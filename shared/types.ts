@@ -68,6 +68,22 @@ export type WorkflowStage =
   | 'upgrading'
   | 'blocked_for_user_decision'
 
+export const WORKFLOW_STAGES: readonly WorkflowStage[] = [
+  'choosing_mode',
+  'clarifying',
+  'generating_sketch',
+  'sketch_ready',
+  'generating_mvp',
+  'testing',
+  'judge_review',
+  'repairing',
+  'ready',
+  'iterating',
+  'completed',
+  'upgrading',
+  'blocked_for_user_decision',
+]
+
 export type SnapshotKind = 'sketch' | 'mvp' | 'iteration' | 'pre_risk' | 'upgrade' | 'rollback_guard'
 export type ProviderType = 'anthropic' | 'openai' | 'google' | 'deepseek' | 'zhipu' | 'minimax' | 'doubao' | 'qwen' | 'custom'
 export type TemplateType = 'web_fullstack' | 'desktop_tool' | 'personal_tool' | 'ai_app'
@@ -171,6 +187,7 @@ export interface AgentEvent {
     | 'rollback_done'
     | 'judge_result'
     | 'user_decision_required'
+    | 'retrying'
     | 'error'
     | 'completed'
   payload: Record<string, unknown>

@@ -11,20 +11,41 @@ import type {
 } from '../shared/types'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
-import { decryptApiKey, getChannelById } from './channel-manager'
+import { decryptApiKey, getChannelByIdRaw } from './channel-manager'
 
 type StreamPublisher = (event: AgentEvent) => void
+type SDKQuery = (prompt: string, options: SDKQueryOptions) => AsyncIterable<SDKMessage>
+
+interface SDKQueryOptions {
+  env: Record<string, string>
+  signal: AbortSignal
+  sessionId: string
+}
 
 interface ActiveRun {
   abortController: AbortController
   iterator?: AsyncIterator<SDKMessage>
 }
 
+const MAX_RETRIES = 25
+const MAX_RETRY_DURATION_MS = 5 * 60 * 1000
+const SILENT_RETRY_THRESHOLD = 5
+
 const activeSessions = new Map<string, ActiveRun>()
 let streamPublisher: StreamPublisher = () => undefined
+let sdkQuery: SDKQuery = mockSDKQuery
+let retrySleep: (ms: number) => Promise<void> = sleep
 
 export function setAgentStreamPublisher(publisher: StreamPublisher): void {
   streamPublisher = publisher
+}
+
+export function setSDKQueryForTests(query: SDKQuery): void {
+  sdkQuery = query
+}
+
+export function setRetrySleepForTests(sleepFn: (ms: number) => Promise<void>): void {
+  retrySleep = sleepFn
 }
 
 export function isSessionActive(sessionId: string): boolean {
@@ -53,13 +74,14 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
   const received: SDKMessage[] = []
 
   try {
-    const channel = input.channel_id ? getChannelById(input.channel_id) : undefined
+    const channel = input.channel_id ? getChannelByIdRaw(input.channel_id) : undefined
     const model = channel?.models.find((item) => item.enabled)?.id ?? 'claude-sonnet-4-6'
+    let env: Record<string, string>
     if (channel) {
       const apiKey = decryptApiKey(channel.api_key)
-      buildSdkEnv(apiKey, channel.base_url, model)
+      env = buildSdkEnv(apiKey, channel.base_url, model)
     } else {
-      buildSdkEnv('test-key-main-only', 'https://api.anthropic.com', model)
+      env = buildSdkEnv('test-key-main-only', 'https://api.anthropic.com', model)
     }
 
     appendAgentMessage(input.session_id, {
@@ -68,24 +90,28 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       timestamp: Date.now(),
     })
 
-    const stream = mockSDKQuery(input.content, abortController.signal)
-    run.iterator = stream[Symbol.asyncIterator]()
+    await runWithRetry(input, async () => {
+      const stream = sdkQuery(input.content, { env, signal: abortController.signal, sessionId: input.session_id })
+      run.iterator = stream[Symbol.asyncIterator]()
 
-    for (;;) {
-      const next = await run.iterator.next()
-      if (next.done) break
+      for (;;) {
+        const next = await run.iterator.next()
+        if (next.done) break
 
-      const sdkMessage = next.value
-      received.push(sdkMessage)
-      const event = convertSDKMessage(input, sdkMessage)
-      if (event) streamPublisher(event)
+        const sdkMessage = next.value
+        received.push(sdkMessage)
+        const event = convertSDKMessage(input, sdkMessage)
+        if (event) streamPublisher(event)
 
-      if (sdkMessage.type === 'result') {
-        break
+        if (sdkMessage.type === 'result') {
+          break
+        }
       }
-    }
 
-    await run.iterator.return?.()
+      await run.iterator.return?.()
+      run.iterator = undefined
+    })
+
     persistAssistantMessages(input.session_id, received)
     streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
 
@@ -100,6 +126,55 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     await run.iterator?.return?.()
     activeSessions.delete(input.session_id)
   }
+}
+
+async function runWithRetry(input: AgentSendMessageInput, sdkCall: () => Promise<void>): Promise<void> {
+  const deadline = Date.now() + MAX_RETRY_DURATION_MS
+  let attempt = 0
+
+  for (;;) {
+    try {
+      await sdkCall()
+      return
+    } catch (error) {
+      if (!shouldRetry(error)) throw error
+      attempt += 1
+      const remaining = deadline - Date.now()
+      if (remaining <= 0 || attempt >= MAX_RETRIES) throw error
+
+      if (attempt > SILENT_RETRY_THRESHOLD) {
+        streamPublisher(makeEvent(input, 'retrying', { attempt, max_retries: MAX_RETRIES }))
+      }
+
+      await retrySleep(Math.min(backoffMs(attempt), remaining))
+    }
+  }
+}
+
+export function shouldRetry(error: unknown): boolean {
+  const statusCode = getStatusCode(error)
+  if (statusCode === 429 || statusCode === 529) return true
+  if (statusCode !== undefined && statusCode >= 500 && statusCode <= 599) return true
+  const message = error instanceof Error ? error.message : String(error)
+  return /\b(ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN)\b/i.test(message)
+}
+
+function getStatusCode(error: unknown): number | undefined {
+  if (typeof error === 'object' && error !== null && 'statusCode' in error) {
+    const value = (error as { statusCode?: unknown }).statusCode
+    if (typeof value === 'number') return value
+  }
+  const message = error instanceof Error ? error.message : String(error)
+  const match = message.match(/\b(429|529|5\d\d)\b/)
+  return match ? Number(match[1]) : undefined
+}
+
+function backoffMs(attempt: number): number {
+  return Math.min(1000 * 2 ** Math.max(0, attempt - 1), 15_000)
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 export async function cancelAgent(input: AgentCancelInput): Promise<AgentCancelResult> {
@@ -158,8 +233,9 @@ function extractText(blocks: MessageContentBlock[]): string {
     .join('')
 }
 
-async function* mockSDKQuery(prompt: string, signal: AbortSignal): AsyncGenerator<SDKMessage> {
-  if (signal.aborted) throw new Error('AGENT_CANCELLED')
+async function* mockSDKQuery(prompt: string, options: SDKQueryOptions): AsyncGenerator<SDKMessage> {
+  if (!options.env.PATH && !options.env.Path) throw new Error('SDK env missing PATH')
+  if (options.signal.aborted) throw new Error('AGENT_CANCELLED')
   yield {
     type: 'assistant',
     message: {
@@ -167,7 +243,7 @@ async function* mockSDKQuery(prompt: string, signal: AbortSignal): AsyncGenerato
       content: [{ type: 'text', text: `收到需求：${prompt.slice(0, 80)}` }],
     },
   }
-  if (signal.aborted) throw new Error('AGENT_CANCELLED')
+  if (options.signal.aborted) throw new Error('AGENT_CANCELLED')
   yield {
     type: 'assistant',
     message: {

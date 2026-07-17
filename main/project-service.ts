@@ -6,7 +6,9 @@ import type {
   ProjectCreateInput,
   ProjectUpgradeInput,
   RevisionAccepted,
+  WorkflowStage,
 } from '../shared/types'
+import { WORKFLOW_STAGES } from '../shared/types'
 import {
   getDocumentsDir,
   getGeneratedProjectPath,
@@ -80,9 +82,16 @@ function updateProject(projectId: string, patch: Partial<Project>): Project {
   const index = readProjects()
   const current = index.projects.find((item) => item.project_id === projectId)
   if (!current) throw new Error('PROJECT_NOT_FOUND')
+  if (patch.current_stage && !isWorkflowStage(patch.current_stage)) {
+    throw new Error('VALIDATION_ERROR: current_stage must be one of WORKFLOW_STAGES')
+  }
   Object.assign(current, patch, { updated_at: new Date().toISOString() })
   writeProjects(index)
   return current
+}
+
+export function isWorkflowStage(stage: string): stage is WorkflowStage {
+  return WORKFLOW_STAGES.includes(stage as WorkflowStage)
 }
 
 function readProjects(): ProjectsIndex {

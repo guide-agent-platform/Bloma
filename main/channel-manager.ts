@@ -21,8 +21,13 @@ function redact(channel: Channel): Channel {
   return { ...channel, api_key: '***' }
 }
 
-export function getChannelById(id: string): Channel | undefined {
+export function getChannelByIdRaw(id: string): Channel | undefined {
   return loadChannels().channels.find((channel) => channel.id === id)
+}
+
+export function getChannelById(id: string): Channel | undefined {
+  const channel = getChannelByIdRaw(id)
+  return channel ? redact(channel) : undefined
 }
 
 export function listChannels(): Channel[] {
@@ -50,7 +55,7 @@ export function decryptApiKey(encryptedHex: string): string {
 }
 
 export async function testChannel(channelId: string): Promise<{ ok: boolean; message: string }> {
-  const channel = getChannelById(channelId)
+  const channel = getChannelByIdRaw(channelId)
   if (!channel) return { ok: false, message: '渠道不存在' }
 
   const apiKey = decryptSecret(channel.api_key)

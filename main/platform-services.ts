@@ -19,6 +19,11 @@ import { appendJsonLine, writeJsonFile } from '../storage/json-store'
 import { findProject } from './project-service'
 
 export function runSandbox(input: SandboxRunInput): SandboxRunResult {
+  /**
+   * SPRINT 0 STUB: returns a file preview URL and does not start a process.
+   * Sprint 1 must implement process management, port allocation, health checks,
+   * and runtime error capture. Related task: P1 sandbox runtime hardening.
+   */
   const project = findProject(input.project_id)
   return {
     status: 'running',
@@ -27,10 +32,20 @@ export function runSandbox(input: SandboxRunInput): SandboxRunResult {
 }
 
 export function stopSandbox(_input: SandboxStopInput): SandboxStopResult {
+  /**
+   * SPRINT 0 STUB: no child process is tracked yet, so stop is acknowledged only.
+   * Sprint 1 must stop the concrete sandbox process by project_id.
+   */
   return { stopped: true }
 }
 
 export function createSnapshot(input: SnapshotCreateInput): Snapshot {
+  /**
+   * TODO [Sprint 1]: implement real file archiving.
+   * Current Sprint 0 behavior writes snapshot metadata only. The
+   * files_archive_path points at the future location for copying or zipping
+   * generated-projects/{project_id} into snapshots/{project_id}/{snapshot_id}/files.
+   */
   const project = findProject(input.project_id)
   const snapshotId = randomUUID()
   const snapshotDir = getSnapshotsDir(project.workspace_slug, project.project_id)

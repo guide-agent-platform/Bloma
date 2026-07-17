@@ -16,6 +16,7 @@ const pendingRequests = new Map<string, {
   resolve: (result: PermissionResult) => void
   request: PermissionRequest
 }>()
+const sessionIndex = new Map<string, Set<string>>()
 
 let requestPublisher: ((request: PermissionRequest) => void) | undefined
 
@@ -49,6 +50,9 @@ export async function canUseTool(
 
   return new Promise<PermissionResult>((resolve) => {
     pendingRequests.set(request.id, { resolve, request })
+    const existing = sessionIndex.get(request.session_id) ?? new Set<string>()
+    existing.add(request.id)
+    sessionIndex.set(request.session_id, existing)
     requestPublisher?.(request)
   })
 }
@@ -60,8 +64,18 @@ export function resolvePermission(input: PermissionResponseInput): PermissionRes
   }
 
   pendingRequests.delete(input.permission_request_id)
+  sessionIndex.get(input.session_id)?.delete(input.permission_request_id)
+  if (sessionIndex.get(input.session_id)?.size === 0) {
+    sessionIndex.delete(input.session_id)
+  }
   entry.resolve({ behavior: input.decision })
   return { resolved: true, permission_request_id: input.permission_request_id }
+}
+
+export function getPendingBySession(sessionId: string): PermissionRequest[] {
+  return [...(sessionIndex.get(sessionId) ?? [])]
+    .map((requestId) => pendingRequests.get(requestId)?.request)
+    .filter((request): request is PermissionRequest => Boolean(request))
 }
 
 export function getPendingRequests(): PermissionRequest[] {
@@ -70,6 +84,7 @@ export function getPendingRequests(): PermissionRequest[] {
 
 export function clearPendingRequests(): void {
   pendingRequests.clear()
+  sessionIndex.clear()
 }
 
 const READ_ONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'TaskOutput', 'TaskList', 'collect_dom_context', 'capture_preview', 'run_gwt_tests', 'run_security_scan'])
