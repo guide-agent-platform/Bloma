@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>长期迭代型工作区</title>
+  <style>
+    :root {
+      --bg: #f5f6f3;
+      --panel: #fff;
+      --ink: #202421;
+      --muted: #66706a;
+      --line: #d8ded8;
+      --accent: #6b5b95;
+      --accent-soft: #ebe7f6;
+      --green: #087f72;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      display: grid;
+      grid-template-rows: 52px 1fr 60px;
+    }
+    header, footer {
+      background: var(--panel);
+      border-color: var(--line);
+      display: flex;
+      align-items: center;
+      padding: 0 18px;
+    }
+    header { border-bottom: 1px solid var(--line); justify-content: space-between; }
+    footer { border-top: 1px solid var(--line); gap: 12px; overflow: hidden; }
+    .project { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .title { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tag { background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 4px 9px; font-size: 12px; font-weight: 700; }
+    .stage { color: var(--muted); font-size: 13px; }
+    .button { height: 34px; border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 0 12px; }
+    main {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(260px, 30%) 180px 1fr;
+    }
+    .chat, .docs, .preview { min-height: 0; min-width: 0; }
+    .chat, .docs {
+      background: var(--panel);
+      border-right: 1px solid var(--line);
+    }
+    .chat { display: grid; grid-template-rows: 1fr auto; }
+    .messages { overflow: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+    .msg { max-width: 94%; padding: 12px 13px; border-radius: 8px; line-height: 1.55; font-size: 14px; }
+    .agent { background: #eef0f3; align-self: flex-start; }
+    .user { background: var(--accent); color: #fff; align-self: flex-end; }
+    .composer { padding: 12px; border-top: 1px solid var(--line); display: flex; gap: 8px; }
+    .composer input { flex: 1; border: 1px solid var(--line); border-radius: 7px; padding: 10px; min-width: 0; }
+    .docs { padding: 14px; display: grid; grid-template-rows: auto 1fr; gap: 12px; }
+    .docs h2 { margin: 0; font-size: 14px; }
+    .doc-list { display: grid; gap: 8px; align-content: start; }
+    .doc-item { border: 1px solid var(--line); border-radius: 6px; padding: 9px; background: #fff; font-size: 13px; }
+    .doc-item strong { display: block; margin-bottom: 4px; }
+    .doc-item span { color: var(--muted); }
+    .preview { padding: 14px; display: grid; grid-template-rows: 42px 1fr; gap: 12px; }
+    .preview-toolbar { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 13px; }
+    .browser { background: #fff; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; display: grid; grid-template-rows: 34px 1fr; }
+    .browser-top { background: #f0f2ef; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 6px; padding: 0 10px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: #b7bdb8; }
+    .app-mock { padding: 24px; display: grid; gap: 16px; align-content: start; }
+    .mock-head { font-size: 24px; font-weight: 750; }
+    .kanban { display: grid; grid-template-columns: repeat(3, minmax(120px, 1fr)); gap: 12px; }
+    .column { border: 1px solid var(--line); border-radius: 8px; background: #fafafa; padding: 12px; min-height: 180px; }
+    .column h3 { margin: 0 0 10px; font-size: 14px; }
+    .task { background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 10px; font-size: 13px; }
+    .node { min-width: 140px; border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 8px; font-size: 12px; }
+    .node.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; grid-template-rows: 34% 0 66%; }
+      .docs { display: none; }
+      .chat { border-right: 0; border-bottom: 1px solid var(--line); }
+    }
+  </style>
+</head>
+<body>
+  <header data-ai-id="workspace-header">
+    <div class="project">
+      <span class="title" data-ai-id="project-title">社团活动管理系统</span>
+      <span class="tag" data-ai-id="mode-tag">精细打磨</span>
+      <span class="stage" data-ai-id="stage-indicator">Sprint 1 规划中</span>
+    </div>
+    <button class="button" data-ai-id="all-projects-button">所有项目</button>
+  </header>
+  <main data-ai-id="workspace-longterm">
+    <section class="chat" data-ai-id="chat-panel">
+      <div class="messages">
+        <div class="msg agent">我已经整理出第一版结构。接下来我会先和你确认整体方案，再开始生成可运行版本。</div>
+        <div class="msg user">可以，先保证活动报名和名单管理。</div>
+        <div class="msg agent">好的，第一轮 Sprint 我会聚焦报名、名单、导出三件事。</div>
+      </div>
+      <div class="composer">
+        <input aria-label="输入消息" placeholder="补充你的计划或限制">
+        <button class="button">发送</button>
+      </div>
+    </section>
+    <aside class="docs" data-ai-id="document-panel">
+      <h2>项目文档</h2>
+      <div class="doc-list">
+        <div class="doc-item" data-ai-id="doc-prd"><strong>PRD</strong><span>已同步</span></div>
+        <div class="doc-item" data-ai-id="doc-user-stories"><strong>用户故事</strong><span>12 条</span></div>
+        <div class="doc-item" data-ai-id="doc-plantuml"><strong>PlantUML</strong><span>待确认</span></div>
+        <div class="doc-item" data-ai-id="doc-gwt"><strong>GWT Feature</strong><span>生成中</span></div>
+      </div>
+    </aside>
+    <section class="preview" data-ai-id="preview-panel">
+      <div class="preview-toolbar">
+        <span>安全预览环境</span>
+        <div>
+          <button class="button">刷新</button>
+          <button class="button">全屏</button>
+        </div>
+      </div>
+      <div class="browser" data-ai-id="sandbox-browser">
+        <div class="browser-top"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+        <div class="app-mock">
+          <div class="mock-head">活动管理</div>
+          <div class="kanban" data-ai-id="generated-app-preview">
+            <section class="column"><h3>报名中</h3><div class="task">春季招新</div></section>
+            <section class="column"><h3>待审核</h3><div class="task">摄影社外拍</div></section>
+            <section class="column"><h3>已结束</h3><div class="task">读书分享会</div></section>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer data-ai-id="timeline-collapsed">
+    <strong>时间轴</strong>
+    <div class="node">草图 v1<br>活动列表</div>
+    <div class="node active">设计确认<br>报名+名单</div>
+    <div class="node">Sprint 1<br>等待生成</div>
+  </footer>
+</body>
+</html>
+

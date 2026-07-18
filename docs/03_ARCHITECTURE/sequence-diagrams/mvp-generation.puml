@@ -1,0 +1,105 @@
+@startuml
+title MVP 生成时序图（Proma Core 对齐 v1.1）
+
+actor User as U
+participant "WorkspaceShell\n(Renderer)" as UI
+participant "Jotai Agent Atoms\nGlobal Listeners" as Atoms
+participant "preload/bridge.ts" as Bridge
+participant "main/ipc.ts" as IPC
+participant "GuideAgentService" as Guide
+participant "DocumentEngine" as Docs
+participant "AgentOrchestrator" as AO
+participant "ChannelManager\nsafeStorage" as Channel
+participant "PermissionService" as Perm
+participant "Agent SDK" as SDK
+participant "ProgrammingOrchestrator" as Prog
+participant "MvpEngine/MCP" as MVP
+participant "SandboxRuntime" as Sandbox
+participant "GWTTestRunner" as Test
+participant "SecurityScanner" as Security
+participant "JudgeEngine" as Judge
+participant "SnapshotManager" as Snapshot
+participant "LocalFirstStore\nJSON/JSONL/files" as Store
+
+U -> UI: 确认草图方向
+UI -> Bridge: electronAPI.project.confirmSketch()
+Bridge -> IPC: invoke(confirm sketch channel)
+IPC -> Store: appendJsonl(user confirmation)
+IPC -> Guide: handleUserConfirmation()
+Guide -> Docs: sync(checkpoint=sketch_confirmed)
+Docs -> Store: write PRD and requirements documents
+Docs --> Guide: PRD + requirements
+Guide -> AO: query(sessionId, MVP generation prompt)
+
+AO -> AO: activeSessions.add(sessionId)
+AO -> Channel: get channel and decrypt API key
+Channel --> AO: model config + decrypted key
+AO -> AO: merge process.env into SDK options.env
+AO -> SDK: query(options, canUseTool)
+
+loop SDKMessage stream
+  SDK --> AO: SDKMessage
+  AO -> Store: appendJsonl(partial AgentEvent)
+  AO -> IPC: emit AgentEvent
+  IPC -> Bridge: push stream event
+  Bridge -> Atoms: update atomFamily(sessionId)
+  Atoms -> UI: render progress
+
+  opt MCP tool permission required
+    AO -> Perm: canUseTool(request)
+    Perm -> IPC: emit PermissionRequest
+    IPC -> Bridge: push PermissionRequest
+    Bridge -> Atoms: update pending permission queue
+    Atoms -> UI: show allow / deny UI
+    U -> UI: decide
+    UI -> Bridge: permissions.respond()
+    Bridge -> IPC: invoke(permission response)
+    IPC -> Perm: resolve(requestId, decision)
+    Perm --> AO: Promise resolved
+  end
+end
+
+AO -> Prog: execute MVP task
+Prog -> MVP: generate_mvp(requirements)
+MVP --> Prog: project files
+Prog -> Sandbox: writeFiles(files)
+Prog -> Sandbox: run()
+Sandbox --> Prog: runtime result
+
+alt 运行失败
+  loop max 3 repair attempts
+    Prog -> Prog: repair from runtime error
+    Prog -> Sandbox: apply fix and rerun
+    Sandbox --> Prog: runtime result
+  end
+else 运行成功
+  Prog -> Docs: generateGWT(requirements)
+  Docs -> Store: write feature files
+  Docs --> Prog: feature files
+  Prog -> Test: run(features)
+  Test --> Prog: test result
+  Prog -> Security: scan(project)
+  Security --> Prog: scan result
+  Prog -> Judge: evaluate(docs, code, tests)
+  Judge --> Prog: verdict
+
+  alt 通过
+    Prog -> Snapshot: create(kind=mvp)
+    Snapshot -> Store: write snapshot metadata and files
+    Prog --> IPC: AgentEvent(mvp_ready)
+    IPC -> Bridge: push AgentEvent
+    Bridge -> Atoms: update session state
+    Atoms -> UI: show MVP preview
+    UI --> U: 展示可运行 MVP
+  else 退回
+    Prog --> IPC: AgentEvent(repairing or ask_user)
+    IPC -> Bridge: push AgentEvent
+    Bridge -> Atoms: update state
+    Atoms -> UI: show plain-language status
+  end
+end
+
+AO -> Store: appendJsonl(final status)
+AO -> AO: cleanup iterator and remove active session
+
+@enduml

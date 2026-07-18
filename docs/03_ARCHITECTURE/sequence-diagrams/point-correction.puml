@@ -1,0 +1,70 @@
+@startuml
+title 点选纠错时序图（Proma Core 对齐 v1.1）
+
+actor User as U
+participant "PreviewPanel\n(Renderer)" as Preview
+participant "PreviewInteractionLayer" as Layer
+participant "PointCorrectionPopover" as Popover
+participant "Jotai Agent Atoms" as Atoms
+participant "preload/bridge.ts" as Bridge
+participant "main/ipc.ts" as IPC
+participant "GuideAgentService" as Guide
+participant "AgentOrchestrator" as AO
+participant "ProgrammingOrchestrator" as Prog
+participant "SandboxRuntime" as Sandbox
+participant "GWTTestRunner" as Test
+participant "SnapshotManager" as Snapshot
+participant "LocalFirstStore" as Store
+participant "AnalyticsCollector" as Analytics
+
+U -> Preview: 点击不满意元素
+Preview -> Layer: captureClick(event)
+Layer --> Preview: highlight(target)
+Layer -> Popover: open(correctionContext)
+Popover --> U: 显示“这里有什么问题？”
+
+alt 用户输入说明
+  U -> Popover: submit(note)
+else 用户点击“你猜”
+  U -> Popover: guess()
+end
+
+Popover -> Bridge: electronAPI.project.submitCorrection(context)
+Bridge -> IPC: invoke(point correction channel)
+IPC -> IPC: validate correction payload
+IPC -> Store: appendJsonl(correction event)
+IPC -> Guide: interpretCorrection(context)
+Guide --> IPC: revision request + user visible acknowledgement
+IPC -> Bridge: push AgentEvent(correction_received)
+Bridge -> Atoms: update atomFamily(sessionId)
+Atoms -> Preview: render status
+Preview --> U: 已收到修改意见
+
+Guide -> AO: query(sessionId, revision prompt)
+AO -> Prog: execute revision task
+Prog -> Sandbox: apply changes
+Prog -> Test: run related GWT
+
+alt 测试通过
+  Test --> Prog: passed
+  Prog -> Snapshot: create(kind=iteration)
+  Snapshot -> Store: write snapshot metadata and files
+  Prog -> Analytics: track(point_correction)
+  Prog --> IPC: AgentEvent(iteration_ready)
+  IPC -> Bridge: push AgentEvent
+  Bridge -> Atoms: update session state
+  Atoms -> Preview: refresh preview
+  Preview --> U: 刷新预览
+else 测试失败
+  Test --> Prog: failed
+  loop max 3 repair attempts
+    Prog -> Prog: repair
+    Prog -> Sandbox: apply fix and rerun
+    Prog -> Test: run related GWT
+  end
+  Prog --> IPC: AgentEvent(repairing or ask_user)
+  IPC -> Bridge: push AgentEvent
+  Bridge -> Atoms: update status
+end
+
+@enduml

@@ -1,0 +1,363 @@
+@startuml
+title 向导 Agent 多智能体协同开发平台 - 核心类图（Proma Core 对齐 v1.1）
+
+skinparam classAttributeIconSize 0
+skinparam monochrome false
+skinparam shadowing false
+skinparam roundcorner 8
+
+package "Renderer UI" {
+  class WorkspaceShell {
+    +render(project: Project)
+    +updateStage(stage: WorkflowStage)
+    +showNotice(message: String)
+  }
+
+  class ModeSelectionPage {
+    +chooseQuick()
+    +chooseLongterm()
+  }
+
+  class ChatPanel {
+    +appendMessage(message: Message)
+    +showCardOptions(options: List<String>)
+    +enqueueUserInput(content: String)
+  }
+
+  class PreviewPanel {
+    +loadPreview(url: String)
+    +refresh()
+    +enterFullscreen()
+  }
+
+  class DocumentPanel {
+    +showDocumentTree(projectId: String)
+    +openDocument(documentId: String)
+  }
+
+  class TimelinePanel {
+    +showSnapshots(snapshots: List<Snapshot>)
+    +requestRollback(snapshotId: String)
+  }
+
+  class PointCorrectionPopover {
+    +open(context: CorrectionContext)
+    +submit(note: String)
+    +guess()
+  }
+
+  class AgentStreamState {
+    +sessionId: String
+    +status: StreamStatus
+    +events: List<AgentEvent>
+    +pendingPermissions: List<PermissionRequest>
+    +append(event: AgentEvent)
+  }
+
+  class IpcBridgeAndAtoms {
+    +call(channel: IpcChannel, payload: Json): Promise<Json>
+    +useGlobalAgentListeners()
+    +agentStateFamily(sessionId: String): AgentStreamState
+    +respondPermission(requestId: String, decision: PermissionDecision)
+  }
+}
+
+package "Application Layer" {
+  class ModeController {
+    +createProject(mode: ProjectMode): Project
+    +upgradeProject(projectId: String): ModeUpgradeResult
+    +canUpgrade(project: Project): Boolean
+  }
+
+  class WorkflowStateMachine {
+    +transition(project: Project, target: WorkflowStage)
+    +canTransition(from: WorkflowStage, to: WorkflowStage): Boolean
+  }
+
+  class DialogueRouter {
+    +route(input: Message, state: Project): RouteDecision
+    +activeRoles(state: Project): List<GuideRole>
+  }
+
+  class GuideAgentService {
+    +respond(context: DialogueContext): GuideResponse
+    +createGenerationTask(response: GuideResponse): AgentTask
+    +interpretCorrection(context: CorrectionContext): RevisionRequest
+  }
+
+  class ProgrammingOrchestrator {
+    +execute(task: AgentTask): ProgrammingResult
+    +repair(task: AgentTask, error: ExecutionError): ProgrammingResult
+    +submitToJudge(result: ProgrammingResult): JudgeResult
+  }
+
+  class AnalyticsCollector {
+    +track(event: AnalyticsEvent)
+    +maskPayload(payload: Json): Json
+  }
+}
+
+package "Proma Main Process Core" {
+  class IpcMainHandlers {
+    +registerHandlers()
+    +validatePayload(channel: IpcChannel, payload: Json)
+    +emitAgentEvent(sessionId: String, event: AgentEvent)
+  }
+
+  class AgentOrchestrator {
+    -activeSessions: Set<String>
+    +query(sessionId: String, input: AgentInput): AsyncIterable<SDKMessage>
+    +buildSdkEnv(channel: Channel): Env
+    +convertMessage(message: SDKMessage): AgentEvent
+    +persistPartial(sessionId: String, event: AgentEvent)
+  }
+
+  class ChannelManager {
+    +listChannels(): List<Channel>
+    +getChannel(channelId: String): Channel
+    +decryptApiKey(channel: Channel): String
+    +saveChannel(channel: Channel)
+  }
+
+  class PermissionService {
+    -pendingRequests: Map<String, PermissionResolver>
+    +canUseTool(request: ToolPermissionRequest): Promise<PermissionDecision>
+    +resolve(requestId: String, decision: PermissionDecision)
+    +listPending(sessionId: String): List<PermissionRequest>
+  }
+
+  class SafeStorageAdapter {
+    +encryptString(value: String): String
+    +decryptString(encryptedHex: String): String
+  }
+}
+
+package "Tools and Runtime" {
+  class SandboxRuntime {
+    +create(projectId: String): Sandbox
+    +writeFiles(files: List<ProjectFile>)
+    +run(command: String): RuntimeResult
+    +stop()
+    +healthCheck(): HealthStatus
+  }
+
+  class PreviewInteractionLayer {
+    +captureClick(event: ClickEvent): CorrectionContext
+    +highlight(context: CorrectionContext)
+    +fallbackRegionSelect(): CorrectionContext
+  }
+
+  class GWTTestRunner {
+    +run(features: List<Document>): TestResult
+  }
+
+  class SecurityScanner {
+    +scan(project: Project): SecurityScanResult
+  }
+
+  class SnapshotManager {
+    +create(project: Project, kind: SnapshotKind): Snapshot
+    +list(projectId: String): List<Snapshot>
+    +rollback(snapshotId: String): RollbackResult
+  }
+}
+
+package "Quality and Documents" {
+  class DocumentEngine {
+    +sync(checkpoint: DocumentCheckpoint): List<Document>
+    +generatePRD(context: DialogueContext): Document
+    +generatePlantUML(project: Project): Document
+    +generateGWT(requirements: List<Requirement>): List<Document>
+  }
+
+  class JudgeEngine {
+    +evaluate(input: JudgeInput): JudgeResult
+    +hardCheck(input: JudgeInput): ConstraintResult
+    +softCheck(input: JudgeInput): ConstraintResult
+  }
+
+  class HardConstraintChecker
+  class SoftConstraintEvaluator
+}
+
+package "Local-First Data" {
+  class LocalFirstStore {
+    +basePath: String = "~/.proma"
+    +readJson(path: String): Json
+    +writeJson(path: String, data: Json)
+    +appendJsonl(path: String, row: Json)
+    +writeWorkspaceFile(path: String, bytes: Binary)
+  }
+
+  class Project {
+    +projectId: String
+    +workspaceSlug: String
+    +name: String
+    +mode: ProjectMode
+    +status: ProjectStatus
+    +currentStage: WorkflowStage
+    +rootPath: String
+    +currentSnapshotId: String
+  }
+
+  class Session {
+    +sessionId: String
+    +projectId: String
+    +jsonlPath: String
+    +summary: String
+    +status: SessionStatus
+  }
+
+  class Message {
+    +messageId: String
+    +sessionId: String
+    +role: MessageRole
+    +content: Text
+    +metadataJson: Json
+  }
+
+  class Channel {
+    +channelId: String
+    +provider: String
+    +model: String
+    +encryptedApiKeyHex: String
+    +baseUrl: String
+  }
+
+  class PermissionRequest {
+    +requestId: String
+    +sessionId: String
+    +toolName: String
+    +riskLevel: PermissionRiskLevel
+    +status: PermissionStatus
+  }
+
+  class Snapshot {
+    +snapshotId: String
+    +projectId: String
+    +kind: SnapshotKind
+    +summary: String
+    +screenshotPath: String
+    +filesArchivePath: String
+  }
+
+  class Document {
+    +documentId: String
+    +projectId: String
+    +type: DocumentType
+    +path: String
+    +version: String
+  }
+
+  class AgentTask {
+    +taskId: String
+    +projectId: String
+    +taskType: TaskType
+    +assignedTo: AgentType
+    +status: TaskStatus
+    +repairCount: Integer
+  }
+
+  class TestResult
+  class JudgeResult
+  class AnalyticsEvent
+  class UserProfile
+}
+
+enum ProjectMode {
+  quick
+  longterm
+}
+
+enum WorkflowStage {
+  choosing_mode
+  clarifying
+  generating_sketch
+  sketch_ready
+  generating_mvp
+  testing
+  judge_review
+  repairing
+  ready
+  iterating
+  completed
+  upgrading
+  blocked_for_user_decision
+}
+
+enum PermissionStatus {
+  pending
+  allowed
+  denied
+  expired
+}
+
+enum StreamStatus {
+  idle
+  streaming
+  waiting_permission
+  failed
+  completed
+}
+
+WorkspaceShell --> ChatPanel
+WorkspaceShell --> PreviewPanel
+WorkspaceShell --> DocumentPanel
+WorkspaceShell --> TimelinePanel
+WorkspaceShell --> IpcBridgeAndAtoms
+ModeSelectionPage --> ModeController
+ChatPanel --> IpcBridgeAndAtoms
+PreviewPanel --> PreviewInteractionLayer
+PointCorrectionPopover --> PreviewInteractionLayer
+IpcBridgeAndAtoms --> AgentStreamState
+AgentStreamState --> PermissionRequest
+
+IpcBridgeAndAtoms --> IpcMainHandlers
+IpcMainHandlers --> AgentOrchestrator
+IpcMainHandlers --> PermissionService
+IpcMainHandlers --> LocalFirstStore
+
+ModeController --> Project
+WorkflowStateMachine --> Project
+DialogueRouter --> GuideAgentService
+GuideAgentService --> AgentTask
+GuideAgentService --> DocumentEngine
+ProgrammingOrchestrator --> SandboxRuntime
+ProgrammingOrchestrator --> GWTTestRunner
+ProgrammingOrchestrator --> SecurityScanner
+ProgrammingOrchestrator --> JudgeEngine
+ProgrammingOrchestrator --> SnapshotManager
+
+AgentOrchestrator --> ChannelManager
+AgentOrchestrator --> PermissionService
+AgentOrchestrator --> LocalFirstStore
+AgentOrchestrator --> ProgrammingOrchestrator
+ChannelManager --> SafeStorageAdapter
+ChannelManager --> Channel
+PermissionService --> PermissionRequest
+PermissionService --> IpcMainHandlers
+
+DocumentEngine --> Document
+JudgeEngine --> HardConstraintChecker
+JudgeEngine --> SoftConstraintEvaluator
+SnapshotManager --> Snapshot
+AnalyticsCollector --> AnalyticsEvent
+AnalyticsCollector --> LocalFirstStore
+
+LocalFirstStore --> Project
+LocalFirstStore --> Session
+LocalFirstStore --> Message
+LocalFirstStore --> Snapshot
+LocalFirstStore --> Document
+LocalFirstStore --> AnalyticsEvent
+
+UserProfile "1" --> "0..*" Project
+Project "1" --> "0..*" Session
+Session "1" --> "0..*" Message
+Project "1" --> "0..*" Snapshot
+Project "1" --> "0..*" Document
+Project "1" --> "0..*" AgentTask
+Project "1" --> "0..*" AnalyticsEvent
+Session "1" --> "0..*" PermissionRequest
+
+@enduml

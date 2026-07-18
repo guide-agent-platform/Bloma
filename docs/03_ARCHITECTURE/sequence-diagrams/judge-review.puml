@@ -1,0 +1,68 @@
+@startuml
+title 裁判审查时序图（Proma Core 对齐 v1.1）
+
+participant "ProgrammingOrchestrator" as Prog
+participant "DocumentEngine" as Docs
+participant "GWTTestRunner" as Test
+participant "JudgeEngine" as Judge
+participant "HardConstraintChecker" as Hard
+participant "SoftConstraintEvaluator" as Soft
+participant "LocalFirstStore" as Store
+participant "GuideAgentService" as Guide
+participant "main/ipc.ts" as IPC
+participant "preload/bridge.ts" as Bridge
+participant "Jotai Agent Atoms" as Atoms
+participant "WorkspaceShell" as UI
+actor User as U
+
+Prog -> Docs: collectDocuments(project)
+Docs -> Store: read documents from workspace
+Docs --> Prog: PRD, PlantUML, GWT, reports
+Prog -> Test: latestResult(project)
+Test --> Prog: test report
+Prog -> Judge: evaluate(judgeInput)
+
+Judge -> Hard: checkDocumentCompleteness()
+Hard --> Judge: hard result
+Judge -> Hard: checkGWTExists()
+Hard --> Judge: hard result
+Judge -> Hard: checkPlantUML()
+Hard --> Judge: hard result
+
+alt 硬约束通过
+  Judge -> Soft: evaluateLogicConsistency()
+  Soft --> Judge: soft result
+  Judge -> Soft: evaluateCompleteness()
+  Soft --> Judge: soft result
+end
+
+Judge --> Prog: verdict
+Prog -> Store: appendJsonl(judge result)
+
+alt pass
+  Prog -> IPC: emit AgentEvent(delivery_ready)
+  IPC -> Bridge: push AgentEvent
+  Bridge -> Atoms: update state
+  Atoms -> UI: render delivery
+  UI --> U: 交付版本
+else suggest_improvement
+  Prog -> Docs: recordSuggestion()
+  Docs -> Store: write suggestion document
+  Prog -> IPC: emit AgentEvent(delivery_ready_with_suggestion)
+  IPC -> Bridge: push AgentEvent
+  Bridge -> Atoms: update state
+  Atoms -> UI: render delivery
+  UI --> U: 交付版本
+else return and repairable
+  Prog -> Prog: create repair task
+  Prog -> IPC: emit AgentEvent(repairing)
+else return and limit reached
+  Prog -> Guide: askUserDecision(user_visible_summary)
+  Guide -> IPC: emit AgentEvent(user_decision_required)
+  IPC -> Bridge: push AgentEvent
+  Bridge -> Atoms: update state
+  Atoms -> UI: render options
+  UI --> U: 继续修复 / 接受当前 / 补充说明
+end
+
+@enduml

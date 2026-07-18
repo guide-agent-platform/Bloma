@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>时间轴展开态</title>
+  <style>
+    :root {
+      --bg: #f5f6f3;
+      --panel: #fff;
+      --ink: #202421;
+      --muted: #66706a;
+      --line: #d8ded8;
+      --accent: #087f72;
+      --accent-soft: #e0f3ee;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    .workspace {
+      width: min(1120px, 100%);
+      height: min(720px, calc(100vh - 48px));
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      display: grid;
+      grid-template-rows: 52px 1fr 230px;
+      overflow: hidden;
+    }
+    header {
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+    }
+    .content {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 35% 1fr;
+    }
+    .chat { border-right: 1px solid var(--line); padding: 18px; background: #fbfbfa; }
+    .preview { padding: 18px; background: #fff; }
+    .placeholder {
+      height: 100%;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+    }
+    .timeline {
+      border-top: 1px solid var(--line);
+      background: #fff;
+      padding: 14px 18px 18px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 14px;
+    }
+    .timeline-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .timeline-head h2 { margin: 0; font-size: 16px; }
+    button {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 6px;
+      height: 34px;
+      padding: 0 12px;
+    }
+    .track {
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: 210px;
+      gap: 14px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+    .snapshot {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+      display: grid;
+      grid-template-rows: 96px 1fr;
+    }
+    .snapshot.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+    .thumb {
+      background: linear-gradient(180deg, #eef3ef, #ffffff);
+      border-bottom: 1px solid var(--line);
+      padding: 10px;
+      display: grid;
+      gap: 6px;
+    }
+    .bar { height: 10px; background: #cfd8d3; border-radius: 3px; }
+    .bar.short { width: 52%; }
+    .mini-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .mini { background: #fff; border: 1px solid #dfe4df; border-radius: 4px; }
+    .meta { padding: 10px; }
+    .name { font-weight: 700; margin-bottom: 5px; font-size: 13px; }
+    .desc { color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .rollback {
+      margin-top: 10px;
+      width: 100%;
+      color: var(--accent);
+      border-color: #9bcfc6;
+      background: var(--accent-soft);
+    }
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(20, 24, 22, .32);
+      display: grid;
+      place-items: center;
+      padding: 20px;
+    }
+    .dialog {
+      width: min(420px, 100%);
+      background: #fff;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      padding: 18px;
+      box-shadow: 0 18px 52px rgba(0,0,0,.22);
+    }
+    .dialog h3 { margin: 0 0 10px; }
+    .dialog p { margin: 0 0 16px; color: var(--muted); line-height: 1.6; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    .primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    @media (max-width: 760px) {
+      .workspace { height: auto; min-height: calc(100vh - 48px); grid-template-rows: 52px 1fr 260px; }
+      .content { grid-template-columns: 1fr; }
+      .chat { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <section class="workspace" data-ai-id="timeline-expanded-state">
+    <header data-ai-id="workspace-header">
+      <strong>日常记账工具</strong>
+      <button>收起时间轴</button>
+    </header>
+    <main class="content">
+      <aside class="chat">已经回到之前版本了，一切都在。要继续的话随时告诉我。</aside>
+      <section class="preview"><div class="placeholder">当前预览区</div></section>
+    </main>
+    <section class="timeline" data-ai-id="timeline-expanded-panel">
+      <div class="timeline-head">
+        <h2>时间轴</h2>
+        <button data-ai-id="collapse-timeline">收起</button>
+      </div>
+      <div class="track">
+        <article class="snapshot" data-ai-id="snapshot-card-sketch">
+          <div class="thumb"><div class="bar"></div><div class="mini-row"><div class="mini"></div><div class="mini"></div></div><div class="bar short"></div></div>
+          <div class="meta"><div class="name">验证草图 v1</div><div class="desc">2 个页面，记账和查看记录。</div><button class="rollback">回到这里</button></div>
+        </article>
+        <article class="snapshot active" data-ai-id="snapshot-card-mvp">
+          <div class="thumb"><div class="bar"></div><div class="mini-row"><div class="mini"></div><div class="mini"></div></div><div class="bar short"></div></div>
+          <div class="meta"><div class="name">MVP v1</div><div class="desc">增加分类筛选和本地保存。</div><button class="rollback">当前版本</button></div>
+        </article>
+        <article class="snapshot" data-ai-id="snapshot-card-before-risk">
+          <div class="thumb"><div class="bar"></div><div class="mini-row"><div class="mini"></div><div class="mini"></div></div><div class="bar short"></div></div>
+          <div class="meta"><div class="name">修改前快照</div><div class="desc">高风险修改前自动保存。</div><button class="rollback">回到这里</button></div>
+        </article>
+      </div>
+    </section>
+  </section>
+  <div class="modal" data-ai-id="rollback-confirm-modal">
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="rollback-title">
+      <h3 id="rollback-title">回到“验证草图 v1”？</h3>
+      <p>确认后，预览区会恢复到这个版本。后面的版本还会保留在时间轴里，不会丢失。</p>
+      <div class="dialog-actions">
+        <button data-ai-id="rollback-cancel">取消</button>
+        <button class="primary" data-ai-id="rollback-confirm">确认回到这里</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+

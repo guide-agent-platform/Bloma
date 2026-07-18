@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>快消型工作区</title>
+  <style>
+    :root {
+      --bg: #f5f6f3;
+      --panel: #fff;
+      --ink: #202421;
+      --muted: #66706a;
+      --line: #d8ded8;
+      --accent: #087f72;
+      --accent-soft: #e0f3ee;
+      --warn: #b7791f;
+      --shadow: 0 8px 24px rgba(30, 38, 34, .08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      display: grid;
+      grid-template-rows: 52px 1fr 58px;
+    }
+    header, footer {
+      background: var(--panel);
+      border-color: var(--line);
+      display: flex;
+      align-items: center;
+      padding: 0 18px;
+    }
+    header {
+      border-bottom: 1px solid var(--line);
+      justify-content: space-between;
+    }
+    footer {
+      border-top: 1px solid var(--line);
+      gap: 14px;
+      overflow: hidden;
+    }
+    .project { display: flex; gap: 10px; align-items: center; min-width: 0; }
+    .title { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tag { background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 4px 9px; font-size: 12px; font-weight: 700; }
+    .stage { color: var(--muted); font-size: 13px; }
+    .button {
+      height: 34px;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 6px;
+      padding: 0 12px;
+      color: var(--ink);
+    }
+    main {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(280px, 35%) 1fr;
+    }
+    .chat, .preview { min-width: 0; min-height: 0; }
+    .chat {
+      border-right: 1px solid var(--line);
+      background: var(--panel);
+      display: grid;
+      grid-template-rows: 1fr auto;
+    }
+    .messages {
+      padding: 18px;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .msg {
+      max-width: 92%;
+      padding: 12px 13px;
+      border-radius: 8px;
+      line-height: 1.55;
+      font-size: 14px;
+    }
+    .agent { background: #eef3ef; align-self: flex-start; }
+    .user { background: var(--accent); color: #fff; align-self: flex-end; }
+    .cards { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip {
+      border: 1px solid #98c7be;
+      background: #fff;
+      color: var(--accent);
+      border-radius: 999px;
+      padding: 7px 10px;
+      font-size: 13px;
+    }
+    .composer {
+      padding: 12px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      gap: 8px;
+    }
+    .composer input {
+      flex: 1;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 10px;
+      font-size: 14px;
+    }
+    .preview {
+      padding: 14px;
+      display: grid;
+      grid-template-rows: 42px 1fr;
+      gap: 12px;
+    }
+    .preview-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .browser {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: 34px 1fr;
+    }
+    .browser-top { background: #f0f2ef; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 6px; padding: 0 10px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: #b7bdb8; }
+    .app-mock { padding: 24px; display: grid; gap: 16px; align-content: start; }
+    .mock-head { font-size: 24px; font-weight: 750; }
+    .mock-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+    .mock-row input { border: 1px solid var(--line); border-radius: 6px; padding: 11px; }
+    .mock-row button { border: 0; background: var(--accent); color: #fff; border-radius: 6px; padding: 0 14px; }
+    .record { border: 1px solid var(--line); border-radius: 7px; padding: 12px; display: flex; justify-content: space-between; }
+    .timeline-label { font-weight: 700; }
+    .node { min-width: 128px; border: 1px solid var(--line); border-radius: 6px; padding: 8px; background: #fff; font-size: 12px; }
+    .node.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+    @media (max-width: 760px) {
+      body { grid-template-rows: 52px 1fr 64px; }
+      main { grid-template-columns: 1fr; grid-template-rows: 44% 56%; }
+      .chat { border-right: 0; border-bottom: 1px solid var(--line); }
+      footer { overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header data-ai-id="workspace-header">
+    <div class="project">
+      <span class="title" data-ai-id="project-title">日常记账工具</span>
+      <span class="tag" data-ai-id="mode-tag">快速尝鲜</span>
+      <span class="stage" data-ai-id="stage-indicator">正在生成草图...</span>
+    </div>
+    <button class="button" data-ai-id="all-projects-button">所有项目</button>
+  </header>
+  <main data-ai-id="workspace-quick">
+    <section class="chat" data-ai-id="chat-panel">
+      <div class="messages" data-ai-id="message-list">
+        <div class="msg agent">你想做什么？可以直接用平常说话的方式告诉我。</div>
+        <div class="msg user">帮我做一个日常记账应用。</div>
+        <div class="msg agent">明白了。你主要想记录哪一类账？</div>
+        <div class="cards" data-ai-id="card-options">
+          <button class="chip">日常开销</button>
+          <button class="chip">生意账目</button>
+          <button class="chip">你帮我决定</button>
+        </div>
+        <div class="msg agent">我先做一个简单版本给你看看方向对不对。</div>
+      </div>
+      <div class="composer" data-ai-id="message-composer">
+        <input aria-label="输入消息" placeholder="告诉我你想调整什么">
+        <button class="button">发送</button>
+      </div>
+    </section>
+    <section class="preview" data-ai-id="preview-panel">
+      <div class="preview-toolbar">
+        <span data-ai-id="preview-status">安全预览环境</span>
+        <div>
+          <button class="button" data-ai-id="refresh-preview">刷新</button>
+          <button class="button" data-ai-id="fullscreen-preview">全屏</button>
+        </div>
+      </div>
+      <div class="browser" data-ai-id="sandbox-browser">
+        <div class="browser-top"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+        <div class="app-mock" data-ai-id="generated-app-preview">
+          <div class="mock-head">记一笔</div>
+          <div class="mock-row">
+            <input value="午餐 28 元" aria-label="记账输入">
+            <button>保存</button>
+          </div>
+          <div class="record"><span>午餐</span><strong>¥28</strong></div>
+          <div class="record"><span>地铁</span><strong>¥6</strong></div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer data-ai-id="timeline-collapsed">
+    <span class="timeline-label">时间轴</span>
+    <div class="node active" data-ai-id="snapshot-sketch">草图 v1<br>记账+列表</div>
+    <div class="node" data-ai-id="snapshot-mvp">MVP v1<br>等待生成</div>
+  </footer>
+</body>
+</html>
+

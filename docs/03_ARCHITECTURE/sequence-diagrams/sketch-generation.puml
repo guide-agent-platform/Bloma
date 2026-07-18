@@ -1,0 +1,86 @@
+@startuml
+title 验证草图生成时序图（Proma Core 对齐 v1.1）
+
+actor User as U
+participant "WorkspaceShell\n(Renderer)" as UI
+participant "Jotai Agent Atoms\nuseGlobalAgentListeners" as Atoms
+participant "preload/bridge.ts\nwindow.electronAPI" as Bridge
+participant "main/ipc.ts\nIPC Handlers" as IPC
+participant "DialogueRouter" as Router
+participant "GuideAgentService" as Guide
+participant "AgentOrchestrator" as AO
+participant "ChannelManager\nsafeStorage" as Channel
+participant "PermissionService\nPromise + Map" as Perm
+participant "Agent SDK" as SDK
+participant "ProgrammingOrchestrator" as Prog
+participant "SketchEngine/MCP" as Sketch
+participant "SandboxRuntime" as Sandbox
+participant "SnapshotManager" as Snapshot
+participant "LocalFirstStore\nJSON/JSONL/files" as Store
+participant "AnalyticsCollector" as Analytics
+
+U -> UI: 输入自然语言需求
+UI -> Atoms: set user input pending
+UI -> Bridge: electronAPI.agent.sendMessage(payload)
+Bridge -> IPC: invoke(IPC_CHANNELS.AGENT_SEND_MESSAGE)
+IPC -> IPC: validate payload from shared/types.ts
+IPC -> Store: appendJsonl(agent-sessions/{sessionId}.jsonl, user message)
+IPC -> Analytics: track(conversation_submitted)
+IPC -> Router: route(message, projectState)
+Router -> Guide: respond(requirement_context)
+
+alt 需求不明确
+  Guide --> IPC: clarification cards
+  IPC -> Bridge: emit AgentEvent(clarification)
+  Bridge -> Atoms: global listener receives event
+  Atoms -> UI: update session state
+  UI --> U: 展示最多 3 个卡片问题
+else 需求足够明确
+  Guide -> AO: query(sessionId, sketch task prompt)
+  AO -> AO: reject if activeSessions has sessionId
+  AO -> Channel: get channel and decrypt API key
+  Channel --> AO: model config + decrypted key
+  AO -> AO: build SDK env by merging process.env
+  AO -> SDK: query(options, canUseTool callback)
+
+  loop SDKMessage stream
+    SDK --> AO: SDKMessage
+    AO -> Store: appendJsonl(partial AgentEvent)
+    AO -> IPC: emit AgentEvent
+    IPC -> Bridge: push stream event
+    Bridge -> Atoms: update atomFamily(sessionId)
+    Atoms -> UI: render assistant progress
+
+    opt tool permission required
+      AO -> Perm: canUseTool(request)
+      Perm -> IPC: emit PermissionRequest(sessionId)
+      IPC -> Bridge: push permission request
+      Bridge -> Atoms: update pendingPermissions
+      Atoms -> UI: show permission prompt
+      U -> UI: allow / deny
+      UI -> Bridge: electronAPI.permissions.respond()
+      Bridge -> IPC: invoke(permission response)
+      IPC -> Perm: resolve(requestId, decision)
+      Perm --> AO: Promise resolved
+    end
+  end
+
+  AO -> Prog: execute sketch task
+  Prog -> Sketch: generate_sketch(task)
+  Sketch --> Prog: files + run command
+  Prog -> Sandbox: writeFiles(files)
+  Prog -> Sandbox: run(run_command)
+  Sandbox --> Prog: previewUrl
+  Prog -> Snapshot: create(kind=sketch)
+  Snapshot -> Store: write snapshot files and metadata
+  Prog -> Analytics: track(sketch_generated, FIRT)
+  Prog --> IPC: AgentEvent(sketch_ready, previewUrl)
+  IPC -> Bridge: push AgentEvent
+  Bridge -> Atoms: update session state
+  Atoms -> UI: render preview
+  UI --> U: 预览区展示可交互草图
+
+  AO -> AO: cleanup iterator and remove active session
+end
+
+@enduml

@@ -1,0 +1,202 @@
+# 向导 Agent 多智能体协同开发平台
+
+> 基于 Proma fork 的零代码软件生成桌面应用文档集  
+> 当前状态：需求、UX、架构、接口、测试、Sprint、科研计划已完成  
+> 日期：2026-07-10
+
+---
+
+## 1. 项目目的
+
+本项目把 Proma 改造为面向零基础用户的软件生成平台。用户不需要理解代码、架构、数据库或测试，只需要用自然语言说明想法，并通过预览确认结果。
+
+核心体验：
+
+```text
+两道门选择
+→ 向导 Agent 澄清需求
+→ 生成验证草图
+→ 用户看预览确认或点选纠错
+→ 生成 MVP
+→ 自动测试和裁判审查
+→ 快照、回滚、继续迭代
+```
+
+平台内部由三类 Agent 协作：
+
+- 向导 Agent：唯一面向用户的对话对象。
+- 编程 Agent：负责生成、运行、测试、修复代码。
+- 裁判 Agent：负责质量门禁，只判定，不修复。
+
+---
+
+## 2. Proma Core 对齐原则
+
+所有实现必须继承 `proma-core-demo` 的底层约束：
+
+- IPC 四层链路：`shared/types.ts -> main/ipc.ts -> preload/bridge.ts -> renderer atoms`。
+- Renderer 不直接访问 Node.js、文件系统、API Key 或 Agent SDK。
+- API Key 只在 main 进程解密，并通过 Electron `safeStorage` 加密保存到 `channels.json`。
+- Agent 流式输出通过 `AgentOrchestrator -> AgentEvent -> IPC -> Jotai atomFamily(sessionId) -> UI`。
+- 工具权限使用 `canUseTool()` + `pendingRequests Map` + UI 决策回传。
+- 运行时存储只使用 `~/.proma/` 下的 JSON、JSONL 和工作区文件目录。
+- SQLite 只允许作为科研离线导出格式，不进入运行时架构。
+
+---
+
+## 3. 文档导航
+
+### 3.1 需求层
+
+| 文档 | 说明 |
+|---|---|
+| `user-stories.md` | 35 条用户故事，覆盖用户、向导 Agent、编程 Agent、裁判 Agent、研究者 |
+| `glossary.md` | 核心术语表 |
+
+### 3.2 UX 层
+
+| 文档 | 说明 |
+|---|---|
+| `sitemap.md` | 页面树、页面说明、全局 UI 元素和技术边界 |
+| `user-flows.md` | 端到端用户流程 |
+| `design-system.md` | 视觉、组件、状态和文案规范 |
+| `interaction-spec.md` | 模式选择、点选纠错、快照回滚、等待反馈等交互规格 |
+| `wireframes/` | 6 个 HTML 线框原型 |
+
+### 3.3 架构层
+
+| 文档 | 说明 |
+|---|---|
+| `architecture.md` | 总体架构、Proma fork 策略、Agent、沙箱、快照、MCP |
+| `component-design.md` | 12 个核心模块设计 |
+| `prompt-engineering.md` | 向导/编程/裁判 Agent Prompt 结构和 Proma core 运行边界 |
+| `data-model.md` | Local-First 存储、实体、埋点、权限、渠道 |
+| `class-diagram.puml` | Proma core 对齐后的核心类图 |
+| `sequence-diagrams/` | 5 个关键时序图 |
+
+### 3.4 接口层
+
+| 文档 | 说明 |
+|---|---|
+| `api-spec.md` | IPC、Renderer Bridge、Agent 流、权限、项目、沙箱、快照、文档、埋点、MCP 工具和错误码 |
+
+### 3.5 测试层
+
+| 文档 | 说明 |
+|---|---|
+| `test-plan.md` | 测试分层、Mock 策略、CI、发布门禁 |
+| `features/` | 6 个 GWT Feature 文件 |
+
+Feature 文件：
+
+- `features/mode-selection.feature`
+- `features/generation-workflow.feature`
+- `features/point-correction.feature`
+- `features/timeline-rollback.feature`
+- `features/self-healing-judge.feature`
+- `features/proma-core-boundary.feature`
+
+### 3.6 计划层
+
+| 文档 | 说明 |
+|---|---|
+| `sprint-plan.md` | Phase 1 四个 Sprint，固定三人分工，交付物和验收标准 |
+| `research-plan.md` | 研究问题、实验设计、指标体系、13 类埋点映射、论文大纲 |
+
+### 3.7 状态文件
+
+| 文档 | 说明 |
+|---|---|
+| `当前已完成.md` | 当前完成状态和剩余工作记录 |
+
+---
+
+## 4. 当前完成状态
+
+已完成：
+
+- 需求层：用户故事、术语表。
+- UX 层：站点地图、用户流程、线框图、设计系统、交互规格。
+- 架构层：架构设计、组件设计、Prompt、数据模型、类图、时序图。
+- 接口层：API 规范。
+- 测试层：测试计划和 6 个 GWT Feature。
+- 计划层：Sprint 计划和科研计划。
+- 顶层：README。
+
+架构层已按 `C:\Users\17359\OneDrive\Desktop\proma-core-demo` 完成 v1.1 对齐。
+
+---
+
+## 5. 三人分工
+
+Phase 1 按固定三人团队推进：
+
+| 角色 | 职责 |
+|---|---|
+| A：工程负责人 / 全栈 | Proma fork、主进程、IPC、AgentOrchestrator、权限服务、沙箱运行、MCP 工具 |
+| B：前端 / UX 工程 | 工作区 UI、Jotai atoms、全局监听器、预览区、点选纠错、时间轴、P0 用户文案 |
+| C：测试 / 研究工程 | GWT Feature、E2E、文档一致性、埋点、脱敏导出、研究指标校验 |
+
+---
+
+## 6. Phase 1 实现顺序
+
+| Sprint | 周期 | 主题 |
+|---|---|---|
+| Sprint 0 | 1 周 | Proma core 对齐与开发底座 |
+| Sprint 1 | 2 周 | 草图生成闭环 |
+| Sprint 2 | 2 周 | MVP 与质量门禁 |
+| Sprint 3 | 2 周 | 纠错、回滚与研究数据 |
+
+进入实现前建议先做：
+
+1. 在真实代码仓库中确认 `proma-core-demo` 与目标 fork 的目录差异。
+2. 建立 `shared/types.ts` 的 IPC 单一真相源。
+3. 设置临时 `PROMA_HOME` 测试环境，避免写入真实用户数据。
+4. 先跑通 `proma-core-boundary.feature` 对应的底层测试骨架。
+
+---
+
+## 7. 发布门禁
+
+Phase 1 发布前必须满足：
+
+- 6 个 GWT Feature 全部通过。
+- 自动修复失败后能回滚到最近健康快照。
+- 裁判退回达到上限后用户能选择继续、接受或补充说明。
+- 用户可见错误文案不包含代码、堆栈、HTTP 状态码、XSS、SQL 注入等技术细节。
+- API Key 明文不会进入 renderer、日志、JSONL、埋点。
+- 运行时不创建 SQLite 文件或服务端数据库连接。
+- 13 类埋点能写入 `analytics.jsonl` 并脱敏导出。
+
+---
+
+## 8. 推荐阅读顺序
+
+如果准备进入实现，建议按以下顺序阅读：
+
+1. `architecture.md`
+2. `api-spec.md`
+3. `data-model.md`
+4. `component-design.md`
+5. `sprint-plan.md`
+6. `test-plan.md`
+7. `features/proma-core-boundary.feature`
+8. `features/generation-workflow.feature`
+
+如果准备做 UX 或产品评审，建议按以下顺序阅读：
+
+1. `glossary.md`
+2. `user-flows.md`
+3. `interaction-spec.md`
+4. `design-system.md`
+5. `wireframes/`
+6. `features/`
+
+---
+
+## 9. 修订记录
+
+| 版本 | 日期 | 修订内容 |
+|------|------|----------|
+| v1.0 | 2026-07-10 | 首版，建立项目总览、文档导航、Proma core 约束、三人分工、实现顺序和发布门禁 |

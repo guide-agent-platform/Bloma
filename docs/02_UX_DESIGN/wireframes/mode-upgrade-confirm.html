@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>模式升级确认框</title>
+  <style>
+    :root {
+      --bg: #f5f6f3;
+      --panel: #fff;
+      --ink: #202421;
+      --muted: #66706a;
+      --line: #d8ded8;
+      --quick: #087f72;
+      --long: #6b5b95;
+      --long-soft: #ebe7f6;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    .workspace {
+      width: min(1000px, 100%);
+      min-height: 620px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      position: relative;
+      display: grid;
+      grid-template-rows: 52px 1fr;
+    }
+    header {
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+    }
+    .tag { background: #e0f3ee; color: var(--quick); border-radius: 999px; padding: 4px 9px; font-size: 12px; font-weight: 700; margin-left: 8px; }
+    .content { padding: 24px; display: grid; grid-template-columns: 35% 1fr; gap: 18px; }
+    .panel { border: 1px solid var(--line); border-radius: 8px; padding: 18px; background: #fbfbfa; }
+    .panel h2 { margin: 0 0 12px; font-size: 18px; }
+    .panel p { margin: 0; color: var(--muted); line-height: 1.65; }
+    .overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(20, 24, 22, .34);
+      display: grid;
+      place-items: center;
+      padding: 20px;
+    }
+    .dialog {
+      width: min(500px, 100%);
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 22px 60px rgba(0,0,0,.24);
+      padding: 22px;
+    }
+    .icon {
+      width: 46px;
+      height: 46px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      background: var(--long-soft);
+      color: var(--long);
+      font-size: 24px;
+      margin-bottom: 14px;
+    }
+    h1 { margin: 0 0 10px; font-size: 22px; }
+    .lead { margin: 0 0 16px; color: var(--muted); line-height: 1.7; }
+    .benefits {
+      display: grid;
+      gap: 9px;
+      margin: 0 0 18px;
+      padding: 0;
+      list-style: none;
+    }
+    .benefits li {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px;
+      font-size: 14px;
+    }
+    .note { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+    .actions { display: flex; justify-content: flex-end; gap: 8px; }
+    button { height: 36px; border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 0 13px; }
+    .primary { background: var(--long); color: #fff; border-color: var(--long); }
+    @media (max-width: 720px) {
+      .content { grid-template-columns: 1fr; }
+      .panel.preview { display: none; }
+      .actions { flex-direction: column-reverse; }
+      button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <section class="workspace" data-ai-id="mode-upgrade-state">
+    <header>
+      <strong>日常记账工具 <span class="tag">快速尝鲜</span></strong>
+      <button>所有项目</button>
+    </header>
+    <main class="content">
+      <section class="panel"><h2>向导 Agent</h2><p>现在看起来已经是个完整可用的工具了。你可以继续小修小改，也可以升级为长期维护项目。</p></section>
+      <section class="panel preview"><h2>当前预览</h2><p>记账、分类、统计功能已经可用。最后一次测试通过。</p></section>
+    </main>
+    <div class="overlay" data-ai-id="mode-upgrade-modal">
+      <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="upgrade-title">
+        <div class="icon" aria-hidden="true">▦</div>
+        <h1 id="upgrade-title">升级为长期维护项目？</h1>
+        <p class="lead">升级后，我会在现有版本基础上补全文档和计划，后面可以更稳定地做版本管理、定期更新和功能扩展。</p>
+        <ul class="benefits">
+          <li data-ai-id="upgrade-benefit-docs">补全 PRD、架构说明、GWT 测试等文档</li>
+          <li data-ai-id="upgrade-benefit-sprint">为下一轮改进生成 Sprint 计划</li>
+          <li data-ai-id="upgrade-benefit-snapshot">升级前会自动保存快照，可回到现在这个版本</li>
+        </ul>
+        <div class="note">暂不升级也没关系，入口会保留。</div>
+        <div class="actions">
+          <button data-ai-id="upgrade-later">暂不升级</button>
+          <button class="primary" data-ai-id="upgrade-confirm">确认升级</button>
+        </div>
+      </section>
+    </div>
+  </section>
+</body>
+</html>
+

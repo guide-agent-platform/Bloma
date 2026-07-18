@@ -1,0 +1,70 @@
+@startuml
+title 异常自愈与熔断回滚时序图（Proma Core 对齐 v1.1）
+
+participant "ProgrammingOrchestrator" as Prog
+participant "AgentOrchestrator" as AO
+participant "SandboxRuntime" as Sandbox
+participant "GWTTestRunner" as Test
+participant "SecurityScanner" as Security
+participant "SnapshotManager" as Snapshot
+participant "LocalFirstStore\nJSON/JSONL/files" as Store
+participant "GuideAgentService" as Guide
+participant "main/ipc.ts" as IPC
+participant "preload/bridge.ts" as Bridge
+participant "Jotai Agent Atoms" as Atoms
+participant "WorkspaceShell" as UI
+actor User as U
+
+Prog -> Sandbox: run project
+Sandbox --> Prog: execution error
+Prog -> Store: appendJsonl(runtime error summary)
+Prog -> IPC: emit AgentEvent(repairing)
+IPC -> Bridge: push AgentEvent
+Bridge -> Atoms: update atomFamily(sessionId)
+Atoms -> UI: show repairing message
+UI --> U: “正在尝试修复”
+
+loop max 3 repair attempts
+  Prog -> AO: query(sessionId, repair prompt)
+  AO -> Store: appendJsonl(partial repair stream)
+  AO --> Prog: repair instruction
+  Prog -> Sandbox: apply fix and rerun
+  Sandbox --> Prog: result
+  alt success
+    Prog -> Test: run regression
+    Test --> Prog: result
+    break
+  end
+end
+
+alt 修复成功
+  Prog -> Snapshot: create(kind=iteration, health=healthy)
+  Snapshot -> Store: write snapshot metadata and files
+  Prog -> IPC: emit AgentEvent(iteration_ready)
+  IPC -> Bridge: push AgentEvent
+  Bridge -> Atoms: update state
+  Atoms -> UI: refresh preview
+  UI --> U: 展示修复后预览
+else 修复失败达到上限
+  Prog -> Snapshot: rollback(latest healthy)
+  Snapshot -> Store: restore files and append rollback record
+  Snapshot --> Prog: rollback result
+  Prog -> Guide: create rollback notice
+  Guide --> IPC: user visible message
+  IPC -> Bridge: push AgentEvent(rollback_done)
+  Bridge -> Atoms: update state
+  Atoms -> UI: render options
+  UI --> U: “已经回到上一个正常版本”
+  UI --> U: 继续尝试 / 接受当前 / 补充说明
+end
+
+alt 安全问题
+  Prog -> Security: scan and repair independently
+  Security --> Prog: security result
+  Prog -> Store: appendJsonl(security event without sensitive payload)
+  Prog -> Guide: create plain risk explanation if unresolved
+end
+
+AO -> AO: cleanup iterator and remove active session
+
+@enduml

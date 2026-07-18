@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>两道门选择页</title>
+  <style>
+    :root {
+      --bg: #f6f7f4;
+      --ink: #1e2320;
+      --muted: #626b66;
+      --line: #d9ded8;
+      --quick: #087f72;
+      --quick-soft: #dff3ee;
+      --long: #6b5b95;
+      --long-soft: #ebe7f6;
+      --card: #ffffff;
+      --shadow: 0 16px 40px rgba(33, 43, 38, .12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      display: grid;
+      grid-template-rows: 56px 1fr;
+    }
+    header {
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 28px;
+      background: rgba(255,255,255,.78);
+    }
+    .brand { font-size: 15px; font-weight: 700; }
+    .top-action {
+      border: 1px solid var(--line);
+      background: #fff;
+      height: 34px;
+      padding: 0 12px;
+      border-radius: 6px;
+      color: var(--muted);
+    }
+    main {
+      display: grid;
+      place-items: center;
+      padding: 32px;
+    }
+    .shell {
+      width: min(980px, 100%);
+    }
+    .prompt {
+      margin: 0 0 24px;
+      font-size: 20px;
+      font-weight: 650;
+      text-align: center;
+    }
+    .choices {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(260px, 1fr));
+      gap: 20px;
+    }
+    .choice {
+      border: 1px solid var(--line);
+      background: var(--card);
+      border-radius: 8px;
+      min-height: 260px;
+      padding: 28px;
+      text-align: left;
+      box-shadow: 0 1px 0 rgba(0,0,0,.04);
+      cursor: pointer;
+    }
+    .choice:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow);
+    }
+    .choice:focus-visible {
+      outline: 3px solid #2f80ed;
+      outline-offset: 3px;
+    }
+    .icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      margin-bottom: 22px;
+      font-size: 25px;
+    }
+    .quick .icon { background: var(--quick-soft); color: var(--quick); }
+    .long .icon { background: var(--long-soft); color: var(--long); }
+    h1 { margin: 0 0 12px; font-size: 28px; letter-spacing: 0; }
+    p { margin: 0; color: var(--muted); line-height: 1.7; font-size: 15px; }
+    .hint {
+      margin-top: 18px;
+      font-size: 13px;
+      color: var(--quick);
+    }
+    @media (max-width: 720px) {
+      header { padding: 0 16px; }
+      main { padding: 20px; align-items: start; }
+      .choices { grid-template-columns: 1fr; }
+      .choice { min-height: 210px; padding: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <header data-ai-id="app-header">
+    <div class="brand" data-ai-id="brand">向导 Agent</div>
+    <button class="top-action" data-ai-id="history-entry">你的项目</button>
+  </header>
+  <main data-ai-id="mode-selection-page">
+    <section class="shell" aria-label="选择项目模式">
+      <p class="prompt" data-ai-id="mode-selection-prompt">你想先怎么做这个软件？</p>
+      <div class="choices">
+        <button class="choice quick" data-ai-id="mode-card-quick">
+          <div class="icon" aria-hidden="true">↗</div>
+          <h1>快速尝鲜</h1>
+          <p>适合一次性小工具、试试想法。AI 自动处理大部分细节，你主要看最终效果满不满意。</p>
+          <div class="hint">做好后也可以升级为长期维护项目</div>
+        </button>
+        <button class="choice long" data-ai-id="mode-card-longterm">
+          <div class="icon" aria-hidden="true">▦</div>
+          <h1>精细打磨</h1>
+          <p>适合想长期使用、持续改进的项目。AI 会在关键节点跟你确认计划，每一步都更稳。</p>
+        </button>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
+
