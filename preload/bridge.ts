@@ -1,3 +1,22 @@
+/**
+ * Preload 脚本
+ *
+ * 通过 contextBridge 将主进程 API 安全地暴露给渲染进程。
+ * 这是 IPC 四层架构的 Layer 3。
+ *
+ * === 四层架构全貌 ===
+ *
+ * Layer 1: shared/types.ts (IPC_CHANNELS 常量 + 所有类型)
+ * Layer 2: main/ipc.ts (ipcMain.handle(IPC_CHANNELS.AGENT_SEND_MESSAGE, handler))
+ * Layer 3: preload/bridge.ts (← 你在这里)
+ * Layer 4: renderer/agent-atoms.ts (window.electronAPI.agent.sendMessage(input))
+ *
+ * === 禁止暴露 ===
+ * - fs, path, child_process 等 Node.js 内置模块
+ * - process.env（API Key 等敏感信息）
+ * - ipcRenderer 直接调用
+ */
+
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC_CHANNELS } from '../shared/types'
 import type {

@@ -1,3 +1,19 @@
+/**
+ * @proma/shared — 共享类型 + IPC 通道常量
+ *
+ * 这是 IPC 四层架构的 Layer 1：单一真相源。
+ * 所有 IPC 通道的请求/响应类型在这里定义，
+ * main/preload/renderer 三层都引用这里的类型。
+ *
+ * 版本：v1.1-sprint0 | 日期：2026-07-18
+ * 对齐：A 的 Bloma project (E:\Psr\develop\sprint0\Bloma\shared\types.ts)
+ * 依赖：DOC-4.1 api-spec.md、DOC-3.4 data-model.md
+ */
+
+// =========================================================================
+// 1. IPC 通道常量（单一扁平对象）
+// =========================================================================
+
 export const IPC_CHANNELS = {
   AGENT_SEND_MESSAGE: 'agent:send-message',
   AGENT_STOP: 'agent:stop',
@@ -16,6 +32,19 @@ export const IPC_CHANNELS = {
 } as const
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
+
+// =========================================================================
+// 2. 通用基础类型
+// =========================================================================
+
+/** 请求包装（所有 invoke input 必须 extend） */
+export interface RequestEnvelope {
+  request_id: string
+}
+
+export type ApiResult<T> =
+  | { ok: true; request_id: string; data: T }
+  | { ok: false; request_id: string; error: ApiError }
 
 export type ErrorCode =
   | 'VALIDATION_ERROR'
@@ -39,7 +68,7 @@ export type ErrorCode =
   | 'ANALYTICS_WRITE_FAILED'
   | 'LOCAL_STORE_WRITE_FAILED'
 
-export type ApiError = {
+export interface ApiError {
   code: ErrorCode
   message: string
   user_visible_message?: string
@@ -47,9 +76,12 @@ export type ApiError = {
   details?: Record<string, unknown>
 }
 
-export type ApiResult<T> =
-  | { ok: true; request_id: string; data: T }
-  | { ok: false; request_id: string; error: ApiError }
+/** 取消订阅函数 */
+export type Unsubscribe = () => void
+
+// =========================================================================
+// 3. 平台枚举
+// =========================================================================
 
 export type ProjectMode = 'quick' | 'longterm'
 
@@ -90,10 +122,11 @@ export type TemplateType = 'web_fullstack' | 'desktop_tool' | 'personal_tool' | 
 export type PermissionDecision = 'allow' | 'deny'
 export type DangerLevel = 'safe' | 'warning' | 'dangerous'
 export type PromaPermissionMode = 'safe' | 'ask' | 'allow-all'
+export type HealthStatus = 'healthy' | 'unhealthy'
 
-export interface RequestEnvelope {
-  request_id: string
-}
+// =========================================================================
+// 4. 渠道（A 的 snake_case 约定）
+// =========================================================================
 
 export interface ChannelModel {
   id: string
@@ -106,6 +139,7 @@ export interface Channel {
   name: string
   provider_type: ProviderType
   base_url: string
+  /** safeStorage.encryptString() 加密后的 hex 字符串 */
   api_key: string
   models: ChannelModel[]
   enabled: boolean
@@ -118,6 +152,10 @@ export interface ChannelCreateInput {
   api_key: string
   models?: ChannelModel[]
 }
+
+// =========================================================================
+// 5. Agent 核心类型
+// =========================================================================
 
 export interface MessageContentBlock {
   type: 'text' | 'tool_use' | 'tool_result'
@@ -140,6 +178,18 @@ export interface SDKMessage {
   message?: { role: string; content: MessageContentBlock[] }
   subtype?: string
 }
+
+/** Agent 会话元数据（renderer 侧定义，非 IPC 传输） */
+export interface AgentSessionMeta {
+  session_id: string
+  project_id: string
+  title: string
+  created_at: string
+}
+
+// =========================================================================
+// 6. Agent IPC 输入/输出
+// =========================================================================
 
 export interface AgentSendMessageInput extends RequestEnvelope {
   session_id: string
@@ -170,6 +220,37 @@ export interface AgentCancelResult {
   session_id: string
 }
 
+// =========================================================================
+// 7. 权限
+// =========================================================================
+
+export interface PermissionRequest {
+  id: string
+  session_id: string
+  project_id?: string
+  tool_name: string
+  tool_input: Record<string, unknown>
+  danger_level: DangerLevel
+  user_visible_summary: string
+  created_at: string
+}
+
+export interface PermissionResponseInput extends RequestEnvelope {
+  permission_request_id: string
+  session_id: string
+  decision: PermissionDecision
+  remember_for_session?: boolean
+}
+
+export interface PermissionResponseResult {
+  resolved: true
+  permission_request_id: string
+}
+
+// =========================================================================
+// 8. Agent 流式事件
+// =========================================================================
+
 export interface AgentEvent {
   event_id: string
   session_id: string
@@ -194,28 +275,9 @@ export interface AgentEvent {
   created_at: string
 }
 
-export interface PermissionRequest {
-  id: string
-  session_id: string
-  project_id?: string
-  tool_name: string
-  tool_input: Record<string, unknown>
-  danger_level: DangerLevel
-  user_visible_summary: string
-  created_at: string
-}
-
-export interface PermissionResponseInput extends RequestEnvelope {
-  permission_request_id: string
-  session_id: string
-  decision: PermissionDecision
-  remember_for_session?: boolean
-}
-
-export interface PermissionResponseResult {
-  resolved: true
-  permission_request_id: string
-}
+// =========================================================================
+// 9. 项目
+// =========================================================================
 
 export interface ProjectCreateInput extends RequestEnvelope {
   mode: ProjectMode
@@ -270,6 +332,10 @@ export interface ProjectUpgradeInput extends RequestEnvelope {
   session_id: string
 }
 
+// =========================================================================
+// 10. 沙箱
+// =========================================================================
+
 export interface SandboxRunInput extends RequestEnvelope {
   project_id: string
   command?: string
@@ -291,12 +357,16 @@ export interface SandboxStopResult {
   stopped: boolean
 }
 
+// =========================================================================
+// 11. 快照
+// =========================================================================
+
 export interface SnapshotCreateInput extends RequestEnvelope {
   project_id: string
   kind: SnapshotKind
   summary: string
   include_documents: boolean
-  health_status: 'healthy' | 'unhealthy'
+  health_status: HealthStatus
 }
 
 export interface Snapshot {
@@ -308,7 +378,7 @@ export interface Snapshot {
   screenshot_path?: string
   files_archive_path: string
   documents_archive_path?: string
-  health_status: 'healthy' | 'unhealthy'
+  health_status: HealthStatus
   parent_snapshot_id?: string
   created_at: string
 }
@@ -326,6 +396,10 @@ export interface RollbackResult {
   guard_snapshot_id: string
   preview_url?: string
 }
+
+// =========================================================================
+// 12. 文档
+// =========================================================================
 
 export interface DocumentSyncInput extends RequestEnvelope {
   project_id: string
@@ -345,6 +419,10 @@ export interface DocumentSyncResult {
   documents: DocumentRef[]
   stale_documents: DocumentRef[]
 }
+
+// =========================================================================
+// 13. 分析/埋点
+// =========================================================================
 
 export interface AnalyticsTrackInput extends RequestEnvelope {
   event: {
@@ -373,6 +451,10 @@ export interface AnalyticsTrackResult {
   recorded: true
   event_id: string
 }
+
+// =========================================================================
+// 14. Renderer Bridge API 契约（ElectronAPI）
+// =========================================================================
 
 export type ElectronAPI = {
   agent: {
@@ -404,3 +486,15 @@ export type ElectronAPI = {
     track(input: AnalyticsTrackInput): Promise<ApiResult<AnalyticsTrackResult>>
   }
 }
+
+// =========================================================================
+// 15. 全局类型声明
+// =========================================================================
+
+declare global {
+  interface Window {
+    electronAPI?: ElectronAPI
+  }
+}
+
+export {}
