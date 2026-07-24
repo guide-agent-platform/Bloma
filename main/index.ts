@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { registerIpcHandlers } from './ipc'
+import { setSnapshotCaptureProvider } from './platform-services'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -33,6 +34,11 @@ async function createMainWindow(): Promise<void> {
     dialog.showErrorBox('预览加载失败', '渲染进程已停止，请重新打开应用。')
   })
 
+  setSnapshotCaptureProvider(async () => {
+    if (!mainWindow) return undefined
+    const image = await mainWindow.webContents.capturePage()
+    return { buffer: image.toPNG(), extension: 'png' }
+  })
   registerIpcHandlers(ipcMain, mainWindow)
 
   if (process.env.VITE_DEV_SERVER_URL) {

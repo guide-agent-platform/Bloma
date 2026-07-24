@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
+import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import type {
   AnalyticsTrackInput,
@@ -29,6 +30,7 @@ type SandboxProcessFactory = (projectRoot: string, port: number, command?: strin
 type PortAllocator = (start: number, end: number) => Promise<number>
 type HealthCheck = (url: string) => Promise<boolean>
 type Sleep = (ms: number) => Promise<void>
+type SnapshotCaptureProvider = () => Promise<{ buffer: Buffer; extension: 'png' | 'jpg' | 'svg' } | undefined>
 
 const SANDBOX_PORT_START = 3000
 const SANDBOX_PORT_END = 3999
@@ -41,6 +43,7 @@ let sandboxProcessFactory: SandboxProcessFactory = spawnStaticServer
 let allocatePort: PortAllocator = findAvailablePort
 let sandboxHealthCheck: HealthCheck = defaultHealthCheck
 let sandboxSleep: Sleep = sleep
+let snapshotCaptureProvider: SnapshotCaptureProvider = defaultSnapshotCapture
 
 export async function runSandbox(input: SandboxRunInput): Promise<SandboxRunResult> {
   const project = findProject(input.project_id)
@@ -183,6 +186,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+async function defaultSnapshotCapture(): Promise<{ buffer: Buffer; extension: 'svg' }> {
+  return {
+    extension: 'svg',
+    buffer: Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540"><rect width="960" height="540" fill="#f7f5fb"/><text x="48" y="72" fill="#1d1d1f" font-family="Arial" font-size="28">Bloma sketch snapshot</text><text x="48" y="118" fill="#6e6e73" font-family="Arial" font-size="18">Preview capture placeholder</text></svg>',
+      'utf8',
+    ),
+  }
+}
+
 const STATIC_SERVER_SCRIPT = `
 const { createReadStream, existsSync, statSync } = require('node:fs');
 const { createServer } = require('node:http');
@@ -211,34 +224,45 @@ createServer((req, res) => {
 }).listen(port, '127.0.0.1');
 `
 
-export function createSnapshot(input: SnapshotCreateInput): Snapshot {
-  /**
-   * TODO [Sprint 1]: implement real file archiving.
-   * Current Sprint 0 behavior writes snapshot metadata only. The
-   * files_archive_path points at the future location for copying or zipping
-   * generated-projects/{project_id} into snapshots/{project_id}/{snapshot_id}/files.
-   */
+export async function createSnapshot(input: SnapshotCreateInput): Promise<Snapshot> {
   const project = findProject(input.project_id)
   const snapshotId = randomUUID()
   const snapshotDir = getSnapshotsDir(project.workspace_slug, project.project_id)
+  const snapshotRoot = `${snapshotDir}/${snapshotId}`
+  const filesArchivePath = `${snapshotRoot}/files`
+  const documentsArchivePath = input.include_documents ? `${snapshotRoot}/documents` : undefined
+
+  mkdirSync(snapshotRoot, { recursive: true })
+  cpSync(project.root_path, filesArchivePath, { recursive: true, force: true })
+  if (documentsArchivePath) {
+    const documentsDir = getDocumentsDir(project.workspace_slug, project.project_id)
+    if (existsSync(documentsDir)) cpSync(documentsDir, documentsArchivePath, { recursive: true, force: true })
+  }
+
+  const capture = await snapshotCaptureProvider()
+  const screenshotPath = capture ? `${snapshotRoot}/screenshot.${capture.extension}` : undefined
+  if (capture && screenshotPath) writeFileSync(screenshotPath, capture.buffer)
+
   const snapshot: Snapshot = {
     snapshot_id: snapshotId,
     project_id: project.project_id,
     kind: input.kind,
     name: `${input.kind}-${snapshotId.slice(0, 8)}`,
     summary: input.summary,
-    files_archive_path: `${snapshotDir}/${snapshotId}/files`,
-    documents_archive_path: input.include_documents ? `${snapshotDir}/${snapshotId}/documents` : undefined,
+    screenshot_path: screenshotPath,
+    files_archive_path: filesArchivePath,
+    documents_archive_path: documentsArchivePath,
     health_status: input.health_status,
     created_at: new Date().toISOString(),
   }
+  writeJsonFile(`${snapshotRoot}/metadata.json`, snapshot)
   writeJsonFile(`${snapshotDir}/${snapshotId}.json`, snapshot)
   return snapshot
 }
 
-export function rollbackSnapshot(input: SnapshotRollbackInput): RollbackResult {
+export async function rollbackSnapshot(input: SnapshotRollbackInput): Promise<RollbackResult> {
   const project = findProject(input.project_id)
-  const guard = createSnapshot({
+  const guard = await createSnapshot({
     request_id: input.request_id,
     project_id: input.project_id,
     kind: 'rollback_guard',
@@ -252,6 +276,14 @@ export function rollbackSnapshot(input: SnapshotRollbackInput): RollbackResult {
     current_snapshot_id: input.snapshot_id,
     guard_snapshot_id: guard.snapshot_id,
   }
+}
+
+export function setSnapshotCaptureProvider(provider?: SnapshotCaptureProvider): void {
+  snapshotCaptureProvider = provider ?? defaultSnapshotCapture
+}
+
+export function setSnapshotCaptureProviderForTests(provider?: SnapshotCaptureProvider): void {
+  snapshotCaptureProvider = provider ?? defaultSnapshotCapture
 }
 
 export function syncDocuments(input: DocumentSyncInput): DocumentSyncResult {

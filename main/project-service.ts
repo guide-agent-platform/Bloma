@@ -78,7 +78,7 @@ export function findProject(projectId: string): Project {
   return project
 }
 
-function updateProject(projectId: string, patch: Partial<Project>): Project {
+export function updateProject(projectId: string, patch: Partial<Project>): Project {
   const index = readProjects()
   const current = index.projects.find((item) => item.project_id === projectId)
   if (!current) throw new Error('PROJECT_NOT_FOUND')
