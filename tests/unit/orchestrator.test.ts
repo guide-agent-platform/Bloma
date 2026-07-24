@@ -50,6 +50,37 @@ describe('AgentOrchestrator', () => {
     const jsonl = readFileSync(join(home, 'agent-sessions', 'session-1.jsonl'), 'utf8')
     expect(jsonl).toContain('做一个记账工具')
     expect(jsonl).toContain('Sprint 0')
+    expect(jsonl).toContain('[terminal] status=completed')
+  })
+
+  it('persists terminal error to JSONL when SDK fails', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-test-'))
+    process.env.PROMA_HOME = home
+
+    setSDKQueryForTests(async function* () {
+      yield {
+        type: 'assistant',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'partial-answer' }] },
+      }
+      throw Object.assign(new Error('boom'), { statusCode: 400 })
+    })
+
+    await expect(
+      runAgent({
+        request_id: 'req-err',
+        session_id: 'session-err',
+        project_id: 'project-err',
+        content: '触发错误',
+        mode: 'quick',
+        current_stage: 'clarifying',
+      }),
+    ).rejects.toThrow()
+
+    const jsonl = readFileSync(join(home, 'agent-sessions', 'session-err.jsonl'), 'utf8')
+    expect(jsonl).toContain('partial-answer')
+    expect(jsonl).toContain('[terminal] status=error')
+    expect(jsonl).toContain('AGENT_SDK_ERROR')
+    expect(isSessionActive('session-err')).toBe(false)
   })
 
   it('passes merged env into the SDK query', async () => {

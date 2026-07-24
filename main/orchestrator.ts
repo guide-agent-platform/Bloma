@@ -113,14 +113,18 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     })
 
     persistAssistantMessages(input.session_id, received)
+    persistTerminalMessage(input.session_id, 'completed')
     streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
 
     return { accepted: true, session_id: input.session_id, stream_started: true }
   } catch (error) {
     persistAssistantMessages(input.session_id, received)
-    streamPublisher(makeEvent(input, 'error', {
-      code: String(error).includes('AGENT_SESSION_BUSY') ? 'AGENT_SESSION_BUSY' : 'AGENT_SDK_ERROR',
-    }))
+    const code = String(error).includes('AGENT_SESSION_BUSY') ? 'AGENT_SESSION_BUSY' : 'AGENT_SDK_ERROR'
+    streamPublisher(makeEvent(input, 'error', { code }))
+    persistTerminalMessage(input.session_id, 'error', {
+      code,
+      message: error instanceof Error ? error.message : String(error),
+    })
     throw error
   } finally {
     await run.iterator?.return?.()
@@ -200,6 +204,30 @@ function persistAssistantMessages(sessionId: string, sdkMessages: SDKMessage[]):
       timestamp: Date.now(),
     })
   }
+}
+
+/**
+ * 将终态（成功/失败）以 system 消息追加到会话 JSONL，
+ * 使本地日志可独立还原会话结束原因，不依赖内存流事件。
+ */
+function persistTerminalMessage(
+  sessionId: string,
+  status: 'completed' | 'error',
+  detail?: { code?: string; message?: string },
+): void {
+  const text =
+    status === 'completed'
+      ? '[terminal] status=completed'
+      : `[terminal] status=error code=${detail?.code ?? 'AGENT_SDK_ERROR'} message=${truncate(detail?.message ?? '')}`
+  appendAgentMessage(sessionId, {
+    role: 'system',
+    content: [{ type: 'text', text }],
+    timestamp: Date.now(),
+  })
+}
+
+function truncate(value: string, max = 200): string {
+  return value.length > max ? `${value.slice(0, max)}…` : value
 }
 
 function convertSDKMessage(input: AgentSendMessageInput, sdkMessage: SDKMessage): AgentEvent | undefined {

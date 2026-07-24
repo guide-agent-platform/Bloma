@@ -45,68 +45,94 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
   })
 
   ipcMain.handle(IPC_CHANNELS.AGENT_SEND_MESSAGE, async (_event, payload: unknown) => {
-    const input = validateAgentSend(payload)
-    return safeInvoke(input.request_id, () => runAgent(input))
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = validateAgentSend(payload)
+      return runAgent(input)
+    })
   })
 
   ipcMain.handle(IPC_CHANNELS.AGENT_STOP, async (_event, payload: unknown) => {
-    const input = validateCancel(payload)
-    return safeInvoke(input.request_id, () => cancelAgent(input))
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = validateCancel(payload)
+      return cancelAgent(input)
+    })
   })
 
   ipcMain.handle(IPC_CHANNELS.PERMISSION_RESPONSE, async (_event, payload: unknown) => {
-    const input = validatePermissionResponse(payload)
-    return safeInvoke(input.request_id, () => resolvePermission(input))
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = validatePermissionResponse(payload)
+      return resolvePermission(input)
+    })
   })
 
   ipcMain.handle(IPC_CHANNELS.PROJECT_CREATE, async (_event, payload: unknown) => {
-    const input = validateProjectCreate(payload)
-    return safeInvoke(input.request_id, () => createProject(input))
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = validateProjectCreate(payload)
+      return createProject(input)
+    })
   })
 
   ipcMain.handle(IPC_CHANNELS.PROJECT_CONFIRM_SKETCH, async (_event, payload: unknown) => {
-    const input = requireFields<ConfirmSketchInput>(payload, ['project_id', 'session_id', 'snapshot_id', 'decision'])
-    return safeInvoke(input.request_id, () => confirmSketch(input))
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<ConfirmSketchInput>(payload, ['project_id', 'session_id', 'snapshot_id', 'decision'])
+      return confirmSketch(input)
+    })
   })
 
   ipcMain.handle(IPC_CHANNELS.PROJECT_SUBMIT_CORRECTION, async (_event, payload: unknown) => {
-    const input = requireFields<PointCorrectionInput>(payload, ['project_id', 'session_id', 'mode'])
-    return safeInvoke(input.request_id, () => submitCorrection(input))
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<PointCorrectionInput>(payload, ['project_id', 'session_id', 'mode'])
+      return submitCorrection(input)
+    })
   })
 
   ipcMain.handle(IPC_CHANNELS.PROJECT_UPGRADE, async (_event, payload: unknown) => {
-    const input = requireFields<ProjectUpgradeInput>(payload, ['project_id', 'session_id'])
-    return safeInvoke(input.request_id, () => upgradeProject(input))
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<ProjectUpgradeInput>(payload, ['project_id', 'session_id'])
+      return upgradeProject(input)
+    })
   })
 
   ipcMain.handle(IPC_CHANNELS.SANDBOX_RUN, async (_event, payload: unknown) => {
-    const input = requireFields<SandboxRunInput>(payload, ['project_id'])
-    return safeInvoke(input.request_id, () => runSandbox(input))
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<SandboxRunInput>(payload, ['project_id'])
+      return runSandbox(input)
+    })
   })
 
   ipcMain.handle(IPC_CHANNELS.SANDBOX_STOP, async (_event, payload: unknown) => {
-    const input = requireFields<SandboxStopInput>(payload, ['project_id'])
-    return safeInvoke(input.request_id, () => stopSandbox(input))
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<SandboxStopInput>(payload, ['project_id'])
+      return stopSandbox(input)
+    })
   })
 
   ipcMain.handle(IPC_CHANNELS.SNAPSHOT_CREATE, async (_event, payload: unknown) => {
-    const input = requireFields<SnapshotCreateInput>(payload, ['project_id', 'kind', 'summary', 'health_status'])
-    return safeInvoke(input.request_id, () => createSnapshot(input))
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<SnapshotCreateInput>(payload, ['project_id', 'kind', 'summary', 'health_status'])
+      return createSnapshot(input)
+    })
   })
 
   ipcMain.handle(IPC_CHANNELS.SNAPSHOT_ROLLBACK, async (_event, payload: unknown) => {
-    const input = requireFields<SnapshotRollbackInput>(payload, ['project_id', 'snapshot_id', 'reason'])
-    return safeInvoke(input.request_id, () => rollbackSnapshot(input))
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<SnapshotRollbackInput>(payload, ['project_id', 'snapshot_id', 'reason'])
+      return rollbackSnapshot(input)
+    })
   })
 
   ipcMain.handle(IPC_CHANNELS.DOCUMENT_SYNC, async (_event, payload: unknown) => {
-    const input = requireFields<DocumentSyncInput>(payload, ['project_id', 'session_id', 'checkpoint'])
-    return safeInvoke(input.request_id, () => syncDocuments(input))
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<DocumentSyncInput>(payload, ['project_id', 'session_id', 'checkpoint'])
+      return syncDocuments(input)
+    })
   })
 
   ipcMain.handle(IPC_CHANNELS.ANALYTICS_TRACK, async (_event, payload: unknown) => {
-    const input = requireFields<AnalyticsTrackInput>(payload, ['event'])
-    return safeInvoke(input.request_id, () => trackAnalytics(input))
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<AnalyticsTrackInput>(payload, ['event'])
+      return trackAnalytics(input)
+    })
   })
 }
 
@@ -141,8 +167,13 @@ function validateProjectCreate(payload: unknown): ProjectCreateInput {
   return input
 }
 
+function extractRequestId(payload: unknown): string {
+  return hasRequestId(payload) ? payload.request_id : ''
+}
+
 function requireFields<T extends { request_id: string }>(payload: unknown, fields: string[]): T {
-  if (!hasRequestId(payload) || !isRecord(payload)) throw new Error('request_id is required')
+  if (!isRecord(payload)) throw new Error('Invalid payload: expected object')
+  if (!hasRequestId(payload)) throw new Error('Missing required field: request_id')
   for (const field of fields) requireValue(payload, field)
   return payload as T
 }
