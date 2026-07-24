@@ -18,7 +18,7 @@ import {
   agentStreamStateFamily,
   globalUserErrorAtom,
 } from './atoms'
-import type { AgentEvent, ProjectMode } from './atoms'
+import type { AgentEvent, Project, ProjectMode } from './atoms'
 
 /** Aurora 渐变网格背景（与 demo.html .aurora 一致） */
 const Aurora: React.FC = () => (
@@ -90,7 +90,33 @@ const AppRoutes: React.FC = () => {
 
   const handleSendMessage = useCallback(async (content: string) => {
     const store = window.__jotai_store__
-    if (!store || !currentProject || !mode) return
+    if (!store || !mode) {
+      setPreviewStatus('error')
+      setPreviewError('请先选择一种开始方式。')
+      return
+    }
+    const api = window.electronAPI
+    if (!api) {
+      setPreviewStatus('error')
+      setPreviewError('当前环境无法连接桌面应用能力。')
+      return
+    }
+
+    let project: Project | null = currentProject
+    if (!project) {
+      const created = await api.project.create({
+        request_id: crypto.randomUUID(),
+        mode,
+        initial_message: content,
+      })
+      if (!created.ok) {
+        setPreviewStatus('error')
+        setPreviewError(created.error.user_visible_message ?? '项目没有创建成功，请再试一次。')
+        return
+      }
+      project = created.data
+      store.set(currentProjectAtom, project)
+    }
 
     const msgsAtom = agentMessagesFamily(sessionId)
     const userMsg: AgentMessage = {
@@ -104,21 +130,14 @@ const AppRoutes: React.FC = () => {
     setWaiting(true)
     setWaitStart(Date.now())
     setPreviewStatus('loading')
-    const api = window.electronAPI
-    if (!api) {
-      setWaiting(false)
-      setPreviewStatus('error')
-      setPreviewError('当前环境无法连接桌面应用能力。')
-      return
-    }
 
     const result = await api.agent.sendMessage({
       request_id: crypto.randomUUID(),
       session_id: sessionId,
-      project_id: currentProject.project_id,
+      project_id: project.project_id,
       content,
       mode,
-      current_stage: currentProject.current_stage,
+      current_stage: project.current_stage,
       metadata: { source: 'chat' },
     })
 

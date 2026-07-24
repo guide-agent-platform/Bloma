@@ -49,9 +49,9 @@ async function createMainWindow(): Promise<void> {
 }
 
 function resolvePreloadPath(): string {
-  const compiled = join(__dirname, '..', 'preload', 'bridge.js')
+  const compiled = join(__dirname, '..', 'preload', 'bridge.cjs')
   if (existsSync(compiled)) return compiled
-  return join(app.getAppPath(), 'preload', 'bridge.js')
+  return join(app.getAppPath(), 'dist-main', 'preload', 'bridge.cjs')
 }
 
 app.whenReady().then(createMainWindow)
