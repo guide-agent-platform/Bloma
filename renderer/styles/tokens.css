@@ -1,0 +1,248 @@
+/* ============================================================
+   Bloma Design Tokens v3.0 — Bento Grids + Aurora + Glass
+   来源: ui-ux-pro-max skill (Bento Grids + Gradient Mesh/Aurora)
+   视觉架构: 玻璃磁贴浮在 aurora 渐变网格上, Apple 风圆角
+   ⚠️ 本文件 :root 变量名与值必须与 demo.html 完全一致
+   ============================================================ */
+
+/* ============================================================
+   LAYER 1: Primitive Tokens
+   ============================================================ */
+:root {
+  /* Neutral (Apple-style) */
+  --gray-50: #FBFBFD;
+  --gray-100: #F5F5F7;
+  --gray-200: #E8E8ED;
+  --gray-300: #D2D2D8;
+  --gray-400: #A1A1A6;
+  --gray-500: #6E6E73;
+  --gray-600: #4B4B50;
+  --gray-700: #3A3A3E;
+  --gray-800: #1F1F23;
+  --gray-900: #1D1D1F;
+
+  /* Violet (quick / primary) */
+  --violet-50: #F5F3FF;
+  --violet-100: #EDE9FE;
+  --violet-200: #DDD6FE;
+  --violet-400: #A78BFA;
+  --violet-500: #8B5CF6;
+  --violet-600: #7C3AED;
+  --violet-700: #6D28D9;
+
+  /* Cyan/Teal (longterm) */
+  --cyan-50: #ECFEFF;
+  --cyan-100: #CFFAFE;
+  --cyan-400: #22D3EE;
+  --cyan-500: #06B6D4;
+  --cyan-600: #0891B2;
+  --cyan-700: #0E7490;
+
+  /* Pink (accent / aurora) */
+  --pink-100: #FCE7F3;
+  --pink-400: #F472B6;
+  --pink-500: #EC4899;
+  --pink-600: #DB2777;
+
+  /* Status */
+  --amber-500: #F59E0B;
+  --emerald-500: #10B981;
+  --red-50: #FEF2F2;
+  --red-100: #FEE2E2;
+  --red-500: #EF4444;
+  --red-600: #DC2626;
+
+  --white: #FFFFFF;
+  --black: #000000;
+
+  /* Spacing (4px = 0.25rem) */
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* Typography */
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-display: "Great Vibes", "Segoe Script", "Snell Roundhand", cursive;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  --font-size-xs: 0.75rem;   /* 12 */
+  --font-size-sm: 0.875rem;  /* 14 */
+  --font-size-md: 1rem;      /* 16 */
+  --font-size-lg: 1.125rem;  /* 18 */
+  --font-size-xl: 1.375rem;  /* 22 */
+  --font-size-2xl: 1.75rem;  /* 28 */
+  --font-size-3xl: 2.25rem;  /* 36 */
+  --font-size-4xl: 2.75rem;  /* 44 */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --line-height-base: 1.6;
+  --line-height-heading: 1.25;
+
+  /* Radius (Apple bento) */
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-tile: 24px;
+  --radius-full: 9999px;
+
+  /* Shadows (soft, layered) */
+  --shadow-sm: 0 1px 2px 0 rgb(29 29 31 / 0.04);
+  --shadow-md: 0 4px 16px -4px rgb(29 29 31 / 0.08), 0 1px 3px -1px rgb(29 29 31 / 0.04);
+  --shadow-lg: 0 16px 48px -12px rgb(31 23 56 / 0.18), 0 4px 12px -4px rgb(29 29 31 / 0.06);
+  --shadow-tile: 0 8px 32px -10px rgb(31 23 56 / 0.12), 0 2px 6px -2px rgb(29 29 31 / 0.05);
+  --shadow-glass: 0 8px 32px -8px rgb(31 23 56 / 0.14), inset 0 1px 0 rgb(255 255 255 / 0.85);
+
+  /* Glass */
+  --glass-bg: rgb(255 255 255 / 0.7);
+  --glass-bg-strong: rgb(255 255 255 / 0.86);
+  --glass-bg-soft: rgb(255 255 255 / 0.55);
+  --glass-border: rgb(255 255 255 / 0.7);
+  --glass-border-subtle: rgb(255 255 255 / 0.5);
+  --glass-blur: 22px;
+
+  /* Aurora mesh blobs */
+  --aurora-violet: rgb(124 58 237 / 0.22);
+  --aurora-pink: rgb(236 72 153 / 0.18);
+  --aurora-cyan: rgb(6 182 212 / 0.18);
+  --aurora-blur: 80px;
+
+  /* Transitions */
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base: 220ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 360ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Layout */
+  --header-height: 60px;
+  --timeline-height: 72px;
+  --tile-gap: 14px;
+}
+
+/* ============================================================
+   LAYER 2: Semantic Tokens
+   ============================================================ */
+:root {
+  --color-bg: #F4F3FA;
+  --color-surface: var(--white);
+  --color-surface-muted: var(--gray-100);
+  --color-text: var(--gray-900);
+  --color-text-muted: var(--gray-500);
+  --color-border: #E6E5EE;
+  --color-focus: var(--violet-600);
+
+  /* Mode colors */
+  --color-quick: var(--violet-600);
+  --color-quick-soft: var(--violet-100);
+  --color-quick-bright: var(--violet-500);
+  --color-longterm: var(--cyan-700);
+  --color-longterm-soft: var(--cyan-50);
+  --color-longterm-bright: var(--cyan-500);
+
+  /* Accent */
+  --color-accent: var(--pink-500);
+  --color-accent-soft: var(--pink-100);
+
+  /* Status */
+  --color-warning: var(--amber-500);
+  --color-success: var(--emerald-500);
+  --color-danger: var(--red-600);
+  --color-danger-soft: var(--red-50);
+}
+
+/* ============================================================
+   LAYER 3: Component Tokens
+   ============================================================ */
+:root {
+  --tile-bg: var(--glass-bg);
+  --tile-border: var(--glass-border);
+  --tile-radius: var(--radius-tile);
+  --tile-shadow: var(--shadow-glass);
+  --tile-blur: var(--glass-blur);
+
+  --button-bg: var(--color-quick);
+  --button-fg: var(--white);
+  --button-hover-bg: var(--violet-700);
+  --button-radius: var(--radius-full);
+
+  --input-bg: rgb(255 255 255 / 0.6);
+  --input-border: var(--color-border);
+  --input-radius: var(--radius-md);
+}
+
+/* ============================================================
+   Global keyframes (React 内联 animation 与 demo.html 共用)
+   ============================================================ */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes pulse-stage {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgb(220 38 38 / 0.5); }
+  70% { box-shadow: 0 0 0 12px rgb(220 38 38 / 0); }
+  100% { box-shadow: 0 0 0 0 rgb(220 38 38 / 0); }
+}
+@keyframes typing-dot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.35; }
+  30% { transform: translateY(-5px); opacity: 1; }
+}
+@keyframes tile-enter {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes aurora-drift {
+  0%   { transform: translate(0, 0) scale(1); }
+  33%  { transform: translate(4%, -3%) scale(1.08); }
+  66%  { transform: translate(-3%, 4%) scale(0.96); }
+  100% { transform: translate(0, 0) scale(1); }
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================================
+   Utility: 玻璃磁贴（与 demo.html .tile 一致）
+   ============================================================ */
+.tile {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-tile);
+  box-shadow: var(--shadow-glass);
+}
+
+/* ============================================================
+   Base — body 提供底色与字体；页面容器保持透明以透出 aurora
+   ============================================================ */
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+#root {
+  position: relative;
+  z-index: 1;
+}
