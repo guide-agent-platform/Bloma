@@ -42,6 +42,13 @@ export const ArrowUp: React.FC<IconProps> = ({ size = 24, strokeWidth = 2 }) => 
   </svg>
 )
 
+export const ArrowRight: React.FC<IconProps> = ({ size = 24, strokeWidth = 2 }) => (
+  <svg {...base(size, strokeWidth)}>
+    <path d="M5 12h14" />
+    <path d="M12 5l7 7-7 7" />
+  </svg>
+)
+
 export const RotateCw: React.FC<IconProps> = ({ size = 24, strokeWidth = 2 }) => (
   <svg {...base(size, strokeWidth)}>
     <path d="M21 12a9 9 0 1 1-2.64-6.36" />

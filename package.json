@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "main/index.js",
   "scripts": {
+    "dev:renderer": "vite --host 127.0.0.1",
+    "build:renderer": "vite build",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run",
     "test:integration": "vitest run tests/integration",

@@ -1,5 +1,4 @@
 import React, { useState, useCallback } from 'react'
-import { Provider, createStore } from 'jotai'
 import { ModeSelectionPage } from './ModeSelectionPage'
 import { WorkspaceShell } from './WorkspaceShell'
 import type { PreviewStatus } from './PreviewPanel'
@@ -35,14 +34,11 @@ const Aurora: React.FC = () => (
 )
 
 const App: React.FC = () => {
-  const storeRef = React.useRef(createStore())
-  const store = storeRef.current
-
   return (
-    <Provider store={store}>
+    <>
       <Aurora />
       <AppRoutes />
-    </Provider>
+    </>
   )
 }
 
@@ -67,7 +63,7 @@ const AppRoutes: React.FC = () => {
     setMode(selectedMode)
 
     // 模拟：通过 store 更新 atoms
-    const store = (window as any).__jotai_demo_store__
+    const store = window.__jotai_store__
     if (store) {
       store.set(projectModeAtom, selectedMode)
       store.set(modeSelectedAtom, true)
@@ -93,7 +89,7 @@ const AppRoutes: React.FC = () => {
 
   // 发送消息 → 模拟 Agent 响应
   const handleSendMessage = useCallback((content: string) => {
-    const store = (window as any).__jotai_demo_store__
+    const store = window.__jotai_store__
     if (!store) return
 
     // 追加用户消息
