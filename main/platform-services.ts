@@ -134,7 +134,11 @@ function spawnStaticServer(projectRoot: string, port: number, command?: string):
     const [executable, ...args] = command.replaceAll('{port}', String(port)).split(/\s+/).filter(Boolean)
     return spawn(executable, args, sandboxSpawnOptions(projectRoot))
   }
-  return spawn(process.execPath, ['-e', STATIC_SERVER_SCRIPT, String(port)], sandboxSpawnOptions(projectRoot))
+  return spawn(resolveNodeExecutable(), ['-e', STATIC_SERVER_SCRIPT, String(port)], sandboxSpawnOptions(projectRoot))
+}
+
+function resolveNodeExecutable(): string {
+  return process.env.npm_node_execpath || process.env.NODE || process.execPath
 }
 
 function sandboxSpawnOptions(projectRoot: string): SpawnOptions {

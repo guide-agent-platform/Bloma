@@ -41,7 +41,8 @@ export async function runSketchTask(input: SketchTaskInput): Promise<SketchTaskR
       code: 'SANDBOX_RUN_FAILED',
       message: sandbox.error_summary?.user_visible_summary ?? '预览暂时没有启动成功，我正在修复。',
     })
-    throw new Error('SANDBOX_RUN_FAILED')
+    const category = sandbox.error_summary?.category ?? 'unknown'
+    throw new Error(`SANDBOX_RUN_FAILED:${category}`)
   }
 
   const snapshot = await createSnapshot({
