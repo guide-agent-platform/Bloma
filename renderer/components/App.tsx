@@ -1,8 +1,10 @@
 import React, { useState, useCallback } from 'react'
+import { useAtomValue } from 'jotai'
 import { ModeSelectionPage } from './ModeSelectionPage'
 import { WorkspaceShell } from './WorkspaceShell'
 import type { PreviewStatus } from './PreviewPanel'
 import type { Snapshot, AgentMessage } from './atoms'
+import type { CardOption } from './CardOptions'
 import {
   modeSelectedAtom,
   projectModeAtom,
@@ -13,16 +15,10 @@ import {
   agentMessagesFamily,
   activeAgentSessionIdAtom,
   snapshotsListAtom,
-  hasActiveStreamAtom,
   agentStreamStateFamily,
+  globalUserErrorAtom,
 } from './atoms'
-import type { ProjectMode, WorkflowStage } from './atoms'
-
-/**
- * 演示用示例草图（与 demo.html 中 SAMPLE_SKETCH 完全一致）。
- * 真实环境由编程 Agent 通过沙箱提供 preview_url，此处仅用于渲染进程演示。
- */
-const SAMPLE_SKETCH = `<html><head><meta charset="UTF-8"><style>body{font-family:'Inter',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:linear-gradient(135deg,#F4F3FA,#FDF2F8);color:#1D1D1F}.app{text-align:center;padding:40px;max-width:440px;width:100%}h1{background:linear-gradient(135deg,#7C3AED,#EC4899);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:6px;font-size:22px;font-weight:700}.sub{color:#6E6E73;margin-bottom:28px;font-size:13px}.card{background:#fff;border:1px solid #E6E5EE;border-radius:16px;padding:18px 20px;margin:10px 0;text-align:left;box-shadow:0 4px 16px -4px rgba(29,29,31,.08)}.card h3{margin-bottom:2px;font-size:12px;color:#6E6E73;font-weight:500}.card .val{font-size:24px;font-weight:700;margin-top:4px}.income{color:#10B981}.expense{color:#DC2626}.balance{color:#7C3AED}</style></head><body><div class="app"><h1>记账应用 · 草图预览</h1><p class="sub">Sprint 1 演示 · 实际由编程Agent生成</p><div class="card"><h3>本月收入</h3><p class="val income">¥ 12,500</p></div><div class="card"><h3>本月支出</h3><p class="val expense">¥ 8,320</p></div><div class="card"><h3>本月结余</h3><p class="val balance">¥ 4,180</p></div></div></body></html>`
+import type { AgentEvent, ProjectMode } from './atoms'
 
 /** Aurora 渐变网格背景（与 demo.html .aurora 一致） */
 const Aurora: React.FC = () => (
@@ -48,21 +44,18 @@ const AppRoutes: React.FC = () => {
   const [waiting, setWaiting] = useState(false)
   const [waitStart, setWaitStart] = useState<number | undefined>()
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>('empty')
-  const [sessionId] = useState(() => `demo-${Date.now()}`)
-  // 演示用：将示例草图转为 blob URL 注入预览，使 running 态与 demo.html 视觉一致
-  const [samplePreviewUrl] = useState(() => {
-    try {
-      return URL.createObjectURL(new Blob([SAMPLE_SKETCH], { type: 'text/html' }))
-    } catch {
-      return undefined
-    }
-  })
+  const [previewUrl, setPreviewUrl] = useState<string | undefined>()
+  const [previewError, setPreviewError] = useState<string | undefined>()
+  const [cardOptions, setCardOptions] = useState<CardOption[]>([])
+  const [sessionId] = useState(() => `session-${Date.now()}`)
+  const processedEventIdsRef = React.useRef<Set<string>>(new Set())
+  const currentProject = useAtomValue(currentProjectAtom)
+  const streamState = useAtomValue(agentStreamStateFamily(sessionId))
 
   // 选择模式 → 进入工作区
   const handleModeSelected = useCallback((selectedMode: 'quick' | 'longterm') => {
     setMode(selectedMode)
 
-    // 模拟：通过 store 更新 atoms
     const store = window.__jotai_store__
     if (store) {
       store.set(projectModeAtom, selectedMode)
@@ -70,29 +63,35 @@ const AppRoutes: React.FC = () => {
       store.set(workflowStageAtom, 'clarifying')
       store.set(stageIndicatorLabelAtom, STAGE_LABEL_MAP.clarifying)
       store.set(activeAgentSessionIdAtom, sessionId)
-      store.set(currentProjectAtom, {
-        project_id: `demo-${Date.now()}`,
-        workspace_slug: 'default-software-builder',
-        name: selectedMode === 'quick' ? '我的快速项目' : '我的长期项目',
-        mode: selectedMode,
-        template_type: 'web_fullstack',
-        status: 'active',
-        current_stage: 'clarifying',
-        root_path: '/demo',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
     }
 
+    setCardOptions([])
+    setPreviewUrl(undefined)
+    setPreviewError(undefined)
+    setPreviewStatus('empty')
     setRoute('workspace')
   }, [sessionId])
 
-  // 发送消息 → 模拟 Agent 响应
-  const handleSendMessage = useCallback((content: string) => {
+  React.useEffect(() => {
     const store = window.__jotai_store__
     if (!store) return
+    for (const event of streamState.events) {
+      if (processedEventIdsRef.current.has(event.event_id)) continue
+      processedEventIdsRef.current.add(event.event_id)
+      handleAgentEvent(event, sessionId, {
+        setWaiting,
+        setPreviewStatus,
+        setPreviewUrl,
+        setPreviewError,
+        setCardOptions,
+      })
+    }
+  }, [sessionId, streamState.events])
 
-    // 追加用户消息
+  const handleSendMessage = useCallback(async (content: string) => {
+    const store = window.__jotai_store__
+    if (!store || !currentProject || !mode) return
+
     const msgsAtom = agentMessagesFamily(sessionId)
     const userMsg: AgentMessage = {
       role: 'user',
@@ -100,51 +99,40 @@ const AppRoutes: React.FC = () => {
       timestamp: Date.now(),
     }
     store.set(msgsAtom, (prev: AgentMessage[]) => [...prev, userMsg])
-
-    // 模拟等待
+    setCardOptions([])
+    setPreviewError(undefined)
     setWaiting(true)
     setWaitStart(Date.now())
     setPreviewStatus('loading')
-
-    // 模拟：更新阶段
-    store.set(workflowStageAtom, 'generating_sketch' as WorkflowStage)
-    store.set(stageIndicatorLabelAtom, STAGE_LABEL_MAP.generating_sketch)
-
-    // 2秒后模拟响应
-    setTimeout(() => {
+    const api = window.electronAPI
+    if (!api) {
       setWaiting(false)
-      setPreviewStatus('running')
+      setPreviewStatus('error')
+      setPreviewError('当前环境无法连接桌面应用能力。')
+      return
+    }
 
-      const assistantMsg: AgentMessage = {
-        role: 'assistant',
-        content: [
-          {
-            type: 'text',
-            text: `收到你的需求：「${content.slice(0, 50)}${content.length > 50 ? '…' : ''}」。\n\n我已经理解了你的想法。这是一个演示模式——在实际环境中，向导 Agent 将澄清需求并生成可交互草图。`,
-          },
-        ],
-        timestamp: Date.now(),
-      }
-      store.set(msgsAtom, (prev: AgentMessage[]) => [...prev, assistantMsg])
+    const result = await api.agent.sendMessage({
+      request_id: crypto.randomUUID(),
+      session_id: sessionId,
+      project_id: currentProject.project_id,
+      content,
+      mode,
+      current_stage: currentProject.current_stage,
+      metadata: { source: 'chat' },
+    })
 
-      store.set(workflowStageAtom, 'sketch_ready' as WorkflowStage)
-      store.set(stageIndicatorLabelAtom, STAGE_LABEL_MAP.sketch_ready)
+    if (!result.ok) {
+      setWaiting(false)
+      setPreviewStatus('error')
+      setPreviewError(result.error.user_visible_message ?? '刚才处理时遇到问题，我会换个方式继续。')
+      store.set(globalUserErrorAtom, result.error.user_visible_message ?? '刚才处理时遇到问题，我会换个方式继续。')
+    }
+  }, [currentProject, mode, sessionId])
 
-      // 创建演示快照
-      store.set(snapshotsListAtom, [
-        {
-          snapshot_id: `snap-demo-${Date.now()}`,
-          project_id: 'demo',
-          kind: 'sketch',
-          name: '验证草图 v1',
-          summary: '演示快照：包含一个简单的预览页面',
-          files_archive_path: '/demo/snapshots/sketch/files',
-          health_status: 'healthy',
-          created_at: new Date().toISOString(),
-        },
-      ])
-    }, 2000)
-  }, [sessionId])
+  const handleCardOptionSelect = useCallback((option: CardOption) => {
+    void handleSendMessage(option.description ? `${option.label}：${option.description}` : option.label)
+  }, [handleSendMessage])
 
   if (route === 'mode-selection') {
     return <ModeSelectionPage onModeSelected={handleModeSelected} />
@@ -152,21 +140,114 @@ const AppRoutes: React.FC = () => {
 
   return (
     <WorkspaceShell
+      cardOptions={cardOptions}
+      onCardOptionSelect={handleCardOptionSelect}
       onSendMessage={handleSendMessage}
       isWaiting={waiting}
       waitStartTime={waitStart}
       waitActionLabel="生成可运行版本"
       previewStatus={previewStatus}
-      previewUrl={previewStatus === 'running' ? samplePreviewUrl : undefined}
+      previewUrl={previewStatus === 'running' ? previewUrl : undefined}
+      previewErrorLabel={previewError}
       onRefreshPreview={() => {
+        if (!currentProject) return
         setPreviewStatus('loading')
-        setTimeout(() => setPreviewStatus('running'), 1500)
+        void window.electronAPI?.sandbox.run({
+          request_id: crypto.randomUUID(),
+          project_id: currentProject.project_id,
+        }).then((result) => {
+          if (result?.ok && result.data.status === 'running') {
+            setPreviewUrl(result.data.preview_url)
+            setPreviewStatus('running')
+            return
+          }
+          setPreviewStatus('error')
+          setPreviewError(result?.ok ? result.data.error_summary?.user_visible_summary : result?.error.user_visible_message)
+        })
       }}
       onAllProjects={() => {
         setRoute('mode-selection')
       }}
     />
   )
+}
+
+interface AgentEventHandlers {
+  setWaiting: React.Dispatch<React.SetStateAction<boolean>>
+  setPreviewStatus: React.Dispatch<React.SetStateAction<PreviewStatus>>
+  setPreviewUrl: React.Dispatch<React.SetStateAction<string | undefined>>
+  setPreviewError: React.Dispatch<React.SetStateAction<string | undefined>>
+  setCardOptions: React.Dispatch<React.SetStateAction<CardOption[]>>
+}
+
+function handleAgentEvent(event: AgentEvent, sessionId: string, handlers: AgentEventHandlers): void {
+  const store = window.__jotai_store__
+  if (!store || event.session_id !== sessionId) return
+
+  if (event.type === 'message_delta' && typeof event.payload.text === 'string') {
+    const text = event.payload.text
+    store.set(agentMessagesFamily(sessionId), (prev: AgentMessage[]) => [
+      ...prev,
+      { role: 'assistant', content: [{ type: 'text', text }], timestamp: Date.now() },
+    ])
+  }
+
+  if (event.type === 'stage_changed' && event.payload.stage === 'generating_sketch') {
+    handlers.setPreviewStatus('loading')
+  }
+
+  if (event.type === 'user_decision_required') {
+    const options = Array.isArray(event.payload.options)
+      ? event.payload.options.filter(isCardOption).slice(0, 4)
+      : []
+    handlers.setWaiting(false)
+    handlers.setPreviewStatus((current) => (current === 'loading' ? 'empty' : current))
+    handlers.setCardOptions(options)
+  }
+
+  if (event.type === 'sketch_ready') {
+    const previewUrl = typeof event.payload.preview_url === 'string' ? event.payload.preview_url : undefined
+    const snapshotId = typeof event.payload.snapshot_id === 'string' ? event.payload.snapshot_id : `snap-${Date.now()}`
+    const summary = typeof event.payload.summary === 'string' ? event.payload.summary : '验证草图已生成'
+    handlers.setWaiting(false)
+    handlers.setCardOptions([])
+    handlers.setPreviewError(undefined)
+    handlers.setPreviewUrl(previewUrl)
+    handlers.setPreviewStatus(previewUrl ? 'running' : 'error')
+    store.set(snapshotsListAtom, (prev: Snapshot[]) => [
+      {
+        snapshot_id: snapshotId,
+        project_id: event.project_id ?? 'unknown',
+        kind: 'sketch',
+        name: `验证草图 ${prev.length + 1}`,
+        summary,
+        files_archive_path: '',
+        health_status: 'healthy',
+        created_at: event.created_at,
+      },
+      ...prev,
+    ])
+  }
+
+  if (event.type === 'error') {
+    handlers.setWaiting(false)
+    handlers.setPreviewStatus('error')
+    handlers.setPreviewError(
+      typeof event.payload.message === 'string'
+        ? event.payload.message
+        : '刚才处理时遇到问题，我会换个方式继续。',
+    )
+  }
+
+  if (event.type === 'completed') {
+    handlers.setWaiting(false)
+  }
+}
+
+function isCardOption(value: unknown): value is CardOption {
+  if (!value || typeof value !== 'object') return false
+  const option = value as Partial<CardOption>
+  return typeof option.id === 'string' && typeof option.label === 'string'
 }
 
 export default App

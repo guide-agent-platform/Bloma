@@ -1,5 +1,6 @@
 export * from '../agent-atoms'
 export type {
+  AgentEvent,
   AgentMessage,
   ProjectMode,
   Snapshot,
