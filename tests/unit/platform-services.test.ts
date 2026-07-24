@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
@@ -117,6 +117,28 @@ describe('PlatformServices sandbox runtime', () => {
 
     expect(result).toEqual({ stopped: true })
     expect(child.kill).toHaveBeenCalledTimes(1)
+  })
+
+  it('serves generated project files with the real static sandbox process', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-sandbox-real-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    writeFileSync(join(project.root_path, 'index.html'), '<h1>real sandbox</h1>', 'utf8')
+
+    const result = await runSandbox({
+      request_id: 'req-run-real',
+      project_id: project.project_id,
+      timeout_ms: 5_000,
+    })
+
+    try {
+      expect(result.status).toBe('running')
+      expect(result.preview_url).toBeTruthy()
+      const response = await fetch(result.preview_url!)
+      expect(await response.text()).toContain('real sandbox')
+    } finally {
+      stopSandbox({ request_id: 'req-stop-real', project_id: project.project_id })
+    }
   })
 })
 

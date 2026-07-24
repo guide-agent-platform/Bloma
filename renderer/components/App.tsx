@@ -142,6 +142,7 @@ const AppRoutes: React.FC = () => {
     })
 
     if (!result.ok) {
+      console.error('agent:send-message failed', result.error)
       setWaiting(false)
       setPreviewStatus('error')
       setPreviewError(result.error.user_visible_message ?? '刚才处理时遇到问题，我会换个方式继续。')
@@ -181,6 +182,7 @@ const AppRoutes: React.FC = () => {
             return
           }
           setPreviewStatus('error')
+          if (result && !result.ok) console.error('sandbox:run failed', result.error)
           setPreviewError(result?.ok ? result.data.error_summary?.user_visible_summary : result?.error.user_visible_message)
         })
       }}

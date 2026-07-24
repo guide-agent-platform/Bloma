@@ -50,6 +50,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
   const [correctionPos, setCorrectionPos] = React.useState({ x: 0, y: 0 })
   const [correctionNote, setCorrectionNote] = React.useState('')
   const iframeRef = React.useRef<HTMLIFrameElement>(null)
+  const shouldUseWebView = typeof window !== 'undefined' && Boolean(window.electronAPI)
 
   const effectiveStatus: PreviewStatus =
     status === 'empty' && (hasStream || ['generating_sketch', 'generating_mvp'].includes(stage))
@@ -148,12 +149,28 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
         {displayStatus === 'empty' && <EmptyState />}
         {displayStatus === 'loading' && <LoadingState label={loadingLabel} />}
         {displayStatus === 'running' && previewUrl && (
-          <iframe
-            ref={iframeRef}
-            src={previewUrl}
-            title="软件预览"
-            style={{ width: '100%', height: '100%', border: 'none', background: 'var(--white)', pointerEvents: correctionActive ? 'none' : 'auto' }}
-          />
+          shouldUseWebView
+            ? React.createElement('webview', {
+                src: previewUrl,
+                title: '软件预览',
+                webpreferences: 'contextIsolation=yes,nodeIntegration=no,sandbox=yes,javascript=yes',
+                style: {
+                  width: '100%',
+                  height: '100%',
+                  border: 'none',
+                  background: 'var(--white)',
+                  pointerEvents: correctionActive ? 'none' : 'auto',
+                },
+              })
+            : (
+              <iframe
+                ref={iframeRef}
+                src={previewUrl}
+                title="软件预览"
+                sandbox="allow-scripts allow-same-origin"
+                style={{ width: '100%', height: '100%', border: 'none', background: 'var(--white)', pointerEvents: correctionActive ? 'none' : 'auto' }}
+              />
+            )
         )}
         {displayStatus === 'running' && !previewUrl && <LoadingState label="正在准备预览…" />}
         {displayStatus === 'error' && <ErrorState label={errorLabel ?? globalError ?? undefined} onRetry={onRefresh} />}

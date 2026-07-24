@@ -142,8 +142,13 @@ async function safeInvoke<T>(requestId: string, fn: () => T | Promise<T>) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (message.includes('AGENT_SESSION_BUSY')) return fail<T>(requestId, 'AGENT_SESSION_BUSY', message, true)
+    if (message.includes('CHANNEL_NOT_FOUND')) return fail<T>(requestId, 'CHANNEL_NOT_FOUND', message)
     if (message.includes('PROJECT_NOT_FOUND')) return fail<T>(requestId, 'PROJECT_NOT_FOUND', message)
     if (message.includes('PERMISSION_REQUEST_NOT_FOUND')) return fail<T>(requestId, 'PERMISSION_REQUEST_NOT_FOUND', message)
+    if (message.includes('SANDBOX_RUN_FAILED')) return fail<T>(requestId, 'SANDBOX_RUN_FAILED', message, true)
+    if (message.includes('SNAPSHOT_CREATE_FAILED')) return fail<T>(requestId, 'SNAPSHOT_CREATE_FAILED', message, true)
+    if (message.includes('DOCUMENT_SYNC_FAILED')) return fail<T>(requestId, 'DOCUMENT_SYNC_FAILED', message, true)
+    if (message.includes('ANALYTICS_WRITE_FAILED')) return fail<T>(requestId, 'ANALYTICS_WRITE_FAILED', message, true)
     return fail<T>(requestId, 'VALIDATION_ERROR', message)
   }
 }
