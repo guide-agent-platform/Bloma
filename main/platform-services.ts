@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
+import { createServer } from 'node:net'
 import type {
   AnalyticsTrackInput,
   AnalyticsTrackResult,
@@ -18,26 +20,196 @@ import { getAnalyticsPath, getDocumentsDir, getSnapshotsDir } from '../storage/c
 import { appendJsonLine, writeJsonFile } from '../storage/json-store'
 import { findProject } from './project-service'
 
-export function runSandbox(input: SandboxRunInput): SandboxRunResult {
-  /**
-   * SPRINT 0 STUB: returns a file preview URL and does not start a process.
-   * Sprint 1 must implement process management, port allocation, health checks,
-   * and runtime error capture. Related task: P1 sandbox runtime hardening.
-   */
+interface SandboxProcess {
+  process: ChildProcess
+  port: number
+}
+
+type SandboxProcessFactory = (projectRoot: string, port: number, command?: string) => ChildProcess
+type PortAllocator = (start: number, end: number) => Promise<number>
+type HealthCheck = (url: string) => Promise<boolean>
+type Sleep = (ms: number) => Promise<void>
+
+const SANDBOX_PORT_START = 3000
+const SANDBOX_PORT_END = 3999
+const DEFAULT_SANDBOX_TIMEOUT_MS = 30_000
+const HEALTH_CHECK_INTERVAL_MS = 250
+const MAX_PORT_ATTEMPTS = 10
+
+const activeSandboxes = new Map<string, SandboxProcess>()
+let sandboxProcessFactory: SandboxProcessFactory = spawnStaticServer
+let allocatePort: PortAllocator = findAvailablePort
+let sandboxHealthCheck: HealthCheck = defaultHealthCheck
+let sandboxSleep: Sleep = sleep
+
+export async function runSandbox(input: SandboxRunInput): Promise<SandboxRunResult> {
   const project = findProject(input.project_id)
-  return {
-    status: 'running',
-    preview_url: `file://${project.root_path.replace(/\\/g, '/')}/index.html`,
+
+  await stopSandbox(input)
+
+  const timeoutMs = input.timeout_ms ?? DEFAULT_SANDBOX_TIMEOUT_MS
+  for (let attempt = 0; attempt < MAX_PORT_ATTEMPTS; attempt += 1) {
+    const port = await allocatePort(SANDBOX_PORT_START, SANDBOX_PORT_END)
+    const previewUrl = `http://localhost:${port}`
+    const child = sandboxProcessFactory(project.root_path, port, input.command)
+    activeSandboxes.set(project.project_id, { process: child, port })
+
+    const started = await waitForSandbox(child, previewUrl, timeoutMs)
+    if (started.ok) {
+      child.once('exit', () => {
+        const current = activeSandboxes.get(project.project_id)
+        if (current?.process === child) activeSandboxes.delete(project.project_id)
+      })
+      return { status: 'running', preview_url: previewUrl, port }
+    }
+
+    child.kill()
+    activeSandboxes.delete(project.project_id)
+    if (started.category !== 'port_unavailable') {
+      return { status: 'failed', error_summary: sandboxError(started.category) }
+    }
   }
+
+  return { status: 'failed', error_summary: sandboxError('port_unavailable') }
 }
 
 export function stopSandbox(_input: SandboxStopInput): SandboxStopResult {
-  /**
-   * SPRINT 0 STUB: no child process is tracked yet, so stop is acknowledged only.
-   * Sprint 1 must stop the concrete sandbox process by project_id.
-   */
+  const current = activeSandboxes.get(_input.project_id)
+  if (current) {
+    current.process.kill()
+    activeSandboxes.delete(_input.project_id)
+  }
   return { stopped: true }
 }
+
+export function setSandboxRuntimeForTests(overrides: {
+  processFactory?: SandboxProcessFactory
+  portAllocator?: PortAllocator
+  healthCheck?: HealthCheck
+  sleep?: Sleep
+}): void {
+  sandboxProcessFactory = overrides.processFactory ?? spawnStaticServer
+  allocatePort = overrides.portAllocator ?? findAvailablePort
+  sandboxHealthCheck = overrides.healthCheck ?? defaultHealthCheck
+  sandboxSleep = overrides.sleep ?? sleep
+}
+
+export function clearSandboxRuntimeForTests(): void {
+  for (const sandbox of activeSandboxes.values()) sandbox.process.kill()
+  activeSandboxes.clear()
+  setSandboxRuntimeForTests({})
+}
+
+async function waitForSandbox(
+  child: ChildProcess,
+  previewUrl: string,
+  timeoutMs: number,
+): Promise<{ ok: true } | { ok: false; category: 'process_crashed' | 'startup_timeout' | 'port_unavailable' }> {
+  let crashed = false
+  let portUnavailable = false
+  child.once('exit', () => {
+    crashed = true
+  })
+  child.once('error', (error) => {
+    crashed = true
+    portUnavailable = /EADDRINUSE/i.test(error.message)
+  })
+
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (portUnavailable) return { ok: false, category: 'port_unavailable' }
+    if (crashed) return { ok: false, category: 'process_crashed' }
+    if (await sandboxHealthCheck(previewUrl)) return { ok: true }
+    await sandboxSleep(HEALTH_CHECK_INTERVAL_MS)
+  }
+
+  return { ok: false, category: 'startup_timeout' }
+}
+
+function spawnStaticServer(projectRoot: string, port: number, command?: string): ChildProcess {
+  if (command) {
+    const [executable, ...args] = command.replaceAll('{port}', String(port)).split(/\s+/).filter(Boolean)
+    return spawn(executable, args, sandboxSpawnOptions(projectRoot))
+  }
+  return spawn(process.execPath, ['-e', STATIC_SERVER_SCRIPT, String(port)], sandboxSpawnOptions(projectRoot))
+}
+
+function sandboxSpawnOptions(projectRoot: string): SpawnOptions {
+  return {
+    cwd: projectRoot,
+    env: { PATH: process.env.PATH, Path: process.env.Path },
+    stdio: 'ignore',
+    windowsHide: true,
+  }
+}
+
+async function findAvailablePort(start: number, end: number): Promise<number> {
+  for (let port = start; port <= end; port += 1) {
+    if (await isPortAvailable(port)) return port
+  }
+  throw new Error('SANDBOX_PORT_UNAVAILABLE')
+}
+
+function isPortAvailable(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = createServer()
+    server.once('error', () => resolve(false))
+    server.once('listening', () => {
+      server.close(() => resolve(true))
+    })
+    server.listen(port, '127.0.0.1')
+  })
+}
+
+async function defaultHealthCheck(url: string): Promise<boolean> {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(1_000) })
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
+function sandboxError(category: 'process_crashed' | 'startup_timeout' | 'port_unavailable'): SandboxRunResult['error_summary'] {
+  const summaries = {
+    process_crashed: '预览启动失败，请再试一次。',
+    startup_timeout: '预览启动时间比预期更长，请稍后重试。',
+    port_unavailable: '预览端口暂时不可用，请稍后重试。',
+  }
+  return { category, user_visible_summary: summaries[category] }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+const STATIC_SERVER_SCRIPT = `
+const { createReadStream, existsSync, statSync } = require('node:fs');
+const { createServer } = require('node:http');
+const { extname, join, normalize, resolve, sep } = require('node:path');
+const root = process.cwd();
+const port = Number(process.argv[1]);
+const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml' };
+createServer((req, res) => {
+  const rawUrl = new URL(req.url || '/', 'http://localhost');
+  const requested = rawUrl.pathname === '/' ? '/index.html' : decodeURIComponent(rawUrl.pathname);
+  const normalized = normalize(requested).replace(/^([/\\\\])+/, '');
+  const filePath = resolve(join(root, normalized));
+  if (filePath !== root && !filePath.startsWith(root + sep)) {
+    res.writeHead(403);
+    res.end('Forbidden');
+    return;
+  }
+  const finalPath = existsSync(filePath) && statSync(filePath).isDirectory() ? join(filePath, 'index.html') : filePath;
+  if (!existsSync(finalPath)) {
+    res.writeHead(404);
+    res.end('Not found');
+    return;
+  }
+  res.writeHead(200, { 'Content-Type': types[extname(finalPath)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
+  createReadStream(finalPath).pipe(res);
+}).listen(port, '127.0.0.1');
+`
 
 export function createSnapshot(input: SnapshotCreateInput): Snapshot {
   /**

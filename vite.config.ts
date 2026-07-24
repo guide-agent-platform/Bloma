@@ -1,5 +1,5 @@
 import { resolve } from 'node:path'
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   root: resolve(__dirname, 'renderer'),
@@ -12,5 +12,8 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5173,
     strictPort: false,
+  },
+  test: {
+    root: __dirname,
   },
 })
