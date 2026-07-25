@@ -18,7 +18,7 @@ describe('Sprint 1 waiting feedback acceptance', () => {
     vi.restoreAllMocks()
   })
 
-  it('[S1-UI-005] 等待反馈应在超过 5 秒后出现并包含安全感说明', () => {
+  it('[S1-UI-005] 等待反馈应在超过 5 秒后显示当前操作但尚不显示安全感说明', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-25T00:00:00.000Z'))
     Element.prototype.scrollIntoView = vi.fn()
@@ -35,11 +35,37 @@ describe('Sprint 1 waiting feedback acceptance', () => {
 
     expect(screen.queryByRole('status')).toBeNull()
     act(() => {
-      vi.advanceTimersByTime(6_000)
+      vi.advanceTimersByTime(5_000)
+    })
+    expect(screen.queryByRole('status')).toBeNull()
+
+    act(() => {
+      vi.advanceTimersByTime(1_000)
     })
     const status = screen.getByRole('status')
     expect(status.textContent).toContain('生成验证草图')
-    expect(status.textContent).toMatch(/安全|放心/)
+    expect(status.textContent).not.toMatch(/安全|放心|不会影响/)
+  })
+
+  it('[S1-UI-010] 等待反馈应在超过 10 秒后加入安全感说明', () => {
+    const { rerender } = render(
+      <WaitingFeedback
+        elapsedSeconds={10}
+        actionLabel="生成验证草图"
+      />,
+    )
+
+    const status = screen.getByRole('status')
+    expect(status.textContent).toContain('生成验证草图')
+    expect(status.textContent).not.toMatch(/安全|放心|不会影响/)
+
+    rerender(
+      <WaitingFeedback
+        elapsedSeconds={11}
+        actionLabel="生成验证草图"
+      />,
+    )
+    expect(status.textContent).toMatch(/安全|放心|不会影响/)
   })
 
   it('[S1-UI-006] 超过 120 秒时应提供继续等待和查看已有部分两个操作', () => {

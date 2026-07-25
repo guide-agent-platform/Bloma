@@ -62,13 +62,17 @@ describe('Sprint 1 mode and workspace regression', () => {
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ mode: 'quick' }))
   })
 
-  it('[S1-UI-002] 等待反馈应在 10 秒和 120 秒切换到对应文案与操作', () => {
-    const { rerender } = render(<WaitingFeedback elapsedSeconds={10} actionLabel="生成草图" />)
+  it('[S1-UI-002] 等待反馈应在超过 5、10 和 120 秒后切换到对应文案与操作', () => {
+    const { rerender } = render(<WaitingFeedback elapsedSeconds={6} actionLabel="生成草图" />)
+    expect(screen.getByRole('status').textContent).toContain('生成草图')
+    expect(screen.getByRole('status').textContent).not.toMatch(/安全|放心|不会影响/)
+
+    rerender(<WaitingFeedback elapsedSeconds={11} actionLabel="生成草图" />)
     expect(screen.getByRole('status').textContent).toContain('安全环境')
 
     rerender(
       <WaitingFeedback
-        elapsedSeconds={120}
+        elapsedSeconds={121}
         actionLabel="生成草图"
         onContinueWaiting={vi.fn()}
         onViewPartial={vi.fn()}
