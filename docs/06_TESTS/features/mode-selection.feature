@@ -7,6 +7,7 @@ Feature: 模式选择与升级
     Given 用户首次启动平台
     And 本地没有正在进行中的项目
 
+  @S1-PROJECT-006
   Scenario: 用户选择快消型并进入工作区
     When 两道门选择页加载完成
     And 用户选择“快速尝鲜”
@@ -15,6 +16,7 @@ Feature: 模式选择与升级
     And 页面进入快消型工作区
     And 工作区不显示技术栈选择
 
+  @S1-PROJECT-007
   Scenario: 用户选择长期迭代型并进入工作区
     When 两道门选择页加载完成
     And 用户选择“精细打磨”
@@ -23,12 +25,14 @@ Feature: 模式选择与升级
     And 页面进入长期迭代型工作区
     And 文档面板入口可见
 
+  @S1-PROJECT-008
   Scenario: 选择模式后不能返回两道门重新选择
     Given 用户已经选择“快速尝鲜”
     When 用户进入快消型工作区
     Then 页面不显示返回两道门的入口
     And 项目模式保持为 "quick"
 
+  @S1-PROJECT-009
   Scenario: 快消型完成后可以升级为长期迭代型
     Given 用户处于快消型工作区
     And 项目已经完成 MVP
@@ -40,6 +44,7 @@ Feature: 模式选择与升级
     And 项目模式变为 "longterm"
     And 文档面板入口可见
 
+  @S1-PROJECT-010
   Scenario: 长期迭代型不能降级为快消型
     Given 用户处于长期迭代型工作区
     When 用户打开项目设置

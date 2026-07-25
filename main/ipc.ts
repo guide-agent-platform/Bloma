@@ -68,7 +68,17 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
   ipcMain.handle(IPC_CHANNELS.PROJECT_CREATE, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = validateProjectCreate(payload)
-      return createProject(input)
+      const project = createProject(input)
+      trackAnalytics({
+        request_id: input.request_id,
+        event: {
+          event_type: 'project_created',
+          project_id: project.project_id,
+          payload: { mode: project.mode },
+          privacy_level: 'research_safe',
+        },
+      })
+      return project
     })
   })
 

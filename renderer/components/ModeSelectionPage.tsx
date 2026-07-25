@@ -19,10 +19,12 @@ export const ModeSelectionPage: React.FC<ModeSelectionPageProps> = ({
   const [, setModeSelected] = useAtom(modeSelectedAtom)
   const [, setCurrentProject] = useAtom(currentProjectAtom)
   const [isSelecting, setIsSelecting] = React.useState(false)
+  const [selectionError, setSelectionError] = React.useState<string>()
 
   const handleSelect = async (mode: 'quick' | 'longterm') => {
     if (isSelecting) return // 防止双击重复创建
     setIsSelecting(true)
+    setSelectionError(undefined)
 
     try {
       // 通过 IPC 创建项目
@@ -32,20 +34,18 @@ export const ModeSelectionPage: React.FC<ModeSelectionPageProps> = ({
           request_id: crypto.randomUUID(),
           mode,
         })
-        if (result.ok) {
-          setCurrentProject(result.data)
+        if (!result.ok) {
+          setSelectionError(result.error.user_visible_message ?? '项目创建失败，请重试。')
+          return
         }
-        // 如果 IPC 失败（如开发环境），仍然进入工作区
+        setCurrentProject(result.data)
       }
 
       setProjectMode(mode)
       setModeSelected(true)
       onModeSelected(mode)
     } catch {
-      // 开发/演示模式：无 Electron 环境时直接进入
-      setProjectMode(mode)
-      setModeSelected(true)
-      onModeSelected(mode)
+      setSelectionError('项目创建失败，请重试。')
     } finally {
       setIsSelecting(false)
     }
@@ -184,6 +184,19 @@ export const ModeSelectionPage: React.FC<ModeSelectionPageProps> = ({
           disabled={isSelecting}
         />
       </div>
+
+      {selectionError && (
+        <p
+          role="alert"
+          style={{
+            marginTop: 'var(--space-4)',
+            color: 'var(--color-error)',
+            fontSize: 'var(--font-size-sm)',
+          }}
+        >
+          {selectionError}
+        </p>
+      )}
     </div>
   )
 }

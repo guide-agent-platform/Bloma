@@ -1,9 +1,10 @@
 import React from 'react'
-import { useAtomValue } from 'jotai'
+import { useAtom, useAtomValue } from 'jotai'
 import { StageIndicator } from './StageIndicator'
 import { Sparkles } from './icons'
 import {
   currentProjectAtom,
+  documentPanelExpandedAtom,
   projectModeAtom,
   networkOnlineAtom,
   stageIndicatorLabelAtom,
@@ -26,6 +27,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects 
   const isOnline = useAtomValue(networkOnlineAtom)
   const stageLabel = useAtomValue(stageIndicatorLabelAtom)
   const stage = useAtomValue(workflowStageAtom)
+  const [documentsExpanded, setDocumentsExpanded] = useAtom(documentPanelExpandedAtom)
   const stageActive = ACTIVE_STAGES.has(stage)
 
   const modeLabel = mode === 'quick' ? '快速尝鲜' : mode === 'longterm' ? '精细打磨' : ''
@@ -125,6 +127,27 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects 
           />
           {isOnline ? '已连接' : '离线'}
         </span>
+
+        {mode === 'longterm' && (
+          <button
+            type="button"
+            aria-pressed={documentsExpanded}
+            onClick={() => setDocumentsExpanded((current) => !current)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              fontSize: 'var(--font-size-sm)',
+              fontWeight: 500,
+              color: 'var(--color-text)',
+              padding: '7px var(--space-4)',
+              borderRadius: 'var(--radius-full)',
+              background: documentsExpanded ? 'var(--glass-bg-strong)' : 'var(--glass-bg-soft)',
+              border: '1px solid var(--glass-border-subtle)',
+            }}
+          >
+            文档
+          </button>
+        )}
 
         {onAllProjects && (
           <button

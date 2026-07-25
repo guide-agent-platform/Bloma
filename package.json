@@ -11,8 +11,14 @@
     "build:main": "esbuild main/index.ts --bundle --platform=node --external:electron --format=esm --outfile=dist-main/main/index.js && esbuild preload/bridge.ts --bundle --platform=node --external:electron --format=cjs --outfile=dist-main/preload/bridge.cjs",
     "start": "npm run build && electron .",
     "typecheck": "tsc --noEmit",
-    "test:unit": "vitest run",
+    "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
+    "test:regression:sprint0": "vitest run tests/regression/sprint0",
+    "test:regression:sprint1": "vitest run tests/regression/sprint1",
+    "test:acceptance:sprint0": "npm run build && vitest run tests/acceptance/sprint0",
+    "test:acceptance:sprint1": "vitest run tests/acceptance/sprint1",
+    "test:electron-smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/electron-startup-smoke.ps1",
+    "test:all": "npm run test:unit && npm run test:integration && npm run test:regression:sprint0 && npm run test:regression:sprint1 && npm run test:acceptance:sprint0 && npm run test:acceptance:sprint1",
     "lint": "tsc --noEmit",
     "docs:check": "node scripts/docs-check.mjs"
   },
@@ -23,10 +29,14 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^22.13.0",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
+    "esbuild": "^0.28.1",
+    "jsdom": "^29.1.1",
     "typescript": "^5.8.3",
+    "vite": "^7.3.6",
     "vitest": "^3.0.5"
   }
 }

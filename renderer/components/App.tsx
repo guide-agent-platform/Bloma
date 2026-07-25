@@ -186,9 +186,6 @@ const AppRoutes: React.FC = () => {
           setPreviewError(result?.ok ? result.data.error_summary?.user_visible_summary : result?.error.user_visible_message)
         })
       }}
-      onAllProjects={() => {
-        setRoute('mode-selection')
-      }}
     />
   )
 }

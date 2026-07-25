@@ -7,6 +7,7 @@ Feature: 草图与 MVP 生成主链路
     Given 用户已经进入软件生成工作区
     And Agent 全局监听器已经挂载
 
+  @S1-SKETCH-004
   Scenario: 需求不明确时最多提出 3 个澄清问题
     Given 项目阶段为 "clarifying"
     When 用户输入“帮我做一个管理工具”
@@ -14,6 +15,7 @@ Feature: 草图与 MVP 生成主链路
     And 澄清问题数量不超过 3 个
     And 问题文案不包含技术术语
 
+  @S1-SKETCH-006
   Scenario: 需求明确时生成验证草图
     Given 项目阶段为 "clarifying"
     When 用户输入“做一个家庭记账页面，可以记录收入支出并看本月结余”
@@ -44,6 +46,7 @@ Feature: 草图与 MVP 生成主链路
     Then 系统记录测试总数、通过数和失败数
     And 测试结果写入文档目录
 
+  @S1-UI-005
   Scenario: 生成等待超过 5 秒时给出等待反馈
     Given 系统正在生成 MVP
     When 生成耗时超过 5 秒
@@ -51,6 +54,7 @@ Feature: 草图与 MVP 生成主链路
     And 文案说明系统正在处理什么
     And 文案不显示日志或堆栈
 
+  @S1-UI-006
   Scenario: 草图生成超过 120 秒时提示耗时过长
     Given 系统正在生成验证草图
     When 生成耗时超过 120 秒
