@@ -18,7 +18,7 @@ import { IPC_CHANNELS } from '../shared/types'
 import { fail, ok } from './api-result'
 import { cancelAgent, runAgent, setAgentStreamPublisher } from './orchestrator'
 import { resolvePermission, setPermissionRequestPublisher } from './permission-service'
-import { confirmSketch, createProject, submitCorrection, upgradeProject } from './project-service'
+import { confirmSketch, createProject, listProjects, submitCorrection, upgradeProject } from './project-service'
 import {
   createSnapshot,
   rollbackSnapshot,
@@ -82,6 +82,13 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     })
   })
 
+  ipcMain.handle(IPC_CHANNELS.PROJECT_LIST, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      requireFields<{ request_id: string }>(payload, [])
+      return listProjects()
+    })
+  })
+
   ipcMain.handle(IPC_CHANNELS.PROJECT_CONFIRM_SKETCH, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<ConfirmSketchInput>(payload, ['project_id', 'session_id', 'snapshot_id', 'decision'])
@@ -99,6 +106,15 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
   ipcMain.handle(IPC_CHANNELS.PROJECT_UPGRADE, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<ProjectUpgradeInput>(payload, ['project_id', 'session_id'])
+      // 切换模式前先创建 upgrade 快照，保留升级前的可回滚状态
+      await createSnapshot({
+        request_id: input.request_id,
+        project_id: input.project_id,
+        kind: 'upgrade',
+        summary: '升级为长期迭代模式前的快照',
+        include_documents: true,
+        health_status: 'healthy',
+      })
       return upgradeProject(input)
     })
   })

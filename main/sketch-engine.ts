@@ -51,7 +51,7 @@ function renderSketchHtml(projectName: string, requirements: SketchRequirement[]
     .map((requirement, index) => {
       const title = pageTitle(requirement.description, index)
       return `
-        <section class="screen" data-page="${escapeHtml(requirement.id)}">
+        <section class="screen${index === 0 ? ' active' : ''}" data-page="${escapeHtml(requirement.id)}">
           <div class="screen-header">
             <span>${escapeHtml(requirement.id)}</span>
             <strong>${escapeHtml(title)}</strong>
@@ -89,6 +89,8 @@ function renderSketchHtml(projectName: string, requirements: SketchRequirement[]
     .mock-list { display: grid; gap: 10px; margin-top: 24px; }
     button { border: 0; border-radius: 10px; padding: 12px 14px; background: linear-gradient(135deg, #7c3aed, #ec4899); color: #fff; font-weight: 700; cursor: pointer; }
     button.secondary { background: #f4f3fa; color: #4b4b55; }
+    .screen { display: none; }
+    .screen.active { display: block; }
   </style>
 </head>
 <body>
@@ -102,6 +104,25 @@ function renderSketchHtml(projectName: string, requirements: SketchRequirement[]
     </div>
     <div class="grid">${cards}</div>
   </main>
+  <script>
+    (function () {
+      var screens = document.querySelectorAll('.screen');
+      screens.forEach(function (screen, index) {
+        if (index === 0) screen.classList.add('active');
+      });
+      document.querySelectorAll('.mock-list button').forEach(function (button) {
+        button.addEventListener('click', function () {
+          var current = document.querySelector('.screen.active');
+          if (!current) return;
+          var next = current.nextElementSibling;
+          if (next && next.classList.contains('screen')) {
+            current.classList.remove('active');
+            next.classList.add('active');
+          }
+        });
+      });
+    })();
+  </script>
 </body>
 </html>
 `

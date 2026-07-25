@@ -49,8 +49,32 @@ const AppRoutes: React.FC = () => {
   const [cardOptions, setCardOptions] = useState<CardOption[]>([])
   const [sessionId] = useState(() => `session-${Date.now()}`)
   const processedEventIdsRef = React.useRef<Set<string>>(new Set())
+  const restoreAttemptedRef = React.useRef(false)
   const currentProject = useAtomValue(currentProjectAtom)
   const streamState = useAtomValue(agentStreamStateFamily(sessionId))
+
+  // 启动恢复：若本地存在活动项目，直接进入工作区而不是显示两道门
+  React.useEffect(() => {
+    if (restoreAttemptedRef.current) return
+    restoreAttemptedRef.current = true
+    const api = window.electronAPI
+    const store = window.__jotai_store__
+    if (!api || !store) return
+    if (typeof api.project.list !== 'function') return
+    void api.project.list({ request_id: crypto.randomUUID() }).then((result) => {
+      if (!result?.ok || result.data.length === 0) return
+      const restored = result.data[0]
+      if (!restored) return
+      store.set(currentProjectAtom, restored)
+      store.set(projectModeAtom, restored.mode)
+      store.set(modeSelectedAtom, true)
+      store.set(workflowStageAtom, restored.current_stage)
+      store.set(stageIndicatorLabelAtom, STAGE_LABEL_MAP[restored.current_stage] ?? '处理中')
+      store.set(activeAgentSessionIdAtom, sessionId)
+      setMode(restored.mode)
+      setRoute('workspace')
+    })
+  }, [sessionId])
 
   // 选择模式 → 进入工作区
   const handleModeSelected = useCallback((selectedMode: 'quick' | 'longterm') => {
@@ -151,7 +175,7 @@ const AppRoutes: React.FC = () => {
   }, [currentProject, mode, sessionId])
 
   const handleCardOptionSelect = useCallback((option: CardOption) => {
-    void handleSendMessage(option.description ? `${option.label}：${option.description}` : option.label)
+    void handleSendMessage(option.label)
   }, [handleSendMessage])
 
   if (route === 'mode-selection') {
@@ -166,6 +190,14 @@ const AppRoutes: React.FC = () => {
       isWaiting={waiting}
       waitStartTime={waitStart}
       waitActionLabel="生成可运行版本"
+      onContinueWaiting={() => {
+        setWaiting(true)
+        setPreviewStatus('loading')
+      }}
+      onViewPartial={() => {
+        setWaiting(false)
+        setPreviewStatus(currentProject ? 'running' : 'empty')
+      }}
       previewStatus={previewStatus}
       previewUrl={previewStatus === 'running' ? previewUrl : undefined}
       previewErrorLabel={previewError}

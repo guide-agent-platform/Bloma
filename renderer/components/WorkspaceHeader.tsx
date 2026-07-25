@@ -1,13 +1,15 @@
 import React from 'react'
-import { useAtom, useAtomValue } from 'jotai'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { StageIndicator } from './StageIndicator'
 import { Sparkles } from './icons'
 import {
+  canUpgradeAtom,
   currentProjectAtom,
   documentPanelExpandedAtom,
   projectModeAtom,
   networkOnlineAtom,
   stageIndicatorLabelAtom,
+  upgradeConfirmVisibleAtom,
   workflowStageAtom,
 } from './atoms'
 
@@ -28,6 +30,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects 
   const stageLabel = useAtomValue(stageIndicatorLabelAtom)
   const stage = useAtomValue(workflowStageAtom)
   const [documentsExpanded, setDocumentsExpanded] = useAtom(documentPanelExpandedAtom)
+  const canUpgrade = useAtomValue(canUpgradeAtom)
+  const setUpgradeConfirmVisible = useSetAtom(upgradeConfirmVisibleAtom)
   const stageActive = ACTIVE_STAGES.has(stage)
 
   const modeLabel = mode === 'quick' ? '快速尝鲜' : mode === 'longterm' ? '精细打磨' : ''
@@ -146,6 +150,27 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects 
             }}
           >
             文档
+          </button>
+        )}
+
+        {canUpgrade && (
+          <button
+            type="button"
+            onClick={() => setUpgradeConfirmVisible(true)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              fontSize: 'var(--font-size-sm)',
+              fontWeight: 600,
+              color: 'var(--white)',
+              padding: '7px var(--space-4)',
+              borderRadius: 'var(--radius-full)',
+              background: 'linear-gradient(135deg, var(--color-quick), var(--color-longterm))',
+              border: '1px solid var(--glass-border-subtle)',
+              cursor: 'pointer',
+            }}
+          >
+            升级为长期模式
           </button>
         )}
 

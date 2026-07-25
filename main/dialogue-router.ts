@@ -29,9 +29,9 @@ export function routeDialogue(message: string, project: Project): DialogueRoute 
   return {
     action: 'ask_clarification',
     questions: [
-      { id: 'goal', label: '主要目标', description: '这个软件最重要的是帮你完成什么？' },
-      { id: 'audience', label: '使用对象', description: '主要是谁来用？自己、团队，还是客户？' },
-      { id: 'workflow', label: '核心流程', description: '用户打开后第一件事和最后一步分别是什么？' },
+      { id: 'daily', label: '日常生活工具', description: '记账、提醒、清单这类日常小事' },
+      { id: 'work', label: '工作提效工具', description: '流程、协作、记录这类工作场景' },
+      { id: 'auto', label: '你帮我决定', description: '交给我，按常见做法先出一版' },
     ],
   }
 }

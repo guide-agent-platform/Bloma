@@ -13,6 +13,7 @@ const expectedChannels = {
   AGENT_STREAM_EVENT: 'agent:stream-event',
   PERMISSION_RESPONSE: 'permission:response',
   PROJECT_CREATE: 'project:create',
+  PROJECT_LIST: 'project:list',
   PROJECT_CONFIRM_SKETCH: 'project:confirm-sketch',
   PROJECT_SUBMIT_CORRECTION: 'project:submit-correction',
   PROJECT_UPGRADE: 'project:upgrade',

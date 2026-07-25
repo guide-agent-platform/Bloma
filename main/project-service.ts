@@ -72,6 +72,17 @@ export function upgradeProject(input: ProjectUpgradeInput): Project {
   return project
 }
 
+export function listProjects(): Project[] {
+  const projects = readProjects().projects
+  // 只返回未归档的项目；活动项目优先排在前面，便于启动恢复取第一个。
+  return projects
+    .filter((item) => item.status !== 'archived')
+    .sort((a, b) => {
+      const order = (status: string) => (status === 'active' ? 0 : 1)
+      return order(a.status) - order(b.status)
+    })
+}
+
 export function findProject(projectId: string): Project {
   const project = readProjects().projects.find((item) => item.project_id === projectId)
   if (!project) throw new Error('PROJECT_NOT_FOUND')

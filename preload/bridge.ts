@@ -56,6 +56,8 @@ const electronAPI: ElectronAPI = {
   project: {
     create: (input: ProjectCreateInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_CREATE, input),
+    list: (input: { request_id: string }) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_LIST, input),
     confirmSketch: (input: ConfirmSketchInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_CONFIRM_SKETCH, input),
     submitCorrection: (input: PointCorrectionInput) =>
