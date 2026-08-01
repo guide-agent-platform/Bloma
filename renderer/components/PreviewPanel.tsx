@@ -1,0 +1,364 @@
+import React from 'react'
+import { useAtomValue } from 'jotai'
+import { RotateCw, Maximize2, Minimize2, Camera, LayoutTemplate, AlertTriangle } from './icons'
+import { hasActiveStreamAtom, workflowStageAtom, globalUserErrorAtom } from './atoms'
+
+export type PreviewStatus = 'empty' | 'loading' | 'running' | 'error' | 'timeout'
+
+export interface CorrectionPayload {
+  elementSelector?: string
+  textContent?: string
+  position: { x: number; y: number }
+  userNote: string
+  fallbackMode: boolean
+}
+
+export interface PreviewPanelProps {
+  status?: PreviewStatus
+  previewUrl?: string
+  loadingLabel?: string
+  errorLabel?: string
+  onRefresh?: () => void
+  onToggleFullscreen?: () => void
+  onScreenshot?: () => void
+  isFullscreen?: boolean
+  onCorrectionSubmit?: (payload: CorrectionPayload) => void
+}
+
+/**
+ * 预览磁贴（Bento 架构）— 玻璃磁贴内嵌白色"舞台"
+ *
+ * 包含：玻璃外壳 + 控制栏 + 白色圆角舞台（iframe/状态/点选纠错）
+ * 状态：空 / 加载 / 运行 / 错误 / 超时
+ */
+export const PreviewPanel: React.FC<PreviewPanelProps> = ({
+  status = 'empty',
+  previewUrl,
+  loadingLabel,
+  errorLabel,
+  onRefresh,
+  onToggleFullscreen,
+  onScreenshot,
+  isFullscreen = false,
+  onCorrectionSubmit,
+}) => {
+  const hasStream = useAtomValue(hasActiveStreamAtom)
+  const stage = useAtomValue(workflowStageAtom)
+  const globalError = useAtomValue(globalUserErrorAtom)
+  const [showControls, setShowControls] = React.useState(false)
+  const [correctionActive, setCorrectionActive] = React.useState(false)
+  const [correctionPos, setCorrectionPos] = React.useState({ x: 0, y: 0 })
+  const [correctionNote, setCorrectionNote] = React.useState('')
+  const iframeRef = React.useRef<HTMLIFrameElement>(null)
+
+  const effectiveStatus: PreviewStatus =
+    status === 'empty' && (hasStream || ['generating_sketch', 'generating_mvp'].includes(stage))
+      ? 'loading'
+      : status
+
+  const displayStatus: PreviewStatus =
+    effectiveStatus !== 'error' && globalError ? 'error' : effectiveStatus
+
+  const shellStyle: React.CSSProperties = isFullscreen
+    ? {
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1000,
+        display: 'flex',
+        flexDirection: 'column',
+        padding: 'var(--space-3)',
+        background: 'var(--color-surface)',
+      }
+    : {
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        overflow: 'hidden',
+        padding: 'var(--space-3)',
+        background: 'var(--glass-bg)',
+        backdropFilter: 'blur(var(--glass-blur))',
+        WebkitBackdropFilter: 'blur(var(--glass-blur))',
+        border: '1px solid var(--glass-border)',
+        borderRadius: 'var(--radius-tile)',
+        boxShadow: 'var(--shadow-glass)',
+      }
+
+  const controlsVisible = showControls || displayStatus === 'error' || displayStatus === 'running'
+
+  return (
+    <div
+      data-ai-id="preview-panel"
+      style={shellStyle}
+      onMouseEnter={() => setShowControls(true)}
+      onMouseLeave={() => setShowControls(false)}
+    >
+      {/* 控制栏 */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: 'var(--space-1) var(--space-2) var(--space-3)',
+          flexShrink: 0,
+          opacity: controlsVisible ? 1 : 0,
+          pointerEvents: controlsVisible ? 'auto' : 'none',
+          height: controlsVisible ? undefined : 0,
+          overflow: 'hidden',
+          transition: 'opacity var(--transition-fast)',
+        }}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text-muted)' }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--color-success)', display: 'inline-block' }} />
+          预览 · 安全环境
+        </span>
+        <div style={{ display: 'flex', gap: 2 }}>
+          {displayStatus === 'running' && onRefresh && (
+            <ControlButton label="刷新" onClick={onRefresh}><RotateCw size={15} /></ControlButton>
+          )}
+          {onScreenshot && (
+            <ControlButton label="截图" onClick={onScreenshot}><Camera size={15} /></ControlButton>
+          )}
+          {onToggleFullscreen && (
+            <ControlButton label={isFullscreen ? '退出全屏' : '全屏'} onClick={onToggleFullscreen}>
+              {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+            </ControlButton>
+          )}
+        </div>
+      </div>
+
+      {/* 白色舞台 */}
+      <div
+        style={{
+          flex: 1,
+          position: 'relative',
+          borderRadius: 'var(--radius-md)',
+          overflow: 'hidden',
+          background: 'var(--white)',
+          boxShadow: 'inset 0 0 0 1px var(--color-border)',
+          minHeight: 0,
+        }}
+      >
+        {displayStatus === 'empty' && <EmptyState />}
+        {displayStatus === 'loading' && <LoadingState label={loadingLabel} />}
+        {displayStatus === 'running' && previewUrl && (
+          <>
+            <iframe
+              ref={iframeRef}
+              src={previewUrl}
+              title="软件预览"
+              style={{ width: '100%', height: '100%', border: 'none', background: 'var(--white)', pointerEvents: correctionActive ? 'none' : 'auto' }}
+            />
+            {/* 点选纠错透明捕获层：盖在 iframe 上方拦截点击 */}
+            {onCorrectionSubmit && (
+              <div
+                data-ai-id="correction-capture-layer"
+                title="点击标记不满意的地方"
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  zIndex: 5,
+                  cursor: `url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><circle cx='12' cy='12' r='10' fill='none' stroke='%23DC2626' stroke-width='2' stroke-dasharray='4 2'/></svg>") 12 12, crosshair`,
+                }}
+                onClick={(e) => {
+                  if (correctionActive) return
+                  const stage = e.currentTarget.parentElement
+                  if (!stage) return
+                  const rect = stage.getBoundingClientRect()
+                  setCorrectionPos({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+                  setCorrectionNote('')
+                  setCorrectionActive(true)
+                }}
+              />
+            )}
+          </>
+        )}
+        {displayStatus === 'running' && !previewUrl && <LoadingState label="正在准备预览…" />}
+        {displayStatus === 'error' && <ErrorState label={errorLabel ?? globalError ?? undefined} onRetry={onRefresh} />}
+        {displayStatus === 'timeout' && <TimeoutState onContinueWaiting={onRefresh} />}
+
+        {correctionActive && onCorrectionSubmit && (
+          <CorrectionOverlay
+            position={correctionPos}
+            note={correctionNote}
+            onNoteChange={setCorrectionNote}
+            onSubmit={() => {
+              onCorrectionSubmit({ position: correctionPos, userNote: correctionNote.trim(), fallbackMode: true })
+              setCorrectionActive(false)
+            }}
+            onGuess={() => {
+              onCorrectionSubmit({ position: correctionPos, userNote: '', fallbackMode: true })
+              setCorrectionActive(false)
+            }}
+            onClose={() => setCorrectionActive(false)}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* =========================================================================
+   ControlButton
+   ========================================================================= */
+
+const ControlButton: React.FC<{ label: string; onClick: () => void; children: React.ReactNode }> = ({
+  label, onClick, children,
+}) => (
+  <button
+    title={label}
+    onClick={onClick}
+    style={{
+      width: 30, height: 30,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      borderRadius: 'var(--radius-sm)',
+      color: 'var(--color-text-muted)',
+      transition: 'all var(--transition-fast)',
+      cursor: 'pointer',
+    }}
+    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-surface-muted)'; e.currentTarget.style.color = 'var(--color-text)' }}
+    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-muted)' }}
+  >
+    {children}
+  </button>
+)
+
+/* =========================================================================
+   States
+   ========================================================================= */
+
+const stateWrap: React.CSSProperties = {
+  height: '100%',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  textAlign: 'center',
+  padding: 'var(--space-8)',
+  background: 'linear-gradient(135deg, var(--gray-50), var(--violet-50))',
+}
+
+const EmptyState: React.FC = () => (
+  <div style={stateWrap}>
+    <span aria-hidden style={{ width: 68, height: 68, borderRadius: 'var(--radius-md)', background: 'var(--white)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 'var(--space-5)', color: 'var(--color-quick)', boxShadow: 'var(--shadow-md)' }}>
+      <LayoutTemplate size={28} />
+    </span>
+    <p style={{ fontSize: 'var(--font-size-lg)', fontWeight: 600, color: 'var(--color-text)', marginBottom: 'var(--space-1)' }}>这里将展示你的软件预览</p>
+    <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-muted)' }}>告诉我你的想法，我来帮你在右边做出来</p>
+  </div>
+)
+
+const LoadingState: React.FC<{ label?: string }> = ({ label }) => (
+  <div style={stateWrap}>
+    <div style={{ width: 42, height: 42, border: '3px solid var(--color-border)', borderTopColor: 'var(--color-quick)', borderRadius: '50%', animation: 'spin 0.8s linear infinite', marginBottom: 'var(--space-5)' }} />
+    <p style={{ fontSize: 'var(--font-size-lg)', fontWeight: 600, color: 'var(--color-text)' }}>{label ?? '正在生成预览…'}</p>
+    <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>这个过程只发生在安全环境里</p>
+  </div>
+)
+
+const ErrorState: React.FC<{ label?: string; onRetry?: () => void }> = ({ label, onRetry }) => (
+  <div style={stateWrap}>
+    <span aria-hidden style={{ width: 68, height: 68, borderRadius: 'var(--radius-md)', background: 'var(--color-danger-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 'var(--space-5)', color: 'var(--color-danger)' }}>
+      <AlertTriangle size={28} />
+    </span>
+    <p style={{ fontSize: 'var(--font-size-lg)', fontWeight: 600, color: 'var(--color-text)', marginBottom: 'var(--space-1)' }}>预览加载失败</p>
+    <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-muted)', maxWidth: 320, marginBottom: 'var(--space-5)' }}>{label ?? '我正在换个方式修复，你的内容没有丢失。'}</p>
+    {onRetry && (
+      <button onClick={onRetry} style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-1)',
+        height: 34, padding: '0 var(--space-4)',
+        fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--white)',
+        background: 'linear-gradient(135deg, var(--color-quick), var(--color-quick-bright))',
+        borderRadius: 'var(--radius-full)',
+        boxShadow: '0 4px 12px -2px rgba(124,58,237,0.4)',
+        cursor: 'pointer', transition: 'all var(--transition-fast)',
+      }}>
+        重试
+      </button>
+    )}
+  </div>
+)
+
+const TimeoutState: React.FC<{ onContinueWaiting?: () => void }> = ({ onContinueWaiting }) => (
+  <div style={stateWrap}>
+    <p style={{ fontSize: 'var(--font-size-lg)', fontWeight: 600, color: 'var(--color-text)', marginBottom: 'var(--space-1)' }}>这次花的时间比预期更长</p>
+    <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-5)' }}>我还在处理中，你可以先看看已经生成的部分</p>
+    {onContinueWaiting && (
+      <button onClick={onContinueWaiting} style={{
+        height: 34, padding: '0 var(--space-4)',
+        fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--white)',
+        background: 'linear-gradient(135deg, var(--color-quick), var(--color-quick-bright))',
+        borderRadius: 'var(--radius-full)',
+        boxShadow: '0 4px 12px -2px rgba(124,58,237,0.4)',
+        cursor: 'pointer',
+      }}>
+        继续等待
+      </button>
+    )}
+  </div>
+)
+
+/* =========================================================================
+   CorrectionOverlay
+   ========================================================================= */
+
+const CorrectionOverlay: React.FC<{
+  position: { x: number; y: number }
+  note: string
+  onNoteChange: (value: string) => void
+  onSubmit: () => void
+  onGuess: () => void
+  onClose: () => void
+}> = ({ position, note, onNoteChange, onSubmit, onGuess, onClose }) => {
+  const markerSize = 24
+  const popoverWidth = 260
+  const popoverLeft = Math.max(8, Math.min(position.x - popoverWidth / 2, typeof window !== 'undefined' ? window.innerWidth - popoverWidth - 16 : 260))
+  const popoverTop = position.y + 36 > (typeof window !== 'undefined' ? window.innerHeight - 190 : 380) ? position.y - 160 : position.y + 22
+
+  return (
+    <>
+      <div data-ai-id="point-correction-popover" style={{
+        position: 'absolute', left: position.x - markerSize / 2, top: position.y - markerSize / 2,
+        width: markerSize, height: markerSize, borderRadius: '50%',
+        border: '2px solid var(--color-danger)', background: 'rgba(220, 38, 38, 0.14)',
+        animation: 'pulse-ring 1.5s ease-in-out infinite', pointerEvents: 'none', zIndex: 10,
+      }} />
+      <div role="dialog" aria-modal="true" aria-label="点选纠错" style={{
+        position: 'absolute', left: popoverLeft, top: popoverTop, width: popoverWidth,
+        padding: 'var(--space-3)',
+        background: 'var(--glass-bg-strong)', backdropFilter: 'blur(var(--glass-blur))', WebkitBackdropFilter: 'blur(var(--glass-blur))',
+        border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-md)',
+        boxShadow: 'var(--shadow-lg)', zIndex: 20, animation: 'tile-enter 0.2s ease both',
+      }}>
+        <p style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, marginBottom: 'var(--space-2)', color: 'var(--color-text)' }}>这里有什么问题？</p>
+        <textarea
+          value={note} onChange={(e) => onNoteChange(e.target.value)}
+          placeholder="描述你想要怎么改（也可以不填）" rows={2} autoFocus
+          style={{
+            width: '100%', maxWidth: '100%', boxSizing: 'border-box', resize: 'none', padding: 'var(--space-2)',
+            fontSize: 'var(--font-size-sm)', fontFamily: 'inherit', color: 'var(--color-text)',
+            background: 'var(--white)', border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-sm)', outline: 'none', lineHeight: 'var(--line-height-base)',
+            marginBottom: 'var(--space-2)', transition: 'border-color var(--transition-fast), box-shadow var(--transition-fast)',
+          }}
+          onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-focus)'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(124,58,237,0.15)' }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSubmit() }
+            if (e.key === 'Escape') onClose()
+          }}
+        />
+        <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
+          <button onClick={onGuess} style={{
+            height: 34, padding: '0 var(--space-4)', fontSize: 'var(--font-size-sm)', fontWeight: 600,
+            color: 'var(--color-text)', background: 'var(--white)', border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-full)', cursor: 'pointer',
+          }}>还没想好</button>
+          <button onClick={onSubmit} style={{
+            height: 34, padding: '0 var(--space-4)', fontSize: 'var(--font-size-sm)', fontWeight: 600,
+            color: 'var(--white)', background: 'linear-gradient(135deg, var(--color-quick), var(--color-quick-bright))',
+            borderRadius: 'var(--radius-full)', boxShadow: '0 4px 12px -2px rgba(124,58,237,0.4)', cursor: 'pointer',
+          }}>提交</button>
+        </div>
+      </div>
+    </>
+  )
+}

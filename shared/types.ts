@@ -22,6 +22,8 @@ export const IPC_CHANNELS = {
   PROJECT_CREATE: 'project:create',
   PROJECT_CONFIRM_SKETCH: 'project:confirm-sketch',
   PROJECT_SUBMIT_CORRECTION: 'project:submit-correction',
+  PROJECT_LIST: 'project:list',
+  PROJECT_ARCHIVE: 'project:archive',
   PROJECT_UPGRADE: 'project:upgrade',
   SANDBOX_RUN: 'sandbox:run',
   SANDBOX_STOP: 'sandbox:stop',
@@ -294,6 +296,8 @@ export interface Project {
   current_stage: WorkflowStage
   root_path: string
   current_snapshot_id?: string
+  /** 最后活跃会话 ID，用于启动恢复时续接上下文 */
+  last_session_id?: string
   created_at: string
   updated_at: string
 }
@@ -467,6 +471,8 @@ export type ElectronAPI = {
   }
   project: {
     create(input: ProjectCreateInput): Promise<ApiResult<Project>>
+    list(): Promise<ApiResult<Project[]>>
+    archive(input: { request_id: string; project_id: string }): Promise<ApiResult<Project>>
     confirmSketch(input: ConfirmSketchInput): Promise<ApiResult<Project>>
     submitCorrection(input: PointCorrectionInput): Promise<ApiResult<RevisionAccepted>>
     upgrade(input: ProjectUpgradeInput): Promise<ApiResult<Project>>
