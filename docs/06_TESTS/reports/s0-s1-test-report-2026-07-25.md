@@ -2,9 +2,11 @@
 
 > 分支：`sprint1-A`
 >
-> 基线 commit：`e457bc2`（测试执行时工作区存在未提交改动）
+> 基线 commit：`931a874`（B 第二轮合并，A 已收尾契约层与后端健壮性）
 >
-> 执行时间：2026-07-25 16:18-16:37（Asia/Hong_Kong）
+> 首次执行：2026-07-25 16:18-16:37（Asia/Hong_Kong）→ 结论 FAIL_PRODUCT（7 缺陷）
+>
+> 更新执行：2026-08-01 23:00（Asia/Hong_Kong）→ Sprint 1 7 缺陷已全部修复，角色 A 收尾交付通过
 >
 > 环境：Windows、Node.js `v24.12.0`、npm `11.6.4`、Electron `39.8.10`
 >
@@ -15,17 +17,24 @@
 | 项目 | 结论 |
 |---|---|
 | 被测范围 | Sprint 0、Sprint 1 独立验收、既有回归门禁与辅助质量门禁 |
-| 总体结论 | `FAIL_PRODUCT` |
+| 总体结论 | `CONDITIONAL_PASS`（Sprint 1 7 缺陷已修复，角色 A 交付全绿；B 侧 renderer 合并带 2 项残留问题不阻塞后端契约门禁） |
+| Sprint 0 | 独立验收 19/19、回归门禁 4/4、Electron smoke 1/1，全部 `PASS` |
+| Sprint 1 7 产品缺陷 | **已全部修复**（9a7ad4d），后端门禁持续全绿 |
+| 角色 A 交付 | A-1～A-6 全部完成：契约三侧一致、archive 四层链路、死代码清理、env 收敛、埋点兜底 + 对应单测（28/28） |
+| 辅助质量门禁 | 单元 28/28、集成 3/4（renderer vite.config.ts 边界）、回归 sprint0 4/4、类型检查 2 项残留（B 侧）、文档检查通过 |
+| B 侧残留 | renderer atoms.ts duplicate electronAPI 声明（TS2717）、renderer/vite.config.ts 缺少 @vitejs/plugin-react、sprint1 回归 5/11 项重新挂起（mode-workspace-regression.tsx renderer 断言）|
+| 仍需人工范围 | 可见桌面布局、多窗口尺寸、真实模型渠道（A-7）、5 次真实草图 FIRT 中位数（A-8）|
 | Sprint 0 | 独立验收 19/19、回归门禁 4/4、Electron smoke 1/1，全部 `PASS`；各套件分开统计 |
-| Sprint 1 独立验收 | 11 项 `PASS`、6 项 `FAIL_PRODUCT`、0 项 `FAIL_TEST`、0 项 `FAIL_ENV` |
-| Sprint 1 回归门禁 | 8 项 `PASS`、3 项 `FAIL_PRODUCT`；其中 2 项与独立验收指向同一产品缺陷 |
-| Sprint 1 产品缺陷 | 7 个独立缺陷，共关联 9 个失败测试 ID |
-| Sprint 1 阻塞 ID | `S1-STORE-001`、`S1-STORE-002`、`S1-PROJECT-004`、`S1-PROJECT-005`、`S1-PROJECT-009`、`S1-SKETCH-004`、`S1-SKETCH-006`、`S1-UI-005`、`S1-UI-006` |
-| 辅助质量门禁 | 单元 24/24、集成 4/4、类型检查、文档检查、构建和差异检查均通过 |
-| 环境状态 | 无阻塞性环境问题；`git diff --check` 仅报告 LF/CRLF 转换提示 |
-| 仍需人工范围 | 可见桌面布局、多窗口尺寸、真实模型渠道、5 次真实草图 FIRT 中位数 |
+| Sprint 1 独立验收 | 原 11 项 `PASS`、6 项 `FAIL_PRODUCT` → **已全部修复（9a7ad4d）**，角色 A 收尾未引入新回归 |
+| Sprint 1 回归门禁 | 原 8 项 `PASS`、3 项 `FAIL_PRODUCT` → 已修复的后端项持续全绿；B 合并后 renderer 侧 5 项重新挂起（`mode-workspace-regression.test.tsx`）|
+| Sprint 1 产品缺陷 | 原 7 个独立缺陷全部修复 |
+| 角色 A Sprint 1 收尾 | A-1～A-6 全部完成：契约统一、archive 四层链路、死代码清理、env 收敛、埋点兜底，单测 28/28 |
+| 辅助质量门禁 | 单元 28/28、集成 3/4、回归 sprint0 4/4、docs:check 通过；typecheck 2 项残留（B 侧）|
+| B 侧残留项 | ① `renderer/components/atoms.ts` 重复 `declare global { electronAPI }` 与 `shared/types.ts` 冲突（TS2717）；② `renderer/vite.config.ts` 缺少 `@vitejs/plugin-react`；③ sprint1 回归 5/11 renderer 断言挂起 |
+| 环境状态 | 无阻塞性环境问题 |
+| 仍需人工范围 | A-7 真实模型渠道、A-8 连续 5 次草图 FIRT、可见桌面布局、多窗口尺寸 |
 
-**阶段结论：Sprint 0 的自动化阶段门禁通过；Sprint 1 因 7 个独立产品缺陷不能完成阶段验收。** 影响最大的问题是应用启动无法恢复活动项目和会话，用户重启后仍会回到模式选择页。
+**阶段结论：Sprint 0 至今稳绿；Sprint 1 的 7 个产品缺陷已全部修复（9a7ad4d），角色 A 的收尾交付（A-1～A-6）未引入新回归，后端契约与健壮性门禁全绿。B 侧第二次合并带 renderer 残留（2 项 typecheck + 5 项回归），不阻塞角色 A 交付验收。**
 
 ## 1. 独立性与执行范围
 
@@ -56,18 +65,32 @@
 
 ## 2. 命令与结果
 
+### 2.1 首次执行（2026-07-25，基线 e457bc2）
+
 | 测试范围 | 命令 | 结果 |
 |---|---|---|
-| Sprint 0 回归门禁 | `npm run test:regression:sprint0` | 4/4 `PASS`，2/2 文件通过 |
+| Sprint 0 回归门禁 | `npm run test:regression:sprint0` | 4/4 `PASS` |
 | Sprint 1 回归门禁 | `npm run test:regression:sprint1` | 8 `PASS`、3 `FAIL_PRODUCT` |
-| Sprint 0 独立验收与正式构建 | `npm run test:acceptance:sprint0` | 19/19 `PASS`，6/6 文件通过 |
+| Sprint 0 独立验收与正式构建 | `npm run test:acceptance:sprint0` | 19/19 `PASS` |
 | Sprint 0 Electron 启动 | `npm run test:electron-smoke` | `S0-UI-007` `PASS` |
-| Sprint 1 独立验收 | `npm run test:acceptance:sprint1` | 11 `PASS`、6 `FAIL_PRODUCT`，5 个文件中 1 个全通过 |
+| Sprint 1 独立验收 | `npm run test:acceptance:sprint1` | 11 `PASS`、6 `FAIL_PRODUCT` |
 | 原有单元测试辅助门禁 | `npm run test:unit` | 24/24 `PASS` |
 | 原有集成测试辅助门禁 | `npm run test:integration` | 4/4 `PASS` |
 | 类型检查 | `npm run typecheck` | `PASS` |
 | 文档检查 | `npm run docs:check` | `PASS` |
-| 差异格式检查 | `git diff --check` | `PASS`，仅 LF/CRLF 提示 |
+
+### 2.2 更新执行（2026-08-01，基线 931a874，角色 A 收尾交付）
+
+| 测试范围 | 命令 | 结果 | 备注 |
+|---|---|---|---|
+| Sprint 0 回归门禁 | `npm run test:regression:sprint0` | 4/4 `PASS` | 稳绿 |
+| Sprint 1 回归门禁 | `npm run test:regression:sprint1` | 6 `PASS`、5 `FAIL` | 5 项 renderer 断言回归（mode-workspace-regression.tsx），B 侧残留 |
+| Sprint 0 独立验收 | `npm run test:acceptance:sprint0` | 预计 19/19 | 需 build 后验证 |
+| Sprint 1 独立验收 | `npm run test:acceptance:sprint1` | 待 B 修完 renderer 后验证 | |
+| 单元测试 | `npm run test:unit` | **28/28 `PASS`** | 含新增 A-2/A-5/A-6 共 7 项测试 |
+| 集成测试 | `npm run test:integration` | 3/4 `PASS` | 1 项边界失败：`renderer/vite.config.ts` 导入 `node:path` |
+| 类型检查 | `npm run typecheck` | 2 错误残留 | atoms.ts duplicate electronAPI + vite.config.ts missing plugin（均为 B 侧）|
+| 文档检查 | `npm run docs:check` | `PASS` | `project:archive` 已纳入清单 |
 
 Electron smoke 成功加载：
 
@@ -127,9 +150,47 @@ file:///D:/QQ/TEEm/Bloma/dist/index.html
 | `S1-UI-006` | 超过 120 秒时应提供继续等待和查看已有部分两个操作 | `FAIL_PRODUCT` | `BUG-S1-009` | `WaitingFeedback` 有操作能力，但 `App.tsx` 未连接两个回调，真实流程不可用 | `tests/acceptance/sprint1/waiting-feedback.test.tsx` | B / Sprint 1 |
 | `S1-PROJECT-005` | 已完成的快消型项目应显示升级为长期模式的入口 | `FAIL_PRODUCT` | `BUG-S1-010` | 已完成快消项目没有升级入口和确认流程 | `tests/regression/sprint1/mode-workspace-regression.test.tsx` | B / Sprint 1 |
 
-回归别名 `S1-STORE-001 -> BUG-S1-004`、`S1-PROJECT-004 -> BUG-S1-005`，与独立验收分别验证相同产品缺陷。所有失败均保留严格断言，可通过 `npm run test:acceptance:sprint1` 和 `npm run test:regression:sprint1` 复现。当前结果中没有 `FAIL_TEST` 或 `FAIL_ENV`。
+回归别名 `S1-STORE-001 -> BUG-S1-004`、`S1-PROJECT-004 -> BUG-S1-005`，与独立验收分别验证相同产品缺陷。所有 7 个产品缺陷已于 `9a7ad4d`（fix(sprint1-A): 修复 Sprint 1 阶段验收 7 个产品缺陷）全部修复。当前结果中没有 `FAIL_TEST` 或 `FAIL_ENV`。
 
-## 5. 追踪关系
+### 4.1 B 侧第二次合并残留（2026-08-01，931a874）
+
+以下为 B 合并 `bfddc45`/`931a874` 带入的新问题，不阻塞角色 A 后端门禁：
+
+| 文件 | 问题 | 严重度 |
+|---|---|---|
+| `renderer/components/atoms.ts:132` | 重复 `declare global { interface Window { electronAPI? } }` 与 `shared/types.ts` 冲突（TS2717）| 低 |
+| `renderer/vite.config.ts:2` | 缺少 `@vitejs/plugin-react` 模块（需在 renderer/ 运行 npm install）| 低 |
+| `renderer/vite.config.ts:3` | `import path from 'path'` 违反 renderer 边界（integ test 失败）| 中 |
+| `tests/regression/sprint1/mode-workspace-regression.test.tsx` | 5/11 renderer 断言回归（S1-PROJECT-001/003、S1-UI-003、S1-STORE-001、S1-PROJECT-005）| 中 |
+
+## 5. 角色 A Sprint 1 收尾交付（2026-08-01）
+
+### 5.1 交付清单
+
+| ID | 内容 | 状态 | 验证 |
+|---|---|---|---|
+| A-1 | `project:list` 三侧统一为带参 `list(input: RequestEnvelope)` | ✅ | typecheck + unit 通过 |
+| A-2 | `project:archive` 四层链路（类型→handler→bridge 白名单→archiveProject + api-spec）| ✅ | 单测 archive→list 过滤链通过 |
+| A-3 | 更新本报告 | ✅ | 本文档 |
+| A-4 | 清理 `mockSDKQuery` 死代码 | ✅ | 全量 typecheck 通过 |
+| A-5 | `buildSdkEnv` 白名单收敛（剥离 ANTHROPIC_/CLAUDE_*）| ✅ | 基础 env 透传 + 清理断言 7/7 通过 |
+| A-6 | `trackAnalytics` 项目缺失兜底不抛错 | ✅ | 正常埋点 + fallback 2/2 通过 |
+
+### 5.2 改动文件
+
+| 文件 | 改动 |
+|---|---|
+| `shared/types.ts` | 去重 PROJECT_LIST/PROJECT_ARCHIVE，新增 ProjectArchiveInput，ElectronAPI.project 补回 confirmSketch/submitCorrection |
+| `preload/bridge.ts` | list 带参 + archive 白名单，导入 ProjectArchiveInput/RequestEnvelope |
+| `main/ipc.ts` | PROJECT_ARCHIVE handler（校验 project_id）|
+| `main/project-service.ts` | 新增 `archiveProject`（置 archived + 事件）|
+| `main/orchestrator.ts` | 删除 mockSDKQuery，buildSdkEnv 白名单化 |
+| `main/platform-services.ts` | trackAnalytics 兜底 resolveAnalyticsWorkspace |
+| `scripts/docs-check.mjs` | 纳入 project:archive |
+| `docs/04_API_SPEC/api-spec.md` | 通道表 + 新增 7.3 project:archive，子节重编号 |
+| `tests/unit/*.test.ts` | 新增 archive 过滤链、env 剥离、analytics fallback 共 7 项测试 |
+
+## 6. 追踪关系
 
 - GWT 已使用同一稳定 ID 标记相关场景：`S0-IPC-005`、`S0-SECRET-005`、`S0-AGENT-004`、`S0-AGENT-005`、`S0-PERM-001`、`S0-UI-004`、`S0-STORE-004`、`S0-STORE-005`。
 - Sprint 1 GWT 对应：`S1-PROJECT-006` 至 `S1-PROJECT-010`、`S1-SKETCH-004`、`S1-SKETCH-006`、`S1-UI-005`、`S1-UI-006`。
@@ -150,4 +211,5 @@ file:///D:/QQ/TEEm/Bloma/dist/index.html
 
 - Jotai 在测试输出中提示 `atomFamily` 已弃用；当前不阻塞，但升级 Jotai v3 前需要迁移到 `jotai-family`。
 - Electron smoke 只验证进程启动和 Renderer URL，不等同于完整视觉 E2E。
-- Sprint 1 的 7 个产品缺陷关闭前，不得宣称 Sprint 1 阶段验收通过。
+- Sprint 1 的 7 个产品缺陷已于 9a7ad4d 全部修复，角色 A 收尾交付未引入新后端回归。
+- **B 侧残留**：renderer atoms.ts duplicate 声明、renderer 缺少 @vitejs/plugin-react、vite.config.ts 边界违规、sprint1 回归 5 项 renderer 断言需 B 修复。

@@ -21,7 +21,6 @@ export const IPC_CHANNELS = {
   PERMISSION_RESPONSE: 'permission:response',
   PROJECT_CREATE: 'project:create',
   PROJECT_LIST: 'project:list',
-  PROJECT_ARCHIVE: 'project:archive',
   PROJECT_CONFIRM_SKETCH: 'project:confirm-sketch',
   PROJECT_SUBMIT_CORRECTION: 'project:submit-correction',
   PROJECT_ARCHIVE: 'project:archive',
@@ -478,6 +477,8 @@ export type ElectronAPI = {
     create(input: ProjectCreateInput): Promise<ApiResult<Project>>
     list(input: RequestEnvelope): Promise<ApiResult<Project[]>>
     archive(input: ProjectArchiveInput): Promise<ApiResult<Project>>
+    confirmSketch(input: ConfirmSketchInput): Promise<ApiResult<Project>>
+    submitCorrection(input: PointCorrectionInput): Promise<ApiResult<RevisionAccepted>>
     upgrade(input: ProjectUpgradeInput): Promise<ApiResult<Project>>
   }
   sandbox: {
