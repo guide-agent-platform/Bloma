@@ -19,18 +19,10 @@ export const ModeSelectionPage: React.FC<ModeSelectionPageProps> = ({
   const [, setModeSelected] = useAtom(modeSelectedAtom)
   const [, setCurrentProject] = useAtom(currentProjectAtom)
   const [isSelecting, setIsSelecting] = React.useState(false)
-<<<<<<< HEAD
-=======
-  const [selectionError, setSelectionError] = React.useState<string>()
->>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
 
   const handleSelect = async (mode: 'quick' | 'longterm') => {
     if (isSelecting) return // 防止双击重复创建
     setIsSelecting(true)
-<<<<<<< HEAD
-=======
-    setSelectionError(undefined)
->>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
 
     try {
       // 通过 IPC 创建项目
@@ -40,32 +32,20 @@ export const ModeSelectionPage: React.FC<ModeSelectionPageProps> = ({
           request_id: crypto.randomUUID(),
           mode,
         })
-<<<<<<< HEAD
         if (result.ok) {
           setCurrentProject(result.data)
         }
         // 如果 IPC 失败（如开发环境），仍然进入工作区
-=======
-        if (!result.ok) {
-          setSelectionError(result.error.user_visible_message ?? '项目创建失败，请重试。')
-          return
-        }
-        setCurrentProject(result.data)
->>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
       }
 
       setProjectMode(mode)
       setModeSelected(true)
       onModeSelected(mode)
     } catch {
-<<<<<<< HEAD
       // 开发/演示模式：无 Electron 环境时直接进入
       setProjectMode(mode)
       setModeSelected(true)
       onModeSelected(mode)
-=======
-      setSelectionError('项目创建失败，请重试。')
->>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
     } finally {
       setIsSelecting(false)
     }
@@ -204,22 +184,6 @@ export const ModeSelectionPage: React.FC<ModeSelectionPageProps> = ({
           disabled={isSelecting}
         />
       </div>
-<<<<<<< HEAD
-=======
-
-      {selectionError && (
-        <p
-          role="alert"
-          style={{
-            marginTop: 'var(--space-4)',
-            color: 'var(--color-error)',
-            fontSize: 'var(--font-size-sm)',
-          }}
-        >
-          {selectionError}
-        </p>
-      )}
->>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
     </div>
   )
 }

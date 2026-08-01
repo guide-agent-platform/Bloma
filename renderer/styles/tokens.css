@@ -70,11 +70,7 @@
 
   /* Typography */
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-<<<<<<< HEAD
   --font-display: "Playfair Display", "Times New Roman", serif;
-=======
-  --font-display: "Great Vibes", "Segoe Script", "Snell Roundhand", cursive;
->>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
   --font-size-xs: 0.75rem;   /* 12 */
   --font-size-sm: 0.875rem;  /* 14 */

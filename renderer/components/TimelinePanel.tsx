@@ -23,7 +23,6 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({ onRollback }) => {
   const snapshots = useAtomValue(snapshotsListAtom)
   const selectedSnapshot = useAtomValue(selectedSnapshotAtom)
 
-<<<<<<< HEAD
   // 回滚确认弹窗状态
   const [confirmSnapshot, setConfirmSnapshot] = React.useState<Snapshot | null>(null)
 
@@ -41,9 +40,6 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({ onRollback }) => {
 
   return (
     <>
-=======
-  return (
->>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
     <div
       data-ai-id="timeline-expanded-panel"
       className="tile"
@@ -110,11 +106,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({ onRollback }) => {
                 key={snap.snapshot_id}
                 snapshot={snap}
                 isCurrent={isCurrent}
-<<<<<<< HEAD
                 onClick={() => !isCurrent && handleRollbackClick(snap)}
-=======
-                onClick={() => !isCurrent && onRollback?.(snap)}
->>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
               />
             )
           })
@@ -150,7 +142,6 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({ onRollback }) => {
         </span>
       </button>
     </div>
-<<<<<<< HEAD
 
     {/* 回滚确认弹窗 */}
     {confirmSnapshot && (
@@ -224,8 +215,6 @@ const RollbackConfirmModal: React.FC<{
         </div>
       </div>
     </div>
-=======
->>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
   )
 }
 

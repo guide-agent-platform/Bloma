@@ -11,18 +11,11 @@ interface IconProps {
   size?: number
   className?: string
   strokeWidth?: number
-<<<<<<< HEAD
   style?: React.CSSProperties
   'aria-hidden'?: boolean
 }
 
 const base = (size: number, strokeWidth: number, style?: React.CSSProperties): React.SVGProps<SVGSVGElement> => ({
-=======
-  'aria-hidden'?: boolean
-}
-
-const base = (size: number, strokeWidth: number): React.SVGProps<SVGSVGElement> => ({
->>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
   width: size,
   height: size,
   viewBox: '0 0 24 24',
@@ -33,10 +26,7 @@ const base = (size: number, strokeWidth: number): React.SVGProps<SVGSVGElement> 
   strokeLinejoin: 'round',
   'aria-hidden': true,
   focusable: false,
-<<<<<<< HEAD
   style,
-=======
->>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
 })
 
 export const Sparkles: React.FC<IconProps> = ({ size = 24, strokeWidth = 2 }) => (
@@ -54,16 +44,6 @@ export const ArrowUp: React.FC<IconProps> = ({ size = 24, strokeWidth = 2 }) => 
   </svg>
 )
 
-<<<<<<< HEAD
-=======
-export const ArrowRight: React.FC<IconProps> = ({ size = 24, strokeWidth = 2 }) => (
-  <svg {...base(size, strokeWidth)}>
-    <path d="M5 12h14" />
-    <path d="M12 5l7 7-7 7" />
-  </svg>
-)
-
->>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
 export const RotateCw: React.FC<IconProps> = ({ size = 24, strokeWidth = 2 }) => (
   <svg {...base(size, strokeWidth)}>
     <path d="M21 12a9 9 0 1 1-2.64-6.36" />
@@ -124,7 +104,6 @@ export const ChevronUp: React.FC<IconProps> = ({ size = 24, strokeWidth = 2 }) =
   </svg>
 )
 
-<<<<<<< HEAD
 export const ArrowRight: React.FC<IconProps> = ({ size = 24, strokeWidth = 2, ...rest }) => (
   <svg {...base(size, strokeWidth)} {...rest}>
     <path d="M5 12h14" />
@@ -139,8 +118,6 @@ export const ArrowLeft: React.FC<IconProps> = ({ size = 24, strokeWidth = 2 }) =
   </svg>
 )
 
-=======
->>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
 export const Zap: React.FC<IconProps> = ({ size = 24, strokeWidth = 2 }) => (
   <svg {...base(size, strokeWidth)}>
     <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" />

@@ -179,11 +179,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           />
         )}
 
-<<<<<<< HEAD
         {isWaiting && (
-=======
-        {isWaiting && elapsed >= 5 && (
->>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
           <WaitingFeedback
             elapsedSeconds={elapsed}
             actionLabel={waitActionLabel}
@@ -277,11 +273,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           </button>
         </div>
         <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-2)', textAlign: 'center' }}>
-<<<<<<< HEAD
           按 Enter 发送，按 Shift + Enter 换行
-=======
-          Enter 发送 · Shift+Enter 换行
->>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
         </p>
       </div>
     </div>
