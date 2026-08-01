@@ -30,7 +30,7 @@
 | Sprint 1 产品缺陷 | 原 7 个独立缺陷全部修复 |
 | 角色 A Sprint 1 收尾 | A-1～A-6 全部完成：契约统一、archive 四层链路、死代码清理、env 收敛、埋点兜底，单测 28/28 |
 | 辅助质量门禁 | 单元 28/28、集成 3/4、回归 sprint0 4/4、docs:check 通过；typecheck 2 项残留（B 侧）|
-| B 侧残留项 | ① `renderer/components/atoms.ts` 重复 `declare global { electronAPI }` 与 `shared/types.ts` 冲突（TS2717）；② `renderer/vite.config.ts` 缺少 `@vitejs/plugin-react`；③ sprint1 回归 5/11 renderer 断言挂起 |
+| B 侧残留项 | ✅ **已全部修复（55c76cf）**：atoms.ts 重复声明、vite.config.ts 边界 + 插件、sprint1 回归 5 项 renderer 断言、App 启动恢复逻辑、ModeSelectionPage 错误处理、WorkspaceHeader 三按钮 |
 | 环境状态 | 无阻塞性环境问题 |
 | 仍需人工范围 | A-7 真实模型渠道、A-8 连续 5 次草图 FIRT、可见桌面布局、多窗口尺寸 |
 
@@ -212,4 +212,12 @@ file:///D:/QQ/TEEm/Bloma/dist/index.html
 - Jotai 在测试输出中提示 `atomFamily` 已弃用；当前不阻塞，但升级 Jotai v3 前需要迁移到 `jotai-family`。
 - Electron smoke 只验证进程启动和 Renderer URL，不等同于完整视觉 E2E。
 - Sprint 1 的 7 个产品缺陷已于 9a7ad4d 全部修复，角色 A 收尾交付未引入新后端回归。
-- **B 侧残留**：renderer atoms.ts duplicate 声明、renderer 缺少 @vitejs/plugin-react、vite.config.ts 边界违规、sprint1 回归 5 项 renderer 断言需 B 修复。
+- ~~B 侧残留~~ → **已于 55c76cf 全部修复**：unit 28/28、integ 4/4、reg:s0 4/4、reg:s1 11/11、typecheck 0 err、docs:check ✓
+
+## 修订记录
+
+| 版本 | 日期 | 基线 | 修订内容 |
+|------|------|------|----------|
+| v0.1 | 2026-07-25 | e457bc2 | 初版 — Sprint 1 FAIL_PRODUCT（7 缺陷）|
+| v0.2 | 2026-08-01 | 931a874 | Sprint 1 7 缺陷已修复，角色 A 交付通过，B 侧残留清单 |
+| v0.3 | 2026-08-02 | 55c76cf | B 侧残留全部修复，全门禁通过 |
