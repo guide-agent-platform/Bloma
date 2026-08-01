@@ -70,7 +70,7 @@ const AppRoutes: React.FC = () => {
   // 本地项目列表（演示模式）
   const [projectList, setProjectList] = useState<Project[]>([])
 
-  // ✅ 使用 Jotai hooks 直接读写 — 不依赖 window.__jotai_demo_store__
+  // ✅ 使用 Jotai hooks 直接读写
   const setProjectMode = useSetAtom(projectModeAtom)
   const setModeSelected = useSetAtom(modeSelectedAtom)
   const setWorkflowStage = useSetAtom(workflowStageAtom)
@@ -79,6 +79,29 @@ const AppRoutes: React.FC = () => {
   const setCurrentProject = useSetAtom(currentProjectAtom)
   const setSnapshotsList = useSetAtom(snapshotsListAtom)
   const setMessages = useSetAtom(agentMessagesFamily(sessionId))
+
+  const restoreAttemptedRef = React.useRef(false)
+
+  // 启动恢复：若本地存在活动项目，直接进入工作区而不是显示两道门
+  React.useEffect(() => {
+    if (restoreAttemptedRef.current) return
+    restoreAttemptedRef.current = true
+    const api = window.electronAPI
+    if (!api?.project?.list) return
+    void api.project.list({ request_id: crypto.randomUUID() }).then((result) => {
+      if (!result?.ok || result.data.length === 0) return
+      const restored = result.data[0]
+      if (!restored) return
+      setMode(restored.mode)
+      setCurrentProject(restored)
+      setProjectMode(restored.mode)
+      setModeSelected(true)
+      setWorkflowStage(restored.current_stage)
+      setStageLabel(STAGE_LABEL_MAP[restored.current_stage] ?? '处理中')
+      setActiveSessionId(sessionId)
+      setRoute('workspace')
+    })
+  }, [sessionId])
 
   // ==================== 选择模式 → 创建工作区 ====================
 
@@ -100,7 +123,6 @@ const AppRoutes: React.FC = () => {
 
     setProjectList((prev: Project[]) => [newProject, ...prev])
 
-    // ✅ 直接通过 hooks 设置 atom
     setProjectMode(selectedMode)
     setModeSelected(true)
     setWorkflowStage('clarifying')
@@ -143,10 +165,9 @@ const AppRoutes: React.FC = () => {
     setRoute('workspace')
   }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject])
 
-  // ==================== "你帮我决定" — 跳过澄清（偏离 2.1 修复） ====================
+  // ==================== "你帮我决定" — 跳过澄清 ====================
 
   const handleDecideForMe = useCallback(() => {
-    // 系统消息
     const systemMsg: AgentMessage = {
       role: 'system',
       content: [{ type: 'text', text: '好的，我根据常见场景帮你决定方向，直接开始生成草图。' }],
@@ -194,13 +215,11 @@ const AppRoutes: React.FC = () => {
   // ==================== 发送消息 ====================
 
   const handleSendMessage = useCallback((content: string) => {
-    // 偏离 2.1：检测"你帮我决定"→ 跳过澄清
     if (content.trim() === '你帮我决定' || content.trim() === '你帮我决定。') {
       handleDecideForMe()
       return
     }
 
-    // 用户消息
     const userMsg: AgentMessage = {
       role: 'user',
       content: [{ type: 'text', text: content }],
@@ -214,7 +233,6 @@ const AppRoutes: React.FC = () => {
     setWorkflowStage('generating_sketch')
     setStageLabel(STAGE_LABEL_MAP.generating_sketch)
 
-    // 模拟 Agent 响应（2s 后）
     setTimeout(() => {
       setWaiting(false)
       setPreviewStatus('running')
@@ -248,7 +266,6 @@ const AppRoutes: React.FC = () => {
   // ==================== 点选纠错 ====================
 
   const handleCorrectionSubmit = useCallback((payload: { position: { x: number; y: number }; userNote: string; fallbackMode: boolean }) => {
-    // 系统消息：告知用户收到了纠错反馈
     const systemMsg: AgentMessage = {
       role: 'system',
       content: [{ type: 'text', text: `已收到你的修改意见${payload.userNote ? `：「${payload.userNote}」` : '（你猜模式）'}，我来帮你调整。` }],
@@ -260,7 +277,6 @@ const AppRoutes: React.FC = () => {
     setStageLabel(STAGE_LABEL_MAP.repairing)
     setPreviewStatus('loading')
 
-    // 模拟修复（1.5s 后重新展示预览）
     setTimeout(() => {
       setPreviewStatus('running')
       setWorkflowStage('sketch_ready')
@@ -322,13 +338,11 @@ const AppRoutes: React.FC = () => {
         setPreviewStatus('loading')
         setTimeout(() => setPreviewStatus('running'), 1500)
       }}
-      // 点选纠错回调
       onCorrectionSubmit={handleCorrectionSubmit}
       onRollback={handleRollback}
-      // "所有项目" → project_history（偏离 1.2 修复）
-      onAllProjects={() => {
+      onAllProjects={projectList.length > 1 ? () => {
         setRoute('project-history')
-      }}
+      } : undefined}
     />
   )
 }
