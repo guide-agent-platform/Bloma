@@ -1,7 +1,7 @@
-import { mkdtempSync, readFileSync } from 'node:fs'
+﻿import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   buildSdkEnv,
   isSessionActive,
@@ -15,6 +15,10 @@ import type { SDKMessage } from '../../shared/types'
 
 describe('AgentOrchestrator', () => {
   const originalPromaHome = process.env.PROMA_HOME
+
+  beforeEach(() => {
+    setSDKQueryForTests(defaultTestQuery)
+  })
 
   afterEach(() => {
     process.env.PROMA_HOME = originalPromaHome
@@ -42,7 +46,7 @@ describe('AgentOrchestrator', () => {
       project_id: 'project-1',
       content: '做一个记账工具',
       mode: 'quick',
-      current_stage: 'clarifying',
+      current_stage: 'generating_mvp',
       metadata: { source: 'chat' },
     })
 
@@ -50,6 +54,37 @@ describe('AgentOrchestrator', () => {
     const jsonl = readFileSync(join(home, 'agent-sessions', 'session-1.jsonl'), 'utf8')
     expect(jsonl).toContain('做一个记账工具')
     expect(jsonl).toContain('Sprint 0')
+    expect(jsonl).toContain('[terminal] status=completed')
+  })
+
+  it('persists terminal error to JSONL when SDK fails', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-test-'))
+    process.env.PROMA_HOME = home
+
+    setSDKQueryForTests(async function* () {
+      yield {
+        type: 'assistant',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'partial-answer' }] },
+      }
+      throw Object.assign(new Error('boom'), { statusCode: 400 })
+    })
+
+    await expect(
+      runAgent({
+        request_id: 'req-err',
+        session_id: 'session-err',
+        project_id: 'project-err',
+        content: '触发错误',
+        mode: 'quick',
+        current_stage: 'generating_mvp',
+      }),
+    ).rejects.toThrow()
+
+    const jsonl = readFileSync(join(home, 'agent-sessions', 'session-err.jsonl'), 'utf8')
+    expect(jsonl).toContain('partial-answer')
+    expect(jsonl).toContain('[terminal] status=error')
+    expect(jsonl).toContain('AGENT_SDK_ERROR')
+    expect(isSessionActive('session-err')).toBe(false)
   })
 
   it('passes merged env into the SDK query', async () => {
@@ -69,7 +104,7 @@ describe('AgentOrchestrator', () => {
       project_id: 'project-env',
       content: '测试 env',
       mode: 'quick',
-      current_stage: 'clarifying',
+      current_stage: 'generating_mvp',
     })
 
     expect(capturedEnv?.PATH).toBe('test-path')
@@ -104,7 +139,7 @@ describe('AgentOrchestrator', () => {
       project_id: 'project-retry',
       content: '测试 retry',
       mode: 'quick',
-      current_stage: 'clarifying',
+      current_stage: 'generating_mvp',
     })
 
     expect(attempts).toBe(7)

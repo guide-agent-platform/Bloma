@@ -4,6 +4,7 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "strict": true,
+    "jsx": "react-jsx",
     "skipLibCheck": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
@@ -15,8 +16,11 @@
     "main/**/*.ts",
     "preload/**/*.ts",
     "renderer/**/*.ts",
+    "renderer/**/*.tsx",
     "shared/**/*.ts",
     "storage/**/*.ts",
-    "tests/**/*.ts"
+    "tests/**/*.ts",
+    "tests/**/*.tsx",
+    "vite.config.ts"
   ]
 }

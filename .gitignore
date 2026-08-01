@@ -1,6 +1,9 @@
 node_modules/
 dist/
+dist-main/
 coverage/
+test-results/
+.vitest/
 .env
 .proma-test/
 *.log

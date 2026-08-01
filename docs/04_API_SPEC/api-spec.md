@@ -40,6 +40,7 @@ const IPC_CHANNELS = {
   AGENT_STREAM_EVENT: "agent:stream-event",
   PERMISSION_RESPONSE: "permission:response",
   PROJECT_CREATE: "project:create",
+  PROJECT_LIST: "project:list",
   PROJECT_CONFIRM_SKETCH: "project:confirm-sketch",
   PROJECT_SUBMIT_CORRECTION: "project:submit-correction",
   PROJECT_UPGRADE: "project:upgrade",
@@ -341,7 +342,25 @@ type Project = {
 - 创建 `documents/{project_id}`。
 - 创建 `snapshots/{project_id}`。
 
-### 7.2 `project:confirm-sketch`
+### 7.2 `project:list`
+
+```ts
+type ProjectListInput = {
+  request_id: string;
+};
+
+// 返回未归档项目列表，活动项目优先
+type ProjectListResult = Project[];
+```
+
+存储：
+
+- 读取项目索引 JSON。
+- 过滤掉 `status === "archived"` 的项目，活动项目排在前面。
+
+用途：应用启动时恢复活动项目与会话，避免重启后回到两道门。
+
+### 7.3 `project:confirm-sketch`
 
 ```ts
 type ConfirmSketchInput = {
@@ -360,7 +379,7 @@ type ConfirmSketchInput = {
 - `needs_change`：生成 revision task。
 - 决策追加写入 JSONL。
 
-### 7.3 `project:submit-correction`
+### 7.4 `project:submit-correction`
 
 ```ts
 type PointCorrectionInput = {

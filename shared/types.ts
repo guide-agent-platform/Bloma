@@ -20,6 +20,7 @@ export const IPC_CHANNELS = {
   AGENT_STREAM_EVENT: 'agent:stream-event',
   PERMISSION_RESPONSE: 'permission:response',
   PROJECT_CREATE: 'project:create',
+  PROJECT_LIST: 'project:list',
   PROJECT_CONFIRM_SKETCH: 'project:confirm-sketch',
   PROJECT_SUBMIT_CORRECTION: 'project:submit-correction',
   PROJECT_LIST: 'project:list',
@@ -471,8 +472,12 @@ export type ElectronAPI = {
   }
   project: {
     create(input: ProjectCreateInput): Promise<ApiResult<Project>>
+<<<<<<< HEAD
     list(): Promise<ApiResult<Project[]>>
     archive(input: { request_id: string; project_id: string }): Promise<ApiResult<Project>>
+=======
+    list(input: RequestEnvelope): Promise<ApiResult<Project[]>>
+>>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
     confirmSketch(input: ConfirmSketchInput): Promise<ApiResult<Project>>
     submitCorrection(input: PointCorrectionInput): Promise<ApiResult<RevisionAccepted>>
     upgrade(input: ProjectUpgradeInput): Promise<ApiResult<Project>>

@@ -1,4 +1,5 @@
 import React from 'react'
+<<<<<<< HEAD
 import ReactDOM from 'react-dom/client'
 import { Provider, createStore } from 'jotai'
 import { setupGlobalAgentListeners } from './agent-atoms'
@@ -15,6 +16,21 @@ const rootEl = document.getElementById('root')
 if (!rootEl) throw new Error('Missing #root element')
 
 ReactDOM.createRoot(rootEl).render(
+=======
+import { createRoot } from 'react-dom/client'
+import { createStore, Provider } from 'jotai'
+import App from './components/App'
+import { setupGlobalAgentListeners } from './agent-atoms'
+
+const rootElement = document.getElementById('root')
+if (!rootElement) throw new Error('Missing #root element')
+
+const store = createStore()
+window.__jotai_store__ = store
+setupGlobalAgentListeners()
+
+createRoot(rootElement).render(
+>>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
   <React.StrictMode>
     <Provider store={store}>
       <App />

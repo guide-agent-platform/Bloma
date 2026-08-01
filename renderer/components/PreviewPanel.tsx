@@ -50,6 +50,10 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
   const [correctionPos, setCorrectionPos] = React.useState({ x: 0, y: 0 })
   const [correctionNote, setCorrectionNote] = React.useState('')
   const iframeRef = React.useRef<HTMLIFrameElement>(null)
+<<<<<<< HEAD
+=======
+  const shouldUseWebView = typeof window !== 'undefined' && Boolean(window.electronAPI)
+>>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
 
   const effectiveStatus: PreviewStatus =
     status === 'empty' && (hasStream || ['generating_sketch', 'generating_mvp'].includes(stage))
@@ -131,16 +135,31 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
         style={{
           flex: 1,
           position: 'relative',
+<<<<<<< HEAD
           borderRadius: 'var(--radius-md)',
+=======
+          borderRadius: 'var(--radius-lg)',
+>>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
           overflow: 'hidden',
           background: 'var(--white)',
           boxShadow: 'inset 0 0 0 1px var(--color-border)',
           minHeight: 0,
         }}
+<<<<<<< HEAD
+=======
+        onClick={(e) => {
+          if (displayStatus !== 'running' || !onCorrectionSubmit) return
+          const rect = e.currentTarget.getBoundingClientRect()
+          setCorrectionPos({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+          setCorrectionNote('')
+          setCorrectionActive(true)
+        }}
+>>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
       >
         {displayStatus === 'empty' && <EmptyState />}
         {displayStatus === 'loading' && <LoadingState label={loadingLabel} />}
         {displayStatus === 'running' && previewUrl && (
+<<<<<<< HEAD
           <>
             <iframe
               ref={iframeRef}
@@ -171,6 +190,30 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
               />
             )}
           </>
+=======
+          shouldUseWebView
+            ? React.createElement('webview', {
+                src: previewUrl,
+                title: '软件预览',
+                webpreferences: 'contextIsolation=yes,nodeIntegration=no,sandbox=yes,javascript=yes',
+                style: {
+                  width: '100%',
+                  height: '100%',
+                  border: 'none',
+                  background: 'var(--white)',
+                  pointerEvents: correctionActive ? 'none' : 'auto',
+                },
+              })
+            : (
+              <iframe
+                ref={iframeRef}
+                src={previewUrl}
+                title="软件预览"
+                sandbox="allow-scripts allow-same-origin"
+                style={{ width: '100%', height: '100%', border: 'none', background: 'var(--white)', pointerEvents: correctionActive ? 'none' : 'auto' }}
+              />
+            )
+>>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
         )}
         {displayStatus === 'running' && !previewUrl && <LoadingState label="正在准备预览…" />}
         {displayStatus === 'error' && <ErrorState label={errorLabel ?? globalError ?? undefined} onRetry={onRefresh} />}
@@ -239,7 +282,11 @@ const stateWrap: React.CSSProperties = {
 
 const EmptyState: React.FC = () => (
   <div style={stateWrap}>
+<<<<<<< HEAD
     <span aria-hidden style={{ width: 68, height: 68, borderRadius: 'var(--radius-md)', background: 'var(--white)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 'var(--space-5)', color: 'var(--color-quick)', boxShadow: 'var(--shadow-md)' }}>
+=======
+    <span aria-hidden style={{ width: 68, height: 68, borderRadius: 'var(--radius-lg)', background: 'var(--white)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 'var(--space-5)', color: 'var(--color-quick)', boxShadow: 'var(--shadow-md)' }}>
+>>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
       <LayoutTemplate size={28} />
     </span>
     <p style={{ fontSize: 'var(--font-size-lg)', fontWeight: 600, color: 'var(--color-text)', marginBottom: 'var(--space-1)' }}>这里将展示你的软件预览</p>
@@ -257,7 +304,11 @@ const LoadingState: React.FC<{ label?: string }> = ({ label }) => (
 
 const ErrorState: React.FC<{ label?: string; onRetry?: () => void }> = ({ label, onRetry }) => (
   <div style={stateWrap}>
+<<<<<<< HEAD
     <span aria-hidden style={{ width: 68, height: 68, borderRadius: 'var(--radius-md)', background: 'var(--color-danger-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 'var(--space-5)', color: 'var(--color-danger)' }}>
+=======
+    <span aria-hidden style={{ width: 68, height: 68, borderRadius: 'var(--radius-lg)', background: 'var(--color-danger-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 'var(--space-5)', color: 'var(--color-danger)' }}>
+>>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
       <AlertTriangle size={28} />
     </span>
     <p style={{ fontSize: 'var(--font-size-lg)', fontWeight: 600, color: 'var(--color-text)', marginBottom: 'var(--space-1)' }}>预览加载失败</p>
@@ -309,10 +360,17 @@ const CorrectionOverlay: React.FC<{
   onGuess: () => void
   onClose: () => void
 }> = ({ position, note, onNoteChange, onSubmit, onGuess, onClose }) => {
+<<<<<<< HEAD
   const markerSize = 24
   const popoverWidth = 260
   const popoverLeft = Math.max(8, Math.min(position.x - popoverWidth / 2, typeof window !== 'undefined' ? window.innerWidth - popoverWidth - 16 : 260))
   const popoverTop = position.y + 36 > (typeof window !== 'undefined' ? window.innerHeight - 190 : 380) ? position.y - 160 : position.y + 22
+=======
+  const markerSize = 28
+  const popoverWidth = 300
+  const popoverLeft = Math.max(8, Math.min(position.x - popoverWidth / 2, typeof window !== 'undefined' ? window.innerWidth - popoverWidth - 16 : 300))
+  const popoverTop = position.y + 40 > (typeof window !== 'undefined' ? window.innerHeight - 200 : 400) ? position.y - 170 : position.y + 24
+>>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
 
   return (
     <>
@@ -324,21 +382,38 @@ const CorrectionOverlay: React.FC<{
       }} />
       <div role="dialog" aria-modal="true" aria-label="点选纠错" style={{
         position: 'absolute', left: popoverLeft, top: popoverTop, width: popoverWidth,
+<<<<<<< HEAD
         padding: 'var(--space-3)',
         background: 'var(--glass-bg-strong)', backdropFilter: 'blur(var(--glass-blur))', WebkitBackdropFilter: 'blur(var(--glass-blur))',
         border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-md)',
         boxShadow: 'var(--shadow-lg)', zIndex: 20, animation: 'tile-enter 0.2s ease both',
       }}>
         <p style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, marginBottom: 'var(--space-2)', color: 'var(--color-text)' }}>这里有什么问题？</p>
+=======
+        padding: 'var(--space-4)',
+        background: 'var(--glass-bg-strong)', backdropFilter: 'blur(var(--glass-blur))', WebkitBackdropFilter: 'blur(var(--glass-blur))',
+        border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-lg)',
+        boxShadow: 'var(--shadow-lg)', zIndex: 20, animation: 'tile-enter 0.2s ease both',
+      }}>
+        <p style={{ fontSize: 'var(--font-size-md)', fontWeight: 600, marginBottom: 'var(--space-3)', color: 'var(--color-text)' }}>这里有什么问题？</p>
+>>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
         <textarea
           value={note} onChange={(e) => onNoteChange(e.target.value)}
           placeholder="描述你想要怎么改（也可以不填）" rows={2} autoFocus
           style={{
+<<<<<<< HEAD
             width: '100%', maxWidth: '100%', boxSizing: 'border-box', resize: 'none', padding: 'var(--space-2)',
             fontSize: 'var(--font-size-sm)', fontFamily: 'inherit', color: 'var(--color-text)',
             background: 'var(--white)', border: '1px solid var(--color-border)',
             borderRadius: 'var(--radius-sm)', outline: 'none', lineHeight: 'var(--line-height-base)',
             marginBottom: 'var(--space-2)', transition: 'border-color var(--transition-fast), box-shadow var(--transition-fast)',
+=======
+            width: '100%', resize: 'none', padding: 'var(--space-2) var(--space-3)',
+            fontSize: 'var(--font-size-sm)', fontFamily: 'inherit', color: 'var(--color-text)',
+            background: 'var(--glass-bg-soft)', border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-sm)', outline: 'none', lineHeight: 'var(--line-height-base)',
+            marginBottom: 'var(--space-3)', transition: 'border-color var(--transition-fast), box-shadow var(--transition-fast)',
+>>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
           }}
           onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-focus)'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(124,58,237,0.15)' }}
           onKeyDown={(e) => {
@@ -349,7 +424,11 @@ const CorrectionOverlay: React.FC<{
         <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
           <button onClick={onGuess} style={{
             height: 34, padding: '0 var(--space-4)', fontSize: 'var(--font-size-sm)', fontWeight: 600,
+<<<<<<< HEAD
             color: 'var(--color-text)', background: 'var(--white)', border: '1px solid var(--color-border)',
+=======
+            color: 'var(--color-text)', background: 'var(--glass-bg-soft)', border: '1px solid var(--color-border)',
+>>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
             borderRadius: 'var(--radius-full)', cursor: 'pointer',
           }}>还没想好</button>
           <button onClick={onSubmit} style={{

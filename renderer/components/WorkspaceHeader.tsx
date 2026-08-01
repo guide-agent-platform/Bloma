@@ -1,4 +1,5 @@
 import React from 'react'
+<<<<<<< HEAD
 import { useAtomValue } from 'jotai'
 import { StageIndicator } from './StageIndicator'
 import { Sparkles } from './icons'
@@ -7,6 +8,19 @@ import {
   projectModeAtom,
   networkOnlineAtom,
   stageIndicatorLabelAtom,
+=======
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
+import { StageIndicator } from './StageIndicator'
+import { Sparkles } from './icons'
+import {
+  canUpgradeAtom,
+  currentProjectAtom,
+  documentPanelExpandedAtom,
+  projectModeAtom,
+  networkOnlineAtom,
+  stageIndicatorLabelAtom,
+  upgradeConfirmVisibleAtom,
+>>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
   workflowStageAtom,
 } from './atoms'
 
@@ -26,6 +40,12 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects 
   const isOnline = useAtomValue(networkOnlineAtom)
   const stageLabel = useAtomValue(stageIndicatorLabelAtom)
   const stage = useAtomValue(workflowStageAtom)
+<<<<<<< HEAD
+=======
+  const [documentsExpanded, setDocumentsExpanded] = useAtom(documentPanelExpandedAtom)
+  const canUpgrade = useAtomValue(canUpgradeAtom)
+  const setUpgradeConfirmVisible = useSetAtom(upgradeConfirmVisibleAtom)
+>>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
   const stageActive = ACTIVE_STAGES.has(stage)
 
   const modeLabel = mode === 'quick' ? '快速尝鲜' : mode === 'longterm' ? '精细打磨' : ''
@@ -126,6 +146,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects 
           {isOnline ? '已连接' : '离线'}
         </span>
 
+<<<<<<< HEAD
         <button
           onClick={onAllProjects}
           disabled={!onAllProjects}
@@ -159,6 +180,78 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects 
         >
           所有项目
         </button>
+=======
+        {mode === 'longterm' && (
+          <button
+            type="button"
+            aria-pressed={documentsExpanded}
+            onClick={() => setDocumentsExpanded((current) => !current)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              fontSize: 'var(--font-size-sm)',
+              fontWeight: 500,
+              color: 'var(--color-text)',
+              padding: '7px var(--space-4)',
+              borderRadius: 'var(--radius-full)',
+              background: documentsExpanded ? 'var(--glass-bg-strong)' : 'var(--glass-bg-soft)',
+              border: '1px solid var(--glass-border-subtle)',
+            }}
+          >
+            文档
+          </button>
+        )}
+
+        {canUpgrade && (
+          <button
+            type="button"
+            onClick={() => setUpgradeConfirmVisible(true)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              fontSize: 'var(--font-size-sm)',
+              fontWeight: 600,
+              color: 'var(--white)',
+              padding: '7px var(--space-4)',
+              borderRadius: 'var(--radius-full)',
+              background: 'linear-gradient(135deg, var(--color-quick), var(--color-longterm))',
+              border: '1px solid var(--glass-border-subtle)',
+              cursor: 'pointer',
+            }}
+          >
+            升级为长期模式
+          </button>
+        )}
+
+        {onAllProjects && (
+          <button
+            onClick={onAllProjects}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 'var(--space-1)',
+              fontSize: 'var(--font-size-sm)',
+              fontWeight: 500,
+              color: 'var(--color-text)',
+              padding: '7px var(--space-4)',
+              borderRadius: 'var(--radius-full)',
+              background: 'var(--glass-bg-soft)',
+              border: '1px solid var(--glass-border-subtle)',
+              transition: 'all var(--transition-fast)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--glass-bg-strong)'
+              e.currentTarget.style.transform = 'translateY(-1px)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'var(--glass-bg-soft)'
+              e.currentTarget.style.transform = 'none'
+            }}
+          >
+            所有项目
+          </button>
+        )}
+>>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
       </div>
     </header>
   )

@@ -12,6 +12,7 @@ import type {
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
 import { decryptApiKey, getChannelByIdRaw } from './channel-manager'
+import { handleGuideMessage } from './guide-agent-service'
 
 type StreamPublisher = (event: AgentEvent) => void
 type SDKQuery = (prompt: string, options: SDKQueryOptions) => AsyncIterable<SDKMessage>
@@ -33,7 +34,7 @@ const SILENT_RETRY_THRESHOLD = 5
 
 const activeSessions = new Map<string, ActiveRun>()
 let streamPublisher: StreamPublisher = () => undefined
-let sdkQuery: SDKQuery = mockSDKQuery
+let sdkQuery: SDKQuery = anthropicMessagesQuery
 let retrySleep: (ms: number) => Promise<void> = sleep
 
 export function setAgentStreamPublisher(publisher: StreamPublisher): void {
@@ -90,6 +91,13 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       timestamp: Date.now(),
     })
 
+    if (shouldUseGuideAgent(input.current_stage)) {
+      await handleGuideMessage(input, streamPublisher)
+      persistTerminalMessage(input.session_id, 'completed')
+      streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
+      return { accepted: true, session_id: input.session_id, stream_started: true }
+    }
+
     await runWithRetry(input, async () => {
       const stream = sdkQuery(input.content, { env, signal: abortController.signal, sessionId: input.session_id })
       run.iterator = stream[Symbol.asyncIterator]()
@@ -113,14 +121,18 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     })
 
     persistAssistantMessages(input.session_id, received)
+    persistTerminalMessage(input.session_id, 'completed')
     streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
 
     return { accepted: true, session_id: input.session_id, stream_started: true }
   } catch (error) {
     persistAssistantMessages(input.session_id, received)
-    streamPublisher(makeEvent(input, 'error', {
-      code: String(error).includes('AGENT_SESSION_BUSY') ? 'AGENT_SESSION_BUSY' : 'AGENT_SDK_ERROR',
-    }))
+    const code = String(error).includes('AGENT_SESSION_BUSY') ? 'AGENT_SESSION_BUSY' : 'AGENT_SDK_ERROR'
+    streamPublisher(makeEvent(input, 'error', { code }))
+    persistTerminalMessage(input.session_id, 'error', {
+      code,
+      message: error instanceof Error ? error.message : String(error),
+    })
     throw error
   } finally {
     await run.iterator?.return?.()
@@ -202,6 +214,30 @@ function persistAssistantMessages(sessionId: string, sdkMessages: SDKMessage[]):
   }
 }
 
+/**
+ * 将终态（成功/失败）以 system 消息追加到会话 JSONL，
+ * 使本地日志可独立还原会话结束原因，不依赖内存流事件。
+ */
+function persistTerminalMessage(
+  sessionId: string,
+  status: 'completed' | 'error',
+  detail?: { code?: string; message?: string },
+): void {
+  const text =
+    status === 'completed'
+      ? '[terminal] status=completed'
+      : `[terminal] status=error code=${detail?.code ?? 'AGENT_SDK_ERROR'} message=${truncate(detail?.message ?? '')}`
+  appendAgentMessage(sessionId, {
+    role: 'system',
+    content: [{ type: 'text', text }],
+    timestamp: Date.now(),
+  })
+}
+
+function truncate(value: string, max = 200): string {
+  return value.length > max ? `${value.slice(0, max)}…` : value
+}
+
 function convertSDKMessage(input: AgentSendMessageInput, sdkMessage: SDKMessage): AgentEvent | undefined {
   if (sdkMessage.type === 'assistant') {
     return makeEvent(input, 'message_delta', {
@@ -252,4 +288,46 @@ async function* mockSDKQuery(prompt: string, options: SDKQueryOptions): AsyncGen
     },
   }
   yield { type: 'result', subtype: 'success' }
+}
+
+async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions): AsyncGenerator<SDKMessage> {
+  if (!options.env.PATH && !options.env.Path) throw new Error('SDK env missing PATH')
+  if (options.signal.aborted) throw new Error('AGENT_CANCELLED')
+  const apiKey = options.env.ANTHROPIC_AUTH_TOKEN
+  if (!apiKey || apiKey === 'test-key-main-only') {
+    throw new Error('CHANNEL_NOT_FOUND: configure a model channel before using the SDK')
+  }
+  const baseUrl = (options.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/+$/, '')
+  const response = await fetch(`${baseUrl}/v1/messages`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'anthropic-version': '2023-06-01',
+      'x-api-key': apiKey,
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: options.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
+      max_tokens: 1200,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+    signal: options.signal,
+  })
+  if (!response.ok) {
+    throw Object.assign(new Error(`SDK request failed with ${response.status}`), { statusCode: response.status })
+  }
+  const data = (await response.json()) as { content?: Array<{ type?: string; text?: string }> }
+  const text = data.content
+    ?.filter((block) => block.type === 'text')
+    .map((block) => block.text ?? '')
+    .join('') ?? ''
+  yield {
+    type: 'assistant',
+    message: { role: 'assistant', content: [{ type: 'text', text }] },
+  }
+  yield { type: 'result', subtype: 'success' }
+}
+
+function shouldUseGuideAgent(stage: AgentSendMessageInput['current_stage']): boolean {
+  return stage === 'clarifying' || stage === 'blocked_for_user_decision'
 }

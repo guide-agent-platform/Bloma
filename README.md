@@ -85,6 +85,7 @@
 | 文档 | 说明 |
 |---|---|
 | `test-plan.md` | 测试分层、Mock 策略、CI、发布门禁 |
+| `testing-standards.md` | 功能域、测试 ID、文件写法、结果分类和测试报告规范 |
 | `features/` | 6 个 GWT Feature 文件 |
 
 Feature 文件：
@@ -120,6 +121,7 @@ Feature 文件：
 - 架构层：架构设计、组件设计、Prompt、数据模型、类图、时序图。
 - 接口层：API 规范。
 - 测试层：测试计划和 6 个 GWT Feature。
+- 测试规范：测试编写、稳定 ID、失败分类和报告要求。
 - 计划层：Sprint 计划和科研计划。
 - 顶层：README。
 
@@ -195,8 +197,47 @@ Phase 1 发布前必须满足：
 
 ---
 
-## 9. 修订记录
+## 9. 开发与测试环境
+
+### 9.1 环境准备
+
+- Node.js 22.13 或更新版本（本次验证使用 24.12.0），npm 10 或更新版本（本次验证使用 11.6.4）。
+- Windows 10/11；Electron 动态验收需要桌面会话。
+- 首次拉取后执行 `npm ci`，依赖版本以 `package-lock.json` 为准。
+- 不提交 `node_modules/`、`dist/`、`dist-main/`、`coverage/`、`test-results/`、`.vitest/`、`.proma-test/` 或日志文件。
+- 新增或升级依赖时提交 `package.json` 和 `package-lock.json`，不要提交安装目录或构建产物。
+
+### 9.2 主要依赖
+
+| 用途 | 依赖 |
+|---|---|
+| 桌面运行 | Electron |
+| Renderer | React、React DOM、Jotai |
+| 类型与构建 | TypeScript、Vite、esbuild |
+| 自动化测试 | Vitest、Testing Library、jsdom |
+
+### 9.3 验证命令
+
+```bash
+npm run typecheck
+npm run build
+npm run test:unit
+npm run test:integration
+npm run test:regression:sprint0
+npm run test:regression:sprint1
+npm run test:acceptance:sprint0
+npm run test:acceptance:sprint1
+npm run test:electron-smoke
+npm run test:all
+npm run docs:check
+```
+
+测试写入文件时必须使用临时 `PROMA_HOME`，完整规则见 `docs/06_TESTS/testing-standards.md`。
+
+## 10. 修订记录
 
 | 版本 | 日期 | 修订内容 |
 |------|------|----------|
 | v1.0 | 2026-07-10 | 首版，建立项目总览、文档导航、Proma core 约束、三人分工、实现顺序和发布门禁 |
+| v1.1 | 2026-07-25 | 增加测试编写与报告规范导航 |
+| v1.2 | 2026-07-25 | 增加开发依赖、测试命令和 Git 产物边界说明 |

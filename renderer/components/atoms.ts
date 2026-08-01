@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 /**
  * Sprint 1 Components Atoms — B 角色本地状态
  *
@@ -14,11 +15,18 @@ import type {
   AgentMessage,
   AgentSessionMeta,
   PermissionRequest,
+=======
+export * from '../agent-atoms'
+export type {
+  AgentEvent,
+  AgentMessage,
+>>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
   Project,
   ProjectMode,
   Snapshot,
   WorkflowStage,
 } from '../../shared/types'
+<<<<<<< HEAD
 
 // 重新导出以便组件统一从 ./atoms 导入
 export type {
@@ -101,3 +109,5 @@ export {
 /** 工作区等待状态（本地 UI 状态，无需跨组件持久化） */
 export const workspaceWaitingAtom = atom<boolean>(false)
 export const workspaceWaitStartAtom = atom<number | undefined>(undefined)
+=======
+>>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84

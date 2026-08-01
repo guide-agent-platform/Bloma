@@ -13,9 +13,16 @@ export interface WaitingFeedbackProps {
  * 等待反馈卡片
  *
  * 三级递进（interaction-spec §6）：
+<<<<<<< HEAD
  * - ≤10 秒：显示当前在做什么（R-WAIT-01）
  * - >10 秒：加入安全感说明（R-WAIT-02）
  * - >120 秒：提供"继续等待"或"查看已有部分"选项（R-WAIT-03）
+=======
+ * - >5 秒：显示当前在做什么并加入安全感说明
+ * - >120 秒：提供"继续等待"或"查看已有部分"选项
+ *
+ * 注：前 5 秒由 ChatPanel 控制不渲染本组件，避免一进入等待就立刻提示。
+>>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
  */
 export const WaitingFeedback: React.FC<WaitingFeedbackProps> = ({
   elapsedSeconds,
@@ -23,7 +30,11 @@ export const WaitingFeedback: React.FC<WaitingFeedbackProps> = ({
   onContinueWaiting,
   onViewPartial,
 }) => {
+<<<<<<< HEAD
   const level: WaitLevel = elapsedSeconds > 120 ? 'timeout' : elapsedSeconds > 10 ? 'long' : 'normal'
+=======
+  const level: WaitLevel = elapsedSeconds >= 120 ? 'timeout' : elapsedSeconds >= 5 ? 'long' : 'normal'
+>>>>>>> 5a004360480c0c81d2999731a003e93e53bcaa84
 
   const messages: Record<WaitLevel, { title: string; safety?: string }> = {
     normal: { title: `我正在帮你${actionLabel}。` },
