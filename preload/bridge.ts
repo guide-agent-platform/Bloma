@@ -29,8 +29,10 @@ import type {
   ElectronAPI,
   PermissionResponseInput,
   PointCorrectionInput,
+  ProjectArchiveInput,
   ProjectCreateInput,
   ProjectUpgradeInput,
+  RequestEnvelope,
   SandboxRunInput,
   SandboxStopInput,
   SnapshotCreateInput,
@@ -56,10 +58,10 @@ const electronAPI: ElectronAPI = {
   project: {
     create: (input: ProjectCreateInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_CREATE, input),
-	    list: (input: { request_id: string }) =>
-	      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_LIST, input),
-	    archive: (input: { request_id: string; project_id: string }) =>
-	      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_ARCHIVE, input),
+    list: (input: RequestEnvelope) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_LIST, input),
+    archive: (input: ProjectArchiveInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_ARCHIVE, input),
     confirmSketch: (input: ConfirmSketchInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_CONFIRM_SKETCH, input),
     submitCorrection: (input: PointCorrectionInput) =>

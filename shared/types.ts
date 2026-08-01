@@ -24,6 +24,7 @@ export const IPC_CHANNELS = {
   PROJECT_ARCHIVE: 'project:archive',
   PROJECT_CONFIRM_SKETCH: 'project:confirm-sketch',
   PROJECT_SUBMIT_CORRECTION: 'project:submit-correction',
+  PROJECT_ARCHIVE: 'project:archive',
   PROJECT_UPGRADE: 'project:upgrade',
   SANDBOX_RUN: 'sandbox:run',
   SANDBOX_STOP: 'sandbox:stop',
@@ -336,6 +337,10 @@ export interface ProjectUpgradeInput extends RequestEnvelope {
   session_id: string
 }
 
+export interface ProjectArchiveInput extends RequestEnvelope {
+  project_id: string
+}
+
 // =========================================================================
 // 10. 沙箱
 // =========================================================================
@@ -471,10 +476,8 @@ export type ElectronAPI = {
   }
   project: {
     create(input: ProjectCreateInput): Promise<ApiResult<Project>>
-	    list(input?: RequestEnvelope): Promise<ApiResult<Project[]>>
-	    archive(input: { request_id: string; project_id: string }): Promise<ApiResult<Project>>
-    confirmSketch(input: ConfirmSketchInput): Promise<ApiResult<Project>>
-    submitCorrection(input: PointCorrectionInput): Promise<ApiResult<RevisionAccepted>>
+    list(input: RequestEnvelope): Promise<ApiResult<Project[]>>
+    archive(input: ProjectArchiveInput): Promise<ApiResult<Project>>
     upgrade(input: ProjectUpgradeInput): Promise<ApiResult<Project>>
   }
   sandbox: {

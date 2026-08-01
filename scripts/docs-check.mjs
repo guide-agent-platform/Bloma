@@ -14,6 +14,7 @@ const expectedChannels = [
   'project:list',
   'project:confirm-sketch',
   'project:submit-correction',
+  'project:archive',
   'project:upgrade',
   'sandbox:run',
   'sandbox:stop',

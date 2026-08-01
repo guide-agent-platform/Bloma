@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
@@ -10,7 +10,9 @@ import {
   runSandbox,
   setSandboxRuntimeForTests,
   stopSandbox,
+  trackAnalytics,
 } from '../../main/platform-services'
+import { getAnalyticsPath } from '../../storage/config-paths'
 
 describe('PlatformServices sandbox runtime', () => {
   const originalPromaHome = process.env.PROMA_HOME
@@ -139,6 +141,55 @@ describe('PlatformServices sandbox runtime', () => {
     } finally {
       stopSandbox({ request_id: 'req-stop-real', project_id: project.project_id })
     }
+  })
+})
+
+describe('PlatformServices analytics', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+  })
+
+  it('records an event under the project workspace slug', () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-analytics-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-proj', mode: 'quick' })
+
+    const result = trackAnalytics({
+      request_id: 'req-ana',
+      event: {
+        event_type: 'project_created',
+        project_id: project.project_id,
+        payload: { mode: 'quick' },
+        privacy_level: 'research_safe',
+      },
+    })
+
+    expect(result.recorded).toBe(true)
+    const file = getAnalyticsPath('default-software-builder')
+    expect(existsSync(file)).toBe(true)
+    expect(readFileSync(file, 'utf8')).toContain('project_created')
+  })
+
+  it('falls back to the default workspace when the project is missing without throwing', () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-analytics-'))
+    process.env.PROMA_HOME = home
+
+    const result = trackAnalytics({
+      request_id: 'req-ana-missing',
+      event: {
+        event_type: 'project_finalized',
+        project_id: 'no-such-project',
+        payload: {},
+        privacy_level: 'research_safe',
+      },
+    })
+
+    expect(result.recorded).toBe(true)
+    const file = getAnalyticsPath('default-software-builder')
+    expect(existsSync(file)).toBe(true)
+    expect(readFileSync(file, 'utf8')).toContain('project_finalized')
   })
 })
 

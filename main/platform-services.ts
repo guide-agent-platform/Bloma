@@ -304,7 +304,7 @@ export function syncDocuments(input: DocumentSyncInput): DocumentSyncResult {
 }
 
 export function trackAnalytics(input: AnalyticsTrackInput): AnalyticsTrackResult {
-  const workspaceSlug = input.event.project_id ? findProject(input.event.project_id).workspace_slug : 'default-software-builder'
+  const workspaceSlug = resolveAnalyticsWorkspace(input.event.project_id)
   const eventId = randomUUID()
   appendJsonLine(getAnalyticsPath(workspaceSlug), {
     event_id: eventId,
@@ -312,4 +312,14 @@ export function trackAnalytics(input: AnalyticsTrackInput): AnalyticsTrackResult
     created_at: new Date().toISOString(),
   })
   return { recorded: true, event_id: eventId }
+}
+
+/** 项目缺失（已归档/删除）时兜底到默认工作区，不让埋点失败反噬业务。 */
+function resolveAnalyticsWorkspace(projectId: string | undefined): string {
+  if (!projectId) return 'default-software-builder'
+  try {
+    return findProject(projectId).workspace_slug
+  } catch {
+    return 'default-software-builder'
+  }
 }

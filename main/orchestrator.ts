@@ -53,13 +53,36 @@ export function isSessionActive(sessionId: string): boolean {
   return activeSessions.has(sessionId)
 }
 
+/** SDK 子进程环境白名单：仅透传运行 SDK 所需的基础环境，避免宿主机 ANTHROPIC_/CLAUDE_ 历史配置污染 Agent 渠道。 */
+const SDK_ENV_ALLOWLIST = [
+  'PATH',
+  'Path',
+  'HOME',
+  'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'TMP',
+  'TEMP',
+  'TMPDIR',
+  'SystemRoot',
+  'WINDIR',
+  'HTTPS_PROXY',
+  'HTTP_PROXY',
+  'NO_PROXY',
+  'https_proxy',
+  'http_proxy',
+  'no_proxy',
+] as const
+
 export function buildSdkEnv(apiKey: string, baseUrl: string, model: string): Record<string, string> {
-  const env: Record<string, string> = { ...(process.env as Record<string, string>) }
+  const env: Record<string, string> = {}
+  for (const key of SDK_ENV_ALLOWLIST) {
+    const value = (process.env as Record<string, string>)[key]
+    if (value !== undefined) env[key] = value
+  }
   env.ANTHROPIC_AUTH_TOKEN = apiKey
   env.ANTHROPIC_BASE_URL = baseUrl
   env.ANTHROPIC_MODEL = model
-  delete env.ANTHROPIC_CUSTOM_HEADERS
-  delete env.CLAUDE_CODE_DISABLE_AUTO_UPDATE
   return env
 }
 
@@ -267,27 +290,6 @@ function extractText(blocks: MessageContentBlock[]): string {
     .filter((block) => block.type === 'text')
     .map((block) => block.text ?? '')
     .join('')
-}
-
-async function* mockSDKQuery(prompt: string, options: SDKQueryOptions): AsyncGenerator<SDKMessage> {
-  if (!options.env.PATH && !options.env.Path) throw new Error('SDK env missing PATH')
-  if (options.signal.aborted) throw new Error('AGENT_CANCELLED')
-  yield {
-    type: 'assistant',
-    message: {
-      role: 'assistant',
-      content: [{ type: 'text', text: `收到需求：${prompt.slice(0, 80)}` }],
-    },
-  }
-  if (options.signal.aborted) throw new Error('AGENT_CANCELLED')
-  yield {
-    type: 'assistant',
-    message: {
-      role: 'assistant',
-      content: [{ type: 'text', text: '。Sprint 0 已建立工程底座，后续可接入真实 SDK。' }],
-    },
-  }
-  yield { type: 'result', subtype: 'success' }
 }
 
 async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions): AsyncGenerator<SDKMessage> {

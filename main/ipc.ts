@@ -7,6 +7,7 @@ import type {
   DocumentSyncInput,
   PermissionResponseInput,
   PointCorrectionInput,
+  ProjectArchiveInput,
   ProjectCreateInput,
   ProjectUpgradeInput,
   SandboxRunInput,
@@ -18,7 +19,7 @@ import { IPC_CHANNELS } from '../shared/types'
 import { fail, ok } from './api-result'
 import { cancelAgent, runAgent, setAgentStreamPublisher } from './orchestrator'
 import { resolvePermission, setPermissionRequestPublisher } from './permission-service'
-import { confirmSketch, createProject, listProjects, submitCorrection, upgradeProject } from './project-service'
+import { archiveProject, confirmSketch, createProject, listProjects, submitCorrection, upgradeProject } from './project-service'
 import {
   createSnapshot,
   rollbackSnapshot,
@@ -86,6 +87,13 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     return safeInvoke(extractRequestId(payload), async () => {
       requireFields<{ request_id: string }>(payload, [])
       return listProjects()
+    })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PROJECT_ARCHIVE, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<ProjectArchiveInput>(payload, ['project_id'])
+      return archiveProject(input)
     })
   })
 

@@ -3,6 +3,7 @@ import type {
   ConfirmSketchInput,
   PointCorrectionInput,
   Project,
+  ProjectArchiveInput,
   ProjectCreateInput,
   ProjectUpgradeInput,
   RevisionAccepted,
@@ -69,6 +70,12 @@ export function submitCorrection(input: PointCorrectionInput): RevisionAccepted 
 export function upgradeProject(input: ProjectUpgradeInput): Project {
   const project = updateProject(input.project_id, { mode: 'longterm', current_stage: 'upgrading' })
   appendProjectEvent(project, 'mode_upgraded', input)
+  return project
+}
+
+export function archiveProject(input: ProjectArchiveInput): Project {
+  const project = updateProject(input.project_id, { status: 'archived' })
+  appendProjectEvent(project, 'project_archived', input)
   return project
 }
 
