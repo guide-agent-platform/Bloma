@@ -1,5 +1,4 @@
 import React, { useState, useCallback } from 'react'
-import { Provider, createStore } from 'jotai'
 import { useSetAtom } from 'jotai'
 import { ModeSelectionPage } from './ModeSelectionPage'
 import { WorkspaceShell } from './WorkspaceShell'
@@ -41,12 +40,11 @@ const Aurora: React.FC = () => (
    ========================================================================= */
 
 const App: React.FC = () => {
-  const storeRef = React.useRef(createStore())
   return (
-    <Provider store={storeRef.current}>
+    <>
       <Aurora />
       <AppRoutes />
-    </Provider>
+    </>
   )
 }
 
