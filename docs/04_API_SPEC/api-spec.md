@@ -43,6 +43,7 @@ const IPC_CHANNELS = {
   PROJECT_LIST: "project:list",
   PROJECT_CONFIRM_SKETCH: "project:confirm-sketch",
   PROJECT_SUBMIT_CORRECTION: "project:submit-correction",
+  PROJECT_ARCHIVE: "project:archive",
   PROJECT_UPGRADE: "project:upgrade",
   SANDBOX_RUN: "sandbox:run",
   SANDBOX_STOP: "sandbox:stop",
@@ -360,7 +361,26 @@ type ProjectListResult = Project[];
 
 用途：应用启动时恢复活动项目与会话，避免重启后回到两道门。
 
-### 7.3 `project:confirm-sketch`
+### 7.3 `project:archive`
+
+```ts
+type ProjectArchiveInput = {
+  request_id: string;
+  project_id: string;
+};
+
+// 归档项目：status 置为 "archived"，从活动列表隐藏
+type ProjectArchiveResult = Project;
+```
+
+存储：
+
+- 更新项目索引 JSON，将 `status` 置为 `archived`。
+- 追加 `project_archived` 事件到项目 `events.jsonl`。
+
+用途：历史项目列表提供"归档"操作，归档后不再出现在 `project:list` 返回中。
+
+### 7.4 `project:confirm-sketch`
 
 ```ts
 type ConfirmSketchInput = {
@@ -379,7 +399,7 @@ type ConfirmSketchInput = {
 - `needs_change`：生成 revision task。
 - 决策追加写入 JSONL。
 
-### 7.4 `project:submit-correction`
+### 7.5 `project:submit-correction`
 
 ```ts
 type PointCorrectionInput = {

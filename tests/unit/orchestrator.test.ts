@@ -36,6 +36,37 @@ describe('AgentOrchestrator', () => {
     expect(env.ANTHROPIC_MODEL).toBe('model-a')
   })
 
+  it('strips host ANTHROPIC_*/CLAUDE_* config and keeps only allowlisted env', () => {
+    const saved = {
+      PATH: process.env.PATH,
+      USERPROFILE: process.env.USERPROFILE,
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+      ANTHROPIC_CUSTOM_HEADERS: process.env.ANTHROPIC_CUSTOM_HEADERS,
+      CLAUDE_CODE_DISABLE_AUTO_UPDATE: process.env.CLAUDE_CODE_DISABLE_AUTO_UPDATE,
+    }
+    process.env.PATH = 'test-path'
+    process.env.USERPROFILE = 'test-home'
+    process.env.ANTHROPIC_API_KEY = 'leaked-host-key'
+    process.env.ANTHROPIC_CUSTOM_HEADERS = '{"x":"y"}'
+    process.env.CLAUDE_CODE_DISABLE_AUTO_UPDATE = 'true'
+    try {
+      const env = buildSdkEnv('secret', 'https://example.test', 'model-a')
+      expect(env.PATH).toBe('test-path')
+      expect(env.USERPROFILE).toBe('test-home')
+      expect(env.ANTHROPIC_AUTH_TOKEN).toBe('secret')
+      expect(env.ANTHROPIC_BASE_URL).toBe('https://example.test')
+      expect(env.ANTHROPIC_MODEL).toBe('model-a')
+      expect(env.ANTHROPIC_API_KEY).toBeUndefined()
+      expect(env.ANTHROPIC_CUSTOM_HEADERS).toBeUndefined()
+      expect(env.CLAUDE_CODE_DISABLE_AUTO_UPDATE).toBeUndefined()
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    }
+  })
+
   it('persists streamed assistant messages to JSONL and releases active session', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-test-'))
     process.env.PROMA_HOME = home
