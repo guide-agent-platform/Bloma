@@ -179,7 +179,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           />
         )}
 
-        {isWaiting && (
+        {isWaiting && elapsed > 5 && (
           <WaitingFeedback
             elapsedSeconds={elapsed}
             actionLabel={waitActionLabel}

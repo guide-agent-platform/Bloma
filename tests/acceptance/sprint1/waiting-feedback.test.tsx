@@ -73,7 +73,7 @@ describe('Sprint 1 waiting feedback acceptance', () => {
     const viewPartial = vi.fn()
     render(
       <WaitingFeedback
-        elapsedSeconds={120}
+        elapsedSeconds={121}
         actionLabel="生成验证草图"
         onContinueWaiting={continueWaiting}
         onViewPartial={viewPartial}

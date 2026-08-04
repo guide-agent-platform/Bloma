@@ -99,6 +99,7 @@ const AppRoutes: React.FC = () => {
       setWorkflowStage(restored.current_stage)
       setStageLabel(STAGE_LABEL_MAP[restored.current_stage] ?? '处理中')
       setActiveSessionId(sessionId)
+      setProjectList(result.data)
       setRoute('workspace')
     })
   }, [sessionId])
@@ -303,6 +304,24 @@ const AppRoutes: React.FC = () => {
     setPreviewStatus('running')
   }, [setMessages])
 
+  // ==================== 超时操作（超过 120 秒） ====================
+
+  const handleContinueWaiting = useCallback(() => {
+    // 继续等待：重置等待起点，重新计时
+    setWaitStart(Date.now())
+  }, [])
+
+  const handleViewPartial = useCallback(() => {
+    // 查看已有部分：预览区已展示当前内容，加一条系统消息说明
+    const msg: AgentMessage = {
+      role: 'system',
+      content: [{ type: 'text', text: '这是目前已经生成好的部分。你可以先看看效果，我继续在后台帮你完善。' }],
+      timestamp: Date.now(),
+    }
+    setMessages((prev: AgentMessage[]) => [...prev, msg])
+    setPreviewStatus('running')
+  }, [setMessages])
+
   // ==================== 路由渲染 ====================
 
   if (route === 'mode-selection') {
@@ -340,7 +359,9 @@ const AppRoutes: React.FC = () => {
       }}
       onCorrectionSubmit={handleCorrectionSubmit}
       onRollback={handleRollback}
-      onAllProjects={projectList.length > 1 ? () => {
+      onContinueWaiting={handleContinueWaiting}
+      onViewPartial={handleViewPartial}
+      onAllProjects={projectList.length > 0 ? () => {
         setRoute('project-history')
       } : undefined}
     />

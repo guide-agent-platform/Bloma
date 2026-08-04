@@ -83,12 +83,13 @@ describe('Sprint 1 mode and workspace regression', () => {
     expect(screen.getByRole('button', { name: '看看已有的' })).toBeTruthy()
   })
 
-  it('[S1-PROJECT-003] 选择模式进入工作区后不应提供返回两道门的入口', async () => {
+  it('[S1-PROJECT-003] 选择模式进入工作区后不应返回两道门且应显示所有项目入口', async () => {
     renderAppWithProject('quick')
     fireEvent.click(screen.getByRole('button', { name: /快速尝鲜/ }))
 
     await waitFor(() => expect(screen.getByRole('textbox')).toBeTruthy())
-    expect(screen.queryByRole('button', { name: '所有项目' })).toBeNull()
+    expect(screen.queryByText('你想做什么样的软件？')).toBeNull()
+    expect(screen.getByRole('button', { name: '所有项目' })).toBeTruthy()
   })
 
   it('[S1-UI-003] 长期迭代型工作区应显示文档入口', async () => {
@@ -124,6 +125,35 @@ describe('Sprint 1 mode and workspace regression', () => {
     render(<Provider store={store}><WorkspaceHeader /></Provider>)
 
     expect(screen.getByRole('button', { name: '升级为长期模式' })).toBeTruthy()
+  })
+
+  it('[S1-PROJECT-013] 启动恢复进入工作区后仍能通过所有项目导航到历史列表并新建项目', async () => {
+    const store = createStore()
+    const list = vi.fn().mockResolvedValue({
+      ok: true,
+      request_id: 'req-restore-nav',
+      data: [project('quick')],
+    })
+    window.__jotai_store__ = store
+    window.electronAPI = { project: { list } } as unknown as ElectronAPI
+
+    render(<Provider store={store}><App /></Provider>)
+
+    // 恢复逻辑：本地存在活动项目 → 直接进入工作区（跳过两道门）
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeTruthy())
+    expect(screen.queryByText('你想做什么样的软件？')).toBeNull()
+
+    // 顶栏必须提供「所有项目」入口（sitemap §3：Phase 1 全局元素）→ 当前 FAIL（缺陷②）
+    const allProjectsButton = screen.getByRole('button', { name: '所有项目' })
+    fireEvent.click(allProjectsButton)
+
+    // 到达历史列表：显示恢复的项目 + 「新建项目」入口
+    await waitFor(() => expect(screen.getByRole('button', { name: '新建项目' })).toBeTruthy())
+    expect(screen.getByText('测试项目')).toBeTruthy()
+
+    // 新建项目 → 回到两道门选择页
+    fireEvent.click(screen.getByRole('button', { name: '新建项目' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /快速尝鲜/ })).toBeTruthy())
   })
 })
 

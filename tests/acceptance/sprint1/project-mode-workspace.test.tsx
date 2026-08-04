@@ -68,7 +68,7 @@ describe('Sprint 1 project mode and workspace acceptance', () => {
     expect(screen.getByText('精细打磨')).toBeTruthy()
   })
 
-  it('[S1-PROJECT-008] 进入工作区后不得提供返回两道门重新选模式的入口', async () => {
+  it('[S1-PROJECT-008] 进入工作区后不得返回两道门且应提供所有项目入口', async () => {
     const store = createStore()
     window.__jotai_store__ = store
     window.electronAPI = {
@@ -86,7 +86,8 @@ describe('Sprint 1 project mode and workspace acceptance', () => {
 
     await waitFor(() => expect(screen.getByRole('textbox')).toBeTruthy())
     expect(screen.queryByText('你想做什么样的软件？')).toBeNull()
-    expect(screen.queryByRole('button', { name: /返回.*模式|重新选择|所有项目/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /返回.*模式|重新选择/ })).toBeNull()
+    expect(screen.getByRole('button', { name: '所有项目' })).toBeTruthy()
   })
 
   it('[S1-PROJECT-010] 长期迭代型工作区不得显示降级为快消型入口', () => {

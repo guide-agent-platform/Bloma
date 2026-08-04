@@ -45,6 +45,9 @@ let sandboxHealthCheck: HealthCheck = defaultHealthCheck
 let sandboxSleep: Sleep = sleep
 let snapshotCaptureProvider: SnapshotCaptureProvider = defaultSnapshotCapture
 
+/** 静态服务器在端口被占用（EADDRINUSE）时的退出码，父进程据此重试下一个端口。 */
+const EXIT_PORT_IN_USE = 10
+
 export async function runSandbox(input: SandboxRunInput): Promise<SandboxRunResult> {
   const project = findProject(input.project_id)
 
@@ -110,8 +113,10 @@ async function waitForSandbox(
 ): Promise<{ ok: true } | { ok: false; category: 'process_crashed' | 'startup_timeout' | 'port_unavailable' }> {
   let crashed = false
   let portUnavailable = false
-  child.once('exit', () => {
+  child.once('exit', (code) => {
     crashed = true
+    // 静态服务器在 EADDRINUSE 时以 EXIT_PORT_IN_USE 退出，视为端口不可用并换端口重试
+    if (code === EXIT_PORT_IN_USE) portUnavailable = true
   })
   child.once('error', (error) => {
     crashed = true
@@ -207,7 +212,7 @@ const { extname, join, normalize, resolve, sep } = require('node:path');
 const root = process.cwd();
 const port = Number(process.argv[1]);
 const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml' };
-createServer((req, res) => {
+const server = createServer((req, res) => {
   const rawUrl = new URL(req.url || '/', 'http://localhost');
   const requested = rawUrl.pathname === '/' ? '/index.html' : decodeURIComponent(rawUrl.pathname);
   const normalized = normalize(requested).replace(/^([/\\\\])+/, '');
@@ -225,7 +230,12 @@ createServer((req, res) => {
   }
   res.writeHead(200, { 'Content-Type': types[extname(finalPath)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
   createReadStream(finalPath).pipe(res);
-}).listen(port, '127.0.0.1');
+});
+server.on('error', (err) => {
+  if (err && err.code === 'EADDRINUSE') process.exit(10);
+  throw err;
+});
+server.listen(port, '127.0.0.1');
 `
 
 export async function createSnapshot(input: SnapshotCreateInput): Promise<Snapshot> {
