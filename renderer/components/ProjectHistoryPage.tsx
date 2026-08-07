@@ -56,6 +56,8 @@ const statusLabelMap: Record<string, string> = {
  * - "新建项目"按钮回到两道门选择页
  * - 支持从工作区顶栏"所有项目"进入
  */
+type LoadState = 'loading' | 'loaded' | 'error'
+
 export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
   projects = [],
   onResumeProject,
@@ -63,49 +65,81 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
   onBackToWorkspace,
 }) => {
   const currentProject = useAtomValue(currentProjectAtom)
+  const [loadState, setLoadState] = React.useState<LoadState>('loading')
+  const [ipcProjects, setIpcProjects] = React.useState<Project[]>([])
+  const [errorRetrying, setErrorRetrying] = React.useState(false)
 
-  // 只展示非归档项目，按更新时间倒序
-  const activeProjects = [...projects]
+  // 优先从 IPC 加载项目列表，失败则回退到 props
+  React.useEffect(() => {
+    let cancelled = false
+    async function load() {
+      setLoadState('loading')
+      try {
+        const api = window.electronAPI
+        if (api) {
+          const result = await api.project.list()
+          if (!cancelled && result.ok) {
+            setIpcProjects(result.data)
+            setLoadState('loaded')
+            return
+          }
+        }
+        // 无 IPC 或失败 → 使用 props
+        if (!cancelled) setLoadState('loaded')
+      } catch {
+        if (!cancelled) setLoadState('error')
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [])
+
+  const handleRetry = () => {
+    setErrorRetrying(true)
+    setTimeout(() => {
+      setErrorRetrying(false)
+      // 重试 IPC 或直接展示 props 数据
+      const api = window.electronAPI
+      if (api) {
+        api.project.list().then(r => {
+          if (r.ok) { setIpcProjects(r.data); setLoadState('loaded') }
+          else setLoadState('loaded') // 回退到 props
+        }).catch(() => setLoadState('loaded'))
+      } else {
+        setLoadState('loaded')
+      }
+    }, 800)
+  }
+
+  // 优先 IPC 数据，其次 props
+  const resolvedProjects = ipcProjects.length > 0 ? ipcProjects : projects
+  const activeProjects = [...resolvedProjects]
     .filter((p) => p.status !== 'archived')
     .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
 
   const formatDate = (iso: string): string => {
     try {
       return new Date(iso).toLocaleDateString('zh-CN', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit',
       })
-    } catch {
-      return iso
-    }
+    } catch { return iso }
   }
 
   return (
     <div
       data-ai-id="project-history-page"
       style={{
-        position: 'relative',
-        zIndex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        minHeight: '100vh',
-        padding: 'var(--space-8) var(--space-6)',
+        position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column',
+        alignItems: 'center', minHeight: '100vh', padding: 'var(--space-8) var(--space-6)',
         background: 'transparent',
       }}
     >
       {/* 顶栏导航 */}
       <div
         style={{
-          width: '100%',
-          maxWidth: 780,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 'var(--space-8)',
+          width: '100%', maxWidth: 780, display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between', marginBottom: 'var(--space-8)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
@@ -113,10 +147,8 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
             <button
               onClick={onBackToWorkspace}
               style={{
-                fontSize: 'var(--font-size-sm)',
-                color: 'var(--color-text-muted)',
-                padding: 'var(--space-2) var(--space-3)',
-                borderRadius: 'var(--radius-sm)',
+                fontSize: 'var(--font-size-sm)', color: 'var(--color-text-muted)',
+                padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-sm)',
                 transition: 'color var(--transition-fast)',
               }}
             >
@@ -167,25 +199,99 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
       {/* 项目列表 */}
       <div
         style={{
-          width: '100%',
-          maxWidth: 780,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 'var(--space-3)',
+          width: '100%', maxWidth: 780, display: 'flex', flexDirection: 'column', gap: 'var(--space-3)',
         }}
       >
-        {activeProjects.length === 0 ? (
-          <EmptyState onNewProject={onNewProject} />
-        ) : (
-          activeProjects.map((project) => (
-            <ProjectRow
-              key={project.project_id}
-              project={project}
-              isCurrent={currentProject?.project_id === project.project_id}
-              onResume={() => onResumeProject(project)}
-            />
-          ))
+        {/* 加载状态：骨架屏 */}
+        {loadState === 'loading' && (
+          <>
+            {[1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="tile"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 'var(--space-4)',
+                  padding: 'var(--space-4) var(--space-5)',
+                  animation: `shimmer 1.5s ease-in-out ${i * 0.15}s infinite`,
+                  background: 'linear-gradient(90deg, var(--glass-bg-soft) 25%, var(--glass-bg) 50%, var(--glass-bg-soft) 75%)',
+                  backgroundSize: '200% 100%',
+                }}
+              >
+                <span style={{ width: 44, height: 44, borderRadius: 'var(--radius-md)', background: 'var(--gray-200)', flexShrink: 0 }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ width: '40%', height: 14, borderRadius: 4, background: 'var(--gray-200)', marginBottom: 8 }} />
+                  <div style={{ width: '60%', height: 10, borderRadius: 4, background: 'var(--gray-200)' }} />
+                </div>
+                <div style={{ width: 60, height: 10, borderRadius: 4, background: 'var(--gray-200)', flexShrink: 0 }} />
+              </div>
+            ))}
+          </>
         )}
+
+        {/* 错误状态 */}
+        {loadState === 'error' && (
+          <div style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+            padding: 'var(--space-12) var(--space-6)', textAlign: 'center',
+          }}>
+            <span style={{
+              width: 64, height: 64, borderRadius: 'var(--radius-lg)',
+              background: 'var(--color-danger-soft)', display: 'inline-flex',
+              alignItems: 'center', justifyContent: 'center', marginBottom: 'var(--space-5)',
+              color: 'var(--color-danger)', fontSize: 28,
+            }}>!</span>
+            <h2 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 600, marginBottom: 'var(--space-2)', color: 'var(--color-text)' }}>
+              暂时无法加载你的项目
+            </h2>
+            <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-5)', maxWidth: 360, lineHeight: 1.6 }}>
+              可能是本地存储出现了问题。你可以重试，也可以跳过直接新建项目。
+            </p>
+            <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
+              <button
+                onClick={handleRetry}
+                disabled={errorRetrying}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)',
+                  fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--white)',
+                  padding: '10px var(--space-5)', borderRadius: 'var(--radius-full)',
+                  background: 'linear-gradient(135deg, var(--color-quick), var(--color-quick-bright))',
+                  boxShadow: '0 4px 12px -2px rgba(124,58,237,0.4)',
+                  cursor: errorRetrying ? 'wait' : 'pointer', fontFamily: 'inherit', border: 'none',
+                  opacity: errorRetrying ? 0.7 : 1,
+                }}
+              >
+                {errorRetrying ? '重试中…' : '重试'}
+              </button>
+              <button
+                onClick={onNewProject}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)',
+                  fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--color-text)',
+                  padding: '10px var(--space-5)', borderRadius: 'var(--radius-full)',
+                  background: 'var(--glass-bg-soft)', border: '1px solid var(--color-border)',
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}
+              >
+                <Sparkles size={15} />
+                跳过，直接新建项目
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 正常状态 */}
+        {loadState === 'loaded' && activeProjects.length === 0 && (
+          <EmptyState onNewProject={onNewProject} />
+        )}
+
+        {loadState === 'loaded' && activeProjects.map((project) => (
+          <ProjectRow
+            key={project.project_id}
+            project={project}
+            isCurrent={currentProject?.project_id === project.project_id}
+            onResume={() => onResumeProject(project)}
+          />
+        ))}
       </div>
     </div>
   )
