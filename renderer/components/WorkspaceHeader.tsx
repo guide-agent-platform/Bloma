@@ -3,9 +3,11 @@ import { useAtomValue } from 'jotai'
 import { StageIndicator } from './StageIndicator'
 import { Sparkles } from './icons'
 import {
+  canUpgradeAtom,
   currentProjectAtom,
-  projectModeAtom,
+  documentPanelExpandedAtom,
   networkOnlineAtom,
+  projectModeAtom,
   stageIndicatorLabelAtom,
   workflowStageAtom,
 } from './atoms'
@@ -26,6 +28,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects 
   const isOnline = useAtomValue(networkOnlineAtom)
   const stageLabel = useAtomValue(stageIndicatorLabelAtom)
   const stage = useAtomValue(workflowStageAtom)
+  const canUpgrade = useAtomValue(canUpgradeAtom)
+  const [docPanelExpanded, setDocPanelExpanded] = React.useState(false)
   const stageActive = ACTIVE_STAGES.has(stage)
 
   const modeLabel = mode === 'quick' ? '快速尝鲜' : mode === 'longterm' ? '精细打磨' : ''
@@ -101,7 +105,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects 
         <StageIndicator label={stageLabel} active={stageActive} />
       </div>
 
-      {/* 右侧：联网 + 所有项目 */}
+      {/* 右侧：联网 + 文档 + 升级 + 所有项目 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
         <span
           title={isOnline ? '已连接' : '网络离线'}
@@ -126,39 +130,85 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects 
           {isOnline ? '已连接' : '离线'}
         </span>
 
-        <button
-          onClick={onAllProjects}
-          disabled={!onAllProjects}
-          data-ai-id="all-projects-button"
-          title="查看所有项目"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 'var(--space-1)',
-            fontSize: 'var(--font-size-sm)',
-            fontWeight: 500,
-            color: onAllProjects ? 'var(--color-text)' : 'var(--color-text-muted)',
-            padding: '7px var(--space-4)',
-            borderRadius: 'var(--radius-full)',
-            background: 'var(--glass-bg-soft)',
-            border: '1px solid var(--glass-border-subtle)',
-            transition: 'all var(--transition-fast)',
-            cursor: onAllProjects ? 'pointer' : 'default',
-            opacity: onAllProjects ? 1 : 0.6,
-          }}
-          onMouseEnter={(e) => {
-            if (!onAllProjects) return
-            e.currentTarget.style.background = 'var(--glass-bg-strong)'
-            e.currentTarget.style.transform = 'translateY(-1px)'
-          }}
-          onMouseLeave={(e) => {
-            if (!onAllProjects) return
-            e.currentTarget.style.background = 'var(--glass-bg-soft)'
-            e.currentTarget.style.transform = 'none'
-          }}
-        >
-          所有项目
-        </button>
+        {/* 长期迭代型：文档入口 */}
+        {mode === 'longterm' && (
+          <button
+            data-ai-id="docs-button"
+            onClick={() => setDocPanelExpanded((v) => !v)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 'var(--space-1)',
+              fontSize: 'var(--font-size-sm)',
+              fontWeight: 500,
+              color: 'var(--color-text)',
+              padding: '7px var(--space-4)',
+              borderRadius: 'var(--radius-full)',
+              background: 'var(--glass-bg-soft)',
+              border: '1px solid var(--glass-border-subtle)',
+              cursor: 'pointer',
+              transition: 'all var(--transition-fast)',
+            }}
+          >
+            文档
+          </button>
+        )}
+
+        {/* 快消型已完成：升级入口 */}
+        {canUpgrade && (
+          <button
+            data-ai-id="upgrade-to-longterm-button"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 'var(--space-1)',
+              fontSize: 'var(--font-size-sm)',
+              fontWeight: 600,
+              color: 'var(--white)',
+              padding: '7px var(--space-4)',
+              borderRadius: 'var(--radius-full)',
+              background: 'linear-gradient(135deg, var(--violet-600), var(--pink-500))',
+              border: 'none',
+              cursor: 'pointer',
+              transition: 'all var(--transition-fast)',
+            }}
+          >
+            升级为长期模式
+          </button>
+        )}
+
+        {/* 所有项目按钮（仅在传入回调时显示） */}
+        {onAllProjects && (
+          <button
+            onClick={onAllProjects}
+            data-ai-id="all-projects-button"
+            title="查看所有项目"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 'var(--space-1)',
+              fontSize: 'var(--font-size-sm)',
+              fontWeight: 500,
+              color: 'var(--color-text)',
+              padding: '7px var(--space-4)',
+              borderRadius: 'var(--radius-full)',
+              background: 'var(--glass-bg-soft)',
+              border: '1px solid var(--glass-border-subtle)',
+              transition: 'all var(--transition-fast)',
+              cursor: 'pointer',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--glass-bg-strong)'
+              e.currentTarget.style.transform = 'translateY(-1px)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'var(--glass-bg-soft)'
+              e.currentTarget.style.transform = 'none'
+            }}
+          >
+            所有项目
+          </button>
+        )}
       </div>
     </header>
   )

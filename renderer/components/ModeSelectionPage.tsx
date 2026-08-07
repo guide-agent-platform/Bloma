@@ -19,10 +19,12 @@ export const ModeSelectionPage: React.FC<ModeSelectionPageProps> = ({
   const [, setModeSelected] = useAtom(modeSelectedAtom)
   const [, setCurrentProject] = useAtom(currentProjectAtom)
   const [isSelecting, setIsSelecting] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
 
   const handleSelect = async (mode: 'quick' | 'longterm') => {
     if (isSelecting) return // 防止双击重复创建
     setIsSelecting(true)
+    setError(null)
 
     try {
       // 通过 IPC 创建项目
@@ -34,8 +36,13 @@ export const ModeSelectionPage: React.FC<ModeSelectionPageProps> = ({
         })
         if (result.ok) {
           setCurrentProject(result.data)
+        } else {
+          // 项目创建失败：展示用户可见错误，不进入工作区
+          const message = result.error?.user_visible_message ?? '项目创建失败，请重试。'
+          setError(message)
+          setIsSelecting(false)
+          return
         }
-        // 如果 IPC 失败（如开发环境），仍然进入工作区
       }
 
       setProjectMode(mode)
@@ -88,6 +95,27 @@ export const ModeSelectionPage: React.FC<ModeSelectionPageProps> = ({
         >
           ← 返回项目列表
         </button>
+      )}
+
+      {/* 错误提示 */}
+      {error && (
+        <div
+          role="alert"
+          style={{
+            position: 'absolute',
+            top: 'var(--space-4)',
+            maxWidth: 460,
+            padding: 'var(--space-3) var(--space-4)',
+            fontSize: 'var(--font-size-sm)',
+            color: 'var(--color-danger)',
+            background: 'var(--danger-soft, #FEF2F2)',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--color-danger)',
+            zIndex: 3,
+          }}
+        >
+          {error}
+        </div>
       )}
 
       {/* Hero */}

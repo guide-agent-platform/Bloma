@@ -40,6 +40,7 @@ describe('Proma core boundary', () => {
 
 function scanDir(dir: string, forbidden: RegExp[]): void {
   for (const entry of readdirSync(dir)) {
+    if (entry === 'node_modules') continue
     const full = join(dir, entry)
     if (statSync(full).isDirectory()) {
       scanDir(full, forbidden)
