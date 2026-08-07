@@ -1,7 +1,7 @@
 ﻿import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildSdkEnv,
   isSessionActive,
@@ -12,6 +12,19 @@ import {
   shouldRetry,
 } from '../../main/orchestrator'
 import type { SDKMessage } from '../../shared/types'
+
+vi.mock('../../main/channel-manager', () => ({
+  getChannelByIdRaw: () => ({
+    id: 'test-channel',
+    name: 'Test',
+    provider_type: 'anthropic',
+    base_url: 'https://api.anthropic.com',
+    api_key: 'encrypted-test-key',
+    models: [{ id: 'claude-sonnet-4-6', name: 'Claude', enabled: true }],
+    enabled: true,
+  }),
+  decryptApiKey: () => 'test-key-from-channel',
+}))
 
 describe('AgentOrchestrator', () => {
   const originalPromaHome = process.env.PROMA_HOME
@@ -78,6 +91,7 @@ describe('AgentOrchestrator', () => {
       content: '做一个记账工具',
       mode: 'quick',
       current_stage: 'generating_mvp',
+      channel_id: 'test-channel',
       metadata: { source: 'chat' },
     })
 
@@ -108,6 +122,7 @@ describe('AgentOrchestrator', () => {
         content: '触发错误',
         mode: 'quick',
         current_stage: 'generating_mvp',
+        channel_id: 'test-channel',
       }),
     ).rejects.toThrow()
 
@@ -136,10 +151,11 @@ describe('AgentOrchestrator', () => {
       content: '测试 env',
       mode: 'quick',
       current_stage: 'generating_mvp',
+      channel_id: 'test-channel',
     })
 
     expect(capturedEnv?.PATH).toBe('test-path')
-    expect(capturedEnv?.ANTHROPIC_AUTH_TOKEN).toBe('test-key-main-only')
+    expect(capturedEnv?.ANTHROPIC_AUTH_TOKEN).toBe('test-key-from-channel')
   })
 
   it('retries 429, 5xx, 529, and transient network errors', () => {
@@ -171,6 +187,7 @@ describe('AgentOrchestrator', () => {
       content: '测试 retry',
       mode: 'quick',
       current_stage: 'generating_mvp',
+      channel_id: 'test-channel',
     })
 
     expect(attempts).toBe(7)

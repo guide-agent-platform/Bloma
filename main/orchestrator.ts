@@ -106,7 +106,8 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       const apiKey = decryptApiKey(channel.api_key)
       env = buildSdkEnv(apiKey, channel.base_url, model)
     } else {
-      env = buildSdkEnv('test-key-main-only', 'https://api.anthropic.com', model)
+      // 无渠道配置时直接抛错，不留测试占位 key
+      throw new Error('CHANNEL_NOT_FOUND: configure a model channel before using the SDK')
     }
 
     appendAgentMessage(input.session_id, {
@@ -309,7 +310,6 @@ async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions)
       'content-type': 'application/json',
       'anthropic-version': '2023-06-01',
       'x-api-key': apiKey,
-      authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
       model: options.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',

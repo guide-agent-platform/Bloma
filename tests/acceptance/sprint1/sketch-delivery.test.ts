@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   clearSandboxRuntimeForTests,
   createSnapshot,
@@ -18,6 +18,19 @@ import {
   useTemporaryPromaHome,
   type TemporaryPromaHome,
 } from '../support/test-environment'
+
+vi.mock('../../../main/channel-manager', () => ({
+  getChannelByIdRaw: () => ({
+    id: 'test-channel',
+    name: 'Test',
+    provider_type: 'anthropic',
+    base_url: 'https://api.anthropic.com',
+    api_key: 'encrypted-test-key',
+    models: [{ id: 'claude-sonnet-4-6', name: 'Claude', enabled: true }],
+    enabled: true,
+  }),
+  decryptApiKey: () => 'test-key-from-channel',
+}))
 
 describe('Sprint 1 sketch delivery acceptance', () => {
   let environment: TemporaryPromaHome | undefined
@@ -86,6 +99,7 @@ describe('Sprint 1 sketch delivery acceptance', () => {
       content: '做一个家庭记账页面，可以记录收入支出并查看本月结余',
       mode: 'quick',
       current_stage: 'clarifying',
+      channel_id: 'test-channel',
     })
 
     const types = events.map((event) => event.type)
@@ -152,6 +166,7 @@ describe('Sprint 1 sketch delivery acceptance', () => {
       content: `做一个记账页面，${secretRequirement}`,
       mode: 'quick',
       current_stage: 'clarifying',
+      channel_id: 'test-channel',
     })
 
     const analyticsPath = join(

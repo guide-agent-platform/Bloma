@@ -13,6 +13,7 @@ import { WORKFLOW_STAGES } from '../shared/types'
 import {
   getDocumentsDir,
   getGeneratedProjectPath,
+  getProjectEventsPath,
   getProjectsIndexPath,
   getSnapshotsDir,
 } from '../storage/config-paths'
@@ -121,7 +122,7 @@ function writeProjects(index: ProjectsIndex): void {
 }
 
 function appendProjectEvent(project: Project, type: string, payload: unknown): void {
-  appendJsonLine(`${project.root_path}/events.jsonl`, {
+  appendJsonLine(getProjectEventsPath(WORKSPACE_SLUG, project.project_id), {
     event_id: randomUUID(),
     type,
     payload,

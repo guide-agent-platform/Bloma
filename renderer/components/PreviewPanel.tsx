@@ -146,6 +146,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
               ref={iframeRef}
               src={previewUrl}
               title="软件预览"
+              sandbox="allow-scripts allow-forms"
               style={{ width: '100%', height: '100%', border: 'none', background: 'var(--white)', pointerEvents: correctionActive ? 'none' : 'auto' }}
             />
             {/* 点选纠错透明捕获层：盖在 iframe 上方拦截点击 */}

@@ -7,6 +7,19 @@ import { clearSandboxRuntimeForTests, stopSandbox } from '../../../main/platform
 import { updateProject } from '../../../main/project-service'
 import { IPC_CHANNELS, type AgentEvent, type ApiResult, type Project } from '../../../shared/types'
 
+vi.mock('../../../main/channel-manager', () => ({
+  getChannelByIdRaw: () => ({
+    id: 'test-channel',
+    name: 'Test',
+    provider_type: 'anthropic',
+    base_url: 'https://api.anthropic.com',
+    api_key: 'encrypted-test-key',
+    models: [{ id: 'claude-sonnet-4-6', name: 'Claude', enabled: true }],
+    enabled: true,
+  }),
+  decryptApiKey: () => 'test-key-from-channel',
+}))
+
 type IpcHandler = (_event: unknown, payload: unknown) => unknown
 
 describe('Sprint 1 sketch and upgrade regression', () => {
@@ -38,6 +51,7 @@ describe('Sprint 1 sketch and upgrade regression', () => {
       content: '做个管理工具',
       mode: 'quick',
       current_stage: 'clarifying',
+      channel_id: 'test-channel',
     }) as ApiResult<unknown>
     const decision = app.events.find((item) => item.type === 'user_decision_required')
     const options = decision?.payload.options as Array<{ label: string; description?: string }>
@@ -60,6 +74,7 @@ describe('Sprint 1 sketch and upgrade regression', () => {
       content: '做一个家庭记账页面，可以记录收入支出并展示本月结余',
       mode: 'quick',
       current_stage: 'clarifying',
+      channel_id: 'test-channel',
     }) as ApiResult<unknown>
     const ready = app.events.find((item) => item.type === 'sketch_ready')
     const previewUrl = ready?.payload.preview_url as string

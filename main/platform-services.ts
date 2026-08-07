@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import type {
   AnalyticsTrackInput,
@@ -18,8 +18,8 @@ import type {
   SnapshotRollbackInput,
 } from '../shared/types'
 import { getAnalyticsPath, getDocumentsDir, getSnapshotsDir } from '../storage/config-paths'
-import { appendJsonLine, writeJsonFile } from '../storage/json-store'
-import { findProject } from './project-service'
+import { appendJsonLine, readJsonFile, writeJsonFile } from '../storage/json-store'
+import { findProject, updateProject } from './project-service'
 
 interface SandboxProcess {
   process: ChildProcess
@@ -134,9 +134,15 @@ async function waitForSandbox(
   return { ok: false, category: 'startup_timeout' }
 }
 
+const ALLOWED_SANDBOX_COMMANDS = new Set(['npm run dev', 'npm start', 'node static-server'])
+
 function spawnStaticServer(projectRoot: string, port: number, command?: string): ChildProcess {
   if (command) {
-    const [executable, ...args] = command.replaceAll('{port}', String(port)).split(/\s+/).filter(Boolean)
+    const normalized = command.trim()
+    if (!ALLOWED_SANDBOX_COMMANDS.has(normalized)) {
+      throw new Error(`SANDBOX_COMMAND_NOT_ALLOWED: ${normalized}`)
+    }
+    const [executable, ...args] = normalized.replaceAll('{port}', String(port)).split(/\s+/).filter(Boolean)
     return spawn(executable, args, sandboxSpawnOptions(projectRoot))
   }
   return spawn(resolveNodeExecutable(), ['-e', STATIC_SERVER_SCRIPT, String(port)], sandboxSpawnOptions(projectRoot))
@@ -228,7 +234,12 @@ const server = createServer((req, res) => {
     res.end('Not found');
     return;
   }
-  res.writeHead(200, { 'Content-Type': types[extname(finalPath)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
+  res.writeHead(200, {
+    'Content-Type': types[extname(finalPath)] || 'application/octet-stream',
+    'Cache-Control': 'no-store',
+    // 生成代码不得联网：禁止 fetch/XHR/WebSocket 到任何外部地址
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; font-src 'self'",
+  });
   createReadStream(finalPath).pipe(res);
 });
 server.on('error', (err) => {
@@ -276,19 +287,54 @@ export async function createSnapshot(input: SnapshotCreateInput): Promise<Snapsh
 
 export async function rollbackSnapshot(input: SnapshotRollbackInput): Promise<RollbackResult> {
   const project = findProject(input.project_id)
+  const snapshotDir = getSnapshotsDir(project.workspace_slug, project.project_id)
+
+  // 1. 校验目标快照存在
+  const targetPath = `${snapshotDir}/${input.snapshot_id}.json`
+  if (!existsSync(targetPath)) throw new Error('SNAPSHOT_NOT_FOUND')
+  const target = readJsonFile<Snapshot>(targetPath, null as never)
+  if (!target) throw new Error('SNAPSHOT_NOT_FOUND')
+
+  // 2. 回滚前拍 guard 快照（保留回滚前状态）
   const guard = await createSnapshot({
     request_id: input.request_id,
     project_id: input.project_id,
     kind: 'rollback_guard',
     summary: `回滚前保护快照：${input.reason}`,
     include_documents: true,
-    health_status: 'healthy',
+    health_status: project.current_snapshot_id ? 'healthy' : 'unhealthy',
   })
+
+  // 3. 停掉正在运行的 sandbox（否则文件句柄占用，Windows 下 rmSync 会 EPERM）
+  stopSandbox({ request_id: input.request_id, project_id: project.project_id })
+
+  // 4. 等待文件句柄释放（Windows 异步释放，给 200ms 缓冲）
+  await new Promise((resolve) => setTimeout(resolve, 200))
+
+  // 5. 恢复项目文件（先清空再复制，确保与快照完全一致）
+  rmSync(project.root_path, { recursive: true, force: true })
+  mkdirSync(project.root_path, { recursive: true })
+  cpSync(target.files_archive_path, project.root_path, { recursive: true, force: true })
+
+  // 6. 恢复文档（如果有）
+  if (target.documents_archive_path && existsSync(target.documents_archive_path)) {
+    const docDir = getDocumentsDir(project.workspace_slug, project.project_id)
+    rmSync(docDir, { recursive: true, force: true })
+    cpSync(target.documents_archive_path, docDir, { recursive: true, force: true })
+  }
+
+  // 7. 更新项目指针
+  updateProject(project.project_id, { current_snapshot_id: input.snapshot_id })
+
+  // 8. 重启 sandbox
+  const sandbox = await runSandbox({ request_id: input.request_id, project_id: input.project_id })
+
   return {
     rolled_back: true,
     project_id: project.project_id,
     current_snapshot_id: input.snapshot_id,
     guard_snapshot_id: guard.snapshot_id,
+    preview_url: sandbox.preview_url,
   }
 }
 

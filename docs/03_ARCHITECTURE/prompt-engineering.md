@@ -230,7 +230,7 @@ Prompt 设计目标：
 | `generating_sketch` | 需求足够明确 | 需求分析师 + UI/UX 顾问 |
 | `sketch_ready` | 用户点选纠错 | UI/UX 顾问 + 需求分析师 |
 | `generating_mvp` | 用户确认草图 | 需求分析师 + 工程经理 |
-| `longterm_planning` | 长期迭代型草图确认 | 架构设计师 + 工程经理 |
+
 | `judge_review` | 裁判退回 | 工程经理 |
 | `blocked_for_user_decision` | 退回达到上限 | 工程经理 + 需求分析师 |
 | `upgrading` | 快消型升级 | 架构设计师 + 工程经理 |

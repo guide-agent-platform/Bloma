@@ -5,6 +5,19 @@ import { join } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runAgent, setAgentStreamPublisher, setSDKQueryForTests } from '../../main/orchestrator'
+
+vi.mock('../../main/channel-manager', () => ({
+  getChannelByIdRaw: () => ({
+    id: 'test-channel',
+    name: 'Test',
+    provider_type: 'anthropic',
+    base_url: 'https://api.anthropic.com',
+    api_key: 'encrypted-test-key',
+    models: [{ id: 'claude-sonnet-4-6', name: 'Claude', enabled: true }],
+    enabled: true,
+  }),
+  decryptApiKey: () => 'test-key-from-channel',
+}))
 import { createProject, findProject } from '../../main/project-service'
 import {
   clearSandboxRuntimeForTests,
@@ -38,6 +51,7 @@ describe('GuideAgentService through AgentOrchestrator', () => {
       content: '记账',
       mode: 'quick',
       current_stage: 'clarifying',
+      channel_id: 'test-channel',
     })
 
     const decision = events.find((event) => event.type === 'user_decision_required')
@@ -69,6 +83,7 @@ describe('GuideAgentService through AgentOrchestrator', () => {
       content: '做一个家庭记账工具，记录收入支出并展示月度结余',
       mode: 'quick',
       current_stage: 'clarifying',
+      channel_id: 'test-channel',
     })
 
     const ready = events.find((event) => event.type === 'sketch_ready')

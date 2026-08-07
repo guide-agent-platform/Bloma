@@ -256,7 +256,6 @@ stateDiagram-v2
     iterating --> testing
     iterating --> completed
     completed --> upgrading
-    upgrading --> longterm_planning
 ```
 
 ---

@@ -1,7 +1,20 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IPC_CHANNELS, type AgentEvent, type ApiResult, type Project } from '../../../shared/types'
 import { createIpcHarness } from '../support/ipc-harness'
 import { useTemporaryPromaHome, type TemporaryPromaHome } from '../support/test-environment'
+
+vi.mock('../../../main/channel-manager', () => ({
+  getChannelByIdRaw: () => ({
+    id: 'test-channel',
+    name: 'Test',
+    provider_type: 'anthropic',
+    base_url: 'https://api.anthropic.com',
+    api_key: 'encrypted-test-key',
+    models: [{ id: 'claude-sonnet-4-6', name: 'Claude', enabled: true }],
+    enabled: true,
+  }),
+  decryptApiKey: () => 'test-key-from-channel',
+}))
 
 describe('Sprint 1 sketch clarification acceptance', () => {
   let environment: TemporaryPromaHome | undefined
@@ -23,6 +36,7 @@ describe('Sprint 1 sketch clarification acceptance', () => {
       content: '帮我做个东西',
       mode: 'quick',
       current_stage: 'clarifying',
+      channel_id: 'test-channel',
     }) as ApiResult<unknown>
     const decision = findEvent(harness.events, 'user_decision_required')
     const options = decision?.payload.options as Array<{ label: string; description?: string }>
@@ -46,6 +60,7 @@ describe('Sprint 1 sketch clarification acceptance', () => {
       content: '做一个可以记录收入支出并展示月度结余的管理页面',
       mode: 'longterm',
       current_stage: 'clarifying',
+      channel_id: 'test-channel',
     }) as ApiResult<unknown>
 
     expect(response.ok).toBe(true)

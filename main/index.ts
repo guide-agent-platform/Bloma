@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, type MessageBoxOptions, type WebContents } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, session, type MessageBoxOptions, type WebContents } from 'electron'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -21,10 +21,12 @@ async function createMainWindow(): Promise<void> {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      webviewTag: true,
+      webviewTag: false,
     },
   })
 
+  configureContentSecurity(mainWindow)
+  configureOutboundAllowlist()
   configureWebContents(mainWindow.webContents)
   mainWindow.webContents.on('will-navigate', (event, url) => {
     const current = mainWindow?.webContents.getURL()
@@ -68,10 +70,52 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) void createMainWindow()
 })
 
+/** 为 renderer 主窗口注入 CSP。注意：此 CSP 不作用于 iframe（iframe 受各自响应头约束）。 */
+function configureContentSecurity(_window: BrowserWindow): void {
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          [
+            "default-src 'none'",
+            "script-src 'self'",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: blob:",
+            "font-src 'self'",
+            "connect-src 'self' http://localhost:* https://api.anthropic.com",
+          ].join('; '),
+        ],
+      },
+    })
+  })
+}
+
+/** 拦截非白名单主机的出站请求，防止生成代码外泄数据或 SSRF。 */
+const ALLOWED_OUTBOUND_HOSTS = new Set([
+  'localhost',
+  '127.0.0.1',
+  'api.anthropic.com',
+])
+
+function configureOutboundAllowlist(): void {
+  session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
+    // dev 模式下跳过拦截（Vite HMR websocket 等）
+    if (!app.isPackaged) return callback({ cancel: false })
+    try {
+      const { hostname } = new URL(details.url)
+      callback({ cancel: !ALLOWED_OUTBOUND_HOSTS.has(hostname) })
+    } catch {
+      // 无法解析的 URL 放行（可能是 file:// 或自定义协议）
+      callback({ cancel: false })
+    }
+  })
+}
+
 function configureWebContents(contents: WebContents): void {
   contents.setWindowOpenHandler(() => ({ action: 'deny' }))
   contents.on('before-input-event', (_event, input) => {
-    if (input.key === 'F12') contents.openDevTools({ mode: 'detach' })
+    if (input.key === 'F12' && !app.isPackaged) contents.openDevTools({ mode: 'detach' })
   })
   const dialogAwareContents = contents as WebContents & {
     on(

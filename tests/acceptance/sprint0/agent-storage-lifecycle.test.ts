@@ -20,6 +20,19 @@ import {
   type TemporaryPromaHome,
 } from '../support/test-environment'
 
+vi.mock('../../../main/channel-manager', () => ({
+  getChannelByIdRaw: () => ({
+    id: 'test-channel',
+    name: 'Test',
+    provider_type: 'anthropic',
+    base_url: 'https://api.anthropic.com',
+    api_key: 'encrypted-test-key',
+    models: [{ id: 'claude-sonnet-4-6', name: 'Claude', enabled: true }],
+    enabled: true,
+  }),
+  decryptApiKey: () => 'test-key-from-channel',
+}))
+
 describe('Sprint 0 agent storage lifecycle acceptance', () => {
   let environment: TemporaryPromaHome | undefined
 
@@ -82,6 +95,7 @@ describe('Sprint 0 agent storage lifecycle acceptance', () => {
       content: '阶段验收消息',
       mode: 'quick',
       current_stage: 'generating_mvp',
+      channel_id: 'test-channel',
     })
 
     // 会话索引已建立，且项目回填了最后活跃会话
@@ -203,6 +217,7 @@ function agentInput(sessionId: string) {
     content: '阶段验收消息',
     mode: 'quick' as const,
     current_stage: 'generating_mvp' as const,
+    channel_id: 'test-channel',
   }
 }
 

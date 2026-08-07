@@ -60,7 +60,10 @@ export async function testChannel(channelId: string): Promise<{ ok: boolean; mes
 
   const apiKey = decryptSecret(channel.api_key)
   const res = await fetch(`${channel.base_url}/v1/models`, {
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
     signal: AbortSignal.timeout(15_000),
   })
 

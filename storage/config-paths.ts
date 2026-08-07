@@ -54,6 +54,11 @@ export function getSnapshotsDir(workspaceSlug: string, projectId: string): strin
   return ensureDir(join(getWorkspacePath(workspaceSlug), 'snapshots', projectId))
 }
 
+/** 项目事件历史独立存放于 workspace 级别，不随项目文件回滚而丢失。 */
+export function getProjectEventsPath(workspaceSlug: string, projectId: string): string {
+  return join(ensureDir(join(getWorkspacePath(workspaceSlug), 'events')), `${projectId}.jsonl`)
+}
+
 export function getAnalyticsPath(workspaceSlug: string): string {
   return join(getWorkspacePath(workspaceSlug), 'analytics.jsonl')
 }
