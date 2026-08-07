@@ -13,6 +13,7 @@ import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
 import { decryptApiKey, getChannelByIdRaw } from './channel-manager'
 import { handleGuideMessage } from './guide-agent-service'
+import { recordSessionActivity } from './session-service'
 
 type StreamPublisher = (event: AgentEvent) => void
 type SDKQuery = (prompt: string, options: SDKQueryOptions) => AsyncIterable<SDKMessage>
@@ -113,6 +114,8 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       content: [{ type: 'text', text: input.content }],
       timestamp: Date.now(),
     })
+    // 维护会话索引并回填 Project.last_session_id，支撑历史对话回访恢复
+    recordSessionActivity(input.session_id, input.project_id)
 
     if (shouldUseGuideAgent(input.current_stage)) {
       await handleGuideMessage(input, streamPublisher)

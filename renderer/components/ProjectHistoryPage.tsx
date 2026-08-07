@@ -77,7 +77,7 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
       try {
         const api = window.electronAPI
         if (api) {
-          const result = await api.project.list()
+          const result = await api.project.list({ request_id: crypto.randomUUID() })
           if (!cancelled && result.ok) {
             setIpcProjects(result.data)
             setLoadState('loaded')
@@ -101,7 +101,7 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
       // 重试 IPC 或直接展示 props 数据
       const api = window.electronAPI
       if (api) {
-        api.project.list().then(r => {
+        api.project.list({ request_id: crypto.randomUUID() }).then(r => {
           if (r.ok) { setIpcProjects(r.data); setLoadState('loaded') }
           else setLoadState('loaded') // 回退到 props
         }).catch(() => setLoadState('loaded'))

@@ -22,6 +22,8 @@ import { IPC_CHANNELS } from '../shared/types'
 import type {
   AgentCancelInput,
   AgentEvent,
+  AgentListSessionsInput,
+  AgentLoadMessagesInput,
   AgentSendMessageInput,
   AnalyticsTrackInput,
   ConfirmSketchInput,
@@ -45,6 +47,10 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SEND_MESSAGE, input),
     cancel: (input: AgentCancelInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_STOP, input),
+    listSessions: (input: AgentListSessionsInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_LIST_SESSIONS, input),
+    loadMessages: (input: AgentLoadMessagesInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_LOAD_MESSAGES, input),
     onStreamEvent: (listener: (event: AgentEvent) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, data: AgentEvent) => listener(data)
       ipcRenderer.on(IPC_CHANNELS.AGENT_STREAM_EVENT, handler)

@@ -17,6 +17,8 @@
 export const IPC_CHANNELS = {
   AGENT_SEND_MESSAGE: 'agent:send-message',
   AGENT_STOP: 'agent:stop',
+  AGENT_LIST_SESSIONS: 'agent:list-sessions',
+  AGENT_LOAD_MESSAGES: 'agent:load-messages',
   AGENT_STREAM_EVENT: 'agent:stream-event',
   PERMISSION_RESPONSE: 'permission:response',
   PROJECT_CREATE: 'project:create',
@@ -56,6 +58,7 @@ export type ErrorCode =
   | 'AGENT_SDK_TIMEOUT'
   | 'AGENT_CANCELLED'
   | 'CHANNEL_NOT_FOUND'
+  | 'SESSION_NOT_FOUND'
   | 'API_KEY_DECRYPT_FAILED'
   | 'PERMISSION_REQUEST_NOT_FOUND'
   | 'PERMISSION_DENIED'
@@ -220,6 +223,45 @@ export interface AgentCancelInput extends RequestEnvelope {
 export interface AgentCancelResult {
   cancelled: boolean
   session_id: string
+}
+
+// =========================================================================
+// 6.5 会话历史（历史对话管理）
+// =========================================================================
+
+/** Agent 会话索引记录（对齐 data-model §5 Session 实体，后端持久化） */
+export interface AgentSessionRecord {
+  session_id: string
+  project_id: string
+  summary?: string
+  status: 'active' | 'waiting_for_user' | 'completed'
+  jsonl_path: string
+  created_at: string
+  updated_at: string
+}
+
+export interface AgentListSessionsInput extends RequestEnvelope {
+  /** 按项目过滤；缺省返回全部会话 */
+  project_id?: string
+}
+
+export interface AgentListSessionsResult {
+  sessions: AgentSessionRecord[]
+}
+
+export interface AgentLoadMessagesInput extends RequestEnvelope {
+  session_id: string
+  /** 返回最近 N 条消息（尾部截取），缺省 200 */
+  limit?: number
+  /** 排除内部终态标记（[terminal] 行），缺省 true */
+  exclude_terminal?: boolean
+}
+
+export interface AgentLoadMessagesResult {
+  session: AgentSessionRecord
+  messages: AgentMessage[]
+  total: number
+  truncated: boolean
 }
 
 // =========================================================================
@@ -468,6 +510,8 @@ export type ElectronAPI = {
   agent: {
     sendMessage(input: AgentSendMessageInput): Promise<ApiResult<AgentSendMessageResult>>
     cancel(input: AgentCancelInput): Promise<ApiResult<AgentCancelResult>>
+    listSessions(input: AgentListSessionsInput): Promise<ApiResult<AgentListSessionsResult>>
+    loadMessages(input: AgentLoadMessagesInput): Promise<ApiResult<AgentLoadMessagesResult>>
     onStreamEvent(listener: (event: AgentEvent) => void): () => void
   }
   permissions: {

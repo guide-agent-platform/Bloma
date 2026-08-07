@@ -10,10 +10,13 @@ const root = fileURLToPath(new URL('../../..', import.meta.url))
 const expectedChannels = {
   AGENT_SEND_MESSAGE: 'agent:send-message',
   AGENT_STOP: 'agent:stop',
+  AGENT_LIST_SESSIONS: 'agent:list-sessions',
+  AGENT_LOAD_MESSAGES: 'agent:load-messages',
   AGENT_STREAM_EVENT: 'agent:stream-event',
   PERMISSION_RESPONSE: 'permission:response',
   PROJECT_CREATE: 'project:create',
   PROJECT_LIST: 'project:list',
+  PROJECT_ARCHIVE: 'project:archive',
   PROJECT_CONFIRM_SKETCH: 'project:confirm-sketch',
   PROJECT_SUBMIT_CORRECTION: 'project:submit-correction',
   PROJECT_UPGRADE: 'project:upgrade',

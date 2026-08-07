@@ -1,6 +1,8 @@
 import type { BrowserWindow, IpcMain } from 'electron'
 import type {
   AgentCancelInput,
+  AgentListSessionsInput,
+  AgentLoadMessagesInput,
   AgentSendMessageInput,
   AnalyticsTrackInput,
   ConfirmSketchInput,
@@ -20,6 +22,7 @@ import { fail, ok } from './api-result'
 import { cancelAgent, runAgent, setAgentStreamPublisher } from './orchestrator'
 import { resolvePermission, setPermissionRequestPublisher } from './permission-service'
 import { archiveProject, confirmSketch, createProject, listProjects, submitCorrection, upgradeProject } from './project-service'
+import { listSessions, loadMessages } from './session-service'
 import {
   createSnapshot,
   rollbackSnapshot,
@@ -56,6 +59,20 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     return safeInvoke(extractRequestId(payload), async () => {
       const input = validateCancel(payload)
       return cancelAgent(input)
+    })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_LIST_SESSIONS, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<AgentListSessionsInput>(payload, [])
+      return listSessions(input)
+    })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_LOAD_MESSAGES, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<AgentLoadMessagesInput>(payload, ['session_id'])
+      return loadMessages(input)
     })
   })
 
@@ -177,6 +194,7 @@ async function safeInvoke<T>(requestId: string, fn: () => T | Promise<T>) {
     const message = error instanceof Error ? error.message : String(error)
     if (message.includes('AGENT_SESSION_BUSY')) return fail<T>(requestId, 'AGENT_SESSION_BUSY', message, true)
     if (message.includes('CHANNEL_NOT_FOUND')) return fail<T>(requestId, 'CHANNEL_NOT_FOUND', message)
+    if (message.includes('SESSION_NOT_FOUND')) return fail<T>(requestId, 'SESSION_NOT_FOUND', message)
     if (message.includes('PROJECT_NOT_FOUND')) return fail<T>(requestId, 'PROJECT_NOT_FOUND', message)
     if (message.includes('PERMISSION_REQUEST_NOT_FOUND')) return fail<T>(requestId, 'PERMISSION_REQUEST_NOT_FOUND', message)
     if (message.includes('SANDBOX_RUN_FAILED')) {

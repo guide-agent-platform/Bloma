@@ -265,6 +265,63 @@ type AgentCancelResult = {
 
 主进程必须触发 SDK iterator cleanup，并释放 `activeSessions`。
 
+### 5.4 `agent:list-sessions`
+
+用途：列出历史会话索引（支持按项目过滤），用于"回访恢复"时选择最近会话。
+
+```ts
+type AgentListSessionsInput = {
+  request_id: string;
+  project_id?: string;
+};
+
+type AgentSessionRecord = {
+  session_id: string;
+  project_id: string;
+  summary?: string;
+  status: "active" | "waiting_for_user" | "completed";
+  jsonl_path: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type AgentListSessionsResult = {
+  sessions: AgentSessionRecord[];
+};
+```
+
+存储：
+
+- 读取 `~/.proma/agent-sessions.json` 索引。
+- 会话索引由 `agent:send-message` 每次运行时维护（创建或更新记录，并回填 `Project.last_session_id`）。
+- 按 `updated_at` 倒序返回。
+
+### 5.5 `agent:load-messages`
+
+用途：读取指定会话的历史消息（尾部截取），用于回访恢复时填充对话区。
+
+```ts
+type AgentLoadMessagesInput = {
+  request_id: string;
+  session_id: string;
+  limit?: number;          // 返回最近 N 条，缺省 200
+  exclude_terminal?: boolean; // 排除内部终态标记（[terminal] 行），缺省 true
+};
+
+type AgentLoadMessagesResult = {
+  session: AgentSessionRecord;
+  messages: AgentMessage[];
+  total: number;      // 过滤后可用消息总数
+  truncated: boolean; // true 表示存在被截断的早期消息
+};
+```
+
+存储：
+
+- 读取 `~/.proma/agent-sessions/{session_id}.jsonl`。
+- JSONL 不存在时返回 `SESSION_NOT_FOUND`。
+- JSONL 存在但索引缺失（升级前遗留数据）时按文件 mtime 合成会话记录，不阻塞读取。
+
 ---
 
 ## 6. 权限接口

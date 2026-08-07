@@ -10,7 +10,8 @@ import {
   setRetrySleepForTests,
   setSDKQueryForTests,
 } from '../../../main/orchestrator'
-import { createProject } from '../../../main/project-service'
+import { createProject, findProject } from '../../../main/project-service'
+import { listSessions, loadMessages } from '../../../main/session-service'
 import type { SDKMessage } from '../../../shared/types'
 import {
   listFilesRecursively,
@@ -67,6 +68,36 @@ describe('Sprint 0 agent storage lifecycle acceptance', () => {
     expect(jsonl).toContain('阶段验收消息')
     expect(jsonl).toContain('已经完成第一部分')
     expect(jsonl).toContain('[terminal] status=error')
+  })
+
+  it('[S0-STORE-006] runAgent 后会话索引与消息读取可还原对话历史', async () => {
+    environment = useTemporaryPromaHome('bloma-role-c-history-')
+    setSDKQueryForTests(successfulQuery)
+    const project = createProject({ request_id: 'role-c-history-project', mode: 'quick' })
+
+    await runAgent({
+      request_id: 'role-c-history-req',
+      session_id: 'role-c-history-session',
+      project_id: project.project_id,
+      content: '阶段验收消息',
+      mode: 'quick',
+      current_stage: 'generating_mvp',
+    })
+
+    // 会话索引已建立，且项目回填了最后活跃会话
+    const sessions = listSessions({ request_id: 'role-c-history-list' }).sessions
+    expect(sessions.some((s) => s.session_id === 'role-c-history-session')).toBe(true)
+    expect(findProject(project.project_id).last_session_id).toBe('role-c-history-session')
+
+    // 历史消息可读回，且默认排除 [terminal] 内部终态行
+    const loaded = loadMessages({
+      request_id: 'role-c-history-load',
+      session_id: 'role-c-history-session',
+    })
+    const texts = loaded.messages.map((m) => m.content.map((b) => b.text ?? '').join(''))
+    expect(texts).toContain('阶段验收消息')
+    expect(texts).toContain('阶段验收完成')
+    expect(loaded.messages.some((m) => m.content.some((b) => b.text?.startsWith('[terminal]')))).toBe(false)
   })
 
   it('[S0-STORE-005] Sprint 0 运行产物不得创建 SQLite 或数据库连接配置', async () => {

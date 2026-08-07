@@ -8,6 +8,8 @@ const shared = readFileSync(new URL('shared/types.ts', root), 'utf8')
 const expectedChannels = [
   'agent:send-message',
   'agent:stop',
+  'agent:list-sessions',
+  'agent:load-messages',
   'agent:stream-event',
   'permission:response',
   'project:create',
