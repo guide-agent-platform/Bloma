@@ -269,4 +269,33 @@ docs/
 
 ---
 
+## 7. 代码版本变更记录
+
+> 进入实现阶段后的代码版本修订记录，按时间倒序排列（最新在最前）。对应 git tag 与语义化版本。
+
+### v1.2（2026-08-07）
+
+| 属性 | 值 |
+|------|-----|
+| **日期** | 2026-08-07 |
+| **状态** | 待审 |
+
+**变更内容**（历史对话管理：会话索引与读取 + 前端回访恢复）：
+
+- `[新增]` IPC 通道 `agent:list-sessions` / `agent:load-messages`；共享契约新增 `AgentSessionRecord` / `AgentListSessions(Input|Result)` / `AgentLoadMessages(Input|Result)` 与 `SESSION_NOT_FOUND` 错误码（`shared/types.ts` §6.5）
+- `[新增]` `main/session-service.ts`：维护 `agent-sessions.json` 会话索引、best-effort 回填 `Project.last_session_id`、尾部截取历史消息加载（默认排除 `[terminal]` 内部终态行）
+- `[修改]` `main/orchestrator.ts` 每次 Agent 运行后调用 `recordSessionActivity` 维护会话索引
+- `[修改]` renderer 启动恢复/回访流程：以 `project.last_session_id` 续接会话（不新建 id），调用 `agent:load-messages` 灌入历史、`agent:list-sessions` 灌入会话索引，加载期间对话区显示骨架占位（对齐 sitemap §2.6）
+- `[修改]` `renderer/agent-atoms.ts` 全局监听器在收到流事件时同步追加新会话到 `agentSessionsAtom`
+- `[修复]` `S0-UI-005` renderer 启动顺序断言：移除 `as any` 与前置分号，统一 store → listeners → render 顺序
+- `[移除]` `storage/config-paths.ts` 遗留的 Conversation 命名死代码（`getConversationsIndexPath` / `getConversationPath`），统一术语为 Agent 会话
+
+**影响评估**：
+
+- 受影响的文档：DOC-4.1 api-spec.md（§5.4/§5.5）、DOC-5.1 sprint-plan.md、DOC-3.4 data-model.md（术语对齐）
+- 受影响的模块：`shared/types.ts`、`main/ipc.ts`、`main/session-service.ts`、`main/orchestrator.ts`、`preload/bridge.ts`、`renderer/agent-atoms.ts`、`renderer/components/App.tsx`、`WorkspaceShell.tsx`、`ChatPanel.tsx`
+- 是否需要回滚测试：是（运行 `npm run typecheck`、`npm run test:acceptance:sprint0`、`npm run test:acceptance:sprint1`）
+
+---
+
 > 本文档从设计阶段起持续维护。进入实现阶段后，每次 Sprint 交付或关键节点均需更新本文档。变更记录按时间倒序排列，最新版本在最前。

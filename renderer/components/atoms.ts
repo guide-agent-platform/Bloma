@@ -42,6 +42,7 @@ export {
   snapshotsListAtom, isQuickModeAtom, isLongtermModeAtom, documentPanelVisibleAtom,
   hasActiveStreamAtom, canUpgradeAtom, STAGE_LABEL_MAP,
   appendMessageToSession, clearPermissionRequest, resetProjectState,
+  loadAgentSessions, loadSessionHistory,
 } from '../agent-atoms'
 
 export const workspaceWaitingAtom = atom<boolean>(false)

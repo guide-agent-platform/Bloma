@@ -23,12 +23,13 @@
  * 新增平台扩展区（项目状态、UI 状态、点选纠错等）以满足 Sprint 1-3 需求。
  */
 
-import { atom, type WritableAtom } from 'jotai'
+import { atom, type Atom, type WritableAtom } from 'jotai'
 import { atomFamily } from 'jotai/utils'
 import type {
   AgentEvent,
   AgentMessage,
   AgentSessionMeta,
+  AgentSessionRecord,
   ElectronAPI,
   PermissionRequest,
   Project,
@@ -45,6 +46,7 @@ declare global {
   interface Window {
     electronAPI?: ElectronAPI
     __jotai_store__?: {
+      get: <Value>(atom: Atom<Value>) => Value
       set: <Value, Args extends unknown[], Result>(
         atom: WritableAtom<Value, Args, Result>,
         ...args: Args
@@ -131,6 +133,20 @@ export function setupGlobalAgentListeners(): () => void {
   if (!api || !store) return () => undefined
 
   return api.onStreamEvent((event) => {
+    // 会话追踪：新出现的 session_id 追加到 agentSessionsAtom（已有索引的会话保持不变）
+    store.set(agentSessionsAtom, (previous) => {
+      if (previous.some((item) => item.session_id === event.session_id)) return previous
+      return [
+        ...previous,
+        {
+          session_id: event.session_id,
+          project_id: event.project_id ?? '',
+          title: '当前对话',
+          created_at: event.created_at,
+        },
+      ]
+    })
+
     const streamAtom = agentStreamStateFamily(event.session_id)
     store.set(streamAtom, (previous: AgentStreamState) => {
       // 权限请求：从 payload 提取并写入队列
@@ -271,6 +287,49 @@ export function appendMessageToSession(
   if (!store) return
   const messagesAtom = agentMessagesFamily(sessionId)
   store.set(messagesAtom, (prev) => [...prev, message])
+}
+
+/** 将后端会话索引记录映射为 renderer 侧会话元数据 */
+function toSessionMeta(record: AgentSessionRecord): AgentSessionMeta {
+  return {
+    session_id: record.session_id,
+    project_id: record.project_id,
+    title: record.summary || record.session_id,
+    created_at: record.created_at,
+  }
+}
+
+/**
+ * 拉取会话索引并灌入 agentSessionsAtom（回访恢复时调用）。
+ * 无 electronAPI/agent.listSessions 环境时静默跳过（兼容 demo 与测试）。
+ */
+export async function loadAgentSessions(projectId?: string): Promise<void> {
+  const api = window.electronAPI?.agent
+  const store = window.__jotai_store__
+  if (!api?.listSessions || !store) return
+  const result = await api.listSessions({
+    request_id: crypto.randomUUID(),
+    project_id: projectId,
+  })
+  if (!result.ok) return
+  store.set(agentSessionsAtom, result.data.sessions.map(toSessionMeta))
+}
+
+/**
+ * 从磁盘加载历史消息并灌入对应会话的 agentMessagesFamily（回访恢复时调用）。
+ * 无 electronAPI/agent.loadMessages 环境时静默跳过（兼容 demo 与测试）。
+ */
+export async function loadSessionHistory(sessionId: string): Promise<void> {
+  const api = window.electronAPI?.agent
+  const store = window.__jotai_store__
+  if (!api?.loadMessages || !store) return
+  const result = await api.loadMessages({
+    request_id: crypto.randomUUID(),
+    session_id: sessionId,
+    limit: 200,
+  })
+  if (!result.ok) return
+  store.set(agentMessagesFamily(sessionId), result.data.messages)
 }
 
 /** 清除指定权限请求 */

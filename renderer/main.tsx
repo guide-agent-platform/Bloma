@@ -5,13 +5,13 @@ import { setupGlobalAgentListeners } from './agent-atoms'
 import App from './components/App'
 
 const store = createStore()
-;(window as any).__jotai_store__ = store
+window.__jotai_store__ = store
 setupGlobalAgentListeners()
 
-const rootEl = document.getElementById('root')
-if (!rootEl) throw new Error('Missing #root element')
+const rootElement = document.getElementById('root')
+if (!rootElement) throw new Error('Missing #root element')
 
-ReactDOM.createRoot(rootEl).render(
+ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
     <Provider store={store}>
       <App />

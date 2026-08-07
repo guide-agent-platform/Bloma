@@ -31,6 +31,8 @@ export interface ChatPanelProps {
   onContinueWaiting?: () => void
   /** 超时-查看已有 */
   onViewPartial?: () => void
+  /** 回访恢复：加载历史消息期间显示骨架占位（sitemap §2.6） */
+  isHistoryLoading?: boolean
 }
 
 const glassTile: React.CSSProperties = {
@@ -55,6 +57,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   waitActionLabel = '生成可运行版本',
   onContinueWaiting,
   onViewPartial,
+  isHistoryLoading = false,
 }) => {
   const activeSessionId = useAtomValue(activeAgentSessionIdAtom)
   const mode = useAtomValue(projectModeAtom)
@@ -136,76 +139,102 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           minHeight: 0,
         }}
       >
-        {/* 空状态 */}
-        {messages.length === 0 && !streamingContent && !isWaiting && (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: 'var(--space-6)' }}>
-            <div>
-              <span
-                aria-hidden
+        {isHistoryLoading ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+            {[1, 2, 3].map((i) => (
+              <div
+                key={i}
                 style={{
-                  width: 52,
-                  height: 52,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 'var(--space-2)',
+                  padding: 'var(--space-4)',
                   borderRadius: 'var(--radius-md)',
-                  background: 'var(--white)',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  marginBottom: 'var(--space-3)',
-                  color: 'var(--color-quick)',
-                  boxShadow: 'var(--shadow-sm)',
+                  animation: `shimmer 1.5s ease-in-out ${i * 0.15}s infinite`,
+                  background: 'linear-gradient(90deg, var(--glass-bg-soft) 25%, var(--glass-bg) 50%, var(--glass-bg-soft) 75%)',
+                  backgroundSize: '200% 100%',
                 }}
               >
-                <MessageSquare size={24} />
-              </span>
-              <p style={{ fontSize: 'var(--font-size-md)', fontWeight: 600, marginBottom: 'var(--space-1)', color: 'var(--color-text)' }}>
-                告诉我你想做什么
-              </p>
-              <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-muted)' }}>
-                用日常语言描述你的想法，我会帮你一步步做出来。
-              </p>
-            </div>
+                <div style={{ width: '35%', height: 12, borderRadius: 4, background: 'var(--gray-200)' }} />
+                <div style={{ width: '70%', height: 12, borderRadius: 4, background: 'var(--gray-200)' }} />
+                <div style={{ width: '50%', height: 10, borderRadius: 4, background: 'var(--gray-200)' }} />
+              </div>
+            ))}
           </div>
-        )}
+        ) : (
+          <>
+            {/* 空状态 */}
+            {messages.length === 0 && !streamingContent && !isWaiting && (
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: 'var(--space-6)' }}>
+                <div>
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 52,
+                      height: 52,
+                      borderRadius: 'var(--radius-md)',
+                      background: 'var(--white)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginBottom: 'var(--space-3)',
+                      color: 'var(--color-quick)',
+                      boxShadow: 'var(--shadow-sm)',
+                    }}
+                  >
+                    <MessageSquare size={24} />
+                  </span>
+                  <p style={{ fontSize: 'var(--font-size-md)', fontWeight: 600, marginBottom: 'var(--space-1)', color: 'var(--color-text)' }}>
+                    告诉我你想做什么
+                  </p>
+                  <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-muted)' }}>
+                    用日常语言描述你的想法，我会帮你一步步做出来。
+                  </p>
+                </div>
+              </div>
+            )}
 
-        {messages.map((msg, i) => (
-          <MessageBubble key={i} message={msg} mode={mode} />
-        ))}
+            {messages.map((msg, i) => (
+              <MessageBubble key={i} message={msg} mode={mode} />
+            ))}
 
-        {streamingContent && (
-          <MessageBubble
-            message={{ role: 'assistant', content: [{ type: 'text', text: streamingContent }], timestamp: Date.now() }}
-            mode={mode}
-            isStreaming
-          />
-        )}
+            {streamingContent && (
+              <MessageBubble
+                message={{ role: 'assistant', content: [{ type: 'text', text: streamingContent }], timestamp: Date.now() }}
+                mode={mode}
+                isStreaming
+              />
+            )}
 
-        {isWaiting && elapsed > 5 && (
-          <WaitingFeedback
-            elapsedSeconds={elapsed}
-            actionLabel={waitActionLabel}
-            onContinueWaiting={onContinueWaiting}
-            onViewPartial={onViewPartial}
-          />
-        )}
+            {isWaiting && elapsed > 5 && (
+              <WaitingFeedback
+                elapsedSeconds={elapsed}
+                actionLabel={waitActionLabel}
+                onContinueWaiting={onContinueWaiting}
+                onViewPartial={onViewPartial}
+              />
+            )}
 
-        {globalError && (
-          <div
-            role="alert"
-            style={{
-              padding: 'var(--space-3) var(--space-4)',
-              background: 'var(--color-danger-soft)',
-              border: '1px solid var(--color-danger)',
-              borderRadius: 'var(--radius-sm)',
-              fontSize: 'var(--font-size-sm)',
-              color: 'var(--color-danger)',
-            }}
-          >
-            {globalError}
-          </div>
-        )}
+            {globalError && (
+              <div
+                role="alert"
+                style={{
+                  padding: 'var(--space-3) var(--space-4)',
+                  background: 'var(--color-danger-soft)',
+                  border: '1px solid var(--color-danger)',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: 'var(--font-size-sm)',
+                  color: 'var(--color-danger)',
+                }}
+              >
+                {globalError}
+              </div>
+            )}
 
-        {cardOptions && cardOptions.length > 0 && onCardOptionSelect && (
-          <CardOptions options={cardOptions} onSelect={onCardOptionSelect} disabled={isWaiting} />
+            {cardOptions && cardOptions.length > 0 && onCardOptionSelect && (
+              <CardOptions options={cardOptions} onSelect={onCardOptionSelect} disabled={isWaiting} />
+            )}
+          </>
         )}
 
         <div ref={messagesEndRef} />

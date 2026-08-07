@@ -13,15 +13,11 @@ export function ensureDir(path: string): string {
 
 export function getChannelsPath(): string { return join(getPromaHome(), 'channels.json') }
 export function getProjectsIndexPath(): string { return join(getPromaHome(), 'projects.json') }
-export function getConversationsIndexPath(): string { return join(getPromaHome(), 'conversations.json') }
 export function getAgentSessionsIndexPath(): string { return join(getPromaHome(), 'agent-sessions.json') }
 export function getSettingsPath(): string { return join(getPromaHome(), 'settings.json') }
 export function getUserProfilePath(): string { return join(getPromaHome(), 'user-profile.json') }
 
-export function getConversationPath(conversationId: string): string {
-  return join(ensureDir(join(getPromaHome(), 'conversations')), `${conversationId}.jsonl`)
-}
-
+// 会话历史统一走 agent-sessions（历史遗留的 Conversation 命名已清理，见 data-model §5/§6）
 export function getAgentSessionPath(sessionId: string): string {
   return join(ensureDir(join(getPromaHome(), 'agent-sessions')), `${sessionId}.jsonl`)
 }

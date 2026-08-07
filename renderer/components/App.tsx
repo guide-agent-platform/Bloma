@@ -15,6 +15,8 @@ import {
   agentMessagesFamily,
   activeAgentSessionIdAtom,
   snapshotsListAtom,
+  loadAgentSessions,
+  loadSessionHistory,
 } from './atoms'
 import type { ProjectMode, WorkflowStage } from './atoms'
 
@@ -61,7 +63,7 @@ const AppRoutes: React.FC = () => {
   const [waiting, setWaiting] = useState(false)
   const [waitStart, setWaitStart] = useState<number | undefined>()
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>('empty')
-  const [sessionId] = useState(() => `demo-${Date.now()}`)
+  const [sessionId, setSessionId] = useState<string>(() => `demo-${Date.now()}`)
   const [samplePreviewUrl] = useState(() => {
     try { return URL.createObjectURL(new Blob([SAMPLE_SKETCH], { type: 'text/html' })) }
     catch { return undefined }
@@ -69,6 +71,9 @@ const AppRoutes: React.FC = () => {
 
   // 本地项目列表（演示模式）
   const [projectList, setProjectList] = useState<Project[]>([])
+
+  // 回访恢复：加载历史消息期间的骨架占位开关
+  const [historyLoading, setHistoryLoading] = useState(false)
 
   // ✅ 使用 Jotai hooks 直接读写
   const setProjectMode = useSetAtom(projectModeAtom)
@@ -92,14 +97,25 @@ const AppRoutes: React.FC = () => {
       if (!result?.ok || result.data.length === 0) return
       const restored = result.data[0]
       if (!restored) return
+      // 回访恢复：用项目记录的最后活跃会话续接上下文（sitemap §2.6），
+      // 不新建会话 id；无历史会话时退回新会话 id。
+      const restoredSessionId = restored.last_session_id ?? sessionId
       setMode(restored.mode)
       setCurrentProject(restored)
       setProjectMode(restored.mode)
       setModeSelected(true)
       setWorkflowStage(restored.current_stage)
       setStageLabel(STAGE_LABEL_MAP[restored.current_stage] ?? '处理中')
-      setActiveSessionId(sessionId)
+      setSessionId(restoredSessionId)
+      setActiveSessionId(restoredSessionId)
       setProjectList(result.data)
+      if (restored.last_session_id) {
+        setHistoryLoading(true)
+        void Promise.all([
+          loadAgentSessions(restored.project_id),
+          loadSessionHistory(restored.last_session_id),
+        ]).finally(() => setHistoryLoading(false))
+      }
       setRoute('workspace')
     })
   }, [sessionId])
@@ -146,12 +162,14 @@ const AppRoutes: React.FC = () => {
 
   const handleResumeProject = useCallback((project: Project) => {
     setMode(project.mode)
-    const resumeSessionId = `demo-resume-${Date.now()}`
+    // 回访恢复：沿用项目最后活跃会话，不新建会话 id（sitemap §2.6）
+    const resumeSessionId = project.last_session_id ?? `demo-resume-${Date.now()}`
 
     setProjectMode(project.mode)
     setModeSelected(true)
     setWorkflowStage(project.current_stage)
     setStageLabel(STAGE_LABEL_MAP[project.current_stage] ?? project.current_stage)
+    setSessionId(resumeSessionId)
     setActiveSessionId(resumeSessionId)
     setCurrentProject(project)
 
@@ -162,6 +180,14 @@ const AppRoutes: React.FC = () => {
           : p,
       ),
     )
+
+    if (project.last_session_id) {
+      setHistoryLoading(true)
+      void Promise.all([
+        loadAgentSessions(project.project_id),
+        loadSessionHistory(project.last_session_id),
+      ]).finally(() => setHistoryLoading(false))
+    }
 
     setRoute('workspace')
   }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject])
@@ -351,6 +377,7 @@ const AppRoutes: React.FC = () => {
       isWaiting={waiting}
       waitStartTime={waitStart}
       waitActionLabel="生成可运行版本"
+      isHistoryLoading={historyLoading}
       previewStatus={previewStatus}
       previewUrl={previewStatus === 'running' ? samplePreviewUrl : undefined}
       onRefreshPreview={() => {

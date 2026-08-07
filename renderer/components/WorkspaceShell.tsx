@@ -17,6 +17,8 @@ export interface WorkspaceShellProps {
   waitActionLabel?: string
   onContinueWaiting?: () => void
   onViewPartial?: () => void
+  /** 回访恢复时是否正在加载历史消息（对话区显示骨架占位） */
+  isHistoryLoading?: boolean
 
   /* === PreviewPanel props === */
   previewStatus?: PreviewStatus
@@ -85,6 +87,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
           waitActionLabel={props.waitActionLabel}
           onContinueWaiting={props.onContinueWaiting}
           onViewPartial={props.onViewPartial}
+          isHistoryLoading={props.isHistoryLoading}
         />
         <PreviewPanel
           status={props.previewStatus}

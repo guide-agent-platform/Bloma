@@ -97,10 +97,20 @@ Phase 1 的目标是交付一个可验证的桌面端核心闭环：
 
 ### 用户故事
 
-- U-01：两道门模式选择。
-- GA-01：自然语言澄清需求。
-- PA-01：从需求生成可运行验证草图。
-- UX：等待反馈、预览展示、草图快照。
+- U-01：两道门模式选择。✅ 已实现（`ModeSelectionPage`）
+- GA-01：自然语言澄清需求。✅ 已实现（`GuideAgentService` + ChatPanel）
+- PA-01：从需求生成可运行验证草图。✅ 已实现（`generate_sketch` + PreviewPanel）
+- UX：等待反馈、预览展示、草图快照。✅ 已实现
+- GA-03：从对话中自动整理需求文档。⚠️ 部分：历史"读取"半边已实现（`agent:list-sessions` / `agent:load-messages` + 回访恢复），检查点"提取/更新 PRD 文档"未实现，**规划为下一阶段待办故事**
+
+### 已实现进度（截至 2026-08-07）
+
+Sprint 1 主要交付物已落地；"历史对话管理"补齐了后端读取半边与前端回访恢复：
+
+- ✅ `agent:list-sessions` / `agent:load-messages` IPC 通道 + `main/session-service.ts`（`agent-sessions.json` 索引、`last_session_id` 回填、历史消息尾部截取）
+- ✅ renderer 启动/回访恢复：以 `project.last_session_id` 续接会话并加载历史，加载期对话区显示骨架占位（sitemap §2.6）；`agentSessionsAtom` 随流事件同步追加
+- ✅ `S0-UI-005` renderer 启动顺序断言修复；`config-paths.ts` Conversation 死代码清理（统一为 Agent 会话术语）
+- ⚠️ 待办（后续 Sprint）：GA-03 检查点自动从对话历史提取并更新需求文档（读取半边已就绪，提取/更新未实现）
 
 ### 交付物
 
@@ -145,6 +155,7 @@ Phase 1 的目标是交付一个可验证的桌面端核心闭环：
 - PA-04：自动修复运行和测试错误。
 - JA-01：裁判硬约束检查。
 - JA-02：裁判软约束评估。
+- GA-03：从对话中自动整理需求文档（⚠️ 从 Sprint 1 顺延：历史读取半边已完成，检查点提取/更新 PRD 文档在此 Sprint 或后续排期）。
 
 ### 交付物
 
