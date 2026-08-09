@@ -54,7 +54,7 @@ describe('Sprint 1 sketch and upgrade regression', () => {
       channel_id: 'test-channel',
     }) as ApiResult<unknown>
     const decision = app.events.find((item) => item.type === 'user_decision_required')
-    const options = decision?.payload.options as Array<{ label: string; description?: string }>
+    const options = decision?.payload.questions as Array<{ label: string; description?: string }>
 
     expect(result.ok).toBe(true)
     expect(options).toHaveLength(3)

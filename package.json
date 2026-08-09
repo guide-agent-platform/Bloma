@@ -20,7 +20,8 @@
     "test:electron-smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/electron-startup-smoke.ps1",
     "test:all": "npm run test:unit && npm run test:integration && npm run test:regression:sprint0 && npm run test:regression:sprint1 && npm run test:acceptance:sprint0 && npm run test:acceptance:sprint1",
     "lint": "tsc --noEmit",
-    "docs:check": "node scripts/docs-check.mjs"
+    "docs:check": "node scripts/docs-check.mjs",
+    "seed:channel": "electron scripts/seed-channel.cjs"
   },
   "dependencies": {
     "electron": "^39.0.0",

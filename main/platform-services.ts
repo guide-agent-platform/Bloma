@@ -1,13 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { createServer } from 'node:net'
 import type {
   AnalyticsTrackInput,
   AnalyticsTrackResult,
-  DocumentRef,
-  DocumentSyncInput,
-  DocumentSyncResult,
   RollbackResult,
   SandboxRunInput,
   SandboxRunResult,
@@ -38,7 +36,15 @@ const DEFAULT_SANDBOX_TIMEOUT_MS = 30_000
 const HEALTH_CHECK_INTERVAL_MS = 250
 const MAX_PORT_ATTEMPTS = 10
 
+/** 快照容量策略（A2-16，闭环 ATK3-G-001，architecture §14）：单项目活跃快照上限。 */
+export const MAX_SNAPSHOTS_PER_PROJECT = 100
+/** 归档保护集：保留最近 N 个 + 每种 kind 最新一个，即使超限也不归档。 */
+export const SNAPSHOT_RECENT_KEEP = 20
+
 const activeSandboxes = new Map<string, SandboxProcess>()
+
+/** 沙箱 stdout/stderr 内部日志（P0 不可见，供 A2-08 修复循环与调试分析）。 */
+const sandboxLogs = new Map<string, string>()
 let sandboxProcessFactory: SandboxProcessFactory = spawnStaticServer
 let allocatePort: PortAllocator = findAvailablePort
 let sandboxHealthCheck: HealthCheck = defaultHealthCheck
@@ -52,6 +58,7 @@ export async function runSandbox(input: SandboxRunInput): Promise<SandboxRunResu
   const project = findProject(input.project_id)
 
   await stopSandbox(input)
+  sandboxLogs.set(input.project_id, '')
 
   const timeoutMs = input.timeout_ms ?? DEFAULT_SANDBOX_TIMEOUT_MS
   for (let attempt = 0; attempt < MAX_PORT_ATTEMPTS; attempt += 1) {
@@ -59,6 +66,13 @@ export async function runSandbox(input: SandboxRunInput): Promise<SandboxRunResu
     const previewUrl = `http://localhost:${port}`
     const child = sandboxProcessFactory(project.root_path, port, input.command)
     activeSandboxes.set(project.project_id, { process: child, port })
+
+    // 捕获 stdout/stderr 到内部日志（供修复循环分析，不向 P0 展示堆栈）
+    const appendLog = (chunk: Buffer | string): void => {
+      sandboxLogs.set(input.project_id, (sandboxLogs.get(input.project_id) ?? '') + String(chunk))
+    }
+    child.stdout?.on('data', appendLog)
+    child.stderr?.on('data', appendLog)
 
     const started = await waitForSandbox(child, previewUrl, timeoutMs)
     if (started.ok) {
@@ -72,11 +86,16 @@ export async function runSandbox(input: SandboxRunInput): Promise<SandboxRunResu
     child.kill()
     activeSandboxes.delete(project.project_id)
     if (started.category !== 'port_unavailable') {
-      return { status: 'failed', error_summary: sandboxError(started.category) }
+      return { status: 'failed', error_summary: classifySandboxFailure(started.category, getSandboxLogs(input.project_id)) }
     }
   }
 
-  return { status: 'failed', error_summary: sandboxError('port_unavailable') }
+  return { status: 'failed', error_summary: classifySandboxFailure('port_unavailable', '') }
+}
+
+/** 读取沙箱内部日志（stdout/stderr 合并），供修复循环与调试使用。 */
+export function getSandboxLogs(projectId: string): string {
+  return sandboxLogs.get(projectId) ?? ''
 }
 
 export function stopSandbox(_input: SandboxStopInput): SandboxStopResult {
@@ -137,26 +156,33 @@ async function waitForSandbox(
 const ALLOWED_SANDBOX_COMMANDS = new Set(['npm run dev', 'npm start', 'node static-server'])
 
 function spawnStaticServer(projectRoot: string, port: number, command?: string): ChildProcess {
+  const options = sandboxSpawnOptions(projectRoot, port)
   if (command) {
     const normalized = command.trim()
     if (!ALLOWED_SANDBOX_COMMANDS.has(normalized)) {
       throw new Error(`SANDBOX_COMMAND_NOT_ALLOWED: ${normalized}`)
     }
-    const [executable, ...args] = normalized.replaceAll('{port}', String(port)).split(/\s+/).filter(Boolean)
-    return spawn(executable, args, sandboxSpawnOptions(projectRoot))
+    const withPort = normalized.replaceAll('{port}', String(port))
+    const [executable, ...args] = withPort.split(/\s+/).filter(Boolean)
+    // Windows 下 npm 为 npm.cmd，spawn 无法直接执行，需经 shell 解析（静态服务器等直接 spawn）
+    const needsShell = /\.(cmd|bat)$/i.test(executable) || executable === 'npm'
+    if (needsShell) {
+      return spawn(withPort, { ...options, shell: true })
+    }
+    return spawn(executable, args, options)
   }
-  return spawn(resolveNodeExecutable(), ['-e', STATIC_SERVER_SCRIPT, String(port)], sandboxSpawnOptions(projectRoot))
+  return spawn(resolveNodeExecutable(), ['-e', STATIC_SERVER_SCRIPT, String(port)], options)
 }
 
 function resolveNodeExecutable(): string {
   return process.env.npm_node_execpath || process.env.NODE || process.execPath
 }
 
-function sandboxSpawnOptions(projectRoot: string): SpawnOptions {
+function sandboxSpawnOptions(projectRoot: string, port: number): SpawnOptions {
   return {
     cwd: projectRoot,
-    env: { PATH: process.env.PATH, Path: process.env.Path },
-    stdio: 'ignore',
+    env: { PATH: process.env.PATH, Path: process.env.Path, PORT: String(port) },
+    stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   }
 }
@@ -188,13 +214,24 @@ async function defaultHealthCheck(url: string): Promise<boolean> {
   }
 }
 
-function sandboxError(category: 'process_crashed' | 'startup_timeout' | 'port_unavailable'): SandboxRunResult['error_summary'] {
-  const summaries = {
-    process_crashed: '预览启动失败，请再试一次。',
-    startup_timeout: '预览启动时间比预期更长，请稍后重试。',
-    port_unavailable: '预览端口暂时不可用，请稍后重试。',
+/** 将沙箱启动失败分类为对 P0 可读的错误摘要（不暴露堆栈/内部标识），供 A2-08 修复循环识别依赖/语法问题。 */
+function classifySandboxFailure(
+  category: 'process_crashed' | 'startup_timeout' | 'port_unavailable',
+  stderr: string,
+): SandboxRunResult['error_summary'] {
+  if (category === 'port_unavailable') {
+    return { category: 'port_unavailable', user_visible_summary: '预览端口暂时被占用，正在换一个。' }
   }
-  return { category, user_visible_summary: summaries[category] }
+  if (category === 'startup_timeout') {
+    return { category: 'timeout_error', user_visible_summary: '预览启动时间比预期更长，请稍后重试。' }
+  }
+  if (/Cannot find module|ENOENT|npm ERR/i.test(stderr)) {
+    return { category: 'dependency_error', user_visible_summary: '预览缺少运行依赖，无法启动。' }
+  }
+  if (/SyntaxError|Unexpected token/i.test(stderr)) {
+    return { category: 'syntax_error', user_visible_summary: '预览代码存在语法错误，无法启动。' }
+  }
+  return { category: 'runtime_error', user_visible_summary: '预览启动失败，请再试一次。' }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -282,7 +319,71 @@ export async function createSnapshot(input: SnapshotCreateInput): Promise<Snapsh
   }
   writeJsonFile(`${snapshotRoot}/metadata.json`, snapshot)
   writeJsonFile(`${snapshotDir}/${snapshotId}.json`, snapshot)
+  // A2-16 快照容量门禁：创建后立即执行归档策略
+  enforceSnapshotCapacity(project.workspace_slug, project.project_id)
   return snapshot
+}
+
+export interface SnapshotCapacityResult {
+  active_count: number
+  archived: string[]
+}
+
+/**
+ * 快照容量策略（A2-16）：单项目活跃快照超上限（100）时，按
+ * 「保留最近 N + 每 kind 最新」保护集，把最旧的其余快照归档到 archive/。
+ * 归档仅移出活跃集、不删除数据；归档合并/清理留给后续迭代。
+ */
+export function enforceSnapshotCapacity(workspaceSlug: string, projectId: string): SnapshotCapacityResult {
+  const snapshotDir = getSnapshotsDir(workspaceSlug, projectId)
+  const active = listActiveSnapshots(snapshotDir)
+  if (active.length <= MAX_SNAPSHOTS_PER_PROJECT) return { active_count: active.length, archived: [] }
+
+  // 保护集：最近 SNAPSHOT_RECENT_KEEP 个 + 每种 kind 最新一个
+  const byNewest = [...active].sort((a, b) => b.created_at.localeCompare(a.created_at))
+  const protectedIds = new Set<string>()
+  for (const snap of byNewest.slice(0, SNAPSHOT_RECENT_KEEP)) protectedIds.add(snap.snapshot_id)
+  const seenKinds = new Set<string>()
+  for (const snap of byNewest) {
+    if (seenKinds.has(snap.kind)) continue
+    seenKinds.add(snap.kind)
+    protectedIds.add(snap.snapshot_id)
+  }
+
+  // 最旧优先归档，直到活跃数回落到上限；保护集内永不归档
+  const oldestFirst = [...active].sort((a, b) => a.created_at.localeCompare(b.created_at))
+  const archiveDir = join(snapshotDir, 'archive')
+  const archived: string[] = []
+  for (const snap of oldestFirst) {
+    if (active.length - archived.length <= MAX_SNAPSHOTS_PER_PROJECT) break
+    if (protectedIds.has(snap.snapshot_id)) continue
+    const source = join(snapshotDir, snap.snapshot_id)
+    if (!existsSync(source)) continue
+    mkdirSync(archiveDir, { recursive: true })
+    renameSync(source, join(archiveDir, snap.snapshot_id))
+    const indexSource = `${source}.json`
+    if (existsSync(indexSource)) renameSync(indexSource, join(archiveDir, `${snap.snapshot_id}.json`))
+    archived.push(snap.snapshot_id)
+  }
+  return { active_count: active.length - archived.length, archived }
+}
+
+interface ActiveSnapshotMeta {
+  snapshot_id: string
+  kind: string
+  created_at: string
+}
+
+function listActiveSnapshots(snapshotDir: string): ActiveSnapshotMeta[] {
+  const result: ActiveSnapshotMeta[] = []
+  for (const entry of readdirSync(snapshotDir)) {
+    const full = join(snapshotDir, entry)
+    if (!statSync(full).isDirectory() || entry === 'archive') continue
+    const meta = readJsonFile<Snapshot | null>(join(full, 'metadata.json'), null)
+    if (!meta?.snapshot_id) continue
+    result.push({ snapshot_id: meta.snapshot_id, kind: meta.kind, created_at: meta.created_at })
+  }
+  return result
 }
 
 export async function rollbackSnapshot(input: SnapshotRollbackInput): Promise<RollbackResult> {
@@ -344,19 +445,6 @@ export function setSnapshotCaptureProvider(provider?: SnapshotCaptureProvider): 
 
 export function setSnapshotCaptureProviderForTests(provider?: SnapshotCaptureProvider): void {
   snapshotCaptureProvider = provider ?? defaultSnapshotCapture
-}
-
-export function syncDocuments(input: DocumentSyncInput): DocumentSyncResult {
-  const project = findProject(input.project_id)
-  const dir = getDocumentsDir(project.workspace_slug, project.project_id)
-  const doc: DocumentRef = {
-    document_id: randomUUID(),
-    type: input.checkpoint === 'mvp_tested' ? 'test_report' : 'prd',
-    path: `${dir}/${input.checkpoint}.md`,
-    status: 'synced',
-  }
-  writeJsonFile(doc.path, { checkpoint: input.checkpoint, changed_files: input.changed_files ?? [] })
-  return { documents: [doc], stale_documents: [] }
 }
 
 export function trackAnalytics(input: AnalyticsTrackInput): AnalyticsTrackResult {

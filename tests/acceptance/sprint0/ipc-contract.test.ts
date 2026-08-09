@@ -26,6 +26,10 @@ const expectedChannels = {
   SNAPSHOT_ROLLBACK: 'snapshot:rollback',
   DOCUMENT_SYNC: 'document:sync',
   ANALYTICS_TRACK: 'analytics:track',
+  CHANNEL_LIST: 'channel:list',
+  CHANNEL_CREATE: 'channel:create',
+  CHANNEL_TEST: 'channel:test',
+  CHANNEL_DELETE: 'channel:delete',
 } as const
 
 describe('Sprint 0 IPC contract acceptance', () => {

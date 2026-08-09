@@ -1,15 +1,42 @@
 import { randomUUID } from 'node:crypto'
-import type { AgentEvent, AgentSendMessageInput } from '../shared/types'
+import type { AgentEvent, AgentSendMessageInput, MessageContentBlock } from '../shared/types'
 import { routeDialogue } from './dialogue-router'
+import type { ConversationTurn, GuideModelOptions } from './orchestrator'
 import { trackAnalytics } from './platform-services'
 import { runSketchTask, setProgrammingEventPublisher } from './programming-orchestrator'
 import { findProject, updateProject } from './project-service'
+import { isRecord } from './validators'
 
 type GuideEventPublisher = (event: AgentEvent) => void
+
+/** 引导对话给模型的结构化指令：模型只输出 JSON 二选一（对齐 A2-14a Step 3 模板）。 */
+const GUIDE_SYSTEM_PROMPT = `你是「向导 Agent」，负责把用户的想法澄清成可生成草图的软件需求。只输出一个 JSON 对象，不要任何多余文字，不要 markdown 代码块围栏。
+
+二选一输出：
+
+【需求足够清晰 → 直接生成草图】
+{"action":"generate_sketch",
+ "reply":"给用户的简短确认话术（简体中文 ≤20 字，口语化，不含技术细节）",
+ "requirements":[{"id":"F-001","description":"核心功能点（动词开头，用户原话提炼，≤40 字）"}]}
+
+【需求不清晰 → 需要澄清】
+{"action":"ask_clarification",
+ "reply":"向用户澄清的引导语（简体中文一句话）",
+ "questions":[{"id":"scope","label":"范围选项（≤6 字）","description":"解释含义（≤20 字）"}]}
+
+约束：
+- requirements 1~5 条；questions 0~3 条（0 条时表示直接在 reply 里追问，不弹选项）。
+- id 用小写字母+连字符（如 daily-tool），不含空格。
+- 只输出 JSON，其余一律不要。`
+
+type GuideParsed =
+  | { action: 'generate_sketch'; reply: string; requirements: { id: string; description: string }[] }
+  | { action: 'ask_clarification'; reply: string; questions: { id: string; label: string; description?: string }[] }
 
 export async function handleGuideMessage(
   input: AgentSendMessageInput,
   publish: GuideEventPublisher,
+  model?: GuideModelOptions,
 ): Promise<void> {
   const project = findProject(input.project_id)
   setProgrammingEventPublisher(publish)
@@ -24,6 +51,12 @@ export async function handleGuideMessage(
     },
   })
 
+  // 渠道可用 → 优先走真实模型；模型不可用 / 解析失败 → 回退规则路由
+  if (model) {
+    const handled = await tryModelDrivenGuide(input, publish, model)
+    if (handled) return
+  }
+
   const route = routeDialogue(input.content, project)
   if (route.action === 'ask_clarification') {
     updateProject(input.project_id, { current_stage: 'blocked_for_user_decision' })
@@ -34,7 +67,7 @@ export async function handleGuideMessage(
     publish(makeGuideEvent(input, 'user_decision_required', {
       kind: 'clarification',
       title: '先确认方向',
-      options: route.questions.slice(0, 3),
+      questions: route.questions.slice(0, 3),
     }))
     return
   }
@@ -47,6 +80,124 @@ export async function handleGuideMessage(
     prompt: input.content,
     requirements: route.requirements,
   })
+}
+
+/**
+ * 模型驱动的澄清对话：给模型下发结构化指令，流式收集回复并发布 message_delta，
+ * 解析 JSON 后执行 generate_sketch / ask_clarification 分支。
+ * 任何失败（网络 / 非 JSON / 校验不过）都返回 false，由调用方回退规则路由。
+ */
+async function tryModelDrivenGuide(
+  input: AgentSendMessageInput,
+  publish: GuideEventPublisher,
+  model: GuideModelOptions,
+): Promise<boolean> {
+  const systemTurn: ConversationTurn = { role: 'system', content: GUIDE_SYSTEM_PROMPT }
+  const history: ConversationTurn[] = [systemTurn, ...model.history]
+
+  let accumulated = ''
+  try {
+    const stream = model.query(input.content, {
+      env: model.env,
+      signal: model.signal,
+      sessionId: model.sessionId,
+      history,
+      maxTokens: model.maxTokens,
+    })
+    for await (const sdkMessage of stream) {
+      if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue
+      const text = extractText(sdkMessage.message.content)
+      if (text) {
+        accumulated += text
+        publish(makeGuideEvent(input, 'message_delta', { text }))
+      }
+    }
+  } catch {
+    // 模型不可用/网络错误：回退规则路由（不打断澄清流程）
+    return false
+  }
+
+  model.persistAssistant(accumulated)
+  const parsed = parseGuideJson(accumulated)
+  if (!parsed) return false
+
+  publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+
+  if (parsed.action === 'ask_clarification') {
+    updateProject(input.project_id, { current_stage: 'blocked_for_user_decision' })
+    publish(makeGuideEvent(input, 'stage_changed', { stage: 'blocked_for_user_decision' }))
+    publish(makeGuideEvent(input, 'user_decision_required', {
+      kind: 'clarification',
+      title: '先确认方向',
+      // questions 0~3 条：0 条表示纯文本澄清，B 侧不弹卡片
+      questions: parsed.questions,
+    }))
+    return true
+  }
+
+  // generate_sketch：不经 user_decision_required，直接进入草图生成（模板化 runSketchTask）
+  await runSketchTask({
+    request_id: input.request_id,
+    session_id: input.session_id,
+    project_id: input.project_id,
+    mode: input.mode,
+    prompt: parsed.reply || input.content,
+    requirements: parsed.requirements,
+  })
+  return true
+}
+
+function parseGuideJson(text: string): GuideParsed | undefined {
+  const cleaned = text.replace(/```(?:json)?/gi, '').trim()
+  const start = cleaned.indexOf('{')
+  const end = cleaned.lastIndexOf('}')
+  if (start < 0 || end <= start) return undefined
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>
+  } catch {
+    return undefined
+  }
+
+  if (parsed.action === 'generate_sketch') {
+    const requirements = (Array.isArray(parsed.requirements) ? parsed.requirements : [])
+      .filter(isRecord)
+      .filter((r) => typeof r.id === 'string' && typeof r.description === 'string')
+      .slice(0, 5)
+      .map((r) => ({ id: r.id as string, description: r.description as string }))
+    if (requirements.length < 1) return undefined
+    return {
+      action: 'generate_sketch',
+      reply: typeof parsed.reply === 'string' ? parsed.reply : '',
+      requirements,
+    }
+  }
+
+  if (parsed.action === 'ask_clarification') {
+    const questions = (Array.isArray(parsed.questions) ? parsed.questions : [])
+      .filter(isRecord)
+      .filter((q) => typeof q.id === 'string' && typeof q.label === 'string')
+      .slice(0, 3)
+      .map((q) => ({
+        id: q.id as string,
+        label: q.label as string,
+        description: typeof q.description === 'string' ? q.description : undefined,
+      }))
+    return {
+      action: 'ask_clarification',
+      reply: typeof parsed.reply === 'string' ? parsed.reply : '',
+      questions,
+    }
+  }
+
+  return undefined
+}
+
+function extractText(blocks: MessageContentBlock[]): string {
+  return blocks
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text ?? '')
+    .join('')
 }
 
 function makeGuideEvent(

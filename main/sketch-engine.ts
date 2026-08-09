@@ -134,7 +134,8 @@ function pageTitle(description: string, index: number): string {
   return trimmed.length > 14 ? `${trimmed.slice(0, 14)}...` : trimmed
 }
 
-function escapeHtml(value: string): string {
+/** HTML 转义工具（导出供 mvp-engine 等复用，避免各模板各自实现一份）。 */
+export function escapeHtml(value: string): string {
   return value
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { existsSync, readFileSync } from 'node:fs'
 import type {
   ConfirmSketchInput,
   PointCorrectionInput,
@@ -10,6 +11,7 @@ import type {
   WorkflowStage,
 } from '../shared/types'
 import { WORKFLOW_STAGES } from '../shared/types'
+import type { SketchRequirement } from './sketch-engine'
 import {
   getDocumentsDir,
   getGeneratedProjectPath,
@@ -128,4 +130,27 @@ function appendProjectEvent(project: Project, type: string, payload: unknown): v
     payload,
     created_at: new Date().toISOString(),
   })
+}
+
+/** 草图生成时记录需求清单，供 MVP 生成读取 P0 功能项（不经 IPC，纯内部 service 直连）。 */
+export function recordSketchGenerated(projectId: string, requirements: SketchRequirement[]): void {
+  appendProjectEvent(findProject(projectId), 'sketch_generated', { requirements })
+}
+
+/** 读取最近一次 `sketch_generated` 事件中的需求清单；无记录时返回空数组。 */
+export function readLastSketchRequirements(projectId: string): SketchRequirement[] {
+  const path = getProjectEventsPath(WORKSPACE_SLUG, projectId)
+  if (!existsSync(path)) return []
+  const lines = readFileSync(path, 'utf8').split('\n').filter((line) => line.trim())
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    try {
+      const event = JSON.parse(lines[index]) as { type?: string; payload?: { requirements?: unknown } }
+      if (event.type === 'sketch_generated' && Array.isArray(event.payload?.requirements)) {
+        return event.payload.requirements as SketchRequirement[]
+      }
+    } catch {
+      // 跳过损坏行
+    }
+  }
+  return []
 }

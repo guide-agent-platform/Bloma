@@ -39,7 +39,7 @@ describe('Sprint 1 sketch clarification acceptance', () => {
       channel_id: 'test-channel',
     }) as ApiResult<unknown>
     const decision = findEvent(harness.events, 'user_decision_required')
-    const options = decision?.payload.options as Array<{ label: string; description?: string }>
+    const options = decision?.payload.questions as Array<{ label: string; description?: string }>
 
     expect(response.ok).toBe(true)
     expect(options.length).toBeGreaterThanOrEqual(2)

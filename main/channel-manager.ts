@@ -44,6 +44,7 @@ export function createChannel(input: ChannelCreateInput): Channel {
     api_key: encryptSecret(input.api_key),
     models: input.models ?? [],
     enabled: true,
+    max_tokens: input.max_tokens,
   }
   config.channels.push(channel)
   saveChannels(config)
@@ -54,20 +55,33 @@ export function decryptApiKey(encryptedHex: string): string {
   return decryptSecret(encryptedHex)
 }
 
+export function deleteChannel(channelId: string): boolean {
+  const config = loadChannels()
+  const before = config.channels.length
+  config.channels = config.channels.filter((channel) => channel.id !== channelId)
+  if (config.channels.length === before) return false
+  saveChannels(config)
+  return true
+}
+
 export async function testChannel(channelId: string): Promise<{ ok: boolean; message: string }> {
   const channel = getChannelByIdRaw(channelId)
   if (!channel) return { ok: false, message: '渠道不存在' }
 
   const apiKey = decryptSecret(channel.api_key)
-  const res = await fetch(`${channel.base_url}/v1/models`, {
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    signal: AbortSignal.timeout(15_000),
-  })
-
-  return res.ok
-    ? { ok: true, message: '连接成功' }
-    : { ok: false, message: '模型配置需要重新验证' }
+  try {
+    const res = await fetch(`${channel.base_url}/v1/models`, {
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      signal: AbortSignal.timeout(15_000),
+    })
+    return res.ok
+      ? { ok: true, message: '连接成功' }
+      : { ok: false, message: '模型配置需要重新验证' }
+  } catch {
+    // 网络不可达/超时：不抛原始错误，给用户可读文案
+    return { ok: false, message: '连接失败，请检查网络或地址' }
+  }
 }

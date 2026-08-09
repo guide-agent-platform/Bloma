@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { existsSync, readFileSync } from 'node:fs'
 import type {
   AgentCancelInput,
   AgentCancelResult,
@@ -15,13 +16,35 @@ import { decryptApiKey, getChannelByIdRaw } from './channel-manager'
 import { handleGuideMessage } from './guide-agent-service'
 import { recordSessionActivity } from './session-service'
 
-type StreamPublisher = (event: AgentEvent) => void
-type SDKQuery = (prompt: string, options: SDKQueryOptions) => AsyncIterable<SDKMessage>
+export type StreamPublisher = (event: AgentEvent) => void
 
-interface SDKQueryOptions {
+/** 传给 SDK 的历史消息轮次（role + 纯文本 content）。 */
+export interface ConversationTurn {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+export interface SDKQueryOptions {
   env: Record<string, string>
   signal: AbortSignal
   sessionId: string
+  /** 多轮历史（不含当前 prompt）；anthropicMessagesQuery 追加 {role:'user', content: prompt} */
+  history?: ConversationTurn[]
+  /** 单次响应的最大 token 数，缺省 1200（去硬编码：由渠道配置传入） */
+  maxTokens?: number
+}
+
+export type SDKQuery = (prompt: string, options: SDKQueryOptions) => AsyncIterable<SDKMessage>
+
+/** 引导对话的模型驱动选项（由 runAgent 注入，避免 guide-agent-service 反向依赖 orchestrator 运行时）。 */
+export interface GuideModelOptions {
+  query: SDKQuery
+  env: Record<string, string>
+  signal: AbortSignal
+  sessionId: string
+  history: ConversationTurn[]
+  maxTokens: number
+  persistAssistant: (text: string) => void
 }
 
 interface ActiveRun {
@@ -44,6 +67,10 @@ export function setAgentStreamPublisher(publisher: StreamPublisher): void {
 
 export function setSDKQueryForTests(query: SDKQuery): void {
   sdkQuery = query
+}
+
+export function resetSDKQueryForTests(): void {
+  sdkQuery = anthropicMessagesQuery
 }
 
 export function setRetrySleepForTests(sleepFn: (ms: number) => Promise<void>): void {
@@ -101,14 +128,14 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
   try {
     const channel = input.channel_id ? getChannelByIdRaw(input.channel_id) : undefined
     const model = channel?.models.find((item) => item.enabled)?.id ?? 'claude-sonnet-4-6'
-    let env: Record<string, string>
+    let env: Record<string, string> | undefined
     if (channel) {
       const apiKey = decryptApiKey(channel.api_key)
       env = buildSdkEnv(apiKey, channel.base_url, model)
-    } else {
-      // 无渠道配置时直接抛错，不留测试占位 key
-      throw new Error('CHANNEL_NOT_FOUND: configure a model channel before using the SDK')
     }
+    const maxTokens = channel?.max_tokens ?? 1200
+    // 多轮历史：读取已有对话轮次（不含本次 user 消息，稍后追加），支撑 SDK 多轮上下文
+    const history = loadConversationHistory(input.session_id)
 
     appendAgentMessage(input.session_id, {
       role: 'user',
@@ -119,14 +146,36 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     recordSessionActivity(input.session_id, input.project_id)
 
     if (shouldUseGuideAgent(input.current_stage)) {
-      await handleGuideMessage(input, streamPublisher)
+      // 引导路径：渠道可用则切真实模型（模型不可用/解析失败回退规则），无渠道直接走规则，不阻塞澄清
+      const guideOptions: GuideModelOptions | undefined = env
+        ? {
+            query: sdkQuery,
+            env,
+            signal: abortController.signal,
+            sessionId: input.session_id,
+            history,
+            maxTokens,
+            persistAssistant: (text: string) =>
+              appendAgentMessage(input.session_id, {
+                role: 'assistant',
+                content: [{ type: 'text', text }],
+                timestamp: Date.now(),
+              }),
+          }
+        : undefined
+      await handleGuideMessage(input, streamPublisher, guideOptions)
       persistTerminalMessage(input.session_id, 'completed')
       streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
       return { accepted: true, session_id: input.session_id, stream_started: true }
     }
 
+    // 编程路径：必须真实模型，无渠道直接抛明确错误（不留测试占位 key）
+    if (!channel || !env) {
+      throw new Error('CHANNEL_NOT_FOUND: configure a model channel before using the SDK')
+    }
+
     await runWithRetry(input, async () => {
-      const stream = sdkQuery(input.content, { env, signal: abortController.signal, sessionId: input.session_id })
+      const stream = sdkQuery(input.content, { env, signal: abortController.signal, sessionId: input.session_id, history, maxTokens })
       run.iterator = stream[Symbol.asyncIterator]()
 
       for (;;) {
@@ -231,14 +280,20 @@ function appendAgentMessage(sessionId: string, message: AgentMessage): void {
 }
 
 function persistAssistantMessages(sessionId: string, sdkMessages: SDKMessage[]): void {
+  // 流式模式下每个 assistant 消息只携带一段 delta 文本，这里合并成一条完整助手消息
+  const texts: string[] = []
   for (const sdk of sdkMessages) {
     if (sdk.type !== 'assistant' || !sdk.message) continue
-    appendAgentMessage(sessionId, {
-      role: 'assistant',
-      content: sdk.message.content,
-      timestamp: Date.now(),
-    })
+    for (const block of sdk.message.content) {
+      if (block.type === 'text' && block.text) texts.push(block.text)
+    }
   }
+  if (texts.length === 0) return
+  appendAgentMessage(sessionId, {
+    role: 'assistant',
+    content: [{ type: 'text', text: texts.join('') }],
+    timestamp: Date.now(),
+  })
 }
 
 /**
@@ -296,6 +351,15 @@ function extractText(blocks: MessageContentBlock[]): string {
     .join('')
 }
 
+/**
+ * 真实模型查询（SSE 流式 + 多轮历史）。
+ *
+ * - 对齐 Anthropic Messages API / MiniMax Anthropic 兼容端点（`x-api-key` 认证头）。
+ * - 保持 `AsyncGenerator<SDKMessage>` 契约：逐个 `assistant` delta → `result`，
+ *   调用方（runAgent/convertSDKMessage/UI）无需改动。
+ * - 每个 assistant 消息只携带一段增量文本（非累积），renderer 按 delta 拼接。
+ * - 历史经 options.history 传入，消息数组 = [...history, {role:'user', content: prompt}]。
+ */
 async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions): AsyncGenerator<SDKMessage> {
   if (!options.env.PATH && !options.env.Path) throw new Error('SDK env missing PATH')
   if (options.signal.aborted) throw new Error('AGENT_CANCELLED')
@@ -304,6 +368,7 @@ async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions)
     throw new Error('CHANNEL_NOT_FOUND: configure a model channel before using the SDK')
   }
   const baseUrl = (options.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/+$/, '')
+  const messages = [...(options.history ?? []), { role: 'user', content: prompt }]
   const response = await fetch(`${baseUrl}/v1/messages`, {
     method: 'POST',
     headers: {
@@ -313,24 +378,84 @@ async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions)
     },
     body: JSON.stringify({
       model: options.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
-      max_tokens: 1200,
-      messages: [{ role: 'user', content: prompt }],
+      max_tokens: options.maxTokens ?? 1200,
+      stream: true,
+      messages,
     }),
     signal: options.signal,
   })
   if (!response.ok) {
     throw Object.assign(new Error(`SDK request failed with ${response.status}`), { statusCode: response.status })
   }
-  const data = (await response.json()) as { content?: Array<{ type?: string; text?: string }> }
-  const text = data.content
-    ?.filter((block) => block.type === 'text')
-    .map((block) => block.text ?? '')
-    .join('') ?? ''
-  yield {
-    type: 'assistant',
-    message: { role: 'assistant', content: [{ type: 'text', text }] },
+  if (!response.body) throw new Error('SDK request body unavailable')
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      // SSE 事件以空行分隔；按 data: 行解析（兼容 \r\n 与 [DONE] 结束标记）
+      for (;;) {
+        const boundary = buffer.indexOf('\n\n')
+        if (boundary < 0) break
+        const rawEvent = buffer.slice(0, boundary)
+        buffer = buffer.slice(boundary + 2)
+        const dataLine = rawEvent
+          .split('\n')
+          .find((line) => line.startsWith('data:'))
+        if (!dataLine) continue
+        const data = dataLine.slice(5).trim()
+        if (!data || data === '[DONE]') continue
+        let parsed: { type?: string; delta?: { type?: string; text?: string } }
+        try {
+          parsed = JSON.parse(data) as typeof parsed
+        } catch {
+          continue
+        }
+        if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta' && typeof parsed.delta.text === 'string') {
+          yield {
+            type: 'assistant',
+            message: { role: 'assistant', content: [{ type: 'text', text: parsed.delta.text }] },
+          }
+        }
+      }
+    }
+  } finally {
+    try {
+      reader.releaseLock()
+    } catch {
+      // 已取消/已释放时忽略
+    }
   }
+
   yield { type: 'result', subtype: 'success' }
+}
+
+/**
+ * 读取会话 JSONL 中最近 N 轮 user/assistant 对话文本，作为 SDK 多轮历史。
+ * 排除内部终态标记（[terminal]）与 system 消息，防止历史污染模型上下文。
+ */
+function loadConversationHistory(sessionId: string, limit = 20): ConversationTurn[] {
+  const path = getAgentSessionPath(sessionId)
+  if (!existsSync(path)) return []
+  const turns: ConversationTurn[] = []
+  for (const line of readFileSync(path, 'utf8').split('\n')) {
+    if (!line.trim()) continue
+    let message: AgentMessage
+    try {
+      message = JSON.parse(line) as AgentMessage
+    } catch {
+      continue
+    }
+    if (message.role !== 'user' && message.role !== 'assistant') continue
+    const text = extractText(message.content)
+    if (!text || text.startsWith('[terminal]')) continue
+    turns.push({ role: message.role, content: text })
+  }
+  return turns.slice(Math.max(0, turns.length - limit))
 }
 
 function shouldUseGuideAgent(stage: AgentSendMessageInput['current_stage']): boolean {

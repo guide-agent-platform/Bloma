@@ -26,6 +26,9 @@ import type {
   AgentLoadMessagesInput,
   AgentSendMessageInput,
   AnalyticsTrackInput,
+  ChannelCreateEnvelope,
+  ChannelDeleteEnvelope,
+  ChannelTestEnvelope,
   ConfirmSketchInput,
   DocumentSyncInput,
   ElectronAPI,
@@ -94,6 +97,16 @@ const electronAPI: ElectronAPI = {
   analytics: {
     track: (input: AnalyticsTrackInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.ANALYTICS_TRACK, input),
+  },
+  channels: {
+    list: (input: RequestEnvelope) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_LIST, input),
+    create: (input: ChannelCreateEnvelope) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_CREATE, input),
+    test: (input: ChannelTestEnvelope) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_TEST, input),
+    delete: (input: ChannelDeleteEnvelope) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_DELETE, input),
   },
 }
 

@@ -33,6 +33,10 @@ export const IPC_CHANNELS = {
   SNAPSHOT_ROLLBACK: 'snapshot:rollback',
   DOCUMENT_SYNC: 'document:sync',
   ANALYTICS_TRACK: 'analytics:track',
+  CHANNEL_LIST: 'channel:list',
+  CHANNEL_CREATE: 'channel:create',
+  CHANNEL_TEST: 'channel:test',
+  CHANNEL_DELETE: 'channel:delete',
 } as const
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
@@ -148,6 +152,8 @@ export interface Channel {
   api_key: string
   models: ChannelModel[]
   enabled: boolean
+  /** 单次响应的最大 token 数（缺省 1200，见 orchestrator 默认值） */
+  max_tokens?: number
 }
 
 export interface ChannelCreateInput {
@@ -156,6 +162,28 @@ export interface ChannelCreateInput {
   base_url: string
   api_key: string
   models?: ChannelModel[]
+  max_tokens?: number
+}
+
+/** IPC 层渠道创建输入：在 ChannelCreateInput 上叠加 request_id 包装（复用 §4 域模型）。 */
+export type ChannelCreateEnvelope = RequestEnvelope & ChannelCreateInput
+
+export interface ChannelTestEnvelope extends RequestEnvelope {
+  channel_id: string
+}
+
+export interface ChannelTestResult {
+  ok: boolean
+  message: string
+}
+
+export interface ChannelDeleteEnvelope extends RequestEnvelope {
+  channel_id: string
+}
+
+export interface ChannelDeleteResult {
+  deleted: true
+  channel_id: string
 }
 
 // =========================================================================
@@ -340,6 +368,11 @@ export interface Project {
   current_snapshot_id?: string
   /** 最后活跃会话 ID，用于启动恢复时续接上下文 */
   last_session_id?: string
+  /** 自动修复计数（component-design §7）：runtime 与 test 各 ≤3，成功归零 */
+  runtime_repair_count?: number
+  test_repair_count?: number
+  /** 裁判退回计数（A2-11）：quick=2 / longterm=3，达上限让渡 */
+  judge_return_count?: number
   created_at: string
   updated_at: string
 }
@@ -538,6 +571,12 @@ export type ElectronAPI = {
   }
   analytics: {
     track(input: AnalyticsTrackInput): Promise<ApiResult<AnalyticsTrackResult>>
+  }
+  channels: {
+    list(input: RequestEnvelope): Promise<ApiResult<Channel[]>>
+    create(input: ChannelCreateEnvelope): Promise<ApiResult<Channel>>
+    test(input: ChannelTestEnvelope): Promise<ApiResult<ChannelTestResult>>
+    delete(input: ChannelDeleteEnvelope): Promise<ApiResult<ChannelDeleteResult>>
   }
 }
 
