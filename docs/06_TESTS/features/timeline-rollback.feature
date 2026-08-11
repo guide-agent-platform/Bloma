@@ -7,11 +7,13 @@ Feature: 快照与线性回滚
     Given 项目已经生成过验证草图和 MVP
     And 时间轴中存在多个快照
 
+  @S3-SNAPSHOT-001
   Scenario: 草图和 MVP 生成后自动创建快照
     When 用户展开时间轴
     Then 时间轴显示“验证草图”和“MVP”快照
     And 每个快照包含预览截图、自然语言摘要和创建时间
 
+  @S3-SNAPSHOT-002
   Scenario: 用户确认回滚到验证草图版本
     Given 时间轴中存在“验证草图 v1”和“MVP v1”两个快照
     When 用户点击“验证草图 v1”的“回到这里”
@@ -23,6 +25,7 @@ Feature: 快照与线性回滚
     And 当前快照指针更新为“验证草图 v1”
     And 向导 Agent 告知用户已经回到之前版本
 
+  @S3-SNAPSHOT-003
   Scenario: 用户取消回滚
     Given 回滚确认框已经显示
     When 用户点击“取消”
@@ -30,18 +33,21 @@ Feature: 快照与线性回滚
     And 当前预览不变
     And 当前快照指针不变
 
+  @S3-SNAPSHOT-004
   Scenario: 当前版本不能回滚到自身
     Given 时间轴展开
     When 用户查看当前版本快照卡片
     Then 卡片显示“当前版本”
     And 卡片不显示“回到这里”按钮
 
+  @S3-SNAPSHOT-005
   Scenario: 回滚后继续修改不创建分支
     Given 用户已经回滚到较早快照
     When 用户继续提交新的修改
     Then 新快照沿当前时间线继续追加
     And 系统不展示分支概念
 
+  @S3-SNAPSHOT-006
   Scenario: 回滚过程中应用关闭后恢复事务
     Given 回滚事务已经开始
     When 用户关闭应用
