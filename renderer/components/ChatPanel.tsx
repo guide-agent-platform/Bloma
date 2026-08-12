@@ -1,5 +1,5 @@
 import React from 'react'
-import { atom, useAtomValue } from 'jotai'
+import { useAtomValue } from 'jotai'
 import { CardOptions } from './CardOptions'
 import type { CardOption } from './CardOptions'
 import { WaitingFeedback } from './WaitingFeedback'
@@ -12,7 +12,7 @@ import {
   globalUserErrorAtom,
   projectModeAtom,
 } from './atoms'
-import type { AgentMessage, AgentStreamState, ProjectMode } from './atoms'
+import type { AgentMessage, ProjectMode } from './atoms'
 
 export interface ChatPanelProps {
   /** 向导 Agent 发出的卡片选项（由上层从 AgentEvent 中解析） */
@@ -34,15 +34,6 @@ export interface ChatPanelProps {
   /** 回访恢复：加载历史消息期间显示骨架占位（sitemap §2.6） */
   isHistoryLoading?: boolean
 }
-
-// 模块级常量：当 activeAgentSessionIdAtom 为 null 时的稳定 fallback atom，
-// 避免在 atomFamily 中创建不可回收的 '__unused__' key。
-const nullMessagesFallback = atom<AgentMessage[]>([])
-const nullStreamFallback = atom<AgentStreamState>({
-  running: false,
-  events: [],
-  content: '',
-})
 
 const glassTile: React.CSSProperties = {
   display: 'flex',
@@ -73,12 +64,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const hasActiveStream = useAtomValue(hasActiveStreamAtom)
   const globalError = useAtomValue(globalUserErrorAtom)
 
-  const messages = useAtomValue(
-    activeSessionId ? agentMessagesFamily(activeSessionId) : nullMessagesFallback,
-  )
-  const streamState = useAtomValue(
-    activeSessionId ? agentStreamStateFamily(activeSessionId) : nullStreamFallback,
-  )
+  const messagesAtom = activeSessionId ? agentMessagesFamily(activeSessionId) : null
+  const messages = useAtomValue(messagesAtom ?? agentMessagesFamily('__unused__'))
+  const streamStateAtom = activeSessionId ? agentStreamStateFamily(activeSessionId) : null
+  const streamState = useAtomValue(streamStateAtom ?? agentStreamStateFamily('__unused__'))
 
   const [inputValue, setInputValue] = React.useState('')
   const messagesEndRef = React.useRef<HTMLDivElement>(null)

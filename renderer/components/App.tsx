@@ -1,12 +1,8 @@
 import React, { useState, useCallback } from 'react'
-import { useSetAtom, useAtomValue } from 'jotai'
+import { useSetAtom } from 'jotai'
 import { ModeSelectionPage } from './ModeSelectionPage'
 import { WorkspaceShell } from './WorkspaceShell'
 import { ProjectHistoryPage } from './ProjectHistoryPage'
-import { PermissionDialog } from './PermissionDialog'
-import { ChannelSettingsPage } from './ChannelSettingsPage'
-import { useUserDecisionCards, toCardSelectionMeta } from './ChatPanel-sprint2'
-import type { CardOption } from './CardOptions'
 import type { PreviewStatus } from './PreviewPanel'
 import type { Snapshot, AgentMessage, Project } from './atoms'
 import {
@@ -50,7 +46,6 @@ const App: React.FC = () => {
     <>
       <Aurora />
       <AppRoutes />
-      <PermissionDialog mode="ask" />
     </>
   )
 }
@@ -60,7 +55,7 @@ const App: React.FC = () => {
    通过 Jotai hooks 直接操作 store，不依赖全局变量
    ========================================================================= */
 
-type AppRoute = 'mode-selection' | 'workspace' | 'project-history' | 'settings'
+type AppRoute = 'mode-selection' | 'workspace' | 'project-history'
 
 const AppRoutes: React.FC = () => {
   const [route, setRoute] = useState<AppRoute>('mode-selection')
@@ -91,11 +86,6 @@ const AppRoutes: React.FC = () => {
   const setMessages = useSetAtom(agentMessagesFamily(sessionId))
 
   const restoreAttemptedRef = React.useRef(false)
-
-  // Sprint 2: 从 AgentEvent 提取 user_decision_required → CardOptions
-  const decisionCards = useUserDecisionCards()
-  const currentProject = useAtomValue(currentProjectAtom)
-  const currentStage = useAtomValue(workflowStageAtom)
 
   // 启动恢复：若本地存在活动项目，直接进入工作区而不是显示两道门
   React.useEffect(() => {
@@ -300,27 +290,6 @@ const AppRoutes: React.FC = () => {
     }, 2000)
   }, [handleDecideForMe, setMessages, setWorkflowStage, setStageLabel, setSnapshotsList])
 
-  // ==================== 卡片选项回传（Sprint 2：澄清卡片） ====================
-
-  const handleCardOptionSelect = useCallback((option: CardOption) => {
-    const api = window.electronAPI
-    if (api?.agent?.sendMessage) {
-      // 真实链路：带 card_option metadata 回传（selected_option_id 对齐契约）
-      void api.agent.sendMessage({
-        request_id: crypto.randomUUID(),
-        session_id: sessionId,
-        project_id: currentProject?.project_id ?? projectList[0]?.project_id ?? 'demo',
-        content: option.label,
-        mode: mode ?? 'quick',
-        current_stage: currentStage,
-        metadata: toCardSelectionMeta(option.id),
-      })
-      return
-    }
-    // demo / 无主进程：回退本地消息流
-    handleSendMessage(option.label)
-  }, [sessionId, currentProject, projectList, mode, currentStage, handleSendMessage])
-
   // ==================== 点选纠错 ====================
 
   const handleCorrectionSubmit = useCallback((payload: { position: { x: number; y: number }; userNote: string; fallbackMode: boolean }) => {
@@ -379,12 +348,6 @@ const AppRoutes: React.FC = () => {
     setPreviewStatus('running')
   }, [setMessages])
 
-  // ==================== 设置页入口 ====================
-
-  const handleOpenSettings = useCallback(() => {
-    setRoute('settings')
-  }, [])
-
   // ==================== 路由渲染 ====================
 
   if (route === 'mode-selection') {
@@ -407,15 +370,9 @@ const AppRoutes: React.FC = () => {
     )
   }
 
-  if (route === 'settings') {
-    return <ChannelSettingsPage onBack={() => setRoute('workspace')} />
-  }
-
   // route === 'workspace'
   return (
     <WorkspaceShell
-      cardOptions={decisionCards ?? undefined}
-      onCardOptionSelect={handleCardOptionSelect}
       onSendMessage={handleSendMessage}
       isWaiting={waiting}
       waitStartTime={waitStart}
@@ -431,7 +388,6 @@ const AppRoutes: React.FC = () => {
       onRollback={handleRollback}
       onContinueWaiting={handleContinueWaiting}
       onViewPartial={handleViewPartial}
-      onOpenSettings={handleOpenSettings}
       onAllProjects={projectList.length > 0 ? () => {
         setRoute('project-history')
       } : undefined}
