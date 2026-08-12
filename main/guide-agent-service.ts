@@ -33,10 +33,43 @@ type GuideParsed =
   | { action: 'generate_sketch'; reply: string; requirements: { id: string; description: string }[] }
   | { action: 'ask_clarification'; reply: string; questions: { id: string; label: string; description?: string }[] }
 
+/**
+ * 澄清卡片已知选项 id → 草图需求描述。
+ * 卡片答案是结构化决策：用户已选方向，直接生成草图（修复规则路由澄清死循环）。
+ * 未知 id（如模型自定义问题）退回用户点选文案本身作为需求。
+ */
+const CARD_ANSWER_REQUIREMENTS: Record<string, string> = {
+  daily: '日常生活工具：帮助管理日常事务，如记账、提醒、清单',
+  work: '工作提效工具：帮助提升工作场景效率，如流程、协作、记录',
+  auto: '通用实用软件工具，由向导按常见做法生成第一版',
+}
+
+/** 阻塞态让渡卡片的决策 id（accept/explain/continue）由 resumeBlockedFlow 处理，不得误入草图生成。 */
+const BLOCKED_DECISION_IDS = new Set(['accept', 'explain', 'continue'])
+
+interface CardAnswerRoute {
+  prompt: string
+  requirements: { id: string; description: string }[]
+}
+
+/** 卡片选项答案：metadata.source === 'card_option' 且非阻塞决策 id 时，视为已澄清，直接生成草图。 */
+function resolveCardAnswer(input: AgentSendMessageInput): CardAnswerRoute | undefined {
+  if (input.metadata?.source !== 'card_option') return undefined
+  const optionId = input.metadata.selected_option_id
+  if (BLOCKED_DECISION_IDS.has(optionId ?? '')) return undefined
+  const description = CARD_ANSWER_REQUIREMENTS[optionId ?? ''] ?? input.content
+  return {
+    prompt: input.content,
+    requirements: [{ id: 'F-001', description }],
+  }
+}
+
 export async function handleGuideMessage(
   input: AgentSendMessageInput,
   publish: GuideEventPublisher,
   model?: GuideModelOptions,
+  /** 规则路由下也把助手回复写入会话 JSONL，保证回访恢复与实时 UI 一致 */
+  persistAssistant?: (text: string) => void,
 ): Promise<void> {
   const project = findProject(input.project_id)
   setProgrammingEventPublisher(publish)
@@ -46,10 +79,31 @@ export async function handleGuideMessage(
       event_type: 'conversation_submitted',
       project_id: input.project_id,
       session_id: input.session_id,
-      payload: { mode: input.mode, source: input.metadata?.source ?? 'chat' },
+      payload: {
+        mode: input.mode,
+        source: input.metadata?.source ?? 'chat',
+        selected_option_id: input.metadata?.selected_option_id,
+      },
       privacy_level: 'research_safe',
     },
   })
+
+  // 卡片答案：用户已通过选项给出方向，直接生成草图（修复澄清死循环）
+  const cardAnswer = resolveCardAnswer(input)
+  if (cardAnswer) {
+    const ack = '好的，按你选的方向开始生成草图。'
+    persistAssistant?.(ack)
+    publish(makeGuideEvent(input, 'message_delta', { text: ack }))
+    await runSketchTask({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+      prompt: cardAnswer.prompt,
+      requirements: cardAnswer.requirements,
+    })
+    return
+  }
 
   // 渠道可用 → 优先走真实模型；模型不可用 / 解析失败 → 回退规则路由
   if (model) {
@@ -61,9 +115,9 @@ export async function handleGuideMessage(
   if (route.action === 'ask_clarification') {
     updateProject(input.project_id, { current_stage: 'blocked_for_user_decision' })
     publish(makeGuideEvent(input, 'stage_changed', { stage: 'blocked_for_user_decision' }))
-    publish(makeGuideEvent(input, 'message_delta', {
-      text: '我需要再确认几个关键点，这样草图会更接近你的想法。',
-    }))
+    const reply = '我需要再确认几个关键点，这样草图会更接近你的想法。'
+    persistAssistant?.(reply)
+    publish(makeGuideEvent(input, 'message_delta', { text: reply }))
     publish(makeGuideEvent(input, 'user_decision_required', {
       kind: 'clarification',
       title: '先确认方向',
@@ -83,8 +137,12 @@ export async function handleGuideMessage(
 }
 
 /**
- * 模型驱动的澄清对话：给模型下发结构化指令，流式收集回复并发布 message_delta，
- * 解析 JSON 后执行 generate_sketch / ask_clarification 分支。
+ * 模型驱动的澄清对话：给模型下发结构化指令，流式收集回复并解析 JSON。
+ *
+ * 关键点：模型被要求"只输出 JSON"，所以流式内容是内部契约，绝不上屏、不落盘。
+ * 只有解析出的用户可见 `reply` 才会发布 message_delta 并写入会话 JSONL——
+ * 否则对话气泡会把 {"action":...} 原始 JSON 直接暴露给用户。
+ *
  * 任何失败（网络 / 非 JSON / 校验不过）都返回 false，由调用方回退规则路由。
  */
 async function tryModelDrivenGuide(
@@ -95,6 +153,7 @@ async function tryModelDrivenGuide(
   const systemTurn: ConversationTurn = { role: 'system', content: GUIDE_SYSTEM_PROMPT }
   const history: ConversationTurn[] = [systemTurn, ...model.history]
 
+  // 只做内部累积：模型流式吐的是原始 JSON，不发布 message_delta，避免结构泄露
   let accumulated = ''
   try {
     const stream = model.query(input.content, {
@@ -107,20 +166,24 @@ async function tryModelDrivenGuide(
     for await (const sdkMessage of stream) {
       if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue
       const text = extractText(sdkMessage.message.content)
-      if (text) {
-        accumulated += text
-        publish(makeGuideEvent(input, 'message_delta', { text }))
-      }
+      if (text) accumulated += text
     }
   } catch {
     // 模型不可用/网络错误：回退规则路由（不打断澄清流程）
     return false
   }
 
-  model.persistAssistant(accumulated)
   const parsed = parseGuideJson(accumulated)
   if (!parsed) return false
 
+  // 仅把对用户可读的 reply 上屏并落盘；缺省给通用兜底话术，绝不写回原始 JSON
+  const reply =
+    parsed.reply.trim() ||
+    (parsed.action === 'ask_clarification'
+      ? '想再多了解一点，方便我判断该怎么做。'
+      : '好的，开始按你的想法生成草图。')
+  model.persistAssistant(reply)
+  publish(makeGuideEvent(input, 'message_delta', { text: reply }))
   publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
 
   if (parsed.action === 'ask_clarification') {

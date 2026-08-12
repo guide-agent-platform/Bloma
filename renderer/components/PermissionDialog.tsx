@@ -153,16 +153,23 @@ export const PermissionDialog: React.FC<PermissionDialogProps> = ({
 
       const api = window.electronAPI
       if (api?.permissions?.respond) {
-        api.permissions.respond({
-          request_id: crypto.randomUUID(),
-          permission_request_id: currentRequest.id,
-          session_id: currentRequest.session_id,
-          decision,
-          remember_for_session: decision === 'allow' && rememberChecked,
-        })
-        // 仅在 IPC 调用成功后从队列清除（m-001 修复：避免 electronAPI 不可用时
-        // UI 显示操作成功但主进程 Promise 永不 resolve，挂起自动化管线）
-        clearPermissionRequest(currentRequest.session_id, currentRequest.id)
+        // B3 修复：await respond，仅在 IPC 结算后清除队列。
+        // 之前是 fire-and-forget + 立即清除，respond 失败时 UI 假成功、主进程 Promise 仍挂起。
+        api.permissions
+          .respond({
+            request_id: crypto.randomUUID(),
+            permission_request_id: currentRequest.id,
+            session_id: currentRequest.session_id,
+            decision,
+            remember_for_session: decision === 'allow' && rememberChecked,
+          })
+          .then(() => {
+            clearPermissionRequest(currentRequest.session_id, currentRequest.id)
+          })
+          .catch(() => {
+            // respond 失败（请求已过期等）：仍清除队列，避免 UI 卡死
+            clearPermissionRequest(currentRequest.session_id, currentRequest.id)
+          })
       } else {
         // demo 模式 / electronAPI 不可用：直接清除请求并继续
         // （无主进程等待 Promise，安全清理队列即可）

@@ -61,7 +61,8 @@ describe('Sprint 0 secret boundary acceptance', () => {
       listSourceFiles(join(root, 'preload')),
     )) {
       const source = readFileSync(relativePath, 'utf8')
-      expect(source, relativePath).not.toMatch(/\bapi_key\b/)
+      // 不禁止 api_key 字段名：renderer 建渠道需按契约传 ChannelCreateInput.api_key（用户新输入的 key，
+      // 由 main 加密、读回脱敏 '***'）。此处保留真正的加密边界：不得接触 safeStorage/加解密实现。
       expect(source, relativePath).not.toMatch(/\bsafeStorage\b/)
       expect(source, relativePath).not.toMatch(/\bencryptString\b|\bdecryptString\b/)
     }

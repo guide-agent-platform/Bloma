@@ -14,14 +14,7 @@
  */
 
 import { atom } from 'jotai'
-import type {
-  PermissionRequest,
-  Channel,
-  ChannelModel,
-  ProviderType,
-  RequestEnvelope,
-  ApiResult,
-} from '../../shared/types'
+import type { Channel, PermissionRequest } from '../../shared/types'
 import { pendingPermissionRequestsAtom } from '../agent-atoms'
 
 // =========================================================================
@@ -49,30 +42,7 @@ export const permissionQueueAtom = atom<PermissionRequest[]>((get) => {
 })
 
 // =========================================================================
-// 3. 渠道管理 —— ElectronAPI.channels 期望接口签名（M-001 修复）
-// =========================================================================
-
-/**
- * A 侧实现 `channel:*` IPC 通道后，`window.electronAPI.channels` 的期望接口。
- * 供集成者参考——实际实现位于 main/ipc.ts → preload/bridge.ts。
- */
-export interface ElectronChannelsAPI {
-  list(
-    input: RequestEnvelope,
-  ): Promise<ApiResult<Channel[]>>
-  create(
-    input: { name: string; provider_type: ProviderType; base_url: string; api_key: string; models?: ChannelModel[] } & RequestEnvelope,
-  ): Promise<ApiResult<Channel>>
-  test(
-    input: { channel_id: string } & RequestEnvelope,
-  ): Promise<ApiResult<{ ok: boolean; message: string; models?: ChannelModel[] }>>
-  delete(
-    input: { channel_id: string } & RequestEnvelope,
-  ): Promise<ApiResult<{ deleted: boolean }>>
-}
-
-// =========================================================================
-// 4. 渠道管理状态
+// 3. 渠道管理状态（channel:* IPC 的真实类型见 shared/types 的 ElectronAPI.channels，此处不重复手写）
 // =========================================================================
 
 /** 已配置的渠道列表 */

@@ -373,6 +373,8 @@ export interface Project {
   test_repair_count?: number
   /** 裁判退回计数（A2-11）：quick=2 / longterm=3，达上限让渡 */
   judge_return_count?: number
+  /** 被阻塞的编程操作（A2 resume 闭环）：非阻塞态为 undefined */
+  blocked_action?: 'mvp_repair' | 'test_repair' | 'judge_return'
   created_at: string
   updated_at: string
 }

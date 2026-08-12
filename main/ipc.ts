@@ -276,6 +276,8 @@ async function safeInvoke<T>(requestId: string, fn: () => T | Promise<T>) {
     return ok(requestId, await fn())
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
+    // 兜底前先把真实错误打到主进程终端，避免被 VALIDATION_ERROR 掩盖而无法排查
+    console.error('[ipc] handler error:', message, error)
     if (message.includes('AGENT_SESSION_BUSY')) return fail<T>(requestId, 'AGENT_SESSION_BUSY', message, true)
     if (message.includes('CHANNEL_NOT_FOUND')) return fail<T>(requestId, 'CHANNEL_NOT_FOUND', message)
     if (message.includes('SESSION_NOT_FOUND')) return fail<T>(requestId, 'SESSION_NOT_FOUND', message)
@@ -290,6 +292,10 @@ async function safeInvoke<T>(requestId: string, fn: () => T | Promise<T>) {
     if (message.includes('SNAPSHOT_CREATE_FAILED')) return fail<T>(requestId, 'SNAPSHOT_CREATE_FAILED', message, true)
     if (message.includes('DOCUMENT_SYNC_FAILED')) return fail<T>(requestId, 'DOCUMENT_SYNC_FAILED', message, true)
     if (message.includes('ANALYTICS_WRITE_FAILED')) return fail<T>(requestId, 'ANALYTICS_WRITE_FAILED', message, true)
+    // safeStorage 解密失败等：不要伪装成「缺少必要信息」，落到专用 code
+    if (message.includes('safeStorage') || message.includes('decrypt') || message.includes('API_KEY_DECRYPT_FAILED')) {
+      return fail<T>(requestId, 'API_KEY_DECRYPT_FAILED', message)
+    }
     return fail<T>(requestId, 'VALIDATION_ERROR', message)
   }
 }

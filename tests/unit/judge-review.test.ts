@@ -32,8 +32,13 @@ describe('Judge review trigger and return counts (A2-11)', () => {
     expect(events.filter((event) => event.type === 'judge_result')).toHaveLength(3)
     const decision = events.find((event) => event.type === 'user_decision_required')
     expect(decision).toBeTruthy()
-    const questions = decision?.payload.questions as Array<{ label: string }> | undefined
+    const questions = decision?.payload.questions as Array<{ id: string; label: string }> | undefined
     expect(questions?.map((q) => q.label)).toContain('接受现状')
+    // A1：编程阻塞路径的 questions 必须带稳定 id（continue/accept/explain），与引导澄清路径形态一致
+    expect(questions?.map((q) => q.id)).toEqual(['continue', 'accept', 'explain'])
+    // A4：repairing 事件必须带 user_visible_summary，供前端横幅展示具体进度
+    const repairing = events.find((event) => event.type === 'repairing')
+    expect(repairing?.payload.user_visible_summary).toBeTruthy()
     expect(JSON.stringify(events)).not.toMatch(/node_modules|Error:|at /)
   })
 

@@ -11,10 +11,9 @@
  *   - api_key 不回显明文（已加密 hex 只显示占位符）
  *
  * 说明：
- *   A 侧暂未实现 channel:list/create/test/delete 的 IPC channel
- *   （shared/types.ts IPC_CHANNELS 中无对应常量）。
- *   本组件使用本地 atoms（channelsListAtom 等）管理状态，
- *   集成时替换为 electronAPI.channels.* 调用。
+ *   已对接 electronAPI.channels.*（list/create/test/delete），
+ *   A 侧已在 main/ipc.ts + preload/bridge.ts 完整实现。
+ *   无 Electron 环境（demo）时回退本地 mock，保证 UI 可交互。
  *
  * 集成方式：
  *   在 App.tsx 的 settings 路由中渲染，或通过设置面板/弹窗打开。
@@ -23,7 +22,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { useAtom } from 'jotai'
 import type {
-  Channel,
   ChannelCreateInput,
   ChannelModel,
   ProviderType,
@@ -125,6 +123,22 @@ const PROVIDER_LABEL_MAP: Record<ProviderType, string> = {
   custom: '自定义',
 }
 
+/**
+ * 各提供商的默认 Base URL（表单留空时自动填入，兑现「留空使用默认地址」的占位提示）。
+ * `custom` 无默认值——自定义提供商必须由用户显式填写 base_url。
+ * MiniMax 默认值对齐 scripts/seed-channel.cjs 的 MINIMAX_BASE_URL。
+ */
+const DEFAULT_BASE_URLS: Partial<Record<ProviderType, string>> = {
+  anthropic: 'https://api.anthropic.com',
+  openai: 'https://api.openai.com/v1',
+  google: 'https://generativelanguage.googleapis.com/v1beta',
+  deepseek: 'https://api.deepseek.com',
+  zhipu: 'https://open.bigmodel.cn/api/paas/v4',
+  minimax: 'https://api.minimaxi.com/anthropic',
+  doubao: 'https://ark.cn-beijing.volces.com/api/v3',
+  qwen: 'https://dashscope.aliyuncs.com/api/v1',
+}
+
 // =========================================================================
 // 子组件：新增/编辑渠道表单
 // =========================================================================
@@ -142,8 +156,13 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ onSave, onCancel, saving }) =
   const [apiKey, setApiKey] = useState('')
   const [modelsText, setModelsText] = useState('')
 
+  const resolvedBaseUrl = baseUrl.trim() || DEFAULT_BASE_URLS[provider] || ''
+
   const canSave =
-    name.trim().length > 0 && apiKey.trim().length > 0 && !saving
+    name.trim().length > 0 &&
+    apiKey.trim().length > 0 &&
+    resolvedBaseUrl.length > 0 &&
+    !saving
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -162,7 +181,7 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ onSave, onCancel, saving }) =
     onSave({
       name: name.trim(),
       provider_type: provider,
-      base_url: baseUrl.trim() || '',
+      base_url: resolvedBaseUrl,
       api_key: apiKey.trim(),
       models: models.length > 0 ? models : undefined,
     })
@@ -225,7 +244,7 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ onSave, onCancel, saving }) =
           style={inputStyle}
           value={baseUrl}
           onChange={(e) => setBaseUrl(e.target.value)}
-          placeholder="留空使用默认地址"
+          placeholder={DEFAULT_BASE_URLS[provider] ? `留空使用 ${DEFAULT_BASE_URLS[provider]}` : '自定义提供商请填写 Base URL'}
         />
       </div>
 
@@ -326,84 +345,131 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
   const [testingId, setTestingId] = useState<string | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
-  // ==================== 模拟数据加载 ====================
-  // 集成时替换为: electronAPI.channels.list()
+  // ==================== 加载渠道列表 ====================
 
   useEffect(() => {
-    if (loading === 'idle') {
-      setLoading('loading')
-      // 模拟异步加载
-      const timer = setTimeout(() => {
-        setLoading('loaded')
-      }, 300)
-      return () => clearTimeout(timer)
+    const api = window.electronAPI
+    if (!api?.channels?.list) {
+      // demo / 无 Electron 环境：直接进入空列表
+      setLoading('loaded')
+      return
     }
-  }, [loading, setLoading])
+    setLoading('loading')
+    void api.channels
+      .list({ request_id: crypto.randomUUID() })
+      .then((result) => {
+        if (result.ok) {
+          setChannels(result.data)
+          setLoading('loaded')
+        } else {
+          setLoading('error')
+        }
+      })
+      .catch(() => setLoading('error'))
+  }, [setChannels, setLoading])
 
   // ==================== 新增渠道 ====================
-  // 集成时替换为: electronAPI.channels.create(input)
 
   const handleCreateChannel = useCallback(
     (input: ChannelCreateInput) => {
-      setSaving(true)
-      // 模拟异步保存
-      // 集成时替换为: electronAPI.channels.create(input)
-      setTimeout(() => {
-        const newChannel: Channel = {
-          id: `ch-${Date.now()}`,
-          name: input.name,
-          provider_type: input.provider_type,
-          base_url: input.base_url || '',
-          /** M-002 修复（2026-08-12）：Channel.api_key 类型约定为 safeStorage 加密后的 hex 字符串，
-           *  不是展示掩码。mock 使用明确占位值，集成后由 A 侧 createChannel handler 填充。 */
-          api_key: '[encrypted-by-safeStorage]',
-          models: input.models ?? [],
-          enabled: true,
-        }
-        setChannels((prev) => [...prev, newChannel])
+      const api = window.electronAPI
+      if (!api?.channels?.create) {
+        // demo / 无 Electron 环境：本地追加一条（key 只展示掩码 '***'）
+        setChannels((prev) => [
+          ...prev,
+          {
+            id: `ch-${Date.now()}`,
+            name: input.name,
+            provider_type: input.provider_type,
+            base_url: input.base_url || '',
+            api_key: '***',
+            models: input.models ?? [],
+            enabled: true,
+          },
+        ])
         setSaving(false)
         setShowForm(false)
-      }, 500)
+        return
+      }
+      setSaving(true)
+      void api.channels
+        .create({ request_id: crypto.randomUUID(), ...input })
+        .then((result) => {
+          if (result.ok) {
+            setChannels((prev) => [...prev, result.data])
+            setShowForm(false)
+          } else {
+            setTestResult({ channelId: '', ok: false, message: result.error?.user_visible_message ?? '渠道创建失败，请重试。' })
+          }
+        })
+        .catch(() => {
+          setTestResult({ channelId: '', ok: false, message: '渠道创建失败，请重试。' })
+        })
+        .finally(() => setSaving(false))
     },
-    [setChannels],
+    [setChannels, setTestResult],
   )
 
   // ==================== 测试连接 ====================
-  // 集成时替换为: electronAPI.channels.test(channelId)
-  // N-009 修复（2026-08-12）：mock 不再对所有 channelId 返回成功；
-  // 仅当 channelId 存在于当前渠道列表中时才返回成功。
 
   const handleTestConnection = useCallback(
     (channelId: string) => {
-      setTestingId(channelId)
-      setTestResult(null)
-      // 模拟异步测试
-      setTimeout(() => {
+      const api = window.electronAPI
+      if (!api?.channels?.test) {
+        // demo / 无 Electron 环境：本地判断是否存在
         const exists = channels.some((c) => c.id === channelId)
         setTestResult({
           channelId,
           ok: exists,
-          message: exists
-            ? '连接成功，模型列表已同步'
-            : '渠道不存在，请刷新后重试',
+          message: exists ? '连接成功，模型列表已同步' : '渠道不存在，请刷新后重试',
         })
-        setTestingId(null)
-        // 3 秒后清除结果
-        setTimeout(() => setTestResult(null), 3000)
-      }, 1500)
+        return
+      }
+      setTestingId(channelId)
+      setTestResult(null)
+      void api.channels
+        .test({ channel_id: channelId, request_id: crypto.randomUUID() })
+        .then((result) => {
+          if (result.ok) {
+            setTestResult({ channelId, ok: result.data.ok, message: result.data.message })
+          } else {
+            setTestResult({ channelId, ok: false, message: result.error?.user_visible_message ?? '测试失败，请重试。' })
+          }
+        })
+        .catch(() => {
+          setTestResult({ channelId, ok: false, message: '测试失败，请重试。' })
+        })
+        .finally(() => setTestingId(null))
     },
     [channels, setTestResult],
   )
 
   // ==================== 删除渠道 ====================
-  // 集成时替换为: electronAPI.channels.delete(channelId)
 
   const handleDeleteChannel = useCallback(
     (channelId: string) => {
-      setChannels((prev) => prev.filter((c) => c.id !== channelId))
-      setDeleteConfirmId(null)
+      const api = window.electronAPI
+      if (!api?.channels?.delete) {
+        // demo / 无 Electron 环境：本地移除
+        setChannels((prev) => prev.filter((c) => c.id !== channelId))
+        setDeleteConfirmId(null)
+        return
+      }
+      void api.channels
+        .delete({ channel_id: channelId, request_id: crypto.randomUUID() })
+        .then((result) => {
+          if (result.ok) {
+            setChannels((prev) => prev.filter((c) => c.id !== channelId))
+          } else {
+            setTestResult({ channelId, ok: false, message: result.error?.user_visible_message ?? '删除失败，请重试。' })
+          }
+        })
+        .catch(() => {
+          setTestResult({ channelId, ok: false, message: '删除失败，请重试。' })
+        })
+        .finally(() => setDeleteConfirmId(null))
     },
-    [setChannels],
+    [setChannels, setTestResult],
   )
 
   // ==================== 渲染 ====================

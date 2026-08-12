@@ -17,8 +17,10 @@ import {
   STAGE_LABEL_MAP,
   currentProjectAtom,
   agentMessagesFamily,
+  appendMessageToSession,
   activeAgentSessionIdAtom,
   snapshotsListAtom,
+  previewUrlAtom,
   loadAgentSessions,
   loadSessionHistory,
 } from './atoms'
@@ -88,6 +90,7 @@ const AppRoutes: React.FC = () => {
   const setActiveSessionId = useSetAtom(activeAgentSessionIdAtom)
   const setCurrentProject = useSetAtom(currentProjectAtom)
   const setSnapshotsList = useSetAtom(snapshotsListAtom)
+  const setPreviewUrl = useSetAtom(previewUrlAtom)
   const setMessages = useSetAtom(agentMessagesFamily(sessionId))
 
   const restoreAttemptedRef = React.useRef(false)
@@ -96,6 +99,7 @@ const AppRoutes: React.FC = () => {
   const decisionCards = useUserDecisionCards()
   const currentProject = useAtomValue(currentProjectAtom)
   const currentStage = useAtomValue(workflowStageAtom)
+  const streamPreviewUrl = useAtomValue(previewUrlAtom)
 
   // 启动恢复：若本地存在活动项目，直接进入工作区而不是显示两道门
   React.useEffect(() => {
@@ -135,38 +139,50 @@ const AppRoutes: React.FC = () => {
   const handleModeSelected = useCallback((selectedMode: 'quick' | 'longterm') => {
     setMode(selectedMode)
 
-    const newProject: Project = {
-      project_id: `demo-${Date.now()}`,
-      workspace_slug: 'default-software-builder',
-      name: selectedMode === 'quick' ? '我的快速项目' : '我的长期项目',
-      mode: selectedMode,
-      template_type: 'web_fullstack',
-      status: 'active',
-      current_stage: 'clarifying',
-      root_path: '/demo',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }
+    // 复用 ModeSelectionPage 经 api.project.create 建好的真实项目（读 store 拿最新值，避开闭包过期）；
+    // 仅 demo / 无 Electron 时才造本地假项目。
+    const existing = window.__jotai_store__?.get(currentProjectAtom) ?? null
+    const newProject: Project =
+      existing && !existing.project_id.startsWith('demo-')
+        ? existing
+        : {
+            project_id: `demo-${Date.now()}`,
+            workspace_slug: 'default-software-builder',
+            name: selectedMode === 'quick' ? '我的快速项目' : '我的长期项目',
+            mode: selectedMode,
+            template_type: 'web_fullstack',
+            status: 'active',
+            current_stage: 'clarifying',
+            root_path: '/demo',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }
+
+    // 真实会话 id：后端首次 sendMessage 时经 recordSessionActivity 落会话索引并回填 last_session_id
+    const newSessionId = crypto.randomUUID()
 
     setProjectList((prev: Project[]) => [newProject, ...prev])
 
     setProjectMode(selectedMode)
     setModeSelected(true)
-    setWorkflowStage('clarifying')
-    setStageLabel(STAGE_LABEL_MAP.clarifying)
-    setActiveSessionId(sessionId)
+    setWorkflowStage(newProject.current_stage)
+    setStageLabel(STAGE_LABEL_MAP[newProject.current_stage] ?? STAGE_LABEL_MAP.clarifying)
+    setSessionId(newSessionId)
+    setActiveSessionId(newSessionId)
     setCurrentProject(newProject)
 
-    // D3 修复：进入工作区后 Agent 发送首条问候消息
-    const greetingMsg: AgentMessage = {
+    // D3 修复：进入工作区后 Agent 发送首条问候消息（写入新会话 family，避开闭包过期）
+    appendMessageToSession(newSessionId, {
       role: 'assistant',
       content: [{ type: 'text', text: '你好！告诉我你想做什么软件，我会一步步帮你做出来。' }],
       timestamp: Date.now(),
-    }
-    setMessages([greetingMsg])
+    })
+
+    // 新项目开始：清掉上一项目的预览地址，避免串台
+    setPreviewUrl(null)
 
     setRoute('workspace')
-  }, [sessionId, setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject])
+  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, setPreviewUrl])
 
   // ==================== 从历史列表恢复项目 ====================
 
@@ -252,6 +268,28 @@ const AppRoutes: React.FC = () => {
   // ==================== 发送消息 ====================
 
   const handleSendMessage = useCallback((content: string) => {
+    const api = window.electronAPI
+
+    // 真实链路：交给主进程 runAgent，流式事件由 setupGlobalAgentListeners 驱动 UI
+    if (api?.agent?.sendMessage) {
+      appendMessageToSession(sessionId, {
+        role: 'user',
+        content: [{ type: 'text', text: content }],
+        timestamp: Date.now(),
+      })
+      void api.agent.sendMessage({
+        request_id: crypto.randomUUID(),
+        session_id: sessionId,
+        project_id: currentProject?.project_id ?? projectList[0]?.project_id ?? 'demo',
+        content,
+        mode: mode ?? 'quick',
+        current_stage: currentStage,
+        metadata: { source: 'chat' },
+      })
+      return
+    }
+
+    // demo / 无主进程：保留原有模拟流（含 "你帮我决定" 快捷语）
     if (content.trim() === '你帮我决定' || content.trim() === '你帮我决定。') {
       handleDecideForMe()
       return
@@ -298,13 +336,19 @@ const AppRoutes: React.FC = () => {
         created_at: new Date().toISOString(),
       }])
     }, 2000)
-  }, [handleDecideForMe, setMessages, setWorkflowStage, setStageLabel, setSnapshotsList])
+  }, [sessionId, currentProject, projectList, mode, currentStage, handleDecideForMe, setMessages, setWorkflowStage, setStageLabel, setSnapshotsList])
 
   // ==================== 卡片选项回传（Sprint 2：澄清卡片） ====================
 
   const handleCardOptionSelect = useCallback((option: CardOption) => {
     const api = window.electronAPI
     if (api?.agent?.sendMessage) {
+      // 点击即有反馈：先本地追加用户气泡（与 handleSendMessage 一致），再回传后端
+      appendMessageToSession(sessionId, {
+        role: 'user',
+        content: [{ type: 'text', text: option.label }],
+        timestamp: Date.now(),
+      })
       // 真实链路：带 card_option metadata 回传（selected_option_id 对齐契约）
       void api.agent.sendMessage({
         request_id: crypto.randomUUID(),
@@ -324,6 +368,29 @@ const AppRoutes: React.FC = () => {
   // ==================== 点选纠错 ====================
 
   const handleCorrectionSubmit = useCallback((payload: { position: { x: number; y: number }; userNote: string; fallbackMode: boolean }) => {
+    const api = window.electronAPI
+    if (api?.project?.submitCorrection) {
+      // 真实链路：记录点选纠错（后端 appendProjectEvent + analytics point_correction）
+      appendMessageToSession(sessionId, {
+        role: 'system',
+        content: [{ type: 'text', text: `已收到你的修改意见${payload.userNote ? `：「${payload.userNote}」` : '（你猜模式）'}，我来帮你调整。` }],
+        timestamp: Date.now(),
+      })
+      void api.project.submitCorrection({
+        request_id: crypto.randomUUID(),
+        project_id: currentProject?.project_id ?? projectList[0]?.project_id ?? 'demo',
+        session_id: sessionId,
+        context: {
+          bounding_rect: { x: payload.position.x, y: payload.position.y, width: 0, height: 0 },
+          fallback_mode: payload.fallbackMode,
+        },
+        user_note: payload.userNote || undefined,
+        mode: payload.userNote ? 'user_note' : 'guess',
+      })
+      return
+    }
+
+    // demo / 无主进程：保留原有模拟
     const systemMsg: AgentMessage = {
       role: 'system',
       content: [{ type: 'text', text: `已收到你的修改意见${payload.userNote ? `：「${payload.userNote}」` : '（你猜模式）'}，我来帮你调整。` }],
@@ -347,7 +414,7 @@ const AppRoutes: React.FC = () => {
       }
       setMessages((prev: AgentMessage[]) => [...prev, doneMsg])
     }, 1500)
-  }, [setMessages, setWorkflowStage, setStageLabel])
+  }, [sessionId, currentProject, projectList, setMessages, setWorkflowStage, setStageLabel])
 
   // ==================== 快照回滚 ====================
 
@@ -385,6 +452,10 @@ const AppRoutes: React.FC = () => {
     setRoute('settings')
   }, [])
 
+  // 预览地址：真实流（sketch_ready/mvp_ready 事件）优先；demo 才退回 SAMPLE_SKETCH
+  const effectivePreviewUrl = streamPreviewUrl ?? (previewStatus === 'running' ? samplePreviewUrl : undefined)
+  const effectivePreviewStatus: PreviewStatus = streamPreviewUrl ? 'running' : previewStatus
+
   // ==================== 路由渲染 ====================
 
   if (route === 'mode-selection') {
@@ -421,8 +492,8 @@ const AppRoutes: React.FC = () => {
       waitStartTime={waitStart}
       waitActionLabel="生成可运行版本"
       isHistoryLoading={historyLoading}
-      previewStatus={previewStatus}
-      previewUrl={previewStatus === 'running' ? samplePreviewUrl : undefined}
+      previewStatus={effectivePreviewStatus}
+      previewUrl={effectivePreviewUrl}
       onRefreshPreview={() => {
         setPreviewStatus('loading')
         setTimeout(() => setPreviewStatus('running'), 1500)

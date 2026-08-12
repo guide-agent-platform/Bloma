@@ -30,6 +30,7 @@ vi.mock('../../../main/channel-manager', () => ({
     enabled: true,
   }),
   decryptApiKey: () => 'test-key-from-channel',
+  getFirstEnabledChannel: () => undefined,
 }))
 
 describe('Sprint 1 sketch delivery acceptance', () => {

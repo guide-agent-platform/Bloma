@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
@@ -17,6 +17,7 @@ vi.mock('../../main/channel-manager', () => ({
     enabled: true,
   }),
   decryptApiKey: () => 'test-key-from-channel',
+  getFirstEnabledChannel: () => undefined,
 }))
 import { createProject, findProject } from '../../main/project-service'
 import {
@@ -134,8 +135,17 @@ describe('GuideAgentService through AgentOrchestrator', () => {
     const ready = events.find((event) => event.type === 'sketch_ready')
     expect(ready).toBeTruthy()
     expect(findProject(project.project_id).current_stage).toBe('sketch_ready')
-    // 流式增量已发布给 UI
-    expect(events.filter((event) => event.type === 'message_delta').length).toBeGreaterThan(0)
+    // 只把用户可见的 reply 上屏，原始 JSON 契约不得泄露
+    const deltaTexts = events
+      .filter((event) => event.type === 'message_delta')
+      .map((event) => String(event.payload.text ?? ''))
+      .join('')
+    expect(deltaTexts).toBe('好的，马上开始')
+    expect(deltaTexts).not.toContain('{"action"')
+    // 会话 JSONL 落盘的也是 reply 而非原始 JSON
+    const jsonl = readFileSync(join(home, 'agent-sessions', 'session-guide.jsonl'), 'utf8')
+    expect(jsonl).toContain('好的，马上开始')
+    expect(jsonl).not.toContain('"action":"generate_sketch"')
   })
 
   it('A2-14a: 模型返回 ask_clarification JSON 时用模型 questions 发澄清卡片', async () => {
@@ -174,6 +184,66 @@ describe('GuideAgentService through AgentOrchestrator', () => {
       expect.objectContaining({ id: 'daily', label: '日常工具' }),
     ])
     expect(findProject(project.project_id).current_stage).toBe('blocked_for_user_decision')
+    // 上屏与落盘的只有 reply，原始 JSON 不泄露
+    const deltaTexts = events
+      .filter((event) => event.type === 'message_delta')
+      .map((event) => String(event.payload.text ?? ''))
+      .join('')
+    expect(deltaTexts).toBe('想确认一下范围')
+    expect(deltaTexts).not.toContain('{"action"')
+    const jsonl = readFileSync(join(home, 'agent-sessions', 'session-guide.jsonl'), 'utf8')
+    expect(jsonl).toContain('想确认一下范围')
+    expect(jsonl).not.toContain('"action":"ask_clarification"')
+  })
+
+  it('A2-14a: 模型 questions 为空（纯文本澄清）时只显示 reply，不弹卡片、不泄露 JSON', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-guide-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    // 复现用户报障：模型返回 ask_clarification 且 questions:[]（在 reply 里直接追问）
+    setSDKQueryForTests(async function* () {
+      yield {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'text',
+            text: '{"action":"ask_clarification","reply":"你好！想做什么样的应用呢？简单描述一下你的想法，我来帮你梳理～","questions":[]}',
+          }],
+        },
+      }
+      yield { type: 'result', subtype: 'success' }
+    })
+
+    await runAgent({
+      request_id: 'req-guide',
+      session_id: 'session-guide',
+      project_id: project.project_id,
+      content: '计算器',
+      mode: 'quick',
+      current_stage: 'clarifying',
+      channel_id: 'test-channel',
+    })
+
+    const decision = events.find((event) => event.type === 'user_decision_required')
+    expect(decision?.payload.questions).toEqual([]) // 不弹卡片
+    expect(findProject(project.project_id).current_stage).toBe('blocked_for_user_decision')
+
+    // 聊天气泡里是友好 reply，不是 {"action":...} 原始 JSON
+    const deltaTexts = events
+      .filter((event) => event.type === 'message_delta')
+      .map((event) => String(event.payload.text ?? ''))
+      .join('')
+    expect(deltaTexts).toBe('你好！想做什么样的应用呢？简单描述一下你的想法，我来帮你梳理～')
+    expect(deltaTexts).not.toContain('{"action"')
+    expect(deltaTexts).not.toContain('questions')
+
+    // 会话 JSONL 同样只落 reply
+    const jsonl = readFileSync(join(home, 'agent-sessions', 'session-guide.jsonl'), 'utf8')
+    expect(jsonl).toContain('简单描述一下你的想法')
+    expect(jsonl).not.toContain('"action":"ask_clarification"')
   })
 
   it('A2-14a: 模型输出非 JSON 时回退规则路由', async () => {
@@ -227,6 +297,56 @@ describe('GuideAgentService through AgentOrchestrator', () => {
     const decision = events.find((event) => event.type === 'user_decision_required')
     expect(decision?.payload.questions).toHaveLength(3)
     expect(findProject(project.project_id).current_stage).toBe('blocked_for_user_decision')
+  })
+
+  it('卡片答案（你帮我决定）直接生成草图，不再重复澄清，且助手回复落盘', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-guide-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    setSandboxRuntimeForTests({
+      portAllocator: async () => 3102,
+      healthCheck: async () => true,
+      processFactory: () => makeChildProcess(),
+    })
+    setSnapshotCaptureProviderForTests(async () => ({
+      extension: 'png',
+      buffer: Buffer.from('fake-png'),
+    }))
+
+    // 第一轮：模糊需求 → 澄清卡片
+    await runAgent({
+      request_id: 'req-guide-1',
+      session_id: 'session-guide',
+      project_id: project.project_id,
+      content: '帮我做个东西',
+      mode: 'quick',
+      current_stage: 'clarifying',
+    })
+    expect(events.filter((event) => event.type === 'user_decision_required')).toHaveLength(1)
+
+    // 第二轮：点击「你帮我决定」卡片 → 直接生成草图，不再重复澄清
+    await runAgent({
+      request_id: 'req-guide-2',
+      session_id: 'session-guide',
+      project_id: project.project_id,
+      content: '你帮我决定',
+      mode: 'quick',
+      current_stage: 'blocked_for_user_decision',
+      metadata: { source: 'card_option', selected_option_id: 'auto' },
+    })
+
+    const decisions = events.filter((event) => event.type === 'user_decision_required')
+    const ready = events.find((event) => event.type === 'sketch_ready')
+    expect(decisions).toHaveLength(1) // 没有第二次澄清
+    expect(ready?.payload.preview_url).toBe('http://localhost:3102')
+    expect(findProject(project.project_id).current_stage).toBe('sketch_ready')
+
+    // 规则路径的助手回复也写入会话 JSONL（回访恢复一致性）
+    const jsonl = readFileSync(join(home, 'agent-sessions', 'session-guide.jsonl'), 'utf8')
+    expect(jsonl).toContain('我需要再确认几个关键点')
+    expect(jsonl).toContain('按你选的方向开始生成草图')
   })
 })
 

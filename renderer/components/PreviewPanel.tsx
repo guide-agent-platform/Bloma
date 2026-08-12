@@ -47,6 +47,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
   const globalError = useAtomValue(globalUserErrorAtom)
   const [showControls, setShowControls] = React.useState(false)
   const [correctionActive, setCorrectionActive] = React.useState(false)
+  const [correctionMode, setCorrectionMode] = React.useState(false)
   const [correctionPos, setCorrectionPos] = React.useState({ x: 0, y: 0 })
   const [correctionNote, setCorrectionNote] = React.useState('')
   const iframeRef = React.useRef<HTMLIFrameElement>(null)
@@ -115,6 +116,20 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
           {displayStatus === 'running' && onRefresh && (
             <ControlButton label="刷新" onClick={onRefresh}><RotateCw size={15} /></ControlButton>
           )}
+          {/* 点选纠错：默认关闭，开启后才拦截 iframe 点击；否则预览可正常交互 */}
+          {displayStatus === 'running' && onCorrectionSubmit && (
+            <ControlButton
+              label={correctionMode ? '退出点选纠错（预览恢复正常交互）' : '点选纠错：标记预览里不满意的地方'}
+              onClick={() => {
+                setCorrectionMode((prev) => {
+                  if (prev) setCorrectionActive(false)
+                  return !prev
+                })
+              }}
+            >
+              <span style={{ fontSize: 11, fontWeight: 700, color: correctionMode ? 'var(--color-quick)' : 'var(--color-text-muted)' }}>纠错</span>
+            </ControlButton>
+          )}
           {onScreenshot && (
             <ControlButton label="截图" onClick={onScreenshot}><Camera size={15} /></ControlButton>
           )}
@@ -149,8 +164,8 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
               sandbox="allow-scripts allow-forms"
               style={{ width: '100%', height: '100%', border: 'none', background: 'var(--white)', pointerEvents: correctionActive ? 'none' : 'auto' }}
             />
-            {/* 点选纠错透明捕获层：盖在 iframe 上方拦截点击 */}
-            {onCorrectionSubmit && (
+            {/* 点选纠错透明捕获层：仅在纠错模式开启时盖在 iframe 上方拦截点击 */}
+            {correctionMode && onCorrectionSubmit && (
               <div
                 data-ai-id="correction-capture-layer"
                 title="点击标记不满意的地方"

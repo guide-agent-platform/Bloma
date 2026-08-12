@@ -80,9 +80,12 @@ interface UserDecisionPayload {
  * - 无事件 → 返回 null（无决策需求）
  */
 function extractCardOptions(events: AgentEvent[]): CardOption[] | null {
-  // 从后往前找最近一次 user_decision_required
+  // 从后往前扫描：
+  // - 先遇到 sketch_ready / mvp_ready → 该决策已被后端处理（卡片已消费），返回 null 隐藏卡片
+  // - 先遇到 user_decision_required → 返回其 questions（0 条 = 模型在文本里追问，不弹卡片）
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i]
+    if (event.type === 'sketch_ready' || event.type === 'mvp_ready') return null
     if (event.type !== 'user_decision_required') continue
 
     const payload = event.payload as UserDecisionPayload
@@ -92,8 +95,9 @@ function extractCardOptions(events: AgentEvent[]): CardOption[] | null {
     if (questions.length === 0) return []
 
     // 1~3 条：转 CardOption
-    return questions.map((q) => ({
-      id: q.id,
+    // B5 防御：question 缺 id 时兜底（A1 已补 id，此处双保险，避免 key=undefined 崩坏）
+    return questions.map((q, i) => ({
+      id: q.id ?? q.label ?? String(i),
       label: q.label,
       description: q.description,
     }))

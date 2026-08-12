@@ -12,8 +12,9 @@ import type {
 } from '../shared/types'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
-import { decryptApiKey, getChannelByIdRaw } from './channel-manager'
+import { decryptApiKey, getChannelByIdRaw, getFirstEnabledChannel } from './channel-manager'
 import { handleGuideMessage } from './guide-agent-service'
+import { resolveBlockedDecision, resumeBlockedFlow } from './programming-orchestrator'
 import { recordSessionActivity } from './session-service'
 
 export type StreamPublisher = (event: AgentEvent) => void
@@ -126,12 +127,23 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
   const received: SDKMessage[] = []
 
   try {
-    const channel = input.channel_id ? getChannelByIdRaw(input.channel_id) : undefined
+    // 未显式指定 channel_id 时自动回退到第一个启用的本项目渠道（否则引导永远走规则路由）
+    const channel = input.channel_id
+      ? getChannelByIdRaw(input.channel_id)
+      : getFirstEnabledChannel()
     const model = channel?.models.find((item) => item.enabled)?.id ?? 'claude-sonnet-4-6'
     let env: Record<string, string> | undefined
+    let channelKeyUnusable = false
     if (channel) {
-      const apiKey = decryptApiKey(channel.api_key)
-      env = buildSdkEnv(apiKey, channel.base_url, model)
+      try {
+        const apiKey = decryptApiKey(channel.api_key)
+        env = buildSdkEnv(apiKey, channel.base_url, model)
+      } catch {
+        // 渠道密钥不可解密（safeStorage 密钥变更 / 跨平台迁移的 ciphertext）：
+        // 该渠道视为不可用，引导路径回退规则路由，编程路径报可读错误。
+        channelKeyUnusable = true
+        console.error(`[runAgent] channel ${channel.id} (${channel.name}) api_key 无法解密，该渠道不可用`)
+      }
     }
     const maxTokens = channel?.max_tokens ?? 1200
     // 多轮历史：读取已有对话轮次（不含本次 user 消息，稍后追加），支撑 SDK 多轮上下文
@@ -145,33 +157,62 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     // 维护会话索引并回填 Project.last_session_id，支撑历史对话回访恢复
     recordSessionActivity(input.session_id, input.project_id)
 
-    if (shouldUseGuideAgent(input.current_stage)) {
-      // 引导路径：渠道可用则切真实模型（模型不可用/解析失败回退规则），无渠道直接走规则，不阻塞澄清
-      const guideOptions: GuideModelOptions | undefined = env
-        ? {
-            query: sdkQuery,
-            env,
-            signal: abortController.signal,
-            sessionId: input.session_id,
-            history,
-            maxTokens,
-            persistAssistant: (text: string) =>
-              appendAgentMessage(input.session_id, {
-                role: 'assistant',
-                content: [{ type: 'text', text }],
-                timestamp: Date.now(),
-              }),
-          }
-        : undefined
-      await handleGuideMessage(input, streamPublisher, guideOptions)
+    // 助手回复落盘（模型路径与规则路径共用，保证回访恢复时对话完整）
+    const persistAssistant = (text: string) =>
+      appendAgentMessage(input.session_id, {
+        role: 'assistant',
+        content: [{ type: 'text', text }],
+        timestamp: Date.now(),
+      })
+
+    // 引导路径的模型选项：渠道可用则切真实模型（不可用/解析失败回退规则），无渠道直接走规则，不阻塞澄清
+    const guideOptions: GuideModelOptions | undefined = env
+      ? {
+          query: sdkQuery,
+          env,
+          signal: abortController.signal,
+          sessionId: input.session_id,
+          history,
+          maxTokens,
+          persistAssistant,
+        }
+      : undefined
+
+    // 阻塞态决策回传（A2/A3）：blocked_action 存在时优先恢复被阻塞的编程操作
+    const blockedDecision = resolveBlockedDecision(input)
+    if (blockedDecision !== undefined) {
+      if (blockedDecision === 'explain') {
+        // 补充说明：清阻塞 + 回澄清，内容交给引导路径重新理解
+        await resumeBlockedFlow(
+          { request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, mode: input.mode, decision: 'explain', content: input.content },
+          streamPublisher,
+        )
+        await handleGuideMessage(input, streamPublisher, guideOptions, persistAssistant)
+      } else {
+        await resumeBlockedFlow(
+          { request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, mode: input.mode, decision: blockedDecision, content: input.content },
+          streamPublisher,
+        )
+      }
       persistTerminalMessage(input.session_id, 'completed')
       streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
       return { accepted: true, session_id: input.session_id, stream_started: true }
     }
 
-    // 编程路径：必须真实模型，无渠道直接抛明确错误（不留测试占位 key）
+    if (shouldUseGuideAgent(input.current_stage)) {
+      await handleGuideMessage(input, streamPublisher, guideOptions, persistAssistant)
+      persistTerminalMessage(input.session_id, 'completed')
+      streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
+      return { accepted: true, session_id: input.session_id, stream_started: true }
+    }
+
+    // 编程路径：必须真实模型，无渠道 / 密钥不可解密直接抛明确错误（不留测试占位 key）
     if (!channel || !env) {
-      throw new Error('CHANNEL_NOT_FOUND: configure a model channel before using the SDK')
+      throw new Error(
+        channelKeyUnusable
+          ? 'API_KEY_DECRYPT_FAILED: 已配置渠道但 api_key 无法解密，请在设置中重新保存该渠道'
+          : 'CHANNEL_NOT_FOUND: configure a model channel before using the SDK',
+      )
     }
 
     await runWithRetry(input, async () => {
