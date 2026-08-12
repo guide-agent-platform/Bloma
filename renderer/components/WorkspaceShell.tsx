@@ -3,6 +3,7 @@ import { WorkspaceHeader } from './WorkspaceHeader'
 import { ChatPanel } from './ChatPanel'
 import { PreviewPanel } from './PreviewPanel'
 import { TimelinePanel } from './TimelinePanel'
+import { MvpStatusBanner } from './MvpStatusBanner'
 import type { CardOption } from './CardOptions'
 import type { PreviewStatus } from './PreviewPanel'
 import type { Snapshot } from './atoms'
@@ -34,6 +35,8 @@ export interface WorkspaceShellProps {
 
   /* === Header props === */
   onAllProjects?: () => void
+  /** 打开设置页回调 */
+  onOpenSettings?: () => void
 }
 
 /**
@@ -66,7 +69,13 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
       }}
     >
       {/* 顶栏 */}
-      <WorkspaceHeader onAllProjects={props.onAllProjects} />
+      <WorkspaceHeader
+        onAllProjects={props.onAllProjects}
+        onOpenSettings={props.onOpenSettings}
+      />
+
+      {/* MVP 状态横幅（Sprint 2） */}
+      <MvpStatusBanner />
 
       {/* 主区：对话（左 1fr ≈ 35%）+ 预览（右 2fr ≈ 65%），等高 */}
       <div
