@@ -1,7 +1,7 @@
 import React from 'react'
 import { useAtomValue } from 'jotai'
 import { StageIndicator } from './StageIndicator'
-import { Sparkles } from './icons'
+import { Sparkles, IconSettings } from './icons'
 import {
   canUpgradeAtom,
   currentProjectAtom,
@@ -15,6 +15,8 @@ import {
 export interface WorkspaceHeaderProps {
   /** 点击"所有项目"的回调 */
   onAllProjects?: () => void
+  /** 打开设置页回调 */
+  onOpenSettings?: () => void
 }
 
 const ACTIVE_STAGES = new Set([
@@ -22,7 +24,7 @@ const ACTIVE_STAGES = new Set([
   'judge_review', 'repairing', 'iterating', 'upgrading',
 ])
 
-export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects }) => {
+export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects, onOpenSettings }) => {
   const project = useAtomValue(currentProjectAtom)
   const mode = useAtomValue(projectModeAtom)
   const isOnline = useAtomValue(networkOnlineAtom)
@@ -174,6 +176,40 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects 
             }}
           >
             升级为长期模式
+          </button>
+        )}
+
+        {/* 设置入口（Sprint 2） */}
+        {onOpenSettings && (
+          <button
+            onClick={onOpenSettings}
+            data-ai-id="settings-button"
+            title="设置（模型渠道）"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 'var(--space-1)',
+              fontSize: 'var(--font-size-sm)',
+              fontWeight: 500,
+              color: 'var(--color-text)',
+              padding: '7px var(--space-4)',
+              borderRadius: 'var(--radius-full)',
+              background: 'var(--glass-bg-soft)',
+              border: '1px solid var(--glass-border-subtle)',
+              cursor: 'pointer',
+              transition: 'all var(--transition-fast)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--glass-bg-strong)'
+              e.currentTarget.style.transform = 'translateY(-1px)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'var(--glass-bg-soft)'
+              e.currentTarget.style.transform = 'none'
+            }}
+          >
+            <IconSettings size={16} />
+            设置
           </button>
         )}
 
