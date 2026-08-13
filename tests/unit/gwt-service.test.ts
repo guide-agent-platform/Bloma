@@ -42,6 +42,39 @@ describe('GWT service (A2-07)', () => {
     }
   })
 
+  it('LLM 产物功能断言：预览含四则按钮 + src/app.js 含 calculate → 全部通过（A2-14b）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-gwt-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    // 真计算器的 index.html 不含需求描述原文，靠功能断言而非原文匹配判定通过
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '基础四则运算计算器' }])
+    const server = createServer((req, res) => {
+      if (req.url === '/src/app.js') {
+        res.writeHead(200, { 'Content-Type': 'application/javascript' })
+        res.end('function calculate(a, op, b) { return op === "+" ? a + b : a; }')
+      } else {
+        res.writeHead(200, { 'Content-Type': 'text/html' })
+        res.end('<html><body><button>+</button><button>−</button><button>×</button><button>÷</button></body></html>')
+      }
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+
+    try {
+      const result = await runGwtScenarios({
+        project_id: project.project_id,
+        session_id: 'session-1',
+        preview_url: `http://127.0.0.1:${port}`,
+      })
+      expect(result.total_count).toBe(1)
+      expect(result.passed_count).toBe(1)
+      expect(result.failed_count).toBe(0)
+      expect(result.failure_summary).toEqual([])
+    } finally {
+      server.close()
+    }
+  })
+
   it('reports failures with P0-readable reasons when the page lacks a feature entry', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-gwt-'))
     process.env.PROMA_HOME = home

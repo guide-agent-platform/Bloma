@@ -64,7 +64,14 @@ describe('Post-MVP testing flow (A2-09 state machine)', () => {
     setProgrammingEventPublisher((event) => events.push(event.type))
 
     let requestCount = 0
-    const server = createServer((_req, res) => {
+    const server = createServer((req, res) => {
+      // A2-14b：runGwtScenarios 现会额外同源拉取 /src/app.js（功能断言），
+      // 这里仅对根 HTML 请求计数，避免 app.js 请求干扰「预览逐步恢复」的请求时序。
+      if (req.url === '/src/app.js') {
+        res.writeHead(200, { 'Content-Type': 'application/javascript' })
+        res.end('// no calculate here')
+        return
+      }
       requestCount += 1
       res.writeHead(200, { 'Content-Type': 'text/html' })
       res.end(requestCount >= 3 ? '<html><p>记录收入与支出</p></html>' : '<html><h1>加载中</h1></html>')

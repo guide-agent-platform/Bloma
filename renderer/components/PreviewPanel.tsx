@@ -23,6 +23,12 @@ export interface PreviewPanelProps {
   onScreenshot?: () => void
   isFullscreen?: boolean
   onCorrectionSubmit?: (payload: CorrectionPayload) => void
+  /** 草图已就绪时的「确认草图 → 生成完整功能」回调（问题 A / P0-1） */
+  onConfirmSketch?: () => void
+  /** 正在生成 MVP（禁用确认按钮，避免重复提交） */
+  confirming?: boolean
+  /** iframe 加载失败（沙箱端口失效/进程已死）时回调，供上层进入 error/重连态 */
+  onPreviewError?: () => void
 }
 
 /**
@@ -41,6 +47,9 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
   onScreenshot,
   isFullscreen = false,
   onCorrectionSubmit,
+  onConfirmSketch,
+  confirming = false,
+  onPreviewError,
 }) => {
   const hasStream = useAtomValue(hasActiveStreamAtom)
   const stage = useAtomValue(workflowStageAtom)
@@ -84,7 +93,8 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
         boxShadow: 'var(--shadow-glass)',
       }
 
-  const controlsVisible = showControls || displayStatus === 'error' || displayStatus === 'running'
+  const controlsVisible =
+    showControls || displayStatus === 'error' || displayStatus === 'running' || stage === 'sketch_ready'
 
   return (
     <div
@@ -112,7 +122,35 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--color-success)', display: 'inline-block' }} />
           预览 · 安全环境
         </span>
-        <div style={{ display: 'flex', gap: 2 }}>
+        <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          {stage === 'sketch_ready' && onConfirmSketch && (
+            <button
+              data-ai-id="confirm-sketch-button"
+              onClick={onConfirmSketch}
+              disabled={confirming}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 'var(--space-1)',
+                height: 30,
+                padding: '0 var(--space-4)',
+                marginRight: 'var(--space-2)',
+                fontSize: 'var(--font-size-sm)',
+                fontWeight: 700,
+                color: 'var(--white)',
+                background: confirming
+                  ? 'var(--gray-400)'
+                  : 'linear-gradient(135deg, var(--color-quick), var(--color-quick-bright))',
+                border: 'none',
+                borderRadius: 'var(--radius-full)',
+                boxShadow: confirming ? 'none' : '0 4px 12px -2px rgba(124,58,237,0.45)',
+                cursor: confirming ? 'not-allowed' : 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {confirming ? '生成中…' : '生成完整功能'}
+            </button>
+          )}
           {displayStatus === 'running' && onRefresh && (
             <ControlButton label="刷新" onClick={onRefresh}><RotateCw size={15} /></ControlButton>
           )}
@@ -161,7 +199,8 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
               ref={iframeRef}
               src={previewUrl}
               title="软件预览"
-              sandbox="allow-scripts allow-forms"
+              sandbox="allow-scripts allow-forms allow-same-origin"
+              onError={onPreviewError}
               style={{ width: '100%', height: '100%', border: 'none', background: 'var(--white)', pointerEvents: correctionActive ? 'none' : 'auto' }}
             />
             {/* 点选纠错透明捕获层：仅在纠错模式开启时盖在 iframe 上方拦截点击 */}
@@ -288,7 +327,7 @@ const ErrorState: React.FC<{ label?: string; onRetry?: () => void }> = ({ label,
         boxShadow: '0 4px 12px -2px rgba(124,58,237,0.4)',
         cursor: 'pointer', transition: 'all var(--transition-fast)',
       }}>
-        重试
+        重新连接沙箱
       </button>
     )}
   </div>

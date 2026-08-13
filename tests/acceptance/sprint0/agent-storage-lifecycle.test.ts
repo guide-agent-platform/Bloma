@@ -10,7 +10,7 @@ import {
   setRetrySleepForTests,
   setSDKQueryForTests,
 } from '../../../main/orchestrator'
-import { createProject, findProject } from '../../../main/project-service'
+import { createProject, findProject, updateProject } from '../../../main/project-service'
 import { listSessions, loadMessages } from '../../../main/session-service'
 import type { SDKMessage } from '../../../shared/types'
 import {
@@ -20,19 +20,23 @@ import {
   type TemporaryPromaHome,
 } from '../support/test-environment'
 
-vi.mock('../../../main/channel-manager', () => ({
-  getChannelByIdRaw: () => ({
-    id: 'test-channel',
-    name: 'Test',
-    provider_type: 'anthropic',
-    base_url: 'https://api.anthropic.com',
-    api_key: 'encrypted-test-key',
-    models: [{ id: 'claude-sonnet-4-6', name: 'Claude', enabled: true }],
-    enabled: true,
-  }),
-  decryptApiKey: () => 'test-key-from-channel',
-  getFirstEnabledChannel: () => undefined,
-}))
+vi.mock('../../../main/channel-manager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/channel-manager')>()
+  return {
+    ...actual,
+    getChannelByIdRaw: () => ({
+      id: 'test-channel',
+      name: 'Test',
+      provider_type: 'anthropic',
+      base_url: 'https://api.anthropic.com',
+      api_key: 'encrypted-test-key',
+      models: [{ id: 'claude-sonnet-4-6', name: 'Claude', enabled: true }],
+      enabled: true,
+    }),
+    decryptApiKey: () => 'test-key-from-channel',
+    getFirstEnabledChannel: () => undefined,
+  }
+})
 
 describe('Sprint 0 agent storage lifecycle acceptance', () => {
   let environment: TemporaryPromaHome | undefined
@@ -88,6 +92,9 @@ describe('Sprint 0 agent storage lifecycle acceptance', () => {
     environment = useTemporaryPromaHome('bloma-role-c-history-')
     setSDKQueryForTests(successfulQuery)
     const project = createProject({ request_id: 'role-c-history-project', mode: 'quick' })
+    // 本用例聚焦存储生命周期而非阶段路由：让项目存储阶段与渲染端上报一致（generating_mvp），
+    // 权威阶段判定才不会把这条消息误路由到引导路径。
+    updateProject(project.project_id, { current_stage: 'generating_mvp' })
 
     await runAgent({
       request_id: 'role-c-history-req',

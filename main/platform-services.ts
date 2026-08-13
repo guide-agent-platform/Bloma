@@ -175,7 +175,9 @@ function spawnStaticServer(projectRoot: string, port: number, command?: string):
 }
 
 function resolveNodeExecutable(): string {
-  return process.env.npm_node_execpath || process.env.NODE || process.execPath
+  // Electron 下 process.execPath 是 electron.exe 而非 node，不能当作 node 回退；
+  // 优先 npm_node_execpath / NODE，最后退回 PATH 上的 node（与 MVP 路径 spawn('node', …) 一致）。
+  return process.env.npm_node_execpath || process.env.NODE || 'node'
 }
 
 function sandboxSpawnOptions(projectRoot: string, port: number): SpawnOptions {
@@ -274,8 +276,10 @@ const server = createServer((req, res) => {
   res.writeHead(200, {
     'Content-Type': types[extname(finalPath)] || 'application/octet-stream',
     'Cache-Control': 'no-store',
-    // 生成代码不得联网：禁止 fetch/XHR/WebSocket 到任何外部地址
-    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; font-src 'self'",
+    // 生成代码不得联网：禁止 fetch/XHR/WebSocket 到任何外部地址。
+    // script-src 保留 'unsafe-eval'：LLM 生成的代码可能用 Function()/eval 计算表达式，
+    // 缺省会被 CSP 阻断（EvalError）导致「点 = 无结果」。沙箱已网络隔离，此处放宽可接受。
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; font-src 'self'",
   });
   createReadStream(finalPath).pipe(res);
 });
@@ -327,6 +331,25 @@ export async function createSnapshot(input: SnapshotCreateInput): Promise<Snapsh
 export interface SnapshotCapacityResult {
   active_count: number
   archived: string[]
+}
+
+/**
+ * 列出项目的活跃快照（读取 `…/snapshots/<project_id>/<snapshot_id>/metadata.json`），
+ * 按创建时间升序（时间轴胶片条从旧到新）。供 `snapshot:list` IPC 与时间轴回填。
+ */
+export function listSnapshots(projectId: string): Snapshot[] {
+  const project = findProject(projectId)
+  const snapshotDir = getSnapshotsDir(project.workspace_slug, project.project_id)
+  const snapshots: Snapshot[] = []
+  if (!existsSync(snapshotDir)) return snapshots
+  for (const entry of readdirSync(snapshotDir)) {
+    const full = join(snapshotDir, entry)
+    if (!statSync(full).isDirectory() || entry === 'archive') continue
+    const meta = readJsonFile<Snapshot | null>(join(full, 'metadata.json'), null)
+    if (!meta?.snapshot_id) continue
+    snapshots.push(meta)
+  }
+  return snapshots.sort((a, b) => a.created_at.localeCompare(b.created_at))
 }
 
 /**

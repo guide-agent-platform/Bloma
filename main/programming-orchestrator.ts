@@ -1,20 +1,30 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentEvent, AgentSendMessageInput, Project, ProjectMode, Snapshot, TemplateType } from '../shared/types'
+import { getAgentSessionPath } from '../storage/config-paths'
+import { appendJsonLine } from '../storage/json-store'
 import { syncDocuments } from './document-engine'
 import { createSnapshot, runSandbox, trackAnalytics } from './platform-services'
-import { generateMvp } from './mvp-engine'
+import { generateMvp, type GeneratedMvpFile } from './mvp-engine'
+import { generateMvpLlm } from './mvp-engine-llm'
+import type { GenerateMvpLlmInput } from './mvp-engine-llm'
+import { buildSdkEnv, decryptApiKey, getChannelByIdRaw, getFirstEnabledChannel } from './channel-manager'
 import { findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
 import { generateSketch, type SketchRequirement } from './sketch-engine'
 import { readTestReport, runGwtScenarios, writeTestReport, type GwtTestResult } from './gwt-service'
 import { applyRepairPatch, REPAIR_CATEGORY_SUMMARY, runRepairCycle, type RepairCategory } from './repair-engine'
 import { runJudge, type JudgeVerdict } from './judge-engine'
 import { assertToolAllowed } from './permission-service'
+import type { SDKQuery } from './orchestrator'
 
 /**
  * 无人值守豁免（A2-12）：自动化管线内部 service 直连时显式传入 allow-all——
  * warning 工具自动放行（不弹 UI）、dangerous 拒绝。禁止隐式绕过，豁免必须显式传入。
  */
 const AUTOMATED_PERMISSION_MODE = 'allow-all' as const
+
+/** 项目已生成完成（ready）的统一话术：完成通知与 ready 护栏共用，避免两套语义相近的固定文案。 */
+export const READY_COMPLETION_COPY =
+  '已经生成好了，可以点右侧预览区的按键试用。有想调整的地方随时告诉我。'
 
 type ProgrammingEventPublisher = (event: AgentEvent) => void
 
@@ -51,6 +61,8 @@ export interface MvpTaskInput {
   project_id: string
   mode: ProjectMode
   template_type?: TemplateType
+  channel_id?: string
+  query?: SDKQuery
 }
 
 export interface MvpTaskResult {
@@ -140,8 +152,10 @@ export async function runMvpTask(input: MvpTaskInput): Promise<MvpTaskResult> {
 
   const requirements = readLastSketchRequirements(input.project_id)
   await allowAutomatedTool('generate_mvp', { project_id: input.project_id }, input.session_id, input.project_id)
-  const mvp = generateMvp({ project_id: input.project_id, requirements, template_type: input.template_type })
-  await allowAutomatedTool('run_project', { project_id: input.project_id, command: mvp.run_command }, input.session_id, input.project_id)
+  const mvp = await resolveMvp(input, requirements)
+  // run_command 白名单式强制覆盖为 'npm start'（真实沙箱启动命令由 ensureSandboxRunning 硬编码为 node static-server）
+  const runCommand = 'npm start'
+  await allowAutomatedTool('run_project', { project_id: input.project_id, command: runCommand }, input.session_id, input.project_id)
   const sandbox = await ensureSandboxRunning(input)
 
   await allowAutomatedTool('create_snapshot', { project_id: input.project_id, kind: 'mvp' }, input.session_id, input.project_id)
@@ -149,7 +163,9 @@ export async function runMvpTask(input: MvpTaskInput): Promise<MvpTaskResult> {
     request_id: input.request_id,
     project_id: input.project_id,
     kind: 'mvp',
-    summary: `MVP 已生成，共 ${mvp.files.length} 个文件，进入测试阶段。`,
+    summary: mvp.generated_by === 'llm'
+      ? `MVP 已生成（LLM 生成，共 ${mvp.files.length} 个文件），进入测试阶段。`
+      : `MVP 已生成，共 ${mvp.files.length} 个文件，进入测试阶段。`,
     include_documents: true,
     health_status: 'healthy',
   })
@@ -164,7 +180,7 @@ export async function runMvpTask(input: MvpTaskInput): Promise<MvpTaskResult> {
         mode: input.mode,
         snapshot_id: snapshot.snapshot_id,
         file_count: mvp.files.length,
-        run_command: mvp.run_command,
+        run_command: runCommand,
       },
       privacy_level: 'research_safe',
     },
@@ -178,11 +194,64 @@ export async function runMvpTask(input: MvpTaskInput): Promise<MvpTaskResult> {
   publish(input, 'mvp_ready', {
     preview_url: sandbox.preview_url,
     snapshot_id: snapshot.snapshot_id,
-    run_command: mvp.run_command,
+    run_command: runCommand,
     summary: mvp.assumptions.join('；'),
   })
 
-  return { preview_url: sandbox.preview_url, snapshot, run_command: mvp.run_command }
+  return { preview_url: sandbox.preview_url, snapshot, run_command: runCommand }
+}
+
+/** runMvpTask 的统一产物形态：LLM 生成与模板兜底在 generated_by 上区分。 */
+interface ResolvedMvp {
+  files: GeneratedMvpFile[]
+  run_command: string
+  assumptions: string[]
+  risks: string[]
+  generated_by: 'llm' | 'template'
+}
+
+/**
+ * A2-14b：优先 LLM 生成（有 query 句柄 + 渠道可用时），模板降级为失败兜底。
+ * LLM 生成异常/超时/解析失败/取消均不中断主链路——回退模板。
+ */
+async function resolveMvp(input: MvpTaskInput, requirements: SketchRequirement[]): Promise<ResolvedMvp> {
+  const llmInput = resolveLlmInput(input, requirements)
+  if (llmInput) {
+    try {
+      const result = await generateMvpLlm(llmInput)
+      if (result.generated_by === 'llm') return result
+    } catch {
+      // LLM 生成异常（网络/模型错误/取消）→ 模板兜底，管线不中断
+    }
+  }
+  const template = generateMvp({ project_id: input.project_id, requirements, template_type: input.template_type })
+  return { ...template, generated_by: 'template' }
+}
+
+/**
+ * 解析 LLM 生成入参：query 门禁 + 渠道解析 + 密钥解密 + 环境构建。
+ * 无 query 句柄 / 无渠道 / 密钥不可解密时返回 undefined（调用方走模板）。
+ */
+function resolveLlmInput(input: MvpTaskInput, requirements: SketchRequirement[]): GenerateMvpLlmInput | undefined {
+  if (!input.query) return undefined
+  const channel = input.channel_id ? getChannelByIdRaw(input.channel_id) : getFirstEnabledChannel()
+  if (!channel) return undefined
+  let apiKey: string
+  try {
+    apiKey = decryptApiKey(channel.api_key)
+  } catch {
+    return undefined
+  }
+  const model = channel.models.find((item) => item.enabled)?.id ?? 'claude-sonnet-4-6'
+  const env = buildSdkEnv(apiKey, channel.base_url, model)
+  return {
+    project_id: input.project_id,
+    requirements,
+    query: input.query,
+    env,
+    sessionId: input.session_id,
+    maxTokens: channel.max_tokens ?? 4000,
+  }
 }
 
 /**
@@ -312,6 +381,12 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
 
   updateProject(input.project_id, { current_stage: 'ready' })
   publish(input, 'stage_changed', { stage: 'ready' })
+  // 软建议（suggest）不再静默忽略：把可读提示附在完成通知后反馈给用户（P1）
+  const completion =
+    verdict.verdict === 'suggest'
+      ? `${READY_COMPLETION_COPY}\n\n补充提示：${verdict.user_visible_summary}`
+      : READY_COMPLETION_COPY
+  publishCompletionMessage(input, completion)
   return { outcome: 'ready', verdict }
 }
 
@@ -387,6 +462,67 @@ export async function runPostMvpTestingFlow(input: GwtTestingInput): Promise<Gwt
   return { verdict: judge.outcome, test_result: testResult, judge: judge.verdict }
 }
 
+export interface IterationTaskInput {
+  request_id: string
+  session_id: string
+  project_id: string
+  mode: ProjectMode
+  prompt: string
+  channel_id?: string
+  query?: SDKQuery
+}
+
+/**
+ * runIterationTask — 已生成完成后用户提出修改诉求（打字或点选纠错）时，重新生成一版 MVP。
+ *
+ * 打通 Sprint 3「纠错 → 重新生成 → 迭代」主线：此前 ready 护栏把修改请求一律挡回固定文案，
+ * 且 submitCorrection 只落盘不触发再生成。这里把修改诉求作为新功能项并入需求清单，进入
+ * iterating 态后复用 runMvpTask + runPostMvpTestingFlow 完整闭环（重新生成 → 测试 → 裁判 → ready）。
+ */
+export async function runIterationTask(input: IterationTaskInput): Promise<MvpTaskResult> {
+  updateProject(input.project_id, { current_stage: 'iterating' })
+  publish(input, 'stage_changed', { stage: 'iterating' })
+
+  // 修改诉求作为新功能项并入需求清单，供 runMvpTask 重新生成读取（含 GWT 骨架同步）
+  const existing = readLastSketchRequirements(input.project_id)
+  const requirements = [...existing, { id: nextRequirementId(existing), description: input.prompt }]
+  recordSketchGenerated(input.project_id, requirements)
+
+  publishCompletionMessage(input, `好的，我按你的新想法「${truncateCopy(input.prompt, 20)}」重新生成一版。`)
+
+  const mvp = await runMvpTask({
+    request_id: input.request_id,
+    session_id: input.session_id,
+    project_id: input.project_id,
+    mode: input.mode,
+    channel_id: input.channel_id,
+    query: input.query,
+  })
+  await runPostMvpTestingFlow({
+    request_id: input.request_id,
+    session_id: input.session_id,
+    project_id: input.project_id,
+    mode: input.mode,
+    preview_url: mvp.preview_url,
+  })
+  return mvp
+}
+
+/** 为追加的需求项生成不冲突的 id（F-xxx 序号递增，规避已有 id 碰撞）。 */
+function nextRequirementId(existing: SketchRequirement[]): string {
+  const max = existing.reduce((acc, item) => {
+    const match = /^F-(\d+)$/.exec(item.id)
+    if (!match) return acc
+    const num = Number(match[1])
+    return Number.isFinite(num) && num > acc ? num : acc
+  }, 0)
+  return `F-${String(max + 1).padStart(3, '0')}`
+}
+
+function truncateCopy(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max)}…` : value
+}
+
 function publish(input: Pick<SketchTaskInput, 'session_id' | 'project_id'>, type: AgentEvent['type'], payload: Record<string, unknown>): void {
   programmingEventPublisher({
     event_id: randomUUID(),
@@ -396,6 +532,25 @@ function publish(input: Pick<SketchTaskInput, 'session_id' | 'project_id'>, type
     payload,
     created_at: new Date().toISOString(),
   })
+}
+
+/**
+ * 完成后主动通知（P0）：后台管线完成到 ready 时，把「已完成」沉淀为一条助手消息
+ * 落盘到会话 JSONL，并下发 message_delta 上屏（随后 completed 收尾让渲染端把累积
+ * 文本 flush 进消息列表）。此前只发 stage_changed/mvp_ready，用户没有任何「完成了」
+ * 的信号，只能反复追问「好了吗」。
+ */
+function publishCompletionMessage(
+  input: Pick<SketchTaskInput, 'session_id' | 'project_id'>,
+  text: string,
+): void {
+  appendJsonLine(getAgentSessionPath(input.session_id), {
+    role: 'assistant',
+    content: [{ type: 'text', text }],
+    timestamp: Date.now(),
+  })
+  publish(input, 'message_delta', { text })
+  publish(input, 'completed', { subtype: 'success' })
 }
 
 /** 无人值守自动化路径的工具门禁：显式传入豁免模式，不弹 UI，危险工具仍拒绝。 */
@@ -465,6 +620,8 @@ export interface ResumeBlockedInput {
   mode: ProjectMode
   decision: BlockedDecision
   content: string
+  query?: SDKQuery
+  channel_id?: string
 }
 
 /**
@@ -495,6 +652,7 @@ export async function resumeBlockedFlow(
       judge_return_count: 0,
     })
     publish(input, 'stage_changed', { stage: 'ready' })
+    publishCompletionMessage(input, '好的，已保留当前版本。你可以点右侧预览区继续试用，有需要调整的随时告诉我。')
     return
   }
 
@@ -512,6 +670,8 @@ export async function resumeBlockedFlow(
       session_id: input.session_id,
       project_id: input.project_id,
       mode: input.mode,
+      query: input.query,
+      channel_id: input.channel_id,
     })
     await runPostMvpTestingFlow({
       request_id: input.request_id,

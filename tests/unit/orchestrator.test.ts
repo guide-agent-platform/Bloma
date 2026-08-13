@@ -15,19 +15,23 @@ import {
 import { getAgentSessionPath } from '../../storage/config-paths'
 import type { SDKMessage } from '../../shared/types'
 
-vi.mock('../../main/channel-manager', () => ({
-  getChannelByIdRaw: () => ({
-    id: 'test-channel',
-    name: 'Test',
-    provider_type: 'anthropic',
-    base_url: 'https://api.anthropic.com',
-    api_key: 'encrypted-test-key',
-    models: [{ id: 'claude-sonnet-4-6', name: 'Claude', enabled: true }],
-    enabled: true,
-  }),
-  decryptApiKey: () => 'test-key-from-channel',
-  getFirstEnabledChannel: () => undefined,
-}))
+vi.mock('../../main/channel-manager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/channel-manager')>()
+  return {
+    ...actual,
+    getChannelByIdRaw: () => ({
+      id: 'test-channel',
+      name: 'Test',
+      provider_type: 'anthropic',
+      base_url: 'https://api.anthropic.com',
+      api_key: 'encrypted-test-key',
+      models: [{ id: 'claude-sonnet-4-6', name: 'Claude', enabled: true }],
+      enabled: true,
+    }),
+    decryptApiKey: () => 'test-key-from-channel',
+    getFirstEnabledChannel: () => undefined,
+  }
+})
 
 describe('AgentOrchestrator', () => {
   const originalPromaHome = process.env.PROMA_HOME
@@ -274,10 +278,50 @@ describe('AgentOrchestrator · A2-14a 真实模型流式 + 多轮历史', () => 
 
     expect(requestBody?.stream).toBe(true)
     expect(requestBody?.messages).toEqual([
+      expect.objectContaining({
+        role: 'system',
+        content: expect.stringContaining('当前项目阶段：generating_mvp'),
+      }),
       { role: 'user', content: '第一轮问题' },
       { role: 'assistant', content: '第一轮回答' },
       { role: 'user', content: '第二轮问题' },
     ])
+  })
+
+  it('过滤历史中的「还没好」类冗余助手轮次，降低自我强化', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-test-'))
+    process.env.PROMA_HOME = home
+    writeFileSync(
+      getAgentSessionPath('session-stall'),
+      [
+        JSON.stringify({ role: 'user', content: [{ type: 'text', text: '好了吗' }], timestamp: 1 }),
+        JSON.stringify({ role: 'assistant', content: [{ type: 'text', text: '还没好，后台还在跑' }], timestamp: 2 }),
+        JSON.stringify({ role: 'user', content: [{ type: 'text', text: '好了没' }], timestamp: 3 }),
+        JSON.stringify({ role: 'assistant', content: [{ type: 'text', text: '还没好' }], timestamp: 4 }),
+      ].join('\n'),
+      'utf8',
+    )
+
+    let requestBody: { messages: Array<{ role: string; content: string }> } | undefined
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+      requestBody = JSON.parse(String(init.body)) as typeof requestBody
+      return sseResponse(['event: message_stop\ndata: {"type":"message_stop"}\n\n'])
+    }))
+
+    await runAgent({
+      request_id: 'req-stall',
+      session_id: 'session-stall',
+      project_id: 'project-stall',
+      content: '现在好了吗',
+      mode: 'quick',
+      current_stage: 'generating_mvp',
+      channel_id: 'test-channel',
+    })
+
+    const assistantTurns = (requestBody?.messages ?? []).filter((message) => message.role === 'assistant')
+    expect(assistantTurns.some((turn) => turn.content.includes('还没好'))).toBe(false)
+    // 用户轮次保留，只是删掉冗余的「还没好」助手轮次
+    expect((requestBody?.messages ?? []).filter((message) => message.role === 'user').length).toBe(3)
   })
 })
 

@@ -21,8 +21,10 @@ import {
   activeAgentSessionIdAtom,
   snapshotsListAtom,
   previewUrlAtom,
+  currentSnapshotIdAtom,
   loadAgentSessions,
   loadSessionHistory,
+  loadSnapshots,
 } from './atoms'
 import type { ProjectMode, WorkflowStage } from './atoms'
 
@@ -30,6 +32,20 @@ import type { ProjectMode, WorkflowStage } from './atoms'
  * 演示用示例草图（与 demo.html 中 SAMPLE_SKETCH 完全一致）。
  */
 const SAMPLE_SKETCH = `<html><head><meta charset="UTF-8"><style>body{font-family:'Inter',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:linear-gradient(135deg,#F4F3FA,#FDF2F8);color:#1D1D1F}.app{text-align:center;padding:40px;max-width:440px;width:100%}h1{background:linear-gradient(135deg,#7C3AED,#EC4899);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:6px;font-size:22px;font-weight:700}.sub{color:#6E6E73;margin-bottom:28px;font-size:13px}.card{background:#fff;border:1px solid #E6E5EE;border-radius:16px;padding:18px 20px;margin:10px 0;text-align:left;box-shadow:0 4px 16px -4px rgba(29,29,31,.08)}.card h3{margin-bottom:2px;font-size:12px;color:#6E6E73;font-weight:500}.card .val{font-size:24px;font-weight:700;margin-top:4px}.income{color:#10B981}.expense{color:#DC2626}.balance{color:#7C3AED}</style></head><body><div class="app"><h1>记账应用 · 草图预览</h1><p class="sub">Sprint 1 演示 · 实际由编程Agent生成</p><div class="card"><h3>本月收入</h3><p class="val income">¥ 12,500</p></div><div class="card"><h3>本月支出</h3><p class="val expense">¥ 8,320</p></div><div class="card"><h3>本月结余</h3><p class="val balance">¥ 4,180</p></div></div></body></html>`
+
+/**
+ * 这些阶段后端已产出可渲染文件（草图 / MVP）。回访恢复或重启后，旧沙箱进程已死，
+ * 需要重跑 sandbox 回填 previewUrlAtom（P0-2）。
+ */
+const PREVIEW_READY_STAGES = new Set<WorkflowStage>([
+  'sketch_ready',
+  'testing',
+  'judge_review',
+  'repairing',
+  'ready',
+  'iterating',
+  'completed',
+])
 
 /* =========================================================================
    Aurora 背景
@@ -71,6 +87,7 @@ const AppRoutes: React.FC = () => {
   const [waitStart, setWaitStart] = useState<number | undefined>()
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>('empty')
   const [sessionId, setSessionId] = useState<string>(() => `demo-${Date.now()}`)
+  const [confirmingSketch, setConfirmingSketch] = useState(false)
   const [samplePreviewUrl] = useState(() => {
     try { return URL.createObjectURL(new Blob([SAMPLE_SKETCH], { type: 'text/html' })) }
     catch { return undefined }
@@ -100,6 +117,38 @@ const AppRoutes: React.FC = () => {
   const currentProject = useAtomValue(currentProjectAtom)
   const currentStage = useAtomValue(workflowStageAtom)
   const streamPreviewUrl = useAtomValue(previewUrlAtom)
+  const currentSnapshotId = useAtomValue(currentSnapshotIdAtom)
+
+  // 回访恢复预览（P0-2）：项目已产出草图/MVP 文件时，重跑沙箱并回填 previewUrlAtom。
+  // 旧沙箱进程已随主进程退出而亡，旧端口必死，直接重跑拿新 preview_url。
+  // 失败不再静默吞掉：显式进入 error 态（带「重新连接沙箱」重试），避免停在空态。
+  const restorePreview = useCallback((projectId: string) => {
+    const api = window.electronAPI
+    if (!api?.sandbox?.restore) {
+      setPreviewStatus('error')
+      return
+    }
+    setPreviewStatus('loading')
+    void api.sandbox.restore({ request_id: crypto.randomUUID(), project_id: projectId })
+      .then((result) => {
+        if (result?.ok && result.data.preview_url) {
+          setPreviewUrl(result.data.preview_url)
+          setPreviewStatus('running')
+        } else {
+          setPreviewUrl(null)
+          setPreviewStatus('error')
+        }
+      })
+      .catch(() => {
+        setPreviewUrl(null)
+        setPreviewStatus('error')
+      })
+  }, [setPreviewUrl])
+
+  // 离开 sketch_ready 后复位「生成中」态（由 stage_changed 事件驱动）
+  React.useEffect(() => {
+    if (currentStage !== 'sketch_ready') setConfirmingSketch(false)
+  }, [currentStage])
 
   // 启动恢复：若本地存在活动项目，直接进入工作区而不是显示两道门
   React.useEffect(() => {
@@ -123,6 +172,8 @@ const AppRoutes: React.FC = () => {
       setSessionId(restoredSessionId)
       setActiveSessionId(restoredSessionId)
       setProjectList(result.data)
+      // 时间轴数据源：恢复时回填磁盘快照列表（否则胶片条永远空）
+      void loadSnapshots(restored.project_id)
       if (restored.last_session_id) {
         setHistoryLoading(true)
         void Promise.all([
@@ -130,9 +181,13 @@ const AppRoutes: React.FC = () => {
           loadSessionHistory(restored.last_session_id),
         ]).finally(() => setHistoryLoading(false))
       }
+      // 已产出预览的项目：重跑沙箱回填预览（旧端口必死，无需校验）
+      if (PREVIEW_READY_STAGES.has(restored.current_stage)) {
+        restorePreview(restored.project_id)
+      }
       setRoute('workspace')
     })
-  }, [sessionId])
+  }, [sessionId, restorePreview])
 
   // ==================== 选择模式 → 创建工作区 ====================
 
@@ -178,11 +233,12 @@ const AppRoutes: React.FC = () => {
       timestamp: Date.now(),
     })
 
-    // 新项目开始：清掉上一项目的预览地址，避免串台
+    // 新项目开始：清掉上一项目的预览地址与时间轴，避免串台
     setPreviewUrl(null)
+    setSnapshotsList([])
 
     setRoute('workspace')
-  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, setPreviewUrl])
+  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, setPreviewUrl, setSnapshotsList])
 
   // ==================== 从历史列表恢复项目 ====================
 
@@ -207,6 +263,9 @@ const AppRoutes: React.FC = () => {
       ),
     )
 
+    // 时间轴数据源：从历史列表恢复项目时回填磁盘快照列表
+    void loadSnapshots(project.project_id)
+
     if (project.last_session_id) {
       setHistoryLoading(true)
       void Promise.all([
@@ -215,8 +274,13 @@ const AppRoutes: React.FC = () => {
       ]).finally(() => setHistoryLoading(false))
     }
 
+    // 已产出预览的项目：重跑沙箱回填预览
+    if (PREVIEW_READY_STAGES.has(project.current_stage)) {
+      restorePreview(project.project_id)
+    }
+
     setRoute('workspace')
-  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject])
+  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, restorePreview])
 
   // ==================== "你帮我决定" — 跳过澄清 ====================
 
@@ -446,6 +510,69 @@ const AppRoutes: React.FC = () => {
     setPreviewStatus('running')
   }, [setMessages])
 
+  // ==================== 确认草图 → 生成完整功能（问题 A / P0-1） ====================
+
+  const handleConfirmSketch = useCallback(() => {
+    const api = window.electronAPI
+    if (!api?.project?.confirmSketch) return
+    const projectId = currentProject?.project_id ?? projectList[0]?.project_id
+    const snapshotId = currentSnapshotId ?? currentProject?.current_snapshot_id
+    if (!projectId || !snapshotId) return
+
+    setConfirmingSketch(true)
+    appendMessageToSession(sessionId, {
+      role: 'system',
+      content: [{ type: 'text', text: '好的，我按你确认的草图开始生成完整功能，稍等一下。' }],
+      timestamp: Date.now(),
+    })
+    setPreviewStatus('loading')
+
+    void api.project.confirmSketch({
+      request_id: crypto.randomUUID(),
+      project_id: projectId,
+      session_id: sessionId,
+      snapshot_id: snapshotId,
+      decision: 'accepted',
+    }).finally(() => setConfirmingSketch(false))
+  }, [sessionId, currentProject, projectList, currentSnapshotId])
+
+  // ==================== 预览刷新 / 重新连接沙箱（P2） ====================
+
+  const handleRefreshPreview = useCallback(() => {
+    const api = window.electronAPI
+    const projectId = currentProject?.project_id ?? projectList[0]?.project_id
+    if (api?.sandbox?.restore && projectId) {
+      setPreviewStatus('loading')
+      void api.sandbox.restore({ request_id: crypto.randomUUID(), project_id: projectId })
+        .then((result) => {
+          if (result?.ok && result.data.preview_url) {
+            setPreviewUrl(result.data.preview_url)
+            setPreviewStatus('running')
+          } else {
+            setPreviewUrl(null)
+            setPreviewStatus('error')
+          }
+        })
+        .catch(() => {
+          setPreviewUrl(null)
+          setPreviewStatus('error')
+        })
+      return
+    }
+    // demo / 无主进程：保留原有模拟
+    setPreviewStatus('loading')
+    setTimeout(() => setPreviewStatus('running'), 1500)
+  }, [currentProject, projectList, setPreviewUrl])
+
+  // ==================== 预览失效兜底（P0） ====================
+
+  // iframe 加载失败（沙箱端口失效/进程已死）时：清掉失效的预览地址并进入 error 态，
+  // 让用户看到「重新连接沙箱」重试按钮，而不是停在空态或死 iframe。
+  const handlePreviewError = useCallback(() => {
+    setPreviewUrl(null)
+    setPreviewStatus('error')
+  }, [setPreviewUrl])
+
   // ==================== 设置页入口 ====================
 
   const handleOpenSettings = useCallback(() => {
@@ -494,10 +621,10 @@ const AppRoutes: React.FC = () => {
       isHistoryLoading={historyLoading}
       previewStatus={effectivePreviewStatus}
       previewUrl={effectivePreviewUrl}
-      onRefreshPreview={() => {
-        setPreviewStatus('loading')
-        setTimeout(() => setPreviewStatus('running'), 1500)
-      }}
+      onRefreshPreview={handleRefreshPreview}
+      onPreviewError={handlePreviewError}
+      onConfirmSketch={window.electronAPI?.project?.confirmSketch ? handleConfirmSketch : undefined}
+      confirming={confirmingSketch}
       onCorrectionSubmit={handleCorrectionSubmit}
       onRollback={handleRollback}
       onContinueWaiting={handleContinueWaiting}

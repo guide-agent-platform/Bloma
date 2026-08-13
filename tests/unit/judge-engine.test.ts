@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -76,6 +76,22 @@ describe('JudgeEngine (A2-10)', () => {
     expect(verdict.verdict).toBe('suggest')
     expect(verdict.repairable).toBe(false)
     expect(verdict.hard_constraints.every((item) => item.passed)).toBe(true)
+  })
+
+  it('passes LLM calculator via functional entry (operators + calculate) even without literal requirement text', () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-judge-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '基础四则运算' }])
+    syncDocuments({ request_id: 'req-sync', session_id: 's', project_id: project.project_id, checkpoint: 'mvp_before_generation' })
+    // LLM 产物用「四则运算计算器」标题 + 运算符按钮实现，不内嵌需求原文「基础四则运算」
+    writeFileSync(join(project.root_path, 'index.html'), '<button>+</button><button>−</button><button>×</button><button>÷</button>', 'utf8')
+    mkdirSync(join(project.root_path, 'src'), { recursive: true })
+    writeFileSync(join(project.root_path, 'src', 'app.js'), 'function calculate(a, b, op) { return a }', 'utf8')
+
+    const verdict = runJudge({ project_id: project.project_id, mode: 'quick' })
+
+    expect(verdict.verdict).toBe('pass')
   })
 
   it('exposes GWT feature ids via readGwtFeatureIds', () => {

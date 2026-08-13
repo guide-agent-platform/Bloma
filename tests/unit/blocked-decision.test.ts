@@ -1,7 +1,11 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
+import { EventEmitter } from 'node:events'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import type { AddressInfo } from 'node:net'
+import type { ChildProcess } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { syncDocuments } from '../../main/document-engine'
 import {
   resolveBlockedDecision,
@@ -9,7 +13,15 @@ import {
   setProgrammingEventPublisher,
 } from '../../main/programming-orchestrator'
 import { createProject, findProject, recordSketchGenerated, updateProject } from '../../main/project-service'
-import type { AgentEvent } from '../../shared/types'
+import { createChannel } from '../../main/channel-manager'
+import { setSafeStorageAdapter } from '../../main/safe-storage'
+import {
+  clearSandboxRuntimeForTests,
+  setSandboxRuntimeForTests,
+  setSnapshotCaptureProviderForTests,
+} from '../../main/platform-services'
+import type { SDKQuery } from '../../main/orchestrator'
+import type { AgentEvent, SDKMessage } from '../../shared/types'
 
 /**
  * A2/A3 — 阻塞态让渡 + resume 闭环。
@@ -24,6 +36,8 @@ describe('Blocked decision resume loop (A2/A3)', () => {
   afterEach(() => {
     process.env.PROMA_HOME = originalPromaHome
     setProgrammingEventPublisher(() => undefined)
+    clearSandboxRuntimeForTests()
+    setSnapshotCaptureProviderForTests()
   })
 
   function makeBlockedProject(blockedAction: 'mvp_repair' | 'test_repair' | 'judge_return') {
@@ -148,5 +162,84 @@ describe('Blocked decision resume loop (A2/A3)', () => {
       expect(after.blocked_action).toBeUndefined()
       expect(after.judge_return_count ?? 0).toBe(0)
     })
+
+    it('continue + mvp_repair → 恢复重跑 runMvpTask 仍走 LLM 路径（透传 query/channel_id），不静默重生成模板', async () => {
+      const project = makeBlockedProject('mvp_repair')
+      recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '基础四则运算计算器' }])
+
+      setSafeStorageAdapter({
+        isEncryptionAvailable: () => true,
+        encryptString: (value) => Buffer.from(`enc:${value}`, 'utf8'),
+        decryptString: (value) => value.toString('utf8').replace(/^enc:/, ''),
+      })
+      const channel = createChannel({ name: 'test', provider_type: 'anthropic', base_url: 'https://test', api_key: 'test-key' })
+
+      // 真实 HTTP 服务器：根路径返回计算器 HTML，/src/app.js 返回 calculate 逻辑，
+      // 供 runMvpTask 的沙箱健康检查与 runPostMvpTestingFlow 的 GWT 功能断言同源拉取。
+      const server = createServer((req, res) => {
+        if (req.url === '/src/app.js') {
+          res.writeHead(200, { 'Content-Type': 'application/javascript' })
+          res.end('function calculate(a, op, b) { return op === "+" ? a + b : a; }')
+        } else {
+          res.writeHead(200, { 'Content-Type': 'text/html' })
+          res.end('<html><body><button>+</button><button>−</button><button>×</button><button>÷</button></body></html>')
+        }
+      })
+      await new Promise<void>((resolve) => server.listen(0, resolve))
+      const port = (server.address() as AddressInfo).port
+
+      setSandboxRuntimeForTests({
+        portAllocator: async () => port,
+        healthCheck: async () => true,
+        processFactory: () => makeChildProcess(),
+      })
+      setSnapshotCaptureProviderForTests(async () => ({ extension: 'png', buffer: Buffer.from('fake-png') }))
+
+      try {
+        await resumeBlockedFlow(
+          {
+            request_id: 'req', session_id: 's', project_id: project.project_id, mode: 'quick',
+            decision: 'continue', content: '',
+            query: calculatorQuery(),
+            channel_id: channel.id,
+          },
+          () => undefined,
+        )
+
+        // LLM 产物（真实计算器）而非模板增删条目：app.js 含 calculate、index.html 含四则按钮
+        expect(readFileSync(join(project.root_path, 'src', 'app.js'), 'utf8')).toContain('calculate')
+        expect(readFileSync(join(project.root_path, 'index.html'), 'utf8')).toContain('÷')
+        // 全程走完（GWT 功能断言 + 裁判）回到 ready，未中途卡死
+        expect(findProject(project.project_id).current_stage).toBe('ready')
+        expect(findProject(project.project_id).blocked_action).toBeUndefined()
+      } finally {
+        server.close()
+      }
+    })
   })
 })
+
+/** LLM 生成型 SDK query 桩：返回可落盘的真实计算器（四则按钮 + calculate 逻辑）。 */
+const CALCULATOR_JSON = JSON.stringify({
+  files: [
+    { path: 'index.html', content: '<!doctype html><html><body><button>+</button><button>−</button><button>×</button><button>÷</button><script src="/src/app.js"></script></body></html>' },
+    { path: 'src/app.js', content: 'function calculate(a, op, b) { return op === "+" ? a + b : a; }' },
+    { path: 'src/styles.css', content: 'body { margin: 0; }' },
+  ],
+  run_command: 'npm run evil',
+  assumptions: ['纯前端计算器'],
+  risks: ['无后端'],
+})
+
+function calculatorQuery(): SDKQuery {
+  return async function* (): AsyncGenerator<SDKMessage> {
+    yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: CALCULATOR_JSON }] } }
+    yield { type: 'result', subtype: 'success' }
+  }
+}
+
+function makeChildProcess(): ChildProcess {
+  const emitter = new EventEmitter() as ChildProcess
+  Object.assign(emitter, { kill: vi.fn(() => true), pid: 1000 })
+  return emitter
+}

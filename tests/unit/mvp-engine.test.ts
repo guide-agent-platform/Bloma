@@ -7,12 +7,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { generateMvp } from '../../main/mvp-engine'
 import { runMvpTask, setProgrammingEventPublisher } from '../../main/programming-orchestrator'
 import { createProject, findProject, recordSketchGenerated } from '../../main/project-service'
+import { createChannel } from '../../main/channel-manager'
+import { setSafeStorageAdapter } from '../../main/safe-storage'
 import {
   clearSandboxRuntimeForTests,
   setSandboxRuntimeForTests,
   setSnapshotCaptureProviderForTests,
 } from '../../main/platform-services'
 import { getAnalyticsPath, getDocumentsDir } from '../../storage/config-paths'
+import type { SDKQuery } from '../../main/orchestrator'
+import type { SDKMessage } from '../../shared/types'
 
 describe('MvpEngine template generation (A2-02)', () => {
   const originalPromaHome = process.env.PROMA_HOME
@@ -133,7 +137,156 @@ describe('Mvp workflow task (A2-04 runMvpTask)', () => {
     expect(existsSync(join(documentsDir, 'sketch_confirmed.md'))).toBe(true)
     expect(existsSync(join(documentsDir, 'mvp_before_generation.md'))).toBe(true)
   })
+
+  // ── A2-14b：runMvpTask 的 LLM 生成路径与模板兜底 ──
+
+  it('无渠道时直接模板兜底（即使传入 query）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-mvp-nolllm-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '基础四则运算计算器' }])
+    setSandboxRuntimeForTests({ portAllocator: async () => 3201, healthCheck: async () => true, processFactory: () => makeChildProcess() })
+    setSnapshotCaptureProviderForTests(async () => ({ extension: 'png', buffer: Buffer.from('fake-png') }))
+
+    const result = await runMvpTask({
+      request_id: 'req-task',
+      session_id: 'session-1',
+      project_id: project.project_id,
+      mode: 'quick',
+      query: calculatorQuery(),
+    })
+
+    expect(result.snapshot.summary).not.toContain('LLM 生成')
+    expect(result.run_command).toBe('npm start')
+  })
+
+  it('渠道存在但 decryptApiKey 失败 → 跳过 LLM 直接模板兜底', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-mvp-badkey-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+    const channel = createTestChannel(false)
+    setSandboxRuntimeForTests({ portAllocator: async () => 3202, healthCheck: async () => true, processFactory: () => makeChildProcess() })
+    setSnapshotCaptureProviderForTests(async () => ({ extension: 'png', buffer: Buffer.from('fake-png') }))
+
+    const result = await runMvpTask({
+      request_id: 'req-task',
+      session_id: 'session-1',
+      project_id: project.project_id,
+      mode: 'quick',
+      channel_id: channel.id,
+      query: calculatorQuery(),
+    })
+
+    expect(result.snapshot.summary).not.toContain('LLM 生成')
+  })
+
+  it('有渠道且 LLM 成功 → 快照 summary 体现 LLM 产出、run_command 强制 npm start、产物为真实计算器', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-mvp-llm-ok-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick', initial_message: '基础四则运算计算器' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '基础四则运算计算器' }])
+    createTestChannel(true)
+    setSandboxRuntimeForTests({ portAllocator: async () => 3203, healthCheck: async () => true, processFactory: () => makeChildProcess() })
+    setSnapshotCaptureProviderForTests(async () => ({ extension: 'png', buffer: Buffer.from('fake-png') }))
+
+    const result = await runMvpTask({
+      request_id: 'req-task',
+      session_id: 'session-1',
+      project_id: project.project_id,
+      mode: 'quick',
+      query: calculatorQuery(),
+    })
+
+    // run_command 被强制覆盖为 npm start（模型返回 evil-run 也被忽略）
+    expect(result.run_command).toBe('npm start')
+    expect(result.snapshot.summary).toContain('LLM 生成')
+    // 产物为真实计算器（四则按钮 + calculate 逻辑），而非增删条目模板
+    expect(readFileSync(join(project.root_path, 'index.html'), 'utf8')).toContain('+')
+    expect(readFileSync(join(project.root_path, 'index.html'), 'utf8')).toContain('÷')
+    expect(readFileSync(join(project.root_path, 'src', 'app.js'), 'utf8')).toContain('calculate')
+  })
+
+  it('有渠道但 input.query 缺失 → query 门禁直接模板兜底', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-mvp-noquery-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+    createTestChannel(true)
+    setSandboxRuntimeForTests({ portAllocator: async () => 3204, healthCheck: async () => true, processFactory: () => makeChildProcess() })
+    setSnapshotCaptureProviderForTests(async () => ({ extension: 'png', buffer: Buffer.from('fake-png') }))
+
+    const result = await runMvpTask({
+      request_id: 'req-task',
+      session_id: 'session-1',
+      project_id: project.project_id,
+      mode: 'quick',
+      // 不传 query
+    })
+
+    expect(result.snapshot.summary).not.toContain('LLM 生成')
+  })
+
+  it('收到 query 但 LLM 抛错 → 捕获走模板兜底，管线不中断', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-mvp-llmerr-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+    createTestChannel(true)
+    setSandboxRuntimeForTests({ portAllocator: async () => 3205, healthCheck: async () => true, processFactory: () => makeChildProcess() })
+    setSnapshotCaptureProviderForTests(async () => ({ extension: 'png', buffer: Buffer.from('fake-png') }))
+
+    const result = await runMvpTask({
+      request_id: 'req-task',
+      session_id: 'session-1',
+      project_id: project.project_id,
+      mode: 'quick',
+      query: throwingQuery(),
+    })
+
+    expect(result.snapshot.summary).not.toContain('LLM 生成')
+    expect(findProject(project.project_id).current_stage).toBe('testing')
+  })
 })
+
+/** 新建一条项目渠道；decryptable=false 时模拟密钥损坏（decrypt 抛错），true 时正常解密。 */
+function createTestChannel(decryptable: boolean): { id: string } {
+  setSafeStorageAdapter({
+    isEncryptionAvailable: () => true,
+    encryptString: (value) => Buffer.from(`enc:${value}`, 'utf8'),
+    decryptString: (value) => {
+      if (!decryptable) throw new Error('Error while decrypting the ciphertext')
+      return value.toString('utf8').replace(/^enc:/, '')
+    },
+  })
+  return createChannel({ name: 'test', provider_type: 'anthropic', base_url: 'https://test', api_key: 'test-key' })
+}
+
+/** LLM 生成型 SDK query 桩：返回可落盘的真实计算器（四则按钮 + calculate 逻辑）。 */
+const CALCULATOR_JSON = JSON.stringify({
+  files: [
+    { path: 'index.html', content: '<!doctype html><html><body><button>+</button><button>−</button><button>×</button><button>÷</button><script src="/src/app.js"></script></body></html>' },
+    { path: 'src/app.js', content: 'function calculate(a, op, b) { return op === "+" ? a + b : a; }' },
+    { path: 'src/styles.css', content: 'body { margin: 0; }' },
+  ],
+  run_command: 'npm run evil',
+  assumptions: ['纯前端计算器'],
+  risks: ['无后端'],
+})
+
+function calculatorQuery(): SDKQuery {
+  return async function* (): AsyncGenerator<SDKMessage> {
+    yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: CALCULATOR_JSON }] } }
+    yield { type: 'result', subtype: 'success' }
+  }
+}
+
+/** LLM query 桩：直接抛错，模拟模型网络错误。 */
+function throwingQuery(): SDKQuery {
+  return async function* (): AsyncGenerator<SDKMessage> {
+    throw new Error('model network error')
+  }
+}
 
 function makeChildProcess(): ChildProcess {
   const emitter = new EventEmitter() as ChildProcess

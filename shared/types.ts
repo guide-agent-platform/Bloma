@@ -29,8 +29,10 @@ export const IPC_CHANNELS = {
   PROJECT_UPGRADE: 'project:upgrade',
   SANDBOX_RUN: 'sandbox:run',
   SANDBOX_STOP: 'sandbox:stop',
+  SANDBOX_RESTORE: 'sandbox:restore',
   SNAPSHOT_CREATE: 'snapshot:create',
   SNAPSHOT_ROLLBACK: 'snapshot:rollback',
+  SNAPSHOT_LIST: 'snapshot:list',
   DOCUMENT_SYNC: 'document:sync',
   ANALYTICS_TRACK: 'analytics:track',
   CHANNEL_LIST: 'channel:list',
@@ -385,6 +387,7 @@ export interface ConfirmSketchInput extends RequestEnvelope {
   snapshot_id: string
   decision: 'accepted' | 'needs_change'
   note?: string
+  channel_id?: string
 }
 
 export interface CorrectionContext {
@@ -466,6 +469,14 @@ export interface Snapshot {
   health_status: HealthStatus
   parent_snapshot_id?: string
   created_at: string
+}
+
+export interface SnapshotListInput extends RequestEnvelope {
+  project_id: string
+}
+
+export interface SnapshotListResult {
+  snapshots: Snapshot[]
 }
 
 export interface SnapshotRollbackInput extends RequestEnvelope {
@@ -563,10 +574,12 @@ export type ElectronAPI = {
   sandbox: {
     run(input: SandboxRunInput): Promise<ApiResult<SandboxRunResult>>
     stop(input: SandboxStopInput): Promise<ApiResult<SandboxStopResult>>
+    restore(input: SandboxRunInput): Promise<ApiResult<SandboxRunResult>>
   }
   snapshots: {
     create(input: SnapshotCreateInput): Promise<ApiResult<Snapshot>>
     rollback(input: SnapshotRollbackInput): Promise<ApiResult<RollbackResult>>
+    list(input: SnapshotListInput): Promise<ApiResult<SnapshotListResult>>
   }
   documents: {
     sync(input: DocumentSyncInput): Promise<ApiResult<DocumentSyncResult>>

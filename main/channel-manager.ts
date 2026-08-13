@@ -4,6 +4,44 @@ import { getChannelsPath } from '../storage/config-paths'
 import { readJsonFile, writeJsonFile } from '../storage/json-store'
 import { decryptSecret, encryptSecret } from './safe-storage'
 
+/** SDK 子进程环境白名单：仅透传运行 SDK 所需的基础环境，避免宿主机 ANTHROPIC_/CLAUDE_ 历史配置污染 Agent 渠道。 */
+const SDK_ENV_ALLOWLIST = [
+  'PATH',
+  'Path',
+  'HOME',
+  'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'TMP',
+  'TEMP',
+  'TMPDIR',
+  'SystemRoot',
+  'WINDIR',
+  'HTTPS_PROXY',
+  'HTTP_PROXY',
+  'NO_PROXY',
+  'https_proxy',
+  'http_proxy',
+  'no_proxy',
+] as const
+
+/**
+ * 由解密后的渠道密钥构建 SDK 子进程环境（ANTHROPIC_AUTH_TOKEN/BASE_URL/MODEL + 白名单宿主环境）。
+ * 从 orchestrator 移入本模块：programming-orchestrator（LLM MVP 生成）需复用而不反向 import
+ * orchestrator.ts，避免 orchestrator ⇄ programming-orchestrator 运行时循环依赖。
+ */
+export function buildSdkEnv(apiKey: string, baseUrl: string, model: string): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const key of SDK_ENV_ALLOWLIST) {
+    const value = (process.env as Record<string, string>)[key]
+    if (value !== undefined) env[key] = value
+  }
+  env.ANTHROPIC_AUTH_TOKEN = apiKey
+  env.ANTHROPIC_BASE_URL = baseUrl
+  env.ANTHROPIC_MODEL = model
+  return env
+}
+
 interface ChannelsConfig {
   version: number
   channels: Channel[]
