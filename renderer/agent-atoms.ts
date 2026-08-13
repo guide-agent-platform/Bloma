@@ -147,6 +147,30 @@ export function setupGlobalAgentListeners(): () => void {
       ]
     })
 
+    // 预览地址：sketch_ready / mvp_ready 带回沙箱 preview_url，供预览区渲染真实产物
+    if (event.type === 'sketch_ready' || event.type === 'mvp_ready') {
+      const url = typeof event.payload.preview_url === 'string' ? event.payload.preview_url : null
+      if (url) store.set(previewUrlAtom, url)
+    }
+
+    // 终态事件：将本次运行累积的流式回复沉淀为一条助手消息，
+    // 修复「completed 后 running=false，流式文本消失且从未进消息列表」。
+    // 读取尚未被重置的 content（同步），随后 reducer 再清空。
+    if (event.type === 'completed' || event.type === 'error') {
+      const terminalStreamAtom = agentStreamStateFamily(event.session_id)
+      const accumulated = store.get(terminalStreamAtom)?.content ?? ''
+      if (accumulated.trim()) {
+        store.set(agentMessagesFamily(event.session_id), (previous) => [
+          ...previous,
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: accumulated }],
+            timestamp: Date.now(),
+          },
+        ])
+      }
+    }
+
     const streamAtom = agentStreamStateFamily(event.session_id)
     store.set(streamAtom, (previous: AgentStreamState) => {
       // 权限请求：从 payload 提取并写入队列
@@ -171,11 +195,12 @@ export function setupGlobalAgentListeners(): () => void {
       }
 
       const text = typeof event.payload.text === 'string' ? event.payload.text : ''
+      const isTerminal = event.type === 'completed' || event.type === 'error'
 
       return {
-        running: event.type !== 'completed' && event.type !== 'error',
+        running: !isTerminal,
         events: [...previous.events, event],
-        content: previous.content + text,
+        content: isTerminal ? '' : previous.content + text,
         last_error:
           event.type === 'error'
             ? String(event.payload.code ?? 'AGENT_SDK_ERROR')
@@ -219,6 +244,9 @@ export const networkOnlineAtom = atom<boolean>(navigator.onLine)
 
 /** 阶段指示器文案（P0 用户可见） */
 export const stageIndicatorLabelAtom = atom<string>('选择模式')
+
+/** 最近一次 sketch_ready / mvp_ready 事件带回的沙箱预览地址；null = 尚无真实预览 */
+export const previewUrlAtom = atom<string | null>(null)
 
 /** 全局用户可见错误 */
 export const globalUserErrorAtom = atom<string | null>(null)

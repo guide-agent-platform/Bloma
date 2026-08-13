@@ -285,7 +285,7 @@ describe('PlatformServices snapshot capacity (A2-16)', () => {
 
     // 显式调用与 createSnapshot 内联触发一致
     expect(enforceSnapshotCapacity(project.workspace_slug, project.project_id).archived).toEqual([])
-  })
+  }, 15_000) // 105 个快照的真实文件 I/O 在 Windows 上接近 5s 默认超时，放宽以避免并行负载下偶发超时
 })
 
 function makeChildProcess(): { process: ChildProcess; kill: ReturnType<typeof vi.fn> } {

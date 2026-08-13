@@ -23,6 +23,15 @@ export type RepairCategory = 'dependency_error' | 'syntax_error' | 'runtime_erro
 export const RUNTIME_REPAIR_LIMIT = 3
 export const TEST_REPAIR_LIMIT = 3
 
+/** 修复类别 → P0 可读文案（A4：`repairing` 事件补 `user_visible_summary`） */
+export const REPAIR_CATEGORY_SUMMARY: Record<RepairCategory, string> = {
+  dependency_error: '预览缺少运行依赖，正在自动修复',
+  syntax_error: '预览代码存在语法错误，正在自动修复',
+  runtime_error: '预览运行时报错，正在自动修复',
+  test_error: '功能检查未通过，正在自动修复',
+  constraint_error: '功能要求未完全对齐，正在重新整理文档',
+}
+
 type RepairKind = 'runtime' | 'test' | 'constraint'
 
 export interface RepairCheck {
@@ -62,7 +71,7 @@ export async function runRepairCycle(input: RepairCycleInput): Promise<RepairCyc
   // 进入 repairing 阶段并广播
   updateProject(project_id, { current_stage: 'repairing' })
   input.publish('stage_changed', { stage: 'repairing' })
-  input.publish('repairing', { attempt, category })
+  input.publish('repairing', { attempt, category, user_visible_summary: REPAIR_CATEGORY_SUMMARY[category] })
   trackAnalytics({
     request_id,
     event: {

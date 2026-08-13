@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import type { AgentEvent, ProjectMode, Snapshot, TemplateType } from '../shared/types'
+import type { AgentEvent, AgentSendMessageInput, Project, ProjectMode, Snapshot, TemplateType } from '../shared/types'
 import { syncDocuments } from './document-engine'
 import { createSnapshot, runSandbox, trackAnalytics } from './platform-services'
 import { generateMvp } from './mvp-engine'
 import { findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
 import { generateSketch, type SketchRequirement } from './sketch-engine'
 import { readTestReport, runGwtScenarios, writeTestReport, type GwtTestResult } from './gwt-service'
-import { applyRepairPatch, runRepairCycle, type RepairCategory } from './repair-engine'
+import { applyRepairPatch, REPAIR_CATEGORY_SUMMARY, runRepairCycle, type RepairCategory } from './repair-engine'
 import { runJudge, type JudgeVerdict } from './judge-engine'
 import { assertToolAllowed } from './permission-service'
 
@@ -17,6 +17,18 @@ import { assertToolAllowed } from './permission-service'
 const AUTOMATED_PERMISSION_MODE = 'allow-all' as const
 
 type ProgrammingEventPublisher = (event: AgentEvent) => void
+
+/** 被阻塞的编程操作类型（A2 resume 闭环，落盘到 Project.blocked_action） */
+export type BlockedAction = 'mvp_repair' | 'test_repair' | 'judge_return'
+/** 阻塞态让渡后用户回传的决策（A3：消费 metadata.selected_option_id 映射而来） */
+export type BlockedDecision = 'continue' | 'accept' | 'explain'
+
+/** 阻塞态让渡卡片（A1：统一带 `id`，与引导澄清路径 questions 形态一致） */
+const BLOCKED_DECISION_QUESTIONS: { id: BlockedDecision; label: string; description: string }[] = [
+  { id: 'continue', label: '继续尝试', description: '让我再修一次' },
+  { id: 'accept', label: '接受现状', description: '保留当前 MVP 先看看' },
+  { id: 'explain', label: '补充说明', description: '告诉向导哪里不对' },
+]
 
 export interface SketchTaskInput {
   request_id: string
@@ -210,14 +222,7 @@ async function ensureSandboxRunning(input: MvpTaskInput): Promise<{ preview_url:
       },
     })
     if (cycle.blocked) {
-      publish(input, 'user_decision_required', {
-        stage: 'blocked_for_user_decision',
-        questions: [
-          { label: '继续尝试', description: '让我再修一次' },
-          { label: '接受现状', description: '保留当前 MVP 先看看' },
-          { label: '补充说明', description: '告诉向导哪里不对' },
-        ],
-      })
+      publishBlockedDecision(input, 'mvp_repair')
       throw new Error('SANDBOX_RUN_FAILED:blocked')
     }
     if (cycle.repaired && sandbox.status === 'running' && sandbox.preview_url) {
@@ -283,16 +288,7 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
     updateProject(input.project_id, { judge_return_count: returns })
 
     if (returns > limit) {
-      updateProject(input.project_id, { current_stage: 'blocked_for_user_decision' })
-      publish(input, 'stage_changed', { stage: 'blocked_for_user_decision' })
-      publish(input, 'user_decision_required', {
-        stage: 'blocked_for_user_decision',
-        questions: [
-          { label: '继续尝试', description: '让我再修一次' },
-          { label: '接受现状', description: '保留当前 MVP 先看看' },
-          { label: '补充说明', description: '告诉向导哪里不对' },
-        ],
-      })
+      publishBlockedDecision(input, 'judge_return')
       return { outcome: 'blocked', verdict }
     }
 
@@ -300,7 +296,7 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
     applyRepairPatch({ request_id: input.request_id, session_id: input.session_id, project_id: input.project_id }, 'constraint_error')
     updateProject(input.project_id, { current_stage: 'repairing' })
     publish(input, 'stage_changed', { stage: 'repairing' })
-    publish(input, 'repairing', { attempt: returns, category: 'constraint_error' })
+    publish(input, 'repairing', { attempt: returns, category: 'constraint_error', user_visible_summary: REPAIR_CATEGORY_SUMMARY.constraint_error })
     trackAnalytics({
       request_id: input.request_id,
       event: {
@@ -374,14 +370,7 @@ export async function runPostMvpTestingFlow(input: GwtTestingInput): Promise<Gwt
       },
     })
     if (cycle.blocked) {
-      publish(input, 'user_decision_required', {
-        stage: 'blocked_for_user_decision',
-        questions: [
-          { label: '继续尝试', description: '让我再修一次' },
-          { label: '接受现状', description: '保留当前 MVP 先看看' },
-          { label: '补充说明', description: '告诉向导哪里不对' },
-        ],
-      })
+      publishBlockedDecision(input, 'test_repair')
       return { verdict: 'blocked', test_result: testResult }
     }
     if (cycle.repaired) break
@@ -417,4 +406,160 @@ async function allowAutomatedTool(
   projectId: string,
 ): Promise<void> {
   await assertToolAllowed(toolName, toolInput, sessionId, AUTOMATED_PERMISSION_MODE, projectId)
+}
+
+// =========================================================================
+// A2/A3 — 阻塞态让渡 + resume 闭环
+// =========================================================================
+
+/**
+ * 阻塞点统一入口：落盘 blocked_action（供 resume 恢复）+ 广播 stage_changed +
+ * 发射带 id 的 user_decision_required（A1 统一 questions 形态）。
+ */
+function publishBlockedDecision(
+  input: { session_id: string; project_id: string },
+  action: BlockedAction,
+): void {
+  updateProject(input.project_id, { current_stage: 'blocked_for_user_decision', blocked_action: action })
+  publish(input, 'stage_changed', { stage: 'blocked_for_user_decision' })
+  publish(input, 'user_decision_required', {
+    kind: 'blocked',
+    stage: 'blocked_for_user_decision',
+    questions: BLOCKED_DECISION_QUESTIONS,
+  })
+}
+
+/**
+ * 解析阻塞态回传的用户决策（A3：消费 metadata.selected_option_id）。
+ *
+ * 仅当项目处于 `blocked_for_user_decision` 且存在 `blocked_action`（编程阻塞）时返回决策；
+ * 引导澄清态（无 blocked_action）返回 undefined，交由引导路径处理。
+ */
+export function resolveBlockedDecision(input: AgentSendMessageInput): BlockedDecision | undefined {
+  if (input.current_stage !== 'blocked_for_user_decision') return undefined
+  let project: Project
+  try {
+    project = findProject(input.project_id)
+  } catch {
+    return undefined
+  }
+  if (!project.blocked_action) return undefined
+
+  if (input.metadata?.source === 'card_option') {
+    const id = input.metadata?.selected_option_id
+    if (id === 'accept' || id === 'explain' || id === 'continue') return id
+    return 'continue'
+  }
+
+  // 自由文本兜底：阻塞态下用户可能直接打字（卡片是主路径，这里是容错）
+  const text = input.content.trim()
+  if (/接受|保留|现状|就这样|算了/.test(text)) return 'accept'
+  if (/继续|重试|再试|再修/.test(text)) return 'continue'
+  return 'explain'
+}
+
+export interface ResumeBlockedInput {
+  request_id: string
+  session_id: string
+  project_id: string
+  mode: ProjectMode
+  decision: BlockedDecision
+  content: string
+}
+
+/**
+ * 恢复被阻塞的编程操作（A2 resume 闭环）。
+ *
+ * - `continue` → 重置对应计数，恢复被阻塞的操作（MVP 修复 / 测试修复 / 裁判退回）
+ * - `accept`   → 接受当前 MVP，进入 ready
+ * - `explain`  → 清阻塞 + 回澄清阶段（实际重新澄清由调用方走 handleGuideMessage）
+ */
+export async function resumeBlockedFlow(
+  input: ResumeBlockedInput,
+  eventPublisher: ProgrammingEventPublisher,
+): Promise<void> {
+  // 嵌套的 runMvpTask / runPostMvpTestingFlow / runJudgeReview 走同一发布通道
+  setProgrammingEventPublisher(eventPublisher)
+
+  const project = findProject(input.project_id)
+  const action = project.blocked_action
+
+  // 无论后续如何，先清除 blocked_action，避免重复触发阻塞分支
+  updateProject(input.project_id, { blocked_action: undefined })
+
+  if (input.decision === 'accept') {
+    updateProject(input.project_id, {
+      current_stage: 'ready',
+      runtime_repair_count: 0,
+      test_repair_count: 0,
+      judge_return_count: 0,
+    })
+    publish(input, 'stage_changed', { stage: 'ready' })
+    return
+  }
+
+  if (input.decision === 'explain') {
+    updateProject(input.project_id, { current_stage: 'clarifying' })
+    publish(input, 'stage_changed', { stage: 'clarifying' })
+    return
+  }
+
+  // decision === 'continue'：重置相关计数后恢复被阻塞的操作
+  if (action === 'mvp_repair') {
+    updateProject(input.project_id, { runtime_repair_count: 0 })
+    const mvp = await runMvpTask({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+    })
+    await runPostMvpTestingFlow({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+      preview_url: mvp.preview_url,
+    })
+    return
+  }
+
+  if (action === 'test_repair') {
+    updateProject(input.project_id, { test_repair_count: 0 })
+    const previewUrl = await ensureResumePreview(input)
+    await runPostMvpTestingFlow({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+      preview_url: previewUrl,
+    })
+    return
+  }
+
+  if (action === 'judge_return') {
+    updateProject(input.project_id, { judge_return_count: 0 })
+    await runJudgeReview({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+    })
+    return
+  }
+
+  // 无明确 action（异常兜底）：进入 ready，避免卡死
+  updateProject(input.project_id, { current_stage: 'ready' })
+  publish(input, 'stage_changed', { stage: 'ready' })
+}
+
+/** 恢复测试/裁判前重新拉起沙箱，返回可用的 preview_url；起不来则抛错由上层报错。 */
+async function ensureResumePreview(input: { request_id: string; project_id: string }): Promise<string> {
+  const sandbox = await runSandbox({
+    request_id: input.request_id,
+    project_id: input.project_id,
+    command: 'node static-server',
+  })
+  if (sandbox.status !== 'running' || !sandbox.preview_url) {
+    throw new Error(`SANDBOX_RUN_FAILED:${sandbox.error_summary?.category ?? 'unknown'}`)
+  }
+  return sandbox.preview_url
 }

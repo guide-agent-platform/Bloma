@@ -70,9 +70,26 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) void createMainWindow()
 })
 
-/** 为 renderer 主窗口注入 CSP。注意：此 CSP 不作用于 iframe（iframe 受各自响应头约束）。 */
+/**
+ * 为 renderer 主窗口注入 CSP。
+ *
+ * 重要：必须按 resourceType === 'mainFrame' 收窄——onHeadersReceived 会拦截
+ * session 内所有请求，若不收窄，CSP 会一并注入沙箱 iframe 的 index.html 响应：
+ * 主窗 CSP 的 `script-src 'self'`（无 unsafe-inline）会与沙箱自身 CSP 取交集，
+ * 把生成页的内联 <script>（用于给 .screen 加 .active）整段屏蔽，导致
+ * 「沙箱里渲染不出应有的 UI」。iframe 子帧受沙箱静态服务器自己的 CSP 约束，
+ * 主窗 CSP 不得覆盖它。
+ *
+ * frame-src 允许主窗 iframe 加载沙箱预览（localhost），否则 default-src 'none'
+ * 会把 iframe 一并禁掉。
+ */
 function configureContentSecurity(_window: BrowserWindow): void {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    if (details.resourceType !== 'mainFrame') {
+      // iframe 子帧 / 脚本 / 样式等：不动响应头，交给各响应自身的 CSP
+      callback({ responseHeaders: details.responseHeaders })
+      return
+    }
     callback({
       responseHeaders: {
         ...details.responseHeaders,
@@ -84,6 +101,7 @@ function configureContentSecurity(_window: BrowserWindow): void {
             "img-src 'self' data: blob:",
             "font-src 'self'",
             "connect-src 'self' http://localhost:* https://api.anthropic.com",
+            "frame-src 'self' http://localhost:* http://127.0.0.1:*",
           ].join('; '),
         ],
       },
