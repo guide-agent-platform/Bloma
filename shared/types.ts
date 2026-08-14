@@ -37,7 +37,10 @@ export const IPC_CHANNELS = {
   ANALYTICS_TRACK: 'analytics:track',
   CHANNEL_LIST: 'channel:list',
   CHANNEL_CREATE: 'channel:create',
+  CHANNEL_UPDATE: 'channel:update',
   CHANNEL_TEST: 'channel:test',
+  CHANNEL_TEST_DIRECT: 'channel:test-direct',
+  CHANNEL_FETCH_MODELS: 'channel:fetch-models',
   CHANNEL_DELETE: 'channel:delete',
 } as const
 
@@ -128,7 +131,28 @@ export const WORKFLOW_STAGES: readonly WorkflowStage[] = [
 ]
 
 export type SnapshotKind = 'sketch' | 'mvp' | 'iteration' | 'pre_risk' | 'upgrade' | 'rollback_guard'
-export type ProviderType = 'anthropic' | 'openai' | 'google' | 'deepseek' | 'zhipu' | 'minimax' | 'doubao' | 'qwen' | 'custom'
+export type ProviderType =
+  | 'anthropic'
+  | 'anthropic-compatible'
+  | 'openai'
+  | 'openai-responses'
+  | 'deepseek'
+  | 'google'
+  | 'kimi-api'
+  | 'kimi-coding'
+  | 'opencode-go-openai'
+  | 'zhipu'
+  | 'zhipu-coding'
+  | 'zhipu-coding-team'
+  | 'ark-coding-plan'
+  | 'minimax'
+  | 'doubao'
+  | 'qwen'
+  | 'qwen-anthropic'
+  | 'qwen-token-plan'
+  | 'xiaomi'
+  | 'xiaomi-token-plan'
+  | 'custom'
 export type TemplateType = 'web_fullstack' | 'desktop_tool' | 'personal_tool' | 'ai_app'
 export type PermissionDecision = 'allow' | 'deny'
 export type DangerLevel = 'safe' | 'warning' | 'dangerous'
@@ -143,6 +167,8 @@ export interface ChannelModel {
   id: string
   name: string
   enabled: boolean
+  /** 来源：manual=手填，fetched=从供应商 API 拉取（默认 manual） */
+  source?: 'manual' | 'fetched'
 }
 
 export interface Channel {
@@ -170,13 +196,79 @@ export interface ChannelCreateInput {
 /** IPC 层渠道创建输入：在 ChannelCreateInput 上叠加 request_id 包装（复用 §4 域模型）。 */
 export type ChannelCreateEnvelope = RequestEnvelope & ChannelCreateInput
 
+/** 渠道更新输入：全字段可选；api_key 传空字符串表示不更新（编辑表单留空时）。 */
+export interface ChannelUpdateInput {
+  name?: string
+  provider_type?: ProviderType
+  base_url?: string
+  /** 明文 API Key；空字符串表示不更新 */
+  api_key?: string
+  models?: ChannelModel[]
+  enabled?: boolean
+  max_tokens?: number
+}
+
+export interface ChannelUpdateEnvelope extends RequestEnvelope {
+  channel_id: string
+  input: ChannelUpdateInput
+}
+
 export interface ChannelTestEnvelope extends RequestEnvelope {
   channel_id: string
 }
 
+/** 连接测试失败归一化分类 */
+export type ChannelTestErrorType =
+  | 'auth'
+  | 'permission'
+  | 'not_found'
+  | 'rate_limit'
+  | 'quota'
+  | 'bad_request'
+  | 'server'
+  | 'network'
+  | 'timeout'
+  | 'unknown'
+
 export interface ChannelTestResult {
   ok: boolean
   message: string
+  errorType?: ChannelTestErrorType
+  statusCode?: number
+  detail?: string
+}
+
+/** 保存前直接测试连接（无需已保存渠道，明文凭证） */
+export interface ChannelDirectTestInput {
+  provider_type: ProviderType
+  base_url: string
+  api_key: string
+  model_id?: string
+  /** api_key 为空时回退到已保存渠道的密钥（编辑表单不改 Key 时使用） */
+  channel_id?: string
+}
+
+export interface ChannelTestDirectEnvelope extends RequestEnvelope {
+  input: ChannelDirectTestInput
+}
+
+/** 拉取模型列表（无需已保存渠道，明文凭证） */
+export interface FetchModelsInput {
+  provider_type: ProviderType
+  base_url: string
+  api_key: string
+  /** api_key 为空时回退到已保存渠道的密钥（编辑表单不改 Key 时使用） */
+  channel_id?: string
+}
+
+export interface FetchModelsEnvelope extends RequestEnvelope {
+  input: FetchModelsInput
+}
+
+export interface FetchModelsResult {
+  success: boolean
+  message: string
+  models: ChannelModel[]
 }
 
 export interface ChannelDeleteEnvelope extends RequestEnvelope {
@@ -186,6 +278,60 @@ export interface ChannelDeleteEnvelope extends RequestEnvelope {
 export interface ChannelDeleteResult {
   deleted: true
   channel_id: string
+}
+
+// =========================================================================
+// 4.1 渠道 provider 常量（renderer UI 与 main 共用）
+// =========================================================================
+
+/** 各 provider 的默认 Base URL（空串表示必须由用户显式填写） */
+export const PROVIDER_DEFAULT_URLS: Record<ProviderType, string> = {
+  anthropic: 'https://api.anthropic.com',
+  'anthropic-compatible': '',
+  openai: 'https://api.openai.com/v1',
+  'openai-responses': 'https://api.openai.com/v1',
+  deepseek: 'https://api.deepseek.com/anthropic',
+  google: 'https://generativelanguage.googleapis.com',
+  'kimi-api': 'https://api.moonshot.cn/anthropic',
+  'kimi-coding': 'https://api.kimi.com/coding/v1',
+  'opencode-go-openai': 'https://opencode.ai/zen/go/v1',
+  zhipu: 'https://open.bigmodel.cn/api/paas/v4',
+  'zhipu-coding': 'https://open.bigmodel.cn/api/anthropic',
+  'zhipu-coding-team': 'https://open.bigmodel.cn/api/anthropic',
+  'ark-coding-plan': 'https://ark.cn-beijing.volces.com/api/plan',
+  minimax: 'https://api.minimaxi.com/anthropic',
+  doubao: 'https://ark.cn-beijing.volces.com/api/v3',
+  qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  'qwen-anthropic': 'https://dashscope.aliyuncs.com/apps/anthropic',
+  'qwen-token-plan': 'https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic/v1/messages',
+  xiaomi: 'https://api.xiaomimimo.com/anthropic',
+  'xiaomi-token-plan': 'https://token-plan-cn.xiaomimimo.com/anthropic',
+  custom: '',
+}
+
+/** 各 provider 的显示名称（面向用户） */
+export const PROVIDER_LABELS: Record<ProviderType, string> = {
+  anthropic: 'Anthropic',
+  'anthropic-compatible': 'Anthropic 兼容格式',
+  openai: 'OpenAI',
+  'openai-responses': 'OpenAI Responses 格式',
+  deepseek: 'DeepSeek',
+  google: 'Google',
+  'kimi-api': 'Kimi API (Anthropic 协议)',
+  'kimi-coding': 'Kimi Coding Plan',
+  'opencode-go-openai': 'OpenCode Go (OpenAI 协议)',
+  zhipu: '智谱 AI',
+  'zhipu-coding': '智谱 Coding Plan',
+  'zhipu-coding-team': '智谱 Coding Plan 团队版',
+  'ark-coding-plan': '火山方舟 Coding Plan',
+  minimax: 'MiniMax (API&编程包)',
+  doubao: '豆包',
+  qwen: '通义千问',
+  'qwen-anthropic': '通义千问 (Anthropic 协议)',
+  'qwen-token-plan': '通义千问 Token Plan',
+  xiaomi: '小米 MiMo (API)',
+  'xiaomi-token-plan': '小米 MiMo Token Plan',
+  custom: 'OpenAI Chat Completions（自定义地址）',
 }
 
 // =========================================================================
@@ -590,7 +736,10 @@ export type ElectronAPI = {
   channels: {
     list(input: RequestEnvelope): Promise<ApiResult<Channel[]>>
     create(input: ChannelCreateEnvelope): Promise<ApiResult<Channel>>
+    update(input: ChannelUpdateEnvelope): Promise<ApiResult<Channel>>
     test(input: ChannelTestEnvelope): Promise<ApiResult<ChannelTestResult>>
+    testDirect(input: ChannelTestDirectEnvelope): Promise<ApiResult<ChannelTestResult>>
+    fetchModels(input: FetchModelsEnvelope): Promise<ApiResult<FetchModelsResult>>
     delete(input: ChannelDeleteEnvelope): Promise<ApiResult<ChannelDeleteResult>>
   }
 }

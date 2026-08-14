@@ -29,6 +29,9 @@ import type {
   ChannelCreateEnvelope,
   ChannelDeleteEnvelope,
   ChannelTestEnvelope,
+  ChannelTestDirectEnvelope,
+  ChannelUpdateEnvelope,
+  FetchModelsEnvelope,
   ConfirmSketchInput,
   DocumentSyncInput,
   ElectronAPI,
@@ -108,8 +111,14 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_LIST, input),
     create: (input: ChannelCreateEnvelope) =>
       ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_CREATE, input),
+    update: (input: ChannelUpdateEnvelope) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_UPDATE, input),
     test: (input: ChannelTestEnvelope) =>
       ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_TEST, input),
+    testDirect: (input: ChannelTestDirectEnvelope) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_TEST_DIRECT, input),
+    fetchModels: (input: FetchModelsEnvelope) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_FETCH_MODELS, input),
     delete: (input: ChannelDeleteEnvelope) =>
       ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_DELETE, input),
   },

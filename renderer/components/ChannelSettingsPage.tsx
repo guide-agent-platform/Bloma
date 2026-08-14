@@ -1,31 +1,32 @@
 /**
  * ChannelSettingsPage — 渠道管理设置页
  *
- * Sprint 2 B 交付物 · A2-17 B侧
+ * Sprint 2 B 交付物 · A2-17 B侧 + 迁移 Proma 渠道配置功能
  *
  * 功能：
  *   - 展示已配置渠道列表（名称/provider/模型数/启用状态）
- *   - 新增渠道表单（name / provider_type / base_url / api_key / models）
- *   - 测试连接按钮
+ *   - 新增/编辑渠道表单（name / provider_type / base_url / api_key / models）
+ *   - 保存前「测试连接」（testChannelDirect）与「拉取模型」（fetchModels）
+ *   - 渠道编辑（updateChannel，api_key 留空 = 不更新）
  *   - 删除渠道确认
  *   - api_key 不回显明文（已加密 hex 只显示占位符）
  *
  * 说明：
- *   已对接 electronAPI.channels.*（list/create/test/delete），
+ *   已对接 electronAPI.channels.*（list/create/update/test/testDirect/fetchModels/delete），
  *   A 侧已在 main/ipc.ts + preload/bridge.ts 完整实现。
  *   无 Electron 环境（demo）时回退本地 mock，保证 UI 可交互。
- *
- * 集成方式：
- *   在 App.tsx 的 settings 路由中渲染，或通过设置面板/弹窗打开。
  */
 
 import React, { useCallback, useEffect, useState } from 'react'
 import { useAtom } from 'jotai'
 import type {
+  Channel,
   ChannelCreateInput,
   ChannelModel,
+  ChannelUpdateInput,
   ProviderType,
 } from '../../shared/types'
+import { PROVIDER_DEFAULT_URLS, PROVIDER_LABELS } from '../../shared/types'
 import {
   channelsListAtom,
   channelsLoadingAtom,
@@ -62,6 +63,14 @@ const IconTrash: React.FC<{ size?: number }> = ({ size = 24 }) => (
   </svg>
 )
 
+const IconEdit: React.FC<{ size?: number }> = ({ size = 24 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth={2} strokeLinecap="round"
+    strokeLinejoin="round" aria-hidden>
+    <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+  </svg>
+)
+
 const IconZap: React.FC<{ size?: number }> = ({ size = 24 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
     stroke="currentColor" strokeWidth={2} strokeLinecap="round"
@@ -95,96 +104,197 @@ const IconArrowLeft: React.FC<{ size?: number }> = ({ size = 24 }) => (
   </svg>
 )
 
+const IconRefresh: React.FC<{ size?: number }> = ({ size = 24 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth={2} strokeLinecap="round"
+    strokeLinejoin="round" aria-hidden>
+    <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+    <path d="M21 3v6h-6" />
+  </svg>
+)
+
+const IconPlug: React.FC<{ size?: number }> = ({ size = 24 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth={2} strokeLinecap="round"
+    strokeLinejoin="round" aria-hidden>
+    <path d="M9 2v6" /><path d="M15 2v6" />
+    <path d="M7 8h10v3a5 5 0 0 1-10 0V8z" />
+    <path d="M12 16v6" />
+  </svg>
+)
+
 // =========================================================================
-// 常量
+// 常量（来自 shared/types 的 PROVIDER_DEFAULT_URLS / PROVIDER_LABELS）
 // =========================================================================
 
-const PROVIDERS: { value: ProviderType; label: string }[] = [
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'google', label: 'Google' },
-  { value: 'deepseek', label: 'DeepSeek' },
-  { value: 'zhipu', label: '智谱' },
-  { value: 'minimax', label: 'MiniMax' },
-  { value: 'doubao', label: '豆包' },
-  { value: 'qwen', label: '通义千问' },
-  { value: 'custom', label: '自定义' },
+/** provider 下拉展示顺序：常用 9 个在前，扩展的 12 个在后 */
+const PROVIDER_ORDER: ProviderType[] = [
+  'anthropic', 'openai', 'google', 'deepseek', 'zhipu', 'minimax', 'doubao', 'qwen', 'custom',
+  'anthropic-compatible', 'openai-responses', 'kimi-api', 'kimi-coding', 'opencode-go-openai',
+  'zhipu-coding', 'zhipu-coding-team', 'ark-coding-plan', 'qwen-anthropic', 'qwen-token-plan',
+  'xiaomi', 'xiaomi-token-plan',
 ]
-
-const PROVIDER_LABEL_MAP: Record<ProviderType, string> = {
-  anthropic: 'Anthropic',
-  openai: 'OpenAI',
-  google: 'Google',
-  deepseek: 'DeepSeek',
-  zhipu: '智谱',
-  minimax: 'MiniMax',
-  doubao: '豆包',
-  qwen: '通义千问',
-  custom: '自定义',
-}
-
-/**
- * 各提供商的默认 Base URL（表单留空时自动填入，兑现「留空使用默认地址」的占位提示）。
- * `custom` 无默认值——自定义提供商必须由用户显式填写 base_url。
- * MiniMax 默认值对齐 scripts/seed-channel.cjs 的 MINIMAX_BASE_URL。
- */
-const DEFAULT_BASE_URLS: Partial<Record<ProviderType, string>> = {
-  anthropic: 'https://api.anthropic.com',
-  openai: 'https://api.openai.com/v1',
-  google: 'https://generativelanguage.googleapis.com/v1beta',
-  deepseek: 'https://api.deepseek.com',
-  zhipu: 'https://open.bigmodel.cn/api/paas/v4',
-  minimax: 'https://api.minimaxi.com/anthropic',
-  doubao: 'https://ark.cn-beijing.volces.com/api/v3',
-  qwen: 'https://dashscope.aliyuncs.com/api/v1',
-}
 
 // =========================================================================
 // 子组件：新增/编辑渠道表单
 // =========================================================================
 
 interface ChannelFormProps {
+  mode: 'create' | 'edit'
+  channelId?: string
+  initial?: {
+    name: string
+    provider: ProviderType
+    baseUrl: string
+    models: ChannelModel[]
+  }
   onSave: (input: ChannelCreateInput) => void
+  onUpdate?: (channelId: string, input: ChannelUpdateInput) => void
   onCancel: () => void
   saving: boolean
 }
 
-const ChannelForm: React.FC<ChannelFormProps> = ({ onSave, onCancel, saving }) => {
-  const [name, setName] = useState('')
-  const [provider, setProvider] = useState<ProviderType>('deepseek')
-  const [baseUrl, setBaseUrl] = useState('')
+function modelsToText(models: ChannelModel[]): string {
+  return models.map((m) => m.name).join(', ')
+}
+
+function textToModels(provider: ProviderType, text: string): ChannelModel[] {
+  return text
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((modelName, i) => ({
+      id: `${provider}-${modelName}-${i}`,
+      name: modelName,
+      enabled: true,
+    }))
+}
+
+const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onSave, onUpdate, onCancel, saving }) => {
+  const [name, setName] = useState(initial?.name ?? '')
+  const [provider, setProvider] = useState<ProviderType>(initial?.provider ?? 'deepseek')
+  const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? '')
   const [apiKey, setApiKey] = useState('')
-  const [modelsText, setModelsText] = useState('')
+  const [modelsText, setModelsText] = useState(initial ? modelsToText(initial.models) : '')
+  const [testing, setTesting] = useState(false)
+  const [testMsg, setTestMsg] = useState<{ ok: boolean; message: string } | null>(null)
+  const [fetching, setFetching] = useState(false)
+  const [fetchMsg, setFetchMsg] = useState<string | null>(null)
 
-  const resolvedBaseUrl = baseUrl.trim() || DEFAULT_BASE_URLS[provider] || ''
+  // provider 变化时：编辑模式不清空已填 baseUrl；新增模式若未手填则自动带默认 URL
+  const resolvedBaseUrl = baseUrl.trim() || PROVIDER_DEFAULT_URLS[provider] || ''
 
+  // create 模式必须填 API Key；edit 模式留空表示不更新密钥
   const canSave =
     name.trim().length > 0 &&
-    apiKey.trim().length > 0 &&
     resolvedBaseUrl.length > 0 &&
+    (mode === 'create' ? apiKey.trim().length > 0 : true) &&
     !saving
+
+  // 测试连接 / 拉取模型：
+  // create 模式必须填明文 API Key；edit 模式留空时回退到已保存渠道密钥（main 进程解密）。
+  const canProbe =
+    resolvedBaseUrl.length > 0 &&
+    (mode === 'create' ? apiKey.trim().length > 0 : true) &&
+    !testing && !fetching
+
+  const handleProviderChange = (value: ProviderType) => {
+    setProvider(value)
+    // 未手填 baseUrl 时跟随默认值
+    if (!baseUrl.trim()) setBaseUrl(PROVIDER_DEFAULT_URLS[value] || '')
+  }
+
+  const handleTest = useCallback(() => {
+    const api = window.electronAPI
+    if (!api?.channels?.testDirect) {
+      setTestMsg({ ok: true, message: '演示环境：连接测试已跳过' })
+      return
+    }
+    setTesting(true)
+    setTestMsg(null)
+    void api.channels
+      .testDirect({
+        request_id: crypto.randomUUID(),
+        input: {
+          provider_type: provider,
+          base_url: resolvedBaseUrl,
+          // 编辑模式 Key 留空时由 main 进程回退到已保存渠道密钥
+          api_key: apiKey.trim(),
+          channel_id: mode === 'edit' ? channelId : undefined,
+          model_id: textToModels(provider, modelsText)[0]?.name,
+        },
+      })
+      .then((result) => {
+        if (result.ok) setTestMsg({ ok: result.data.ok, message: result.data.message })
+        else setTestMsg({ ok: false, message: result.error?.user_visible_message ?? '测试失败，请重试。' })
+      })
+      .catch(() => setTestMsg({ ok: false, message: '测试失败，请重试。' }))
+      .finally(() => setTesting(false))
+  }, [mode, channelId, provider, resolvedBaseUrl, apiKey, modelsText])
+
+  const handleFetchModels = useCallback(() => {
+    const api = window.electronAPI
+    if (!api?.channels?.fetchModels) {
+      setFetchMsg('演示环境：跳过模型拉取')
+      return
+    }
+    setFetching(true)
+    setFetchMsg(null)
+    void api.channels
+      .fetchModels({
+        request_id: crypto.randomUUID(),
+        input: {
+          provider_type: provider,
+          base_url: resolvedBaseUrl,
+          // 编辑模式 Key 留空时由 main 进程回退到已保存渠道密钥
+          api_key: apiKey.trim(),
+          channel_id: mode === 'edit' ? channelId : undefined,
+        },
+      })
+      .then((result) => {
+        if (result.ok) {
+          const models = result.data.models
+          if (models.length === 0) {
+            setFetchMsg('没有拉取到模型，可手动填写')
+            return
+          }
+          // 合并进模型文本：保留已有手填项，追加新拉取项（按名称去重）
+          const existing = new Set(modelsText.split(',').map((s) => s.trim()).filter(Boolean))
+          const fresh = models.map((m) => m.name).filter((n) => !existing.has(n))
+          setModelsText([...existing, ...fresh].join(', '))
+          setFetchMsg(`成功获取 ${models.length} 个模型：${models.map((m) => m.name).slice(0, 3).join('、')}${models.length > 3 ? '…' : ''}`)
+        } else {
+          setFetchMsg(result.error?.user_visible_message ?? '拉取失败，请重试。')
+        }
+      })
+      .catch(() => setFetchMsg('拉取失败，请重试。'))
+      .finally(() => setFetching(false))
+  }, [mode, channelId, provider, resolvedBaseUrl, apiKey, modelsText])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!canSave) return
 
-    const models: ChannelModel[] = modelsText
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((modelName, i) => ({
-        id: `${provider}-${modelName}-${i}`,
-        name: modelName,
-        enabled: true,
-      }))
+    const models = textToModels(provider, modelsText)
 
-    onSave({
-      name: name.trim(),
-      provider_type: provider,
-      base_url: resolvedBaseUrl,
-      api_key: apiKey.trim(),
-      models: models.length > 0 ? models : undefined,
-    })
+    if (mode === 'create') {
+      onSave({
+        name: name.trim(),
+        provider_type: provider,
+        base_url: resolvedBaseUrl,
+        api_key: apiKey.trim(),
+        models: models.length > 0 ? models : undefined,
+      })
+    } else if (onUpdate && channelId) {
+      onUpdate(channelId, {
+        name: name.trim(),
+        provider_type: provider,
+        base_url: resolvedBaseUrl,
+        models: models.length > 0 ? models : [],
+        // 留空表示不更新密钥
+        api_key: apiKey.trim() || undefined,
+      })
+    }
   }
 
   const labelStyle: React.CSSProperties = {
@@ -229,10 +339,10 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ onSave, onCancel, saving }) =
         <select
           style={inputStyle}
           value={provider}
-          onChange={(e) => setProvider(e.target.value as ProviderType)}
+          onChange={(e) => handleProviderChange(e.target.value as ProviderType)}
         >
-          {PROVIDERS.map((p) => (
-            <option key={p.value} value={p.value}>{p.label}</option>
+          {PROVIDER_ORDER.map((p) => (
+            <option key={p} value={p}>{PROVIDER_LABELS[p]}</option>
           ))}
         </select>
       </div>
@@ -244,19 +354,19 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ onSave, onCancel, saving }) =
           style={inputStyle}
           value={baseUrl}
           onChange={(e) => setBaseUrl(e.target.value)}
-          placeholder={DEFAULT_BASE_URLS[provider] ? `留空使用 ${DEFAULT_BASE_URLS[provider]}` : '自定义提供商请填写 Base URL'}
+          placeholder={PROVIDER_DEFAULT_URLS[provider] ? `留空使用 ${PROVIDER_DEFAULT_URLS[provider]}` : '自定义提供商请填写 Base URL'}
         />
       </div>
 
       {/* API Key */}
       <div>
-        <label style={labelStyle}>API Key *</label>
+        <label style={labelStyle}>API Key {mode === 'create' ? '*' : ''}</label>
         <input
           style={{ ...inputStyle, fontFamily: 'monospace' }}
           type="password"
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
-          placeholder="sk-…"
+          placeholder={mode === 'edit' ? '留空则不更新密钥' : 'sk-…'}
         />
         <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: 4 }}>
           Key 将使用系统安全存储加密，不会明文保存
@@ -265,7 +375,7 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ onSave, onCancel, saving }) =
 
       {/* 模型列表 */}
       <div>
-        <label style={labelStyle}>可用模型（逗号分隔，可选）</label>
+        <label style={labelStyle}>可用模型（逗号分隔）</label>
         <input
           style={inputStyle}
           value={modelsText}
@@ -274,10 +384,86 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ onSave, onCancel, saving }) =
         />
         {modelsText.trim().length > 0 && (
           <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: 4 }}>
-            将添加 {modelsText.split(',').filter((s) => s.trim()).length} 个模型
+            当前 {modelsText.split(',').filter((s) => s.trim()).length} 个模型
           </p>
         )}
       </div>
+
+      {/* 测试连接 / 拉取模型 */}
+      <div style={{ display: 'flex', gap: 'var(--space-3)' }}>
+        <button
+          type="button"
+          onClick={handleTest}
+          disabled={!canProbe}
+          style={{
+            flex: 1,
+            height: 36,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 'var(--space-2)',
+            fontSize: 'var(--font-size-sm)',
+            fontWeight: 600,
+            color: canProbe ? 'var(--color-text)' : 'var(--color-text-muted)',
+            background: 'var(--glass-bg-soft)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-sm)',
+            cursor: canProbe ? 'pointer' : 'not-allowed',
+            fontFamily: 'inherit',
+            opacity: canProbe ? 1 : 0.5,
+          }}
+        >
+          <IconPlug size={15} />
+          {testing ? '测试中…' : '测试连接'}
+        </button>
+        <button
+          type="button"
+          onClick={handleFetchModels}
+          disabled={!canProbe}
+          style={{
+            flex: 1,
+            height: 36,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 'var(--space-2)',
+            fontSize: 'var(--font-size-sm)',
+            fontWeight: 600,
+            color: canProbe ? 'var(--color-text)' : 'var(--color-text-muted)',
+            background: 'var(--glass-bg-soft)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-sm)',
+            cursor: canProbe ? 'pointer' : 'not-allowed',
+            fontFamily: 'inherit',
+            opacity: canProbe ? 1 : 0.5,
+          }}
+        >
+          <IconRefresh size={15} />
+          {fetching ? '拉取中…' : '拉取模型'}
+        </button>
+      </div>
+
+      {/* 测试 / 拉取结果 */}
+      {(testMsg || fetchMsg) && (
+        <div
+          role="status"
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 'var(--space-2)',
+            padding: 'var(--space-3) var(--space-4)',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: 'var(--font-size-sm)',
+            fontWeight: 500,
+            color: (testMsg && !testMsg.ok) ? '#991B1B' : '#065F46',
+            background: (testMsg && !testMsg.ok) ? '#FEF2F2' : '#ECFDF5',
+            border: `1px solid ${(testMsg && !testMsg.ok) ? '#FECACA' : '#A7F3D0'}`,
+          }}
+        >
+          {(testMsg && !testMsg.ok) ? <IconAlertTriangle size={16} /> : <IconCheck size={16} />}
+          <span>{testMsg?.message ?? fetchMsg}</span>
+        </div>
+      )}
 
       {/* 操作按钮 */}
       <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end', marginTop: 'var(--space-2)' }}>
@@ -320,7 +506,7 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ onSave, onCancel, saving }) =
             boxShadow: canSave ? '0 4px 12px -2px rgba(124,58,237,0.35)' : 'none',
           }}
         >
-          {saving ? '保存中…' : '保存渠道'}
+          {saving ? '保存中…' : (mode === 'edit' ? '保存修改' : '保存渠道')}
         </button>
       </div>
     </form>
@@ -341,6 +527,7 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
   const [loading, setLoading] = useAtom(channelsLoadingAtom)
   const [testResult, setTestResult] = useAtom(channelTestResultAtom)
   const [showForm, setShowForm] = useState(false)
+  const [editingChannel, setEditingChannel] = useState<Channel | null>(null)
   const [saving, setSaving] = useState(false)
   const [testingId, setTestingId] = useState<string | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
@@ -389,6 +576,7 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
         ])
         setSaving(false)
         setShowForm(false)
+        setEditingChannel(null)
         return
       }
       setSaving(true)
@@ -398,6 +586,7 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
           if (result.ok) {
             setChannels((prev) => [...prev, result.data])
             setShowForm(false)
+            setEditingChannel(null)
           } else {
             setTestResult({ channelId: '', ok: false, message: result.error?.user_visible_message ?? '渠道创建失败，请重试。' })
           }
@@ -409,6 +598,44 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
     },
     [setChannels, setTestResult],
   )
+
+  // ==================== 更新渠道（编辑） ====================
+
+  const handleUpdateChannel = useCallback(
+    (channelId: string, input: ChannelUpdateInput) => {
+      const api = window.electronAPI
+      if (!api?.channels?.update) {
+        // demo / 无 Electron 环境：本地更新
+        setChannels((prev) => prev.map((c) => c.id === channelId ? { ...c, ...input, api_key: '***' } : c))
+        setShowForm(false)
+        setEditingChannel(null)
+        return
+      }
+      setSaving(true)
+      void api.channels
+        .update({ request_id: crypto.randomUUID(), channel_id: channelId, input })
+        .then((result) => {
+          if (result.ok) {
+            setChannels((prev) => prev.map((c) => c.id === channelId ? result.data : c))
+            setShowForm(false)
+            setEditingChannel(null)
+          } else {
+            setTestResult({ channelId, ok: false, message: result.error?.user_visible_message ?? '渠道更新失败，请重试。' })
+          }
+        })
+        .catch(() => {
+          setTestResult({ channelId, ok: false, message: '渠道更新失败，请重试。' })
+        })
+        .finally(() => setSaving(false))
+    },
+    [setChannels, setTestResult],
+  )
+
+  const handleEditChannel = useCallback((channel: Channel) => {
+    setEditingChannel(channel)
+    setTestResult(null)
+    setShowForm(true)
+  }, [setTestResult])
 
   // ==================== 测试连接 ====================
 
@@ -624,7 +851,10 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
               添加一个模型渠道来让向导 Agent 开始工作
             </p>
             <button
-              onClick={() => setShowForm(true)}
+              onClick={() => {
+                setEditingChannel(null)
+                setShowForm(true)
+              }}
               style={{
                 height: 38,
                 padding: '0 var(--space-5)',
@@ -684,7 +914,7 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
                         borderRadius: 'var(--radius-full)',
                       }}
                     >
-                      {PROVIDER_LABEL_MAP[channel.provider_type]}
+                      {PROVIDER_LABELS[channel.provider_type] ?? channel.provider_type}
                     </span>
                   </div>
                   <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
@@ -716,6 +946,35 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
                     }}
                   >
                     {testingId === channel.id ? '测试中…' : '测试连接'}
+                  </button>
+
+                  <button
+                    onClick={() => handleEditChannel(channel)}
+                    title="编辑渠道"
+                    style={{
+                      width: 32,
+                      height: 32,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: 'var(--radius-sm)',
+                      color: 'var(--color-text-muted)',
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      transition: 'all var(--transition-fast)',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'var(--color-quick-soft)'
+                      e.currentTarget.style.color = 'var(--color-quick)'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'transparent'
+                      e.currentTarget.style.color = 'var(--color-text-muted)'
+                    }}
+                  >
+                    <IconEdit size={16} />
                   </button>
 
                   {deleteConfirmId === channel.id ? (
@@ -794,7 +1053,10 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
         {!showForm && channels.length > 0 && (
           <div style={{ paddingTop: 'var(--space-2)' }}>
             <button
-              onClick={() => setShowForm(true)}
+              onClick={() => {
+                setEditingChannel(null)
+                setShowForm(true)
+              }}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -824,7 +1086,7 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
           </div>
         )}
 
-        {/* ── 新增表单 ── */}
+        {/* ── 新增/编辑表单 ── */}
         {showForm && (
           <div
             style={{
@@ -844,10 +1106,13 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
               }}
             >
               <h3 style={{ fontSize: 'var(--font-size-sm)', fontWeight: 700, color: 'var(--color-text)', margin: 0 }}>
-                新增模型渠道
+                {editingChannel ? `编辑渠道：${editingChannel.name}` : '新增模型渠道'}
               </h3>
               <button
-                onClick={() => setShowForm(false)}
+                onClick={() => {
+                  setShowForm(false)
+                  setEditingChannel(null)
+                }}
                 disabled={saving}
                 aria-label="关闭"
                 style={{
@@ -868,8 +1133,20 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
               </button>
             </div>
             <ChannelForm
+              mode={editingChannel ? 'edit' : 'create'}
+              channelId={editingChannel?.id}
+              initial={editingChannel ? {
+                name: editingChannel.name,
+                provider: editingChannel.provider_type,
+                baseUrl: editingChannel.base_url,
+                models: editingChannel.models,
+              } : undefined}
               onSave={handleCreateChannel}
-              onCancel={() => setShowForm(false)}
+              onUpdate={handleUpdateChannel}
+              onCancel={() => {
+                setShowForm(false)
+                setEditingChannel(null)
+              }}
               saving={saving}
             />
           </div>

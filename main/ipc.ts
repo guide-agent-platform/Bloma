@@ -9,6 +9,9 @@ import type {
   ChannelCreateEnvelope,
   ChannelDeleteEnvelope,
   ChannelTestEnvelope,
+  ChannelTestDirectEnvelope,
+  ChannelUpdateEnvelope,
+  FetchModelsEnvelope,
   ConfirmSketchInput,
   DocumentSyncInput,
   PermissionResponseInput,
@@ -30,7 +33,7 @@ import { runIterationTask, runMvpTask, runPostMvpTestingFlow, setProgrammingEven
 import { assertToolAllowed, resolvePermission, setPermissionRequestPublisher } from './permission-service'
 import { archiveProject, confirmSketch, createProject, findProject, listProjects, submitCorrection, upgradeProject } from './project-service'
 import { listSessions, loadMessages } from './session-service'
-import { createChannel, deleteChannel, listChannels, testChannel } from './channel-manager'
+import { createChannel, deleteChannel, fetchModels, listChannels, testChannel, testChannelDirect, updateChannel } from './channel-manager'
 import { syncDocuments } from './document-engine'
 import {
   createSnapshot,
@@ -324,10 +327,35 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     })
   })
 
+  ipcMain.handle(IPC_CHANNELS.CHANNEL_UPDATE, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<ChannelUpdateEnvelope>(payload, ['channel_id', 'input'])
+      const updated = updateChannel(input.channel_id, input.input)
+      if (!updated) {
+        throw new Error('CHANNEL_NOT_FOUND: channel does not exist')
+      }
+      return updated
+    })
+  })
+
   ipcMain.handle(IPC_CHANNELS.CHANNEL_TEST, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<ChannelTestEnvelope>(payload, ['channel_id'])
       return testChannel(input.channel_id)
+    })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.CHANNEL_TEST_DIRECT, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<ChannelTestDirectEnvelope>(payload, ['input'])
+      return testChannelDirect(input.input)
+    })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.CHANNEL_FETCH_MODELS, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<FetchModelsEnvelope>(payload, ['input'])
+      return fetchModels(input.input)
     })
   })
 

@@ -215,6 +215,7 @@ describe('AgentOrchestrator · A2-14a 真实模型流式 + 多轮历史', () => 
     setRetrySleepForTests(async () => undefined)
     setSDKQueryForTests(defaultTestQuery)
     vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
   })
 
   it('流式 SSE 多 delta 逐条发布，并在 JSONL 合并为一条助手消息', async () => {
@@ -260,7 +261,7 @@ describe('AgentOrchestrator · A2-14a 真实模型流式 + 多轮历史', () => 
       'utf8',
     )
 
-    let requestBody: { stream: boolean; messages: unknown[]; max_tokens: number } | undefined
+    let requestBody: { stream: boolean; messages: unknown[]; max_tokens: number; system?: string } | undefined
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
       requestBody = JSON.parse(String(init.body)) as typeof requestBody
       return sseResponse(['event: message_stop\ndata: {"type":"message_stop"}\n\n'])
@@ -277,11 +278,9 @@ describe('AgentOrchestrator · A2-14a 真实模型流式 + 多轮历史', () => 
     })
 
     expect(requestBody?.stream).toBe(true)
+    // Anthropic Messages API：system 放顶层 system 字段，messages 只允许 user/assistant
+    expect(requestBody?.system).toContain('当前项目阶段：generating_mvp')
     expect(requestBody?.messages).toEqual([
-      expect.objectContaining({
-        role: 'system',
-        content: expect.stringContaining('当前项目阶段：generating_mvp'),
-      }),
       { role: 'user', content: '第一轮问题' },
       { role: 'assistant', content: '第一轮回答' },
       { role: 'user', content: '第二轮问题' },
@@ -322,6 +321,85 @@ describe('AgentOrchestrator · A2-14a 真实模型流式 + 多轮历史', () => 
     expect(assistantTurns.some((turn) => turn.content.includes('还没好'))).toBe(false)
     // 用户轮次保留，只是删掉冗余的「还没好」助手轮次
     expect((requestBody?.messages ?? []).filter((message) => message.role === 'user').length).toBe(3)
+  })
+
+  it('BLOMA_SHOW_THINKING=1 时请求体携带 thinking 且 budget_tokens < max_tokens', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-test-'))
+    process.env.PROMA_HOME = home
+    vi.stubEnv('BLOMA_SHOW_THINKING', '1')
+
+    let requestBody: { stream: boolean; thinking?: { type: string; budget_tokens: number }; max_tokens: number } | undefined
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+      requestBody = JSON.parse(String(init.body)) as typeof requestBody
+      return sseResponse(['event: message_stop\ndata: {"type":"message_stop"}\n\n'])
+    }))
+
+    await runAgent({
+      request_id: 'req-think',
+      session_id: 'session-think',
+      project_id: 'project-think',
+      content: '测试思考',
+      mode: 'quick',
+      current_stage: 'generating_mvp',
+      channel_id: 'test-channel',
+    })
+
+    expect(requestBody?.stream).toBe(true)
+    expect(requestBody?.thinking?.type).toBe('enabled')
+    expect(requestBody?.thinking?.budget_tokens).toBeGreaterThan(0)
+    expect(requestBody?.thinking?.budget_tokens).toBeLessThan(requestBody?.max_tokens ?? 0)
+  })
+
+  it('BLOMA_SHOW_THINKING=1 时 thinking_delta 打印到主进程 stdout', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-test-'))
+    process.env.PROMA_HOME = home
+    vi.stubEnv('BLOMA_SHOW_THINKING', '1')
+
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(sseResponse([
+      'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"用户可能在思考记账的分类方式"}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"好的"}}\n\n',
+      'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+    ])))
+
+    await runAgent({
+      request_id: 'req-think2',
+      session_id: 'session-think2',
+      project_id: 'project-think2',
+      content: '测试思考输出',
+      mode: 'quick',
+      current_stage: 'generating_mvp',
+      channel_id: 'test-channel',
+    })
+
+    expect(spy).toHaveBeenCalled()
+    const printed = spy.mock.calls.map((call) => String(call[0]))
+    expect(printed.some((line) => line.includes('[thinking:') && line.includes('用户可能在思考记账的分类方式'))).toBe(true)
+    spy.mockRestore()
+  })
+
+  it('未设 BLOMA_SHOW_THINKING 时请求体不含 thinking（默认行为不变）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-test-'))
+    process.env.PROMA_HOME = home
+    vi.unstubAllEnvs()
+
+    let requestBody: { stream: boolean; thinking?: unknown } | undefined
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+      requestBody = JSON.parse(String(init.body)) as typeof requestBody
+      return sseResponse(['event: message_stop\ndata: {"type":"message_stop"}\n\n'])
+    }))
+
+    await runAgent({
+      request_id: 'req-nothink',
+      session_id: 'session-nothink',
+      project_id: 'project-nothink',
+      content: '测试默认',
+      mode: 'quick',
+      current_stage: 'generating_mvp',
+      channel_id: 'test-channel',
+    })
+
+    expect(requestBody?.thinking).toBeUndefined()
   })
 })
 

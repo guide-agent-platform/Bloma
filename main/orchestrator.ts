@@ -19,6 +19,8 @@ import { handleGuideMessage } from './guide-agent-service'
 import { READY_COMPLETION_COPY, resolveBlockedDecision, resumeBlockedFlow, runIterationTask, setProgrammingEventPublisher } from './programming-orchestrator'
 import { findProject } from './project-service'
 import { recordSessionActivity } from './session-service'
+import { isThinkingLogEnabled, logThinking } from './thinking-log'
+import { extractErrorMessage } from './channel-test-error'
 
 export type StreamPublisher = (event: AgentEvent) => void
 
@@ -106,13 +108,14 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     const channel = input.channel_id
       ? getChannelByIdRaw(input.channel_id)
       : getFirstEnabledChannel()
-    const model = channel?.models.find((item) => item.enabled)?.id ?? 'claude-sonnet-4-6'
+    // 模型名用 name（真实模型 ID）：id 是渠道内唯一标识（多 Agent / 识图-编程模型区分用），不能传给 API
+    const model = channel?.models.find((item) => item.enabled)?.name ?? 'claude-sonnet-4-6'
     let env: Record<string, string> | undefined
     let channelKeyUnusable = false
     if (channel) {
       try {
         const apiKey = decryptApiKey(channel.api_key)
-        env = buildSdkEnv(apiKey, channel.base_url, model)
+        env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
       } catch {
         // 渠道密钥不可解密（safeStorage 密钥变更 / 跨平台迁移的 ciphertext）：
         // 该渠道视为不可用，引导路径回退规则路由，编程路径报可读错误。
@@ -501,7 +504,37 @@ async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions)
     throw new Error('CHANNEL_NOT_FOUND: configure a model channel before using the SDK')
   }
   const baseUrl = (options.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/+$/, '')
-  const messages = [...(options.history ?? []), { role: 'user', content: prompt }]
+
+  // Anthropic Messages API 的 messages 数组只允许 user/assistant 角色，
+  // system 必须放顶层 system 字段。把 history 里的 system 消息提取到顶层，
+  // 否则 messages 含 role:'system' 会触发 400（MVP 生成的 history 首条就是 system）。
+  const history = options.history ?? []
+  const systemText = history
+    .filter((turn) => turn.role === 'system')
+    .map((turn) => turn.content)
+    .filter(Boolean)
+    .join('\n')
+  const messages = [
+    ...history.filter((turn) => turn.role !== 'system'),
+    { role: 'user' as const, content: prompt },
+  ]
+
+  // 开发插件：BLOMA_SHOW_THINKING=1 时启用 extended thinking 并把思考打印到终端。
+  // Anthropic 要求 max_tokens > budget_tokens；预算取一半（封顶 1024，下限 256）。
+  const showThinking = isThinkingLogEnabled()
+  const body: Record<string, unknown> = {
+    model: options.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
+    max_tokens: options.maxTokens ?? 1200,
+    stream: true,
+    messages,
+  }
+  if (systemText) body.system = systemText
+  if (showThinking) {
+    const maxTokens = options.maxTokens ?? 1200
+    const budget = Math.min(1024, Math.floor(maxTokens / 2))
+    body.thinking = { type: 'enabled', budget_tokens: Math.max(256, budget) }
+  }
+
   const response = await fetch(`${baseUrl}/v1/messages`, {
     method: 'POST',
     headers: {
@@ -509,15 +542,23 @@ async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions)
       'anthropic-version': '2023-06-01',
       'x-api-key': apiKey,
     },
-    body: JSON.stringify({
-      model: options.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
-      max_tokens: options.maxTokens ?? 1200,
-      stream: true,
-      messages,
-    }),
+    body: JSON.stringify(body),
     signal: options.signal,
   })
   if (!response.ok) {
+    // 诊断增强：读取有界响应体并把可读原因打进主进程日志（仅日志，不进 SDKMessage/UI）。
+    // Error message 保持原样，避免 renderer error 事件暴露技术细节。
+    let detail = ''
+    try {
+      const text = (await response.text()).slice(0, 2000)
+      detail = extractErrorMessage(text)
+    } catch {
+      detail = ''
+    }
+    console.error(
+      `[anthropicMessagesQuery] model request failed: HTTP ${response.status}`
+      + (detail ? ` — ${detail}` : ''),
+    )
     throw Object.assign(new Error(`SDK request failed with ${response.status}`), { statusCode: response.status })
   }
   if (!response.body) throw new Error('SDK request body unavailable')
@@ -542,10 +583,24 @@ async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions)
         if (!dataLine) continue
         const data = dataLine.slice(5).trim()
         if (!data || data === '[DONE]') continue
-        let parsed: { type?: string; delta?: { type?: string; text?: string } }
+        let parsed: {
+          type?: string
+          delta?: { type?: string; text?: string; thinking?: string }
+          content_block?: { type?: string }
+        }
         try {
           parsed = JSON.parse(data) as typeof parsed
         } catch {
+          continue
+        }
+        // 思考过程增量：仅打印到主进程终端（BLOMA_SHOW_THINKING 时），不进 SDKMessage / 事件 / UI / JSONL
+        if (
+          showThinking &&
+          parsed.type === 'content_block_delta' &&
+          parsed.delta?.type === 'thinking_delta' &&
+          typeof parsed.delta.thinking === 'string'
+        ) {
+          logThinking(options.sessionId, parsed.delta.thinking)
           continue
         }
         if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta' && typeof parsed.delta.text === 'string') {

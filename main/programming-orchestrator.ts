@@ -216,8 +216,9 @@ async function resolveMvp(input: MvpTaskInput, requirements: SketchRequirement[]
   } catch {
     throw new Error('API_KEY_DECRYPT_FAILED: 渠道 api_key 无法解密，请在设置中重新保存该渠道')
   }
-  const model = channel.models.find((item) => item.enabled)?.id ?? 'claude-sonnet-4-6'
-  const env = buildSdkEnv(apiKey, channel.base_url, model)
+  // 模型名用 name（真实模型 ID）：id 是渠道内唯一标识，不能传给 API
+  const model = channel.models.find((item) => item.enabled)?.name ?? 'claude-sonnet-4-6'
+  const env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
   return generateMvpLlm({
     project_id: input.project_id,
     requirements,
