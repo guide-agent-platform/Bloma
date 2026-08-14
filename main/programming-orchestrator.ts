@@ -7,7 +7,8 @@ import { createSnapshot, runSandbox, trackAnalytics } from './platform-services'
 import { generateMvpLlm, type GenerateMvpLlmResult } from './mvp-engine-llm'
 import { buildSdkEnv, decryptApiKey, getChannelByIdRaw, getFirstEnabledChannel } from './channel-manager'
 import { findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
-import { generateSketch, type SketchRequirement } from './sketch-engine'
+import { generateSketch, type GenerateSketchResult, type SketchRequirement } from './sketch-engine'
+import { generateSketchLlm } from './sketch-engine-llm'
 import { readTestReport, runGwtScenarios, writeTestReport, type GwtTestResult } from './gwt-service'
 import { applyRepairPatch, REPAIR_CATEGORY_SUMMARY, runRepairCycle, type RepairCategory } from './repair-engine'
 import { runJudge, type JudgeVerdict } from './judge-engine'
@@ -45,6 +46,8 @@ export interface SketchTaskInput {
   mode: ProjectMode
   prompt: string
   requirements?: SketchRequirement[]
+  channel_id?: string
+  query?: SDKQuery
 }
 
 export interface SketchTaskResult {
@@ -82,7 +85,7 @@ export async function runSketchTask(input: SketchTaskInput): Promise<SketchTaskR
   const requirements = input.requirements?.length
     ? input.requirements
     : [{ id: 'F-001', description: input.prompt }]
-  const sketch = generateSketch({ project_id: input.project_id, requirements, max_pages: 3 })
+  const sketch = await resolveSketch(input, requirements)
   recordSketchGenerated(input.project_id, requirements)
   await allowAutomatedTool('run_project', { project_id: input.project_id }, input.session_id, input.project_id)
   const sandbox = await runSandbox({ request_id: input.request_id, project_id: input.project_id })
@@ -132,6 +135,41 @@ export async function runSketchTask(input: SketchTaskInput): Promise<SketchTaskR
   })
 
   return { preview_url: sandbox.preview_url, snapshot, summary: sketch.summary }
+}
+
+/**
+ * resolveSketch — 草图生成来源分流。
+ *
+ * 渠道可用且调用方传入 query 时走 LLM 草图（generateSketchLlm，无交互纯外观、贴合功能项）；
+ * 否则（无渠道 / 密钥不可解密 / LLM 生成失败）回退确定性模板 generateSketch。
+ * 与 MVP 的「无模板兜底」不同：草图是低成本方向确认，不能因 LLM 故障卡死澄清流程。
+ */
+async function resolveSketch(input: SketchTaskInput, requirements: SketchRequirement[]): Promise<GenerateSketchResult> {
+  const channel = input.channel_id ? getChannelByIdRaw(input.channel_id) : getFirstEnabledChannel()
+  if (!channel || !input.query) {
+    return generateSketch({ project_id: input.project_id, requirements, max_pages: 3 })
+  }
+  let apiKey: string
+  try {
+    apiKey = decryptApiKey(channel.api_key)
+  } catch {
+    return generateSketch({ project_id: input.project_id, requirements, max_pages: 3 })
+  }
+  const model = channel.models.find((item) => item.enabled)?.id ?? 'claude-sonnet-4-6'
+  const env = buildSdkEnv(apiKey, channel.base_url, model)
+  try {
+    return await generateSketchLlm({
+      project_id: input.project_id,
+      requirements,
+      query: input.query,
+      env,
+      sessionId: input.session_id,
+      maxTokens: channel.max_tokens ?? 4000,
+    })
+  } catch {
+    // LLM 草图失败（超时/非 HTML/网络错误）回退模板，不阻断草图产出
+    return generateSketch({ project_id: input.project_id, requirements, max_pages: 3 })
+  }
 }
 
 /**

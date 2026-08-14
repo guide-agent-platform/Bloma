@@ -130,6 +130,8 @@ export async function handleGuideMessage(
       mode: input.mode,
       prompt: cardAnswer.prompt,
       requirements: cardAnswer.requirements,
+      channel_id: input.channel_id,
+      query: model?.query,
     })
     return
   }
@@ -162,6 +164,8 @@ export async function handleGuideMessage(
     mode: input.mode,
     prompt: input.content,
     requirements: ensurePrimaryIntent(route.requirements, primaryIntent),
+    channel_id: input.channel_id,
+    query: model?.query,
   })
 }
 
@@ -228,7 +232,7 @@ async function tryModelDrivenGuide(
     return true
   }
 
-  // generate_sketch：不经 user_decision_required，直接进入草图生成（模板化 runSketchTask）
+  // generate_sketch：不经 user_decision_required，直接进入草图生成（渠道可用走 LLM，否则回退模板）
   await runSketchTask({
     request_id: input.request_id,
     session_id: input.session_id,
@@ -236,6 +240,8 @@ async function tryModelDrivenGuide(
     mode: input.mode,
     prompt: parsed.reply || input.content,
     requirements: ensurePrimaryIntent(parsed.requirements, primaryIntent),
+    channel_id: input.channel_id,
+    query: model.query,
   })
   return true
 }
