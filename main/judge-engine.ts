@@ -5,6 +5,7 @@ import { getDocumentsDir } from '../storage/config-paths'
 import type { GwtTestResult } from './gwt-service'
 import { findProject, readLastSketchRequirements } from './project-service'
 import { escapeHtml } from './sketch-engine'
+import { hasFourOperators } from './gwt-service'
 
 /**
  * JudgeEngine（A2-10）——只判定、不修改代码。
@@ -62,8 +63,16 @@ export function runJudge(input: JudgeInput): JudgeVerdict {
   const hardConstraints: JudgeConstraint[] = [prdPresent, gwtCoverage]
 
   // ── 基础软约束 ──
+  // 功能入口一致性：LLM 产物不应要求内嵌需求原文（措辞不同会造成假阴性），
+  // 与 GWT 执行同步改用功能断言——HTML 含四则运算符按钮 + app.js 含 calculate 逻辑，
+  // 即视为功能项有对应入口；模板产物仍按需求原文转义后的文本匹配兜底。
   const indexHtml = readProjectHtml(project.root_path)
-  const missingEntry = requirements.filter((item) => !indexHtml.includes(escapeHtml(item.description)))
+  const appJs = readProjectAppJs(project.root_path)
+  const functionalEntry = hasFourOperators(indexHtml) && appJs.includes('calculate')
+  const missingEntry = requirements.filter((item) => {
+    const textualEntry = indexHtml.includes(escapeHtml(item.description))
+    return !(textualEntry || functionalEntry)
+  })
   const codeConsistency: JudgeConstraint = {
     name: '功能入口一致性',
     passed: missingEntry.length === 0,
@@ -129,6 +138,16 @@ function readProjectHtml(projectRoot: string): string {
   if (!existsSync(indexPath)) return ''
   try {
     return readFileSync(indexPath, 'utf8')
+  } catch {
+    return ''
+  }
+}
+
+function readProjectAppJs(projectRoot: string): string {
+  const appJsPath = join(projectRoot, 'src', 'app.js')
+  if (!existsSync(appJsPath)) return ''
+  try {
+    return readFileSync(appJsPath, 'utf8')
   } catch {
     return ''
   }

@@ -41,6 +41,7 @@ import type {
   SandboxRunInput,
   SandboxStopInput,
   SnapshotCreateInput,
+  SnapshotListInput,
   SnapshotRollbackInput,
 } from '../shared/types'
 
@@ -83,12 +84,16 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.SANDBOX_RUN, input),
     stop: (input: SandboxStopInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.SANDBOX_STOP, input),
+    restore: (input: SandboxRunInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SANDBOX_RESTORE, input),
   },
   snapshots: {
     create: (input: SnapshotCreateInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_CREATE, input),
     rollback: (input: SnapshotRollbackInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_ROLLBACK, input),
+    list: (input: SnapshotListInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_LIST, input),
   },
   documents: {
     sync: (input: DocumentSyncInput) =>

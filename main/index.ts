@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { registerIpcHandlers } from './ipc'
 import { setSnapshotCaptureProvider } from './platform-services'
+import { MAIN_FRAME_CSP, shouldInjectMainFrameCsp } from './csp'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -85,7 +86,7 @@ app.on('activate', () => {
  */
 function configureContentSecurity(_window: BrowserWindow): void {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    if (details.resourceType !== 'mainFrame') {
+    if (!shouldInjectMainFrameCsp(details.resourceType)) {
       // iframe 子帧 / 脚本 / 样式等：不动响应头，交给各响应自身的 CSP
       callback({ responseHeaders: details.responseHeaders })
       return
@@ -93,17 +94,7 @@ function configureContentSecurity(_window: BrowserWindow): void {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
-        'Content-Security-Policy': [
-          [
-            "default-src 'none'",
-            "script-src 'self'",
-            "style-src 'self' 'unsafe-inline'",
-            "img-src 'self' data: blob:",
-            "font-src 'self'",
-            "connect-src 'self' http://localhost:* https://api.anthropic.com",
-            "frame-src 'self' http://localhost:* http://127.0.0.1:*",
-          ].join('; '),
-        ],
+        'Content-Security-Policy': [MAIN_FRAME_CSP],
       },
     })
   })

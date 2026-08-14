@@ -11,7 +11,7 @@ import { escapeHtml, type SketchRequirement } from './sketch-engine'
  * 模板为自包含纯前端应用（表单/列表/本地状态），
  * 通过 `npm start`（静态服务器）在沙箱内启动，不依赖外部依赖安装。
  *
- * ⚠️ 决策 D1：模板优先；LLM 生成型 MVP 由 A2-14b 承接（Sprint 3）。
+ * ⚠️ 决策 D1：模板优先；LLM 生成型 MVP 已由 A2-14b 落地（Sprint 3，见 mvp-engine-llm.ts），模板保留为失败兜底。
  */
 
 export interface GenerateMvpInput {
@@ -71,7 +71,7 @@ function normalizeRequirements(requirements: SketchRequirement[] | undefined): S
   return [{ id: 'F-001', description: '把用户的想法整理成一个可运行、可操作的功能页面。' }]
 }
 
-function renderPackageJson(projectName: string): string {
+export function renderPackageJson(projectName: string): string {
   const slug = slugify(projectName) || 'bloma-mvp'
   return `${JSON.stringify(
     {
@@ -95,7 +95,7 @@ function slugify(value: string): string {
 }
 
 /** 自包含静态服务器：读取 PORT 环境变量（沙箱注入），带路径穿越防护与 CSP 网络隔离。 */
-function renderStaticServer(): string {
+export function renderStaticServer(): string {
   return `// 自包含静态服务器（Bloma MVP 模板）
 const { createReadStream, existsSync, statSync } = require('node:fs');
 const { createServer } = require('node:http');
@@ -122,7 +122,7 @@ const server = createServer((req, res) => {
   res.writeHead(200, {
     'Content-Type': types[extname(finalPath)] || 'application/octet-stream',
     'Cache-Control': 'no-store',
-    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; font-src 'self'",
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; font-src 'self'",
   });
   createReadStream(finalPath).pipe(res);
 });
@@ -195,7 +195,8 @@ function renderAppJs(): string {
     catch (e) { return []; }
   }
   function saveItems(featureId, items) {
-    localStorage.setItem(KEY_PREFIX + featureId, JSON.stringify(items));
+    try { localStorage.setItem(KEY_PREFIX + featureId, JSON.stringify(items)); }
+    catch (e) { /* 沙箱禁用 localStorage 时静默降级，不中断整段交互 */ }
   }
   function renderList(featureId) {
     var list = document.querySelector('ul.items[data-feature="' + featureId + '"]');

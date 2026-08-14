@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { BrowserWindow, IpcMain } from 'electron'
 import type {
   AgentCancelInput,
@@ -19,12 +20,13 @@ import type {
   SandboxRunInput,
   SandboxStopInput,
   SnapshotCreateInput,
+  SnapshotListInput,
   SnapshotRollbackInput,
 } from '../shared/types'
 import { IPC_CHANNELS } from '../shared/types'
 import { fail, ok } from './api-result'
-import { cancelAgent, runAgent, setAgentStreamPublisher } from './orchestrator'
-import { runMvpTask, runPostMvpTestingFlow, setProgrammingEventPublisher } from './programming-orchestrator'
+import { cancelAgent, getSdkQuery, runAgent, setAgentStreamPublisher } from './orchestrator'
+import { runIterationTask, runMvpTask, runPostMvpTestingFlow, setProgrammingEventPublisher } from './programming-orchestrator'
 import { assertToolAllowed, resolvePermission, setPermissionRequestPublisher } from './permission-service'
 import { archiveProject, confirmSketch, createProject, findProject, listProjects, submitCorrection, upgradeProject } from './project-service'
 import { listSessions, loadMessages } from './session-service'
@@ -32,6 +34,7 @@ import { createChannel, deleteChannel, listChannels, testChannel } from './chann
 import { syncDocuments } from './document-engine'
 import {
   createSnapshot,
+  listSnapshots,
   rollbackSnapshot,
   runSandbox,
   stopSandbox,
@@ -135,6 +138,8 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
           session_id: input.session_id,
           project_id: input.project_id,
           mode: project.mode,
+          channel_id: input.channel_id,
+          query: getSdkQuery(),
         })
           .then((mvp) =>
             runPostMvpTestingFlow({
@@ -145,7 +150,20 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
               preview_url: mvp.preview_url,
             }),
           )
-          .catch(() => undefined)
+          .catch((error) => {
+            // P1：不再静默吞错——MVP 生成/测试链失败时向渲染端发 error 事件，
+            // 让「预览为什么空」可观测，而不是停在空态。
+            const message = error instanceof Error ? error.message : String(error)
+            console.error('[ipc] MVP generation/testing flow failed:', message, error)
+            mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, {
+              event_id: randomUUID(),
+              session_id: input.session_id,
+              project_id: input.project_id,
+              type: 'error',
+              payload: { code: 'SANDBOX_RUN_FAILED', message },
+              created_at: new Date().toISOString(),
+            })
+          })
       }
       return project
     })
@@ -154,7 +172,34 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
   ipcMain.handle(IPC_CHANNELS.PROJECT_SUBMIT_CORRECTION, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<PointCorrectionInput>(payload, ['project_id', 'session_id', 'mode'])
-      return submitCorrection(input)
+      const result = submitCorrection(input)
+
+      // 点选纠错 → 重新生成（Sprint 3 纠错主线接通）：落盘后触发带新需求的 MVP 重新生成。
+      // 只有带明确诉求（user_note / 点选文本）时才重新生成；纯「猜」模式（无文案）保持只落盘。
+      const prompt = extractCorrectionPrompt(input)
+      if (prompt) {
+        const mode = findProject(input.project_id).mode
+        void runIterationTask({
+          request_id: input.request_id,
+          session_id: input.session_id,
+          project_id: input.project_id,
+          mode,
+          prompt,
+          query: getSdkQuery(),
+        }).catch((error) => {
+          const message = error instanceof Error ? error.message : String(error)
+          console.error('[ipc] correction regeneration failed:', message, error)
+          mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, {
+            event_id: randomUUID(),
+            session_id: input.session_id,
+            project_id: input.project_id,
+            type: 'error',
+            payload: { code: 'SANDBOX_RUN_FAILED', message },
+            created_at: new Date().toISOString(),
+          })
+        })
+      }
+      return result
     })
   })
 
@@ -196,6 +241,16 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     })
   })
 
+  ipcMain.handle(IPC_CHANNELS.SANDBOX_RESTORE, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<SandboxRunInput>(payload, ['project_id'])
+      // 恢复路径（P0-2）：项目已产出草图/MVP 文件，但沙箱进程随主进程退出而亡，
+      // 旧端口必死。用默认静态服务器直接重跑并回填 preview_url，不弹权限确认
+      // （该本地项目本就归当前用户所有，命令受 runSandbox 白名单约束）。
+      return runSandbox({ request_id: input.request_id, project_id: input.project_id })
+    })
+  })
+
   ipcMain.handle(IPC_CHANNELS.SNAPSHOT_CREATE, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<SnapshotCreateInput>(payload, ['project_id', 'kind', 'summary', 'health_status'])
@@ -222,6 +277,13 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
         input.project_id,
       )
       return rollbackSnapshot(input)
+    })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SNAPSHOT_LIST, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<SnapshotListInput>(payload, ['project_id'])
+      return { snapshots: listSnapshots(input.project_id) }
     })
   })
 
@@ -330,6 +392,14 @@ function resolvePermissionSession(projectId: string): string {
   } catch {
     return projectId
   }
+}
+
+/** 从点选纠错入参提取可执行的修改诉求；无明确文案（纯猜模式）返回 undefined。 */
+function extractCorrectionPrompt(input: PointCorrectionInput): string | undefined {
+  const note = input.user_note?.trim()
+  if (note) return note
+  const textContent = input.context?.text_content?.trim()
+  return textContent || undefined
 }
 
 function requireFields<T extends { request_id: string }>(payload: unknown, fields: string[]): T {

@@ -29,6 +29,11 @@ export interface WorkspaceShellProps {
   onToggleFullscreen?: () => void
   onScreenshot?: () => void
   onCorrectionSubmit?: (payload: { position: { x: number; y: number }; userNote: string; fallbackMode: boolean }) => void
+  /** 确认草图 → 生成完整功能（问题 A / P0-1） */
+  onConfirmSketch?: () => void
+  confirming?: boolean
+  /** iframe 加载失败（沙箱端口失效）时回调 */
+  onPreviewError?: () => void
 
   /* === TimelinePanel props === */
   onRollback?: (snapshot: Snapshot) => void
@@ -106,6 +111,9 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
           onToggleFullscreen={props.onToggleFullscreen}
           onScreenshot={props.onScreenshot}
           onCorrectionSubmit={props.onCorrectionSubmit}
+          onConfirmSketch={props.onConfirmSketch}
+          confirming={props.confirming}
+          onPreviewError={props.onPreviewError}
         />
       </div>
 

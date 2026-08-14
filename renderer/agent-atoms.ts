@@ -151,6 +151,10 @@ export function setupGlobalAgentListeners(): () => void {
     if (event.type === 'sketch_ready' || event.type === 'mvp_ready') {
       const url = typeof event.payload.preview_url === 'string' ? event.payload.preview_url : null
       if (url) store.set(previewUrlAtom, url)
+      const snapshotId = typeof event.payload.snapshot_id === 'string' ? event.payload.snapshot_id : null
+      if (snapshotId) store.set(currentSnapshotIdAtom, snapshotId)
+      // 时间轴数据源：后端每次落新快照即重新拉取快照列表，避免胶片条永远空
+      if (event.project_id) void loadSnapshots(event.project_id)
     }
 
     // 终态事件：将本次运行累积的流式回复沉淀为一条助手消息，
@@ -247,6 +251,9 @@ export const stageIndicatorLabelAtom = atom<string>('选择模式')
 
 /** 最近一次 sketch_ready / mvp_ready 事件带回的沙箱预览地址；null = 尚无真实预览 */
 export const previewUrlAtom = atom<string | null>(null)
+
+/** 最近一次 sketch_ready / mvp_ready 事件带回的快照 id；null = 尚无快照（供「确认草图」回传） */
+export const currentSnapshotIdAtom = atom<string | null>(null)
 
 /** 全局用户可见错误 */
 export const globalUserErrorAtom = atom<string | null>(null)
@@ -358,6 +365,22 @@ export async function loadSessionHistory(sessionId: string): Promise<void> {
   })
   if (!result.ok) return
   store.set(agentMessagesFamily(sessionId), result.data.messages)
+}
+
+/**
+ * 从磁盘加载项目快照列表并灌入 snapshotsListAtom（时间轴胶片条的数据源）。
+ * 无 electronAPI/snapshots.list 环境时静默跳过（兼容 demo 与测试）。
+ */
+export async function loadSnapshots(projectId: string): Promise<void> {
+  const api = window.electronAPI?.snapshots
+  const store = window.__jotai_store__
+  if (!api?.list || !store) return
+  const result = await api.list({
+    request_id: crypto.randomUUID(),
+    project_id: projectId,
+  })
+  if (!result.ok) return
+  store.set(snapshotsListAtom, result.data.snapshots)
 }
 
 /** 清除指定权限请求 */

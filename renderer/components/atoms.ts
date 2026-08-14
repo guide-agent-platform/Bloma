@@ -40,9 +40,9 @@ export {
   networkOnlineAtom, stageIndicatorLabelAtom, globalUserErrorAtom, upgradeConfirmVisibleAtom,
   correctionModalVisibleAtom, correctionUserNoteAtom, correctionContextAtom,
   snapshotsListAtom, isQuickModeAtom, isLongtermModeAtom, documentPanelVisibleAtom,
-  hasActiveStreamAtom, canUpgradeAtom, previewUrlAtom, STAGE_LABEL_MAP,
+  hasActiveStreamAtom, canUpgradeAtom, previewUrlAtom, currentSnapshotIdAtom, STAGE_LABEL_MAP,
   appendMessageToSession, clearPermissionRequest, resetProjectState,
-  loadAgentSessions, loadSessionHistory,
+  loadAgentSessions, loadSessionHistory, loadSnapshots,
 } from '../agent-atoms'
 
 export const workspaceWaitingAtom = atom<boolean>(false)

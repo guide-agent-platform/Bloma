@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -71,5 +71,29 @@ describe('Judge review trigger and return counts (A2-11)', () => {
     expect(result.verdict.verdict).toBe('pass')
     expect(findProject(project.project_id).current_stage).toBe('ready')
     expect(findProject(project.project_id).judge_return_count ?? 0).toBe(0)
+  })
+
+  it('MVP 完成到 ready 时主动下发「完成」助手消息（落盘 + message_delta + completed）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-judge-complete-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+    syncDocuments({ request_id: 'req-sync', session_id: 'session-complete', project_id: project.project_id, checkpoint: 'mvp_before_generation' })
+    writeFileSync(join(project.root_path, 'index.html'), '<p>记录收入与支出</p>', 'utf8')
+
+    const events: Array<{ type: string; payload: Record<string, unknown> }> = []
+    setProgrammingEventPublisher((event) => events.push({ type: event.type, payload: event.payload as Record<string, unknown> }))
+
+    await runJudgeReview({ request_id: 'req-judge', session_id: 'session-complete', project_id: project.project_id })
+
+    // 主动完成通知：message_delta 上屏 + completed 收尾，消除「用户不知道完成了」的感知断裂
+    const delta = events.find((event) => event.type === 'message_delta')
+    expect(delta).toBeTruthy()
+    expect(String(delta?.payload.text ?? '')).toContain('已经生成好了')
+    expect(events.some((event) => event.type === 'completed')).toBe(true)
+
+    // 落盘：会话 JSONL 里有对应助手消息（回访恢复时对话完整）
+    const jsonl = readFileSync(join(home, 'agent-sessions', 'session-complete.jsonl'), 'utf8')
+    expect(jsonl).toContain('已经生成好了')
   })
 })
