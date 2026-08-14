@@ -41,7 +41,7 @@ export {
   correctionModalVisibleAtom, correctionUserNoteAtom, correctionContextAtom,
   snapshotsListAtom, isQuickModeAtom, isLongtermModeAtom, documentPanelVisibleAtom,
   hasActiveStreamAtom, canUpgradeAtom, previewUrlAtom, currentSnapshotIdAtom, STAGE_LABEL_MAP,
-  appendMessageToSession, clearPermissionRequest, resetProjectState,
+  appendMessageToSession, markDecisionConsumed, clearPermissionRequest, resetProjectState,
   loadAgentSessions, loadSessionHistory, loadSnapshots,
 } from '../agent-atoms'
 

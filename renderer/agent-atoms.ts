@@ -85,6 +85,17 @@ export const agentStreamStateFamily = atomFamily((sessionId: string) =>
   }),
 )
 
+/**
+ * 决策卡片消费标记（per session）——修复「选了选项卡片还赖着不走」。
+ *
+ * 卡片是否显示由 `useUserDecisionCards` 从 events 反推（扫到 user_decision_required
+ * 就显示，扫到 sketch_ready 才隐藏）。但草图走 LLM 后，从「用户点选」到「sketch_ready
+ * 事件到达」有数秒到数十秒空窗，events 里最新仍是旧的 user_decision_required，卡片不消失，
+ * 用户误以为没生效、再点一次就撞 AGENT_SESSION_BUSY。这个标记让点选动作立即消费卡片，
+ * 不依赖后端事件时序；新一轮 user_decision_required 到达时重置，让新问题能重新弹出。
+ */
+export const decisionConsumedFamily = atomFamily((_sessionId: string) => atom(false))
+
 // =========================================================================
 // 3. 消息列表（atomFamily）— 对齐 A
 // =========================================================================
@@ -173,6 +184,11 @@ export function setupGlobalAgentListeners(): () => void {
           },
         ])
       }
+    }
+
+    // 新一轮决策需求到达 → 重置消费标记，让新卡片能重新弹出
+    if (event.type === 'user_decision_required') {
+      store.set(decisionConsumedFamily(event.session_id), false)
     }
 
     const streamAtom = agentStreamStateFamily(event.session_id)
@@ -324,6 +340,13 @@ export function appendMessageToSession(
   store.set(messagesAtom, (prev) => [...prev, message])
 }
 
+/** 标记当前会话的决策卡片已被消费（用户已点选），立即隐藏卡片。 */
+export function markDecisionConsumed(sessionId: string): void {
+  const store = window.__jotai_store__
+  if (!store) return
+  store.set(decisionConsumedFamily(sessionId), true)
+}
+
 /** 将后端会话索引记录映射为 renderer 侧会话元数据 */
 function toSessionMeta(record: AgentSessionRecord): AgentSessionMeta {
   return {
@@ -336,7 +359,7 @@ function toSessionMeta(record: AgentSessionRecord): AgentSessionMeta {
 
 /**
  * 拉取会话索引并灌入 agentSessionsAtom（回访恢复时调用）。
- * 无 electronAPI/agent.listSessions 环境时静默跳过（兼容 demo 与测试）。
+ * 无 electronAPI/agent.listSessions 环境时静默跳过（兼容测试环境）。
  */
 export async function loadAgentSessions(projectId?: string): Promise<void> {
   const api = window.electronAPI?.agent
@@ -352,7 +375,7 @@ export async function loadAgentSessions(projectId?: string): Promise<void> {
 
 /**
  * 从磁盘加载历史消息并灌入对应会话的 agentMessagesFamily（回访恢复时调用）。
- * 无 electronAPI/agent.loadMessages 环境时静默跳过（兼容 demo 与测试）。
+ * 无 electronAPI/agent.loadMessages 环境时静默跳过（兼容测试环境）。
  */
 export async function loadSessionHistory(sessionId: string): Promise<void> {
   const api = window.electronAPI?.agent
@@ -369,7 +392,7 @@ export async function loadSessionHistory(sessionId: string): Promise<void> {
 
 /**
  * 从磁盘加载项目快照列表并灌入 snapshotsListAtom（时间轴胶片条的数据源）。
- * 无 electronAPI/snapshots.list 环境时静默跳过（兼容 demo 与测试）。
+ * 无 electronAPI/snapshots.list 环境时静默跳过（兼容测试环境）。
  */
 export async function loadSnapshots(projectId: string): Promise<void> {
   const api = window.electronAPI?.snapshots

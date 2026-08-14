@@ -36,6 +36,7 @@ import type { AgentStreamState } from '../agent-atoms'
 import {
   activeAgentSessionIdAtom,
   agentStreamStateFamily,
+  decisionConsumedFamily,
 } from '../agent-atoms'
 import type { AgentEvent } from '../../shared/types'
 
@@ -128,11 +129,16 @@ export function useUserDecisionCards(): CardOption[] | null {
   const streamState = useAtomValue(
     sessionId ? agentStreamStateFamily(sessionId) : nullStreamFallback,
   )
+  const consumed = useAtomValue(
+    sessionId ? decisionConsumedFamily(sessionId) : atom(false),
+  )
 
   return useMemo(() => {
     if (!sessionId || !streamState) return null
+    // 用户已点选（consumed=true）→ 立即隐藏卡片，不等 sketch_ready（草图走 LLM 有空窗）
+    if (consumed) return null
     return extractCardOptions(streamState.events)
-  }, [sessionId, streamState])
+  }, [sessionId, streamState, consumed])
 }
 
 // =========================================================================
