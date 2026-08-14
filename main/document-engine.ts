@@ -155,6 +155,37 @@ export function buildPrdBackplane(
   }
 }
 
+/**
+ * 读取 PRD 背板（prd.json），作为裁判/意图识别的唯一需求事实源。
+ *
+ * - 已冻结（sketch_confirmed 写过 prd.json）时直接读盘；
+ * - 无 prd.json（旧数据 / 仅走到 mvp_before_generation）时按最后草图需求忠实重建，
+ *   且**不填默认项**——让「PRD 核心功能项为空」能被如实判退回。
+ */
+export function readPrdBackplane(projectId: string): PrdBackplane {
+  const project = findProject(projectId)
+  const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+  const path = join(dir, 'prd.json')
+  if (existsSync(path)) {
+    try {
+      const parsed = JSON.parse(readFileSync(path, 'utf8')) as PrdBackplane
+      if (parsed && Array.isArray(parsed.requirements)) return parsed
+    } catch {
+      // 损坏则回退到按当前需求重建
+    }
+  }
+  const items = readLastSketchRequirements(projectId)
+  return {
+    project_id: project.project_id,
+    name: project.name,
+    positioning: items[0]?.description ?? project.name,
+    requirements: items,
+    acceptance: {},
+    out_of_scope: [],
+    assumptions: [],
+  }
+}
+
 function renderPrdJson(backplane: PrdBackplane): string {
   return `${JSON.stringify(backplane, null, 2)}\n`
 }

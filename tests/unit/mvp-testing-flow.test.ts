@@ -1,5 +1,5 @@
 import { createServer } from 'node:http'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -25,6 +25,8 @@ describe('Post-MVP testing flow (A2-09 state machine)', () => {
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
     recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
     syncDocuments({ request_id: 'req-sync', session_id: 'session-1', project_id: project.project_id, checkpoint: 'mvp_before_generation' })
+    // 裁判（改造 E）读项目产物校验「代码交互入口」，须先落盘 index.html
+    writeFileSync(join(project.root_path, 'index.html'), '<html><body><p>记录收入与支出</p></body></html>', 'utf8')
     const events: string[] = []
     setProgrammingEventPublisher((event) => events.push(event.type))
 

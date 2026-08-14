@@ -62,20 +62,43 @@ describe('JudgeEngine (A2-10)', () => {
     expect(verdict.hard_constraints.find((item) => item.name === 'PRD 核心功能项')?.passed).toBe(false)
   })
 
-  it('suggests (not returns) when only a soft consistency check fails', () => {
+  it('returns (not suggest) when a PRD feature has no interactive entry — 三方对齐收口', () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-judge-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
     recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
     syncDocuments({ request_id: 'req-sync', session_id: 's', project_id: project.project_id, checkpoint: 'mvp_before_generation' })
-    // 页面没有对应入口（软约束失败）
+    // 页面没有对应入口（既无需求原文，也无交互控件 + 脚本逻辑）——改造 E 升级为硬约束退回
     writeFileSync(join(project.root_path, 'index.html'), '<p>其他内容</p>', 'utf8')
 
     const verdict = runJudge({ project_id: project.project_id, mode: 'quick' })
 
+    expect(verdict.verdict).toBe('return')
+    expect(verdict.repairable).toBe(true)
+    const entry = verdict.hard_constraints.find((item) => item.name === '代码交互入口')
+    expect(entry?.passed).toBe(false)
+    expect(entry?.detail).toContain('F-001')
+  })
+
+  it('suggests (not returns) when only the test-result soft constraint fails', () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-judge-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+    syncDocuments({ request_id: 'req-sync', session_id: 's', project_id: project.project_id, checkpoint: 'mvp_before_generation' })
+    // 交互入口齐全（硬约束全过）
+    writeFileSync(join(project.root_path, 'index.html'), '<p>记录收入与支出</p>', 'utf8')
+
+    const verdict = runJudge({
+      project_id: project.project_id,
+      mode: 'quick',
+      test_result: { total_count: 1, passed_count: 0, failed_count: 1, failure_summary: [{ scenario: 'F-001', reason: 'x' }] },
+    })
+
     expect(verdict.verdict).toBe('suggest')
     expect(verdict.repairable).toBe(false)
     expect(verdict.hard_constraints.every((item) => item.passed)).toBe(true)
+    expect(verdict.soft_constraints.find((item) => item.name === '测试结果')?.passed).toBe(false)
   })
 
   it('passes LLM product via domain-agnostic functional entry (interactive control + script logic) even without literal requirement text', () => {
