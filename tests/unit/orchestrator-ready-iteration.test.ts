@@ -127,6 +127,35 @@ describe('ready 护栏意图分流', () => {
     expect(deltas).toContain('已经生成好了')
     expect(deltas).toContain('右侧预览区')
   })
+
+  it('ready 阶段「货不对板/否定」类反馈（"啥意思，我要音乐合成器"）进入迭代重新生成', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-mismatch-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    setSDKQueryForTests(async function* () {
+      yield { type: 'result', subtype: 'success' }
+    })
+
+    vi.mocked(findProject).mockReturnValue({
+      project_id: 'project-ready-mismatch',
+      current_stage: 'ready',
+    } as never)
+
+    await runAgent({
+      request_id: 'req-mismatch',
+      session_id: 'session-mismatch',
+      project_id: 'project-ready-mismatch',
+      content: '啥意思，我要音乐合成器',
+      mode: 'quick',
+      current_stage: 'ready',
+      channel_id: 'test-channel',
+    })
+
+    expect(runIterationTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: '啥意思，我要音乐合成器' }),
+    )
+  })
 })
 
 async function* defaultTestQuery(): AsyncGenerator<SDKMessage> {

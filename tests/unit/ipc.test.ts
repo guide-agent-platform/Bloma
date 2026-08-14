@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -110,6 +110,10 @@ describe('ipc submit-correction → runIterationTask wiring（Sprint 3 纠错主
         prompt: '改成九个数字按键',
       }),
     )
+
+    // 纠错原文按 user 角色回写会话 JSONL，历史对话不再出现"助手引用了用户没说过的话"的断层
+    const jsonl = readFileSync(join(home, 'agent-sessions', 'session-1.jsonl'), 'utf8')
+    expect(jsonl).toContain('改成九个数字按键')
   })
 
   it('纯猜模式（无文案）不触发重新生成，只落盘', async () => {
