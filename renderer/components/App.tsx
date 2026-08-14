@@ -100,6 +100,7 @@ const AppRoutes: React.FC = () => {
   const setCurrentProject = useSetAtom(currentProjectAtom)
   const setSnapshotsList = useSetAtom(snapshotsListAtom)
   const setPreviewUrl = useSetAtom(previewUrlAtom)
+  const setCurrentSnapshotId = useSetAtom(currentSnapshotIdAtom)
   const setMessages = useSetAtom(agentMessagesFamily(sessionId))
 
   const restoreAttemptedRef = React.useRef(false)
@@ -335,15 +336,58 @@ const AppRoutes: React.FC = () => {
 
   // ==================== 快照回滚 ====================
 
+  /**
+   * 真回滚（P0 修复，原为假实现：只插系统消息不调 IPC）。
+   * 走 IPC snapshot:rollback——主进程先拍 rollback_guard 保护快照，再停沙箱、
+   * 按快照恢复文件/文档、重启沙箱（危险操作，会先弹权限确认）。
+   * 成功后回填 preview_url 与当前快照指针，并刷新时间轴（会多出 guard 快照）。
+   */
   const handleRollback = useCallback((snapshot: Snapshot) => {
-    const msg: AgentMessage = {
-      role: 'system',
-      content: [{ type: 'text', text: `已经回到「${snapshot.name}」了，一切都在。要继续的话随时告诉我。` }],
-      timestamp: Date.now(),
+    const api = window.electronAPI
+    const projectId = currentProject?.project_id ?? projectList[0]?.project_id ?? ''
+    const notify = (text: string) => {
+      setMessages((prev: AgentMessage[]) => [
+        ...prev,
+        { role: 'system', content: [{ type: 'text', text }], timestamp: Date.now() },
+      ])
     }
-    setMessages((prev: AgentMessage[]) => [...prev, msg])
-    setPreviewStatus('running')
-  }, [setMessages])
+    if (!api?.snapshots?.rollback || !projectId) {
+      setPreviewStatus('error')
+      notify('回滚服务暂时连不上，这次没有回滚成功，稍后再试一次。')
+      return
+    }
+    setPreviewStatus('loading')
+    void api.snapshots.rollback({
+      request_id: crypto.randomUUID(),
+      project_id: projectId,
+      snapshot_id: snapshot.snapshot_id,
+      reason: 'user_undo',
+    })
+      .then((result) => {
+        if (result?.ok && result.data.rolled_back) {
+          if (result.data.preview_url) {
+            setPreviewUrl(result.data.preview_url)
+          } else {
+            setPreviewUrl(null)
+            setPreviewStatus('error')
+          }
+          setCurrentSnapshotId(result.data.current_snapshot_id)
+          void loadSnapshots(projectId)
+          notify(
+            result.data.preview_url
+              ? `已经回到「${snapshot.name}」了，预览区就是当时的版本。要继续的话随时告诉我。`
+              : `已经回到「${snapshot.name}」了，但预览沙箱没起来，可以点「重新连接沙箱」再看。`,
+          )
+        } else {
+          setPreviewStatus('error')
+          notify('回滚没有成功（快照可能已失效或被拒绝），当前版本没有被改动。')
+        }
+      })
+      .catch(() => {
+        setPreviewStatus('error')
+        notify('回滚出错了，当前版本没有被改动。可以稍后再试一次。')
+      })
+  }, [currentProject, projectList, setCurrentSnapshotId, setMessages, setPreviewUrl])
 
   // ==================== 超时操作（超过 120 秒） ====================
 
