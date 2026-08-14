@@ -7,6 +7,33 @@ export interface SketchRequirement {
   description: string
 }
 
+/**
+ * PRD 背板——快消型的唯一需求事实源。
+ *
+ * 由 DocumentEngine 在检查点产出并冻结，供三类下游复用同一份锚点：
+ * - MVP 生成（mvp-engine-llm 读定位/功能项/范围外，防"货不对板"）；
+ * - GWT 派生（按 acceptance 生成场景）；
+ * - 裁判校验 / 意图识别（按功能项与产物对照判定"是否货不对板"）。
+ *
+ * F-001 固定为"主题锚点"（用户最初想做什么），澄清/纠错/迭代只追加后续项、不覆盖主题。
+ */
+export interface PrdBackplane {
+  project_id: string
+  name: string
+  /** 产品定位一句话（主题锚点，取自 F-001 描述） */
+  positioning: string
+  /** 核心功能项：F-001 为主题，其余为澄清/纠错/迭代追加项 */
+  requirements: SketchRequirement[]
+  /** 功能项 id → 验收要点（GWT 派生源） */
+  acceptance: Record<string, string>
+  /** 本轮明确不做的事（防模型擅自扩功能） */
+  out_of_scope: string[]
+  /** 后台决策假设（assumptions，供 decisions 回溯） */
+  assumptions: string[]
+  /** 冻结时间（mvp_before_generation 时落盘；草案阶段为 undefined） */
+  frozen_at?: string
+}
+
 export interface GenerateSketchInput {
   project_id: string
   requirements: SketchRequirement[]

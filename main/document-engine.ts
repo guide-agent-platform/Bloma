@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { DocumentRef, DocumentSyncInput, DocumentSyncResult } from '../shared/types'
+import type { DocumentRef, DocumentSyncInput, DocumentSyncResult, Project } from '../shared/types'
 import { getDocumentsDir } from '../storage/config-paths'
 import { findProject, readLastSketchRequirements } from './project-service'
-import type { SketchRequirement } from './sketch-engine'
+import type { PrdBackplane, SketchRequirement } from './sketch-engine'
 
 /**
  * DocumentEngine — 文档同步（对齐 api-spec §10.1 / architecture §7.3）。
@@ -40,12 +40,15 @@ export function syncDocuments(input: DocumentSyncInput): DocumentSyncResult {
 
   switch (input.checkpoint) {
     case 'sketch_confirmed':
-      files.push({ relativePath: 'sketch_confirmed.md', content: renderPrdDraft(project.name, requirements), type: 'prd' })
+      files.push(
+        { relativePath: 'sketch_confirmed.md', content: renderPrdDraft(buildPrdBackplane(project, requirements, input.checkpoint)), type: 'prd' },
+        { relativePath: 'prd.json', content: renderPrdJson(buildPrdBackplane(project, requirements, input.checkpoint)), type: 'prd' },
+      )
       break
     case 'mvp_before_generation':
       files.push({
         relativePath: 'mvp_before_generation.md',
-        content: renderPrdFull(project.name, requirements),
+        content: renderPrdFull(buildPrdBackplane(project, requirements, input.checkpoint)),
         type: 'prd',
       })
       files.push(...renderGwtSkeleton(requirements).map((feature) => ({
@@ -118,36 +121,97 @@ function readRequirements(requirements: SketchRequirement[]): SketchRequirement[
   return [{ id: 'F-001', description: '把用户的想法整理成一个可运行、可操作的功能页面。' }]
 }
 
-function renderPrdDraft(projectName: string, requirements: SketchRequirement[]): string {
+/**
+ * 组装 PRD 背板（快消型的唯一需求事实源）。
+ *
+ * - positioning 取 F-001（主题锚点，改造 A 已保证 F-001 是用户最初想做什么）；
+ * - acceptance 由确定性规则生成默认验收要点（GWT 派生源，改造 D 消费）；
+ * - out_of_scope / assumptions 在草案阶段留空，由后续生成回填（改造 C）。
+ * - mvp_before_generation 时冻结（落盘 frozen_at），此后编程管线只读冻结版。
+ */
+export function buildPrdBackplane(
+  project: Project,
+  requirements: SketchRequirement[],
+  checkpoint: DocumentSyncInput['checkpoint'],
+): PrdBackplane {
   const items = readRequirements(requirements)
+  const acceptance: Record<string, string> = {}
+  for (const item of items) {
+    acceptance[item.id] = `${item.description}：核心路径可交互，边界与异常输入不崩溃。`
+  }
+  return {
+    project_id: project.project_id,
+    name: project.name,
+    positioning: items[0]?.description ?? project.name,
+    requirements: items,
+    acceptance,
+    out_of_scope: [],
+    assumptions: [],
+    ...(checkpoint === 'mvp_before_generation' ? { frozen_at: new Date().toISOString() } : {}),
+  }
+}
+
+function renderPrdJson(backplane: PrdBackplane): string {
+  return `${JSON.stringify(backplane, null, 2)}\n`
+}
+
+function renderPrdDraft(backplane: PrdBackplane): string {
+  const items = backplane.requirements
   const list = items.map((item) => `- [ ] **${item.id}** ${item.description}`).join('\n')
-  return `# ${projectName} · PRD 草案
+  const acceptance = items
+    .map((item) => `- **${item.id}**：${backplane.acceptance[item.id] ?? ''}`)
+    .join('\n')
+  const outOfScope = backplane.out_of_scope.length
+    ? backplane.out_of_scope.map((scope) => `- ${scope}`).join('\n')
+    : '- 暂无'
+  return `# ${backplane.name} · PRD 草案
 
 > 状态：草图已确认，进入 MVP 生成前。（checkpoint: sketch_confirmed）
 
-## 核心功能项
+## 1. 产品定位
+
+${backplane.positioning}
+
+## 2. 核心功能项
 
 ${list}
 
-## 说明
-- 本草案由确认后的草图需求生成，供 MVP 模板与 GWT 骨架使用。
-- 后续需求细化见对话历史（A2-06 顺延项）。
+## 3. 验收标准
+
+${acceptance}
+
+## 4. 范围外（非目标）
+
+${outOfScope}
+
+## 5. 说明
+- 本草案由确认后的草图需求生成，供 MVP 生成与 GWT 骨架使用。
+- 后续需求细化见对话历史。
 `
 }
 
-function renderPrdFull(projectName: string, requirements: SketchRequirement[]): string {
-  const items = readRequirements(requirements)
+function renderPrdFull(backplane: PrdBackplane): string {
+  const items = backplane.requirements
   const list = items.map((item) => `- [x] **${item.id}** ${item.description}`).join('\n')
   const featureRefs = items.map((item) => `- \`features/${item.id}.feature\``).join('\n')
-  return `# ${projectName} · PRD（MVP 生成前）
+  return `# ${backplane.name} · PRD（MVP 生成前）
 
 > 状态：功能项已锁定，GWT 骨架已生成。（checkpoint: mvp_before_generation）
+> 冻结时间：${backplane.frozen_at ?? '—'}
 
-## 完整功能项
+## 1. 产品定位
+
+${backplane.positioning}
+
+## 2. 完整功能项
 
 ${list}
 
-## GWT 骨架
+## 3. 验收标准
+
+${items.map((item) => `- **${item.id}**：${backplane.acceptance[item.id] ?? ''}`).join('\n')}
+
+## 4. GWT 骨架
 每个 P0 功能项至少包含 1 个 GWT 场景，feature 文件位于 \`documents/{project_id}/features/\`：
 
 ${featureRefs}
