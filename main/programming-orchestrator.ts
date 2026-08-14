@@ -168,7 +168,7 @@ async function resolveSketch(input: SketchTaskInput, requirements: SketchRequire
       query: input.query,
       env,
       sessionId: input.session_id,
-      maxTokens: channel.max_tokens ?? 4000,
+      maxTokens: channel.max_tokens ?? DEFAULT_MAX_TOKENS,
     })
   } catch {
     // LLM 草图失败（超时/非 HTML/网络错误）回退模板，不阻断草图产出

@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ConversationTurn, SDKQuery } from './orchestrator'
+import type { SDKQuery } from './orchestrator'
 import { findProject } from './project-service'
 import type { SketchRequirement } from './sketch-engine'
 import type { MessageContentBlock } from '../shared/types'
@@ -34,6 +34,11 @@ export interface GenerateSketchLlmResult {
 
 const DEFAULT_TIMEOUT_MS = 90_000
 
+/** 渠道未配置 max_tokens 时的默认值：重 CSS 视觉稿 4000 必截断（线上已踩坑），与 mvp-engine-llm 同值。 */
+const DEFAULT_MAX_TOKENS = 8192
+const MAX_MAX_TOKENS = 16384
+const MAX_GENERATION_ATTEMPTS = 2
+
 const SYSTEM_PROMPT = `你是「Bloma 草图生成器」，负责把用户的想法生成一个**无交互的纯外观 HTML 草图**，用来让用户确认"软件长什么样"。只输出一个完整的 HTML 文档，不要任何解释文字，不要 markdown 代码块围栏。
 
 硬性约束：
@@ -53,45 +58,57 @@ export async function generateSketchLlm(input: GenerateSketchLlmInput): Promise<
 
   try {
     const prompt = buildPrompt(input.requirements)
-    const history: ConversationTurn[] = [{ role: 'system', content: SYSTEM_PROMPT }]
+    let maxTokens = input.maxTokens ?? DEFAULT_MAX_TOKENS
+    let truncated = false
 
-    let accumulated = ''
-    try {
-      const stream = input.query(prompt, {
-        env: input.env,
-        signal: combinedSignal,
-        sessionId: input.sessionId,
-        history,
-        maxTokens: input.maxTokens,
-      })
-      for await (const sdkMessage of stream) {
-        if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue
-        const text = extractText(sdkMessage.message.content)
-        if (text) accumulated += text
+    // 首试 + 一次恢复重试：截断（文档未闭合）→ 加大 maxTokens 重新生成，绝不内容级修补；
+    // 重试耗尽抛错，由调用方回退确定性模板，不阻断草图产出。
+    for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt += 1) {
+      let accumulated = ''
+      try {
+        const stream = input.query(prompt, {
+          env: input.env,
+          signal: combinedSignal,
+          sessionId: input.sessionId,
+          history: [{ role: 'system', content: SYSTEM_PROMPT }],
+          maxTokens,
+        })
+        for await (const sdkMessage of stream) {
+          if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue
+          const text = extractText(sdkMessage.message.content)
+          if (text) accumulated += text
+        }
+      } catch (error) {
+        if (selfController.signal.aborted) throw new Error('SKETCH_LLM_TIMEOUT: 草图生成超时，已取消本次生成')
+        throw error
       }
-    } catch (error) {
+
       if (selfController.signal.aborted) throw new Error('SKETCH_LLM_TIMEOUT: 草图生成超时，已取消本次生成')
-      throw error
+
+      const html = cleanSketchHtml(accumulated)
+      if (isHtmlDocument(html)) {
+        const project = findProject(input.project_id)
+        const file = { path: 'index.html', content: html }
+        const fullPath = join(project.root_path, file.path)
+        mkdirSync(join(fullPath, '..'), { recursive: true })
+        writeFileSync(fullPath, file.content, 'utf8')
+
+        return {
+          files: [file],
+          run_command: 'node static-server',
+          summary: '已按你的需求生成外观草图。',
+        }
+      }
+
+      truncated = looksTruncated(html)
+      if (truncated) maxTokens = Math.min(maxTokens * 2, MAX_MAX_TOKENS)
     }
 
-    if (selfController.signal.aborted) throw new Error('SKETCH_LLM_TIMEOUT: 草图生成超时，已取消本次生成')
-
-    const html = cleanSketchHtml(accumulated)
-    if (!isHtmlDocument(html)) {
-      throw new Error('SKETCH_LLM_PARSE_FAILED: 模型输出不是有效的 HTML 草图')
+    // 重试耗尽：按最后一种失败原因抛清晰错误，便于上层回退模板与用户定位。
+    if (truncated) {
+      throw new Error('SKETCH_LLM_TRUNCATED: 草图输出被截断（疑似 max_tokens 不足），已尝试加大 token 重试仍失败')
     }
-
-    const project = findProject(input.project_id)
-    const file = { path: 'index.html', content: html }
-    const fullPath = join(project.root_path, file.path)
-    mkdirSync(join(fullPath, '..'), { recursive: true })
-    writeFileSync(fullPath, file.content, 'utf8')
-
-    return {
-      files: [file],
-      run_command: 'node static-server',
-      summary: '已按你的需求生成外观草图。',
-    }
+    throw new Error('SKETCH_LLM_PARSE_FAILED: 模型输出不是有效的 HTML 草图')
   } finally {
     clearTimeout(timer)
   }
@@ -132,9 +149,25 @@ function cleanSketchHtml(raw: string): string {
     .trim()
 }
 
-/** 判定输出是否是完整的 HTML 文档（含 <html 或 <body，且含内联 <style>）。 */
+/** 判定输出是否是完整的 HTML 文档（含 <html 或 <body、内联 <style>，且以 </html> 闭合）。 */
 function isHtmlDocument(html: string): boolean {
-  return /<style[\s>]/i.test(html) && /<html[\s>]|<body[\s>]/i.test(html)
+  return (
+    /<style[\s>]/i.test(html) &&
+    /<html[\s>]|<body[\s>]/i.test(html) &&
+    /<\/html>\s*$/i.test(html)
+  )
+}
+
+/**
+ * 检测模型输出是否被截断（max_tokens 用尽导致文档未闭合）。只做结构判断，绝不修补内容——
+ * 线上案例：11KB 视觉稿停在 CSS 中间（无 </html>），浏览器把残余内容全当 CSS 解析 → 整页空白。
+ */
+function looksTruncated(html: string): boolean {
+  // 只有「已开始 HTML 文档（有内联 <style>）但未闭合」才算截断；
+  // 纯文本/根本不是 HTML → 不重试，走 SKETCH_LLM_PARSE_FAILED 路径。
+  if (!/<style[\s>]/i.test(html)) return false
+  if (!/<\/html>\s*$/i.test(html)) return true
+  return /(?:\.\.\.|…)\s*$|\/\*\s*(?:rest|more|remaining|todo|未完|略|其余)[\s*]*$/i.test(html)
 }
 
 function extractText(blocks: MessageContentBlock[]): string {
