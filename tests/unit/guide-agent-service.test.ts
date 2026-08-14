@@ -23,7 +23,7 @@ vi.mock('../../main/channel-manager', async (importOriginal) => {
     getFirstEnabledChannel: () => undefined,
   }
 })
-import { createProject, findProject } from '../../main/project-service'
+import { createProject, findProject, readLastSketchRequirements } from '../../main/project-service'
 import {
   clearSandboxRuntimeForTests,
   setSandboxRuntimeForTests,
@@ -351,6 +351,76 @@ describe('GuideAgentService through AgentOrchestrator', () => {
     const jsonl = readFileSync(join(home, 'agent-sessions', 'session-guide.jsonl'), 'utf8')
     expect(jsonl).toContain('我需要再确认几个关键点')
     expect(jsonl).toContain('按你选的方向开始生成草图')
+  })
+
+  it('澄清后生成草图保留主题锚点，不被澄清答案覆盖（货不对板修复）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-guide-theme-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    setSandboxRuntimeForTests({
+      portAllocator: async () => 3103,
+      healthCheck: async () => true,
+      processFactory: () => makeChildProcess(),
+    })
+    setSnapshotCaptureProviderForTests(async () => ({
+      extension: 'png',
+      buffer: Buffer.from('fake-png'),
+    }))
+
+    // 第一轮：主题 → 模型反问类型（ask_clarification），不生成草图
+    setSDKQueryForTests(async function* () {
+      yield {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'text',
+            text: '{"action":"ask_clarification","reply":"你说的音乐合成器想要哪种类型呢？","questions":[]}',
+          }],
+        },
+      }
+      yield { type: 'result', subtype: 'success' }
+    })
+    await runAgent({
+      request_id: 'req-theme-1',
+      session_id: 'session-theme',
+      project_id: project.project_id,
+      content: '帮我做一个音乐合成器',
+      mode: 'quick',
+      current_stage: 'clarifying',
+      channel_id: 'test-channel',
+    })
+
+    // 第二轮：澄清答案「网页端」→ 模型 generate_sketch 却把主题丢了，只返回「网页端」
+    setSDKQueryForTests(async function* () {
+      yield {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'text',
+            text: '{"action":"generate_sketch","reply":"好的，开始生成","requirements":[{"id":"F-001","description":"网页端"}]}',
+          }],
+        },
+      }
+      yield { type: 'result', subtype: 'success' }
+    })
+    await runAgent({
+      request_id: 'req-theme-2',
+      session_id: 'session-theme',
+      project_id: project.project_id,
+      content: '网页端',
+      mode: 'quick',
+      current_stage: 'blocked_for_user_decision',
+      channel_id: 'test-channel',
+    })
+
+    // 需求清单必须以主题为 F-001 锚点，澄清答案只追加为后续项，而不是覆盖主题
+    const descriptions = readLastSketchRequirements(project.project_id).map((r) => r.description)
+    expect(descriptions[0]).toBe('帮我做一个音乐合成器')
+    expect(descriptions).toContain('网页端')
   })
 })
 

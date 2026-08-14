@@ -111,6 +111,31 @@ export function loadMessages(input: AgentLoadMessagesInput): AgentLoadMessagesRe
   }
 }
 
+/**
+ * 从会话 JSONL 中提取"主题锚点"：首条非空 user 消息（用户最初想做什么）。
+ * 供澄清/纠错路径复用，保证后续需求累积不会丢失最初的主题。
+ * 无会话文件或没有 user 消息时返回 undefined。
+ */
+export function readPrimaryIntent(sessionId: string): string | undefined {
+  const path = getAgentSessionPath(sessionId)
+  if (!existsSync(path)) return undefined
+  for (const line of readFileSync(path, 'utf8').split('\n')) {
+    if (!line.trim()) continue
+    try {
+      const message = JSON.parse(line) as AgentMessage
+      if (message.role !== 'user') continue
+      const text = (message.content ?? [])
+        .map((block) => (block.type === 'text' ? (block.text ?? '') : ''))
+        .join('')
+        .trim()
+      if (text) return text
+    } catch {
+      // 跳过损坏行
+    }
+  }
+  return undefined
+}
+
 function resolveSessionRecord(sessionId: string, path: string): AgentSessionRecord {
   const existing = readSessions().sessions.find((item) => item.session_id === sessionId)
   if (existing) return existing

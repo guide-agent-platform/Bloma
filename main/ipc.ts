@@ -41,6 +41,8 @@ import {
   trackAnalytics,
 } from './platform-services'
 import { hasRequestId, isRecord, requireValue } from './validators'
+import { getAgentSessionPath } from '../storage/config-paths'
+import { appendJsonLine } from '../storage/json-store'
 
 export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow): void {
   setAgentStreamPublisher((event) => {
@@ -178,6 +180,13 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
       // 只有带明确诉求（user_note / 点选文本）时才重新生成；纯「猜」模式（无文案）保持只落盘。
       const prompt = extractCorrectionPrompt(input)
       if (prompt) {
+        // 点选纠错原文按 user 角色回写会话 JSONL（对齐 runAgent 落盘），
+        // 避免历史里出现"助手引用了用户没说过的话"的断层。
+        appendJsonLine(getAgentSessionPath(input.session_id), {
+          role: 'user',
+          content: [{ type: 'text', text: prompt }],
+          timestamp: Date.now(),
+        })
         const mode = findProject(input.project_id).mode
         void runIterationTask({
           request_id: input.request_id,

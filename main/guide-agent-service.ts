@@ -5,6 +5,8 @@ import type { ConversationTurn, GuideModelOptions } from './orchestrator'
 import { trackAnalytics } from './platform-services'
 import { runSketchTask, setProgrammingEventPublisher } from './programming-orchestrator'
 import { findProject, updateProject } from './project-service'
+import { readPrimaryIntent } from './session-service'
+import type { SketchRequirement } from './sketch-engine'
 import { isRecord } from './validators'
 
 type GuideEventPublisher = (event: AgentEvent) => void
@@ -49,18 +51,42 @@ const BLOCKED_DECISION_IDS = new Set(['accept', 'explain', 'continue'])
 
 interface CardAnswerRoute {
   prompt: string
-  requirements: { id: string; description: string }[]
+  requirements: SketchRequirement[]
+}
+
+/**
+ * 保证需求清单始终以"主题"为 F-001 锚点：澄清答案（如"网页端"）只是主题的属性，
+ * 绝不能覆盖最初的主题（如"音乐合成器"）。清单已含主题时原样返回；否则把主题
+ * 前置为 F-001，其余项顺延为 F-002/F-003…，避免"货不对板"。
+ */
+function ensurePrimaryIntent(
+  requirements: SketchRequirement[],
+  primaryIntent: string | undefined,
+): SketchRequirement[] {
+  if (!primaryIntent) return requirements
+  const normalized = primaryIntent.replace(/\s+/g, ' ').trim()
+  if (!normalized) return requirements
+  const hasTheme = requirements.some((item) => {
+    const description = item.description.replace(/\s+/g, ' ').trim()
+    return description.includes(normalized) || normalized.includes(description)
+  })
+  if (hasTheme) return requirements
+  const shifted = requirements.map((item, index) => ({
+    ...item,
+    id: `F-${String(index + 2).padStart(3, '0')}`,
+  }))
+  return [{ id: 'F-001', description: normalized }, ...shifted]
 }
 
 /** 卡片选项答案：metadata.source === 'card_option' 且非阻塞决策 id 时，视为已澄清，直接生成草图。 */
-function resolveCardAnswer(input: AgentSendMessageInput): CardAnswerRoute | undefined {
+function resolveCardAnswer(input: AgentSendMessageInput, primaryIntent?: string): CardAnswerRoute | undefined {
   if (input.metadata?.source !== 'card_option') return undefined
   const optionId = input.metadata.selected_option_id
   if (BLOCKED_DECISION_IDS.has(optionId ?? '')) return undefined
   const description = CARD_ANSWER_REQUIREMENTS[optionId ?? ''] ?? input.content
   return {
     prompt: input.content,
-    requirements: [{ id: 'F-001', description }],
+    requirements: ensurePrimaryIntent([{ id: 'F-001', description }], primaryIntent),
   }
 }
 
@@ -88,8 +114,11 @@ export async function handleGuideMessage(
     },
   })
 
+  // 主题锚点：首条用户消息（用户最初想做什么），澄清答案只能追加、不能覆盖主题
+  const primaryIntent = readPrimaryIntent(input.session_id)
+
   // 卡片答案：用户已通过选项给出方向，直接生成草图（修复澄清死循环）
-  const cardAnswer = resolveCardAnswer(input)
+  const cardAnswer = resolveCardAnswer(input, primaryIntent)
   if (cardAnswer) {
     const ack = '好的，按你选的方向开始生成草图。'
     persistAssistant?.(ack)
@@ -107,7 +136,7 @@ export async function handleGuideMessage(
 
   // 渠道可用 → 优先走真实模型；模型不可用 / 解析失败 → 回退规则路由
   if (model) {
-    const handled = await tryModelDrivenGuide(input, publish, model)
+    const handled = await tryModelDrivenGuide(input, publish, model, primaryIntent)
     if (handled) return
   }
 
@@ -132,7 +161,7 @@ export async function handleGuideMessage(
     project_id: input.project_id,
     mode: input.mode,
     prompt: input.content,
-    requirements: route.requirements,
+    requirements: ensurePrimaryIntent(route.requirements, primaryIntent),
   })
 }
 
@@ -149,6 +178,7 @@ async function tryModelDrivenGuide(
   input: AgentSendMessageInput,
   publish: GuideEventPublisher,
   model: GuideModelOptions,
+  primaryIntent?: string,
 ): Promise<boolean> {
   const systemTurn: ConversationTurn = { role: 'system', content: GUIDE_SYSTEM_PROMPT }
   const history: ConversationTurn[] = [systemTurn, ...model.history]
@@ -205,7 +235,7 @@ async function tryModelDrivenGuide(
     project_id: input.project_id,
     mode: input.mode,
     prompt: parsed.reply || input.content,
-    requirements: parsed.requirements,
+    requirements: ensurePrimaryIntent(parsed.requirements, primaryIntent),
   })
   return true
 }

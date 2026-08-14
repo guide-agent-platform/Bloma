@@ -620,5 +620,7 @@ function shouldUseGuideAgent(stage: AgentSendMessageInput['current_stage']): boo
 function isModificationIntent(text: string): boolean {
   const trimmed = text.trim()
   if (!trimmed) return false
-  return /(修改|改|换|调整|纠错|重做|重来|重新|优化|修正|不要|去掉|删除|删掉|加一个|加个|加上|新增|变成|换成|改成|再来|换个|调整一下|重新生成)/.test(trimmed)
+  // 显式修改动词 + 否定/货不对板/重述主题类表达（"啥意思，我要音乐合成器"、"这不是我想要的"）。
+  // 纯进度追问（好了吗/怎么样了）不含这些词，不会被误判为修改意图。
+  return /(修改|改一改|改下|改一下|调整|纠错|重做|重来|重新|优化|修正|不要|去掉|删除|删掉|加一个|加个|加上|新增|变成|换成|改成|再来|换个|不对|不是|不满意|搞错|做错|错了|偏了|货不对板|啥意思|什么意思|这不是|我要的是|我想要的是|应该是)/.test(trimmed)
 }
