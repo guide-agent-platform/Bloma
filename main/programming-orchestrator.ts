@@ -4,9 +4,7 @@ import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
 import { syncDocuments } from './document-engine'
 import { createSnapshot, runSandbox, trackAnalytics } from './platform-services'
-import { generateMvp, type GeneratedMvpFile } from './mvp-engine'
-import { generateMvpLlm } from './mvp-engine-llm'
-import type { GenerateMvpLlmInput } from './mvp-engine-llm'
+import { generateMvpLlm, type GenerateMvpLlmResult } from './mvp-engine-llm'
 import { buildSdkEnv, decryptApiKey, getChannelByIdRaw, getFirstEnabledChannel } from './channel-manager'
 import { findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
 import { generateSketch, type SketchRequirement } from './sketch-engine'
@@ -137,10 +135,10 @@ export async function runSketchTask(input: SketchTaskInput): Promise<SketchTaskR
 }
 
 /**
- * runMvpTask — 草图确认后无需再发消息，直接从模板生成 MVP 并进入测试阶段。
+ * runMvpTask — 草图确认后无需再发消息，直接由 LLM 生成 MVP 并进入测试阶段。
  *
  * 顺序（对齐任务规划）：stage generating_mvp → 文档打点 sketch_confirmed /
- * mvp_before_generation → generateMvp → 沙箱启动 → mvp 快照（含文档）→
+ * mvp_before_generation → generateMvpLlm → 沙箱启动 → mvp 快照（含文档）→
  * analytics mvp_delivered → stage testing → 发布 mvp_ready。
  */
 export async function runMvpTask(input: MvpTaskInput): Promise<MvpTaskResult> {
@@ -163,9 +161,7 @@ export async function runMvpTask(input: MvpTaskInput): Promise<MvpTaskResult> {
     request_id: input.request_id,
     project_id: input.project_id,
     kind: 'mvp',
-    summary: mvp.generated_by === 'llm'
-      ? `MVP 已生成（LLM 生成，共 ${mvp.files.length} 个文件），进入测试阶段。`
-      : `MVP 已生成，共 ${mvp.files.length} 个文件，进入测试阶段。`,
+    summary: `MVP 已生成（LLM 生成，共 ${mvp.files.length} 个文件），进入测试阶段。`,
     include_documents: true,
     health_status: 'healthy',
   })
@@ -201,57 +197,35 @@ export async function runMvpTask(input: MvpTaskInput): Promise<MvpTaskResult> {
   return { preview_url: sandbox.preview_url, snapshot, run_command: runCommand }
 }
 
-/** runMvpTask 的统一产物形态：LLM 生成与模板兜底在 generated_by 上区分。 */
-interface ResolvedMvp {
-  files: GeneratedMvpFile[]
-  run_command: string
-  assumptions: string[]
-  risks: string[]
-  generated_by: 'llm' | 'template'
-}
-
 /**
- * A2-14b：优先 LLM 生成（有 query 句柄 + 渠道可用时），模板降级为失败兜底。
- * LLM 生成异常/超时/解析失败/取消均不中断主链路——回退模板。
+ * A2-14b：MVP 一律由 LLM 生成（无模板兜底）。
+ * 无 query 句柄 / 无可用渠道 / 密钥不可解密，或 LLM 生成失败（超时/解析失败/路径非法）
+ * 均抛错向上传播——不再静默降级为模板（模板重建仅保留在 repair-engine 的自动修复路径）。
  */
-async function resolveMvp(input: MvpTaskInput, requirements: SketchRequirement[]): Promise<ResolvedMvp> {
-  const llmInput = resolveLlmInput(input, requirements)
-  if (llmInput) {
-    try {
-      const result = await generateMvpLlm(llmInput)
-      if (result.generated_by === 'llm') return result
-    } catch {
-      // LLM 生成异常（网络/模型错误/取消）→ 模板兜底，管线不中断
-    }
+async function resolveMvp(input: MvpTaskInput, requirements: SketchRequirement[]): Promise<GenerateMvpLlmResult> {
+  if (!input.query) {
+    throw new Error('MVP_GENERATION_FAILED: 缺少模型调用句柄，无法生成 MVP')
   }
-  const template = generateMvp({ project_id: input.project_id, requirements, template_type: input.template_type })
-  return { ...template, generated_by: 'template' }
-}
-
-/**
- * 解析 LLM 生成入参：query 门禁 + 渠道解析 + 密钥解密 + 环境构建。
- * 无 query 句柄 / 无渠道 / 密钥不可解密时返回 undefined（调用方走模板）。
- */
-function resolveLlmInput(input: MvpTaskInput, requirements: SketchRequirement[]): GenerateMvpLlmInput | undefined {
-  if (!input.query) return undefined
   const channel = input.channel_id ? getChannelByIdRaw(input.channel_id) : getFirstEnabledChannel()
-  if (!channel) return undefined
+  if (!channel) {
+    throw new Error('MVP_GENERATION_FAILED: 没有可用的模型渠道，请在设置中配置并验证渠道后再生成')
+  }
   let apiKey: string
   try {
     apiKey = decryptApiKey(channel.api_key)
   } catch {
-    return undefined
+    throw new Error('API_KEY_DECRYPT_FAILED: 渠道 api_key 无法解密，请在设置中重新保存该渠道')
   }
   const model = channel.models.find((item) => item.enabled)?.id ?? 'claude-sonnet-4-6'
   const env = buildSdkEnv(apiKey, channel.base_url, model)
-  return {
+  return generateMvpLlm({
     project_id: input.project_id,
     requirements,
     query: input.query,
     env,
     sessionId: input.session_id,
     maxTokens: channel.max_tokens ?? 4000,
-  }
+  })
 }
 
 /**

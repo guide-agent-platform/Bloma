@@ -78,16 +78,16 @@ describe('JudgeEngine (A2-10)', () => {
     expect(verdict.hard_constraints.every((item) => item.passed)).toBe(true)
   })
 
-  it('passes LLM calculator via functional entry (operators + calculate) even without literal requirement text', () => {
+  it('passes LLM product via domain-agnostic functional entry (interactive control + script logic) even without literal requirement text', () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-judge-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
-    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '基础四则运算' }])
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
     syncDocuments({ request_id: 'req-sync', session_id: 's', project_id: project.project_id, checkpoint: 'mvp_before_generation' })
-    // LLM 产物用「四则运算计算器」标题 + 运算符按钮实现，不内嵌需求原文「基础四则运算」
-    writeFileSync(join(project.root_path, 'index.html'), '<button>+</button><button>−</button><button>×</button><button>÷</button>', 'utf8')
+    // 模型产物用交互控件 + 脚本逻辑实现，不内嵌需求原文「记录收入与支出」
+    writeFileSync(join(project.root_path, 'index.html'), '<button>开始使用</button><input type="text" />', 'utf8')
     mkdirSync(join(project.root_path, 'src'), { recursive: true })
-    writeFileSync(join(project.root_path, 'src', 'app.js'), 'function calculate(a, b, op) { return a }', 'utf8')
+    writeFileSync(join(project.root_path, 'src', 'app.js'), "document.querySelector('button').addEventListener('click', function () {})", 'utf8')
 
     const verdict = runJudge({ project_id: project.project_id, mode: 'quick' })
 

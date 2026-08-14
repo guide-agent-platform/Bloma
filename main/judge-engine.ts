@@ -5,7 +5,7 @@ import { getDocumentsDir } from '../storage/config-paths'
 import type { GwtTestResult } from './gwt-service'
 import { findProject, readLastSketchRequirements } from './project-service'
 import { escapeHtml } from './sketch-engine'
-import { hasFourOperators } from './gwt-service'
+import { hasInteractiveEntry } from './gwt-service'
 
 /**
  * JudgeEngine（A2-10）——只判定、不修改代码。
@@ -64,11 +64,11 @@ export function runJudge(input: JudgeInput): JudgeVerdict {
 
   // ── 基础软约束 ──
   // 功能入口一致性：LLM 产物不应要求内嵌需求原文（措辞不同会造成假阴性），
-  // 与 GWT 执行同步改用功能断言——HTML 含四则运算符按钮 + app.js 含 calculate 逻辑，
+  // 与 GWT 执行同步改用领域无关的功能断言——index.html 含交互控件 + app.js 含脚本逻辑，
   // 即视为功能项有对应入口；模板产物仍按需求原文转义后的文本匹配兜底。
   const indexHtml = readProjectHtml(project.root_path)
   const appJs = readProjectAppJs(project.root_path)
-  const functionalEntry = hasFourOperators(indexHtml) && appJs.includes('calculate')
+  const functionalEntry = hasInteractiveEntry(indexHtml, appJs)
   const missingEntry = requirements.filter((item) => {
     const textualEntry = indexHtml.includes(escapeHtml(item.description))
     return !(textualEntry || functionalEntry)
