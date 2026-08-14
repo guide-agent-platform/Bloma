@@ -10,9 +10,9 @@ import type { SDKMessage } from '../../shared/types'
 /**
  * A2-14b — LLM 生成型 MVP 模块级单测。
  *
- * 覆盖：成功落盘 / 解析失败 / 空输出 / 空 files / 抛错传播 / 超时兜底 / 外部取消 /
+ * 覆盖：成功落盘 / 解析失败 / 空输出 / 空 files / 抛错传播 / 超时抛错 / 外部取消 /
  * 路径穿越整批拒绝 / 绝对路径整批拒绝 / package.json 强制重写 / static-server.js 系统接管 /
- * 文件数超上限。
+ * 文件数超上限。所有失败均抛错向上传播，无模板兜底。
  */
 
 const CALCULATOR_JSON = JSON.stringify({
@@ -78,11 +78,10 @@ describe('MvpEngineLlm generation (A2-14b)', () => {
     }
   }
 
-  it('LLM 返回合法 JSON（计算器）→ 文件落盘、generated_by=llm、run_command 为模型原样值', async () => {
+  it('LLM 返回合法 JSON（计算器）→ 文件落盘、run_command 为模型原样值', async () => {
     const input = makeInput()
     const result = await generateMvpLlm(input)
 
-    expect(result.generated_by).toBe('llm')
     // run_command 为模型返回的原样值（强制覆盖在 runMvpTask，模块层不负责）
     expect(result.run_command).toBe('npm run custom')
     expect(result.files.map((f) => f.path)).toEqual([
@@ -102,37 +101,29 @@ describe('MvpEngineLlm generation (A2-14b)', () => {
     expect(appJs).toContain('calculate')
   })
 
-  it('LLM 返回非 JSON → 返回 template 兜底且 files 为空数组', async () => {
+  it('LLM 返回非 JSON → 抛 MVP_LLM_PARSE_FAILED（无模板兜底）', async () => {
     const input = makeInput({ query: queryReturning('这不是 JSON，只是人话') })
-    const result = await generateMvpLlm(input)
-    expect(result.generated_by).toBe('template')
-    expect(result.files).toEqual([])
+    await expect(generateMvpLlm(input)).rejects.toThrow('MVP_LLM_PARSE_FAILED')
   })
 
-  it('LLM 返回空 files（合法 JSON 但 files:[]）→ 返回 template 兜底', async () => {
+  it('LLM 返回空 files（合法 JSON 但 files:[]）→ 抛 MVP_LLM_INVALID_OUTPUT', async () => {
     const input = makeInput({ query: queryReturning(JSON.stringify({ files: [], run_command: 'npm start' })) })
-    const result = await generateMvpLlm(input)
-    expect(result.generated_by).toBe('template')
-    expect(result.files).toEqual([])
+    await expect(generateMvpLlm(input)).rejects.toThrow('MVP_LLM_INVALID_OUTPUT')
   })
 
-  it('LLM 返回空输出（零 token，流无任何消息）→ 返回 template 兜底', async () => {
+  it('LLM 返回空输出（零 token，流无任何消息）→ 抛 MVP_LLM_PARSE_FAILED', async () => {
     const input = makeInput({ query: zeroTokenQuery })
-    const result = await generateMvpLlm(input)
-    expect(result.generated_by).toBe('template')
-    expect(result.files).toEqual([])
+    await expect(generateMvpLlm(input)).rejects.toThrow('MVP_LLM_PARSE_FAILED')
   })
 
-  it('LLM 抛错 → 错误向上传播（由 runMvpTask 捕获走兜底）', async () => {
+  it('LLM 抛错 → 错误向上传播（由 runMvpTask 向上报错，不降级）', async () => {
     const input = makeInput({ query: throwingQuery })
     await expect(generateMvpLlm(input)).rejects.toThrow('model network error')
   })
 
-  it('LLM 超时（注入短 timeoutMs）→ 返回 template 兜底，不抛错', async () => {
+  it('LLM 超时（注入短 timeoutMs）→ 抛 MVP_LLM_TIMEOUT（无模板兜底）', async () => {
     const input = makeInput({ query: hangingQuery, timeoutMs: 50 })
-    const result = await generateMvpLlm(input)
-    expect(result.generated_by).toBe('template')
-    expect(result.files).toEqual([])
+    await expect(generateMvpLlm(input)).rejects.toThrow('MVP_LLM_TIMEOUT')
   })
 
   it('LLM 外部取消（先于 timeoutMs 触发外部 signal）→ 抛错向上传播', async () => {
@@ -143,20 +134,16 @@ describe('MvpEngineLlm generation (A2-14b)', () => {
     await expect(pending).rejects.toThrow('cancelled')
   })
 
-  it('path 路径穿越（../evil.js）→ 整批拒绝走 template 兜底', async () => {
+  it('path 路径穿越（../evil.js）→ 整批拒绝抛 MVP_LLM_PATH_REJECTED', async () => {
     const json = JSON.stringify({ files: [{ path: '../evil.js', content: 'x' }, { path: 'index.html', content: 'ok' }], run_command: 'npm start' })
     const input = makeInput({ query: queryReturning(json) })
-    const result = await generateMvpLlm(input)
-    expect(result.generated_by).toBe('template')
-    expect(result.files).toEqual([])
+    await expect(generateMvpLlm(input)).rejects.toThrow('MVP_LLM_PATH_REJECTED')
   })
 
-  it('path 绝对路径（/abs/path.js）→ 整批拒绝走 template 兜底', async () => {
+  it('path 绝对路径（/abs/path.js）→ 整批拒绝抛 MVP_LLM_PATH_REJECTED', async () => {
     const json = JSON.stringify({ files: [{ path: '/abs/path.js', content: 'x' }], run_command: 'npm start' })
     const input = makeInput({ query: queryReturning(json) })
-    const result = await generateMvpLlm(input)
-    expect(result.generated_by).toBe('template')
-    expect(result.files).toEqual([])
+    await expect(generateMvpLlm(input)).rejects.toThrow('MVP_LLM_PATH_REJECTED')
   })
 
   it('模型返回 package.json content → 被忽略，系统重写为固定 start 脚本', async () => {
@@ -169,7 +156,6 @@ describe('MvpEngineLlm generation (A2-14b)', () => {
     })
     const input = makeInput({ query: queryReturning(json) })
     const result = await generateMvpLlm(input)
-    expect(result.generated_by).toBe('llm')
     const packageJson = readFileSync(join(findRoot(input), 'package.json'), 'utf8')
     expect(packageJson).toContain('"start": "node static-server"')
     expect(packageJson).not.toContain('evil')
@@ -185,19 +171,16 @@ describe('MvpEngineLlm generation (A2-14b)', () => {
     })
     const input = makeInput({ query: queryReturning(json) })
     const result = await generateMvpLlm(input)
-    expect(result.generated_by).toBe('llm')
     const staticServer = readFileSync(join(findRoot(input), 'static-server.js'), 'utf8')
     expect(staticServer).toContain('process.env.PORT')
     expect(staticServer).toContain("connect-src 'none'")
     expect(staticServer).not.toContain('evil node code')
   })
 
-  it('files 数量超上限（>10）→ 返回 template 兜底', async () => {
+  it('files 数量超上限（>10）→ 抛 MVP_LLM_INVALID_OUTPUT', async () => {
     const files = Array.from({ length: 11 }, (_, i) => ({ path: `src/f${i}.js`, content: 'x' }))
     const input = makeInput({ query: queryReturning(JSON.stringify({ files, run_command: 'npm start' })) })
-    const result = await generateMvpLlm(input)
-    expect(result.generated_by).toBe('template')
-    expect(result.files).toEqual([])
+    await expect(generateMvpLlm(input)).rejects.toThrow('MVP_LLM_INVALID_OUTPUT')
   })
 
   it('模型在 index.html 写内联 meta CSP → 被剥离，避免与平台 CSP 冲突导致 eval/内联脚本被拦', async () => {
@@ -213,7 +196,6 @@ describe('MvpEngineLlm generation (A2-14b)', () => {
     const input = makeInput({ query: queryReturning(json) })
     const result = await generateMvpLlm(input)
 
-    expect(result.generated_by).toBe('llm')
     const indexHtml = readFileSync(join(findRoot(input), 'index.html'), 'utf8')
     expect(indexHtml).not.toMatch(/http-equiv\s*=\s*["']?content-security-policy/i)
     expect(indexHtml).toContain('+')

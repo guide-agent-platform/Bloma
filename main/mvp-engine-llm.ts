@@ -7,13 +7,13 @@ import { renderPackageJson, renderStaticServer, type GeneratedMvpFile } from './
 import type { MessageContentBlock } from '../shared/types'
 
 /**
- * MvpEngineLlm — A2-14b：从已确认需求真实生成可运行 MVP 代码（LLM 生成型，模板降级为兜底）。
+ * MvpEngineLlm — A2-14b：从已确认需求真实生成可运行 MVP 代码（LLM 生成型，无模板兜底）。
  *
  * - 模型只输出一个 JSON `{ files:[{path,content}], run_command, assumptions, risks }`；
  * - 文件路径白名单校验（模型可写仅 index.html / src/*.js / src/*.css），
  *   package.json 与 static-server.js 由系统固定写入（不接受模型 content）；
- * - 120s 硬超时（对齐 R-WAIT-03）：超时/解析失败/非 JSON/空输出/空 files → 返回 template 兜底；
- *   外部取消 → 抛错向上；仅网络/模型错误等非中止异常向上抛。
+ * - 120s 硬超时（对齐 R-WAIT-03）：超时/解析失败/非 JSON/空输出/空 files/路径非法/超文件数
+ *   一律抛错向上传播；外部取消抛 AGENT_CANCELLED。不再降级为模板（模板仅保留在 repair-engine 自动修复）。
  */
 
 export interface GenerateMvpLlmInput {
@@ -32,7 +32,6 @@ export interface GenerateMvpLlmResult {
   run_command: string
   assumptions: string[]
   risks: string[]
-  generated_by: 'llm' | 'template'
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000
@@ -57,11 +56,11 @@ const SYSTEM_PROMPT = `你是「Bloma MVP 生成器」，负责把已确认的�
  "risks":["..."]}
 
 硬性约束：
+- 严格按照用户提供的需求清单实现对应功能，不要擅自替换成其他应用（如计算器、待办清单、记账本等）——用户要什么就做什么。
 - 纯前端应用，零外部依赖，仅 index.html / src/app.js / src/styles.css 三个文件，可本地 npm start 启动。
 - 运行在安全沙箱内：CSP connect-src 为 none，应用不得发起任何外部网络请求（不 fetch/XHR/WebSocket 外部地址）。
-- index.html 必须包含四则运算符按钮：+（加）、−（减）、×（乘）、÷（除）。
-- src/app.js 必须包含名为 calculate 的四则运算逻辑函数。
-- 严禁使用 eval()、new Function()、Function() 构造器、setTimeout/setInterval 传字符串等动态执行方式——它们会被沙箱 CSP 拦截导致按钮无响应。四则运算请用显式的 if/switch 分支或运算符判断实现。
+- index.html 提供用户可见的功能入口与交互控件（按钮/输入框等），src/app.js 实现对应的交互逻辑。
+- 严禁使用 eval()、new Function()、Function() 构造器、setTimeout/setInterval 传字符串等动态执行方式——它们会被沙箱 CSP 拦截导致按钮无响应。交互逻辑请用显式的 if/switch 分支或事件监听实现。
 - index.html 中不要写 <meta http-equiv="Content-Security-Policy"> 标签（沙箱 CSP 由平台统一注入，内联 meta 会与之冲突导致脚本被拦）。
 - 只输出 JSON，其余一律不要。`
 
@@ -90,21 +89,23 @@ export async function generateMvpLlm(input: GenerateMvpLlmInput): Promise<Genera
         if (text) accumulated += text
       }
     } catch (error) {
-      // 按触发源区分语义（不依赖错误类型）：自建 timeout controller 先触发 → 超时返回 template；
-      // 外部 signal 先触发 → 取消语义向上抛；其余网络/模型错误 → 向上抛由 runMvpTask 兜底。
-      if (selfController.signal.aborted) return templateFallback()
+      // 按触发源区分语义（不依赖错误类型）：自建 timeout controller 先触发 → 超时抛错；
+      // 外部 signal 先触发 → 取消语义向上抛；其余网络/模型错误 → 向上抛。
+      if (selfController.signal.aborted) throw new Error('MVP_LLM_TIMEOUT: 模型生成超时，已取消本次生成')
       throw error
     }
 
-    // 流正常结束但自建 controller 已触发（mock 流在 abort 后仍返回）→ 超时兜底
-    if (selfController.signal.aborted) return templateFallback()
+    // 流正常结束但自建 controller 已触发（mock 流在 abort 后仍返回）→ 超时抛错
+    if (selfController.signal.aborted) throw new Error('MVP_LLM_TIMEOUT: 模型生成超时，已取消本次生成')
     if (input.signal?.aborted) throw new Error('AGENT_CANCELLED')
 
     const parsed = parseMvpJson(accumulated)
-    if (!parsed || parsed.files.length === 0 || parsed.files.length > MAX_FILES) return templateFallback()
+    if (!parsed) throw new Error('MVP_LLM_PARSE_FAILED: 模型输出无法解析为有效 JSON')
+    if (parsed.files.length === 0) throw new Error('MVP_LLM_INVALID_OUTPUT: 模型未返回任何文件')
+    if (parsed.files.length > MAX_FILES) throw new Error(`MVP_LLM_INVALID_OUTPUT: 模型返回文件数超过上限 ${MAX_FILES}`)
 
     const modelFiles = validateFilePaths(parsed.files)
-    if (!modelFiles) return templateFallback()
+    if (!modelFiles) throw new Error('MVP_LLM_PATH_REJECTED: 模型返回了非法的文件路径')
 
     const project = findProject(input.project_id)
     const finalFiles: GeneratedMvpFile[] = [
@@ -123,7 +124,6 @@ export async function generateMvpLlm(input: GenerateMvpLlmInput): Promise<Genera
       run_command: typeof parsed.run_command === 'string' && parsed.run_command.trim() ? parsed.run_command : 'npm start',
       assumptions: parsed.assumptions ?? [],
       risks: parsed.risks ?? [],
-      generated_by: 'llm',
     }
   } finally {
     clearTimeout(timer)
@@ -144,7 +144,7 @@ function combineSignals(self: AbortSignal, external?: AbortSignal): AbortSignal 
 function buildPrompt(requirements: SketchRequirement[]): string {
   const list = requirements.length
     ? requirements.map((r) => `- ${r.id}: ${r.description}`).join('\n')
-    : '- F-001: 基础四则运算计算器'
+    : '- F-001: 一个可运行、可交互的功能页面'
   return `请生成以下需求的 MVP：\n${list}`
 }
 
@@ -235,6 +235,3 @@ function extractText(blocks: MessageContentBlock[]): string {
     .join('')
 }
 
-function templateFallback(): GenerateMvpLlmResult {
-  return { files: [], run_command: 'npm start', assumptions: [], risks: [], generated_by: 'template' }
-}

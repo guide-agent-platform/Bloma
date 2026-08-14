@@ -111,11 +111,13 @@ describe('Mvp workflow task (A2-04 runMvpTask)', () => {
     }))
     setProgrammingEventPublisher((event) => events.push(event.type))
 
+    createTestChannel(true)
     const result = await runMvpTask({
       request_id: 'req-task',
       session_id: 'session-1',
       project_id: project.project_id,
       mode: 'quick',
+      query: calculatorQuery(),
     })
 
     expect(result.preview_url).toBe('http://localhost:3100')
@@ -138,9 +140,9 @@ describe('Mvp workflow task (A2-04 runMvpTask)', () => {
     expect(existsSync(join(documentsDir, 'mvp_before_generation.md'))).toBe(true)
   })
 
-  // ── A2-14b：runMvpTask 的 LLM 生成路径与模板兜底 ──
+  // ── A2-14b：runMvpTask 的 LLM 生成路径（无模板兜底）──
 
-  it('无渠道时直接模板兜底（即使传入 query）', async () => {
+  it('无渠道时抛错（即使传入 query，无模板兜底）', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-mvp-nolllm-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
@@ -148,19 +150,16 @@ describe('Mvp workflow task (A2-04 runMvpTask)', () => {
     setSandboxRuntimeForTests({ portAllocator: async () => 3201, healthCheck: async () => true, processFactory: () => makeChildProcess() })
     setSnapshotCaptureProviderForTests(async () => ({ extension: 'png', buffer: Buffer.from('fake-png') }))
 
-    const result = await runMvpTask({
+    await expect(runMvpTask({
       request_id: 'req-task',
       session_id: 'session-1',
       project_id: project.project_id,
       mode: 'quick',
       query: calculatorQuery(),
-    })
-
-    expect(result.snapshot.summary).not.toContain('LLM 生成')
-    expect(result.run_command).toBe('npm start')
+    })).rejects.toThrow('没有可用的模型渠道')
   })
 
-  it('渠道存在但 decryptApiKey 失败 → 跳过 LLM 直接模板兜底', async () => {
+  it('渠道存在但 decryptApiKey 失败 → 抛 API_KEY_DECRYPT_FAILED（无模板兜底）', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-mvp-badkey-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
@@ -169,16 +168,14 @@ describe('Mvp workflow task (A2-04 runMvpTask)', () => {
     setSandboxRuntimeForTests({ portAllocator: async () => 3202, healthCheck: async () => true, processFactory: () => makeChildProcess() })
     setSnapshotCaptureProviderForTests(async () => ({ extension: 'png', buffer: Buffer.from('fake-png') }))
 
-    const result = await runMvpTask({
+    await expect(runMvpTask({
       request_id: 'req-task',
       session_id: 'session-1',
       project_id: project.project_id,
       mode: 'quick',
       channel_id: channel.id,
       query: calculatorQuery(),
-    })
-
-    expect(result.snapshot.summary).not.toContain('LLM 生成')
+    })).rejects.toThrow('API_KEY_DECRYPT_FAILED')
   })
 
   it('有渠道且 LLM 成功 → 快照 summary 体现 LLM 产出、run_command 强制 npm start、产物为真实计算器', async () => {
@@ -207,7 +204,7 @@ describe('Mvp workflow task (A2-04 runMvpTask)', () => {
     expect(readFileSync(join(project.root_path, 'src', 'app.js'), 'utf8')).toContain('calculate')
   })
 
-  it('有渠道但 input.query 缺失 → query 门禁直接模板兜底', async () => {
+  it('有渠道但 input.query 缺失 → 抛 MVP_GENERATION_FAILED（无模板兜底）', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-mvp-noquery-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
@@ -216,18 +213,16 @@ describe('Mvp workflow task (A2-04 runMvpTask)', () => {
     setSandboxRuntimeForTests({ portAllocator: async () => 3204, healthCheck: async () => true, processFactory: () => makeChildProcess() })
     setSnapshotCaptureProviderForTests(async () => ({ extension: 'png', buffer: Buffer.from('fake-png') }))
 
-    const result = await runMvpTask({
+    await expect(runMvpTask({
       request_id: 'req-task',
       session_id: 'session-1',
       project_id: project.project_id,
       mode: 'quick',
       // 不传 query
-    })
-
-    expect(result.snapshot.summary).not.toContain('LLM 生成')
+    })).rejects.toThrow('MVP_GENERATION_FAILED')
   })
 
-  it('收到 query 但 LLM 抛错 → 捕获走模板兜底，管线不中断', async () => {
+  it('收到 query 但 LLM 抛错 → 错误向上传播，管线中断（无模板兜底）', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-mvp-llmerr-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
@@ -236,16 +231,13 @@ describe('Mvp workflow task (A2-04 runMvpTask)', () => {
     setSandboxRuntimeForTests({ portAllocator: async () => 3205, healthCheck: async () => true, processFactory: () => makeChildProcess() })
     setSnapshotCaptureProviderForTests(async () => ({ extension: 'png', buffer: Buffer.from('fake-png') }))
 
-    const result = await runMvpTask({
+    await expect(runMvpTask({
       request_id: 'req-task',
       session_id: 'session-1',
       project_id: project.project_id,
       mode: 'quick',
       query: throwingQuery(),
-    })
-
-    expect(result.snapshot.summary).not.toContain('LLM 生成')
-    expect(findProject(project.project_id).current_stage).toBe('testing')
+    })).rejects.toThrow('model network error')
   })
 })
 

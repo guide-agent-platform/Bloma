@@ -47,9 +47,9 @@ export async function runGwtScenarios(input: RunGwtInput): Promise<GwtTestResult
   const html = input.preview_url ? await fetchHtml(input.preview_url) : undefined
   const appJs = input.preview_url ? await fetchAppJs(input.preview_url) : undefined
 
-  // LLM 产物功能断言（A2-14b）：真计算器的 index.html 未必内嵌需求描述原文，
-  // 改用「四则运算符按钮 + calculate 逻辑」判定，避免误判失败进 repair 被模板替换。
-  if (html !== undefined && appJs !== undefined && hasFourOperators(html) && appJs.includes('calculate')) {
+  // LLM 产物功能断言（A2-14b）：模型产物的 index.html 未必内嵌需求描述原文（措辞不同会假阴性），
+  // 改用领域无关的「交互控件 + 脚本逻辑」判定，避免误判失败进 repair 被模板替换。
+  if (html !== undefined && appJs !== undefined && hasInteractiveEntry(html, appJs)) {
     return { total_count: items.length, passed_count: items.length, failed_count: 0, failure_summary: [] }
   }
 
@@ -89,9 +89,17 @@ async function fetchAppJs(previewUrl: string): Promise<string | undefined> {
   }
 }
 
-/** 判定 HTML 是否含四则运算符按钮（LLM 产物功能断言的一部分，供 gwt 与 judge 共用）。 */
-export function hasFourOperators(html: string): boolean {
-  return ['+', '−', '×', '÷'].every((op) => html.includes(op))
+/**
+ * LLM 产物功能断言（领域无关）：判定页面是否提供可交互的功能入口，供 gwt 与 judge 共用。
+ * 不依赖具体领域（计算器/待办/音乐合成器等），只要 index.html 含交互控件且 src/app.js 有脚本逻辑，
+ * 即视为功能入口存在。模板产物通常直接内嵌需求原文、走原文匹配；此断言兜底覆盖
+ * 「LLM 措辞与需求原文不同」导致的假阴性。占位实现（无浏览器）下的启发式，C 的 GWTTestRunner 交付后替换。
+ */
+export function hasInteractiveEntry(html: string, appJs: string): boolean {
+  if (!html || !appJs) return false
+  const hasControl = /<(button|input|select|textarea|a|form)\b/i.test(html)
+  const hasLogic = /\b(addEventListener|onclick|oninput|onchange|onsubmit|function)\b/i.test(appJs)
+  return hasControl && hasLogic
 }
 
 /** 将 GWT 执行结果写为测试报告（本模块唯一写盘，供裁判读取）。 */
