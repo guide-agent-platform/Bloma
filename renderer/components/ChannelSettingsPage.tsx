@@ -13,7 +13,7 @@
  * 说明：
  *   已对接 electronAPI.channels.*（list/create/test/delete），
  *   A 侧已在 main/ipc.ts + preload/bridge.ts 完整实现。
- *   无 Electron 环境（demo）时回退本地 mock，保证 UI 可交互。
+ *   仅支持真实 Electron 链路，无主进程时静默跳过。
  *
  * 集成方式：
  *   在 App.tsx 的 settings 路由中渲染，或通过设置面板/弹窗打开。
@@ -349,11 +349,7 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
 
   useEffect(() => {
     const api = window.electronAPI
-    if (!api?.channels?.list) {
-      // demo / 无 Electron 环境：直接进入空列表
-      setLoading('loaded')
-      return
-    }
+    if (!api?.channels?.list) return
     setLoading('loading')
     void api.channels
       .list({ request_id: crypto.randomUUID() })
@@ -373,24 +369,7 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
   const handleCreateChannel = useCallback(
     (input: ChannelCreateInput) => {
       const api = window.electronAPI
-      if (!api?.channels?.create) {
-        // demo / 无 Electron 环境：本地追加一条（key 只展示掩码 '***'）
-        setChannels((prev) => [
-          ...prev,
-          {
-            id: `ch-${Date.now()}`,
-            name: input.name,
-            provider_type: input.provider_type,
-            base_url: input.base_url || '',
-            api_key: '***',
-            models: input.models ?? [],
-            enabled: true,
-          },
-        ])
-        setSaving(false)
-        setShowForm(false)
-        return
-      }
+      if (!api?.channels?.create) return
       setSaving(true)
       void api.channels
         .create({ request_id: crypto.randomUUID(), ...input })
@@ -415,16 +394,7 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
   const handleTestConnection = useCallback(
     (channelId: string) => {
       const api = window.electronAPI
-      if (!api?.channels?.test) {
-        // demo / 无 Electron 环境：本地判断是否存在
-        const exists = channels.some((c) => c.id === channelId)
-        setTestResult({
-          channelId,
-          ok: exists,
-          message: exists ? '连接成功，模型列表已同步' : '渠道不存在，请刷新后重试',
-        })
-        return
-      }
+      if (!api?.channels?.test) return
       setTestingId(channelId)
       setTestResult(null)
       void api.channels
@@ -441,7 +411,7 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
         })
         .finally(() => setTestingId(null))
     },
-    [channels, setTestResult],
+    [setTestResult],
   )
 
   // ==================== 删除渠道 ====================
@@ -449,12 +419,7 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
   const handleDeleteChannel = useCallback(
     (channelId: string) => {
       const api = window.electronAPI
-      if (!api?.channels?.delete) {
-        // demo / 无 Electron 环境：本地移除
-        setChannels((prev) => prev.filter((c) => c.id !== channelId))
-        setDeleteConfirmId(null)
-        return
-      }
+      if (!api?.channels?.delete) return
       void api.channels
         .delete({ channel_id: channelId, request_id: crypto.randomUUID() })
         .then((result) => {

@@ -18,6 +18,7 @@ import {
   currentProjectAtom,
   agentMessagesFamily,
   appendMessageToSession,
+  markDecisionConsumed,
   activeAgentSessionIdAtom,
   snapshotsListAtom,
   previewUrlAtom,
@@ -27,11 +28,6 @@ import {
   loadSnapshots,
 } from './atoms'
 import type { ProjectMode, WorkflowStage } from './atoms'
-
-/**
- * 演示用示例草图（与 demo.html 中 SAMPLE_SKETCH 完全一致）。
- */
-const SAMPLE_SKETCH = `<html><head><meta charset="UTF-8"><style>body{font-family:'Inter',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:linear-gradient(135deg,#F4F3FA,#FDF2F8);color:#1D1D1F}.app{text-align:center;padding:40px;max-width:440px;width:100%}h1{background:linear-gradient(135deg,#7C3AED,#EC4899);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:6px;font-size:22px;font-weight:700}.sub{color:#6E6E73;margin-bottom:28px;font-size:13px}.card{background:#fff;border:1px solid #E6E5EE;border-radius:16px;padding:18px 20px;margin:10px 0;text-align:left;box-shadow:0 4px 16px -4px rgba(29,29,31,.08)}.card h3{margin-bottom:2px;font-size:12px;color:#6E6E73;font-weight:500}.card .val{font-size:24px;font-weight:700;margin-top:4px}.income{color:#10B981}.expense{color:#DC2626}.balance{color:#7C3AED}</style></head><body><div class="app"><h1>记账应用 · 草图预览</h1><p class="sub">Sprint 1 演示 · 实际由编程Agent生成</p><div class="card"><h3>本月收入</h3><p class="val income">¥ 12,500</p></div><div class="card"><h3>本月支出</h3><p class="val expense">¥ 8,320</p></div><div class="card"><h3>本月结余</h3><p class="val balance">¥ 4,180</p></div></div></body></html>`
 
 /**
  * 这些阶段后端已产出可渲染文件（草图 / MVP）。回访恢复或重启后，旧沙箱进程已死，
@@ -86,14 +82,10 @@ const AppRoutes: React.FC = () => {
   const [waiting, setWaiting] = useState(false)
   const [waitStart, setWaitStart] = useState<number | undefined>()
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>('empty')
-  const [sessionId, setSessionId] = useState<string>(() => `demo-${Date.now()}`)
+  const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID())
   const [confirmingSketch, setConfirmingSketch] = useState(false)
-  const [samplePreviewUrl] = useState(() => {
-    try { return URL.createObjectURL(new Blob([SAMPLE_SKETCH], { type: 'text/html' })) }
-    catch { return undefined }
-  })
 
-  // 本地项目列表（演示模式）
+  // 本地项目列表（真实 IPC 返回的项目索引）
   const [projectList, setProjectList] = useState<Project[]>([])
 
   // 回访恢复：加载历史消息期间的骨架占位开关
@@ -194,24 +186,9 @@ const AppRoutes: React.FC = () => {
   const handleModeSelected = useCallback((selectedMode: 'quick' | 'longterm') => {
     setMode(selectedMode)
 
-    // 复用 ModeSelectionPage 经 api.project.create 建好的真实项目（读 store 拿最新值，避开闭包过期）；
-    // 仅 demo / 无 Electron 时才造本地假项目。
-    const existing = window.__jotai_store__?.get(currentProjectAtom) ?? null
-    const newProject: Project =
-      existing && !existing.project_id.startsWith('demo-')
-        ? existing
-        : {
-            project_id: `demo-${Date.now()}`,
-            workspace_slug: 'default-software-builder',
-            name: selectedMode === 'quick' ? '我的快速项目' : '我的长期项目',
-            mode: selectedMode,
-            template_type: 'web_fullstack',
-            status: 'active',
-            current_stage: 'clarifying',
-            root_path: '/demo',
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          }
+    // 复用 ModeSelectionPage 经 api.project.create 建好的真实项目（读 store 拿最新值，避开闭包过期）
+    const newProject = window.__jotai_store__?.get(currentProjectAtom) ?? null
+    if (!newProject) return // 无主进程 / 项目创建失败：不进入工作区
 
     // 真实会话 id：后端首次 sendMessage 时经 recordSessionActivity 落会话索引并回填 last_session_id
     const newSessionId = crypto.randomUUID()
@@ -245,7 +222,7 @@ const AppRoutes: React.FC = () => {
   const handleResumeProject = useCallback((project: Project) => {
     setMode(project.mode)
     // 回访恢复：沿用项目最后活跃会话，不新建会话 id（sitemap §2.6）
-    const resumeSessionId = project.last_session_id ?? `demo-resume-${Date.now()}`
+    const resumeSessionId = project.last_session_id ?? crypto.randomUUID()
 
     setProjectMode(project.mode)
     setModeSelected(true)
@@ -282,203 +259,79 @@ const AppRoutes: React.FC = () => {
     setRoute('workspace')
   }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, restorePreview])
 
-  // ==================== "你帮我决定" — 跳过澄清 ====================
-
-  const handleDecideForMe = useCallback(() => {
-    const systemMsg: AgentMessage = {
-      role: 'system',
-      content: [{ type: 'text', text: '好的，我根据常见场景帮你决定方向，直接开始生成草图。' }],
-      timestamp: Date.now(),
-    }
-    setMessages((prev: AgentMessage[]) => [...prev, systemMsg])
-
-    setWaiting(true)
-    setWaitStart(Date.now())
-    setPreviewStatus('loading')
-    setWorkflowStage('generating_sketch')
-    setStageLabel(STAGE_LABEL_MAP.generating_sketch)
-
-    // 模拟生成（1.8s 后响应）
-    setTimeout(() => {
-      setWaiting(false)
-      setPreviewStatus('running')
-
-      const assistantMsg: AgentMessage = {
-        role: 'assistant',
-        content: [{
-          type: 'text',
-          text: '我根据常见使用场景为你生成了初始草图。你可以在左侧预览效果，如果有不满意的地方，点击预览区告诉我哪里需要调整。',
-        }],
-        timestamp: Date.now(),
-      }
-      setMessages((prev: AgentMessage[]) => [...prev, assistantMsg])
-
-      setWorkflowStage('sketch_ready')
-      setStageLabel(STAGE_LABEL_MAP.sketch_ready)
-
-      setSnapshotsList([{
-        snapshot_id: `snap-demo-${Date.now()}`,
-        project_id: 'demo',
-        kind: 'sketch',
-        name: '初始草图 v1',
-        summary: '根据默认假设自动生成',
-        files_archive_path: '/demo/snapshots/sketch/files',
-        health_status: 'healthy',
-        created_at: new Date().toISOString(),
-      }])
-    }, 1800)
-  }, [setMessages, setWorkflowStage, setStageLabel, setSnapshotsList])
-
   // ==================== 发送消息 ====================
 
   const handleSendMessage = useCallback((content: string) => {
     const api = window.electronAPI
+    if (!api?.agent?.sendMessage) return
 
     // 真实链路：交给主进程 runAgent，流式事件由 setupGlobalAgentListeners 驱动 UI
-    if (api?.agent?.sendMessage) {
-      appendMessageToSession(sessionId, {
-        role: 'user',
-        content: [{ type: 'text', text: content }],
-        timestamp: Date.now(),
-      })
-      void api.agent.sendMessage({
-        request_id: crypto.randomUUID(),
-        session_id: sessionId,
-        project_id: currentProject?.project_id ?? projectList[0]?.project_id ?? 'demo',
-        content,
-        mode: mode ?? 'quick',
-        current_stage: currentStage,
-        metadata: { source: 'chat' },
-      })
-      return
-    }
-
-    // demo / 无主进程：保留原有模拟流（含 "你帮我决定" 快捷语）
-    if (content.trim() === '你帮我决定' || content.trim() === '你帮我决定。') {
-      handleDecideForMe()
-      return
-    }
-
-    const userMsg: AgentMessage = {
+    appendMessageToSession(sessionId, {
       role: 'user',
       content: [{ type: 'text', text: content }],
       timestamp: Date.now(),
-    }
-    setMessages((prev: AgentMessage[]) => [...prev, userMsg])
-
-    setWaiting(true)
-    setWaitStart(Date.now())
-    setPreviewStatus('loading')
-    setWorkflowStage('generating_sketch')
-    setStageLabel(STAGE_LABEL_MAP.generating_sketch)
-
-    setTimeout(() => {
-      setWaiting(false)
-      setPreviewStatus('running')
-
-      const assistantMsg: AgentMessage = {
-        role: 'assistant',
-        content: [{
-          type: 'text',
-          text: `收到你的需求：「${content.slice(0, 50)}${content.length > 50 ? '…' : ''}」\n\n我已经理解了你的想法。这是一个演示模式——在实际环境中，向导 Agent 将澄清需求并生成可交互草图。`,
-        }],
-        timestamp: Date.now(),
-      }
-      setMessages((prev: AgentMessage[]) => [...prev, assistantMsg])
-
-      setWorkflowStage('sketch_ready')
-      setStageLabel(STAGE_LABEL_MAP.sketch_ready)
-
-      setSnapshotsList([{
-        snapshot_id: `snap-demo-${Date.now()}`,
-        project_id: 'demo',
-        kind: 'sketch',
-        name: '验证草图 v1',
-        summary: '演示快照：包含一个简单的预览页面',
-        files_archive_path: '/demo/snapshots/sketch/files',
-        health_status: 'healthy',
-        created_at: new Date().toISOString(),
-      }])
-    }, 2000)
-  }, [sessionId, currentProject, projectList, mode, currentStage, handleDecideForMe, setMessages, setWorkflowStage, setStageLabel, setSnapshotsList])
+    })
+    void api.agent.sendMessage({
+      request_id: crypto.randomUUID(),
+      session_id: sessionId,
+      project_id: currentProject?.project_id ?? projectList[0]?.project_id ?? '',
+      content,
+      mode: mode ?? 'quick',
+      current_stage: currentStage,
+      metadata: { source: 'chat' },
+    })
+  }, [sessionId, currentProject, projectList, mode, currentStage])
 
   // ==================== 卡片选项回传（Sprint 2：澄清卡片） ====================
 
   const handleCardOptionSelect = useCallback((option: CardOption) => {
     const api = window.electronAPI
-    if (api?.agent?.sendMessage) {
-      // 点击即有反馈：先本地追加用户气泡（与 handleSendMessage 一致），再回传后端
-      appendMessageToSession(sessionId, {
-        role: 'user',
-        content: [{ type: 'text', text: option.label }],
-        timestamp: Date.now(),
-      })
-      // 真实链路：带 card_option metadata 回传（selected_option_id 对齐契约）
-      void api.agent.sendMessage({
-        request_id: crypto.randomUUID(),
-        session_id: sessionId,
-        project_id: currentProject?.project_id ?? projectList[0]?.project_id ?? 'demo',
-        content: option.label,
-        mode: mode ?? 'quick',
-        current_stage: currentStage,
-        metadata: toCardSelectionMeta(option.id),
-      })
-      return
-    }
-    // demo / 无主进程：回退本地消息流
-    handleSendMessage(option.label)
-  }, [sessionId, currentProject, projectList, mode, currentStage, handleSendMessage])
+    if (!api?.agent?.sendMessage) return
+
+    // 点击即有反馈：先本地追加用户气泡（与 handleSendMessage 一致），再回传后端
+    appendMessageToSession(sessionId, {
+      role: 'user',
+      content: [{ type: 'text', text: option.label }],
+      timestamp: Date.now(),
+    })
+    // 立即消费决策卡片，避免「选了选项卡片还赖着不走」（草图走 LLM 的空窗期）
+    markDecisionConsumed(sessionId)
+    // 真实链路：带 card_option metadata 回传（selected_option_id 对齐契约）
+    void api.agent.sendMessage({
+      request_id: crypto.randomUUID(),
+      session_id: sessionId,
+      project_id: currentProject?.project_id ?? projectList[0]?.project_id ?? '',
+      content: option.label,
+      mode: mode ?? 'quick',
+      current_stage: currentStage,
+      metadata: toCardSelectionMeta(option.id),
+    })
+  }, [sessionId, currentProject, projectList, mode, currentStage])
 
   // ==================== 点选纠错 ====================
 
   const handleCorrectionSubmit = useCallback((payload: { position: { x: number; y: number }; userNote: string; fallbackMode: boolean }) => {
     const api = window.electronAPI
-    if (api?.project?.submitCorrection) {
-      // 真实链路：记录点选纠错（后端 appendProjectEvent + analytics point_correction）
-      appendMessageToSession(sessionId, {
-        role: 'system',
-        content: [{ type: 'text', text: `已收到你的修改意见${payload.userNote ? `：「${payload.userNote}」` : '（你猜模式）'}，我来帮你调整。` }],
-        timestamp: Date.now(),
-      })
-      void api.project.submitCorrection({
-        request_id: crypto.randomUUID(),
-        project_id: currentProject?.project_id ?? projectList[0]?.project_id ?? 'demo',
-        session_id: sessionId,
-        context: {
-          bounding_rect: { x: payload.position.x, y: payload.position.y, width: 0, height: 0 },
-          fallback_mode: payload.fallbackMode,
-        },
-        user_note: payload.userNote || undefined,
-        mode: payload.userNote ? 'user_note' : 'guess',
-      })
-      return
-    }
+    if (!api?.project?.submitCorrection) return
 
-    // demo / 无主进程：保留原有模拟
-    const systemMsg: AgentMessage = {
+    // 真实链路：记录点选纠错（后端 appendProjectEvent + analytics point_correction）
+    appendMessageToSession(sessionId, {
       role: 'system',
       content: [{ type: 'text', text: `已收到你的修改意见${payload.userNote ? `：「${payload.userNote}」` : '（你猜模式）'}，我来帮你调整。` }],
       timestamp: Date.now(),
-    }
-    setMessages((prev: AgentMessage[]) => [...prev, systemMsg])
-
-    setWorkflowStage('repairing')
-    setStageLabel(STAGE_LABEL_MAP.repairing)
-    setPreviewStatus('loading')
-
-    setTimeout(() => {
-      setPreviewStatus('running')
-      setWorkflowStage('sketch_ready')
-      setStageLabel(STAGE_LABEL_MAP.sketch_ready)
-
-      const doneMsg: AgentMessage = {
-        role: 'assistant',
-        content: [{ type: 'text', text: '改好了，你看看效果？不满意随时告诉我。' }],
-        timestamp: Date.now(),
-      }
-      setMessages((prev: AgentMessage[]) => [...prev, doneMsg])
-    }, 1500)
-  }, [sessionId, currentProject, projectList, setMessages, setWorkflowStage, setStageLabel])
+    })
+    void api.project.submitCorrection({
+      request_id: crypto.randomUUID(),
+      project_id: currentProject?.project_id ?? projectList[0]?.project_id ?? '',
+      session_id: sessionId,
+      context: {
+        bounding_rect: { x: payload.position.x, y: payload.position.y, width: 0, height: 0 },
+        fallback_mode: payload.fallbackMode,
+      },
+      user_note: payload.userNote || undefined,
+      mode: payload.userNote ? 'user_note' : 'guess',
+    })
+  }, [sessionId, currentProject, projectList])
 
   // ==================== 快照回滚 ====================
 
@@ -541,27 +394,23 @@ const AppRoutes: React.FC = () => {
   const handleRefreshPreview = useCallback(() => {
     const api = window.electronAPI
     const projectId = currentProject?.project_id ?? projectList[0]?.project_id
-    if (api?.sandbox?.restore && projectId) {
-      setPreviewStatus('loading')
-      void api.sandbox.restore({ request_id: crypto.randomUUID(), project_id: projectId })
-        .then((result) => {
-          if (result?.ok && result.data.preview_url) {
-            setPreviewUrl(result.data.preview_url)
-            setPreviewStatus('running')
-          } else {
-            setPreviewUrl(null)
-            setPreviewStatus('error')
-          }
-        })
-        .catch(() => {
+    if (!api?.sandbox?.restore || !projectId) return
+
+    setPreviewStatus('loading')
+    void api.sandbox.restore({ request_id: crypto.randomUUID(), project_id: projectId })
+      .then((result) => {
+        if (result?.ok && result.data.preview_url) {
+          setPreviewUrl(result.data.preview_url)
+          setPreviewStatus('running')
+        } else {
           setPreviewUrl(null)
           setPreviewStatus('error')
-        })
-      return
-    }
-    // demo / 无主进程：保留原有模拟
-    setPreviewStatus('loading')
-    setTimeout(() => setPreviewStatus('running'), 1500)
+        }
+      })
+      .catch(() => {
+        setPreviewUrl(null)
+        setPreviewStatus('error')
+      })
   }, [currentProject, projectList, setPreviewUrl])
 
   // ==================== 预览失效兜底（P0） ====================
@@ -579,8 +428,8 @@ const AppRoutes: React.FC = () => {
     setRoute('settings')
   }, [])
 
-  // 预览地址：真实流（sketch_ready/mvp_ready 事件）优先；demo 才退回 SAMPLE_SKETCH
-  const effectivePreviewUrl = streamPreviewUrl ?? (previewStatus === 'running' ? samplePreviewUrl : undefined)
+  // 预览地址：由 sketch_ready / mvp_ready 事件回填的沙箱地址（streamPreviewUrl）
+  const effectivePreviewUrl = streamPreviewUrl ?? undefined
   const effectivePreviewStatus: PreviewStatus = streamPreviewUrl ? 'running' : previewStatus
 
   // ==================== 路由渲染 ====================
