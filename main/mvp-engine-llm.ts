@@ -37,6 +37,18 @@ export interface GenerateMvpLlmResult {
 
 const DEFAULT_TIMEOUT_MS = 120_000
 const MAX_FILES = 10
+/** 单次生成默认最大输出 token（对齐全量代码生成，避免 4000 导致三文件 JSON 溢出截断）。 */
+export const DEFAULT_MAX_TOKENS = 8192
+/** 截断升级重试时的输出上限（一次性放宽，成本可控）。 */
+const MAX_MAX_TOKENS = 16384
+/** 生成尝试次数上限：首试 + 一次恢复重试（对齐 ADR-082「一次修复往返」的成本控制）。 */
+const MAX_GENERATION_ATTEMPTS = 2
+
+/** 格式错误（非截断）恢复重试的反馈提示：只要求重输出合法 JSON，不修补内容。 */
+const RETRY_FEEDBACK_PROMPT =
+  '你上一次的输出无法被解析为有效 JSON。请重新只输出一个 JSON 对象' +
+  '（{"files":[{"path":"...","content":"..."}],"run_command":"npm start","assumptions":[],"risks":[]}），' +
+  '不要任何 markdown 代码围栏、不要任何解释文字，确保所有括号与引号完整闭合。'
 
 /** 模型可写白名单：精确单层匹配（index.html 顶层、src/ 下一层 .js/.css）。 */
 const MODEL_WRITABLE_TESTS: ((path: string) => boolean)[] = [
@@ -73,62 +85,136 @@ export async function generateMvpLlm(input: GenerateMvpLlmInput): Promise<Genera
 
   try {
     const prompt = buildPrompt(input.backplane)
-    const history: ConversationTurn[] = [{ role: 'system', content: SYSTEM_PROMPT }]
+    let maxTokens = input.maxTokens ?? DEFAULT_MAX_TOKENS
+    let lastAccumulated = ''
+    let truncated = false
 
-    let accumulated = ''
-    try {
-      const stream = input.query(prompt, {
-        env: input.env,
-        signal: combinedSignal,
-        sessionId: input.sessionId,
-        history,
-        maxTokens: input.maxTokens,
-      })
-      for await (const sdkMessage of stream) {
-        if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue
-        const text = extractText(sdkMessage.message.content)
-        if (text) accumulated += text
+    // 首试 + 一次恢复重试：截断 → 加大 maxTokens 重新生成（内容不能修补）；
+    // 格式错误（非截断）→ 带反馈重试。两种恢复都只做一轮，成本与延迟可控。
+    for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt += 1) {
+      const accumulated = await streamAccumulate(input, prompt, maxTokens, attempt, lastAccumulated, truncated, combinedSignal, selfController)
+      if (input.signal?.aborted) throw new Error('AGENT_CANCELLED')
+
+      const parsed = parseMvpJson(accumulated)
+      if (parsed) {
+        if (parsed.files.length === 0) throw new Error('MVP_LLM_INVALID_OUTPUT: 模型未返回任何文件')
+        if (parsed.files.length > MAX_FILES) throw new Error(`MVP_LLM_INVALID_OUTPUT: 模型返回文件数超过上限 ${MAX_FILES}`)
+
+        const modelFiles = validateFilePaths(parsed.files)
+        if (!modelFiles) throw new Error('MVP_LLM_PATH_REJECTED: 模型返回了非法的文件路径')
+
+        const project = findProject(input.project_id)
+        const finalFiles: GeneratedMvpFile[] = [
+          { path: 'package.json', content: renderPackageJson(project.name) },
+          { path: 'static-server.js', content: renderStaticServer() },
+          ...modelFiles.map(sanitizeModelFile),
+        ]
+        for (const file of finalFiles) {
+          const fullPath = join(project.root_path, file.path)
+          mkdirSync(join(fullPath, '..'), { recursive: true })
+          writeFileSync(fullPath, file.content, 'utf8')
+        }
+
+        return {
+          files: finalFiles,
+          run_command: typeof parsed.run_command === 'string' && parsed.run_command.trim() ? parsed.run_command : 'npm start',
+          assumptions: parsed.assumptions ?? [],
+          risks: parsed.risks ?? [],
+        }
       }
-    } catch (error) {
-      // 按触发源区分语义（不依赖错误类型）：自建 timeout controller 先触发 → 超时抛错；
-      // 外部 signal 先触发 → 取消语义向上抛；其余网络/模型错误 → 向上抛。
-      if (selfController.signal.aborted) throw new Error('MVP_LLM_TIMEOUT: 模型生成超时，已取消本次生成')
-      throw error
+
+      // 解析失败：区分截断与格式错误，决定重试策略。
+      truncated = looksTruncated(accumulated)
+      lastAccumulated = accumulated
+      if (truncated) maxTokens = Math.min(maxTokens * 2, MAX_MAX_TOKENS)
     }
 
-    // 流正常结束但自建 controller 已触发（mock 流在 abort 后仍返回）→ 超时抛错
-    if (selfController.signal.aborted) throw new Error('MVP_LLM_TIMEOUT: 模型生成超时，已取消本次生成')
-    if (input.signal?.aborted) throw new Error('AGENT_CANCELLED')
-
-    const parsed = parseMvpJson(accumulated)
-    if (!parsed) throw new Error('MVP_LLM_PARSE_FAILED: 模型输出无法解析为有效 JSON')
-    if (parsed.files.length === 0) throw new Error('MVP_LLM_INVALID_OUTPUT: 模型未返回任何文件')
-    if (parsed.files.length > MAX_FILES) throw new Error(`MVP_LLM_INVALID_OUTPUT: 模型返回文件数超过上限 ${MAX_FILES}`)
-
-    const modelFiles = validateFilePaths(parsed.files)
-    if (!modelFiles) throw new Error('MVP_LLM_PATH_REJECTED: 模型返回了非法的文件路径')
-
-    const project = findProject(input.project_id)
-    const finalFiles: GeneratedMvpFile[] = [
-      { path: 'package.json', content: renderPackageJson(project.name) },
-      { path: 'static-server.js', content: renderStaticServer() },
-      ...modelFiles.map(sanitizeModelFile),
-    ]
-    for (const file of finalFiles) {
-      const fullPath = join(project.root_path, file.path)
-      mkdirSync(join(fullPath, '..'), { recursive: true })
-      writeFileSync(fullPath, file.content, 'utf8')
+    // 重试耗尽：按最后一种失败原因抛清晰错误，便于上层与用户定位。
+    if (truncated) {
+      throw new Error('MVP_LLM_TRUNCATED: 模型输出被截断（疑似 max_tokens 不足），已尝试加大 token 重试仍失败')
     }
-
-    return {
-      files: finalFiles,
-      run_command: typeof parsed.run_command === 'string' && parsed.run_command.trim() ? parsed.run_command : 'npm start',
-      assumptions: parsed.assumptions ?? [],
-      risks: parsed.risks ?? [],
-    }
+    throw new Error('MVP_LLM_PARSE_FAILED: 模型输出无法解析为有效 JSON')
   } finally {
     clearTimeout(timer)
   }
+}
+
+/**
+ * 单次生成：流式累积 assistant 文本，超时/取消语义与旧实现一致。
+ * 重试时按策略调整 prompt 与历史（截断→全新重生成；格式错误→带反馈续问）。
+ */
+async function streamAccumulate(
+  input: GenerateMvpLlmInput,
+  prompt: string,
+  maxTokens: number,
+  attempt: number,
+  lastAccumulated: string,
+  truncated: boolean,
+  signal: AbortSignal,
+  selfController: AbortController,
+): Promise<string> {
+  const history = buildRetryHistory(input.backplane, attempt, lastAccumulated, truncated)
+  const queryPrompt = attempt === 0 || truncated ? prompt : RETRY_FEEDBACK_PROMPT
+
+  let accumulated = ''
+  try {
+    const stream = input.query(queryPrompt, {
+      env: input.env,
+      signal,
+      sessionId: input.sessionId,
+      history,
+      maxTokens,
+    })
+    for await (const sdkMessage of stream) {
+      if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue
+      const text = extractText(sdkMessage.message.content)
+      if (text) accumulated += text
+    }
+  } catch (error) {
+    // 按触发源区分语义（不依赖错误类型）：自建 timeout controller 先触发 → 超时抛错；
+    // 外部 signal 先触发 → 取消语义向上抛；其余网络/模型错误 → 向上抛。
+    if (selfController.signal.aborted) throw new Error('MVP_LLM_TIMEOUT: 模型生成超时，已取消本次生成')
+    throw error
+  }
+
+  // 流正常结束但自建 controller 已触发（mock 流在 abort 后仍返回）→ 超时抛错
+  if (selfController.signal.aborted) throw new Error('MVP_LLM_TIMEOUT: 模型生成超时，已取消本次生成')
+  return accumulated
+}
+
+/** 重试历史：截断走全新重生成（不加脏输出），格式错误把坏输出作为 assistant 轮次回灌续问。 */
+function buildRetryHistory(backplane: PrdBackplane, attempt: number, lastAccumulated: string, truncated: boolean): ConversationTurn[] {
+  if (attempt === 0 || truncated) return [{ role: 'system', content: SYSTEM_PROMPT }]
+  return [
+    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'user', content: buildPrompt(backplane) },
+    { role: 'assistant', content: lastAccumulated },
+  ]
+}
+
+/** 检测模型输出是否被截断（max_tokens 用尽导致 JSON 未闭合）。只做结构判断，绝不修补内容。 */
+function looksTruncated(text: string): boolean {
+  const cleaned = text.replace(/```(?:json)?/gi, '').trim()
+  const start = cleaned.lastIndexOf('{')
+  if (start < 0) return false
+  // 模型截断惯用的省略/占位符结尾
+  if (/(?:\.\.\.|…)\s*$|\/\/\s*(?:rest|more|remaining|todo|未完|略|其余)\s*$/i.test(cleaned)) return true
+  const tail = cleaned.slice(start)
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (const ch of tail) {
+    if (inString) {
+      if (escaped) { escaped = false; continue }
+      if (ch === '\\') { escaped = true; continue }
+      if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') { inString = true; continue }
+    if (ch === '{' || ch === '[') depth += 1
+    else if (ch === '}' || ch === ']') depth = Math.max(0, depth - 1)
+  }
+  return inString || depth > 0
 }
 
 /** 组合自建超时 signal 与外部 signal：任一触发即中止（等价 AbortSignal.any，Node ≥ 20.3）。 */

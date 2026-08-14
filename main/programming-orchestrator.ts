@@ -4,7 +4,7 @@ import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
 import { buildPrdBackplane, syncDocuments } from './document-engine'
 import { createSnapshot, runSandbox, trackAnalytics } from './platform-services'
-import { generateMvpLlm, type GenerateMvpLlmResult } from './mvp-engine-llm'
+import { DEFAULT_MAX_TOKENS, generateMvpLlm, type GenerateMvpLlmResult } from './mvp-engine-llm'
 import { buildSdkEnv, decryptApiKey, getChannelByIdRaw, getFirstEnabledChannel } from './channel-manager'
 import { findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
 import { generateSketch, type GenerateSketchResult, type SketchRequirement } from './sketch-engine'
@@ -24,6 +24,10 @@ const AUTOMATED_PERMISSION_MODE = 'allow-all' as const
 /** 项目已生成完成（ready）的统一话术：完成通知与 ready 护栏共用，避免两套语义相近的固定文案。 */
 export const READY_COMPLETION_COPY =
   '已经生成好了，可以点右侧预览区的按键试用。有想调整的地方随时告诉我。'
+
+/** 迭代/生成失败时如实告知用户的话术：不假装成功，也不把失败藏成「已经生成好了」。 */
+export const GENERATION_FAILED_COPY =
+  '这次修改没有成功（模型生成失败了），你可以再试一次，或者换个说法描述你的需求。'
 
 type ProgrammingEventPublisher = (event: AgentEvent) => void
 
@@ -264,7 +268,7 @@ async function resolveMvp(input: MvpTaskInput, requirements: SketchRequirement[]
     query: input.query,
     env,
     sessionId: input.session_id,
-    maxTokens: channel.max_tokens ?? 4000,
+    maxTokens: channel.max_tokens ?? DEFAULT_MAX_TOKENS,
   })
 }
 
@@ -504,22 +508,37 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
 
   publishCompletionMessage(input, `好的，我按你的新想法「${truncateCopy(input.prompt, 20)}」重新生成一版。`)
 
-  const mvp = await runMvpTask({
-    request_id: input.request_id,
-    session_id: input.session_id,
-    project_id: input.project_id,
-    mode: input.mode,
-    channel_id: input.channel_id,
-    query: input.query,
-  })
-  await runPostMvpTestingFlow({
-    request_id: input.request_id,
-    session_id: input.session_id,
-    project_id: input.project_id,
-    mode: input.mode,
-    preview_url: mvp.preview_url,
-  })
-  return mvp
+  try {
+    const mvp = await runMvpTask({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+      channel_id: input.channel_id,
+      query: input.query,
+    })
+    await runPostMvpTestingFlow({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+      preview_url: mvp.preview_url,
+    })
+    return mvp
+  } catch (error) {
+    // 迭代失败如实回滚：回到 ready（上一版 MVP 仍完整保留），并如实告知用户。
+    // 否则项目会停在 iterating/generating_mvp，后续「好了吗」落入编程路径被模型
+    // 编造成「已经生成好了」（阶段如实性）。
+    updateProject(input.project_id, { current_stage: 'ready' })
+    publish(input, 'stage_changed', { stage: 'ready' })
+    appendJsonLine(getAgentSessionPath(input.session_id), {
+      role: 'assistant',
+      content: [{ type: 'text', text: GENERATION_FAILED_COPY }],
+      timestamp: Date.now(),
+    })
+    publish(input, 'message_delta', { text: GENERATION_FAILED_COPY })
+    throw error
+  }
 }
 
 /** 为追加的需求项生成不冲突的 id（F-xxx 序号递增，规避已有 id 碰撞）。 */

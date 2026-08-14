@@ -44,6 +44,13 @@ import { hasRequestId, isRecord, requireValue } from './validators'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
 
+/** 从错误信息里提取统一的错误码前缀（如 MVP_LLM_PARSE_FAILED、SANDBOX_RUN_FAILED），缺省 AGENT_SDK_ERROR。 */
+function errorCodeFrom(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  const match = /^([A-Z][A-Z0-9_]*):/.exec(message)
+  return match ? match[1] : 'AGENT_SDK_ERROR'
+}
+
 export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow): void {
   setAgentStreamPublisher((event) => {
     mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, event)
@@ -162,7 +169,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
               session_id: input.session_id,
               project_id: input.project_id,
               type: 'error',
-              payload: { code: 'SANDBOX_RUN_FAILED', message },
+              payload: { code: errorCodeFrom(error), message },
               created_at: new Date().toISOString(),
             })
           })
@@ -203,7 +210,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
             session_id: input.session_id,
             project_id: input.project_id,
             type: 'error',
-            payload: { code: 'SANDBOX_RUN_FAILED', message },
+            payload: { code: errorCodeFrom(error), message },
             created_at: new Date().toISOString(),
           })
         })
