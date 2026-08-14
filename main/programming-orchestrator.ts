@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { AgentEvent, AgentSendMessageInput, Project, ProjectMode, Snapshot, TemplateType } from '../shared/types'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
-import { syncDocuments } from './document-engine'
+import { buildPrdBackplane, syncDocuments } from './document-engine'
 import { createSnapshot, runSandbox, trackAnalytics } from './platform-services'
 import { generateMvpLlm, type GenerateMvpLlmResult } from './mvp-engine-llm'
 import { buildSdkEnv, decryptApiKey, getChannelByIdRaw, getFirstEnabledChannel } from './channel-manager'
@@ -218,9 +218,11 @@ async function resolveMvp(input: MvpTaskInput, requirements: SketchRequirement[]
   }
   const model = channel.models.find((item) => item.enabled)?.id ?? 'claude-sonnet-4-6'
   const env = buildSdkEnv(apiKey, channel.base_url, model)
+  // 生成侧读 PRD 背板（定位/功能项/验收/范围外），而非裸需求清单——主题锚点从 prompt 层压住"货不对板"。
+  const backplane = buildPrdBackplane(findProject(input.project_id), requirements, 'mvp_before_generation')
   return generateMvpLlm({
     project_id: input.project_id,
-    requirements,
+    backplane,
     query: input.query,
     env,
     sessionId: input.session_id,

@@ -70,7 +70,15 @@ describe('MvpEngineLlm generation (A2-14b)', () => {
     const project = createProject({ request_id: 'req-project', mode: 'quick', initial_message: '基础四则运算计算器' })
     return {
       project_id: project.project_id,
-      requirements: [{ id: 'F-001', description: '基础四则运算计算器' }],
+      backplane: {
+        project_id: project.project_id,
+        name: '基础四则运算计算器',
+        positioning: '基础四则运算计算器',
+        requirements: [{ id: 'F-001', description: '基础四则运算计算器' }],
+        acceptance: { 'F-001': '基础四则运算计算器：核心路径可交互，边界与异常输入不崩溃。' },
+        out_of_scope: [],
+        assumptions: [],
+      },
       query: queryReturning(CALCULATOR_JSON),
       env: { PATH: 'x', ANTHROPIC_AUTH_TOKEN: 'test-key' },
       sessionId: 'session-1',
@@ -99,6 +107,41 @@ describe('MvpEngineLlm generation (A2-14b)', () => {
     expect(indexHtml).toContain('÷')
     const appJs = readFileSync(join(findRoot(input), 'src', 'app.js'), 'utf8')
     expect(appJs).toContain('calculate')
+  })
+
+  it('buildPrompt 注入 PRD 背板（产品定位 + 功能项 + 范围外），主题锚点不丢失', async () => {
+    let capturedPrompt = ''
+    const captureQuery: SDKQuery = async function* (prompt: string) {
+      capturedPrompt = prompt
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: CALCULATOR_JSON }] } }
+      yield { type: 'result', subtype: 'success' }
+    }
+    const input = makeInput({
+      query: captureQuery,
+      backplane: {
+        project_id: 'p',
+        name: '音乐合成器',
+        positioning: '音乐合成器',
+        requirements: [
+          { id: 'F-001', description: '音乐合成器' },
+          { id: 'F-002', description: '网页端' },
+        ],
+        acceptance: {
+          'F-001': '音乐合成器：核心路径可交互',
+          'F-002': '网页端：核心路径可交互',
+        },
+        out_of_scope: ['不做移动端 App'],
+        assumptions: [],
+      },
+    })
+
+    await generateMvpLlm(input)
+
+    expect(capturedPrompt).toContain('产品定位：音乐合成器')
+    expect(capturedPrompt).toContain('F-001: 音乐合成器')
+    expect(capturedPrompt).toContain('F-002: 网页端')
+    expect(capturedPrompt).toContain('范围外（不要实现）')
+    expect(capturedPrompt).toContain('不做移动端 App')
   })
 
   it('LLM 返回非 JSON → 抛 MVP_LLM_PARSE_FAILED（无模板兜底）', async () => {

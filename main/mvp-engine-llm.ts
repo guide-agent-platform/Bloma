@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ConversationTurn, SDKQuery } from './orchestrator'
 import { findProject } from './project-service'
-import type { SketchRequirement } from './sketch-engine'
+import type { PrdBackplane } from './sketch-engine'
 import { renderPackageJson, renderStaticServer, type GeneratedMvpFile } from './mvp-engine'
 import type { MessageContentBlock } from '../shared/types'
 
@@ -18,7 +18,8 @@ import type { MessageContentBlock } from '../shared/types'
 
 export interface GenerateMvpLlmInput {
   project_id: string
-  requirements: SketchRequirement[]
+  /** PRD 背板：生成唯一事实源（定位/功能项/验收/范围外），防"货不对板"。 */
+  backplane: PrdBackplane
   query: SDKQuery
   env: Record<string, string>
   signal?: AbortSignal
@@ -71,7 +72,7 @@ export async function generateMvpLlm(input: GenerateMvpLlmInput): Promise<Genera
   const combinedSignal = combineSignals(selfController.signal, input.signal)
 
   try {
-    const prompt = buildPrompt(input.requirements)
+    const prompt = buildPrompt(input.backplane)
     const history: ConversationTurn[] = [{ role: 'system', content: SYSTEM_PROMPT }]
 
     let accumulated = ''
@@ -141,11 +142,29 @@ function combineSignals(self: AbortSignal, external?: AbortSignal): AbortSignal 
   return controller.signal
 }
 
-function buildPrompt(requirements: SketchRequirement[]): string {
-  const list = requirements.length
-    ? requirements.map((r) => `- ${r.id}: ${r.description}`).join('\n')
-    : '- F-001: 一个可运行、可交互的功能页面'
-  return `请生成以下需求的 MVP：\n${list}`
+function buildPrompt(backplane: PrdBackplane): string {
+  const items = backplane.requirements.length
+    ? backplane.requirements
+    : [{ id: 'F-001', description: '一个可运行、可交互的功能页面' }]
+  const list = items.map((r) => `- ${r.id}: ${r.description}`).join('\n')
+  const acceptance = items.map((r) => `- ${r.id}: ${backplane.acceptance[r.id] ?? ''}`).join('\n')
+  const outOfScope = backplane.out_of_scope.length
+    ? backplane.out_of_scope.map((scope) => `- ${scope}`).join('\n')
+    : '- 无'
+  return [
+    `请根据以下 PRD 背板生成 MVP（产品定位是唯一主题锚点，功能项必须全部实现，不得擅自替换成其他应用）。`,
+    ``,
+    `产品定位：${backplane.positioning}`,
+    ``,
+    `功能项：`,
+    list,
+    ``,
+    `验收标准：`,
+    acceptance,
+    ``,
+    `范围外（不要实现）：`,
+    outOfScope,
+  ].join('\n')
 }
 
 interface MvpLlmParsed {
