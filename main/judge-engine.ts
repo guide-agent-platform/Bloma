@@ -3,17 +3,18 @@ import { join } from 'node:path'
 import type { ProjectMode } from '../shared/types'
 import { getDocumentsDir } from '../storage/config-paths'
 import type { GwtTestResult } from './gwt-service'
-import { findProject, readLastSketchRequirements } from './project-service'
+import { findProject } from './project-service'
+import { readPrdBackplane } from './document-engine'
 import { escapeHtml } from './sketch-engine'
 import { hasInteractiveEntry } from './gwt-service'
 
 /**
  * JudgeEngine（A2-10）——只判定、不修改代码。
  *
- * - 硬约束（`return` 即退回）：PRD 存在且核心功能项非空；每个 P0 功能项至少有
- *   1 个 GWT 场景覆盖。
- * - 基础软约束（决策 D4，本 Sprint 只做基础档，避免循环退回）：PRD 功能项在
- *   生成产物中有对应入口、测试全部通过；输出 `pass | suggest | return`。
+ * - 硬约束（`return` 即退回，三方对齐：PRD 功能项 ↔ GWT 场景 ↔ 代码交互入口）：
+ *   ① PRD 背板存在且核心功能项非空；② 每个 P0 功能项至少有 1 个 GWT 场景覆盖；
+ *   ③ 每个 P0 功能项在生成产物中有对应交互入口（快消型只做存在性检查，长期型再做结构比对）。
+ * - 软约束（`suggest`）：测试全部通过。
  * - 输出结构对齐 component-design §11：`{ verdict, hard_constraints[],
  *   soft_constraints[], user_visible_summary, repairable }`。
  * - `user_visible_summary` 使用 P0 可读语言，不含堆栈/内部标识。
@@ -43,7 +44,7 @@ export interface JudgeInput {
 
 export function runJudge(input: JudgeInput): JudgeVerdict {
   const project = findProject(input.project_id)
-  const requirements = readLastSketchRequirements(input.project_id)
+  const requirements = readPrdBackplane(input.project_id).requirements
   const featureIds = readGwtFeatureIds(input.project_id)
 
   // ── 硬约束 ──
@@ -60,12 +61,12 @@ export function runJudge(input: JudgeInput): JudgeVerdict {
       ? `全部 ${requirements.length} 个功能项都有 GWT 场景`
       : `缺少 GWT 场景：${missingGwt.map((item) => item.id).join('、')}`,
   }
-  const hardConstraints: JudgeConstraint[] = [prdPresent, gwtCoverage]
 
-  // ── 基础软约束 ──
-  // 功能入口一致性：LLM 产物不应要求内嵌需求原文（措辞不同会造成假阴性），
-  // 与 GWT 执行同步改用领域无关的功能断言——index.html 含交互控件 + app.js 含脚本逻辑，
-  // 即视为功能项有对应入口；模板产物仍按需求原文转义后的文本匹配兜底。
+  // ── 硬约束：代码交互入口（三方对齐收口，改造 E）──
+  // LLM 产物不应要求内嵌需求原文（措辞不同会造成假阴性），与 GWT 执行同步改用
+  // 领域无关的功能断言——index.html 含交互控件 + app.js 含脚本逻辑，即视为功能项
+  // 有对应入口；模板产物仍按需求原文转义后的文本匹配兜底。快消型只做存在性：
+  // 只要产物整体存在可交互入口即视为全部功能项对齐（长期型再做逐项结构比对）。
   const indexHtml = readProjectHtml(project.root_path)
   const appJs = readProjectAppJs(project.root_path)
   const functionalEntry = hasInteractiveEntry(indexHtml, appJs)
@@ -74,13 +75,16 @@ export function runJudge(input: JudgeInput): JudgeVerdict {
     return !(textualEntry || functionalEntry)
   })
   const codeConsistency: JudgeConstraint = {
-    name: '功能入口一致性',
+    name: '代码交互入口',
     passed: missingEntry.length === 0,
     detail: missingEntry.length === 0
       ? '功能项在页面中有对应入口'
       : `页面缺少入口：${missingEntry.map((item) => item.id).join('、')}`,
   }
-  const softConstraints: JudgeConstraint[] = [codeConsistency]
+  const hardConstraints: JudgeConstraint[] = [prdPresent, gwtCoverage, codeConsistency]
+
+  // ── 软约束：测试结果 ──
+  const softConstraints: JudgeConstraint[] = []
   if (input.test_result) {
     const result = input.test_result
     softConstraints.push({

@@ -56,7 +56,7 @@ describe('Sprint 1 sketch delivery acceptance', () => {
     environment = undefined
   })
 
-  it('[S1-SKETCH-006] 草图应是含内联 CSS 与 JS 的单文件可交互 HTML', () => {
+  it('[S1-SKETCH-006] 草图应是含内联 CSS 的无交互纯外观单文件 HTML', () => {
     environment = useTemporaryPromaHome('bloma-role-c-sketch-file-')
     const project = createProject({
       request_id: 'role-c-sketch-project',
@@ -76,8 +76,13 @@ describe('Sprint 1 sketch delivery acceptance', () => {
     expect(generated.files).toHaveLength(1)
     expect(generated.files[0]?.path).toBe('index.html')
     expect(html).toMatch(/<style>[\s\S]+<\/style>/)
-    expect(html).toMatch(/<script>[\s\S]+<\/script>/)
-    expect(html).toMatch(/addEventListener|onclick=|classList\./)
+    // 无交互：不产出 <script>、无事件绑定，整页 pointer-events 禁用，控件只看不动
+    expect(html).not.toMatch(/<script>/)
+    expect(html).not.toMatch(/addEventListener|onclick=|classList\./)
+    expect(html).toContain('pointer-events: none')
+    // 外观界面：含产品外壳（顶栏 + hero + 功能区块），且区块数受 max_pages 约束
+    expect(html).toContain('topbar')
+    expect(html).toContain('hero')
     expect((html.match(/data-page=/g) ?? []).length).toBeGreaterThanOrEqual(1)
     expect((html.match(/data-page=/g) ?? []).length).toBeLessThanOrEqual(3)
   })

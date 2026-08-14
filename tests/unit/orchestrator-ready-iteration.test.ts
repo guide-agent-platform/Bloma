@@ -156,6 +156,68 @@ describe('ready 护栏意图分流', () => {
       expect.objectContaining({ prompt: '啥意思，我要音乐合成器' }),
     )
   })
+
+  it('ready 阶段模糊否定（L1 未命中、L2 疑似）经 L3 LLM 兜底判为修改 → 进入迭代', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-l3-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    // L3 兜底调用：模型回答 modify
+    setSDKQueryForTests(async function* () {
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'modify' }] } }
+      yield { type: 'result', subtype: 'success' }
+    })
+
+    vi.mocked(findProject).mockReturnValue({
+      project_id: 'project-ready-l3',
+      workspace_slug: 'default-software-builder',
+      current_stage: 'ready',
+    } as never)
+
+    await runAgent({
+      request_id: 'req-l3',
+      session_id: 'session-l3',
+      project_id: 'project-ready-l3',
+      content: '怎么感觉不太对劲，这跟我想要的不一样啊',
+      mode: 'quick',
+      current_stage: 'ready',
+      channel_id: 'test-channel',
+    })
+
+    expect(runIterationTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: '怎么感觉不太对劲，这跟我想要的不一样啊' }),
+    )
+  })
+
+  it('ready 阶段纯进度追问不触发 L3 LLM 调用（延迟不被拖累）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-nol3-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    let sdkCalled = false
+    setAgentStreamPublisher((event) => events.push(event))
+    setSDKQueryForTests(async function* () {
+      sdkCalled = true
+      yield { type: 'result', subtype: 'success' }
+    })
+
+    vi.mocked(findProject).mockReturnValue({
+      project_id: 'project-ready-nol3',
+      current_stage: 'ready',
+    } as never)
+
+    await runAgent({
+      request_id: 'req-nol3',
+      session_id: 'session-nol3',
+      project_id: 'project-ready-nol3',
+      content: '好了吗',
+      mode: 'quick',
+      current_stage: 'ready',
+      channel_id: 'test-channel',
+    })
+
+    expect(runIterationTaskMock).not.toHaveBeenCalled()
+    expect(sdkCalled).toBe(false)
+  })
 })
 
 async function* defaultTestQuery(): AsyncGenerator<SDKMessage> {

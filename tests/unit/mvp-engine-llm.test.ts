@@ -33,6 +33,17 @@ function queryReturning(text: string): SDKQuery {
   }
 }
 
+/** 按调用次序依次返回不同文本（超出后复用最后一个），用于模拟「首试失败、重试成功」。 */
+function querySequence(...texts: string[]): SDKQuery {
+  let call = 0
+  return async function* (): AsyncGenerator<SDKMessage> {
+    const text = texts[Math.min(call, texts.length - 1)] ?? ''
+    call += 1
+    yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }
+    yield { type: 'result', subtype: 'success' }
+  }
+}
+
 const zeroTokenQuery: SDKQuery = async function* (): AsyncGenerator<SDKMessage> {
   // 流无任何消息（零 token）
 }
@@ -70,7 +81,15 @@ describe('MvpEngineLlm generation (A2-14b)', () => {
     const project = createProject({ request_id: 'req-project', mode: 'quick', initial_message: '基础四则运算计算器' })
     return {
       project_id: project.project_id,
-      requirements: [{ id: 'F-001', description: '基础四则运算计算器' }],
+      backplane: {
+        project_id: project.project_id,
+        name: '基础四则运算计算器',
+        positioning: '基础四则运算计算器',
+        requirements: [{ id: 'F-001', description: '基础四则运算计算器' }],
+        acceptance: { 'F-001': '基础四则运算计算器：核心路径可交互，边界与异常输入不崩溃。' },
+        out_of_scope: [],
+        assumptions: [],
+      },
       query: queryReturning(CALCULATOR_JSON),
       env: { PATH: 'x', ANTHROPIC_AUTH_TOKEN: 'test-key' },
       sessionId: 'session-1',
@@ -101,9 +120,90 @@ describe('MvpEngineLlm generation (A2-14b)', () => {
     expect(appJs).toContain('calculate')
   })
 
+  it('buildPrompt 注入 PRD 背板（产品定位 + 功能项 + 范围外），主题锚点不丢失', async () => {
+    let capturedPrompt = ''
+    const captureQuery: SDKQuery = async function* (prompt: string) {
+      capturedPrompt = prompt
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: CALCULATOR_JSON }] } }
+      yield { type: 'result', subtype: 'success' }
+    }
+    const input = makeInput({
+      query: captureQuery,
+      backplane: {
+        project_id: 'p',
+        name: '音乐合成器',
+        positioning: '音乐合成器',
+        requirements: [
+          { id: 'F-001', description: '音乐合成器' },
+          { id: 'F-002', description: '网页端' },
+        ],
+        acceptance: {
+          'F-001': '音乐合成器：核心路径可交互',
+          'F-002': '网页端：核心路径可交互',
+        },
+        out_of_scope: ['不做移动端 App'],
+        assumptions: [],
+      },
+    })
+
+    await generateMvpLlm(input)
+
+    expect(capturedPrompt).toContain('产品定位：音乐合成器')
+    expect(capturedPrompt).toContain('F-001: 音乐合成器')
+    expect(capturedPrompt).toContain('F-002: 网页端')
+    expect(capturedPrompt).toContain('范围外（不要实现）')
+    expect(capturedPrompt).toContain('不做移动端 App')
+  })
+
   it('LLM 返回非 JSON → 抛 MVP_LLM_PARSE_FAILED（无模板兜底）', async () => {
     const input = makeInput({ query: queryReturning('这不是 JSON，只是人话') })
     await expect(generateMvpLlm(input)).rejects.toThrow('MVP_LLM_PARSE_FAILED')
+  })
+
+  it('截断输出 → 加大 maxTokens 重试一次并成功（不做内容级修补）', async () => {
+    const truncated = '{"files":[{"path":"index.html","content":"<button>'
+    const input = makeInput({ query: querySequence(truncated, CALCULATOR_JSON) })
+    const result = await generateMvpLlm(input)
+    expect(result.files.map((f) => f.path)).toEqual([
+      'package.json',
+      'static-server.js',
+      'index.html',
+      'src/app.js',
+      'src/styles.css',
+    ])
+  })
+
+  it('截断输出重试后仍截断 → 抛 MVP_LLM_TRUNCATED', async () => {
+    const truncated = '{"files":[{"path":"index.html","content":"<button>'
+    const input = makeInput({ query: querySequence(truncated, truncated) })
+    await expect(generateMvpLlm(input)).rejects.toThrow('MVP_LLM_TRUNCATED')
+  })
+
+  it('截断重试时 maxTokens 升级到 2 倍（默认 8192 → 16384）', async () => {
+    const truncated = '{"files":[{"path":"index.html","content":"<button>'
+    const maxTokensSeen: number[] = []
+    const query: SDKQuery = async function* (_prompt: string, options: SDKQueryOptions) {
+      maxTokensSeen.push(options.maxTokens ?? -1)
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: truncated }] } }
+      yield { type: 'result', subtype: 'success' }
+    }
+    const input = makeInput({ query })
+    await expect(generateMvpLlm(input)).rejects.toThrow('MVP_LLM_TRUNCATED')
+    expect(maxTokensSeen).toEqual([8192, 16384])
+  })
+
+  it('非截断格式错误 → 带反馈重试（坏输出作为 assistant 回灌 + 反馈提示）', async () => {
+    const calls: { prompt: string; history: { role: string; content: string }[] }[] = []
+    const query: SDKQuery = async function* (prompt: string, options: SDKQueryOptions) {
+      calls.push({ prompt, history: options.history ?? [] })
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '这不是 JSON' }] } }
+      yield { type: 'result', subtype: 'success' }
+    }
+    const input = makeInput({ query })
+    await expect(generateMvpLlm(input)).rejects.toThrow('MVP_LLM_PARSE_FAILED')
+    expect(calls).toHaveLength(2)
+    expect(calls[1].prompt).toContain('无法被解析为有效 JSON')
+    expect(calls[1].history.some((t) => t.role === 'assistant' && t.content === '这不是 JSON')).toBe(true)
   })
 
   it('LLM 返回空 files（合法 JSON 但 files:[]）→ 抛 MVP_LLM_INVALID_OUTPUT', async () => {

@@ -2,12 +2,13 @@ import { randomUUID } from 'node:crypto'
 import type { AgentEvent, AgentSendMessageInput, Project, ProjectMode, Snapshot, TemplateType } from '../shared/types'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
-import { syncDocuments } from './document-engine'
+import { buildPrdBackplane, syncDocuments } from './document-engine'
 import { createSnapshot, runSandbox, trackAnalytics } from './platform-services'
-import { generateMvpLlm, type GenerateMvpLlmResult } from './mvp-engine-llm'
+import { DEFAULT_MAX_TOKENS, generateMvpLlm, type GenerateMvpLlmResult } from './mvp-engine-llm'
 import { buildSdkEnv, decryptApiKey, getChannelByIdRaw, getFirstEnabledChannel } from './channel-manager'
 import { findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
-import { generateSketch, type SketchRequirement } from './sketch-engine'
+import { generateSketch, type GenerateSketchResult, type SketchRequirement } from './sketch-engine'
+import { generateSketchLlm } from './sketch-engine-llm'
 import { readTestReport, runGwtScenarios, writeTestReport, type GwtTestResult } from './gwt-service'
 import { applyRepairPatch, REPAIR_CATEGORY_SUMMARY, runRepairCycle, type RepairCategory } from './repair-engine'
 import { runJudge, type JudgeVerdict } from './judge-engine'
@@ -23,6 +24,10 @@ const AUTOMATED_PERMISSION_MODE = 'allow-all' as const
 /** 项目已生成完成（ready）的统一话术：完成通知与 ready 护栏共用，避免两套语义相近的固定文案。 */
 export const READY_COMPLETION_COPY =
   '已经生成好了，可以点右侧预览区的按键试用。有想调整的地方随时告诉我。'
+
+/** 迭代/生成失败时如实告知用户的话术：不假装成功，也不把失败藏成「已经生成好了」。 */
+export const GENERATION_FAILED_COPY =
+  '这次修改没有成功（模型生成失败了），你可以再试一次，或者换个说法描述你的需求。'
 
 type ProgrammingEventPublisher = (event: AgentEvent) => void
 
@@ -45,6 +50,8 @@ export interface SketchTaskInput {
   mode: ProjectMode
   prompt: string
   requirements?: SketchRequirement[]
+  channel_id?: string
+  query?: SDKQuery
 }
 
 export interface SketchTaskResult {
@@ -82,7 +89,7 @@ export async function runSketchTask(input: SketchTaskInput): Promise<SketchTaskR
   const requirements = input.requirements?.length
     ? input.requirements
     : [{ id: 'F-001', description: input.prompt }]
-  const sketch = generateSketch({ project_id: input.project_id, requirements, max_pages: 3 })
+  const sketch = await resolveSketch(input, requirements)
   recordSketchGenerated(input.project_id, requirements)
   await allowAutomatedTool('run_project', { project_id: input.project_id }, input.session_id, input.project_id)
   const sandbox = await runSandbox({ request_id: input.request_id, project_id: input.project_id })
@@ -132,6 +139,41 @@ export async function runSketchTask(input: SketchTaskInput): Promise<SketchTaskR
   })
 
   return { preview_url: sandbox.preview_url, snapshot, summary: sketch.summary }
+}
+
+/**
+ * resolveSketch — 草图生成来源分流。
+ *
+ * 渠道可用且调用方传入 query 时走 LLM 草图（generateSketchLlm，无交互纯外观、贴合功能项）；
+ * 否则（无渠道 / 密钥不可解密 / LLM 生成失败）回退确定性模板 generateSketch。
+ * 与 MVP 的「无模板兜底」不同：草图是低成本方向确认，不能因 LLM 故障卡死澄清流程。
+ */
+async function resolveSketch(input: SketchTaskInput, requirements: SketchRequirement[]): Promise<GenerateSketchResult> {
+  const channel = input.channel_id ? getChannelByIdRaw(input.channel_id) : getFirstEnabledChannel()
+  if (!channel || !input.query) {
+    return generateSketch({ project_id: input.project_id, requirements, max_pages: 3 })
+  }
+  let apiKey: string
+  try {
+    apiKey = decryptApiKey(channel.api_key)
+  } catch {
+    return generateSketch({ project_id: input.project_id, requirements, max_pages: 3 })
+  }
+  const model = channel.models.find((item) => item.enabled)?.id ?? 'claude-sonnet-4-6'
+  const env = buildSdkEnv(apiKey, channel.base_url, model)
+  try {
+    return await generateSketchLlm({
+      project_id: input.project_id,
+      requirements,
+      query: input.query,
+      env,
+      sessionId: input.session_id,
+      maxTokens: channel.max_tokens ?? 4000,
+    })
+  } catch {
+    // LLM 草图失败（超时/非 HTML/网络错误）回退模板，不阻断草图产出
+    return generateSketch({ project_id: input.project_id, requirements, max_pages: 3 })
+  }
 }
 
 /**
@@ -219,13 +261,15 @@ async function resolveMvp(input: MvpTaskInput, requirements: SketchRequirement[]
   // 模型名用 name（真实模型 ID）：id 是渠道内唯一标识，不能传给 API
   const model = channel.models.find((item) => item.enabled)?.name ?? 'claude-sonnet-4-6'
   const env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
+  // 生成侧读 PRD 背板（定位/功能项/验收/范围外），而非裸需求清单——主题锚点从 prompt 层压住"货不对板"。
+  const backplane = buildPrdBackplane(findProject(input.project_id), requirements, 'mvp_before_generation')
   return generateMvpLlm({
     project_id: input.project_id,
-    requirements,
+    backplane,
     query: input.query,
     env,
     sessionId: input.session_id,
-    maxTokens: channel.max_tokens ?? 4000,
+    maxTokens: channel.max_tokens ?? DEFAULT_MAX_TOKENS,
   })
 }
 
@@ -465,22 +509,37 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
 
   publishCompletionMessage(input, `好的，我按你的新想法「${truncateCopy(input.prompt, 20)}」重新生成一版。`)
 
-  const mvp = await runMvpTask({
-    request_id: input.request_id,
-    session_id: input.session_id,
-    project_id: input.project_id,
-    mode: input.mode,
-    channel_id: input.channel_id,
-    query: input.query,
-  })
-  await runPostMvpTestingFlow({
-    request_id: input.request_id,
-    session_id: input.session_id,
-    project_id: input.project_id,
-    mode: input.mode,
-    preview_url: mvp.preview_url,
-  })
-  return mvp
+  try {
+    const mvp = await runMvpTask({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+      channel_id: input.channel_id,
+      query: input.query,
+    })
+    await runPostMvpTestingFlow({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+      preview_url: mvp.preview_url,
+    })
+    return mvp
+  } catch (error) {
+    // 迭代失败如实回滚：回到 ready（上一版 MVP 仍完整保留），并如实告知用户。
+    // 否则项目会停在 iterating/generating_mvp，后续「好了吗」落入编程路径被模型
+    // 编造成「已经生成好了」（阶段如实性）。
+    updateProject(input.project_id, { current_stage: 'ready' })
+    publish(input, 'stage_changed', { stage: 'ready' })
+    appendJsonLine(getAgentSessionPath(input.session_id), {
+      role: 'assistant',
+      content: [{ type: 'text', text: GENERATION_FAILED_COPY }],
+      timestamp: Date.now(),
+    })
+    publish(input, 'message_delta', { text: GENERATION_FAILED_COPY })
+    throw error
+  }
 }
 
 /** 为追加的需求项生成不冲突的 id（F-xxx 序号递增，规避已有 id 碰撞）。 */

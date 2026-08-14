@@ -17,6 +17,7 @@ import { buildSdkEnv, decryptApiKey, getChannelByIdRaw, getFirstEnabledChannel }
 export { buildSdkEnv } from './channel-manager'
 import { handleGuideMessage } from './guide-agent-service'
 import { READY_COMPLETION_COPY, resolveBlockedDecision, resumeBlockedFlow, runIterationTask, setProgrammingEventPublisher } from './programming-orchestrator'
+import { readPrdBackplane } from './document-engine'
 import { findProject } from './project-service'
 import { recordSessionActivity } from './session-service'
 import { isThinkingLogEnabled, logThinking } from './thinking-log'
@@ -218,7 +219,16 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     // 但必须做意图分流：识别到修改/调整/纠错类输入时，进入迭代重新生成流程，
     // 而不是一律返回固定文案——否则「已生成后继续改」会被挡成「修改黑洞」。
     if (authoritativeStage === 'ready' || authoritativeStage === 'completed') {
-      if (isModificationIntent(input.content)) {
+      const intent = await resolveModificationIntent({
+        content: input.content,
+        project_id: input.project_id,
+        session_id: input.session_id,
+        query: sdkQuery,
+        env,
+        signal: abortController.signal,
+        maxTokens,
+      })
+      if (intent === 'modify') {
         // 让编程管线沿用与 runAgent 相同的流式发布通道，确保迭代事件上屏
         setProgrammingEventPublisher(streamPublisher)
         await runIterationTask({
@@ -667,10 +677,11 @@ function shouldUseGuideAgent(stage: AgentSendMessageInput['current_stage']): boo
 }
 
 /**
- * 识别「修改/调整/纠错」类意图（ready/completed 阶段护栏的意图分流）。
+ * L1 规则快速门——识别「修改/调整/纠错」类意图（毫秒级纯函数）。
  *
  * 用户在项目已生成后继续提的修改诉求（改、换、加、删、调整、重新等）应进入迭代
  * 重新生成流程，而非被 ready 护栏固定文案挡回。纯进度追问（好了吗 / 怎么样了）不命中。
+ * 命中则直接 `modify`，不再走 L2/L3（避免每条消息都付一次 LLM 往返的延迟）。
  */
 function isModificationIntent(text: string): boolean {
   const trimmed = text.trim()
@@ -678,4 +689,98 @@ function isModificationIntent(text: string): boolean {
   // 显式修改动词 + 否定/货不对板/重述主题类表达（"啥意思，我要音乐合成器"、"这不是我想要的"）。
   // 纯进度追问（好了吗/怎么样了）不含这些词，不会被误判为修改意图。
   return /(修改|改一改|改下|改一下|调整|纠错|重做|重来|重新|优化|修正|不要|去掉|删除|删掉|加一个|加个|加上|新增|变成|换成|改成|再来|换个|不对|不是|不满意|搞错|做错|错了|偏了|货不对板|啥意思|什么意思|这不是|我要的是|我想要的是|应该是)/.test(trimmed)
+}
+
+/** L2 疑似判断——带疑问/否定/困惑语气、但未命中 L1 明确词的模糊表达（"这咋是待办"、"感觉怪怪的"）。 */
+function isSuspiciousIntent(text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed) return false
+  // 纯进度追问不进疑似，避免每条"好了吗"都触发 L3 LLM 往返（延迟立场）
+  if (/(好了吗|好了没|好没好|做完了吗|做完了没|完成了吗|完成了没|怎么样|怎么样了|进展|进度|状态)/.test(trimmed)) return false
+  return /(吗|呢|吧|嘛|么|怎么|为什么|为啥|咋|难道|哪|谁|什么|啥|感觉|好像|应该|觉得|奇怪|怪|不像|不一样|不是|不对|错|没|没有|这|那|是不是|对不对)/.test(trimmed)
+}
+
+/**
+ * 分层意图识别——规则快门 + LLM 兜底（改造 F）。
+ *
+ * L1（isModificationIntent）毫秒级命中 → `modify`；未命中进入 L2 疑似判断：
+ * 不疑似（纯进度/闲聊）→ `other`；疑似 → L3 用 LLM + PRD 背板上下文判定
+ * 「是否表达不满/修改诉求」。L3 无可用渠道时保守回退 `other`（固定完成文案），
+ * 不因意图判定失败而误触发需要渠道的迭代流程。
+ */
+async function resolveModificationIntent(opts: {
+  content: string
+  project_id: string
+  session_id: string
+  query: SDKQuery
+  env: Record<string, string> | undefined
+  signal: AbortSignal
+  maxTokens: number
+}): Promise<'modify' | 'other'> {
+  if (isModificationIntent(opts.content)) return 'modify'
+  if (!isSuspiciousIntent(opts.content)) return 'other'
+  if (!opts.env) return 'other'
+  const env = opts.env
+  try {
+    return await classifyIntentViaLlm({ ...opts, env })
+  } catch {
+    // L3 兜底失败不阻断对话：退回固定完成文案，绝不因意图判定异常让用户卡死
+    return 'other'
+  }
+}
+
+/**
+ * L3 LLM 兜底——判定「是否表达不满/修改诉求」。
+ *
+ * 单句文本无法判断用户是否不满（锚点是「当前产物 vs 用户期望」的差），所以把
+ * PRD 背板的定位 + 功能项喂给模型作为上下文锚点。输出只解析一个布尔：是否表达
+ * 修改/不满诉求。这是唯一会产生 LLM 往返的意图判定路径，且仅在 L2 疑似时触发。
+ */
+async function classifyIntentViaLlm(opts: {
+  content: string
+  project_id: string
+  session_id: string
+  query: SDKQuery
+  env: Record<string, string>
+  signal: AbortSignal
+  maxTokens: number
+}): Promise<'modify' | 'other'> {
+  const backplane = readPrdBackplane(opts.project_id)
+  const prompt = buildIntentPrompt(backplane, opts.content)
+
+  const texts: string[] = []
+  for await (const sdk of opts.query(prompt, {
+    env: opts.env,
+    signal: opts.signal,
+    sessionId: opts.session_id,
+    maxTokens: opts.maxTokens,
+  })) {
+    if (sdk.type !== 'assistant' || !sdk.message) continue
+    for (const block of sdk.message.content) {
+      if (block.type === 'text' && block.text) texts.push(block.text)
+    }
+  }
+
+  return /\b(modify|修改|调整|改|重做|重新生成|重新做|换)\b/i.test(texts.join('')) ? 'modify' : 'other'
+}
+
+/** 组装 L3 意图判定的上下文 prompt：PRD 背板定位 + 功能项 + 用户最新消息。 */
+function buildIntentPrompt(backplane: { positioning: string; requirements: Array<{ id: string; description: string }> }, content: string): string {
+  const items = backplane.requirements.length
+    ? backplane.requirements.map((r) => `- ${r.id}: ${r.description}`).join('\n')
+    : '- （无已确认功能项）'
+  return [
+    '你在判断用户对已生成项目的最新消息是否表达「不满或修改诉求」。',
+    '',
+    '【项目原本要什么（PRD 背板）】',
+    `产品定位：${backplane.positioning}`,
+    '功能项：',
+    items,
+    '',
+    '【用户刚刚说】',
+    content,
+    '',
+    '若用户在表达「货不对板 / 要改 / 要重做 / 要换 / 补充需求」请只回答「modify」；',
+    '若只是「问进度 / 闲聊 / 确认状态」请只回答「other」。不要解释。',
+  ].join('\n')
 }

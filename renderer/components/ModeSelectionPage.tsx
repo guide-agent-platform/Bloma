@@ -29,30 +29,28 @@ export const ModeSelectionPage: React.FC<ModeSelectionPageProps> = ({
     try {
       // 通过 IPC 创建项目
       const api = window.electronAPI
-      if (api) {
-        const result = await api.project.create({
-          request_id: crypto.randomUUID(),
-          mode,
-        })
-        if (result.ok) {
-          setCurrentProject(result.data)
-        } else {
-          // 项目创建失败：展示用户可见错误，不进入工作区
-          const message = result.error?.user_visible_message ?? '项目创建失败，请重试。'
-          setError(message)
-          setIsSelecting(false)
-          return
-        }
+      if (!api?.project?.create) {
+        setError('当前环境无法创建项目，请通过桌面应用启动。')
+        return
+      }
+      const result = await api.project.create({
+        request_id: crypto.randomUUID(),
+        mode,
+      })
+      if (result.ok) {
+        setCurrentProject(result.data)
+      } else {
+        // 项目创建失败：展示用户可见错误，不进入工作区
+        const message = result.error?.user_visible_message ?? '项目创建失败，请重试。'
+        setError(message)
+        return
       }
 
       setProjectMode(mode)
       setModeSelected(true)
       onModeSelected(mode)
     } catch {
-      // 开发/演示模式：无 Electron 环境时直接进入
-      setProjectMode(mode)
-      setModeSelected(true)
-      onModeSelected(mode)
+      setError('项目创建失败，请重试。')
     } finally {
       setIsSelecting(false)
     }
