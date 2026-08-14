@@ -109,6 +109,14 @@ describe('DocumentEngine (A2-05)', () => {
     expect(feature1).toContain('Given')
     expect(readFileSync(join(dir, 'features', 'F-002.feature'), 'utf8')).toContain('Feature:')
     expect(result.documents.some((doc) => doc.type === 'gwt_feature')).toBe(true)
+    // 每个功能项覆盖「正常路径 + 边界 + 异常」三类场景（PRD §11.3）
+    expect(feature1.match(/Scenario:/g)).toHaveLength(3)
+    expect(feature1).toContain('核心路径可运行')
+    expect(feature1).toContain('边界输入不崩溃')
+    expect(feature1).toContain('异常输入不崩溃')
+    // 场景文本引用主题词（功能项描述），从 PRD 背板派生
+    expect(feature1).toContain('记录收入与支出')
+    expect(feature1).toContain('验收要点')
   })
 
   it('mounts a test report reference (body written by GWT execution) on mvp_tested', () => {

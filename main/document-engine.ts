@@ -39,24 +39,28 @@ export function syncDocuments(input: DocumentSyncInput): DocumentSyncResult {
   const files: Array<{ relativePath: string; content: string; type: DocumentRef['type'] }> = []
 
   switch (input.checkpoint) {
-    case 'sketch_confirmed':
+    case 'sketch_confirmed': {
+      const backplane = buildPrdBackplane(project, requirements, input.checkpoint)
       files.push(
-        { relativePath: 'sketch_confirmed.md', content: renderPrdDraft(buildPrdBackplane(project, requirements, input.checkpoint)), type: 'prd' },
-        { relativePath: 'prd.json', content: renderPrdJson(buildPrdBackplane(project, requirements, input.checkpoint)), type: 'prd' },
+        { relativePath: 'sketch_confirmed.md', content: renderPrdDraft(backplane), type: 'prd' },
+        { relativePath: 'prd.json', content: renderPrdJson(backplane), type: 'prd' },
       )
       break
-    case 'mvp_before_generation':
+    }
+    case 'mvp_before_generation': {
+      const backplane = buildPrdBackplane(project, requirements, input.checkpoint)
       files.push({
         relativePath: 'mvp_before_generation.md',
-        content: renderPrdFull(buildPrdBackplane(project, requirements, input.checkpoint)),
+        content: renderPrdFull(backplane),
         type: 'prd',
       })
-      files.push(...renderGwtSkeleton(requirements).map((feature) => ({
+      files.push(...renderGwtSkeleton(backplane).map((feature) => ({
         relativePath: `features/${feature.fileName}`,
         content: feature.content,
         type: 'gwt_feature' as const,
       })))
       break
+    }
     case 'mvp_tested':
       files.push({
         relativePath: 'mvp_tested.md',
@@ -278,29 +282,51 @@ function renderSprintPlan(projectName: string): string {
 `
 }
 
-/** GWT 骨架：按需求清单生成 Gherkin feature 文件（确定性模板，不依赖 LLM）。 */
+/** GWT 骨架：按 PRD 背板生成 Gherkin feature 文件（确定性模板，不依赖 LLM）。 */
 export function renderGwtSkeleton(
-  requirements: SketchRequirement[],
+  backplane: PrdBackplane,
 ): Array<{ fileName: string; content: string }> {
-  return readRequirements(requirements).map((item) => {
+  return readRequirements(backplane.requirements).map((item) => {
     const id = safeFileName(item.id)
     const title = shortTitle(item.description)
+    const acceptance = backplane.acceptance[item.id] ?? `${item.description}：核心路径可交互，边界与异常输入不崩溃。`
     return {
       fileName: `${id}.feature`,
-      content: `# GWT 骨架（由 DocumentEngine 生成，GWTTestRunner 执行）
+      content: renderFeatureFile(id, title, item.description, acceptance),
+    }
+  })
+}
+
+/**
+ * 每个功能项生成「正常路径 + 边界 + 异常」三条场景（对齐 PRD §11.3）。
+ * 场景是确定性骨架（快消型无浏览器执行器，实际断言由 gwt-service 的
+ * hasInteractiveEntry / 原文匹配兜底），但保证每个 P0 功能项覆盖三类路径。
+ */
+function renderFeatureFile(id: string, title: string, description: string, acceptance: string): string {
+  return `# GWT 骨架（由 DocumentEngine 生成，GWTTestRunner 执行）
 Feature: ${title}
 
   As a 用户
-  I want ${item.description}
+  I want ${description}
   So that 能完成核心目标
 
   Scenario: 核心路径可运行
     Given 已进入 ${title} 功能页面
     When 我执行核心操作
     Then 页面返回预期结果
-`,
-    }
-  })
+
+  Scenario: 边界输入不崩溃
+    Given 已进入 ${title} 功能页面
+    When 我输入边界值
+    Then 页面不崩溃并给出可理解的反馈
+
+  Scenario: 异常输入不崩溃
+    Given 已进入 ${title} 功能页面
+    When 我输入异常内容
+    Then 页面不崩溃并给出可理解的反馈
+
+  # 验收要点：${acceptance}
+`
 }
 
 function safeFileName(value: string): string {
