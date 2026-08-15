@@ -43,10 +43,10 @@ export interface GenerateMvpLlmResult {
  * `timeoutMs` 语义为「>0 才设 timer」，保留供测试注入短超时。
  */
 const MAX_FILES = 10
-/** 单次生成默认最大输出 token（对齐全量代码生成，避免 4000 导致三文件 JSON 溢出截断）。 */
-export const DEFAULT_MAX_TOKENS = 8192
+/** 单次生成默认最大输出 token（2026-08-16 线上实锤：三文件 JSON 8192 必溢出、隐性截断还骗过 looksTruncated 报成 PARSE_FAILED）。 */
+export const DEFAULT_MAX_TOKENS = 16384
 /** 截断升级重试时的输出上限（一次性放宽，成本可控）。 */
-const MAX_MAX_TOKENS = 16384
+const MAX_MAX_TOKENS = 32768
 /** 生成尝试次数上限：首试 + 一次恢复重试（对齐 ADR-082「一次修复往返」的成本控制）。 */
 const MAX_GENERATION_ATTEMPTS = 2
 

@@ -179,7 +179,7 @@ describe('MvpEngineLlm generation (A2-14b)', () => {
     await expect(generateMvpLlm(input)).rejects.toThrow('MVP_LLM_TRUNCATED')
   })
 
-  it('截断重试时 maxTokens 升级到 2 倍（默认 8192 → 16384）', async () => {
+  it('截断重试时 maxTokens 升级到 2 倍（默认 16384 → 32768，2026-08-16 三文件 JSON 8192 溢出实锤后上调）', async () => {
     const truncated = '{"files":[{"path":"index.html","content":"<button>'
     const maxTokensSeen: number[] = []
     const query: SDKQuery = async function* (_prompt: string, options: SDKQueryOptions) {
@@ -189,7 +189,7 @@ describe('MvpEngineLlm generation (A2-14b)', () => {
     }
     const input = makeInput({ query })
     await expect(generateMvpLlm(input)).rejects.toThrow('MVP_LLM_TRUNCATED')
-    expect(maxTokensSeen).toEqual([8192, 16384])
+    expect(maxTokensSeen).toEqual([16384, 32768])
   })
 
   it('非截断格式错误 → 带反馈重试（坏输出作为 assistant 回灌 + 反馈提示）', async () => {

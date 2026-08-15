@@ -731,9 +731,14 @@ async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions)
     const maxTokens = options.maxTokens ?? 1200
     const budget = Math.min(1024, Math.floor(maxTokens / 2))
     body.thinking = { type: 'enabled', budget_tokens: Math.max(256, budget) }
+  } else {
+    // 显式禁思考（2026-08-16 线上案例：MiniMax-M3 等思考型渠道默认输出 thinking_delta，
+    // 且可能把 max_tokens 预算全部耗在思考上导致正文为零——草图首试 56.5s 零字符纯浪费）。
+    // 本查询只透传 text_delta，思考对产物零贡献，禁掉是最优解。
+    body.thinking = { type: 'disabled' }
   }
 
-  const response = await fetch(`${baseUrl}/v1/messages`, {
+  const requestInit = (): RequestInit => ({
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -743,6 +748,7 @@ async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions)
     body: JSON.stringify(body),
     signal: options.signal,
   })
+  let response = await fetch(`${baseUrl}/v1/messages`, requestInit())
   if (!response.ok) {
     // 诊断增强：读取有界响应体并把可读原因打进主进程日志（仅日志，不进 SDKMessage/UI）。
     // Error message 保持原样，避免 renderer error 事件暴露技术细节。
@@ -750,6 +756,31 @@ async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions)
     try {
       const text = (await response.text()).slice(0, 2000)
       detail = extractErrorMessage(text)
+    } catch {
+      detail = ''
+    }
+    // 兼容性降级：个别渠道/模型不支持显式 thinking 参数（400 且错误提到 thinking/reasoning）——
+    // 移除该参数重试一次。思考开关是尽力而为的优化，绝不因它阻塞生成。
+    const thinkingRejected = response.status === 400
+      && (body.thinking as { type?: string } | undefined)?.type === 'disabled'
+      && /thinking|reasoning/i.test(detail)
+    if (thinkingRejected) {
+      console.warn(`[anthropicMessagesQuery] 渠道拒绝 thinking:disabled（${detail}），移除该参数后重试一次`)
+      delete body.thinking
+      response = await fetch(`${baseUrl}/v1/messages`, requestInit())
+    } else {
+      console.error(
+        `[anthropicMessagesQuery] model request failed: HTTP ${response.status}`
+        + (detail ? ` — ${detail}` : ''),
+      )
+      throw Object.assign(new Error(`SDK request failed with ${response.status}`), { statusCode: response.status })
+    }
+  }
+  if (!response.ok) {
+    // 降级重试后仍失败：按原语义抛错
+    let detail = ''
+    try {
+      detail = extractErrorMessage((await response.text()).slice(0, 2000))
     } catch {
       detail = ''
     }

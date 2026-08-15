@@ -350,7 +350,67 @@ describe('AgentOrchestrator · A2-14a 真实模型流式 + 多轮历史', () => 
     expect(requestBody?.thinking?.budget_tokens).toBeLessThan(requestBody?.max_tokens ?? 0)
   })
 
+  it('默认（未开 BLOMA_SHOW_THINKING）请求体显式携带 thinking:disabled——禁思考防预算被思考耗尽正文为零', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-test-'))
+    process.env.PROMA_HOME = home
+
+    let requestBody: { thinking?: { type: string; budget_tokens?: number } } | undefined
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+      requestBody = JSON.parse(String(init.body)) as typeof requestBody
+      return sseResponse(['event: message_stop\ndata: {"type":"message_stop"}\n\n'])
+    }))
+
+    await runAgent({
+      request_id: 'req-nothink',
+      session_id: 'session-nothink',
+      project_id: 'project-nothink',
+      content: '测试禁思考',
+      mode: 'quick',
+      current_stage: 'generating_mvp',
+      channel_id: 'test-channel',
+    })
+
+    // 2026-08-16 线上案例：MiniMax-M3 思考烧光 max_tokens 预算致草图首试 56.5s 零字符——
+    // 本查询只透传 text_delta，思考零贡献，默认必须显式禁掉
+    expect(requestBody?.thinking?.type).toBe('disabled')
+    expect(requestBody?.thinking?.budget_tokens).toBeUndefined()
+  })
+
+  it('渠道 400 拒绝 thinking 参数 → 移除后自动重试一次，生成不因思考开关被阻塞', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-test-'))
+    process.env.PROMA_HOME = home
+
+    const bodies: Array<{ thinking?: { type: string } }> = []
+    let call = 0
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+      call += 1
+      bodies.push(JSON.parse(String(init.body)) as { thinking?: { type: string } })
+      if (call === 1) {
+        return new Response(
+          JSON.stringify({ type: 'error', error: { message: 'thinking is not supported for this model' } }),
+          { status: 400 },
+        )
+      }
+      return sseResponse(['event: message_stop\ndata: {"type":"message_stop"}\n\n'])
+    }))
+
+    await runAgent({
+      request_id: 'req-think400',
+      session_id: 'session-think400',
+      project_id: 'project-think400',
+      content: '测试拒绝降级',
+      mode: 'quick',
+      current_stage: 'generating_mvp',
+      channel_id: 'test-channel',
+    })
+
+    expect(call).toBe(2)
+    expect(bodies[0]?.thinking?.type).toBe('disabled')
+    expect(bodies[1]?.thinking).toBeUndefined()
+  })
+
   it('BLOMA_SHOW_THINKING=1 时 thinking_delta 打印到主进程 stdout', async () => {
+
     const home = mkdtempSync(join(tmpdir(), 'proma-test-'))
     process.env.PROMA_HOME = home
     vi.stubEnv('BLOMA_SHOW_THINKING', '1')
@@ -376,30 +436,6 @@ describe('AgentOrchestrator · A2-14a 真实模型流式 + 多轮历史', () => 
     const printed = spy.mock.calls.map((call) => String(call[0]))
     expect(printed.some((line) => line.includes('[thinking:') && line.includes('用户可能在思考记账的分类方式'))).toBe(true)
     spy.mockRestore()
-  })
-
-  it('未设 BLOMA_SHOW_THINKING 时请求体不含 thinking（默认行为不变）', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'proma-test-'))
-    process.env.PROMA_HOME = home
-    vi.unstubAllEnvs()
-
-    let requestBody: { stream: boolean; thinking?: unknown } | undefined
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
-      requestBody = JSON.parse(String(init.body)) as typeof requestBody
-      return sseResponse(['event: message_stop\ndata: {"type":"message_stop"}\n\n'])
-    }))
-
-    await runAgent({
-      request_id: 'req-nothink',
-      session_id: 'session-nothink',
-      project_id: 'project-nothink',
-      content: '测试默认',
-      mode: 'quick',
-      current_stage: 'generating_mvp',
-      channel_id: 'test-channel',
-    })
-
-    expect(requestBody?.thinking).toBeUndefined()
   })
 })
 
