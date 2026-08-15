@@ -32,7 +32,27 @@ export interface GenerateSketchLlmResult {
   summary: string
 }
 
-const DEFAULT_TIMEOUT_MS = 90_000
+/** 单次尝试的留痕：只进日志与 sketch_fallback 埋点，用于事后区分「慢」还是「截断重试被掐」。 */
+export interface SketchAttemptDetail {
+  attempt: number
+  elapsed_ms: number
+  chars: number
+  truncated: boolean
+}
+
+/** 草图 LLM 失败错误：携带逐次尝试明细，resolveSketch 取出进埋点。 */
+export class SketchLlmError extends Error {
+  readonly attempts: SketchAttemptDetail[]
+
+  constructor(message: string, attempts: SketchAttemptDetail[]) {
+    super(message)
+    this.name = 'SketchLlmError'
+    this.attempts = attempts
+  }
+}
+
+/** 与 mvp-engine-llm 同值（120s）：草图曾用 90s 且「首试+重试」共享预算，重试只剩残余时间必超时（2026-08-16 线上案例）。 */
+const DEFAULT_TIMEOUT_MS = 120_000
 
 /** 渠道未配置 max_tokens 时的默认值：重 CSS 视觉稿 4000 必截断（线上已踩坑），与 mvp-engine-llm 同值。 */
 const DEFAULT_MAX_TOKENS = 8192
@@ -51,67 +71,77 @@ const SYSTEM_PROMPT = `你是「Bloma 草图生成器」，负责把用户的想
 - 只输出 HTML，其余一律不要。`
 
 export async function generateSketchLlm(input: GenerateSketchLlmInput): Promise<GenerateSketchLlmResult> {
-  const selfController = new AbortController()
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  const timer = setTimeout(() => selfController.abort(), timeoutMs)
-  const combinedSignal = combineSignals(selfController.signal, undefined)
+  const prompt = buildPrompt(input.requirements)
+  let maxTokens = input.maxTokens ?? DEFAULT_MAX_TOKENS
+  let truncated = false
+  const attempts: SketchAttemptDetail[] = []
 
-  try {
-    const prompt = buildPrompt(input.requirements)
-    let maxTokens = input.maxTokens ?? DEFAULT_MAX_TOKENS
-    let truncated = false
+  // 首试 + 一次恢复重试：截断（文档未闭合）→ 加大 maxTokens 重新生成，绝不内容级修补；
+  // 重试耗尽抛错，由调用方回退确定性模板，不阻断草图产出。
+  // 超时预算**按次发放**：每次尝试新建 timer——共享总预算会让截断重试只剩残余时间，结构性必超时。
+  for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt += 1) {
+    const selfController = new AbortController()
+    const timer = setTimeout(() => selfController.abort(), timeoutMs)
+    const startedAt = Date.now()
+    let accumulated = ''
 
-    // 首试 + 一次恢复重试：截断（文档未闭合）→ 加大 maxTokens 重新生成，绝不内容级修补；
-    // 重试耗尽抛错，由调用方回退确定性模板，不阻断草图产出。
-    for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt += 1) {
-      let accumulated = ''
-      try {
-        const stream = input.query(prompt, {
-          env: input.env,
-          signal: combinedSignal,
-          sessionId: input.sessionId,
-          history: [{ role: 'system', content: SYSTEM_PROMPT }],
-          maxTokens,
-        })
-        for await (const sdkMessage of stream) {
-          if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue
-          const text = extractText(sdkMessage.message.content)
-          if (text) accumulated += text
-        }
-      } catch (error) {
-        if (selfController.signal.aborted) throw new Error('SKETCH_LLM_TIMEOUT: 草图生成超时，已取消本次生成')
-        throw error
+    const timeoutError = (truncatedFlag: boolean): SketchLlmError =>
+      new SketchLlmError(
+        `SKETCH_LLM_TIMEOUT: 草图生成超时（第 ${attempt + 1} 次尝试，预算 ${timeoutMs}ms），已取消本次生成`,
+        [...attempts, { attempt: attempt + 1, elapsed_ms: Date.now() - startedAt, chars: accumulated.length, truncated: truncatedFlag }],
+      )
+
+    try {
+      const stream = input.query(prompt, {
+        env: input.env,
+        signal: selfController.signal,
+        sessionId: input.sessionId,
+        history: [{ role: 'system', content: SYSTEM_PROMPT }],
+        maxTokens,
+      })
+      for await (const sdkMessage of stream) {
+        if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue
+        const text = extractText(sdkMessage.message.content)
+        if (text) accumulated += text
       }
-
-      if (selfController.signal.aborted) throw new Error('SKETCH_LLM_TIMEOUT: 草图生成超时，已取消本次生成')
-
-      const html = cleanSketchHtml(accumulated)
-      if (isHtmlDocument(html)) {
-        const project = findProject(input.project_id)
-        const file = { path: 'index.html', content: html }
-        const fullPath = join(project.root_path, file.path)
-        mkdirSync(join(fullPath, '..'), { recursive: true })
-        writeFileSync(fullPath, file.content, 'utf8')
-
-        return {
-          files: [file],
-          run_command: 'node static-server',
-          summary: '已按你的需求生成外观草图。',
-        }
-      }
-
-      truncated = looksTruncated(html)
-      if (truncated) maxTokens = Math.min(maxTokens * 2, MAX_MAX_TOKENS)
+    } catch (error) {
+      clearTimeout(timer)
+      if (selfController.signal.aborted) throw timeoutError(false)
+      throw error
     }
-
-    // 重试耗尽：按最后一种失败原因抛清晰错误，便于上层回退模板与用户定位。
-    if (truncated) {
-      throw new Error('SKETCH_LLM_TRUNCATED: 草图输出被截断（疑似 max_tokens 不足），已尝试加大 token 重试仍失败')
-    }
-    throw new Error('SKETCH_LLM_PARSE_FAILED: 模型输出不是有效的 HTML 草图')
-  } finally {
     clearTimeout(timer)
+    if (selfController.signal.aborted) throw timeoutError(false)
+
+    const html = cleanSketchHtml(accumulated)
+    truncated = looksTruncated(html)
+    attempts.push({ attempt: attempt + 1, elapsed_ms: Date.now() - startedAt, chars: accumulated.length, truncated })
+    console.log(
+      `[generateSketchLlm] attempt=${attempt + 1}/${MAX_GENERATION_ATTEMPTS} elapsed=${attempts[attempts.length - 1].elapsed_ms}ms chars=${accumulated.length} html=${isHtmlDocument(html)} truncated=${truncated}`,
+    )
+
+    if (isHtmlDocument(html)) {
+      const project = findProject(input.project_id)
+      const file = { path: 'index.html', content: html }
+      const fullPath = join(project.root_path, file.path)
+      mkdirSync(join(fullPath, '..'), { recursive: true })
+      writeFileSync(fullPath, file.content, 'utf8')
+
+      return {
+        files: [file],
+        run_command: 'node static-server',
+        summary: '已按你的需求生成外观草图。',
+      }
+    }
+
+    if (truncated) maxTokens = Math.min(maxTokens * 2, MAX_MAX_TOKENS)
   }
+
+  // 重试耗尽：按最后一种失败原因抛清晰错误（附逐次明细），便于上层回退模板与用户定位。
+  if (truncated) {
+    throw new SketchLlmError('SKETCH_LLM_TRUNCATED: 草图输出被截断（疑似 max_tokens 不足），已尝试加大 token 重试仍失败', attempts)
+  }
+  throw new SketchLlmError('SKETCH_LLM_PARSE_FAILED: 模型输出不是有效的 HTML 草图', attempts)
 }
 
 function buildPrompt(requirements: SketchRequirement[]): string {
@@ -127,11 +157,6 @@ function buildPrompt(requirements: SketchRequirement[]): string {
     ``,
     `要求：界面区块与功能项一一对应，视觉上像一个真实产品（不是需求清单）。`,
   ].join('\n')
-}
-
-/** 组合自建超时 signal（草图阶段无外部 signal，直接返回 self）。 */
-function combineSignals(self: AbortSignal, _external?: AbortSignal): AbortSignal {
-  return self
 }
 
 /**

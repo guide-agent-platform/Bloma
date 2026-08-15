@@ -16,7 +16,6 @@ export interface WorkspaceShellProps {
   decisionTitle?: string
   onCardOptionSelect?: (option: CardOption) => void
   onSendMessage?: (content: string) => void
-  isWaiting?: boolean
   waitStartTime?: number
   waitActionLabel?: string
   onContinueWaiting?: () => void
@@ -107,7 +106,6 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
           decisionTitle={props.decisionTitle}
           onCardOptionSelect={props.onCardOptionSelect}
           onSendMessage={props.onSendMessage}
-          isWaiting={props.isWaiting}
           waitStartTime={props.waitStartTime}
           waitActionLabel={props.waitActionLabel}
           onContinueWaiting={props.onContinueWaiting}

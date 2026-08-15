@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
@@ -97,10 +97,21 @@ describe('GuideAgentService through AgentOrchestrator', () => {
     expect(findProject(project.project_id).current_stage).toBe('sketch_ready')
   })
 
-  it('A2-14a: 模型返回 generate_sketch JSON 时直接进入草图生成', async () => {
+  it('A2-14a: 已过澄清轮后模型返回 generate_sketch JSON 时直接进入草图生成', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-guide-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    // 预置一轮已完成的澄清往返：首轮必须澄清（2026-08-16 硬护栏），
+    // 非首轮的 generate_sketch 才允许直接开工
+    mkdirSync(join(home, 'agent-sessions'), { recursive: true })
+    writeFileSync(
+      join(home, 'agent-sessions', 'session-guide.jsonl'),
+      [
+        JSON.stringify({ role: 'user', content: [{ type: 'text', text: '做一个记账工具' }], timestamp: 1 }),
+        JSON.stringify({ role: 'assistant', content: [{ type: 'text', text: '要给谁用、记什么？' }], timestamp: 2 }),
+      ].join('\n') + '\n',
+      'utf8',
+    )
     const events: AgentEvent[] = []
     setAgentStreamPublisher((event) => events.push(event))
     setSDKQueryForTests(async function* () {

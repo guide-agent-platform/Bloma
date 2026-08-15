@@ -80,7 +80,6 @@ type AppRoute = 'mode-selection' | 'workspace' | 'project-history' | 'settings'
 const AppRoutes: React.FC = () => {
   const [route, setRoute] = useState<AppRoute>('mode-selection')
   const [mode, setMode] = useState<ProjectMode | null>(null)
-  const [waiting, setWaiting] = useState(false)
   const [waitStart, setWaitStart] = useState<number | undefined>()
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>('empty')
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID())
@@ -665,7 +664,6 @@ const AppRoutes: React.FC = () => {
         decisionTitle={decisionCards?.title}
         onCardOptionSelect={handleCardOptionSelect}
         onSendMessage={handleSendMessage}
-        isWaiting={waiting}
         waitStartTime={waitStart}
         waitActionLabel="生成可运行版本"
         isHistoryLoading={historyLoading}

@@ -11,6 +11,7 @@ import {
   hasActiveStreamAtom,
   globalUserErrorAtom,
   projectModeAtom,
+  workflowStageAtom,
 } from './atoms'
 import type { AgentMessage, AgentStreamState, ProjectMode } from './atoms'
 
@@ -48,6 +49,16 @@ const nullStreamFallback = atom<AgentStreamState>({
   content: '',
 })
 
+/** 生成类阶段 → WaitingFeedback 的「正在做什么」话术（按权威阶段展示，不再一刀切「生成可运行版本」）。 */
+const STAGE_ACTION_LABELS: Record<string, string> = {
+  generating_sketch: '生成草图',
+  generating_mvp: '生成可运行版本',
+  testing: '测试生成的版本',
+  judge_review: '审查生成的版本',
+  repairing: '自动修复问题',
+  iterating: '修改应用',
+}
+
 const glassTile: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
@@ -78,6 +89,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const mode = useAtomValue(projectModeAtom)
   const hasActiveStream = useAtomValue(hasActiveStreamAtom)
   const globalError = useAtomValue(globalUserErrorAtom)
+  const workflowStage = useAtomValue(workflowStageAtom)
+
+  /** 忙碌 = 外部等待或本地流式运行中。输入框保持可编辑（草稿），只禁发，不再整体锁死。 */
+  const busy = isWaiting || hasActiveStream
 
   const messages = useAtomValue(
     activeSessionId ? agentMessagesFamily(activeSessionId) : nullMessagesFallback,
@@ -96,21 +111,32 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, streamingContent, cardOptions])
 
+  // 本地流计时兜底：App 未传 waitStartTime 时以流启动时刻起算，保证 WaitingFeedback
+  // 三级递进在纯流式等待下也生效（此前挂在恒 false 的 isWaiting 上，组件从未显示过）。
+  const [streamStart, setStreamStart] = React.useState<number | undefined>()
+  React.useEffect(() => {
+    if (hasActiveStream) setStreamStart((previous) => previous ?? Date.now())
+    else setStreamStart(undefined)
+  }, [hasActiveStream])
+  const effectiveWaitStart = waitStartTime ?? streamStart
+
   const [elapsed, setElapsed] = React.useState(0)
   React.useEffect(() => {
-    if (!isWaiting || !waitStartTime) {
+    if (!busy || !effectiveWaitStart) {
       setElapsed(0)
       return
     }
     const timer = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - waitStartTime) / 1000))
+      setElapsed(Math.floor((Date.now() - effectiveWaitStart) / 1000))
     }, 1000)
     return () => clearInterval(timer)
-  }, [isWaiting, waitStartTime])
+  }, [busy, effectiveWaitStart])
+
+  const busyActionLabel = STAGE_ACTION_LABELS[workflowStage] ?? waitActionLabel
 
   const handleSubmit = () => {
     const trimmed = inputValue.trim()
-    if (!trimmed || isWaiting) return
+    if (!trimmed || busy) return
     onSendMessage?.(trimmed)
     setInputValue('')
   }
@@ -122,7 +148,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     }
   }
 
-  const canSend = !isWaiting && inputValue.trim().length > 0
+  const canSend = !busy && inputValue.trim().length > 0
 
   return (
     <div data-ai-id="chat-panel" style={glassTile}>
@@ -223,10 +249,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               />
             )}
 
-            {isWaiting && elapsed > 5 && (
+            {busy && elapsed > 5 && (
               <WaitingFeedback
                 elapsedSeconds={elapsed}
-                actionLabel={waitActionLabel}
+                actionLabel={busyActionLabel}
                 onContinueWaiting={onContinueWaiting}
                 onViewPartial={onViewPartial}
               />
@@ -262,7 +288,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                     {decisionTitle}
                   </p>
                 )}
-                <CardOptions options={cardOptions} onSelect={onCardOptionSelect} disabled={isWaiting} />
+                <CardOptions options={cardOptions} onSelect={onCardOptionSelect} disabled={busy} />
               </div>
             )}
           </>
@@ -290,8 +316,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={isWaiting || hasActiveStream}
-            placeholder={hasActiveStream ? '生成中，点右侧停止可中断…' : isWaiting ? '正在处理中…' : '描述你的想法…'}
+            placeholder={busy ? '生成中…可以先把想法打出来，结束后发送' : '描述你的想法…'}
             rows={1}
             style={{
               flex: 1,

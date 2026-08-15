@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { generateSketchLlm, type GenerateSketchLlmInput } from '../../main/sketch-engine-llm'
+import { generateSketchLlm, SketchLlmError, type GenerateSketchLlmInput } from '../../main/sketch-engine-llm'
 import type { SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
 import { createProject, findProject } from '../../main/project-service'
 import type { SDKMessage } from '../../shared/types'
@@ -146,5 +146,34 @@ describe('SketchEngineLlm generation (草图走 LLM)', () => {
     const input = makeInput({ query: truncatedQuery, maxTokens: 4000 })
     await expect(generateSketchLlm(input)).rejects.toThrow('SKETCH_LLM_TRUNCATED')
     expect(existsSync(join(findProject(input.project_id).root_path, 'index.html'))).toBe(false)
+  })
+
+  it('超时错误携带逐次尝试明细（SketchLlmError.attempts）→ 埋点可事后定位', async () => {
+    const input = makeInput({ query: hangingQuery, timeoutMs: 50 })
+    const error = (await generateSketchLlm(input).catch((e: unknown) => e)) as SketchLlmError
+    expect(error).toBeInstanceOf(SketchLlmError)
+    expect(error.message).toContain('SKETCH_LLM_TIMEOUT')
+    expect(error.attempts).toHaveLength(1)
+    expect(error.attempts[0]).toMatchObject({ attempt: 1, truncated: false })
+    expect(error.attempts[0].elapsed_ms).toBeGreaterThanOrEqual(50)
+  })
+
+  it('截断重试享有独立超时预算（不再与首试共享总时长）', async () => {
+    // 2026-08-16 线上案例回归：90s 共享预算下，截断重试只剩残余时间结构性必超时。
+    // 每次尝试 ~250ms、预算 400ms：按次发放可成功；共享总预算（~500ms > 400ms）必被掐。
+    const truncatedHtml = SKETCH_HTML.slice(0, SKETCH_HTML.length - 40)
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+    const delayedQuery: SDKQuery = async function* (
+      _prompt: string,
+      options: SDKQueryOptions,
+    ): AsyncGenerator<SDKMessage> {
+      await sleep(250)
+      const text = (options.maxTokens ?? 0) > 4000 ? SKETCH_HTML : truncatedHtml
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }
+      yield { type: 'result', subtype: 'success' }
+    }
+    const input = makeInput({ query: delayedQuery, timeoutMs: 400, maxTokens: 4000 })
+    const result = await generateSketchLlm(input)
+    expect(result.files[0]?.content).toContain('</html>')
   })
 })

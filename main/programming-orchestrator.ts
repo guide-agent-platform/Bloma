@@ -8,7 +8,7 @@ import { DEFAULT_MAX_TOKENS, generateMvpLlm, type GenerateMvpLlmResult } from '.
 import { buildSdkEnv, decryptApiKey, getChannelByIdRaw, getFirstEnabledChannel } from './channel-manager'
 import { findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
 import { generateSketch, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from './sketch-engine'
-import { generateSketchLlm } from './sketch-engine-llm'
+import { generateSketchLlm, SketchLlmError, type SketchAttemptDetail } from './sketch-engine-llm'
 import { generatePrdLlm } from './prd-engine-llm'
 import { readTestReport, runGwtScenarios, writeTestReport, type GwtTestResult } from './gwt-service'
 import { applyRepairPatch, REPAIR_CATEGORY_SUMMARY, runRepairCycle, type RepairCategory } from './repair-engine'
@@ -95,7 +95,7 @@ export async function runSketchTask(input: SketchTaskInput): Promise<SketchTaskR
   const requirements = input.requirements?.length
     ? input.requirements
     : [{ id: 'F-001', description: input.prompt }]
-  const { result: sketch, source, fallbackReason, llmErrorCode } = await resolveSketch(input, requirements)
+  const { result: sketch, source, fallbackReason, llmErrorCode, llmAttempts } = await resolveSketch(input, requirements)
   if (source === 'template' && fallbackReason) {
     // 模板回退必须留痕：埋点 + 会话内如实说明（阶段如实性——不假装模型参与了生成）。
     // 此前完全静默，渠道瞬断时用户只看到「草图变成通用占位页」却无任何线索。
@@ -105,7 +105,7 @@ export async function runSketchTask(input: SketchTaskInput): Promise<SketchTaskR
         event_type: 'sketch_fallback',
         project_id: input.project_id,
         session_id: input.session_id,
-        payload: { reason: fallbackReason, llm_error_code: llmErrorCode },
+        payload: { reason: fallbackReason, llm_error_code: llmErrorCode, llm_attempts: llmAttempts },
         privacy_level: 'research_safe',
       },
     })
@@ -178,6 +178,8 @@ interface ResolvedSketch {
   fallbackReason?: SketchFallbackReason
   /** llm_failed 时的粗粒度错误码（SKETCH_LLM_* / unknown），只进日志与埋点，不进 UI。 */
   llmErrorCode?: string
+  /** llm_failed 时的逐次尝试明细（耗时/字符数/是否截断），进埋点供事后定位。 */
+  llmAttempts?: SketchAttemptDetail[]
 }
 
 /**
@@ -221,12 +223,14 @@ async function resolveSketch(input: SketchTaskInput, requirements: SketchRequire
   } catch (error) {
     // LLM 草图失败（超时/非 HTML/网络错误）回退模板，不阻断草图产出
     const llmErrorCode = error instanceof Error ? (error.message.match(/^([A-Z_]+):/)?.[1] ?? 'unknown') : 'unknown'
-    console.error(`[resolveSketch] 草图回退确定性模板: reason=llm_failed code=${llmErrorCode}（${error instanceof Error ? error.message : String(error)}）`)
+    const llmAttempts = error instanceof SketchLlmError ? error.attempts : undefined
+    console.error(`[resolveSketch] 草图回退确定性模板: reason=llm_failed code=${llmErrorCode}（${error instanceof Error ? error.message : String(error)}）${llmAttempts ? ` attempts=${JSON.stringify(llmAttempts)}` : ''}`)
     return {
       result: generateSketch({ project_id: input.project_id, requirements, max_pages: 3 }),
       source: 'template',
       fallbackReason: 'llm_failed',
       llmErrorCode,
+      llmAttempts,
     }
   }
 }

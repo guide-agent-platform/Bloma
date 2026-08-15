@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { AgentEvent, AgentSendMessageInput, MessageContentBlock } from '../shared/types'
+import type { AgentEvent, AgentSendMessageInput, MessageContentBlock, Project } from '../shared/types'
 import { routeDialogue, type ClarificationOption } from './dialogue-router'
 import { recordDecision } from './decision-log'
 import type { ConversationTurn, GuideModelOptions } from './orchestrator'
@@ -47,6 +47,14 @@ const GUIDE_SYSTEM_PROMPT = `你是「向导 Agent」，负责把用户的想法
 type GuideParsed =
   | { action: 'generate_sketch'; reply: string; requirements: { id: string; description: string }[] }
   | { action: 'ask_clarification'; reply: string; questions: { id: string; label: string; description?: string }[] }
+
+/**
+ * 首轮硬护栏（附加到系统提示尾部）：需求确认是产品闭环的必经一环，不能因模型采样差异被跳过
+ * （2026-08-16 赛车模拟器案例：同样输入一天前澄清、一天后直出草图，用户全程零确认）。
+ */
+const FIRST_TURN_RULE = `
+
+本轮硬性要求：这是用户在本次会话的第一条消息，你必须输出 ask_clarification，禁止输出 generate_sketch——先就最影响成品形态的一个维度（做哪种类型/给谁用/核心场景）提问，并给出 2~3 个互斥的具体选项。`
 
 /**
  * 规则路由三张固定卡片（日常生活/工作提效/你帮我决定）→ 草图需求扩写。
@@ -222,7 +230,7 @@ export async function handleGuideMessage(
 
   // 渠道可用 → 优先走真实模型；模型不可用 / 解析失败 → 回退规则路由
   if (model) {
-    const handled = await tryModelDrivenGuide(input, publish, model, primaryIntent, persistSystem)
+    const handled = await tryModelDrivenGuide(input, publish, model, primaryIntent, persistSystem, project)
     if (handled) return
   }
 
@@ -264,8 +272,14 @@ async function tryModelDrivenGuide(
   model: GuideModelOptions,
   primaryIntent?: string,
   persistSystem?: (text: string) => void,
+  project?: Project,
 ): Promise<boolean> {
-  const systemTurn: ConversationTurn = { role: 'system', content: GUIDE_SYSTEM_PROMPT }
+  // 首轮判定：会话里还没有任何助手回复 = 用户尚未经历过一轮澄清（卡片答案路径不经过此处）
+  const isFirstTurn = !model.history.some((turn) => turn.role === 'assistant')
+  const systemTurn: ConversationTurn = {
+    role: 'system',
+    content: isFirstTurn ? GUIDE_SYSTEM_PROMPT + FIRST_TURN_RULE : GUIDE_SYSTEM_PROMPT,
+  }
   const history: ConversationTurn[] = [systemTurn, ...model.history]
 
   // 只做内部累积：模型流式吐的是原始 JSON，不发布 message_delta，避免结构泄露
@@ -290,6 +304,24 @@ async function tryModelDrivenGuide(
 
   const parsed = parseGuideJson(accumulated)
   if (!parsed) return false
+
+  // 首轮护栏（代码级，不信任提示词）：模型无视 FIRST_TURN_RULE 直接 generate_sketch 时降级为澄清，
+  // 且不采用其「直接开工」话术（阶段如实性）。规则路由给得出选项就弹卡，否则纯文本追问。
+  if (isFirstTurn && parsed.action === 'generate_sketch') {
+    console.error('[guide] 首轮护栏生效：模型跳过澄清直接 generate_sketch，已降级为澄清追问')
+    const route = project ? routeDialogue(input.content, project) : undefined
+    const questions = route?.action === 'ask_clarification' ? route.questions.slice(0, 3) : []
+    const reply = questions.length
+      ? '开工前先确认一个关键点，这样做出来更接近你的想法：'
+      : '开工前先确认一个关键点：你想要哪种类型、主要给谁用？'
+    updateProject(input.project_id, { current_stage: 'blocked_for_user_decision' })
+    publish(makeGuideEvent(input, 'stage_changed', { stage: 'blocked_for_user_decision' }))
+    model.persistAssistant(reply)
+    publish(makeGuideEvent(input, 'message_delta', { text: reply }))
+    publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+    publishClarificationCard(input, publish, normalizeClarificationOptions(questions), persistSystem, reply)
+    return true
+  }
 
   // 仅把对用户可读的 reply 上屏并落盘；缺省给通用兜底话术，绝不写回原始 JSON
   const reply =
