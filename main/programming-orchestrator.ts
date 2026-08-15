@@ -225,8 +225,9 @@ async function nameByLlm(input: MvpTaskInput): Promise<string | null> {
   } catch {
     return null
   }
-  const model = channel.models.find((item) => item.enabled)?.id ?? 'claude-sonnet-4-6'
-  const env = buildSdkEnv(apiKey, channel.base_url, model)
+  // 模型名用 name（真实模型 ID）：id 是渠道内唯一标识，不能传给 API（对齐 resolveSketch）
+  const model = channel.models.find((item) => item.enabled)?.name ?? 'claude-sonnet-4-6'
+  const env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
 
   const backplane = readPrdBackplane(input.project_id)
   const intent = readPrimaryIntent(input.session_id)
