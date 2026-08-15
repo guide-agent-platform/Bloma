@@ -159,8 +159,9 @@ async function resolveSketch(input: SketchTaskInput, requirements: SketchRequire
   } catch {
     return generateSketch({ project_id: input.project_id, requirements, max_pages: 3 })
   }
-  const model = channel.models.find((item) => item.enabled)?.id ?? 'claude-sonnet-4-6'
-  const env = buildSdkEnv(apiKey, channel.base_url, model)
+  // 模型名用 name（真实模型 ID）：id 是渠道内唯一标识，不能传给 API
+  const model = channel.models.find((item) => item.enabled)?.name ?? 'claude-sonnet-4-6'
+  const env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
   try {
     return await generateSketchLlm({
       project_id: input.project_id,
