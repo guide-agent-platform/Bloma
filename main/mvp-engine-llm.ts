@@ -98,8 +98,14 @@ export async function generateMvpLlm(input: GenerateMvpLlmInput): Promise<Genera
     // 首试 + 一次恢复重试：截断 → 加大 maxTokens 重新生成（内容不能修补）；
     // 格式错误（非截断）→ 带反馈重试。两种恢复都只做一轮，成本与延迟可控。
     for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt += 1) {
+      const startedAt = Date.now()
       const accumulated = await streamAccumulate(input, prompt, maxTokens, attempt, lastAccumulated, truncated, combinedSignal, selfController)
       if (input.signal?.aborted) throw new Error('AGENT_CANCELLED')
+      // 逐次尝试留痕（与 generateSketchLlm 对齐，2026-08-16 线上案例：MVP 失败连
+      // 输出多长都不知道，事后无法区分「截断/空输出/格式坏」）
+      console.log(
+        `[generateMvpLlm] attempt=${attempt + 1}/${MAX_GENERATION_ATTEMPTS} elapsed=${Date.now() - startedAt}ms chars=${accumulated.length} maxTokens=${maxTokens}`,
+      )
 
       const parsed = parseMvpJson(accumulated)
       if (parsed) {

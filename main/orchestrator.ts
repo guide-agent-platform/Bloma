@@ -764,6 +764,11 @@ async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions)
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  // 事件类型计数（可观测性）：零正文 + 有思考 = 思考型模型把 max_tokens 预算耗在思考上
+  // （2026-08-16 线上案例：草图首试 56s 零字符，重试才出正文——上层只能看到 chars=0 无法定位）
+  let textDeltaCount = 0
+  let thinkingDeltaCount = 0
+  let otherDeltaCount = 0
   try {
     for (;;) {
       const { done, value } = await reader.read()
@@ -791,6 +796,11 @@ async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions)
         } catch {
           continue
         }
+        if (parsed.type === 'content_block_delta') {
+          if (parsed.delta?.type === 'text_delta') textDeltaCount += 1
+          else if (parsed.delta?.type === 'thinking_delta') thinkingDeltaCount += 1
+          else otherDeltaCount += 1
+        }
         // 思考过程增量：仅打印到主进程终端（BLOMA_SHOW_THINKING 时），不进 SDKMessage / 事件 / UI / JSONL
         if (
           showThinking &&
@@ -810,6 +820,13 @@ async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions)
       }
     }
   } finally {
+    if (textDeltaCount === 0 && (thinkingDeltaCount > 0 || otherDeltaCount > 0)) {
+      console.error(
+        `[anthropicMessagesQuery] 零正文输出：model=${String(body.model)} max_tokens=${String(body.max_tokens)} `
+        + `text_delta=${textDeltaCount} thinking_delta=${thinkingDeltaCount} other_delta=${otherDeltaCount}`
+        + (thinkingDeltaCount > 0 ? '——思考型模型疑似把 max_tokens 预算耗在思考上，正文为零' : ''),
+      )
+    }
     try {
       reader.releaseLock()
     } catch {
