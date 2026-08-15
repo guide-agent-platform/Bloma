@@ -772,32 +772,32 @@ async function resolveIterationDecisionFlow(
  *
  * 用户在项目已生成后继续提的修改诉求（改、换、加、删、调整、重新等）应进入迭代
  * 重新生成流程，而非被 ready 护栏固定文案挡回。纯进度追问（好了吗 / 怎么样了）不命中。
- * 命中则直接 `modify`，不再走 L2/L3（避免每条消息都付一次 LLM 往返的延迟）。
+ * 命中则直接 `modify`，不再走 L3（避免每条消息都付一次 LLM 往返的延迟）。
  */
 function isModificationIntent(text: string): boolean {
   const trimmed = text.trim()
   if (!trimmed) return false
-  // 显式修改动词 + 否定/货不对板/重述主题类表达（"啥意思，我要音乐合成器"、"这不是我想要的"）。
-  // 纯进度追问（好了吗/怎么样了）不含这些词，不会被误判为修改意图。
-  return /(修改|改一改|改下|改一下|调整|纠错|重做|重来|重新|优化|修正|不要|去掉|删除|删掉|加一个|加个|加上|新增|变成|换成|改成|再来|换个|不对|不是|不满意|搞错|做错|错了|偏了|货不对板|啥意思|什么意思|这不是|我要的是|我想要的是|应该是)/.test(trimmed)
+  // 显式修改动词 + 否定/货不对板/重述主题类表达（"啥意思，我要音乐合成器"、"这不是我想要的"）
+  // + 缩小范围类平静陈述（"我只需要理财房贷的计算器"——无动词、无语气词，
+  //   线上案例：曾连漏 L1/L2 两层被固定文案挡回）。注意「不需要」不含连续子串「不要」，须单列。
+  return /(修改|改一改|改下|改一下|调整|纠错|重做|重来|重新|优化|修正|不要|不需要|只需要|只要|不用|就够了|去掉|删除|删掉|加一个|加个|加上|新增|变成|换成|改成|再来|换个|不对|不是|不满意|搞错|做错|错了|偏了|货不对板|啥意思|什么意思|这不是|我要的是|我想要的是|应该是)/.test(trimmed)
 }
 
-/** L2 疑似判断——带疑问/否定/困惑语气、但未命中 L1 明确词的模糊表达（"这咋是待办"、"感觉怪怪的"）。 */
-function isSuspiciousIntent(text: string): boolean {
-  const trimmed = text.trim()
-  if (!trimmed) return false
-  // 纯进度追问不进疑似，避免每条"好了吗"都触发 L3 LLM 往返（延迟立场）
-  if (/(好了吗|好了没|好没好|做完了吗|做完了没|完成了吗|完成了没|怎么样|怎么样了|进展|进度|状态)/.test(trimmed)) return false
-  return /(吗|呢|吧|嘛|么|怎么|为什么|为啥|咋|难道|哪|谁|什么|啥|感觉|好像|应该|觉得|奇怪|怪|不像|不一样|不是|不对|错|没|没有|这|那|是不是|对不对)/.test(trimmed)
-}
+/** 纯进度追问（好了吗/怎么样了）——固定「other」，绝不进修改/LLM 判定（延迟立场）。 */
+const PROGRESS_QUERY_RE = /(好了吗|好了没|好没好|做完了吗|做完了没|完成了吗|完成了没|怎么样|怎么样了|进展|进度|状态)/
+
+/** 纯应答寒暄（好的/谢谢/嗯，整句无其他信息）——不值得付一次 L3 LLM 往返。 */
+const TRIVIAL_ACK_RE = /^(好的?|嗯+|哦+|噢+|行|ok|okay|不用了|谢谢|感谢|多谢|收到|了解|明白|知道了?|不错|很好|挺好的?)[。.!！~～，,\s]*$/i
 
 /**
  * 分层意图识别——规则快门 + LLM 兜底（改造 F）。
  *
- * L1（isModificationIntent）毫秒级命中 → `modify`；未命中进入 L2 疑似判断：
- * 不疑似（纯进度/闲聊）→ `other`；疑似 → L3 用 LLM + PRD 背板上下文判定
- * 「是否表达不满/修改诉求」。L3 无可用渠道时保守回退 `other`（固定完成文案），
- * 不因意图判定失败而误触发需要渠道的迭代流程。
+ * 纯进度追问 / 纯寒暄应答 → 固定 `other`；L1（isModificationIntent）毫秒级命中 → `modify`；
+ * 其余一律 L3 用 LLM + PRD 背板上下文判定「是否表达不满/修改诉求」。
+ * 曾经的 L2 语气标记门（疑问/否定/困惑字词）已移除：它把「平静的陈述式修改诉求」
+ * （如「我只需要理财房贷的计算器」，零语气标记）永远挡在 L3 之外，形成结构性盲区；
+ * ready 阶段非进度、非寒暄的陈述句本来就是修改/反馈的高发区，默认交给 LLM 判定。
+ * L3 无可用渠道时保守回退 `other`（固定完成文案），不因意图判定失败而误触发需要渠道的迭代流程。
  */
 async function resolveModificationIntent(opts: {
   content: string
@@ -808,8 +808,9 @@ async function resolveModificationIntent(opts: {
   signal: AbortSignal
   maxTokens: number
 }): Promise<'modify' | 'other'> {
+  if (PROGRESS_QUERY_RE.test(opts.content)) return 'other'
+  if (TRIVIAL_ACK_RE.test(opts.content.trim())) return 'other'
   if (isModificationIntent(opts.content)) return 'modify'
-  if (!isSuspiciousIntent(opts.content)) return 'other'
   if (!opts.env) return 'other'
   const env = opts.env
   try {

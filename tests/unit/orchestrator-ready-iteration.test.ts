@@ -335,6 +335,106 @@ describe('ready 护栏意图分流', () => {
     expect(runIterationTaskMock).not.toHaveBeenCalled()
     expect(sdkCalled).toBe(false)
   })
+
+  // 「我只需要理财房贷的计算器」线上案例：无修改动词、无否定/疑问语气词，
+  // 曾连漏 L1/L2 两层被 READY_COMPLETION_COPY 挡回（用户只能靠点选纠错按钮绕过）。
+  it('ready 阶段缩小范围类平静陈述（"我只需要理财房贷的计算器"）L1 直命中 → 确认卡，不付 LLM 往返', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-scope-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    let sdkCalled = false
+    setAgentStreamPublisher((event) => events.push(event))
+    setSDKQueryForTests(async function* () {
+      sdkCalled = true
+      yield { type: 'result', subtype: 'success' }
+    })
+
+    vi.mocked(findProject).mockReturnValue({
+      project_id: 'project-ready-scope',
+      current_stage: 'ready',
+    } as never)
+
+    await runAgent({
+      request_id: 'req-scope',
+      session_id: 'session-scope',
+      project_id: 'project-ready-scope',
+      content: '我只需要理财房贷的计算器',
+      mode: 'quick',
+      current_stage: 'ready',
+      channel_id: 'test-channel',
+    })
+
+    expect(runIterationTaskMock).not.toHaveBeenCalled()
+    expect(sdkCalled).toBe(false)
+    const decision = events.find((event) => event.type === 'user_decision_required')
+    expect(decision?.payload.kind).toBe('iteration_confirm')
+  })
+
+  it('ready 阶段平静陈述（零语气标记，L1 未命中）默认进 L3：LLM 判 modify → 确认卡', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-l3-plain-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    setSDKQueryForTests(async function* () {
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'modify' }] } }
+      yield { type: 'result', subtype: 'success' }
+    })
+
+    vi.mocked(findProject).mockReturnValue({
+      project_id: 'project-ready-l3-plain',
+      workspace_slug: 'default-software-builder',
+      current_stage: 'ready',
+    } as never)
+
+    await runAgent({
+      request_id: 'req-l3-plain',
+      session_id: 'session-l3-plain',
+      project_id: 'project-ready-l3-plain',
+      content: '界面太花了',
+      mode: 'quick',
+      current_stage: 'ready',
+      channel_id: 'test-channel',
+    })
+
+    expect(runIterationTaskMock).not.toHaveBeenCalled()
+    const decision = events.find((event) => event.type === 'user_decision_required')
+    expect(decision?.payload.kind).toBe('iteration_confirm')
+  })
+
+  it('ready 阶段纯寒暄应答（"谢谢"）不付 L3 LLM 往返，固定完成文案', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-ack-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    let sdkCalled = false
+    setAgentStreamPublisher((event) => events.push(event))
+    setSDKQueryForTests(async function* () {
+      sdkCalled = true
+      yield { type: 'result', subtype: 'success' }
+    })
+
+    vi.mocked(findProject).mockReturnValue({
+      project_id: 'project-ready-ack',
+      current_stage: 'ready',
+    } as never)
+
+    await runAgent({
+      request_id: 'req-ack',
+      session_id: 'session-ack',
+      project_id: 'project-ready-ack',
+      content: '谢谢',
+      mode: 'quick',
+      current_stage: 'ready',
+      channel_id: 'test-channel',
+    })
+
+    expect(runIterationTaskMock).not.toHaveBeenCalled()
+    expect(sdkCalled).toBe(false)
+    const deltas = events
+      .filter((event) => event.type === 'message_delta')
+      .map((event) => String(event.payload.text ?? ''))
+      .join('')
+    expect(deltas).toContain('已经生成好了')
+  })
 })
 
 async function* defaultTestQuery(): AsyncGenerator<SDKMessage> {
