@@ -473,13 +473,10 @@ function listActiveSnapshots(snapshotDir: string): ActiveSnapshotMeta[] {
 
 export async function rollbackSnapshot(input: SnapshotRollbackInput): Promise<RollbackResult> {
   const project = findProject(input.project_id)
-  const snapshotDir = getSnapshotsDir(project.workspace_slug, project.project_id)
 
-  // 1. 校验目标快照存在
-  const targetPath = `${snapshotDir}/${input.snapshot_id}.json`
-  if (!existsSync(targetPath)) throw new Error('SNAPSHOT_NOT_FOUND')
-  const target = readJsonFile<Snapshot>(targetPath, null as never)
-  if (!target) throw new Error('SNAPSHOT_NOT_FOUND')
+  // 1. 校验目标快照存在（含元数据读取，详见 restoreSnapshotFiles）
+  const snapshotDir = getSnapshotsDir(project.workspace_slug, project.project_id)
+  if (!existsSync(`${snapshotDir}/${input.snapshot_id}.json`)) throw new Error('SNAPSHOT_NOT_FOUND')
 
   // 2. 回滚前拍 guard 快照（保留回滚前状态）
   const guard = await createSnapshot({
@@ -491,26 +488,8 @@ export async function rollbackSnapshot(input: SnapshotRollbackInput): Promise<Ro
     health_status: project.current_snapshot_id ? 'healthy' : 'unhealthy',
   })
 
-  // 3. 停掉正在运行的 sandbox 并等待其真正退出（Windows：进程 cwd/句柄锁住项目目录，
-  //    不等退出就 rmSync 会 EBUSY/EPERM——2026-08-15 赛车项目回滚报障的根因）
-  await stopSandbox({ request_id: input.request_id, project_id: project.project_id })
-
-  // 4. 恢复项目文件（先清空再复制，确保与快照完全一致）。
-  //    maxRetries/retryDelay 兜底瞬态锁（杀毒/索引器/句柄异步释放）：
-  //    Node 原生对 EBUSY/EPERM/ENOTEMPTY 自动重试，避免一次撞锁让整个回滚失败。
-  rmSync(project.root_path, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
-  mkdirSync(project.root_path, { recursive: true })
-  cpSync(target.files_archive_path, project.root_path, { recursive: true, force: true })
-
-  // 6. 恢复文档（如果有）
-  if (target.documents_archive_path && existsSync(target.documents_archive_path)) {
-    const docDir = getDocumentsDir(project.workspace_slug, project.project_id)
-    rmSync(docDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
-    cpSync(target.documents_archive_path, docDir, { recursive: true, force: true })
-  }
-
-  // 7. 更新项目指针
-  updateProject(project.project_id, { current_snapshot_id: input.snapshot_id })
+  // 3~7. 停沙箱 → 恢复文件/文档 → 更新指针（与启动对账共用的恢复原语）
+  await restoreSnapshotFiles(input)
 
   // 8. 重启 sandbox
   const sandbox = await runSandbox({ request_id: input.request_id, project_id: input.project_id })
@@ -522,6 +501,47 @@ export async function rollbackSnapshot(input: SnapshotRollbackInput): Promise<Ro
     guard_snapshot_id: guard.snapshot_id,
     preview_url: sandbox.preview_url,
   }
+}
+
+/**
+ * 快照文件恢复原语（不含 guard / 沙箱重启）：
+ * 停掉运行中的沙箱并等待退出（Windows 句柄锁）→ 清空项目目录 → 复制快照文件 →
+ * 恢复文档归档（如有）→ 更新 current_snapshot_id 指针。
+ * rollbackSnapshot（完整事务）与启动对账 T1（崩溃残留恢复，不重启沙箱）共用。
+ */
+export async function restoreSnapshotFiles(input: {
+  request_id: string
+  project_id: string
+  snapshot_id: string
+}): Promise<Snapshot> {
+  const project = findProject(input.project_id)
+  const snapshotDir = getSnapshotsDir(project.workspace_slug, project.project_id)
+
+  const targetPath = `${snapshotDir}/${input.snapshot_id}.json`
+  if (!existsSync(targetPath)) throw new Error('SNAPSHOT_NOT_FOUND')
+  const target = readJsonFile<Snapshot>(targetPath, null as never)
+  if (!target) throw new Error('SNAPSHOT_NOT_FOUND')
+
+  // 停掉正在运行的 sandbox 并等待其真正退出（Windows：进程 cwd/句柄锁住项目目录，
+  // 不等退出就 rmSync 会 EBUSY/EPERM——2026-08-15 赛车项目回滚报障的根因）
+  await stopSandbox({ request_id: input.request_id, project_id: project.project_id })
+
+  // 恢复项目文件（先清空再复制，确保与快照完全一致）。
+  // maxRetries/retryDelay 兜底瞬态锁（杀毒/索引器/句柄异步释放）：
+  // Node 原生对 EBUSY/EPERM/ENOTEMPTY 自动重试，避免一次撞锁让整个回滚失败。
+  rmSync(project.root_path, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  mkdirSync(project.root_path, { recursive: true })
+  cpSync(target.files_archive_path, project.root_path, { recursive: true, force: true })
+
+  // 恢复文档（如果有）
+  if (target.documents_archive_path && existsSync(target.documents_archive_path)) {
+    const docDir = getDocumentsDir(project.workspace_slug, project.project_id)
+    rmSync(docDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+    cpSync(target.documents_archive_path, docDir, { recursive: true, force: true })
+  }
+
+  updateProject(project.project_id, { current_snapshot_id: input.snapshot_id })
+  return target
 }
 
 export function setSnapshotCaptureProvider(provider?: SnapshotCaptureProvider): void {

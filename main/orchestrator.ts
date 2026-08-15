@@ -29,6 +29,8 @@ import {
   takePendingIteration,
 } from './programming-orchestrator'
 import { readPrdBackplane } from './document-engine'
+import { recordDecision } from './decision-log'
+import { isCircuitBreakSettled } from './recovery-service'
 import { findProject, updateProject } from './project-service'
 import { recordSessionActivity } from './session-service'
 import { isThinkingLogEnabled, logThinking } from './thinking-log'
@@ -314,6 +316,15 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
         // 重生成整版，且整句口语被逐字并入需求清单污染 PRD 背板。确认后才进入迭代。
         const description = refineModificationDescription(input.content)
         setPendingIteration(input.project_id, { raw: input.content, description })
+        recordDecision({
+          project_id: input.project_id,
+          session_id: input.session_id,
+          entry: {
+            type: 'modification_gate',
+            title: '触发修改确认门',
+            why: `识别到修改诉求，原话「${input.content}」清洗为「${description}」；修改是整版重造，必须先过用户确认`,
+          },
+        })
         updateProject(input.project_id, { current_stage: 'blocked_for_user_decision' })
         streamPublisher(makeEvent(input, 'stage_changed', { stage: 'blocked_for_user_decision' }))
         const confirmCopy = `我理解你想改：「${truncateForCopy(description, 40)}」，确认按这个方向重新生成一版吗？`
@@ -401,7 +412,20 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
 
     return { accepted: true, session_id: input.session_id, stream_started: true }
   } catch (error) {
+    // 熔断回滚已完成收尾（T5）：阶段收敛、如实消息、completed 事件都在回滚内发过，
+    // 这里不得再当普通失败处理（不覆盖阶段、不发 error 事件）。
+    if (isCircuitBreakSettled(error)) {
+      persistTerminalMessage(input.session_id, 'completed')
+      return { accepted: true, session_id: input.session_id, stream_started: true }
+    }
     persistAssistantMessages(input.session_id, received)
+    // 用户主动停止（T3）：终止流并落盘终态，但不作为错误向上抛——
+    // 会话仍可用（activeSessions 已在 cancelAgent 清除，可继续发消息）。
+    if (isUserCancelled(error)) {
+      streamPublisher(makeEvent(input, 'error', { code: 'AGENT_CANCELLED' }))
+      persistTerminalMessage(input.session_id, 'error', { code: 'AGENT_CANCELLED', message: '用户停止了本次生成' })
+      return { accepted: true, session_id: input.session_id, stream_started: true }
+    }
     const code = String(error).includes('AGENT_SESSION_BUSY') ? 'AGENT_SESSION_BUSY' : 'AGENT_SDK_ERROR'
     streamPublisher(makeEvent(input, 'error', { code }))
     persistTerminalMessage(input.session_id, 'error', {
@@ -469,16 +493,25 @@ export async function cancelAgent(input: AgentCancelInput): Promise<AgentCancelR
   const background = backgroundRuns.get(input.session_id)
   if (!run && !background) return { cancelled: false, session_id: input.session_id }
 
+  // abort 携带带标记的 Error 作为拒绝原因（T3）：fetch 会以该 reason 拒绝，
+  // runAgent 据此识别「用户主动停止」而非普通 SDK 错误。
+  const reason = new Error(`AGENT_CANCELLED: ${input.reason}`)
   if (run) {
-    run.abortController.abort(input.reason)
+    run.abortController.abort(reason)
     await run.iterator?.return?.()
     activeSessions.delete(input.session_id)
   }
   if (background) {
-    background.abort(input.reason)
+    background.abort(reason)
     backgroundRuns.delete(input.session_id)
   }
   return { cancelled: true, session_id: input.session_id }
+}
+
+/** 用户主动取消的判定：中止信号抛出的 AbortError 或查询入口的 AGENT_CANCELLED。 */
+function isUserCancelled(error: unknown): boolean {
+  if (error instanceof Error && error.name === 'AbortError') return true
+  return String(error).includes('AGENT_CANCELLED')
 }
 
 function appendAgentMessage(sessionId: string, message: AgentMessage): void {
@@ -798,6 +831,16 @@ async function resolveIterationDecisionFlow(
   const pending = takePendingIteration(input.project_id)
 
   if (decision === 'confirm' && pending) {
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'modification_decision',
+        title: '用户确认修改',
+        why: `用户在确认卡点选「对，就这样改」，按已确认的修改点「${pending.description}」进入迭代重新生成`,
+        detail: { raw: pending.raw, description: pending.description },
+      },
+    })
     setProgrammingEventPublisher(streamPublisher)
     await runIterationTask({
       request_id: input.request_id,
@@ -818,6 +861,25 @@ async function resolveIterationDecisionFlow(
       : decision === 'rephrase'
         ? '好的，你想怎么改，直接说就行。'
         : '好的，先保持现在的版本。'
+  recordDecision({
+    project_id: input.project_id,
+    session_id: input.session_id,
+    entry: {
+      type: 'modification_decision',
+      title:
+        decision === 'confirm'
+          ? '确认卡已过期'
+          : decision === 'rephrase'
+            ? '用户要求重新描述'
+            : '用户放弃本次修改',
+      why:
+        decision === 'confirm'
+          ? '用户点了「对，就这样改」但待确认修改已丢失（如重启后点旧卡），回 ready 请用户重说'
+          : decision === 'rephrase'
+            ? `用户点「不对，我重新说」，放弃修改点「${pending?.description ?? '（已丢失）'}」，回 ready 等待重述`
+            : `用户点「不改了」，放弃修改点「${pending?.description ?? '（已丢失）'}」，保持当前版本`,
+    },
+  })
   updateProject(input.project_id, { current_stage: 'ready' })
   streamPublisher(makeEvent(input, 'stage_changed', { stage: 'ready' }))
   appendAgentMessage(input.session_id, {

@@ -3,7 +3,7 @@ import type { AgentEvent, AgentSendMessageInput, MessageContentBlock, Project, P
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
 import { buildPrdBackplane, readPrdBackplane, syncDocuments } from './document-engine'
-import { createSnapshot, rollbackSnapshot, runSandbox, trackAnalytics } from './platform-services'
+import { createSnapshot, runSandbox, trackAnalytics } from './platform-services'
 import { DEFAULT_MAX_TOKENS, generateMvpLlm, type GenerateMvpLlmResult } from './mvp-engine-llm'
 import { buildSdkEnv, decryptApiKey, getChannelByIdRaw, getFirstEnabledChannel } from './channel-manager'
 import { findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
@@ -14,6 +14,8 @@ import { readTestReport, runGwtScenarios, writeTestReport, type GwtTestResult } 
 import { applyRepairPatch, REPAIR_CATEGORY_SUMMARY, runRepairCycle, type RepairCategory } from './repair-engine'
 import { runJudge, type JudgeVerdict } from './judge-engine'
 import { assertToolAllowed } from './permission-service'
+import { recordDecision } from './decision-log'
+import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from './recovery-service'
 import { readPrimaryIntent } from './session-service'
 import type { SDKQuery } from './orchestrator'
 
@@ -30,10 +32,6 @@ export const READY_COMPLETION_COPY =
 /** 迭代/生成失败时如实告知用户的话术：不假装成功，也不把失败藏成「已经生成好了」。 */
 export const GENERATION_FAILED_COPY =
   '这次修改没有成功（模型生成失败了），你可以再试一次，或者换个说法描述你的需求。'
-
-/** 熔断回滚后告知用户内容未丢失的话术（对齐 self-healing-judge @S2-JUDGE-002）。 */
-export const ROLLBACK_FUSE_COPY =
-  '已经自动回到之前的版本，内容都还在，没有丢失。你可以选择继续尝试、接受当前，或补充说明。'
 
 type ProgrammingEventPublisher = (event: AgentEvent) => void
 
@@ -506,7 +504,17 @@ async function ensureSandboxRunning(input: MvpTaskInput): Promise<{ preview_url:
       },
     })
     if (cycle.blocked) {
-      await rollbackToHealthySnapshot(input)
+      // 熔断回滚（T5）：修复耗尽不再只让渡——先回滚健康快照并按磁盘证据收敛，
+      // 回滚不成才交 blocked_for_user_decision 让渡。回滚成功抛哨兵错误，
+      // 上层（runAgent / ipc）识别后不再当普通失败处理。
+      const outcome = await circuitBreakRollback({
+        request_id: input.request_id,
+        session_id: input.session_id,
+        project_id: input.project_id,
+        reason: `runtime 修复循环耗尽（mvp_repair，上限后仍无法启动沙箱）`,
+        publish: (type, payload) => publish(input, type, payload),
+      })
+      if (outcome.rolled_back) throw new CircuitBreakSettledError()
       publishBlockedDecision(input, 'mvp_repair')
       throw new Error('SANDBOX_RUN_FAILED:blocked')
     }
@@ -525,41 +533,6 @@ function throwSandboxFailure(input: MvpTaskInput, errorSummary: { category: stri
     message: errorSummary?.user_visible_summary ?? '预览暂时没有启动成功，我正在修复。',
   })
   throw new Error(`SANDBOX_RUN_FAILED:${errorSummary?.category ?? 'unknown'}`)
-}
-
-/**
- * 熔断回滚（self-healing-judge @S2-JUDGE-002）：runtime/test 修复连续失败达上限后，
- * 回滚到最近一次健康快照（current_snapshot_id），并如实告知用户内容未丢失。
- * 无健康快照（首次生成尚无草图快照）或回滚失败时静默跳过，不阻断让渡流程——
- * blocked 决策卡仍会弹出兜底。
- */
-async function rollbackToHealthySnapshot(input: {
-  request_id: string
-  session_id: string
-  project_id: string
-}): Promise<void> {
-  const target = findProject(input.project_id).current_snapshot_id
-  if (!target) return
-  try {
-    const result = await rollbackSnapshot({
-      request_id: input.request_id,
-      project_id: input.project_id,
-      snapshot_id: target,
-      reason: 'repair_fuse',
-    })
-    appendJsonLine(getAgentSessionPath(input.session_id), {
-      role: 'assistant',
-      content: [{ type: 'text', text: ROLLBACK_FUSE_COPY }],
-      timestamp: Date.now(),
-    })
-    publish(input, 'message_delta', { text: ROLLBACK_FUSE_COPY })
-    publish(input, 'rollback_done', {
-      snapshot_id: result.current_snapshot_id,
-      preview_url: result.preview_url,
-    })
-  } catch {
-    // 回滚失败（快照缺失/损坏）不反噬让渡：blocked 卡片仍会弹出
-  }
 }
 
 export interface GwtTestingInput {
@@ -610,6 +583,20 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
     const limit = project.mode === 'quick' ? JUDGE_RETURN_QUICK_LIMIT : JUDGE_RETURN_LONGTERM_LIMIT
     const returns = (project.judge_return_count ?? 0) + 1
     updateProject(input.project_id, { judge_return_count: returns })
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'judge_return',
+        title: `裁判退回（第 ${returns} 次，上限 ${limit}）`,
+        why: verdict.user_visible_summary,
+        detail: {
+          returns,
+          limit,
+          hard_failures: verdict.hard_constraints.filter((item) => !item.passed).map((item) => item.name),
+        },
+      },
+    })
 
     if (returns > limit) {
       // U7：把 Judge 的具体退回原因（user_visible_summary，如「缺了按月统计功能」）带给让渡卡片
@@ -708,8 +695,15 @@ export async function runPostMvpTestingFlow(input: GwtTestingInput): Promise<Gwt
       },
     })
     if (cycle.blocked) {
-      // 熔断回滚：先回到最近健康快照，再让渡，避免用户面对一堆被修坏的中间态
-      await rollbackToHealthySnapshot(input)
+      // 熔断回滚（T5）：同 mvp_repair——先回滚再让渡，回滚成功由哨兵错误终结本流程
+      const outcome = await circuitBreakRollback({
+        request_id: input.request_id,
+        session_id: input.session_id,
+        project_id: input.project_id,
+        reason: 'test 修复循环耗尽（test_repair，GWT 场景反复未过）',
+        publish: (type, payload) => publish(input, type, payload),
+      })
+      if (outcome.rolled_back) throw new CircuitBreakSettledError()
       // U7：把未通过场景汇总成可读偏差描述，避免让渡卡片只有泛化文案
       const failureTitle =
         testResult.failure_summary.length > 0
@@ -784,6 +778,8 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
     })
     return mvp
   } catch (error) {
+    // 熔断回滚已完成收尾（T5）：阶段已按磁盘证据收敛、消息已发，不再覆盖为 ready
+    if (isCircuitBreakSettled(error)) throw error
     // 迭代失败如实回滚：回到 ready（上一版 MVP 仍完整保留），并如实告知用户。
     // 否则项目会停在 iterating/generating_mvp，后续「好了吗」落入编程路径被模型
     // 编造成「已经生成好了」（阶段如实性）。

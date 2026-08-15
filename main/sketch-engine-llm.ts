@@ -149,8 +149,8 @@ function cleanSketchHtml(raw: string): string {
     .trim()
 }
 
-/** 判定输出是否是完整的 HTML 文档（含 <html 或 <body、内联 <style>，且以 </html> 闭合）。 */
-function isHtmlDocument(html: string): boolean {
+/** 判定输出是否是完整的 HTML 文档（含 <html 或 <body、内联 <style>，且以 </html> 闭合）。导出供恢复服务复用（T1 磁盘产物完整性校验）。 */
+export function isHtmlDocument(html: string): boolean {
   return (
     /<style[\s>]/i.test(html) &&
     /<html[\s>]|<body[\s>]/i.test(html) &&

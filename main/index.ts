@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { registerIpcHandlers } from './ipc'
 import { setSnapshotCaptureProvider } from './platform-services'
+import { reconcileInterruptedProjects } from './recovery-service'
 import { MAIN_FRAME_CSP, shouldInjectMainFrameCsp } from './csp'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -57,7 +58,32 @@ function resolvePreloadPath(): string {
   return join(app.getAppPath(), 'dist-main', 'preload', 'bridge.cjs')
 }
 
-app.whenReady().then(createMainWindow)
+/**
+ * 启动孤儿阶段对账（长期型改造 T1）：崩溃/强杀后项目可能残留 generating_mvp /
+ * testing / judge_review / repairing / iterating 等中间态。开窗前按磁盘证据把
+ * 这些项目收敛到 ready / sketch_ready / clarifying 并在会话里落如实说明——
+ * 只认磁盘产物与健康快照，不推断进度。失败不阻断启动。
+ */
+async function reconcileInterruptedProjectsAtStartup(): Promise<void> {
+  try {
+    const outcomes = await reconcileInterruptedProjects()
+    if (outcomes.length > 0) {
+      console.log(
+        `[reconcile] 启动对账完成：${outcomes.length} 个中断项目已收敛 ` +
+          outcomes.map((item) => `${item.project_id.slice(0, 8)} ${item.from_stage}→${item.to_stage}`).join(', '),
+      )
+    }
+  } catch (error) {
+    console.error('[reconcile] 启动对账失败（不阻断启动）:', error)
+  }
+}
+
+app.whenReady().then(async () => {
+  // 开窗前完成对账（恢复是纯本地文件 IO，通常毫秒级；阶段收敛先于渲染端读取，
+  // 避免渲染端拿到中间态阶段又滞后于磁盘）
+  await reconcileInterruptedProjectsAtStartup()
+  await createMainWindow()
+})
 
 app.on('web-contents-created', (_event, contents) => {
   if (contents.getType() === 'webview') configureWebContents(contents)

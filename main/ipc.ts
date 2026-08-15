@@ -66,6 +66,7 @@ import {
 import { cleanOrphanSessions, listSessions, loadMessages } from './session-service'
 import { createChannel, deleteChannel, fetchModels, listChannels, testChannel, testChannelDirect, updateChannel } from './channel-manager'
 import { listDocuments, readDocument, syncDocuments } from './document-engine'
+import { isCircuitBreakSettled } from './recovery-service'
 import {
   createSnapshot,
   listSnapshots,
@@ -282,6 +283,8 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
             // U5：用户主动停止（signal 已 abort）不再发 error 事件——渲染端已落「已停止生成」，
             // 避免两条相互矛盾的消息；只有真实失败才上报错误。
             if (abortController.signal.aborted) return
+            // 熔断回滚已完成收尾（T5）：阶段/消息/completed 事件已在回滚内发布，不再发 error
+            if (isCircuitBreakSettled(error)) return
             // P1：不再静默吞错——MVP 生成/测试链失败时向渲染端发 error 事件，
             // 让「预览为什么空」可观测，而不是停在空态。
             const message = error instanceof Error ? error.message : String(error)
@@ -332,6 +335,8 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
         }).catch((error) => {
           // U5：用户主动停止不再发 error 事件（runIterationTask 内部已回滚到 ready）。
           if (abortController.signal.aborted) return
+          // 熔断回滚已完成收尾（T5）：不再发 error 事件（收尾已全部完成）
+          if (isCircuitBreakSettled(error)) return
           const message = error instanceof Error ? error.message : String(error)
           console.error('[ipc] correction regeneration failed:', message, error)
           mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, {

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentEvent, AgentSendMessageInput, MessageContentBlock } from '../shared/types'
 import { routeDialogue, type ClarificationOption } from './dialogue-router'
+import { recordDecision } from './decision-log'
 import type { ConversationTurn, GuideModelOptions } from './orchestrator'
 import { trackAnalytics } from './platform-services'
 import { runSketchTask, setProgrammingEventPublisher } from './programming-orchestrator'
@@ -190,6 +191,19 @@ export async function handleGuideMessage(
   // 卡片答案：用户已通过选项给出方向，直接生成草图（修复澄清死循环）
   const cardAnswer = resolveCardAnswer(input, primaryIntent)
   if (cardAnswer) {
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'clarification_answer',
+        title: '用户点选澄清答案',
+        why: `用户点选「${input.content}」，以此作为已确认方向生成草图`,
+        detail: {
+          option_id: input.metadata?.selected_option_id,
+          requirements: cardAnswer.requirements,
+        },
+      },
+    })
     const ack = '好的，按你选的方向开始生成草图。'
     persistAssistant?.(ack)
     publish(makeGuideEvent(input, 'message_delta', { text: ack }))
@@ -219,7 +233,7 @@ export async function handleGuideMessage(
     const reply = '我需要再确认几个关键点，这样草图会更接近你的想法。'
     persistAssistant?.(reply)
     publish(makeGuideEvent(input, 'message_delta', { text: reply }))
-    publishClarificationCard(input, publish, normalizeClarificationOptions(route.questions.slice(0, 3)), persistSystem)
+    publishClarificationCard(input, publish, normalizeClarificationOptions(route.questions.slice(0, 3)), persistSystem, '我需要再确认几个关键点')
     return
   }
 
@@ -290,7 +304,7 @@ async function tryModelDrivenGuide(
   if (parsed.action === 'ask_clarification') {
     updateProject(input.project_id, { current_stage: 'blocked_for_user_decision' })
     publish(makeGuideEvent(input, 'stage_changed', { stage: 'blocked_for_user_decision' }))
-    publishClarificationCard(input, publish, normalizeClarificationOptions(parsed.questions), persistSystem)
+    publishClarificationCard(input, publish, normalizeClarificationOptions(parsed.questions), persistSystem, parsed.reply.trim())
     return true
   }
 
@@ -309,7 +323,7 @@ async function tryModelDrivenGuide(
 }
 
 /**
- * 发布澄清决策卡片并落盘选项原文（[decision-card] 内部标记）。
+ * 发布澄清决策卡片并落盘选项原文（[decision-card] 内部标记）+ 决策日志（T2）。
  * questions 为空表示纯文本澄清，不弹卡片；有选项时务必落盘——
  * user_decision_required 事件只存在渲染端内存，不落盘则事后无法追溯
  * 到底给用户弹过哪些选项（历史会话只能看到 reply 问句）。
@@ -319,10 +333,21 @@ function publishClarificationCard(
   publish: GuideEventPublisher,
   questions: ClarificationOption[],
   persistSystem?: (text: string) => void,
+  question?: string,
 ): void {
   if (questions.length > 0) {
     persistSystem?.(`[decision-card] ${questions.map((option) => option.label).join('｜')}`)
   }
+  recordDecision({
+    project_id: input.project_id,
+    session_id: input.session_id,
+    entry: {
+      type: 'clarification_card',
+      title: '澄清提问',
+      why: question ? `向用户提问：「${question}」` : '向用户追问澄清（纯文本，无选项卡片）',
+      detail: { options: questions.map((option) => option.label) },
+    },
+  })
   publish(makeGuideEvent(input, 'user_decision_required', {
     kind: 'clarification',
     title: '先确认方向',
