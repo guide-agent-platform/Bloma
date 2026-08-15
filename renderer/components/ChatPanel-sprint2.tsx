@@ -52,6 +52,11 @@ const nullStreamFallback = atom<AgentStreamState>({
   content: '',
 })
 
+// sessionId 为空时的 consumed 兜底：必须模块级常量。
+// 内联 atom(false) 会在每次渲染创建新 atom → useAtomValue 重新订阅 → 无限重渲染
+// （jsdom/测试环境直接挂死；真机模式选择页空转烧 CPU）。与 nullStreamFallback 同模式。
+const notConsumedFallback = atom(false)
+
 // =========================================================================
 // user_decision_required payload 类型
 // =========================================================================
@@ -130,7 +135,7 @@ export function useUserDecisionCards(): CardOption[] | null {
     sessionId ? agentStreamStateFamily(sessionId) : nullStreamFallback,
   )
   const consumed = useAtomValue(
-    sessionId ? decisionConsumedFamily(sessionId) : atom(false),
+    sessionId ? decisionConsumedFamily(sessionId) : notConsumedFallback,
   )
 
   return useMemo(() => {

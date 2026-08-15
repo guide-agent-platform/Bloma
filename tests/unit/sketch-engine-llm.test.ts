@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -116,5 +116,35 @@ describe('SketchEngineLlm generation (草图走 LLM)', () => {
   it('LLM 抛错 → 错误向上传播（由 resolveSketch 回退模板）', async () => {
     const input = makeInput({ query: throwingQuery })
     await expect(generateSketchLlm(input)).rejects.toThrow('model network error')
+  })
+
+  it('输出截断（无 </html> 闭合）→ 加大 maxTokens 重试一次，成功后落盘完整 HTML', async () => {
+    // 线上案例复现：重 CSS 视觉稿被 max_tokens 截断，停在样式中间
+    const truncatedHtml = SKETCH_HTML.slice(0, SKETCH_HTML.length - 40)
+    const seenMaxTokens: number[] = []
+    const retryQuery: SDKQuery = async function* (_prompt, options): AsyncGenerator<SDKMessage> {
+      seenMaxTokens.push(options.maxTokens ?? 0)
+      const text = seenMaxTokens.length === 1 ? truncatedHtml : SKETCH_HTML
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }
+      yield { type: 'result', subtype: 'success' }
+    }
+    const input = makeInput({ query: retryQuery, maxTokens: 4000 })
+    const result = await generateSketchLlm(input)
+
+    expect(seenMaxTokens).toEqual([4000, 8000])
+    const html = readFileSync(join(findProject(input.project_id).root_path, 'index.html'), 'utf8')
+    expect(html).toContain('</html>')
+    expect(result.summary).toContain('外观草图')
+  })
+
+  it('重试仍截断 → 抛 SKETCH_LLM_TRUNCATED，截断产物不落盘', async () => {
+    const truncatedHtml = SKETCH_HTML.slice(0, SKETCH_HTML.length - 40)
+    const truncatedQuery: SDKQuery = async function* (): AsyncGenerator<SDKMessage> {
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: truncatedHtml }] } }
+      yield { type: 'result', subtype: 'success' }
+    }
+    const input = makeInput({ query: truncatedQuery, maxTokens: 4000 })
+    await expect(generateSketchLlm(input)).rejects.toThrow('SKETCH_LLM_TRUNCATED')
+    expect(existsSync(join(findProject(input.project_id).root_path, 'index.html'))).toBe(false)
   })
 })
