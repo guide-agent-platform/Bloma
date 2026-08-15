@@ -7,6 +7,29 @@
 
 **v1.1 修订说明**：同步 §5 已知待同步项状态（4 项全部已同步），新增 §5.1 目录结构重组记录。按 `workflow.md §2.4` 走修订流程，待评审后回到已确认。
 
+## Sprint 3 项目管理补全（2026-08-15）
+
+| 属性 | 值 |
+|------|-----|
+| **状态** | 已确认（随 `sprint2` push 发布） |
+
+### 变更内容
+
+- `[新增]` 项目硬删除 `project:delete`：索引条目 + 项目/文档/快照/事件文件 + 关联会话物理清理，路径安全防护，删除前停沙箱（迁移自 Proma `deleteAgentWorkspace`）
+- `[新增]` 取消归档 `project:unarchive`（archived → active）
+- `[新增]` 历史列表「进行中 / 已归档」视角 Tab，`project:list` 增 `scope`（active/archived/all）
+- `[新增]` 历史项目行内「归档 / 恢复 / 删除」操作 + 删除二次确认弹窗
+- `[新增]` 安全独立计数（PRD §10.5）：`Project.security_repair_count`，repair-engine 新增 `security_error` 类别，上限 3 次不计入普通退回
+- `[修复]` S2-PROJECT-001 E2E mock 补齐（`getFirstEnabledChannel` + `buildSdkEnv` PATH + `getSdkQuery` 确定性 LLM 响应）
+- `[新增]` 声明 `@playwright/test` E2E 依赖（此前未声明，依赖 node_modules 残留）
+
+### 影响评估
+
+- 受影响文档：DOC-4.1 `api-spec.md`（v1.2，补 `project:unarchive`/`project:delete`/`project:list` scope）
+- 受影响模块：project-service / repair-engine / ipc / preload-bridge / ProjectHistoryPage / App
+- 测试：新增 S3-PROJECT-001~017；`npm run test:all` 全绿
+- 是否需要回滚测试：是（归档/删除/回滚路径已覆盖）
+
 ---
 
 ## 1. 版本号规则
