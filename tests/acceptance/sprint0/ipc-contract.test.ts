@@ -17,6 +17,8 @@ const expectedChannels = {
   PROJECT_CREATE: 'project:create',
   PROJECT_LIST: 'project:list',
   PROJECT_ARCHIVE: 'project:archive',
+  PROJECT_UNARCHIVE: 'project:unarchive',
+  PROJECT_DELETE: 'project:delete',
   PROJECT_CONFIRM_SKETCH: 'project:confirm-sketch',
   PROJECT_SUBMIT_CORRECTION: 'project:submit-correction',
   PROJECT_UPGRADE: 'project:upgrade',
@@ -30,7 +32,10 @@ const expectedChannels = {
   ANALYTICS_TRACK: 'analytics:track',
   CHANNEL_LIST: 'channel:list',
   CHANNEL_CREATE: 'channel:create',
+  CHANNEL_UPDATE: 'channel:update',
   CHANNEL_TEST: 'channel:test',
+  CHANNEL_TEST_DIRECT: 'channel:test-direct',
+  CHANNEL_FETCH_MODELS: 'channel:fetch-models',
   CHANNEL_DELETE: 'channel:delete',
 } as const
 

@@ -488,6 +488,24 @@ const AppRoutes: React.FC = () => {
     setRoute('settings')
   }, [])
 
+  // ==================== 历史列表操作同步（Sprint 3：归档/删除/恢复） ====================
+
+  // 历史项目页对项目做归档/删除/恢复后，回传最新活动列表：
+  // 1) 同步 App 的 projectList（启动恢复与 handleSendMessage 兜底都依赖它）；
+  // 2) 若当前项目已被删除（不在活动列表），清 currentProject 并回两道门。
+  const handleProjectsChanged = useCallback(
+    (list: Project[]) => {
+      setProjectList(list)
+      if (currentProject && !list.some((p) => p.project_id === currentProject.project_id)) {
+        setCurrentProject(null)
+        setProjectMode(null)
+        setModeSelected(false)
+        setRoute('mode-selection')
+      }
+    },
+    [currentProject, setProjectList, setCurrentProject, setProjectMode, setModeSelected],
+  )
+
   // 预览地址：由 sketch_ready / mvp_ready 事件回填的沙箱地址（streamPreviewUrl）
   const effectivePreviewUrl = streamPreviewUrl ?? undefined
   const effectivePreviewStatus: PreviewStatus = streamPreviewUrl ? 'running' : previewStatus
@@ -510,6 +528,7 @@ const AppRoutes: React.FC = () => {
         onResumeProject={handleResumeProject}
         onNewProject={() => setRoute('mode-selection')}
         onBackToWorkspace={() => setRoute('workspace')}
+        onProjectsChanged={handleProjectsChanged}
       />
     )
   }

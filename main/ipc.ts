@@ -18,6 +18,9 @@ import type {
   PointCorrectionInput,
   ProjectArchiveInput,
   ProjectCreateInput,
+  ProjectDeleteInput,
+  ProjectListInput,
+  ProjectUnarchiveInput,
   ProjectUpgradeInput,
   RequestEnvelope,
   SandboxRunInput,
@@ -31,7 +34,17 @@ import { fail, ok } from './api-result'
 import { cancelAgent, getSdkQuery, runAgent, setAgentStreamPublisher } from './orchestrator'
 import { runIterationTask, runMvpTask, runPostMvpTestingFlow, setProgrammingEventPublisher } from './programming-orchestrator'
 import { assertToolAllowed, resolvePermission, setPermissionRequestPublisher } from './permission-service'
-import { archiveProject, confirmSketch, createProject, findProject, listProjects, submitCorrection, upgradeProject } from './project-service'
+import {
+  archiveProject,
+  confirmSketch,
+  createProject,
+  deleteProject,
+  findProject,
+  listProjects,
+  submitCorrection,
+  unarchiveProject,
+  upgradeProject,
+} from './project-service'
 import { listSessions, loadMessages } from './session-service'
 import { createChannel, deleteChannel, fetchModels, listChannels, testChannel, testChannelDirect, updateChannel } from './channel-manager'
 import { syncDocuments } from './document-engine'
@@ -126,8 +139,8 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
 
   ipcMain.handle(IPC_CHANNELS.PROJECT_LIST, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
-      requireFields<{ request_id: string }>(payload, [])
-      return listProjects()
+      const input = requireFields<ProjectListInput>(payload, [])
+      return listProjects(input.scope ?? 'active')
     })
   })
 
@@ -135,6 +148,22 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<ProjectArchiveInput>(payload, ['project_id'])
       return archiveProject(input)
+    })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PROJECT_UNARCHIVE, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<ProjectUnarchiveInput>(payload, ['project_id'])
+      return unarchiveProject(input)
+    })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PROJECT_DELETE, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<ProjectDeleteInput>(payload, ['project_id'])
+      // 先停该项目沙箱，避免 Windows 文件句柄占用导致 rmSync EPERM（复用回滚的"先停后删"模式）
+      stopSandbox({ request_id: input.request_id, project_id: input.project_id })
+      return deleteProject(input)
     })
   })
 

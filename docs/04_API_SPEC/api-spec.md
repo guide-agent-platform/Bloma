@@ -44,6 +44,8 @@ const IPC_CHANNELS = {
   PROJECT_CONFIRM_SKETCH: "project:confirm-sketch",
   PROJECT_SUBMIT_CORRECTION: "project:submit-correction",
   PROJECT_ARCHIVE: "project:archive",
+  PROJECT_UNARCHIVE: "project:unarchive",
+  PROJECT_DELETE: "project:delete",
   PROJECT_UPGRADE: "project:upgrade",
   SANDBOX_RUN: "sandbox:run",
   SANDBOX_STOP: "sandbox:stop",
@@ -405,18 +407,19 @@ type Project = {
 ```ts
 type ProjectListInput = {
   request_id: string;
+  scope?: "active" | "archived" | "all"; // 默认 active
 };
 
-// 返回未归档项目列表，活动项目优先
+// 按视角返回项目列表：active 过滤归档，archived 只回归档，all 返回全部（活动项目优先）
 type ProjectListResult = Project[];
 ```
 
 存储：
 
 - 读取项目索引 JSON。
-- 过滤掉 `status === "archived"` 的项目，活动项目排在前面。
+- 按 `scope` 过滤：`active`（默认）过滤 `status === "archived"`；`archived` 只返回 `status === "archived"`；`all` 返回全部。活动项目排在前面。
 
-用途：应用启动时恢复活动项目与会话，避免重启后回到两道门。
+用途：应用启动时恢复活动项目与会话（scope 默认 active），避免重启后回到两道门；历史列表页「已归档」视角使用 scope=archived。
 
 ### 7.3 `project:archive`
 
@@ -437,7 +440,47 @@ type ProjectArchiveResult = Project;
 
 用途：历史项目列表提供"归档"操作，归档后不再出现在 `project:list` 返回中。
 
-### 7.4 `project:confirm-sketch`
+### 7.4 `project:unarchive`
+
+```ts
+type ProjectUnarchiveInput = {
+  request_id: string;
+  project_id: string;
+};
+
+// 取消归档：status 恢复为 "active"，重新出现在 active 视角
+type ProjectUnarchiveResult = Project;
+```
+
+存储：
+
+- 更新项目索引 JSON，将 `status` 恢复为 `active`。
+
+用途：历史项目列表「已归档」视角提供"恢复"操作，恢复后重新出现在 `project:list`（scope 默认 active）返回中。
+
+### 7.5 `project:delete`
+
+```ts
+type ProjectDeleteInput = {
+  request_id: string;
+  project_id: string;
+};
+
+// 硬删除项目：索引条目 + 项目/文档/快照/事件文件 + 关联会话
+type ProjectDeleteResult = { deleted: true };
+```
+
+存储与清理（迁移自 Proma `deleteAgentWorkspace` / `deleteConversation`）：
+
+- 从项目索引 JSON 移除该条目并落盘（先索引后文件，rm 失败只残留无引用文件，不产生孤儿索引）。
+- 从 `agent-sessions.json` 移除该项目的会话索引，并删除 `agent-sessions/{session_id}.jsonl`。
+- 物理删除 `generated-projects/{project_id}`、`documents/{project_id}`、`snapshots/{project_id}`、`events/{project_id}.jsonl`。
+- 路径安全防护：所有待删路径必须落在 workspace 根内，否则拒绝（`PROJECT_DELETE_PATH_SAFETY`）。
+- 删除前主进程先 `stopSandbox` 停止该项目沙箱，避免 Windows 文件句柄占用。
+
+用途：历史项目列表提供"删除"操作（UI 二次确认）。这是不可逆操作，会清掉用户生成的软件全部文件与对话记录。
+
+### 7.6 `project:confirm-sketch`
 
 ```ts
 type ConfirmSketchInput = {
@@ -456,7 +499,7 @@ type ConfirmSketchInput = {
 - `needs_change`：生成 revision task。
 - 决策追加写入 JSONL。
 
-### 7.5 `project:submit-correction`
+### 7.7 `project:submit-correction`
 
 ```ts
 type PointCorrectionInput = {
@@ -901,3 +944,4 @@ type ErrorCode =
 |------|------|----------|
 | v1.0 | 2026-07-10 | 首版，定义 IPC、Renderer Bridge、Agent 流、权限、项目、沙箱、快照、文档、埋点、MCP 工具和错误码 |
 | v1.1 | 2026-07-10 | 按 `proma-core-demo` 对齐修订：IPC 通道 `AGENT_CANCEL` → `AGENT_STOP` 与 Proma 原版命名一致 |
+| v1.2 | 2026-08-15 | 项目管理补全：新增 `project:unarchive`（取消归档）、`project:delete`（硬删除，含清理与路径安全防护）；`project:list` 增加 `scope`（active/archived/all）视角 |

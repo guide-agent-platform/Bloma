@@ -15,24 +15,27 @@ import { findProject, readLastSketchRequirements, updateProject } from './projec
  *
  * 计数：`runtime_repair_count` / `test_repair_count` 各 ≤3（component-design §7），
  * 成功归零；达上限进入 `blocked_for_user_decision`（让渡），熔断回滚在 Sprint 3。
+ * 安全修复独立计数：`security_repair_count` ≤3（PRD §10.5），不计入普通退回次数。
  * 埋点：`self_repair_triggered`（含 attempt）+ `programming_execution`。
  */
 
-export type RepairCategory = 'dependency_error' | 'syntax_error' | 'runtime_error' | 'test_error' | 'constraint_error'
+export type RepairCategory = 'dependency_error' | 'syntax_error' | 'runtime_error' | 'test_error' | 'constraint_error' | 'security_error'
 
 export const RUNTIME_REPAIR_LIMIT = 3
 export const TEST_REPAIR_LIMIT = 3
+export const SECURITY_REPAIR_LIMIT = 3
 
-/** 修复类别 → P0 可读文案（A4：`repairing` 事件补 `user_visible_summary`） */
+/** 修复类别 → P0 可读文案（A4：`repairing` 事件补 `user_visible_summary`；安全文案不含 XSS/SQL 注入等术语） */
 export const REPAIR_CATEGORY_SUMMARY: Record<RepairCategory, string> = {
   dependency_error: '预览缺少运行依赖，正在自动修复',
   syntax_error: '预览代码存在语法错误，正在自动修复',
   runtime_error: '预览运行时报错，正在自动修复',
   test_error: '功能检查未通过，正在自动修复',
   constraint_error: '功能要求未完全对齐，正在重新整理文档',
+  security_error: '检测到安全隐患，正在自动修复',
 }
 
-type RepairKind = 'runtime' | 'test' | 'constraint'
+type RepairKind = 'runtime' | 'test' | 'constraint' | 'security'
 
 export interface RepairCheck {
   ok: boolean
@@ -59,13 +62,15 @@ export interface RepairCycleResult {
 export function getRepairCount(projectId: string, kind: RepairKind): number {
   if (kind === 'constraint') return 0
   const project = findProject(projectId)
+  if (kind === 'security') return project.security_repair_count ?? 0
   return kind === 'runtime' ? (project.runtime_repair_count ?? 0) : (project.test_repair_count ?? 0)
 }
 
 export async function runRepairCycle(input: RepairCycleInput): Promise<RepairCycleResult> {
   const { request_id, session_id, project_id, category } = input
   const kind = repairKind(category)
-  const limit = kind === 'test' ? TEST_REPAIR_LIMIT : RUNTIME_REPAIR_LIMIT
+  const limit =
+    kind === 'test' ? TEST_REPAIR_LIMIT : kind === 'security' ? SECURITY_REPAIR_LIMIT : RUNTIME_REPAIR_LIMIT
   const attempt = getRepairCount(project_id, kind) + 1
 
   // 进入 repairing 阶段并广播
@@ -108,14 +113,16 @@ export async function runRepairCycle(input: RepairCycleInput): Promise<RepairCyc
     const resetPatch: Record<string, number> = {}
     if (kind === 'runtime') resetPatch.runtime_repair_count = 0
     if (kind === 'test') resetPatch.test_repair_count = 0
+    if (kind === 'security') resetPatch.security_repair_count = 0
     updateProject(project_id, { current_stage: 'testing', ...resetPatch })
     input.publish('stage_changed', { stage: 'testing' })
     return { repaired: true, blocked: false, attempt, stage: 'testing' }
   }
 
-  // 修复失败：计数 +1，返回让调用方再次进入循环
+  // 修复失败：计数 +1，返回让调用方再次进入循环（security 独立计数，不计入普通退回）
   if (kind === 'runtime') updateProject(project_id, { runtime_repair_count: attempt })
   if (kind === 'test') updateProject(project_id, { test_repair_count: attempt })
+  if (kind === 'security') updateProject(project_id, { security_repair_count: attempt })
   return { repaired: false, blocked: false, attempt, stage: 'repairing' }
 }
 
@@ -137,7 +144,9 @@ export function applyRepairPatch(
     return { patched: true, summary: '已重新生成 PRD 与 GWT 骨架' }
   }
 
-  // 模板化重建：确定性模板覆盖，消除缺失/损坏文件
+  // 模板化重建：确定性模板覆盖，消除缺失/损坏文件。
+  // security_error 同样走模板重建（确定性产物不含注入/XSS 类危险模式），
+  // 完整 OWASP 安全扫描器由 Sprint 3 独立承接，本处提供独立计数契约。
   const mvp = generateMvp({ project_id: input.project_id, requirements })
   return { patched: true, summary: `已按模板重建 MVP（${mvp.files.length} 个文件）` }
 }
@@ -145,5 +154,6 @@ export function applyRepairPatch(
 function repairKind(category: RepairCategory): RepairKind {
   if (category === 'test_error') return 'test'
   if (category === 'constraint_error') return 'constraint'
+  if (category === 'security_error') return 'security'
   return 'runtime'
 }

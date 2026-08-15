@@ -39,6 +39,9 @@ import type {
   PointCorrectionInput,
   ProjectArchiveInput,
   ProjectCreateInput,
+  ProjectDeleteInput,
+  ProjectListInput,
+  ProjectUnarchiveInput,
   ProjectUpgradeInput,
   RequestEnvelope,
   SandboxRunInput,
@@ -71,10 +74,14 @@ const electronAPI: ElectronAPI = {
   project: {
     create: (input: ProjectCreateInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_CREATE, input),
-    list: (input: RequestEnvelope) =>
+    list: (input: ProjectListInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_LIST, input),
     archive: (input: ProjectArchiveInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_ARCHIVE, input),
+    unarchive: (input: ProjectUnarchiveInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_UNARCHIVE, input),
+    delete: (input: ProjectDeleteInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_DELETE, input),
     confirmSketch: (input: ConfirmSketchInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_CONFIRM_SKETCH, input),
     submitCorrection: (input: PointCorrectionInput) =>

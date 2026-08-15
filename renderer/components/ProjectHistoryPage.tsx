@@ -1,12 +1,9 @@
 import React from 'react'
-import { useAtom, useAtomValue } from 'jotai'
+import { useAtomValue } from 'jotai'
 import { Sparkles, Gem, ArrowRight, LayoutTemplate } from './icons'
 import {
   currentProjectAtom,
-  projectModeAtom,
-  workflowStageAtom,
   STAGE_LABEL_MAP,
-  activeAgentSessionIdAtom,
 } from './atoms'
 import type { Project, ProjectMode, WorkflowStage } from './atoms'
 
@@ -19,6 +16,8 @@ export interface ProjectHistoryPageProps {
   onNewProject: () => void
   /** 返回当前工作区（如果有活跃项目） */
   onBackToWorkspace?: () => void
+  /** 归档/删除/恢复后回传最新活动项目列表（供 App 同步 projectList） */
+  onProjectsChanged?: (projects: Project[]) => void
 }
 
 const modeLabelMap: Record<ProjectMode, string> = {
@@ -43,88 +42,117 @@ const statusLabelMap: Record<string, string> = {
   archived: '已归档',
 }
 
+type LoadState = 'loading' | 'loaded' | 'error'
+type ActiveTab = 'active' | 'archived'
+
+/** 稳定空数组默认值：避免 props 默认参数每次渲染新建引用导致 load effect 无限重跑。 */
+const EMPTY_PROJECTS: Project[] = []
+
 /**
  * 历史项目列表页
  *
- * 规范来源：interaction-spec §3.2 状态机
- *   choosing_mode --> project_history: 从历史入口返回
- *   sitemap.md 标注"历史项目列表（新增，Phase 1）"
- *
- * 功能：
- * - 展示所有活动项目（名称、模式、阶段、更新时间）
- * - 点击进入已有项目工作区
- * - "新建项目"按钮回到两道门选择页
- * - 支持从工作区顶栏"所有项目"进入
+ * 规范来源：interaction-spec §3.2 状态机 + sitemap.md「历史项目列表（Phase 1）」。
+ * 本轮（Sprint 3）补齐项目管理操作（迁移自 Proma 归档/删除）：
+ * - 「进行中 / 已归档」两个视角 Tab（对齐 Proma archived scope）
+ * - 活动行「归档 / 删除」，归档行「恢复 / 删除」，删除需二次确认
+ * - 操作成功后经 onProjectsChanged 回传最新活动列表，供 App 同步 projectList
  */
-type LoadState = 'loading' | 'loaded' | 'error'
-
 export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
-  projects = [],
+  projects = EMPTY_PROJECTS,
   onResumeProject,
   onNewProject,
   onBackToWorkspace,
+  onProjectsChanged,
 }) => {
   const currentProject = useAtomValue(currentProjectAtom)
+  const [activeTab, setActiveTab] = React.useState<ActiveTab>('active')
   const [loadState, setLoadState] = React.useState<LoadState>('loading')
   const [ipcProjects, setIpcProjects] = React.useState<Project[]>([])
+  /** 是否已从 IPC 成功加载（区分「IPC 返回空列表」与「无 IPC 数据」） */
+  const [loadedFromIpc, setLoadedFromIpc] = React.useState(false)
+  const [deletingProject, setDeletingProject] = React.useState<Project | null>(null)
   const [errorRetrying, setErrorRetrying] = React.useState(false)
 
-  // 优先从 IPC 加载项目列表，失败则回退到 props
-  React.useEffect(() => {
-    let cancelled = false
-    async function load() {
-      setLoadState('loading')
+  const load = React.useCallback(async (scope: ActiveTab) => {
+    setLoadState('loading')
+    const api = window.electronAPI
+    if (api?.project?.list) {
       try {
-        const api = window.electronAPI
-        if (api) {
-          const result = await api.project.list({ request_id: crypto.randomUUID() })
-          if (!cancelled && result.ok) {
-            setIpcProjects(result.data)
-            setLoadState('loaded')
-            return
-          }
+        const result = await api.project.list({ request_id: crypto.randomUUID(), scope })
+        if (result.ok) {
+          setIpcProjects(result.data)
+          setLoadedFromIpc(true)
+          setLoadState('loaded')
+          return
         }
-        // 无 IPC 或失败 → 使用 props
-        if (!cancelled) setLoadState('loaded')
       } catch {
-        if (!cancelled) setLoadState('error')
+        // 落到 props 兜底
       }
     }
-    load()
-    return () => { cancelled = true }
+    setLoadedFromIpc(false)
+    setIpcProjects([])
+    setLoadState('loaded')
   }, [])
+
+  React.useEffect(() => {
+    void load(activeTab)
+  }, [activeTab, load])
 
   const handleRetry = () => {
     setErrorRetrying(true)
     setTimeout(() => {
       setErrorRetrying(false)
-      // 重试 IPC 或直接展示 props 数据
-      const api = window.electronAPI
-      if (api) {
-        api.project.list({ request_id: crypto.randomUUID() }).then(r => {
-          if (r.ok) { setIpcProjects(r.data); setLoadState('loaded') }
-          else setLoadState('loaded') // 回退到 props
-        }).catch(() => setLoadState('loaded'))
-      } else {
-        setLoadState('loaded')
-      }
+      void load(activeTab)
     }, 800)
   }
 
-  // 优先 IPC 数据，其次 props
-  const resolvedProjects = ipcProjects.length > 0 ? ipcProjects : projects
-  const activeProjects = [...resolvedProjects]
-    .filter((p) => p.status !== 'archived')
-    .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+  /** 操作成功后：刷新 active 列表并回传 App，再刷新当前 tab 视图。 */
+  const afterMutate = React.useCallback(async () => {
+    const api = window.electronAPI
+    if (api?.project?.list) {
+      const active = await api.project.list({ request_id: crypto.randomUUID(), scope: 'active' })
+      if (active.ok) onProjectsChanged?.(active.data)
+    }
+    await load(activeTab)
+  }, [activeTab, load, onProjectsChanged])
 
-  const formatDate = (iso: string): string => {
-    try {
-      return new Date(iso).toLocaleDateString('zh-CN', {
-        year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: '2-digit', minute: '2-digit',
+  const handleArchive = (project: Project) => {
+    const api = window.electronAPI
+    if (!api?.project?.archive) return
+    void api.project
+      .archive({ request_id: crypto.randomUUID(), project_id: project.project_id })
+      .then((result) => {
+        if (result.ok) void afterMutate()
       })
-    } catch { return iso }
   }
+
+  const handleUnarchive = (project: Project) => {
+    const api = window.electronAPI
+    if (!api?.project?.unarchive) return
+    void api.project
+      .unarchive({ request_id: crypto.randomUUID(), project_id: project.project_id })
+      .then((result) => {
+        if (result.ok) void afterMutate()
+      })
+  }
+
+  const handleDeleteConfirm = () => {
+    if (!deletingProject) return
+    const api = window.electronAPI
+    const project = deletingProject
+    setDeletingProject(null)
+    if (!api?.project?.delete) return
+    void api.project
+      .delete({ request_id: crypto.randomUUID(), project_id: project.project_id })
+      .then((result) => {
+        if (result.ok) void afterMutate()
+      })
+  }
+
+  const resolvedProjects = loadedFromIpc ? ipcProjects : activeTab === 'active' ? projects : []
+  const visibleProjects = [...resolvedProjects].sort(
+    (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+  )
 
   return (
     <div
@@ -139,7 +167,7 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
       <div
         style={{
           width: '100%', maxWidth: 780, display: 'flex', alignItems: 'center',
-          justifyContent: 'space-between', marginBottom: 'var(--space-8)',
+          justifyContent: 'space-between', marginBottom: 'var(--space-6)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
@@ -194,6 +222,27 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
           <Sparkles size={15} />
           新建项目
         </button>
+      </div>
+
+      {/* 视角 Tab：进行中 / 已归档（对齐 Proma archived scope） */}
+      <div
+        style={{
+          width: '100%', maxWidth: 780, display: 'flex', gap: 'var(--space-2)',
+          marginBottom: 'var(--space-4)',
+        }}
+      >
+        <TabButton
+          label="进行中"
+          dataAiId="history-tab-active"
+          active={activeTab === 'active'}
+          onClick={() => setActiveTab('active')}
+        />
+        <TabButton
+          label="已归档"
+          dataAiId="history-tab-archived"
+          active={activeTab === 'archived'}
+          onClick={() => setActiveTab('archived')}
+        />
       </div>
 
       {/* 项目列表 */}
@@ -280,32 +329,118 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
         )}
 
         {/* 正常状态 */}
-        {loadState === 'loaded' && activeProjects.length === 0 && (
-          <EmptyState onNewProject={onNewProject} />
+        {loadState === 'loaded' && visibleProjects.length === 0 && (
+          <EmptyState onNewProject={onNewProject} tabLabel={activeTab === 'archived' ? '已归档' : '进行中'} />
         )}
 
-        {loadState === 'loaded' && activeProjects.map((project) => (
-          <ProjectRow
-            key={project.project_id}
-            project={project}
-            isCurrent={currentProject?.project_id === project.project_id}
-            onResume={() => onResumeProject(project)}
-          />
-        ))}
+        {loadState === 'loaded' &&
+          visibleProjects.map((project) => (
+            <ProjectRow
+              key={project.project_id}
+              project={project}
+              isCurrent={currentProject?.project_id === project.project_id}
+              onResume={() => onResumeProject(project)}
+              actions={
+                project.status === 'archived' ? (
+                  <>
+                    <ActionButton label="恢复" dataAiId="project-restore-button" onClick={() => handleUnarchive(project)} />
+                    <ActionButton label="删除" dataAiId="project-delete-button" danger onClick={() => setDeletingProject(project)} />
+                  </>
+                ) : (
+                  <>
+                    <ActionButton label="归档" dataAiId="project-archive-button" onClick={() => handleArchive(project)} />
+                    <ActionButton label="删除" dataAiId="project-delete-button" danger onClick={() => setDeletingProject(project)} />
+                  </>
+                )
+              }
+            />
+          ))}
       </div>
+
+      {/* 删除二次确认弹窗 */}
+      {deletingProject && (
+        <DeleteConfirmModal
+          project={deletingProject}
+          onCancel={() => setDeletingProject(null)}
+          onConfirm={handleDeleteConfirm}
+        />
+      )}
     </div>
   )
 }
 
 /* =========================================================================
-   ProjectRow
+   TabButton / ActionButton / ProjectRow / DeleteConfirmModal
    ========================================================================= */
+
+const TabButton: React.FC<{ label: string; dataAiId: string; active: boolean; onClick: () => void }> = ({
+  label,
+  dataAiId,
+  active,
+  onClick,
+}) => (
+  <button
+    data-ai-id={dataAiId}
+    onClick={onClick}
+    aria-pressed={active}
+    style={{
+      fontSize: 'var(--font-size-sm)',
+      fontWeight: active ? 600 : 500,
+      color: active ? 'var(--color-quick)' : 'var(--color-text-muted)',
+      padding: 'var(--space-2) var(--space-4)',
+      borderRadius: 'var(--radius-full)',
+      background: active ? 'var(--color-quick-soft)' : 'transparent',
+      border: 'none',
+      cursor: 'pointer',
+      transition: 'all var(--transition-fast)',
+    }}
+  >
+    {label}
+  </button>
+)
+
+const ActionButton: React.FC<{
+  label: string
+  dataAiId: string
+  onClick: () => void
+  danger?: boolean
+}> = ({ label, dataAiId, onClick, danger }) => (
+  <button
+    data-ai-id={dataAiId}
+    onClick={(e) => {
+      e.stopPropagation()
+      onClick()
+    }}
+    style={{
+      fontSize: 'var(--font-size-xs)',
+      fontWeight: 500,
+      color: danger ? 'var(--color-danger)' : 'var(--color-text-muted)',
+      padding: '4px var(--space-3)',
+      borderRadius: 'var(--radius-full)',
+      background: 'transparent',
+      border: `1px solid ${danger ? 'var(--color-danger)' : 'var(--color-border)'}`,
+      cursor: 'pointer',
+      whiteSpace: 'nowrap',
+      transition: 'all var(--transition-fast)',
+      fontFamily: 'inherit',
+    }}
+    onMouseEnter={(e) => {
+      e.currentTarget.style.background = danger ? 'var(--color-danger-soft)' : 'var(--glass-bg-soft)'
+    }}
+    onMouseLeave={(e) => {
+      e.currentTarget.style.background = 'transparent'
+    }}
+  >
+    {label}
+  </button>
+)
 
 const ProjectRow: React.FC<{
   project: Project
   isCurrent: boolean
   onResume: () => void
-}> = ({ project, isCurrent, onResume }) => {
+  actions?: React.ReactNode
+}> = ({ project, isCurrent, onResume, actions }) => {
   const stageLabel = STAGE_LABEL_MAP[project.current_stage] ?? project.current_stage
   const modeLabel = modeLabelMap[project.mode] ?? project.mode
   const modeColor = modeColorMap[project.mode] ?? 'var(--color-text-muted)'
@@ -327,19 +462,18 @@ const ProjectRow: React.FC<{
   }, [project.updated_at])
 
   return (
-    <button
-      onClick={onResume}
+    <div
       data-ai-id="project-list-item"
       className="tile"
       style={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
+        gap: 'var(--space-3)',
         padding: 'var(--space-4) var(--space-5)',
         textAlign: 'left',
         animation: 'tile-enter 0.3s ease both',
         transition: 'all var(--transition-fast)',
-        cursor: 'pointer',
         border: isCurrent ? '1px solid var(--color-quick)' : undefined,
       }}
       onMouseEnter={(e) => {
@@ -351,8 +485,15 @@ const ProjectRow: React.FC<{
         e.currentTarget.style.boxShadow = 'var(--shadow-glass)'
       }}
     >
-      {/* 左侧信息 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)', minWidth: 0 }}>
+      {/* 行主体：点击恢复项目 */}
+      <button
+        onClick={onResume}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 'var(--space-4)', minWidth: 0,
+          flex: 1, textAlign: 'left', background: 'transparent', border: 'none',
+          cursor: 'pointer', padding: 0, fontFamily: 'inherit',
+        }}
+      >
         {/* 项目图标 */}
         <span
           style={{
@@ -381,7 +522,7 @@ const ProjectRow: React.FC<{
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
-                maxWidth: 240,
+                maxWidth: 200,
               }}
             >
               {project.name}
@@ -425,24 +566,84 @@ const ProjectRow: React.FC<{
             </span>
           </div>
         </div>
-      </div>
+      </button>
 
-      {/* 右侧：时间 + 箭头 */}
+      {/* 右侧：时间 + 操作按钮 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexShrink: 0 }}>
         <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
           {formattedDate}
         </span>
-        <ArrowRight size={16} style={{ color: 'var(--color-text-muted)' }} />
+        <ArrowRight size={16} style={{ color: 'var(--color-text-muted)', display: 'none' }} />
+        {actions}
       </div>
-    </button>
+    </div>
   )
 }
+
+const DeleteConfirmModal: React.FC<{
+  project: Project
+  onCancel: () => void
+  onConfirm: () => void
+}> = ({ project, onCancel, onConfirm }) => (
+  <div
+    role="dialog"
+    aria-modal="true"
+    data-ai-id="project-delete-confirm-modal"
+    style={{
+      position: 'fixed', inset: 0, zIndex: 1000,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(0,0,0,0.4)',
+    }}
+  >
+    <div
+      style={{
+        background: 'var(--color-surface)',
+        borderRadius: 'var(--radius-md)',
+        boxShadow: 'var(--shadow-lg)',
+        padding: 'var(--space-6)',
+        width: 'min(420px, 90vw)',
+      }}
+    >
+      <h3 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 600, color: 'var(--color-text)', marginBottom: 'var(--space-3)' }}>
+        删除「{project.name}」？
+      </h3>
+      <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-muted)', lineHeight: 1.6, marginBottom: 'var(--space-6)' }}>
+        删除后无法恢复：项目文件、快照和对话记录都会被清除。确定要删除吗？
+      </p>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-3)' }}>
+        <button
+          onClick={onCancel}
+          style={{
+            fontSize: 'var(--font-size-sm)', fontWeight: 500, color: 'var(--color-text)',
+            padding: '8px var(--space-4)', borderRadius: 'var(--radius-full)',
+            background: 'var(--glass-bg-soft)', border: '1px solid var(--color-border)',
+            cursor: 'pointer', fontFamily: 'inherit',
+          }}
+        >
+          取消
+        </button>
+        <button
+          onClick={onConfirm}
+          data-ai-id="project-delete-confirm-button"
+          style={{
+            fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--white)',
+            padding: '8px var(--space-4)', borderRadius: 'var(--radius-full)',
+            background: 'var(--color-danger)', border: 'none',
+            cursor: 'pointer', fontFamily: 'inherit',
+          }}
+        >
+          确认删除
+        </button>
+      </div>
+    </div>
+  </div>
+)
 
 /* =========================================================================
    EmptyState
    ========================================================================= */
 
-const EmptyState: React.FC<{ onNewProject: () => void }> = ({ onNewProject }) => (
+const EmptyState: React.FC<{ onNewProject: () => void; tabLabel: string }> = ({ onNewProject, tabLabel }) => (
   <div
     style={{
       display: 'flex',
@@ -477,7 +678,7 @@ const EmptyState: React.FC<{ onNewProject: () => void }> = ({ onNewProject }) =>
         color: 'var(--color-text)',
       }}
     >
-      还没有项目
+      {tabLabel === '已归档' ? '还没有已归档的项目' : '还没有项目'}
     </h2>
     <p
       style={{
@@ -488,33 +689,37 @@ const EmptyState: React.FC<{ onNewProject: () => void }> = ({ onNewProject }) =>
         lineHeight: 'var(--line-height-base)',
       }}
     >
-      你还没有创建过任何项目。点击下方按钮，选择一个模式开始你的第一个项目吧。
+      {tabLabel === '已归档'
+        ? '归档的项目会出现在这里，可以随时恢复或删除。'
+        : '你还没有创建过任何项目。点击下方按钮，选择一个模式开始你的第一个项目吧。'}
     </p>
-    <button
-      onClick={onNewProject}
-      data-ai-id="empty-new-project-button"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 'var(--space-2)',
-        fontSize: 'var(--font-size-sm)',
-        fontWeight: 600,
-        color: 'var(--white)',
-        padding: '10px var(--space-5)',
-        borderRadius: 'var(--radius-full)',
-        background: 'linear-gradient(135deg, var(--color-quick), var(--color-quick-bright))',
-        boxShadow: '0 4px 12px -2px rgba(124,58,237,0.4)',
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.transform = 'translateY(-1px)'
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.transform = 'none'
-      }}
-    >
-      <Sparkles size={15} />
-      创建第一个项目
-    </button>
+    {tabLabel !== '已归档' && (
+      <button
+        onClick={onNewProject}
+        data-ai-id="empty-new-project-button"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 'var(--space-2)',
+          fontSize: 'var(--font-size-sm)',
+          fontWeight: 600,
+          color: 'var(--white)',
+          padding: '10px var(--space-5)',
+          borderRadius: 'var(--radius-full)',
+          background: 'linear-gradient(135deg, var(--color-quick), var(--color-quick-bright))',
+          boxShadow: '0 4px 12px -2px rgba(124,58,237,0.4)',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.transform = 'translateY(-1px)'
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = 'none'
+        }}
+      >
+        <Sparkles size={15} />
+        创建第一个项目
+      </button>
+    )}
   </div>
 )
 

@@ -18,8 +18,9 @@
     "test:acceptance:sprint0": "npm run build && vitest run tests/acceptance/sprint0",
     "test:acceptance:sprint1": "vitest run tests/acceptance/sprint1",
     "test:acceptance:sprint2": "vitest run tests/acceptance/sprint2",
+    "test:acceptance:sprint3": "vitest run tests/acceptance/sprint3",
     "test:electron-smoke": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/electron-startup-smoke.ps1",
-    "test:all": "npm run test:unit && npm run test:integration && npm run test:regression:sprint0 && npm run test:regression:sprint1 && npm run test:acceptance:sprint0 && npm run test:acceptance:sprint1 && npm run test:acceptance:sprint2",
+    "test:all": "npm run test:unit && npm run test:integration && npm run test:regression:sprint0 && npm run test:regression:sprint1 && npm run test:acceptance:sprint0 && npm run test:acceptance:sprint1 && npm run test:acceptance:sprint2 && npm run test:acceptance:sprint3",
     "lint": "tsc --noEmit",
     "docs:check": "node scripts/docs-check.mjs",
     "seed:channel": "electron scripts/seed-channel.cjs"

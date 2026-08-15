@@ -26,6 +26,8 @@ export const IPC_CHANNELS = {
   PROJECT_CONFIRM_SKETCH: 'project:confirm-sketch',
   PROJECT_SUBMIT_CORRECTION: 'project:submit-correction',
   PROJECT_ARCHIVE: 'project:archive',
+  PROJECT_UNARCHIVE: 'project:unarchive',
+  PROJECT_DELETE: 'project:delete',
   PROJECT_UPGRADE: 'project:upgrade',
   SANDBOX_RUN: 'sandbox:run',
   SANDBOX_STOP: 'sandbox:stop',
@@ -521,6 +523,8 @@ export interface Project {
   test_repair_count?: number
   /** 裁判退回计数（A2-11）：quick=2 / longterm=3，达上限让渡 */
   judge_return_count?: number
+  /** 安全问题独立计数（PRD §10.5）：上限 3 次强制修复，不计入普通退回次数 */
+  security_repair_count?: number
   /** 被阻塞的编程操作（A2 resume 闭环）：非阻塞态为 undefined */
   blocked_action?: 'mvp_repair' | 'test_repair' | 'judge_return'
   created_at: string
@@ -564,6 +568,21 @@ export interface ProjectUpgradeInput extends RequestEnvelope {
 
 export interface ProjectArchiveInput extends RequestEnvelope {
   project_id: string
+}
+
+/** 取消归档：archived → active（对齐 Proma archived toggle） */
+export interface ProjectUnarchiveInput extends RequestEnvelope {
+  project_id: string
+}
+
+/** 硬删除项目：清理索引条目 + 项目/文档/快照/事件文件 + 关联会话 */
+export interface ProjectDeleteInput extends RequestEnvelope {
+  project_id: string
+}
+
+/** 历史项目列表视角：active（默认，过滤归档）/ archived / all */
+export interface ProjectListInput extends RequestEnvelope {
+  scope?: 'active' | 'archived' | 'all'
 }
 
 // =========================================================================
@@ -711,8 +730,10 @@ export type ElectronAPI = {
   }
   project: {
     create(input: ProjectCreateInput): Promise<ApiResult<Project>>
-    list(input: RequestEnvelope): Promise<ApiResult<Project[]>>
+    list(input: ProjectListInput): Promise<ApiResult<Project[]>>
     archive(input: ProjectArchiveInput): Promise<ApiResult<Project>>
+    unarchive(input: ProjectUnarchiveInput): Promise<ApiResult<Project>>
+    delete(input: ProjectDeleteInput): Promise<ApiResult<{ deleted: true }>>
     confirmSketch(input: ConfirmSketchInput): Promise<ApiResult<Project>>
     submitCorrection(input: PointCorrectionInput): Promise<ApiResult<RevisionAccepted>>
     upgrade(input: ProjectUpgradeInput): Promise<ApiResult<Project>>

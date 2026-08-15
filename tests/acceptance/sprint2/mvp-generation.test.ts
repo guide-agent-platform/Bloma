@@ -2,32 +2,68 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { IPC_CHANNELS, type AgentEvent, type ApiResult, type Project } from '../../../shared/types'
+import { IPC_CHANNELS, type AgentEvent, type ApiResult, type Project, type SDKMessage } from '../../../shared/types'
+import type { SDKQuery } from '../../../main/orchestrator'
 import { registerIpcHandlers } from '../../../main/ipc'
 import { clearSandboxRuntimeForTests, createSnapshot, stopSandbox } from '../../../main/platform-services'
 import { generateSketch } from '../../../main/sketch-engine'
 import { recordSketchGenerated } from '../../../main/project-service'
 import { waitForCondition } from '../support/test-environment'
 
+/** A2-14b 后 resolveMvp 一律走 LLM（无模板兜底），测试必须注入确定性 query。 */
+const { mockSdkQuery } = vi.hoisted(() => ({ mockSdkQuery: { current: null as unknown as SDKQuery } }))
+
+const CALCULATOR_JSON = JSON.stringify({
+  files: [
+    { path: 'index.html', content: '<!doctype html><html><body><button>+</button><button>−</button><button>×</button><button>÷</button><script src="/src/app.js"></script></body></html>' },
+    { path: 'src/app.js', content: 'function calculate(a, op, b) { return op === "+" ? a + b : a; }' },
+    { path: 'src/styles.css', content: 'body { margin: 0; }' },
+  ],
+  run_command: 'npm start',
+  assumptions: ['家庭记账'],
+  risks: [],
+})
+
+function queryReturning(text: string): SDKQuery {
+  return async function* (): AsyncGenerator<SDKMessage> {
+    yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }
+    yield { type: 'result', subtype: 'success' }
+  }
+}
+
+const TEST_CHANNEL = {
+  id: 'test-channel',
+  name: 'Test',
+  provider_type: 'anthropic',
+  base_url: 'https://api.anthropic.com',
+  api_key: 'encrypted-test-key',
+  models: [{ id: 'claude-sonnet-4-6', name: 'Claude', enabled: true }],
+  enabled: true,
+}
+
 vi.mock('../../../main/channel-manager', () => ({
-  getChannelByIdRaw: () => ({
-    id: 'test-channel',
-    name: 'Test',
-    provider_type: 'anthropic',
-    base_url: 'https://api.anthropic.com',
-    api_key: 'encrypted-test-key',
-    models: [{ id: 'claude-sonnet-4-6', name: 'Claude', enabled: true }],
-    enabled: true,
-  }),
+  getChannelByIdRaw: () => TEST_CHANNEL,
+  // 全量 mock 需补齐 getFirstEnabledChannel：programming-orchestrator resolveMvp 在
+  // confirm-sketch 未传 channel_id 时回退到它（S2-PROJECT-001 超时根因）。
+  getFirstEnabledChannel: () => TEST_CHANNEL,
   decryptApiKey: () => 'test-key-from-channel',
   // 修复：mock 必须提供 buildSdkEnv，否则 programming-orchestrator 调用 undefined 抛错，
   // 导致 mvp_ready 事件永不发出（S2-PROJECT-001 超时）。
+  // env 必须含 PATH：orchestrator anthropicMessagesQuery 校验 `SDK env missing PATH`。
   buildSdkEnv: (_apiKey: string, baseUrl: string, model: string) => ({
     ANTHROPIC_AUTH_TOKEN: 'test-key',
     ANTHROPIC_BASE_URL: baseUrl,
     ANTHROPIC_MODEL: model,
+    PATH: process.env.PATH ?? process.env.Path ?? 'MOCK_PATH',
   }),
 }))
+
+// confirm-sketch accepted → runMvpTask({ query: getSdkQuery() }) 走 LLM 生成。
+// 覆盖 getSdkQuery 返回确定性 mock query，避免测试发起真实模型 HTTP 请求而超时。
+vi.mock('../../../main/orchestrator', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/orchestrator')>()
+  return { ...actual, getSdkQuery: () => mockSdkQuery.current }
+})
 
 type IpcHandler = (_event: unknown, payload: unknown) => unknown
 
@@ -88,6 +124,8 @@ describe('Sprint 2 MVP generation acceptance (S2-PROJECT-001)', () => {
   }
 
   it('[S2-PROJECT-001] 草图确认 accepted 后生成正式 MVP 目录、mvp 快照与 PRD/GWT 文档', async () => {
+    // A2-14b：MVP 由 LLM 生成（无模板兜底），注入确定性计算器响应
+    mockSdkQuery.current = queryReturning(CALCULATOR_JSON)
     const app = setup('bloma-s2-mvp-')
     const project = await createProject(app, 'quick')
     activeProjectId = project.project_id
