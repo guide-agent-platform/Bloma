@@ -311,8 +311,13 @@ const AppRoutes: React.FC = () => {
     })
   }, [sessionId, currentProject, projectList, mode, currentStage])
 
-  // ==================== 停止生成（U4） ====================
+  // ==================== 停止生成（U4 / T3：agent:stop） ====================
 
+  /**
+   * 用户点击停止键：调 agent:stop（后端 cancelAgent 以 AGENT_CANCELLED 标记中止
+   * SDK 查询并清除 activeSessions）。后端随后发 AGENT_CANCELLED 终态事件，
+   * 流式状态归 false，不残留「进行中」假象；会话解锁后可继续发消息。
+   */
   const handleStopGeneration = useCallback(() => {
     const api = window.electronAPI
     if (!api?.agent?.cancel) return
