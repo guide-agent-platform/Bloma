@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import type { AgentEvent, AgentSendMessageInput, Project, ProjectMode, Snapshot, TemplateType } from '../shared/types'
+import type { AgentEvent, AgentSendMessageInput, MessageContentBlock, Project, ProjectMode, Snapshot, TemplateType } from '../shared/types'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
-import { buildPrdBackplane, syncDocuments } from './document-engine'
+import { buildPrdBackplane, readPrdBackplane, syncDocuments } from './document-engine'
 import { createSnapshot, runSandbox, trackAnalytics } from './platform-services'
 import { DEFAULT_MAX_TOKENS, generateMvpLlm, type GenerateMvpLlmResult } from './mvp-engine-llm'
 import { buildSdkEnv, decryptApiKey, getChannelByIdRaw, getFirstEnabledChannel } from './channel-manager'
@@ -13,6 +13,7 @@ import { readTestReport, runGwtScenarios, writeTestReport, type GwtTestResult } 
 import { applyRepairPatch, REPAIR_CATEGORY_SUMMARY, runRepairCycle, type RepairCategory } from './repair-engine'
 import { runJudge, type JudgeVerdict } from './judge-engine'
 import { assertToolAllowed } from './permission-service'
+import { readPrimaryIntent } from './session-service'
 import type { SDKQuery } from './orchestrator'
 
 /**
@@ -176,6 +177,132 @@ async function resolveSketch(input: SketchTaskInput, requirements: SketchRequire
   }
 }
 
+// ---------------------------------------------------------------------------
+// 需求确认后自动命名（runMvpTask 首次生成时执行一次）
+// ---------------------------------------------------------------------------
+
+/** 项目名上限：历史项目列表按单行卡片展示，过长会撑坏布局。 */
+const PROJECT_NAME_MAX_LENGTH = 12
+/** 命名单独计时：起名是附属能力，不允许它拖慢 MVP 生成链路。 */
+const NAMING_TIMEOUT_MS = 30_000
+
+const NAMING_SYSTEM_PROMPT = `你是产品命名助手。根据用户的原始需求和 PRD 摘要，给这个软件项目起一个简短的中文名。
+硬性约束：
+- 只输出项目名本身，不要任何解释、引号、标点或前后缀
+- 2~12 个汉字，名词短语，体现产品用途（如「家庭记账本」「倒计时番茄钟」「模拟钢琴」）
+- 不要带「工具」「应用」「项目」「软件」这类通用后缀，除非去掉后语义不完整`
+
+/**
+ * 需求确认后自动命名：项目初始名是首句口述的前 32 字（如「帮我做个东西」），
+ * 确认草图时需求已经收敛，此时用 LLM 按 PRD 背板起一个可辨识的名字；
+ * LLM 不可用/产出不合格时，按首句口述做确定性前缀剥离兜底。
+ * `auto_named` 标记保证只自动命名一次，之后（含未来手动改名）不再覆盖。
+ */
+export async function autoNameProject(input: MvpTaskInput): Promise<void> {
+  const project = findProject(input.project_id)
+  if (project.auto_named) return
+
+  const name =
+    (await nameByLlm(input)) ??
+    deriveFallbackName(readPrimaryIntent(input.session_id) ?? '')
+  if (name) {
+    updateProject(input.project_id, { name, auto_named: true })
+  } else {
+    // 兜底也拿不到（首句口述剥完为空）：只落标记，避免每次生成都重试
+    updateProject(input.project_id, { auto_named: true })
+  }
+}
+
+/** LLM 起名：复用 MVP 同一套渠道解析与流式查询；任何失败返回 null 交给兜底。 */
+async function nameByLlm(input: MvpTaskInput): Promise<string | null> {
+  if (!input.query) return null
+  const channel = input.channel_id ? getChannelByIdRaw(input.channel_id) : getFirstEnabledChannel()
+  if (!channel) return null
+  let apiKey: string
+  try {
+    apiKey = decryptApiKey(channel.api_key)
+  } catch {
+    return null
+  }
+  const model = channel.models.find((item) => item.enabled)?.id ?? 'claude-sonnet-4-6'
+  const env = buildSdkEnv(apiKey, channel.base_url, model)
+
+  const backplane = readPrdBackplane(input.project_id)
+  const intent = readPrimaryIntent(input.session_id)
+  const prompt = [
+    '用户原始需求：',
+    intent ?? '（无记录）',
+    '',
+    'PRD 摘要：',
+    `定位：${backplane.positioning}`,
+    `核心功能：${backplane.requirements.slice(0, 5).map((item) => item.description).join('；')}`,
+    '',
+    '请给这个项目起名，只输出名称本身。',
+  ].join('\n')
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), NAMING_TIMEOUT_MS)
+  try {
+    let accumulated = ''
+    for await (const message of input.query(prompt, {
+      env,
+      signal: controller.signal,
+      sessionId: input.session_id,
+      history: [{ role: 'system', content: NAMING_SYSTEM_PROMPT }],
+      maxTokens: 64,
+    })) {
+      if (message.type !== 'assistant' || !message.message) continue
+      accumulated += extractQueryText(message.message.content)
+    }
+    return sanitizeLlmName(accumulated)
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function extractQueryText(blocks: MessageContentBlock[]): string {
+  return blocks
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text ?? '')
+    .join('')
+}
+
+/**
+ * 清洗模型输出：取首个非空行、剥包裹引号；长度异常或含句内标点
+ * （说明性输出如「好的，我建议命名为：」）视为不合格交回兜底。
+ */
+function sanitizeLlmName(raw: string): string | null {
+  const firstLine = raw
+    .trim()
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.length > 0)
+  if (!firstLine) return null
+  const stripped = firstLine.replace(/^[「『"'“（]+|[」』"'”）]+$/g, '').trim()
+  if (stripped.length < 2 || stripped.length > PROJECT_NAME_MAX_LENGTH + 4) return null
+  if (/[：:，,。.！!？?；;、]/.test(stripped)) return null
+  return stripped.slice(0, PROJECT_NAME_MAX_LENGTH)
+}
+
+/** 口述前缀（同族长前缀在前，避免短前缀抢占匹配），循环剥离最多 3 轮覆盖组合前缀。 */
+const VERB_PREFIX_PATTERN =
+  /^(?:麻烦(?:你)?帮我|请(?:你)?帮我|帮我|我想做一个|我想做个|我想要一个|我想要个|我想要|我想做|我想|我要一个|我要个|我要|做个|做一个|制作一个|制作个|开发一个|开发个|搭建一个|搭一个|生成一个|生成个|造一个|整一个|来一个|一个)/
+
+/** 确定性兜底：剥掉「帮我制作一个」这类口述前缀与收尾语气词，剩余部分截断做项目名。 */
+export function deriveFallbackName(intent: string): string | null {
+  let current = intent.trim()
+  for (let round = 0; round < 3; round += 1) {
+    const next = current.replace(VERB_PREFIX_PATTERN, '').trim()
+    if (next === current) break
+    current = next
+  }
+  current = current.replace(/[。！？!?，,、~～\s]+$/g, '')
+  if (!current) return null
+  return current.slice(0, PROJECT_NAME_MAX_LENGTH)
+}
+
 /**
  * runMvpTask — 草图确认后无需再发消息，直接由 LLM 生成 MVP 并进入测试阶段。
  *
@@ -191,6 +318,12 @@ export async function runMvpTask(input: MvpTaskInput): Promise<MvpTaskResult> {
   syncDocuments({ request_id: input.request_id, project_id: input.project_id, session_id: input.session_id, checkpoint: 'mvp_before_generation' })
 
   const requirements = readLastSketchRequirements(input.project_id)
+  // 需求确认后自动命名（首次生成执行一次）：命名是附属能力，任何失败都不阻断生成
+  try {
+    await autoNameProject(input)
+  } catch {
+    // 命名异常（如项目并发更新）静默放过，MVP 生成照常继续
+  }
   await allowAutomatedTool('generate_mvp', { project_id: input.project_id }, input.session_id, input.project_id)
   const mvp = await resolveMvp(input, requirements)
   // run_command 白名单式强制覆盖为 'npm start'（真实沙箱启动命令由 ensureSandboxRunning 硬编码为 node static-server）
