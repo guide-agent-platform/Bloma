@@ -1,20 +1,23 @@
 import type { AgentEvent } from '../shared/types'
-import { syncDocuments } from './document-engine'
+import { buildPrdBackplane, syncDocuments } from './document-engine'
 import { generateMvp } from './mvp-engine'
+import { DEFAULT_MAX_TOKENS, generateMvpLlm } from './mvp-engine-llm'
+import { buildSdkEnv, decryptApiKey, getChannelByIdRaw, getFirstEnabledChannel } from './channel-manager'
 import { trackAnalytics } from './platform-services'
 import { findProject, readLastSketchRequirements, updateProject } from './project-service'
+import type { SDKQuery } from './orchestrator'
 
 /**
  * 自动修复循环（A2-08，闭环 ATK-Z-001）。
  *
- * 模板化补丁库：按错误类别预置确定性补丁，修复后重新校验：
- * - `dependency_error` / `syntax_error` / `runtime_error` → 按模板重建 MVP 文件
- *   （模板确定性，清除部分写入/缺失依赖/语法损坏；端口问题由 runSandbox 换端口兜底）
- * - `test_error` → 按模板重建前端文件，恢复 P0 功能入口
- * - `constraint_error` → 重新生成 PRD/GWT 骨架（文档层面，不改代码，A2-10 硬约束退回对接）
+ * 修复分两档，LLM 优先、模板兜底（self-healing-judge @S2-JUDGE-001「分析错误原因」）：
+ * - `dependency_error` / `syntax_error` / `runtime_error` / `test_error` / `security_error`
+ *   → 有模型句柄时，把失败原因作为 repairContext 交给 LLM 针对性重新生成 MVP；失败/无渠道
+ *   再回退确定性模板重建（generateMvp）。
+ * - `constraint_error` → 重新生成 PRD/GWT 骨架（文档层面，不改代码，A2-10 硬约束退回对接）。
  *
  * 计数：`runtime_repair_count` / `test_repair_count` 各 ≤3（component-design §7），
- * 成功归零；达上限进入 `blocked_for_user_decision`（让渡），熔断回滚在 Sprint 3。
+ * 成功归零；达上限进入 `blocked_for_user_decision`（让渡），熔断回滚由调用方接入。
  * 安全修复独立计数：`security_repair_count` ≤3（PRD §10.5），不计入普通退回次数。
  * 埋点：`self_repair_triggered`（含 attempt）+ `programming_execution`。
  */
@@ -50,6 +53,12 @@ export interface RepairCycleInput {
   publish: (type: AgentEvent['type'], payload: Record<string, unknown>) => void
   /** 修复后重新校验：返回 ok 表示本轮修复成功（校验逻辑由调用方注入） */
   verify: (projectId: string) => Promise<RepairCheck>
+  /** LLM 修复句柄（分析错误原因并重新生成）；缺省时回退模板重建。 */
+  query?: SDKQuery
+  channel_id?: string
+  signal?: AbortSignal
+  /** 本次修复针对的具体错误（供 LLM 分析原因用） */
+  error?: { category: string; summary: string }
 }
 
 export interface RepairCycleResult {
@@ -95,7 +104,11 @@ export async function runRepairCycle(input: RepairCycleInput): Promise<RepairCyc
     return { repaired: false, blocked: true, attempt, stage: 'blocked_for_user_decision' }
   }
 
-  const patch = applyRepairPatch({ request_id, session_id, project_id }, category)
+  const patch = await applyRepairPatchWithLlm(
+    { request_id, session_id, project_id },
+    category,
+    { query: input.query, channel_id: input.channel_id, signal: input.signal, error: input.error },
+  )
   trackAnalytics({
     request_id,
     event: {
@@ -149,6 +162,74 @@ export function applyRepairPatch(
   // 完整 OWASP 安全扫描器由 Sprint 3 独立承接，本处提供独立计数契约。
   const mvp = generateMvp({ project_id: input.project_id, requirements })
   return { patched: true, summary: `已按模板重建 MVP（${mvp.files.length} 个文件）` }
+}
+
+export interface RepairLlmOptions {
+  query?: SDKQuery
+  channel_id?: string
+  signal?: AbortSignal
+  error?: { category: string; summary: string }
+}
+
+/**
+ * 修复补丁的 LLM 优先入口（self-healing-judge @S2-JUDGE-001「分析错误原因」）。
+ *
+ * constraint_error 属文档层面重生成，无代码修复语义，直接走模板；
+ * 其余类别先尝试把失败原因交给 LLM 针对性重新生成 MVP，失败/无渠道再回退模板重建。
+ */
+export async function applyRepairPatchWithLlm(
+  input: { request_id: string; session_id: string; project_id: string },
+  category: RepairCategory,
+  opts: RepairLlmOptions,
+): Promise<{ patched: boolean; summary: string }> {
+  if (category === 'constraint_error') return applyRepairPatch(input, category)
+  const llmResult = await repairMvpViaLlm(input, category, opts)
+  if (llmResult) return llmResult
+  return applyRepairPatch(input, category)
+}
+
+/**
+ * 用 LLM 分析失败原因并重新生成 MVP（复用 mvp-engine-llm 的 repairContext 注入）。
+ * 任何失败（无 query/无渠道/密钥不可解密/生成异常）返回 null，交给模板兜底。
+ */
+async function repairMvpViaLlm(
+  input: { request_id: string; session_id: string; project_id: string },
+  category: RepairCategory,
+  opts: RepairLlmOptions,
+): Promise<{ patched: boolean; summary: string } | null> {
+  if (!opts.query) return null
+  const channel = opts.channel_id ? getChannelByIdRaw(opts.channel_id) : getFirstEnabledChannel()
+  if (!channel) return null
+  let apiKey: string
+  try {
+    apiKey = decryptApiKey(channel.api_key)
+  } catch {
+    return null
+  }
+  // 模型名用 name（真实模型 ID）：id 是渠道内唯一标识，不能传给 API
+  const model = channel.models.find((item) => item.enabled)?.name ?? 'claude-sonnet-4-6'
+  const env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
+
+  const requirements = readLastSketchRequirements(input.project_id)
+  const backplane = buildPrdBackplane(findProject(input.project_id), requirements, 'mvp_before_generation')
+  try {
+    await generateMvpLlm({
+      project_id: input.project_id,
+      backplane,
+      query: opts.query,
+      env,
+      sessionId: input.session_id,
+      maxTokens: channel.max_tokens ?? DEFAULT_MAX_TOKENS,
+      signal: opts.signal,
+      repairContext: {
+        category,
+        error: opts.error?.summary ?? REPAIR_CATEGORY_SUMMARY[category],
+      },
+    })
+    return { patched: true, summary: `已分析错误原因并重新生成 MVP（${category}）` }
+  } catch {
+    return null
+  }
 }
 
 function repairKind(category: RepairCategory): RepairKind {

@@ -59,18 +59,11 @@ export const channelTestResultAtom = atom<{
 } | null>(null)
 
 // =========================================================================
-// 5. 设置页路由（集成到 WorkspaceHeader / App）
-// =========================================================================
-
-export type SettingsTab = 'channels' | 'general'
-
-export const settingsOpenAtom = atom<boolean>(false)
-export const settingsActiveTabAtom = atom<SettingsTab>('channels')
-
-// =========================================================================
-// 6. MVP 确认 / 继续操作（供用户决策）
+// 4. MVP 确认 / 继续操作（供用户决策）
 // =========================================================================
 
 // userDecisionAtom 已移除（N-003 修复：未被任何组件消费的死代码）。
+// settingsOpenAtom / settingsActiveTabAtom / SettingsTab 已移除（2026-08-15）：
+// 设置页改为 route === 'settings' 路由，不再需要这些全局状态。
 // blocked_for_user_decision 阶段的 UI 决策需求由 MvpStatusBanner 通过
 // agentStreamStateFamily events 中的 stage_changed 事件直接派生。

@@ -66,12 +66,22 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
 }) => {
   const currentProject = useAtomValue(currentProjectAtom)
   const [activeTab, setActiveTab] = React.useState<ActiveTab>('active')
+  const [searchQuery, setSearchQuery] = React.useState('')
+  const [modeFilter, setModeFilter] = React.useState<'all' | ProjectMode>('all')
+  const [sortBy, setSortBy] = React.useState<'updated_desc' | 'updated_asc' | 'name'>('updated_desc')
   const [loadState, setLoadState] = React.useState<LoadState>('loading')
   const [ipcProjects, setIpcProjects] = React.useState<Project[]>([])
   /** 是否已从 IPC 成功加载（区分「IPC 返回空列表」与「无 IPC 数据」） */
   const [loadedFromIpc, setLoadedFromIpc] = React.useState(false)
   const [deletingProject, setDeletingProject] = React.useState<Project | null>(null)
   const [errorRetrying, setErrorRetrying] = React.useState(false)
+  const [exportingProject, setExportingProject] = React.useState<Project | null>(null)
+  const [exportNotice, setExportNotice] = React.useState<string | null>(null)
+  const [cleaningSessions, setCleaningSessions] = React.useState(false)
+  const [sessionCleanNotice, setSessionCleanNotice] = React.useState<string | null>(null)
+  const [renamingProject, setRenamingProject] = React.useState<Project | null>(null)
+  const [renameDraft, setRenameDraft] = React.useState('')
+  const [renameSubmitting, setRenameSubmitting] = React.useState(false)
 
   const load = React.useCallback(async (scope: ActiveTab) => {
     setLoadState('loading')
@@ -136,6 +146,26 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
       })
   }
 
+  const handleAbandon = (project: Project) => {
+    const api = window.electronAPI
+    if (!api?.project?.abandon) return
+    void api.project
+      .abandon({ request_id: crypto.randomUUID(), project_id: project.project_id })
+      .then((result) => {
+        if (result.ok) void afterMutate()
+      })
+  }
+
+  const handleReopen = (project: Project) => {
+    const api = window.electronAPI
+    if (!api?.project?.reopen) return
+    void api.project
+      .reopen({ request_id: crypto.randomUUID(), project_id: project.project_id })
+      .then((result) => {
+        if (result.ok) void afterMutate()
+      })
+  }
+
   const handleDeleteConfirm = () => {
     if (!deletingProject) return
     const api = window.electronAPI
@@ -149,10 +179,99 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
       })
   }
 
+  const handleExport = (project: Project) => {
+    const api = window.electronAPI
+    if (!api?.project?.export) return
+    setExportingProject(project)
+    setExportNotice(null)
+    void api.project
+      .export({ request_id: crypto.randomUUID(), project_id: project.project_id })
+      .then((result) => {
+        if (result.ok && result.data && !result.data.canceled && result.data.destination) {
+          const count = result.data.file_count != null ? `（${result.data.file_count} 个文件）` : ''
+          setExportNotice(`已导出「${project.name}」到 ${result.data.destination}${count}`)
+        }
+      })
+      .finally(() => setExportingProject(null))
+  }
+
+  const handleStartRename = (project: Project) => {
+    setRenamingProject(project)
+    setRenameDraft(project.name)
+  }
+
+  const handleRenameCancel = () => {
+    setRenamingProject(null)
+    setRenameDraft('')
+  }
+
+  const handleRenameSubmit = () => {
+    if (!renamingProject) return
+    const api = window.electronAPI
+    if (!api?.project?.rename) return
+    const name = renameDraft.trim()
+    if (name.length === 0 || name === renamingProject.name) {
+      handleRenameCancel()
+      return
+    }
+    setRenameSubmitting(true)
+    void api.project
+      .rename({ request_id: crypto.randomUUID(), project_id: renamingProject.project_id, name })
+      .then((result) => {
+        if (result.ok) {
+          setRenamingProject(null)
+          setRenameDraft('')
+          void afterMutate()
+        }
+      })
+      .finally(() => setRenameSubmitting(false))
+  }
+
+  const handleCleanOrphanSessions = () => {
+    const api = window.electronAPI
+    if (!api?.agent?.cleanOrphans) return
+    setCleaningSessions(true)
+    setSessionCleanNotice(null)
+    void api.agent
+      .cleanOrphans({ request_id: crypto.randomUUID() })
+      .then((result) => {
+        if (result.ok && result.data) {
+          const removed = result.data.removed
+          setSessionCleanNotice(removed > 0 ? `已清理 ${removed} 个无效会话。` : '没有需要清理的无效会话。')
+        }
+      })
+      .finally(() => setCleaningSessions(false))
+  }
+
+  const resetFilters = () => {
+    setSearchQuery('')
+    setModeFilter('all')
+    setSortBy('updated_desc')
+  }
+
   const resolvedProjects = loadedFromIpc ? ipcProjects : activeTab === 'active' ? projects : []
-  const visibleProjects = [...resolvedProjects].sort(
-    (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
-  )
+
+  const filteredProjects = React.useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    return resolvedProjects.filter((project) => {
+      if (modeFilter !== 'all' && project.mode !== modeFilter) return false
+      if (query && !project.name.toLowerCase().includes(query)) return false
+      return true
+    })
+  }, [resolvedProjects, modeFilter, searchQuery])
+
+  const visibleProjects = React.useMemo(() => {
+    const sorted = [...filteredProjects]
+    if (sortBy === 'name') {
+      sorted.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+    } else {
+      sorted.sort((a, b) => {
+        const diff = new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+        return sortBy === 'updated_asc' ? -diff : diff
+      })
+    }
+    return sorted
+  }, [filteredProjects, sortBy])
 
   return (
     <div
@@ -245,6 +364,87 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
         />
       </div>
 
+      {/* 搜索 / 筛选 / 排序（U14）——纯前端过滤，project.list 已返回全量字段 */}
+      {loadState === 'loaded' && resolvedProjects.length > 0 && (
+        <div
+          data-ai-id="project-filter-toolbar"
+          style={{
+            width: '100%', maxWidth: 780, display: 'flex', flexWrap: 'wrap', alignItems: 'center',
+            gap: 'var(--space-2)', marginBottom: 'var(--space-4)',
+          }}
+        >
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="搜索项目名称…"
+            aria-label="搜索项目"
+            data-ai-id="project-search-input"
+            style={{
+              flex: '1 1 180px', minWidth: 160, height: 34,
+              fontSize: 'var(--font-size-sm)', color: 'var(--color-text)',
+              padding: '0 var(--space-3)', borderRadius: 'var(--radius-full)',
+              background: 'var(--glass-bg-soft)', border: '1px solid var(--color-border)',
+              outline: 'none', fontFamily: 'inherit',
+            }}
+          />
+          <TabButton label="全部" dataAiId="filter-mode-all" active={modeFilter === 'all'} onClick={() => setModeFilter('all')} />
+          <TabButton label="快速尝鲜" dataAiId="filter-mode-quick" active={modeFilter === 'quick'} onClick={() => setModeFilter('quick')} />
+          <TabButton label="精细打磨" dataAiId="filter-mode-longterm" active={modeFilter === 'longterm'} onClick={() => setModeFilter('longterm')} />
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+            aria-label="排序方式"
+            data-ai-id="project-sort-select"
+            style={{
+              height: 34, fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)',
+              padding: '0 var(--space-2)', borderRadius: 'var(--radius-full)',
+              background: 'var(--glass-bg-soft)', border: '1px solid var(--color-border)',
+              outline: 'none', cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            <option value="updated_desc">最近更新</option>
+            <option value="updated_asc">最早更新</option>
+            <option value="name">名称排序</option>
+          </select>
+        </div>
+      )}
+
+      {/* 导出成功提示（U10） */}
+      {exportNotice && (
+        <div
+          data-ai-id="project-export-notice"
+          role="status"
+          style={{
+            width: '100%', maxWidth: 780, marginBottom: 'var(--space-4)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)',
+            padding: 'var(--space-3) var(--space-4)',
+            borderRadius: 'var(--radius-md)',
+            background: 'var(--glass-bg-strong)',
+            border: '1px solid var(--glass-border-subtle)',
+            fontSize: 'var(--font-size-xs)',
+            color: 'var(--color-text)',
+            lineHeight: 1.6,
+            animation: 'tile-enter 0.2s ease both',
+          }}
+        >
+          <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', minWidth: 0 }}>
+            <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--color-success)', flexShrink: 0 }} />
+            <span style={{ wordBreak: 'break-all' }}>{exportNotice}</span>
+          </span>
+          <button
+            onClick={() => setExportNotice(null)}
+            aria-label="关闭提示"
+            style={{
+              color: 'var(--color-text-muted)', fontSize: 'var(--font-size-sm)',
+              padding: '0 var(--space-1)', lineHeight: 1, cursor: 'pointer',
+              background: 'transparent', border: 'none', fontFamily: 'inherit',
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* 项目列表 */}
       <div
         style={{
@@ -328,9 +528,36 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
           </div>
         )}
 
-        {/* 正常状态 */}
-        {loadState === 'loaded' && visibleProjects.length === 0 && (
+        {/* 正常状态：无项目 */}
+        {loadState === 'loaded' && resolvedProjects.length === 0 && (
           <EmptyState onNewProject={onNewProject} tabLabel={activeTab === 'archived' ? '已归档' : '进行中'} />
+        )}
+
+        {/* 正常状态：有项目但搜索/筛选无结果 */}
+        {loadState === 'loaded' && resolvedProjects.length > 0 && visibleProjects.length === 0 && (
+          <div
+            data-ai-id="project-filter-empty"
+            style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center',
+              padding: 'var(--space-10) var(--space-6)',
+            }}
+          >
+            <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-4)' }}>
+              没有匹配「{searchQuery.trim()}」的项目
+            </p>
+            <button
+              onClick={resetFilters}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)',
+                fontSize: 'var(--font-size-sm)', fontWeight: 500, color: 'var(--color-text)',
+                padding: '8px var(--space-4)', borderRadius: 'var(--radius-full)',
+                background: 'var(--glass-bg-soft)', border: '1px solid var(--color-border)',
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}
+            >
+              清除筛选
+            </button>
+          </div>
         )}
 
         {loadState === 'loaded' &&
@@ -340,15 +567,40 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
               project={project}
               isCurrent={currentProject?.project_id === project.project_id}
               onResume={() => onResumeProject(project)}
+              renaming={renamingProject?.project_id === project.project_id}
+              renameValue={renameDraft}
+              renameSubmitting={renameSubmitting}
+              onRenameValueChange={setRenameDraft}
+              onRenameSubmit={handleRenameSubmit}
+              onRenameCancel={handleRenameCancel}
               actions={
                 project.status === 'archived' ? (
                   <>
                     <ActionButton label="恢复" dataAiId="project-restore-button" onClick={() => handleUnarchive(project)} />
+                    <ActionButton label="重命名" dataAiId="project-rename-button" onClick={() => handleStartRename(project)} />
+                    <ActionButton
+                      label={exportingProject?.project_id === project.project_id ? '导出中…' : '导出'}
+                      dataAiId="project-export-button"
+                      onClick={() => handleExport(project)}
+                      disabled={exportingProject !== null}
+                    />
                     <ActionButton label="删除" dataAiId="project-delete-button" danger onClick={() => setDeletingProject(project)} />
                   </>
                 ) : (
                   <>
+                    {project.status === 'abandoned' ? (
+                      <ActionButton label="恢复进行" dataAiId="project-reopen-button" onClick={() => handleReopen(project)} />
+                    ) : project.status === 'active' ? (
+                      <ActionButton label="标记为已放弃" dataAiId="project-abandon-button" onClick={() => handleAbandon(project)} />
+                    ) : null}
                     <ActionButton label="归档" dataAiId="project-archive-button" onClick={() => handleArchive(project)} />
+                    <ActionButton label="重命名" dataAiId="project-rename-button" onClick={() => handleStartRename(project)} />
+                    <ActionButton
+                      label={exportingProject?.project_id === project.project_id ? '导出中…' : '导出'}
+                      dataAiId="project-export-button"
+                      onClick={() => handleExport(project)}
+                      disabled={exportingProject !== null}
+                    />
                     <ActionButton label="删除" dataAiId="project-delete-button" danger onClick={() => setDeletingProject(project)} />
                   </>
                 )
@@ -356,6 +608,53 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
             />
           ))}
       </div>
+
+      {/* 数据管理（U11）：清理孤儿会话 */}
+      <div
+        data-ai-id="session-cleanup-section"
+        style={{
+          width: '100%', maxWidth: 780, marginTop: 'var(--space-6)',
+          paddingTop: 'var(--space-5)', borderTop: '1px solid var(--glass-border-subtle)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)',
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <p style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--color-text)', margin: 0 }}>
+            数据管理
+          </p>
+          <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', margin: '4px 0 0', lineHeight: 1.6 }}>
+            清理指向已删除项目的无效会话记录，回收本地存储空间。
+          </p>
+        </div>
+        <button
+          onClick={handleCleanOrphanSessions}
+          disabled={cleaningSessions}
+          data-ai-id="session-clean-orphans-button"
+          style={{
+            flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 'var(--space-2)',
+            fontSize: 'var(--font-size-xs)', fontWeight: 500, color: 'var(--color-text-muted)',
+            padding: '6px var(--space-4)', borderRadius: 'var(--radius-full)',
+            background: 'transparent', border: '1px solid var(--color-border)',
+            cursor: cleaningSessions ? 'wait' : 'pointer', fontFamily: 'inherit',
+            opacity: cleaningSessions ? 0.7 : 1, whiteSpace: 'nowrap',
+          }}
+        >
+          {cleaningSessions ? '清理中…' : '清理无效会话'}
+        </button>
+      </div>
+
+      {sessionCleanNotice && (
+        <p
+          data-ai-id="session-clean-notice"
+          role="status"
+          style={{
+            width: '100%', maxWidth: 780, margin: 'var(--space-3) 0 0',
+            fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', lineHeight: 1.6,
+          }}
+        >
+          {sessionCleanNotice}
+        </p>
+      )}
 
       {/* 删除二次确认弹窗 */}
       {deletingProject && (
@@ -404,11 +703,14 @@ const ActionButton: React.FC<{
   dataAiId: string
   onClick: () => void
   danger?: boolean
-}> = ({ label, dataAiId, onClick, danger }) => (
+  disabled?: boolean
+}> = ({ label, dataAiId, onClick, danger, disabled }) => (
   <button
     data-ai-id={dataAiId}
+    disabled={disabled}
     onClick={(e) => {
       e.stopPropagation()
+      if (disabled) return
       onClick()
     }}
     style={{
@@ -419,10 +721,11 @@ const ActionButton: React.FC<{
       borderRadius: 'var(--radius-full)',
       background: 'transparent',
       border: `1px solid ${danger ? 'var(--color-danger)' : 'var(--color-border)'}`,
-      cursor: 'pointer',
+      cursor: disabled ? 'not-allowed' : 'pointer',
       whiteSpace: 'nowrap',
       transition: 'all var(--transition-fast)',
       fontFamily: 'inherit',
+      opacity: disabled ? 0.6 : 1,
     }}
     onMouseEnter={(e) => {
       e.currentTarget.style.background = danger ? 'var(--color-danger-soft)' : 'var(--glass-bg-soft)'
@@ -440,7 +743,24 @@ const ProjectRow: React.FC<{
   isCurrent: boolean
   onResume: () => void
   actions?: React.ReactNode
-}> = ({ project, isCurrent, onResume, actions }) => {
+  renaming?: boolean
+  renameValue?: string
+  renameSubmitting?: boolean
+  onRenameValueChange?: (value: string) => void
+  onRenameSubmit?: () => void
+  onRenameCancel?: () => void
+}> = ({
+  project,
+  isCurrent,
+  onResume,
+  actions,
+  renaming,
+  renameValue,
+  renameSubmitting,
+  onRenameValueChange,
+  onRenameSubmit,
+  onRenameCancel,
+}) => {
   const stageLabel = STAGE_LABEL_MAP[project.current_stage] ?? project.current_stage
   const modeLabel = modeLabelMap[project.mode] ?? project.mode
   const modeColor = modeColorMap[project.mode] ?? 'var(--color-text-muted)'
@@ -460,6 +780,25 @@ const ProjectRow: React.FC<{
       return project.updated_at
     }
   }, [project.updated_at])
+
+  const projectIcon = (
+    <span
+      style={{
+        width: 44,
+        height: 44,
+        borderRadius: 'var(--radius-md)',
+        background: 'var(--white)',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: modeColor,
+        boxShadow: 'var(--shadow-sm)',
+        flexShrink: 0,
+      }}
+    >
+      {project.mode === 'quick' ? <Sparkles size={20} /> : <Gem size={20} />}
+    </span>
+  )
 
   return (
     <div
@@ -485,88 +824,147 @@ const ProjectRow: React.FC<{
         e.currentTarget.style.boxShadow = 'var(--shadow-glass)'
       }}
     >
-      {/* 行主体：点击恢复项目 */}
-      <button
-        onClick={onResume}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 'var(--space-4)', minWidth: 0,
-          flex: 1, textAlign: 'left', background: 'transparent', border: 'none',
-          cursor: 'pointer', padding: 0, fontFamily: 'inherit',
-        }}
-      >
-        {/* 项目图标 */}
-        <span
+      {/* 行主体：重命名态渲染内联表单，否则点击恢复项目 */}
+      {renaming ? (
+        <form
+          data-ai-id="project-rename-form"
+          onSubmit={(e) => {
+            e.preventDefault()
+            onRenameSubmit?.()
+          }}
           style={{
-            width: 44,
-            height: 44,
-            borderRadius: 'var(--radius-md)',
-            background: 'var(--white)',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: modeColor,
-            boxShadow: 'var(--shadow-sm)',
-            flexShrink: 0,
+            display: 'flex', alignItems: 'center', gap: 'var(--space-3)', minWidth: 0,
+            flex: 1,
           }}
         >
-          {project.mode === 'quick' ? <Sparkles size={20} /> : <Gem size={20} />}
-        </span>
+          {projectIcon}
+          <input
+            autoFocus
+            value={renameValue}
+            onChange={(e) => onRenameValueChange?.(e.target.value)}
+            placeholder="输入新名称"
+            aria-label="项目新名称"
+            data-ai-id="project-rename-input"
+            maxLength={32}
+            style={{
+              flex: 1, minWidth: 0, height: 34,
+              fontSize: 'var(--font-size-sm)', color: 'var(--color-text)',
+              padding: '0 var(--space-3)', borderRadius: 'var(--radius-md)',
+              background: 'var(--glass-bg-soft)', border: '1px solid var(--color-quick)',
+              outline: 'none', fontFamily: 'inherit',
+            }}
+          />
+          <button
+            type="submit"
+            disabled={renameSubmitting}
+            data-ai-id="project-rename-submit"
+            style={{
+              fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--white)',
+              padding: '6px var(--space-3)', borderRadius: 'var(--radius-full)',
+              background: 'var(--color-quick)', border: 'none',
+              cursor: renameSubmitting ? 'wait' : 'pointer', fontFamily: 'inherit',
+              whiteSpace: 'nowrap', opacity: renameSubmitting ? 0.7 : 1,
+            }}
+          >
+            {renameSubmitting ? '保存中…' : '保存'}
+          </button>
+          <button
+            type="button"
+            onClick={onRenameCancel}
+            data-ai-id="project-rename-cancel"
+            style={{
+              fontSize: 'var(--font-size-xs)', fontWeight: 500, color: 'var(--color-text-muted)',
+              padding: '6px var(--space-3)', borderRadius: 'var(--radius-full)',
+              background: 'transparent', border: '1px solid var(--color-border)',
+              cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+            }}
+          >
+            取消
+          </button>
+        </form>
+      ) : (
+        <button
+          onClick={onResume}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 'var(--space-4)', minWidth: 0,
+            flex: 1, textAlign: 'left', background: 'transparent', border: 'none',
+            cursor: 'pointer', padding: 0, fontFamily: 'inherit',
+          }}
+        >
+          {projectIcon}
 
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 2 }}>
-            <span
-              style={{
-                fontSize: 'var(--font-size-sm)',
-                fontWeight: 600,
-                color: 'var(--color-text)',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                maxWidth: 200,
-              }}
-            >
-              {project.name}
-            </span>
-            {isCurrent && (
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 2 }}>
               <span
                 style={{
-                  fontSize: 'var(--font-size-xs)',
+                  fontSize: 'var(--font-size-sm)',
                   fontWeight: 600,
-                  color: 'var(--color-quick)',
-                  padding: '1px var(--space-2)',
-                  borderRadius: 'var(--radius-full)',
-                  background: 'var(--color-quick-soft)',
+                  color: 'var(--color-text)',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  maxWidth: 200,
                 }}
               >
-                当前
+                {project.name}
               </span>
+              {isCurrent && (
+                <span
+                  style={{
+                    fontSize: 'var(--font-size-xs)',
+                    fontWeight: 600,
+                    color: 'var(--color-quick)',
+                    padding: '1px var(--space-2)',
+                    borderRadius: 'var(--radius-full)',
+                    background: 'var(--color-quick-soft)',
+                  }}
+                >
+                  当前
+                </span>
+              )}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-1)',
+                  padding: '2px var(--space-2)',
+                  fontSize: 'var(--font-size-xs)',
+                  fontWeight: 500,
+                  color: modeColor,
+                  background: modeBg,
+                  borderRadius: 'var(--radius-full)',
+                }}
+              >
+                {modeLabel}
+              </span>
+              <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+                {stageLabel}
+              </span>
+              <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
+                · {statusLabel}
+              </span>
+            </div>
+            {project.progress_summary && (
+              <p
+                data-ai-id="project-progress-summary"
+                style={{
+                  margin: '2px 0 0',
+                  fontSize: 'var(--font-size-xs)',
+                  color: 'var(--color-text-muted)',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  maxWidth: 360,
+                }}
+              >
+                最近：{project.progress_summary}
+              </p>
             )}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 'var(--space-1)',
-                padding: '2px var(--space-2)',
-                fontSize: 'var(--font-size-xs)',
-                fontWeight: 500,
-                color: modeColor,
-                background: modeBg,
-                borderRadius: 'var(--radius-full)',
-              }}
-            >
-              {modeLabel}
-            </span>
-            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-              {stageLabel}
-            </span>
-            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-              · {statusLabel}
-            </span>
-          </div>
-        </div>
-      </button>
+        </button>
+      )}
 
       {/* 右侧：时间 + 操作按钮 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexShrink: 0 }}>

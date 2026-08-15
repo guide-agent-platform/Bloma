@@ -16,9 +16,9 @@ import type { AgentEvent } from '../../../shared/types'
  *   说明现实风险和可选下一步
  * - PRD §10.5：安全问题的退回不计入普通退回次数，独立计数（上限 3 次强制修复）
  *
- * 接口现状：当前实现中 Project 无 security_repair_count 字段、RepairCategory 无 security 类别、
- * run_security_scan 仅存在于权限白名单表、无安全文案渲染函数。
- * 依据独立测试设计策略，本测试保留文档要求的期望行为；接口未给出处以契约缺口断言如实暴露 FAIL_PRODUCT。
+ * 接口现状：`Project.security_repair_count` 字段、`RepairCategory.security_error` 类别、
+ * `SECURITY_REPAIR_LIMIT` 独立上限与安全文案均已落地（repair-engine），安全修复不计入普通退回次数。
+ * `run_security_scan` 扫描工具实现仍留待 Sprint 3，本测试仅验证"安全独立计数接口"这一契约（已满足）。
  */
 describe('Sprint 2 security independent count acceptance (S2-JUDGE-007 / S2-JUDGE-008)', () => {
   const originalPromaHome = process.env.PROMA_HOME
@@ -40,10 +40,11 @@ describe('Sprint 2 security independent count acceptance (S2-JUDGE-007 / S2-JUDG
   }
 
   /**
-   * [S2-JUDGE-007] 契约缺口测试：安全问题应使用独立于普通退回的计数器
+   * [S2-JUDGE-007] 安全问题应使用独立于普通退回的计数器
    *
    * 文档要求：安全问题不计入普通退回次数（PRD §10.5），需要独立计数接口。
-   * 当前实现未提供该接口 —— 本断言如实暴露产品缺口（FAIL_PRODUCT）。
+   * 实现已提供 `Project.security_repair_count` 独立字段（repair-engine 单独维护，不复用 judge_return_count），
+   * 本断言验证该契约成立。
    */
   it('[S2-JUDGE-007] 契约：系统应暴露独立于普通退回的安全计数接口', async () => {
     setup('bloma-s2-sec-contract-')
@@ -56,8 +57,7 @@ describe('Sprint 2 security independent count acceptance (S2-JUDGE-007 / S2-JUDG
     expect(findProject(projectId).judge_return_count).toBeGreaterThan(0)
 
     // ② 文档要求：安全修复独立计数（PRD §10.5 上限 3 次强制修复，不计入普通退回）
-    //    —— 接口缺失：Project 类型无 security_repair_count，RepairCategory 无 security 类别。
-    //    此断言验证"存在独立安全计数接口"这一契约，当前 FAIL_PRODUCT。
+    //    —— 已由 Project.security_repair_count 独立字段满足（repair-engine 单独维护）
     const project = findProject(projectId)
     expect(project).toHaveProperty('security_repair_count')
 

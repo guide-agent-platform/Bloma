@@ -5,6 +5,7 @@ import type { DocumentRef } from '../shared/types'
 import { getDocumentsDir } from '../storage/config-paths'
 import { findProject, readLastSketchRequirements } from './project-service'
 import { escapeHtml, type SketchRequirement } from './sketch-engine'
+import { runBrowserGwt } from './gwt-runner'
 
 /**
  * GWT 服务（A2-07，方案A拆分：A 写骨架 / C 执行）。
@@ -39,8 +40,14 @@ export interface RunGwtInput {
 const TEST_REPORT_JSON = 'test-report.json'
 const TEST_REPORT_MD = 'test-report.md'
 
-/** 在预览上执行 GWT 场景，返回结构化结果（占位实现；C 的 GWTTestRunner 替换）。 */
+/** 在预览上执行 GWT 场景，返回结构化结果。 */
 export async function runGwtScenarios(input: RunGwtInput): Promise<GwtTestResult> {
+  // 真实浏览器执行器优先（A2-07 / api-spec §12.4）：Playwright 无头加载预览页，
+  // 真正执行页面 JS 后对每个 P0 功能项断言功能入口；浏览器不可用（未安装 chromium
+  // / 导入失败 / 启动失败 / 导航失败）时返回 null，自动降级为下方 fetch + 正则 静态启发式。
+  const browserResult = await runBrowserGwt(input)
+  if (browserResult) return browserResult
+
   const project = findProject(input.project_id)
   const requirements = readLastSketchRequirements(input.project_id)
   const items = requirements.length ? requirements : [{ id: 'F-001', description: '核心功能页面可访问' }]

@@ -1,13 +1,15 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { createProject, findProject } from '../../main/project-service'
+import { archiveProject, createProject, findProject } from '../../main/project-service'
 import {
+  cleanOrphanSessions,
   listSessions,
   loadMessages,
   recordSessionActivity,
 } from '../../main/session-service'
+import { getAgentSessionPath } from '../../storage/config-paths'
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -94,6 +96,33 @@ describe('SessionService 会话索引', () => {
 
       const all = listSessions({ request_id: 'req-2' }).sessions
       expect(all.map((s) => s.session_id)).toEqual(['session-old', 'session-new'])
+    } finally {
+      process.env.PROMA_HOME = originalHome
+    }
+  })
+})
+
+describe('SessionService 清理孤儿会话（U11）', () => {
+  it('移除指向已删除/不存在项目的会话，保留归档项目的会话', () => {
+    const originalHome = process.env.PROMA_HOME
+    const home = useTemporaryHome('session-clean-')
+    try {
+      const project = createProject({ request_id: 'req-1', mode: 'quick' })
+      archiveProject({ request_id: 'req-2', project_id: project.project_id })
+      recordSessionActivity('session-keep', project.project_id)
+
+      recordSessionActivity('session-orphan', 'project-missing')
+      writeSessionJsonl(home, 'session-orphan', [
+        { role: 'user', content: [{ type: 'text', text: 'x' }], timestamp: 1 },
+      ])
+
+      const result = cleanOrphanSessions()
+
+      expect(result.removed).toBe(1)
+      const ids = listSessions({ request_id: 'req-3' }).sessions.map((s) => s.session_id)
+      expect(ids).toContain('session-keep')
+      expect(ids).not.toContain('session-orphan')
+      expect(existsSync(getAgentSessionPath('session-orphan'))).toBe(false)
     } finally {
       process.env.PROMA_HOME = originalHome
     }

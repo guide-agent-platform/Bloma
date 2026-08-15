@@ -145,3 +145,9 @@ export const IconSettings: React.FC<IconProps> = ({ size = 24, strokeWidth = 2 }
     <circle cx="12" cy="12" r="3" />
   </svg>
 )
+
+export const IconStop: React.FC<IconProps> = ({ size = 24 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <rect x="5" y="5" width="14" height="14" rx="3" fill="currentColor" />
+  </svg>
+)

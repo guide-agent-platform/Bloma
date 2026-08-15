@@ -27,6 +27,7 @@ import type {
   ChannelCreateInput,
   ChannelModel,
   ChannelUpdateInput,
+  PromaPermissionMode,
   ProviderType,
 } from '../../shared/types'
 import { PROVIDER_DEFAULT_URLS, PROVIDER_LABELS } from '../../shared/types'
@@ -34,6 +35,7 @@ import {
   channelsListAtom,
   channelsLoadingAtom,
   channelTestResultAtom,
+  permissionModeAtom,
 } from './atoms-sprint2'
 
 // =========================================================================
@@ -521,6 +523,16 @@ export interface ChannelSettingsPageProps {
   onBack?: () => void
 }
 
+// =========================================================================
+// 权限模式三档选项（与 shared/types 的 PromaPermissionMode 对齐）
+// =========================================================================
+
+const PERMISSION_MODE_OPTIONS: { value: PromaPermissionMode; label: string; desc: string }[] = [
+  { value: 'safe', label: '安全', desc: '危险操作直接拒绝' },
+  { value: 'ask', label: '每次询问', desc: '执行前弹窗确认（默认）' },
+  { value: 'allow-all', label: '全部放行', desc: '仅开发 / 演示用' },
+]
+
 export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack }) => {
   const [channels, setChannels] = useAtom(channelsListAtom)
   const [loading, setLoading] = useAtom(channelsLoadingAtom)
@@ -530,6 +542,20 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
   const [saving, setSaving] = useState(false)
   const [testingId, setTestingId] = useState<string | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [permissionMode, setPermissionModeAtom] = useAtom(permissionModeAtom)
+
+  // ==================== 权限模式切换 ====================
+
+  const handleChangePermissionMode = useCallback(
+    (next: PromaPermissionMode) => {
+      setPermissionModeAtom(next)
+      const api = window.electronAPI
+      if (api?.permissions?.setMode) {
+        void api.permissions.setMode({ request_id: crypto.randomUUID(), mode: next })
+      }
+    },
+    [setPermissionModeAtom],
+  )
 
   // ==================== 加载渠道列表 ====================
 
@@ -740,6 +766,67 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
           gap: 'var(--space-4)',
         }}
       >
+        {/* ── 权限模式 ── */}
+        <section
+          aria-label="权限模式"
+          style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}
+        >
+          <div>
+            <h3 style={{ fontSize: 'var(--font-size-sm)', fontWeight: 700, color: 'var(--color-text)', margin: 0 }}>
+              权限模式
+            </h3>
+            <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', margin: '4px 0 0' }}>
+              控制向导 Agent 执行本地操作时的确认策略
+            </p>
+          </div>
+          <div role="radiogroup" aria-label="权限模式" style={{ display: 'flex', gap: 'var(--space-2)' }}>
+            {PERMISSION_MODE_OPTIONS.map((opt) => {
+              const active = permissionMode === opt.value
+              return (
+                <button
+                  key={opt.value}
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => handleChangePermissionMode(opt.value)}
+                  data-ai-id={`permission-mode-${opt.value}`}
+                  style={{
+                    flex: 1,
+                    padding: 'var(--space-3)',
+                    textAlign: 'left',
+                    borderRadius: 'var(--radius-md)',
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    border: active ? '1px solid var(--color-quick)' : '1px solid var(--color-border)',
+                    background: active ? 'var(--color-quick-soft)' : 'var(--white)',
+                    transition: 'all var(--transition-fast)',
+                  }}
+                >
+                  <span
+                    style={{
+                      display: 'block',
+                      fontSize: 'var(--font-size-xs)',
+                      fontWeight: 700,
+                      color: active ? 'var(--color-quick)' : 'var(--color-text)',
+                    }}
+                  >
+                    {opt.label}
+                  </span>
+                  <span
+                    style={{
+                      display: 'block',
+                      fontSize: 'var(--font-size-xs)',
+                      color: 'var(--color-text-muted)',
+                      marginTop: 2,
+                    }}
+                  >
+                    {opt.desc}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </section>
+
         {/* ── 测试结果提示 ── */}
         {testResult && (
           <div

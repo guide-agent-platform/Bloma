@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { dialog } from 'electron'
 import type { BrowserWindow, IpcMain } from 'electron'
 import type {
   AgentCancelInput,
@@ -13,13 +14,22 @@ import type {
   ChannelUpdateEnvelope,
   FetchModelsEnvelope,
   ConfirmSketchInput,
+  DocumentListInput,
+  DocumentReadInput,
   DocumentSyncInput,
+  DomCollectContextInput,
   PermissionResponseInput,
+  PermissionSetModeInput,
   PointCorrectionInput,
+  ProjectAbandonInput,
   ProjectArchiveInput,
   ProjectCreateInput,
   ProjectDeleteInput,
+  ProjectExportInput,
+  ProjectFinalizeInput,
   ProjectListInput,
+  ProjectReopenInput,
+  ProjectRenameInput,
   ProjectUnarchiveInput,
   ProjectUpgradeInput,
   RequestEnvelope,
@@ -28,29 +38,38 @@ import type {
   SnapshotCreateInput,
   SnapshotListInput,
   SnapshotRollbackInput,
+  SnapshotScreenshotInput,
 } from '../shared/types'
 import { IPC_CHANNELS } from '../shared/types'
 import { fail, ok } from './api-result'
-import { cancelAgent, getSdkQuery, runAgent, setAgentStreamPublisher } from './orchestrator'
+import { cancelAgent, getSdkQuery, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from './orchestrator'
+import { collectDomContext } from './dom-context'
 import { runIterationTask, runMvpTask, runPostMvpTestingFlow, setProgrammingEventPublisher } from './programming-orchestrator'
-import { assertToolAllowed, resolvePermission, setPermissionRequestPublisher } from './permission-service'
+import { assertToolAllowed, getPermissionMode, resolvePermission, setPermissionMode, setPermissionRequestPublisher } from './permission-service'
 import {
+  abandonProject,
   archiveProject,
   confirmSketch,
   createProject,
   deleteProject,
+  exportProject,
+  finalizeProject,
   findProject,
+  getProjectProgressSummary,
   listProjects,
+  renameProject,
+  reopenProject,
   submitCorrection,
   unarchiveProject,
   upgradeProject,
 } from './project-service'
-import { listSessions, loadMessages } from './session-service'
+import { cleanOrphanSessions, listSessions, loadMessages } from './session-service'
 import { createChannel, deleteChannel, fetchModels, listChannels, testChannel, testChannelDirect, updateChannel } from './channel-manager'
-import { syncDocuments } from './document-engine'
+import { listDocuments, readDocument, syncDocuments } from './document-engine'
 import {
   createSnapshot,
   listSnapshots,
+  loadSnapshotScreenshot,
   rollbackSnapshot,
   runSandbox,
   stopSandbox,
@@ -113,10 +132,26 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     })
   })
 
+  // U11：清理孤儿会话——移除指向已删除项目的会话记录及其 JSONL 文件。
+  ipcMain.handle(IPC_CHANNELS.SESSION_CLEAN_ORPHANS, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      requireFields<RequestEnvelope>(payload, [])
+      return cleanOrphanSessions()
+    })
+  })
+
   ipcMain.handle(IPC_CHANNELS.PERMISSION_RESPONSE, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = validatePermissionResponse(payload)
       return resolvePermission(input)
+    })
+  })
+
+  // 权限模式切换：设置页三档（safe/ask/allow-all）同步到主进程 enforcement。
+  ipcMain.handle(IPC_CHANNELS.PERMISSION_SET_MODE, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<PermissionSetModeInput>(payload, ['mode'])
+      return { mode: setPermissionMode(input.mode) }
     })
   })
 
@@ -140,7 +175,11 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
   ipcMain.handle(IPC_CHANNELS.PROJECT_LIST, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<ProjectListInput>(payload, [])
-      return listProjects(input.scope ?? 'active')
+      // U16：为每个项目附带最近进展摘要，列表卡片纯展示用。
+      return listProjects(input.scope ?? 'active').map((project) => ({
+        ...project,
+        progress_summary: getProjectProgressSummary(project.project_id),
+      }))
     })
   })
 
@@ -167,6 +206,47 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     })
   })
 
+  // U10：手动导出项目——弹系统目录选择框，把生成的项目代码复制到用户选定目录。
+  // 取消导出不是错误，返回 { canceled: true } 让前端静默处理，不落 error 事件。
+  ipcMain.handle(IPC_CHANNELS.PROJECT_EXPORT, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<ProjectExportInput>(payload, ['project_id'])
+      const project = findProject(input.project_id)
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: `导出「${project.name}」`,
+        buttonLabel: '导出到这里',
+        properties: ['openDirectory', 'createDirectory'],
+      })
+      if (result.canceled || result.filePaths.length === 0) {
+        return { canceled: true }
+      }
+      return exportProject(input, result.filePaths[0])
+    })
+  })
+
+  // U13：项目重命名——清洗由 renameProject 完成，空名回抛 VALIDATION_ERROR。
+  ipcMain.handle(IPC_CHANNELS.PROJECT_RENAME, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<ProjectRenameInput>(payload, ['project_id', 'name'])
+      return renameProject(input)
+    })
+  })
+
+  // U15：状态流转——标记为「已放弃」/「恢复进行」（active ↔ abandoned）。
+  ipcMain.handle(IPC_CHANNELS.PROJECT_ABANDON, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<ProjectAbandonInput>(payload, ['project_id'])
+      return abandonProject(input)
+    })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PROJECT_REOPEN, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<ProjectReopenInput>(payload, ['project_id'])
+      return reopenProject(input)
+    })
+  })
+
   ipcMain.handle(IPC_CHANNELS.PROJECT_CONFIRM_SKETCH, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<ConfirmSketchInput>(payload, ['project_id', 'session_id', 'snapshot_id', 'decision'])
@@ -174,6 +254,9 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
       if (input.decision === 'accepted') {
         // 决策 D5：接受后 main 侧直接下发 MVP 生成，无需用户再次发消息；
         // MVP 就绪后自动进入测试与状态机后半段（A2-09）
+        // U4/U5：注册可取消句柄，让「停止生成」能 abort 这条 fire-and-forget 链路。
+        const abortController = new AbortController()
+        registerBackgroundRun(input.session_id, abortController)
         void runMvpTask({
           request_id: input.request_id,
           session_id: input.session_id,
@@ -181,6 +264,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
           mode: project.mode,
           channel_id: input.channel_id,
           query: getSdkQuery(),
+          signal: abortController.signal,
         })
           .then((mvp) =>
             runPostMvpTestingFlow({
@@ -189,9 +273,15 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
               project_id: input.project_id,
               mode: project.mode,
               preview_url: mvp.preview_url,
+              channel_id: input.channel_id,
+              query: getSdkQuery(),
+              signal: abortController.signal,
             }),
           )
           .catch((error) => {
+            // U5：用户主动停止（signal 已 abort）不再发 error 事件——渲染端已落「已停止生成」，
+            // 避免两条相互矛盾的消息；只有真实失败才上报错误。
+            if (abortController.signal.aborted) return
             // P1：不再静默吞错——MVP 生成/测试链失败时向渲染端发 error 事件，
             // 让「预览为什么空」可观测，而不是停在空态。
             const message = error instanceof Error ? error.message : String(error)
@@ -205,6 +295,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
               created_at: new Date().toISOString(),
             })
           })
+          .finally(() => unregisterBackgroundRun(input.session_id))
       }
       return project
     })
@@ -227,6 +318,9 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
           timestamp: Date.now(),
         })
         const mode = findProject(input.project_id).mode
+        // U4/U5：注册可取消句柄，让「停止生成」能 abort 点选纠错触发的再生成链路。
+        const abortController = new AbortController()
+        registerBackgroundRun(input.session_id, abortController)
         void runIterationTask({
           request_id: input.request_id,
           session_id: input.session_id,
@@ -234,7 +328,10 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
           mode,
           prompt,
           query: getSdkQuery(),
+          signal: abortController.signal,
         }).catch((error) => {
+          // U5：用户主动停止不再发 error 事件（runIterationTask 内部已回滚到 ready）。
+          if (abortController.signal.aborted) return
           const message = error instanceof Error ? error.message : String(error)
           console.error('[ipc] correction regeneration failed:', message, error)
           mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, {
@@ -246,8 +343,19 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
             created_at: new Date().toISOString(),
           })
         })
+        .finally(() => unregisterBackgroundRun(input.session_id))
       }
       return result
+    })
+  })
+
+  // U8：点选纠错 DOM 上下文收集。渲染进程读不到跨域预览 iframe，主进程通过
+  // subframe.executeJavaScript(document.elementFromPoint) 收集 selector/文本/包围盒。
+  ipcMain.handle(IPC_CHANNELS.DOM_COLLECT_CONTEXT, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<DomCollectContextInput>(payload, ['project_id', 'session_id'])
+      const click = input.click ?? { x: 0, y: 0 }
+      return collectDomContext(mainWindow.webContents, click)
     })
   })
 
@@ -267,15 +375,43 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     })
   })
 
+  ipcMain.handle(IPC_CHANNELS.PROJECT_FINALIZE, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<ProjectFinalizeInput>(payload, ['project_id', 'session_id'])
+      // U6：满意度埋点 + 项目收口。product_finalized 走研究安全级，不含具体对话内容。
+      trackAnalytics({
+        request_id: input.request_id,
+        event: {
+          event_type: 'satisfaction_marked',
+          project_id: input.project_id,
+          session_id: input.session_id,
+          payload: { stage: 'ready' },
+          privacy_level: 'research_safe',
+        },
+      })
+      trackAnalytics({
+        request_id: input.request_id,
+        event: {
+          event_type: 'project_finalized',
+          project_id: input.project_id,
+          session_id: input.session_id,
+          payload: {},
+          privacy_level: 'research_safe',
+        },
+      })
+      return finalizeProject(input)
+    })
+  })
+
   ipcMain.handle(IPC_CHANNELS.SANDBOX_RUN, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<SandboxRunInput>(payload, ['project_id'])
-      // 用户显式操作（沙箱运行按钮）走完整 ask 流程
+      // 用户显式操作（沙箱运行按钮）走当前权限模式（默认 ask，可在设置中切换）
       await assertToolAllowed(
         'run_project',
         { project_id: input.project_id, command: input.command },
         resolvePermissionSession(input.project_id),
-        'ask',
+        getPermissionMode(),
         input.project_id,
       )
       return runSandbox(input)
@@ -306,7 +442,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
         'create_snapshot',
         { project_id: input.project_id, kind: input.kind },
         resolvePermissionSession(input.project_id),
-        'ask',
+        getPermissionMode(),
         input.project_id,
       )
       return createSnapshot(input)
@@ -316,12 +452,12 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
   ipcMain.handle(IPC_CHANNELS.SNAPSHOT_ROLLBACK, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<SnapshotRollbackInput>(payload, ['project_id', 'snapshot_id', 'reason'])
-      // 危险操作（手动回滚）必须用户确认
+      // 危险操作（手动回滚）走当前权限模式（默认 ask，可在设置中切换）
       await assertToolAllowed(
         'rollback_snapshot',
         { project_id: input.project_id, snapshot_id: input.snapshot_id },
         resolvePermissionSession(input.project_id),
-        'ask',
+        getPermissionMode(),
         input.project_id,
       )
       return rollbackSnapshot(input)
@@ -335,10 +471,33 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     })
   })
 
+  // U9：快照缩略图——主进程读截图文件转 base64 data URL，供渲染端 `<img>` 展示。
+  ipcMain.handle(IPC_CHANNELS.SNAPSHOT_SCREENSHOT, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<SnapshotScreenshotInput>(payload, ['project_id', 'snapshot_id'])
+      return { data_url: await loadSnapshotScreenshot(input.project_id, input.snapshot_id) }
+    })
+  })
+
   ipcMain.handle(IPC_CHANNELS.DOCUMENT_SYNC, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<DocumentSyncInput>(payload, ['project_id', 'session_id', 'checkpoint'])
       return syncDocuments(input)
+    })
+  })
+
+  // U2：文档面板——列出/读取项目文档（PRD/GWT/测试报告）。
+  ipcMain.handle(IPC_CHANNELS.DOCUMENT_LIST, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<DocumentListInput>(payload, ['project_id'])
+      return { documents: listDocuments(input.project_id) }
+    })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.DOCUMENT_READ, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<DocumentReadInput>(payload, ['project_id', 'document_id'])
+      return readDocument(input.project_id, input.document_id)
     })
   })
 

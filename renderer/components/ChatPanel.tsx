@@ -3,7 +3,7 @@ import { atom, useAtomValue } from 'jotai'
 import { CardOptions } from './CardOptions'
 import type { CardOption } from './CardOptions'
 import { WaitingFeedback } from './WaitingFeedback'
-import { ArrowUp, MessageSquare } from './icons'
+import { ArrowUp, MessageSquare, IconStop } from './icons'
 import {
   activeAgentSessionIdAtom,
   agentMessagesFamily,
@@ -17,6 +17,8 @@ import type { AgentMessage, AgentStreamState, ProjectMode } from './atoms'
 export interface ChatPanelProps {
   /** 向导 Agent 发出的卡片选项（由上层从 AgentEvent 中解析） */
   cardOptions?: CardOption[]
+  /** 决策卡标题（U7：让渡偏差描述 / 澄清方向等） */
+  decisionTitle?: string
   /** 用户选择卡片选项 */
   onCardOptionSelect?: (option: CardOption) => void
   /** 用户提交文本消息 */
@@ -33,6 +35,8 @@ export interface ChatPanelProps {
   onViewPartial?: () => void
   /** 回访恢复：加载历史消息期间显示骨架占位（sitemap §2.6） */
   isHistoryLoading?: boolean
+  /** 停止当前生成（U4：Agent 流式生成中点击停止） */
+  onStopGeneration?: () => void
 }
 
 // 模块级常量：当 activeAgentSessionIdAtom 为 null 时的稳定 fallback atom，
@@ -59,6 +63,7 @@ const glassTile: React.CSSProperties = {
 
 export const ChatPanel: React.FC<ChatPanelProps> = ({
   cardOptions,
+  decisionTitle,
   onCardOptionSelect,
   onSendMessage,
   isWaiting = false,
@@ -67,6 +72,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   onContinueWaiting,
   onViewPartial,
   isHistoryLoading = false,
+  onStopGeneration,
 }) => {
   const activeSessionId = useAtomValue(activeAgentSessionIdAtom)
   const mode = useAtomValue(projectModeAtom)
@@ -243,7 +249,21 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             )}
 
             {cardOptions && cardOptions.length > 0 && onCardOptionSelect && (
-              <CardOptions options={cardOptions} onSelect={onCardOptionSelect} disabled={isWaiting} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                {decisionTitle && (
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: 'var(--font-size-xs)',
+                      lineHeight: 1.5,
+                      color: 'var(--color-text-muted)',
+                    }}
+                  >
+                    {decisionTitle}
+                  </p>
+                )}
+                <CardOptions options={cardOptions} onSelect={onCardOptionSelect} disabled={isWaiting} />
+              </div>
             )}
           </>
         )}
@@ -270,8 +290,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={isWaiting}
-            placeholder={isWaiting ? '正在处理中…' : '描述你的想法…'}
+            disabled={isWaiting || hasActiveStream}
+            placeholder={hasActiveStream ? '生成中，点右侧停止可中断…' : isWaiting ? '正在处理中…' : '描述你的想法…'}
             rows={1}
             style={{
               flex: 1,
@@ -288,29 +308,53 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               maxHeight: 120,
             }}
           />
-          <button
-            onClick={handleSubmit}
-            disabled={!canSend}
-            aria-label="发送消息"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 36,
-              height: 36,
-              borderRadius: 'var(--radius-full)',
-              flexShrink: 0,
-              background: canSend
-                ? 'linear-gradient(135deg, var(--color-quick), var(--color-quick-bright))'
-                : 'var(--gray-200)',
-              color: canSend ? 'var(--white)' : 'var(--gray-400)',
-              boxShadow: canSend ? '0 4px 12px -2px rgba(124,58,237,0.45)' : 'none',
-              transition: 'all var(--transition-fast)',
-              cursor: canSend ? 'pointer' : 'not-allowed',
-            }}
-          >
-            <ArrowUp size={17} />
-          </button>
+          {hasActiveStream ? (
+            <button
+              onClick={onStopGeneration}
+              aria-label="停止生成"
+              title="停止生成"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 36,
+                height: 36,
+                borderRadius: 'var(--radius-full)',
+                flexShrink: 0,
+                background: 'var(--color-danger)',
+                color: 'var(--white)',
+                boxShadow: '0 4px 12px -2px rgba(220,38,38,0.45)',
+                transition: 'all var(--transition-fast)',
+                cursor: 'pointer',
+              }}
+            >
+              <IconStop size={16} />
+            </button>
+          ) : (
+            <button
+              onClick={handleSubmit}
+              disabled={!canSend}
+              aria-label="发送消息"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 36,
+                height: 36,
+                borderRadius: 'var(--radius-full)',
+                flexShrink: 0,
+                background: canSend
+                  ? 'linear-gradient(135deg, var(--color-quick), var(--color-quick-bright))'
+                  : 'var(--gray-200)',
+                color: canSend ? 'var(--white)' : 'var(--gray-400)',
+                boxShadow: canSend ? '0 4px 12px -2px rgba(124,58,237,0.45)' : 'none',
+                transition: 'all var(--transition-fast)',
+                cursor: canSend ? 'pointer' : 'not-allowed',
+              }}
+            >
+              <ArrowUp size={17} />
+            </button>
+          )}
         </div>
         <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-2)', textAlign: 'center' }}>
           按 Enter 发送，按 Shift + Enter 换行

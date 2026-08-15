@@ -26,7 +26,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { useAtomValue } from 'jotai'
 import type { DangerLevel, PermissionRequest } from '../../shared/types'
 import { clearPermissionRequest } from '../agent-atoms'
-import { permissionQueueAtom } from './atoms-sprint2'
+import { permissionModeAtom, permissionQueueAtom } from './atoms-sprint2'
 
 // =========================================================================
 // 内联 SVG 图标（主 icons.tsx 中没有这些，集成时可迁移过去）
@@ -121,7 +121,7 @@ function toolReadableName(toolName: string): string {
 
 export interface PermissionDialogProps {
   /**
-   * 权限模式。
+   * 权限模式（保留供测试/未来覆盖，正常由 permissionModeAtom 驱动）。
    * 'safe'      → 危险操作直接拒绝不弹窗（无人值守/自动化管线默认）
    * 'ask'       → 弹窗确认（默认）
    * 'allow-all' → 全部自动放行（仅开发/演示用）
@@ -129,9 +129,10 @@ export interface PermissionDialogProps {
   mode?: 'safe' | 'ask' | 'allow-all'
 }
 
-export const PermissionDialog: React.FC<PermissionDialogProps> = ({
-  mode = 'ask',
-}) => {
+export const PermissionDialog: React.FC<PermissionDialogProps> = ({ mode: propMode }) => {
+  // U·权限模式切换：模式来自全局 atom（设置页可切换），与主进程 enforcement 保持一致。
+  const atomMode = useAtomValue(permissionModeAtom)
+  const mode = propMode ?? atomMode
   // -------- 从 atoms-sprint2 订阅权限队列（N-004 修复：消除重复展平逻辑）--------
   const requests = useAtomValue(permissionQueueAtom)
 
@@ -175,10 +176,16 @@ export const PermissionDialog: React.FC<PermissionDialogProps> = ({
     [currentRequest, rememberChecked],
   )
 
-  // ==================== safe 模式自动处理 ====================
+  // ==================== safe / allow-all 模式自动处理 ====================
 
   useEffect(() => {
-    if (mode !== 'safe' || !currentRequest) return
+    if (!currentRequest) return
+    // allow-all：全部自动放行（含主进程仍会上报的 dangerous，避免挂起等待）。
+    if (mode === 'allow-all') {
+      handleRespond('allow')
+      return
+    }
+    if (mode !== 'safe') return
     if (currentRequest.danger_level === 'dangerous') {
       // safe 模式：危险工具直接拒绝
       handleRespond('deny')
@@ -199,11 +206,8 @@ export const PermissionDialog: React.FC<PermissionDialogProps> = ({
   // 无请求 → 不渲染
   if (!currentRequest) return null
 
-  // allow-all 模式 → 不弹窗
-  if (mode === 'allow-all') return null
-
-  // safe 模式不在 UI 层弹窗（已在 effect 中自动处理）
-  if (mode === 'safe') return null
+  // 非 ask 模式不弹窗（safe / allow-all 已在 effect 中自动处理）
+  if (mode !== 'ask') return null
 
   // ask 模式：按等级渲染
   const level = currentRequest.danger_level

@@ -3,8 +3,11 @@ import {
   canUseTool,
   clearPendingRequests,
   getPendingBySession,
+  getPermissionMode,
   resolvePermission,
+  setPermissionMode,
 } from '../../main/permission-service'
+import type { PromaPermissionMode } from '../../shared/types'
 
 describe('PermissionService', () => {
   afterEach(() => {
@@ -60,5 +63,29 @@ describe('PermissionService', () => {
     expect(getPendingBySession('s1')).toHaveLength(1)
     expect(getPendingBySession('s2')).toHaveLength(1)
     expect(getPendingBySession('missing')).toHaveLength(0)
+  })
+})
+
+describe('PermissionService · 全局权限模式', () => {
+  afterEach(() => {
+    // 恢复默认 ask，避免污染其它测试对 enforcement 默认值的预期
+    setPermissionMode('ask')
+  })
+
+  it('defaults to ask', () => {
+    expect(getPermissionMode()).toBe('ask')
+  })
+
+  it('sets and returns a valid mode', () => {
+    expect(setPermissionMode('allow-all')).toBe('allow-all')
+    expect(getPermissionMode()).toBe('allow-all')
+    expect(setPermissionMode('safe')).toBe('safe')
+    expect(getPermissionMode()).toBe('safe')
+  })
+
+  it('rejects an invalid mode with VALIDATION_ERROR', () => {
+    expect(() => setPermissionMode('bogus' as unknown as PromaPermissionMode)).toThrow(
+      'VALIDATION_ERROR',
+    )
   })
 })

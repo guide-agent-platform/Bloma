@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
@@ -381,6 +381,37 @@ export function listSnapshots(projectId: string): Snapshot[] {
     snapshots.push(meta)
   }
   return snapshots.sort((a, b) => a.created_at.localeCompare(b.created_at))
+}
+
+const SCREENSHOT_MIME: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  svg: 'image/svg+xml',
+}
+
+/**
+ * U9：读取某快照的截图文件，转成 base64 data URL 回传渲染端（缩略图）。
+ * 渲染进程受 CSP `img-src 'self' data: blob:` 约束，无法直接加载磁盘 file:// 截图；
+ * 主进程读文件转 data URL 后，`<img>` 可安全展示。无截图/读失败返回 null（前端回退纯色块）。
+ */
+export async function loadSnapshotScreenshot(projectId: string, snapshotId: string): Promise<string | null> {
+  const project = findProject(projectId)
+  const snapshotDir = getSnapshotsDir(project.workspace_slug, project.project_id)
+  const meta = readJsonFile<Snapshot | null>(join(snapshotDir, snapshotId, 'metadata.json'), null)
+  const screenshotPath = meta?.screenshot_path
+  if (!screenshotPath || !existsSync(screenshotPath)) return null
+
+  const ext = screenshotPath.split('.').pop()?.toLowerCase() ?? ''
+  const mime = SCREENSHOT_MIME[ext]
+  if (!mime) return null
+
+  try {
+    const base64 = readFileSync(screenshotPath).toString('base64')
+    return `data:${mime};base64,${base64}`
+  } catch {
+    return null
+  }
 }
 
 /**

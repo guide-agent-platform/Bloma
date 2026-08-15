@@ -25,6 +25,7 @@ import {
   runIterationTask,
   setPendingIteration,
   setProgrammingEventPublisher,
+  takeFailedIteration,
   takePendingIteration,
 } from './programming-orchestrator'
 import { readPrdBackplane } from './document-engine'
@@ -74,6 +75,14 @@ const MAX_RETRY_DURATION_MS = 5 * 60 * 1000
 const SILENT_RETRY_THRESHOLD = 5
 
 const activeSessions = new Map<string, ActiveRun>()
+
+/**
+ * 后台编程任务的取消注册表（U4/U5）：confirmSketch / submitCorrection 触发的
+ * runMvpTask / runIterationTask 是 fire-and-forget，不经过 runAgent，activeSessions 管不到；
+ * 单独记一份供 cancelAgent 统一 abort——否则「停止生成」按钮对这两条链路点了没反应。
+ */
+const backgroundRuns = new Map<string, AbortController>()
+
 let streamPublisher: StreamPublisher = () => undefined
 let sdkQuery: SDKQuery = anthropicMessagesQuery
 let retrySleep: (ms: number) => Promise<void> = sleep
@@ -101,6 +110,16 @@ export function setRetrySleepForTests(sleepFn: (ms: number) => Promise<void>): v
 
 export function isSessionActive(sessionId: string): boolean {
   return activeSessions.has(sessionId)
+}
+
+/** 注册后台编程任务的可取消句柄（confirmSketch / submitCorrection 路径）。 */
+export function registerBackgroundRun(sessionId: string, controller: AbortController): void {
+  backgroundRuns.set(sessionId, controller)
+}
+
+/** 移除后台编程任务的可取消句柄（任务结束或已取消）。 */
+export function unregisterBackgroundRun(sessionId: string): void {
+  backgroundRuns.delete(sessionId)
 }
 
 export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendMessageResult> {
@@ -211,7 +230,40 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     // 此刻权威阶段是 blocked_for_user_decision，若落入 handleGuideMessage 会被
     // resolveCardAnswer 当成澄清卡答案误入草图生成。
     if (input.metadata?.source === 'card_option' && isIterationDecisionId(input.metadata.selected_option_id)) {
-      await resolveIterationDecisionFlow(input, streamPublisher, sdkQuery)
+      await resolveIterationDecisionFlow(input, streamPublisher, sdkQuery, abortController.signal)
+      persistTerminalMessage(input.session_id, 'completed')
+      streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
+      return { accepted: true, session_id: input.session_id, stream_started: true }
+    }
+
+    // U12：失败重试卡回传（selected_option_id === 'retry'）——取出上次失败诉求原样重跑，
+    // 在引导路径/ready 护栏之前拦截（与修改确认卡同理），实现「一键重试」而非重新打字。
+    if (input.metadata?.source === 'card_option' && input.metadata.selected_option_id === 'retry') {
+      const failedPrompt = takeFailedIteration(input.project_id)
+      if (failedPrompt) {
+        setProgrammingEventPublisher(streamPublisher)
+        await runIterationTask({
+          request_id: input.request_id,
+          session_id: input.session_id,
+          project_id: input.project_id,
+          mode: input.mode,
+          prompt: failedPrompt,
+          channel_id: input.channel_id,
+          query: sdkQuery,
+          signal: abortController.signal,
+        })
+      } else {
+        // 重试诉求已失效（如重启后点旧卡）：如实说明，收敛回 ready
+        const copy = '这次重试的诉求已经失效，想调整的话请再描述一次。'
+        updateProject(input.project_id, { current_stage: 'ready' })
+        streamPublisher(makeEvent(input, 'stage_changed', { stage: 'ready' }))
+        appendAgentMessage(input.session_id, {
+          role: 'assistant',
+          content: [{ type: 'text', text: copy }],
+          timestamp: Date.now(),
+        })
+        streamPublisher(makeEvent(input, 'message_delta', { text: copy }))
+      }
       persistTerminalMessage(input.session_id, 'completed')
       streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
       return { accepted: true, session_id: input.session_id, stream_started: true }
@@ -414,11 +466,18 @@ function sleep(ms: number): Promise<void> {
 
 export async function cancelAgent(input: AgentCancelInput): Promise<AgentCancelResult> {
   const run = activeSessions.get(input.session_id)
-  if (!run) return { cancelled: false, session_id: input.session_id }
+  const background = backgroundRuns.get(input.session_id)
+  if (!run && !background) return { cancelled: false, session_id: input.session_id }
 
-  run.abortController.abort(input.reason)
-  await run.iterator?.return?.()
-  activeSessions.delete(input.session_id)
+  if (run) {
+    run.abortController.abort(input.reason)
+    await run.iterator?.return?.()
+    activeSessions.delete(input.session_id)
+  }
+  if (background) {
+    background.abort(input.reason)
+    backgroundRuns.delete(input.session_id)
+  }
   return { cancelled: true, session_id: input.session_id }
 }
 
@@ -733,6 +792,7 @@ async function resolveIterationDecisionFlow(
   input: AgentSendMessageInput,
   streamPublisher: (event: AgentEvent) => void,
   sdkQuery: SDKQuery | undefined,
+  signal?: AbortSignal,
 ): Promise<void> {
   const decision = input.metadata?.selected_option_id
   const pending = takePendingIteration(input.project_id)
@@ -747,6 +807,7 @@ async function resolveIterationDecisionFlow(
       prompt: pending.description,
       channel_id: input.channel_id,
       query: sdkQuery,
+      signal,
     })
     return
   }

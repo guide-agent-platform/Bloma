@@ -11,14 +11,14 @@ const clearRequirement = '做一个家庭记账页面，可以记录收入支出
  * - generation-workflow.feature @S2-PROJECT-001：草图确认 → MVP 生成 → 沙箱启动 → 预览
  * - sprint-plan.md §5 Sprint 2 验收：MVP 在沙箱中启动无错误
  *
- * 说明：renderer 当前为演示模式（App.tsx 的 handleSendMessage 直接返回"演示模式"文案，
- * 不调用 agent.sendMessage / project.confirmSketch 真实链路）。本测试通过 preload 白名单
- * `window.electronAPI` 直接驱动真实 IPC 四层链路（shared → main → preload → renderer），
- * 完整走「agent.sendMessage 生成草图 → confirmSketch 确认 → runMvpTask 生成 MVP」，
+ * 说明：renderer 已接入真实 `window.electronAPI.agent.sendMessage` / `project.confirmSketch`
+ * 四层链路（shared → main → preload → renderer），本测试通过 preload 白名单
+ * `window.electronAPI` 直接驱动真实 IPC 链路，完整走
+ * 「agent.sendMessage 生成草图 → confirmSketch 确认 → runMvpTask 生成 MVP」，
  * 验证从草图确认到 MVP 可运行产物的端到端主链路。
  */
 test('[S2-PROJECT-001-e2e] Electron 中经真实 IPC 链路生成草图并确认后产出可运行 MVP', async ({ bloma }) => {
-  // ① 进入 quick 工作区（演示模式 UI 可用，用于确认工作区已挂载）
+  // ① 进入 quick 工作区（用于确认工作区已挂载）
   await enterQuickWorkspace(bloma.page)
 
   // ② 通过 preload 白名单 API 创建项目并发送明确需求（规则路由 → generate_sketch → runSketchTask）

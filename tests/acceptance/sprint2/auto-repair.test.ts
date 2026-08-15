@@ -1,12 +1,21 @@
+import { EventEmitter } from 'node:events'
+import type { ChildProcess } from 'node:child_process'
 import { createServer } from 'node:http'
-import { existsSync, mkdtempSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { syncDocuments } from '../../../main/document-engine'
 import { runPostMvpTestingFlow, setProgrammingEventPublisher } from '../../../main/programming-orchestrator'
-import { createProject, findProject, recordSketchGenerated } from '../../../main/project-service'
+import {
+  clearSandboxRuntimeForTests,
+  createSnapshot,
+  listSnapshots,
+  setSandboxRuntimeForTests,
+  setSnapshotCaptureProviderForTests,
+} from '../../../main/platform-services'
+import { createProject, findProject, recordSketchGenerated, updateProject } from '../../../main/project-service'
 import type { AgentEvent } from '../../../shared/types'
 
 /**
@@ -34,9 +43,11 @@ describe('Sprint 2 auto repair acceptance (S2-JUDGE-001 / S2-JUDGE-002)', () => 
     process.env.PROMA_HOME = originalPromaHome
     home = undefined
     setProgrammingEventPublisher(() => undefined)
+    clearSandboxRuntimeForTests()
+    setSnapshotCaptureProviderForTests()
   })
 
-  function setup(prefix: string): { projectId: string } {
+  async function setup(prefix: string): Promise<{ projectId: string; snapshotId: string }> {
     home = mkdtempSync(join(tmpdir(), prefix))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 's2-project', mode: 'quick' })
@@ -47,7 +58,24 @@ describe('Sprint 2 auto repair acceptance (S2-JUDGE-001 / S2-JUDGE-002)', () => 
       project_id: project.project_id,
       checkpoint: 'mvp_before_generation',
     })
-    return { projectId: project.project_id }
+    // 真实 runSketchTask 会落一份 sketch 快照并推进 current_snapshot_id；熔断回滚以此为健康目标。
+    // 注入 mock 沙箱运行时 + 截图 provider，避免回滚里 runSandbox 起真实进程/等待超时。
+    setSandboxRuntimeForTests({
+      portAllocator: async () => 3201,
+      healthCheck: async () => true,
+      processFactory: () => makeChildProcess(),
+    })
+    setSnapshotCaptureProviderForTests(async () => ({ extension: 'png', buffer: Buffer.from('fake-png') }))
+    const snapshot = await createSnapshot({
+      request_id: 's2-snapshot',
+      project_id: project.project_id,
+      kind: 'sketch',
+      summary: '记录收入与支出的验证草图',
+      include_documents: false,
+      health_status: 'healthy',
+    })
+    updateProject(project.project_id, { current_snapshot_id: snapshot.snapshot_id })
+    return { projectId: project.project_id, snapshotId: snapshot.snapshot_id }
   }
 
   async function previewServer(htmlProvider: () => string): Promise<string> {
@@ -62,7 +90,7 @@ describe('Sprint 2 auto repair acceptance (S2-JUDGE-001 / S2-JUDGE-002)', () => 
   }
 
   it('[S2-JUDGE-001] 运行失败时自动修复并在 3 次内恢复，且用户事件不含堆栈', async () => {
-    const { projectId } = setup('bloma-s2-repair-ok-')
+    const { projectId } = await setup('bloma-s2-repair-ok-')
     const events: AgentEvent[] = []
     setProgrammingEventPublisher((event) => events.push(event))
 
@@ -94,7 +122,7 @@ describe('Sprint 2 auto repair acceptance (S2-JUDGE-001 / S2-JUDGE-002)', () => 
   })
 
   it('[S2-JUDGE-002] 连续 3 次修复失败后熔断，通知用户内容未丢失并提供继续/接受/补充选项', async () => {
-    const { projectId } = setup('bloma-s2-repair-fuse-')
+    const { projectId, snapshotId } = await setup('bloma-s2-repair-fuse-')
     const events: AgentEvent[] = []
     setProgrammingEventPublisher((event) => events.push(event))
 
@@ -130,8 +158,17 @@ describe('Sprint 2 auto repair acceptance (S2-JUDGE-001 / S2-JUDGE-002)', () => 
     const serialized = JSON.stringify(events)
     expect(serialized).not.toMatch(/node_modules|Error: |at |TypeError|ReferenceError/)
 
-    // ⑤ 文档要求：熔断后回滚到最近一次健康快照（PRD §13.4 / self-healing-judge @S2-JUDGE-002）
-    //    —— 当前实现仅进入 blocked，尚未执行 rollbackSnapshot，此断言如实反映产品缺口。
-    expect(existsSync(join(home!, 'agent-workspaces', 'default-software-builder', 'snapshots', projectId))).toBe(true)
+    // ⑤ 熔断回滚到最近健康快照：下发 rollback_done + 落「内容未丢失」文案，
+    //    并产出 rollback_guard 保护快照，且项目指针仍指向健康快照（PRD §13.4 / @S2-JUDGE-002）
+    expect(events.some((event) => event.type === 'rollback_done')).toBe(true)
+    expect(events.some((event) => event.type === 'message_delta' && String(event.payload.text).includes('回到之前的版本'))).toBe(true)
+    expect(listSnapshots(projectId).some((snap) => snap.kind === 'rollback_guard')).toBe(true)
+    expect(findProject(projectId).current_snapshot_id).toBe(snapshotId)
   })
 })
+
+function makeChildProcess(): ChildProcess {
+  const emitter = new EventEmitter() as ChildProcess
+  Object.assign(emitter, { kill: vi.fn(() => true), pid: 1000 })
+  return emitter
+}

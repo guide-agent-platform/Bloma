@@ -26,6 +26,8 @@ export interface GenerateMvpLlmInput {
   sessionId: string
   maxTokens?: number
   timeoutMs?: number
+  /** 修复上下文（self-healing @分析错误原因）：上次生成/运行失败的具体原因，注入 prompt 让模型针对性修复。 */
+  repairContext?: { category: string; error: string }
 }
 
 export interface GenerateMvpLlmResult {
@@ -84,7 +86,7 @@ export async function generateMvpLlm(input: GenerateMvpLlmInput): Promise<Genera
   const combinedSignal = combineSignals(selfController.signal, input.signal)
 
   try {
-    const prompt = buildPrompt(input.backplane)
+    const prompt = buildPrompt(input.backplane, input.repairContext)
     let maxTokens = input.maxTokens ?? DEFAULT_MAX_TOKENS
     let lastAccumulated = ''
     let truncated = false
@@ -153,7 +155,7 @@ async function streamAccumulate(
   signal: AbortSignal,
   selfController: AbortController,
 ): Promise<string> {
-  const history = buildRetryHistory(input.backplane, attempt, lastAccumulated, truncated)
+  const history = buildRetryHistory(input.backplane, input.repairContext, attempt, lastAccumulated, truncated)
   const queryPrompt = attempt === 0 || truncated ? prompt : RETRY_FEEDBACK_PROMPT
 
   let accumulated = ''
@@ -183,11 +185,17 @@ async function streamAccumulate(
 }
 
 /** 重试历史：截断走全新重生成（不加脏输出），格式错误把坏输出作为 assistant 轮次回灌续问。 */
-function buildRetryHistory(backplane: PrdBackplane, attempt: number, lastAccumulated: string, truncated: boolean): ConversationTurn[] {
+function buildRetryHistory(
+  backplane: PrdBackplane,
+  repairContext: GenerateMvpLlmInput['repairContext'],
+  attempt: number,
+  lastAccumulated: string,
+  truncated: boolean,
+): ConversationTurn[] {
   if (attempt === 0 || truncated) return [{ role: 'system', content: SYSTEM_PROMPT }]
   return [
     { role: 'system', content: SYSTEM_PROMPT },
-    { role: 'user', content: buildPrompt(backplane) },
+    { role: 'user', content: buildPrompt(backplane, repairContext) },
     { role: 'assistant', content: lastAccumulated },
   ]
 }
@@ -228,7 +236,7 @@ function combineSignals(self: AbortSignal, external?: AbortSignal): AbortSignal 
   return controller.signal
 }
 
-function buildPrompt(backplane: PrdBackplane): string {
+function buildPrompt(backplane: PrdBackplane, repairContext?: GenerateMvpLlmInput['repairContext']): string {
   const items = backplane.requirements.length
     ? backplane.requirements
     : [{ id: 'F-001', description: '一个可运行、可交互的功能页面' }]
@@ -237,6 +245,15 @@ function buildPrompt(backplane: PrdBackplane): string {
   const outOfScope = backplane.out_of_scope.length
     ? backplane.out_of_scope.map((scope) => `- ${scope}`).join('\n')
     : '- 无'
+  const repairSection = repairContext
+    ? [
+        ``,
+        `【修复上下文（上次版本失败原因，请针对性修复）】`,
+        `错误类别：${repairContext.category}`,
+        `错误描述：${repairContext.error}`,
+        `请先分析上述失败原因，再生成修复后的版本；其余功能项与验收标准不变，不要擅自改需求。`,
+      ]
+    : []
   return [
     `请根据以下 PRD 背板生成 MVP（产品定位是唯一主题锚点，功能项必须全部实现，不得擅自替换成其他应用）。`,
     ``,
@@ -250,6 +267,7 @@ function buildPrompt(backplane: PrdBackplane): string {
     ``,
     `范围外（不要实现）：`,
     outOfScope,
+    ...repairSection,
   ].join('\n')
 }
 

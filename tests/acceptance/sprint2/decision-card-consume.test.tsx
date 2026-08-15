@@ -62,7 +62,7 @@ describe('决策卡片消费标记（选了选项就立即隐藏卡片）', () =
     const { result, rerender } = renderHook(() => useUserDecisionCards(), { wrapper })
 
     // 未消费：卡片应显示
-    expect(result.current?.map((c) => c.label)).toEqual(['生活工具'])
+    expect(result.current?.options.map((c) => c.label)).toEqual(['生活工具'])
 
     // 用户点选 → 立即消费
     act(() => markDecisionConsumed('session-1'))
@@ -99,6 +99,6 @@ describe('决策卡片消费标记（选了选项就立即隐藏卡片）', () =
     })
     rerender()
 
-    expect(result.current?.map((c) => c.label)).toEqual(['B'])
+    expect(result.current?.options.map((c) => c.label)).toEqual(['B'])
   })
 })

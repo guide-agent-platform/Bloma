@@ -175,6 +175,8 @@ function deriveBannerState(
       return { visible: true, variant: 'ready', title: STAGE_LABEL_MAP[stage], detail: '草图已生成，确认后即可生成完整功能，或继续对话调整方向', stage }
     case 'generating_mvp':
       return { visible: true, variant: 'generating', title: STAGE_LABEL_MAP[stage], detail: '正在生成完整项目，请稍候…', stage }
+    case 'iterating':
+      return { visible: true, variant: 'generating', title: STAGE_LABEL_MAP[stage], detail: '正在按你的新想法重新生成，稍候会自动测试并审查…', stage }
     case 'testing':
       return { visible: true, variant: 'testing', title: STAGE_LABEL_MAP[stage], detail: '正在运行功能检查…', stage }
     case 'judge_review':

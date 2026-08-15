@@ -28,6 +28,7 @@ import {
   loadSnapshots,
 } from './atoms'
 import type { ProjectMode, WorkflowStage } from './atoms'
+import type { DomCollectContextResult } from '../../shared/types'
 
 /**
  * 这些阶段后端已产出可渲染文件（草图 / MVP）。回访恢复或重启后，旧沙箱进程已死，
@@ -64,7 +65,7 @@ const App: React.FC = () => {
     <>
       <Aurora />
       <AppRoutes />
-      <PermissionDialog mode="ask" />
+      <PermissionDialog />
     </>
   )
 }
@@ -84,6 +85,8 @@ const AppRoutes: React.FC = () => {
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>('empty')
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID())
   const [confirmingSketch, setConfirmingSketch] = useState(false)
+  // U1：升级为长期模式的确认弹窗开关
+  const [upgradeConfirmOpen, setUpgradeConfirmOpen] = useState(false)
 
   // 本地项目列表（真实 IPC 返回的项目索引）
   const [projectList, setProjectList] = useState<Project[]>([])
@@ -295,8 +298,37 @@ const AppRoutes: React.FC = () => {
       mode: mode ?? 'quick',
       current_stage: currentStage,
       metadata: { source: 'chat' },
+    }).then((result) => {
+      // U5：生成期间发消息会被后端以 AGENT_SESSION_BUSY 拒绝并静默吞掉——
+      // 这里补一条引导，告诉用户可等完成或点停止，而不是消息石沉大海。
+      if (!result?.ok && result?.error?.code === 'AGENT_SESSION_BUSY') {
+        appendMessageToSession(sessionId, {
+          role: 'system',
+          content: [{ type: 'text', text: '我正在生成中，暂时没法同时处理新消息。你可以点输入框右侧的停止按钮中断当前生成，或等它完成后再发。' }],
+          timestamp: Date.now(),
+        })
+      }
     })
   }, [sessionId, currentProject, projectList, mode, currentStage])
+
+  // ==================== 停止生成（U4） ====================
+
+  const handleStopGeneration = useCallback(() => {
+    const api = window.electronAPI
+    if (!api?.agent?.cancel) return
+
+    // 立即反馈：先落一条系统消息，再让主进程 abort 当前流
+    appendMessageToSession(sessionId, {
+      role: 'system',
+      content: [{ type: 'text', text: '已停止生成。当前已生成的内容会保留，你可以继续补充或调整。' }],
+      timestamp: Date.now(),
+    })
+    void api.agent.cancel({
+      request_id: crypto.randomUUID(),
+      session_id: sessionId,
+      reason: 'user_cancelled',
+    })
+  }, [sessionId])
 
   // ==================== 卡片选项回传（Sprint 2：澄清卡片） ====================
 
@@ -326,9 +358,27 @@ const AppRoutes: React.FC = () => {
 
   // ==================== 点选纠错 ====================
 
-  const handleCorrectionSubmit = useCallback((payload: { position: { x: number; y: number }; userNote: string; fallbackMode: boolean }) => {
+  const handleCorrectionSubmit = useCallback(async (payload: { position: { x: number; y: number }; userNote: string; fallbackMode: boolean }) => {
     const api = window.electronAPI
     if (!api?.project?.submitCorrection) return
+
+    const projectId = currentProject?.project_id ?? projectList[0]?.project_id ?? ''
+
+    // U8：点选纠错前先向主进程收集点击处的 DOM 上下文（element_selector/text_content/真实包围盒）。
+    // 渲染进程读不到跨域预览 iframe 的 DOM，改由主进程通过 subframe.executeJavaScript 收集；
+    // 收集失败则回退纯坐标模式（bounding_rect width/height 0、fallback_mode true）。
+    let domContext: DomCollectContextResult | undefined
+    try {
+      const dom = await api?.dom?.collectContext?.({
+        request_id: crypto.randomUUID(),
+        project_id: projectId,
+        session_id: sessionId,
+        click: { x: payload.position.x, y: payload.position.y },
+      })
+      if (dom?.ok && dom.data && !dom.data.fallback_mode) domContext = dom.data
+    } catch {
+      // 收集异常不阻断纠错提交，回退纯坐标
+    }
 
     // 真实链路：记录点选纠错（后端 appendProjectEvent + analytics point_correction）
     appendMessageToSession(sessionId, {
@@ -338,12 +388,19 @@ const AppRoutes: React.FC = () => {
     })
     void api.project.submitCorrection({
       request_id: crypto.randomUUID(),
-      project_id: currentProject?.project_id ?? projectList[0]?.project_id ?? '',
+      project_id: projectId,
       session_id: sessionId,
-      context: {
-        bounding_rect: { x: payload.position.x, y: payload.position.y, width: 0, height: 0 },
-        fallback_mode: payload.fallbackMode,
-      },
+      context: domContext
+        ? {
+            element_selector: domContext.element_selector,
+            text_content: domContext.text_content,
+            bounding_rect: domContext.bounding_rect,
+            fallback_mode: false,
+          }
+        : {
+            bounding_rect: { x: payload.position.x, y: payload.position.y, width: 0, height: 0 },
+            fallback_mode: true,
+          },
       user_note: payload.userNote || undefined,
       mode: payload.userNote ? 'user_note' : 'guess',
     })
@@ -448,6 +505,64 @@ const AppRoutes: React.FC = () => {
     }).finally(() => setConfirmingSketch(false))
   }, [sessionId, currentProject, projectList, currentSnapshotId])
 
+  // ==================== 标记为完成（U6） ====================
+
+  const handleMarkComplete = useCallback(() => {
+    const api = window.electronAPI
+    const projectId = currentProject?.project_id ?? projectList[0]?.project_id
+    if (!api?.project?.finalize || !projectId) return
+
+    void api.project.finalize({
+      request_id: crypto.randomUUID(),
+      project_id: projectId,
+      session_id: sessionId,
+    }).then((result) => {
+      if (!result?.ok) return
+      // 后端已把项目收口到 completed（satisfaction_marked + project_finalized 埋点）；
+      // 同步渲染端，让 stage 从 ready 切到 completed，头部随之出现「升级为长期模式」入口。
+      setCurrentProject(result.data)
+      setWorkflowStage(result.data.current_stage)
+      setStageLabel(STAGE_LABEL_MAP[result.data.current_stage] ?? '已完成')
+      appendMessageToSession(sessionId, {
+        role: 'system',
+        content: [{ type: 'text', text: '已标记为完成。这个项目会保留在你的历史列表里，随时可以回来继续完善，或升级为长期模式。' }],
+        timestamp: Date.now(),
+      })
+    })
+  }, [currentProject, projectList, sessionId, setCurrentProject, setWorkflowStage, setStageLabel])
+
+  // ==================== 升级为长期模式（U1） ====================
+
+  // 点击「升级为长期模式」按钮 → 先弹确认（PRD §4.4），确认后再走 IPC
+  const handleUpgrade = useCallback(() => {
+    setUpgradeConfirmOpen(true)
+  }, [])
+
+  const handleConfirmUpgrade = useCallback(() => {
+    const api = window.electronAPI
+    const projectId = currentProject?.project_id ?? projectList[0]?.project_id
+    setUpgradeConfirmOpen(false)
+    if (!api?.project?.upgrade || !projectId) return
+
+    void api.project.upgrade({
+      request_id: crypto.randomUUID(),
+      project_id: projectId,
+      session_id: sessionId,
+    }).then((result) => {
+      if (!result?.ok) return
+      // 后端已把项目切到 longterm + upgrading 阶段并落 upgrade 快照；此处同步渲染端
+      setCurrentProject(result.data)
+      setProjectMode('longterm')
+      setWorkflowStage(result.data.current_stage)
+      setStageLabel(STAGE_LABEL_MAP[result.data.current_stage] ?? '处理中')
+      appendMessageToSession(sessionId, {
+        role: 'system',
+        content: [{ type: 'text', text: '已升级为长期迭代模式，我会持续帮你维护文档与测试。随时可以继续完善。' }],
+        timestamp: Date.now(),
+      })
+    })
+  }, [currentProject, projectList, sessionId, setCurrentProject, setProjectMode, setWorkflowStage, setStageLabel])
+
   // ==================== 预览刷新 / 重新连接沙箱（P2） ====================
 
   const handleRefreshPreview = useCallback(() => {
@@ -539,30 +654,147 @@ const AppRoutes: React.FC = () => {
 
   // route === 'workspace'
   return (
-    <WorkspaceShell
-      cardOptions={decisionCards ?? undefined}
-      onCardOptionSelect={handleCardOptionSelect}
-      onSendMessage={handleSendMessage}
-      isWaiting={waiting}
-      waitStartTime={waitStart}
-      waitActionLabel="生成可运行版本"
-      isHistoryLoading={historyLoading}
-      previewStatus={effectivePreviewStatus}
-      previewUrl={effectivePreviewUrl}
-      onRefreshPreview={handleRefreshPreview}
-      onPreviewError={handlePreviewError}
-      onConfirmSketch={window.electronAPI?.project?.confirmSketch ? handleConfirmSketch : undefined}
-      confirming={confirmingSketch}
-      onCorrectionSubmit={handleCorrectionSubmit}
-      onRollback={handleRollback}
-      onContinueWaiting={handleContinueWaiting}
-      onViewPartial={handleViewPartial}
-      onOpenSettings={handleOpenSettings}
-      onAllProjects={projectList.length > 0 ? () => {
-        setRoute('project-history')
-      } : undefined}
-    />
+    <>
+      <WorkspaceShell
+        cardOptions={decisionCards?.options}
+        decisionTitle={decisionCards?.title}
+        onCardOptionSelect={handleCardOptionSelect}
+        onSendMessage={handleSendMessage}
+        isWaiting={waiting}
+        waitStartTime={waitStart}
+        waitActionLabel="生成可运行版本"
+        isHistoryLoading={historyLoading}
+        previewStatus={effectivePreviewStatus}
+        previewUrl={effectivePreviewUrl}
+        onRefreshPreview={handleRefreshPreview}
+        onPreviewError={handlePreviewError}
+        onConfirmSketch={window.electronAPI?.project?.confirmSketch ? handleConfirmSketch : undefined}
+        confirming={confirmingSketch}
+        onMarkComplete={window.electronAPI?.project?.finalize ? handleMarkComplete : undefined}
+        onCorrectionSubmit={handleCorrectionSubmit}
+        onRollback={handleRollback}
+        onContinueWaiting={handleContinueWaiting}
+        onViewPartial={handleViewPartial}
+        onStopGeneration={handleStopGeneration}
+        onOpenSettings={handleOpenSettings}
+        onUpgrade={handleUpgrade}
+        onAllProjects={projectList.length > 0 ? () => {
+          setRoute('project-history')
+        } : undefined}
+      />
+      {upgradeConfirmOpen && (
+        <UpgradeConfirmDialog
+          onCancel={() => setUpgradeConfirmOpen(false)}
+          onConfirm={handleConfirmUpgrade}
+        />
+      )}
+    </>
   )
 }
+
+/* =========================================================================
+   UpgradeConfirmDialog — 升级为长期模式的确认弹窗（U1 / PRD §4.4）
+   ========================================================================= */
+
+const UpgradeConfirmDialog: React.FC<{
+  onCancel: () => void
+  onConfirm: () => void
+}> = ({ onCancel, onConfirm }) => (
+  <div
+    role="dialog"
+    aria-modal="true"
+    aria-label="升级为长期模式"
+    data-ai-id="upgrade-confirm-dialog"
+    style={{
+      position: 'fixed',
+      inset: 0,
+      zIndex: 1100,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'rgba(0,0,0,0.35)',
+      backdropFilter: 'blur(4px)',
+      WebkitBackdropFilter: 'blur(4px)',
+      animation: 'tile-enter 0.15s ease both',
+    }}
+    onClick={(e) => {
+      if (e.target === e.currentTarget) onCancel()
+    }}
+  >
+    <div
+      style={{
+        background: 'var(--white)',
+        borderRadius: 'var(--radius-lg)',
+        padding: 'var(--space-6)',
+        maxWidth: 420,
+        width: '90%',
+        boxShadow: 'var(--shadow-lg)',
+        animation: 'tile-enter 0.2s ease both',
+      }}
+    >
+      <p
+        style={{
+          fontSize: 'var(--font-size-md)',
+          fontWeight: 700,
+          color: 'var(--color-text)',
+          margin: '0 0 var(--space-3)',
+        }}
+      >
+        升级为长期模式？
+      </p>
+      <p
+        style={{
+          fontSize: 'var(--font-size-sm)',
+          color: 'var(--color-text)',
+          lineHeight: 'var(--line-height-base)',
+          margin: '0 0 var(--space-5)',
+        }}
+      >
+        升级后会切换到「精细打磨」模式，我会持续帮你维护 PRD / 测试报告等文档。升级前会自动保存一份当前版本快照，之后仍可回滚。
+      </p>
+      <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
+        <button
+          onClick={onCancel}
+          data-ai-id="upgrade-cancel"
+          style={{
+            height: 36,
+            padding: '0 var(--space-5)',
+            fontSize: 'var(--font-size-sm)',
+            fontWeight: 600,
+            color: 'var(--color-text)',
+            background: 'var(--color-surface-muted)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-sm)',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            transition: 'all var(--transition-fast)',
+          }}
+        >
+          取消
+        </button>
+        <button
+          onClick={onConfirm}
+          data-ai-id="upgrade-confirm"
+          style={{
+            height: 36,
+            padding: '0 var(--space-5)',
+            fontSize: 'var(--font-size-sm)',
+            fontWeight: 600,
+            color: 'var(--white)',
+            background: 'linear-gradient(135deg, var(--color-quick), var(--color-quick-bright))',
+            border: 'none',
+            borderRadius: 'var(--radius-sm)',
+            boxShadow: '0 4px 12px -2px rgba(124,58,237,0.4)',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            transition: 'all var(--transition-fast)',
+          }}
+        >
+          确认升级
+        </button>
+      </div>
+    </div>
+  </div>
+)
 
 export default App

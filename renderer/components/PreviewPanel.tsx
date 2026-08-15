@@ -29,6 +29,8 @@ export interface PreviewPanelProps {
   confirming?: boolean
   /** iframe 加载失败（沙箱端口失效/进程已死）时回调，供上层进入 error/重连态 */
   onPreviewError?: () => void
+  /** U6：ready 阶段的「标记为完成」回调（产品闭环最后一步） */
+  onMarkComplete?: () => void
 }
 
 /**
@@ -50,6 +52,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
   onConfirmSketch,
   confirming = false,
   onPreviewError,
+  onMarkComplete,
 }) => {
   const hasStream = useAtomValue(hasActiveStreamAtom)
   const stage = useAtomValue(workflowStageAtom)
@@ -149,6 +152,32 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
               }}
             >
               {confirming ? '生成中…' : '生成完整功能'}
+            </button>
+          )}
+          {stage === 'ready' && onMarkComplete && (
+            <button
+              data-ai-id="mark-complete-button"
+              onClick={onMarkComplete}
+              title="标记为完成"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 'var(--space-1)',
+                height: 30,
+                padding: '0 var(--space-4)',
+                marginRight: 'var(--space-2)',
+                fontSize: 'var(--font-size-sm)',
+                fontWeight: 700,
+                color: 'var(--white)',
+                background: 'linear-gradient(135deg, #10B981, #059669)',
+                border: 'none',
+                borderRadius: 'var(--radius-full)',
+                boxShadow: '0 4px 12px -2px rgba(16,185,129,0.45)',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              标记为完成
             </button>
           )}
           {displayStatus === 'running' && onRefresh && (

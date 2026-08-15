@@ -19,8 +19,10 @@ export const IPC_CHANNELS = {
   AGENT_STOP: 'agent:stop',
   AGENT_LIST_SESSIONS: 'agent:list-sessions',
   AGENT_LOAD_MESSAGES: 'agent:load-messages',
+  SESSION_CLEAN_ORPHANS: 'session:clean-orphans',
   AGENT_STREAM_EVENT: 'agent:stream-event',
   PERMISSION_RESPONSE: 'permission:response',
+  PERMISSION_SET_MODE: 'permission:set-mode',
   PROJECT_CREATE: 'project:create',
   PROJECT_LIST: 'project:list',
   PROJECT_CONFIRM_SKETCH: 'project:confirm-sketch',
@@ -29,13 +31,22 @@ export const IPC_CHANNELS = {
   PROJECT_UNARCHIVE: 'project:unarchive',
   PROJECT_DELETE: 'project:delete',
   PROJECT_UPGRADE: 'project:upgrade',
+  PROJECT_FINALIZE: 'project:finalize',
+  PROJECT_EXPORT: 'project:export',
+  PROJECT_RENAME: 'project:rename',
+  PROJECT_ABANDON: 'project:abandon',
+  PROJECT_REOPEN: 'project:reopen',
   SANDBOX_RUN: 'sandbox:run',
   SANDBOX_STOP: 'sandbox:stop',
   SANDBOX_RESTORE: 'sandbox:restore',
   SNAPSHOT_CREATE: 'snapshot:create',
   SNAPSHOT_ROLLBACK: 'snapshot:rollback',
   SNAPSHOT_LIST: 'snapshot:list',
+  SNAPSHOT_SCREENSHOT: 'snapshot:screenshot',
   DOCUMENT_SYNC: 'document:sync',
+  DOCUMENT_LIST: 'document:list',
+  DOCUMENT_READ: 'document:read',
+  DOM_COLLECT_CONTEXT: 'dom:collect-context',
   ANALYTICS_TRACK: 'analytics:track',
   CHANNEL_LIST: 'channel:list',
   CHANNEL_CREATE: 'channel:create',
@@ -442,6 +453,11 @@ export interface AgentLoadMessagesResult {
   truncated: boolean
 }
 
+/** U11：清理孤儿会话的结果——被移除的会话数量（无孤儿时 removed=0）。 */
+export interface SessionCleanOrphansResult {
+  removed: number
+}
+
 // =========================================================================
 // 7. 权限
 // =========================================================================
@@ -467,6 +483,15 @@ export interface PermissionResponseInput extends RequestEnvelope {
 export interface PermissionResponseResult {
   resolved: true
   permission_request_id: string
+}
+
+/** 权限模式切换：在设置页把 safe / ask / allow-all 同步到主进程 enforcement。 */
+export interface PermissionSetModeInput extends RequestEnvelope {
+  mode: PromaPermissionMode
+}
+
+export interface PermissionSetModeResult {
+  mode: PromaPermissionMode
 }
 
 // =========================================================================
@@ -529,6 +554,8 @@ export interface Project {
   blocked_action?: 'mvp_repair' | 'test_repair' | 'judge_return'
   /** 需求确认后已自动命名过（autoNameProject）：此后不再覆盖，保住用户手动改名 */
   auto_named?: boolean
+  /** U16：最近进展摘要（取自最近一次 sketch_generated 需求，列表卡片纯展示用，不经落盘） */
+  progress_summary?: string
   created_at: string
   updated_at: string
 }
@@ -563,7 +590,34 @@ export interface RevisionAccepted {
   task_id: string
 }
 
+/**
+ * U8：点选纠错 DOM 上下文收集。
+ * 渲染进程无法直接读取跨域预览 iframe 的 DOM，改由主进程通过
+ * subframe.executeJavaScript(document.elementFromPoint) 收集。
+ * 对齐 api-spec §12.8 `collect_dom_context`。
+ */
+export interface DomCollectContextInput extends RequestEnvelope {
+  project_id: string
+  session_id: string
+  /** 点击坐标，相对预览 iframe 左上角（CSS 像素） */
+  click: { x: number; y: number }
+}
+
+export interface DomCollectContextResult {
+  element_selector?: string
+  text_content?: string
+  bounding_rect: { x: number; y: number; width: number; height: number }
+  /** true 表示未能定位到具体元素（回退为纯坐标模式） */
+  fallback_mode: boolean
+}
+
 export interface ProjectUpgradeInput extends RequestEnvelope {
+  project_id: string
+  session_id: string
+}
+
+/** U6：用户满意后「标记为完成」——产品闭环最后一步（PRD §5.1 阶段 3） */
+export interface ProjectFinalizeInput extends RequestEnvelope {
   project_id: string
   session_id: string
 }
@@ -585,6 +639,36 @@ export interface ProjectDeleteInput extends RequestEnvelope {
 /** 历史项目列表视角：active（默认，过滤归档）/ archived / all */
 export interface ProjectListInput extends RequestEnvelope {
   scope?: 'active' | 'archived' | 'all'
+}
+
+/** U10：手动导出项目——把生成的项目代码复制到用户选定的目录（PRD §14.2）。 */
+export interface ProjectExportInput extends RequestEnvelope {
+  project_id: string
+}
+
+/** U13：项目重命名——零基础用户的首个项目名来自首句口述，改名提升列表辨识度。 */
+export interface ProjectRenameInput extends RequestEnvelope {
+  project_id: string
+  name: string
+}
+
+/** U15：标记项目为「已放弃」——active → abandoned，让列表状态可主动流转。 */
+export interface ProjectAbandonInput extends RequestEnvelope {
+  project_id: string
+}
+
+/** U15：放弃的项目「恢复进行」——abandoned → active，与归档/取消归档对称。 */
+export interface ProjectReopenInput extends RequestEnvelope {
+  project_id: string
+}
+
+/** U10：导出结果。canceled=true 表示用户在保存对话框取消了操作。 */
+export interface ProjectExportResult {
+  canceled: boolean
+  /** 实际导出目录（已取消时 undefined） */
+  destination?: string
+  /** 复制的文件数（已取消时 undefined） */
+  file_count?: number
 }
 
 // =========================================================================
@@ -646,6 +730,20 @@ export interface SnapshotListResult {
   snapshots: Snapshot[]
 }
 
+/**
+ * U9：快照缩略图。渲染进程受 CSP 约束（img-src 'self' data: blob:）无法直接加载
+ * 磁盘上的 file:// 截图，改由主进程读文件转 base64 data URL 回传。
+ */
+export interface SnapshotScreenshotInput extends RequestEnvelope {
+  project_id: string
+  snapshot_id: string
+}
+
+export interface SnapshotScreenshotResult {
+  /** base64 data URL（如 data:image/png;base64,…）；无截图时为 null */
+  data_url: string | null
+}
+
 export interface SnapshotRollbackInput extends RequestEnvelope {
   project_id: string
   snapshot_id: string
@@ -681,6 +779,26 @@ export interface DocumentRef {
 export interface DocumentSyncResult {
   documents: DocumentRef[]
   stale_documents: DocumentRef[]
+}
+
+/** U2：列出项目已产出的文档（PRD/GWT/测试报告等）。 */
+export interface DocumentListInput extends RequestEnvelope {
+  project_id: string
+}
+
+export interface DocumentListResult {
+  documents: DocumentRef[]
+}
+
+/** U2：读取单个文档内容。 */
+export interface DocumentReadInput extends RequestEnvelope {
+  project_id: string
+  document_id: string
+}
+
+export interface DocumentReadResult {
+  document: DocumentRef
+  content: string
 }
 
 // =========================================================================
@@ -725,10 +843,13 @@ export type ElectronAPI = {
     cancel(input: AgentCancelInput): Promise<ApiResult<AgentCancelResult>>
     listSessions(input: AgentListSessionsInput): Promise<ApiResult<AgentListSessionsResult>>
     loadMessages(input: AgentLoadMessagesInput): Promise<ApiResult<AgentLoadMessagesResult>>
+    /** U11：清理孤儿会话（project_id 已失效），返回移除数量。 */
+    cleanOrphans(input: RequestEnvelope): Promise<ApiResult<SessionCleanOrphansResult>>
     onStreamEvent(listener: (event: AgentEvent) => void): () => void
   }
   permissions: {
     respond(input: PermissionResponseInput): Promise<ApiResult<PermissionResponseResult>>
+    setMode(input: PermissionSetModeInput): Promise<ApiResult<PermissionSetModeResult>>
   }
   project: {
     create(input: ProjectCreateInput): Promise<ApiResult<Project>>
@@ -736,9 +857,14 @@ export type ElectronAPI = {
     archive(input: ProjectArchiveInput): Promise<ApiResult<Project>>
     unarchive(input: ProjectUnarchiveInput): Promise<ApiResult<Project>>
     delete(input: ProjectDeleteInput): Promise<ApiResult<{ deleted: true }>>
+    export(input: ProjectExportInput): Promise<ApiResult<ProjectExportResult>>
+    rename(input: ProjectRenameInput): Promise<ApiResult<Project>>
+    abandon(input: ProjectAbandonInput): Promise<ApiResult<Project>>
+    reopen(input: ProjectReopenInput): Promise<ApiResult<Project>>
     confirmSketch(input: ConfirmSketchInput): Promise<ApiResult<Project>>
     submitCorrection(input: PointCorrectionInput): Promise<ApiResult<RevisionAccepted>>
     upgrade(input: ProjectUpgradeInput): Promise<ApiResult<Project>>
+    finalize(input: ProjectFinalizeInput): Promise<ApiResult<Project>>
   }
   sandbox: {
     run(input: SandboxRunInput): Promise<ApiResult<SandboxRunResult>>
@@ -749,9 +875,15 @@ export type ElectronAPI = {
     create(input: SnapshotCreateInput): Promise<ApiResult<Snapshot>>
     rollback(input: SnapshotRollbackInput): Promise<ApiResult<RollbackResult>>
     list(input: SnapshotListInput): Promise<ApiResult<SnapshotListResult>>
+    screenshot(input: SnapshotScreenshotInput): Promise<ApiResult<SnapshotScreenshotResult>>
   }
   documents: {
     sync(input: DocumentSyncInput): Promise<ApiResult<DocumentSyncResult>>
+    list(input: DocumentListInput): Promise<ApiResult<DocumentListResult>>
+    read(input: DocumentReadInput): Promise<ApiResult<DocumentReadResult>>
+  }
+  dom: {
+    collectContext(input: DomCollectContextInput): Promise<ApiResult<DomCollectContextResult>>
   }
   analytics: {
     track(input: AnalyticsTrackInput): Promise<ApiResult<AnalyticsTrackResult>>

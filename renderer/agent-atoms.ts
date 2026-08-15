@@ -158,8 +158,8 @@ export function setupGlobalAgentListeners(): () => void {
       ]
     })
 
-    // 预览地址：sketch_ready / mvp_ready 带回沙箱 preview_url，按项目隔离存储（多项目各自独立预览）
-    if (event.type === 'sketch_ready' || event.type === 'mvp_ready') {
+    // 预览地址：sketch_ready / mvp_ready / rollback_done 带回沙箱 preview_url，按项目隔离存储（多项目各自独立预览）
+    if (event.type === 'sketch_ready' || event.type === 'mvp_ready' || event.type === 'rollback_done') {
       const url = typeof event.payload.preview_url === 'string' ? event.payload.preview_url : null
       if (event.project_id && url) {
         store.set(previewUrlsAtom, (prev) => ({ ...prev, [event.project_id!]: url }))

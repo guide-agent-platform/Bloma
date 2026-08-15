@@ -1,13 +1,19 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, rmSync } from 'node:fs'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import type {
   ConfirmSketchInput,
   PointCorrectionInput,
   Project,
+  ProjectAbandonInput,
   ProjectArchiveInput,
   ProjectCreateInput,
   ProjectDeleteInput,
+  ProjectExportInput,
+  ProjectExportResult,
+  ProjectFinalizeInput,
+  ProjectReopenInput,
+  ProjectRenameInput,
   ProjectUnarchiveInput,
   ProjectUpgradeInput,
   RevisionAccepted,
@@ -87,6 +93,25 @@ export function upgradeProject(input: ProjectUpgradeInput): Project {
   return project
 }
 
+/** U6：用户满意后「标记为完成」——项目收口到 completed，闭环产品最后一环。 */
+export function finalizeProject(input: ProjectFinalizeInput): Project {
+  const project = updateProject(input.project_id, { status: 'completed', current_stage: 'completed' })
+  appendProjectEvent(project, 'project_finalized', input)
+  return project
+}
+
+/** U15：标记为「已放弃」——active → abandoned（状态流转的另一半，与 U6 的 completed 对称）。 */
+export function abandonProject(input: ProjectAbandonInput): Project {
+  const project = updateProject(input.project_id, { status: 'abandoned' })
+  appendProjectEvent(project, 'project_abandoned', input)
+  return project
+}
+
+/** U15：放弃的项目「恢复进行」——abandoned → active（与取消归档对称）。 */
+export function reopenProject(input: ProjectReopenInput): Project {
+  return updateProject(input.project_id, { status: 'active' })
+}
+
 export function archiveProject(input: ProjectArchiveInput): Project {
   const project = updateProject(input.project_id, { status: 'archived' })
   appendProjectEvent(project, 'project_archived', input)
@@ -96,6 +121,18 @@ export function archiveProject(input: ProjectArchiveInput): Project {
 /** 取消归档：archived → active，重新出现在 active 视角（对齐 Proma archived toggle）。 */
 export function unarchiveProject(input: ProjectUnarchiveInput): Project {
   return updateProject(input.project_id, { status: 'active' })
+}
+
+/**
+ * U13：项目重命名。清洗空白与非法字符，空名回退占位；截断到 32 字，
+ * 与 createProject 的 initial_message 截断契约保持一致。
+ */
+export function renameProject(input: ProjectRenameInput): Project {
+  const name = (input.name ?? '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '').trim().slice(0, 32)
+  if (name.length === 0) throw new Error('VALIDATION_ERROR: name must not be empty')
+  const project = updateProject(input.project_id, { name })
+  appendProjectEvent(project, 'project_renamed', input)
+  return project
 }
 
 /**
@@ -126,6 +163,55 @@ export function deleteProject(input: ProjectDeleteInput): { deleted: true } {
   removeProjectFiles(project.workspace_slug, project.project_id)
 
   return { deleted: true }
+}
+
+/**
+ * U10：手动导出项目（PRD §14.2）。
+ * 把生成的项目代码（root_path）复制到用户选定目录下的同名子文件夹，
+ * 不触碰索引/会话/快照——导出是只读复制，不改变任何项目状态。
+ */
+export function exportProject(input: ProjectExportInput, destination: string): ProjectExportResult {
+  const project = findProject(input.project_id)
+  const target = join(destination, sanitizeFolderName(project.name))
+  copyDirRecursive(project.root_path, target)
+  return { canceled: false, destination: target, file_count: countFiles(target) }
+}
+
+/**
+ * 递归复制目录。Node 的 `fs.cpSync` 在 Windows 下对非 ASCII 目标路径会静默失败
+ * （不抛错、也不复制），改用 mkdirSync + copyFileSync 手动复制，中文项目名也安全。
+ */
+function copyDirRecursive(src: string, dest: string): void {
+  mkdirSync(dest, { recursive: true })
+  if (!existsSync(src)) return
+  for (const entry of readdirSync(src, { withFileTypes: true })) {
+    const srcPath = join(src, entry.name)
+    const destPath = join(dest, entry.name)
+    if (entry.isDirectory()) copyDirRecursive(srcPath, destPath)
+    else if (entry.isFile()) copyFileSync(srcPath, destPath)
+  }
+}
+
+/** 把项目名清洗成可用的文件夹名：剔除 Windows/跨平台非法字符，空则回退占位名。 */
+function sanitizeFolderName(name: string): string {
+  const cleaned = name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '').trim()
+  return cleaned.length > 0 ? cleaned : '未命名项目'
+}
+
+/** 递归统计目录下文件数（只计普通文件，跳过子目录自身，防符号链接循环）。 */
+function countFiles(dir: string): number {
+  let count = 0
+  let entries: Array<{ name: string; isDirectory(): boolean; isFile(): boolean }> = []
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return 0
+  }
+  for (const entry of entries) {
+    if (entry.isDirectory()) count += countFiles(join(dir, entry.name))
+    else if (entry.isFile()) count += 1
+  }
+  return count
 }
 
 export function listProjects(scope: ProjectListScope = 'active'): Project[] {
@@ -247,4 +333,17 @@ export function readLastSketchRequirements(projectId: string): SketchRequirement
     }
   }
   return []
+}
+
+/**
+ * U16：最近进展摘要——取最近一次 sketch_generated 需求的最后一条描述，
+ * 供历史项目卡片展示「最近做了什么」。无草图记录时返回 undefined。
+ * 纯读取，不经落盘；只依赖 project-service 自身数据，避免与 session-service 循环依赖。
+ */
+export function getProjectProgressSummary(projectId: string): string | undefined {
+  const requirements = readLastSketchRequirements(projectId)
+  if (requirements.length === 0) return undefined
+  const last = (requirements[requirements.length - 1].description ?? '').trim()
+  if (!last) return undefined
+  return last.length > 40 ? `${last.slice(0, 40)}…` : last
 }

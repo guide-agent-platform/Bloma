@@ -1,5 +1,5 @@
 import React from 'react'
-import { useAtomValue } from 'jotai'
+import { useAtom, useAtomValue } from 'jotai'
 import { StageIndicator } from './StageIndicator'
 import { Sparkles, IconSettings } from './icons'
 import {
@@ -17,6 +17,8 @@ export interface WorkspaceHeaderProps {
   onAllProjects?: () => void
   /** 打开设置页回调 */
   onOpenSettings?: () => void
+  /** 点击「升级为长期模式」回调（U1：升级接线） */
+  onUpgrade?: () => void
 }
 
 const ACTIVE_STAGES = new Set([
@@ -24,14 +26,14 @@ const ACTIVE_STAGES = new Set([
   'judge_review', 'repairing', 'iterating', 'upgrading',
 ])
 
-export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects, onOpenSettings }) => {
+export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects, onOpenSettings, onUpgrade }) => {
   const project = useAtomValue(currentProjectAtom)
   const mode = useAtomValue(projectModeAtom)
   const isOnline = useAtomValue(networkOnlineAtom)
   const stageLabel = useAtomValue(stageIndicatorLabelAtom)
   const stage = useAtomValue(workflowStageAtom)
   const canUpgrade = useAtomValue(canUpgradeAtom)
-  const [docPanelExpanded, setDocPanelExpanded] = React.useState(false)
+  const [docPanelExpanded, setDocPanelExpanded] = useAtom(documentPanelExpandedAtom)
   const stageActive = ACTIVE_STAGES.has(stage)
 
   const modeLabel = mode === 'quick' ? '快速尝鲜' : mode === 'longterm' ? '精细打磨' : ''
@@ -160,6 +162,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects,
         {canUpgrade && (
           <button
             data-ai-id="upgrade-to-longterm-button"
+            onClick={onUpgrade}
             style={{
               display: 'inline-flex',
               alignItems: 'center',

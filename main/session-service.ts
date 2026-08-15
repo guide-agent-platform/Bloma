@@ -13,7 +13,7 @@
  * 对齐：shared/types.ts §6.5、DOC-3.4 data-model.md §5 Session / §6 Message
  */
 
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, statSync } from 'node:fs'
 import type {
   AgentListSessionsInput,
   AgentListSessionsResult,
@@ -21,10 +21,11 @@ import type {
   AgentLoadMessagesResult,
   AgentMessage,
   AgentSessionRecord,
+  SessionCleanOrphansResult,
 } from '../shared/types'
 import { getAgentSessionPath, getAgentSessionsIndexPath } from '../storage/config-paths'
 import { readJsonFile, writeJsonFile } from '../storage/json-store'
-import { updateProject } from './project-service'
+import { listProjects, updateProject } from './project-service'
 
 interface SessionsIndex {
   version: number
@@ -68,6 +69,24 @@ export function listSessions(input: AgentListSessionsInput): AgentListSessionsRe
     .filter((item) => !input.project_id || item.project_id === input.project_id)
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
   return { sessions }
+}
+
+/**
+ * U11：清理孤儿会话——移除 project_id 已不在项目索引中的会话记录及其 JSONL 文件。
+ * 归档项目仍存在于项目索引（可恢复），其会话历史必须保留，故不在此清理范围。
+ * 只清理指向已删除/不存在项目的会话，以及空 project_id 的遗留会话。
+ */
+export function cleanOrphanSessions(): SessionCleanOrphansResult {
+  const validIds = new Set(listProjects('all').map((project) => project.project_id))
+  const index = readSessions()
+  const orphans = index.sessions.filter((item) => !validIds.has(item.project_id))
+  for (const orphan of orphans) {
+    const jsonl = getAgentSessionPath(orphan.session_id)
+    if (existsSync(jsonl)) rmSync(jsonl, { force: true })
+  }
+  index.sessions = index.sessions.filter((item) => validIds.has(item.project_id))
+  writeSessions(index)
+  return { removed: orphans.length }
 }
 
 /**

@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { syncDocuments } from '../../main/document-engine'
+import { listDocuments, readDocument, syncDocuments } from '../../main/document-engine'
 import { createProject, recordSketchGenerated } from '../../main/project-service'
 import { getDocumentsDir } from '../../storage/config-paths'
 
@@ -169,5 +169,67 @@ describe('DocumentEngine (A2-05)', () => {
     // sketch_confirmed 现产出两个文件（sketch_confirmed.md + prd.json），重同步时均标记为 stale
     expect(second.stale_documents.map((doc) => doc.status)).toEqual(['stale', 'stale'])
     expect(second.documents[0].status).toBe('synced')
+  })
+})
+
+describe('DocumentEngine 文档面板（U2）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+  })
+
+  it('lists synced documents, skipping stale overrides', () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-doc-list-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+    const base = { request_id: 'req-sync', session_id: 'session-1', project_id: project.project_id }
+
+    // 首次同步 → 2 份文档；再次同步 → 旧版本 stale，仅保留最新
+    syncDocuments({ ...base, checkpoint: 'sketch_confirmed' })
+    syncDocuments({ ...base, checkpoint: 'sketch_confirmed' })
+
+    const documents = listDocuments(project.project_id)
+    expect(documents.length).toBeGreaterThan(0)
+    expect(documents.every((doc) => doc.status !== 'stale')).toBe(true)
+    expect(documents.every((doc) => doc.type === 'prd')).toBe(true)
+    expect(documents.some((doc) => doc.path.endsWith('sketch_confirmed.md'))).toBe(true)
+  })
+
+  it('reads a document by id and returns its content', () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-doc-read-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+    syncDocuments({
+      request_id: 'req-sync',
+      session_id: 'session-1',
+      project_id: project.project_id,
+      checkpoint: 'sketch_confirmed',
+    })
+
+    const documents = listDocuments(project.project_id)
+    const target = documents.find((doc) => doc.path.endsWith('sketch_confirmed.md'))
+    expect(target).toBeDefined()
+
+    const result = readDocument(project.project_id, target!.document_id)
+    expect(result.document.document_id).toBe(target!.document_id)
+    expect(result.document.type).toBe('prd')
+    expect(result.content).toContain('PRD 草案')
+  })
+
+  it('throws DOCUMENT_NOT_FOUND for an unknown document id', () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-doc-missing-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    syncDocuments({
+      request_id: 'req-sync',
+      session_id: 'session-1',
+      project_id: project.project_id,
+      checkpoint: 'sketch_confirmed',
+    })
+
+    expect(() => readDocument(project.project_id, 'no-such-document')).toThrow('DOCUMENT_NOT_FOUND')
   })
 })

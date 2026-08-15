@@ -78,17 +78,26 @@ interface UserDecisionPayload {
 // =========================================================================
 
 /**
+ * 决策卡内容：title 为卡片标题（引导澄清「先确认方向」/ 迭代确认「确认修改方向」/
+ * 让渡具体偏差「缺了按月统计功能」等），options 为选项列表。
+ */
+export interface DecisionCards {
+  title?: string
+  options: CardOption[]
+}
+
+/**
  * 扫描 session 的流式事件，返回最近一次 user_decision_required
- * 事件中的 questions 转换成的 CardOption[]。
+ * 事件中的 title + questions 转换成的 DecisionCards。
  *
- * - 1~3 条 → 转为 CardOption[]（B-对接契约 §2 方案 A：保留卡片）
- * - 0 条   → 返回空数组（不弹卡片，用户自由文本回复）
+ * - 1~3 条 → 转为 DecisionCards（B-对接契约 §2 方案 A：保留卡片）
+ * - 0 条   → 返回 { options: [] }（不弹卡片，用户自由文本回复）
  * - 无事件 → 返回 null（无决策需求）
  */
-function extractCardOptions(events: AgentEvent[]): CardOption[] | null {
+function extractDecisionCards(events: AgentEvent[]): DecisionCards | null {
   // 从后往前扫描：
   // - 先遇到 sketch_ready / mvp_ready → 该决策已被后端处理（卡片已消费），返回 null 隐藏卡片
-  // - 先遇到 user_decision_required → 返回其 questions（0 条 = 模型在文本里追问，不弹卡片）
+  // - 先遇到 user_decision_required → 返回其 title + questions（0 条 = 模型在文本里追问，不弹卡片）
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i]
     if (event.type === 'sketch_ready' || event.type === 'mvp_ready') return null
@@ -98,15 +107,18 @@ function extractCardOptions(events: AgentEvent[]): CardOption[] | null {
     const questions = payload.questions ?? []
 
     // questions 0 条：模型在流式文本中追问，不弹卡片
-    if (questions.length === 0) return []
+    if (questions.length === 0) return { options: [] }
 
     // 1~3 条：转 CardOption
     // B5 防御：question 缺 id 时兜底（A1 已补 id，此处双保险，避免 key=undefined 崩坏）
-    return questions.map((q, i) => ({
-      id: q.id ?? q.label ?? String(i),
-      label: q.label,
-      description: q.description,
-    }))
+    return {
+      title: payload.title,
+      options: questions.map((q, i) => ({
+        id: q.id ?? q.label ?? String(i),
+        label: q.label,
+        description: q.description,
+      })),
+    }
   }
 
   return null // 无 user_decision_required 事件
@@ -117,19 +129,19 @@ function extractCardOptions(events: AgentEvent[]): CardOption[] | null {
 // =========================================================================
 
 /**
- * 从当前活跃会话的流式事件中提取 user_decision_required 的卡片选项。
+ * 从当前活跃会话的流式事件中提取 user_decision_required 的决策卡（title + 选项）。
  *
  * 返回值语义：
- *   - null        → 没有 user_decision_required 事件（不干预 CardOptions）
- *   - CardOption[] → 有效选项（空数组 = 模型文本追问，不弹卡片）
+ *   - null          → 没有 user_decision_required 事件（不干预 CardOptions）
+ *   - DecisionCards → 有效决策卡（options 空数组 = 模型文本追问，不弹卡片）
  *
  * 用法：
  * ```tsx
  * const decisionCards = useUserDecisionCards()
- * const cardOptions = decisionCards ?? externalCardOptions
+ * const cardOptions = decisionCards?.options ?? externalCardOptions
  * ```
  */
-export function useUserDecisionCards(): CardOption[] | null {
+export function useUserDecisionCards(): DecisionCards | null {
   const sessionId = useAtomValue(activeAgentSessionIdAtom)
   const streamState = useAtomValue(
     sessionId ? agentStreamStateFamily(sessionId) : nullStreamFallback,
@@ -142,7 +154,7 @@ export function useUserDecisionCards(): CardOption[] | null {
     if (!sessionId || !streamState) return null
     // 用户已点选（consumed=true）→ 立即隐藏卡片，不等 sketch_ready（草图走 LLM 有空窗）
     if (consumed) return null
-    return extractCardOptions(streamState.events)
+    return extractDecisionCards(streamState.events)
   }, [sessionId, streamState, consumed])
 }
 

@@ -106,6 +106,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({ onRollback }) => {
                 key={snap.snapshot_id}
                 snapshot={snap}
                 isCurrent={isCurrent}
+                showThumbnail={expanded}
                 onClick={() => !isCurrent && handleRollbackClick(snap)}
               />
             )
@@ -225,18 +226,20 @@ const RollbackConfirmModal: React.FC<{
 const SnapChip: React.FC<{
   snapshot: Snapshot
   isCurrent: boolean
+  showThumbnail: boolean
   onClick: () => void
-}> = ({ snapshot, isCurrent, onClick }) => {
+}> = ({ snapshot, isCurrent, showThumbnail, onClick }) => {
   return (
     <button
       title={isCurrent ? '当前版本' : `回到「${snapshot.name}」`}
       onClick={onClick}
       style={{
         display: 'flex',
-        flexDirection: 'column',
+        flexDirection: showThumbnail ? 'row' : 'column',
         justifyContent: 'center',
-        gap: 2,
-        padding: '6px var(--space-3)',
+        alignItems: showThumbnail ? 'center' : 'stretch',
+        gap: showThumbnail ? 'var(--space-2)' : 2,
+        padding: showThumbnail ? '4px var(--space-3)' : '6px var(--space-3)',
         borderRadius: 'var(--radius-md)',
         background: isCurrent
           ? 'linear-gradient(135deg, var(--violet-600), var(--violet-500))'
@@ -262,12 +265,83 @@ const SnapChip: React.FC<{
         }
       }}
     >
-      <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600 }}>
-        {snapshot.name}
-      </span>
-      <span style={{ fontSize: 10, opacity: 0.7 }}>
-        {new Date(snapshot.created_at).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+      {showThumbnail && <SnapshotThumb snapshot={snapshot} />}
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+        <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600 }}>
+          {snapshot.name}
+        </span>
+        <span style={{ fontSize: 10, opacity: 0.7 }}>
+          {new Date(snapshot.created_at).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+        </span>
       </span>
     </button>
+  )
+}
+
+/* =========================================================================
+   SnapshotThumb — 快照真实截图缩略图（U9）
+   渲染进程受 CSP `img-src 'self' data: blob:` 约束，无法直接加载磁盘 file:// 截图；
+   由主进程读文件转 base64 data URL 回传，这里懒加载并按需展示。
+   ========================================================================= */
+
+const SnapshotThumb: React.FC<{ snapshot: Snapshot }> = ({ snapshot }) => {
+  const [dataUrl, setDataUrl] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    let cancelled = false
+    const api = window.electronAPI
+    if (!api?.snapshots?.screenshot) return
+    void api.snapshots
+      .screenshot({
+        request_id: crypto.randomUUID(),
+        project_id: snapshot.project_id,
+        snapshot_id: snapshot.snapshot_id,
+      })
+      .then((result) => {
+        if (!cancelled && result?.ok && result.data?.data_url) setDataUrl(result.data.data_url)
+      })
+      .catch(() => {
+        // 读图失败：保持占位色块
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [snapshot.project_id, snapshot.snapshot_id])
+
+  if (dataUrl) {
+    return (
+      <img
+        src={dataUrl}
+        alt=""
+        style={{
+          width: 84,
+          height: 48,
+          objectFit: 'cover',
+          borderRadius: 'var(--radius-sm)',
+          background: 'var(--color-surface-muted)',
+          flexShrink: 0,
+        }}
+      />
+    )
+  }
+
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: 84,
+        height: 48,
+        borderRadius: 'var(--radius-sm)',
+        background: 'var(--color-surface-muted)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: 10,
+        color: 'var(--color-text-muted)',
+        flexShrink: 0,
+      }}
+    >
+      快照
+    </span>
   )
 }

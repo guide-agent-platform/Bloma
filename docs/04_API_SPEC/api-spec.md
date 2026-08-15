@@ -37,8 +37,12 @@
 const IPC_CHANNELS = {
   AGENT_SEND_MESSAGE: "agent:send-message",
   AGENT_STOP: "agent:stop",
+  AGENT_LIST_SESSIONS: "agent:list-sessions",
+  AGENT_LOAD_MESSAGES: "agent:load-messages",
+  SESSION_CLEAN_ORPHANS: "session:clean-orphans",
   AGENT_STREAM_EVENT: "agent:stream-event",
   PERMISSION_RESPONSE: "permission:response",
+  PERMISSION_SET_MODE: "permission:set-mode",
   PROJECT_CREATE: "project:create",
   PROJECT_LIST: "project:list",
   PROJECT_CONFIRM_SKETCH: "project:confirm-sketch",
@@ -47,12 +51,30 @@ const IPC_CHANNELS = {
   PROJECT_UNARCHIVE: "project:unarchive",
   PROJECT_DELETE: "project:delete",
   PROJECT_UPGRADE: "project:upgrade",
+  PROJECT_FINALIZE: "project:finalize",
+  PROJECT_EXPORT: "project:export",
+  PROJECT_RENAME: "project:rename",
+  PROJECT_ABANDON: "project:abandon",
+  PROJECT_REOPEN: "project:reopen",
   SANDBOX_RUN: "sandbox:run",
   SANDBOX_STOP: "sandbox:stop",
+  SANDBOX_RESTORE: "sandbox:restore",
   SNAPSHOT_CREATE: "snapshot:create",
   SNAPSHOT_ROLLBACK: "snapshot:rollback",
+  SNAPSHOT_LIST: "snapshot:list",
+  SNAPSHOT_SCREENSHOT: "snapshot:screenshot",
   DOCUMENT_SYNC: "document:sync",
-  ANALYTICS_TRACK: "analytics:track"
+  DOCUMENT_LIST: "document:list",
+  DOCUMENT_READ: "document:read",
+  DOM_COLLECT_CONTEXT: "dom:collect-context",
+  ANALYTICS_TRACK: "analytics:track",
+  CHANNEL_LIST: "channel:list",
+  CHANNEL_CREATE: "channel:create",
+  CHANNEL_UPDATE: "channel:update",
+  CHANNEL_TEST: "channel:test",
+  CHANNEL_TEST_DIRECT: "channel:test-direct",
+  CHANNEL_FETCH_MODELS: "channel:fetch-models",
+  CHANNEL_DELETE: "channel:delete"
 } as const;
 ```
 
@@ -237,6 +259,7 @@ type AgentEvent = {
     | "rollback_done"
     | "judge_result"
     | "user_decision_required"
+    | "retrying"
     | "error"
     | "completed";
   payload: Record<string, unknown>;
@@ -908,6 +931,7 @@ type ErrorCode =
   | "AGENT_SDK_TIMEOUT"
   | "AGENT_CANCELLED"
   | "CHANNEL_NOT_FOUND"
+  | "SESSION_NOT_FOUND"
   | "API_KEY_DECRYPT_FAILED"
   | "PERMISSION_REQUEST_NOT_FOUND"
   | "PERMISSION_DENIED"
@@ -930,6 +954,7 @@ type ErrorCode =
 | `AGENT_SDK_ERROR` | 是 | “刚才处理时遇到问题，我会换个方式继续。” |
 | `AGENT_SDK_TIMEOUT` | 是 | “这一步等得有点久，我会重新尝试。” |
 | `CHANNEL_NOT_FOUND` | 否 | “当前还没有可用的模型配置。” |
+| `SESSION_NOT_FOUND` | 否 | “没有找到这段对话记录。” |
 | `API_KEY_DECRYPT_FAILED` | 否 | “模型配置需要重新验证。” |
 | `PERMISSION_DENIED` | 否 | “这个操作已取消，当前内容不会被改动。” |
 | `SANDBOX_RUN_FAILED` | 是 | “预览暂时没有启动成功，我正在修复。” |
@@ -945,3 +970,4 @@ type ErrorCode =
 | v1.0 | 2026-07-10 | 首版，定义 IPC、Renderer Bridge、Agent 流、权限、项目、沙箱、快照、文档、埋点、MCP 工具和错误码 |
 | v1.1 | 2026-07-10 | 按 `proma-core-demo` 对齐修订：IPC 通道 `AGENT_CANCEL` → `AGENT_STOP` 与 Proma 原版命名一致 |
 | v1.2 | 2026-08-15 | 项目管理补全：新增 `project:unarchive`（取消归档）、`project:delete`（硬删除，含清理与路径安全防护）；`project:list` 增加 `scope`（active/archived/all）视角 |
+| v1.3 | 2026-08-15 | 与 `shared/types.ts` 对齐：§2.1 IPC 通道补全至 40 个（会话/渠道/快照列表/文档读取/DOM 上下文等）；§5.2 AgentEvent 补 `retrying`；§14 错误码补 `SESSION_NOT_FOUND` |

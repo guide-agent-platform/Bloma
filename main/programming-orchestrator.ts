@@ -3,12 +3,13 @@ import type { AgentEvent, AgentSendMessageInput, MessageContentBlock, Project, P
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
 import { buildPrdBackplane, readPrdBackplane, syncDocuments } from './document-engine'
-import { createSnapshot, runSandbox, trackAnalytics } from './platform-services'
+import { createSnapshot, rollbackSnapshot, runSandbox, trackAnalytics } from './platform-services'
 import { DEFAULT_MAX_TOKENS, generateMvpLlm, type GenerateMvpLlmResult } from './mvp-engine-llm'
 import { buildSdkEnv, decryptApiKey, getChannelByIdRaw, getFirstEnabledChannel } from './channel-manager'
 import { findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
-import { generateSketch, type GenerateSketchResult, type SketchRequirement } from './sketch-engine'
+import { generateSketch, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from './sketch-engine'
 import { generateSketchLlm } from './sketch-engine-llm'
+import { generatePrdLlm } from './prd-engine-llm'
 import { readTestReport, runGwtScenarios, writeTestReport, type GwtTestResult } from './gwt-service'
 import { applyRepairPatch, REPAIR_CATEGORY_SUMMARY, runRepairCycle, type RepairCategory } from './repair-engine'
 import { runJudge, type JudgeVerdict } from './judge-engine'
@@ -29,6 +30,10 @@ export const READY_COMPLETION_COPY =
 /** 迭代/生成失败时如实告知用户的话术：不假装成功，也不把失败藏成「已经生成好了」。 */
 export const GENERATION_FAILED_COPY =
   '这次修改没有成功（模型生成失败了），你可以再试一次，或者换个说法描述你的需求。'
+
+/** 熔断回滚后告知用户内容未丢失的话术（对齐 self-healing-judge @S2-JUDGE-002）。 */
+export const ROLLBACK_FUSE_COPY =
+  '已经自动回到之前的版本，内容都还在，没有丢失。你可以选择继续尝试、接受当前，或补充说明。'
 
 type ProgrammingEventPublisher = (event: AgentEvent) => void
 
@@ -69,6 +74,8 @@ export interface MvpTaskInput {
   template_type?: TemplateType
   channel_id?: string
   query?: SDKQuery
+  /** 停止生成信号（U5：迭代/生成期间点停止，abort 后中止 LLM 生成） */
+  signal?: AbortSignal
 }
 
 export interface MvpTaskResult {
@@ -316,10 +323,8 @@ export async function runMvpTask(input: MvpTaskInput): Promise<MvpTaskResult> {
   publish(input, 'stage_changed', { stage: 'generating_mvp' })
   updateProject(input.project_id, { current_stage: 'generating_mvp' })
 
-  syncDocuments({ request_id: input.request_id, project_id: input.project_id, session_id: input.session_id, checkpoint: 'sketch_confirmed' })
-  syncDocuments({ request_id: input.request_id, project_id: input.project_id, session_id: input.session_id, checkpoint: 'mvp_before_generation' })
-
   const requirements = readLastSketchRequirements(input.project_id)
+  await syncPrdCheckpoints(input, requirements)
   // 需求确认后自动命名（首次生成执行一次）：命名是附属能力，任何失败都不阻断生成
   try {
     await autoNameProject(input)
@@ -397,7 +402,9 @@ async function resolveMvp(input: MvpTaskInput, requirements: SketchRequirement[]
   const model = channel.models.find((item) => item.enabled)?.name ?? 'claude-sonnet-4-6'
   const env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
   // 生成侧读 PRD 背板（定位/功能项/验收/范围外），而非裸需求清单——主题锚点从 prompt 层压住"货不对板"。
-  const backplane = buildPrdBackplane(findProject(input.project_id), requirements, 'mvp_before_generation')
+  // 读 prd.json（syncPrdCheckpoints 已落盘，可能是 LLM 从对话提取、也可能模板兜底），
+  // 保证生成用的是与文档面板/裁判同一份事实源，而非临时重建。
+  const backplane = readPrdBackplane(input.project_id)
   return generateMvpLlm({
     project_id: input.project_id,
     backplane,
@@ -405,7 +412,57 @@ async function resolveMvp(input: MvpTaskInput, requirements: SketchRequirement[]
     env,
     sessionId: input.session_id,
     maxTokens: channel.max_tokens ?? DEFAULT_MAX_TOKENS,
+    signal: input.signal,
   })
+}
+
+/**
+ * 在 sketch_confirmed / mvp_before_generation 两个检查点写 PRD 文档（PRD §7.1「从对话提取」）。
+ *
+ * 优先用 LLM 从对话历史提取 PRD 背板（定位/验收/范围外/假设），失败/无渠道回退
+ * `buildPrdBackplane` 确定性模板。功能项始终使用已冻结清单（F-001 主题锚点不变式）。
+ */
+async function syncPrdCheckpoints(input: MvpTaskInput, requirements: SketchRequirement[]): Promise<void> {
+  const backplane = await resolvePrdBackplane(input, requirements)
+  syncDocuments(
+    { request_id: input.request_id, project_id: input.project_id, session_id: input.session_id, checkpoint: 'sketch_confirmed' },
+    backplane,
+  )
+  syncDocuments(
+    { request_id: input.request_id, project_id: input.project_id, session_id: input.session_id, checkpoint: 'mvp_before_generation' },
+    { ...backplane, frozen_at: new Date().toISOString() },
+  )
+}
+
+/** PRD 背板来源分流：渠道可用走 LLM 从对话提取，否则回退确定性模板。 */
+async function resolvePrdBackplane(input: MvpTaskInput, requirements: SketchRequirement[]): Promise<PrdBackplane> {
+  const template = (): PrdBackplane =>
+    buildPrdBackplane(findProject(input.project_id), requirements, 'sketch_confirmed')
+
+  if (!input.query) return template()
+  const channel = input.channel_id ? getChannelByIdRaw(input.channel_id) : getFirstEnabledChannel()
+  if (!channel) return template()
+  let apiKey: string
+  try {
+    apiKey = decryptApiKey(channel.api_key)
+  } catch {
+    return template()
+  }
+  // 模型名用 name（真实模型 ID）：id 是渠道内唯一标识，不能传给 API
+  const model = channel.models.find((item) => item.enabled)?.name ?? 'claude-sonnet-4-6'
+  const env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
+
+  const llm = await generatePrdLlm({
+    project_id: input.project_id,
+    session_id: input.session_id,
+    requirements,
+    query: input.query,
+    env,
+    maxTokens: channel.max_tokens ?? 2048,
+    signal: input.signal,
+  })
+  if (!llm) return template()
+  return { ...llm, name: findProject(input.project_id).name }
 }
 
 /**
@@ -435,6 +492,10 @@ async function ensureSandboxRunning(input: MvpTaskInput): Promise<{ preview_url:
       project_id: input.project_id,
       category: category as RepairCategory,
       publish: (type, payload) => publish(input, type, payload),
+      query: input.query,
+      channel_id: input.channel_id,
+      signal: input.signal,
+      error: { category, summary: sandbox.error_summary?.user_visible_summary ?? '' },
       verify: async () => {
         sandbox = await runSandbox({
           request_id: input.request_id,
@@ -445,6 +506,7 @@ async function ensureSandboxRunning(input: MvpTaskInput): Promise<{ preview_url:
       },
     })
     if (cycle.blocked) {
+      await rollbackToHealthySnapshot(input)
       publishBlockedDecision(input, 'mvp_repair')
       throw new Error('SANDBOX_RUN_FAILED:blocked')
     }
@@ -465,12 +527,51 @@ function throwSandboxFailure(input: MvpTaskInput, errorSummary: { category: stri
   throw new Error(`SANDBOX_RUN_FAILED:${errorSummary?.category ?? 'unknown'}`)
 }
 
+/**
+ * 熔断回滚（self-healing-judge @S2-JUDGE-002）：runtime/test 修复连续失败达上限后，
+ * 回滚到最近一次健康快照（current_snapshot_id），并如实告知用户内容未丢失。
+ * 无健康快照（首次生成尚无草图快照）或回滚失败时静默跳过，不阻断让渡流程——
+ * blocked 决策卡仍会弹出兜底。
+ */
+async function rollbackToHealthySnapshot(input: {
+  request_id: string
+  session_id: string
+  project_id: string
+}): Promise<void> {
+  const target = findProject(input.project_id).current_snapshot_id
+  if (!target) return
+  try {
+    const result = await rollbackSnapshot({
+      request_id: input.request_id,
+      project_id: input.project_id,
+      snapshot_id: target,
+      reason: 'repair_fuse',
+    })
+    appendJsonLine(getAgentSessionPath(input.session_id), {
+      role: 'assistant',
+      content: [{ type: 'text', text: ROLLBACK_FUSE_COPY }],
+      timestamp: Date.now(),
+    })
+    publish(input, 'message_delta', { text: ROLLBACK_FUSE_COPY })
+    publish(input, 'rollback_done', {
+      snapshot_id: result.current_snapshot_id,
+      preview_url: result.preview_url,
+    })
+  } catch {
+    // 回滚失败（快照缺失/损坏）不反噬让渡：blocked 卡片仍会弹出
+  }
+}
+
 export interface GwtTestingInput {
   request_id: string
   session_id: string
   project_id: string
   mode: ProjectMode
   preview_url: string
+  /** LLM 测试修复句柄（分析失败原因并重新生成）；缺省时回退模板重建。 */
+  query?: SDKQuery
+  channel_id?: string
+  signal?: AbortSignal
 }
 
 export interface GwtTestingResult {
@@ -511,7 +612,8 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
     updateProject(input.project_id, { judge_return_count: returns })
 
     if (returns > limit) {
-      publishBlockedDecision(input, 'judge_return')
+      // U7：把 Judge 的具体退回原因（user_visible_summary，如「缺了按月统计功能」）带给让渡卡片
+      publishBlockedDecision(input, 'judge_return', verdict.user_visible_summary)
       return { outcome: 'blocked', verdict }
     }
 
@@ -592,6 +694,13 @@ export async function runPostMvpTestingFlow(input: GwtTestingInput): Promise<Gwt
       project_id: input.project_id,
       category: 'test_error',
       publish: (type, payload) => publish(input, type, payload),
+      query: input.query,
+      channel_id: input.channel_id,
+      signal: input.signal,
+      error: {
+        category: 'test_error',
+        summary: testResult.failure_summary.map((f) => `${f.scenario}：${f.reason}`).join('；'),
+      },
       verify: async () => {
         testResult = await runGwtScenarios({ project_id: input.project_id, session_id: input.session_id, preview_url: input.preview_url })
         writeTestReport({ request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, result: testResult })
@@ -599,7 +708,14 @@ export async function runPostMvpTestingFlow(input: GwtTestingInput): Promise<Gwt
       },
     })
     if (cycle.blocked) {
-      publishBlockedDecision(input, 'test_repair')
+      // 熔断回滚：先回到最近健康快照，再让渡，避免用户面对一堆被修坏的中间态
+      await rollbackToHealthySnapshot(input)
+      // U7：把未通过场景汇总成可读偏差描述，避免让渡卡片只有泛化文案
+      const failureTitle =
+        testResult.failure_summary.length > 0
+          ? `测试未通过：${testResult.failure_summary.map((f) => f.scenario).join('、')}`
+          : '自动修复多次后测试仍未通过'
+      publishBlockedDecision(input, 'test_repair', failureTitle)
       return { verdict: 'blocked', test_result: testResult }
     }
     if (cycle.repaired) break
@@ -624,6 +740,8 @@ export interface IterationTaskInput {
   prompt: string
   channel_id?: string
   query?: SDKQuery
+  /** 停止生成信号（U5：迭代期间点停止） */
+  signal?: AbortSignal
 }
 
 /**
@@ -652,6 +770,7 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
       mode: input.mode,
       channel_id: input.channel_id,
       query: input.query,
+      signal: input.signal,
     })
     await runPostMvpTestingFlow({
       request_id: input.request_id,
@@ -659,20 +778,38 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
       project_id: input.project_id,
       mode: input.mode,
       preview_url: mvp.preview_url,
+      query: input.query,
+      channel_id: input.channel_id,
+      signal: input.signal,
     })
     return mvp
   } catch (error) {
     // 迭代失败如实回滚：回到 ready（上一版 MVP 仍完整保留），并如实告知用户。
     // 否则项目会停在 iterating/generating_mvp，后续「好了吗」落入编程路径被模型
     // 编造成「已经生成好了」（阶段如实性）。
+    // U5：用户主动停止（signal 已 abort）时不再补「生成失败」话术——渲染端已落
+    // 「已停止生成」提示，避免两条相互矛盾的消息。
+    const cancelled = input.signal?.aborted === true
     updateProject(input.project_id, { current_stage: 'ready' })
     publish(input, 'stage_changed', { stage: 'ready' })
-    appendJsonLine(getAgentSessionPath(input.session_id), {
-      role: 'assistant',
-      content: [{ type: 'text', text: GENERATION_FAILED_COPY }],
-      timestamp: Date.now(),
-    })
-    publish(input, 'message_delta', { text: GENERATION_FAILED_COPY })
+    if (!cancelled) {
+      // U12：记录本次失败的诉求，供「再试一次」一键重跑（避免用户重新打字描述）。
+      setFailedIteration(input.project_id, input.prompt)
+      appendJsonLine(getAgentSessionPath(input.session_id), {
+        role: 'assistant',
+        content: [{ type: 'text', text: GENERATION_FAILED_COPY }],
+        timestamp: Date.now(),
+      })
+      publish(input, 'message_delta', { text: GENERATION_FAILED_COPY })
+      // 失败文案旁附「再试一次」卡片（复用决策卡基建）：单选一张，点击回传 retry。
+      publish(input, 'user_decision_required', {
+        kind: 'retry',
+        title: '这次修改没有成功',
+        questions: [
+          { id: 'retry', label: '再试一次', description: '用同样的诉求重新生成一版' },
+        ],
+      })
+    }
     throw error
   }
 }
@@ -712,6 +849,25 @@ export function takePendingIteration(projectId: string): PendingIteration | unde
   const pending = pendingIterations.get(projectId)
   pendingIterations.delete(projectId)
   return pending
+}
+
+// ==================== 失败重试（U12） ====================
+
+/**
+ * 最近一次迭代失败时所用的诉求（按 project 内存级记录）。
+ * 渲染端点「再试一次」时由 orchestrator 取出并原样重跑 runIterationTask，
+ * 避免用户重新打字描述。与 pendingIterations 同生命周期：随进程重启失效。
+ */
+const failedIterations = new Map<string, string>()
+
+export function setFailedIteration(projectId: string, prompt: string): void {
+  failedIterations.set(projectId, prompt)
+}
+
+export function takeFailedIteration(projectId: string): string | undefined {
+  const prompt = failedIterations.get(projectId)
+  failedIterations.delete(projectId)
+  return prompt
 }
 
 export function isIterationDecisionId(id: string | undefined): id is IterationDecisionId {
@@ -785,12 +941,15 @@ async function allowAutomatedTool(
 function publishBlockedDecision(
   input: { session_id: string; project_id: string },
   action: BlockedAction,
+  title?: string,
 ): void {
   updateProject(input.project_id, { current_stage: 'blocked_for_user_decision', blocked_action: action })
   publish(input, 'stage_changed', { stage: 'blocked_for_user_decision' })
   publish(input, 'user_decision_required', {
     kind: 'blocked',
     stage: 'blocked_for_user_decision',
+    // U7：让渡卡片带上具体偏差描述（如「缺了按月统计功能」），落到 title 字段由渲染端展示
+    title,
     questions: BLOCKED_DECISION_QUESTIONS,
   })
 }
@@ -890,6 +1049,8 @@ export async function resumeBlockedFlow(
       project_id: input.project_id,
       mode: input.mode,
       preview_url: mvp.preview_url,
+      query: input.query,
+      channel_id: input.channel_id,
     })
     return
   }
@@ -903,6 +1064,8 @@ export async function resumeBlockedFlow(
       project_id: input.project_id,
       mode: input.mode,
       preview_url: previewUrl,
+      query: input.query,
+      channel_id: input.channel_id,
     })
     return
   }

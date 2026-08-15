@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import type { DocumentRef, DocumentSyncInput, DocumentSyncResult, Project } from '../shared/types'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import type {
+  DocumentReadResult,
+  DocumentRef,
+  DocumentSyncInput,
+  DocumentSyncResult,
+  Project,
+} from '../shared/types'
 import { getDocumentsDir } from '../storage/config-paths'
 import { findProject, readLastSketchRequirements } from './project-service'
 import type { PrdBackplane, SketchRequirement } from './sketch-engine'
@@ -29,7 +35,7 @@ interface ManifestEntry {
   status: DocumentRef['status']
 }
 
-export function syncDocuments(input: DocumentSyncInput): DocumentSyncResult {
+export function syncDocuments(input: DocumentSyncInput, backplaneOverride?: PrdBackplane): DocumentSyncResult {
   const project = findProject(input.project_id)
   const dir = getDocumentsDir(project.workspace_slug, project.project_id)
   const requirements = readLastSketchRequirements(input.project_id)
@@ -40,7 +46,7 @@ export function syncDocuments(input: DocumentSyncInput): DocumentSyncResult {
 
   switch (input.checkpoint) {
     case 'sketch_confirmed': {
-      const backplane = buildPrdBackplane(project, requirements, input.checkpoint)
+      const backplane = backplaneOverride ?? buildPrdBackplane(project, requirements, input.checkpoint)
       files.push(
         { relativePath: 'sketch_confirmed.md', content: renderPrdDraft(backplane), type: 'prd' },
         { relativePath: 'prd.json', content: renderPrdJson(backplane), type: 'prd' },
@@ -48,7 +54,7 @@ export function syncDocuments(input: DocumentSyncInput): DocumentSyncResult {
       break
     }
     case 'mvp_before_generation': {
-      const backplane = buildPrdBackplane(project, requirements, input.checkpoint)
+      const backplane = backplaneOverride ?? buildPrdBackplane(project, requirements, input.checkpoint)
       files.push({
         relativePath: 'mvp_before_generation.md',
         content: renderPrdFull(backplane),
@@ -117,6 +123,55 @@ export function syncDocuments(input: DocumentSyncInput): DocumentSyncResult {
   ])
 
   return { documents, stale_documents: staleDocuments }
+}
+
+/**
+ * U2：列出项目已产出的文档（跳过 stale 被覆盖的旧版本）。
+ * 数据源是 document-engine 写盘时维护的 `.document-manifest.json`。
+ */
+export function listDocuments(projectId: string): DocumentRef[] {
+  const project = findProject(projectId)
+  const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+  return readManifest(dir)
+    .filter((entry) => entry.status !== 'stale')
+    .map((entry) => ({
+      document_id: entry.document_id,
+      type: entry.type,
+      path: entry.path,
+      status: entry.status,
+    }))
+}
+
+/**
+ * U2：读取单个文档内容。路径安全防护——文档路径必须落在项目 documents 目录内，
+ * 防止清单被篡改后越权读取磁盘任意文件。
+ */
+export function readDocument(projectId: string, documentId: string): DocumentReadResult {
+  const project = findProject(projectId)
+  const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+  const entry = readManifest(dir).find((item) => item.document_id === documentId)
+  if (!entry) throw new Error('DOCUMENT_NOT_FOUND')
+  assertInsideDocumentsDir(dir, entry.path)
+  if (!existsSync(entry.path)) throw new Error('DOCUMENT_NOT_FOUND')
+  return {
+    document: {
+      document_id: entry.document_id,
+      type: entry.type,
+      path: entry.path,
+      status: entry.status,
+    },
+    content: readFileSync(entry.path, 'utf8'),
+  }
+}
+
+/** 文档路径必须落在项目 documents 目录内（对齐 project-service 的路径安全校验）。 */
+function assertInsideDocumentsDir(dir: string, target: string): void {
+  const root = resolve(dir)
+  const resolved = resolve(target)
+  const rel = relative(root, resolved)
+  if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error(`DOCUMENT_PATH_SAFETY: path outside documents dir: ${target}`)
+  }
 }
 
 /** 读取需求清单；为空时回退到默认功能项，保证文档始终可读。 */

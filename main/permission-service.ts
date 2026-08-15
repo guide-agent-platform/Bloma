@@ -24,6 +24,28 @@ export function setPermissionRequestPublisher(publisher: (request: PermissionReq
   requestPublisher = publisher
 }
 
+// =========================================================================
+// 全局权限模式（U·权限模式切换）——设置页切换后经 IPC 同步到这里，
+// 作为用户显式操作（run_project / create_snapshot / rollback_snapshot）的 enforcement 源。
+// 无人值守自动化管线（programming-orchestrator）仍显式传 AUTOMATED_PERMISSION_MODE，不受影响。
+// =========================================================================
+
+let globalPermissionMode: PromaPermissionMode = 'ask'
+
+/** 读取当前全局权限模式（默认 ask）。 */
+export function getPermissionMode(): PromaPermissionMode {
+  return globalPermissionMode
+}
+
+/** 设置全局权限模式，非法值回抛 VALIDATION_ERROR；返回生效后的模式。 */
+export function setPermissionMode(mode: PromaPermissionMode): PromaPermissionMode {
+  if (mode !== 'safe' && mode !== 'ask' && mode !== 'allow-all') {
+    throw new Error('VALIDATION_ERROR: mode must be one of safe | ask | allow-all')
+  }
+  globalPermissionMode = mode
+  return mode
+}
+
 /**
  * 生产接线入口（A2-12）：在内部工具/IPC 通道执行前调用，返回 denied 时抛出
  * `PERMISSION_DENIED:<toolName>`。无人值守自动化管线显式传入 `allow-all` 豁免

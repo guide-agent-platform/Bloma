@@ -33,14 +33,23 @@ import type {
   ChannelUpdateEnvelope,
   FetchModelsEnvelope,
   ConfirmSketchInput,
+  DocumentListInput,
+  DocumentReadInput,
   DocumentSyncInput,
+  DomCollectContextInput,
   ElectronAPI,
   PermissionResponseInput,
+  PermissionSetModeInput,
   PointCorrectionInput,
+  ProjectAbandonInput,
   ProjectArchiveInput,
   ProjectCreateInput,
   ProjectDeleteInput,
+  ProjectExportInput,
+  ProjectFinalizeInput,
   ProjectListInput,
+  ProjectReopenInput,
+  ProjectRenameInput,
   ProjectUnarchiveInput,
   ProjectUpgradeInput,
   RequestEnvelope,
@@ -49,6 +58,7 @@ import type {
   SnapshotCreateInput,
   SnapshotListInput,
   SnapshotRollbackInput,
+  SnapshotScreenshotInput,
 } from '../shared/types'
 
 const electronAPI: ElectronAPI = {
@@ -61,6 +71,8 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_LIST_SESSIONS, input),
     loadMessages: (input: AgentLoadMessagesInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_LOAD_MESSAGES, input),
+    cleanOrphans: (input: RequestEnvelope) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SESSION_CLEAN_ORPHANS, input),
     onStreamEvent: (listener: (event: AgentEvent) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, data: AgentEvent) => listener(data)
       ipcRenderer.on(IPC_CHANNELS.AGENT_STREAM_EVENT, handler)
@@ -70,6 +82,8 @@ const electronAPI: ElectronAPI = {
   permissions: {
     respond: (input: PermissionResponseInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PERMISSION_RESPONSE, input),
+    setMode: (input: PermissionSetModeInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PERMISSION_SET_MODE, input),
   },
   project: {
     create: (input: ProjectCreateInput) =>
@@ -82,12 +96,22 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_UNARCHIVE, input),
     delete: (input: ProjectDeleteInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_DELETE, input),
+    export: (input: ProjectExportInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_EXPORT, input),
+    rename: (input: ProjectRenameInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_RENAME, input),
+    abandon: (input: ProjectAbandonInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_ABANDON, input),
+    reopen: (input: ProjectReopenInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_REOPEN, input),
     confirmSketch: (input: ConfirmSketchInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_CONFIRM_SKETCH, input),
     submitCorrection: (input: PointCorrectionInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_SUBMIT_CORRECTION, input),
     upgrade: (input: ProjectUpgradeInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_UPGRADE, input),
+    finalize: (input: ProjectFinalizeInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_FINALIZE, input),
   },
   sandbox: {
     run: (input: SandboxRunInput) =>
@@ -104,10 +128,20 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_ROLLBACK, input),
     list: (input: SnapshotListInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_LIST, input),
+    screenshot: (input: SnapshotScreenshotInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_SCREENSHOT, input),
   },
   documents: {
     sync: (input: DocumentSyncInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.DOCUMENT_SYNC, input),
+    list: (input: DocumentListInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.DOCUMENT_LIST, input),
+    read: (input: DocumentReadInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.DOCUMENT_READ, input),
+  },
+  dom: {
+    collectContext: (input: DomCollectContextInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.DOM_COLLECT_CONTEXT, input),
   },
   analytics: {
     track: (input: AnalyticsTrackInput) =>
