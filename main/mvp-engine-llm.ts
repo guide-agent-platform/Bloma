@@ -37,7 +37,11 @@ export interface GenerateMvpLlmResult {
   risks: string[]
 }
 
-const DEFAULT_TIMEOUT_MS = 120_000
+/**
+ * 默认不设生成超时（2026-08-16 用户决策「取消时间限制」，与 sketch-engine-llm 同步）：
+ * 慢渠道下固定预算会把长输出掐死，改为无上限等待，由停止按钮手动中止。
+ * `timeoutMs` 语义为「>0 才设 timer」，保留供测试注入短超时。
+ */
 const MAX_FILES = 10
 /** 单次生成默认最大输出 token（对齐全量代码生成，避免 4000 导致三文件 JSON 溢出截断）。 */
 export const DEFAULT_MAX_TOKENS = 8192
@@ -81,8 +85,8 @@ const SYSTEM_PROMPT = `你是「Bloma MVP 生成器」，负责把已确认的�
 
 export async function generateMvpLlm(input: GenerateMvpLlmInput): Promise<GenerateMvpLlmResult> {
   const selfController = new AbortController()
-  const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  const timer = setTimeout(() => selfController.abort(), timeoutMs)
+  const timeoutMs = input.timeoutMs ?? 0
+  const timer = timeoutMs > 0 ? setTimeout(() => selfController.abort(), timeoutMs) : undefined
   const combinedSignal = combineSignals(selfController.signal, input.signal)
 
   try {

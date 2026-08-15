@@ -28,7 +28,7 @@ export interface GeneratePrdLlmInput {
   timeoutMs?: number
 }
 
-const DEFAULT_TIMEOUT_MS = 30_000
+/** 默认不设生成超时（2026-08-16 用户决策「取消时间限制」，与 sketch/mvp 引擎同步）；timeoutMs>0 才设 timer，供测试注入。 */
 const DEFAULT_MAX_TOKENS = 2048
 
 const SYSTEM_PROMPT = `你是「Bloma 需求分析师」，负责把一段用户对话提炼成结构化的 PRD 摘要。只输出一个 JSON 对象，不要任何多余文字，不要 markdown 代码块围栏。
@@ -54,8 +54,8 @@ export async function generatePrdLlm(input: GeneratePrdLlmInput): Promise<PrdBac
     : [{ id: 'F-001', description: '一个可运行、可交互的功能页面' }]
 
   const controller = new AbortController()
-  const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const timeoutMs = input.timeoutMs ?? 0
+  const timer = timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : undefined
   const signal = combineSignals(controller.signal, input.signal)
 
   try {

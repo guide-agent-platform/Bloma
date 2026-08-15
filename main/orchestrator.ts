@@ -19,10 +19,12 @@ import { handleGuideMessage } from './guide-agent-service'
 import {
   READY_COMPLETION_COPY,
   isIterationDecisionId,
+  nextRequirementId,
   refineModificationDescription,
   resolveBlockedDecision,
   resumeBlockedFlow,
   runIterationTask,
+  runSketchTask,
   setPendingIteration,
   setProgrammingEventPublisher,
   takeFailedIteration,
@@ -31,7 +33,7 @@ import {
 import { readPrdBackplane } from './document-engine'
 import { recordDecision } from './decision-log'
 import { isCircuitBreakSettled } from './recovery-service'
-import { findProject, updateProject } from './project-service'
+import { findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
 import { recordSessionActivity } from './session-service'
 import { isThinkingLogEnabled, logThinking } from './thinking-log'
 import { extractErrorMessage } from './channel-test-error'
@@ -286,10 +288,57 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
 
     // 转移阶段护栏（问题 A / P1）：sketch_ready 阶段的消息不得落入无工具的编程路径。
     // 后端已产出草图，模型拿不到工具上下文只会「假装交付」/把 HTML 贴进聊天。
-    // 这里直接引导用户走「确认草图」按钮进 MVP 流程（调整走点选纠错或继续对话）。
+    // 意图分流（2026-08-16 用户反馈「无法对草图提修改意见」）：此前该阶段所有输入
+    // 一律回固定文案，文案却承诺「直接告诉我哪里要改」——修改意见实际无处理路径，
+    // 用户唯一出路是点「生成完整功能」直接进 MVP。现在与 ready 护栏同理做意图
+    // 分流：识别到修改诉求 → 清洗后并入需求清单，重新生成草图（落回 sketch_ready）。
+    // 草图重生成是低成本方向确认，与 ready 阶段的修改确认门不同——不过门直接改，
+    // 改错了也能低成本再改。其余输入（确认/进度/闲聊）维持固定引导走按钮。
     // 判断用权威阶段：项目已推进到 ready 时（渲染端阶段可能滞后）不得误入此护栏，
     // 否则会把「项目已好」错报成「还在草图阶段」。
     if (authoritativeStage === 'sketch_ready') {
+      const intent = await resolveModificationIntent({
+        content: input.content,
+        project_id: input.project_id,
+        session_id: input.session_id,
+        query: sdkQuery,
+        env,
+        signal: abortController.signal,
+        maxTokens,
+      })
+      if (intent === 'modify') {
+        const description = refineModificationDescription(input.content)
+        const existing = readLastSketchRequirements(input.project_id)
+        const requirements = [...existing, { id: nextRequirementId(existing), description }]
+        recordSketchGenerated(input.project_id, requirements)
+        recordDecision({
+          project_id: input.project_id,
+          session_id: input.session_id,
+          entry: {
+            type: 'modification_gate',
+            title: '草图阶段修改意见',
+            why: `用户对草图提出「${input.content}」，清洗为「${description}」并入需求清单，重新生成草图`,
+            detail: { stage: 'sketch_ready', requirements },
+          },
+        })
+        const ack = `好的，按「${truncateForCopy(description, 40)}」调整草图，重新生成一版。`
+        persistAssistant(ack)
+        streamPublisher(makeEvent(input, 'message_delta', { text: ack }))
+        setProgrammingEventPublisher(streamPublisher)
+        await runSketchTask({
+          request_id: input.request_id,
+          session_id: input.session_id,
+          project_id: input.project_id,
+          mode: input.mode,
+          prompt: description,
+          requirements,
+          channel_id: input.channel_id,
+          query: sdkQuery,
+        })
+        persistTerminalMessage(input.session_id, 'completed')
+        streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
+        return { accepted: true, session_id: input.session_id, stream_started: true }
+      }
       const guidance =
         '草图已经生成好了。你可以点预览区上方的「生成完整功能」确认并继续；' +
         '想调整的话，点预览区「纠错」按钮标记不满意的位置，或直接告诉我哪里要改。'

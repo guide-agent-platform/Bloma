@@ -51,8 +51,11 @@ export class SketchLlmError extends Error {
   }
 }
 
-/** 与 mvp-engine-llm 同值（120s）：草图曾用 90s 且「首试+重试」共享预算，重试只剩残余时间必超时（2026-08-16 线上案例）。 */
-const DEFAULT_TIMEOUT_MS = 120_000
+/**
+ * 默认不设生成超时（2026-08-16 用户决策「取消时间限制」）：90s→120s 两轮调参后慢渠道
+ * 仍会被掐死，改为无上限等待，由渲染端 WaitingFeedback 提示 + 停止按钮（T3/U4）手动中止。
+ * `timeoutMs` 语义改为「>0 才设 timer」：默认 0 = 不限时，参数保留供测试注入短超时。
+ */
 
 /** 渠道未配置 max_tokens 时的默认值：重 CSS 视觉稿 4000 必截断（线上已踩坑），与 mvp-engine-llm 同值。 */
 const DEFAULT_MAX_TOKENS = 8192
@@ -71,7 +74,7 @@ const SYSTEM_PROMPT = `你是「Bloma 草图生成器」，负责把用户的想
 - 只输出 HTML，其余一律不要。`
 
 export async function generateSketchLlm(input: GenerateSketchLlmInput): Promise<GenerateSketchLlmResult> {
-  const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const timeoutMs = input.timeoutMs ?? 0
   const prompt = buildPrompt(input.requirements)
   let maxTokens = input.maxTokens ?? DEFAULT_MAX_TOKENS
   let truncated = false
@@ -82,7 +85,7 @@ export async function generateSketchLlm(input: GenerateSketchLlmInput): Promise<
   // 超时预算**按次发放**：每次尝试新建 timer——共享总预算会让截断重试只剩残余时间，结构性必超时。
   for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt += 1) {
     const selfController = new AbortController()
-    const timer = setTimeout(() => selfController.abort(), timeoutMs)
+    const timer = timeoutMs > 0 ? setTimeout(() => selfController.abort(), timeoutMs) : undefined
     const startedAt = Date.now()
     let accumulated = ''
 

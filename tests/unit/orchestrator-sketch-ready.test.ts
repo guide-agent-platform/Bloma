@@ -1,9 +1,12 @@
+import { EventEmitter } from 'node:events'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runAgent, setAgentStreamPublisher, setSDKQueryForTests } from '../../main/orchestrator'
-import { findProject } from '../../main/project-service'
+import { createProject, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../../main/project-service'
+import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests, setSnapshotCaptureProviderForTests } from '../../main/platform-services'
 import type { AgentEvent, SDKMessage, WorkflowStage } from '../../shared/types'
 
 vi.mock('../../main/channel-manager', async (importOriginal) => {
@@ -42,6 +45,8 @@ describe('转移阶段护栏（问题 A / P1）', () => {
     process.env.PROMA_HOME = originalPromaHome
     setAgentStreamPublisher(() => undefined)
     setSDKQueryForTests(defaultTestQuery)
+    clearSandboxRuntimeForTests()
+    setSnapshotCaptureProviderForTests()
     vi.mocked(findProject).mockReset()
   })
 
@@ -72,6 +77,62 @@ describe('转移阶段护栏（问题 A / P1）', () => {
       .map((event) => String(event.payload.text ?? ''))
       .join('')
     expect(deltas).toContain('生成完整功能')
+    expect(events.some((event) => event.type === 'completed')).toBe(true)
+  })
+
+  it('sketch_ready 阶段提修改意见 → 并入需求重新生成草图，不再只回固定文案（2026-08-16 用户反馈）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-sketch-modify-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-sketch-modify', mode: 'quick' })
+    updateProject(project.project_id, { current_stage: 'sketch_ready' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '家庭记账，记录收入支出' }])
+    // 权威阶段以 findProject 存储为准：mock 返回刚创建的真实项目（root_path 指向临时 home）
+    vi.mocked(findProject).mockReturnValue({ ...project, current_stage: 'sketch_ready' } as never)
+
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    // 草图 LLM 输出完整 HTML（含 <style> 且 </html> 闭合 → isHtmlDocument 通过，走 LLM 路径不落模板）
+    setSDKQueryForTests(async function* () {
+      yield {
+        type: 'assistant',
+        message: { role: 'assistant', content: [{ type: 'text', text: '<!doctype html><html><head><style>body{color:#3355ff}</style></head><body><main>记账</main></body></html>' }] },
+      }
+      yield { type: 'result', subtype: 'success' }
+    })
+    setSandboxRuntimeForTests({
+      portAllocator: async () => 3102,
+      healthCheck: async () => true,
+      processFactory: () => makeChildProcess(),
+    })
+    setSnapshotCaptureProviderForTests(async () => ({
+      extension: 'png',
+      buffer: Buffer.from('fake-png'),
+    }))
+
+    // 「改成」命中 L1 修改意图规则，不依赖 LLM 兜底判定
+    await runAgent({
+      request_id: 'req-sketch-modify',
+      session_id: 'session-sketch-modify',
+      project_id: project.project_id,
+      content: '主色调改成蓝色，标题再大一点',
+      mode: 'quick',
+      current_stage: 'sketch_ready',
+      channel_id: 'test-channel',
+    })
+
+    // 修改意见并入需求清单：原 F-001 保留 + 追加一条含修改意见的新需求
+    const requirements = readLastSketchRequirements(project.project_id)
+    expect(requirements.some((item) => item.id === 'F-001' && item.description.includes('记账'))).toBe(true)
+    expect(requirements.some((item) => item.id !== 'F-001' && item.description.includes('蓝色'))).toBe(true)
+    // 重新走草图生成并落回 sketch_ready（而非直接进 MVP 或只回固定引导文案）
+    expect(events.some((event) => event.type === 'stage_changed' && event.payload.stage === 'generating_sketch')).toBe(true)
+    expect(events.some((event) => event.type === 'sketch_ready')).toBe(true)
+    const deltas = events
+      .filter((event) => event.type === 'message_delta')
+      .map((event) => String(event.payload.text ?? ''))
+      .join('')
+    expect(deltas).toContain('调整草图')
+    expect(deltas).not.toContain('生成完整功能')
     expect(events.some((event) => event.type === 'completed')).toBe(true)
   })
 
@@ -191,4 +252,10 @@ async function* defaultTestQuery(): AsyncGenerator<SDKMessage> {
     message: { role: 'assistant', content: [{ type: 'text', text: 'test' }] },
   }
   yield { type: 'result', subtype: 'success' }
+}
+
+function makeChildProcess(): ChildProcess {
+  const emitter = new EventEmitter() as ChildProcess
+  Object.assign(emitter, { kill: vi.fn(() => true), pid: 1000 })
+  return emitter
 }

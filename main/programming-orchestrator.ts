@@ -249,8 +249,6 @@ function sketchFallbackCopy(reason: SketchFallbackReason): string {
 
 /** 项目名上限：历史项目列表按单行卡片展示，过长会撑坏布局。 */
 const PROJECT_NAME_MAX_LENGTH = 12
-/** 命名单独计时：起名是附属能力，不允许它拖慢 MVP 生成链路。 */
-const NAMING_TIMEOUT_MS = 30_000
 
 const NAMING_SYSTEM_PROMPT = `你是产品命名助手。根据用户的原始需求和 PRD 摘要，给这个软件项目起一个简短的中文名。
 硬性约束：
@@ -307,8 +305,10 @@ async function nameByLlm(input: MvpTaskInput): Promise<string | null> {
     '请给这个项目起名，只输出名称本身。',
   ].join('\n')
 
+  // 不设超时（2026-08-16 取消生成时间限制）：慢渠道下 30s 会把起名掐成静默兜底；
+  // 起名失败本就有确定性兜底，等待与全局「无时间上限 + 停止按钮中止」策略一致。
+  // controller 仅为满足 SDKQueryOptions 的必填 signal 保留，无 timer 不再主动 abort。
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), NAMING_TIMEOUT_MS)
   try {
     let accumulated = ''
     for await (const message of input.query(prompt, {
@@ -324,8 +324,6 @@ async function nameByLlm(input: MvpTaskInput): Promise<string | null> {
     return sanitizeLlmName(accumulated)
   } catch {
     return null
-  } finally {
-    clearTimeout(timer)
   }
 }
 
@@ -870,8 +868,8 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
   }
 }
 
-/** 为追加的需求项生成不冲突的 id（F-xxx 序号递增，规避已有 id 碰撞）。 */
-function nextRequirementId(existing: SketchRequirement[]): string {
+/** 为追加的需求项生成不冲突的 id（F-xxx 序号递增，规避已有 id 碰撞）。导出供 orchestrator 草图阶段修改意见并入需求复用。 */
+export function nextRequirementId(existing: SketchRequirement[]): string {
   const max = existing.reduce((acc, item) => {
     const match = /^F-(\d+)$/.exec(item.id)
     if (!match) return acc
