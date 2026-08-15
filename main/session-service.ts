@@ -72,7 +72,7 @@ export function listSessions(input: AgentListSessionsInput): AgentListSessionsRe
 
 /**
  * 读取指定会话的 JSONL 历史消息。
- * 默认排除内部终态标记（`[terminal]` 行），支持尾部截取（limit）。
+ * 默认排除内部标记（`[terminal]` 终态行、`[decision-card]` 决策卡片选项行），支持尾部截取（limit）。
  * JSONL 存在但索引缺失时（升级前遗留数据），按文件 mtime 合成会话记录。
  */
 export function loadMessages(input: AgentLoadMessagesInput): AgentLoadMessagesResult {
@@ -98,7 +98,7 @@ export function loadMessages(input: AgentLoadMessagesInput): AgentLoadMessagesRe
       if (!message) return false
       if (!excludeTerminal) return true
       const text = message.content?.find((block) => block.type === 'text')?.text ?? ''
-      return !text.startsWith('[terminal]')
+      return !text.startsWith('[terminal]') && !text.startsWith('[decision-card]')
     })
 
   const total = all.length

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
 import type {
@@ -98,13 +99,37 @@ export function getSandboxLogs(projectId: string): string {
   return sandboxLogs.get(projectId) ?? ''
 }
 
-export function stopSandbox(_input: SandboxStopInput): SandboxStopResult {
+export async function stopSandbox(_input: SandboxStopInput): Promise<SandboxStopResult> {
   const current = activeSandboxes.get(_input.project_id)
   if (current) {
-    current.process.kill()
     activeSandboxes.delete(_input.project_id)
+    await terminateProcessTree(current.process)
   }
   return { stopped: true }
+}
+
+/** 等待进程退出的兜底上限：超过即放弃等待（进程可能已僵死，调用方的 rmSync 重试兜底）。 */
+const TERMINATE_WAIT_MS = 2_000
+
+/**
+ * 终止沙箱进程并等待其真正退出。Windows 下两个坑（回滚 rmSync 报 EBUSY 的根因）：
+ * ① kill() 只是通知，进程退出与 cwd/句柄锁释放是异步的，不等退出就删目录会撞锁；
+ * ② shell:true 包装的 npm 命令，kill 只终止 cmd.exe 外壳，真正的 node 孙进程存活
+ *   且 cwd 仍锁着项目目录——标记 treeKillWin32 的进程用 taskkill /T /F 整树击杀。
+ * （测试注入的 mock 进程无此标记，只走 kill()，不会被真实 taskkill 误伤）
+ */
+async function terminateProcessTree(child: ChildProcess): Promise<void> {
+  // 真实运行中进程两字段为 null，已退出为数值/信号串；测试 mock 未定义视为运行中
+  const alreadyExited = (child.exitCode ?? null) !== null || (child.signalCode ?? null) !== null
+  if (alreadyExited) return
+  if (process.platform === 'win32' && (child as ChildProcess & { treeKillWin32?: boolean }).treeKillWin32 && typeof child.pid === 'number') {
+    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
+  } else {
+    child.kill()
+  }
+  const exited = new Promise<void>((resolvePromise) => child.once('exit', () => resolvePromise()))
+  const giveUp = new Promise<void>((resolvePromise) => setTimeout(resolvePromise, TERMINATE_WAIT_MS))
+  await Promise.race([exited, giveUp])
 }
 
 export function setSandboxRuntimeForTests(overrides: {
@@ -156,22 +181,27 @@ async function waitForSandbox(
 const ALLOWED_SANDBOX_COMMANDS = new Set(['npm run dev', 'npm start', 'node static-server'])
 
 function spawnStaticServer(projectRoot: string, port: number, command?: string): ChildProcess {
-  const options = sandboxSpawnOptions(projectRoot, port)
   if (command) {
     const normalized = command.trim()
     if (!ALLOWED_SANDBOX_COMMANDS.has(normalized)) {
       throw new Error(`SANDBOX_COMMAND_NOT_ALLOWED: ${normalized}`)
     }
+    const options = sandboxSpawnOptions(projectRoot, port)
     const withPort = normalized.replaceAll('{port}', String(port))
     const [executable, ...args] = withPort.split(/\s+/).filter(Boolean)
     // Windows 下 npm 为 npm.cmd，spawn 无法直接执行，需经 shell 解析（静态服务器等直接 spawn）
     const needsShell = /\.(cmd|bat)$/i.test(executable) || executable === 'npm'
     if (needsShell) {
-      return spawn(withPort, { ...options, shell: true })
+      const child = spawn(withPort, { ...options, shell: true })
+      // shell 包装的进程树：kill 只杀外壳不杀孙进程，Windows 下需整树击杀（见 terminateProcessTree）
+      if (process.platform === 'win32') (child as ChildProcess & { treeKillWin32?: boolean }).treeKillWin32 = true
+      return child
     }
     return spawn(executable, args, options)
   }
-  return spawn(resolveNodeExecutable(), ['-e', STATIC_SERVER_SCRIPT, String(port)], options)
+  // 内嵌脚本不占项目目录作 cwd（Windows：进程 cwd 会锁目录，回滚 rmSync 报 EBUSY），
+  // 服务根目录改由参数传入；cwd 落在系统临时目录。
+  return spawn(resolveNodeExecutable(), ['-e', STATIC_SERVER_SCRIPT, String(port), projectRoot], sandboxSpawnOptions(tmpdir(), port))
 }
 
 function resolveNodeExecutable(): string {
@@ -254,7 +284,8 @@ const STATIC_SERVER_SCRIPT = `
 const { createReadStream, existsSync, statSync } = require('node:fs');
 const { createServer } = require('node:http');
 const { extname, join, normalize, resolve, sep } = require('node:path');
-const root = process.cwd();
+// 服务根目录由参数传入（cwd 已挪到系统临时目录，避免 Windows 下进程 cwd 锁住项目目录）
+const root = resolve(process.argv[2]);
 const port = Number(process.argv[1]);
 const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml' };
 const server = createServer((req, res) => {
@@ -429,21 +460,21 @@ export async function rollbackSnapshot(input: SnapshotRollbackInput): Promise<Ro
     health_status: project.current_snapshot_id ? 'healthy' : 'unhealthy',
   })
 
-  // 3. 停掉正在运行的 sandbox（否则文件句柄占用，Windows 下 rmSync 会 EPERM）
-  stopSandbox({ request_id: input.request_id, project_id: project.project_id })
+  // 3. 停掉正在运行的 sandbox 并等待其真正退出（Windows：进程 cwd/句柄锁住项目目录，
+  //    不等退出就 rmSync 会 EBUSY/EPERM——2026-08-15 赛车项目回滚报障的根因）
+  await stopSandbox({ request_id: input.request_id, project_id: project.project_id })
 
-  // 4. 等待文件句柄释放（Windows 异步释放，给 200ms 缓冲）
-  await new Promise((resolve) => setTimeout(resolve, 200))
-
-  // 5. 恢复项目文件（先清空再复制，确保与快照完全一致）
-  rmSync(project.root_path, { recursive: true, force: true })
+  // 4. 恢复项目文件（先清空再复制，确保与快照完全一致）。
+  //    maxRetries/retryDelay 兜底瞬态锁（杀毒/索引器/句柄异步释放）：
+  //    Node 原生对 EBUSY/EPERM/ENOTEMPTY 自动重试，避免一次撞锁让整个回滚失败。
+  rmSync(project.root_path, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
   mkdirSync(project.root_path, { recursive: true })
   cpSync(target.files_archive_path, project.root_path, { recursive: true, force: true })
 
   // 6. 恢复文档（如果有）
   if (target.documents_archive_path && existsSync(target.documents_archive_path)) {
     const docDir = getDocumentsDir(project.workspace_slug, project.project_id)
-    rmSync(docDir, { recursive: true, force: true })
+    rmSync(docDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
     cpSync(target.documents_archive_path, docDir, { recursive: true, force: true })
   }
 

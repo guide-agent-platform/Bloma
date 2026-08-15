@@ -184,8 +184,10 @@ describe('GuideAgentService through AgentOrchestrator', () => {
 
     const decision = events.find((event) => event.type === 'user_decision_required')
     expect(decision?.payload.kind).toBe('clarification')
+    // 纠偏：模型只给 1 个方向项时补「你帮我决定」兜底，保证卡片始终有明确可选项
     expect(decision?.payload.questions).toEqual([
       expect.objectContaining({ id: 'daily', label: '日常工具' }),
+      expect.objectContaining({ id: 'auto', label: '你帮我决定' }),
     ])
     expect(findProject(project.project_id).current_stage).toBe('blocked_for_user_decision')
     // 上屏与落盘的只有 reply，原始 JSON 不泄露
@@ -248,6 +250,136 @@ describe('GuideAgentService through AgentOrchestrator', () => {
     const jsonl = readFileSync(join(home, 'agent-sessions', 'session-guide.jsonl'), 'utf8')
     expect(jsonl).toContain('简单描述一下你的想法')
     expect(jsonl).not.toContain('"action":"ask_clarification"')
+  })
+
+  it('澄清选项纠偏：占位/问句式 label 过滤、重复去重、上限 3+兜底，且选项落盘可追溯', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-guide-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    // 模型把占位文案、新问题、重复项全混进 questions（历史报障形态）
+    setSDKQueryForTests(async function* () {
+      yield {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'text',
+            text: '{"action":"ask_clarification","reply":"想做哪种工具呢？","questions":[' +
+              '{"id":"a","label":"范围选项","description":"占位"},' +
+              '{"id":"b","label":"做什么类型？"},' +
+              '{"id":"c","label":"记账本","description":"记收入支出"},{"id":"d","label":"记账本"},' +
+              '{"id":"e","label":"待办清单"},{"id":"f","label":"纪念日提醒"}]}',
+          }],
+        },
+      }
+      yield { type: 'result', subtype: 'success' }
+    })
+
+    await runAgent({
+      request_id: 'req-guide',
+      session_id: 'session-guide',
+      project_id: project.project_id,
+      content: '做个工具',
+      mode: 'quick',
+      current_stage: 'clarifying',
+      channel_id: 'test-channel',
+    })
+
+    const decision = events.find((event) => event.type === 'user_decision_required')
+    const labels = (decision?.payload.questions as Array<{ label: string }>).map((q) => q.label)
+    // 占位/问句丢弃、重复去重、模型方向项最多 3 个、末尾必补「你帮我决定」
+    expect(labels).toEqual(['记账本', '待办清单', '纪念日提醒', '你帮我决定'])
+    // 卡片选项原文落盘（[decision-card] 内部标记），事后可追溯弹过哪些选项
+    const jsonl = readFileSync(join(home, 'agent-sessions', 'session-guide.jsonl'), 'utf8')
+    expect(jsonl).toContain('[decision-card] 记账本｜待办清单｜纪念日提醒｜你帮我决定')
+    expect(findProject(project.project_id).current_stage).toBe('blocked_for_user_decision')
+  })
+
+  it('澄清选项纠偏：模型选项全非法时降级为纯文本追问（questions 空，不弹卡片）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-guide-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    setSDKQueryForTests(async function* () {
+      yield {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'text',
+            text: '{"action":"ask_clarification","reply":"想做什么样的应用呢？","questions":[' +
+              '{"id":"a","label":"选项一"},{"id":"b","label":"范围选项"},{"id":"c","label":"哪种类型？"}]}',
+          }],
+        },
+      }
+      yield { type: 'result', subtype: 'success' }
+    })
+
+    await runAgent({
+      request_id: 'req-guide',
+      session_id: 'session-guide',
+      project_id: project.project_id,
+      content: '做个东西',
+      mode: 'quick',
+      current_stage: 'clarifying',
+      channel_id: 'test-channel',
+    })
+
+    const decision = events.find((event) => event.type === 'user_decision_required')
+    // 光杆占位选项绝不弹给用户，降级为 reply 纯文本追问
+    expect(decision?.payload.questions).toEqual([])
+    const jsonl = readFileSync(join(home, 'agent-sessions', 'session-guide.jsonl'), 'utf8')
+    expect(jsonl).not.toContain('[decision-card]')
+    expect(findProject(project.project_id).current_stage).toBe('blocked_for_user_decision')
+  })
+
+  it('卡片答案防 id 撞车：模型卡片复用 daily 但 label 含义不同 → 需求用点选原文，不用预置扩写', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-guide-card-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    setSandboxRuntimeForTests({
+      portAllocator: async () => 3104,
+      healthCheck: async () => true,
+      processFactory: () => makeChildProcess(),
+    })
+    setSnapshotCaptureProviderForTests(async () => ({
+      extension: 'png',
+      buffer: Buffer.from('fake-png'),
+    }))
+
+    // 第一轮：模糊需求 → 规则澄清卡片
+    await runAgent({
+      request_id: 'req-card-1',
+      session_id: 'session-card',
+      project_id: project.project_id,
+      content: '帮我做个东西',
+      mode: 'quick',
+      current_stage: 'clarifying',
+    })
+
+    // 第二轮：模型弹的卡片 id 恰好是 daily，但用户点的是「音乐节排期」
+    await runAgent({
+      request_id: 'req-card-2',
+      session_id: 'session-card',
+      project_id: project.project_id,
+      content: '音乐节排期',
+      mode: 'quick',
+      current_stage: 'blocked_for_user_decision',
+      metadata: { source: 'card_option', selected_option_id: 'daily' },
+    })
+
+    const ready = events.find((event) => event.type === 'sketch_ready')
+    expect(ready).toBeTruthy()
+    const descriptions = readLastSketchRequirements(project.project_id).map((r) => r.description)
+    // 需求以主题为锚点、以点选原文为方向，绝不映射到「日常生活工具」预置文案
+    expect(descriptions[0]).toBe('帮我做个东西')
+    expect(descriptions).toContain('音乐节排期')
+    expect(descriptions.join('\n')).not.toContain('日常生活工具')
   })
 
   it('A2-14a: 模型输出非 JSON 时回退规则路由', async () => {

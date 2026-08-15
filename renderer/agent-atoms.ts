@@ -170,6 +170,22 @@ export function setupGlobalAgentListeners(): () => void {
       if (event.project_id) void loadSnapshots(event.project_id)
     }
 
+    // 自动命名：MVP 就绪时后端可能已按需求给项目改名（autoNameProject 落盘），
+    // 重新拉项目列表回填 currentProjectAtom，让工作区头部立即显示新名字
+    if (event.type === 'mvp_ready') {
+      const projectApi = window.electronAPI?.project
+      if (projectApi?.list) {
+        void projectApi.list({ request_id: crypto.randomUUID() }).then((result) => {
+          if (!result?.ok) return
+          const current = store.get(currentProjectAtom)
+          const updated = result.data.find((item) => item.project_id === current?.project_id)
+          if (current && updated && updated.name !== current.name) {
+            store.set(currentProjectAtom, updated)
+          }
+        })
+      }
+    }
+
     // 终态事件：将本次运行累积的流式回复沉淀为一条助手消息，
     // 修复「completed 后 running=false，流式文本消失且从未进消息列表」。
     // 读取尚未被重置的 content（同步），随后 reducer 再清空。

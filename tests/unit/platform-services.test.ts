@@ -151,7 +151,7 @@ describe('PlatformServices sandbox runtime', () => {
     })
 
     await runSandbox({ request_id: 'req-run', project_id: project.project_id })
-    const result = stopSandbox({ request_id: 'req-stop', project_id: project.project_id })
+    const result = await stopSandbox({ request_id: 'req-stop', project_id: project.project_id })
 
     expect(result).toEqual({ stopped: true })
     expect(child.kill).toHaveBeenCalledTimes(1)
@@ -290,7 +290,11 @@ describe('PlatformServices snapshot capacity (A2-16)', () => {
 
 function makeChildProcess(): { process: ChildProcess; kill: ReturnType<typeof vi.fn> } {
   const emitter = new EventEmitter() as ChildProcess
-  const kill = vi.fn(() => true)
+  // kill 时同步发 exit：stopSandbox 会等进程真正退出（2s 兜底），mock 不发事件会白等
+  const kill = vi.fn(() => {
+    emitter.emit('exit')
+    return true
+  })
   Object.assign(emitter, { kill, pid: 1000 })
   return { process: emitter, kill }
 }

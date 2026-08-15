@@ -527,6 +527,8 @@ export interface Project {
   security_repair_count?: number
   /** 被阻塞的编程操作（A2 resume 闭环）：非阻塞态为 undefined */
   blocked_action?: 'mvp_repair' | 'test_repair' | 'judge_return'
+  /** 需求确认后已自动命名过（autoNameProject）：此后不再覆盖，保住用户手动改名 */
+  auto_named?: boolean
   created_at: string
   updated_at: string
 }
