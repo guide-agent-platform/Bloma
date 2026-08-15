@@ -143,6 +143,23 @@ export function listDocuments(projectId: string): DocumentRef[] {
 }
 
 /**
+ * 把 decision-log 直写的 decisions.md 登记进文档清单（幂等，按 path 去重），
+ * 使文档面板（document:list）能看到并读取它。syncDocuments 重建清单时
+ * decisions.md 不与其产出路径重叠，条目会作为 untouched 一直保留。
+ */
+export function registerDecisionsDocument(projectId: string): void {
+  const project = findProject(projectId)
+  const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+  const path = join(dir, 'decisions.md')
+  const previous = readManifest(dir)
+  if (previous.some((entry) => entry.path === path)) return
+  writeManifest(dir, [
+    ...previous,
+    { document_id: 'decisions-log', path, type: 'decisions', checkpoint: 'decisions', status: 'synced' },
+  ])
+}
+
+/**
  * U2：读取单个文档内容。路径安全防护——文档路径必须落在项目 documents 目录内，
  * 防止清单被篡改后越权读取磁盘任意文件。
  */

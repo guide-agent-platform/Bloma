@@ -10,6 +10,7 @@ const TYPE_LABEL_MAP: Record<DocumentRef['type'], string> = {
   gwt_feature: 'GWT 场景',
   test_report: '测试报告',
   changelog: '变更记录',
+  decisions: '决策日志',
 }
 
 /** 从绝对路径取文件名（跨平台） */

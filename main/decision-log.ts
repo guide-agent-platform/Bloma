@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { AgentMessage } from '../shared/types'
 import { getAgentSessionPath, getDocumentsDir } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
+import { registerDecisionsDocument } from './document-engine'
 import { findProject } from './project-service'
 import { listSessions } from './session-service'
 
@@ -100,6 +101,8 @@ export function exportDecisionsMd(projectId: string): void {
   lines.sort((a, b) => a.timestamp - b.timestamp)
   const dir = getDocumentsDir(project.workspace_slug, project.project_id)
   writeFileSync(join(dir, DECISIONS_MD), renderDecisionsMarkdown(project.name, lines), 'utf8')
+  // 登记进文档清单（幂等），让文档面板能列出并读取 decisions.md
+  registerDecisionsDocument(projectId)
 }
 
 /** 解析一行 system 文本为新格式决策（JSON）或旧格式决策卡片行；非决策行返回 undefined。 */

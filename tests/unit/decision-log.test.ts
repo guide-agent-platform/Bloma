@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { exportDecisionsMd, recordDecision } from '../../main/decision-log'
+import { listDocuments, readDocument } from '../../main/document-engine'
 import { createProject, findProject } from '../../main/project-service'
 import { getAgentSessionPath, getDocumentsDir } from '../../storage/config-paths'
 import { appendJsonLine } from '../../storage/json-store'
@@ -59,6 +60,15 @@ describe('decision-log (T2)', () => {
     expect(markdown).toContain('触发修改确认门')
     expect(markdown).toContain('识别到修改诉求')
     expect(markdown).toContain('modification_gate')
+
+    // 前后端对齐：decisions.md 登记进文档清单，文档面板可列出并读取
+    const decisionsDoc = listDocuments(projectId).find((doc) => doc.type === 'decisions')
+    expect(decisionsDoc).toBeDefined()
+    const read = readDocument(projectId, decisionsDoc!.document_id)
+    expect(read.content).toContain('触发修改确认门')
+    // 再次导出（幂等登记，不产生重复条目）
+    exportDecisionsMd(projectId)
+    expect(listDocuments(projectId).filter((doc) => doc.type === 'decisions')).toHaveLength(1)
   })
 
   it('历史项目的 [decision-card] 旧行如实聚合导出，不补造', () => {
