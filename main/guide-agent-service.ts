@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentEvent, AgentSendMessageInput, MessageContentBlock } from '../shared/types'
-import { routeDialogue } from './dialogue-router'
+import { routeDialogue, type ClarificationOption } from './dialogue-router'
 import type { ConversationTurn, GuideModelOptions } from './orchestrator'
 import { trackAnalytics } from './platform-services'
 import { runSketchTask, setProgrammingEventPublisher } from './programming-orchestrator'
@@ -21,13 +21,25 @@ const GUIDE_SYSTEM_PROMPT = `你是「向导 Agent」，负责把用户的想法
  "reply":"给用户的简短确认话术（简体中文 ≤20 字，口语化，不含技术细节）",
  "requirements":[{"id":"F-001","description":"核心功能点（动词开头，用户原话提炼，≤40 字）"}]}
 
-【需求不清晰 → 需要澄清】
+【需求不清晰 → 澄清：问一个问题，并给出这个问题可点选的答案】
 {"action":"ask_clarification",
- "reply":"向用户澄清的引导语（简体中文一句话）",
- "questions":[{"id":"scope","label":"范围选项（≤6 字）","description":"解释含义（≤20 字）"}]}
+ "reply":"一个明确的问句（只问一个产品维度：做哪种类型/给谁用/核心场景，≤40 字，以？结尾）",
+ "questions":[
+   {"id":"answer-ledger","label":"这个问题的一个具体答案（名词短语 ≤8 字，如「记账本」）","description":"选它之后会做成什么样（≤20 字）"},
+   {"id":"answer-todo","label":"另一个互斥的具体答案","description":"……"},
+   {"id":"auto","label":"你帮我决定","description":"交给我，按常见做法先出一版"}
+ ]}
+
+澄清规则（重要）：
+- questions 是 reply 那个问题的候选答案，不是新问题；用户点任何一个都能直接开工。
+- 选项互斥、具体、贴合用户原话：用「记账本/待办清单/赛道计时赛」这类名词短语。
+- 禁止抽象形容词当选项（「自由」「灵活」「好用」），禁止占位文案（「范围选项」「选项一」），label 不以「？」结尾。
+- questions 2~4 条，最后一条固定为 {"id":"auto","label":"你帮我决定","description":"交给我，按常见做法先出一版"}。
+- 确实无法给出具体选项时才 questions:[]（在 reply 里纯文本追问）。
+- 用户已回答过 2 轮澄清仍不明确：选最接近的理解直接 generate_sketch，不要再追问。
 
 约束：
-- requirements 1~5 条；questions 0~3 条（0 条时表示直接在 reply 里追问，不弹选项）。
+- requirements 1~5 条。
 - id 用小写字母+连字符（如 daily-tool），不含空格。
 - 只输出 JSON，其余一律不要。`
 
@@ -36,9 +48,9 @@ type GuideParsed =
   | { action: 'ask_clarification'; reply: string; questions: { id: string; label: string; description?: string }[] }
 
 /**
- * 澄清卡片已知选项 id → 草图需求描述。
+ * 规则路由三张固定卡片（日常生活/工作提效/你帮我决定）→ 草图需求扩写。
  * 卡片答案是结构化决策：用户已选方向，直接生成草图（修复规则路由澄清死循环）。
- * 未知 id（如模型自定义问题）退回用户点选文案本身作为需求。
+ * 仅在点选文案与 FIXED_CARD_LABELS 完全一致时启用；其余一律以点选原文为需求。
  */
 const CARD_ANSWER_REQUIREMENTS: Record<string, string> = {
   daily: '日常生活工具：帮助管理日常事务，如记账、提醒、清单',
@@ -46,8 +58,63 @@ const CARD_ANSWER_REQUIREMENTS: Record<string, string> = {
   auto: '通用实用软件工具，由向导按常见做法生成第一版',
 }
 
+/**
+ * 规则路由三张固定卡片的 label → 选项 id。只有点选文案与固定卡片完全一致时才用
+ * 预置需求扩写；模型卡片可能复用同名 id（如 daily）但含义不同，一律以点选原文
+ * 为准，防止 id 撞车把需求映射到毫不相干的预置文案上。
+ */
+const FIXED_CARD_LABELS: Record<string, string> = {
+  daily: '日常生活工具',
+  work: '工作提效工具',
+  auto: '你帮我决定',
+}
+
 /** 阻塞态让渡卡片的决策 id（accept/explain/continue）由 resumeBlockedFlow 处理，不得误入草图生成。 */
 const BLOCKED_DECISION_IDS = new Set(['accept', 'explain', 'continue'])
+
+/** 兜底选项：每张澄清卡片固定收尾，保证用户永远有「不选具体方向也能开工」的出口。 */
+const AUTO_ESCAPE_OPTION: ClarificationOption = {
+  id: 'auto',
+  label: '你帮我决定',
+  description: '交给我，按常见做法先出一版',
+}
+
+/** 占位/问题式 label：模型把模板占位文案或新问题当成选项输出时，直接丢弃。 */
+function isBadOptionLabel(label: string): boolean {
+  const trimmed = label.trim()
+  if (trimmed.length < 2) return true
+  if (/[?？]$/.test(trimmed)) return true
+  return /^(范围)?选项\s*[一二三四五六七八九十0-9a-c]?$|^option\s*[a-c]?$/i.test(trimmed)
+}
+
+const LABEL_MAX_LENGTH = 12
+const DESCRIPTION_MAX_LENGTH = 30
+/** 模型方向项上限：加 auto 兜底后单轮最多 4 张卡（对齐 CardOptions 契约）。 */
+const MODEL_OPTION_MAX = 3
+
+/**
+ * 澄清选项纠偏：模型输出的 questions 一律不信任——占位/问句式 label 丢弃、
+ * label 去重、超长截断；纠偏后非空必补「你帮我决定」兜底项；全军覆没则返回
+ * 空数组（降级为 reply 纯文本追问），绝不把莫名其妙的光杆选项弹给用户。
+ * 只处理用户可见文案的展示层截断，不触碰「代码型 JSON 不可修补」红线。
+ */
+function normalizeClarificationOptions(raw: ClarificationOption[]): ClarificationOption[] {
+  const seen = new Set<string>()
+  const options: ClarificationOption[] = []
+  for (const option of raw) {
+    const label = option.label.replace(/\s+/g, ' ').trim().slice(0, LABEL_MAX_LENGTH)
+    if (isBadOptionLabel(label) || seen.has(label)) continue
+    seen.add(label)
+    const description = option.description?.replace(/\s+/g, ' ').trim().slice(0, DESCRIPTION_MAX_LENGTH)
+    options.push(description ? { id: option.id, label, description } : { id: option.id, label })
+    if (options.length >= MODEL_OPTION_MAX) break
+  }
+  if (options.length === 0) return []
+  const hasEscape = options.some(
+    (option) => option.id === 'auto' || /帮你决定|你来定|你决定/.test(option.label),
+  )
+  return hasEscape ? options : [...options, AUTO_ESCAPE_OPTION]
+}
 
 interface CardAnswerRoute {
   prompt: string
@@ -83,7 +150,8 @@ function resolveCardAnswer(input: AgentSendMessageInput, primaryIntent?: string)
   if (input.metadata?.source !== 'card_option') return undefined
   const optionId = input.metadata.selected_option_id
   if (BLOCKED_DECISION_IDS.has(optionId ?? '')) return undefined
-  const description = CARD_ANSWER_REQUIREMENTS[optionId ?? ''] ?? input.content
+  const isFixedCard = FIXED_CARD_LABELS[optionId ?? ''] === input.content.trim()
+  const description = isFixedCard ? CARD_ANSWER_REQUIREMENTS[optionId ?? ''] : input.content
   return {
     prompt: input.content,
     requirements: ensurePrimaryIntent([{ id: 'F-001', description }], primaryIntent),
@@ -96,6 +164,8 @@ export async function handleGuideMessage(
   model?: GuideModelOptions,
   /** 规则路由下也把助手回复写入会话 JSONL，保证回访恢复与实时 UI 一致 */
   persistAssistant?: (text: string) => void,
+  /** 内部标记落盘（system role，回访恢复不展示）：决策卡片弹出时记录选项原文，供事后追溯 */
+  persistSystem?: (text: string) => void,
 ): Promise<void> {
   const project = findProject(input.project_id)
   setProgrammingEventPublisher(publish)
@@ -138,7 +208,7 @@ export async function handleGuideMessage(
 
   // 渠道可用 → 优先走真实模型；模型不可用 / 解析失败 → 回退规则路由
   if (model) {
-    const handled = await tryModelDrivenGuide(input, publish, model, primaryIntent)
+    const handled = await tryModelDrivenGuide(input, publish, model, primaryIntent, persistSystem)
     if (handled) return
   }
 
@@ -149,11 +219,7 @@ export async function handleGuideMessage(
     const reply = '我需要再确认几个关键点，这样草图会更接近你的想法。'
     persistAssistant?.(reply)
     publish(makeGuideEvent(input, 'message_delta', { text: reply }))
-    publish(makeGuideEvent(input, 'user_decision_required', {
-      kind: 'clarification',
-      title: '先确认方向',
-      questions: route.questions.slice(0, 3),
-    }))
+    publishClarificationCard(input, publish, normalizeClarificationOptions(route.questions.slice(0, 3)), persistSystem)
     return
   }
 
@@ -183,6 +249,7 @@ async function tryModelDrivenGuide(
   publish: GuideEventPublisher,
   model: GuideModelOptions,
   primaryIntent?: string,
+  persistSystem?: (text: string) => void,
 ): Promise<boolean> {
   const systemTurn: ConversationTurn = { role: 'system', content: GUIDE_SYSTEM_PROMPT }
   const history: ConversationTurn[] = [systemTurn, ...model.history]
@@ -223,12 +290,7 @@ async function tryModelDrivenGuide(
   if (parsed.action === 'ask_clarification') {
     updateProject(input.project_id, { current_stage: 'blocked_for_user_decision' })
     publish(makeGuideEvent(input, 'stage_changed', { stage: 'blocked_for_user_decision' }))
-    publish(makeGuideEvent(input, 'user_decision_required', {
-      kind: 'clarification',
-      title: '先确认方向',
-      // questions 0~3 条：0 条表示纯文本澄清，B 侧不弹卡片
-      questions: parsed.questions,
-    }))
+    publishClarificationCard(input, publish, normalizeClarificationOptions(parsed.questions), persistSystem)
     return true
   }
 
@@ -244,6 +306,29 @@ async function tryModelDrivenGuide(
     query: model.query,
   })
   return true
+}
+
+/**
+ * 发布澄清决策卡片并落盘选项原文（[decision-card] 内部标记）。
+ * questions 为空表示纯文本澄清，不弹卡片；有选项时务必落盘——
+ * user_decision_required 事件只存在渲染端内存，不落盘则事后无法追溯
+ * 到底给用户弹过哪些选项（历史会话只能看到 reply 问句）。
+ */
+function publishClarificationCard(
+  input: AgentSendMessageInput,
+  publish: GuideEventPublisher,
+  questions: ClarificationOption[],
+  persistSystem?: (text: string) => void,
+): void {
+  if (questions.length > 0) {
+    persistSystem?.(`[decision-card] ${questions.map((option) => option.label).join('｜')}`)
+  }
+  publish(makeGuideEvent(input, 'user_decision_required', {
+    kind: 'clarification',
+    title: '先确认方向',
+    // 0 条表示纯文本澄清，B 侧不弹卡片
+    questions,
+  }))
 }
 
 function parseGuideJson(text: string): GuideParsed | undefined {
@@ -276,7 +361,9 @@ function parseGuideJson(text: string): GuideParsed | undefined {
     const questions = (Array.isArray(parsed.questions) ? parsed.questions : [])
       .filter(isRecord)
       .filter((q) => typeof q.id === 'string' && typeof q.label === 'string')
-      .slice(0, 3)
+      // 预截取放宽到 8 条：占位/问句式坏选项要在纠偏（normalizeClarificationOptions）时
+      // 才被丢弃，先截 3 条会让坏选项占坑挤掉后面的合法项
+      .slice(0, 8)
       .map((q) => ({
         id: q.id as string,
         label: q.label as string,

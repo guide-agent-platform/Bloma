@@ -552,6 +552,48 @@ function nextRequirementId(existing: SketchRequirement[]): string {
   return `F-${String(max + 1).padStart(3, '0')}`
 }
 
+// ==================== 修改确认门（与澄清卡片对称的两道门） ====================
+
+/** 修改确认卡的决策 id（confirm/rephrase/cancel），由 orchestrator 在引导路径前拦截。 */
+export type IterationDecisionId = 'confirm' | 'rephrase' | 'cancel'
+
+export interface PendingIteration {
+  /** 用户原话（确认卡 reply 展示用，保证用户认得出） */
+  raw: string
+  /** 清洗后的需求项描述（确认后并入 F-xxx，避免整句口水话污染 PRD 背板） */
+  description: string
+}
+
+// 生命周期与决策卡一致（渲染端内存级）：卡片随重启消失，pending 也无须持久化
+const pendingIterations = new Map<string, PendingIteration>()
+
+export function setPendingIteration(projectId: string, pending: PendingIteration): void {
+  pendingIterations.set(projectId, pending)
+}
+
+/** 取出并清除 pending（confirm/rephrase/cancel 任一决策都终结本次待确认修改）。 */
+export function takePendingIteration(projectId: string): PendingIteration | undefined {
+  const pending = pendingIterations.get(projectId)
+  pendingIterations.delete(projectId)
+  return pending
+}
+
+export function isIterationDecisionId(id: string | undefined): id is IterationDecisionId {
+  return id === 'confirm' || id === 'rephrase' || id === 'cancel'
+}
+
+/**
+ * 修改诉求 → 需求项描述：剥离否定引导与口语前缀（「啥意思，我要音乐合成器」→
+ * 「音乐合成器」）。纯需求文案清洗，非代码修补；清洗后为空则保留原文，绝不改写语义。
+ */
+export function refineModificationDescription(text: string): string {
+  let out = text.trim()
+  out = out.replace(/^(不对|不是|搞错了|弄错了|错了|这不对|货不对板|什么意思|啥意思)[，,。！!～\s]*/, '')
+  out = out.replace(/^(我要的是|我想要的是|我想要|我要|我希望(?:他|它|这个)?能?|我想|能不能|可以|请帮我|帮我)[，,。！!\s]*/, '')
+  out = out.replace(/^[，,。！!\s]+/, '')
+  return out.trim() || text.trim()
+}
+
 function truncateCopy(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max)}…` : value
 }

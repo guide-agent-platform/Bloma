@@ -16,9 +16,19 @@ import { appendJsonLine } from '../storage/json-store'
 import { buildSdkEnv, decryptApiKey, getChannelByIdRaw, getFirstEnabledChannel } from './channel-manager'
 export { buildSdkEnv } from './channel-manager'
 import { handleGuideMessage } from './guide-agent-service'
-import { READY_COMPLETION_COPY, resolveBlockedDecision, resumeBlockedFlow, runIterationTask, setProgrammingEventPublisher } from './programming-orchestrator'
+import {
+  READY_COMPLETION_COPY,
+  isIterationDecisionId,
+  refineModificationDescription,
+  resolveBlockedDecision,
+  resumeBlockedFlow,
+  runIterationTask,
+  setPendingIteration,
+  setProgrammingEventPublisher,
+  takePendingIteration,
+} from './programming-orchestrator'
 import { readPrdBackplane } from './document-engine'
-import { findProject } from './project-service'
+import { findProject, updateProject } from './project-service'
 import { recordSessionActivity } from './session-service'
 
 export type StreamPublisher = (event: AgentEvent) => void
@@ -152,6 +162,14 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
         timestamp: Date.now(),
       })
 
+    // 内部标记落盘（system role，回访恢复不展示）：决策卡片选项原文等追溯信息
+    const persistSystem = (text: string) =>
+      appendAgentMessage(input.session_id, {
+        role: 'system',
+        content: [{ type: 'text', text }],
+        timestamp: Date.now(),
+      })
+
     // 引导路径的模型选项：渠道可用则切真实模型（不可用/解析失败回退规则），无渠道直接走规则，不阻塞澄清
     const guideOptions: GuideModelOptions | undefined = env
       ? {
@@ -174,7 +192,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
           { request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, mode: input.mode, decision: 'explain', content: input.content, query: sdkQuery, channel_id: input.channel_id },
           streamPublisher,
         )
-        await handleGuideMessage(input, streamPublisher, guideOptions, persistAssistant)
+        await handleGuideMessage(input, streamPublisher, guideOptions, persistAssistant, persistSystem)
       } else {
         await resumeBlockedFlow(
           { request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, mode: input.mode, decision: blockedDecision, content: input.content, query: sdkQuery, channel_id: input.channel_id },
@@ -186,8 +204,18 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       return { accepted: true, session_id: input.session_id, stream_started: true }
     }
 
+    // 修改确认卡回传（confirm/rephrase/cancel）：必须在引导路径之前拦截——
+    // 此刻权威阶段是 blocked_for_user_decision，若落入 handleGuideMessage 会被
+    // resolveCardAnswer 当成澄清卡答案误入草图生成。
+    if (input.metadata?.source === 'card_option' && isIterationDecisionId(input.metadata.selected_option_id)) {
+      await resolveIterationDecisionFlow(input, streamPublisher, sdkQuery)
+      persistTerminalMessage(input.session_id, 'completed')
+      streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
+      return { accepted: true, session_id: input.session_id, stream_started: true }
+    }
+
     if (shouldUseGuideAgent(authoritativeStage)) {
-      await handleGuideMessage(input, streamPublisher, guideOptions, persistAssistant)
+      await handleGuideMessage(input, streamPublisher, guideOptions, persistAssistant, persistSystem)
       persistTerminalMessage(input.session_id, 'completed')
       streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
       return { accepted: true, session_id: input.session_id, stream_started: true }
@@ -226,20 +254,33 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
         maxTokens,
       })
       if (intent === 'modify') {
-        // 让编程管线沿用与 runAgent 相同的流式发布通道，确保迭代事件上屏
-        setProgrammingEventPublisher(streamPublisher)
-        await runIterationTask({
-          request_id: input.request_id,
-          session_id: input.session_id,
-          project_id: input.project_id,
-          mode: input.mode,
-          prompt: input.content,
-          channel_id: input.channel_id,
-          query: sdkQuery,
-        })
+        // 修改确认门：修改是破坏性最大的操作（整版重造），必须与草图/MVP 一样先过一道
+        // 确认。直接开跑曾是「修改黑洞」的反面——误触发词表（如「换个话题」）会白白
+        // 重生成整版，且整句口语被逐字并入需求清单污染 PRD 背板。确认后才进入迭代。
+        const description = refineModificationDescription(input.content)
+        setPendingIteration(input.project_id, { raw: input.content, description })
+        updateProject(input.project_id, { current_stage: 'blocked_for_user_decision' })
+        streamPublisher(makeEvent(input, 'stage_changed', { stage: 'blocked_for_user_decision' }))
+        const confirmCopy = `我理解你想改：「${truncateForCopy(description, 40)}」，确认按这个方向重新生成一版吗？`
+        persistAssistant(confirmCopy)
+        persistSystem(`[decision-card] 对，就这样改｜不对，我重新说｜不改了`)
+        streamPublisher(makeEvent(input, 'message_delta', { text: confirmCopy }))
+        streamPublisher(makeEvent(input, 'user_decision_required', {
+          kind: 'iteration_confirm',
+          title: '确认修改方向',
+          questions: [
+            { id: 'confirm', label: '对，就这样改', description: '按这个修改点重新生成一版' },
+            { id: 'rephrase', label: '不对，我重新说', description: '再说一次你想怎么改' },
+            { id: 'cancel', label: '不改了', description: '保持当前版本' },
+          ],
+        }))
+        persistTerminalMessage(input.session_id, 'completed')
+        streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
         return { accepted: true, session_id: input.session_id, stream_started: true }
       }
-      const guidance = READY_COMPLETION_COPY
+      // other（进度追问/闲聊）：固定完成文案 + 修改出口引导，避免「修改黑洞」的死胡同——
+      // 用户修改诉求没命中意图词时，至少要告诉他怎么说才能触发修改。
+      const guidance = `${READY_COMPLETION_COPY}\n\n想调整哪里直接告诉我，比如“加一个历史记录”。`
       persistAssistant(guidance)
       streamPublisher(makeEvent(input, 'message_delta', { text: guidance }))
       persistTerminalMessage(input.session_id, 'completed')
@@ -619,6 +660,56 @@ function isStallReply(text: string): boolean {
 
 function shouldUseGuideAgent(stage: AgentSendMessageInput['current_stage']): boolean {
   return stage === 'clarifying' || stage === 'blocked_for_user_decision'
+}
+
+/** 用户可见文案截断（超长加省略号）。 */
+function truncateForCopy(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max)}…` : value
+}
+
+/**
+ * 修改确认卡三决策的分发：
+ * - confirm：取出 pending，以清洗后的修改描述进入迭代（不再弹任何确认）；
+ * - rephrase/cancel：终结 pending，回到 ready 并如实告知；
+ * - pending 已丢失（如重启后点旧卡）：如实说明过期，回 ready 请用户重说。
+ * 任一决策都会把阶段收敛回 ready / iterating，绝不悬在 blocked_for_user_decision。
+ */
+async function resolveIterationDecisionFlow(
+  input: AgentSendMessageInput,
+  streamPublisher: (event: AgentEvent) => void,
+  sdkQuery: SDKQuery | undefined,
+): Promise<void> {
+  const decision = input.metadata?.selected_option_id
+  const pending = takePendingIteration(input.project_id)
+
+  if (decision === 'confirm' && pending) {
+    setProgrammingEventPublisher(streamPublisher)
+    await runIterationTask({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+      prompt: pending.description,
+      channel_id: input.channel_id,
+      query: sdkQuery,
+    })
+    return
+  }
+
+  const copy =
+    decision === 'confirm'
+      ? '刚才的确认卡片已过期，想修改的话请再说一次。'
+      : decision === 'rephrase'
+        ? '好的，你想怎么改，直接说就行。'
+        : '好的，先保持现在的版本。'
+  updateProject(input.project_id, { current_stage: 'ready' })
+  streamPublisher(makeEvent(input, 'stage_changed', { stage: 'ready' }))
+  appendAgentMessage(input.session_id, {
+    role: 'assistant',
+    content: [{ type: 'text', text: copy }],
+    timestamp: Date.now(),
+  })
+  streamPublisher(makeEvent(input, 'message_delta', { text: copy }))
 }
 
 /**

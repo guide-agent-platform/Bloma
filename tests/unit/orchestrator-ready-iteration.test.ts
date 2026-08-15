@@ -35,13 +35,14 @@ vi.mock('../../main/programming-orchestrator', async (importOriginal) => {
 
 vi.mock('../../main/project-service', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../main/project-service')>()
-  return { ...original, findProject: vi.fn() }
+  return { ...original, findProject: vi.fn(), updateProject: vi.fn(() => ({})) }
 })
 
 /**
- * ready 护栏意图分流（「修改黑洞」修复）。
- * - 已生成完成后，用户提出修改/调整/纠错类输入 → 进入迭代重新生成（runIterationTask）。
- * - 纯进度追问（好了吗）→ 仍走固定完成文案，不误触发迭代。
+ * ready 护栏意图分流（「修改黑洞」修复）+ 修改确认门。
+ * - 已生成完成后，修改类输入 → 先弹「修改确认卡」（不直接整版重造）；
+ * - 用户点「对，就这样改」→ 才进入迭代重新生成（runIterationTask，prompt 为清洗后的描述）；
+ * - 纯进度追问（好了吗）→ 固定完成文案 + 修改出口引导，不误触发迭代。
  */
 describe('ready 护栏意图分流', () => {
   const originalPromaHome = process.env.PROMA_HOME
@@ -54,7 +55,7 @@ describe('ready 护栏意图分流', () => {
     runIterationTaskMock.mockClear()
   })
 
-  it('ready 阶段修改请求进入迭代重新生成，而非固定文案挡回', async () => {
+  it('ready 阶段修改请求先弹确认卡；点「对，就这样改」后才以清洗后描述进入迭代', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-ready-iter-'))
     process.env.PROMA_HOME = home
     const events: AgentEvent[] = []
@@ -70,6 +71,7 @@ describe('ready 护栏意图分流', () => {
       current_stage: 'ready',
     } as never)
 
+    // 第一轮：修改诉求 → 确认卡（不是直接重生成）
     await runAgent({
       request_id: 'req-iter',
       session_id: 'session-iter',
@@ -80,19 +82,46 @@ describe('ready 护栏意图分流', () => {
       channel_id: 'test-channel',
     })
 
-    expect(runIterationTaskMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        project_id: 'project-ready-iter',
-        prompt: '能不能改成那种九个数字按键的那种',
-      }),
-    )
+    expect(runIterationTaskMock).not.toHaveBeenCalled()
     expect(sdkCalled).toBe(false)
-    // 不再下发「已经生成好了」固定文案
+    const decision = events.find((event) => event.type === 'user_decision_required')
+    expect(decision?.payload.kind).toBe('iteration_confirm')
+    expect(decision?.payload.questions).toEqual([
+      expect.objectContaining({ id: 'confirm', label: '对，就这样改' }),
+      expect.objectContaining({ id: 'rephrase', label: '不对，我重新说' }),
+      expect.objectContaining({ id: 'cancel', label: '不改了' }),
+    ])
+    // 确认卡 reply 展示清洗后的修改点，用户认得出
     const deltas = events
       .filter((event) => event.type === 'message_delta')
       .map((event) => String(event.payload.text ?? ''))
       .join('')
+    expect(deltas).toContain('改成那种九个数字按键的那种')
     expect(deltas).not.toContain('已经生成好了')
+
+    // 第二轮：点「对，就这样改」→ 迭代开跑，prompt 是剥离「能不能」后的描述
+    events.length = 0
+    vi.mocked(findProject).mockReturnValue({
+      project_id: 'project-ready-iter',
+      current_stage: 'blocked_for_user_decision',
+    } as never)
+    await runAgent({
+      request_id: 'req-iter-2',
+      session_id: 'session-iter',
+      project_id: 'project-ready-iter',
+      content: '对，就这样改',
+      mode: 'quick',
+      current_stage: 'blocked_for_user_decision',
+      channel_id: 'test-channel',
+      metadata: { source: 'card_option', selected_option_id: 'confirm' },
+    })
+
+    expect(runIterationTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        project_id: 'project-ready-iter',
+        prompt: '改成那种九个数字按键的那种',
+      }),
+    )
   })
 
   it('ready 阶段纯进度追问仍走固定完成文案，不误触发迭代', async () => {
@@ -126,9 +155,11 @@ describe('ready 护栏意图分流', () => {
       .join('')
     expect(deltas).toContain('已经生成好了')
     expect(deltas).toContain('右侧预览区')
+    // other 死胡同出口：告诉用户怎么说才能触发修改
+    expect(deltas).toContain('想调整哪里直接告诉我')
   })
 
-  it('ready 阶段「货不对板/否定」类反馈（"啥意思，我要音乐合成器"）进入迭代重新生成', async () => {
+  it('ready 阶段「货不对板/否定」类反馈（"啥意思，我要音乐合成器"）→ 确认卡，reply 展示清洗后的「音乐合成器」', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-ready-mismatch-'))
     process.env.PROMA_HOME = home
     const events: AgentEvent[] = []
@@ -152,12 +183,18 @@ describe('ready 护栏意图分流', () => {
       channel_id: 'test-channel',
     })
 
-    expect(runIterationTaskMock).toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: '啥意思，我要音乐合成器' }),
-    )
+    // 不直接重生成，先确认；否定引导与口语前缀被清洗后展示
+    expect(runIterationTaskMock).not.toHaveBeenCalled()
+    const decision = events.find((event) => event.type === 'user_decision_required')
+    expect(decision?.payload.kind).toBe('iteration_confirm')
+    const deltas = events
+      .filter((event) => event.type === 'message_delta')
+      .map((event) => String(event.payload.text ?? ''))
+      .join('')
+    expect(deltas).toContain('「音乐合成器」')
   })
 
-  it('ready 阶段模糊否定（L1 未命中、L2 疑似）经 L3 LLM 兜底判为修改 → 进入迭代', async () => {
+  it('ready 阶段模糊否定（L1 未命中、L2 疑似）经 L3 LLM 兜底判为修改 → 弹确认卡（非直接迭代）', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-ready-l3-'))
     process.env.PROMA_HOME = home
     const events: AgentEvent[] = []
@@ -184,9 +221,89 @@ describe('ready 护栏意图分流', () => {
       channel_id: 'test-channel',
     })
 
-    expect(runIterationTaskMock).toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: '怎么感觉不太对劲，这跟我想要的不一样啊' }),
-    )
+    expect(runIterationTaskMock).not.toHaveBeenCalled()
+    const decision = events.find((event) => event.type === 'user_decision_required')
+    expect(decision?.payload.kind).toBe('iteration_confirm')
+  })
+
+  it('确认卡「不对，我重新说」/「不改了」→ 不迭代、pending 终结、阶段回 ready 并如实告知', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-rephrase-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    setSDKQueryForTests(defaultTestQuery)
+
+    for (const [projectId, optionId, label, expectedCopy] of [
+      ['project-rephrase', 'rephrase', '不对，我重新说', '好的，你想怎么改，直接说就行。'],
+      ['project-cancel', 'cancel', '不改了', '好的，先保持现在的版本。'],
+    ] as const) {
+      // 先制造 pending：ready 阶段修改诉求 → 确认卡
+      vi.mocked(findProject).mockReturnValue({ project_id: projectId, current_stage: 'ready' } as never)
+      await runAgent({
+        request_id: `req-${optionId}-1`,
+        session_id: `session-${optionId}`,
+        project_id: projectId,
+        content: '加一个历史记录',
+        mode: 'quick',
+        current_stage: 'ready',
+        channel_id: 'test-channel',
+      })
+      // 点决策卡
+      vi.mocked(findProject).mockReturnValue({ project_id: projectId, current_stage: 'blocked_for_user_decision' } as never)
+      await runAgent({
+        request_id: `req-${optionId}-2`,
+        session_id: `session-${optionId}`,
+        project_id: projectId,
+        content: label,
+        mode: 'quick',
+        current_stage: 'blocked_for_user_decision',
+        channel_id: 'test-channel',
+        metadata: { source: 'card_option', selected_option_id: optionId },
+      })
+    }
+
+    expect(runIterationTaskMock).not.toHaveBeenCalled()
+    const deltas = events
+      .filter((event) => event.type === 'message_delta')
+      .map((event) => String(event.payload.text ?? ''))
+      .join('\n')
+    expect(deltas).toContain('好的，你想怎么改，直接说就行。')
+    expect(deltas).toContain('好的，先保持现在的版本。')
+    const stageEvents = events
+      .filter((event) => event.type === 'stage_changed')
+      .map((event) => String(event.payload.stage))
+    expect(stageEvents).toContain('ready')
+  })
+
+  it('确认卡过期（如重启后点旧卡，pending 已丢）→ 不迭代，如实说明过期并回 ready', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-expired-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    setSDKQueryForTests(defaultTestQuery)
+
+    vi.mocked(findProject).mockReturnValue({
+      project_id: 'project-expired',
+      current_stage: 'blocked_for_user_decision',
+    } as never)
+
+    await runAgent({
+      request_id: 'req-expired',
+      session_id: 'session-expired',
+      project_id: 'project-expired',
+      content: '对，就这样改',
+      mode: 'quick',
+      current_stage: 'blocked_for_user_decision',
+      channel_id: 'test-channel',
+      metadata: { source: 'card_option', selected_option_id: 'confirm' },
+    })
+
+    expect(runIterationTaskMock).not.toHaveBeenCalled()
+    const deltas = events
+      .filter((event) => event.type === 'message_delta')
+      .map((event) => String(event.payload.text ?? ''))
+      .join('')
+    expect(deltas).toContain('确认卡片已过期')
   })
 
   it('ready 阶段纯进度追问不触发 L3 LLM 调用（延迟不被拖累）', async () => {
