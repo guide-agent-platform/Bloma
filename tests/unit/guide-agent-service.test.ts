@@ -144,7 +144,9 @@ describe('GuideAgentService through AgentOrchestrator', () => {
       .filter((event) => event.type === 'message_delta')
       .map((event) => String(event.payload.text ?? ''))
       .join('')
-    expect(deltaTexts).toBe('好的，马上开始')
+    expect(deltaTexts).toContain('好的，马上开始')
+    // 本 mock 的草图 LLM 输出非 HTML → 模板回退必须如实告知（草图说明，2026-08-15 静默回退案例）
+    expect(deltaTexts).toContain('草图说明')
     expect(deltaTexts).not.toContain('{"action"')
     // 会话 JSONL 落盘的也是 reply 而非原始 JSON
     const jsonl = readFileSync(join(home, 'agent-sessions', 'session-guide.jsonl'), 'utf8')

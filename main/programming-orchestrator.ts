@@ -95,7 +95,28 @@ export async function runSketchTask(input: SketchTaskInput): Promise<SketchTaskR
   const requirements = input.requirements?.length
     ? input.requirements
     : [{ id: 'F-001', description: input.prompt }]
-  const sketch = await resolveSketch(input, requirements)
+  const { result: sketch, source, fallbackReason, llmErrorCode } = await resolveSketch(input, requirements)
+  if (source === 'template' && fallbackReason) {
+    // 模板回退必须留痕：埋点 + 会话内如实说明（阶段如实性——不假装模型参与了生成）。
+    // 此前完全静默，渠道瞬断时用户只看到「草图变成通用占位页」却无任何线索。
+    trackAnalytics({
+      request_id: input.request_id,
+      event: {
+        event_type: 'sketch_fallback',
+        project_id: input.project_id,
+        session_id: input.session_id,
+        payload: { reason: fallbackReason, llm_error_code: llmErrorCode },
+        privacy_level: 'research_safe',
+      },
+    })
+    const copy = sketchFallbackCopy(fallbackReason)
+    appendJsonLine(getAgentSessionPath(input.session_id), {
+      role: 'assistant',
+      content: [{ type: 'text', text: copy }],
+      timestamp: Date.now(),
+    })
+    publish(input, 'message_delta', { text: copy })
+  }
   recordSketchGenerated(input.project_id, requirements)
   await allowAutomatedTool('run_project', { project_id: input.project_id }, input.session_id, input.project_id)
   const sandbox = await runSandbox({ request_id: input.request_id, project_id: input.project_id })
@@ -147,29 +168,48 @@ export async function runSketchTask(input: SketchTaskInput): Promise<SketchTaskR
   return { preview_url: sandbox.preview_url, snapshot, summary: sketch.summary }
 }
 
+/** 草图回退原因：模板路径必带其一，供日志/埋点/如实告知，杜绝静默降级。 */
+type SketchFallbackReason = 'no_channel' | 'no_query' | 'decrypt_failed' | 'llm_failed'
+
+/** resolveSketch 的产物：结果 + 来源。模板路径必带 fallbackReason（LLM 路径不带）。 */
+interface ResolvedSketch {
+  result: GenerateSketchResult
+  source: 'llm' | 'template'
+  fallbackReason?: SketchFallbackReason
+  /** llm_failed 时的粗粒度错误码（SKETCH_LLM_* / unknown），只进日志与埋点，不进 UI。 */
+  llmErrorCode?: string
+}
+
 /**
  * resolveSketch — 草图生成来源分流。
  *
  * 渠道可用且调用方传入 query 时走 LLM 草图（generateSketchLlm，无交互纯外观、贴合功能项）；
  * 否则（无渠道 / 密钥不可解密 / LLM 生成失败）回退确定性模板 generateSketch。
  * 与 MVP 的「无模板兜底」不同：草图是低成本方向确认，不能因 LLM 故障卡死澄清流程。
+ *
+ * 回退不再静默（2026-08-15 赛车模拟器案例：渠道瞬断导致 18ms 内静默落模板，
+ * 事件流里毫无痕迹，事后只能靠毫秒级时间差反推 LLM 未发起）——来源与原因
+ * 一路带回给 runSketchTask 落日志/埋点/用户提示。
  */
-async function resolveSketch(input: SketchTaskInput, requirements: SketchRequirement[]): Promise<GenerateSketchResult> {
+async function resolveSketch(input: SketchTaskInput, requirements: SketchRequirement[]): Promise<ResolvedSketch> {
   const channel = input.channel_id ? getChannelByIdRaw(input.channel_id) : getFirstEnabledChannel()
   if (!channel || !input.query) {
-    return generateSketch({ project_id: input.project_id, requirements, max_pages: 3 })
+    const reason = input.query ? 'no_channel' : 'no_query'
+    console.error(`[resolveSketch] 草图回退确定性模板: reason=${reason}（channel_id=${input.channel_id ?? 'auto'}）`)
+    return { result: generateSketch({ project_id: input.project_id, requirements, max_pages: 3 }), source: 'template', fallbackReason: reason }
   }
   let apiKey: string
   try {
     apiKey = decryptApiKey(channel.api_key)
   } catch {
-    return generateSketch({ project_id: input.project_id, requirements, max_pages: 3 })
+    console.error(`[resolveSketch] 草图回退确定性模板: reason=decrypt_failed（channel ${channel.id} (${channel.name}) api_key 无法解密）`)
+    return { result: generateSketch({ project_id: input.project_id, requirements, max_pages: 3 }), source: 'template', fallbackReason: 'decrypt_failed' }
   }
   // 模型名用 name（真实模型 ID）：id 是渠道内唯一标识，不能传给 API
   const model = channel.models.find((item) => item.enabled)?.name ?? 'claude-sonnet-4-6'
   const env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
   try {
-    return await generateSketchLlm({
+    const result = await generateSketchLlm({
       project_id: input.project_id,
       requirements,
       query: input.query,
@@ -177,10 +217,26 @@ async function resolveSketch(input: SketchTaskInput, requirements: SketchRequire
       sessionId: input.session_id,
       maxTokens: channel.max_tokens ?? DEFAULT_MAX_TOKENS,
     })
-  } catch {
+    return { result, source: 'llm' }
+  } catch (error) {
     // LLM 草图失败（超时/非 HTML/网络错误）回退模板，不阻断草图产出
-    return generateSketch({ project_id: input.project_id, requirements, max_pages: 3 })
+    const llmErrorCode = error instanceof Error ? (error.message.match(/^([A-Z_]+):/)?.[1] ?? 'unknown') : 'unknown'
+    console.error(`[resolveSketch] 草图回退确定性模板: reason=llm_failed code=${llmErrorCode}（${error instanceof Error ? error.message : String(error)}）`)
+    return {
+      result: generateSketch({ project_id: input.project_id, requirements, max_pages: 3 }),
+      source: 'template',
+      fallbackReason: 'llm_failed',
+      llmErrorCode,
+    }
   }
+}
+
+/** 模板回退时给用户的如实话术：不假装模型参与了生成，并给可操作的去处。 */
+function sketchFallbackCopy(reason: SketchFallbackReason): string {
+  if (reason === 'llm_failed') {
+    return '（草图说明：这次模型生成失败了，先用简化模板让你确认大方向。可以再让我生成一次，或直接描述想要的样子。）'
+  }
+  return '（草图说明：这次没有可用的模型渠道，先用简化模板让你确认大方向。在设置里配好渠道后再让我重新生成，外观就会贴合你的需求。）'
 }
 
 // ---------------------------------------------------------------------------

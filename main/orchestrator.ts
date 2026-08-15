@@ -154,6 +154,12 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
         channelKeyUnusable = true
         console.error(`[runAgent] channel ${channel.id} (${channel.name}) api_key 无法解密，该渠道不可用`)
       }
+    } else {
+      // 无可用渠道（无启用渠道 / 密钥均不可解密）：引导回规则路由、草图落模板，
+      // 全链路静默降级。必须留日志——2026-08-15 赛车模拟器案例正是这一支无声
+      // 瞬断（模型缺席 18ms 出模板草图），事后只能靠毫秒级时间差反推。
+      console.error('[runAgent] 未解析到可用渠道（input.channel_id='
+        + `${input.channel_id ?? 'auto'}，getFirstEnabledChannel 无可用项），本次模型不参与：引导走规则路由、草图走模板`)
     }
     const maxTokens = channel?.max_tokens ?? 1200
     // 多轮历史：读取已有对话轮次（不含本次 user 消息，稍后追加），支撑 SDK 多轮上下文

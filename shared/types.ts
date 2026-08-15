@@ -812,6 +812,7 @@ export interface AnalyticsTrackInput extends RequestEnvelope {
       | 'conversation_submitted'
       | 'guide_role_switched'
       | 'sketch_generated'
+      | 'sketch_fallback'
       | 'mvp_delivered'
       | 'user_undo'
       | 'point_correction'
