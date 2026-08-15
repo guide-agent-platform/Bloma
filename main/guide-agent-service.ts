@@ -12,7 +12,7 @@ import { isRecord } from './validators'
 type GuideEventPublisher = (event: AgentEvent) => void
 
 /** 引导对话给模型的结构化指令：模型只输出 JSON 二选一（对齐 A2-14a Step 3 模板）。 */
-export const GUIDE_SYSTEM_PROMPT = `你是「向导 Agent」，负责把用户的想法澄清成可生成草图的软件需求。只输出一个 JSON 对象，不要任何多余文字，不要 markdown 代码块围栏。
+const GUIDE_SYSTEM_PROMPT = `你是「向导 Agent」，负责把用户的想法澄清成可生成草图的软件需求。只输出一个 JSON 对象，不要任何多余文字，不要 markdown 代码块围栏。
 
 二选一输出：
 
@@ -24,18 +24,11 @@ export const GUIDE_SYSTEM_PROMPT = `你是「向导 Agent」，负责把用户�
 【需求不清晰 → 需要澄清】
 {"action":"ask_clarification",
  "reply":"向用户澄清的引导语（简体中文一句话）",
- "questions":[{"id":"具体小写-连字符","label":"具体子类型（≤8 字，必须是用户能直接选的具体场景）","description":"说明选它后系统做成什么样的软件（≤30 字）"}]}
-
-澄清选项约束（重要）：
-- questions 的 label 必须是**具体可执行的子类型**，不能是笼统大类。
-  错误：label="游戏类型"（用户无法选"是什么游戏"）
-  正确：label="角色扮演"、"策略对战"、"休闲消除"、"看图记账" 等
-- 每个 label 应能独立作为草图需求的一句话描述。
-- description 补充该选项做成后的软件形态，帮助用户理解。
-- id 用小写字母+连字符（如 rpg-game），不含空格。
+ "questions":[{"id":"scope","label":"范围选项（≤6 字）","description":"解释含义（≤20 字）"}]}
 
 约束：
 - requirements 1~5 条；questions 0~3 条（0 条时表示直接在 reply 里追问，不弹选项）。
+- id 用小写字母+连字符（如 daily-tool），不含空格。
 - 只输出 JSON，其余一律不要。`
 
 type GuideParsed =
