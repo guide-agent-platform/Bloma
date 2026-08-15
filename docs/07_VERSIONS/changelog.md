@@ -7,7 +7,7 @@
 
 **v1.1 修订说明**：同步 §5 已知待同步项状态（4 项全部已同步），新增 §5.1 目录结构重组记录。按 `workflow.md §2.4` 走修订流程，待评审后回到已确认。
 
-## Sprint 3 项目管理补全（2026-08-15）
+## Sprint 3 项目管理补全 + 多项目预览 + 远程功能整合（2026-08-15）
 
 | 属性 | 值 |
 |------|-----|
@@ -15,20 +15,44 @@
 
 ### 变更内容
 
-- `[新增]` 项目硬删除 `project:delete`：索引条目 + 项目/文档/快照/事件文件 + 关联会话物理清理，路径安全防护，删除前停沙箱（迁移自 Proma `deleteAgentWorkspace`）
+**项目管理（迁移自 Proma 归档/删除 + 安全独立计数）**
+- `[新增]` 项目硬删除 `project:delete`：索引条目 + 项目/文档/快照/事件文件 + 关联会话物理清理，路径安全防护，删除前停沙箱
 - `[新增]` 取消归档 `project:unarchive`（archived → active）
 - `[新增]` 历史列表「进行中 / 已归档」视角 Tab，`project:list` 增 `scope`（active/archived/all）
 - `[新增]` 历史项目行内「归档 / 恢复 / 删除」操作 + 删除二次确认弹窗
 - `[新增]` 安全独立计数（PRD §10.5）：`Project.security_repair_count`，repair-engine 新增 `security_error` 类别，上限 3 次不计入普通退回
+
+**多项目预览**
+- `[新增]` 多项目预览地址按 project_id 隔离（`previewUrlsAtom`），各项目独立沙箱预览
+
+**澄清选项（对齐协作者工作）**
+- `[修改]` GUIDE_SYSTEM_PROMPT 澄清部分以协作者 86ff8eb 版本为准（一个明确问句 + 可点选答案、选项互斥具体、末条固定「你帮我决定」）；本地「澄清选项约束为具体子类型」（c2）因语义重复放弃（`git revert`）
+
+**渠道模型字段**
+- `[修复]` 渠道模型取 `name` 而非 `id`（id 是渠道内唯一标识，不能传 API），`buildSdkEnv` 透传 `provider_type`；含 `autoNameProject` 内部字段对齐
+
+**整合协作者已推送工作**
+- `[新增]` 决策卡片规范化：澄清选项纠偏 + 修改确认门
+- `[修复]` 回滚 EBUSY：沙箱停稳杀净 + rmSync 重试 + cwd 锁根除
+- `[新增]` 需求确认后自动命名：LLM 起名 + 口述前缀剥离兜底
+
+**工程/测试**
 - `[修复]` S2-PROJECT-001 E2E mock 补齐（`getFirstEnabledChannel` + `buildSdkEnv` PATH + `getSdkQuery` 确定性 LLM 响应）
 - `[新增]` 声明 `@playwright/test` E2E 依赖（此前未声明，依赖 node_modules 残留）
+- `[修复]` `npm audit fix` 修复 nanoid/postcss（extract-zip 需 electron breaking 升级，记录豁免）
 
 ### 影响评估
 
 - 受影响文档：DOC-4.1 `api-spec.md`（v1.2，补 `project:unarchive`/`project:delete`/`project:list` scope）
-- 受影响模块：project-service / repair-engine / ipc / preload-bridge / ProjectHistoryPage / App
-- 测试：新增 S3-PROJECT-001~017；`npm run test:all` 全绿
+- 受影响模块：project-service / repair-engine / ipc / preload-bridge / ProjectHistoryPage / App / programming-orchestrator / guide-agent-service / agent-atoms / platform-services / session-service / orchestrator / shared-types
+- 测试：新增 S3-PROJECT-001~017 + 协作者测试（auto-name / guide-agent-service / orchestrator-ready-iteration / platform-services）；`npm run test:all` 全绿
 - 是否需要回滚测试：是（归档/删除/回滚路径已覆盖）
+
+### 协作备注
+
+- 本次 push 通过 `git merge origin/sprint2` 整合协作者 bukejiegg 的 3 个 commit（决策卡片规范化 / 回滚 EBUSY 修复 / 需求自动命名）
+- 本地「澄清选项约束」（c2）与协作者版本语义重复，已 `git revert` 放弃
+- 作者 email 已统一为 `leiyuwan22@gmail.com`（filter-branch 修正），备份分支 `backup-sprint2-pre-push` 保留
 
 ---
 
