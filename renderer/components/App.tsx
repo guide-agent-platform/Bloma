@@ -21,7 +21,7 @@ import {
   markDecisionConsumed,
   activeAgentSessionIdAtom,
   snapshotsListAtom,
-  previewUrlAtom,
+  previewUrlsAtom,
   currentSnapshotIdAtom,
   loadAgentSessions,
   loadSessionHistory,
@@ -31,7 +31,7 @@ import type { ProjectMode, WorkflowStage } from './atoms'
 
 /**
  * 这些阶段后端已产出可渲染文件（草图 / MVP）。回访恢复或重启后，旧沙箱进程已死，
- * 需要重跑 sandbox 回填 previewUrlAtom（P0-2）。
+ * 需要重跑 sandbox 回填 previewUrlsAtom（P0-2）。
  */
 const PREVIEW_READY_STAGES = new Set<WorkflowStage>([
   'sketch_ready',
@@ -99,7 +99,7 @@ const AppRoutes: React.FC = () => {
   const setActiveSessionId = useSetAtom(activeAgentSessionIdAtom)
   const setCurrentProject = useSetAtom(currentProjectAtom)
   const setSnapshotsList = useSetAtom(snapshotsListAtom)
-  const setPreviewUrl = useSetAtom(previewUrlAtom)
+  const setPreviewUrls = useSetAtom(previewUrlsAtom)
   const setCurrentSnapshotId = useSetAtom(currentSnapshotIdAtom)
   const setMessages = useSetAtom(agentMessagesFamily(sessionId))
 
@@ -109,10 +109,25 @@ const AppRoutes: React.FC = () => {
   const decisionCards = useUserDecisionCards()
   const currentProject = useAtomValue(currentProjectAtom)
   const currentStage = useAtomValue(workflowStageAtom)
-  const streamPreviewUrl = useAtomValue(previewUrlAtom)
+  const previewUrls = useAtomValue(previewUrlsAtom)
   const currentSnapshotId = useAtomValue(currentSnapshotIdAtom)
 
-  // 回访恢复预览（P0-2）：项目已产出草图/MVP 文件时，重跑沙箱并回填 previewUrlAtom。
+  // 当前项目预览地址（按 project_id 隔离）：从 previewUrlsAtom 取本项目沙箱地址
+  const streamPreviewUrl = currentProject?.project_id
+    ? (previewUrls[currentProject.project_id] ?? null)
+    : null
+
+  // 写 / 清空指定项目的预览地址（多项目各自独立预览）
+  const setProjectPreview = useCallback((projectId: string, url: string | null) => {
+    setPreviewUrls((prev) => {
+      if (url) return { ...prev, [projectId]: url }
+      const next = { ...prev }
+      delete next[projectId]
+      return next
+    })
+  }, [setPreviewUrls])
+
+  // 回访恢复预览（P0-2）：项目已产出草图/MVP 文件时，重跑沙箱并回填 previewUrlsAtom。
   // 旧沙箱进程已随主进程退出而亡，旧端口必死，直接重跑拿新 preview_url。
   // 失败不再静默吞掉：显式进入 error 态（带「重新连接沙箱」重试），避免停在空态。
   const restorePreview = useCallback((projectId: string) => {
@@ -125,18 +140,18 @@ const AppRoutes: React.FC = () => {
     void api.sandbox.restore({ request_id: crypto.randomUUID(), project_id: projectId })
       .then((result) => {
         if (result?.ok && result.data.preview_url) {
-          setPreviewUrl(result.data.preview_url)
+          setProjectPreview(projectId, result.data.preview_url)
           setPreviewStatus('running')
         } else {
-          setPreviewUrl(null)
+          setProjectPreview(projectId, null)
           setPreviewStatus('error')
         }
       })
       .catch(() => {
-        setPreviewUrl(null)
+        setProjectPreview(projectId, null)
         setPreviewStatus('error')
       })
-  }, [setPreviewUrl])
+  }, [setProjectPreview])
 
   // 离开 sketch_ready 后复位「生成中」态（由 stage_changed 事件驱动）
   React.useEffect(() => {
@@ -212,11 +227,11 @@ const AppRoutes: React.FC = () => {
     })
 
     // 新项目开始：清掉上一项目的预览地址与时间轴，避免串台
-    setPreviewUrl(null)
+    setProjectPreview(newProject.project_id, null)
     setSnapshotsList([])
 
     setRoute('workspace')
-  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, setPreviewUrl, setSnapshotsList])
+  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, setProjectPreview, setSnapshotsList])
 
   // ==================== 从历史列表恢复项目 ====================
 
@@ -366,9 +381,9 @@ const AppRoutes: React.FC = () => {
       .then((result) => {
         if (result?.ok && result.data.rolled_back) {
           if (result.data.preview_url) {
-            setPreviewUrl(result.data.preview_url)
+            setProjectPreview(projectId, result.data.preview_url)
           } else {
-            setPreviewUrl(null)
+            setProjectPreview(projectId, null)
             setPreviewStatus('error')
           }
           setCurrentSnapshotId(result.data.current_snapshot_id)
@@ -387,7 +402,7 @@ const AppRoutes: React.FC = () => {
         setPreviewStatus('error')
         notify('回滚出错了，当前版本没有被改动。可以稍后再试一次。')
       })
-  }, [currentProject, projectList, setCurrentSnapshotId, setMessages, setPreviewUrl])
+  }, [currentProject, projectList, setCurrentSnapshotId, setMessages, setProjectPreview])
 
   // ==================== 超时操作（超过 120 秒） ====================
 
@@ -444,27 +459,28 @@ const AppRoutes: React.FC = () => {
     void api.sandbox.restore({ request_id: crypto.randomUUID(), project_id: projectId })
       .then((result) => {
         if (result?.ok && result.data.preview_url) {
-          setPreviewUrl(result.data.preview_url)
+          setProjectPreview(projectId, result.data.preview_url)
           setPreviewStatus('running')
         } else {
-          setPreviewUrl(null)
+          setProjectPreview(projectId, null)
           setPreviewStatus('error')
         }
       })
       .catch(() => {
-        setPreviewUrl(null)
+        setProjectPreview(projectId, null)
         setPreviewStatus('error')
       })
-  }, [currentProject, projectList, setPreviewUrl])
+  }, [currentProject, projectList, setProjectPreview])
 
   // ==================== 预览失效兜底（P0） ====================
 
   // iframe 加载失败（沙箱端口失效/进程已死）时：清掉失效的预览地址并进入 error 态，
   // 让用户看到「重新连接沙箱」重试按钮，而不是停在空态或死 iframe。
   const handlePreviewError = useCallback(() => {
-    setPreviewUrl(null)
+    const projectId = currentProject?.project_id ?? projectList[0]?.project_id
+    if (projectId) setProjectPreview(projectId, null)
     setPreviewStatus('error')
-  }, [setPreviewUrl])
+  }, [currentProject, projectList, setProjectPreview])
 
   // ==================== 设置页入口 ====================
 

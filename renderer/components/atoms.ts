@@ -40,7 +40,7 @@ export {
   networkOnlineAtom, stageIndicatorLabelAtom, globalUserErrorAtom, upgradeConfirmVisibleAtom,
   correctionModalVisibleAtom, correctionUserNoteAtom, correctionContextAtom,
   snapshotsListAtom, isQuickModeAtom, isLongtermModeAtom, documentPanelVisibleAtom,
-  hasActiveStreamAtom, canUpgradeAtom, previewUrlAtom, currentSnapshotIdAtom, STAGE_LABEL_MAP,
+  hasActiveStreamAtom, canUpgradeAtom, previewUrlsAtom, currentSnapshotIdAtom, STAGE_LABEL_MAP,
   appendMessageToSession, markDecisionConsumed, clearPermissionRequest, resetProjectState,
   loadAgentSessions, loadSessionHistory, loadSnapshots,
 } from '../agent-atoms'

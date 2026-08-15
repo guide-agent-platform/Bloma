@@ -158,10 +158,12 @@ export function setupGlobalAgentListeners(): () => void {
       ]
     })
 
-    // 预览地址：sketch_ready / mvp_ready 带回沙箱 preview_url，供预览区渲染真实产物
+    // 预览地址：sketch_ready / mvp_ready 带回沙箱 preview_url，按项目隔离存储（多项目各自独立预览）
     if (event.type === 'sketch_ready' || event.type === 'mvp_ready') {
       const url = typeof event.payload.preview_url === 'string' ? event.payload.preview_url : null
-      if (url) store.set(previewUrlAtom, url)
+      if (event.project_id && url) {
+        store.set(previewUrlsAtom, (prev) => ({ ...prev, [event.project_id!]: url }))
+      }
       const snapshotId = typeof event.payload.snapshot_id === 'string' ? event.payload.snapshot_id : null
       if (snapshotId) store.set(currentSnapshotIdAtom, snapshotId)
       // 时间轴数据源：后端每次落新快照即重新拉取快照列表，避免胶片条永远空
@@ -265,8 +267,8 @@ export const networkOnlineAtom = atom<boolean>(navigator.onLine)
 /** 阶段指示器文案（P0 用户可见） */
 export const stageIndicatorLabelAtom = atom<string>('选择模式')
 
-/** 最近一次 sketch_ready / mvp_ready 事件带回的沙箱预览地址；null = 尚无真实预览 */
-export const previewUrlAtom = atom<string | null>(null)
+/** 各项目最近一次 sketch_ready / mvp_ready 事件带回的沙箱预览地址（按 project_id 隔离） */
+export const previewUrlsAtom = atom<Record<string, string>>({})
 
 /** 最近一次 sketch_ready / mvp_ready 事件带回的快照 id；null = 尚无快照（供「确认草图」回传） */
 export const currentSnapshotIdAtom = atom<string | null>(null)
