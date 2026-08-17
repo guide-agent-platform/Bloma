@@ -122,7 +122,7 @@ const server = createServer((req, res) => {
   res.writeHead(200, {
     'Content-Type': types[extname(finalPath)] || 'application/octet-stream',
     'Cache-Control': 'no-store',
-    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; font-src 'self'",
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; font-src 'self'",
   });
   createReadStream(finalPath).pipe(res);
 });

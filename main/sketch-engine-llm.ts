@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { SDKQuery } from './orchestrator'
 import { findProject } from './project-service'
 import type { SketchRequirement } from './sketch-engine'
+import { requirementAssertions, requirementStory } from './sketch-engine'
 import type { MessageContentBlock } from '../shared/types'
 
 /**
@@ -69,6 +70,8 @@ const SYSTEM_PROMPT = `你是「Bloma 草图生成器」，负责把用户的想
 - **纯外观、零交互**：严禁出现 <script> 标签、任何 onclick/oninput 等内联事件、任何 JavaScript 逻辑。所有"按钮/输入框/列表"都只是视觉占位，点了没有任何反应，只要看起来像真实产品即可。
 - 像一个真实产品的界面，而不是需求清单列表：要有应用外壳（顶部导航/标题栏）、主视觉区、以及按功能项组织的界面区块（表单、列表、统计卡、卡片等，按功能项语义选择合适形态）。
 - 严格按照用户的功能项实现对应的界面区块，不要擅自替换成其他应用（用户要记账就做记账界面，不是计算器/待办）。
+- **视觉表达对齐行为断言**：功能项若带有行为断言（如「按右方向键→车辆 x 坐标增加」），界面必须把断言涉及的实体与状态画出来（如赛道上的赛车、方向键提示），让用户看草图就能预判行为；断言里的实体不要凭空换成别的。
+- **为移植做准备**：class 命名语义化（如 .race-track、.car、.history-list，不用 .box1、.red-div），DOM 结构清晰分层——草图确认后会被移植进三文件 MVP，语义化结构让移植不丢视觉。
 - 纯内联 CSS，不引用任何外部字体/图片/CDN 资源。
 - 视觉上干净现代，浅色主题，圆角卡片，克制的紫色系点缀。
 - 只输出 HTML，其余一律不要。`
@@ -151,14 +154,22 @@ function buildPrompt(requirements: SketchRequirement[]): string {
   const items = requirements.length
     ? requirements
     : [{ id: 'F-001', description: '一个软件' }]
-  const list = items.map((r) => `- ${r.id}: ${r.description}`).join('\n')
+  const list = items
+    .map((item) => {
+      const assertions = requirementAssertions(item)
+      const assertionLines = assertions.length
+        ? assertions.map((assertion) => `    - ${assertion}`).join('\n')
+        : ''
+      return [`- ${item.id}: ${requirementStory(item)}`, ...(assertionLines ? [assertionLines] : [])].join('\n')
+    })
+    .join('\n')
   return [
     `请根据以下功能项生成无交互的纯外观 HTML 草图。`,
     ``,
-    `功能项：`,
+    `功能项（含行为断言——断言涉及的实体与状态必须在界面中可见）：`,
     list,
     ``,
-    `要求：界面区块与功能项一一对应，视觉上像一个真实产品（不是需求清单）。`,
+    `要求：界面区块与功能项一一对应，视觉上像一个真实产品（不是需求清单）；class 语义化命名，方便后续移植。`,
   ].join('\n')
 }
 

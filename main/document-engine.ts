@@ -280,6 +280,26 @@ function renderPrdJson(backplane: PrdBackplane): string {
   return `${JSON.stringify(backplane, null, 2)}\n`
 }
 
+/**
+ * 读取 UX 契约草图全文（§4.2）：契约存在且文件在盘时返回全文，否则 undefined（PRD-only）。
+ * MVP 生成 / 修复共用——草图全文作为输入上下文不降采样。路径必须落在 documents 目录内
+ * （防 prd.json 被篡改后越权读任意文件）。
+ */
+export function readUxContractSketch(projectId: string, backplane?: PrdBackplane): string | undefined {
+  const contract = (backplane ?? readPrdBackplane(projectId)).ux_contract
+  if (!contract) return undefined
+  const project = findProject(projectId)
+  const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+  const path = join(dir, contract.sketch_rel_path)
+  assertInsideDocumentsDir(dir, path)
+  if (!existsSync(path)) return undefined
+  try {
+    return readFileSync(path, 'utf8')
+  } catch {
+    return undefined
+  }
+}
+
 function renderPrdDraft(backplane: PrdBackplane): string {
   const items = backplane.requirements
   const list = items.map(renderRequirementLine).join('\n')

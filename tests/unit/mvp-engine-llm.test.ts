@@ -120,7 +120,7 @@ describe('MvpEngineLlm generation (A2-14b)', () => {
     expect(appJs).toContain('calculate')
   })
 
-  it('buildPrompt 注入 PRD 背板（产品定位 + 功能项 + 范围外），主题锚点不丢失', async () => {
+  it('buildPrompt 注入密背板（故事 + 行为断言 + 优先级 + 范围外 + 护栏），主题锚点不丢失', async () => {
     let capturedPrompt = ''
     const captureQuery: SDKQuery = async function* (prompt: string) {
       capturedPrompt = prompt
@@ -134,7 +134,13 @@ describe('MvpEngineLlm generation (A2-14b)', () => {
         name: '音乐合成器',
         positioning: '音乐合成器',
         requirements: [
-          { id: 'F-001', description: '音乐合成器' },
+          {
+            id: 'F-001',
+            description: '音乐合成器',
+            story: '作为音乐爱好者，我想在网页上弹奏合成器，以便随时创作旋律',
+            behavior_assertions: ['点击琴键→播放对应音调'],
+            priority: 'P0',
+          },
           { id: 'F-002', description: '网页端' },
         ],
         acceptance: {
@@ -143,16 +149,57 @@ describe('MvpEngineLlm generation (A2-14b)', () => {
         },
         out_of_scope: ['不做移动端 App'],
         assumptions: [],
+        generation_guardrails: {
+          must_do: ['琴键支持鼠标与键盘两种触发'],
+          must_not_do: ['不引入 Web Audio 之外的音频库'],
+        },
       },
     })
 
     await generateMvpLlm(input)
 
     expect(capturedPrompt).toContain('产品定位：音乐合成器')
-    expect(capturedPrompt).toContain('F-001: 音乐合成器')
-    expect(capturedPrompt).toContain('F-002: 网页端')
+    // 密背板格式层：故事 + 行为断言 + 优先级（F-002 薄项经 helper 回退默认）
+    expect(capturedPrompt).toContain('F-001（P0）：作为音乐爱好者，我想在网页上弹奏合成器，以便随时创作旋律')
+    expect(capturedPrompt).toContain('行为断言：点击琴键→播放对应音调')
+    expect(capturedPrompt).toContain('F-002（P2）：网页端')
+    expect(capturedPrompt).toContain('行为断言：该功能项在产物中可见且可交互')
     expect(capturedPrompt).toContain('范围外（不要实现）')
     expect(capturedPrompt).toContain('不做移动端 App')
+    expect(capturedPrompt).toContain('MUST DO：')
+    expect(capturedPrompt).toContain('琴键支持鼠标与键盘两种触发')
+    // 无草图契约（PRD-only）：不注入 UX 契约段与仲裁规则
+    expect(capturedPrompt).not.toContain('UX 契约草图')
+    expect(capturedPrompt).not.toContain('仲裁规则')
+  })
+
+  it('buildPrompt 注入双契约：草图全文（不降采样）+ 仲裁规则（§4.2/§7.1）', async () => {
+    let capturedPrompt = ''
+    let capturedHistory: { role: string; content: string }[] = []
+    const captureQuery: SDKQuery = async function* (prompt: string, options: SDKQueryOptions) {
+      capturedPrompt = prompt
+      capturedHistory = options.history ?? []
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: CALCULATOR_JSON }] } }
+      yield { type: 'result', subtype: 'success' }
+    }
+    const sketchHtml = '<!doctype html><html><head><style>.race-track{width:100%}</style></head><body><div class="race-track"><div class="car">🏎️</div></div></body></html>'
+    const input = makeInput({ query: captureQuery, sketchHtml })
+
+    await generateMvpLlm(input)
+
+    // 草图全文注入（不降采样、不截断）
+    expect(capturedPrompt).toContain('UX 契约草图（用户已确认，HTML 全文）')
+    expect(capturedPrompt).toContain(sketchHtml)
+    // 仲裁规则写死：行为优先、草图为准、范围互斥
+    expect(capturedPrompt).toContain('行为断言与草图冲突 → 行为优先，但保持草图审美')
+    expect(capturedPrompt).toContain('布局/结构/样式 → 以草图为准，不得低于草图精致度')
+    // 系统提示词：6 段式结构 + 共享硬约束/反模式骨架
+    const system = capturedHistory.find((turn) => turn.role === 'system')?.content ?? ''
+    expect(system).toContain('=== 1. TASK ===')
+    expect(system).toContain('=== 4. MUST DO ===')
+    expect(system).toContain('禁止「整页粘贴草图 + 塞一段 script」')
+    expect(system).toContain('HARD BLOCKS')
+    expect(system).toContain('ANTI-PATTERNS')
   })
 
   it('LLM 返回非 JSON → 抛 MVP_LLM_PARSE_FAILED（无模板兜底）', async () => {

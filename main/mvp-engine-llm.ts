@@ -3,7 +3,9 @@ import { join } from 'node:path'
 import type { ConversationTurn, SDKQuery } from './orchestrator'
 import { findProject } from './project-service'
 import type { PrdBackplane } from './sketch-engine'
+import { requirementAssertions, requirementPriority, requirementStory } from './sketch-engine'
 import { renderPackageJson, renderStaticServer, type GeneratedMvpFile } from './mvp-engine'
+import { buildAntiPatternsSection, buildHardBlocksSection } from './prompts/shared'
 import type { MessageContentBlock } from '../shared/types'
 
 /**
@@ -18,7 +20,7 @@ import type { MessageContentBlock } from '../shared/types'
 
 export interface GenerateMvpLlmInput {
   project_id: string
-  /** PRD 背板：生成唯一事实源（定位/功能项/验收/范围外），防"货不对板"。 */
+  /** PRD 背板：生成唯一事实源（定位/功能项/行为断言/范围外/护栏），防"货不对板"。 */
   backplane: PrdBackplane
   query: SDKQuery
   env: Record<string, string>
@@ -26,6 +28,8 @@ export interface GenerateMvpLlmInput {
   sessionId: string
   maxTokens?: number
   timeoutMs?: number
+  /** UX 契约草图 HTML 全文（§4.2：仅「用户确认 + 非模板回退」时由调用方注入，不降采样）。 */
+  sketchHtml?: string
   /** 修复上下文（self-healing @分析错误原因）：上次生成/运行失败的具体原因，注入 prompt 让模型针对性修复。 */
   repairContext?: { category: string; error: string }
 }
@@ -66,7 +70,11 @@ const MODEL_WRITABLE_TESTS: ((path: string) => boolean)[] = [
 /** 系统接管文件：content 忽略，由系统写入固定版本，不整批拒绝。 */
 const SYSTEM_FILES = new Set(['package.json', 'static-server.js'])
 
-const SYSTEM_PROMPT = `你是「Bloma MVP 生成器」，负责把已确认的需求生成一个可运行、纯前端的 MVP。只输出一个 JSON 对象，不要任何多余文字，不要 markdown 代码块围栏。
+/**
+ * 系统提示词：Sisyphus 6 段式 + Hephaestus 常识补全 + 草图保真（§7.1）。
+ * 双契约输入（PRD 行为契约 + 草图 UX 契约）与仲裁规则见 buildPrompt。
+ */
+const SYSTEM_PROMPT = `你是「Bloma MVP 生成器」，负责把已确认的需求（PRD 密背板）+ 用户确认过的草图，生成一个可运行、纯前端的 MVP。只输出一个 JSON 对象，不要任何多余文字，不要 markdown 代码块围栏。
 
 输出结构：
 {"files":[{"path":"index.html","content":"..."},{"path":"src/app.js","content":"..."},{"path":"src/styles.css","content":"..."}],
@@ -74,14 +82,40 @@ const SYSTEM_PROMPT = `你是「Bloma MVP 生成器」，负责把已确认的�
  "assumptions":["..."],
  "risks":["..."]}
 
-硬性约束：
-- 严格按照用户提供的需求清单实现对应功能，不要擅自替换成其他应用（如计算器、待办清单、记账本等）——用户要什么就做什么。
-- 纯前端应用，零外部依赖，仅 index.html / src/app.js / src/styles.css 三个文件，可本地 npm start 启动。
-- 运行在安全沙箱内：CSP connect-src 为 none，应用不得发起任何外部网络请求（不 fetch/XHR/WebSocket 外部地址）。
-- index.html 提供用户可见的功能入口与交互控件（按钮/输入框等），src/app.js 实现对应的交互逻辑。
-- 严禁使用 eval()、new Function()、Function() 构造器、setTimeout/setInterval 传字符串等动态执行方式——它们会被沙箱 CSP 拦截导致按钮无响应。交互逻辑请用显式的 if/switch 分支或事件监听实现。
-- index.html 中不要写 <meta http-equiv="Content-Security-Policy"> 标签（沙箱 CSP 由平台统一注入，内联 meta 会与之冲突导致脚本被拦）。
-- 只输出 JSON，其余一律不要。`
+=== 1. TASK ===
+严格按 PRD 密背板实现每个功能项；每个功能项 = 故事化描述 + 行为断言 + 优先级（P0 必做且必须全真）。
+
+=== 2. EXPECTED OUTCOME（完成标尺） ===
+- 每个 P0 功能项的 behavior_assertions 全部为真——生成前逐条列出，生成后逐条对照。
+- 视觉/布局不低于 UX 契约草图（若提供草图全文）：结构、排版、精致度是下限。
+- 静态一致性自检：无运行报错，交互控件真实驱动应用状态（不是只改文字）。
+
+=== 3. REQUIRED INPUTS ===
+- PRD 背板：产品定位 + 故事化功能项（含行为断言）+ 范围排除 + 生成护栏。
+- UX 契约草图 HTML 全文（若提供）：用户已确认的视觉基准。
+- 沙箱约束（见硬约束）。
+
+=== 4. MUST DO ===
+- 把草图的结构/样式**移植**进三文件布局（index.html 承骨架、src/styles.css 承样式），再补交互逻辑；禁止「整页粘贴草图 + 塞一段 script」的偷懒移植。
+- 保留草图的 DOM 骨架、语义化 class 命名与关键排版；行为逻辑写进 src/app.js，用显式 if/switch 分支或事件监听实现。
+- 常识补全：对未在断言里细化的交互默认值（按钮态、空态、反馈文案、初始值），用常见 UI 模式补齐；补全决策记入 assumptions。
+- 输出前自检：逐条断言检查能否被代码满足，不能满足的调整实现而不是删断言。
+
+=== 5. MUST NOT DO ===
+- 不擅自替换应用主题（用户要什么做什么，不要换成计算器/待办清单等常见模板应用）。
+- 不越过 out_of_scope 范围排除与生成护栏（不越界加戏）。
+- 不把元指令（「重新生成」之类）当功能项实现。
+- 不 fetch/XHR/WebSocket 外部地址；不 eval/Function()；不写 CSP meta。
+
+=== 6. CONTEXT ===
+- 项目名/定位/优先级/草图确认时间由用户提示词给出。
+- assumptions 记录后台决策假设（含常识补全），供回溯。
+
+${buildHardBlocksSection()}
+
+${buildAntiPatternsSection()}
+
+只输出 JSON，其余一律不要。`
 
 export async function generateMvpLlm(input: GenerateMvpLlmInput): Promise<GenerateMvpLlmResult> {
   const selfController = new AbortController()
@@ -90,7 +124,7 @@ export async function generateMvpLlm(input: GenerateMvpLlmInput): Promise<Genera
   const combinedSignal = combineSignals(selfController.signal, input.signal)
 
   try {
-    const prompt = buildPrompt(input.backplane, input.repairContext)
+    const prompt = buildPrompt(input.backplane, input.repairContext, input.sketchHtml)
     let maxTokens = input.maxTokens ?? DEFAULT_MAX_TOKENS
     let lastAccumulated = ''
     let truncated = false
@@ -165,7 +199,7 @@ async function streamAccumulate(
   signal: AbortSignal,
   selfController: AbortController,
 ): Promise<string> {
-  const history = buildRetryHistory(input.backplane, input.repairContext, attempt, lastAccumulated, truncated)
+  const history = buildRetryHistory(input.backplane, input.repairContext, input.sketchHtml, attempt, lastAccumulated, truncated)
   const queryPrompt = attempt === 0 || truncated ? prompt : RETRY_FEEDBACK_PROMPT
 
   let accumulated = ''
@@ -198,6 +232,7 @@ async function streamAccumulate(
 function buildRetryHistory(
   backplane: PrdBackplane,
   repairContext: GenerateMvpLlmInput['repairContext'],
+  sketchHtml: string | undefined,
   attempt: number,
   lastAccumulated: string,
   truncated: boolean,
@@ -205,7 +240,7 @@ function buildRetryHistory(
   if (attempt === 0 || truncated) return [{ role: 'system', content: SYSTEM_PROMPT }]
   return [
     { role: 'system', content: SYSTEM_PROMPT },
-    { role: 'user', content: buildPrompt(backplane, repairContext) },
+    { role: 'user', content: buildPrompt(backplane, repairContext, sketchHtml) },
     { role: 'assistant', content: lastAccumulated },
   ]
 }
@@ -246,37 +281,71 @@ function combineSignals(self: AbortSignal, external?: AbortSignal): AbortSignal 
   return controller.signal
 }
 
-function buildPrompt(backplane: PrdBackplane, repairContext?: GenerateMvpLlmInput['repairContext']): string {
+function buildPrompt(
+  backplane: PrdBackplane,
+  repairContext: GenerateMvpLlmInput['repairContext'],
+  sketchHtml?: string,
+): string {
   const items = backplane.requirements.length
     ? backplane.requirements
     : [{ id: 'F-001', description: '一个可运行、可交互的功能页面' }]
-  const list = items.map((r) => `- ${r.id}: ${r.description}`).join('\n')
-  const acceptance = items.map((r) => `- ${r.id}: ${backplane.acceptance[r.id] ?? ''}`).join('\n')
+  // 密背板功能项：故事 + 行为断言 + 优先级（§3.1）——断言是完成标尺，不是装饰
+  const list = items
+    .map((item) => {
+      const lines = [`- ${item.id}（${requirementPriority(item)}）：${requirementStory(item)}`]
+      for (const assertion of requirementAssertions(item)) {
+        lines.push(`  - 行为断言：${assertion}`)
+      }
+      if (item.scope_notes) lines.push(`  - 范围排除：${item.scope_notes}`)
+      return lines.join('\n')
+    })
+    .join('\n')
   const outOfScope = backplane.out_of_scope.length
     ? backplane.out_of_scope.map((scope) => `- ${scope}`).join('\n')
     : '- 无'
+  const guardrails = backplane.generation_guardrails
+    const guardrailSection = guardrails && (guardrails.must_do.length || guardrails.must_not_do.length)
+      ? [
+          ``,
+          `【生成护栏】`,
+          ...(guardrails.must_do.length ? [`MUST DO：`, ...guardrails.must_do.map((rule) => `- ${rule}`)] : []),
+          ...(guardrails.must_not_do.length ? [`MUST NOT DO：`, ...guardrails.must_not_do.map((rule) => `- ${rule}`)] : []),
+        ]
+      : []
+  // UX 契约（§4.2）：草图全文不降采样；仲裁规则写死「行为优先、保持审美」
+  const sketchSection = sketchHtml
+    ? [
+        ``,
+        `【UX 契约草图（用户已确认，HTML 全文）】`,
+        sketchHtml,
+        ``,
+        `【仲裁规则（草图与 PRD 冲突时）】`,
+        `- 行为断言与草图冲突 → 行为优先，但保持草图审美；`,
+        `- 布局/结构/样式 → 以草图为准，不得低于草图精致度；`,
+        `- 范围排除 → 两者都不得越界。`,
+      ]
+    : []
   const repairSection = repairContext
     ? [
         ``,
         `【修复上下文（上次版本失败原因，请针对性修复）】`,
         `错误类别：${repairContext.category}`,
         `错误描述：${repairContext.error}`,
-        `请先分析上述失败原因，再生成修复后的版本；其余功能项与验收标准不变，不要擅自改需求。`,
+        `请先分析上述失败原因，再生成修复后的版本；其余功能项与行为断言不变，不要擅自改需求。`,
       ]
     : []
   return [
-    `请根据以下 PRD 背板生成 MVP（产品定位是唯一主题锚点，功能项必须全部实现，不得擅自替换成其他应用）。`,
+    `请根据以下 PRD 密背板${sketchHtml ? ' + UX 契约草图' : ''}生成 MVP（产品定位是唯一主题锚点，功能项必须全部实现，不得擅自替换成其他应用）。`,
     ``,
     `产品定位：${backplane.positioning}`,
     ``,
-    `功能项：`,
+    `功能项（故事 + 行为断言 + 优先级）：`,
     list,
-    ``,
-    `验收标准：`,
-    acceptance,
     ``,
     `范围外（不要实现）：`,
     outOfScope,
+    ...guardrailSection,
+    ...sketchSection,
     ...repairSection,
   ].join('\n')
 }

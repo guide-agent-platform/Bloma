@@ -1,5 +1,5 @@
 import type { AgentEvent } from '../shared/types'
-import { buildPrdBackplane, syncDocuments } from './document-engine'
+import { buildPrdBackplane, readPrdBackplane, readUxContractSketch, syncDocuments } from './document-engine'
 import { generateMvp } from './mvp-engine'
 import { DEFAULT_MAX_TOKENS, generateMvpLlm } from './mvp-engine-llm'
 import { buildSdkEnv, decryptApiKey, getChannelByIdRaw, getFirstEnabledChannel } from './channel-manager'
@@ -210,8 +210,10 @@ async function repairMvpViaLlm(
   const model = channel.models.find((item) => item.enabled)?.name ?? 'claude-sonnet-4-6'
   const env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
 
-  const requirements = readLastSketchRequirements(input.project_id)
-  const backplane = buildPrdBackplane(findProject(input.project_id), requirements, 'mvp_before_generation')
+  // 修复与生成同一份事实源（§4.2 双契约）：读冻结 prd.json（含 ux_contract）而非临时重建，
+  // 保证修复版与原生成版消费同一份行为契约 + 草图契约
+  const backplane = readPrdBackplane(input.project_id)
+  const sketchHtml = readUxContractSketch(input.project_id, backplane)
   try {
     await generateMvpLlm({
       project_id: input.project_id,
@@ -221,6 +223,7 @@ async function repairMvpViaLlm(
       sessionId: input.session_id,
       maxTokens: channel.max_tokens ?? DEFAULT_MAX_TOKENS,
       signal: opts.signal,
+      sketchHtml,
       repairContext: {
         category,
         error: opts.error?.summary ?? REPAIR_CATEGORY_SUMMARY[category],

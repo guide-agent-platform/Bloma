@@ -308,9 +308,10 @@ const server = createServer((req, res) => {
     'Content-Type': types[extname(finalPath)] || 'application/octet-stream',
     'Cache-Control': 'no-store',
     // 生成代码不得联网：禁止 fetch/XHR/WebSocket 到任何外部地址。
-    // script-src 保留 'unsafe-eval'：LLM 生成的代码可能用 Function()/eval 计算表达式，
-    // 缺省会被 CSP 阻断（EvalError）导致「点 = 无结果」。沙箱已网络隔离，此处放宽可接受。
-    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; font-src 'self'",
+    // script-src 不再保留 'unsafe-eval'（2026-08-17 设计 §7.0/FEAS-C3 收紧）：eval/Function()
+    // 的禁令原本只写在提示词里（CSP 实含 unsafe-eval、并不拦截），收紧后该约束被真正
+    // 强制——MVP 提示词已同步要求用显式 if/switch 或事件监听实现交互逻辑。
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; font-src 'self'",
   });
   createReadStream(finalPath).pipe(res);
 });

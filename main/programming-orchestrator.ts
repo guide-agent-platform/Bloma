@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto'
+import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import type { AgentEvent, AgentSendMessageInput, MessageContentBlock, Project, ProjectMode, Snapshot, TemplateType } from '../shared/types'
-import { getAgentSessionPath } from '../storage/config-paths'
+import { getAgentSessionPath, getDocumentsDir } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
-import { buildPrdBackplane, readPrdBackplane, syncDocuments } from './document-engine'
+import { buildPrdBackplane, readPrdBackplane, readUxContractSketch, syncDocuments } from './document-engine'
 import { createSnapshot, runSandbox, trackAnalytics } from './platform-services'
 import { DEFAULT_MAX_TOKENS, generateMvpLlm, type GenerateMvpLlmResult } from './mvp-engine-llm'
 import { buildSdkEnv, decryptApiKey, getChannelByIdRaw, getFirstEnabledChannel } from './channel-manager'
@@ -97,6 +99,10 @@ export async function runSketchTask(input: SketchTaskInput): Promise<SketchTaskR
     ? input.requirements
     : [{ id: 'F-001', description: input.prompt }]
   const { result: sketch, source, fallbackReason, llmErrorCode, llmAttempts } = await resolveSketch(input, requirements)
+  // 草图来源持久化（§4.2 质量门②判定依据）：source('llm'|'template') 原本只存在于生成
+  // 时刻的内存与事件流，而 sketch_confirmed 常跨会话发生（重启后经 T1 收敛）、确认时无处
+  // 可读——落 project 字段（sketch_source + sketch_generated_at）供质量门读取与刷新判定
+  updateProject(input.project_id, { sketch_source: source, sketch_generated_at: new Date().toISOString() })
   if (source === 'template' && fallbackReason) {
     // 模板回退必须留痕：埋点 + 会话内如实说明（阶段如实性——不假装模型参与了生成）。
     // 此前完全静默，渠道瞬断时用户只看到「草图变成通用占位页」却无任何线索。
@@ -458,10 +464,13 @@ async function resolveMvp(input: MvpTaskInput, requirements: SketchRequirement[]
   // 模型名用 name（真实模型 ID）：id 是渠道内唯一标识，不能传给 API
   const model = channel.models.find((item) => item.enabled)?.name ?? 'claude-sonnet-4-6'
   const env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
-  // 生成侧读 PRD 背板（定位/功能项/验收/范围外），而非裸需求清单——主题锚点从 prompt 层压住"货不对板"。
+  // 生成侧读 PRD 背板（定位/功能项/行为断言/范围外/护栏），而非裸需求清单——主题锚点从 prompt 层压住"货不对板"。
   // 读 prd.json（syncPrdCheckpoints 已落盘，可能是 LLM 从对话提取、也可能模板兜底），
   // 保证生成用的是与文档面板/裁判同一份事实源，而非临时重建。
   const backplane = readPrdBackplane(input.project_id)
+  // 双契约输入（§4.2）：背板带 ux_contract 时注入草图全文（不降采样），MVP 同时消费
+  // PRD 行为契约 + 草图 UX 契约；无契约（模板草图/旧项目）退回 PRD-only
+  const sketchHtml = readUxContractSketch(input.project_id, backplane)
   return generateMvpLlm({
     project_id: input.project_id,
     backplane,
@@ -470,6 +479,7 @@ async function resolveMvp(input: MvpTaskInput, requirements: SketchRequirement[]
     sessionId: input.session_id,
     maxTokens: channel.max_tokens ?? DEFAULT_MAX_TOKENS,
     signal: input.signal,
+    sketchHtml,
   })
 }
 
@@ -480,7 +490,7 @@ async function resolveMvp(input: MvpTaskInput, requirements: SketchRequirement[]
  * `buildPrdBackplane` 确定性模板。功能项始终使用已冻结清单（F-001 主题锚点不变式）。
  */
 async function syncPrdCheckpoints(input: MvpTaskInput, requirements: SketchRequirement[]): Promise<void> {
-  const backplane = await resolvePrdBackplane(input, requirements)
+  const backplane = registerUxContract(input, await resolvePrdBackplane(input, requirements))
   syncDocuments(
     { request_id: input.request_id, project_id: input.project_id, session_id: input.session_id, checkpoint: 'sketch_confirmed' },
     backplane,
@@ -490,6 +500,47 @@ async function syncPrdCheckpoints(input: MvpTaskInput, requirements: SketchRequi
     { ...backplane, frozen_at: new Date().toISOString() },
   )
 }
+
+/**
+ * UX 契约登记（§4.2 草图升格为 UX 契约）：仅在 sketch_confirmed 检查点执行。
+ *
+ * 质量门 = ①用户确认（runMvpTask 只在 confirmSketch accepted 后进入，检查点本身即确认）
+ * + ②非模板回退（project.sketch_source === 'llm'）。通过 → 把当前草图（磁盘 index.html，
+ * 此刻 MVP 尚未生成、仍是草图本体）复制进 documents 冻结为 sketch.html 契约；未通过 →
+ * ux_contract 为空，MVP 退回 PRD-only（模板草图不承载用户确认的视觉意图）。
+ *
+ * 刷新判定：草图重新生成（sketch_generated_at 更新）且 LLM 产物 → 重新登记覆盖旧契约；
+ * 草图未再生成（迭代重跑 runMvpTask）→ 沿用既有契约（此时磁盘 index.html 已是 MVP，
+ * 不能当草图复制）；新一轮草图是模板回退 → 契约作废（质量门未过）。
+ */
+export function registerUxContract(input: MvpTaskInput, backplane: PrdBackplane): PrdBackplane {
+  const project = findProject(input.project_id)
+  // 输出契约由本函数显式决定：先剥离入参携带的旧契约（入参可能是读盘背板），
+  // 再按质量门判定登记/沿用/作废，消除对「入参必须是新鲜背板」的隐含假设
+  const { ux_contract: _staleFromInput, ...fresh } = backplane
+  const previous = readPrdBackplane(input.project_id).ux_contract
+  const generatedAt = project.sketch_generated_at
+
+  if (previous && generatedAt && new Date(previous.confirmed_at) >= new Date(generatedAt)) {
+    return { ...fresh, ux_contract: previous }
+  }
+  if (project.sketch_source === 'llm') {
+    const documentsDir = getDocumentsDir(project.workspace_slug, project.project_id)
+    const sketchAbsolute = join(project.root_path, 'index.html')
+    if (existsSync(sketchAbsolute)) {
+      mkdirSync(documentsDir, { recursive: true })
+      copyFileSync(sketchAbsolute, join(documentsDir, UX_CONTRACT_SKETCH_FILE))
+      return {
+        ...fresh,
+        ux_contract: { sketch_rel_path: UX_CONTRACT_SKETCH_FILE, confirmed_at: new Date().toISOString() },
+      }
+    }
+  }
+  return fresh
+}
+
+/** UX 契约草图在 documents 目录下的固定文件名。 */
+const UX_CONTRACT_SKETCH_FILE = 'sketch.html'
 
 /** PRD 背板来源分流：渠道可用走 LLM 从对话提取，否则回退确定性模板。 */
 async function resolvePrdBackplane(input: MvpTaskInput, requirements: SketchRequirement[]): Promise<PrdBackplane> {
