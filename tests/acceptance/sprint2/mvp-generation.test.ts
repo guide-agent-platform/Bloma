@@ -41,22 +41,29 @@ const TEST_CHANNEL = {
   enabled: true,
 }
 
-vi.mock('../../../main/channel-manager', () => ({
-  getChannelByIdRaw: () => TEST_CHANNEL,
-  // 全量 mock 需补齐 getFirstEnabledChannel：programming-orchestrator resolveMvp 在
-  // confirm-sketch 未传 channel_id 时回退到它（S2-PROJECT-001 超时根因）。
-  getFirstEnabledChannel: () => TEST_CHANNEL,
-  decryptApiKey: () => 'test-key-from-channel',
-  // 修复：mock 必须提供 buildSdkEnv，否则 programming-orchestrator 调用 undefined 抛错，
-  // 导致 mvp_ready 事件永不发出（S2-PROJECT-001 超时）。
-  // env 必须含 PATH：orchestrator anthropicMessagesQuery 校验 `SDK env missing PATH`。
-  buildSdkEnv: (_apiKey: string, baseUrl: string, model: string) => ({
-    ANTHROPIC_AUTH_TOKEN: 'test-key',
-    ANTHROPIC_BASE_URL: baseUrl,
-    ANTHROPIC_MODEL: model,
-    PATH: process.env.PATH ?? process.env.Path ?? 'MOCK_PATH',
-  }),
-}))
+// mock 必须 importOriginal + spread（陷阱 2 约定）：model-resolution 的类别解析会调
+// listEnabledModels（真实实现按 enabled 过滤），裸工厂缺导出会让解析抛错、mvp_ready
+// 永不发出（S2-PROJECT-001 超时）。
+vi.mock('../../../main/channel-manager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/channel-manager')>()
+  return {
+    ...actual,
+    getChannelByIdRaw: () => TEST_CHANNEL,
+    // 全量 mock 需补齐 getFirstEnabledChannel：programming-orchestrator resolveMvp 在
+    // confirm-sketch 未传 channel_id 时回退到它（S2-PROJECT-001 超时根因）。
+    getFirstEnabledChannel: () => TEST_CHANNEL,
+    decryptApiKey: () => 'test-key-from-channel',
+    // 修复：mock 必须提供 buildSdkEnv，否则 programming-orchestrator 调用 undefined 抛错，
+    // 导致 mvp_ready 事件永不发出（S2-PROJECT-001 超时）。
+    // env 必须含 PATH：orchestrator anthropicMessagesQuery 校验 `SDK env missing PATH`。
+    buildSdkEnv: (_apiKey: string, baseUrl: string, model: string) => ({
+      ANTHROPIC_AUTH_TOKEN: 'test-key',
+      ANTHROPIC_BASE_URL: baseUrl,
+      ANTHROPIC_MODEL: model,
+      PATH: process.env.PATH ?? process.env.Path ?? 'MOCK_PATH',
+    }),
+  }
+})
 
 // confirm-sketch accepted → runMvpTask({ query: getSdkQuery() }) 走 LLM 生成。
 // 覆盖 getSdkQuery 返回确定性 mock query，避免测试发起真实模型 HTTP 请求而超时。
