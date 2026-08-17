@@ -4,6 +4,7 @@ import type { SDKQuery } from './orchestrator'
 import { findProject } from './project-service'
 import type { SketchRequirement } from './sketch-engine'
 import { requirementAssertions, requirementStory } from './sketch-engine'
+import { categoryTemperature } from './model-resolution'
 import type { MessageContentBlock } from '../shared/types'
 
 /**
@@ -105,6 +106,8 @@ export async function generateSketchLlm(input: GenerateSketchLlmInput): Promise<
         sessionId: input.sessionId,
         history: [{ role: 'system', content: SYSTEM_PROMPT }],
         maxTokens,
+        // §7.7 类别温度：视觉稳定（0.1）
+        temperature: categoryTemperature('sketch'),
       })
       for await (const sdkMessage of stream) {
         if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue

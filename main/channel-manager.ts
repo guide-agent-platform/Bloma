@@ -142,6 +142,11 @@ export function getChannelByIdRaw(id: string): Channel | undefined {
   return channel && isOursChannel(channel) ? channel : undefined
 }
 
+/** 渠道内 enabled 模型列表（保持配置序），供 model-resolution 类别解析用（§6.4）。 */
+export function listEnabledModels(channel: Pick<Channel, 'models'>): ChannelModel[] {
+  return (channel.models ?? []).filter((item) => item.enabled)
+}
+
 export function getChannelById(id: string): Channel | undefined {
   const channel = getChannelByIdRaw(id)
   return channel ? redact(channel) : undefined

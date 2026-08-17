@@ -3,6 +3,7 @@ import type { SDKQuery } from './orchestrator'
 import { getAgentSessionPath } from '../storage/config-paths'
 import type { AgentMessage, MessageContentBlock } from '../shared/types'
 import type { PrdBackplane, SketchRequirement } from './sketch-engine'
+import { categoryTemperature } from './model-resolution'
 
 /**
  * PrdEngineLlm — 从对话历史提取 PRD 背板（PRD §7.1「草图确认后从对话提取并生成 PRD 初稿」）。
@@ -67,6 +68,8 @@ export async function generatePrdLlm(input: GeneratePrdLlmInput): Promise<PrdBac
       sessionId: input.session_id,
       history: [{ role: 'system', content: SYSTEM_PROMPT }],
       maxTokens: input.maxTokens ?? DEFAULT_MAX_TOKENS,
+      // §7.7 类别温度：判定/提取要稳、可复现（0.1）
+      temperature: categoryTemperature('prd'),
     })
     for await (const sdkMessage of stream) {
       if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue

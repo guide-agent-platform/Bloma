@@ -15,6 +15,7 @@ import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
 import { buildSdkEnv, decryptApiKey, getChannelByIdRaw, getFirstEnabledChannel } from './channel-manager'
 export { buildSdkEnv } from './channel-manager'
+import { categoryForStage, categoryTemperature, resolveCategoryModel } from './model-resolution'
 import { handleGuideMessage } from './guide-agent-service'
 import {
   READY_COMPLETION_COPY,
@@ -55,6 +56,8 @@ export interface SDKQueryOptions {
   history?: ConversationTurn[]
   /** 单次响应的最大 token 数，缺省 1200（去硬编码：由渠道配置传入） */
   maxTokens?: number
+  /** 采样温度（§7.7 类别校准表：guide 0.3 / 生成与判定类 0.1）；缺省不传，由 API 默认 */
+  temperature?: number
 }
 
 export type SDKQuery = (prompt: string, options: SDKQueryOptions) => AsyncIterable<SDKMessage>
@@ -67,6 +70,8 @@ export interface GuideModelOptions {
   sessionId: string
   history: ConversationTurn[]
   maxTokens: number
+  /** §7.7 类别温度：guide 澄清要发散（0.3），由 runAgent 按类别注入 */
+  temperature?: number
   persistAssistant: (text: string) => void
 }
 
@@ -139,23 +144,43 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
   const received: SDKMessage[] = []
 
   try {
+    // 权威项目阶段（工作项 1）：以项目存储为准，渲染端上报阶段仅为回退。
+    // 前移到渠道解析之前——类别路由（§6.4）需要按阶段选文档类别。
+    let authoritativeStage: WorkflowStage = input.current_stage
+    try {
+      authoritativeStage = findProject(input.project_id).current_stage
+    } catch {
+      // 项目索引缺失（如测试环境）时退回渲染端上报的阶段
+    }
+
     // 未显式指定 channel_id 时自动回退到第一个启用的本项目渠道（否则引导永远走规则路由）
     const channel = input.channel_id
       ? getChannelByIdRaw(input.channel_id)
       : getFirstEnabledChannel()
-    // 模型名用 name（真实模型 ID）：id 是渠道内唯一标识（多 Agent / 识图-编程模型区分用），不能传给 API
-    const model = channel?.models.find((item) => item.enabled)?.name ?? 'claude-sonnet-4-6'
     let env: Record<string, string> | undefined
-    let channelKeyUnusable = false
+    let channelUnusableReason: 'decrypt_failed' | 'model_not_found' | undefined
     if (channel) {
+      let apiKey: string | undefined
       try {
-        const apiKey = decryptApiKey(channel.api_key)
-        env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
+        apiKey = decryptApiKey(channel.api_key)
       } catch {
         // 渠道密钥不可解密（safeStorage 密钥变更 / 跨平台迁移的 ciphertext）：
         // 该渠道视为不可用，引导路径回退规则路由，编程路径报可读错误。
-        channelKeyUnusable = true
+        channelUnusableReason = 'decrypt_failed'
         console.error(`[runAgent] channel ${channel.id} (${channel.name}) api_key 无法解密，该渠道不可用`)
+      }
+      if (apiKey) {
+        try {
+          // 类别路由（§6.4）：按权威阶段→文档类别经 model-resolution 解析模型，
+          // 不再全引擎共用一个写死的模型。模型名用 name（真实模型 ID）：id 是渠道内
+          // 唯一标识（多 Agent / 识图-编程模型区分用），不能传给 API
+          const { model } = resolveCategoryModel(channel, categoryForStage(authoritativeStage))
+          env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
+        } catch (error) {
+          // 渠道无启用模型：与密钥不可解密同待遇——引导回规则路由，编程路径报可读错误
+          channelUnusableReason = 'model_not_found'
+          console.error(`[runAgent] ${error instanceof Error ? error.message : String(error)}，本次模型不参与：引导走规则路由、草图走模板`)
+        }
       }
     } else {
       // 无可用渠道（无启用渠道 / 密钥均不可解密）：引导回规则路由、草图落模板，
@@ -176,16 +201,10 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     // 维护会话索引并回填 Project.last_session_id，支撑历史对话回访恢复
     recordSessionActivity(input.session_id, input.project_id)
 
-    // 权威项目阶段（工作项 1）：以项目存储为准，渲染端上报阶段仅为回退。
-    // 渲染端 workflowStageAtom 由 stage_changed 事件驱动，MVP/测试/ready 阶段的事件
-    // 若丢失或乱序会导致渲染端阶段滞后（如项目已 ready 仍上报 sketch_ready），
-    // 护栏/引导路径/编程路径注入必须统一读 findProject 的真实阶段，避免据此错报进度。
-    let authoritativeStage: WorkflowStage = input.current_stage
-    try {
-      authoritativeStage = findProject(input.project_id).current_stage
-    } catch {
-      // 项目索引缺失（如测试环境）时退回渲染端上报的阶段
-    }
+    // 权威项目阶段已在函数顶部解析（categoryForStage 类别路由依赖它）；渲染端
+    // workflowStageAtom 由 stage_changed 事件驱动，MVP/测试/ready 阶段的事件若丢失
+    // 或乱序会导致渲染端阶段滞后（如项目已 ready 仍上报 sketch_ready），护栏/引导
+    // 路径/编程路径注入必须统一读 findProject 的真实阶段，避免据此错报进度。
 
     // 助手回复落盘（模型路径与规则路径共用，保证回访恢复时对话完整）
     const persistAssistant = (text: string) =>
@@ -212,6 +231,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
           sessionId: input.session_id,
           history,
           maxTokens,
+          temperature: categoryTemperature('guide'),
           persistAssistant,
         }
       : undefined
@@ -431,12 +451,14 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       return { accepted: true, session_id: input.session_id, stream_started: true }
     }
 
-    // 编程路径：必须真实模型，无渠道 / 密钥不可解密直接抛明确错误（不留测试占位 key）
+    // 编程路径：必须真实模型，无渠道 / 密钥不可解密 / 无启用模型直接抛明确错误（不留测试占位 key）
     if (!channel || !env) {
       throw new Error(
-        channelKeyUnusable
+        channelUnusableReason === 'decrypt_failed'
           ? 'API_KEY_DECRYPT_FAILED: 已配置渠道但 api_key 无法解密，请在设置中重新保存该渠道'
-          : 'CHANNEL_NOT_FOUND: configure a model channel before using the SDK',
+          : channelUnusableReason === 'model_not_found'
+            ? 'CHANNEL_MODEL_NOT_FOUND: 渠道没有启用的模型，请在设置中启用至少一个模型'
+            : 'CHANNEL_NOT_FOUND: configure a model channel before using the SDK',
       )
     }
 
@@ -742,12 +764,18 @@ async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions)
   // 开发插件：BLOMA_SHOW_THINKING=1 时启用 extended thinking 并把思考打印到终端。
   // Anthropic 要求 max_tokens > budget_tokens；预算取一半（封顶 1024，下限 256）。
   const showThinking = isThinkingLogEnabled()
+  // 模型只经 env 传入（类别路由已删硬编码默认）：缺失即配置错误，明确抛错不静默猜模型
+  const model = options.env.ANTHROPIC_MODEL
+  if (!model) {
+    throw new Error('SDK_MODEL_NOT_CONFIGURED: SDK env 缺少 ANTHROPIC_MODEL（模型路由未解析到模型）')
+  }
   const body: Record<string, unknown> = {
-    model: options.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
+    model,
     max_tokens: options.maxTokens ?? 1200,
     stream: true,
     messages,
   }
+  if (options.temperature !== undefined) body.temperature = options.temperature
   if (systemText) body.system = systemText
   if (showThinking) {
     const maxTokens = options.maxTokens ?? 1200

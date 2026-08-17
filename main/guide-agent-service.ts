@@ -291,6 +291,7 @@ async function tryModelDrivenGuide(
       sessionId: model.sessionId,
       history,
       maxTokens: model.maxTokens,
+      temperature: model.temperature,
     })
     for await (const sdkMessage of stream) {
       if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue

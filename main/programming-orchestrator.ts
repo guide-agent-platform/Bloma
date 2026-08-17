@@ -21,6 +21,7 @@ import { recordDecision } from './decision-log'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from './recovery-service'
 import { readPrimaryIntent } from './session-service'
 import type { SDKQuery } from './orchestrator'
+import { resolveCategoryModel } from './model-resolution'
 
 /**
  * 无人值守豁免（A2-12）：自动化管线内部 service 直连时显式传入 allow-all——
@@ -176,7 +177,7 @@ export async function runSketchTask(input: SketchTaskInput): Promise<SketchTaskR
 }
 
 /** 草图回退原因：模板路径必带其一，供日志/埋点/如实告知，杜绝静默降级。 */
-type SketchFallbackReason = 'no_channel' | 'no_query' | 'decrypt_failed' | 'llm_failed'
+type SketchFallbackReason = 'no_channel' | 'no_query' | 'decrypt_failed' | 'no_model' | 'llm_failed'
 
 /** resolveSketch 的产物：结果 + 来源。模板路径必带 fallbackReason（LLM 路径不带）。 */
 interface ResolvedSketch {
@@ -214,9 +215,16 @@ async function resolveSketch(input: SketchTaskInput, requirements: SketchRequire
     console.error(`[resolveSketch] 草图回退确定性模板: reason=decrypt_failed（channel ${channel.id} (${channel.name}) api_key 无法解密）`)
     return { result: generateSketch({ project_id: input.project_id, requirements, max_pages: 3 }), source: 'template', fallbackReason: 'decrypt_failed' }
   }
-  // 模型名用 name（真实模型 ID）：id 是渠道内唯一标识，不能传给 API
-  const model = channel.models.find((item) => item.enabled)?.name ?? 'claude-sonnet-4-6'
-  const env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
+  // 类别路由（§6.4）：sketch 类别解析模型；渠道无启用模型时回退模板（草图是低成本
+  // 方向确认，不能因选不出模型卡死澄清流程）
+  let env: Record<string, string>
+  try {
+    const { model } = resolveCategoryModel(channel, 'sketch')
+    env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
+  } catch (error) {
+    console.error(`[resolveSketch] 草图回退确定性模板: reason=no_model（${error instanceof Error ? error.message : String(error)}）`)
+    return { result: generateSketch({ project_id: input.project_id, requirements, max_pages: 3 }), source: 'template', fallbackReason: 'no_model' }
+  }
   try {
     const result = await generateSketchLlm({
       project_id: input.project_id,
@@ -295,9 +303,15 @@ async function nameByLlm(input: MvpTaskInput): Promise<string | null> {
   } catch {
     return null
   }
-  // 模型名用 name（真实模型 ID）：id 是渠道内唯一标识，不能传给 API（对齐 resolveSketch）
-  const model = channel.models.find((item) => item.enabled)?.name ?? 'claude-sonnet-4-6'
-  const env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
+  // 类别路由（§6.4）：命名是附属轻量任务（非文档类别），借 guide 类别解析；
+  // 任何失败返回 null 交确定性兜底（命名绝不阻断生成）
+  let env: Record<string, string>
+  try {
+    const { model } = resolveCategoryModel(channel, 'guide')
+    env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
+  } catch {
+    return null
+  }
 
   const backplane = readPrdBackplane(input.project_id)
   const intent = readPrimaryIntent(input.session_id)
@@ -461,9 +475,14 @@ async function resolveMvp(input: MvpTaskInput, requirements: SketchRequirement[]
   } catch {
     throw new Error('API_KEY_DECRYPT_FAILED: 渠道 api_key 无法解密，请在设置中重新保存该渠道')
   }
-  // 模型名用 name（真实模型 ID）：id 是渠道内唯一标识，不能传给 API
-  const model = channel.models.find((item) => item.enabled)?.name ?? 'claude-sonnet-4-6'
-  const env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
+  // 类别路由（§6.4）：mvp 类别解析模型；无启用模型属配置错误，明确抛错（MVP 无模板兜底）
+  let env: Record<string, string>
+  try {
+    const { model } = resolveCategoryModel(channel, 'mvp')
+    env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
+  } catch {
+    throw new Error('CHANNEL_MODEL_NOT_FOUND: 渠道没有启用的模型，请在设置中启用至少一个模型后再生成')
+  }
   // 生成侧读 PRD 背板（定位/功能项/行为断言/范围外/护栏），而非裸需求清单——主题锚点从 prompt 层压住"货不对板"。
   // 读 prd.json（syncPrdCheckpoints 已落盘，可能是 LLM 从对话提取、也可能模板兜底），
   // 保证生成用的是与文档面板/裁判同一份事实源，而非临时重建。
@@ -556,9 +575,14 @@ async function resolvePrdBackplane(input: MvpTaskInput, requirements: SketchRequ
   } catch {
     return template()
   }
-  // 模型名用 name（真实模型 ID）：id 是渠道内唯一标识，不能传给 API
-  const model = channel.models.find((item) => item.enabled)?.name ?? 'claude-sonnet-4-6'
-  const env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
+  // 类别路由（§6.4）：prd 类别解析模型；失败回退确定性模板（PRD 提取失败不阻断生成）
+  let env: Record<string, string>
+  try {
+    const { model } = resolveCategoryModel(channel, 'prd')
+    env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
+  } catch {
+    return template()
+  }
 
   const llm = await generatePrdLlm({
     project_id: input.project_id,
@@ -939,8 +963,8 @@ export async function mergeIterationRequirements(
     const channel = input.channel_id ? getChannelByIdRaw(input.channel_id) : getFirstEnabledChannel()
     if (!channel) return appendRaw()
     const apiKey = decryptApiKey(channel.api_key)
-    const model = channel.models.find((item) => item.enabled)?.name ?? 'claude-sonnet-4-6'
-    const env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
+    // 类别路由（§6.4）：normalizer 归 prd 类别（§7.7 判定要稳 0.1）；失败由外层 catch 回退原样追加
+    const env = buildSdkEnv(apiKey, channel.base_url, resolveCategoryModel(channel, 'prd').model, channel.provider_type)
     const normalization = await normalizeRequirementUpdate({
       session_id: input.session_id,
       existing,

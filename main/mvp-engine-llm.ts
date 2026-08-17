@@ -6,6 +6,7 @@ import type { PrdBackplane } from './sketch-engine'
 import { requirementAssertions, requirementPriority, requirementStory } from './sketch-engine'
 import { renderPackageJson, renderStaticServer, type GeneratedMvpFile } from './mvp-engine'
 import { buildAntiPatternsSection, buildHardBlocksSection } from './prompts/shared'
+import { categoryTemperature } from './model-resolution'
 import type { MessageContentBlock } from '../shared/types'
 
 /**
@@ -210,6 +211,8 @@ async function streamAccumulate(
       sessionId: input.sessionId,
       history,
       maxTokens,
+      // §7.7 类别温度：代码生成要严格（0.1）
+      temperature: categoryTemperature('mvp'),
     })
     for await (const sdkMessage of stream) {
       if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue

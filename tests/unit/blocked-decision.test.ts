@@ -172,7 +172,7 @@ describe('Blocked decision resume loop (A2/A3)', () => {
         encryptString: (value) => Buffer.from(`enc:${value}`, 'utf8'),
         decryptString: (value) => value.toString('utf8').replace(/^enc:/, ''),
       })
-      const channel = createChannel({ name: 'test', provider_type: 'anthropic', base_url: 'https://test', api_key: 'test-key' })
+      const channel = createChannel({ name: 'test', provider_type: 'anthropic', base_url: 'https://test', api_key: 'test-key', models: [{ id: 'm1', name: 'test-model', enabled: true }] })
 
       // 真实 HTTP 服务器：根路径返回计算器 HTML，/src/app.js 返回 calculate 逻辑，
       // 供 runMvpTask 的沙箱健康检查与 runPostMvpTestingFlow 的 GWT 功能断言同源拉取。

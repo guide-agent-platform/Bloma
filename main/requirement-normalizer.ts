@@ -1,6 +1,7 @@
 import type { SDKQuery } from './orchestrator'
 import type { SketchRequirement } from './sketch-engine'
 import { requirementAssertions } from './sketch-engine'
+import { categoryTemperature } from './model-resolution'
 import { recordDecision } from './decision-log'
 
 /**
@@ -95,6 +96,8 @@ export async function normalizeRequirementUpdate(
       sessionId: input.session_id,
       history: [{ role: 'system', content: SYSTEM_PROMPT }],
       maxTokens: input.maxTokens ?? DEFAULT_MAX_TOKENS,
+      // §7.7 类别温度：归一化判定要稳、可复现（0.1）
+      temperature: categoryTemperature('prd'),
     })
     for await (const sdkMessage of stream) {
       if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue

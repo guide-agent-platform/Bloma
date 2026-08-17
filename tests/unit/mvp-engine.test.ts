@@ -251,7 +251,7 @@ function createTestChannel(decryptable: boolean): { id: string } {
       return value.toString('utf8').replace(/^enc:/, '')
     },
   })
-  return createChannel({ name: 'test', provider_type: 'anthropic', base_url: 'https://test', api_key: 'test-key' })
+  return createChannel({ name: 'test', provider_type: 'anthropic', base_url: 'https://test', api_key: 'test-key', models: [{ id: 'm1', name: 'test-model', enabled: true }] })
 }
 
 /** LLM 生成型 SDK query 桩：返回可落盘的真实计算器（四则按钮 + calculate 逻辑）。 */
