@@ -12,6 +12,7 @@ import { getDocumentsDir } from '../storage/config-paths'
 import { findProject, readLastSketchRequirements } from './project-service'
 import type { PrdBackplane, SketchRequirement } from './sketch-engine'
 import { requirementAssertions, requirementPriority, requirementStory } from './sketch-engine'
+import { describeEffect, describeTrigger, parseBehaviorAssertion } from './behavior-assertions'
 
 /**
  * DocumentEngine — 文档同步（对齐 api-spec §10.1 / architecture §7.3）。
@@ -285,7 +286,7 @@ function renderPrdJson(backplane: PrdBackplane): string {
  * MVP 生成 / 修复共用——草图全文作为输入上下文不降采样。路径必须落在 documents 目录内
  * （防 prd.json 被篡改后越权读任意文件）。
  */
-export function readUxContractSketch(projectId: string, backplane?: PrdBackplane): string | undefined {
+export function readUxContractSketch(projectId: string, backplane?: Pick<PrdBackplane, 'ux_contract'>): string | undefined {
   const contract = (backplane ?? readPrdBackplane(projectId)).ux_contract
   if (!contract) return undefined
   const project = findProject(projectId)
@@ -454,48 +455,72 @@ function renderSprintPlan(projectName: string): string {
 `
 }
 
-/** GWT 骨架：按 PRD 背板生成 Gherkin feature 文件（确定性模板，不依赖 LLM）。 */
+/**
+ * GWT 骨架：按 PRD 背板生成 Gherkin feature 文件（确定性模板，不依赖 LLM）。
+ *
+ * M3（§7.4）：场景从 behavior_assertions 派生——每条断言一个 Scenario
+ * （When=触发器、Then=效果，来自 behavior-assertions 词表解析），解析不出
+ * 触发/效果的断言（含默认断言）落「核心路径可运行」存在性骨架；边界/异常
+ * 两条鲁棒性场景保留。运行时的真实行为验证由 gwt-runner 在产物预览上执行。
+ */
 export function renderGwtSkeleton(
   backplane: PrdBackplane,
 ): Array<{ fileName: string; content: string }> {
   return readRequirements(backplane.requirements).map((item) => {
     const id = safeFileName(item.id)
-    const title = shortTitle(item.description)
     const acceptance = backplane.acceptance[item.id] ?? `${item.description}：核心路径可交互，边界与异常输入不崩溃。`
     return {
       fileName: `${id}.feature`,
-      content: renderFeatureFile(id, title, item.description, acceptance),
+      content: renderFeatureFile(item, acceptance),
     }
   })
 }
 
-/**
- * 每个功能项生成「正常路径 + 边界 + 异常」三条场景（对齐 PRD §11.3）。
- * 场景是确定性骨架（快消型无浏览器执行器，实际断言由 gwt-service 的
- * hasInteractiveEntry / 原文匹配兜底），但保证每个 P0 功能项覆盖三类路径。
- */
-function renderFeatureFile(id: string, title: string, description: string, acceptance: string): string {
-  return `# GWT 骨架（由 DocumentEngine 生成，GWTTestRunner 执行）
+function renderFeatureFile(item: SketchRequirement, acceptance: string): string {
+  const title = shortTitle(item.description)
+  const scenarios: string[] = []
+  for (const assertion of requirementAssertions(item)) {
+    const plan = parseBehaviorAssertion(assertion)
+    if (plan.presenceFallback || !plan.trigger || !plan.effect) {
+      scenarios.push([
+        `  Scenario: 核心路径可运行（${assertion}）`,
+        `    Given 已进入 ${title} 功能页面`,
+        `    When 我执行核心操作`,
+        `    Then 页面返回预期结果`,
+      ].join('\n'))
+    } else {
+      scenarios.push([
+        `  Scenario: ${assertion}`,
+        `    Given 已进入 ${title} 功能页面`,
+        `    When ${describeTrigger(plan.trigger)}`,
+        `    Then ${describeEffect(plan.effect)}`,
+      ].join('\n'))
+    }
+  }
+  scenarios.push(
+    [
+      `  Scenario: 边界输入不崩溃`,
+      `    Given 已进入 ${title} 功能页面`,
+      `    When 我输入边界值`,
+      `    Then 页面不崩溃并给出可理解的反馈`,
+    ].join('\n'),
+  )
+  scenarios.push(
+    [
+      `  Scenario: 异常输入不崩溃`,
+      `    Given 已进入 ${title} 功能页面`,
+      `    When 我输入异常内容`,
+      `    Then 页面不崩溃并给出可理解的反馈`,
+    ].join('\n'),
+  )
+  return `# GWT 骨架（由 DocumentEngine 生成，场景从行为断言派生，GWTTestRunner 执行）
 Feature: ${title}
 
   As a 用户
-  I want ${description}
+  I want ${requirementStory(item)}
   So that 能完成核心目标
 
-  Scenario: 核心路径可运行
-    Given 已进入 ${title} 功能页面
-    When 我执行核心操作
-    Then 页面返回预期结果
-
-  Scenario: 边界输入不崩溃
-    Given 已进入 ${title} 功能页面
-    When 我输入边界值
-    Then 页面不崩溃并给出可理解的反馈
-
-  Scenario: 异常输入不崩溃
-    Given 已进入 ${title} 功能页面
-    When 我输入异常内容
-    Then 页面不崩溃并给出可理解的反馈
+${scenarios.join('\n\n')}
 
   # 验收要点：${acceptance}
 `

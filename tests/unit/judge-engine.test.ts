@@ -68,14 +68,14 @@ describe('JudgeEngine (A2-10)', () => {
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
     recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
     syncDocuments({ request_id: 'req-sync', session_id: 's', project_id: project.project_id, checkpoint: 'mvp_before_generation' })
-    // 页面没有对应入口（既无需求原文，也无交互控件 + 脚本逻辑）——改造 E 升级为硬约束退回
+    // 页面没有对应入口（既无需求原文，也无交互控件 + 脚本逻辑）——存在性基线退回
     writeFileSync(join(project.root_path, 'index.html'), '<p>其他内容</p>', 'utf8')
 
     const verdict = runJudge({ project_id: project.project_id, mode: 'quick' })
 
     expect(verdict.verdict).toBe('return')
     expect(verdict.repairable).toBe(true)
-    const entry = verdict.hard_constraints.find((item) => item.name === '代码交互入口')
+    const entry = verdict.hard_constraints.find((item) => item.name === 'P0 行为断言可满足性')
     expect(entry?.passed).toBe(false)
     expect(entry?.detail).toContain('F-001')
   })

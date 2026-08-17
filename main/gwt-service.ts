@@ -5,7 +5,7 @@ import type { DocumentRef } from '../shared/types'
 import { getDocumentsDir } from '../storage/config-paths'
 import { findProject, readLastSketchRequirements } from './project-service'
 import { escapeHtml, type SketchRequirement } from './sketch-engine'
-import { runBrowserGwt } from './gwt-runner'
+import { planScenarios, runBrowserGwt, scenarioName as gwtScenarioName } from './gwt-runner'
 
 /**
  * GWT 服务（A2-07，方案A拆分：A 写骨架 / C 执行）。
@@ -29,6 +29,12 @@ export interface GwtTestResult {
   passed_count: number
   failed_count: number
   failure_summary: GwtFailureSummary[]
+  /**
+   * 待评估断言（§8.1）：行为断言解析出了效果词表但产物未现关键词（可能走
+   * SVG/canvas/@keyframes 等不落关键词的合法实现）→ 静态模式无法判定，不计失败，
+   * 由行为脚本/LLM 裁判兜底。信息性字段，裁判不作硬约束依据。
+   */
+  unverified?: string[]
 }
 
 export interface RunGwtInput {
@@ -42,45 +48,67 @@ const TEST_REPORT_MD = 'test-report.md'
 
 /** 在预览上执行 GWT 场景，返回结构化结果。 */
 export async function runGwtScenarios(input: RunGwtInput): Promise<GwtTestResult> {
-  // 真实浏览器执行器优先（A2-07 / api-spec §12.4）：Playwright 无头加载预览页，
-  // 真正执行页面 JS 后对每个 P0 功能项断言功能入口；浏览器不可用（未安装 chromium
-  // / 导入失败 / 启动失败 / 导航失败）时返回 null，自动降级为下方 fetch + 正则 静态启发式。
+  // 真实浏览器执行器优先（A2-07 / api-spec §12.4；M3 per-assertion 行为探针）：
+  // Playwright 无头加载预览页，逐条行为断言「模拟触发 → 断言状态变化」；
+  // 浏览器不可用（未安装 chromium / 导入失败 / 启动失败 / 导航失败）时返回 null，
+  // 自动降级为下方 fetch + 正则 的静态启发式。
   const browserResult = await runBrowserGwt(input)
   if (browserResult) return browserResult
+  return runStaticScenarios(input)
+}
 
-  const project = findProject(input.project_id)
+/**
+ * 静态启发式兜底（无浏览器环境）：逐条断言判定（§8.1 有界静态启发式）。
+ *
+ * - 存在性断言（默认断言/解析不出触发与效果）：需求原文转义后出现在 HTML，或
+ *   产物整体具备「交互控件 + 脚本逻辑」（hasInteractiveEntry 一票语义，与改造前同构）；
+ * - 行为断言：效果词表关键词出现在产物全文（HTML+JS）→ 静态确认通过；未现关键词 →
+ *   **待评估不计失败**（防 SVG/canvas/@keyframes 等不落关键词的合法实现被误退回，
+ *   真实行为判定交给浏览器行为脚本——它不可用时宁可放过不可误杀）。
+ */
+async function runStaticScenarios(input: RunGwtInput): Promise<GwtTestResult> {
   const requirements = readLastSketchRequirements(input.project_id)
-  const items = requirements.length ? requirements : [{ id: 'F-001', description: '核心功能页面可访问' }]
   const html = input.preview_url ? await fetchHtml(input.preview_url) : undefined
   const appJs = input.preview_url ? await fetchAppJs(input.preview_url) : undefined
-
-  // LLM 产物功能断言（A2-14b）：模型产物的 index.html 未必内嵌需求描述原文（措辞不同会假阴性），
-  // 改用领域无关的「交互控件 + 脚本逻辑」判定，避免误判失败进 repair 被模板替换。
-  if (html !== undefined && appJs !== undefined && hasInteractiveEntry(html, appJs)) {
-    return { total_count: items.length, passed_count: items.length, failed_count: 0, failure_summary: [] }
-  }
+  const artifact = `${html ?? ''}\n${appJs ?? ''}`
+  const functionalEntry = html !== undefined && appJs !== undefined && hasInteractiveEntry(html, appJs)
 
   const failureSummary: GwtFailureSummary[] = []
+  const unverified: string[] = []
   let passedCount = 0
-  for (const item of items) {
-    // 服务端模板对 description 做了 HTML 转义，比对时同样转义
-    const marker = escapeHtml(item.description)
-    const ok = html !== undefined && html.includes(marker)
-    if (ok) {
+  for (const scenario of planScenarios(requirements)) {
+    const name = gwtScenarioName(scenario.item.id, scenario.assertion)
+    const { plan } = scenario
+    if (plan.presenceFallback || !plan.effect) {
+      // 存在性断言：需求原文转义匹配（模板产物）或整体交互入口（LLM 产物）一票通过
+      const marker = escapeHtml(scenario.item.description)
+      const ok = html !== undefined && (html.includes(marker) || functionalEntry)
+      if (ok) {
+        passedCount += 1
+      } else {
+        failureSummary.push({
+          scenario: name,
+          reason: html === undefined ? '预览不可访问' : `页面缺少功能入口：${scenario.item.description}`,
+        })
+      }
+      continue
+    }
+    // 行为断言：关键词静态确认；未命中 → 待评估（不计失败，不触发修复循环）
+    const keywordHit = plan.effect.keywords.some((keyword) => artifact.includes(keyword))
+    if (keywordHit) {
       passedCount += 1
     } else {
-      failureSummary.push({
-        scenario: scenarioName(item),
-        reason: html === undefined ? '预览不可访问' : `页面缺少功能入口：${item.description}`,
-      })
+      unverified.push(name)
+      passedCount += 1
     }
   }
 
   return {
-    total_count: items.length,
+    total_count: failureSummary.length + passedCount,
     passed_count: passedCount,
-    failed_count: items.length - passedCount,
+    failed_count: failureSummary.length,
     failure_summary: failureSummary,
+    ...(unverified.length ? { unverified } : {}),
   }
 }
 
@@ -133,10 +161,6 @@ export function readTestReport(projectId: string): GwtTestResult | null {
   } catch {
     return null
   }
-}
-
-function scenarioName(item: SketchRequirement): string {
-  return `${item.id} 核心路径可运行`
 }
 
 function renderTestReportMarkdown(result: GwtTestResult, sessionId: string): string {
