@@ -1,11 +1,12 @@
 import { EventEmitter } from 'node:events'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runAgent, setAgentStreamPublisher, setSDKQueryForTests } from '../../main/orchestrator'
 import { createProject, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../../main/project-service'
+import { getAgentSessionPath } from '../../storage/config-paths'
 import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests, setSnapshotCaptureProviderForTests } from '../../main/platform-services'
 import type { AgentEvent, SDKMessage, WorkflowStage } from '../../shared/types'
 
@@ -134,6 +135,88 @@ describe('转移阶段护栏（问题 A / P1）', () => {
     expect(deltas).toContain('调整草图')
     expect(deltas).not.toContain('生成完整功能')
     expect(events.some((event) => event.type === 'completed')).toBe(true)
+  })
+
+  it('sketch_ready 修改意见经归一化：修正类诉求 revise 已有功能项，不再追加碎片（2026-08-16 复测 43b47a47）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-sketch-norm-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-sketch-norm', mode: 'quick' })
+    updateProject(project.project_id, { current_stage: 'sketch_ready' })
+    recordSketchGenerated(project.project_id, [
+      { id: 'F-001', description: '家庭记账，记录收入支出' },
+      { id: 'F-002', description: '页面样式简洁' },
+    ])
+    vi.mocked(findProject).mockReturnValue({ ...project, current_stage: 'sketch_ready' } as never)
+
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    // query 按调用次数分流：第 1 次=需求归一化（revise F-002），第 2 次=草图 LLM
+    // （完整 HTML 含 <style> 且 </html> 闭合 → isHtmlDocument 通过，走 LLM 路径不落模板）
+    const SKETCH_HTML = '<!doctype html><html><head><style>body{color:#3333ff}</style></head><body><main>记账</main></body></html>'
+    let call = 0
+    setSDKQueryForTests(async function* () {
+      call += 1
+      yield {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: call === 1 ? '{"action":"revise","revise_id":"F-002","description":"页面主色调为蓝色，标题字号加大"}' : SKETCH_HTML,
+            },
+          ],
+        },
+      }
+      yield { type: 'result', subtype: 'success' }
+    })
+    setSandboxRuntimeForTests({
+      portAllocator: async () => 3103,
+      healthCheck: async () => true,
+      processFactory: () => makeChildProcess(),
+    })
+    setSnapshotCaptureProviderForTests(async () => ({
+      extension: 'png',
+      buffer: Buffer.from('fake-png'),
+    }))
+
+    // 「改成」命中 L1 修改意图规则，不依赖 LLM 兜底判定
+    await runAgent({
+      request_id: 'req-sketch-norm',
+      session_id: 'session-sketch-norm',
+      project_id: project.project_id,
+      content: '页面样式改成蓝色',
+      mode: 'quick',
+      current_stage: 'sketch_ready',
+      channel_id: 'test-channel',
+    })
+
+    // revise 不扩容：修正吸收进 F-002 描述，而不是新增 F-003 碎片
+    const requirements = readLastSketchRequirements(project.project_id)
+    expect(requirements).toHaveLength(2)
+    expect(requirements.find((item) => item.id === 'F-002')?.description).toBe('页面主色调为蓝色，标题字号加大')
+    expect(requirements.find((item) => item.id === 'F-001')?.description).toBe('家庭记账，记录收入支出')
+    // 归一化决策落 T2 决策日志（requirement_normalized）；JSONL 行是 JSON-in-JSON，
+    // 决策文本经转义嵌入，先解析行再断言解码后文本
+    const decisionText = readFileSync(getAgentSessionPath('session-sketch-norm'), 'utf8')
+      .split('\n')
+      .filter((line) => line.trim())
+      .map((line) => {
+        try {
+          return JSON.parse(line) as { content?: Array<{ text?: string }> }
+        } catch {
+          return null
+        }
+      })
+      .filter((message): message is { content: Array<{ text?: string }> } => message !== null)
+      .map((message) => message.content?.[0]?.text ?? '')
+      .find((text) => text.startsWith('[decision]'))
+    expect(decisionText).toBeTruthy()
+    expect(decisionText).toContain('"type":"requirement_normalized"')
+    expect(decisionText).toContain('F-002')
+    // 草图照常重生成并落回 sketch_ready
+    expect(events.some((event) => event.type === 'stage_changed' && event.payload.stage === 'generating_sketch')).toBe(true)
+    expect(events.some((event) => event.type === 'sketch_ready')).toBe(true)
   })
 
   it('编程路径输出完整 HTML / 代码块时追加显式提示', async () => {

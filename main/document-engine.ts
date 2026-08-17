@@ -11,6 +11,7 @@ import type {
 import { getDocumentsDir } from '../storage/config-paths'
 import { findProject, readLastSketchRequirements } from './project-service'
 import type { PrdBackplane, SketchRequirement } from './sketch-engine'
+import { requirementAssertions, requirementPriority, requirementStory } from './sketch-engine'
 
 /**
  * DocumentEngine — 文档同步（对齐 api-spec §10.1 / architecture §7.3）。
@@ -198,11 +199,13 @@ function readRequirements(requirements: SketchRequirement[]): SketchRequirement[
 }
 
 /**
- * 组装 PRD 背板（快消型的唯一需求事实源）。
+ * 组装 PRD 背板（快消型的唯一需求事实源，密背板版 §3.2）。
  *
  * - positioning 取 F-001（主题锚点，改造 A 已保证 F-001 是用户最初想做什么）；
- * - acceptance 由确定性规则生成默认验收要点（GWT 派生源，改造 D 消费）；
- * - out_of_scope / assumptions 在草案阶段留空，由后续生成回填（改造 C）。
+ * - requirements 构建侧归一化为厚形态（story/断言/优先级物化进 prd.json，§10 兼容：
+ *   旧数据无需迁移，读取侧经 requirement* helper 回退默认）；
+ * - acceptance 保持兼容（行为断言迁入 requirements 后逐步废弃）；
+ * - out_of_scope 并入 normalizer 判定的范围声明（project.scope_exclusions）；
  * - mvp_before_generation 时冻结（落盘 frozen_at），此后编程管线只读冻结版。
  */
 export function buildPrdBackplane(
@@ -210,9 +213,11 @@ export function buildPrdBackplane(
   requirements: SketchRequirement[],
   checkpoint: DocumentSyncInput['checkpoint'],
 ): PrdBackplane {
-  const items = readRequirements(requirements)
+  const items = readRequirements(requirements).map(normalizeRequirement)
   const acceptance: Record<string, string> = {}
   for (const item of items) {
+    // acceptance 是废弃中的兼容字段（行为断言已迁入 requirements）：保持旧格式，
+    // 供 GWT 骨架「验收要点」等存量消费方读取，新数据流一律走 requirements
     acceptance[item.id] = `${item.description}：核心路径可交互，边界与异常输入不崩溃。`
   }
   return {
@@ -221,9 +226,22 @@ export function buildPrdBackplane(
     positioning: items[0]?.description ?? project.name,
     requirements: items,
     acceptance,
-    out_of_scope: [],
+    out_of_scope: [...new Set(project.scope_exclusions ?? [])],
     assumptions: [],
     ...(checkpoint === 'mvp_before_generation' ? { frozen_at: new Date().toISOString() } : {}),
+  }
+}
+
+/**
+ * 构建侧归一化（§10 兼容）：把薄形态（仅 id+description）物化为厚形态。
+ * 缺省值与读取侧 helper（requirementStory 等）一致，落盘后下游无需再判空。
+ */
+function normalizeRequirement(item: SketchRequirement): SketchRequirement {
+  return {
+    ...item,
+    story: requirementStory(item),
+    behavior_assertions: requirementAssertions(item),
+    priority: requirementPriority(item),
   }
 }
 
@@ -253,7 +271,7 @@ export function readPrdBackplane(projectId: string): PrdBackplane {
     positioning: items[0]?.description ?? project.name,
     requirements: items,
     acceptance: {},
-    out_of_scope: [],
+    out_of_scope: [...new Set(project.scope_exclusions ?? [])],
     assumptions: [],
   }
 }
@@ -264,10 +282,7 @@ function renderPrdJson(backplane: PrdBackplane): string {
 
 function renderPrdDraft(backplane: PrdBackplane): string {
   const items = backplane.requirements
-  const list = items.map((item) => `- [ ] **${item.id}** ${item.description}`).join('\n')
-  const acceptance = items
-    .map((item) => `- **${item.id}**：${backplane.acceptance[item.id] ?? ''}`)
-    .join('\n')
+  const list = items.map(renderRequirementLine).join('\n')
   const outOfScope = backplane.out_of_scope.length
     ? backplane.out_of_scope.map((scope) => `- ${scope}`).join('\n')
     : '- 暂无'
@@ -279,27 +294,23 @@ function renderPrdDraft(backplane: PrdBackplane): string {
 
 ${backplane.positioning}
 
-## 2. 核心功能项
+## 2. 用户故事与行为断言
 
 ${list}
 
-## 3. 验收标准
-
-${acceptance}
-
-## 4. 范围外（非目标）
+## 3. 范围外（非目标）
 
 ${outOfScope}
-
-## 5. 说明
-- 本草案由确认后的草图需求生成，供 MVP 生成与 GWT 骨架使用。
+${renderGuardrailsSection(backplane)}${renderUxContractSection(backplane)}
+## 说明
+- 本草案由确认后的草图需求生成（密背板：故事化功能项 + 行为断言 + 优先级）。
 - 后续需求细化见对话历史。
 `
 }
 
 function renderPrdFull(backplane: PrdBackplane): string {
   const items = backplane.requirements
-  const list = items.map((item) => `- [x] **${item.id}** ${item.description}`).join('\n')
+  const list = items.map(renderRequirementLine).join('\n')
   const featureRefs = items.map((item) => `- \`features/${item.id}.feature\``).join('\n')
   return `# ${backplane.name} · PRD（MVP 生成前）
 
@@ -310,18 +321,56 @@ function renderPrdFull(backplane: PrdBackplane): string {
 
 ${backplane.positioning}
 
-## 2. 完整功能项
+## 2. 用户故事与行为断言
 
 ${list}
 
-## 3. 验收标准
+## 3. 范围外（非目标）
 
-${items.map((item) => `- **${item.id}**：${backplane.acceptance[item.id] ?? ''}`).join('\n')}
-
-## 4. GWT 骨架
-每个 P0 功能项至少包含 1 个 GWT 场景，feature 文件位于 \`documents/{project_id}/features/\`：
+${backplane.out_of_scope.length ? backplane.out_of_scope.map((scope) => `- ${scope}`).join('\n') : '- 无'}
+${renderGuardrailsSection(backplane)}${renderUxContractSection(backplane)}
+## 4. 验收（GWT）
+每个 P0 功能项至少包含 1 个 GWT 场景（从行为断言派生），feature 文件位于 \`documents/{project_id}/features/\`：
 
 ${featureRefs}
+`
+}
+
+/** 单条功能项的用户可读渲染（§3.4）：故事 + 行为断言 + 优先级 + 范围排除。 */
+function renderRequirementLine(item: SketchRequirement): string {
+  const lines = [`- [ ] **${item.id}**（${requirementPriority(item)}）${requirementStory(item)}`]
+  for (const assertion of requirementAssertions(item)) {
+    lines.push(`  - 行为断言：${assertion}`)
+  }
+  if (item.scope_notes) lines.push(`  - 范围排除：${item.scope_notes}`)
+  return lines.join('\n')
+}
+
+/** 生成护栏段（仅当 generation_guardrails 存在时渲染，§3.4）。 */
+function renderGuardrailsSection(backplane: PrdBackplane): string {
+  const guardrails = backplane.generation_guardrails
+  if (!guardrails || (guardrails.must_do.length === 0 && guardrails.must_not_do.length === 0)) return ''
+  const mustDo = guardrails.must_do.length ? guardrails.must_do.map((rule) => `- ${rule}`).join('\n') : '- 无'
+  const mustNotDo = guardrails.must_not_do.length ? guardrails.must_not_do.map((rule) => `- ${rule}`).join('\n') : '- 无'
+  return `
+## 生成护栏
+
+MUST DO：
+${mustDo}
+
+MUST NOT DO：
+${mustNotDo}
+`
+}
+
+/** 草图契约段（仅当 ux_contract 存在时渲染，§3.4/§4.2）。 */
+function renderUxContractSection(backplane: PrdBackplane): string {
+  if (!backplane.ux_contract) return ''
+  return `
+## 草图契约（UX 契约）
+
+参考 \`${backplane.ux_contract.sketch_rel_path}\`（用户已于 ${backplane.ux_contract.confirmed_at} 确认）。
+MVP 的布局/结构/样式以该草图为基准，不得低于草图精致度。
 `
 }
 

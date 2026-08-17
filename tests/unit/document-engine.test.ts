@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { listDocuments, readDocument, syncDocuments } from '../../main/document-engine'
-import { createProject, recordSketchGenerated } from '../../main/project-service'
+import { createProject, recordSketchGenerated, updateProject } from '../../main/project-service'
 import { getDocumentsDir } from '../../storage/config-paths'
 
 describe('DocumentEngine (A2-05)', () => {
@@ -31,13 +31,71 @@ describe('DocumentEngine (A2-05)', () => {
     expect(prd).toContain('PRD 草案')
     expect(prd).toContain('F-001')
     expect(prd).toContain('记录收入与支出')
-    // 结构化 PRD 背板：含产品定位 + 验收标准 + 范围外
+    // 结构化 PRD 背板（密背板版）：产品定位 + 用户故事与行为断言 + 范围外
     expect(prd).toContain('产品定位')
-    expect(prd).toContain('验收标准')
+    expect(prd).toContain('用户故事与行为断言')
+    expect(prd).toContain('行为断言：该功能项在产物中可见且可交互')
     expect(prd).toContain('范围外')
     expect(result.documents.length).toBeGreaterThan(0)
     expect(result.documents[0].status).toBe('synced')
     expect(result.documents[0].type).toBe('prd')
+  })
+
+  it('renders thick backplane: story/assertions/priority materialized into prd.json; scope_exclusions merged into out_of_scope', () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-doc-thick-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    updateProject(project.project_id, { scope_exclusions: ['不做排行榜', '不做登录'] })
+    recordSketchGenerated(project.project_id, [
+      {
+        id: 'F-001',
+        description: '赛车模拟器',
+        story: '作为玩家，我想驾驶赛车，以便获得竞速体验',
+        behavior_assertions: ['按右方向键→车辆 x 坐标增加'],
+        priority: 'P0',
+      },
+      { id: 'F-002', description: '历史记录' },
+    ])
+
+    // prd.json 产自 sketch_confirmed；mvp_before_generation.md 是用户可读渲染（两检查点各取所需）
+    syncDocuments({
+      request_id: 'req-sync',
+      session_id: 'session-1',
+      project_id: project.project_id,
+      checkpoint: 'sketch_confirmed',
+    })
+    syncDocuments({
+      request_id: 'req-sync',
+      session_id: 'session-1',
+      project_id: project.project_id,
+      checkpoint: 'mvp_before_generation',
+    })
+
+    const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+    const backplane = JSON.parse(readFileSync(join(dir, 'prd.json'), 'utf8'))
+    // 薄项（F-002）构建侧归一化：story 回退 description、默认断言、P2（不触发 P0 门禁）
+    expect(backplane.requirements[0]).toMatchObject({
+      id: 'F-001',
+      story: '作为玩家，我想驾驶赛车，以便获得竞速体验',
+      behavior_assertions: ['按右方向键→车辆 x 坐标增加'],
+      priority: 'P0',
+    })
+    expect(backplane.requirements[1]).toMatchObject({
+      id: 'F-002',
+      story: '历史记录',
+      behavior_assertions: ['该功能项在产物中可见且可交互'],
+      priority: 'P2',
+    })
+    // normalizer 判定的范围声明并入 out_of_scope
+    expect(backplane.out_of_scope).toEqual(['不做排行榜', '不做登录'])
+    // 用户可读渲染：故事 + 断言 + 优先级 + 范围排除
+    const full = readFileSync(join(dir, 'mvp_before_generation.md'), 'utf8')
+    expect(full).toContain('用户故事与行为断言')
+    expect(full).toContain('作为玩家，我想驾驶赛车，以便获得竞速体验')
+    expect(full).toContain('行为断言：按右方向键→车辆 x 坐标增加')
+    expect(full).toContain('不做排行榜')
+    // 无 ux_contract 时不渲染草图契约段（质量门未通过 → PRD-only）
+    expect(full).not.toContain('草图契约')
   })
 
   it('writes a machine-readable PRD backplane (prd.json) with positioning + acceptance on sketch_confirmed', () => {

@@ -30,10 +30,11 @@ import {
   takeFailedIteration,
   takePendingIteration,
 } from './programming-orchestrator'
+import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from './requirement-normalizer'
 import { readPrdBackplane } from './document-engine'
 import { recordDecision } from './decision-log'
 import { isCircuitBreakSettled } from './recovery-service'
-import { findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
+import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
 import { recordSessionActivity } from './session-service'
 import { isThinkingLogEnabled, logThinking } from './thinking-log'
 import { extractErrorMessage } from './channel-test-error'
@@ -309,7 +310,24 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       if (intent === 'modify') {
         const description = refineModificationDescription(input.content)
         const existing = readLastSketchRequirements(input.project_id)
-        const requirements = [...existing, { id: nextRequirementId(existing), description }]
+        // 修改诉求归一化后并入需求清单：口语碎片原样入库会污染 PRD 背板（线上案例
+        // 「重新生成」被 acceptance 解释成功能、产品里长出重置按钮；「车的运行方向不对」
+        // 只能生成最小满足版）。归一化失败/无渠道回退改动前现状（原样追加），不阻断草图重生成。
+        const normalization = await normalizeRequirementUpdate({
+          session_id: input.session_id,
+          existing,
+          modification: description,
+          query: sdkQuery,
+          env,
+          signal: abortController.signal,
+        })
+        const requirements = applyNormalization(existing, normalization, nextRequirementId(existing), 'correction')
+        if (normalization.action === 'out_of_scope' && normalization.outOfScope) {
+          addScopeExclusion(input.project_id, normalization.outOfScope)
+        }
+        if (normalization.via === 'llm') {
+          recordRequirementNormalization(input, 'sketch_ready', description, normalization)
+        }
         recordSketchGenerated(input.project_id, requirements)
         recordDecision({
           project_id: input.project_id,
@@ -317,8 +335,12 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
           entry: {
             type: 'modification_gate',
             title: '草图阶段修改意见',
-            why: `用户对草图提出「${input.content}」，清洗为「${description}」并入需求清单，重新生成草图`,
-            detail: { stage: 'sketch_ready', requirements },
+            why: `用户对草图提出「${input.content}」，清洗为「${description}」并入需求清单（${normalization.action}${normalization.reviseId ? ` ${normalization.reviseId}` : ''}），重新生成草图`,
+            detail: {
+              stage: 'sketch_ready',
+              normalization: { action: normalization.action, revise_id: normalization.reviseId, description: normalization.description },
+              requirements,
+            },
           },
         })
         const ack = `好的，按「${truncateForCopy(description, 40)}」调整草图，重新生成一版。`

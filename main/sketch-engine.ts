@@ -2,9 +2,61 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { findProject } from './project-service'
 
+/**
+ * 功能项（密背板格式层，2026-08-17 设计 §3.1）。
+ *
+ * description 保持为「一行可读描述」——存量数据/展示/兜底都以它为准；
+ * story / behavior_assertions / priority 是密背板新增的可选厚字段，
+ * 读取侧一律经 `requirementStory` / `requirementAssertions` / `requirementPriority`
+ * 取值（缺省回退），旧数据（只有 id+description）无需迁移即可参与新管线。
+ */
 export interface SketchRequirement {
   id: string
   description: string
+  /** 故事化描述：作为<角色>，我想<功能>，以便<价值>；缺省回退 description */
+  story?: string
+  /** 行为断言：可执行、可断言的行为清单（GWT 派生 / 裁判门禁 / MVP 完成标尺） */
+  behavior_assertions?: string[]
+  /** P0/P1/P2：P0 必须有断言覆盖并进行为门禁；缺省 F-001=P0、其余 P2 */
+  priority?: 'P0' | 'P1' | 'P2'
+  /** 单条范围排除（可空）：该项明确不做的事 */
+  scope_notes?: string
+  /** 来源：clarify | correction | iteration | auto */
+  source?: string
+}
+
+/** 行为断言缺省兜底（§10 兼容：旧项无断言时保证 GWT 仍有可派生场景） */
+export const DEFAULT_BEHAVIOR_ASSERTION = '该功能项在产物中可见且可交互'
+
+/** 故事化描述读取：story 优先、description 兜底（§10 兼容）。 */
+export function requirementStory(item: SketchRequirement): string {
+  const story = item.story?.trim()
+  return story ? story : item.description
+}
+
+/** 行为断言读取：过滤空串；缺失时回退默认断言（§10 兼容）。 */
+export function requirementAssertions(item: SketchRequirement): string[] {
+  const assertions = (item.behavior_assertions ?? []).map((value) => value.trim()).filter(Boolean)
+  return assertions.length > 0 ? assertions : [DEFAULT_BEHAVIOR_ASSERTION]
+}
+
+/** 优先级读取：缺省 F-001（主题锚点）= P0、其余 P2（不触发 P0 门禁，保守兼容）。 */
+export function requirementPriority(item: SketchRequirement): 'P0' | 'P1' | 'P2' {
+  return item.priority ?? (item.id === 'F-001' ? 'P0' : 'P2')
+}
+
+/** 全局 UX 契约（§4.2）：本轮用户确认过的草图（仅「用户确认 + 非模板回退」时存在）。 */
+export interface UxContract {
+  /** 草图文件相对路径（相对 documents/{project_id}/，如 sketch.html） */
+  sketch_rel_path: string
+  /** 用户确认时间 */
+  confirmed_at: string
+}
+
+/** MVP 生成护栏（§3.2）：MUST DO / MUST NOT DO，可被 normalizer/评审追加。 */
+export interface GenerationGuardrails {
+  must_do: string[]
+  must_not_do: string[]
 }
 
 /**
@@ -24,12 +76,16 @@ export interface PrdBackplane {
   positioning: string
   /** 核心功能项：F-001 为主题，其余为澄清/纠错/迭代追加项 */
   requirements: SketchRequirement[]
-  /** 功能项 id → 验收要点（GWT 派生源） */
+  /** 功能项 id → 验收要点（行为断言迁入 requirements 后逐步废弃；保持兼容） */
   acceptance: Record<string, string>
-  /** 本轮明确不做的事（防模型擅自扩功能） */
+  /** 本轮明确不做的事（防模型擅自扩功能；含 normalizer 判定的范围声明） */
   out_of_scope: string[]
   /** 后台决策假设（assumptions，供 decisions 回溯） */
   assumptions: string[]
+  /** 全局 UX 契约（§4.2）：仅「用户确认 + 非模板回退」的草图才登记 */
+  ux_contract?: UxContract
+  /** MVP 生成护栏（§3.2）：MUST DO / MUST NOT DO */
+  generation_guardrails?: GenerationGuardrails
   /** 冻结时间（mvp_before_generation 时落盘；草案阶段为 undefined） */
   frozen_at?: string
 }

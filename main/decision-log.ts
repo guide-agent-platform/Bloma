@@ -22,6 +22,7 @@ export type DecisionType =
   | 'clarification_answer'
   | 'modification_gate'
   | 'modification_decision'
+  | 'requirement_normalized'
   | 'judge_return'
   | 'circuit_rollback'
   | 'startup_convergence'

@@ -6,10 +6,11 @@ import { buildPrdBackplane, readPrdBackplane, syncDocuments } from './document-e
 import { createSnapshot, runSandbox, trackAnalytics } from './platform-services'
 import { DEFAULT_MAX_TOKENS, generateMvpLlm, type GenerateMvpLlmResult } from './mvp-engine-llm'
 import { buildSdkEnv, decryptApiKey, getChannelByIdRaw, getFirstEnabledChannel } from './channel-manager'
-import { findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
+import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
 import { generateSketch, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from './sketch-engine'
 import { generateSketchLlm, SketchLlmError, type SketchAttemptDetail } from './sketch-engine-llm'
 import { generatePrdLlm } from './prd-engine-llm'
+import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from './requirement-normalizer'
 import { readTestReport, runGwtScenarios, writeTestReport, type GwtTestResult } from './gwt-service'
 import { applyRepairPatch, REPAIR_CATEGORY_SUMMARY, runRepairCycle, type RepairCategory } from './repair-engine'
 import { runJudge, type JudgeVerdict } from './judge-engine'
@@ -807,9 +808,11 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
   updateProject(input.project_id, { current_stage: 'iterating' })
   publish(input, 'stage_changed', { stage: 'iterating' })
 
-  // 修改诉求作为新功能项并入需求清单，供 runMvpTask 重新生成读取（含 GWT 骨架同步）
+  // 修改诉求归一化后并入需求清单，供 runMvpTask 重新生成读取（含 GWT 骨架同步）。
+  // 口语碎片原样入库会污染 PRD 背板（线上案例：「重新生成」被 acceptance 解释成功能、
+  // 产品里长出重置按钮），归一化失败/无渠道时回退原样追加（改动前现状），不阻断迭代。
   const existing = readLastSketchRequirements(input.project_id)
-  const requirements = [...existing, { id: nextRequirementId(existing), description: input.prompt }]
+  const requirements = await mergeIterationRequirements(input, existing)
   recordSketchGenerated(input.project_id, requirements)
 
   publishCompletionMessage(input, `好的，我按你的新想法「${truncateCopy(input.prompt, 20)}」重新生成一版。`)
@@ -865,6 +868,45 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
       })
     }
     throw error
+  }
+}
+
+/**
+ * runIterationTask 专用：修改诉求 → 归一化 → 并入需求清单。
+ * LLM 判定 revise（修订已有功能项，F-001 主题锚点除外）/ append（改写后追加新项）/
+ * skip（操作指令不入清单，按原清单重生成），详见 requirement-normalizer。
+ * 任何失败（无渠道/密钥/LLM/解析）回退改动前现状：清洗原文原样追加——归一化是旁路
+ * 增强，绝不阻断迭代主线。导出供测试锁定归一化与回退行为。
+ */
+export async function mergeIterationRequirements(
+  input: IterationTaskInput,
+  existing: SketchRequirement[],
+): Promise<SketchRequirement[]> {
+  const appendRaw = (): SketchRequirement[] => [...existing, { id: nextRequirementId(existing), description: input.prompt }]
+  if (!input.query) return appendRaw()
+  try {
+    const channel = input.channel_id ? getChannelByIdRaw(input.channel_id) : getFirstEnabledChannel()
+    if (!channel) return appendRaw()
+    const apiKey = decryptApiKey(channel.api_key)
+    const model = channel.models.find((item) => item.enabled)?.name ?? 'claude-sonnet-4-6'
+    const env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
+    const normalization = await normalizeRequirementUpdate({
+      session_id: input.session_id,
+      existing,
+      modification: input.prompt,
+      query: input.query,
+      env,
+      signal: input.signal,
+    })
+    if (normalization.action === 'out_of_scope' && normalization.outOfScope) {
+      addScopeExclusion(input.project_id, normalization.outOfScope)
+    }
+    if (normalization.via === 'llm') {
+      recordRequirementNormalization(input, 'iteration', input.prompt, normalization)
+    }
+    return applyNormalization(existing, normalization, nextRequirementId(existing), 'iteration')
+  } catch {
+    return appendRaw()
   }
 }
 

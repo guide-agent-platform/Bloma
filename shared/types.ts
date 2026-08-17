@@ -554,6 +554,12 @@ export interface Project {
   blocked_action?: 'mvp_repair' | 'test_repair' | 'judge_return'
   /** 需求确认后已自动命名过（autoNameProject）：此后不再覆盖，保住用户手动改名 */
   auto_named?: boolean
+  /** 最近一次草图的生成来源（§4.2 质量门：仅 'llm' 草图可升格 UX 契约） */
+  sketch_source?: 'llm' | 'template'
+  /** 最近一次草图生成时间（ux_contract 刷新判定：确认晚于生成才登记新草图） */
+  sketch_generated_at?: string
+  /** normalizer 判定的范围声明（「不要 X」），buildPrdBackplane 时并入 out_of_scope */
+  scope_exclusions?: string[]
   /** U16：最近进展摘要（取自最近一次 sketch_generated 需求，列表卡片纯展示用，不经落盘） */
   progress_summary?: string
   created_at: string

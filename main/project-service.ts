@@ -317,6 +317,16 @@ export function recordSketchGenerated(projectId: string, requirements: SketchReq
   appendProjectEvent(findProject(projectId), 'sketch_generated', { requirements })
 }
 
+/**
+ * normalizer 判定的范围声明（「不要 X」）持久化（§5.3 out_of_scope）：
+ * 去重追加到 project.scope_exclusions，buildPrdBackplane 时并入 out_of_scope。
+ */
+export function addScopeExclusion(projectId: string, exclusion: string): void {
+  const project = findProject(projectId)
+  const merged = [...new Set([...(project.scope_exclusions ?? []), exclusion.trim()].filter(Boolean))]
+  updateProject(projectId, { scope_exclusions: merged })
+}
+
 /** 读取最近一次 `sketch_generated` 事件中的需求清单；无记录时返回空数组。 */
 export function readLastSketchRequirements(projectId: string): SketchRequirement[] {
   const path = getProjectEventsPath(WORKSPACE_SLUG, projectId)
