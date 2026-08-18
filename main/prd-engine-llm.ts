@@ -153,7 +153,7 @@ function buildPrompt(items: SketchRequirement[], conversation: string): string {
 }
 
 /** 读取会话 JSONL 中 user/assistant 可见轮次（排除内部 [terminal]/system 标记）。 */
-function readConversation(sessionId: string): string {
+export function readConversation(sessionId: string): string {
   const path = getAgentSessionPath(sessionId)
   if (!existsSync(path)) return ''
   const lines: string[] = []

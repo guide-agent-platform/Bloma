@@ -13,7 +13,8 @@ import { captureConstraints, extractConstraints, readProjectConstraints } from '
 import { distillProjectMemorySafely, readProjectMemory } from './memory-distiller'
 import { generateSketch, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from './sketch-engine'
 import { generateSketchLlm, SketchLlmError, type SketchAttemptDetail } from './sketch-engine-llm'
-import { generatePrdLlm } from './prd-engine-llm'
+import { generatePrdLlm, readConversation } from './prd-engine-llm'
+import { enrichRequirementsLlm, extractUserTexts, mergeEnrichment } from './requirement-enricher'
 import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from './requirement-normalizer'
 import { readTestReport, runGwtScenarios, writeTestReport, type GwtTestResult } from './gwt-service'
 import { applyRepairPatch, REPAIR_CATEGORY_SUMMARY, runRepairCycle, type RepairCategory } from './repair-engine'
@@ -572,8 +573,21 @@ export function registerUxContract(input: MvpTaskInput, backplane: PrdBackplane)
 /** UX 契约草图在 documents 目录下的固定文件名。 */
 const UX_CONTRACT_SKETCH_FILE = 'sketch.html'
 
-/** PRD 背板来源分流：渠道可用走 LLM 从对话提取，否则回退确定性模板。 */
-async function resolvePrdBackplane(input: MvpTaskInput, requirements: SketchRequirement[]): Promise<PrdBackplane> {
+/**
+ * PRD 背板来源分流：渠道可用走 LLM 从对话提取，否则回退确定性模板。
+ *
+ * 2026-08-18 功能项加厚（设计 §3.3）：在 sketch_confirmed 与 `generatePrdLlm` **并行**
+ * 跑一道「功能项加厚」LLM 提取（`enrichRequirementsLlm`），把薄功能项补成 story +
+ * 行为断言 + 优先级。两路互不依赖、共用同一渠道/env/对话；任一失败一律降级，绝不
+ * 阻断主链路——`enrichRequirementsLlm` 契约返回 null，但 abort/网络极端情形仍可能
+ * throw，一并 `.catch(()=>null)` 兜底。
+ *
+ * 合并底 = 冻结清单（权威 id 集） + `readPrdBackplane` 上轮 prd.json 对应项既有字段
+ * （重跑时上轮 auto priority/已厚断言成为「已有」被「只填缺省」保留）；`mergeEnrichment`
+ * 返回 `{ requirements, stats }`，断言丢弃率/优先级抑制数由本调用侧落决策日志
+ * （enrichment_stats）供线上标定接地守卫误杀——日志失败仅静默丢弃，不阻断主链路。
+ */
+export async function resolvePrdBackplane(input: MvpTaskInput, requirements: SketchRequirement[]): Promise<PrdBackplane> {
   const template = (): PrdBackplane =>
     buildPrdBackplane(findProject(input.project_id), requirements, 'sketch_confirmed')
 
@@ -590,25 +604,76 @@ async function resolvePrdBackplane(input: MvpTaskInput, requirements: SketchRequ
   const channel = resolution.channel
   const env = resolution.env
 
-  const llm = await generatePrdLlm({
-    project_id: input.project_id,
-    session_id: input.session_id,
-    requirements,
-    query: input.query,
-    env,
-    maxTokens: channel.max_tokens ?? 2048,
-    signal: input.signal,
-  })
-  if (!llm) return template()
+  const project = findProject(input.project_id)
+  // 上轮已写盘的 prd.json（如有）：重跑时其对应项既有字段并入合并底（§3.2）；首轮无 prd.json 按最后草图需求忠实重建（不含默认项）
+  const existing = readPrdBackplane(input.project_id)
+  // 渠道能力上限：enricher 与 generatePrdLlm 共用同一上限，绝不请求超过渠道能力（§3.1 预算 = min(上限, 4096 + 项数×600)）
+  const maxTokens = channel.max_tokens ?? 2048
+  // 并行：PRD 元数据提取 + 功能项加厚互不依赖，共用同一渠道/env/对话
+  const [llm, enriched] = await Promise.all([
+    generatePrdLlm({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      requirements,
+      query: input.query,
+      env,
+      maxTokens,
+      signal: input.signal,
+    }).catch(() => null), // 防御性兜底：契约返回 null，但 abort/网络极端情形仍可能 throw，一并降级避免 Promise.all 整体 reject
+    enrichRequirementsLlm({
+      session_id: input.session_id,
+      requirements,
+      query: input.query,
+      env,
+      maxTokens,
+      signal: input.signal,
+    }).catch(() => null), // 异常一律降级 null，绝不因 reject 阻断主链路
+  ])
+
+  const base = llm ?? template()
+  // 权威 id 集：冻结清单（llm 失败回退 template() 时其 requirements 可能与冻结清单
+  // 不一致——template() 会把默认存在性断言/story 物化，以原始冻结清单为准保证加厚不丢）
+  const frozen = llm ? base.requirements : requirements
+  // 接地守卫②的用户原话（user 轮次；assistant 轮次不参与子串匹配，防模型自述被引为支撑）
+  const userTexts = extractUserTexts(readConversation(input.session_id))
+  // 冻结项为 id 骨架，上轮 prd.json 对应项既有字段并入合并底；stats 为断言丢弃与优先级抑制分类（纯返回值，无日志副作用）
+  let enrichedRequirements: SketchRequirement[]
+  let stats = { formatDropped: 0, groundingDropped: 0, prioritySuppressed: 0 }
+  try {
+    const merged = mergeEnrichment(frozen, enriched, existing.requirements ?? [], userTexts)
+    enrichedRequirements = merged.requirements
+    stats = merged.stats
+  } catch {
+    // 防御性兜底：mergeEnrichment 自身契约不抛错（内部回退合并底），此处再包一层——
+    // 任何异常回退冻结清单，绝不阻断 MVP 生成主链路（设计 §3.4）
+    enrichedRequirements = frozen
+  }
+  // 丢弃率/抑制率决策日志（T2 recordDecision）：供线上标定接地守卫误杀。日志属附加
+  // 观测，绝不得阻断主链路——recordDecision 为同步 void 且内部 appendJsonLine 无异常
+  // 包裹，可能 throw，须 try/catch 隔离，失败仅静默丢弃观测
+  try {
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'enrichment_stats',
+        title: '功能项加厚断言丢弃与优先级抑制统计',
+        why: '记录格式/接地守卫断言丢弃数与优先级抑制数，供线上标定',
+        detail: stats,
+      },
+    })
+  } catch {
+    // 忽略：日志失败不影响主链路
+  }
   // 项目级字段合并（T4-L1）：LLM 从对话提取的背板不带 project.constraints /
   // scope_exclusions（其提取源是会话文本，项目存储是另一路事实）——冻结前并入，
   // 防止确定性门捕获的约束/范围声明在 prd.json 里丢失
-  const project = findProject(input.project_id)
   return {
-    ...llm,
+    ...base,
     name: project.name,
-    out_of_scope: [...new Set([...(llm.out_of_scope ?? []), ...(project.scope_exclusions ?? [])])],
-    ...(project.constraints?.length ? { constraints: [...new Set([...(llm.constraints ?? []), ...project.constraints])] } : {}),
+    requirements: enrichedRequirements,
+    out_of_scope: [...new Set([...(llm?.out_of_scope ?? []), ...(project.scope_exclusions ?? [])])],
+    ...(project.constraints?.length ? { constraints: [...new Set([...(llm?.constraints ?? []), ...project.constraints])] } : {}),
   }
 }
 

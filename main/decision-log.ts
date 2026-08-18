@@ -29,6 +29,7 @@ export type DecisionType =
   | 'runtime_channel_switch'
   | 'constraint_captured'
   | 'memory_distilled'
+  | 'enrichment_stats'
 
 export interface DecisionEntry {
   type: DecisionType
