@@ -36,6 +36,8 @@ import type {
   SandboxRunInput,
   SandboxStopInput,
   SnapshotCreateInput,
+  SnapshotDocumentListInput,
+  SnapshotDocumentReadInput,
   SnapshotListInput,
   SnapshotRollbackInput,
   SnapshotScreenshotInput,
@@ -69,8 +71,10 @@ import { listDocuments, readDocument, syncDocuments } from './document-engine'
 import { isCircuitBreakSettled } from './recovery-service'
 import {
   createSnapshot,
+  listSnapshotDocuments,
   listSnapshots,
   loadSnapshotScreenshot,
+  readSnapshotDocument,
   rollbackSnapshot,
   runSandbox,
   stopSandbox,
@@ -481,6 +485,21 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<SnapshotScreenshotInput>(payload, ['project_id', 'snapshot_id'])
       return { data_url: await loadSnapshotScreenshot(input.project_id, input.snapshot_id) }
+    })
+  })
+
+  // T7 文档版本化：时间轴回看某快照冻结的文档（「当时的想法」与代码快照对齐）。
+  ipcMain.handle(IPC_CHANNELS.SNAPSHOT_DOCUMENT_LIST, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<SnapshotDocumentListInput>(payload, ['project_id', 'snapshot_id'])
+      return listSnapshotDocuments(input.project_id, input.snapshot_id)
+    })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SNAPSHOT_DOCUMENT_READ, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<SnapshotDocumentReadInput>(payload, ['project_id', 'snapshot_id', 'document_id'])
+      return readSnapshotDocument(input.project_id, input.snapshot_id, input.document_id)
     })
   })
 

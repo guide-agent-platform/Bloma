@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, isAbsolute, join, relative, resolve } from 'node:path'
 import { createServer } from 'node:net'
 import type {
   AnalyticsTrackInput,
@@ -14,10 +14,13 @@ import type {
   SandboxStopResult,
   Snapshot,
   SnapshotCreateInput,
+  SnapshotDocumentEntry,
+  SnapshotDocumentListResult,
   SnapshotRollbackInput,
 } from '../shared/types'
 import { getAnalyticsPath, getDocumentsDir, getSnapshotsDir } from '../storage/config-paths'
 import { appendJsonLine, readJsonFile, writeJsonFile } from '../storage/json-store'
+import { readDocumentsManifest } from './document-engine'
 import { findProject, updateProject } from './project-service'
 
 interface SandboxProcess {
@@ -332,9 +335,17 @@ export async function createSnapshot(input: SnapshotCreateInput): Promise<Snapsh
 
   mkdirSync(snapshotRoot, { recursive: true })
   cpSync(project.root_path, filesArchivePath, { recursive: true, force: true })
+  // 文档冻结（T7）：documents 目录整份归档（prd.json/decisions.md/sketch.html 都在其中；
+  // T2 落盘即导出保证 decisions.md 不是过期聚合）。目录尚不存在（如草图阶段的早期快照）
+  // 时归档路径置 undefined——metadata 不谎报有归档，回看/回滚据此如实提示。
+  let effectiveDocumentsArchivePath = documentsArchivePath
   if (documentsArchivePath) {
     const documentsDir = getDocumentsDir(project.workspace_slug, project.project_id)
-    if (existsSync(documentsDir)) cpSync(documentsDir, documentsArchivePath, { recursive: true, force: true })
+    if (existsSync(documentsDir)) {
+      cpSync(documentsDir, documentsArchivePath, { recursive: true, force: true })
+    } else {
+      effectiveDocumentsArchivePath = undefined
+    }
   }
 
   const capture = await snapshotCaptureProvider()
@@ -349,7 +360,7 @@ export async function createSnapshot(input: SnapshotCreateInput): Promise<Snapsh
     summary: input.summary,
     screenshot_path: screenshotPath,
     files_archive_path: filesArchivePath,
-    documents_archive_path: documentsArchivePath,
+    documents_archive_path: effectiveDocumentsArchivePath,
     health_status: input.health_status,
     created_at: new Date().toISOString(),
   }
@@ -413,6 +424,85 @@ export async function loadSnapshotScreenshot(projectId: string, snapshotId: stri
   } catch {
     return null
   }
+}
+
+// =========================================================================
+// T7 文档版本化：快照冻结文档的回看（「当时的想法」与代码快照对齐）
+// =========================================================================
+
+export type { SnapshotDocumentEntry, SnapshotDocumentListResult } from '../shared/types'
+
+/** 读快照元数据（回看/回滚共用；不存在抛 SNAPSHOT_NOT_FOUND）。 */
+function readSnapshotMeta(projectId: string, snapshotId: string): Snapshot {
+  const project = findProject(projectId)
+  const snapshotDir = getSnapshotsDir(project.workspace_slug, project.project_id)
+  const meta = readJsonFile<Snapshot | null>(`${snapshotDir}/${snapshotId}.json`, null)
+  if (!meta?.snapshot_id) throw new Error('SNAPSHOT_NOT_FOUND')
+  return meta
+}
+
+/** 解析快照文档归档目录；快照无文档归档（include_documents=false / 当时无文档）返回 undefined。 */
+function snapshotDocumentsDir(meta: Snapshot): string | undefined {
+  if (!meta.documents_archive_path || !existsSync(meta.documents_archive_path)) return undefined
+  return meta.documents_archive_path
+}
+
+/**
+ * 列出某快照冻结的文档。manifest 从归档读取（path 按 basename 重锚定归档目录——
+ * manifest 存的是冻结时的绝对路径，直接用会读错地方）；归档在而 manifest 缺失时，
+ * 按已知固定文件名（prd.json/decisions.md）探测实际冻结的文件（读出事实，非补造历史）。
+ */
+export function listSnapshotDocuments(projectId: string, snapshotId: string): SnapshotDocumentListResult {
+  const meta = readSnapshotMeta(projectId, snapshotId)
+  const archiveDir = snapshotDocumentsDir(meta)
+  if (!archiveDir) return { snapshot_id: snapshotId, frozen: false, documents: [] }
+
+  const manifest = readDocumentsManifest(archiveDir)
+  const documents: SnapshotDocumentEntry[] = manifest
+    .filter((entry) => entry.status !== 'stale')
+    .map((entry) => ({
+      document_id: entry.document_id,
+      type: entry.type,
+      status: entry.status,
+      file: basename(entry.path),
+    }))
+  if (documents.length > 0) return { snapshot_id: snapshotId, frozen: true, documents }
+
+  // 归档在但 manifest 缺失/为空：探测已知文档文件（老快照兜底，仍只读实际存在的文件）
+  const known: Array<{ document_id: string; type: SnapshotDocumentEntry['type']; file: string }> = [
+    { document_id: 'prd-frozen', type: 'prd', file: 'prd.json' },
+    { document_id: 'decisions-log', type: 'decisions', file: 'decisions.md' },
+  ]
+  const probed = known.filter((item) => existsSync(join(archiveDir, item.file)))
+  return {
+    snapshot_id: snapshotId,
+    frozen: true,
+    documents: probed.map((item) => ({ ...item, status: 'synced' })),
+  }
+}
+
+/**
+ * 读取某快照冻结的文档内容（时间轴回看「当时的想法」）。路径安全：文件必须落在
+ * 归档目录内（manifest 可能被篡改，basename 重锚定天然剥离目录穿越，仍做防御校验）。
+ */
+export function readSnapshotDocument(
+  projectId: string,
+  snapshotId: string,
+  documentId: string,
+): { snapshot_id: string; document: SnapshotDocumentEntry; content: string } {
+  const meta = readSnapshotMeta(projectId, snapshotId)
+  const archiveDir = snapshotDocumentsDir(meta)
+  if (!archiveDir) throw new Error('SNAPSHOT_DOCUMENTS_NOT_FROZEN: 该快照没有冻结文档（存量快照），无法回看当时的想法')
+  const entry = listSnapshotDocuments(projectId, snapshotId).documents.find((item) => item.document_id === documentId)
+  if (!entry) throw new Error('DOCUMENT_NOT_FOUND')
+
+  const path = resolve(archiveDir, entry.file)
+  const rel = relative(resolve(archiveDir), path)
+  if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error(`DOCUMENT_PATH_SAFETY: path outside snapshot documents archive: ${entry.file}`)
+  }
+  if (!existsSync(path)) throw new Error('DOCUMENT_NOT_FOUND')
+  return { snapshot_id: snapshotId, document: entry, content: readFileSync(path, 'utf8') }
 }
 
 /**
@@ -489,6 +579,11 @@ export async function rollbackSnapshot(input: SnapshotRollbackInput): Promise<Ro
     health_status: project.current_snapshot_id ? 'healthy' : 'unhealthy',
   })
 
+  // 文档是否随回滚（T7）：目标快照有文档归档才恢复——存量快照（T7 前无冻结）
+  // 如实报告 documents_restored=false，渲染端提示「该快照无冻结文档」，绝不补造。
+  const target = readJsonFile<Snapshot | null>(`${snapshotDir}/${input.snapshot_id}.json`, null)
+  const documentsRestored = Boolean(target?.documents_archive_path && existsSync(target.documents_archive_path))
+
   // 3~7. 停沙箱 → 恢复文件/文档 → 更新指针（与启动对账共用的恢复原语）
   await restoreSnapshotFiles(input)
 
@@ -501,6 +596,7 @@ export async function rollbackSnapshot(input: SnapshotRollbackInput): Promise<Ro
     current_snapshot_id: input.snapshot_id,
     guard_snapshot_id: guard.snapshot_id,
     preview_url: sandbox.preview_url,
+    documents_restored: documentsRestored,
   }
 }
 

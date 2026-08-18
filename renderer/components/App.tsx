@@ -449,10 +449,16 @@ const AppRoutes: React.FC = () => {
           }
           setCurrentSnapshotId(result.data.current_snapshot_id)
           void loadSnapshots(projectId)
+          // T7 如实提示：存量快照（T7 前归档）没有冻结文档，回滚只还原了代码，
+          // 文档面板仍是最新版——不静默、不补造
+          const docsNote =
+            result.data.documents_restored === false
+              ? '（这个版本比较早，没有冻结当时的文档；文档面板显示的仍是最新版。）'
+              : ''
           notify(
             result.data.preview_url
-              ? `已经回到「${snapshot.name}」了，预览区就是当时的版本。要继续的话随时告诉我。`
-              : `已经回到「${snapshot.name}」了，但预览沙箱没起来，可以点「重新连接沙箱」再看。`,
+              ? `已经回到「${snapshot.name}」了，预览区就是当时的版本。${docsNote}要继续的话随时告诉我。`
+              : `已经回到「${snapshot.name}」了，但预览沙箱没起来，可以点「重新连接沙箱」再看。${docsNote}`,
           )
         } else {
           setPreviewStatus('error')

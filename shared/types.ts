@@ -43,6 +43,8 @@ export const IPC_CHANNELS = {
   SNAPSHOT_ROLLBACK: 'snapshot:rollback',
   SNAPSHOT_LIST: 'snapshot:list',
   SNAPSHOT_SCREENSHOT: 'snapshot:screenshot',
+  SNAPSHOT_DOCUMENT_LIST: 'snapshot:document-list',
+  SNAPSHOT_DOCUMENT_READ: 'snapshot:document-read',
   DOCUMENT_SYNC: 'document:sync',
   DOCUMENT_LIST: 'document:list',
   DOCUMENT_READ: 'document:read',
@@ -752,6 +754,42 @@ export interface SnapshotScreenshotResult {
   data_url: string | null
 }
 
+/**
+ * T7 文档版本化：时间轴回看某快照冻结的文档（「当时的想法」与代码快照对齐）。
+ * 存量快照（T7 前归档）无冻结文档——frozen=false 如实提示缺失，不补造。
+ */
+export interface SnapshotDocumentEntry {
+  document_id: string
+  type: DocumentRef['type']
+  status: DocumentRef['status']
+  /** 归档内文件名（manifest 存的是冻结时的绝对路径，读取按 basename 重锚定归档目录） */
+  file: string
+}
+
+export interface SnapshotDocumentListInput extends RequestEnvelope {
+  project_id: string
+  snapshot_id: string
+}
+
+export interface SnapshotDocumentListResult {
+  snapshot_id: string
+  /** 该快照冻结时是否归档了文档 */
+  frozen: boolean
+  documents: SnapshotDocumentEntry[]
+}
+
+export interface SnapshotDocumentReadInput extends RequestEnvelope {
+  project_id: string
+  snapshot_id: string
+  document_id: string
+}
+
+export interface SnapshotDocumentReadResult {
+  snapshot_id: string
+  document: SnapshotDocumentEntry
+  content: string
+}
+
 export interface SnapshotRollbackInput extends RequestEnvelope {
   project_id: string
   snapshot_id: string
@@ -764,6 +802,8 @@ export interface RollbackResult {
   current_snapshot_id: string
   guard_snapshot_id: string
   preview_url?: string
+  /** T7：文档是否随回滚恢复（目标快照无冻结文档时为 false——存量快照如实提示缺失，不补造） */
+  documents_restored?: boolean
 }
 
 // =========================================================================
@@ -885,6 +925,8 @@ export type ElectronAPI = {
     rollback(input: SnapshotRollbackInput): Promise<ApiResult<RollbackResult>>
     list(input: SnapshotListInput): Promise<ApiResult<SnapshotListResult>>
     screenshot(input: SnapshotScreenshotInput): Promise<ApiResult<SnapshotScreenshotResult>>
+    documentList(input: SnapshotDocumentListInput): Promise<ApiResult<SnapshotDocumentListResult>>
+    documentRead(input: SnapshotDocumentReadInput): Promise<ApiResult<SnapshotDocumentReadResult>>
   }
   documents: {
     sync(input: DocumentSyncInput): Promise<ApiResult<DocumentSyncResult>>

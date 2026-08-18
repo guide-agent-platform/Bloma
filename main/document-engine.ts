@@ -539,6 +539,11 @@ function shortTitle(description: string): string {
   return trimmed.length > 24 ? `${trimmed.slice(0, 24)}…` : trimmed
 }
 
+/** 读文档清单（T7 快照回看复用：platform-services 从归档目录读同一份 manifest）。 */
+export function readDocumentsManifest(dir: string): ManifestEntry[] {
+  return readManifest(dir)
+}
+
 function readManifest(dir: string): ManifestEntry[] {
   const path = join(dir, '.document-manifest.json')
   if (!existsSync(path)) return []

@@ -13,6 +13,7 @@ import type {
   Project,
   ProjectMode,
   Snapshot,
+  SnapshotDocumentEntry,
   WorkflowStage,
 } from '../../shared/types'
 
@@ -24,6 +25,7 @@ export type {
   Project,
   ProjectMode,
   Snapshot,
+  SnapshotDocumentEntry,
   WorkflowStage,
 }
 export type { ElectronAPI } from '../../shared/types'

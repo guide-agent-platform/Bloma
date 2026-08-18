@@ -144,7 +144,9 @@ export async function runSketchTask(input: SketchTaskInput): Promise<SketchTaskR
     project_id: input.project_id,
     kind: 'sketch',
     summary: sketch.summary,
-    include_documents: false,
+    // T7 文档版本化：草图快照也冻结当时的 prd.json/decisions.md（documents 目录
+    // 尚不存在时 createSnapshot 内部如实置空归档路径，不谎报）
+    include_documents: true,
     health_status: 'healthy',
   })
 

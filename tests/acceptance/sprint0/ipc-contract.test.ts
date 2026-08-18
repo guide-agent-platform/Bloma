@@ -38,6 +38,8 @@ const expectedChannels = {
   SNAPSHOT_ROLLBACK: 'snapshot:rollback',
   SNAPSHOT_LIST: 'snapshot:list',
   SNAPSHOT_SCREENSHOT: 'snapshot:screenshot',
+  SNAPSHOT_DOCUMENT_LIST: 'snapshot:document-list',
+  SNAPSHOT_DOCUMENT_READ: 'snapshot:document-read',
   DOCUMENT_SYNC: 'document:sync',
   DOCUMENT_LIST: 'document:list',
   DOCUMENT_READ: 'document:read',

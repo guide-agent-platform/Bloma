@@ -58,6 +58,8 @@ import type {
   SnapshotCreateInput,
   SnapshotListInput,
   SnapshotRollbackInput,
+  SnapshotDocumentListInput,
+  SnapshotDocumentReadInput,
   SnapshotScreenshotInput,
 } from '../shared/types'
 
@@ -130,6 +132,10 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_LIST, input),
     screenshot: (input: SnapshotScreenshotInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_SCREENSHOT, input),
+    documentList: (input: SnapshotDocumentListInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_DOCUMENT_LIST, input),
+    documentRead: (input: SnapshotDocumentReadInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.SNAPSHOT_DOCUMENT_READ, input),
   },
   documents: {
     sync: (input: DocumentSyncInput) =>
