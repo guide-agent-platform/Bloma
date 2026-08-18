@@ -136,7 +136,7 @@ describe('T7 snapshot document versioning', () => {
       request_id: 'req-t7-rb1',
       project_id: project.project_id,
       snapshot_id: frozenSnap.snapshot_id,
-      reason: 'test',
+      reason: 'user_undo',
     })
     expect(r1.documents_restored).toBe(true)
     const currentDir = getDocumentsDir(project.workspace_slug, project.project_id)
@@ -147,7 +147,7 @@ describe('T7 snapshot document versioning', () => {
       request_id: 'req-t7-rb2',
       project_id: project.project_id,
       snapshot_id: legacySnap.snapshot_id,
-      reason: 'test',
+      reason: 'user_undo',
     })
     expect(r2.documents_restored).toBe(false)
   }, 15_000)
