@@ -6,6 +6,7 @@ import type { ConversationTurn, GuideModelOptions } from './orchestrator'
 import { trackAnalytics } from './platform-services'
 import { runSketchTask, setProgrammingEventPublisher } from './programming-orchestrator'
 import { findProject, updateProject } from './project-service'
+import { captureConstraints, extractConstraints } from './constraint-extractor'
 import { readPrimaryIntent } from './session-service'
 import type { SketchRequirement } from './sketch-engine'
 import { isRecord } from './validators'
@@ -42,6 +43,7 @@ const GUIDE_SYSTEM_PROMPT = `你是「向导 Agent」，负责把用户的想法
 约束：
 - requirements 1~5 条。
 - id 用小写字母+连字符（如 daily-tool），不含空格。
+- 用户说的约束（「不含登录」「必须离线可用」「禁止联网」这类必须/不要类要求）不要写成 requirements 功能项——平台会单独持久化并注入，requirements 只放要做的事。
 - 只输出 JSON，其余一律不要。`
 
 type GuideParsed =
@@ -195,6 +197,16 @@ export async function handleGuideMessage(
 
   // 主题锚点：首条用户消息（用户最初想做什么），澄清答案只能追加、不能覆盖主题
   const primaryIntent = readPrimaryIntent(input.session_id)
+
+  // 用户约束走门（T4-L1 写入侧）：约束语句（「不含登录」「必须离线可用」）确定性提取、
+  // 持久化 project.constraints，随背板常驻注入——不依赖模型记忆，首轮约束历轮生效。
+  // 在三条子路径（卡片答案/模型驱动/规则路由）分叉之前统一收口。
+  captureConstraints({
+    project_id: input.project_id,
+    session_id: input.session_id,
+    constraints: extractConstraints(input.content),
+    source: 'guide_gate',
+  })
 
   // 卡片答案：用户已通过选项给出方向，直接生成草图（修复澄清死循环）
   const cardAnswer = resolveCardAnswer(input, primaryIntent)

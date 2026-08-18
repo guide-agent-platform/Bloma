@@ -28,6 +28,8 @@ export interface NormalizeRequirementUpdateInput {
   existing: SketchRequirement[]
   /** 已经过规则清洗（refineModificationDescription）的修改描述 */
   modification: string
+  /** 用户已声明约束（T4-L1：project.constraints，历轮生效；与约束冲突的新功能判 out_of_scope） */
+  constraints?: string[]
   query: SDKQuery
   env: Record<string, string> | undefined
   signal?: AbortSignal
@@ -90,7 +92,7 @@ export async function normalizeRequirementUpdate(
   if (!input.env) return fallback(input.modification)
   try {
     let accumulated = ''
-    const stream = input.query(buildPrompt(input.existing, input.modification), {
+    const stream = input.query(buildPrompt(input.existing, input.modification, input.constraints), {
       env: input.env,
       signal: input.signal ?? new AbortController().signal,
       sessionId: input.session_id,
@@ -321,18 +323,28 @@ function parseDecision(text: string): ParsedDecision | undefined {
   }
 }
 
-function buildPrompt(existing: SketchRequirement[], modification: string): string {
+function buildPrompt(existing: SketchRequirement[], modification: string, constraints?: string[]): string {
   const list = existing.length
     ? existing.map((item) => {
         const assertions = item.behavior_assertions?.length ? `（已有断言：${item.behavior_assertions.join('；')}）` : ''
         return `- ${item.id}: ${item.description}${assertions}`
       }).join('\n')
     : '- （无已确认功能项）'
+  const constraintSection =
+    constraints && constraints.length
+      ? [
+          '',
+          '【用户已声明的约束（历轮有效，优先级最高）】',
+          ...constraints.map((constraint) => `- ${constraint}`),
+          '与上述约束冲突的修改诉求（如约束「不含登录」却要求加登录）判 out_of_scope，理由注明与约束冲突。',
+        ]
+      : []
   return [
     '请把下面这条修改诉求整理为故事化功能项，并决定它如何并入已有功能项清单。',
     '',
     '【已有功能项】',
     list,
+    ...constraintSection,
     '',
     '【用户的修改诉求（已经过初步清洗）】',
     modification,

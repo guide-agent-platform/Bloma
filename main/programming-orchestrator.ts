@@ -9,6 +9,8 @@ import { createSnapshot, runSandbox, trackAnalytics } from './platform-services'
 import { DEFAULT_MAX_TOKENS, generateMvpLlm, type GenerateMvpLlmResult } from './mvp-engine-llm'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
 import { resolveChannelEnv } from './runtime-fallback'
+import { captureConstraints, extractConstraints, readProjectConstraints } from './constraint-extractor'
+import { distillProjectMemorySafely, readProjectMemory } from './memory-distiller'
 import { generateSketch, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from './sketch-engine'
 import { generateSketchLlm, SketchLlmError, type SketchAttemptDetail } from './sketch-engine-llm'
 import { generatePrdLlm } from './prd-engine-llm'
@@ -229,6 +231,8 @@ async function resolveSketch(input: SketchTaskInput, requirements: SketchRequire
     const result = await generateSketchLlm({
       project_id: input.project_id,
       requirements,
+      // 用户约束随草图注入（T4-L1）：「不含登录」→ 草图不画登录界面
+      constraints: readProjectConstraints(input.project_id),
       query: input.query,
       env,
       sessionId: input.session_id,
@@ -393,6 +397,15 @@ export async function runMvpTask(input: MvpTaskInput): Promise<MvpTaskResult> {
   publish(input, 'stage_changed', { stage: 'generating_mvp' })
   updateProject(input.project_id, { current_stage: 'generating_mvp' })
 
+  // T4-L3 蒸馏兜底·触发点①（草图确认后，fire-and-forget）：默认关闭
+  // （BLOMA_MEMORY_DISTILL=1），失败在内部降级并落决策，绝不阻塞 MVP 生成
+  distillProjectMemorySafely({
+    project_id: input.project_id,
+    session_id: input.session_id,
+    channel_id: input.channel_id,
+    query: input.query,
+  })
+
   const requirements = readLastSketchRequirements(input.project_id)
   await syncPrdCheckpoints(input, requirements)
   // 需求确认后自动命名（首次生成执行一次）：命名是附属能力，任何失败都不阻断生成
@@ -493,6 +506,8 @@ async function resolveMvp(input: MvpTaskInput, requirements: SketchRequirement[]
     maxTokens: channel.max_tokens ?? DEFAULT_MAX_TOKENS,
     signal: input.signal,
     sketchHtml,
+    // T4-L3 对话性记忆（存在才注入；与背板冲突以背板为准）
+    memory: readProjectMemory(input.project_id),
   })
 }
 
@@ -583,7 +598,16 @@ async function resolvePrdBackplane(input: MvpTaskInput, requirements: SketchRequ
     signal: input.signal,
   })
   if (!llm) return template()
-  return { ...llm, name: findProject(input.project_id).name }
+  // 项目级字段合并（T4-L1）：LLM 从对话提取的背板不带 project.constraints /
+  // scope_exclusions（其提取源是会话文本，项目存储是另一路事实）——冻结前并入，
+  // 防止确定性门捕获的约束/范围声明在 prd.json 里丢失
+  const project = findProject(input.project_id)
+  return {
+    ...llm,
+    name: project.name,
+    out_of_scope: [...new Set([...(llm.out_of_scope ?? []), ...(project.scope_exclusions ?? [])])],
+    ...(project.constraints?.length ? { constraints: [...new Set([...(llm.constraints ?? []), ...project.constraints])] } : {}),
+  }
 }
 
 /**
@@ -901,6 +925,14 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
       channel_id: input.channel_id,
       signal: input.signal,
     })
+    // T4-L3 蒸馏兜底·触发点②（每次迭代完成后，fire-and-forget）：默认关闭，
+    // 失败在内部降级并落决策，绝不阻塞迭代收尾
+    distillProjectMemorySafely({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      channel_id: input.channel_id,
+      query: input.query,
+    })
     return mvp
   } catch (error) {
     // 熔断回滚已完成收尾（T5）：阶段已按磁盘证据收敛、消息已发，不再覆盖为 ready
@@ -949,6 +981,14 @@ export async function mergeIterationRequirements(
   const appendRaw = (): SketchRequirement[] => [...existing, { id: nextRequirementId(existing), description: input.prompt }]
   if (!input.query) return appendRaw()
   try {
+    // 约束走门（T4-L1 修改门）：修改诉求里的约束语句确定性入库，并随归一化判定注入——
+    // 与既有约束冲突的新功能（如约束「不含登录」时要求加登录）判 out_of_scope
+    captureConstraints({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      constraints: extractConstraints(input.prompt),
+      source: 'iteration_modification',
+    })
     // 渠道+类别统一收口（runtime-fallback，T9）：normalizer 归 prd 类别（§7.7 判定要
     // 稳 0.1）；失败由外层 catch 回退原样追加
     const resolution = resolveChannelEnv({
@@ -963,6 +1003,7 @@ export async function mergeIterationRequirements(
       session_id: input.session_id,
       existing,
       modification: input.prompt,
+      constraints: readProjectConstraints(input.project_id),
       query: input.query,
       env,
       signal: input.signal,

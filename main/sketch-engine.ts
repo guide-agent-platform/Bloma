@@ -80,6 +80,12 @@ export interface PrdBackplane {
   acceptance: Record<string, string>
   /** 本轮明确不做的事（防模型擅自扩功能；含 normalizer 判定的范围声明） */
   out_of_scope: string[]
+  /**
+   * 用户声明的约束（T4-L1：「不含登录」「必须离线可用」，排除与要求类皆可）：
+   * 来自 project.constraints（澄清门/修改门确定性提取），随背板常驻注入
+   * 生成/归一化/意图分流——首轮约束 >30 轮仍生效的结构性保证。
+   */
+  constraints?: string[]
   /** 后台决策假设（assumptions，供 decisions 回溯） */
   assumptions: string[]
   /** 全局 UX 契约（§4.2）：仅「用户确认 + 非模板回退」的草图才登记 */

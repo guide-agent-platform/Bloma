@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ConversationTurn, SDKQuery } from './orchestrator'
 import { findProject } from './project-service'
+import type { ProjectMemory } from './memory-distiller'
 import type { PrdBackplane } from './sketch-engine'
 import { requirementAssertions, requirementPriority, requirementStory } from './sketch-engine'
 import { renderPackageJson, renderStaticServer, type GeneratedMvpFile } from './mvp-engine'
@@ -31,6 +32,8 @@ export interface GenerateMvpLlmInput {
   timeoutMs?: number
   /** UX 契约草图 HTML 全文（§4.2：仅「用户确认 + 非模板回退」时由调用方注入，不降采样）。 */
   sketchHtml?: string
+  /** T4-L3 对话性记忆（memory.json，兜底层）：被否决方案/口头偏好/非功能诉求；与背板冲突以背板为准 */
+  memory?: ProjectMemory
   /** 修复上下文（self-healing @分析错误原因）：上次生成/运行失败的具体原因，注入 prompt 让模型针对性修复。 */
   repairContext?: { category: string; error: string }
 }
@@ -125,7 +128,7 @@ export async function generateMvpLlm(input: GenerateMvpLlmInput): Promise<Genera
   const combinedSignal = combineSignals(selfController.signal, input.signal)
 
   try {
-    const prompt = buildPrompt(input.backplane, input.repairContext, input.sketchHtml)
+    const prompt = buildPrompt(input.backplane, input.repairContext, input.sketchHtml, input.memory)
     let maxTokens = input.maxTokens ?? DEFAULT_MAX_TOKENS
     let lastAccumulated = ''
     let truncated = false
@@ -200,7 +203,7 @@ async function streamAccumulate(
   signal: AbortSignal,
   selfController: AbortController,
 ): Promise<string> {
-  const history = buildRetryHistory(input.backplane, input.repairContext, input.sketchHtml, attempt, lastAccumulated, truncated)
+  const history = buildRetryHistory(input.backplane, input.repairContext, input.sketchHtml, input.memory, attempt, lastAccumulated, truncated)
   const queryPrompt = attempt === 0 || truncated ? prompt : RETRY_FEEDBACK_PROMPT
 
   let accumulated = ''
@@ -236,6 +239,7 @@ function buildRetryHistory(
   backplane: PrdBackplane,
   repairContext: GenerateMvpLlmInput['repairContext'],
   sketchHtml: string | undefined,
+  memory: ProjectMemory | undefined,
   attempt: number,
   lastAccumulated: string,
   truncated: boolean,
@@ -243,7 +247,7 @@ function buildRetryHistory(
   if (attempt === 0 || truncated) return [{ role: 'system', content: SYSTEM_PROMPT }]
   return [
     { role: 'system', content: SYSTEM_PROMPT },
-    { role: 'user', content: buildPrompt(backplane, repairContext, sketchHtml) },
+    { role: 'user', content: buildPrompt(backplane, repairContext, sketchHtml, memory) },
     { role: 'assistant', content: lastAccumulated },
   ]
 }
@@ -288,6 +292,7 @@ function buildPrompt(
   backplane: PrdBackplane,
   repairContext: GenerateMvpLlmInput['repairContext'],
   sketchHtml?: string,
+  memory?: ProjectMemory,
 ): string {
   const items = backplane.requirements.length
     ? backplane.requirements
@@ -306,6 +311,12 @@ function buildPrompt(
   const outOfScope = backplane.out_of_scope.length
     ? backplane.out_of_scope.map((scope) => `- ${scope}`).join('\n')
     : '- 无'
+  // 用户约束（T4-L1）：历轮声明的必须/不要类要求，随背板常驻注入（约 ≤20 行短句，
+  // 三层注入预算：背板约束+历史窗口 10 轮+记忆 ≤12 条均在数百 token 量级，草图全文仍是大头）
+  const constraintSection =
+    backplane.constraints && backplane.constraints.length
+      ? ['', `用户约束（历轮声明，长期有效，必须遵守）：`, ...backplane.constraints.map((constraint) => `- ${constraint}`)]
+      : []
   const guardrails = backplane.generation_guardrails
     const guardrailSection = guardrails && (guardrails.must_do.length || guardrails.must_not_do.length)
       ? [
@@ -337,6 +348,10 @@ function buildPrompt(
         `请先分析上述失败原因，再生成修复后的版本；其余功能项与行为断言不变，不要擅自改需求。`,
       ]
     : []
+  // 对话性记忆（T4-L3 兜底，仅提示级参考）：被否决方案/口头偏好/非功能诉求。
+  // 与背板/约束/草图冲突时一律以上方 PRD 背板与用户约束为准（单一事实源仲裁）；
+  // 三层注入预算：本段 ≤12 条短句（数百 token），草图全文仍是预算大头。
+  const memorySection = renderMemorySection(memory)
   return [
     `请根据以下 PRD 密背板${sketchHtml ? ' + UX 契约草图' : ''}生成 MVP（产品定位是唯一主题锚点，功能项必须全部实现，不得擅自替换成其他应用）。`,
     ``,
@@ -347,10 +362,31 @@ function buildPrompt(
     ``,
     `范围外（不要实现）：`,
     outOfScope,
+    ...constraintSection,
     ...guardrailSection,
     ...sketchSection,
     ...repairSection,
+    ...memorySection,
   ].join('\n')
+}
+
+/** 记忆段渲染：三类合并 ≤12 条短句；空记忆返回空段（不占预算）。 */
+function renderMemorySection(memory: ProjectMemory | undefined): string[] {
+  if (!memory) return []
+  const groups: Array<[string, string[]]> = [
+    ['被否决的方案（不要重蹈）', memory.rejected_ideas],
+    ['口头偏好', memory.verbal_preferences],
+    ['非功能诉求', memory.non_functional_notes],
+  ]
+  const lines: string[] = []
+  for (const [label, entries] of groups) {
+    for (const entry of entries) {
+      if (lines.length >= 12) break
+      lines.push(`- ${label}｜${entry}`)
+    }
+  }
+  if (lines.length === 0) return []
+  return ['', `【对话性记忆（提示级参考；与 PRD 背板/用户约束/草图冲突时以它们为准）】`, ...lines]
 }
 
 interface MvpLlmParsed {

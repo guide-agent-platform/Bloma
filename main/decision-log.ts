@@ -27,6 +27,8 @@ export type DecisionType =
   | 'circuit_rollback'
   | 'startup_convergence'
   | 'runtime_channel_switch'
+  | 'constraint_captured'
+  | 'memory_distilled'
 
 export interface DecisionEntry {
   type: DecisionType

@@ -16,7 +16,7 @@ import { listEnabledModels } from './channel-manager'
  * 失败处理沿用各引擎现有重试策略（截断→升 maxTokens、带反馈重试），路由层只负责
  * 「选哪个模型」，不重复生成逻辑。
  */
-export type DocumentCategory = 'guide' | 'prd' | 'sketch' | 'mvp' | 'gwt' | 'judge'
+export type DocumentCategory = 'guide' | 'prd' | 'sketch' | 'mvp' | 'gwt' | 'judge' | 'summary'
 
 export interface CategoryModelConfig {
   category: DocumentCategory
@@ -36,6 +36,8 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<DocumentCategory, CategoryModelCon
   mvp: { category: 'mvp', capability: 'strongest' },
   gwt: { category: 'gwt', capability: 'strongest' },
   judge: { category: 'judge', capability: 'strongest' },
+  // T4-L3 蒸馏（memory.json）：后台整理型任务，不映射任何阶段（categoryForStage 不含）
+  summary: { category: 'summary', capability: 'strongest' },
 }
 
 let categoryConfigs: Record<DocumentCategory, CategoryModelConfig> = { ...DEFAULT_CATEGORY_CONFIGS }
@@ -116,6 +118,8 @@ export const CATEGORY_TEMPERATURES: Record<DocumentCategory, number> = {
   mvp: 0.1,
   gwt: 0.1,
   judge: 0.1,
+  // 蒸馏要忠实转写而非发散（§7.7 校准表新增，T4-L3）
+  summary: 0.1,
 }
 
 export function categoryTemperature(category: DocumentCategory): number {

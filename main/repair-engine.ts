@@ -6,6 +6,7 @@ import { trackAnalytics } from './platform-services'
 import { findProject, readLastSketchRequirements, updateProject } from './project-service'
 import type { SDKQuery } from './orchestrator'
 import { resolveChannelEnv } from './runtime-fallback'
+import { readProjectMemory } from './memory-distiller'
 
 /**
  * 自动修复循环（A2-08，闭环 ATK-Z-001）。
@@ -224,6 +225,8 @@ async function repairMvpViaLlm(
       maxTokens: channel.max_tokens ?? DEFAULT_MAX_TOKENS,
       signal: opts.signal,
       sketchHtml,
+      // T4-L3 对话性记忆（修复与生成同源注入；与背板冲突以背板为准）
+      memory: readProjectMemory(input.project_id),
       repairContext: {
         category,
         error: opts.error?.summary ?? REPAIR_CATEGORY_SUMMARY[category],

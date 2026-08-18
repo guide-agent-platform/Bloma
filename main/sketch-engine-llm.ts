@@ -21,6 +21,8 @@ import type { MessageContentBlock } from '../shared/types'
 export interface GenerateSketchLlmInput {
   project_id: string
   requirements: SketchRequirement[]
+  /** 用户已声明约束（T4-L1：project.constraints，随草图生成注入——「不含登录」则草图不画登录界面） */
+  constraints?: string[]
   query: SDKQuery
   env: Record<string, string>
   sessionId: string
@@ -79,7 +81,7 @@ const SYSTEM_PROMPT = `你是「Bloma 草图生成器」，负责把用户的想
 
 export async function generateSketchLlm(input: GenerateSketchLlmInput): Promise<GenerateSketchLlmResult> {
   const timeoutMs = input.timeoutMs ?? 0
-  const prompt = buildPrompt(input.requirements)
+  const prompt = buildPrompt(input.requirements, input.constraints)
   let maxTokens = input.maxTokens ?? DEFAULT_MAX_TOKENS
   let truncated = false
   const attempts: SketchAttemptDetail[] = []
@@ -153,7 +155,7 @@ export async function generateSketchLlm(input: GenerateSketchLlmInput): Promise<
   throw new SketchLlmError('SKETCH_LLM_PARSE_FAILED: 模型输出不是有效的 HTML 草图', attempts)
 }
 
-function buildPrompt(requirements: SketchRequirement[]): string {
+function buildPrompt(requirements: SketchRequirement[], constraints?: string[]): string {
   const items = requirements.length
     ? requirements
     : [{ id: 'F-001', description: '一个软件' }]
@@ -166,11 +168,20 @@ function buildPrompt(requirements: SketchRequirement[]): string {
       return [`- ${item.id}: ${requirementStory(item)}`, ...(assertionLines ? [assertionLines] : [])].join('\n')
     })
     .join('\n')
+  const constraintSection =
+    constraints && constraints.length
+      ? [
+          ``,
+          `用户约束（历轮声明，必须遵守——约束说不做的界面元素一律不出现）：`,
+          ...constraints.map((constraint) => `- ${constraint}`),
+        ]
+      : []
   return [
     `请根据以下功能项生成无交互的纯外观 HTML 草图。`,
     ``,
     `功能项（含行为断言——断言涉及的实体与状态必须在界面中可见）：`,
     list,
+    ...constraintSection,
     ``,
     `要求：界面区块与功能项一一对应，视觉上像一个真实产品（不是需求清单）；class 语义化命名，方便后续移植。`,
   ].join('\n')

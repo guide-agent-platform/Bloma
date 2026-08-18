@@ -327,6 +327,22 @@ export function addScopeExclusion(projectId: string, exclusion: string): void {
   updateProject(projectId, { scope_exclusions: merged })
 }
 
+/**
+ * 用户约束（T4-L1「不含登录」「必须离线可用」）持久化：去重追加到
+ * project.constraints，buildPrdBackplane 时并入背板 constraints 常驻注入。
+ * 返回实际新增的条目（供调用方只在「确有新约束」时落决策日志；重复声明不加噪声）。
+ */
+export function addConstraints(projectId: string, additions: string[]): string[] {
+  const candidates = [...new Set(additions.map((value) => value.trim()).filter(Boolean))]
+  if (candidates.length === 0) return []
+  const project = findProject(projectId)
+  const existing = project.constraints ?? []
+  const added = candidates.filter((value) => !existing.includes(value))
+  if (added.length === 0) return []
+  updateProject(projectId, { constraints: [...existing, ...added] })
+  return added
+}
+
 /** 读取最近一次 `sketch_generated` 事件中的需求清单；无记录时返回空数组。 */
 export function readLastSketchRequirements(projectId: string): SketchRequirement[] {
   const path = getProjectEventsPath(WORKSPACE_SLUG, projectId)

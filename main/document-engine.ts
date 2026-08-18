@@ -228,6 +228,9 @@ export function buildPrdBackplane(
     requirements: items,
     acceptance,
     out_of_scope: [...new Set(project.scope_exclusions ?? [])],
+    // 用户约束常驻注入（T4-L1）：project.constraints 是唯一写入源（澄清门/修改门
+    // 确定性提取），背板只做组装——不在这里引入第二个事实源
+    ...(project.constraints?.length ? { constraints: [...new Set(project.constraints)] } : {}),
     assumptions: [],
     ...(checkpoint === 'mvp_before_generation' ? { frozen_at: new Date().toISOString() } : {}),
   }
@@ -273,6 +276,7 @@ export function readPrdBackplane(projectId: string): PrdBackplane {
     requirements: items,
     acceptance: {},
     out_of_scope: [...new Set(project.scope_exclusions ?? [])],
+    ...(project.constraints?.length ? { constraints: [...new Set(project.constraints)] } : {}),
     assumptions: [],
   }
 }

@@ -560,6 +560,8 @@ export interface Project {
   sketch_generated_at?: string
   /** normalizer 判定的范围声明（「不要 X」），buildPrdBackplane 时并入 out_of_scope */
   scope_exclusions?: string[]
+  /** 用户声明过的约束（T4-L1：「不含登录」「必须离线可用」），buildPrdBackplane 时并入 constraints 常驻注入 */
+  constraints?: string[]
   /** U16：最近进展摘要（取自最近一次 sketch_generated 需求，列表卡片纯展示用，不经落盘） */
   progress_summary?: string
   created_at: string

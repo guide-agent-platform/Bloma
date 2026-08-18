@@ -42,6 +42,7 @@ import {
 import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from './requirement-normalizer'
 import { readPrdBackplane } from './document-engine'
 import { recordDecision } from './decision-log'
+import { captureConstraints, extractConstraints, readProjectConstraints, scanSessionConstraints } from './constraint-extractor'
 import { isCircuitBreakSettled } from './recovery-service'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
 import { recordSessionActivity } from './session-service'
@@ -186,8 +187,31 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       console.error(`[runAgent] 渠道不可用（reason=${resolution.unusableReason}，channel_id=${input.channel_id ?? 'auto'}），本次模型不参与：引导走规则路由、草图走模板`)
     }
     const maxTokens = channel?.max_tokens ?? 1200
-    // 多轮历史：读取已有对话轮次（不含本次 user 消息，稍后追加），支撑 SDK 多轮上下文
-    const history = loadConversationHistory(input.session_id)
+    // 多轮历史（T4-L2 窗口改造）：近 N 轮原文（显式常量，默认 10——不再静默写死 20；
+    // 窗口只管「最近在聊什么」）+ 全量约束扫描回灌（约束是长期不变量，来自全量 JSONL，
+    // 第 1 轮说的约束在 30 轮后依然注入）。漏网的约束在此回填 project.constraints。
+    const recentHistory = loadConversationHistory(input.session_id, HISTORY_WINDOW_TURNS)
+    const sessionConstraints = scanSessionConstraints(input.session_id)
+    if (sessionConstraints.length > 0) {
+      captureConstraints({
+        project_id: input.project_id,
+        session_id: input.session_id,
+        constraints: sessionConstraints,
+        source: 'session_scan',
+      })
+    }
+    const constraintTurn: ConversationTurn[] = sessionConstraints.length
+      ? [
+          {
+            role: 'system',
+            content:
+              '【用户已声明的约束（历轮全量扫描，长期有效）】\n' +
+              sessionConstraints.map((constraint) => `- ${constraint}`).join('\n') +
+              '\n理解需求、澄清提问与功能设计都不得违反以上约束；与约束冲突的功能一律不做。',
+          },
+        ]
+      : []
+    const history = [...recentHistory, ...constraintTurn]
 
     appendAgentMessage(input.session_id, {
       role: 'user',
@@ -325,6 +349,14 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       })
       if (intent === 'modify') {
         const description = refineModificationDescription(input.content)
+        // 约束走门（T4-L1 修改门）：修改意见里的约束语句入库（「不含登录」类），
+        // 归一化判定 out_of_scope 是语义层的；这里是关键词层的确定性兜底
+        captureConstraints({
+          project_id: input.project_id,
+          session_id: input.session_id,
+          constraints: extractConstraints(description),
+          source: 'sketch_ready_modification',
+        })
         const existing = readLastSketchRequirements(input.project_id)
         // 修改诉求归一化后并入需求清单：口语碎片原样入库会污染 PRD 背板（线上案例
         // 「重新生成」被 acceptance 解释成功能、产品里长出重置按钮；「车的运行方向不对」
@@ -333,6 +365,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
           session_id: input.session_id,
           existing,
           modification: description,
+          constraints: readProjectConstraints(input.project_id),
           query: sdkQuery,
           env,
           signal: abortController.signal,
@@ -962,10 +995,17 @@ async function* queryWithRuntimeFallback(prompt: string, options: SDKQueryOption
 }
 
 /**
+ * 多轮历史窗口（T4-L2）：近 N 轮原文。显式配置常量（默认 10，不静默写死）——
+ * 窗口内原文承载「最近在聊什么」；长期不变量（用户约束）不靠窗口，由
+ * scanSessionConstraints 全量扫描 + project.constraints 背板注入承载。
+ */
+export const HISTORY_WINDOW_TURNS = 10
+
+/**
  * 读取会话 JSONL 中最近 N 轮 user/assistant 对话文本，作为 SDK 多轮历史。
  * 排除内部终态标记（[terminal]）与 system 消息，防止历史污染模型上下文。
  */
-function loadConversationHistory(sessionId: string, limit = 20): ConversationTurn[] {
+function loadConversationHistory(sessionId: string, limit = HISTORY_WINDOW_TURNS): ConversationTurn[] {
   const path = getAgentSessionPath(sessionId)
   if (!existsSync(path)) return []
   const turns: ConversationTurn[] = []
