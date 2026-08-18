@@ -2,11 +2,10 @@ import type { AgentEvent } from '../shared/types'
 import { buildPrdBackplane, readPrdBackplane, readUxContractSketch, syncDocuments } from './document-engine'
 import { generateMvp } from './mvp-engine'
 import { DEFAULT_MAX_TOKENS, generateMvpLlm } from './mvp-engine-llm'
-import { buildSdkEnv, decryptApiKey, getChannelByIdRaw, getFirstEnabledChannel } from './channel-manager'
 import { trackAnalytics } from './platform-services'
 import { findProject, readLastSketchRequirements, updateProject } from './project-service'
 import type { SDKQuery } from './orchestrator'
-import { resolveCategoryModel } from './model-resolution'
+import { resolveChannelEnv } from './runtime-fallback'
 
 /**
  * 自动修复循环（A2-08，闭环 ATK-Z-001）。
@@ -199,23 +198,17 @@ async function repairMvpViaLlm(
   opts: RepairLlmOptions,
 ): Promise<{ patched: boolean; summary: string } | null> {
   if (!opts.query) return null
-  const channel = opts.channel_id ? getChannelByIdRaw(opts.channel_id) : getFirstEnabledChannel()
-  if (!channel) return null
-  let apiKey: string
-  try {
-    apiKey = decryptApiKey(channel.api_key)
-  } catch {
-    return null
-  }
-  // 类别路由（§6.4）：修复归属原失败任务的类别（runtime/test 修复都是重建 MVP → mvp）；
-  // 解析失败返回 null 交模板重建兜底
-  let env: Record<string, string>
-  try {
-    const { model } = resolveCategoryModel(channel, 'mvp')
-    env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
-  } catch {
-    return null
-  }
+  // 渠道+类别统一收口（runtime-fallback，T9）：修复归属原失败任务的类别（runtime/test
+  // 修复都是重建 MVP → mvp），主渠道不可用已尝试切备用渠道；仍无可用返回 null 交模板重建兜底
+  const resolution = resolveChannelEnv({
+    channelId: opts.channel_id,
+    category: 'mvp',
+    projectId: input.project_id,
+    sessionId: input.session_id,
+  })
+  if (!resolution.env || !resolution.channel) return null
+  const channel = resolution.channel
+  const env = resolution.env
 
   // 修复与生成同一份事实源（§4.2 双契约）：读冻结 prd.json（含 ux_contract）而非临时重建，
   // 保证修复版与原生成版消费同一份行为契约 + 草图契约

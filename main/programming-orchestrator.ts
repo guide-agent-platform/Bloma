@@ -7,8 +7,8 @@ import { appendJsonLine } from '../storage/json-store'
 import { buildPrdBackplane, readPrdBackplane, readUxContractSketch, syncDocuments } from './document-engine'
 import { createSnapshot, runSandbox, trackAnalytics } from './platform-services'
 import { DEFAULT_MAX_TOKENS, generateMvpLlm, type GenerateMvpLlmResult } from './mvp-engine-llm'
-import { buildSdkEnv, decryptApiKey, getChannelByIdRaw, getFirstEnabledChannel } from './channel-manager'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
+import { resolveChannelEnv } from './runtime-fallback'
 import { generateSketch, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from './sketch-engine'
 import { generateSketchLlm, SketchLlmError, type SketchAttemptDetail } from './sketch-engine-llm'
 import { generatePrdLlm } from './prd-engine-llm'
@@ -21,7 +21,6 @@ import { recordDecision } from './decision-log'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from './recovery-service'
 import { readPrimaryIntent } from './session-service'
 import type { SDKQuery } from './orchestrator'
-import { resolveCategoryModel } from './model-resolution'
 
 /**
  * 无人值守豁免（A2-12）：自动化管线内部 service 直连时显式传入 allow-all——
@@ -202,29 +201,30 @@ interface ResolvedSketch {
  * 一路带回给 runSketchTask 落日志/埋点/用户提示。
  */
 async function resolveSketch(input: SketchTaskInput, requirements: SketchRequirement[]): Promise<ResolvedSketch> {
-  const channel = input.channel_id ? getChannelByIdRaw(input.channel_id) : getFirstEnabledChannel()
-  if (!channel || !input.query) {
-    const reason = input.query ? 'no_channel' : 'no_query'
-    console.error(`[resolveSketch] 草图回退确定性模板: reason=${reason}（channel_id=${input.channel_id ?? 'auto'}）`)
+  if (!input.query) {
+    console.error('[resolveSketch] 草图回退确定性模板: reason=no_query')
+    return { result: generateSketch({ project_id: input.project_id, requirements, max_pages: 3 }), source: 'template', fallbackReason: 'no_query' }
+  }
+  // 渠道+类别统一收口（runtime-fallback，T9）：主渠道不可用时已按解析链尝试切备用渠道
+  // （切换落决策日志），仍无可用才回退模板（草图是低成本方向确认，不能因选不出渠道/模型卡死澄清流程）
+  const resolution = resolveChannelEnv({
+    channelId: input.channel_id,
+    category: 'sketch',
+    projectId: input.project_id,
+    sessionId: input.session_id,
+  })
+  if (!resolution.env || !resolution.channel) {
+    const reason =
+      resolution.unusableReason === 'decrypt_failed'
+        ? 'decrypt_failed'
+        : resolution.unusableReason === 'model_not_found'
+          ? 'no_model'
+          : 'no_channel'
+    console.error(`[resolveSketch] 草图回退确定性模板: reason=${reason}（channel_id=${input.channel_id ?? 'auto'}，含备用渠道均不可用）`)
     return { result: generateSketch({ project_id: input.project_id, requirements, max_pages: 3 }), source: 'template', fallbackReason: reason }
   }
-  let apiKey: string
-  try {
-    apiKey = decryptApiKey(channel.api_key)
-  } catch {
-    console.error(`[resolveSketch] 草图回退确定性模板: reason=decrypt_failed（channel ${channel.id} (${channel.name}) api_key 无法解密）`)
-    return { result: generateSketch({ project_id: input.project_id, requirements, max_pages: 3 }), source: 'template', fallbackReason: 'decrypt_failed' }
-  }
-  // 类别路由（§6.4）：sketch 类别解析模型；渠道无启用模型时回退模板（草图是低成本
-  // 方向确认，不能因选不出模型卡死澄清流程）
-  let env: Record<string, string>
-  try {
-    const { model } = resolveCategoryModel(channel, 'sketch')
-    env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
-  } catch (error) {
-    console.error(`[resolveSketch] 草图回退确定性模板: reason=no_model（${error instanceof Error ? error.message : String(error)}）`)
-    return { result: generateSketch({ project_id: input.project_id, requirements, max_pages: 3 }), source: 'template', fallbackReason: 'no_model' }
-  }
+  const channel = resolution.channel
+  const env = resolution.env
   try {
     const result = await generateSketchLlm({
       project_id: input.project_id,
@@ -295,23 +295,16 @@ export async function autoNameProject(input: MvpTaskInput): Promise<void> {
 /** LLM 起名：复用 MVP 同一套渠道解析与流式查询；任何失败返回 null 交给兜底。 */
 async function nameByLlm(input: MvpTaskInput): Promise<string | null> {
   if (!input.query) return null
-  const channel = input.channel_id ? getChannelByIdRaw(input.channel_id) : getFirstEnabledChannel()
-  if (!channel) return null
-  let apiKey: string
-  try {
-    apiKey = decryptApiKey(channel.api_key)
-  } catch {
-    return null
-  }
-  // 类别路由（§6.4）：命名是附属轻量任务（非文档类别），借 guide 类别解析；
-  // 任何失败返回 null 交确定性兜底（命名绝不阻断生成）
-  let env: Record<string, string>
-  try {
-    const { model } = resolveCategoryModel(channel, 'guide')
-    env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
-  } catch {
-    return null
-  }
+  // 命名是附属轻量任务（非文档类别），借 guide 类别解析；渠道解析收口 runtime-fallback
+  // （主渠道不可用已尝试切备用）；任何失败返回 null 交确定性兜底（命名绝不阻断生成）
+  const resolution = resolveChannelEnv({
+    channelId: input.channel_id,
+    category: 'guide',
+    projectId: input.project_id,
+    sessionId: input.session_id,
+  })
+  if (!resolution.env) return null
+  const env = resolution.env
 
   const backplane = readPrdBackplane(input.project_id)
   const intent = readPrimaryIntent(input.session_id)
@@ -465,24 +458,25 @@ async function resolveMvp(input: MvpTaskInput, requirements: SketchRequirement[]
   if (!input.query) {
     throw new Error('MVP_GENERATION_FAILED: 缺少模型调用句柄，无法生成 MVP')
   }
-  const channel = input.channel_id ? getChannelByIdRaw(input.channel_id) : getFirstEnabledChannel()
-  if (!channel) {
-    throw new Error('MVP_GENERATION_FAILED: 没有可用的模型渠道，请在设置中配置并验证渠道后再生成')
+  // 渠道+类别统一收口（runtime-fallback，T9）：主渠道密钥不可解密/无启用模型时已按
+  // 解析链切备用渠道；mvp 类别解析模型，仍无可用属配置错误，明确抛错（MVP 无模板兜底）
+  const resolution = resolveChannelEnv({
+    channelId: input.channel_id,
+    category: 'mvp',
+    projectId: input.project_id,
+    sessionId: input.session_id,
+  })
+  if (!resolution.env || !resolution.channel) {
+    throw new Error(
+      resolution.unusableReason === 'decrypt_failed'
+        ? 'API_KEY_DECRYPT_FAILED: 渠道 api_key 无法解密，请在设置中重新保存该渠道'
+        : resolution.unusableReason === 'model_not_found'
+          ? 'CHANNEL_MODEL_NOT_FOUND: 渠道没有启用的模型，请在设置中启用至少一个模型后再生成'
+          : 'MVP_GENERATION_FAILED: 没有可用的模型渠道，请在设置中配置并验证渠道后再生成',
+    )
   }
-  let apiKey: string
-  try {
-    apiKey = decryptApiKey(channel.api_key)
-  } catch {
-    throw new Error('API_KEY_DECRYPT_FAILED: 渠道 api_key 无法解密，请在设置中重新保存该渠道')
-  }
-  // 类别路由（§6.4）：mvp 类别解析模型；无启用模型属配置错误，明确抛错（MVP 无模板兜底）
-  let env: Record<string, string>
-  try {
-    const { model } = resolveCategoryModel(channel, 'mvp')
-    env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
-  } catch {
-    throw new Error('CHANNEL_MODEL_NOT_FOUND: 渠道没有启用的模型，请在设置中启用至少一个模型后再生成')
-  }
+  const channel = resolution.channel
+  const env = resolution.env
   // 生成侧读 PRD 背板（定位/功能项/行为断言/范围外/护栏），而非裸需求清单——主题锚点从 prompt 层压住"货不对板"。
   // 读 prd.json（syncPrdCheckpoints 已落盘，可能是 LLM 从对话提取、也可能模板兜底），
   // 保证生成用的是与文档面板/裁判同一份事实源，而非临时重建。
@@ -567,22 +561,17 @@ async function resolvePrdBackplane(input: MvpTaskInput, requirements: SketchRequ
     buildPrdBackplane(findProject(input.project_id), requirements, 'sketch_confirmed')
 
   if (!input.query) return template()
-  const channel = input.channel_id ? getChannelByIdRaw(input.channel_id) : getFirstEnabledChannel()
-  if (!channel) return template()
-  let apiKey: string
-  try {
-    apiKey = decryptApiKey(channel.api_key)
-  } catch {
-    return template()
-  }
-  // 类别路由（§6.4）：prd 类别解析模型；失败回退确定性模板（PRD 提取失败不阻断生成）
-  let env: Record<string, string>
-  try {
-    const { model } = resolveCategoryModel(channel, 'prd')
-    env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
-  } catch {
-    return template()
-  }
+  // 渠道+类别统一收口（runtime-fallback，T9）；prd 类别解析模型，主渠道不可用已尝试
+  // 切备用渠道，仍无可用回退确定性模板（PRD 提取失败不阻断生成）
+  const resolution = resolveChannelEnv({
+    channelId: input.channel_id,
+    category: 'prd',
+    projectId: input.project_id,
+    sessionId: input.session_id,
+  })
+  if (!resolution.env || !resolution.channel) return template()
+  const channel = resolution.channel
+  const env = resolution.env
 
   const llm = await generatePrdLlm({
     project_id: input.project_id,
@@ -960,11 +949,16 @@ export async function mergeIterationRequirements(
   const appendRaw = (): SketchRequirement[] => [...existing, { id: nextRequirementId(existing), description: input.prompt }]
   if (!input.query) return appendRaw()
   try {
-    const channel = input.channel_id ? getChannelByIdRaw(input.channel_id) : getFirstEnabledChannel()
-    if (!channel) return appendRaw()
-    const apiKey = decryptApiKey(channel.api_key)
-    // 类别路由（§6.4）：normalizer 归 prd 类别（§7.7 判定要稳 0.1）；失败由外层 catch 回退原样追加
-    const env = buildSdkEnv(apiKey, channel.base_url, resolveCategoryModel(channel, 'prd').model, channel.provider_type)
+    // 渠道+类别统一收口（runtime-fallback，T9）：normalizer 归 prd 类别（§7.7 判定要
+    // 稳 0.1）；失败由外层 catch 回退原样追加
+    const resolution = resolveChannelEnv({
+      channelId: input.channel_id,
+      category: 'prd',
+      projectId: input.project_id,
+      sessionId: input.session_id,
+    })
+    if (!resolution.env) return appendRaw()
+    const env = resolution.env
     const normalization = await normalizeRequirementUpdate({
       session_id: input.session_id,
       existing,

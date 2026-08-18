@@ -26,6 +26,7 @@ export type DecisionType =
   | 'judge_return'
   | 'circuit_rollback'
   | 'startup_convergence'
+  | 'runtime_channel_switch'
 
 export interface DecisionEntry {
   type: DecisionType

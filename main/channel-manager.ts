@@ -174,6 +174,14 @@ export function listChannels(): Channel[] {
   return loadChannels().channels.filter(isOursChannel).map(redact)
 }
 
+/**
+ * 全部启用的本项目渠道（未脱敏，含真实 api_key 密文）。
+ * 供运行时被动回退（T9）枚举备用渠道用；密钥仍只在 main 进程解密，不经 IPC 外泄。
+ */
+export function listEnabledRawChannels(): Channel[] {
+  return loadChannels().channels.filter((channel) => isOursChannel(channel) && channel.enabled)
+}
+
 export function createChannel(input: ChannelCreateInput): Channel {
   const config = loadChannels()
   const channel: Channel = {

@@ -423,8 +423,8 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
   if (isSystem) {
     // [decision] 是内部决策簿记（用户面在文档面板的 decisions.md），不进聊天流
     if (text.startsWith('[decision]')) return null
-    // [reconcile] / [decision-card] 是机器前缀，剥掉后展示人话
-    const display = text.replace(/^\[(?:reconcile|decision-card)\]\s*/, '')
+    // [reconcile] / [decision-card] / [channel-switch] 是机器前缀，剥掉后展示人话
+    const display = text.replace(/^\[(?:reconcile|decision-card|channel-switch)\]\s*/, '')
     return (
       <div
         style={{

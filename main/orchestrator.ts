@@ -13,9 +13,17 @@ import type {
 } from '../shared/types'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
-import { buildSdkEnv, decryptApiKey, getChannelByIdRaw, getFirstEnabledChannel } from './channel-manager'
 export { buildSdkEnv } from './channel-manager'
-import { categoryForStage, categoryTemperature, resolveCategoryModel } from './model-resolution'
+import {
+  extractErrorStatusCode,
+  isInfrastructureFailure,
+  isUserCancelledQuery,
+  pickBackupChannelEnv,
+  readFallbackContext,
+  recordChannelSwitch,
+  resolveChannelEnv,
+} from './runtime-fallback'
+import { categoryForStage, categoryTemperature } from './model-resolution'
 import { handleGuideMessage } from './guide-agent-service'
 import {
   READY_COMPLETION_COPY,
@@ -94,7 +102,7 @@ const activeSessions = new Map<string, ActiveRun>()
 const backgroundRuns = new Map<string, AbortController>()
 
 let streamPublisher: StreamPublisher = () => undefined
-let sdkQuery: SDKQuery = anthropicMessagesQuery
+let sdkQuery: SDKQuery = queryWithRuntimeFallback
 let retrySleep: (ms: number) => Promise<void> = sleep
 
 export function setAgentStreamPublisher(publisher: StreamPublisher): void {
@@ -106,7 +114,7 @@ export function setSDKQueryForTests(query: SDKQuery): void {
 }
 
 export function resetSDKQueryForTests(): void {
-  sdkQuery = anthropicMessagesQuery
+  sdkQuery = queryWithRuntimeFallback
 }
 
 /** 生产侧 query 访问器：读取模块级 sdkQuery（默认 anthropicMessagesQuery），供 ipc.ts 透传给 runMvpTask。 */
@@ -153,41 +161,29 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       // 项目索引缺失（如测试环境）时退回渲染端上报的阶段
     }
 
-    // 未显式指定 channel_id 时自动回退到第一个启用的本项目渠道（否则引导永远走规则路由）
-    const channel = input.channel_id
-      ? getChannelByIdRaw(input.channel_id)
-      : getFirstEnabledChannel()
-    let env: Record<string, string> | undefined
-    let channelUnusableReason: 'decrypt_failed' | 'model_not_found' | undefined
-    if (channel) {
-      let apiKey: string | undefined
-      try {
-        apiKey = decryptApiKey(channel.api_key)
-      } catch {
-        // 渠道密钥不可解密（safeStorage 密钥变更 / 跨平台迁移的 ciphertext）：
-        // 该渠道视为不可用，引导路径回退规则路由，编程路径报可读错误。
-        channelUnusableReason = 'decrypt_failed'
-        console.error(`[runAgent] channel ${channel.id} (${channel.name}) api_key 无法解密，该渠道不可用`)
-      }
-      if (apiKey) {
-        try {
-          // 类别路由（§6.4）：按权威阶段→文档类别经 model-resolution 解析模型，
-          // 不再全引擎共用一个写死的模型。模型名用 name（真实模型 ID）：id 是渠道内
-          // 唯一标识（多 Agent / 识图-编程模型区分用），不能传给 API
-          const { model } = resolveCategoryModel(channel, categoryForStage(authoritativeStage))
-          env = buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type)
-        } catch (error) {
-          // 渠道无启用模型：与密钥不可解密同待遇——引导回规则路由，编程路径报可读错误
-          channelUnusableReason = 'model_not_found'
-          console.error(`[runAgent] ${error instanceof Error ? error.message : String(error)}，本次模型不参与：引导走规则路由、草图走模板`)
-        }
-      }
-    } else {
-      // 无可用渠道（无启用渠道 / 密钥均不可解密）：引导回规则路由、草图落模板，
+    // 渠道 + 类别 → env 统一收口（runtime-fallback）：类别路由（§6.4）按权威阶段解析
+    // 模型（模型名用 name 真实模型 ID）；主渠道密钥不可解密/无启用模型时按 T9 切备用
+    // 渠道（切换已落决策日志），无备用才降级。env 携带回退上下文供请求期被动切换。
+    const resolution = resolveChannelEnv({
+      channelId: input.channel_id,
+      category: categoryForStage(authoritativeStage),
+      projectId: input.project_id,
+      sessionId: input.session_id,
+    })
+    const channel = resolution.channel
+    const env = resolution.env
+    if (env) {
+      console.debug?.(`[runAgent] channel ${channel?.id} (${channel?.name}) 解析成功（类别 ${categoryForStage(authoritativeStage)}）`)
+    } else if (resolution.unusableReason === 'no_channel') {
+      // 无可用渠道（无启用渠道 / 密钥均不可解密且无备用）：引导回规则路由、草图落模板，
       // 全链路静默降级。必须留日志——2026-08-15 赛车模拟器案例正是这一支无声
       // 瞬断（模型缺席 18ms 出模板草图），事后只能靠毫秒级时间差反推。
       console.error('[runAgent] 未解析到可用渠道（input.channel_id='
         + `${input.channel_id ?? 'auto'}，getFirstEnabledChannel 无可用项），本次模型不参与：引导走规则路由、草图走模板`)
+    } else {
+      // 主渠道不可用且无备用（decrypt_failed / model_not_found，切换未遂的原因已在
+      // runtime-fallback 记录）：引导路径回规则路由，编程路径报可读错误。
+      console.error(`[runAgent] 渠道不可用（reason=${resolution.unusableReason}，channel_id=${input.channel_id ?? 'auto'}），本次模型不参与：引导走规则路由、草图走模板`)
     }
     const maxTokens = channel?.max_tokens ?? 1200
     // 多轮历史：读取已有对话轮次（不含本次 user 消息，稍后追加），支撑 SDK 多轮上下文
@@ -451,12 +447,13 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       return { accepted: true, session_id: input.session_id, stream_started: true }
     }
 
-    // 编程路径：必须真实模型，无渠道 / 密钥不可解密 / 无启用模型直接抛明确错误（不留测试占位 key）
+    // 编程路径：必须真实模型，无渠道 / 密钥不可解密 / 无启用模型（且无备用渠道可切）
+    // 直接抛明确错误（不留测试占位 key）
     if (!channel || !env) {
       throw new Error(
-        channelUnusableReason === 'decrypt_failed'
+        resolution.unusableReason === 'decrypt_failed'
           ? 'API_KEY_DECRYPT_FAILED: 已配置渠道但 api_key 无法解密，请在设置中重新保存该渠道'
-          : channelUnusableReason === 'model_not_found'
+          : resolution.unusableReason === 'model_not_found'
             ? 'CHANNEL_MODEL_NOT_FOUND: 渠道没有启用的模型，请在设置中启用至少一个模型'
             : 'CHANNEL_NOT_FOUND: configure a model channel before using the SDK',
       )
@@ -916,6 +913,52 @@ async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions)
   }
 
   yield { type: 'result', subtype: 'success' }
+}
+
+/**
+ * 请求期被动渠道回退（T9）：包住 anthropicMessagesQuery 作为模块默认 query。
+ *
+ * 首调命中基础设施故障（429/5xx/网络错误，见 isInfrastructureFailure）且**尚未流出
+ * 任何正文**时，按 env 携带的回退上下文切备用渠道重试一次；内容型失败（截断/解析
+ * 错发生在引擎层，到不了这里）、用户取消、已流出正文（重试会导致 delta 重复拼接）
+ * 一律原样上抛，走调用方既有重试链。切换本身经 recordChannelSwitch 落决策日志
+ * 与 [channel-switch] 系统行，绝不静默。
+ */
+async function* queryWithRuntimeFallback(prompt: string, options: SDKQueryOptions): AsyncGenerator<SDKMessage> {
+  const context = readFallbackContext(options.env)
+  let emitted = false
+  const iterator = anthropicMessagesQuery(prompt, options)[Symbol.asyncIterator]()
+  try {
+    for (;;) {
+      const next = await iterator.next()
+      if (next.done) return
+      if (next.value.type === 'assistant') emitted = true
+      yield next.value
+    }
+  } catch (error) {
+    if (!context || emitted || isUserCancelledQuery(error) || !isInfrastructureFailure(error)) throw error
+    const backup = pickBackupChannelEnv(context)
+    if (!backup) throw error
+    const statusCode = extractErrorStatusCode(error)
+    recordChannelSwitch({
+      context,
+      reason: statusCode ? `http_${statusCode}` : 'network_error',
+      to: backup,
+      statusCode,
+    })
+    yield* anthropicMessagesQuery(prompt, {
+      ...options,
+      env: backup.env,
+      // 备用渠道有自己的 max_tokens 上限（16384 主渠道对备用渠道可能 400）
+      maxTokens: backup.channel.max_tokens ?? options.maxTokens,
+    })
+  } finally {
+    try {
+      await iterator.return?.(undefined)
+    } catch {
+      // 已完成/已抛错时是 no-op，忽略
+    }
+  }
 }
 
 /**
