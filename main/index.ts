@@ -1,10 +1,16 @@
-import { app, BrowserWindow, dialog, ipcMain, session, type MessageBoxOptions, type WebContents } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Notification, session, type MessageBoxOptions, type WebContents } from 'electron'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { registerIpcHandlers } from './ipc'
 import { setSnapshotCaptureProvider } from './platform-services'
 import { reconcileInterruptedProjects } from './recovery-service'
+import {
+  setFocusWindowAction,
+  setNotificationBackend,
+  setWindowFocusedHook,
+  startPendingDecisionReminderLoop,
+} from './notifications'
 import { MAIN_FRAME_CSP, shouldInjectMainFrameCsp } from './csp'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -44,6 +50,37 @@ async function createMainWindow(): Promise<void> {
     return { buffer: image.toPNG(), extension: 'png' }
   })
   registerIpcHandlers(ipcMain, mainWindow)
+  // T6 后台执行通知：注入 Electron 系统通知后端 + 焦点钩子，并启动待决策持续提醒轮询。
+  // 点击通知聚焦回主窗；关闭（dismiss）通知记为该项目的显式忽略，停止反复提醒。
+  setNotificationBackend({
+    show: (notification, hooks) => {
+      if (!Notification.isSupported()) return
+      const instance = new Notification({ title: notification.title, body: notification.body })
+      let clicked = false
+      if (hooks?.onClick) {
+        instance.on('click', () => {
+          clicked = true
+          hooks.onClick?.()
+        })
+      }
+      if (hooks?.onDismiss) {
+        // Windows/多数桌面：点击会先于 close 触发；clicked 标记避免「点完又被记成忽略」
+        instance.on('close', () => {
+          if (!clicked) hooks.onDismiss?.()
+        })
+      }
+      instance.show()
+    },
+    isSupported: () => Notification.isSupported(),
+  })
+  setWindowFocusedHook(() => mainWindow?.isFocused() ?? false)
+  setFocusWindowAction(() => {
+    if (mainWindow) {
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+  startPendingDecisionReminderLoop()
 
   if (process.env.VITE_DEV_SERVER_URL) {
     await mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)

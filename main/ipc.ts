@@ -47,6 +47,7 @@ import { fail, ok } from './api-result'
 import { cancelAgent, getSdkQuery, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from './orchestrator'
 import { collectDomContext } from './dom-context'
 import { runIterationTask, runMvpTask, runPostMvpTestingFlow, setProgrammingEventPublisher } from './programming-orchestrator'
+import { handleAgentStreamEvent } from './notifications'
 import { assertToolAllowed, getPermissionMode, resolvePermission, setPermissionMode, setPermissionRequestPublisher } from './permission-service'
 import {
   abandonProject,
@@ -94,9 +95,12 @@ function errorCodeFrom(error: unknown): string {
 export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow): void {
   setAgentStreamPublisher((event) => {
     mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, event)
+    // T6 后台执行通知：completed/error/user_decision_required → 系统通知（无后端注入时内部 no-op）
+    handleAgentStreamEvent(event)
   })
   setProgrammingEventPublisher((event) => {
     mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, event)
+    handleAgentStreamEvent(event)
   })
   setPermissionRequestPublisher((request) => {
     mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, {
