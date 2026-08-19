@@ -139,6 +139,32 @@ describe('M5 职责分工区（ChannelSettingsPage）', () => {
     })
   })
 
+  it('滚轮悬停渠道下拉循环切换该角色渠道（自动/各渠道），生效模型预览随草稿更新', async () => {
+    installApi({ views: makeViews() })
+    render(<ChannelSettingsPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('职责分工')).toBeDefined()
+    })
+
+    const select = screen.getByLabelText('草图生成 渠道') as HTMLSelectElement
+    expect(select.value).toBe('ch-kimi')
+
+    // 滚轮向下（deltaY>0）：ch-kimi → 自动/全局默认（''）
+    await act(async () => {
+      fireEvent.wheel(select, { deltaY: 120 })
+    })
+    expect(select.value).toBe('')
+    // 草稿已变脏：保存按钮由禁用变可用（routing.sketch.channel_id 清除）
+    expect((screen.getByTestId('category-routing-save') as HTMLButtonElement).disabled).toBe(false)
+
+    // 滚轮向上（deltaY<0）：自动 → ch-kimi（累计器跨事件，-120 抵消先前余量后步进一步）
+    await act(async () => {
+      fireEvent.wheel(select, { deltaY: -120 })
+    })
+    expect(select.value).toBe('ch-kimi')
+  })
+
   it('「恢复全部默认」提交空路由表', async () => {
     const { updateSpy } = installApi({
       views: makeViews(),

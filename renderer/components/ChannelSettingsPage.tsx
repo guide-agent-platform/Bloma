@@ -20,7 +20,7 @@
  *   在 App.tsx 的 settings 路由中渲染，或通过设置面板/弹窗打开。
  */
 
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useAtom } from 'jotai'
 import type {
   CategoryRoutingConfig,
@@ -573,6 +573,45 @@ const CategoryRoutingSection: React.FC<{
     }))
   }, [])
 
+  // ==================== 滚轮悬停下拉 = 循环切换该角色渠道（用户确认行为） ====================
+  //
+  // 真实 Electron 实测（2026-08-20）：关闭态 <select> 在 Chromium/Electron 里本就不吞
+  // 滚轮——光标停在下拉上页面照样滚动。旧修复「转发 wheel 到页面」前提不成立、属空拳。
+  // 用户明确要求：悬停职责渠道下拉滚轮 → 在该角色可选渠道（自动/各渠道）间循环切换，
+  // 生效模型预览实时更新；离开下拉区域滚轮照常滚动页面。原生下拉弹层打开时 wheel 事件
+  // 走弹层不经页面，故此处只处理关闭态。deltaY 按行归一化为像素后累计，每 ~100px 步进
+  // 一项（普通鼠标一格≈100px≈一次事件≈一项；触控板小幅滚动累积后按比例步进）。
+  const cycleChannelRef = useRef<(category: DocumentCategory, step: number) => void>(() => {})
+  cycleChannelRef.current = (category, step) => {
+    // 顺序与下拉选项一致：'' = 自动/全局默认，其后为 Anthropic 协议渠道（selectable 序）
+    const order = ['', ...selectable.map((channel) => channel.id)]
+    const current = draft[category]?.channelId ?? ''
+    let index = order.indexOf(current)
+    if (index === -1) index = 0
+    const nextIndex = (index + step + order.length) % order.length
+    patchRow(category, { channelId: order[nextIndex]! || undefined })
+  }
+  const wheelAccRef = useRef(0)
+  useEffect(() => {
+    const cycleOnWheel = (event: WheelEvent) => {
+      const target = event.target as HTMLElement | null
+      if (!target || target.tagName !== 'SELECT') return
+      const aiId = target.getAttribute('data-ai-id') ?? ''
+      if (!aiId.startsWith('category-routing-select-')) return
+      if ((target as HTMLSelectElement).disabled) return
+      event.preventDefault()
+      const delta =
+        event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * 33 : event.deltaY
+      wheelAccRef.current += delta
+      const step = Math.trunc(wheelAccRef.current / 100)
+      if (step === 0) return
+      wheelAccRef.current -= step * 100
+      cycleChannelRef.current(aiId.replace('category-routing-select-', '') as DocumentCategory, step)
+    }
+    document.addEventListener('wheel', cycleOnWheel, { passive: false })
+    return () => document.removeEventListener('wheel', cycleOnWheel)
+  }, [])
+
   const saveRouting = useCallback(
     (routing: CategoryRoutingConfig) => {
       const api = window.electronAPI
@@ -905,26 +944,6 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
     },
     [setPermissionModeAtom],
   )
-
-  // ==================== 滚轮命中下拉时转发页面滚动 ====================
-  //
-  // Chromium 里 wheel 事件落在 <select> 上会被其吞掉：关闭态的 select 自身无可滚
-  // 内容、也不把滚动让给页面。设置页每行职责的渠道下拉占据行内近半宽，配置模型
-  // 时光标正停在下拉上，滚轮全被吞 → 页面滚不动（「列表无法滚动，只能显示前三个」）。
-  // 原生下拉展开时事件走弹层不经过页面，此处只救关闭态：preventDefault 后把
-  // deltaY 手动转发给页面滚动（deltaMode 为行时按每行约 33px 归一化）。
-  useEffect(() => {
-    const forwardWheelFromSelect = (event: WheelEvent) => {
-      const target = event.target as HTMLElement | null
-      if (target?.tagName !== 'SELECT') return
-      event.preventDefault()
-      const delta =
-        event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * 33 : event.deltaY
-      window.scrollBy({ top: delta })
-    }
-    document.addEventListener('wheel', forwardWheelFromSelect, { passive: false, capture: true })
-    return () => document.removeEventListener('wheel', forwardWheelFromSelect, { capture: true })
-  }, [])
 
   // ==================== 加载渠道列表 ====================
 
