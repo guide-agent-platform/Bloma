@@ -23,15 +23,19 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { useAtom } from 'jotai'
 import type {
+  CategoryRoutingConfig,
+  CategoryRoutingView,
   Channel,
   ChannelCreateInput,
   ChannelModel,
   ChannelUpdateInput,
+  DocumentCategory,
   PromaPermissionMode,
   ProviderType,
 } from '../../shared/types'
-import { PROVIDER_DEFAULT_URLS, PROVIDER_LABELS } from '../../shared/types'
+import { PROVIDER_DEFAULT_URLS, PROVIDER_LABELS, isAnthropicProtocolProvider } from '../../shared/types'
 import {
+  categoryRoutingViewsAtom,
   channelsListAtom,
   channelsLoadingAtom,
   channelTestResultAtom,
@@ -515,6 +519,350 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onS
 }
 
 // =========================================================================
+// M5 子组件：职责分工（类别 → 渠道路由）
+// =========================================================================
+
+/** 单类别草稿：主渠道选择 + 备用渠道顺序（保存时全量组装） */
+interface RoutingDraftRow {
+  channelId?: string
+  fallbackIds: string[]
+}
+
+type RoutingDraft = Partial<Record<DocumentCategory, RoutingDraftRow>>
+
+/** 渠道下拉候选：仅 Anthropic 协议渠道（运行时固定 /v1/messages，OpenAI 协议会 404） */
+function routingSelectableChannels(channels: Channel[]): Channel[] {
+  return channels.filter((channel) => isAnthropicProtocolProvider(channel.provider_type))
+}
+
+/** 本地模型预览：M4 默认全类别 strongest = 渠道 models 列表序首个 enabled */
+function previewModelName(channel: Channel | undefined): string | undefined {
+  return channel?.models.find((model) => model.enabled)?.name
+}
+
+const CategoryRoutingSection: React.FC<{
+  channels: Channel[]
+  views: CategoryRoutingView[] | null
+  onViewsSaved: (views: CategoryRoutingView[]) => void
+}> = ({ channels, views, onViewsSaved }) => {
+  const [draft, setDraft] = useState<RoutingDraft>({})
+  const [draftReady, setDraftReady] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [expandedCategory, setExpandedCategory] = useState<DocumentCategory | null>(null)
+
+  const selectable = routingSelectableChannels(channels)
+
+  // 视图模型（重新）加载时初始化草稿：配置值原样带入（dangling 态保留 channel_id 供展示/编辑）
+  useEffect(() => {
+    if (!views) return
+    const next: RoutingDraft = {}
+    for (const view of views) {
+      next[view.category] = {
+        channelId: view.channel_id,
+        fallbackIds: [...(view.fallback_channel_ids ?? [])],
+      }
+    }
+    setDraft(next)
+    setDraftReady(true)
+  }, [views])
+
+  const patchRow = useCallback((category: DocumentCategory, patch: Partial<RoutingDraftRow>) => {
+    setDraft((prev) => ({
+      ...prev,
+      [category]: { channelId: prev[category]?.channelId, fallbackIds: prev[category]?.fallbackIds ?? [], ...patch },
+    }))
+  }, [])
+
+  const saveRouting = useCallback(
+    (routing: CategoryRoutingConfig) => {
+      const api = window.electronAPI
+      if (!api?.channels?.categoryRoutingUpdate) return
+      setSaving(true)
+      void api.channels
+        .categoryRoutingUpdate({ request_id: crypto.randomUUID(), routing })
+        .then((result) => {
+          if (result.ok) onViewsSaved(result.data.views)
+        })
+        .finally(() => setSaving(false))
+    },
+    [onViewsSaved],
+  )
+
+  const handleSave = useCallback(() => {
+    if (!views) return
+    const routing: CategoryRoutingConfig = {}
+    for (const view of views) {
+      const row = draft[view.category]
+      if (!row) continue
+      const entry: { channel_id?: string; fallback_channel_ids?: string[] } = {}
+      if (row.channelId) entry.channel_id = row.channelId
+      if (row.fallbackIds.length > 0) entry.fallback_channel_ids = [...row.fallbackIds]
+      if (entry.channel_id !== undefined || entry.fallback_channel_ids !== undefined) {
+        routing[view.category] = entry
+      }
+    }
+    saveRouting(routing)
+  }, [views, draft, saveRouting])
+
+  const handleResetAll = useCallback(() => {
+    saveRouting({})
+  }, [saveRouting])
+
+  const handleRestoreAuto = useCallback((category: DocumentCategory) => {
+    patchRow(category, { channelId: undefined })
+  }, [patchRow])
+
+  const moveFallback = useCallback((category: DocumentCategory, index: number, delta: -1 | 1) => {
+    setDraft((prev) => {
+      const row = prev[category]
+      if (!row) return prev
+      const list = [...row.fallbackIds]
+      const target = index + delta
+      if (target < 0 || target >= list.length) return prev
+      ;[list[index], list[target]] = [list[target]!, list[index]!]
+      return { ...prev, [category]: { ...row, fallbackIds: list } }
+    })
+  }, [])
+
+  const toggleFallback = useCallback((category: DocumentCategory, channelId: string) => {
+    setDraft((prev) => {
+      const row = prev[category]
+      if (!row) return prev
+      const has = row.fallbackIds.includes(channelId)
+      const fallbackIds = has
+        ? row.fallbackIds.filter((id) => id !== channelId)
+        : [...row.fallbackIds, channelId]
+      return { ...prev, [category]: { ...row, fallbackIds } }
+    })
+  }, [])
+
+  const dirty = views?.some((view) => {
+    const row = draft[view.category]
+    if (!row) return false
+    return row.channelId !== view.channel_id
+      || JSON.stringify(row.fallbackIds) !== JSON.stringify(view.fallback_channel_ids ?? [])
+  }) ?? false
+
+  const selectStyle: React.CSSProperties = {
+    height: 32,
+    padding: '0 var(--space-2)',
+    fontSize: 'var(--font-size-xs)',
+    color: 'var(--color-text)',
+    background: 'var(--white)',
+    border: '1px solid var(--color-border)',
+    borderRadius: 'var(--radius-sm)',
+    outline: 'none',
+    fontFamily: 'inherit',
+  }
+
+  const smallButtonStyle = (tone: 'default' | 'danger'): React.CSSProperties => ({
+    height: 26,
+    padding: '0 var(--space-2)',
+    fontSize: 'var(--font-size-xs)',
+    fontWeight: 500,
+    color: tone === 'danger' ? 'var(--color-danger)' : 'var(--color-text-muted)',
+    background: 'transparent',
+    border: `1px solid ${tone === 'danger' ? 'var(--color-danger-soft)' : 'var(--color-border)'}`,
+    borderRadius: 'var(--radius-sm)',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  })
+
+  if (!views && !draftReady) {
+    return null
+  }
+
+  return (
+    <section
+      aria-label="职责分工"
+      data-ai-id="category-routing-section"
+      style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--space-3)' }}>
+        <div>
+          <h3 style={{ fontSize: 'var(--font-size-sm)', fontWeight: 700, color: 'var(--color-text)', margin: 0 }}>
+            职责分工
+          </h3>
+          <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', margin: '4px 0 0' }}>
+            为每类职责固定模型渠道（多家厂商各司其职）；未配置的职责走全局默认渠道
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleResetAll}
+          disabled={saving}
+          data-ai-id="category-routing-reset-all"
+          style={smallButtonStyle('danger')}
+        >
+          恢复全部默认
+        </button>
+      </div>
+
+      {views?.map((view) => {
+        const row = draft[view.category]
+        if (!row) return null
+        const selected = row.channelId ? channels.find((c) => c.id === row.channelId) : undefined
+        // 悬空判定：草稿仍指向视图模型判定的已删除渠道（未改选/未恢复自动）
+        const dangling = view.effective === 'dangling' && row.channelId === view.channel_id
+        const preview = selected
+          ? previewModelName(selected)
+          : view.model_name
+        const expanded = expandedCategory === view.category
+        return (
+          <div
+            key={view.category}
+            data-ai-id={`category-routing-row-${view.category}`}
+            style={{
+              padding: 'var(--space-3) var(--space-4)',
+              background: dangling ? '#FFFBEB' : 'var(--white)',
+              border: `1px solid ${dangling ? '#FDE68A' : 'var(--color-border)'}`,
+              borderRadius: 'var(--radius-md)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--space-2)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, color: 'var(--color-text)' }}>
+                  {view.label}
+                </span>
+                {preview && (
+                  <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginLeft: 'var(--space-2)' }}>
+                    生效模型：{preview}
+                  </span>
+                )}
+              </div>
+              <select
+                aria-label={`${view.label} 渠道`}
+                data-ai-id={`category-routing-select-${view.category}`}
+                style={selectStyle}
+                value={row.channelId ?? ''}
+                disabled={saving}
+                onChange={(e) => patchRow(view.category, { channelId: e.target.value || undefined })}
+              >
+                <option value="">自动 / 全局默认{view.channel_name && view.effective === 'auto' ? `（${view.channel_name}）` : ''}</option>
+                {selectable.map((channel) => (
+                  <option key={channel.id} value={channel.id}>
+                    {channel.name}（{PROVIDER_LABELS[channel.provider_type] ?? channel.provider_type}）
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => setExpandedCategory(expanded ? null : view.category)}
+                style={smallButtonStyle('default')}
+                aria-expanded={expanded}
+              >
+                备用顺序{row.fallbackIds.length > 0 ? `（${row.fallbackIds.length}）` : ''}
+              </button>
+            </div>
+
+            {dangling && (
+              <div
+                role="alert"
+                data-ai-id={`category-routing-dangling-${view.category}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-2)',
+                  fontSize: 'var(--font-size-xs)',
+                  color: '#92400E',
+                }}
+              >
+                <IconAlertTriangle size={14} />
+                <span>指向的渠道已被删除，当前回退全局默认</span>
+                <button
+                  type="button"
+                  onClick={() => handleRestoreAuto(view.category)}
+                  data-ai-id={`category-routing-restore-auto-${view.category}`}
+                  style={smallButtonStyle('default')}
+                >
+                  恢复自动
+                </button>
+              </div>
+            )}
+
+            {expanded && (
+              <div
+                data-ai-id={`category-routing-fallback-${view.category}`}
+                style={{
+                  padding: 'var(--space-3)',
+                  background: 'var(--glass-bg-soft)',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-sm)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 'var(--space-2)',
+                }}
+              >
+                <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
+                  该职责渠道故障时依次尝试的备用顺序（勾选即加入，↑↓ 调整顺序；不选则按任意启用渠道）
+                </p>
+                {selectable.length === 0 && (
+                  <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
+                    暂无 Anthropic 协议渠道可选
+                  </p>
+                )}
+                {selectable.map((channel) => {
+                  const index = row.fallbackIds.indexOf(channel.id)
+                  const checked = index >= 0
+                  return (
+                    <div key={channel.id} style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--font-size-xs)', flex: 1, cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={saving}
+                          onChange={() => toggleFallback(view.category, channel.id)}
+                        />
+                        {channel.name}
+                      </label>
+                      {checked && (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>#{index + 1}</span>
+                          <button type="button" aria-label="上移" disabled={index === 0 || saving} onClick={() => moveFallback(view.category, index, -1)} style={smallButtonStyle('default')}>↑</button>
+                          <button type="button" aria-label="下移" disabled={index === row.fallbackIds.length - 1 || saving} onClick={() => moveFallback(view.category, index, 1)} style={smallButtonStyle('default')}>↓</button>
+                        </span>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      {views && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={!dirty || saving}
+            data-ai-id="category-routing-save"
+            style={{
+              height: 32,
+              padding: '0 var(--space-4)',
+              fontSize: 'var(--font-size-xs)',
+              fontWeight: 600,
+              color: dirty && !saving ? 'var(--white)' : 'var(--color-text-muted)',
+              background: dirty && !saving ? 'linear-gradient(135deg, var(--color-quick), var(--color-quick-bright))' : 'var(--gray-200)',
+              border: 'none',
+              borderRadius: 'var(--radius-sm)',
+              cursor: dirty && !saving ? 'pointer' : 'not-allowed',
+              fontFamily: 'inherit',
+            }}
+          >
+            {saving ? '保存中…' : '保存职责分工'}
+          </button>
+        </div>
+      )}
+    </section>
+  )
+}
+
+// =========================================================================
 // 主组件
 // =========================================================================
 
@@ -543,6 +891,7 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
   const [testingId, setTestingId] = useState<string | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [permissionMode, setPermissionModeAtom] = useAtom(permissionModeAtom)
+  const [routingViews, setRoutingViews] = useAtom(categoryRoutingViewsAtom)
 
   // ==================== 权限模式切换 ====================
 
@@ -575,6 +924,21 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
       })
       .catch(() => setLoading('error'))
   }, [setChannels, setLoading])
+
+  // ==================== M5：加载职责分工视图模型 ====================
+
+  useEffect(() => {
+    const api = window.electronAPI
+    if (!api?.channels?.categoryRoutingList) return
+    void api.channels
+      .categoryRoutingList({ request_id: crypto.randomUUID() })
+      .then((result) => {
+        if (result.ok) setRoutingViews(result.data.views)
+      })
+      .catch(() => {
+        // 视图模型加载失败时保持 null，职责分工区不渲染（不阻塞渠道管理）
+      })
+  }, [setRoutingViews])
 
   // ==================== 新增渠道 ====================
 
@@ -826,6 +1190,9 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
             })}
           </div>
         </section>
+
+        {/* ── M5 职责分工（类别 → 渠道路由）── */}
+        <CategoryRoutingSection channels={channels} views={routingViews} onViewsSaved={(views) => setRoutingViews(views)} />
 
         {/* ── 测试结果提示 ── */}
         {testResult && (
