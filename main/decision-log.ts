@@ -27,6 +27,7 @@ export type DecisionType =
   | 'circuit_rollback'
   | 'startup_convergence'
   | 'runtime_channel_switch'
+  | 'category_route'
   | 'constraint_captured'
   | 'memory_distilled'
   | 'enrichment_stats'

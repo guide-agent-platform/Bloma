@@ -8,6 +8,7 @@ import {
   getFirstEnabledChannel,
   listEnabledRawChannels,
 } from './channel-manager'
+import { getCategoryFallbackChannelIds, resolveRoutedChannelId } from './category-routing'
 import { recordDecision } from './decision-log'
 import { resolveCategoryModel, type DocumentCategory } from './model-resolution'
 
@@ -84,7 +85,7 @@ export interface ChannelEnvResolution {
   unusableReason?: ChannelUnusableReason
 }
 
-type ChannelEnvAttempt = { status: 'ok'; env: Record<string, string> } | { status: 'failed'; reason: 'decrypt_failed' | 'model_not_found' }
+type ChannelEnvAttempt = { status: 'ok'; env: Record<string, string>; model: string } | { status: 'failed'; reason: 'decrypt_failed' | 'model_not_found' }
 
 function tryBuildChannelEnv(channel: Channel, category: DocumentCategory): ChannelEnvAttempt {
   let apiKey: string
@@ -95,17 +96,41 @@ function tryBuildChannelEnv(channel: Channel, category: DocumentCategory): Chann
   }
   try {
     const { model } = resolveCategoryModel(channel, category)
-    return { status: 'ok', env: buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type) }
+    return { status: 'ok', env: buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type), model }
   } catch {
     return { status: 'failed', reason: 'model_not_found' }
   }
 }
 
+// ---------------------------------------------------------------------------
+// 主渠道选择（M5 §4.1 解析链）：①显式 channel_id > ②类别路由表 > ③全局兜底
+// ---------------------------------------------------------------------------
+
+interface PrimaryChannelSelection {
+  channel?: Channel
+  /** 主渠道是否来自类别路由表命中（视图模型 effective: 'routed' 的解析侧依据） */
+  routed: boolean
+}
+
+function resolvePrimaryChannel(opts: { channelId?: string; category: DocumentCategory }): PrimaryChannelSelection {
+  // ① 显式 channel_id（调用方传入，最高优先级；渲染端今天不发）
+  if (opts.channelId) return { channel: getChannelByIdRaw(opts.channelId), routed: false }
+  // ② 类别路由表（M5）：悬空/禁用/非 Anthropic 协议由 resolveRoutedChannelId 内部回退 undefined
+  const routedId = resolveRoutedChannelId(opts.category)
+  if (routedId) {
+    const routed = getChannelByIdRaw(routedId)
+    if (routed) return { channel: routed, routed: true }
+  }
+  // ③ 全局兜底（无路由/路由悬空/路由禁用时；与 M4 现状一致，向后兼容）
+  return { channel: getFirstEnabledChannel(), routed: false }
+}
+
 /**
  * 渠道 + 文档类别 → SDK env（原各编排器内 8 处重复的「选渠道→解密→类别解析→构建」块
- * 的统一收口）。主渠道密钥不可解密 / 无启用模型时按同一类别解析链切第一个可用备用
- * 渠道（T9 构建期回退），并落决策日志；无备用可用时如实返回 unusableReason，
- * 调用方维持原有降级语义（草图回模板 / MVP 抛错 / 引导回规则路由）。
+ * 的统一收口）。主渠道按 M5 §4.1 解析链选择（显式 channel_id > 类别路由表 > 全局兜底）；
+ * 主渠道密钥不可解密 / 无启用模型时按同一类别解析链切备用渠道（T9 构建期回退，
+ * 备用顺序先按类别路由的 fallback_channel_ids，§4.4），并落决策日志；无备用可用时
+ * 如实返回 unusableReason，调用方维持原有降级语义（草图回模板 / MVP 抛错 / 引导回规则路由）。
  */
 export function resolveChannelEnv(opts: {
   channelId?: string
@@ -113,7 +138,8 @@ export function resolveChannelEnv(opts: {
   projectId?: string
   sessionId?: string
 }): ChannelEnvResolution {
-  const primary = opts.channelId ? getChannelByIdRaw(opts.channelId) : getFirstEnabledChannel()
+  const primarySelection = resolvePrimaryChannel(opts)
+  const primary = primarySelection.channel
   if (!primary) return { unusableReason: 'no_channel' }
 
   const context: RuntimeFallbackContext = {
@@ -124,6 +150,16 @@ export function resolveChannelEnv(opts: {
   }
   const attempt = tryBuildChannelEnv(primary, opts.category)
   if (attempt.status === 'ok') {
+    if (primarySelection.routed && opts.projectId && opts.sessionId) {
+      recordCategoryRoute({
+        projectId: opts.projectId,
+        sessionId: opts.sessionId,
+        category: opts.category,
+        channelId: primary.id,
+        channelName: primary.name,
+        model: attempt.model,
+      })
+    }
     return { env: attachFallbackContext(attempt.env, context), channel: primary }
   }
 
@@ -139,7 +175,8 @@ export function resolveChannelEnv(opts: {
 }
 
 // ---------------------------------------------------------------------------
-// 备用渠道枚举（按 channels.json 配置序，第一个「密钥可解密 + 有启用模型」者胜出）
+// 备用渠道枚举（M5 §4.4：先按类别路由的 fallback_channel_ids 顺序，未命中回退
+// channels.json 配置序；跳过当前主渠道，保序去重）
 // ---------------------------------------------------------------------------
 
 export interface BackupChannelEnv {
@@ -149,8 +186,14 @@ export interface BackupChannelEnv {
 }
 
 export function pickBackupChannelEnv(context: Pick<RuntimeFallbackContext, 'channelId' | 'category'>): BackupChannelEnv | undefined {
-  for (const channel of listEnabledRawChannels()) {
-    if (channel.id === context.channelId) continue
+  const fallbackOrder = getCategoryFallbackChannelIds(context.category)
+  // getChannelByIdRaw 已含 isOursChannel 校验、getCategoryFallbackChannelIds 已过滤禁用；
+  // listEnabledRawChannels 全为启用项目渠道——候选只需跳过主渠道与已见过（保序去重）
+  const candidates = [...fallbackOrder.map((id) => getChannelByIdRaw(id)), ...listEnabledRawChannels()]
+  const seen = new Set<string>([context.channelId])
+  for (const channel of candidates) {
+    if (!channel || seen.has(channel.id)) continue
+    seen.add(channel.id)
     let apiKey: string
     try {
       apiKey = decryptApiKey(channel.api_key)
@@ -301,5 +344,61 @@ export function recordChannelSwitch(record: {
     role: 'system',
     content: [{ type: 'text', text: `[channel-switch] 渠道「${fromName}」${describeTrigger(record)}，已自动切换到备用渠道「${record.to.channel.name}」重试` }],
     timestamp: Date.now(),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// 类别路由留痕（M5 §8）：主渠道命中路由表时落 category_route 决策日志。
+// 路由是静态配置非事件——不新增用户可见系统行（避免刷屏，与 [channel-switch] 语义区分）。
+// ---------------------------------------------------------------------------
+
+const CATEGORY_ROUTE_LOG_THROTTLE_MS = 30_000
+const recentRouteLogs = new Map<string, number>()
+
+/** 测试复位节流窗（生产不调用）。 */
+export function resetCategoryRouteThrottleForTests(): void {
+  recentRouteLogs.clear()
+}
+
+/**
+ * 落一次「类别路由生效」决策日志（§8）：按「项目+会话+类别」30s 窗口节流（同键只落
+ * 一次，非永久去重）。projectId/sessionId 缺失时与 recordChannelSwitch 一致直接跳过
+ * 不落日志、节流键不进 Map（避免含 undefined 的键跨会话/项目碰撞误吞后续记录）。
+ * 支撑回访/审计重建「哪一步用了哪家」。
+ */
+function recordCategoryRoute(record: {
+  projectId: string
+  sessionId: string
+  category: DocumentCategory
+  channelId: string
+  channelName: string
+  model: string
+}): void {
+  const dedupeKey = `${record.projectId}:${record.sessionId}:${record.category}`
+  const now = Date.now()
+  const last = recentRouteLogs.get(dedupeKey)
+  if (last !== undefined && now - last < CATEGORY_ROUTE_LOG_THROTTLE_MS) return
+  if (recentRouteLogs.size > 100) {
+    for (const [key, at] of recentRouteLogs) {
+      if (now - at >= CATEGORY_ROUTE_LOG_THROTTLE_MS) recentRouteLogs.delete(key)
+    }
+  }
+  recentRouteLogs.set(dedupeKey, now)
+
+  recordDecision({
+    project_id: record.projectId,
+    session_id: record.sessionId,
+    entry: {
+      type: 'category_route',
+      title: '类别渠道路由生效',
+      why: `${record.category} 类别按职责分工路由到渠道「${record.channelName}」（${record.model}）`,
+      detail: {
+        category: record.category,
+        channel_id: record.channelId,
+        channel_name: record.channelName,
+        model: record.model,
+        source: 'category_routing',
+      },
+    },
   })
 }
