@@ -1,4 +1,4 @@
-import type { Channel, ChannelModel, WorkflowStage } from '../shared/types'
+import type { Channel, ChannelModel, DocumentCategory, WorkflowStage } from '../shared/types'
 import { listEnabledModels } from './channel-manager'
 
 /**
@@ -16,7 +16,8 @@ import { listEnabledModels } from './channel-manager'
  * 失败处理沿用各引擎现有重试策略（截断→升 maxTokens、带反馈重试），路由层只负责
  * 「选哪个模型」，不重复生成逻辑。
  */
-export type DocumentCategory = 'guide' | 'prd' | 'sketch' | 'mvp' | 'gwt' | 'judge' | 'summary'
+// M5：DocumentCategory 迁移至 shared/types（renderer 设置页共用），此处 re-export 保持既有导入兼容。
+export type { DocumentCategory } from '../shared/types'
 
 export interface CategoryModelConfig {
   category: DocumentCategory

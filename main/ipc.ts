@@ -7,6 +7,7 @@ import type {
   AgentLoadMessagesInput,
   AgentSendMessageInput,
   AnalyticsTrackInput,
+  CategoryRoutingUpdateEnvelope,
   ChannelCreateEnvelope,
   ChannelDeleteEnvelope,
   ChannelTestEnvelope,
@@ -68,6 +69,7 @@ import {
 } from './project-service'
 import { cleanOrphanSessions, listSessions, loadMessages } from './session-service'
 import { createChannel, deleteChannel, fetchModels, listChannels, testChannel, testChannelDirect, updateChannel } from './channel-manager'
+import { buildCategoryRoutingViews, updateCategoryRouting } from './category-routing'
 import { listDocuments, readDocument, syncDocuments } from './document-engine'
 import { isCircuitBreakSettled } from './recovery-service'
 import {
@@ -589,6 +591,23 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
         throw new Error('CHANNEL_NOT_FOUND: channel does not exist')
       }
       return { deleted: true, channel_id: input.channel_id }
+    })
+  })
+
+  // M5：类别 → 渠道路由（职责分工）。list 返回视图模型（渠道名/模型预览，不含明文 key）。
+  ipcMain.handle(IPC_CHANNELS.CATEGORY_ROUTING_LIST, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      requireFields<RequestEnvelope>(payload, [])
+      return buildCategoryRoutingViews()
+    })
+  })
+
+  // M5：全量覆盖路由表。结构非法走 VALIDATION_ERROR；无效引用（已删除/非本项目/
+  // 非 Anthropic 协议）在 updateCategoryRouting 内剥离 + console.warn，不阻塞其余类别。
+  ipcMain.handle(IPC_CHANNELS.CATEGORY_ROUTING_UPDATE, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<CategoryRoutingUpdateEnvelope>(payload, ['routing'])
+      return updateCategoryRouting(input.routing)
     })
   })
 }

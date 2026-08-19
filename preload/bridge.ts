@@ -26,6 +26,7 @@ import type {
   AgentLoadMessagesInput,
   AgentSendMessageInput,
   AnalyticsTrackInput,
+  CategoryRoutingUpdateEnvelope,
   ChannelCreateEnvelope,
   ChannelDeleteEnvelope,
   ChannelTestEnvelope,
@@ -168,6 +169,10 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_FETCH_MODELS, input),
     delete: (input: ChannelDeleteEnvelope) =>
       ipcRenderer.invoke(IPC_CHANNELS.CHANNEL_DELETE, input),
+    categoryRoutingList: (input: RequestEnvelope) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CATEGORY_ROUTING_LIST, input),
+    categoryRoutingUpdate: (input: CategoryRoutingUpdateEnvelope) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CATEGORY_ROUTING_UPDATE, input),
   },
 }
 

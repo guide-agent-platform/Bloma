@@ -57,6 +57,8 @@ export const IPC_CHANNELS = {
   CHANNEL_TEST_DIRECT: 'channel:test-direct',
   CHANNEL_FETCH_MODELS: 'channel:fetch-models',
   CHANNEL_DELETE: 'channel:delete',
+  CATEGORY_ROUTING_LIST: 'category-routing:list',
+  CATEGORY_ROUTING_UPDATE: 'category-routing:update',
 } as const
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
@@ -347,6 +349,84 @@ export const PROVIDER_LABELS: Record<ProviderType, string> = {
   xiaomi: '小米 MiMo (API)',
   'xiaomi-token-plan': '小米 MiMo Token Plan',
   custom: 'OpenAI Chat Completions（自定义地址）',
+}
+
+/**
+ * 走 Anthropic Messages 协议的 provider（M5 单一真相源，main 校验与 renderer 下拉共用）。
+ * Bloma 运行时查询固定请求 `${baseUrl}/v1/messages`，OpenAI 协议渠道（zhipu/doubao/
+ * qwen/openai/custom 等）会 404——类别路由与渠道下拉均须过滤。
+ */
+export const ANTHROPIC_PROTOCOL_PROVIDERS: readonly ProviderType[] = [
+  'anthropic',
+  'anthropic-compatible',
+  'deepseek',
+  'minimax',
+  'xiaomi',
+  'xiaomi-token-plan',
+  'qwen-anthropic',
+  'qwen-token-plan',
+  'zhipu-coding',
+  'zhipu-coding-team',
+  'ark-coding-plan',
+  'kimi-api',
+  'kimi-coding',
+]
+
+/** 判定 provider 是否走 Anthropic Messages 协议（M5：路由保存校验/解析复核/下拉过滤）。 */
+export function isAnthropicProtocolProvider(provider: ProviderType): boolean {
+  return ANTHROPIC_PROTOCOL_PROVIDERS.includes(provider)
+}
+
+// =========================================================================
+// 4.2 文档类别与类别路由（M4 类别→模型 / M5 类别→渠道）
+// =========================================================================
+
+/**
+ * 文档类别（M4）：代码里写类别不写模型名，由 main/model-resolution 单点解析到模型。
+ * M5 起迁移至 shared（renderer 设置页与 main 路由共用）；main 侧 re-export 保持兼容。
+ * 注：gwt 不参与渠道路由（走浏览器探针/静态启发式，从不解析 LLM 渠道）。
+ */
+export type DocumentCategory = 'guide' | 'prd' | 'sketch' | 'mvp' | 'gwt' | 'judge' | 'summary'
+
+/** M5 类别路由条目（~/.proma/category-routing.json，snake_case）。 */
+export interface CategoryRoutingEntry {
+  /** 该类别固定渠道；缺省 = 全局自动 */
+  channel_id?: string
+  /** 基础设施故障时的备用渠道优先顺序；未设置 = 沿用 T9「任意 enabled 渠道」 */
+  fallback_channel_ids?: string[]
+}
+
+export type CategoryRoutingConfig = Partial<Record<DocumentCategory, CategoryRoutingEntry>>
+
+export interface CategoryRoutingFile {
+  version: 1
+  routing: CategoryRoutingConfig
+}
+
+/** 设置页「职责分工」单行视图模型（不含明文 key，供 UI 直接渲染）。 */
+export interface CategoryRoutingView {
+  category: DocumentCategory
+  /** 中文职责名（与 M5 设计 §1 映射表逐字一致） */
+  label: string
+  /** 配置值；dangling 态仍保留原配置值用于展示 */
+  channel_id?: string
+  /** 配置的备用渠道顺序；dangling 态保留原配置值供展示/编辑 */
+  fallback_channel_ids?: string[]
+  /** 当前解析到的渠道名（routed=路由渠道；auto/dangling=生效的全局默认渠道） */
+  channel_name?: string
+  /** M4 在该渠道解析到的模型名（预览；auto/dangling 为全局默认渠道解析结果） */
+  model_name?: string
+  /** routed=命中路由；auto=全局默认（含禁用渠道生效期）；dangling=已删除渠道 */
+  effective: 'routed' | 'auto' | 'dangling'
+}
+
+export interface CategoryRoutingListResult {
+  version: number
+  views: CategoryRoutingView[]
+}
+
+export interface CategoryRoutingUpdateEnvelope extends RequestEnvelope {
+  routing: CategoryRoutingConfig
 }
 
 // =========================================================================
@@ -947,6 +1027,10 @@ export type ElectronAPI = {
     testDirect(input: ChannelTestDirectEnvelope): Promise<ApiResult<ChannelTestResult>>
     fetchModels(input: FetchModelsEnvelope): Promise<ApiResult<FetchModelsResult>>
     delete(input: ChannelDeleteEnvelope): Promise<ApiResult<ChannelDeleteResult>>
+    /** M5：列出「职责分工」视图模型（类别→渠道路由 + 模型预览）。 */
+    categoryRoutingList(input: RequestEnvelope): Promise<ApiResult<CategoryRoutingListResult>>
+    /** M5：全量覆盖类别路由表（缺省类别 = 未配置）。 */
+    categoryRoutingUpdate(input: CategoryRoutingUpdateEnvelope): Promise<ApiResult<CategoryRoutingListResult>>
   }
 }
 

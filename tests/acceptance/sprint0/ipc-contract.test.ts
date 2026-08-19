@@ -52,6 +52,8 @@ const expectedChannels = {
   CHANNEL_TEST_DIRECT: 'channel:test-direct',
   CHANNEL_FETCH_MODELS: 'channel:fetch-models',
   CHANNEL_DELETE: 'channel:delete',
+  CATEGORY_ROUTING_LIST: 'category-routing:list',
+  CATEGORY_ROUTING_UPDATE: 'category-routing:update',
 } as const
 
 describe('Sprint 0 IPC contract acceptance', () => {

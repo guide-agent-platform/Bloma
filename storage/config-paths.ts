@@ -12,6 +12,8 @@ export function ensureDir(path: string): string {
 }
 
 export function getChannelsPath(): string { return join(getPromaHome(), 'channels.json') }
+/** M5 类别路由表（snake_case；与 Proma 共用的 channels.json 分开存放）。 */
+export function getCategoryRoutingPath(): string { return join(getPromaHome(), 'category-routing.json') }
 export function getProjectsIndexPath(): string { return join(getPromaHome(), 'projects.json') }
 export function getAgentSessionsIndexPath(): string { return join(getPromaHome(), 'agent-sessions.json') }
 export function getSettingsPath(): string { return join(getPromaHome(), 'settings.json') }

@@ -10,6 +10,7 @@ import type {
   FetchModelsResult,
   ProviderType,
 } from '../shared/types'
+import { ANTHROPIC_PROTOCOL_PROVIDERS, isAnthropicProtocolProvider } from '../shared/types'
 import { getChannelsPath } from '../storage/config-paths'
 import { readJsonFile, writeJsonFile } from '../storage/json-store'
 import { decryptSecret, encryptSecret } from './safe-storage'
@@ -58,25 +59,15 @@ const SDK_ENV_ALLOWLIST = [
 ] as const
 
 /**
- * 走 Anthropic Messages 协议（x-api-key 认证）的 provider。
+ * 走 Anthropic Messages 协议（x-api-key 认证）的 provider 集合（消费 shared 的
+ * ANTHROPIC_PROTOCOL_PROVIDERS 单一真相源；renderer 渠道下拉与 M5 路由校验共用）。
  * Bloma 运行时消费点（anthropicMessagesQuery）只拼接 `${baseUrl}/v1/messages`，
  * 因此这些 provider 的 base_url 需规范化为协议根（剥掉 /v1、/v1/messages 等后缀）。
  */
-const ANTHROPIC_PROTOCOL_PROVIDERS = new Set<ProviderType>([
-  'anthropic',
-  'anthropic-compatible',
-  'deepseek',
-  'minimax',
-  'xiaomi',
-  'xiaomi-token-plan',
-  'qwen-anthropic',
-  'qwen-token-plan',
-  'zhipu-coding',
-  'zhipu-coding-team',
-  'ark-coding-plan',
-  'kimi-api',
-  'kimi-coding',
-])
+const ANTHROPIC_PROTOCOL_SET = new Set<ProviderType>(ANTHROPIC_PROTOCOL_PROVIDERS)
+
+// M5：从 shared re-export（保持 §5#10「channel-manager 导出判定」的既有消费口径）
+export { isAnthropicProtocolProvider }
 
 /**
  * 由解密后的渠道密钥构建 SDK 子进程环境（ANTHROPIC_AUTH_TOKEN/BASE_URL/MODEL + 白名单宿主环境）。
@@ -97,7 +88,7 @@ export function buildSdkEnv(
     if (value !== undefined) env[key] = value
   }
   const effectiveBaseUrl =
-    providerType && ANTHROPIC_PROTOCOL_PROVIDERS.has(providerType)
+    providerType && ANTHROPIC_PROTOCOL_SET.has(providerType)
       ? normalizeAnthropicBaseUrlForSdk(baseUrl)
       : baseUrl
   env.ANTHROPIC_AUTH_TOKEN = apiKey
@@ -307,7 +298,7 @@ export async function testChannelDirect(input: ChannelDirectTestInput): Promise<
 }
 
 function isAnthropicProtocol(provider: ProviderType): boolean {
-  return ANTHROPIC_PROTOCOL_PROVIDERS.has(provider)
+  return isAnthropicProtocolProvider(provider)
 }
 
 function isOpenAIProtocol(provider: ProviderType): boolean {
