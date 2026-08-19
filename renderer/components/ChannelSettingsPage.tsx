@@ -906,6 +906,26 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
     [setPermissionModeAtom],
   )
 
+  // ==================== 滚轮命中下拉时转发页面滚动 ====================
+  //
+  // Chromium 里 wheel 事件落在 <select> 上会被其吞掉：关闭态的 select 自身无可滚
+  // 内容、也不把滚动让给页面。设置页每行职责的渠道下拉占据行内近半宽，配置模型
+  // 时光标正停在下拉上，滚轮全被吞 → 页面滚不动（「列表无法滚动，只能显示前三个」）。
+  // 原生下拉展开时事件走弹层不经过页面，此处只救关闭态：preventDefault 后把
+  // deltaY 手动转发给页面滚动（deltaMode 为行时按每行约 33px 归一化）。
+  useEffect(() => {
+    const forwardWheelFromSelect = (event: WheelEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target?.tagName !== 'SELECT') return
+      event.preventDefault()
+      const delta =
+        event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * 33 : event.deltaY
+      window.scrollBy({ top: delta })
+    }
+    document.addEventListener('wheel', forwardWheelFromSelect, { passive: false, capture: true })
+    return () => document.removeEventListener('wheel', forwardWheelFromSelect, { capture: true })
+  }, [])
+
   // ==================== 加载渠道列表 ====================
 
   useEffect(() => {
