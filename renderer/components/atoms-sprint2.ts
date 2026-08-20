@@ -14,7 +14,7 @@
  */
 
 import { atom } from 'jotai'
-import type { CategoryRoutingView, Channel, PermissionRequest } from '../../shared/types'
+import type { CategoryRoutingView, Channel, PermissionRequest, PromptSlotId, PromptSlotInfo } from '../../shared/types'
 import { pendingPermissionRequestsAtom } from '../agent-atoms'
 
 // =========================================================================
@@ -74,3 +74,19 @@ export const categoryRoutingViewsAtom = atom<CategoryRoutingView[] | null>(null)
 // 设置页改为 route === 'settings' 路由，不再需要这些全局状态。
 // blocked_for_user_decision 阶段的 UI 决策需求由 MvpStatusBanner 通过
 // agentStreamStateFamily events 中的 stage_changed 事件直接派生。
+
+// =========================================================================
+// 5. 提示词配置状态（设置页「提示词配置」Tab）
+// =========================================================================
+
+/** 提示词槽位列表 */
+export const promptSlotsAtom = atom<PromptSlotInfo[]>([])
+
+/** 提示词槽位列表加载状态 */
+export const promptSlotsLoadingAtom = atom<'idle' | 'loading' | 'loaded' | 'error'>('idle')
+
+/** 当前选中的提示词槽位 id */
+export const promptActiveSlotIdAtom = atom<PromptSlotId | null>(null)
+
+/** 保存/恢复提示词的结果提示 */
+export const promptSaveStatusAtom = atom<{ ok: boolean; message: string } | null>(null)

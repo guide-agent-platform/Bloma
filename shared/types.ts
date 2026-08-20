@@ -59,6 +59,10 @@ export const IPC_CHANNELS = {
   CHANNEL_DELETE: 'channel:delete',
   CATEGORY_ROUTING_LIST: 'category-routing:list',
   CATEGORY_ROUTING_UPDATE: 'category-routing:update',
+  PROMPT_LIST: 'prompt:list',
+  PROMPT_READ: 'prompt:read',
+  PROMPT_SAVE: 'prompt:save',
+  PROMPT_RESET: 'prompt:reset',
 } as const
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
@@ -295,6 +299,56 @@ export interface ChannelDeleteEnvelope extends RequestEnvelope {
 export interface ChannelDeleteResult {
   deleted: true
   channel_id: string
+}
+
+// =========================================================================
+// 4.2 提示词配置（引擎 system prompt 外置覆盖，界面化配置）
+// 覆盖文件位于 {PROMA_HOME}/prompts/{id}.md，存在即全量替换内置默认（见 main/prompt-config.ts）。
+// =========================================================================
+
+/** 提示词槽位 ID：当前已接线 prd-system，sketch/mvp/guide 为预留槽位（enabled=false）。 */
+export type PromptSlotId = 'prd-system' | 'sketch-system' | 'mvp-system' | 'guide-system'
+
+/** 槽位列表项（设置页左侧列表） */
+export interface PromptSlotInfo {
+  id: PromptSlotId
+  /** 用户可读名称，如「PRD 需求提炼提示词」 */
+  label: string
+  description: string
+  /** 是否已接入 override 机制（false = 预留槽位，暂不可编辑） */
+  enabled: boolean
+  /** 是否存在自定义覆盖文件 */
+  has_override: boolean
+}
+
+/** 槽位详情（设置页编辑器加载当前生效内容） */
+export interface PromptSlotDetail extends PromptSlotInfo {
+  /** 当前生效的提示词全文：有覆盖 = 覆盖内容；无覆盖 = 内置默认；未启用槽位为空串 */
+  content: string
+}
+
+export interface PromptReadInput extends RequestEnvelope {
+  prompt_id: PromptSlotId
+}
+
+export interface PromptSaveInput extends RequestEnvelope {
+  prompt_id: PromptSlotId
+  /** 覆盖文件全文；空白内容拒绝保存（VALIDATION_ERROR） */
+  content: string
+}
+
+export interface PromptResetInput extends RequestEnvelope {
+  prompt_id: PromptSlotId
+}
+
+export interface PromptSaveResult {
+  saved: true
+  prompt_id: PromptSlotId
+}
+
+export interface PromptResetResult {
+  reset: true
+  prompt_id: PromptSlotId
 }
 
 // =========================================================================
@@ -1037,6 +1091,12 @@ export type ElectronAPI = {
     categoryRoutingList(input: RequestEnvelope): Promise<ApiResult<CategoryRoutingListResult>>
     /** M5：全量覆盖类别路由表（缺省类别 = 未配置）。 */
     categoryRoutingUpdate(input: CategoryRoutingUpdateEnvelope): Promise<ApiResult<CategoryRoutingListResult>>
+  }
+  prompts: {
+    list(input: RequestEnvelope): Promise<ApiResult<PromptSlotInfo[]>>
+    read(input: PromptReadInput): Promise<ApiResult<PromptSlotDetail>>
+    save(input: PromptSaveInput): Promise<ApiResult<PromptSaveResult>>
+    reset(input: PromptResetInput): Promise<ApiResult<PromptResetResult>>
   }
 }
 

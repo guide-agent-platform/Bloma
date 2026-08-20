@@ -105,14 +105,6 @@ const IconAlertTriangle: React.FC<{ size?: number }> = ({ size = 24 }) => (
   </svg>
 )
 
-const IconArrowLeft: React.FC<{ size?: number }> = ({ size = 24 }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
-    stroke="currentColor" strokeWidth={2} strokeLinecap="round"
-    strokeLinejoin="round" aria-hidden>
-    <path d="m15 18-6-6 6-6" />
-  </svg>
-)
-
 const IconRefresh: React.FC<{ size?: number }> = ({ size = 24 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
     stroke="currentColor" strokeWidth={2} strokeLinecap="round"
@@ -905,11 +897,6 @@ const CategoryRoutingSection: React.FC<{
 // 主组件
 // =========================================================================
 
-export interface ChannelSettingsPageProps {
-  /** 返回工作区的回调 */
-  onBack?: () => void
-}
-
 // =========================================================================
 // 权限模式三档选项（与 shared/types 的 PromaPermissionMode 对齐）
 // =========================================================================
@@ -920,7 +907,7 @@ const PERMISSION_MODE_OPTIONS: { value: PromaPermissionMode; label: string; desc
   { value: 'allow-all', label: '全部放行', desc: '仅开发 / 演示用' },
 ]
 
-export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack }) => {
+export const ChannelSettingsPage: React.FC = () => {
   const [channels, setChannels] = useAtom(channelsListAtom)
   const [loading, setLoading] = useAtom(channelsLoadingAtom)
   const [testResult, setTestResult] = useAtom(channelTestResultAtom)
@@ -1100,7 +1087,7 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
         padding: 'var(--space-8) var(--space-5)',
       }}
     >
-      {/* ── 头部 ── */}
+      {/* ── 小节标题 ── */}
       <div
         style={{
           display: 'flex',
@@ -1109,33 +1096,6 @@ export const ChannelSettingsPage: React.FC<ChannelSettingsPageProps> = ({ onBack
           marginBottom: 'var(--space-6)',
         }}
       >
-        {onBack && (
-          <button
-            onClick={onBack}
-            aria-label="返回工作区"
-            style={{
-              width: 36,
-              height: 36,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: 'var(--radius-sm)',
-              color: 'var(--color-text-muted)',
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              transition: 'all var(--transition-fast)',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'var(--color-surface-muted)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent'
-            }}
-          >
-            <IconArrowLeft size={20} />
-          </button>
-        )}
         <div>
           <h1
             style={{

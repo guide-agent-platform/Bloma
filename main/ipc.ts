@@ -22,6 +22,9 @@ import type {
   PermissionResponseInput,
   PermissionSetModeInput,
   PointCorrectionInput,
+  PromptReadInput,
+  PromptResetInput,
+  PromptSaveInput,
   ProjectAbandonInput,
   ProjectArchiveInput,
   ProjectCreateInput,
@@ -70,6 +73,7 @@ import {
 import { cleanOrphanSessions, listSessions, loadMessages } from './session-service'
 import { createChannel, deleteChannel, fetchModels, listChannels, testChannel, testChannelDirect, updateChannel } from './channel-manager'
 import { buildCategoryRoutingViews, updateCategoryRouting } from './category-routing'
+import { listPromptSlots, readPromptSlot, resetPromptSlot, savePromptSlot } from './prompt-service'
 import { listDocuments, readDocument, syncDocuments } from './document-engine'
 import { isCircuitBreakSettled } from './recovery-service'
 import {
@@ -676,6 +680,36 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<CategoryRoutingUpdateEnvelope>(payload, ['routing'])
       return updateCategoryRouting(input.routing)
+    })
+  })
+
+  // ==================== 提示词配置（设置页「提示词配置」Tab） ====================
+
+  ipcMain.handle(IPC_CHANNELS.PROMPT_LIST, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      requireFields<RequestEnvelope>(payload, [])
+      return listPromptSlots()
+    })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PROMPT_READ, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<PromptReadInput>(payload, ['prompt_id'])
+      return readPromptSlot(input.prompt_id)
+    })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PROMPT_SAVE, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<PromptSaveInput>(payload, ['prompt_id', 'content'])
+      return savePromptSlot(input.prompt_id, input.content)
+    })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.PROMPT_RESET, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<PromptResetInput>(payload, ['prompt_id'])
+      return resetPromptSlot(input.prompt_id)
     })
   })
 }

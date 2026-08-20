@@ -4,7 +4,7 @@ import { ModeSelectionPage } from './ModeSelectionPage'
 import { WorkspaceShell } from './WorkspaceShell'
 import { ProjectHistoryPage } from './ProjectHistoryPage'
 import { PermissionDialog } from './PermissionDialog'
-import { ChannelSettingsPage } from './ChannelSettingsPage'
+import { SettingsPage } from './SettingsPage'
 import { useUserDecisionCards, toCardSelectionMeta } from './ChatPanel-sprint2'
 import type { CardOption } from './CardOptions'
 import type { PreviewStatus } from './PreviewPanel'
@@ -684,7 +684,7 @@ const AppRoutes: React.FC = () => {
   }
 
   if (route === 'settings') {
-    return <ChannelSettingsPage onBack={() => setRoute('workspace')} />
+    return <SettingsPage onBack={() => setRoute('workspace')} />
   }
 
   // route === 'workspace'

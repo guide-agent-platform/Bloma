@@ -398,9 +398,32 @@ description: Guide zero-code users through natural-language software generation 
 
 ---
 
+## 11.5 提示词外置配置（2026-08-16）
+
+对齐 Proma 工作区配置模式（文件即真相）：引擎 system prompt 支持**外置文件全量覆盖内置默认**，便于不改代码调优提示词。
+
+**路径规则**：`{PROMA_HOME}/prompts/{name}.md`（默认 `~/.proma/prompts/`）。
+
+| 引擎 | 覆盖文件 | 说明 |
+|------|---------|------|
+| PRD 需求分析师（prd-engine-llm） | `prompts/prd-system.md` | 当前唯一接线 |
+
+**覆盖语义**：
+- 文件存在且非空白 → **全量替换**内置默认（不是追加）。
+- 文件不存在/读失败/空白 → 使用内置默认，绝不阻断生成链路。
+- 无缓存：改文件**即时生效**，无需重启应用。
+- 测试环境注入 `PROMA_HOME` 临时目录即可隔离验证（见 `tests/acceptance/sprint2/llm-prd-repair.test.ts` 的 PROMPT-OVERRIDE/DEFAULT 用例）。
+
+**机制代码**：`main/prompt-config.ts`（`loadPromptOverride`）+ `storage/config-paths.ts`（`getPromptOverridePath`）。其他引擎（sketch/mvp/guide）按同名约定可自行接入。
+
+---
+
+---
+
 ## 12. 修订记录
 
 | 版本 | 日期 | 修订内容 |
 |------|------|----------|
 | v1.0 | 2026-07-10 | 首版，定义向导 Agent 角色提示词、角色切换规则、编程/裁判 Prompt 和 software-builder Skill |
 | v1.1 | 2026-07-10 | 按 `proma-core-demo` 补充 Proma core 运行边界：IPC 四层、Agent SDK env、全局监听器、Promise+Map 权限、safeStorage 和 Local-First JSON/JSONL 存储 |
+| v1.2 | 2026-08-16 | PRD 需求分析师提示词增强（positioning 三要素 ≤120 字、acceptance 每功能项 2~4 条含正常+边界、记账本 few-shot、maxTokens 2048→8192）+ 新增 §11.5 提示词外置配置机制（`prompts/prd-system.md` 文件存在即全量覆盖） |

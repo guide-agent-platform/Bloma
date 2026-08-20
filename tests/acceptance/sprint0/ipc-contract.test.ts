@@ -54,6 +54,10 @@ const expectedChannels = {
   CHANNEL_DELETE: 'channel:delete',
   CATEGORY_ROUTING_LIST: 'category-routing:list',
   CATEGORY_ROUTING_UPDATE: 'category-routing:update',
+  PROMPT_LIST: 'prompt:list',
+  PROMPT_READ: 'prompt:read',
+  PROMPT_SAVE: 'prompt:save',
+  PROMPT_RESET: 'prompt:reset',
 } as const
 
 describe('Sprint 0 IPC contract acceptance', () => {

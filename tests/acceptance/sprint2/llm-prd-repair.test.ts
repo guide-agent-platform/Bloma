@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { generatePrdLlm } from '../../../main/prd-engine-llm'
 import { generateMvpLlm } from '../../../main/mvp-engine-llm'
 import { buildPrdBackplane } from '../../../main/document-engine'
-import { getAgentSessionPath } from '../../../storage/config-paths'
+import { getAgentSessionPath, getPromptOverridePath } from '../../../storage/config-paths'
 import { appendJsonLine } from '../../../storage/json-store'
 import { createProject, findProject, recordSketchGenerated } from '../../../main/project-service'
 import type { SDKMessage } from '../../../shared/types'
@@ -126,6 +126,77 @@ describe('Sprint 2 LLM PRD extraction + repair cause analysis', () => {
     expect(backplane).not.toBeNull()
     expect(backplane?.positioning).toBe('记录收入与支出')
     expect(backplane?.acceptance['F-001']).toContain('核心路径可交互')
+  })
+
+  it('[PRD-PROMPT-DEFAULT] 无覆盖文件时使用内置默认 system prompt（含需求分析师角色）', async () => {
+    const projectId = setup('bloma-s2-prd-prompt-default-')
+    appendJsonLine(getAgentSessionPath('s2-session-prompt-default'), {
+      role: 'user',
+      content: [{ type: 'text', text: '做一个记账工具' }],
+      timestamp: Date.now(),
+    })
+
+    let capturedSystem = ''
+    const query: SDKQuery = async function* (_prompt: string, options) {
+      capturedSystem = options.history?.[0]?.content ?? ''
+      yield {
+        type: 'assistant',
+        message: { role: 'assistant', content: [{ type: 'text', text: '{}' }] },
+      }
+      yield { type: 'result', subtype: 'success' }
+    }
+
+    await generatePrdLlm({
+      project_id: projectId,
+      session_id: 's2-session-prompt-default',
+      requirements: [{ id: 'F-001', description: '记录收入与支出' }],
+      query,
+      env: { PATH: 'x' },
+    })
+
+    expect(capturedSystem).toContain('需求分析师')
+    // 提示词增强后应包含质量标准（多条验收要求），防回归退回单行简陋版
+    expect(capturedSystem).toContain('2~4 条')
+  })
+
+  it('[PRD-PROMPT-OVERRIDE] prompts/prd-system.md 存在时全量覆盖内置默认', async () => {
+    const projectId = setup('bloma-s2-prd-prompt-override-')
+    appendJsonLine(getAgentSessionPath('s2-session-prompt-override'), {
+      role: 'user',
+      content: [{ type: 'text', text: '做一个记账工具' }],
+      timestamp: Date.now(),
+    })
+
+    const { writeFileSync, mkdirSync } = require('node:fs')
+    const { dirname } = require('node:path')
+    const overridePath = getPromptOverridePath('prd-system')
+    mkdirSync(dirname(overridePath), { recursive: true })
+    writeFileSync(overridePath, '自定义测试提示词：OVERRIDE-MARKER-12345', 'utf8')
+
+    let capturedSystem = ''
+    const query: SDKQuery = async function* (_prompt: string, options) {
+      capturedSystem = options.history?.[0]?.content ?? ''
+      yield {
+        type: 'assistant',
+        message: { role: 'assistant', content: [{ type: 'text', text: '{}' }] },
+      }
+      yield { type: 'result', subtype: 'success' }
+    }
+
+    try {
+      await generatePrdLlm({
+        project_id: projectId,
+        session_id: 's2-session-prompt-override',
+        requirements: [{ id: 'F-001', description: '记录收入与支出' }],
+        query,
+        env: { PATH: 'x' },
+      })
+
+      expect(capturedSystem).toBe('自定义测试提示词：OVERRIDE-MARKER-12345')
+      expect(capturedSystem).not.toContain('需求分析师')
+    } finally {
+      // 覆盖文件写在 PROMA_HOME 临时目录内，afterEach 会整体清掉，无需额外删除
+    }
   })
 
   it('[REPAIR-LLM] 修复上下文（错误原因）注入生成 prompt，供模型分析修复', async () => {

@@ -42,6 +42,9 @@ import type {
   PermissionResponseInput,
   PermissionSetModeInput,
   PointCorrectionInput,
+  PromptReadInput,
+  PromptResetInput,
+  PromptSaveInput,
   ProjectAbandonInput,
   ProjectArchiveInput,
   ProjectCreateInput,
@@ -173,6 +176,16 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.CATEGORY_ROUTING_LIST, input),
     categoryRoutingUpdate: (input: CategoryRoutingUpdateEnvelope) =>
       ipcRenderer.invoke(IPC_CHANNELS.CATEGORY_ROUTING_UPDATE, input),
+  },
+  prompts: {
+    list: (input: RequestEnvelope) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROMPT_LIST, input),
+    read: (input: PromptReadInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROMPT_READ, input),
+    save: (input: PromptSaveInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROMPT_SAVE, input),
+    reset: (input: PromptResetInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROMPT_RESET, input),
   },
 }
 

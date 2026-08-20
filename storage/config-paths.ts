@@ -19,6 +19,11 @@ export function getAgentSessionsIndexPath(): string { return join(getPromaHome()
 export function getSettingsPath(): string { return join(getPromaHome(), 'settings.json') }
 export function getUserProfilePath(): string { return join(getPromaHome(), 'user-profile.json') }
 
+/** 引擎 system prompt 外置覆盖路径：{PROMA_HOME}/prompts/{name}.md（文件存在即覆盖内置默认）。 */
+export function getPromptOverridePath(name: string): string {
+  return join(getPromaHome(), 'prompts', `${name}.md`)
+}
+
 // 会话历史统一走 agent-sessions（历史遗留的 Conversation 命名已清理，见 data-model §5/§6）
 export function getAgentSessionPath(sessionId: string): string {
   return join(ensureDir(join(getPromaHome(), 'agent-sessions')), `${sessionId}.jsonl`)
