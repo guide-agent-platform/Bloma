@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { describeEffect, describeTrigger, parseBehaviorAssertion } from '../../main/behavior-assertions'
-import { planScenarios, scenarioName } from '../../main/gwt-runner'
+import { planScenarios, scenarioName, setBrowserGwtDisabledForTests } from '../../main/gwt-runner'
 import { runGwtScenarios } from '../../main/gwt-service'
 import { runJudge } from '../../main/judge-engine'
 import { syncDocuments } from '../../main/document-engine'
@@ -176,9 +176,12 @@ describe('GWT 静态兜底 per-assertion（无浏览器环境）', () => {
 
   afterEach(() => {
     process.env.PROMA_HOME = originalPromaHome
+    // 本 describe 验证静态兜底路径：固定禁用浏览器探针（模拟 chromium 不可用）
+    setBrowserGwtDisabledForTests(false)
   })
 
   it('行为断言词表命中产物 → 通过；未命中 → 待评估不计失败', async () => {
+    setBrowserGwtDisabledForTests(true)
     const home = mkdtempSync(join(tmpdir(), 'proma-gwt-static-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })

@@ -22,6 +22,16 @@ import { parseBehaviorAssertion, describeEffect, type AssertionPlan } from './be
 
 let browserAvailable: boolean | undefined
 
+/**
+ * 测试 seam：单测固定走 gwt-service 的静态兜底路径（模拟 chromium 不可用）。
+ * 这些用例的 mock 产物只喂静态词表、无真实交互元素，真探针会误判失败；
+ * 与 sandbox 的 setSandboxRuntimeForTests 同一模式。
+ */
+let disabledForTests = false
+export function setBrowserGwtDisabledForTests(disabled: boolean): void {
+  disabledForTests = disabled
+}
+
 /** 单条断言的执行计划（含所属功能项，供场景命名与裁判对账）。 */
 interface ScenarioPlan {
   item: SketchRequirement
@@ -30,6 +40,7 @@ interface ScenarioPlan {
 }
 
 export async function runBrowserGwt(input: RunGwtInput): Promise<GwtTestResult | null> {
+  if (disabledForTests) return null
   if (browserAvailable === false) return null
   if (!input.preview_url) return null
 

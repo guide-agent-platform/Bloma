@@ -10,6 +10,7 @@ import {
 } from '../../main/programming-orchestrator'
 import { syncDocuments } from '../../main/document-engine'
 import { createProject, findProject, recordSketchGenerated } from '../../main/project-service'
+import { setBrowserGwtDisabledForTests } from '../../main/gwt-runner'
 
 describe('Post-MVP testing flow (A2-09 state machine)', () => {
   const originalPromaHome = process.env.PROMA_HOME
@@ -17,9 +18,12 @@ describe('Post-MVP testing flow (A2-09 state machine)', () => {
   afterEach(() => {
     process.env.PROMA_HOME = originalPromaHome
     setProgrammingEventPublisher(() => undefined)
+    setBrowserGwtDisabledForTests(false)
   })
 
   it('reaches judge_review when all GWT scenarios pass on the first run', async () => {
+    // mock 产物只喂静态词表（无真实交互元素），固定走静态兜底（模拟 chromium 不可用）
+    setBrowserGwtDisabledForTests(true)
     const home = mkdtempSync(join(tmpdir(), 'proma-flow-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
@@ -57,6 +61,8 @@ describe('Post-MVP testing flow (A2-09 state machine)', () => {
   })
 
   it('auto-repairs test failures (max 3), then reaches judge_review once the preview recovers', async () => {
+    // 同上：修复验证走静态兜底（「预览逐步恢复」的时序由静态 fetch 计数驱动）
+    setBrowserGwtDisabledForTests(true)
     const home = mkdtempSync(join(tmpdir(), 'proma-flow-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })

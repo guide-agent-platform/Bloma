@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { readTestReport, runGwtScenarios, writeTestReport } from '../../main/gwt-service'
+import { setBrowserGwtDisabledForTests } from '../../main/gwt-runner'
 import { createProject, recordSketchGenerated } from '../../main/project-service'
 import { getDocumentsDir } from '../../storage/config-paths'
 
@@ -13,9 +14,12 @@ describe('GWT service (A2-07)', () => {
 
   afterEach(() => {
     process.env.PROMA_HOME = originalPromaHome
+    setBrowserGwtDisabledForTests(false)
   })
 
   it('marks scenarios passed when the preview serves every P0 feature entry', async () => {
+    // mock 产物只喂静态词表（无真实交互元素），固定走静态兜底（模拟 chromium 不可用）
+    setBrowserGwtDisabledForTests(true)
     const home = mkdtempSync(join(tmpdir(), 'proma-gwt-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
