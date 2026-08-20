@@ -8,6 +8,7 @@ import { DocumentPanel } from './DocumentPanel'
 import type { CardOption } from './CardOptions'
 import type { PreviewStatus } from './PreviewPanel'
 import type { Snapshot } from './atoms'
+import type { DomCollectContextResult } from '../../shared/types'
 
 export interface WorkspaceShellProps {
   /* === ChatPanel props === */
@@ -32,7 +33,9 @@ export interface WorkspaceShellProps {
   onRefreshPreview?: () => void
   onToggleFullscreen?: () => void
   onScreenshot?: () => void
-  onCorrectionSubmit?: (payload: { position: { x: number; y: number }; userNote: string; fallbackMode: boolean }) => void
+  onCorrectionSubmit?: (payload: { position: { x: number; y: number }; userNote: string; fallbackMode: boolean; domContext?: DomCollectContextResult }) => void
+  /** 点击预览元素时向主进程收集 DOM 上下文（高亮被选区域，R-CORR-01） */
+  onCollectDomContext?: (click: { x: number; y: number }) => Promise<DomCollectContextResult | undefined>
   /** 确认草图 → 生成完整功能（问题 A / P0-1） */
   onConfirmSketch?: () => void
   confirming?: boolean
@@ -121,6 +124,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
           onToggleFullscreen={props.onToggleFullscreen}
           onScreenshot={props.onScreenshot}
           onCorrectionSubmit={props.onCorrectionSubmit}
+          onCollectDomContext={props.onCollectDomContext}
           onConfirmSketch={props.onConfirmSketch}
           confirming={props.confirming}
           onPreviewError={props.onPreviewError}

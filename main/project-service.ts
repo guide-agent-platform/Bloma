@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync 
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import type {
   ConfirmSketchInput,
+  CorrectionContext,
   PointCorrectionInput,
   Project,
   ProjectAbandonInput,
@@ -83,8 +84,57 @@ export function confirmSketch(input: ConfirmSketchInput): Project {
 export function submitCorrection(input: PointCorrectionInput): RevisionAccepted {
   const taskId = randomUUID()
   const project = findProject(input.project_id)
-  appendProjectEvent(project, 'point_correction', { ...input, task_id: taskId })
-  return { accepted: true, task_id: taskId }
+  // R-CORR-07 / S3-CORRECT-004：同一区域连续两次被纠错后，向导 Agent 必须主动追问，
+  // 不再盲目自动修改。这里按区域键统计连续纠错次数（本次之前的 prior_count），
+  // 落盘 repeat_count 供埋点与事后追溯（research-plan §5 point_correction.repeat_count）。
+  const repeat = countConsecutiveCorrections(input.project_id, correctionRegionKey(input.context))
+  appendProjectEvent(project, 'point_correction', { ...input, task_id: taskId, repeat_count: repeat.repeat_count })
+  return {
+    accepted: true,
+    task_id: taskId,
+    repeat_count: repeat.repeat_count,
+    prior_count: repeat.prior_count,
+    should_follow_up: repeat.should_follow_up,
+  }
+}
+
+/**
+ * 点选纠错的「区域」键：优先用 DOM selector（精确命中），fallback 时退化为
+ * 四舍五入的包围盒坐标（同区域近似命中）。context 缺失返回 undefined（无法追踪重复）。
+ */
+export function correctionRegionKey(context?: CorrectionContext): string | undefined {
+  if (!context) return undefined
+  if (context.element_selector) return `selector:${context.element_selector}`
+  const rect = context.bounding_rect
+  if (!rect) return undefined
+  return `rect:${Math.round(rect.x)},${Math.round(rect.y)},${Math.round(rect.width)},${Math.round(rect.height)}`
+}
+
+/**
+ * 统计「本次提交之前」同一区域被连续纠错的次数（从最新事件向前回溯，遇不同区域即止）。
+ * 返回 repeat_count（含本次）= prior_count + 1；prior_count ≥ 2 时 should_follow_up 为 true
+ * （对齐 S3-CORRECT-004：连续两次已纠错 → 第三次点击主动追问，不再盲目自动修改）。
+ */
+function countConsecutiveCorrections(
+  projectId: string,
+  regionKey: string | undefined,
+): { repeat_count: number; prior_count: number; should_follow_up: boolean } {
+  if (!regionKey) return { repeat_count: 1, prior_count: 0, should_follow_up: false }
+  const path = getProjectEventsPath(WORKSPACE_SLUG, projectId)
+  if (!existsSync(path)) return { repeat_count: 1, prior_count: 0, should_follow_up: false }
+  let priorCount = 0
+  const lines = readFileSync(path, 'utf8').split('\n').filter((line) => line.trim())
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    try {
+      const event = JSON.parse(lines[index]) as { type?: string; payload?: { context?: CorrectionContext } }
+      if (event.type !== 'point_correction') continue
+      if (correctionRegionKey(event.payload?.context) !== regionKey) break
+      priorCount += 1
+    } catch {
+      // 跳过损坏行
+    }
+  }
+  return { repeat_count: priorCount + 1, prior_count: priorCount, should_follow_up: priorCount >= 2 }
 }
 
 export function upgradeProject(input: ProjectUpgradeInput): Project {

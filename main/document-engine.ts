@@ -145,6 +145,25 @@ export function listDocuments(projectId: string): DocumentRef[] {
 }
 
 /**
+ * A3 安全扫描报告写盘 + 清单登记（幂等，按 path 去重）。
+ * markdown 内容由 security-scan.ts 渲染，这里只负责落盘与清单登记，使文档面板
+ * （document:list）能看到并读取 security-scan.md。
+ */
+export function writeSecurityScanDocument(projectId: string, markdown: string): void {
+  const project = findProject(projectId)
+  const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  const path = join(dir, 'security-scan.md')
+  writeFileSync(path, markdown, 'utf8')
+  const previous = readManifest(dir)
+  if (previous.some((entry) => entry.path === path)) return
+  writeManifest(dir, [
+    ...previous,
+    { document_id: 'security-scan', path, type: 'test_report', checkpoint: 'security_scan', status: 'synced' },
+  ])
+}
+
+/**
  * 把 decision-log 直写的 decisions.md 登记进文档清单（幂等，按 path 去重），
  * 使文档面板（document:list）能看到并读取它。syncDocuments 重建清单时
  * decisions.md 不与其产出路径重叠，条目会作为 untouched 一直保留。

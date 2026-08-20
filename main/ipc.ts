@@ -319,6 +319,44 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
       const input = requireFields<PointCorrectionInput>(payload, ['project_id', 'session_id', 'mode'])
       const result = submitCorrection(input)
 
+      // S3-CORRECT-006 / research-plan §5：point_correction 埋点（含 repeat_count / fallback_mode）。
+      trackAnalytics({
+        request_id: input.request_id,
+        event: {
+          event_type: 'point_correction',
+          project_id: input.project_id,
+          session_id: input.session_id,
+          payload: {
+            target_type: input.context?.element_selector ? 'element' : 'region',
+            fallback_mode: input.context?.fallback_mode ?? false,
+            repeat_count: result.repeat_count ?? 1,
+            mode: input.mode,
+          },
+          privacy_level: 'research_safe',
+        },
+      })
+
+      // R-CORR-07 / S3-CORRECT-004：同一区域已连续两次纠错 → 向导 Agent 主动追问，
+      // 不再盲目自动修改（跳过再生成），让用户更具体地描述期望（文案不含技术术语）。
+      if (result.should_follow_up) {
+        const followUp =
+          '我注意到这里你已经连续改过两次了，怕又猜错。能再具体一点吗？比如想要改成什么内容、放在哪个位置，还是换个样子？'
+        appendJsonLine(getAgentSessionPath(input.session_id), {
+          role: 'assistant',
+          content: [{ type: 'text', text: followUp }],
+          timestamp: Date.now(),
+        })
+        mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, {
+          event_id: randomUUID(),
+          session_id: input.session_id,
+          project_id: input.project_id,
+          type: 'message_delta',
+          payload: { text: followUp },
+          created_at: new Date().toISOString(),
+        })
+        return result
+      }
+
       // 点选纠错 → 重新生成（Sprint 3 纠错主线接通）：落盘后触发带新需求的 MVP 重新生成。
       // 只有带明确诉求（user_note / 点选文本）时才重新生成；纯「猜」模式（无文案）保持只落盘。
       const prompt = extractCorrectionPrompt(input)
@@ -378,13 +416,24 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<ProjectUpgradeInput>(payload, ['project_id', 'session_id'])
       // 切换模式前先创建 upgrade 快照，保留升级前的可回滚状态
-      await createSnapshot({
+      const snapshot = await createSnapshot({
         request_id: input.request_id,
         project_id: input.project_id,
         kind: 'upgrade',
         summary: '升级为长期迭代模式前的快照',
         include_documents: true,
         health_status: 'healthy',
+      })
+      // research-plan §5：mode_upgraded 埋点（from_mode → to_mode + 快照 id）。
+      trackAnalytics({
+        request_id: input.request_id,
+        event: {
+          event_type: 'mode_upgraded',
+          project_id: input.project_id,
+          session_id: input.session_id,
+          payload: { from_mode: 'quick', to_mode: 'longterm', snapshot_id: snapshot.snapshot_id },
+          privacy_level: 'research_safe',
+        },
       })
       return upgradeProject(input)
     })
@@ -475,7 +524,26 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
         getPermissionMode(),
         input.project_id,
       )
-      return rollbackSnapshot(input)
+      const result = await rollbackSnapshot(input)
+      // research-plan §5：user_undo 埋点（用户主动回滚使用率）。熔断/升级失败回滚走
+      // self_repair_triggered / decision-log，不算用户主动撤销。
+      if (input.reason === 'user_undo') {
+        trackAnalytics({
+          request_id: input.request_id,
+          event: {
+            event_type: 'user_undo',
+            project_id: input.project_id,
+            session_id: resolvePermissionSession(input.project_id),
+            payload: {
+              snapshot_id: input.snapshot_id,
+              reason: input.reason,
+              stage: findProject(input.project_id).current_stage,
+            },
+            privacy_level: 'research_safe',
+          },
+        })
+      }
+      return result
     })
   })
 

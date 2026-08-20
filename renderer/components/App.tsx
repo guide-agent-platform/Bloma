@@ -362,26 +362,51 @@ const AppRoutes: React.FC = () => {
 
   // ==================== 点选纠错 ====================
 
-  const handleCorrectionSubmit = useCallback(async (payload: { position: { x: number; y: number }; userNote: string; fallbackMode: boolean }) => {
+  /** U8/R-CORR-01：点击预览元素时向主进程收集该元素的 DOM 上下文（用于高亮被选区域） */
+  const handleCollectDomContext = useCallback(async (click: { x: number; y: number }) => {
     const api = window.electronAPI
-    if (!api?.project?.submitCorrection) return
-
     const projectId = currentProject?.project_id ?? projectList[0]?.project_id ?? ''
-
-    // U8：点选纠错前先向主进程收集点击处的 DOM 上下文（element_selector/text_content/真实包围盒）。
-    // 渲染进程读不到跨域预览 iframe 的 DOM，改由主进程通过 subframe.executeJavaScript 收集；
-    // 收集失败则回退纯坐标模式（bounding_rect width/height 0、fallback_mode true）。
-    let domContext: DomCollectContextResult | undefined
     try {
       const dom = await api?.dom?.collectContext?.({
         request_id: crypto.randomUUID(),
         project_id: projectId,
         session_id: sessionId,
-        click: { x: payload.position.x, y: payload.position.y },
+        click,
       })
-      if (dom?.ok && dom.data && !dom.data.fallback_mode) domContext = dom.data
+      if (dom?.ok && dom.data) return dom.data
     } catch {
-      // 收集异常不阻断纠错提交，回退纯坐标
+      // 收集异常返回 undefined，UI 回退红点标记
+    }
+    return undefined
+  }, [sessionId, currentProject, projectList])
+
+  const handleCorrectionSubmit = useCallback(async (payload: {
+    position: { x: number; y: number }
+    userNote: string
+    fallbackMode: boolean
+    domContext?: DomCollectContextResult
+  }) => {
+    const api = window.electronAPI
+    if (!api?.project?.submitCorrection) return
+
+    const projectId = currentProject?.project_id ?? projectList[0]?.project_id ?? ''
+
+    // U8：优先使用点击时已收集的 DOM 上下文（PreviewPanel 点击即收集用于高亮）；缺失时提交前兜底收集一次。
+    // 渲染进程读不到跨域预览 iframe 的 DOM，改由主进程通过 subframe.executeJavaScript 收集；
+    // 收集失败则回退纯坐标模式（bounding_rect width/height 0、fallback_mode true）。
+    let domContext: DomCollectContextResult | undefined = payload.domContext
+    if (!domContext) {
+      try {
+        const dom = await api?.dom?.collectContext?.({
+          request_id: crypto.randomUUID(),
+          project_id: projectId,
+          session_id: sessionId,
+          click: { x: payload.position.x, y: payload.position.y },
+        })
+        if (dom?.ok && dom.data && !dom.data.fallback_mode) domContext = dom.data
+      } catch {
+        // 收集异常不阻断纠错提交，回退纯坐标
+      }
     }
 
     // 真实链路：记录点选纠错（后端 appendProjectEvent + analytics point_correction）
@@ -681,6 +706,7 @@ const AppRoutes: React.FC = () => {
         confirming={confirmingSketch}
         onMarkComplete={window.electronAPI?.project?.finalize ? handleMarkComplete : undefined}
         onCorrectionSubmit={handleCorrectionSubmit}
+        onCollectDomContext={handleCollectDomContext}
         onRollback={handleRollback}
         onContinueWaiting={handleContinueWaiting}
         onViewPartial={handleViewPartial}

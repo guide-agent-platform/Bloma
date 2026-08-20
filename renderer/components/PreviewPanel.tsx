@@ -2,6 +2,7 @@ import React from 'react'
 import { useAtomValue } from 'jotai'
 import { RotateCw, Maximize2, Minimize2, Camera, LayoutTemplate, AlertTriangle } from './icons'
 import { hasActiveStreamAtom, workflowStageAtom, globalUserErrorAtom } from './atoms'
+import type { DomCollectContextResult } from '../../shared/types'
 
 export type PreviewStatus = 'empty' | 'loading' | 'running' | 'error' | 'timeout'
 
@@ -11,6 +12,8 @@ export interface CorrectionPayload {
   position: { x: number; y: number }
   userNote: string
   fallbackMode: boolean
+  /** 点击时已收集的 DOM 上下文（真实包围盒 + selector/text），供后端复用、避免二次收集 */
+  domContext?: DomCollectContextResult
 }
 
 export interface PreviewPanelProps {
@@ -23,6 +26,8 @@ export interface PreviewPanelProps {
   onScreenshot?: () => void
   isFullscreen?: boolean
   onCorrectionSubmit?: (payload: CorrectionPayload) => void
+  /** 点击预览元素时向主进程收集该元素的 DOM 上下文（用于高亮被选区域，R-CORR-01） */
+  onCollectDomContext?: (click: { x: number; y: number }) => Promise<DomCollectContextResult | undefined>
   /** 草图已就绪时的「确认草图 → 生成完整功能」回调（问题 A / P0-1） */
   onConfirmSketch?: () => void
   /** 正在生成 MVP（禁用确认按钮，避免重复提交） */
@@ -49,6 +54,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
   onScreenshot,
   isFullscreen = false,
   onCorrectionSubmit,
+  onCollectDomContext,
   onConfirmSketch,
   confirming = false,
   onPreviewError,
@@ -62,6 +68,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
   const [correctionMode, setCorrectionMode] = React.useState(false)
   const [correctionPos, setCorrectionPos] = React.useState({ x: 0, y: 0 })
   const [correctionNote, setCorrectionNote] = React.useState('')
+  const [correctionDomContext, setCorrectionDomContext] = React.useState<DomCollectContextResult | null>(null)
   const iframeRef = React.useRef<HTMLIFrameElement>(null)
 
   const effectiveStatus: PreviewStatus =
@@ -248,9 +255,17 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
                   const stage = e.currentTarget.parentElement
                   if (!stage) return
                   const rect = stage.getBoundingClientRect()
-                  setCorrectionPos({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+                  const pos = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+                  setCorrectionPos(pos)
                   setCorrectionNote('')
+                  setCorrectionDomContext(null)
                   setCorrectionActive(true)
+                  // R-CORR-01：点击即收集 DOM 上下文用于高亮被选区域；异步回填，失败保持红点回退
+                  if (onCollectDomContext) {
+                    void onCollectDomContext(pos).then((ctx) => {
+                      if (ctx) setCorrectionDomContext(ctx)
+                    })
+                  }
                 }}
               />
             )}
@@ -263,14 +278,25 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
         {correctionActive && onCorrectionSubmit && (
           <CorrectionOverlay
             position={correctionPos}
+            domContext={correctionDomContext ?? undefined}
             note={correctionNote}
             onNoteChange={setCorrectionNote}
             onSubmit={() => {
-              onCorrectionSubmit({ position: correctionPos, userNote: correctionNote.trim(), fallbackMode: true })
+              onCorrectionSubmit({
+                position: correctionPos,
+                userNote: correctionNote.trim(),
+                fallbackMode: correctionDomContext ? correctionDomContext.fallback_mode : true,
+                domContext: correctionDomContext ?? undefined,
+              })
               setCorrectionActive(false)
             }}
             onGuess={() => {
-              onCorrectionSubmit({ position: correctionPos, userNote: '', fallbackMode: true })
+              onCorrectionSubmit({
+                position: correctionPos,
+                userNote: '',
+                fallbackMode: correctionDomContext ? correctionDomContext.fallback_mode : true,
+                domContext: correctionDomContext ?? undefined,
+              })
               setCorrectionActive(false)
             }}
             onClose={() => setCorrectionActive(false)}
@@ -387,25 +413,42 @@ const TimeoutState: React.FC<{ onContinueWaiting?: () => void }> = ({ onContinue
 
 const CorrectionOverlay: React.FC<{
   position: { x: number; y: number }
+  domContext?: DomCollectContextResult
   note: string
   onNoteChange: (value: string) => void
   onSubmit: () => void
   onGuess: () => void
   onClose: () => void
-}> = ({ position, note, onNoteChange, onSubmit, onGuess, onClose }) => {
+}> = ({ position, domContext, note, onNoteChange, onSubmit, onGuess, onClose }) => {
   const markerSize = 24
   const popoverWidth = 260
   const popoverLeft = Math.max(8, Math.min(position.x - popoverWidth / 2, typeof window !== 'undefined' ? window.innerWidth - popoverWidth - 16 : 260))
   const popoverTop = position.y + 36 > (typeof window !== 'undefined' ? window.innerHeight - 190 : 380) ? position.y - 160 : position.y + 22
 
+  // R-CORR-01：命中真实元素（bounding_rect 有效）则高亮该区域；否则回退红点标记
+  const region = domContext && !domContext.fallback_mode
+    && domContext.bounding_rect.width > 0 && domContext.bounding_rect.height > 0
+    ? domContext.bounding_rect
+    : undefined
+
   return (
     <>
-      <div data-ai-id="point-correction-popover" style={{
-        position: 'absolute', left: position.x - markerSize / 2, top: position.y - markerSize / 2,
-        width: markerSize, height: markerSize, borderRadius: '50%',
-        border: '2px solid var(--color-danger)', background: 'rgba(220, 38, 38, 0.14)',
-        animation: 'pulse-ring 1.5s ease-in-out infinite', pointerEvents: 'none', zIndex: 10,
-      }} />
+      {region && (
+        <div data-ai-id="selected-preview-element-highlight" style={{
+          position: 'absolute', left: region.x, top: region.y, width: region.width, height: region.height,
+          border: '2px solid var(--color-danger)', background: 'rgba(220, 38, 38, 0.10)',
+          borderRadius: 2, pointerEvents: 'none', zIndex: 10,
+          boxShadow: '0 0 0 4px rgba(220, 38, 38, 0.12)',
+        }} />
+      )}
+      {!region && (
+        <div data-ai-id="point-correction-popover" style={{
+          position: 'absolute', left: position.x - markerSize / 2, top: position.y - markerSize / 2,
+          width: markerSize, height: markerSize, borderRadius: '50%',
+          border: '2px solid var(--color-danger)', background: 'rgba(220, 38, 38, 0.14)',
+          animation: 'pulse-ring 1.5s ease-in-out infinite', pointerEvents: 'none', zIndex: 10,
+        }} />
+      )}
       <div role="dialog" aria-modal="true" aria-label="点选纠错" style={{
         position: 'absolute', left: popoverLeft, top: popoverTop, width: popoverWidth,
         padding: 'var(--space-3)',

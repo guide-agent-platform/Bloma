@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { AgentEvent, AgentSendMessageInput, MessageContentBlock, Project, ProjectMode, Snapshot, TemplateType } from '../shared/types'
 import { getAgentSessionPath, getDocumentsDir } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
-import { buildPrdBackplane, readPrdBackplane, readUxContractSketch, syncDocuments } from './document-engine'
+import { buildPrdBackplane, readPrdBackplane, readUxContractSketch, syncDocuments, writeSecurityScanDocument } from './document-engine'
 import { createSnapshot, runSandbox, trackAnalytics } from './platform-services'
 import { DEFAULT_MAX_TOKENS, generateMvpLlm, type GenerateMvpLlmResult } from './mvp-engine-llm'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
@@ -17,6 +17,7 @@ import { generatePrdLlm, readConversation } from './prd-engine-llm'
 import { enrichRequirementsLlm, extractUserTexts, mergeEnrichment } from './requirement-enricher'
 import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from './requirement-normalizer'
 import { readTestReport, runGwtScenarios, writeTestReport, type GwtTestResult } from './gwt-service'
+import { renderSecurityScanMarkdown, runSecurityScan } from './security-scan'
 import { applyRepairPatch, REPAIR_CATEGORY_SUMMARY, runRepairCycle, type RepairCategory } from './repair-engine'
 import { runJudge, type JudgeVerdict } from './judge-engine'
 import { assertToolAllowed } from './permission-service'
@@ -42,7 +43,7 @@ export const GENERATION_FAILED_COPY =
 type ProgrammingEventPublisher = (event: AgentEvent) => void
 
 /** 被阻塞的编程操作类型（A2 resume 闭环，落盘到 Project.blocked_action） */
-export type BlockedAction = 'mvp_repair' | 'test_repair' | 'judge_return'
+export type BlockedAction = 'mvp_repair' | 'test_repair' | 'judge_return' | 'security_repair'
 /** 阻塞态让渡后用户回传的决策（A3：消费 metadata.selected_option_id 映射而来） */
 export type BlockedDecision = 'continue' | 'accept' | 'explain'
 
@@ -161,6 +162,10 @@ export async function runSketchTask(input: SketchTaskInput): Promise<SketchTaskR
         mode: input.mode,
         snapshot_id: snapshot.snapshot_id,
         file_count: sketch.files.length,
+        page_count: sketch.files.length,
+        // FIRT（research-plan §4.1）：项目创建 → 首个可交互草图就绪的耗时，
+        // = sketch_generated.created_at - project_created.created_at（本埋点落盘时点即草图就绪时刻）。
+        duration_ms: Date.now() - new Date(findProject(input.project_id).created_at).getTime(),
       },
       privacy_level: 'research_safe',
     },
@@ -929,6 +934,51 @@ export async function runPostMvpTestingFlow(input: GwtTestingInput): Promise<Gwt
     if (cycle.repaired) break
   }
 
+  // 测试通过 → 安全扫描（A3 OWASP，Sprint 3 安全扫描基础）：扫产物 HTML/JS 并落
+  // security-scan.md。高危命中进入 security_error 修复循环（独立计数，不计入普通退回，
+  // S2-JUDGE-007）；修复耗尽则熔断回滚（S2-JUDGE-002）。
+  let security = runSecurityScan({ project_id: input.project_id, root_path: findProject(input.project_id).root_path })
+  writeSecurityScanDocument(input.project_id, renderSecurityScanMarkdown(security))
+  while (!security.passed) {
+    const cycle = await runRepairCycle({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      category: 'security_error',
+      publish: (type, payload) => publish(input, type, payload),
+      query: input.query,
+      channel_id: input.channel_id,
+      signal: input.signal,
+      error: {
+        category: 'security_error',
+        summary: security.issues
+          .filter((issue) => issue.severity === 'high' || issue.severity === 'critical')
+          .map((issue) => `${issue.file}:${issue.line} ${issue.user_visible_summary}`)
+          .join('；'),
+      },
+      verify: async () => {
+        security = runSecurityScan({ project_id: input.project_id, root_path: findProject(input.project_id).root_path })
+        writeSecurityScanDocument(input.project_id, renderSecurityScanMarkdown(security))
+        return { ok: security.passed }
+      },
+    })
+    if (cycle.blocked) {
+      // 熔断回滚（T5）：同 test_repair——先回滚健康快照再让渡；回滚成功由哨兵错误终结本流程
+      const outcome = await circuitBreakRollback({
+        request_id: input.request_id,
+        session_id: input.session_id,
+        project_id: input.project_id,
+        reason: '安全修复循环耗尽（security_repair，高危命中反复未除）',
+        publish: (type, payload) => publish(input, type, payload),
+      })
+      if (outcome.rolled_back) throw new CircuitBreakSettledError()
+      // 安全让渡文案不含技术术语（S2-JUDGE-008）
+      publishBlockedDecision(input, 'security_repair', '检测到的安全隐患反复修不好，需要你来定夺')
+      return { verdict: 'blocked', test_result: testResult }
+    }
+    if (cycle.repaired) break
+  }
+
   // 测试通过 → 进入裁判审查（A2-11）
   updateProject(input.project_id, { current_stage: 'judge_review' })
   publish(input, 'stage_changed', { stage: 'judge_review' })
@@ -1349,6 +1399,22 @@ export async function resumeBlockedFlow(
       request_id: input.request_id,
       session_id: input.session_id,
       project_id: input.project_id,
+    })
+    return
+  }
+
+  if (action === 'security_repair') {
+    updateProject(input.project_id, { security_repair_count: 0 })
+    const previewUrl = await ensureResumePreview(input)
+    // 重新走完整测试 + 安全扫描流程（安全扫描已嵌入 runPostMvpTestingFlow 后半段）
+    await runPostMvpTestingFlow({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+      preview_url: previewUrl,
+      query: input.query,
+      channel_id: input.channel_id,
     })
     return
   }

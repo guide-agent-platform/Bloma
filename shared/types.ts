@@ -633,7 +633,7 @@ export interface Project {
   /** 安全问题独立计数（PRD §10.5）：上限 3 次强制修复，不计入普通退回次数 */
   security_repair_count?: number
   /** 被阻塞的编程操作（A2 resume 闭环）：非阻塞态为 undefined */
-  blocked_action?: 'mvp_repair' | 'test_repair' | 'judge_return'
+  blocked_action?: 'mvp_repair' | 'test_repair' | 'judge_return' | 'security_repair'
   /** 需求确认后已自动命名过（autoNameProject）：此后不再覆盖，保住用户手动改名 */
   auto_named?: boolean
   /** 最近一次草图的生成来源（§4.2 质量门：仅 'llm' 草图可升格 UX 契约） */
@@ -678,6 +678,12 @@ export interface PointCorrectionInput extends RequestEnvelope {
 export interface RevisionAccepted {
   accepted: true
   task_id: string
+  /** 同一区域连续纠错计数（含本次，1-based）；用于 R-CORR-07 重复纠错追问 */
+  repeat_count?: number
+  /** 本次提交前同一区域已被连续纠错的次数；≥2 表示已连续两次纠错过 */
+  prior_count?: number
+  /** 连续两次已纠错（本次为第三次及以上）→ 向导 Agent 应主动追问，不再盲目自动修改 */
+  should_follow_up?: boolean
 }
 
 /**

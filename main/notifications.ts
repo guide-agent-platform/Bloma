@@ -248,6 +248,8 @@ function blockedDecisionBody(action: ProjectBlockedAction | undefined): string {
       return '功能测试反复不过，我停在这里等你选：继续修复 / 接受现状 / 补充说明。'
     case 'judge_return':
       return '质量审查反复不过，我停在这里等你选：继续修复 / 接受现状 / 补充说明。'
+    case 'security_repair':
+      return '检测到的安全隐患反复修不好，我停在这里等你选：继续修复 / 接受现状 / 补充说明。'
     default:
       return '有一个决策还等着你拍板，处理完我就能继续。'
   }
