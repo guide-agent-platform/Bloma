@@ -7,7 +7,7 @@ import { trackAnalytics } from './platform-services'
 import { runSketchTask, setProgrammingEventPublisher } from './programming-orchestrator'
 import { findProject, updateProject } from './project-service'
 import { captureConstraints, extractConstraints } from './constraint-extractor'
-import { readPrimaryIntent } from './session-service'
+import { isAutoDelegationText, readPrimaryIntent } from './session-service'
 import type { SketchRequirement } from './sketch-engine'
 import { isRecord } from './validators'
 
@@ -35,6 +35,9 @@ const GUIDE_SYSTEM_PROMPT = `你是「向导 Agent」，负责把用户的想法
 澄清规则（重要）：
 - questions 是 reply 那个问题的候选答案，不是新问题；用户点任何一个都能直接开工。
 - 选项互斥、具体、贴合用户原话：用「记账本/待办清单/赛道计时赛」这类名词短语。
+- 选项必须是具体成品名词；以「类」结尾的类目词（工具类/游戏类/记录类）视同抽象形容词，禁止输出。
+- 历史中「上轮已向用户出示的选项」是你之前给用户看过的答案：不得重复上一轮问句，新选项必须比上轮更具体或门槛更低。
+- 用户表达没想法/让你定/随便时，直接 generate_sketch（按常见做法出第一版），不得把问题抛回给没有想法的用户。
 - 禁止抽象形容词当选项（「自由」「灵活」「好用」），禁止占位文案（「范围选项」「选项一」），label 不以「？」结尾。
 - questions 2~4 条，最后一条固定为 {"id":"auto","label":"你帮我决定","description":"交给我，按常见做法先出一版"}。
 - 确实无法给出具体选项时才 questions:[]（在 reply 里纯文本追问）。
@@ -169,6 +172,23 @@ function resolveCardAnswer(input: AgentSendMessageInput, primaryIntent?: string)
   }
 }
 
+/**
+ * 自由文本让渡（D1 修复）：打字说「我还没想法/随便/你帮我决定」与点选 auto 卡片语义
+ * 相同，但不带 card_option 元数据——不识别就会落回模型路径被原样重问（2026-08-22
+ * 线上案例）。确定性判定（零模型依赖），出口完全复用卡片 auto 路径；让渡话术由
+ * session-service 单点维护（readPrimaryIntent 的锚点豁免共用同一张表）。
+ */
+function resolveAutoDelegation(input: AgentSendMessageInput, primaryIntent?: string): CardAnswerRoute | undefined {
+  if (!isAutoDelegationText(input.content)) return undefined
+  return {
+    prompt: input.content,
+    requirements: ensurePrimaryIntent(
+      [{ id: 'F-001', description: CARD_ANSWER_REQUIREMENTS.auto }],
+      primaryIntent,
+    ),
+  }
+}
+
 export async function handleGuideMessage(
   input: AgentSendMessageInput,
   publish: GuideEventPublisher,
@@ -234,6 +254,39 @@ export async function handleGuideMessage(
       mode: input.mode,
       prompt: cardAnswer.prompt,
       requirements: cardAnswer.requirements,
+      channel_id: input.channel_id,
+      query: model?.query,
+    })
+    return
+  }
+
+  // 自由文本让渡（D1 修复）：打字版「你帮我决定」——出口与卡片 auto 路径完全一致，
+  // 仅 decision detail 标 source='free_text_auto' 与点选区分（埋点/事后追溯可辨）
+  const autoDelegation = resolveAutoDelegation(input, primaryIntent)
+  if (autoDelegation) {
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'clarification_answer',
+        title: '用户让渡决定权（自由文本）',
+        why: `用户说「${input.content}」，视为交由向导按常见做法生成第一版草图`,
+        detail: {
+          source: 'free_text_auto',
+          requirements: autoDelegation.requirements,
+        },
+      },
+    })
+    const ack = '好的，我来定方向，先按常见做法出一版草图。'
+    persistAssistant?.(ack)
+    publish(makeGuideEvent(input, 'message_delta', { text: ack }))
+    await runSketchTask({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+      prompt: autoDelegation.prompt,
+      requirements: autoDelegation.requirements,
       channel_id: input.channel_id,
       query: model?.query,
     })

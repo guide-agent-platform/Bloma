@@ -130,6 +130,32 @@ export function loadMessages(input: AgentLoadMessagesInput): AgentLoadMessagesRe
   }
 }
 
+/** 自由文本让渡长度上限：超过即视为含实际内容的话（「随便做个游戏」），不做让渡判定。 */
+const AUTO_DELEGATION_MAX_LENGTH = 16
+
+/**
+ * 自由文本让渡话术表（D1 修复）：「我还没想法/随便/你帮我决定」这类输入与点选
+ * 「你帮我决定」卡片语义相同。整句命中才触发——人称前缀与语气词尾归一后全匹配，
+ * 含实际内容的长句（「随便做个游戏」「帮我做个记账的」）不误伤。首版从宽，
+ * 靠线上对话样本迭代（对齐行为断言词表的扩充思路）。
+ */
+const AUTO_DELEGATION_PATTERN =
+  /^(?:还没想(?:法|好)?|没(?:有)?想法|没头绪|不知道(?:做|要)?什么|都(?:可以|行)|随便(?:来|做|弄|你|了)?|你(?:帮我)?决定|你来定|你看着办|听你的|交给你们?|帮我(?:挑|选)(?:一个|一下)?|无所谓)$/
+
+/**
+ * 让渡话术判定：≤16 字且整句命中（人称前缀/语气词已归一）。供两处共用，改表须两侧同步：
+ * - guide-agent-service 自由文本让渡分流（resolveAutoDelegation）
+ * - readPrimaryIntent 主题锚点豁免（让渡话术不承载主题）
+ */
+export function isAutoDelegationText(content: string): boolean {
+  const trimmed = content.trim()
+  if (trimmed.length === 0 || trimmed.length > AUTO_DELEGATION_MAX_LENGTH) return false
+  const normalized = trimmed
+    .replace(/^(?:我|我们|咱们)/, '')
+    .replace(/(?:了|呢|啊|呀|吧|呗|哦|哈)+[。.!！~～\s]*$/, '')
+  return AUTO_DELEGATION_PATTERN.test(normalized)
+}
+
 /**
  * 从会话 JSONL 中提取"主题锚点"：首条非空 user 消息（用户最初想做什么）。
  * 供澄清/纠错路径复用，保证后续需求累积不会丢失最初的主题。

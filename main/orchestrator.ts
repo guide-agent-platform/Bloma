@@ -1003,7 +1003,10 @@ export const HISTORY_WINDOW_TURNS = 10
 
 /**
  * 读取会话 JSONL 中最近 N 轮 user/assistant 对话文本，作为 SDK 多轮历史。
- * 排除内部终态标记（[terminal]）与 system 消息，防止历史污染模型上下文。
+ * 排除内部终态标记（[terminal]）与 system 消息——唯一例外是 [decision-card]
+ * 选项行（D2 修复）：转成模型可读措辞回灌，否则模型看不到自己上轮给过什么
+ * 选项，会原样重问甚至把具体选项退化成抽象类目。其余 system 行
+ * （[decision]/[reconcile]/[channel-switch]）维持过滤，防止历史污染模型上下文。
  */
 function loadConversationHistory(sessionId: string, limit = HISTORY_WINDOW_TURNS): ConversationTurn[] {
   const path = getAgentSessionPath(sessionId)
@@ -1015,6 +1018,16 @@ function loadConversationHistory(sessionId: string, limit = HISTORY_WINDOW_TURNS
     try {
       message = JSON.parse(line) as AgentMessage
     } catch {
+      continue
+    }
+    if (message.role === 'system') {
+      const text = extractText(message.content)
+      if (text.startsWith('[decision-card]')) {
+        turns.push({
+          role: 'system',
+          content: `【上轮已向用户出示的选项】${text.slice('[decision-card]'.length).trim()}`,
+        })
+      }
       continue
     }
     if (message.role !== 'user' && message.role !== 'assistant') continue
@@ -1032,7 +1045,19 @@ function loadConversationHistory(sessionId: string, limit = HISTORY_WINDOW_TURNS
     if (previous && previous.role === 'assistant' && previous.content === turn.content) continue
     filtered.push(turn)
   }
-  return filtered.slice(Math.max(0, filtered.length - limit))
+  // 窗口只按 user/assistant 轮计数：decision-card 回灌行不占窗口名额，跟随相邻轮
+  // 进出窗口——所附着的对话被挤出窗口时一并丢弃，防止孤立的选项行悬空无上下文
+  let start = 0
+  let keptTurns = 0
+  for (let i = filtered.length - 1; i >= 0; i--) {
+    if (filtered[i].role === 'system') continue
+    keptTurns++
+    if (keptTurns > limit) {
+      start = i + 1
+      break
+    }
+  }
+  return filtered.slice(start)
 }
 
 /** 检测「还没好/还在生成」类冗余助手回复（P1：自我强化源，需从历史中过滤）。 */

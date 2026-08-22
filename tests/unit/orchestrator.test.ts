@@ -287,6 +287,88 @@ describe('AgentOrchestrator · A2-14a 真实模型流式 + 多轮历史', () => 
     ])
   })
 
+  it('D2 修复：[decision-card] 选项行回灌 system（转措辞），其余 system 行（[decision]/[terminal]）仍被过滤', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-test-'))
+    process.env.PROMA_HOME = home
+    writeFileSync(
+      getAgentSessionPath('session-card'),
+      [
+        JSON.stringify({ role: 'user', content: [{ type: 'text', text: '你好' }], timestamp: 1 }),
+        JSON.stringify({ role: 'assistant', content: [{ type: 'text', text: '你想做一个什么类型的工具？' }], timestamp: 2 }),
+        JSON.stringify({ role: 'system', content: [{ type: 'text', text: '[decision-card] 待办清单｜记事本｜你帮我决定' }], timestamp: 3 }),
+        JSON.stringify({ role: 'system', content: [{ type: 'text', text: '[decision] {"type":"clarification_card","title":"澄清提问","why":"向用户提问"}' }], timestamp: 4 }),
+        JSON.stringify({ role: 'system', content: [{ type: 'text', text: '[terminal] status=completed' }], timestamp: 5 }),
+      ].join('\n'),
+      'utf8',
+    )
+
+    let requestBody: { messages: Array<{ role: string; content: string }>; system?: string } | undefined
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+      requestBody = JSON.parse(String(init.body)) as typeof requestBody
+      return sseResponse(['event: message_stop\ndata: {"type":"message_stop"}\n\n'])
+    }))
+
+    await runAgent({
+      request_id: 'req-card',
+      session_id: 'session-card',
+      project_id: 'project-card',
+      content: '我还没想法',
+      mode: 'quick',
+      current_stage: 'generating_mvp',
+      channel_id: 'test-channel',
+    })
+
+    // 选项行转成模型可读措辞回灌（模型看不到上轮选项是 D2 原样重问的根因）
+    expect(requestBody?.system).toContain('【上轮已向用户出示的选项】待办清单｜记事本｜你帮我决定')
+    // 其余 system 行维持过滤：[decision] 原始 JSON、[terminal] 终态标记都不进上下文
+    expect(requestBody?.system).not.toContain('[decision]')
+    expect(requestBody?.system).not.toContain('clarification_card')
+    expect(requestBody?.system).not.toContain('[terminal]')
+    // messages 仍只有 user/assistant（system 已被提取到顶层）
+    expect(requestBody?.messages.every((message) => message.role !== 'system')).toBe(true)
+  })
+
+  it('D2 修复：窗口 slice 只按 user/assistant 计数，decision-card 行不占名额、随相邻轮进出窗口', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-test-'))
+    process.env.PROMA_HOME = home
+    // 12 轮对话（超出 HISTORY_WINDOW_TURNS=10）：窗口外的卡 A 不回灌，窗口内的卡 B 回灌
+    const lines: string[] = []
+    for (let i = 1; i <= 12; i++) {
+      lines.push(JSON.stringify({ role: 'user', content: [{ type: 'text', text: `第${i}轮问题` }], timestamp: i * 10 }))
+      lines.push(JSON.stringify({ role: 'assistant', content: [{ type: 'text', text: `第${i}轮回答` }], timestamp: i * 10 + 1 }))
+      if (i === 1) {
+        lines.push(JSON.stringify({ role: 'system', content: [{ type: 'text', text: '[decision-card] 窗口外选项A｜你帮我决定' }], timestamp: 12 }))
+      }
+      if (i === 11) {
+        lines.push(JSON.stringify({ role: 'system', content: [{ type: 'text', text: '[decision-card] 窗口内选项B｜你帮我决定' }], timestamp: 112 }))
+      }
+    }
+    writeFileSync(getAgentSessionPath('session-window'), lines.join('\n'), 'utf8')
+
+    let requestBody: { messages: Array<{ role: string; content: string }>; system?: string } | undefined
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+      requestBody = JSON.parse(String(init.body)) as typeof requestBody
+      return sseResponse(['event: message_stop\ndata: {"type":"message_stop"}\n\n'])
+    }))
+
+    await runAgent({
+      request_id: 'req-window',
+      session_id: 'session-window',
+      project_id: 'project-window',
+      content: '当前问题',
+      mode: 'quick',
+      current_stage: 'generating_mvp',
+      channel_id: 'test-channel',
+    })
+
+    // 窗口外（第 1~2 轮）的卡 A 连同其对话一起被挤出；窗口内的卡 B 跟随保留
+    expect(requestBody?.system).not.toContain('窗口外选项A')
+    expect(requestBody?.system).toContain('【上轮已向用户出示的选项】窗口内选项B｜你帮我决定')
+    // user/assistant 仍限 10 轮 + 当前 1 条；卡片行不挤占窗口名额
+    expect(requestBody?.messages).toHaveLength(11)
+    expect(requestBody?.messages[0]).toEqual({ role: 'user', content: '第8轮问题' })
+  })
+
   it('过滤历史中的「还没好」类冗余助手轮次，降低自我强化', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-test-'))
     process.env.PROMA_HOME = home
