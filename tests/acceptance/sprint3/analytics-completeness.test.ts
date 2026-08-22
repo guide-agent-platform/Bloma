@@ -198,9 +198,13 @@ describe('Sprint 3 analytics completeness audit (T8)', () => {
     expect(events).toContain('user_undo')
   })
 
-  it('[T8-004] 埋点事件完整性审计：所有已定义事件类型均有触发路径或明确阻塞项', () => {
+  it('[T8-004] 埋点事件完整性审计：所有已定义事件类型均有真实断言或明确阻塞项', () => {
     // 本测试为静态审计，确保当新增/删除事件类型时有人维护触发路径与测试覆盖。
     // 事件类型真源来自 shared/types.ts AnalyticsTrackInput.event.event_type 联合类型。
+    //
+    // 审计真实化（对抗审查 M3 修复）：覆盖表从「表内有条目即过」升级为「引用实存校验」——
+    // 每个事件的断言文件必须真实存在于仓库，且其源码中 grep 得到该事件字面量的
+    // 落盘断言（readAnalytics/expect(...event_type)），杜绝「引用一个不存在的覆盖」。
     const allDefinedEventTypes = [
       'project_created',
       'conversation_submitted',
@@ -218,25 +222,45 @@ describe('Sprint 3 analytics completeness audit (T8)', () => {
       'project_finalized',
     ] as const
 
-    const coveredByExistingTests: Record<string, string> = {
-      project_created: 'T8-001 / S1-ANALYTICS-001',
-      conversation_submitted: 'S1-ANALYTICS-001',
-      sketch_generated: 'S1-ANALYTICS-001 (含 FIRT duration_ms)',
-      sketch_fallback: 'unit/sketch-fallback-observability.test.ts',
-      mvp_delivered: 'S2-PROJECT-001 / unit/mvp-engine.test.ts',
-      user_undo: 'T8-003',
-      point_correction: 'T8-002',
-      mode_upgraded: 'T8-001',
-      programming_execution: 'repair-engine.ts + repair cycle tests',
-      self_repair_triggered: 'repair-engine.ts + repair cycle tests',
-      judge_verdict: 'S2-PROJECT-001 / judge-engine tests',
-      satisfaction_marked: 'T8-001',
-      project_finalized: 'T8-001',
+    // 事件 → 断言所在测试文件（相对仓库根）；文件必须存在且源码含该事件字面量。
+    const coveredByExistingTests: Record<string, string[]> = {
+      project_created: [
+        'tests/acceptance/sprint3/analytics-completeness.test.ts', // T8-001
+        'tests/acceptance/sprint1/sketch-delivery.test.ts', // S1-ANALYTICS-001
+      ],
+      conversation_submitted: ['tests/acceptance/sprint1/sketch-delivery.test.ts'],
+      sketch_generated: ['tests/acceptance/sprint1/sketch-delivery.test.ts'], // 含 FIRT duration_ms
+      sketch_fallback: ['tests/unit/sketch-fallback-observability.test.ts'],
+      mvp_delivered: [
+        'tests/acceptance/sprint3/analytics-completeness.test.ts', // 事件枚举审计
+        'tests/e2e/sprint2/mvp-workflow.e2e.ts', // E2E 轮询 mvp_delivered 落盘
+      ],
+      user_undo: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-003
+      point_correction: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-002
+      mode_upgraded: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-001
+      programming_execution: ['tests/acceptance/sprint2/auto-repair.test.ts'], // S2-JUDGE-001 修复循环落盘
+      self_repair_triggered: ['tests/acceptance/sprint2/auto-repair.test.ts'], // 同上
+      judge_verdict: ['tests/acceptance/sprint2/auto-repair.test.ts'], // judgeOnce 判定落盘
+      satisfaction_marked: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-001
+      project_finalized: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-001
     }
 
     const todoBlocked: Record<string, string> = {
       guide_role_switched:
         'Phase 1 当前实现无 DialogueRouter 显式角色切换；guide-agent-service 以单一路由处理用户输入，未按 PRD §6.2 切需求分析师/UI/UX 顾问/架构设计师/工程经理角色。待 DialogueRouter 落地后补写入点。',
+    }
+
+    // 引用实存校验：断言文件必须存在，且源码中真实出现该事件字面量（否则覆盖声称失实）
+    for (const [eventType, files] of Object.entries(coveredByExistingTests)) {
+      for (const file of files) {
+        const absolutePath = join(__dirname, '..', '..', '..', file)
+        expect(existsSync(absolutePath), `事件 "${eventType}" 引用的断言文件不存在: ${file}`).toBe(true)
+        const source = readFileSync(absolutePath, 'utf8')
+        expect(
+          source.includes(`'${eventType}'`) || source.includes(`"${eventType}"`),
+          `事件 "${eventType}" 在 ${file} 源码中无该字面量的断言——覆盖声称失实`,
+        ).toBe(true)
+      }
     }
 
     for (const eventType of allDefinedEventTypes) {

@@ -51,6 +51,18 @@ describe('Sprint 2 auto repair acceptance (S2-JUDGE-001 / S2-JUDGE-002)', () => 
     setSnapshotCaptureProviderForTests()
   })
 
+  /** 读取临时 PROMA_HOME 下 analytics.jsonl 的事件类型列表（T8-004 审计真实化配套）。 */
+  function readAnalyticsEventTypes(): string[] {
+    const { existsSync, readFileSync } = require('node:fs') as typeof import('node:fs')
+    const path = join(home!, 'agent-workspaces', 'default-software-builder', 'analytics.jsonl')
+    if (!existsSync(path)) return []
+    return readFileSync(path, 'utf8')
+      .trim()
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => (JSON.parse(line) as { event_type: string }).event_type)
+  }
+
   async function setup(prefix: string): Promise<{ projectId: string; snapshotId: string }> {
     home = mkdtempSync(join(tmpdir(), prefix))
     process.env.PROMA_HOME = home
@@ -135,6 +147,13 @@ describe('Sprint 2 auto repair acceptance (S2-JUDGE-001 / S2-JUDGE-002)', () => 
     // 用户可见事件不包含堆栈/内部标识
     const serialized = JSON.stringify(events)
     expect(serialized).not.toMatch(/node_modules|Error: |at |TypeError|ReferenceError/)
+
+    // 埋点落盘（T8-004 审计真实化）：修复循环与裁判判定的三类事件真实写入 analytics.jsonl
+    const analytics = readAnalyticsEventTypes()
+    expect(analytics).toContain('self_repair_triggered')
+    expect(analytics).toContain('programming_execution')
+    expect(analytics).toContain('judge_verdict')
+    expect(analytics.every((type) => type.length > 0)).toBe(true)
   })
 
   it('[S2-JUDGE-002] 连续 3 次修复失败后熔断回滚，项目回到健康快照且阶段与磁盘一致', async () => {
