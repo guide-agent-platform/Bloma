@@ -157,9 +157,17 @@ export function isAutoDelegationText(content: string): boolean {
 }
 
 /**
+ * 纯问候语（D4 修复）：整句命中才跳过，「你好，我想做个记账本」承载主题、必须保留。
+ * 问候语不承载任何产品信息，若被当成主题锚点前置 F-001，会把真正的需求挤到 F-002。
+ */
+const GREETING_ONLY_PATTERN =
+  /^(?:(?:你|您)好(?:呀|啊)?|嗨|哈喽|哈啰|hello|hi|hey|在吗|在么|早上好|下午好|晚上好|早安|午安)[\s!！。.~～呀啊嗯]*$/i
+
+/**
  * 从会话 JSONL 中提取"主题锚点"：首条非空 user 消息（用户最初想做什么）。
  * 供澄清/纠错路径复用，保证后续需求累积不会丢失最初的主题。
- * 无会话文件或没有 user 消息时返回 undefined。
+ * 无实质内容的消息（纯问候、让渡话术、trim 后不足 2 字）不配当锚点，跳过向下找；
+ * 全部无实质内容或无会话文件时返回 undefined。
  */
 export function readPrimaryIntent(sessionId: string): string | undefined {
   const path = getAgentSessionPath(sessionId)
@@ -173,7 +181,13 @@ export function readPrimaryIntent(sessionId: string): string | undefined {
         .map((block) => (block.type === 'text' ? (block.text ?? '') : ''))
         .join('')
         .trim()
-      if (text) return text
+      if (
+        text.length >= 2 &&
+        !GREETING_ONLY_PATTERN.test(text) &&
+        !isAutoDelegationText(text)
+      ) {
+        return text
+      }
     } catch {
       // 跳过损坏行
     }

@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import type { AgentEvent, AgentSendMessageInput, MessageContentBlock, Project } from '../shared/types'
+import { existsSync, readFileSync } from 'node:fs'
+import type { AgentEvent, AgentMessage, AgentSendMessageInput, MessageContentBlock, Project } from '../shared/types'
+import { getAgentSessionPath } from '../storage/config-paths'
 import { routeDialogue, type ClarificationOption } from './dialogue-router'
-import { recordDecision } from './decision-log'
+import { parseDecisionText, recordDecision } from './decision-log'
 import type { ConversationTurn, GuideModelOptions } from './orchestrator'
 import { trackAnalytics } from './platform-services'
 import { runSketchTask, setProgrammingEventPublisher } from './programming-orchestrator'
@@ -91,6 +93,56 @@ const AUTO_ESCAPE_OPTION: ClarificationOption = {
   id: 'auto',
   label: '你帮我决定',
   description: '交给我，按常见做法先出一版',
+}
+
+/** 澄清轮次熔断阈值：连续出示 N 张澄清卡仍不明确 → 代码级强制 auto 开工（提示词同款要求的兜底执行）。 */
+const CLARIFICATION_ROUND_LIMIT = 2
+
+/** 澄清终止类决策：出现即代表澄清已收敛（开工/迭代/裁判/回滚），连续计数在此截断。 */
+const CLARIFICATION_ENDING_DECISION_TYPES = new Set<string>([
+  'clarification_answer',
+  'clarification_forced_auto',
+  'modification_gate',
+  'modification_decision',
+  'requirement_normalized',
+  'judge_return',
+  'circuit_rollback',
+  'enrichment_stats',
+])
+
+/**
+ * 连续澄清轮次计数（D3 修复）：从会话 JSONL 尾部往前数连续尾随的 [decision-card] 行，
+ * 遇到澄清终止类决策行即断（新会话/无卡片从 0 起）。user/assistant 轮与 [terminal]、
+ * category_route/constraint_captured 等每轮都写的会话级噪声行透明——它们不代表澄清
+ * 结束；纯文本澄清（无卡片）不计——没有卡片就没有「用户点不点」的轮次语义。
+ */
+export function countTrailingClarificationRounds(sessionId: string): number {
+  const path = getAgentSessionPath(sessionId)
+  if (!existsSync(path)) return 0
+  const lines = readFileSync(path, 'utf8').split('\n')
+  let rounds = 0
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim()
+    if (!line) continue
+    let message: AgentMessage
+    try {
+      message = JSON.parse(line) as AgentMessage
+    } catch {
+      continue // 损坏行跳过，不误断计数
+    }
+    if (message.role !== 'system') continue
+    const text = extractText(message.content ?? []).trim()
+    if (text.startsWith('[decision-card]')) {
+      rounds += 1
+      if (rounds >= CLARIFICATION_ROUND_LIMIT) return rounds // 阈值已到，更早的无需再数
+      continue
+    }
+    if (text.startsWith('[decision]')) {
+      const entry = parseDecisionText(text)
+      if (entry && CLARIFICATION_ENDING_DECISION_TYPES.has(entry.type)) return rounds
+    }
+  }
+  return rounds
 }
 
 /** 占位/问题式 label：模型把模板占位文案或新问题当成选项输出时，直接丢弃。 */
@@ -386,6 +438,44 @@ async function tryModelDrivenGuide(
     publish(makeGuideEvent(input, 'message_delta', { text: reply }))
     publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
     publishClarificationCard(input, publish, normalizeClarificationOptions(questions), persistSystem, reply)
+    return true
+  }
+
+  // 澄清轮次熔断（D3 修复，代码级兜底）：提示词要求「已回答过 2 轮澄清仍不明确就直接
+  // generate_sketch」，这里强制执行——已连续 2 轮出示卡片、模型仍要 ask_clarification
+  // 时转 auto 直接开工，不再把问题抛给反复表示没想法的用户。留痕对齐「静默降级必须留日志」。
+  if (
+    parsed.action === 'ask_clarification' &&
+    countTrailingClarificationRounds(input.session_id) >= CLARIFICATION_ROUND_LIMIT
+  ) {
+    console.error('[guide] 澄清轮次熔断：连续 2 轮仍不明确，已强制 auto 生成草图')
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'clarification_forced_auto',
+        title: '澄清轮次熔断，强制开工',
+        why: '已连续 2 轮澄清仍不明确，模型仍要追问，按 auto 常见做法直接生成草图',
+        detail: { consecutive_rounds: CLARIFICATION_ROUND_LIMIT },
+      },
+    })
+    const ack = '几轮还没定下来，我先按常见做法出一版草图，你看完再调整。'
+    model.persistAssistant(ack)
+    publish(makeGuideEvent(input, 'message_delta', { text: ack }))
+    publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+    await runSketchTask({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+      prompt: input.content,
+      requirements: ensurePrimaryIntent(
+        [{ id: 'F-001', description: CARD_ANSWER_REQUIREMENTS.auto }],
+        primaryIntent,
+      ),
+      channel_id: input.channel_id,
+      query: model.query,
+    })
     return true
   }
 

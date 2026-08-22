@@ -20,6 +20,7 @@ import { listSessions } from './session-service'
 export type DecisionType =
   | 'clarification_card'
   | 'clarification_answer'
+  | 'clarification_forced_auto'
   | 'modification_gate'
   | 'modification_decision'
   | 'requirement_normalized'
@@ -112,7 +113,7 @@ export function exportDecisionsMd(projectId: string): void {
 }
 
 /** 解析一行 system 文本为新格式决策（JSON）或旧格式决策卡片行；非决策行返回 undefined。 */
-function parseDecisionText(text: string): DecisionEntry | undefined {
+export function parseDecisionText(text: string): DecisionEntry | undefined {
   if (text.startsWith(DECISION_PREFIX)) {
     try {
       const parsed = JSON.parse(text.slice(DECISION_PREFIX.length)) as DecisionEntry
