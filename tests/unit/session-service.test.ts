@@ -7,6 +7,7 @@ import {
   cleanOrphanSessions,
   listSessions,
   loadMessages,
+  readPrimaryIntent,
   recordSessionActivity,
 } from '../../main/session-service'
 import { getAgentSessionPath } from '../../storage/config-paths'
@@ -196,6 +197,54 @@ describe('SessionService 历史消息读取', () => {
       expect(result.messages).toHaveLength(1)
       expect(result.session.session_id).toBe('legacy-session')
       expect(result.session.project_id).toBe('')
+    } finally {
+      process.env.PROMA_HOME = originalHome
+    }
+  })
+})
+
+describe('SessionService readPrimaryIntent 主题锚点（D4 无实质内容豁免）', () => {
+  /** 2026-08-22 线上案例：会话以「你好」开场，第二轮用户点「你帮我决定」卡——
+   * 问候语若被当主题锚点前置 F-001，真正的需求全被挤到 F-002。 */
+  function readIntent(lines: unknown[]): string | undefined {
+    const originalHome = process.env.PROMA_HOME
+    const home = useTemporaryHome('session-intent-')
+    try {
+      writeSessionJsonl(home, 'session-intent', lines)
+      return readPrimaryIntent('session-intent')
+    } finally {
+      process.env.PROMA_HOME = originalHome
+    }
+  }
+
+  const user = (text: string) => ({ role: 'user', content: [{ type: 'text', text }], timestamp: 1 })
+
+  it('首条是纯问候 → 跳过，取首条有实质内容的 user 消息', () => {
+    for (const greeting of ['你好', '你好呀！', 'hi', 'HELLO', '在吗', '早上好']) {
+      expect(readIntent([user(greeting), user('我想做个记账工具')]), greeting).toBe('我想做个记账工具')
+    }
+  })
+
+  it('让渡话术（含点选 auto 卡的落盘原文「你帮我决定」）不配当锚点', () => {
+    expect(readIntent([user('你好'), user('你帮我决定')])).toBeUndefined()
+    expect(readIntent([user('我还没想法'), user('记账的')])).toBe('记账的')
+  })
+
+  it('trim 后不足 2 字的输入跳过', () => {
+    expect(readIntent([user('好'), user('做菜谱')])).toBe('做菜谱')
+  })
+
+  it('带实质内容的消息不受影响（含问候词但非整句问候）', () => {
+    expect(readIntent([user('你好，我想做个记账本')])).toBe('你好，我想做个记账本')
+    expect(readIntent([user('帮我做一个音乐合成器')])).toBe('帮我做一个音乐合成器')
+  })
+
+  it('全部无实质内容 → undefined；无会话文件 → undefined', () => {
+    expect(readIntent([user('你好'), user('嗯')])).toBeUndefined()
+    const originalHome = process.env.PROMA_HOME
+    useTemporaryHome('session-intent-empty-')
+    try {
+      expect(readPrimaryIntent('no-such-session')).toBeUndefined()
     } finally {
       process.env.PROMA_HOME = originalHome
     }

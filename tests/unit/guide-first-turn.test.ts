@@ -23,6 +23,8 @@ vi.mock('../../main/project-service', () => ({
 }))
 vi.mock('../../main/session-service', () => ({
   readPrimaryIntent: vi.fn(() => undefined),
+  // guide-agent-service 的自由文本让渡分流依赖同一模块的话术表（单点维护），mock 须同步提供
+  isAutoDelegationText: (content: string) => /^(?:我还没想法|随便|你帮我决定)$/.test(content.trim()),
 }))
 vi.mock('../../main/decision-log', () => ({
   recordDecision: vi.fn(),

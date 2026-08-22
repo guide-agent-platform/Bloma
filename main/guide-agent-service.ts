@@ -1,13 +1,15 @@
 import { randomUUID } from 'node:crypto'
-import type { AgentEvent, AgentSendMessageInput, MessageContentBlock, Project } from '../shared/types'
+import { existsSync, readFileSync } from 'node:fs'
+import type { AgentEvent, AgentMessage, AgentSendMessageInput, MessageContentBlock, Project } from '../shared/types'
+import { getAgentSessionPath } from '../storage/config-paths'
 import { routeDialogue, type ClarificationOption } from './dialogue-router'
-import { recordDecision } from './decision-log'
+import { parseDecisionText, recordDecision } from './decision-log'
 import type { ConversationTurn, GuideModelOptions } from './orchestrator'
 import { trackAnalytics } from './platform-services'
 import { runSketchTask, setProgrammingEventPublisher } from './programming-orchestrator'
 import { findProject, updateProject } from './project-service'
 import { captureConstraints, extractConstraints } from './constraint-extractor'
-import { readPrimaryIntent } from './session-service'
+import { isAutoDelegationText, readPrimaryIntent } from './session-service'
 import type { SketchRequirement } from './sketch-engine'
 import { isRecord } from './validators'
 
@@ -35,6 +37,9 @@ const GUIDE_SYSTEM_PROMPT = `你是「向导 Agent」，负责把用户的想法
 澄清规则（重要）：
 - questions 是 reply 那个问题的候选答案，不是新问题；用户点任何一个都能直接开工。
 - 选项互斥、具体、贴合用户原话：用「记账本/待办清单/赛道计时赛」这类名词短语。
+- 选项必须是具体成品名词；以「类」结尾的类目词（工具类/游戏类/记录类）视同抽象形容词，禁止输出。
+- 历史中「上轮已向用户出示的选项」是你之前给用户看过的答案：不得重复上一轮问句，新选项必须比上轮更具体或门槛更低。
+- 用户表达没想法/让你定/随便时，直接 generate_sketch（按常见做法出第一版），不得把问题抛回给没有想法的用户。
 - 禁止抽象形容词当选项（「自由」「灵活」「好用」），禁止占位文案（「范围选项」「选项一」），label 不以「？」结尾。
 - questions 2~4 条，最后一条固定为 {"id":"auto","label":"你帮我决定","description":"交给我，按常见做法先出一版"}。
 - 确实无法给出具体选项时才 questions:[]（在 reply 里纯文本追问）。
@@ -88,6 +93,56 @@ const AUTO_ESCAPE_OPTION: ClarificationOption = {
   id: 'auto',
   label: '你帮我决定',
   description: '交给我，按常见做法先出一版',
+}
+
+/** 澄清轮次熔断阈值：连续出示 N 张澄清卡仍不明确 → 代码级强制 auto 开工（提示词同款要求的兜底执行）。 */
+const CLARIFICATION_ROUND_LIMIT = 2
+
+/** 澄清终止类决策：出现即代表澄清已收敛（开工/迭代/裁判/回滚），连续计数在此截断。 */
+const CLARIFICATION_ENDING_DECISION_TYPES = new Set<string>([
+  'clarification_answer',
+  'clarification_forced_auto',
+  'modification_gate',
+  'modification_decision',
+  'requirement_normalized',
+  'judge_return',
+  'circuit_rollback',
+  'enrichment_stats',
+])
+
+/**
+ * 连续澄清轮次计数（D3 修复）：从会话 JSONL 尾部往前数连续尾随的 [decision-card] 行，
+ * 遇到澄清终止类决策行即断（新会话/无卡片从 0 起）。user/assistant 轮与 [terminal]、
+ * category_route/constraint_captured 等每轮都写的会话级噪声行透明——它们不代表澄清
+ * 结束；纯文本澄清（无卡片）不计——没有卡片就没有「用户点不点」的轮次语义。
+ */
+export function countTrailingClarificationRounds(sessionId: string): number {
+  const path = getAgentSessionPath(sessionId)
+  if (!existsSync(path)) return 0
+  const lines = readFileSync(path, 'utf8').split('\n')
+  let rounds = 0
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim()
+    if (!line) continue
+    let message: AgentMessage
+    try {
+      message = JSON.parse(line) as AgentMessage
+    } catch {
+      continue // 损坏行跳过，不误断计数
+    }
+    if (message.role !== 'system') continue
+    const text = extractText(message.content ?? []).trim()
+    if (text.startsWith('[decision-card]')) {
+      rounds += 1
+      if (rounds >= CLARIFICATION_ROUND_LIMIT) return rounds // 阈值已到，更早的无需再数
+      continue
+    }
+    if (text.startsWith('[decision]')) {
+      const entry = parseDecisionText(text)
+      if (entry && CLARIFICATION_ENDING_DECISION_TYPES.has(entry.type)) return rounds
+    }
+  }
+  return rounds
 }
 
 /** 占位/问题式 label：模型把模板占位文案或新问题当成选项输出时，直接丢弃。 */
@@ -169,6 +224,23 @@ function resolveCardAnswer(input: AgentSendMessageInput, primaryIntent?: string)
   }
 }
 
+/**
+ * 自由文本让渡（D1 修复）：打字说「我还没想法/随便/你帮我决定」与点选 auto 卡片语义
+ * 相同，但不带 card_option 元数据——不识别就会落回模型路径被原样重问（2026-08-22
+ * 线上案例）。确定性判定（零模型依赖），出口完全复用卡片 auto 路径；让渡话术由
+ * session-service 单点维护（readPrimaryIntent 的锚点豁免共用同一张表）。
+ */
+function resolveAutoDelegation(input: AgentSendMessageInput, primaryIntent?: string): CardAnswerRoute | undefined {
+  if (!isAutoDelegationText(input.content)) return undefined
+  return {
+    prompt: input.content,
+    requirements: ensurePrimaryIntent(
+      [{ id: 'F-001', description: CARD_ANSWER_REQUIREMENTS.auto }],
+      primaryIntent,
+    ),
+  }
+}
+
 export async function handleGuideMessage(
   input: AgentSendMessageInput,
   publish: GuideEventPublisher,
@@ -234,6 +306,39 @@ export async function handleGuideMessage(
       mode: input.mode,
       prompt: cardAnswer.prompt,
       requirements: cardAnswer.requirements,
+      channel_id: input.channel_id,
+      query: model?.query,
+    })
+    return
+  }
+
+  // 自由文本让渡（D1 修复）：打字版「你帮我决定」——出口与卡片 auto 路径完全一致，
+  // 仅 decision detail 标 source='free_text_auto' 与点选区分（埋点/事后追溯可辨）
+  const autoDelegation = resolveAutoDelegation(input, primaryIntent)
+  if (autoDelegation) {
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'clarification_answer',
+        title: '用户让渡决定权（自由文本）',
+        why: `用户说「${input.content}」，视为交由向导按常见做法生成第一版草图`,
+        detail: {
+          source: 'free_text_auto',
+          requirements: autoDelegation.requirements,
+        },
+      },
+    })
+    const ack = '好的，我来定方向，先按常见做法出一版草图。'
+    persistAssistant?.(ack)
+    publish(makeGuideEvent(input, 'message_delta', { text: ack }))
+    await runSketchTask({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+      prompt: autoDelegation.prompt,
+      requirements: autoDelegation.requirements,
       channel_id: input.channel_id,
       query: model?.query,
     })
@@ -333,6 +438,44 @@ async function tryModelDrivenGuide(
     publish(makeGuideEvent(input, 'message_delta', { text: reply }))
     publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
     publishClarificationCard(input, publish, normalizeClarificationOptions(questions), persistSystem, reply)
+    return true
+  }
+
+  // 澄清轮次熔断（D3 修复，代码级兜底）：提示词要求「已回答过 2 轮澄清仍不明确就直接
+  // generate_sketch」，这里强制执行——已连续 2 轮出示卡片、模型仍要 ask_clarification
+  // 时转 auto 直接开工，不再把问题抛给反复表示没想法的用户。留痕对齐「静默降级必须留日志」。
+  if (
+    parsed.action === 'ask_clarification' &&
+    countTrailingClarificationRounds(input.session_id) >= CLARIFICATION_ROUND_LIMIT
+  ) {
+    console.error('[guide] 澄清轮次熔断：连续 2 轮仍不明确，已强制 auto 生成草图')
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'clarification_forced_auto',
+        title: '澄清轮次熔断，强制开工',
+        why: '已连续 2 轮澄清仍不明确，模型仍要追问，按 auto 常见做法直接生成草图',
+        detail: { consecutive_rounds: CLARIFICATION_ROUND_LIMIT },
+      },
+    })
+    const ack = '几轮还没定下来，我先按常见做法出一版草图，你看完再调整。'
+    model.persistAssistant(ack)
+    publish(makeGuideEvent(input, 'message_delta', { text: ack }))
+    publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+    await runSketchTask({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+      prompt: input.content,
+      requirements: ensurePrimaryIntent(
+        [{ id: 'F-001', description: CARD_ANSWER_REQUIREMENTS.auto }],
+        primaryIntent,
+      ),
+      channel_id: input.channel_id,
+      query: model.query,
+    })
     return true
   }
 
