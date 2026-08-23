@@ -1,4 +1,5 @@
 import type { SDKQuery } from './orchestrator'
+import { loadPromptOverride } from './prompt-config'
 import type { SketchRequirement } from './sketch-engine'
 import { DEFAULT_BEHAVIOR_ASSERTION } from './sketch-engine'
 import { parseBehaviorAssertion } from './behavior-assertions'
@@ -69,7 +70,7 @@ export const MAX_GENERATION_ATTEMPTS = 2
 const BUDGET_BASE = 4096
 const BUDGET_PER_ITEM = 600
 
-const SYSTEM_PROMPT = `你是「Bloma 需求加厚师」。把已冻结但过薄的软件功能项，补成可执行的行为契约。只输出一个 JSON 对象，不要任何多余文字，不要 markdown 代码块围栏。
+export const DEFAULT_SYSTEM_PROMPT = `你是「Bloma 需求加厚师」。把已冻结但过薄的软件功能项，补成可执行的行为契约。只输出一个 JSON 对象，不要任何多余文字，不要 markdown 代码块围栏。
 
 输入：功能项清单（只做语义补全，不改写 id/description/顺序）+ 用户对话原文。
 
@@ -200,9 +201,9 @@ async function streamAccumulate(
 
 /** 重试历史：截断走全新重生成（不加脏输出），格式错误把坏输出作为 assistant 轮次回灌续问。 */
 function buildRetryHistory(prompt: string, attempt: number, lastAccumulated: string, truncated: boolean): ConversationTurnLike[] {
-  if (attempt === 0 || truncated) return [{ role: 'system', content: SYSTEM_PROMPT }]
+  if (attempt === 0 || truncated) return [{ role: 'system', content: loadPromptOverride('enricher-system') ?? DEFAULT_SYSTEM_PROMPT }]
   return [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: loadPromptOverride('enricher-system') ?? DEFAULT_SYSTEM_PROMPT },
     { role: 'user', content: prompt },
     { role: 'assistant', content: lastAccumulated },
   ]

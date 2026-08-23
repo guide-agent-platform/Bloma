@@ -29,7 +29,7 @@ describe('Sprint 2 prompt settings IPC', () => {
     return environment
   }
 
-  it('[PROMPT-SETTINGS-001] list 返回全部预留槽位，prd-system 已启用、其余未启用', async () => {
+  it('[PROMPT-SETTINGS-001] list 返回全部六槽位，全部已接线启用（五引擎接入后契约）', async () => {
     useEnv()
     const harness = createIpcHarness()
 
@@ -40,10 +40,17 @@ describe('Sprint 2 prompt settings IPC', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) throw new Error('expected list to succeed')
     const ids = result.data.map((s) => s.id)
-    expect(ids).toEqual(['prd-system', 'sketch-system', 'mvp-system', 'guide-system'])
-    expect(result.data.find((s) => s.id === 'prd-system')?.enabled).toBe(true)
-    for (const slot of result.data.filter((s) => s.id !== 'prd-system')) {
-      expect(slot.enabled).toBe(false)
+    expect(ids).toEqual([
+      'prd-system',
+      'sketch-system',
+      'mvp-system',
+      'guide-system',
+      'enricher-system',
+      'normalizer-system',
+    ])
+    // 五引擎接入（TDD）后全部槽位 enabled=true——不再是「预留未启用」
+    for (const slot of result.data) {
+      expect(slot.enabled).toBe(true)
       expect(slot.label.length).toBeGreaterThan(0)
       expect(slot.description.length).toBeGreaterThan(0)
     }
@@ -129,16 +136,18 @@ describe('Sprint 2 prompt settings IPC', () => {
     expect(read.data.content).toContain('需求分析师')
   })
 
-  it('[PROMPT-SETTINGS-005] 非法输入一律 VALIDATION_ERROR：空白内容/未启用槽位/非法 id', async () => {
+  it('[PROMPT-SETTINGS-005] 非法输入一律 VALIDATION_ERROR：空白内容/缺字段/非法 id', async () => {
     useEnv()
     const harness = createIpcHarness()
     const invoke = (channel: string, payload: Record<string, unknown>): Promise<ApiResult<unknown>> =>
       harness.invoke(channel, payload) as Promise<ApiResult<unknown>>
 
+    // 注：五引擎接入后全部槽位 enabled=true，原「未启用槽位 save 报错」场景不复存在，
+    // 改为「缺 content 字段」与「空白内容」两类非法输入。
     const cases: Array<{ channel: string; payload: Record<string, unknown> }> = [
       { channel: IPC_CHANNELS.PROMPT_SAVE, payload: { request_id: 'e1', prompt_id: 'prd-system', content: '   ' } },
       { channel: IPC_CHANNELS.PROMPT_SAVE, payload: { request_id: 'e2', prompt_id: 'prd-system', content: '' } },
-      { channel: IPC_CHANNELS.PROMPT_SAVE, payload: { request_id: 'e3', prompt_id: 'mvp-system', content: '自定义' } },
+      { channel: IPC_CHANNELS.PROMPT_SAVE, payload: { request_id: 'e3', prompt_id: 'mvp-system' } },
       { channel: IPC_CHANNELS.PROMPT_SAVE, payload: { request_id: 'e4', prompt_id: 'not-exist', content: '自定义' } },
       { channel: IPC_CHANNELS.PROMPT_READ, payload: { request_id: 'e5', prompt_id: 'not-exist' } },
       { channel: IPC_CHANNELS.PROMPT_RESET, payload: { request_id: 'e6', prompt_id: 'not-exist' } },

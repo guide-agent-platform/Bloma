@@ -406,15 +406,22 @@ description: Guide zero-code users through natural-language software generation 
 
 | 引擎 | 覆盖文件 | 说明 |
 |------|---------|------|
-| PRD 需求分析师（prd-engine-llm） | `prompts/prd-system.md` | 当前唯一接线 |
+| PRD 需求分析师（prd-engine-llm） | `prompts/prd-system.md` | 首个接线（2026-08-16） |
+| 草图生成器（sketch-engine-llm） | `prompts/sketch-system.md` | 2026-08-23 接入 |
+| MVP 生成器（mvp-engine-llm） | `prompts/mvp-system.md` | 2026-08-23 接入（首试与带反馈重试两处） |
+| 向导 Agent（guide-agent-service） | `prompts/guide-system.md` | 2026-08-23 接入（首轮硬护栏 FIRST_TURN_RULE 仍追加在覆盖内容之后） |
+| 功能项加厚师（requirement-enricher） | `prompts/enricher-system.md` | 2026-08-23 接入 |
+| 修改诉求归一化（requirement-normalizer） | `prompts/normalizer-system.md` | 2026-08-23 接入 |
+
+六槽位全部在设置页「提示词配置」可编辑（`prompt-service.ts` 槽位注册表 enabled=true）。
 
 **覆盖语义**：
 - 文件存在且非空白 → **全量替换**内置默认（不是追加）。
 - 文件不存在/读失败/空白 → 使用内置默认，绝不阻断生成链路。
 - 无缓存：改文件**即时生效**，无需重启应用。
-- 测试环境注入 `PROMA_HOME` 临时目录即可隔离验证（见 `tests/acceptance/sprint2/llm-prd-repair.test.ts` 的 PROMPT-OVERRIDE/DEFAULT 用例）。
+- 测试环境注入 `PROMA_HOME` 临时目录即可隔离验证（见 `tests/unit/prompt-override-engines.test.ts` 六槽位覆盖/回退用例、`tests/acceptance/sprint2/llm-prd-repair.test.ts` 的 PROMPT-OVERRIDE/DEFAULT 用例）。
 
-**机制代码**：`main/prompt-config.ts`（`loadPromptOverride`）+ `storage/config-paths.ts`（`getPromptOverridePath`）。其他引擎（sketch/mvp/guide）按同名约定可自行接入。
+**机制代码**：`main/prompt-config.ts`（`loadPromptOverride`）+ `storage/config-paths.ts`（`getPromptOverridePath`）。各引擎内置默认以 `DEFAULT_SYSTEM_PROMPT`（向导为 `DEFAULT_GUIDE_SYSTEM_PROMPT`）导出，供设置页展示。
 
 ---
 

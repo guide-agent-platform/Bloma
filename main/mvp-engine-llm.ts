@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ConversationTurn, SDKQuery } from './orchestrator'
 import { findProject } from './project-service'
+import { loadPromptOverride } from './prompt-config'
 import type { ProjectMemory } from './memory-distiller'
 import type { PrdBackplane } from './sketch-engine'
 import { requirementAssertions, requirementPriority, requirementStory } from './sketch-engine'
@@ -78,7 +79,7 @@ const SYSTEM_FILES = new Set(['package.json', 'static-server.js'])
  * 系统提示词：Sisyphus 6 段式 + Hephaestus 常识补全 + 草图保真（§7.1）。
  * 双契约输入（PRD 行为契约 + 草图 UX 契约）与仲裁规则见 buildPrompt。
  */
-const SYSTEM_PROMPT = `你是「Bloma MVP 生成器」，负责把已确认的需求（PRD 密背板）+ 用户确认过的草图，生成一个可运行、纯前端的 MVP。只输出一个 JSON 对象，不要任何多余文字，不要 markdown 代码块围栏。
+export const DEFAULT_SYSTEM_PROMPT = `你是「Bloma MVP 生成器」，负责把已确认的需求（PRD 密背板）+ 用户确认过的草图，生成一个可运行、纯前端的 MVP。只输出一个 JSON 对象，不要任何多余文字，不要 markdown 代码块围栏。
 
 输出结构：
 {"files":[{"path":"index.html","content":"..."},{"path":"src/app.js","content":"..."},{"path":"src/styles.css","content":"..."}],
@@ -244,9 +245,11 @@ function buildRetryHistory(
   lastAccumulated: string,
   truncated: boolean,
 ): ConversationTurn[] {
-  if (attempt === 0 || truncated) return [{ role: 'system', content: SYSTEM_PROMPT }]
+  if (attempt === 0 || truncated) {
+    return [{ role: 'system', content: loadPromptOverride('mvp-system') ?? DEFAULT_SYSTEM_PROMPT }]
+  }
   return [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: loadPromptOverride('mvp-system') ?? DEFAULT_SYSTEM_PROMPT },
     { role: 'user', content: buildPrompt(backplane, repairContext, sketchHtml, memory) },
     { role: 'assistant', content: lastAccumulated },
   ]

@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { SDKQuery } from './orchestrator'
 import { findProject } from './project-service'
+import { loadPromptOverride } from './prompt-config'
 import type { SketchRequirement } from './sketch-engine'
 import { requirementAssertions, requirementStory } from './sketch-engine'
 import { categoryTemperature } from './model-resolution'
@@ -66,7 +67,7 @@ const DEFAULT_MAX_TOKENS = 16384
 const MAX_MAX_TOKENS = 32768
 const MAX_GENERATION_ATTEMPTS = 2
 
-const SYSTEM_PROMPT = `你是「Bloma 草图生成器」，负责把用户的想法生成一个**无交互的纯外观 HTML 草图**，用来让用户确认"软件长什么样"。只输出一个完整的 HTML 文档，不要任何解释文字，不要 markdown 代码块围栏。
+export const DEFAULT_SYSTEM_PROMPT = `你是「Bloma 草图生成器」，负责把用户的想法生成一个**无交互的纯外观 HTML 草图**，用来让用户确认"软件长什么样"。只输出一个完整的 HTML 文档，不要任何解释文字，不要 markdown 代码块围栏。
 
 硬性约束：
 - 输出必须是一个自包含的 HTML 文档（含 <!doctype html>、<head>、内联 <style>、<body>）。
@@ -106,7 +107,7 @@ export async function generateSketchLlm(input: GenerateSketchLlmInput): Promise<
         env: input.env,
         signal: selfController.signal,
         sessionId: input.sessionId,
-        history: [{ role: 'system', content: SYSTEM_PROMPT }],
+        history: [{ role: 'system', content: loadPromptOverride('sketch-system') ?? DEFAULT_SYSTEM_PROMPT }],
         maxTokens,
         // §7.7 类别温度：视觉稳定（0.1）
         temperature: categoryTemperature('sketch'),

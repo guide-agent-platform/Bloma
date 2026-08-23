@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import type { AgentEvent, AgentMessage, AgentSendMessageInput, MessageContentBlock, Project } from '../shared/types'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { routeDialogue, type ClarificationOption } from './dialogue-router'
+import { loadPromptOverride } from './prompt-config'
 import { parseDecisionText, recordDecision } from './decision-log'
 import type { ConversationTurn, GuideModelOptions } from './orchestrator'
 import { trackAnalytics } from './platform-services'
@@ -16,7 +17,7 @@ import { isRecord } from './validators'
 type GuideEventPublisher = (event: AgentEvent) => void
 
 /** 引导对话给模型的结构化指令：模型只输出 JSON 二选一（对齐 A2-14a Step 3 模板）。 */
-const GUIDE_SYSTEM_PROMPT = `你是「向导 Agent」，负责把用户的想法澄清成可生成草图的软件需求。只输出一个 JSON 对象，不要任何多余文字，不要 markdown 代码块围栏。
+export const DEFAULT_GUIDE_SYSTEM_PROMPT = `你是「向导 Agent」，负责把用户的想法澄清成可生成草图的软件需求。只输出一个 JSON 对象，不要任何多余文字，不要 markdown 代码块围栏。
 
 二选一输出：
 
@@ -395,7 +396,9 @@ async function tryModelDrivenGuide(
   const isFirstTurn = !model.history.some((turn) => turn.role === 'assistant')
   const systemTurn: ConversationTurn = {
     role: 'system',
-    content: isFirstTurn ? GUIDE_SYSTEM_PROMPT + FIRST_TURN_RULE : GUIDE_SYSTEM_PROMPT,
+    content: isFirstTurn
+            ? (loadPromptOverride('guide-system') ?? DEFAULT_GUIDE_SYSTEM_PROMPT) + FIRST_TURN_RULE
+            : loadPromptOverride('guide-system') ?? DEFAULT_GUIDE_SYSTEM_PROMPT,
   }
   const history: ConversationTurn[] = [systemTurn, ...model.history]
 

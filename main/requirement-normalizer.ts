@@ -1,4 +1,5 @@
 import type { SDKQuery } from './orchestrator'
+import { loadPromptOverride } from './prompt-config'
 import type { SketchRequirement } from './sketch-engine'
 import { requirementAssertions } from './sketch-engine'
 import { categoryTemperature } from './model-resolution'
@@ -64,7 +65,7 @@ export interface RequirementNormalizationDecision {
 const MAX_DESCRIPTION_LENGTH = 300
 const DEFAULT_MAX_TOKENS = 512
 
-const SYSTEM_PROMPT = `你是「Bloma 需求整理员」。用户对已生成项目提出了一条修改诉求，你要把它整理为「故事化功能项」并决定如何并入已有功能项清单。
+export const DEFAULT_SYSTEM_PROMPT = `你是「Bloma 需求整理员」。用户对已生成项目提出了一条修改诉求，你要把它整理为「故事化功能项」并决定如何并入已有功能项清单。
 
 判定规则（四选一）：
 - revise：这条诉求是对某个已有功能项的修正、细化或纠错（如「车的运行方向不对」是修正控制类功能项）。重写该功能项的故事化描述并**追加**行为断言，给出 revise_id；
@@ -96,7 +97,7 @@ export async function normalizeRequirementUpdate(
       env: input.env,
       signal: input.signal ?? new AbortController().signal,
       sessionId: input.session_id,
-      history: [{ role: 'system', content: SYSTEM_PROMPT }],
+      history: [{ role: 'system', content: loadPromptOverride('normalizer-system') ?? DEFAULT_SYSTEM_PROMPT }],
       maxTokens: input.maxTokens ?? DEFAULT_MAX_TOKENS,
       // §7.7 类别温度：归一化判定要稳、可复现（0.1）
       temperature: categoryTemperature('prd'),

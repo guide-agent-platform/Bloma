@@ -306,8 +306,8 @@ export interface ChannelDeleteResult {
 // 覆盖文件位于 {PROMA_HOME}/prompts/{id}.md，存在即全量替换内置默认（见 main/prompt-config.ts）。
 // =========================================================================
 
-/** 提示词槽位 ID：当前已接线 prd-system，sketch/mvp/guide 为预留槽位（enabled=false）。 */
-export type PromptSlotId = 'prd-system' | 'sketch-system' | 'mvp-system' | 'guide-system'
+/** 提示词槽位 ID：六槽位全部接线 loadPromptOverride（prd/sketch/mvp/guide/enricher/normalizer）。 */
+export type PromptSlotId = 'prd-system' | 'sketch-system' | 'mvp-system' | 'guide-system' | 'enricher-system' | 'normalizer-system'
 
 /** 槽位列表项（设置页左侧列表） */
 export interface PromptSlotInfo {
