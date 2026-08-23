@@ -19,11 +19,10 @@ import { expect, test } from '../support/electron-fixture'
  * 5. 断言确定性磁盘产物：rollback_guard 保护快照 + projects.json 快照指针更新
  *    （restoreSnapshotFiles 在沙箱重启**前**落盘指针，天然确定），UI 播报随后收敛。
  *
- * 已知依赖（allow-all × dangerous 契约，F8 产品缺陷单独立项）：
- * 「allow-all 下 dangerous 级仍弹确认窗」当前成立——主进程 canUseTool allow-all 时
- * warning 放行、dangerous 仍进 pendingRequests；渲染端 permissionModeAtom 不随主进程
- * setMode 广播（恒为默认 'ask'），PermissionDialog 因此照常渲染。若未来修复 atom
- * 同步，需同步统一 PermissionDialog 的 allow-all 分支契约，否则本用例会挂起。
+ * 权限契约（@S3-JUDGE-009，F8 已统一）：allow-all = 除 dangerous 外自动放行；
+ * dangerous 与模式无关，必须弹窗人工确认。主进程 canUseTool 与渲染端
+ * PermissionDialog 均按此契约执行，且 setMode 后经 permission_mode_changed 广播
+ * 同步渲染端 atom——本用例「弹窗必现」前提是显式契约，不再是实现偶然。
  *
  * 说明：`user_undo` 埋点的写入正确性由 acceptance（analytics-completeness T8-003）
  * 覆盖，本 E2E 不以埋点 poll 作为阻塞断言（时序跨 Electron+reload+沙箱不稳定）。

@@ -156,6 +156,45 @@ describe('Sprint 0 permission boundary acceptance', () => {
     expect(events).not.toContain('permission_requested')
     expect(result.snapshot.snapshot_id).toBeTruthy()
   })
+
+  it('[S0-PERM-006] allow-all 模式下 warning 工具直接放行、不产生待确认请求', async () => {
+    const result = await canUseTool(
+      'generate_sketch',
+      { project_id: 'p-allow-all' },
+      's-allow-all',
+      'allow-all',
+      'p-allow-all',
+    )
+
+    // 契约（@S3-JUDGE-009 / F8）：allow-all = 除 dangerous 外全部自动放行
+    expect(result).toEqual({ behavior: 'allow' })
+    expect(getPendingBySession('s-allow-all')).toEqual([])
+  })
+
+  it('[S0-PERM-007] allow-all 模式下 dangerous 工具仍须用户确认（不自动放行/拒绝）', async () => {
+    const decision = canUseTool(
+      'rollback_snapshot',
+      { project_id: 'p-allow-all', snapshot_id: 'snap-1' },
+      's-allow-all-d',
+      'allow-all',
+      'p-allow-all',
+    )
+    const pending = getPendingBySession('s-allow-all-d')
+
+    // 契约（@S3-JUDGE-009 / F8）：dangerous 与模式无关，必须人工确认——
+    // 落 pendingRequests 等用户决策，绝不自动放行/拒绝
+    expect(pending).toHaveLength(1)
+    expect(pending[0]?.danger_level).toBe('dangerous')
+
+    resolvePermission({
+      request_id: 's0-perm-007-resolve',
+      permission_request_id: pending[0]!.id,
+      session_id: 's-allow-all-d',
+      decision: 'allow',
+    })
+    await expect(decision).resolves.toEqual({ behavior: 'allow' })
+    expect(getPendingRequests()).toEqual([])
+  })
 })
 
 function makeChildProcess(): ChildProcess {

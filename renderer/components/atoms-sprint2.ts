@@ -21,8 +21,12 @@ import { pendingPermissionRequestsAtom } from '../agent-atoms'
 // 1. 权限模式（全局，可在设置中切换）
 // =========================================================================
 
-/** 当前权限模式：safe=自动拒绝危险 / ask=弹窗确认 / allow-all=全部放行 */
-export const permissionModeAtom = atom<'safe' | 'ask' | 'allow-all'>('ask')
+/**
+ * 当前权限模式 atom 定义已上移至 agent-atoms.ts（F8：全局监听器需在收到
+ * permission_mode_changed 广播时写它；定义在上游消除 agent-atoms ← atoms-sprint2
+ * 循环依赖）。此处 re-export 保持既有 import 路径兼容。
+ */
+export { permissionModeAtom } from '../agent-atoms'
 
 // =========================================================================
 // 2. 权限队列（从 agent-atoms 的 pendingPermissionRequestsAtom 派生，FIFO）

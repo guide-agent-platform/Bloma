@@ -654,6 +654,8 @@ export interface AgentEvent {
     | 'retrying'
     | 'error'
     | 'completed'
+    /** 权限模式切换广播（F8）：主进程 setMode 成功后同步渲染端 atom，payload.mode 为新模式 */
+    | 'permission_mode_changed'
   payload: Record<string, unknown>
   created_at: string
 }

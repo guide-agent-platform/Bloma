@@ -110,6 +110,14 @@ export const agentMessagesFamily = atomFamily((_sessionId: string) =>
 
 export const pendingPermissionRequestsAtom = atom<Map<string, PermissionRequest[]>>(new Map())
 
+/**
+ * 当前权限模式（F8 上移至此）：safe=自动拒绝危险 / ask=弹窗确认 /
+ * allow-all=除 dangerous 外自动放行（dangerous 与模式无关须人工确认，@S3-JUDGE-009）。
+ * 主进程 setMode 成功后广播 permission_mode_changed，全局监听器据此同步——
+ * 设置页本地写仍保留（同一 atom，双入口一致）。
+ */
+export const permissionModeAtom = atom<'safe' | 'ask' | 'allow-all'>('ask')
+
 export const currentSessionPermissionCountAtom = atom((get) => {
   const activeId = get(activeAgentSessionIdAtom)
   if (!activeId) return 0
@@ -207,6 +215,15 @@ export function setupGlobalAgentListeners(): () => void {
     // 新一轮决策需求到达 → 重置消费标记，让新卡片能重新弹出
     if (event.type === 'user_decision_required') {
       store.set(decisionConsumedFamily(event.session_id), false)
+    }
+
+    // 权限模式切换广播（F8）：主进程 setMode 成功后同步渲染端 atom——
+    // 弹窗契约（dangerous 人工确认与模式无关）不再依赖「atom 恰好未同步」的缺口。
+    if (event.type === 'permission_mode_changed' && typeof event.payload.mode === 'string') {
+      const mode = event.payload.mode as 'safe' | 'ask' | 'allow-all'
+      if (mode === 'safe' || mode === 'ask' || mode === 'allow-all') {
+        store.set(permissionModeAtom, mode)
+      }
     }
 
     const streamAtom = agentStreamStateFamily(event.session_id)

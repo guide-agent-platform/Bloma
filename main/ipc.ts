@@ -163,10 +163,20 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
   })
 
   // 权限模式切换：设置页三档（safe/ask/allow-all）同步到主进程 enforcement。
+  // F8：切换成功后经 stream 通道广播 permission_mode_changed，渲染端 atom 随主进程
+  // 同步（此前 atom 只在设置页本地写、其他入口 setMode 后弹窗契约押在未同步缺口上）。
   ipcMain.handle(IPC_CHANNELS.PERMISSION_SET_MODE, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<PermissionSetModeInput>(payload, ['mode'])
-      return { mode: setPermissionMode(input.mode) }
+      const mode = setPermissionMode(input.mode)
+      mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, {
+        event_id: randomUUID(),
+        session_id: `permission-mode-${mode}`,
+        type: 'permission_mode_changed',
+        payload: { mode },
+        created_at: new Date().toISOString(),
+      })
+      return { mode }
     })
   })
 

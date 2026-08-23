@@ -122,9 +122,10 @@ function toolReadableName(toolName: string): string {
 export interface PermissionDialogProps {
   /**
    * 权限模式（保留供测试/未来覆盖，正常由 permissionModeAtom 驱动）。
-   * 'safe'      → 危险操作直接拒绝不弹窗（无人值守/自动化管线默认）
+   * 统一契约（@S3-JUDGE-009 / F8）：dangerous 必须人工确认，与模式无关。
+   * 'safe'      → 危险操作直接拒绝不弹窗；warning 不经此层（主进程已放行）
    * 'ask'       → 弹窗确认（默认）
-   * 'allow-all' → 全部自动放行（仅开发/演示用）
+   * 'allow-all' → warning/safe 自动放行；dangerous 仍弹窗人工确认
    */
   mode?: 'safe' | 'ask' | 'allow-all'
 }
@@ -177,12 +178,16 @@ export const PermissionDialog: React.FC<PermissionDialogProps> = ({ mode: propMo
   )
 
   // ==================== safe / allow-all 模式自动处理 ====================
+  // 统一契约（@S3-JUDGE-009 / F8）：dangerous 必须人工确认，与模式无关；
+  // allow-all = 除 dangerous 外全部自动放行（与主进程 canUseTool 对齐）。
 
   useEffect(() => {
     if (!currentRequest) return
-    // allow-all：全部自动放行（含主进程仍会上报的 dangerous，避免挂起等待）。
+    // allow-all：warning/safe 自动放行；dangerous 落到弹窗人工确认（不自动处理）。
     if (mode === 'allow-all') {
-      handleRespond('allow')
+      if (currentRequest.danger_level !== 'dangerous') {
+        handleRespond('allow')
+      }
       return
     }
     if (mode !== 'safe') return
@@ -206,8 +211,9 @@ export const PermissionDialog: React.FC<PermissionDialogProps> = ({ mode: propMo
   // 无请求 → 不渲染
   if (!currentRequest) return null
 
-  // 非 ask 模式不弹窗（safe / allow-all 已在 effect 中自动处理）
-  if (mode !== 'ask') return null
+  // safe 模式不弹窗（dangerous 已自动拒绝、warning 主进程已放行不会到达）；
+  // ask / allow-all 下 dangerous 请求渲染弹窗等人工确认（契约：dangerous 与模式无关）。
+  if (mode === 'safe') return null
 
   // ask 模式：按等级渲染
   const level = currentRequest.danger_level
