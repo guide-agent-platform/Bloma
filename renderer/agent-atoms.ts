@@ -249,6 +249,22 @@ export function setupGlobalAgentListeners(): () => void {
         store.set(stageIndicatorLabelAtom, STAGE_LABEL_MAP[event.payload.stage as WorkflowStage] ?? '处理中')
       }
 
+      // Agent Loop 工具进行中（PR4）：编程阶段把阶段指示细化为「第 N 轮 · 正在 {工具}」。
+      // 只在生成/测试/修复/迭代阶段生效——澄清等对话阶段没有轮次语义；
+      // 下一次 stage_changed 会重置回标准阶段文案，无需在此清理。
+      if (event.type === 'tool_call_started') {
+        const stage = store.get(workflowStageAtom)
+        if (stage === 'generating_mvp' || stage === 'testing' || stage === 'repairing' || stage === 'iterating') {
+          const tool = String(event.payload.tool ?? '')
+          const turn = event.payload.turn
+          const toolName = TOOL_STAGE_LABELS[tool] ?? tool
+          store.set(
+            stageIndicatorLabelAtom,
+            turn !== undefined ? `第 ${Number(turn)} 轮 · 正在${toolName}` : `正在${toolName}`,
+          )
+        }
+      }
+
       const text = typeof event.payload.text === 'string' ? event.payload.text : ''
       const isTerminal = event.type === 'completed' || event.type === 'error'
 
@@ -474,6 +490,18 @@ export function resetProjectState(): void {
 // =========================================================================
 // 12. 阶段指示器文案（P0 用户可见中文）
 // =========================================================================
+
+/** Agent Loop 工具 → 阶段指示文案（PR4：「第 N 轮 · 正在写入文件」）。 */
+export const TOOL_STAGE_LABELS: Record<string, string> = {
+  read_file: '读取文件',
+  list_files: '查看文件列表',
+  grep: '搜索代码',
+  write_file: '写入文件',
+  edit_file: '修改文件',
+  run_preview: '启动预览',
+  run_gwt_tests: '测试功能',
+  run_security_scan: '安全扫描',
+}
 
 export const STAGE_LABEL_MAP: Record<WorkflowStage, string> = {
   choosing_mode: '选择模式',

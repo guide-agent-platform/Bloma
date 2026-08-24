@@ -3,6 +3,7 @@ import { atom, useAtomValue } from 'jotai'
 import { CardOptions } from './CardOptions'
 import type { CardOption } from './CardOptions'
 import { WaitingFeedback } from './WaitingFeedback'
+import { ToolBlocksReplay, ToolCallFeed } from './ToolCallBlock'
 import { ArrowUp, MessageSquare, IconStop } from './icons'
 import {
   activeAgentSessionIdAtom,
@@ -106,6 +107,17 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const inputRef = React.useRef<HTMLTextAreaElement>(null)
 
   const streamingContent = hasActiveStream && streamState ? streamState.content : ''
+
+  // 历史回放关联表：tool_use_id → 工具名（loop 落盘的 user 轮 tool_result 只有 id，回放时回填名字）
+  const toolNamesById = React.useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const message of messages) {
+      for (const block of message.content) {
+        if (block.type === 'tool_use' && block.id && block.name) map[block.id] = block.name
+      }
+    }
+    return map
+  }, [messages])
 
   React.useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -238,8 +250,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             )}
 
             {messages.map((msg, i) => (
-              <MessageBubble key={i} message={msg} mode={mode} />
+              <MessageBubble key={i} message={msg} mode={mode} toolNamesById={toolNamesById} />
             ))}
+
+            {/* Agent Loop 实时工具流（tool_call_started/completed 事件推导的折叠行） */}
+            {hasActiveStream && streamState && <ToolCallFeed events={streamState.events} />}
 
             {streamingContent && (
               <MessageBubble
@@ -397,6 +412,8 @@ interface MessageBubbleProps {
   message: AgentMessage
   mode: ProjectMode | null
   isStreaming?: boolean
+  /** tool_use_id → 工具名（回放 tool_result 行用） */
+  toolNamesById?: Record<string, string>
 }
 
 const userBubbleBg = (mode: ProjectMode | null): string =>
@@ -409,7 +426,7 @@ const userBubbleShadow = (mode: ProjectMode | null): string =>
     ? '0 4px 12px -3px rgba(14,116,144,0.35)'
     : '0 4px 12px -3px rgba(124,58,237,0.35)'
 
-const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreaming = false }) => {
+const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreaming = false, toolNamesById }) => {
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
 
@@ -418,7 +435,15 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
     .map((block) => block.text ?? '')
     .join('')
 
-  if (!text && !isStreaming) return null
+  // Agent Loop 落盘的轮次：assistant 轮带 tool_use、user 轮只带 tool_result（无文本）
+  const hasToolBlocks = message.content.some((block) => block.type === 'tool_use' || block.type === 'tool_result')
+
+  if (!text && !hasToolBlocks && !isStreaming) return null
+
+  // 纯工具轮（无文本）：居中工具行胶囊，不占用对话气泡（陷阱 26 家族：不污染纯文本流）
+  if (!text && hasToolBlocks) {
+    return <ToolBlocksReplay blocks={message.content} toolNamesById={toolNamesById} />
+  }
 
   if (isSystem) {
     // [decision] 是内部决策簿记（用户面在文档面板的 decisions.md），不进聊天流
@@ -475,6 +500,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
       >
         {text || (isStreaming ? '…' : '')}
       </div>
+      {hasToolBlocks && <ToolBlocksReplay blocks={message.content} toolNamesById={toolNamesById} />}
       <span
         style={{
           fontSize: 'var(--font-size-xs)',
