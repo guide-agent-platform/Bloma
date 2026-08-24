@@ -278,6 +278,12 @@ describe('runAgentLoop（PR2 L1）', () => {
     expect(result.status).toBe('turn_limit')
     const lastCall = receivedMessages.at(-1)!
     expect(lastCall.length).toBe(2 + TOOL_WINDOW_ROUNDS * 2) // system + task + 最近 8 轮 tool 对
+    // 窗口内容断言：保留最近 8 轮（第 5~12 轮，id t3..t10），早期轮（t0..t2）被剪掉
+    const toolUseIds = lastCall
+      .filter((turn) => turn.role === 'assistant')
+      .map((turn) => (turn.content as Array<{ type?: string; id?: string }>).find((block) => block.type === 'tool_use')?.id)
+      .filter(Boolean)
+    expect(toolUseIds).toEqual(['t3', 't4', 't5', 't6', 't7', 't8', 't9', 't10'])
     const jsonl = readSessionJsonl('session-window')
     expect(jsonl.filter((m) => m.role === 'assistant' && m.content.some((b) => b.type === 'tool_use'))).toHaveLength(12)
   })

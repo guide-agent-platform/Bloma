@@ -72,6 +72,48 @@ describe('PlatformServices sandbox runtime', () => {
     expect(child.kill).not.toHaveBeenCalled() // 红：当前第二次 stopSandbox 会 kill
   })
 
+  it('runSandbox 幂等守卫：command 不匹配时不复用，走 stop+spawn', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-sandbox-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-cmd', mode: 'quick' })
+    const child = makeChildProcess()
+    let spawnCount = 0
+    setSandboxRuntimeForTests({
+      portAllocator: async () => 3201,
+      healthCheck: async () => true,
+      processFactory: () => {
+        spawnCount += 1
+        return child.process
+      },
+    })
+    await runSandbox({ request_id: 'req-1', project_id: project.project_id }) // 无 command → 内嵌服务器
+    await runSandbox({ request_id: 'req-2', project_id: project.project_id, command: 'npm start' })
+    expect(spawnCount).toBe(2) // 红：当前守卫不比较 command → 复用 → 1
+  })
+
+  it('runSandbox 幂等守卫兜底：healthCheck 失败时不复用，走 stop+spawn', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-sandbox-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-fall', mode: 'quick' })
+    const child = makeChildProcess()
+    let spawnCount = 0
+    let currentPort = 3202
+    setSandboxRuntimeForTests({
+      portAllocator: async () => currentPort,
+      // 守卫探活的是「旧端口」（当前 port 已递增到新端口）→ false；spawn 后探活的是「新端口」→ true
+      healthCheck: async (url) => url.endsWith(`:${currentPort}`),
+      processFactory: () => {
+        spawnCount += 1
+        return child.process
+      },
+    })
+    await runSandbox({ request_id: 'req-1', project_id: project.project_id }) // spawn :3202，探活通过
+    currentPort = 3203 // 服务器「已挂」：守卫探活旧 :3202 失败 → 不掩盖故障，stop+spawn :3203
+    await runSandbox({ request_id: 'req-2', project_id: project.project_id })
+    expect(spawnCount).toBe(2)
+    expect(child.kill).toHaveBeenCalledTimes(1)
+  })
+
   it('retries with a new port when the sandbox process reports a port conflict', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-sandbox-'))
     process.env.PROMA_HOME = home

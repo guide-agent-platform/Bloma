@@ -26,6 +26,8 @@ import { findProject, updateProject } from './project-service'
 interface SandboxProcess {
   process: ChildProcess
   port: number
+  /** 启动命令（幂等守卫据此区分「内嵌静态服务器」与显式命令沙箱，command 不匹配不复用） */
+  command?: string
 }
 
 type SandboxProcessFactory = (projectRoot: string, port: number, command?: string) => ChildProcess
@@ -65,7 +67,11 @@ export async function runSandbox(input: SandboxRunInput): Promise<SandboxRunResu
   // 消除 runMvpViaAgentLoop 交付前对 loop 内 run_preview 沙箱的冗余重启（preview_url 抖动）；
   // 崩溃/挂起时 map 已被 exit 清理或 healthCheck 失败 → 照常走 stop+spawn 重启。
   const existing = activeSandboxes.get(project.project_id)
-  if (existing && (await sandboxHealthCheck(`http://localhost:${existing.port}`))) {
+  if (
+    existing
+    && existing.command === (input.command ?? undefined)
+    && (await sandboxHealthCheck(`http://localhost:${existing.port}`))
+  ) {
     return { status: 'running', preview_url: `http://localhost:${existing.port}`, port: existing.port }
   }
 
@@ -77,7 +83,7 @@ export async function runSandbox(input: SandboxRunInput): Promise<SandboxRunResu
     const port = await allocatePort(SANDBOX_PORT_START, SANDBOX_PORT_END)
     const previewUrl = `http://localhost:${port}`
     const child = sandboxProcessFactory(project.root_path, port, input.command)
-    activeSandboxes.set(project.project_id, { process: child, port })
+    activeSandboxes.set(project.project_id, { process: child, port, command: input.command })
 
     // 捕获 stdout/stderr 到内部日志（供修复循环分析，不向 P0 展示堆栈）
     const appendLog = (chunk: Buffer | string): void => {

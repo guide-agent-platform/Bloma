@@ -375,7 +375,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         new_string: { type: 'string', description: '（diff 模式）替换后的内容' },
         content: { type: 'string', description: '（whole 模式）修改后的完整文件内容' },
       },
-      required: editFormat === 'whole' ? ['path'] : ['path', 'new_string'],
+      required: editFormat === 'whole' ? ['path'] : ['path', 'old_string', 'new_string'],
     },
     execute: async (toolInput, ctx) => {
       const project = findProject(projectId)

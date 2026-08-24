@@ -238,6 +238,13 @@ describe('agent-tools（PR2 L2）', () => {
       expect(readFileSync(join(project.root_path, 'src', 'app.js'), 'utf8')).toBe('const a = 1;\n')
     })
 
+    it('edit_file schema：diff 模式 required 含 path/old_string/new_string', async () => {
+      const project = createProject({ request_id: 'req-e4', mode: 'quick' })
+      const tools = buildAgentTools({ projectId: project.project_id })
+      const edit = byName(tools, 'edit_file')
+      expect(edit.input_schema.required).toEqual(['path', 'old_string', 'new_string'])
+    })
+
     it('edit_file whole 模式：content 整文件重写（弱渠道能力位）', async () => {
       const project = createProject({ request_id: 'req-e2', mode: 'quick' })
       writeFileSync(join(project.root_path, 'index.html'), '<html><head></head><body>旧</body></html>', 'utf8')

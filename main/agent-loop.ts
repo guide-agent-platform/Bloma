@@ -126,6 +126,10 @@ function isToolTurn(turn: ConversationTurn): boolean {
  * Agent Loop 上下文窗口化（F4）：首轮 task 恒保留，后向扫描——
  * tool 轮按 toolRounds*2 条预算保留（相邻成对 → 最近完整 N 轮，不拆 tool_use→tool_result 配对），
  * 纯文本轮按 textWindowTurns 保留；保持原顺序。JSONL 落盘不走此路径（全量审计）。
+ *
+ * 已知取舍（对抗审查 M2）：硬窗口会丢弃早期轮次的工具结果——长循环（longterm=40 轮）下
+ * 第 1 次 run_gwt_tests 失败的断言细节可能在 8 轮后出窗。当前为最小改动采用固定窗口；
+ * 若后续模型质量受此影响，优先方案是「钉住首个 test_failed 轮」（在 kept 之外 unshift 该轮对）。
  */
 export function windowMessages(messages: ConversationTurn[], textWindowTurns: number, toolRounds: number): ConversationTurn[] {
   if (messages.length === 0) return []
@@ -279,7 +283,8 @@ async function executeToolCall(
   // 权限门禁：loop 是无人值守自动化，仅支持 allow-all（warning 放行、dangerous 交由
   // canUseTool 判定）；非 allow-all（ask/safe）直接拒绝进 is_error 让模型自纠——
   // 避免 canUseTool 在 ask 模式下落 pending 等 UI 造成永久挂起（取消信号也无法中断）。
-  // 副作用：非 allow-all 下 safe 工具也一并拒绝，生产 loop 恒 allow-all，接受。
+  // 副作用：非 allow-all 下 safe 工具也一并拒绝，生产 loop 恒 allow-all，接受
+  //（该行为已由 tests/unit/agent-loop-permission.test.ts 锁定，防未来无意放宽）。
   if (input.permissionMode !== 'allow-all') {
     return { output: `权限拒绝：本次运行不允许执行「${use.name}」。请改用其他方式完成，或直接输出当前进展总结。`, isError: true }
   }

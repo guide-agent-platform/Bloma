@@ -96,6 +96,17 @@ describe('runAgentLoop 权限防御（F3）', () => {
     expect(userBlock.content).toContain('权限拒绝')
   })
 
+  it('B：非 allow-all 下 safe 工具（read_file）也被连带拒绝（锁定行为，防止未来无意放宽）', async () => {
+    const reader = tool('read_file', () => ({ output: '内容' }))
+    const { query } = scriptedQuery([[toolUseMessage('t1', 'read_file')], [textMessage('收尾')]])
+    const result = await Promise.race([
+      runAgentLoop(baseInput({ query, tools: [reader], permissionMode: 'safe' })),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('AGENT_LOOP_HUNG')), 2000)),
+    ])
+    expect((result as { status: string }).status).toBe('completed')
+    expect(mockCanUseTool).not.toHaveBeenCalled()
+  })
+
   it('D：canUseTool 挂起（pending）时取消可中断，收尾 cancelled', async () => {
     mockCanUseTool.mockReturnValue(new Promise(() => {}))
     const controller = new AbortController()
