@@ -29,8 +29,17 @@ export function getAgentSessionPath(sessionId: string): string {
   return join(ensureDir(join(getPromaHome(), 'agent-sessions')), `${sessionId}.jsonl`)
 }
 
+/**
+ * 工作区根路径的纯拼接版（不建目录）。只读路径必须走这里：
+ * 经 `getWorkspacePath` 会顺手 mkdir，使「读事件/读埋点」也产生落盘副作用
+ * （PROMA_HOME 被污染时甚至会在 cwd 下建出 `undefined/agent-workspaces/...`）。
+ */
+function workspaceRoot(workspaceSlug: string): string {
+  return join(getPromaHome(), 'agent-workspaces', workspaceSlug)
+}
+
 export function getWorkspacePath(workspaceSlug: string): string {
-  return ensureDir(join(getPromaHome(), 'agent-workspaces', workspaceSlug))
+  return ensureDir(workspaceRoot(workspaceSlug))
 }
 
 export function getWorkspaceMcpConfigPath(workspaceSlug: string): string {
@@ -61,13 +70,17 @@ export function getSnapshotsDir(workspaceSlug: string, projectId: string): strin
   return ensureDir(join(getWorkspacePath(workspaceSlug), 'snapshots', projectId))
 }
 
-/** 项目事件历史独立存放于 workspace 级别，不随项目文件回滚而丢失。 */
+/**
+ * 项目事件历史独立存放于 workspace 级别，不随项目文件回滚而丢失。
+ * 纯路径（不建目录）：写入方 `appendJsonLine` 自建父目录，读取方不该有副作用。
+ */
 export function getProjectEventsPath(workspaceSlug: string, projectId: string): string {
-  return join(ensureDir(join(getWorkspacePath(workspaceSlug), 'events')), `${projectId}.jsonl`)
+  return join(workspaceRoot(workspaceSlug), 'events', `${projectId}.jsonl`)
 }
 
+/** 纯路径（不建目录），同 `getProjectEventsPath`。 */
 export function getAnalyticsPath(workspaceSlug: string): string {
-  return join(getWorkspacePath(workspaceSlug), 'analytics.jsonl')
+  return join(workspaceRoot(workspaceSlug), 'analytics.jsonl')
 }
 
 export function getSdkBinaryPath(): string {

@@ -15,5 +15,7 @@ export default defineConfig({
   },
   test: {
     root: __dirname,
+    // PROMA_HOME 被 teardown 写成字符串 "undefined" 时统一归位，见该文件注释
+    setupFiles: [resolve(__dirname, 'tests/support/proma-home-guard.ts')],
   },
 })

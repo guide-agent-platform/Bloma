@@ -194,7 +194,8 @@ it('[S0-STORE-002] 会话事件应写入临时 PROMA_HOME', () => {
 - 所有会写文件的测试必须使用测试专属临时 `PROMA_HOME`。
 - 禁止写入真实 `~/.proma/`、桌面、下载目录或用户项目目录。
 - setup 必须在被测模块首次读取路径前设置 `PROMA_HOME`。
-- teardown 必须恢复原环境变量并清理临时目录。
+- teardown 必须恢复原环境变量并清理临时目录。恢复时原值可能是 `undefined`，直接赋值会被 Node 转成字符串 `"undefined"`（后续用例即以相对路径写到 `./undefined/`），因此须 `delete` 而非赋值；`tests/support/proma-home-guard.ts`（全局 setupFile）已做兜底归位。
+- 路径工具中「文件路径」getter 不建目录（`getProjectEventsPath`/`getAnalyticsPath`），父目录由 `json-store` 写入时自建；只有「目录」getter 才 `ensureDir`。新增读路径勿引入 mkdir 副作用。
 
 ### 7.2 Agent 与模型
 
