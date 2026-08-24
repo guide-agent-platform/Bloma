@@ -646,6 +646,17 @@ export interface PermissionSetModeResult {
 // 8. Agent 流式事件
 // =========================================================================
 
+/** Agent Loop 结束状态（loop-aware judge M4-B 用；与 main/agent-loop 的 AgentLoopResult.status 同构）。 */
+export type AgentLoopStatus = 'completed' | 'turn_limit' | 'budget_exhausted' | 'cancelled'
+
+/** JudgeInput 的 loop 元数据（M4-B）：judge 对 loop 异常终止态判「不达标/让渡」，不信模型自述。 */
+export interface AgentLoopJudgeMetadata {
+  status: AgentLoopStatus
+  turns: number
+  finalText: string
+  toolCalls: Array<{ name: string; turn: number }>
+}
+
 export interface AgentEvent {
   event_id: string
   session_id: string
@@ -668,6 +679,13 @@ export interface AgentEvent {
     | 'completed'
     /** 权限模式切换广播（F8）：主进程 setMode 成功后同步渲染端 atom，payload.mode 为新模式 */
     | 'permission_mode_changed'
+    /** 委派子 agent 冒泡提问（M3）：payload.delegation_id / child_session_id / role / question */
+    | 'delegation_question'
+    /** 委派生命周期（M4-C）：payload 含 delegation_id / child_session_id / role / goal / status */
+    | 'delegation_started'
+    | 'delegation_completed'
+    | 'delegation_failed'
+    | 'delegation_cancelled'
   payload: Record<string, unknown>
   created_at: string
 }
@@ -714,6 +732,10 @@ export interface Project {
   constraints?: string[]
   /** U16：最近进展摘要（取自最近一次 sketch_generated 需求，列表卡片纯展示用，不经落盘） */
   progress_summary?: string
+  /** 最近一次 MVP 生成是否走 Agent Loop（M4-A：resume 时据此选「只终验不重修」路径） */
+  via_agent_loop?: boolean
+  /** 最近一次 Agent Loop 的结束状态（M4-B：judge loop-aware 读；resume 时透传给终验） */
+  agent_loop_status?: AgentLoopStatus
   created_at: string
   updated_at: string
 }

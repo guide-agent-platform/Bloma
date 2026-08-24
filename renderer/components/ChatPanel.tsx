@@ -4,6 +4,7 @@ import { CardOptions } from './CardOptions'
 import type { CardOption } from './CardOptions'
 import { WaitingFeedback } from './WaitingFeedback'
 import { ToolBlocksReplay, ToolCallFeed } from './ToolCallBlock'
+import { DelegationFeed } from './DelegationFeed'
 import { ArrowUp, MessageSquare, IconStop } from './icons'
 import {
   activeAgentSessionIdAtom,
@@ -255,6 +256,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
             {/* Agent Loop 实时工具流（tool_call_started/completed 事件推导的折叠行） */}
             {hasActiveStream && streamState && <ToolCallFeed events={streamState.events} />}
+
+            {/* Agent Loop 委派协作流（delegate_agent 委派的子会话行胶囊，M4-C） */}
+            {activeSessionId && <DelegationFeed sessionId={activeSessionId} />}
 
             {streamingContent && (
               <MessageBubble

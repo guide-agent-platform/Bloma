@@ -85,6 +85,29 @@ export const agentStreamStateFamily = atomFamily((sessionId: string) =>
   }),
 )
 
+// =========================================================================
+// 2b. 委派协作视图状态（M4-C，按 sessionId 隔离）
+// =========================================================================
+
+export type DelegationViewStatus = 'running' | 'completed' | 'failed' | 'cancelled'
+
+/** 委派子会话的渲染端视图（id/role/status 实时；pending_question 提示待回答）。 */
+export interface DelegationView {
+  delegation_id: string
+  child_session_id: string
+  role: string
+  goal: string
+  status: DelegationViewStatus
+  /** 子 agent 挂起提问的问题（父 loop 待 answer；显示 pending 提示） */
+  pending_question?: string
+}
+
+/** 委派生命周期聚合（仿 agentStreamStateFamily reducer）：从事件流归约出活跃/历史子会话列表。 */
+export const delegationsFamily = atomFamily((_sessionId: string) => atom<DelegationView[]>([]))
+
+/** 无 active session 时的稳定 fallback（避免 atomFamily 创建不可回收的 key，陷阱 10）。 */
+export const emptyDelegationsFallback = atom<DelegationView[]>([])
+
 /**
  * 决策卡片消费标记（per session）——修复「选了选项卡片还赖着不走」。
  *
@@ -226,6 +249,10 @@ export function setupGlobalAgentListeners(): () => void {
       }
     }
 
+    // M4-C 委派协作视图：生命周期事件（delegation_started/completed/failed/cancelled）+
+    // delegate_agent 工具调用的 detail 派生，归约进 delegationsFamily（仿 stream reducer）。
+    store.set(delegationsFamily(event.session_id), (previous) => reduceDelegationEvent(previous, event))
+
     const streamAtom = agentStreamStateFamily(event.session_id)
     store.set(streamAtom, (previous: AgentStreamState) => {
       // 权限请求：从 payload 提取并写入队列
@@ -282,6 +309,84 @@ export function setupGlobalAgentListeners(): () => void {
 }
 
 // =========================================================================
+// 5b. 委派事件归约（M4-C）
+// =========================================================================
+
+/**
+ * 委派事件 → delegationsFamily 的归约函数。
+ *
+ * 事件来源两类：
+ * - 委派生命周期事件（delegation_started / completed / failed / cancelled /
+ *   delegation_question）：主进程 agent-collaboration 在 start/settle/stop 时发布。
+ * - tool_call_completed 的 detail（M4-C 透传 delegate_agent 结构化返回）：在 lifecycle
+ *   事件缺失时派生初始行（防御时序——工具调用先于子循环收敛，started 通常已先到）。
+ *
+ * payload 契约：delegation_id / child_session_id / role / goal / status（生命周期事件与
+ * delegate 工具 detail 共用同一字段名）。
+ */
+function reduceDelegationEvent(previous: DelegationView[], event: AgentEvent): DelegationView[] {
+  // 生命周期事件（delegation_*）的 delegation_id 在顶层；tool_call_completed 的委派标识
+  // 嵌套在 detail 里（agent-loop 白名单透传），这里统一提取，保证两种来源都能归约出委派行。
+  const detail = event.payload.detail as Record<string, unknown> | undefined
+  const id =
+    typeof event.payload.delegation_id === 'string'
+      ? event.payload.delegation_id
+      : event.type === 'tool_call_completed' && detail && typeof detail.delegation_id === 'string'
+        ? detail.delegation_id
+        : undefined
+  if (!id) return previous
+  const index = previous.findIndex((item) => item.delegation_id === id)
+  const existing = index >= 0 ? previous[index] : undefined
+  const base: DelegationView = {
+    delegation_id: id,
+    child_session_id:
+      existing?.child_session_id ?? (typeof event.payload.child_session_id === 'string' ? event.payload.child_session_id : ''),
+    role: existing?.role ?? (typeof event.payload.role === 'string' ? event.payload.role : 'custom'),
+    goal: existing?.goal ?? (typeof event.payload.goal === 'string' ? event.payload.goal : ''),
+    status: existing?.status ?? 'running',
+  }
+  const upsert = (next: DelegationView): DelegationView[] => {
+    if (index < 0) return [...previous, next]
+    const copy = [...previous]
+    copy[index] = next
+    return copy
+  }
+
+  switch (event.type) {
+    case 'delegation_started':
+      return upsert({ ...base, status: 'running', pending_question: undefined })
+    case 'delegation_completed':
+      return upsert({ ...base, status: 'completed', pending_question: undefined })
+    case 'delegation_failed':
+      return upsert({ ...base, status: 'failed', pending_question: undefined })
+    case 'delegation_cancelled':
+      return upsert({ ...base, status: 'cancelled', pending_question: undefined })
+    case 'delegation_question':
+      return upsert({
+        ...base,
+        pending_question: typeof event.payload.question === 'string' ? event.payload.question : undefined,
+      })
+    case 'tool_call_completed': {
+      // delegate_agent 工具调用的 detail（无 lifecycle 事件时的派生来源）；已有记录不覆盖
+      // （tool_call 先于子循环收敛，避免把已 completed 的委派降回 running）。
+      if (existing) return previous
+      const detail = event.payload.detail as Record<string, unknown> | undefined
+      if (!detail || typeof detail.delegation_id !== 'string') return previous
+      const status = detail.status
+      return upsert({
+        delegation_id: detail.delegation_id,
+        child_session_id: typeof detail.child_session_id === 'string' ? detail.child_session_id : '',
+        role: typeof detail.role === 'string' ? detail.role : 'custom',
+        goal: typeof detail.goal === 'string' ? detail.goal : '',
+        status: status === 'completed' || status === 'failed' || status === 'cancelled' ? status : 'running',
+      })
+    }
+    default:
+      return previous
+  }
+}
+
+// =========================================================================
 // 6. 平台扩展 — 项目状态
 // =========================================================================
 
@@ -306,6 +411,9 @@ export const timelineExpandedAtom = atom<boolean>(false)
 
 /** 文档面板是否展开（仅长期迭代型可见） */
 export const documentPanelExpandedAtom = atom<boolean>(false)
+
+/** 协作面板（委派子会话抽屉）是否展开（M4-C，WorkspaceHeader「协作」按钮切换） */
+export const collaborationPanelExpandedAtom = atom<boolean>(false)
 
 /** 当前选中的快照 */
 export const selectedSnapshotAtom = atom<Snapshot | null>(null)
@@ -482,6 +590,7 @@ export function resetProjectState(): void {
   store.set(modeSelectedAtom, false)
   store.set(timelineExpandedAtom, false)
   store.set(documentPanelExpandedAtom, false)
+  store.set(collaborationPanelExpandedAtom, false)
   store.set(snapshotsListAtom, [])
   store.set(selectedSnapshotAtom, null)
   store.set(stageIndicatorLabelAtom, '选择模式')

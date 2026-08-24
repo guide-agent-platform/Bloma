@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { AgentEvent, AgentSendMessageInput, Channel, ChannelModel, MessageContentBlock, Project, ProjectMode, Snapshot, TemplateType } from '../shared/types'
+import type { AgentEvent, AgentLoopJudgeMetadata, AgentSendMessageInput, Channel, ChannelModel, MessageContentBlock, Project, ProjectMode, Snapshot, TemplateType } from '../shared/types'
 import { getAgentSessionPath, getDocumentsDir } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
 import { buildPrdBackplane, readPrdBackplane, readUxContractSketch, syncDocuments, writeSecurityScanDocument } from './document-engine'
@@ -25,8 +25,9 @@ import { assertToolAllowed } from './permission-service'
 import { recordDecision } from './decision-log'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from './recovery-service'
 import { readPrimaryIntent } from './session-service'
-import { runAgentLoop } from './agent-loop'
+import { runAgentLoop, type AgentLoopResult } from './agent-loop'
 import { buildAgentTools } from './agent-tools'
+import { registerParentLoopContext, setChildToolsBuilder, unregisterParentLoopContext } from './agent-collaboration'
 import { categoryTemperature } from './model-resolution'
 import type { SDKQuery, ToolDefinition } from './orchestrator'
 
@@ -93,6 +94,8 @@ export interface MvpTaskResult {
   run_command: string
   /** 本次 MVP 由 Agent Loop 路径生成（3b：调用方据此把外部修复循环切为「只终验不重修」） */
   via_agent_loop?: boolean
+  /** Agent Loop 结果元数据（M4-B：runAgentLoopPostTesting 透传给 judge loop-aware；仅 loop 路径存在） */
+  loop_result?: AgentLoopResult
 }
 
 let programmingEventPublisher: ProgrammingEventPublisher = () => undefined
@@ -456,7 +459,7 @@ export async function runMvpTask(input: MvpTaskInput): Promise<MvpTaskResult> {
  */
 async function finalizeMvpDelivery(
   input: MvpTaskInput,
-  detail: { fileCount: number; snapshotSummary: string; readySummary: string; previewUrl: string; viaAgentLoop?: boolean },
+  detail: { fileCount: number; snapshotSummary: string; readySummary: string; previewUrl: string; viaAgentLoop?: boolean; loopResult?: AgentLoopResult },
 ): Promise<MvpTaskResult> {
   const runCommand = 'npm start'
   await allowAutomatedTool('run_project', { project_id: input.project_id, command: runCommand }, input.session_id, input.project_id)
@@ -490,6 +493,8 @@ async function finalizeMvpDelivery(
   updateProject(input.project_id, {
     current_stage: 'testing',
     current_snapshot_id: snapshot.snapshot_id,
+    // M4-A：持久化 loop 路径标记，resumeBlockedFlow 据此选「只终验不重修」门禁路径
+    ...(detail.viaAgentLoop ? { via_agent_loop: true, agent_loop_status: detail.loopResult?.status } : {}),
   })
   publish(input, 'stage_changed', { stage: 'testing' })
   publish(input, 'mvp_ready', {
@@ -503,7 +508,7 @@ async function finalizeMvpDelivery(
     preview_url: detail.previewUrl,
     snapshot,
     run_command: runCommand,
-    ...(detail.viaAgentLoop ? { via_agent_loop: true } : {}),
+    ...(detail.viaAgentLoop ? { via_agent_loop: true, loop_result: detail.loopResult } : {}),
   }
 }
 
@@ -567,6 +572,9 @@ export function agentLoopEnabled(): boolean {
 
 /** maxTurns（方案 §8 待拍板默认：quick=24 / longterm=40，首跑后按埋点标定）。 */
 const AGENT_LOOP_MAX_TURNS: Record<ProjectMode, number> = { quick: 24, longterm: 40 }
+
+/** 子 agent 独立轮次上限（比主 loop 小，控制委派 token 成本；按埋点标定）。 */
+const DELEGATION_MAX_TURNS = 12
 
 /** 渠道 tool use 支持度的进程内探测缓存（key = `${channelId}:${modelName}`，重启后重新探测一次）。 */
 const toolSupportCache = new Map<string, boolean>()
@@ -693,6 +701,38 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   const backplane = readPrdBackplane(input.project_id)
   const editFormat = loop.model?.edit_format ?? 'diff'
   const startedAt = Date.now()
+  // 委派协作（嫁接方案 §4.1）：注册父 loop 上下文供 delegate_agent 构建子循环；子工具集按 role 裁剪
+  setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
+  registerParentLoopContext(input.session_id, {
+    query: input.query!,
+    env: loop.env,
+    maxTokens: loop.channel.max_tokens ?? DEFAULT_MAX_TOKENS,
+    maxTurns: AGENT_LOOP_MAX_TURNS[input.mode],
+    delegationMaxTurns: DELEGATION_MAX_TURNS,
+    permissionMode: AUTOMATED_PERMISSION_MODE,
+    temperature: categoryTemperature('mvp'),
+    system: buildAgentLoopSystemPrompt(backplane, editFormat),
+    editFormat,
+    publish: (type, payload) => publish(input, type, payload),
+    onChildTurn: (info, child) => {
+      trackAnalytics({
+        request_id: child.requestId,
+        event: {
+          event_type: 'agent_loop_turn',
+          project_id: input.project_id,
+          session_id: child.sessionId,
+          payload: {
+            turn: info.turn,
+            tool_calls: info.toolCalls.map((call) => call.name),
+            via: 'delegation',
+            role: child.role,
+          },
+          privacy_level: 'research_safe',
+        },
+      })
+    },
+  })
+
   recordDecision({
     project_id: input.project_id,
     session_id: input.session_id,
@@ -708,7 +748,9 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     },
   })
 
-  const result = await runAgentLoop({
+  let result: AgentLoopResult
+  try {
+    result = await runAgentLoop({
     system: buildAgentLoopSystemPrompt(backplane, editFormat),
     task: buildAgentLoopTask(backplane, input.mode),
     tools: buildAgentTools({
@@ -757,6 +799,9 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
       })
     },
   })
+  } finally {
+    unregisterParentLoopContext(input.session_id)
+  }
 
   const durationMs = Date.now() - startedAt
   const toolDistribution: Record<string, number> = {}
@@ -815,6 +860,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     readySummary: result.finalText.slice(0, 200) || `Agent Loop 生成完成（${result.status}）。`,
     previewUrl: sandbox.preview_url,
     viaAgentLoop: true,
+    loopResult: result,
   })
 }
 
@@ -1171,6 +1217,10 @@ export interface JudgeReviewInput {
   request_id: string
   session_id: string
   project_id: string
+  /** Agent Loop 结果元数据（M4-B）：loop 路径终验透传，judge 对异常终止态判「不达标/让渡」 */
+  loop?: AgentLoopJudgeMetadata
+  /** loop 路径「只终验不重修」（M4-B）：constraint_error 不再外部文档重修，首败熔断让渡 */
+  repairInternalized?: boolean
 }
 
 export interface JudgeReviewResult {
@@ -1208,8 +1258,11 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
       },
     })
 
-    if (returns > limit) {
-      // U7：把 Judge 的具体退回原因（user_visible_summary，如「缺了按月统计功能」）带给让渡卡片
+    // M4-B loop-aware：loop 路径「只终验不重修」——constraint_error 不再外部文档重修
+    // （loop 已内化修复，外部再修语义重复）；judge 自判 repairable=false（loop 异常终止态）
+    // 同样不再重修。首败即熔断让渡（U7：把具体退回原因带给让渡卡片）。
+    const repairable = verdict.repairable === true && input.repairInternalized !== true
+    if (!repairable || returns > limit) {
       publishBlockedDecision(input, 'judge_return', verdict.user_visible_summary)
       return { outcome: 'blocked', verdict }
     }
@@ -1246,7 +1299,12 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
 function judgeOnce(input: JudgeReviewInput): JudgeVerdict {
   const project = findProject(input.project_id)
   const testResult = readTestReport(input.project_id)
-  const verdict = runJudge({ project_id: input.project_id, mode: project.mode, test_result: testResult ?? undefined })
+  const verdict = runJudge({
+    project_id: input.project_id,
+    mode: project.mode,
+    test_result: testResult ?? undefined,
+    ...(input.loop ? { loop: input.loop } : {}),
+  })
   publish(input, 'judge_result', {
     verdict: verdict.verdict,
     user_visible_summary: verdict.user_visible_summary,
@@ -1411,6 +1469,80 @@ export async function runPostMvpTestingFlow(input: GwtTestingInput): Promise<Gwt
   return { verdict: judge.outcome, test_result: testResult, judge: judge.verdict }
 }
 
+export interface AgentLoopPostTestingInput {
+  request_id: string
+  session_id: string
+  project_id: string
+  mode: ProjectMode
+  preview_url: string
+  /** Agent Loop 结果元数据（M4-B）：其存在即标记 loop 路径；judge 对异常终止态判「让渡」 */
+  loop: AgentLoopJudgeMetadata
+}
+
+/**
+ * runAgentLoopPostTesting — Agent Loop 路径的独立门禁函数（M4-A，微调方案 §4）。
+ *
+ * 语义固定为「只终验不重修」：GWT 终验 →（通过）安全扫描 → judge 终审 → ready / 让渡，
+ * **无外部修复循环**（loop 内的自测自修已用尽修复预算，不给外部预算）。与
+ * runPostMvpTestingFlow（旧管道含 repairing 修复循环）解耦：loop 调用方一律走本函数，
+ * 不再靠 `repair_internalized` 布尔位在旧函数里分叉两种语义（D1）。
+ */
+export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput): Promise<GwtTestingResult> {
+  updateProject(input.project_id, { current_stage: 'testing' })
+  publish(input, 'stage_changed', { stage: 'testing' })
+
+  let testResult = await runGwtScenarios({ project_id: input.project_id, session_id: input.session_id, preview_url: input.preview_url })
+  writeTestReport({ request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, result: testResult })
+  syncDocuments({ request_id: input.request_id, project_id: input.project_id, session_id: input.session_id, checkpoint: 'mvp_tested' })
+
+  // 只终验不重修：GWT 首败即熔断回滚 / 让渡（loop 内修复预算已用尽）
+  if (testResult.failed_count > 0) {
+    const outcome = await circuitBreakRollback({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      reason: '终验未通过（Agent Loop 路径，loop 内修复预算已用尽）',
+      publish: (type, payload) => publish(input, type, payload),
+    })
+    if (outcome.rolled_back) throw new CircuitBreakSettledError()
+    const failureTitle =
+      testResult.failure_summary.length > 0
+        ? `测试未通过：${testResult.failure_summary.map((f) => f.scenario).join('、')}`
+        : '自动修复多次后测试仍未通过'
+    publishBlockedDecision(input, 'test_repair', failureTitle)
+    return { verdict: 'blocked', test_result: testResult }
+  }
+
+  // 安全扫描终验（A3，OWASP 静态扫描）：高危/严重命中同样只熔断不重修
+  let security = runSecurityScan({ project_id: input.project_id, root_path: findProject(input.project_id).root_path })
+  writeSecurityScanDocument(input.project_id, renderSecurityScanMarkdown(security))
+  if (!security.passed) {
+    const outcome = await circuitBreakRollback({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      reason: '安全终验未通过（Agent Loop 路径，loop 内修复预算已用尽）',
+      publish: (type, payload) => publish(input, type, payload),
+    })
+    if (outcome.rolled_back) throw new CircuitBreakSettledError()
+    publishBlockedDecision(input, 'security_repair', '检测到的安全隐患反复修不好，需要你来定夺')
+    return { verdict: 'blocked', test_result: testResult }
+  }
+
+  // 终审（M4-B loop-aware）：judge 感知 loop 结果——completed 照常读盘判定；异常终止态让渡。
+  // judge 级修复同样「只终验不重修」（repairInternalized 熔断 constraint_error 外部文档重修）。
+  updateProject(input.project_id, { current_stage: 'judge_review' })
+  publish(input, 'stage_changed', { stage: 'judge_review' })
+  const judge = await runJudgeReview({
+    request_id: input.request_id,
+    session_id: input.session_id,
+    project_id: input.project_id,
+    loop: input.loop,
+    repairInternalized: true,
+  })
+  return { verdict: judge.outcome, test_result: testResult, judge: judge.verdict }
+}
+
 export interface IterationTaskInput {
   request_id: string
   session_id: string
@@ -1453,17 +1585,28 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
       query: input.query,
       signal: input.signal,
     })
-    await runPostMvpTestingFlow({
-      request_id: input.request_id,
-      session_id: input.session_id,
-      project_id: input.project_id,
-      mode: input.mode,
-      preview_url: mvp.preview_url,
-      query: input.query,
-      channel_id: input.channel_id,
-      signal: input.signal,
-      repair_internalized: mvp.via_agent_loop === true,
-    })
+    // M4-A：loop 生成的迭代走独立门禁（只终验不重修），旧管道走原测试流程
+    if (mvp.via_agent_loop && mvp.loop_result) {
+      await runAgentLoopPostTesting({
+        request_id: input.request_id,
+        session_id: input.session_id,
+        project_id: input.project_id,
+        mode: input.mode,
+        preview_url: mvp.preview_url,
+        loop: mvp.loop_result,
+      })
+    } else {
+      await runPostMvpTestingFlow({
+        request_id: input.request_id,
+        session_id: input.session_id,
+        project_id: input.project_id,
+        mode: input.mode,
+        preview_url: mvp.preview_url,
+        query: input.query,
+        channel_id: input.channel_id,
+        signal: input.signal,
+      })
+    }
     // T4-L3 蒸馏兜底·触发点②（每次迭代完成后，fire-and-forget）：默认关闭，
     // 失败在内部降级并落决策，绝不阻塞迭代收尾
     distillProjectMemorySafely({
@@ -1755,6 +1898,12 @@ export async function resumeBlockedFlow(
 
   const project = findProject(input.project_id)
   const action = project.blocked_action
+  // M4-A：项目由 Agent Loop 生成 → resume 走独立门禁（只终验不重修）；judge 需 loop 元数据。
+  // loop 已结束时原始 AgentLoopResult 不在内存，用持久化的 via_agent_loop + agent_loop_status 重建
+  // 最小元数据（turns/finalText/toolCalls 不再可用，judge 只消费 status 判断异常终止态）。
+  const loopMeta: AgentLoopJudgeMetadata | undefined = project.via_agent_loop
+    ? { status: project.agent_loop_status ?? 'completed', turns: 0, finalText: '', toolCalls: [] }
+    : undefined
 
   // 无论后续如何，先清除 blocked_action，避免重复触发阻塞分支
   updateProject(input.project_id, { blocked_action: undefined })
@@ -1788,31 +1937,53 @@ export async function resumeBlockedFlow(
       query: input.query,
       channel_id: input.channel_id,
     })
-    await runPostMvpTestingFlow({
-      request_id: input.request_id,
-      session_id: input.session_id,
-      project_id: input.project_id,
-      mode: input.mode,
-      preview_url: mvp.preview_url,
-      query: input.query,
-      channel_id: input.channel_id,
-      repair_internalized: mvp.via_agent_loop === true,
-    })
+    // M4-A：新生成仍走 loop → 门禁函数；否则旧管道
+    if (mvp.via_agent_loop && mvp.loop_result) {
+      await runAgentLoopPostTesting({
+        request_id: input.request_id,
+        session_id: input.session_id,
+        project_id: input.project_id,
+        mode: input.mode,
+        preview_url: mvp.preview_url,
+        loop: mvp.loop_result,
+      })
+    } else {
+      await runPostMvpTestingFlow({
+        request_id: input.request_id,
+        session_id: input.session_id,
+        project_id: input.project_id,
+        mode: input.mode,
+        preview_url: mvp.preview_url,
+        query: input.query,
+        channel_id: input.channel_id,
+      })
+    }
     return
   }
 
   if (action === 'test_repair') {
     updateProject(input.project_id, { test_repair_count: 0 })
     const previewUrl = await ensureResumePreview(input)
-    await runPostMvpTestingFlow({
-      request_id: input.request_id,
-      session_id: input.session_id,
-      project_id: input.project_id,
-      mode: input.mode,
-      preview_url: previewUrl,
-      query: input.query,
-      channel_id: input.channel_id,
-    })
+    if (loopMeta) {
+      await runAgentLoopPostTesting({
+        request_id: input.request_id,
+        session_id: input.session_id,
+        project_id: input.project_id,
+        mode: input.mode,
+        preview_url: previewUrl,
+        loop: loopMeta,
+      })
+    } else {
+      await runPostMvpTestingFlow({
+        request_id: input.request_id,
+        session_id: input.session_id,
+        project_id: input.project_id,
+        mode: input.mode,
+        preview_url: previewUrl,
+        query: input.query,
+        channel_id: input.channel_id,
+      })
+    }
     return
   }
 
@@ -1822,6 +1993,7 @@ export async function resumeBlockedFlow(
       request_id: input.request_id,
       session_id: input.session_id,
       project_id: input.project_id,
+      ...(loopMeta ? { loop: loopMeta, repairInternalized: true } : {}),
     })
     return
   }
@@ -1829,16 +2001,27 @@ export async function resumeBlockedFlow(
   if (action === 'security_repair') {
     updateProject(input.project_id, { security_repair_count: 0 })
     const previewUrl = await ensureResumePreview(input)
-    // 重新走完整测试 + 安全扫描流程（安全扫描已嵌入 runPostMvpTestingFlow 后半段）
-    await runPostMvpTestingFlow({
-      request_id: input.request_id,
-      session_id: input.session_id,
-      project_id: input.project_id,
-      mode: input.mode,
-      preview_url: previewUrl,
-      query: input.query,
-      channel_id: input.channel_id,
-    })
+    if (loopMeta) {
+      await runAgentLoopPostTesting({
+        request_id: input.request_id,
+        session_id: input.session_id,
+        project_id: input.project_id,
+        mode: input.mode,
+        preview_url: previewUrl,
+        loop: loopMeta,
+      })
+    } else {
+      // 重新走完整测试 + 安全扫描流程（安全扫描已嵌入 runPostMvpTestingFlow 后半段）
+      await runPostMvpTestingFlow({
+        request_id: input.request_id,
+        session_id: input.session_id,
+        project_id: input.project_id,
+        mode: input.mode,
+        preview_url: previewUrl,
+        query: input.query,
+        channel_id: input.channel_id,
+      })
+    }
     return
   }
 

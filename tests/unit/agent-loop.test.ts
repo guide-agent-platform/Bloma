@@ -288,3 +288,64 @@ describe('runAgentLoop（PR2 L1）', () => {
     expect(jsonl.filter((m) => m.role === 'assistant' && m.content.some((b) => b.type === 'tool_use'))).toHaveLength(12)
   })
 })
+
+describe('M4-C tool_call_completed detail 白名单透传', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-detail-'))
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+  })
+
+  it('委派工具返回结构化 detail：白名单字段进事件，长文本 result_summary 丢弃', async () => {
+    const delegate = tool('delegate_agent', () => ({
+      output: '已启动委派',
+      detail: {
+        delegation_id: 'd-01',
+        child_session_id: 'child-01',
+        role: 'explore',
+        goal: '检查 index.html',
+        status: 'running',
+        pending_question: undefined,
+        result_summary: '非常长的结果摘要'.repeat(200),
+      },
+    }))
+    const events: Array<{ type: string; payload: Record<string, unknown> }> = []
+    const { query } = scriptedQuery([[toolUseMessage('t1', 'delegate_agent')], [textMessage('完成')]])
+    await runAgentLoop(baseInput({
+      query,
+      tools: [delegate],
+      publish: (type, payload) => events.push({ type, payload }),
+    }))
+
+    const completed = events.find((event) => event.type === 'tool_call_completed')
+    expect(completed?.payload.detail).toEqual({
+      delegation_id: 'd-01',
+      child_session_id: 'child-01',
+      role: 'explore',
+      goal: '检查 index.html',
+      status: 'running',
+    })
+    // 白名单外字段不进事件流（§7 防敏感/超长泄漏）
+    expect(JSON.stringify(completed?.payload.detail)).not.toContain('result_summary')
+    expect(JSON.stringify(completed?.payload.detail)).not.toContain('非常长的结果摘要')
+  })
+
+  it('detail 无白名单字段（或非委派工具）→ 事件不带 detail', async () => {
+    const plain = tool('echo', () => ({ output: 'ok', detail: { foo: 'bar', content: 'x'.repeat(600) } }))
+    const events: Array<{ type: string; payload: Record<string, unknown> }> = []
+    const { query } = scriptedQuery([[toolUseMessage('t1', 'echo')], [textMessage('完成')]])
+    await runAgentLoop(baseInput({
+      query,
+      tools: [plain],
+      publish: (type, payload) => events.push({ type, payload }),
+    }))
+
+    const completed = events.find((event) => event.type === 'tool_call_completed')
+    expect(completed?.payload.detail).toBeUndefined()
+    // 白名单外 detail 不进事件流，事件仍保留 output_summary（模型可见摘要不受影响）
+    expect(completed?.payload.output_summary).toBe('ok')
+  })
+})

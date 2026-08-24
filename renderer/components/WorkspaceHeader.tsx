@@ -4,6 +4,7 @@ import { StageIndicator } from './StageIndicator'
 import { Sparkles, IconSettings } from './icons'
 import {
   canUpgradeAtom,
+  collaborationPanelExpandedAtom,
   currentProjectAtom,
   documentPanelExpandedAtom,
   networkOnlineAtom,
@@ -34,6 +35,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects,
   const stage = useAtomValue(workflowStageAtom)
   const canUpgrade = useAtomValue(canUpgradeAtom)
   const [docPanelExpanded, setDocPanelExpanded] = useAtom(documentPanelExpandedAtom)
+  const [collabPanelExpanded, setCollabPanelExpanded] = useAtom(collaborationPanelExpandedAtom)
   const stageActive = ACTIVE_STAGES.has(stage)
 
   const modeLabel = mode === 'quick' ? '快速尝鲜' : mode === 'longterm' ? '精细打磨' : ''
@@ -134,28 +136,51 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects,
           {isOnline ? '已连接' : '离线'}
         </span>
 
-        {/* 长期迭代型：文档入口 */}
+        {/* 长期迭代型：委派协作 + 文档入口（两个抽屉门控，M4-C） */}
         {mode === 'longterm' && (
-          <button
-            data-ai-id="docs-button"
-            onClick={() => setDocPanelExpanded((v) => !v)}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 'var(--space-1)',
-              fontSize: 'var(--font-size-sm)',
-              fontWeight: 500,
-              color: 'var(--color-text)',
-              padding: '7px var(--space-4)',
-              borderRadius: 'var(--radius-full)',
-              background: 'var(--glass-bg-soft)',
-              border: '1px solid var(--glass-border-subtle)',
-              cursor: 'pointer',
-              transition: 'all var(--transition-fast)',
-            }}
-          >
-            文档
-          </button>
+          <>
+            <button
+              data-ai-id="collaboration-button"
+              title="委派协作"
+              onClick={() => setCollabPanelExpanded((v) => !v)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 'var(--space-1)',
+                fontSize: 'var(--font-size-sm)',
+                fontWeight: 500,
+                color: 'var(--color-text)',
+                padding: '7px var(--space-4)',
+                borderRadius: 'var(--radius-full)',
+                background: collabPanelExpanded ? 'var(--glass-bg-strong)' : 'var(--glass-bg-soft)',
+                border: '1px solid var(--glass-border-subtle)',
+                cursor: 'pointer',
+                transition: 'all var(--transition-fast)',
+              }}
+            >
+              协作
+            </button>
+            <button
+              data-ai-id="docs-button"
+              onClick={() => setDocPanelExpanded((v) => !v)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 'var(--space-1)',
+                fontSize: 'var(--font-size-sm)',
+                fontWeight: 500,
+                color: 'var(--color-text)',
+                padding: '7px var(--space-4)',
+                borderRadius: 'var(--radius-full)',
+                background: 'var(--glass-bg-soft)',
+                border: '1px solid var(--glass-border-subtle)',
+                cursor: 'pointer',
+                transition: 'all var(--transition-fast)',
+              }}
+            >
+              文档
+            </button>
+          </>
         )}
 
         {/* 快消型已完成：升级入口 */}

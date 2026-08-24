@@ -5,6 +5,7 @@ import { PreviewPanel } from './PreviewPanel'
 import { TimelinePanel } from './TimelinePanel'
 import { MvpStatusBanner } from './MvpStatusBanner'
 import { DocumentPanel } from './DocumentPanel'
+import { CollaborationPanel } from './CollaborationPanel'
 import type { CardOption } from './CardOptions'
 import type { PreviewStatus } from './PreviewPanel'
 import type { Snapshot } from './atoms'
@@ -137,6 +138,9 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
 
       {/* 文档面板抽屉（U2）：由 documentPanelExpandedAtom 门控，展开时覆盖在右侧 */}
       <DocumentPanel />
+
+      {/* 委派协作抽屉（M4-C）：由 collaborationPanelExpandedAtom 门控，展开时覆盖在右侧 */}
+      <CollaborationPanel />
     </div>
   )
 }

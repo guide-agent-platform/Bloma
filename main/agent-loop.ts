@@ -1,4 +1,4 @@
-import type { AgentEvent, MessageContentBlock, PromaPermissionMode } from '../shared/types'
+import type { AgentEvent, AgentLoopStatus, MessageContentBlock, PromaPermissionMode } from '../shared/types'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
 import { canUseTool } from './permission-service'
@@ -34,6 +34,8 @@ export interface AgentLoopToolState {
   edits_after_test_failure: number
   /** 修复回合计数（每次新出现的 GWT 失败 +1，对应旧 test_repair_count 口径） */
   repair_round: number
+  /** 委派深度（0=主 agent；子 agent = 父深度+1。委派工具据此判深，≥1 禁止再派） */
+  delegation_depth: number
 }
 
 export interface ToolContext {
@@ -42,6 +44,8 @@ export interface ToolContext {
   requestId: string
   signal: AbortSignal
   state: AgentLoopToolState
+  /** 当前工具调用的 tool_use_id（executeToolCall 每次执行前设置；委派等有副作用工具用它做幂等键） */
+  toolCallId?: string
 }
 
 /** 工具产物：output 给模型看（ACI 规范），detail 只进事件流/审计不进模型上下文。 */
@@ -85,6 +89,8 @@ export interface AgentLoopInput {
   toolBudget?: Record<string, number>
   /** 自动化管线传 allow-all（对齐 AUTOMATED_PERMISSION_MODE：warning 放行、dangerous 拒绝） */
   permissionMode: PromaPermissionMode
+  /** 委派深度（缺省 0 = 主 agent；子 agent = 父深度+1，写入工具 state） */
+  delegationDepth?: number
   temperature?: number
   signal: AbortSignal
   publish: (type: AgentEvent['type'], payload: Record<string, unknown>) => void
@@ -93,7 +99,7 @@ export interface AgentLoopInput {
 }
 
 export interface AgentLoopResult {
-  status: 'completed' | 'turn_limit' | 'budget_exhausted' | 'cancelled'
+  status: AgentLoopStatus
   turns: number
   finalText: string
   toolCalls: Array<{ name: string; turn: number }>
@@ -152,8 +158,8 @@ export function windowMessages(messages: ConversationTurn[], textWindowTurns: nu
   return [head, ...kept]
 }
 
-export function createToolState(): AgentLoopToolState {
-  return { test_failed: false, edits_after_test_failure: 0, repair_round: 0 }
+export function createToolState(delegationDepth = 0): AgentLoopToolState {
+  return { test_failed: false, edits_after_test_failure: 0, repair_round: 0, delegation_depth: delegationDepth }
 }
 
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
@@ -171,7 +177,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     sessionId: input.sessionId,
     requestId: input.requestId,
     signal: input.signal,
-    state: createToolState(),
+    state: createToolState(input.delegationDepth ?? 0),
   }
 
   let turns = 0
@@ -242,6 +248,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         duration_ms: Date.now() - startedAt,
         output_summary: outcome.output.slice(0, EVENT_SUMMARY_CHAR_LIMIT),
         is_error: outcome.isError === true,
+        // M4-C：结构化 detail 透传进事件流（委派工具返回 id/role/status 等，渲染端据此派生协作视图）。
+        // 限字段白名单（防敏感/超长数据泄漏）：只取委派工具的标识与状态字段，丢弃 result_summary 等长文本。
+        ...(outcome.detail ? { detail: sanitizeToolDetail(outcome.detail) } : {}),
       })
       resultBlocks.push({
         type: 'tool_result',
@@ -278,6 +287,7 @@ async function executeToolCall(
   if (!tool) {
     return { output: `未知工具「${use.name}」。可用工具：${[...toolByName.keys()].join('、')}`, isError: true }
   }
+  ctx.toolCallId = use.id
   const toolInput = use.input ?? {}
 
   // 权限门禁：loop 是无人值守自动化，仅支持 allow-all（warning 放行、dangerous 交由
@@ -361,6 +371,30 @@ function textOfBlocks(blocks: MessageContentBlock[]): string {
     .filter((block) => block.type === 'text')
     .map((block) => block.text ?? '')
     .join('')
+}
+
+/**
+ * tool_call_completed 的 detail 白名单透传（M4-C §7 限字段）：
+ * 只取委派工具的结构化标识/状态（delegation_id / child_session_id / role / goal / status /
+ * pending_question / error），丢弃 result_summary 等可能超长/含敏感内容的长文本字段。
+ * 无白名单命中返回 undefined（该工具无 detail 或 detail 无委派字段，事件不带 detail）。
+ */
+const TOOL_DETAIL_SAFE_KEYS = [
+  'delegation_id',
+  'child_session_id',
+  'role',
+  'goal',
+  'status',
+  'pending_question',
+  'error',
+] as const
+
+function sanitizeToolDetail(detail: Record<string, unknown>): Record<string, unknown> | undefined {
+  const result: Record<string, unknown> = {}
+  for (const key of TOOL_DETAIL_SAFE_KEYS) {
+    if (detail[key] !== undefined) result[key] = detail[key]
+  }
+  return Object.keys(result).length > 0 ? result : undefined
 }
 
 function summarizeJson(value: unknown): string {

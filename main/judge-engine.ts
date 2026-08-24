@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ProjectMode } from '../shared/types'
+import type { AgentLoopJudgeMetadata, ProjectMode } from '../shared/types'
 import { getDocumentsDir } from '../storage/config-paths'
 import type { GwtTestResult } from './gwt-service'
 import { findProject } from './project-service'
@@ -45,9 +45,28 @@ export interface JudgeInput {
   project_id: string
   mode: ProjectMode
   test_result?: GwtTestResult
+  /** Agent Loop 结果元数据（M4-B，loop-aware）：loop 异常终止态判「不达标/让渡」，不信模型自述 */
+  loop?: AgentLoopJudgeMetadata
 }
 
 export function runJudge(input: JudgeInput): JudgeVerdict {
+  // M4-B loop-aware 分支（在磁盘读判之前）：loop 未正常收尾（turn_limit / budget_exhausted /
+  // cancelled）→ 硬约束失败且 repairable=false——产物即使「能跑」也不放行，绝不凭模型自述放行。
+  if (input.loop && input.loop.status !== 'completed') {
+    const loopConstraint: JudgeConstraint = {
+      name: 'Agent Loop 完成状态',
+      passed: false,
+      detail: `自动生成未正常收尾（${loopStatusLabel(input.loop.status)}，${input.loop.turns} 轮），产物不能直接交付`,
+    }
+    return {
+      verdict: 'return',
+      hard_constraints: [loopConstraint],
+      soft_constraints: [],
+      user_visible_summary: `自动生成没有正常收尾（${loopStatusLabel(input.loop.status)}），需要你决定怎么处理。`,
+      repairable: false,
+    }
+  }
+
   const project = findProject(input.project_id)
   const backplane = readPrdBackplane(input.project_id)
   const requirements = backplane.requirements
@@ -239,6 +258,20 @@ function extractCssClasses(html: string): string[] {
     }
   }
   return [...classes]
+}
+
+/** Agent Loop 异常终止态 → 用户可读标签（loop-aware judge 的 user_visible_summary 用）。 */
+function loopStatusLabel(status: AgentLoopJudgeMetadata['status']): string {
+  switch (status) {
+    case 'turn_limit':
+      return '达到轮次上限'
+    case 'budget_exhausted':
+      return '修复预算耗尽'
+    case 'cancelled':
+      return '被取消'
+    default:
+      return status
+  }
 }
 
 /** 读取 documents/{project_id}/features/ 下的 GWT feature 文件 id 列表。 */

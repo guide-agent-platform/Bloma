@@ -1,0 +1,615 @@
+import { randomUUID } from 'node:crypto'
+import type { AgentEvent, PromaPermissionMode } from '../shared/types'
+import type { SDKQuery } from './orchestrator'
+import {
+  runAgentLoop,
+  type AgentLoopResult,
+  type AgentLoopTool,
+  type AgentLoopTurnInfo,
+  type ToolContext,
+} from './agent-loop'
+
+/**
+ * 委派协作协调器（委派协作嫁接方案 §4.1，2026-08-24）。
+ *
+ * Proma 委派模式（agent-collaboration-tools.ts 实证）在 Bloma 的落地：编程主 agent
+ * 自主循环内可 **fire-and-forget** 委派真实子会话（独立 runAgentLoop）并行协作，
+ * 仅 1 层深度、每父并行上限、tool-call 幂等。父 agent 后续用 wait_for_delegations
+ * 阻塞收集结果。
+ *
+ * 依赖纪律（避免循环依赖）：
+ * - 本模块 **不 import agent-tools.ts**。子 agent 工具集由 `setChildToolsBuilder`
+ *   注入（programming-orchestrator 用 `buildAgentTools({ role })` 注入）。
+ * - 父 loop 的运行上下文（query/env/背板 system/maxTokens/权限）由
+ *   `registerParentLoopContext` 注册，`startDelegation` 按父 sessionId 取用。
+ */
+
+// =========================================================================
+// 常量
+// =========================================================================
+
+/** 委派目标描述截断上限（对齐 Proma DELEGATION_GOAL_CHAR_LIMIT）。 */
+export const DELEGATION_GOAL_CHAR_LIMIT = 200
+
+/** 子 agent 结果摘要回传上限（对齐 Proma get_delegation_results ≤50000 chars）。 */
+export const DELEGATION_RESULT_CHAR_LIMIT = 50_000
+
+/** 每父会话并行在跑委派数上限（对齐 Proma MAX_RUNNING_DELEGATIONS_PER_PARENT）。 */
+export const MAX_RUNNING_DELEGATIONS_PER_PARENT = 4
+
+/** 内存中保留的已终结委派记录上限（防 registry 无限增长）。 */
+const MAX_FINISHED_DELEGATIONS = 50
+
+/** wait_for_delegations 缺省等待上限（毫秒）。 */
+const DEFAULT_DELEGATION_WAIT_TIMEOUT_MS = 600_000
+
+// =========================================================================
+// 类型
+// =========================================================================
+
+export type DelegationRole = 'explore' | 'research' | 'implement' | 'review' | 'custom'
+
+export type DelegationStatus = 'running' | 'completed' | 'failed' | 'cancelled'
+
+export interface DelegateAgentArgs {
+  task: string
+  role?: DelegationRole
+  expectedOutput?: string
+  title?: string
+}
+
+export interface StartDelegationResult {
+  delegation_id: string
+  child_session_id: string
+  role: DelegationRole
+  goal: string
+  status: DelegationStatus
+}
+
+export interface DelegationSummary {
+  delegation_id: string
+  role: DelegationRole
+  status: DelegationStatus
+  goal: string
+  result_summary?: string
+  error?: string
+  started_at: number
+  /** 子 agent 通过 ask_delegation_question 挂起提问中（父 agent 应尽快 answer）。 */
+  pending_question?: string
+}
+
+/** 子 agent 提问信号：ask 时 resolve，wait_for_delegations 据此提前返回让父代答。 */
+export interface AskSignal {
+  promise: Promise<void>
+  resolve: () => void
+}
+
+export interface DelegationRecord {
+  delegationId: string
+  parentSessionId: string
+  childSessionId: string
+  projectId: string
+  role: DelegationRole
+  goal: string
+  status: DelegationStatus
+  resultSummary?: string
+  error?: string
+  startedAt: number
+  /** stop_delegation 中止子循环用。 */
+  abort: AbortController
+  /** 终结（completed/failed/cancelled）时 resolve；wait_for_delegations 阻塞点。 */
+  completion: Promise<void>
+  /** stop_delegation 手动终结时主动 resolve completion（解除 wait 阻塞；内部字段，勿直接操作）。 */
+  resolveCompletion: () => void
+  /** 子 agent 提问信号（ask 时 resolve；wait_for_delegations 提前返回让父代答）。 */
+  askSignal: AskSignal
+  /** 子 agent 挂起提问的问题（待父 answer；父答后清空）。 */
+  pendingQuestion?: string
+  /** ask_delegation_question 挂起的 resolve（answer 时回调，把答案回传子 loop）。 */
+  pendingAnswerResolve?: (answer: string) => void
+}
+
+/** 父 loop 运行上下文（构建子 AgentLoopInput 所需；runMvpViaAgentLoop 注册）。 */
+export interface DelegationParentContext {
+  query: SDKQuery
+  env: Record<string, string>
+  maxTokens: number
+  /** 父 loop 轮次上限（子 loop 取 min(父上限, delegationMaxTurns)）。 */
+  maxTurns: number
+  /** 子 agent 独立轮次上限（比主 loop 小，控制 token 成本）。 */
+  delegationMaxTurns: number
+  permissionMode: PromaPermissionMode
+  temperature: number
+  /** 背板锚定 system prompt（buildAgentLoopSystemPrompt 产物），子 loop 在它之上加委派规则。 */
+  system: string
+  editFormat: 'diff' | 'whole'
+  publish: (type: AgentEvent['type'], payload: Record<string, unknown>) => void
+  /** 子 loop 每轮埋点（programming-orchestrator 注入，session_id=子 sessionId）。 */
+  onChildTurn?: (info: AgentLoopTurnInfo, child: { sessionId: string; requestId: string; role: DelegationRole }) => void
+}
+
+/** 子 agent 工具集构建器（按 role 裁剪；programming-orchestrator 注入 buildAgentTools）。 */
+export type ChildToolsBuilder = (projectId: string, role: DelegationRole, editFormat: 'diff' | 'whole') => AgentLoopTool[]
+
+export interface WaitForDelegationsArgs {
+  delegationIds?: string[]
+  strategy?: 'all' | 'any'
+  timeout_ms?: number
+}
+
+// =========================================================================
+// 内部状态
+// =========================================================================
+
+const delegations = new Map<string, DelegationRecord>()
+const parentContexts = new Map<string, DelegationParentContext>()
+
+let childToolsBuilder: ChildToolsBuilder = () => {
+  throw new Error('子 agent 工具集构建器未注入（programming-orchestrator 应在 runMvpViaAgentLoop 注册 setChildToolsBuilder）')
+}
+
+// =========================================================================
+// 注册表（父上下文 / 子工具构建器）
+// =========================================================================
+
+export function setChildToolsBuilder(builder: ChildToolsBuilder): void {
+  childToolsBuilder = builder
+}
+
+/** 注册父 loop 上下文（runMvpViaAgentLoop 起跑前调用，结束后 unregister）。 */
+export function registerParentLoopContext(sessionId: string, context: DelegationParentContext): void {
+  parentContexts.set(sessionId, context)
+}
+
+export function unregisterParentLoopContext(sessionId: string): void {
+  parentContexts.delete(sessionId)
+}
+
+// =========================================================================
+// 委派创建（fire-and-forget）
+// =========================================================================
+
+/**
+ * 创建委派记录并 fire-and-forget 启动子 loop（对齐 Proma startDelegation：
+ * delegate 工具立刻返回 delegationId，不阻塞当前轮；子会话后台独立运行）。
+ *
+ * 深度限制：父 agent 的 state.delegation_depth ≥ 1（即本会话已是子 agent）时拒绝。
+ */
+export function startDelegation(parent: ToolContext, args: DelegateAgentArgs): StartDelegationResult {
+  const task = assertNonBlank(args.task, 'task')
+  const role = args.role ?? 'custom'
+  assertCanCreateDelegation(parent.state.delegation_depth)
+  const parentCtx = parentContexts.get(parent.sessionId)
+  if (!parentCtx) {
+    throw new Error(`未找到父循环上下文（sessionId=${parent.sessionId}）。委派工具只在主 agent loop 内可用。`)
+  }
+  if (runningDelegationCount(parent.sessionId) >= MAX_RUNNING_DELEGATIONS_PER_PARENT) {
+    throw new Error(`当前并行的委派子会话已达上限（${MAX_RUNNING_DELEGATIONS_PER_PARENT}）。请先 wait_for_delegations 收集或 stop_delegation 停止。`)
+  }
+
+  const delegationId = randomUUID()
+  const goal = truncateText(task, DELEGATION_GOAL_CHAR_LIMIT)
+  const { completion, resolveCompletion } = createDelegationCompletion()
+  const childSessionId = randomUUID()
+
+  const record: DelegationRecord = {
+    delegationId,
+    parentSessionId: parent.sessionId,
+    childSessionId,
+    projectId: parent.projectId,
+    role,
+    goal,
+    status: 'running',
+    startedAt: Date.now(),
+    abort: new AbortController(),
+    completion,
+    resolveCompletion,
+    askSignal: createAskSignal(),
+  }
+  delegations.set(delegationId, record)
+  pruneFinishedDelegations()
+  publishDelegationEvent(parent.sessionId, 'delegation_started', record)
+
+  const prompt = buildDelegationPrompt({ role, task, expectedOutput: args.expectedOutput })
+
+  void runChildLoop({ parent, parentCtx, record, prompt, role }).then(
+    (result) => settleChildLoop(record, result),
+    (error) => settleChildLoopError(record, error),
+  )
+
+  return { delegation_id: delegationId, child_session_id: childSessionId, role, goal, status: record.status }
+}
+
+/** 子 loop 正常结束：落 result summary 并置 completed（非 running 状态不覆盖，如已被 stop）。 */
+function settleChildLoop(record: DelegationRecord, result: AgentLoopResult): void {
+  if (record.status !== 'running') return
+  record.resultSummary = summarizeChildResult(result)
+  record.status = 'completed'
+  record.resolveCompletion()
+  publishDelegationEvent(record.parentSessionId, 'delegation_completed', record)
+}
+
+/** 子 loop 异常结束：落 error 并置 failed（非 running 状态不覆盖）。 */
+function settleChildLoopError(record: DelegationRecord, error: unknown): void {
+  if (record.status !== 'running') return
+  record.error = errorMessage(error)
+  record.status = 'failed'
+  record.resolveCompletion()
+  publishDelegationEvent(record.parentSessionId, 'delegation_failed', record)
+}
+
+/** 子 agent 循环：复用 runAgentLoop，独立 sessionId/requestId，role 裁剪工具集。 */
+async function runChildLoop(opts: {
+  parent: ToolContext
+  parentCtx: DelegationParentContext
+  record: DelegationRecord
+  prompt: string
+  role: DelegationRole
+}): Promise<AgentLoopResult> {
+  const { parent, parentCtx, record, prompt, role } = opts
+  const childRequestId = randomUUID()
+  const maxTurns = Math.max(1, Math.min(parentCtx.delegationMaxTurns, parentCtx.maxTurns))
+  return runAgentLoop({
+    system: buildChildSystemPrompt(parentCtx.system, role),
+    task: prompt,
+    tools: childToolsBuilder(parent.projectId, role, parentCtx.editFormat),
+    query: parentCtx.query,
+    env: parentCtx.env,
+    sessionId: record.childSessionId,
+    projectId: parent.projectId,
+    requestId: childRequestId,
+    maxTokens: parentCtx.maxTokens,
+    maxTurns,
+    permissionMode: parentCtx.permissionMode,
+    delegationDepth: parent.state.delegation_depth + 1,
+    temperature: parentCtx.temperature,
+    signal: record.abort.signal,
+    publish: parentCtx.publish,
+    onTurn: parentCtx.onChildTurn
+      ? (info) => parentCtx.onChildTurn!(info, { sessionId: record.childSessionId, requestId: childRequestId, role })
+      : undefined,
+  })
+}
+
+// =========================================================================
+// 委派读取 / 等待
+// =========================================================================
+
+export function getDelegationSummary(record: DelegationRecord): DelegationSummary {
+  return {
+    delegation_id: record.delegationId,
+    role: record.role,
+    status: record.status,
+    goal: record.goal,
+    result_summary: record.resultSummary,
+    error: record.error,
+    started_at: record.startedAt,
+    pending_question: record.pendingQuestion,
+  }
+}
+
+export function findDelegation(parentSessionId: string, delegationId: string): DelegationRecord | undefined {
+  const record = delegations.get(delegationId)
+  if (!record || record.parentSessionId !== parentSessionId) return undefined
+  return record
+}
+
+export function listDelegations(parentSessionId: string): DelegationRecord[] {
+  return [...delegations.values()].filter((record) => record.parentSessionId === parentSessionId)
+}
+
+/**
+ * 委派生命周期事件发布（M4-C，渲染端协作视图的数据源）：
+ * 父 loop 上下文在册时经 publish 通道发事件（payload: delegation_id / child_session_id /
+ * role / goal / status）；父 loop 已结束（unregister）时静默跳过——事件流断供不阻塞 registry。
+ */
+function publishDelegationEvent(
+  parentSessionId: string,
+  type: 'delegation_started' | 'delegation_completed' | 'delegation_failed' | 'delegation_cancelled',
+  record: DelegationRecord,
+): void {
+  parentContexts.get(parentSessionId)?.publish(type, {
+    delegation_id: record.delegationId,
+    child_session_id: record.childSessionId,
+    role: record.role,
+    goal: record.goal,
+    status: record.status,
+  })
+}
+
+/** 阻塞等待委派收敛（all/any + timeout）。超时不抛错，返回当前状态让父 agent 决定继续等或停止。 */
+export async function waitForDelegations(
+  parent: ToolContext,
+  args: WaitForDelegationsArgs,
+): Promise<DelegationSummary[]> {
+  const ids = args.delegationIds ?? listDelegations(parent.sessionId).map((record) => record.delegationId)
+  const records = ids.map((id) => {
+    const record = findDelegation(parent.sessionId, id)
+    if (!record) throw new Error(`未找到当前会话下的委派: ${id}`)
+    return record
+  })
+  if (records.length === 0) return []
+
+  const timeoutMs = args.timeout_ms ?? DEFAULT_DELEGATION_WAIT_TIMEOUT_MS
+  const timeout = new Promise<'timeout'>((resolve) => {
+    const timer = setTimeout(() => resolve('timeout'), timeoutMs)
+    timer.unref?.()
+  })
+
+  // 子 agent 提问信号：任一 ask_delegation_question 挂起即提前返回（父 agent 据此代答，
+  // 而不是干等到 timeout）。不参与 Promise.any 的终结判定，仅作 race 的提前出路。
+  const questionSignals = records.map((record) => record.askSignal.promise)
+  if (args.strategy === 'any') {
+    await Promise.race([Promise.any(records.map((record) => record.completion)), Promise.any(questionSignals), timeout])
+  } else {
+    await Promise.race([Promise.all(records.map((record) => record.completion)), Promise.any(questionSignals), timeout])
+  }
+  return records.map(getDelegationSummary)
+}
+
+// =========================================================================
+// 停止（Proma stop_delegation / stop_delegations）
+// =========================================================================
+
+/**
+ * 停止单个委派子会话：中止子循环（abort）、状态置 cancelled、主动 resolve completion
+ * 解除 wait 阻塞。已终结的委派不做变更，返回当前状态。
+ */
+export function stopDelegation(parentSessionId: string, delegationId: string): DelegationSummary {
+  const record = findDelegation(parentSessionId, delegationId)
+  if (!record) throw new Error(`未找到当前会话下的委派: ${delegationId}`)
+  if (record.status === 'running') {
+    record.status = 'cancelled'
+    record.error = '已由主 agent 停止（stop_delegation）'
+    record.abort.abort()
+    record.resolveCompletion()
+    publishDelegationEvent(parentSessionId, 'delegation_cancelled', record)
+  }
+  return getDelegationSummary(record)
+}
+
+/** 批量停止（Proma stop_delegations）：delegation_ids 缺省 = 停止当前全部委派。 */
+export function stopDelegations(parentSessionId: string, delegationIds?: string[]): DelegationSummary[] {
+  const ids =
+    delegationIds && delegationIds.length > 0
+      ? delegationIds
+      : listDelegations(parentSessionId).map((record) => record.delegationId)
+  return ids.map((id) => stopDelegation(parentSessionId, id))
+}
+
+// =========================================================================
+// 提问冒泡 / 父代答（Proma answer_delegation_question）
+// =========================================================================
+
+/**
+ * 子 agent 挂起提问（ask_delegation_question 工具的协调函数）：
+ * 把问题记到 record + resolve askSignal（wait_for_delegations 提前返回）+ 发 delegation_question
+ * 事件；返回一个 Promise，父 agent 通过 answerDelegationQuestion 回答时 resolve（答案回传子 loop）。
+ * abort 兜底：子循环被停止时 resolve 一个占位答复，让子 loop 能正常收尾而不是永久挂起。
+ */
+export function askDelegationQuestion(ctx: ToolContext, question: string): Promise<string> {
+  const record = findRecordByChildSession(ctx.sessionId)
+  if (!record) throw new Error(`未找到当前子会话对应的委派记录（child_session_id=${ctx.sessionId}）`)
+  if (record.status !== 'running') throw new Error(`委派已不在运行（status=${record.status}），不能提问`)
+  if (record.pendingQuestion) throw new Error('已有待回答的问题，请等待主 agent 回答后再提问')
+
+  record.pendingQuestion = question
+  record.askSignal.resolve()
+  parentContexts.get(record.parentSessionId)?.publish('delegation_question', {
+    delegation_id: record.delegationId,
+    child_session_id: record.childSessionId,
+    role: record.role,
+    question,
+  })
+
+  return new Promise<string>((resolve) => {
+    record.pendingAnswerResolve = resolve
+    if (ctx.signal.aborted) {
+      resolve('[子代理已被停止，未收到回答]')
+      return
+    }
+    ctx.signal.addEventListener(
+      'abort',
+      () => resolve('[子代理已被停止，未收到回答]'),
+      { once: true },
+    )
+  })
+}
+
+/** 父 agent 代答子 agent 挂起的问题（answer_delegation_question 工具）：回答回传子 loop 挂起点。 */
+export function answerDelegationQuestion(
+  parentSessionId: string,
+  delegationId: string,
+  answer: string,
+): { delegation_id: string; answered: boolean } {
+  const record = findDelegation(parentSessionId, delegationId)
+  if (!record) throw new Error(`未找到当前会话下的委派: ${delegationId}`)
+  if (!record.pendingQuestion) {
+    throw new Error(`委派 ${delegationId} 没有待回答的问题（当前 status=${record.status}）。用 get_delegation_results 查看。`)
+  }
+  record.pendingAnswerResolve?.(answer)
+  record.pendingQuestion = undefined
+  record.pendingAnswerResolve = undefined
+  return { delegation_id: delegationId, answered: true }
+}
+
+// =========================================================================
+// 续跑（Proma continue_delegation）
+// =========================================================================
+
+/**
+ * 让一个已终结（completed/failed/cancelled）的委派继续：重置为 running、复用 childSessionId
+ * （同一独立 JSONL 追加轮）、用新任务 prompt 重启子 loop。running 中的委派拒绝续跑。
+ */
+export function continueDelegation(parent: ToolContext, delegationId: string, task: string): StartDelegationResult {
+  const record = findDelegation(parent.sessionId, delegationId)
+  if (!record) throw new Error(`未找到当前会话下的委派: ${delegationId}`)
+  if (record.status === 'running') throw new Error(`委派 ${delegationId} 仍在运行中，不能继续（先 wait_for_delegations 或 stop_delegation）。`)
+  const parentCtx = parentContexts.get(parent.sessionId)
+  if (!parentCtx) {
+    throw new Error(`未找到父循环上下文（sessionId=${parent.sessionId}）。委派工具只在主 agent loop 内可用。`)
+  }
+
+  record.status = 'running'
+  record.resultSummary = undefined
+  record.error = undefined
+  record.pendingQuestion = undefined
+  record.pendingAnswerResolve = undefined
+  record.abort = new AbortController()
+  const { completion, resolveCompletion } = createDelegationCompletion()
+  record.completion = completion
+  record.resolveCompletion = resolveCompletion
+  record.askSignal = createAskSignal()
+
+  const prompt = buildDelegationPrompt({ role: record.role, task })
+  void runChildLoop({ parent, parentCtx, record, prompt, role: record.role }).then(
+    (result) => settleChildLoop(record, result),
+    (error) => settleChildLoopError(record, error),
+  )
+  publishDelegationEvent(parent.sessionId, 'delegation_started', record)
+  return {
+    delegation_id: record.delegationId,
+    child_session_id: record.childSessionId,
+    role: record.role,
+    goal: record.goal,
+    status: 'running',
+  }
+}
+
+/** 按子会话 id 找委派记录（子 agent 的 ask 工具在子 loop 里，ctx.sessionId 是子会话 id）。 */
+function findRecordByChildSession(childSessionId: string): DelegationRecord | undefined {
+  for (const record of delegations.values()) {
+    if (record.childSessionId === childSessionId) return record
+  }
+  return undefined
+}
+
+// =========================================================================
+// 幂等（tool-call 重放/重试防御）
+// =========================================================================
+
+const delegationCallCache = new Map<string, StartDelegationResult>()
+
+/** 按 (sessionId, toolCallId) 幂等创建委派：同一次 tool_use 的重放/重试只 create 一次。 */
+export function delegateAgentOnce(
+  sessionId: string,
+  toolCallId: string | undefined,
+  createFn: () => StartDelegationResult,
+): StartDelegationResult {
+  const key = `${sessionId}:${toolCallId ?? 'anonymous'}`
+  const existing = delegationCallCache.get(key)
+  if (existing) return existing
+  const created = createFn()
+  delegationCallCache.set(key, created)
+  return created
+}
+
+// =========================================================================
+// 深度 / 并行限制
+// =========================================================================
+
+export function assertCanCreateDelegation(depth: number): void {
+  if (depth >= 1) {
+    throw new Error('协作子会话不能继续创建新的子会话（委派深度限制 1 层）')
+  }
+}
+
+function runningDelegationCount(parentSessionId: string): number {
+  let count = 0
+  for (const record of delegations.values()) {
+    if (record.parentSessionId === parentSessionId && record.status === 'running') count += 1
+  }
+  return count
+}
+
+function pruneFinishedDelegations(): void {
+  const finished = [...delegations.values()]
+    .filter((record) => record.status !== 'running')
+    .sort((a, b) => a.startedAt - b.startedAt)
+  const excess = finished.length - MAX_FINISHED_DELEGATIONS
+  for (let index = 0; index < excess; index += 1) {
+    delegations.delete(finished[index]!.delegationId)
+  }
+}
+
+// =========================================================================
+// 提示词构造（纯函数，可测）
+// =========================================================================
+
+const ROLE_INSTRUCTIONS: Record<DelegationRole, string> = {
+  explore: '职责：探索代码库——梳理文件结构、定位相关实现、报告事实性发现。只读操作，不做修改。',
+  research: '职责：调研——阅读相关代码与文档，形成结论或对比方案。只读操作，不做修改。',
+  implement: '职责：实现——编写/修改项目文件完成子任务。遵循平台工具护栏（路径沙箱、语法校验、可写范围）。',
+  review: '职责：审查——阅读代码指出问题（正确性/可维护性/安全隐患），给出文件定位与建议，不直接修改。',
+  custom: '职责：按主 agent 在任务里给出的具体指令工作。',
+}
+
+/** 子 agent system prompt：父背板 system + role 行为说明 + 委派边界规则。 */
+export function buildChildSystemPrompt(parentSystem: string, role: DelegationRole): string {
+  return `${parentSystem}
+
+<delegation_context>
+你是主 agent 委派的一名协作子 agent（role=${role}）。
+${ROLE_INSTRUCTIONS[role]}
+边界：
+- 只负责完成本任务；完成后用纯文本输出结果摘要，不要输出「我将…」式的过程承诺。
+- 你不能再委派其他子 agent（深度限制）；需要额外信息时用现有工具自行获取。
+- 不向用户提问；确实受阻时，如实说明阻塞原因并输出当前进展。
+</delegation_context>`
+}
+
+export function buildDelegationPrompt(opts: {
+  role: DelegationRole
+  task: string
+  expectedOutput?: string
+}): string {
+  const expected = opts.expectedOutput
+    ? `期望输出：${opts.expectedOutput}`
+    : '完成后用简洁文本输出结果摘要（关键发现/完成清单/未完成项与原因）。'
+  return `协作子任务（role=${opts.role}）：\n${opts.task}\n\n${expected}`
+}
+
+// =========================================================================
+// 工具函数
+// =========================================================================
+
+function summarizeChildResult(result: AgentLoopResult): string {
+  const header = `子代理状态：${result.status}（${result.turns} 轮，${result.toolCalls.length} 次工具调用）`
+  const body = result.finalText.trim()
+  const full = body ? `${header}\n${body}` : header
+  return truncateText(full, DELEGATION_RESULT_CHAR_LIMIT)
+}
+
+function createDelegationCompletion(): { completion: Promise<void>; resolveCompletion: () => void } {
+  let resolveCompletion!: () => void
+  const completion = new Promise<void>((resolve) => {
+    resolveCompletion = resolve
+  })
+  return { completion, resolveCompletion }
+}
+
+function createAskSignal(): AskSignal {
+  let resolve!: () => void
+  const promise = new Promise<void>((r) => {
+    resolve = r
+  })
+  return { promise, resolve }
+}
+
+function truncateText(text: string, limit: number): string {
+  if (text.length <= limit) return text
+  return `${text.slice(0, limit)}…[截断]`
+}
+
+function assertNonBlank(value: unknown, name: string): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`${name} 必填（非空字符串）`)
+  }
+  return value.trim()
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.name === 'AbortError') return '子代理已被停止'
+  const message = error instanceof Error ? error.message : String(error)
+  return message.length > 500 ? `${message.slice(0, 500)}…` : message
+}

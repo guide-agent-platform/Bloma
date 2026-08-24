@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  runAgentLoopPostTesting,
   runPostMvpTestingFlow,
   setProgrammingEventPublisher,
 } from '../../main/programming-orchestrator'
@@ -137,6 +138,133 @@ describe('Post-MVP testing flow (A2-09 state machine)', () => {
       const questions = decision?.payload.questions as Array<{ label: string }> | undefined
       expect(questions?.map((q) => q.label)).toContain('继续尝试')
       expect(JSON.stringify(events)).not.toMatch(/node_modules|Error:|at /)
+    } finally {
+      server.close()
+    }
+  })
+})
+
+describe('runAgentLoopPostTesting（M4-A 独立门禁：只终验不重修）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+    setProgrammingEventPublisher(() => undefined)
+    setBrowserGwtDisabledForTests(false)
+  })
+
+  const LOOP_COMPLETED = { status: 'completed' as const, turns: 8, finalText: '完成', toolCalls: [] as Array<{ name: string; turn: number }> }
+
+  it('loop completed：GWT 通过 → 安全扫描 → judge pass → ready，全程无 repairing', async () => {
+    setBrowserGwtDisabledForTests(true)
+    const home = mkdtempSync(join(tmpdir(), 'proma-loop-gate-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+    syncDocuments({ request_id: 'req-sync', session_id: 'session-1', project_id: project.project_id, checkpoint: 'mvp_before_generation' })
+    writeFileSync(join(project.root_path, 'index.html'), '<html><body><p>记录收入与支出</p></body></html>', 'utf8')
+    const events: string[] = []
+    setProgrammingEventPublisher((event) => events.push(event.type))
+
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/html' })
+      res.end('<html><body><p>记录收入与支出</p></body></html>')
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+
+    try {
+      const result = await runAgentLoopPostTesting({
+        request_id: 'req-flow',
+        session_id: 'session-1',
+        project_id: project.project_id,
+        mode: 'quick',
+        preview_url: `http://127.0.0.1:${port}`,
+        loop: LOOP_COMPLETED,
+      })
+
+      expect(result.verdict).toBe('ready')
+      expect(result.judge?.verdict).toBe('pass')
+      expect(result.test_result.failed_count).toBe(0)
+      // 固定语义：不产生 repairing 事件（外部修复循环已从 loop 路径移除）
+      expect(events).not.toContain('repairing')
+      expect(findProject(project.project_id).current_stage).toBe('ready')
+      expect(findProject(project.project_id).test_repair_count ?? 0).toBe(0)
+    } finally {
+      server.close()
+    }
+  })
+
+  it('GWT 首败即让渡（不重试不进入 repairing），judge 未介入', async () => {
+    setBrowserGwtDisabledForTests(true)
+    const home = mkdtempSync(join(tmpdir(), 'proma-loop-gate-'))
+    process.env.PROMA_HOME = home
+    // 无健康快照 → circuitBreakRollback 不触发回滚，直接让渡
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    const events: string[] = []
+    setProgrammingEventPublisher((event) => events.push(event.type))
+
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/html' })
+      res.end('<html><h1>持续失败</h1></html>')
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+
+    try {
+      const result = await runAgentLoopPostTesting({
+        request_id: 'req-flow',
+        session_id: 'session-1',
+        project_id: project.project_id,
+        mode: 'quick',
+        preview_url: `http://127.0.0.1:${port}`,
+        loop: LOOP_COMPLETED,
+      })
+
+      expect(result.verdict).toBe('blocked')
+      expect(findProject(project.project_id).current_stage).toBe('blocked_for_user_decision')
+      // 首败熔断：不复修、不计数（test_repair_count 只在旧管道 repair 循环里 +1）
+      expect(findProject(project.project_id).test_repair_count ?? 0).toBe(0)
+      expect(events.filter((type) => type === 'repairing')).toHaveLength(0)
+      // 没有进入 judge：GWT 未过，judge 不读盘
+      expect(events.filter((type) => type === 'judge_result')).toHaveLength(0)
+    } finally {
+      server.close()
+    }
+  })
+
+  it('loop 异常终止态（turn_limit）：即便 GWT 通过也由 judge 判让渡，不 reach ready', async () => {
+    setBrowserGwtDisabledForTests(true)
+    const home = mkdtempSync(join(tmpdir(), 'proma-loop-gate-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+    syncDocuments({ request_id: 'req-sync', session_id: 'session-1', project_id: project.project_id, checkpoint: 'mvp_before_generation' })
+    writeFileSync(join(project.root_path, 'index.html'), '<html><body><p>记录收入与支出</p></body></html>', 'utf8')
+    const events: string[] = []
+    setProgrammingEventPublisher((event) => events.push(event.type))
+
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/html' })
+      res.end('<html><body><p>记录收入与支出</p></body></html>')
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+
+    try {
+      const result = await runAgentLoopPostTesting({
+        request_id: 'req-flow',
+        session_id: 'session-1',
+        project_id: project.project_id,
+        mode: 'quick',
+        preview_url: `http://127.0.0.1:${port}`,
+        loop: { status: 'turn_limit', turns: 24, finalText: '轮次耗尽', toolCalls: [] },
+      })
+
+      expect(result.verdict).toBe('blocked')
+      expect(result.judge?.verdict).toBe('return')
+      expect(findProject(project.project_id).current_stage).toBe('blocked_for_user_decision')
+      expect(events.filter((type) => type === 'repairing')).toHaveLength(0)
     } finally {
       server.close()
     }

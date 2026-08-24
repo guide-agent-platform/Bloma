@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { runMvpTask, runPostMvpTestingFlow, agentLoopEnabled } from '../../../main/programming-orchestrator'
+import { runAgentLoopPostTesting, runIterationTask, runMvpTask, agentLoopEnabled, setProgrammingEventPublisher } from '../../../main/programming-orchestrator'
 import { createProject, findProject, recordSketchGenerated } from '../../../main/project-service'
 import { createChannel } from '../../../main/channel-manager'
 import { setSafeStorageAdapter } from '../../../main/safe-storage'
@@ -18,8 +18,9 @@ import type { SDKQuery, SDKQueryOptions } from '../../../main/orchestrator'
 
 /**
  * Agent Loop 全链验收（PR3，mock 渠道）：flag + 能力位 → loop 生成（write_file →
- * run_preview → run_gwt_tests 失败 → 自修 → 再测通过 → 安全扫描）→ 外部强制终验
- * （runPostMvpTestingFlow repair_internalized）→ judge → ready。
+ * run_preview → run_gwt_tests 失败 → 自修 → 再测通过 → 安全扫描）→ 独立门禁终验
+ * （M4-A runAgentLoopPostTesting，只终验不重修）→ judge → ready。
+ * M4-C 委派协作全链：父 loop delegate_agent → 子会话收敛 → delegation 生命周期事件。
  * 沙箱用 setSandboxRuntimeForTests 注入（端口指向真实静态文件服务器，GWT 走静态兜底）。
  */
 
@@ -96,6 +97,54 @@ function scriptedQuery(opts: { probeRespondsWithToolUse?: boolean } = {}): { que
   return { query, loopModelCalls: () => modelCalls }
 }
 
+/** M4-C 委派全链剧本：父 loop 写文件 → run_preview → delegate_agent + wait_for_delegations → 收尾。 */
+const DELEGATION_SCRIPT: MessageContentBlock[][] = [
+  [text('我先把页面写出来。'), toolUse('t1', 'write_file', { path: 'index.html', content: INDEX_V2 }), toolUse('t2', 'write_file', { path: 'src/app.js', content: APP_JS })],
+  [toolUse('t3', 'run_preview', {})],
+  [toolUse('t4', 'delegate_agent', { task: '检查 index.html 是否包含收入支出入口', role: 'explore' }), toolUse('t5', 'wait_for_delegations', { strategy: 'all', timeout_ms: 10000 })],
+  [text('完成：记账 MVP 已就绪，委派子会话已收敛。')],
+]
+
+/**
+ * 委派感知的 mock 渠道：按工具集区分父/子 loop（父含 delegate_agent；子 explore 只读工具集
+ * 不含委派工具 → 一轮文本收尾）。父子共享同一 query 闭包，但计数独立。
+ */
+function delegationScriptedQuery(): { query: SDKQuery; parentModelCalls: () => number } {
+  let parentTurn = 0
+  let parentCalls = 0
+  const query: SDKQuery = async function* (_prompt: string, options: SDKQueryOptions) {
+    const tools = options.tools ?? []
+    if (tools.some((tool) => tool.name === 'loop_support_probe')) {
+      yield assistant([toolUse('probe-1', 'loop_support_probe', {})])
+      yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+      return
+    }
+    if (tools.length === 0) {
+      yield assistant([text('这不是 JSON')])
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+      return
+    }
+    // 父 loop：含 delegate_agent → 走父剧本
+    if (tools.some((tool) => tool.name === 'delegate_agent')) {
+      parentCalls += 1
+      const script = DELEGATION_SCRIPT[Math.min(parentTurn, DELEGATION_SCRIPT.length - 1)]
+      parentTurn += 1
+      yield assistant(script)
+      yield {
+        type: 'result',
+        subtype: 'success',
+        stop_reason: script.some((block) => block.type === 'tool_use') ? 'tool_use' : 'end_turn',
+        usage: { input_tokens: 100 + parentTurn, output_tokens: 50 },
+      }
+      return
+    }
+    // 子 loop（explore 只读工具集）：一轮文本收尾
+    yield assistant([text('子任务完成：index.html 已包含收入支出入口，检查通过。')])
+    yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+  }
+  return { query, parentModelCalls: () => parentCalls }
+}
+
 function readAnalyticsEventTypes(): string[] {
   try {
     return readFileSync(getAnalyticsPath('default-software-builder'), 'utf8')
@@ -146,6 +195,7 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
     else process.env.BLOMA_AGENT_LOOP = originalFlag
     setBrowserGwtDisabledForTests(false)
     clearSandboxRuntimeForTests()
+    setProgrammingEventPublisher(() => undefined)
   })
 
   it('flag + supports_tools=true：loop 全链到 ready，埋点/决策/JSONL 全留痕', async () => {
@@ -199,15 +249,14 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
       // 系统接管文件由平台补齐（loop 工具无权写）
       expect(() => readFileSync(join(findProject(project.project_id).root_path, 'package.json'), 'utf8')).not.toThrow()
 
-      // 外部强制终验（repair_internalized）→ judge → ready
-      const flow = await runPostMvpTestingFlow({
+      // M4-A 独立门禁终验（loop 结果透传 judge，只终验不重修）→ judge → ready
+      const flow = await runAgentLoopPostTesting({
         request_id: 'req-acc-1',
         session_id: 'session-acc-1',
         project_id: project.project_id,
         mode: 'quick',
         preview_url: mvp.preview_url,
-        query,
-        repair_internalized: true,
+        loop: mvp.loop_result!,
       })
       expect(flow.verdict).toBe('ready')
       expect(findProject(project.project_id).current_stage).toBe('ready')
@@ -234,6 +283,172 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
       const sessionText = readFileSync(getAgentSessionPath('session-acc-1'), 'utf8')
       expect(sessionText).toContain('"type":"tool_use"')
       expect(sessionText).toContain('"type":"tool_result"')
+    } finally {
+      server.close()
+    }
+  }, 20000)
+
+  it('M4-C 委派全链：父 loop delegate_agent → 子会话收敛 → 生命周期事件发布 → 终验 ready', async () => {
+    createChannel({
+      name: 'delegation-channel',
+      provider_type: 'anthropic',
+      base_url: 'https://delegation.example',
+      api_key: 'key-del',
+      models: [{ id: 'm1', name: 'delegation-model', enabled: true, supports_tools: true }],
+    })
+    const project = createProject({ request_id: 'req-acc-del', mode: 'quick', initial_message: '帮我做一个记账应用' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出', priority: 'P0' }])
+
+    // 真实静态文件服务器（delegate 子会话 read_file 也读项目文件，必须真实落盘）
+    const server = createServer((req, res) => {
+      const root = findProject(project.project_id).root_path
+      const path = req.url === '/' ? '/index.html' : (req.url ?? '/index.html')
+      try {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+        res.end(readFileSync(join(root, path.replace(/^\//, '')), 'utf8'))
+      } catch {
+        res.writeHead(404)
+        res.end('Not Found')
+      }
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+    setSandboxRuntimeForTests({
+      processFactory: () => fakeChild(),
+      portAllocator: async () => port,
+      healthCheck: async () => true,
+    })
+
+    // 捕获发布事件（delegation 生命周期经编程事件通道发到父 loop session）
+    const events: Array<{ type: string; session_id: string; payload: Record<string, unknown> }> = []
+    setProgrammingEventPublisher((event) =>
+      events.push({ type: event.type, session_id: event.session_id, payload: event.payload as Record<string, unknown> }),
+    )
+
+    try {
+      const { query, parentModelCalls } = delegationScriptedQuery()
+      const mvp = await runMvpTask({
+        request_id: 'req-acc-del',
+        session_id: 'session-del',
+        project_id: project.project_id,
+        mode: 'quick',
+        query,
+      })
+      expect(mvp.via_agent_loop).toBe(true)
+      expect(parentModelCalls()).toBe(DELEGATION_SCRIPT.length)
+
+      // 委派生命周期事件发布到父 loop session（渲染端据此派生协作视图）
+      const started = events.filter((event) => event.type === 'delegation_started')
+      expect(started).toHaveLength(1)
+      expect(started[0].session_id).toBe('session-del')
+      expect(started[0].payload).toMatchObject({ role: 'explore', status: 'running' })
+      expect(started[0].payload.delegation_id).toBeTruthy()
+      expect(started[0].payload.child_session_id).toBeTruthy()
+
+      const completed = events.filter((event) => event.type === 'delegation_completed')
+      expect(completed).toHaveLength(1)
+      expect(completed[0].session_id).toBe('session-del')
+      expect(completed[0].payload.delegation_id).toBe(started[0].payload.delegation_id)
+      expect(completed[0].payload.status).toBe('completed')
+
+      // 独立门禁终验（loop 结果透传 judge）→ ready
+      const flow = await runAgentLoopPostTesting({
+        request_id: 'req-acc-del',
+        session_id: 'session-del',
+        project_id: project.project_id,
+        mode: 'quick',
+        preview_url: mvp.preview_url,
+        loop: mvp.loop_result!,
+      })
+      expect(flow.verdict).toBe('ready')
+      expect(findProject(project.project_id).current_stage).toBe('ready')
+    } finally {
+      server.close()
+    }
+  }, 20000)
+
+  it('M4-A iterating 走 loop 锁定：迭代终验失败只让渡不重修（无 repairing，loop 门禁生效）', async () => {
+    createChannel({
+      name: 'iter-loop-channel',
+      provider_type: 'anthropic',
+      base_url: 'https://iter-loop.example',
+      api_key: 'key-iter-loop',
+      models: [{ id: 'm1', name: 'iter-loop-model', enabled: true, supports_tools: true }],
+    })
+    const project = createProject({ request_id: 'req-acc-iter', mode: 'quick', initial_message: '帮我做一个记账应用' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出', priority: 'P0' }])
+
+    // 可切换的失败开关：初始生成走通过内容；迭代阶段走持续失败（逼出终验失败路径）
+    let shouldFail = false
+    const server = createServer((req, res) => {
+      const root = findProject(project.project_id).root_path
+      const path = req.url === '/' ? '/index.html' : (req.url ?? '/index.html')
+      try {
+        if (!shouldFail) {
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+          res.end(readFileSync(join(root, path.replace(/^\//, '')), 'utf8'))
+        } else {
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+          res.end('<html><h1>持续失败</h1></html>')
+        }
+      } catch {
+        res.writeHead(404)
+        res.end('Not Found')
+      }
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+    setSandboxRuntimeForTests({
+      processFactory: () => fakeChild(),
+      portAllocator: async () => port,
+      healthCheck: async () => true,
+    })
+
+    const events: string[] = []
+    setProgrammingEventPublisher((event) => events.push(event.type))
+
+    try {
+      // 初始生成：loop 全链 → ready（loop 路径标记持久化）
+      const firstQuery = scriptedQuery()
+      const mvp = await runMvpTask({
+        request_id: 'req-acc-iter',
+        session_id: 'session-iter',
+        project_id: project.project_id,
+        mode: 'quick',
+        query: firstQuery.query,
+      })
+      expect(mvp.via_agent_loop).toBe(true)
+      const firstGate = await runAgentLoopPostTesting({
+        request_id: 'req-acc-iter',
+        session_id: 'session-iter',
+        project_id: project.project_id,
+        mode: 'quick',
+        preview_url: mvp.preview_url,
+        loop: mvp.loop_result!,
+      })
+      expect(firstGate.verdict).toBe('ready')
+      expect(findProject(project.project_id).current_stage).toBe('ready')
+
+      // 迭代：切换到失败内容 → loop 重新生成 → 门禁终验首败即熔断回滚（loop 内修复预算已用尽）
+      shouldFail = true
+      events.length = 0
+      const iterQuery = scriptedQuery()
+      // 存在健康快照（初始 ready 快照）→ 首败熔断回滚并抛 CircuitBreakSettledError，runIterationTask 如实上抛
+      await expect(
+        runIterationTask({
+          request_id: 'req-acc-iter',
+          session_id: 'session-iter',
+          project_id: project.project_id,
+          mode: 'quick',
+          prompt: '把按钮改成蓝色',
+          query: iterQuery.query,
+        }),
+      ).rejects.toThrow('REPAIR_CIRCUIT_SETTLED')
+      // 只终验不重修：迭代终验失败零 repairing、零修复计数（旧管道会 repairing ×3 后让渡）
+      expect(events.filter((type) => type === 'repairing')).toHaveLength(0)
+      expect(findProject(project.project_id).test_repair_count ?? 0).toBe(0)
+      // 回滚收尾：回到健康版本（ready），内容未丢失
+      expect(findProject(project.project_id).current_stage).toBe('ready')
     } finally {
       server.close()
     }
