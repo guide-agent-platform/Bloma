@@ -138,7 +138,7 @@ describe('Sprint 2 LLM PRD extraction + repair cause analysis', () => {
 
     let capturedSystem = ''
     const query: SDKQuery = async function* (_prompt: string, options) {
-      capturedSystem = options.history?.[0]?.content ?? ''
+      capturedSystem = typeof options.history?.[0]?.content === 'string' ? options.history[0].content : ''
       yield {
         type: 'assistant',
         message: { role: 'assistant', content: [{ type: 'text', text: '{}' }] },
@@ -175,7 +175,7 @@ describe('Sprint 2 LLM PRD extraction + repair cause analysis', () => {
 
     let capturedSystem = ''
     const query: SDKQuery = async function* (_prompt: string, options) {
-      capturedSystem = options.history?.[0]?.content ?? ''
+      capturedSystem = typeof options.history?.[0]?.content === 'string' ? options.history[0].content : ''
       yield {
         type: 'assistant',
         message: { role: 'assistant', content: [{ type: 'text', text: '{}' }] },

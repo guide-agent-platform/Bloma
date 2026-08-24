@@ -246,7 +246,7 @@ describe('T4-L2 runAgent 读取侧：全量扫描回灌引导上下文', () => {
     // 项目建立时没有约束门（模拟 L1 落地前的历史会话）：约束只存在于第 1 轮 JSONL
     writeSession('session-e2e', longSession(32))
 
-    const capturedHistories: Array<Array<{ role: string; content: string }>> = []
+    const capturedHistories: Array<Array<{ role: string; content: string | import('../../shared/types').MessageContentBlock[] }>> = []
     setSDKQueryForTests(async function* (_prompt: string, options) {
       capturedHistories.push(options.history ?? [])
       yield {
@@ -278,7 +278,7 @@ describe('T4-L2 runAgent 读取侧：全量扫描回灌引导上下文', () => {
     // 约束系统行注入模型历史（无论隔了多少轮）
     const constraintTurns = capturedHistories
       .flat()
-      .filter((t) => t.role === 'system' && t.content.includes('不含登录'))
+      .filter((t) => t.role === 'system' && typeof t.content === 'string' && t.content.includes('不含登录'))
     expect(constraintTurns.length).toBeGreaterThan(0)
     // 历史窗口收敛为近 10 轮原文（不含约束系统行时 user/assistant 轮数 ≤ 10）
     const dialogueTurns = (capturedHistories[0] ?? []).filter((t) => t.role !== 'system')

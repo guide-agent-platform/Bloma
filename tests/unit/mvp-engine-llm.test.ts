@@ -175,7 +175,7 @@ describe('MvpEngineLlm generation (A2-14b)', () => {
 
   it('buildPrompt 注入双契约：草图全文（不降采样）+ 仲裁规则（§4.2/§7.1）', async () => {
     let capturedPrompt = ''
-    let capturedHistory: { role: string; content: string }[] = []
+    let capturedHistory: { role: string; content: string | import('../../shared/types').MessageContentBlock[] }[] = []
     const captureQuery: SDKQuery = async function* (prompt: string, options: SDKQueryOptions) {
       capturedPrompt = prompt
       capturedHistory = options.history ?? []
@@ -240,7 +240,7 @@ describe('MvpEngineLlm generation (A2-14b)', () => {
   })
 
   it('非截断格式错误 → 带反馈重试（坏输出作为 assistant 回灌 + 反馈提示）', async () => {
-    const calls: { prompt: string; history: { role: string; content: string }[] }[] = []
+    const calls: { prompt: string; history: { role: string; content: string | import('../../shared/types').MessageContentBlock[] }[] }[] = []
     const query: SDKQuery = async function* (prompt: string, options: SDKQueryOptions) {
       calls.push({ prompt, history: options.history ?? [] })
       yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '这不是 JSON' }] } }

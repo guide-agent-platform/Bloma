@@ -190,6 +190,12 @@ export interface ChannelModel {
   enabled: boolean
   /** 来源：manual=手填，fetched=从供应商 API 拉取（默认 manual） */
   source?: 'manual' | 'fetched'
+  /** Agent Loop 能力位：显式 false = 已知不支持 tool use（分流直接回退管道）；
+   *  true / 缺省 = 允许走 loop（缺省时首用可探测，探测失败回退并落决策日志）。 */
+  supports_tools?: boolean
+  /** 编辑格式能力位（Aider 结论：弱渠道用 diff 编辑不可靠）：
+   *  diff = old_string/new_string 精确替换（默认）；whole = 整文件重写。 */
+  edit_format?: 'diff' | 'whole'
 }
 
 export interface Channel {
@@ -495,6 +501,8 @@ export interface MessageContentBlock {
   input?: Record<string, unknown>
   tool_use_id?: string
   content?: string
+  /** tool_result 专用：true 表示该工具执行失败/被拒，模型据此自纠 */
+  is_error?: boolean
 }
 
 export interface AgentMessage {
@@ -507,6 +515,10 @@ export interface SDKMessage {
   type: 'user' | 'assistant' | 'system' | 'result'
   message?: { role: string; content: MessageContentBlock[] }
   subtype?: string
+  /** message_delta 的 stop_reason（'tool_use' = 模型要求继续工具循环；Agent Loop 据此判定续轮） */
+  stop_reason?: string
+  /** 渠道返回的用量（message_start/message_delta 的 usage 聚合；Agent Loop 逐轮埋点用） */
+  usage?: { input_tokens?: number; output_tokens?: number }
 }
 
 /** Agent 会话元数据（renderer 侧定义，非 IPC 传输） */
@@ -1009,6 +1021,8 @@ export interface AnalyticsTrackInput extends RequestEnvelope {
       | 'mode_upgraded'
       | 'programming_execution'
       | 'self_repair_triggered'
+      | 'agent_loop_turn'
+      | 'agent_loop_completed'
       | 'judge_verdict'
       | 'satisfaction_marked'
       | 'project_finalized'

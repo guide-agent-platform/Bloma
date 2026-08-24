@@ -51,10 +51,25 @@ import { extractErrorMessage } from './channel-test-error'
 
 export type StreamPublisher = (event: AgentEvent) => void
 
-/** 传给 SDK 的历史消息轮次（role + 纯文本 content）。 */
+/**
+ * 传给 SDK 的工具定义（Agent Loop，PR1）。
+ * 形态对齐 Anthropic Messages API 的 tools 数组元素，原样透传请求体。
+ */
+export interface ToolDefinition {
+  name: string
+  description: string
+  input_schema: Record<string, unknown>
+}
+
+/**
+ * 传给 SDK 的历史消息轮次（PR1 起 content 支持块数组）。
+ * 纯文本轮次照旧传 string（逐字节与改造前一致）；Agent Loop 的 tool_use（assistant）
+ * 与 tool_result（user）轮次传 MessageContentBlock[]——tool_result 必须包在 user 消息
+ * 的 content 数组里、紧跟对应 tool_use 的 assistant 轮之后（陷阱 11 扩展）。
+ */
 export interface ConversationTurn {
   role: 'system' | 'user' | 'assistant'
-  content: string
+  content: string | MessageContentBlock[]
 }
 
 export interface SDKQueryOptions {
@@ -63,10 +78,18 @@ export interface SDKQueryOptions {
   sessionId: string
   /** 多轮历史（不含当前 prompt）；anthropicMessagesQuery 追加 {role:'user', content: prompt} */
   history?: ConversationTurn[]
+  /**
+   * 完整 messages 数组（含末尾 user 轮，Agent Loop 的 tool_result 回填用）。
+   * 提供时忽略 history + prompt 拼装，数组原样作为请求 messages（system 轮仍提取到
+   * 顶层 system 字段）；不传 = 现状拼装路径，零行为变化。
+   */
+  messages?: ConversationTurn[]
   /** 单次响应的最大 token 数，缺省 1200（去硬编码：由渠道配置传入） */
   maxTokens?: number
   /** 采样温度（§7.7 类别校准表：guide 0.3 / 生成与判定类 0.1）；缺省不传，由 API 默认 */
   temperature?: number
+  /** 工具定义（Agent Loop）：不传 = 现状，请求体不携带 tools 字段 */
+  tools?: ToolDefinition[]
 }
 
 export type SDKQuery = (prompt: string, options: SDKQueryOptions) => AsyncIterable<SDKMessage>
@@ -767,8 +790,12 @@ function buildProgrammingSystemTurn(stage: WorkflowStage): ConversationTurn {
  *   调用方（runAgent/convertSDKMessage/UI）无需改动。
  * - 每个 assistant 消息只携带一段增量文本（非累积），renderer 按 delta 拼接。
  * - 历史经 options.history 传入，消息数组 = [...history, {role:'user', content: prompt}]。
+ * - PR1：options.tools 携带工具定义时请求体加 tools，并解析 tool_use 流事件
+ *   （input_json_delta 累积 → content_block_stop 产出完整 tool_use block 随当轮
+ *   assistant 消息 yield）；message_delta 的 stop_reason / usage 记入 result 消息。
+ *   不传 tools 时行为与改造前逐字节一致。导出供 SSE 解析单测直接驱动。
  */
-async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions): AsyncGenerator<SDKMessage> {
+export async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions): AsyncGenerator<SDKMessage> {
   if (!options.env.PATH && !options.env.Path) throw new Error('SDK env missing PATH')
   if (options.signal.aborted) throw new Error('AGENT_CANCELLED')
   const apiKey = options.env.ANTHROPIC_AUTH_TOKEN
@@ -780,16 +807,22 @@ async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions)
   // Anthropic Messages API 的 messages 数组只允许 user/assistant 角色，
   // system 必须放顶层 system 字段。把 history 里的 system 消息提取到顶层，
   // 否则 messages 含 role:'system' 会触发 400（MVP 生成的 history 首条就是 system）。
-  const history = options.history ?? []
+  // PR1 扩展：options.messages 提供时数组原样作为请求 messages（Agent Loop 的
+  // tool_result 回填需要把块数组 user 轮完整透传，不能走 prompt 追加拼装）；
+  // content 为块数组的轮次直接透传（陷阱 11 扩展：混合 content 一律数组形态）。
+  const history = options.messages ?? options.history ?? []
   const systemText = history
     .filter((turn) => turn.role === 'system')
-    .map((turn) => turn.content)
+    .map((turn) => (typeof turn.content === 'string' ? turn.content : extractText(turn.content)))
     .filter(Boolean)
     .join('\n')
-  const messages = [
-    ...history.filter((turn) => turn.role !== 'system'),
-    { role: 'user' as const, content: prompt },
-  ]
+  const nonSystemTurns = history.filter((turn) => turn.role !== 'system')
+  const messages = options.messages
+    ? nonSystemTurns
+    : [
+        ...nonSystemTurns,
+        { role: 'user' as const, content: prompt },
+      ]
 
   // 开发插件：BLOMA_SHOW_THINKING=1 时启用 extended thinking 并把思考打印到终端。
   // Anthropic 要求 max_tokens > budget_tokens；预算取一半（封顶 1024，下限 256）。
@@ -807,6 +840,7 @@ async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions)
   }
   if (options.temperature !== undefined) body.temperature = options.temperature
   if (systemText) body.system = systemText
+  if (options.tools?.length) body.tools = options.tools
   if (showThinking) {
     const maxTokens = options.maxTokens ?? 1200
     const budget = Math.min(1024, Math.floor(maxTokens / 2))
@@ -880,6 +914,11 @@ async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions)
   let textDeltaCount = 0
   let thinkingDeltaCount = 0
   let otherDeltaCount = 0
+  let toolUseCount = 0
+  // PR1 tool use 流解析状态：input_json_delta 分片累积，content_block_stop 产出完整 tool_use
+  let activeToolUse: { id: string; name: string; json: string } | null = null
+  let stopReason: string | undefined
+  let usageInfo: { input_tokens?: number; output_tokens?: number } | undefined
   try {
     for (;;) {
       const { done, value } = await reader.read()
@@ -899,8 +938,10 @@ async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions)
         if (!data || data === '[DONE]') continue
         let parsed: {
           type?: string
-          delta?: { type?: string; text?: string; thinking?: string }
-          content_block?: { type?: string }
+          delta?: { type?: string; text?: string; thinking?: string; stop_reason?: string; partial_json?: string }
+          content_block?: { type?: string; id?: string; name?: string }
+          message?: { usage?: { input_tokens?: number; output_tokens?: number } }
+          usage?: { input_tokens?: number; output_tokens?: number }
         }
         try {
           parsed = JSON.parse(data) as typeof parsed
@@ -927,11 +968,62 @@ async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions)
             type: 'assistant',
             message: { role: 'assistant', content: [{ type: 'text', text: parsed.delta.text }] },
           }
+          continue
+        }
+        // ---- PR1 tool use 解析（无 tools 的请求不会出现这些事件，零行为变化）----
+        if (parsed.type === 'message_start') {
+          const inputTokens = parsed.message?.usage?.input_tokens
+          if (typeof inputTokens === 'number') usageInfo = { ...usageInfo, input_tokens: inputTokens }
+          continue
+        }
+        if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'tool_use') {
+          activeToolUse = {
+            id: typeof parsed.content_block.id === 'string' ? parsed.content_block.id : '',
+            name: typeof parsed.content_block.name === 'string' ? parsed.content_block.name : '',
+            json: '',
+          }
+          continue
+        }
+        if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'input_json_delta') {
+          // partial_json 分片累积（陷阱：绝不能逐片 JSON.parse，必须到 content_block_stop 一次性解析）
+          if (activeToolUse && typeof parsed.delta.partial_json === 'string') {
+            activeToolUse.json += parsed.delta.partial_json
+          }
+          continue
+        }
+        if (parsed.type === 'content_block_stop') {
+          if (activeToolUse) {
+            let input: Record<string, unknown>
+            try {
+              input = activeToolUse.json ? (JSON.parse(activeToolUse.json) as Record<string, unknown>) : {}
+            } catch {
+              // 累积 JSON 损坏（流中断/渠道脏数据）：不给模型残缺输入，置空对象由调用方按
+              // 参数校验错误处理——正则修补违反「代码型 JSON 不做修补」约定（陷阱 7）
+              input = {}
+            }
+            yield {
+              type: 'assistant',
+              message: {
+                role: 'assistant',
+                content: [{ type: 'tool_use', id: activeToolUse.id, name: activeToolUse.name, input }],
+              },
+            }
+            toolUseCount += 1
+            activeToolUse = null
+          }
+          continue
+        }
+        if (parsed.type === 'message_delta') {
+          if (typeof parsed.delta?.stop_reason === 'string') stopReason = parsed.delta.stop_reason
+          const outputTokens = parsed.usage?.output_tokens
+          if (typeof outputTokens === 'number') usageInfo = { ...usageInfo, output_tokens: outputTokens }
+          continue
         }
       }
     }
   } finally {
-    if (textDeltaCount === 0 && (thinkingDeltaCount > 0 || otherDeltaCount > 0)) {
+    // tool-only 轮次（模型只调工具不说话）是 Agent Loop 的正常形态，不算零正文
+    if (textDeltaCount === 0 && toolUseCount === 0 && (thinkingDeltaCount > 0 || otherDeltaCount > 0)) {
       console.error(
         `[anthropicMessagesQuery] 零正文输出：model=${String(body.model)} max_tokens=${String(body.max_tokens)} `
         + `text_delta=${textDeltaCount} thinking_delta=${thinkingDeltaCount} other_delta=${otherDeltaCount}`
@@ -945,7 +1037,14 @@ async function* anthropicMessagesQuery(prompt: string, options: SDKQueryOptions)
     }
   }
 
-  yield { type: 'result', subtype: 'success' }
+  yield {
+    type: 'result',
+    subtype: 'success',
+    // stop_reason / usage 只在有值时携带（不传 tools 的响应也有 stop_reason——
+    // end_turn 等，多带一个字段对既有消费者零影响，Agent Loop 据此判定续轮与埋点）
+    ...(stopReason !== undefined ? { stop_reason: stopReason } : {}),
+    ...(usageInfo !== undefined ? { usage: usageInfo } : {}),
+  }
 }
 
 /**
@@ -1011,7 +1110,8 @@ export const HISTORY_WINDOW_TURNS = 10
 function loadConversationHistory(sessionId: string, limit = HISTORY_WINDOW_TURNS): ConversationTurn[] {
   const path = getAgentSessionPath(sessionId)
   if (!existsSync(path)) return []
-  const turns: ConversationTurn[] = []
+  // 本函数产出的轮次 content 一律是提取后的纯文本（loop 的块数组轮次不经此路径）
+  const turns: Array<{ role: ConversationTurn['role']; content: string }> = []
   for (const line of readFileSync(path, 'utf8').split('\n')) {
     if (!line.trim()) continue
     let message: AgentMessage
