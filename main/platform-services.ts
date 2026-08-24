@@ -61,6 +61,14 @@ const EXIT_PORT_IN_USE = 10
 export async function runSandbox(input: SandboxRunInput): Promise<SandboxRunResult> {
   const project = findProject(input.project_id)
 
+  // 幂等守卫：同一 project 已 running 且健康时直接复用（不 stop 不 spawn）。
+  // 消除 runMvpViaAgentLoop 交付前对 loop 内 run_preview 沙箱的冗余重启（preview_url 抖动）；
+  // 崩溃/挂起时 map 已被 exit 清理或 healthCheck 失败 → 照常走 stop+spawn 重启。
+  const existing = activeSandboxes.get(project.project_id)
+  if (existing && (await sandboxHealthCheck(`http://localhost:${existing.port}`))) {
+    return { status: 'running', preview_url: `http://localhost:${existing.port}`, port: existing.port }
+  }
+
   await stopSandbox(input)
   sandboxLogs.set(input.project_id, '')
 

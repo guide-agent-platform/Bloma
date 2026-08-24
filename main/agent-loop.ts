@@ -108,6 +108,46 @@ const EVENT_SUMMARY_CHAR_LIMIT = 500
 /** 预算耗尽软着陆：连续 2 轮仍在撞预算（无进展）才终止，给模型收尾总结机会。 */
 const BUDGET_STALL_TURNS = 2
 
+/** 传给模型的纯文本轮窗口（上下文限界；loop 中纯文本轮罕见，见 windowMessages 注释）。 */
+export const TEXT_WINDOW_TURNS = 8
+/** 传给模型的工具轮对窗口（assistant tool_use + user tool_result 成对保留，绝不拆对）。 */
+export const TOOL_WINDOW_ROUNDS = 8
+
+/**
+ * 判断是否为工具轮：content 为块数组且含 tool_use / tool_result。
+ * （loop 的 messages 中 assistant 轮必含 tool_use、user 轮必含 tool_result——
+ * 无工具即返回 completed，因此 messages 里实际没有纯文本轮，F4 窗口化对象是 tool 轮对。）
+ */
+function isToolTurn(turn: ConversationTurn): boolean {
+  return Array.isArray(turn.content) && turn.content.some((block) => block.type === 'tool_use' || block.type === 'tool_result')
+}
+
+/**
+ * Agent Loop 上下文窗口化（F4）：首轮 task 恒保留，后向扫描——
+ * tool 轮按 toolRounds*2 条预算保留（相邻成对 → 最近完整 N 轮，不拆 tool_use→tool_result 配对），
+ * 纯文本轮按 textWindowTurns 保留；保持原顺序。JSONL 落盘不走此路径（全量审计）。
+ */
+export function windowMessages(messages: ConversationTurn[], textWindowTurns: number, toolRounds: number): ConversationTurn[] {
+  if (messages.length === 0) return []
+  const head = messages[0]
+  const tail = messages.slice(1)
+  let toolBudget = toolRounds * 2
+  let textBudget = textWindowTurns
+  const kept: ConversationTurn[] = []
+  for (let i = tail.length - 1; i >= 0; i -= 1) {
+    if (isToolTurn(tail[i])) {
+      if (toolBudget > 0) {
+        kept.unshift(tail[i])
+        toolBudget -= 1
+      }
+    } else if (textBudget > 0) {
+      kept.unshift(tail[i])
+      textBudget -= 1
+    }
+  }
+  return [head, ...kept]
+}
+
 export function createToolState(): AgentLoopToolState {
   return { test_failed: false, edits_after_test_failure: 0, repair_round: 0 }
 }
@@ -148,7 +188,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         sessionId: input.sessionId,
         maxTokens: input.maxTokens,
         ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
-        messages: [{ role: 'system', content: input.system }, ...messages],
+        messages: [{ role: 'system', content: input.system }, ...windowMessages(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS)],
         tools: definitions,
       })) {
         if (sdk.type === 'assistant' && sdk.message) {
@@ -236,9 +276,17 @@ async function executeToolCall(
   }
   const toolInput = use.input ?? {}
 
-  // 权限门禁：dangerous 在 allow-all 下也拒绝（自动化管线约定），拒绝转 is_error 让模型自纠
+  // 权限门禁：loop 是无人值守自动化，仅支持 allow-all（warning 放行、dangerous 交由
+  // canUseTool 判定）；非 allow-all（ask/safe）直接拒绝进 is_error 让模型自纠——
+  // 避免 canUseTool 在 ask 模式下落 pending 等 UI 造成永久挂起（取消信号也无法中断）。
+  // 副作用：非 allow-all 下 safe 工具也一并拒绝，生产 loop 恒 allow-all，接受。
+  if (input.permissionMode !== 'allow-all') {
+    return { output: `权限拒绝：本次运行不允许执行「${use.name}」。请改用其他方式完成，或直接输出当前进展总结。`, isError: true }
+  }
   try {
-    const permission = await canUseTool(use.name, toolInput, input.sessionId, input.permissionMode, input.projectId)
+    // 与 AbortSignal 竞速（withAbort）：即便 canUseTool 意外落 pending（如未来
+    // dangerous-under-allow-all），取消也能中断，绝不进程级永久阻塞。
+    const permission = await withAbort(canUseTool(use.name, toolInput, input.sessionId, input.permissionMode, input.projectId), input.signal)
     if (permission.behavior === 'deny') {
       return { output: `权限拒绝：本次运行不允许执行「${use.name}」。请改用其他方式完成，或直接输出当前进展总结。`, isError: true }
     }
@@ -262,6 +310,29 @@ async function executeToolCall(
     // 工具异常不崩循环：错误摘要回给模型自纠（AutoGPT 式死循环由预算/轮次兜底）
     return { output: `工具执行出错：${errorMessage(error)}`, isError: true }
   }
+}
+
+/**
+ * 把 promise 与 AbortSignal 竞速：signal 已 abort 立即 reject AGENT_CANCELLED；
+ * 中途 abort 也 reject（once 监听，settle 后移除）。用于把「可能永不 settle 的等待」
+ * 纳入取消范围，避免进程级永久阻塞（如 ask 权限 pending）。
+ */
+export function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new Error('AGENT_CANCELLED'))
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new Error('AGENT_CANCELLED'))
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      },
+    )
+  })
 }
 
 function loopCancelled(turns: number, finalText: string, toolCalls: Array<{ name: string; turn: number }>): AgentLoopResult {

@@ -50,6 +50,28 @@ describe('PlatformServices sandbox runtime', () => {
     expect(captured).toEqual({ cwd: project.root_path, port: 3100 })
   })
 
+  it('runSandbox 幂等：同一 project 连续两次调用复用现有沙箱，不重复 spawn', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-sandbox-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-idem', mode: 'quick' })
+    const child = makeChildProcess()
+    let spawnCount = 0
+    setSandboxRuntimeForTests({
+      portAllocator: async () => 3200,
+      healthCheck: async () => true,
+      processFactory: () => {
+        spawnCount += 1
+        return child.process
+      },
+    })
+    const first = await runSandbox({ request_id: 'req-1', project_id: project.project_id })
+    const second = await runSandbox({ request_id: 'req-2', project_id: project.project_id })
+    expect(spawnCount).toBe(1) // 红：当前第二次 stop+spawn → 2
+    expect(second).toEqual({ status: 'running', preview_url: 'http://localhost:3200', port: 3200 })
+    expect(second.preview_url).toBe(first.preview_url)
+    expect(child.kill).not.toHaveBeenCalled() // 红：当前第二次 stopSandbox 会 kill
+  })
+
   it('retries with a new port when the sandbox process reports a port conflict', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-sandbox-'))
     process.env.PROMA_HOME = home

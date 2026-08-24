@@ -205,8 +205,8 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     return undefined
   }
 
-  /** 落盘前统一护栏：路径沙箱 + 可写范围 + 语法/结构校验 + meta CSP 剥离。 */
-  const validateAndWrite = async (root: string, rel: string, content: string): Promise<ToolOutcome> => {
+  /** 落盘前统一护栏：路径沙箱 + 可写范围 + 语法/结构校验 + 修复预算门 + meta CSP 剥离。 */
+  const validateAndWrite = async (root: string, rel: string, content: string, ctx: ToolContext): Promise<ToolOutcome> => {
     if (!isWritablePath(rel)) return { output: notWritableError(rel), isError: true }
     if (extname(rel).toLowerCase() === '.html') {
       const structureError = checkHtmlStructure(content)
@@ -218,6 +218,9 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         return { output: `JS 语法校验未通过，已拒绝写入 ${rel}：\n${syntax.error}\n请读完错误定位后修改再提交。`, isError: true }
       }
     }
+    // 修复预算门：路径/参数/语法均校验通过后才烧预算（无效调用不烧，对齐注释语义）
+    const budget = guardRepairBudget(ctx)
+    if (budget) return budget
     const finalContent = extname(rel).toLowerCase() === '.html' ? stripMetaCsp(content) : content
     const abs = join(root, rel)
     mkdirSync(join(abs, '..'), { recursive: true })
@@ -353,9 +356,8 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       const project = findProject(projectId)
       const resolved = resolveInsideProject(project.root_path, toolInput.path)
       if (!resolved.ok) return { output: resolved.error, isError: true }
-      const budget = guardRepairBudget(ctx)
-      if (budget) return budget
-      return validateAndWrite(project.root_path, resolved.rel, toolInput.content)
+      // 修复预算门在 validateAndWrite 内（校验通过后才烧预算）
+      return validateAndWrite(project.root_path, resolved.rel, toolInput.content, ctx)
     },
   }
 
@@ -373,7 +375,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         new_string: { type: 'string', description: '（diff 模式）替换后的内容' },
         content: { type: 'string', description: '（whole 模式）修改后的完整文件内容' },
       },
-      required: ['path'],
+      required: editFormat === 'whole' ? ['path'] : ['path', 'new_string'],
     },
     execute: async (toolInput, ctx) => {
       const project = findProject(projectId)
@@ -385,9 +387,12 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         if (typeof toolInput.content !== 'string') {
           return { output: '缺少参数：diff 模式需要 old_string + new_string，whole 模式需要 content。', isError: true }
         }
-        const budget = guardRepairBudget(ctx)
-        if (budget) return budget
-        return validateAndWrite(project.root_path, resolved.rel, toolInput.content)
+        return validateAndWrite(project.root_path, resolved.rel, toolInput.content, ctx)
+      }
+
+      // diff 模式：new_string 必须显式提供（可为空串但不能缺省，缺省静默删除是隐蔽 bug）
+      if (typeof toolInput.new_string !== 'string') {
+        return { output: '缺少参数：diff 模式需要 old_string + new_string（new_string 可为空串，但不能缺省）。', isError: true }
       }
 
       // diff 模式：old_string 唯一命中才替换（SWE-agent ACI：未命中/多命中都报错并引导定点）
@@ -402,10 +407,8 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       if (count > 1) {
         return { output: `old_string 在 ${resolved.rel} 中命中 ${count} 处，不唯一。请扩大上下文使片段唯一。`, isError: true }
       }
-      const budget = guardRepairBudget(ctx)
-      if (budget) return budget
-      const next = current.replace(toolInput.old_string, typeof toolInput.new_string === 'string' ? toolInput.new_string : '')
-      return validateAndWrite(project.root_path, resolved.rel, next)
+      const next = current.replace(toolInput.old_string, toolInput.new_string)
+      return validateAndWrite(project.root_path, resolved.rel, next, ctx)
     },
   }
 

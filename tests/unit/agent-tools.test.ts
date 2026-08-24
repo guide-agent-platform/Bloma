@@ -227,6 +227,17 @@ describe('agent-tools（PR2 L2）', () => {
       expect(readFileSync(join(project.root_path, 'src', 'app.js'), 'utf8')).toContain('"new"')
     })
 
+    it('edit_file diff 模式：new_string 缺省 → 参数错误，不执行删除', async () => {
+      const project = createProject({ request_id: 'req-e3', mode: 'quick' })
+      mkdirSync(join(project.root_path, 'src'), { recursive: true })
+      writeFileSync(join(project.root_path, 'src', 'app.js'), 'const a = 1;\n', 'utf8')
+      const tools = buildAgentTools({ projectId: project.project_id })
+      const outcome = await byName(tools, 'edit_file').execute({ path: 'src/app.js', old_string: 'const a = 1' }, ctxFor(project.project_id))
+      expect(outcome.isError).toBe(true)
+      expect(outcome.output).toContain('new_string')
+      expect(readFileSync(join(project.root_path, 'src', 'app.js'), 'utf8')).toBe('const a = 1;\n')
+    })
+
     it('edit_file whole 模式：content 整文件重写（弱渠道能力位）', async () => {
       const project = createProject({ request_id: 'req-e2', mode: 'quick' })
       writeFileSync(join(project.root_path, 'index.html'), '<html><head></head><body>旧</body></html>', 'utf8')
@@ -340,6 +351,24 @@ describe('agent-tools（PR2 L2）', () => {
       expect(outcomes[EDIT_BUDGET_AFTER_TEST_FAILURE].budgetExhausted).toBe(true)
       expect(outcomes[EDIT_BUDGET_AFTER_TEST_FAILURE].output).toContain('预算已用尽')
       expect(ctx.state.edits_after_test_failure).toBe(EDIT_BUDGET_AFTER_TEST_FAILURE + 1)
+    })
+
+    it('修复预算：语法校验失败的写入不递增，合法写入递增 1', async () => {
+      const project = createProject({ request_id: 'req-t4', mode: 'quick' })
+      recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+      const tools = buildAgentTools({ projectId: project.project_id })
+      const ctx = ctxFor(project.project_id)
+      ctx.state.preview_url = 'http://127.0.0.1:1' // 不可达 → 测试失败
+      const gwt = await byName(tools, 'run_gwt_tests').execute({}, ctx)
+      expect(ctx.state.test_failed).toBe(true)
+
+      const bad = await byName(tools, 'write_file').execute({ path: 'bad.js', content: 'SYNTAX_ERROR const x =' }, ctx)
+      expect(bad.isError).toBe(true)
+      expect(ctx.state.edits_after_test_failure).toBe(0) // 红：当前语法失败也烧预算 → 为 1
+
+      const good = await byName(tools, 'write_file').execute({ path: 'index.html', content: '<html><head></head><body>ok</body></html>' }, ctx)
+      expect(good.isError).toBeUndefined()
+      expect(ctx.state.edits_after_test_failure).toBe(1)
     })
   })
 

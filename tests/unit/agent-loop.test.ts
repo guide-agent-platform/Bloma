@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { runAgentLoop, type AgentLoopInput, type AgentLoopTool, type ToolOutcome } from '../../main/agent-loop'
+import { runAgentLoop, TOOL_WINDOW_ROUNDS, type AgentLoopInput, type AgentLoopTool, type ToolOutcome } from '../../main/agent-loop'
 import type { SDKMessage } from '../../shared/types'
 import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
 import { getAgentSessionPath } from '../../storage/config-paths'
@@ -268,5 +268,17 @@ describe('runAgentLoop（PR2 L1）', () => {
       onTurn: (info) => turns.push({ turn: info.turn, toolCalls: info.toolCalls, inputTokens: info.inputTokens }),
     }))
     expect(turns).toEqual([{ turn: 1, toolCalls: [{ name: 'echo', turn: 1 }], inputTokens: 100 }])
+  })
+
+  it('F4：长 loop 最后一次模型调用 messages 有界，JSONL 仍全量', async () => {
+    const echo = tool('echo', () => ({ output: 'ok' }))
+    const script = Array.from({ length: 12 }, (_, i) => [toolUseMessage(`t${i}`, 'echo')])
+    const { query, receivedMessages } = scriptedQuery(script)
+    const result = await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 12, sessionId: 'session-window' }))
+    expect(result.status).toBe('turn_limit')
+    const lastCall = receivedMessages.at(-1)!
+    expect(lastCall.length).toBe(2 + TOOL_WINDOW_ROUNDS * 2) // system + task + 最近 8 轮 tool 对
+    const jsonl = readSessionJsonl('session-window')
+    expect(jsonl.filter((m) => m.role === 'assistant' && m.content.some((b) => b.type === 'tool_use'))).toHaveLength(12)
   })
 })
