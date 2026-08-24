@@ -32,6 +32,7 @@ export type DecisionType =
   | 'constraint_captured'
   | 'memory_distilled'
   | 'enrichment_stats'
+  | 'agent_loop'
 
 export interface DecisionEntry {
   type: DecisionType

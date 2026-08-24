@@ -301,6 +301,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
               channel_id: input.channel_id,
               query: getSdkQuery(),
               signal: abortController.signal,
+              repair_internalized: mvp.via_agent_loop === true,
             }),
           )
           .catch((error) => {
