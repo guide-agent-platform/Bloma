@@ -1276,8 +1276,9 @@ const TRIVIAL_ACK_RE = /^(好的?|嗯+|哦+|噢+|行|ok|okay|不用了|谢谢|�
 /**
  * 分层意图识别——规则快门 + LLM 兜底（改造 F）。
  *
- * 纯进度追问 / 纯寒暄应答 → 固定 `other`；L1（isModificationIntent）毫秒级命中 → `modify`；
- * 其余一律 L3 用 LLM + PRD 背板上下文判定「是否表达不满/修改诉求」。
+ * 纯寒暄应答 → 固定 `other`；L1（isModificationIntent）毫秒级命中 → `modify`；纯进度
+ * 追问（无修改词）→ 固定 `other`；其余一律 L3 用 LLM + PRD 背板上下文判定「是否表达不满/修改诉求」。
+ * L1 先于进度门是放行一致化要求：进度子串门只能拦「纯」进度句，不得吞掉含修改动词的混合句。
  * 曾经的 L2 语气标记门（疑问/否定/困惑字词）已移除：它把「平静的陈述式修改诉求」
  * （如「我只需要理财房贷的计算器」，零语气标记）永远挡在 L3 之外，形成结构性盲区；
  * ready 阶段非进度、非寒暄的陈述句本来就是修改/反馈的高发区，默认交给 LLM 判定。
@@ -1292,9 +1293,12 @@ async function resolveModificationIntent(opts: {
   signal: AbortSignal
   maxTokens: number
 }): Promise<'modify' | 'other'> {
-  if (PROGRESS_QUERY_RE.test(opts.content)) return 'other'
   if (TRIVIAL_ACK_RE.test(opts.content.trim())) return 'other'
+  // 顺序修正（放行一致化）：L1 修改词表先于进度子串门——纯进度句（好了吗/怎么样了）
+  // 不含修改词、行为不变；但「进度词 + 修改动词」混合句（「做完了没？把按钮换成蓝色」）
+  // 此前被子串进度门整句吞掉、永远到不了 L1/L3，被固定文案挡回（放行不一致）。
   if (isModificationIntent(opts.content)) return 'modify'
+  if (PROGRESS_QUERY_RE.test(opts.content)) return 'other'
   if (!opts.env) return 'other'
   const env = opts.env
   try {
@@ -1337,7 +1341,15 @@ async function classifyIntentViaLlm(opts: {
     }
   }
 
-  return /\b(modify|修改|调整|改|重做|重新生成|重新做|换)\b/i.test(texts.join('')) ? 'modify' : 'other'
+  // 应答解析（修复死正则）：JS 的 \b 基于 \w（仅 ASCII），中文字符间永远无边界，
+  // 原式 /\b(...|修改|改|...)\b/ 的中文分支全部永不命中——模型答「修改」曾被误判
+  // `other`，只因恰好答 ASCII「modify」而侥幸工作。归一化（trim/小写/去尾标点）后
+  // 整 token 匹配，再保留 ASCII \b 兜底吸收「modify。附带解释」类应答。
+  const raw = texts.join('').trim().toLowerCase()
+  const verdict = raw.replace(/[。.!！~～,，?？\s]+$/g, '')
+  if (verdict === 'modify' || ['修改', '调整', '改', '重做', '重新生成', '重新做', '换'].includes(verdict)) return 'modify'
+  if (/\bmodify\b/.test(raw)) return 'modify'
+  return 'other'
 }
 
 /** 组装 L3 意图判定的上下文 prompt：PRD 背板定位 + 功能项 + 用户最新消息。 */

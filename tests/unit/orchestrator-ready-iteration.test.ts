@@ -226,6 +226,76 @@ describe('ready 护栏意图分流', () => {
     expect(decision?.payload.kind).toBe('iteration_confirm')
   })
 
+  it('「进度词 + 修改动词」混合句（做完了没？把按钮换成蓝色）→ L1 命中弹确认卡，不被进度子串门挡回', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-mixed-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    let sdkCalled = false
+    setAgentStreamPublisher((event) => events.push(event))
+    setSDKQueryForTests(async function* () {
+      sdkCalled = true
+      yield { type: 'result', subtype: 'success' }
+    })
+
+    vi.mocked(findProject).mockReturnValue({
+      project_id: 'project-ready-mixed',
+      current_stage: 'ready',
+    } as never)
+
+    await runAgent({
+      request_id: 'req-mixed',
+      session_id: 'session-mixed',
+      project_id: 'project-ready-mixed',
+      content: '做完了没？把按钮换成蓝色',
+      mode: 'quick',
+      current_stage: 'ready',
+      channel_id: 'test-channel',
+    })
+
+    // 放行一致化回归：此前「做完了没」进度子串优先于 L1，整句被判 other 挡回固定文案
+    expect(runIterationTaskMock).not.toHaveBeenCalled()
+    expect(sdkCalled).toBe(false) // L1 毫秒级命中，无需 LLM 往返
+    const decision = events.find((event) => event.type === 'user_decision_required')
+    expect(decision?.payload.kind).toBe('iteration_confirm')
+    const deltas = events
+      .filter((event) => event.type === 'message_delta')
+      .map((event) => String(event.payload.text ?? ''))
+      .join('')
+    expect(deltas).not.toContain('已经生成好了')
+  })
+
+  it('L3 兜底应答为中文「修改」仍判 modify → 弹确认卡（\b 死正则回归）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-l3-zh-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    setSDKQueryForTests(async function* () {
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '修改' }] } }
+      yield { type: 'result', subtype: 'success' }
+    })
+
+    vi.mocked(findProject).mockReturnValue({
+      project_id: 'project-ready-l3-zh',
+      workspace_slug: 'default-software-builder',
+      current_stage: 'ready',
+    } as never)
+
+    await runAgent({
+      request_id: 'req-l3-zh',
+      session_id: 'session-l3-zh',
+      project_id: 'project-ready-l3-zh',
+      content: '这配色看着有点刺眼',
+      mode: 'quick',
+      current_stage: 'ready',
+      channel_id: 'test-channel',
+    })
+
+    // 旧解析 /\b(...|修改|...)\b/ 的中文分支永不命中（\b 仅 ASCII），中文应答被误判 other
+    expect(runIterationTaskMock).not.toHaveBeenCalled()
+    const decision = events.find((event) => event.type === 'user_decision_required')
+    expect(decision?.payload.kind).toBe('iteration_confirm')
+  })
+
   it('确认卡「不对，我重新说」/「不改了」→ 不迭代、pending 终结、阶段回 ready 并如实告知', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-ready-rephrase-'))
     process.env.PROMA_HOME = home
