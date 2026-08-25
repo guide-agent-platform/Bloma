@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { captureConstraints, extractConstraints, scanSessionConstraints } from '../../main/constraint-extractor'
 import { buildPrdBackplane } from '../../main/document-engine'
-import { generateMvpLlm } from '../../main/mvp-engine-llm'
+import { buildAgentLoopSystemPrompt } from '../../main/programming-orchestrator'
 import { generateSketchLlm } from '../../main/sketch-engine-llm'
 import { HISTORY_WINDOW_TURNS, runAgent, setAgentStreamPublisher, setSDKQueryForTests } from '../../main/orchestrator'
 import { createChannel } from '../../main/channel-manager'
@@ -181,7 +181,7 @@ describe('T4-L1 约束注入生成提示词（背板常驻）', () => {
     expect(prompts[0]).toContain('用户约束')
   })
 
-  it('MVP 提示词包含用户约束段', async () => {
+  it('MVP 系统提示词（Agent Loop 背板锚定）包含用户约束段', () => {
     const project = createProject({ request_id: 'req-mvp', mode: 'quick', initial_message: '记账本' })
     const backplane: PrdBackplane = {
       project_id: project.project_id,
@@ -193,28 +193,11 @@ describe('T4-L1 约束注入生成提示词（背板常驻）', () => {
       constraints: ['不含登录', '必须离线可用'],
       assumptions: [],
     }
-    const prompts: string[] = []
-    const query = async function* (prompt: string): AsyncGenerator<SDKMessage> {
-      prompts.push(prompt)
-      yield {
-        type: 'assistant',
-        message: {
-          role: 'assistant',
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              files: [{ path: 'index.html', content: '<!doctype html><html><head><style>a{}</style></head><body><button>存</button></body></html>' }],
-              run_command: 'npm start',
-            }),
-          }],
-        },
-      }
-      yield { type: 'result', subtype: 'success' }
-    }
-    await generateMvpLlm({ project_id: project.project_id, backplane, query, env: {}, sessionId: 'session-mvp' })
-    expect(prompts[0]).toContain('用户约束')
-    expect(prompts[0]).toContain('不含登录')
-    expect(prompts[0]).toContain('必须离线可用')
+    // 废旧管道改造后 MVP 由 Agent Loop 生成，其背板锚定系统提示词即「MVP 提示词」。
+    const prompt = buildAgentLoopSystemPrompt(backplane, 'diff')
+    expect(prompt).toContain('用户约束')
+    expect(prompt).toContain('不含登录')
+    expect(prompt).toContain('必须离线可用')
   })
 })
 

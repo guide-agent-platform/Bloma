@@ -7,9 +7,6 @@ import {
   DEFAULT_SYSTEM_PROMPT as SKETCH_DEFAULT,
 } from '../../main/sketch-engine-llm'
 import {
-  DEFAULT_SYSTEM_PROMPT as MVP_DEFAULT,
-} from '../../main/mvp-engine-llm'
-import {
   DEFAULT_SYSTEM_PROMPT as ENRICHER_DEFAULT,
 } from '../../main/requirement-enricher'
 import {
@@ -24,18 +21,19 @@ import { DEFAULT_GUIDE_SYSTEM_PROMPT as GUIDE_DEFAULT } from '../../main/guide-a
  * 默认 system prompt；不存在/空白 → 回退内置默认。与 prd-engine（`prd-system`）
  * 同一机制（prompt-config.loadPromptOverride，无缓存改完即时生效）。
  *
- * 槽位：sketch-system / mvp-system / guide-system / enricher-system / normalizer-system
+ * 槽位：sketch-system / guide-system / enricher-system / normalizer-system
+ * （`loop-system` 为追加模式、无内置默认，由 Agent Loop 侧 buildLoopSystemWithOverride 单独接入，
+ *   本套「全量替换」契约不适用于它；`mvp-system` 随废旧管道删除。）
  */
 
 const SLOTS = [
   { slot: 'sketch-system', builtin: SKETCH_DEFAULT, marker: '草图生成器' },
-  { slot: 'mvp-system', builtin: MVP_DEFAULT, marker: 'MVP 生成器' },
   { slot: 'guide-system', builtin: GUIDE_DEFAULT, marker: '向导 Agent' },
   { slot: 'enricher-system', builtin: ENRICHER_DEFAULT, marker: '需求加厚师' },
   { slot: 'normalizer-system', builtin: NORMALIZER_DEFAULT, marker: '需求整理员' },
 ] as const
 
-describe('提示词外置覆盖——五引擎接入（TDD）', () => {
+describe('提示词外置覆盖——四引擎接入（TDD）', () => {
   const originalPromaHome = process.env.PROMA_HOME
   let home: string | undefined
 
@@ -68,7 +66,7 @@ describe('提示词外置覆盖——五引擎接入（TDD）', () => {
     expect(loadPromptOverride(slot)).toBeNull()
   })
 
-  it('五引擎常量均以 DEFAULT_SYSTEM_PROMPT 导出（供设置页展示内置默认）', () => {
+  it('四引擎常量均以 DEFAULT_SYSTEM_PROMPT 导出（供设置页展示内置默认）', () => {
     // TDD 结构断言：接线后各引擎必须导出 DEFAULT_SYSTEM_PROMPT（或 GUIDE 前缀），
     // 且使用处经 loadPromptOverride 组装——此用例锁定「常量可导出 + 槽位字符串在源码中被引用」。
     for (const { slot, builtin, marker } of SLOTS) {

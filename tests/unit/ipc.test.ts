@@ -25,7 +25,7 @@ vi.mock('../../main/programming-orchestrator', async (importOriginal) => {
   return {
     ...actual,
     runMvpTask: runMvpTaskMock,
-    runPostMvpTestingFlow: vi.fn(async () => ({})),
+    runAgentLoopPostTesting: vi.fn(async () => ({})),
     runIterationTask: runIterationTaskMock,
   }
 })

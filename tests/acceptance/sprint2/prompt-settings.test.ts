@@ -43,12 +43,12 @@ describe('Sprint 2 prompt settings IPC', () => {
     expect(ids).toEqual([
       'prd-system',
       'sketch-system',
-      'mvp-system',
       'guide-system',
       'enricher-system',
       'normalizer-system',
+      'loop-system',
     ])
-    // 五引擎接入（TDD）后全部槽位 enabled=true——不再是「预留未启用」
+    // 全部槽位 enabled=true——不再是「预留未启用」；loop-system 为追加模式（默认空）
     for (const slot of result.data) {
       expect(slot.enabled).toBe(true)
       expect(slot.label.length).toBeGreaterThan(0)
@@ -147,7 +147,7 @@ describe('Sprint 2 prompt settings IPC', () => {
     const cases: Array<{ channel: string; payload: Record<string, unknown> }> = [
       { channel: IPC_CHANNELS.PROMPT_SAVE, payload: { request_id: 'e1', prompt_id: 'prd-system', content: '   ' } },
       { channel: IPC_CHANNELS.PROMPT_SAVE, payload: { request_id: 'e2', prompt_id: 'prd-system', content: '' } },
-      { channel: IPC_CHANNELS.PROMPT_SAVE, payload: { request_id: 'e3', prompt_id: 'mvp-system' } },
+      { channel: IPC_CHANNELS.PROMPT_SAVE, payload: { request_id: 'e3', prompt_id: 'loop-system' } },
       { channel: IPC_CHANNELS.PROMPT_SAVE, payload: { request_id: 'e4', prompt_id: 'not-exist', content: '自定义' } },
       { channel: IPC_CHANNELS.PROMPT_READ, payload: { request_id: 'e5', prompt_id: 'not-exist' } },
       { channel: IPC_CHANNELS.PROMPT_RESET, payload: { request_id: 'e6', prompt_id: 'not-exist' } },

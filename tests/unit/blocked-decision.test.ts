@@ -20,8 +20,9 @@ import {
   setSandboxRuntimeForTests,
   setSnapshotCaptureProviderForTests,
 } from '../../main/platform-services'
-import type { SDKQuery } from '../../main/orchestrator'
-import type { AgentEvent, SDKMessage } from '../../shared/types'
+import { setBrowserGwtDisabledForTests } from '../../main/gwt-runner'
+import type { SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
+import type { AgentEvent, MessageContentBlock, SDKMessage } from '../../shared/types'
 
 /**
  * A2/A3 — 阻塞态让渡 + resume 闭环。
@@ -38,6 +39,7 @@ describe('Blocked decision resume loop (A2/A3)', () => {
     setProgrammingEventPublisher(() => undefined)
     clearSandboxRuntimeForTests()
     setSnapshotCaptureProviderForTests()
+    setBrowserGwtDisabledForTests(false)
   })
 
   function makeBlockedProject(blockedAction: 'mvp_repair' | 'test_repair' | 'judge_return') {
@@ -163,7 +165,7 @@ describe('Blocked decision resume loop (A2/A3)', () => {
       expect(after.judge_return_count ?? 0).toBe(0)
     })
 
-    it('continue + mvp_repair → 恢复重跑 runMvpTask 仍走 LLM 路径（透传 query/channel_id），不静默重生成模板', async () => {
+    it('continue + mvp_repair → 恢复重跑 runMvpTask 仍走 loop 生成（透传 query/channel_id），不静默重生成模板', async () => {
       const project = makeBlockedProject('mvp_repair')
       recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '基础四则运算计算器' }])
 
@@ -172,20 +174,22 @@ describe('Blocked decision resume loop (A2/A3)', () => {
         encryptString: (value) => Buffer.from(`enc:${value}`, 'utf8'),
         decryptString: (value) => value.toString('utf8').replace(/^enc:/, ''),
       })
-      const channel = createChannel({ name: 'test', provider_type: 'anthropic', base_url: 'https://test', api_key: 'test-key', models: [{ id: 'm1', name: 'test-model', enabled: true }] })
+      const channel = createChannel({ name: 'test', provider_type: 'anthropic', base_url: 'https://test', api_key: 'test-key', models: [{ id: 'm1', name: 'test-model', enabled: true, supports_tools: true }] })
 
-      // 真实 HTTP 服务器：根路径返回计算器 HTML，/src/app.js 返回 calculate 逻辑，
-      // 供 runMvpTask 的沙箱健康检查与 runPostMvpTestingFlow 的 GWT 功能断言同源拉取。
+      // 真实 HTTP 服务器：根路径动态返回 loop 已写入项目根目录的 index.html，/src/app.js 返回 calculate 逻辑，
+      // 供 loop 的 run_preview / run_gwt_tests（静态兜底）与终验门禁同源拉取。
       const server = createServer((req, res) => {
-        if (req.url === '/src/app.js') {
-          res.writeHead(200, { 'Content-Type': 'application/javascript' })
-          res.end('function calculate(a, op, b) { return op === "+" ? a + b : a; }')
-        } else {
-          res.writeHead(200, { 'Content-Type': 'text/html' })
-          res.end('<html><body><button>+</button><button>−</button><button>×</button><button>÷</button></body></html>')
+        const root = findProject(project.project_id).root_path
+        const path = req.url === '/' ? '/index.html' : (req.url ?? '/index.html')
+        try {
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+          res.end(readFileSync(join(root, path.replace(/^\//, '')), 'utf8'))
+        } catch {
+          res.writeHead(404)
+          res.end('Not Found')
         }
       })
-      await new Promise<void>((resolve) => server.listen(0, resolve))
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
       const port = (server.address() as AddressInfo).port
 
       setSandboxRuntimeForTests({
@@ -194,22 +198,23 @@ describe('Blocked decision resume loop (A2/A3)', () => {
         processFactory: () => makeChildProcess(),
       })
       setSnapshotCaptureProviderForTests(async () => ({ extension: 'png', buffer: Buffer.from('fake-png') }))
+      setBrowserGwtDisabledForTests(true)
 
       try {
         await resumeBlockedFlow(
           {
             request_id: 'req', session_id: 's', project_id: project.project_id, mode: 'quick',
             decision: 'continue', content: '',
-            query: calculatorQuery(),
+            query: loopScriptedQuery(),
             channel_id: channel.id,
           },
           () => undefined,
         )
 
-        // LLM 产物（真实计算器）而非模板增删条目：app.js 含 calculate、index.html 含四则按钮
+        // loop 产物（真实计算器）而非模板增删条目：app.js 含 calculate、index.html 含四则按钮
         expect(readFileSync(join(project.root_path, 'src', 'app.js'), 'utf8')).toContain('calculate')
         expect(readFileSync(join(project.root_path, 'index.html'), 'utf8')).toContain('÷')
-        // 全程走完（GWT 功能断言 + 裁判）回到 ready，未中途卡死
+        // 全程走完（loop 生成 + GWT + 裁判）回到 ready，未中途卡死
         expect(findProject(project.project_id).current_stage).toBe('ready')
         expect(findProject(project.project_id).blocked_action).toBeUndefined()
       } finally {
@@ -219,22 +224,40 @@ describe('Blocked decision resume loop (A2/A3)', () => {
   })
 })
 
-/** LLM 生成型 SDK query 桩：返回可落盘的真实计算器（四则按钮 + calculate 逻辑）。 */
-const CALCULATOR_JSON = JSON.stringify({
-  files: [
-    { path: 'index.html', content: '<!doctype html><html><body><button>+</button><button>−</button><button>×</button><button>÷</button><script src="/src/app.js"></script></body></html>' },
-    { path: 'src/app.js', content: 'function calculate(a, op, b) { return op === "+" ? a + b : a; }' },
-    { path: 'src/styles.css', content: 'body { margin: 0; }' },
+/** loop 剧本：write_file 落盘真实计算器 → run_preview → run_gwt_tests → 收尾。 */
+const CALCULATOR_INDEX_HTML =
+  '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8" /></head><body><h1>基础四则运算计算器</h1>' +
+  '<button>+</button><button>−</button><button>×</button><button>÷</button><script src="/src/app.js"></script></body></html>'
+const CALCULATOR_APP_JS =
+  'function calculate(a, op, b) { return op === "+" ? a + b : a; }\ndocument.addEventListener("DOMContentLoaded", function () {});\n'
+const CALCULATOR_LOOP_SCRIPT: MessageContentBlock[][] = [
+  [
+    { type: 'tool_use', id: 't1', name: 'write_file', input: { path: 'index.html', content: CALCULATOR_INDEX_HTML } },
+    { type: 'tool_use', id: 't2', name: 'write_file', input: { path: 'src/app.js', content: CALCULATOR_APP_JS } },
   ],
-  run_command: 'npm run evil',
-  assumptions: ['纯前端计算器'],
-  risks: ['无后端'],
-})
+  [{ type: 'tool_use', id: 't3', name: 'run_preview', input: {} }],
+  [{ type: 'tool_use', id: 't4', name: 'run_gwt_tests', input: {} }],
+  [{ type: 'text', text: '完成：基础四则运算计算器已就绪。' }],
+]
 
-function calculatorQuery(): SDKQuery {
-  return async function* (): AsyncGenerator<SDKMessage> {
-    yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: CALCULATOR_JSON }] } }
-    yield { type: 'result', subtype: 'success' }
+/** loop 生成型 SDK query 桩：带 tools 的调用按剧本走（write_file → run_preview → run_gwt_tests）。 */
+function loopScriptedQuery(): SDKQuery {
+  let turn = 0
+  return async function* (_prompt: string, options: SDKQueryOptions): AsyncGenerator<SDKMessage> {
+    const tools = options.tools ?? []
+    if (tools.length > 0) {
+      const script = CALCULATOR_LOOP_SCRIPT[Math.min(turn, CALCULATOR_LOOP_SCRIPT.length - 1)]
+      turn += 1
+      yield { type: 'assistant', message: { role: 'assistant', content: script } }
+      yield {
+        type: 'result',
+        subtype: 'success',
+        stop_reason: script.some((block) => block.type === 'tool_use') ? 'tool_use' : 'end_turn',
+      }
+      return
+    }
+    yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '这不是 JSON' }] } }
+    yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
   }
 }
 

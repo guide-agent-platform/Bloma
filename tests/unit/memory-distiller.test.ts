@@ -8,7 +8,6 @@ import {
   readProjectMemory,
   setMemoryDistillEnabledForTests,
 } from '../../main/memory-distiller'
-import { generateMvpLlm } from '../../main/mvp-engine-llm'
 import { createChannel } from '../../main/channel-manager'
 import { setSafeStorageAdapter } from '../../main/safe-storage'
 import { createProject, findProject } from '../../main/project-service'
@@ -286,51 +285,5 @@ describe('T4-L3 蒸馏层 · 单一事实源仲裁（验收③）', () => {
     expect(memory?.rejected_ideas).toEqual([]) // 重叠丢弃
     expect(memory?.verbal_preferences).toEqual(['界面简单点']) // 「做一个记账本」与功能项重叠被丢
     expect(memory?.non_functional_notes).toEqual(['数据不上传云端'])
-  })
-
-  it('memory 注入 MVP 提示词：提示级参考 + 背板优先仲裁', async () => {
-    const project = createProject({ request_id: 'req-inject', mode: 'quick', initial_message: '记账本' })
-    const prompts: string[] = []
-    await generateMvpLlm({
-      project_id: project.project_id,
-      backplane: {
-        project_id: project.project_id,
-        name: '记账本',
-        positioning: '记账本',
-        requirements: [{ id: 'F-001', description: '记账本' }],
-        acceptance: {},
-        out_of_scope: [],
-        assumptions: [],
-      },
-      memory: {
-        version: 1,
-        distilled_at: new Date().toISOString(),
-        rejected_ideas: ['月历视图已被否决'],
-        verbal_preferences: ['界面简单点'],
-        non_functional_notes: [],
-      },
-      query: async function* (prompt: string): AsyncGenerator<SDKMessage> {
-        prompts.push(prompt)
-        yield {
-          type: 'assistant',
-          message: {
-            role: 'assistant',
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                files: [{ path: 'index.html', content: '<!doctype html><html><head><style>a{}</style></head><body><button>存</button></body></html>' }],
-                run_command: 'npm start',
-              }),
-            }],
-          },
-        }
-        yield { type: 'result', subtype: 'success' }
-      },
-      env: {},
-      sessionId: 'session-inject',
-    })
-    expect(prompts[0]).toContain('对话性记忆')
-    expect(prompts[0]).toContain('月历视图已被否决')
-    expect(prompts[0]).toContain('以它们为准')
   })
 })

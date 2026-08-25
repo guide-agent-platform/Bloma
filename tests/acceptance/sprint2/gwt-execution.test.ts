@@ -1,10 +1,9 @@
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { syncDocuments } from '../../../main/document-engine'
 import { writeTestReport, runGwtScenarios } from '../../../main/gwt-service'
-import { generateMvp } from '../../../main/mvp-engine'
 import { createProject, findProject, recordSketchGenerated } from '../../../main/project-service'
 import { getDocumentsDir } from '../../../storage/config-paths'
 
@@ -34,6 +33,23 @@ describe('Sprint 2 GWT execution acceptance (S2-JUDGE-009)', () => {
     home = mkdtempSync(join(tmpdir(), prefix))
     process.env.PROMA_HOME = home
     return home
+  }
+
+  /** 直接写文件构造 MVP 产物骨架（index.html 含功能入口 + 交互控件 + 脚本，静态可跑）。 */
+  function writeProjectSkeleton(root: string, requirements: Array<{ id: string; description: string }>): void {
+    mkdirSync(join(root, 'src'), { recursive: true })
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'mvp', version: '0.1.0', scripts: { start: 'node static-server' } }, null, 2), 'utf8')
+    writeFileSync(join(root, 'static-server.js'), 'const http=require("node:http");http.createServer((q,s)=>s.end("ok")).listen(0);', 'utf8')
+    const cards = requirements
+      .map((r) => `<section class="feature" data-feature="${r.id}"><h2>${r.description}</h2><form class="add-form" data-feature="${r.id}"><input name="text" /><button type="submit">添加</button></form></section>`)
+      .join('\n')
+    writeFileSync(
+      join(root, 'index.html'),
+      `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8" /><style>body{font-family:sans-serif}</style></head><body>${cards}<script src="/src/app.js"></script></body></html>\n`,
+      'utf8',
+    )
+    writeFileSync(join(root, 'src/app.js'), 'document.querySelectorAll("form").forEach(function(f){f.addEventListener("submit",function(e){e.preventDefault();});});\n', 'utf8')
+    writeFileSync(join(root, 'src/styles.css'), 'body{color:#111}\n', 'utf8')
   }
 
   it('[S2-JUDGE-009] MVP 生成后应为每个 P0 功能项生成 GWT 场景并写入文档目录', () => {
@@ -78,8 +94,9 @@ describe('Sprint 2 GWT execution acceptance (S2-JUDGE-009)', () => {
       project_id: project.project_id,
       checkpoint: 'mvp_before_generation',
     })
-    // MVP 产物：index.html 包含全部功能项入口
-    generateMvp({ project_id: project.project_id, requirements, template_type: 'web_fullstack' })
+    // MVP 产物：直接写文件构造骨架（废旧管道改造后无模板引擎；夹具只改「建项目方式」，
+    // 断言/预期不动——测的是 GWT 对预览的行为，而非旧模板）
+    writeProjectSkeleton(project.root_path, requirements)
     // 用本地 http 服务模拟沙箱预览，返回包含功能入口的 HTML
     const { url: previewUrl, close } = await startPreviewServer('<p>记录收入与支出</p><p>展示本月结余</p>')
     try {
