@@ -5,6 +5,7 @@ import type { CardOption } from './CardOptions'
 import { WaitingFeedback } from './WaitingFeedback'
 import { ToolBlocksReplay, ToolCallFeed } from './ToolCallBlock'
 import { DelegationFeed } from './DelegationFeed'
+import { Markdown } from './Markdown'
 import { ArrowUp, MessageSquare, IconStop } from './icons'
 import {
   activeAgentSessionIdAtom,
@@ -498,11 +499,13 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
           boxShadow: isUser ? userBubbleShadow(mode) : 'var(--shadow-sm)',
           borderBottomRightRadius: isUser ? 'var(--radius-sm)' : undefined,
           borderBottomLeftRadius: !isUser ? 'var(--radius-sm)' : undefined,
-          whiteSpace: 'pre-wrap',
+          // user 气泡纯文本保换行；assistant 气泡走 Markdown 渲染（块级元素，pre-wrap 会叠加间距）
+          whiteSpace: isUser ? 'pre-wrap' : undefined,
           wordBreak: 'break-word',
         }}
       >
-        {text || (isStreaming ? '…' : '')}
+        {/* assistant 旁白/完成总结渲染 Markdown（模型输出天然带 md）；user 输入保持纯文本语义 */}
+        {isUser || !text ? text || (isStreaming ? '…' : '') : <Markdown text={text} />}
       </div>
       {hasToolBlocks && <ToolBlocksReplay blocks={message.content} toolNamesById={toolNamesById} />}
       <span
