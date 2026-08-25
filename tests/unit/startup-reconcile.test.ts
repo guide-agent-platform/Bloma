@@ -148,4 +148,29 @@ describe('startup reconcile (T1)', () => {
     expect(convergeStageFromEvidence('sketch_only')).toBe('sketch_ready')
     expect(convergeStageFromEvidence('none')).toBe('clarifying')
   })
+
+  it('evaluateDiskArtifact：Agent Loop 外链样式产物不误判为 none（2026-08-25 线上案例）', () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-loop-evidence-'))
+    const root = join(home, 'loop')
+    mkdirSync(join(root, 'src'), { recursive: true })
+    writeFileSync(
+      join(root, 'index.html'),
+      '<html><head><link rel="stylesheet" href="src/styles.css"></head><body><button id="go">点我</button><script src="src/app.js"></script></body></html>',
+      'utf8',
+    )
+    writeFileSync(join(root, 'src', 'app.js'), "document.getElementById('go').addEventListener('click', () => {})", 'utf8')
+    // 外链样式 + 交互控件 + 脚本逻辑 → complete（此前被判 none → 熔断回滚后收敛 clarifying + 「没有可用产物」假话）
+    expect(evaluateDiskArtifact(root)).toBe('complete')
+    expect(convergeStageFromEvidence(evaluateDiskArtifact(root))).toBe('ready')
+    // 交互脚本缺失 → 仍降级 sketch_only，不冒充 ready
+    const lostJs = join(home, 'loop-lost-js')
+    mkdirSync(join(lostJs, 'src'), { recursive: true })
+    writeFileSync(
+      join(lostJs, 'index.html'),
+      '<html><head><link rel="stylesheet" href="src/styles.css"></head><body><button>点我</button></body></html>',
+      'utf8',
+    )
+    writeFileSync(join(lostJs, 'src', 'app.js'), '', 'utf8')
+    expect(evaluateDiskArtifact(lostJs)).toBe('sketch_only')
+  })
 })

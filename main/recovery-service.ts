@@ -58,7 +58,7 @@ export function evaluateDiskArtifact(rootPath: string): DiskArtifactEvidence {
   } catch {
     return 'none'
   }
-  if (!isHtmlDocument(html)) return 'none'
+  if (!isHtmlDocument(html) && !isLoopStyleEntry(html)) return 'none'
   const appJsPath = join(rootPath, 'src', 'app.js')
   let appJs = ''
   if (existsSync(appJsPath)) {
@@ -76,6 +76,21 @@ export function convergeStageFromEvidence(evidence: DiskArtifactEvidence): 'read
   if (evidence === 'complete') return 'ready'
   if (evidence === 'sketch_only') return 'sketch_ready'
   return 'clarifying'
+}
+
+/**
+ * Agent Loop 产物入口判定（2026-08-25 线上案例）：结构与闭合同 isHtmlDocument，但样式
+ * 走外链 `<link rel="stylesheet">`（src/styles.css）而非内联 `<style>`——loop 转正后
+ * 的合法产物形态。isHtmlDocument 本体保持草图管线的「内联样式」校验语义不动，此处
+ * 只放宽磁盘证据收敛（T1 启动对账 / T5 熔断回滚）对 loop 产物的误判
+ * （此前外链样式产物被判 'none' → 收敛 clarifying + 「没有留下可用产物」假话）。
+ */
+function isLoopStyleEntry(html: string): boolean {
+  return (
+    /<link\b[^>]*\brel\s*=\s*["']?stylesheet/i.test(html) &&
+    /<html[\s>]|<body[\s>]/i.test(html) &&
+    /<\/html>\s*$/i.test(html)
+  )
 }
 
 /** 最近一个健康快照（health_status === 'healthy'，复用 Snapshot 既有字段）；无则 undefined。 */

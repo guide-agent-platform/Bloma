@@ -455,6 +455,45 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
     }
   }, 20000)
 
+  it('迭代中用户停止 → loop cancelled 即中止：不交付、不终验、不熔断、阶段回 ready（U5，2026-08-25 线上案例）', async () => {
+    createChannel({
+      name: 'cancel-loop-channel',
+      provider_type: 'anthropic',
+      base_url: 'https://cancel-loop.example',
+      api_key: 'key-cancel-loop',
+      models: [{ id: 'm1', name: 'cancel-loop-model', enabled: true, supports_tools: true }],
+    })
+    const project = createProject({ request_id: 'req-acc-cancel', mode: 'quick', initial_message: '帮我做一个记账应用' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出', priority: 'P0' }])
+
+    const events: string[] = []
+    setProgrammingEventPublisher((event) => events.push(event.type))
+
+    // 用户在再生成启动前已点「停止」：signal 已 abort → loop 首轮检查即 cancelled（0 轮）
+    const controller = new AbortController()
+    controller.abort(new Error('AGENT_CANCELLED: user_cancelled'))
+    await expect(
+      runIterationTask({
+        request_id: 'req-acc-cancel',
+        session_id: 'session-cancel',
+        project_id: project.project_id,
+        mode: 'quick',
+        prompt: '把按钮改成蓝色',
+        query: scriptedQuery().query,
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow('AGENT_CANCELLED')
+
+    // cancelled 不再走「补脚手架→交付→终验→熔断」：无交付终态、无回滚
+    expect(events).not.toContain('mvp_ready')
+    expect(events).not.toContain('rollback_done')
+    // U5：用户主动停止不补失败话术/重试卡片/错误事件（渲染端已落「已停止生成」）
+    expect(events).not.toContain('user_decision_required')
+    expect(events).not.toContain('error')
+    // 迭代取消如实回 ready，阶段不滞留 iterating
+    expect(findProject(project.project_id).current_stage).toBe('ready')
+  })
+
   it('能力位缺省 → 探测通过 → 走 loop；探测拒绝 → 如实抛错并落决策', async () => {
     createChannel({
       name: 'probe-channel',

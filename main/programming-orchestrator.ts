@@ -798,6 +798,15 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     },
   })
 
+  // 用户已停止（U5，2026-08-25 线上案例）：loop 返回 cancelled 即中止交付链——
+  // 不补脚手架、不起沙箱、不终验不改阶段。此前无此特判，停止后照样交付+终验+
+  // 熔断回滚，把用户停止谎报成「修复预算耗尽/无可用产物」并污染项目阶段。
+  // 错误向上传播由调用方按「signal 已 abort → 静默」消化（runIterationTask 回 ready、
+  // ipc 两处 catch 均不再发终态事件，渲染端已落「已停止生成」）。
+  if (result.status === 'cancelled') {
+    throw new Error(`AGENT_CANCELLED: Agent Loop 已取消（${result.turns} 轮），中止交付`)
+  }
+
   // loop 工具无权写系统接管文件，由平台补齐（与管道路径 generateMvpLlm 行为一致）
   writeFileSync(join(project.root_path, 'package.json'), renderPackageJson(project.name), 'utf8')
   writeFileSync(join(project.root_path, 'static-server.js'), renderStaticServer(), 'utf8')
@@ -1239,6 +1248,16 @@ export interface AgentLoopPostTestingInput {
 }
 
 /**
+ * 熔断原因里的 loop 结局描述（2026-08-25 线上案例）：此前写死「loop 内修复预算已
+ * 用尽」，cancelled/turn_limit 等异常终止也被谎报成预算耗尽。按 loop 实际状态如实
+ * 陈述——completed 才是「修复预算已用尽」语义，其余状态点名终止原因。
+ */
+function loopOutcomeNote(loop: AgentLoopJudgeMetadata | undefined): string {
+  if (!loop) return '无 loop 元数据（存量项目 resume）'
+  return loop.status === 'completed' ? 'loop 内修复预算已用尽' : `Agent Loop 异常终止（${loop.status}）`
+}
+
+/**
  * runAgentLoopPostTesting — Agent Loop 路径的独立门禁函数（M4-A，微调方案 §4）。
  *
  * 语义固定为「只终验不重修」：GWT 终验 →（通过）安全扫描 → judge 终审 → ready / 让渡，
@@ -1260,7 +1279,7 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
       request_id: input.request_id,
       session_id: input.session_id,
       project_id: input.project_id,
-      reason: '终验未通过（Agent Loop 路径，loop 内修复预算已用尽）',
+      reason: `终验未通过（Agent Loop 路径，${loopOutcomeNote(input.loop)}）`,
       publish: (type, payload) => publish(input, type, payload),
     })
     if (outcome.rolled_back) throw new CircuitBreakSettledError()
@@ -1280,7 +1299,7 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
       request_id: input.request_id,
       session_id: input.session_id,
       project_id: input.project_id,
-      reason: '安全终验未通过（Agent Loop 路径，loop 内修复预算已用尽）',
+      reason: `安全终验未通过（Agent Loop 路径，${loopOutcomeNote(input.loop)}）`,
       publish: (type, payload) => publish(input, type, payload),
     })
     if (outcome.rolled_back) throw new CircuitBreakSettledError()
