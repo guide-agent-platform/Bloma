@@ -8,6 +8,7 @@ import {
   emptyDelegationsFallback,
   type DelegationView,
 } from './atoms'
+import { DELEGATION_ROLE_LABELS, DELEGATION_STATUS_COLORS, DELEGATION_STATUS_LABELS } from './delegation-labels'
 
 /**
  * CollaborationPanel — 委派协作抽屉（M4-C，方案 §4 组合 A，仿 DocumentPanel）。
@@ -16,28 +17,6 @@ import {
  * pending_question 提示 + 可展开历史）。展开态由 `collaborationPanelExpandedAtom` 控制
  * （WorkspaceHeader 切换），未展开时渲染 null，可直接挂在 WorkspaceShell 中自门控。
  */
-
-const ROLE_LABELS: Record<string, string> = {
-  explore: '探索',
-  research: '调研',
-  implement: '实现',
-  review: '审查',
-  custom: '协作',
-}
-
-const STATUS_LABELS: Record<string, string> = {
-  running: '协作中',
-  completed: '已完成',
-  failed: '失败',
-  cancelled: '已停止',
-}
-
-const STATUS_COLORS: Record<string, string> = {
-  running: 'var(--color-warning)',
-  completed: 'var(--color-quick)',
-  failed: 'var(--color-danger)',
-  cancelled: 'var(--gray-400)',
-}
 
 function shortId(id: string): string {
   if (!id) return '—'
@@ -137,13 +116,13 @@ const DelegationCard: React.FC<{ item: DelegationView }> = ({ item }) => {
             background: 'var(--color-quick-soft)', whiteSpace: 'nowrap',
           }}
         >
-          {ROLE_LABELS[item.role] ?? item.role}
+          {DELEGATION_ROLE_LABELS[item.role] ?? item.role}
         </span>
         <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text)', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {item.goal || '（未命名任务）'}
         </span>
-        <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: 'var(--font-size-xs)', color: STATUS_COLORS[item.status] ?? 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-          {STATUS_LABELS[item.status] ?? item.status}
+        <span style={{ marginLeft: 'auto', flexShrink: 0, fontSize: 'var(--font-size-xs)', color: DELEGATION_STATUS_COLORS[item.status] ?? 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
+          {DELEGATION_STATUS_LABELS[item.status] ?? item.status}
         </span>
       </div>
 

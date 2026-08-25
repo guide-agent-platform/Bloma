@@ -27,7 +27,7 @@ import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled }
 import { readPrimaryIntent } from './session-service'
 import { runAgentLoop, type AgentLoopResult } from './agent-loop'
 import { buildAgentTools } from './agent-tools'
-import { registerParentLoopContext, setChildToolsBuilder, unregisterParentLoopContext } from './agent-collaboration'
+import { disposeParentDelegationState, registerParentLoopContext, setChildToolsBuilder } from './agent-collaboration'
 import { categoryTemperature } from './model-resolution'
 import type { SDKQuery, ToolDefinition } from './orchestrator'
 
@@ -800,7 +800,9 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     },
   })
   } finally {
-    unregisterParentLoopContext(input.session_id)
+    // 父 loop 收尾（含用户停止/异常）：stop 全部 running 子委派 + 清幂等缓存 + 注销父上下文
+    // （审计 P1-2/P2-4——只 unregister 不清理会让子 agent 后台偷跑且结果丢失）
+    disposeParentDelegationState(input.session_id)
   }
 
   const durationMs = Date.now() - startedAt
@@ -1901,8 +1903,10 @@ export async function resumeBlockedFlow(
   // M4-A：项目由 Agent Loop 生成 → resume 走独立门禁（只终验不重修）；judge 需 loop 元数据。
   // loop 已结束时原始 AgentLoopResult 不在内存，用持久化的 via_agent_loop + agent_loop_status 重建
   // 最小元数据（turns/finalText/toolCalls 不再可用，judge 只消费 status 判断异常终止态）。
+  // fallback 用异常终止态（审计 P2-3 fail-closed）：状态缺失时宁可让渡（repairable:false），
+  // 不能默认 completed 绕过门禁。
   const loopMeta: AgentLoopJudgeMetadata | undefined = project.via_agent_loop
-    ? { status: project.agent_loop_status ?? 'completed', turns: 0, finalText: '', toolCalls: [] }
+    ? { status: project.agent_loop_status ?? 'turn_limit', turns: 0, finalText: '', toolCalls: [] }
     : undefined
 
   // 无论后续如何，先清除 blocked_action，避免重复触发阻塞分支

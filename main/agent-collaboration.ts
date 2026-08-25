@@ -377,6 +377,23 @@ export function stopDelegations(parentSessionId: string, delegationIds?: string[
   return ids.map((id) => stopDelegation(parentSessionId, id))
 }
 
+/**
+ * 父 loop 收尾（正常结束 / 异常 / 用户停止）时的一次性清理（审计 P1-2 + P2-4）：
+ * 1. 先 stopDelegations——running 子委派既不被 abort 也不被 stop 会在后台偷跑消耗 token，
+ *    且父 loop 结束后无人收集其结果（孤儿 + 资源泄漏）。先于 unregister 执行，
+ *    delegation_cancelled 事件仍能经在册的父上下文 publish 出去。
+ * 2. 清空该父会话的 tool-call 幂等缓存——delegationCallCache 跨 session 永不清理会无界增长。
+ * 3. 注销父上下文。
+ */
+export function disposeParentDelegationState(parentSessionId: string): void {
+  stopDelegations(parentSessionId)
+  const prefix = `${parentSessionId}:`
+  for (const key of delegationCallCache.keys()) {
+    if (key.startsWith(prefix)) delegationCallCache.delete(key)
+  }
+  unregisterParentLoopContext(parentSessionId)
+}
+
 // =========================================================================
 // 提问冒泡 / 父代答（Proma answer_delegation_question）
 // =========================================================================
@@ -430,6 +447,10 @@ export function answerDelegationQuestion(
   record.pendingAnswerResolve?.(answer)
   record.pendingQuestion = undefined
   record.pendingAnswerResolve = undefined
+  // 重建 askSignal（审计 P1-1）：Promise 只能 resolve 一次。若沿用已 resolve 的旧 signal，
+  // 父 agent answer 后再次 wait_for_delegations 会因 questionSignals 里仍是 resolved 状态而
+  // 立即假提前返回（子 agent 还在 running）。重建后下一次提问产生新 signal。
+  record.askSignal = createAskSignal()
   return { delegation_id: delegationId, answered: true }
 }
 
@@ -442,12 +463,18 @@ export function answerDelegationQuestion(
  * （同一独立 JSONL 追加轮）、用新任务 prompt 重启子 loop。running 中的委派拒绝续跑。
  */
 export function continueDelegation(parent: ToolContext, delegationId: string, task: string): StartDelegationResult {
+  const trimmedTask = assertNonBlank(task, 'task')
   const record = findDelegation(parent.sessionId, delegationId)
   if (!record) throw new Error(`未找到当前会话下的委派: ${delegationId}`)
   if (record.status === 'running') throw new Error(`委派 ${delegationId} 仍在运行中，不能继续（先 wait_for_delegations 或 stop_delegation）。`)
   const parentCtx = parentContexts.get(parent.sessionId)
   if (!parentCtx) {
     throw new Error(`未找到父循环上下文（sessionId=${parent.sessionId}）。委派工具只在主 agent loop 内可用。`)
+  }
+  // 复用与 startDelegation 相同的并行上限门禁（审计 P2-5）：continue 会把 running 数 +1，
+  // 绕过检查即可突破「每父并行 ≤ MAX_RUNNING_DELEGATIONS_PER_PARENT」硬上限。
+  if (runningDelegationCount(parent.sessionId) >= MAX_RUNNING_DELEGATIONS_PER_PARENT) {
+    throw new Error(`当前并行的委派子会话已达上限（${MAX_RUNNING_DELEGATIONS_PER_PARENT}）。请先 wait_for_delegations 收集或 stop_delegation 停止。`)
   }
 
   record.status = 'running'
@@ -460,8 +487,11 @@ export function continueDelegation(parent: ToolContext, delegationId: string, ta
   record.completion = completion
   record.resolveCompletion = resolveCompletion
   record.askSignal = createAskSignal()
+  // 续跑即新任务（审计 P2-6）：goal/startedAt 跟随本次 task，事件与渲染端不再显示旧 goal。
+  record.goal = truncateText(trimmedTask, DELEGATION_GOAL_CHAR_LIMIT)
+  record.startedAt = Date.now()
 
-  const prompt = buildDelegationPrompt({ role: record.role, task })
+  const prompt = buildDelegationPrompt({ role: record.role, task: trimmedTask })
   void runChildLoop({ parent, parentCtx, record, prompt, role: record.role }).then(
     (result) => settleChildLoop(record, result),
     (error) => settleChildLoopError(record, error),
@@ -490,13 +520,18 @@ function findRecordByChildSession(childSessionId: string): DelegationRecord | un
 
 const delegationCallCache = new Map<string, StartDelegationResult>()
 
-/** 按 (sessionId, toolCallId) 幂等创建委派：同一次 tool_use 的重放/重试只 create 一次。 */
+/**
+ * 按 (sessionId, toolCallId) 幂等创建委派：同一次 tool_use 的重放/重试只 create 一次。
+ * toolCallId 缺失时**不走幂等缓存**（审计 P3-7）：`anonymous` 兜底键会让同 session 多个
+ * 无 id 调用错误复用第一个的结果（幂等变成错误共享），直接 create 更安全。
+ */
 export function delegateAgentOnce(
   sessionId: string,
   toolCallId: string | undefined,
   createFn: () => StartDelegationResult,
 ): StartDelegationResult {
-  const key = `${sessionId}:${toolCallId ?? 'anonymous'}`
+  if (toolCallId === undefined || toolCallId === '') return createFn()
+  const key = `${sessionId}:${toolCallId}`
   const existing = delegationCallCache.get(key)
   if (existing) return existing
   const created = createFn()

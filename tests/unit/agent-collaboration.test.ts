@@ -9,10 +9,12 @@ import { buildAgentTools } from '../../main/agent-tools'
 import {
   MAX_RUNNING_DELEGATIONS_PER_PARENT,
   answerDelegationQuestion,
+  askDelegationQuestion,
   buildChildSystemPrompt,
   buildDelegationPrompt,
   continueDelegation,
   delegateAgentOnce,
+  disposeParentDelegationState,
   findDelegation,
   getDelegationSummary,
   listDelegations,
@@ -594,9 +596,10 @@ describe('M4-C 委派生命周期事件（delegation_started/completed/failed/ca
 
     const startedEvents = events.filter((event) => event.type === 'delegation_started')
     expect(startedEvents).toHaveLength(2)
-    // 续跑复用同一 child_session_id（JSONL 追加）；goal 保留原委派任务（记录不变更）
+    // 续跑复用同一 child_session_id（JSONL 追加）；goal 跟随本次续跑任务（审计 P2-6 修复：
+    // 事件与渲染端不再显示旧 goal）
     expect(startedEvents[1]!.payload.child_session_id).toBe(created.child_session_id)
-    expect(startedEvents[1]!.payload.goal).toBe('写初稿')
+    expect(startedEvents[1]!.payload.goal).toBe('补充测试')
   })
 
   it('ask 提问 → delegation_question 事件（question 原样）；父答后子 loop 完成', async () => {
@@ -630,5 +633,156 @@ describe('M4-C 委派生命周期事件（delegation_started/completed/failed/ca
     await findDelegation(parentSessionId, created.delegation_id)!.completion
     const completed = events.find((event) => event.type === 'delegation_completed')
     expect(completed?.payload.status).toBe('completed')
+  })
+})
+
+describe('审计修复回归（审计报告 2026-08-25：P1-1/P1-2/P2-4/P2-5/P2-6/P3-7）', () => {
+  const hang: AgentLoopTool = {
+    name: 'hang',
+    description: '挂起',
+    input_schema: { type: 'object', properties: {} },
+    execute: () => new Promise<never>(() => {}),
+  }
+
+  /** 协调层直连版 ask 工具：不经 buildAgentTools，便于与 hang 组合裁剪。 */
+  const askTool: AgentLoopTool = {
+    name: 'ask_delegation_question',
+    description: '向主 agent 提问',
+    input_schema: { type: 'object', properties: { question: { type: 'string' } }, required: ['question'] },
+    execute: async (input, ctx) => ({
+      output: `主 agent 回答：${await askDelegationQuestion(ctx, String(input.question ?? ''))}`,
+    }),
+  }
+
+  const originalPromaHome = process.env.PROMA_HOME
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-collab-fix-'))
+    parentSessionId = `session-fix-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
+  })
+  afterEach(() => {
+    for (const record of listDelegations(parentSessionId)) {
+      if (record.status === 'running') record.abort.abort()
+    }
+    unregisterParentLoopContext(parentSessionId)
+    process.env.PROMA_HOME = originalPromaHome
+  })
+
+  it('P1-1：answer 后再次 wait 不因旧 askSignal 假提前返回（等满 timeout 而非立即返回）', async () => {
+    // 子 loop：第一轮 ask 挂起；answer 后第二轮调 hang（保持 running）
+    let asked = false
+    const query: SDKQuery = async function* () {
+      if (!asked) {
+        asked = true
+        yield {
+          type: 'assistant',
+          message: { role: 'assistant', content: [{ type: 'tool_use', id: 'ask-1', name: 'ask_delegation_question', input: { question: '允许重命名吗？' } }] },
+        }
+        yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+        return
+      }
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'hang-1', name: 'hang', input: {} }] } }
+      yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+    }
+    setChildToolsBuilder(() => [askTool, hang])
+    registerParent(query)
+    const created = startDelegation(parentContext(), { task: '任务', role: 'implement' })
+
+    // 第一次 wait：ask 挂起时经 askSignal 提前返回 pending_question
+    const first = await waitForDelegations(parentContext(), { delegationIds: [created.delegation_id], timeout_ms: 2000 })
+    expect(first[0]!.pending_question).toBe('允许重命名吗？')
+
+    answerDelegationQuestion(parentSessionId, created.delegation_id, '可以')
+
+    // 第二次 wait：askSignal 已重建（未 resolve），子 agent 挂在 hang → 只能等满 timeout。
+    // 若沿用旧 resolved signal，此处立即假提前返回（耗时 ~0），标准流程「answer 后再 wait」即触发。
+    const start = Date.now()
+    const second = await waitForDelegations(parentContext(), { delegationIds: [created.delegation_id], timeout_ms: 300 })
+    const elapsed = Date.now() - start
+    expect(elapsed).toBeGreaterThanOrEqual(250)
+    expect(second[0]!.status).toBe('running')
+    expect(second[0]!.pending_question).toBeUndefined()
+  })
+
+  it('P2-5：continue 复用并行上限门禁——running 数已达上限时拒绝续跑', async () => {
+    registerParent(oneShotQuery('初稿完成'))
+    const done = startDelegation(parentContext(), { task: '初稿' })
+    await findDelegation(parentSessionId, done.delegation_id)!.completion
+
+    setChildToolsBuilder(() => [hang])
+    registerParent(toolUseQuery('hang')) // 覆盖注册：后续子 loop 挂在 running
+    for (let index = 0; index < MAX_RUNNING_DELEGATIONS_PER_PARENT; index += 1) {
+      startDelegation(parentContext(), { task: `并行 ${index}` })
+    }
+    expect(() => continueDelegation(parentContext(), done.delegation_id, '续跑任务')).toThrow(/并行.*上限/)
+  })
+
+  it('P2-6：continue 更新 goal/startedAt——摘要与事件不再显示旧任务', async () => {
+    registerParent(oneShotQuery('初稿完成'))
+    const done = startDelegation(parentContext(), { task: '旧任务目标' })
+    await findDelegation(parentSessionId, done.delegation_id)!.completion
+    const oldStartedAt = findDelegation(parentSessionId, done.delegation_id)!.startedAt
+
+    const continued = continueDelegation(parentContext(), done.delegation_id, '新任务目标')
+    expect(continued.goal).toBe('新任务目标')
+
+    const record = findDelegation(parentSessionId, done.delegation_id)!
+    expect(record.goal).toBe('新任务目标')
+    expect(record.startedAt).toBeGreaterThanOrEqual(oldStartedAt)
+  })
+
+  it('P3-7：toolCallId 缺失不走幂等缓存——两次调用各自 create，不共享结果', () => {
+    let calls = 0
+    const createFn = (): StartDelegationResult => {
+      calls += 1
+      return { delegation_id: `d-${calls}`, child_session_id: `c-${calls}`, role: 'custom', goal: 'g', status: 'running' }
+    }
+    const first = delegateAgentOnce(parentSessionId, undefined, createFn)
+    const second = delegateAgentOnce(parentSessionId, undefined, createFn)
+    expect(calls).toBe(2)
+    expect(second.delegation_id).not.toBe(first.delegation_id)
+  })
+
+  it('P1-2/P2-4：disposeParentDelegationState——stop running 子委派 + 清幂等缓存 + 注销父上下文', async () => {
+    const events: Array<{ type: string; payload: Record<string, unknown> }> = []
+    registerParentLoopContext(parentSessionId, {
+      query: toolUseQuery('hang'),
+      env: {},
+      maxTokens: 256,
+      maxTurns: 6,
+      delegationMaxTurns: 4,
+      permissionMode: 'allow-all',
+      temperature: 0.5,
+      system: 's',
+      editFormat: 'diff',
+      publish: (type, payload) => events.push({ type, payload }),
+    })
+    setChildToolsBuilder(() => [hang])
+    const created = startDelegation(parentContext(), { task: '慢任务' })
+    delegateAgentOnce(parentSessionId, 'tool-1', () => ({
+      delegation_id: 'd-x',
+      child_session_id: 'c-x',
+      role: 'custom',
+      goal: 'g',
+      status: 'running',
+    }))
+
+    disposeParentDelegationState(parentSessionId)
+
+    // ① running 子委派被停止 → cancelled；cancelled 事件在注销前发出（顺序：stop 先于 unregister）
+    expect(findDelegation(parentSessionId, created.delegation_id)!.status).toBe('cancelled')
+    expect(
+      events.some((event) => event.type === 'delegation_cancelled' && event.payload.delegation_id === created.delegation_id),
+    ).toBe(true)
+    // ② 幂等缓存被清空：同 key 再调用会重新 create
+    let calls = 0
+    delegateAgentOnce(parentSessionId, 'tool-1', () => {
+      calls += 1
+      return { delegation_id: 'd-y', child_session_id: 'c-y', role: 'custom', goal: 'g', status: 'running' }
+    })
+    expect(calls).toBe(1)
+    // ③ 父上下文已注销：再派新委派被拒
+    expect(() => startDelegation(parentContext(), { task: '新任务' })).toThrow(/未找到父循环上下文/)
   })
 })

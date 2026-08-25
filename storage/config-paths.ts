@@ -42,8 +42,9 @@ export function getWorkspacePath(workspaceSlug: string): string {
   return ensureDir(workspaceRoot(workspaceSlug))
 }
 
+/** 纯路径（不建目录），同 `getProjectEventsPath`：mcp.json 是读文件，读取方不该有 mkdir 副作用。 */
 export function getWorkspaceMcpConfigPath(workspaceSlug: string): string {
-  return join(getWorkspacePath(workspaceSlug), 'mcp.json')
+  return join(workspaceRoot(workspaceSlug), 'mcp.json')
 }
 
 export function getWorkspaceSkillsDir(workspaceSlug: string): string {

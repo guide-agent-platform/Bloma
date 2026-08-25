@@ -1,6 +1,7 @@
 import React from 'react'
 import { useAtomValue } from 'jotai'
-import { delegationsFamily, type DelegationView, type DelegationViewStatus } from '../agent-atoms'
+import { delegationsFamily, type DelegationView } from '../agent-atoms'
+import { DELEGATION_ROLE_LABELS, DELEGATION_STATUS_COLORS, DELEGATION_STATUS_LABELS } from './delegation-labels'
 
 /**
  * DelegationFeed — 委派协作视图（M4-C，方案 §4 组合 B）。
@@ -9,28 +10,6 @@ import { delegationsFamily, type DelegationView, type DelegationViewStatus } fro
  * 以 id/role/status 实时可见（仿 ToolCallBlock 折叠行），子 agent 挂起提问时显示
  * 「待回答」警示。数据源为 delegationsFamily（生命周期事件 + delegate 工具 detail 归约）。
  */
-
-const ROLE_LABELS: Record<string, string> = {
-  explore: '探索',
-  research: '调研',
-  implement: '实现',
-  review: '审查',
-  custom: '协作',
-}
-
-const STATUS_DOT_COLOR: Record<DelegationViewStatus, string> = {
-  running: 'var(--color-warning)',
-  completed: 'var(--color-quick)',
-  failed: 'var(--color-danger)',
-  cancelled: 'var(--gray-400)',
-}
-
-const STATUS_TEXT: Record<DelegationViewStatus, string> = {
-  running: '协作中',
-  completed: '已完成',
-  failed: '失败',
-  cancelled: '已停止',
-}
 
 function shortId(id: string): string {
   if (!id) return '—'
@@ -85,13 +64,13 @@ const DelegationRow: React.FC<{ item: DelegationView }> = ({ item }) => {
             height: 6,
             borderRadius: '50%',
             flexShrink: 0,
-            background: STATUS_DOT_COLOR[item.status],
+            background: DELEGATION_STATUS_COLORS[item.status],
             display: 'inline-block',
             animation: item.status === 'running' ? 'pulse-stage 1.6s ease-in-out infinite' : 'none',
           }}
         />
         <span style={{ flexShrink: 0, fontWeight: 600, color: 'var(--color-text)' }}>
-          子会话 · {ROLE_LABELS[item.role] ?? item.role}
+          子会话 · {DELEGATION_ROLE_LABELS[item.role] ?? item.role}
         </span>
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
           {truncateText(item.goal, 40)}
@@ -100,7 +79,7 @@ const DelegationRow: React.FC<{ item: DelegationView }> = ({ item }) => {
           <span style={{ flexShrink: 0, color: 'var(--color-warning)', fontWeight: 600 }}>待回答</span>
         )}
         <span style={{ marginLeft: 'auto', flexShrink: 0 }}>
-          {STATUS_TEXT[item.status]}
+          {DELEGATION_STATUS_LABELS[item.status]}
         </span>
       </div>
       {expanded && (
