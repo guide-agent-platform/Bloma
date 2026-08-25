@@ -907,6 +907,8 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     '【终止条件】全部 P0 断言通过 + 安全扫描无高危，才输出完成总结（含做了什么、' +
     '未解决的低优先级项）。测试未全绿不得声称完成。',
     '',
+    '【表达】面向用户的旁白与完成总结一律用中文（代码与文件内容除外）。',
+    '',
     '【护栏】路径限项目目录内；不 eval/Function；不外联 fetch/XHR；不写 CSP meta；' +
     'out_of_scope 内的功能一律不做；编辑校验失败的错误信息要读完再改。',
     '',

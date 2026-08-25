@@ -189,6 +189,24 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
     // ---- 模型调用（L0 带 tools；messages 全量透传，system 提取由查询层负责）----
     const assistantBlocks: MessageContentBlock[] = []
+    // 网关脏增量清洗 + 文本整段化（2026-08-25 线上案例）：ds 渠道在带 tools 的流式
+    // 响应里会往 token 增量之间插入字面 "\n\n" 的独立纯空白增量（有时连发多个），
+    // 裸拼接会让旁白「每词一段」；同时把连续 text 增量合并为单块落盘（对齐 guide
+    // 路径的整段化，JSONL 不再落几百个碎块）。
+    const cleaner = createWhitespaceArtifactCleaner()
+    const textParts: string[] = []
+    const emitText = (text: string): void => {
+      // 助手旁白照常进事件流上屏（与 runAgent 的 message_delta 语义一致）
+      input.publish('message_delta', { text })
+      textParts.push(text)
+    }
+    const flushTextRun = (): void => {
+      for (const piece of cleaner.end()) emitText(piece)
+      if (textParts.length > 0) {
+        assistantBlocks.push({ type: 'text', text: textParts.join('') })
+        textParts.length = 0
+      }
+    }
     let stopReason: string | undefined
     let usage: { input_tokens?: number; output_tokens?: number } | undefined
     try {
@@ -202,16 +220,21 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         tools: definitions,
       })) {
         if (sdk.type === 'assistant' && sdk.message) {
-          assistantBlocks.push(...sdk.message.content)
-          // 助手旁白照常进事件流上屏（与 runAgent 的 message_delta 语义一致）
           for (const block of sdk.message.content) {
-            if (block.type === 'text' && block.text) input.publish('message_delta', { text: block.text })
+            if (block.type === 'text' && block.text) {
+              for (const piece of cleaner.push(block.text)) emitText(piece)
+            } else {
+              // tool_use 块前先把挂起的空白与文本段收口，保持块序与流序一致
+              flushTextRun()
+              assistantBlocks.push(block)
+            }
           }
         } else if (sdk.type === 'result') {
           stopReason = sdk.stop_reason
           usage = sdk.usage
         }
       }
+      flushTextRun()
     } catch (error) {
       if (isLoopCancelled(error, input.signal)) return loopCancelled(turns, finalText, toolCalls)
       throw error
@@ -352,6 +375,50 @@ export function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<
 
 function loopCancelled(turns: number, finalText: string, toolCalls: Array<{ name: string; turn: number }>): AgentLoopResult {
   return { status: 'cancelled', turns, finalText, toolCalls }
+}
+
+interface WhitespaceArtifactCleaner {
+  /** 喂入一个 text 增量，返回应立即放行的增量（0~2 段）。 */
+  push(text: string): string[]
+  /** 流结束/遇到非文本块：把挂起的空白如实放行（一次性，幂等）。 */
+  end(): string[]
+}
+
+/**
+ * 网关脏增量清洗器（2026-08-25 线上实测，ds 渠道带 tools 的流）：
+ * token 增量之间被插入字面 "\n\n" 的独立纯空白增量（词块本身自带前导空格）。
+ * 判据：纯空白增量先挂起——后继增量以空白开头 → 必是词间工件（模型原文不可能
+ * 是「词\n\n 词」形态），连同此前累积的空白一并丢弃；后继以非空白开头（如合法
+ * 段落分隔 "\n\n## 标题"）或流结束/遇到工具块 → 如实保留。
+ * 已知取舍：罕见 markdown「空行 + 行首空格」会被误并入上一段，视觉损失远小于
+ * 当前「每词一段」的污染，接受。
+ */
+function createWhitespaceArtifactCleaner(): WhitespaceArtifactCleaner {
+  let pending = ''
+  return {
+    push(text: string): string[] {
+      if (text.trim() === '') {
+        pending += text
+        return []
+      }
+      if (pending !== '') {
+        if (/^\s/.test(text)) {
+          pending = ''
+          return [text]
+        }
+        const kept = pending
+        pending = ''
+        return [kept, text]
+      }
+      return [text]
+    },
+    end(): string[] {
+      if (pending === '') return []
+      const kept = pending
+      pending = ''
+      return [kept]
+    },
+  }
 }
 
 /** 取消判定：中止信号已触发，或查询抛出 AbortError / AGENT_CANCELLED 家族错误。 */

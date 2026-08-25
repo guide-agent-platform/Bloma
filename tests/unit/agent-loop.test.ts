@@ -348,4 +348,41 @@ describe('M4-C tool_call_completed detail 白名单透传', () => {
     // 白名单外 detail 不进事件流，事件仍保留 output_summary（模型可见摘要不受影响）
     expect(completed?.payload.output_summary).toBe('ok')
   })
+
+  it('网关脏增量清洗：词间独立 "\\n\\n" 丢弃、合法段落分隔保留（2026-08-25 线上案例）', async () => {
+    // 复刻 ds 渠道带 tools 流的实测形态：词块自带前导空格，词间被插字面 "\n\n" 独立增量；
+    // '.\n\n' 附着在词块尾部的合法段落分隔必须原样保留
+    const deltas = ['Now', '\n\n', ' let', '\n\n', ' me', '\n\n', ' create', ' the', ' app', '.js', '.\n\n', 'The', ' ', 'end']
+    const events: Array<{ type: string; payload: Record<string, unknown> }> = []
+    const { query } = scriptedQuery([deltas.map(textMessage)])
+    const result = await runAgentLoop(baseInput({ query, publish: (type, payload) => events.push({ type, payload }) }))
+
+    expect(result.status).toBe('completed')
+    expect(result.finalText).toBe('Now let me create the app.js.\n\nThe end')
+    // 上屏增量同样清洗：拼接后与 finalText 一致
+    const streamed = events.filter((event) => event.type === 'message_delta').map((event) => String(event.payload.text ?? '')).join('')
+    expect(streamed).toBe(result.finalText)
+  })
+
+  it('连发多个词间空白工件一并丢弃', async () => {
+    const { query } = scriptedQuery([['Now', '\n\n', '\n\n', '\n\n', ' let', ' me', ' add'].map(textMessage)])
+    const result = await runAgentLoop(baseInput({ query }))
+    expect(result.finalText).toBe('Now let me add')
+  })
+
+  it('连续 text 增量合并为单块落盘；工具块前挂起的空白如实放行', async () => {
+    const echo = tool('echo', () => ({ output: 'ok' }))
+    const { query } = scriptedQuery([[
+      ...['do', ' it', '\n\n'].map(textMessage),
+      toolUseMessage('t1', 'echo'),
+    ], [textMessage('完成')]])
+    await runAgentLoop(baseInput({ query, tools: [echo] }))
+
+    const lines = readSessionJsonl('session-loop')
+    const assistantLine = lines.find((line) => line.content.some((block) => block.type === 'tool_use'))
+    // 文本段合并为一个 text 块（不再落几百个碎块），工具块紧随其后
+    expect(assistantLine?.content).toHaveLength(2)
+    expect(assistantLine?.content[0]).toMatchObject({ type: 'text', text: 'do it\n\n' })
+    expect(assistantLine?.content[1]).toMatchObject({ type: 'tool_use', name: 'echo' })
+  })
 })
