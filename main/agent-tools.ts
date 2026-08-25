@@ -10,6 +10,14 @@ import { planScenarios, scenarioName } from './gwt-runner'
 import { runSecurityScan } from './security-scan'
 import type { AgentLoopTool, ToolContext, ToolOutcome } from './agent-loop'
 import {
+  NET_FETCH_DEFAULT_CHARS,
+  NET_FETCH_MAX_BYTES,
+  NET_FETCH_MAX_CHARS_LIMIT,
+  NET_FETCH_TIMEOUT_MS,
+  assertPublicHttpUrl,
+  htmlToText,
+} from './net-guard'
+import {
   answerDelegationQuestion,
   askDelegationQuestion,
   continueDelegation,
@@ -60,12 +68,6 @@ const LIST_DEPTH_LIMIT = 4
 const LIST_ENTRY_LIMIT = 200
 const GREP_HIT_LIMIT = 50
 const READ_DEFAULT_WINDOW = 100
-
-/** web_fetch：单次抓取超时 / 响应体上限 / 返回文本缺省与硬上限（ACI 截断契约）。 */
-const WEB_FETCH_TIMEOUT_MS = 15_000
-const WEB_FETCH_MAX_BYTES = 2 * 1024 * 1024
-const WEB_FETCH_DEFAULT_CHARS = 12_000
-const WEB_FETCH_MAX_CHARS_LIMIT = 50_000
 const SANDBOX_LOG_TAIL_LIMIT = 2048
 
 // =========================================================================
@@ -192,82 +194,6 @@ function collectProjectFiles(root: string, subDir = ''): string[] {
     }
   }
   return out.sort()
-}
-
-// =========================================================================
-// web_fetch：SSRF 防护与文本提取
-// =========================================================================
-
-/**
- * web_fetch 目标校验（SSRF 防护，v1 静态判定）：
- * - 只允许 http/https；
- * - 拒绝 localhost/.local/.internal 与私网/环回/链路本地/保留段 IP 字面量；
- * - 拒绝无点主机名（公网域名必含点，同时挡掉十/十六进制 IP 编码与内网单标签名）；
- * - 不做 DNS 解析复核（DNS rebinding 不防），桌面端模型半信任场景下够用，注释明示。
- */
-function assertPublicHttpUrl(raw: string): { ok: true; url: URL } | { ok: false; error: string } {
-  let url: URL
-  try {
-    url = new URL(raw)
-  } catch {
-    return { ok: false, error: `URL 无效：${raw}` }
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    return { ok: false, error: `只允许 http/https 地址（收到 ${url.protocol}）。` }
-  }
-  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '')
-  if (!host.includes('.') && !host.includes(':')) {
-    return { ok: false, error: `非常规主机名不允许抓取（${url.hostname}）；请使用完整公网域名。` }
-  }
-  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) {
-    return { ok: false, error: `内网/本机地址不允许抓取（${url.hostname}）。` }
-  }
-  if (isDisallowedIpLiteral(host)) {
-    return { ok: false, error: `内网/保留地址不允许抓取（${url.hostname}）。` }
-  }
-  return { ok: true, url }
-}
-
-/** 私网/环回/链路本地/保留段 IP 字面量判定（IPv4 段式 + IPv6 前缀式）。 */
-function isDisallowedIpLiteral(host: string): boolean {
-  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host)
-  if (v4) {
-    const a = Number(v4[1])
-    const b = Number(v4[2])
-    if (a === 0 || a === 10 || a === 127) return true
-    if (a === 169 && b === 254) return true
-    if (a === 172 && b >= 16 && b <= 31) return true
-    if (a === 192 && b === 168) return true
-    if (a >= 224) return true // 组播/保留段
-    return false
-  }
-  if (host.includes(':')) {
-    const lower = host.toLowerCase()
-    if (lower === '::1' || lower === '::') return true
-    if (lower.startsWith('fc') || lower.startsWith('fd')) return true // fc00::/7 唯一本地
-    if (/^fe[89ab]/.test(lower)) return true // fe80::/10 链路本地
-  }
-  return false
-}
-
-/** HTML → 纯文本粗提取（零依赖）：去脚本/样式/注释 → 块级标签换行 → 剥标签 → 解码基本实体。 */
-function htmlToText(html: string): string {
-  return html
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(?:p|div|section|article|header|footer|nav|aside|main|li|tr|h[1-6]|blockquote|pre)>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#0?39;/gi, "'")
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n\s*\n\s*\n+/g, '\n\n')
-    .trim()
 }
 
 // =========================================================================
@@ -460,13 +386,13 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       const guarded = assertPublicHttpUrl(toolInput.url.trim())
       if (!guarded.ok) return { output: guarded.error, isError: true }
       const maxChars = Math.min(
-        Math.max(Math.trunc(numberOr(toolInput.max_chars, WEB_FETCH_DEFAULT_CHARS)), 500),
-        WEB_FETCH_MAX_CHARS_LIMIT,
+        Math.max(Math.trunc(numberOr(toolInput.max_chars, NET_FETCH_DEFAULT_CHARS)), 500),
+        NET_FETCH_MAX_CHARS_LIMIT,
       )
       let response: Response
       try {
         response = await fetch(guarded.url, {
-          signal: AbortSignal.timeout(WEB_FETCH_TIMEOUT_MS),
+          signal: AbortSignal.timeout(NET_FETCH_TIMEOUT_MS),
           redirect: 'follow',
           headers: { accept: 'text/html,application/json,text/plain,*/*' },
         })
@@ -489,8 +415,8 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         return { output: `不支持的响应类型（content-type: ${contentType || '未知'}），只支持文本类内容。`, isError: true }
       }
       const buffer = await response.arrayBuffer()
-      if (buffer.byteLength > WEB_FETCH_MAX_BYTES) {
-        return { output: `响应过大（${buffer.byteLength} 字节 > 上限 ${WEB_FETCH_MAX_BYTES}），已放弃。`, isError: true }
+      if (buffer.byteLength > NET_FETCH_MAX_BYTES) {
+        return { output: `响应过大（${buffer.byteLength} 字节 > 上限 ${NET_FETCH_MAX_BYTES}），已放弃。`, isError: true }
       }
       const raw = new TextDecoder('utf-8', { fatal: false }).decode(buffer)
       const text = /html/i.test(contentType) ? htmlToText(raw) : raw

@@ -119,6 +119,25 @@ export const emptyDelegationsFallback = atom<DelegationView[]>([])
  */
 export const decisionConsumedFamily = atomFamily((_sessionId: string) => atom(false))
 
+/**
+ * 需求确认弹窗数据（confirm_requirements 流，2026-08-26）：最新一条
+ * kind='requirement_confirm' 的 user_decision_required 载荷，由专用弹窗
+ * RequirementConfirmDialog 渲染。不走内联决策卡：该 kind 无 questions，
+ * extractDecisionCards 的向后扫描天然返回空卡（不弹内联卡）。
+ */
+export interface RequirementConfirmState {
+  sessionId: string
+  projectId: string
+  title: string
+  requirements: Array<{ id: string; description: string }>
+  research: { available: boolean; summary: string }
+}
+
+export const requirementConfirmFamily = atomFamily((_sessionId: string) => atom<RequirementConfirmState | null>(null))
+
+/** 无 active session 时的稳定 fallback（陷阱 10：兜底 atom 一律模块级常量）。 */
+export const nullRequirementConfirmFallback = atom<RequirementConfirmState | null>(null)
+
 // =========================================================================
 // 3. 消息列表（atomFamily）— 对齐 A
 // =========================================================================
@@ -238,6 +257,25 @@ export function setupGlobalAgentListeners(): () => void {
     // 新一轮决策需求到达 → 重置消费标记，让新卡片能重新弹出
     if (event.type === 'user_decision_required') {
       store.set(decisionConsumedFamily(event.session_id), false)
+      // 需求确认弹窗（专用 kind，2026-08-26）：写入专用 atom，由 RequirementConfirmDialog 渲染
+      const payload = event.payload as { kind?: unknown; title?: unknown; requirements?: unknown; research?: { available?: unknown; summary?: unknown } }
+      if (payload?.kind === 'requirement_confirm') {
+        const requirements = Array.isArray(payload.requirements)
+          ? (payload.requirements as Array<{ id: string; description: string }>).filter(
+              (item) => typeof item?.id === 'string' && typeof item?.description === 'string',
+            )
+          : []
+        store.set(requirementConfirmFamily(event.session_id), {
+          sessionId: event.session_id,
+          projectId: String(event.project_id ?? ''),
+          title: typeof payload.title === 'string' && payload.title ? payload.title : '确认你的需求',
+          requirements,
+          research: {
+            available: payload.research?.available === true,
+            summary: typeof payload.research?.summary === 'string' ? payload.research.summary : '',
+          },
+        })
+      }
     }
 
     // 权限模式切换广播（F8）：主进程 setMode 成功后同步渲染端 atom——

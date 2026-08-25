@@ -3,6 +3,7 @@ import { dialog } from 'electron'
 import type { BrowserWindow, IpcMain } from 'electron'
 import type {
   AgentCancelInput,
+  AgentConfirmRequirementsInput,
   AgentListSessionsInput,
   AgentLoadMessagesInput,
   AgentSendMessageInput,
@@ -71,6 +72,7 @@ import {
   upgradeProject,
 } from './project-service'
 import { cleanOrphanSessions, listSessions, loadMessages } from './session-service'
+import { resolveRequirementConfirm } from './guide-agent-service'
 import { createChannel, deleteChannel, fetchModels, listChannels, testChannel, testChannelDirect, updateChannel } from './channel-manager'
 import { buildCategoryRoutingViews, updateCategoryRouting } from './category-routing'
 import { listPromptSlots, readPromptSlot, resetPromptSlot, savePromptSlot } from './prompt-service'
@@ -152,6 +154,15 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     return safeInvoke(extractRequestId(payload), async () => {
       requireFields<RequestEnvelope>(payload, [])
       return cleanOrphanSessions()
+    })
+  })
+
+  // 需求确认弹窗决策回传（confirm_requirements 流，2026-08-26）：confirm/delegate →
+  // PRD 前移 + 草图；supplement 由渲染端走既有 send-message，不经此通道。
+  ipcMain.handle(IPC_CHANNELS.AGENT_CONFIRM_REQUIREMENTS, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = validateConfirmRequirements(payload)
+      return resolveRequirementConfirm(input)
     })
   })
 
@@ -759,6 +770,14 @@ function validateAgentSend(payload: unknown): AgentSendMessageInput {
 
 function validateCancel(payload: unknown): AgentCancelInput {
   return requireFields<AgentCancelInput>(payload, ['session_id', 'reason'])
+}
+
+function validateConfirmRequirements(payload: unknown): AgentConfirmRequirementsInput {
+  const input = requireFields<AgentConfirmRequirementsInput>(payload, ['session_id', 'project_id', 'decision'])
+  if (input.decision !== 'confirm' && input.decision !== 'delegate') {
+    throw new Error('decision must be confirm or delegate')
+  }
+  return input
 }
 
 function validatePermissionResponse(payload: unknown): PermissionResponseInput {

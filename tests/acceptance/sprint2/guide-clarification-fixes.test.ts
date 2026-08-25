@@ -20,6 +20,16 @@ vi.mock('../../../main/channel-manager', async (importOriginal) => {
     getFirstEnabledChannel: () => undefined,
   }
 })
+vi.mock('../../../main/guide-research', () => ({
+  // 市调在验收中固定降级（不打真实网络）；DDG 真实链路由线上验证覆盖
+  researchMarketSimilar: vi.fn(async (queries: string[]) => ({
+    available: false,
+    queries,
+    results: [],
+    summary: '',
+    reason: 'empty',
+  })),
+}))
 import { createProject, findProject, readLastSketchRequirements } from '../../../main/project-service'
 import {
   clearSandboxRuntimeForTests,
@@ -158,7 +168,7 @@ describe('Sprint 2 guide clarification fixes acceptance（向导澄清修复）'
     }
   })
 
-  it('[③ 独立用例] 连续 2 轮澄清后模型仍要追问 → 熔断强制 auto 开工并留痕', async () => {
+  it('[③ 独立用例] 连续 2 轮澄清后模型仍要追问 → 熔断转入需求确认弹窗（不臆断开工）并留痕', async () => {
     const env = useTemporaryPromaHome('bloma-s2-guide-breaker-')
     try {
       const project = createProject({ request_id: 'req-project', mode: 'quick' })
@@ -179,17 +189,19 @@ describe('Sprint 2 guide clarification fixes acceptance（向导澄清修复）'
         })
       }
 
-      // 前两轮各弹一张卡；第三轮模型仍要 ask_clarification → 熔断，不再弹第三张卡
-      expect(events.filter((event) => event.type === 'user_decision_required')).toHaveLength(2)
-      expect(events.find((event) => event.type === 'sketch_ready')).toBeTruthy()
-      expect(findProject(project.project_id).current_stage).toBe('sketch_ready')
-      // 熔断开工走 auto 常见做法；主题锚点仍以首条实质消息（「帮我做个东西」，
-      // 问候「你好」已被 ⑤ 豁免）为 F-001，auto 扩写顺延其后
-      const descriptions = readLastSketchRequirements(project.project_id).map((r) => r.description)
-      expect(descriptions[0]).toBe('帮我做个东西')
-      expect(descriptions).toContain('通用实用软件工具，由向导按常见做法生成第一版')
+      // 前两轮各弹一张澄清卡；第三轮模型仍要 ask_clarification → 熔断转入需求确认弹窗
+      // （2026-08-26 语义修订：不再强制 auto 开工，弹窗内保留让渡出口）
+      const decisionEvents = events.filter((event) => event.type === 'user_decision_required')
+      expect(decisionEvents).toHaveLength(3)
+      expect(decisionEvents[2]?.payload.kind).toBe('requirement_confirm')
+      // 不臆断开工：未生成草图，阶段停在待用户决策
+      expect(events.find((event) => event.type === 'sketch_ready')).toBeFalsy()
+      expect(findProject(project.project_id).current_stage).toBe('blocked_for_user_decision')
+      // 弹窗需求以首条实质消息（「帮我做个东西」，问候「你好」已被 ⑤ 豁免）为主题锚点
+      const confirmRequirements = (decisionEvents[2]?.payload.requirements ?? []) as Array<{ id: string; description: string }>
+      expect(confirmRequirements[0]?.description).toBe('帮我做个东西')
       const jsonl = readFileSync(join(env.home, 'agent-sessions', 'session-breaker.jsonl'), 'utf8')
-      expect(jsonl).toContain('clarification_forced_auto')
+      expect(jsonl).toContain('clarification_forced_confirm')
     } finally {
       env.cleanup()
     }

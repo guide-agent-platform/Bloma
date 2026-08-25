@@ -39,6 +39,7 @@ const IPC_CHANNELS = {
   AGENT_STOP: "agent:stop",
   AGENT_LIST_SESSIONS: "agent:list-sessions",
   AGENT_LOAD_MESSAGES: "agent:load-messages",
+  AGENT_CONFIRM_REQUIREMENTS: "agent:confirm-requirements",
   SESSION_CLEAN_ORPHANS: "session:clean-orphans",
   AGENT_STREAM_EVENT: "agent:stream-event",
   PERMISSION_RESPONSE: "permission:response",
@@ -355,6 +356,27 @@ type AgentLoadMessagesResult = {
 - 读取 `~/.proma/agent-sessions/{session_id}.jsonl`。
 - JSONL 不存在时返回 `SESSION_NOT_FOUND`。
 - JSONL 存在但索引缺失（升级前遗留数据）时按文件 mtime 合成会话记录，不阻塞读取。
+
+### 5.6 `agent:confirm-requirements`
+
+用途：需求确认弹窗（confirm_requirements 流，2026-08-26）的决策回传。confirm=按勾选子集开工；delegate=用户主动让渡，按向导整理的清单全量开工。两条路径都会先做 PRD 前移（requirement_confirmed 检查点落盘，早于草图），失败不阻断。继续补充说明不走本通道，由渲染端直接走 `agent:send-message` 回到向导。
+
+```ts
+type AgentConfirmRequirementsInput = {
+  request_id: string;
+  session_id: string;
+  project_id: string;
+  decision: "confirm" | "delegate";
+  requirement_ids?: string[]; // confirm 时勾选的需求 id 子集；空集/缺省视为全量
+};
+
+type AgentConfirmRequirementsResult = {
+  started: boolean;     // false = 无待决弹窗（重复提交/重启丢失），幂等不报错
+  prd_written: boolean; // PRD 前移是否成功落盘
+};
+```
+
+事件配套：向导判定需求成型时经 `agent:stream-event` 推送 `user_decision_required`，`payload.kind = "requirement_confirm"`，携 `requirements`（勾选清单）与 `research`（DDG 市调摘要，`available:false` 时如实标注）；渲染端由 RequirementConfirmDialog 弹窗消费（不走内联决策卡）。
 
 ---
 

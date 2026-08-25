@@ -7,6 +7,30 @@
 
 **v1.1 修订说明**：同步 §5 已知待同步项状态（4 项全部已同步），新增 §5.1 目录结构重组记录。按 `workflow.md §2.4` 走修订流程，待评审后回到已确认。
 
+## 向导需求确认弹窗 + 市调 + PRD 前移（2026-08-26）
+
+| 属性 | 值 |
+|------|-----|
+| **状态** | 已确认 |
+
+### 变更内容
+
+**向导新增 confirm_requirements 动作（需求确认弹窗）**
+- `[新增]` 提示词三选一：需求基本成型 → 输出 confirm_requirements（requirements 清单 + research_queries 市调查询），平台执行市调后弹独立确认窗（RequirementConfirmDialog）：需求勾选清单 + 市调摘要折叠 + 三出口（确认勾选子集 / 继续补充说明→回向导 / 由向导决定），对齐「不得臆断，除非用户选择由向导决定」
+- `[新增]` 新模块 `main/guide-research.ts`：DDG html 免 key 市调（15s 超时、结果块解析、uddg 跳转解码、广告位剔除、去重 top6、失败降级 available:false 不阻断弹窗）；SSRF 防护与文本提取抽取为共享层 `main/net-guard.ts`（web_fetch 同源复用，行内标签剥除不再插入多余空格）
+- `[修改]` D3 轮次熔断语义修订：连续 2 轮不收敛由「强制 auto 开工」改为「转入需求确认弹窗」（弹窗内保留让渡出口），决策类型新增 clarification_forced_confirm/requirement_confirm_card/requirement_confirmed
+- `[新增]` PRD 前移：确认/让渡后立即 resolvePrdBackplane + syncDocuments 新检查点 requirement_confirmed（写 requirement_confirmed.md + prd.json，早于草图；失败不阻断草图）；DocumentSyncInput.checkpoint 联合类型同步
+- `[新增]` IPC 四层新通道 `agent:confirm-requirements`（confirm/delegate + requirement_ids；supplement 走既有 send-message）：shared/types → ipc.ts（含 decision 校验）→ preload/bridge → renderer；ipc-contract expectedChannels 同步
+- `[新增]` 渲染端 requirementConfirmFamily atom（事件归约 kind=requirement_confirm，extractDecisionCards 天然不弹内联卡）+ RequirementConfirmDialog 组件常驻挂载（App 根，同 PermissionDialog）
+
+### 影响评估
+
+- 受影响模块：guide-agent-service / guide-research（新）/ net-guard（新）/ document-engine / decision-log / ipc / preload-bridge / agent-atoms / RequirementConfirmDialog（新）/ App / shared-types / api-spec
+- 测试：新增 unit 15 例（guide-research 4 / guide-requirement-confirm 5 / requirement-confirm-dialog 5 含事件归约）；修订 guide-clarification-round-limit 1 例与 acceptance sprint2 guide-clarification-fixes ③（D3 新语义）；ipc-contract 同步 3 例全过；typecheck 0 错、docs:check 过
+- 线上待验证：DDG 市调真实链路（免 key 端点稳定性）、confirm 全链（市调→弹窗→确认→PRD→草图）真实渠道首跑
+
+---
+
 ## 工程修复与联网工具（2026-08-25）
 
 | 属性 | 值 |

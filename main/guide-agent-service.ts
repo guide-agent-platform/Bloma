@@ -1,13 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
-import type { AgentEvent, AgentMessage, AgentSendMessageInput, MessageContentBlock, Project } from '../shared/types'
+import type { AgentEvent, AgentMessage, AgentSendMessageInput, MessageContentBlock, Project, ProjectMode } from '../shared/types'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { routeDialogue, type ClarificationOption } from './dialogue-router'
 import { loadPromptOverride } from './prompt-config'
 import { parseDecisionText, recordDecision } from './decision-log'
-import type { ConversationTurn, GuideModelOptions } from './orchestrator'
+import { syncDocuments } from './document-engine'
+import { researchMarketSimilar, type MarketResearch } from './guide-research'
+import type { ConversationTurn, GuideModelOptions, SDKQuery } from './orchestrator'
 import { trackAnalytics } from './platform-services'
-import { runSketchTask, setProgrammingEventPublisher } from './programming-orchestrator'
+import { resolvePrdBackplane, runSketchTask, setProgrammingEventPublisher } from './programming-orchestrator'
 import { findProject, updateProject } from './project-service'
 import { captureConstraints, extractConstraints } from './constraint-extractor'
 import { isAutoDelegationText, readPrimaryIntent } from './session-service'
@@ -19,9 +21,15 @@ type GuideEventPublisher = (event: AgentEvent) => void
 /** 引导对话给模型的结构化指令：模型只输出 JSON 二选一（对齐 A2-14a Step 3 模板）。 */
 export const DEFAULT_GUIDE_SYSTEM_PROMPT = `你是「向导 Agent」，负责把用户的想法澄清成可生成草图的软件需求。只输出一个 JSON 对象，不要任何多余文字，不要 markdown 代码块围栏。
 
-二选一输出：
+三选一输出：
 
-【需求足够清晰 → 直接生成草图】
+【需求基本成型 → 交用户确认（平台会弹确认窗并附市调）】
+{"action":"confirm_requirements",
+ "reply":"给用户的简短说明（简体中文 ≤20 字，如「我整理好了，请确认这份需求」）",
+ "requirements":[{"id":"F-001","description":"核心功能点（动词开头，用户原话提炼，≤40 字）"}],
+ "research_queries":["市调查询，如「记账 应用 推荐」","可选第二条，如「best budget apps""]}
+
+【需求足够清晰且用户明确催开工 → 直接生成草图】
 {"action":"generate_sketch",
  "reply":"给用户的简短确认话术（简体中文 ≤20 字，口语化，不含技术细节）",
  "requirements":[{"id":"F-001","description":"核心功能点（动词开头，用户原话提炼，≤40 字）"}]}
@@ -41,10 +49,13 @@ export const DEFAULT_GUIDE_SYSTEM_PROMPT = `你是「向导 Agent」，负责把
 - 选项必须是具体成品名词；以「类」结尾的类目词（工具类/游戏类/记录类）视同抽象形容词，禁止输出。
 - 历史中「上轮已向用户出示的选项」是你之前给用户看过的答案：不得重复上一轮问句，新选项必须比上轮更具体或门槛更低。
 - 用户表达没想法/让你定/随便时，直接 generate_sketch（按常见做法出第一版），不得把问题抛回给没有想法的用户。
+- 需求基本成型（类型/给谁用/核心场景中至少两项已明确，或描述已足够具体）→ 选 confirm_requirements：把已明确的内容整理成 requirements 清单交用户在弹窗中确认，不得臆断未确认的细节；拿不准就继续 ask_clarification。
+- research_queries 是给平台做「市面上类似产品」调查的搜索词（1~2 条，中英各一最佳），用用户能听懂的主题词，不要写技术术语。
+- 用户已回答过 2 轮澄清仍不明确：选最接近的理解整理成清单，输出 confirm_requirements 交用户确认，不要再追问。
 - 禁止抽象形容词当选项（「自由」「灵活」「好用」），禁止占位文案（「范围选项」「选项一」），label 不以「？」结尾。
 - questions 2~4 条，最后一条固定为 {"id":"auto","label":"你帮我决定","description":"交给我，按常见做法先出一版"}。
 - 确实无法给出具体选项时才 questions:[]（在 reply 里纯文本追问）。
-- 用户已回答过 2 轮澄清仍不明确：选最接近的理解直接 generate_sketch，不要再追问。
+- 用户已回答过 2 轮澄清仍不明确：选最接近的理解整理成清单，输出 confirm_requirements 交用户确认，不要再追问。
 
 约束：
 - requirements 1~5 条。
@@ -55,6 +66,7 @@ export const DEFAULT_GUIDE_SYSTEM_PROMPT = `你是「向导 Agent」，负责把
 type GuideParsed =
   | { action: 'generate_sketch'; reply: string; requirements: { id: string; description: string }[] }
   | { action: 'ask_clarification'; reply: string; questions: { id: string; label: string; description?: string }[] }
+  | { action: 'confirm_requirements'; reply: string; requirements: { id: string; description: string }[]; research_queries: string[] }
 
 /**
  * 首轮硬护栏（附加到系统提示尾部）：需求确认是产品闭环的必经一环，不能因模型采样差异被跳过
@@ -103,6 +115,9 @@ const CLARIFICATION_ROUND_LIMIT = 2
 const CLARIFICATION_ENDING_DECISION_TYPES = new Set<string>([
   'clarification_answer',
   'clarification_forced_auto',
+  'clarification_forced_confirm',
+  'requirement_confirm_card',
+  'requirement_confirmed',
   'modification_gate',
   'modification_decision',
   'requirement_normalized',
@@ -444,41 +459,27 @@ async function tryModelDrivenGuide(
     return true
   }
 
-  // 澄清轮次熔断（D3 修复，代码级兜底）：提示词要求「已回答过 2 轮澄清仍不明确就直接
-  // generate_sketch」，这里强制执行——已连续 2 轮出示卡片、模型仍要 ask_clarification
-  // 时转 auto 直接开工，不再把问题抛给反复表示没想法的用户。留痕对齐「静默降级必须留日志」。
+  // 澄清轮次熔断（D3，2026-08-26 语义修订：不再臆断开工）：已连续 2 轮出示卡片、模型仍要
+  // ask_clarification 时，转入需求确认弹窗——按最接近的理解整理清单，交用户勾选/补充/
+  // 让渡（「由向导决定」出口=用户主动授权，对齐「不得臆断，除非用户选择由向导决定」）。
   if (
     parsed.action === 'ask_clarification' &&
     countTrailingClarificationRounds(input.session_id) >= CLARIFICATION_ROUND_LIMIT
   ) {
-    console.error('[guide] 澄清轮次熔断：连续 2 轮仍不明确，已强制 auto 生成草图')
-    recordDecision({
-      project_id: input.project_id,
-      session_id: input.session_id,
-      entry: {
-        type: 'clarification_forced_auto',
-        title: '澄清轮次熔断，强制开工',
-        why: '已连续 2 轮澄清仍不明确，模型仍要追问，按 auto 常见做法直接生成草图',
-        detail: { consecutive_rounds: CLARIFICATION_ROUND_LIMIT },
-      },
-    })
-    const ack = '几轮还没定下来，我先按常见做法出一版草图，你看完再调整。'
-    model.persistAssistant(ack)
-    publish(makeGuideEvent(input, 'message_delta', { text: ack }))
-    publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
-    await runSketchTask({
-      request_id: input.request_id,
-      session_id: input.session_id,
-      project_id: input.project_id,
-      mode: input.mode,
-      prompt: input.content,
-      requirements: ensurePrimaryIntent(
-        [{ id: 'F-001', description: CARD_ANSWER_REQUIREMENTS.auto }],
-        primaryIntent,
-      ),
-      channel_id: input.channel_id,
-      query: model.query,
-    })
+    console.error('[guide] 澄清轮次熔断：连续 2 轮仍不明确，转入需求确认弹窗（不自动开工）')
+    const fallbackRequirements = ensurePrimaryIntent(
+      primaryIntent ? [] : [{ id: 'F-001', description: input.content.slice(0, 40) }],
+      primaryIntent,
+    )
+    await startRequirementConfirmFlow(
+      input,
+      publish,
+      model,
+      fallbackRequirements,
+      [primaryIntent ?? input.content.slice(0, 20)].filter((query) => query.trim().length > 0),
+      persistSystem,
+      true,
+    )
     return true
   }
 
@@ -496,6 +497,11 @@ async function tryModelDrivenGuide(
     updateProject(input.project_id, { current_stage: 'blocked_for_user_decision' })
     publish(makeGuideEvent(input, 'stage_changed', { stage: 'blocked_for_user_decision' }))
     publishClarificationCard(input, publish, normalizeClarificationOptions(parsed.questions), persistSystem, parsed.reply.trim())
+    return true
+  }
+
+  if (parsed.action === 'confirm_requirements') {
+    await startRequirementConfirmFlow(input, publish, model, ensurePrimaryIntent(parsed.requirements, primaryIntent), parsed.research_queries, persistSystem, false)
     return true
   }
 
@@ -547,6 +553,173 @@ function publishClarificationCard(
   }))
 }
 
+// =========================================================================
+// 需求确认弹窗（confirm_requirements，2026-08-26）
+// =========================================================================
+
+/** 弹窗待决状态（per project）：模型整理的需求清单 + 市调结果 + 续跑所需的模型上下文。 */
+interface PendingRequirementConfirm {
+  request_id: string
+  session_id: string
+  project_id: string
+  mode: AgentSendMessageInput['mode']
+  channel_id?: string
+  requirements: SketchRequirement[]
+  research: MarketResearch
+  query: SDKQuery
+  publish: GuideEventPublisher
+}
+
+const pendingRequirementConfirms = new Map<string, PendingRequirementConfirm>()
+
+export function takePendingRequirementConfirm(projectId: string): PendingRequirementConfirm | undefined {
+  const pending = pendingRequirementConfirms.get(projectId)
+  pendingRequirementConfirms.delete(projectId)
+  return pending
+}
+
+/** 需求确认弹窗主流程：市调（增强不阻断）→ 落盘留痕 → pending 状态 → 弹窗事件。 */
+async function startRequirementConfirmFlow(
+  input: AgentSendMessageInput,
+  publish: GuideEventPublisher,
+  model: GuideModelOptions,
+  requirements: SketchRequirement[],
+  researchQueries: string[],
+  persistSystem?: (text: string) => void,
+  forcedByRoundBreaker = false,
+): Promise<void> {
+  updateProject(input.project_id, { current_stage: 'blocked_for_user_decision' })
+  publish(makeGuideEvent(input, 'stage_changed', { stage: 'blocked_for_user_decision' }))
+
+  // 市调：失败降级 available:false，弹窗照常出（增强不是依赖）
+  let research: MarketResearch = { available: false, queries: researchQueries, results: [], summary: '' }
+  try {
+    research = await researchMarketSimilar(researchQueries)
+  } catch {
+    // researchMarketSimilar 内部已降级，此处双保险
+  }
+
+  persistSystem?.(`[decision-card] 需求确认：${requirements.map((item) => item.description).join('｜')}`)
+  recordDecision({
+    project_id: input.project_id,
+    session_id: input.session_id,
+    entry: {
+      type: forcedByRoundBreaker ? 'clarification_forced_confirm' : 'requirement_confirm_card',
+      title: forcedByRoundBreaker ? '澄清轮次熔断，转入需求确认' : '需求确认弹窗',
+      why: forcedByRoundBreaker
+        ? '已连续 2 轮澄清仍不明确，按最接近的理解整理清单，交用户确认/补充/让渡'
+        : '需求基本成型，交用户在弹窗中确认、补充或让渡',
+      detail: {
+        requirements,
+        research_available: research.available,
+        research_queries: researchQueries,
+      },
+    },
+  })
+
+  pendingRequirementConfirms.set(input.project_id, {
+    request_id: input.request_id,
+    session_id: input.session_id,
+    project_id: input.project_id,
+    mode: input.mode,
+    channel_id: input.channel_id,
+    requirements,
+    research,
+    query: model.query,
+    publish,
+  })
+
+  publish(makeGuideEvent(input, 'user_decision_required', {
+    kind: 'requirement_confirm',
+    title: '确认你的需求',
+    requirements,
+    research: {
+      available: research.available,
+      summary: research.summary,
+      results: research.results.slice(0, 6),
+    },
+  }))
+}
+
+/** 用户在弹窗中的决策回传入口（IPC agent:confirm-requirements 的服务侧实现）。
+ * confirm：按勾选子集开工；delegate：用户主动让渡，按向导整理的清单全量开工。
+ * 两条路径都先做 PRD 前移（requirement_confirmed 检查点落盘，早于草图），失败不阻断。 */
+export async function resolveRequirementConfirm(input: {
+  request_id: string
+  session_id: string
+  project_id: string
+  decision: 'confirm' | 'delegate'
+  requirement_ids?: string[]
+}): Promise<{ started: boolean; prd_written: boolean }> {
+  const pending = takePendingRequirementConfirm(input.project_id)
+  if (!pending) return { started: false, prd_written: false }
+  const publish = pending.publish
+
+  const selected = pending.requirements.filter((item) => input.requirement_ids?.includes(item.id))
+  const requirements =
+    input.decision === 'delegate' || selected.length === 0 ? pending.requirements : selected
+
+  recordDecision({
+    project_id: input.project_id,
+    session_id: pending.session_id,
+    entry: {
+      type: 'requirement_confirmed',
+      title: input.decision === 'delegate' ? '用户让渡：由向导决定需求' : '用户确认需求清单',
+      why:
+        input.decision === 'delegate'
+          ? '用户在确认弹窗选择「由向导决定」，按向导整理的清单开工'
+          : `用户在确认弹窗勾选 ${requirements.length} 条需求开工`,
+      detail: {
+        decision: input.decision,
+        selected_ids: input.decision === 'delegate' ? undefined : requirements.map((item) => item.id),
+        requirements,
+      },
+    },
+  })
+
+  let prdWritten = false
+  try {
+    const backplane = await resolvePrdBackplane(
+      {
+        request_id: pending.request_id,
+        session_id: pending.session_id,
+        project_id: pending.project_id,
+        mode: pending.mode,
+        channel_id: pending.channel_id,
+        query: pending.query,
+      },
+      requirements,
+    )
+    syncDocuments(
+      {
+        request_id: pending.request_id,
+        project_id: pending.project_id,
+        session_id: pending.session_id,
+        checkpoint: 'requirement_confirmed',
+      },
+      backplane,
+    )
+    prdWritten = true
+    publish(makeGuideEvent(input, 'message_delta', { text: '需求已确认，我先把它整理成产品需求文档，然后开始画草图。' }))
+  } catch (error) {
+    console.error('[guide] PRD 前移生成失败（不阻断草图）:', error)
+    publish(makeGuideEvent(input, 'message_delta', { text: '需求已确认，开始画草图。' }))
+  }
+  publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+
+  await runSketchTask({
+    request_id: pending.request_id,
+    session_id: pending.session_id,
+    project_id: pending.project_id,
+    mode: pending.mode,
+    prompt: '按确认的需求清单生成草图',
+    requirements,
+    channel_id: pending.channel_id,
+    query: pending.query,
+  })
+  return { started: true, prd_written: prdWritten }
+}
+
 function parseGuideJson(text: string): GuideParsed | undefined {
   const cleaned = text.replace(/```(?:json)?/gi, '').trim()
   const start = cleaned.indexOf('{')
@@ -592,6 +765,24 @@ function parseGuideJson(text: string): GuideParsed | undefined {
     }
   }
 
+  if (parsed.action === 'confirm_requirements') {
+    const requirements = (Array.isArray(parsed.requirements) ? parsed.requirements : [])
+      .filter(isRecord)
+      .filter((r) => typeof r.id === 'string' && typeof r.description === 'string')
+      .slice(0, 5)
+      .map((r) => ({ id: r.id as string, description: r.description as string }))
+    if (requirements.length < 1) return undefined
+    const researchQueries = (Array.isArray(parsed.research_queries) ? parsed.research_queries : [])
+      .filter((query): query is string => typeof query === 'string' && query.trim().length > 0)
+      .slice(0, 2)
+    return {
+      action: 'confirm_requirements',
+      reply: typeof parsed.reply === 'string' ? parsed.reply : '',
+      requirements,
+      research_queries: researchQueries,
+    }
+  }
+
   return undefined
 }
 
@@ -603,7 +794,7 @@ function extractText(blocks: MessageContentBlock[]): string {
 }
 
 function makeGuideEvent(
-  input: AgentSendMessageInput,
+  input: Pick<AgentSendMessageInput, 'session_id' | 'project_id'>,
   type: AgentEvent['type'],
   payload: Record<string, unknown>,
 ): AgentEvent {

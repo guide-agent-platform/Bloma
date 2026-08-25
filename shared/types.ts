@@ -19,6 +19,7 @@ export const IPC_CHANNELS = {
   AGENT_STOP: 'agent:stop',
   AGENT_LIST_SESSIONS: 'agent:list-sessions',
   AGENT_LOAD_MESSAGES: 'agent:load-messages',
+  AGENT_CONFIRM_REQUIREMENTS: 'agent:confirm-requirements',
   SESSION_CLEAN_ORPHANS: 'session:clean-orphans',
   AGENT_STREAM_EVENT: 'agent:stream-event',
   PERMISSION_RESPONSE: 'permission:response',
@@ -533,6 +534,20 @@ export interface AgentSessionMeta {
 // 6. Agent IPC 输入/输出
 // =========================================================================
 
+/** 需求确认弹窗决策回传（confirm_requirements 流，2026-08-26）：confirm=勾选子集开工，delegate=用户让渡由向导定。 */
+export interface AgentConfirmRequirementsInput extends RequestEnvelope {
+  session_id: string
+  project_id: string
+  decision: 'confirm' | 'delegate'
+  /** confirm 时勾选的需求 id 子集；空集/缺省视为全量（兑底防误操作全清空） */
+  requirement_ids?: string[]
+}
+
+export interface AgentConfirmRequirementsResult {
+  started: boolean
+  prd_written: boolean
+}
+
 export interface AgentSendMessageInput extends RequestEnvelope {
   session_id: string
   project_id: string
@@ -989,7 +1004,7 @@ export interface RollbackResult {
 export interface DocumentSyncInput extends RequestEnvelope {
   project_id: string
   session_id: string
-  checkpoint: 'sketch_confirmed' | 'mvp_before_generation' | 'mvp_tested' | 'iteration_completed' | 'mode_upgraded'
+  checkpoint: 'requirement_confirmed' | 'sketch_confirmed' | 'mvp_before_generation' | 'mvp_tested' | 'iteration_completed' | 'mode_upgraded'
   changed_files?: string[]
 }
 
@@ -1072,6 +1087,7 @@ export type ElectronAPI = {
     loadMessages(input: AgentLoadMessagesInput): Promise<ApiResult<AgentLoadMessagesResult>>
     /** U11：清理孤儿会话（project_id 已失效），返回移除数量。 */
     cleanOrphans(input: RequestEnvelope): Promise<ApiResult<SessionCleanOrphansResult>>
+    confirmRequirements(input: AgentConfirmRequirementsInput): Promise<ApiResult<AgentConfirmRequirementsResult>>
     onStreamEvent(listener: (event: AgentEvent) => void): () => void
   }
   permissions: {

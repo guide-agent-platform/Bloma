@@ -47,6 +47,16 @@ export function syncDocuments(input: DocumentSyncInput, backplaneOverride?: PrdB
   const files: Array<{ relativePath: string; content: string; type: DocumentRef['type'] }> = []
 
   switch (input.checkpoint) {
+    case 'requirement_confirmed': {
+      // PRD 前移检查点（2026-08-26）：需求确认弹窗通过后立即形成 PRD，早于草图；
+      // 草图确认检查点（sketch_confirmed）会基于 readPrdBackplane 合并重写，不冲突
+      const backplane = backplaneOverride ?? buildPrdBackplane(project, requirements, input.checkpoint)
+      files.push(
+        { relativePath: 'requirement_confirmed.md', content: renderPrdDraft(backplane), type: 'prd' },
+        { relativePath: 'prd.json', content: renderPrdJson(backplane), type: 'prd' },
+      )
+      break
+    }
     case 'sketch_confirmed': {
       const backplane = backplaneOverride ?? buildPrdBackplane(project, requirements, input.checkpoint)
       files.push(

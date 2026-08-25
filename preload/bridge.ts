@@ -21,6 +21,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC_CHANNELS } from '../shared/types'
 import type {
   AgentCancelInput,
+  AgentConfirmRequirementsInput,
   AgentEvent,
   AgentListSessionsInput,
   AgentLoadMessagesInput,
@@ -79,6 +80,8 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_LOAD_MESSAGES, input),
     cleanOrphans: (input: RequestEnvelope) =>
       ipcRenderer.invoke(IPC_CHANNELS.SESSION_CLEAN_ORPHANS, input),
+    confirmRequirements: (input: AgentConfirmRequirementsInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_CONFIRM_REQUIREMENTS, input),
     onStreamEvent: (listener: (event: AgentEvent) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, data: AgentEvent) => listener(data)
       ipcRenderer.on(IPC_CHANNELS.AGENT_STREAM_EVENT, handler)

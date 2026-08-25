@@ -11,6 +11,10 @@ vi.mock('../../main/programming-orchestrator', () => ({
 vi.mock('../../main/platform-services', () => ({
   trackAnalytics: vi.fn(),
 }))
+vi.mock('../../main/guide-research', () => ({
+  // 市调在单测中固定降级（不打真实网络）；弹窗流程可用性由 guide-research 专属测试覆盖
+  researchMarketSimilar: vi.fn(async () => ({ available: false, queries: [], results: [], summary: '' })),
+}))
 vi.mock('../../main/project-service', () => ({
   findProject: vi.fn(() => ({
     project_id: 'proj-1',
@@ -234,23 +238,23 @@ describe('引导对话 · 连续澄清熔断', () => {
     }
   })
 
-  it('连续 2 轮仍 ask_clarification → 熔断强制 auto：开工、不弹卡、留痕、留日志', async () => {
+  it('连续 2 轮仍 ask_clarification → 熔断转入需求确认弹窗（不臆断开工、留痕、留日志）', async () => {
     writeSession(2)
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const events: AgentEvent[] = []
 
     await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(askJson))
 
-    // 强制开工：不采纳模型的追问，不弹第三张卡
-    expect(runSketchTask).toHaveBeenCalledTimes(1)
-    expect(events.find((event) => event.type === 'user_decision_required')).toBeUndefined()
-    // 需求走 auto 常见做法扩写
-    expect(vi.mocked(runSketchTask).mock.calls[0][0].requirements).toEqual([
-      { id: 'F-001', description: '通用实用软件工具，由向导按常见做法生成第一版' },
+    // 2026-08-26 语义修订：不再强制 auto 开工——不弹第三张澄清卡，也不直接生成草图，
+    // 而是转需求确认弹窗（弹窗内保留「由向导决定」出口 = 用户主动让渡）
+    expect(runSketchTask).not.toHaveBeenCalled()
+    const confirmEvent = events.find((event) => event.type === 'user_decision_required')
+    expect(confirmEvent?.payload.kind).toBe('requirement_confirm')
+    expect(confirmEvent?.payload.requirements).toEqual([
+      { id: 'F-001', description: '还是没定下来' },
     ])
-    // 留痕对齐「静默降级必须留日志」约定
     expect(recordDecision).toHaveBeenCalledWith(expect.objectContaining({
-      entry: expect.objectContaining({ type: 'clarification_forced_auto' }),
+      entry: expect.objectContaining({ type: 'clarification_forced_confirm' }),
     }))
     expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('澄清轮次熔断'))
   })
