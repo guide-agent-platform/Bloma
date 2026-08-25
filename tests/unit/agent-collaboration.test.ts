@@ -215,11 +215,11 @@ describe('委派协作 M1', () => {
   })
 
   it('role 裁剪：explore/research 只读+ask；implement/review 全量+ask；parent 含全部委派工具', () => {
-    const readOnly = ['read_file', 'list_files', 'grep', 'ask_delegation_question']
+    const readOnly = ['read_file', 'list_files', 'grep', 'web_fetch', 'ask_delegation_question']
     expect(buildAgentTools({ projectId: 'p', role: 'explore' }).map((tool) => tool.name)).toEqual(readOnly)
     expect(buildAgentTools({ projectId: 'p', role: 'research' }).map((tool) => tool.name)).toEqual(readOnly)
 
-    const full = ['read_file', 'list_files', 'grep', 'write_file', 'edit_file', 'run_preview', 'run_gwt_tests', 'run_security_scan']
+    const full = ['read_file', 'list_files', 'grep', 'web_fetch', 'write_file', 'edit_file', 'run_preview', 'run_gwt_tests', 'run_security_scan']
     const implementTools = [...full, 'ask_delegation_question']
     expect(buildAgentTools({ projectId: 'p', role: 'implement' }).map((tool) => tool.name)).toEqual(implementTools)
     expect(buildAgentTools({ projectId: 'p', role: 'review' }).map((tool) => tool.name)).toEqual(implementTools)
@@ -351,7 +351,7 @@ describe('M2 委派工具（agent-tools 接线，委派协作嫁接方案 §4.2�
   })
 
   it('role 裁剪：parent 含全部委派工具；implement 子 agent 只含 ask 不含委派/代答/续跑', () => {
-    const full = ['read_file', 'list_files', 'grep', 'write_file', 'edit_file', 'run_preview', 'run_gwt_tests', 'run_security_scan']
+    const full = ['read_file', 'list_files', 'grep', 'web_fetch', 'write_file', 'edit_file', 'run_preview', 'run_gwt_tests', 'run_security_scan']
     const delegationTools = [
       'delegate_agent',
       'wait_for_delegations',

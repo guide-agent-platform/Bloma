@@ -907,6 +907,23 @@ MCP 工具由 Agent SDK 在 main 进程侧调用，权限由 `PermissionService.
 }
 ```
 
+### 12.10 `web_fetch`
+
+```json
+{
+  "input": {
+    "url": "https://example.com/docs",
+    "max_chars": 12000
+  },
+  "output": {
+    "output": "（终态 URL · HTTP 状态 · 类型）\n纯文本正文（超限截断并提示）",
+    "detail": {"url": "string", "status": 200, "chars": 0, "truncated": false}
+  }
+}
+```
+
+规则：仅 http/https 公网地址；内网/环回/链路本地/保留段 IP、localhost/.local/.internal、无点主机名一律拒绝；重定向终态复检；响应体上限 2MB；HTML 剔除 script/style/标签后仅保留可见文本。
+
 ---
 
 ## 13. 权限等级
@@ -922,6 +939,7 @@ MCP 工具由 Agent SDK 在 main 进程侧调用，权限由 `PermissionService.
 | `generate_mvp` | warning | 写入项目文件 |
 | `run_project` | warning | 启动本地进程 |
 | `create_snapshot` | warning | 写入快照文件 |
+| `web_fetch` | warning | 公网只读抓取（SSRF 防护拒绝内网地址） |
 | `rollback_snapshot` | dangerous | 覆盖当前工作副本 |
 
 规则：

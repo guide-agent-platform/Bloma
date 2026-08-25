@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildAgentTools,
   EDIT_BUDGET_AFTER_TEST_FAILURE,
@@ -395,6 +395,146 @@ describe('agent-tools（PR2 L2）', () => {
       writeFileSync(join(project.root_path, 'src', 'evil.js'), 'const safe = 1\n', 'utf8')
       const good = await byName(tools, 'run_security_scan').execute({}, ctx)
       expect(good.output).toContain('安全扫描通过')
+    })
+  })
+
+  describe('web_fetch（联网只读 + SSRF 防护）', () => {
+    /** 构造鸭型 Response（不发真实网络）。 */
+    function fakeResponse(init: {
+      ok?: boolean
+      status?: number
+      url?: string
+      contentType?: string
+      body?: string
+    }): Response {
+      const encoder = new TextEncoder()
+      const bytes = encoder.encode(init.body ?? '')
+      return {
+        ok: init.ok ?? true,
+        status: init.status ?? 200,
+        url: init.url ?? 'https://example.com/docs',
+        headers: { get: (name: string) => (name.toLowerCase() === 'content-type' ? (init.contentType ?? 'text/html; charset=utf-8') : null) },
+        arrayBuffer: async () => bytes.buffer,
+      } as unknown as Response
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    it('内网/本机/非常规地址一律拒绝且不发起网络请求', async () => {
+      const project = createProject({ request_id: 'req-wf-1', mode: 'quick' })
+      const fetchSpy = vi.fn()
+      vi.stubGlobal('fetch', fetchSpy)
+      const tool = byName(buildAgentTools({ projectId: project.project_id }), 'web_fetch')
+      const ctx = ctxFor(project.project_id)
+
+      for (const url of [
+        'http://localhost:3000/x',
+        'http://127.0.0.1/x',
+        'http://192.168.1.1/admin',
+        'http://10.0.0.5/x',
+        'http://172.16.0.1/x',
+        'http://169.254.169.254/latest/meta-data',
+        'http://[::1]/x',
+        'http://[fd00::1]/x',
+        'file:///C:/Windows/win.ini',
+        'ftp://example.com/x',
+        'http://intranet/doc',
+        'http://2130706433/x',
+      ]) {
+        const result = await tool.execute({ url }, ctx)
+        expect(result.isError, `URL 应被拒绝：${url}`).toBe(true)
+      }
+      expect(fetchSpy).not.toHaveBeenCalled()
+    })
+
+    it('公网 HTML → 剧本/样式剔除、标签剥离、实体解码、保留可见文本', async () => {
+      const project = createProject({ request_id: 'req-wf-2', mode: 'quick' })
+      const fetchSpy = vi.fn(async () =>
+        fakeResponse({
+          url: 'https://example.com/docs',
+          body:
+            '<html><head><style>.a{color:red}</style><script>alert(1)</script></head>' +
+            '<body><h1>API 文档</h1><p>GET /add 返回 &lt;sum&gt;&amp;&amp; 总和</p><!-- 注释 --><li>限流说明</li></body></html>',
+        }),
+      )
+      vi.stubGlobal('fetch', fetchSpy)
+      const ctx = ctxFor(project.project_id)
+
+      const result = await byName(buildAgentTools({ projectId: project.project_id }), 'web_fetch').execute(
+        { url: 'https://example.com/docs' },
+        ctx,
+      )
+      expect(result.isError).toBeUndefined()
+      const text = String(result.output)
+      expect(text).toContain('API 文档')
+      expect(text).toContain('<sum>&& 总和')
+      expect(text).toContain('限流说明')
+      expect(text).not.toContain('alert(1)')
+      expect(text).not.toContain('color:red')
+      expect(text).toContain('example.com')
+    })
+
+    it('超长文本按 max_chars 截断并提示；非 2xx / 二进制 / 重定向入内网如实报错', async () => {
+      const project = createProject({ request_id: 'req-wf-3', mode: 'quick' })
+      const ctx = ctxFor(project.project_id)
+      const long = 'x'.repeat(30_000)
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => fakeResponse({ body: long, contentType: 'text/plain' })),
+      )
+      const truncated = await byName(buildAgentTools({ projectId: project.project_id }), 'web_fetch').execute(
+        { url: 'https://example.com/big' },
+        ctx,
+      )
+      expect(String(truncated.output)).toContain('已截断')
+      expect(String(truncated.output).length).toBeLessThan(20_000)
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => fakeResponse({ ok: false, status: 404 })),
+      )
+      const missing = await byName(buildAgentTools({ projectId: project.project_id }), 'web_fetch').execute(
+        { url: 'https://example.com/none' },
+        ctx,
+      )
+      expect(missing.isError).toBe(true)
+      expect(String(missing.output)).toContain('HTTP 404')
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => fakeResponse({ contentType: 'image/png' })),
+      )
+      const binary = await byName(buildAgentTools({ projectId: project.project_id }), 'web_fetch').execute(
+        { url: 'https://example.com/logo.png' },
+        ctx,
+      )
+      expect(binary.isError).toBe(true)
+      expect(String(binary.output)).toContain('不支持的响应类型')
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => fakeResponse({ url: 'http://192.168.0.1/redirected' })),
+      )
+      const redirected = await byName(buildAgentTools({ projectId: project.project_id }), 'web_fetch').execute(
+        { url: 'https://example.com/go' },
+        ctx,
+      )
+      expect(redirected.isError).toBe(true)
+      expect(String(redirected.output)).toContain('重定向到了不允许的地址')
+    })
+
+    it('角色裁剪：explore/research 含 web_fetch；权限登记为 warning', async () => {
+      const project = createProject({ request_id: 'req-wf-4', mode: 'quick' })
+      const explore = buildAgentTools({ projectId: project.project_id, role: 'explore' })
+      expect(explore.map((tool) => tool.name)).toContain('web_fetch')
+      const parent = buildAgentTools({ projectId: project.project_id })
+      expect(parent.map((tool) => tool.name)).toContain('web_fetch')
+
+      const { TOOL_PERMISSION_REGISTRY } = await import('../../main/permission-service')
+      expect(TOOL_PERMISSION_REGISTRY.web_fetch).toBe('warning')
     })
   })
 })

@@ -7,6 +7,34 @@
 
 **v1.1 修订说明**：同步 §5 已知待同步项状态（4 项全部已同步），新增 §5.1 目录结构重组记录。按 `workflow.md §2.4` 走修订流程，待评审后回到已确认。
 
+## 工程修复与联网工具（2026-08-25）
+
+| 属性 | 值 |
+|------|-----|
+| **状态** | 已确认 |
+
+### 变更内容
+
+**缺陷④修复：后台链路刷新会话索引**
+- `[修复]` 编程编排器后台任务（草图/MVP/迭代/终验/让渡恢复）不经 runAgent，agent-sessions.json 索引 updated_at 停在最后一次交互消息（实测后台跑完数小时仍不刷新，历史列表排序失真）——`publish()` 前置节流刷新（同会话 30s 一次，旁路容错不阻断事件）；附带后台链路回填 Project.last_session_id；新增 seam `resetSessionActivityThrottleForTests`
+
+**意图分流放行一致化（遗留待查项闭环）**
+- `[修复]` L1 修改词表先于进度子串门：「进度词 + 修改动词」混合句（「做完了没？把按钮换成蓝色」）此前被进度子串门整句吞掉、永远到不了 L1/L3；纯进度句/纯寒暄行为不变
+- `[修复]` L3 应答解析死正则：/\b(...|修改|改|...)\b/ 的 \b 仅基于 ASCII \w，中文分支永不命中，模型答「修改」被误判 other（此前只因恰好答 ASCII「modify」侥幸工作）——归一化后整 token 匹配 + ASCII \b 兜底
+
+**Agent Loop 新增 web_fetch 联网只读工具（9 工具）**
+- `[新增]` 编程/子/探索角色可用：抓取公网网页/文档→纯文本；SSRF 防护（私网/环回/链路本地/保留段 IP、localhost/.local/.internal、无点主机名拒绝，重定向终态复检）；15s 超时、2MB 响应上限、ACI 截断（缺省 12000 字符）；权限登记 warning（防 URL 夹带数据外发）；api-spec §12.10/§13 同步
+
+**工程卫生**
+- `[修复]` 删除陷阱34修复前残留的 `undefined/` 测试污染目录与空目录 `-p/`；README §3.7 失效的 `当前已完成.md` 引用改指 changelog
+
+### 影响评估
+
+- 受影响模块：programming-orchestrator / orchestrator / agent-tools / permission-service / api-spec / README
+- 测试：新增 unit 8 例（session-activity-refresh 2 / ready-iteration 意图分流 2 / agent-tools web_fetch 4 含角色裁剪与权限登记断言）；受影响单测全绿；typecheck 0 错、docs:check 过
+
+---
+
 ## Sprint 3 项目管理补全 + 多项目预览 + 远程功能整合（2026-08-15）
 
 | 属性 | 值 |

@@ -108,7 +108,7 @@ Feature 文件：
 
 | 文档 | 说明 |
 |---|---|
-| `当前已完成.md` | 当前完成状态和剩余工作记录 |
+| `07_VERSIONS/changelog.md` | 版本变更记录（当前状态与剩余工作以 changelog + git log 为准） |
 
 ---
 
