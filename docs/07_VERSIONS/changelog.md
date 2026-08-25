@@ -320,6 +320,33 @@ docs/
 
 > 进入实现阶段后的代码版本修订记录，按时间倒序排列（最新在最前）。对应 git tag 与语义化版本。
 
+### v1.3（2026-08-25）
+
+| 属性 | 值 |
+|------|-----|
+| **日期** | 2026-08-25 |
+| **状态** | 待审 |
+
+**变更内容**（Agent Loop 转正唯一运行时 + 委派协作收尾 + 审计修复 + 废旧管道删除）：
+
+- `[变更]` **Agent Loop 转正**：`BLOMA_AGENT_LOOP` 缺省开启（`=0` 紧急关闭、`=1` 兼容无害），agent loop 成为 MVP 生成唯一运行时；渠道不支持工具循环 / 探测失败 / 探测无结论一律发布用户可见错误并如实抛错，不再静默回退固定管道
+- `[变更]` **路由层能力过滤**：`resolveChannelEnv`/`pickBackupChannelEnv` 增 `requireTools`，MVP 类别按 `supports_tools` 过滤（主渠道不支持 → 走备用序，全不支持 → `tools_unsupported`；`undefined` 放行探测）
+- `[新增]` **委派协作 M1~M4**：`delegate_agent`/`wait_for_delegations`/`ask_delegation_question`/`answer_delegation` 工具 + 子会话生命周期（`delegation_started`/`delegation_completed`/`delegation_failed` 事件）+ loop 门禁 + judge 终审 + 渲染端协作视图
+- `[变更]` **终验门禁 M4-A**：`runAgentLoopPostTesting` 语义固定为「只终验不重修」（GWT → 安全扫描 → judge），loop 内自测自修已用尽修复预算，不给外部修复预算
+- `[变更]` **提示词槽位**：废弃 `mvp-system`，新增 `loop-system`（追加模式，覆盖内容 append 在动态 system prompt 之后，背板锚定段不可覆盖）
+- `[移除]` **废旧管道**：删除 `mvp-engine-llm.ts` / `mvp-engine.ts` / `repair-engine.ts` 及 `resolveMvp`/`ensureSandboxRunning`/`runPostMvpTestingFlow`/管道回退分支；埋点契约不变只换来源（`self_repair_triggered` → loop `onRepairRound`；`programming_execution` 无新产生点，类型保留向后兼容历史 JSONL）
+- `[修复]` 审计报告九项：委派并发/生命周期、一致性、收尾三类（P1/P2/P3）
+- `[变更]` **存量项目**：不写迁移代码，切换前 `via_agent_loop=false` 项目在旧版完成（D6）
+
+**影响评估**：
+
+- 受影响的文档：DOC-4.1 api-spec.md（补 `delegation_*` 事件、移除旧管道专属通道）、DOC-3.4 data-model.md
+- 受影响的模块：`main/programming-orchestrator.ts`、`main/runtime-fallback.ts`、`main/agent-loop.ts`、`main/agent-tools.ts`、`main/agent-collaboration.ts`、`main/project-scaffold.ts`、`main/prompt-service.ts`、`shared/types.ts`、`main/ipc.ts`
+- 删除文件：`main/mvp-engine-llm.ts`、`main/mvp-engine.ts`、`main/repair-engine.ts` 及对应单测/验收
+- 是否需要回滚测试：是（`npm run typecheck`、`npm run test:unit`、`npm run test:acceptance:sprint0/2/3`、`npm run docs:check`）
+
+---
+
 ### v1.2（2026-08-07）
 
 | 属性 | 值 |

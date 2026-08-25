@@ -261,7 +261,16 @@ type AgentEvent = {
     | "user_decision_required"
     | "retrying"
     | "error"
-    | "completed";
+    | "completed"
+    /** 权限模式切换广播（F8） */
+    | "permission_mode_changed"
+    /** 委派子 agent 冒泡提问（M3） */
+    | "delegation_question"
+    /** 委派生命周期（M4-C） */
+    | "delegation_started"
+    | "delegation_completed"
+    | "delegation_failed"
+    | "delegation_cancelled";
   payload: Record<string, unknown>;
   created_at: string;
 };
@@ -710,12 +719,15 @@ type AnalyticsEventInput = {
     | "conversation_submitted"
     | "guide_role_switched"
     | "sketch_generated"
+    | "sketch_fallback"
     | "mvp_delivered"
     | "user_undo"
     | "point_correction"
     | "mode_upgraded"
     | "programming_execution"
     | "self_repair_triggered"
+    | "agent_loop_turn"
+    | "agent_loop_completed"
     | "judge_verdict"
     | "satisfaction_marked"
     | "project_finalized";
@@ -971,3 +983,4 @@ type ErrorCode =
 | v1.1 | 2026-07-10 | 按 `proma-core-demo` 对齐修订：IPC 通道 `AGENT_CANCEL` → `AGENT_STOP` 与 Proma 原版命名一致 |
 | v1.2 | 2026-08-15 | 项目管理补全：新增 `project:unarchive`（取消归档）、`project:delete`（硬删除，含清理与路径安全防护）；`project:list` 增加 `scope`（active/archived/all）视角 |
 | v1.3 | 2026-08-15 | 与 `shared/types.ts` 对齐：§2.1 IPC 通道补全至 40 个（会话/渠道/快照列表/文档读取/DOM 上下文等）；§5.2 AgentEvent 补 `retrying`；§14 错误码补 `SESSION_NOT_FOUND` |
+| v1.4 | 2026-08-25 | Agent Loop 转正唯一运行时：§5.2 AgentEvent 补 `permission_mode_changed` 与 `delegation_question`/`delegation_started`/`delegation_completed`/`delegation_failed`/`delegation_cancelled` 委派事件；§11 埋点接口与 `shared/types.ts` 对齐（新增 `agent_loop_turn`/`agent_loop_completed`，`programming_execution` 随废旧管道保留类型但无新产生点） |
