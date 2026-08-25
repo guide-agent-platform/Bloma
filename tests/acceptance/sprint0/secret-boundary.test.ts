@@ -36,7 +36,7 @@ describe('Sprint 0 secret boundary acceptance', () => {
       api_key: 'role-c-plain-secret',
     })
     const raw = getChannelByIdRaw(channel.id)
-    const persisted = readFileSync(join(environment.home, 'channels.json'), 'utf8')
+    const persisted = readFileSync(join(environment.home, 'bloma-channels.json'), 'utf8')
 
     expect(channel.api_key).toBe('***')
     expect(listChannels()).toEqual([expect.objectContaining({ api_key: '***' })])

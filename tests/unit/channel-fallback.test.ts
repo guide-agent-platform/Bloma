@@ -14,7 +14,7 @@ import {
 /**
  * 渠道自动回退的密钥解密守卫（getFirstEnabledChannel）。
  *
- * 背景：~/.proma/channels.json 里的项目渠道 api_key 用 safeStorage 加密。
+ * 背景：~/.proma/bloma-channels.json 里的项目渠道 api_key 用 safeStorage 加密。
  * 若 ciphertext 来自另一平台（macOS 的 "v10" 前缀在 Windows DPAPI 下解不开）
  * 或 safeStorage 密钥已变更，decryptSecret 会抛错。getFirstEnabledChannel
  * 必须跳过这类损坏渠道，否则自动选中后 runAgent 解密崩溃。

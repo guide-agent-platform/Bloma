@@ -50,7 +50,7 @@ describe('Sprint 0 Proma core security regression', () => {
     expect(listChannels()[0]?.api_key).toBe('***')
     expect(raw?.api_key).not.toContain('acceptance-secret')
     expect(decryptApiKey(raw!.api_key)).toBe('acceptance-secret')
-    expect(readFileSync(join(home, 'channels.json'), 'utf8')).not.toContain('acceptance-secret')
+    expect(readFileSync(join(home, 'bloma-channels.json'), 'utf8')).not.toContain('acceptance-secret')
   })
 
   it('[S0-SECRET-002] Electron 窗口应启用隔离并关闭 Renderer 的 Node 集成', () => {

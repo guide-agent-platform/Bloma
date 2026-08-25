@@ -49,7 +49,7 @@ describe('Sprint 2 channel management IPC', () => {
     if (!created.ok) throw new Error('expected create to succeed')
     expect(created.data.api_key).toBe('***')
 
-    const persisted = readFileSync(join(environment!.home, 'channels.json'), 'utf8')
+    const persisted = readFileSync(join(environment!.home, 'bloma-channels.json'), 'utf8')
     expect(persisted).toContain(Buffer.from('enc:plain-secret-key', 'utf8').toString('hex'))
     expect(persisted).not.toContain('plain-secret-key')
 

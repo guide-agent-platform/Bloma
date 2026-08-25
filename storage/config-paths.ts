@@ -12,6 +12,9 @@ export function ensureDir(path: string): string {
 }
 
 export function getChannelsPath(): string { return join(getPromaHome(), 'channels.json') }
+/** Bloma 专属渠道存储（2026-08-26 独立化）：与 Proma 共用的 channels.json 分开存放——
+ *  Proma(v9) 写入时会丢弃本项目 snake_case 条目，共用导致渠道反复被清空。 */
+export function getBlomaChannelsPath(): string { return join(getPromaHome(), 'bloma-channels.json') }
 /** M5 类别路由表（snake_case；与 Proma 共用的 channels.json 分开存放）。 */
 export function getCategoryRoutingPath(): string { return join(getPromaHome(), 'category-routing.json') }
 export function getProjectsIndexPath(): string { return join(getPromaHome(), 'projects.json') }

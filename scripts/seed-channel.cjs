@@ -3,7 +3,7 @@
  * seed-channel.cjs — 渠道配置 seed 脚本（dev 工具，A2-17 临时解锁用）
  *
  * 在 Electron main 进程内运行，借助 safeStorage（OS 级加密）把渠道 key 加密写入
- * ~/.proma/channels.json。key 只从环境变量 MINIMAX_API_KEY 读取：
+ * ~/.proma/bloma-channels.json（2026-08-26 起独立存放，与 Proma 的 channels.json 分离）。key 只从环境变量 MINIMAX_API_KEY 读取：
  *   - 不落任何明文文件（仅写 safeStorage 加密后的 hex）
  *   - 不打印 key 本体（日志只显示 api_key=***）
  *
@@ -24,7 +24,7 @@ const { homedir } = require('node:os')
 const { join } = require('node:path')
 
 const PROMA_HOME = process.env.PROMA_HOME || join(homedir(), '.proma')
-const CHANNELS_PATH = join(PROMA_HOME, 'channels.json')
+const CHANNELS_PATH = join(PROMA_HOME, 'bloma-channels.json')
 
 // 渠道参数（可用环境变量覆盖；默认对齐已核实的 MiniMax M3 配置）
 const CHANNEL_NAME = process.env.MINIMAX_CHANNEL_NAME || 'MiniMax'

@@ -18,7 +18,7 @@ const { homedir } = require('node:os')
 const { join } = require('node:path')
 
 const PROMA_HOME = process.env.PROMA_HOME || join(homedir(), '.proma')
-const CHANNELS_PATH = join(PROMA_HOME, 'channels.json')
+const CHANNELS_PATH = join(PROMA_HOME, 'bloma-channels.json')
 
 /** 密文前 8 字节解码为可见 ASCII（'.' 替换不可见字符），用于识别 macOS "v10" 前缀特征。 */
 function hexPrefixAscii(hex) {
@@ -43,7 +43,7 @@ function maskPlain(plain) {
 
 function main() {
   if (!existsSync(CHANNELS_PATH)) {
-    console.log(`[diagnose] 未找到 channels.json：${CHANNELS_PATH}`)
+    console.log(`[diagnose] 未找到渠道文件：${CHANNELS_PATH}`)
     app.exit(1)
     return
   }

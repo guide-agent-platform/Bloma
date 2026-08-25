@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import type {
   Channel,
   ChannelCreateInput,
@@ -11,7 +12,7 @@ import type {
   ProviderType,
 } from '../shared/types'
 import { ANTHROPIC_PROTOCOL_PROVIDERS, isAnthropicProtocolProvider } from '../shared/types'
-import { getChannelsPath } from '../storage/config-paths'
+import { getBlomaChannelsPath, getChannelsPath } from '../storage/config-paths'
 import { readJsonFile, writeJsonFile } from '../storage/json-store'
 import { decryptSecret, encryptSecret } from './safe-storage'
 import {
@@ -103,11 +104,22 @@ interface ChannelsConfig {
 }
 
 function loadChannels(): ChannelsConfig {
-  return readJsonFile<ChannelsConfig>(getChannelsPath(), { version: 1, channels: [] })
+  const path = getBlomaChannelsPath()
+  if (!existsSync(path)) {
+    // 一次性迁移（2026-08-26 渠道存储独立化）：Bloma 曾与 Proma 共用 channels.json，
+    // 但 Proma(v9) 写入时会整体丢弃本项目 snake_case 条目（实测渠道反复被清空），
+    // 故迁出至 bloma-channels.json。仅读取旧共享文件、绝不回写它（那已是 Proma 的地盘）。
+    // 空迁移也落盘——文件存在即迁移完成标记，后续读写只走新文件。
+    const legacy = readJsonFile<ChannelsConfig>(getChannelsPath(), { version: 1, channels: [] })
+    const migrated: ChannelsConfig = { version: 1, channels: legacy.channels.filter(isOursChannel) }
+    writeJsonFile(path, migrated)
+    return migrated
+  }
+  return readJsonFile<ChannelsConfig>(path, { version: 1, channels: [] })
 }
 
 function saveChannels(config: ChannelsConfig): void {
-  writeJsonFile(getChannelsPath(), config)
+  writeJsonFile(getBlomaChannelsPath(), config)
 }
 
 function redact(channel: Channel): Channel {

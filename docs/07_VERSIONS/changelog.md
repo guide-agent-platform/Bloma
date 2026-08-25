@@ -7,6 +7,26 @@
 
 **v1.1 修订说明**：同步 §5 已知待同步项状态（4 项全部已同步），新增 §5.1 目录结构重组记录。按 `workflow.md §2.4` 走修订流程，待评审后回到已确认。
 
+## 渠道存储独立化：bloma-channels.json（2026-08-26）
+
+| 属性 | 值 |
+|------|-----|
+| **状态** | 已确认 |
+
+### 变更内容
+
+- `[修复]` 渠道存储从与 Proma 共用的 `~/.proma/channels.json` 迁至专属 `~/.proma/bloma-channels.json`（`config-paths.getBlomaChannelsPath`）：实测 Proma(v9) 写入共用文件时会整体丢弃本项目 snake_case 条目（2026-08-26 00:27 文件实锤，仅剩 camelCase 条目），导致双开场景下本项目渠道每次被清空、每次启动重配
+- `[新增]` loadChannels 一次性迁移：新文件不存在时从旧共用文件提取 snake_case 条目写入（空迁移也落盘作完成标记），绝不回写旧共用文件；saveChannels 只写新文件
+- `[修改]` seed-channel / diagnose-channels 脚本与 3 处测试落盘断言同步新文件名；渠道相关 6 文件 44 例全过
+- `[运维]` 用户渠道已从 8-20 备份（channels.json.bak-20260820-012132）恢复 3 条（ds/kimi/glm，safeStorage 密钥随备份时点，若后换过 key 需重填一次）
+
+### 影响评估
+
+- 受影响模块：config-paths / channel-manager / scripts×2 / 测试×4
+- 兼容性：旧共用文件不再读写（Proma 地盘）；isOursChannel 过滤语义不变；既有渠道经迁移/恢复保留
+
+---
+
 ## 向导需求确认弹窗 + 市调 + PRD 前移（2026-08-26）
 
 | 属性 | 值 |
