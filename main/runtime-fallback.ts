@@ -75,31 +75,47 @@ export function readFallbackContext(env: Record<string, string> | undefined): Ru
 // 构建期：渠道 + 类别 → env（主渠道基础设施故障时切第一个可用备用渠道）
 // ---------------------------------------------------------------------------
 
-export type ChannelUnusableReason = 'no_channel' | 'decrypt_failed' | 'model_not_found'
+export type ChannelUnusableReason = 'no_channel' | 'decrypt_failed' | 'model_not_found' | 'tools_unsupported'
 
 export interface ChannelEnvResolution {
   env?: Record<string, string>
   /** env 实际使用的渠道（可能是切换后的备用渠道；max_tokens 等以它为准） */
   channel?: Channel
+  /** 实际解析出的模型名（供调用方核对 supports_tools，免去再解析一次） */
+  modelName?: string
+  /** 实际解析出的模型是否支持 tool use（undefined = 能力位未标注，可探测） */
+  supportsTools?: boolean
   /** 无可用渠道（含备用）时的原因；调用方按各自语义降级/报错 */
   unusableReason?: ChannelUnusableReason
 }
 
-type ChannelEnvAttempt = { status: 'ok'; env: Record<string, string>; model: string } | { status: 'failed'; reason: 'decrypt_failed' | 'model_not_found' }
+type ChannelEnvAttempt =
+  | { status: 'ok'; env: Record<string, string>; model: string; supportsTools: boolean | undefined }
+  | { status: 'failed'; reason: 'decrypt_failed' | 'model_not_found' | 'tools_unsupported' }
 
-function tryBuildChannelEnv(channel: Channel, category: DocumentCategory): ChannelEnvAttempt {
+/** 解析出的模型在渠道 models[] 上的 tool use 能力位（`supports_tools` 在 ChannelModel 上，不在 Channel 上）。 */
+function readSupportsTools(channel: Channel, model: string): boolean | undefined {
+  return channel.models?.find((candidate) => candidate.name === model)?.supports_tools
+}
+
+function tryBuildChannelEnv(channel: Channel, category: DocumentCategory, requireTools?: boolean): ChannelEnvAttempt {
   let apiKey: string
   try {
     apiKey = decryptApiKey(channel.api_key)
   } catch {
     return { status: 'failed', reason: 'decrypt_failed' }
   }
+  let model: string
   try {
-    const { model } = resolveCategoryModel(channel, category)
-    return { status: 'ok', env: buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type), model }
+    model = resolveCategoryModel(channel, category).model
   } catch {
     return { status: 'failed', reason: 'model_not_found' }
   }
+  const supportsTools = readSupportsTools(channel, model)
+  // 路由层过滤（废旧管道方案 D2）：调用方要求 tool use 时，显式标记为不支持的模型直接
+  // 判不可用交由备用链接手；undefined（未标注）放行——能力未知者由调用方探测。
+  if (requireTools === true && supportsTools === false) return { status: 'failed', reason: 'tools_unsupported' }
+  return { status: 'ok', env: buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type), model, supportsTools }
 }
 
 // ---------------------------------------------------------------------------
@@ -131,12 +147,17 @@ function resolvePrimaryChannel(opts: { channelId?: string; category: DocumentCat
  * 主渠道密钥不可解密 / 无启用模型时按同一类别解析链切备用渠道（T9 构建期回退，
  * 备用顺序先按类别路由的 fallback_channel_ids，§4.4），并落决策日志；无备用可用时
  * 如实返回 unusableReason，调用方维持原有降级语义（草图回模板 / MVP 抛错 / 引导回规则路由）。
+ *
+ * `requireTools`（废旧管道方案 §4.2）：调用方要求模型支持 tool use（agent loop 唯一
+ * 运行时后 MVP 类别必传）时，`supports_tools === false` 的模型按「不可用」走备用链；
+ * 备用也全不支持则如实返回 `tools_unsupported`，绝不静默降级。不传时行为与改造前完全一致。
  */
 export function resolveChannelEnv(opts: {
   channelId?: string
   category: DocumentCategory
   projectId?: string
   sessionId?: string
+  requireTools?: boolean
 }): ChannelEnvResolution {
   const primarySelection = resolvePrimaryChannel(opts)
   const primary = primarySelection.channel
@@ -148,7 +169,7 @@ export function resolveChannelEnv(opts: {
     projectId: opts.projectId,
     sessionId: opts.sessionId,
   }
-  const attempt = tryBuildChannelEnv(primary, opts.category)
+  const attempt = tryBuildChannelEnv(primary, opts.category, opts.requireTools)
   if (attempt.status === 'ok') {
     if (primarySelection.routed && opts.projectId && opts.sessionId) {
       recordCategoryRoute({
@@ -160,15 +181,22 @@ export function resolveChannelEnv(opts: {
         model: attempt.model,
       })
     }
-    return { env: attachFallbackContext(attempt.env, context), channel: primary }
+    return {
+      env: attachFallbackContext(attempt.env, context),
+      channel: primary,
+      modelName: attempt.model,
+      supportsTools: attempt.supportsTools,
+    }
   }
 
-  const backup = pickBackupChannelEnv(context)
+  const backup = pickBackupChannelEnv(context, opts.requireTools)
   if (backup) {
     recordChannelSwitch({ context, reason: attempt.reason, to: backup })
     return {
       env: attachFallbackContext(backup.env, { ...context, channelId: backup.channel.id }),
       channel: backup.channel,
+      modelName: backup.model,
+      supportsTools: backup.supportsTools,
     }
   }
   return { unusableReason: attempt.reason }
@@ -183,9 +211,14 @@ export interface BackupChannelEnv {
   channel: Channel
   model: string
   env: Record<string, string>
+  /** 备用模型的 tool use 能力位（undefined = 未标注，可探测） */
+  supportsTools?: boolean
 }
 
-export function pickBackupChannelEnv(context: Pick<RuntimeFallbackContext, 'channelId' | 'category'>): BackupChannelEnv | undefined {
+export function pickBackupChannelEnv(
+  context: Pick<RuntimeFallbackContext, 'channelId' | 'category'>,
+  requireTools?: boolean,
+): BackupChannelEnv | undefined {
   const fallbackOrder = getCategoryFallbackChannelIds(context.category)
   // getChannelByIdRaw 已含 isOursChannel 校验、getCategoryFallbackChannelIds 已过滤禁用；
   // listEnabledRawChannels 全为启用项目渠道——候选只需跳过主渠道与已见过（保序去重）
@@ -200,12 +233,16 @@ export function pickBackupChannelEnv(context: Pick<RuntimeFallbackContext, 'chan
     } catch {
       continue
     }
+    let model: string
     try {
-      const { model } = resolveCategoryModel(channel, context.category)
-      return { channel, model, env: buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type) }
+      model = resolveCategoryModel(channel, context.category).model
     } catch {
       continue
     }
+    const supportsTools = readSupportsTools(channel, model)
+    // 与主渠道同一口径：显式 false 跳过，undefined（未标注）放行留给调用方探测
+    if (requireTools === true && supportsTools === false) continue
+    return { channel, model, env: buildSdkEnv(apiKey, channel.base_url, model, channel.provider_type), supportsTools }
   }
   return undefined
 }
@@ -282,6 +319,7 @@ function describeTrigger(record: { reason: string; statusCode?: number }): strin
   if (record.statusCode) return `请求失败（HTTP ${record.statusCode}）`
   if (record.reason === 'decrypt_failed') return 'api_key 无法解密'
   if (record.reason === 'model_not_found') return '没有启用的模型'
+  if (record.reason === 'tools_unsupported') return '模型不支持工具调用'
   if (record.reason === 'network_error') return '网络错误'
   return `请求失败（${record.reason}）`
 }

@@ -300,6 +300,81 @@ describe('runtime channel fallback · T9 构建期渠道解析', () => {
     expect(resolution.channel).toBeUndefined()
     expect(resolution.unusableReason).toBe('no_channel')
   })
+
+  it('requireTools：主渠道 supports_tools=false → 路由到 supports_tools=true 的备用渠道', () => {
+    workingSafeStorage()
+    const primary = createChannel({
+      name: '不支持工具的主渠道',
+      provider_type: 'anthropic',
+      base_url: 'https://primary.example',
+      api_key: 'key-a',
+      models: [{ id: 'm1', name: 'model-a', enabled: true, supports_tools: false }],
+    })
+    const backup = createChannel({
+      name: '支持工具的备用渠道',
+      provider_type: 'anthropic',
+      base_url: 'https://backup.example',
+      api_key: 'key-b',
+      models: [{ id: 'm2', name: 'model-b', enabled: true, supports_tools: true }],
+    })
+    const resolution = resolveChannelEnv({ channelId: primary.id, category: 'mvp', projectId: 'p-tools', sessionId: 's-tools', requireTools: true })
+    expect(resolution.channel?.id).toBe(backup.id)
+    expect(resolution.modelName).toBe('model-b')
+    expect(resolution.supportsTools).toBe(true)
+  })
+
+  it('requireTools：主/备用均 supports_tools=false → 如实返回 tools_unsupported', () => {
+    workingSafeStorage()
+    const primary = createChannel({
+      name: '不支持工具的主渠道',
+      provider_type: 'anthropic',
+      base_url: 'https://primary.example',
+      api_key: 'key-a',
+      models: [{ id: 'm1', name: 'model-a', enabled: true, supports_tools: false }],
+    })
+    const backup = createChannel({
+      name: '不支持的备用渠道',
+      provider_type: 'anthropic',
+      base_url: 'https://backup.example',
+      api_key: 'key-b',
+      models: [{ id: 'm2', name: 'model-b', enabled: true, supports_tools: false }],
+    })
+    const resolution = resolveChannelEnv({ channelId: primary.id, category: 'mvp', projectId: 'p-tools', sessionId: 's-tools', requireTools: true })
+    expect(resolution.env).toBeUndefined()
+    expect(resolution.channel).toBeUndefined()
+    expect(resolution.unusableReason).toBe('tools_unsupported')
+  })
+
+  it('requireTools：supports_tools 缺省（undefined）→ 放行走探测，不误判不支持', () => {
+    workingSafeStorage()
+    const primary = createChannel({
+      name: '能力位未标注渠道',
+      provider_type: 'anthropic',
+      base_url: 'https://primary.example',
+      api_key: 'key-a',
+      models: [{ id: 'm1', name: 'model-a', enabled: true }],
+    })
+    const resolution = resolveChannelEnv({ channelId: primary.id, category: 'mvp', projectId: 'p-tools', sessionId: 's-tools', requireTools: true })
+    expect(resolution.channel?.id).toBe(primary.id)
+    expect(resolution.modelName).toBe('model-a')
+    expect(resolution.supportsTools).toBeUndefined()
+  })
+
+  it('回归：不传 requireTools 时行为不变（supports_tools=false 也不被过滤）', () => {
+    workingSafeStorage()
+    const primary = createChannel({
+      name: '不带 requireTools 的主渠道',
+      provider_type: 'anthropic',
+      base_url: 'https://primary.example',
+      api_key: 'key-a',
+      models: [{ id: 'm1', name: 'model-a', enabled: true, supports_tools: false }],
+    })
+    const resolution = resolveChannelEnv({ channelId: primary.id, category: 'mvp', projectId: 'p-tools', sessionId: 's-tools' })
+    expect(resolution.channel?.id).toBe(primary.id)
+    expect(resolution.modelName).toBe('model-a')
+    expect(resolution.supportsTools).toBe(false)
+    expect(resolution.unusableReason).toBeUndefined()
+  })
 })
 
 describe('runtime channel fallback · 故障分类', () => {
