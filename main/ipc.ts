@@ -50,7 +50,7 @@ import { IPC_CHANNELS } from '../shared/types'
 import { fail, ok } from './api-result'
 import { cancelAgent, getSdkQuery, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from './orchestrator'
 import { collectDomContext } from './dom-context'
-import { runAgentLoopPostTesting, runIterationTask, runMvpTask, runPostMvpTestingFlow, setProgrammingEventPublisher } from './programming-orchestrator'
+import { runAgentLoopPostTesting, runIterationTask, runMvpTask, setProgrammingEventPublisher } from './programming-orchestrator'
 import { handleAgentStreamEvent } from './notifications'
 import { assertToolAllowed, getPermissionMode, resolvePermission, setPermissionMode, setPermissionRequestPublisher } from './permission-service'
 import {
@@ -292,26 +292,14 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
           signal: abortController.signal,
         })
           .then((mvp) => {
-            // M4-A：loop 生成的 MVP 走独立门禁（只终验不重修），旧管道走原测试流程
-            if (mvp.via_agent_loop && mvp.loop_result) {
-              return runAgentLoopPostTesting({
-                request_id: input.request_id,
-                session_id: input.session_id,
-                project_id: input.project_id,
-                mode: project.mode,
-                preview_url: mvp.preview_url,
-                loop: mvp.loop_result,
-              })
-            }
-            return runPostMvpTestingFlow({
+            // Agent Loop 唯一运行时：MVP 生成后统一走独立门禁（只终验不重修）
+            return runAgentLoopPostTesting({
               request_id: input.request_id,
               session_id: input.session_id,
               project_id: input.project_id,
               mode: project.mode,
               preview_url: mvp.preview_url,
-              channel_id: input.channel_id,
-              query: getSdkQuery(),
-              signal: abortController.signal,
+              loop: mvp.loop_result,
             })
           })
           .catch((error) => {

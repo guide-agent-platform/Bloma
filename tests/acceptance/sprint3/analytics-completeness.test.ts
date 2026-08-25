@@ -238,9 +238,8 @@ describe('Sprint 3 analytics completeness audit (T8)', () => {
       user_undo: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-003
       point_correction: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-002
       mode_upgraded: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-001
-      programming_execution: ['tests/acceptance/sprint2/auto-repair.test.ts'], // S2-JUDGE-001 修复循环落盘
-      self_repair_triggered: ['tests/acceptance/sprint2/auto-repair.test.ts'], // 同上
-      judge_verdict: ['tests/acceptance/sprint2/auto-repair.test.ts'], // judgeOnce 判定落盘
+      self_repair_triggered: ['tests/acceptance/sprint3/agent-loop-pipeline.test.ts'], // loop onRepairRound 落盘（废旧管道改造后来源换为 agent loop）
+      judge_verdict: ['tests/acceptance/sprint3/agent-loop-pipeline.test.ts'], // 终验 judge 判定落盘
       satisfaction_marked: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-001
       project_finalized: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-001
     }
@@ -248,6 +247,8 @@ describe('Sprint 3 analytics completeness audit (T8)', () => {
     const todoBlocked: Record<string, string> = {
       guide_role_switched:
         'Phase 1 当前实现无 DialogueRouter 显式角色切换；guide-agent-service 以单一路由处理用户输入，未按 PRD §6.2 切需求分析师/UI/UX 顾问/架构设计师/工程经理角色。待 DialogueRouter 落地后补写入点。',
+      programming_execution:
+        '该事件原由废旧管道 repair-engine（applyRepairPatchWithLlm）落盘；Agent Loop 转正后修复已内化进 loop（onRepairRound 落 self_repair_triggered + agent_loop_turn 记录轮次），不再有独立编程执行埋点。事件类型保留（向后兼容历史 JSONL），无新产生点。',
     }
 
     // 引用实存校验：断言文件必须存在，且源码中真实出现该事件字面量（否则覆盖声称失实）

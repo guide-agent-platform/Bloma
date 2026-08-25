@@ -261,11 +261,12 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
       expect(flow.verdict).toBe('ready')
       expect(findProject(project.project_id).current_stage).toBe('ready')
 
-      // 埋点：逐轮 + 完成 + 修复映射 + mvp_delivered 口径锚点
+      // 埋点：逐轮 + 完成 + 修复映射 + 裁判判定 + mvp_delivered 口径锚点
       const events = readAnalyticsEventTypes()
       expect(events.filter((type) => type === 'agent_loop_turn').length).toBe(LOOP_SCRIPT.length)
       expect(events).toContain('agent_loop_completed')
       expect(events).toContain('self_repair_triggered')
+      expect(events).toContain('judge_verdict')
       expect(events).toContain('mvp_delivered')
       const mvpDelivered = readFileSync(getAnalyticsPath('default-software-builder'), 'utf8')
         .split('\n')
@@ -454,7 +455,7 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
     }
   }, 20000)
 
-  it('能力位缺省 → 探测通过 → 走 loop；探测拒绝 → 回退管道并落决策', async () => {
+  it('能力位缺省 → 探测通过 → 走 loop；探测拒绝 → 如实抛错并落决策', async () => {
     createChannel({
       name: 'probe-channel',
       provider_type: 'anthropic',
@@ -501,7 +502,7 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
       server.close()
     }
 
-    // 探测拒绝（模型不调工具）→ 缓存「不支持」→ 回退管道（无 MVP JSON → 既有报错语义）
+    // 探测拒绝（模型不调工具）→ 缓存「不支持」→ 如实抛错（唯一运行时，无管道可回退）
     // 用独立渠道（探测缓存按 channel+model 键控，不能复用上面已探测通过的同渠道）
     const rejectChannel = createChannel({
       name: 'probe-reject-channel',
@@ -522,12 +523,60 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
         channel_id: rejectChannel.id,
         query: rejectQuery,
       }),
-    ).rejects.toThrow('MVP_LLM_PARSE_FAILED')
+    ).rejects.toThrow('当前渠道未通过工具能力探测')
     expect(readDecisionLines('session-acc-3').join('\n')).toContain('tool use 探测未通过')
   })
 
-  it('flag 关（BLOMA_AGENT_LOOP 未设）→ 分流不生效，走既有管道', async () => {
+  it('flag 未设 → 默认走 loop（D5 缺省开启），复用脚本生成到 ready', async () => {
     delete process.env.BLOMA_AGENT_LOOP
+    expect(agentLoopEnabled()).toBe(true)
+    createChannel({
+      name: 'default-on-channel',
+      provider_type: 'anthropic',
+      base_url: 'https://default-on.example',
+      api_key: 'key-default-on',
+      models: [{ id: 'm1', name: 'default-on-model', enabled: true, supports_tools: true }],
+    })
+    const project = createProject({ request_id: 'req-acc-4', mode: 'quick', initial_message: '记账' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+
+    const server = createServer((req, res) => {
+      const root = findProject(project.project_id).root_path
+      const path = req.url === '/' ? '/index.html' : (req.url ?? '/index.html')
+      try {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+        res.end(readFileSync(join(root, path.replace(/^\//, '')), 'utf8'))
+      } catch {
+        res.writeHead(404)
+        res.end('Not Found')
+      }
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+    setSandboxRuntimeForTests({
+      processFactory: () => fakeChild(),
+      portAllocator: async () => port,
+      healthCheck: async () => true,
+    })
+
+    try {
+      const { query } = scriptedQuery()
+      const mvp = await runMvpTask({
+        request_id: 'req-acc-4',
+        session_id: 'session-acc-4',
+        project_id: project.project_id,
+        mode: 'quick',
+        query,
+      })
+      expect(mvp.via_agent_loop).toBe(true)
+      expect(readDecisionLines('session-acc-4').join('\n')).toContain('Agent Loop 生成启用')
+    } finally {
+      server.close()
+    }
+  }, 20000)
+
+  it('BLOMA_AGENT_LOOP=0 → 明确关闭，runMvpTask 如实抛错并落「Agent Loop 不可用」', async () => {
+    process.env.BLOMA_AGENT_LOOP = '0'
     expect(agentLoopEnabled()).toBe(false)
     createChannel({
       name: 'off-channel',
@@ -536,19 +585,19 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
       api_key: 'key-off',
       models: [{ id: 'm1', name: 'off-model', enabled: true, supports_tools: true }],
     })
-    const project = createProject({ request_id: 'req-acc-4', mode: 'quick', initial_message: '记账' })
+    const project = createProject({ request_id: 'req-acc-5', mode: 'quick', initial_message: '记账' })
     recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
     const { query } = scriptedQuery()
-    // 管道路径拿不到合法 MVP JSON → 既有报错（证明 loop 完全未参与）
     await expect(
       runMvpTask({
-        request_id: 'req-acc-4',
-        session_id: 'session-acc-4',
+        request_id: 'req-acc-5',
+        session_id: 'session-acc-5',
         project_id: project.project_id,
         mode: 'quick',
         query,
       }),
-    ).rejects.toThrow('MVP_LLM_PARSE_FAILED')
-    expect(readDecisionLines('session-acc-4').join('\n')).not.toContain('Agent Loop 生成启用')
+    ).rejects.toThrow('Agent Loop 已关闭或缺少模型调用句柄')
+    expect(readDecisionLines('session-acc-5').join('\n')).not.toContain('Agent Loop 生成启用')
+    expect(readDecisionLines('session-acc-5').join('\n')).toContain('Agent Loop 不可用')
   })
 })

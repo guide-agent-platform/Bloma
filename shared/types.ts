@@ -313,7 +313,7 @@ export interface ChannelDeleteResult {
 // =========================================================================
 
 /** 提示词槽位 ID：六槽位全部接线 loadPromptOverride（prd/sketch/mvp/guide/enricher/normalizer）。 */
-export type PromptSlotId = 'prd-system' | 'sketch-system' | 'mvp-system' | 'guide-system' | 'enricher-system' | 'normalizer-system'
+export type PromptSlotId = 'prd-system' | 'sketch-system' | 'guide-system' | 'enricher-system' | 'normalizer-system' | 'loop-system'
 
 /** 槽位列表项（设置页左侧列表） */
 export interface PromptSlotInfo {

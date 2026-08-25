@@ -6,12 +6,11 @@ import { getAgentSessionPath, getDocumentsDir } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
 import { buildPrdBackplane, readPrdBackplane, readUxContractSketch, syncDocuments, writeSecurityScanDocument } from './document-engine'
 import { createSnapshot, runSandbox, trackAnalytics } from './platform-services'
-import { DEFAULT_MAX_TOKENS, generateMvpLlm, type GenerateMvpLlmResult } from './mvp-engine-llm'
-import { renderPackageJson, renderStaticServer } from './mvp-engine'
+import { renderPackageJson, renderStaticServer } from './project-scaffold'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
 import { resolveChannelEnv } from './runtime-fallback'
 import { captureConstraints, extractConstraints, readProjectConstraints } from './constraint-extractor'
-import { distillProjectMemorySafely, readProjectMemory } from './memory-distiller'
+import { distillProjectMemorySafely } from './memory-distiller'
 import { generateSketch, requirementAssertions, requirementPriority, requirementStory, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from './sketch-engine'
 import { generateSketchLlm, SketchLlmError, type SketchAttemptDetail } from './sketch-engine-llm'
 import { generatePrdLlm, readConversation } from './prd-engine-llm'
@@ -19,8 +18,8 @@ import { enrichRequirementsLlm, extractUserTexts, mergeEnrichment } from './requ
 import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from './requirement-normalizer'
 import { readTestReport, runGwtScenarios, writeTestReport, type GwtTestResult } from './gwt-service'
 import { renderSecurityScanMarkdown, runSecurityScan } from './security-scan'
-import { applyRepairPatch, REPAIR_CATEGORY_SUMMARY, runRepairCycle, type RepairCategory } from './repair-engine'
 import { runJudge, type JudgeVerdict } from './judge-engine'
+import { loadPromptOverride } from './prompt-config'
 import { assertToolAllowed } from './permission-service'
 import { recordDecision } from './decision-log'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from './recovery-service'
@@ -36,6 +35,9 @@ import type { SDKQuery, ToolDefinition } from './orchestrator'
  * warning 工具自动放行（不弹 UI）、dangerous 拒绝。禁止隐式绕过，豁免必须显式传入。
  */
 const AUTOMATED_PERMISSION_MODE = 'allow-all' as const
+
+/** 渠道未配置 max_tokens 时的默认上限（与旧 mvp-engine-llm 的 16384 同值，loop 路径沿用）。 */
+const DEFAULT_MAX_TOKENS = 16384
 
 /** 项目已生成完成（ready）的统一话术：完成通知与 ready 护栏共用，避免两套语义相近的固定文案。 */
 export const READY_COMPLETION_COPY =
@@ -407,7 +409,7 @@ export function deriveFallbackName(intent: string): string | null {
  * runMvpTask — 草图确认后无需再发消息，直接由 LLM 生成 MVP 并进入测试阶段。
  *
  * 顺序（对齐任务规划）：stage generating_mvp → 文档打点 sketch_confirmed /
- * mvp_before_generation → generateMvpLlm → 沙箱启动 → mvp 快照（含文档）→
+ * mvp_before_generation → Agent Loop 生成（唯一运行时）→ 沙箱启动 → mvp 快照（含文档）→
  * analytics mvp_delivered → stage testing → 发布 mvp_ready。
  */
 export async function runMvpTask(input: MvpTaskInput): Promise<MvpTaskResult> {
@@ -433,24 +435,10 @@ export async function runMvpTask(input: MvpTaskInput): Promise<MvpTaskResult> {
   }
   await allowAutomatedTool('generate_mvp', { project_id: input.project_id }, input.session_id, input.project_id)
 
-  // Agent Loop 分流（PR3 §4.4）：flag + 渠道能力位双条件，命中走 agentic loop 生成；
-  // 未命中（flag 关 / 渠道不支持 / 探测失败）零成本回退既有管道，一行不动。
-  const loopContext = await tryResolveAgentLoop(input)
-  if (loopContext) {
-    return runMvpViaAgentLoop(input, loopContext)
-  }
-
-  const mvp = await resolveMvp(input, requirements)
-  // 沙箱启动（含外部 runtime 修复循环）；run_command 白名单式固定 'npm start'
-  // （真实启动命令由 ensureSandboxRunning 硬编码为 node static-server）
-  const sandbox = await ensureSandboxRunning(input)
-
-  return finalizeMvpDelivery(input, {
-    fileCount: mvp.files.length,
-    snapshotSummary: `MVP 已生成（LLM 生成，共 ${mvp.files.length} 个文件），进入测试阶段。`,
-    readySummary: mvp.assumptions.join('；'),
-    previewUrl: sandbox.preview_url,
-  })
+  // Agent Loop 是唯一运行时（废旧管道方案 D1）：MVP 一律走 agentic loop 生成。
+  // 渠道不支持 tool use / 探测失败 / 探测无结论在此抛错向上（见 tryResolveAgentLoop），
+  // 不再存在旧管道回退分支。
+  return runMvpViaAgentLoop(input, await tryResolveAgentLoop(input))
 }
 
 /**
@@ -512,62 +500,13 @@ async function finalizeMvpDelivery(
   }
 }
 
-/**
- * A2-14b：MVP 一律由 LLM 生成（无模板兜底）。
- * 无 query 句柄 / 无可用渠道 / 密钥不可解密，或 LLM 生成失败（超时/解析失败/路径非法）
- * 均抛错向上传播——不再静默降级为模板（模板重建仅保留在 repair-engine 的自动修复路径）。
- */
-async function resolveMvp(input: MvpTaskInput, requirements: SketchRequirement[]): Promise<GenerateMvpLlmResult> {
-  if (!input.query) {
-    throw new Error('MVP_GENERATION_FAILED: 缺少模型调用句柄，无法生成 MVP')
-  }
-  // 渠道+类别统一收口（runtime-fallback，T9）：主渠道密钥不可解密/无启用模型时已按
-  // 解析链切备用渠道；mvp 类别解析模型，仍无可用属配置错误，明确抛错（MVP 无模板兜底）
-  const resolution = resolveChannelEnv({
-    channelId: input.channel_id,
-    category: 'mvp',
-    projectId: input.project_id,
-    sessionId: input.session_id,
-  })
-  if (!resolution.env || !resolution.channel) {
-    throw new Error(
-      resolution.unusableReason === 'decrypt_failed'
-        ? 'API_KEY_DECRYPT_FAILED: 渠道 api_key 无法解密，请在设置中重新保存该渠道'
-        : resolution.unusableReason === 'model_not_found'
-          ? 'CHANNEL_MODEL_NOT_FOUND: 渠道没有启用的模型，请在设置中启用至少一个模型后再生成'
-          : 'MVP_GENERATION_FAILED: 没有可用的模型渠道，请在设置中配置并验证渠道后再生成',
-    )
-  }
-  const channel = resolution.channel
-  const env = resolution.env
-  // 生成侧读 PRD 背板（定位/功能项/行为断言/范围外/护栏），而非裸需求清单——主题锚点从 prompt 层压住"货不对板"。
-  // 读 prd.json（syncPrdCheckpoints 已落盘，可能是 LLM 从对话提取、也可能模板兜底），
-  // 保证生成用的是与文档面板/裁判同一份事实源，而非临时重建。
-  const backplane = readPrdBackplane(input.project_id)
-  // 双契约输入（§4.2）：背板带 ux_contract 时注入草图全文（不降采样），MVP 同时消费
-  // PRD 行为契约 + 草图 UX 契约；无契约（模板草图/旧项目）退回 PRD-only
-  const sketchHtml = readUxContractSketch(input.project_id, backplane)
-  return generateMvpLlm({
-    project_id: input.project_id,
-    backplane,
-    query: input.query,
-    env,
-    sessionId: input.session_id,
-    maxTokens: channel.max_tokens ?? DEFAULT_MAX_TOKENS,
-    signal: input.signal,
-    sketchHtml,
-    // T4-L3 对话性记忆（存在才注入；与背板冲突以背板为准）
-    memory: readProjectMemory(input.project_id),
-  })
-}
-
 // =========================================================================
 // Agent Loop 接线（PR3，方案 §4.4）——与旧管道并存，flag + 渠道能力位双条件
 // =========================================================================
 
-/** Agent Loop 总开关：BLOMA_AGENT_LOOP=1（对齐 BLOMA_SHOW_THINKING / BLOMA_MEMORY_DISTILL 先例）。 */
+/** Agent Loop 总开关（D5）：缺省开启；`=0` 紧急关闭；`=1` 兼容无害（显式开，与缺省同义）。 */
 export function agentLoopEnabled(): boolean {
-  return process.env.BLOMA_AGENT_LOOP === '1'
+  return process.env.BLOMA_AGENT_LOOP !== '0'
 }
 
 /** maxTurns（方案 §8 待拍板默认：quick=24 / longterm=40，首跑后按埋点标定）。 */
@@ -594,41 +533,51 @@ export interface AgentLoopChannelContext {
 
 /**
  * 分流判定（runMvpTask 入口）：flag 开 + query 句柄在 + mvp 渠道可用 + 能力位放行。
- * 任何一项不满足返回 undefined，调用方回退既有管道（一行不动）。探测结论与回退
- * 原因均落决策日志，绝不静默降级（2026-08-15 赛车案例教训）。
+ * 只有「通过」才返回 context；不支持 / 探测未通过 / 探测无结论一律发布用户可见错误并
+ * **抛错**（废旧管道方案 D1/D2：agent loop 是唯一运行时，无管道可回退）。探测结论
+ * 与失败原因均落决策日志，绝不静默降级（2026-08-15 赛车案例教训）。
  */
-async function tryResolveAgentLoop(input: MvpTaskInput): Promise<AgentLoopChannelContext | undefined> {
-  if (!agentLoopEnabled() || !input.query) return undefined
+async function tryResolveAgentLoop(input: MvpTaskInput): Promise<AgentLoopChannelContext> {
+  if (!agentLoopEnabled() || !input.query) throw agentLoopChannelError(input, 'AGENT_LOOP_UNAVAILABLE', 'Agent Loop 已关闭或缺少模型调用句柄，无法生成 MVP。')
   const resolution = resolveChannelEnv({
     channelId: input.channel_id,
     category: 'mvp',
     projectId: input.project_id,
     sessionId: input.session_id,
+    requireTools: true,
   })
-  if (!resolution.env || !resolution.channel) return undefined // 渠道问题留给管道路径按原语义报错
+  if (!resolution.env || !resolution.channel) {
+    const message =
+      resolution.unusableReason === 'decrypt_failed'
+        ? 'API_KEY_DECRYPT_FAILED: 渠道 api_key 无法解密，请在设置中重新保存该渠道'
+        : resolution.unusableReason === 'model_not_found'
+          ? 'CHANNEL_MODEL_NOT_FOUND: 渠道没有启用的模型，请在设置中启用至少一个模型后再生成'
+          : resolution.unusableReason === 'tools_unsupported'
+            ? 'AGENT_LOOP_CHANNEL_UNSUPPORTED: 当前渠道不支持工具循环（tool use），请切换到支持的工具渠道后重试。'
+            : 'MVP_GENERATION_FAILED: 没有可用的模型渠道，请在设置中配置并验证渠道后再生成'
+    throw agentLoopChannelError(input, errorCodeFrom(message), message)
+  }
   const channel = resolution.channel
   const env = resolution.env
   const model = channel.models.find((candidate) => candidate.enabled && candidate.name === env.ANTHROPIC_MODEL)
 
-  // 显式能力位：false = 已知不支持，直接回管道；true = 免探测
+  // 显式能力位：false = 已知不支持，直接抛错（路由层过滤已处理主/备用，此处兜底并发场景）
   if (model?.supports_tools === false) {
-    recordAgentLoopFallback(input, `渠道 ${channel.name}/${env.ANTHROPIC_MODEL} 已标记不支持 tool use（supports_tools=false）`)
-    return undefined
+    throw agentLoopChannelError(input, 'AGENT_LOOP_CHANNEL_UNSUPPORTED', '当前渠道不支持工具循环（tool use），请切换到支持的工具渠道后重试。')
   }
   if (model?.supports_tools === true) return { env, channel, model }
 
   const cacheKey = `${channel.id}:${env.ANTHROPIC_MODEL}`
   const cached = toolSupportCache.get(cacheKey)
   if (cached !== undefined) {
-    if (!cached) recordAgentLoopFallback(input, `渠道 ${channel.name}/${env.ANTHROPIC_MODEL} 本进程内已探测为不支持 tool use，回退管道`)
-    return cached ? { env, channel, model } : undefined
+    if (!cached) throw agentLoopChannelError(input, 'AGENT_LOOP_PROBE_FAILED', '当前渠道未通过工具能力探测，请更换渠道或稍后重试。')
+    return { env, channel, model }
   }
 
   const probed = await probeToolSupport(input.query, env, input.session_id, input.signal)
   if (probed === undefined) {
-    // 探测自身失败（网络/渠道抖动）：本次回退管道，不写缓存——下次仍会重试探测
-    recordAgentLoopFallback(input, `渠道 ${channel.name}/${env.ANTHROPIC_MODEL} tool use 探测未得出结论（基础设施错误），本次回退管道`)
-    return undefined
+    // 探测自身失败（网络/渠道抖动）：不写缓存——下次仍会重试探测；本次如实抛错（无管道可回退）
+    throw agentLoopChannelError(input, 'AGENT_LOOP_PROBE_INCONCLUSIVE', '工具能力探测未得出结论（网络问题），请稍后重试。')
   }
   toolSupportCache.set(cacheKey, probed)
   recordDecision({
@@ -637,11 +586,19 @@ async function tryResolveAgentLoop(input: MvpTaskInput): Promise<AgentLoopChanne
     entry: {
       type: 'agent_loop',
       title: probed ? '渠道 tool use 探测通过' : '渠道 tool use 探测未通过',
-      why: `对 ${channel.name}/${env.ANTHROPIC_MODEL} 发起带 tools 的最小探测请求：${probed ? '模型发起了 tool_use，走 Agent Loop 生成' : '模型未发起 tool_use（或渠道 400 拒绝 tools 参数），回退固定管道'}`,
+      why: `对 ${channel.name}/${env.ANTHROPIC_MODEL} 发起带 tools 的最小探测请求：${probed ? '模型发起了 tool_use，走 Agent Loop 生成' : '模型未发起 tool_use（或渠道 400 拒绝 tools 参数），Agent Loop 不可用'}`,
       detail: { channel_id: channel.id, model: env.ANTHROPIC_MODEL, supports_tools: probed },
     },
   })
-  return probed ? { env, channel, model } : undefined
+  if (!probed) throw agentLoopChannelError(input, 'AGENT_LOOP_PROBE_FAILED', '当前渠道未通过工具能力探测，请更换渠道或稍后重试。')
+  return { env, channel, model }
+}
+
+/** Agent Loop 不可用的统一报错：发布用户可见 error 事件 + 落「Agent Loop 不可用」决策留痕，再抛错。 */
+function agentLoopChannelError(input: MvpTaskInput, code: string, message: string): Error {
+  recordAgentLoopUnavailable(input, message)
+  publish(input, 'error', { code, message })
+  return new Error(message)
 }
 
 /** 探测：发一个带 tools 的最小请求。返回 true/false；探测自身失败返回 undefined。 */
@@ -678,16 +635,22 @@ async function probeToolSupport(
   }
 }
 
-function recordAgentLoopFallback(input: MvpTaskInput, reason: string): void {
+function recordAgentLoopUnavailable(input: MvpTaskInput, reason: string): void {
   recordDecision({
     project_id: input.project_id,
     session_id: input.session_id,
     entry: {
       type: 'agent_loop',
-      title: 'Agent Loop 回退固定管道',
+      title: 'Agent Loop 不可用',
       why: reason,
     },
   })
+}
+
+/** 从 `CODE: message` 形态的错误串里抽出纯错误码（与 ipc.ts errorCodeFrom 同口径）。 */
+function errorCodeFrom(message: string): string {
+  const match = /^([A-Z_]+):/.exec(message)
+  return match ? match[1] : 'AGENT_LOOP_UNAVAILABLE'
 }
 
 /**
@@ -711,7 +674,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     delegationMaxTurns: DELEGATION_MAX_TURNS,
     permissionMode: AUTOMATED_PERMISSION_MODE,
     temperature: categoryTemperature('mvp'),
-    system: buildAgentLoopSystemPrompt(backplane, editFormat),
+    system: buildLoopSystemWithOverride(backplane, editFormat),
     editFormat,
     publish: (type, payload) => publish(input, type, payload),
     onChildTurn: (info, child) => {
@@ -751,7 +714,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   let result: AgentLoopResult
   try {
     result = await runAgentLoop({
-    system: buildAgentLoopSystemPrompt(backplane, editFormat),
+    system: buildLoopSystemWithOverride(backplane, editFormat),
     task: buildAgentLoopTask(backplane, input.mode),
     tools: buildAgentTools({
       projectId: input.project_id,
@@ -943,6 +906,16 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
   ].join('\n')
 }
 
+/**
+ * 背板锚定系统提示词 + 用户追加规则（D4 追加模式）：`loop-system` 覆盖文件内容追加在
+ * 动态 system prompt 之后（背板锚定段不可覆盖）。无覆盖文件返回 base 本身。
+ */
+function buildLoopSystemWithOverride(backplane: PrdBackplane, editFormat: 'diff' | 'whole'): string {
+  const base = buildAgentLoopSystemPrompt(backplane, editFormat)
+  const override = loadPromptOverride('loop-system')
+  return override ? `${base}\n\n【用户自定义规则】\n${override}` : base
+}
+
 /** 初始 user 消息：任务指令（背板细节在 system，这里只给行动指令）。 */
 function buildAgentLoopTask(backplane: PrdBackplane, mode: ProjectMode): string {
   return [
@@ -1115,96 +1088,6 @@ export async function resolvePrdBackplane(input: MvpTaskInput, requirements: Ske
   }
 }
 
-/**
- * ensureSandboxRunning — 启动 MVP 沙箱；启动失败时按错误类别进入自动修复循环
- * （dependency/syntax/runtime 可修复；timeout/端口等环境问题直接抛出，交由上层报错）。
- */
-async function ensureSandboxRunning(input: MvpTaskInput): Promise<{ preview_url: string }> {
-  let sandbox = await runSandbox({
-    request_id: input.request_id,
-    project_id: input.project_id,
-    command: 'node static-server',
-  })
-  if (sandbox.status === 'running' && sandbox.preview_url) return { preview_url: sandbox.preview_url }
-
-  let category = sandbox.error_summary?.category
-  const repairable = (value: string | undefined): value is RepairCategory =>
-    value === 'dependency_error' || value === 'syntax_error' || value === 'runtime_error'
-  if (!repairable(category)) {
-    throwSandboxFailure(input, sandbox.error_summary)
-  }
-
-  // 可修复 → 进入 runtime 修复循环（最多 3 次，内部熔断）
-  while (true) {
-    const cycle = await runRepairCycle({
-      request_id: input.request_id,
-      session_id: input.session_id,
-      project_id: input.project_id,
-      category: category as RepairCategory,
-      publish: (type, payload) => publish(input, type, payload),
-      query: input.query,
-      channel_id: input.channel_id,
-      signal: input.signal,
-      error: { category, summary: sandbox.error_summary?.user_visible_summary ?? '' },
-      verify: async () => {
-        sandbox = await runSandbox({
-          request_id: input.request_id,
-          project_id: input.project_id,
-          command: 'node static-server',
-        })
-        return { ok: sandbox.status === 'running', preview_url: sandbox.preview_url }
-      },
-    })
-    if (cycle.blocked) {
-      // 熔断回滚（T5）：修复耗尽不再只让渡——先回滚健康快照并按磁盘证据收敛，
-      // 回滚不成才交 blocked_for_user_decision 让渡。回滚成功抛哨兵错误，
-      // 上层（runAgent / ipc）识别后不再当普通失败处理。
-      const outcome = await circuitBreakRollback({
-        request_id: input.request_id,
-        session_id: input.session_id,
-        project_id: input.project_id,
-        reason: `runtime 修复循环耗尽（mvp_repair，上限后仍无法启动沙箱）`,
-        publish: (type, payload) => publish(input, type, payload),
-      })
-      if (outcome.rolled_back) throw new CircuitBreakSettledError()
-      publishBlockedDecision(input, 'mvp_repair')
-      throw new Error('SANDBOX_RUN_FAILED:blocked')
-    }
-    if (cycle.repaired && sandbox.status === 'running' && sandbox.preview_url) {
-      return { preview_url: sandbox.preview_url }
-    }
-    const nextCategory = sandbox.error_summary?.category
-    if (!repairable(nextCategory)) throwSandboxFailure(input, sandbox.error_summary)
-    category = nextCategory
-  }
-}
-
-function throwSandboxFailure(input: MvpTaskInput, errorSummary: { category: string; user_visible_summary: string } | undefined): never {
-  publish(input, 'error', {
-    code: 'SANDBOX_RUN_FAILED',
-    message: errorSummary?.user_visible_summary ?? '预览暂时没有启动成功，我正在修复。',
-  })
-  throw new Error(`SANDBOX_RUN_FAILED:${errorSummary?.category ?? 'unknown'}`)
-}
-
-export interface GwtTestingInput {
-  request_id: string
-  session_id: string
-  project_id: string
-  mode: ProjectMode
-  preview_url: string
-  /** LLM 测试修复句柄（分析失败原因并重新生成）；缺省时回退模板重建。 */
-  query?: SDKQuery
-  channel_id?: string
-  signal?: AbortSignal
-  /**
-   * 3b 修复内化：MVP 来自 Agent Loop（自测自修已在 loop 内完成、修复预算已用尽）。
-   * true 时本函数只做**外部强制终验**——终验首败即走熔断回滚/让渡（与旧循环耗尽
-   * 同构），不再跑外部修复循环（不信模型自述，也绝不重复给预算）。
-   */
-  repair_internalized?: boolean
-}
-
 export interface GwtTestingResult {
   verdict: 'ready' | 'blocked'
   test_result: GwtTestResult
@@ -1270,10 +1153,10 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
     }
 
     // constraint_error 修复：重新生成 PRD/GWT 骨架，然后重新判定
-    applyRepairPatch({ request_id: input.request_id, session_id: input.session_id, project_id: input.project_id }, 'constraint_error')
+    applyConstraintErrorDocRepair({ request_id: input.request_id, session_id: input.session_id, project_id: input.project_id })
     updateProject(input.project_id, { current_stage: 'repairing' })
     publish(input, 'stage_changed', { stage: 'repairing' })
-    publish(input, 'repairing', { attempt: returns, category: 'constraint_error', user_visible_summary: REPAIR_CATEGORY_SUMMARY.constraint_error })
+    publish(input, 'repairing', { attempt: returns, category: 'constraint_error', user_visible_summary: '功能要求未完全对齐，正在重新整理文档' })
     trackAnalytics({
       request_id: input.request_id,
       event: {
@@ -1296,6 +1179,20 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
       : READY_COMPLETION_COPY
   publishCompletionMessage(input, completion)
   return { outcome: 'ready', verdict }
+}
+
+/**
+ * constraint_error 文档级修复（原 repair-engine.applyRepairPatch 的 constraint 分支，随废旧管道
+ * 删除内联于此）：重新生成 PRD 与 GWT 骨架（文档层面），不改动项目代码。judge 退回重试
+ * 路径（repairInternalized 未设的存量语义）仍依赖它重建文档骨架。
+ */
+function applyConstraintErrorDocRepair(input: { request_id: string; session_id: string; project_id: string }): void {
+  syncDocuments({
+    request_id: input.request_id,
+    session_id: input.session_id,
+    project_id: input.project_id,
+    checkpoint: 'mvp_before_generation',
+  })
 }
 
 function judgeOnce(input: JudgeReviewInput): JudgeVerdict {
@@ -1330,155 +1227,15 @@ function judgeOnce(input: JudgeReviewInput): JudgeVerdict {
   return verdict
 }
 
-/**
- * runPostMvpTestingFlow — MVP 就绪后的测试与状态机后半段（A2-09）。
- *
- * testing →（GWT 执行 + 测试报告）→ 通过则进入 judge_review（A2-11 接入裁判判定）；
- * 失败则进入 repairing ↔ testing 自动修复循环（A2-08），达上限 blocked_for_user_decision 让渡。
- */
-export async function runPostMvpTestingFlow(input: GwtTestingInput): Promise<GwtTestingResult> {
-  updateProject(input.project_id, { current_stage: 'testing' })
-  publish(input, 'stage_changed', { stage: 'testing' })
-
-  let testResult = await runGwtScenarios({ project_id: input.project_id, session_id: input.session_id, preview_url: input.preview_url })
-  writeTestReport({ request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, result: testResult })
-  syncDocuments({ request_id: input.request_id, project_id: input.project_id, session_id: input.session_id, checkpoint: 'mvp_tested' })
-
-  while (testResult.failed_count > 0) {
-    // 3b 修复内化：loop 路径自修预算已在 loop 内用尽，终验首败直接走熔断/让渡
-    if (input.repair_internalized) {
-      const outcome = await circuitBreakRollback({
-        request_id: input.request_id,
-        session_id: input.session_id,
-        project_id: input.project_id,
-        reason: '终验未通过（Agent Loop 路径，loop 内修复预算已用尽）',
-        publish: (type, payload) => publish(input, type, payload),
-      })
-      if (outcome.rolled_back) throw new CircuitBreakSettledError()
-      const failureTitle =
-        testResult.failure_summary.length > 0
-          ? `测试未通过：${testResult.failure_summary.map((f) => f.scenario).join('、')}`
-          : '自动修复多次后测试仍未通过'
-      publishBlockedDecision(input, 'test_repair', failureTitle)
-      return { verdict: 'blocked', test_result: testResult }
-    }
-    const cycle = await runRepairCycle({
-      request_id: input.request_id,
-      session_id: input.session_id,
-      project_id: input.project_id,
-      category: 'test_error',
-      publish: (type, payload) => publish(input, type, payload),
-      query: input.query,
-      channel_id: input.channel_id,
-      signal: input.signal,
-      error: {
-        category: 'test_error',
-        summary: testResult.failure_summary.map((f) => `${f.scenario}：${f.reason}`).join('；'),
-      },
-      verify: async () => {
-        testResult = await runGwtScenarios({ project_id: input.project_id, session_id: input.session_id, preview_url: input.preview_url })
-        writeTestReport({ request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, result: testResult })
-        return { ok: testResult.failed_count === 0 }
-      },
-    })
-    if (cycle.blocked) {
-      // 熔断回滚（T5）：同 mvp_repair——先回滚再让渡，回滚成功由哨兵错误终结本流程
-      const outcome = await circuitBreakRollback({
-        request_id: input.request_id,
-        session_id: input.session_id,
-        project_id: input.project_id,
-        reason: 'test 修复循环耗尽（test_repair，GWT 场景反复未过）',
-        publish: (type, payload) => publish(input, type, payload),
-      })
-      if (outcome.rolled_back) throw new CircuitBreakSettledError()
-      // U7：把未通过场景汇总成可读偏差描述，避免让渡卡片只有泛化文案
-      const failureTitle =
-        testResult.failure_summary.length > 0
-          ? `测试未通过：${testResult.failure_summary.map((f) => f.scenario).join('、')}`
-          : '自动修复多次后测试仍未通过'
-      publishBlockedDecision(input, 'test_repair', failureTitle)
-      return { verdict: 'blocked', test_result: testResult }
-    }
-    if (cycle.repaired) break
-  }
-
-  // 测试通过 → 安全扫描（A3 OWASP，Sprint 3 安全扫描基础）：扫产物 HTML/JS 并落
-  // security-scan.md。高危命中进入 security_error 修复循环（独立计数，不计入普通退回，
-  // S2-JUDGE-007）；修复耗尽则熔断回滚（S2-JUDGE-002）。
-  let security = runSecurityScan({ project_id: input.project_id, root_path: findProject(input.project_id).root_path })
-  writeSecurityScanDocument(input.project_id, renderSecurityScanMarkdown(security))
-  while (!security.passed) {
-    // 3b 修复内化：loop 路径安全自修已在 loop 内完成，终验仍高危直接熔断/让渡
-    if (input.repair_internalized) {
-      const outcome = await circuitBreakRollback({
-        request_id: input.request_id,
-        session_id: input.session_id,
-        project_id: input.project_id,
-        reason: '安全终验未通过（Agent Loop 路径，loop 内修复预算已用尽）',
-        publish: (type, payload) => publish(input, type, payload),
-      })
-      if (outcome.rolled_back) throw new CircuitBreakSettledError()
-      publishBlockedDecision(input, 'security_repair', '检测到的安全隐患反复修不好，需要你来定夺')
-      return { verdict: 'blocked', test_result: testResult }
-    }
-    const cycle = await runRepairCycle({
-      request_id: input.request_id,
-      session_id: input.session_id,
-      project_id: input.project_id,
-      category: 'security_error',
-      publish: (type, payload) => publish(input, type, payload),
-      query: input.query,
-      channel_id: input.channel_id,
-      signal: input.signal,
-      error: {
-        category: 'security_error',
-        summary: security.issues
-          .filter((issue) => issue.severity === 'high' || issue.severity === 'critical')
-          .map((issue) => `${issue.file}:${issue.line} ${issue.user_visible_summary}`)
-          .join('；'),
-      },
-      verify: async () => {
-        security = runSecurityScan({ project_id: input.project_id, root_path: findProject(input.project_id).root_path })
-        writeSecurityScanDocument(input.project_id, renderSecurityScanMarkdown(security))
-        return { ok: security.passed }
-      },
-    })
-    if (cycle.blocked) {
-      // 熔断回滚（T5）：同 test_repair——先回滚健康快照再让渡；回滚成功由哨兵错误终结本流程
-      const outcome = await circuitBreakRollback({
-        request_id: input.request_id,
-        session_id: input.session_id,
-        project_id: input.project_id,
-        reason: '安全修复循环耗尽（security_repair，高危命中反复未除）',
-        publish: (type, payload) => publish(input, type, payload),
-      })
-      if (outcome.rolled_back) throw new CircuitBreakSettledError()
-      // 安全让渡文案不含技术术语（S2-JUDGE-008）
-      publishBlockedDecision(input, 'security_repair', '检测到的安全隐患反复修不好，需要你来定夺')
-      return { verdict: 'blocked', test_result: testResult }
-    }
-    if (cycle.repaired) break
-  }
-
-  // 测试通过 → 进入裁判审查（A2-11）
-  updateProject(input.project_id, { current_stage: 'judge_review' })
-  publish(input, 'stage_changed', { stage: 'judge_review' })
-  const judge = await runJudgeReview({
-    request_id: input.request_id,
-    session_id: input.session_id,
-    project_id: input.project_id,
-  })
-  return { verdict: judge.outcome, test_result: testResult, judge: judge.verdict }
-}
-
 export interface AgentLoopPostTestingInput {
   request_id: string
   session_id: string
   project_id: string
   mode: ProjectMode
   preview_url: string
-  /** Agent Loop 结果元数据（M4-B）：其存在即标记 loop 路径；judge 对异常终止态判「让渡」 */
-  loop: AgentLoopJudgeMetadata
+  /** Agent Loop 结果元数据（M4-B）：其存在即标记 loop 路径；judge 对异常终止态判「让渡」。
+   *  存量旧版项目（via_agent_loop=false）resume 时无 loop 元数据，缺省走普通终验（无修复）。 */
+  loop?: AgentLoopJudgeMetadata
 }
 
 /**
@@ -1562,7 +1319,7 @@ export interface IterationTaskInput {
  *
  * 打通 Sprint 3「纠错 → 重新生成 → 迭代」主线：此前 ready 护栏把修改请求一律挡回固定文案，
  * 且 submitCorrection 只落盘不触发再生成。这里把修改诉求作为新功能项并入需求清单，进入
- * iterating 态后复用 runMvpTask + runPostMvpTestingFlow 完整闭环（重新生成 → 测试 → 裁判 → ready）。
+ * iterating 态后复用 runMvpTask + runAgentLoopPostTesting 完整闭环（重新生成 → 终验 → 裁判 → ready）。
  */
 export async function runIterationTask(input: IterationTaskInput): Promise<MvpTaskResult> {
   updateProject(input.project_id, { current_stage: 'iterating' })
@@ -1587,28 +1344,15 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
       query: input.query,
       signal: input.signal,
     })
-    // M4-A：loop 生成的迭代走独立门禁（只终验不重修），旧管道走原测试流程
-    if (mvp.via_agent_loop && mvp.loop_result) {
-      await runAgentLoopPostTesting({
-        request_id: input.request_id,
-        session_id: input.session_id,
-        project_id: input.project_id,
-        mode: input.mode,
-        preview_url: mvp.preview_url,
-        loop: mvp.loop_result,
-      })
-    } else {
-      await runPostMvpTestingFlow({
-        request_id: input.request_id,
-        session_id: input.session_id,
-        project_id: input.project_id,
-        mode: input.mode,
-        preview_url: mvp.preview_url,
-        query: input.query,
-        channel_id: input.channel_id,
-        signal: input.signal,
-      })
-    }
+    // Agent Loop 唯一运行时：迭代产物一律走独立门禁（只终验不重修）
+    await runAgentLoopPostTesting({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+      preview_url: mvp.preview_url,
+      loop: mvp.loop_result,
+    })
     // T4-L3 蒸馏兜底·触发点②（每次迭代完成后，fire-and-forget）：默认关闭，
     // 失败在内部降级并落决策，绝不阻塞迭代收尾
     distillProjectMemorySafely({
@@ -1895,7 +1639,7 @@ export async function resumeBlockedFlow(
   input: ResumeBlockedInput,
   eventPublisher: ProgrammingEventPublisher,
 ): Promise<void> {
-  // 嵌套的 runMvpTask / runPostMvpTestingFlow / runJudgeReview 走同一发布通道
+  // 嵌套的 runMvpTask / runAgentLoopPostTesting / runJudgeReview 走同一发布通道
   setProgrammingEventPublisher(eventPublisher)
 
   const project = findProject(input.project_id)
@@ -1941,53 +1685,30 @@ export async function resumeBlockedFlow(
       query: input.query,
       channel_id: input.channel_id,
     })
-    // M4-A：新生成仍走 loop → 门禁函数；否则旧管道
-    if (mvp.via_agent_loop && mvp.loop_result) {
-      await runAgentLoopPostTesting({
-        request_id: input.request_id,
-        session_id: input.session_id,
-        project_id: input.project_id,
-        mode: input.mode,
-        preview_url: mvp.preview_url,
-        loop: mvp.loop_result,
-      })
-    } else {
-      await runPostMvpTestingFlow({
-        request_id: input.request_id,
-        session_id: input.session_id,
-        project_id: input.project_id,
-        mode: input.mode,
-        preview_url: mvp.preview_url,
-        query: input.query,
-        channel_id: input.channel_id,
-      })
-    }
+    // Agent Loop 唯一运行时：新生成直接走门禁函数（只终验不重修）
+    await runAgentLoopPostTesting({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+      preview_url: mvp.preview_url,
+      loop: mvp.loop_result,
+    })
     return
   }
 
   if (action === 'test_repair') {
     updateProject(input.project_id, { test_repair_count: 0 })
     const previewUrl = await ensureResumePreview(input)
-    if (loopMeta) {
-      await runAgentLoopPostTesting({
-        request_id: input.request_id,
-        session_id: input.session_id,
-        project_id: input.project_id,
-        mode: input.mode,
-        preview_url: previewUrl,
-        loop: loopMeta,
-      })
-    } else {
-      await runPostMvpTestingFlow({
-        request_id: input.request_id,
-        session_id: input.session_id,
-        project_id: input.project_id,
-        mode: input.mode,
-        preview_url: previewUrl,
-        query: input.query,
-        channel_id: input.channel_id,
-      })
-    }
+    // loop 元数据仅在 project.via_agent_loop 时存在；存量旧项目缺省走普通终验（无修复）
+    await runAgentLoopPostTesting({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+      preview_url: previewUrl,
+      loop: loopMeta,
+    })
     return
   }
 
@@ -2005,27 +1726,15 @@ export async function resumeBlockedFlow(
   if (action === 'security_repair') {
     updateProject(input.project_id, { security_repair_count: 0 })
     const previewUrl = await ensureResumePreview(input)
-    if (loopMeta) {
-      await runAgentLoopPostTesting({
-        request_id: input.request_id,
-        session_id: input.session_id,
-        project_id: input.project_id,
-        mode: input.mode,
-        preview_url: previewUrl,
-        loop: loopMeta,
-      })
-    } else {
-      // 重新走完整测试 + 安全扫描流程（安全扫描已嵌入 runPostMvpTestingFlow 后半段）
-      await runPostMvpTestingFlow({
-        request_id: input.request_id,
-        session_id: input.session_id,
-        project_id: input.project_id,
-        mode: input.mode,
-        preview_url: previewUrl,
-        query: input.query,
-        channel_id: input.channel_id,
-      })
-    }
+    // 重新走完整测试 + 安全扫描终验（安全扫描已嵌入 runAgentLoopPostTesting 后半段）
+    await runAgentLoopPostTesting({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+      preview_url: previewUrl,
+      loop: loopMeta,
+    })
     return
   }
 

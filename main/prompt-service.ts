@@ -5,7 +5,6 @@ import { getPromptOverridePath, ensureDir } from '../storage/config-paths'
 import { loadPromptOverride } from './prompt-config'
 import { DEFAULT_SYSTEM_PROMPT as PRD_DEFAULT } from './prd-engine-llm'
 import { DEFAULT_SYSTEM_PROMPT as SKETCH_DEFAULT } from './sketch-engine-llm'
-import { DEFAULT_SYSTEM_PROMPT as MVP_DEFAULT } from './mvp-engine-llm'
 import { DEFAULT_GUIDE_SYSTEM_PROMPT as GUIDE_DEFAULT } from './guide-agent-service'
 import { DEFAULT_SYSTEM_PROMPT as ENRICHER_DEFAULT } from './requirement-enricher'
 import { DEFAULT_SYSTEM_PROMPT as NORMALIZER_DEFAULT } from './requirement-normalizer'
@@ -46,13 +45,6 @@ const PROMPT_SLOTS: PromptSlotDef[] = [
     getDefault: () => SKETCH_DEFAULT,
   },
   {
-    id: 'mvp-system',
-    label: 'MVP 生成提示词',
-    description: '按 PRD 密背板 + UX 契约草图生成可运行 MVP（6 段式提示词）。',
-    enabled: true,
-    getDefault: () => MVP_DEFAULT,
-  },
-  {
     id: 'guide-system',
     label: '向导 Agent 对话提示词',
     description: '驱动向导 Agent 需求澄清对话（二选一 JSON 输出契约）。',
@@ -72,6 +64,13 @@ const PROMPT_SLOTS: PromptSlotDef[] = [
     description: '把用户修改诉求整理为故事化功能项（revise/append/skip/out_of_scope 四态）。',
     enabled: true,
     getDefault: () => NORMALIZER_DEFAULT,
+  },
+  {
+    id: 'loop-system',
+    label: 'Agent Loop 追加规则',
+    description: '在默认行为之上追加自定义规则（追加模式），背板锚定段不可覆盖。',
+    enabled: true,
+    getDefault: () => '',
   },
 ]
 
