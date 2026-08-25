@@ -23,7 +23,7 @@ import { loadPromptOverride } from './prompt-config'
 import { assertToolAllowed } from './permission-service'
 import { recordDecision } from './decision-log'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from './recovery-service'
-import { readPrimaryIntent } from './session-service'
+import { readPrimaryIntent, recordSessionActivity } from './session-service'
 import { runAgentLoop, type AgentLoopResult } from './agent-loop'
 import { buildAgentTools } from './agent-tools'
 import { disposeParentDelegationState, registerParentLoopContext, setChildToolsBuilder } from './agent-collaboration'
@@ -1545,7 +1545,35 @@ function truncateCopy(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max)}…` : value
 }
 
+/**
+ * 后台链路会话活跃刷新（缺陷④）：编程编排器的后台任务（草图/MVP/迭代/终验/让渡恢复）
+ * 不经 runAgent，会话索引 agent-sessions.json 的 updated_at 停在最后一次交互消息，
+ * 历史列表「按最近活跃倒序」失真（实测后台 MVP 跑完数小时 updated_at 仍停在旧时间）。
+ * publish 是全部后台链路事件的必经点，在此刷新索引；同一会话 30s 节流一次，
+ * 避免 loop 多轮工具事件把小索引文件写成热点。旁路观测，失败不得阻断事件发布。
+ */
+const SESSION_ACTIVITY_REFRESH_MS = 30_000
+const sessionActivityLastRefreshAt = new Map<string, number>()
+
+function touchSessionActivity(input: Pick<SketchTaskInput, 'session_id' | 'project_id'>): void {
+  const now = Date.now()
+  const last = sessionActivityLastRefreshAt.get(input.session_id) ?? 0
+  if (now - last < SESSION_ACTIVITY_REFRESH_MS) return
+  sessionActivityLastRefreshAt.set(input.session_id, now)
+  try {
+    recordSessionActivity(input.session_id, input.project_id)
+  } catch {
+    // 索引刷新为旁路观测，绝不阻断事件发布
+  }
+}
+
+/** 测试 seam：清除会话活跃节流状态，保证用例间互不串扰。 */
+export function resetSessionActivityThrottleForTests(): void {
+  sessionActivityLastRefreshAt.clear()
+}
+
 function publish(input: Pick<SketchTaskInput, 'session_id' | 'project_id'>, type: AgentEvent['type'], payload: Record<string, unknown>): void {
+  touchSessionActivity(input)
   programmingEventPublisher({
     event_id: randomUUID(),
     session_id: input.session_id,
