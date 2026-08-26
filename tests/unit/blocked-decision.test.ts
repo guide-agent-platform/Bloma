@@ -221,6 +221,107 @@ describe('Blocked decision resume loop (A2/A3)', () => {
         server.close()
       }
     })
+
+    // ---- M4-B loop-aware resume 移植（2026-08-26，远端缺失项：S4-JUDGE-001~003）----
+
+    it('[S4-JUDGE-001] resume test_repair：loop 异常终止态（turn_limit）→ 走 loop 门禁 → judge 让渡不重修', async () => {
+      setBrowserGwtDisabledForTests(true)
+      setSafeStorageAdapter({
+        isEncryptionAvailable: () => true,
+        encryptString: (value) => Buffer.from(`enc:${value}`, 'utf8'),
+        decryptString: (value) => value.toString('utf8').replace(/^enc:/, ''),
+      })
+      const project = makeBlockedProject('test_repair')
+      updateProject(project.project_id, { via_agent_loop: true, agent_loop_status: 'turn_limit' })
+      recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+      syncDocuments({ request_id: 'req-sync', session_id: 'session-1', project_id: project.project_id, checkpoint: 'mvp_before_generation' })
+      writeFileSync(join(project.root_path, 'index.html'), '<html><body><p>记录收入与支出</p></body></html>', 'utf8')
+
+      const server = createServer((req, res) => {
+        const root = findProject(project.project_id).root_path
+        const path = req.url === '/' ? '/index.html' : (req.url ?? '/index.html')
+        let content: string
+        try {
+          // 先读文件再写 headers：GWT 会请求 /src/app.js（功能断言），项目无此文件时
+          // readFileSync 抛错必须发生在 writeHead 之前，避免 ERR_HTTP_HEADERS_SENT
+          content = readFileSync(join(root, path.replace(/^\//, '')), 'utf8')
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+          res.end(content)
+        } catch {
+          res.writeHead(404)
+          res.end('Not Found')
+        }
+      })
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+      const port = (server.address() as AddressInfo).port
+      setSandboxRuntimeForTests({
+        portAllocator: async () => port,
+        healthCheck: async () => true,
+        processFactory: () => makeChildProcess(),
+      })
+      setSnapshotCaptureProviderForTests(async () => ({ extension: 'png', buffer: Buffer.from('fake-png') }))
+      const events: string[] = []
+      setProgrammingEventPublisher((event) => events.push(event.type))
+
+      try {
+        await resumeBlockedFlow(
+          { request_id: 'req', session_id: 's', project_id: project.project_id, mode: 'quick', decision: 'continue', content: '' },
+          (event) => events.push(event.type),
+        )
+
+        const after = findProject(project.project_id)
+        // loop 门禁只终验不重修：GWT 过 → 安全过 → judge loop-aware 判让渡（turn_limit 非 completed）
+        expect(after.current_stage).toBe('blocked_for_user_decision')
+        expect(after.blocked_action).toBe('judge_return')
+        expect(after.test_repair_count ?? 0).toBe(0)
+        expect(events.filter((type) => type === 'repairing')).toHaveLength(0)
+        expect(events).toContain('judge_result')
+        expect(after.via_agent_loop).toBe(true)
+      } finally {
+        server.close()
+      }
+    })
+
+    it('[S4-JUDGE-002] resume judge_return：loop completed → 走正常读盘判定 → ready', async () => {
+      const project = makeBlockedProject('judge_return')
+      updateProject(project.project_id, { via_agent_loop: true, agent_loop_status: 'completed', judge_return_count: 3 })
+      recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+      syncDocuments({ request_id: 'req-sync', session_id: 'session-1', project_id: project.project_id, checkpoint: 'mvp_before_generation' })
+      writeFileSync(join(project.root_path, 'index.html'), '<p>记录收入与支出</p>', 'utf8')
+      const events: string[] = []
+      setProgrammingEventPublisher((event) => events.push(event.type))
+
+      await resumeBlockedFlow(
+        { request_id: 'req', session_id: 's', project_id: project.project_id, mode: 'quick', decision: 'continue', content: '' },
+        (event) => events.push(event.type),
+      )
+
+      const after = findProject(project.project_id)
+      // judge_return 分支带 loop 元数据 + repairInternalized：completed 走正常读盘 → pass → ready
+      expect(after.current_stage).toBe('ready')
+      expect(after.blocked_action).toBeUndefined()
+      expect(after.judge_return_count ?? 0).toBe(0)
+      expect(events).toContain('judge_result')
+    })
+
+    it('[S4-JUDGE-003] resume judge_return：via_agent_loop 但 status 未落盘 → ?? turn_limit 兜底 fail-closed 走让渡', async () => {
+      const project = makeBlockedProject('judge_return')
+      updateProject(project.project_id, { via_agent_loop: true, judge_return_count: 2 })
+      recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+      syncDocuments({ request_id: 'req-sync', session_id: 'session-1', project_id: project.project_id, checkpoint: 'mvp_before_generation' })
+      writeFileSync(join(project.root_path, 'index.html'), '<p>记录收入与支出</p>', 'utf8')
+
+      await resumeBlockedFlow(
+        { request_id: 'req', session_id: 's', project_id: project.project_id, mode: 'quick', decision: 'continue', content: '' },
+        () => undefined,
+      )
+
+      const after = findProject(project.project_id)
+      // fail-closed：状态缺失保守判 turn_limit → judge 让渡，绝不默认 completed 放行
+      expect(after.current_stage).toBe('blocked_for_user_decision')
+      expect(after.blocked_action).toBe('judge_return')
+      expect(after.judge_return_count ?? 0).toBe(1)
+    })
   })
 })
 

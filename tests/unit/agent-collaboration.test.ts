@@ -59,6 +59,13 @@ function toolUseQuery(toolName: string): SDKQuery {
   }
 }
 
+/** 子 loop 第一轮即抛错的 query：runAgentLoop 对普通 Error 会 rethrow → 触发 settleChildLoopError。 */
+function throwingQuery(error: Error): SDKQuery {
+  return async function* () {
+    throw error
+  }
+}
+
 let parentSessionId = 'session-parent'
 
 function parentContext(overrides: Partial<ToolContext> = {}): ToolContext {
@@ -784,5 +791,163 @@ describe('审计修复回归（审计报告 2026-08-25：P1-1/P1-2/P2-4/P2-5/P2-
     expect(calls).toBe(1)
     // ③ 父上下文已注销：再派新委派被拒
     expect(() => startDelegation(parentContext(), { task: '新任务' })).toThrow(/未找到父循环上下文/)
+  })
+})
+
+// =========================================================================
+// 委派补测 S4（2026-08-26 移植：独立补盲中远端缺失的 H1 failed 事件 / M1 ask
+// abort 兜底 / M4 wait any 提前返回 / L 低优先级项。远端 372a15a 已含 P1-1/P2-4/
+// P2-5/P2-6/P3-7 等效用例，本段只移植远端缺失项）
+// =========================================================================
+describe('委派补测 S4（远端缺失项移植）', () => {
+  const hang: AgentLoopTool = {
+    name: 'hang',
+    description: '挂起',
+    input_schema: { type: 'object', properties: {} },
+    execute: () => new Promise<never>(() => {}),
+  }
+  const originalPromaHome = process.env.PROMA_HOME
+  let isolatedParentSessionId = 'session-s4m-0'
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-collab-s4m-'))
+    isolatedParentSessionId = `session-s4m-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    parentSessionId = isolatedParentSessionId
+    setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
+  })
+  afterEach(() => {
+    for (const record of listDelegations(parentSessionId)) {
+      if (record.status === 'running') record.abort.abort()
+    }
+    unregisterParentLoopContext(parentSessionId)
+    process.env.PROMA_HOME = originalPromaHome
+  })
+
+  function registerParentCapturing(query: SDKQuery): Array<{ type: string; payload: Record<string, unknown> }> {
+    const events: Array<{ type: string; payload: Record<string, unknown> }> = []
+    registerParentLoopContext(parentSessionId, {
+      query,
+      env: {},
+      maxTokens: 256,
+      maxTurns: 6,
+      delegationMaxTurns: 4,
+      permissionMode: 'allow-all',
+      temperature: 0.5,
+      system: '父系统提示（背板）',
+      editFormat: 'diff',
+      publish: (type, payload) => events.push({ type, payload }),
+    })
+    return events
+  }
+
+  it('[S4-AGENT-001] 子 loop 抛错 → delegation_failed 事件 + record 置 failed + error 落摘要', async () => {
+    const events = registerParentCapturing(throwingQuery(new Error('SDK 渠道 500')))
+    const created = startDelegation(parentContext(), { task: '会失败的子任务', role: 'research' })
+    await findDelegation(parentSessionId, created.delegation_id)!.completion
+    const record = findDelegation(parentSessionId, created.delegation_id)!
+    const summary = getDelegationSummary(record)
+    expect(record.status).toBe('failed')
+    expect(record.error).toBe('SDK 渠道 500')
+    expect(summary.error).toBe('SDK 渠道 500')
+    expect(summary.result_summary).toBeUndefined()
+    const failed = events.find((event) => event.type === 'delegation_failed')
+    expect(failed).toBeTruthy()
+    expect(failed!.payload).toMatchObject({ delegation_id: created.delegation_id, status: 'failed' })
+    expect(events.some((event) => event.type === 'delegation_completed')).toBe(false)
+  })
+
+  it('[S4-AGENT-002] 子 loop 抛超长错误 → error 截断到 501 字符且带省略号', async () => {
+    const events = registerParentCapturing(throwingQuery(new Error('x'.repeat(600))))
+    const created = startDelegation(parentContext(), { task: '会失败的子任务' })
+    await findDelegation(parentSessionId, created.delegation_id)!.completion
+    const record = findDelegation(parentSessionId, created.delegation_id)!
+    expect(record.status).toBe('failed')
+    expect(record.error!.length).toBe(501)
+    expect(record.error!.endsWith('…')).toBe(true)
+    expect(events.some((event) => event.type === 'delegation_failed')).toBe(true)
+  })
+
+  it('[S4-AGENT-003] ask abort 兜底：子挂起提问被 stop 中止 → 占位答复，不永久挂起', async () => {
+    setChildToolsBuilder(() => [hang])
+    registerParent(toolUseQuery('hang'))
+    const created = startDelegation(parentContext(), { task: '慢任务' })
+    const record = findDelegation(parentSessionId, created.delegation_id)!
+    const childCtx: ToolContext = {
+      projectId: 'project-parent',
+      sessionId: created.child_session_id,
+      requestId: 'req-child',
+      signal: record.abort.signal,
+      state: createToolState(1),
+    }
+    const answerP = askDelegationQuestion(childCtx, '可以继续吗？')
+    expect(record.pendingQuestion).toBe('可以继续吗？')
+    stopDelegation(parentSessionId, created.delegation_id)
+    const answer = await answerP
+    expect(answer).toBe('[子代理已被停止，未收到回答]')
+    expect(record.status).toBe('cancelled')
+  })
+
+  it('[S4-AGENT-004] wait any：快子完成立即返回（非 timeout），慢子仍 running', async () => {
+    let fastChildId = ''
+    const branched: SDKQuery = async function* (_prompt: string, options: SDKQueryOptions) {
+      // 让出到 microtask：两个 startDelegation 与 fastChildId 赋值均为同步代码，分支时已就绪
+      await Promise.resolve()
+      if (options.sessionId === fastChildId) {
+        yield textMessage('快任务完成结果')
+        yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+        return
+      }
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'h-hang', name: 'hang', input: {} }] } }
+      yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+    }
+    setChildToolsBuilder(() => [hang])
+    registerParent(branched)
+    const slow = startDelegation(parentContext(), { task: '慢任务' })
+    const fast = startDelegation(parentContext(), { task: '快任务' })
+    fastChildId = fast.child_session_id
+
+    const t0 = Date.now()
+    const summaries = await waitForDelegations(parentContext(), {
+      delegationIds: [slow.delegation_id, fast.delegation_id],
+      strategy: 'any',
+      timeout_ms: 60_000,
+    })
+    const elapsed = Date.now() - t0
+    const fastSummary = summaries.find((s) => s.delegation_id === fast.delegation_id)!
+    expect(fastSummary.status).toBe('completed')
+    expect(fastSummary.result_summary).toContain('快任务完成结果')
+    const slowSummary = summaries.find((s) => s.delegation_id === slow.delegation_id)!
+    expect(slowSummary.status).toBe('running')
+    expect(elapsed).toBeLessThan(2000)
+    findDelegation(parentSessionId, slow.delegation_id)!.abort.abort()
+  })
+
+  it('[S4-AGENT-012] wait_for_delegations：未知 id 抛错；空 records 返回 []', async () => {
+    registerParent(oneShotQuery('x'))
+    await expect(
+      waitForDelegations(parentContext(), { delegationIds: ['no-such'], timeout_ms: 1 }),
+    ).rejects.toThrow(/未找到当前会话下的委派/)
+    expect(await waitForDelegations(parentContext(), { delegationIds: [], timeout_ms: 1 })).toEqual([])
+  })
+
+  it('[S4-AGENT-013] stop_delegation 已终结委派幂等：返回当前状态、不覆盖', async () => {
+    registerParent(oneShotQuery('x'))
+    const created = startDelegation(parentContext(), { task: '完成的任务' })
+    await findDelegation(parentSessionId, created.delegation_id)!.completion
+    const summary = stopDelegation(parentSessionId, created.delegation_id)
+    expect(summary.status).toBe('completed')
+    expect(findDelegation(parentSessionId, created.delegation_id)!.status).toBe('completed')
+  })
+
+  it('[S4-AGENT-014] 未注册父上下文时 startDelegation 抛错', () => {
+    expect(() => startDelegation(parentContext(), { task: '任务' })).toThrow(/未找到父循环上下文/)
+  })
+
+  it('[S4-AGENT-015] get_delegation_results 显式 id 未找到抛错', async () => {
+    registerParent(oneShotQuery('x'))
+    const tool = buildAgentTools({ projectId: 'p', role: 'parent' }).find((t) => t.name === 'get_delegation_results')!
+    await expect(tool.execute({ delegation_ids: ['no-such'] }, parentContext())).rejects.toThrow(
+      /未找到当前会话下的委派/,
+    )
   })
 })

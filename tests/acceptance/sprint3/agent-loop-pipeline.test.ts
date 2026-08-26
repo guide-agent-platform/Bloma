@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import type { ChildProcess } from 'node:child_process'
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
@@ -8,11 +8,13 @@ import type { AddressInfo } from 'node:net'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { runAgentLoopPostTesting, runIterationTask, runMvpTask, agentLoopEnabled, setProgrammingEventPublisher } from '../../../main/programming-orchestrator'
 import { createProject, findProject, recordSketchGenerated } from '../../../main/project-service'
+import { syncDocuments } from '../../../main/document-engine'
 import { createChannel } from '../../../main/channel-manager'
 import { setSafeStorageAdapter } from '../../../main/safe-storage'
 import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../../main/platform-services'
 import { setBrowserGwtDisabledForTests } from '../../../main/gwt-runner'
 import { getAnalyticsPath, getAgentSessionPath } from '../../../storage/config-paths'
+import { listDelegations } from '../../../main/agent-collaboration'
 import type { MessageContentBlock, SDKMessage } from '../../../shared/types'
 import type { SDKQuery, SDKQueryOptions } from '../../../main/orchestrator'
 
@@ -638,5 +640,253 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
     ).rejects.toThrow('Agent Loop 已关闭或缺少模型调用句柄')
     expect(readDecisionLines('session-acc-5').join('\n')).not.toContain('Agent Loop 生成启用')
     expect(readDecisionLines('session-acc-5').join('\n')).toContain('Agent Loop 不可用')
+  })
+
+  // ---- 2026-08-26 移植：独立补盲中远端缺失的 M3 落盘契约 / P1-2 孤儿清理 / M2 安全熔断 ----
+
+  it('[S4-AGENT-005] loop 生成后 via_agent_loop / agent_loop_status 落盘持久化（H2 resume 依赖此契约）', async () => {
+    createChannel({
+      name: 'persist-loop-channel',
+      provider_type: 'anthropic',
+      base_url: 'https://persist-loop.example',
+      api_key: 'key-persist-loop',
+      models: [{ id: 'm1', name: 'persist-loop-model', enabled: true, supports_tools: true }],
+    })
+    const project = createProject({ request_id: 'req-acc-persist', mode: 'quick', initial_message: '帮我做一个记账应用' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出', priority: 'P0' }])
+
+    const server = createServer((req, res) => {
+      const root = findProject(project.project_id).root_path
+      const path = req.url === '/' ? '/index.html' : (req.url ?? '/index.html')
+      try {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+        res.end(readFileSync(join(root, path.replace(/^\//, '')), 'utf8'))
+      } catch {
+        res.writeHead(404)
+        res.end('Not Found')
+      }
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+    setSandboxRuntimeForTests({
+      processFactory: () => fakeChild(),
+      portAllocator: async () => port,
+      healthCheck: async () => true,
+    })
+
+    try {
+      const { query } = scriptedQuery()
+      const mvp = await runMvpTask({
+        request_id: 'req-acc-persist',
+        session_id: 'session-persist',
+        project_id: project.project_id,
+        mode: 'quick',
+        query,
+      })
+      expect(mvp.via_agent_loop).toBe(true)
+      expect(mvp.loop_result?.status).toBe('completed')
+      const persisted = findProject(project.project_id)
+      expect(persisted.via_agent_loop).toBe(true)
+      expect(persisted.agent_loop_status).toBe('completed')
+    } finally {
+      server.close()
+    }
+  }, 20000)
+
+  it('[S4-AGENT-006] loop 轮次耗尽（turn_limit）→ agent_loop_status 落盘为 turn_limit', async () => {
+    createChannel({
+      name: 'persist-limit-channel',
+      provider_type: 'anthropic',
+      base_url: 'https://persist-limit.example',
+      api_key: 'key-persist-limit',
+      models: [{ id: 'm1', name: 'persist-limit-model', enabled: true, supports_tools: true }],
+    })
+    const project = createProject({ request_id: 'req-acc-limit', mode: 'quick', initial_message: '帮我做一个记账应用' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出', priority: 'P0' }])
+
+    const server = createServer((req, res) => {
+      const root = findProject(project.project_id).root_path
+      const path = req.url === '/' ? '/index.html' : (req.url ?? '/index.html')
+      try {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+        res.end(readFileSync(join(root, path.replace(/^\//, '')), 'utf8'))
+      } catch {
+        res.writeHead(404)
+        res.end('Not Found')
+      }
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+    setSandboxRuntimeForTests({
+      processFactory: () => fakeChild(),
+      portAllocator: async () => port,
+      healthCheck: async () => true,
+    })
+
+    // LIMIT 剧本：第一轮 write_file 落盘 index.html（避免 AGENT_LOOP_INCOMPLETE 提前报错），
+    // 后续每轮调未知工具（即时 is_error）→ 循环永不收敛 → 跑满 AGENT_LOOP_MAX_TURNS(quick=24) → turn_limit
+    let loopTurn = 0
+    const limitQuery: SDKQuery = async function* (_prompt: string, options: SDKQueryOptions) {
+      if (options.tools?.some((tool) => tool.name === 'loop_support_probe')) {
+        yield assistant([toolUse('probe-1', 'loop_support_probe', {})])
+        yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+        return
+      }
+      if ((options.tools ?? []).length > 0) {
+        loopTurn += 1
+        const blocks =
+          loopTurn === 1
+            ? [toolUse('t1', 'write_file', { path: 'index.html', content: '<html><body><p>记账</p></body></html>' })]
+            : [toolUse('l-1', 'no_such_tool', {})]
+        yield assistant(blocks)
+        yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+        return
+      }
+      yield assistant([text('这不是 JSON')])
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+
+    try {
+      const mvp = await runMvpTask({
+        request_id: 'req-acc-limit',
+        session_id: 'session-limit',
+        project_id: project.project_id,
+        mode: 'quick',
+        query: limitQuery,
+      })
+      expect(mvp.via_agent_loop).toBe(true)
+      expect(mvp.loop_result?.status).toBe('turn_limit')
+      expect(findProject(project.project_id).agent_loop_status).toBe('turn_limit')
+      expect(findProject(project.project_id).via_agent_loop).toBe(true)
+    } finally {
+      server.close()
+    }
+  }, 30000)
+
+  it('[S4-AGENT-008] 父 loop 结束时仍有 running 子委派 → finally 清理为 cancelled，不泄漏（P1-2）', async () => {
+    createChannel({
+      name: 'orphan-loop-channel',
+      provider_type: 'anthropic',
+      base_url: 'https://orphan-loop.example',
+      api_key: 'key-orphan-loop',
+      models: [{ id: 'm1', name: 'orphan-loop-model', enabled: true, supports_tools: true }],
+    })
+    const project = createProject({ request_id: 'req-acc-orphan', mode: 'quick', initial_message: '帮我做一个记账应用' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出', priority: 'P0' }])
+
+    const server = createServer((req, res) => {
+      const root = findProject(project.project_id).root_path
+      const path = req.url === '/' ? '/index.html' : (req.url ?? '/index.html')
+      try {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+        res.end(readFileSync(join(root, path.replace(/^\//, '')), 'utf8'))
+      } catch {
+        res.writeHead(404)
+        res.end('Not Found')
+      }
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+    setSandboxRuntimeForTests({
+      processFactory: () => fakeChild(),
+      portAllocator: async () => port,
+      healthCheck: async () => true,
+    })
+
+    // 父 loop：写文件 → delegate_agent（fire-and-forget，不 wait）→ 文本收尾 → 父 completed
+    // 子 loop：第一轮 ask_delegation_question 挂起（父不答 → 子停在 running）
+    const ORPHAN_SCRIPT: MessageContentBlock[][] = [
+      [text('我先把页面写出来。'), toolUse('t1', 'write_file', { path: 'index.html', content: INDEX_V2 })],
+      [toolUse('t2', 'delegate_agent', { task: '调研配色方案', role: 'explore' })],
+      [text('完成：记账 MVP 已就绪。')],
+    ]
+    let parentTurn = 0
+    const orphanQuery: SDKQuery = async function* (_prompt: string, options: SDKQueryOptions) {
+      const tools = options.tools ?? []
+      if (tools.some((tool) => tool.name === 'loop_support_probe')) {
+        yield assistant([toolUse('probe-1', 'loop_support_probe', {})])
+        yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+        return
+      }
+      if (tools.length === 0) {
+        yield assistant([text('这不是 JSON')])
+        yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+        return
+      }
+      if (tools.some((tool) => tool.name === 'delegate_agent')) {
+        const script = ORPHAN_SCRIPT[Math.min(parentTurn, ORPHAN_SCRIPT.length - 1)]
+        parentTurn += 1
+        yield assistant(script)
+        yield {
+          type: 'result',
+          subtype: 'success',
+          stop_reason: script.some((block) => block.type === 'tool_use') ? 'tool_use' : 'end_turn',
+        }
+        return
+      }
+      // 子 loop（explore 只读含 ask）：第一轮 ask 挂起，父不答 → 停在 running
+      yield assistant([toolUse('ask-1', 'ask_delegation_question', { question: '用什么配色？' })])
+      yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+    }
+
+    try {
+      const mvp = await runMvpTask({
+        request_id: 'req-acc-orphan',
+        session_id: 'session-orphan',
+        project_id: project.project_id,
+        mode: 'quick',
+        query: orphanQuery,
+      })
+      expect(mvp.via_agent_loop).toBe(true)
+      // 父 loop 已收尾（completed）；running 的子委派必须被 finally 清理为 cancelled
+      const orphans = listDelegations('session-orphan')
+      expect(orphans.length).toBe(1)
+      expect(orphans[0]!.status).toBe('cancelled')
+    } finally {
+      server.close()
+    }
+  }, 20000)
+
+  it('[S4-JUDGE-004] GWT 通过但安全扫描不过（产物含 eval 高危）→ security_repair 让渡，零 repairing（M2）', async () => {
+    setBrowserGwtDisabledForTests(true)
+    const home = mkdtempSync(join(tmpdir(), 'proma-loop-sec-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+    syncDocuments({ request_id: 'req-sync', session_id: 'session-1', project_id: project.project_id, checkpoint: 'mvp_before_generation' })
+    // 磁盘产物：命中 GWT 特征词 + 高危 eval（OWASP critical）→ 安全扫描 passed=false
+    writeFileSync(
+      join(project.root_path, 'index.html'),
+      '<html><body><p>记录收入与支出</p></body></html><script>const r = eval("1+1")</script>',
+      'utf8',
+    )
+    const events: string[] = []
+    setProgrammingEventPublisher((event) => events.push(event.type))
+
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/html' })
+      res.end('<html><body><p>记录收入与支出</p></body></html>')
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+
+    try {
+      const result = await runAgentLoopPostTesting({
+        request_id: 'req-flow',
+        session_id: 'session-1',
+        project_id: project.project_id,
+        mode: 'quick',
+        preview_url: `http://127.0.0.1:${port}`,
+        loop: { status: 'completed', turns: 8, finalText: '完成', toolCalls: [] },
+      })
+      expect(result.verdict).toBe('blocked')
+      expect(findProject(project.project_id).current_stage).toBe('blocked_for_user_decision')
+      expect(findProject(project.project_id).blocked_action).toBe('security_repair')
+      expect(events.filter((type) => type === 'repairing')).toHaveLength(0)
+      expect(events.filter((type) => type === 'judge_result')).toHaveLength(0)
+      expect(findProject(project.project_id).test_repair_count ?? 0).toBe(0)
+    } finally {
+      server.close()
+    }
   })
 })
