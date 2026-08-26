@@ -12,8 +12,10 @@ import { getPromptOverridePath } from '../storage/config-paths'
  * 刻意不做缓存：每次生成才读一次盘，成本可忽略，换来「改文件即时生效、
  * 无需重启」。
  *
- * 当前接线：prd-engine-llm（`prd-system`）。机制通用，sketch/mvp/guide
- * 等引擎可按同名约定自行接入。
+ * 当前接线：prd-system / sketch-system / guide-system / enricher-system / normalizer-system
+ * 五引擎（80c0e07 全量接入，TDD）+ loop-system（追加模式槽位，废旧管道Loop转正时由
+ * mvp-system 迁移改名，默认空、追加于动态 system 之后，背板锚定段不可覆盖）。
+
  */
 export function loadPromptOverride(name: string): string | null {
   try {

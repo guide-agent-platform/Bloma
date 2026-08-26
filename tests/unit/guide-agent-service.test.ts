@@ -386,13 +386,20 @@ describe('GuideAgentService through AgentOrchestrator', () => {
       metadata: { source: 'card_option', selected_option_id: 'daily' },
     })
 
-    const ready = events.find((event) => event.type === 'sketch_ready')
-    expect(ready).toBeTruthy()
-    const descriptions = readLastSketchRequirements(project.project_id).map((r) => r.description)
+    // 收敛路径统一收口（2026-08-27）：点选不再直接开工，进入 PRD 后置链 → 审查 → PRD 确认卡挂起
+    const prdCard = events.find(
+      (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
+    )
+    expect(prdCard).toBeTruthy()
+    const stories = ((prdCard!.payload as { requirements?: Array<{ story?: string }> }).requirements ?? [])
+      .map((item) => item.story ?? '')
+      .join('\n')
     // 需求以主题为锚点、以点选原文为方向，绝不映射到「日常生活工具」预置文案
-    expect(descriptions[0]).toBe('帮我做个东西')
-    expect(descriptions).toContain('音乐节排期')
-    expect(descriptions.join('\n')).not.toContain('日常生活工具')
+    expect(stories).toContain('帮我做个东西')
+    expect(stories).toContain('音乐节排期')
+    expect(stories).not.toContain('日常生活工具')
+    // 挂起不开工：草图等用户确认 PRD 后才生成
+    expect(events.find((event) => event.type === 'sketch_ready')).toBeUndefined()
   })
 
   it('A2-14a: 模型输出非 JSON 时回退规则路由', async () => {
@@ -448,7 +455,7 @@ describe('GuideAgentService through AgentOrchestrator', () => {
     expect(findProject(project.project_id).current_stage).toBe('blocked_for_user_decision')
   })
 
-  it('卡片答案（你帮我决定）直接生成草图，不再重复澄清，且助手回复落盘', async () => {
+  it('卡片答案（你帮我决定）统一走让渡流：card_auto 留痕 + PRD 确认卡挂起，不再直接开草图', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-guide-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
@@ -475,7 +482,7 @@ describe('GuideAgentService through AgentOrchestrator', () => {
     })
     expect(events.filter((event) => event.type === 'user_decision_required')).toHaveLength(1)
 
-    // 第二轮：点击「你帮我决定」卡片 → 直接生成草图，不再重复澄清
+    // 第二轮：点击「你帮我决定」卡片 → 让渡统一（点选/打字同一仪式）：留痕 card_auto + PRD 确认卡挂起
     await runAgent({
       request_id: 'req-guide-2',
       session_id: 'session-guide',
@@ -486,16 +493,26 @@ describe('GuideAgentService through AgentOrchestrator', () => {
       metadata: { source: 'card_option', selected_option_id: 'auto' },
     })
 
-    const decisions = events.filter((event) => event.type === 'user_decision_required')
-    const ready = events.find((event) => event.type === 'sketch_ready')
-    expect(decisions).toHaveLength(1) // 没有第二次澄清
-    expect(ready?.payload.preview_url).toBe('http://localhost:3102')
-    expect(findProject(project.project_id).current_stage).toBe('sketch_ready')
+    // 没有第二次澄清（排除 PRD/需求确认等专属决策卡后，仅剩首轮一张澄清卡）
+    const clarifications = events.filter((event) => {
+      if (event.type !== 'user_decision_required') return false
+      const kind = (event.payload as { kind?: string }).kind ?? ''
+      return kind !== 'prd_confirm' && kind !== 'prd_review' && kind !== 'requirement_confirm'
+    })
+    expect(clarifications).toHaveLength(1)
+    // PRD 确认卡已发（挂起等用户过目），未直接开草图
+    const prdCard = events.find(
+      (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
+    )
+    expect(prdCard).toBeTruthy()
+    expect(events.find((event) => event.type === 'sketch_ready')).toBeUndefined()
+    expect(findProject(project.project_id).current_stage).toBe('blocked_for_user_decision')
 
-    // 规则路径的助手回复也写入会话 JSONL（回访恢复一致性）
+    // 规则路径的助手回复也写入会话 JSONL（回访恢复一致性）+ 让渡留痕
     const jsonl = readFileSync(join(home, 'agent-sessions', 'session-guide.jsonl'), 'utf8')
     expect(jsonl).toContain('我需要再确认几个关键点')
-    expect(jsonl).toContain('按你选的方向开始生成草图')
+    expect(jsonl).toContain('我来定方向，先整理成产品需求文档')
+    expect(jsonl).toContain('card_auto')
   })
 
   it('澄清后生成草图保留主题锚点，不被澄清答案覆盖（货不对板修复）', async () => {
