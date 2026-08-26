@@ -4,14 +4,15 @@ import { join } from 'node:path'
 import type { AgentEvent, AgentLoopJudgeMetadata, AgentSendMessageInput, Channel, ChannelModel, MessageContentBlock, Project, ProjectMode, Snapshot, TemplateType } from '../shared/types'
 import { getAgentSessionPath, getDocumentsDir } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
-import { buildPrdBackplane, readPrdBackplane, readUxContractSketch, syncDocuments, writeSecurityScanDocument } from './document-engine'
+import { buildPrdBackplane, readPrdBackplane, readUxContractSketch, syncDocuments, updateRequirementStatus, writeSecurityScanDocument } from './document-engine'
+import { appendProjectLearning, renderLearningsSection } from './learnings-log'
 import { createSnapshot, runSandbox, trackAnalytics } from './platform-services'
 import { renderPackageJson, renderStaticServer } from './project-scaffold'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
 import { resolveChannelEnv } from './runtime-fallback'
 import { captureConstraints, extractConstraints, readProjectConstraints } from './constraint-extractor'
 import { distillProjectMemorySafely } from './memory-distiller'
-import { generateSketch, requirementAssertions, requirementPriority, requirementStory, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from './sketch-engine'
+import { generateSketch, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from './sketch-engine'
 import { generateSketchLlm, SketchLlmError, type SketchAttemptDetail } from './sketch-engine-llm'
 import { generatePrdLlm, readConversation } from './prd-engine-llm'
 import { enrichRequirementsLlm, extractUserTexts, mergeEnrichment } from './requirement-enricher'
@@ -799,6 +800,16 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     },
   })
 
+  // 执行经验沉淀（2026-08-26 改造 2，ralph progress.txt 等价物）：完成总结/异常结局
+  // append-only 进 learnings.jsonl，下轮 fresh loop 经【历史经验】段注入；静默失败不阻断
+  appendProjectLearning(input.project_id, {
+    kind: result.status === 'completed' ? 'loop_summary' : 'loop_outcome',
+    text:
+      result.finalText.trim() ||
+      `Loop 结束（${result.status}，${result.turns} 轮 / ${result.toolCalls.length} 次工具调用）`,
+    meta: { status: result.status, turns: result.turns, tool_calls: result.toolCalls.length },
+  })
+
   // 用户已停止（U5，2026-08-25 线上案例）：loop 返回 cancelled 即中止交付链——
   // 不补脚手架、不起沙箱、不终验不改阶段。此前无此特判，停止后照样交付+终验+
   // 熔断回滚，把用户停止谎报成「修复预算耗尽/无可用产物」并污染项目阶段。
@@ -875,7 +886,10 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
       return (
         `- [${item.id}]（${requirementPriority(item)}）${requirementStory(item)}` +
         (assertions ? `\n  行为断言：\n${assertions}` : '') +
-        (item.scope_notes ? `\n  范围排除：${item.scope_notes}` : '')
+        (item.scope_notes ? `\n  范围排除：${item.scope_notes}` : '') +
+        // 活背板：带执行状态时标注（首轮/全量重生成时无 status，零开销；
+        // 部分重生成/恢复终验路径下让 loop 知道哪些项已是既成事实）
+        (item.status ? `\n  执行状态：${requirementStatusLabel(item.status)}` : '')
       )
     })
     .join('\n')
@@ -924,8 +938,11 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
  */
 function buildLoopSystemWithOverride(backplane: PrdBackplane, editFormat: 'diff' | 'whole'): string {
   const base = buildAgentLoopSystemPrompt(backplane, editFormat)
+  // 历史经验段（改造 2）：迭代/重生成场景下轮 fresh loop 开场即知上轮踩坑；
+  // 首轮无经验返回空串零开销；renderLearningsSection 内部静默失败
+  const learnings = renderLearningsSection(backplane.project_id)
   const override = loadPromptOverride('loop-system')
-  return override ? `${base}\n\n【用户自定义规则】\n${override}` : base
+  return [base, learnings, override ? `【用户自定义规则】\n${override}` : ''].filter(Boolean).join('\n\n')
 }
 
 /** 初始 user 消息：任务指令（背板细节在 system，这里只给行动指令）。 */
@@ -1247,6 +1264,11 @@ async function evaluateOnce(input: JudgeReviewInput): Promise<JudgeVerdict> {
     requestId: input.request_id,
     publish: (event) => publish(input, event.type, event.payload),
   })
+  // 活背板（2026-08-26）：逐功能项判定回写 prd.json（pass/fail 都回写——partial/unverified
+  // 同样是用户该看到的执行状态；内部全 catch，失败不影响裁决流）
+  if (!semantic.skipped && semantic.findings.length > 0) {
+    updateRequirementStatus(input.project_id, semantic.findings)
+  }
   if (semantic.skipped) {
     try {
       recordDecision({

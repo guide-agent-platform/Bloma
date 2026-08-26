@@ -16,6 +16,14 @@ import {
   resumePrdReviewOverride,
   runPrdReviewGate,
 } from './prd-review'
+import {
+  PRD_CONFIRM_OPTION_ADJUST,
+  PRD_CONFIRM_OPTION_CONFIRM,
+  consumePrdConfirmAdjust,
+  publishPrdConfirmCard,
+  resolvePrdConfirmCardAnswer,
+  resumePrdConfirmConfirmed,
+} from './prd-confirm'
 import { resolveChannelEnv } from './runtime-fallback'
 import type { ConversationTurn, GuideModelOptions, SDKQuery } from './orchestrator'
 import { trackAnalytics } from './platform-services'
@@ -109,7 +117,15 @@ const FIXED_CARD_LABELS: Record<string, string> = {
 }
 
 /** 阻塞态让渡卡片的决策 id（accept/explain/continue）由 resumeBlockedFlow 处理，不得误入草图生成。 */
-const BLOCKED_DECISION_IDS = new Set(['accept', 'explain', 'continue', PRD_REVIEW_OPTION_OVERRIDE, PRD_REVIEW_OPTION_SUPPLEMENT])
+const BLOCKED_DECISION_IDS = new Set([
+  'accept',
+  'explain',
+  'continue',
+  PRD_REVIEW_OPTION_OVERRIDE,
+  PRD_REVIEW_OPTION_SUPPLEMENT,
+  PRD_CONFIRM_OPTION_CONFIRM,
+  PRD_CONFIRM_OPTION_ADJUST,
+])
 
 /** 兜底选项：每张澄清卡片固定收尾，保证用户永远有「不选具体方向也能开工」的出口。 */
 const AUTO_ESCAPE_OPTION: ClarificationOption = {
@@ -307,6 +323,23 @@ export async function handleGuideMessage(
   if (prdReviewDecision === 'supplement') {
     consumePrdReviewSupplement(input)
     const hint = '好的，你想补充或修改哪里？直接打字告诉我就行。'
+    persistAssistant?.(hint)
+    publish(makeGuideEvent(input, 'message_delta', { text: hint }))
+    publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+    return
+  }
+
+  // PRD 确认卡回传（2026-08-26 改造 3，在审查卡之后/普通卡之前拦截）：
+  // confirm → user_confirmed_at 落盘 + 开草图；adjust → 消费 pending，提示打字补充
+  // （逐项「这条不对」也走 adjust，补充文本自带条目 id，回向导模型路径修订）。
+  const prdConfirmDecision = resolvePrdConfirmCardAnswer(input)
+  if (prdConfirmDecision === 'confirm') {
+    await resumePrdConfirmConfirmed(input)
+    return
+  }
+  if (prdConfirmDecision === 'adjust') {
+    consumePrdConfirmAdjust(input)
+    const hint = '好的，你想调整哪里？指出具体条目（如「F-002 的验收不对：我想要的是导出 Excel」），我修订后再请你确认。'
     persistAssistant?.(hint)
     publish(makeGuideEvent(input, 'message_delta', { text: hint }))
     publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
@@ -783,7 +816,29 @@ export async function resolveRequirementConfirm(input: {
       })
       return { started: true, prd_written: prdWritten }
     }
-    publish(makeGuideEvent(input, 'message_delta', { text: '需求已确认，我先把它整理成产品需求文档（已通过裁判审查），然后开始画草图。' }))
+    // PRD 用户确认门（2026-08-26 改造 3）：审查通过后不直接开草图，先把背板四段式
+    // 摊给用户确认（机器质量关已过，人语义关接力）；quick 折叠完整视图/longterm 展开。
+    // 降级话术如实：规则门降级时不自称「已通过裁判审查」。
+    const reviewPassedCopy =
+      review.mode === 'rules'
+        ? '需求已确认，我把它整理成了产品需求文档。请你过目，确认无误后我开始画草图。'
+        : '需求已确认，我把它整理成了产品需求文档（已通过裁判审查）。请你过目这份 PRD，确认无误后我开始画草图。'
+    publish(makeGuideEvent(input, 'message_delta', { text: reviewPassedCopy }))
+    publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+    publishPrdConfirmCard({
+      input: {
+        request_id: pending.request_id,
+        session_id: pending.session_id,
+        project_id: pending.project_id,
+        mode: pending.mode,
+        channel_id: pending.channel_id,
+      },
+      backplane: backplaneForReview,
+      requirements,
+      query: pending.query,
+      publish,
+    })
+    return { started: true, prd_written: prdWritten }
   } else if (prdWritten) {
     publish(makeGuideEvent(input, 'message_delta', { text: '需求已确认，我先把它整理成产品需求文档，然后开始画草图。' }))
   } else {

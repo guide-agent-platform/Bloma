@@ -23,6 +23,32 @@ export interface SketchRequirement {
   scope_notes?: string
   /** 来源：clarify | correction | iteration | auto */
   source?: string
+  /**
+   * 执行状态（judge 语义审查回写，2026-08-26 活背板）：未判定时缺省（渲染为未勾选）。
+   * 迭代全量重生成时随 prd.json 重写自然清除——新产物未判定即无状态，语义自洽。
+   */
+  status?: RequirementStatus
+  /** 状态备注（裁判证据 evidence，≤160 字） */
+  status_note?: string
+}
+
+/** 功能项执行状态：与 judge-semantic 的逐项判定字面量保持一致。 */
+export type RequirementStatus = 'implemented' | 'partial' | 'missing' | 'deviated' | 'unverified'
+
+/** 执行状态中文标签（PRD 渲染 / loop 项目锚共用）。 */
+export function requirementStatusLabel(status: RequirementStatus): string {
+  switch (status) {
+    case 'implemented':
+      return '已实现'
+    case 'partial':
+      return '部分实现'
+    case 'missing':
+      return '未实现'
+    case 'deviated':
+      return '做偏'
+    default:
+      return '无法验证'
+  }
 }
 
 /** 行为断言缺省兜底（§10 兼容：旧项无断言时保证 GWT 仍有可派生场景） */
@@ -94,6 +120,8 @@ export interface PrdBackplane {
   generation_guardrails?: GenerationGuardrails
   /** 冻结时间（mvp_before_generation 时落盘；草案阶段为 undefined） */
   frozen_at?: string
+  /** 用户阅读确认时间（PRD 确认卡「确认无误」时落盘，2026-08-26）——迭代争议仲裁锚点 */
+  user_confirmed_at?: string
 }
 
 export interface GenerateSketchInput {

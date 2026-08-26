@@ -138,6 +138,37 @@ export const requirementConfirmFamily = atomFamily((_sessionId: string) => atom<
 /** 无 active session 时的稳定 fallback（陷阱 10：兜底 atom 一律模块级常量）。 */
 export const nullRequirementConfirmFallback = atom<RequirementConfirmState | null>(null)
 
+/**
+ * PRD 确认弹窗数据（prd_confirm 流，2026-08-26 改造 3）：最新一条
+ * kind='prd_confirm' 的 user_decision_required 载荷，由专用弹窗 PrdConfirmDialog
+ * 渲染。四段式背板投影：P0 断言展开、P1/P2 折叠；完整视图 longterm 默认展开。
+ * 不走内联决策卡：该 kind 无 questions，extractDecisionCards 天然不弹（同上）。
+ */
+export interface PrdConfirmRequirement {
+  id: string
+  priority: 'P0' | 'P1' | 'P2'
+  story: string
+  assertions: string[]
+}
+
+export interface PrdConfirmState {
+  sessionId: string
+  projectId: string
+  title: string
+  positioning: string
+  requirements: PrdConfirmRequirement[]
+  outOfScope: string[]
+  assumptions: string[]
+  constraints: string[]
+  /** 完整 PRD 视图默认展开（longterm） */
+  expanded: boolean
+}
+
+export const prdConfirmFamily = atomFamily((_sessionId: string) => atom<PrdConfirmState | null>(null))
+
+/** 无 active session 时的稳定 fallback（陷阱 10）。 */
+export const nullPrdConfirmFallback = atom<PrdConfirmState | null>(null)
+
 // =========================================================================
 // 3. 消息列表（atomFamily）— 对齐 A
 // =========================================================================
@@ -274,6 +305,42 @@ export function setupGlobalAgentListeners(): () => void {
             available: payload.research?.available === true,
             summary: typeof payload.research?.summary === 'string' ? payload.research.summary : '',
           },
+        })
+      }
+      // PRD 确认弹窗（专用 kind，2026-08-26 改造 3）：四段式背板投影写入专用 atom
+      if (payload?.kind === 'prd_confirm') {
+        const prdPayload = payload as {
+          positioning?: unknown
+          requirements?: unknown
+          out_of_scope?: unknown
+          assumptions?: unknown
+          constraints?: unknown
+          expanded?: unknown
+        }
+        const stringList = (value: unknown): string[] =>
+          Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
+        const prdRequirements = Array.isArray(prdPayload.requirements)
+          ? (prdPayload.requirements as Array<Record<string, unknown>>).filter(
+              (item) => typeof item?.id === 'string' && typeof item?.story === 'string',
+            )
+          : []
+        store.set(prdConfirmFamily(event.session_id), {
+          sessionId: event.session_id,
+          projectId: String(event.project_id ?? ''),
+          title: typeof payload.title === 'string' && payload.title ? payload.title : '请确认这份 PRD',
+          positioning: typeof prdPayload.positioning === 'string' ? prdPayload.positioning : '',
+          requirements: prdRequirements.map((item): PrdConfirmRequirement => ({
+            id: String(item.id),
+            priority: item.priority === 'P0' ? 'P0' : item.priority === 'P1' ? 'P1' : 'P2',
+            story: String(item.story),
+            assertions: Array.isArray(item.assertions)
+              ? item.assertions.filter((entry): entry is string => typeof entry === 'string')
+              : [],
+          })),
+          outOfScope: stringList(prdPayload.out_of_scope),
+          assumptions: stringList(prdPayload.assumptions),
+          constraints: stringList(prdPayload.constraints),
+          expanded: prdPayload.expanded === true,
         })
       }
     }

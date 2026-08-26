@@ -10,8 +10,8 @@ import type {
 } from '../shared/types'
 import { getDocumentsDir } from '../storage/config-paths'
 import { findProject, readLastSketchRequirements } from './project-service'
-import type { PrdBackplane, SketchRequirement } from './sketch-engine'
-import { requirementAssertions, requirementPriority, requirementStory } from './sketch-engine'
+import type { PrdBackplane, RequirementStatus, SketchRequirement } from './sketch-engine'
+import { requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory } from './sketch-engine'
 import { describeEffect, describeTrigger, parseBehaviorAssertion } from './behavior-assertions'
 
 /**
@@ -310,6 +310,67 @@ export function readPrdBackplane(projectId: string): PrdBackplane {
   }
 }
 
+/** 语义审查判定回写的入参（与 judge-semantic.SemanticFinding 结构兼容，避免模块循环依赖）。 */
+export interface RequirementStatusUpdate {
+  requirement_id: string
+  status: RequirementStatus
+  evidence?: string
+}
+
+/**
+ * 活背板（2026-08-26）：把裁判语义审查的逐功能项判定回写进 prd.json（ralph 式 passes）。
+ *
+ * - 只改 requirements[].status / status_note，其余字段（含 frozen_at）原样保留；
+ * - 需求内容仍以冻结清单为准——回写是执行侧状态，不触碰需求语义；
+ * - prd.json 缺失 / 损坏 / 写失败：静默返回 null（增强腿，绝不阻断裁决流）；
+ * - 迭代全量重生成时 syncPrdCheckpoints 重写 prd.json，status 自然清除（新产物未判定）。
+ */
+export function updateRequirementStatus(
+  projectId: string,
+  updates: RequirementStatusUpdate[],
+): PrdBackplane | null {
+  if (updates.length === 0) return null
+  try {
+    const project = findProject(projectId)
+    const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+    const path = join(dir, 'prd.json')
+    if (!existsSync(path)) return null
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as PrdBackplane
+    if (!parsed || !Array.isArray(parsed.requirements)) return null
+    const byId = new Map(updates.map((update) => [update.requirement_id, update]))
+    parsed.requirements = parsed.requirements.map((item) => {
+      const update = byId.get(item.id)
+      if (!update) return item
+      const note = update.evidence?.trim().slice(0, 160)
+      return { ...item, status: update.status, ...(note ? { status_note: note } : {}) }
+    })
+    writeFileSync(path, renderPrdJson(parsed), 'utf8')
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+/**
+ * PRD 用户确认落盘（2026-08-26，改造 3）：确认卡「确认无误」时写入 user_confirmed_at。
+ * 只加/更新时间戳字段，其余内容原样保留；prd.json 缺失/损坏 → null 不抛错（增强腿）。
+ */
+export function markPrdUserConfirmed(projectId: string): PrdBackplane | null {
+  try {
+    const project = findProject(projectId)
+    const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+    const path = join(dir, 'prd.json')
+    if (!existsSync(path)) return null
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as PrdBackplane
+    if (!parsed || !Array.isArray(parsed.requirements)) return null
+    const confirmed: PrdBackplane = { ...parsed, user_confirmed_at: new Date().toISOString() }
+    writeFileSync(path, renderPrdJson(confirmed), 'utf8')
+    return confirmed
+  } catch {
+    return null
+  }
+}
+
 function renderPrdJson(backplane: PrdBackplane): string {
   return `${JSON.stringify(backplane, null, 2)}\n`
 }
@@ -390,9 +451,12 @@ ${featureRefs}
 `
 }
 
-/** 单条功能项的用户可读渲染（§3.4）：故事 + 行为断言 + 优先级 + 范围排除。 */
+/** 单条功能项的用户可读渲染（§3.4）：故事 + 行为断言 + 优先级 + 范围排除 + 执行状态。 */
 function renderRequirementLine(item: SketchRequirement): string {
-  const lines = [`- [ ] **${item.id}**（${requirementPriority(item)}）${requirementStory(item)}`]
+  // 活背板勾选态：implemented 勾选；其余判定以中文标签标注（GFM 只有 [ ]/[x] 两种）
+  const checked = item.status === 'implemented' ? 'x' : ' '
+  const statusSuffix = item.status && item.status !== 'implemented' ? `（${requirementStatusLabel(item.status)}）` : ''
+  const lines = [`- [${checked}] **${item.id}**（${requirementPriority(item)}）${requirementStory(item)}${statusSuffix}`]
   for (const assertion of requirementAssertions(item)) {
     lines.push(`  - 行为断言：${assertion}`)
   }

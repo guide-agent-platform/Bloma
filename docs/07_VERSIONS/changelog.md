@@ -7,6 +7,27 @@
 
 **v1.1 修订说明**：同步 §5 已知待同步项状态（4 项全部已同步），新增 §5.1 目录结构重组记录。按 `workflow.md §2.4` 走修订流程，待评审后回到已确认。
 
+## 活背板三件套：功能项状态回写 + PRD 用户确认门 + 执行经验沉淀（2026-08-26）
+
+| 属性 | 值 |
+|------|-----|
+| **状态** | 已确认 |
+
+### 变更内容
+
+- **改造 1 功能项状态回写（ralph 式 passes）**：`[新增]` `SketchRequirement` 可选字段 `status`（implemented/partial/missing/deviated/unverified）+ `status_note`（裁判证据，≤160 字）；`[新增]` document-engine `updateRequirementStatus`——judge 语义审查的逐项判定回写进 prd.json（pass/fail 都回写，只改状态不碰需求语义，内部全 catch 不阻断裁决流）；接线在 evaluateOnce（semantic 非 skipped 即回写）；PRD 渲染勾选态（implemented→`[x]`，其余中文标签）；loop 项目锺带执行状态行（部分重生成/恢复终验路径下让 loop 知道哪些项是既成事实）。**语义自洽点：迭代全量重生成时 syncPrdCheckpoints 重写 prd.json，status 自然清除（新产物未判定）**
+- **改造 3 PRD 用户确认门**：六维审查**通过**后、草图前，把背板以四段式确认卡摊给用户阅读确认——机器质量关（prd-review）与人语义关接力，确认的是「系统加工的理解细节」（story 化/断言/优先级/范围外/假设）而非用户已确认过的话。`[新增]` 新模块 `main/prd-confirm.ts`（发布/挂起/回传消费，复用 card_option 元数据零新 IPC）；`[新增]` 渲染端 `PrdConfirmDialog`（四段式：定位/功能清单 P0 断言展开、P1P2 折叠/明确不做的高亮/系统假设可推翻；完整视图 longterm 默认展开、quick 折叠；整体确认 + 逐项「这条不对」预填回向导）；`[新增]` PrdBackplane `user_confirmed_at` 落盘（markPrdUserConfirmed，迭代争议仲裁锚点）；DecisionType 新增 `prd_confirm`；BLOCKED_DECISION_IDS 同步两选项 id。审查 needs_revision 的 override 分支不再发卡（避免双重打断）；规则门降级话术如实（不自称「已通过裁判审查」）
+- **改造 2 执行经验沉淀（ralph progress.txt 等价物）**：`[新增]` 新模块 `main/learnings-log.ts`（append-only JSONL `documents/{id}/learnings.jsonl`，只存执行过程经验——loop 完成总结/异常结局，不存需求/决策/约束防第二事实源，零 LLM 成本）；接线 runMvpViaAgentLoop 结束点（finalText 完成总结 + 轮次/工具元数据）；`buildLoopSystemWithOverride` 新增【历史经验】段注入最近 6 条（首轮无经验零开销，下轮 fresh loop 开场即知上轮踩坑）
+
+### 影响评估
+
+- 受影响模块：sketch-engine（类型）/ document-engine（回写/确认落盘/勾选渲染）/ programming-orchestrator（回写接线/learnings/状态行）/ guide-agent-service + prd-confirm（新）/ learnings-log（新）/ agent-atoms + PrdConfirmDialog（新）+ App / decision-log（DecisionType）
+- 测试：新增 requirement-status 8 例、guide-prd-confirm 4 例、prd-confirm-dialog 4 例、learnings-log 5 例；同步既有 guide-prd-review 2 例与 guide-requirement-confirm 2 例至新语义（审查通过→确认卡挂起而非直接草图）；全量 unit 579/581（2 失败均为既有并行 flake：blocked-decision/platform-services，单跑全过）、acceptance sprint2 33/33 + sprint3 49/49、typecheck 0、docs:check 过
+- 线上待验证：确认卡全链首跑（弹窗→确认→user_confirmed_at→草图；adjust 回向导修订闭环）；judge 回写后文档面板 prd.json 勾选态；迭代重生成 learnings 注入对 loop 行为的实际影响
+- 方法论来源：snarktank/ralph（文档即状态：passes 回写/progress.txt/写给维护者的文档）；确认卡信息设计拍板：P0 断言展开 + 整体确认带逐项异议出口（用户 2026-08-26）
+
+---
+
 ## 裁判审查委派化：协作过程可视化（2026-08-26）
 
 | 属性 | 值 |

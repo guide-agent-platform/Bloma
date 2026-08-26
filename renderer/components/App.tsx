@@ -5,6 +5,7 @@ import { WorkspaceShell } from './WorkspaceShell'
 import { ProjectHistoryPage } from './ProjectHistoryPage'
 import { PermissionDialog } from './PermissionDialog'
 import { RequirementConfirmDialog } from './RequirementConfirmDialog'
+import { PrdConfirmDialog } from './PrdConfirmDialog'
 import { SettingsPage } from './SettingsPage'
 import { useUserDecisionCards, toCardSelectionMeta } from './ChatPanel-sprint2'
 import type { CardOption } from './CardOptions'
@@ -68,6 +69,7 @@ const App: React.FC = () => {
       <AppRoutes />
       <PermissionDialog />
       <RequirementConfirmDialog />
+      <PrdConfirmDialog />
     </>
   )
 }

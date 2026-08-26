@@ -157,7 +157,7 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     vi.restoreAllMocks()
   })
 
-  it('审查通过（仅 minor）→ 草图照常，话术含「已通过裁判审查」', async () => {
+  it('审查通过（仅 minor）→ 发 PRD 确认卡挂起（改造 3：草图待用户确认），话术含「已通过裁判审查」', async () => {
     const { query, reviewCalls } = scriptedQuery([reviewPassJson])
     await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(query))
     await resolveRequirementConfirm({ request_id: 'req-pr2', session_id: SESSION_ID, project_id: 'proj-1', decision: 'confirm' })
@@ -165,7 +165,12 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     expect(reviewCalls.length).toBe(1)
     expect(reviewCalls[0]).toContain('六维攻击面')
     expect(reviewCalls[0]).toContain('记账本')
-    expect(runSketchTask).toHaveBeenCalledTimes(1)
+    // 2026-08-26 改造 3：审查通过后不直接开草图，先发四段式 PRD 确认卡（人语义关接力）
+    expect(runSketchTask).not.toHaveBeenCalled()
+    const card = events.find(
+      (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
+    )
+    expect(card).toBeTruthy()
     const deltas = events.filter((event) => event.type === 'message_delta').map((event) => String(event.payload.text))
     expect(deltas.some((text) => text.includes('已通过裁判审查'))).toBe(true)
   })
@@ -236,14 +241,19 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     expect(deltas.some((text) => text.includes('直接打字'))).toBe(true)
   })
 
-  it('LLM 输出不可解析 → 规则门降级（degraded），正常背板放行', async () => {
+  it('LLM 输出不可解析 → 规则门降级（degraded），正常背板放行（改造 3：发确认卡而非直接草图）', async () => {
     const { query } = scriptedQuery(['这不是 JSON，模型抽风了'])
     await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(query))
     events.length = 0
     await resolveRequirementConfirm({ request_id: 'req-pr2', session_id: SESSION_ID, project_id: 'proj-1', decision: 'confirm' })
 
-    // 规则门检查 mock 背板（定位非空、需求正常）→ pass → 草图照常
-    expect(runSketchTask).toHaveBeenCalledTimes(1)
+    // 规则门检查 mock 背板（定位非空、需求正常）→ pass → 发 PRD 确认卡（不直接草图）
+    expect(runSketchTask).not.toHaveBeenCalled()
+    expect(
+      events.some(
+        (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
+      ),
+    ).toBe(true)
   })
 
   it('parseReviewIssues 白名单：非法维度/严重度/空 claim 丢弃；围栏容忍', () => {

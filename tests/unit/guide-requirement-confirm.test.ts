@@ -161,7 +161,7 @@ describe('需求确认弹窗（confirm_requirements）', () => {
     expect(takePendingRequirementConfirm('proj-1')).toBeUndefined()
   })
 
-  it('用户勾选子集 confirm → PRD 前移落盘（requirement_confirmed）+ 以勾选集开工', async () => {
+  it('用户勾选子集 confirm → PRD 前移落盘（requirement_confirmed）+ 审查后发 PRD 确认卡挂起（改造 3）', async () => {
     await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(), undefined, persistSystem)
 
     const result = await resolveRequirementConfirm({
@@ -181,9 +181,16 @@ describe('需求确认弹窗（confirm_requirements）', () => {
       expect.objectContaining({ checkpoint: 'requirement_confirmed', project_id: 'proj-1' }),
       expect.anything(),
     )
-    expect(runSketchTask).toHaveBeenCalledWith(expect.objectContaining({
-      requirements: [{ id: 'F-002', description: '按月汇总统计' }],
-    }))
+    // 改造 3：审查（本例 mock 无审查响应→规则门降级过）后不直接开草图，
+    // 先发四段式 PRD 确认卡挂起，等用户确认卡回传才开工
+    expect(runSketchTask).not.toHaveBeenCalled()
+    const prdCard = events.find(
+      (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
+    )
+    expect(prdCard).toBeTruthy()
+    expect((prdCard!.payload as { requirements?: Array<{ id: string }> }).requirements).toEqual([
+      expect.objectContaining({ id: 'F-002' }),
+    ])
     expect(recordDecision).toHaveBeenCalledWith(expect.objectContaining({
       entry: expect.objectContaining({ type: 'requirement_confirmed', title: '用户确认需求清单' }),
     }))
@@ -191,7 +198,7 @@ describe('需求确认弹窗（confirm_requirements）', () => {
     expect(deltas.some((text) => text.includes('产品需求文档'))).toBe(true)
   })
 
-  it('用户选择「由向导决定」（delegate）→ 清单全量开工，决策注明让渡', async () => {
+  it('用户选择「由向导决定」（delegate）→ PRD 确认卡同样挂起（清单全量投影），决策注明让渡', async () => {
     await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(), undefined, persistSystem)
 
     await resolveRequirementConfirm({
@@ -201,12 +208,16 @@ describe('需求确认弹窗（confirm_requirements）', () => {
       decision: 'delegate',
     })
 
-    expect(runSketchTask).toHaveBeenCalledWith(expect.objectContaining({
-      requirements: [
-        { id: 'F-001', description: '记账本，记录日常收支' },
-        { id: 'F-002', description: '按月汇总统计' },
-      ],
-    }))
+    // 改造 3：delegate 同样进确认门（全量清单投影），不直接开工
+    expect(runSketchTask).not.toHaveBeenCalled()
+    const prdCard = events.find(
+      (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
+    )
+    expect(prdCard).toBeTruthy()
+    expect((prdCard!.payload as { requirements?: Array<{ id: string }> }).requirements).toEqual([
+      expect.objectContaining({ id: 'F-001' }),
+      expect.objectContaining({ id: 'F-002' }),
+    ])
     expect(recordDecision).toHaveBeenCalledWith(expect.objectContaining({
       entry: expect.objectContaining({ type: 'requirement_confirmed', title: '用户让渡：由向导决定需求' }),
     }))
