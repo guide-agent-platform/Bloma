@@ -7,6 +7,26 @@
 
 **v1.1 修订说明**：同步 §5 已知待同步项状态（4 项全部已同步），新增 §5.1 目录结构重组记录。按 `workflow.md §2.4` 走修订流程，待评审后回到已确认。
 
+## MVP 终审语义审查腿（裁判域 LLM，非 AC）（2026-08-26）
+
+| 属性 | 值 |
+|------|-----|
+| **状态** | 已确认 |
+
+### 变更内容
+
+- `[新增]` 新模块 `main/judge-semantic.ts`：MVP 终审的 LLM 语义审查腿，归裁判域（只判定不修复），与 prd-review（简化版 AC）刻意区分——审的是「产物是否忠实实现 PRD 每个功能项」，不使用 AC 方法论。逐功能项判定 implemented/partial/missing/deviated/unverified（不确定→unverified 不误杀 canvas/动画类）；证据必须引用产物代码；P0 missing/deviated→blocking、P0 partial/P1 missing/deviated→major，其余仅备注；代码级推导不信任模型自报结论；产物超长截断 24k 并如实标注
+- `[修改]` runJudgeReview 合成裁决（evaluateOnce）：规则引擎先行（return 直接进退回流，省一次 LLM）；规则全绿且 query 可用→语义审查，失败合成 return 进同一退回计数/让渡流；LLM 失败/无渠道→跳过并留痕（judge_semantic），绝不阻断交付。渠道优先 M5 prd 类别路由（可指快模型）
+- `[修改]` JudgeReviewInput/AgentLoopPostTestingInput 增 query/channel_id 透传（ipc/迭代/resume 五个调用点全部接线）；judge-engine 导出 readArtifactText 供语义审查复用；DecisionType 加 judge_semantic
+
+### 影响评估
+
+- 受影响模块：judge-semantic（新）/ programming-orchestrator / judge-engine / decision-log / ipc
+- 测试：新增 judge-semantic 6 例（解析白名单/严重度推导/合成 return+让渡留痕/全绿维持/skip 降级/截断标注）；judge 系既有 19 例、loop 门禁验收 5 例、sprint2 验收 40 例全过；全量 unit 553/555（2 失败为既有 flake，隔离全过）；typecheck 0 错
+- 线上待验证：真实渠道语义审查首跑（误杀率/命中质量）；每轮 MVP 终验增加一次 LLM 调用的耗时（建议 prd 类指快模型）
+
+---
+
 ## PRD 裁判审查门：简化版 AC 对抗审计（2026-08-26）
 
 | 属性 | 值 |

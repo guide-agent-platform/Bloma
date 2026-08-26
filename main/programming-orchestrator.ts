@@ -18,7 +18,8 @@ import { enrichRequirementsLlm, extractUserTexts, mergeEnrichment } from './requ
 import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from './requirement-normalizer'
 import { readTestReport, runGwtScenarios, writeTestReport, type GwtTestResult } from './gwt-service'
 import { renderSecurityScanMarkdown, runSecurityScan } from './security-scan'
-import { runJudge, type JudgeVerdict } from './judge-engine'
+import { runJudge, readArtifactText, type JudgeVerdict } from './judge-engine'
+import { runSemanticJudgeReview } from './judge-semantic'
 import { loadPromptOverride } from './prompt-config'
 import { assertToolAllowed } from './permission-service'
 import { recordDecision } from './decision-log'
@@ -1117,6 +1118,9 @@ export interface JudgeReviewInput {
   loop?: AgentLoopJudgeMetadata
   /** loop 路径「只终验不重修」（M4-B）：constraint_error 不再外部文档重修，首败熔断让渡 */
   repairInternalized?: boolean
+  /** 语义审查腿（2026-08-26，裁判域 LLM）：规则全绿后审「产物是否忠实实现 PRD」；缺省跳过 */
+  query?: SDKQuery
+  channel_id?: string
 }
 
 export interface JudgeReviewResult {
@@ -1131,9 +1135,12 @@ export interface JudgeReviewResult {
  * `return` → `judge_return_count +1`，未达上限则执行 constraint_error 修复
  * （重新生成 PRD/GWT 骨架，不改代码）后重新判定；达上限（quick=2/longterm=3）
  * → blocked_for_user_decision 让渡。
+ * 语义审查腿（2026-08-26）：规则先行——规则 return 直接进退回流（省一次 LLM）；
+ * 规则全绿且 query 可用 → 语义审查（产物 vs PRD 忠实性），失败合成 return 进同一
+ * 退回计数/让渡流；LLM 失败跳过留痕，绝不阻断交付。
  */
 export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeReviewResult> {
-  let verdict = judgeOnce(input)
+  let verdict = await evaluateOnce(input)
   while (verdict.verdict === 'return') {
     const project = findProject(input.project_id)
     const limit = project.mode === 'quick' ? JUDGE_RETURN_QUICK_LIMIT : JUDGE_RETURN_LONGTERM_LIMIT
@@ -1178,7 +1185,7 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
         privacy_level: 'research_safe',
       },
     })
-    verdict = judgeOnce(input)
+    verdict = await evaluateOnce(input)
   }
 
   updateProject(input.project_id, { current_stage: 'ready' })
@@ -1204,6 +1211,80 @@ function applyConstraintErrorDocRepair(input: { request_id: string; session_id: 
     project_id: input.project_id,
     checkpoint: 'mvp_before_generation',
   })
+}
+
+/** 单轮完整裁决：规则引擎先行，规则全绿且 query 可用时叠加 LLM 语义审查腿。 */
+async function evaluateOnce(input: JudgeReviewInput): Promise<JudgeVerdict> {
+  const verdict = judgeOnce(input)
+  if (verdict.verdict === 'return' || !input.query) return verdict
+
+  // 渠道：优先 M5 类别路由（prd 审查类，可指快模型），失败回退跳过
+  let env: Record<string, string> | undefined
+  try {
+    const resolution = resolveChannelEnv({
+      channelId: input.channel_id,
+      category: 'prd',
+      projectId: input.project_id,
+      sessionId: input.session_id,
+    })
+    env = resolution.env ?? undefined
+  } catch {
+    env = undefined
+  }
+  const project = findProject(input.project_id)
+  const backplane = readPrdBackplane(input.project_id)
+  const testResult = readTestReport(input.project_id)
+  const semantic = await runSemanticJudgeReview({
+    backplane,
+    artifact: readArtifactText(project.root_path),
+    testSummary: testResult
+      ? `共 ${testResult.total_count} 项，通过 ${testResult.passed_count}、失败 ${testResult.failed_count}`
+      : undefined,
+    query: input.query,
+    env,
+    sessionId: input.session_id,
+  })
+  if (semantic.skipped) {
+    try {
+      recordDecision({
+        project_id: input.project_id,
+        session_id: input.session_id,
+        entry: {
+          type: 'judge_semantic',
+          title: '语义审查跳过',
+          why: semantic.skipReason === 'no_channel' ? '无可用渠道，语义审查未执行' : 'LLM 语义审查失败，跳过不阻断',
+          detail: { skip_reason: semantic.skipReason },
+        },
+      })
+    } catch {
+      // 观测日志失败不影响主链路
+    }
+    return verdict
+  }
+  if (semantic.constraint && !semantic.constraint.passed) {
+    try {
+      recordDecision({
+        project_id: input.project_id,
+        session_id: input.session_id,
+        entry: {
+          type: 'judge_semantic',
+          title: '语义审查未过（裁判 LLM）',
+          why: semantic.constraint.detail,
+          detail: { findings: semantic.findings },
+        },
+      })
+    } catch {
+      // 同上
+    }
+    return {
+      verdict: 'return',
+      hard_constraints: [...verdict.hard_constraints, semantic.constraint],
+      soft_constraints: verdict.soft_constraints,
+      user_visible_summary: semantic.constraint.detail,
+      repairable: true,
+    }
+  }
+  return verdict
 }
 
 function judgeOnce(input: JudgeReviewInput): JudgeVerdict {
@@ -1247,6 +1328,9 @@ export interface AgentLoopPostTestingInput {
   /** Agent Loop 结果元数据（M4-B）：其存在即标记 loop 路径；judge 对异常终止态判「让渡」。
    *  存量旧版项目（via_agent_loop=false）resume 时无 loop 元数据，缺省走普通终验（无修复）。 */
   loop?: AgentLoopJudgeMetadata
+  /** 语义审查腿透传（2026-08-26）：judge 规则全绿后审产物 vs PRD 忠实性 */
+  query?: SDKQuery
+  channel_id?: string
 }
 
 /**
@@ -1319,6 +1403,8 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
     project_id: input.project_id,
     loop: input.loop,
     repairInternalized: true,
+    query: input.query,
+    channel_id: input.channel_id,
   })
   return { verdict: judge.outcome, test_result: testResult, judge: judge.verdict }
 }
@@ -1373,6 +1459,8 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
       mode: input.mode,
       preview_url: mvp.preview_url,
       loop: mvp.loop_result,
+      query: input.query,
+      channel_id: input.channel_id,
     })
     // T4-L3 蒸馏兜底·触发点②（每次迭代完成后，fire-and-forget）：默认关闭，
     // 失败在内部降级并落决策，绝不阻塞迭代收尾
@@ -1742,6 +1830,8 @@ export async function resumeBlockedFlow(
       mode: input.mode,
       preview_url: mvp.preview_url,
       loop: mvp.loop_result,
+      query: input.query,
+      channel_id: input.channel_id,
     })
     return
   }
@@ -1757,6 +1847,8 @@ export async function resumeBlockedFlow(
       mode: input.mode,
       preview_url: previewUrl,
       loop: loopMeta,
+      query: input.query,
+      channel_id: input.channel_id,
     })
     return
   }
@@ -1768,6 +1860,8 @@ export async function resumeBlockedFlow(
       session_id: input.session_id,
       project_id: input.project_id,
       ...(loopMeta ? { loop: loopMeta, repairInternalized: true } : {}),
+      query: input.query,
+      channel_id: input.channel_id,
     })
     return
   }
@@ -1783,6 +1877,8 @@ export async function resumeBlockedFlow(
       mode: input.mode,
       preview_url: previewUrl,
       loop: loopMeta,
+      query: input.query,
+      channel_id: input.channel_id,
     })
     return
   }

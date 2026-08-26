@@ -26,6 +26,7 @@ export type DecisionType =
   | 'requirement_confirmed'
   | 'prd_review'
   | 'prd_review_overridden'
+  | 'judge_semantic'
   | 'modification_gate'
   | 'modification_decision'
   | 'requirement_normalized'

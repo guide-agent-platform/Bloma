@@ -284,8 +284,8 @@ export function readGwtFeatureIds(projectId: string): string[] {
     .map((name) => name.slice(0, -'.feature'.length))
 }
 
-/** 读取产物全文（index.html + src/ 下 js/css），供行为断言关键词检查。 */
-function readArtifactText(projectRoot: string): string {
+/** 读取产物全文（index.html + src/ 下 js/css），供行为断言关键词检查与语义审查。 */
+export function readArtifactText(projectRoot: string): string {
   const parts: string[] = [readProjectHtml(projectRoot)]
   const srcDir = join(projectRoot, 'src')
   if (existsSync(srcDir)) {
