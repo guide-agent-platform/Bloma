@@ -95,3 +95,28 @@ export async function collectDomContext(
     return fallback(click)
   }
 }
+
+/**
+ * 点选纠错滚动转发：把渲染端捕获层收到的滚轮/中键拖拽增量滚到跨域预览 iframe。
+ * 渲染端无法 contentWindow.scrollBy（跨域），主进程经 frame.executeJavaScript
+ * 越过同源限制执行 window.scrollBy。找不到预览子帧时返回 scrolled:false，前端静默忽略。
+ */
+export async function scrollPreview(
+  webContents: WebContents,
+  deltaX: number,
+  deltaY: number,
+): Promise<{ scrolled: boolean }> {
+  const frame = findPreviewFrame(webContents)
+  if (!frame) return { scrolled: false }
+
+  const dx = Number.isFinite(deltaX) ? deltaX : 0
+  const dy = Number.isFinite(deltaY) ? deltaY : 0
+  if (dx === 0 && dy === 0) return { scrolled: true }
+
+  try {
+    await frame.executeJavaScript(`window.scrollBy(${dx}, ${dy})`, true)
+    return { scrolled: true }
+  } catch {
+    return { scrolled: false }
+  }
+}

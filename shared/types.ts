@@ -50,6 +50,7 @@ export const IPC_CHANNELS = {
   DOCUMENT_LIST: 'document:list',
   DOCUMENT_READ: 'document:read',
   DOM_COLLECT_CONTEXT: 'dom:collect-context',
+  DOM_SCROLL_PREVIEW: 'dom:scroll-preview',
   ANALYTICS_TRACK: 'analytics:track',
   CHANNEL_LIST: 'channel:list',
   CHANNEL_CREATE: 'channel:create',
@@ -812,6 +813,23 @@ export interface DomCollectContextResult {
   fallback_mode: boolean
 }
 
+/**
+ * 点选纠错模式下把滚轮/中键拖拽滚动转发到跨域预览 iframe。
+ * 渲染端捕获层盖在 iframe 上方拦截点击，顺带挡住了滚动；主进程经
+ * subframe.executeJavaScript(window.scrollBy) 越过同源限制滚动预览。
+ */
+export interface DomScrollPreviewInput extends RequestEnvelope {
+  /** 水平滚动增量（CSS 像素，正值向右） */
+  delta_x: number
+  /** 垂直滚动增量（CSS 像素，正值向下） */
+  delta_y: number
+}
+
+export interface DomScrollPreviewResult {
+  /** 是否找到预览子帧并执行了滚动（找不到子帧时 false，前端静默忽略） */
+  scrolled: boolean
+}
+
 export interface ProjectUpgradeInput extends RequestEnvelope {
   project_id: string
   session_id: string
@@ -1129,6 +1147,8 @@ export type ElectronAPI = {
   }
   dom: {
     collectContext(input: DomCollectContextInput): Promise<ApiResult<DomCollectContextResult>>
+    /** 点选纠错模式下转发滚轮/中键拖拽滚动到跨域预览 iframe */
+    scrollPreview(input: DomScrollPreviewInput): Promise<ApiResult<DomScrollPreviewResult>>
   }
   analytics: {
     track(input: AnalyticsTrackInput): Promise<ApiResult<AnalyticsTrackResult>>

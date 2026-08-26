@@ -68,6 +68,7 @@ const IPC_CHANNELS = {
   DOCUMENT_LIST: "document:list",
   DOCUMENT_READ: "document:read",
   DOM_COLLECT_CONTEXT: "dom:collect-context",
+  DOM_SCROLL_PREVIEW: "dom:scroll-preview",
   ANALYTICS_TRACK: "analytics:track",
   CHANNEL_LIST: "channel:list",
   CHANNEL_CREATE: "channel:create",
@@ -945,6 +946,22 @@ MCP 工具由 Agent SDK 在 main 进程侧调用，权限由 `PermissionService.
 ```
 
 规则：仅 http/https 公网地址；内网/环回/链路本地/保留段 IP、localhost/.local/.internal、无点主机名一律拒绝；重定向终态复检；响应体上限 2MB；HTML 剔除 script/style/标签后仅保留可见文本。
+
+### 12.11 `scroll_preview`（点选纠错滚动转发）
+
+渲染端点选纠错捕获层盖在跨域预览 iframe 上方会挡住滚动；此通道把滚轮/中键拖拽的增量转发给主进程，主进程经 `subframe.executeJavaScript(window.scrollBy)` 滚动预览。
+
+```json
+{
+  "input": {
+    "delta_x": 0,
+    "delta_y": 120
+  },
+  "output": {
+    "scrolled": true
+  }
+}
+```
 
 ---
 

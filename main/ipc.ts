@@ -20,6 +20,7 @@ import type {
   DocumentReadInput,
   DocumentSyncInput,
   DomCollectContextInput,
+  DomScrollPreviewInput,
   PermissionResponseInput,
   PermissionSetModeInput,
   PointCorrectionInput,
@@ -50,7 +51,7 @@ import type {
 import { IPC_CHANNELS } from '../shared/types'
 import { fail, ok } from './api-result'
 import { cancelAgent, getSdkQuery, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from './orchestrator'
-import { collectDomContext } from './dom-context'
+import { collectDomContext, scrollPreview } from './dom-context'
 import { runAgentLoopPostTesting, runIterationTask, runMvpTask, setProgrammingEventPublisher } from './programming-orchestrator'
 import { handleAgentStreamEvent } from './notifications'
 import { assertToolAllowed, getPermissionMode, resolvePermission, setPermissionMode, setPermissionRequestPublisher } from './permission-service'
@@ -433,6 +434,14 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
       const input = requireFields<DomCollectContextInput>(payload, ['project_id', 'session_id'])
       const click = input.click ?? { x: 0, y: 0 }
       return collectDomContext(mainWindow.webContents, click)
+    })
+  })
+
+  // 点选纠错滚动转发：捕获层挡住预览滚动，这里把滚轮/中键拖拽增量滚回跨域 iframe。
+  ipcMain.handle(IPC_CHANNELS.DOM_SCROLL_PREVIEW, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<DomScrollPreviewInput>(payload, [])
+      return scrollPreview(mainWindow.webContents, input.delta_x ?? 0, input.delta_y ?? 0)
     })
   })
 

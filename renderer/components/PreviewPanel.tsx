@@ -71,6 +71,50 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
   const [correctionDomContext, setCorrectionDomContext] = React.useState<DomCollectContextResult | null>(null)
   const iframeRef = React.useRef<HTMLIFrameElement>(null)
 
+  // 纠错模式下转发滚轮/中键拖拽滚动到跨域预览 iframe：捕获层盖在 iframe 上方会挡住滚动，
+  // 这里把增量累积后按帧 flush 给主进程，由主进程 executeJavaScript(window.scrollBy) 越过同源限制滚动预览。
+  const scrollPendingRef = React.useRef({ x: 0, y: 0 })
+  const scrollRafRef = React.useRef<number | null>(null)
+  const middleDragRef = React.useRef({ active: false, lastX: 0, lastY: 0 })
+  // 弹窗打开后预览的累计滚动量，用于让标记/弹窗跟随内容滚动，保持锚定在点选元素上
+  const [scrollOffset, setScrollOffset] = React.useState({ x: 0, y: 0 })
+
+  const flushPreviewScroll = React.useCallback(() => {
+    scrollRafRef.current = null
+    const { x, y } = scrollPendingRef.current
+    scrollPendingRef.current = { x: 0, y: 0 }
+    if (x === 0 && y === 0) return
+    void window.electronAPI?.dom?.scrollPreview?.({
+      request_id: crypto.randomUUID(),
+      delta_x: x,
+      delta_y: y,
+    })
+    // 同步累计滚动量，驱动标记/弹窗跟随内容滚动（保持锚定在点选元素上）
+    setScrollOffset((prev) => ({ x: prev.x + x, y: prev.y + y }))
+  }, [])
+
+  const queuePreviewScroll = React.useCallback(
+    (dx: number, dy: number) => {
+      if (!window.electronAPI?.dom?.scrollPreview) return
+      scrollPendingRef.current.x += dx
+      scrollPendingRef.current.y += dy
+      if (scrollRafRef.current == null) {
+        scrollRafRef.current = requestAnimationFrame(flushPreviewScroll)
+      }
+    },
+    [flushPreviewScroll],
+  )
+
+  // 卸载时取消未 flush 的滚动帧，避免在已销毁组件上继续触发
+  React.useEffect(() => {
+    return () => {
+      if (scrollRafRef.current != null) {
+        cancelAnimationFrame(scrollRafRef.current)
+        scrollRafRef.current = null
+      }
+    }
+  }, [])
+
   const effectiveStatus: PreviewStatus =
     status === 'empty' && (hasStream || ['generating_sketch', 'generating_mvp'].includes(stage))
       ? 'loading'
@@ -250,6 +294,34 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
                   zIndex: 5,
                   cursor: `url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><circle cx='12' cy='12' r='10' fill='none' stroke='%23DC2626' stroke-width='2' stroke-dasharray='4 2'/></svg>") 12 12, crosshair`,
                 }}
+                onWheel={(e) => {
+                  // 滚轮滚动转发：deltaMode 0=像素 / 1=行 / 2=页，统一换算成像素后转给预览
+                  const factor = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? window.innerHeight : 1
+                  queuePreviewScroll(e.deltaX * factor, e.deltaY * factor)
+                }}
+                onPointerDown={(e) => {
+                  // 中键拖拽滚动（替代被捕获层挡住的浏览器原生 autoscroll）
+                  if (e.button !== 1) return
+                  e.preventDefault()
+                  middleDragRef.current = { active: true, lastX: e.clientX, lastY: e.clientY }
+                  e.currentTarget.setPointerCapture?.(e.pointerId)
+                }}
+                onPointerMove={(e) => {
+                  if (!middleDragRef.current.active) return
+                  const dx = e.clientX - middleDragRef.current.lastX
+                  const dy = e.clientY - middleDragRef.current.lastY
+                  middleDragRef.current.lastX = e.clientX
+                  middleDragRef.current.lastY = e.clientY
+                  queuePreviewScroll(dx, dy)
+                }}
+                onPointerUp={(e) => {
+                  if (e.button !== 1) return
+                  middleDragRef.current.active = false
+                  e.currentTarget.releasePointerCapture?.(e.pointerId)
+                }}
+                onPointerCancel={() => {
+                  middleDragRef.current.active = false
+                }}
                 onClick={(e) => {
                   if (correctionActive) return
                   const stage = e.currentTarget.parentElement
@@ -260,6 +332,8 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
                   setCorrectionNote('')
                   setCorrectionDomContext(null)
                   setCorrectionActive(true)
+                  // 重新点选时归零滚动偏移，标记从当前预览位置开始锚定
+                  setScrollOffset({ x: 0, y: 0 })
                   // R-CORR-01：点击即收集 DOM 上下文用于高亮被选区域；异步回填，失败保持红点回退
                   if (onCollectDomContext) {
                     void onCollectDomContext(pos).then((ctx) => {
@@ -278,6 +352,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
         {correctionActive && onCorrectionSubmit && (
           <CorrectionOverlay
             position={correctionPos}
+            scrollOffset={scrollOffset}
             domContext={correctionDomContext ?? undefined}
             note={correctionNote}
             onNoteChange={setCorrectionNote}
@@ -413,13 +488,15 @@ const TimeoutState: React.FC<{ onContinueWaiting?: () => void }> = ({ onContinue
 
 const CorrectionOverlay: React.FC<{
   position: { x: number; y: number }
+  /** 弹窗打开后预览的累计滚动量，标记/弹窗据此反向偏移，锚定在点选元素上 */
+  scrollOffset: { x: number; y: number }
   domContext?: DomCollectContextResult
   note: string
   onNoteChange: (value: string) => void
   onSubmit: () => void
   onGuess: () => void
   onClose: () => void
-}> = ({ position, domContext, note, onNoteChange, onSubmit, onGuess, onClose }) => {
+}> = ({ position, scrollOffset, domContext, note, onNoteChange, onSubmit, onGuess, onClose }) => {
   const markerSize = 24
   const popoverWidth = 260
   const popoverLeft = Math.max(8, Math.min(position.x - popoverWidth / 2, typeof window !== 'undefined' ? window.innerWidth - popoverWidth - 16 : 260))
@@ -435,7 +512,7 @@ const CorrectionOverlay: React.FC<{
     <>
       {region && (
         <div data-ai-id="selected-preview-element-highlight" style={{
-          position: 'absolute', left: region.x, top: region.y, width: region.width, height: region.height,
+          position: 'absolute', left: region.x - scrollOffset.x, top: region.y - scrollOffset.y, width: region.width, height: region.height,
           border: '2px solid var(--color-danger)', background: 'rgba(220, 38, 38, 0.10)',
           borderRadius: 2, pointerEvents: 'none', zIndex: 10,
           boxShadow: '0 0 0 4px rgba(220, 38, 38, 0.12)',
@@ -443,14 +520,14 @@ const CorrectionOverlay: React.FC<{
       )}
       {!region && (
         <div data-ai-id="point-correction-popover" style={{
-          position: 'absolute', left: position.x - markerSize / 2, top: position.y - markerSize / 2,
+          position: 'absolute', left: position.x - markerSize / 2 - scrollOffset.x, top: position.y - markerSize / 2 - scrollOffset.y,
           width: markerSize, height: markerSize, borderRadius: '50%',
           border: '2px solid var(--color-danger)', background: 'rgba(220, 38, 38, 0.14)',
           animation: 'pulse-ring 1.5s ease-in-out infinite', pointerEvents: 'none', zIndex: 10,
         }} />
       )}
       <div role="dialog" aria-modal="true" aria-label="点选纠错" style={{
-        position: 'absolute', left: popoverLeft, top: popoverTop, width: popoverWidth,
+        position: 'absolute', left: popoverLeft - scrollOffset.x, top: popoverTop - scrollOffset.y, width: popoverWidth,
         padding: 'var(--space-3)',
         background: 'var(--glass-bg-strong)', backdropFilter: 'blur(var(--glass-blur))', WebkitBackdropFilter: 'blur(var(--glass-blur))',
         border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-md)',
@@ -474,6 +551,11 @@ const CorrectionOverlay: React.FC<{
           }}
         />
         <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{
+            height: 34, padding: '0 var(--space-4)', fontSize: 'var(--font-size-sm)', fontWeight: 600,
+            color: 'var(--color-text)', background: 'var(--white)', border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-full)', cursor: 'pointer',
+          }}>取消</button>
           <button onClick={onGuess} style={{
             height: 34, padding: '0 var(--space-4)', fontSize: 'var(--font-size-sm)', fontWeight: 600,
             color: 'var(--color-text)', background: 'var(--white)', border: '1px solid var(--color-border)',

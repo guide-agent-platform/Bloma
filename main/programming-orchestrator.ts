@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { AgentEvent, AgentLoopJudgeMetadata, AgentSendMessageInput, Channel, ChannelModel, MessageContentBlock, Project, ProjectMode, Snapshot, TemplateType } from '../shared/types'
+import type { AgentEvent, AgentLoopJudgeMetadata, AgentSendMessageInput, Channel, ChannelModel, MessageContentBlock, Project, ProjectMode, Snapshot, SnapshotKind, TemplateType } from '../shared/types'
 import { getAgentSessionPath, getDocumentsDir } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
 import { buildPrdBackplane, readPrdBackplane, readUxContractSketch, syncDocuments, updateRequirementStatus, writeSecurityScanDocument } from './document-engine'
@@ -450,35 +450,39 @@ export async function runMvpTask(input: MvpTaskInput): Promise<MvpTaskResult> {
 async function finalizeMvpDelivery(
   input: MvpTaskInput,
   detail: { fileCount: number; snapshotSummary: string; readySummary: string; previewUrl: string; viaAgentLoop?: boolean; loopResult?: AgentLoopResult },
+  snapshotKind: SnapshotKind = 'mvp',
 ): Promise<MvpTaskResult> {
   const runCommand = 'npm start'
   await allowAutomatedTool('run_project', { project_id: input.project_id, command: runCommand }, input.session_id, input.project_id)
-  await allowAutomatedTool('create_snapshot', { project_id: input.project_id, kind: 'mvp' }, input.session_id, input.project_id)
+  await allowAutomatedTool('create_snapshot', { project_id: input.project_id, kind: snapshotKind }, input.session_id, input.project_id)
   const snapshot = await createSnapshot({
     request_id: input.request_id,
     project_id: input.project_id,
-    kind: 'mvp',
+    kind: snapshotKind,
     summary: detail.snapshotSummary,
     include_documents: true,
     health_status: 'healthy',
   })
 
-  trackAnalytics({
-    request_id: input.request_id,
-    event: {
-      event_type: 'mvp_delivered',
-      project_id: input.project_id,
-      session_id: input.session_id,
-      payload: {
-        mode: input.mode,
-        snapshot_id: snapshot.snapshot_id,
-        file_count: detail.fileCount,
-        run_command: runCommand,
-        ...(detail.viaAgentLoop ? { via_agent_loop: true } : {}),
+  // 迭代快照不记 mvp_delivered（那是首次交付 MVP 的埋点；点选纠错的 point_correction 已在 ipc.ts 记录）
+  if (snapshotKind === 'mvp') {
+    trackAnalytics({
+      request_id: input.request_id,
+      event: {
+        event_type: 'mvp_delivered',
+        project_id: input.project_id,
+        session_id: input.session_id,
+        payload: {
+          mode: input.mode,
+          snapshot_id: snapshot.snapshot_id,
+          file_count: detail.fileCount,
+          run_command: runCommand,
+          ...(detail.viaAgentLoop ? { via_agent_loop: true } : {}),
+        },
+        privacy_level: 'research_safe',
       },
-      privacy_level: 'research_safe',
-    },
-  })
+    })
+  }
 
   updateProject(input.project_id, {
     current_stage: 'testing',
@@ -661,7 +665,7 @@ function errorCodeFrom(message: string): string {
  * 单次启动沙箱（启动失败分类的修复已内化在 loop：run_preview 失败 → 看日志 → edit_file），
  * 再走共用交付尾巴。沙箱起不来直接抛错（loop 已给过自修机会，不再走外部修复循环）。
  */
-async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelContext): Promise<MvpTaskResult> {
+async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelContext, snapshotKind: SnapshotKind = 'mvp'): Promise<MvpTaskResult> {
   const project = findProject(input.project_id)
   const backplane = readPrdBackplane(input.project_id)
   const editFormat = loop.model?.edit_format ?? 'diff'
@@ -842,12 +846,14 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   const fileCount = countProjectFiles(project.root_path)
   return finalizeMvpDelivery(input, {
     fileCount,
-    snapshotSummary: `MVP 已生成（Agent Loop，${result.turns} 轮 / ${result.toolCalls.length} 次工具调用），进入测试阶段。`,
+    snapshotSummary: snapshotKind === 'iteration'
+      ? `已按修改意见重新生成（Agent Loop，${result.turns} 轮 / ${result.toolCalls.length} 次工具调用），进入测试阶段。`
+      : `MVP 已生成（Agent Loop，${result.turns} 轮 / ${result.toolCalls.length} 次工具调用），进入测试阶段。`,
     readySummary: result.finalText.slice(0, 200) || `Agent Loop 生成完成（${result.status}）。`,
     previewUrl: sandbox.preview_url,
     viaAgentLoop: true,
     loopResult: result,
-  })
+  }, snapshotKind)
 }
 
 /** 递归统计项目产物文件数（跳过 node_modules 等，快照 summary 与埋点用）。 */
@@ -1467,15 +1473,10 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
   publishCompletionMessage(input, `好的，我按你的新想法「${truncateCopy(input.prompt, 20)}」重新生成一版。`)
 
   try {
-    const mvp = await runMvpTask({
-      request_id: input.request_id,
-      session_id: input.session_id,
-      project_id: input.project_id,
-      mode: input.mode,
-      channel_id: input.channel_id,
-      query: input.query,
-      signal: input.signal,
-    })
+    // 迭代不进入 generating_mvp 阶段（那是首次生成 MVP 的语义）：保持 iterating，
+    // 只更新 PRD 背板（含合并后的需求）供 loop 增量修改，快照用 iteration 而非 mvp。
+    await syncPrdCheckpoints(input, requirements)
+    const mvp = await runMvpViaAgentLoop(input, await tryResolveAgentLoop(input), 'iteration')
     // Agent Loop 唯一运行时：迭代产物一律走独立门禁（只终验不重修）
     await runAgentLoopPostTesting({
       request_id: input.request_id,

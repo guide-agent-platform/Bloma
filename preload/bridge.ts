@@ -39,6 +39,7 @@ import type {
   DocumentReadInput,
   DocumentSyncInput,
   DomCollectContextInput,
+  DomScrollPreviewInput,
   ElectronAPI,
   PermissionResponseInput,
   PermissionSetModeInput,
@@ -155,6 +156,8 @@ const electronAPI: ElectronAPI = {
   dom: {
     collectContext: (input: DomCollectContextInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.DOM_COLLECT_CONTEXT, input),
+    scrollPreview: (input: DomScrollPreviewInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.DOM_SCROLL_PREVIEW, input),
   },
   analytics: {
     track: (input: AnalyticsTrackInput) =>

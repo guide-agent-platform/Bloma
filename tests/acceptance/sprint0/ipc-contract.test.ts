@@ -45,6 +45,7 @@ const expectedChannels = {
   DOCUMENT_LIST: 'document:list',
   DOCUMENT_READ: 'document:read',
   DOM_COLLECT_CONTEXT: 'dom:collect-context',
+  DOM_SCROLL_PREVIEW: 'dom:scroll-preview',
   ANALYTICS_TRACK: 'analytics:track',
   CHANNEL_LIST: 'channel:list',
   CHANNEL_CREATE: 'channel:create',
