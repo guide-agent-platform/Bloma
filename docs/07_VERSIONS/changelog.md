@@ -7,6 +7,28 @@
 
 **v1.1 修订说明**：同步 §5 已知待同步项状态（4 项全部已同步），新增 §5.1 目录结构重组记录。按 `workflow.md §2.4` 走修订流程，待评审后回到已确认。
 
+## PRD 裁判审查门：简化版 AC 对抗审计（2026-08-26）
+
+| 属性 | 值 |
+|------|-----|
+| **状态** | 已确认 |
+
+### 变更内容
+
+- `[新增]` 新模块 `main/prd-review.ts`：PRD 落盘后、草图前的裁判审查门。方法论源自用户指定 skill「ac-audit」（~/.claude/skills/ac-audit）的流程精简版——保留六维攻击面 I-F-Z-U-L-G + PRD 权重（F30/U20/L15/G15/I10/Z10）、严重度分级（blocking/major→退回，minor/suggestion→放行）、证据引用/禁编造/禁提修复方案铁律、诚实降级标注 simplified_ac；砍掉多轮循环/Defender 修复/双 Arbiter/Prober/金丝雀/重叠度实测（单轮秒级）
+- `[新增]` 独立一次模型请求（AC 铁律「审查者≠生成者」，不与 PRD 生成合并自查）；渠道优先 M5 prd 类别路由（可指快模型）、回退向导轮 env、再失败降级确定性规则门（只拦空定位/零功能项/描述过短/完全重复硬伤）——永不阻断主流程
+- `[新增]` 审查未过 → 决策卡「忽略问题继续生成 / 我来补充说明」（复用 card_option 回传，零新 IPC）：override→按原需求开草图 + 日志 prd_review_overridden；supplement→提示打字补充回向导修订。代码级裁决不信任模型自报宽松结论（按 severity 推导）
+- `[修改]` guide-agent-service：resolveRequirementConfirm 插审查门（PRD 失败时跳过审查保持原降级）；handleGuideMessage 顶部拦截审查卡回传（先于 resolveCardAnswer）；BLOCKED_DECISION_IDS 加审查卡选项 id；pending 补存 env
+- `[修改]` decision-log：DecisionType 加 prd_review / prd_review_overridden
+
+### 影响评估
+
+- 受影响模块：prd-review（新）/ guide-agent-service / decision-log
+- 测试：新增 guide-prd-review 6 例（pass 分流/卡片留痕/override+supplement/降级/解析白名单/规则门）；既有 guide 系 5 文件 26 例全过；全量 unit 546/549（3 失败为既有 flake 三件套，隔离 30/30 全过）；typecheck 0 错
+- 线上待验证：真实渠道六维审查首跑（问题命中质量/误报率）、prd 类别路由指快模型的耗时
+
+---
+
 ## 渠道存储独立化：bloma-channels.json（2026-08-26）
 
 | 属性 | 值 |

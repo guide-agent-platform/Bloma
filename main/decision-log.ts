@@ -24,6 +24,8 @@ export type DecisionType =
   | 'clarification_forced_confirm'
   | 'requirement_confirm_card'
   | 'requirement_confirmed'
+  | 'prd_review'
+  | 'prd_review_overridden'
   | 'modification_gate'
   | 'modification_decision'
   | 'requirement_normalized'

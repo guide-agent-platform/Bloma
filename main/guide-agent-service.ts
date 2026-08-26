@@ -7,13 +7,23 @@ import { loadPromptOverride } from './prompt-config'
 import { parseDecisionText, recordDecision } from './decision-log'
 import { syncDocuments } from './document-engine'
 import { researchMarketSimilar, type MarketResearch } from './guide-research'
+import {
+  PRD_REVIEW_OPTION_OVERRIDE,
+  PRD_REVIEW_OPTION_SUPPLEMENT,
+  consumePrdReviewSupplement,
+  publishPrdReviewCard,
+  resolvePrdReviewCardAnswer,
+  resumePrdReviewOverride,
+  runPrdReviewGate,
+} from './prd-review'
+import { resolveChannelEnv } from './runtime-fallback'
 import type { ConversationTurn, GuideModelOptions, SDKQuery } from './orchestrator'
 import { trackAnalytics } from './platform-services'
 import { resolvePrdBackplane, runSketchTask, setProgrammingEventPublisher } from './programming-orchestrator'
 import { findProject, updateProject } from './project-service'
 import { captureConstraints, extractConstraints } from './constraint-extractor'
 import { isAutoDelegationText, readPrimaryIntent } from './session-service'
-import type { SketchRequirement } from './sketch-engine'
+import type { PrdBackplane, SketchRequirement } from './sketch-engine'
 import { isRecord } from './validators'
 
 type GuideEventPublisher = (event: AgentEvent) => void
@@ -99,7 +109,7 @@ const FIXED_CARD_LABELS: Record<string, string> = {
 }
 
 /** 阻塞态让渡卡片的决策 id（accept/explain/continue）由 resumeBlockedFlow 处理，不得误入草图生成。 */
-const BLOCKED_DECISION_IDS = new Set(['accept', 'explain', 'continue'])
+const BLOCKED_DECISION_IDS = new Set(['accept', 'explain', 'continue', PRD_REVIEW_OPTION_OVERRIDE, PRD_REVIEW_OPTION_SUPPLEMENT])
 
 /** 兜底选项：每张澄清卡片固定收尾，保证用户永远有「不选具体方向也能开工」的出口。 */
 const AUTO_ESCAPE_OPTION: ClarificationOption = {
@@ -285,6 +295,23 @@ export async function handleGuideMessage(
 
   // 主题锚点：首条用户消息（用户最初想做什么），澄清答案只能追加、不能覆盖主题
   const primaryIntent = readPrimaryIntent(input.session_id)
+
+  // PRD 审查决策卡回传（必须在普通卡片答案分流之前：审查卡选项 id 专属，
+  // 误入 resolveCardAnswer 会把按钮文案当需求开工）。override → 忽略问题开草图；
+  // supplement → 提示用户直接打字补充（pending 已消费，新确认弹窗会重建全流程）。
+  const prdReviewDecision = resolvePrdReviewCardAnswer(input)
+  if (prdReviewDecision === 'override') {
+    await resumePrdReviewOverride(input)
+    return
+  }
+  if (prdReviewDecision === 'supplement') {
+    consumePrdReviewSupplement(input)
+    const hint = '好的，你想补充或修改哪里？直接打字告诉我就行。'
+    persistAssistant?.(hint)
+    publish(makeGuideEvent(input, 'message_delta', { text: hint }))
+    publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+    return
+  }
 
   // 用户约束走门（T4-L1 写入侧）：约束语句（「不含登录」「必须离线可用」）确定性提取、
   // 持久化 project.constraints，随背板常驻注入——不依赖模型记忆，首轮约束历轮生效。
@@ -567,6 +594,8 @@ interface PendingRequirementConfirm {
   requirements: SketchRequirement[]
   research: MarketResearch
   query: SDKQuery
+  /** PRD 审查门（简化版 AC）复用：向导轮模型 env，prd 类别路由解析失败时的回退 */
+  env: Record<string, string>
   publish: GuideEventPublisher
 }
 
@@ -626,6 +655,7 @@ async function startRequirementConfirmFlow(
     requirements,
     research,
     query: model.query,
+    env: model.env,
     publish,
   })
 
@@ -678,6 +708,7 @@ export async function resolveRequirementConfirm(input: {
   })
 
   let prdWritten = false
+  let backplaneForReview: PrdBackplane | undefined
   try {
     const backplane = await resolvePrdBackplane(
       {
@@ -690,6 +721,7 @@ export async function resolveRequirementConfirm(input: {
       },
       requirements,
     )
+    backplaneForReview = backplane
     syncDocuments(
       {
         request_id: pending.request_id,
@@ -700,9 +732,58 @@ export async function resolveRequirementConfirm(input: {
       backplane,
     )
     prdWritten = true
-    publish(makeGuideEvent(input, 'message_delta', { text: '需求已确认，我先把它整理成产品需求文档，然后开始画草图。' }))
   } catch (error) {
     console.error('[guide] PRD 前移生成失败（不阻断草图）:', error)
+  }
+
+  // PRD 裁判审查门（简化版 AC，2026-08-26）：PRD 落盘后、草图前。审查是独立一次
+  // 模型请求（审查者≠生成者）；渠道优先 prd 类别路由，回退向导轮 env，再失败规则门。
+  // PRD 本身生成失败（无背板）时跳过审查直接草图（原有降级语义不变）。
+  if (prdWritten && backplaneForReview) {
+    let reviewEnv: Record<string, string> | undefined = pending.env
+    try {
+      const resolution = resolveChannelEnv({
+        channelId: pending.channel_id,
+        category: 'prd',
+        projectId: pending.project_id,
+        sessionId: pending.session_id,
+      })
+      if (resolution.env) reviewEnv = resolution.env
+    } catch {
+      // 类别路由解析失败：用向导轮 env 兜底
+    }
+    const review = await runPrdReviewGate({
+      backplane: backplaneForReview,
+      confirmedRequirements: requirements,
+      query: pending.query,
+      env: reviewEnv,
+      sessionId: pending.session_id,
+    })
+    if (review.verdict === 'needs_revision') {
+      publish(makeGuideEvent(input, 'message_delta', {
+        text: `需求已确认，产品需求文档已形成。裁判审查发现 ${review.issues.filter((issue) => issue.severity === 'blocking' || issue.severity === 'major').length} 个需要你定夺的问题，请看下面的卡片选择怎么处理。`,
+      }))
+      publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+      publishPrdReviewCard({
+        input: {
+          request_id: pending.request_id,
+          session_id: pending.session_id,
+          project_id: pending.project_id,
+          mode: pending.mode,
+          channel_id: pending.channel_id,
+        },
+        requirements,
+        issues: review.issues,
+        outcome: review,
+        query: pending.query,
+        publish,
+      })
+      return { started: true, prd_written: prdWritten }
+    }
+    publish(makeGuideEvent(input, 'message_delta', { text: '需求已确认，我先把它整理成产品需求文档（已通过裁判审查），然后开始画草图。' }))
+  } else if (prdWritten) {
+    publish(makeGuideEvent(input, 'message_delta', { text: '需求已确认，我先把它整理成产品需求文档，然后开始画草图。' }))
+  } else {
     publish(makeGuideEvent(input, 'message_delta', { text: '需求已确认，开始画草图。' }))
   }
   publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
