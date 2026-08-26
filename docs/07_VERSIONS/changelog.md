@@ -7,6 +7,28 @@
 
 **v1.1 修订说明**：同步 §5 已知待同步项状态（4 项全部已同步），新增 §5.1 目录结构重组记录。按 `workflow.md §2.4` 走修订流程，待评审后回到已确认。
 
+## 裁判审查委派化：协作过程可视化（2026-08-26）
+
+| 属性 | 值 |
+|------|-----|
+| **状态** | 已确认 |
+
+### 变更内容
+
+- `[新增]` 新模块 `main/review-delegation.ts`：PRD 六维审查与 MVP 语义审查默认升级为**真·委派子 agent**（用户拍板：协作过程可视化）——经 agent-collaboration M1–M4 派 `role='research'`（物理只读工具面 read_file/list_files/grep/web_fetch，裁判铁律「只判定不修复」由工具面保证而非提示词），生命周期事件（delegation_started/completed/failed）流入 DelegationFeed/CollaborationPanel 实时可见，子会话 JSONL 可回放
+- `[新增]` 合成父键（review-{uuid}）注册父上下文，与 MVP 主 loop 的真实注册完全隔离；finally 三件套清理（停残/注销/清状态，防孤儿子 agent）；120s 等待上限、8 轮子 agent 上限
+- `[修改]` 语义审查委派版的实质升级：产物不再内联截断 24k，子 agent 用只读工具**自行翻代码找证据**；PRD 门委派与直连共用任务体构造
+- `[修改]` 降级链：委派（默认）→ 直连 LLM（既有路径）→ 规则门；开关 BLOMA_DELEGATED_REVIEW（缺省开，='0' 回退直连）；PrdReviewOutcome/SemanticJudgeResult 增 via 字段（delegation/direct，入决策日志）
+- `[修改]` 两调用点（resolveRequirementConfirm/evaluateOnce）透传 projectId/requestId/publish；三个既有测试文件关委派走直连；渲染端零改动（M4-C 事件基建直接消费）
+
+### 影响评估
+
+- 受影响模块：review-delegation（新）/ prd-review / judge-semantic / guide-agent-service / programming-orchestrator / 测试×4
+- 测试：新增 review-delegation 5 例（接线/开关/超时/失败/拋错清理）；目标集 57/57、全量 unit 558/560 + acceptance 129/132（失败均为既有并行 flake 三件套，隔离 12/12 全过）；typecheck 0 错
+- 线上待验证：委派审查首跑（DelegationFeed 可视化效果、子 agent 只读查证质量、耗时）
+
+---
+
 ## MVP 终审语义审查腿（裁判域 LLM，非 AC）（2026-08-26）
 
 | 属性 | 值 |

@@ -25,6 +25,7 @@ import { recordDecision } from './decision-log'
 import { runSketchTask } from './programming-orchestrator'
 import type { PrdBackplane } from './sketch-engine'
 import type { SDKQuery } from './orchestrator'
+import { delegatedReviewEnabled, runDelegatedReview } from './review-delegation'
 
 // =========================================================================
 // 类型
@@ -46,6 +47,8 @@ export interface PrdReviewOutcome {
   issues: PrdReviewIssue[]
   /** llm = 六维攻击审查；rules = LLM 不可用后的确定性降级 */
   mode: 'llm' | 'rules'
+  /** llm 路径执行方式：delegation = 委派子 agent（可视化）；direct = 平台直连 */
+  via?: 'delegation' | 'direct'
   degraded?: boolean
 }
 
@@ -121,15 +124,42 @@ export async function runPrdReviewGate(opts: {
   sessionId: string
   signal?: AbortSignal
   maxTokens?: number
+  /** 委派可视化（2026-08-26）：三者齐备时优先走委派子 agent，否则直连 */
+  projectId?: string
+  requestId?: string
+  publish?: (event: AgentEvent) => void
 }): Promise<PrdReviewOutcome> {
   const { backplane, confirmedRequirements, query, env, sessionId, signal, maxTokens } = opts
   if (!env) {
     // 无可用渠道 env：直接规则门（不算 degraded——渠道不可用的如实降级）
     return ruleGateReview(backplane)
   }
+  // ① 委派审查（默认，协作过程经 DelegationFeed 可视化）；解析失败/委派失败落直连
+  if (delegatedReviewEnabled() && opts.projectId && opts.requestId && opts.publish) {
+    const delegated = await runDelegatedReview({
+      goal: `裁判六维审查 PRD：${backplane.name ?? '未命名项目'}`,
+      task: buildPrdReviewTask(backplane, confirmedRequirements),
+      system: PRD_REVIEW_SYSTEM_PROMPT,
+      query,
+      env,
+      sessionId,
+      projectId: opts.projectId,
+      requestId: opts.requestId,
+      publish: opts.publish,
+    })
+    if (delegated.ok && delegated.finalText) {
+      try {
+        const issues = parseReviewIssues(delegated.finalText)
+        return { verdict: deriveVerdict(issues), issues, mode: 'llm', via: 'delegation' }
+      } catch {
+        console.error('[prd-review] 委派审查输出不可解析，回退直连')
+      }
+    }
+  }
+  // ② 直连单次请求
   try {
     const issues = await attackViaLlm({ backplane, confirmedRequirements, query, env, sessionId, signal, maxTokens })
-    return { verdict: deriveVerdict(issues), issues, mode: 'llm' }
+    return { verdict: deriveVerdict(issues), issues, mode: 'llm', via: 'direct' }
   } catch (error) {
     console.error('[prd-review] LLM 审查失败，降级规则门:', error)
     return { ...ruleGateReview(backplane), degraded: true }
@@ -143,7 +173,35 @@ function deriveVerdict(issues: PrdReviewIssue[]): 'pass' | 'needs_revision' {
     : 'pass'
 }
 
-/** LLM 攻击轮：内联 PRD 全文 + 用户确认清单（F 维的对照基准）。 */
+/** 审查任务体（委派与直连共用）：PRD 全文 + 用户确认清单 + 输出指令。 */
+function buildPrdReviewTask(
+  backplane: PrdBackplane,
+  confirmedRequirements: Array<{ id: string; description: string }>,
+): string {
+  return [
+    '【PRD 全文（背板 JSON）】',
+    JSON.stringify(
+      {
+        name: backplane.name,
+        positioning: backplane.positioning,
+        requirements: backplane.requirements,
+        out_of_scope: backplane.out_of_scope,
+        constraints: backplane.constraints,
+      },
+      null,
+      2,
+    ),
+    '',
+    '【用户确认的需求清单（F 保真维度的对照基准）】',
+    confirmedRequirements.length
+      ? confirmedRequirements.map((item) => `- ${item.id}: ${item.description}`).join('\n')
+      : '- （无已确认清单，F 维度记 clean）',
+    '',
+    '现在执行六维攻击审查，按【输出】格式给出 JSON。',
+  ].join('\n')
+}
+
+/** LLM 攻击轮（直连）：内联 PRD 全文 + 用户确认清单（F 维的对照基准）。 */
 async function attackViaLlm(opts: {
   backplane: PrdBackplane
   confirmedRequirements: Array<{ id: string; description: string }>
@@ -153,29 +211,7 @@ async function attackViaLlm(opts: {
   signal?: AbortSignal
   maxTokens?: number
 }): Promise<PrdReviewIssue[]> {
-  const prompt = [
-    PRD_REVIEW_SYSTEM_PROMPT,
-    '',
-    '【PRD 全文（背板 JSON）】',
-    JSON.stringify(
-      {
-        name: opts.backplane.name,
-        positioning: opts.backplane.positioning,
-        requirements: opts.backplane.requirements,
-        out_of_scope: opts.backplane.out_of_scope,
-        constraints: opts.backplane.constraints,
-      },
-      null,
-      2,
-    ),
-    '',
-    '【用户确认的需求清单（F 保真维度的对照基准）】',
-    opts.confirmedRequirements.length
-      ? opts.confirmedRequirements.map((item) => `- ${item.id}: ${item.description}`).join('\n')
-      : '- （无已确认清单，F 维度记 clean）',
-    '',
-    '现在执行六维攻击审查，按【输出】格式给出 JSON。',
-  ].join('\n')
+  const prompt = [PRD_REVIEW_SYSTEM_PROMPT, '', buildPrdReviewTask(opts.backplane, opts.confirmedRequirements)].join('\n')
 
   const texts: string[] = []
   for await (const message of opts.query(prompt, {
@@ -293,6 +329,7 @@ export function publishPrdReviewCard(opts: {
       detail: {
         simplified_ac: true,
         mode: outcome.mode,
+        via: outcome.via ?? 'direct',
         degraded: outcome.degraded ?? false,
         issues,
       },

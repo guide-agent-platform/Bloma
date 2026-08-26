@@ -758,6 +758,9 @@ export async function resolveRequirementConfirm(input: {
       query: pending.query,
       env: reviewEnv,
       sessionId: pending.session_id,
+      projectId: pending.project_id,
+      requestId: pending.request_id,
+      publish,
     })
     if (review.verdict === 'needs_revision') {
       publish(makeGuideEvent(input, 'message_delta', {

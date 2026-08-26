@@ -24,6 +24,8 @@ import type { PrdBackplane, SketchRequirement } from './sketch-engine'
 import { requirementPriority } from './sketch-engine'
 import type { SDKQuery } from './orchestrator'
 import type { JudgeConstraint } from './judge-engine'
+import { delegatedReviewEnabled, runDelegatedReview } from './review-delegation'
+import type { AgentEvent } from '../shared/types'
 
 // =========================================================================
 // 类型
@@ -43,6 +45,8 @@ export interface SemanticJudgeResult {
   findings: SemanticFinding[]
   skipped: boolean
   skipReason?: 'no_channel' | 'llm_failed'
+  /** 未跳过时的执行方式：delegation = 委派子 agent（可视化）；direct = 平台直连 */
+  via?: 'delegation' | 'direct'
 }
 
 /** 产物文本截断上限（防超长产物撑爆审查请求；截断在 prompt 中如实标注） */
@@ -81,18 +85,66 @@ export async function runSemanticJudgeReview(opts: {
   env: Record<string, string> | undefined
   sessionId: string
   signal?: AbortSignal
+  /** 委派可视化（2026-08-26）：三者齐备时优先委派（子 agent 用只读工具自查产物），否则直连 */
+  projectId?: string
+  requestId?: string
+  publish?: (event: AgentEvent) => void
 }): Promise<SemanticJudgeResult> {
-  if (!opts.env) {
+  const { backplane, artifact, testSummary, query, env, sessionId, signal } = opts
+  if (!env) {
     return { constraint: null, findings: [], skipped: true, skipReason: 'no_channel' }
   }
-  const { backplane, artifact, testSummary, query, env, sessionId, signal } = opts
+  // ① 委派审查（默认，协作过程 DelegationFeed 可视化）：子 agent 用只读工具自行查证
+  //    产物，不再受 24k 内联截断限制
+  if (delegatedReviewEnabled() && opts.projectId && opts.requestId && opts.publish) {
+    const delegated = await runDelegatedReview({
+      goal: `裁判语义审查产物 vs PRD：${backplane.name ?? '未命名项目'}`,
+      task: buildDelegatedJudgeTask(backplane, testSummary),
+      system: SEMANTIC_JUDGE_SYSTEM_PROMPT,
+      query,
+      env,
+      sessionId,
+      projectId: opts.projectId,
+      requestId: opts.requestId,
+      publish: opts.publish,
+    })
+    if (delegated.ok && delegated.finalText) {
+      try {
+        const findings = parseSemanticFindings(delegated.finalText, backplane.requirements ?? [])
+        return { constraint: deriveConstraint(findings, backplane.requirements ?? []), findings, skipped: false, via: 'delegation' }
+      } catch {
+        console.error('[judge-semantic] 委派审查输出不可解析，回退直连')
+      }
+    }
+  }
+  // ② 直连（内联产物，截断 24k）
   try {
     const findings = await judgeViaLlm({ backplane, artifact, testSummary, query, env, sessionId, signal })
-    return { constraint: deriveConstraint(findings, backplane.requirements ?? []), findings, skipped: false }
+    return { constraint: deriveConstraint(findings, backplane.requirements ?? []), findings, skipped: false, via: 'direct' }
   } catch (error) {
     console.error('[judge-semantic] LLM 语义审查失败，跳过（不影响裁决）:', error)
     return { constraint: null, findings: [], skipped: true, skipReason: 'llm_failed' }
   }
+}
+
+/** 委派版任务：PRD 内联 + 产物改为子 agent 自查（只读工具，物理不可改）。 */
+function buildDelegatedJudgeTask(backplane: PrdBackplane, testSummary?: string): string {
+  const requirements = backplane.requirements ?? []
+  const lines = [
+    '【任务】审查生成的软件产物是否忠实实现了 PRD 的每个功能项。',
+    '',
+    '【PRD 功能项】（P0=核心必须 / P1=重要 / P2=加分）',
+    ...requirements.map(
+      (item) =>
+        `- ${item.id} [${requirementPriority(item)}] ${item.description}${
+          item.behavior_assertions?.length ? `（验收：${item.behavior_assertions.join('；')}）` : ''
+        }`,
+    ),
+    '',
+    '【产物】在本项目根目录：index.html 与 src/ 下的 js/css。用 read_file / list_files / grep 自行查证（只读，绝不修改任何文件），逐项对照后按【输出】格式给出严格 JSON。',
+  ]
+  if (testSummary) lines.push('', `【测试报告摘要】${testSummary}（仅供参考，以你读到的代码为准）`)
+  return lines.join('\n')
 }
 
 /** LLM 判定轮：内联 PRD 功能项（含优先级与断言）+ 产物代码 + 测试摘要。 */

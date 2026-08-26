@@ -112,6 +112,8 @@ describe('需求确认弹窗（confirm_requirements）', () => {
   let persistSystem: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
+    // 委派审查默认开启：单测固定走直连路径（委派链路由 review-delegation 专属测试覆盖）
+    process.env.BLOMA_DELEGATED_REVIEW = '0'
     home = mkdtempSync(join(tmpdir(), 'proma-req-confirm-'))
     process.env.PROMA_HOME = home
     mkdirSync(join(home, 'agent-sessions'), { recursive: true })
@@ -131,6 +133,7 @@ describe('需求确认弹窗（confirm_requirements）', () => {
   })
 
   afterEach(() => {
+    delete process.env.BLOMA_DELEGATED_REVIEW
     process.env.PROMA_HOME = originalPromaHome
     vi.restoreAllMocks()
   })

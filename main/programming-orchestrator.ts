@@ -1243,6 +1243,9 @@ async function evaluateOnce(input: JudgeReviewInput): Promise<JudgeVerdict> {
     query: input.query,
     env,
     sessionId: input.session_id,
+    projectId: input.project_id,
+    requestId: input.request_id,
+    publish: (event) => publish(input, event.type, event.payload),
   })
   if (semantic.skipped) {
     try {

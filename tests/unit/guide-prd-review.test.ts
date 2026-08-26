@@ -140,6 +140,8 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
   let events: AgentEvent[]
 
   beforeEach(() => {
+    // 委派审查默认开启：单测固定走直连路径（委派链路由 review-delegation 专属测试覆盖）
+    process.env.BLOMA_DELEGATED_REVIEW = '0'
     const home = mkdtempSync(join(tmpdir(), 'proma-prd-review-'))
     process.env.PROMA_HOME = home
     mkdirSync(join(home, 'agent-sessions'), { recursive: true })
@@ -150,6 +152,7 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
   })
 
   afterEach(() => {
+    delete process.env.BLOMA_DELEGATED_REVIEW
     process.env.PROMA_HOME = originalPromaHome
     vi.restoreAllMocks()
   })
