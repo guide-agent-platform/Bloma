@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { registerIpcHandlers } from '../../main/ipc'
-import { createProject } from '../../main/project-service'
+import { createProject, updateProject } from '../../main/project-service'
 import { resetSDKQueryForTests, setSDKQueryForTests } from '../../main/orchestrator'
 import type { SDKQuery } from '../../main/orchestrator'
 import { getDocumentsDir } from '../../storage/config-paths'
@@ -100,12 +100,14 @@ describe('ipc submit-correction → runIterationTask wiring（Sprint 3 纠错主
     runIterationTaskMock.mockClear()
   })
 
-  it('点选纠错（带 user_note，PRD 已确认）落盘后触发带新需求的重新生成', async () => {
+  it('点选纠错（带 user_note，PRD 已确认且 MVP 已交付）落盘后触发带新需求的重新生成', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-ipc-correction-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
     // 「不过目不开工」（2026-08-27）：只有 PRD 已被用户确认过的项目，点选纠错才直达 MVP 迭代
     seedConfirmedPrd(project.project_id, true)
+    // 阶段分流（2026-08-27）：ready/completed（MVP 已交付）才走迭代；草图阶段走草图修改门
+    updateProject(project.project_id, { current_stage: 'ready' })
 
     const handlers = new Map<string, (_event: unknown, payload: unknown) => unknown>()
     registerIpcHandlers(

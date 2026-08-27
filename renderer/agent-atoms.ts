@@ -243,7 +243,7 @@ export function setupGlobalAgentListeners(): () => void {
     if (event.type === 'sketch_ready' || event.type === 'mvp_ready' || event.type === 'rollback_done') {
       const url = typeof event.payload.preview_url === 'string' ? event.payload.preview_url : null
       if (event.project_id && url) {
-        store.set(previewUrlsAtom, (prev) => ({ ...prev, [event.project_id!]: url }))
+        store.set(previewUrlsAtom, (prev) => ({ ...prev, [event.project_id!]: { url, updatedAt: Date.now() } }))
       }
       const snapshotId = typeof event.payload.snapshot_id === 'string' ? event.payload.snapshot_id : null
       if (snapshotId) store.set(currentSnapshotIdAtom, snapshotId)
@@ -529,8 +529,10 @@ export const networkOnlineAtom = atom<boolean>(navigator.onLine)
 /** 阶段指示器文案（P0 用户可见） */
 export const stageIndicatorLabelAtom = atom<string>('选择模式')
 
-/** 各项目最近一次 sketch_ready / mvp_ready 事件带回的沙箱预览地址（按 project_id 隔离） */
-export const previewUrlsAtom = atom<Record<string, string>>({})
+/** 各项目最近一次 sketch_ready / mvp_ready 事件带回的沙箱预览地址（按 project_id 隔离；
+ * updatedAt 用于 cache-buster：沙箱同端口重 serve 新产物时 URL 不变，webview 不重载——
+ * 2026-08-27 线上案例「迭代后预览内容没变」） */
+export const previewUrlsAtom = atom<Record<string, { url: string; updatedAt: number }>>({})
 
 /** 最近一次 sketch_ready / mvp_ready 事件带回的快照 id；null = 尚无快照（供「确认草图」回传） */
 export const currentSnapshotIdAtom = atom<string | null>(null)

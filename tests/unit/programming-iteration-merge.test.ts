@@ -69,9 +69,9 @@ describe('mergeIterationRequirements（迭代修改诉求归一化入库）', ()
       makeInput(makeQuery('{"action":"revise","revise_id":"F-003","description":"行进方向与按键语义一致：左转左行、右转右行"}'), 'test-channel'),
       EXISTING,
     )
-    expect(merged).toHaveLength(2)
-    expect(merged.find((item) => item.id === 'F-003')?.description).toBe('行进方向与按键语义一致：左转左行、右转右行')
-    expect(merged.find((item) => item.id === 'F-001')?.description).toBe('做一个赛车模拟器')
+    expect(merged.requirements).toHaveLength(2)
+    expect(merged.requirements.find((item) => item.id === 'F-003')?.description).toBe('行进方向与按键语义一致：左转左行、右转右行')
+    expect(merged.requirements.find((item) => item.id === 'F-001')?.description).toBe('做一个赛车模拟器')
     // JSONL 行是 JSON-in-JSON（decision 文本经转义），先解析行再断言解码后文本
     const decisionText = readDecisionText(getAgentSessionPath('session-merge'))
     expect(decisionText).toContain('"type":"requirement_normalized"')
@@ -84,15 +84,16 @@ describe('mergeIterationRequirements（迭代修改诉求归一化入库）', ()
       makeInput(makeQuery('{"action":"skip","reason":"操作指令"}'), 'test-channel'),
       EXISTING,
     )
-    expect(merged).toEqual(EXISTING)
+    expect(merged.requirements).toEqual(EXISTING)
+    expect(merged.action).toBe('skip')
   })
 
   it('无渠道（无 channel_id 且无可用渠道）→ 回退原样追加', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-iter-fallback-'))
     process.env.PROMA_HOME = home
     const merged = await mergeIterationRequirements(makeInput(makeQuery('{"action":"skip"}'), undefined), EXISTING)
-    expect(merged).toHaveLength(3)
-    expect(merged[2]).toEqual({ id: 'F-004', description: '车的运行方向不对' })
+    expect(merged.requirements).toHaveLength(3)
+    expect(merged.requirements[2]).toEqual({ id: 'F-004', description: '车的运行方向不对' })
   })
 
   it('归一化输出非 JSON → 回退原样追加（改动前现状）', async () => {
@@ -100,14 +101,14 @@ describe('mergeIterationRequirements（迭代修改诉求归一化入库）', ()
     process.env.PROMA_HOME = home
     const merged = await mergeIterationRequirements(makeInput(makeQuery('好的，我来帮您整理'), 'test-channel'), EXISTING)
     // 回退原样追加（description=清洗原文），读取侧 helper 兜底默认断言/P2；source 标注入库点
-    expect(merged[2]).toEqual({ id: 'F-004', description: '车的运行方向不对', source: 'iteration' })
+    expect(merged.requirements[2]).toEqual({ id: 'F-004', description: '车的运行方向不对', source: 'iteration' })
   })
 
   it('query 缺失（无模型句柄）→ 回退原样追加', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-iter-noquery-'))
     process.env.PROMA_HOME = home
     const merged = await mergeIterationRequirements(makeInput(undefined, 'test-channel'), EXISTING)
-    expect(merged[2]).toEqual({ id: 'F-004', description: '车的运行方向不对' })
+    expect(merged.requirements[2]).toEqual({ id: 'F-004', description: '车的运行方向不对' })
   })
 })
 

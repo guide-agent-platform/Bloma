@@ -416,7 +416,43 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
           })
           return result
         }
+        // 草图阶段分流（2026-08-27 线上案例 dbe1e6fd：用户在草图预览点选说「换个名字」，
+        // 项目还在 sketch_ready（草图未确认），却被直接推进 MVP 迭代——11 轮 loop 全量
+        // 重写三文件+测试+扫描，草图确认门（「生成完整功能」按钮）被抢跑。
+        // 草图阶段的点选纠错改走 send-message 的草图修改门：归一化并入后重生成草图
+        // （秒级、低成本方向确认），MVP 只能经确认草图或已交付后的迭代到达）
+        const stage = String(findProject(input.project_id).current_stage ?? '')
         const mode = findProject(input.project_id).mode
+        if (stage !== 'ready' && stage !== 'completed') {
+          const sketchNote = '收到，我按这处意见先调整草图（确认草图后才会生成完整功能）。'
+          appendJsonLine(getAgentSessionPath(input.session_id), {
+            role: 'assistant',
+            content: [{ type: 'text', text: sketchNote }],
+            timestamp: Date.now(),
+          })
+          mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, {
+            event_id: randomUUID(),
+            session_id: input.session_id,
+            project_id: input.project_id,
+            type: 'message_delta',
+            payload: { text: sketchNote },
+            created_at: new Date().toISOString(),
+          })
+          const sketchAbort = new AbortController()
+          registerBackgroundRun(input.session_id, sketchAbort)
+          void runAgent({
+            request_id: input.request_id,
+            session_id: input.session_id,
+            project_id: input.project_id,
+            content: prompt,
+            mode,
+            current_stage: 'sketch_ready' as never,
+          }).catch((error) => {
+            if (sketchAbort.signal.aborted) return
+            console.error('[ipc] correction sketch regeneration failed:', error)
+          })
+          return result
+        }
         // U4/U5：注册可取消句柄，让「停止生成」能 abort 点选纠错触发的再生成链路。
         const abortController = new AbortController()
         registerBackgroundRun(input.session_id, abortController)

@@ -438,6 +438,12 @@ const SnapshotDocumentsModal: React.FC<{
   const [selected, setSelected] = React.useState<SnapshotDocumentEntry | null>(null)
   const [content, setContent] = React.useState<{ loading: boolean; text: string; error?: string }>({ loading: false, text: '' })
 
+  // 快照切换时重置选中文档（2026-08-27 线上案例：selected 残留旧快照的 document_id，
+  // 带着新 snapshot_id 去读 → DOCUMENT_NOT_FOUND 主进程噪音 ×N）
+  React.useEffect(() => {
+    setSelected(null)
+  }, [snapshot.snapshot_id])
+
   React.useEffect(() => {
     let cancelled = false
     const api = window.electronAPI

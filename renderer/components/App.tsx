@@ -118,15 +118,19 @@ const AppRoutes: React.FC = () => {
   const previewUrls = useAtomValue(previewUrlsAtom)
   const currentSnapshotId = useAtomValue(currentSnapshotIdAtom)
 
-  // 当前项目预览地址（按 project_id 隔离）：从 previewUrlsAtom 取本项目沙箱地址
-  const streamPreviewUrl = currentProject?.project_id
+  // 当前项目预览地址（按 project_id 隔离）：从 previewUrlsAtom 取本项目沙箱地址；
+  // updatedAt 拼进 query 作 cache-buster——沙箱同端口重 serve 新产物时强制 webview 重载
+  const previewEntry = currentProject?.project_id
     ? (previewUrls[currentProject.project_id] ?? null)
+    : null
+  const streamPreviewUrl = previewEntry
+    ? `${previewEntry.url}${previewEntry.url.includes('?') ? '&' : '?'}_r=${previewEntry.updatedAt}`
     : null
 
   // 写 / 清空指定项目的预览地址（多项目各自独立预览）
   const setProjectPreview = useCallback((projectId: string, url: string | null) => {
     setPreviewUrls((prev) => {
-      if (url) return { ...prev, [projectId]: url }
+      if (url) return { ...prev, [projectId]: { url, updatedAt: Date.now() } }
       const next = { ...prev }
       delete next[projectId]
       return next

@@ -1467,10 +1467,20 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
   // 口语碎片原样入库会污染 PRD 背板（线上案例：「重新生成」被 acceptance 解释成功能、
   // 产品里长出重置按钮），归一化失败/无渠道时回退原样追加（改动前现状），不阻断迭代。
   const existing = readLastSketchRequirements(input.project_id)
-  const requirements = await mergeIterationRequirements(input, existing)
+  const merged = await mergeIterationRequirements(input, existing)
+  const requirements = merged.requirements
   recordSketchGenerated(input.project_id, requirements)
 
-  publishCompletionMessage(input, `好的，我按你的新想法「${truncateCopy(input.prompt, 20)}」重新生成一版。`)
+  // ack 如实（2026-08-27 线上案例 dbe1e6fd：「换个名字」被判 skip 后仍说「按你的新想法
+  // 重新生成」，用户体感记忆断层——skip 意味着诉求未入需求，必须告知而非假装采纳）
+  if (merged.action === 'skip') {
+    publishCompletionMessage(
+      input,
+      `收到「${truncateCopy(input.prompt, 20)}」——这句我没当作需求改动（判为操作指令），按原样重新生成了一版。想改哪里请直接说，比如「标题改成计算助手」。`,
+    )
+  } else {
+    publishCompletionMessage(input, `好的，我按你的新想法「${truncateCopy(input.prompt, 20)}」重新生成一版。`)
+  }
 
   try {
     // 迭代不进入 generating_mvp 阶段（那是首次生成 MVP 的语义）：保持 iterating，
@@ -1540,8 +1550,8 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
 export async function mergeIterationRequirements(
   input: IterationTaskInput,
   existing: SketchRequirement[],
-): Promise<SketchRequirement[]> {
-  const appendRaw = (): SketchRequirement[] => [...existing, { id: nextRequirementId(existing), description: input.prompt }]
+): Promise<{ requirements: SketchRequirement[]; action: 'revise' | 'append' | 'skip' | 'out_of_scope' | 'raw' }> {
+  const appendRaw = (): { requirements: SketchRequirement[]; action: 'raw' } => ({ requirements: [...existing, { id: nextRequirementId(existing), description: input.prompt }], action: 'raw' })
   if (!input.query) return appendRaw()
   try {
     // 约束走门（T4-L1 修改门）：修改诉求里的约束语句确定性入库，并随归一化判定注入——
@@ -1577,7 +1587,7 @@ export async function mergeIterationRequirements(
     if (normalization.via === 'llm') {
       recordRequirementNormalization(input, 'iteration', input.prompt, normalization)
     }
-    return applyNormalization(existing, normalization, nextRequirementId(existing), 'iteration')
+    return { requirements: applyNormalization(existing, normalization, nextRequirementId(existing), 'iteration'), action: normalization.action }
   } catch {
     return appendRaw()
   }
