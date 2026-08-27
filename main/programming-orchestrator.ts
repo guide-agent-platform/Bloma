@@ -575,7 +575,7 @@ async function tryResolveAgentLoop(input: MvpTaskInput): Promise<AgentLoopChanne
     return { env, channel, model }
   }
 
-  const probed = await probeToolSupport(input.query, env, input.session_id, input.signal)
+  const probed = await probeToolSupport(input.query, env, input.session_id, input.signal, channel?.provider_type)
   if (probed === undefined) {
     // 探测自身失败（网络/渠道抖动）：不写缓存——下次仍会重试探测；本次如实抛错（无管道可回退）
     throw agentLoopChannelError(input, 'AGENT_LOOP_PROBE_INCONCLUSIVE', '工具能力探测未得出结论（网络问题），请稍后重试。')
@@ -608,6 +608,7 @@ async function probeToolSupport(
   env: Record<string, string>,
   sessionId: string,
   signal: AbortSignal | undefined,
+  providerType?: string,
 ): Promise<boolean | undefined> {
   const controller = new AbortController()
   const onOuterAbort = () => controller.abort(signal?.reason)
@@ -619,6 +620,9 @@ async function probeToolSupport(
       signal: controller.signal,
       sessionId,
       maxTokens: 128,
+      // omit 推广（审查 P2-①）：探测请求同样透传 providerType，避免 omit 渠道 400 导致
+      // 探测无结论 → MVP 生成整体失败（而非仅多一次往返）
+      providerType,
       history: [{ role: 'system', content: '这是一次工具能力探测。请立即调用 loop_support_probe 工具，不要输出任何文字。' }],
       tools: [TOOL_SUPPORT_PROBE],
     })) {
@@ -677,6 +681,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     temperature: categoryTemperature('mvp'),
     system: buildLoopSystemWithOverride(backplane, editFormat),
     editFormat,
+    providerType: loop.channel.provider_type,
     publish: (type, payload) => publish(input, type, payload),
     onChildTurn: (info, child) => {
       trackAnalytics({
@@ -736,6 +741,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     }),
     query: input.query!,
     env: loop.env,
+    providerType: loop.channel.provider_type,
     sessionId: input.session_id,
     projectId: input.project_id,
     requestId: input.request_id,

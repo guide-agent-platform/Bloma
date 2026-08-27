@@ -91,6 +91,8 @@ export interface AgentLoopInput {
   permissionMode: PromaPermissionMode
   /** 委派深度（缺省 0 = 主 agent；子 agent = 父深度+1，写入工具 state） */
   delegationDepth?: number
+  /** omit 推广（2026-08-27）：渠道 providerType——Token Plan 类渠道 off 档发 disabled 也 400，透传激活 omit */
+  providerType?: string
   temperature?: number
   signal: AbortSignal
   publish: (type: AgentEvent['type'], payload: Record<string, unknown>) => void
@@ -216,6 +218,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         sessionId: input.sessionId,
         maxTokens: input.maxTokens,
         ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
+        ...(input.providerType !== undefined ? { providerType: input.providerType } : {}),
         messages: [{ role: 'system', content: input.system }, ...windowMessages(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS)],
         tools: definitions,
       })) {

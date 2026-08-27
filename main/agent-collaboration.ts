@@ -123,6 +123,8 @@ export interface DelegationParentContext {
   /** 背板锚定 system prompt（buildAgentLoopSystemPrompt 产物），子 loop 在它之上加委派规则。 */
   system: string
   editFormat: 'diff' | 'whole'
+  /** omit 推广（2026-08-27）：子 loop 透传父渠道 providerType，Token Plan 类渠道免 400 往返 */
+  providerType?: string
   publish: (type: AgentEvent['type'], payload: Record<string, unknown>) => void
   /** 子 loop 每轮埋点（programming-orchestrator 注入，session_id=子 sessionId）。 */
   onChildTurn?: (info: AgentLoopTurnInfo, child: { sessionId: string; requestId: string; role: DelegationRole }) => void
@@ -290,6 +292,7 @@ async function runChildLoop(opts: {
     permissionMode: parentCtx.permissionMode,
     delegationDepth: parent.state.delegation_depth + 1,
     temperature: parentCtx.temperature,
+    providerType: parentCtx.providerType,
     signal: record.abort.signal,
     publish: parentCtx.publish,
     onTurn: parentCtx.onChildTurn

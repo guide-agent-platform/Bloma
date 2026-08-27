@@ -387,3 +387,25 @@ describe('M4-C tool_call_completed detail 白名单透传', () => {
     expect(assistantLine?.content[1]).toMatchObject({ type: 'tool_use', name: 'echo' })
   })
 })
+
+describe('AgentLoop providerType 透传（omit 推广 2026-08-27）', () => {
+  it('[S4-REASON-023] runAgentLoop 将 providerType 透传到 query options', async () => {
+    let receivedProviderType: string | undefined
+    const query: SDKQuery = async function* (_prompt: string, options: SDKQueryOptions) {
+      receivedProviderType = options.providerType
+      yield { type: 'result', subtype: 'success' }
+    }
+    await runAgentLoop(baseInput({ query, providerType: 'deepseek' }))
+    expect(receivedProviderType).toBe('deepseek')
+  })
+
+  it('[S4-REASON-024] 缺省不传 providerType → options 字段缺失（零回归：omit 不触发、走 thinking:disabled 现状）', async () => {
+    let hasProviderType = true
+    const query: SDKQuery = async function* (_prompt: string, options: SDKQueryOptions) {
+      hasProviderType = 'providerType' in options
+      yield { type: 'result', subtype: 'success' }
+    }
+    await runAgentLoop(baseInput({ query }))
+    expect(hasProviderType).toBe(false)
+  })
+})

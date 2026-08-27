@@ -98,7 +98,7 @@ function parentContext(overrides: Partial<ToolContext> = {}): ToolContext {
   }
 }
 
-function registerParent(query: SDKQuery): void {
+function registerParent(query: SDKQuery, providerType?: string): void {
   registerParentLoopContext(parentSessionId, {
     query,
     env: {},
@@ -109,6 +109,7 @@ function registerParent(query: SDKQuery): void {
     temperature: 0.5,
     system: '父系统提示（PRD 背板锚定）',
     editFormat: 'diff',
+    providerType,
     publish: () => undefined,
   })
 }
@@ -1023,5 +1024,41 @@ describe('委派补测 S4（远端缺失项移植）', () => {
     await expect(tool.execute({ delegation_ids: ['no-such'] }, parentContext())).rejects.toThrow(
       /未找到当前会话下的委派/,
     )
+  })
+})
+
+describe('委派子 loop providerType 透传（omit 推广 2026-08-27）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const localParentId = `session-provtype-${Date.now()}`
+
+  afterEach(async () => {
+    try {
+      unregisterParentLoopContext(localParentId)
+    } finally {
+      restorePromaHome(originalPromaHome)
+    }
+  })
+
+  it('[S4-REASON-025] 子 loop 收到父渠道 providerType（Token Plan 类渠道免 400 往返）', async () => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-collab-provtype-'))
+    let childProviderType: string | undefined = 'unset'
+    const query: SDKQuery = async function* (_prompt: string, options: SDKQueryOptions) {
+      childProviderType = options.providerType
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '子任务完成：入口检查通过' }] } }
+      yield { type: 'result', subtype: 'success' }
+    }
+    // 复用 registerParent 助手（含 providerType 参数），避免上下文构造重复（审查 P2-⑥）
+    parentSessionId = localParentId
+    registerParent(query, 'qwen-token-plan')
+    setChildToolsBuilder(() => [{ name: 'read_file', description: '读文件', input_schema: { type: 'object', properties: {} }, execute: async () => ({ output: 'content' }) }])
+
+    const created = startDelegation(
+      parentContext(),
+      { task: '检查入口', role: 'explore', expectedOutput: '结论' },
+    )
+    const record = findDelegation(localParentId, created.delegation_id)
+    expect(record).toBeDefined()
+    await record!.completion
+    expect(childProviderType).toBe('qwen-token-plan')
   })
 })
