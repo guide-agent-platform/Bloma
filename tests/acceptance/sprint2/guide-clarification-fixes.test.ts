@@ -188,7 +188,7 @@ describe('Sprint 2 guide clarification fixes acceptance（向导澄清修复）'
     }
   })
 
-  it('[③ 独立用例] 连续 2 轮澄清后模型仍要追问 → 熔断转入需求确认弹窗（不臆断开工）并留痕', async () => {
+  it('[③ 独立用例] 连续 3 轮澄清后模型仍要追问 → 熔断转入需求确认弹窗（不臆断开工）并留痕；2026-08-27 点选回流后阈值 2→3', async () => {
     const env = useTemporaryPromaHome('bloma-s2-guide-breaker-')
     try {
       const project = createProject({ request_id: 'req-project', mode: 'quick' })
@@ -200,6 +200,7 @@ describe('Sprint 2 guide clarification fixes acceptance（向导澄清修复）'
         { content: '你好', stage: 'clarifying' as const, reply: '你想做一个什么类型的工具？' },
         { content: '帮我做个东西', stage: 'blocked_for_user_decision' as const, reply: '想给谁用？' },
         { content: '嗯我再想想', stage: 'blocked_for_user_decision' as const, reply: '具体想做什么内容？' },
+        { content: '还是没想好', stage: 'blocked_for_user_decision' as const, reply: '平时什么时候会用它？' },
       ]
       for (const [index, round] of rounds.entries()) {
         mockModelAsking(round.reply, index === 0 ? ['待办清单', '记事本'] : ['自己用', '全家共用'])
@@ -209,11 +210,12 @@ describe('Sprint 2 guide clarification fixes acceptance（向导澄清修复）'
         })
       }
 
-      // 前两轮各弹一张澄清卡；第三轮模型仍要 ask_clarification → 熔断转入需求确认弹窗
-      // （2026-08-26 语义修订：不再强制 auto 开工，弹窗内保留让渡出口）
+      // 前三轮各弹一张澄清卡；第四轮模型仍要 ask_clarification → 熔断转入需求确认弹窗
+      // （2026-08-26 语义修订：不再强制 auto 开工，弹窗内保留让渡出口；
+      //  2026-08-27 点选回流：阈值 2→3，向导可多跟踪一轮）
       const decisionEvents = events.filter((event) => event.type === 'user_decision_required')
-      expect(decisionEvents).toHaveLength(3)
-      expect(decisionEvents[2]?.payload.kind).toBe('requirement_confirm')
+      expect(decisionEvents).toHaveLength(4)
+      expect(decisionEvents[3]?.payload.kind).toBe('requirement_confirm')
       // 不臆断开工：未生成草图，阶段停在待用户决策
       expect(events.find((event) => event.type === 'sketch_ready')).toBeFalsy()
       expect(findProject(project.project_id).current_stage).toBe('blocked_for_user_decision')

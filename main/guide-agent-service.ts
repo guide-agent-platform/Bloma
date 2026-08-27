@@ -134,11 +134,13 @@ const AUTO_ESCAPE_OPTION: ClarificationOption = {
 }
 
 /** 澄清轮次熔断阈值：连续出示 N 张澄清卡仍不明确 → 代码级转入需求确认弹窗（D3 修订 2026-08-26；原「强制 auto 开工」语义已被弹窗化取代）。 */
-const CLARIFICATION_ROUND_LIMIT = 2
+const CLARIFICATION_ROUND_LIMIT = 3
 
-/** 澄清终止类决策：出现即代表澄清已收敛（开工/迭代/裁判/回滚），连续计数在此截断。 */
+/** 澄清终止类决策：出现即代表澄清已收敛（开工/迭代/裁判/回滚），连续计数在此截断。
+ * 2026-08-27 点选回流修订：clarification_answer（用户点选了某个选项）不再视为终点——
+ * 回流模式下用户答完当前问题，向导可能继续追问下一未知点（持续跟踪），澄清结束
+ * 由向导的 confirm/generate 决定（二者走的链路都会落终止类决策）。 */
 const CLARIFICATION_ENDING_DECISION_TYPES = new Set<string>([
-  'clarification_answer',
   'clarification_forced_auto',
   'clarification_forced_confirm',
   'requirement_confirm_card',
@@ -408,7 +410,7 @@ export async function handleGuideMessage(
     source: 'guide_gate',
   })
 
-  // 卡片答案：用户已通过选项给出方向，直接生成草图（修复澄清死循环）
+  // 卡片答案：用户点选了选项（2026-08-27 语义升级：点选回流模型——向导持续跟踪用户选择）
   const cardAnswer = resolveCardAnswer(input, primaryIntent)
   if (cardAnswer) {
     recordDecision({
@@ -417,7 +419,7 @@ export async function handleGuideMessage(
       entry: {
         type: 'clarification_answer',
         title: '用户点选澄清答案',
-        why: `用户点选「${input.content}」，以此作为已确认方向生成草图`,
+        why: `用户点选「${input.content}」，以此作为已确认方向`,
         detail: {
           option_id: input.metadata?.selected_option_id,
           requirements: cardAnswer.requirements,
@@ -425,11 +427,22 @@ export async function handleGuideMessage(
       },
     })
 
+    // 点选回流（2026-08-27 用户拍板「向导持续跟踪用户选择」）：点选不再被平台短路直接
+    // 开工——答案已在对话历史里，回流向导模型，由它跟踪全部已选内容自主决定下一步：
+    // 还缺关键信息→继续问；信息够了→confirm_requirements（弹窗确认）/generate_sketch
+    // （PRD 确认门兑底）。防死循环：D3 熔断（连续 3 张卡不收敛转确认弹窗）仍然生效。
+    // 例外：点选「你帮我决定」是让渡信号（用户明确不想再答），不回流，直接走下方收敛链。
+    const isAutoDelegation = input.content.trim() === '你帮我决定' || input.metadata?.selected_option_id === 'auto'
+    if (!isAutoDelegation && model) {
+      const handledByModel = await tryModelDrivenGuide(input, publish, model, primaryIntent, persistSystem, project)
+      if (handledByModel) return
+    }
+
     const ack = '好的，按你选的方向整理成产品需求文档，请你过目确认后再画草图。'
     persistAssistant?.(ack)
     publish(makeGuideEvent(input, 'message_delta', { text: ack }))
-    // 收敛路径统一收口（2026-08-27，排查报告 🔴1）：点选不再直接开工，
-    // 统一进入 PRD 后置链（PRD→六维审查→确认卡→草图）
+    // 收敛链（让渡点选/无渠道降级/模型未处理）：统一进入 PRD 后置链
+    // （PRD→六维审查→确认卡→草图）
     await runPrdPipeline({
       request_id: input.request_id,
       session_id: input.session_id,

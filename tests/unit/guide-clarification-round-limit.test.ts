@@ -131,7 +131,8 @@ describe('countTrailingClarificationRounds 尾随澄清轮计数', () => {
     expect(countTrailingClarificationRounds(SESSION_ID)).toBe(2)
   })
 
-  it('用户点选过答案（clarification_answer）→ 澄清已收敛，计数截断为 0', () => {
+  it('用户点选过答案（clarification_answer）→ 点选回流修订（2026-08-27）：点选不再截断计数，
+     向导可继续追问下一未知点；澄清终点改为向导的收敛决策', () => {
     writeSession([
       user('你好'),
       assistant('你想做什么类型的工具？'),
@@ -141,7 +142,8 @@ describe('countTrailingClarificationRounds 尾随澄清轮计数', () => {
       decision('clarification_answer'),
       terminal(),
     ])
-    expect(countTrailingClarificationRounds(SESSION_ID)).toBe(0)
+    // 点选透明：尾随卡片计数保留（向导继续问的熔断依据不受点选影响）
+    expect(countTrailingClarificationRounds(SESSION_ID)).toBe(1)
   })
 
   it('会话文件不存在 → 0（新会话/测试字面 id 不炸）', () => {
@@ -227,8 +229,8 @@ describe('引导对话 · 连续澄清熔断', () => {
     requirements: [{ id: 'F-001', description: '通用工具' }],
   })
 
-  it('0/1 轮尾随卡片 + 模型仍要澄清 → 照常弹卡（熔断不介入）', async () => {
-    for (const cardCount of [0, 1]) {
+  it('0/1/2 轮尾随卡片 + 模型仍要澄清 → 照常弹卡（熔断不介入）', async () => {
+    for (const cardCount of [0, 1, 2]) {
       writeSession(cardCount)
       vi.mocked(runSketchTask).mockClear()
       const events: AgentEvent[] = []
@@ -238,8 +240,8 @@ describe('引导对话 · 连续澄清熔断', () => {
     }
   })
 
-  it('连续 2 轮仍 ask_clarification → 熔断转入需求确认弹窗（不臆断开工、留痕、留日志）', async () => {
-    writeSession(2)
+  it('连续 3 轮仍 ask_clarification → 熔断转入需求确认弹窗（不臆断开工、留痕、留日志；2026-08-27 点选回流后阈值 2→3）', async () => {
+    writeSession(3)
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const events: AgentEvent[] = []
 
