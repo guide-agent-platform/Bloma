@@ -26,7 +26,7 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
     delete window.__jotai_store__
   })
 
-  it('流式运行中：textarea 可编辑、显示停止按钮、5 秒后出现「生成草图」等待反馈', () => {
+  it('流式运行中：textarea 可编辑、显示停止按钮、Enter 提交仍可用（后端排队兜底）', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-16T00:00:00.000Z'))
     Element.prototype.scrollIntoView = vi.fn()
@@ -37,9 +37,10 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
     store.set(agentStreamStateFamily('session-1'), { running: true, events: [], content: '' })
     window.__jotai_store__ = store
 
+    const onSend = vi.fn()
     render(
       <Provider store={store}>
-        <ChatPanel onSendMessage={vi.fn()} />
+        <ChatPanel onSendMessage={onSend} />
       </Provider>,
     )
 
@@ -49,8 +50,13 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
     fireEvent.change(input, { target: { value: '先记着：要加深色模式' } })
     expect((input as HTMLTextAreaElement).value).toBe('先记着：要加深色模式')
 
-    // 生成中显示停止按钮（U4），发送入口被替换（不能中途发送）
+    // 生成中显示停止按钮（U4）
     expect(screen.getByLabelText('停止生成')).toBeTruthy()
+
+    // message-queue（2026-08-27）：生成期间 Enter 仍可提交——由后端排队兜底，不丢消息
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onSend).toHaveBeenCalledWith('先记着：要加深色模式')
+    expect((input as HTMLTextAreaElement).value).toBe('')
 
     // 超过 5 秒出现等待反馈，且话术按阶段显示
     expect(screen.queryByRole('status')).toBeNull()

@@ -326,3 +326,43 @@ describe('WorkspaceHeader 徽标 null 态（QW#1 审查 P1-①）', () => {
     expect(screen.queryByText('未配置 AI')).toBeNull()
   })
 })
+
+describe('消息排队提示（message-queue S4-QUEUE-009）', () => {
+  afterEach(() => {
+    cleanup()
+    delete window.electronAPI
+    delete window.__jotai_store__
+    vi.restoreAllMocks()
+    resetChannelsFetchFlagForTests()
+  })
+
+  it('[S1-UI-019] 生成期间发送 → 后端返回 queued → 追加「已排队」系统提示', async () => {
+    const store = createStore()
+    window.__jotai_store__ = store
+    const sendMessage = vi.fn().mockResolvedValue({
+      ok: true,
+      request_id: 't',
+      data: { accepted: true, session_id: 's', stream_started: false, queued: true },
+    })
+    window.electronAPI = {
+      project: {
+        create: vi.fn().mockResolvedValue({ ok: true, request_id: 't', data: project('quick') }),
+        list: vi.fn().mockResolvedValue({ ok: true, request_id: 't', data: [] }),
+      },
+      agent: { sendMessage },
+    } as unknown as ElectronAPI
+
+    render(<Provider store={store}><App /></Provider>)
+    fireEvent.click(screen.getByRole('button', { name: /快速做一个试试/ }))
+    await waitFor(() => expect(screen.getByPlaceholderText('描述你的想法…')).toBeTruthy())
+
+    const input = screen.getByPlaceholderText('描述你的想法…')
+    fireEvent.change(input, { target: { value: '把按钮改成蓝色' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledTimes(1)
+      expect(screen.getByText(/已排队/)).toBeTruthy()
+    })
+  })
+})

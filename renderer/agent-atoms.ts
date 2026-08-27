@@ -194,6 +194,19 @@ export function setupGlobalAgentListeners(): () => void {
   if (!api || !store) return () => undefined
 
   return api.onStreamEvent((event) => {
+    // queued_started（message-queue 2026-08-27）：排队消息开始派发——追加「正在处理」
+    // 提示，视觉上翻转「⏳ 已排队」（旧提示保留为历史记录）
+    if (event.type === 'queued_started') {
+      store.set(agentMessagesFamily(event.session_id), (previous) => [
+        ...previous,
+        {
+          role: 'system',
+          content: [{ type: 'text', text: '正在处理你排队的消息…' }],
+          timestamp: Date.now(),
+        },
+      ])
+    }
+
     // 会话追踪：新出现的 session_id 追加到 agentSessionsAtom（已有索引的会话保持不变）
     store.set(agentSessionsAtom, (previous) => {
       if (previous.some((item) => item.session_id === event.session_id)) return previous

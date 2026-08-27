@@ -14,6 +14,7 @@ import type {
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
 import { buildThinkingFragment, type ThinkingLevel } from '../shared/reasoning-profile'
+import { SessionMessageQueue, type QueueEntry } from './message-queue'
 export { buildSdkEnv } from './channel-manager'
 import {
   extractErrorStatusCode,
@@ -130,6 +131,28 @@ const activeSessions = new Map<string, ActiveRun>()
  */
 const backgroundRuns = new Map<string, AbortController>()
 
+/**
+ * 会话消息队列（message-queue-port.md P1，2026-08-27）：生成期间用户消息不丢——
+ * 忙时入队、run 完成后自动派发（对齐 ChatGPT/Claude 排队语义）。
+ * 队列真相在 main（内存态，重启丢队列 v1 可接受）；renderer 只消费投影事件。
+ */
+const sessionMessageQueue = new SessionMessageQueue({
+  // 后台生成（runMvpTask/runIterationTask fire-and-forget）也计入「忙」：MVP/迭代是最长
+  // 生成阶段，期间发消息同样排队而非直接开跑（审查 P2-⑤）
+  isActive: (sessionId) => activeSessions.has(sessionId) || backgroundRuns.has(sessionId),
+  startRun: async (sessionId, entry) => {
+    const input = entry.input as AgentSendMessageInput | undefined
+    if (!input) return
+    // 派发 = 重新走 runAgent（activeSessions 此时已空，正常执行）；request_id 复用队列消息 id
+    await runAgent({ ...input, request_id: entry.queueMessageId })
+  },
+  onDispatched: (sessionId, entry) => {
+    const input = entry.input as AgentSendMessageInput | undefined
+    if (!input) return
+    streamPublisher(makeEvent(input, 'queued_started', { queue_message_id: entry.queueMessageId }))
+  },
+})
+
 let streamPublisher: StreamPublisher = () => undefined
 let sdkQuery: SDKQuery = queryWithRuntimeFallback
 let retrySleep: (ms: number) => Promise<void> = sleep
@@ -167,11 +190,20 @@ export function registerBackgroundRun(sessionId: string, controller: AbortContro
 /** 移除后台编程任务的可取消句柄（任务结束或已取消）。 */
 export function unregisterBackgroundRun(sessionId: string): void {
   backgroundRuns.delete(sessionId)
+  // message-queue：后台生成结束 → 尝试派发排队消息（isActive 已解除，若队列有货自动开跑）
+  sessionMessageQueue.onRunComplete(sessionId, undefined, false)
 }
 
 export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendMessageResult> {
   if (activeSessions.has(input.session_id)) {
-    throw new Error('AGENT_SESSION_BUSY')
+    // message-queue（message-queue-port.md P1，2026-08-27）：生成期间消息排队不丢——
+    // 排队中仅 UI 投影（queued 态），run 完成后自动派发；用户可撤回。
+    sessionMessageQueue.enqueue(input.session_id, {
+      queueMessageId: input.request_id,
+      userMessage: input.content,
+      input,
+    })
+    return { accepted: true, session_id: input.session_id, stream_started: false, queued: true }
   }
 
   const abortController = new AbortController()
@@ -179,6 +211,8 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
   activeSessions.set(input.session_id, run)
 
   const received: SDKMessage[] = []
+  // message-queue：run 终态收口判断用户是否主动停止（isUserCancelled 分支置 true）
+  let stoppedByUser = false
 
   try {
     // 权威项目阶段（工作项 1）：以项目存储为准，渲染端上报阶段仅为回退。
@@ -579,6 +613,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     // 用户主动停止（T3）：终止流并落盘终态，但不作为错误向上抛——
     // 会话仍可用（activeSessions 已在 cancelAgent 清除，可继续发消息）。
     if (isUserCancelled(error)) {
+      stoppedByUser = true
       streamPublisher(makeEvent(input, 'error', { code: 'AGENT_CANCELLED' }))
       persistTerminalMessage(input.session_id, 'error', { code: 'AGENT_CANCELLED', message: '用户停止了本次生成' })
       return { accepted: true, session_id: input.session_id, stream_started: true }
@@ -593,6 +628,8 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
   } finally {
     await run.iterator?.return?.()
     activeSessions.delete(input.session_id)
+    // message-queue：run 收口——自然完成自动派发排队消息；用户停止不派发（违背停止意图）
+    sessionMessageQueue.onRunComplete(input.session_id, input.request_id, stoppedByUser)
   }
 }
 
@@ -662,6 +699,10 @@ export async function cancelAgent(input: AgentCancelInput): Promise<AgentCancelR
     background.abort(reason)
     backgroundRuns.delete(input.session_id)
   }
+  // message-queue：用户停止 → 不自动派发排队消息（stoppedByUser=true，停止意图优先）
+  // 并清空该会话排队消息，避免「已排队」气泡永久 limbo（审查 P2-④）
+  sessionMessageQueue.onRunComplete(input.session_id, undefined, true)
+  sessionMessageQueue.clear(input.session_id)
   return { cancelled: true, session_id: input.session_id }
 }
 

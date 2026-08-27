@@ -150,7 +150,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   const handleSubmit = () => {
     const trimmed = inputValue.trim()
-    if (!trimmed || busy) return
+    if (!trimmed) return
+    // message-queue（2026-08-27）：生成期间也允许提交——后端排队兜底（queued:true），
+    // 消息不丢、run 完成后自动派发。busy 时发送按钮区被停止按钮替换，靠 Enter 提交。
     onSendMessage?.(trimmed)
     setInputValue('')
   }
@@ -336,7 +338,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={busy ? '生成中…可以先把想法打出来，结束后发送' : '描述你的想法…'}
+            placeholder={busy ? '生成中…可以继续输入，会自动排队处理' : '描述你的想法…'}
             rows={1}
             style={{
               flex: 1,

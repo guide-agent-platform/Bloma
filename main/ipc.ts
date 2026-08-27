@@ -769,7 +769,8 @@ async function safeInvoke<T>(requestId: string, fn: () => T | Promise<T>) {
 }
 
 function validateAgentSend(payload: unknown): AgentSendMessageInput {
-  const input = requireFields<AgentSendMessageInput>(payload, ['session_id', 'project_id', 'content', 'mode', 'current_stage'])
+  // request_id 必填：message-queue 用它作 queueMessageId 去重键（审查 P2-③：缺省会被 undefined 误判重复丢消息）
+  const input = requireFields<AgentSendMessageInput>(payload, ['request_id', 'session_id', 'project_id', 'content', 'mode', 'current_stage'])
   return input
 }
 

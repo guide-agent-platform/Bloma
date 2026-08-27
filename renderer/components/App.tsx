@@ -308,8 +308,17 @@ const AppRoutes: React.FC = () => {
       current_stage: currentStage,
       metadata: { source: 'chat' },
     }).then((result) => {
-      // U5：生成期间发消息会被后端以 AGENT_SESSION_BUSY 拒绝并静默吞掉——
-      // 这里补一条引导，告诉用户可等完成或点停止，而不是消息石沉大海。
+      // message-queue（2026-08-27）：生成期间发送 → 后端入队并返回 queued:true——
+      // 追加「已排队」提示，消息不会丢，run 完成后自动处理。
+      if (result?.ok && result.data?.queued) {
+        appendMessageToSession(sessionId, {
+          role: 'system',
+          content: [{ type: 'text', text: '⏳ 已排队：当前生成完成后会自动处理这条消息。' }],
+          timestamp: Date.now(),
+        })
+        return
+      }
+      // U5 兜底：后端仍拒绝（旧后端/边缘 BUSY）→ 引导用户等待或停止，而不是消息石沉大海。
       if (!result?.ok && result?.error?.code === 'AGENT_SESSION_BUSY') {
         appendMessageToSession(sessionId, {
           role: 'system',

@@ -565,6 +565,8 @@ export interface AgentSendMessageResult {
   accepted: true
   session_id: string
   stream_started: boolean
+  /** message-queue（2026-08-27）：true = 会话忙，消息已入队待 run 完成后自动派发 */
+  queued?: boolean
 }
 
 export interface AgentCancelInput extends RequestEnvelope {
@@ -701,6 +703,8 @@ export interface AgentEvent {
     | 'delegation_completed'
     | 'delegation_failed'
     | 'delegation_cancelled'
+    /** 排队消息开始派发（message-queue 2026-08-27）：payload.queue_message_id；渲染端把「已排队」气泡翻转 */
+    | 'queued_started'
   payload: Record<string, unknown>
   created_at: string
 }
