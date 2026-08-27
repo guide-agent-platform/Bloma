@@ -4,6 +4,7 @@ import React from 'react'
 import { configure, cleanup, render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChannelSettingsPage } from '../../../renderer/components/ChannelSettingsPage'
+import { resetChannelsFetchFlagForTests } from '../../../renderer/components/atoms-sprint2'
 import type { CategoryRoutingListResult, CategoryRoutingUpdateEnvelope, Channel, ElectronAPI, RequestEnvelope } from '../../../shared/types'
 
 // 项目约定：组件测试锚点用 data-ai-id（与 data-testid 同构查询）
@@ -81,6 +82,7 @@ describe('M5 职责分工区（ChannelSettingsPage）', () => {
   afterEach(() => {
     cleanup()
     delete window.electronAPI
+    resetChannelsFetchFlagForTests()
   })
 
   it('渲染 6 行职责 + 渠道下拉（仅 Anthropic 协议渠道可选）', async () => {
@@ -183,5 +185,31 @@ describe('M5 职责分工区（ChannelSettingsPage）', () => {
       expect(updateSpy).toHaveBeenCalledTimes(1)
     })
     expect((updateSpy.mock.calls[0]![0] as CategoryRoutingUpdateEnvelope).routing).toEqual({})
+  })
+})
+
+describe('渠道表单文案（QW#5 ux-r2 I4）', () => {
+  afterEach(() => {
+    cleanup()
+    delete window.electronAPI
+    resetChannelsFetchFlagForTests()
+  })
+
+  it('[S1-UI-013] 表单标签去黑话：「渠道名称」→「给它起个名字」、「Base URL」→「服务地址」', async () => {
+    window.electronAPI = {
+      channels: {
+        list: () => Promise.resolve({ ok: true, request_id: 't', data: [] }),
+        categoryRoutingList: () => Promise.resolve({ ok: true, request_id: 't', data: { version: 1, views: [] } }),
+      },
+    } as unknown as ElectronAPI
+    render(<ChannelSettingsPage />)
+
+    await waitFor(() => expect(screen.getByText(/还没有配置/)).toBeDefined())
+    fireEvent.click(screen.getByRole('button', { name: /添加第一个渠道/ }))
+
+    await waitFor(() => expect(screen.getByText(/给它起个名字/)).toBeDefined())
+    expect(screen.getByText(/服务地址/)).toBeDefined()
+    expect(screen.queryByText('Base URL')).toBeNull()
+    expect(screen.queryByText('渠道名称 *')).toBeNull()
   })
 })

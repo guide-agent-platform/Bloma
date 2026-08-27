@@ -12,8 +12,15 @@ import {
   projectModeAtom,
   stageIndicatorLabelAtom,
   workflowStageAtom,
+  networkOnlineAtom,
 } from '../../../renderer/components/atoms'
-import type { ElectronAPI, Project } from '../../../shared/types'
+import {
+  channelsListAtom,
+  channelsLoadingAtom,
+  refreshChannelsList,
+  resetChannelsFetchFlagForTests,
+} from '../../../renderer/components/atoms-sprint2'
+import type { Channel, ElectronAPI, Project } from '../../../shared/types'
 
 describe('Sprint 1 project mode and workspace acceptance', () => {
   beforeEach(() => {
@@ -25,6 +32,7 @@ describe('Sprint 1 project mode and workspace acceptance', () => {
     delete window.electronAPI
     delete window.__jotai_store__
     vi.restoreAllMocks()
+    resetChannelsFetchFlagForTests()
   })
 
   it('[S1-PROJECT-006] 选择快速尝鲜应创建 quick 项目并进入统一工作区', async () => {
@@ -113,6 +121,102 @@ describe('Sprint 1 project mode and workspace acceptance', () => {
     expect(screen.queryByText(/React|Vue|数据库|技术栈|API/)).toBeNull()
   })
 
+  it('[S1-UI-012] 快速尝鲜卡显示「新手推荐」角标（QW#4，ux-r2 I3 默认推荐）', () => {
+    render(<Provider><ModeSelectionPage onModeSelected={vi.fn()} /></Provider>)
+    expect(screen.getByText('新手推荐')).toBeTruthy()
+  })
+
+  it('[S1-UI-009] 零渠道时头部徽标显示「未配置 AI」而非「已连接」（QW#1，ux-r2 I1）', () => {
+    const store = createStore()
+    store.set(currentProjectAtom, project('quick'))
+    store.set(projectModeAtom, 'quick')
+    store.set(channelsLoadingAtom, 'loaded')
+    store.set(channelsListAtom, [])
+
+    render(<Provider store={store}><WorkspaceHeader /></Provider>)
+
+    expect(screen.getByText('未配置 AI')).toBeTruthy()
+    expect(screen.queryByText('已连接')).toBeNull()
+    expect(screen.queryByText('AI 就绪')).toBeNull()
+  })
+
+  it('[S1-UI-010] 有可用渠道时显示「AI 就绪」而非「已连接」黑话（QW#1）', () => {
+    const usableChannel: Channel = {
+      id: 'c1',
+      name: '测试渠道',
+      provider_type: 'anthropic',
+      base_url: 'https://example.com',
+      api_key: 'enc',
+      enabled: true,
+      models: [{ id: 'm1', name: 'deepseek-v4-flash', enabled: true }],
+    }
+    const store = createStore()
+    store.set(currentProjectAtom, project('quick'))
+    store.set(projectModeAtom, 'quick')
+    store.set(channelsLoadingAtom, 'loaded')
+    store.set(channelsListAtom, [usableChannel])
+
+    render(<Provider store={store}><WorkspaceHeader /></Provider>)
+    expect(screen.getByText('AI 就绪')).toBeTruthy()
+    expect(screen.queryByText('已连接')).toBeNull()
+    expect(screen.queryByText('未配置 AI')).toBeNull()
+  })
+
+  it('[S1-UI-011] 禁用渠道 / 无启用模型 → 视为未配置 AI（QW#1）', () => {
+    const store = createStore()
+    store.set(currentProjectAtom, project('quick'))
+    store.set(projectModeAtom, 'quick')
+    store.set(channelsLoadingAtom, 'loaded')
+    store.set(channelsListAtom, [
+      {
+        id: 'c1',
+        name: '禁用渠道',
+        provider_type: 'anthropic',
+        base_url: 'https://example.com',
+        api_key: 'enc',
+        enabled: false,
+        models: [{ id: 'm1', name: 'm', enabled: true }],
+      },
+      {
+        id: 'c2',
+        name: '无启用模型',
+        provider_type: 'anthropic',
+        base_url: 'https://example.com',
+        api_key: 'enc',
+        enabled: true,
+        models: [{ id: 'm2', name: 'm2', enabled: false }],
+      },
+    ])
+
+    render(<Provider store={store}><WorkspaceHeader /></Provider>)
+    expect(screen.getByText('未配置 AI')).toBeTruthy()
+    expect(screen.queryByText('AI 就绪')).toBeNull()
+  })
+
+  it('[S1-UI-014] 有渠道但网络离线 → 显示「离线」（QW#1 三态补齐）', () => {
+    const store = createStore()
+    store.set(currentProjectAtom, project('quick'))
+    store.set(projectModeAtom, 'quick')
+    store.set(channelsLoadingAtom, 'loaded')
+    store.set(channelsListAtom, [
+      {
+        id: 'c1',
+        name: '测试渠道',
+        provider_type: 'anthropic',
+        base_url: 'https://example.com',
+        api_key: 'enc',
+        enabled: true,
+        models: [{ id: 'm1', name: 'm1', enabled: true }],
+      },
+    ])
+    store.set(networkOnlineAtom, false)
+
+    render(<Provider store={store}><WorkspaceHeader /></Provider>)
+    expect(screen.getByText('离线')).toBeTruthy()
+    expect(screen.queryByText('AI 就绪')).toBeNull()
+    expect(screen.queryByText('已连接')).toBeNull()
+  })
+
   it('[S1-UI-008] 项目创建失败时只展示 P0 可读文案且不进入工作区', async () => {
     const onModeSelected = vi.fn()
     window.electronAPI = {
@@ -154,3 +258,71 @@ function project(mode: Project['mode']): Project {
     updated_at: '2026-07-25T00:00:00.000Z',
   }
 }
+
+describe('refreshChannelsList（QW#1 启动加载）', () => {
+  afterEach(() => {
+    delete window.electronAPI
+    vi.restoreAllMocks()
+    resetChannelsFetchFlagForTests()
+  })
+
+  it('[S1-UI-015] 调用 channels.list 并写入 channelsListAtom / channelsLoadingAtom', async () => {
+    const list = vi.fn().mockResolvedValue({
+      ok: true,
+      request_id: 't',
+      data: [{ id: 'c1', name: 'x', provider_type: 'anthropic', base_url: 'u', api_key: 'k', enabled: true, models: [] }],
+    })
+    window.electronAPI = { channels: { list } } as unknown as ElectronAPI
+
+    const setChannels = vi.fn()
+    const setLoading = vi.fn()
+    await refreshChannelsList(setChannels, setLoading)
+
+    expect(list).toHaveBeenCalledTimes(1)
+    expect(setLoading).toHaveBeenCalledWith('loading')
+    expect(setChannels).toHaveBeenCalledWith([expect.objectContaining({ id: 'c1' })])
+    expect(setLoading).toHaveBeenCalledWith('loaded')
+  })
+
+  it('[S1-UI-016] list 失败 → setLoading error（徽标回退加载中态不闪变）', async () => {
+    window.electronAPI = {
+      channels: { list: vi.fn().mockResolvedValue({ ok: false, request_id: 't', error: { code: 'X', message: 'x' } }) },
+    } as unknown as ElectronAPI
+
+    const setChannels = vi.fn()
+    const setLoading = vi.fn()
+    await refreshChannelsList(setChannels, setLoading)
+
+    expect(setLoading).toHaveBeenCalledWith('error')
+    expect(setChannels).not.toHaveBeenCalled()
+  })
+})
+
+describe('WorkspaceHeader 徽标 null 态（QW#1 审查 P1-①）', () => {
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('[S1-UI-017] channelsLoadingAtom=idle（未加载）时渲染 Header 不显示「AI 就绪」/「未配置 AI」', () => {
+    const store = createStore()
+    store.set(currentProjectAtom, project('quick'))
+    store.set(projectModeAtom, 'quick')
+    // 不 set loading：默认 'idle'
+
+    render(<Provider store={store}><WorkspaceHeader /></Provider>)
+    expect(screen.queryByText('AI 就绪')).toBeNull()
+    expect(screen.queryByText('未配置 AI')).toBeNull()
+    expect(screen.queryByText('已连接')).toBeNull()
+  })
+
+  it('[S1-UI-018] channelsLoadingAtom=error 时同样不显示徽标（避免永久「AI 就绪」误导）', () => {
+    const store = createStore()
+    store.set(currentProjectAtom, project('quick'))
+    store.set(projectModeAtom, 'quick')
+    store.set(channelsLoadingAtom, 'error')
+
+    render(<Provider store={store}><WorkspaceHeader /></Provider>)
+    expect(screen.queryByText('AI 就绪')).toBeNull()
+    expect(screen.queryByText('未配置 AI')).toBeNull()
+  })
+})

@@ -28,6 +28,7 @@ import {
   loadSessionHistory,
   loadSnapshots,
 } from './atoms'
+import { refreshChannelsList, channelsListAtom, channelsLoadingAtom } from './atoms-sprint2'
 import type { ProjectMode, WorkflowStage } from './atoms'
 import type { DomCollectContextResult } from '../../shared/types'
 
@@ -106,6 +107,13 @@ const AppRoutes: React.FC = () => {
   const setPreviewUrls = useSetAtom(previewUrlsAtom)
   const setCurrentSnapshotId = useSetAtom(currentSnapshotIdAtom)
   const setMessages = useSetAtom(agentMessagesFamily(sessionId))
+  const setChannels = useSetAtom(channelsListAtom)
+  const setChannelsLoading = useSetAtom(channelsLoadingAtom)
+
+  // QW#1：启动即加载渠道列表（Header 三态徽标需要，不只 Settings 页）；Settings 页复用幂等加载
+  React.useEffect(() => {
+    void refreshChannelsList(setChannels, setChannelsLoading)
+  }, [setChannels, setChannelsLoading])
 
   const restoreAttemptedRef = React.useRef(false)
 

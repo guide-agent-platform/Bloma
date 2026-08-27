@@ -10,6 +10,8 @@ export interface ModeCardProps {
   description: string
   /** 辅助提示（卡片底部 helper 文案） */
   helperText?: string
+  /** 角标（如「新手推荐」，纯样式，提升首屏默认认知） */
+  badge?: string
   /** 选中回调 */
   onSelect: (mode: 'quick' | 'longterm') => void
   /** 禁用（防止双击重复创建） */
@@ -26,6 +28,7 @@ export const ModeCard: React.FC<ModeCardProps> = ({
   title,
   description,
   helperText,
+  badge,
   onSelect,
   disabled = false,
 }) => {
@@ -96,6 +99,26 @@ export const ModeCard: React.FC<ModeCardProps> = ({
           {isQuick ? <Zap size={14} /> : <Gem size={14} />}
           {MODE_LABELS[mode]}
         </span>
+        {/* QW#4（ux-r2 I3）：新手推荐角标（纯样式，默认认知引导） */}
+        {badge && (
+          <span
+            data-ai-id={isQuick ? 'mode-card-quick-badge' : undefined}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 'var(--space-1)',
+              padding: '3px var(--space-2)',
+              fontSize: 'var(--font-size-xs)',
+              fontWeight: 700,
+              borderRadius: 'var(--radius-full)',
+              background: 'rgb(255 255 255 / 0.95)',
+              color: 'var(--violet-700)',
+              boxShadow: '0 2px 8px rgb(0 0 0 / 0.18)',
+            }}
+          >
+            {badge}
+          </span>
+        )}
         {/* 水印大图标 */}
         <span
           aria-hidden

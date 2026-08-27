@@ -40,6 +40,7 @@ import {
   channelsLoadingAtom,
   channelTestResultAtom,
   permissionModeAtom,
+  refreshChannelsList,
 } from './atoms-sprint2'
 
 // =========================================================================
@@ -318,9 +319,9 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onS
 
   return (
     <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-      {/* 渠道名称 */}
+      {/* 渠道名称（QW#5：去「渠道」黑话，0 基础用户不知道什么是渠道） */}
       <div>
-        <label style={labelStyle}>渠道名称 *</label>
+        <label style={labelStyle}>给它起个名字 *</label>
         <input
           style={inputStyle}
           value={name}
@@ -344,14 +345,14 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onS
         </select>
       </div>
 
-      {/* Base URL */}
+      {/* Base URL（QW#5：去技术黑话） */}
       <div>
-        <label style={labelStyle}>Base URL</label>
+        <label style={labelStyle}>服务地址（一般不用改）</label>
         <input
           style={inputStyle}
           value={baseUrl}
           onChange={(e) => setBaseUrl(e.target.value)}
-          placeholder={PROVIDER_DEFAULT_URLS[provider] ? `留空使用 ${PROVIDER_DEFAULT_URLS[provider]}` : '自定义提供商请填写 Base URL'}
+          placeholder={PROVIDER_DEFAULT_URLS[provider] ? `留空使用 ${PROVIDER_DEFAULT_URLS[provider]}` : '自定义提供商请填写服务地址'}
         />
       </div>
 
@@ -935,20 +936,8 @@ export const ChannelSettingsPage: React.FC = () => {
   // ==================== 加载渠道列表 ====================
 
   useEffect(() => {
-    const api = window.electronAPI
-    if (!api?.channels?.list) return
-    setLoading('loading')
-    void api.channels
-      .list({ request_id: crypto.randomUUID() })
-      .then((result) => {
-        if (result.ok) {
-          setChannels(result.data)
-          setLoading('loaded')
-        } else {
-          setLoading('error')
-        }
-      })
-      .catch(() => setLoading('error'))
+    // QW#1：复用启动加载（幂等——App 挂载已加载，这里仅确保 settings 页打开时数据新鲜）
+    void refreshChannelsList(setChannels, setLoading)
   }, [setChannels, setLoading])
 
   // ==================== M5：加载职责分工视图模型 ====================
