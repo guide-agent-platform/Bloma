@@ -103,8 +103,8 @@ describe('引导首轮澄清硬护栏', () => {
 
     // 不开工：草图任务绝不能被触发
     expect(runSketchTask).not.toHaveBeenCalled()
-    // 系统提示带上了首轮硬性要求
-    expect(model.captured.history[0]?.content).toContain('硬性要求')
+    // 系统提示带上了首轮护栏（2026-08-27 软化为「本轮提示」：保留防零确认开工底线，提问决策归还向导）
+    expect(model.captured.history[0]?.content).toContain('本轮提示')
     // 不采用模型的「直接开工」话术，落盘的是澄清问句
     expect(model.persistAssistant).toHaveBeenCalledWith(expect.stringContaining('确认'))
     expect(model.persistAssistant).not.toHaveBeenCalledWith('好的，这就为你生成草图！')
@@ -147,7 +147,7 @@ describe('引导首轮澄清硬护栏', () => {
 
     await handleGuideMessage(makeInput(), (event) => events.push(event), model)
 
-    expect(model.captured.history[0]?.content).not.toContain('硬性要求')
+    expect(model.captured.history[0]?.content).not.toContain('本轮提示')
     expect(model.persistAssistant).toHaveBeenCalledWith('好的，这就为你生成草图！')
     expect(runSketchTask).toHaveBeenCalledTimes(1)
     expect(vi.mocked(runSketchTask).mock.calls[0][0].requirements).toEqual([
