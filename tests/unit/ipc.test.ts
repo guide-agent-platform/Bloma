@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -6,7 +6,26 @@ import { registerIpcHandlers } from '../../main/ipc'
 import { createProject } from '../../main/project-service'
 import { resetSDKQueryForTests, setSDKQueryForTests } from '../../main/orchestrator'
 import type { SDKQuery } from '../../main/orchestrator'
+import { getDocumentsDir } from '../../storage/config-paths'
 import { IPC_CHANNELS } from '../../shared/types'
+
+/** 预置「PRD 已被用户确认」状态：写带 user_confirmed_at 的 prd.json（不过目不开工防御的前置）。 */
+function seedConfirmedPrd(home: string, projectId: string, confirmed = true): void {
+  const dir = getDocumentsDir('default-software-builder', projectId)
+  mkdirSync(dir, { recursive: true })
+  const backplane = {
+    project_id: projectId,
+    name: '测试项目',
+    positioning: '测试定位',
+    requirements: [{ id: 'F-001', description: '核心功能', priority: 'P0', story: '作为用户…', assertions: [] }],
+    acceptance: {},
+    out_of_scope: [],
+    assumptions: [],
+    ...(confirmed ? { user_confirmed_at: '2026-08-27T02:00:00.000Z' } : {}),
+  }
+  writeFileSync(join(dir, 'prd.json'), JSON.stringify(backplane), 'utf8')
+  void home
+}
 
 /**
  * A2-14b — ipc.ts:133 确认草图→runMvpTask 的 query 透传。
@@ -82,10 +101,12 @@ describe('ipc submit-correction → runIterationTask wiring（Sprint 3 纠错主
     runIterationTaskMock.mockClear()
   })
 
-  it('点选纠错（带 user_note）落盘后触发带新需求的重新生成', async () => {
+  it('点选纠错（带 user_note，PRD 已确认）落盘后触发带新需求的重新生成', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-ipc-correction-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    // 「不过目不开工」（2026-08-27）：只有 PRD 已被用户确认过的项目，点选纠错才直达 MVP 迭代
+    seedConfirmedPrd(home, project.project_id, true)
 
     const handlers = new Map<string, (_event: unknown, payload: unknown) => unknown>()
     registerIpcHandlers(
@@ -137,5 +158,38 @@ describe('ipc submit-correction → runIterationTask wiring（Sprint 3 纠错主
     })
 
     expect(runIterationTaskMock).not.toHaveBeenCalled()
+  })
+
+  it('PRD 未确认时点选纠错不触发 MVP 迭代，只落盘+引导完成确认（不过目不开工，2026-08-27）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ipc-correction-unconfirmed-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    // 不预置 user_confirmed_at（prd.json 缺失 → fail-closed 视为未确认）
+
+    const sentEvents: Array<{ type: string; payload: { text?: string } }> = []
+    const handlers = new Map<string, (_event: unknown, payload: unknown) => unknown>()
+    registerIpcHandlers(
+      { handle: (channel: string, handler: (_event: unknown, payload: unknown) => unknown) => handlers.set(channel, handler) } as never,
+      { webContents: { send: (_: unknown, event: { type: string; payload: { text?: string } }) => sentEvents.push(event) } } as never,
+    )
+
+    const submitCorrection = handlers.get(IPC_CHANNELS.PROJECT_SUBMIT_CORRECTION)
+    await submitCorrection!({}, {
+      request_id: 'req-correction',
+      project_id: project.project_id,
+      session_id: 'session-1',
+      context: { bounding_rect: { x: 0, y: 0, width: 0, height: 0 }, fallback_mode: false },
+      user_note: '不要这个名字',
+      mode: 'user_note',
+    })
+
+    // 未确认 → 不进入 MVP 全量重造，改引导回 PRD 确认流
+    expect(runIterationTaskMock).not.toHaveBeenCalled()
+    const guidance = sentEvents.find((event) => event.type === 'message_delta')?.payload.text
+    expect(guidance).toContain('还没经你确认')
+    // 纠错原文仍按 user 角色落盘（留痕不丢）
+    const jsonl = readFileSync(join(home, 'agent-sessions', 'session-1.jsonl'), 'utf8')
+    expect(jsonl).toContain('不要这个名字')
+    expect(jsonl).toContain('还没经你确认')
   })
 })

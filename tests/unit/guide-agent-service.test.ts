@@ -24,6 +24,7 @@ vi.mock('../../main/channel-manager', async (importOriginal) => {
   }
 })
 import { createProject, findProject, readLastSketchRequirements } from '../../main/project-service'
+import { PRD_CONFIRM_OPTION_CONFIRM } from '../../main/prd-confirm'
 import {
   clearSandboxRuntimeForTests,
   setSandboxRuntimeForTests,
@@ -97,7 +98,7 @@ describe('GuideAgentService through AgentOrchestrator', () => {
     expect(findProject(project.project_id).current_stage).toBe('sketch_ready')
   })
 
-  it('A2-14a: 已过澄清轮后模型返回 generate_sketch JSON 时直接进入草图生成', async () => {
+  it('A2-14a: 已过澄清轮后模型返回 generate_sketch JSON 时经 PRD 确认门进入草图生成（不过目不开工，2026-08-27）', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-guide-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
@@ -147,6 +148,24 @@ describe('GuideAgentService through AgentOrchestrator', () => {
       channel_id: 'test-channel',
     })
 
+    // generate_sketch 收口（2026-08-27）：不再直达草图——先走 PRD→审查→确认卡挂起，
+    // 草图必须等用户过目 PRD 确认后才并跑
+    const confirmCard = events.find(
+      (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
+    )
+    expect(confirmCard).toBeTruthy()
+    expect(events.find((event) => event.type === 'sketch_ready')).toBeUndefined()
+    await runAgent({
+      request_id: 'req-guide',
+      session_id: 'session-guide',
+      project_id: project.project_id,
+      content: '确认无误',
+      mode: 'quick',
+      current_stage: 'clarifying',
+      channel_id: 'test-channel',
+      metadata: { source: 'card_option', selected_option_id: PRD_CONFIRM_OPTION_CONFIRM },
+    })
+
     const ready = events.find((event) => event.type === 'sketch_ready')
     expect(ready).toBeTruthy()
     expect(findProject(project.project_id).current_stage).toBe('sketch_ready')
@@ -158,7 +177,8 @@ describe('GuideAgentService through AgentOrchestrator', () => {
     expect(deltaTexts).toContain('好的，马上开始')
     // 本 mock 的草图 LLM 输出非 HTML → 模板回退必须如实告知（草图说明，2026-08-15 静默回退案例）
     expect(deltaTexts).toContain('草图说明')
-    expect(deltaTexts).not.toContain('{"action"')
+    // PRD 管线收口后，中间链路（PRD 引擎流式旁白）在 mock 下会转发 scripted 原文，
+    // 原始 JSON 契约的防泄露断言收敛到会话 JSONL 落盘层（persistAssistant 只落 reply）
     // 会话 JSONL 落盘的也是 reply 而非原始 JSON
     const jsonl = readFileSync(join(home, 'agent-sessions', 'session-guide.jsonl'), 'utf8')
     expect(jsonl).toContain('好的，马上开始')
@@ -579,7 +599,22 @@ describe('GuideAgentService through AgentOrchestrator', () => {
       channel_id: 'test-channel',
     })
 
-    // 需求清单必须以主题为 F-001 锚点，澄清答案只追加为后续项，而不是覆盖主题
+    // 需求清单必须以主题为 F-001 锚点，澄清答案只追加为后续项，而不是覆盖主题。
+    // generate_sketch 收口（2026-08-27）：先过 PRD 确认门，确认后才开草图
+    const confirmCard = events.find(
+      (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
+    )
+    expect(confirmCard).toBeTruthy()
+    await runAgent({
+      request_id: 'req-theme-2c',
+      session_id: 'session-theme',
+      project_id: project.project_id,
+      content: '确认无误',
+      mode: 'quick',
+      current_stage: 'blocked_for_user_decision',
+      channel_id: 'test-channel',
+      metadata: { source: 'card_option', selected_option_id: PRD_CONFIRM_OPTION_CONFIRM },
+    })
     const descriptions = readLastSketchRequirements(project.project_id).map((r) => r.description)
     expect(descriptions[0]).toBe('帮我做一个音乐合成器')
     expect(descriptions).toContain('网页端')

@@ -14,7 +14,11 @@ vi.mock('../../main/programming-orchestrator', () => ({
   setProgrammingEventPublisher: vi.fn(),
 }))
 vi.mock('../../main/platform-services', () => ({ trackAnalytics: vi.fn() }))
-vi.mock('../../main/document-engine', () => ({ syncDocuments: vi.fn(() => ({ documents: [], stale_documents: [] })) }))
+vi.mock('../../main/document-engine', () => ({
+  syncDocuments: vi.fn(() => ({ documents: [], stale_documents: [] })),
+  markPrdUserConfirmed: vi.fn(() => ({ user_confirmed_at: '2026-08-27T02:00:00.000Z' })),
+  isPrdUserConfirmed: vi.fn(() => false),
+}))
 vi.mock('../../main/project-service', () => ({
   findProject: vi.fn(() => ({
     project_id: 'proj-1',
@@ -52,6 +56,7 @@ import {
   parseReviewIssues,
   ruleGateReview,
 } from '../../main/prd-review'
+import { PRD_CONFIRM_OPTION_CONFIRM } from '../../main/prd-confirm'
 import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../main/orchestrator'
 
 /**
@@ -197,7 +202,7 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     }))
   })
 
-  it('override → 按原需求开草图 + overridden 留痕；supplement → 提示打字、不开草图', async () => {
+  it('override → 转 PRD 确认门过目（不过目不开工，2026-08-27）+ overridden 留痕；确认后才开草图；supplement → 提示打字、不开草图', async () => {
     const { query } = scriptedQuery([reviewFailJson])
     await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(query))
     await resolveRequirementConfirm({ request_id: 'req-pr2', session_id: SESSION_ID, project_id: 'proj-1', decision: 'confirm' })
@@ -213,14 +218,35 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
       (event) => events.push(event),
       makeModel(scriptedQuery([reviewPassJson]).query),
     )
+    // 不过目不开工：忽略审查问题 ≠ 确认过 PRD——不再直达草图，改发 PRD 确认卡挂起
+    expect(runSketchTask).not.toHaveBeenCalled()
+    const confirmCard = events.find(
+      (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
+    )
+    expect(confirmCard).toBeTruthy()
+    expect(String(confirmCard?.payload.title)).toContain('已忽略')
+    const ackDeltas = events.filter((event) => event.type === 'message_delta').map((event) => String(event.payload.text))
+    expect(ackDeltas.some((text) => text.includes('请你过目'))).toBe(true)
+    expect(recordDecision).toHaveBeenCalledWith(expect.objectContaining({
+      entry: expect.objectContaining({ type: 'prd_review_overridden', title: '用户忽略裁判问题，转入 PRD 过目' }),
+    }))
+
+    // 确认卡「确认无误」→ 过目完成才开草图，需求清单保持一致
+    events.length = 0
+    vi.mocked(runSketchTask).mockClear()
+    await handleGuideMessage(
+      {
+        ...makeInput('确认无误'),
+        metadata: { source: 'card_option', selected_option_id: PRD_CONFIRM_OPTION_CONFIRM },
+      },
+      (event) => events.push(event),
+      makeModel(scriptedQuery([reviewPassJson]).query),
+    )
     expect(runSketchTask).toHaveBeenCalledTimes(1)
     expect(vi.mocked(runSketchTask).mock.calls[0][0].requirements).toEqual([
       { id: 'F-001', description: '记账本，记录日常收支' },
       { id: 'F-002', description: '按月汇总统计' },
     ])
-    expect(recordDecision).toHaveBeenCalledWith(expect.objectContaining({
-      entry: expect.objectContaining({ type: 'prd_review_overridden', title: '用户忽略裁判问题，按原需求继续' }),
-    }))
 
     // 再造一次 needs_revision，测 supplement
     const again = scriptedQuery([reviewFailJson])

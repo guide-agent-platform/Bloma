@@ -371,6 +371,17 @@ export function markPrdUserConfirmed(projectId: string): PrdBackplane | null {
   }
 }
 
+/** PRD 是否已被用户确认过（确认卡「确认无误」落盘 user_confirmed_at）。
+ * 读取失败/无 prd.json（回退重建对象无该字段）均视为未确认——fail-closed，
+ * 供点选纠错等直达开工路径的「不过目不开工」防御检查使用（2026-08-27）。 */
+export function isPrdUserConfirmed(projectId: string): boolean {
+  try {
+    return Boolean(readPrdBackplane(projectId).user_confirmed_at)
+  } catch {
+    return false
+  }
+}
+
 function renderPrdJson(backplane: PrdBackplane): string {
   return `${JSON.stringify(backplane, null, 2)}\n`
 }

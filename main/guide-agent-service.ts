@@ -559,7 +559,7 @@ async function tryModelDrivenGuide(
     parsed.reply.trim() ||
     (parsed.action === 'ask_clarification'
       ? '想再多了解一点，方便我判断该怎么做。'
-      : '好的，开始按你的想法生成草图。')
+      : '好的，我先把你的想法整理成产品需求文档，请你过目。')
   model.persistAssistant(reply)
   publish(makeGuideEvent(input, 'message_delta', { text: reply }))
   publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
@@ -576,16 +576,19 @@ async function tryModelDrivenGuide(
     return true
   }
 
-  // generate_sketch：不经 user_decision_required，直接进入草图生成（渠道可用走 LLM，否则回退模板）
-  await runSketchTask({
+  // generate_sketch（2026-08-27 收口补全）：模型判定需求成型直接开工的第四条入口，
+  // 与点选/让渡/弹窗统一走 PRD 后置链（前移→六维审查→确认卡→草图）——
+  // 「不过目不开工」，不再直达 runSketchTask。
+  await runPrdPipeline({
     request_id: input.request_id,
     session_id: input.session_id,
     project_id: input.project_id,
     mode: input.mode,
-    prompt: parsed.reply || input.content,
-    requirements: ensurePrimaryIntent(parsed.requirements, primaryIntent),
     channel_id: input.channel_id,
+    requirements: ensurePrimaryIntent(parsed.requirements, primaryIntent),
     query: model.query,
+    env: model.env,
+    publish,
   })
   return true
 }
@@ -817,6 +820,7 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
         requirements,
         issues: review.issues,
         outcome: review,
+        backplane: backplaneForReview,
         query: pending.query ?? NO_QUERY_FALLBACK,
         publish,
       })

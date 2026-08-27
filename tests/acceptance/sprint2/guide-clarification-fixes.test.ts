@@ -115,15 +115,27 @@ describe('Sprint 2 guide clarification fixes acceptance（向导澄清修复）'
         content: '我还没想法', mode: 'quick', current_stage: 'blocked_for_user_decision', channel_id: 'test-channel',
       })
 
-      // 直接进入草图生成，不再弹卡
+      // 让渡 → PRD 管线收口（2026-08-27「不过目不开工」）：不再直达草图，
+      // 先 PRD→六维审查→PRD 确认卡挂起；重问仍不得发生
+      const confirmCard = events.find(
+        (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
+      )
+      expect(confirmCard).toBeTruthy()
+      expect(events.filter((event) => event.type === 'user_decision_required')).toHaveLength(2) // 首轮澄清卡 + PRD 确认卡
+      // 同文问句不得作为新澄清卡重发（让渡分流短路了模型路径；PRD 引擎流式旁白
+      // 在 mock 下会转发 scripted 原文属伪影，以卡片为准）
+      const clarifyCards = events.filter(
+        (event) => event.type === 'user_decision_required' && Array.isArray((event.payload as { questions?: unknown[] }).questions),
+      )
+      expect(clarifyCards).toHaveLength(1)
+      // 用户过目确认后才开草图
+      await runAgent({
+        request_id: 'req-3', session_id: 'session-scene', project_id: project.project_id,
+        content: '确认无误', mode: 'quick', current_stage: 'blocked_for_user_decision', channel_id: 'test-channel',
+        metadata: { source: 'card_option', selected_option_id: 'prd_confirm_confirm' },
+      })
       expect(events.find((event) => event.type === 'sketch_ready')).toBeTruthy()
-      expect(events.filter((event) => event.type === 'user_decision_required')).toHaveLength(1)
       expect(findProject(project.project_id).current_stage).toBe('sketch_ready')
-      // 同文问句全程只出现一次（第二轮没有重问）
-      const questionCount = events
-        .filter((event) => event.type === 'message_delta')
-        .filter((event) => String(event.payload.text ?? '').includes('你想做一个什么类型的工具？')).length
-      expect(questionCount).toBe(1)
       // 「你好」（问候）与「我还没想法」（让渡）都不配当主题锚点：F-001 是 auto 扩写
       expect(readLastSketchRequirements(project.project_id)[0]?.description).toBe(
         '通用实用软件工具，由向导按常见做法生成第一版',
@@ -145,13 +157,21 @@ describe('Sprint 2 guide clarification fixes acceptance（向导澄清修复）'
       setupSandbox(4102)
       mockModelAsking('想做哪种工具？', ['记账本', '待办清单'])
 
-      // 打字版「你帮我决定」：与点选卡片同义，直接开工
+      // 打字版「你帮我决定」：与点选卡片同义——不再直达草图，先过 PRD 确认门（2026-08-27）
       await runAgent({
         request_id: 'req-1', session_id: 'session-free-text', project_id: project.project_id,
         content: '你帮我决定', mode: 'quick', current_stage: 'blocked_for_user_decision', channel_id: 'test-channel',
       })
+      const confirmCard = events.find(
+        (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
+      )
+      expect(confirmCard).toBeTruthy()
+      await runAgent({
+        request_id: 'req-1c', session_id: 'session-free-text', project_id: project.project_id,
+        content: '确认无误', mode: 'quick', current_stage: 'blocked_for_user_decision', channel_id: 'test-channel',
+        metadata: { source: 'card_option', selected_option_id: 'prd_confirm_confirm' },
+      })
       expect(events.find((event) => event.type === 'sketch_ready')).toBeTruthy()
-      expect(events.filter((event) => event.type === 'user_decision_required')).toHaveLength(0)
 
       // 含实际内容的话（「随便做个游戏」）不是让渡：照常澄清，不擅自开工
       const project2 = createProject({ request_id: 'req-project-2', mode: 'quick' })

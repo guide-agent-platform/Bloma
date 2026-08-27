@@ -22,7 +22,7 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentEvent, AgentSendMessageInput } from '../shared/types'
 import { recordDecision } from './decision-log'
-import { runSketchTask } from './programming-orchestrator'
+import { publishPrdConfirmCard } from './prd-confirm'
 import type { PrdBackplane } from './sketch-engine'
 import type { SDKQuery } from './orchestrator'
 import { delegatedReviewEnabled, runDelegatedReview } from './review-delegation'
@@ -52,7 +52,7 @@ export interface PrdReviewOutcome {
   degraded?: boolean
 }
 
-/** 审查未过后的待决状态：用户可选忽略（override→直接草图）或补充说明（回向导）。 */
+/** 审查未过后的待决状态：用户可选忽略（override→过 PRD 确认门）或补充说明（回向导）。 */
 interface PendingPrdReview {
   request_id: string
   session_id: string
@@ -61,6 +61,8 @@ interface PendingPrdReview {
   channel_id?: string
   requirements: Array<{ id: string; description: string }>
   issues: PrdReviewIssue[]
+  /** 审查时的背板：override 后转 PRD 确认门要用（2026-08-27，不过目不开工） */
+  backplane: PrdBackplane
   query: SDKQuery
   publish: (event: AgentEvent) => void
 }
@@ -301,6 +303,7 @@ export function publishPrdReviewCard(opts: {
   requirements: Array<{ id: string; description: string }>
   issues: PrdReviewIssue[]
   outcome: PrdReviewOutcome
+  backplane: PrdBackplane
   query: SDKQuery
   publish: (event: AgentEvent) => void
 }): void {
@@ -315,6 +318,7 @@ export function publishPrdReviewCard(opts: {
     channel_id: input.channel_id,
     requirements,
     issues,
+    backplane: opts.backplane,
     query: opts.query,
     publish: opts.publish,
   })
@@ -353,7 +357,7 @@ export function publishPrdReviewCard(opts: {
         {
           id: PRD_REVIEW_OPTION_OVERRIDE,
           label: '忽略问题，继续生成',
-          description: '按现在的需求直接画草图',
+          description: '按现在的需求过目 PRD 后再开工',
         },
         {
           id: PRD_REVIEW_OPTION_SUPPLEMENT,
@@ -389,36 +393,40 @@ export function resolvePrdReviewCardAnswer(
   return optionId === PRD_REVIEW_OPTION_OVERRIDE ? 'override' : 'supplement'
 }
 
-/** 用户选择忽略：按原需求直接开草图，决策日志留痕（用户主权，不硬拦）。 */
+/** 用户选择忽略：忽略审查问题≠确认过 PRD——「不过目不开工」（2026-08-27 用户拍板），
+ * 转发 PRD 确认门把背板四段式摊给用户过目，确认后才开草图；决策日志留痕。 */
 export async function resumePrdReviewOverride(input: AgentSendMessageInput): Promise<boolean> {
   const pending = takePendingPrdReview(input.project_id)
   if (!pending) return false
+  const serious = pending.issues.filter((issue) => issue.severity === 'blocking' || issue.severity === 'major')
   recordDecision({
     project_id: input.project_id,
     session_id: pending.session_id,
     entry: {
       type: 'prd_review_overridden',
-      title: '用户忽略裁判问题，按原需求继续',
-      why: '用户在 PRD 审查决策卡选择「忽略问题，继续生成」',
+      title: '用户忽略裁判问题，转入 PRD 过目',
+      why: `用户在 PRD 审查决策卡选择「忽略问题，继续生成」；忽略审查问题不等于确认过 PRD，转入确认门过目后开工`,
       detail: {
-        ignored_issues: pending.issues
-          .filter((issue) => issue.severity === 'blocking' || issue.severity === 'major')
-          .map((issue) => issue.claim),
+        ignored_issues: serious.map((issue) => issue.claim),
       },
     },
   })
-  const ack = '好的，按你确认的需求继续，开始画草图。'
+  const ack = `好的，已按你的选择忽略审查发现的问题。这是按你的需求整理的 PRD，请你过目，确认无误后我再开始画草图。`
   pending.publish(makeReviewEvent(pending, 'message_delta', { text: ack }))
   pending.publish(makeReviewEvent(pending, 'message_completed', { subtype: 'success' }))
-  await runSketchTask({
-    request_id: pending.request_id,
-    session_id: pending.session_id,
-    project_id: pending.project_id,
-    mode: pending.mode,
-    prompt: '按确认的需求清单生成草图',
+  publishPrdConfirmCard({
+    input: {
+      request_id: pending.request_id,
+      session_id: pending.session_id,
+      project_id: pending.project_id,
+      mode: pending.mode,
+      channel_id: pending.channel_id,
+    },
+    backplane: pending.backplane,
     requirements: pending.requirements,
-    channel_id: pending.channel_id,
     query: pending.query,
+    publish: pending.publish,
+    reviewNote: `已忽略 ${serious.length} 个审查问题`,
   })
   return true
 }

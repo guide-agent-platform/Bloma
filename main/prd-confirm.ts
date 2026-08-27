@@ -17,7 +17,8 @@ import type { SDKQuery } from './orchestrator'
  * - 回传复用 card_option 元数据（send-message），零新 IPC 通道；
  * - confirm → user_confirmed_at 落盘 prd.json（迭代争议仲裁锚点）→ 开草图；
  * - adjust → 消费 pending，用户打字补充回向导模型路径（新确认流程会重建闭环）；
- * - 审查 needs_revision 的 override 分支不再发本卡（用户刚决策过，避免双重打断）。
+ * - 审查 needs_revision 的 override 分支同样发本卡（2026-08-27 用户拍板「不过目不开工」：
+ *   忽略审查问题≠确认过 PRD，override 后仍须过目；卡片 title 如实标注已忽略问题数）。
  */
 
 /** PRD 确认卡选项 id（回传经 send-message 的 card_option 元数据识别）。 */
@@ -59,8 +60,11 @@ export function publishPrdConfirmCard(opts: {
   requirements: Array<{ id: string; description: string }>
   query: SDKQuery
   publish: (event: AgentEvent) => void
+  /** 审查被用户 override 后转入确认门时携带：如实标注「已忽略 N 个审查问题」，
+   *  卡片 title 同步变体（不再自称「已通过裁判审查」——诚实披露）。 */
+  reviewNote?: string
 }): void {
-  const { input, backplane } = opts
+  const { input, backplane, reviewNote } = opts
   pendingPrdConfirms.set(input.project_id, {
     request_id: input.request_id,
     session_id: input.session_id,
@@ -78,8 +82,10 @@ export function publishPrdConfirmCard(opts: {
     entry: {
       type: 'prd_confirm',
       title: 'PRD 用户确认门（挂起）',
-      why: '审查已通过，等待用户阅读确认 PRD 后开草图',
-      detail: { requirement_count: backplane.requirements.length },
+      why: reviewNote
+        ? `用户已忽略审查问题（${reviewNote}），仍须过目 PRD 后才开草图（不过目不开工）`
+        : '审查已通过，等待用户阅读确认 PRD 后开草图',
+      detail: { requirement_count: backplane.requirements.length, review_note: reviewNote },
     },
   })
 
@@ -90,7 +96,10 @@ export function publishPrdConfirmCard(opts: {
     type: 'user_decision_required',
     payload: {
       kind: 'prd_confirm',
-      title: '请确认这份 PRD（已通过裁判审查）',
+      title: reviewNote
+        ? `请确认这份 PRD（${reviewNote}）`
+        : '请确认这份 PRD（已通过裁判审查）',
+      review_note: reviewNote,
       positioning: backplane.positioning,
       requirements: backplane.requirements.map((item) => ({
         id: item.id,

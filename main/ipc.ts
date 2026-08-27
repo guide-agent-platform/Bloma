@@ -77,7 +77,7 @@ import { resolveRequirementConfirm } from './guide-agent-service'
 import { createChannel, deleteChannel, fetchModels, listChannels, testChannel, testChannelDirect, updateChannel } from './channel-manager'
 import { buildCategoryRoutingViews, updateCategoryRouting } from './category-routing'
 import { listPromptSlots, readPromptSlot, resetPromptSlot, savePromptSlot } from './prompt-service'
-import { listDocuments, readDocument, syncDocuments } from './document-engine'
+import { listDocuments, readDocument, syncDocuments, isPrdUserConfirmed } from './document-engine'
 import { isCircuitBreakSettled } from './recovery-service'
 import {
   createSnapshot,
@@ -393,6 +393,29 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
           content: [{ type: 'text', text: prompt }],
           timestamp: Date.now(),
         })
+        // 「不过目不开工」防御（2026-08-27 用户拍板）：PRD 从未被用户确认过时，
+        // 点选纠错不直接触发 MVP 全量重造——否则会绕过 PRD 确认门与草图确认门
+        // （线上案例：审查 override 后草图阶段纠错直达 loop）。此时只留痕+引导
+        // 回确认流；正常链路（确认门修复后）草图先于确认生成，此分支仅兑异常/存量
+        // 不一致状态。fail-closed：prd.json 缺失/损坏均视为未确认。
+        if (!isPrdUserConfirmed(input.project_id)) {
+          const guidance =
+            '收到，这处调整意见我先记下了。不过需求定稿（PRD）还没经你确认过，我先把整理好的 PRD 给你过目，确认后我再按你的意见继续。'
+          appendJsonLine(getAgentSessionPath(input.session_id), {
+            role: 'assistant',
+            content: [{ type: 'text', text: guidance }],
+            timestamp: Date.now(),
+          })
+          mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, {
+            event_id: randomUUID(),
+            session_id: input.session_id,
+            project_id: input.project_id,
+            type: 'message_delta',
+            payload: { text: guidance },
+            created_at: new Date().toISOString(),
+          })
+          return result
+        }
         const mode = findProject(input.project_id).mode
         // U4/U5：注册可取消句柄，让「停止生成」能 abort 点选纠错触发的再生成链路。
         const abortController = new AbortController()
