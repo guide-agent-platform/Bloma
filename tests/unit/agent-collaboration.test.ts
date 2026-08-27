@@ -556,12 +556,10 @@ describe('M4-C 委派生命周期事件（delegation_started/completed/failed/ca
     parentSessionId = `session-evt-${Date.now()}-${Math.random().toString(36).slice(2)}`
     setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
   })
-  afterEach(() => {
-    for (const record of listDelegations(parentSessionId)) {
-      if (record.status === 'running') record.abort.abort()
-    }
+  afterEach(async () => {
+    await abortAndSettleChildLoops()
     unregisterParentLoopContext(parentSessionId)
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   function registerParentCapturing(query: SDKQuery): Array<{ type: string; payload: Record<string, unknown> }> {
@@ -692,12 +690,10 @@ describe('审计修复回归（审计报告 2026-08-25：P1-1/P1-2/P2-4/P2-5/P2-
     parentSessionId = `session-fix-${Date.now()}-${Math.random().toString(36).slice(2)}`
     setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
   })
-  afterEach(() => {
-    for (const record of listDelegations(parentSessionId)) {
-      if (record.status === 'running') record.abort.abort()
-    }
+  afterEach(async () => {
+    await abortAndSettleChildLoops()
     unregisterParentLoopContext(parentSessionId)
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   it('P1-1：answer 后再次 wait 不因旧 askSignal 假提前返回（等满 timeout 而非立即返回）', async () => {
@@ -839,12 +835,10 @@ describe('委派补测 S4（远端缺失项移植）', () => {
     parentSessionId = isolatedParentSessionId
     setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
   })
-  afterEach(() => {
-    for (const record of listDelegations(parentSessionId)) {
-      if (record.status === 'running') record.abort.abort()
-    }
+  afterEach(async () => {
+    await abortAndSettleChildLoops()
     unregisterParentLoopContext(parentSessionId)
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   function registerParentCapturing(query: SDKQuery): Array<{ type: string; payload: Record<string, unknown> }> {
