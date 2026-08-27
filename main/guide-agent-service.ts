@@ -30,7 +30,7 @@ import type { ConversationTurn, GuideModelOptions, SDKQuery } from './orchestrat
 import { trackAnalytics } from './platform-services'
 import { resolvePrdBackplane, runSketchTask, setProgrammingEventPublisher, nextRequirementId, refineModificationDescription } from './programming-orchestrator'
 import { normalizeRequirementUpdate, applyNormalization } from './requirement-normalizer'
-import { findProject, updateProject } from './project-service'
+import { findProject, updateProject, readLastSketchRequirements, recordSketchGenerated } from './project-service'
 import { captureConstraints, extractConstraints, readProjectConstraints } from './constraint-extractor'
 import { isAutoDelegationText, readPrimaryIntent } from './session-service'
 import type { PrdBackplane, SketchRequirement } from './sketch-engine'
@@ -54,14 +54,27 @@ export const DEFAULT_GUIDE_SYSTEM_PROMPT = `你是「向导 Agent」，负责把
  "reply":"给用户的简短确认话术（简体中文 ≤20 字，口语化，不含技术细节）",
  "requirements":[{"id":"F-001","description":"核心功能点（动词开头，用户原话提炼，≤40 字）"}]}
 
-【需求还不够能落地 → 澄清：问一个启发式问题，选项要能点亮用户的想象力】
+【需求还不够能落地 → 澄清：一次把多个维度的问题都准备好】
 {"action":"ask_clarification",
- "reply":"一个具体问句（只问一个产品维度，≤40 字，以？结尾）",
+ "reply":"一个具体问句（≤40 字，以？结尾）；可以先用 ≤10 字呼应主题（如「好——计算器！」）",
  "questions":[
-   {"id":"answer-a","label":"一个具体形态/做法（名词短语 ≤8 字，如「悬浮球秒记」）","description":"选它之后会做成什么样（≤20 字）"},
+   {"id":"answer-a","label":"本轮问题的一个具体形态/做法（名词短语 ≤8 字，如「悬浮球秒记」）","description":"选它之后会做成什么样（≤20 字）"},
    {"id":"answer-b","label":"另一个互斥的具体形态/做法","description":"……"},
    {"id":"auto","label":"你帮我决定","description":"交给我，按常见做法先出一版"}
+ ],
+ "followups":[
+   {"reply":"下一个独立维度的问句","questions":[{"id":"...","label":"具体形态选项"},{"id":"...","label":"另一选项"},{"id":"auto","label":"你帮我决定","description":"交给我，按常见做法先出一版"}]},
+   {"reply":"再下一个独立维度的问句（可选，最多两条）","questions":["……同上……"]}
  ]}
+
+followups（批量澄清，重要）：
+- 一次把 1~2 个**与本轮问题相互独立**的后续维度问题准备好，平台会缓存后依次弹出：用户每点选一项立即看到下一问（不再等模型响应），全部答完才整理 PRD——快且完整。
+- followups 的每个维度必须与本轮问题正交（例：本轮问交互形态，followup 问数据组织/回看方式），绝不重复同一维度。
+- 每个 followup 的 questions 同样 2~4 条，最后一条固定 auto；reply 是问句。
+
+问句风格（避免千篇一律）：
+- 三种风格轮换使用，连续两轮不得用同一种开头：①直问式（「做成什么形态？」）②场景式（「平时更可能在什么时候打开它？」）③偏好式（「你更在意快还是全？」）。
+- 禁止每轮都用「你希望这个 X 怎么…？」句式开头；问句要贴合已聊到的上下文，像真人接着聊，而不是填表。
 
 澄清策略（核心——你的提问质量直接决定 PRD 质量）：
 - 澄清不是走过场：目标是把用户脑中没说出口的细节问出来。信息薄的需求（只有一句话的想法）产出的 PRD 会空壳到不可用——宁可多问一轮其发，也不要急着收敛。
@@ -85,8 +98,27 @@ export const DEFAULT_GUIDE_SYSTEM_PROMPT = `你是「向导 Agent」，负责把
 
 type GuideParsed =
   | { action: 'generate_sketch'; reply: string; requirements: { id: string; description: string }[] }
-  | { action: 'ask_clarification'; reply: string; questions: { id: string; label: string; description?: string }[] }
+  | {
+      action: 'ask_clarification'
+      reply: string
+      questions: { id: string; label: string; description?: string }[]
+      /** 批量澄清（2026-08-27）：与本轮问题相互独立的后续维度问题（1~2 个），
+       *  平台缓存后依次弹出——用户每点选一项立即出下一问（不再等模型），
+       *  一次模型调用收齐多维度，答完才进 PRD 管线。 */
+      followups?: { reply: string; questions: { id: string; label: string; description?: string }[] }[]
+    }
   | { action: 'confirm_requirements'; reply: string; requirements: { id: string; description: string }[]; research_queries: string[] }
+
+interface ClarificationFollowup {
+  reply: string
+  questions: ClarificationOption[]
+}
+
+/** 批量澄清队列（per-project）：模型一次生成的后续维度问题；用户点选即弹下一个，
+ *  自由文本/让渡即打断清空（用户自己接管节奏）。 */
+const pendingFollowups = new Map<string, ClarificationFollowup[]>()
+/** 批量澄清进行中标记（per-project）：末轮点选时用累积清单进管线（区别于纯单问模式）。 */
+const batchClarifying = new Set<string>()
 
 /**
  * 首轮硬护栏（附加到系统提示尾部）：需求确认是产品闭环的必经一环，不能因模型采样差异被跳过
@@ -411,6 +443,12 @@ export async function handleGuideMessage(
     source: 'guide_gate',
   })
 
+  // 批量澄清打断（2026-08-27）：自由打字（非卡片点选）= 用户接管节奏，清空预生成队列
+  if (input.metadata?.source !== 'card_option') {
+    pendingFollowups.delete(input.project_id)
+    batchClarifying.delete(input.project_id)
+  }
+
   // 卡片答案：用户已通过选项给出方向，直接生成草图（修复澄清死循环）
   const cardAnswer = resolveCardAnswer(input, primaryIntent)
   if (cardAnswer) {
@@ -427,18 +465,53 @@ export async function handleGuideMessage(
         },
       },
     })
+
+    // 批量澄清（2026-08-27）：还有预生成的后续维度 → 把本轮答案累积进项目需求清单，
+    // 立即弹下一问（不等模型），不进 PRD 管线；用户自由打字/让渡会清空队列即打断。
+    // 多轮答案按 id 去重（首个 F-001 主题锚点保留），批量模式跳过模型轮必须显式累积
+    const followups = pendingFollowups.get(input.project_id)
+    if (followups && followups.length > 0) {
+      const existing = readLastSketchRequirements(input.project_id)
+      const seen = new Set(existing.map((item) => item.id))
+      const mergedRequirements = [
+        ...existing,
+        ...cardAnswer.requirements.filter((item) => !seen.has(item.id)),
+      ] as typeof existing
+      recordSketchGenerated(input.project_id, mergedRequirements)
+      const next = followups.shift()!
+      const followupAck = `好的，记下了。接着定下一个点——${next.reply}`
+      persistAssistant?.(followupAck)
+      publish(makeGuideEvent(input, 'message_delta', { text: followupAck }))
+      publishClarificationCard(input, publish, normalizeClarificationOptions(next.questions), persistSystem, next.reply)
+      batchClarifying.add(input.project_id)
+      return
+    }
+    pendingFollowups.delete(input.project_id)
+
+    // 批量末轮（队列已空且批量进行中）：本轮答案并入累积清单后进管线；
+    // 纯单问模式（无批量标记）维持原语义（本轮答案直接进管线）
+    let finalRequirements = cardAnswer.requirements
+    if (batchClarifying.has(input.project_id)) {
+      batchClarifying.delete(input.project_id)
+      const existing = readLastSketchRequirements(input.project_id)
+      const seen = new Set(existing.map((item) => item.id))
+      finalRequirements = [
+        ...existing,
+        ...cardAnswer.requirements.filter((item) => !seen.has(item.id)),
+      ] as typeof cardAnswer.requirements
+    }
     const ack = '好的，按你选的方向整理成产品需求文档，请你过目确认后再画草图。'
     persistAssistant?.(ack)
     publish(makeGuideEvent(input, 'message_delta', { text: ack }))
     // 收敛路径统一收口（2026-08-27，排查报告 🔴1）：点选不再直接开工，
-    // 统一进入 PRD 后置链（PRD→六维审查→确认卡→草图）
+    // 统一进入 PRD 后置链（PRD→六维审查→确认卡→草图）；批量澄清末轮用累积清单
     await runPrdPipeline({
       request_id: input.request_id,
       session_id: input.session_id,
       project_id: input.project_id,
       mode: input.mode,
       channel_id: input.channel_id,
-      requirements: cardAnswer.requirements,
+      requirements: finalRequirements,
       query: model?.query,
       env: model?.env,
       publish,
@@ -450,6 +523,9 @@ export async function handleGuideMessage(
   // 仅 decision detail 标 source='free_text_auto' 与点选区分（埋点/事后追溯可辨）
   const autoDelegation = resolveAutoDelegation(input, primaryIntent)
   if (autoDelegation) {
+    // 让渡即终止批量澄清（用户不想再答，清空预生成队列）
+    pendingFollowups.delete(input.project_id)
+    batchClarifying.delete(input.project_id)
     // 让渡来源区分（2026-08-27 统一后点选 auto 卡也走这里）：card_auto=点选卡、free_text_auto=打字
     const viaCard = input.metadata?.source === 'card_option'
     recordDecision({
@@ -620,6 +696,16 @@ async function tryModelDrivenGuide(
     updateProject(input.project_id, { current_stage: 'blocked_for_user_decision' })
     publish(makeGuideEvent(input, 'stage_changed', { stage: 'blocked_for_user_decision' }))
     publishClarificationCard(input, publish, normalizeClarificationOptions(parsed.questions), persistSystem, parsed.reply.trim())
+    // 批量澄清（2026-08-27）：缓存预生成的后续维度问题——用户每点选一项立即弹下一个
+    if (parsed.followups && parsed.followups.length > 0) {
+      pendingFollowups.set(
+        input.project_id,
+        parsed.followups.map((f) => ({
+          reply: f.reply,
+          questions: normalizeClarificationOptions(f.questions as ClarificationOption[]),
+        })).filter((f) => f.questions.length >= 2),
+      )
+    }
     return true
   }
 
@@ -1010,10 +1096,29 @@ function parseGuideJson(text: string): GuideParsed | undefined {
         label: q.label as string,
         description: typeof q.description === 'string' ? q.description : undefined,
       }))
+    // 批量澄清（2026-08-27）：followups 宽松解析（每条 reply+questions，最多 2 条），
+    // 坏条目丢弃不阻断主问题
+    const followups = (Array.isArray(parsed.followups) ? parsed.followups : [])
+      .filter(isRecord)
+      .map((f) => ({
+        reply: typeof f.reply === 'string' ? f.reply : '',
+        questions: (Array.isArray(f.questions) ? f.questions : [])
+          .filter(isRecord)
+          .filter((q) => typeof q.id === 'string' && typeof q.label === 'string')
+          .slice(0, 4)
+          .map((q) => ({
+            id: q.id as string,
+            label: q.label as string,
+            description: typeof q.description === 'string' ? q.description : undefined,
+          })),
+      }))
+      .filter((f) => f.reply.trim() !== '' && f.questions.length >= 2)
+      .slice(0, 2)
     return {
       action: 'ask_clarification',
       reply: typeof parsed.reply === 'string' ? parsed.reply : '',
       questions,
+      followups: followups.length > 0 ? followups : undefined,
     }
   }
 

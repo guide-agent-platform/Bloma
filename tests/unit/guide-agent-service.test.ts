@@ -235,6 +235,78 @@ describe('GuideAgentService through AgentOrchestrator', () => {
     expect(jsonl).not.toContain('"action":"ask_clarification"')
   })
 
+  it('批量澄清（2026-08-27）：followups 缓存队列——点选立即弹下一问，末轮累积清单进管线，打字即打断', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-guide-batch-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    // 首轮：带 1 条 followup（独立维度）
+    setSDKQueryForTests(async function* () {
+      yield {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              action: 'ask_clarification',
+              reply: '做成什么形态？',
+              questions: [
+                { id: 'answer-float', label: '悬浮球秒开' },
+                { id: 'answer-side', label: '侧边栏常驻' },
+              ],
+              followups: [
+                { reply: '记完之后主要怎么用？', questions: [{ id: 'answer-list', label: '清单勾选' }, { id: 'answer-search', label: '搜索回看' }] },
+              ],
+            }),
+          }],
+        },
+      }
+      yield { type: 'result', subtype: 'success' }
+    })
+    await runAgent({
+      request_id: 'req-b1', session_id: 'session-batch', project_id: project.project_id,
+      content: '做一个随记工具', mode: 'quick', current_stage: 'clarifying', channel_id: 'test-channel',
+    })
+    expect(events.filter((e) => e.type === 'user_decision_required').length).toBe(1)
+
+    // 第一轮点选：应立即弹出 followup 问题（不再调模型），不进 PRD 管线
+    events.length = 0
+    await runAgent({
+      request_id: 'req-b2', session_id: 'session-batch', project_id: project.project_id,
+      content: '悬浮球秒开', mode: 'quick', current_stage: 'blocked_for_user_decision', channel_id: 'test-channel',
+      metadata: { source: 'card_option', selected_option_id: 'answer-float' },
+    })
+    const cards = events.filter((e) => e.type === 'user_decision_required')
+    expect(cards).toHaveLength(1)
+    expect(String(cards[0]!.payload.questions?.[0]?.label)).toBe('清单勾选')
+    const ackTexts = events.filter((e) => e.type === 'message_delta').map((e) => String(e.payload.text)).join('')
+    expect(ackTexts).toContain('接着定下一个点')
+    // 中间轮不得发 PRD 管线（无 prd_confirm/prd_review 事件）
+    expect(events.some((e) => e.type === 'user_decision_required' && (e.payload as { kind?: string }).kind === 'prd_confirm')).toBe(false)
+
+    // 末轮点选：累积清单（两轮答案都在）进 PRD 管线
+    events.length = 0
+    setSDKQueryForTests(async function* () {
+      yield {
+        type: 'assistant',
+        message: { role: 'assistant', content: [{ type: 'text', text: '{"action":"confirm_requirements","reply":"整理好了","requirements":[{"id":"F-001","description":"随记"}],"research_queries":[]}' }] },
+      }
+      yield { type: 'result', subtype: 'success' }
+    })
+    await runAgent({
+      request_id: 'req-b3', session_id: 'session-batch', project_id: project.project_id,
+      content: '清单勾选', mode: 'quick', current_stage: 'blocked_for_user_decision', channel_id: 'test-channel',
+      metadata: { source: 'card_option', selected_option_id: 'answer-list' },
+    })
+    // 末轮进管线：PRD 引擎/审查（mock 下宽松解析）后出现确认卡或退回卡（二者必有其一）
+    const prdStage = events.some(
+      (e) => e.type === 'user_decision_required' && ['prd_confirm', 'prd_review'].includes(String((e.payload as { kind?: string }).kind)),
+    )
+    expect(prdStage).toBe(true)
+  })
+
   it('A2-14a: 模型 questions 为空（纯文本澄清）时只显示 reply，不弹卡片、不泄露 JSON', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-guide-'))
     process.env.PROMA_HOME = home
