@@ -66,8 +66,8 @@ const confirmJson = JSON.stringify({
   action: 'confirm_requirements',
   reply: '我整理好了，请确认这份需求',
   requirements: [
-    { id: 'F-001', description: '记账本，记录日常收支' },
-    { id: 'F-002', description: '按月汇总统计' },
+    { id: 'F-001', description: '记账本，记录日常收支', origin: 'user' },
+    { id: 'F-002', description: '按月汇总统计', origin: 'guide' },
   ],
   research_queries: ['记账 应用 推荐'],
 })
@@ -147,6 +147,10 @@ describe('需求确认弹窗（confirm_requirements）', () => {
     const confirmEvent = events.find((event) => event.type === 'user_decision_required')
     expect(confirmEvent?.payload.kind).toBe('requirement_confirm')
     expect(confirmEvent?.payload.requirements).toHaveLength(2)
+    // 向导补充可见（2026-08-27）：origin 透传到弹窗，渲染「向导补充」徽标
+    const confirmRequirements = (confirmEvent?.payload as { requirements?: Array<{ id: string; origin?: string }> }).requirements ?? []
+    expect(confirmRequirements[0]).toMatchObject({ id: 'F-001', origin: 'user' })
+    expect(confirmRequirements[1]).toMatchObject({ id: 'F-002', origin: 'guide' })
     expect(confirmEvent?.payload.research).toMatchObject({ available: true })
     // 落盘留痕：弹窗内容可事后追溯 + 决策日志
     expect(persistSystem).toHaveBeenCalledWith(expect.stringContaining('[decision-card] 需求确认：'))
@@ -173,9 +177,9 @@ describe('需求确认弹窗（confirm_requirements）', () => {
     })
 
     expect(result).toMatchObject({ started: true, prd_written: true })
-    // PRD 前移：勾选后的需求集 + requirement_confirmed 检查点
+    // PRD 前移：勾选后的需求集 + requirement_confirmed 检查点（origin 随条目透传）
     expect(resolvePrdBackplane).toHaveBeenCalledWith(expect.anything(), [
-      { id: 'F-002', description: '按月汇总统计' },
+      { id: 'F-002', description: '按月汇总统计', origin: 'guide' },
     ])
     expect(syncDocuments).toHaveBeenCalledWith(
       expect.objectContaining({ checkpoint: 'requirement_confirmed', project_id: 'proj-1' }),
@@ -233,6 +237,55 @@ describe('需求确认弹窗（confirm_requirements）', () => {
     })
     expect(result).toMatchObject({ started: false, prd_written: false })
     expect(runSketchTask).not.toHaveBeenCalled()
+  })
+
+  it('确认后用户停止（AGENT_STOP signal 预 abort）→ 管线零推进：不前移 PRD、不审查、不开草图（abb1a19f 断链修复）', async () => {
+    await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(), undefined, persistSystem)
+    vi.mocked(resolvePrdBackplane).mockClear()
+    vi.mocked(syncDocuments).mockClear()
+    vi.mocked(runSketchTask).mockClear()
+
+    const controller = new AbortController()
+    controller.abort()
+    const result = await resolveRequirementConfirm(
+      {
+        request_id: 'req-c6',
+        session_id: SESSION_ID,
+        project_id: 'proj-1',
+        decision: 'confirm',
+      },
+      controller.signal,
+    )
+    expect(result).toMatchObject({ started: false, prd_written: false })
+    expect(resolvePrdBackplane).not.toHaveBeenCalled()
+    expect(syncDocuments).not.toHaveBeenCalled()
+    expect(runSketchTask).not.toHaveBeenCalled()
+  })
+
+  it('确认后在 PRD 前移完成后停止（审查前 abort）→ 不跑审查、不发卡、不开草图', async () => {
+    await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(), undefined, persistSystem)
+    // 前移已完成（prd_written=true）但审查未开始时用户停止：审查/卡片/草图全部不再推进
+    const controller = new AbortController()
+    const prdBackplaneOnce = vi.mocked(resolvePrdBackplane).mockImplementationOnce(async (_input, requirements) => {
+      controller.abort() // 前移完成的瞬间用户点停止
+      return { name: '未命名项目', positioning: 'p', requirements } as never
+    })
+    const result = await resolveRequirementConfirm(
+      {
+        request_id: 'req-c7',
+        session_id: SESSION_ID,
+        project_id: 'proj-1',
+        decision: 'confirm',
+      },
+      controller.signal,
+    )
+    prdBackplaneOnce.mockRestore()
+    expect(result).toMatchObject({ started: true, prd_written: true })
+    expect(syncDocuments).toHaveBeenCalledTimes(1) // 前移本身已落盘
+    expect(runSketchTask).not.toHaveBeenCalled()
+    // 不发确认卡/审查卡（无 user_decision_required、无 PRD 确认旁白）
+    const after = events.filter((event) => event.type === 'user_decision_required')
+    expect(after.filter((event) => event.payload?.kind === 'prd_confirm' || event.payload?.kind === 'prd_review')).toHaveLength(0)
   })
 
   it('PRD 前移失败 → 不阻断草图（话术如实降级），仍开工', async () => {

@@ -50,6 +50,8 @@ export interface PrdReviewOutcome {
   /** llm 路径执行方式：delegation = 委派子 agent（可视化）；direct = 平台直连 */
   via?: 'delegation' | 'direct'
   degraded?: boolean
+  /** 用户主动停止（AGENT_STOP）：调用方收到后应立即终止管线，不推进草图/卡片 */
+  aborted?: true
 }
 
 /** 审查未过后的待决状态：用户可选忽略（override→过 PRD 确认门）或补充说明（回向导）。 */
@@ -136,7 +138,8 @@ export async function runPrdReviewGate(opts: {
     // 无可用渠道 env：直接规则门（不算 degraded——渠道不可用的如实降级）
     return ruleGateReview(backplane)
   }
-  // ① 委派审查（默认，协作过程经 DelegationFeed 可视化）；解析失败/委派失败落直连
+  // ① 委派审查（默认，协作过程经 DelegationFeed 可视化）；解析失败/委派失败落直连。
+  // 例外：aborted（用户停止）不得降级直连——那会让「停止后再跑一遍」
   if (delegatedReviewEnabled() && opts.projectId && opts.requestId && opts.publish) {
     const delegated = await runDelegatedReview({
       goal: `裁判六维审查 PRD：${backplane.name ?? '未命名项目'}`,
@@ -148,7 +151,11 @@ export async function runPrdReviewGate(opts: {
       projectId: opts.projectId,
       requestId: opts.requestId,
       publish: opts.publish,
+      signal: opts.signal,
     })
+    if (delegated.failure === 'aborted') {
+      return { verdict: 'pass', issues: [], mode: 'llm', via: 'delegation', aborted: true }
+    }
     if (delegated.ok && delegated.finalText) {
       try {
         const issues = parseReviewIssues(delegated.finalText)
@@ -163,6 +170,10 @@ export async function runPrdReviewGate(opts: {
     const issues = await attackViaLlm({ backplane, confirmedRequirements, query, env, sessionId, signal, maxTokens })
     return { verdict: deriveVerdict(issues), issues, mode: 'llm', via: 'direct' }
   } catch (error) {
+    // 用户停止（abort 抛 AbortError）：不降级规则门（降级会继续往下跑卡片/草图）
+    if (opts.signal?.aborted) {
+      return { verdict: 'pass', issues: [], mode: 'llm', via: 'direct', aborted: true }
+    }
     console.error('[prd-review] LLM 审查失败，降级规则门:', error)
     return { ...ruleGateReview(backplane), degraded: true }
   }

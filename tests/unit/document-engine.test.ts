@@ -41,6 +41,51 @@ describe('DocumentEngine (A2-05)', () => {
     expect(result.documents[0].type).toBe('prd')
   })
 
+  it('requirement_confirmed checkpoint: 状态行如实（不谎报草图已确认）+ 无 priority 条目不渲染缺省 P2（abb1a19f）', () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-doc-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project-2', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [
+      { id: 'F-001', description: '做一个电子合成音乐平台', priority: 'P0' },
+      // 模拟 enrichment prioritySuppressed 后的条目：无 priority 字段
+      { id: 'F-002', description: '提供氛围类电子音乐在线试听' },
+    ])
+
+    syncDocuments(
+      {
+        request_id: 'req-sync-2',
+        session_id: 'session-2',
+        project_id: project.project_id,
+        checkpoint: 'requirement_confirmed',
+      },
+      // 线上同款路径：resolvePrdBackplane 产物作 override（enrichment 抑制后 priority 缺失保留），
+      // 不走 buildPrdBackplane 的构建侧物化
+      {
+        project_id: project.project_id,
+        name: '未命名项目',
+        positioning: '做一个电子合成音乐平台',
+        requirements: [
+          { id: 'F-001', description: '做一个电子合成音乐平台', priority: 'P0' },
+          { id: 'F-002', description: '提供氛围类电子音乐在线试听' },
+        ],
+        out_of_scope: [],
+        constraints: [],
+        acceptance: {},
+        assumptions: [],
+      },
+    )
+
+    const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+    const prd = readFileSync(join(dir, 'requirement_confirmed.md'), 'utf8')
+    // 修复②：需求确认检查点不得谎报「草图已确认」（草图还没画）
+    expect(prd).toContain('需求已确认，PRD 草案形成')
+    expect(prd).not.toContain('草图已确认')
+    // 修复③a：显式优先级照常渲染，被抑制的条目不再硬标缺省 P2
+    expect(prd).toContain('**F-001**（P0）')
+    expect(prd).toContain('**F-002**')
+    expect(prd).not.toContain('**F-002**（P2）')
+  })
+
   it('renders thick backplane: story/assertions/priority materialized into prd.json; scope_exclusions merged into out_of_scope', () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-doc-thick-'))
     process.env.PROMA_HOME = home

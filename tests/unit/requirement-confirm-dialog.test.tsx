@@ -30,8 +30,8 @@ const CONFIRM_EVENT: AgentEvent = {
     kind: 'requirement_confirm',
     title: '确认你的需求',
     requirements: [
-      { id: 'F-001', description: '记账本，记录日常收支' },
-      { id: 'F-002', description: '按月汇总统计' },
+      { id: 'F-001', description: '记账本，记录日常收支', origin: 'user' },
+      { id: 'F-002', description: '按月汇总统计', origin: 'guide' },
     ],
     research: {
       available: true,
@@ -116,6 +116,9 @@ describe('需求确认弹窗 RequirementConfirmDialog', () => {
 
     expect(screen.getByTestId('requirement-confirm-dialog')).toBeTruthy()
     expect(screen.getByTestId('requirement-confirm-submit').textContent).toContain('确认，开始做')
+    // 向导补充可见（2026-08-27）：origin=guide 的条目标「向导补充」徽标，user 条目不标
+    expect(screen.getByTestId('requirement-confirm-origin-F-002').textContent).toContain('向导补充')
+    expect(screen.queryByTestId('requirement-confirm-origin-F-001')).toBeNull()
 
     // 取消 F-001：主按钮变为「确认勾选的 1 项」
     fireEvent.click(screen.getByTestId('requirement-confirm-item-F-001'))

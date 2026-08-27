@@ -131,8 +131,7 @@ describe('countTrailingClarificationRounds 尾随澄清轮计数', () => {
     expect(countTrailingClarificationRounds(SESSION_ID)).toBe(2)
   })
 
-  it('用户点选过答案（clarification_answer）→ 点选回流修订（2026-08-27）：点选不再截断计数，
-     向导可继续追问下一未知点；澄清终点改为向导的收敛决策', () => {
+  it('用户点选过答案（clarification_answer）→ 点选回流修订（2026-08-27）：点选不再截断计数，向导可继续追问下一未知点；澄清终点改为向导的收敛决策', () => {
     writeSession([
       user('你好'),
       assistant('你想做什么类型的工具？'),

@@ -129,7 +129,7 @@ export interface RequirementConfirmState {
   sessionId: string
   projectId: string
   title: string
-  requirements: Array<{ id: string; description: string }>
+  requirements: Array<{ id: string; description: string; origin?: 'user' | 'guide' }>
   research: { available: boolean; summary: string }
 }
 
@@ -292,9 +292,13 @@ export function setupGlobalAgentListeners(): () => void {
       const payload = event.payload as { kind?: unknown; title?: unknown; requirements?: unknown; research?: { available?: unknown; summary?: unknown } }
       if (payload?.kind === 'requirement_confirm') {
         const requirements = Array.isArray(payload.requirements)
-          ? (payload.requirements as Array<{ id: string; description: string }>).filter(
+          ? (payload.requirements as Array<{ id: string; description: string; origin?: 'user' | 'guide' }>).filter(
               (item) => typeof item?.id === 'string' && typeof item?.description === 'string',
-            )
+            ).map((item) => ({
+              id: item.id,
+              description: item.description,
+              origin: item.origin === 'guide' ? ('guide' as const) : undefined,
+            }))
           : []
         store.set(requirementConfirmFamily(event.session_id), {
           sessionId: event.session_id,

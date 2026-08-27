@@ -52,7 +52,7 @@ export function syncDocuments(input: DocumentSyncInput, backplaneOverride?: PrdB
       // 草图确认检查点（sketch_confirmed）会基于 readPrdBackplane 合并重写，不冲突
       const backplane = backplaneOverride ?? buildPrdBackplane(project, requirements, input.checkpoint)
       files.push(
-        { relativePath: 'requirement_confirmed.md', content: renderPrdDraft(backplane), type: 'prd' },
+        { relativePath: 'requirement_confirmed.md', content: renderPrdDraft(backplane, 'requirement_confirmed'), type: 'prd' },
         { relativePath: 'prd.json', content: renderPrdJson(backplane), type: 'prd' },
       )
       break
@@ -60,7 +60,7 @@ export function syncDocuments(input: DocumentSyncInput, backplaneOverride?: PrdB
     case 'sketch_confirmed': {
       const backplane = backplaneOverride ?? buildPrdBackplane(project, requirements, input.checkpoint)
       files.push(
-        { relativePath: 'sketch_confirmed.md', content: renderPrdDraft(backplane), type: 'prd' },
+        { relativePath: 'sketch_confirmed.md', content: renderPrdDraft(backplane, 'sketch_confirmed'), type: 'prd' },
         { relativePath: 'prd.json', content: renderPrdJson(backplane), type: 'prd' },
       )
       break
@@ -406,15 +406,20 @@ export function readUxContractSketch(projectId: string, backplane?: Pick<PrdBack
   }
 }
 
-function renderPrdDraft(backplane: PrdBackplane): string {
+function renderPrdDraft(backplane: PrdBackplane, checkpoint: 'requirement_confirmed' | 'sketch_confirmed'): string {
   const items = backplane.requirements
   const list = items.map(renderRequirementLine).join('\n')
   const outOfScope = backplane.out_of_scope.length
     ? backplane.out_of_scope.map((scope) => `- ${scope}`).join('\n')
     : '- 暂无'
+  // 状态行如实：需求确认检查点时草图还没画，不得谎报「草图已确认」（线上 abb1a19f）
+  const statusLine =
+    checkpoint === 'requirement_confirmed'
+      ? '> 状态：需求已确认，PRD 草案形成，等待裁判审查与用户过目。（checkpoint: requirement_confirmed）'
+      : '> 状态：草图已确认，进入 MVP 生成前。（checkpoint: sketch_confirmed）'
   return `# ${backplane.name} · PRD 草案
 
-> 状态：草图已确认，进入 MVP 生成前。（checkpoint: sketch_confirmed）
+${statusLine}
 
 ## 1. 产品定位
 
@@ -467,7 +472,11 @@ function renderRequirementLine(item: SketchRequirement): string {
   // 活背板勾选态：implemented 勾选；其余判定以中文标签标注（GFM 只有 [ ]/[x] 两种）
   const checked = item.status === 'implemented' ? 'x' : ' '
   const statusSuffix = item.status && item.status !== 'implemented' ? `（${requirementStatusLabel(item.status)}）` : ''
-  const lines = [`- [${checked}] **${item.id}**（${requirementPriority(item)}）${requirementStory(item)}${statusSuffix}`]
+  // 优先级只在显式存在时渲染：enrichment 守卫抑制后的条目 prd.json 本就无 priority 字段，
+  // 渲染再补缺省 P2 会让「不确定不标」的守卫语义失效（线上 abb1a19f F-002/F-005）；
+  // 逻辑侧（GWT/judge）仍用 requirementPriority() 缺省，不受影响
+  const priorityLabel = item.priority ? `（${item.priority}）` : ''
+  const lines = [`- [${checked}] **${item.id}**${priorityLabel}${requirementStory(item)}${statusSuffix}`]
   for (const assertion of requirementAssertions(item)) {
     lines.push(`  - 行为断言：${assertion}`)
   }

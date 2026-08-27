@@ -204,7 +204,29 @@ export const RequirementConfirmDialog: React.FC = () => {
                   onChange={() => toggle(item.id)}
                   style={{ marginTop: 2 }}
                 />
-                <span>{item.description}</span>
+                <span>
+                  {item.origin === 'guide' && (
+                    <span
+                      data-ai-id={`requirement-confirm-origin-${item.id}`}
+                      title="这条不是你说的，是向导根据需求闭环自主补的——不想要就取消勾选"
+                      style={{
+                        display: 'inline-block',
+                        marginRight: 6,
+                        padding: '0 6px',
+                        fontSize: 11,
+                        lineHeight: '18px',
+                        borderRadius: 9,
+                        color: 'var(--color-text-secondary, #5b6472)',
+                        background: 'var(--color-bg-secondary, #f0f2f7)',
+                        border: '1px solid var(--color-border, #e2e6ee)',
+                        verticalAlign: 1,
+                      }}
+                    >
+                      向导补充
+                    </span>
+                  )}
+                  {item.description}
+                </span>
               </label>
             </li>
           ))}

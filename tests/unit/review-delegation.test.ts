@@ -150,4 +150,27 @@ describe('review-delegation 审查委派运行时', () => {
     expect(result).toMatchObject({ ok: false, failure: 'failed' })
     expect(unregisterParentLoopContext).toHaveBeenCalled()
   })
+
+  // AGENT_STOP 断链修复（2026-08-27 线上 abb1a19f）：确认后管线不经过 runAgent，
+  // 必须由 signal 传导停止——否则审查子 agent 只能等到 120s 超时，用户「暂停」完全无效
+  it('等待审查期间用户停止（signal abort）→ failure:aborted + stopDelegations 清理子 agent', async () => {
+    const controller = new AbortController()
+    vi.mocked(waitForDelegations).mockImplementationOnce(() => new Promise(() => {}) as never)
+    const promise = runDelegatedReview({ ...baseOpts(), signal: controller.signal })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    controller.abort()
+    const outcome = await promise
+    expect(outcome).toMatchObject({ ok: false, failure: 'aborted' })
+    expect(stopDelegations).toHaveBeenCalled()
+    expect(unregisterParentLoopContext).toHaveBeenCalled()
+    expect(disposeParentDelegationState).toHaveBeenCalled()
+  })
+
+  it('调用前已停止（signal 预 abort）→ 直接 aborted，不消费审查结果', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const outcome = await runDelegatedReview({ ...baseOpts(), signal: controller.signal })
+    expect(outcome).toMatchObject({ ok: false, failure: 'aborted' })
+    expect(stopDelegations).toHaveBeenCalled()
+  })
 })

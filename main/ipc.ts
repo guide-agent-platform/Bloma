@@ -159,11 +159,19 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
   })
 
   // 需求确认弹窗决策回传（confirm_requirements 流，2026-08-26）：confirm/delegate →
-  // PRD 前移 + 草图；supplement 由渲染端走既有 send-message，不经此通道。
+  // PRD 前移 + 六维审查 + PRD 确认卡；supplement 由渲染端走既有 send-message，不经此通道。
+  // 确认后管线不经过 runAgent（activeSessions 管不到），注册 backgroundRun 让「停止」
+  // 按钮（cancelAgent）能 abort——否则审查委派等长环节停不掉（线上 abb1a19f 断链）。
   ipcMain.handle(IPC_CHANNELS.AGENT_CONFIRM_REQUIREMENTS, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = validateConfirmRequirements(payload)
-      return resolveRequirementConfirm(input)
+      const controller = new AbortController()
+      registerBackgroundRun(input.session_id, controller)
+      try {
+        return await resolveRequirementConfirm(input, controller.signal)
+      } finally {
+        unregisterBackgroundRun(input.session_id)
+      }
     })
   })
 

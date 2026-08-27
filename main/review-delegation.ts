@@ -42,7 +42,7 @@ export interface DelegatedReviewOutcome {
   /** 子 agent 最终输出（去掉「子代理状态：…」头行后的正文） */
   finalText?: string
   delegationId?: string
-  failure?: 'disabled' | 'timeout' | 'failed' | 'bad_status' | 'empty'
+  failure?: 'disabled' | 'timeout' | 'failed' | 'bad_status' | 'empty' | 'aborted'
 }
 
 /** 单次委派审查的等待上限（子 agent 只读审查，正常 1-4 轮内完成）。 */
@@ -52,7 +52,8 @@ const REVIEW_DELEGATION_MAX_TURNS = 8
 
 /**
  * 派出审查子 agent 并等待收敛。任何异常都返回 failure（不抛错）——调用方据此
- * 降级到直连路径。finally 里统一收尾：超时残留的 running 子会话强制停止、
+ * 降级到直连路径；**唯一例外是 aborted（用户主动停止）**，调用方必须立即终止管线、
+ * 不得降级直连。finally 里统一收尾：超时/中止残留的 running 子会话强制停止、
  * 合成父上下文注销、委派状态清理（防孤儿子 agent 后台偷跑，对齐审计 P1-2 精神）。
  */
 export async function runDelegatedReview(opts: {
@@ -66,6 +67,8 @@ export async function runDelegatedReview(opts: {
   requestId: string
   publish: (event: AgentEvent) => void
   timeoutMs?: number
+  /** 主链路中止信号（AGENT_STOP）：abort 即停子 agent 并返回 failure:'aborted'，不降级直连 */
+  signal?: AbortSignal
 }): Promise<DelegatedReviewOutcome> {
   if (!delegatedReviewEnabled()) return { ok: false, failure: 'disabled' }
 
@@ -78,7 +81,9 @@ export async function runDelegatedReview(opts: {
     projectId: opts.projectId,
     sessionId: parentKey,
     requestId: opts.requestId,
-    signal: new AbortController().signal,
+    // 主链路 signal 缺席时维持旧语义（孤立信号）；传入时仅作 abort 感知用，
+    // 子 loop 的查询中止靠 finally 里 stopDelegations(parentKey) abort record.abort
+    signal: opts.signal ?? new AbortController().signal,
     state: createToolState(),
   }
 
@@ -111,11 +116,29 @@ export async function runDelegatedReview(opts: {
       expectedOutput: '按任务要求输出严格 JSON 裁决',
     })
 
-    const summaries = await waitForDelegations(parent, {
-      strategy: 'all',
-      delegationIds: [started.delegation_id],
-      timeout_ms: opts.timeoutMs ?? REVIEW_DELEGATION_TIMEOUT_MS,
-    })
+    const summaries = await Promise.race([
+      waitForDelegations(parent, {
+        strategy: 'all',
+        delegationIds: [started.delegation_id],
+        timeout_ms: opts.timeoutMs ?? REVIEW_DELEGATION_TIMEOUT_MS,
+      }),
+      // 主链路 abort（AGENT_STOP）提前出赛：waitForDelegations 不监听外部 signal，
+      // 不 race 的话停止后仍要干等到子收敛或 120s 超时（线上 abb1a19f 实测断链）
+      opts.signal
+        ? new Promise<DelegationSummary[]>((resolve) => {
+            if (opts.signal!.aborted) return resolve([])
+            opts.signal!.addEventListener(
+              'abort',
+              () => resolve([]),
+              { once: true },
+            )
+          })
+        : null,
+    ].filter((p): p is Promise<DelegationSummary[]> => p !== null))
+    if (opts.signal?.aborted) {
+      // finally 里 stopDelegations 会中止子 agent——aborted 语义不得触发调用方降级直连
+      return { ok: false, delegationId: started.delegation_id, failure: 'aborted' }
+    }
     const summary: DelegationSummary | undefined = summaries[0]
     if (!summary) return { ok: false, delegationId: started.delegation_id, failure: 'empty' }
     if (summary.status === 'running') {

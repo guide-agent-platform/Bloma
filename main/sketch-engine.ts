@@ -23,6 +23,9 @@ export interface SketchRequirement {
   scope_notes?: string
   /** 来源：clarify | correction | iteration | auto */
   source?: string
+  /** 提出者（向导补充可见，2026-08-27）：user=用户原话/点选；guide=向导 agent 自主补充。
+   * 仅向导 confirm_requirements/generate_sketch 输出携带，需求确认弹窗据此标「向导补充」徽标。 */
+  origin?: 'user' | 'guide'
   /**
    * 执行状态（judge 语义审查回写，2026-08-26 活背板）：未判定时缺省（渲染为未勾选）。
    * 迭代全量重生成时随 prd.json 重写自然清除——新产物未判定即无状态，语义自洽。

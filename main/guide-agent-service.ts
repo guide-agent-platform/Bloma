@@ -54,14 +54,14 @@ export const DEFAULT_GUIDE_SYSTEM_PROMPT = `你是「向导 Agent」，一位经
 
 【需求基本成型 → 交用户确认（平台会弹确认窗并附市调）】
 {"action":"confirm_requirements",
- "reply":"给用户的简短说明（简体中文 ≤20 字）",
- "requirements":[{"id":"F-001","description":"核心功能点（动词开头，用户原话提炼，≤40 字）"}],
+ "reply":"给用户的说明（简体中文 ≤80 字）：若清单里有你在用户原话之外补充的条目，必须在这里明说补了什么、为什么",
+ "requirements":[{"id":"F-001","description":"核心功能点（动词开头，用户原话提炼，≤40 字）","origin":"user"}],
  "research_queries":["市调查询，如「记账 应用 推荐」","可选第二条"]}
 
 【需求足够清晰且用户明确催开工 → 直接生成草图】
 {"action":"generate_sketch",
- "reply":"给用户的简短确认话术（简体中文 ≤20 字，口语化）",
- "requirements":[{"id":"F-001","description":"核心功能点（动词开头，≤40 字）"}]}
+ "reply":"给用户的简短确认话术（简体中文 ≤80 字，口语化）",
+ "requirements":[{"id":"F-001","description":"核心功能点（动词开头，≤40 字）","origin":"user"}]}
 
 【需要澄清 → 问一个你最想问的问题，并给出可点选的具体答案】
 {"action":"ask_clarification",
@@ -76,14 +76,22 @@ export const DEFAULT_GUIDE_SYSTEM_PROMPT = `你是「向导 Agent」，一位经
 - questions 是 reply 那个问题的候选答案，不是新问题；选项互斥、贴合用户原话、具体到能想象成品（「悬浮球随时呼出」是好选项；「工具类」「好用」是坏选项）。
 - questions 2~4 条，最后一条固定为 {"id":"auto","label":"你帮我决定","description":"交给我，按常见做法先出一版"}；确实无法给出具体选项时才 questions:[]（在 reply 里纯文本追问）。
 - requirements 1~5 条；id 用小写字母+连字符（如 daily-tool）。
+- requirements 每条标 origin："user"=直接来自用户原话/点选；"guide"=你自主补充/具体化的。补充不是越少越好——把需求真正闭环所需的功能（如查看/管理/筛选路径）补齐是你的职责，但每条补充都要经得起「为什么需要它」的追问。
 - 用户说的约束（「不含登录」「必须离线可用」这类必须/不要类要求）不要写成 requirements 功能项——平台会单独持久化并注入。
 - research_queries 用用户能听懂的主题词，不要技术术语。
 - 只输出 JSON，其余一律不要。`
 
 type GuideParsed =
-  | { action: 'generate_sketch'; reply: string; requirements: { id: string; description: string }[] }
+  | { action: 'generate_sketch'; reply: string; requirements: GuideRequirementItem[] }
   | { action: 'ask_clarification'; reply: string; questions: { id: string; label: string; description?: string }[] }
-  | { action: 'confirm_requirements'; reply: string; requirements: { id: string; description: string }[]; research_queries: string[] }
+  | { action: 'confirm_requirements'; reply: string; requirements: GuideRequirementItem[]; research_queries: string[] }
+
+/** 向导输出的功能项：origin 标提出者（user/guide），需求确认弹窗据此标「向导补充」 */
+interface GuideRequirementItem {
+  id: string
+  description: string
+  origin?: 'user' | 'guide'
+}
 
 /**
  * 首轮硬护栏（附加到系统提示尾部）：需求确认是产品闭环的必经一环，不能因模型采样差异被跳过
@@ -382,6 +390,7 @@ export async function handleGuideMessage(
         query: pendingAdjust.query,
         env: undefined,
         publish,
+        signal: model?.signal,
       })
       return
     }
@@ -453,6 +462,7 @@ export async function handleGuideMessage(
       query: model?.query,
       env: model?.env,
       publish,
+      signal: model?.signal,
     })
     return
   }
@@ -491,6 +501,7 @@ export async function handleGuideMessage(
       query: model?.query,
       env: model?.env,
       publish,
+      signal: model?.signal,
     })
     return
   }
@@ -652,6 +663,7 @@ async function tryModelDrivenGuide(
     query: model.query,
     env: model.env,
     publish,
+    signal: model.signal,
   })
   return true
 }
@@ -792,6 +804,8 @@ interface PrdPipelineContext {
   query: SDKQuery | undefined
   env?: Record<string, string>
   publish: GuideEventPublisher
+  /** 主链路中止信号（AGENT_STOP）：分阶段检查，abort 后不再推进审查/卡片/草图 */
+  signal?: AbortSignal
 }
 
 /** 规则路由等无模型场景的兑底查询：LLM 审查必然失败 → 如实降级规则门。 */
@@ -810,10 +824,18 @@ const NO_QUERY_FALLBACK: SDKQuery = async function* (): AsyncGenerator<never> {
  */
 async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: boolean; prd_written: boolean }> {
   const { requirements, publish } = pending
+  const signal = pending.signal
+  const aborted = () => signal?.aborted ?? false
+  // 委派审查运行期间的事件（delegation_*/tool_call 等）经此门控：停止后不再漏事件；
+  // 挂起卡存档的 publish 仍传原始版本（卡片选项由用户主动触发，理应发声）
+  const gatedPublish: GuideEventPublisher = (event) => {
+    if (!aborted()) publish(event)
+  }
   const eventInput = { session_id: pending.session_id, project_id: pending.project_id }
 
   let prdWritten = false
   let backplaneForReview: PrdBackplane | undefined
+  if (aborted()) return { started: false, prd_written: false }
   try {
     const backplane = await resolvePrdBackplane(
       {
@@ -845,6 +867,7 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
   // 模型请求（审查者≠生成者）；渠道优先 prd 类别路由，回退收敛入口轮 env，再失败规则门。
   // PRD 本身生成失败（无背板）时跳过审查直接草图（降级语义不变）。
   if (prdWritten && backplaneForReview) {
+    if (aborted()) return { started: true, prd_written: prdWritten }
     let reviewEnv: Record<string, string> | undefined = pending.env
     try {
       const resolution = resolveChannelEnv({
@@ -865,9 +888,13 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
       sessionId: pending.session_id,
       projectId: pending.project_id,
       requestId: pending.request_id,
-      publish,
+      publish: gatedPublish,
+      signal,
     })
+    // 用户停止：不发卡、不开草图，管线就此终止（abb1a19f 断链修复）
+    if (review.aborted || aborted()) return { started: true, prd_written: prdWritten }
     if (review.verdict === 'needs_revision') {
+      if (aborted()) return { started: true, prd_written: prdWritten }
       publish(makeGuideEvent(eventInput, 'message_delta', {
         text: `需求已确认，产品需求文档已形成。裁判审查发现 ${review.issues.filter((issue) => issue.severity === 'blocking' || issue.severity === 'major').length} 个需要你定夺的问题，请看下面的卡片选择怎么处理。`,
       }))
@@ -896,6 +923,7 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
       review.mode === 'rules'
         ? '需求已确认，我把它整理成了产品需求文档。请你过目，确认无误后我开始画草图。'
         : '需求已确认，我把它整理成了产品需求文档（已通过裁判审查）。请你过目这份 PRD，确认无误后我开始画草图。'
+    if (aborted()) return { started: true, prd_written: prdWritten }
     publish(makeGuideEvent(eventInput, 'message_delta', { text: reviewPassedCopy }))
     publish(makeGuideEvent(eventInput, 'message_completed', { subtype: 'success' }))
     publishPrdConfirmCard({
@@ -920,6 +948,8 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
   }
   publish(makeGuideEvent(eventInput, 'message_completed', { subtype: 'success' }))
 
+  // 用户停止：不再启动草图任务（草图全程 20~60s，停不掉会继续偷跑）
+  if (aborted()) return { started: true, prd_written: prdWritten }
   await runSketchTask({
     request_id: pending.request_id,
     session_id: pending.session_id,
@@ -936,13 +966,17 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
 /** 用户在弹窗中的决策回传入口（IPC agent:confirm-requirements 的服务侧实现）。
  * confirm：按勾选子集开工；delegate：用户主动让渡，按向导整理的清单全量开工。
  * 两条路径都进入 runPrdPipeline（PRD→审查→确认卡→草图）。 */
-export async function resolveRequirementConfirm(input: {
-  request_id: string
-  session_id: string
-  project_id: string
-  decision: 'confirm' | 'delegate'
-  requirement_ids?: string[]
-}): Promise<{ started: boolean; prd_written: boolean }> {
+export async function resolveRequirementConfirm(
+  input: {
+    request_id: string
+    session_id: string
+    project_id: string
+    decision: 'confirm' | 'delegate'
+    requirement_ids?: string[]
+  },
+  /** AGENT_STOP 可中止信号（由 ipc.ts 注册 backgroundRun 后传入） */
+  signal?: AbortSignal,
+): Promise<{ started: boolean; prd_written: boolean }> {
   const pending = takePendingRequirementConfirm(input.project_id)
   if (!pending) return { started: false, prd_written: false }
   const publish = pending.publish
@@ -980,6 +1014,7 @@ export async function resolveRequirementConfirm(input: {
     query: pending.query,
     env: pending.env,
     publish,
+    signal,
   })
 }
 
@@ -1000,7 +1035,11 @@ function parseGuideJson(text: string): GuideParsed | undefined {
       .filter(isRecord)
       .filter((r) => typeof r.id === 'string' && typeof r.description === 'string')
       .slice(0, 5)
-      .map((r) => ({ id: r.id as string, description: r.description as string }))
+      .map((r) => ({
+        id: r.id as string,
+        description: r.description as string,
+        origin: r.origin === 'guide' ? ('guide' as const) : r.origin === 'user' ? ('user' as const) : undefined,
+      }))
     if (requirements.length < 1) return undefined
     return {
       action: 'generate_sketch',
@@ -1033,7 +1072,11 @@ function parseGuideJson(text: string): GuideParsed | undefined {
       .filter(isRecord)
       .filter((r) => typeof r.id === 'string' && typeof r.description === 'string')
       .slice(0, 5)
-      .map((r) => ({ id: r.id as string, description: r.description as string }))
+      .map((r) => ({
+        id: r.id as string,
+        description: r.description as string,
+        origin: r.origin === 'guide' ? ('guide' as const) : r.origin === 'user' ? ('user' as const) : undefined,
+      }))
     if (requirements.length < 1) return undefined
     const researchQueries = (Array.isArray(parsed.research_queries) ? parsed.research_queries : [])
       .filter((query): query is string => typeof query === 'string' && query.trim().length > 0)
