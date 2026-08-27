@@ -1,13 +1,14 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SDKMessage } from '../../shared/types'
 import type { SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
 import { createToolState, type AgentLoopTool, type ToolContext } from '../../main/agent-loop'
 import { buildAgentTools } from '../../main/agent-tools'
 import {
   MAX_RUNNING_DELEGATIONS_PER_PARENT,
+  ABORT_SETTLE_TIMEOUT_MS,
   answerDelegationQuestion,
   askDelegationQuestion,
   buildChildSystemPrompt,
@@ -191,6 +192,49 @@ describe('委派协作 M1', () => {
     // 停止一个释放额度（stop 语义：abort 子循环）→ 可再派
     const first = findDelegation(parentSessionId,ids[0])!
     first.abort.abort()
+  })
+
+  it('abort 后子循环不响应（hang 类工具）时超时强制收尾：completion resolve、status cancelled、record 摘除', async () => {
+    // 场景 B（真实泄漏）：权限检查已通过、子循环已进入 tool.execute 挂起后再 abort——
+    // 此时 abort 信号无法中断 hang（execute 永不 settle），loop 永久挂起、completion 永不 resolve。
+    let hangEntered = false
+    const hang: AgentLoopTool = {
+      name: 'hang',
+      description: '挂起',
+      input_schema: { type: 'object', properties: {} },
+      execute: () => {
+        hangEntered = true
+        return new Promise<never>(() => {})
+      },
+    }
+    registerParent(toolUseQuery('hang'))
+    setChildToolsBuilder(() => [hang])
+    const created = startDelegation(parentContext(), { task: '挂起任务', role: 'explore' })
+    const record = findDelegation(parentSessionId, created.delegation_id)!
+    expect(record.status).toBe('running')
+    // 真实计时等待子循环真正进入 hang 执行（权限通过 → tool.execute 挂起）
+    for (let i = 0; i < 100 && !hangEntered; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    expect(hangEntered).toBe(true)
+
+    vi.useFakeTimers()
+    try {
+      let settled = false
+      record.completion.then(() => { settled = true })
+      record.abort.abort()
+      // abort 后 loop 仍挂起：completion 不应在超时前被 resolve
+      await vi.advanceTimersByTimeAsync(0)
+      expect(settled).toBe(false)
+      // 超时兜底触发：强制收尾（resolve completion + 摘除 registry）
+      await vi.advanceTimersByTimeAsync(ABORT_SETTLE_TIMEOUT_MS)
+      expect(settled).toBe(true)
+      expect(record.status).toBe('cancelled')
+      // record 已从 registry 摘除，不再占用并行额度
+      expect(listDelegations(parentSessionId).some((r) => r.delegationId === created.delegation_id)).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('幂等：同 (sessionId, toolCallId) 只 create 一次（tool-call 重放防御）', () => {
