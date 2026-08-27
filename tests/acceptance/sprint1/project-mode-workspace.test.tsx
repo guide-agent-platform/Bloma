@@ -366,3 +366,60 @@ describe('消息排队提示（message-queue S4-QUEUE-009）', () => {
     })
   })
 })
+
+describe('零渠道欢迎引导（QW#2 ux-r2 I2）', () => {
+  afterEach(() => {
+    cleanup()
+    delete window.electronAPI
+    delete window.__jotai_store__
+    vi.restoreAllMocks()
+    resetChannelsFetchFlagForTests()
+  })
+
+  it('[S1-UI-020] 进入工作区且零渠道 → 自动追加「还没连接 AI 模型」引导提示', async () => {
+    const store = createStore()
+    window.__jotai_store__ = store
+    window.electronAPI = {
+      project: {
+        create: vi.fn().mockResolvedValue({ ok: true, request_id: 't', data: project('quick') }),
+        list: vi.fn().mockResolvedValue({ ok: true, request_id: 't', data: [] }),
+      },
+      channels: {
+        list: vi.fn().mockResolvedValue({ ok: true, request_id: 't', data: [] }),
+      },
+    } as unknown as ElectronAPI
+
+    render(<Provider store={store}><App /></Provider>)
+    fireEvent.click(screen.getByRole('button', { name: /快速做一个试试/ }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/还没连接 AI 模型/)).toBeTruthy()
+    })
+    // 引导指向设置入口（消息文本含「设置」字样，设置按钮同时存在）
+    expect(screen.getAllByText(/设置/).length).toBeGreaterThan(0)
+  })
+
+  it('[S1-UI-021] 有可用渠道时进入工作区不显示零渠道引导', async () => {
+    const store = createStore()
+    window.__jotai_store__ = store
+    window.electronAPI = {
+      project: {
+        create: vi.fn().mockResolvedValue({ ok: true, request_id: 't', data: project('quick') }),
+        list: vi.fn().mockResolvedValue({ ok: true, request_id: 't', data: [] }),
+      },
+      channels: {
+        list: vi.fn().mockResolvedValue({
+          ok: true,
+          request_id: 't',
+          data: [{ id: 'c1', name: 'x', provider_type: 'anthropic', base_url: 'u', api_key: 'k', enabled: true, models: [{ id: 'm1', name: 'm', enabled: true }] }],
+        }),
+      },
+    } as unknown as ElectronAPI
+
+    render(<Provider store={store}><App /></Provider>)
+    fireEvent.click(screen.getByRole('button', { name: /快速做一个试试/ }))
+
+    await waitFor(() => expect(screen.getByPlaceholderText(/描述你的想法/)).toBeTruthy())
+    expect(screen.queryByText(/还没连接 AI 模型/)).toBeNull()
+  })
+})

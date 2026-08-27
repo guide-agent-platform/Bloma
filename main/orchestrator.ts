@@ -408,6 +408,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
         env,
         signal: abortController.signal,
         maxTokens,
+        providerType: channel?.provider_type,
       })
       if (intent === 'modify') {
         const description = refineModificationDescription(input.content)
@@ -431,6 +432,9 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
           query: sdkQuery,
           env,
           signal: abortController.signal,
+          // omit 推广（reasoning-profile 2026-08-27）：Token Plan 类渠道即使 off 档也
+          // 发 disabled 会 400——透传 providerType 激活 omit，免 400+重试往返
+          providerType: channel?.provider_type,
         })
         const requirements = applyNormalization(existing, normalization, nextRequirementId(existing), 'correction')
         if (normalization.action === 'out_of_scope' && normalization.outOfScope) {
@@ -497,6 +501,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
         env,
         signal: abortController.signal,
         maxTokens,
+        providerType: channel?.provider_type,
       })
       if (intent === 'modify') {
         // 修改确认门：修改是破坏性最大的操作（整版重造），必须与草图/MVP 一样先过一道
@@ -1143,6 +1148,9 @@ async function* queryWithRuntimeFallback(prompt: string, options: SDKQueryOption
       env: backup.env,
       // 备用渠道有自己的 max_tokens 上限（16384 主渠道对备用渠道可能 400）
       maxTokens: backup.channel.max_tokens ?? options.maxTokens,
+      // omit 推广（审查 P2-②）：回退切换备用渠道时重派生 providerType，避免陈旧主渠道
+      // omit 判定（主非 omit→备 Token Plan 仍发 disabled 再 400；主 omit→备非 omit 丢禁思考）
+      providerType: backup.channel.provider_type,
     })
   } finally {
     try {
@@ -1352,6 +1360,7 @@ async function resolveModificationIntent(opts: {
   env: Record<string, string> | undefined
   signal: AbortSignal
   maxTokens: number
+  providerType?: string
 }): Promise<'modify' | 'other'> {
   if (TRIVIAL_ACK_RE.test(opts.content.trim())) return 'other'
   // 顺序修正（放行一致化）：L1 修改词表先于进度子串门——纯进度句（好了吗/怎么样了）
@@ -1362,7 +1371,7 @@ async function resolveModificationIntent(opts: {
   if (!opts.env) return 'other'
   const env = opts.env
   try {
-    return await classifyIntentViaLlm({ ...opts, env })
+    return await classifyIntentViaLlm({ ...opts, env, providerType: opts.providerType })
   } catch {
     // L3 兜底失败不阻断对话：退回固定完成文案，绝不因意图判定异常让用户卡死
     return 'other'
@@ -1384,6 +1393,8 @@ async function classifyIntentViaLlm(opts: {
   env: Record<string, string>
   signal: AbortSignal
   maxTokens: number
+  /** omit 推广（2026-08-27）：Token Plan 类渠道 off 档发 disabled 也 400——透传激活 omit（审查 P2-①） */
+  providerType?: string
 }): Promise<'modify' | 'other'> {
   const backplane = readPrdBackplane(opts.project_id)
   const prompt = buildIntentPrompt(backplane, opts.content)
@@ -1394,6 +1405,7 @@ async function classifyIntentViaLlm(opts: {
     signal: opts.signal,
     sessionId: opts.session_id,
     maxTokens: opts.maxTokens,
+    providerType: opts.providerType,
   })) {
     if (sdk.type !== 'assistant' || !sdk.message) continue
     for (const block of sdk.message.content) {

@@ -28,7 +28,7 @@ import {
   loadSessionHistory,
   loadSnapshots,
 } from './atoms'
-import { refreshChannelsList, channelsListAtom, channelsLoadingAtom } from './atoms-sprint2'
+import { refreshChannelsList, channelsListAtom, channelsLoadingAtom, hasUsableChannelsAtom } from './atoms-sprint2'
 import type { ProjectMode, WorkflowStage } from './atoms'
 import type { DomCollectContextResult } from '../../shared/types'
 
@@ -107,13 +107,35 @@ const AppRoutes: React.FC = () => {
   const setPreviewUrls = useSetAtom(previewUrlsAtom)
   const setCurrentSnapshotId = useSetAtom(currentSnapshotIdAtom)
   const setMessages = useSetAtom(agentMessagesFamily(sessionId))
+  const sessionMessages = useAtomValue(agentMessagesFamily(sessionId))
   const setChannels = useSetAtom(channelsListAtom)
   const setChannelsLoading = useSetAtom(channelsLoadingAtom)
+  const hasChannels = useAtomValue(hasUsableChannelsAtom)
 
   // QW#1：启动即加载渠道列表（Header 三态徽标需要，不只 Settings 页）；Settings 页复用幂等加载
   React.useEffect(() => {
     void refreshChannelsList(setChannels, setChannelsLoading)
   }, [setChannels, setChannelsLoading])
+
+  // QW#2（ux-first-run-0basics I2）：进入工作区且零渠道（已决 false）→ 追加一次
+  // 引导提示（纯文本，指向右上角 ⚙️ 设置入口）；有渠道/未决（null）不打扰。
+  const zeroChannelHintShownRef = React.useRef(false)
+  React.useEffect(() => {
+    if (route !== 'workspace') return
+    if (zeroChannelHintShownRef.current) return
+    if (hasChannels !== false) return
+    // 审查 P2-③：用户已对话（含回访恢复历史/中途删渠道）时不打扰——引导只在空会话首跑显示
+    if (sessionMessages.some((m) => m.role === 'user')) return
+    zeroChannelHintShownRef.current = true
+    appendMessageToSession(sessionId, {
+      role: 'system',
+      content: [{
+        type: 'text',
+        text: '💡 你还没连接 AI 模型。点右上角 ⚙️ 设置，添加一个 AI 模型（给它起个名字 + API Key），2 分钟搞定。连接后向导就能直接为你生成。',
+      }],
+      timestamp: Date.now(),
+    })
+  }, [route, hasChannels, sessionId, sessionMessages])
 
   const restoreAttemptedRef = React.useRef(false)
 
