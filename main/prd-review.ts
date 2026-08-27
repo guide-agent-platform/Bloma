@@ -16,7 +16,7 @@
  * 向导轮 env，再失败降级确定性规则门——审查是门禁增强，不是硬依赖，永不阻断主流程。
  *
  * 裁决规则（代码级，不信任模型自报宽松结论）：issues 中存在 blocking/major
- * → needs_revision（退用户决策卡：忽略继续 / 我来补充）；否则 pass → 草图。
+ * → needs_revision（退用户决策卡：忽略继续 / 我来补充）；否则 pass → PRD 确认卡（2026-08-27 起用户过目后才开草图，不过目不开工）。
  */
 
 import { randomUUID } from 'node:crypto'

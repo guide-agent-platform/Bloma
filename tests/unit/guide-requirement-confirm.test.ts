@@ -249,7 +249,8 @@ describe('需求确认弹窗（confirm_requirements）', () => {
     expect(result).toMatchObject({ started: true, prd_written: false })
     expect(runSketchTask).toHaveBeenCalledTimes(1)
     const deltas = events.filter((event) => event.type === 'message_delta').map((event) => String(event.payload.text))
-    expect(deltas.some((text) => text.includes('开始画草图'))).toBe(true)
+    expect(deltas.some((text) => text.includes('没能生成'))).toBe(true)
+    expect(deltas.some((text) => text.includes('直接画草图'))).toBe(true)
     // 会话 JSONL 落盘了弹窗留痕（回访可追溯）
     const sessionText = readFileSync(join(home, 'agent-sessions', `${SESSION_ID}.jsonl`), 'utf8')
     expect(sessionText).toContain('[decision-card] 需求确认：')

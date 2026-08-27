@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  migrateCompatibleChannelBaseUrl,
   normalizeAnthropicBaseUrlForSdk,
   normalizeAnthropicProviderUrl,
   resolveAnthropicMessagesUrl,
@@ -92,28 +91,5 @@ describe('normalizeAnthropicBaseUrlForSdk', () => {
       .toBe('https://api.anthropic.com')
     expect(normalizeAnthropicBaseUrlForSdk('https://api.anthropic.com'))
       .toBe('https://api.anthropic.com')
-  })
-})
-
-describe('migrateCompatibleChannelBaseUrl', () => {
-  it('custom 补全为 /chat/completions', () => {
-    expect(migrateCompatibleChannelBaseUrl('https://api.example.com/v1', 'custom'))
-      .toBe('https://api.example.com/v1/chat/completions')
-  })
-
-  it('custom 已是完整端点则不重复追加', () => {
-    expect(migrateCompatibleChannelBaseUrl('https://api.example.com/v1/chat/completions', 'custom'))
-      .toBe('https://api.example.com/v1/chat/completions')
-  })
-
-  it('anthropic-compatible 补全为 /v1/messages', () => {
-    expect(migrateCompatibleChannelBaseUrl('https://gateway.example.com/v1', 'anthropic-compatible'))
-      .toBe('https://gateway.example.com/v1/messages')
-  })
-
-  it('空值与其余 provider 原样返回', () => {
-    expect(migrateCompatibleChannelBaseUrl('', 'custom')).toBe('')
-    expect(migrateCompatibleChannelBaseUrl('https://api.deepseek.com/anthropic', 'deepseek'))
-      .toBe('https://api.deepseek.com/anthropic')
   })
 })

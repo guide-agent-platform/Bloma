@@ -849,10 +849,11 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
       publish,
     })
     return { started: true, prd_written: prdWritten }
-  } else if (prdWritten) {
-    publish(makeGuideEvent(eventInput, 'message_delta', { text: '需求已确认，我先把它整理成产品需求文档，然后开始画草图。' }))
   } else {
-    publish(makeGuideEvent(eventInput, 'message_delta', { text: '需求已确认，开始画草图。' }))
+    // PRD 前移失败降级（不阻断草图）：话术如实披露 PRD 没能生成，不偽装已整理
+    publish(makeGuideEvent(eventInput, 'message_delta', {
+      text: '需求已确认。产品需求文档这次没能生成（稍后可重试），我按需求清单直接画草图。',
+    }))
   }
   publish(makeGuideEvent(eventInput, 'message_completed', { subtype: 'success' }))
 

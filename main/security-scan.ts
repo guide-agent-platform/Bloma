@@ -12,7 +12,8 @@ import { join, relative } from 'node:path'
  * - 非加密网络资源引用（http://）—— 传输层不安全。
  *
  * 只读扫描，不改产物；`passed=false` 表示存在 high/critical 命中，由调用方接入
- * security_error 修复循环（repair-engine 独立计数，不计入普通退回）。所有面向用户的
+ * security_error 修复（loop 内化：Agent Loop 收到未过报告后自行 edit_file 修复重扫，
+ * 7992edc 废旧管道转正后 repair-engine 已删）。所有面向用户的
  * 摘要文案不含 XSS / SQL 注入等技术术语（self-healing-judge @S2-JUDGE-008）。
  */
 

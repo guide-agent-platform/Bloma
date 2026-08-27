@@ -10,7 +10,7 @@ import { getDocumentsDir } from '../../storage/config-paths'
 import { IPC_CHANNELS } from '../../shared/types'
 
 /** 预置「PRD 已被用户确认」状态：写带 user_confirmed_at 的 prd.json（不过目不开工防御的前置）。 */
-function seedConfirmedPrd(home: string, projectId: string, confirmed = true): void {
+function seedConfirmedPrd(projectId: string, confirmed = true): void {
   const dir = getDocumentsDir('default-software-builder', projectId)
   mkdirSync(dir, { recursive: true })
   const backplane = {
@@ -24,7 +24,6 @@ function seedConfirmedPrd(home: string, projectId: string, confirmed = true): vo
     ...(confirmed ? { user_confirmed_at: '2026-08-27T02:00:00.000Z' } : {}),
   }
   writeFileSync(join(dir, 'prd.json'), JSON.stringify(backplane), 'utf8')
-  void home
 }
 
 /**
@@ -106,7 +105,7 @@ describe('ipc submit-correction → runIterationTask wiring（Sprint 3 纠错主
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
     // 「不过目不开工」（2026-08-27）：只有 PRD 已被用户确认过的项目，点选纠错才直达 MVP 迭代
-    seedConfirmedPrd(home, project.project_id, true)
+    seedConfirmedPrd(project.project_id, true)
 
     const handlers = new Map<string, (_event: unknown, payload: unknown) => unknown>()
     registerIpcHandlers(

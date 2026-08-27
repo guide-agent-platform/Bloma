@@ -1053,7 +1053,7 @@ export async function resolvePrdBackplane(input: MvpTaskInput, requirements: Ske
   const project = findProject(input.project_id)
   // 上轮已写盘的 prd.json（如有）：重跑时其对应项既有字段并入合并底（§3.2）；首轮无 prd.json 按最后草图需求忠实重建（不含默认项）
   const existing = readPrdBackplane(input.project_id)
-  // 渠道能力上限：enricher 与 generatePrdLlm 共用同一上限，绝不请求超过渠道能力（§3.1 预算 = min(上限, 4096 + 项数×600)）
+  // 渠道能力上限：enricher 与 generatePrdLlm 共用同一上限，直接用渠道配置值（缺省 8192），不另设公式预算
   const maxTokens = channel.max_tokens ?? 8192
   // 并行：PRD 元数据提取 + 功能项加厚互不依赖，共用同一渠道/env/对话
   const [llm, enriched] = await Promise.all([

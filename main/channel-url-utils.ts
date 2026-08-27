@@ -124,48 +124,6 @@ export function normalizeBaseUrl(baseUrl: string): string {
 }
 
 /**
- * 规范化 OpenAI 兼容 Base URL（用于 SDK）。
- *
- * custom / OpenAI Responses 渠道若保存的是完整端点，这里还原成协议根地址，
- * 避免重复拼接。
- */
-export function normalizeOpenAIBaseUrlForSdk(baseUrl: string): string {
-  if (hasPathSuffix(baseUrl, '/chat/completions')) {
-    return removePathSuffixForSdkBaseUrl(baseUrl, '/chat/completions')
-  }
-  if (hasPathSuffix(baseUrl, '/responses')) {
-    return removePathSuffixForSdkBaseUrl(baseUrl, '/responses')
-  }
-  return normalizeBaseUrl(baseUrl)
-}
-
-/**
- * 解析 OpenAI Chat Completions 请求地址。
- *
- * OpenAI 兼容格式（custom）要求用户直接填写完整请求端点。
- * 内置 OpenAI 协议供应商仍允许填写协议根地址。
- */
-export function resolveOpenAIChatCompletionsUrl(baseUrl: string, provider: ProviderType = 'openai'): string {
-  if (provider === 'custom') {
-    return trimTrailingUrlPathSlash(baseUrl)
-  }
-  if (hasPathSuffix(baseUrl, '/chat/completions')) {
-    return trimTrailingUrlPathSlash(baseUrl)
-  }
-  return `${normalizeBaseUrl(baseUrl)}/chat/completions`
-}
-
-/**
- * 解析 OpenAI Responses 请求地址。
- */
-export function resolveOpenAIResponsesUrl(baseUrl: string, _provider: ProviderType = 'openai-responses'): string {
-  if (hasPathSuffix(baseUrl, '/responses')) {
-    return trimTrailingUrlPathSlash(baseUrl)
-  }
-  return `${normalizeBaseUrl(baseUrl)}/responses`
-}
-
-/**
  * 解析 OpenAI Models 地址。
  *
  * 当用户把兼容格式配置为完整 /chat/completions 或 /responses 端点时，
@@ -233,32 +191,4 @@ export function resolveAnthropicModelsUrl(baseUrl: string, provider: ProviderTyp
     return replacePathSuffix(baseUrl, '/messages', '/models')
   }
   return `${normalizeAnthropicProviderUrl(baseUrl, provider)}/models`
-}
-
-/**
- * 将旧版本（v1）存储的通用兼容渠道 Base URL 一次性迁移为完整请求端点。
- *
- * 幂等保证：空值、非 custom/anthropic-compatible、以及已经是完整端点的值都原样返回。
- */
-export function migrateCompatibleChannelBaseUrl(baseUrl: string, provider: ProviderType): string {
-  const trimmed = baseUrl.trim()
-  if (trimmed === '') {
-    return baseUrl
-  }
-
-  if (provider === 'custom') {
-    if (hasPathSuffix(trimmed, '/chat/completions')) {
-      return trimTrailingUrlPathSlash(trimmed)
-    }
-    return `${normalizeBaseUrl(trimmed)}/chat/completions`
-  }
-
-  if (provider === 'anthropic-compatible') {
-    if (hasPathSuffix(trimmed, '/messages')) {
-      return trimTrailingUrlPathSlash(trimmed)
-    }
-    return `${normalizeVersionedAnthropicBaseUrl(trimmed)}/messages`
-  }
-
-  return baseUrl
 }

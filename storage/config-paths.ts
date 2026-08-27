@@ -19,8 +19,6 @@ export function getBlomaChannelsPath(): string { return join(getPromaHome(), 'bl
 export function getCategoryRoutingPath(): string { return join(getPromaHome(), 'category-routing.json') }
 export function getProjectsIndexPath(): string { return join(getPromaHome(), 'projects.json') }
 export function getAgentSessionsIndexPath(): string { return join(getPromaHome(), 'agent-sessions.json') }
-export function getSettingsPath(): string { return join(getPromaHome(), 'settings.json') }
-export function getUserProfilePath(): string { return join(getPromaHome(), 'user-profile.json') }
 
 /** 引擎 system prompt 外置覆盖路径：{PROMA_HOME}/prompts/{name}.md（文件存在即覆盖内置默认）。 */
 export function getPromptOverridePath(name: string): string {
@@ -43,19 +41,6 @@ function workspaceRoot(workspaceSlug: string): string {
 
 export function getWorkspacePath(workspaceSlug: string): string {
   return ensureDir(workspaceRoot(workspaceSlug))
-}
-
-/** 纯路径（不建目录），同 `getProjectEventsPath`：mcp.json 是读文件，读取方不该有 mkdir 副作用。 */
-export function getWorkspaceMcpConfigPath(workspaceSlug: string): string {
-  return join(workspaceRoot(workspaceSlug), 'mcp.json')
-}
-
-export function getWorkspaceSkillsDir(workspaceSlug: string): string {
-  return ensureDir(join(getWorkspacePath(workspaceSlug), 'skills'))
-}
-
-export function getWorkspaceFilesDir(workspaceSlug: string): string {
-  return ensureDir(join(getWorkspacePath(workspaceSlug), 'workspace-files'))
 }
 
 export function getGeneratedProjectsDir(workspaceSlug: string): string {
@@ -85,8 +70,4 @@ export function getProjectEventsPath(workspaceSlug: string, projectId: string): 
 /** 纯路径（不建目录），同 `getProjectEventsPath`。 */
 export function getAnalyticsPath(workspaceSlug: string): string {
   return join(workspaceRoot(workspaceSlug), 'analytics.jsonl')
-}
-
-export function getSdkBinaryPath(): string {
-  return join(getPromaHome(), 'sdk-config', 'claude')
 }

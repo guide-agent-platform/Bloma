@@ -71,10 +71,6 @@ export function setReminderIntervalForTests(ms: number): void {
   reminderIntervalMs = ms
 }
 
-export function getReminderInterval(): number {
-  return reminderIntervalMs
-}
-
 /** project_id：用户显式忽略（关闭通知等）——同一项目不再反复提醒，直到该项目脱离阻塞态。 */
 const ignored = new Set<string>()
 /** project_id -> 上次系统通知时间戳（频率上限与「是否已提醒过」共用）。 */
@@ -263,11 +259,6 @@ export function markPendingDecisionIgnored(projectId: string): void {
 
 export function isPendingDecisionIgnored(projectId: string): boolean {
   return ignored.has(projectId)
-}
-
-/** 测试/诊断：当前是否有未处理（且未忽略）的待决策项目。 */
-export function hasUnhandledPendingDecisions(): boolean {
-  return listProjects('active').some((p) => p.current_stage === 'blocked_for_user_decision' && !ignored.has(p.project_id))
 }
 
 function clearProjectReminderState(projectId: string): void {

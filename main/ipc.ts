@@ -400,7 +400,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
         // 不一致状态。fail-closed：prd.json 缺失/损坏均视为未确认。
         if (!isPrdUserConfirmed(input.project_id)) {
           const guidance =
-            '收到，这处调整意见我先记下了。不过需求定稿（PRD）还没经你确认过，我先把整理好的 PRD 给你过目，确认后我再按你的意见继续。'
+            '收到，这处调整意见我先记下了。不过需求定稿（PRD）还没经你确认过，我先不动手重做——请回到对话里把想法告诉我，我们先一起确认需求，再按你的意见改。'
           appendJsonLine(getAgentSessionPath(input.session_id), {
             role: 'assistant',
             content: [{ type: 'text', text: guidance }],
