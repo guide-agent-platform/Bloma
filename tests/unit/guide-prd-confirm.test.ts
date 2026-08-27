@@ -12,6 +12,8 @@ vi.mock('../../main/programming-orchestrator', () => ({
     requirements,
   })),
   setProgrammingEventPublisher: vi.fn(),
+  nextRequirementId: vi.fn((existing: Array<{ id: string }>) => `F-00${existing.length + 1}`),
+  refineModificationDescription: vi.fn((text: string) => text.trim()),
 }))
 vi.mock('../../main/platform-services', () => ({ trackAnalytics: vi.fn() }))
 vi.mock('../../main/document-engine', () => ({
@@ -57,7 +59,8 @@ import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../main/o
  * PRD 用户确认门（2026-08-26 改造 3）：
  * - 六维审查通过 → 四段式确认卡（kind='prd_confirm'，背板结构化投影）+ 不开草图（挂起）
  * - confirm 回传 → markPrdUserConfirmed 落盘 + 开草图 + 决策留痕
- * - adjust 回传 → 消费 pending + 提示打字补充，不开草图
+ * - adjust 回传带实质文本 → 直接进修订闭环（归一化并入→重走 PRD 管线→新确认卡），不再咐提示
+ * - dismiss 回传 → 消费 pending + 引导回对话，不开工
  * - 无 pending 的选项回传不拦截（重启丢失/重复点击防误拦）
  */
 
@@ -194,11 +197,12 @@ describe('PRD 用户确认门（改造 3）', () => {
     expect(decisions.some((entry) => entry.type === 'prd_confirm' && entry.title.includes('已确认'))).toBe(true)
   })
 
-  it('adjust 回传 → 消费 pending + 提示调整，不开草图', async () => {
+  it('adjust 回传带文本 → 直接进修订闭环：ack 后重走 PRD 管线出新确认卡，不再咐「指出条目」（2026-08-27 线上案例 02239079）', async () => {
     await startConfirmFlow()
+    events.length = 0
 
     await handleGuideMessage(
-      makeInput({ content: 'F-002 这条不对：我想要的是导出 Excel', metadata: { source: 'card_option', selected_option_id: PRD_CONFIRM_OPTION_ADJUST } }),
+      makeInput({ content: '我想要更多有趣的功能', metadata: { source: 'card_option', selected_option_id: PRD_CONFIRM_OPTION_ADJUST } }),
       (event) => events.push(event),
       makeModel(scriptedQuery()),
     )
@@ -209,7 +213,41 @@ describe('PRD 用户确认门（改造 3）', () => {
       .filter((event) => event.type === 'message_delta')
       .map((event) => (event.payload as { text?: string }).text ?? '')
       .join('\n')
-    expect(texts).toContain('你想调整哪里')
+    // ack 话术承诺修订，不再把用户咐在「你想调整哪里」
+    expect(texts).toContain('修订 PRD')
+    expect(texts).not.toContain('你想调整哪里')
+    // 修订链重走 PRD 管线：新确认卡再次挂起（含首张共 2 张 prd_confirm 事件）
+    const confirmCards = events.filter(
+      (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
+    )
+    expect(confirmCards).toHaveLength(1)
+    // 修订后的清单在原清单基础上追加（归一化 fallback append，非推倒重来）
+    const card = confirmCards[0]!.payload as { requirements?: Array<{ id: string }> }
+    expect(card.requirements?.map((item) => item.id)).toContain('F-003')
+    expect(card.requirements?.map((item) => item.id)).toContain('F-001')
+  })
+
+  it('dismiss 回传 → 消费 pending + 引导回对话，不开工不发新卡', async () => {
+    await startConfirmFlow()
+    events.length = 0
+
+    await handleGuideMessage(
+      makeInput({ content: '稍后再说，先不确认。', metadata: { source: 'card_option', selected_option_id: 'prd_confirm_dismiss' } }),
+      (event) => events.push(event),
+      makeModel(scriptedQuery()),
+    )
+
+    expect(runSketchTask).not.toHaveBeenCalled()
+    expect(markPrdUserConfirmed).not.toHaveBeenCalled()
+    expect(events.some((event) => event.type === 'user_decision_required')).toBe(false)
+    const texts = events
+      .filter((event) => event.type === 'message_delta')
+      .map((event) => (event.payload as { text?: string }).text ?? '')
+      .join('\n')
+    expect(texts).toContain('先不确认这份 PRD')
+    expect(recordDecision).toHaveBeenCalledWith(expect.objectContaining({
+      entry: expect.objectContaining({ title: '用户暂不确认 PRD，回对话继续' }),
+    }))
   })
 
   it('无 pending 的选项回传不拦截（重复点击/重启丢失防误拦）', async () => {

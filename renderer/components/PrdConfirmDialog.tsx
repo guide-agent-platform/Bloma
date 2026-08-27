@@ -49,6 +49,14 @@ const secondaryButtonStyle: React.CSSProperties = {
   cursor: 'pointer',
 }
 
+/** 暂不确认（第三出口）：弱化为文字链接风格，避免与两个主行动争夺注意力。 */
+const dismissButtonStyle: React.CSSProperties = {
+  ...secondaryButtonStyle,
+  border: 'none',
+  color: 'var(--color-text-muted, #8a94a6)',
+  textDecoration: 'underline',
+}
+
 const inputStyle: React.CSSProperties = {
   width: '100%',
   boxSizing: 'border-box',
@@ -190,6 +198,10 @@ export const PrdConfirmDialog: React.FC = () => {
 
   const submitConfirm = (): void => {
     void sendMessage('确认这份 PRD，开始画草图。', 'prd_confirm_confirm')
+  }
+
+  const submitDismiss = (): void => {
+    void sendMessage('稍后再说，先不确认。', 'prd_confirm_dismiss')
   }
 
   const submitAdjust = (): void => {
@@ -350,6 +362,16 @@ export const PrdConfirmDialog: React.FC = () => {
           </div>
         ) : (
           <div data-ai-id="prd-confirm-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {/* 暂不确认出口（2026-08-27 线上案例：弹窗无关闭方式，用户被强制二选一） */}
+            <button
+              type="button"
+              data-ai-id="prd-confirm-dismiss"
+              style={dismissButtonStyle}
+              disabled={submitting}
+              onClick={submitDismiss}
+            >
+              稍后再说
+            </button>
             <button type="button" style={secondaryButtonStyle} onClick={() => setAdjustOpen(true)}>
               有要调整的
             </button>

@@ -20,6 +20,7 @@ import {
   PRD_CONFIRM_OPTION_ADJUST,
   PRD_CONFIRM_OPTION_CONFIRM,
   consumePrdConfirmAdjust,
+  consumePrdConfirmDismiss,
   publishPrdConfirmCard,
   resolvePrdConfirmCardAnswer,
   resumePrdConfirmConfirmed,
@@ -27,9 +28,10 @@ import {
 import { resolveChannelEnv } from './runtime-fallback'
 import type { ConversationTurn, GuideModelOptions, SDKQuery } from './orchestrator'
 import { trackAnalytics } from './platform-services'
-import { resolvePrdBackplane, runSketchTask, setProgrammingEventPublisher } from './programming-orchestrator'
+import { resolvePrdBackplane, runSketchTask, setProgrammingEventPublisher, nextRequirementId, refineModificationDescription } from './programming-orchestrator'
+import { normalizeRequirementUpdate, applyNormalization } from './requirement-normalizer'
 import { findProject, updateProject } from './project-service'
-import { captureConstraints, extractConstraints } from './constraint-extractor'
+import { captureConstraints, extractConstraints, readProjectConstraints } from './constraint-extractor'
 import { isAutoDelegationText, readPrimaryIntent } from './session-service'
 import type { PrdBackplane, SketchRequirement } from './sketch-engine'
 import { isRecord } from './validators'
@@ -341,16 +343,58 @@ export async function handleGuideMessage(
   }
 
   // PRD 确认卡回传（2026-08-26 改造 3，在审查卡之后/普通卡之前拦截）：
-  // confirm → user_confirmed_at 落盘 + 开草图；adjust → 消费 pending，提示打字补充
-  // （逐项「这条不对」也走 adjust，补充文本自带条目 id，回向导模型路径修订）。
+  // confirm → user_confirmed_at 落盘 + 开草图；adjust → 消费 pending：带实质文本时直接进
+  // 修订闭环（归一化并入 → 重走 PRD 管线 → 新确认卡），不再把用户咐在提示上——
+  // 线上案例 02239079：用户在弹窗输入「我想要更多有趣的功能」被提示「指出具体条目」
+  // 啪住，困惑打「？」后整个需求流程重新澄清全链重跑（用户反馈「没法在原有基础上
+  // 修改，是完全性重构」）；dismiss → 暂不确认，回对话继续不开工。
   const prdConfirmDecision = resolvePrdConfirmCardAnswer(input)
   if (prdConfirmDecision === 'confirm') {
     await resumePrdConfirmConfirmed(input)
     return
   }
   if (prdConfirmDecision === 'adjust') {
-    consumePrdConfirmAdjust(input)
+    const pendingAdjust = consumePrdConfirmAdjust(input)
+    const adjustment = input.content.trim()
+    if (pendingAdjust && adjustment) {
+      const ack = `好的，按你的想法「${adjustment.slice(0, 40)}」修订 PRD，整理好后再请你确认。`
+      persistAssistant?.(ack)
+      publish(makeGuideEvent(input, 'message_delta', { text: ack }))
+      publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+      // 归一化并入（env 缺省走词表 fallback；语义消化归后续 PRD 引擎重整）：
+      // 「加个有趣的功能」类口语在原清单基础上 append/revise，而不是推倒重来
+      const existing = pendingAdjust.requirements as SketchRequirement[]
+      const normalization = await normalizeRequirementUpdate({
+        session_id: input.session_id,
+        existing,
+        modification: refineModificationDescription(adjustment),
+        constraints: readProjectConstraints(input.project_id),
+        query: pendingAdjust.query,
+        env: undefined,
+      })
+      const merged = applyNormalization(existing, normalization, nextRequirementId(existing), 'correction')
+      await runPrdPipeline({
+        request_id: input.request_id,
+        session_id: input.session_id,
+        project_id: input.project_id,
+        mode: input.mode,
+        channel_id: input.channel_id,
+        requirements: merged,
+        query: pendingAdjust.query,
+        env: undefined,
+        publish,
+      })
+      return
+    }
     const hint = '好的，你想调整哪里？指出具体条目（如「F-002 的验收不对：我想要的是导出 Excel」），我修订后再请你确认。'
+    persistAssistant?.(hint)
+    publish(makeGuideEvent(input, 'message_delta', { text: hint }))
+    publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+    return
+  }
+  if (prdConfirmDecision === 'dismiss') {
+    consumePrdConfirmDismiss(input)
+    const hint = '好的，先不确认这份 PRD。你可以直接在对话里继续说想法或补充要求，我们理顺后我再来请你确认。'
     persistAssistant?.(hint)
     publish(makeGuideEvent(input, 'message_delta', { text: hint }))
     publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))

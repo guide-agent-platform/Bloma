@@ -155,6 +155,21 @@ describe('PRD 确认弹窗 PrdConfirmDialog', () => {
     })
   })
 
+  it('稍后再说（第三出口）→ 发送 prd_confirm_dismiss 并关闭弹窗，不开工（2026-08-27）', async () => {
+    setState()
+    renderDialog()
+
+    fireEvent.click(screen.getByTestId('prd-confirm-dismiss'))
+    await waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+        metadata: { source: 'card_option', selected_option_id: 'prd_confirm_dismiss' },
+      }))
+    })
+    await waitFor(() => {
+      expect(screen.queryByTestId('prd-confirm-dialog')).toBeNull()
+    })
+  })
+
   it('逐项「这条不对」→ 调整输入框预填条目 id，发送走 prd_confirm_adjust', async () => {
     setState()
     renderDialog()

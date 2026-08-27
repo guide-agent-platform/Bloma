@@ -24,6 +24,8 @@ import type { SDKQuery } from './orchestrator'
 /** PRD 确认卡选项 id（回传经 send-message 的 card_option 元数据识别）。 */
 export const PRD_CONFIRM_OPTION_CONFIRM = 'prd_confirm_confirm'
 export const PRD_CONFIRM_OPTION_ADJUST = 'prd_confirm_adjust'
+/** 暂不确认（2026-08-27）：弹窗第三出口——关闭弹窗回对话继续，不开工、pending 消费留痕。 */
+export const PRD_CONFIRM_OPTION_DISMISS = 'prd_confirm_dismiss'
 
 /** 确认未决状态：等用户读卡确认或提出调整。 */
 interface PendingPrdConfirm {
@@ -119,14 +121,20 @@ export function publishPrdConfirmCard(opts: {
 /** 确认卡回传识别：card_option 且选项 id 专属、pending 仍存活时才拦截。 */
 export function resolvePrdConfirmCardAnswer(
   input: AgentSendMessageInput,
-): 'confirm' | 'adjust' | undefined {
+): 'confirm' | 'adjust' | 'dismiss' | undefined {
   if (input.metadata?.source !== 'card_option') return undefined
   const optionId = input.metadata.selected_option_id
-  if (optionId !== PRD_CONFIRM_OPTION_CONFIRM && optionId !== PRD_CONFIRM_OPTION_ADJUST) {
+  if (
+    optionId !== PRD_CONFIRM_OPTION_CONFIRM &&
+    optionId !== PRD_CONFIRM_OPTION_ADJUST &&
+    optionId !== PRD_CONFIRM_OPTION_DISMISS
+  ) {
     return undefined
   }
   if (!hasPendingPrdConfirm(input.project_id)) return undefined
-  return optionId === PRD_CONFIRM_OPTION_CONFIRM ? 'confirm' : 'adjust'
+  if (optionId === PRD_CONFIRM_OPTION_CONFIRM) return 'confirm'
+  if (optionId === PRD_CONFIRM_OPTION_DISMISS) return 'dismiss'
+  return 'adjust'
 }
 
 /** 用户确认：user_confirmed_at 落盘（失败不阻断）→ 决策留痕 → 开草图。 */
@@ -163,7 +171,7 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
   return true
 }
 
-/** 用户选择调整：取走 pending（补充后新确认流程会重建），返回待决信息供调用方发提示。 */
+/** 用户选择调整：取走 pending（带文本时直接进修订闭环），返回待决信息供调用方。 */
 export function consumePrdConfirmAdjust(input: AgentSendMessageInput): PendingPrdConfirm | undefined {
   const pending = takePendingPrdConfirm(input.project_id)
   if (!pending) return undefined
@@ -175,6 +183,24 @@ export function consumePrdConfirmAdjust(input: AgentSendMessageInput): PendingPr
       title: '用户选择调整 PRD，回向导修订',
       why: '用户在确认卡选择「有要调整的」（或点击了具体条目的「这条不对」）',
       detail: { user_message: input.content.slice(0, 200) },
+    },
+  })
+  return pending
+}
+
+/** 用户暂不确认（2026-08-27）：关闭弹窗回对话继续——不开工（不过目不开工保持），
+ * pending 消费留痕；用户后续在对话里理顺需求后会重新收敛出新确认卡。 */
+export function consumePrdConfirmDismiss(input: AgentSendMessageInput): PendingPrdConfirm | undefined {
+  const pending = takePendingPrdConfirm(input.project_id)
+  if (!pending) return undefined
+  recordDecision({
+    project_id: input.project_id,
+    session_id: pending.session_id,
+    entry: {
+      type: 'prd_confirm',
+      title: '用户暂不确认 PRD，回对话继续',
+      why: '用户在确认卡选择「稍后再说」——不开工，需求继续在对话里打磨',
+      detail: {},
     },
   })
   return pending
