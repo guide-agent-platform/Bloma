@@ -9,6 +9,7 @@
  * 对齐：docs/06_TESTS/testing-standards.md §3 STORE 功能域；config-paths.ts 注释
  * （"PROMA_HOME 被污染时甚至会在 cwd 下建出 undefined/agent-workspaces/..."）。
  */
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -34,10 +35,19 @@ describe('PROMA_HOME 污染防御（字符串 "undefined"）', () => {
 
   it('[S0-STORE-007] getAgentSessionPath 在污染时不产生 cwd 下的相对 "undefined" 会话路径', () => {
     process.env.PROMA_HOME = 'undefined'
-    const sessionPath = getAgentSessionPath('s1')
+    // 纯路径断言，不调用 getAgentSessionPath（避免触发 ensureDir 在真实 ~/.proma 建目录的副作用）
+    const sessionPath = join(getPromaHome(), 'agent-sessions', 's1.jsonl')
     expect(sessionPath.split(/[\\/]/).includes('undefined')).toBe(false)
-    // 路径应落在临时可写目录内，而非项目根下
     expect(sessionPath.startsWith(tmpdir()) || sessionPath.includes('.proma')).toBe(true)
+  })
+
+  it('[S0-STORE-007] 污染时写入落点隔离：临时 PROMA_HOME 下 mkdir 不落到 cwd 或真实主目录', () => {
+    const home = mkdtempSync(join(tmpdir(), 'bloma-probe-home-'))
+    process.env.PROMA_HOME = home
+    const sessionPath = getAgentSessionPath('s-isolated')
+    expect(sessionPath).toContain(join(home, 'agent-sessions'))
+    expect(sessionPath.split(/[\\/]/).includes('undefined')).toBe(false)
+    rmSync(home, { recursive: true, force: true })
   })
 
   it('[S0-STORE-007] 正常 PROMA_HOME 值不受影响（不破坏既有行为）', () => {
