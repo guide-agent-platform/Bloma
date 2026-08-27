@@ -180,6 +180,10 @@ export const PrdConfirmDialog: React.FC = () => {
     const api = window.electronAPI
     if (!api?.agent?.sendMessage || submitting) return
     setSubmitting(true)
+    // 乐观关闭（2026-08-27 线上案例：点确认后弹窗不消失）：send-message 的 IPC 回传
+    // 绑定主进程全链——confirm 回传含草图生成全程（可达数十秒），await 会让弹窗挂死。
+    // 先关弹窗再等 IPC；主进程侧 pending 校验失败时弹窗本就该关（旧卡/重复点击）。
+    close()
     try {
       await api.agent.sendMessage({
         request_id: crypto.randomUUID(),
@@ -193,7 +197,6 @@ export const PrdConfirmDialog: React.FC = () => {
     } catch (error) {
       console.error('[prd-confirm] 发送异常:', error)
     }
-    close()
   }
 
   const submitConfirm = (): void => {

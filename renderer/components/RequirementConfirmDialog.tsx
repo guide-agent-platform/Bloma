@@ -99,6 +99,9 @@ export const RequirementConfirmDialog: React.FC = () => {
     const api = window.electronAPI
     if (!api?.agent?.confirmRequirements || submitting) return
     setSubmitting(true)
+    // 乐观关闭（2026-08-27）：confirmRequirements 的 IPC 回传绑定 PRD 管线全程
+    // （PRD 生成+六维审查，可达数十秒），await 会让弹窗挂死——先关再等。
+    close()
     try {
       const result = await api.agent.confirmRequirements({
         request_id: crypto.randomUUID(),
@@ -111,7 +114,6 @@ export const RequirementConfirmDialog: React.FC = () => {
     } catch (error) {
       console.error('[requirement-confirm] 提交异常:', error)
     }
-    close()
   }
 
   const submitSupplement = async (): Promise<void> => {
@@ -119,6 +121,8 @@ export const RequirementConfirmDialog: React.FC = () => {
     const text = supplementText.trim()
     if (!api?.agent?.sendMessage || submitting || !text) return
     setSubmitting(true)
+    // 乐观关闭（同 submitDecision：不等 IPC 返回）
+    close()
     try {
       await api.agent.sendMessage({
         request_id: crypto.randomUUID(),
@@ -132,7 +136,6 @@ export const RequirementConfirmDialog: React.FC = () => {
     } catch (error) {
       console.error('[requirement-confirm] 补充说明发送异常:', error)
     }
-    close()
   }
 
   const allChecked = effectiveChecked.size === state.requirements.length && state.requirements.length > 0
