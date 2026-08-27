@@ -220,7 +220,7 @@ describe('Sprint 2 guide clarification fixes acceptance（向导澄清修复）'
       expect(events.find((event) => event.type === 'sketch_ready')).toBeFalsy()
       expect(findProject(project.project_id).current_stage).toBe('blocked_for_user_decision')
       // 弹窗需求以首条实质消息（「帮我做个东西」，问候「你好」已被 ⑤ 豁免）为主题锚点
-      const confirmRequirements = (decisionEvents[2]?.payload.requirements ?? []) as Array<{ id: string; description: string }>
+      const confirmRequirements = (decisionEvents[3]?.payload.requirements ?? []) as Array<{ id: string; description: string }>
       expect(confirmRequirements[0]?.description).toBe('帮我做个东西')
       const jsonl = readFileSync(join(env.home, 'agent-sessions', 'session-breaker.jsonl'), 'utf8')
       expect(jsonl).toContain('clarification_forced_confirm')
