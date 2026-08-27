@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -14,7 +15,7 @@ describe('decision-log (T2)', () => {
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   function setup(): { projectId: string; sessionId: string; decisionsPath: () => string } {

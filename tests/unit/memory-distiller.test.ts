@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -81,7 +82,7 @@ describe('T4-L3 蒸馏层 · 开关与成功路径', () => {
   })
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     setMemoryDistillEnabledForTests(false)
   })
 
@@ -134,7 +135,7 @@ describe('T4-L3 蒸馏层 · 失败降级（验收②：三类注入点）', () 
   })
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     setMemoryDistillEnabledForTests(false)
   })
 
@@ -242,7 +243,7 @@ describe('T4-L3 蒸馏层 · 单一事实源仲裁（验收③）', () => {
   })
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     setMemoryDistillEnabledForTests(false)
   })
 

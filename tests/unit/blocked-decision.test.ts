@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { createServer } from 'node:http'
 import { EventEmitter } from 'node:events'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
@@ -35,7 +36,7 @@ describe('Blocked decision resume loop (A2/A3)', () => {
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     setProgrammingEventPublisher(() => undefined)
     clearSandboxRuntimeForTests()
     setSnapshotCaptureProviderForTests()

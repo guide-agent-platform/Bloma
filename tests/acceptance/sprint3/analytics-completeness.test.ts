@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../../support/proma-home-guard'
 import { EventEmitter } from 'node:events'
 import { existsSync, readFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -34,7 +35,7 @@ describe('Sprint 3 analytics completeness audit (T8)', () => {
       const { rmSync } = await import('node:fs')
       rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     }
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     home = undefined
     clearPendingRequests()
     clearSandboxRuntimeForTests()

@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../../support/proma-home-guard'
 import { EventEmitter } from 'node:events'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -30,7 +31,7 @@ describe('Sprint 0 permission boundary acceptance', () => {
     setProgrammingEventPublisher(() => undefined)
     clearSandboxRuntimeForTests()
     setSnapshotCaptureProviderForTests()
-    if (originalPromaHome) process.env.PROMA_HOME = originalPromaHome
+    if (originalPromaHome) restorePromaHome(originalPromaHome)
   })
 
   const originalPromaHome = process.env.PROMA_HOME

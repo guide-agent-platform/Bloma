@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -44,14 +45,6 @@ async function abortAndSettleChildLoops(): Promise<void> {
   ])
 }
 
-/**
- * 安全恢复 PROMA_HOME：本机未设时必须 delete，不能把 undefined 赋回 env
- * （Node 会把 process.env.X = undefined 强制转成字符串 "undefined"，污染成相对路径）。
- */
-function restorePromaHome(original: string | undefined): void {
-  if (original === undefined) delete process.env.PROMA_HOME
-  else process.env.PROMA_HOME = original
-}
 
 /**
  * 委派协作 M1 单元测试（委派协作嫁接方案 §4.1/§5，2026-08-24）。

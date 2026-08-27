@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../../support/proma-home-guard'
 import { EventEmitter } from 'node:events'
 import type { ChildProcess } from 'node:child_process'
 import { mkdtempSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -192,7 +193,7 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
     })
   })
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     if (originalFlag === undefined) delete process.env.BLOMA_AGENT_LOOP
     else process.env.BLOMA_AGENT_LOOP = originalFlag
     setBrowserGwtDisabledForTests(false)

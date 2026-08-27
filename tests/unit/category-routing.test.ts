@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -56,7 +57,7 @@ describe('category-routing（M5 类别→渠道路由）', () => {
   })
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     resetCategoryRoutingForTests()
     vi.restoreAllMocks()
   })

@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { EventEmitter } from 'node:events'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -43,7 +44,7 @@ describe('转移阶段护栏（问题 A / P1）', () => {
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     setAgentStreamPublisher(() => undefined)
     setSDKQueryForTests(defaultTestQuery)
     clearSandboxRuntimeForTests()

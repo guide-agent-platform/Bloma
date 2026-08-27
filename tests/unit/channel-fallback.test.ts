@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -57,7 +58,7 @@ describe('channel auto-fallback decrypt guard', () => {
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   it('密钥无法解密的渠道被跳过，返回 undefined 而不是抛错', () => {
@@ -133,7 +134,7 @@ describe('category routing × resolveChannelEnv（M5）', () => {
   })
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     resetCategoryRoutingForTests()
     resetCategoryRouteThrottleForTests()
     vi.restoreAllMocks()

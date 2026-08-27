@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../../support/proma-home-guard'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -29,7 +30,7 @@ describe('Sprint 2 security independent count acceptance (S2-JUDGE-007 / S2-JUDG
       const { rmSync } = require('node:fs')
       rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     }
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     home = undefined
     setProgrammingEventPublisher(() => undefined)
   })

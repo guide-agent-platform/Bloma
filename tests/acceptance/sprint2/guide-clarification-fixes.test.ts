@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../../support/proma-home-guard'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -50,7 +51,7 @@ describe('Sprint 2 guide clarification fixes acceptance（向导澄清修复）'
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     setAgentStreamPublisher(() => undefined)
     setSDKQueryForTests(defaultPlainQuery)
     clearSandboxRuntimeForTests()

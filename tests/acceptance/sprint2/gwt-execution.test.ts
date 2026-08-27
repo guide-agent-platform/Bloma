@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../../support/proma-home-guard'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -25,7 +26,7 @@ describe('Sprint 2 GWT execution acceptance (S2-JUDGE-009)', () => {
       const { rmSync } = require('node:fs')
       rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     }
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     home = undefined
   })
 

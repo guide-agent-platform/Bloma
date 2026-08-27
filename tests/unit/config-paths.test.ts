@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 /**
  * config-paths 存储路径防御（PROMA_HOME 污染）
  *
@@ -20,7 +21,7 @@ const originalPromaHome = process.env.PROMA_HOME
 afterEach(() => {
   // 安全恢复：本机未设 PROMA_HOME 时用 delete，绝不把 undefined 赋回 env（避免污染字符串 "undefined"）
   if (originalPromaHome === undefined) delete process.env.PROMA_HOME
-  else process.env.PROMA_HOME = originalPromaHome
+  else restorePromaHome(originalPromaHome)
 })
 
 describe('PROMA_HOME 污染防御（字符串 "undefined"）', () => {

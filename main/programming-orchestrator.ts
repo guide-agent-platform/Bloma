@@ -1482,6 +1482,10 @@ export async function mergeIterationRequirements(
       query: input.query,
       env,
       signal: input.signal,
+      // 推理档位试点（reasoning-profile 2026-08-27）：归一化语义判定启用 high；
+      // 仅 deepseek-v4* / glm 系 profile 实际生效，其余模型/omit 渠道自动落回现状
+      thinkingLevel: 'high',
+      providerType: resolution.channel?.provider_type,
     })
     if (normalization.action === 'out_of_scope' && normalization.outOfScope) {
       addScopeExclusion(input.project_id, normalization.outOfScope)

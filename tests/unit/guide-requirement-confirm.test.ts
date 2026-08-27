@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -131,7 +132,7 @@ describe('需求确认弹窗（confirm_requirements）', () => {
   })
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     vi.restoreAllMocks()
   })
 

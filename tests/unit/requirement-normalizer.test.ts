@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { mkdtempSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -5,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from '../../main/requirement-normalizer'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import type { SDKMessage } from '../../shared/types'
+import type { SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
 
 /**
  * 修改诉求归一化（2026-08-16 复测 43b47a47：口语碎片原样入库污染 PRD 背板）。
@@ -29,13 +31,53 @@ function makeQuery(text: string) {
   }
 }
 
+/** 捕获 query 收到的 options（透传断言用） */
+function captureQuery(text: string): { query: SDKQuery; captured: Array<Record<string, unknown>> } {
+  const captured: Array<Record<string, unknown>> = []
+  const query: SDKQuery = async function* (_prompt: string, options: SDKQueryOptions) {
+    captured.push(options as unknown as Record<string, unknown>)
+    yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }
+    yield { type: 'result', subtype: 'success' }
+  }
+  return { query, captured }
+}
+
 const originalPromaHome = process.env.PROMA_HOME
 
 afterEach(() => {
-  process.env.PROMA_HOME = originalPromaHome
+  restorePromaHome(originalPromaHome)
 })
 
 describe('requirement-normalizer', () => {
+  it('[S4-REASON-017] thinkingLevel/providerType 透传到 query options（迭代修改门试点）', async () => {
+    const { query, captured } = captureQuery('{"action":"skip"}')
+    await normalizeRequirementUpdate({
+      session_id: 's',
+      existing: EXISTING,
+      modification: '重新生成',
+      query,
+      env: ENV,
+      thinkingLevel: 'high',
+      providerType: 'deepseek',
+    })
+    expect(captured).toHaveLength(1)
+    expect(captured[0].thinkingLevel).toBe('high')
+    expect(captured[0].providerType).toBe('deepseek')
+  })
+
+  it('[S4-REASON-018] 缺省不传 thinkingLevel → options 不带该字段（零回归契约）', async () => {
+    const { query, captured } = captureQuery('{"action":"skip"}')
+    await normalizeRequirementUpdate({
+      session_id: 's',
+      existing: EXISTING,
+      modification: '重新生成',
+      query,
+      env: ENV,
+    })
+    expect(captured[0].thinkingLevel).toBeUndefined()
+    expect(captured[0].providerType).toBeUndefined()
+  })
+
   it('revise：修正类诉求改写目标功能项，不再追加碎片', async () => {
     const decision = await normalizeRequirementUpdate({
       session_id: 's',

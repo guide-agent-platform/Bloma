@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -34,7 +35,7 @@ describe('ipc confirm-sketch → runMvpTask wiring (A2-14b)', () => {
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     resetSDKQueryForTests()
     runMvpTaskMock.mockClear()
     runIterationTaskMock.mockClear()
@@ -77,7 +78,7 @@ describe('ipc submit-correction → runIterationTask wiring（Sprint 3 纠错主
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     resetSDKQueryForTests()
     runIterationTaskMock.mockClear()
   })
@@ -144,7 +145,7 @@ describe('ipc document:sync checkpoint 白名单（GA-03 加固，2026-08-27）'
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   function captureHandlers(): Map<string, (_event: unknown, payload: unknown) => unknown> {

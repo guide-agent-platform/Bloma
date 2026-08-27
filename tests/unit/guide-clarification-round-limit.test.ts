@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -76,7 +77,7 @@ describe('countTrailingClarificationRounds 尾随澄清轮计数', () => {
   })
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   function writeSession(lines: unknown[]): void {
@@ -162,7 +163,7 @@ describe('引导对话 · 连续澄清熔断', () => {
   })
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     vi.restoreAllMocks()
   })
 

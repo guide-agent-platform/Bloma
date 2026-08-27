@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -39,7 +40,7 @@ describe('提示词外置覆盖——四引擎接入（TDD）', () => {
 
   afterEach(() => {
     if (home) rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     home = undefined
   })
 

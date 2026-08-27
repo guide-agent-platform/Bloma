@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { EventEmitter } from 'node:events'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -68,7 +69,7 @@ describe('后台链路会话索引活跃刷新（缺陷④）', () => {
   })
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     clearSandboxRuntimeForTests()
     setSnapshotCaptureProviderForTests()
     setProgrammingEventPublisher(() => undefined)

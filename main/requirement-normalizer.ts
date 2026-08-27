@@ -1,4 +1,5 @@
 import type { SDKQuery } from './orchestrator'
+import type { ThinkingLevel } from '../shared/reasoning-profile'
 import { loadPromptOverride } from './prompt-config'
 import type { SketchRequirement } from './sketch-engine'
 import { requirementAssertions } from './sketch-engine'
@@ -35,6 +36,10 @@ export interface NormalizeRequirementUpdateInput {
   env: Record<string, string> | undefined
   signal?: AbortSignal
   maxTokens?: number
+  /** 推理档位（reasoning-profile 2026-08-27）：归一化判定类任务可显式传入；缺省 off = 现状 */
+  thinkingLevel?: ThinkingLevel
+  /** 渠道 providerType（omit 黑名单判断；不传 = 不做 omit） */
+  providerType?: string
 }
 
 export type RequirementNormalizationAction = 'revise' | 'append' | 'skip' | 'out_of_scope'
@@ -101,6 +106,9 @@ export async function normalizeRequirementUpdate(
       maxTokens: input.maxTokens ?? DEFAULT_MAX_TOKENS,
       // §7.7 类别温度：归一化判定要稳、可复现（0.1）
       temperature: categoryTemperature('prd'),
+      // 推理档位试点：判定/校验类任务启用（仅 deepseek-v4* / glm 系 profile 生效，其余自动落回现状）
+      thinkingLevel: input.thinkingLevel,
+      providerType: input.providerType,
     })
     for await (const sdkMessage of stream) {
       if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue

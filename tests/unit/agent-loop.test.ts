@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -94,7 +95,7 @@ describe('runAgentLoop（PR2 L1）', () => {
     process.env.PROMA_HOME = home
   })
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   it('模型只回文本（无 tool_use）→ completed，单轮收尾', async () => {
@@ -296,7 +297,7 @@ describe('M4-C tool_call_completed detail 白名单透传', () => {
     process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-detail-'))
   })
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   it('委派工具返回结构化 detail：白名单字段进事件，长文本 result_summary 丢弃', async () => {

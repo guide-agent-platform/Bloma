@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -47,7 +48,7 @@ describe('SessionService 会话索引', () => {
 
       expect(findProject(project.project_id).last_session_id).toBe('session-new')
     } finally {
-      process.env.PROMA_HOME = originalHome
+      restorePromaHome(originalHome)
     }
   })
 
@@ -65,7 +66,7 @@ describe('SessionService 会话索引', () => {
       expect(record.updated_at >= record.created_at).toBe(true)
       expect(record.project_id).toBe('project-b')
     } finally {
-      process.env.PROMA_HOME = originalHome
+      restorePromaHome(originalHome)
     }
   })
 
@@ -77,7 +78,7 @@ describe('SessionService 会话索引', () => {
       const sessions = listSessions({ request_id: 'req-1' }).sessions
       expect(sessions).toHaveLength(1)
     } finally {
-      process.env.PROMA_HOME = originalHome
+      restorePromaHome(originalHome)
     }
   })
 
@@ -98,7 +99,7 @@ describe('SessionService 会话索引', () => {
       const all = listSessions({ request_id: 'req-2' }).sessions
       expect(all.map((s) => s.session_id)).toEqual(['session-old', 'session-new'])
     } finally {
-      process.env.PROMA_HOME = originalHome
+      restorePromaHome(originalHome)
     }
   })
 })
@@ -125,7 +126,7 @@ describe('SessionService 清理孤儿会话（U11）', () => {
       expect(ids).not.toContain('session-orphan')
       expect(existsSync(getAgentSessionPath('session-orphan'))).toBe(false)
     } finally {
-      process.env.PROMA_HOME = originalHome
+      restorePromaHome(originalHome)
     }
   })
 })
@@ -149,7 +150,7 @@ describe('SessionService 历史消息读取', () => {
       expect(result.messages.every((m) => !m.content.some((b) => b.text?.startsWith('[terminal]')))).toBe(true)
       expect(result.session.session_id).toBe('session-load')
     } finally {
-      process.env.PROMA_HOME = originalHome
+      restorePromaHome(originalHome)
     }
   })
 
@@ -171,7 +172,7 @@ describe('SessionService 历史消息读取', () => {
       expect(result.messages).toHaveLength(3)
       expect(result.messages.at(-1)?.content[0].text).toBe('消息9')
     } finally {
-      process.env.PROMA_HOME = originalHome
+      restorePromaHome(originalHome)
     }
   })
 
@@ -181,7 +182,7 @@ describe('SessionService 历史消息读取', () => {
     try {
       expect(() => loadMessages({ request_id: 'req-1', session_id: 'ghost' })).toThrow('SESSION_NOT_FOUND')
     } finally {
-      process.env.PROMA_HOME = originalHome
+      restorePromaHome(originalHome)
     }
   })
 
@@ -198,7 +199,7 @@ describe('SessionService 历史消息读取', () => {
       expect(result.session.session_id).toBe('legacy-session')
       expect(result.session.project_id).toBe('')
     } finally {
-      process.env.PROMA_HOME = originalHome
+      restorePromaHome(originalHome)
     }
   })
 })
@@ -213,7 +214,7 @@ describe('SessionService readPrimaryIntent 主题锚点（D4 无实质内容豁�
       writeSessionJsonl(home, 'session-intent', lines)
       return readPrimaryIntent('session-intent')
     } finally {
-      process.env.PROMA_HOME = originalHome
+      restorePromaHome(originalHome)
     }
   }
 
@@ -246,7 +247,7 @@ describe('SessionService readPrimaryIntent 主题锚点（D4 无实质内容豁�
     try {
       expect(readPrimaryIntent('no-such-session')).toBeUndefined()
     } finally {
-      process.env.PROMA_HOME = originalHome
+      restorePromaHome(originalHome)
     }
   })
 })

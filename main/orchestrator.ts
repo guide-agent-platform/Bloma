@@ -13,6 +13,7 @@ import type {
 } from '../shared/types'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
+import { buildThinkingFragment, type ThinkingLevel } from '../shared/reasoning-profile'
 export { buildSdkEnv } from './channel-manager'
 import {
   extractErrorStatusCode,
@@ -90,6 +91,10 @@ export interface SDKQueryOptions {
   temperature?: number
   /** 工具定义（Agent Loop）：不传 = 现状，请求体不携带 tools 字段 */
   tools?: ToolDefinition[]
+  /** 推理档位（reasoning-profile 2026-08-27）：仅判定/校验类任务显式传入；缺省 off = 现状（thinking:disabled） */
+  thinkingLevel?: ThinkingLevel
+  /** 渠道 providerType（omit 黑名单判断用；不传 = 不做 omit，off 档下与现状一致） */
+  providerType?: string
 }
 
 export type SDKQuery = (prompt: string, options: SDKQueryOptions) => AsyncIterable<SDKMessage>
@@ -846,10 +851,20 @@ export async function* anthropicMessagesQuery(prompt: string, options: SDKQueryO
     const budget = Math.min(1024, Math.floor(maxTokens / 2))
     body.thinking = { type: 'enabled', budget_tokens: Math.max(256, budget) }
   } else {
-    // 显式禁思考（2026-08-16 线上案例：MiniMax-M3 等思考型渠道默认输出 thinking_delta，
-    // 且可能把 max_tokens 预算全部耗在思考上导致正文为零——草图首试 56.5s 零字符纯浪费）。
-    // 本查询只透传 text_delta，思考对产物零贡献，禁掉是最优解。
-    body.thinking = { type: 'disabled' }
+    // 推理档位（reasoning-profile 2026-08-27）：判定/校验类任务（judge 等）可经
+    // options.thinkingLevel 启用 DeepSeek v4 / GLM 系思考（output_config.effort 独立
+    // 深度控制，不吞 max_tokens）；缺省 off = 显式禁思考（2026-08-16 线上案例：
+    // MiniMax-M3 等思考型渠道把 max_tokens 全耗在思考上，草图首试 56.5s 零字符）。
+    // omit 渠道（Token Plan 类连 disabled 都 400）→ 完全不发字段，消灭 400+重试往返。
+    const fragment = buildThinkingFragment(
+      model,
+      options.providerType,
+      options.thinkingLevel ?? 'off',
+    )
+    if (!fragment.omit) {
+      if (fragment.thinking) body.thinking = fragment.thinking
+      if (fragment.output_config) body.output_config = fragment.output_config
+    }
   }
 
   const requestInit = (): RequestInit => ({
@@ -873,14 +888,18 @@ export async function* anthropicMessagesQuery(prompt: string, options: SDKQueryO
     } catch {
       detail = ''
     }
-    // 兼容性降级：个别渠道/模型不支持显式 thinking 参数（400 且错误提到 thinking/reasoning）——
-    // 移除该参数重试一次。思考开关是尽力而为的优化，绝不因它阻塞生成。
+    // 兼容性降级：个别渠道/模型不支持显式 thinking 参数（400 且错误提到 thinking/reasoning/
+    // effort/output_config）——移除 thinking 与 output_config 重试一次。覆盖 disabled 档
+    // （2026-08-16 前现状）与 enabled+output_config 档（reasoning-profile 试点，审查 P2-⑥：
+    // glm-5.3 anthropic 端点对 output_config.effort 的接受度未实测）。思考开关是尽力而为
+    // 的优化，绝不因它阻塞生成。
     const thinkingRejected = response.status === 400
-      && (body.thinking as { type?: string } | undefined)?.type === 'disabled'
-      && /thinking|reasoning/i.test(detail)
+      && (body.thinking as { type?: string } | undefined) !== undefined
+      && /thinking|reasoning|effort|output_config/i.test(detail)
     if (thinkingRejected) {
-      console.warn(`[anthropicMessagesQuery] 渠道拒绝 thinking:disabled（${detail}），移除该参数后重试一次`)
+      console.warn(`[anthropicMessagesQuery] 渠道拒绝 thinking 参数（${detail}），移除该参数后重试一次`)
       delete body.thinking
+      delete body.output_config
       response = await fetch(`${baseUrl}/v1/messages`, requestInit())
     } else {
       console.error(

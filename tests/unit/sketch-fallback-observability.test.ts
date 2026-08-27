@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { EventEmitter } from 'node:events'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -64,7 +65,7 @@ describe('sketch template fallback observability', () => {
   const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     clearSandboxRuntimeForTests()
     setSnapshotCaptureProviderForTests()
     setProgrammingEventPublisher(() => undefined)

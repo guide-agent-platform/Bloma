@@ -1,4 +1,5 @@
-﻿import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+﻿import { restorePromaHome } from '../support/proma-home-guard'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -41,7 +42,7 @@ describe('AgentOrchestrator', () => {
   })
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     setAgentStreamPublisher(() => undefined)
     setRetrySleepForTests(async () => undefined)
     setSDKQueryForTests(defaultTestQuery)
@@ -210,7 +211,7 @@ describe('AgentOrchestrator · A2-14a 真实模型流式 + 多轮历史', () => 
   })
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     setAgentStreamPublisher(() => undefined)
     setRetrySleepForTests(async () => undefined)
     setSDKQueryForTests(defaultTestQuery)

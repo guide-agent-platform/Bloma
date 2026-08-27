@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../../support/proma-home-guard'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -14,7 +15,7 @@ describe('Sprint 0 Proma core security regression', () => {
   let home: string | undefined
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     if (home) rmSync(home, { recursive: true, force: true })
     home = undefined
   })

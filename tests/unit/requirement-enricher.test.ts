@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -28,7 +29,7 @@ let home: string | undefined
 
 afterEach(() => {
   if (home) rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
-  process.env.PROMA_HOME = originalPromaHome
+  restorePromaHome(originalPromaHome)
   home = undefined
 })
 

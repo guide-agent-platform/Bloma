@@ -200,3 +200,50 @@ describe('anthropicMessagesQuery tool use 解析（PR1）', () => {
     ])
   })
 })
+
+describe('anthropicMessagesQuery 推理档位（reasoning-profile 2026-08-27）', () => {
+  it('[S4-REASON-019] thinkingLevel=max + deepseek-v4-flash → thinking:enabled + output_config.effort=max', async () => {
+    stubFetchWithResponse(sseResponse([{ type: 'message_stop' }]))
+    await collect(anthropicMessagesQuery('判定', baseOptions({
+      env: {
+        PATH: process.env.PATH ?? 'C:\\',
+        ANTHROPIC_AUTH_TOKEN: 'test-key',
+        ANTHROPIC_BASE_URL: 'https://mock.example',
+        ANTHROPIC_MODEL: 'deepseek-v4-flash',
+      },
+      thinkingLevel: 'max',
+      providerType: 'deepseek',
+    })))
+
+    const body = lastRequestBody()
+    expect(body.thinking).toEqual({ type: 'enabled' })
+    expect(body.output_config).toEqual({ effort: 'max' })
+  })
+
+  it('[S4-REASON-020] omit 渠道（qwen-token-plan）+ thinkingLevel=max → 请求体无 thinking 字段（免 400 往返）', async () => {
+    stubFetchWithResponse(sseResponse([{ type: 'message_stop' }]))
+    await collect(anthropicMessagesQuery('判定', baseOptions({
+      env: {
+        PATH: process.env.PATH ?? 'C:\\',
+        ANTHROPIC_AUTH_TOKEN: 'test-key',
+        ANTHROPIC_BASE_URL: 'https://mock.example',
+        ANTHROPIC_MODEL: 'qwen3.8-max-preview',
+      },
+      thinkingLevel: 'max',
+      providerType: 'qwen-token-plan',
+    })))
+
+    const body = lastRequestBody()
+    expect(body.thinking).toBeUndefined()
+    expect(body.output_config).toBeUndefined()
+  })
+
+  it('[S4-REASON-021] 缺省（不传 thinkingLevel）→ thinking:disabled（零回归契约，与现状逐字节一致）', async () => {
+    stubFetchWithResponse(sseResponse([{ type: 'message_stop' }]))
+    await collect(anthropicMessagesQuery('判定', baseOptions()))
+
+    const body = lastRequestBody()
+    expect(body.thinking).toEqual({ type: 'disabled' })
+    expect(body.output_config).toBeUndefined()
+  })
+})

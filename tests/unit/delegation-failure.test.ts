@@ -1,4 +1,5 @@
-﻿import { mkdtempSync } from 'node:fs'
+﻿import { restorePromaHome } from '../support/proma-home-guard'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -59,7 +60,7 @@ describe('delegation_failed：AbortError 归一化（H1，独立 mock 档）', (
       if (record.status === 'running') record.abort.abort()
     }
     unregisterParentLoopContext(parentSessionId)
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   function registerParentCapturing(query: SDKQuery): Array<{ type: string; payload: Record<string, unknown> }> {

@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../../support/proma-home-guard'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -28,7 +29,7 @@ describe('Sprint 2 MVP-Judge regression gate', () => {
       const { rmSync } = require('node:fs')
       rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     }
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     home = undefined
     setProgrammingEventPublisher(() => undefined)
   })

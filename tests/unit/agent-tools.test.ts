@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { EventEmitter } from 'node:events'
 import type { ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
@@ -65,7 +66,7 @@ describe('agent-tools（PR2 L2）', () => {
     setBrowserGwtDisabledForTests(true)
   })
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     setJsSyntaxCheckerForTests(undefined)
     setBrowserGwtDisabledForTests(false)
     clearSandboxRuntimeForTests()

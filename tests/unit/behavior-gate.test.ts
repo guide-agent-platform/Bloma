@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -88,7 +89,7 @@ describe('裁判行为门禁（P3：车不位移必退回）', () => {
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   /** 构造「车只旋转不位移」的产物（2026-08-16 复测 43b47a47 实锤形态）。 */
@@ -175,7 +176,7 @@ describe('GWT 静态兜底 per-assertion（无浏览器环境）', () => {
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     // 本 describe 验证静态兜底路径：固定禁用浏览器探针（模拟 chromium 不可用）
     setBrowserGwtDisabledForTests(false)
   })
@@ -255,7 +256,7 @@ describe('GWT 骨架从行为断言派生 + 精致度软约束', () => {
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   it('feature 文件：每条断言一个场景（When=触发、Then=效果），默认断言落存在性骨架', () => {

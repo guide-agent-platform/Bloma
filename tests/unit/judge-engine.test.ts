@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -10,7 +11,7 @@ describe('JudgeEngine (A2-10)', () => {
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   it('passes when PRD is present, every feature has a GWT scenario, and entries exist', () => {
@@ -132,7 +133,7 @@ describe('JudgeEngine loop-aware（M4-B：异常终止态不凭产物放行）',
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   /** 备好「产物完美」的盘面：PRD 背板 + GWT 全覆盖 + 原文匹配入口，无 loop 时必 pass。 */

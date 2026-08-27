@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../../support/proma-home-guard'
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -37,7 +38,7 @@ describe('Sprint 1 sketch and upgrade regression', () => {
     if (activeProjectId) stopSandbox({ request_id: 'cleanup', project_id: activeProjectId })
     clearSandboxRuntimeForTests()
     if (activePreviewUrl) await waitUntilStopped(activePreviewUrl)
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     if (home) rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     home = undefined
     activeProjectId = undefined
