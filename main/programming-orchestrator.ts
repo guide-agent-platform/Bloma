@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { AgentEvent, AgentLoopJudgeMetadata, AgentSendMessageInput, Channel, ChannelModel, MessageContentBlock, Project, ProjectMode, Snapshot, TemplateType } from '../shared/types'
+import type { AgentEvent, AgentLoopJudgeMetadata, AgentSendMessageInput, Channel, ChannelModel, DocumentSyncResult, MessageContentBlock, Project, ProjectMode, Snapshot, TemplateType } from '../shared/types'
 import { getAgentSessionPath, getDocumentsDir } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
 import { buildPrdBackplane, readPrdBackplane, readUxContractSketch, syncDocuments, writeSecurityScanDocument } from './document-engine'
@@ -1336,6 +1336,25 @@ export interface IterationTaskInput {
 }
 
 /**
+ * 迭代收尾 changelog 触发（GA-03 后半 2026-08-27，PRD §7.1「每轮迭代结束后追加 Changelog」）。
+ *
+ * 同步执行、失败静默降级（同 distillProjectMemorySafely 的降级原则）：文档同步是附属产物，
+ * 失败绝不阻断迭代成功收尾；熔断/取消路径不调用本函数（调用位置在 runIterationTask 成功尾）。
+ * 返回降级结果（当前无调用方消费返回值，保留以便未来接决策日志）。
+ */
+export function syncIterationCompleted(input: {
+  request_id: string
+  session_id: string
+  project_id: string
+}): DocumentSyncResult {
+  try {
+    return syncDocuments({ ...input, checkpoint: 'iteration_completed' })
+  } catch {
+    return { documents: [], stale_documents: [] }
+  }
+}
+
+/**
  * runIterationTask — 已生成完成后用户提出修改诉求（打字或点选纠错）时，重新生成一版 MVP。
  *
  * 打通 Sprint 3「纠错 → 重新生成 → 迭代」主线：此前 ready 护栏把修改请求一律挡回固定文案，
@@ -1381,6 +1400,13 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
       session_id: input.session_id,
       channel_id: input.channel_id,
       query: input.query,
+    })
+    // GA-03（PRD §7.1 触发节点「每轮迭代结束后」）：追加 Changelog，合并本轮功能项
+    // 清单；fire-and-forget——写盘失败静默降级，不阻断迭代成功收尾
+    syncIterationCompleted({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
     })
     return mvp
   } catch (error) {

@@ -139,3 +139,63 @@ describe('ipc submit-correction → runIterationTask wiring（Sprint 3 纠错主
     expect(runIterationTaskMock).not.toHaveBeenCalled()
   })
 })
+
+describe('ipc document:sync checkpoint 白名单（GA-03 加固，2026-08-27）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+  })
+
+  function captureHandlers(): Map<string, (_event: unknown, payload: unknown) => unknown> {
+    const handlers = new Map<string, (_event: unknown, payload: unknown) => unknown>()
+    registerIpcHandlers(
+      { handle: (channel: string, handler: (_event: unknown, payload: unknown) => unknown) => handlers.set(channel, handler) } as never,
+      { webContents: { send: () => undefined } } as never,
+    )
+    return handlers
+  }
+
+  it('[S4-DOCUMENT-005] iteration_completed 为内部检查点，renderer 触发被拒绝', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ipc-doc-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+
+    const handlers = captureHandlers()
+    const docSync = handlers.get(IPC_CHANNELS.DOCUMENT_SYNC)
+    const result = await docSync!({}, {
+      request_id: 'req-doc',
+      project_id: project.project_id,
+      session_id: 'session-1',
+      checkpoint: 'iteration_completed',
+    })
+    expect(result).toMatchObject({ ok: false })
+    expect(JSON.stringify(result)).toContain('DOCUMENT_SYNC_FAILED')
+    expect(JSON.stringify(result)).toContain('internal-only')
+  })
+
+  it('[S4-DOCUMENT-006] mode_upgraded 同样被拒绝；sketch_confirmed 等文档检查点仍可同步', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ipc-doc-2-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+
+    const handlers = captureHandlers()
+    const docSync = handlers.get(IPC_CHANNELS.DOCUMENT_SYNC)
+    const modeResult = await docSync!({}, {
+      request_id: 'req-doc-mode',
+      project_id: project.project_id,
+      session_id: 'session-1',
+      checkpoint: 'mode_upgraded',
+    })
+    expect(JSON.stringify(modeResult)).toContain('DOCUMENT_SYNC_FAILED')
+
+    const sketchResult = await docSync!({}, {
+      request_id: 'req-doc-sketch',
+      project_id: project.project_id,
+      session_id: 'session-1',
+      checkpoint: 'sketch_confirmed',
+    })
+    expect(JSON.stringify(sketchResult)).not.toContain('DOCUMENT_SYNC_FAILED')
+    expect(JSON.stringify(sketchResult)).toContain('"ok":true')
+  })
+})

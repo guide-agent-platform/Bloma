@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import type { ChildProcess } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
@@ -13,7 +13,7 @@ import { createChannel } from '../../../main/channel-manager'
 import { setSafeStorageAdapter } from '../../../main/safe-storage'
 import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../../main/platform-services'
 import { setBrowserGwtDisabledForTests } from '../../../main/gwt-runner'
-import { getAnalyticsPath, getAgentSessionPath } from '../../../storage/config-paths'
+import { getAnalyticsPath, getAgentSessionPath, getDocumentsDir } from '../../../storage/config-paths'
 import { listDelegations } from '../../../main/agent-collaboration'
 import type { MessageContentBlock, SDKMessage } from '../../../shared/types'
 import type { SDKQuery, SDKQueryOptions } from '../../../main/orchestrator'
@@ -452,10 +452,94 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
       expect(findProject(project.project_id).test_repair_count ?? 0).toBe(0)
       // 回滚收尾：回到健康版本（ready），内容未丢失
       expect(findProject(project.project_id).current_stage).toBe('ready')
+      // 熔断路径不触发 changelog（GA-03：iteration_completed 仅在成功收尾触发）
+      expect(
+        existsSync(join(getDocumentsDir(project.workspace_slug, project.project_id), 'iteration_completed.md')),
+      ).toBe(false)
     } finally {
       server.close()
     }
   }, 20000)
+
+  it('迭代成功收尾 → iteration_completed changelog 落盘（GA-03，PRD §7.1 每轮迭代后追加）', async () => {
+    createChannel({
+      name: 'iter-changelog-channel',
+      provider_type: 'anthropic',
+      base_url: 'https://iter-changelog.example',
+      api_key: 'key-iter-changelog',
+      models: [{ id: 'm1', name: 'iter-changelog-model', enabled: true, supports_tools: true }],
+    })
+    const project = createProject({ request_id: 'req-acc-iter-ok', mode: 'quick', initial_message: '帮我做一个记账应用' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出', priority: 'P0' }])
+
+    const server = createServer((req, res) => {
+      const root = findProject(project.project_id).root_path
+      const path = req.url === '/' ? '/index.html' : (req.url ?? '/index.html')
+      try {
+        const content = readFileSync(join(root, path.replace(/^\//, '')), 'utf8')
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+        res.end(content)
+      } catch {
+        res.writeHead(404)
+        res.end('Not Found')
+      }
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+    setSandboxRuntimeForTests({
+      processFactory: () => fakeChild(),
+      portAllocator: async () => port,
+      healthCheck: async () => true,
+    })
+
+    try {
+      // 初始生成 → ready（loop 全链）
+      const firstQuery = scriptedQuery()
+      const mvp = await runMvpTask({
+        request_id: 'req-acc-iter-ok',
+        session_id: 'session-iter-ok',
+        project_id: project.project_id,
+        mode: 'quick',
+        query: firstQuery.query,
+      })
+      const firstGate = await runAgentLoopPostTesting({
+        request_id: 'req-acc-iter-ok',
+        session_id: 'session-iter-ok',
+        project_id: project.project_id,
+        mode: 'quick',
+        preview_url: mvp.preview_url,
+        loop: mvp.loop_result!,
+      })
+      expect(firstGate.verdict).toBe('ready')
+      expect(findProject(project.project_id).current_stage).toBe('ready')
+
+      // 迭代：重新生成一版 → 终验 → ready，收尾追加 changelog
+      const iterQuery = scriptedQuery()
+      await runIterationTask({
+        request_id: 'req-acc-iter-ok',
+        session_id: 'session-iter-ok',
+        project_id: project.project_id,
+        mode: 'quick',
+        prompt: '把导出报表改成按年汇总',
+        query: iterQuery.query,
+      })
+
+      const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+      const changelog = readFileSync(join(dir, 'iteration_completed.md'), 'utf8')
+      expect(changelog).toContain('变更记录')
+      expect(changelog).toContain('F-001')
+      expect(changelog).toContain('记录收入与支出')
+      // 本轮修改诉求并入功能项后也进入 changelog（合并本轮反馈）：锁定新增项 id F-002
+      expect(changelog).toContain('F-002')
+      expect(changelog).toContain('按年汇总')
+      // 时间戳：迭代完成时刻
+      expect(changelog).toMatch(/\d{4}-\d{2}-\d{2}/)
+      // 阶段如实收尾 ready
+      expect(findProject(project.project_id).current_stage).toBe('ready')
+    } finally {
+      server.close()
+    }
+  }, 25000)
 
   it('迭代中用户停止 → loop cancelled 即中止：不交付、不终验、不熔断、阶段回 ready（U5，2026-08-25 线上案例）', async () => {
     createChannel({
@@ -494,6 +578,10 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
     expect(events).not.toContain('error')
     // 迭代取消如实回 ready，阶段不滞留 iterating
     expect(findProject(project.project_id).current_stage).toBe('ready')
+    // 取消路径不触发 changelog（GA-03：iteration_completed 仅在成功收尾触发）
+    expect(
+      existsSync(join(getDocumentsDir(project.workspace_slug, project.project_id), 'iteration_completed.md')),
+    ).toBe(false)
   })
 
   it('能力位缺省 → 探测通过 → 走 loop；探测拒绝 → 如实抛错并落决策', async () => {

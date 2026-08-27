@@ -87,7 +87,7 @@ export function syncDocuments(input: DocumentSyncInput, backplaneOverride?: PrdB
       })
       break
     case 'iteration_completed':
-      files.push({ relativePath: 'iteration_completed.md', content: renderChangelog(), type: 'changelog' })
+      files.push({ relativePath: 'iteration_completed.md', content: renderChangelog(requirements), type: 'changelog' })
       break
     case 'mode_upgraded':
       files.push({ relativePath: 'mode_upgraded.md', content: renderModeUpgraded(project.name), type: 'user_story' })
@@ -445,13 +445,25 @@ ${refs}
 `
 }
 
-function renderChangelog(): string {
+/**
+ * 变更记录（GA-03 后半 2026-08-27）：记录迭代完成时间戳 + 当前功能项清单，
+ * 不再是静态占位——PRD §7.1「每轮迭代结束后追加 Changelog」。
+ * 空清单时输出「本轮无功能项变更」，不套用 PRD 草案的 F-001 默认回退（避免伪造变更记录）。
+ */
+function renderChangelog(requirements: SketchRequirement[]): string {
+  const items = requirements.length > 0 ? requirements : []
+  const body =
+    items.length > 0
+      ? `## 当前功能项清单
+
+${items.map((item) => `- ${item.id}：${item.description}`).join('\n')}
+`
+      : '- 本轮无功能项变更\n'
   return `# 变更记录
 
-> 一次迭代已完成。（checkpoint: iteration_completed）
+> 迭代完成时间：${new Date().toISOString()}（checkpoint: iteration_completed）
 
-- 快照已回滚/确认，项目进入新一轮迭代。
-`
+${body}`
 }
 
 function renderModeUpgraded(projectName: string): string {

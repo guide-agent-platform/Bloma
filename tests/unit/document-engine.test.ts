@@ -177,6 +177,69 @@ describe('DocumentEngine (A2-05)', () => {
     expect(feature1).toContain('验收要点')
   })
 
+  it('[S4-DOCUMENT-001] appends a changelog on iteration_completed with current feature set and timestamp', () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-doc-iter-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [
+      { id: 'F-001', description: '记录收入与支出' },
+      { id: 'F-002', description: '导出月度报表' },
+    ])
+
+    const result = syncDocuments({
+      request_id: 'req-iter',
+      session_id: 'session-1',
+      project_id: project.project_id,
+      checkpoint: 'iteration_completed',
+    })
+
+    const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+    const changelog = readFileSync(join(dir, 'iteration_completed.md'), 'utf8')
+    expect(changelog).toContain('变更记录')
+    expect(changelog).toContain('F-001')
+    expect(changelog).toContain('F-002')
+    // 合并本轮反馈：changelog 引用当前功能项清单（非静态占位）
+    expect(changelog).toContain('记录收入与支出')
+    expect(changelog).toContain('导出月度报表')
+    // 时间戳：changelog 记录迭代完成时刻
+    expect(changelog).toMatch(/\d{4}-\d{2}-\d{2}/)
+    expect(result.documents[0].type).toBe('changelog')
+    expect(result.documents[0].status).toBe('synced')
+    expect(listDocuments(project.project_id).some((d) => d.type === 'changelog')).toBe(true)
+
+    // 幂等/覆盖语义：再次同步同检查点 → 旧 changelog 标记 stale，仍只保留一份 synced
+    const second = syncDocuments({
+      request_id: 'req-iter-2',
+      session_id: 'session-1',
+      project_id: project.project_id,
+      checkpoint: 'iteration_completed',
+    })
+    expect(second.stale_documents.length).toBe(1)
+    const synced = listDocuments(project.project_id).filter((d) => d.type === 'changelog')
+    expect(synced.filter((d) => d.status === 'synced').length).toBe(1)
+  })
+
+  it('[S4-DOCUMENT-004] 无功能项时 changelog 不伪造默认项，输出「本轮无功能项变更」', () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-doc-iter-empty-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    // 不 recordSketchGenerated：需求清单为空
+
+    syncDocuments({
+      request_id: 'req-iter-empty',
+      session_id: 'session-1',
+      project_id: project.project_id,
+      checkpoint: 'iteration_completed',
+    })
+
+    const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+    const changelog = readFileSync(join(dir, 'iteration_completed.md'), 'utf8')
+    expect(changelog).toContain('变更记录')
+    // 不套用 PRD 草案默认回退（F-001 是用户从未提过的占位项）
+    expect(changelog).not.toContain('F-001')
+    expect(changelog).toContain('本轮无功能项变更')
+  })
+
   it('mounts a test report reference (body written by GWT execution) on mvp_tested', () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-doc-'))
     process.env.PROMA_HOME = home

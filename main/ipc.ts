@@ -604,6 +604,11 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
   ipcMain.handle(IPC_CHANNELS.DOCUMENT_SYNC, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<DocumentSyncInput>(payload, ['project_id', 'session_id', 'checkpoint'])
+      // 主进程内部生命周期节点（迭代收尾 / 模式升级）不允许 renderer 主动触发：
+      // 防伪造 changelog/模式文档（2026-08-27 多角色审查 P2-IPC）。
+      if (input.checkpoint === 'iteration_completed' || input.checkpoint === 'mode_upgraded') {
+        throw new Error(`DOCUMENT_SYNC_FAILED: checkpoint ${input.checkpoint} is internal-only`)
+      }
       return syncDocuments(input)
     })
   })
