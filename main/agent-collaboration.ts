@@ -238,6 +238,21 @@ function settleChildLoopError(record: DelegationRecord, error: unknown): void {
   publishDelegationEvent(record.parentSessionId, 'delegation_failed', record)
 }
 
+/** 子 agent 事件白名单：仅委派生命周期与工具行事件可进入父会话事件流。
+ * 子 agent 的 message_delta / message_completed 是内部旁白（审查六维分析、探索过程
+ * 叙述），进入主聊天流会在流式显示后被终态固化清除——用户看到「输出了又消失且
+ * 无记录」（2026-08-27 线上案例 ba16fd1a）。协作可视化由 delegation_* 生命周期
+ * 胶囊 + tool_call_completed（detail 白名单，陷阱 35）承担，聊天类事件一律拦截。 */
+const CHILD_LOOP_ALLOWED_EVENT_TYPES = new Set<AgentEvent['type']>([
+  'delegation_started',
+  'delegation_completed',
+  'delegation_failed',
+  'delegation_cancelled',
+  'delegation_question',
+  'tool_call_started',
+  'tool_call_completed',
+])
+
 /** 子 agent 循环：复用 runAgentLoop，独立 sessionId/requestId，role 裁剪工具集。 */
 async function runChildLoop(opts: {
   parent: ToolContext
@@ -264,7 +279,10 @@ async function runChildLoop(opts: {
     delegationDepth: parent.state.delegation_depth + 1,
     temperature: parentCtx.temperature,
     signal: record.abort.signal,
-    publish: parentCtx.publish,
+    // 子 agent 聊天类事件（message_delta 等）不进父会话聊天流（见白名单注释）
+    publish: (type, payload) => {
+      if (CHILD_LOOP_ALLOWED_EVENT_TYPES.has(type)) parentCtx.publish(type, payload)
+    },
     onTurn: parentCtx.onChildTurn
       ? (info) => parentCtx.onChildTurn!(info, { sessionId: record.childSessionId, requestId: childRequestId, role })
       : undefined,

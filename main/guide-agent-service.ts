@@ -324,8 +324,16 @@ export async function handleGuideMessage(
     return
   }
   if (prdReviewDecision === 'supplement') {
-    consumePrdReviewSupplement(input)
-    const hint = '好的，你想补充或修改哪里？直接打字告诉我就行。'
+    const pendingSupplement = consumePrdReviewSupplement(input)
+    // 提示必须带上审查发现的问题清单（用户点「我来补充说明」的动机就是回应这些问题；
+    // 空泛提示会让用户不知道该补什么，2026-08-27 线上案例）
+    const issueList = (pendingSupplement?.issues ?? [])
+      .filter((issue) => issue.severity === 'blocking' || issue.severity === 'major')
+      .slice(0, 3)
+      .map((issue, index) => `${index + 1}. ${issue.claim}`)
+    const hint = issueList.length
+      ? `好的，裁判发现的问题是：\n${issueList.join('\n')}\n你想补充或澄清哪一条？直接打字告诉我就行，我会修订 PRD 后再请你确认。`
+      : '好的，你想补充或修改哪里？直接打字告诉我就行，我会修订 PRD 后再请你确认。'
     persistAssistant?.(hint)
     publish(makeGuideEvent(input, 'message_delta', { text: hint }))
     publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))

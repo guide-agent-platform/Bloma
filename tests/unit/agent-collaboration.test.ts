@@ -634,6 +634,23 @@ describe('M4-C 委派生命周期事件（delegation_started/completed/failed/ca
     const completed = events.find((event) => event.type === 'delegation_completed')
     expect(completed?.payload.status).toBe('completed')
   })
+
+  it('子 agent 旁白不进父事件流（白名单拦截 message_delta/completed，2026-08-27 线上案例 ba16fd1a）', async () => {
+    // 线上案例：审查委派子 agent 的六维分析旁白被全量转发进主聊天流，流式显示后
+    // 随终态固化清除、永不落盘——用户看到「思考过程输出了又消失且无记录」。
+    // 修复：runChildLoop 事件白名单，仅委派生命周期与工具行事件可进入父事件流。
+    const events = registerParentCapturing(oneShotQuery('这是子 agent 的内部旁白，不该出现在父聊天流'))
+    const created = startDelegation(parentContext(), { task: '内部审查', role: 'research' })
+    await findDelegation(parentSessionId, created.delegation_id)!.completion
+
+    // 聊天类事件一律拦截：旁白与流式收尾都不进父事件流
+    expect(events.some((event) => event.type === 'message_delta')).toBe(false)
+    expect(events.some((event) => event.type === 'message_completed')).toBe(false)
+    expect(events.some((event) => event.type === 'error')).toBe(false)
+    // 协作可视化链路保持：生命周期 + 工具行事件照常透传
+    expect(events.some((event) => event.type === 'delegation_started')).toBe(true)
+    expect(events.some((event) => event.type === 'delegation_completed')).toBe(true)
+  })
 })
 
 describe('审计修复回归（审计报告 2026-08-25：P1-1/P1-2/P2-4/P2-5/P2-6/P3-7）', () => {
