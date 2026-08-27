@@ -49,7 +49,13 @@ describe('Local-First storage', () => {
     expect(process.env.PROMA_HOME).toBe('undefined')
   })
 
+  it('裸 teardown 若写成字符串 "null" 同样会被 guard 归位', () => {
+    process.env.PROMA_HOME = null as unknown as string
+    expect(process.env.PROMA_HOME).toBe('null')
+  })
+
   it('全局 guard 在下个用例开始前归位，污染不跨用例传播', () => {
     expect(process.env.PROMA_HOME).not.toBe('undefined')
+    expect(process.env.PROMA_HOME).not.toBe('null')
   })
 })

@@ -33,6 +33,18 @@ describe('PROMA_HOME 污染防御（字符串 "undefined"）', () => {
     expect(join(home, 'agent-sessions')).not.toMatch(/^undefined[\\/]/)
   })
 
+  it('[S0-STORE-007] 污染变体统一防御：null/空串/纯空格/带空格变体均回退主目录（参数化）', () => {
+    // 与 product 层 getPromaHome 的 trim 后拒 "undefined"/"null"/空串 语义一一对应
+    const variants = ['null', '', '   ', ' undefined ', ' null ']
+    for (const polluted of variants) {
+      process.env.PROMA_HOME = polluted
+      const home = getPromaHome()
+      expect(home, `PROMA_HOME=${JSON.stringify(polluted)}`).not.toBe(polluted)
+      expect(home, `PROMA_HOME=${JSON.stringify(polluted)}`).toContain('.proma')
+      expect(join(home, 'agent-sessions')).not.toMatch(/^undefined[\\/]/)
+    }
+  })
+
   it('[S0-STORE-007] getAgentSessionPath 在污染时不产生 cwd 下的相对 "undefined" 会话路径', () => {
     process.env.PROMA_HOME = 'undefined'
     // 纯路径断言，不调用 getAgentSessionPath（避免触发 ensureDir 在真实 ~/.proma 建目录的副作用）

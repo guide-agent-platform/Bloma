@@ -12,7 +12,11 @@ import { afterEach, beforeEach } from 'vitest'
  * after 钩子最后执行，即排在各测试文件自己的 teardown 之后）。
  */
 function clearPollutedPromaHome(): void {
-  if (process.env.PROMA_HOME === 'undefined') delete process.env.PROMA_HOME
+  const env = process.env.PROMA_HOME
+  // 与 storage/config-paths.ts getPromaHome() 的防御语义对齐：
+  // trim 后为 "undefined"/"null"/空串 的污染值一律删除，避免相对路径读写落到 cwd。
+  const trimmed = env ? env.trim() : ''
+  if (!trimmed || trimmed === 'undefined' || trimmed === 'null') delete process.env.PROMA_HOME
 }
 
 beforeEach(clearPollutedPromaHome)
