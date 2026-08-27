@@ -3,7 +3,14 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 export function getPromaHome(): string {
-  return process.env.PROMA_HOME || join(homedir(), '.proma')
+  const env = process.env.PROMA_HOME
+  // 防御 PROMA_HOME 被污染为字符串 "undefined"/"null"（Node 中 process.env.X = undefined/null
+  // 会强制转成字符串）：此时若直接返回，join 会得到相对路径 `undefined/...`，mkdir/写入落到
+  // cwd（项目根）下，产生 `./undefined/agent-sessions/` 等污染目录。统一 trim 后校验，
+  // 带空格变体与正常值也按 trim 后语义处理。
+  const trimmed = env ? env.trim() : ''
+  if (trimmed && trimmed !== 'undefined' && trimmed !== 'null') return trimmed
+  return join(homedir(), '.proma')
 }
 
 export function ensureDir(path: string): string {
