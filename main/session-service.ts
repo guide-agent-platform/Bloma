@@ -13,7 +13,8 @@
  * 对齐：shared/types.ts §6.5、DOC-3.4 data-model.md §5 Session / §6 Message
  */
 
-import { existsSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { rmSyncWithRetry } from './fs-retry'
 import type {
   AgentListSessionsInput,
   AgentListSessionsResult,
@@ -82,7 +83,7 @@ export function cleanOrphanSessions(): SessionCleanOrphansResult {
   const orphans = index.sessions.filter((item) => !validIds.has(item.project_id))
   for (const orphan of orphans) {
     const jsonl = getAgentSessionPath(orphan.session_id)
-    if (existsSync(jsonl)) rmSync(jsonl, { force: true })
+    if (existsSync(jsonl)) rmSyncWithRetry(jsonl, { force: true })
   }
   index.sessions = index.sessions.filter((item) => validIds.has(item.project_id))
   writeSessions(index)

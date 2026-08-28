@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
+import { rmSyncWithRetry } from './fs-retry'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import type {
   ConfirmSketchInput,
@@ -341,7 +342,7 @@ function removeProjectSessions(projectId: string): void {
   writeJsonFile(sessionsPath, index)
   for (const session of matched) {
     const jsonl = getAgentSessionPath(session.session_id)
-    if (existsSync(jsonl)) rmSync(jsonl, { force: true })
+    if (existsSync(jsonl)) rmSyncWithRetry(jsonl, { force: true })
   }
 }
 
@@ -355,7 +356,7 @@ function removeProjectFiles(workspaceSlug: string, projectId: string): void {
   ]
   for (const target of targets) {
     try {
-      if (existsSync(target)) rmSync(target, { recursive: true, force: true })
+      if (existsSync(target)) rmSyncWithRetry(target, { recursive: true, force: true })
     } catch (error) {
       console.warn(`[ProjectService] 删除项目文件失败，已残留无引用文件 (${projectId}):`, error)
     }

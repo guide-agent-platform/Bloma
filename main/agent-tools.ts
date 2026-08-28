@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { rmSyncWithRetry } from './fs-retry'
 import { tmpdir } from 'node:os'
 import { extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { findProject, readLastSketchRequirements } from './project-service'
@@ -100,8 +101,8 @@ async function checkJsSyntaxViaNode(content: string): Promise<{ ok: true } | { o
     if (scriptCheck.ok) return { ok: true }
     return { ok: false, error: moduleCheck.stderr.trim() || 'JS 语法检查未通过' }
   } finally {
-    rmSync(mjs, { force: true })
-    rmSync(cjs, { force: true })
+    rmSyncWithRetry(mjs, { force: true })
+    rmSyncWithRetry(cjs, { force: true })
   }
 }
 
