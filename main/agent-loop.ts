@@ -2,6 +2,7 @@ import type { AgentEvent, AgentLoopStatus, MessageContentBlock, PromaPermissionM
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
 import { canUseTool } from './permission-service'
+import { windowMessagesWithDigest } from './compacting-window'
 import type { ConversationTurn, SDKQuery, ToolDefinition } from './orchestrator'
 
 /**
@@ -139,24 +140,42 @@ function isToolTurn(turn: ConversationTurn): boolean {
  * 第 1 次 run_gwt_tests 失败的断言细节可能在 8 轮后出窗。当前为最小改动采用固定窗口；
  * 若后续模型质量受此影响，优先方案是「钉住首个 test_failed 轮」（在 kept 之外 unshift 该轮对）。
  */
-export function windowMessages(messages: ConversationTurn[], textWindowTurns: number, toolRounds: number): ConversationTurn[] {
-  if (messages.length === 0) return []
+/**
+ * 窗口分区（compacting-window 移植的重构基础）：同一后向扫描算法，同时返回保留集与驱逐集。
+ * windowMessages 基于它保持原行为；windowMessagesWithDigest 基于驱逐集生成摘要。
+ */
+export function partitionWindow(
+  messages: ConversationTurn[],
+  textWindowTurns: number,
+  toolRounds: number,
+): { head: ConversationTurn | null; kept: ConversationTurn[]; evicted: ConversationTurn[] } {
+  if (messages.length === 0) return { head: null, kept: [], evicted: [] }
   const head = messages[0]
   const tail = messages.slice(1)
   let toolBudget = toolRounds * 2
   let textBudget = textWindowTurns
   const kept: ConversationTurn[] = []
+  const keptIdx = new Set<number>()
   for (let i = tail.length - 1; i >= 0; i -= 1) {
     if (isToolTurn(tail[i])) {
       if (toolBudget > 0) {
         kept.unshift(tail[i])
+        keptIdx.add(i)
         toolBudget -= 1
       }
     } else if (textBudget > 0) {
       kept.unshift(tail[i])
+      keptIdx.add(i)
       textBudget -= 1
     }
   }
+  const evicted = tail.filter((_, i) => !keptIdx.has(i))
+  return { head, kept, evicted }
+}
+
+export function windowMessages(messages: ConversationTurn[], textWindowTurns: number, toolRounds: number): ConversationTurn[] {
+  const { head, kept } = partitionWindow(messages, textWindowTurns, toolRounds)
+  if (!head) return []
   return [head, ...kept]
 }
 
@@ -219,7 +238,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         maxTokens: input.maxTokens,
         ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
         ...(input.providerType !== undefined ? { providerType: input.providerType } : {}),
-        messages: [{ role: 'system', content: input.system }, ...windowMessages(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS)],
+        messages: [{ role: 'system', content: input.system }, ...windowMessagesWithDigest(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS)],
         tools: definitions,
       })) {
         if (sdk.type === 'assistant' && sdk.message) {
