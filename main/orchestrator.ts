@@ -144,6 +144,11 @@ const sessionMessageQueue = new SessionMessageQueue({
   // 后台生成（runMvpTask/runIterationTask fire-and-forget）也计入「忙」：MVP/迭代是最长
   // 生成阶段，期间发消息同样排队而非直接开跑（审查 P2-⑤）
   isActive: (sessionId) => activeSessions.has(sessionId) || backgroundRuns.has(sessionId),
+  // 派发失败安全网放弃钩子（queue-dispatch-requeue r68）：v1 先 console 留痕（观测），
+  // 渲染端「发送失败可重试」气泡后续档接入
+  onDropped: (sessionId, entry, reason) => {
+    console.warn(`[message-queue] 排队消息派发放弃（session=${sessionId} msg=${entry.queueMessageId} reason=${reason}）`)
+  },
   startRun: async (sessionId, entry) => {
     const input = entry.input as AgentSendMessageInput | undefined
     if (!input) return
