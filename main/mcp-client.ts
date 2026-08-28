@@ -130,6 +130,16 @@ export class MiniMcpClient {
     return this.stderrBuf.join('')
   }
 
+  /** 进程退出回调（MCP manager 崩溃重启依赖）：幂等注册，触发一次即自动移除 */
+  onExit(listener: (code: number | null, signal: NodeJS.Signals | null) => void): void {
+    this.proc.once('exit', listener)
+  }
+
+  /** 测试钩子：模拟进程被外部 kill（真实 kill → exit 事件 → manager 重启/degraded 路径） */
+  simulateExitForTests(): void {
+    this.proc.kill()
+  }
+
   /** 杀掉子进程并拒绝所有在途请求。幂等（二次调用安全）。 */
   dispose(): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
     if (this.disposed) return Promise.resolve({ code: null, signal: null })
