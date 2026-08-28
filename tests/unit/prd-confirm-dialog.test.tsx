@@ -5,6 +5,7 @@ import { createStore, Provider } from 'jotai'
 import { cleanup, configure, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PrdConfirmDialog } from '../../renderer/components/PrdConfirmDialog'
+import { PRD_TERMS, priorityLabel } from '../../renderer/lib/prd-terms'
 import {
   activeAgentSessionIdAtom,
   prdConfirmFamily,
@@ -189,5 +190,41 @@ describe('PRD 确认弹窗 PrdConfirmDialog', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('prd-confirm-dialog')).toBeNull()
     })
+  })
+
+  it('白话术语层（闭环 PR7）：徽标带白话、段标题套术语表、顶部固定说明行', () => {
+    setState()
+    renderDialog()
+
+    // 徽标：P 码保留对账 + 白话后缀
+    expect(screen.getByTestId('prd-confirm-item-F-001').textContent).toContain('P0 · 核心必须')
+    expect(screen.getByTestId('prd-confirm-item-F-002').textContent).toContain('P2 · 可延后')
+    // P1/P2 折叠摘要套术语表
+    expect(screen.getByTestId('prd-confirm-item-F-002').textContent).toContain('做到这样才算完成（1 条）')
+    // 顶部固定说明行（婴儿模式入口语）
+    expect(screen.getByTestId('prd-confirm-plain-intro').textContent).toContain('看不懂的词')
+    expect(screen.getByTestId('prd-confirm-plain-intro').textContent).toContain('这条不对')
+    // 功能清单段标题套术语表
+    expect(screen.getByTestId('prd-confirm-requirements-title').textContent)
+      .toContain('核心必须')
+    expect(screen.getByTestId('prd-confirm-requirements-title').textContent)
+      .toContain('做到这样才算完成')
+    // 范围外 / 假设段标题套术语表
+    expect(screen.getByTestId('prd-confirm-out-of-scope').textContent).toContain('这次明确不做的')
+    expect(screen.getByTestId('prd-confirm-assumptions').textContent).toContain('我们替你默认的')
+  })
+})
+
+describe('prd-terms 术语表（闭环 PR7，单点维护）', () => {
+  it('P 码白话映射与 priorityLabel 拼装', () => {
+    expect(PRD_TERMS.P0).toBe('核心必须')
+    expect(PRD_TERMS.P1).toBe('重要')
+    expect(PRD_TERMS.P2).toBe('可延后')
+    expect(PRD_TERMS.assertion).toBe('做到这样才算完成')
+    expect(PRD_TERMS.outOfScope).toBe('这次明确不做的')
+    expect(PRD_TERMS.assumption).toBe('我们替你默认的（说一声就能改）')
+    expect(priorityLabel('P0')).toBe('P0 · 核心必须')
+    expect(priorityLabel('P1')).toBe('P1 · 重要')
+    expect(priorityLabel('P2')).toBe('P2 · 可延后')
   })
 })

@@ -27,6 +27,7 @@ import {
   workflowStageAtom,
 } from '../agent-atoms'
 import type { PrdConfirmRequirement } from '../agent-atoms'
+import { PRD_TERMS, priorityLabel } from '../lib/prd-terms'
 
 const primaryButtonStyle: React.CSSProperties = {
   padding: '10px 18px',
@@ -137,7 +138,7 @@ function RequirementBlock(props: { item: PrdConfirmRequirement; onDisagree: (id:
     >
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
         <span>
-          <span style={priorityBadgeStyle(item.priority)}>{item.priority}</span>
+          <span style={priorityBadgeStyle(item.priority)}>{priorityLabel(item.priority)}</span>
           <strong>{item.id}</strong>　{item.story}
         </span>
         <button type="button" style={disagreeLinkStyle} data-ai-id={`prd-confirm-disagree-${item.id}`} onClick={() => onDisagree(item.id)}>
@@ -148,7 +149,7 @@ function RequirementBlock(props: { item: PrdConfirmRequirement; onDisagree: (id:
         assertions.length > 0 ? assertionList : null
       ) : assertions.length > 0 ? (
         <details style={{ marginTop: 4 }}>
-          <summary style={{ ...assertionTextStyle, cursor: 'pointer' }}>验收细节（{assertions.length} 条）</summary>
+          <summary style={{ ...assertionTextStyle, cursor: 'pointer' }}>{PRD_TERMS.assertion}（{assertions.length} 条）</summary>
           {assertionList}
         </details>
       ) : null}
@@ -255,6 +256,11 @@ export const PrdConfirmDialog: React.FC = () => {
           {state.title}
         </h2>
 
+        {/* 顶部固定说明行（闭环 PR7 婴儿模式）：看不懂的词直接指出，不猜 */}
+        <p data-ai-id="prd-confirm-plain-intro" style={{ margin: 0, fontSize: 13, color: 'var(--color-text-secondary, #5b6472)' }}>
+          下面是我们对你需求的理解，请逐条过目——看不懂的词，直接点「这条不对」告诉我们。
+        </p>
+
         {/* 第一段：定位一句话 */}
         <div>
           <h3 style={sectionTitleStyle}>我们理解你要做的</h3>
@@ -265,8 +271,8 @@ export const PrdConfirmDialog: React.FC = () => {
 
         {/* 第二段：功能清单（P0 断言展开 / P1P2 折叠，逐项可异议） */}
         <div>
-          <h3 style={sectionTitleStyle}>
-            功能清单（{state.requirements.length} 项）——P0 为核心必须，附验收细节
+          <h3 data-ai-id="prd-confirm-requirements-title" style={sectionTitleStyle}>
+            功能清单（{state.requirements.length} 项）——{PRD_TERMS.P0}的每项都写清了{PRD_TERMS.assertion}
           </h3>
           <ul data-ai-id="prd-confirm-requirements" style={{ listStyle: 'none', margin: '8px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {state.requirements.map((item) => (
@@ -277,7 +283,7 @@ export const PrdConfirmDialog: React.FC = () => {
 
         {/* 第三段：明确不做的（高亮——事后争议最大） */}
         <div data-ai-id="prd-confirm-out-of-scope">
-          <h3 style={sectionTitleStyle}>明确不做的</h3>
+          <h3 style={sectionTitleStyle}>{PRD_TERMS.outOfScope}</h3>
           <div style={{ ...warnBlockStyle('danger'), marginTop: 6 }}>
             {state.outOfScope.length > 0 ? state.outOfScope.map((entry) => <div key={entry}>· {entry}</div>) : <div>（无明确排除项）</div>}
           </div>
@@ -286,7 +292,7 @@ export const PrdConfirmDialog: React.FC = () => {
         {/* 第四段：系统替你做的决定（空段隐藏，不摆空架子） */}
         {state.assumptions.length > 0 ? (
           <div data-ai-id="prd-confirm-assumptions">
-            <h3 style={sectionTitleStyle}>系统替你做的决定（可推翻）</h3>
+            <h3 style={sectionTitleStyle}>{PRD_TERMS.assumption}</h3>
             <div style={{ ...warnBlockStyle('caution'), marginTop: 6 }}>
               {state.assumptions.map((entry) => (
                 <div key={entry}>· {entry}</div>
@@ -324,7 +330,7 @@ export const PrdConfirmDialog: React.FC = () => {
             {state.requirements.map((item) => (
               <div key={item.id} style={{ marginBottom: 10 }}>
                 <div>
-                  <span style={priorityBadgeStyle(item.priority)}>{item.priority}</span>
+                  <span style={priorityBadgeStyle(item.priority)}>{priorityLabel(item.priority)}</span>
                   <strong>{item.id}</strong>　{item.story}
                 </div>
                 {item.assertions.map((assertion, index) => (

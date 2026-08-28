@@ -177,7 +177,7 @@ export const RequirementConfirmDialog: React.FC = () => {
           {state.title}
         </h2>
         <p style={{ margin: 0, fontSize: 13, color: 'var(--color-text-secondary, #5b6472)' }}>
-          下面是我按你的描述整理的需求清单，确认后我会先形成产品需求文档（PRD），再开始画草图。
+          下面是我按你的描述整理的需求清单，确认后我会先整理成一份需求文档请你过目，再开始画草图。
           有想改的地方直接补充，或者交给我来定。
         </p>
 
