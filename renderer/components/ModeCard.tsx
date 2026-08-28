@@ -45,15 +45,21 @@ export const ModeCard: React.FC<ModeCardProps> = ({
     ? '0 6px 16px -4px rgba(124,58,237,0.45)'
     : '0 6px 16px -4px rgba(8,145,178,0.45)'
 
+  // 模式卡 a11y B 档（2026-08-28）：根 button → div role=group（可达名收口 + 保鼠标整卡行为），
+  // 「开始」span → 真 button（键盘细粒度导航 + 原生激活；stopPropagation 防容器冒泡双触发——审计 v2 实测）。
+  // disabled 迁移：容器 aria-disabled+样式，内按钮原生 disabled。
+  const handleCardClick = (): void => {
+    if (!disabled) onSelect(mode)
+  }
+
   return (
-    <button
+    <div
+      role="group"
+      aria-label={`${title}（${MODE_LABELS[mode]}）`}
+      aria-disabled={disabled || undefined}
       className="mode-tile tile"
       data-ai-id={isQuick ? 'mode-card-quick' : 'mode-card-longterm'}
-      disabled={disabled}
-      // 模式卡 a11y A 档（2026-08-28）：可达名=「title（模式名）」≤16 字——
-      // 整卡全部文本作可达名（实测 74 字）会让读屏器念完才知道是什么
-      aria-label={`${title}（${MODE_LABELS[mode]}）`}
-      onClick={() => onSelect(mode)}
+      onClick={handleCardClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
@@ -160,7 +166,14 @@ export const ModeCard: React.FC<ModeCardProps> = ({
         >
           {description}
         </p>
-        <span
+        <button
+          type="button"
+          aria-label={`开始：${title}`}
+          disabled={disabled}
+          onClick={(e) => {
+            e.stopPropagation()
+            if (!disabled) onSelect(mode)
+          }}
           style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -173,17 +186,19 @@ export const ModeCard: React.FC<ModeCardProps> = ({
             color: 'var(--white)',
             background: ctaBg,
             boxShadow: ctaShadow,
+            border: 'none',
+            cursor: disabled ? 'not-allowed' : 'pointer',
           }}
         >
           开始
           <ArrowRight size={16} />
-        </span>
+        </button>
         {helperText && (
           <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-3)' }}>
             {helperText}
           </span>
         )}
       </div>
-    </button>
+    </div>
   )
 }

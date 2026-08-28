@@ -2,10 +2,13 @@
 
 import React from 'react'
 import { createStore, Provider } from 'jotai'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, configure } from '@testing-library/react'
+
+configure({ testIdAttribute: 'data-ai-id' })
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../../../renderer/components/App'
 import { ModeSelectionPage } from '../../../renderer/components/ModeSelectionPage'
+import { ModeCard } from '../../../renderer/components/ModeCard'
 import { WorkspaceHeader } from '../../../renderer/components/WorkspaceHeader'
 import {
   currentProjectAtom,
@@ -46,7 +49,7 @@ describe('Sprint 1 project mode and workspace acceptance', () => {
     window.electronAPI = { project: { create } } as unknown as ElectronAPI
 
     render(<Provider store={store}><App /></Provider>)
-    fireEvent.click(screen.getByRole('button', { name: /快速尝鲜/ }))
+    fireEvent.click(screen.getByTestId('mode-card-quick'))
 
     await waitFor(() => expect(screen.getByRole('textbox')).toBeTruthy())
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ mode: 'quick' }))
@@ -70,7 +73,7 @@ describe('Sprint 1 project mode and workspace acceptance', () => {
     } as unknown as ElectronAPI
 
     render(<Provider store={store}><App /></Provider>)
-    fireEvent.click(screen.getByRole('button', { name: /精细打磨/ }))
+    fireEvent.click(screen.getByTestId('mode-card-longterm'))
 
     await waitFor(() => expect(screen.getByRole('button', { name: '文档' })).toBeTruthy())
     expect(screen.getByText('精细打磨')).toBeTruthy()
@@ -90,7 +93,7 @@ describe('Sprint 1 project mode and workspace acceptance', () => {
     } as unknown as ElectronAPI
 
     render(<Provider store={store}><App /></Provider>)
-    fireEvent.click(screen.getByRole('button', { name: /快速尝鲜/ }))
+    fireEvent.click(screen.getByTestId('mode-card-quick'))
 
     await waitFor(() => expect(screen.getByRole('textbox')).toBeTruthy())
     expect(screen.queryByText('你想做什么样的软件？')).toBeNull()
@@ -243,7 +246,7 @@ describe('Sprint 1 project mode and workspace acceptance', () => {
     } as unknown as ElectronAPI
 
     render(<Provider><ModeSelectionPage onModeSelected={onModeSelected} /></Provider>)
-    fireEvent.click(screen.getByRole('button', { name: /快速尝鲜/ }))
+    fireEvent.click(screen.getByTestId('mode-card-quick'))
 
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toBe('本地保存失败，请检查磁盘空间后再试。')
@@ -361,7 +364,7 @@ describe('消息排队提示（message-queue S4-QUEUE-009）', () => {
     } as unknown as ElectronAPI
 
     render(<Provider store={store}><App /></Provider>)
-    fireEvent.click(screen.getByRole('button', { name: /快速做一个试试/ }))
+    fireEvent.click(screen.getByTestId('mode-card-quick'))
     await waitFor(() => expect(screen.getByPlaceholderText('描述你的想法…')).toBeTruthy())
 
     const input = screen.getByPlaceholderText('描述你的想法…')
@@ -404,7 +407,7 @@ describe('零渠道欢迎引导（QW#2 ux-r2 I2）', () => {
     } as unknown as ElectronAPI
 
     render(<Provider store={store}><App /></Provider>)
-    fireEvent.click(screen.getByRole('button', { name: /快速做一个试试/ }))
+    fireEvent.click(screen.getByTestId('mode-card-quick'))
 
     await waitFor(() => {
       expect(screen.getByText(/还没连接 AI 模型/)).toBeTruthy()
@@ -436,7 +439,7 @@ describe('零渠道欢迎引导（QW#2 ux-r2 I2）', () => {
     } as unknown as ElectronAPI
 
     render(<Provider store={store}><App /></Provider>)
-    fireEvent.click(screen.getByRole('button', { name: /快速做一个试试/ }))
+    fireEvent.click(screen.getByTestId('mode-card-quick'))
     await waitFor(() => {
       expect(screen.getByText(/还没连接 AI 模型/)).toBeTruthy()
     })
@@ -472,22 +475,69 @@ describe('零渠道欢迎引导（QW#2 ux-r2 I2）', () => {
     } as unknown as ElectronAPI
 
     render(<Provider store={store}><App /></Provider>)
-    fireEvent.click(screen.getByRole('button', { name: /快速做一个试试/ }))
+    fireEvent.click(screen.getByTestId('mode-card-quick'))
 
     await waitFor(() => expect(screen.getByPlaceholderText(/描述你的想法/)).toBeTruthy())
     expect(screen.queryByText(/还没连接 AI 模型/)).toBeNull()
   })
 })
 
-describe('模式卡可达名（mode-card-a11y，r63 方向 B，A 档）', () => {
-  it('[S1-UI-024] 模式卡按钮可达名为「title（模式名）」≤16 字，而非整卡 74 字巨型可达名', () => {
+describe('模式卡 a11y（mode-card-a11y，r63 方向 B）', () => {
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('[S1-UI-024] B 档结构：卡为 group 可达名「title（模式名）」+「开始」为真按钮（h2 不嵌 button）', () => {
     render(<Provider store={createStore()}><ModeSelectionPage onModeSelected={vi.fn()} /></Provider>)
 
-    const quick = screen.getByRole('button', { name: '快速做一个试试（快速尝鲜）' })
+    // 卡=group（可达名收口，非整卡 74 字巨型按钮）
+    const quick = screen.getByRole('group', { name: '快速做一个试试（快速尝鲜）' })
     expect(quick).toBeTruthy()
-    const longterm = screen.getByRole('button', { name: '认真打磨一个产品（精细打磨）' })
-    expect(longterm).toBeTruthy()
-    // 可达名不再包含描述/角标/CTA 全文（读屏器不必念完整卡才知道是什么）
-    expect(quick.getAttribute('aria-label')).not.toContain('一次性小工具')
+    // 「开始」是真按钮且可达名收口
+    const start = screen.getByRole('button', { name: '开始：快速做一个试试' })
+    expect(start).toBeTruthy()
+    // h2 不再嵌 button（A 档已知边界，B 根治）
+    const heading = quick.querySelector('h2')
+    expect(heading?.querySelector('button')).toBeNull()
+  })
+
+  it('[S1-UI-025] 点「开始」→ onSelect 恰 1 次（容器不冒泡双触发）；点卡空白区 → 容器仍触发', async () => {
+    const onSelect = vi.fn()
+    window.electronAPI = {
+      project: { create: vi.fn().mockResolvedValue({ ok: true, request_id: 't', data: { project_id: 'p-b' } }) },
+    } as unknown as ElectronAPI
+    render(<Provider store={createStore()}><ModeSelectionPage onModeSelected={onSelect} /></Provider>)
+
+    const start = screen.getByRole('button', { name: '开始：快速做一个试试' })
+    console.log('START-DISABLED:', start.disabled, 'ARIA:', start.getAttribute('aria-label'))
+    fireEvent.click(start)
+    await waitFor(() => expect(onSelect).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByText(/一次性小工具/))
+    await waitFor(() => expect(onSelect).toHaveBeenCalledTimes(2))
+  })
+
+  it('[S1-UI-026] 键盘激活：开始为原生 button（可 focus，Enter 激活由平台契约保证）', () => {
+    const onSelect = vi.fn()
+    render(<Provider store={createStore()}><ModeSelectionPage onModeSelected={onSelect} /></Provider>)
+
+    const start = screen.getByRole('button', { name: '开始：快速做一个试试' })
+    start.focus()
+    expect(document.activeElement).toBe(start)
+    // 原生 button 标签即键盘激活契约（jsdom 不合成 Enter→click，标签断言锁定）
+    expect(start.tagName).toBe('BUTTON')
+  })
+
+  it('[S1-UI-027] disabled → 容器 aria-disabled + 开始按钮原生 disabled，点击不触发', () => {
+    const onSelect = vi.fn()
+    render(<ModeCard mode="quick" title="快速做一个试试" description="x" disabled onSelect={onSelect} />)
+
+    const quick = screen.getByRole('group', { name: /快速做一个试试/ })
+    expect(quick.getAttribute('aria-disabled')).toBe('true')
+    const start = screen.getByRole('button', { name: '开始：快速做一个试试' }) as HTMLButtonElement
+    expect(start.disabled).toBe(true)
+    fireEvent.click(start)
+    fireEvent.click(quick)
+    expect(onSelect).not.toHaveBeenCalled()
   })
 })
