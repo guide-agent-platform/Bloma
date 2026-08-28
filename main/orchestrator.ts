@@ -977,11 +977,22 @@ export async function* anthropicMessagesQuery(prompt: string, options: SDKQueryO
     const thinkingRejected = response.status === 400
       && (body.thinking as { type?: string } | undefined) !== undefined
       && /thinking|reasoning|effort|output_config/i.test(detail)
+    // vision 降级（clipboard-paste P2 兑现，r74）：带图请求遇 400 且错误提 image——
+    // 模型能力缺失非瞬时故障（重试无意义），包装为用户可读引导而非裸 SDK 400。
+    // 三条件缺一不可：400 + 请求确实携带 image 块 + 错误提 image（避免无关 400 误伤）。
+    const imageRejected = response.status === 400
+      && JSON.stringify(body.messages ?? []).includes('"type":"image"')
+      && /image|multimodal|vision|多模态/i.test(detail)
     if (thinkingRejected) {
       console.warn(`[anthropicMessagesQuery] 渠道拒绝 thinking 参数（${detail}），移除该参数后重试一次`)
       delete body.thinking
       delete body.output_config
       response = await fetch(`${baseUrl}/v1/messages`, requestInit())
+    } else if (imageRejected) {
+      throw Object.assign(
+        new Error('当前模型不支持图片输入——请用文字描述内容，或在设置中更换支持视觉的模型后重试。'),
+        { statusCode: response.status },
+      )
     } else {
       console.error(
         `[anthropicMessagesQuery] model request failed: HTTP ${response.status}`
@@ -1002,6 +1013,16 @@ export async function* anthropicMessagesQuery(prompt: string, options: SDKQueryO
       `[anthropicMessagesQuery] model request failed: HTTP ${response.status}`
       + (detail ? ` — ${detail}` : ''),
     )
+    // 降级重试后仍失败：vision 判定同样生效（thinking 降级重试不移除 image 块；重算因作用域独立）
+    const imageRejectedRetry = response.status === 400
+      && JSON.stringify(body.messages ?? []).includes('"type":"image"')
+      && /image|multimodal|vision|多模态/i.test(detail)
+    if (imageRejectedRetry) {
+      throw Object.assign(
+        new Error('当前模型不支持图片输入——请用文字描述内容，或在设置中更换支持视觉的模型后重试。'),
+        { statusCode: response.status },
+      )
+    }
     throw Object.assign(new Error(`SDK request failed with ${response.status}`), { statusCode: response.status })
   }
   if (!response.body) throw new Error('SDK request body unavailable')

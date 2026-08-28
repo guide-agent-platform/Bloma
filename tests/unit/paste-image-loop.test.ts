@@ -199,3 +199,55 @@ describe('anthropicMessagesQuery 入口水合（API 边界统一）', () => {
     }
   }
 })
+
+describe('vision 降级文案（clipboard-paste P2 兑现，r74）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-vision-deg-'))
+  })
+  afterEach(() => {
+    restorePromaHome(originalPromaHome)
+    vi.unstubAllGlobals()
+  })
+
+  it('[S4-AGENT-099] 不支持 vision 的模型返回 400(image) → 错误包装为用户可读引导文案（非裸 SDK 400）', async () => {
+    const saved = savePastedImage('session-vd', PNG_1PX_BASE64, 'png')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'messages: image content blocks are not supported by this model' } }), { status: 400 })),
+    )
+    const turns: ConversationTurn[] = [
+      { role: 'user', content: [{ type: 'text', text: '看图' }, { type: 'image', imageId: saved.imageId, media_type: 'image/png' }] },
+    ]
+    const err = await anthropicMessagesQuery('主任务', {
+      env: { PATH: 'x', ANTHROPIC_AUTH_TOKEN: 'k', ANTHROPIC_BASE_URL: 'https://mock.example', ANTHROPIC_MODEL: 'text-only-model' },
+      signal: new AbortController().signal,
+      sessionId: 'session-vd',
+      messages: turns,
+    })[Symbol.asyncIterator]().next().then(
+      () => null,
+      (e: Error) => e,
+    )
+    expect(err).toBeTruthy()
+    expect(err!.message).toContain('当前模型不支持图片')
+    expect(err!.message).toContain('更换')
+  })
+
+  it('[S4-AGENT-100] 无图请求的 400 不被误包装（保持原 SDK 错误形态，回归保护）', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'messages: image content blocks are not supported' } }), { status: 400 })),
+    )
+    const err = await anthropicMessagesQuery('纯文本任务', {
+      env: { PATH: 'x', ANTHROPIC_AUTH_TOKEN: 'k', ANTHROPIC_BASE_URL: 'https://mock.example', ANTHROPIC_MODEL: 'm' },
+      signal: new AbortController().signal,
+      sessionId: 'session-vd2',
+    })[Symbol.asyncIterator]().next().then(
+      () => null,
+      (e: Error) => e,
+    )
+    expect(err?.message).toContain('SDK request failed with 400') // 原形态不变
+    expect(err?.message).not.toContain('当前模型不支持图片')
+  })
+})
