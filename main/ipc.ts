@@ -21,6 +21,7 @@ import type {
   DocumentSyncInput,
   DomCollectContextInput,
   PermissionResponseInput,
+  PastedImageSaveInput,
   PermissionSetModeInput,
   PointCorrectionInput,
   PromptReadInput,
@@ -50,6 +51,7 @@ import type {
 import { IPC_CHANNELS } from '../shared/types'
 import { fail, ok } from './api-result'
 import { cancelAgent, getSdkQuery, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from './orchestrator'
+import { savePastedImage } from './pasted-images'
 import { collectDomContext } from './dom-context'
 import { runAgentLoopPostTesting, runIterationTask, runMvpTask, setProgrammingEventPublisher } from './programming-orchestrator'
 import { handleAgentStreamEvent } from './notifications'
@@ -125,6 +127,17 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     return safeInvoke(extractRequestId(payload), async () => {
       const input = validateAgentSend(payload)
       return runAgent(input)
+    })
+  })
+
+  // 粘贴图存盘（clipboard-paste P1，2026-08-29）：renderer 粘贴→base64 存文件→短引用；
+  // 大小校验双保险（renderer 白名单先行，主进程兜底防绕过）
+  ipcMain.handle(IPC_CHANNELS.PASTED_IMAGE_SAVE, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<PastedImageSaveInput>(payload, ['session_id', 'base64', 'ext'])
+      if (typeof input.base64 !== 'string' || input.base64.length === 0) throw new Error('PASTED_IMAGE_EMPTY: 空 base64 载荷')
+      if (Buffer.byteLength(input.base64, 'base64') > 5 * 1024 * 1024) throw new Error('PASTED_IMAGE_TOO_LARGE: 超过 5MB 上限')
+      return savePastedImage(input.session_id, input.base64, input.ext)
     })
   })
 
@@ -771,6 +784,15 @@ async function safeInvoke<T>(requestId: string, fn: () => T | Promise<T>) {
 function validateAgentSend(payload: unknown): AgentSendMessageInput {
   // request_id 必填：message-queue 用它作 queueMessageId 去重键（审查 P2-③：缺省会被 undefined 误判重复丢消息）
   const input = requireFields<AgentSendMessageInput>(payload, ['request_id', 'session_id', 'project_id', 'content', 'mode', 'current_stage'])
+  // clipboard-paste P1（2026-08-29）：可选 images 结构校验——存在则必须为合法引用数组（消费端另有过滤）
+  if (input.images !== undefined) {
+    if (!Array.isArray(input.images)) throw new Error('PASTED_IMAGE_BAD_REFS: images 必须为数组')
+    for (const r of input.images) {
+      if (!r || typeof r.imageId !== 'string' || typeof r.media_type !== 'string') {
+        throw new Error('PASTED_IMAGE_BAD_REFS: images 元素必须含 imageId/media_type 字符串')
+      }
+    }
+  }
   return input
 }
 

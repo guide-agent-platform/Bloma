@@ -17,8 +17,9 @@ import {
   workflowStageAtom,
   sessionUsageFamily,
 } from './atoms'
-import type { AgentMessage, AgentStreamState, ProjectMode } from './atoms'
+import type { AgentMessage, AgentStreamState, PastedImageRef, ProjectMode } from './atoms'
 import { hasUsableChannelsAtom, chatInputDraftAtom } from './atoms-sprint2'
+import { extractPastedImages, extFromMime, toBase64DataUrl } from '../lib/paste-extract'
 
 export interface ChatPanelProps {
   /** 向导 Agent 发出的卡片选项（由上层从 AgentEvent 中解析） */
@@ -27,8 +28,8 @@ export interface ChatPanelProps {
   decisionTitle?: string
   /** 用户选择卡片选项 */
   onCardOptionSelect?: (option: CardOption) => void
-  /** 用户提交文本消息 */
-  onSendMessage?: (content: string) => void
+  /** 用户提交文本消息；粘贴图片时附带短引用数组（clipboard-paste P1，2026-08-29） */
+  onSendMessage?: (content: string, images?: PastedImageRef[]) => void
   /** 是否正在等待 Agent 响应 */
   isWaiting?: boolean
   /** 等待开始时间（用于计算已等待秒数） */
@@ -113,6 +114,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   // WC-P2（2026-08-29）：草稿 atom 化——零渠道提交被拦截直达设置页后，返回工作区输入仍在
   const [inputValue, setInputValue] = useAtom(chatInputDraftAtom)
   const hasChannels = useAtomValue(hasUsableChannelsAtom)
+  // clipboard-paste P1（2026-08-29）：待发送粘贴图（短引用 + 内存 dataURL 预览）与降级错误
+  const [pendingImages, setPendingImages] = React.useState<Array<PastedImageRef & { dataUrl: string }>>([])
+  const [pasteError, setPasteError] = React.useState<string | null>(null)
   const messagesEndRef = React.useRef<HTMLDivElement>(null)
   const inputRef = React.useRef<HTMLTextAreaElement>(null)
 
@@ -178,6 +182,37 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     setPendingQueue((queue) => queue.filter((t) => !dispatchedTexts.has(t)))
   }, [dispatchedTexts])
 
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    // clipboard-paste P1（2026-08-29）：粘贴图提取→IPC 存盘→chip；纯文本零干扰（不 preventDefault）
+    const result = await extractPastedImages(e.clipboardData?.items ?? null)
+    if (!result.shouldPrevent) return
+    e.preventDefault()
+    if (result.rejected.length > 0) {
+      setPasteError(result.rejected[0].reason)
+    }
+    const api = window.electronAPI
+    for (const image of result.images) {
+      try {
+        const res = await api?.pastedImage?.save({
+          request_id: crypto.randomUUID(),
+          session_id: activeSessionId ?? 'unattached',
+          base64: image.base64,
+          ext: extFromMime(image.media_type),
+        })
+        if (res?.ok && res.data) {
+          setPendingImages((prev) => [
+            ...prev,
+            { imageId: res.data.imageId, media_type: res.data.media_type, dataUrl: toBase64DataUrl(image.base64, image.media_type) },
+          ])
+        } else {
+          setPasteError(res && !res.ok ? '图片保存失败，已改用纯文本发送' : '图片保存失败，已改用纯文本发送')
+        }
+      } catch {
+        setPasteError('图片保存失败，已改用纯文本发送')
+      }
+    }
+  }
+
   const handleSubmit = () => {
     const trimmed = inputValue.trim()
     if (!trimmed) return
@@ -190,7 +225,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     // message-queue（2026-08-27）：生成期间也允许提交——后端排队兜底（queued:true），
     // 消息不丢、run 完成后自动派发。busy 时发送按钮区被停止按钮替换，靠 Enter 提交。
     if (busy) setPendingQueue((q) => [...q, trimmed])
-    onSendMessage?.(trimmed)
+    // clipboard-paste P1：带图时第二参传短引用数组；无图保持单参调用形态（不传 undefined 占位，
+    // 旧 mock/子类对签名兼容性零感知）。发送后清 chip（纯文本路径零变化）。
+    const imageRefs: PastedImageRef[] | undefined = pendingImages.length
+      ? pendingImages.map(({ imageId, media_type }) => ({ imageId, media_type }))
+      : undefined
+    if (imageRefs) onSendMessage?.(trimmed, imageRefs)
+    else onSendMessage?.(trimmed)
+    setPendingImages([])
+    setPasteError(null)
     setInputValue('')
   }
 
@@ -400,6 +443,52 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
       {/* 输入区（胶囊） */}
       <div style={{ padding: 'var(--space-3) var(--space-4)', flexShrink: 0, borderTop: '1px solid var(--color-border)' }}>
+        {/* clipboard-paste P1（2026-08-29）：待发送图片 chip 行——缩略预览（内存 dataURL）+ 移除；存图失败降级提示 */}
+        {(pendingImages.length > 0 || pasteError) && (
+          <div
+            style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', alignItems: 'center', marginBottom: 'var(--space-2)' }}
+          >
+            {pendingImages.map((img, i) => (
+              <span
+                key={img.imageId}
+                data-ai-id="paste-image-chip"
+                title={`图片 ${i + 1}（${img.media_type}）`}
+                style={{
+                  position: 'relative',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-1)',
+                  padding: 'var(--space-1) var(--space-2) var(--space-1) var(--space-1)',
+                  borderRadius: 'var(--radius-full)',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--glass-bg-soft)',
+                  fontSize: 'var(--font-size-xs)',
+                  color: 'var(--color-text-muted)',
+                }}
+              >
+                <img
+                  data-ai-id="paste-image-thumb"
+                  src={img.dataUrl}
+                  alt={`粘贴图片 ${i + 1}`}
+                  style={{ width: 24, height: 24, borderRadius: 'var(--radius-full)', objectFit: 'cover' }}
+                />
+                图片{i + 1}
+                <button
+                  onClick={() => setPendingImages((prev) => prev.filter((p) => p.imageId !== img.imageId))}
+                  aria-label={`移除图片 ${i + 1}`}
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', padding: '0 2px' }}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            {pasteError && (
+              <span data-ai-id="paste-image-error" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-danger)' }}>
+                {pasteError}
+              </span>
+            )}
+          </div>
+        )}
         <div
           style={{
             display: 'flex',
@@ -417,6 +506,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder={
               busy
                 ? '生成中…可以继续输入，会自动排队处理'
@@ -539,8 +629,10 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
 
   // Agent Loop 落盘的轮次：assistant 轮带 tool_use、user 轮只带 tool_result（无文本）
   const hasToolBlocks = message.content.some((block) => block.type === 'tool_use' || block.type === 'tool_result')
+  // clipboard-paste P1（2026-08-29）：粘贴图片块——气泡内 chip 标注（缩略图回放 P2）
+  const imageBlocks = message.content.filter((block) => block.type === 'image')
 
-  if (!text && !hasToolBlocks && !isStreaming) return null
+  if (!text && !hasToolBlocks && imageBlocks.length === 0 && !isStreaming) return null
 
   // 纯工具轮（无文本）：居中工具行胶囊，不占用对话气泡（陷阱 26 家族：不污染纯文本流）
   if (!text && hasToolBlocks) {
@@ -651,6 +743,23 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
       >
         {/* assistant 旁白/完成总结渲染 Markdown（模型输出天然带 md）；user 输入保持纯文本语义 */}
         {isUser || !text ? text || (isStreaming ? '…' : '') : <Markdown text={text} />}
+        {imageBlocks.length > 0 && (
+          <span
+            data-ai-id="message-image-chip"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              marginLeft: 'var(--space-2)',
+              padding: '1px 8px',
+              borderRadius: 'var(--radius-full)',
+              background: 'rgba(255,255,255,0.25)',
+              fontSize: 'var(--font-size-xs)',
+            }}
+          >
+            🖼️ 图片 ×{imageBlocks.length}
+          </span>
+        )}
       </div>
       {hasToolBlocks && <ToolBlocksReplay blocks={message.content} toolNamesById={toolNamesById} />}
       <span

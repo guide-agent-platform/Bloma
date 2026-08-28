@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentLoopStatus, MessageContentBlock, PromaPermissionMode } from '../shared/types'
+import type { AgentEvent, AgentLoopStatus, MessageContentBlock, PromaPermissionMode, PastedImageRef } from '../shared/types'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
 import { canUseTool } from './permission-service'
@@ -80,6 +80,8 @@ export interface AgentLoopInput {
   system: string
   /** 初始 user 消息（任务指令） */
   task: string
+  /** 剪贴板粘贴图片引用（clipboard-paste P1，2026-08-29）：与 task 同轮组装 [text, ...image] 块数组 */
+  images?: PastedImageRef[]
   /**
    * 历史轮次前缀（delegation continue 重放，2026-08-28）：作为 messages 开头传入模型，
    * task 仍是最新 user 轮。不写入 JSONL——重放轮已在子会话文件里，审计只记新轮次。
@@ -215,9 +217,21 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   ])
   const task = recallBlock ? `${recallBlock}
 ${skillPrep.content}` : skillPrep.content
-  const messages: ConversationTurn[] = [...(input.historyTurns ?? []), { role: 'user', content: task }]
+  // clipboard-paste P1（2026-08-29）：带图时首条 user 轮为 [text, ...image 短引用] 块数组；
+  // 水合只在 anthropicMessagesQuery 请求体边界发生（JSONL/模型历史全程轻量）。
+  const pastedImageRefs = sanitizePastedImageRefs(input.images)
+  const taskBlocks: MessageContentBlock[] | undefined = pastedImageRefs.length
+    ? [
+        { type: 'text', text: task },
+        ...pastedImageRefs.map((r) => ({ type: 'image' as const, imageId: r.imageId, media_type: r.media_type })),
+      ]
+    : undefined
+  const messages: ConversationTurn[] = [
+    ...(input.historyTurns ?? []),
+    taskBlocks ? { role: 'user' as const, content: taskBlocks } : { role: 'user' as const, content: task },
+  ]
   // 初始 task 落盘（审计完整性：JSONL 是子会话全量审计，缺首条 user 会让 continue 重放丢任务原文）
-  appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: task }])
+  appendLoopMessage(input.sessionId, 'user', taskBlocks ?? [{ type: 'text', text: task }])
   const ctx: ToolContext = {
     projectId: input.projectId,
     sessionId: input.sessionId,
@@ -513,16 +527,26 @@ function errorMessage(error: unknown): string {
   return message.length > 500 ? `${message.slice(0, 500)}…` : message
 }
 
-/** 占用估算文本：text 正文 + tool_result 内容 + tool_use input 序列化（全块口径）。 */
-function estimateBlocksText(blocks: MessageContentBlock[]): string {
+/** 占用估算文本：text 正文 + tool_result 内容 + tool_use input 序列化 + image 占位（全块口径）。 */
+export function estimateBlocksText(blocks: MessageContentBlock[]): string {
   return blocks
     .map((b) => {
       if (b.type === 'text') return b.text ?? ''
       if (b.type === 'tool_result') return typeof b.content === 'string' ? b.content : ''
       if (b.type === 'tool_use') return JSON.stringify(b.input ?? {})
+      if (b.type === 'image') return '[图片]' // clipboard-paste P1：防用量估算漏计图片块（占位口径，非 base64）
       return ''
     })
     .join('\n')
+}
+
+/** 畸形粘贴引用过滤（fuzz 加固，S4-AGENT-093）：非对象/缺 imageId/非法 media_type/穿越串一律滤除 */
+function sanitizePastedImageRefs(images?: PastedImageRef[]): PastedImageRef[] {
+  if (!images?.length) return []
+  return images.filter((r): r is PastedImageRef => {
+    if (!r || typeof r !== 'object' || typeof r.imageId !== 'string' || typeof r.media_type !== 'string') return false
+    return /^[A-Za-z0-9_-]+\/[A-Za-z0-9-]+\.(png|jpeg|jpg|gif|webp)$/.test(r.imageId)
+  })
 }
 
 function textOfBlocks(blocks: MessageContentBlock[]): string {

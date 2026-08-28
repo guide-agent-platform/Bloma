@@ -16,6 +16,7 @@
 
 export const IPC_CHANNELS = {
   AGENT_SEND_MESSAGE: 'agent:send-message',
+  PASTED_IMAGE_SAVE: 'pasted-image:save',
   AGENT_STOP: 'agent:stop',
   AGENT_LIST_SESSIONS: 'agent:list-sessions',
   AGENT_LOAD_MESSAGES: 'agent:load-messages',
@@ -495,7 +496,7 @@ export interface CategoryRoutingUpdateEnvelope extends RequestEnvelope {
 // =========================================================================
 
 export interface MessageContentBlock {
-  type: 'text' | 'tool_use' | 'tool_result'
+  type: 'text' | 'tool_use' | 'tool_result' | 'image'
   text?: string
   id?: string
   name?: string
@@ -504,6 +505,31 @@ export interface MessageContentBlock {
   content?: string
   /** tool_result 专用：true 表示该工具执行失败/被拒，模型据此自纠 */
   is_error?: boolean
+  /** image 块专用：短引用 pasted-images/<sessionId>/<uuid>.<ext>——JSONL/内存只落此 id 不落 base64 */
+  imageId?: string
+  /** image 块专用：image/png | image/jpeg | image/gif | image/webp */
+  media_type?: string
+  /** image 块水合产物（Anthropic base64 source）：只在 anthropicMessagesQuery 请求体出现，
+   *  禁止写入 JSONL 或回传 renderer（契约测试 S4-AGENT-091/095 锁定） */
+  source?: { type: 'base64'; media_type: string; data: string }
+}
+
+/** 粘贴图片引用（AgentSendMessageInput.images / ChatPanel 发送第二参） */
+export interface PastedImageRef {
+  imageId: string
+  media_type: string
+}
+
+/** 粘贴图存盘 IPC 输入：base64 载荷（无 dataURL 前缀）+ 扩展名（png/jpeg/gif/webp） */
+export interface PastedImageSaveInput extends RequestEnvelope {
+  session_id: string
+  base64: string
+  ext: string
+}
+
+export interface PastedImageSaveResult {
+  imageId: string
+  media_type: string
 }
 
 export interface AgentMessage {
@@ -557,6 +583,8 @@ export interface AgentSendMessageInput extends RequestEnvelope {
   mode: ProjectMode
   current_stage: WorkflowStage
   channel_id?: string
+  /** 剪贴板粘贴图片引用（clipboard-paste P1，2026-08-29）：随消息一同进模型与 JSONL */
+  images?: PastedImageRef[]
   metadata?: {
     source: 'chat' | 'card_option' | 'system_resume'
     selected_option_id?: string
@@ -1091,6 +1119,10 @@ export interface AnalyticsTrackResult {
 // =========================================================================
 
 export type ElectronAPI = {
+  pastedImage: {
+    /** 剪贴板粘贴图存盘（clipboard-paste P1）：base64→{PROMA_HOME}/pasted-images/<sessionId>/，返回短引用 */
+    save(input: PastedImageSaveInput): Promise<ApiResult<PastedImageSaveResult>>
+  }
   agent: {
     sendMessage(input: AgentSendMessageInput): Promise<ApiResult<AgentSendMessageResult>>
     cancel(input: AgentCancelInput): Promise<ApiResult<AgentCancelResult>>

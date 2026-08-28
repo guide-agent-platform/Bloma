@@ -9,7 +9,7 @@ import { SettingsPage } from './SettingsPage'
 import { useUserDecisionCards, toCardSelectionMeta } from './ChatPanel-sprint2'
 import type { CardOption } from './CardOptions'
 import type { PreviewStatus } from './PreviewPanel'
-import type { Snapshot, AgentMessage, Project } from './atoms'
+import type { Snapshot, AgentMessage, Project, PastedImageRef } from './atoms'
 import {
   modeSelectedAtom,
   projectModeAtom,
@@ -336,14 +336,20 @@ const AppRoutes: React.FC = () => {
 
   // ==================== 发送消息 ====================
 
-  const handleSendMessage = useCallback((content: string) => {
+  const handleSendMessage = useCallback((content: string, images?: PastedImageRef[]) => {
     const api = window.electronAPI
     if (!api?.agent?.sendMessage) return
 
     // 真实链路：交给主进程 runAgent，流式事件由 setupGlobalAgentListeners 驱动 UI
+    // clipboard-paste P1（2026-08-29）：带图消息本地气泡即块数组（imageId 短引用，无 base64）
     appendMessageToSession(sessionId, {
       role: 'user',
-      content: [{ type: 'text', text: content }],
+      content: images?.length
+        ? [
+            { type: 'text', text: content },
+            ...images.map((r) => ({ type: 'image' as const, imageId: r.imageId, media_type: r.media_type })),
+          ]
+        : [{ type: 'text', text: content }],
       timestamp: Date.now(),
     })
     void api.agent.sendMessage({
@@ -351,6 +357,7 @@ const AppRoutes: React.FC = () => {
       session_id: sessionId,
       project_id: currentProject?.project_id ?? projectList[0]?.project_id ?? '',
       content,
+      images,
       mode: mode ?? 'quick',
       current_stage: currentStage,
       metadata: { source: 'chat' },

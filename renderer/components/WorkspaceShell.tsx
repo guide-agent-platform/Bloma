@@ -8,7 +8,7 @@ import { DocumentPanel } from './DocumentPanel'
 import { CollaborationPanel } from './CollaborationPanel'
 import type { CardOption } from './CardOptions'
 import type { PreviewStatus } from './PreviewPanel'
-import type { Snapshot } from './atoms'
+import type { Snapshot, PastedImageRef } from './atoms'
 import type { DomCollectContextResult } from '../../shared/types'
 
 export interface WorkspaceShellProps {
@@ -17,7 +17,7 @@ export interface WorkspaceShellProps {
   /** 决策卡标题（U7：让渡偏差描述 / 澄清方向等） */
   decisionTitle?: string
   onCardOptionSelect?: (option: CardOption) => void
-  onSendMessage?: (content: string) => void
+  onSendMessage?: (content: string, images?: PastedImageRef[]) => void
   waitStartTime?: number
   waitActionLabel?: string
   onContinueWaiting?: () => void

@@ -8,6 +8,7 @@ import type {
   AgentSendMessageInput,
   AgentSendMessageResult,
   MessageContentBlock,
+  PastedImageRef,
   SDKMessage,
   WorkflowStage,
 } from '../shared/types'
@@ -15,6 +16,7 @@ import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
 import { buildThinkingFragment, type ThinkingLevel } from '../shared/reasoning-profile'
 import { SessionMessageQueue, type QueueEntry } from './message-queue'
+import { hydrateMessagesImageBlocks } from './pasted-images'
 export { buildSdkEnv } from './channel-manager'
 import {
   extractErrorStatusCode,
@@ -80,6 +82,8 @@ export interface SDKQueryOptions {
   sessionId: string
   /** 多轮历史（不含当前 prompt）；anthropicMessagesQuery 追加 {role:'user', content: prompt} */
   history?: ConversationTurn[]
+  /** 剪贴板粘贴图片引用（clipboard-paste P1，2026-08-29）：prompt 同轮组装 [text,...image] 块数组 */
+  images?: PastedImageRef[]
   /**
    * 完整 messages 数组（含末尾 user 轮，Agent Loop 的 tool_result 回填用）。
    * 提供时忽略 history + prompt 拼装，数组原样作为请求 messages（system 轮仍提取到
@@ -277,7 +281,13 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
 
     appendAgentMessage(input.session_id, {
       role: 'user',
-      content: [{ type: 'text', text: input.content }],
+      // clipboard-paste P1（2026-08-29）：带图消息落 [text, ...image 短引用] 块数组（JSONL 无 base64）
+      content: input.images?.length
+        ? [
+            { type: 'text', text: input.content },
+            ...input.images.map((r) => ({ type: 'image' as const, imageId: r.imageId, media_type: r.media_type })),
+          ]
+        : [{ type: 'text', text: input.content }],
       timestamp: Date.now(),
     })
     // 维护会话索引并回填 Project.last_session_id，支撑历史对话回访恢复
@@ -567,7 +577,8 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     const programmingHistory: ConversationTurn[] = [buildProgrammingSystemTurn(authoritativeStage), ...history]
 
     await runWithRetry(input, async () => {
-      const stream = sdkQuery(input.content, { env, signal: abortController.signal, sessionId: input.session_id, history: programmingHistory, maxTokens })
+      // clipboard-paste P1（2026-08-29）：澄清对话带图——模型在草图澄清期即可看见用户贴的截图
+      const stream = sdkQuery(input.content, { env, signal: abortController.signal, sessionId: input.session_id, history: programmingHistory, images: input.images, maxTokens })
       run.iterator = stream[Symbol.asyncIterator]()
 
       for (;;) {
@@ -868,12 +879,24 @@ export async function* anthropicMessagesQuery(prompt: string, options: SDKQueryO
     .filter(Boolean)
     .join('\n')
   const nonSystemTurns = history.filter((turn) => turn.role !== 'system')
-  const messages = options.messages
-    ? nonSystemTurns
-    : [
-        ...nonSystemTurns,
-        { role: 'user' as const, content: prompt },
-      ]
+  // clipboard-paste P1（2026-08-29）：带图 prompt 组装 [text,...image 短引用] 块数组（畸形引用过滤防注入）
+  const pastedRefs = (options.images ?? []).filter(
+    (r) => r && typeof r.imageId === 'string' && /^[A-Za-z0-9_-]+\/[A-Za-z0-9-]+\.(png|jpeg|jpg|gif|webp)$/.test(r.imageId),
+  )
+  const promptTurn: ConversationTurn = pastedRefs.length
+    ? {
+        role: 'user' as const,
+        content: [
+          { type: 'text' as const, text: prompt },
+          ...pastedRefs.map((r) => ({ type: 'image' as const, imageId: r.imageId, media_type: r.media_type })),
+        ],
+      }
+    : { role: 'user' as const, content: prompt }
+  // 水合统一入口：无论 options.messages（loop tool_result 回填）还是 history+prompt 拼装路径，
+  // 请求体里的 image 块都在此统一转 base64（最近 4 图全量，更早降级；JSONL/内存全程短引用）
+  const messages = hydrateMessagesImageBlocks(
+    options.messages ? nonSystemTurns : [...nonSystemTurns, promptTurn],
+  )
 
   // 开发插件：BLOMA_SHOW_THINKING=1 时启用 extended thinking 并把思考打印到终端。
   // Anthropic 要求 max_tokens > budget_tokens；预算取一半（封顶 1024，下限 256）。
