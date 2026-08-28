@@ -31,7 +31,7 @@
  *   node scripts/multi-vendor-run.mjs verdict --prompt <问题> --evidence <文件> [--shared <文件>] --out <输出>
  */
 
-import { readFileSync, existsSync, writeFileSync } from 'node:fs'
+import { readFileSync, existsSync, writeFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import os from 'node:os'
 import { execFileSync } from 'node:child_process'
@@ -42,6 +42,7 @@ const KEY_READER = join(BLOMA_ROOT, 'scripts', 'channel-key-reader.cjs')
 const PROMA_CHANNELS = process.env.PROMA_CHANNELS || join(os.homedir(), '.proma', 'channels.json')
 const PROMA_USER_DATA = process.env.PROMA_USER_DATA || join(os.homedir(), 'AppData', 'Roaming', '@proma', 'electron')
 const KEYS_CACHE = join(os.tmpdir(), 'bloma-multi-vendor-keys.json')
+const KEYS_CACHE_TTL_MS = 30 * 60 * 1000 // 缓存 30 分钟过期（防止渠道变更后旧 key 持续生效——2026-08-28 踩坑：旧号到限但缓存命中旧 key 报 429）
 
 // ── 硬性三模型（唯一允许）─────────────────────────────
 // ⚠️ 2026-08-28 应急：DeepSeek 官方渠道 402（Insufficient Balance），
@@ -49,9 +50,11 @@ const KEYS_CACHE = join(os.tmpdir(), 'bloma-multi-vendor-keys.json')
 // DeepSeek 充值后改回：channel:'DeepSeek', api:'anthropic'。
 const HARD_MODELS = {
   deepseek: { channel: '阿里云云工', model: 'deepseek-v4-flash', api: 'openai' },
-  zhipu: { channel: '智谱 Coding Plan', model: 'glm-5.3-flash', api: 'anthropic' },
+  zhipu: { channel: '智谱 Coding Plan', keyRef: 'id:97b3075f', model: 'glm-5.3-flash', api: 'anthropic' },
   aliyun: { channel: '阿里云云工', model: 'qwen3.8-flash', api: 'openai' },
 }
+// ⚠️ 2026-08-28：两个智谱账号，用户指定全用新号 97b3075f（未到限）；旧号 6b1e4508 已到限（9-03 00:43 重置）闲置备用。
+// ⚠️ 2026-08-28 应急：DeepSeek 官方 402，deepseek-v4-flash 暂由阿里云承载；充值后改回 channel:'DeepSeek', api:'anthropic'。
 
 // ── 角色 → 模型映射（多模型承担多角色）──────────────────
 // Attacker（挑刺/严格派）= DeepSeek；Defender（辩护/建设派）= 智谱；Reviewer（中立裁决）= 阿里云
@@ -106,7 +109,12 @@ function loadKeys() {
     return JSON.parse(process.env.MULTI_VENDOR_KEYS_JSON)
   }
   if (existsSync(KEYS_CACHE)) {
-    try { return JSON.parse(readFileSync(KEYS_CACHE, 'utf-8')) } catch { /* fallthrough */ }
+    try {
+      const st = statSync(KEYS_CACHE)
+      if (Date.now() - st.mtimeMs < KEYS_CACHE_TTL_MS) {
+        return JSON.parse(readFileSync(KEYS_CACHE, 'utf-8'))
+      }
+    } catch { /* fallthrough */ }
   }
   try {
     const out = join(os.tmpdir(), 'bloma-mv-keys-tmp.json')
@@ -127,8 +135,9 @@ function resolveVendorCall(vendorKey, requestedModel) {
     throw new Error(`模型硬性约束：${vendorKey} 只允许 ${vendor.model}，收到 ${requestedModel}（已拒绝）`)
   }
   const keys = loadKeys()
-  const ch = keys[vendor.channel]
-  if (!ch?.apiKey) throw new Error(`渠道 ${vendor.channel} 无可用 key`)
+  // keyRef 优先（支持同名渠道按 id 取），否则按渠道名
+  const ch = keys[vendor.keyRef || vendor.channel]
+  if (!ch?.apiKey) throw new Error(`渠道 ${vendor.keyRef || vendor.channel} 无可用 key`)
   return { ...vendor, apiKey: ch.apiKey, baseUrl: ch.baseUrl }
 }
 
