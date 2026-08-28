@@ -13,7 +13,9 @@ import { parseBehaviorAssertion, describeEffect, type AssertionPlan } from './be
  *   → 校验页面上确有元素右移（位移/显隐/条目数/文本四类效果探针）；
  * - 解析不出触发器或效果的断言（含默认断言「可见且可交互」）→ 存在性检查兜底
  *   （渲染文本含功能项故事，或页面提供交互控件），与改造前语义同构；
- * - 捕获未捕获异常（pageerror）作为「运行时报错」的失败原因。
+ * - 捕获页面诊断（pageerror 运行时报错 / console error·warning / requestfailed 资源
+ *   加载失败）：**只附加到失败场景的原因里，不改变通过/失败判定**——通过的场景
+ *   即使有 console 噪音也判过，防误杀（随感 39 诊断补盲）。
  *
  * 优雅降级：Playwright 不可导入 / chromium 未安装 / 启动失败 / 导航失败，一律返回
  * `null`，交由 gwt-service 的静态启发式兜底，绝不阻断测试链路。浏览器可用性首次失败
@@ -83,12 +85,76 @@ export function scenarioName(itemId: string, assertion: string): string {
   return `${itemId} ${assertion}`
 }
 
+/** 页面诊断采集（随感 39 补盲）：pageerror / console error·warning / requestfailed 三路。 */
+export interface PageDiagnostics {
+  pageErrors: string[]
+  consoleErrors: string[]
+  requestFailures: string[]
+}
+
+/** 诊断计数快照（per-scenario 差值归属的基准）。 */
+export interface DiagnosticsSnapshot {
+  pageErrors: number
+  consoleErrors: number
+  requestFailures: number
+}
+
+/** 每类诊断的采集上限（防超大页面把失败原因淹没）。 */
+const DIAGNOSTICS_LIMIT = 20
+
+/**
+ * 挂接页面诊断采集：三类事件各自计入独立数组，超上限丢弃（先到先得）。
+ * console 只采 error / warning；文本截 200 字符；URL 截 120 字符。
+ */
+export function attachPageDiagnostics(page: Page): PageDiagnostics {
+  const diag: PageDiagnostics = { pageErrors: [], consoleErrors: [], requestFailures: [] }
+  page.on('pageerror', (error) => {
+    if (diag.pageErrors.length < DIAGNOSTICS_LIMIT) diag.pageErrors.push(error.message)
+  })
+  page.on('console', (msg) => {
+    if (msg.type() !== 'error' && msg.type() !== 'warning') return
+    const text = msg.text().slice(0, 200)
+    if (diag.consoleErrors.length < DIAGNOSTICS_LIMIT) diag.consoleErrors.push(`[${msg.type()}] ${text}`)
+  })
+  page.on('requestfailed', (req) => {
+    const failure = req.failure()?.errorText ?? 'failed'
+    if (diag.requestFailures.length < DIAGNOSTICS_LIMIT)
+      diag.requestFailures.push(`${req.url().slice(0, 120)}（${failure}）`)
+  })
+  return diag
+}
+
+export function snapshotDiagnostics(d: PageDiagnostics): DiagnosticsSnapshot {
+  return {
+    pageErrors: d.pageErrors.length,
+    consoleErrors: d.consoleErrors.length,
+    requestFailures: d.requestFailures.length,
+  }
+}
+
+/** 快照之后新增的诊断（归属当前场景），按 页面报错→控制台→资源失败 排序。 */
+export function newDiagnosticsSince(d: PageDiagnostics, s: DiagnosticsSnapshot): string[] {
+  return [
+    ...d.pageErrors.slice(s.pageErrors).map((t) => `页面运行时报错：${t}`),
+    ...d.consoleErrors.slice(s.consoleErrors).map((t) => `控制台输出：${t}`),
+    ...d.requestFailures.slice(s.requestFailures).map((t) => `资源加载失败：${t}`),
+  ]
+}
+
+/**
+ * 失败原因拼装：诊断只是附加信息（最多 3 条），原失败原因保持前缀不变——
+ * 这也是「诊断不改变判定」的语义锚点（通过的场景根本不会走到这里）。
+ */
+export function composeFailureReason(reason: string, extra: string[]): string {
+  if (extra.length === 0) return reason
+  return `${reason}\n附带诊断（最多 3 条）：\n- ${extra.slice(0, 3).join('\n- ')}`
+}
+
 async function executeScenarios(browser: Browser, input: RunGwtInput): Promise<GwtTestResult> {
   const scenarios = planScenarios(readLastSketchRequirements(input.project_id))
 
   const page = await browser.newPage()
-  const pageErrors: string[] = []
-  page.on('pageerror', (error) => pageErrors.push(error.message))
+  const diagnostics = attachPageDiagnostics(page)
 
   const failureSummary: GwtTestResult['failure_summary'] = []
   let passedCount = 0
@@ -96,17 +162,17 @@ async function executeScenarios(browser: Browser, input: RunGwtInput): Promise<G
     await page.goto(input.preview_url!, { waitUntil: 'domcontentloaded', timeout: 10_000 })
 
     for (const scenario of scenarios) {
-      // 每个场景独立记录运行时报错（触发后新出现的 pageerror 归属当前断言）
-      const errorsBefore = pageErrors.length
+      // 每个场景独立快照（触发后新出现的诊断归属当前断言）
+      const before = snapshotDiagnostics(diagnostics)
       const reason = await runScenario(page, scenario)
       if (reason === undefined) {
         passedCount += 1
         continue
       }
-      const runtimeError = pageErrors.length > errorsBefore ? `页面运行时报错：${pageErrors[errorsBefore]}` : undefined
+      // 诊断只附加不替换：console 噪音/资源失败不改变判定，只在失败时帮修复定位
       failureSummary.push({
         scenario: scenarioName(scenario.item.id, scenario.assertion),
-        reason: runtimeError ?? reason,
+        reason: composeFailureReason(reason, newDiagnosticsSince(diagnostics, before)),
       })
     }
 
