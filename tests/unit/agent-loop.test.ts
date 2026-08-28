@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { runAgentLoop, TOOL_WINDOW_ROUNDS, windowMessages, type AgentLoopInput, type AgentLoopTool, type ToolOutcome } from '../../main/agent-loop'
+import type { AgentEvent } from '../../shared/types'
 import type { SDKMessage } from '../../shared/types'
 import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
 import { getAgentSessionPath } from '../../storage/config-paths'
@@ -494,5 +495,172 @@ describe('F4 窗口钉住首个 test_failed 轮（闭环治理 PR2）', () => {
       .map((turn) => (turn.content as Array<{ type?: string; id?: string }>).find((block) => block.type === 'tool_use')?.id)
       .filter(Boolean)
     expect(toolUseIds).toEqual(['t3', 't4', 't5', 't6', 't7', 't8', 't9', 't10'])
+  })
+})
+
+interface CompactQueryOptions {
+  inputTokens: number
+  handoff: 'text' | 'throw' | 'hang'
+  handoffText?: string
+}
+
+/** 压缩测试 query：带 tools 的正常轮回 toolUse+usage；无 tools 的交接调用按 handoff 行为。 */
+function compactQuery(options: CompactQueryOptions): {
+  query: SDKQuery
+  turnCalls: ConversationTurn[][]
+  handoffCalls: ConversationTurn[][]
+} {
+  let calls = 0
+  const turnCalls: ConversationTurn[][] = []
+  const handoffCalls: ConversationTurn[][] = []
+  const query: SDKQuery = async function* (_prompt, queryOptions) {
+    const index = calls
+    calls += 1
+    if (queryOptions.tools === undefined) {
+      handoffCalls.push((queryOptions.messages ?? []).map((turn) => ({ ...turn })))
+      if (options.handoff === 'throw') throw new Error('渠道 429')
+      if (options.handoff === 'hang') {
+        await new Promise<never>((_resolve, reject) => {
+          queryOptions.signal.addEventListener('abort', () => reject(new Error('AGENT_CANCELLED')))
+        })
+      }
+      yield textMessage(options.handoffText ?? '交接：已完成布局与样式；未解决 GWT 场景 3；下一步修点击。')
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+      return
+    }
+    turnCalls.push((queryOptions.messages ?? []).map((turn) => ({ ...turn })))
+    yield toolUseMessage(`t${index}`, 'echo')
+    yield { type: 'result', subtype: 'success', stop_reason: 'tool_use', usage: { input_tokens: options.inputTokens, output_tokens: 10 } }
+  }
+  return { query, turnCalls, handoffCalls }
+}
+
+function textOf(turn: ConversationTurn | undefined): string {
+  return typeof turn?.content === 'string' ? turn.content : ''
+}
+
+describe('usage 竹节压缩（闭环 PR6）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalThreshold = process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
+  const echo = tool('echo', () => ({ output: 'ok' }))
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-compact-'))
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+    if (originalThreshold === undefined) delete process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
+    else process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = originalThreshold
+  })
+
+  it('超阈值触发：messages 重置为 task+交接（task+2 次交接=3 节），交接调用无 tools 且带交接 system', async () => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    const { query, turnCalls, handoffCalls } = compactQuery({ inputTokens: 5000, handoff: 'text', handoffText: '交接：布局完成，GWT 场景 3 未过，下一步修点击。' })
+    const events: Array<{ type: AgentEvent['type']; payload: Record<string, unknown> }> = []
+    const result = await runAgentLoop(baseInput({
+      query,
+      tools: [echo],
+      maxTurns: 8,
+      sessionId: 'session-compact',
+      publish: (type, payload) => events.push({ type, payload }),
+    }))
+
+    expect(result.status).toBe('turn_limit')
+    // 恰好两次压缩：第 1、2 轮后（封顶），后续轮不再触发
+    const compactions = events.filter((event) => event.type === 'loop_compaction')
+    expect(compactions).toHaveLength(2)
+    expect(compactions[0]!.payload).toMatchObject({ at_turn: 1, compactions: 1 })
+    expect(compactions[1]!.payload).toMatchObject({ at_turn: 2, compactions: 2 })
+
+    // 交接调用：无 tools、system 为交接助手、携带窗口化消息
+    expect(handoffCalls).toHaveLength(2)
+    expect(textOf(handoffCalls[0]![0])).toContain('工程交接助手')
+
+    // 第 2 轮模型调用看到的已是重置后的 messages：task + 第 1 段交接
+    expect(turnCalls[1]).toHaveLength(2)
+    const secondTurnTask = textOf(turnCalls[1]![1])
+    expect(secondTurnTask).toContain('测试任务')
+    expect(secondTurnTask).toContain('【此前进度交接（第 1 段）】')
+    expect(secondTurnTask).toContain('布局完成')
+
+    // 第 3 轮：task + 第 2 段交接（重置会把压缩轮自身的工具对一并抹掉，其内容进交接文档）
+    expect(turnCalls[2]).toHaveLength(2)
+    expect(textOf(turnCalls[2]![1])).toContain('第 2 段')
+    // 第 4 轮：重置后的新工具对（第 3 轮的 t4）重新累积；第 1 轮旧对永久丢弃
+    expect(turnCalls[3]).toHaveLength(4)
+    const turn4ToolIds = turnCalls[3]!
+      .filter((turn) => turn.role === 'assistant')
+      .map((turn) => (turn.content as Array<{ type?: string; id?: string }>).find((b) => b.type === 'tool_use')?.id)
+    expect(turn4ToolIds).toEqual(['t4'])
+
+    // JSONL 审计全量照落：8 轮工具行一条不少
+    expect(readSessionJsonl('session-compact').filter((m) => m.role === 'assistant' && m.content.some((b) => b.type === 'tool_use'))).toHaveLength(8)
+  })
+
+  it('压缩封顶 2 次：阈值持续超额、可触发轮次充足也不超出', async () => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    const { query } = compactQuery({ inputTokens: 999_999, handoff: 'text' })
+    const events: Array<{ type: AgentEvent['type'] }> = []
+    await runAgentLoop(baseInput({
+      query,
+      tools: [echo],
+      maxTurns: 12,
+      sessionId: 'session-compact-cap',
+      publish: (type) => events.push({ type }),
+    }))
+    expect(events.filter((event) => event.type === 'loop_compaction')).toHaveLength(2)
+  })
+
+  it('交接 LLM 失败 → 确定性 fallback（轮次/工具统计/最近进展），不阻断 loop', async () => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    const { query, turnCalls } = compactQuery({ inputTokens: 5000, handoff: 'throw' })
+    const result = await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 6, sessionId: 'session-compact-fallback' }))
+
+    expect(result.status).toBe('turn_limit')
+    const secondTurnTask = textOf(turnCalls[1]![1])
+    expect(secondTurnTask).toContain('【此前进度交接（第 1 段）】')
+    expect(secondTurnTask).toContain('自动交接')
+    expect(secondTurnTask).toContain('echo×1')
+  })
+
+  it('BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS=0 完全关闭（回归锁）：usage 再大也不重置', async () => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '0'
+    const { query, turnCalls } = compactQuery({ inputTokens: 999_999, handoff: 'text' })
+    const events: Array<{ type: AgentEvent['type'] }> = []
+    const result = await runAgentLoop(baseInput({
+      query,
+      tools: [echo],
+      maxTurns: 6,
+      sessionId: 'session-compact-off',
+      publish: (type) => events.push({ type }),
+    }))
+
+    expect(result.status).toBe('turn_limit')
+    expect(events.filter((event) => event.type === 'loop_compaction')).toHaveLength(0)
+    // 最后一轮仍是固定窗口语义（无交接段）
+    const lastCall = turnCalls.at(-1)!
+    expect(JSON.stringify(lastCall)).not.toContain('此前进度交接')
+    expect(lastCall).toHaveLength(1 + 1 + 5 * 2) // system + task + 5 轮对
+  })
+
+  it('abort 在交接等待中正确退出：交接调用挂起，主 signal 取消后立即收尾', async () => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    const { query } = compactQuery({ inputTokens: 5000, handoff: 'hang' })
+    const controller = new AbortController()
+    const events: Array<{ type: AgentEvent['type'] }> = []
+
+    const pending = runAgentLoop(baseInput({
+      query,
+      tools: [echo],
+      maxTurns: 6,
+      sessionId: 'session-compact-abort',
+      signal: controller.signal,
+      publish: (type) => events.push({ type }),
+    }))
+    setTimeout(() => controller.abort(), 30)
+    const result = await pending // 交接等待应随 abort 立即解除，而非阻塞
+
+    expect(result.status).toBe('cancelled')
+    expect(events.filter((event) => event.type === 'loop_compaction')).toHaveLength(0)
   })
 })

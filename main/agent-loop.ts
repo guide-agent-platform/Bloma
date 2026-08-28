@@ -114,6 +114,64 @@ const EVENT_SUMMARY_CHAR_LIMIT = 500
 /** 预算耗尽软着陆：连续 2 轮仍在撞预算（无进展）才终止，给模型收尾总结机会。 */
 const BUDGET_STALL_TURNS = 2
 
+// ---- usage 竹节压缩（闭环 PR6，随感 14/15/38）----
+
+/** 触发阈值缺省（input tokens）；标定依据由 PR8 脚本回填（拍板项 B 首版值）。 */
+const LOOP_COMPACT_INPUT_TOKENS_DEFAULT = 100_000
+/** 每 loop 至多压缩次数：task + 2 次交接 = 3 节（随感 38 竹节≤3 节）。 */
+const LOOP_MAX_COMPACTIONS = 2
+/** 交接调用（无 tools 小请求）的 maxTokens。 */
+const LOOP_HANDOFF_MAX_TOKENS = 1024
+const LOOP_HANDOFF_SYSTEM =
+  '你是工程交接助手。把当前进展压缩成交接文档：已完成/未解决（含失败的测试断言原文）/下一步。不超过 600 字，保留文件名、报错原文等关键细节。'
+
+/** 阈值可环境覆盖（'0' = 关闭）；无效值回缺省。每次 runAgentLoop 读取（便于测试与运行时调整）。 */
+function resolveCompactThreshold(): number {
+  const raw = process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
+  if (raw === undefined || raw.trim() === '') return LOOP_COMPACT_INPUT_TOKENS_DEFAULT
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : LOOP_COMPACT_INPUT_TOKENS_DEFAULT
+}
+
+/** 交接模型不可用时的确定性拼装（零 LLM 兑底）。 */
+function deterministicHandoff(turn: number, toolCalls: Array<{ name: string }>, finalText: string): string {
+  const counts = new Map<string, number>()
+  for (const call of toolCalls) counts.set(call.name, (counts.get(call.name) ?? 0) + 1)
+  const usage = [...counts.entries()].map(([name, count]) => `${name}×${count}`).join('、')
+  const parts = [
+    `【自动交接（交接模型不可用）】已进行到第 ${turn} 轮，工具调用：${usage || '（无）'}。`,
+    finalText.trim() ? `最近说明：${finalText.trim().slice(0, 200)}` : '',
+  ]
+  return parts.filter(Boolean).join('\n')
+}
+
+/** 一次无 tools 的交接小调用（复用 input.query/env 同渠道）；任何失败返回 '' 交由确定性兑底。 */
+async function requestHandoff(input: AgentLoopInput, messages: ConversationTurn[], pinnedTestTurn: number | undefined): Promise<string> {
+  let text = ''
+  try {
+    for await (const sdk of input.query('', {
+      env: input.env,
+      signal: input.signal,
+      sessionId: input.sessionId,
+      maxTokens: LOOP_HANDOFF_MAX_TOKENS,
+      messages: [
+        { role: 'system', content: LOOP_HANDOFF_SYSTEM },
+        // 钉轮一并携带（PR2）：交接文档必须看得到首个测试失败轮的断言原文
+        ...windowMessages(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn),
+      ],
+    })) {
+      if (sdk.type === 'assistant' && sdk.message) {
+        for (const block of sdk.message.content) {
+          if (block.type === 'text' && block.text) text += block.text
+        }
+      }
+    }
+  } catch {
+    return ''
+  }
+  return text.trim()
+}
+
 /** 传给模型的纯文本轮窗口（上下文限界；loop 中纯文本轮罕见，见 windowMessages 注释）。 */
 export const TEXT_WINDOW_TURNS = 8
 /** 传给模型的工具轮对窗口（assistant tool_use + user tool_result 成对保留，绝不拆对）。 */
@@ -209,6 +267,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   let consecutiveBudgetStallTurns = 0
   // 首个 test_failed 轮（窗口钉轮，只钉一次）：修复全程可见第一次测试失败的断言细节
   let pinnedTestTurn: number | undefined
+  // 已压缩次数（竹节压缩，闭环 PR6）
+  let compactions = 0
+  const compactThreshold = resolveCompactThreshold()
 
   for (let turn = 1; turn <= input.maxTurns; turn += 1) {
     if (input.signal.aborted) return loopCancelled(turns, finalText, toolCalls)
@@ -317,6 +378,25 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     consecutiveBudgetStallTurns = budgetStallThisTurn ? consecutiveBudgetStallTurns + 1 : 0
     if (consecutiveBudgetStallTurns >= BUDGET_STALL_TURNS) {
       return { status: 'budget_exhausted', turns, finalText, toolCalls }
+    }
+
+    // ---- usage 竹节压缩（闭环 PR6）：阈值触发交接，重置为 task+交接文档 ----
+    // 钉轮细节随重置进入交接文档（PR2 交互备忘：压缩后 pinnedTestTurn 清空）
+    if (
+      compactThreshold > 0 &&
+      (usage?.input_tokens ?? 0) >= compactThreshold &&
+      compactions < LOOP_MAX_COMPACTIONS &&
+      turn < input.maxTurns - 3
+    ) {
+      if (input.signal.aborted) return loopCancelled(turns, finalText, toolCalls)
+      const handoff = await requestHandoff(input, messages, pinnedTestTurn)
+      if (input.signal.aborted) return loopCancelled(turns, finalText, toolCalls)
+      const summary = handoff || deterministicHandoff(turn, toolCalls, finalText)
+      messages.length = 0
+      messages.push({ role: 'user', content: `${input.task}\n\n【此前进度交接（第 ${compactions + 1} 段）】\n${summary}` })
+      compactions += 1
+      pinnedTestTurn = undefined // 失败细节已进交接文档
+      input.publish('loop_compaction', { at_turn: turn, input_tokens: usage?.input_tokens, compactions })
     }
   }
 

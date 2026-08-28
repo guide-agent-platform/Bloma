@@ -702,6 +702,8 @@ export interface AgentEvent {
     | 'delegation_completed'
     | 'delegation_failed'
     | 'delegation_cancelled'
+    /** usage 竹节压缩（闭环 PR6）：payload 含 at_turn / input_tokens / compactions；messages 已重置为 task+交接文档 */
+    | 'loop_compaction'
   payload: Record<string, unknown>
   created_at: string
 }

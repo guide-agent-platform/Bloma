@@ -272,7 +272,9 @@ type AgentEvent = {
     | "delegation_started"
     | "delegation_completed"
     | "delegation_failed"
-    | "delegation_cancelled";
+    | "delegation_cancelled"
+    /** usage 竹节压缩（闭环 PR6）：at_turn / input_tokens / compactions */
+    | "loop_compaction";
   payload: Record<string, unknown>;
   created_at: string;
 };

@@ -7,6 +7,24 @@
 
 **v1.1 修订说明**：同步 §5 已知待同步项状态（4 项全部已同步），新增 §5.1 目录结构重组记录。按 `workflow.md §2.4` 走修订流程，待评审后回到已确认。
 
+## usage 阈值竹节压缩：Agent Loop 主动交接≤2 段（2026-08-29）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | feat（闭环与上下文治理 PR6） |
+| 模块 | `main/agent-loop.ts`、`shared/types.ts`、api-spec §5.2 AgentEvent |
+
+### 变更内容
+
+- 每轮结束后（下一轮模型调用前）检查 usage：`input_tokens` ≥ 阈值（缺省 100k，`BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS` 可覆盖，`'0'` 关闭）且未达封顶 → 一次无 tools 交接小调用（复用同渠道 query/env，maxTokens 1024，携带窗口化消息含钉轮），把进展压缩成交接文档后重置 messages 为 `task + 【此前进度交接（第 N 段）】`；每 loop 至多 2 次（task+2 次交接=3 节，随感 38）。
+- 交接 LLM 失败 → 确定性 fallback（轮次/工具统计/最近进展，零 LLM）；压缩后 `pinnedTestTurn` 清空（失败细节已进交接文档）。
+- AgentEvent 新增 `loop_compaction`（at_turn / input_tokens / compactions）；渲染端归约 default 分支安全忽略（已核）。
+
+### 影响评估
+
+- 默认阈值 100k 的标定依据由 PR8 脚本回填（拍板项 B 首版值）；线上先观察 agent_loop_turn 埋点再定。
+- JSONL 审计全量照落不受影响；新增单测 5 例（触发/封顶/fallback/关闭回归/abort 退出）。
+
 ## web_research 委派化查询工具 + toolBudget 首个生产接线（2026-08-29）
 
 | 属性 | 值 |
