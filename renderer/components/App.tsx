@@ -28,7 +28,7 @@ import {
   loadSessionHistory,
   loadSnapshots,
 } from './atoms'
-import { refreshChannelsList, channelsListAtom, channelsLoadingAtom, hasUsableChannelsAtom } from './atoms-sprint2'
+import { refreshChannelsList, channelsListAtom, channelsLoadingAtom, hasUsableChannelsAtom, chatInputDraftAtom } from './atoms-sprint2'
 import type { ProjectMode, WorkflowStage } from './atoms'
 import type { DomCollectContextResult } from '../../shared/types'
 
@@ -111,6 +111,8 @@ const AppRoutes: React.FC = () => {
   const setChannels = useSetAtom(channelsListAtom)
   const setChannelsLoading = useSetAtom(channelsLoadingAtom)
   const hasChannels = useAtomValue(hasUsableChannelsAtom)
+  // WC-P2 审查加固（2026-08-29）：草稿随会话切换重置（跨项目不串台）；设置页往返不经过此处，草稿保留语义不变
+  const resetChatInputDraft = useSetAtom(chatInputDraftAtom)
 
   // QW#1：启动即加载渠道列表（Header 三态徽标需要，不只 Settings 页）；Settings 页复用幂等加载
   React.useEffect(() => {
@@ -273,6 +275,7 @@ const AppRoutes: React.FC = () => {
     setSessionId(newSessionId)
     setActiveSessionId(newSessionId)
     setCurrentProject(newProject)
+    resetChatInputDraft('')
 
     // D3 修复：进入工作区后 Agent 发送首条问候消息（写入新会话 family，避开闭包过期）
     appendMessageToSession(newSessionId, {
@@ -286,7 +289,7 @@ const AppRoutes: React.FC = () => {
     setSnapshotsList([])
 
     setRoute('workspace')
-  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, setProjectPreview, setSnapshotsList])
+  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, setProjectPreview, setSnapshotsList, resetChatInputDraft])
 
   // ==================== 从历史列表恢复项目 ====================
 
@@ -302,6 +305,7 @@ const AppRoutes: React.FC = () => {
     setSessionId(resumeSessionId)
     setActiveSessionId(resumeSessionId)
     setCurrentProject(project)
+    resetChatInputDraft('')
 
     setProjectList((prev: Project[]) =>
       prev.map((p) =>
@@ -328,7 +332,7 @@ const AppRoutes: React.FC = () => {
     }
 
     setRoute('workspace')
-  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, restorePreview])
+  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, restorePreview, resetChatInputDraft])
 
   // ==================== 发送消息 ====================
 

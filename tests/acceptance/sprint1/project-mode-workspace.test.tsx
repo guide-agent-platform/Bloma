@@ -480,6 +480,96 @@ describe('零渠道欢迎引导（QW#2 ux-r2 I2）', () => {
     await waitFor(() => expect(screen.getByPlaceholderText(/描述你的想法/)).toBeTruthy())
     expect(screen.queryByText(/还没连接 AI 模型/)).toBeNull()
   })
+
+  it('[S1-UI-028] 零渠道时输入框 placeholder 显示连接引导而非默认文案（WC-P2）', async () => {
+    const store = createStore()
+    window.__jotai_store__ = store
+    window.electronAPI = {
+      project: {
+        create: vi.fn().mockResolvedValue({ ok: true, request_id: 't', data: project('quick') }),
+        list: vi.fn().mockResolvedValue({ ok: true, request_id: 't', data: [] }),
+      },
+      channels: {
+        list: vi.fn().mockResolvedValue({ ok: true, request_id: 't', data: [] }),
+      },
+    } as unknown as ElectronAPI
+
+    render(<Provider store={store}><App /></Provider>)
+    fireEvent.click(screen.getByTestId('mode-card-quick'))
+
+    // 零渠道已决后：placeholder 从「描述你的想法…」切换为连接引导语
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/还没有连接 AI 模型/)).toBeTruthy()
+    })
+    // 引导语给动作指引（去哪连）而不只是陈述问题
+    expect(screen.getByPlaceholderText(/设置页/)).toBeTruthy()
+    expect(screen.queryByPlaceholderText('描述你的想法…')).toBeNull()
+  })
+
+  it('[S1-UI-029] 零渠道时提交首条消息 → 不发送（无 user 气泡），直达设置页，返回后草稿保留（WC-P2）', async () => {
+    const store = createStore()
+    window.__jotai_store__ = store
+    window.electronAPI = {
+      project: {
+        create: vi.fn().mockResolvedValue({ ok: true, request_id: 't', data: project('quick') }),
+        list: vi.fn().mockResolvedValue({ ok: true, request_id: 't', data: [] }),
+      },
+      channels: {
+        list: vi.fn().mockResolvedValue({ ok: true, request_id: 't', data: [] }),
+      },
+    } as unknown as ElectronAPI
+
+    render(<Provider store={store}><App /></Provider>)
+    fireEvent.click(screen.getByTestId('mode-card-quick'))
+
+    const input = await waitFor(() => screen.getByPlaceholderText(/还没有连接 AI 模型/))
+    fireEvent.change(input, { target: { value: '帮我做一个待办应用' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    // ① 直达设置页（不裸报错、不发起无渠道 run）
+    await waitFor(() => {
+      expect(screen.getByText('模型渠道')).toBeTruthy()
+    })
+    // ② 消息未发送：消息流中没有 user 气泡（textarea value 不进 text content）
+    expect(screen.queryByText('帮我做一个待办应用')).toBeNull()
+    // ③ 返回工作区：草稿保留，连好渠道回来即可直接发送
+    fireEvent.click(screen.getByRole('button', { name: '返回工作区' }))
+    await waitFor(() => {
+      const back = screen.getByPlaceholderText(/还没有连接 AI 模型/) as HTMLTextAreaElement
+      expect(back.value).toBe('帮我做一个待办应用')
+    })
+  })
+
+  it('[S1-UI-034] 新建第二个项目时上一项目草稿不串台（跨项目重置，WC-P2 审查加固）', async () => {
+    const store = createStore()
+    window.__jotai_store__ = store
+    window.electronAPI = {
+      project: {
+        create: vi.fn().mockResolvedValue({ ok: true, request_id: 't', data: project('quick') }),
+        list: vi.fn().mockResolvedValue({ ok: true, request_id: 't', data: [] }),
+      },
+      channels: {
+        list: vi.fn().mockResolvedValue({ ok: true, request_id: 't', data: [] }),
+      },
+    } as unknown as ElectronAPI
+
+    render(<Provider store={store}><App /></Provider>)
+    fireEvent.click(screen.getByTestId('mode-card-quick'))
+
+    // 第一个项目里写下草稿（未发送）
+    const input = await waitFor(() => screen.getByPlaceholderText(/还没有连接 AI 模型/)) as HTMLTextAreaElement
+    fireEvent.change(input, { target: { value: '第一个项目的想法' } })
+
+    // workspace → 所有项目 → 新项目 → 模式选择 → 新 workspace
+    fireEvent.click(screen.getByTestId('all-projects-button'))
+    await waitFor(() => expect(screen.getByTestId('new-project-button')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('new-project-button'))
+    fireEvent.click(await waitFor(() => screen.getByTestId('mode-card-quick')))
+
+    // 新项目 workspace：草稿应为空（上一项目未发送草稿不串台）
+    const fresh = await waitFor(() => screen.getByPlaceholderText(/还没有连接 AI 模型/)) as HTMLTextAreaElement
+    expect(fresh.value).toBe('')
+  })
 })
 
 describe('模式卡 a11y（mode-card-a11y，r63 方向 B）', () => {
@@ -509,7 +599,6 @@ describe('模式卡 a11y（mode-card-a11y，r63 方向 B）', () => {
     render(<Provider store={createStore()}><ModeSelectionPage onModeSelected={onSelect} /></Provider>)
 
     const start = screen.getByRole('button', { name: '开始：快速做一个试试' })
-    console.log('START-DISABLED:', start.disabled, 'ARIA:', start.getAttribute('aria-label'))
     fireEvent.click(start)
     await waitFor(() => expect(onSelect).toHaveBeenCalledTimes(1))
 

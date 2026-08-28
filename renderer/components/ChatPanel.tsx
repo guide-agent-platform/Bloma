@@ -1,5 +1,5 @@
 import React from 'react'
-import { atom, useAtomValue } from 'jotai'
+import { atom, useAtom, useAtomValue } from 'jotai'
 import { CardOptions } from './CardOptions'
 import type { CardOption } from './CardOptions'
 import { WaitingFeedback } from './WaitingFeedback'
@@ -18,6 +18,7 @@ import {
   sessionUsageFamily,
 } from './atoms'
 import type { AgentMessage, AgentStreamState, ProjectMode } from './atoms'
+import { hasUsableChannelsAtom, chatInputDraftAtom } from './atoms-sprint2'
 
 export interface ChatPanelProps {
   /** 向导 Agent 发出的卡片选项（由上层从 AgentEvent 中解析） */
@@ -109,7 +110,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     activeSessionId ? agentStreamStateFamily(activeSessionId) : nullStreamFallback,
   )
 
-  const [inputValue, setInputValue] = React.useState('')
+  // WC-P2（2026-08-29）：草稿 atom 化——零渠道提交被拦截直达设置页后，返回工作区输入仍在
+  const [inputValue, setInputValue] = useAtom(chatInputDraftAtom)
+  const hasChannels = useAtomValue(hasUsableChannelsAtom)
   const messagesEndRef = React.useRef<HTMLDivElement>(null)
   const inputRef = React.useRef<HTMLTextAreaElement>(null)
 
@@ -178,6 +181,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const handleSubmit = () => {
     const trimmed = inputValue.trim()
     if (!trimmed) return
+    // WC-P2（2026-08-29）：零渠道提交不裸报错——拦截发送（无渠道 run 必失败），
+    // 直达设置页；草稿保留（atom 化），连接成功返回工作区后输入仍在。
+    if (hasChannels === false) {
+      onOpenSettings?.()
+      return
+    }
     // message-queue（2026-08-27）：生成期间也允许提交——后端排队兜底（queued:true），
     // 消息不丢、run 完成后自动派发。busy 时发送按钮区被停止按钮替换，靠 Enter 提交。
     if (busy) setPendingQueue((q) => [...q, trimmed])
@@ -408,7 +417,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={busy ? '生成中…可以继续输入，会自动排队处理' : '描述你的想法…'}
+            placeholder={
+              busy
+                ? '生成中…可以继续输入，会自动排队处理'
+                : hasChannels === false
+                  ? '还没有连接 AI 模型——发送任意内容，直达设置页完成连接'
+                  : '描述你的想法…'
+            }
             rows={1}
             style={{
               flex: 1,
