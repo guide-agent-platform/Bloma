@@ -678,8 +678,8 @@ export function buildDelegationPrompt(opts: {
   expectedOutput?: string
 }): string {
   const expected = opts.expectedOutput
-    ? `期望输出：${opts.expectedOutput}`
-    : '完成后用简洁文本输出结果摘要（关键发现/完成清单/未完成项与原因）。'
+    ? `期望输出：${opts.expectedOutput}\n（最终回复请以一行「结论:」开头的标记句总结关键信息——标记句会被上下文压缩保留，格式：结论: <要点>）`
+    : '完成后用简洁文本输出结果摘要（关键发现/完成清单/未完成项与原因）。最终回复以一行「结论:」开头的标记句总结（会被上下文压缩保留）。'
   return `协作子任务（role=${opts.role}）：\n${opts.task}\n\n${expected}`
 }
 

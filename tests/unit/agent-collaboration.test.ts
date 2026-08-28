@@ -365,6 +365,20 @@ describe('委派协作 M1', () => {
     expect(prompt).toContain('创建 src/app.js')
     expect(prompt).toContain('期望输出：返回文件清单')
   })
+
+  it('digest 标记句规范：任务书要求最终回复以「结论:」开头标记句（提升 compacting-window 提取命中率）', () => {
+    // compacting-window 的确定性提取只认六类标记句（目标/约束/方案/失败/结论/已核验）；
+    // 子任务书不教子 Agent 用标记句，驱逐时 digest 就抓不到要点（delegation-persistence-port §四-2）
+    const withExpected = buildDelegationPrompt({
+      role: 'implement',
+      task: '创建 src/app.js',
+      expectedOutput: '返回文件清单',
+    })
+    expect(withExpected).toContain('结论:')
+
+    const withoutExpected = buildDelegationPrompt({ role: 'explore', task: '调研目录结构' })
+    expect(withoutExpected).toContain('结论:')
+  })
 })
 
 describe('M2 委派工具（agent-tools 接线，委派协作嫁接方案 §4.2）', () => {
