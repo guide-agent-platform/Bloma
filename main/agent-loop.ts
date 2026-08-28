@@ -3,6 +3,7 @@ import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
 import { canUseTool } from './permission-service'
 import { windowMessagesWithDigest } from './compacting-window'
+import { prepareTaskWithSkills } from './skill-loader'
 import type { ConversationTurn, SDKQuery, ToolDefinition } from './orchestrator'
 
 /**
@@ -198,9 +199,13 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   const budgetUsed: Record<string, number> = {}
   const toolCalls: Array<{ name: string; turn: number }> = []
   // continue 重放（阶段 3）：历史轮次前缀不写入 JSONL（已在子会话文件里），仅进模型上下文
-  const messages: ConversationTurn[] = [...(input.historyTurns ?? []), { role: 'user', content: input.task }]
+  // skill 机制（2026-08-28）：任务含 /skill: 命令时从两级白名单根前置注入（无命令零 IO）。
+  // 注入块只随当条 user 消息进窗口（windowMessagesWithDigest 自然滑出），不污染 system；
+  // JSONL 落注入后文本——审计=模型实际所见，continue 重放一致。
+  const task = (await prepareTaskWithSkills(input.task, input.projectId)).content
+  const messages: ConversationTurn[] = [...(input.historyTurns ?? []), { role: 'user', content: task }]
   // 初始 task 落盘（审计完整性：JSONL 是子会话全量审计，缺首条 user 会让 continue 重放丢任务原文）
-  appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: input.task }])
+  appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: task }])
   const ctx: ToolContext = {
     projectId: input.projectId,
     sessionId: input.sessionId,

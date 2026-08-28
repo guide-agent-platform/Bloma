@@ -1,10 +1,11 @@
 import { restorePromaHome } from '../support/proma-home-guard'
 import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { runAgentLoop, TOOL_WINDOW_ROUNDS, type AgentLoopInput, type AgentLoopTool, type ToolOutcome } from '../../main/agent-loop'
-import type { SDKMessage } from '../../shared/types'
+import type { MessageContentBlock, SDKMessage } from '../../shared/types'
 import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
 import { getAgentSessionPath } from '../../storage/config-paths'
 
@@ -462,5 +463,76 @@ describe('AgentLoop providerType 透传（omit 推广 2026-08-27）', () => {
     }
     await runAgentLoop(baseInput({ query }))
     expect(hasProviderType).toBe(false)
+  })
+})
+
+describe('AgentLoop skill 注入 hook（2026-08-28，skill 机制转正）', () => {
+  // 独立于上方 describe 的 PROMA_HOME 隔离（vitest beforeEach 仅作用于自身 describe 作用域）
+  const savedHome = process.env.PROMA_HOME
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-skill-'))
+  })
+  afterEach(() => {
+    if (savedHome === undefined) delete process.env.PROMA_HOME
+    else process.env.PROMA_HOME = savedHome
+  })
+
+  it('[S4-AGENT-033] 任务含 /skill: 命令 → 首条 user 消息前置 skill block；JSONL 审计同文', async () => {
+    const globalRoot = join(process.env.PROMA_HOME ?? '', 'skills')
+    await mkdir(join(globalRoot, 'sop'), { recursive: true })
+    await writeFile(join(globalRoot, 'sop', 'SKILL.md'), '---\nname: dev-sop\ndescription: 开发 SOP\n---\n\n步骤一：取号', 'utf8')
+    let receivedUserTurns: Array<string | MessageContentBlock[]> = []
+    const query: SDKQuery = async function* (_prompt: string, options: SDKQueryOptions) {
+      receivedUserTurns = (options.messages ?? []).filter((t) => t.role === 'user').map((t) => t.content)
+      yield { type: 'result', subtype: 'success' }
+    }
+    await runAgentLoop(baseInput({ query, task: '执行 /skill:dev-sop' }))
+    const firstUserTurn = String(receivedUserTurns[0] ?? '')
+    expect(firstUserTurn.startsWith('<skill name="dev-sop"')).toBe(true)
+    expect(firstUserTurn.endsWith('执行 /skill:dev-sop')).toBe(true)
+    // JSONL 审计 = 模型实际所见（continue 重放一致）
+    const firstLine = readSessionJsonl('session-loop')[0]
+    expect(firstLine?.role).toBe('user')
+    expect((firstLine?.content[0] as { text?: string })?.text).toContain('步骤一：取号')
+  })
+
+  it('[S4-AGENT-038] JSONL 后续行不含注入块（deepseek high：skill 只随当条消息，不污染后续轮次）', async () => {
+    const globalRoot = join(process.env.PROMA_HOME ?? '', 'skills')
+    await mkdir(join(globalRoot, 'sop2'), { recursive: true })
+    await writeFile(join(globalRoot, 'sop2', 'SKILL.md'), '---\nname: dev-sop2\n---\n\n正文', 'utf8')
+    let turnCount = 0
+    const echo: AgentLoopTool = {
+      name: 'echo',
+      description: 'echo',
+      input_schema: { type: 'object', properties: {} },
+      execute: async () => ({ output: 'ok' }),
+    }
+    const query: SDKQuery = async function* (_prompt: string, options: SDKQueryOptions) {
+      turnCount += 1
+      if (turnCount === 1) {
+        yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'echo', input: {} }] } }
+        yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+        return
+      }
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+    await runAgentLoop(baseInput({ query, task: '执行 /skill:dev-sop2', tools: [echo] }))
+    const lines = readSessionJsonl('session-loop')
+    expect(lines.length).toBeGreaterThanOrEqual(3) // user(注入) + assistant(tool_use) + user(tool_result)
+    for (const [index, line] of lines.entries()) {
+      const text = JSON.stringify(line)
+      if (index === 0) expect(text).toContain('<skill name=')
+      else expect(text).not.toContain('<skill name=')
+    }
+  })
+
+  it('[S4-AGENT-034] 无 /skill: 命令 → task 原样（零注入零回归）', async () => {
+    let receivedFirst: string | MessageContentBlock[] = ''
+    const query: SDKQuery = async function* (_prompt: string, options: SDKQueryOptions) {
+      receivedFirst = (options.messages ?? []).find((t) => t.role === 'user')?.content ?? ''
+      yield { type: 'result', subtype: 'success' }
+    }
+    await runAgentLoop(baseInput({ query, task: '普通任务' }))
+    expect(receivedFirst).toBe('普通任务')
   })
 })
