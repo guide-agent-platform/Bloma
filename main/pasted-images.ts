@@ -10,7 +10,7 @@
 // - 安全：resolvePastedImagePath 严格校验 imageId 格式（两段式、白名单字符），防路径穿越。
 
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ConversationTurn } from './orchestrator'
 import type { MessageContentBlock } from '../shared/types'
@@ -36,6 +36,23 @@ const EXT_TO_MIME: Record<string, string> = {
 export function getPastedImagesDir(sessionId?: string): string {
   const base = join(getPromaHome(), 'pasted-images')
   return sessionId ? join(base, sessionId) : base
+}
+
+/**
+ * 会话删除清理（clipboard-paste P2 挂账兑现，r73）：递归删除该会话的粘贴图目录。
+ * 挂点：session-service.cleanOrphanSessions（孤儿会话 JSONL 删除同步）。
+ * 幂等：目录不存在返回 false 不抛错（删除主流程零感知）；仅删自己会话目录（不误删契约 096）。
+ */
+export function cleanupPastedImages(sessionId: string): boolean {
+  if (!sessionId) return false
+  const dir = getPastedImagesDir(sessionId)
+  if (!existsSync(dir)) return false
+  try {
+    rmSync(dir, { recursive: true, force: true })
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**

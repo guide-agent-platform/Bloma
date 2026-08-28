@@ -3,12 +3,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
+  cleanupPastedImages,
   MAX_HYDRATED_IMAGES,
   getPastedImagesDir,
   hydrateMessagesImageBlocks,
   resolvePastedImagePath,
   savePastedImage,
 } from '../../main/pasted-images'
+import { createProject, deleteProject } from '../../main/project-service'
+import { recordSessionActivity } from '../../main/session-service'
 import type { ConversationTurn } from '../../main/orchestrator'
 import type { MessageContentBlock } from '../../shared/types'
 import { restorePromaHome } from '../support/proma-home-guard'
@@ -123,5 +126,45 @@ describe('pasted-images 水合层（API 边界统一）', () => {
     const blocks = out[0].content as MessageContentBlock[]
     expect(blocks[0].text).toBe('[图片已丢失]')
     expect(blocks[1].source?.data).toBe(PNG_1PX_BASE64)
+  })
+})
+
+describe('会话删除清理钩子（clipboard-paste P2 挂账，r73）', () => {
+  it('[S4-AGENT-096] cleanupPastedImages 递归删除该会话粘贴图目录；其他会话不受影响（不误删契约）', () => {
+    const s1 = savePastedImage('sess-del', PNG_1PX_BASE64, 'png')
+    savePastedImage('sess-del', PNG_1PX_BASE64, 'png') // 同会话第二张
+    const keep = savePastedImage('sess-keep', PNG_1PX_BASE64, 'png')
+    expect(existsSync(resolvePastedImagePath(s1.imageId))).toBe(true)
+
+    expect(cleanupPastedImages('sess-del')).toBe(true)
+
+    // 该会话目录整体消失（含全部粘贴图）
+    expect(existsSync(getPastedImagesDir('sess-del'))).toBe(false)
+    // 其他会话不误删
+    expect(existsSync(resolvePastedImagePath(keep.imageId))).toBe(true)
+    // 幂等：再删一次返回 false（目录已不存在），不抛错
+    expect(cleanupPastedImages('sess-del')).toBe(false)
+  })
+
+  it('[S4-AGENT-097] 故障注入：目录不存在/非法 sessionId → 不抛错静默（删除主流程零感知）', () => {
+    expect(() => cleanupPastedImages('never-existed')).not.toThrow()
+    expect(cleanupPastedImages('never-existed')).toBe(false)
+    expect(() => cleanupPastedImages('')).not.toThrow()
+  })
+})
+
+describe('项目删除清理集成（R1 deepseek P1 挂点修复，r73）', () => {
+  it('[S4-AGENT-098] deleteProject → 该项目全部会话的粘贴图目录同步回收', () => {
+    const project = createProject({ request_id: 'req-pm', mode: 'quick', initial_message: '粘贴图清理' })
+    const sessionId = 'sess-of-deleted-project'
+    recordSessionActivity(sessionId, project.project_id)
+    savePastedImage(sessionId, PNG_1PX_BASE64, 'png')
+    savePastedImage('sess-other-project', PNG_1PX_BASE64, 'png')
+
+    deleteProject({ request_id: 'req-del', project_id: project.project_id })
+
+    // 项目删除 → 其会话粘贴图目录被回收；其他会话不受影响
+    expect(existsSync(getPastedImagesDir(sessionId))).toBe(false)
+    expect(existsSync(getPastedImagesDir('sess-other-project'))).toBe(true)
   })
 })

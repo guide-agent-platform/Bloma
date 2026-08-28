@@ -27,6 +27,7 @@ import type {
 import { getAgentSessionPath, getAgentSessionsIndexPath } from '../storage/config-paths'
 import { readJsonFile, writeJsonFile } from '../storage/json-store'
 import { listProjects, updateProject } from './project-service'
+import { cleanupPastedImages } from './pasted-images'
 
 interface SessionsIndex {
   version: number
@@ -93,6 +94,8 @@ export function cleanOrphanSessions(): SessionCleanOrphansResult {
   for (const orphan of orphans) {
     const jsonl = getAgentSessionPath(orphan.session_id)
     if (existsSync(jsonl)) rmSyncWithRetry(jsonl, { force: true })
+    // 粘贴图清理（clipboard-paste P2 兑现，r73）：孤儿会话的粘贴图目录同步回收（幂等静默）
+    cleanupPastedImages(orphan.session_id)
   }
   index.sessions = index.sessions.filter((item) => validIds.has(item.project_id))
   writeSessions(index)

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import { rmSyncWithRetry } from './fs-retry'
+import { cleanupPastedImages } from './pasted-images'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import type {
   ConfirmSketchInput,
@@ -343,6 +344,8 @@ function removeProjectSessions(projectId: string): void {
   for (const session of matched) {
     const jsonl = getAgentSessionPath(session.session_id)
     if (existsSync(jsonl)) rmSyncWithRetry(jsonl, { force: true })
+    // 粘贴图清理（clipboard-paste R1 挂点修复，r73）：项目删除时其全部会话的粘贴图同步回收
+    cleanupPastedImages(session.session_id)
   }
 }
 
