@@ -870,11 +870,14 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
     if (aborted()) return { started: true, prd_written: prdWritten }
     let reviewEnv: Record<string, string> | undefined = pending.env
     try {
+      // 备用链限路由配置域（闭环 PR4）：审查不静默落到任意弱模型；主渠道坏且无配置
+      // 备用时留 pending.env（向导轮同渠道）——请求失败自然走规则门降级，口径一致
       const resolution = resolveChannelEnv({
         channelId: pending.channel_id,
         category: 'prd',
         projectId: pending.project_id,
         sessionId: pending.session_id,
+        fallbackScope: 'routed-only',
       })
       if (resolution.env) reviewEnv = resolution.env
     } catch {

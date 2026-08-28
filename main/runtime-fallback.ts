@@ -152,12 +152,21 @@ function resolvePrimaryChannel(opts: { channelId?: string; category: DocumentCat
  * 运行时后 MVP 类别必传）时，`supports_tools === false` 的模型按「不可用」走备用链；
  * 备用也全不支持则如实返回 `tools_unsupported`，绝不静默降级。不传时行为与改造前完全一致。
  */
+/**
+ * 备用渠道查找域（闭环 PR4）：'all'（缺省，现状）= 路由 fallback_channel_ids +
+ * 全部启用渠道兜底；'routed-only' = 只走类别路由 fallback_channel_ids，找不到就
+ * 如实返回不可用——judge 审查族专用，防「终审静默落到任意弱模型」。主渠道可用时
+ * 两种 scope 行为完全一致（备用链不触发）。
+ */
+export type FallbackScope = 'all' | 'routed-only'
+
 export function resolveChannelEnv(opts: {
   channelId?: string
   category: DocumentCategory
   projectId?: string
   sessionId?: string
   requireTools?: boolean
+  fallbackScope?: FallbackScope
 }): ChannelEnvResolution {
   const primarySelection = resolvePrimaryChannel(opts)
   const primary = primarySelection.channel
@@ -189,9 +198,9 @@ export function resolveChannelEnv(opts: {
     }
   }
 
-  const backup = pickBackupChannelEnv(context, opts.requireTools)
+  const backup = pickBackupChannelEnv(context, opts.requireTools, opts.fallbackScope)
   if (backup) {
-    recordChannelSwitch({ context, reason: attempt.reason, to: backup })
+    recordChannelSwitch({ context, reason: attempt.reason, to: backup, fallbackScope: opts.fallbackScope })
     return {
       env: attachFallbackContext(backup.env, { ...context, channelId: backup.channel.id }),
       channel: backup.channel,
@@ -218,11 +227,14 @@ export interface BackupChannelEnv {
 export function pickBackupChannelEnv(
   context: Pick<RuntimeFallbackContext, 'channelId' | 'category'>,
   requireTools?: boolean,
+  fallbackScope?: FallbackScope,
 ): BackupChannelEnv | undefined {
   const fallbackOrder = getCategoryFallbackChannelIds(context.category)
   // getChannelByIdRaw 已含 isOursChannel 校验、getCategoryFallbackChannelIds 已过滤禁用；
-  // listEnabledRawChannels 全为启用项目渠道——候选只需跳过主渠道与已见过（保序去重）
-  const candidates = [...fallbackOrder.map((id) => getChannelByIdRaw(id)), ...listEnabledRawChannels()]
+  // listEnabledRawChannels 全为启用项目渠道——候选只需跳过主渠道与已见过（保序去重）。
+  // routed-only（闭环 PR4）：去掉全部启用渠道尾巴——审查族只信用户显式配置的备用链。
+  const routedCandidates = fallbackOrder.map((id) => getChannelByIdRaw(id))
+  const candidates = fallbackScope === 'routed-only' ? routedCandidates : [...routedCandidates, ...listEnabledRawChannels()]
   const seen = new Set<string>([context.channelId])
   for (const channel of candidates) {
     if (!channel || seen.has(channel.id)) continue
@@ -338,6 +350,7 @@ export function recordChannelSwitch(record: {
   reason: string
   to: BackupChannelEnv
   statusCode?: number
+  fallbackScope?: FallbackScope
 }): void {
   const fromName = channelDisplayName(record.context.channelId)
   const why =
@@ -373,6 +386,7 @@ export function recordChannelSwitch(record: {
         category: record.context.category,
         reason: record.reason,
         status_code: record.statusCode,
+        fallback_scope: record.fallbackScope ?? 'all',
       },
     },
   })

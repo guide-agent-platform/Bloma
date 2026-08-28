@@ -11,6 +11,7 @@ import {
   resolveChannelEnv,
   resetChannelSwitchThrottleForTests,
 } from '../../main/runtime-fallback'
+import { resetCategoryRoutingForTests, setCategoryRoutingForTests } from '../../main/category-routing'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import type { SDKMessage } from '../../shared/types'
 
@@ -394,5 +395,161 @@ describe('runtime channel fallback · 故障分类', () => {
     const abortError = new Error('The operation was aborted')
     abortError.name = 'AbortError'
     expect(isInfrastructureFailure(abortError)).toBe(false)
+  })
+})
+
+describe('runtime channel fallback · 审查族 fallbackScope（闭环 PR4）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-runtime-fallback-scope-'))
+    resetChannelSwitchThrottleForTests()
+    resetCategoryRoutingForTests()
+  })
+
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+    resetCategoryRoutingForTests()
+  })
+
+  /** 主渠道 key-a 密钥不可解（模拟 safeStorage 密钥变更），其余渠道可用。 */
+  function brokenPrimaryStorage(): void {
+    setSafeStorageAdapter({
+      isEncryptionAvailable: () => true,
+      encryptString: (value) => Buffer.from(`enc:${value}`, 'utf8'),
+      decryptString: (value) => {
+        const text = value.toString('utf8')
+        if (text === 'enc:key-a') throw new Error('Error while decrypting the ciphertext')
+        return text.replace(/^enc:/, '')
+      },
+    })
+  }
+
+  function seedJudgeChannels(): { primary: { id: string; name: string }; bystander: { id: string; name: string } } {
+    brokenPrimaryStorage()
+    const primary = createChannel({
+      name: '审查主渠道',
+      provider_type: 'anthropic',
+      base_url: 'https://judge-primary.example',
+      api_key: 'key-a',
+      models: [{ id: 'm1', name: 'model-a', enabled: true }],
+    })
+    const bystander = createChannel({
+      name: '无关启用渠道',
+      provider_type: 'anthropic',
+      base_url: 'https://bystander.example',
+      api_key: 'key-x',
+      models: [{ id: 'mx', name: 'model-x', enabled: true }],
+    })
+    return { primary, bystander }
+  }
+
+  it("routed-only：无路由配置时不兜底全部启用渠道，如实 unusableReason（终审不落弱模型）", () => {
+    const { primary, bystander } = seedJudgeChannels()
+    expect(bystander.id).toBeTruthy() // 无关启用渠道存在，旧逻辑会兜到它
+
+    const resolution = resolveChannelEnv({
+      channelId: primary.id,
+      category: 'prd',
+      projectId: 'p-scope',
+      sessionId: 's-scope-1',
+      fallbackScope: 'routed-only',
+    })
+    expect(resolution.env).toBeUndefined()
+    expect(resolution.channel).toBeUndefined()
+    expect(resolution.unusableReason).toBe('decrypt_failed')
+    // 没有切换发生：不落 runtime_channel_switch 决策行
+    expect(readSystemLines('s-scope-1').filter((line) => line.includes('runtime_channel_switch'))).toHaveLength(0)
+  })
+
+  it('routed-only：路由配置的 fallback_channel_ids 命中 → 切配置域内备用，决策含 fallback_scope', () => {
+    const { primary, bystander } = seedJudgeChannels()
+    setCategoryRoutingForTests({ prd: { fallback_channel_ids: [bystander.id] } })
+
+    const resolution = resolveChannelEnv({
+      channelId: primary.id,
+      category: 'prd',
+      projectId: 'p-scope',
+      sessionId: 's-scope-2',
+      fallbackScope: 'routed-only',
+    })
+    expect(resolution.channel?.id).toBe(bystander.id)
+    expect(resolution.modelName).toBe('model-x')
+
+    const decision = readSystemLines('s-scope-2').find((line) => line.startsWith('[decision]') && line.includes('runtime_channel_switch'))
+    expect(decision).toContain('无关启用渠道')
+    expect(decision).toContain('routed-only')
+  })
+
+  it('routed-only：配置的备用也不可用 → 不兜底其它启用渠道（配置域内找不到就是找不到）', () => {
+    const { primary } = seedJudgeChannels()
+    // 配置一个同样密钥损坏的备用渠道 + 一个健康但未配置的旁观渠道
+    const brokenBackup = createChannel({
+      name: '坏密钥备用',
+      provider_type: 'anthropic',
+      base_url: 'https://broken-backup.example',
+      api_key: 'key-broken',
+      models: [{ id: 'mb', name: 'model-b', enabled: true }],
+    })
+    // brokenBackup 的密钥也解不开：切换 adapter 让 key-broken 也抛错
+    setSafeStorageAdapter({
+      isEncryptionAvailable: () => true,
+      encryptString: (value) => Buffer.from(`enc:${value}`, 'utf8'),
+      decryptString: (value) => {
+        const text = value.toString('utf8')
+        if (text === 'enc:key-a' || text === 'enc:key-broken') throw new Error('Error while decrypting the ciphertext')
+        return text.replace(/^enc:/, '')
+      },
+    })
+    setCategoryRoutingForTests({ prd: { fallback_channel_ids: [brokenBackup.id] } })
+
+    const resolution = resolveChannelEnv({
+      channelId: primary.id,
+      category: 'prd',
+      projectId: 'p-scope',
+      sessionId: 's-scope-3',
+      fallbackScope: 'routed-only',
+    })
+    expect(resolution.env).toBeUndefined()
+    expect(resolution.unusableReason).toBe('decrypt_failed')
+  })
+
+  it('回归：缺省与显式 all 均兜底全部启用渠道（现状不变）', () => {
+    const { primary, bystander } = seedJudgeChannels()
+
+    const byDefault = resolveChannelEnv({ channelId: primary.id, category: 'prd', projectId: 'p-scope', sessionId: 's-scope-4a' })
+    expect(byDefault.channel?.id).toBe(bystander.id)
+
+    const explicitAll = resolveChannelEnv({ channelId: primary.id, category: 'prd', projectId: 'p-scope', sessionId: 's-scope-4b', fallbackScope: 'all' })
+    expect(explicitAll.channel?.id).toBe(bystander.id)
+  })
+
+  it('主渠道可用时 routed-only 零影响（备用链不触发，无切换决策）', () => {
+    workingSafeStorage()
+    const primary = createChannel({
+      name: '健康审查主渠道',
+      provider_type: 'anthropic',
+      base_url: 'https://judge-primary.example',
+      api_key: 'key-a',
+      models: [{ id: 'm1', name: 'model-a', enabled: true }],
+    })
+    createChannel({
+      name: '无关启用渠道',
+      provider_type: 'anthropic',
+      base_url: 'https://bystander.example',
+      api_key: 'key-x',
+      models: [{ id: 'mx', name: 'model-x', enabled: true }],
+    })
+
+    const resolution = resolveChannelEnv({
+      channelId: primary.id,
+      category: 'prd',
+      projectId: 'p-scope',
+      sessionId: 's-scope-5',
+      fallbackScope: 'routed-only',
+    })
+    expect(resolution.channel?.id).toBe(primary.id)
+    expect(resolution.modelName).toBe('model-a')
+    expect(readSystemLines('s-scope-5').filter((line) => line.includes('runtime_channel_switch'))).toHaveLength(0)
   })
 })

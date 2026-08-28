@@ -1241,7 +1241,8 @@ async function evaluateOnce(input: JudgeReviewInput): Promise<JudgeVerdict> {
   const verdict = judgeOnce(input)
   if (verdict.verdict === 'return' || !input.query) return verdict
 
-  // 渠道：优先 M5 类别路由（prd 审查类，可指快模型），失败回退跳过
+  // 渠道：优先 M5 类别路由（prd 审查类，可指快模型），失败回退跳过；
+  // 备用链限路由配置域（闭环 PR4）：终审绝不静默落到任意弱模型，找不到就 skip 留痕
   let env: Record<string, string> | undefined
   try {
     const resolution = resolveChannelEnv({
@@ -1249,6 +1250,7 @@ async function evaluateOnce(input: JudgeReviewInput): Promise<JudgeVerdict> {
       category: 'prd',
       projectId: input.project_id,
       sessionId: input.session_id,
+      fallbackScope: 'routed-only',
     })
     env = resolution.env ?? undefined
   } catch {
