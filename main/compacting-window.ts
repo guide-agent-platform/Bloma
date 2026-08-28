@@ -57,8 +57,11 @@ function turnPlainLines(turn: ConversationTurn): string {
 }
 
 /**
- * 带 digest 的窗口化：与 windowMessages 同一保留算法；被驱逐轮次提取标记句生成
- * digest 消息（插在 head 后）。无关键信息则与 windowMessages 完全一致（零浪费，原型⑫）。
+ * 带 digest 的窗口化：与 windowMessages 同一保留算法；被驱逐轮次提取标记句生成 digest，
+ * **并入 head（首轮 task）的 content 末尾**。多厂商审查 fail 点修复（2026-08-28 deepseek）：
+ * 独立 digest 消息（user 角色）插在 user task 后会造成连续两条 user 消息，透传 Anthropic
+ * API 有角色交替风险；合并后消息数与结构零变化，仅 head 文本追加。
+ * 无关键信息则与 windowMessages 完全一致（零浪费，原型⑫）。
  */
 export function windowMessagesWithDigest(
   messages: ConversationTurn[],
@@ -81,5 +84,10 @@ export function windowMessagesWithDigest(
     lines.shift()
   }
   const digest = `${DIGEST_HEADER_PREFIX} · 滑出窗口的关键信息自动提取，只读参考]\n${lines.join('\n')}`
-  return [head, { role: 'user', content: digest }, ...kept]
+  // 合并进 head：string content 直接追加；块数组 content 追加 text 块（防御性，head 实际为 string task）
+  const headWithDigest: ConversationTurn =
+    typeof head.content === 'string'
+      ? { ...head, content: `${head.content}\n\n${digest}` }
+      : { ...head, content: [...head.content, { type: 'text' as const, text: digest }] }
+  return [headWithDigest, ...kept]
 }

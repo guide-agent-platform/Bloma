@@ -278,7 +278,7 @@ describe('runAgentLoop（PR2 L1）', () => {
     const result = await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 12, sessionId: 'session-window' }))
     expect(result.status).toBe('turn_limit')
     const lastCall = receivedMessages.at(-1)!
-    // compacting-window（2026-08-28）：本场景全为 'ok' 无标记句 → 纯噪音零浪费，无 digest——
+    // compacting-window（2026-08-28）：本场景全为 'ok' 无标记句 → 纯噪音零浪费，head 无 digest——
     // 长度 = system + task + 最近 8 轮 tool 对（有标记句的 digest 场景见下个用例）
     expect(lastCall.length).toBe(2 + TOOL_WINDOW_ROUNDS * 2)
     // 窗口内容断言：保留最近 8 轮（第 5~12 轮，id t3..t10），早期轮（t0..t2）被剪掉
@@ -304,13 +304,13 @@ describe('runAgentLoop（PR2 L1）', () => {
     const result = await runAgentLoop(baseInput({ query, tools: [seqEcho], maxTurns: 13, sessionId: 'session-digest' }))
     expect(result.status).toBe('completed')
     const lastCall = receivedMessages.at(-1)!
-    const digestTurn = lastCall.find(
-      (t) => t.role === 'user' && typeof t.content === 'string' && t.content.includes('[早期轮次简报'),
-    )
-    expect(digestTurn).toBeDefined()
-    expect(digestTurn!.content as string).toContain('失败: 首轮探测超时，方案 A 已排除')
-    // digest 在 task（head）之后、活跃窗口之前（lastCall[0]=system，[1]=task，[2]=digest）
-    expect(lastCall.indexOf(digestTurn!)).toBe(2)
+    // digest 并入 head content（审查 fail 点修复：不新增独立消息，避免连续 user）——
+    // 长度仍 = system + task + 最近 8 轮 tool 对
+    expect(lastCall.length).toBe(2 + TOOL_WINDOW_ROUNDS * 2)
+    const headContent = lastCall[1].content
+    expect(typeof headContent).toBe('string')
+    expect(headContent as string).toContain('[早期轮次简报')
+    expect(headContent as string).toContain('失败: 首轮探测超时，方案 A 已排除')
     // JSONL 全量审计不受窗口/digest 影响
     const jsonl = readSessionJsonl('session-digest')
     expect(jsonl.filter((m) => m.role === 'assistant')).toHaveLength(13)
