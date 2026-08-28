@@ -77,6 +77,11 @@ export interface AgentLoopInput {
   system: string
   /** 初始 user 消息（任务指令） */
   task: string
+  /**
+   * 历史轮次前缀（delegation continue 重放，2026-08-28）：作为 messages 开头传入模型，
+   * task 仍是最新 user 轮。不写入 JSONL——重放轮已在子会话文件里，审计只记新轮次。
+   */
+  historyTurns?: ConversationTurn[]
   tools: AgentLoopTool[]
   query: SDKQuery
   env: Record<string, string>
@@ -192,7 +197,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   const toolByName = new Map(input.tools.map((tool) => [tool.name, tool]))
   const budgetUsed: Record<string, number> = {}
   const toolCalls: Array<{ name: string; turn: number }> = []
-  const messages: ConversationTurn[] = [{ role: 'user', content: input.task }]
+  // continue 重放（阶段 3）：历史轮次前缀不写入 JSONL（已在子会话文件里），仅进模型上下文
+  const messages: ConversationTurn[] = [...(input.historyTurns ?? []), { role: 'user', content: input.task }]
+  // 初始 task 落盘（审计完整性：JSONL 是子会话全量审计，缺首条 user 会让 continue 重放丢任务原文）
+  appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: input.task }])
   const ctx: ToolContext = {
     projectId: input.projectId,
     sessionId: input.sessionId,

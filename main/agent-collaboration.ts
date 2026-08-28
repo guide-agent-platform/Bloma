@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { appendDelegationSettle } from './delegation-persistence'
+import { appendDelegationSettle, buildReplayTurns, loadChildSessionSnapshot } from './delegation-persistence'
 import { recordSessionActivity } from './session-service'
 import type { AgentEvent, PromaPermissionMode } from '../shared/types'
 import type { SDKQuery } from './orchestrator'
+import type { ConversationTurn } from './orchestrator'
 import {
   runAgentLoop,
   type AgentLoopResult,
@@ -303,6 +304,8 @@ async function runChildLoop(opts: {
   record: DelegationRecord
   prompt: string
   role: DelegationRole
+  /** continue 续跑重放的历史轮次（阶段 3）；startDelegation 全新会话不传 */
+  replayTurns?: ConversationTurn[]
 }): Promise<AgentLoopResult> {
   const { parent, parentCtx, record, prompt, role } = opts
   const childRequestId = randomUUID()
@@ -310,6 +313,7 @@ async function runChildLoop(opts: {
   return runAgentLoop({
     system: buildChildSystemPrompt(parentCtx.system, role),
     task: prompt,
+    historyTurns: opts.replayTurns,
     tools: childToolsBuilder(parent.projectId, role, parentCtx.editFormat),
     query: parentCtx.query,
     env: parentCtx.env,
@@ -556,7 +560,18 @@ export function continueDelegation(parent: ToolContext, delegationId: string, ta
   record.startedAt = Date.now()
 
   const prompt = buildDelegationPrompt({ role: record.role, task: trimmedTask })
-  void runChildLoop({ parent, parentCtx, record, prompt, role: record.role }).then(
+  // 阶段 3 续跑重放：终态子会话 JSONL 历史读回 + follow-up 末位 user 轮——
+  // 模型看到完整旧上下文（资产复用），而非只有新指令的重开；超窗由 compacting-window 兑底
+  let replayTurns: ConversationTurn[] | undefined
+  try {
+    const snap = loadChildSessionSnapshot(record.childSessionId)
+    if (snap.lastSettle && snap.messages.length > 0) {
+      replayTurns = buildReplayTurns(snap.messages, trimmedTask)
+    }
+  } catch (error) {
+    console.warn('[delegation-persistence] 续跑历史读回失败，退化为无历史续跑:', error)
+  }
+  void runChildLoop({ parent, parentCtx, record, prompt, role: record.role, replayTurns }).then(
     (result) => settleChildLoop(record, result),
     (error) => settleChildLoopError(record, error),
   )

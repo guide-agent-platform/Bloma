@@ -291,6 +291,34 @@ describe('runAgentLoop（PR2 L1）', () => {
     expect(jsonl.filter((m) => m.role === 'assistant' && m.content.some((b) => b.type === 'tool_use'))).toHaveLength(12)
   })
 
+  it('historyTurns：重放历史进模型上下文且不重复写 JSONL（delegation continue 阶段 3）', async () => {
+    const echo = tool('echo', () => ({ output: 'ok' }))
+    const { query, receivedMessages } = scriptedQuery([[textMessage('已读取历史，继续')]])
+    const historyTurns: ConversationTurn[] = [
+      { role: 'user', content: '目标: 修复登录超时' },
+      { role: 'assistant', content: [{ type: 'text', text: '根因是 dns 阻塞' }] },
+    ]
+    const result = await runAgentLoop(baseInput({
+      query,
+      tools: [echo],
+      task: '把 dns 预热同样加到注册页',
+      historyTurns,
+      sessionId: 'session-replay',
+    }))
+    expect(result.status).toBe('completed')
+    const firstCall = receivedMessages[0]!
+    // system + 重放历史 2 轮 + task（最新 user 轮）
+    expect(firstCall.length).toBe(1 + 2 + 1)
+    expect(firstCall[1]!.content).toBe('目标: 修复登录超时')
+    expect(firstCall[3]!.content).toBe('把 dns 预热同样加到注册页')
+    // JSONL 审计只记新轮次，重放历史不重复落盘
+    const jsonl = readSessionJsonl('session-replay')
+    const replayedInJsonl = jsonl.filter(
+      (m) => Array.isArray(m.content) && (m.content as Array<{ text?: string }>).some((b) => b.text === '目标: 修复登录超时'),
+    )
+    expect(replayedInJsonl).toHaveLength(0)
+  })
+
   it('compacting-window：早期轮关键标记句滑出后以 digest 消息保留在窗口头（长循环不失忆）', async () => {
     // echo 工具返回 seq 文本作为 tool_result 内容——第 1 轮 result 含失败标记句
     const seqEcho = tool('echo', (input) => ({ output: String(input['seq'] ?? '') }))

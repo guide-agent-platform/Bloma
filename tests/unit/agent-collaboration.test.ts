@@ -613,6 +613,39 @@ describe('M3 提问冒泡 / 续跑（委派协作嫁接方案 §6）', () => {
     expect(summary.result_summary).toContain('初稿完成')
   })
 
+  it('continue 重放：子 loop 模型上下文含旧会话历史 + follow-up（阶段 3 资产复用）', async () => {
+    // 捕获子 loop 的 query messages：首轮记录发起请求
+    let capturedMessages: unknown[][] = []
+    const capturingQuery: SDKQuery = async function* (_prompt, options) {
+      capturedMessages.push((options.messages ?? []).map((t) => JSON.parse(JSON.stringify(t))))
+      yield textMessage('已基于旧历史续跑')
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+    setChildToolsBuilder(() => [hang])
+    registerParent(toolUseQuery('hang'))
+    const first = startDelegation(parentContext(), { task: '目标: 旧会话任务第一轮' })
+    findDelegation(parentSessionId, first.delegation_id)!.abort.abort()
+    // 等待 abort 强制收尾（ABORT_SETTLE_TIMEOUT_MS 5s 太长；直接置终态由 settle 语义覆盖）
+    const firstRecord = findDelegation(parentSessionId, first.delegation_id)!
+    await Promise.race([firstRecord.completion, new Promise((r) => setTimeout(r, 150))])
+
+    setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
+    registerParent(capturingQuery)
+    const done = startDelegation(parentContext(), { task: '目标: 完整跑完的旧任务', role: 'explore' })
+    await findDelegation(parentSessionId, done.delegation_id)!.completion
+
+    capturedMessages = []
+    continueDelegation(parentContext(), done.delegation_id, '基于旧历史继续深化')
+    await findDelegation(parentSessionId, done.delegation_id)!.completion
+
+    // 续跑第一次模型调用：[system, ...重放历史, task/follow-up]
+    expect(capturedMessages.length).toBeGreaterThan(0)
+    const firstCall = capturedMessages[0]!
+    const asText = JSON.stringify(firstCall)
+    expect(asText).toContain('目标: 完整跑完的旧任务') // 旧历史被重放进模型上下文
+    expect(asText).toContain('基于旧历史继续深化') // follow-up 在场
+  })
+
   it('continue 工具接线：已终结委派经 continue_delegation 工具续跑', async () => {
     registerParent(oneShotQuery('初版完成'))
     const created = startDelegation(parentContext(), { task: '初版', role: 'review' })

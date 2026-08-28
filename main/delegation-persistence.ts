@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { appendJsonLine } from '../storage/json-store'
 import { getAgentSessionPath, getAgentSessionsIndexPath } from '../storage/config-paths'
-import type { AgentSessionRecord } from '../shared/types'
+import type { AgentSessionRecord, MessageContentBlock } from '../shared/types'
+import type { ConversationTurn } from './orchestrator'
 
 /**
  * Delegation 子会话持久化与恢复（delegation-persistence-port.md 阶段 1+2，2026-08-28）：
@@ -110,4 +111,72 @@ export function restoreDelegationRecord(parentSessionId: string, delegationId: s
     ...(resultSummary ? { resultSummary } : {}),
     ...(error ? { error } : {}),
   }
+}
+
+// ==========================================================================
+// 阶段 3：continue 续跑输入构造（delegation-persistence-port.md §三-阶段 3）
+// ==========================================================================
+
+export interface ChildSessionMessage {
+  role: 'assistant' | 'user'
+  content: MessageContentBlock[]
+}
+
+export interface ChildSessionSettle {
+  status: Exclude<RestoredDelegationStatus, 'running'>
+  resultSummary?: string
+  error?: string
+}
+
+export interface ChildSessionSnapshot {
+  messages: ChildSessionMessage[]
+  /** null = 无 settle 行（重启时子任务仍在跑）——上层据此拒绝 continue */
+  lastSettle: ChildSessionSettle | null
+}
+
+/**
+ * 读回子会话 JSONL：对话消息与 settle 终态行分离。
+ * settle 行（appendDelegationSettle 写入）不是对话消息，不进重放。
+ */
+export function loadChildSessionSnapshot(childSessionId: string): ChildSessionSnapshot {
+  const path = getAgentSessionPath(childSessionId)
+  if (!existsSync(path)) return { messages: [], lastSettle: null }
+  const lines = readFileSync(path, 'utf8')
+    .split('\n')
+    .filter((line) => line.trim().length > 0)
+  const messages: ChildSessionMessage[] = []
+  let lastSettle: ChildSessionSettle | null = null
+  for (const line of lines) {
+    let parsed: Record<string, unknown>
+    try {
+      parsed = JSON.parse(line) as Record<string, unknown>
+    } catch {
+      continue
+    }
+    if (typeof parsed[SETTLE_FIELD] === 'string') {
+      lastSettle = {
+        status: parsed[SETTLE_FIELD] as ChildSessionSettle['status'],
+        resultSummary: typeof parsed.result_summary === 'string' ? parsed.result_summary : undefined,
+        error: typeof parsed.error === 'string' ? parsed.error : undefined,
+      }
+      continue
+    }
+    if ((parsed.role === 'assistant' || parsed.role === 'user') && Array.isArray(parsed.content)) {
+      messages.push({ role: parsed.role, content: parsed.content as MessageContentBlock[] })
+    }
+  }
+  return { messages, lastSettle }
+}
+
+/**
+ * 续跑输入构造：重放历史轮次 + follow-up 追加为末条 user 轮。
+ * （runAgentLoop historyTurns 同构——task/follow-up 恒为最新 user 轮，历史在前。）
+ */
+export function buildReplayTurns(
+  messages: ChildSessionMessage[],
+  followUp: string,
+): ConversationTurn[] {
+  const turns: ConversationTurn[] = messages.map((m) => ({ role: m.role, content: m.content }))
+  turns.push({ role: 'user', content: [{ type: 'text', text: followUp }] })
+  return turns
 }
