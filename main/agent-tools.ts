@@ -8,6 +8,7 @@ import { findProject, readLastSketchRequirements } from './project-service'
 import { getSandboxLogs, runSandbox } from './platform-services'
 import { runGwtScenarios } from './gwt-service'
 import { planScenarios, scenarioName } from './gwt-runner'
+import { decideWrite, estimateTokenCount } from './usage-guard'
 import { runSecurityScan } from './security-scan'
 import type { AgentLoopTool, ToolContext, ToolOutcome } from './agent-loop'
 import {
@@ -447,6 +448,16 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     },
     execute: async (toolInput, ctx) => {
       if (typeof toolInput.content !== 'string') return { output: '缺少 content 参数（文件完整内容）。', isError: true }
+      // 费用守卫 Hook 3（usage-guard，2026-08-28）：超大单次写入预拦截——整文件覆盖语义下
+      // 一次写 16k+ token 内容通常意味着失控（上下文爆掉才失败的预防线），当场引导分块。
+      const estTokens = estimateTokenCount(toolInput.content)
+      if (decideWrite(toolInput.content) === 'chunk') {
+        return {
+          output: `单次写入内容过大（约 ${estTokens} tokens，阈值 16000）。请拆分为多次写入：先写骨架文件，再用 edit_file 逐段补充内容。`,
+          isError: true,
+          detail: { est_tokens: estTokens, threshold: 16000 },
+        }
+      }
       const project = findProject(projectId)
       const resolved = resolveInsideProject(project.root_path, toolInput.path)
       if (!resolved.ok) return { output: resolved.error, isError: true }
