@@ -90,6 +90,19 @@ describe('buildSessionIndex（索引与增量）', () => {
     expect((): void => JSON.parse(raw)).not.toThrow()
   })
 
+  it('[S4-RECALL-014] assistant 字符串 content 兼容（r57 low 池：Proma app 旧格式 assistant 纯文本）', async () => {
+    // Proma app 早期/简化格式：assistant 的 content 是纯字符串而非块数组
+    const dir = join(getPromaHome(), 'agent-sessions')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 's-str.jsonl'), JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: '字符串形态的助手回复：重试采用指数退避' }, _createdAt: Date.now() }) + '\n', 'utf8')
+    const { index, totalMessages } = await buildSessionIndex()
+    expect(totalMessages).toBe(1)
+    expect(index.files[0]?.msgs[0]?.text).toContain('指数退避')
+    // 可被检索命中
+    const hits = await searchSessions(index, '指数退避', 3)
+    expect(hits).toHaveLength(1)
+  })
+
   it('[S4-RECALL-006] 会话目录不存在 → 空索引零异常（首次启动/测试环境）', async () => {
     const { index } = await buildSessionIndex()
     expect(index.files).toHaveLength(0)

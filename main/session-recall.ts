@@ -83,7 +83,8 @@ function extractTexts(line: string): ExtractedText | null {
   const content = (j.message as { content?: unknown } | undefined)?.content ?? j.content
   const at = (j._createdAt as number | undefined) ?? (j.timestamp as number | undefined) ?? 0
   if (!Array.isArray(content)) {
-    if (typeof content === 'string' && role === 'user') return { role, text: content.slice(0, 2000), at }
+    // 字符串形态（r57 low 池采纳）：user 与 assistant 均兼容（assistant 纯文本旧格式此前被漏索引）
+    if (typeof content === 'string' && content.trim()) return { role, text: content.slice(0, 2000), at }
     return null
   }
   const texts = content
