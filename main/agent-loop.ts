@@ -237,9 +237,11 @@ ${skillPrep.content}` : skillPrep.content
       inputTokens: usageTotals.inputTokens,
       outputTokens: usageTotals.outputTokens,
       turnsWithUsage: usageTotals.turnsWithUsage,
+      // 全块口径（r55 low 池采纳）：tool_result 内容与 tool_use input 都占上下文，
+      // text-only 口径在渠道全盲时会严重低估占用。
       estContextTokens: estimateTokenCount(
         messages
-          .map((m) => (typeof m.content === 'string' ? m.content : textOfBlocks(m.content)))
+          .map((m) => (typeof m.content === 'string' ? m.content : estimateBlocksText(m.content)))
           .join('\n'),
       ),
     },
@@ -498,6 +500,18 @@ function isLoopCancelled(error: unknown, signal: AbortSignal): boolean {
 function errorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
   return message.length > 500 ? `${message.slice(0, 500)}…` : message
+}
+
+/** 占用估算文本：text 正文 + tool_result 内容 + tool_use input 序列化（全块口径）。 */
+function estimateBlocksText(blocks: MessageContentBlock[]): string {
+  return blocks
+    .map((b) => {
+      if (b.type === 'text') return b.text ?? ''
+      if (b.type === 'tool_result') return typeof b.content === 'string' ? b.content : ''
+      if (b.type === 'tool_use') return JSON.stringify(b.input ?? {})
+      return ''
+    })
+    .join('\n')
 }
 
 function textOfBlocks(blocks: MessageContentBlock[]): string {

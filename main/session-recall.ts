@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { createReadStream, existsSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { join } from 'node:path'
 import { getPromaHome } from '../storage/config-paths'
@@ -138,7 +138,11 @@ export async function buildSessionIndex(force = false): Promise<{ index: Session
   }
   const index: SessionIndex = { builtAt: Date.now(), files: indexed }
   try {
-    writeFileSync(indexPath, JSON.stringify(index))
+    // 原子写（r55 low 池采纳）：先写同目录 tmp 再 rename，并发读者只会看到旧/新完整内容，
+    // 不会读到半写 JSON（Windows 同卷 rename 原子）。残留 tmp 由下次构建覆盖清理。
+    const tmpPath = `${indexPath}.${process.pid}.tmp`
+    writeFileSync(tmpPath, JSON.stringify(index))
+    renameSync(tmpPath, indexPath)
   } catch {
     // 索引写失败不影响本次检索结果（内存中已可用）
   }

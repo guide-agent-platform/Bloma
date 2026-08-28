@@ -78,6 +78,18 @@ describe('buildSessionIndex（索引与增量）', () => {
     expect(second.index.files).toHaveLength(1)
   })
 
+  it('[S4-RECALL-013] 索引原子写：无半写残留（tmp 清理），索引文件可完整解析（r55 low 池：并发读安全）', async () => {
+    const { readdirSync } = await import('node:fs')
+    seedSession('s-at.jsonl', [blomaLine('user', '原子写测试')])
+    await buildSessionIndex()
+    const homeFiles = readdirSync(getPromaHome())
+    // 落盘后不允许残留 .tmp* 中间文件（写完即 rename 原子替换）
+    expect(homeFiles.some((f) => f.includes('.tmp'))).toBe(false)
+    // 索引可完整 JSON 解析（并发读者不会读到半写内容）
+    const raw = (await import('node:fs')).readFileSync(join(getPromaHome(), '.session-recall-index.json'), 'utf8')
+    expect((): void => JSON.parse(raw)).not.toThrow()
+  })
+
   it('[S4-RECALL-006] 会话目录不存在 → 空索引零异常（首次启动/测试环境）', async () => {
     const { index } = await buildSessionIndex()
     expect(index.files).toHaveLength(0)
