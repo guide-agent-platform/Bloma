@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ChatPanel } from '../../../renderer/components/ChatPanel'
 import {
   activeAgentSessionIdAtom,
+  agentMessagesFamily,
   agentStreamStateFamily,
   workflowStageAtom,
 } from '../../../renderer/agent-atoms'
@@ -122,7 +123,49 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
     expect((input as HTMLTextAreaElement).value).toBe('')
   })
 
-  it('排队气泡派发后出列：run 结束（不再 busy）时不再显示', () => {
+  it('排队气泡派发后出列：消息真实进流时不再显示', () => {
+    Element.prototype.scrollIntoView = vi.fn()
+
+    const store = createStore()
+    store.set(activeAgentSessionIdAtom, 'session-1')
+    store.set(agentStreamStateFamily('session-1'), { running: true, events: [], content: '' })
+    window.__jotai_store__ = store
+
+    const onSend = vi.fn()
+    const { rerender, container } = render(
+      <Provider store={store}>
+        <ChatPanel onSendMessage={onSend} />
+      </Provider>,
+    )
+
+    const input = screen.getByRole('textbox')
+    fireEvent.change(input, { target: { value: '生成完成后看看这个' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(screen.getByText('生成完成后看看这个')).toBeTruthy()
+
+    // 后端队列派发：run 结束 + 用户消息进流（agentMessagesFamily）→ 气泡出列
+    act(() => {
+      store.set(agentStreamStateFamily('session-1'), { running: false, events: [], content: '' })
+      store.set(agentMessagesFamily('session-1'), [
+        {
+          role: 'user',
+          content: [{ type: 'text', text: '生成完成后看看这个' }],
+          timestamp: Date.now(),
+        } as never,
+      ])
+    })
+    rerender(
+      <Provider store={store}>
+        <ChatPanel onSendMessage={onSend} />
+      </Provider>,
+    )
+    // 排队气泡出列（排队态消失），真实消息气泡接管——文本仍可见但不再是排队回显
+    expect(container.querySelector('[data-ai-id=queued-message]')).toBeNull()
+    expect(screen.queryByText('排队中')).toBeNull()
+    expect(screen.getAllByText('生成完成后看看这个')).toHaveLength(1)
+  })
+
+  it('run 间隙抖动不误清：busy 短暂解除但消息未进流时气泡仍在（审查 fail 点加固）', () => {
     Element.prototype.scrollIntoView = vi.fn()
 
     const store = createStore()
@@ -138,11 +181,11 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
     )
 
     const input = screen.getByRole('textbox')
-    fireEvent.change(input, { target: { value: '生成完成后看看这个' } })
+    fireEvent.change(input, { target: { value: '抖动场景消息' } })
     fireEvent.keyDown(input, { key: 'Enter' })
-    expect(screen.getByText('生成完成后看看这个')).toBeTruthy()
+    expect(screen.getByText('抖动场景消息')).toBeTruthy()
 
-    // run 结束：running→false，后端队列派发完成，排队气泡出列
+    // run A 结束（busy→false）但消息尚未派发进流（异步间隙）——气泡必须保留
     act(() => {
       store.set(agentStreamStateFamily('session-1'), { running: false, events: [], content: '' })
     })
@@ -151,7 +194,7 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
         <ChatPanel onSendMessage={onSend} />
       </Provider>,
     )
-    expect(screen.queryByText('生成完成后看看这个')).toBeNull()
-    expect(screen.queryByText('排队中')).toBeNull()
+    expect(screen.getByText('抖动场景消息')).toBeTruthy()
+    expect(screen.getByText('排队中')).toBeTruthy()
   })
 })

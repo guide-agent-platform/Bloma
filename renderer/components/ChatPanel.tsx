@@ -150,11 +150,25 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   // message-queue UI 收尾（ux-chatpanel-review P1-①，2026-08-28）：busy 时提交的消息由后端
   // 排队兜底，但派发前不在 messages 流里——本地回显灰化「排队中」气泡，确认消息没丢。
-  // run 结束（busy→false）后端队列已派发完，气泡出列（真实消息进流接管）。
+  // 出列以「消息真实进流」为派发完成信号；不用 busy→false 兜底清空——run 间隙抖动会
+  // 误清尚未派发的气泡（多厂商审查 aliyun fail 点，2026-08-28 加固）。
   const [pendingQueue, setPendingQueue] = React.useState<string[]>([])
+  const dispatchedTexts = React.useMemo(() => {
+    const set = new Set<string>()
+    for (const message of messages) {
+      if (message.role !== 'user') continue
+      const text = message.content
+        .filter((block) => block.type === 'text')
+        .map((block) => block.text)
+        .join('\n')
+      if (text) set.add(text)
+    }
+    return set
+  }, [messages])
   React.useEffect(() => {
-    if (!busy) setPendingQueue([])
-  }, [busy])
+    if (dispatchedTexts.size === 0) return
+    setPendingQueue((queue) => queue.filter((t) => !dispatchedTexts.has(t)))
+  }, [dispatchedTexts])
 
   const handleSubmit = () => {
     const trimmed = inputValue.trim()
