@@ -538,3 +538,16 @@ describe('agent-tools（PR2 L2）', () => {
     })
   })
 })
+
+describe('web_research 工具面（闭环 PR5）', () => {
+  it('仅 parent 可见：research/implement/explore 子代理无 web_research（防递归委派）', () => {
+    const parentNames = buildAgentTools({ projectId: 'p' }).map((tool) => tool.name)
+    expect(parentNames).toContain('web_research')
+    expect(parentNames).toHaveLength(17)
+
+    for (const role of ['research', 'explore', 'implement', 'review', 'custom'] as const) {
+      const names = buildAgentTools({ projectId: 'p', role }).map((tool) => tool.name)
+      expect(names).not.toContain('web_research')
+    }
+  })
+})

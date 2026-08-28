@@ -7,6 +7,23 @@
 
 **v1.1 修订说明**：同步 §5 已知待同步项状态（4 项全部已同步），新增 §5.1 目录结构重组记录。按 `workflow.md §2.4` 走修订流程，待评审后回到已确认。
 
+## web_research 委派化查询工具 + toolBudget 首个生产接线（2026-08-29）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | feat（闭环与上下文治理 PR5） |
+| 模块 | `main/agent-tools.ts`、`main/programming-orchestrator.ts`、api-spec §12.12 |
+
+### 变更内容
+
+- 新增 `web_research` 工具（仅 parent，子代理无此工具防递归委派）：派出 role=research 只读子代理联网调研，阻塞等待收敛（上限 90s，超时停止子代理）后回灌 ≤4000 字精干结论（剥「子代理状态」头行），主 loop 上下文不进原文大段；等待经 withAbort 接入主 loop 取消信号，用户点停止立即解除。
+- `AgentLoopInput.toolBudget` 首个生产接线：`runMvpViaAgentLoop` 传 `{ web_research: 4 }`，超限走既有 budgetExhausted 软着陆。
+
+### 影响评估
+
+- parent 工具面 16→17，仅新增不改旧；api-spec 新增 §12.12。
+- 新增单测 8 例（agent-collaboration 7 + agent-tools 工具面 1），角色裁剪断言同步。
+
 ## 收敛路径统一收口：点选/让渡接入 PRD 后置链（排查报告批次1，🔴1/🔴2）（2026-08-27）
 
 | 属性 | 值 |

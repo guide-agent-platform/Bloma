@@ -963,6 +963,25 @@ MCP 工具由 Agent SDK 在 main 进程侧调用，权限由 `PermissionService.
 }
 ```
 
+### 12.12 `web_research`（Agent Loop 委派化联网调研，仅 parent）
+
+针对一个问题或 URL 派出只读调研子代理（role=research，工具面含 web_fetch），阻塞等待收敛后回灌精干结论；主 loop 上下文只进 ≤4000 字总结，原文抓取全部发生在子代理（随感 43「查资料 fork 出去」）。
+
+```json
+{
+  "input": {
+    "question": "Playwright 如何监听 iframe 内的 console 报错",
+    "focus": "可用的 API 与版本要求"
+  },
+  "output": {
+    "output": "调研结论：\n（≤4000 字要点 + 出处 URL，已剥子代理状态头行）",
+    "detail": { "delegation_id": "string" }
+  }
+}
+```
+
+规则：仅主 agent loop（role=parent）可用，子代理无此工具（防递归委派；research 子代理自己用 web_fetch）；收敛上限 90s，超时停止子代理并如实告知（isError）；子代理失败/取消不拋错，建议改用 web_fetch；生产 toolBudget 每 loop 限 4 次（超限软着陆）。
+
 ---
 
 ## 13. 权限等级

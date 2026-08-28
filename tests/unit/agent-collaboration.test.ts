@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { SDKMessage } from '../../shared/types'
 import type { SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
 import { createToolState, type AgentLoopTool, type ToolContext } from '../../main/agent-loop'
-import { buildAgentTools } from '../../main/agent-tools'
+import { buildAgentTools, setWebResearchTimeoutForTests, WEB_RESEARCH_TIMEOUT_MS } from '../../main/agent-tools'
 import {
   MAX_RUNNING_DELEGATIONS_PER_PARENT,
   answerDelegationQuestion,
@@ -228,6 +228,7 @@ describe('委派协作 M1', () => {
     expect(parentTools).toEqual([
       ...full,
       'delegate_agent',
+      'web_research',
       'wait_for_delegations',
       'get_delegation_results',
       'stop_delegation',
@@ -354,6 +355,7 @@ describe('M2 委派工具（agent-tools 接线，委派协作嫁接方案 §4.2�
     const full = ['read_file', 'list_files', 'grep', 'web_fetch', 'write_file', 'edit_file', 'run_preview', 'run_gwt_tests', 'run_security_scan']
     const delegationTools = [
       'delegate_agent',
+      'web_research',
       'wait_for_delegations',
       'get_delegation_results',
       'stop_delegation',
@@ -801,5 +803,98 @@ describe('审计修复回归（审计报告 2026-08-25：P1-1/P1-2/P2-4/P2-5/P2-
     expect(calls).toBe(1)
     // ③ 父上下文已注销：再派新委派被拒
     expect(() => startDelegation(parentContext(), { task: '新任务' })).toThrow(/未找到父循环上下文/)
+  })
+})
+
+describe('web_research 委派化查询（闭环 PR5）', () => {
+  const hang: AgentLoopTool = {
+    name: 'hang',
+    description: '挂起',
+    input_schema: { type: 'object', properties: {} },
+    execute: () => new Promise<never>(() => {}),
+  }
+
+  beforeEach(() => {
+    parentSessionId = `session-web-research-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
+  })
+  afterEach(() => {
+    for (const record of listDelegations(parentSessionId)) {
+      if (record.status === 'running') record.abort.abort()
+    }
+    unregisterParentLoopContext(parentSessionId)
+    setWebResearchTimeoutForTests(WEB_RESEARCH_TIMEOUT_MS)
+  })
+
+  function webResearch(): AgentLoopTool {
+    const tool = buildAgentTools({ projectId: 'project-parent', role: 'parent' }).find((candidate) => candidate.name === 'web_research')
+    if (!tool) throw new Error('web_research 不在 parent 工具面')
+    return tool
+  }
+
+  it('正常路径：research 委派收敛 → 剥「子代理状态」头行回灌结论，detail 带委派 id', async () => {
+    registerParent(oneShotQuery('Vue 3 与 React 18 均可满足；小包体积优先选 Vue 3。出处：https://example.com/compare'))
+    const outcome = await webResearch().execute(
+      { question: '前端框架选型对比', focus: '包体积' },
+      parentContext(),
+    )
+    expect(outcome.isError).toBeUndefined()
+    expect(outcome.output.startsWith('调研结论：\n')).toBe(true)
+    expect(outcome.output).toContain('Vue 3')
+    // 头行已剥：不给模型看内部运行指标
+    expect(outcome.output).not.toContain('子代理状态')
+    expect(outcome.detail).toEqual({ delegation_id: expect.any(String) })
+    // 委派角色确为只读调研
+    const record = listDelegations(parentSessionId)[0]!
+    expect(record.role).toBe('research')
+  })
+
+  it('结论截断：子代理正文超 4000 字时回灌内容封顶', async () => {
+    registerParent(oneShotQuery('长'.repeat(9000)))
+    const outcome = await webResearch().execute({ question: '长文调研' }, parentContext())
+    expect(outcome.isError).toBeUndefined()
+    expect(outcome.output.length).toBeLessThanOrEqual('调研结论：\n'.length + 4000)
+  })
+
+  it('超时未收敛：停止子代理并如实告知，不拋错', async () => {
+    setWebResearchTimeoutForTests(60)
+    setChildToolsBuilder(() => [hang])
+    registerParent(toolUseQuery('hang'))
+
+    const outcome = await webResearch().execute({ question: '慢调研' }, parentContext())
+    expect(outcome.isError).toBe(true)
+    expect(outcome.output).toContain('未收敛')
+    expect(listDelegations(parentSessionId)[0]!.status).toBe('cancelled')
+  })
+
+  it('子代理失败（渠道异常）→ isError 且建议改用 web_fetch', async () => {
+    const failingQuery: SDKQuery = async function* () {
+      throw new Error('渠道 429')
+    }
+    registerParent(failingQuery)
+
+    const outcome = await webResearch().execute({ question: '会失败的调研' }, parentContext())
+    expect(outcome.isError).toBe(true)
+    expect(outcome.output).toContain('未成功')
+    expect(outcome.output).toContain('web_fetch')
+    expect(listDelegations(parentSessionId)[0]!.status).toBe('failed')
+  })
+
+  it('abort 中止等待：主 loop signal 取消时等待立即解除（不等 90s 超时）', async () => {
+    setChildToolsBuilder(() => [hang])
+    registerParent(toolUseQuery('hang'))
+    const controller = new AbortController()
+
+    const pending = webResearch().execute({ question: '会被取消的调研' }, parentContext({ signal: controller.signal }))
+    setTimeout(() => controller.abort(), 30)
+    const outcome = await pending // withAbort 接线：应在毫秒级 resolve，而非阻塞到超时
+    expect(outcome.isError).toBe(true)
+    expect(outcome.output).toContain('取消')
+  })
+
+  it('缺少 question 参数 → isError', async () => {
+    const outcome = await webResearch().execute({}, parentContext())
+    expect(outcome.isError).toBe(true)
+    expect(outcome.output).toContain('缺少 question')
   })
 })

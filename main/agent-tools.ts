@@ -8,7 +8,7 @@ import { getSandboxLogs, runSandbox } from './platform-services'
 import { runGwtScenarios } from './gwt-service'
 import { planScenarios, scenarioName } from './gwt-runner'
 import { runSecurityScan } from './security-scan'
-import type { AgentLoopTool, ToolContext, ToolOutcome } from './agent-loop'
+import { withAbort, type AgentLoopTool, type ToolContext, type ToolOutcome } from './agent-loop'
 import {
   NET_FETCH_DEFAULT_CHARS,
   NET_FETCH_MAX_BYTES,
@@ -31,13 +31,15 @@ import {
   waitForDelegations,
   type DelegationRole,
   type DelegationSummary,
+  type StartDelegationResult,
 } from './agent-collaboration'
 
 /**
  * Agent Loop 工具集（L2，AgentLoop 改造方案 §4.3；委派协作嫁接方案 §4.2）。
  *
- * 主 agent（role='parent'）9 个受控 ACI 工具（8 本地 + web_fetch 联网只读）+ delegate_agent
- * 委派工具；子 agent 按 role 裁剪（explore/research 只读，implement/review/custom 全量 9，无委派工具）。
+ * 主 agent（role='parent'）9 个受控 ACI 工具（8 本地 + web_fetch 联网只读）+ 委派工具族
+ * （delegate_agent / web_research 委派化调研 / wait·get·stop / ask·answer·continue）；
+ * 子 agent 按 role 裁剪（explore/research 只读，implement/review/custom 全量 9，无委派工具）。
  * 输出契约一律按 SWE-agent ACI 规范：截断、结构化、空输出显式反馈（「执行成功，无输出」）。
  * 编辑护栏前置：write_file / edit_file 落盘前做语法/结构校验，错误当场回给模型（lint guardrail）。
  *
@@ -54,6 +56,17 @@ import {
 
 /** 测试失败后的写入类工具修复预算（同构旧管道 test_repair_count ≤ 3）。 */
 export const EDIT_BUDGET_AFTER_TEST_FAILURE = 3
+
+/** web_research 回灌主 loop 的结论上限（字符）。 */
+const WEB_RESEARCH_MAX_CHARS = 4000
+/** web_research 调研子代理的收敛上限（毫秒）。 */
+export const WEB_RESEARCH_TIMEOUT_MS = 90_000
+let webResearchTimeoutMs = WEB_RESEARCH_TIMEOUT_MS
+
+/** 测试 seam：缩短 web_research 等待上限（超时/取消用例不等真实 90s）。 */
+export function setWebResearchTimeoutForTests(ms: number): void {
+  webResearchTimeoutMs = ms
+}
 
 /** 系统接管文件（与 mvp-engine-llm SYSTEM_FILES 同集）：模型写入会被拒绝。 */
 const SYSTEM_FILES = new Set(['package.json', 'static-server.js'])
@@ -710,6 +723,67 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     },
   }
 
+  // 委派化联网调研（闭环 PR5，随感 43「查资料 fork 出去」）：主 loop 上下文只进
+  // ≤4000 字精干结论，原文抓取全部发生在 research 子代理（其工具面含 web_fetch）。
+  const web_research: AgentLoopTool = {
+    name: 'web_research',
+    description:
+      '针对一个问题或一个 URL 派出只读调研子代理：抓取/检索后总结成精干结论返回（≤4000 字），' +
+      '不占用当前上下文。适合查文档、找方案、比对做法；只需抓单页原文时用 web_fetch。' +
+      '参数：question（要查清的问题，或直接给 URL）、focus（关注点，可选）。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: '要查清的问题或目标 URL' },
+        focus: { type: 'string', description: '重点关注哪方面（可选）' },
+      },
+      required: ['question'],
+    },
+    execute: async (toolInput, ctx) => {
+      const question = String(toolInput.question ?? '').trim()
+      if (!question) return { output: '缺少 question 参数。', isError: true }
+      const focus = typeof toolInput.focus === 'string' && toolInput.focus.trim() ? toolInput.focus.trim() : undefined
+      let started: StartDelegationResult | undefined
+      try {
+        started = startDelegation(ctx, {
+          task:
+            `联网调研并总结（你是只读调研子代理，不能修改任何文件）：\n问题：${question}` +
+            `${focus ? `\n重点关注：${focus}` : ''}\n` +
+            `要求：用 web_fetch 抓取必要页面后，输出不超过 2000 字的中文结论（要点+出处 URL），不要贴原文大段。`,
+          role: 'research',
+          expectedOutput: '≤2000 字中文结论 + 出处 URL',
+        })
+        // withAbort：主 loop 取消时立即解除等待（waitForDelegations 本体不监听外部
+        // signal，见 abb1a19f 缺陷①的同类问题）；孤儿清理由 runMvpViaAgentLoop 的
+        // finally disposeParentDelegationState 兑底。
+        const summaries = await withAbort(
+          waitForDelegations(ctx, { strategy: 'all', delegationIds: [started.delegation_id], timeout_ms: webResearchTimeoutMs }),
+          ctx.signal,
+        )
+        const summary = summaries[0]
+        if (!summary || summary.status === 'running') {
+          stopDelegation(ctx.sessionId, started.delegation_id)
+          return {
+            output: `调研子代理 ${Math.round(webResearchTimeoutMs / 1000)}s 内未收敛，已停止。请基于已有信息继续，或缩小问题后重试。`,
+            isError: true,
+          }
+        }
+        if (summary.status !== 'completed' || !summary.result_summary) {
+          return { output: `调研子代理未成功（status=${summary.status}）。可改用 web_fetch 直接抓取。`, isError: true }
+        }
+        // 剥「子代理状态：」头行（同 review-delegation），内部运行指标不进模型上下文
+        const body = summary.result_summary.split('\n').slice(1).join('\n').trim()
+        return { output: `调研结论：\n${body.slice(0, WEB_RESEARCH_MAX_CHARS)}`, detail: { delegation_id: started.delegation_id } }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (ctx.signal.aborted || message.includes('AGENT_CANCELLED')) {
+          return { output: `调研等待已随主任务取消中止（委派 ${started?.delegation_id ?? '未知'}，由平台收尾停止）。`, isError: true }
+        }
+        return { output: `调研委派失败：${message}。可改用 web_fetch 直接抓取。`, isError: true }
+      }
+    },
+  }
+
   // 子 agent（委派子会话）专属：向主 agent 挂起提问（M3 冒泡）。主 agent 用 answer_delegation_question 代答。
   const ask_delegation_question: AgentLoopTool = {
     name: 'ask_delegation_question',
@@ -812,6 +886,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     run_gwt_tests,
     run_security_scan,
     delegate_agent,
+    web_research,
     wait_for_delegations,
     get_delegation_results,
     stop_delegation,

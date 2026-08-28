@@ -28,6 +28,9 @@ import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled }
 import { readPrimaryIntent, recordSessionActivity } from './session-service'
 import { runAgentLoop, type AgentLoopResult } from './agent-loop'
 import { buildAgentTools } from './agent-tools'
+
+/** web_research 每 loop 调用预算（闭环 PR5）：调研委派限 4 次，防无节制外呼。 */
+const WEB_RESEARCH_BUDGET = 4
 import { disposeParentDelegationState, registerParentLoopContext, setChildToolsBuilder } from './agent-collaboration'
 import { categoryTemperature } from './model-resolution'
 import type { SDKQuery, ToolDefinition } from './orchestrator'
@@ -722,6 +725,9 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     result = await runAgentLoop({
     system: buildLoopSystemWithOverride(backplane, editFormat),
     task: buildAgentLoopTask(backplane, input.mode),
+    // toolBudget 首个生产接线（闭环 PR5）：web_research 每次都 fork 调研子代理，
+    // 限 4 次防长 loop 无节制外呼；超限走既有 budgetExhausted 软着陆
+    toolBudget: { web_research: WEB_RESEARCH_BUDGET },
     tools: buildAgentTools({
       projectId: input.project_id,
       editFormat,
