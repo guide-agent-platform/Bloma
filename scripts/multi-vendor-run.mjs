@@ -45,9 +45,8 @@ const KEYS_CACHE = join(os.tmpdir(), 'bloma-multi-vendor-keys.json')
 const KEYS_CACHE_TTL_MS = 30 * 60 * 1000 // 缓存 30 分钟过期（防止渠道变更后旧 key 持续生效——2026-08-28 踩坑：旧号到限但缓存命中旧 key 报 429）
 
 // ── 硬性三模型（唯一允许）─────────────────────────────
-// ⚠️ 2026-08-28 应急：DeepSeek 官方渠道 402（Insufficient Balance），
-// deepseek-v4-flash 暂由阿里云云工渠道承载（同款模型，OpenAI 协议）。
-// DeepSeek 充值后改回：channel:'DeepSeek', api:'anthropic'。
+// ⚠️ 2026-08-28 用户决定：DeepSeek 官方渠道已弃用（删除），deepseek-v4-flash
+// 永久由阿里云云工渠道承载（同款模型，OpenAI 协议）。glm 固定用智谱新号 97b3075f。
 const HARD_MODELS = {
   deepseek: { channel: '阿里云云工', model: 'deepseek-v4-flash', api: 'openai' },
   zhipu: { channel: '智谱 Coding Plan', keyRef: 'id:97b3075f', model: 'glm-5.3-flash', api: 'anthropic' },
@@ -260,7 +259,9 @@ async function runVerdict(prompt, evidenceFile, outFile, shared) {
     }
   }
   const verdicts = Object.values(results).map((r) => r.output?.verdict).filter(Boolean)
-  const majority = verdicts.filter((v) => v === 'pass').length >= Math.ceil(verdicts.length / 2) ? 'pass' : verdicts.length ? 'fail' : 'unknown'
+  // 空洞真值修复（v6 ①，2026-08-28）：verdicts 为空（全厂商失败）时 0>=0 恒真曾给绿色 pass——
+  // 密钥全故障时质量门假绿。先判空返回 unknown，多数决仅在非空时计算。
+  const majority = verdicts.length === 0 ? 'unknown' : verdicts.filter((v) => v === 'pass').length >= Math.ceil(verdicts.length / 2) ? 'pass' : 'fail'
   const out = { ok: true, majorityVerdict: majority, hardModels: Object.fromEntries(Object.entries(HARD_MODELS).map(([k, v]) => [k, v.model])), sharedContext: !!shared, compactNotes, generatedAt: new Date().toISOString(), vendors: results }
   if (outFile) writeFileSync(outFile, JSON.stringify(out, null, 2), 'utf-8')
   console.log(JSON.stringify(out, null, 2))
@@ -299,7 +300,9 @@ async function runAllRoles(prompt, evidenceFile, outFile, shared) {
     }
   }
   const verdicts = Object.values(results).map((r) => r.output?.verdict).filter(Boolean)
-  const majority = verdicts.filter((v) => v === 'pass').length >= Math.ceil(verdicts.length / 2) ? 'pass' : verdicts.length ? 'fail' : 'unknown'
+  // 空洞真值修复（v6 ①，2026-08-28）：verdicts 为空（全厂商失败）时 0>=0 恒真曾给绿色 pass——
+  // 密钥全故障时质量门假绿。先判空返回 unknown，多数决仅在非空时计算。
+  const majority = verdicts.length === 0 ? 'unknown' : verdicts.filter((v) => v === 'pass').length >= Math.ceil(verdicts.length / 2) ? 'pass' : 'fail'
   const out = {
     ok: true,
     majorityVerdict: majority,
