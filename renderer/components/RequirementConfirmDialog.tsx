@@ -67,6 +67,9 @@ export const RequirementConfirmDialog: React.FC = () => {
   const [supplementOpen, setSupplementOpen] = useState(false)
   const [supplementText, setSupplementText] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  // web-reference 接线 UI 段（2026-08-28）：可选参考网页链接，confirm 时透传后端提取设计参考卡
+  const [referenceUrl, setReferenceUrl] = useState('')
+  const [referenceError, setReferenceError] = useState(false)
 
   // 新弹窗到达时重置本地勾选（缺省全选）；checked=null 表示「全选」
   const effectiveChecked = useMemo(() => {
@@ -92,12 +95,21 @@ export const RequirementConfirmDialog: React.FC = () => {
     setSupplementOpen(false)
     setSupplementText('')
     setSubmitting(false)
+    setReferenceUrl('')
+    setReferenceError(false)
     clearConfirm(null)
   }
 
   const submitDecision = async (decision: 'confirm' | 'delegate'): Promise<void> => {
     const api = window.electronAPI
     if (!api?.agent?.confirmRequirements || submitting) return
+    // SSRF 双保险第一道：填了链接必须 http(s) 开头（后端 buildReferenceSection 还有同款门）
+    const trimmedReference = referenceUrl.trim()
+    if (trimmedReference && !/^https?:\/\//i.test(trimmedReference)) {
+      setReferenceError(true)
+      return
+    }
+    setReferenceError(false)
     setSubmitting(true)
     try {
       const result = await api.agent.confirmRequirements({
@@ -106,6 +118,7 @@ export const RequirementConfirmDialog: React.FC = () => {
         project_id: state.projectId,
         decision,
         requirement_ids: decision === 'confirm' ? [...effectiveChecked] : undefined,
+        reference_url: trimmedReference || undefined,
       })
       if (!result?.ok) console.error('[requirement-confirm] 提交失败:', result?.error)
     } catch (error) {
@@ -234,6 +247,27 @@ export const RequirementConfirmDialog: React.FC = () => {
             </p>
           )}
         </details>
+
+        {/* 参考链接（web-reference 接线 UI 段，2026-08-28）：可选，confirm 时透传提取设计参考卡 */}
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={{ fontSize: 12, color: 'var(--color-text-secondary, #5b6472)' }}>参考网页链接（可选）</span>
+          <input
+            data-ai-id="requirement-confirm-reference-url"
+            type="text"
+            value={referenceUrl}
+            onChange={(event) => {
+              setReferenceUrl(event.target.value)
+              setReferenceError(false)
+            }}
+            placeholder="做个像某网站那样的？贴链接（http(s)://…）"
+            style={{ ...inputStyle, minHeight: 0 }}
+          />
+          {referenceError && (
+            <span data-ai-id="requirement-confirm-reference-error" style={{ fontSize: 12, color: '#d64545' }}>
+              链接需以 http:// 或 https:// 开头，请修改后再确认
+            </span>
+          )}
+        </label>
 
         {supplementOpen ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

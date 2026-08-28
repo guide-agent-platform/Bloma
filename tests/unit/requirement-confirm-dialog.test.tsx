@@ -136,6 +136,63 @@ describe('需求确认弹窗 RequirementConfirmDialog', () => {
     })
   })
 
+  it('[S4-AGENT-069] 参考链接可选输入 → confirm payload 透传 reference_url（web-reference UI 段）', async () => {
+    store.set(requirementConfirmFamily('session-rc'), {
+      sessionId: 'session-rc',
+      projectId: 'project-rc',
+      title: '确认你的需求',
+      requirements: CONFIRM_EVENT.payload.requirements as Array<{ id: string; description: string }>,
+      research: { available: false, summary: '' },
+    })
+    renderDialog()
+
+    fireEvent.change(screen.getByTestId('requirement-confirm-reference-url'), {
+      target: { value: 'https://example.com/shop' },
+    })
+    fireEvent.click(screen.getByTestId('requirement-confirm-submit'))
+    await waitFor(() => {
+      expect(confirmRequirements).toHaveBeenCalledWith(expect.objectContaining({
+        decision: 'confirm',
+        reference_url: 'https://example.com/shop',
+      }))
+    })
+  })
+
+  it('[S4-AGENT-070] 非 http(s) 参考链接 → 前端拦截提示，不提交弹窗不关（SSRF 双保险第一道）', async () => {
+    store.set(requirementConfirmFamily('session-rc'), {
+      sessionId: 'session-rc',
+      projectId: 'project-rc',
+      title: '确认你的需求',
+      requirements: CONFIRM_EVENT.payload.requirements as Array<{ id: string; description: string }>,
+      research: { available: false, summary: '' },
+    })
+    renderDialog()
+
+    fireEvent.change(screen.getByTestId('requirement-confirm-reference-url'), {
+      target: { value: 'file:///etc/passwd' },
+    })
+    fireEvent.click(screen.getByTestId('requirement-confirm-submit'))
+    expect(confirmRequirements).not.toHaveBeenCalled()
+    expect(screen.getByTestId('requirement-confirm-reference-error').textContent).toContain('http')
+    expect(screen.queryByTestId('requirement-confirm-dialog')).not.toBeNull()
+  })
+
+  it('[S4-AGENT-071] 不填参考链接 → payload 不含 reference_url 字段（零回归）', async () => {
+    store.set(requirementConfirmFamily('session-rc'), {
+      sessionId: 'session-rc',
+      projectId: 'project-rc',
+      title: '确认你的需求',
+      requirements: CONFIRM_EVENT.payload.requirements as Array<{ id: string; description: string }>,
+      research: { available: false, summary: '' },
+    })
+    renderDialog()
+    fireEvent.click(screen.getByTestId('requirement-confirm-submit'))
+    await waitFor(() => expect(confirmRequirements).toHaveBeenCalled())
+    const allCalls = (confirmRequirements as unknown as { mock: { calls: Array<Array<unknown>> } }).mock.calls
+    const firstCall = (allCalls[0]?.[0] ?? {}) as { reference_url?: string }
+    expect(firstCall.reference_url).toBeUndefined()
+  })
+
   it('「由向导决定」出口 → decision=delegate（不带勾选集）', async () => {
     store.set(requirementConfirmFamily('session-rc'), {
       sessionId: 'session-rc',
