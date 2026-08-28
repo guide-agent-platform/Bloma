@@ -88,4 +88,70 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
     expect(onSendMessage).toHaveBeenCalledWith('加一个深色模式')
     expect((input as HTMLTextAreaElement).value).toBe('')
   })
+
+  // message-queue UI 收尾（ux-chatpanel-review P1-①，2026-08-28）：busy 时提交的消息
+  // 进后端队列但不在 messages 流里——用户看到「打了字→字消失→屏幕无新元素」。
+  // 排队气泡：灰化用户气泡 + 「排队中」角标，派发后（不再 busy）消失。
+  it('排队消息可见：busy 时提交出现灰化「排队中」气泡，不再静默丢失', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-28T00:00:00.000Z'))
+    Element.prototype.scrollIntoView = vi.fn()
+
+    const store = createStore()
+    store.set(activeAgentSessionIdAtom, 'session-1')
+    store.set(workflowStageAtom, 'generating_sketch')
+    store.set(agentStreamStateFamily('session-1'), { running: true, events: [], content: '' })
+    window.__jotai_store__ = store
+
+    const onSend = vi.fn()
+    render(
+      <Provider store={store}>
+        <ChatPanel onSendMessage={onSend} />
+      </Provider>,
+    )
+
+    const input = screen.getByRole('textbox')
+    expect(screen.queryByText('排队中')).toBeNull()
+
+    fireEvent.change(input, { target: { value: '再加一个导出按钮' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    // 排队气泡出现：消息原文可见 + 排队中角标；输入框照常清空
+    expect(screen.getByText('再加一个导出按钮')).toBeTruthy()
+    expect(screen.getByText('排队中')).toBeTruthy()
+    expect((input as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it('排队气泡派发后出列：run 结束（不再 busy）时不再显示', () => {
+    Element.prototype.scrollIntoView = vi.fn()
+
+    const store = createStore()
+    store.set(activeAgentSessionIdAtom, 'session-1')
+    store.set(agentStreamStateFamily('session-1'), { running: true, events: [], content: '' })
+    window.__jotai_store__ = store
+
+    const onSend = vi.fn()
+    const { rerender } = render(
+      <Provider store={store}>
+        <ChatPanel onSendMessage={onSend} />
+      </Provider>,
+    )
+
+    const input = screen.getByRole('textbox')
+    fireEvent.change(input, { target: { value: '生成完成后看看这个' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(screen.getByText('生成完成后看看这个')).toBeTruthy()
+
+    // run 结束：running→false，后端队列派发完成，排队气泡出列
+    act(() => {
+      store.set(agentStreamStateFamily('session-1'), { running: false, events: [], content: '' })
+    })
+    rerender(
+      <Provider store={store}>
+        <ChatPanel onSendMessage={onSend} />
+      </Provider>,
+    )
+    expect(screen.queryByText('生成完成后看看这个')).toBeNull()
+    expect(screen.queryByText('排队中')).toBeNull()
+  })
 })

@@ -148,11 +148,20 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   const busyActionLabel = STAGE_ACTION_LABELS[workflowStage] ?? waitActionLabel
 
+  // message-queue UI 收尾（ux-chatpanel-review P1-①，2026-08-28）：busy 时提交的消息由后端
+  // 排队兜底，但派发前不在 messages 流里——本地回显灰化「排队中」气泡，确认消息没丢。
+  // run 结束（busy→false）后端队列已派发完，气泡出列（真实消息进流接管）。
+  const [pendingQueue, setPendingQueue] = React.useState<string[]>([])
+  React.useEffect(() => {
+    if (!busy) setPendingQueue([])
+  }, [busy])
+
   const handleSubmit = () => {
     const trimmed = inputValue.trim()
     if (!trimmed) return
     // message-queue（2026-08-27）：生成期间也允许提交——后端排队兜底（queued:true），
     // 消息不丢、run 完成后自动派发。busy 时发送按钮区被停止按钮替换，靠 Enter 提交。
+    if (busy) setPendingQueue((q) => [...q, trimmed])
     onSendMessage?.(trimmed)
     setInputValue('')
   }
@@ -255,6 +264,48 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
             {messages.map((msg, i) => (
               <MessageBubble key={i} message={msg} mode={mode} toolNamesById={toolNamesById} />
+            ))}
+
+            {/* message-queue UI 收尾（P1-①）：排队中的消息灰化回显，确认不丢 */}
+            {pendingQueue.map((text, i) => (
+              <div
+                key={`queued-${i}-${text}`}
+                data-ai-id="queued-message"
+                style={{
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  alignItems: 'center',
+                  gap: 'var(--space-2)',
+                  opacity: 0.55,
+                  padding: '0 var(--space-2)',
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 'var(--font-size-xs)',
+                    color: 'var(--color-text-muted)',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: '999px',
+                    padding: '0 var(--space-2)',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  排队中
+                </span>
+                <span
+                  style={{
+                    maxWidth: '70%',
+                    background: 'var(--color-surface-muted, rgba(127,127,127,0.12))',
+                    borderRadius: 'var(--radius-md, 10px)',
+                    padding: 'var(--space-2) var(--space-3)',
+                    fontSize: 'var(--font-size-sm)',
+                    color: 'var(--color-text)',
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  {text}
+                </span>
+              </div>
             ))}
 
             {/* Agent Loop 实时工具流（tool_call_started/completed 事件推导的折叠行） */}
