@@ -466,6 +466,43 @@ describe('AgentLoop providerType 透传（omit 推广 2026-08-27）', () => {
   })
 })
 
+describe('AgentLoop 会话级 usage 聚合（2026-08-28，费用守卫 Hook 1）', () => {
+  const savedHome3 = process.env.PROMA_HOME
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-usage-'))
+  })
+  afterEach(() => {
+    if (savedHome3 === undefined) delete process.env.PROMA_HOME
+    else process.env.PROMA_HOME = savedHome3
+  })
+
+  it('[S4-AGENT-050] 两轮 usage 累计 input/output + turnsWithUsage；estContextTokens 为正（渠道全盲时唯一占用信号）', async () => {
+    const echo: AgentLoopTool = {
+      name: 'echo',
+      description: 'echo',
+      input_schema: { type: 'object', properties: {} },
+      execute: async () => ({ output: 'ok' }),
+    }
+    let turn = 0
+    const query: SDKQuery = async function* () {
+      turn += 1
+      if (turn === 1) {
+        yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'echo', input: {} }] } }
+        yield { type: 'result', subtype: 'success', stop_reason: 'tool_use', usage: { input_tokens: 1200, output_tokens: 60 } }
+        return
+      }
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '完成' }] } }
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn', usage: { input_tokens: 800, output_tokens: 40 } }
+    }
+    const result = await runAgentLoop(baseInput({ query, task: '测试用量聚合', tools: [echo] }))
+    expect(result.status).toBe('completed')
+    expect(result.usage?.inputTokens).toBe(2000)
+    expect(result.usage?.outputTokens).toBe(100)
+    expect(result.usage?.turnsWithUsage).toBe(2)
+    expect(result.usage?.estContextTokens).toBeGreaterThan(0)
+  })
+})
+
 describe('AgentLoop session-recall 注入 hook（2026-08-28，guidance v5 ②）', () => {
   const savedHome2 = process.env.PROMA_HOME
   beforeEach(() => {

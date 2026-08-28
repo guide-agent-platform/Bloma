@@ -5,6 +5,7 @@ import { canUseTool } from './permission-service'
 import { windowMessagesWithDigest } from './compacting-window'
 import { prepareTaskWithSkills } from './skill-loader'
 import { prepareRecallBlock } from './session-recall'
+import { estimateTokenCount } from './usage-guard'
 import type { ConversationTurn, SDKQuery, ToolDefinition } from './orchestrator'
 
 /**
@@ -113,6 +114,9 @@ export interface AgentLoopResult {
   turns: number
   finalText: string
   toolCalls: Array<{ name: string; turn: number }>
+  /** 会话级 usage 聚合（费用守卫 Hook 1，2026-08-28）：渠道不返回 usage 时 turnsWithUsage=0，
+   * estContextTokens（估算器）成为唯一占用信号。估算为启发式，只作守卫/展示不作计费。 */
+  usage?: { inputTokens: number; outputTokens: number; estContextTokens: number; turnsWithUsage: number }
 }
 
 /** JSONL 审计里单条 tool_result 的截断上限（全文走事件流，防 JSONL 膨胀）。 */
@@ -225,9 +229,24 @@ ${skillPrep.content}` : skillPrep.content
   let turns = 0
   let finalText = ''
   let consecutiveBudgetStallTurns = 0
+  // 费用守卫 Hook 1（2026-08-28）：逐轮累计渠道返回 usage（渠道不返回即全盲 → estContextTokens 兜底）
+  const usageTotals = { inputTokens: 0, outputTokens: 0, turnsWithUsage: 0 }
+  const attachUsage = (r: AgentLoopResult): AgentLoopResult => ({
+    ...r,
+    usage: {
+      inputTokens: usageTotals.inputTokens,
+      outputTokens: usageTotals.outputTokens,
+      turnsWithUsage: usageTotals.turnsWithUsage,
+      estContextTokens: estimateTokenCount(
+        messages
+          .map((m) => (typeof m.content === 'string' ? m.content : textOfBlocks(m.content)))
+          .join('\n'),
+      ),
+    },
+  })
 
   for (let turn = 1; turn <= input.maxTurns; turn += 1) {
-    if (input.signal.aborted) return loopCancelled(turns, finalText, toolCalls)
+    if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls))
 
     // ---- 模型调用（L0 带 tools；messages 全量透传，system 提取由查询层负责）----
     const assistantBlocks: MessageContentBlock[] = []
@@ -279,8 +298,13 @@ ${skillPrep.content}` : skillPrep.content
       }
       flushTextRun()
     } catch (error) {
-      if (isLoopCancelled(error, input.signal)) return loopCancelled(turns, finalText, toolCalls)
+      if (isLoopCancelled(error, input.signal)) return attachUsage(loopCancelled(turns, finalText, toolCalls))
       throw error
+    }
+    if (usage) {
+      usageTotals.inputTokens += usage.input_tokens ?? 0
+      usageTotals.outputTokens += usage.output_tokens ?? 0
+      usageTotals.turnsWithUsage += 1
     }
     turns = turn
     finalText = textOfBlocks(assistantBlocks)
@@ -292,7 +316,7 @@ ${skillPrep.content}` : skillPrep.content
     input.onTurn?.({ turn, toolCalls: turnCalls, inputTokens: usage?.input_tokens, outputTokens: usage?.output_tokens })
 
     // 无 tool_use = 模型声明收工（真伪由外部强制终验收口，不信模型自述）
-    if (turnToolUses.length === 0) return { status: 'completed', turns, finalText, toolCalls }
+    if (turnToolUses.length === 0) return attachUsage({ status: 'completed', turns, finalText, toolCalls })
 
     // ---- 工具执行：串行 + 整批 tool_result 进同一条 user 消息（不变式）----
     const resultBlocks: MessageContentBlock[] = []
@@ -331,11 +355,11 @@ ${skillPrep.content}` : skillPrep.content
 
     consecutiveBudgetStallTurns = budgetStallThisTurn ? consecutiveBudgetStallTurns + 1 : 0
     if (consecutiveBudgetStallTurns >= BUDGET_STALL_TURNS) {
-      return { status: 'budget_exhausted', turns, finalText, toolCalls }
+      return attachUsage({ status: 'budget_exhausted', turns, finalText, toolCalls })
     }
   }
 
-  return { status: 'turn_limit', turns, finalText, toolCalls }
+  return attachUsage({ status: 'turn_limit', turns, finalText, toolCalls })
 }
 
 /**
