@@ -893,9 +893,16 @@ export async function* anthropicMessagesQuery(prompt: string, options: SDKQueryO
   if (systemText) body.system = systemText
   if (options.tools?.length) body.tools = options.tools
   if (showThinking) {
-    const maxTokens = options.maxTokens ?? 1200
-    const budget = Math.min(1024, Math.floor(maxTokens / 2))
-    body.thinking = { type: 'enabled', budget_tokens: Math.max(256, budget) }
+    // omit 渠道互斥（2026-08-28 边界收口）：Token Plan 类渠道连 thinking:disabled 都 400，
+    // 开发插件 showThinking 若照发 enabled 必 400——omit 时跳过 thinking 字段并留日志。
+    const devFragment = buildThinkingFragment(model, options.providerType, 'off')
+    if (devFragment.omit) {
+      console.warn('[anthropicMessagesQuery] omit 渠道忽略 BLOMA_SHOW_THINKING（thinking 字段会 400）')
+    } else {
+      const maxTokens = options.maxTokens ?? 1200
+      const budget = Math.min(1024, Math.floor(maxTokens / 2))
+      body.thinking = { type: 'enabled', budget_tokens: Math.max(256, budget) }
+    }
   } else {
     // 推理档位（reasoning-profile 2026-08-27）：判定/校验类任务（judge 等）可经
     // options.thinkingLevel 启用 DeepSeek v4 / GLM 系思考（output_config.effort 独立

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  anthropicMessagesQuery,
   buildSdkEnv,
   isSessionActive,
   resetSDKQueryForTests,
@@ -433,6 +434,27 @@ describe('AgentOrchestrator · A2-14a 真实模型流式 + 多轮历史', () => 
     expect(requestBody?.thinking?.budget_tokens).toBeLessThan(requestBody?.max_tokens ?? 0)
   })
 
+  it('omit 渠道 + BLOMA_SHOW_THINKING=1：不携带 thinking 字段（互斥——omit 连 disabled 都 400，2026-08-28 边界收口）', async () => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'proma-test-'))
+    vi.stubEnv('BLOMA_SHOW_THINKING', '1')
+
+    let requestBody: { thinking?: { type: string } } | undefined
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+      requestBody = JSON.parse(String(init.body)) as typeof requestBody
+      return sseResponse(['event: message_stop' + String.fromCharCode(10) + 'data: ' + JSON.stringify({ type: 'message_stop' }) + String.fromCharCode(10, 10)])
+    }))
+
+    await collect(anthropicMessagesQuery('测试 omit 互斥', {
+      env: { PATH: 'C:' + String.fromCharCode(92), ANTHROPIC_AUTH_TOKEN: 'k', ANTHROPIC_BASE_URL: 'https://mock.example', ANTHROPIC_MODEL: 'mock-model' },
+      signal: new AbortController().signal,
+      sessionId: 'session-omit-think',
+      maxTokens: 512,
+      providerType: 'zhipu-coding',
+    }))
+
+    expect(requestBody?.thinking).toBeUndefined()
+  })
+
   it('默认（未开 BLOMA_SHOW_THINKING）请求体显式携带 thinking:disabled——禁思考防预算被思考耗尽正文为零', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-test-'))
     process.env.PROMA_HOME = home
@@ -521,6 +543,13 @@ describe('AgentOrchestrator · A2-14a 真实模型流式 + 多轮历史', () => 
     spy.mockRestore()
   })
 })
+
+
+async function collect(gen: AsyncGenerator<SDKMessage>): Promise<SDKMessage[]> {
+  const out: SDKMessage[] = []
+  for await (const message of gen) out.push(message)
+  return out
+}
 
 function sseResponse(chunks: string[]): Response {
   const encoder = new TextEncoder()
