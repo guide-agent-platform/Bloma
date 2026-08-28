@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { appendDelegationSettle, buildReplayTurns, loadChildSessionSnapshot } from './delegation-persistence'
+import { appendDelegationSettle, loadChildSessionSnapshot, replayTurnsFrom } from './delegation-persistence'
 import { recordSessionActivity } from './session-service'
 import type { AgentEvent, PromaPermissionMode } from '../shared/types'
 import type { SDKQuery } from './orchestrator'
@@ -566,7 +566,7 @@ export function continueDelegation(parent: ToolContext, delegationId: string, ta
   try {
     const snap = loadChildSessionSnapshot(record.childSessionId)
     if (snap.lastSettle && snap.messages.length > 0) {
-      replayTurns = buildReplayTurns(snap.messages, trimmedTask)
+      replayTurns = replayTurnsFrom(snap.messages)
     }
   } catch (error) {
     console.warn('[delegation-persistence] 续跑历史读回失败，退化为无历史续跑:', error)

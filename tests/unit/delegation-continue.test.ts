@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  buildReplayTurns,
   loadChildSessionSnapshot,
+  replayTurnsFrom,
 } from '../../main/delegation-persistence'
 import { appendJsonLine } from '../../storage/json-store'
 import { getAgentSessionPath } from '../../storage/config-paths'
@@ -75,30 +75,41 @@ describe('loadChildSessionSnapshot（读回：消息与 settle 分离）', () =>
   })
 })
 
-describe('buildReplayTurns（重放 + follow-up）', () => {
-  it('重放保序保数，tool_use/tool_result blocks 原样保留', () => {
+describe('replayTurnsFrom（纯重放：新指令由 runAgentLoop 的 task 承担，不重复）', () => {
+  it('重放保序保数，tool_use/tool_result blocks 原样保留；不追加 follow-up（审查 fail 点修复：避免连续双 user + 指令重复）', () => {
     useTemporaryHome('deleg-cont-replay-')
     writeCompletedChildSession('cont-2')
     const snap = loadChildSessionSnapshot('cont-2')
 
-    const turns = buildReplayTurns(snap.messages, '把 dns 预热同样加到注册页')
-    expect(turns).toHaveLength(5)
-    // 保序：u/a/u/a + follow-up(user)
-    expect(turns.map((t) => t.role)).toEqual(['user', 'assistant', 'user', 'assistant', 'user'])
-    // tool blocks 原样保留
+    const turns = replayTurnsFrom(snap.messages)
+    expect(turns).toHaveLength(4)
+    expect(turns.map((t) => t.role)).toEqual(['user', 'assistant', 'user', 'assistant'])
     expect((turns[1]!.content as MessageContentBlock[]).some((b) => b.type === 'tool_use')).toBe(true)
     expect((turns[2]!.content as MessageContentBlock[]).some((b) => b.type === 'tool_result')).toBe(true)
   })
 
-  it('follow-up 追加为末条 user 轮；原上下文完整保留（首条含目标+约束）', () => {
+  it('首条非 user 的异常历史被丢弃（防 Anthropic 首条非 user 400）；末尾悬空 tool_use 轮被丢弃（防配对校验失败）', () => {
+    useTemporaryHome('deleg-cont-guard-')
+    // 异常格式：assistant 开头 + 末尾 assistant 含未配对 tool_use
+    appendJsonLine(getAgentSessionPath('cont-guard'), { role: 'assistant', content: [{ type: 'text', text: '孤儿开头' }], timestamp: 1 })
+    appendJsonLine(getAgentSessionPath('cont-guard'), { role: 'user', content: [{ type: 'text', text: '目标: 正常任务' }], timestamp: 2 })
+    appendJsonLine(getAgentSessionPath('cont-guard'), { role: 'assistant', content: [{ type: 'tool_use', id: 'x1', name: 'edit_file', input: {} }], timestamp: 3 })
+    const snap = loadChildSessionSnapshot('cont-guard')
+
+    const turns = replayTurnsFrom(snap.messages)
+    expect(turns.length).toBeGreaterThan(0)
+    expect(turns[0]!.role).toBe('user')
+    expect((turns[0]!.content as MessageContentBlock[])[0]).toMatchObject({ type: 'text' })
+    // 悬空 tool_use 轮已被丢弃
+    expect(turns.some((t) => Array.isArray(t.content) && (t.content as MessageContentBlock[]).some((b) => b.type === 'tool_use'))).toBe(false)
+  })
+
+  it('原上下文完整保留（首条含目标+约束）', () => {
     useTemporaryHome('deleg-cont-fu-')
     writeCompletedChildSession('cont-3')
     const snap = loadChildSessionSnapshot('cont-3')
 
-    const turns = buildReplayTurns(snap.messages, '把 dns 预热同样加到注册页')
-    const last = turns[4]!
-    expect(last.role).toBe('user')
-    expect((last.content as MessageContentBlock[])[0]).toMatchObject({ type: 'text', text: '把 dns 预热同样加到注册页' })
+    const turns = replayTurnsFrom(snap.messages)
     expect((turns[0]!.content as MessageContentBlock[])[0]!.text).toContain('目标: 修复登录超时')
   })
 
@@ -107,7 +118,7 @@ describe('buildReplayTurns（重放 + follow-up）', () => {
     writeCompletedChildSession('cont-4')
     const snap = loadChildSessionSnapshot('cont-4')
 
-    const continueInput = JSON.stringify(buildReplayTurns(snap.messages, '继续下一问'))
+    const continueInput = JSON.stringify(replayTurnsFrom(snap.messages))
     const freshInput = JSON.stringify([{ role: 'user', content: [{ type: 'text', text: '继续下一问' }] }])
     expect(continueInput.length).toBeGreaterThan(freshInput.length)
   })

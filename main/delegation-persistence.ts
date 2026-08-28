@@ -169,14 +169,19 @@ export function loadChildSessionSnapshot(childSessionId: string): ChildSessionSn
 }
 
 /**
- * 续跑输入构造：重放历史轮次 + follow-up 追加为末条 user 轮。
- * （runAgentLoop historyTurns 同构——task/follow-up 恒为最新 user 轮，历史在前。）
+ * 纯重放：子会话历史 → 模型可见轮次。新指令（follow-up）不在此追加——由 runAgentLoop
+ * 的 task 承担（多厂商审查 fail 点修复：否则 follow-up 重复 + 连续双 user）。
+ * 防御：首条非 user 的异常历史丢弃（防 Anthropic 首条非 user 400）；
+ * 末尾悬空 tool_use 轮丢弃（无后续 tool_result 会触发配对校验失败）。
  */
-export function buildReplayTurns(
-  messages: ChildSessionMessage[],
-  followUp: string,
-): ConversationTurn[] {
+export function replayTurnsFrom(messages: ChildSessionMessage[]): ConversationTurn[] {
   const turns: ConversationTurn[] = messages.map((m) => ({ role: m.role, content: m.content }))
-  turns.push({ role: 'user', content: [{ type: 'text', text: followUp }] })
+  while (turns.length > 0 && turns[0]!.role !== 'user') turns.shift()
+  while (turns.length > 0) {
+    const last = turns[turns.length - 1]!
+    if (last.role === 'assistant' && Array.isArray(last.content) && last.content.some((b) => b.type === 'tool_use')) {
+      turns.pop()
+    } else break
+  }
   return turns
 }
