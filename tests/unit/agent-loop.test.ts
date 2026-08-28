@@ -466,6 +466,36 @@ describe('AgentLoop providerType 透传（omit 推广 2026-08-27）', () => {
   })
 })
 
+describe('AgentLoop session-recall 注入 hook（2026-08-28，guidance v5 ②）', () => {
+  const savedHome2 = process.env.PROMA_HOME
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-recall-'))
+  })
+  afterEach(() => {
+    if (savedHome2 === undefined) delete process.env.PROMA_HOME
+    else process.env.PROMA_HOME = savedHome2
+  })
+
+  it('[S4-RECALL-010] 指代词任务 → 首条 user 消息前置 <session-recall> 块，任务原文在最后', async () => {
+    const sessDir = join(process.env.PROMA_HOME ?? '', 'agent-sessions')
+    await mkdir(sessDir, { recursive: true })
+    await writeFile(
+      join(sessDir, 'hist.jsonl'),
+      JSON.stringify({ role: 'user', content: [{ type: 'text', text: '渠道配置页面用 tab 布局' }], timestamp: Date.now() }) + '\n',
+      'utf8',
+    )
+    let receivedTask = ''
+    const query: SDKQuery = async function* (_prompt: string, options: SDKQueryOptions) {
+      receivedTask = String((options.messages ?? []).find((t) => t.role === 'user')?.content ?? '')
+      yield { type: 'result', subtype: 'success' }
+    }
+    await runAgentLoop(baseInput({ query, task: '继续上次的渠道配置' }))
+    expect(receivedTask.startsWith('<session-recall>')).toBe(true)
+    expect(receivedTask).toContain('渠道配置页面')
+    expect(receivedTask.endsWith('继续上次的渠道配置')).toBe(true)
+  })
+})
+
 describe('AgentLoop skill 注入 hook（2026-08-28，skill 机制转正）', () => {
   // 独立于上方 describe 的 PROMA_HOME 隔离（vitest beforeEach 仅作用于自身 describe 作用域）
   const savedHome = process.env.PROMA_HOME

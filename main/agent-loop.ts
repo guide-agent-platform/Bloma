@@ -4,6 +4,7 @@ import { appendJsonLine } from '../storage/json-store'
 import { canUseTool } from './permission-service'
 import { windowMessagesWithDigest } from './compacting-window'
 import { prepareTaskWithSkills } from './skill-loader'
+import { prepareRecallBlock } from './session-recall'
 import type { ConversationTurn, SDKQuery, ToolDefinition } from './orchestrator'
 
 /**
@@ -202,7 +203,14 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   // skill 机制（2026-08-28）：任务含 /skill: 命令时从两级白名单根前置注入（无命令零 IO）。
   // 注入块只随当条 user 消息进窗口（windowMessagesWithDigest 自然滑出），不污染 system；
   // JSONL 落注入后文本——审计=模型实际所见，continue 重放一致。
-  const task = (await prepareTaskWithSkills(input.task, input.projectId)).content
+  // 跨会话检索（guidance v5 ②，2026-08-28）：主 loop（depth 0）指代词任务前置 <session-recall>
+  // 历史摘录（模块内失败静默）；与 skill 注入一次拼接，任务原文始终在最后。
+  const [skillPrep, recallBlock] = await Promise.all([
+    prepareTaskWithSkills(input.task, input.projectId),
+    prepareRecallBlock(input.task, input.delegationDepth ?? 0),
+  ])
+  const task = recallBlock ? `${recallBlock}
+${skillPrep.content}` : skillPrep.content
   const messages: ConversationTurn[] = [...(input.historyTurns ?? []), { role: 'user', content: task }]
   // 初始 task 落盘（审计完整性：JSONL 是子会话全量审计，缺首条 user 会让 continue 重放丢任务原文）
   appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: task }])
