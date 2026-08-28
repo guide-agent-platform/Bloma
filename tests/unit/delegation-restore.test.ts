@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createProject } from '../../main/project-service'
 import { loadMessages, recordSessionActivity } from '../../main/session-service'
-import { appendDelegationSettle, restoreDelegationRecord } from '../../main/delegation-persistence'
+import { appendDelegationSettle, reconcileRunningDelegations, restoreDelegationRecord } from '../../main/delegation-persistence'
 import { appendJsonLine, readJsonFile, writeJsonFile } from '../../storage/json-store'
 import { getAgentSessionPath } from '../../storage/config-paths'
 
@@ -164,3 +164,35 @@ function readSessionsIndexRaw(path: string): { version: number; sessions: Array<
 function writeSessionsIndexRaw(path: string, index: { version: number; sessions: Array<Record<string, unknown>> }): void {
   writeJsonFile(path, index)
 }
+
+describe('reconcileRunningDelegations（启动对账：重启中断的委派自动标 cancelled）', () => {
+  it('running 态委派经对账后标 cancelled 且落 settle 行；已终态的不动', () => {
+    useTemporaryHome('deleg-reconcile-')
+    const project = createProject({ request_id: 'req-rc', mode: 'quick' })
+    recordSessionActivity('rc-child-running', project.project_id, {
+      parentSessionId: 'parent-rc',
+      sourceDelegationId: 'deleg-rc-1',
+    })
+    // 运行中的子会话：有消息无 settle 行（真实 running 语义）
+    appendJsonLine(getAgentSessionPath('rc-child-running'), { role: 'assistant', content: [{ type: 'text', text: '进行中' }], timestamp: Date.now() })
+    recordSessionActivity('rc-child-done', project.project_id, {
+      parentSessionId: 'parent-rc',
+      sourceDelegationId: 'deleg-rc-2',
+    })
+    appendDelegationSettle('rc-child-done', 'completed', { resultSummary: '早已完成' })
+
+    // 对账前：running 态可恢复（诚实报告）
+    expect(restoreDelegationRecord('parent-rc', 'deleg-rc-1')!.status).toBe('running')
+
+    const reconciled = reconcileRunningDelegations('parent-rc')
+    expect(reconciled).toHaveLength(1)
+    expect(reconciled[0]!.delegationId).toBe('deleg-rc-1')
+    expect(reconciled[0]!.status).toBe('cancelled')
+
+    // 对账后：running → cancelled（终态），已完成的委派不受影响
+    expect(restoreDelegationRecord('parent-rc', 'deleg-rc-1')!.status).toBe('cancelled')
+    expect(restoreDelegationRecord('parent-rc', 'deleg-rc-2')!.status).toBe('completed')
+    // 幂等：再跑一次无新对账项
+    expect(reconcileRunningDelegations('parent-rc')).toHaveLength(0)
+  })
+})

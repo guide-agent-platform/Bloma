@@ -185,3 +185,44 @@ export function replayTurnsFrom(messages: ChildSessionMessage[]): ConversationTu
   }
   return turns
 }
+
+/**
+ * 启动对账（多厂商审查 risk-3 闭环，2026-08-28）：重启后「无 settle 行」的委派 =
+ * 应用重启时子任务仍在跑——统一标记为 cancelled（「应用重启中断」）并落 settle 行，
+ * 之后 restoreDelegationRecord 读到的即终态，无需每个调用方自行处理 running 态。
+ * 幂等：已终态（有 settle 行）的委派不重复处理。
+ */
+export function reconcileRunningDelegations(parentSessionId: string): RestoredDelegationRecord[] {
+  const indexPath = getAgentSessionsIndexPath()
+  if (!existsSync(indexPath)) return []
+  let sessions: AgentSessionRecord[]
+  try {
+    const raw = JSON.parse(readFileSync(indexPath, 'utf8')) as { sessions?: AgentSessionRecord[] }
+    sessions = Array.isArray(raw.sessions) ? raw.sessions : []
+  } catch {
+    return []
+  }
+  const reconciled: RestoredDelegationRecord[] = []
+  for (const session of sessions) {
+    if (!session.source_delegation_id) continue
+    if (session.parent_session_id && session.parent_session_id !== parentSessionId) continue
+    const snap = loadChildSessionSnapshot(session.session_id)
+    if (snap.lastSettle) continue // 已终态，不动
+    const record: RestoredDelegationRecord = {
+      delegationId: session.source_delegation_id,
+      parentSessionId: session.parent_session_id ?? parentSessionId,
+      childSessionId: session.session_id,
+      status: 'cancelled',
+      finished: true,
+      error: '应用重启中断（启动对账自动标记）',
+    }
+    try {
+      appendDelegationSettle(session.session_id, 'cancelled', { error: record.error })
+    } catch (error) {
+      console.warn('[delegation-persistence] 对账 settle 落盘失败:', error)
+      continue
+    }
+    reconciled.push(record)
+  }
+  return reconciled
+}
