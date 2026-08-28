@@ -710,6 +710,8 @@ export interface AgentEvent {
     | 'delegation_cancelled'
     /** 排队消息开始派发（message-queue 2026-08-27）：payload.queue_message_id；渲染端把「已排队」气泡翻转 */
     | 'queued_started'
+    /** 会话用量汇总（usage-guard 渲染层 2026-08-28）：loop 结束发布，渲染端显示透明条 */
+    | 'usage_summary'
   payload: Record<string, unknown>
   created_at: string
 }

@@ -231,21 +231,32 @@ ${skillPrep.content}` : skillPrep.content
   let consecutiveBudgetStallTurns = 0
   // 费用守卫 Hook 1（2026-08-28）：逐轮累计渠道返回 usage（渠道不返回即全盲 → estContextTokens 兜底）
   const usageTotals = { inputTokens: 0, outputTokens: 0, turnsWithUsage: 0 }
-  const attachUsage = (r: AgentLoopResult): AgentLoopResult => ({
-    ...r,
-    usage: {
-      inputTokens: usageTotals.inputTokens,
-      outputTokens: usageTotals.outputTokens,
-      turnsWithUsage: usageTotals.turnsWithUsage,
-      // 全块口径（r55 low 池采纳）：tool_result 内容与 tool_use input 都占上下文，
-      // text-only 口径在渠道全盲时会严重低估占用。
-      estContextTokens: estimateTokenCount(
-        messages
-          .map((m) => (typeof m.content === 'string' ? m.content : estimateBlocksText(m.content)))
-          .join('\n'),
-      ),
-    },
-  })
+  const attachUsage = (r: AgentLoopResult): AgentLoopResult => {
+    // 渲染层透明条数据源（v6 ② b）：loop 结束发布 usage_summary 事件（取消/熔断路径同样发布——用量是事实）
+    const estContextTokens = estimateTokenCount(
+      messages
+        .map((m) => (typeof m.content === 'string' ? m.content : estimateBlocksText(m.content)))
+        .join('\n'),
+    )
+    input.publish('usage_summary', {
+      session_id: input.sessionId,
+      input_tokens: usageTotals.inputTokens,
+      output_tokens: usageTotals.outputTokens,
+      est_context_tokens: estContextTokens,
+      turns_with_usage: usageTotals.turnsWithUsage,
+    })
+    return {
+      ...r,
+      usage: {
+        inputTokens: usageTotals.inputTokens,
+        outputTokens: usageTotals.outputTokens,
+        turnsWithUsage: usageTotals.turnsWithUsage,
+        // 全块口径（r55 low 池采纳）：tool_result 内容与 tool_use input 都占上下文，
+        // text-only 口径在渠道全盲时会严重低估占用。
+        estContextTokens,
+      },
+    }
+  }
 
   for (let turn = 1; turn <= input.maxTurns; turn += 1) {
     if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls))

@@ -188,6 +188,16 @@ export const currentSessionPermissionCountAtom = atom((get) => {
  *
  * @returns cleanup 函数（仅在应用退出时调用）
  */
+/** 会话用量（usage-guard 渲染层 2026-08-28）：usage_summary 事件的归约形态 */
+export interface SessionUsage {
+  inputTokens: number
+  outputTokens: number
+  estContextTokens: number
+  turnsWithUsage: number
+}
+
+export const sessionUsageFamily = atomFamily((sessionId: string) => atom<SessionUsage | undefined>(undefined))
+
 export function setupGlobalAgentListeners(): () => void {
   const api = window.electronAPI?.agent
   const store = window.__jotai_store__
@@ -196,6 +206,19 @@ export function setupGlobalAgentListeners(): () => void {
   return api.onStreamEvent((event) => {
     // queued_started（message-queue 2026-08-27）：排队消息开始派发——追加「正在处理」
     // 提示，视觉上翻转「⏳ 已排队」（旧提示保留为历史记录）
+    // usage_summary（usage-guard 渲染层 2026-08-28）：同会话累加渠道/估算用量
+    if (event.type === 'usage_summary') {
+      const p = event.payload as { input_tokens?: number; output_tokens?: number; est_context_tokens?: number; turns_with_usage?: number }
+      const usagesAtom = sessionUsageFamily(event.session_id)
+      const prev = store.get(usagesAtom)
+      store.set(usagesAtom, {
+        inputTokens: (prev?.inputTokens ?? 0) + (p.input_tokens ?? 0),
+        outputTokens: (prev?.outputTokens ?? 0) + (p.output_tokens ?? 0),
+        estContextTokens: p.est_context_tokens ?? prev?.estContextTokens ?? 0,
+        turnsWithUsage: (prev?.turnsWithUsage ?? 0) + (p.turns_with_usage ?? 0),
+      })
+    }
+
     if (event.type === 'queued_started') {
       store.set(agentMessagesFamily(event.session_id), (previous) => [
         ...previous,

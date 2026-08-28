@@ -15,6 +15,7 @@ import {
   globalUserErrorAtom,
   projectModeAtom,
   workflowStageAtom,
+  sessionUsageFamily,
 } from './atoms'
 import type { AgentMessage, AgentStreamState, ProjectMode } from './atoms'
 
@@ -92,6 +93,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   onOpenSettings,
 }) => {
   const activeSessionId = useAtomValue(activeAgentSessionIdAtom)
+  const sessionUsage = useAtomValue(sessionUsageFamily(activeSessionId ?? ''))
   const mode = useAtomValue(projectModeAtom)
   const hasActiveStream = useAtomValue(hasActiveStreamAtom)
   const globalError = useAtomValue(globalUserErrorAtom)
@@ -474,6 +476,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-2)', textAlign: 'center' }}>
           按 Enter 发送，按 Shift + Enter 换行
         </p>
+        {sessionUsage && (
+          <p
+            data-ai-id="session-usage-hint"
+            style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textAlign: 'center', margin: '0 auto' }}
+          >
+            {`本会话已用 ≈${(sessionUsage.inputTokens + sessionUsage.outputTokens).toLocaleString()} tokens${sessionUsage.turnsWithUsage === 0 ? '（估算）' : ''}`}
+          </p>
+        )}
       </div>
     </div>
   )

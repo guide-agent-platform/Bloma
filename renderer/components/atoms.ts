@@ -48,6 +48,7 @@ export {
   delegationsFamily, emptyDelegationsFallback,
   appendMessageToSession, markDecisionConsumed, clearPermissionRequest, resetProjectState,
   loadAgentSessions, loadSessionHistory, loadSnapshots,
+  sessionUsageFamily,
 } from '../agent-atoms'
 
 export const workspaceWaitingAtom = atom<boolean>(false)
