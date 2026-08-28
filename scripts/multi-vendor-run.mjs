@@ -258,10 +258,22 @@ async function runVerdict(prompt, evidenceFile, outFile, shared) {
       results[vk] = { model: HARD_MODELS[vk].model, error: e.message }
     }
   }
-  const verdicts = Object.values(results).map((r) => r.output?.verdict).filter(Boolean)
+  // 计票修复（r69）：双形态兼容——verdict 字符串（verdict 命令）与 pass 布尔（自定义 prompt 常见形态）。
+  // 旧逻辑只认 verdict 字段，pass 布尔形态的 fail 票会被静默丢弃（r69 R1 实证：1 pass/2 fail 误判 pass）。
+  const verdicts = Object.values(results)
+    .map((r) => {
+      const o = r.output
+      if (!o || typeof o !== 'object') return undefined
+      if (typeof o.verdict === 'string') return o.verdict
+      if (typeof o.pass === 'boolean') return o.pass ? 'pass' : 'fail'
+      return undefined
+    })
+    .filter(Boolean)
   // 空洞真值修复（v6 ①，2026-08-28）：verdicts 为空（全厂商失败）时 0>=0 恒真曾给绿色 pass——
   // 密钥全故障时质量门假绿。先判空返回 unknown，多数决仅在非空时计算。
-  const majority = verdicts.length === 0 ? 'unknown' : verdicts.filter((v) => v === 'pass').length >= Math.ceil(verdicts.length / 2) ? 'pass' : 'fail'
+  // 门槛修复（r69）：严格多数（>50%）才 pass——旧 >=ceil(n/2) 在偶数票时 50% 即 pass（2 票 1 pass 误判）。
+  // uncertain 计入分母稀释但不投 pass 票。
+  const majority = verdicts.length === 0 ? 'unknown' : verdicts.filter((v) => v === 'pass').length > verdicts.length / 2 ? 'pass' : 'fail'
   const out = { ok: true, majorityVerdict: majority, hardModels: Object.fromEntries(Object.entries(HARD_MODELS).map(([k, v]) => [k, v.model])), sharedContext: !!shared, compactNotes, generatedAt: new Date().toISOString(), vendors: results }
   if (outFile) writeFileSync(outFile, JSON.stringify(out, null, 2), 'utf-8')
   console.log(JSON.stringify(out, null, 2))
@@ -299,10 +311,22 @@ async function runAllRoles(prompt, evidenceFile, outFile, shared) {
       results[role] = { vendor: vendorKey, model: HARD_MODELS[vendorKey].model, error: e.message }
     }
   }
-  const verdicts = Object.values(results).map((r) => r.output?.verdict).filter(Boolean)
+  // 计票修复（r69）：双形态兼容——verdict 字符串（verdict 命令）与 pass 布尔（自定义 prompt 常见形态）。
+  // 旧逻辑只认 verdict 字段，pass 布尔形态的 fail 票会被静默丢弃（r69 R1 实证：1 pass/2 fail 误判 pass）。
+  const verdicts = Object.values(results)
+    .map((r) => {
+      const o = r.output
+      if (!o || typeof o !== 'object') return undefined
+      if (typeof o.verdict === 'string') return o.verdict
+      if (typeof o.pass === 'boolean') return o.pass ? 'pass' : 'fail'
+      return undefined
+    })
+    .filter(Boolean)
   // 空洞真值修复（v6 ①，2026-08-28）：verdicts 为空（全厂商失败）时 0>=0 恒真曾给绿色 pass——
   // 密钥全故障时质量门假绿。先判空返回 unknown，多数决仅在非空时计算。
-  const majority = verdicts.length === 0 ? 'unknown' : verdicts.filter((v) => v === 'pass').length >= Math.ceil(verdicts.length / 2) ? 'pass' : 'fail'
+  // 门槛修复（r69）：严格多数（>50%）才 pass——旧 >=ceil(n/2) 在偶数票时 50% 即 pass（2 票 1 pass 误判）。
+  // uncertain 计入分母稀释但不投 pass 票。
+  const majority = verdicts.length === 0 ? 'unknown' : verdicts.filter((v) => v === 'pass').length > verdicts.length / 2 ? 'pass' : 'fail'
   const out = {
     ok: true,
     majorityVerdict: majority,

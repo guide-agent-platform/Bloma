@@ -8,6 +8,7 @@ import { buildPrdBackplane, readPrdBackplane, readUxContractSketch, syncDocument
 import { createSnapshot, runSandbox, trackAnalytics } from './platform-services'
 import { renderPackageJson, renderStaticServer } from './project-scaffold'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
+import { appendProjectMapToSystem, loadProjectMapBlock } from './project-map'
 import { resolveChannelEnv } from './runtime-fallback'
 import { captureConstraints, extractConstraints, readProjectConstraints } from './constraint-extractor'
 import { distillProjectMemorySafely } from './memory-distiller'
@@ -679,7 +680,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     delegationMaxTurns: DELEGATION_MAX_TURNS,
     permissionMode: AUTOMATED_PERMISSION_MODE,
     temperature: categoryTemperature('mvp'),
-    system: buildLoopSystemWithOverride(backplane, editFormat),
+    system: buildLoopSystemWithOverride(backplane, editFormat, input.project_id),
     editFormat,
     providerType: loop.channel.provider_type,
     publish: (type, payload) => publish(input, type, payload),
@@ -720,7 +721,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   let result: AgentLoopResult
   try {
     result = await runAgentLoop({
-    system: buildLoopSystemWithOverride(backplane, editFormat),
+    system: buildLoopSystemWithOverride(backplane, editFormat, input.project_id),
     task: buildAgentLoopTask(backplane, input.mode),
     tools: buildAgentTools({
       projectId: input.project_id,
@@ -928,10 +929,19 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
  * 背板锚定系统提示词 + 用户追加规则（D4 追加模式）：`loop-system` 覆盖文件内容追加在
  * 动态 system prompt 之后（背板锚定段不可覆盖）。无覆盖文件返回 base 本身。
  */
-function buildLoopSystemWithOverride(backplane: PrdBackplane, editFormat: 'diff' | 'whole'): string {
+function buildLoopSystemWithOverride(backplane: PrdBackplane, editFormat: 'diff' | 'whole', projectId?: string): string {
   const base = buildAgentLoopSystemPrompt(backplane, editFormat)
   const override = loadPromptOverride('loop-system')
-  return override ? `${base}\n\n【用户自定义规则】\n${override}` : base
+  const withOverride = override ? `${base}\n\n【用户自定义规则】\n${override}` : base
+  // project-map（Graft 模式，r69）：代码结构语义地图注入 system 尾部——定位代码优先按锚点
+  // read_file，避免每轮 grep 漫游（冷会话重探索问题）；地图缺失/项目读取失败静默不注入。
+  if (!projectId) return withOverride
+  try {
+    const project = findProject(projectId)
+    return appendProjectMapToSystem(withOverride, loadProjectMapBlock(projectId, project.workspace_slug))
+  } catch {
+    return withOverride
+  }
 }
 
 /** 初始 user 消息：任务指令（背板细节在 system，这里只给行动指令）。 */

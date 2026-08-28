@@ -5,6 +5,7 @@ import { rmSyncWithRetry } from './fs-retry'
 import { tmpdir } from 'node:os'
 import { extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { findProject, readLastSketchRequirements } from './project-service'
+import { scheduleProjectMapRefresh } from './project-map'
 import { getSandboxLogs, runSandbox } from './platform-services'
 import { runGwtScenarios } from './gwt-service'
 import { planScenarios, scenarioName } from './gwt-runner'
@@ -255,6 +256,13 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     const abs = join(root, rel)
     mkdirSync(join(abs, '..'), { recursive: true })
     writeFileSync(abs, finalContent, 'utf8')
+    // project-map（Graft 模式，r69）：工程产物写盘后 fire-and-forget 刷新语义地图
+    //（write_file / edit_file whole / edit_file diff 三路共用本写入点）；失败静默不影响返回
+    try {
+      scheduleProjectMapRefresh(findProject(projectId).workspace_slug, projectId, root)
+    } catch {
+      /* 项目索引缺失等：地图刷新放弃，写盘结果不受影响 */
+    }
     const stripped = finalContent !== content
     return {
       output: `已写入 ${rel}（${Buffer.byteLength(finalContent, 'utf8')} 字节）${stripped ? '；已剥离与平台 CSP 冲突的 meta 标签' : ''}`,
