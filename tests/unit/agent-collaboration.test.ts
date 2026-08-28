@@ -183,6 +183,23 @@ describe('委派协作 M1', () => {
     expect(restored!.resultSummary).toContain('子任务完成')
   })
 
+  it('stop_delegation 后恢复：重启视角从盘上读到 cancelled 终态（stop 路径落盘）', async () => {
+    registerParent(oneShotQuery('不会被等到的一轮'))
+    const created = startDelegation(parentContext(), {
+      task: '将被停止的任务',
+      role: 'explore',
+    })
+    expect(findDelegation(parentSessionId, created.delegation_id)).toBeDefined()
+
+    const summary = stopDelegation(parentSessionId, created.delegation_id)
+    expect(summary.status).toBe('cancelled')
+
+    const restored = restoreDelegationRecord(parentSessionId, created.delegation_id)
+    expect(restored).toBeDefined()
+    expect(restored!.status).toBe('cancelled')
+    expect(restored!.finished).toBe(true)
+  })
+
   it('深度限制：父 agent 已是子会话（delegation_depth ≥ 1）→ 拒绝再派', () => {
     registerParent(oneShotQuery('ok'))
     const deepParent = parentContext({ state: createToolState(1) })

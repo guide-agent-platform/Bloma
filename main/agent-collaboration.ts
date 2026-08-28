@@ -226,8 +226,9 @@ export function startDelegation(parent: ToolContext, args: DelegateAgentArgs): S
       parentSessionId: parent.sessionId,
       sourceDelegationId: delegationId,
     })
-  } catch {
-    // 索引写入失败不阻断委派（best-effort，同 recordSessionActivity 自身的容错口径）
+  } catch (error) {
+    // best-effort（同 recordSessionActivity 容错口径）；warn 保证落盘失败运维可见
+    console.warn('[delegation-persistence] 子会话归属写入失败:', error)
   }
   pruneFinishedDelegations()
   publishDelegationEvent(parent.sessionId, 'delegation_started', record)
@@ -245,8 +246,8 @@ export function startDelegation(parent: ToolContext, args: DelegateAgentArgs): S
         record.error = '已由主 agent 停止（abort），子循环未响应，超时强制收尾'
         try {
           appendDelegationSettle(record.childSessionId, 'cancelled', { error: record.error })
-        } catch {
-          // 落盘失败不阻断强制收尾
+        } catch (error) {
+          console.warn('[delegation-persistence] abort 强制收尾落盘失败:', error)
         }
         record.resolveCompletion()
         publishDelegationEvent(parent.sessionId, 'delegation_cancelled', record)
@@ -274,8 +275,8 @@ function settleChildLoop(record: DelegationRecord, result: AgentLoopResult): voi
   // persistence：终态落盘（重启后 JSONL 末行推断依据）
   try {
     appendDelegationSettle(record.childSessionId, 'completed', { resultSummary: record.resultSummary })
-  } catch {
-    // 落盘失败不阻断内存态收尾（best-effort）
+  } catch (error) {
+    console.warn('[delegation-persistence] settle 落盘失败:', error)
   }
   record.resolveCompletion()
   publishDelegationEvent(record.parentSessionId, 'delegation_completed', record)
@@ -421,8 +422,8 @@ export function stopDelegation(parentSessionId: string, delegationId: string): D
     record.error = '已由主 agent 停止（stop_delegation）'
     try {
       appendDelegationSettle(record.childSessionId, 'cancelled', { error: record.error })
-    } catch {
-      // 落盘失败不阻断内存态收尾
+    } catch (error) {
+      console.warn('[delegation-persistence] stop 落盘失败:', error)
     }
     record.abort.abort()
     record.resolveCompletion()
