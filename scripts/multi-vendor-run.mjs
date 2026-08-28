@@ -156,7 +156,10 @@ async function callModel(vendorKey, system, userPrompt, shared, maxTokens = COMP
 
   if (v.api === 'anthropic') {
     const url = (v.baseUrl || '').endsWith('/messages') ? v.baseUrl : `${(v.baseUrl || '').replace(/\/+$/, '')}/v1/messages`
-    const body = { model: v.model, max_tokens: maxTokens, system, messages: [{ role: 'user', content: finalUser }] }
+    // thinking 显式禁用（2026-08-28 r54）：glm-5.3-flash 思考模型在长上下文下会把 max_tokens
+    // 全部耗在 thinking 块（实测 19KB 上下文 4096 输出全为 thinking、正文为空，见 errors.md）；
+    // 探针已证 zhipu anthropic 端点接受 disabled（200 正常返回）。
+    const body = { model: v.model, max_tokens: maxTokens, thinking: { type: 'disabled' }, system, messages: [{ role: 'user', content: finalUser }] }
     const resp = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': v.apiKey, 'anthropic-version': '2023-06-01' },
