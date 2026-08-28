@@ -121,6 +121,14 @@ describe('Sprint 1 project mode and workspace acceptance', () => {
     expect(screen.queryByText(/React|Vue|数据库|技术栈|API/)).toBeNull()
   })
 
+  it('[S1-UI-023] 快消卡引导文案「转为长期维护」无「升级」付费歧义（QW#2 走查 P3-⑤）', () => {
+    render(<Provider><ModeSelectionPage onModeSelected={vi.fn()} /></Provider>)
+
+    expect(screen.getByText('以后也能转为长期维护')).toBeTruthy()
+    // 「升级」在模式选择语境有付费暗示（评审 ux-qw2-welcome-review P3-⑤），此页不再出现
+    expect(screen.queryByText(/升级为长期维护/)).toBeNull()
+  })
+
   it('[S1-UI-012] 快速尝鲜卡显示「新手推荐」角标（QW#4，ux-r2 I3 默认推荐）', () => {
     render(<Provider><ModeSelectionPage onModeSelected={vi.fn()} /></Provider>)
     expect(screen.getByText('新手推荐')).toBeTruthy()
