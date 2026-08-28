@@ -133,29 +133,53 @@ function isToolTurn(turn: ConversationTurn): boolean {
  * tool 轮按 toolRounds*2 条预算保留（相邻成对 → 最近完整 N 轮，不拆 tool_use→tool_result 配对），
  * 纯文本轮按 textWindowTurns 保留；保持原顺序。JSONL 落盘不走此路径（全量审计）。
  *
- * 已知取舍（对抗审查 M2）：硬窗口会丢弃早期轮次的工具结果——长循环（longterm=40 轮）下
- * 第 1 次 run_gwt_tests 失败的断言细节可能在 8 轮后出窗。当前为最小改动采用固定窗口；
- * 若后续模型质量受此影响，优先方案是「钉住首个 test_failed 轮」（在 kept 之外 unshift 该轮对）。
+ * 钉轮（闭环治理 PR2，对抗审查 M2 取舍落地）：pinnedTurn 指向首个 test_failed 轮（1-based），
+ * 该轮的 assistant+user 对在窗口预算之外恒保留——长循环下第 1 次 run_gwt_tests 失败的
+ * 断言细节不会随 8 轮硬窗口出窗，模型修复不再重复踩已修过的坑。只钉完整对
+ * （角色成对且都是工具轮）；对不完整（cancelled 残局）不钉，退化为固定窗口。
  */
-export function windowMessages(messages: ConversationTurn[], textWindowTurns: number, toolRounds: number): ConversationTurn[] {
+export function windowMessages(
+  messages: ConversationTurn[],
+  textWindowTurns: number,
+  toolRounds: number,
+  pinnedTurn?: number,
+): ConversationTurn[] {
   if (messages.length === 0) return []
   const head = messages[0]
   const tail = messages.slice(1)
+  // pinnedTurn t 的对 = tail[2(t-1)]（assistant tool_use）+ tail[2(t-1)+1]（user tool_result）
+  const pinned = new Set<number>()
+  if (pinnedTurn !== undefined) {
+    const a = 2 * (pinnedTurn - 1)
+    const b = a + 1
+    const assistant = tail[a]
+    const result = tail[b]
+    if (
+      assistant && result &&
+      assistant.role === 'assistant' && isToolTurn(assistant) &&
+      result.role === 'user' && isToolTurn(result)
+    ) {
+      pinned.add(a)
+      pinned.add(b)
+    }
+  }
   let toolBudget = toolRounds * 2
   let textBudget = textWindowTurns
-  const kept: ConversationTurn[] = []
+  const kept: number[] = [] // tail 索引（升序由 unshift 维持）
   for (let i = tail.length - 1; i >= 0; i -= 1) {
+    if (pinned.has(i)) continue // 钉住的对不占窗口预算
     if (isToolTurn(tail[i])) {
       if (toolBudget > 0) {
-        kept.unshift(tail[i])
+        kept.unshift(i)
         toolBudget -= 1
       }
     } else if (textBudget > 0) {
-      kept.unshift(tail[i])
+      kept.unshift(i)
       textBudget -= 1
     }
   }
-  return [head, ...kept]
+  const ordered = [...pinned, ...kept].sort((x, y) => x - y) // 保持原顺序
+  return [head, ...ordered.map((i) => tail[i])]
 }
 
 export function createToolState(delegationDepth = 0): AgentLoopToolState {
@@ -183,6 +207,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   let turns = 0
   let finalText = ''
   let consecutiveBudgetStallTurns = 0
+  // 首个 test_failed 轮（窗口钉轮，只钉一次）：修复全程可见第一次测试失败的断言细节
+  let pinnedTestTurn: number | undefined
 
   for (let turn = 1; turn <= input.maxTurns; turn += 1) {
     if (input.signal.aborted) return loopCancelled(turns, finalText, toolCalls)
@@ -216,7 +242,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         sessionId: input.sessionId,
         maxTokens: input.maxTokens,
         ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
-        messages: [{ role: 'system', content: input.system }, ...windowMessages(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS)],
+        messages: [{ role: 'system', content: input.system }, ...windowMessages(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn)],
         tools: definitions,
       })) {
         if (sdk.type === 'assistant' && sdk.message) {
@@ -285,6 +311,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     appendLoopMessage(input.sessionId, 'user', resultBlocks)
     messages.push({ role: 'assistant', content: assistantBlocks })
     messages.push({ role: 'user', content: resultBlocks })
+    // 钉轮信号：本轮工具把 test_failed 置位（如 run_gwt_tests 失败）且尚未钉过 → 钉本轮
+    if (ctx.state.test_failed && pinnedTestTurn === undefined) pinnedTestTurn = turn
 
     consecutiveBudgetStallTurns = budgetStallThisTurn ? consecutiveBudgetStallTurns + 1 : 0
     if (consecutiveBudgetStallTurns >= BUDGET_STALL_TURNS) {
