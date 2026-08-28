@@ -478,3 +478,16 @@ describe('零渠道欢迎引导（QW#2 ux-r2 I2）', () => {
     expect(screen.queryByText(/还没连接 AI 模型/)).toBeNull()
   })
 })
+
+describe('模式卡可达名（mode-card-a11y，r63 方向 B，A 档）', () => {
+  it('[S1-UI-024] 模式卡按钮可达名为「title（模式名）」≤16 字，而非整卡 74 字巨型可达名', () => {
+    render(<Provider store={createStore()}><ModeSelectionPage onModeSelected={vi.fn()} /></Provider>)
+
+    const quick = screen.getByRole('button', { name: '快速做一个试试（快速尝鲜）' })
+    expect(quick).toBeTruthy()
+    const longterm = screen.getByRole('button', { name: '认真打磨一个产品（精细打磨）' })
+    expect(longterm).toBeTruthy()
+    // 可达名不再包含描述/角标/CTA 全文（读屏器不必念完整卡才知道是什么）
+    expect(quick.getAttribute('aria-label')).not.toContain('一次性小工具')
+  })
+})

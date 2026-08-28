@@ -50,6 +50,9 @@ export const ModeCard: React.FC<ModeCardProps> = ({
       className="mode-tile tile"
       data-ai-id={isQuick ? 'mode-card-quick' : 'mode-card-longterm'}
       disabled={disabled}
+      // 模式卡 a11y A 档（2026-08-28）：可达名=「title（模式名）」≤16 字——
+      // 整卡全部文本作可达名（实测 74 字）会让读屏器念完才知道是什么
+      aria-label={`${title}（${MODE_LABELS[mode]}）`}
       onClick={() => onSelect(mode)}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
