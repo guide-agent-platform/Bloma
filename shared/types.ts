@@ -592,6 +592,9 @@ export interface AgentSessionRecord {
   jsonl_path: string
   created_at: string
   updated_at: string
+  /** delegation-persistence 阶段 1（2026-08-28）：委派子会话归属——重启后按 delegationId 找回 */
+  parent_session_id?: string
+  source_delegation_id?: string
 }
 
 export interface AgentListSessionsInput extends RequestEnvelope {

@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { appendDelegationSettle } from './delegation-persistence'
+import { recordSessionActivity } from './session-service'
 import type { AgentEvent, PromaPermissionMode } from '../shared/types'
 import type { SDKQuery } from './orchestrator'
 import {
@@ -217,6 +219,16 @@ export function startDelegation(parent: ToolContext, args: DelegateAgentArgs): S
     askSignal: createAskSignal(),
   }
   delegations.set(delegationId, record)
+  // delegation-persistence 阶段 1（2026-08-28）：子会话索引写归属 meta——重启后
+  // restoreDelegationRecord 可按 delegationId 找回子会话 JSONL（内存 registry 重启即丢）
+  try {
+    recordSessionActivity(childSessionId, parent.projectId, {
+      parentSessionId: parent.sessionId,
+      sourceDelegationId: delegationId,
+    })
+  } catch {
+    // 索引写入失败不阻断委派（best-effort，同 recordSessionActivity 自身的容错口径）
+  }
   pruneFinishedDelegations()
   publishDelegationEvent(parent.sessionId, 'delegation_started', record)
 
@@ -231,6 +243,11 @@ export function startDelegation(parent: ToolContext, args: DelegateAgentArgs): S
         if (record.status !== 'running') return
         record.status = 'cancelled'
         record.error = '已由主 agent 停止（abort），子循环未响应，超时强制收尾'
+        try {
+          appendDelegationSettle(record.childSessionId, 'cancelled', { error: record.error })
+        } catch {
+          // 落盘失败不阻断强制收尾
+        }
         record.resolveCompletion()
         publishDelegationEvent(parent.sessionId, 'delegation_cancelled', record)
         delegations.delete(record.delegationId)
@@ -254,6 +271,12 @@ function settleChildLoop(record: DelegationRecord, result: AgentLoopResult): voi
   if (record.status !== 'running') return
   record.resultSummary = summarizeChildResult(result)
   record.status = 'completed'
+  // persistence：终态落盘（重启后 JSONL 末行推断依据）
+  try {
+    appendDelegationSettle(record.childSessionId, 'completed', { resultSummary: record.resultSummary })
+  } catch {
+    // 落盘失败不阻断内存态收尾（best-effort）
+  }
   record.resolveCompletion()
   publishDelegationEvent(record.parentSessionId, 'delegation_completed', record)
 }
@@ -263,6 +286,11 @@ function settleChildLoopError(record: DelegationRecord, error: unknown): void {
   if (record.status !== 'running') return
   record.error = errorMessage(error)
   record.status = 'failed'
+  try {
+    appendDelegationSettle(record.childSessionId, 'failed', { error: record.error })
+  } catch {
+    // 落盘失败不阻断内存态收尾
+  }
   record.resolveCompletion()
   publishDelegationEvent(record.parentSessionId, 'delegation_failed', record)
 }
@@ -391,6 +419,11 @@ export function stopDelegation(parentSessionId: string, delegationId: string): D
   if (record.status === 'running') {
     record.status = 'cancelled'
     record.error = '已由主 agent 停止（stop_delegation）'
+    try {
+      appendDelegationSettle(record.childSessionId, 'cancelled', { error: record.error })
+    } catch {
+      // 落盘失败不阻断内存态收尾
+    }
     record.abort.abort()
     record.resolveCompletion()
     publishDelegationEvent(parentSessionId, 'delegation_cancelled', record)

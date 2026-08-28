@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SDKMessage } from '../../shared/types'
 import type { SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
 import { createToolState, type AgentLoopTool, type ToolContext } from '../../main/agent-loop'
+import { restoreDelegationRecord } from '../../main/delegation-persistence'
 import { buildAgentTools } from '../../main/agent-tools'
 import {
   MAX_RUNNING_DELEGATIONS_PER_PARENT,
@@ -157,6 +158,29 @@ describe('委派协作 M1', () => {
     expect(summary.status).toBe('completed')
     expect(summary.result_summary).toContain('子任务完成')
     expect(summary.result_summary).toContain('completed')
+  })
+
+  it('持久化恢复：子会话带归属 meta，settle 后重启视角能从盘上恢复 completed record', async () => {
+    registerParent(oneShotQuery('子任务完成，结果：xxx'))
+    const created = startDelegation(parentContext(), {
+      task: '检查并报告',
+      role: 'explore',
+    })
+    const record = findDelegation(parentSessionId, created.delegation_id)!
+
+    // running 期：restore 已能从索引按 delegationId 找回子会话（阶段 1 meta 归属）
+    const runningRestored = restoreDelegationRecord(parentSessionId, created.delegation_id)
+    expect(runningRestored).toBeDefined()
+    expect(runningRestored!.childSessionId).toBe(created.child_session_id)
+    expect(runningRestored!.parentSessionId).toBe(parentSessionId)
+
+    await record.completion
+    // settle 落盘后：重启视角从 JSONL 末行推断 completed + summary（阶段 2）
+    const restored = restoreDelegationRecord(parentSessionId, created.delegation_id)
+    expect(restored).toBeDefined()
+    expect(restored!.status).toBe('completed')
+    expect(restored!.finished).toBe(true)
+    expect(restored!.resultSummary).toContain('子任务完成')
   })
 
   it('深度限制：父 agent 已是子会话（delegation_depth ≥ 1）→ 拒绝再派', () => {
