@@ -129,9 +129,30 @@ const AppRoutes: React.FC = () => {
     zeroChannelHintShownRef.current = true
     appendMessageToSession(sessionId, {
       role: 'system',
+      // QW#2 二期（2026-08-28）：[welcome-hint] 前缀走 ChatPanel 专属醒目卡片（内嵌直达按钮）；
+      // 文案去黑话（API Key=门禁卡，从模型官网复制）+ 时长如实（首次约 10 分钟，不再承诺 2 分钟）
       content: [{
         type: 'text',
-        text: '💡 你还没连接 AI 模型。点右上角 ⚙️ 设置，添加一个 AI 模型（给它起个名字 + API Key），2 分钟搞定。连接后向导就能直接为你生成。',
+        text: '[welcome-hint]💡 你还没连接 AI 模型。添加一个 AI 模型需要从模型官网复制一段「API Key」（相当于门禁卡），首次约 10 分钟。连接后向导就能直接为你生成。',
+      }],
+      timestamp: Date.now(),
+    })
+  }, [route, hasChannels, sessionId, sessionMessages])
+
+  // QW#2 二期 P2-④（2026-08-28）：引导已出且渠道从无到有 → 追加连接成功正反馈，
+  // 对称闭环衔接用户下一步动作（不再让用户试探性发消息确认自己搞对了）
+  const channelSuccessShownRef = React.useRef(false)
+  React.useEffect(() => {
+    if (route !== 'workspace') return
+    if (!zeroChannelHintShownRef.current) return
+    if (hasChannels !== true) return
+    if (channelSuccessShownRef.current) return
+    channelSuccessShownRef.current = true
+    appendMessageToSession(sessionId, {
+      role: 'system',
+      content: [{
+        type: 'text',
+        text: '[welcome-hint:done]✅ 连接成功！把你想做的软件告诉我吧。',
       }],
       timestamp: Date.now(),
     })

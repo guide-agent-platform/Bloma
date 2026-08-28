@@ -116,6 +116,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
           onViewPartial={props.onViewPartial}
           isHistoryLoading={props.isHistoryLoading}
           onStopGeneration={props.onStopGeneration}
+          onOpenSettings={props.onOpenSettings}
         />
         <PreviewPanel
           status={props.previewStatus}

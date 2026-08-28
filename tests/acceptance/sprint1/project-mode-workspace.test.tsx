@@ -2,7 +2,7 @@
 
 import React from 'react'
 import { createStore, Provider } from 'jotai'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../../../renderer/components/App'
 import { ModeSelectionPage } from '../../../renderer/components/ModeSelectionPage'
@@ -368,6 +368,12 @@ describe('消息排队提示（message-queue S4-QUEUE-009）', () => {
 })
 
 describe('零渠道欢迎引导（QW#2 ux-r2 I2）', () => {
+  // 修 S1-UI-020 存量崩溃（2026-08-28）：该 describe 一直缺 scrollIntoView mock——
+  // 引导消息追加触发 ChatPanel 滚动 effect，jsdom 无 scrollIntoView → 整树卸载 body 空 div。
+  // 其他 describe 的 beforeEach 均有此 mock，仅本块漏配（FAIL_TEST，非产品缺陷）。
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = vi.fn()
+  })
   afterEach(() => {
     cleanup()
     delete window.electronAPI
@@ -395,8 +401,49 @@ describe('零渠道欢迎引导（QW#2 ux-r2 I2）', () => {
     await waitFor(() => {
       expect(screen.getByText(/还没连接 AI 模型/)).toBeTruthy()
     })
-    // 引导指向设置入口（消息文本含「设置」字样，设置按钮同时存在）
-    expect(screen.getAllByText(/设置/).length).toBeGreaterThan(0)
+    // QW#2 二期 P1-②（2026-08-28）：引导卡片内嵌「去连接」直达按钮（宁可给按钮不给说明书）
+    const goBtn = screen.getByRole('button', { name: /去连接 AI 模型/ })
+    // P1-③：文案去黑话——API Key 解释为「门禁卡」+ 首次约 10 分钟（不再承诺 2 分钟）
+    expect(screen.getByText(/门禁卡/)).toBeTruthy()
+    expect(screen.getByText(/首次约 10 分钟/)).toBeTruthy()
+    expect(screen.queryByText(/2 分钟搞定/)).toBeNull()
+    // 点击直达按钮 → 切到设置页（模型渠道 Tab）
+    fireEvent.click(goBtn)
+    await waitFor(() => {
+      expect(screen.getByText('模型渠道')).toBeTruthy()
+    })
+  })
+
+  it('[S1-UI-022] 零渠道引导显示后连接成功 → 追加「✅ 连接成功」正反馈（QW#2 二期 P2-④）', async () => {
+    const store = createStore()
+    window.__jotai_store__ = store
+    window.electronAPI = {
+      project: {
+        create: vi.fn().mockResolvedValue({ ok: true, request_id: 't', data: project('quick') }),
+        list: vi.fn().mockResolvedValue({ ok: true, request_id: 't', data: [] }),
+      },
+      channels: {
+        list: vi.fn().mockResolvedValue({ ok: true, request_id: 't', data: [] }),
+      },
+    } as unknown as ElectronAPI
+
+    render(<Provider store={store}><App /></Provider>)
+    fireEvent.click(screen.getByRole('button', { name: /快速做一个试试/ }))
+    await waitFor(() => {
+      expect(screen.getByText(/还没连接 AI 模型/)).toBeTruthy()
+    })
+    // 用户在设置页连好渠道 → 渠道列表原子更新（false → true 转换）
+    act(() => {
+      store.set(channelsListAtom, [
+        { id: 'c1', name: 'x', provider_type: 'anthropic', base_url: 'u', api_key: 'k', enabled: true, models: [{ id: 'm1', name: 'm', enabled: true }] },
+      ])
+    })
+    await waitFor(() => {
+      expect(screen.getByText(/连接成功/)).toBeTruthy()
+    })
+    // 成功卡不带直达按钮（反馈语义，不再指路）；引导卡按钮仍在属正常（两条消息并存）
+    const successCard = screen.getByText(/连接成功/).closest('div')
+    expect(successCard?.querySelector('button')).toBeNull()
   })
 
   it('[S1-UI-021] 有可用渠道时进入工作区不显示零渠道引导', async () => {

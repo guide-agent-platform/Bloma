@@ -41,6 +41,8 @@ export interface ChatPanelProps {
   isHistoryLoading?: boolean
   /** 停止当前生成（U4：Agent 流式生成中点击停止） */
   onStopGeneration?: () => void
+  /** 零渠道引导卡直达按钮（QW#2 二期 P1-①②）：切到设置页，宁可给按钮不给说明书 */
+  onOpenSettings?: () => void
 }
 
 // 模块级常量：当 activeAgentSessionIdAtom 为 null 时的稳定 fallback atom，
@@ -87,6 +89,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   onViewPartial,
   isHistoryLoading = false,
   onStopGeneration,
+  onOpenSettings,
 }) => {
   const activeSessionId = useAtomValue(activeAgentSessionIdAtom)
   const mode = useAtomValue(projectModeAtom)
@@ -277,7 +280,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             )}
 
             {messages.map((msg, i) => (
-              <MessageBubble key={i} message={msg} mode={mode} toolNamesById={toolNamesById} />
+              <MessageBubble key={i} message={msg} mode={mode} toolNamesById={toolNamesById} onOpenSettings={onOpenSettings} />
             ))}
 
             {/* message-queue UI 收尾（P1-①）：排队中的消息灰化回显，确认不丢 */}
@@ -486,6 +489,8 @@ interface MessageBubbleProps {
   isStreaming?: boolean
   /** tool_use_id → 工具名（回放 tool_result 行用） */
   toolNamesById?: Record<string, string>
+  /** 零渠道引导卡直达按钮回调（QW#2 二期） */
+  onOpenSettings?: () => void
 }
 
 const userBubbleBg = (mode: ProjectMode | null): string =>
@@ -498,7 +503,7 @@ const userBubbleShadow = (mode: ProjectMode | null): string =>
     ? '0 4px 12px -3px rgba(14,116,144,0.35)'
     : '0 4px 12px -3px rgba(124,58,237,0.35)'
 
-const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreaming = false, toolNamesById }) => {
+const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreaming = false, toolNamesById, onOpenSettings }) => {
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
 
@@ -520,6 +525,54 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
   if (isSystem) {
     // [decision] 是内部决策簿记（用户面在文档面板的 decisions.md），不进聊天流
     if (text.startsWith('[decision]')) return null
+    // [welcome-hint] 零渠道引导（QW#2 二期 P1-①，2026-08-28）：专属醒目卡片——正常字号 +
+    // 品牌色左边框 + 内嵌直达按钮。不再与 [channel-switch] 等机器簿记共用弱样式胶囊
+    //（首跑最关键的第一条提示曾是全场视觉最弱元素，font-size-xs + text-muted）。
+    const welcomeDone = text.startsWith('[welcome-hint:done]')
+    if (text.startsWith('[welcome-hint]') || welcomeDone) {
+      // done 变体（P2-④）：绿色左边框、不带直达按钮——反馈语义不再指路
+      const hint = text.replace(/^\[welcome-hint(?::done)?\]\s*/, '')
+      return (
+        <div
+          style={{
+            alignSelf: 'center',
+            maxWidth: '92%',
+            width: 'fit-content',
+            padding: 'var(--space-4)',
+            background: 'var(--glass-bg-soft)',
+            borderLeft: welcomeDone ? '3px solid #10b981' : '3px solid var(--color-quick, #7c3aed)',
+            borderRadius: 'var(--radius-md)',
+            fontSize: 'var(--font-size-sm)',
+            color: 'var(--color-text)',
+            animation: 'tile-enter 0.3s ease both',
+          }}
+        >
+          <div>{hint}</div>
+          {onOpenSettings && !welcomeDone && (
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              style={{
+                marginTop: 'var(--space-3)',
+                padding: 'var(--space-2) var(--space-4)',
+                background: 'linear-gradient(135deg, var(--color-quick, #7c3aed), var(--color-quick-bright, #9f67ff))',
+                color: 'var(--white, #fff)',
+                border: 'none',
+                borderRadius: 'var(--radius-full)',
+                fontSize: 'var(--font-size-sm)',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              ⚙️ 去连接 AI 模型
+            </button>
+          )}
+          <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-2)' }}>
+            也可以随时点右上角 ⚙️
+          </p>
+        </div>
+      )
+    }
     // [reconcile] / [decision-card] / [channel-switch] 是机器前缀，剥掉后展示人话
     const display = text.replace(/^\[(?:reconcile|decision-card|channel-switch)\]\s*/, '')
     return (
