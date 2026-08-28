@@ -1,5 +1,5 @@
 import { restorePromaHome } from '../support/proma-home-guard'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -218,6 +218,99 @@ describe('DocumentEngine (A2-05)', () => {
     expect(second.stale_documents.length).toBe(1)
     const synced = listDocuments(project.project_id).filter((d) => d.type === 'changelog')
     expect(synced.filter((d) => d.status === 'synced').length).toBe(1)
+  })
+
+  // 用户裁决（2026-08-28 09:05）：GA-03 P1 changelog 语义 = 追加式。
+  // 每轮迭代完成后 append 历史条目（时间戳 + 本轮变更记录 + 功能项变化），
+  // 历史条目 append-only 永不改写（PRD §7.1「每轮迭代结束后追加 Changelog」字面语义）。
+  it('[S4-DOCUMENT-007] changelog 追加式：第二轮同步保留第一轮历史条目（append-only）', () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-doc-iter-append-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+    const changelogPath = join(dir, 'iteration_completed.md')
+
+    // 第一轮：F-001 + F-002
+    recordSketchGenerated(project.project_id, [
+      { id: 'F-001', description: '记录收入与支出' },
+      { id: 'F-002', description: '导出月度报表' },
+    ])
+    syncDocuments({ request_id: 'req-iter-r1', session_id: 'session-1', project_id: project.project_id, checkpoint: 'iteration_completed' })
+    const afterRound1 = readFileSync(changelogPath, 'utf8')
+
+    // 第二轮：F-002 消失、F-003 新增
+    recordSketchGenerated(project.project_id, [
+      { id: 'F-001', description: '记录收入与支出' },
+      { id: 'F-003', description: '导出CSV文件' },
+    ])
+    syncDocuments({ request_id: 'req-iter-r2', session_id: 'session-1', project_id: project.project_id, checkpoint: 'iteration_completed' })
+
+    const changelog = readFileSync(changelogPath, 'utf8')
+    // append-only 铁律：第一轮历史条目逐字保留（旧覆盖式实现会丢失「导出月度报表」）
+    expect(changelog).toContain(afterRound1)
+    expect(changelog).toContain('导出月度报表')
+    // 新条目反映第二轮当前清单
+    expect(changelog).toContain('导出CSV文件')
+    // 轮次计数：两个条目标题，第 1 轮 → 第 2 轮
+    expect(changelog).toContain('第 1 轮迭代')
+    expect(changelog).toContain('第 2 轮迭代')
+  })
+
+  it('[S4-DOCUMENT-008] changelog 追加式：新条目标注功能项变化（新增/移除）', () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-doc-iter-diff-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+
+    recordSketchGenerated(project.project_id, [
+      { id: 'F-001', description: '记录收入与支出' },
+      { id: 'F-002', description: '导出月度报表' },
+    ])
+    syncDocuments({ request_id: 'req-iter-r1', session_id: 'session-1', project_id: project.project_id, checkpoint: 'iteration_completed' })
+
+    recordSketchGenerated(project.project_id, [
+      { id: 'F-001', description: '记录收入与支出' },
+      { id: 'F-003', description: '导出CSV文件' },
+    ])
+    syncDocuments({ request_id: 'req-iter-r2', session_id: 'session-1', project_id: project.project_id, checkpoint: 'iteration_completed' })
+
+    const changelog = readFileSync(join(dir, 'iteration_completed.md'), 'utf8')
+    // 功能项变化段：相对上一条历史条目的 diff
+    expect(changelog).toContain('新增 F-003')
+    expect(changelog).toContain('移除 F-002')
+    // 首轮条目不带 diff 标注（无基线，如实记录首次记录）
+    expect(changelog).toContain('首次记录')
+  })
+
+  it('[S4-DOCUMENT-009] changelog 追加式：旧覆盖式遗留文件兼容追加（原内容原样保留）', () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-doc-iter-legacy-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+    const changelogPath = join(dir, 'iteration_completed.md')
+    // 改造上线前旧实现产出的覆盖式文件（无轮次编号格式）
+    const legacy = [
+      '# 变更记录',
+      '',
+      '> 迭代完成时间：2026-08-27T10:00:00.000Z（checkpoint: iteration_completed）',
+      '',
+      '## 当前功能项清单',
+      '',
+      '- F-001：记录收入与支出',
+      '',
+    ].join('\n')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(changelogPath, legacy, 'utf8')
+
+    recordSketchGenerated(project.project_id, [{ id: 'F-002', description: '导出月度报表' }])
+    syncDocuments({ request_id: 'req-iter-legacy', session_id: 'session-1', project_id: project.project_id, checkpoint: 'iteration_completed' })
+
+    const changelog = readFileSync(changelogPath, 'utf8')
+    // 旧内容原样保留（append-only 不改写历史）
+    expect(changelog).toContain(legacy.trimEnd())
+    // 新条目从第 1 轮开始编号（旧格式无轮次编号，无法归轮，如实从新起算）
+    expect(changelog).toContain('第 1 轮迭代')
+    expect(changelog).toContain('导出月度报表')
   })
 
   it('[S4-DOCUMENT-004] 无功能项时 changelog 不伪造默认项，输出「本轮无功能项变更」', () => {
