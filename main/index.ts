@@ -12,6 +12,7 @@ import {
   startPendingDecisionReminderLoop,
 } from './notifications'
 import { MAIN_FRAME_CSP, shouldInjectMainFrameCsp } from './csp'
+import { createCrashGuard } from './renderer-crash-guard'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -40,8 +41,16 @@ async function createMainWindow(): Promise<void> {
     const current = mainWindow?.webContents.getURL()
     if (current && new URL(url).origin !== new URL(current).origin) event.preventDefault()
   })
+  // Renderer-Crash-Guard v2（v7 Top3，2026-08-29）：渲染进程崩溃不再死路——
+  // reason 白名单（crashed/oom/abnormal-exit）→ 30s 窗口限流 2 次自动 reload → 超限弹框；
+  // 500ms 风暴去重入日志；reload/弹框/日志写全防护（状态机见 renderer-crash-guard.ts，单测 S4-AGENT-075~082）。
+  // 日志落 userData（Electron 惯例，与渠道/会话存储同区）。
+  const crashGuard = createCrashGuard(join(app.getPath('userData'), 'renderer-crash-log.jsonl'))
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
-    dialog.showErrorBox('预览加载失败', '渲染进程已停止，请重新打开应用。')
+    crashGuard.onGone('main', Date.now(), details.reason, details.exitCode, {
+      reload: () => mainWindow?.webContents.reload(),
+      showErrorBox: () => dialog.showErrorBox('预览加载失败', '渲染进程已停止，请重新打开应用。'),
+    })
   })
 
   setSnapshotCaptureProvider(async () => {
