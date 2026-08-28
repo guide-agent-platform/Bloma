@@ -519,7 +519,21 @@ export function agentLoopEnabled(): boolean {
 }
 
 /** maxTurns（方案 §8 待拍板默认：quick=24 / longterm=40，首跑后按埋点标定）。 */
-const AGENT_LOOP_MAX_TURNS: Record<ProjectMode, number> = { quick: 24, longterm: 40 }
+/** maxTurns 缺省（缺省=现状，零行为变化）；可 env 覆盖（闭环 PR8）。 */
+const AGENT_LOOP_MAX_TURNS_DEFAULTS: Record<ProjectMode, number> = { quick: 24, longterm: 40 }
+
+/**
+ * maxTurns 解析（闭环 PR8，随感 16/41）：BLOMA_LOOP_MAX_TURNS_QUICK / _LONGTERM
+ * 可覆盖（标定脚本 npm run analyze:loop 出建议后人工回填）；非法值（非数字/≤0）
+ * 回退缺省。每次调用读取（便于测试与运行时调整）。缺省 = 改造前常量，零行为变化。
+ */
+export function resolveAgentLoopMaxTurns(mode: ProjectMode): number {
+  const fallback = AGENT_LOOP_MAX_TURNS_DEFAULTS[mode]
+  const raw = mode === 'quick' ? process.env.BLOMA_LOOP_MAX_TURNS_QUICK : process.env.BLOMA_LOOP_MAX_TURNS_LONGTERM
+  if (raw === undefined || raw.trim() === '') return fallback
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback
+}
 
 /** 子 agent 独立轮次上限（比主 loop 小，控制委派 token 成本；按埋点标定）。 */
 const DELEGATION_MAX_TURNS = 12
@@ -679,7 +693,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     query: input.query!,
     env: loop.env,
     maxTokens: loop.channel.max_tokens ?? DEFAULT_MAX_TOKENS,
-    maxTurns: AGENT_LOOP_MAX_TURNS[input.mode],
+    maxTurns: resolveAgentLoopMaxTurns(input.mode),
     delegationMaxTurns: DELEGATION_MAX_TURNS,
     permissionMode: AUTOMATED_PERMISSION_MODE,
     temperature: categoryTemperature('mvp'),
@@ -711,10 +725,10 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     entry: {
       type: 'agent_loop',
       title: 'Agent Loop 生成启用',
-      why: `BLOMA_AGENT_LOOP=1 且渠道 ${loop.channel.name}/${loop.env.ANTHROPIC_MODEL} 支持 tool use，MVP 走 agentic loop 生成（maxTurns=${AGENT_LOOP_MAX_TURNS[input.mode]}，edit_format=${editFormat}）`,
+      why: `BLOMA_AGENT_LOOP=1 且渠道 ${loop.channel.name}/${loop.env.ANTHROPIC_MODEL} 支持 tool use，MVP 走 agentic loop 生成（maxTurns=${resolveAgentLoopMaxTurns(input.mode)}，edit_format=${editFormat}）`,
       detail: {
         repair_budget_mapping: 'loop 内「GWT 失败后的 edit_file/write_file」预算 3 次，同构旧管道 test_repair_count ≤ 3',
-        max_turns: AGENT_LOOP_MAX_TURNS[input.mode],
+        max_turns: resolveAgentLoopMaxTurns(input.mode),
         edit_format: editFormat,
       },
     },
@@ -751,7 +765,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     projectId: input.project_id,
     requestId: input.request_id,
     maxTokens: loop.channel.max_tokens ?? DEFAULT_MAX_TOKENS,
-    maxTurns: AGENT_LOOP_MAX_TURNS[input.mode],
+    maxTurns: resolveAgentLoopMaxTurns(input.mode),
     permissionMode: AUTOMATED_PERMISSION_MODE,
     temperature: categoryTemperature('mvp'),
     signal: input.signal ?? new AbortController().signal,

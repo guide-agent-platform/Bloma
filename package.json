@@ -11,6 +11,7 @@
     "build:main": "esbuild main/index.ts --bundle --platform=node --external:electron --external:playwright --format=esm --outfile=dist-main/main/index.js && esbuild preload/bridge.ts --bundle --platform=node --external:electron --format=cjs --outfile=dist-main/preload/bridge.cjs",
     "start": "npm run build && electron .",
     "typecheck": "tsc --noEmit",
+    "analyze:loop": "node scripts/calibrate-loop-params.mjs",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:regression:sprint0": "vitest run tests/regression/sprint0",
