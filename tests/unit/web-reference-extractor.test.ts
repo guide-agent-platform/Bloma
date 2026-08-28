@@ -1,6 +1,7 @@
 import { createServer, type Server } from 'node:http'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
+  buildReferenceSection,
   estimateReferenceCardSize,
   extractReferenceCard,
   fetchForReference,
@@ -124,5 +125,28 @@ describe('fetchForReference（真实网络栈 + 诚实错误）', () => {
     expect(card.palette).toHaveLength(0)
     expect(card.layoutHints).toHaveLength(0)
     expect(card.componentCounts.buttons).toBe(0)
+  })
+})
+
+
+describe('buildReferenceSection（SSRF 门 + 失败降级，2026-08-28 产品接线切片）', () => {
+  it('[S4-AGENT-064] 无 url / 非 http(s)（file://、ftp://、纯路径）→ 空串零 IO', async () => {
+    expect(await buildReferenceSection(undefined)).toBe('')
+    expect(await buildReferenceSection(null)).toBe('')
+    expect(await buildReferenceSection('')).toBe('')
+    expect(await buildReferenceSection('file:///etc/passwd')).toBe('')
+    expect(await buildReferenceSection('ftp://example.com/x')).toBe('')
+    expect(await buildReferenceSection('/etc/passwd')).toBe('')
+  })
+
+  it('[S4-AGENT-065] 合法 http(s) URL → 设计参考节（含标题与主配色），超时/404 降级空串不抛', async () => {
+    const section = await buildReferenceSection(`${base}/shop`, 2000)
+    expect(section).toContain('设计参考')
+    expect(section).toContain('示例商城')
+    expect(section).toContain('#ff5000')
+    // 404 → 降级空串（不阻断调用方主流程）
+    expect(await buildReferenceSection(`${base}/404`, 2000)).toBe('')
+    // 超时 → 降级空串
+    expect(await buildReferenceSection(`${base}/slow`, 300)).toBe('')
   })
 })

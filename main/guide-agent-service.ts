@@ -10,6 +10,7 @@ import { researchMarketSimilar, type MarketResearch } from './guide-research'
 import type { ConversationTurn, GuideModelOptions, SDKQuery } from './orchestrator'
 import { trackAnalytics } from './platform-services'
 import { resolvePrdBackplane, runSketchTask, setProgrammingEventPublisher } from './programming-orchestrator'
+import { buildReferenceSection } from './web-reference-extractor'
 import { findProject, updateProject } from './project-service'
 import { captureConstraints, extractConstraints } from './constraint-extractor'
 import { isAutoDelegationText, readPrimaryIntent } from './session-service'
@@ -650,6 +651,8 @@ export async function resolveRequirementConfirm(input: {
   project_id: string
   decision: 'confirm' | 'delegate'
   requirement_ids?: string[]
+  /** 可选参考网页链接（仅 http(s)）：提取设计参考卡追加到草图 prompt，失败降级 */
+  reference_url?: string
 }): Promise<{ started: boolean; prd_written: boolean }> {
   const pending = takePendingRequirementConfirm(input.project_id)
   if (!pending) return { started: false, prd_written: false }
@@ -707,12 +710,15 @@ export async function resolveRequirementConfirm(input: {
   }
   publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
 
+  // 设计参考接线（web-reference-extractor，2026-08-28）：仅 http(s)，3s 预算，
+  // 任何失败降级空串不阻断确认（对齐 autoName/distill 降级纪律）
+  const referenceSection = await buildReferenceSection(input.reference_url)
   await runSketchTask({
     request_id: pending.request_id,
     session_id: pending.session_id,
     project_id: pending.project_id,
     mode: pending.mode,
-    prompt: '按确认的需求清单生成草图',
+    prompt: `按确认的需求清单生成草图${referenceSection}`,
     requirements,
     channel_id: pending.channel_id,
     query: pending.query,

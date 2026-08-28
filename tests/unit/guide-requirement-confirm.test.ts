@@ -189,6 +189,62 @@ describe('需求确认弹窗（confirm_requirements）', () => {
     expect(deltas.some((text) => text.includes('产品需求文档'))).toBe(true)
   })
 
+  it('[S4-AGENT-066] confirm 带 reference_url → 草图 prompt 追加设计参考节（r56 提取器接线）', async () => {
+    const { createServer } = await import('node:http')
+    const server = createServer((req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html' })
+      res.end('<html><head><title>示例商城</title><style>body{color:#ff5000}</style></head><body><h1>品质好物</h1></body></html>')
+    })
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+    const refUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}/ref`
+    try {
+      await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(), undefined, persistSystem)
+
+      const result = await resolveRequirementConfirm({
+        request_id: 'req-c6',
+        session_id: SESSION_ID,
+        project_id: 'proj-1',
+        decision: 'confirm',
+        requirement_ids: ['F-001'],
+        reference_url: refUrl,
+      })
+      expect(result.started).toBe(true)
+      const call = vi.mocked(runSketchTask).mock.calls.at(-1)?.[0] as { prompt: string }
+      expect(call.prompt).toContain('【设计参考】')
+      expect(call.prompt).toContain('示例商城')
+      expect(call.prompt).toContain('#ff5000')
+    } finally {
+      server.closeAllConnections()
+      await new Promise<void>((r) => server.close(() => r()))
+    }
+  })
+
+  it('[S4-AGENT-067] 无 reference_url → prompt 不含设计参考节（零回归）', async () => {
+    await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(), undefined, persistSystem)
+    await resolveRequirementConfirm({
+      request_id: 'req-c7',
+      session_id: SESSION_ID,
+      project_id: 'proj-1',
+      decision: 'confirm',
+    })
+    const call = vi.mocked(runSketchTask).mock.calls.at(-1)?.[0] as { prompt: string }
+    expect(call.prompt).not.toContain('设计参考')
+  })
+
+  it('[S4-AGENT-068] reference_url 非 http(s) → SSRF 拒绝，prompt 无参考节且照常开工', async () => {
+    await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(), undefined, persistSystem)
+    const result = await resolveRequirementConfirm({
+      request_id: 'req-c8',
+      session_id: SESSION_ID,
+      project_id: 'proj-1',
+      decision: 'confirm',
+      reference_url: 'file:///etc/passwd',
+    })
+    expect(result.started).toBe(true)
+    const call = vi.mocked(runSketchTask).mock.calls.at(-1)?.[0] as { prompt: string }
+    expect(call.prompt).not.toContain('设计参考')
+  })
+
   it('用户选择「由向导决定」（delegate）→ 清单全量开工，决策注明让渡', async () => {
     await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(), undefined, persistSystem)
 

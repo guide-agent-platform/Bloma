@@ -541,6 +541,8 @@ export interface AgentConfirmRequirementsInput extends RequestEnvelope {
   decision: 'confirm' | 'delegate'
   /** confirm 时勾选的需求 id 子集；空集/缺省视为全量（兑底防误操作全清空） */
   requirement_ids?: string[]
+  /** 可选参考网页链接（web-reference-extractor，2026-08-28）：仅 http(s)，提取失败静默降级 */
+  reference_url?: string
 }
 
 export interface AgentConfirmRequirementsResult {

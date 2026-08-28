@@ -133,3 +133,25 @@ export async function fetchForReference(url: string, timeoutMs = DEFAULT_TIMEOUT
     clearTimeout(timer)
   }
 }
+
+// ---------- 产品接线切片（2026-08-28）：SSRF 门 + 失败降级的设计参考节 ----------
+
+/**
+ * 可选参考 URL → 「设计参考」提示节（供 runSketchTask prompt 追加）。
+ * 安全面（三厂商 verdict 一致要求）：仅接受 http(s)（fetch 层天然拒 file://，
+ * 此处再显式挡 file://、ftp:// 与相对路径等）；任何失败（超时/404/解析）→ 空串，
+ * 绝不阻断确认主流程（对齐 autoName/distill 的降级纪律）。
+ */
+export async function buildReferenceSection(url: string | null | undefined, timeoutMs = 3000): Promise<string> {
+  if (!url || !/^https?:\/\//i.test(url.trim())) return ''
+  try {
+    const card = await fetchForReference(url.trim(), timeoutMs)
+    const lines = ['', '【设计参考】用户提供了参考网页，视觉风格可借鉴（仅参考，不必照抄）：', `- 页面标题：${card.title}`]
+    if (card.palette.length) lines.push(`- 主配色：${card.palette.join('、')}`)
+    if (card.layoutHints.length) lines.push(`- 布局特征：${card.layoutHints.join('、')}`)
+    if (card.headings.length) lines.push(`- 信息层级：${card.headings.slice(0, 3).join(' / ')}`)
+    return lines.join('\n')
+  } catch {
+    return ''
+  }
+}
