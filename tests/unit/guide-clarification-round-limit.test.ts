@@ -35,13 +35,13 @@ vi.mock('../../main/session-service', async (importOriginal) => {
 vi.mock('../../main/decision-log', () => ({
   recordDecision: vi.fn(),
   parseDecisionText: (text: string) => {
-    // 真实 parseDecisionText 依赖读盘导出，测试内联同构实现（只取 type）
+    // 真实 parseDecisionText 依赖读盘导出，测试内联同构实现（含 detail，供点选累积扫描）
     const match = /^\[decision\] (\{.*\})$/.exec(text.trim())
     if (!match) return undefined
     try {
-      const parsed = JSON.parse(match[1]) as { type?: string; title?: string; why?: string }
+      const parsed = JSON.parse(match[1]) as { type?: string; title?: string; why?: string; detail?: unknown }
       if (typeof parsed.title === 'string' && typeof parsed.why === 'string') {
-        return { type: parsed.type, title: parsed.title, why: parsed.why }
+        return { type: parsed.type, title: parsed.title, why: parsed.why, detail: parsed.detail }
       }
     } catch {
       // 损坏行
@@ -258,6 +258,115 @@ describe('引导对话 · 连续澄清熔断', () => {
       entry: expect.objectContaining({ type: 'clarification_forced_confirm' }),
     }))
     expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('澄清轮次熔断'))
+  })
+
+  it('三轮点选后熔断（2026-08-29 线上：音乐合成器）→ 确认弹窗清单含主题+全部三轮点选方向，不再只剩主题句', async () => {
+    // 复刻线上会话 3fdc2615：三轮实质点选（旧快照形态=每轮 F-001+F-002），熔断时清单只剩一句 → PRD 正文与清单不一致 → 审查误判「擅自加戏」
+    const answerDecision = (second: string) => ({
+      role: 'system',
+      content: [{
+        type: 'text',
+        text: `[decision] ${JSON.stringify({
+          type: 'clarification_answer',
+          title: '用户点选澄清答案',
+          why: `用户点选「${second}」`,
+          detail: {
+            option_id: 'answer-b',
+            requirements: [
+              { id: 'F-001', description: '做一个音乐合成器' },
+              { id: 'F-002', description: second },
+            ],
+          },
+        })}`,
+      }],
+      timestamp: 7,
+    })
+    const lines: unknown[] = [
+      { role: 'user', content: [{ type: 'text', text: '做一个音乐合成器' }], timestamp: 1 },
+    ]
+    const picks = ['电脑专业软件', '创意实验', '实时演奏']
+    picks.forEach((pick, i) => {
+      lines.push(
+        { role: 'assistant', content: [{ type: 'text', text: `第${i + 1}轮问句？` }], timestamp: 2 + i },
+        { role: 'system', content: [{ type: 'text', text: `[decision-card] 选项A${i}｜选项B${i}｜你帮我决定` }] },
+        { role: 'user', content: [{ type: 'text', text: pick }], timestamp: 6 + i },
+        answerDecision(pick),
+        { role: 'system', content: [{ type: 'text', text: '[terminal] status=completed' }] },
+      )
+    })
+    writeFileSync(
+      join(home, 'agent-sessions', `${SESSION_ID}.jsonl`),
+      lines.map((line) => JSON.stringify(line)).join('\n') + '\n',
+      'utf8',
+    )
+
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const events: AgentEvent[] = []
+    await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(askJson))
+
+    const confirmEvent = events.find((event) => event.type === 'user_decision_required')
+    expect(confirmEvent?.payload.kind).toBe('requirement_confirm')
+    expect(confirmEvent?.payload.requirements).toEqual([
+      { id: 'F-001', description: '做一个音乐合成器' },
+      { id: 'F-002', description: '电脑专业软件' },
+      { id: 'F-003', description: '创意实验' },
+      { id: 'F-004', description: '实时演奏' },
+    ])
+  })
+
+  it('点选回流累积（2026-08-29）：第二轮点选的清单含第一轮方向，不再每轮覆盖 F-002', async () => {
+    // 第一轮点选已落盘（旧形态快照），用户第二轮点选「创意实验」→ clarification_answer 留痕的清单应累积
+    const lines: unknown[] = [
+      { role: 'user', content: [{ type: 'text', text: '做一个音乐合成器' }], timestamp: 1 },
+      { role: 'assistant', content: [{ type: 'text', text: '哪种形态？' }], timestamp: 2 },
+      { role: 'system', content: [{ type: 'text', text: '[decision-card] 手机｜电脑｜你帮我决定' }] },
+      { role: 'user', content: [{ type: 'text', text: '电脑专业软件' }], timestamp: 3 },
+      {
+        role: 'system',
+        content: [{
+          type: 'text',
+          text: `[decision] ${JSON.stringify({
+            type: 'clarification_answer',
+            title: '用户点选澄清答案',
+            why: '用户点选「电脑专业软件」',
+            detail: {
+              option_id: 'answer-b',
+              requirements: [
+                { id: 'F-001', description: '做一个音乐合成器' },
+                { id: 'F-002', description: '电脑专业软件' },
+              ],
+            },
+          })}`,
+        }],
+        timestamp: 4,
+      },
+      { role: 'system', content: [{ type: 'text', text: '[terminal] status=completed' }] },
+    ]
+    writeFileSync(
+      join(home, 'agent-sessions', `${SESSION_ID}.jsonl`),
+      lines.map((line) => JSON.stringify(line)).join('\n') + '\n',
+      'utf8',
+    )
+
+    const input: AgentSendMessageInput = {
+      ...makeInput(),
+      content: '创意实验',
+      metadata: { source: 'card_option', selected_option_id: 'answer-b' },
+    }
+    await handleGuideMessage(input, () => undefined, undefined)
+
+    expect(recordDecision).toHaveBeenCalledWith(expect.objectContaining({
+      entry: expect.objectContaining({
+        type: 'clarification_answer',
+        detail: expect.objectContaining({
+          requirements: [
+            { id: 'F-001', description: '做一个音乐合成器' },
+            { id: 'F-002', description: '电脑专业软件' },
+            { id: 'F-003', description: '创意实验' },
+          ],
+        }),
+      }),
+    }))
   })
 
   it('连续 2 轮但模型主动 generate_sketch → 正常开工，熔断零介入', async () => {

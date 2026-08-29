@@ -238,6 +238,58 @@ interface CardAnswerRoute {
   requirements: SketchRequirement[]
 }
 
+/** 收集当前澄清序列内用户已点选的全部方向（2026-08-29 点选累积修复引入）。
+ * 从会话 JSONL 尾部扫描（终止语义与 countTrailingClarificationRounds 一致：遇澄清
+ * 终止类决策即断，[decision-card] 行透明），合并各轮 clarification_answer 快照中的
+ * 功能项描述并去重，按点选时间正序返回（主题句最早出现、天然排首位）。线上案例：
+ * 三轮点选「电脑专业软件/创意实验/实时演奏」后熔断，确认弹窗只剩主题句一句，
+ * 后续 PRD 正文（从对话历史提取）与确认清单不一致，审查误判「擅自加戏」。 */
+function collectClarificationAnswers(sessionId: string): string[] {
+  const path = getAgentSessionPath(sessionId)
+  if (!existsSync(path)) return []
+  const lines = readFileSync(path, 'utf8').split('\n')
+  const parseSystemLine = (line: string): { kind: 'card' } | { kind: 'decision'; entry: ReturnType<typeof parseDecisionText> } | undefined => {
+    const trimmed = line.trim()
+    if (!trimmed) return undefined
+    let message: AgentMessage
+    try {
+      message = JSON.parse(trimmed) as AgentMessage
+    } catch {
+      return undefined
+    }
+    if (message.role !== 'system') return undefined
+    const text = extractText(message.content ?? []).trim()
+    if (text.startsWith('[decision-card]')) return { kind: 'card' }
+    if (!text.startsWith('[decision]')) return undefined
+    return { kind: 'decision', entry: parseDecisionText(text) }
+  }
+  // 第一遍：从尾往前定位当前澄清序列的起点（最近一个终止类决策行之后；无则从头）
+  let start = 0
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const parsed = parseSystemLine(lines[i])
+    if (parsed?.kind !== 'decision' || !parsed.entry) continue
+    if (CLARIFICATION_ENDING_DECISION_TYPES.has(parsed.entry.type)) {
+      start = i + 1
+      break
+    }
+  }
+  // 第二遍：序列内正序收集（文件序即时间序，主题句在首轮快照中天然居首）
+  const collected: string[] = []
+  for (let i = start; i < lines.length; i++) {
+    const parsed = parseSystemLine(lines[i])
+    if (parsed?.kind !== 'decision' || parsed.entry?.type !== 'clarification_answer') continue
+    const detail = parsed.entry.detail as { requirements?: Array<{ description?: unknown }> } | undefined
+    if (!Array.isArray(detail?.requirements)) continue
+    for (const item of detail.requirements) {
+      const description =
+        typeof item?.description === 'string' ? item.description.replace(/\s+/g, ' ').trim() : ''
+      if (!description || collected.includes(description)) continue
+      collected.push(description)
+    }
+  }
+  return collected
+}
+
 /**
  * 保证需求清单始终以"主题"为 F-001 锚点：澄清答案（如"网页端"）只是主题的属性，
  * 绝不能覆盖最初的主题（如"音乐合成器"）。清单已含主题时原样返回；否则把主题
@@ -272,9 +324,16 @@ function resolveCardAnswer(input: AgentSendMessageInput, primaryIntent?: string)
   if (optionId === 'auto') return undefined
   const isFixedCard = FIXED_CARD_LABELS[optionId ?? ''] === input.content.trim()
   const description = isFixedCard ? CARD_ANSWER_REQUIREMENTS[optionId ?? ''] : input.content
+  // 点选累积（2026-08-29 线上：每轮只带当轮答案导致 F-002 被覆盖，三轮点选只剩最后
+  // 一个方向）：本轮答案并入当前澄清序列内已点选的全部方向，清单随轮次增长。
+  const descriptions = [...collectClarificationAnswers(input.session_id), description]
+    .filter((item, index, all) => all.indexOf(item) === index)
   return {
     prompt: input.content,
-    requirements: ensurePrimaryIntent([{ id: 'F-001', description }], primaryIntent),
+    requirements: ensurePrimaryIntent(
+      descriptions.map((item, index) => ({ id: `F-${String(index + 1).padStart(3, '0')}`, description: item })),
+      primaryIntent,
+    ),
   }
 }
 
@@ -604,16 +663,22 @@ async function tryModelDrivenGuide(
     return true
   }
 
-  // 澄清轮次熔断（D3，2026-08-26 语义修订：不再臆断开工）：已连续 2 轮出示卡片、模型仍要
-  // ask_clarification 时，转入需求确认弹窗——按最接近的理解整理清单，交用户勾选/补充/
-  // 让渡（「由向导决定」出口=用户主动授权，对齐「不得臆断，除非用户选择由向导决定」）。
+  // 澄清轮次熔断（D3，2026-08-26 语义修订：不再臆断开工）：已连续 N 轮出示卡片、模型仍要
+  // ask_clarification 时，转入需求确认弹窗——「按最接近的理解整理清单」=主题+本轮
+  // 序列内用户已点选的全部方向（2026-08-29 修复：旧逻辑只用主题句兜底，三轮点选
+  // 方向全部丢失，确认弹窗只剩一句空壳，PRD 正文与清单不一致引发审查误判）。
   if (
     parsed.action === 'ask_clarification' &&
     countTrailingClarificationRounds(input.session_id) >= CLARIFICATION_ROUND_LIMIT
   ) {
-    console.error('[guide] 澄清轮次熔断：连续 2 轮仍不明确，转入需求确认弹窗（不自动开工）')
+    console.error(`[guide] 澄清轮次熔断：连续 ${CLARIFICATION_ROUND_LIMIT} 轮仍不明确，转入需求确认弹窗（不自动开工）`)
+    const collected = collectClarificationAnswers(input.session_id)
     const fallbackRequirements = ensurePrimaryIntent(
-      primaryIntent ? [] : [{ id: 'F-001', description: input.content.slice(0, 40) }],
+      collected.length > 0
+        ? collected.map((item, index) => ({ id: `F-${String(index + 1).padStart(3, '0')}`, description: item }))
+        : primaryIntent
+          ? []
+          : [{ id: 'F-001', description: input.content.slice(0, 40) }],
       primaryIntent,
     )
     await startRequirementConfirmFlow(
@@ -758,7 +823,7 @@ async function startRequirementConfirmFlow(
       type: forcedByRoundBreaker ? 'clarification_forced_confirm' : 'requirement_confirm_card',
       title: forcedByRoundBreaker ? '澄清轮次熔断，转入需求确认' : '需求确认弹窗',
       why: forcedByRoundBreaker
-        ? '已连续 2 轮澄清仍不明确，按最接近的理解整理清单，交用户确认/补充/让渡'
+        ? `已连续 ${CLARIFICATION_ROUND_LIMIT} 轮澄清仍不明确，按主题与你已点选的方向整理清单，交用户确认/补充/让渡`
         : '需求基本成型，交用户在弹窗中确认、补充或让渡',
       detail: {
         requirements,
