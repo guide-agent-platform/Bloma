@@ -933,6 +933,12 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
   // PRD 本身生成失败（无背板）时跳过审查直接草图（降级语义不变）。
   if (prdWritten && backplaneForReview) {
     if (aborted()) return { started: true, prd_written: prdWritten }
+    // 审查开始旁白（2026-08-29 线上：委派审查最长 120s 黑盒等待，期间 DelegationFeed
+    // 只见「子会话·调研」+子 agent 活动，用户误读为「裁判没审完就开始做草图」——
+    // 主聊天流明示裁判正在审查，时序可循）。不落盘（状态性旁白，回访不需要）。
+    gatedPublish(makeGuideEvent(eventInput, 'message_delta', {
+      text: '需求已确认，正在请裁判审查这份 PRD（六维审查，约需几十秒），完成后请你定夺。',
+    }))
     let reviewEnv: Record<string, string> | undefined = pending.env
     try {
       // 备用链限路由配置域（闭环 PR4）：审查不静默落到任意弱模型；主渠道坏且无配置

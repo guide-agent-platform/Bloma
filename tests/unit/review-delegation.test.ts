@@ -91,10 +91,11 @@ describe('review-delegation 审查委派运行时', () => {
     const result = await runDelegatedReview(baseOpts())
 
     expect(result).toMatchObject({ ok: true, delegationId: 'del-1', finalText: '{"issues":[]}' })
-    // role=research（物理只读，裁判不可改产物）
+    // role=research（物理只读，裁判不可改产物）；goal 拼进 task 首行（DelegationFeed
+    // goal 列显示用，2026-08-29：审查委派在时间轴上可辨「裁判六维审查 PRD：测试」）
     expect(startDelegation).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: 'proj-1' }),
-      expect.objectContaining({ role: 'research', task: '任务体' }),
+      expect.objectContaining({ role: 'research', task: '裁判六维审查 PRD：测试\n\n任务体' }),
     )
     // 父上下文用合成键（review- 前缀），与真实 loop 注册隔离
     const parentKey = vi.mocked(registerParentLoopContext).mock.calls[0][0]

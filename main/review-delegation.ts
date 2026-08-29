@@ -111,7 +111,11 @@ export async function runDelegatedReview(opts: {
     })
 
     const started = startDelegation(parent, {
-      task: opts.task,
+      // goal 拼进 task 首行（2026-08-29 线上：DelegationFeed 的 goal 列取 task 截断，
+      // 此前丢弃 opts.goal 导致审查委派显示「【PRD 全文（背板 JSON）】{"name":…」
+      // 碎片+「子会话·调研」标签——用户误读为「已经开始做草图」。首行短句让
+      // 时间轴一眼可辨「裁判六维审查 PRD：xxx」/「裁判语义审查产物 vs PRD：xxx」。
+      task: `${opts.goal}\n\n${opts.task}`,
       role: 'research',
       expectedOutput: '按任务要求输出严格 JSON 裁决',
     })
