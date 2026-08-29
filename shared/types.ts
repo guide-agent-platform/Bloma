@@ -61,6 +61,8 @@ export const IPC_CHANNELS = {
   CHANNEL_DELETE: 'channel:delete',
   CATEGORY_ROUTING_LIST: 'category-routing:list',
   CATEGORY_ROUTING_UPDATE: 'category-routing:update',
+  CATEGORY_ROUTING_ROLE_LIST: 'category-routing:role-list',
+  CATEGORY_ROUTING_ROLE_UPDATE: 'category-routing:role-update',
   PROMPT_LIST: 'prompt:list',
   PROMPT_READ: 'prompt:read',
   PROMPT_SAVE: 'prompt:save',
@@ -456,6 +458,39 @@ export interface CategoryRoutingEntry {
   channel_id?: string
   /** 基础设施故障时的备用渠道优先顺序；未设置 = 沿用 T9「任意 enabled 渠道」 */
   fallback_channel_ids?: string[]
+}
+
+/** 用户可配置的三类 Agent 角色；gwt 由浏览器探针执行，不属于 LLM 渠道角色。 */
+export type AgentRoutingRole = 'guide' | 'programming' | 'judge'
+
+/** 角色到运行时文档类别的固定聚合映射（设置层与测试共用）。 */
+export const AGENT_ROLE_CATEGORIES: Record<AgentRoutingRole, readonly DocumentCategory[]> = {
+  guide: ['guide', 'prd', 'summary'],
+  programming: ['sketch', 'mvp'],
+  judge: ['judge'],
+}
+
+export const AGENT_ROUTING_ROLES: readonly AgentRoutingRole[] = ['guide', 'programming', 'judge']
+
+export interface CategoryRoutingRoleView {
+  role: AgentRoutingRole
+  label: string
+  description: string
+  categories: DocumentCategory[]
+  channel_id?: string
+  fallback_channel_ids?: string[]
+  channel_name?: string
+  model_name?: string
+  effective: 'routed' | 'auto' | 'dangling' | 'mixed'
+}
+
+export interface CategoryRoutingRoleListResult {
+  version: number
+  views: CategoryRoutingRoleView[]
+}
+
+export interface CategoryRoutingRoleUpdateEnvelope extends RequestEnvelope {
+  routing: Partial<Record<AgentRoutingRole, CategoryRoutingEntry>>
 }
 
 export type CategoryRoutingConfig = Partial<Record<DocumentCategory, CategoryRoutingEntry>>
@@ -1181,6 +1216,9 @@ export type ElectronAPI = {
     categoryRoutingList(input: RequestEnvelope): Promise<ApiResult<CategoryRoutingListResult>>
     /** M5：全量覆盖类别路由表（缺省类别 = 未配置）。 */
     categoryRoutingUpdate(input: CategoryRoutingUpdateEnvelope): Promise<ApiResult<CategoryRoutingListResult>>
+    /** 三角色渠道配置：向导 / 编程 / 裁判。 */
+    categoryRoutingRoleList(input: RequestEnvelope): Promise<ApiResult<CategoryRoutingRoleListResult>>
+    categoryRoutingRoleUpdate(input: CategoryRoutingRoleUpdateEnvelope): Promise<ApiResult<CategoryRoutingRoleListResult>>
   }
   prompts: {
     list(input: RequestEnvelope): Promise<ApiResult<PromptSlotInfo[]>>

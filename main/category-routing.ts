@@ -1,34 +1,42 @@
 import { existsSync } from 'node:fs'
 import type {
+  AgentRoutingRole,
   CategoryRoutingConfig,
+  CategoryRoutingEntry,
   CategoryRoutingListResult,
+  CategoryRoutingRoleListResult,
+  CategoryRoutingRoleView,
   CategoryRoutingView,
   DocumentCategory,
 } from '../shared/types'
+import { AGENT_ROLE_CATEGORIES, AGENT_ROUTING_ROLES } from '../shared/types'
 import { getCategoryRoutingPath } from '../storage/config-paths'
 import { readJsonFile, writeJsonFile } from '../storage/json-store'
 import { getChannelByIdRaw, getFirstEnabledChannel, isAnthropicProtocolProvider } from './channel-manager'
 import { resolveCategoryModel } from './model-resolution'
 
 /**
- * 类别 → 渠道路由（M5，2026-08-19 设计定稿）。
- *
- * 新增全局分工表 `~/.proma/category-routing.json`（snake_case）：每个职责
- * （DocumentCategory）可固定走某家厂商的渠道，未配置的类别保持「全局自动」。
- * 与 M4/T9 正交：
- * - M4 `resolveCategoryModel` 在赢家渠道内决定「哪个模型」；
- * - 本模块决定「哪个渠道」（主路由 `resolveRoutedChannelId` + 备用顺序
- *   `getCategoryFallbackChannelIds`）；
- * - T9 `runtime-fallback` 仍负责基础设施故障的跨渠道切换留痕（内容型失败不切）。
- *
- * 配置不进 channels.json——后者与 Proma 共用且走 camelCase，混入会破坏
- * isOursChannel 过滤与 Proma 兼容。无配置文件时行为与 M4/T9 现状完全一致。
+ * 渠道运行时仍按 DocumentCategory 解析；设置层聚合为向导、编程、裁判三角色。
+ * 历史 category-routing.json 保持类别级存储，所以旧配置与调用点无需迁移。
  */
+export const ROLE_CATEGORIES: Record<AgentRoutingRole, readonly DocumentCategory[]> = AGENT_ROLE_CATEGORIES
+export const ROUTABLE_ROLES: readonly AgentRoutingRole[] = AGENT_ROUTING_ROLES
 
-/** 参与渠道路由的类别（§1 映射表）；gwt 走浏览器探针/静态启发式、从不解析 LLM 渠道，不在列。 */
+export const ROLE_LABELS: Record<AgentRoutingRole, string> = {
+  guide: '向导 Agent',
+  programming: '编程 Agent',
+  judge: '裁判 Agent',
+}
+
+export const ROLE_DESCRIPTIONS: Record<AgentRoutingRole, string> = {
+  guide: '澄清需求、提取 PRD 与整理项目记忆',
+  programming: '生成草图与完整可运行版本',
+  judge: '审查需求与交付是否达到要求',
+}
+
+/** 运行时类别常量保留；设置页不再逐类显示。 */
 export const ROUTABLE_CATEGORIES: readonly DocumentCategory[] = ['sketch', 'mvp', 'guide', 'prd', 'judge', 'summary']
 
-/** 类别 → 中文职责名（§1 职责列逐字一致，供视图模型与设置页共用）。 */
 export const CATEGORY_LABELS: Record<DocumentCategory, string> = {
   sketch: '草图生成',
   mvp: 'MVP 生成',
@@ -39,12 +47,14 @@ export const CATEGORY_LABELS: Record<DocumentCategory, string> = {
   gwt: 'GWT 执行（不走 LLM 渠道）',
 }
 
-/** undefined = 尚未从磁盘加载（下次访问再读）；缓存与 M4 的 categoryConfigs 同模式。 */
+export function roleForCategory(category: DocumentCategory): AgentRoutingRole | undefined {
+  return ROUTABLE_ROLES.find((role) => ROLE_CATEGORIES[role].includes(category))
+}
+
 let routingCache: CategoryRoutingConfig | undefined
 
 function loadRoutingConfig(): CategoryRoutingConfig {
   if (routingCache) return routingCache
-  // 无配置文件是正常态（fresh/存量用户）：空表直接生效，不落警告（§9.5 向后兼容）
   if (!existsSync(getCategoryRoutingPath())) {
     routingCache = {}
     return routingCache
@@ -56,8 +66,7 @@ function loadRoutingConfig(): CategoryRoutingConfig {
       routingCache = {}
       return routingCache
     }
-    const routing = file.routing
-    routingCache = routing && typeof routing === 'object' ? (routing as CategoryRoutingConfig) : {}
+    routingCache = file.routing && typeof file.routing === 'object' ? file.routing as CategoryRoutingConfig : {}
   } catch (error) {
     console.warn('[categoryRouting] category-routing.json 损坏，回退空路由表：', error)
     routingCache = {}
@@ -65,25 +74,17 @@ function loadRoutingConfig(): CategoryRoutingConfig {
   return routingCache
 }
 
-/** 读取路由表（副本）；文件缺失/损坏/version 不符回退空表（损坏落 console.warn）。 */
+/** 运行时/兼容代码读取类别级路由表。 */
 export function loadCategoryRouting(): CategoryRoutingConfig {
   return { ...loadRoutingConfig() }
 }
 
-/** 固定以 version: 1 组装落盘，并刷新模块缓存。 */
 export function saveCategoryRouting(routing: CategoryRoutingConfig): void {
   writeJsonFile(getCategoryRoutingPath(), { version: 1, routing })
   routingCache = { ...routing }
 }
 
-/**
- * 解析类别的主路由渠道 id（§4.1 ②）：
- * - 悬空（渠道已删除）→ undefined + console.warn（不静默，设置页同步警示）；
- * - 渠道禁用 → undefined 不落警示（保留意图，重新启用后自动恢复）；
- * - 非 Anthropic 协议 → undefined + console.warn（运行时固定 /v1/messages，防
- *   保存后 updateChannel 改协议或人工/旧版本写入 OpenAI 协议渠道 id 导致 404）。
- * 未配置/各类回退均返回 undefined，由调用方落入全局兜底（getFirstEnabledChannel）。
- */
+/** 运行时按类别解析，角色 UI 保存时已将角色选择展开到所有关联类别。 */
 export function resolveRoutedChannelId(category: DocumentCategory): string | undefined {
   const entry = loadRoutingConfig()[category]
   if (!entry?.channel_id) return undefined
@@ -94,36 +95,75 @@ export function resolveRoutedChannelId(category: DocumentCategory): string | und
   }
   if (!channel.enabled) return undefined
   if (!isAnthropicProtocolProvider(channel.provider_type)) {
-    console.warn(
-      `[categoryRouting] ${category} 类别路由指向的渠道「${channel.name}」非 Anthropic 协议（${channel.provider_type}），` +
-        '运行时无法走 /v1/messages，回退全局默认渠道',
-    )
+    console.warn(`[categoryRouting] ${category} 类别路由指向的渠道「${channel.name}」非 Anthropic 协议（${channel.provider_type}），运行时无法走 /v1/messages，回退全局默认渠道`)
     return undefined
   }
   return channel.id
 }
 
-/**
- * 类别的备用渠道优先顺序（§4.4）：读 fallback_channel_ids，过滤
- * 「不存在/非本项目/禁用」条目（getChannelByIdRaw 已含 isOursChannel 校验）。
- */
 export function getCategoryFallbackChannelIds(category: DocumentCategory): string[] {
-  const entry = loadRoutingConfig()[category]
-  return (entry?.fallback_channel_ids ?? []).filter((id) => {
+  return (loadRoutingConfig()[category]?.fallback_channel_ids ?? []).filter((id) => {
     const channel = getChannelByIdRaw(id)
     return channel !== undefined && channel.enabled
   })
 }
 
-// ---------------------------------------------------------------------------
-// 视图模型（category-routing:list / update 返回值）
-// ---------------------------------------------------------------------------
+function sameStringList(left: readonly string[] | undefined, right: readonly string[] | undefined): boolean {
+  return JSON.stringify(left ?? []) === JSON.stringify(right ?? [])
+}
 
-/**
- * 构建 6 类职责的视图模型（§6）：channel_name/model_name 供 UI 直接渲染；
- * effective 三态——routed=命中路由，auto=全局默认（含禁用渠道生效期），
- * dangling=指向已删除渠道（保留原配置值供展示，UI 行内警示 + 「恢复自动」）。
- */
+function sameEntry(left: CategoryRoutingEntry | undefined, right: CategoryRoutingEntry | undefined): boolean {
+  return left?.channel_id === right?.channel_id && sameStringList(left?.fallback_channel_ids, right?.fallback_channel_ids)
+}
+
+function resolvedRoleView(role: AgentRoutingRole, routing: CategoryRoutingConfig, globalDefault: ReturnType<typeof getFirstEnabledChannel>): CategoryRoutingRoleView {
+  const categories = [...ROLE_CATEGORIES[role]]
+  const entries = categories.map((category) => routing[category])
+  const first = entries[0]
+  if (!entries.every((entry) => sameEntry(entry, first))) {
+    return { role, label: ROLE_LABELS[role], description: ROLE_DESCRIPTIONS[role], categories, effective: 'mixed' }
+  }
+
+  const configuredId = first?.channel_id
+  let effective: CategoryRoutingRoleView['effective'] = 'auto'
+  let channel = globalDefault
+  if (configuredId) {
+    const configured = getChannelByIdRaw(configuredId)
+    if (!configured) effective = 'dangling'
+    else if (configured.enabled && isAnthropicProtocolProvider(configured.provider_type)) {
+      effective = 'routed'
+      channel = configured
+    }
+  }
+  let modelName: string | undefined
+  if (channel) {
+    try {
+      modelName = resolveCategoryModel(channel, categories[0]!).model
+    } catch {
+      modelName = undefined
+    }
+  }
+  return {
+    role,
+    label: ROLE_LABELS[role],
+    description: ROLE_DESCRIPTIONS[role],
+    categories,
+    channel_id: configuredId,
+    fallback_channel_ids: first?.fallback_channel_ids,
+    channel_name: channel?.name,
+    model_name: modelName,
+    effective,
+  }
+}
+
+/** 设置页主接口：三角色视图。历史六类别配置若不一致，以 mixed 明示而不丢失。 */
+export function buildCategoryRoutingRoleViews(): CategoryRoutingRoleListResult {
+  const routing = loadCategoryRouting()
+  const globalDefault = getFirstEnabledChannel()
+  return { version: 2, views: ROUTABLE_ROLES.map((role) => resolvedRoleView(role, routing, globalDefault)) }
+}
+
+/** 历史类别级视图接口，供旧调用方兼容。 */
 export function buildCategoryRoutingViews(): CategoryRoutingListResult {
   const routing = loadCategoryRouting()
   const globalDefault = getFirstEnabledChannel()
@@ -134,13 +174,11 @@ export function buildCategoryRoutingViews(): CategoryRoutingListResult {
     let channel = globalDefault
     if (configuredId) {
       const configured = getChannelByIdRaw(configuredId)
-      if (!configured) {
-        effective = 'dangling'
-      } else if (configured.enabled && isAnthropicProtocolProvider(configured.provider_type)) {
+      if (!configured) effective = 'dangling'
+      else if (configured.enabled && isAnthropicProtocolProvider(configured.provider_type)) {
         effective = 'routed'
         channel = configured
       }
-      // 禁用（生效期）或非 Anthropic 协议：运行时按未设置回退 → auto（§6 口径）
     }
     let model_name: string | undefined
     if (channel) {
@@ -163,88 +201,85 @@ export function buildCategoryRoutingViews(): CategoryRoutingListResult {
   return { version: 1, views }
 }
 
-// ---------------------------------------------------------------------------
-// 保存校验（category-routing:update）
-// ---------------------------------------------------------------------------
-
 const KNOWN_CATEGORIES = new Set<string>(['guide', 'prd', 'sketch', 'mvp', 'gwt', 'judge', 'summary'])
+const KNOWN_ROLES = new Set<string>(ROUTABLE_ROLES)
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
-/** 单个渠道引用的剥离判定：返回保留该引用时对应的渠道 id，否则 undefined。 */
-function keepChannelReference(category: string, field: string, channelId: unknown): string | undefined {
+function keepChannelReference(scope: string, field: string, channelId: unknown): string | undefined {
   if (typeof channelId !== 'string' || !channelId) {
-    throw new Error(`CATEGORY_ROUTING_INVALID: routing.${category}.${field} 必须是非空字符串`)
+    throw new Error(`CATEGORY_ROUTING_INVALID: routing.${scope}.${field} 必须是非空字符串`)
   }
   const channel = getChannelByIdRaw(channelId)
   if (!channel) {
-    console.warn(`[categoryRouting] 保存时剥离 ${category}.${field}：渠道 ${channelId} 不存在或非本项目渠道`)
+    console.warn(`[categoryRouting] 保存时剥离 ${scope}.${field}：渠道 ${channelId} 不存在或非本项目渠道`)
     return undefined
   }
   if (!isAnthropicProtocolProvider(channel.provider_type)) {
-    // 含启用与禁用的 OpenAI 协议渠道：重启用后仍 404，保留意图无意义
-    console.warn(
-      `[categoryRouting] 保存时剥离 ${category}.${field}：渠道「${channel.name}」（${channel.provider_type}）非 Anthropic 协议，` +
-        '运行时固定请求 /v1/messages 会 404',
-    )
+    console.warn(`[categoryRouting] 保存时剥离 ${scope}.${field}：渠道「${channel.name}」（${channel.provider_type}）非 Anthropic 协议，运行时固定请求 /v1/messages 会 404`)
     return undefined
   }
-  // 禁用 + Anthropic 协议：保留（重新启用后自动恢复）
   return channelId
 }
 
-/**
- * 全量覆盖保存（§6 护栏）：
- * - 结构非法（routing 非对象 / 条目非对象 / 字段类型错）→ 抛错走 VALIDATION_ERROR；
- * - 引用已删除/非本项目/非 Anthropic 协议渠道 → 剥离该引用 + console.warn，不阻塞其余保存；
- * - 禁用且 Anthropic 协议的引用 → 保留意图；
- * - 未知类别键（如 "foo"）→ 剥离 + console.warn；
- * - 剥离后条目为空则整条不写（悬空不落盘）。
- */
-export function updateCategoryRouting(routing: unknown): CategoryRoutingListResult {
-  if (!isRecord(routing)) {
-    throw new Error('CATEGORY_ROUTING_INVALID: routing 必须是对象')
+function cleanRoutingEntry(scope: string, entry: unknown): CategoryRoutingEntry | undefined {
+  if (entry === undefined || entry === null) return undefined
+  if (!isRecord(entry)) throw new Error(`CATEGORY_ROUTING_INVALID: routing.${scope} 必须是对象`)
+  const cleaned: CategoryRoutingEntry = {}
+  if (entry.channel_id !== undefined) {
+    const kept = keepChannelReference(scope, 'channel_id', entry.channel_id)
+    if (kept) cleaned.channel_id = kept
   }
+  if (entry.fallback_channel_ids !== undefined) {
+    if (!Array.isArray(entry.fallback_channel_ids)) throw new Error(`CATEGORY_ROUTING_INVALID: routing.${scope}.fallback_channel_ids 必须是字符串数组`)
+    const kept = entry.fallback_channel_ids
+      .map((id, index) => keepChannelReference(scope, `fallback_channel_ids[${index}]`, id))
+      .filter((id): id is string => id !== undefined)
+    if (kept.length) cleaned.fallback_channel_ids = kept
+  }
+  return cleaned.channel_id !== undefined || cleaned.fallback_channel_ids !== undefined ? cleaned : undefined
+}
+
+/** 历史类别级全量保存入口。 */
+export function updateCategoryRouting(routing: unknown): CategoryRoutingListResult {
+  if (!isRecord(routing)) throw new Error('CATEGORY_ROUTING_INVALID: routing 必须是对象')
   const cleaned: CategoryRoutingConfig = {}
   for (const [key, entry] of Object.entries(routing)) {
     if (!KNOWN_CATEGORIES.has(key)) {
       console.warn(`[categoryRouting] 保存时剥离未知类别键「${key}」`)
       continue
     }
-    if (entry === undefined || entry === null) continue
-    if (!isRecord(entry)) {
-      throw new Error(`CATEGORY_ROUTING_INVALID: routing.${key} 必须是对象`)
-    }
-    const category = key as DocumentCategory
-    const cleanedEntry: { channel_id?: string; fallback_channel_ids?: string[] } = {}
-    if (entry.channel_id !== undefined) {
-      const kept = keepChannelReference(key, 'channel_id', entry.channel_id)
-      if (kept) cleanedEntry.channel_id = kept
-    }
-    if (entry.fallback_channel_ids !== undefined) {
-      if (!Array.isArray(entry.fallback_channel_ids)) {
-        throw new Error(`CATEGORY_ROUTING_INVALID: routing.${key}.fallback_channel_ids 必须是字符串数组`)
-      }
-      const keptList = entry.fallback_channel_ids
-        .map((id, index) => keepChannelReference(key, `fallback_channel_ids[${index}]`, id))
-        .filter((id): id is string => id !== undefined)
-      if (keptList.length > 0) cleanedEntry.fallback_channel_ids = keptList
-    }
-    if (cleanedEntry.channel_id !== undefined || cleanedEntry.fallback_channel_ids !== undefined) {
-      cleaned[category] = cleanedEntry
-    }
+    const cleanedEntry = cleanRoutingEntry(key, entry)
+    if (cleanedEntry) cleaned[key as DocumentCategory] = cleanedEntry
   }
   saveCategoryRouting(cleaned)
   return buildCategoryRoutingViews()
 }
 
-// ---------------------------------------------------------------------------
-// 测试 seam（同 M4 的 categoryConfigs 模式）
-// ---------------------------------------------------------------------------
+/** 新三角色全量保存：每个角色选择展开写到其覆盖的所有运行时类别。 */
+export function updateCategoryRoutingRoles(routing: unknown): CategoryRoutingRoleListResult {
+  if (!isRecord(routing)) throw new Error('CATEGORY_ROUTING_INVALID: routing 必须是对象')
+  const cleaned: CategoryRoutingConfig = {}
+  for (const [key, entry] of Object.entries(routing)) {
+    if (!KNOWN_ROLES.has(key)) {
+      console.warn(`[categoryRouting] 保存时剥离未知角色键「${key}」`)
+      continue
+    }
+    const cleanedEntry = cleanRoutingEntry(key, entry)
+    if (!cleanedEntry) continue
+    for (const category of ROLE_CATEGORIES[key as AgentRoutingRole]) {
+      cleaned[category] = {
+        ...(cleanedEntry.channel_id ? { channel_id: cleanedEntry.channel_id } : {}),
+        ...(cleanedEntry.fallback_channel_ids?.length ? { fallback_channel_ids: [...cleanedEntry.fallback_channel_ids] } : {}),
+      }
+    }
+  }
+  saveCategoryRouting(cleaned)
+  return buildCategoryRoutingRoleViews()
+}
 
-/** 测试注入路由表（不经磁盘）；resetCategoryRoutingForTests 复位为「未加载」。 */
 export function setCategoryRoutingForTests(config: CategoryRoutingConfig): void {
   routingCache = { ...config }
 }

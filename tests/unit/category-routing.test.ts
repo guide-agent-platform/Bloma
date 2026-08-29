@@ -8,13 +8,18 @@ import { setSafeStorageAdapter } from '../../main/safe-storage'
 import { getCategoryRoutingPath } from '../../storage/config-paths'
 import {
   buildCategoryRoutingViews,
+  buildCategoryRoutingRoleViews,
   getCategoryFallbackChannelIds,
   loadCategoryRouting,
   resetCategoryRoutingForTests,
   resolveRoutedChannelId,
+  roleForCategory,
+  ROLE_CATEGORIES,
+  ROUTABLE_ROLES,
   saveCategoryRouting,
   setCategoryRoutingForTests,
   updateCategoryRouting,
+  updateCategoryRoutingRoles,
 } from '../../main/category-routing'
 
 /**
@@ -61,9 +66,83 @@ describe('category-routing（M5 类别→渠道路由）', () => {
     vi.restoreAllMocks()
   })
 
-  // ------------------------------------------------------------------
-  // resolveRoutedChannelId：路由命中 / 悬空 / 禁用 / 非 Anthropic 协议
-  // ------------------------------------------------------------------
+  it('角色映射固定为向导/编程/裁判三组，gwt 不属于角色', () => {
+    expect(ROUTABLE_ROLES).toEqual(['guide', 'programming', 'judge'])
+    expect(ROLE_CATEGORIES.guide).toEqual(['guide', 'prd', 'summary'])
+    expect(ROLE_CATEGORIES.programming).toEqual(['sketch', 'mvp'])
+    expect(ROLE_CATEGORIES.judge).toEqual(['judge'])
+    expect(roleForCategory('guide')).toBe('guide')
+    expect(roleForCategory('prd')).toBe('guide')
+    expect(roleForCategory('summary')).toBe('guide')
+    expect(roleForCategory('sketch')).toBe('programming')
+    expect(roleForCategory('mvp')).toBe('programming')
+    expect(roleForCategory('judge')).toBe('judge')
+    expect(roleForCategory('gwt')).toBeUndefined()
+  })
+
+  it('角色视图始终只有三行，旧类别配置一致时聚合为角色渠道', () => {
+    const ds = seedChannel('ds', 'deepseek')
+    const kimi = seedChannel('kimi', 'kimi-api')
+    saveCategoryRouting({
+      guide: { channel_id: ds.id },
+      prd: { channel_id: ds.id },
+      summary: { channel_id: ds.id },
+      sketch: { channel_id: kimi.id },
+      mvp: { channel_id: kimi.id },
+    })
+
+    const result = buildCategoryRoutingRoleViews()
+    expect(result.version).toBe(2)
+    expect(result.views.map((view) => view.role)).toEqual(['guide', 'programming', 'judge'])
+    expect(result.views).toHaveLength(3)
+    expect(result.views.find((view) => view.role === 'guide')).toMatchObject({
+      label: '向导 Agent', channel_id: ds.id, effective: 'routed',
+    })
+    expect(result.views.find((view) => view.role === 'programming')).toMatchObject({
+      label: '编程 Agent', channel_id: kimi.id, effective: 'routed',
+    })
+  })
+
+  it('旧类别配置在同一角色内不一致时显示 mixed，不静默覆盖', () => {
+    const ds = seedChannel('ds', 'deepseek')
+    const kimi = seedChannel('kimi', 'kimi-api')
+    saveCategoryRouting({ guide: { channel_id: ds.id }, prd: { channel_id: kimi.id } })
+    const guide = buildCategoryRoutingRoleViews().views.find((view) => view.role === 'guide')!
+    expect(guide.effective).toBe('mixed')
+    expect(guide.channel_id).toBeUndefined()
+  })
+
+  it('角色保存会展开到全部关联类别，运行时类别解析随角色选择生效', () => {
+    const ds = seedChannel('ds', 'deepseek')
+    const kimi = seedChannel('kimi', 'kimi-api')
+    updateCategoryRoutingRoles({
+      guide: { channel_id: ds.id, fallback_channel_ids: [kimi.id] },
+      programming: { channel_id: kimi.id },
+      judge: { channel_id: ds.id },
+    })
+    expect(loadCategoryRouting()).toEqual({
+      guide: { channel_id: ds.id, fallback_channel_ids: [kimi.id] },
+      prd: { channel_id: ds.id, fallback_channel_ids: [kimi.id] },
+      summary: { channel_id: ds.id, fallback_channel_ids: [kimi.id] },
+      sketch: { channel_id: kimi.id },
+      mvp: { channel_id: kimi.id },
+      judge: { channel_id: ds.id },
+    })
+    expect(resolveRoutedChannelId('prd')).toBe(ds.id)
+    expect(resolveRoutedChannelId('mvp')).toBe(kimi.id)
+  })
+
+  it('角色保存是全量覆盖，缺省角色会清除旧类别配置', () => {
+    const ds = seedChannel('ds', 'deepseek')
+    const kimi = seedChannel('kimi', 'kimi-api')
+    saveCategoryRouting({ guide: { channel_id: ds.id }, sketch: { channel_id: kimi.id } })
+    updateCategoryRoutingRoles({ guide: { channel_id: ds.id } })
+    expect(loadCategoryRouting()).toEqual({
+      guide: { channel_id: ds.id },
+      prd: { channel_id: ds.id },
+      summary: { channel_id: ds.id },
+    })
+  })
 
   it('路由命中：返回配置渠道 id', () => {
     const kimi = seedChannel('kimi', 'kimi-api')

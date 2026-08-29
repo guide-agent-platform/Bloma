@@ -28,6 +28,7 @@ import type {
   AgentSendMessageInput,
   AnalyticsTrackInput,
   CategoryRoutingUpdateEnvelope,
+  CategoryRoutingRoleUpdateEnvelope,
   ChannelCreateEnvelope,
   ChannelDeleteEnvelope,
   ChannelTestEnvelope,
@@ -182,6 +183,10 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.CATEGORY_ROUTING_LIST, input),
     categoryRoutingUpdate: (input: CategoryRoutingUpdateEnvelope) =>
       ipcRenderer.invoke(IPC_CHANNELS.CATEGORY_ROUTING_UPDATE, input),
+    categoryRoutingRoleList: (input: RequestEnvelope) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CATEGORY_ROUTING_ROLE_LIST, input),
+    categoryRoutingRoleUpdate: (input: CategoryRoutingRoleUpdateEnvelope) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CATEGORY_ROUTING_ROLE_UPDATE, input),
   },
   prompts: {
     list: (input: RequestEnvelope) =>

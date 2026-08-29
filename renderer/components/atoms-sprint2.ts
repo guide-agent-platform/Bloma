@@ -14,7 +14,7 @@
  */
 
 import { atom } from 'jotai'
-import type { CategoryRoutingView, Channel, PermissionRequest, PromptSlotId, PromptSlotInfo } from '../../shared/types'
+import type { CategoryRoutingRoleView, CategoryRoutingView, Channel, PermissionRequest, PromptSlotId, PromptSlotInfo } from '../../shared/types'
 import { pendingPermissionRequestsAtom } from '../agent-atoms'
 
 // =========================================================================
@@ -63,11 +63,15 @@ export const channelTestResultAtom = atom<{
 } | null>(null)
 
 // =========================================================================
-// 3.5 类别路由（M5「职责分工」：category-routing:list/update 视图模型）
+// 3.5 角色路由（M5「职责分工」：三角色渠道视图模型）
 // =========================================================================
 
-/** 职责分工视图模型（null = 未加载/不可用） */
+/** 三角色职责视图模型（null = 未加载/不可用） */
+export const categoryRoutingRoleViewsAtom = atom<CategoryRoutingRoleView[] | null>(null)
+
+/** 历史类别视图 atom 保留，供旧组件/测试兼容。 */
 export const categoryRoutingViewsAtom = atom<CategoryRoutingView[] | null>(null)
+
 
 // =========================================================================
 // 4. MVP 确认 / 继续操作（供用户决策）

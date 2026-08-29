@@ -9,6 +9,7 @@ import type {
   AgentSendMessageInput,
   AnalyticsTrackInput,
   CategoryRoutingUpdateEnvelope,
+  CategoryRoutingRoleUpdateEnvelope,
   ChannelCreateEnvelope,
   ChannelDeleteEnvelope,
   ChannelTestEnvelope,
@@ -75,7 +76,12 @@ import {
 import { cleanOrphanSessions, listSessions, loadMessages } from './session-service'
 import { resolveRequirementConfirm } from './guide-agent-service'
 import { createChannel, deleteChannel, fetchModels, listChannels, testChannel, testChannelDirect, updateChannel } from './channel-manager'
-import { buildCategoryRoutingViews, updateCategoryRouting } from './category-routing'
+import {
+  buildCategoryRoutingRoleViews,
+  buildCategoryRoutingViews,
+  updateCategoryRouting,
+  updateCategoryRoutingRoles,
+} from './category-routing'
 import { listPromptSlots, readPromptSlot, resetPromptSlot, savePromptSlot } from './prompt-service'
 import { listDocuments, readDocument, syncDocuments, isPrdUserConfirmed } from './document-engine'
 import { isCircuitBreakSettled } from './recovery-service'
@@ -776,6 +782,21 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<CategoryRoutingUpdateEnvelope>(payload, ['routing'])
       return updateCategoryRouting(input.routing)
+    })
+  })
+
+  // M5：三角色渠道路由（向导 / 编程 / 裁判）。角色配置在保存时展开到底层类别。
+  ipcMain.handle(IPC_CHANNELS.CATEGORY_ROUTING_ROLE_LIST, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      requireFields<RequestEnvelope>(payload, [])
+      return buildCategoryRoutingRoleViews()
+    })
+  })
+
+  ipcMain.handle(IPC_CHANNELS.CATEGORY_ROUTING_ROLE_UPDATE, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<CategoryRoutingRoleUpdateEnvelope>(payload, ['routing'])
+      return updateCategoryRoutingRoles(input.routing)
     })
   })
 

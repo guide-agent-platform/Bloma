@@ -56,6 +56,8 @@ const expectedChannels = {
   CHANNEL_DELETE: 'channel:delete',
   CATEGORY_ROUTING_LIST: 'category-routing:list',
   CATEGORY_ROUTING_UPDATE: 'category-routing:update',
+  CATEGORY_ROUTING_ROLE_LIST: 'category-routing:role-list',
+  CATEGORY_ROUTING_ROLE_UPDATE: 'category-routing:role-update',
   PROMPT_LIST: 'prompt:list',
   PROMPT_READ: 'prompt:read',
   PROMPT_SAVE: 'prompt:save',
