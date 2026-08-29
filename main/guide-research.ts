@@ -36,6 +36,9 @@ const MAX_QUERIES = 2
 
 /** 搜索端点（固定公网主机，无用户可控 URL 片段）。 */
 const DDG_HTML_ENDPOINT = 'https://html.duckduckgo.com/html/'
+/** 回退端点：必应（2026-08-29 线上实测：DDG 在部分网络环境（如大陆）直连必超时，
+ * 必应同环境 0.6s 可达；DDG 失败（网络/HTTP/解析空）时逐查询回退必应）。 */
+const BING_ENDPOINT = 'https://www.bing.com/search'
 
 /** fetch 注入 seam（单测不打真实网络）。 */
 let researchFetch: typeof fetch = fetch
@@ -80,19 +83,40 @@ export async function researchMarketSimilar(queriesInput: string[]): Promise<Mar
   return { available: true, queries, results, summary: renderSummary(results) }
 }
 
-/** 单条查询：请求 DDG html 端点并解析结果块。 */
+/** 单条查询：DDG html 端点优先，失败回退必应（2026-08-29；两端均败才降级）。 */
 async function searchOnce(query: string): Promise<MarketResearch> {
+  const viaDdg = await searchViaEngine(query, DDG_HTML_ENDPOINT, parseDdgResults, {
+    // DDG html 端点对无 UA 请求可能返回异常页，补常规浏览器头
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) BlomaResearch/1.0',
+    accept: 'text/html',
+    'accept-language': 'zh-CN,zh;q=0.9,en;q=0.5',
+  })
+  if (viaDdg.available) return viaDdg
+  const viaBing = await searchViaEngine(query, `${BING_ENDPOINT}?setlang=zh-hans`, parseBingResults, {
+    // 必应对非标准 UA 可能触发风控/验证页，用完整浏览器 UA
+    'user-agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    accept: 'text/html',
+    'accept-language': 'zh-CN,zh;q=0.9,en;q=0.5',
+  })
+  if (viaBing.available) return viaBing
+  return viaDdg // 两端均败：保留首选端点的失败原因（诊断口径一致）
+}
+
+/** 单引擎搜索：请求 + 解析 + 结果条数上限，失败语义（network/http_N/empty）学一不做二不改。 */
+async function searchViaEngine(
+  query: string,
+  endpoint: string,
+  parse: (html: string) => MarketResult[],
+  headers: Record<string, string>,
+): Promise<MarketResearch> {
   let response: Response
   try {
-    response = await researchFetch(`${DDG_HTML_ENDPOINT}?q=${encodeURIComponent(query)}`, {
+    const separator = endpoint.includes('?') ? '&' : '?'
+    response = await researchFetch(`${endpoint}${separator}q=${encodeURIComponent(query)}`, {
       method: 'GET',
       signal: AbortSignal.timeout(NET_FETCH_TIMEOUT_MS),
-      headers: {
-        // DDG html 端点对无 UA 请求可能返回异常页，补常规浏览器头
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) BlomaResearch/1.0',
-        accept: 'text/html',
-        'accept-language': 'zh-CN,zh;q=0.9,en;q=0.5',
-      },
+      headers,
       redirect: 'follow',
     })
   } catch {
@@ -102,11 +126,38 @@ async function searchOnce(query: string): Promise<MarketResearch> {
     return { available: false, queries: [query], results: [], summary: '', reason: `http_${response.status}` as `http_${number}` }
   }
   const html = await response.text()
-  const results = parseDdgResults(html).slice(0, MAX_RESULTS_PER_QUERY)
+  const results = parse(html).slice(0, MAX_RESULTS_PER_QUERY)
   if (results.length === 0) {
     return { available: false, queries: [query], results: [], summary: '', reason: 'empty' }
   }
   return { available: true, queries: [query], results, summary: renderSummary(results) }
+}
+
+/**
+ * 解析必应结果页（2026-08-29 回退端点）：按 <li class="b_algo"> 结果块切分，
+ * 逐块取标题锚点（h2>a）与摘要（b_caption）。必应站内链接/无 h2 锚点的块丢弃。
+ */
+export function parseBingResults(html: string): MarketResult[] {
+  const blocks = html.split('<li class="b_algo"').slice(1)
+  const out: MarketResult[] = []
+  for (const block of blocks) {
+    const anchor = /<h2[^>]*><a[^>]*href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/.exec(block)
+    if (!anchor) continue
+    let url: URL
+    try {
+      url = new URL(anchor[1])
+    } catch {
+      continue
+    }
+    // 必应站内链（含跳转链）无市调价值
+    if (/(^|\.)bing\.com$/i.test(url.hostname)) continue
+    const title = htmlToText(anchor[2]).trim()
+    if (!title) continue
+    const snippetMatch = /class="b_caption"[^>]*>([\s\S]*?)<\/div>/.exec(block)
+    const snippet = snippetMatch ? htmlToText(snippetMatch[1]).trim().slice(0, 200) : ''
+    out.push({ title, url: url.toString(), snippet })
+  }
+  return out
 }
 
 /**

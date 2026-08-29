@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  parseBingResults,
   parseDdgResults,
   researchMarketSimilar,
   resetGuideResearchFetchForTests,
@@ -24,6 +25,20 @@ function ddgPage(results: Array<{ title: string; href: string; snippet: string; 
 
 const htmlResponse = (body: string): Response =>
   ({ ok: true, status: 200, text: async () => body }) as unknown as Response
+
+/** 构造必应结果页（b_algo 块：h2 锚点 + b_caption 摘要；含站内链噪声）。 */
+function bingPage(results: Array<{ title: string; href: string; snippet: string }>): string {
+  const blocks = results
+    .map(
+      (result) => `
+      <li class="b_algo" data-id iid="SERP.1">
+        <h2 class=""><a target="_blank" href="${result.href}">${result.title}</a></h2>
+        <div class="b_caption"><p>${result.snippet}</p></div>
+      </li>`,
+    )
+    .join('\n')
+  return `<html><body><ol id="b_results">${blocks}<li class="b_algo"><h2><a href="https://www.bing.com/aclick">广告</a></h2></li></ol></body></html>`
+}
 
 describe('guide-research 市调（DDG 免 key）', () => {
   afterEach(() => {
@@ -96,5 +111,44 @@ describe('guide-research 市调（DDG 免 key）', () => {
     // 空查询列表直接降级
     const noQuery = await researchMarketSimilar(['  '])
     expect(noQuery.available).toBe(false)
+  })
+
+  it('必应解析（2026-08-29 回退端点）：b_algo 块取标题/链接/摘要，站内链剔除', () => {
+    const page = bingPage([
+      { title: '在线音乐制作', href: 'https://example.com/studio', snippet: '浏览器一键实现音频剪辑' },
+      { title: '免费合成器', href: 'https://example.org/synth', snippet: '8 位风格低音合成器' },
+    ])
+    const parsed = parseBingResults(page)
+    expect(parsed).toHaveLength(2)
+    expect(parsed[0]).toMatchObject({ title: '在线音乐制作', url: 'https://example.com/studio', snippet: '浏览器一键实现音频剪辑' })
+    expect(parsed[1]?.url).toBe('https://example.org/synth')
+    // 站内链（bing.com）不进市调
+    expect(parsed.every((item) => !item.url.includes('bing.com'))).toBe(true)
+  })
+
+  it('DDG 失败回退必应（2026-08-29 线上：大陆网络 DDG 直连必超时）：必应命中则市调可用', async () => {
+    const bing = bingPage([
+      { title: '在线音乐制作', href: 'https://example.com/studio', snippet: '音频剪辑工具' },
+      { title: '免费合成器榜单', href: 'https://example.org/synth', snippet: '8 位风格低音合成器' },
+    ])
+    setGuideResearchFetchForTests(async (input) => {
+      const url = String(input)
+      if (url.includes('duckduckgo')) throw new TypeError('fetch failed') // 模拟 DDG 被墙
+      return htmlResponse(bing)
+    })
+    const result = await researchMarketSimilar(['做一个音乐合成器'])
+    expect(result.available).toBe(true)
+    expect(result.results).toHaveLength(2)
+    expect(result.summary).toContain('example.com')
+  })
+
+  it('两端均败：保留 DDG 失败原因（诊断口径不因回退混淆）', async () => {
+    setGuideResearchFetchForTests(async (input) => {
+      if (String(input).includes('duckduckgo')) throw new TypeError('fetch failed')
+      return ({ ok: false, status: 503, text: async () => '' }) as unknown as Response
+    })
+    const result = await researchMarketSimilar(['番茄钟'])
+    expect(result.available).toBe(false)
+    expect(result.reason).toBe('network')
   })
 })
