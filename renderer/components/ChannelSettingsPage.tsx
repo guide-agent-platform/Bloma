@@ -181,7 +181,7 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onS
   const [testing, setTesting] = useState(false)
   const [testMsg, setTestMsg] = useState<{ ok: boolean; message: string } | null>(null)
   const [fetching, setFetching] = useState(false)
-  const [fetchMsg, setFetchMsg] = useState<string | null>(null)
+  const [fetchMsg, setFetchMsg] = useState<{ ok: boolean; message: string } | null>(null)
 
   // provider 变化时：编辑模式不清空已填 baseUrl；新增模式若未手填则自动带默认 URL
   const resolvedBaseUrl = baseUrl.trim() || PROVIDER_DEFAULT_URLS[provider] || ''
@@ -253,19 +253,19 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onS
         if (result.ok) {
           const models = result.data.models
           if (models.length === 0) {
-            setFetchMsg('没有拉取到模型，可手动填写')
+            setFetchMsg({ ok: false, message: '没有拉取到模型，可手动填写' })
             return
           }
           // 合并进模型文本：保留已有手填项，追加新拉取项（按名称去重）
           const existing = new Set(modelsText.split(',').map((s) => s.trim()).filter(Boolean))
           const fresh = models.map((m) => m.name).filter((n) => !existing.has(n))
           setModelsText([...existing, ...fresh].join(', '))
-          setFetchMsg(`成功获取 ${models.length} 个模型：${models.map((m) => m.name).slice(0, 3).join('、')}${models.length > 3 ? '…' : ''}`)
+          setFetchMsg({ ok: true, message: `成功获取 ${models.length} 个模型：${models.map((m) => m.name).slice(0, 3).join('、')}${models.length > 3 ? '…' : ''}` })
         } else {
-          setFetchMsg(result.error?.user_visible_message ?? '拉取失败，请重试。')
+          setFetchMsg({ ok: false, message: result.error?.user_visible_message ?? '拉取失败，请重试。' })
         }
       })
-      .catch(() => setFetchMsg('拉取失败，请重试。'))
+      .catch(() => setFetchMsg({ ok: false, message: '拉取失败，请重试。' }))
       .finally(() => setFetching(false))
   }, [mode, channelId, provider, resolvedBaseUrl, apiKey, modelsText])
 
@@ -453,13 +453,14 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onS
             borderRadius: 'var(--radius-sm)',
             fontSize: 'var(--font-size-sm)',
             fontWeight: 500,
-            color: (testMsg && !testMsg.ok) ? '#991B1B' : '#065F46',
-            background: (testMsg && !testMsg.ok) ? '#FEF2F2' : '#ECFDF5',
-            border: `1px solid ${(testMsg && !testMsg.ok) ? '#FECACA' : '#A7F3D0'}`,
+            // F1 修复（r73）：拉取失败也红——fetchMsg 结构化补 ok 标志，色逻辑合并两源
+            color: ((testMsg && !testMsg.ok) || (fetchMsg && !fetchMsg.ok)) ? '#991B1B' : '#065F46',
+            background: ((testMsg && !testMsg.ok) || (fetchMsg && !fetchMsg.ok)) ? '#FEF2F2' : '#ECFDF5',
+            border: `1px solid ${((testMsg && !testMsg.ok) || (fetchMsg && !fetchMsg.ok)) ? '#FECACA' : '#A7F3D0'}`,
           }}
         >
-          {(testMsg && !testMsg.ok) ? <IconAlertTriangle size={16} /> : <IconCheck size={16} />}
-          <span>{testMsg?.message ?? fetchMsg}</span>
+          {((testMsg && !testMsg.ok) || (fetchMsg && !fetchMsg.ok)) ? <IconAlertTriangle size={16} /> : <IconCheck size={16} />}
+          <span>{testMsg?.message ?? fetchMsg?.message}</span>
         </div>
       )}
 
