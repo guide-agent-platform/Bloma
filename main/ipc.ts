@@ -172,11 +172,11 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     return safeInvoke(extractRequestId(payload), async () => {
       const input = validateConfirmRequirements(payload)
       const controller = new AbortController()
-      registerBackgroundRun(input.session_id, controller)
+      const runId = registerBackgroundRun(input.session_id, controller, input.project_id)
       try {
         return await resolveRequirementConfirm(input, controller.signal)
       } finally {
-        unregisterBackgroundRun(input.session_id)
+        unregisterBackgroundRun(input.session_id, runId)
       }
     })
   })
@@ -307,7 +307,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
         // MVP 就绪后自动进入测试与状态机后半段（A2-09）
         // U4/U5：注册可取消句柄，让「停止生成」能 abort 这条 fire-and-forget 链路。
         const abortController = new AbortController()
-        registerBackgroundRun(input.session_id, abortController)
+        const runId = registerBackgroundRun(input.session_id, abortController, input.project_id)
         void runMvpTask({
           request_id: input.request_id,
           session_id: input.session_id,
@@ -326,6 +326,9 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
               mode: project.mode,
               preview_url: mvp.preview_url,
               loop: mvp.loop_result,
+              query: getSdkQuery(),
+              channel_id: input.channel_id,
+              signal: abortController.signal,
             })
           })
           .catch((error) => {
@@ -347,7 +350,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
               created_at: new Date().toISOString(),
             })
           })
-          .finally(() => unregisterBackgroundRun(input.session_id))
+          .finally(() => unregisterBackgroundRun(input.session_id, runId))
       }
       return project
     })
@@ -452,8 +455,9 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
             payload: { text: sketchNote },
             created_at: new Date().toISOString(),
           })
-          const sketchAbort = new AbortController()
-          registerBackgroundRun(input.session_id, sketchAbort)
+          // runAgent 自带前台登记（activeSessions + 项目互斥）：不要再在此注册
+          // backgroundRun——双重登记会先占住项目锁，runAgent 内 acquire 直接抛
+          // AGENT_PROJECT_BUSY，且此分支此前没有 finally 清理句柄，会永久锁死项目。
           void runAgent({
             request_id: input.request_id,
             session_id: input.session_id,
@@ -461,15 +465,25 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
             content: prompt,
             mode,
             current_stage: 'sketch_ready' as never,
-          }).catch((error) => {
-            if (sketchAbort.signal.aborted) return
-            console.error('[ipc] correction sketch regeneration failed:', error)
+          } as never).catch((error) => {
+            // 用户取消时 runAgent 正常返回不抛错；这里只处理真实失败（含项目忙拒绝）
+            if (String(error).includes('AGENT_CANCELLED')) return
+            const message = error instanceof Error ? error.message : String(error)
+            console.error('[ipc] correction sketch regeneration failed:', message, error)
+            mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, {
+              event_id: randomUUID(),
+              session_id: input.session_id,
+              project_id: input.project_id,
+              type: 'error',
+              payload: { code: errorCodeFrom(error), message },
+              created_at: new Date().toISOString(),
+            })
           })
           return result
         }
         // U4/U5：注册可取消句柄，让「停止生成」能 abort 点选纠错触发的再生成链路。
         const abortController = new AbortController()
-        registerBackgroundRun(input.session_id, abortController)
+        const runId = registerBackgroundRun(input.session_id, abortController, input.project_id)
         void runIterationTask({
           request_id: input.request_id,
           session_id: input.session_id,
@@ -494,7 +508,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
             created_at: new Date().toISOString(),
           })
         })
-        .finally(() => unregisterBackgroundRun(input.session_id))
+        .finally(() => unregisterBackgroundRun(input.session_id, runId))
       }
       return result
     })

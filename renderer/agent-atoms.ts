@@ -244,6 +244,14 @@ export function setupGlobalAgentListeners(): () => void {
       ]
     })
 
+    // 项目隔离：全局阶段/快照等单例原子只接受当前项目的事件，后台项目的迟到事件
+    // 不得挤占当前项目 UI（「运行状态相互挤占」的渲染端根因）。
+    const isEventForCurrentProject = (): boolean => {
+      const current = store.get(currentProjectAtom)
+      if (!current || !event.project_id) return true
+      return current.project_id === event.project_id
+    }
+
     // 预览地址：sketch_ready / mvp_ready / rollback_done 带回沙箱 preview_url，按项目隔离存储（多项目各自独立预览）
     if (event.type === 'sketch_ready' || event.type === 'mvp_ready' || event.type === 'rollback_done') {
       const url = typeof event.payload.preview_url === 'string' ? event.payload.preview_url : null
@@ -251,9 +259,10 @@ export function setupGlobalAgentListeners(): () => void {
         store.set(previewUrlsAtom, (prev) => ({ ...prev, [event.project_id!]: { url, updatedAt: Date.now() } }))
       }
       const snapshotId = typeof event.payload.snapshot_id === 'string' ? event.payload.snapshot_id : null
-      if (snapshotId) store.set(currentSnapshotIdAtom, snapshotId)
+      // 快照指针按当前项目隔离：后台项目迟到的 sketch_ready 不得改写当前项目 UI
+      if (snapshotId && isEventForCurrentProject()) store.set(currentSnapshotIdAtom, snapshotId)
       // 时间轴数据源：后端每次落新快照即重新拉取快照列表，避免胶片条永远空
-      if (event.project_id) void loadSnapshots(event.project_id)
+      if (event.project_id && isEventForCurrentProject()) void loadSnapshots(event.project_id)
     }
 
     // 自动命名：MVP 就绪时后端可能已按需求给项目改名（autoNameProject 落盘），
@@ -404,8 +413,8 @@ export function setupGlobalAgentListeners(): () => void {
         })
       }
 
-      // 阶段变更：同步全局工作流阶段
-      if (event.type === 'stage_changed' && event.payload.stage) {
+      // 阶段变更：同步全局工作流阶段（只接受当前项目的事件，防止后台项目挤占 UI）
+      if (event.type === 'stage_changed' && event.payload.stage && isEventForCurrentProject()) {
         store.set(workflowStageAtom, event.payload.stage as WorkflowStage)
         store.set(stageIndicatorLabelAtom, STAGE_LABEL_MAP[event.payload.stage as WorkflowStage] ?? '处理中')
       }
@@ -413,7 +422,7 @@ export function setupGlobalAgentListeners(): () => void {
       // Agent Loop 工具进行中（PR4）：编程阶段把阶段指示细化为「第 N 轮 · 正在 {工具}」。
       // 只在生成/测试/修复/迭代阶段生效——澄清等对话阶段没有轮次语义；
       // 下一次 stage_changed 会重置回标准阶段文案，无需在此清理。
-      if (event.type === 'tool_call_started') {
+      if (event.type === 'tool_call_started' && isEventForCurrentProject()) {
         const stage = store.get(workflowStageAtom)
         if (stage === 'generating_mvp' || stage === 'testing' || stage === 'repairing' || stage === 'iterating') {
           const tool = String(event.payload.tool ?? '')
@@ -698,6 +707,8 @@ export async function loadSnapshots(projectId: string): Promise<void> {
     project_id: projectId,
   })
   if (!result.ok) return
+  // 防串台：切项目后旧项目的异步回包不得覆盖当前项目时间轴
+  if (store.get(currentProjectAtom)?.project_id !== projectId) return
   store.set(snapshotsListAtom, result.data.snapshots)
 }
 

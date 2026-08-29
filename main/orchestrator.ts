@@ -110,20 +110,57 @@ export interface GuideModelOptions {
 interface ActiveRun {
   abortController: AbortController
   iterator?: AsyncIterator<SDKMessage>
+  projectId: string
+  /** 唯一运行令牌；release 时按令牌校验，旧任务不能清掉新任务。 */
+  runId: string
+  /** 运行的发布通道；后台任务不能污染后来切换的会话。 */
+  publisher: StreamPublisher
 }
+
+interface BackgroundRun {
+  controller: AbortController
+  projectId: string
+  runId: string
+  publisher: StreamPublisher
+}
+
+const MAX_CONCURRENT_RUNS_PER_PROJECT = 1
 
 const MAX_RETRIES = 25
 const MAX_RETRY_DURATION_MS = 5 * 60 * 1000
 const SILENT_RETRY_THRESHOLD = 5
 
 const activeSessions = new Map<string, ActiveRun>()
+const activeProjects = new Map<string, string>()
 
 /**
- * 后台编程任务的取消注册表（U4/U5）：confirmSketch / submitCorrection 触发的
- * runMvpTask / runIterationTask 是 fire-and-forget，不经过 runAgent，activeSessions 管不到；
- * 单独记一份供 cancelAgent 统一 abort——否则「停止生成」按钮对这两条链路点了没反应。
+ * 后台编程任务的取消注册表（U4/U5）。按 runId 保存而不是只按 sessionId：
+ * 一个旧任务完成时不能误删同 session 的新任务；project 级互斥由 activeProjects 统一维护。
  */
-const backgroundRuns = new Map<string, AbortController>()
+const backgroundRuns = new Map<string, BackgroundRun>()
+
+function activeRunCountForProject(projectId: string): number {
+  return activeProjects.has(projectId) ? 1 : 0
+}
+
+function projectBusyError(projectId: string): Error {
+  return new Error(`AGENT_PROJECT_BUSY: project ${projectId} already has an active run`)
+}
+
+function acquireProjectRun(projectId: string, runId: string): void {
+  if (activeRunCountForProject(projectId) >= MAX_CONCURRENT_RUNS_PER_PROJECT) {
+    throw projectBusyError(projectId)
+  }
+  activeProjects.set(projectId, runId)
+}
+
+function releaseProjectRun(projectId: string, runId: string): void {
+  if (activeProjects.get(projectId) === runId) activeProjects.delete(projectId)
+}
+
+function hasRunForProject(projectId: string): boolean {
+  return activeProjects.has(projectId)
+}
 
 let streamPublisher: StreamPublisher = () => undefined
 let sdkQuery: SDKQuery = queryWithRuntimeFallback
@@ -151,27 +188,52 @@ export function setRetrySleepForTests(sleepFn: (ms: number) => Promise<void>): v
 }
 
 export function isSessionActive(sessionId: string): boolean {
-  return activeSessions.has(sessionId)
+  return activeSessions.has(sessionId) || backgroundRuns.has(sessionId)
 }
 
-/** 注册后台编程任务的可取消句柄（confirmSketch / submitCorrection 路径）。 */
-export function registerBackgroundRun(sessionId: string, controller: AbortController): void {
-  backgroundRuns.set(sessionId, controller)
+export function isProjectActive(projectId: string): boolean {
+  return hasRunForProject(projectId)
 }
 
-/** 移除后台编程任务的可取消句柄（任务结束或已取消）。 */
-export function unregisterBackgroundRun(sessionId: string): void {
+/** 注册后台编程任务；同一项目不能覆盖已有运行。 */
+export function registerBackgroundRun(
+  sessionId: string,
+  controller: AbortController,
+  projectId?: string,
+  publisher: StreamPublisher = streamPublisher,
+): string {
+  const resolvedProjectId = projectId ?? sessionId
+  if (backgroundRuns.has(sessionId)) throw new Error('AGENT_SESSION_BUSY')
+  const runId = randomUUID()
+  acquireProjectRun(resolvedProjectId, runId)
+  backgroundRuns.set(sessionId, { controller, projectId: resolvedProjectId, runId, publisher })
+  return runId
+}
+
+/** 移除后台句柄；只接受注册时返回的令牌，防旧 finally 误删新运行。 */
+export function unregisterBackgroundRun(sessionId: string, runId?: string): void {
+  const current = backgroundRuns.get(sessionId)
+  if (!current || (runId !== undefined && current.runId !== runId)) return
   backgroundRuns.delete(sessionId)
+  releaseProjectRun(current.projectId, current.runId)
+}
+
+function registerForegroundRun(input: AgentSendMessageInput, run: ActiveRun): void {
+  if (activeSessions.has(input.session_id)) throw new Error('AGENT_SESSION_BUSY')
+  acquireProjectRun(input.project_id, run.runId)
+  activeSessions.set(input.session_id, run)
 }
 
 export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendMessageResult> {
-  if (activeSessions.has(input.session_id)) {
-    throw new Error('AGENT_SESSION_BUSY')
-  }
-
+  const runId = randomUUID()
   const abortController = new AbortController()
-  const run: ActiveRun = { abortController }
-  activeSessions.set(input.session_id, run)
+  const run: ActiveRun = {
+    abortController,
+    projectId: input.project_id,
+    runId,
+    publisher: streamPublisher,
+  }
+  registerForegroundRun(input, run)
 
   const received: SDKMessage[] = []
 
@@ -564,6 +626,11 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
 
     return { accepted: true, session_id: input.session_id, stream_started: true }
   } catch (error) {
+    // 如果 cancelAgent 已按 runId 发过终态，旧任务只负责收尾，不能再覆盖 UI/日志。
+    const stillOwnsRun = activeSessions.get(input.session_id)?.runId === runId
+    if (!stillOwnsRun && isUserCancelled(error)) {
+      return { accepted: true, session_id: input.session_id, stream_started: true }
+    }
     // 熔断回滚已完成收尾（T5）：阶段收敛、如实消息、completed 事件都在回滚内发过，
     // 这里不得再当普通失败处理（不覆盖阶段、不发 error 事件）。
     if (isCircuitBreakSettled(error)) {
@@ -574,7 +641,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     // 用户主动停止（T3）：终止流并落盘终态，但不作为错误向上抛——
     // 会话仍可用（activeSessions 已在 cancelAgent 清除，可继续发消息）。
     if (isUserCancelled(error)) {
-      streamPublisher(makeEvent(input, 'error', { code: 'AGENT_CANCELLED' }))
+      publishRunEvent(input, run, 'error', { code: 'AGENT_CANCELLED' })
       persistTerminalMessage(input.session_id, 'error', { code: 'AGENT_CANCELLED', message: '用户停止了本次生成' })
       return { accepted: true, session_id: input.session_id, stream_started: true }
     }
@@ -587,7 +654,11 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     throw error
   } finally {
     await run.iterator?.return?.()
-    activeSessions.delete(input.session_id)
+    const current = activeSessions.get(input.session_id)
+    if (current?.runId === runId) {
+      activeSessions.delete(input.session_id)
+      releaseProjectRun(input.project_id, runId)
+    }
   }
 }
 
@@ -641,21 +712,70 @@ function sleep(ms: number): Promise<void> {
 }
 
 export async function cancelAgent(input: AgentCancelInput): Promise<AgentCancelResult> {
-  const run = activeSessions.get(input.session_id)
-  const background = backgroundRuns.get(input.session_id)
-  if (!run && !background) return { cancelled: false, session_id: input.session_id }
+  const targets: Array<{ sessionId: string; controller: AbortController; projectId: string; runId: string; publisher: StreamPublisher }> = []
 
-  // abort 携带带标记的 Error 作为拒绝原因（T3）：fetch 会以该 reason 拒绝，
-  // runAgent 据此识别「用户主动停止」而非普通 SDK 错误。
-  const reason = new Error(`AGENT_CANCELLED: ${input.reason}`)
-  if (run) {
-    run.abortController.abort(reason)
-    await run.iterator?.return?.()
-    activeSessions.delete(input.session_id)
+  const foreground = activeSessions.get(input.session_id)
+  if (foreground && (!input.project_id || foreground.projectId === input.project_id)) {
+    targets.push({
+      sessionId: input.session_id,
+      controller: foreground.abortController,
+      projectId: foreground.projectId,
+      runId: foreground.runId,
+      publisher: foreground.publisher,
+    })
   }
-  if (background) {
-    background.abort(reason)
-    backgroundRuns.delete(input.session_id)
+  const background = backgroundRuns.get(input.session_id)
+  if (background && (!input.project_id || background.projectId === input.project_id)) {
+    targets.push({
+      sessionId: input.session_id,
+      controller: background.controller,
+      projectId: background.projectId,
+      runId: background.runId,
+      publisher: background.publisher,
+    })
+  }
+
+  // project_id 是新客户端的主取消范围：一个项目可能由多个入口产生不同 session。
+  if (input.project_id) {
+    for (const [sessionId, run] of activeSessions) {
+      if (run.projectId === input.project_id && !targets.some((target) => target.runId === run.runId)) {
+        targets.push({ sessionId, controller: run.abortController, projectId: run.projectId, runId: run.runId, publisher: run.publisher })
+      }
+    }
+    for (const [sessionId, run] of backgroundRuns) {
+      if (run.projectId === input.project_id && !targets.some((target) => target.runId === run.runId)) {
+        targets.push({ sessionId, controller: run.controller, projectId: run.projectId, runId: run.runId, publisher: run.publisher })
+      }
+    }
+  }
+
+  if (targets.length === 0) return { cancelled: false, session_id: input.session_id }
+
+  const reason = new Error(`AGENT_CANCELLED: ${input.reason}`)
+  for (const target of targets) {
+    target.controller.abort(reason)
+    const foregroundRun = activeSessions.get(target.sessionId)
+    if (foregroundRun?.runId === target.runId) {
+      await foregroundRun.iterator?.return?.()
+      activeSessions.delete(target.sessionId)
+    }
+    const backgroundRun = backgroundRuns.get(target.sessionId)
+    if (backgroundRun?.runId === target.runId) {
+      backgroundRuns.delete(target.sessionId)
+    }
+    releaseProjectRun(target.projectId, target.runId)
+    // 取消必须有明确终态；后台链路没有 runAgent 的 catch 可以替它发 error。
+    target.publisher(makeEvent({
+      request_id: input.request_id,
+      session_id: target.sessionId,
+      project_id: target.projectId,
+      content: '',
+      mode: 'quick',
+      current_stage: 'choosing_mode',
+    }, 'error', { code: 'AGENT_CANCELLED' }))
+    // 取消也要落盘终态：runAgent 侧收到取消后已释放归属、提前返回，不再写 JSONL，
+    // 这里统一为每个目标补一条可还原的停止记录（前台/后台一致）。
+    persistTerminalMessage(target.sessionId, 'error', { code: 'AGENT_CANCELLED', message: '用户停止了本次生成' })
   }
   return { cancelled: true, session_id: input.session_id }
 }
@@ -733,6 +853,10 @@ function makeEvent(input: AgentSendMessageInput, type: AgentEvent['type'], paylo
     payload,
     created_at: new Date().toISOString(),
   }
+}
+
+function publishRunEvent(input: AgentSendMessageInput, run: ActiveRun, type: AgentEvent['type'], payload: Record<string, unknown>): void {
+  run.publisher(makeEvent(input, type, payload))
 }
 
 function extractText(blocks: MessageContentBlock[]): string {

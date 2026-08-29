@@ -591,6 +591,7 @@ export async function handleGuideMessage(
     requirements: ensurePrimaryIntent(route.requirements, primaryIntent),
     channel_id: input.channel_id,
     query: model?.query,
+    signal: model?.signal,
   })
 }
 
@@ -1111,6 +1112,7 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
       query: pending.query ?? NO_QUERY_FALLBACK,
       publish,
       ideas: reviewIdeas,
+      signal,
     })
     return { started: true, prd_written: prdWritten }
   } else {
@@ -1132,6 +1134,7 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
     requirements,
     channel_id: pending.channel_id,
     query: pending.query,
+    signal,
   })
   return { started: true, prd_written: prdWritten }
 }

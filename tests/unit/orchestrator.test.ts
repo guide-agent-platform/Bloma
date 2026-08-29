@@ -4,16 +4,20 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildSdkEnv,
+  cancelAgent,
+  isProjectActive,
   isSessionActive,
+  registerBackgroundRun,
   resetSDKQueryForTests,
   runAgent,
   setAgentStreamPublisher,
   setRetrySleepForTests,
   setSDKQueryForTests,
   shouldRetry,
+  unregisterBackgroundRun,
 } from '../../main/orchestrator'
 import { getAgentSessionPath } from '../../storage/config-paths'
-import type { SDKMessage } from '../../shared/types'
+import type { AgentEvent, SDKMessage } from '../../shared/types'
 
 vi.mock('../../main/channel-manager', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../main/channel-manager')>()
@@ -518,6 +522,77 @@ describe('AgentOrchestrator · A2-14a 真实模型流式 + 多轮历史', () => 
     const printed = spy.mock.calls.map((call) => String(call[0]))
     expect(printed.some((line) => line.includes('[thinking:') && line.includes('用户可能在思考记账的分类方式'))).toBe(true)
     spy.mockRestore()
+  })
+})
+
+describe('AgentOrchestrator · 项目级运行隔离与停止终态（2026-08-29 修复）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+
+  beforeEach(() => {
+    setSDKQueryForTests(defaultTestQuery)
+  })
+
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+    setAgentStreamPublisher(() => undefined)
+    setRetrySleepForTests(async () => undefined)
+    setSDKQueryForTests(defaultTestQuery)
+  })
+
+  it('同一项目已有后台运行，另一会话启动前台 runAgent 应抛 AGENT_PROJECT_BUSY', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-test-'))
+    process.env.PROMA_HOME = home
+    const runId = registerBackgroundRun('session-bg', new AbortController(), 'project-x')
+    await expect(
+      runAgent({
+        request_id: 'req-fg',
+        session_id: 'session-fg',
+        project_id: 'project-x',
+        content: '做一个工具',
+        mode: 'quick',
+        current_stage: 'generating_mvp',
+        channel_id: 'test-channel',
+      }),
+    ).rejects.toThrow('AGENT_PROJECT_BUSY')
+    unregisterBackgroundRun('session-bg', runId)
+    expect(isProjectActive('project-x')).toBe(false)
+  })
+
+  it('后台注册按令牌注销：过期令牌不能清掉新运行，正确令牌才释放项目', () => {
+    const runId = registerBackgroundRun('session-s', new AbortController(), 'project-y')
+    // 同 session 再注册被拒（不再静默覆盖句柄）
+    expect(() => registerBackgroundRun('session-s', new AbortController(), 'project-y')).toThrow('AGENT_SESSION_BUSY')
+    // 旧任务的 finally 用过期令牌清理：不得删除新句柄
+    unregisterBackgroundRun('session-s', 'stale-run-token')
+    expect(isProjectActive('project-y')).toBe(true)
+    unregisterBackgroundRun('session-s', runId)
+    expect(isProjectActive('project-y')).toBe(false)
+  })
+
+  it('cancelAgent 取消后台运行：abort 生效、发布 AGENT_CANCELLED 终态、释放项目锁', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-test-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    const controller = new AbortController()
+    const runId = registerBackgroundRun('session-c', controller, 'project-z')
+    const result = await cancelAgent({
+      request_id: 'req-cancel',
+      session_id: 'session-c',
+      project_id: 'project-z',
+      reason: 'user_cancelled',
+    })
+    expect(result.cancelled).toBe(true)
+    expect(controller.signal.aborted).toBe(true)
+    expect(events.some((event) => event.type === 'error' && event.payload?.code === 'AGENT_CANCELLED')).toBe(true)
+    expect(isProjectActive('project-z')).toBe(false)
+    const second = await cancelAgent({
+      request_id: 'req-cancel-2',
+      session_id: 'session-c',
+      project_id: 'project-z',
+      reason: 'user_cancelled',
+    })
+    expect(second.cancelled).toBe(false)
   })
 })
 

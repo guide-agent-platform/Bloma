@@ -29,6 +29,8 @@ export interface GenerateSketchLlmInput {
   sessionId: string
   maxTokens?: number
   timeoutMs?: number
+  /** 外部取消信号；与内部超时信号合并。 */
+  signal?: AbortSignal
 }
 
 export interface GenerateSketchLlmResult {
@@ -92,6 +94,8 @@ export async function generateSketchLlm(input: GenerateSketchLlmInput): Promise<
   // 超时预算**按次发放**：每次尝试新建 timer——共享总预算会让截断重试只剩残余时间，结构性必超时。
   for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt += 1) {
     const selfController = new AbortController()
+    const onOuterAbort = () => selfController.abort(input.signal?.reason)
+    input.signal?.addEventListener('abort', onOuterAbort, { once: true })
     const timer = timeoutMs > 0 ? setTimeout(() => selfController.abort(), timeoutMs) : undefined
     const startedAt = Date.now()
     let accumulated = ''
@@ -119,10 +123,14 @@ export async function generateSketchLlm(input: GenerateSketchLlmInput): Promise<
       }
     } catch (error) {
       clearTimeout(timer)
+      input.signal?.removeEventListener('abort', onOuterAbort)
+      if (input.signal?.aborted) throw new Error('AGENT_CANCELLED')
       if (selfController.signal.aborted) throw timeoutError(false)
       throw error
     }
     clearTimeout(timer)
+    input.signal?.removeEventListener('abort', onOuterAbort)
+    if (input.signal?.aborted) throw new Error('AGENT_CANCELLED')
     if (selfController.signal.aborted) throw timeoutError(false)
 
     const html = cleanSketchHtml(accumulated)

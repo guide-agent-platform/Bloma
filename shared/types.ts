@@ -88,6 +88,7 @@ export type ErrorCode =
   | 'VALIDATION_ERROR'
   | 'IPC_CHANNEL_NOT_FOUND'
   | 'AGENT_SESSION_BUSY'
+  | 'AGENT_PROJECT_BUSY'
   | 'AGENT_SDK_ERROR'
   | 'AGENT_SDK_TIMEOUT'
   | 'AGENT_CANCELLED'
@@ -619,6 +620,8 @@ export interface AgentSendMessageResult {
 
 export interface AgentCancelInput extends RequestEnvelope {
   session_id: string
+  /** 可选 project_id：同项目不同会话切换/停止时一并中止全部顶层运行。旧客户端只传 session_id 仍兼容。 */
+  project_id?: string
   reason: 'user_cancelled' | 'route_change' | 'shutdown'
 }
 

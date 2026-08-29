@@ -54,6 +54,11 @@ export const GENERATION_FAILED_COPY =
 
 type ProgrammingEventPublisher = (event: AgentEvent) => void
 
+/** 统一的取消边界：所有顶层阶段在发生副作用前调用，保证 stop 后不再切状态/起新任务。 */
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new Error('AGENT_CANCELLED')
+}
+
 /** 被阻塞的编程操作类型（A2 resume 闭环，落盘到 Project.blocked_action） */
 export type BlockedAction = 'mvp_repair' | 'test_repair' | 'judge_return' | 'security_repair'
 /** 阻塞态让渡后用户回传的决策（A3：消费 metadata.selected_option_id 映射而来） */
@@ -75,6 +80,8 @@ export interface SketchTaskInput {
   requirements?: SketchRequirement[]
   channel_id?: string
   query?: SDKQuery
+  /** 停止信号：草图生成、沙箱与快照间均不得在取消后继续推进。 */
+  signal?: AbortSignal
 }
 
 export interface SketchTaskResult {
@@ -112,6 +119,7 @@ export function setProgrammingEventPublisher(publisher: ProgrammingEventPublishe
 }
 
 export async function runSketchTask(input: SketchTaskInput): Promise<SketchTaskResult> {
+  throwIfAborted(input.signal)
   publish(input, 'stage_changed', { stage: 'generating_sketch' })
   updateProject(input.project_id, { current_stage: 'generating_sketch' })
 
@@ -119,6 +127,7 @@ export async function runSketchTask(input: SketchTaskInput): Promise<SketchTaskR
     ? input.requirements
     : [{ id: 'F-001', description: input.prompt }]
   const { result: sketch, source, fallbackReason, llmErrorCode, llmAttempts } = await resolveSketch(input, requirements)
+  throwIfAborted(input.signal)
   // 草图来源持久化（§4.2 质量门②判定依据）：source('llm'|'template') 原本只存在于生成
   // 时刻的内存与事件流，而 sketch_confirmed 常跨会话发生（重启后经 T1 收敛）、确认时无处
   // 可读——落 project 字段（sketch_source + sketch_generated_at）供质量门读取与刷新判定
@@ -147,6 +156,7 @@ export async function runSketchTask(input: SketchTaskInput): Promise<SketchTaskR
   recordSketchGenerated(input.project_id, requirements)
   await allowAutomatedTool('run_project', { project_id: input.project_id }, input.session_id, input.project_id)
   const sandbox = await runSandbox({ request_id: input.request_id, project_id: input.project_id })
+  throwIfAborted(input.signal)
   if (sandbox.status !== 'running' || !sandbox.preview_url) {
     publish(input, 'error', {
       code: 'SANDBOX_RUN_FAILED',
@@ -261,6 +271,7 @@ async function resolveSketch(input: SketchTaskInput, requirements: SketchRequire
       env,
       sessionId: input.session_id,
       maxTokens: channel.max_tokens ?? DEFAULT_MAX_TOKENS,
+      signal: input.signal,
     })
     return { result, source: 'llm' }
   } catch (error) {
@@ -418,6 +429,7 @@ export function deriveFallbackName(intent: string): string | null {
  * analytics mvp_delivered → stage testing → 发布 mvp_ready。
  */
 export async function runMvpTask(input: MvpTaskInput): Promise<MvpTaskResult> {
+  throwIfAborted(input.signal)
   publish(input, 'stage_changed', { stage: 'generating_mvp' })
   updateProject(input.project_id, { current_stage: 'generating_mvp' })
 
@@ -432,6 +444,7 @@ export async function runMvpTask(input: MvpTaskInput): Promise<MvpTaskResult> {
 
   const requirements = readLastSketchRequirements(input.project_id)
   await syncPrdCheckpoints(input, requirements)
+  throwIfAborted(input.signal)
   // 需求确认后自动命名（首次生成执行一次）：命名是附属能力，任何失败都不阻断生成
   try {
     await autoNameProject(input)
@@ -1166,6 +1179,8 @@ export interface JudgeReviewInput {
   /** 语义审查腿（2026-08-26，裁判域 LLM）：规则全绿后审「产物是否忠实实现 PRD」；缺省跳过 */
   query?: SDKQuery
   channel_id?: string
+  /** 取消信号：语义审查及其委派等待期间立即停止。 */
+  signal?: AbortSignal
 }
 
 export interface JudgeReviewResult {
@@ -1185,6 +1200,7 @@ export interface JudgeReviewResult {
  * 退回计数/让渡流；LLM 失败跳过留痕，绝不阻断交付。
  */
 export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeReviewResult> {
+  throwIfAborted(input.signal)
   let verdict = await evaluateOnce(input)
   while (verdict.verdict === 'return') {
     const project = findProject(input.project_id)
@@ -1233,6 +1249,7 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
     verdict = await evaluateOnce(input)
   }
 
+  throwIfAborted(input.signal)
   updateProject(input.project_id, { current_stage: 'ready' })
   publish(input, 'stage_changed', { stage: 'ready' })
   // 软建议（suggest）不再静默忽略：把可读提示附在完成通知后反馈给用户（P1）
@@ -1293,6 +1310,7 @@ async function evaluateOnce(input: JudgeReviewInput): Promise<JudgeVerdict> {
     projectId: input.project_id,
     requestId: input.request_id,
     publish: (event) => publish(input, event.type, event.payload),
+    signal: input.signal,
   })
   // 活背板（2026-08-26）：逐功能项判定回写 prd.json（pass/fail 都回写——partial/unverified
   // 同样是用户该看到的执行状态；内部全 catch，失败不影响裁决流）
@@ -1380,6 +1398,8 @@ export interface AgentLoopPostTestingInput {
   project_id: string
   mode: ProjectMode
   preview_url: string
+  /** 停止信号：终验开始后取消不得继续切阶段、写报告或触发裁判。 */
+  signal?: AbortSignal
   /** Agent Loop 结果元数据（M4-B）：其存在即标记 loop 路径；judge 对异常终止态判「让渡」。
    *  存量旧版项目（via_agent_loop=false）resume 时无 loop 元数据，缺省走普通终验（无修复）。 */
   loop?: AgentLoopJudgeMetadata
@@ -1407,12 +1427,15 @@ function loopOutcomeNote(loop: AgentLoopJudgeMetadata | undefined): string {
  * 不再靠 `repair_internalized` 布尔位在旧函数里分叉两种语义（D1）。
  */
 export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput): Promise<GwtTestingResult> {
+  throwIfAborted(input.signal)
   updateProject(input.project_id, { current_stage: 'testing' })
   publish(input, 'stage_changed', { stage: 'testing' })
 
-  let testResult = await runGwtScenarios({ project_id: input.project_id, session_id: input.session_id, preview_url: input.preview_url })
+  const testResult = await runGwtScenarios({ project_id: input.project_id, session_id: input.session_id, preview_url: input.preview_url })
+  throwIfAborted(input.signal)
   writeTestReport({ request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, result: testResult })
   syncDocuments({ request_id: input.request_id, project_id: input.project_id, session_id: input.session_id, checkpoint: 'mvp_tested' })
+  throwIfAborted(input.signal)
 
   // 只终验不重修：GWT 首败即熔断回滚 / 让渡（loop 内修复预算已用尽）
   if (testResult.failed_count > 0) {
@@ -1434,6 +1457,7 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
 
   // 安全扫描终验（A3，OWASP 静态扫描）：高危/严重命中同样只熔断不重修
   let security = runSecurityScan({ project_id: input.project_id, root_path: findProject(input.project_id).root_path })
+  throwIfAborted(input.signal)
   writeSecurityScanDocument(input.project_id, renderSecurityScanMarkdown(security))
   if (!security.passed) {
     const outcome = await circuitBreakRollback({
@@ -1450,6 +1474,7 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
 
   // 终审（M4-B loop-aware）：judge 感知 loop 结果——completed 照常读盘判定；异常终止态让渡。
   // judge 级修复同样「只终验不重修」（repairInternalized 熔断 constraint_error 外部文档重修）。
+  throwIfAborted(input.signal)
   updateProject(input.project_id, { current_stage: 'judge_review' })
   publish(input, 'stage_changed', { stage: 'judge_review' })
   const judge = await runJudgeReview({
@@ -1460,6 +1485,7 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
     repairInternalized: true,
     query: input.query,
     channel_id: input.channel_id,
+    signal: input.signal,
   })
   return { verdict: judge.outcome, test_result: testResult, judge: judge.verdict }
 }

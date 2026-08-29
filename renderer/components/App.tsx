@@ -322,25 +322,28 @@ const AppRoutes: React.FC = () => {
 
   /**
    * 用户点击停止键：调 agent:stop（后端 cancelAgent 以 AGENT_CANCELLED 标记中止
-   * SDK 查询并清除 activeSessions）。后端随后发 AGENT_CANCELLED 终态事件，
-   * 流式状态归 false，不残留「进行中」假象；会话解锁后可继续发消息。
+   * 查询并清除运行登记，随后发 AGENT_CANCELLED 终态事件）。带 project_id 停止同项目
+   * 全部入口的运行；只在实际取消成功时才落「已停止」提示，避免假反馈。
    */
-  const handleStopGeneration = useCallback(() => {
+  const handleStopGeneration = useCallback(async () => {
     const api = window.electronAPI
     if (!api?.agent?.cancel) return
 
-    // 立即反馈：先落一条系统消息，再让主进程 abort 当前流
-    appendMessageToSession(sessionId, {
-      role: 'system',
-      content: [{ type: 'text', text: '已停止生成。当前已生成的内容会保留，你可以继续补充或调整。' }],
-      timestamp: Date.now(),
-    })
-    void api.agent.cancel({
+    const result = await api.agent.cancel({
       request_id: crypto.randomUUID(),
       session_id: sessionId,
+      project_id: currentProject?.project_id,
       reason: 'user_cancelled',
     })
-  }, [sessionId])
+    // cancelled:false 说明没有可停止的运行（已结束/已被其他路径清掉），不写成功提示
+    if (result.ok && result.data.cancelled) {
+      appendMessageToSession(sessionId, {
+        role: 'system',
+        content: [{ type: 'text', text: '已停止生成。当前已生成的内容会保留，你可以继续补充或调整。' }],
+        timestamp: Date.now(),
+      })
+    }
+  }, [sessionId, currentProject])
 
   // ==================== 卡片选项回传（Sprint 2：澄清卡片） ====================
 

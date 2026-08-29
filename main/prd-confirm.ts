@@ -39,6 +39,8 @@ interface PendingPrdConfirm {
   ideas: ResearchIdea[]
   query: SDKQuery
   publish: (event: AgentEvent) => void
+  /** 停止信号：确认后开草图同样可被停止（不传则不可取消） */
+  signal?: AbortSignal
 }
 
 const pendingPrdConfirms = new Map<string, PendingPrdConfirm>()
@@ -69,6 +71,8 @@ export function publishPrdConfirmCard(opts: {
   /** 审查被用户 override 后转入确认门时携带：如实标注「已忽略 N 个审查问题」，
    *  卡片 title 同步变体（不再自称「已通过裁判审查」——诚实披露）。 */
   reviewNote?: string
+  /** 停止信号：确认卡回传后开草图的可取消句柄（与发布方同一 controller） */
+  signal?: AbortSignal
 }): void {
   const { input, backplane, reviewNote } = opts
   const ideas = opts.ideas ?? []
@@ -82,6 +86,7 @@ export function publishPrdConfirmCard(opts: {
     ideas,
     query: opts.query,
     publish: opts.publish,
+    signal: opts.signal,
   })
 
   recordDecision({
@@ -206,6 +211,7 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
     requirements: sketchRequirements,
     channel_id: pending.channel_id,
     query: pending.query,
+    signal: pending.signal,
   })
   return true
 }
