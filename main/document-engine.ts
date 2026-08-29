@@ -10,6 +10,7 @@ import type {
 } from '../shared/types'
 import { getDocumentsDir } from '../storage/config-paths'
 import { findProject, readLastSketchRequirements } from './project-service'
+import { nextRequirementId } from './programming-orchestrator'
 import type { PrdBackplane, RequirementStatus, SketchRequirement } from './sketch-engine'
 import { requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory } from './sketch-engine'
 import { describeEffect, describeTrigger, parseBehaviorAssertion } from './behavior-assertions'
@@ -395,10 +396,12 @@ export function isPrdUserConfirmed(projectId: string): boolean {
 }
 
 /** 向盘上 prd.json 追加功能项（2026-08-29 灵感参考：PRD 确认卡勾选采纳市调想法）。
- * 读-改-写保留全部既有字段（含 user_confirmed_at/status 等）；失败返回 null 不抛错。 */
+ * 读-改-写保留全部既有字段（含 user_confirmed_at/status 等）；**id 由本函数内部按
+ * 盘上现状编号**（nextRequirementId 语义 max+1，审查修复：调用方猜号在盘上条目多于
+ * 待决清单时会碰撞被去重过滤，勾选的想法静默丢失）；失败返回 null 不抛错。 */
 export function appendPrdRequirements(
   projectId: string,
-  items: Array<{ id: string; description: string; origin?: 'user' | 'guide' }>,
+  items: Array<{ description: string; origin?: 'user' | 'guide' }>,
 ): PrdBackplane | null {
   try {
     const project = findProject(projectId)
@@ -407,24 +410,26 @@ export function appendPrdRequirements(
     if (!existsSync(path)) return null
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as PrdBackplane
     if (!parsed || !Array.isArray(parsed.requirements)) return null
-    const existingIds = new Set(parsed.requirements.map((item) => item.id))
     const existingDescriptions = new Set(
       parsed.requirements.map((item) => item.description.replace(/\s+/g, ' ').trim()),
     )
-    const additions = items.filter(
-      (item) =>
-        item.description.trim().length > 0 &&
-        !existingIds.has(item.id) &&
-        !existingDescriptions.has(item.description.replace(/\s+/g, ' ').trim()),
-    )
-    if (additions.length === 0) return parsed
-    const updated: PrdBackplane = {
-      ...parsed,
-      requirements: [...parsed.requirements, ...additions.map((item) => ({
-        ...item,
+    const merged = [...parsed.requirements]
+    let changed = false
+    for (const item of items) {
+      const description = item.description.replace(/\s+/g, ' ').trim()
+      if (!description || existingDescriptions.has(description)) continue
+      const id = nextRequirementId(merged)
+      const addition: SketchRequirement = {
+        id,
+        description,
         ...(item.origin ? { origin: item.origin } : {}),
-      }))],
+      }
+      merged.push(addition)
+      existingDescriptions.add(description)
+      changed = true
     }
+    if (!changed) return parsed
+    const updated: PrdBackplane = { ...parsed, requirements: merged }
     writeFileSync(path, renderPrdJson(updated), 'utf8')
     return updated
   } catch {

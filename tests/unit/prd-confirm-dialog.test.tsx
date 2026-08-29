@@ -177,6 +177,31 @@ describe('PRD 确认弹窗 PrdConfirmDialog', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('prd-confirm-dialog')).toBeNull()
     })
+
+    // 空想法（审查 P2-4 补断言）：ideas=[] 时想法区不渲染，确认不带 adopted_ideas
+    cleanup()
+    store.set(prdConfirmFamily('session-pc'), {
+      sessionId: 'session-pc',
+      projectId: 'project-pc',
+      title: '请确认这份 PRD（已通过裁判审查）',
+      positioning: '个人记账工具',
+      requirements: [
+        { id: 'F-001', priority: 'P0', story: '作为用户，我想记录日常收支', assertions: ['记录后列表实时刷新'] },
+      ],
+      outOfScope: [],
+      assumptions: [],
+      constraints: [],
+      expanded: false,
+      ideas: [],
+    })
+    renderDialog()
+    expect(screen.queryByTestId('prd-confirm-ideas')).toBeNull()
+    fireEvent.click(screen.getByTestId('prd-confirm-submit'))
+    await waitFor(() => {
+      expect(sendMessage).toHaveBeenLastCalledWith(expect.objectContaining({
+        metadata: { source: 'card_option', selected_option_id: 'prd_confirm_confirm' },
+      }))
+    })
   })
 
   it('整体确认 → sendMessage 携带 card_option/prd_confirm_confirm，弹窗关闭', async () => {

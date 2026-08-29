@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { isPrdUserConfirmed, listDocuments, markPrdUserConfirmed, readDocument, syncDocuments } from '../../main/document-engine'
+import { appendPrdRequirements, isPrdUserConfirmed, listDocuments, markPrdUserConfirmed, readDocument, syncDocuments } from '../../main/document-engine'
 import { createProject, recordSketchGenerated, updateProject } from '../../main/project-service'
 import { getDocumentsDir } from '../../storage/config-paths'
 
@@ -68,6 +68,48 @@ describe('DocumentEngine (A2-05)', () => {
     const dir = getDocumentsDir(project.workspace_slug, project.project_id)
     const prd = JSON.parse(readFileSync(join(dir, 'prd.json'), 'utf8'))
     expect(prd.user_confirmed_at).toBeTruthy()
+  })
+
+  it('appendPrdRequirements：盘上现状内部编号（盘上条目多于传入清单时不碰撞丢想法，审查修复 P1）+ 全字段保留', () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-doc-append-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-append', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '做一个音乐合成器' }])
+
+    syncDocuments({
+      request_id: 'req-append-1',
+      session_id: 'session-append',
+      project_id: project.project_id,
+      checkpoint: 'requirement_confirmed',
+    })
+    expect(markPrdUserConfirmed(project.project_id)).not.toBeNull()
+
+    // 盘上人工加厚到 F-005（模拟 enrichment 已扩展，比 pending 薄清单多）
+    const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+    const prd = JSON.parse(readFileSync(join(dir, 'prd.json'), 'utf8'))
+    prd.requirements.push(
+      { id: 'F-002', description: '虚拟键盘' },
+      { id: 'F-005', description: '录音回放' },
+    )
+    require('node:fs').writeFileSync(join(dir, 'prd.json'), JSON.stringify(prd, null, 2) + '\n')
+
+    // 采纳两条想法（不传 id，内部应按盘上 max=5 编号为 F-006/F-007，而非 length+1 碰撞被丢）
+    const updated = appendPrdRequirements(project.project_id, [
+      { description: '参考市面做法：步进音序器', origin: 'user' },
+      { description: '参考市面做法：音色参数实验', origin: 'user' },
+    ])
+    expect(updated).not.toBeNull()
+    const ids = updated!.requirements.map((item) => item.id)
+    expect(ids).toContain('F-006')
+    expect(ids).toContain('F-007')
+    expect(updated!.requirements).toHaveLength(5)
+    // 全字段保留：确认标记仍在
+    expect(updated!.user_confirmed_at).toBeTruthy()
+    // 幂等：重复追加同描述被去重
+    const again = appendPrdRequirements(project.project_id, [
+      { description: '参考市面做法：步进音序器', origin: 'user' },
+    ])
+    expect(again!.requirements).toHaveLength(5)
   })
 
   it('requirement_confirmed checkpoint: 状态行如实（不谎报草图已确认）+ 无 priority 条目不渲染缺省 P2（abb1a19f）', () => {

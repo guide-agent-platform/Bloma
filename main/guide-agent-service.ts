@@ -1095,6 +1095,9 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
     } catch {
       // 市调/提炼是增强不是依赖：失败不阻断确认卡
     }
+    // 市调+提炼可达数十秒（fetch 15s + LLM）：期间用户停止 → 不再发卡（对齐
+    // 「停止后不推进」不变式；否则停止后弹窗仍出现，状态错乱）
+    if (aborted()) return { started: true, prd_written: prdWritten }
     publishPrdConfirmCard({
       input: {
         request_id: pending.request_id,

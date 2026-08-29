@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { AgentEvent, AgentSendMessageInput, ResearchIdea } from '../shared/types'
 import { recordDecision } from './decision-log'
 import { appendPrdRequirements, markPrdUserConfirmed } from './document-engine'
-import { runSketchTask } from './programming-orchestrator'
+import { nextRequirementId, runSketchTask } from './programming-orchestrator'
 import type { PrdBackplane } from './sketch-engine'
 import { requirementAssertions, requirementPriority, requirementStory } from './sketch-engine'
 import type { SDKQuery } from './orchestrator'
@@ -154,8 +154,7 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
     .filter((label) => pending.ideas.some((idea) => idea.label === label))
   let sketchRequirements = pending.requirements
   if (adopted.length > 0) {
-    const additions = adopted.map((label, index) => ({
-      id: `F-${String(pending.requirements.length + index + 1).padStart(3, '0')}`,
+    const additions = adopted.map((label) => ({
       description: `参考市面做法：${label.replace(/\s+/g, ' ').trim()}`,
       origin: 'user' as const,
     }))
@@ -166,7 +165,12 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
         description: item.description,
       }))
     } else {
-      sketchRequirements = [...pending.requirements, ...additions]
+      // 盘上缺失/损坏：仅并入内存清单（id 由 nextRequirementId 语义编号，防碰撞）
+      const memoryMerged = [...pending.requirements]
+      for (const addition of additions) {
+        memoryMerged.push({ id: nextRequirementId(memoryMerged), ...addition })
+      }
+      sketchRequirements = memoryMerged
       console.error('[prd-confirm] 采纳想法写入 prd.json 失败（缺失/损坏），仅并入草图任务清单')
     }
   }

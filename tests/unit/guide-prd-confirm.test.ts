@@ -12,7 +12,15 @@ vi.mock('../../main/programming-orchestrator', () => ({
     requirements,
   })),
   setProgrammingEventPublisher: vi.fn(),
-  nextRequirementId: vi.fn((existing: Array<{ id: string }>) => `F-00${existing.length + 1}`),
+  // 保真对齐真实实现（审查 P1-2）：max+1 + padStart(3,'0')，而非 length+1——
+  // 防 id 空洞/≥10 条时掩盖编号类 bug
+  nextRequirementId: vi.fn((existing: Array<{ id: string }>) => {
+    const max = existing.reduce((acc, item) => {
+      const match = /^F-(\d+)$/.exec(item.id)
+      return match ? Math.max(acc, Number(match[1])) : acc
+    }, 0)
+    return `F-${String(max + 1).padStart(3, '0')}`
+  }),
   refineModificationDescription: vi.fn((text: string) => text.trim()),
 }))
 vi.mock('../../main/platform-services', () => ({ trackAnalytics: vi.fn() }))
@@ -199,6 +207,40 @@ describe('PRD 用户确认门（改造 3）', () => {
         detail: expect.objectContaining({ adopted_ideas: [ideas[0].label] }), // 篡改/不存在的 label 被过滤
       }),
     }))
+  })
+
+  it('发卡前市调提炼段（审查 P1-1）：市调可用时 ideas 进 prd_confirm 卡 payload；市调抛错仍发卡不阻断（降级兑现）', async () => {
+    vi.mocked(researchMarketSimilar).mockImplementationOnce(async () => {
+      throw new Error('fetch failed')
+    })
+    await startConfirmFlow()
+
+    // 市调抛错 → ideas 空，确认卡仍发出（增强不是依赖）
+    let card = events.find(
+      (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
+    )
+    expect(card).toBeTruthy()
+    expect((card!.payload as { ideas?: unknown[] }).ideas ?? []).toHaveLength(0)
+
+    // 市调可用（fallback 提炼）→ ideas 随卡透出（注意：一次 startConfirmFlow 调两次市调——弹窗+发卡，mock 需栈两次）
+    events = []
+    const availableResearch = {
+      available: true,
+      queries: ['q'],
+      results: [{ title: '虚拟键盘实时弹奏类工具', url: 'https://www.example.com/studio', snippet: '按键即发声' }],
+      summary: '虚拟键盘实时弹奏类工具 — example.com 按键即发声',
+    }
+    vi.mocked(researchMarketSimilar).mockResolvedValueOnce(availableResearch)
+    vi.mocked(researchMarketSimilar).mockResolvedValueOnce(availableResearch)
+    await startConfirmFlow()
+    card = events.find(
+      (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
+    )
+    expect(card).toBeTruthy()
+    const ideas = (card!.payload as { ideas?: Array<{ label: string; source: string }> }).ideas ?? []
+    expect(ideas).toHaveLength(1)
+    expect(ideas[0].label).toContain('虚拟键盘')
+    expect(ideas[0].source).toBe('example.com')
   })
 
   it('审查通过 → 发四段式确认卡（kind=prd_confirm，背板投影）且不开草图', async () => {
