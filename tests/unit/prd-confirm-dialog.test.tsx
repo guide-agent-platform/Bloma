@@ -81,6 +81,7 @@ describe('PRD 确认弹窗 PrdConfirmDialog', () => {
       assumptions: ['数据只存本地浏览器（你未说明存储位置）'],
       constraints: ['必须离线可用'],
       expanded: false,
+      ideas: [],
     })
   }
 
@@ -115,6 +116,7 @@ describe('PRD 确认弹窗 PrdConfirmDialog', () => {
       ],
       outOfScope: ['不做排行榜', '不做登录'],
       expanded: false,
+      ideas: [],
     })
 
     // 其它 kind 不触碰弹窗 atom
@@ -137,6 +139,44 @@ describe('PRD 确认弹窗 PrdConfirmDialog', () => {
     // 系统假设 + 用户约束
     expect(screen.getByTestId('prd-confirm-assumptions').textContent).toContain('数据只存本地浏览器')
     expect(screen.getByTestId('prd-confirm-constraints').textContent).toContain('必须离线可用')
+  })
+
+  it('灵感参考（2026-08-29）：想法区渲染可勾选，确认时 metadata 带 adopted_ideas；空想法不渲染', async () => {
+    store.set(prdConfirmFamily('session-pc'), {
+      sessionId: 'session-pc',
+      projectId: 'project-pc',
+      title: '请确认这份 PRD（已通过裁判审查）',
+      positioning: '个人记账工具',
+      requirements: [
+        { id: 'F-001', priority: 'P0', story: '作为用户，我想记录日常收支', assertions: ['记录后列表实时刷新'] },
+      ],
+      outOfScope: [],
+      assumptions: [],
+      constraints: [],
+      expanded: false,
+      ideas: [
+        { label: '语音快速记账', note: '说一句话自动记一笔', source: 'example.com' },
+        { label: '拍照识别小票', note: '小票自动入账', source: 'example.org' },
+      ],
+    })
+    renderDialog()
+
+    expect(screen.getByTestId('prd-confirm-ideas').textContent).toContain('灵感参考')
+    fireEvent.click(screen.getByTestId('prd-confirm-idea-语音快速记账'))
+    fireEvent.click(screen.getByTestId('prd-confirm-submit'))
+
+    await waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+        metadata: expect.objectContaining({
+          source: 'card_option',
+          selected_option_id: 'prd_confirm_confirm',
+          adopted_ideas: ['语音快速记账'],
+        }),
+      }))
+    })
+    await waitFor(() => {
+      expect(screen.queryByTestId('prd-confirm-dialog')).toBeNull()
+    })
   })
 
   it('整体确认 → sendMessage 携带 card_option/prd_confirm_confirm，弹窗关闭', async () => {

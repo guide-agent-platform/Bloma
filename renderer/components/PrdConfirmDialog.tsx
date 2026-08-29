@@ -167,6 +167,7 @@ export const PrdConfirmDialog: React.FC = () => {
   const [adjustOpen, setAdjustOpen] = useState(false)
   const [adjustText, setAdjustText] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [adoptedIdeas, setAdoptedIdeas] = useState<Set<string>>(new Set())
 
   if (!state) return null
 
@@ -174,10 +175,24 @@ export const PrdConfirmDialog: React.FC = () => {
     setAdjustOpen(false)
     setAdjustText('')
     setSubmitting(false)
+    setAdoptedIdeas(new Set())
     clearConfirm(null)
   }
 
-  const sendMessage = async (content: string, selectedOptionId: string): Promise<void> => {
+  const toggleIdea = (label: string): void => {
+    setAdoptedIdeas((previous) => {
+      const next = new Set(previous)
+      if (next.has(label)) next.delete(label)
+      else next.add(label)
+      return next
+    })
+  }
+
+  const sendMessage = async (
+    content: string,
+    selectedOptionId: string,
+    adoptedIdeaList?: string[],
+  ): Promise<void> => {
     const api = window.electronAPI
     if (!api?.agent?.sendMessage || submitting) return
     setSubmitting(true)
@@ -193,7 +208,11 @@ export const PrdConfirmDialog: React.FC = () => {
         content,
         mode: mode ?? 'quick',
         current_stage: stage,
-        metadata: { source: 'card_option', selected_option_id: selectedOptionId },
+        metadata: {
+          source: 'card_option',
+          selected_option_id: selectedOptionId,
+          ...(adoptedIdeaList && adoptedIdeaList.length > 0 ? { adopted_ideas: adoptedIdeaList } : {}),
+        },
       })
     } catch (error) {
       console.error('[prd-confirm] 发送异常:', error)
@@ -201,7 +220,11 @@ export const PrdConfirmDialog: React.FC = () => {
   }
 
   const submitConfirm = (): void => {
-    void sendMessage('确认这份 PRD，开始画草图。', 'prd_confirm_confirm')
+    void sendMessage(
+      '确认这份 PRD，开始画草图。',
+      'prd_confirm_confirm',
+      adoptedIdeas.size > 0 ? [...adoptedIdeas] : undefined,
+    )
   }
 
   const submitDismiss = (): void => {
@@ -310,6 +333,53 @@ export const PrdConfirmDialog: React.FC = () => {
                 <div key={entry}>· {entry}</div>
               ))}
             </div>
+          </div>
+        ) : null}
+
+        {/* 灵感参考（2026-08-29，市调想法可勾选采纳并入 PRD；空段隐藏） */}
+        {state.ideas.length > 0 ? (
+          <div data-ai-id="prd-confirm-ideas">
+            <h3 style={sectionTitleStyle}>灵感参考（市面上的做法）</h3>
+            <p style={{ margin: '4px 0 8px', fontSize: 12, color: 'var(--color-text-secondary, #5b6472)' }}>
+              看到想要的方向就勾上，确认后会并入这份 PRD 一起做；不勾就仅作参考。
+            </p>
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {state.ideas.map((idea) => {
+                const adopted = adoptedIdeas.has(idea.label)
+                return (
+                  <li key={idea.label}>
+                    <label
+                      data-ai-id={`prd-confirm-idea-${idea.label.slice(0, 8)}`}
+                      style={{
+                        display: 'flex',
+                        gap: 10,
+                        alignItems: 'flex-start',
+                        padding: '8px 12px',
+                        borderRadius: 'var(--radius-sm)',
+                        border: adopted
+                          ? '1px solid var(--color-primary, #4f6ef7)'
+                          : '1px dashed var(--color-border, #e2e6ee)',
+                        background: adopted ? 'var(--color-bg-subtle, #f6f8fb)' : 'transparent',
+                        cursor: 'pointer',
+                        fontSize: 13,
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      <input type="checkbox" checked={adopted} onChange={() => toggleIdea(idea.label)} style={{ marginTop: 2 }} />
+                      <span>
+                        <strong style={{ fontWeight: 600 }}>{idea.label}</strong>
+                        {idea.note && <span style={{ color: 'var(--color-text-secondary, #5b6472)' }}> — {idea.note}</span>}
+                        {idea.source && (
+                          <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--color-text-muted, #8a93a5)' }} title={`来源：${idea.source}`}>
+                            {idea.source}
+                          </span>
+                        )}
+                      </span>
+                    </label>
+                  </li>
+                )
+              })}
+            </ul>
           </div>
         ) : null}
 

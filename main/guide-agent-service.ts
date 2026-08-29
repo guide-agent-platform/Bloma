@@ -876,10 +876,12 @@ const RESEARCH_IDEA_SYSTEM_PROMPT = [
  * 市调想法提炼（2026-08-29 灵感参考改造，用户拍板「向导整理提供给用户看、让他选择要不要」）：
  * 优先 LLM 把搜索结果提炼成玩法短句；失败/无模型/无结果降级用原始条目
  * （title 当 label、snippet 截断当 note）——零 LLM 也保证想法区可用。
+ * 查询参数取最小面（query/env/signal/sessionId），需求确认弹窗（GuideModelOptions）
+ * 与 PRD 确认卡（runPrdPipeline 只有裸 query/env）两处调用方都能供给。
  */
 async function distillResearchIdeas(
   research: MarketResearch,
-  model: GuideModelOptions,
+  opts: { query: SDKQuery; env?: Record<string, string>; signal?: AbortSignal; sessionId?: string },
 ): Promise<ResearchIdea[]> {
   if (!research.available || research.results.length === 0) return []
   // 兑底：原始条目直接当想法（LLM 失败时用户仍能看到并勾选）
@@ -890,10 +892,10 @@ async function distillResearchIdeas(
   }))
   try {
     let accumulated = ''
-    const stream = model.query(`【调研结果】\n${research.summary}`, {
-      env: model.env,
-      signal: model.signal,
-      sessionId: model.sessionId,
+    const stream = opts.query(`【调研结果】\n${research.summary}`, {
+      env: opts.env ?? {},
+      signal: opts.signal ?? new AbortController().signal,
+      sessionId: opts.sessionId ?? '',
       history: [{ role: 'system', content: RESEARCH_IDEA_SYSTEM_PROMPT }],
       maxTokens: 800,
     })
@@ -1075,6 +1077,24 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
     if (aborted()) return { started: true, prd_written: prdWritten }
     publish(makeGuideEvent(eventInput, 'message_delta', { text: reviewPassedCopy }))
     publish(makeGuideEvent(eventInput, 'message_completed', { subtype: 'success' }))
+    // 市调想法（2026-08-29 灵感参考，用户拍板「提供想法、让他选择要不要」）：收敛链的
+    // 过目点是四段式确认卡——市调+提炼挂在此处，点选收敛/让渡/generate_sketch 等
+    // 所有入口都能看到想法区（此前只挂需求确认弹窗，点选回流失败降级走收敛链时
+    // 用户完全看不到市调）。市调失败/无结果 → ideas 空，卡面不显示想法区。
+    let reviewIdeas: ResearchIdea[] = []
+    try {
+      const research = await researchMarketSimilar([
+        backplaneForReview.requirements[0]?.description ?? backplaneForReview.name,
+      ].filter((query) => query.trim().length > 0))
+      reviewIdeas = await distillResearchIdeas(research, {
+        query: pending.query ?? NO_QUERY_FALLBACK,
+        env: reviewEnv,
+        signal,
+        sessionId: pending.session_id,
+      })
+    } catch {
+      // 市调/提炼是增强不是依赖：失败不阻断确认卡
+    }
     publishPrdConfirmCard({
       input: {
         request_id: pending.request_id,
@@ -1087,6 +1107,7 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
       requirements,
       query: pending.query ?? NO_QUERY_FALLBACK,
       publish,
+      ideas: reviewIdeas,
     })
     return { started: true, prd_written: prdWritten }
   } else {

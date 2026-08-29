@@ -165,6 +165,8 @@ export interface PrdConfirmState {
   constraints: string[]
   /** 完整 PRD 视图默认展开（longterm） */
   expanded: boolean
+  /** 市调提炼想法（2026-08-29 灵感参考）：确认时可勾选采纳并入 PRD */
+  ideas: ResearchIdea[]
 }
 
 export const prdConfirmFamily = atomFamily((_sessionId: string) => atom<PrdConfirmState | null>(null))
@@ -333,6 +335,7 @@ export function setupGlobalAgentListeners(): () => void {
           assumptions?: unknown
           constraints?: unknown
           expanded?: unknown
+          ideas?: unknown
         }
         const stringList = (value: unknown): string[] =>
           Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
@@ -358,6 +361,15 @@ export function setupGlobalAgentListeners(): () => void {
           assumptions: stringList(prdPayload.assumptions),
           constraints: stringList(prdPayload.constraints),
           expanded: prdPayload.expanded === true,
+          ideas: Array.isArray(prdPayload.ideas)
+            ? (prdPayload.ideas as Array<{ label?: unknown; note?: unknown; source?: unknown }>).filter(
+                (item) => typeof item?.label === 'string' && item.label.trim().length > 0,
+              ).map((item) => ({
+                label: item.label as string,
+                note: typeof item.note === 'string' ? item.note : '',
+                source: typeof item.source === 'string' ? item.source : '',
+              }))
+            : [],
         })
       }
     }

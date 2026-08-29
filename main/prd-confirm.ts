@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import type { AgentEvent, AgentSendMessageInput } from '../shared/types'
+import type { AgentEvent, AgentSendMessageInput, ResearchIdea } from '../shared/types'
 import { recordDecision } from './decision-log'
-import { markPrdUserConfirmed } from './document-engine'
+import { appendPrdRequirements, markPrdUserConfirmed } from './document-engine'
 import { runSketchTask } from './programming-orchestrator'
 import type { PrdBackplane } from './sketch-engine'
 import { requirementAssertions, requirementPriority, requirementStory } from './sketch-engine'
@@ -35,6 +35,8 @@ interface PendingPrdConfirm {
   mode: AgentSendMessageInput['mode']
   channel_id?: string
   requirements: Array<{ id: string; description: string }>
+  /** 市调提炼想法（2026-08-29 灵感参考）：确认时勾选采纳并入 PRD */
+  ideas: ResearchIdea[]
   query: SDKQuery
   publish: (event: AgentEvent) => void
 }
@@ -62,11 +64,14 @@ export function publishPrdConfirmCard(opts: {
   requirements: Array<{ id: string; description: string }>
   query: SDKQuery
   publish: (event: AgentEvent) => void
+  /** 市调提炼想法（2026-08-29 灵感参考）：卡面可勾选采纳 */
+  ideas?: ResearchIdea[]
   /** 审查被用户 override 后转入确认门时携带：如实标注「已忽略 N 个审查问题」，
    *  卡片 title 同步变体（不再自称「已通过裁判审查」——诚实披露）。 */
   reviewNote?: string
 }): void {
   const { input, backplane, reviewNote } = opts
+  const ideas = opts.ideas ?? []
   pendingPrdConfirms.set(input.project_id, {
     request_id: input.request_id,
     session_id: input.session_id,
@@ -74,6 +79,7 @@ export function publishPrdConfirmCard(opts: {
     mode: input.mode,
     channel_id: input.channel_id,
     requirements: opts.requirements,
+    ideas,
     query: opts.query,
     publish: opts.publish,
   })
@@ -113,6 +119,7 @@ export function publishPrdConfirmCard(opts: {
       assumptions: backplane.assumptions ?? [],
       constraints: backplane.constraints ?? [],
       expanded: input.mode === 'longterm',
+      ideas,
     },
     created_at: new Date().toISOString(),
   } as AgentEvent)
@@ -137,10 +144,32 @@ export function resolvePrdConfirmCardAnswer(
   return 'adjust'
 }
 
-/** 用户确认：user_confirmed_at 落盘（失败不阻断）→ 决策留痕 → 开草图。 */
+/** 用户确认：勾选采纳的市调想法先并入 PRD（盘上+待决清单）→ user_confirmed_at 落盘
+ * （失败不阻断）→ 决策留痕 → 开草图（2026-08-29 灵感参考：四段式卡同样可采纳想法）。 */
 export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): Promise<boolean> {
   const pending = takePendingPrdConfirm(input.project_id)
   if (!pending) return false
+  // 勾选采纳：只认 pending 里真实存在的 label（防篡改），去重后并入
+  const adopted = (input.metadata?.adopted_ideas ?? [])
+    .filter((label) => pending.ideas.some((idea) => idea.label === label))
+  let sketchRequirements = pending.requirements
+  if (adopted.length > 0) {
+    const additions = adopted.map((label, index) => ({
+      id: `F-${String(pending.requirements.length + index + 1).padStart(3, '0')}`,
+      description: `参考市面做法：${label.replace(/\s+/g, ' ').trim()}`,
+      origin: 'user' as const,
+    }))
+    const updatedBackplane = appendPrdRequirements(input.project_id, additions)
+    if (updatedBackplane) {
+      sketchRequirements = updatedBackplane.requirements.map((item) => ({
+        id: item.id,
+        description: item.description,
+      }))
+    } else {
+      sketchRequirements = [...pending.requirements, ...additions]
+      console.error('[prd-confirm] 采纳想法写入 prd.json 失败（缺失/损坏），仅并入草图任务清单')
+    }
+  }
   const confirmed = markPrdUserConfirmed(input.project_id)
   if (!confirmed) console.error('[prd-confirm] user_confirmed_at 落盘失败（prd.json 缺失/损坏），继续开草图')
   recordDecision({
@@ -152,10 +181,16 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
       why: confirmed
         ? `用户在确认卡选择「确认无误」，user_confirmed_at=${confirmed.user_confirmed_at}`
         : '用户在确认卡选择「确认无误」（时间戳落盘失败，决策仍留痕）',
-      detail: confirmed?.user_confirmed_at ? { user_confirmed_at: confirmed.user_confirmed_at } : {},
+      detail: {
+        ...(confirmed?.user_confirmed_at ? { user_confirmed_at: confirmed.user_confirmed_at } : {}),
+        ...(adopted.length > 0 ? { adopted_ideas: adopted } : {}),
+      },
     },
   })
-  const ack = '已确认，按这份 PRD 开始画草图。'
+  const ack =
+    adopted.length > 0
+      ? `已确认，按这份 PRD（含采纳的 ${adopted.length} 条市调想法）开始画草图。`
+      : '已确认，按这份 PRD 开始画草图。'
   pending.publish(makeConfirmEvent(pending, 'message_delta', { text: ack }))
   pending.publish(makeConfirmEvent(pending, 'message_completed', { subtype: 'success' }))
   await runSketchTask({
@@ -164,7 +199,7 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
     project_id: pending.project_id,
     mode: pending.mode,
     prompt: '按确认的需求清单生成草图',
-    requirements: pending.requirements,
+    requirements: sketchRequirements,
     channel_id: pending.channel_id,
     query: pending.query,
   })

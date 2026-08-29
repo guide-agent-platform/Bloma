@@ -394,6 +394,44 @@ export function isPrdUserConfirmed(projectId: string): boolean {
   }
 }
 
+/** 向盘上 prd.json 追加功能项（2026-08-29 灵感参考：PRD 确认卡勾选采纳市调想法）。
+ * 读-改-写保留全部既有字段（含 user_confirmed_at/status 等）；失败返回 null 不抛错。 */
+export function appendPrdRequirements(
+  projectId: string,
+  items: Array<{ id: string; description: string; origin?: 'user' | 'guide' }>,
+): PrdBackplane | null {
+  try {
+    const project = findProject(projectId)
+    const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+    const path = join(dir, 'prd.json')
+    if (!existsSync(path)) return null
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as PrdBackplane
+    if (!parsed || !Array.isArray(parsed.requirements)) return null
+    const existingIds = new Set(parsed.requirements.map((item) => item.id))
+    const existingDescriptions = new Set(
+      parsed.requirements.map((item) => item.description.replace(/\s+/g, ' ').trim()),
+    )
+    const additions = items.filter(
+      (item) =>
+        item.description.trim().length > 0 &&
+        !existingIds.has(item.id) &&
+        !existingDescriptions.has(item.description.replace(/\s+/g, ' ').trim()),
+    )
+    if (additions.length === 0) return parsed
+    const updated: PrdBackplane = {
+      ...parsed,
+      requirements: [...parsed.requirements, ...additions.map((item) => ({
+        ...item,
+        ...(item.origin ? { origin: item.origin } : {}),
+      }))],
+    }
+    writeFileSync(path, renderPrdJson(updated), 'utf8')
+    return updated
+  } catch {
+    return null
+  }
+}
+
 function renderPrdJson(backplane: PrdBackplane): string {
   return `${JSON.stringify(backplane, null, 2)}\n`
 }

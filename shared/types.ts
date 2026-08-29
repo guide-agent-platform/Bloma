@@ -571,6 +571,8 @@ export interface AgentSendMessageInput extends RequestEnvelope {
   metadata?: {
     source: 'chat' | 'card_option' | 'system_resume'
     selected_option_id?: string
+    /** PRD 确认卡 confirm 时勾选采纳的市调想法（2026-08-29 灵感参考，四段式卡同样可采纳） */
+    adopted_ideas?: string[]
   }
 }
 
