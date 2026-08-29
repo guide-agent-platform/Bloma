@@ -14,6 +14,7 @@ vi.mock('../../main/platform-services', () => ({
 }))
 vi.mock('../../main/guide-research', () => ({
   // 市调在单测中固定降级（不打真实网络）；弹窗流程可用性由 guide-research 专属测试覆盖
+    normalizeResearchQuery: (q: string) => q,
   researchMarketSimilar: vi.fn(async () => ({ available: false, queries: [], results: [], summary: '' })),
 }))
 vi.mock('../../main/project-service', () => ({

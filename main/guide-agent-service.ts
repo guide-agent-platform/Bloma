@@ -6,7 +6,7 @@ import { routeDialogue, type ClarificationOption } from './dialogue-router'
 import { loadPromptOverride } from './prompt-config'
 import { parseDecisionText, recordDecision } from './decision-log'
 import { syncDocuments } from './document-engine'
-import { researchMarketSimilar, type MarketResearch } from './guide-research'
+import { researchMarketSimilar, normalizeResearchQuery, type MarketResearch } from './guide-research'
 import {
   PRD_REVIEW_OPTION_OVERRIDE,
   PRD_REVIEW_OPTION_SUPPLEMENT,
@@ -79,7 +79,7 @@ export const DEFAULT_GUIDE_SYSTEM_PROMPT = `你是「向导 Agent」，一位经
 - requirements 1~5 条；id 用小写字母+连字符（如 daily-tool）。
 - requirements 每条标 origin："user"=直接来自用户原话/点选；"guide"=你自主补充/具体化的。补充不是越少越好——把需求真正闭环所需的功能（如查看/管理/筛选路径）补齐是你的职责，但每条补充都要经得起「为什么需要它」的追问。
 - 用户说的约束（「不含登录」「必须离线可用」这类必须/不要类要求）不要写成 requirements 功能项——平台会单独持久化并注入。
-- research_queries 用用户能听懂的主题词，不要技术术语。
+- research_queries 是市调检索词：要具体到产品形态+功能名词（如「记账 App 收入支出」「家庭记账 月度报表」），能直接搜到真实产品；不要口语、不要泛指词（“做一个”“类似的”“推荐”），最多 2 条。
 - 只输出 JSON，其余一律不要。`
 
 type GuideParsed =
@@ -896,9 +896,12 @@ async function startRequirementConfirmFlow(
   publish(makeGuideEvent(input, 'stage_changed', { stage: 'blocked_for_user_decision' }))
 
   // 市调：失败降级 available:false，弹窗照常出（增强不是依赖）
-  let research: MarketResearch = { available: false, queries: researchQueries, results: [], summary: '' }
+  // 顾问式（2026-08-30）：需求+候选词 → LLM 改写聚焦查询词（失败降级候选词/需求清洗）
+  const demandText = requirements.map((item) => item.description).join('；').slice(0, 200)
+  const marketQueries = await buildResearchQueries(demandText, researchQueries, model)
+  let research: MarketResearch = { available: false, queries: marketQueries, results: [], summary: '' }
   try {
-    research = await researchMarketSimilar(researchQueries)
+    research = await researchMarketSimilar(marketQueries)
   } catch {
     // researchMarketSimilar 内部已降级，此处双保险
   }
@@ -921,7 +924,7 @@ async function startRequirementConfirmFlow(
     },
   })
 
-  const ideas = await distillResearchIdeas(research, model)
+  const ideas = await distillResearchIdeas(research, { ...model, demand: demandText })
 
   pendingRequirementConfirms.set(input.project_id, {
     request_id: input.request_id,
@@ -952,8 +955,9 @@ async function startRequirementConfirmFlow(
 
 /** 市调想法提炼提示词：把搜索结果提炼成可勾选采纳的「市面上的做法」短句。 */
 const RESEARCH_IDEA_SYSTEM_PROMPT = [
-  '你是产品向导。把市面上的类似产品调研结果提炼成 3~5 条「市面上的做法/玩法」供用户参考勾选。',
+  '你是产品向导。根据【用户需求】，把调研结果里与之强相关的市面做法提炼成 3~5 条「市面上的做法/玩法」供用户参考勾选。',
   '每条：label（≤20 字玩法短句，如「虚拟键盘实时弹奏」）、note（≤40 字要点说明）、source（来源域名）。',
+  '相关性是硬标准：与用户需求无关的搜索结果直接忽略，不要提炼；宁可少给，绝不硬凑不相关的做法。',
   '只提炼搜索结果里真实出现的做法，不臆造；结果不足 3 条时有多少给多少。',
   '输出严格 JSON：{"ideas":[{"label":"…","note":"…","source":"…"}]}，不要输出其他内容。',
 ].join('\n')
@@ -967,18 +971,27 @@ const RESEARCH_IDEA_SYSTEM_PROMPT = [
  */
 async function distillResearchIdeas(
   research: MarketResearch,
-  opts: { query: SDKQuery; env?: Record<string, string>; signal?: AbortSignal; sessionId?: string },
+  opts: { query: SDKQuery; env?: Record<string, string>; signal?: AbortSignal; sessionId?: string; demand?: string },
 ): Promise<ResearchIdea[]> {
   if (!research.available || research.results.length === 0) return []
-  // 兑底：原始条目直接当想法（LLM 失败时用户仍能看到并勾选）
-  const fallback = research.results.slice(0, 4).map((result) => ({
-    label: result.title.replace(/\s+/g, ' ').trim().slice(0, 20),
-    note: result.snippet.replace(/\s+/g, ' ').trim().slice(0, 40),
-    source: safeHostname(result.url),
-  }))
+  const demand = opts.demand?.trim() ?? ''
+  // 兑底：原始条目直接当想法（LLM 失败时用户仍能看到并勾选）。
+  // 温和收紧（2026-08-30）：只丢明显噪音标题（搜索结果与查询词天然相关，查询构造已从源头锚定需求）
+  const fallback = research.results
+    .slice(0, 4)
+    .map((result) => ({
+      label: result.title.replace(/\s+/g, ' ').trim().slice(0, 20),
+      note: result.snippet.replace(/\s+/g, ' ').trim().slice(0, 40),
+      source: safeHostname(result.url),
+    }))
+    .filter((idea) => {
+      if (!idea.label || idea.label.length < 4) return false
+      return !/^(官网|首页|下载|登录|注册|免费|教程|视频)/.test(idea.label)
+    })
   try {
     let accumulated = ''
-    const stream = opts.query(`【调研结果】\n${research.summary}`, {
+    const demandBlock = demand ? `【用户需求】\n${demand}\n\n` : ''
+    const stream = opts.query(`${demandBlock}【调研结果】\n${research.summary}`, {
       env: opts.env ?? {},
       signal: opts.signal ?? new AbortController().signal,
       sessionId: opts.sessionId ?? '',
@@ -1018,6 +1031,63 @@ function safeHostname(url: string): string {
     return new URL(url).hostname.replace(/^www\./, '')
   } catch {
     return ''
+  }
+}
+
+/** 市调查询词构造提示词（顾问式，2026-08-30）：需求理解 → 具体可检索查询词。 */
+const RESEARCH_QUERY_SYSTEM_PROMPT = [
+  '你是产品调研员。把【用户需求】和候选词改写成 2 个具体可检索的市调查询词。',
+  '要求：查询词要具体到产品形态+核心功能名词（如「复音电子琴 教学 音色」），能直接搜到真实产品；',
+  '不要口语、不要泛指词（“做一个”“类似的”“推荐”）；两个查询词覆盖不同侧面（功能/同类产品/目标人群）。',
+  '候选词质量差也没关系，重写即可。',
+  '输出严格 JSON：{"queries":["…","…"]}，不要输出其他内容。',
+].join('\n')
+
+/**
+ * 顾问式查询构造：LLM 把需求+候选词改写为聚焦查询词；失败/无需求降级为候选词清洗 + 需求清洗（保证非空）。
+ * 与 distill 同款降级纪律：市调是增强不是依赖，查询构造失败不影响弹窗。
+ */
+async function buildResearchQueries(
+  demand: string,
+  hints: string[],
+  opts: { query: SDKQuery; env?: Record<string, string>; signal?: AbortSignal; sessionId?: string },
+): Promise<string[]> {
+  const demandText = demand.trim()
+  // 规则兑底：候选词优先（模型输出通常比需求原文更可检索），需求清洗兜底
+  const fallback = [...hints.map(normalizeResearchQuery), normalizeResearchQuery(demandText)]
+    .filter((q) => q.length > 0)
+    .slice(0, 2)
+  if (!demandText) return fallback
+  try {
+    let accumulated = ''
+    const hintBlock = hints.length > 0 ? `\n候选词：${hints.join(' / ')}` : ''
+    const stream = opts.query(`【用户需求】\n${demandText}${hintBlock}`, {
+      env: opts.env ?? {},
+      signal: opts.signal ?? new AbortController().signal,
+      sessionId: opts.sessionId ?? '',
+      history: [{ role: 'system', content: RESEARCH_QUERY_SYSTEM_PROMPT }],
+      maxTokens: 200,
+    })
+    for await (const message of stream) {
+      if (message.type === 'assistant' && message.message) {
+        for (const block of message.message.content) {
+          if (block.type === 'text') accumulated += block.text
+        }
+      }
+    }
+    const start = accumulated.indexOf('{')
+    const end = accumulated.lastIndexOf('}')
+    if (start < 0 || end <= start) return fallback
+    const parsed = JSON.parse(accumulated.slice(start, end + 1)) as { queries?: Array<unknown> }
+    if (!Array.isArray(parsed.queries)) return fallback
+    const queries = parsed.queries
+      .filter((q): q is string => typeof q === 'string' && q.trim().length > 0)
+      .map((q) => normalizeResearchQuery(q))
+      .filter((q) => q.length > 0)
+      .slice(0, 2)
+    return queries.length > 0 ? queries : fallback
+  } catch {
+    return fallback
   }
 }
 
@@ -1171,14 +1241,21 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
     // 用户完全看不到市调）。市调失败/无结果 → ideas 空，卡面不显示想法区。
     let reviewIdeas: ResearchIdea[] = []
     try {
-      const research = await researchMarketSimilar([
-        backplaneForReview.requirements[0]?.description ?? backplaneForReview.name,
-      ].filter((query) => query.trim().length > 0))
+      // 顾问式（2026-08-30）：需求名+首条描述 → LLM 改写聚焦查询词（失败降级需求清洗）
+      const demandText = `${backplaneForReview.name}：${backplaneForReview.requirements[0]?.description ?? ''}`.slice(0, 200)
+      const marketQueries = await buildResearchQueries(demandText, [], {
+        query: pending.query ?? NO_QUERY_FALLBACK,
+        env: reviewEnv,
+        signal,
+        sessionId: pending.session_id,
+      })
+      const research = await researchMarketSimilar(marketQueries)
       reviewIdeas = await distillResearchIdeas(research, {
         query: pending.query ?? NO_QUERY_FALLBACK,
         env: reviewEnv,
         signal,
         sessionId: pending.session_id,
+        demand: demandText,
       })
     } catch {
       // 市调/提炼是增强不是依赖：失败不阻断确认卡

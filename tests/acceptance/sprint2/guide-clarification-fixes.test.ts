@@ -23,6 +23,7 @@ vi.mock('../../../main/channel-manager', async (importOriginal) => {
 })
 vi.mock('../../../main/guide-research', () => ({
   // 市调在验收中固定降级（不打真实网络）；DDG 真实链路由线上验证覆盖
+    normalizeResearchQuery: (q: string) => q,
   researchMarketSimilar: vi.fn(async (queries: string[]) => ({
     available: false,
     queries,

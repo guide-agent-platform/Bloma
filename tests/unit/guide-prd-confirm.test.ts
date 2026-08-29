@@ -46,6 +46,7 @@ vi.mock('../../main/session-service', async (importOriginal) => {
 })
 vi.mock('../../main/decision-log', () => ({ recordDecision: vi.fn(), parseDecisionText: vi.fn() }))
 vi.mock('../../main/guide-research', () => ({
+    normalizeResearchQuery: (q: string) => q,
   researchMarketSimilar: vi.fn(async (queries: string[]) => ({ available: false, queries, results: [], summary: '' })),
 }))
 vi.mock('../../main/runtime-fallback', () => ({

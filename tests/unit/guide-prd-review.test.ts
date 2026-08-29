@@ -39,6 +39,7 @@ vi.mock('../../main/session-service', async (importOriginal) => {
 })
 vi.mock('../../main/decision-log', () => ({ recordDecision: vi.fn(), parseDecisionText: vi.fn() }))
 vi.mock('../../main/guide-research', () => ({
+    normalizeResearchQuery: (q: string) => q,
   researchMarketSimilar: vi.fn(async (queries: string[]) => ({ available: false, queries, results: [], summary: '' })),
 }))
 vi.mock('../../main/requirement-normalizer', () => ({
@@ -96,16 +97,22 @@ function scriptedQuery(reviewResponses: string[]): { query: SDKQuery; reviewCall
   let confirmServed = false
   let reviewIndex = 0
   const query: SDKQuery = async function* (prompt: string): AsyncGenerator<SDKMessage> {
-    if (prompt.includes('confirm_requirements') || (!confirmServed && !prompt.includes('六维'))) {
+    if (!confirmServed && !prompt.includes('六维')) {
       confirmServed = true
       yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: confirmJson }] } }
       yield { type: 'result', subtype: 'success' }
       return
     }
-    reviewCalls.push(prompt)
-    const response = reviewResponses[Math.min(reviewIndex, reviewResponses.length - 1)] ?? ''
-    reviewIndex += 1
-    yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: response }] } }
+    if (prompt.includes('六维')) {
+      reviewCalls.push(prompt)
+      const response = reviewResponses[Math.min(reviewIndex, reviewResponses.length - 1)] ?? ''
+      reviewIndex += 1
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: response }] } }
+      yield { type: 'result', subtype: 'success' }
+      return
+    }
+    // 其他调用（顾问式查询构造/想法提炼/PRD 前移等）：返回空 JSON 让调用方走规则降级，不计入审查
+    yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '{}' }] } }
     yield { type: 'result', subtype: 'success' }
   }
   return { query, reviewCalls }

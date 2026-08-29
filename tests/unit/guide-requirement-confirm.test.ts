@@ -33,6 +33,7 @@ vi.mock('../../main/session-service', async (importOriginal) => {
 })
 vi.mock('../../main/decision-log', () => ({ recordDecision: vi.fn(), parseDecisionText: vi.fn() }))
 vi.mock('../../main/guide-research', () => ({
+    normalizeResearchQuery: (q: string) => q,
   researchMarketSimilar: vi.fn(async (queries: string[]) => ({
     available: true,
     queries,
@@ -142,8 +143,8 @@ describe('需求确认弹窗（confirm_requirements）', () => {
     await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(), undefined, persistSystem)
 
     expect(runSketchTask).not.toHaveBeenCalled()
-    // 市调按模型的 research_queries 执行（增强注入弹窗）
-    expect(researchMarketSimilar).toHaveBeenCalledWith(['记账 应用 推荐'])
+    // 市调按模型的 research_queries 执行（增强注入弹窗）；查询构造失败时候选词优先进入市调
+    expect(researchMarketSimilar).toHaveBeenCalledWith(expect.arrayContaining(['记账 应用 推荐']))
     const confirmEvent = events.find((event) => event.type === 'user_decision_required')
     expect(confirmEvent?.payload.kind).toBe('requirement_confirm')
     expect(confirmEvent?.payload.requirements).toHaveLength(2)
