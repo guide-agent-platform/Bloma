@@ -148,6 +148,11 @@ const sessionMessageQueue = new SessionMessageQueue({
   // 渲染端「发送失败可重试」气泡后续档接入
   onDropped: (sessionId, entry, reason) => {
     console.warn(`[message-queue] 排队消息派发放弃（session=${sessionId} msg=${entry.queueMessageId} reason=${reason}）`)
+    // queue_dropped 渲染端红泡（onDropped 气泡，r79）：安全网放弃派发 → 渲染端告知用户（非静默）
+    const input = entry.input as AgentSendMessageInput | undefined
+    if (input) {
+      streamPublisher(makeEvent(input, 'queue_dropped', { queue_message_id: entry.queueMessageId, reason }))
+    }
   },
   startRun: async (sessionId, entry) => {
     const input = entry.input as AgentSendMessageInput | undefined
