@@ -76,21 +76,35 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
   const scrollPendingRef = React.useRef({ x: 0, y: 0 })
   const scrollRafRef = React.useRef<number | null>(null)
   const middleDragRef = React.useRef({ active: false, lastX: 0, lastY: 0 })
-  // 弹窗打开后预览的累计滚动量，用于让标记/弹窗跟随内容滚动，保持锚定在点选元素上
+  // 点选时 iframe 的滚动位置（锚点）：弹窗/标记按「当前滚动 - 锚点」反向偏移，跟随内容滚动、相对元素位置不变
+  const anchorScrollRef = React.useRef({ x: 0, y: 0 })
+  // 最近一次从 scrollPreview 返回的 iframe 实际滚动位置（用于点击瞬间兑底锚点）
+  const iframeScrollRef = React.useRef({ x: 0, y: 0 })
+  // 滚动请求序号：只应用最新一次结果，避免并发 IPC 乱序返回导致 scrollOffset 回跳
+  const scrollSeqRef = React.useRef(0)
   const [scrollOffset, setScrollOffset] = React.useState({ x: 0, y: 0 })
 
-  const flushPreviewScroll = React.useCallback(() => {
+  const flushPreviewScroll = React.useCallback(async () => {
     scrollRafRef.current = null
     const { x, y } = scrollPendingRef.current
     scrollPendingRef.current = { x: 0, y: 0 }
     if (x === 0 && y === 0) return
-    void window.electronAPI?.dom?.scrollPreview?.({
+    const seq = ++scrollSeqRef.current
+    const result = await window.electronAPI?.dom?.scrollPreview?.({
       request_id: crypto.randomUUID(),
       delta_x: x,
       delta_y: y,
     })
-    // 同步累计滚动量，驱动标记/弹窗跟随内容滚动（保持锚定在点选元素上）
-    setScrollOffset((prev) => ({ x: prev.x + x, y: prev.y + y }))
+    if (seq !== scrollSeqRef.current) return
+    // 用主进程返回的实际滚动位置计算偏移（而非滚轮 delta 猜测），
+    // 到边界时 scrollBy 不再滚动，scrollOffset 也不再漂移。
+    if (result?.ok && result.data?.scrolled) {
+      iframeScrollRef.current = { x: result.data.scroll_x, y: result.data.scroll_y }
+      setScrollOffset({
+        x: result.data.scroll_x - anchorScrollRef.current.x,
+        y: result.data.scroll_y - anchorScrollRef.current.y,
+      })
+    }
   }, [])
 
   const queuePreviewScroll = React.useCallback(
@@ -295,7 +309,8 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
                   cursor: `url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><circle cx='12' cy='12' r='10' fill='none' stroke='%23DC2626' stroke-width='2' stroke-dasharray='4 2'/></svg>") 12 12, crosshair`,
                 }}
                 onWheel={(e) => {
-                  // 滚轮滚动转发：deltaMode 0=像素 / 1=行 / 2=页，统一换算成像素后转给预览
+                  // 滚轮滚动转发：deltaMode 0=像素 / 1=行 / 2=页，统一换算成像素后转给预览；
+                  // 弹窗/标记经 scrollOffset 反向偏移跟随滚动，滚轮在纠错模式下始终正常工作。
                   const factor = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? window.innerHeight : 1
                   queuePreviewScroll(e.deltaX * factor, e.deltaY * factor)
                 }}
@@ -323,7 +338,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
                   middleDragRef.current.active = false
                 }}
                 onClick={(e) => {
-                  if (correctionActive) return
+                  // 连续点选：弹窗已打开时再点别处，直接重新锚定弹窗位置，无需先关闭（修复「只能点选一次」）
                   const stage = e.currentTarget.parentElement
                   if (!stage) return
                   const rect = stage.getBoundingClientRect()
@@ -332,8 +347,21 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
                   setCorrectionNote('')
                   setCorrectionDomContext(null)
                   setCorrectionActive(true)
-                  // 重新点选时归零滚动偏移，标记从当前预览位置开始锚定
+                  // 锚定：先用最近已知的 iframe 滚动位置归零偏移，再异步读一次精确 scrollY 校准
+                  // （覆盖「进入纠错模式前已用原生滚动滚过 iframe」的情况）
+                  anchorScrollRef.current = iframeScrollRef.current
                   setScrollOffset({ x: 0, y: 0 })
+                  void window.electronAPI?.dom?.scrollPreview?.({
+                    request_id: crypto.randomUUID(),
+                    delta_x: 0,
+                    delta_y: 0,
+                  }).then((r) => {
+                    if (r?.ok && r.data) {
+                      anchorScrollRef.current = { x: r.data.scroll_x, y: r.data.scroll_y }
+                      iframeScrollRef.current = anchorScrollRef.current
+                      setScrollOffset({ x: 0, y: 0 })
+                    }
+                  })
                   // R-CORR-01：点击即收集 DOM 上下文用于高亮被选区域；异步回填，失败保持红点回退
                   if (onCollectDomContext) {
                     void onCollectDomContext(pos).then((ctx) => {
@@ -356,6 +384,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
             domContext={correctionDomContext ?? undefined}
             note={correctionNote}
             onNoteChange={setCorrectionNote}
+            onWheelScroll={(dx, dy) => queuePreviewScroll(dx, dy)}
             onSubmit={() => {
               onCorrectionSubmit({
                 position: correctionPos,
@@ -488,15 +517,17 @@ const TimeoutState: React.FC<{ onContinueWaiting?: () => void }> = ({ onContinue
 
 const CorrectionOverlay: React.FC<{
   position: { x: number; y: number }
-  /** 弹窗打开后预览的累计滚动量，标记/弹窗据此反向偏移，锚定在点选元素上 */
+  /** 点选后 iframe 的累计滚动量，弹窗/标记据此反向偏移，跟随内容滚动、相对点选元素位置不变 */
   scrollOffset: { x: number; y: number }
   domContext?: DomCollectContextResult
   note: string
   onNoteChange: (value: string) => void
+  /** 弹窗上的滚轮转发（滚动预览 iframe，与捕获层滚轮共用同一滚动链路） */
+  onWheelScroll: (dx: number, dy: number) => void
   onSubmit: () => void
   onGuess: () => void
   onClose: () => void
-}> = ({ position, scrollOffset, domContext, note, onNoteChange, onSubmit, onGuess, onClose }) => {
+}> = ({ position, scrollOffset, domContext, note, onNoteChange, onWheelScroll, onSubmit, onGuess, onClose }) => {
   const markerSize = 24
   const popoverWidth = 260
   const popoverLeft = Math.max(8, Math.min(position.x - popoverWidth / 2, typeof window !== 'undefined' ? window.innerWidth - popoverWidth - 16 : 260))
@@ -526,7 +557,16 @@ const CorrectionOverlay: React.FC<{
           animation: 'pulse-ring 1.5s ease-in-out infinite', pointerEvents: 'none', zIndex: 10,
         }} />
       )}
-      <div role="dialog" aria-modal="true" aria-label="点选纠错" style={{
+      <div role="dialog" aria-modal="true" aria-label="点选纠错"
+        onWheel={(e) => {
+          // 弹窗上的滚轮同样转发为预览滚动（弹窗在捕获层之上，不冒泡到捕获层），
+          // 阻止默认行为防止外层工作区被滚动。
+          e.preventDefault()
+          e.stopPropagation()
+          const factor = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? window.innerHeight : 1
+          onWheelScroll(e.deltaX * factor, e.deltaY * factor)
+        }}
+        style={{
         position: 'absolute', left: popoverLeft - scrollOffset.x, top: popoverTop - scrollOffset.y, width: popoverWidth,
         padding: 'var(--space-3)',
         background: 'var(--glass-bg-strong)', backdropFilter: 'blur(var(--glass-blur))', WebkitBackdropFilter: 'blur(var(--glass-blur))',
@@ -537,6 +577,7 @@ const CorrectionOverlay: React.FC<{
         <textarea
           value={note} onChange={(e) => onNoteChange(e.target.value)}
           placeholder="描述你想要怎么改（也可以不填）" rows={2} autoFocus
+          onWheel={(e) => e.stopPropagation()}
           style={{
             width: '100%', maxWidth: '100%', boxSizing: 'border-box', resize: 'none', padding: 'var(--space-2)',
             fontSize: 'var(--font-size-sm)', fontFamily: 'inherit', color: 'var(--color-text)',

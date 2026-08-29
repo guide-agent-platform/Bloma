@@ -923,6 +923,10 @@ export interface DomScrollPreviewInput extends RequestEnvelope {
 export interface DomScrollPreviewResult {
   /** 是否找到预览子帧并执行了滚动（找不到子帧时 false，前端静默忽略） */
   scrolled: boolean
+  /** 执行滚动后预览 iframe 的实际水平滚动位置（window.scrollX，CSS 像素） */
+  scroll_x: number
+  /** 执行滚动后预览 iframe 的实际垂直滚动位置（window.scrollY，CSS 像素） */
+  scroll_y: number
 }
 
 export interface ProjectUpgradeInput extends RequestEnvelope {
