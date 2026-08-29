@@ -466,6 +466,22 @@ function snapshotDocumentsDir(meta: Snapshot): string | undefined {
  * manifest 存的是冻结时的绝对路径，直接用会读错地方）；归档在而 manifest 缺失时，
  * 按已知固定文件名（prd.json/decisions.md）探测实际冻结的文件（读出事实，非补造历史）。
  */
+/**
+ * manifest 存的是冻结时的绝对路径（锚在项目 documents 目录下）。读取按「相对
+ * documents 根的相对路径」重锚定归档目录——必须保留 features/ 等合法子目录
+ * （2026-08-29 线上：basename 压平子目录导致回看 features/F-001.feature、
+ * plantuml/architecture.puml 必 DOCUMENT_NOT_FOUND，live 文档面板用完整路径不受影响）。
+ * manifest 被篡改/路径越出 documents 根时回退 basename，行为交由
+ * readSnapshotDocument 的防御校验兜底（与旧逻辑一致）。
+ */
+function reanchorRelativePath(projectId: string, absolutePath: string): string {
+  const project = findProject(projectId)
+  const documentsDir = getDocumentsDir(project.workspace_slug, project.project_id)
+  const rel = relative(resolve(documentsDir), resolve(absolutePath))
+  if (!rel || rel.startsWith('..') || isAbsolute(rel)) return basename(absolutePath)
+  return rel.split(/[\\/]/).join('/')
+}
+
 export function listSnapshotDocuments(projectId: string, snapshotId: string): SnapshotDocumentListResult {
   const meta = readSnapshotMeta(projectId, snapshotId)
   const archiveDir = snapshotDocumentsDir(meta)
@@ -478,7 +494,7 @@ export function listSnapshotDocuments(projectId: string, snapshotId: string): Sn
       document_id: entry.document_id,
       type: entry.type,
       status: entry.status,
-      file: basename(entry.path),
+      file: reanchorRelativePath(projectId, entry.path),
     }))
   if (documents.length > 0) return { snapshot_id: snapshotId, frozen: true, documents }
 
@@ -497,7 +513,8 @@ export function listSnapshotDocuments(projectId: string, snapshotId: string): Sn
 
 /**
  * 读取某快照冻结的文档内容（时间轴回看「当时的想法」）。路径安全：文件必须落在
- * 归档目录内（manifest 可能被篡改，basename 重锚定天然剥离目录穿越，仍做防御校验）。
+ * 归档目录内（manifest 可能被篡改，重锚定为归档内相对路径后仍做防御校验；
+ * 合法子目录 features/ 等由 reanchorRelativePath 保留）。
  */
 export function readSnapshotDocument(
   projectId: string,

@@ -973,7 +973,7 @@ export interface SnapshotDocumentEntry {
   document_id: string
   type: DocumentRef['type']
   status: DocumentRef['status']
-  /** 归档内文件名（manifest 存的是冻结时的绝对路径，读取按 basename 重锚定归档目录） */
+  /** 归档内相对路径（manifest 存的是冻结时的绝对路径，读取按相对 documents 根重锚定，保留 features/ 等子目录） */
   file: string
 }
 

@@ -99,6 +99,57 @@ describe('T7 snapshot document versioning', () => {
     )
   })
 
+  it('lists and reads manifest entries in subdirectories (features/) without basename flattening', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-t7-subdir-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-t7-subdir', mode: 'quick' })
+
+    // 模拟 syncDocuments(mvp_before_generation) 的真实产物：子目录文件 + manifest 登记绝对路径
+    const docsDir = getDocumentsDir(project.workspace_slug, project.project_id)
+    mkdirSync(join(docsDir, 'features'), { recursive: true })
+    const featurePath = join(docsDir, 'features', 'F-001.feature')
+    writeFileSync(featurePath, '# GWT Feature F-001 frozen\n')
+    writeFileSync(
+      join(docsDir, '.document-manifest.json'),
+      `${JSON.stringify({
+        version: 1,
+        documents: [
+          {
+            document_id: 'gwt-f001',
+            path: featurePath,
+            type: 'gwt_feature',
+            checkpoint: 'mvp_before_generation',
+            status: 'synced',
+          },
+        ],
+      }, null, 2)}\n`,
+      'utf8',
+    )
+
+    const snapshot = await createSnapshot({
+      request_id: 'req-t7-subdir-snap',
+      project_id: project.project_id,
+      kind: 'mvp',
+      summary: 'subdir',
+      include_documents: true,
+      health_status: 'healthy',
+    })
+
+    // 列表保留子目录相对路径（旧逻辑 basename 压平 → F-001.feature）
+    const listed = listSnapshotDocuments(project.project_id, snapshot.snapshot_id)
+    expect(listed.frozen).toBe(true)
+    expect(listed.documents[0]).toMatchObject({
+      document_id: 'gwt-f001',
+      type: 'gwt_feature',
+      file: 'features/F-001.feature',
+    })
+
+    // 回看读取成功（旧逻辑在此抛 DOCUMENT_NOT_FOUND，即 2026-08-29 线上主进程噪音）
+    const read = readSnapshotDocument(project.project_id, snapshot.snapshot_id, 'gwt-f001')
+    expect(read.content).toBe('# GWT Feature F-001 frozen\n')
+    expect(read.document.file).toBe('features/F-001.feature')
+  })
+
   it('rollback restores documents only when the target snapshot froze them', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-t7-rollback-'))
     process.env.PROMA_HOME = home
