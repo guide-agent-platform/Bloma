@@ -70,6 +70,8 @@ export const RequirementConfirmDialog: React.FC = () => {
   // web-reference 接线 UI 段（2026-08-28）：可选参考网页链接，confirm 时透传后端提取设计参考卡
   const [referenceUrl, setReferenceUrl] = useState('')
   const [referenceError, setReferenceError] = useState(false)
+  /** F9a（r84）：提交/发送失败内联错误条——失败不关窗，用户可重试 */
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
   // 新弹窗到达时重置本地勾选（缺省全选）；checked=null 表示「全选」
   const effectiveChecked = useMemo(() => {
@@ -120,10 +122,19 @@ export const RequirementConfirmDialog: React.FC = () => {
         requirement_ids: decision === 'confirm' ? [...effectiveChecked] : undefined,
         reference_url: trimmedReference || undefined,
       })
-      if (!result?.ok) console.error('[requirement-confirm] 提交失败:', result?.error)
+      // F9a 修复（r84）：失败不关窗——弹窗留+勾选保留+内联错误条（决定不再静默丢失）
+      if (!result?.ok) {
+        setSubmitError(`提交失败：${result?.error ?? '未知错误'}——请重试`)
+        setSubmitting(false)
+        return
+      }
     } catch (error) {
       console.error('[requirement-confirm] 提交异常:', error)
+      setSubmitError('提交失败：连接异常——请重试')
+      setSubmitting(false)
+      return
     }
+    setSubmitError(null)
     close()
   }
 
@@ -133,7 +144,7 @@ export const RequirementConfirmDialog: React.FC = () => {
     if (!api?.agent?.sendMessage || submitting || !text) return
     setSubmitting(true)
     try {
-      await api.agent.sendMessage({
+      const result = await api.agent.sendMessage({
         request_id: crypto.randomUUID(),
         session_id: state.sessionId,
         project_id: state.projectId,
@@ -142,9 +153,19 @@ export const RequirementConfirmDialog: React.FC = () => {
         current_stage: stage,
         metadata: { source: 'chat' },
       })
+      // F9a 修复（r84）：supplement 失败同样不关窗——错误条+文本保留可重发
+      if (!result?.ok) {
+        setSubmitError(`发送失败：${result?.error ?? '未知错误'}——请重试`)
+        setSubmitting(false)
+        return
+      }
     } catch (error) {
       console.error('[requirement-confirm] 补充说明发送异常:', error)
+      setSubmitError('发送失败：连接异常——请重试')
+      setSubmitting(false)
+      return
     }
+    setSubmitError(null)
     close()
   }
 
@@ -268,6 +289,26 @@ export const RequirementConfirmDialog: React.FC = () => {
             </span>
           )}
         </label>
+
+        {submitError && (
+          <div
+            data-ai-id="requirement-confirm-submit-error"
+            role="alert"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: 'var(--space-2) var(--space-3)',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: 12,
+              color: '#d64545',
+              background: '#FEF2F2',
+              border: '1px solid #FECACA',
+            }}
+          >
+            {submitError}
+          </div>
+        )}
 
         {supplementOpen ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

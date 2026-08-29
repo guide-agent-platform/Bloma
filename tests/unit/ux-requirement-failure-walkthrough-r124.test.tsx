@@ -88,26 +88,29 @@ describe('B 腿 r124：需求确认弹窗失败静默走查（F9a）', () => {
     return screen.queryByRole('dialog') === null
   }
 
-  it('[N1·confirm 失败静默] ok:false → 现状仅 console.error+close（F9a 翻转位：修复后弹窗留+错误条可见+勾选保留）', async () => {
+  it('[N1·confirm 失败·F9a 已修] ok:false → 弹窗留+错误条可见+勾选保留（可重试）', async () => {
     confirmRequirements.mockResolvedValue({ ok: false, error: 'db locked' })
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: /确认，开始做/ }))
     await waitFor(() => expect(confirmRequirements).toHaveBeenCalledTimes(1))
-    // 现状断言（修复后翻转）：弹窗关闭=决定静默丢失
-    await waitFor(() => expect(dialogGone()).toBe(true))
-    expect(screen.queryByText(/失败|出错|重试/)).toBeNull() // 零用户反馈
+    // F9a 修复：失败不关窗——弹窗留+内联错误条
+    expect(dialogGone()).toBe(false)
+    const errBar = await screen.findByTestId('requirement-confirm-submit-error')
+    expect(errBar.textContent).toContain('失败')
+    // 勾选保留：确认按钮仍可点（可重试）
+    expect(screen.getByRole('button', { name: /确认，开始做/ })).toBeTruthy()
   })
 
-  it('[N2·confirm 异常静默] throw → 同款静默关窗（翻转位同 N1）', async () => {
+  it('[N2·confirm 异常·F9a 已修] throw → 弹窗留+错误条（同 N1）', async () => {
     confirmRequirements.mockRejectedValue(new Error('ipc gone'))
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: /确认，开始做/ }))
     await waitFor(() => expect(confirmRequirements).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(dialogGone()).toBe(true))
-    expect(screen.queryByText(/失败|出错|重试/)).toBeNull()
+    expect(dialogGone()).toBe(false)
+    expect(await screen.findByTestId('requirement-confirm-submit-error')).toBeTruthy()
   })
 
-  it('[N3·补充发送失败静默] supplement ok:false → 关窗+文本丢弃（翻转位：弹窗留+错误条+文本保留）', async () => {
+  it('[N3·补充发送失败·F9a 已修] supplement ok:false → 弹窗留+错误条+文本保留（可重发）', async () => {
     sendMessage.mockResolvedValue({ ok: false, error: 'queue full' })
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: /继续补充说明/ }))
@@ -115,10 +118,13 @@ describe('B 腿 r124：需求确认弹窗失败静默走查（F9a）', () => {
     fireEvent.change(input, { target: { value: '还要支持导出 Excel' } })
     fireEvent.click(screen.getByRole('button', { name: '发送补充说明' }))
     await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(dialogGone()).toBe(true))
+    expect(dialogGone()).toBe(false)
+    const errBar = await screen.findByTestId('requirement-confirm-submit-error')
+    expect(errBar.textContent).toContain('失败')
+    expect((input as HTMLTextAreaElement).value).toBe('还要支持导出 Excel') // 文本保留可重发
   })
 
-  it('[N4·补充发送异常静默] supplement throw → 同款（翻转位同 N3）', async () => {
+  it('[N4·补充发送异常·F9a 已修] supplement throw → 弹窗留+错误条（同 N3）', async () => {
     sendMessage.mockRejectedValue(new Error('net down'))
     renderDialog()
     fireEvent.click(screen.getByRole('button', { name: /继续补充说明/ }))
@@ -126,7 +132,9 @@ describe('B 腿 r124：需求确认弹窗失败静默走查（F9a）', () => {
     fireEvent.change(input, { target: { value: '补充：界面要简洁' } })
     fireEvent.click(screen.getByRole('button', { name: '发送补充说明' }))
     await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(dialogGone()).toBe(true))
+    expect(dialogGone()).toBe(false)
+    expect(await screen.findByTestId('requirement-confirm-submit-error')).toBeTruthy()
+    expect((input as HTMLTextAreaElement).value).toBe('补充：界面要简洁')
   })
 
   it('[M1·aria/文案基线锁定] role=dialog+aria-modal+后果动词按钮（防回归，非发现）', () => {
