@@ -639,6 +639,8 @@ export interface AgentSendMessageInput extends RequestEnvelope {
     selected_option_id?: string
     /** PRD 确认卡 confirm 时勾选采纳的市调想法（2026-08-29 灵感参考，四段式卡同样可采纳） */
     adopted_ideas?: string[]
+    /** 裁判审查逐题选择题的答案（2026-08-30）：弹窗一次性回传，每题 issue_id/option_id/label */
+    review_answers?: Array<{ issue_id: string; option_id: string; label: string }>
   }
 }
 

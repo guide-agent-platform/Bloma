@@ -174,6 +174,39 @@ export const prdConfirmFamily = atomFamily((_sessionId: string) => atom<PrdConfi
 /** 无 active session 时的稳定 fallback（陷阱 10）。 */
 export const nullPrdConfirmFallback = atom<PrdConfirmState | null>(null)
 
+/**
+ * 裁判审查逐题选择题数据（prd_review 流，2026-08-30 选择题化）：最新一条
+ * kind='prd_review' 的 user_decision_required 载荷，由专用弹窗 ReviewChoicesDialog
+ * 渲染。逐题结构：每题 question + 一组可点选项；另有全局「全部交给向导决定」出口。
+ * 不走内联决策卡（该 kind 无 questions 字段，extractDecisionCards 天然不弹内联卡）。
+ */
+export interface ReviewChoiceOption {
+  id: string
+  label: string
+  description?: string
+}
+
+export interface ReviewChoiceQuestion {
+  id: string
+  question: string
+  options: ReviewChoiceOption[]
+}
+
+export interface ReviewChoicesState {
+  sessionId: string
+  projectId: string
+  title: string
+  summary: string
+  questions: ReviewChoiceQuestion[]
+  /** 全局出口（全部交给向导决定） */
+  globalOptions: ReviewChoiceOption[]
+}
+
+export const reviewChoicesFamily = atomFamily((_sessionId: string) => atom<ReviewChoicesState | null>(null))
+
+/** 无 active session 时的稳定 fallback（陷阱 10）。 */
+export const nullReviewChoicesFallback = atom<ReviewChoicesState | null>(null)
+
 // =========================================================================
 // 3. 消息列表（atomFamily）— 对齐 A
 // =========================================================================
@@ -429,6 +462,44 @@ export function setupGlobalAgentListeners(): () => void {
               }))
             : [],
         })
+      }
+      // 裁判审查逐题选择题（2026-08-30 选择题化）：review_questions 逐题结构 + 全局出口
+      if (payload?.kind === 'prd_review') {
+        const reviewPayload = payload as {
+          summary?: unknown
+          review_questions?: unknown
+          global_options?: unknown
+        }
+        const reviewOptions = (value: unknown): ReviewChoiceOption[] =>
+          Array.isArray(value)
+            ? (value as Array<Record<string, unknown>>)
+                .filter((item) => typeof item?.id === 'string' && typeof item?.label === 'string')
+                .map((item) => ({
+                  id: String(item.id),
+                  label: String(item.label),
+                  description: typeof item.description === 'string' ? item.description : undefined,
+                }))
+            : []
+        const reviewQuestions = Array.isArray(reviewPayload.review_questions)
+          ? (reviewPayload.review_questions as Array<Record<string, unknown>>)
+              .filter((item) => typeof item?.id === 'string' && typeof item?.question === 'string')
+              .map((item) => ({
+                id: String(item.id),
+                question: String(item.question),
+                options: reviewOptions(item.options),
+              }))
+              .filter((item) => item.options.length > 0)
+          : []
+        if (reviewQuestions.length > 0) {
+          store.set(reviewChoicesFamily(event.session_id), {
+            sessionId: event.session_id,
+            projectId: String(event.project_id ?? ''),
+            title: typeof payload.title === 'string' && payload.title ? payload.title : '裁判发现几个地方需要你确认',
+            summary: typeof reviewPayload.summary === 'string' ? reviewPayload.summary : '',
+            questions: reviewQuestions,
+            globalOptions: reviewOptions(reviewPayload.global_options),
+          })
+        }
       }
     }
 

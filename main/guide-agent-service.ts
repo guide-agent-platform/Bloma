@@ -10,11 +10,11 @@ import { researchMarketSimilar, normalizeResearchQuery, type MarketResearch } fr
 import {
   PRD_REVIEW_OPTION_OVERRIDE,
   PRD_REVIEW_OPTION_SUPPLEMENT,
-  consumePrdReviewSupplement,
   publishPrdReviewCard,
-  resolvePrdReviewCardAnswer,
+  resolvePrdReviewAnswers,
   resumePrdReviewOverride,
   runPrdReviewGate,
+  takePendingPrdReview,
 } from './prd-review'
 import {
   PRD_CONFIRM_OPTION_ADJUST,
@@ -384,40 +384,75 @@ export async function handleGuideMessage(
   // 主题锚点：首条用户消息（用户最初想做什么），澄清答案只能追加、不能覆盖主题
   const primaryIntent = readPrimaryIntent(input.session_id)
 
-  // PRD 审查决策卡回传（必须在普通卡片答案分流之前：审查卡选项 id 专属，
-  // 误入 resolveCardAnswer 会把按钮文案当需求开工）。override → 忽略问题开草图；
-  // supplement → 提示用户直接打字补充（pending 已消费，新确认弹窗会重建全流程）。
-  const prdReviewDecision = resolvePrdReviewCardAnswer(input)
-  if (prdReviewDecision === 'override') {
-    await resumePrdReviewOverride(input)
+  // PRD 审查逐题选择题回传（2026-08-30 选择题化，必须在普通卡片答案分流之前：
+  // 审查卡选项 id 专属，误入 resolveCardAnswer 会把按钮文案当需求开工）。
+  // delegate_all → 全部交给向导决定，转 PRD 确认门（不过目不开工）；answers →
+  // 逐题答案：全「这条没问题」= 等价忽略转确认门，否则收集点选方向归一化修订重走管线。
+  const prdReviewAnswers = resolvePrdReviewAnswers(input)
+  if (prdReviewAnswers?.kind === 'delegate_all') {
+    await resumePrdReviewOverride(input, {
+      logTitle: '用户全部交给向导决定，转入 PRD 过目',
+      logWhy: '用户在审查逐题卡选择「全部交给向导决定」；交由向导修订不等于确认过 PRD，转入确认门过目后开工',
+      reviewNote: '已交由向导决定审查问题',
+    })
     return
   }
-  if (prdReviewDecision === 'supplement') {
-    const pendingSupplement = consumePrdReviewSupplement(input)
-    // 保存待接状态：用户下一次普通文本 → 修订闭环。此前只提示不接，用户打字会掉进
-    // 兜底 runSketchTask 用旧需求直接开做——「还没提交审查反馈就开始做」根因。
-    if (pendingSupplement) {
-      pendingReviewSupplements.set(input.project_id, {
-        session_id: pendingSupplement.session_id,
-        requirements: pendingSupplement.requirements,
-        query: pendingSupplement.query,
-        publish: pendingSupplement.publish,
-        signal: model?.signal,
-        createdAt: Date.now(),
-      })
+  if (prdReviewAnswers?.kind === 'answers') {
+    const substantive = prdReviewAnswers.answers.filter((answer) => !answer.ignored)
+    if (substantive.length === 0) {
+      // 全部选了「这条没问题」→ 等价忽略，转 PRD 确认门
+      await resumePrdReviewOverride(input)
+      return
     }
-    // 提示必须带上审查发现的问题清单（用户点「我来补充说明」的动机就是回应这些问题；
-    // 空泛提示会让用户不知道该补什么，2026-08-27 线上案例）
-    const issueList = (pendingSupplement?.issues ?? [])
-      .filter((issue) => issue.severity === 'blocking' || issue.severity === 'major')
-      .slice(0, 3)
-      .map((issue, index) => `${index + 1}. ${issue.claim}`)
-    const hint = issueList.length
-      ? `好的，裁判发现的问题是：\n${issueList.join('\n')}\n你想补充或澄清哪一条？直接打字告诉我就行，我会修订 PRD 后再请你确认。`
-      : '好的，你想补充或修改哪里？直接打字告诉我就行，我会修订 PRD 后再请你确认。'
-    persistAssistant?.(hint)
-    publish(makeGuideEvent(input, 'message_delta', { text: hint }))
+    const pending = takePendingPrdReview(input.project_id)
+    if (!pending) return
+    const combined = substantive
+      .map((answer) => answer.label || answer.option_id)
+      .filter(Boolean)
+      .join('；')
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'prd_review_answered',
+        title: '用户逐题作答审查问题',
+        why: `用户对 ${prdReviewAnswers.answers.length} 个审查问题作答（${substantive.length} 个选择修订方向）`,
+        detail: {
+          answers: prdReviewAnswers.answers.map((answer) => ({
+            issue_id: answer.issue_id,
+            option_id: answer.option_id,
+            label: answer.label,
+            ignored: answer.ignored,
+          })),
+        },
+      },
+    })
+    const ack = `收到，按你的选择「${combined.slice(0, 40)}」修订 PRD，整理好后再请你确认。`
+    persistAssistant?.(ack)
+    publish(makeGuideEvent(input, 'message_delta', { text: ack }))
     publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+    const existing = pending.requirements as SketchRequirement[]
+    const normalization = await normalizeRequirementUpdate({
+      session_id: input.session_id,
+      existing,
+      modification: refineModificationDescription(combined),
+      constraints: readProjectConstraints(input.project_id),
+      query: pending.query,
+      env: undefined,
+    })
+    const merged = applyNormalization(existing, normalization, nextRequirementId(existing), 'correction')
+    await runPrdPipeline({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+      channel_id: input.channel_id,
+      requirements: merged,
+      query: pending.query,
+      env: undefined,
+      publish,
+      signal: model?.signal,
+    })
     return
   }
 
@@ -490,47 +525,6 @@ export async function handleGuideMessage(
     constraints: extractConstraints(input.content),
     source: 'guide_gate',
   })
-
-  // 审查卡「我来补充说明」的接续（2026-08-29 修复）：用户点补充后打字的普通文本
-  // 视为对审查问题的反馈 → 归一化并入需求 → 重走 PRD 管线（修订→审查→确认卡），
-  // 而不是掉进兜底 runSketchTask 用旧需求直接开做。卡片回传不在此拦截。
-  const reviewSupplement = takePendingReviewSupplement(input.project_id)
-  if (reviewSupplement && input.metadata?.source !== 'card_option' && input.session_id === reviewSupplement.session_id) {
-    const adjustment = input.content.trim()
-    if (adjustment) {
-      const normalization = await normalizeRequirementUpdate({
-        session_id: input.session_id,
-        existing: reviewSupplement.requirements,
-        modification: refineModificationDescription(adjustment),
-        constraints: readProjectConstraints(input.project_id),
-        query: reviewSupplement.query,
-        env: undefined,
-      })
-      const merged = applyNormalization(
-        reviewSupplement.requirements,
-        normalization,
-        nextRequirementId(reviewSupplement.requirements),
-        'correction',
-      )
-      const ack = `收到，按你的补充「${adjustment.slice(0, 40)}」修订 PRD，整理好后再请你确认。`
-      persistAssistant?.(ack)
-      publish(makeGuideEvent(input, 'message_delta', { text: ack }))
-      publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
-      await runPrdPipeline({
-        request_id: input.request_id,
-        session_id: input.session_id,
-        project_id: input.project_id,
-        mode: input.mode,
-        channel_id: input.channel_id,
-        requirements: merged,
-        query: reviewSupplement.query,
-        env: undefined,
-        publish,
-        signal: reviewSupplement.signal,
-      })
-      return
-    }
-  }
 
   // 卡片答案：用户点选了选项（2026-08-27 语义升级：点选回流模型——向导持续跟踪用户选择）
   const cardAnswer = resolveCardAnswer(input, primaryIntent)
@@ -841,37 +835,6 @@ interface PendingRequirementConfirm {
   /** PRD 审查门（简化版 AC）复用：向导轮模型 env，prd 类别路由解析失败时的回退 */
   env: Record<string, string>
   publish: GuideEventPublisher
-}
-
-/** 审查卡「我来补充说明」后的待接状态（2026-08-29）：用户点补充后下一次普通文本
- *  视为对审查问题的反馈 → 归一化并入需求 → 重走 PRD 管线（修订→审查→确认卡）。
- *  此前只发提示、不接文本，用户补充会掉进兜底 runSketchTask 用旧需求直接开做。 */
-interface PendingReviewSupplement {
-  session_id: string
-  requirements: SketchRequirement[]
-  query: SDKQuery
-  publish: GuideEventPublisher
-  signal?: AbortSignal
-  /** 创建时间：残留的补充状态最多等待 3 分钟，过期失效（防用户离开后无关文本被当补充） */
-  createdAt: number
-}
-
-/** 补充状态有效期：用户点「我来补充说明」后应在短时间内打字，过期即失效。 */
-const REVIEW_SUPPLEMENT_TTL_MS = 3 * 60 * 1000
-
-const pendingReviewSupplements = new Map<string, PendingReviewSupplement>()
-
-function takePendingReviewSupplement(projectId: string): PendingReviewSupplement | undefined {
-  const pending = pendingReviewSupplements.get(projectId)
-  if (!pending) return undefined
-  pendingReviewSupplements.delete(projectId)
-  if (Date.now() - pending.createdAt > REVIEW_SUPPLEMENT_TTL_MS) return undefined
-  return pending
-}
-
-/** 测试辅助：清空补充待接状态（模块级 Map 跨用例残留会串扰） */
-export function clearPendingReviewSupplementsForTests(): void {
-  pendingReviewSupplements.clear()
 }
 
 const pendingRequirementConfirms = new Map<string, PendingRequirementConfirm>()

@@ -52,7 +52,6 @@ vi.mock('../../main/runtime-fallback', () => ({
 }))
 
 import {
-  clearPendingReviewSupplementsForTests,
   handleGuideMessage,
   resolveRequirementConfirm,
 } from '../../main/guide-agent-service'
@@ -60,8 +59,8 @@ import { resolveChannelEnv } from '../../main/runtime-fallback'
 import { recordDecision } from '../../main/decision-log'
 import { resolvePrdBackplane, runSketchTask } from '../../main/programming-orchestrator'
 import {
-  PRD_REVIEW_OPTION_OVERRIDE,
-  PRD_REVIEW_OPTION_SUPPLEMENT,
+  PRD_REVIEW_OPTION_DELEGATE_ALL,
+  buildReviewQuestions,
   parseReviewIssues,
   ruleGateReview,
 } from '../../main/prd-review'
@@ -150,8 +149,30 @@ function makeInput(content = '自己用，要能按月看统计'): AgentSendMess
 const reviewPassJson = JSON.stringify({ issues: [{ dimension: 'U', severity: 'minor', location: 'F-001', claim: '措辞可更具体', evidence: ['记账'] }], clean_dimensions: ['F', 'I', 'Z', 'L', 'G'] })
 const reviewFailJson = JSON.stringify({
   issues: [
-    { dimension: 'F', severity: 'major', location: 'F-002', claim: '用户要的按月汇总在 PRD 里被弱化成了可选', evidence: ['按月汇总统计'] },
-    { dimension: 'L', severity: 'blocking', location: 'F-001', claim: '只有记账没有查看记录的路径', evidence: ['记录日常收支'] },
+    {
+      dimension: 'F',
+      severity: 'major',
+      location: 'F-002',
+      claim: '用户要的按月汇总在 PRD 里被弱化成了可选',
+      evidence: ['按月汇总统计'],
+      plain_question: '你想要的按月汇总，要不要作为主要功能？',
+      options: [
+        { id: 'monthly-core', label: '要，作为主要功能', description: '每月自动出汇总' },
+        { id: 'monthly-optional', label: '不用，可选就行', description: '' },
+      ],
+    },
+    {
+      dimension: 'L',
+      severity: 'blocking',
+      location: 'F-001',
+      claim: '只有记账没有查看记录的路径',
+      evidence: ['记录日常收支'],
+      plain_question: '记完账后，你想怎么翻看以前的记录？',
+      options: [
+        { id: 'list-view', label: '能看到列表', description: '按时间列出所有账目' },
+        { id: 'search-view', label: '能搜索查找', description: '按关键词搜' },
+      ],
+    },
   ],
   clean_dimensions: ['I', 'Z'],
 })
@@ -175,7 +196,6 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
   afterEach(() => {
     delete process.env.BLOMA_DELEGATED_REVIEW
     process.env.PROMA_HOME = originalPromaHome
-    clearPendingReviewSupplementsForTests()
     vi.restoreAllMocks()
   })
 
@@ -202,7 +222,7 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     expect(deltas.some((text) => text.includes('已通过裁判审查'))).toBe(true)
   })
 
-  it('审查发现 blocking/major → 决策卡 + 不开草图 + prd_review 留痕（simplified_ac）', async () => {
+  it('审查发现 blocking/major → 发逐题选择题卡 + 不开草图 + prd_review 留痕（simplified_ac）', async () => {
     const { query } = scriptedQuery([reviewFailJson])
     await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(query))
     events.length = 0
@@ -211,9 +231,16 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     expect(runSketchTask).not.toHaveBeenCalled()
     const card = events.find((event) => event.type === 'user_decision_required')
     expect(card?.payload.kind).toBe('prd_review')
-    expect(card?.payload.questions).toEqual([
-      expect.objectContaining({ id: PRD_REVIEW_OPTION_OVERRIDE, label: '忽略问题，继续生成' }),
-      expect.objectContaining({ id: PRD_REVIEW_OPTION_SUPPLEMENT, label: '我来补充说明' }),
+    const reviewQuestions = card?.payload.review_questions as Array<{ id: string; question: string; options: Array<{ id: string; label: string }> }>
+    expect(reviewQuestions).toHaveLength(2)
+    expect(reviewQuestions[0].question).toContain('按月汇总')
+    expect(reviewQuestions[0].options).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'q0:monthly-core', label: '要，作为主要功能' }),
+      expect.objectContaining({ id: 'q0:ignore', label: '这条没问题' }),
+    ]))
+    // 全局让渡出口
+    expect(card?.payload.global_options).toEqual([
+      expect.objectContaining({ id: PRD_REVIEW_OPTION_DELEGATE_ALL }),
     ])
     expect(String(card?.payload.summary)).toContain('按月汇总')
     expect(recordDecision).toHaveBeenCalledWith(expect.objectContaining({
@@ -224,33 +251,31 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     }))
   })
 
-  it('override → 转 PRD 确认门过目（不过目不开工，2026-08-27）+ overridden 留痕；确认后才开草图；supplement → 提示打字、不开草图', async () => {
+  it('delegate_all / 全部「这条没问题」→ 转 PRD 确认门过目（不过目不开工），确认后才开草图', async () => {
     const { query } = scriptedQuery([reviewFailJson])
     await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(query))
     await resolveRequirementConfirm({ request_id: 'req-pr2', session_id: SESSION_ID, project_id: 'proj-1', decision: 'confirm' })
 
-    // override 回传（卡片点击语义）
+    // 全局让渡回传（全部交给向导决定）
     events.length = 0
     vi.mocked(runSketchTask).mockClear()
     await handleGuideMessage(
       {
-        ...makeInput('忽略问题，继续生成'),
-        metadata: { source: 'card_option', selected_option_id: PRD_REVIEW_OPTION_OVERRIDE },
+        ...makeInput('全部交给向导决定'),
+        metadata: { source: 'card_option', selected_option_id: PRD_REVIEW_OPTION_DELEGATE_ALL },
       },
       (event) => events.push(event),
       makeModel(scriptedQuery([reviewPassJson]).query),
     )
-    // 不过目不开工：忽略审查问题 ≠ 确认过 PRD——不再直达草图，改发 PRD 确认卡挂起
+    // 不过目不开工：让渡 ≠ 确认过 PRD——不再直达草图，改发 PRD 确认卡挂起
     expect(runSketchTask).not.toHaveBeenCalled()
     const confirmCard = events.find(
       (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
     )
     expect(confirmCard).toBeTruthy()
-    expect(String(confirmCard?.payload.title)).toContain('已忽略')
-    const ackDeltas = events.filter((event) => event.type === 'message_delta').map((event) => String(event.payload.text))
-    expect(ackDeltas.some((text) => text.includes('请你过目'))).toBe(true)
+    expect(String(confirmCard?.payload.title)).toContain('已交由向导决定')
     expect(recordDecision).toHaveBeenCalledWith(expect.objectContaining({
-      entry: expect.objectContaining({ type: 'prd_review_overridden', title: '用户忽略裁判问题，转入 PRD 过目' }),
+      entry: expect.objectContaining({ type: 'prd_review_overridden' }),
     }))
 
     // 确认卡「确认无误」→ 过目完成才开草图，需求清单保持一致
@@ -270,27 +295,36 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
       { id: 'F-002', description: '按月汇总统计' },
     ])
 
-    // 再造一次 needs_revision，测 supplement
+    // 再造一次 needs_revision，测「全部这道没问题」→ 等价忽略转确认门
     const again = scriptedQuery([reviewFailJson])
-    await handleGuideMessage(makeInput(), () => undefined, makeModel(again.query))
+    await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(again.query))
     await resolveRequirementConfirm({ request_id: 'req-pr3', session_id: SESSION_ID, project_id: 'proj-1', decision: 'confirm' })
     events.length = 0
     vi.mocked(runSketchTask).mockClear()
     await handleGuideMessage(
       {
-        ...makeInput('我来补充说明'),
-        metadata: { source: 'card_option', selected_option_id: PRD_REVIEW_OPTION_SUPPLEMENT },
+        ...makeInput('我选好了'),
+        metadata: {
+          source: 'card_option',
+          review_answers: [
+            { issue_id: 'q0', option_id: 'q0:ignore', label: '这条没问题' },
+            { issue_id: 'q1', option_id: 'q1:ignore', label: '这条没问题' },
+          ],
+        },
       },
       (event) => events.push(event),
       makeModel(scriptedQuery([reviewPassJson]).query),
     )
     expect(runSketchTask).not.toHaveBeenCalled()
-    const deltas = events.filter((event) => event.type === 'message_delta').map((event) => String(event.payload.text))
-    expect(deltas.some((text) => text.includes('直接打字'))).toBe(true)
+    expect(
+      events.some(
+        (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
+      ),
+    ).toBe(true)
   })
 
-  it('supplement 后用户打字补充 → 修订 PRD 重走管线，而不是用旧需求直接开草图（2026-08-29 修复）', async () => {
-    const proj = 'proj-supp'
+  it('逐题答案（有实质选择）→ 归一化并入需求 + 重走管线，而不是用旧需求直接开草图', async () => {
+    const proj = 'proj-answers'
     const inputFor = (content: string, extra?: Partial<AgentSendMessageInput>): AgentSendMessageInput => ({
       ...makeInput(content),
       project_id: proj,
@@ -299,26 +333,22 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     // 0) 需求确认 → PRD → 审查 fail → 审查卡挂起（独立项目键，避免跨用例残留状态干扰）
     const { query } = scriptedQuery([reviewFailJson])
     await handleGuideMessage(inputFor('做个记账的东西'), () => undefined, makeModel(query))
-    await resolveRequirementConfirm({ request_id: 'req-supp', session_id: SESSION_ID, project_id: proj, decision: 'confirm' })
+    await resolveRequirementConfirm({ request_id: 'req-ans', session_id: SESSION_ID, project_id: proj, decision: 'confirm' })
 
-    // 1) 点「我来补充说明」：只提示，不开草图，并挂起待接状态
+    // 1) 逐题作答回传：q0 选实质方向、q1 选「这条没问题」→ 归一化并入 + 重走管线
     events.length = 0
     vi.mocked(runSketchTask).mockClear()
     await handleGuideMessage(
       {
-        ...inputFor('我来补充说明'),
-        metadata: { source: 'card_option', selected_option_id: PRD_REVIEW_OPTION_SUPPLEMENT },
+        ...inputFor('我选好了，按我的选择修订需求。'),
+        metadata: {
+          source: 'card_option',
+          review_answers: [
+            { issue_id: 'q0', option_id: 'q0:monthly-core', label: '要，作为主要功能' },
+            { issue_id: 'q1', option_id: 'q1:ignore', label: '这条没问题' },
+          ],
+        },
       },
-      (event) => events.push(event),
-      makeModel(scriptedQuery([reviewPassJson]).query),
-    )
-    expect(runSketchTask).not.toHaveBeenCalled()
-
-    // 2) 用户打字反馈（普通文本，非卡片）——修复前会掉进兜底 runSketchTask 用旧需求直接开做
-    events.length = 0
-    vi.mocked(runSketchTask).mockClear()
-    await handleGuideMessage(
-      inputFor('U 的问题按层级关系处理，教学机是计算机模拟器的一种'),
       (event) => events.push(event),
       makeModel(scriptedQuery([reviewPassJson]).query),
     )
@@ -364,6 +394,9 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     const broken = ruleGateReview({ name: 'x', positioning: '', requirements: [] } as never)
     expect(broken.verdict).toBe('needs_revision')
     expect(broken.issues.map((issue) => issue.severity)).toEqual(['blocking', 'blocking'])
+    // 零基础选择题化（2026-08-30）：规则门每条 issue 必带零基础话术 + 通用选项
+    expect(broken.issues.every((issue) => issue.plain_question && issue.plain_question.length > 0)).toBe(true)
+    expect(broken.issues.every((issue) => (issue.options ?? []).length > 0)).toBe(true)
 
     const duplicated = ruleGateReview({
       name: 'x',
@@ -386,5 +419,45 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
       requirements: [{ id: 'F-001', description: '记录日常收支' }],
     } as never)
     expect(healthy.verdict).toBe('pass')
+  })
+
+  it('parseReviewIssues 解析 plain_question/options（零基础选择题化）', () => {
+    const parsed = parseReviewIssues(
+      '{"issues":[{"dimension":"F","severity":"major","location":"F-002","claim":"弱化按月汇总","plain_question":"按月汇总要不要作为主要功能？","options":[{"id":"a","label":"要，作为主要功能","description":"每月出汇总"},{"id":"b","label":"不用，可选就行","description":""}]}],"clean_dimensions":[]}',
+    )
+    expect(parsed).toHaveLength(1)
+    expect(parsed[0].plain_question).toBe('按月汇总要不要作为主要功能？')
+    expect(parsed[0].options).toEqual([
+      { id: 'a', label: '要，作为主要功能', description: '每月出汇总' },
+      { id: 'b', label: '不用，可选就行' },
+    ])
+  })
+
+  it('buildReviewQuestions：逐题编号 + 每题的「这条没问题」兜底出口', () => {
+    const questions = buildReviewQuestions([
+      {
+        dimension: 'F',
+        severity: 'major',
+        location: 'F-002',
+        claim: '弱化',
+        evidence: [],
+        plain_question: '按月汇总要不要作为主要功能？',
+        options: [{ id: 'monthly-core', label: '要，作为主要功能' }],
+      },
+      {
+        dimension: 'L',
+        severity: 'blocking',
+        location: 'F-001',
+        claim: '无查看路径',
+        evidence: [],
+        plain_question: '怎么翻看记录？',
+        options: [],
+      },
+    ])
+    expect(questions).toHaveLength(2)
+    expect(questions[0].id).toBe('q0')
+    expect(questions[0].options.map((option) => option.id)).toEqual(['q0:monthly-core', 'q0:ignore'])
+    // 无 options 的 issue → 只有兜底「这条没问题」
+    expect(questions[1].options.map((option) => option.id)).toEqual(['q1:ignore'])
   })
 })
