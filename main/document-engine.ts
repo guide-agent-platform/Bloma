@@ -99,9 +99,18 @@ export function syncDocuments(input: DocumentSyncInput, backplaneOverride?: PrdB
         type: 'test_report',
       })
       break
-    case 'iteration_completed':
-      files.push({ relativePath: 'iteration_completed.md', content: renderChangelog(), type: 'changelog' })
+    case 'iteration_completed': {
+      // 追加式 changelog（用户裁决 2026-08-28，GA-03 P1）：读现有文件，末尾 append 历史条目，
+      // append-only 永不改写（PRD §7.1「每轮迭代结束后追加 Changelog」字面语义）
+      const changelogPath = join(dir, 'iteration_completed.md')
+      const existingChangelog = existsSync(changelogPath) ? readFileSync(changelogPath, 'utf8') : ''
+      files.push({
+        relativePath: 'iteration_completed.md',
+        content: renderChangelog(requirements, existingChangelog),
+        type: 'changelog',
+      })
       break
+    }
     case 'mode_upgraded':
       files.push({ relativePath: 'mode_upgraded.md', content: renderModeUpgraded(project.name), type: 'user_story' })
       break
@@ -596,13 +605,74 @@ ${refs}
 `
 }
 
-function renderChangelog(): string {
-  return `# 变更记录
+/**
+ * 变更记录（追加式，用户裁决 2026-08-28，GA-03 P1）：每轮迭代完成后 append 一段历史条目
+ * （时间戳 + 功能项变化 + 当前清单），累积成时间线；历史条目 append-only 永不改写。
+ * 空清单时输出「本轮无功能项变更」，不套用 PRD 草案的 F-001 默认回退（避免伪造变更记录）。
+ * 旧覆盖式遗留文件（无轮次编号）原样保留，新条目从「第 1 轮」起算。
+ */
+function renderChangelog(requirements: SketchRequirement[], existing = ''): string {
+  const entry = renderChangelogEntry(requirements, existing)
+  if (existing.trim() === '') return `# 变更记录\n\n${entry}`
+  return `${existing.trimEnd()}\n\n${entry}\n`
+}
 
-> 一次迭代已完成。（checkpoint: iteration_completed）
+/** 单条历史条目：轮次编号按已有新格式条目数递增（旧格式无法归轮，从 1 起算） */
+function renderChangelogEntry(requirements: SketchRequirement[], existing: string): string {
+  const round = (existing.match(/^## \d{4}-/gm) ?? []).length + 1
+  const timestamp = new Date().toISOString()
+  const current = requirements.map((item) => ({ id: item.id, description: item.description }))
+  const baseline = parseLastEntryItems(existing)
+  const items =
+    current.length > 0
+      ? current.map((item) => `- ${item.id}：${item.description}`).join('\n')
+      : '- 本轮无功能项变更'
+  return `## ${timestamp}（第 ${round} 轮迭代）\n\n${renderChangeLine(baseline, current)}\n\n**当前功能项清单**：\n\n${items}`
+}
 
-- 快照已回滚/确认，项目进入新一轮迭代。
-`
+/** 功能项变化行：相对上一条历史条目的 diff（新增/移除/变更）；首轮如实记录「首次记录」 */
+function renderChangeLine(
+  baseline: Array<{ id: string; description: string }> | null,
+  current: Array<{ id: string; description: string }>,
+): string {
+  if (baseline === null) return `**功能项变化**：首次记录（${current.length} 项）`
+  const added = current.filter((c) => !baseline.some((b) => b.id === c.id))
+  const removed = baseline.filter((b) => !current.some((c) => c.id === b.id))
+  const changed = current.filter((c) => {
+    const prev = baseline.find((b) => b.id === c.id)
+    return prev !== undefined && prev.description !== c.description
+  })
+  const parts = [
+    ...added.map((i) => `新增 ${i.id}（${i.description}）`),
+    ...removed.map((i) => `移除 ${i.id}（${i.description}）`),
+    ...changed.map((i) => `变更 ${i.id}（→ ${i.description}）`),
+  ]
+  return `**功能项变化**：${parts.length > 0 ? parts.join('；') : '无'}`
+}
+
+/**
+ * 解析现有 changelog 中最后一个连续功能项列表块（`- id：描述` 行）作为 diff 基线。
+ * 兼容旧覆盖式格式（全文仅一个列表块）与新追加式格式（每条目一块，最后一块即最新基线）。
+ * 全文无任何列表行 → null（首轮）；「本轮无功能项变更」无冒号分隔不匹配（空基线不伪造）。
+ */
+function parseLastEntryItems(existing: string): Array<{ id: string; description: string }> | null {
+  const lines = existing.split('\n')
+  let lastBlock: string[] = []
+  let currentBlock: string[] = []
+  for (const line of lines) {
+    if (/^- (.+?)[:：]/.test(line)) {
+      currentBlock.push(line)
+    } else {
+      if (currentBlock.length > 0) lastBlock = currentBlock
+      currentBlock = []
+    }
+  }
+  if (currentBlock.length > 0) lastBlock = currentBlock
+  if (lastBlock.length === 0) return null
+  return lastBlock.map((line) => {
+    const match = line.match(/^- (.+?)[:：](.*)$/)
+    return { id: (match?.[1] ?? '').trim(), description: (match?.[2] ?? '').trim() }
+  })
 }
 
 function renderModeUpgraded(projectName: string): string {

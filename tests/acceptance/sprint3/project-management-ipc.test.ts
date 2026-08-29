@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../../support/proma-home-guard'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -14,7 +15,7 @@ async function withTmpHome<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn()
   } finally {
-    process.env.PROMA_HOME = originalHome
+    restorePromaHome(originalHome)
   }
 }
 

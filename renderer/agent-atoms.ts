@@ -224,12 +224,61 @@ export const currentSessionPermissionCountAtom = atom((get) => {
  *
  * @returns cleanup 函数（仅在应用退出时调用）
  */
+/** 会话用量（usage-guard 渲染层 2026-08-28）：usage_summary 事件的归约形态 */
+export interface SessionUsage {
+  inputTokens: number
+  outputTokens: number
+  estContextTokens: number
+  turnsWithUsage: number
+}
+
+export const sessionUsageFamily = atomFamily((sessionId: string) => atom<SessionUsage | undefined>(undefined))
+
 export function setupGlobalAgentListeners(): () => void {
   const api = window.electronAPI?.agent
   const store = window.__jotai_store__
   if (!api || !store) return () => undefined
 
   return api.onStreamEvent((event) => {
+    // queued_started（message-queue 2026-08-27）：排队消息开始派发——追加「正在处理」
+    // 提示，视觉上翻转「⏳ 已排队」（旧提示保留为历史记录）
+    // usage_summary（usage-guard 渲染层 2026-08-28）：同会话累加渠道/估算用量
+    if (event.type === 'usage_summary') {
+      const p = event.payload as { input_tokens?: number; output_tokens?: number; est_context_tokens?: number; turns_with_usage?: number }
+      const usagesAtom = sessionUsageFamily(event.session_id)
+      const prev = store.get(usagesAtom)
+      store.set(usagesAtom, {
+        inputTokens: (prev?.inputTokens ?? 0) + (p.input_tokens ?? 0),
+        outputTokens: (prev?.outputTokens ?? 0) + (p.output_tokens ?? 0),
+        estContextTokens: p.est_context_tokens ?? prev?.estContextTokens ?? 0,
+        turnsWithUsage: (prev?.turnsWithUsage ?? 0) + (p.turns_with_usage ?? 0),
+      })
+    }
+
+    if (event.type === 'queued_started') {
+      store.set(agentMessagesFamily(event.session_id), (previous) => [
+        ...previous,
+        {
+          role: 'system',
+          content: [{ type: 'text', text: '正在处理你排队的消息…' }],
+          timestamp: Date.now(),
+        },
+      ])
+    }
+
+    // queue_dropped（onDropped 气泡，r79）：安全网放弃派发 → 红泡告知「发送失败」而非静默消失
+    if (event.type === 'queue_dropped') {
+      const p = event.payload as { reason?: string }
+      store.set(agentMessagesFamily(event.session_id), (previous) => [
+        ...previous,
+        {
+          role: 'system',
+          content: [{ type: 'text', text: `[queue-dropped] 排队消息发送失败（${p.reason ?? 'unknown'}）——请重新发送` }],
+          timestamp: Date.now(),
+        },
+      ])
+    }
+
     // 会话追踪：新出现的 session_id 追加到 agentSessionsAtom（已有索引的会话保持不变）
     store.set(agentSessionsAtom, (previous) => {
       if (previous.some((item) => item.session_id === event.session_id)) return previous

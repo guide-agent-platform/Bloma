@@ -30,6 +30,7 @@ import type { ConversationTurn, GuideModelOptions, SDKQuery } from './orchestrat
 import { trackAnalytics } from './platform-services'
 import { resolvePrdBackplane, runSketchTask, setProgrammingEventPublisher, nextRequirementId, refineModificationDescription } from './programming-orchestrator'
 import { normalizeRequirementUpdate, applyNormalization } from './requirement-normalizer'
+import { buildReferenceSection } from './web-reference-extractor'
 import { findProject, updateProject, readLastSketchRequirements, recordSketchGenerated } from './project-service'
 import { captureConstraints, extractConstraints, readProjectConstraints } from './constraint-extractor'
 import { isAutoDelegationText, readPrimaryIntent } from './session-service'
@@ -1031,6 +1032,8 @@ interface PrdPipelineContext {
   query: SDKQuery | undefined
   env?: Record<string, string>
   publish: GuideEventPublisher
+  /** 可选参考网页链接（web-reference-extractor，2026-08-28）：仅 http(s)，提取失败静默降级 */
+  reference_url?: string
   /** 主链路中止信号（AGENT_STOP）：分阶段检查，abort 后不再推进审查/卡片/草图 */
   signal?: AbortSignal
 }
@@ -1209,12 +1212,15 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
 
   // 用户停止：不再启动草图任务（草图全程 20~60s，停不掉会继续偷跑）
   if (aborted()) return { started: true, prd_written: prdWritten }
+  // 设计参考接线（web-reference-extractor，2026-08-28）：仅 http(s)，3s 预算，
+  // 任何失败降级空串不阻断确认（对齐 autoName/distill 降级纪律）
+  const referenceSection = await buildReferenceSection(pending.reference_url)
   await runSketchTask({
     request_id: pending.request_id,
     session_id: pending.session_id,
     project_id: pending.project_id,
     mode: pending.mode,
-    prompt: '按确认的需求清单生成草图',
+    prompt: `按确认的需求清单生成草图${referenceSection}`,
     requirements,
     channel_id: pending.channel_id,
     query: pending.query,
@@ -1235,6 +1241,8 @@ export async function resolveRequirementConfirm(
     requirement_ids?: string[]
     /** 用户勾选采纳的市调想法（2026-08-29 灵感参考）：并入需求清单追加 F-00N */
     adopted_ideas?: string[]
+    /** 可选参考网页链接（web-reference-extractor，2026-08-28）：仅 http(s)，提取失败静默降级 */
+    reference_url?: string
   },
   /** AGENT_STOP 可中止信号（由 ipc.ts 注册 backgroundRun 后传入） */
   signal?: AbortSignal,
@@ -1295,6 +1303,7 @@ export async function resolveRequirementConfirm(
     query: pending.query,
     env: pending.env,
     publish,
+    reference_url: input.reference_url,
     signal,
   })
 }

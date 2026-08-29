@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { createServer } from 'node:http'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import type { AddressInfo } from 'node:net'
@@ -13,7 +14,7 @@ describe('GWT service (A2-07)', () => {
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     setBrowserGwtDisabledForTests(false)
   })
 

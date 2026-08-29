@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto'
+import { appendDelegationSettle, loadChildSessionSnapshot, replayTurnsFrom } from './delegation-persistence'
+import { recordSessionActivity } from './session-service'
 import type { AgentEvent, PromaPermissionMode } from '../shared/types'
 import type { SDKQuery } from './orchestrator'
+import type { ConversationTurn } from './orchestrator'
 import {
   runAgentLoop,
   type AgentLoopResult,
@@ -123,6 +126,8 @@ export interface DelegationParentContext {
   /** 背板锚定 system prompt（buildAgentLoopSystemPrompt 产物），子 loop 在它之上加委派规则。 */
   system: string
   editFormat: 'diff' | 'whole'
+  /** omit 推广（2026-08-27）：子 loop 透传父渠道 providerType，Token Plan 类渠道免 400 往返 */
+  providerType?: string
   publish: (type: AgentEvent['type'], payload: Record<string, unknown>) => void
   /** 子 loop 每轮埋点（programming-orchestrator 注入，session_id=子 sessionId）。 */
   onChildTurn?: (info: AgentLoopTurnInfo, child: { sessionId: string; requestId: string; role: DelegationRole }) => void
@@ -143,6 +148,14 @@ export interface WaitForDelegationsArgs {
 
 const delegations = new Map<string, DelegationRecord>()
 const parentContexts = new Map<string, DelegationParentContext>()
+
+/**
+ * abort 后子循环仍不 settle 的强制收尾超时（ms）：
+ * 部分工具（如 hang 类 `execute: () => new Promise<never>(() => {})`）不响应 abort 信号，
+ * abort 后子循环永久挂起、completion 永不 resolve，DelegationRecord 会永远留在 registry
+ * （内存泄漏 + 占用并行额度）。超时后强制终结（resolve completion + 摘除），见 startDelegation。
+ */
+export const ABORT_SETTLE_TIMEOUT_MS = 5000
 
 let childToolsBuilder: ChildToolsBuilder = () => {
   throw new Error('子 agent 工具集构建器未注入（programming-orchestrator 应在 runMvpViaAgentLoop 注册 setChildToolsBuilder）')
@@ -207,8 +220,43 @@ export function startDelegation(parent: ToolContext, args: DelegateAgentArgs): S
     askSignal: createAskSignal(),
   }
   delegations.set(delegationId, record)
+  // delegation-persistence 阶段 1（2026-08-28）：子会话索引写归属 meta——重启后
+  // restoreDelegationRecord 可按 delegationId 找回子会话 JSONL（内存 registry 重启即丢）
+  try {
+    recordSessionActivity(childSessionId, parent.projectId, {
+      parentSessionId: parent.sessionId,
+      sourceDelegationId: delegationId,
+    })
+  } catch (error) {
+    // best-effort（同 recordSessionActivity 容错口径）；warn 保证落盘失败运维可见
+    console.warn('[delegation-persistence] 子会话归属写入失败:', error)
+  }
   pruneFinishedDelegations()
   publishDelegationEvent(parent.sessionId, 'delegation_started', record)
+
+  // abort 兜底（P2⑤）：abort 后子循环可能不响应（hang 类工具 execute 永不 settle，
+  // runAgentLoop 的 tool.execute 不经 withAbort），超时后强制收尾——resolve completion
+  // 解除 wait 阻塞 + 置 cancelled + 摘除 registry，避免 DelegationRecord 永久泄漏。
+  // 正常路径（loop 在超时前 settle，或 stopDelegation 已手动收尾）下 status 已非 running，幂等跳过。
+  record.abort.signal.addEventListener(
+    'abort',
+    () => {
+      setTimeout(() => {
+        if (record.status !== 'running') return
+        record.status = 'cancelled'
+        record.error = '已由主 agent 停止（abort），子循环未响应，超时强制收尾'
+        try {
+          appendDelegationSettle(record.childSessionId, 'cancelled', { error: record.error })
+        } catch (error) {
+          console.warn('[delegation-persistence] abort 强制收尾落盘失败:', error)
+        }
+        record.resolveCompletion()
+        publishDelegationEvent(parent.sessionId, 'delegation_cancelled', record)
+        delegations.delete(record.delegationId)
+      }, ABORT_SETTLE_TIMEOUT_MS).unref?.()
+    },
+    { once: true },
+  )
 
   const prompt = buildDelegationPrompt({ role, task, expectedOutput: args.expectedOutput })
 
@@ -225,6 +273,12 @@ function settleChildLoop(record: DelegationRecord, result: AgentLoopResult): voi
   if (record.status !== 'running') return
   record.resultSummary = summarizeChildResult(result)
   record.status = 'completed'
+  // persistence：终态落盘（重启后 JSONL 末行推断依据）
+  try {
+    appendDelegationSettle(record.childSessionId, 'completed', { resultSummary: record.resultSummary })
+  } catch (error) {
+    console.warn('[delegation-persistence] settle 落盘失败:', error)
+  }
   record.resolveCompletion()
   publishDelegationEvent(record.parentSessionId, 'delegation_completed', record)
 }
@@ -234,6 +288,11 @@ function settleChildLoopError(record: DelegationRecord, error: unknown): void {
   if (record.status !== 'running') return
   record.error = errorMessage(error)
   record.status = 'failed'
+  try {
+    appendDelegationSettle(record.childSessionId, 'failed', { error: record.error })
+  } catch {
+    // 落盘失败不阻断内存态收尾
+  }
   record.resolveCompletion()
   publishDelegationEvent(record.parentSessionId, 'delegation_failed', record)
 }
@@ -260,6 +319,8 @@ async function runChildLoop(opts: {
   record: DelegationRecord
   prompt: string
   role: DelegationRole
+  /** continue 续跑重放的历史轮次（阶段 3）；startDelegation 全新会话不传 */
+  replayTurns?: ConversationTurn[]
 }): Promise<AgentLoopResult> {
   const { parent, parentCtx, record, prompt, role } = opts
   const childRequestId = randomUUID()
@@ -267,6 +328,7 @@ async function runChildLoop(opts: {
   return runAgentLoop({
     system: buildChildSystemPrompt(parentCtx.system, role),
     task: prompt,
+    historyTurns: opts.replayTurns,
     tools: childToolsBuilder(parent.projectId, role, parentCtx.editFormat),
     query: parentCtx.query,
     env: parentCtx.env,
@@ -278,6 +340,7 @@ async function runChildLoop(opts: {
     permissionMode: parentCtx.permissionMode,
     delegationDepth: parent.state.delegation_depth + 1,
     temperature: parentCtx.temperature,
+    providerType: parentCtx.providerType,
     signal: record.abort.signal,
     // 子 agent 聊天类事件（message_delta 等）不进父会话聊天流（见白名单注释）
     publish: (type, payload) => {
@@ -379,6 +442,11 @@ export function stopDelegation(parentSessionId: string, delegationId: string): D
   if (record.status === 'running') {
     record.status = 'cancelled'
     record.error = '已由主 agent 停止（stop_delegation）'
+    try {
+      appendDelegationSettle(record.childSessionId, 'cancelled', { error: record.error })
+    } catch (error) {
+      console.warn('[delegation-persistence] stop 落盘失败:', error)
+    }
     record.abort.abort()
     record.resolveCompletion()
     publishDelegationEvent(parentSessionId, 'delegation_cancelled', record)
@@ -510,7 +578,18 @@ export function continueDelegation(parent: ToolContext, delegationId: string, ta
   record.startedAt = Date.now()
 
   const prompt = buildDelegationPrompt({ role: record.role, task: trimmedTask })
-  void runChildLoop({ parent, parentCtx, record, prompt, role: record.role }).then(
+  // 阶段 3 续跑重放：终态子会话 JSONL 历史读回 + follow-up 末位 user 轮——
+  // 模型看到完整旧上下文（资产复用），而非只有新指令的重开；超窗由 compacting-window 兑底
+  let replayTurns: ConversationTurn[] | undefined
+  try {
+    const snap = loadChildSessionSnapshot(record.childSessionId)
+    if (snap.lastSettle && snap.messages.length > 0) {
+      replayTurns = replayTurnsFrom(snap.messages)
+    }
+  } catch (error) {
+    console.warn('[delegation-persistence] 续跑历史读回失败，退化为无历史续跑:', error)
+  }
+  void runChildLoop({ parent, parentCtx, record, prompt, role: record.role, replayTurns }).then(
     (result) => settleChildLoop(record, result),
     (error) => settleChildLoopError(record, error),
   )
@@ -617,8 +696,8 @@ export function buildDelegationPrompt(opts: {
   expectedOutput?: string
 }): string {
   const expected = opts.expectedOutput
-    ? `期望输出：${opts.expectedOutput}`
-    : '完成后用简洁文本输出结果摘要（关键发现/完成清单/未完成项与原因）。'
+    ? `期望输出：${opts.expectedOutput}\n（最终回复请以一行「结论:」开头的标记句总结关键信息——标记句会被上下文压缩保留，格式：结论: <要点>）`
+    : '完成后用简洁文本输出结果摘要（关键发现/完成清单/未完成项与原因）。最终回复以一行「结论:」开头的标记句总结（会被上下文压缩保留）。'
   return `协作子任务（role=${opts.role}）：\n${opts.task}\n\n${expected}`
 }
 

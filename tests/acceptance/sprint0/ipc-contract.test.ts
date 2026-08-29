@@ -15,6 +15,7 @@ const expectedChannels = {
   AGENT_LIST_SESSIONS: 'agent:list-sessions',
   AGENT_LOAD_MESSAGES: 'agent:load-messages',
   AGENT_CONFIRM_REQUIREMENTS: 'agent:confirm-requirements',
+  PASTED_IMAGE_SAVE: 'pasted-image:save',
   SESSION_CLEAN_ORPHANS: 'session:clean-orphans',
   AGENT_STREAM_EVENT: 'agent:stream-event',
   PERMISSION_RESPONSE: 'permission:response',

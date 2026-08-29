@@ -16,6 +16,7 @@
 
 export const IPC_CHANNELS = {
   AGENT_SEND_MESSAGE: 'agent:send-message',
+  PASTED_IMAGE_SAVE: 'pasted-image:save',
   AGENT_STOP: 'agent:stop',
   AGENT_LIST_SESSIONS: 'agent:list-sessions',
   AGENT_LOAD_MESSAGES: 'agent:load-messages',
@@ -532,7 +533,7 @@ export interface CategoryRoutingUpdateEnvelope extends RequestEnvelope {
 // =========================================================================
 
 export interface MessageContentBlock {
-  type: 'text' | 'tool_use' | 'tool_result'
+  type: 'text' | 'tool_use' | 'tool_result' | 'image'
   text?: string
   id?: string
   name?: string
@@ -541,6 +542,31 @@ export interface MessageContentBlock {
   content?: string
   /** tool_result 专用：true 表示该工具执行失败/被拒，模型据此自纠 */
   is_error?: boolean
+  /** image 块专用：短引用 pasted-images/<sessionId>/<uuid>.<ext>——JSONL/内存只落此 id 不落 base64 */
+  imageId?: string
+  /** image 块专用：image/png | image/jpeg | image/gif | image/webp */
+  media_type?: string
+  /** image 块水合产物（Anthropic base64 source）：只在 anthropicMessagesQuery 请求体出现，
+   *  禁止写入 JSONL 或回传 renderer（契约测试 S4-AGENT-091/095 锁定） */
+  source?: { type: 'base64'; media_type: string; data: string }
+}
+
+/** 粘贴图片引用（AgentSendMessageInput.images / ChatPanel 发送第二参） */
+export interface PastedImageRef {
+  imageId: string
+  media_type: string
+}
+
+/** 粘贴图存盘 IPC 输入：base64 载荷（无 dataURL 前缀）+ 扩展名（png/jpeg/gif/webp） */
+export interface PastedImageSaveInput extends RequestEnvelope {
+  session_id: string
+  base64: string
+  ext: string
+}
+
+export interface PastedImageSaveResult {
+  imageId: string
+  media_type: string
 }
 
 export interface AgentMessage {
@@ -580,6 +606,8 @@ export interface AgentConfirmRequirementsInput extends RequestEnvelope {
   requirement_ids?: string[]
   /** confirm 时勾选采纳的市调想法（label 原文，2026-08-29 灵感参考改造）：并入需求清单追加 F-00N */
   adopted_ideas?: string[]
+  /** 可选参考网页链接（web-reference-extractor，2026-08-28）：仅 http(s)，提取失败静默降级 */
+  reference_url?: string
 }
 
 /** 市调提炼想法（2026-08-29 灵感参考改造）：向导把搜索结果提炼成可勾选采纳的「市面上的做法」。 */
@@ -604,6 +632,8 @@ export interface AgentSendMessageInput extends RequestEnvelope {
   mode: ProjectMode
   current_stage: WorkflowStage
   channel_id?: string
+  /** 剪贴板粘贴图片引用（clipboard-paste P1，2026-08-29）：随消息一同进模型与 JSONL */
+  images?: PastedImageRef[]
   metadata?: {
     source: 'chat' | 'card_option' | 'system_resume'
     selected_option_id?: string
@@ -616,6 +646,8 @@ export interface AgentSendMessageResult {
   accepted: true
   session_id: string
   stream_started: boolean
+  /** message-queue（2026-08-27）：true = 会话忙，消息已入队待 run 完成后自动派发 */
+  queued?: boolean
 }
 
 export interface AgentCancelInput extends RequestEnvelope {
@@ -643,6 +675,9 @@ export interface AgentSessionRecord {
   jsonl_path: string
   created_at: string
   updated_at: string
+  /** delegation-persistence 阶段 1（2026-08-28）：委派子会话归属——重启后按 delegationId 找回 */
+  parent_session_id?: string
+  source_delegation_id?: string
 }
 
 export interface AgentListSessionsInput extends RequestEnvelope {
@@ -756,6 +791,12 @@ export interface AgentEvent {
     | 'delegation_cancelled'
     /** usage 竹节压缩（闭环 PR6）：payload 含 at_turn / input_tokens / compactions；messages 已重置为 task+交接文档 */
     | 'loop_compaction'
+    /** 排队消息开始派发（message-queue 2026-08-27）：payload.queue_message_id；渲染端把「已排队」气泡翻转 */
+    | 'queued_started'
+    /** 排队消息派发失败（onDropped 气泡，r79）：payload.queue_message_id / reason；渲染端红泡告知 */
+    | 'queue_dropped'
+    /** 会话用量汇总（usage-guard 渲染层 2026-08-28）：loop 结束发布，渲染端显示透明条 */
+    | 'usage_summary'
   payload: Record<string, unknown>
   created_at: string
 }
@@ -1152,6 +1193,10 @@ export interface AnalyticsTrackResult {
 // =========================================================================
 
 export type ElectronAPI = {
+  pastedImage: {
+    /** 剪贴板粘贴图存盘（clipboard-paste P1）：base64→{PROMA_HOME}/pasted-images/<sessionId>/，返回短引用 */
+    save(input: PastedImageSaveInput): Promise<ApiResult<PastedImageSaveResult>>
+  }
   agent: {
     sendMessage(input: AgentSendMessageInput): Promise<ApiResult<AgentSendMessageResult>>
     cancel(input: AgentCancelInput): Promise<ApiResult<AgentCancelResult>>

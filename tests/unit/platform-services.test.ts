@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { EventEmitter } from 'node:events'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -23,7 +24,7 @@ describe('PlatformServices sandbox runtime', () => {
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     clearSandboxRuntimeForTests()
   })
 
@@ -248,7 +249,7 @@ describe('PlatformServices analytics', () => {
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   it('records an event under the project workspace slug', () => {
@@ -297,7 +298,7 @@ describe('PlatformServices snapshot capacity (A2-16)', () => {
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     clearSandboxRuntimeForTests()
     setSnapshotCaptureProviderForTests()
   })

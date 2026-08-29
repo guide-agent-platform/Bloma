@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -35,7 +36,7 @@ function withTmpHome<T>(fn: () => T): T {
   try {
     return fn()
   } finally {
-    process.env.PROMA_HOME = originalHome
+    restorePromaHome(originalHome)
   }
 }
 
@@ -63,7 +64,7 @@ describe('ProjectService archive', () => {
 
       expect(listProjects().some((p) => p.project_id === project.project_id)).toBe(false)
     } finally {
-      process.env.PROMA_HOME = originalHome
+      restorePromaHome(originalHome)
     }
   })
 })

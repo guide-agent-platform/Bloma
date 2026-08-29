@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { EventEmitter } from 'node:events'
 import type { ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
@@ -65,7 +66,7 @@ describe('agent-tools（PR2 L2）', () => {
     setBrowserGwtDisabledForTests(true)
   })
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     setJsSyntaxCheckerForTests(undefined)
     setBrowserGwtDisabledForTests(false)
     clearSandboxRuntimeForTests()
@@ -132,6 +133,26 @@ describe('agent-tools（PR2 L2）', () => {
   })
 
   describe('write_file / edit_file（编辑护栏前置）', () => {
+    it('[S4-AGENT-054] write_file 超大内容预拦截：≥16k tokens 拒绝并引导分块（费用守卫 Hook 3，2026-08-28）', async () => {
+      const project = createProject({ request_id: 'req-w-big', mode: 'quick' })
+      const tools = buildAgentTools({ projectId: project.project_id })
+      const huge = 'x'.repeat(70_000) // 70000 ASCII ≈ 17500 tokens ≥ 16k 阈值
+      const outcome = await byName(tools, 'write_file').execute({ path: 'big.html', content: huge }, ctxFor(project.project_id))
+      expect(outcome.isError).toBe(true)
+      expect(outcome.output).toContain('17500')
+      expect(outcome.output).toContain('edit_file')
+      // 拒绝即未落盘
+      expect(existsSync(join(project.root_path, 'big.html'))).toBe(false)
+    })
+
+    it('[S4-AGENT-055] 正常大小写入不受影响（零回归）', async () => {
+      const project = createProject({ request_id: 'req-w-ok', mode: 'quick' })
+      const tools = buildAgentTools({ projectId: project.project_id })
+      const outcome = await byName(tools, 'write_file').execute({ path: 'ok.html', content: '<html><body>ok</body></html>' }, ctxFor(project.project_id))
+      expect(outcome.isError).toBeFalsy()
+      expect(existsSync(join(project.root_path, 'ok.html'))).toBe(true)
+    })
+
     it('路径沙箱：../ 逃逸、绝对路径、盘符路径一律拒绝', async () => {
       const project = createProject({ request_id: 'req-w1', mode: 'quick' })
       const tools = buildAgentTools({ projectId: project.project_id })

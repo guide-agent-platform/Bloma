@@ -10,6 +10,8 @@ export interface ModeCardProps {
   description: string
   /** 辅助提示（卡片底部 helper 文案） */
   helperText?: string
+  /** 角标（如「新手推荐」，纯样式，提升首屏默认认知） */
+  badge?: string
   /** 选中回调 */
   onSelect: (mode: 'quick' | 'longterm') => void
   /** 禁用（防止双击重复创建） */
@@ -26,6 +28,7 @@ export const ModeCard: React.FC<ModeCardProps> = ({
   title,
   description,
   helperText,
+  badge,
   onSelect,
   disabled = false,
 }) => {
@@ -42,12 +45,21 @@ export const ModeCard: React.FC<ModeCardProps> = ({
     ? '0 6px 16px -4px rgba(124,58,237,0.45)'
     : '0 6px 16px -4px rgba(8,145,178,0.45)'
 
+  // 模式卡 a11y B 档（2026-08-28）：根 button → div role=group（可达名收口 + 保鼠标整卡行为），
+  // 「开始」span → 真 button（键盘细粒度导航 + 原生激活；stopPropagation 防容器冒泡双触发——审计 v2 实测）。
+  // disabled 迁移：容器 aria-disabled+样式，内按钮原生 disabled。
+  const handleCardClick = (): void => {
+    if (!disabled) onSelect(mode)
+  }
+
   return (
-    <button
+    <div
+      role="group"
+      aria-label={`${title}（${MODE_LABELS[mode]}）`}
+      aria-disabled={disabled || undefined}
       className="mode-tile tile"
       data-ai-id={isQuick ? 'mode-card-quick' : 'mode-card-longterm'}
-      disabled={disabled}
-      onClick={() => onSelect(mode)}
+      onClick={handleCardClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
@@ -96,6 +108,26 @@ export const ModeCard: React.FC<ModeCardProps> = ({
           {isQuick ? <Zap size={14} /> : <Gem size={14} />}
           {MODE_LABELS[mode]}
         </span>
+        {/* QW#4（ux-r2 I3）：新手推荐角标（纯样式，默认认知引导） */}
+        {badge && (
+          <span
+            data-ai-id={isQuick ? 'mode-card-quick-badge' : undefined}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 'var(--space-1)',
+              padding: '3px var(--space-2)',
+              fontSize: 'var(--font-size-xs)',
+              fontWeight: 700,
+              borderRadius: 'var(--radius-full)',
+              background: 'rgb(255 255 255 / 0.95)',
+              color: 'var(--violet-700)',
+              boxShadow: '0 2px 8px rgb(0 0 0 / 0.18)',
+            }}
+          >
+            {badge}
+          </span>
+        )}
         {/* 水印大图标 */}
         <span
           aria-hidden
@@ -134,7 +166,14 @@ export const ModeCard: React.FC<ModeCardProps> = ({
         >
           {description}
         </p>
-        <span
+        <button
+          type="button"
+          aria-label={`开始：${title}`}
+          disabled={disabled}
+          onClick={(e) => {
+            e.stopPropagation()
+            if (!disabled) onSelect(mode)
+          }}
           style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -147,17 +186,19 @@ export const ModeCard: React.FC<ModeCardProps> = ({
             color: 'var(--white)',
             background: ctaBg,
             boxShadow: ctaShadow,
+            border: 'none',
+            cursor: disabled ? 'not-allowed' : 'pointer',
           }}
         >
           开始
           <ArrowRight size={16} />
-        </span>
+        </button>
         {helperText && (
           <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-3)' }}>
             {helperText}
           </span>
         )}
       </div>
-    </button>
+    </div>
   )
 }

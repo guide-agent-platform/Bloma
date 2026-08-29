@@ -15,6 +15,10 @@ export default defineConfig({
   },
   test: {
     root: __dirname,
+    // 全局单测超时 30s：用例含真实 IO（mkdtemp/写盘/子流程），全量 62 文件并发时 IO 争抢
+    // 可使单用例从 ~0.7s 膨胀到 >5s，默认 5s 偶发超时级联失败（2026-08-28 flaky 实测）。
+    // 放宽后真 hang 的测试也能在 30s 内报失败，不影响 CI 时效（全量常态 ~9s）。
+    testTimeout: 30_000,
     // PROMA_HOME 被 teardown 写成字符串 "undefined" 时统一归位，见该文件注释
     setupFiles: [resolve(__dirname, 'tests/support/proma-home-guard.ts')],
   },

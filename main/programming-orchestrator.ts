@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { AgentEvent, AgentLoopJudgeMetadata, AgentSendMessageInput, Channel, ChannelModel, MessageContentBlock, Project, ProjectMode, Snapshot, SnapshotKind, TemplateType } from '../shared/types'
+import type { AgentEvent, AgentLoopJudgeMetadata, AgentSendMessageInput, Channel, ChannelModel, DocumentSyncResult, MessageContentBlock, Project, ProjectMode, Snapshot, SnapshotKind, TemplateType } from '../shared/types'
 import { getAgentSessionPath, getDocumentsDir } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
 import { buildPrdBackplane, readPrdBackplane, readUxContractSketch, syncDocuments, updateRequirementStatus, writeSecurityScanDocument } from './document-engine'
@@ -9,6 +9,7 @@ import { appendProjectLearning, renderLearningsSection } from './learnings-log'
 import { createSnapshot, runSandbox, trackAnalytics } from './platform-services'
 import { renderPackageJson, renderStaticServer } from './project-scaffold'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
+import { appendProjectMapToSystem, loadProjectMapBlock } from './project-map'
 import { resolveChannelEnv } from './runtime-fallback'
 import { captureConstraints, extractConstraints, readProjectConstraints } from './constraint-extractor'
 import { distillProjectMemorySafely } from './memory-distiller'
@@ -304,7 +305,8 @@ function sketchFallbackCopy(reason: SketchFallbackReason): string {
   if (reason === 'llm_failed') {
     return '（草图说明：这次模型生成失败了，先用简化模板让你确认大方向。可以再让我生成一次，或直接描述想要的样子。）'
   }
-  return '（草图说明：这次没有可用的模型渠道，先用简化模板让你确认大方向。在设置里配好渠道后再让我重新生成，外观就会贴合你的需求。）'
+  // QW#3（ux-first-run-0basics I2）：去「渠道」黑话 + 给动词出口（0 基础用户不知道「渠道」是什么）
+  return '（草图说明：AI 还没连上，先用简化模板给你看个方向。去「设置」里连接 AI 模型后，回复「重新生成」即可。）'
 }
 
 // ---------------------------------------------------------------------------
@@ -622,7 +624,7 @@ async function tryResolveAgentLoop(input: MvpTaskInput): Promise<AgentLoopChanne
     return { env, channel, model }
   }
 
-  const probed = await probeToolSupport(input.query, env, input.session_id, input.signal)
+  const probed = await probeToolSupport(input.query, env, input.session_id, input.signal, channel?.provider_type)
   if (probed === undefined) {
     // 探测自身失败（网络/渠道抖动）：不写缓存——下次仍会重试探测；本次如实抛错（无管道可回退）
     throw agentLoopChannelError(input, 'AGENT_LOOP_PROBE_INCONCLUSIVE', '工具能力探测未得出结论（网络问题），请稍后重试。')
@@ -655,6 +657,7 @@ async function probeToolSupport(
   env: Record<string, string>,
   sessionId: string,
   signal: AbortSignal | undefined,
+  providerType?: string,
 ): Promise<boolean | undefined> {
   const controller = new AbortController()
   const onOuterAbort = () => controller.abort(signal?.reason)
@@ -666,6 +669,9 @@ async function probeToolSupport(
       signal: controller.signal,
       sessionId,
       maxTokens: 128,
+      // omit 推广（审查 P2-①）：探测请求同样透传 providerType，避免 omit 渠道 400 导致
+      // 探测无结论 → MVP 生成整体失败（而非仅多一次往返）
+      providerType,
       history: [{ role: 'system', content: '这是一次工具能力探测。请立即调用 loop_support_probe 工具，不要输出任何文字。' }],
       tools: [TOOL_SUPPORT_PROBE],
     })) {
@@ -722,8 +728,9 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     delegationMaxTurns: DELEGATION_MAX_TURNS,
     permissionMode: AUTOMATED_PERMISSION_MODE,
     temperature: categoryTemperature('mvp'),
-    system: buildLoopSystemWithOverride(backplane, editFormat),
+    system: buildLoopSystemWithOverride(backplane, editFormat, input.project_id),
     editFormat,
+    providerType: loop.channel.provider_type,
     publish: (type, payload) => publish(input, type, payload),
     onChildTurn: (info, child) => {
       trackAnalytics({
@@ -762,7 +769,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   let result: AgentLoopResult
   try {
     result = await runAgentLoop({
-    system: buildLoopSystemWithOverride(backplane, editFormat),
+    system: buildLoopSystemWithOverride(backplane, editFormat, input.project_id),
     task: buildAgentLoopTask(backplane, input.mode),
     // toolBudget 首个生产接线（闭环 PR5）：web_research 每次都 fork 调研子代理，
     // 限 4 次防长 loop 无节制外呼；超限走既有 budgetExhausted 软着陆
@@ -987,13 +994,23 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
  * 背板锚定系统提示词 + 用户追加规则（D4 追加模式）：`loop-system` 覆盖文件内容追加在
  * 动态 system prompt 之后（背板锚定段不可覆盖）。无覆盖文件返回 base 本身。
  */
-function buildLoopSystemWithOverride(backplane: PrdBackplane, editFormat: 'diff' | 'whole'): string {
+function buildLoopSystemWithOverride(backplane: PrdBackplane, editFormat: 'diff' | 'whole', projectId?: string): string {
   const base = buildAgentLoopSystemPrompt(backplane, editFormat)
   // 历史经验段（改造 2）：迭代/重生成场景下轮 fresh loop 开场即知上轮踩坑；
   // 首轮无经验返回空串零开销；renderLearningsSection 内部静默失败
   const learnings = renderLearningsSection(backplane.project_id)
   const override = loadPromptOverride('loop-system')
-  return [base, learnings, override ? `【用户自定义规则】\n${override}` : ''].filter(Boolean).join('\n\n')
+  // 并集：本地 learnings 经验段 + 队友 project-map 注入（2026-08-29 合入）
+  // project-map（Graft 模式，r69）：代码结构语义地图注入 system 尾部——定位代码优先按锚点
+  // read_file，避免每轮 grep 漫游（冷会话重探索问题）；地图缺失/项目读取失败静默不注入。
+  const withOverride = [base, learnings, override ? `【用户自定义规则】\n${override}` : ''].filter(Boolean).join('\n\n')
+  if (!projectId) return withOverride
+  try {
+    const project = findProject(projectId)
+    return appendProjectMapToSystem(withOverride, loadProjectMapBlock(projectId, project.workspace_slug))
+  } catch {
+    return withOverride
+  }
 }
 
 /** 初始 user 消息：任务指令（背板细节在 system，这里只给行动指令）。 */
@@ -1513,6 +1530,25 @@ export interface IterationTaskInput {
 }
 
 /**
+ * 迭代收尾 changelog 触发（GA-03 后半 2026-08-27，PRD §7.1「每轮迭代结束后追加 Changelog」）。
+ *
+ * 同步执行、失败静默降级（同 distillProjectMemorySafely 的降级原则）：文档同步是附属产物，
+ * 失败绝不阻断迭代成功收尾；熔断/取消路径不调用本函数（调用位置在 runIterationTask 成功尾）。
+ * 返回降级结果（当前无调用方消费返回值，保留以便未来接决策日志）。
+ */
+export function syncIterationCompleted(input: {
+  request_id: string
+  session_id: string
+  project_id: string
+}): DocumentSyncResult {
+  try {
+    return syncDocuments({ ...input, checkpoint: 'iteration_completed' })
+  } catch {
+    return { documents: [], stale_documents: [] }
+  }
+}
+
+/**
  * runIterationTask — 已生成完成后用户提出修改诉求（打字或点选纠错）时，重新生成一版 MVP。
  *
  * 打通 Sprint 3「纠错 → 重新生成 → 迭代」主线：此前 ready 护栏把修改请求一律挡回固定文案，
@@ -1565,6 +1601,13 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
       session_id: input.session_id,
       channel_id: input.channel_id,
       query: input.query,
+    })
+    // GA-03（PRD §7.1 触发节点「每轮迭代结束后」）：追加 Changelog，合并本轮功能项
+    // 清单；fire-and-forget——写盘失败静默降级，不阻断迭代成功收尾
+    syncIterationCompleted({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
     })
     return mvp
   } catch (error) {
@@ -1640,6 +1683,10 @@ export async function mergeIterationRequirements(
       query: input.query,
       env,
       signal: input.signal,
+      // 推理档位试点（reasoning-profile 2026-08-27）：归一化语义判定启用 high；
+      // 仅 deepseek-v4* / glm 系 profile 实际生效，其余模型/omit 渠道自动落回现状
+      thinkingLevel: 'high',
+      providerType: resolution.channel?.provider_type,
     })
     if (normalization.action === 'out_of_scope' && normalization.outOfScope) {
       addScopeExclusion(input.project_id, normalization.outOfScope)

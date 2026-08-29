@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../../support/proma-home-guard'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -26,7 +27,7 @@ describe('Sprint 2 judge hard constraints acceptance (S2-JUDGE-003 / S2-JUDGE-00
     if (home) {
       rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     }
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     home = undefined
   })
 

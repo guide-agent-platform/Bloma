@@ -1,12 +1,15 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { rmSyncWithRetry } from './fs-retry'
 import { tmpdir } from 'node:os'
 import { extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { findProject, readLastSketchRequirements } from './project-service'
+import { scheduleProjectMapRefresh } from './project-map'
 import { getSandboxLogs, runSandbox } from './platform-services'
 import { runGwtScenarios } from './gwt-service'
 import { planScenarios, scenarioName } from './gwt-runner'
+import { decideWrite, estimateTokenCount } from './usage-guard'
 import { runSecurityScan } from './security-scan'
 import { withAbort, type AgentLoopTool, type ToolContext, type ToolOutcome } from './agent-loop'
 import {
@@ -113,8 +116,8 @@ async function checkJsSyntaxViaNode(content: string): Promise<{ ok: true } | { o
     if (scriptCheck.ok) return { ok: true }
     return { ok: false, error: moduleCheck.stderr.trim() || 'JS 语法检查未通过' }
   } finally {
-    rmSync(mjs, { force: true })
-    rmSync(cjs, { force: true })
+    rmSyncWithRetry(mjs, { force: true })
+    rmSyncWithRetry(cjs, { force: true })
   }
 }
 
@@ -266,6 +269,13 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     const abs = join(root, rel)
     mkdirSync(join(abs, '..'), { recursive: true })
     writeFileSync(abs, finalContent, 'utf8')
+    // project-map（Graft 模式，r69）：工程产物写盘后 fire-and-forget 刷新语义地图
+    //（write_file / edit_file whole / edit_file diff 三路共用本写入点）；失败静默不影响返回
+    try {
+      scheduleProjectMapRefresh(findProject(projectId).workspace_slug, projectId, root)
+    } catch {
+      /* 项目索引缺失等：地图刷新放弃，写盘结果不受影响 */
+    }
     const stripped = finalContent !== content
     return {
       output: `已写入 ${rel}（${Buffer.byteLength(finalContent, 'utf8')} 字节）${stripped ? '；已剥离与平台 CSP 冲突的 meta 标签' : ''}`,
@@ -459,6 +469,16 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     },
     execute: async (toolInput, ctx) => {
       if (typeof toolInput.content !== 'string') return { output: '缺少 content 参数（文件完整内容）。', isError: true }
+      // 费用守卫 Hook 3（usage-guard，2026-08-28）：超大单次写入预拦截——整文件覆盖语义下
+      // 一次写 16k+ token 内容通常意味着失控（上下文爆掉才失败的预防线），当场引导分块。
+      const estTokens = estimateTokenCount(toolInput.content)
+      if (decideWrite(toolInput.content) === 'chunk') {
+        return {
+          output: `单次写入内容过大（约 ${estTokens} tokens，阈值 16000）。请拆分为多次写入：先写骨架文件，再用 edit_file 逐段补充内容。`,
+          isError: true,
+          detail: { est_tokens: estTokens, threshold: 16000 },
+        }
+      }
       const project = findProject(projectId)
       const resolved = resolveInsideProject(project.root_path, toolInput.path)
       if (!resolved.ok) return { output: resolved.error, isError: true }

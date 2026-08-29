@@ -26,8 +26,8 @@ describe('Sprint 1 mode and workspace regression', () => {
   it('[S1-UI-001] 两道门应展示快消型和长期迭代型入口且不展示技术栈选择', () => {
     render(<Provider><ModeSelectionPage onModeSelected={vi.fn()} /></Provider>)
 
-    expect(screen.getByRole('button', { name: /快速尝鲜/ })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /精细打磨/ })).toBeTruthy()
+    expect(screen.getByRole('group', { name: /快速做一个试试（快速尝鲜）/ })).toBeTruthy()
+    expect(screen.getByRole('group', { name: /认真打磨一个产品（精细打磨）/ })).toBeTruthy()
     expect(screen.queryByText(/技术栈/)).toBeNull()
   })
 
@@ -44,7 +44,7 @@ describe('Sprint 1 mode and workspace regression', () => {
     } as unknown as ElectronAPI
 
     render(<Provider><ModeSelectionPage onModeSelected={onModeSelected} /></Provider>)
-    fireEvent.click(screen.getByRole('button', { name: /快速尝鲜/ }))
+    fireEvent.click(screen.getByRole('group', { name: /快速做一个试试（快速尝鲜）/ }))
 
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('项目创建失败'))
     expect(onModeSelected).not.toHaveBeenCalled()
@@ -56,7 +56,7 @@ describe('Sprint 1 mode and workspace regression', () => {
     window.electronAPI = { project: { create } } as unknown as ElectronAPI
 
     render(<Provider><ModeSelectionPage onModeSelected={onModeSelected} /></Provider>)
-    fireEvent.click(screen.getByRole('button', { name: /快速尝鲜/ }))
+    fireEvent.click(screen.getByRole('group', { name: /快速做一个试试（快速尝鲜）/ }))
 
     await waitFor(() => expect(onModeSelected).toHaveBeenCalledWith('quick'))
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ mode: 'quick' }))
@@ -85,7 +85,7 @@ describe('Sprint 1 mode and workspace regression', () => {
 
   it('[S1-PROJECT-003] 选择模式进入工作区后不应返回两道门且应显示所有项目入口', async () => {
     renderAppWithProject('quick')
-    fireEvent.click(screen.getByRole('button', { name: /快速尝鲜/ }))
+    fireEvent.click(screen.getByRole('group', { name: /快速做一个试试（快速尝鲜）/ }))
 
     await waitFor(() => expect(screen.getByRole('textbox')).toBeTruthy())
     expect(screen.queryByText('你想做什么样的软件？')).toBeNull()
@@ -94,7 +94,7 @@ describe('Sprint 1 mode and workspace regression', () => {
 
   it('[S1-UI-003] 长期迭代型工作区应显示文档入口', async () => {
     renderAppWithProject('longterm')
-    fireEvent.click(screen.getByRole('button', { name: /精细打磨/ }))
+    fireEvent.click(screen.getByRole('group', { name: /认真打磨一个产品（精细打磨）/ }))
 
     await waitFor(() => expect(screen.getByRole('button', { name: '文档' })).toBeTruthy())
   })
@@ -153,7 +153,7 @@ describe('Sprint 1 mode and workspace regression', () => {
 
     // 新建项目 → 回到两道门选择页
     fireEvent.click(screen.getByRole('button', { name: '新建项目' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: /快速尝鲜/ })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('group', { name: /快速做一个试试（快速尝鲜）/ })).toBeTruthy())
   })
 })
 

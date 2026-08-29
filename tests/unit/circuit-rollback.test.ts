@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import type { ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -17,7 +18,7 @@ describe('circuit break rollback (T5)', () => {
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     clearSandboxRuntimeForTests()
   })
 

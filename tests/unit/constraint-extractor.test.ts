@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -77,7 +78,7 @@ describe('T4-L2 全量扫描：首轮约束历轮可回', () => {
   })
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   it('>30 轮会话，第 1 轮约束仍被扫出（读取侧不靠窗口）', () => {
@@ -104,7 +105,7 @@ describe('T4-L1 约束走门：捕获入库与决策留痕', () => {
   })
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   it('captureConstraints 持久化 project.constraints 并落决策行；重复声明不重复入库', () => {
@@ -153,7 +154,7 @@ describe('T4-L1 约束注入生成提示词（背板常驻）', () => {
   })
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     vi.restoreAllMocks()
   })
 
@@ -214,7 +215,7 @@ describe('T4-L2 runAgent 读取侧：全量扫描回灌引导上下文', () => {
   })
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     setAgentStreamPublisher(() => undefined)
     setSDKQueryForTests(resetQuery)
     vi.unstubAllGlobals()

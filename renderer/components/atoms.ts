@@ -9,6 +9,7 @@ import type {
   AgentEvent,
   AgentMessage,
   AgentSessionMeta,
+  PastedImageRef,
   PermissionRequest,
   Project,
   ProjectMode,
@@ -21,6 +22,7 @@ export type {
   AgentEvent,
   AgentMessage,
   AgentSessionMeta,
+  PastedImageRef,
   PermissionRequest,
   Project,
   ProjectMode,
@@ -48,6 +50,7 @@ export {
   delegationsFamily, emptyDelegationsFallback,
   appendMessageToSession, markDecisionConsumed, clearPermissionRequest, resetProjectState,
   loadAgentSessions, loadSessionHistory, loadSnapshots,
+  sessionUsageFamily,
 } from '../agent-atoms'
 
 export const workspaceWaitingAtom = atom<boolean>(false)

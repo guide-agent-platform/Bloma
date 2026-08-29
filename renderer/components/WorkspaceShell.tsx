@@ -8,7 +8,7 @@ import { DocumentPanel } from './DocumentPanel'
 import { CollaborationPanel } from './CollaborationPanel'
 import type { CardOption } from './CardOptions'
 import type { PreviewStatus } from './PreviewPanel'
-import type { Snapshot } from './atoms'
+import type { Snapshot, PastedImageRef } from './atoms'
 import type { DomCollectContextResult } from '../../shared/types'
 
 export interface WorkspaceShellProps {
@@ -19,7 +19,7 @@ export interface WorkspaceShellProps {
   /** 决策卡正文（2026-08-29：审查卡的具体问题清单） */
   decisionBody?: string
   onCardOptionSelect?: (option: CardOption) => void
-  onSendMessage?: (content: string) => void
+  onSendMessage?: (content: string, images?: PastedImageRef[]) => void
   waitStartTime?: number
   waitActionLabel?: string
   onContinueWaiting?: () => void
@@ -119,6 +119,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
           onViewPartial={props.onViewPartial}
           isHistoryLoading={props.isHistoryLoading}
           onStopGeneration={props.onStopGeneration}
+          onOpenSettings={props.onOpenSettings}
         />
         <PreviewPanel
           status={props.previewStatus}

@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { mkdtempSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -10,7 +11,7 @@ describe('Local-First storage', () => {
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   it('uses temporary PROMA_HOME and creates JSON/file directories only', () => {
@@ -49,7 +50,13 @@ describe('Local-First storage', () => {
     expect(process.env.PROMA_HOME).toBe('undefined')
   })
 
+  it('裸 teardown 若写成字符串 "null" 同样会被 guard 归位', () => {
+    process.env.PROMA_HOME = null as unknown as string
+    expect(process.env.PROMA_HOME).toBe('null')
+  })
+
   it('全局 guard 在下个用例开始前归位，污染不跨用例传播', () => {
     expect(process.env.PROMA_HOME).not.toBe('undefined')
+    expect(process.env.PROMA_HOME).not.toBe('null')
   })
 })

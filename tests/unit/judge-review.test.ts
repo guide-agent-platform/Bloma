@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -10,7 +11,7 @@ describe('Judge review trigger and return counts (A2-11)', () => {
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     setProgrammingEventPublisher(() => undefined)
   })
 
@@ -102,7 +103,7 @@ describe('Judge review loop-aware fuse（M4-B：只终验不重修）', () => {
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     setProgrammingEventPublisher(() => undefined)
     setForegroundRunChecker(() => false)
   })

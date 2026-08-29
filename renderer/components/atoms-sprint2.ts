@@ -55,6 +55,60 @@ export const channelsListAtom = atom<Channel[]>([])
 /** 渠道列表加载状态 */
 export const channelsLoadingAtom = atom<'idle' | 'loading' | 'loaded' | 'error'>('idle')
 
+/**
+ * 聊天输入草稿（WC-P2，2026-08-29）：提升到 atom 使零渠道提交被拦截直达设置页后，
+ * 返回工作区时输入仍在——连接成功即可直接发送，不重打一遍。
+ */
+export const chatInputDraftAtom = atom('')
+
+/**
+ * 是否有可用 AI 渠道（QW#1 ux-first-run-0basics I1）：
+ * null=未决（加载中/未加载）；true/false=已决（有启用渠道且含启用模型）。
+ * 供 WorkspaceHeader 三态徽标（「未配置 AI / AI 就绪 / 离线」）消费，替代 navigator.onLine 误导。
+ */
+export const hasUsableChannelsAtom = atom<boolean | null>((get) => {
+  const loading = get(channelsLoadingAtom)
+  if (loading !== 'loaded') return null
+  return get(channelsListAtom).some((channel) => channel.enabled && (channel.models ?? []).some((model) => model.enabled))
+})
+
+/** 模块级 in-flight 守卫：App 与 Settings 页只允许首次真正发一次 channels.list（审查 P2-②） */
+let channelsFetchStarted = false
+
+/** 测试用：重置 in-flight 守卫（模块级状态跨用例会污染） */
+export function resetChannelsFetchFlagForTests(): void {
+  channelsFetchStarted = false
+}
+
+/**
+ * 加载渠道列表到 atoms（QW#1：Header 三态徽标需要启动时就绪；Settings 页复用）。
+ * 守卫：首次调用真正发请求，后续调用直接返回（保存/删除渠道由 handler 本地 setChannels 同步，无需重拉）。
+ */
+export async function refreshChannelsList(
+  setChannels: (channels: Channel[]) => void,
+  setLoading: (state: 'idle' | 'loading' | 'loaded' | 'error') => void,
+): Promise<void> {
+  if (channelsFetchStarted) return
+  channelsFetchStarted = true
+  const api = window.electronAPI
+  if (!api?.channels?.list) {
+    setLoading('error')
+    return
+  }
+  setLoading('loading')
+  try {
+    const result = await api.channels.list({ request_id: crypto.randomUUID() })
+    if (result.ok) {
+      setChannels(result.data)
+      setLoading('loaded')
+    } else {
+      setLoading('error')
+    }
+  } catch {
+    setLoading('error')
+  }
+}
+
 /** 渠道测试连接结果 */
 export const channelTestResultAtom = atom<{
   channelId: string

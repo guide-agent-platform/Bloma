@@ -45,6 +45,7 @@ import {
   channelsLoadingAtom,
   channelTestResultAtom,
   permissionModeAtom,
+  refreshChannelsList,
 } from './atoms-sprint2'
 
 // =========================================================================
@@ -185,7 +186,7 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onS
   const [testing, setTesting] = useState(false)
   const [testMsg, setTestMsg] = useState<{ ok: boolean; message: string } | null>(null)
   const [fetching, setFetching] = useState(false)
-  const [fetchMsg, setFetchMsg] = useState<string | null>(null)
+  const [fetchMsg, setFetchMsg] = useState<{ ok: boolean; message: string } | null>(null)
 
   // provider 变化时：编辑模式不清空已填 baseUrl；新增模式若未手填则自动带默认 URL
   const resolvedBaseUrl = baseUrl.trim() || PROVIDER_DEFAULT_URLS[provider] || ''
@@ -257,19 +258,19 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onS
         if (result.ok) {
           const models = result.data.models
           if (models.length === 0) {
-            setFetchMsg('没有拉取到模型，可手动填写')
+            setFetchMsg({ ok: false, message: '没有拉取到模型，可手动填写' })
             return
           }
           // 合并进模型文本：保留已有手填项，追加新拉取项（按名称去重）
           const existing = new Set(modelsText.split(',').map((s) => s.trim()).filter(Boolean))
           const fresh = models.map((m) => m.name).filter((n) => !existing.has(n))
           setModelsText([...existing, ...fresh].join(', '))
-          setFetchMsg(`成功获取 ${models.length} 个模型：${models.map((m) => m.name).slice(0, 3).join('、')}${models.length > 3 ? '…' : ''}`)
+          setFetchMsg({ ok: true, message: `成功获取 ${models.length} 个模型：${models.map((m) => m.name).slice(0, 3).join('、')}${models.length > 3 ? '…' : ''}` })
         } else {
-          setFetchMsg(result.error?.user_visible_message ?? '拉取失败，请重试。')
+          setFetchMsg({ ok: false, message: result.error?.user_visible_message ?? '拉取失败，请重试。' })
         }
       })
-      .catch(() => setFetchMsg('拉取失败，请重试。'))
+      .catch(() => setFetchMsg({ ok: false, message: '拉取失败，请重试。' }))
       .finally(() => setFetching(false))
   }, [mode, channelId, provider, resolvedBaseUrl, apiKey, modelsText])
 
@@ -323,9 +324,9 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onS
 
   return (
     <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-      {/* 渠道名称 */}
+      {/* 渠道名称（QW#5：去「渠道」黑话，0 基础用户不知道什么是渠道） */}
       <div>
-        <label style={labelStyle}>渠道名称 *</label>
+        <label style={labelStyle}>给它起个名字 *</label>
         <input
           style={inputStyle}
           value={name}
@@ -349,14 +350,14 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onS
         </select>
       </div>
 
-      {/* Base URL */}
+      {/* Base URL（QW#5：去技术黑话） */}
       <div>
-        <label style={labelStyle}>Base URL</label>
+        <label style={labelStyle}>服务地址（一般不用改）</label>
         <input
           style={inputStyle}
           value={baseUrl}
           onChange={(e) => setBaseUrl(e.target.value)}
-          placeholder={PROVIDER_DEFAULT_URLS[provider] ? `留空使用 ${PROVIDER_DEFAULT_URLS[provider]}` : '自定义提供商请填写 Base URL'}
+          placeholder={PROVIDER_DEFAULT_URLS[provider] ? `留空使用 ${PROVIDER_DEFAULT_URLS[provider]}` : '自定义提供商请填写服务地址'}
         />
       </div>
 
@@ -457,13 +458,14 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onS
             borderRadius: 'var(--radius-sm)',
             fontSize: 'var(--font-size-sm)',
             fontWeight: 500,
-            color: (testMsg && !testMsg.ok) ? '#991B1B' : '#065F46',
-            background: (testMsg && !testMsg.ok) ? '#FEF2F2' : '#ECFDF5',
-            border: `1px solid ${(testMsg && !testMsg.ok) ? '#FECACA' : '#A7F3D0'}`,
+            // F1 修复（r73）：拉取失败也红——fetchMsg 结构化补 ok 标志，色逻辑合并两源
+            color: ((testMsg && !testMsg.ok) || (fetchMsg && !fetchMsg.ok)) ? '#991B1B' : '#065F46',
+            background: ((testMsg && !testMsg.ok) || (fetchMsg && !fetchMsg.ok)) ? '#FEF2F2' : '#ECFDF5',
+            border: `1px solid ${((testMsg && !testMsg.ok) || (fetchMsg && !fetchMsg.ok)) ? '#FECACA' : '#A7F3D0'}`,
           }}
         >
-          {(testMsg && !testMsg.ok) ? <IconAlertTriangle size={16} /> : <IconCheck size={16} />}
-          <span>{testMsg?.message ?? fetchMsg}</span>
+          {((testMsg && !testMsg.ok) || (fetchMsg && !fetchMsg.ok)) ? <IconAlertTriangle size={16} /> : <IconCheck size={16} />}
+          <span>{testMsg?.message ?? fetchMsg?.message}</span>
         </div>
       )}
 
@@ -828,20 +830,8 @@ export const ChannelSettingsPage: React.FC = () => {
   // ==================== 加载渠道列表 ====================
 
   useEffect(() => {
-    const api = window.electronAPI
-    if (!api?.channels?.list) return
-    setLoading('loading')
-    void api.channels
-      .list({ request_id: crypto.randomUUID() })
-      .then((result) => {
-        if (result.ok) {
-          setChannels(result.data)
-          setLoading('loaded')
-        } else {
-          setLoading('error')
-        }
-      })
-      .catch(() => setLoading('error'))
+    // QW#1：复用启动加载（幂等——App 挂载已加载，这里仅确保 settings 页打开时数据新鲜）
+    void refreshChannelsList(setChannels, setLoading)
   }, [setChannels, setLoading])
 
   // ==================== M5：加载三角色渠道配置视图 ====================

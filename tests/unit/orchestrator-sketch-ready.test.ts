@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { EventEmitter } from 'node:events'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -43,7 +44,7 @@ describe('转移阶段护栏（问题 A / P1）', () => {
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     setAgentStreamPublisher(() => undefined)
     setSDKQueryForTests(defaultTestQuery)
     clearSandboxRuntimeForTests()
@@ -154,7 +155,9 @@ describe('转移阶段护栏（问题 A / P1）', () => {
     // （完整 HTML 含 <style> 且 </html> 闭合 → isHtmlDocument 通过，走 LLM 路径不落模板）
     const SKETCH_HTML = '<!doctype html><html><head><style>body{color:#3333ff}</style></head><body><main>记账</main></body></html>'
     let call = 0
-    setSDKQueryForTests(async function* () {
+    const capturedOptions: Array<{ providerType?: string }> = []
+    setSDKQueryForTests(async function* (_prompt: string, options: { providerType?: string }) {
+      capturedOptions.push(options)
       call += 1
       yield {
         type: 'assistant',
@@ -191,6 +194,9 @@ describe('转移阶段护栏（问题 A / P1）', () => {
       channel_id: 'test-channel',
     })
 
+    // omit 推广（审查 P2-④ 补强）：归一化 LLM 调用（首个）透传渠道 providerType（anthropic）
+    expect(capturedOptions.length).toBeGreaterThan(0)
+    expect(capturedOptions[0]?.providerType).toBe('anthropic')
     // revise 不扩容：修正吸收进 F-002 描述，而不是新增 F-003 碎片
     const requirements = readLastSketchRequirements(project.project_id)
     expect(requirements).toHaveLength(2)

@@ -68,6 +68,11 @@ export const RequirementConfirmDialog: React.FC = () => {
   const [supplementOpen, setSupplementOpen] = useState(false)
   const [supplementText, setSupplementText] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  // web-reference 接线 UI 段（2026-08-28）：可选参考网页链接，confirm 时透传后端提取设计参考卡
+  const [referenceUrl, setReferenceUrl] = useState('')
+  const [referenceError, setReferenceError] = useState(false)
+  /** F9a（r84）：提交/发送失败内联错误条——失败不关窗，用户可重试 */
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
   // 新弹窗到达时重置本地勾选（缺省全选）；checked=null 表示「全选」
   const effectiveChecked = useMemo(() => {
@@ -94,6 +99,8 @@ export const RequirementConfirmDialog: React.FC = () => {
     setSupplementOpen(false)
     setSupplementText('')
     setSubmitting(false)
+    setReferenceUrl('')
+    setReferenceError(false)
     clearConfirm(null)
   }
 
@@ -109,6 +116,13 @@ export const RequirementConfirmDialog: React.FC = () => {
   const submitDecision = async (decision: 'confirm' | 'delegate'): Promise<void> => {
     const api = window.electronAPI
     if (!api?.agent?.confirmRequirements || submitting) return
+    // SSRF 双保险第一道：填了链接必须 http(s) 开头（后端 buildReferenceSection 还有同款门）
+    const trimmedReference = referenceUrl.trim()
+    if (trimmedReference && !/^https?:\/\//i.test(trimmedReference)) {
+      setReferenceError(true)
+      return
+    }
+    setReferenceError(false)
     setSubmitting(true)
     // 乐观关闭（2026-08-27）：confirmRequirements 的 IPC 回传绑定 PRD 管线全程
     // （PRD 生成+六维审查，可达数十秒），await 会让弹窗挂死——先关再等。
@@ -121,10 +135,19 @@ export const RequirementConfirmDialog: React.FC = () => {
         decision,
         requirement_ids: decision === 'confirm' ? [...effectiveChecked] : undefined,
         adopted_ideas: decision === 'confirm' && adoptedIdeas.size > 0 ? [...adoptedIdeas] : undefined,
+        reference_url: trimmedReference || undefined,
       })
-      if (!result?.ok) console.error('[requirement-confirm] 提交失败:', result?.error)
+      // F9a 修复（r84）：失败不关窗——弹窗留+勾选保留+内联错误条（决定不再静默丢失）
+      if (!result?.ok) {
+        setSubmitError(`提交失败：${result?.error ?? '未知错误'}——请重试`)
+        setSubmitting(false)
+        return
+      }
     } catch (error) {
       console.error('[requirement-confirm] 提交异常:', error)
+      setSubmitError('提交失败：连接异常——请重试')
+      setSubmitting(false)
+      return
     }
   }
 
@@ -136,7 +159,7 @@ export const RequirementConfirmDialog: React.FC = () => {
     // 乐观关闭（同 submitDecision：不等 IPC 返回）
     close()
     try {
-      await api.agent.sendMessage({
+      const result = await api.agent.sendMessage({
         request_id: crypto.randomUUID(),
         session_id: state.sessionId,
         project_id: state.projectId,
@@ -145,8 +168,17 @@ export const RequirementConfirmDialog: React.FC = () => {
         current_stage: stage,
         metadata: { source: 'chat' },
       })
+      // F9a 修复（r84）：supplement 失败同样不关窗——错误条+文本保留可重发
+      if (!result?.ok) {
+        setSubmitError(`发送失败：${result?.error ?? '未知错误'}——请重试`)
+        setSubmitting(false)
+        return
+      }
     } catch (error) {
       console.error('[requirement-confirm] 补充说明发送异常:', error)
+      setSubmitError('发送失败：连接异常——请重试')
+      setSubmitting(false)
+      return
     }
   }
 
@@ -328,6 +360,47 @@ export const RequirementConfirmDialog: React.FC = () => {
               </p>
             )}
           </details>
+        )}
+
+        {/* 参考链接（web-reference 接线 UI 段，2026-08-28）：可选，confirm 时透传提取设计参考卡 */}
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={{ fontSize: 12, color: 'var(--color-text-secondary, #5b6472)' }}>参考网页链接（可选）</span>
+          <input
+            data-ai-id="requirement-confirm-reference-url"
+            type="text"
+            value={referenceUrl}
+            onChange={(event) => {
+              setReferenceUrl(event.target.value)
+              setReferenceError(false)
+            }}
+            placeholder="做个像某网站那样的？贴链接（http(s)://…）"
+            style={{ ...inputStyle, minHeight: 0 }}
+          />
+          {referenceError && (
+            <span data-ai-id="requirement-confirm-reference-error" style={{ fontSize: 12, color: '#d64545' }}>
+              链接需以 http:// 或 https:// 开头，请修改后再确认
+            </span>
+          )}
+        </label>
+
+        {submitError && (
+          <div
+            data-ai-id="requirement-confirm-submit-error"
+            role="alert"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: 'var(--space-2) var(--space-3)',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: 12,
+              color: '#d64545',
+              background: '#FEF2F2',
+              border: '1px solid #FECACA',
+            }}
+          >
+            {submitError}
+          </div>
         )}
 
         {supplementOpen ? (

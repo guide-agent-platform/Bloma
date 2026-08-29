@@ -60,6 +60,7 @@ import type {
   ProjectUnarchiveInput,
   ProjectUpgradeInput,
   RequestEnvelope,
+  PastedImageSaveInput,
   SandboxRunInput,
   SandboxStopInput,
   SnapshotCreateInput,
@@ -71,6 +72,9 @@ import type {
 } from '../shared/types'
 
 const electronAPI: ElectronAPI = {
+  pastedImage: {
+    save: (input: PastedImageSaveInput) => ipcRenderer.invoke(IPC_CHANNELS.PASTED_IMAGE_SAVE, input),
+  },
   agent: {
     sendMessage: (input: AgentSendMessageInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SEND_MESSAGE, input),

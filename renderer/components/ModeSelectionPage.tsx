@@ -197,7 +197,8 @@ export const ModeSelectionPage: React.FC<ModeSelectionPageProps> = ({
           mode="quick"
           title="快速做一个试试"
           description="适合一次性小工具、试试想法。AI 自动搞定大部分细节，你只管看最终效果满不满意。"
-          helperText="选好后也可以升级为长期维护"
+          helperText="以后也能转为长期维护"
+          badge="新手推荐"
           onSelect={handleSelect}
           disabled={isSelecting}
         />

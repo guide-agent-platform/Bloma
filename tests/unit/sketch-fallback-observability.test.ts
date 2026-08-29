@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { EventEmitter } from 'node:events'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -64,7 +65,7 @@ describe('sketch template fallback observability', () => {
   const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     clearSandboxRuntimeForTests()
     setSnapshotCaptureProviderForTests()
     setProgrammingEventPublisher(() => undefined)
@@ -123,7 +124,11 @@ describe('sketch template fallback observability', () => {
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('reason=no_channel'))
     expect(readAnalytics(home)).toContain('"reason":"no_channel"')
     const session = readFileSync(getAgentSessionPath('session-fb-2'), 'utf8')
-    expect(session).toContain('没有可用的模型渠道')
+    // QW#3（ux-first-run-0basics I2）：降级文案去「渠道」黑话 + 给动词出口
+    expect(session).toContain('AI 还没连上')
+    expect(session).toContain('设置')
+    expect(session).toContain('重新生成')
+    expect(session).not.toContain('模型渠道')
   })
 
   it('密钥不可解密回退模板 → reason=decrypt_failed 埋点', async () => {

@@ -13,7 +13,8 @@
  * 对齐：shared/types.ts §6.5、DOC-3.4 data-model.md §5 Session / §6 Message
  */
 
-import { existsSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { rmSyncWithRetry } from './fs-retry'
 import type {
   AgentListSessionsInput,
   AgentListSessionsResult,
@@ -26,6 +27,7 @@ import type {
 import { getAgentSessionPath, getAgentSessionsIndexPath } from '../storage/config-paths'
 import { readJsonFile, writeJsonFile } from '../storage/json-store'
 import { listProjects, updateProject } from './project-service'
+import { cleanupPastedImages } from './pasted-images'
 
 interface SessionsIndex {
   version: number
@@ -35,8 +37,14 @@ interface SessionsIndex {
 /**
  * 记录一次会话活动：创建/更新会话索引，并回填项目"最后活跃会话"。
  * 项目不存在（如测试中的字面 project_id）时静默跳过 last_session_id 回填。
+ * delegationMeta（delegation-persistence 阶段 1，2026-08-28）：委派子会话首次记录时
+ * 写入归属字段，重启后可按 delegationId 反查子会话 JSONL。
  */
-export function recordSessionActivity(sessionId: string, projectId: string): void {
+export function recordSessionActivity(
+  sessionId: string,
+  projectId: string,
+  delegationMeta?: { parentSessionId: string; sourceDelegationId: string },
+): void {
   const index = readSessions()
   const existing = index.sessions.find((item) => item.session_id === sessionId)
   const now = new Date().toISOString()
@@ -52,6 +60,9 @@ export function recordSessionActivity(sessionId: string, projectId: string): voi
       jsonl_path: getAgentSessionPath(sessionId),
       created_at: now,
       updated_at: now,
+      ...(delegationMeta
+        ? { parent_session_id: delegationMeta.parentSessionId, source_delegation_id: delegationMeta.sourceDelegationId }
+        : {}),
     })
   }
   writeSessions(index)
@@ -82,7 +93,9 @@ export function cleanOrphanSessions(): SessionCleanOrphansResult {
   const orphans = index.sessions.filter((item) => !validIds.has(item.project_id))
   for (const orphan of orphans) {
     const jsonl = getAgentSessionPath(orphan.session_id)
-    if (existsSync(jsonl)) rmSync(jsonl, { force: true })
+    if (existsSync(jsonl)) rmSyncWithRetry(jsonl, { force: true })
+    // 粘贴图清理（clipboard-paste P2 兑现，r73）：孤儿会话的粘贴图目录同步回收（幂等静默）
+    cleanupPastedImages(orphan.session_id)
   }
   index.sessions = index.sessions.filter((item) => validIds.has(item.project_id))
   writeSessions(index)
@@ -115,6 +128,8 @@ export function loadMessages(input: AgentLoadMessagesInput): AgentLoadMessagesRe
     })
     .filter((message): message is AgentMessage => {
       if (!message) return false
+      // delegation-persistence（2026-08-28）：settle 行（终态标记，无 role）不是对话消息
+      if ((message as unknown as Record<string, unknown>).delegation_settle) return false
       if (!excludeTerminal) return true
       const text = message.content?.find((block) => block.type === 'text')?.text ?? ''
       return !text.startsWith('[terminal]') && !text.startsWith('[decision-card]')

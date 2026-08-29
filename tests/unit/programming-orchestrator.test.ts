@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -71,7 +72,7 @@ beforeEach(() => {
 
 afterEach(() => {
   if (home) rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
-  process.env.PROMA_HOME = originalPromaHome
+  restorePromaHome(originalPromaHome)
   home = undefined
   channelId = undefined
 })

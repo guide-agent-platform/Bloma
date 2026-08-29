@@ -8,11 +8,15 @@ import type {
   AgentSendMessageInput,
   AgentSendMessageResult,
   MessageContentBlock,
+  PastedImageRef,
   SDKMessage,
   WorkflowStage,
 } from '../shared/types'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
+import { buildThinkingFragment, type ThinkingLevel } from '../shared/reasoning-profile'
+import { SessionMessageQueue, type QueueEntry } from './message-queue'
+import { hydrateMessagesImageBlocks } from './pasted-images'
 export { buildSdkEnv } from './channel-manager'
 import {
   extractErrorStatusCode,
@@ -78,6 +82,8 @@ export interface SDKQueryOptions {
   sessionId: string
   /** 多轮历史（不含当前 prompt）；anthropicMessagesQuery 追加 {role:'user', content: prompt} */
   history?: ConversationTurn[]
+  /** 剪贴板粘贴图片引用（clipboard-paste P1，2026-08-29）：prompt 同轮组装 [text,...image] 块数组 */
+  images?: PastedImageRef[]
   /**
    * 完整 messages 数组（含末尾 user 轮，Agent Loop 的 tool_result 回填用）。
    * 提供时忽略 history + prompt 拼装，数组原样作为请求 messages（system 轮仍提取到
@@ -90,6 +96,10 @@ export interface SDKQueryOptions {
   temperature?: number
   /** 工具定义（Agent Loop）：不传 = 现状，请求体不携带 tools 字段 */
   tools?: ToolDefinition[]
+  /** 推理档位（reasoning-profile 2026-08-27）：仅判定/校验类任务显式传入；缺省 off = 现状（thinking:disabled） */
+  thinkingLevel?: ThinkingLevel
+  /** 渠道 providerType（omit 黑名单判断用；不传 = 不做 omit，off 档下与现状一致） */
+  providerType?: string
 }
 
 export type SDKQuery = (prompt: string, options: SDKQueryOptions) => AsyncIterable<SDKMessage>
@@ -162,6 +172,38 @@ function hasRunForProject(projectId: string): boolean {
   return activeProjects.has(projectId)
 }
 
+/**
+ * 会话消息队列（message-queue-port.md P1，2026-08-27）：生成期间用户消息不丢——
+ * 忙时入队、run 完成后自动派发（对齐 ChatGPT/Claude 排队语义）。
+ * 队列真相在 main（内存态，重启丢队列 v1 可接受）；renderer 只消费投影事件。
+ */
+const sessionMessageQueue = new SessionMessageQueue({
+  // 后台生成（runMvpTask/runIterationTask fire-and-forget）也计入「忙」：MVP/迭代是最长
+  // 生成阶段，期间发消息同样排队而非直接开跑（审查 P2-⑤）
+  isActive: (sessionId) => activeSessions.has(sessionId) || backgroundRuns.has(sessionId),
+  // 派发失败安全网放弃钩子（queue-dispatch-requeue r68）：v1 先 console 留痕（观测），
+  // 渲染端「发送失败可重试」气泡后续档接入
+  onDropped: (sessionId, entry, reason) => {
+    console.warn(`[message-queue] 排队消息派发放弃（session=${sessionId} msg=${entry.queueMessageId} reason=${reason}）`)
+    // queue_dropped 渲染端红泡（onDropped 气泡，r79）：安全网放弃派发 → 渲染端告知用户（非静默）
+    const input = entry.input as AgentSendMessageInput | undefined
+    if (input) {
+      streamPublisher(makeEvent(input, 'queue_dropped', { queue_message_id: entry.queueMessageId, reason }))
+    }
+  },
+  startRun: async (sessionId, entry) => {
+    const input = entry.input as AgentSendMessageInput | undefined
+    if (!input) return
+    // 派发 = 重新走 runAgent（activeSessions 此时已空，正常执行）；request_id 复用队列消息 id
+    await runAgent({ ...input, request_id: entry.queueMessageId })
+  },
+  onDispatched: (sessionId, entry) => {
+    const input = entry.input as AgentSendMessageInput | undefined
+    if (!input) return
+    streamPublisher(makeEvent(input, 'queued_started', { queue_message_id: entry.queueMessageId }))
+  },
+})
+
 let streamPublisher: StreamPublisher = () => undefined
 let sdkQuery: SDKQuery = queryWithRuntimeFallback
 let retrySleep: (ms: number) => Promise<void> = sleep
@@ -225,6 +267,8 @@ export function unregisterBackgroundRun(sessionId: string, runId?: string): void
   if (!current || (runId !== undefined && current.runId !== runId)) return
   backgroundRuns.delete(sessionId)
   releaseProjectRun(current.projectId, current.runId)
+  // message-queue：后台生成结束 → 尝试派发排队消息（isActive 已解除，若队列有货自动开跑）
+  sessionMessageQueue.onRunComplete(sessionId, undefined, false)
 }
 
 function registerForegroundRun(input: AgentSendMessageInput, run: ActiveRun): void {
@@ -234,6 +278,16 @@ function registerForegroundRun(input: AgentSendMessageInput, run: ActiveRun): vo
 }
 
 export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendMessageResult> {
+  if (activeSessions.has(input.session_id)) {
+    // message-queue（message-queue-port.md P1，2026-08-27）：生成期间消息排队不丢——
+    // 排队中仅 UI 投影（queued 态），run 完成后自动派发；用户可撤回。
+    sessionMessageQueue.enqueue(input.session_id, {
+      queueMessageId: input.request_id,
+      userMessage: input.content,
+      input,
+    })
+    return { accepted: true, session_id: input.session_id, stream_started: false, queued: true }
+  }
   const runId = randomUUID()
   const abortController = new AbortController()
   const run: ActiveRun = {
@@ -245,6 +299,8 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
   registerForegroundRun(input, run)
 
   const received: SDKMessage[] = []
+  // message-queue：run 终态收口判断用户是否主动停止（isUserCancelled 分支置 true）
+  let stoppedByUser = false
 
   try {
     // 权威项目阶段（工作项 1）：以项目存储为准，渲染端上报阶段仅为回退。
@@ -309,7 +365,13 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
 
     appendAgentMessage(input.session_id, {
       role: 'user',
-      content: [{ type: 'text', text: input.content }],
+      // clipboard-paste P1（2026-08-29）：带图消息落 [text, ...image 短引用] 块数组（JSONL 无 base64）
+      content: input.images?.length
+        ? [
+            { type: 'text', text: input.content },
+            ...input.images.map((r) => ({ type: 'image' as const, imageId: r.imageId, media_type: r.media_type })),
+          ]
+        : [{ type: 'text', text: input.content }],
       timestamp: Date.now(),
     })
     // 维护会话索引并回填 Project.last_session_id，支撑历史对话回访恢复
@@ -440,6 +502,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
         env,
         signal: abortController.signal,
         maxTokens,
+        providerType: channel?.provider_type,
       })
       if (intent === 'modify') {
         const description = refineModificationDescription(input.content)
@@ -463,6 +526,9 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
           query: sdkQuery,
           env,
           signal: abortController.signal,
+          // omit 推广（reasoning-profile 2026-08-27）：Token Plan 类渠道即使 off 档也
+          // 发 disabled 会 400——透传 providerType 激活 omit，免 400+重试往返
+          providerType: channel?.provider_type,
         })
         const requirements = applyNormalization(existing, normalization, nextRequirementId(existing), 'correction')
         if (normalization.action === 'out_of_scope' && normalization.outOfScope) {
@@ -536,6 +602,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
         env,
         signal: abortController.signal,
         maxTokens,
+        providerType: channel?.provider_type,
       })
       if (intent === 'modify') {
         // 修改确认门：修改是破坏性最大的操作（整版重造），必须与草图/MVP 一样先过一道
@@ -601,7 +668,8 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     const programmingHistory: ConversationTurn[] = [buildProgrammingSystemTurn(authoritativeStage), ...history]
 
     await runWithRetry(input, async () => {
-      const stream = sdkQuery(input.content, { env, signal: abortController.signal, sessionId: input.session_id, history: programmingHistory, maxTokens })
+      // clipboard-paste P1（2026-08-29）：澄清对话带图——模型在草图澄清期即可看见用户贴的截图
+      const stream = sdkQuery(input.content, { env, signal: abortController.signal, sessionId: input.session_id, history: programmingHistory, images: input.images, maxTokens })
       run.iterator = stream[Symbol.asyncIterator]()
 
       for (;;) {
@@ -657,6 +725,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     // 用户主动停止（T3）：终止流并落盘终态，但不作为错误向上抛——
     // 会话仍可用（activeSessions 已在 cancelAgent 清除，可继续发消息）。
     if (isUserCancelled(error)) {
+      stoppedByUser = true
       publishRunEvent(input, run, 'error', { code: 'AGENT_CANCELLED' })
       persistTerminalMessage(input.session_id, 'error', { code: 'AGENT_CANCELLED', message: '用户停止了本次生成' })
       return { accepted: true, session_id: input.session_id, stream_started: true }
@@ -674,6 +743,8 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     if (current?.runId === runId) {
       activeSessions.delete(input.session_id)
       releaseProjectRun(input.project_id, runId)
+      // message-queue：run 收口——自然完成自动派发排队消息；用户停止不派发（违背停止意图）
+      sessionMessageQueue.onRunComplete(input.session_id, input.request_id, stoppedByUser)
     }
   }
 }
@@ -813,6 +884,10 @@ export async function cancelAgent(input: AgentCancelInput): Promise<AgentCancelR
     // 这里统一为每个目标补一条可还原的停止记录（前台/后台一致）。
     persistTerminalMessage(target.sessionId, 'error', { code: 'AGENT_CANCELLED', message: '用户停止了本次生成' })
   }
+  // message-queue：用户停止 → 不自动派发排队消息（stoppedByUser=true，停止意图优先）
+  // 并清空该会话排队消息，避免「已排队」气泡永久 limbo（审查 P2-④）
+  sessionMessageQueue.onRunComplete(input.session_id, undefined, true)
+  sessionMessageQueue.clear(input.session_id)
   return { cancelled: true, session_id: input.session_id }
 }
 
@@ -977,12 +1052,24 @@ export async function* anthropicMessagesQuery(prompt: string, options: SDKQueryO
     .filter(Boolean)
     .join('\n')
   const nonSystemTurns = history.filter((turn) => turn.role !== 'system')
-  const messages = options.messages
-    ? nonSystemTurns
-    : [
-        ...nonSystemTurns,
-        { role: 'user' as const, content: prompt },
-      ]
+  // clipboard-paste P1（2026-08-29）：带图 prompt 组装 [text,...image 短引用] 块数组（畸形引用过滤防注入）
+  const pastedRefs = (options.images ?? []).filter(
+    (r) => r && typeof r.imageId === 'string' && /^[A-Za-z0-9_-]+\/[A-Za-z0-9-]+\.(png|jpeg|jpg|gif|webp)$/.test(r.imageId),
+  )
+  const promptTurn: ConversationTurn = pastedRefs.length
+    ? {
+        role: 'user' as const,
+        content: [
+          { type: 'text' as const, text: prompt },
+          ...pastedRefs.map((r) => ({ type: 'image' as const, imageId: r.imageId, media_type: r.media_type })),
+        ],
+      }
+    : { role: 'user' as const, content: prompt }
+  // 水合统一入口：无论 options.messages（loop tool_result 回填）还是 history+prompt 拼装路径，
+  // 请求体里的 image 块都在此统一转 base64（最近 4 图全量，更早降级；JSONL/内存全程短引用）
+  const messages = hydrateMessagesImageBlocks(
+    options.messages ? nonSystemTurns : [...nonSystemTurns, promptTurn],
+  )
 
   // 开发插件：BLOMA_SHOW_THINKING=1 时启用 extended thinking 并把思考打印到终端。
   // Anthropic 要求 max_tokens > budget_tokens；预算取一半（封顶 1024，下限 256）。
@@ -1002,14 +1089,31 @@ export async function* anthropicMessagesQuery(prompt: string, options: SDKQueryO
   if (systemText) body.system = systemText
   if (options.tools?.length) body.tools = options.tools
   if (showThinking) {
-    const maxTokens = options.maxTokens ?? 1200
-    const budget = Math.min(1024, Math.floor(maxTokens / 2))
-    body.thinking = { type: 'enabled', budget_tokens: Math.max(256, budget) }
+    // omit 渠道互斥（2026-08-28 边界收口）：Token Plan 类渠道连 thinking:disabled 都 400，
+    // 开发插件 showThinking 若照发 enabled 必 400——omit 时跳过 thinking 字段并留日志。
+    const devFragment = buildThinkingFragment(model, options.providerType, 'off')
+    if (devFragment.omit) {
+      console.warn('[anthropicMessagesQuery] omit 渠道忽略 BLOMA_SHOW_THINKING（thinking 字段会 400）')
+    } else {
+      const maxTokens = options.maxTokens ?? 1200
+      const budget = Math.min(1024, Math.floor(maxTokens / 2))
+      body.thinking = { type: 'enabled', budget_tokens: Math.max(256, budget) }
+    }
   } else {
-    // 显式禁思考（2026-08-16 线上案例：MiniMax-M3 等思考型渠道默认输出 thinking_delta，
-    // 且可能把 max_tokens 预算全部耗在思考上导致正文为零——草图首试 56.5s 零字符纯浪费）。
-    // 本查询只透传 text_delta，思考对产物零贡献，禁掉是最优解。
-    body.thinking = { type: 'disabled' }
+    // 推理档位（reasoning-profile 2026-08-27）：判定/校验类任务（judge 等）可经
+    // options.thinkingLevel 启用 DeepSeek v4 / GLM 系思考（output_config.effort 独立
+    // 深度控制，不吞 max_tokens）；缺省 off = 显式禁思考（2026-08-16 线上案例：
+    // MiniMax-M3 等思考型渠道把 max_tokens 全耗在思考上，草图首试 56.5s 零字符）。
+    // omit 渠道（Token Plan 类连 disabled 都 400）→ 完全不发字段，消灭 400+重试往返。
+    const fragment = buildThinkingFragment(
+      model,
+      options.providerType,
+      options.thinkingLevel ?? 'off',
+    )
+    if (!fragment.omit) {
+      if (fragment.thinking) body.thinking = fragment.thinking
+      if (fragment.output_config) body.output_config = fragment.output_config
+    }
   }
 
   const requestInit = (): RequestInit => ({
@@ -1033,15 +1137,30 @@ export async function* anthropicMessagesQuery(prompt: string, options: SDKQueryO
     } catch {
       detail = ''
     }
-    // 兼容性降级：个别渠道/模型不支持显式 thinking 参数（400 且错误提到 thinking/reasoning）——
-    // 移除该参数重试一次。思考开关是尽力而为的优化，绝不因它阻塞生成。
+    // 兼容性降级：个别渠道/模型不支持显式 thinking 参数（400 且错误提到 thinking/reasoning/
+    // effort/output_config）——移除 thinking 与 output_config 重试一次。覆盖 disabled 档
+    // （2026-08-16 前现状）与 enabled+output_config 档（reasoning-profile 试点，审查 P2-⑥：
+    // glm-5.3 anthropic 端点对 output_config.effort 的接受度未实测）。思考开关是尽力而为
+    // 的优化，绝不因它阻塞生成。
     const thinkingRejected = response.status === 400
-      && (body.thinking as { type?: string } | undefined)?.type === 'disabled'
-      && /thinking|reasoning/i.test(detail)
+      && (body.thinking as { type?: string } | undefined) !== undefined
+      && /thinking|reasoning|effort|output_config/i.test(detail)
+    // vision 降级（clipboard-paste P2 兑现，r74）：带图请求遇 400 且错误提 image——
+    // 模型能力缺失非瞬时故障（重试无意义），包装为用户可读引导而非裸 SDK 400。
+    // 三条件缺一不可：400 + 请求确实携带 image 块 + 错误提 image（避免无关 400 误伤）。
+    const imageRejected = response.status === 400
+      && JSON.stringify(body.messages ?? []).includes('"type":"image"')
+      && /image|multimodal|vision|多模态/i.test(detail)
     if (thinkingRejected) {
-      console.warn(`[anthropicMessagesQuery] 渠道拒绝 thinking:disabled（${detail}），移除该参数后重试一次`)
+      console.warn(`[anthropicMessagesQuery] 渠道拒绝 thinking 参数（${detail}），移除该参数后重试一次`)
       delete body.thinking
+      delete body.output_config
       response = await fetch(`${baseUrl}/v1/messages`, requestInit())
+    } else if (imageRejected) {
+      throw Object.assign(
+        new Error('当前模型不支持图片输入——请用文字描述内容，或在设置中更换支持视觉的模型后重试。'),
+        { statusCode: response.status },
+      )
     } else {
       console.error(
         `[anthropicMessagesQuery] model request failed: HTTP ${response.status}`
@@ -1062,6 +1181,16 @@ export async function* anthropicMessagesQuery(prompt: string, options: SDKQueryO
       `[anthropicMessagesQuery] model request failed: HTTP ${response.status}`
       + (detail ? ` — ${detail}` : ''),
     )
+    // 降级重试后仍失败：vision 判定同样生效（thinking 降级重试不移除 image 块；重算因作用域独立）
+    const imageRejectedRetry = response.status === 400
+      && JSON.stringify(body.messages ?? []).includes('"type":"image"')
+      && /image|multimodal|vision|多模态/i.test(detail)
+    if (imageRejectedRetry) {
+      throw Object.assign(
+        new Error('当前模型不支持图片输入——请用文字描述内容，或在设置中更换支持视觉的模型后重试。'),
+        { statusCode: response.status },
+      )
+    }
     throw Object.assign(new Error(`SDK request failed with ${response.status}`), { statusCode: response.status })
   }
   if (!response.body) throw new Error('SDK request body unavailable')
@@ -1243,6 +1372,9 @@ async function* queryWithRuntimeFallback(prompt: string, options: SDKQueryOption
       env: backup.env,
       // 备用渠道有自己的 max_tokens 上限（16384 主渠道对备用渠道可能 400）
       maxTokens: backup.channel.max_tokens ?? options.maxTokens,
+      // omit 推广（审查 P2-②）：回退切换备用渠道时重派生 providerType，避免陈旧主渠道
+      // omit 判定（主非 omit→备 Token Plan 仍发 disabled 再 400；主 omit→备非 omit 丢禁思考）
+      providerType: backup.channel.provider_type,
     })
   } finally {
     try {
@@ -1452,6 +1584,7 @@ async function resolveModificationIntent(opts: {
   env: Record<string, string> | undefined
   signal: AbortSignal
   maxTokens: number
+  providerType?: string
 }): Promise<'modify' | 'other'> {
   if (TRIVIAL_ACK_RE.test(opts.content.trim())) return 'other'
   // 顺序修正（放行一致化）：L1 修改词表先于进度子串门——纯进度句（好了吗/怎么样了）
@@ -1462,7 +1595,7 @@ async function resolveModificationIntent(opts: {
   if (!opts.env) return 'other'
   const env = opts.env
   try {
-    return await classifyIntentViaLlm({ ...opts, env })
+    return await classifyIntentViaLlm({ ...opts, env, providerType: opts.providerType })
   } catch {
     // L3 兜底失败不阻断对话：退回固定完成文案，绝不因意图判定异常让用户卡死
     return 'other'
@@ -1484,6 +1617,8 @@ async function classifyIntentViaLlm(opts: {
   env: Record<string, string>
   signal: AbortSignal
   maxTokens: number
+  /** omit 推广（2026-08-27）：Token Plan 类渠道 off 档发 disabled 也 400——透传激活 omit（审查 P2-①） */
+  providerType?: string
 }): Promise<'modify' | 'other'> {
   const backplane = readPrdBackplane(opts.project_id)
   const prompt = buildIntentPrompt(backplane, opts.content)
@@ -1494,6 +1629,7 @@ async function classifyIntentViaLlm(opts: {
     signal: opts.signal,
     sessionId: opts.session_id,
     maxTokens: opts.maxTokens,
+    providerType: opts.providerType,
   })) {
     if (sdk.type !== 'assistant' || !sdk.message) continue
     for (const block of sdk.message.content) {

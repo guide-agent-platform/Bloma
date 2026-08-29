@@ -95,6 +95,12 @@ export interface AgentLoopInput {
   permissionMode: PromaPermissionMode
   /** 委派深度（缺省 0 = 主 agent；子 agent = 父深度+1，写入工具 state） */
   delegationDepth?: number
+  /** 续跑重放历史轮次（delegation continue 阶段 3，2026-08-29 队友合入）：
+   * 类型先行，agent-loop 消费逻辑待下轮 compacting-window 整合时接入 */
+  historyTurns?: ConversationTurn[]
+  /** omit 推广（2026-08-27 队友合入）：透传父渠道 providerType，Token Plan 类渠道免 400 往返；
+   * 类型先行，SDK 消费待下轮 agent-loop 整合时接入 */
+  providerType?: string
   temperature?: number
   signal: AbortSignal
   publish: (type: AgentEvent['type'], payload: Record<string, unknown>) => void

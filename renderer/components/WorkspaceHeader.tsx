@@ -12,6 +12,7 @@ import {
   stageIndicatorLabelAtom,
   workflowStageAtom,
 } from './atoms'
+import { hasUsableChannelsAtom } from './atoms-sprint2'
 
 export interface WorkspaceHeaderProps {
   /** 点击"所有项目"的回调 */
@@ -31,6 +32,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects,
   const project = useAtomValue(currentProjectAtom)
   const mode = useAtomValue(projectModeAtom)
   const isOnline = useAtomValue(networkOnlineAtom)
+  const hasChannels = useAtomValue(hasUsableChannelsAtom)
   const stageLabel = useAtomValue(stageIndicatorLabelAtom)
   const stage = useAtomValue(workflowStageAtom)
   const canUpgrade = useAtomValue(canUpgradeAtom)
@@ -111,30 +113,51 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects,
         <StageIndicator label={stageLabel} active={stageActive} />
       </div>
 
-      {/* 右侧：联网 + 文档 + 升级 + 所有项目 */}
+      {/* 右侧：AI 状态 + 文档 + 升级 + 所有项目 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-        <span
-          title={isOnline ? '已连接' : '网络离线'}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 'var(--space-1)',
-            fontSize: 'var(--font-size-xs)',
-            fontWeight: 500,
-            color: isOnline ? 'var(--color-text-muted)' : 'var(--color-danger)',
-          }}
-        >
+        {/* QW#1（ux-first-run-0basics I1）：渠道感知三态徽标——零渠道时显示「未配置 AI」
+            而非 navigator.onLine 的「已连接」（误导用户以为 AI 就绪）；有渠道且在线 → 「AI 就绪」；
+            有渠道但网络离线 → 「离线」。hasChannels 为 null（idle/loading/error）时**不渲染**，
+            避免「AI 就绪」闪变误导（审查 P1-①）。 */}
+        {hasChannels === null ? null : hasChannels === false ? (
           <span
+            title="还没有可用的 AI 模型，去设置里连接一个"
             style={{
-              width: 7,
-              height: 7,
-              borderRadius: '50%',
-              background: isOnline ? 'var(--color-success)' : 'var(--color-danger)',
-              display: 'inline-block',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 'var(--space-1)',
+              fontSize: 'var(--font-size-xs)',
+              fontWeight: 500,
+              color: 'var(--color-warning)',
             }}
-          />
-          {isOnline ? '已连接' : '离线'}
-        </span>
+          >
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--color-warning)', display: 'inline-block' }} />
+            未配置 AI
+          </span>
+        ) : (
+          <span
+            title={isOnline ? 'AI 就绪' : '网络离线'}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 'var(--space-1)',
+              fontSize: 'var(--font-size-xs)',
+              fontWeight: 500,
+              color: isOnline ? 'var(--color-text-muted)' : 'var(--color-danger)',
+            }}
+          >
+            <span
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                background: isOnline ? 'var(--color-success)' : 'var(--color-danger)',
+                display: 'inline-block',
+              }}
+            />
+            {isOnline ? 'AI 就绪' : '离线'}
+          </span>
+        )}
 
         {/* 长期迭代型：委派协作 + 文档入口（两个抽屉门控，M4-C） */}
         {mode === 'longterm' && (

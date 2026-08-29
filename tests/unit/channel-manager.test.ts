@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -36,7 +37,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  process.env.PROMA_HOME = originalPromaHome
+  restorePromaHome(originalPromaHome)
   vi.unstubAllGlobals()
 })
 

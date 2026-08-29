@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -121,7 +122,7 @@ describe('runtime channel fallback · T9 请求期被动切换', () => {
   })
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     vi.unstubAllGlobals()
   })
 
@@ -253,7 +254,7 @@ describe('runtime channel fallback · T9 构建期渠道解析', () => {
   })
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   it('主渠道密钥不可解密 → 构建期即切备用渠道并落决策（解密失败属基础设施故障）', () => {

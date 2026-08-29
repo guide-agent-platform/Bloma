@@ -10,7 +10,7 @@ import { SettingsPage } from './SettingsPage'
 import { useUserDecisionCards, toCardSelectionMeta } from './ChatPanel-sprint2'
 import type { CardOption } from './CardOptions'
 import type { PreviewStatus } from './PreviewPanel'
-import type { Snapshot, AgentMessage, Project } from './atoms'
+import type { Snapshot, AgentMessage, Project, PastedImageRef } from './atoms'
 import {
   modeSelectedAtom,
   projectModeAtom,
@@ -29,6 +29,7 @@ import {
   loadSessionHistory,
   loadSnapshots,
 } from './atoms'
+import { refreshChannelsList, channelsListAtom, channelsLoadingAtom, hasUsableChannelsAtom, chatInputDraftAtom } from './atoms-sprint2'
 import type { ProjectMode, WorkflowStage } from './atoms'
 import type { DomCollectContextResult } from '../../shared/types'
 
@@ -108,6 +109,58 @@ const AppRoutes: React.FC = () => {
   const setPreviewUrls = useSetAtom(previewUrlsAtom)
   const setCurrentSnapshotId = useSetAtom(currentSnapshotIdAtom)
   const setMessages = useSetAtom(agentMessagesFamily(sessionId))
+  const sessionMessages = useAtomValue(agentMessagesFamily(sessionId))
+  const setChannels = useSetAtom(channelsListAtom)
+  const setChannelsLoading = useSetAtom(channelsLoadingAtom)
+  const hasChannels = useAtomValue(hasUsableChannelsAtom)
+  // WC-P2 审查加固（2026-08-29）：草稿随会话切换重置（跨项目不串台）；设置页往返不经过此处，草稿保留语义不变
+  const resetChatInputDraft = useSetAtom(chatInputDraftAtom)
+
+  // QW#1：启动即加载渠道列表（Header 三态徽标需要，不只 Settings 页）；Settings 页复用幂等加载
+  React.useEffect(() => {
+    void refreshChannelsList(setChannels, setChannelsLoading)
+  }, [setChannels, setChannelsLoading])
+
+  // QW#2（ux-first-run-0basics I2）：进入工作区且零渠道（已决 false）→ 追加一次
+  // 引导提示（纯文本，指向右上角 ⚙️ 设置入口）；有渠道/未决（null）不打扰。
+  const zeroChannelHintShownRef = React.useRef(false)
+  React.useEffect(() => {
+    if (route !== 'workspace') return
+    if (zeroChannelHintShownRef.current) return
+    if (hasChannels !== false) return
+    // 审查 P2-③：用户已对话（含回访恢复历史/中途删渠道）时不打扰——引导只在空会话首跑显示
+    if (sessionMessages.some((m) => m.role === 'user')) return
+    zeroChannelHintShownRef.current = true
+    appendMessageToSession(sessionId, {
+      role: 'system',
+      // QW#2 二期（2026-08-28）：[welcome-hint] 前缀走 ChatPanel 专属醒目卡片（内嵌直达按钮）；
+      // 文案去黑话（API Key=门禁卡，从模型官网复制）+ 时长如实（首次约 10 分钟，不再承诺 2 分钟）
+      content: [{
+        type: 'text',
+        text: '[welcome-hint]💡 你还没连接 AI 模型。添加一个 AI 模型需要从模型官网复制一段「API Key」（相当于门禁卡），首次约 10 分钟。连接后向导就能直接为你生成。',
+      }],
+      timestamp: Date.now(),
+    })
+  }, [route, hasChannels, sessionId, sessionMessages])
+
+  // QW#2 二期 P2-④（2026-08-28）：引导已出且渠道从无到有 → 追加连接成功正反馈，
+  // 对称闭环衔接用户下一步动作（不再让用户试探性发消息确认自己搞对了）
+  const channelSuccessShownRef = React.useRef(false)
+  React.useEffect(() => {
+    if (route !== 'workspace') return
+    if (!zeroChannelHintShownRef.current) return
+    if (hasChannels !== true) return
+    if (channelSuccessShownRef.current) return
+    channelSuccessShownRef.current = true
+    appendMessageToSession(sessionId, {
+      role: 'system',
+      content: [{
+        type: 'text',
+        text: '[welcome-hint:done]✅ 连接成功！把你想做的软件告诉我吧。',
+      }],
+      timestamp: Date.now(),
+    })
+  }, [route, hasChannels, sessionId, sessionMessages])
 
   const restoreAttemptedRef = React.useRef(false)
 
@@ -228,6 +281,7 @@ const AppRoutes: React.FC = () => {
     setSessionId(newSessionId)
     setActiveSessionId(newSessionId)
     setCurrentProject(newProject)
+    resetChatInputDraft('')
 
     // D3 修复：进入工作区后 Agent 发送首条问候消息（写入新会话 family，避开闭包过期）
     appendMessageToSession(newSessionId, {
@@ -241,7 +295,7 @@ const AppRoutes: React.FC = () => {
     setSnapshotsList([])
 
     setRoute('workspace')
-  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, setProjectPreview, setSnapshotsList])
+  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, setProjectPreview, setSnapshotsList, resetChatInputDraft])
 
   // ==================== 从历史列表恢复项目 ====================
 
@@ -257,6 +311,7 @@ const AppRoutes: React.FC = () => {
     setSessionId(resumeSessionId)
     setActiveSessionId(resumeSessionId)
     setCurrentProject(project)
+    resetChatInputDraft('')
 
     setProjectList((prev: Project[]) =>
       prev.map((p) =>
@@ -283,18 +338,24 @@ const AppRoutes: React.FC = () => {
     }
 
     setRoute('workspace')
-  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, restorePreview])
+  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, restorePreview, resetChatInputDraft])
 
   // ==================== 发送消息 ====================
 
-  const handleSendMessage = useCallback((content: string) => {
+  const handleSendMessage = useCallback((content: string, images?: PastedImageRef[]) => {
     const api = window.electronAPI
     if (!api?.agent?.sendMessage) return
 
     // 真实链路：交给主进程 runAgent，流式事件由 setupGlobalAgentListeners 驱动 UI
+    // clipboard-paste P1（2026-08-29）：带图消息本地气泡即块数组（imageId 短引用，无 base64）
     appendMessageToSession(sessionId, {
       role: 'user',
-      content: [{ type: 'text', text: content }],
+      content: images?.length
+        ? [
+            { type: 'text', text: content },
+            ...images.map((r) => ({ type: 'image' as const, imageId: r.imageId, media_type: r.media_type })),
+          ]
+        : [{ type: 'text', text: content }],
       timestamp: Date.now(),
     })
     void api.agent.sendMessage({
@@ -302,12 +363,22 @@ const AppRoutes: React.FC = () => {
       session_id: sessionId,
       project_id: currentProject?.project_id ?? projectList[0]?.project_id ?? '',
       content,
+      images,
       mode: mode ?? 'quick',
       current_stage: currentStage,
       metadata: { source: 'chat' },
     }).then((result) => {
-      // U5：生成期间发消息会被后端以 AGENT_SESSION_BUSY 拒绝并静默吞掉——
-      // 这里补一条引导，告诉用户可等完成或点停止，而不是消息石沉大海。
+      // message-queue（2026-08-27）：生成期间发送 → 后端入队并返回 queued:true——
+      // 追加「已排队」提示，消息不会丢，run 完成后自动处理。
+      if (result?.ok && result.data?.queued) {
+        appendMessageToSession(sessionId, {
+          role: 'system',
+          content: [{ type: 'text', text: '⏳ 已排队：当前生成完成后会自动处理这条消息。' }],
+          timestamp: Date.now(),
+        })
+        return
+      }
+      // U5 兜底：后端仍拒绝（旧后端/边缘 BUSY）→ 引导用户等待或停止，而不是消息石沉大海。
       if (!result?.ok && result?.error?.code === 'AGENT_SESSION_BUSY') {
         appendMessageToSession(sessionId, {
           role: 'system',

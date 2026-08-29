@@ -175,9 +175,15 @@ describe('Sprint 0 agent storage lifecycle acceptance', () => {
 
     const first = runAgent(agentInput('role-c-busy'))
     await waitForCondition(() => isSessionActive('role-c-busy'))
-    await expect(runAgent(agentInput('role-c-busy'))).rejects.toThrow('AGENT_SESSION_BUSY')
+    // message-queue（2026-08-27）：busy 不再 throw 丢消息——排队并返回 queued:true
+    const second = await runAgent(agentInput('role-c-busy'))
+    expect(second.queued).toBe(true)
+    expect(second.stream_started).toBe(false)
+    expect(isSessionActive('role-c-busy')).toBe(true) // 第一条仍在跑
     release()
     await first
+    // 第一条完成 → 队列自动派发第二条（短暂占用后释放）
+    await waitForCondition(() => !isSessionActive('role-c-busy'))
     expect(isSessionActive('role-c-busy')).toBe(false)
   })
 

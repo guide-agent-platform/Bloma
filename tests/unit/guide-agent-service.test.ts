@@ -1,3 +1,4 @@
+import { restorePromaHome } from '../support/proma-home-guard'
 import { EventEmitter } from 'node:events'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -32,11 +33,14 @@ import {
 } from '../../main/platform-services'
 import type { AgentEvent, SDKMessage } from '../../shared/types'
 
-describe('GuideAgentService through AgentOrchestrator', () => {
+// timeout 30s：本文件用例含真实 IO（mkdtemp/createProject 写盘/runAgent 子流程），
+// 全量 62 文件并发跑时 IO 争抢可使单用例从 ~0.7s 膨胀到 >5s，默认 5s 偶发超时并级联失败
+//（2026-08-28 flaky 实测：首轮 10 失败含 5005ms 超时，重跑全绿）。放宽到 30s 只影响真 hang 的捕捉时机。
+describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () => {
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
     setAgentStreamPublisher(() => undefined)
     setSDKQueryForTests(defaultTestQuery)
     clearSandboxRuntimeForTests()
