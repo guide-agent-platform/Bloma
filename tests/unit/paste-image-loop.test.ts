@@ -251,3 +251,51 @@ describe('vision 降级文案（clipboard-paste P2 兑现，r74）', () => {
     expect(err?.message).not.toContain('当前模型不支持图片')
   })
 })
+
+describe('审查补充（R1 deepseek P2：thinking×image 组合场景，r74）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-combo-'))
+  })
+  afterEach(() => {
+    restorePromaHome(originalPromaHome)
+    vi.unstubAllGlobals()
+    delete process.env.BLOMA_SHOW_THINKING
+  })
+
+  it('[S4-AGENT-101] thinking 降级重试后 image 400 → 引导文案在重试后分支同样生效（两阶段组合）', async () => {
+    vi.stubEnv('BLOMA_SHOW_THINKING', '1') // body.thinking 存在 → thinkingRejected 分支可达
+    const saved = savePastedImage('session-combo', PNG_1PX_BASE64, 'png')
+    const bodies: Array<{ thinking?: unknown; messages?: unknown[] }> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body))
+        bodies.push(body)
+        if (bodies.length === 1) {
+          return new Response(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'thinking is not supported by this model' } }), { status: 400 })
+        }
+        return new Response(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'image content blocks are not supported' } }), { status: 400 })
+      }),
+    )
+    const turns: ConversationTurn[] = [
+      { role: 'user', content: [{ type: 'text', text: '看图' }, { type: 'image', imageId: saved.imageId, media_type: 'image/png' }] },
+    ]
+    const err = await anthropicMessagesQuery('主任务', {
+      env: { PATH: 'x', ANTHROPIC_AUTH_TOKEN: 'k', ANTHROPIC_BASE_URL: 'https://mock.example', ANTHROPIC_MODEL: 'm' },
+      signal: new AbortController().signal,
+      sessionId: 'session-combo',
+      messages: turns,
+    })[Symbol.asyncIterator]().next().then(
+      () => null,
+      (e: Error) => e,
+    )
+    // 两阶段：第一次 thinking 拒绝 → 降级重试（移除 thinking）→ 第二次 image 拒绝 → 引导文案
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0].thinking).toBeDefined()
+    expect(bodies[1].thinking).toBeUndefined() // 重试已移除 thinking
+    expect(bodies[1].messages && JSON.stringify(bodies[1].messages)).toContain('"type":"image"') // image 块仍在
+    expect(err?.message).toContain('当前模型不支持图片') // 重试后分支的引导文案生效
+  })
+})
