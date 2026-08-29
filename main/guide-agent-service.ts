@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
-import type { AgentEvent, AgentMessage, AgentSendMessageInput, MessageContentBlock, Project, ProjectMode } from '../shared/types'
+import type { AgentEvent, AgentMessage, AgentSendMessageInput, MessageContentBlock, Project, ProjectMode, ResearchIdea } from '../shared/types'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { routeDialogue, type ClarificationOption } from './dialogue-router'
 import { loadPromptOverride } from './prompt-config'
@@ -780,6 +780,8 @@ interface PendingRequirementConfirm {
   channel_id?: string
   requirements: SketchRequirement[]
   research: MarketResearch
+  /** 市调提炼想法（2026-08-29 灵感参考）：勾选采纳后并入需求清单 */
+  ideas: ResearchIdea[]
   query: SDKQuery
   /** PRD 审查门（简化版 AC）复用：向导轮模型 env，prd 类别路由解析失败时的回退 */
   env: Record<string, string>
@@ -833,6 +835,8 @@ async function startRequirementConfirmFlow(
     },
   })
 
+  const ideas = await distillResearchIdeas(research, model)
+
   pendingRequirementConfirms.set(input.project_id, {
     request_id: input.request_id,
     session_id: input.session_id,
@@ -841,6 +845,7 @@ async function startRequirementConfirmFlow(
     channel_id: input.channel_id,
     requirements,
     research,
+    ideas,
     query: model.query,
     env: model.env,
     publish,
@@ -850,12 +855,82 @@ async function startRequirementConfirmFlow(
     kind: 'requirement_confirm',
     title: '确认你的需求',
     requirements,
+    ideas,
     research: {
       available: research.available,
       summary: research.summary,
       results: research.results.slice(0, 6),
     },
   }))
+}
+
+/** 市调想法提炼提示词：把搜索结果提炼成可勾选采纳的「市面上的做法」短句。 */
+const RESEARCH_IDEA_SYSTEM_PROMPT = [
+  '你是产品向导。把市面上的类似产品调研结果提炼成 3~5 条「市面上的做法/玩法」供用户参考勾选。',
+  '每条：label（≤20 字玩法短句，如「虚拟键盘实时弹奏」）、note（≤40 字要点说明）、source（来源域名）。',
+  '只提炼搜索结果里真实出现的做法，不臆造；结果不足 3 条时有多少给多少。',
+  '输出严格 JSON：{"ideas":[{"label":"…","note":"…","source":"…"}]}，不要输出其他内容。',
+].join('\n')
+
+/**
+ * 市调想法提炼（2026-08-29 灵感参考改造，用户拍板「向导整理提供给用户看、让他选择要不要」）：
+ * 优先 LLM 把搜索结果提炼成玩法短句；失败/无模型/无结果降级用原始条目
+ * （title 当 label、snippet 截断当 note）——零 LLM 也保证想法区可用。
+ */
+async function distillResearchIdeas(
+  research: MarketResearch,
+  model: GuideModelOptions,
+): Promise<ResearchIdea[]> {
+  if (!research.available || research.results.length === 0) return []
+  // 兑底：原始条目直接当想法（LLM 失败时用户仍能看到并勾选）
+  const fallback = research.results.slice(0, 4).map((result) => ({
+    label: result.title.replace(/\s+/g, ' ').trim().slice(0, 20),
+    note: result.snippet.replace(/\s+/g, ' ').trim().slice(0, 40),
+    source: safeHostname(result.url),
+  }))
+  try {
+    let accumulated = ''
+    const stream = model.query(`【调研结果】\n${research.summary}`, {
+      env: model.env,
+      signal: model.signal,
+      sessionId: model.sessionId,
+      history: [{ role: 'system', content: RESEARCH_IDEA_SYSTEM_PROMPT }],
+      maxTokens: 800,
+    })
+    for await (const message of stream) {
+      if (message.type === 'assistant' && message.message) {
+        for (const block of message.message.content) {
+          if (block.type === 'text') accumulated += block.text
+        }
+      }
+    }
+    const start = accumulated.indexOf('{')
+    const end = accumulated.lastIndexOf('}')
+    if (start < 0 || end <= start) return fallback
+    const parsed = JSON.parse(accumulated.slice(start, end + 1)) as {
+      ideas?: Array<{ label?: unknown; note?: unknown; source?: unknown }>
+    }
+    if (!Array.isArray(parsed.ideas)) return fallback
+    const ideas = parsed.ideas
+      .filter((item) => typeof item?.label === 'string' && item.label.trim().length > 0)
+      .slice(0, 5)
+      .map((item) => ({
+        label: String(item.label).replace(/\s+/g, ' ').trim().slice(0, 20),
+        note: typeof item.note === 'string' ? item.note.replace(/\s+/g, ' ').trim().slice(0, 40) : '',
+        source: typeof item.source === 'string' ? item.source.replace(/^https?:\/\//, '').split('/')[0] : '',
+      }))
+    return ideas.length > 0 ? ideas : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function safeHostname(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return ''
+  }
 }
 
 /** PRD 后置链公共上下文：需求已收敛（无论哪条入口），统一走 PRD→审查→确认→草图。 */
@@ -1047,6 +1122,8 @@ export async function resolveRequirementConfirm(
     project_id: string
     decision: 'confirm' | 'delegate'
     requirement_ids?: string[]
+    /** 用户勾选采纳的市调想法（2026-08-29 灵感参考）：并入需求清单追加 F-00N */
+    adopted_ideas?: string[]
   },
   /** AGENT_STOP 可中止信号（由 ipc.ts 注册 backgroundRun 后传入） */
   signal?: AbortSignal,
@@ -1059,6 +1136,24 @@ export async function resolveRequirementConfirm(
   const requirements =
     input.decision === 'delegate' || selected.length === 0 ? pending.requirements : selected
 
+  // 勾选采纳的市调想法并入清单（2026-08-29 灵感参考）：想法→功能项追加 F-00N；
+  // 只认 pending 里真实存在的 label（防篡改），去重防重复采纳
+  const adopted = (input.adopted_ideas ?? [])
+    .filter((label) => pending.ideas.some((idea) => idea.label === label))
+  const existingDescriptions = new Set(requirements.map((item) => item.description.replace(/\s+/g, ' ').trim()))
+  const mergedRequirements = [...requirements]
+  for (const label of adopted) {
+    const normalized = label.replace(/\s+/g, ' ').trim()
+    if (!normalized || existingDescriptions.has(normalized)) continue
+    existingDescriptions.add(normalized)
+    mergedRequirements.push({
+      id: nextRequirementId(mergedRequirements),
+      description: `参考市面做法：${normalized}`,
+      origin: 'user',
+    })
+  }
+  const finalRequirements = mergedRequirements
+
   recordDecision({
     project_id: input.project_id,
     session_id: pending.session_id,
@@ -1068,11 +1163,12 @@ export async function resolveRequirementConfirm(
       why:
         input.decision === 'delegate'
           ? '用户在确认弹窗选择「由向导决定」，按向导整理的清单开工'
-          : `用户在确认弹窗勾选 ${requirements.length} 条需求开工`,
+          : `用户在确认弹窗勾选 ${finalRequirements.length} 条需求开工${adopted.length > 0 ? `（含采纳市调想法 ${adopted.length} 条）` : ''}`,
       detail: {
         decision: input.decision,
         selected_ids: input.decision === 'delegate' ? undefined : requirements.map((item) => item.id),
-        requirements,
+        adopted_ideas: adopted.length > 0 ? adopted : undefined,
+        requirements: finalRequirements,
       },
     },
   })
@@ -1084,7 +1180,7 @@ export async function resolveRequirementConfirm(
     project_id: pending.project_id,
     mode: pending.mode,
     channel_id: pending.channel_id,
-    requirements,
+    requirements: finalRequirements,
     query: pending.query,
     env: pending.env,
     publish,

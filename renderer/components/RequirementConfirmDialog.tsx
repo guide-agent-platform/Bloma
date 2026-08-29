@@ -64,6 +64,7 @@ export const RequirementConfirmDialog: React.FC = () => {
   const stage = useAtomValue(workflowStageAtom)
 
   const [checked, setChecked] = useState<Set<string> | null>(null)
+  const [adoptedIdeas, setAdoptedIdeas] = useState<Set<string>>(new Set())
   const [supplementOpen, setSupplementOpen] = useState(false)
   const [supplementText, setSupplementText] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -89,10 +90,20 @@ export const RequirementConfirmDialog: React.FC = () => {
 
   const close = (): void => {
     setChecked(null)
+    setAdoptedIdeas(new Set())
     setSupplementOpen(false)
     setSupplementText('')
     setSubmitting(false)
     clearConfirm(null)
+  }
+
+  const toggleIdea = (label: string): void => {
+    setAdoptedIdeas((previous) => {
+      const next = new Set(previous)
+      if (next.has(label)) next.delete(label)
+      else next.add(label)
+      return next
+    })
   }
 
   const submitDecision = async (decision: 'confirm' | 'delegate'): Promise<void> => {
@@ -109,6 +120,7 @@ export const RequirementConfirmDialog: React.FC = () => {
         project_id: state.projectId,
         decision,
         requirement_ids: decision === 'confirm' ? [...effectiveChecked] : undefined,
+        adopted_ideas: decision === 'confirm' && adoptedIdeas.size > 0 ? [...adoptedIdeas] : undefined,
       })
       if (!result?.ok) console.error('[requirement-confirm] 提交失败:', result?.error)
     } catch (error) {
@@ -232,33 +244,91 @@ export const RequirementConfirmDialog: React.FC = () => {
           ))}
         </ul>
 
-        <details data-ai-id="requirement-confirm-research" style={{ fontSize: 13 }}>
-          <summary style={{ cursor: 'pointer', color: 'var(--color-text-secondary, #5b6472)' }}>
-            {state.research.available ? '市面上类似的产品（市调参考）' : '市调参考（本次不可用）'}
-          </summary>
-          {state.research.available ? (
-            <pre
-              data-ai-id="requirement-confirm-research-body"
-              style={{
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                background: 'var(--color-bg-subtle, #f6f8fb)',
-                padding: 12,
-                borderRadius: 'var(--radius-sm)',
-                fontSize: 12,
-                margin: '10px 0 0',
-                maxHeight: 180,
-                overflowY: 'auto',
-              }}
-            >
-              {state.research.summary || '（无摘要）'}
-            </pre>
-          ) : (
-            <p style={{ margin: '10px 0 0', color: 'var(--color-text-secondary, #5b6472)' }}>
-              本次没查到可用的市调结果，可直接确认需求，不影响生成。
+        {state.ideas.length > 0 ? (
+          <div data-ai-id="requirement-confirm-ideas" style={{ marginTop: 4 }}>
+            <p style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 600, color: 'var(--color-text, inherit)' }}>
+              灵感参考（市面上的做法）
             </p>
-          )}
-        </details>
+            <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--color-text-secondary, #5b6472)' }}>
+              看到想要的方向就勾上，会并入需求清单一起做；不勾就仅作参考。
+            </p>
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {state.ideas.map((idea) => {
+                const adopted = adoptedIdeas.has(idea.label)
+                return (
+                  <li key={idea.label}>
+                    <label
+                      data-ai-id={`requirement-confirm-idea-${idea.label.slice(0, 8)}`}
+                      style={{
+                        display: 'flex',
+                        gap: 10,
+                        alignItems: 'flex-start',
+                        padding: '8px 12px',
+                        borderRadius: 'var(--radius-sm)',
+                        border: adopted
+                          ? '1px solid var(--color-primary, #4f6ef7)'
+                          : '1px dashed var(--color-border, #e2e6ee)',
+                        background: adopted ? 'var(--color-bg-subtle, #f6f8fb)' : 'transparent',
+                        cursor: 'pointer',
+                        fontSize: 13,
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={adopted}
+                        onChange={() => toggleIdea(idea.label)}
+                        style={{ marginTop: 2 }}
+                      />
+                      <span>
+                        <strong style={{ fontWeight: 600 }}>{idea.label}</strong>
+                        {idea.note && (
+                          <span style={{ color: 'var(--color-text-secondary, #5b6472)' }}> — {idea.note}</span>
+                        )}
+                        {idea.source && (
+                          <span
+                            style={{ marginLeft: 6, fontSize: 11, color: 'var(--color-text-muted, #8a93a5)' }}
+                            title={`来源：${idea.source}`}
+                          >
+                            {idea.source}
+                          </span>
+                        )}
+                      </span>
+                    </label>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ) : (
+          <details data-ai-id="requirement-confirm-research" style={{ fontSize: 13 }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--color-text-secondary, #5b6472)' }}>
+              {state.research.available ? '市面上类似的产品（市调参考）' : '市调参考（本次不可用）'}
+            </summary>
+            {state.research.available ? (
+              <pre
+                data-ai-id="requirement-confirm-research-body"
+                style={{
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  background: 'var(--color-bg-subtle, #f6f8fb)',
+                  padding: 12,
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: 12,
+                  margin: '10px 0 0',
+                  maxHeight: 180,
+                  overflowY: 'auto',
+                }}
+              >
+                {state.research.summary || '（无摘要）'}
+              </pre>
+            ) : (
+              <p style={{ margin: '10px 0 0', color: 'var(--color-text-secondary, #5b6472)' }}>
+                本次没查到可用的市调结果，可直接确认需求，不影响生成。
+              </p>
+            )}
+          </details>
+        )}
 
         {supplementOpen ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

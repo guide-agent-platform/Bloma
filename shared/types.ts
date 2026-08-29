@@ -542,6 +542,18 @@ export interface AgentConfirmRequirementsInput extends RequestEnvelope {
   decision: 'confirm' | 'delegate'
   /** confirm 时勾选的需求 id 子集；空集/缺省视为全量（兑底防误操作全清空） */
   requirement_ids?: string[]
+  /** confirm 时勾选采纳的市调想法（label 原文，2026-08-29 灵感参考改造）：并入需求清单追加 F-00N */
+  adopted_ideas?: string[]
+}
+
+/** 市调提炼想法（2026-08-29 灵感参考改造）：向导把搜索结果提炼成可勾选采纳的「市面上的做法」。 */
+export interface ResearchIdea {
+  /** 想法短句（≤20 字，如「虚拟键盘实时弹奏」） */
+  label: string
+  /** 一句说明（≤40 字，来自搜索结果的要点） */
+  note: string
+  /** 来源域名（展示用，如 example.com） */
+  source: string
 }
 
 export interface AgentConfirmRequirementsResult {

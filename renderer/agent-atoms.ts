@@ -34,6 +34,7 @@ import type {
   PermissionRequest,
   Project,
   ProjectMode,
+  ResearchIdea,
   Snapshot,
   WorkflowStage,
 } from '../shared/types'
@@ -131,6 +132,8 @@ export interface RequirementConfirmState {
   title: string
   requirements: Array<{ id: string; description: string; origin?: 'user' | 'guide' }>
   research: { available: boolean; summary: string }
+  /** 市调提炼想法（2026-08-29 灵感参考）：可勾选采纳并入需求清单 */
+  ideas: ResearchIdea[]
 }
 
 export const requirementConfirmFamily = atomFamily((_sessionId: string) => atom<RequirementConfirmState | null>(null))
@@ -289,7 +292,7 @@ export function setupGlobalAgentListeners(): () => void {
     if (event.type === 'user_decision_required') {
       store.set(decisionConsumedFamily(event.session_id), false)
       // 需求确认弹窗（专用 kind，2026-08-26）：写入专用 atom，由 RequirementConfirmDialog 渲染
-      const payload = event.payload as { kind?: unknown; title?: unknown; requirements?: unknown; research?: { available?: unknown; summary?: unknown } }
+      const payload = event.payload as { kind?: unknown; title?: unknown; requirements?: unknown; research?: { available?: unknown; summary?: unknown }; ideas?: unknown }
       if (payload?.kind === 'requirement_confirm') {
         const requirements = Array.isArray(payload.requirements)
           ? (payload.requirements as Array<{ id: string; description: string; origin?: 'user' | 'guide' }>).filter(
@@ -300,11 +303,21 @@ export function setupGlobalAgentListeners(): () => void {
               origin: item.origin === 'guide' ? ('guide' as const) : undefined,
             }))
           : []
+        const ideas = Array.isArray(payload.ideas)
+          ? (payload.ideas as Array<{ label?: unknown; note?: unknown; source?: unknown }>).filter(
+              (item) => typeof item?.label === 'string' && item.label.trim().length > 0,
+            ).map((item) => ({
+              label: item.label as string,
+              note: typeof item.note === 'string' ? item.note : '',
+              source: typeof item.source === 'string' ? item.source : '',
+            }))
+          : []
         store.set(requirementConfirmFamily(event.session_id), {
           sessionId: event.session_id,
           projectId: String(event.project_id ?? ''),
           title: typeof payload.title === 'string' && payload.title ? payload.title : '确认你的需求',
           requirements,
+          ideas,
           research: {
             available: payload.research?.available === true,
             summary: typeof payload.research?.summary === 'string' ? payload.research.summary : '',

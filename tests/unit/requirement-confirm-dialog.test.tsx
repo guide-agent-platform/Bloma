@@ -104,6 +104,50 @@ describe('需求确认弹窗 RequirementConfirmDialog', () => {
     expect(store.get(requirementConfirmFamily('session-rc'))).not.toBeNull()
   })
 
+  it('灵感参考（2026-08-29）：想法区默认展开可勾选采纳，confirm 提交带 adopted_ideas；无想法时回退旧市调折叠区', async () => {
+    store.set(requirementConfirmFamily('session-rc'), {
+      sessionId: 'session-rc',
+      projectId: 'project-rc',
+      title: '确认你的需求',
+      requirements: [{ id: 'F-001', description: '做一个音乐合成器' }],
+      research: { available: true, summary: '原始摘要' },
+      ideas: [
+        { label: '虚拟键盘实时弹奏', note: '像钢琴 App 按键发声', source: 'example.com' },
+        { label: '步进音序器编曲', note: '网格排布音符循环播放', source: 'example.org' },
+      ],
+    })
+    renderDialog()
+
+    // 想法区默认展开（非折叠）：向导整理过的做法可勾选
+    expect(screen.getByTestId('requirement-confirm-ideas').textContent).toContain('灵感参考')
+    expect(screen.getByTestId('requirement-confirm-idea-虚拟键盘实时弹奏').textContent).toContain('虚拟键盘实时弹奏')
+    // 有想法区时不再显示旧折叠区
+    expect(screen.queryByTestId('requirement-confirm-research')).toBeNull()
+
+    // 勾选一条想法 → confirm 提交带 adopted_ideas
+    fireEvent.click(screen.getByTestId('requirement-confirm-idea-虚拟键盘实时弹奏'))
+    fireEvent.click(screen.getByTestId('requirement-confirm-submit'))
+    await waitFor(() => {
+      expect(confirmRequirements).toHaveBeenCalledWith(expect.objectContaining({
+        decision: 'confirm',
+        adopted_ideas: ['虚拟键盘实时弹奏'],
+      }))
+    })
+
+    // 无想法时回退旧折叠区（零 LLM/市调空结果的兑底形态）
+    cleanup()
+    store.set(requirementConfirmFamily('session-rc'), {
+      sessionId: 'session-rc',
+      projectId: 'project-rc',
+      title: '确认你的需求',
+      requirements: [{ id: 'F-001', description: '做一个音乐合成器' }],
+      research: { available: true, summary: '原始摘要' },
+      ideas: [],
+    })
+    renderDialog()
+    expect(screen.getByTestId('requirement-confirm-research').textContent).toContain('市面上类似的产品')
+  })
+
   it('默认全选；取消一项后主按钮只提交勾选子集；提交成功弹窗关闭', async () => {
     store.set(requirementConfirmFamily('session-rc'), {
       sessionId: 'session-rc',
@@ -111,6 +155,7 @@ describe('需求确认弹窗 RequirementConfirmDialog', () => {
       title: '确认你的需求',
       requirements: CONFIRM_EVENT.payload.requirements as Array<{ id: string; description: string }>,
       research: { available: true, summary: '市调摘要内容' },
+      ideas: [],
     })
     renderDialog()
 
@@ -146,6 +191,7 @@ describe('需求确认弹窗 RequirementConfirmDialog', () => {
       title: '确认你的需求',
       requirements: [{ id: 'F-001', description: '记账本' }],
       research: { available: false, summary: '' },
+      ideas: [],
     })
     renderDialog()
 
@@ -170,6 +216,7 @@ describe('需求确认弹窗 RequirementConfirmDialog', () => {
       title: '确认你的需求',
       requirements: [{ id: 'F-001', description: '记账本' }],
       research: { available: false, summary: '' },
+      ideas: [],
     })
     renderDialog()
 

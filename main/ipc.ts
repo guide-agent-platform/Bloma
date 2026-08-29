@@ -853,6 +853,14 @@ function validateConfirmRequirements(payload: unknown): AgentConfirmRequirements
   if (input.decision !== 'confirm' && input.decision !== 'delegate') {
     throw new Error('decision must be confirm or delegate')
   }
+  // adopted_ideas：可选字符串数组（用户勾选采纳的市调想法原文），非数组/含非字符串项时剔除
+  if (input.adopted_ideas !== undefined) {
+    if (!Array.isArray(input.adopted_ideas)) {
+      delete input.adopted_ideas
+    } else {
+      input.adopted_ideas = input.adopted_ideas.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    }
+  }
   return input
 }
 

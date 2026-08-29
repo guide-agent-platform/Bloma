@@ -46,6 +46,7 @@ vi.mock('../../main/runtime-fallback', () => ({
 
 import { handleGuideMessage, resolveRequirementConfirm } from '../../main/guide-agent-service'
 import { recordDecision } from '../../main/decision-log'
+import { researchMarketSimilar } from '../../main/guide-research'
 import { markPrdUserConfirmed } from '../../main/document-engine'
 import { resolvePrdBackplane, runSketchTask } from '../../main/programming-orchestrator'
 import {
@@ -154,6 +155,51 @@ describe('PRD 用户确认门（改造 3）', () => {
     await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(scriptedQuery()))
     await resolveRequirementConfirm({ request_id: 'req-pc2', session_id: SESSION_ID, project_id: 'proj-1', decision: 'confirm' })
   }
+
+  it('勾选采纳市调想法（2026-08-29 灵感参考）→ 并入需求清单追加条目，decision 留痕；LLM 提炼失败回退原始条目', async () => {
+    // 市调可用：distill 调模型（scriptedQuery 第二次返 reviewPassJson，解析不出 ideas）→ 回退原始条目当想法
+    vi.mocked(researchMarketSimilar).mockResolvedValueOnce({
+      available: true,
+      queries: ['做个记账的东西'],
+      results: [
+        { title: '虚拟键盘实时弹奏类工具盘点', url: 'https://www.example.com/studio', snippet: '按键即发声，支持多音色' },
+        { title: '步进音序器编曲工具', url: 'https://example.org/seq', snippet: '网格排布音符' },
+      ],
+      summary: '1. 虚拟键盘实时弹奏类工具盘点 — example.com\n按键即发声，支持多音色\n2. 步进音序器编曲工具 — example.org\n网格排布音符',
+    })
+
+    await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(scriptedQuery()))
+
+    const confirmEvent = events.find(
+      (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'requirement_confirm',
+    )
+    expect(confirmEvent).toBeTruthy()
+    const ideas = (confirmEvent!.payload as { ideas?: Array<{ label: string; source: string }> }).ideas ?? []
+    expect(ideas).toHaveLength(2)
+    expect(ideas[0].label).toContain('虚拟键盘')
+    expect(ideas[0].source).toBe('example.com') // www. 剥除
+
+    // 用户勾选第一条想法确认 → 并入需求清单（PRD 背板透传 requirements 可见）+ decision 留痕
+    await resolveRequirementConfirm({
+      request_id: 'req-pc2',
+      session_id: SESSION_ID,
+      project_id: 'proj-1',
+      decision: 'confirm',
+      adopted_ideas: [ideas[0].label, '嘉绗不存在的想法'],
+    })
+    expect(vi.mocked(resolvePrdBackplane)).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.arrayContaining([
+        expect.objectContaining({ description: `参考市面做法：${ideas[0].label}` }),
+      ]),
+    )
+    expect(recordDecision).toHaveBeenCalledWith(expect.objectContaining({
+      entry: expect.objectContaining({
+        type: 'requirement_confirmed',
+        detail: expect.objectContaining({ adopted_ideas: [ideas[0].label] }), // 篡改/不存在的 label 被过滤
+      }),
+    }))
+  })
 
   it('审查通过 → 发四段式确认卡（kind=prd_confirm，背板投影）且不开草图', async () => {
     await startConfirmFlow()
