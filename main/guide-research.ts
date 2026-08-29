@@ -52,12 +52,39 @@ export function resetGuideResearchFetchForTests(): void {
 }
 
 /**
+ * 市调查询词清洗（2026-08-29：线上案例查询词为需求原文「帮我做一个计算机模拟器」，
+ * 口语话术导致搜索结果不相关）。剥离常见对话前缀与尾语气词，保留核心主题词。
+ */
+export function normalizeResearchQuery(raw: string): string {
+  let query = String(raw ?? '').trim()
+  if (!query) return ''
+  // 第一层：祈使/请求主谓（帮我/请你/我想/我需要 等；「请帮我」必须在「请」之前）
+  query = query.replace(
+    /^(?:请帮我|帮我|请你|麻烦你|麻烦|请|我想要一个|我想要|我想做一个|我想做|我想弄|我想搞|我想写|我想|我需要|给我|希望你能|能帮我|可不可以|可以帮我|能不能帮我|能不能)/,
+    '',
+  )
+  // 第二层：制作动词（做一个/制作/搞一个 等）
+  query = query.replace(
+    /^(?:做一个|做个|制作一个|制作|搞一个|写一个|开发一个|设计一个|弄一个|整一个|来一个|做一个简单的|做|搞|写|开发|设计|弄|整|来)/,
+    '',
+  )
+  query = query.trim()
+  // 去尾部语气词/句尾填充
+  while (query.length > 0 && /[吧啊呢哦呀吗么哈哇的]/.test(query.charAt(query.length - 1))) {
+    query = query.slice(0, -1).trim()
+  }
+  // 截断到 40 字（超长原始需求只取主题头部）
+  query = query.slice(0, 40).trim()
+  return query
+}
+
+/**
  * 按向导给出的市调查询（≤2 条）并发搜索并合并去重。
  * 任何失败（网络/HTTP/解析为空）降级为 available:false——市调是增强，不是依赖。
  */
 export async function researchMarketSimilar(queriesInput: string[]): Promise<MarketResearch> {
   const queries = queriesInput
-    .map((query) => query.trim())
+    .map((query) => normalizeResearchQuery(query))
     .filter((query) => query.length > 0)
     .slice(0, MAX_QUERIES)
   if (queries.length === 0) {

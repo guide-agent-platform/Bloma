@@ -393,6 +393,18 @@ export async function handleGuideMessage(
   }
   if (prdReviewDecision === 'supplement') {
     const pendingSupplement = consumePrdReviewSupplement(input)
+    // 保存待接状态：用户下一次普通文本 → 修订闭环。此前只提示不接，用户打字会掉进
+    // 兜底 runSketchTask 用旧需求直接开做——「还没提交审查反馈就开始做」根因。
+    if (pendingSupplement) {
+      pendingReviewSupplements.set(input.project_id, {
+        session_id: pendingSupplement.session_id,
+        requirements: pendingSupplement.requirements,
+        query: pendingSupplement.query,
+        publish: pendingSupplement.publish,
+        signal: model?.signal,
+        createdAt: Date.now(),
+      })
+    }
     // 提示必须带上审查发现的问题清单（用户点「我来补充说明」的动机就是回应这些问题；
     // 空泛提示会让用户不知道该补什么，2026-08-27 线上案例）
     const issueList = (pendingSupplement?.issues ?? [])
@@ -477,6 +489,47 @@ export async function handleGuideMessage(
     constraints: extractConstraints(input.content),
     source: 'guide_gate',
   })
+
+  // 审查卡「我来补充说明」的接续（2026-08-29 修复）：用户点补充后打字的普通文本
+  // 视为对审查问题的反馈 → 归一化并入需求 → 重走 PRD 管线（修订→审查→确认卡），
+  // 而不是掉进兜底 runSketchTask 用旧需求直接开做。卡片回传不在此拦截。
+  const reviewSupplement = takePendingReviewSupplement(input.project_id)
+  if (reviewSupplement && input.metadata?.source !== 'card_option' && input.session_id === reviewSupplement.session_id) {
+    const adjustment = input.content.trim()
+    if (adjustment) {
+      const normalization = await normalizeRequirementUpdate({
+        session_id: input.session_id,
+        existing: reviewSupplement.requirements,
+        modification: refineModificationDescription(adjustment),
+        constraints: readProjectConstraints(input.project_id),
+        query: reviewSupplement.query,
+        env: undefined,
+      })
+      const merged = applyNormalization(
+        reviewSupplement.requirements,
+        normalization,
+        nextRequirementId(reviewSupplement.requirements),
+        'correction',
+      )
+      const ack = `收到，按你的补充「${adjustment.slice(0, 40)}」修订 PRD，整理好后再请你确认。`
+      persistAssistant?.(ack)
+      publish(makeGuideEvent(input, 'message_delta', { text: ack }))
+      publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+      await runPrdPipeline({
+        request_id: input.request_id,
+        session_id: input.session_id,
+        project_id: input.project_id,
+        mode: input.mode,
+        channel_id: input.channel_id,
+        requirements: merged,
+        query: reviewSupplement.query,
+        env: undefined,
+        publish,
+        signal: reviewSupplement.signal,
+      })
+      return
+    }
+  }
 
   // 卡片答案：用户点选了选项（2026-08-27 语义升级：点选回流模型——向导持续跟踪用户选择）
   const cardAnswer = resolveCardAnswer(input, primaryIntent)
@@ -787,6 +840,37 @@ interface PendingRequirementConfirm {
   /** PRD 审查门（简化版 AC）复用：向导轮模型 env，prd 类别路由解析失败时的回退 */
   env: Record<string, string>
   publish: GuideEventPublisher
+}
+
+/** 审查卡「我来补充说明」后的待接状态（2026-08-29）：用户点补充后下一次普通文本
+ *  视为对审查问题的反馈 → 归一化并入需求 → 重走 PRD 管线（修订→审查→确认卡）。
+ *  此前只发提示、不接文本，用户补充会掉进兜底 runSketchTask 用旧需求直接开做。 */
+interface PendingReviewSupplement {
+  session_id: string
+  requirements: SketchRequirement[]
+  query: SDKQuery
+  publish: GuideEventPublisher
+  signal?: AbortSignal
+  /** 创建时间：残留的补充状态最多等待 3 分钟，过期失效（防用户离开后无关文本被当补充） */
+  createdAt: number
+}
+
+/** 补充状态有效期：用户点「我来补充说明」后应在短时间内打字，过期即失效。 */
+const REVIEW_SUPPLEMENT_TTL_MS = 3 * 60 * 1000
+
+const pendingReviewSupplements = new Map<string, PendingReviewSupplement>()
+
+function takePendingReviewSupplement(projectId: string): PendingReviewSupplement | undefined {
+  const pending = pendingReviewSupplements.get(projectId)
+  if (!pending) return undefined
+  pendingReviewSupplements.delete(projectId)
+  if (Date.now() - pending.createdAt > REVIEW_SUPPLEMENT_TTL_MS) return undefined
+  return pending
+}
+
+/** 测试辅助：清空补充待接状态（模块级 Map 跨用例残留会串扰） */
+export function clearPendingReviewSupplementsForTests(): void {
+  pendingReviewSupplements.clear()
 }
 
 const pendingRequirementConfirms = new Map<string, PendingRequirementConfirm>()

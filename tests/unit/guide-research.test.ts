@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  normalizeResearchQuery,
   parseBingResults,
   parseDdgResults,
   researchMarketSimilar,
@@ -44,6 +45,31 @@ describe('guide-research 市调（DDG 免 key）', () => {
   afterEach(() => {
     resetGuideResearchFetchForTests()
     vi.unstubAllGlobals()
+  })
+
+  it('查询词清洗（2026-08-29 灵感不相关修复）：剥离「帮我做一个」类口语话术与尾语气词', () => {
+    expect(normalizeResearchQuery('帮我做一个计算机模拟器')).toBe('计算机模拟器')
+    expect(normalizeResearchQuery('我想做一个记账应用')).toBe('记账应用')
+    expect(normalizeResearchQuery('请帮我写一个待办清单工具吧')).toBe('待办清单工具')
+    expect(normalizeResearchQuery('能不能做一个健身打卡的')).toBe('健身打卡')
+    expect(normalizeResearchQuery('计算器')).toBe('计算器')
+    expect(normalizeResearchQuery('   ')).toBe('')
+  })
+
+  it('市调入口对查询词统一清洗后再搜索（含话术前缀的原始需求不再原样出网）', async () => {
+    const captured: string[] = []
+    setGuideResearchFetchForTests((_input, _init) => {
+      const url = String(_input)
+      captured.push(url)
+      return Promise.resolve(htmlResponse(ddgPage([{ title: '计算机模拟器 - 搜索结果', href: 'https://example.com/x', snippet: '教学机与硬件原理' }])))
+    })
+    const research = await researchMarketSimilar(['帮我做一个计算机模拟器', '我想做一个记账应用'])
+    expect(research.available).toBe(true)
+    expect(captured.length).toBe(2)
+    // 搜索 URL 的 q= 参数不含口语话术
+    expect(captured[0]).not.toContain(encodeURIComponent('帮我'))
+    expect(captured[0]).toContain(encodeURIComponent('计算机模拟器'))
+    expect(captured[1]).toContain(encodeURIComponent('记账应用'))
   })
 
   it('解析结果块：uddg 跳转解码为真实 URL，广告位剔除，标题/摘要剥标签', () => {

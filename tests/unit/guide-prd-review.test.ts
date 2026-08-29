@@ -12,6 +12,8 @@ vi.mock('../../main/programming-orchestrator', () => ({
     requirements,
   })),
   setProgrammingEventPublisher: vi.fn(),
+  refineModificationDescription: vi.fn((text: string) => text),
+  nextRequirementId: vi.fn((existing: Array<{ id: string }>) => `F-${String(existing.length + 1).padStart(3, '0')}`),
 }))
 vi.mock('../../main/platform-services', () => ({ trackAnalytics: vi.fn() }))
 vi.mock('../../main/document-engine', () => ({
@@ -39,12 +41,20 @@ vi.mock('../../main/decision-log', () => ({ recordDecision: vi.fn(), parseDecisi
 vi.mock('../../main/guide-research', () => ({
   researchMarketSimilar: vi.fn(async (queries: string[]) => ({ available: false, queries, results: [], summary: '' })),
 }))
+vi.mock('../../main/requirement-normalizer', () => ({
+  normalizeRequirementUpdate: vi.fn(async () => ({ action: 'append', via: 'rules' })),
+  applyNormalization: vi.fn((existing: unknown[]) => existing),
+}))
 vi.mock('../../main/runtime-fallback', () => ({
   // 类别路由解析固定失败 → 审查 env 走 pending（向导轮 env）回退路径
   resolveChannelEnv: vi.fn(() => ({ env: undefined, channel: undefined })),
 }))
 
-import { handleGuideMessage, resolveRequirementConfirm } from '../../main/guide-agent-service'
+import {
+  clearPendingReviewSupplementsForTests,
+  handleGuideMessage,
+  resolveRequirementConfirm,
+} from '../../main/guide-agent-service'
 import { resolveChannelEnv } from '../../main/runtime-fallback'
 import { recordDecision } from '../../main/decision-log'
 import { resolvePrdBackplane, runSketchTask } from '../../main/programming-orchestrator'
@@ -55,6 +65,7 @@ import {
   ruleGateReview,
 } from '../../main/prd-review'
 import { PRD_CONFIRM_OPTION_CONFIRM } from '../../main/prd-confirm'
+import { applyNormalization, normalizeRequirementUpdate } from '../../main/requirement-normalizer'
 import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../main/orchestrator'
 
 /**
@@ -157,6 +168,7 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
   afterEach(() => {
     delete process.env.BLOMA_DELEGATED_REVIEW
     process.env.PROMA_HOME = originalPromaHome
+    clearPendingReviewSupplementsForTests()
     vi.restoreAllMocks()
   })
 
@@ -268,6 +280,46 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     expect(runSketchTask).not.toHaveBeenCalled()
     const deltas = events.filter((event) => event.type === 'message_delta').map((event) => String(event.payload.text))
     expect(deltas.some((text) => text.includes('直接打字'))).toBe(true)
+  })
+
+  it('supplement 后用户打字补充 → 修订 PRD 重走管线，而不是用旧需求直接开草图（2026-08-29 修复）', async () => {
+    const proj = 'proj-supp'
+    const inputFor = (content: string, extra?: Partial<AgentSendMessageInput>): AgentSendMessageInput => ({
+      ...makeInput(content),
+      project_id: proj,
+      ...extra,
+    })
+    // 0) 需求确认 → PRD → 审查 fail → 审查卡挂起（独立项目键，避免跨用例残留状态干扰）
+    const { query } = scriptedQuery([reviewFailJson])
+    await handleGuideMessage(inputFor('做个记账的东西'), () => undefined, makeModel(query))
+    await resolveRequirementConfirm({ request_id: 'req-supp', session_id: SESSION_ID, project_id: proj, decision: 'confirm' })
+
+    // 1) 点「我来补充说明」：只提示，不开草图，并挂起待接状态
+    events.length = 0
+    vi.mocked(runSketchTask).mockClear()
+    await handleGuideMessage(
+      {
+        ...inputFor('我来补充说明'),
+        metadata: { source: 'card_option', selected_option_id: PRD_REVIEW_OPTION_SUPPLEMENT },
+      },
+      (event) => events.push(event),
+      makeModel(scriptedQuery([reviewPassJson]).query),
+    )
+    expect(runSketchTask).not.toHaveBeenCalled()
+
+    // 2) 用户打字反馈（普通文本，非卡片）——修复前会掉进兜底 runSketchTask 用旧需求直接开做
+    events.length = 0
+    vi.mocked(runSketchTask).mockClear()
+    await handleGuideMessage(
+      inputFor('U 的问题按层级关系处理，教学机是计算机模拟器的一种'),
+      (event) => events.push(event),
+      makeModel(scriptedQuery([reviewPassJson]).query),
+    )
+    expect(runSketchTask).not.toHaveBeenCalled()
+    expect(vi.mocked(normalizeRequirementUpdate)).toHaveBeenCalled()
+    expect(vi.mocked(applyNormalization)).toHaveBeenCalled()
+    const deltas = events.filter((event) => event.type === 'message_delta').map((event) => String(event.payload.text))
+    expect(deltas.some((text) => text.includes('修订 PRD'))).toBe(true)
   })
 
   it('LLM 输出不可解析 → 规则门降级（degraded），正常背板放行（改造 3：发确认卡而非直接草图）', async () => {
