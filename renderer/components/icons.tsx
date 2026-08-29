@@ -151,3 +151,12 @@ export const IconStop: React.FC<IconProps> = ({ size = 24 }) => (
     <rect x="5" y="5" width="14" height="14" rx="3" fill="currentColor" />
   </svg>
 )
+
+export const IconAlertTriangle: React.FC<{ size?: number }> = ({ size = 24 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" strokeWidth={2} strokeLinecap="round"
+    strokeLinejoin="round" aria-hidden>
+    <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+    <path d="M12 9v4" /><path d="M12 17h.01" />
+  </svg>
+)

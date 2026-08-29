@@ -6,7 +6,7 @@ import { WaitingFeedback } from './WaitingFeedback'
 import { ToolBlocksReplay, ToolCallFeed } from './ToolCallBlock'
 import { DelegationFeed } from './DelegationFeed'
 import { Markdown } from './Markdown'
-import { ArrowUp, MessageSquare, IconStop } from './icons'
+import { ArrowUp, MessageSquare, IconAlertTriangle, IconStop } from './icons'
 import {
   activeAgentSessionIdAtom,
   agentMessagesFamily,
@@ -642,6 +642,30 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
   if (isSystem) {
     // [decision] 是内部决策簿记（用户面在文档面板的 decisions.md），不进聊天流
     if (text.startsWith('[decision]')) return null
+    // [queue-dropped]（onDropped 气泡，r79）：安全网放弃派发 → 红泡告知发送失败
+    if (text.startsWith('[queue-dropped]')) {
+      return (
+        <div
+          data-ai-id="queue-dropped"
+          role="status"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--space-2)',
+            padding: 'var(--space-2) var(--space-4)',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: 'var(--font-size-sm)',
+            fontWeight: 500,
+            color: '#991B1B',
+            background: '#FEF2F2',
+            border: '1px solid #FECACA',
+          }}
+        >
+          <IconAlertTriangle size={14} />
+          {text.replace(/^\[queue-dropped\]\s*/, '')}
+        </div>
+      )
+    }
     // [welcome-hint] 零渠道引导（QW#2 二期 P1-①，2026-08-28）：专属醒目卡片——正常字号 +
     // 品牌色左边框 + 内嵌直达按钮。不再与 [channel-switch] 等机器簿记共用弱样式胶囊
     //（首跑最关键的第一条提示曾是全场视觉最弱元素，font-size-xs + text-muted）。

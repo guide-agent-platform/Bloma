@@ -230,6 +230,19 @@ export function setupGlobalAgentListeners(): () => void {
       ])
     }
 
+    // queue_dropped（onDropped 气泡，r79）：安全网放弃派发 → 红泡告知「发送失败」而非静默消失
+    if (event.type === 'queue_dropped') {
+      const p = event.payload as { reason?: string }
+      store.set(agentMessagesFamily(event.session_id), (previous) => [
+        ...previous,
+        {
+          role: 'system',
+          content: [{ type: 'text', text: `[queue-dropped] 排队消息发送失败（${p.reason ?? 'unknown'}）——请重新发送` }],
+          timestamp: Date.now(),
+        },
+      ])
+    }
+
     // 会话追踪：新出现的 session_id 追加到 agentSessionsAtom（已有索引的会话保持不变）
     store.set(agentSessionsAtom, (previous) => {
       if (previous.some((item) => item.session_id === event.session_id)) return previous

@@ -65,13 +65,13 @@ describe('ux-queue-echo r99：busy 排队回显现状（挂账 onDropped 气泡�
     expect(texts.some((t) => t.includes('第二条'))).toBe(true)
   })
 
-  it('[Q3·丢弃缺口·现状锁定] onDropped 无任何 UI 反馈（queue-dropped 气泡不存在——修后此断言应翻转为存在）', async () => {
+  it('[Q3·无事件基线] busy 提交且无 queue_dropped 事件 → 仅灰泡无红泡（事件由 S4-QUEUE-021/023 专测）', async () => {
     const input = mountBusy()
     fireEvent.change(input, { target: { value: '将被丢弃' } })
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' })
     await waitFor(() => expect(screen.getAllByTestId('queued-message').length).toBe(1))
-    // 现状：派发失败安全网只有 console.warn（orchestrator:149）——渲染端零反馈。
-    // 接入 queue_dropped 事件后：本用例应改为「收到事件 → 红泡出现+灰泡消失」（翻转位）。
+    // onDropped 事件→渲染红泡链路由 queue-dropped-bubble.test.tsx（S4-QUEUE-021/022）专测；
+    // 本用例锁定无事件时的基线：红泡不出现（防常显）。
     expect(screen.queryByTestId('queue-dropped')).toBeNull()
   })
 })
