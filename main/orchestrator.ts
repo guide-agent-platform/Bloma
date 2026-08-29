@@ -490,6 +490,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
           requirements,
           channel_id: input.channel_id,
           query: sdkQuery,
+          signal: abortController.signal,
         })
         persistTerminalMessage(input.session_id, 'completed')
         streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
