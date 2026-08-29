@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { listDocuments, readDocument, syncDocuments } from '../../main/document-engine'
+import { isPrdUserConfirmed, listDocuments, markPrdUserConfirmed, readDocument, syncDocuments } from '../../main/document-engine'
 import { createProject, recordSketchGenerated, updateProject } from '../../main/project-service'
 import { getDocumentsDir } from '../../storage/config-paths'
 
@@ -39,6 +39,35 @@ describe('DocumentEngine (A2-05)', () => {
     expect(result.documents.length).toBeGreaterThan(0)
     expect(result.documents[0].status).toBe('synced')
     expect(result.documents[0].type).toBe('prd')
+  })
+
+  it('sketch_confirmed 重建 prd.json 继承盘上 user_confirmed_at（2026-08-29 线上：MVP 交付后点选纠错被误判未确认踢回确认流）', () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-doc-confirm-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project-confirm', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '做一个记账计算器' }])
+
+    // 线上时序：requirement_confirmed 落盘 prd.json → 用户在确认卡确认 → 草图 → 点「生成完整功能」
+    syncDocuments({
+      request_id: 'req-sync-confirm-1',
+      session_id: 'session-confirm',
+      project_id: project.project_id,
+      checkpoint: 'requirement_confirmed',
+    })
+    expect(markPrdUserConfirmed(project.project_id)).not.toBeNull()
+    expect(isPrdUserConfirmed(project.project_id)).toBe(true)
+
+    // 修复前：此处全量重建丢 user_confirmed_at → isPrdUserConfirmed false → 迭代/点选纠错死局
+    syncDocuments({
+      request_id: 'req-sync-confirm-2',
+      session_id: 'session-confirm',
+      project_id: project.project_id,
+      checkpoint: 'sketch_confirmed',
+    })
+    expect(isPrdUserConfirmed(project.project_id)).toBe(true)
+    const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+    const prd = JSON.parse(readFileSync(join(dir, 'prd.json'), 'utf8'))
+    expect(prd.user_confirmed_at).toBeTruthy()
   })
 
   it('requirement_confirmed checkpoint: 状态行如实（不谎报草图已确认）+ 无 priority 条目不渲染缺省 P2（abb1a19f）', () => {

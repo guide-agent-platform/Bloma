@@ -59,9 +59,21 @@ export function syncDocuments(input: DocumentSyncInput, backplaneOverride?: PrdB
     }
     case 'sketch_confirmed': {
       const backplane = backplaneOverride ?? buildPrdBackplane(project, requirements, input.checkpoint)
+      // 用户确认事实继承（2026-08-29 线上）：PRD 确认（markPrdUserConfirmed 落
+      // user_confirmed_at）后用户点「生成完整功能」进入本检查点，此处全量重建
+      // prd.json 若不带盘上确认标记，isPrdUserConfirmed 即 fail-closed 误判「未确认」
+      // ——交付后的点选纠错/迭代全部被踢回确认流，而确认卡不会再发，通道死局
+      // （线上案例：MVP 已交付，点选「太丑」被拒）。确认是用户行为事实而非产物
+      // 判定，重建必须继承；requirement_confirmed 分支刻意不继承（修订闭环重写时
+      // 「新 PRD 未确认」语义自洽，新确认卡会重新落盘）。
+      const confirmedAt = readPersistedUserConfirmedAt(dir)
       files.push(
         { relativePath: 'sketch_confirmed.md', content: renderPrdDraft(backplane, 'sketch_confirmed'), type: 'prd' },
-        { relativePath: 'prd.json', content: renderPrdJson(backplane), type: 'prd' },
+        {
+          relativePath: 'prd.json',
+          content: renderPrdJson(confirmedAt ? { ...backplane, user_confirmed_at: confirmedAt } : backplane),
+          type: 'prd',
+        },
       )
       break
     }
@@ -384,6 +396,18 @@ export function isPrdUserConfirmed(projectId: string): boolean {
 
 function renderPrdJson(backplane: PrdBackplane): string {
   return `${JSON.stringify(backplane, null, 2)}\n`
+}
+
+/** 读盘上 prd.json 的用户确认时间（损坏/缺失 → undefined），供重建时继承确认事实。 */
+function readPersistedUserConfirmedAt(dir: string): string | undefined {
+  const path = join(dir, 'prd.json')
+  if (!existsSync(path)) return undefined
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as PrdBackplane
+    return typeof parsed?.user_confirmed_at === 'string' ? parsed.user_confirmed_at : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /**
