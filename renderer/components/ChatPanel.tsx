@@ -23,6 +23,8 @@ export interface ChatPanelProps {
   cardOptions?: CardOption[]
   /** 决策卡标题（U7：让渡偏差描述 / 澄清方向等） */
   decisionTitle?: string
+  /** 决策卡正文（2026-08-29：审查卡的具体问题清单） */
+  decisionBody?: string
   /** 用户选择卡片选项 */
   onCardOptionSelect?: (option: CardOption) => void
   /** 用户提交文本消息 */
@@ -78,6 +80,7 @@ const glassTile: React.CSSProperties = {
 export const ChatPanel: React.FC<ChatPanelProps> = ({
   cardOptions,
   decisionTitle,
+  decisionBody,
   onCardOptionSelect,
   onSendMessage,
   isWaiting = false,
@@ -307,6 +310,26 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                   >
                     {decisionTitle}
                   </p>
+                )}
+                {decisionBody && (
+                  <div
+                    data-ai-id="decision-card-body"
+                    style={{
+                      margin: 0,
+                      padding: '8px 12px',
+                      fontSize: 'var(--font-size-xs)',
+                      lineHeight: 1.6,
+                      color: 'var(--color-text-secondary, #5b6472)',
+                      background: 'var(--color-bg-subtle, #f6f8fb)',
+                      borderRadius: 'var(--radius-sm)',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      maxHeight: 180,
+                      overflowY: 'auto',
+                    }}
+                  >
+                    {decisionBody}
+                  </div>
                 )}
                 <CardOptions options={cardOptions} onSelect={onCardOptionSelect} disabled={busy} />
               </div>

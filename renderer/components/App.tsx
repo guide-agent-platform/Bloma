@@ -701,6 +701,7 @@ const AppRoutes: React.FC = () => {
       <WorkspaceShell
         cardOptions={decisionCards?.options}
         decisionTitle={decisionCards?.title}
+        decisionBody={decisionCards?.body}
         onCardOptionSelect={handleCardOptionSelect}
         onSendMessage={handleSendMessage}
         waitStartTime={waitStart}

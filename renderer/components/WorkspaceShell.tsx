@@ -16,6 +16,8 @@ export interface WorkspaceShellProps {
   cardOptions?: CardOption[]
   /** 决策卡标题（U7：让渡偏差描述 / 澄清方向等） */
   decisionTitle?: string
+  /** 决策卡正文（2026-08-29：审查卡的具体问题清单） */
+  decisionBody?: string
   onCardOptionSelect?: (option: CardOption) => void
   onSendMessage?: (content: string) => void
   waitStartTime?: number
@@ -108,6 +110,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
         <ChatPanel
           cardOptions={props.cardOptions}
           decisionTitle={props.decisionTitle}
+          decisionBody={props.decisionBody}
           onCardOptionSelect={props.onCardOptionSelect}
           onSendMessage={props.onSendMessage}
           waitStartTime={props.waitStartTime}

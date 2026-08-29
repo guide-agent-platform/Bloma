@@ -71,6 +71,9 @@ interface UserDecisionPayload {
   kind?: string
   title?: string
   questions?: ClarificationQuestion[]
+  /** 审查卡（kind=prd_review）携带的问题详情（2026-08-29：暴露给用户看具体的） */
+  issues?: Array<{ dimension?: unknown; severity?: unknown; claim?: unknown }>
+  summary?: unknown
 }
 
 // =========================================================================
@@ -83,6 +86,8 @@ interface UserDecisionPayload {
  */
 export interface DecisionCards {
   title?: string
+  /** 决策卡正文（2026-08-29：审查卡的具体问题清单，让用户知情后再选忽略/补充） */
+  body?: string
   options: CardOption[]
 }
 
@@ -113,6 +118,7 @@ function extractDecisionCards(events: AgentEvent[]): DecisionCards | null {
     // B5 防御：question 缺 id 时兜底（A1 已补 id，此处双保险，避免 key=undefined 崩坏）
     return {
       title: payload.title,
+      body: extractDecisionBody(payload),
       options: questions.map((q, i) => ({
         id: q.id ?? q.label ?? String(i),
         label: q.label,
@@ -122,6 +128,23 @@ function extractDecisionCards(events: AgentEvent[]): DecisionCards | null {
   }
 
   return null // 无 user_decision_required 事件
+}
+
+/** 决策卡正文（2026-08-29）：审查卡的问题清单（severity 徽标+问题描述），
+ * 其它卡回退 summary 字段；都没有则 undefined 不渲染。 */
+function extractDecisionBody(payload: UserDecisionPayload): string | undefined {
+  const issues = Array.isArray(payload.issues) ? payload.issues : []
+  if (issues.length > 0) {
+    return issues
+      .map((issue) => {
+        const severity =
+          issue.severity === 'blocking' ? '【严重】' : issue.severity === 'major' ? '【重要】' : ''
+        const claim = typeof issue.claim === 'string' ? issue.claim.replace(/\s+/g, ' ').trim() : ''
+        return `${severity}${claim}`.slice(0, 120)
+      })
+      .join('\n')
+  }
+  return typeof payload.summary === 'string' && payload.summary ? payload.summary : undefined
 }
 
 // =========================================================================
