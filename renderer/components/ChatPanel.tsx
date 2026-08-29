@@ -784,6 +784,29 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
             🖼️ 图片 ×{imageBlocks.length}
           </span>
         )}
+        {/* F4（r82）：复制入口——0 基础对照 Claude/GPT 基线；clipboard 可选链防御（非安全上下文降级） */}
+        {text && (
+          <button
+            onClick={() => {
+              void navigator.clipboard?.writeText(text).catch(() => undefined)
+            }}
+            aria-label="复制"
+            title="复制"
+            style={{
+              marginTop: 'var(--space-2)',
+              alignSelf: 'flex-end',
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: 'var(--font-size-xs)',
+              color: isUser ? 'rgba(255,255,255,0.8)' : 'var(--color-text-muted)',
+              padding: '2px 6px',
+              borderRadius: 'var(--radius-sm)',
+            }}
+          >
+            复制
+          </button>
+        )}
       </div>
       {hasToolBlocks && <ToolBlocksReplay blocks={message.content} toolNamesById={toolNamesById} />}
       <span

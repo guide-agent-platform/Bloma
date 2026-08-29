@@ -4,7 +4,7 @@
 // user 气泡纯文本也无 copy；错误回复无 retry）。本 spec 锁现状+预埋翻转位（修复后断言翻转即验收）。
 
 import React from 'react'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createStore, Provider } from 'jotai'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatPanel } from '../../renderer/components/ChatPanel'
@@ -38,22 +38,29 @@ describe('ux-message-actions-walkthrough r117：消息操作（copy/retry——F
     )
   }
 
-  it('[M1·assistant 无复制] AI 回复渲染 Markdown 文本，但无「复制」按钮（F4 翻转位：修复后应存在且写入剪贴板）', () => {
-    mountWith([msg('user', '写个方案'), msg('assistant', '# 方案标题\n\n正文内容')])
+  it('[M1·assistant 复制按钮·F4 已修] AI 回复渲染 Markdown + 「复制」按钮写入剪贴板', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    mountWith([msg('assistant', '# 方案标题\n\n正文内容')])
     expect(screen.getByText('方案标题')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /复制|copy/i })).toBeNull() // F4 翻转位
+    const btn = screen.getByRole('button', { name: /复制|copy/i }) // F4 翻转：按钮存在
+    fireEvent.click(btn)
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining('正文内容')))
   })
 
-  it('[M2·user 无复制] 用户消息纯文本可选中，但无复制按钮（翻转位同 M1）', () => {
+  it('[M2·user 复制按钮·F4 已修] 用户消息也有复制入口（翻转位同 M1）', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
     mountWith([msg('user', '这是我的原始提问')])
     expect(screen.getByText('这是我的原始提问')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /复制|copy/i })).toBeNull() // F4 翻转位
+    fireEvent.click(screen.getByRole('button', { name: /复制|copy/i }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('这是我的原始提问'))
   })
 
-  it('[M3·错误回复无重试] 错误文本可见但无「重试」按钮（翻转位：修复后 assistant 错误消息应有 retry 入口）', () => {
+  it('[M3·错误回复无重试] 错误文本可见但无「重试」按钮（retry 语义需产品决策——P2 挂账，非本轮 F4 范围）', () => {
     mountWith([msg('user', '再来一次'), msg('assistant', '模型渠道超时', true)])
     expect(screen.getByText(/出错了：模型渠道超时/)).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /重试|retry/i })).toBeNull() // F4 翻转位
+    expect(screen.queryByRole('button', { name: /重试|retry/i })).toBeNull()
   })
 
   it('[M4·降级基线] 文本节点存在于 DOM（用户至少可手动框选 Ctrl+C——非图片化锁死）', () => {
