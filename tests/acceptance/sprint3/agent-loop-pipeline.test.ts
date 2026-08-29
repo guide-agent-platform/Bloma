@@ -310,6 +310,62 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
 
   // omit 渠道全链测试暂移除：依赖 agent-loop providerType 透传消费（agent-loop 半合并保留本地版，下轮 compacting-window 整合时从队友分支取回恢复）
 
+  it('omit 渠道（zhipu-coding）全链：每次模型调用都携带渠道 providerType（编排队→agent-loop→query 透传锁定，omit 待办②）', async () => {
+    createChannel({
+      name: 'omit-channel',
+      provider_type: 'zhipu-coding',
+      base_url: 'https://omit.example',
+      api_key: 'key-omit',
+      models: [{ id: 'm1', name: 'omit-model', enabled: true, supports_tools: true }],
+    })
+    const project = createProject({ request_id: 'req-acc-omit', mode: 'quick', initial_message: '帮我做一个记账应用' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出', priority: 'P0' }])
+
+    const server = createServer((req, res) => {
+      const root = findProject(project.project_id).root_path
+      const path = req.url === '/' ? '/index.html' : (req.url ?? '/index.html')
+      try {
+        const content = readFileSync(join(root, path.replace(/^\//, '')), 'utf8')
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+        res.end(content)
+      } catch {
+        res.writeHead(404)
+        res.end('Not Found')
+      }
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+    setSandboxRuntimeForTests({
+      processFactory: () => fakeChild(),
+      portAllocator: async () => port,
+      healthCheck: async () => true,
+    })
+
+    try {
+      const { query, providerTypes } = scriptedQuery()
+      const mvp = await runMvpTask({
+        request_id: 'req-acc-omit',
+        session_id: 'session-acc-omit',
+        project_id: project.project_id,
+        mode: 'quick',
+        query,
+      })
+
+      // 透传锁定：每次带 tools 的模型调用（探测/loop 轮）的 options.providerType 都等于渠道 provider_type。
+      // 若编排队构造丢字段，omit 渠道在真实 anthropicMessagesQuery 下会发 thinking:disabled → 400。
+      // 无工具附属调用（autoName 命名等）不计入——不透传只是多一次 400 兼容重试（omit 待办③已裁定优雅降级）。
+      expect(mvp.via_agent_loop).toBe(true)
+      const withTools = providerTypes.filter((call) => call.toolCount > 0)
+      // 本地收口机制（wrapUp）会让末轮在无工具收口轮交卷（toolCount=0 不计入）：
+      // 数量断言放宽为 >0，核心意图保留——所有带工具调用都带渠道 providerType
+      expect(withTools.length).toBeGreaterThan(0)
+      expect(withTools.every((call) => call.providerType === 'zhipu-coding')).toBe(true)
+      expect(findProject(project.project_id).current_stage).toBe('testing')
+    } finally {
+      server.close()
+    }
+  }, 20000)
+
   it('M4-C 委派全链：父 loop delegate_agent → 子会话收敛 → 生命周期事件发布 → 终验 ready', async () => {
     createChannel({
       name: 'delegation-channel',

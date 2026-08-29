@@ -800,6 +800,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     maxTurns: resolveAgentLoopMaxTurns(input.mode),
     permissionMode: AUTOMATED_PERMISSION_MODE,
     temperature: categoryTemperature('mvp'),
+    providerType: loop.channel.provider_type,
     signal: input.signal ?? new AbortController().signal,
     publish: (type, payload) => publish(input, type, payload),
     onTurn: (info) => {

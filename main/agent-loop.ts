@@ -1,8 +1,12 @@
-import type { AgentEvent, AgentLoopStatus, MessageContentBlock, PromaPermissionMode } from '../shared/types'
+import type { AgentEvent, AgentLoopStatus, MessageContentBlock, PastedImageRef, PromaPermissionMode } from '../shared/types'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
 import { canUseTool } from './permission-service'
 import type { ConversationTurn, SDKQuery, ToolDefinition } from './orchestrator'
+import { prepareTaskWithSkills } from './skill-loader'
+import { prepareRecallBlock } from './session-recall'
+import { estimateTokenCount } from './usage-guard'
+import { windowMessagesWithDigest } from './compacting-window'
 
 /**
  * Agent Loop 执行器（L1，AgentLoop 改造方案 §4.2）。
@@ -95,12 +99,17 @@ export interface AgentLoopInput {
   permissionMode: PromaPermissionMode
   /** 委派深度（缺省 0 = 主 agent；子 agent = 父深度+1，写入工具 state） */
   delegationDepth?: number
-  /** 续跑重放历史轮次（delegation continue 阶段 3，2026-08-29 队友合入）：
-   * 类型先行，agent-loop 消费逻辑待下轮 compacting-window 整合时接入 */
+  /** 续跑重放历史轮次（delegation continue 阶段 3，2026-08-28 队友）：作为 messages 开头
+   * 传入模型，task 仍是最新 user 轮；不写入 JSONL——重放轮已在子会话文件里 */
   historyTurns?: ConversationTurn[]
-  /** omit 推广（2026-08-27 队友合入）：透传父渠道 providerType，Token Plan 类渠道免 400 往返；
-   * 类型先行，SDK 消费待下轮 agent-loop 整合时接入 */
+  /** omit 推广（2026-08-27 队友）：透传父渠道 providerType，Token Plan 类渠道免 400 往返 */
   providerType?: string
+  /** 剪贴板粘贴图片引用（clipboard-paste P1，2026-08-29 队友）：与 task 同轮组装 [text, ...image] 块数组 */
+  images?: PastedImageRef[]
+  /** 会话级 usage 聚合（费用守卫 Hook 1，2026-08-28 队友）：渠道不返回 usage 时
+   * turnsWithUsage=0，estContextTokens（估算器）成为唯一占用信号。估算为启发式，
+   * 只作守卫/展示不作计费 */
+  usage?: { inputTokens: number; outputTokens: number; estContextTokens: number; turnsWithUsage: number }
   temperature?: number
   signal: AbortSignal
   publish: (type: AgentEvent['type'], payload: Record<string, unknown>) => void
@@ -113,6 +122,8 @@ export interface AgentLoopResult {
   turns: number
   finalText: string
   toolCalls: Array<{ name: string; turn: number }>
+  /** 会话级 usage 聚合（费用守卫 Hook 1，2026-08-28 队友）：逐轮累计渠道返回 usage + 全块口径估算 */
+  usage?: { inputTokens: number; outputTokens: number; estContextTokens: number; turnsWithUsage: number }
 }
 
 /** JSONL 审计里单条 tool_result 的截断上限（全文走事件流，防 JSONL 膨胀）。 */
@@ -247,13 +258,18 @@ function isToolTurn(turn: ConversationTurn): boolean {
  * 断言细节不会随 8 轮硬窗口出窗，模型修复不再重复踩已修过的坑。只钉完整对
  * （角色成对且都是工具轮）；对不完整（cancelled 残局）不钉，退化为固定窗口。
  */
-export function windowMessages(
+/**
+ * 窗口分区（compacting-window 移植的重构基础，2026-08-28 队友）：同一后向扫描算法，
+ * 同时返回保留集与驱逐集。windowMessages 基于它保持原行为；windowMessagesWithDigest
+ * 基于驱逐集生成摘要。pinnedTurn 支持本地钉轮（首个测试失败轮恒保留，不占窗口预算）。
+ */
+export function partitionWindow(
   messages: ConversationTurn[],
   textWindowTurns: number,
   toolRounds: number,
   pinnedTurn?: number,
-): ConversationTurn[] {
-  if (messages.length === 0) return []
+): { head: ConversationTurn | null; kept: ConversationTurn[]; evicted: ConversationTurn[] } {
+  if (messages.length === 0) return { head: null, kept: [], evicted: [] }
   const head = messages[0]
   const tail = messages.slice(1)
   // pinnedTurn t 的对 = tail[2(t-1)]（assistant tool_use）+ tail[2(t-1)+1]（user tool_result）
@@ -274,21 +290,56 @@ export function windowMessages(
   }
   let toolBudget = toolRounds * 2
   let textBudget = textWindowTurns
-  const kept: number[] = [] // tail 索引（升序由 unshift 维持）
+  const keptIdx = new Set<number>()
+  for (const idx of pinned) keptIdx.add(idx) // 钉住的对恒保留（不占预算）
   for (let i = tail.length - 1; i >= 0; i -= 1) {
-    if (pinned.has(i)) continue // 钉住的对不占窗口预算
+    if (pinned.has(i)) continue
     if (isToolTurn(tail[i])) {
       if (toolBudget > 0) {
-        kept.unshift(i)
+        keptIdx.add(i)
         toolBudget -= 1
       }
     } else if (textBudget > 0) {
-      kept.unshift(i)
+      keptIdx.add(i)
       textBudget -= 1
     }
   }
-  const ordered = [...pinned, ...kept].sort((x, y) => x - y) // 保持原顺序
-  return [head, ...ordered.map((i) => tail[i])]
+  const kept = [...keptIdx].sort((a, b) => a - b).map((i) => tail[i])
+  const evicted = tail.filter((_, i) => !keptIdx.has(i))
+  return { head, kept, evicted }
+}
+
+export function windowMessages(
+  messages: ConversationTurn[],
+  textWindowTurns: number,
+  toolRounds: number,
+  pinnedTurn?: number,
+): ConversationTurn[] {
+  const { head, kept } = partitionWindow(messages, textWindowTurns, toolRounds, pinnedTurn)
+  if (!head) return []
+  return [head, ...kept]
+}
+
+/** 占用估算文本：text 正文 + tool_result 内容 + tool_use input 序列化 + image 占位（全块口径，r55 队友）。 */
+export function estimateBlocksText(blocks: MessageContentBlock[]): string {
+  return blocks
+    .map((b) => {
+      if (b.type === 'text') return b.text ?? ''
+      if (b.type === 'tool_result') return typeof b.content === 'string' ? b.content : ''
+      if (b.type === 'tool_use') return JSON.stringify(b.input ?? {})
+      if (b.type === 'image') return '[图片]' // clipboard-paste P1：防用量估算漏计图片块（占位口径，非 base64）
+      return ''
+    })
+    .join('\n')
+}
+
+/** 畸形粘贴引用过滤（fuzz 加固，S4-AGENT-093 队友）：非对象/缺 imageId/非法 media_type/穿越串一律滤除 */
+function sanitizePastedImageRefs(images?: PastedImageRef[]): PastedImageRef[] {
+  if (!images?.length) return []
+  return images.filter((r): r is PastedImageRef => {
+    if (!r || typeof r !== 'object' || typeof r.imageId !== 'string' || typeof r.media_type !== 'string') return false
+    return /^[A-Za-z0-9_-]+\/[A-Za-z0-9-]+\.(png|jpeg|jpg|gif|webp)$/.test(r.imageId)
+  })
 }
 
 export function createToolState(delegationDepth = 0): AgentLoopToolState {
@@ -311,7 +362,32 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   const toolByName = new Map(input.tools.map((tool) => [tool.name, tool]))
   const budgetUsed: Record<string, number> = {}
   const toolCalls: Array<{ name: string; turn: number }> = []
-  const messages: ConversationTurn[] = [{ role: 'user', content: input.task }]
+  // continue 重放（阶段 3，2026-08-28 队友）：历史轮次前缀不写入 JSONL（已在子会话文件里），仅进模型上下文
+  // skill 机制（2026-08-28）：任务含 /skill: 命令时从两级白名单根前置注入（无命令零 IO）。
+  // 注入块只随当条 user 消息进窗口（digest/窗口自然滑出），不污染 system；
+  // JSONL 落注入后文本——审计=模型实际所见，continue 重放一致。
+  // 跨会话检索（guidance v5 ②）：主 loop（depth 0）指代词任务前置 <session-recall> 历史摘录
+  // （模块内失败静默）；与 skill 注入一次拼接，任务原文始终在最后。
+  const [skillPrep, recallBlock] = await Promise.all([
+    prepareTaskWithSkills(input.task, input.projectId),
+    prepareRecallBlock(input.task, input.delegationDepth ?? 0),
+  ])
+  const task = recallBlock ? `${recallBlock}\n${skillPrep.content}` : skillPrep.content
+  // clipboard-paste P1（2026-08-29）：带图时首条 user 轮为 [text, ...image 短引用] 块数组；
+  // 水合只在 anthropicMessagesQuery 请求体边界发生（JSONL/模型历史全程轻量）。
+  const pastedImageRefs = sanitizePastedImageRefs(input.images)
+  const taskBlocks: MessageContentBlock[] | undefined = pastedImageRefs.length
+    ? [
+        { type: 'text', text: task },
+        ...pastedImageRefs.map((r) => ({ type: 'image' as const, imageId: r.imageId, media_type: r.media_type })),
+      ]
+    : undefined
+  const messages: ConversationTurn[] = [
+    ...(input.historyTurns ?? []),
+    taskBlocks ? { role: 'user' as const, content: taskBlocks } : { role: 'user' as const, content: task },
+  ]
+  // 初始 task 落盘（审计完整性：JSONL 是子会话全量审计，缺首条 user 会让 continue 重放丢任务原文）
+  appendLoopMessage(input.sessionId, 'user', taskBlocks ?? [{ type: 'text', text: task }])
   const ctx: ToolContext = {
     projectId: input.projectId,
     sessionId: input.sessionId,
@@ -323,6 +399,34 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   let turns = 0
   let finalText = ''
   let consecutiveBudgetStallTurns = 0
+  // 费用守卫 Hook 1（2026-08-28 队友）：逐轮累计渠道返回 usage（渠道不返回即全盲 → estContextTokens 兜底）
+  const usageTotals = { inputTokens: 0, outputTokens: 0, turnsWithUsage: 0 }
+  const attachUsage = (r: AgentLoopResult): AgentLoopResult => {
+    // 渲染层透明条数据源（v6 ② b）：loop 结束发布 usage_summary 事件（取消/熔断路径同样发布——用量是事实）
+    const estContextTokens = estimateTokenCount(
+      messages
+        .map((m) => (typeof m.content === 'string' ? m.content : estimateBlocksText(m.content)))
+        .join('\n'),
+    )
+    input.publish('usage_summary', {
+      session_id: input.sessionId,
+      input_tokens: usageTotals.inputTokens,
+      output_tokens: usageTotals.outputTokens,
+      est_context_tokens: estContextTokens,
+      turns_with_usage: usageTotals.turnsWithUsage,
+    })
+    return {
+      ...r,
+      usage: {
+        inputTokens: usageTotals.inputTokens,
+        outputTokens: usageTotals.outputTokens,
+        turnsWithUsage: usageTotals.turnsWithUsage,
+        // 全块口径（r55 low 池采纳）：tool_result 内容与 tool_use input 都占上下文，
+        // text-only 口径在渠道全盲时会严重低估占用。
+        estContextTokens,
+      },
+    }
+  }
   // 收口态：GWT 全过 + 安全扫描通过后置位，此后模型调用停用全部工具并追加收口指令
   let wrapUp = false
   // 首个 test_failed 轮（窗口钉轮，只钉一次）：修复全程可见第一次测试失败的断言细节。
@@ -336,7 +440,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   const compactThreshold = resolveCompactThreshold()
 
   for (let turn = 1; turn <= input.maxTurns; turn += 1) {
-    if (input.signal.aborted) return loopCancelled(turns, finalText, toolCalls)
+    if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls))
 
     // ---- 模型调用（L0 带 tools；messages 全量透传，system 提取由查询层负责）----
     const assistantBlocks: MessageContentBlock[] = []
@@ -367,7 +471,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         sessionId: input.sessionId,
         maxTokens: input.maxTokens,
         ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
-        messages: [{ role: 'system', content: wrapUp ? `${input.system}${WRAP_UP_SUFFIX}` : input.system }, ...windowMessages(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn)],
+        ...(input.providerType !== undefined ? { providerType: input.providerType } : {}),
+        messages: [{ role: 'system', content: wrapUp ? `${input.system}${WRAP_UP_SUFFIX}` : input.system }, ...windowMessagesWithDigest(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn)],
         tools: wrapUp ? [] : definitions,
       })) {
         if (sdk.type === 'assistant' && sdk.message) {
@@ -387,8 +492,13 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       }
       flushTextRun()
     } catch (error) {
-      if (isLoopCancelled(error, input.signal)) return loopCancelled(turns, finalText, toolCalls)
+      if (isLoopCancelled(error, input.signal)) return attachUsage(loopCancelled(turns, finalText, toolCalls))
       throw error
+    }
+    if (usage) {
+      usageTotals.inputTokens += usage.input_tokens ?? 0
+      usageTotals.outputTokens += usage.output_tokens ?? 0
+      usageTotals.turnsWithUsage += 1
     }
     turns = turn
     finalText = textOfBlocks(assistantBlocks)
@@ -400,13 +510,13 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     input.onTurn?.({ turn, toolCalls: turnCalls, inputTokens: usage?.input_tokens, outputTokens: usage?.output_tokens })
 
     // 无 tool_use = 模型声明收工（真伪由外部强制终验收口，不信模型自述）
-    if (turnToolUses.length === 0) return { status: 'completed', turns, finalText, toolCalls }
+    if (turnToolUses.length === 0) return attachUsage({ status: 'completed', turns, finalText, toolCalls })
 
     // ---- 工具执行：串行 + 整批 tool_result 进同一条 user 消息（不变式）----
     const resultBlocks: MessageContentBlock[] = []
     let budgetStallThisTurn = false
     for (const use of turnToolUses) {
-      if (input.signal.aborted) return loopCancelled(turns, finalText, toolCalls)
+      if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls))
       input.publish('tool_call_started', {
         tool: use.name,
         turn,
@@ -449,7 +559,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
 
     consecutiveBudgetStallTurns = budgetStallThisTurn ? consecutiveBudgetStallTurns + 1 : 0
     if (consecutiveBudgetStallTurns >= BUDGET_STALL_TURNS) {
-      return { status: 'budget_exhausted', turns, finalText, toolCalls }
+      return attachUsage({ status: 'budget_exhausted', turns, finalText, toolCalls })
     }
 
     // ---- usage 竹节压缩（闭环 PR6）：阈值触发交接，重置为 task+交接文档 ----
@@ -459,9 +569,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       compactions < LOOP_MAX_COMPACTIONS &&
       turn < input.maxTurns - 3
     ) {
-      if (input.signal.aborted) return loopCancelled(turns, finalText, toolCalls)
+      if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls))
       const handoff = await requestHandoff(input, messages, pinnedTestTurn)
-      if (input.signal.aborted) return loopCancelled(turns, finalText, toolCalls)
+      if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls))
       // 确定性兑底也携带钉轮失败断言原文（审查 P1-2：交接失败恰是最需要细节的降级路径）
       const summary = handoff || deterministicHandoff(turn, toolCalls, finalText, pinnedFailureExcerpt(messages, pinnedTestTurn))
       messages.length = 0
@@ -487,9 +597,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   // 补一次无 tools 的收口调用让模型交卷：出文本 → completed（外部终验仍照跑，不信自述）；
   // 仍坚持要工具 → 如实 turn_limit。宽限轮不计 turns、不发 onTurn（epilogue 不是工作轮）。
   const grace = await runGraceWrapUpTurn(input, messages, pinnedTestTurn)
-  if (grace.kind === 'text') return { status: 'completed', turns, finalText: grace.text, toolCalls }
-  if (grace.kind === 'cancelled') return loopCancelled(turns, finalText, toolCalls)
-  return { status: 'turn_limit', turns, finalText, toolCalls }
+  if (grace.kind === 'text') return attachUsage({ status: 'completed', turns, finalText: grace.text, toolCalls })
+  if (grace.kind === 'cancelled') return attachUsage(loopCancelled(turns, finalText, toolCalls))
+  return attachUsage({ status: 'turn_limit', turns, finalText, toolCalls })
 }
 
 type GraceWrapUpOutcome = { kind: 'text'; text: string } | { kind: 'refused' } | { kind: 'cancelled' } | { kind: 'failed' }
@@ -522,7 +632,7 @@ async function runGraceWrapUpTurn(
       ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
       messages: [
         { role: 'system', content: `${input.system}${GRACE_TURN_SUFFIX}` },
-        ...windowMessages(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn),
+        ...windowMessagesWithDigest(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn),
       ],
       // 空数组而非缺省：与「无 tools 的交接调用」在调用方可区分（tools === undefined）
       tools: [],
