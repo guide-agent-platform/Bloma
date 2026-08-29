@@ -138,6 +138,92 @@ describe('ipc submit-correction → runIterationTask wiring（Sprint 3 纠错主
     expect(jsonl).toContain('改成九个数字按键')
   })
 
+  it('点选纠错 user_note 拼入圈选 DOM 上下文，诉求文本携带被圈目标（2026-08-29 线上案例：圈选标题说「换个名字」）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ipc-correction-context-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    seedConfirmedPrd(project.project_id, true)
+    updateProject(project.project_id, { current_stage: 'ready' })
+
+    const handlers = new Map<string, (_event: unknown, payload: unknown) => unknown>()
+    registerIpcHandlers(
+      { handle: (channel: string, handler: (_event: unknown, payload: unknown) => unknown) => handlers.set(channel, handler) } as never,
+      { webContents: { send: () => undefined } } as never,
+    )
+
+    const submitCorrection = handlers.get(IPC_CHANNELS.PROJECT_SUBMIT_CORRECTION)
+    await submitCorrection!({}, {
+      request_id: 'req-correction-ctx',
+      project_id: project.project_id,
+      session_id: 'session-ctx',
+      context: {
+        element_selector: '#app-title',
+        text_content: '计算器模拟器',
+        bounding_rect: { x: 10, y: 20, width: 200, height: 40 },
+        fallback_mode: false,
+      },
+      user_note: '换个名字',
+      mode: 'user_note',
+    })
+
+    // 诉求必须携带被圈目标，归一化模型才能判 revise 而非 skip
+    expect(runIterationTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining('计算器模拟器'),
+      }),
+    )
+    expect(runIterationTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining('换个名字'),
+      }),
+    )
+    expect(runIterationTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining('#app-title'),
+      }),
+    )
+  })
+
+  it('纯猜模式带圈选文本：诉求为「希望调整该元素」语义，不把元素文本原样当需求', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ipc-correction-guess-text-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    seedConfirmedPrd(project.project_id, true)
+    updateProject(project.project_id, { current_stage: 'ready' })
+
+    const handlers = new Map<string, (_event: unknown, payload: unknown) => unknown>()
+    registerIpcHandlers(
+      { handle: (channel: string, handler: (_event: unknown, payload: unknown) => unknown) => handlers.set(channel, handler) } as never,
+      { webContents: { send: () => undefined } } as never,
+    )
+
+    const submitCorrection = handlers.get(IPC_CHANNELS.PROJECT_SUBMIT_CORRECTION)
+    await submitCorrection!({}, {
+      request_id: 'req-correction-guess-text',
+      project_id: project.project_id,
+      session_id: 'session-guess-text',
+      context: {
+        element_selector: '.todo-item',
+        text_content: '待办事项',
+        bounding_rect: { x: 10, y: 20, width: 100, height: 30 },
+        fallback_mode: false,
+      },
+      mode: 'guess',
+    })
+
+    // 触发重生成，且诉求语义化（「希望调整这个元素」），不再把「待办事项」当新需求 append
+    expect(runIterationTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining('待办事项'),
+      }),
+    )
+    expect(runIterationTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining('希望调整这个元素'),
+      }),
+    )
+  })
+
   it('纯猜模式（无文案）不触发重新生成，只落盘', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-ipc-correction-guess-'))
     process.env.PROMA_HOME = home

@@ -8,3 +8,4 @@ test-results/
 .proma-test/
 *.log
 .context/
+.omo/

@@ -219,6 +219,66 @@ describe('转移阶段护栏（问题 A / P1）', () => {
     expect(events.some((event) => event.type === 'sketch_ready')).toBe(true)
   })
 
+  it('sketch_ready 修改意见判 skip 时 ack 如实告知，不假装采纳（2026-08-29 点选纠错线上案例）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-sketch-skip-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-sketch-skip', mode: 'quick' })
+    updateProject(project.project_id, { current_stage: 'sketch_ready' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '计算器模拟器，基础四则运算' }])
+    vi.mocked(findProject).mockReturnValue({ ...project, current_stage: 'sketch_ready' } as never)
+
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    // query 按调用次数分流：第 1 次=需求归一化（判 skip：无信息量操作指令），第 2 次=草图 LLM
+    const SKETCH_HTML = '<!doctype html><html><head><style>body{color:#3333ff}</style></head><body><main>计算器</main></body></html>'
+    let call = 0
+    setSDKQueryForTests(async function* () {
+      call += 1
+      yield {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: call === 1 ? '{"action":"skip","reason":"操作指令"}' : SKETCH_HTML }],
+        },
+      }
+      yield { type: 'result', subtype: 'success' }
+    })
+    setSandboxRuntimeForTests({
+      portAllocator: async () => 3104,
+      healthCheck: async () => true,
+      processFactory: () => makeChildProcess(),
+    })
+    setSnapshotCaptureProviderForTests(async () => ({
+      extension: 'png',
+      buffer: Buffer.from('fake-png'),
+    }))
+
+    await runAgent({
+      request_id: 'req-sketch-skip',
+      session_id: 'session-sketch-skip',
+      project_id: project.project_id,
+      content: '换个名字',
+      mode: 'quick',
+      current_stage: 'sketch_ready',
+      channel_id: 'test-channel',
+    })
+
+    // skip 不入需求清单：需求仍只有 F-001，且描述未被修改
+    const requirements = readLastSketchRequirements(project.project_id)
+    expect(requirements).toHaveLength(1)
+    expect(requirements[0]?.description).toContain('计算器模拟器')
+    // ack 如实：明确说明「没当作需求改动」，绝不假装「按…调整」
+    const deltas = events
+      .filter((event) => event.type === 'message_delta')
+      .map((event) => String(event.payload.text ?? ''))
+      .join('')
+    expect(deltas).toContain('没当作需求改动')
+    expect(deltas).toContain('想改哪里请直接说')
+    expect(deltas).not.toContain('按「换个名字」调整草图')
+    expect(events.some((event) => event.type === 'stage_changed' && event.payload.stage === 'generating_sketch')).toBe(true)
+    expect(events.some((event) => event.type === 'sketch_ready')).toBe(true)
+  })
+
   it('编程路径输出完整 HTML / 代码块时追加显式提示', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-code-hint-'))
     process.env.PROMA_HOME = home

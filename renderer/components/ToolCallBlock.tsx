@@ -6,10 +6,11 @@ import type { AgentEvent, MessageContentBlock } from '../../shared/types'
  *
  * 三个视图：
  * - ToolCallFeed：实时流（消费 tool_call_started/completed 事件），折叠行显示
- *   「第 N 轮 · 工具名 + 输入摘要 + 状态 + 耗时」，点击展开截断输出。
+ *   「工具名 + 输入摘要 + 状态 + 耗时」，点击展开截断输出。
  * - ToolCallRow：单行（上两者共用）。
  * - ToolBlocksReplay：历史回放（JSONL 落盘的 tool_use / tool_result block 转工具行
  *   胶囊，归入陷阱 26 前缀家族的「不污染纯文本流」设计）。
+ * 2026-08-29 用户反馈：轮次号对零基础用户是噪音，行内与阶段指示一律隐藏「第 N 轮 ·」。
  */
 
 /** 工具名 → 用户可读名（与主进程 TOOL_DISPLAY_NAMES 对齐，渲染端独立维护避免跨层依赖）。 */
@@ -57,7 +58,6 @@ function truncateText(value: string, max: number): string {
 
 export interface ToolCallRowProps {
   tool: string
-  turn?: number
   inputSummary?: string
   outputSummary?: string
   status: ToolCallStatus
@@ -66,7 +66,7 @@ export interface ToolCallRowProps {
   replay?: boolean
 }
 
-export const ToolCallRow: React.FC<ToolCallRowProps> = ({ tool, turn, inputSummary, outputSummary, status, durationMs, replay = false }) => {
+export const ToolCallRow: React.FC<ToolCallRowProps> = ({ tool, inputSummary, outputSummary, status, durationMs, replay = false }) => {
   const [expanded, setExpanded] = React.useState(false)
   const summary = outputSummary ?? inputSummary ?? ''
   const hasDetail = summary.length > 0 && status !== 'running'
@@ -110,7 +110,6 @@ export const ToolCallRow: React.FC<ToolCallRowProps> = ({ tool, turn, inputSumma
           }}
         />
         <span style={{ color: 'var(--color-text)', fontWeight: 500, flexShrink: 0 }}>
-          {turn !== undefined ? `第 ${turn} 轮 · ` : ''}
           {toolLabel(tool)}
         </span>
         {inputSummary && (
@@ -199,7 +198,6 @@ export const ToolCallFeed: React.FC<{ events: AgentEvent[] }> = ({ events }) => 
         <ToolCallRow
           key={record.key}
           tool={record.tool}
-          turn={record.turn}
           inputSummary={record.inputSummary}
           outputSummary={record.outputSummary}
           status={record.status}

@@ -277,16 +277,18 @@ describe('runAgentLoop（PR2 L1）', () => {
     const { query, receivedMessages } = scriptedQuery(script)
     const result = await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 12, sessionId: 'session-window' }))
     expect(result.status).toBe('turn_limit')
+    // 宽限轮（2026-08-29）：最后一条是 maxTurns 耗尽后的无 tools 交卷调用，messages 同样有界
     const lastCall = receivedMessages.at(-1)!
     expect(lastCall.length).toBe(2 + TOOL_WINDOW_ROUNDS * 2) // system + task + 最近 8 轮 tool 对
-    // 窗口内容断言：保留最近 8 轮（第 5~12 轮，id t3..t10），早期轮（t0..t2）被剪掉
+    // 窗口内容断言：宽限轮看到 12 轮全量，保留最近 8 轮（第 5~12 轮，id t4..t11），早期轮被剪掉
     const toolUseIds = lastCall
       .filter((turn) => turn.role === 'assistant')
       .map((turn) => (turn.content as Array<{ type?: string; id?: string }>).find((block) => block.type === 'tool_use')?.id)
       .filter(Boolean)
-    expect(toolUseIds).toEqual(['t3', 't4', 't5', 't6', 't7', 't8', 't9', 't10'])
+    expect(toolUseIds).toEqual(['t4', 't5', 't6', 't7', 't8', 't9', 't10', 't11'])
+    // JSONL 审计全量照落：12 个工作轮 + 1 条宽限轮 assistant 行
     const jsonl = readSessionJsonl('session-window')
-    expect(jsonl.filter((m) => m.role === 'assistant' && m.content.some((b) => b.type === 'tool_use'))).toHaveLength(12)
+    expect(jsonl.filter((m) => m.role === 'assistant' && m.content.some((b) => b.type === 'tool_use'))).toHaveLength(13)
   })
 })
 
@@ -471,17 +473,18 @@ describe('F4 窗口钉住首个 test_failed 轮（闭环治理 PR2）', () => {
     const result = await runAgentLoop(baseInput({ query, tools: [echo, gwtFail], maxTurns: 12, sessionId: 'session-pin' }))
 
     expect(result.status).toBe('turn_limit')
+    // 宽限轮（2026-08-29）：最后一条为耗尽后的无 tools 调用，窗口 = 钉住的 t1 对 + 最近 8 对（t4..t11）
     const lastCall = receivedMessages.at(-1)!
-    // system + task + 钉住的 t1 对 + 最近 8 轮对（t3..t10）
+    // system + task + 钉住的 t1 对 + 最近 8 轮对（t4..t11）
     expect(lastCall).toHaveLength(1 + 1 + 2 + TOOL_WINDOW_ROUNDS * 2)
     const toolUseIds = lastCall
       .filter((turn) => turn.role === 'assistant')
       .map((turn) => (turn.content as Array<{ type?: string; id?: string }>).find((block) => block.type === 'tool_use')?.id)
       .filter(Boolean)
-    expect(toolUseIds).toEqual(['t1', 't3', 't4', 't5', 't6', 't7', 't8', 't9', 't10'])
-    // JSONL 审计全量照落，不受窗口化影响
+    expect(toolUseIds).toEqual(['t1', 't4', 't5', 't6', 't7', 't8', 't9', 't10', 't11'])
+    // JSONL 审计全量照落，不受窗口化影响：12 个工作轮 + 1 条宽限轮 assistant 行
     const jsonl = readSessionJsonl('session-pin')
-    expect(jsonl.filter((m) => m.role === 'assistant' && m.content.some((b) => b.type === 'tool_use'))).toHaveLength(12)
+    expect(jsonl.filter((m) => m.role === 'assistant' && m.content.some((b) => b.type === 'tool_use'))).toHaveLength(13)
   })
 
   it('主循环接线：无失败时模型可见消息与固定窗口完全一致（回归）', async () => {
@@ -496,7 +499,7 @@ describe('F4 窗口钉住首个 test_failed 轮（闭环治理 PR2）', () => {
       .filter((turn) => turn.role === 'assistant')
       .map((turn) => (turn.content as Array<{ type?: string; id?: string }>).find((block) => block.type === 'tool_use')?.id)
       .filter(Boolean)
-    expect(toolUseIds).toEqual(['t3', 't4', 't5', 't6', 't7', 't8', 't9', 't10'])
+    expect(toolUseIds).toEqual(['t4', 't5', 't6', 't7', 't8', 't9', 't10', 't11'])
   })
 })
 
@@ -595,8 +598,8 @@ describe('usage 竹节压缩（闭环 PR6）', () => {
       .map((turn) => (turn.content as Array<{ type?: string; id?: string }>).find((b) => b.type === 'tool_use')?.id)
     expect(turn4ToolIds).toEqual(['t4'])
 
-    // JSONL 审计全量照落：8 轮工具行一条不少
-    expect(readSessionJsonl('session-compact').filter((m) => m.role === 'assistant' && m.content.some((b) => b.type === 'tool_use'))).toHaveLength(8)
+    // JSONL 审计全量照落：8 轮工具行 + 1 条宽限轮（2026-08-29，耗尽后的无 tools 调用）一条不少
+    expect(readSessionJsonl('session-compact').filter((m) => m.role === 'assistant' && m.content.some((b) => b.type === 'tool_use'))).toHaveLength(9)
   })
 
   it('压缩封顶 2 次：阈值持续超额、可触发轮次充足也不超出', async () => {
@@ -639,10 +642,10 @@ describe('usage 竹节压缩（闭环 PR6）', () => {
 
     expect(result.status).toBe('turn_limit')
     expect(events.filter((event) => event.type === 'loop_compaction')).toHaveLength(0)
-    // 最后一轮仍是固定窗口语义（无交接段）
+    // 最后一轮是宽限轮（2026-08-29）：看到全部 6 对（无交接段、无压缩），窗口保留 6 对
     const lastCall = turnCalls.at(-1)!
     expect(JSON.stringify(lastCall)).not.toContain('此前进度交接')
-    expect(lastCall).toHaveLength(1 + 1 + 5 * 2) // system + task + 5 轮对
+    expect(lastCall).toHaveLength(1 + 1 + 6 * 2) // system + task + 6 轮对
   })
 
   it('abort 在交接等待中正确退出：交接调用挂起，主 signal 取消后立即收尾', async () => {
@@ -771,5 +774,107 @@ describe('压缩×钉轮交互修复（审查 P1-1/P1-2）', () => {
     const lines = readSessionJsonl('session-pinfix-fallback').map((line) => JSON.stringify(line))
     const compactionLine = lines.find((line) => line.includes('[loop-compaction]'))
     expect(compactionLine).toContain('F-002')
+  })
+})
+
+describe('绿灯收口与宽限轮（2026-08-29 turn_limit 线上案例 eb900c57）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-wrapup-'))
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+  })
+
+  /** 模拟 run_gwt_tests 全过：置位 gwt_all_passed（与真实工具同款信号）。 */
+  function gwtPassTool(): AgentLoopTool {
+    return {
+      name: 'run_gwt_tests',
+      description: '模拟测试全过',
+      input_schema: { type: 'object', properties: {} },
+      execute: async (_input, ctx) => {
+        ctx.state.gwt_all_passed = true
+        return { output: '全部通过（5/5 个场景）。' }
+      },
+    }
+  }
+
+  /** 模拟 run_security_scan 通过：置位 security_all_passed（与真实工具同款信号）。 */
+  function scanPassTool(): AgentLoopTool {
+    return {
+      name: 'run_security_scan',
+      description: '模拟安全扫描通过',
+      input_schema: { type: 'object', properties: {} },
+      execute: async (_input, ctx) => {
+        ctx.state.security_all_passed = true
+        return { output: '安全扫描通过：无高危/严重问题。' }
+      },
+    }
+  }
+
+  it('测试+扫描全过后下一轮停用工具并追加收口指令 → 模型交卷 completed（线上案例根因回归）', async () => {
+    // 剧本：第 1 轮同时要测试+扫描（都全过）→ 收口轮（无 tools）输出总结
+    const { query, receivedToolCount, receivedMessages } = scriptedQuery([
+      [toolUseMessage('t1', 'run_gwt_tests'), toolUseMessage('t2', 'run_security_scan')],
+      [textMessage('完成：8Bit 模拟器全部功能就绪。')],
+    ])
+    const result = await runAgentLoop(baseInput({ query, tools: [gwtPassTool(), scanPassTool()] }))
+
+    expect(result.status).toBe('completed')
+    expect(result.turns).toBe(2)
+    expect(result.finalText).toBe('完成：8Bit 模拟器全部功能就绪。')
+    // 收口轮不带任何工具（tools 为空数组），system 追加收口指令
+    expect(receivedToolCount).toEqual([2, 0])
+    expect(String((receivedMessages[1]![0] as { content: string }).content)).toContain('【收口】')
+  })
+
+  it('测试全过但安全扫描未跑 → 不收口，继续给工具（收口需两个绿灯同时成立）', async () => {
+    const { query, receivedToolCount } = scriptedQuery([
+      [toolUseMessage('t1', 'run_gwt_tests')],
+      [toolUseMessage('t2', 'run_security_scan')],
+      [textMessage('完成')],
+    ])
+    const result = await runAgentLoop(baseInput({ query, tools: [gwtPassTool(), scanPassTool()] }))
+    expect(result.status).toBe('completed')
+    // 第 2 轮仍带工具定义（安全扫描还没跑，不得提前收口）；第 3 轮收口停用全部工具
+    expect(receivedToolCount).toEqual([2, 2, 0])
+  })
+
+  it('maxTurns 耗尽 → 宽限轮纯文本交卷 → completed（宽限轮不计 turns）', async () => {
+    const echo = tool('echo', () => ({ output: 'ok' }))
+    let call = 0
+    const events: Array<{ type: string; payload: Record<string, unknown> }> = []
+    const query: SDKQuery = async function* () {
+      call += 1
+      if (call <= 3) {
+        yield toolUseMessage(`t${call}`, 'echo')
+        yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+      } else {
+        yield textMessage('总结：基础功能已完成。')
+        yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+      }
+    }
+    const result = await runAgentLoop(baseInput({
+      query,
+      tools: [echo],
+      maxTurns: 3,
+      publish: (type, payload) => events.push({ type, payload }),
+    }))
+
+    expect(result.status).toBe('completed')
+    expect(result.turns).toBe(3) // 宽限轮不计入 turns
+    expect(result.finalText).toBe('总结：基础功能已完成。')
+    expect(result.toolCalls).toHaveLength(3)
+    // 宽限轮文本照进事件流（UI 可见交卷内容）
+    expect(events.some((event) => event.type === 'message_delta' && String(event.payload.text).includes('总结'))).toBe(true)
+  })
+
+  it('宽限轮仍坚持要工具 → 如实 turn_limit（不谎报完成）', async () => {
+    const echo = tool('echo', () => ({ output: 'ok' }))
+    const { query } = scriptedQuery([[toolUseMessage('t1', 'echo')]])
+    const result = await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 2 }))
+    expect(result.status).toBe('turn_limit')
+    expect(result.turns).toBe(2)
   })
 })

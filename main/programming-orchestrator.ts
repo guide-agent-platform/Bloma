@@ -114,6 +114,16 @@ export interface MvpTaskResult {
 
 let programmingEventPublisher: ProgrammingEventPublisher = () => undefined
 
+/**
+ * 前台运行探针（让渡终态补发用）：由 ipc.ts 接线注入 orchestrator.hasForegroundRun。
+ * 缺省 () => false = 视为无前台运行（单测环境），让渡路径总是补发终态——宁可多发一个
+ * 幂等 completed，不可再让 UI 永久卡「生成中」。
+ */
+let foregroundRunChecker: (sessionId: string) => boolean = () => false
+export function setForegroundRunChecker(checker: (sessionId: string) => boolean): void {
+  foregroundRunChecker = checker
+}
+
 export function setProgrammingEventPublisher(publisher: ProgrammingEventPublisher): void {
   programmingEventPublisher = publisher
 }
@@ -1809,6 +1819,21 @@ function publishBlockedDecision(
     title,
     questions: BLOCKED_DECISION_QUESTIONS,
   })
+  // 终态补发（2026-08-29 线上卡死案例 eb900c57）：让渡路径此前只发 stage_changed +
+  // user_decision_required，渲染端 running 只有 completed/error 能复位 → UI 永久停在
+  // 「生成中」、停止按钮点了没反应。把让渡问题沉淀为助手消息并补发 completed，让输入框
+  // 回到可发送状态（决策卡片仍展示，等用户点选 resume）。前台 runAgent 流除外——它自带
+  // 终态，中途补发会提前熄掉运行指示（resume 的继续尝试可能跑几分钟）。
+  const text = `这里需要你来定夺：${title ?? '当前进度需要你确认下一步'}。`
+  appendJsonLine(getAgentSessionPath(input.session_id), {
+    role: 'assistant',
+    content: [{ type: 'text', text }],
+    timestamp: Date.now(),
+  })
+  publish(input, 'message_delta', { text })
+  if (!foregroundRunChecker(input.session_id)) {
+    publish(input, 'completed', { subtype: 'blocked' })
+  }
 }
 
 /**

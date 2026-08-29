@@ -30,6 +30,10 @@ export interface AgentLoopToolState {
   preview_url?: string
   /** loop 内至少一次 GWT 测试失败后置位（修复预算口径的计数开关，PR3 §4.4） */
   test_failed: boolean
+  /** 最近一次 run_gwt_tests 是否全过（收口判定：与 security_all_passed 同时成立 → 强制收尾总结） */
+  gwt_all_passed: boolean
+  /** 最近一次 run_security_scan 是否通过（收口判定，同上） */
+  security_all_passed: boolean
   /** 测试失败后的写入类工具调用次数（edit-after-test-failure 预算，默认上限 3） */
   edits_after_test_failure: number
   /** 修复回合计数（每次新出现的 GWT 失败 +1，对应旧 test_repair_count 口径） */
@@ -113,6 +117,23 @@ const EVENT_SUMMARY_CHAR_LIMIT = 500
 
 /** 预算耗尽软着陆：连续 2 轮仍在撞预算（无进展）才终止，给模型收尾总结机会。 */
 const BUDGET_STALL_TURNS = 2
+
+/**
+ * 收口指令（2026-08-29 线上案例 eb900c57）：GWT 全过 + 安全扫描通过 = 平台意义上的
+ * 「活已干完」。此后停用全部工具并在 system 追加收口指令，逼模型立即输出完成总结——
+ * 该案例第 20 轮测试/扫描已全过，最后 4 轮却继续冗余验证，把「交卷」挤出了 24 轮预算。
+ */
+const WRAP_UP_SUFFIX =
+  '\n\n【收口】run_gwt_tests 与 run_security_scan 都已全部通过，任务已经完成。' +
+  '不要再调用任何工具、不要再做任何检查，立即输出最终完成总结。'
+
+/**
+ * 宽限收口轮指令：轮次预算耗尽时的最后一口气——工具已全部停用，只给模型一次纯文本
+ * 交卷机会（出总结 → completed；仍坚持要工具 → 如实 turn_limit）。
+ */
+const GRACE_TURN_SUFFIX =
+  '\n\n【收尾】轮次预算已用尽，所有工具已停用。请立即基于当前进展输出最终完成总结：' +
+  '哪些功能已完成、哪些未完成或仍有问题。不要再尝试调用工具。'
 
 // ---- usage 竹节压缩（闭环 PR6，随感 14/15/38）----
 
@@ -265,7 +286,14 @@ export function windowMessages(
 }
 
 export function createToolState(delegationDepth = 0): AgentLoopToolState {
-  return { test_failed: false, edits_after_test_failure: 0, repair_round: 0, delegation_depth: delegationDepth }
+  return {
+    test_failed: false,
+    gwt_all_passed: false,
+    security_all_passed: false,
+    edits_after_test_failure: 0,
+    repair_round: 0,
+    delegation_depth: delegationDepth,
+  }
 }
 
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
@@ -289,6 +317,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   let turns = 0
   let finalText = ''
   let consecutiveBudgetStallTurns = 0
+  // 收口态：GWT 全过 + 安全扫描通过后置位，此后模型调用停用全部工具并追加收口指令
+  let wrapUp = false
   // 首个 test_failed 轮（窗口钉轮，只钉一次）：修复全程可见第一次测试失败的断言细节。
   // 相对轮号（turn - pinBaseTurn）：压缩重置后 tail 从零计数，索引映射恒成立（审查 P1-1）
   let pinnedTestTurn: number | undefined
@@ -331,8 +361,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         sessionId: input.sessionId,
         maxTokens: input.maxTokens,
         ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
-        messages: [{ role: 'system', content: input.system }, ...windowMessages(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn)],
-        tools: definitions,
+        messages: [{ role: 'system', content: wrapUp ? `${input.system}${WRAP_UP_SUFFIX}` : input.system }, ...windowMessages(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn)],
+        tools: wrapUp ? [] : definitions,
       })) {
         if (sdk.type === 'assistant' && sdk.message) {
           for (const block of sdk.message.content) {
@@ -407,6 +437,10 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       pinnedRepairRound = ctx.state.repair_round
     }
 
+    // 收口判定（2026-08-29 线上案例 eb900c57）：GWT 全过 + 安全扫描通过 = 活已干完，
+    // 下一轮起停用全部工具 + system 追加收口指令，逼模型交卷而非继续冗余验证。
+    wrapUp = ctx.state.gwt_all_passed && ctx.state.security_all_passed
+
     consecutiveBudgetStallTurns = budgetStallThisTurn ? consecutiveBudgetStallTurns + 1 : 0
     if (consecutiveBudgetStallTurns >= BUDGET_STALL_TURNS) {
       return { status: 'budget_exhausted', turns, finalText, toolCalls }
@@ -442,7 +476,77 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     }
   }
 
+  // ---- 宽限收口轮（2026-08-29 线上案例 eb900c57）：预算耗尽不再直接判 turn_limit ----
+  // 该案例产物第 20 轮已全部就绪（测试/扫描全过），只差「输出完成总结」这个动作被挤掉。
+  // 补一次无 tools 的收口调用让模型交卷：出文本 → completed（外部终验仍照跑，不信自述）；
+  // 仍坚持要工具 → 如实 turn_limit。宽限轮不计 turns、不发 onTurn（epilogue 不是工作轮）。
+  const grace = await runGraceWrapUpTurn(input, messages, pinnedTestTurn)
+  if (grace.kind === 'text') return { status: 'completed', turns, finalText: grace.text, toolCalls }
+  if (grace.kind === 'cancelled') return loopCancelled(turns, finalText, toolCalls)
   return { status: 'turn_limit', turns, finalText, toolCalls }
+}
+
+type GraceWrapUpOutcome = { kind: 'text'; text: string } | { kind: 'refused' } | { kind: 'cancelled' } | { kind: 'failed' }
+
+/**
+ * 宽限收口轮：maxTurns 耗尽后的无 tools 交卷调用（GRACE_TURN_SUFFIX 见注释）。
+ * 文本照常进事件流上屏 + JSONL 审计；取消 → cancelled；其余失败按 turn_limit 兜底
+ * （工作轮的结果才是主体，宽限轮失败不翻盘）。
+ */
+async function runGraceWrapUpTurn(
+  input: AgentLoopInput,
+  messages: ConversationTurn[],
+  pinnedTestTurn: number | undefined,
+): Promise<GraceWrapUpOutcome> {
+  if (input.signal.aborted) return { kind: 'cancelled' }
+  const blocks: MessageContentBlock[] = []
+  const textParts: string[] = []
+  const cleaner = createWhitespaceArtifactCleaner()
+  const flushText = (): void => {
+    if (textParts.length === 0) return
+    blocks.push({ type: 'text', text: textParts.join('') })
+    textParts.length = 0
+  }
+  try {
+    for await (const sdk of input.query('', {
+      env: input.env,
+      signal: input.signal,
+      sessionId: input.sessionId,
+      maxTokens: input.maxTokens,
+      ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
+      messages: [
+        { role: 'system', content: `${input.system}${GRACE_TURN_SUFFIX}` },
+        ...windowMessages(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn),
+      ],
+      // 空数组而非缺省：与「无 tools 的交接调用」在调用方可区分（tools === undefined）
+      tools: [],
+    })) {
+      if (sdk.type === 'assistant' && sdk.message) {
+        for (const block of sdk.message.content) {
+          if (block.type === 'text' && block.text) {
+            const pieces = cleaner.push(block.text)
+            for (const piece of pieces) input.publish('message_delta', { text: piece })
+            textParts.push(...pieces)
+          } else {
+            flushText()
+            blocks.push(block)
+          }
+        }
+      }
+    }
+    for (const piece of cleaner.end()) {
+      input.publish('message_delta', { text: piece })
+      textParts.push(piece)
+    }
+    flushText()
+  } catch (error) {
+    if (isLoopCancelled(error, input.signal)) return { kind: 'cancelled' }
+    console.error('[agent-loop] 宽限收口轮失败，按 turn_limit 收口:', errorMessage(error))
+    return { kind: 'failed' }
+  }
+  appendLoopMessage(input.sessionId, 'assistant', blocks)
+  if (blocks.some((block) => block.type === 'tool_use')) return { kind: 'refused' }
+  return { kind: 'text', text: textOfBlocks(blocks) }
 }
 
 /**

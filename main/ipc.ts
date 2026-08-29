@@ -51,9 +51,9 @@ import type {
 } from '../shared/types'
 import { IPC_CHANNELS } from '../shared/types'
 import { fail, ok } from './api-result'
-import { cancelAgent, getSdkQuery, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from './orchestrator'
+import { cancelAgent, getSdkQuery, hasForegroundRun, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from './orchestrator'
 import { collectDomContext, scrollPreview } from './dom-context'
-import { runAgentLoopPostTesting, runIterationTask, runMvpTask, setProgrammingEventPublisher } from './programming-orchestrator'
+import { runAgentLoopPostTesting, runIterationTask, runMvpTask, setForegroundRunChecker, setProgrammingEventPublisher } from './programming-orchestrator'
 import { handleAgentStreamEvent } from './notifications'
 import { assertToolAllowed, getPermissionMode, resolvePermission, setPermissionMode, setPermissionRequestPublisher } from './permission-service'
 import {
@@ -117,6 +117,9 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, event)
     handleAgentStreamEvent(event)
   })
+  // 让渡终态补发的前台判定（2026-08-29）：前台 runAgent 流自带终态，后台编程流没有——
+  // publishBlockedDecision 据此决定是否补发 completed，避免 UI 永久卡「生成中」。
+  setForegroundRunChecker(hasForegroundRun)
   setPermissionRequestPublisher((request) => {
     mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, {
       event_id: request.id,
@@ -922,12 +925,37 @@ function resolvePermissionSession(projectId: string): string {
   }
 }
 
-/** 从点选纠错入参提取可执行的修改诉求；无明确文案（纯猜模式）返回 undefined。 */
+/** 圈选目标文本过长截断，避免整段页面文案灌进归一化 prompt。 */
+const MAX_CORRECTION_TARGET_LEN = 80
+
+/**
+ * 从点选纠错入参提取可执行的修改诉求；无明确文案（纯猜模式）返回 undefined（只落盘不重生成）。
+ *
+ * 圈选 DOM 上下文（text_content / element_selector）必须拼进诉求文本：否则归一化模型
+ * 只看到「换个名字」这种无目标文本，无法判定 revise，只能 skip——但 ack 又按已采纳回复，
+ * 用户体感「我说改名它说改了结果没改」（2026-08-29 线上案例：圈选标题说「换个名字」）。
+ *
+ * 形态：
+ * - user_note 模式："用户圈选了预览界面上的「<text>」（selector: <sel>），并说：<note>"；
+ *   无 DOM 上下文时回退 note 原文（兼容旧测试与纯坐标兜底）；
+ * - guess 模式（无 note）：元素文本是「被圈对象」不是修改诉求，不能原样当诉求（会被归一化
+ *   当成新需求 append），改带「希望调整这个元素」语义；无 text_content 时返回 undefined。
+ */
 function extractCorrectionPrompt(input: PointCorrectionInput): string | undefined {
   const note = input.user_note?.trim()
-  if (note) return note
   const textContent = input.context?.text_content?.trim()
-  return textContent || undefined
+  const selector = input.context?.element_selector?.trim()
+  const targetText = textContent || selector
+  const targetDesc = targetText
+    ? `预览界面上的「${truncateForCorrection(targetText, MAX_CORRECTION_TARGET_LEN)}」${textContent && selector ? `（selector: ${selector}）` : ''}`
+    : undefined
+  if (note) return targetDesc ? `用户圈选了${targetDesc}，并说：${note}` : note
+  if (textContent) return `用户圈选了${targetDesc}，未填写具体说明，希望调整这个元素`
+  return undefined
+}
+
+function truncateForCorrection(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max)}…` : value
 }
 
 function requireFields<T extends { request_id: string }>(payload: unknown, fields: string[]): T {

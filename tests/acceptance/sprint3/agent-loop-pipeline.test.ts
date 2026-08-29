@@ -78,6 +78,20 @@ function scriptedQuery(opts: { probeRespondsWithToolUse?: boolean } = {}): { que
       yield { type: 'result', subtype: 'success', stop_reason: opts.probeRespondsWithToolUse ? 'tool_use' : 'end_turn' }
       return
     }
+    // 收口/宽限轮（2026-08-29）：tools 已停用但 system 带收口/收尾指令 → 仍按剧本交卷并计数
+    if (tools.length === 0 && /【收口】|【收尾】/.test(String(options.messages?.[0]?.content ?? ''))) {
+      modelCalls += 1
+      const script = LOOP_SCRIPT[Math.min(loopTurn, LOOP_SCRIPT.length - 1)]
+      loopTurn += 1
+      yield assistant(script)
+      yield {
+        type: 'result',
+        subtype: 'success',
+        stop_reason: script.some((block) => block.type === 'tool_use') ? 'tool_use' : 'end_turn',
+        usage: { input_tokens: 100 + loopTurn, output_tokens: 50 },
+      }
+      return
+    }
     if (tools.length > 0) {
       modelCalls += 1
       const script = LOOP_SCRIPT[Math.min(loopTurn, LOOP_SCRIPT.length - 1)]

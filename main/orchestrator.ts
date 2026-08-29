@@ -191,6 +191,15 @@ export function isSessionActive(sessionId: string): boolean {
   return activeSessions.has(sessionId) || backgroundRuns.has(sessionId)
 }
 
+/**
+ * 会话是否有前台 runAgent 运行。让渡终态补发用（programming-orchestrator 经
+ * setForegroundRunChecker 注入）：前台运行自带 completed/error 终态，让渡路径
+ * 此时不必（也不应）中途补发 completed 提前熄掉运行指示。
+ */
+export function hasForegroundRun(sessionId: string): boolean {
+  return activeSessions.has(sessionId)
+}
+
 export function isProjectActive(projectId: string): boolean {
   return hasRunForProject(projectId)
 }
@@ -477,7 +486,13 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
             },
           },
         })
-        const ack = `好的，按「${truncateForCopy(description, 40)}」调整草图，重新生成一版。`
+        // ack 如实（2026-08-29 线上案例：点选纠错圈选标题说「换个名字」，归一化判 skip
+        // 但旧 ack 仍说「按…调整草图」，用户体感「我说改名它说改了结果没改」）。
+        // skip 意味着诉求未入需求，必须告知而非假装采纳（与 runIterationTask 口径一致）。
+        const ack =
+          normalization.action === 'skip'
+            ? `收到「${truncateForCopy(input.content, 40)}」——这句我没当作需求改动（判为操作指令），按原样重新生成了一版。想改哪里请直接说，比如「标题改成计算助手」。`
+            : `好的，按「${truncateForCopy(description, 40)}」调整草图，重新生成一版。`
         persistAssistant(ack)
         streamPublisher(makeEvent(input, 'message_delta', { text: ack }))
         setProgrammingEventPublisher(streamPublisher)
@@ -750,7 +765,27 @@ export async function cancelAgent(input: AgentCancelInput): Promise<AgentCancelR
     }
   }
 
-  if (targets.length === 0) return { cancelled: false, session_id: input.session_id }
+  if (targets.length === 0) {
+    // 兜底复位（2026-08-29 线上卡死案例 eb900c57）：点击停止却无可停运行，通常是运行
+    // 早已结束但终态事件缺失（如让渡路径漏发 completed），渲染端 running 永久卡 true、
+    // 停止按钮点了没反应。这里补发一个 completed 终态把流复位回空闲——幂等（对已空闲
+    // 会话再收终态无副作用），不落 JSONL（会话真实终态以实际运行记录为准）。
+    streamPublisher(
+      makeEvent(
+        {
+          request_id: input.request_id,
+          session_id: input.session_id,
+          project_id: input.project_id ?? '',
+          content: '',
+          mode: 'quick',
+          current_stage: 'choosing_mode',
+        },
+        'completed',
+        { subtype: 'forced_reset' },
+      ),
+    )
+    return { cancelled: false, session_id: input.session_id }
+  }
 
   const reason = new Error(`AGENT_CANCELLED: ${input.reason}`)
   for (const target of targets) {

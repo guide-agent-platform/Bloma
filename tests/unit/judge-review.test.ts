@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { syncDocuments } from '../../main/document-engine'
-import { runJudgeReview, setProgrammingEventPublisher } from '../../main/programming-orchestrator'
+import { runJudgeReview, setForegroundRunChecker, setProgrammingEventPublisher } from '../../main/programming-orchestrator'
 import { createProject, findProject, recordSketchGenerated } from '../../main/project-service'
 
 describe('Judge review trigger and return counts (A2-11)', () => {
@@ -104,6 +104,7 @@ describe('Judge review loop-aware fuse（M4-B：只终验不重修）', () => {
   afterEach(() => {
     process.env.PROMA_HOME = originalPromaHome
     setProgrammingEventPublisher(() => undefined)
+    setForegroundRunChecker(() => false)
   })
 
   it('repairInternalized（loop 路径）：首次 return 即熔断让渡，不再外部文档重修（无 repairing）', async () => {
@@ -130,6 +131,10 @@ describe('Judge review loop-aware fuse（M4-B：只终验不重修）', () => {
     expect(events.filter((type) => type === 'judge_result')).toHaveLength(1)
     expect(events).toContain('user_decision_required')
     expect(findProject(project.project_id).current_stage).toBe('blocked_for_user_decision')
+    // 让渡终态补发（2026-08-29 卡死修复）：后台流无 runAgent 兜底，必须补 completed 复位渲染端
+    expect(events).toContain('completed')
+    const jsonl = readFileSync(join(home, 'agent-sessions', 'session-fuse.jsonl'), 'utf8')
+    expect(jsonl).toContain('这里需要你来定夺')
   })
 
   it('loop 异常终止态（repairable=false）：即使无 repairInternalized 也首败让渡', async () => {
@@ -150,6 +155,27 @@ describe('Judge review loop-aware fuse（M4-B：只终验不重修）', () => {
     expect(result.verdict.repairable).toBe(false)
     expect(events.filter((type) => type === 'repairing')).toHaveLength(0)
     expect(events).toContain('user_decision_required')
+  })
+
+  it('前台 runAgent 流存在时不补发 completed（避免中途熄掉运行指示，resume 继续可能跑几分钟）', async () => {
+    setForegroundRunChecker(() => true)
+    const home = mkdtempSync(join(tmpdir(), 'proma-judge-fuse-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    const events: string[] = []
+    setProgrammingEventPublisher((event) => events.push(event.type))
+
+    const result = await runJudgeReview({
+      request_id: 'req-judge',
+      session_id: 'session-fuse-3',
+      project_id: project.project_id,
+      loop: { status: 'turn_limit', turns: 24, finalText: '轮次耗尽', toolCalls: [] },
+    })
+
+    expect(result.outcome).toBe('blocked')
+    expect(events).toContain('user_decision_required')
+    // 前台流由 runAgent 收尾：让渡路径不得中途补发 completed
+    expect(events).not.toContain('completed')
   })
 
   it('loop completed + judge pass → ready（loop 路径正常放行，judge_return_count 不动）', async () => {

@@ -593,6 +593,10 @@ describe('AgentOrchestrator · 项目级运行隔离与停止终态（2026-08-29
       reason: 'user_cancelled',
     })
     expect(second.cancelled).toBe(false)
+    // 兜底复位（2026-08-29 卡死修复）：无可停运行时补发 completed 终态，复位渲染端 running
+    const rescue = events.find((event) => event.type === 'completed')
+    expect(rescue?.session_id).toBe('session-c')
+    expect(rescue?.payload?.subtype).toBe('forced_reset')
   })
 })
 

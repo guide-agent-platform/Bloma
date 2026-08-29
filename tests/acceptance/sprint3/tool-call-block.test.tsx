@@ -17,7 +17,7 @@ import type { AgentEvent, ElectronAPI } from '../../../shared/types'
 
 /**
  * PR4 渲染端验收：ToolCallFeed 实时流 / ToolBlocksReplay 历史回放 /
- * ChatPanel 集成 / 阶段指示器「第 N 轮 · 正在 {工具}」。
+ * ChatPanel 集成 / 阶段指示器「正在 {工具}」（2026-08-29 起隐藏轮次）。
  * 锚点用 data-ai-id（陷阱 30）；非 globals 模式 RTL 手动 cleanup。
  */
 
@@ -37,7 +37,7 @@ function event(type: AgentEvent['type'], payload: Record<string, unknown>): Agen
 describe('ToolCallFeed（实时工具流）', () => {
   afterEach(() => cleanup())
 
-  it('started → completed：折叠行显示轮次/工具/状态/耗时，点击展开输出', () => {
+  it('started → completed：折叠行显示工具/状态/耗时（2026-08-29 起隐藏轮次），点击展开输出', () => {
     const events = [
       event('tool_call_started', { tool: 'write_file', turn: 1, input_summary: '{"path":"index.html"}' }),
       event('tool_call_completed', { tool: 'write_file', turn: 1, status: 'ok', duration_ms: 1200, output_summary: '已写入 index.html（2048 字节）' }),
@@ -45,10 +45,11 @@ describe('ToolCallFeed（实时工具流）', () => {
     render(<ToolCallFeed events={events} />)
 
     const row = screen.getAllByTestId('tool-call-row')[0]
-    expect(row.textContent).toContain('第 1 轮')
     expect(row.textContent).toContain('写入文件')
     expect(row.textContent).toContain('完成')
     expect(row.textContent).toContain('1.2s')
+    // 轮次号对用户是噪音：行内不再出现「第 N 轮 ·」前缀
+    expect(row.textContent).not.toContain('轮')
     // 默认折叠，点击展开输出摘要（点击目标是有 role=button 的内层行）
     expect(screen.queryByTestId('tool-call-output')).toBeNull()
     fireEvent.click(row.querySelector('[role="button"]')!)
@@ -144,7 +145,7 @@ describe('ChatPanel 集成（loop 轮次进消息列表）', () => {
   })
 })
 
-describe('阶段指示器细化（第 N 轮 · 正在 {工具}）', () => {
+describe('阶段指示器细化（正在 {工具}，2026-08-29 起隐藏轮次）', () => {
   afterEach(() => cleanup())
 
   it('编程阶段的 tool_call_started 更新阶段文案；其他阶段不受影响', () => {
@@ -158,12 +159,12 @@ describe('阶段指示器细化（第 N 轮 · 正在 {工具}）', () => {
 
     store.set(workflowStageAtom, 'generating_mvp')
     emit!(event('tool_call_started', { tool: 'write_file', turn: 3 }))
-    expect(store.get(stageIndicatorLabelAtom)).toBe('第 3 轮 · 正在写入文件')
+    expect(store.get(stageIndicatorLabelAtom)).toBe('正在写入文件')
 
     // 澄清阶段无轮次语义，不细化
     store.set(workflowStageAtom, 'clarifying')
     emit!(event('tool_call_started', { tool: 'write_file', turn: 4 }))
-    expect(store.get(stageIndicatorLabelAtom)).toBe('第 3 轮 · 正在写入文件')
+    expect(store.get(stageIndicatorLabelAtom)).toBe('正在写入文件')
 
     // stage_changed 重置回标准阶段文案
     emit!(event('stage_changed', { stage: 'testing' }))

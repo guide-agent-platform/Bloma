@@ -551,6 +551,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       if (result.failed_count > 0) {
         // 修复预算口径：每次失败运行 = 一个新修复回合（对应旧 test_repair_count +1）
         ctx.state.test_failed = true
+        ctx.state.gwt_all_passed = false
         ctx.state.repair_round += 1
         options.onRepairRound?.(ctx.state.repair_round)
         const failures = result.failure_summary.map((failure) => `- ${failure.scenario}：${failure.reason}`).join('\n')
@@ -560,6 +561,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         }
       }
       // 全过显式列出场景名（ACI：空结果显式反馈 + 可核对的通过清单）
+      ctx.state.gwt_all_passed = true
       const scenarioNames = planScenarios(readLastSketchRequirements(projectId)).map((scenario) =>
         scenarioName(scenario.item.id, scenario.assertion),
       )
@@ -575,17 +577,19 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     name: 'run_security_scan',
     description: '对项目产物做安全静态扫描。通过时明确说明；发现高危/严重问题时列出 file:line 与修复建议。',
     input_schema: { type: 'object', properties: {} },
-    execute: async () => {
+    execute: async (_toolInput, ctx) => {
       const project = findProject(projectId)
       const result = runSecurityScan({ project_id: projectId, root_path: project.root_path })
       const blocking = result.issues.filter((issue) => issue.severity === 'high' || issue.severity === 'critical')
       if (result.passed) {
+        ctx.state.security_all_passed = true
         const minor = result.issues.length - blocking.length
         return {
           output: `安全扫描通过：无高危/严重问题（扫描 ${result.scanned_files} 个文件${minor > 0 ? `，另有 ${minor} 个低/中危提示` : ''}）。`,
           detail: { passed: true, scanned_files: result.scanned_files },
         }
       }
+      ctx.state.security_all_passed = false
       const listing = blocking.map((issue) => `- ${issue.file}:${issue.line} ${issue.user_visible_summary}`).join('\n')
       return {
         output: `安全扫描未通过（${blocking.length} 个高危/严重问题，扫描 ${result.scanned_files} 个文件）：\n${listing}\n请修复后重新扫描。`,
