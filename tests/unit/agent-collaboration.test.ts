@@ -813,8 +813,11 @@ describe('web_research 委派化查询（闭环 PR5）', () => {
     input_schema: { type: 'object', properties: {} },
     execute: () => new Promise<never>(() => {}),
   }
+  const originalPromaHome = process.env.PROMA_HOME
 
   beforeEach(() => {
+    // 子委派真实写 JSONL：必须隔离 PROMA_HOME（审查 P1-5②，勿写真实 ~/.proma）
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-web-research-'))
     parentSessionId = `session-web-research-${Date.now()}-${Math.random().toString(36).slice(2)}`
     setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
   })
@@ -824,6 +827,7 @@ describe('web_research 委派化查询（闭环 PR5）', () => {
     }
     unregisterParentLoopContext(parentSessionId)
     setWebResearchTimeoutForTests(WEB_RESEARCH_TIMEOUT_MS)
+    process.env.PROMA_HOME = originalPromaHome
   })
 
   function webResearch(): AgentLoopTool {
@@ -896,5 +900,32 @@ describe('web_research 委派化查询（闭环 PR5）', () => {
     const outcome = await webResearch().execute({}, parentContext())
     expect(outcome.isError).toBe(true)
     expect(outcome.output).toContain('缺少 question')
+  })
+
+  it('子代理冒泡提问 → 如实告知而非谎报超时，子代理被停（审查 P1-3）', async () => {
+    const askTool: AgentLoopTool = {
+      name: 'ask_now',
+      description: '触发冒泡提问',
+      input_schema: { type: 'object', properties: {} },
+      execute: async (_input, ctx) => ({ output: await askDelegationQuestion(ctx, '调研范围是否包含竞品价格？') }),
+    }
+    setChildToolsBuilder(() => [askTool])
+    registerParent(toolUseQuery('ask_now'))
+
+    const outcome = await webResearch().execute({ question: '需要澄清的调研' }, parentContext())
+    expect(outcome.isError).toBe(true)
+    expect(outcome.output).toContain('澄清')
+    expect(outcome.output).toContain('调研范围是否包含竞品价格')
+    // 不谎报超时：90s 文案不得出现
+    expect(outcome.output).not.toContain('未收敛')
+    expect(listDelegations(parentSessionId)[0]!.status).toBe('cancelled')
+  })
+
+  it('子代理完成但结论为空 → isError 给出重试/替代建议（审查 P2-3）', async () => {
+    registerParent(oneShotQuery(''))
+    const outcome = await webResearch().execute({ question: '空结论调研' }, parentContext())
+    expect(outcome.isError).toBe(true)
+    expect(outcome.output).toContain('没有产出结论')
+    expect(outcome.output).toContain('web_fetch')
   })
 })

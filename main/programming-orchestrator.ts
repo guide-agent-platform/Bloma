@@ -28,12 +28,12 @@ import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled }
 import { readPrimaryIntent, recordSessionActivity } from './session-service'
 import { runAgentLoop, type AgentLoopResult } from './agent-loop'
 import { buildAgentTools } from './agent-tools'
-
-/** web_research 每 loop 调用预算（闭环 PR5）：调研委派限 4 次，防无节制外呼。 */
-const WEB_RESEARCH_BUDGET = 4
 import { disposeParentDelegationState, registerParentLoopContext, setChildToolsBuilder } from './agent-collaboration'
 import { categoryTemperature } from './model-resolution'
 import type { SDKQuery, ToolDefinition } from './orchestrator'
+
+/** web_research 每 loop 调用预算（闭环 PR5）：调研委派限 4 次，防无节制外呼。 */
+const WEB_RESEARCH_BUDGET = 4
 
 /**
  * 无人值守豁免（A2-12）：自动化管线内部 service 直连时显式传入 allow-all——
@@ -532,7 +532,9 @@ export function resolveAgentLoopMaxTurns(mode: ProjectMode): number {
   const raw = mode === 'quick' ? process.env.BLOMA_LOOP_MAX_TURNS_QUICK : process.env.BLOMA_LOOP_MAX_TURNS_LONGTERM
   if (raw === undefined || raw.trim() === '') return fallback
   const parsed = Number(raw)
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback
+  // 先取整再校验（审查 P2-1）：'0.5' 不得 floor 成 0 让 loop 零轮直接 turn_limit
+  const floored = Math.floor(parsed)
+  return Number.isFinite(parsed) && floored > 0 ? floored : fallback
 }
 
 /** 子 agent 独立轮次上限（比主 loop 小，控制委派 token 成本；按埋点标定）。 */

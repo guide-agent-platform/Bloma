@@ -24,6 +24,7 @@ vi.mock('../../main/runtime-fallback', () => ({
 }))
 
 import { runJudgeReview, setProgrammingEventPublisher } from '../../main/programming-orchestrator'
+import { resolveChannelEnv } from '../../main/runtime-fallback'
 import { runJudge } from '../../main/judge-engine'
 import { syncDocuments } from '../../main/document-engine'
 import { createProject, findProject } from '../../main/project-service'
@@ -162,6 +163,10 @@ describe('judge-semantic 执行与 runJudgeReview 合成', () => {
 
     expect(result.outcome).toBe('blocked')
     expect(result.verdict.verdict).toBe('return')
+    // 审查备用链限路由配置域（闭环 PR4，审查 P1-5① 接线锁）：语义终审不得漏传 routed-only
+    expect(vi.mocked(resolveChannelEnv)).toHaveBeenCalledWith(
+      expect.objectContaining({ category: 'prd', fallbackScope: 'routed-only' }),
+    )
     const semantic = result.verdict.hard_constraints.find((item) => item.name === '语义忠实性（裁判审查）')
     expect(semantic?.passed).toBe(false)
     expect(semantic?.detail).toContain('F-002')

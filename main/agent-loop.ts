@@ -133,16 +133,40 @@ function resolveCompactThreshold(): number {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : LOOP_COMPACT_INPUT_TOKENS_DEFAULT
 }
 
-/** 交接模型不可用时的确定性拼装（零 LLM 兑底）。 */
-function deterministicHandoff(turn: number, toolCalls: Array<{ name: string }>, finalText: string): string {
+/** 交接模型不可用时的确定性拼装（零 LLM 兑底；含钉轮失败断言原文，审查 P1-2）。 */
+function deterministicHandoff(
+  turn: number,
+  toolCalls: Array<{ name: string }>,
+  finalText: string,
+  failureExcerpt: string,
+): string {
   const counts = new Map<string, number>()
   for (const call of toolCalls) counts.set(call.name, (counts.get(call.name) ?? 0) + 1)
   const usage = [...counts.entries()].map(([name, count]) => `${name}×${count}`).join('、')
   const parts = [
     `【自动交接（交接模型不可用）】已进行到第 ${turn} 轮，工具调用：${usage || '（无）'}。`,
+    failureExcerpt ? `未解决的测试失败（原文）：${failureExcerpt}` : '',
     finalText.trim() ? `最近说明：${finalText.trim().slice(0, 200)}` : '',
   ]
   return parts.filter(Boolean).join('\n')
+}
+
+/** 钉轮对的 tool_result 文本（确定性交接兑底用，截 400 字；钉轮失效/未钉返回空）。 */
+function pinnedFailureExcerpt(messages: ConversationTurn[], pinnedTurn: number | undefined): string {
+  if (pinnedTurn === undefined) return ''
+  const a = 2 * (pinnedTurn - 1)
+  const pair = messages.slice(1 + a, 1 + a + 2)
+  if (pair.length < 2) return ''
+  const texts: string[] = []
+  for (const turn of pair) {
+    if (!Array.isArray(turn.content)) continue
+    for (const block of turn.content) {
+      if (block.type === 'tool_result' && typeof block.content === 'string' && block.content.trim()) {
+        texts.push(block.content)
+      }
+    }
+  }
+  return texts.join('\n').slice(0, 400)
 }
 
 /** 一次无 tools 的交接小调用（复用 input.query/env 同渠道）；任何失败返回 '' 交由确定性兑底。 */
@@ -265,8 +289,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   let turns = 0
   let finalText = ''
   let consecutiveBudgetStallTurns = 0
-  // 首个 test_failed 轮（窗口钉轮，只钉一次）：修复全程可见第一次测试失败的断言细节
+  // 首个 test_failed 轮（窗口钉轮，只钉一次）：修复全程可见第一次测试失败的断言细节。
+  // 相对轮号（turn - pinBaseTurn）：压缩重置后 tail 从零计数，索引映射恒成立（审查 P1-1）
   let pinnedTestTurn: number | undefined
+  let pinBaseTurn = 0
+  // 已被钉轮/交接覆盖到的 repair_round：防粘性 test_failed 在压缩后幻影重钉（审查 P1-1）
+  let pinnedRepairRound = 0
   // 已压缩次数（竹节压缩，闭环 PR6）
   let compactions = 0
   const compactThreshold = resolveCompactThreshold()
@@ -372,8 +400,12 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     appendLoopMessage(input.sessionId, 'user', resultBlocks)
     messages.push({ role: 'assistant', content: assistantBlocks })
     messages.push({ role: 'user', content: resultBlocks })
-    // 钉轮信号：本轮工具把 test_failed 置位（如 run_gwt_tests 失败）且尚未钉过 → 钉本轮
-    if (ctx.state.test_failed && pinnedTestTurn === undefined) pinnedTestTurn = turn
+    // 钉轮信号：出现「新的」测试失败（repair_round 增长；粘性 test_failed 不算）且
+    // 尚未钉过 → 钉本轮（相对轮号）
+    if (ctx.state.test_failed && ctx.state.repair_round > pinnedRepairRound) {
+      if (pinnedTestTurn === undefined) pinnedTestTurn = turn - pinBaseTurn
+      pinnedRepairRound = ctx.state.repair_round
+    }
 
     consecutiveBudgetStallTurns = budgetStallThisTurn ? consecutiveBudgetStallTurns + 1 : 0
     if (consecutiveBudgetStallTurns >= BUDGET_STALL_TURNS) {
@@ -381,7 +413,6 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     }
 
     // ---- usage 竹节压缩（闭环 PR6）：阈值触发交接，重置为 task+交接文档 ----
-    // 钉轮细节随重置进入交接文档（PR2 交互备忘：压缩后 pinnedTestTurn 清空）
     if (
       compactThreshold > 0 &&
       (usage?.input_tokens ?? 0) >= compactThreshold &&
@@ -391,12 +422,23 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       if (input.signal.aborted) return loopCancelled(turns, finalText, toolCalls)
       const handoff = await requestHandoff(input, messages, pinnedTestTurn)
       if (input.signal.aborted) return loopCancelled(turns, finalText, toolCalls)
-      const summary = handoff || deterministicHandoff(turn, toolCalls, finalText)
+      // 确定性兑底也携带钉轮失败断言原文（审查 P1-2：交接失败恰是最需要细节的降级路径）
+      const summary = handoff || deterministicHandoff(turn, toolCalls, finalText, pinnedFailureExcerpt(messages, pinnedTestTurn))
       messages.length = 0
       messages.push({ role: 'user', content: `${input.task}\n\n【此前进度交接（第 ${compactions + 1} 段）】\n${summary}` })
       compactions += 1
-      pinnedTestTurn = undefined // 失败细节已进交接文档
+      // 重置钉轮坐标系（审查 P1-1）：基线推进到本轮，旧失败已被交接文档覆盖（repair_round
+      // 快照对齐，后续只有新失败才重钉；避免粘性 test_failed 幻影钉在无关轮对上）
+      pinBaseTurn = turn
+      pinnedTestTurn = undefined
+      pinnedRepairRound = ctx.state.repair_round
       input.publish('loop_compaction', { at_turn: turn, input_tokens: usage?.input_tokens, compactions })
+      // 交接文档落 JSONL 审计（与 [channel-switch] 同一 system 行呈现模式，审查 P1-2）
+      appendJsonLine(getAgentSessionPath(input.sessionId), {
+        role: 'system',
+        content: [{ type: 'text', text: `[loop-compaction] 第 ${compactions} 段交接（at_turn=${turn}，input_tokens=${usage?.input_tokens ?? '-'}）：\n${summary.slice(0, 1000)}` }],
+        timestamp: Date.now(),
+      })
     }
   }
 

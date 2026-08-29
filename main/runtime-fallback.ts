@@ -142,6 +142,14 @@ function resolvePrimaryChannel(opts: { channelId?: string; category: DocumentCat
 }
 
 /**
+ * 备用渠道查找域（闭环 PR4）：'all'（缺省，现状）= 路由 fallback_channel_ids +
+ * 全部启用渠道兜底；'routed-only' = 只走类别路由 fallback_channel_ids，找不到就
+ * 如实返回不可用——judge 审查族专用，防「终审静默落到任意弱模型」。主渠道可用时
+ * 两种 scope 行为完全一致（备用链不触发）。
+ */
+export type FallbackScope = 'all' | 'routed-only'
+
+/**
  * 渠道 + 文档类别 → SDK env（原各编排器内 8 处重复的「选渠道→解密→类别解析→构建」块
  * 的统一收口）。主渠道按 M5 §4.1 解析链选择（显式 channel_id > 类别路由表 > 全局兜底）；
  * 主渠道密钥不可解密 / 无启用模型时按同一类别解析链切备用渠道（T9 构建期回退，
@@ -152,14 +160,6 @@ function resolvePrimaryChannel(opts: { channelId?: string; category: DocumentCat
  * 运行时后 MVP 类别必传）时，`supports_tools === false` 的模型按「不可用」走备用链；
  * 备用也全不支持则如实返回 `tools_unsupported`，绝不静默降级。不传时行为与改造前完全一致。
  */
-/**
- * 备用渠道查找域（闭环 PR4）：'all'（缺省，现状）= 路由 fallback_channel_ids +
- * 全部启用渠道兜底；'routed-only' = 只走类别路由 fallback_channel_ids，找不到就
- * 如实返回不可用——judge 审查族专用，防「终审静默落到任意弱模型」。主渠道可用时
- * 两种 scope 行为完全一致（备用链不触发）。
- */
-export type FallbackScope = 'all' | 'routed-only'
-
 export function resolveChannelEnv(opts: {
   channelId?: string
   category: DocumentCategory

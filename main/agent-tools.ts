@@ -763,6 +763,14 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         const summary = summaries[0]
         if (!summary || summary.status === 'running') {
           stopDelegation(ctx.sessionId, started.delegation_id)
+          // 子代理冒泡提问（审查 P1-3）：waitForDelegations 对 askSignal 提前返回，这不是超时；
+          // 如实转述问题并建议改路，不得谎报「未收敛」击杀有进展的子代理
+          if (summary?.pending_question) {
+            return {
+              output: `调研子代理中途需要澄清问题：「${summary.pending_question.slice(0, 200)}」。这类问题不适合委派调研：可把 question 拆得更具体后重试，或改用 web_fetch 直接抓取。`,
+              isError: true,
+            }
+          }
           return {
             output: `调研子代理 ${Math.round(webResearchTimeoutMs / 1000)}s 内未收敛，已停止。请基于已有信息继续，或缩小问题后重试。`,
             isError: true,
@@ -773,6 +781,10 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         }
         // 剥「子代理状态：」头行（同 review-delegation），内部运行指标不进模型上下文
         const body = summary.result_summary.split('\n').slice(1).join('\n').trim()
+        // 空结论显式化（审查 P2-3）：完成但无产出不能假装成功，给重试/替代建议
+        if (!body) {
+          return { output: '调研子代理完成了任务但没有产出结论（可能空响应）。可重试一次，或改用 web_fetch 直接抓取。', isError: true }
+        }
         return { output: `调研结论：\n${body.slice(0, WEB_RESEARCH_MAX_CHARS)}`, detail: { delegation_id: started.delegation_id } }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)

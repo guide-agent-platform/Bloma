@@ -459,7 +459,9 @@ describe('F4 窗口钉住首个 test_failed 轮（闭环治理 PR2）', () => {
       description: '模拟 run_gwt_tests 失败',
       input_schema: { type: 'object', properties: {} },
       execute: async (_input, ctx) => {
+        // 与真实 run_gwt_tests 同款信号：test_failed 置位 + repair_round 增长（审查 P1-1 修复后钉轮按 repair_round 门控）
         ctx.state.test_failed = true
+        ctx.state.repair_round += 1
         return { output: '共 1 个场景：通过 0、失败 1。\n失败场景：\n- F-001：断言未满足' }
       },
     }
@@ -662,5 +664,112 @@ describe('usage 竹节压缩（闭环 PR6）', () => {
 
     expect(result.status).toBe('cancelled')
     expect(events.filter((event) => event.type === 'loop_compaction')).toHaveLength(0)
+  })
+})
+
+/** 压缩×钉轮交互修复测试 query：可按轮指定工具名（gwt_fail/echo），usage 恒超额。 */
+function turnScriptQuery(options: {
+  toolByTurn: (turn: number) => string
+  handoff: 'text' | 'throw'
+  handoffText?: string
+}): { query: SDKQuery; turnCalls: ConversationTurn[][] } {
+  let calls = 0
+  let turn = 0
+  const turnCalls: ConversationTurn[][] = []
+  const query: SDKQuery = async function* (_prompt, queryOptions) {
+    const index = calls
+    calls += 1
+    if (queryOptions.tools === undefined) {
+      if (options.handoff === 'throw') throw new Error('渠道 429')
+      yield textMessage(options.handoffText ?? '交接：已完成布局；未解决 GWT；下一步修点击。')
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+      return
+    }
+    turn += 1
+    turnCalls.push((queryOptions.messages ?? []).map((m) => ({ ...m })))
+    yield toolUseMessage(`t${index}`, options.toolByTurn(turn))
+    yield { type: 'result', subtype: 'success', stop_reason: 'tool_use', usage: { input_tokens: 5000, output_tokens: 10 } }
+  }
+  return { query, turnCalls }
+}
+
+/** 模拟 run_gwt_tests 失败：置位 test_failed 并增长 repair_round（与真实工具同款信号）。 */
+function gwtFailTool(): AgentLoopTool {
+  return {
+    name: 'gwt_fail',
+    description: '模拟测试失败',
+    input_schema: { type: 'object', properties: {} },
+    execute: async (_input, ctx) => {
+      ctx.state.test_failed = true
+      ctx.state.repair_round += 1
+      return { output: '共 2 个场景：通过 0、失败 2。\n- F-002 按右方向键→列表高亮右移：断言未满足（预期高亮右移，实际无变化）' }
+    },
+  }
+}
+
+function toolUseIdOf(turn: ConversationTurn): string | undefined {
+  return Array.isArray(turn.content)
+    ? (turn.content as Array<{ type?: string; id?: string }>).find((b) => b.type === 'tool_use')?.id
+    : undefined
+}
+
+describe('压缩×钉轮交互修复（审查 P1-1/P1-2）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalThreshold = process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
+  const echo = tool('echo', () => ({ output: 'ok' }))
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-pinfix-'))
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+    if (originalThreshold === undefined) delete process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
+    else process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = originalThreshold
+  })
+
+  it('压缩后无新失败 → 无幻影钉（不误钉无关轮对）', async () => {
+    // 第 1 轮失败（钉轮）→ 同轮末压缩（钉轮随重置进交接文档）→ 后续轮不再失败
+    const { query, turnCalls } = turnScriptQuery({ toolByTurn: (turn) => (turn === 1 ? 'gwt_fail' : 'echo'), handoff: 'text' })
+    await runAgentLoop(baseInput({ query, tools: [echo, gwtFailTool()], maxTurns: 14, sessionId: 'session-pinfix-phantom' }))
+
+    // 最后一轮（第 14 轮）调用：tail 为重置后第 2..13 轮共 12 对，窗口保留最近 8 对（第 6..13 轮）
+    const lastCall = turnCalls.at(-1)!
+    const ids = lastCall.filter((t) => t.role === 'assistant').map(toolUseIdOf).filter(Boolean)
+    expect(lastCall).toHaveLength(1 + 1 + 16)
+    // 第 4/5 轮对不在窗口内且不被幻影钉住（旧缺陷会钉 tail[2..3]=第 4 轮对）
+    expect(ids).toHaveLength(8)
+  })
+
+  it('压缩后出现新测试失败 → 新失败轮被钉住（相对轮号映射正确）', async () => {
+    // 前 2 轮 echo 触发两次压缩（封顶）；第 3 轮新失败 → 钉重置后的第 1 对
+    const { query, turnCalls } = turnScriptQuery({ toolByTurn: (turn) => (turn === 3 ? 'gwt_fail' : 'echo'), handoff: 'text' })
+    await runAgentLoop(baseInput({ query, tools: [echo, gwtFailTool()], maxTurns: 14, sessionId: 'session-pinfix-repin' }))
+
+    const lastCall = turnCalls.at(-1)!
+    const ids = lastCall.filter((t) => t.role === 'assistant').map(toolUseIdOf).filter(Boolean)
+    expect(lastCall).toHaveLength(1 + 1 + 2 + 16) // system + task + 钉住的第 3 轮对 + 最近 8 对
+    // 钉住的第 3 轮（重置后相对第 1 对）在最前，其余为第 6..13 轮；第 4/5 轮出窗且不钉
+    // （第 3 轮自己的 pair 在第 4 轮调用里才可见）
+    const turn4Call = turnCalls[3]!
+    const turn3Id = turn4Call.filter((t) => t.role === 'assistant').map(toolUseIdOf).find(Boolean)
+    expect(ids[0]).toBe(turn3Id)
+    expect(ids).toHaveLength(9)
+  })
+
+  it('交接 LLM 失败 → 确定性 fallback 携带钉轮失败断言原文；交接文档落 JSONL 审计', async () => {
+    const { query, turnCalls } = turnScriptQuery({ toolByTurn: () => 'gwt_fail', handoff: 'throw' })
+    await runAgentLoop(baseInput({ query, tools: [echo, gwtFailTool()], maxTurns: 6, sessionId: 'session-pinfix-fallback' }))
+
+    // 第 2 轮调用看到的交接段含失败断言原文（而非只有工具计数）
+    const secondTask = textOf(turnCalls[1]![1])
+    expect(secondTask).toContain('【此前进度交接（第 1 段）】')
+    expect(secondTask).toContain('F-002')
+    expect(secondTask).toContain('断言未满足')
+
+    // 交接文档落 JSONL（system 行，与 [channel-switch] 同一呈现模式）
+    const lines = readSessionJsonl('session-pinfix-fallback').map((line) => JSON.stringify(line))
+    const compactionLine = lines.find((line) => line.includes('[loop-compaction]'))
+    expect(compactionLine).toContain('F-002')
   })
 })

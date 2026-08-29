@@ -150,6 +150,19 @@ export function composeFailureReason(reason: string, extra: string[]): string {
   return `${reason}\n附带诊断（最多 3 条）：\n- ${extra.slice(0, 3).join('\n- ')}`
 }
 
+/**
+ * 单场景结局归约（executeScenarios 接线点，可单测）：
+ * 通过的场景即使有诊断噪音也判过（防误杀锚点）；失败的场景拼 ≤3 条附加诊断。
+ */
+export function evaluateScenarioOutcome(
+  reason: string | undefined,
+  diagnostics: PageDiagnostics,
+  before: DiagnosticsSnapshot,
+): string | undefined {
+  if (reason === undefined) return undefined
+  return composeFailureReason(reason, newDiagnosticsSince(diagnostics, before))
+}
+
 async function executeScenarios(browser: Browser, input: RunGwtInput): Promise<GwtTestResult> {
   const scenarios = planScenarios(readLastSketchRequirements(input.project_id))
 
@@ -162,17 +175,17 @@ async function executeScenarios(browser: Browser, input: RunGwtInput): Promise<G
     await page.goto(input.preview_url!, { waitUntil: 'domcontentloaded', timeout: 10_000 })
 
     for (const scenario of scenarios) {
-      // 每个场景独立快照（触发后新出现的诊断归属当前断言）
+      // 每个场景独立快照（触发后新出现的诊断归属当前断言）；结局归约统一走
+      // evaluateScenarioOutcome（诊断只附加不替换，不改通过/失败判定）
       const before = snapshotDiagnostics(diagnostics)
-      const reason = await runScenario(page, scenario)
+      const reason = evaluateScenarioOutcome(await runScenario(page, scenario), diagnostics, before)
       if (reason === undefined) {
         passedCount += 1
         continue
       }
-      // 诊断只附加不替换：console 噪音/资源失败不改变判定，只在失败时帮修复定位
       failureSummary.push({
         scenario: scenarioName(scenario.item.id, scenario.assertion),
-        reason: composeFailureReason(reason, newDiagnosticsSince(diagnostics, before)),
+        reason,
       })
     }
 

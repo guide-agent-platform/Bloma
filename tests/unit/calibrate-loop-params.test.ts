@@ -100,7 +100,7 @@ describe('resolveAgentLoopMaxTurns（闭环 PR8，env 可覆盖）', () => {
     expect(resolveAgentLoopMaxTurns('longterm')).toBe(40)
   })
 
-  it('env 覆盖生效；非法值（非数字/≤0）回退缺省', () => {
+  it('env 覆盖生效；非法值（非数字/≤0/小数下取整为 0）回退缺省', () => {
     process.env.BLOMA_LOOP_MAX_TURNS_QUICK = '32'
     process.env.BLOMA_LOOP_MAX_TURNS_LONGTERM = '60'
     expect(resolveAgentLoopMaxTurns('quick')).toBe(32)
@@ -109,6 +109,9 @@ describe('resolveAgentLoopMaxTurns（闭环 PR8，env 可覆盖）', () => {
     process.env.BLOMA_LOOP_MAX_TURNS_QUICK = 'abc'
     expect(resolveAgentLoopMaxTurns('quick')).toBe(24)
     process.env.BLOMA_LOOP_MAX_TURNS_QUICK = '0'
+    expect(resolveAgentLoopMaxTurns('quick')).toBe(24)
+    // 小数下取整后为 0：不得让 loop 零轮直接 turn_limit（审查 P2-1）
+    process.env.BLOMA_LOOP_MAX_TURNS_QUICK = '0.5'
     expect(resolveAgentLoopMaxTurns('quick')).toBe(24)
   })
 })

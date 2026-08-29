@@ -44,10 +44,8 @@ vi.mock('../../main/runtime-fallback', () => ({
   resolveChannelEnv: vi.fn(() => ({ env: undefined, channel: undefined })),
 }))
 
-import {
-  handleGuideMessage,
-  resolveRequirementConfirm,
-} from '../../main/guide-agent-service'
+import { handleGuideMessage, resolveRequirementConfirm } from '../../main/guide-agent-service'
+import { resolveChannelEnv } from '../../main/runtime-fallback'
 import { recordDecision } from '../../main/decision-log'
 import { resolvePrdBackplane, runSketchTask } from '../../main/programming-orchestrator'
 import {
@@ -170,6 +168,11 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     expect(reviewCalls.length).toBe(1)
     expect(reviewCalls[0]).toContain('六维攻击面')
     expect(reviewCalls[0]).toContain('记账本')
+    // 审查备用链限路由配置域（闭环 PR4，审查 P1-5① 接线锁）：漏传 routed-only 会让
+    // 备用链静默兑底到任意启用渠道——mock 断言参数防回归
+    expect(vi.mocked(resolveChannelEnv)).toHaveBeenCalledWith(
+      expect.objectContaining({ category: 'prd', fallbackScope: 'routed-only' }),
+    )
     // 2026-08-26 改造 3：审查通过后不直接开草图，先发四段式 PRD 确认卡（人语义关接力）
     expect(runSketchTask).not.toHaveBeenCalled()
     const card = events.find(

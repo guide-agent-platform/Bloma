@@ -4,6 +4,7 @@ import type { Page } from 'playwright'
 import {
   attachPageDiagnostics,
   composeFailureReason,
+  evaluateScenarioOutcome,
   newDiagnosticsSince,
   snapshotDiagnostics,
 } from '../../main/gwt-runner'
@@ -11,7 +12,8 @@ import {
 /**
  * PR1（随感 39 诊断补盲）纯函数单测：pageerror / console / requestfailed 三路采集、
  * snapshot 差值归属、上限 20、长文本截断、诊断只附加不改判定。
- * executeScenarios 的浏览器接线由 gwt-service/behavior-gate 既有用例回归（均走静态兜底 seam）。
+ * 浏览器接线（executeScenarios）经 evaluateScenarioOutcome 锁定同款语义
+ * （生产无 chromium 注入环境的直接路径，诚实标注而非声称另有回归）。
  */
 
 /** fake page：EventEmitter + .on()，只实现诊断监听用到的事件面（Page 侧供类型、EventEmitter 侧供 emit） */
@@ -148,5 +150,31 @@ describe('gwt-runner 页面诊断采集（PR1）', () => {
     expect(diag.pageErrors).toEqual(['once'])
     expect(diag.consoleErrors).toEqual(['[error] c-once'])
     expect(snapshotDiagnostics(diag)).toEqual({ pageErrors: 1, consoleErrors: 1, requestFailures: 0 })
+  })
+
+  it('evaluateScenarioOutcome：通过的场景即使有诊断噪音也返回通过（防误杀锚点）', () => {
+    const page = createFakePage()
+    const diag = attachPageDiagnostics(page)
+    const before = snapshotDiagnostics(diag)
+    // 场景执行期间爆发 console 噪音 + 资源失败，但断言本身通过
+    page.emit('console', consoleMessage('error', '统计脚本 404 噪音'))
+    page.emit('requestfailed', failedRequest('https://example.com/analytics.js', 'net::ERR_FAILED'))
+
+    expect(evaluateScenarioOutcome(undefined, diag, before)).toBeUndefined()
+  })
+
+  it('evaluateScenarioOutcome：失败场景拼装诊断（≤3 条），原因为前缀', () => {
+    const page = createFakePage()
+    const diag = attachPageDiagnostics(page)
+    const before = snapshotDiagnostics(diag)
+    page.emit('pageerror', new Error('boom'))
+    page.emit('console', consoleMessage('error', 'e1'))
+    page.emit('console', consoleMessage('error', 'e2'))
+    page.emit('console', consoleMessage('error', 'e3'))
+    page.emit('requestfailed', failedRequest('https://example.com/x.js', 'net::ERR_FAILED'))
+
+    const reason = evaluateScenarioOutcome('断言未满足：按右方向键→高亮右移', diag, before)!
+    expect(reason.startsWith('断言未满足：按右方向键→高亮右移\n附带诊断（最多 3 条）：')).toBe(true)
+    expect(reason).not.toContain('x.js') // 第 4 条之后不拼
   })
 })
