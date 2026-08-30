@@ -197,6 +197,49 @@ export function countTrailingClarificationRounds(sessionId: string): number {
   return rounds
 }
 
+/** 审查确认轮次熔断阈值（2026-08-30 用户拍板）：裁判连续出示 N 轮逐题选择题仍不过 → 不再追问，直接转 PRD 确认门过目。 */
+const PRD_REVIEW_ROUND_LIMIT = 2
+
+/** 审查确认终止类决策：出现即代表审查确认环节结束（转确认门/进入确认门），连续计数在此截断。 */
+const PRD_REVIEW_ENDING_DECISION_TYPES = new Set<string>([
+  'prd_review_overridden',
+  'prd_confirm',
+])
+
+/**
+ * 连续审查确认轮次计数（2026-08-30）：从会话 JSONL 尾部往前数连续的 prd_review 发卡决策，
+ * 遇到审查确认终止类决策即断。prd_review_answered（用户作答）不计数也不断——作答后
+ * 再次发卡是同一确认序列的下一轮。计数即「已出示给用户的逐题选择题卡数」。
+ */
+export function countTrailingPrdReviewRounds(sessionId: string): number {
+  const path = getAgentSessionPath(sessionId)
+  if (!existsSync(path)) return 0
+  const lines = readFileSync(path, 'utf8').split('\n')
+  let rounds = 0
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim()
+    if (!line) continue
+    let message: AgentMessage
+    try {
+      message = JSON.parse(line) as AgentMessage
+    } catch {
+      continue
+    }
+    if (message.role !== 'system') continue
+    const text = extractText(message.content ?? []).trim()
+    if (!text.startsWith('[decision]')) continue
+    const entry = parseDecisionText(text)
+    if (!entry) continue
+    if (entry.type === 'prd_review') {
+      rounds += 1
+      if (rounds >= PRD_REVIEW_ROUND_LIMIT) return rounds
+      continue
+    }
+    if (PRD_REVIEW_ENDING_DECISION_TYPES.has(entry.type)) return rounds
+  }
+  return rounds
+}
+
 /** 占位/问题式 label：模型把模板占位文案或新问题当成选项输出时，直接丢弃。 */
 function isBadOptionLabel(label: string): boolean {
   const trimmed = label.trim()
@@ -1167,6 +1210,42 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
     if (review.aborted || aborted()) return { started: true, prd_written: prdWritten }
     if (review.verdict === 'needs_revision') {
       if (aborted()) return { started: true, prd_written: prdWritten }
+      // 审查确认轮次熔断（2026-08-30 用户拍板）：连续 N 轮逐题选择题仍不过 → 不再逐条追问，
+      // 直接转 PRD 确认门让用户过目后开工，避免陷入确认细节循环。
+      if (countTrailingPrdReviewRounds(pending.session_id) >= PRD_REVIEW_ROUND_LIMIT) {
+        console.error(`[guide] 审查确认轮次熔断：连续 ${PRD_REVIEW_ROUND_LIMIT} 轮确认仍不过，直接转 PRD 确认门`)
+        recordDecision({
+          project_id: pending.project_id,
+          session_id: pending.session_id,
+          entry: {
+            type: 'prd_review_round_limit',
+            title: '审查确认轮次熔断，转入 PRD 过目',
+            why: `裁判已连续出示 ${PRD_REVIEW_ROUND_LIMIT} 轮逐题选择题仍未收敛，停止逐条追问，转 PRD 确认门让用户过目后开工`,
+            detail: {
+              serious_count: review.issues.filter((issue) => issue.severity === 'blocking' || issue.severity === 'major').length,
+            },
+          },
+        })
+        const roundLimitCopy = `需求已确认，产品需求文档已形成。裁判已经连续检查了 ${PRD_REVIEW_ROUND_LIMIT} 轮，剩下的小问题不再逐条追问了——请你直接过目这份 PRD，有要改的直接说，确认无误我就开工。`
+        publish(makeGuideEvent(eventInput, 'message_delta', { text: roundLimitCopy }))
+        publish(makeGuideEvent(eventInput, 'message_completed', { subtype: 'success' }))
+        publishPrdConfirmCard({
+          input: {
+            request_id: pending.request_id,
+            session_id: pending.session_id,
+            project_id: pending.project_id,
+            mode: pending.mode,
+            channel_id: pending.channel_id,
+          },
+          backplane: backplaneForReview,
+          requirements,
+          query: pending.query ?? NO_QUERY_FALLBACK,
+          publish,
+          reviewNote: `已连续 ${PRD_REVIEW_ROUND_LIMIT} 轮确认`,
+          signal,
+        })
+        return { started: true, prd_written: prdWritten }
+      }
       publish(makeGuideEvent(eventInput, 'message_delta', {
         text: `需求已确认，产品需求文档已形成。裁判审查发现 ${review.issues.filter((issue) => issue.severity === 'blocking' || issue.severity === 'major').length} 个需要你定夺的问题，请看下面的卡片选择怎么处理。`,
       }))

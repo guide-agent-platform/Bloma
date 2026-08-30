@@ -27,6 +27,7 @@ export type DecisionType =
   | 'prd_review'
   | 'prd_review_overridden'
   | 'prd_review_answered'
+  | 'prd_review_round_limit'
   | 'prd_confirm'
   | 'judge_semantic'
   | 'modification_gate'
