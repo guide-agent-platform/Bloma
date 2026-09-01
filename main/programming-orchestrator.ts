@@ -13,7 +13,7 @@ import { appendProjectMapToSystem, loadProjectMapBlock } from './project-map'
 import { resolveChannelEnv } from './runtime-fallback'
 import { captureConstraints, extractConstraints, readProjectConstraints } from './constraint-extractor'
 import { distillProjectMemorySafely } from './memory-distiller'
-import { generateSketch, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from './sketch-engine'
+import { generateSketch, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, backplaneTemplateMeta, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from './sketch-engine'
 import { generateSketchLlm, SketchLlmError, type SketchAttemptDetail } from './sketch-engine-llm'
 import { generatePrdLlm, readConversation } from './prd-engine-llm'
 import { enrichRequirementsLlm, extractUserTexts, mergeEnrichment } from './requirement-enricher'
@@ -1176,13 +1176,16 @@ export async function resolvePrdBackplane(input: MvpTaskInput, requirements: Ske
   }
   // 项目级字段合并（T4-L1）：LLM 从对话提取的背板不带 project.constraints /
   // scope_exclusions（其提取源是会话文本，项目存储是另一路事实）——冻结前并入，
-  // 防止确定性门捕获的约束/范围声明在 prd.json 里丢失
+  // 防止确定性门捕获的约束/范围声明在 prd.json 里丢失。
+  // template_meta（注入点①）：LLM 背板不带模板元信息，按项目 template_type 兜底写入；
+  // 若 base 已携带（重跑/迭代路径保留旧值）则原样保留。
   return {
     ...base,
     name: project.name,
     requirements: enrichedRequirements,
     out_of_scope: [...new Set([...(llm?.out_of_scope ?? []), ...(project.scope_exclusions ?? [])])],
     ...(project.constraints?.length ? { constraints: [...new Set([...(llm?.constraints ?? []), ...project.constraints])] } : {}),
+    template_meta: base.template_meta ?? backplaneTemplateMeta(base, project.template_type),
   }
 }
 

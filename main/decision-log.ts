@@ -43,6 +43,7 @@ export type DecisionType =
   | 'memory_distilled'
   | 'enrichment_stats'
   | 'agent_loop'
+  | 'template_type_refined'
 
 export interface DecisionEntry {
   type: DecisionType

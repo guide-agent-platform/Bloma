@@ -166,8 +166,8 @@ export function defaultConstraintLevel(type: TemplateType): ConstraintLevel {
 }
 
 /** 模板元信息读取：背板缺省时按项目 template_type 兜底构造（不回写；写入由注入点①负责）。 */
-export function backplaneTemplateMeta(backplane: PrdBackplane, projectTemplateType: TemplateType): TemplateMeta {
-  if (backplane.template_meta) return backplane.template_meta
+export function backplaneTemplateMeta(metaSource: Pick<PrdBackplane, 'template_meta'>, projectTemplateType: TemplateType): TemplateMeta {
+  if (metaSource.template_meta) return metaSource.template_meta
   return { type: projectTemplateType, level: defaultConstraintLevel(projectTemplateType), version: TEMPLATE_META_VERSION }
 }
 

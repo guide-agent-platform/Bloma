@@ -24,6 +24,7 @@ import type {
 } from '../shared/types'
 import { WORKFLOW_STAGES } from '../shared/types'
 import type { SketchRequirement } from './sketch-engine'
+import { inferTemplateType, refineTemplateType } from './template-inference'
 import {
   getAgentSessionPath,
   getAgentSessionsIndexPath,
@@ -58,7 +59,8 @@ export function createProject(input: ProjectCreateInput): Project {
     workspace_slug: WORKSPACE_SLUG,
     name: input.initial_message?.slice(0, 32) || '未命名项目',
     mode: input.mode,
-    template_type: 'web_fullstack',
+    // 注入点①（周计划 §6 / PRD 12.2）：关键词自动推断，对用户透明；无命中兜底个人小工具（宽松级误判代价最小）
+    template_type: inferTemplateType(input.initial_message ?? ''),
     status: 'active',
     current_stage: 'clarifying',
     root_path: rootPath,

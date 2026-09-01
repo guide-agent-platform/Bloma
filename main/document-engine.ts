@@ -12,7 +12,7 @@ import { getDocumentsDir } from '../storage/config-paths'
 import { findProject, readLastSketchRequirements } from './project-service'
 import { nextRequirementId } from './programming-orchestrator'
 import type { PrdBackplane, RequirementStatus, SketchRequirement } from './sketch-engine'
-import { requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory } from './sketch-engine'
+import { requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, backplaneTemplateMeta } from './sketch-engine'
 import { describeEffect, describeTrigger, parseBehaviorAssertion } from './behavior-assertions'
 
 /**
@@ -283,6 +283,9 @@ export function buildPrdBackplane(
     // 确定性提取），背板只做组装——不在这里引入第二个事实源
     ...(project.constraints?.length ? { constraints: [...new Set(project.constraints)] } : {}),
     assumptions: [],
+    // 注入点①（周计划 §6）：模板元信息随背板落盘，下游注入点按此路由；
+    // 缺省按项目 template_type 兜底构造（与读取侧 backplaneTemplateMeta 同源）
+    template_meta: backplaneTemplateMeta({}, project.template_type),
     ...(checkpoint === 'mvp_before_generation' ? { frozen_at: new Date().toISOString() } : {}),
   }
 }

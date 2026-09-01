@@ -34,6 +34,7 @@ import { resolvePrdBackplane, runSketchTask, setProgrammingEventPublisher, nextR
 import { normalizeRequirementUpdate, applyNormalization } from './requirement-normalizer'
 import { buildReferenceSection } from './web-reference-extractor'
 import { findProject, updateProject, readLastSketchRequirements, recordSketchGenerated } from './project-service'
+import { refineTemplateType } from './template-inference'
 import { captureConstraints, extractConstraints, readProjectConstraints } from './constraint-extractor'
 import { isAutoDelegationText, readPrimaryIntent } from './session-service'
 import type { PrdBackplane, SketchRequirement } from './sketch-engine'
@@ -410,6 +411,26 @@ export async function handleGuideMessage(
   persistSystem?: (text: string) => void,
 ): Promise<void> {
   const project = findProject(input.project_id)
+  // 注入点①澄清轮修正（对用户透明，PRD 12.2）：后续话语带显式形态信号（网页/桌面）时
+  // 更新类型推断；weak 信号不动已有判断。失败静默——推断是增强不是依赖，不阻断澄清链。
+  try {
+    const refined = refineTemplateType(project.template_type, input.content)
+    if (refined) {
+      updateProject(input.project_id, { template_type: refined })
+      recordDecision({
+        project_id: input.project_id,
+        session_id: input.session_id,
+        entry: {
+          type: 'template_type_refined',
+          title: '项目类型推断修正',
+          why: '用户后续话语携带显式载体形态信号，自动修正模板类型推断（对用户透明）',
+          detail: { from: project.template_type, to: refined, signal: input.content.slice(0, 80) },
+        },
+      })
+    }
+  } catch {
+    // 推断修正失败不影响澄清链
+  }
   setProgrammingEventPublisher(publish)
   trackAnalytics({
     request_id: input.request_id,
