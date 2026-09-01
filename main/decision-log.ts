@@ -45,6 +45,7 @@ export type DecisionType =
   | 'agent_loop'
   | 'template_type_refined'
   | 'requirement_earsified'
+  | 'template_override_rejected'
 
 export interface DecisionEntry {
   type: DecisionType

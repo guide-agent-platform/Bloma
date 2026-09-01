@@ -8,7 +8,7 @@
     "dev:renderer": "vite --host 127.0.0.1",
     "build": "npm run build:renderer && npm run build:main",
     "build:renderer": "vite build",
-    "build:main": "esbuild main/index.ts --bundle --platform=node --external:electron --external:playwright --format=esm --outfile=dist-main/main/index.js && esbuild preload/bridge.ts --bundle --platform=node --external:electron --format=cjs --outfile=dist-main/preload/bridge.cjs",
+    "build:main": "esbuild main/index.ts --bundle --platform=node --external:electron --external:playwright --format=esm --outfile=dist-main/main/index.js && esbuild preload/bridge.ts --bundle --platform=node --external:electron --format=cjs --outfile=dist-main/preload/bridge.cjs && node -e \"const{cpSync,mkdirSync}=require('node:fs');mkdirSync('dist-main/main/templates',{recursive:true});cpSync('main/templates','dist-main/main/templates',{recursive:true})\"",
     "start": "npm run build && electron .",
     "start:auto": "node scripts/start.mjs",
     "typecheck": "tsc --noEmit",

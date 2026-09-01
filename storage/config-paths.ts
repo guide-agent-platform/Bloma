@@ -32,6 +32,11 @@ export function getPromptOverridePath(name: string): string {
   return join(getPromaHome(), 'prompts', `${name}.md`)
 }
 
+/** 工程模板外置覆盖路径（2026-09-02 周计划 §5 P4：~/.proma/templates/{type}.md，沿用 prompt-config 模式）。 */
+export function getProjectTemplatePath(type: string): string {
+  return join(getPromaHome(), 'templates', `${type}.md`)
+}
+
 // 会话历史统一走 agent-sessions（历史遗留的 Conversation 命名已清理，见 data-model §5/§6）
 export function getAgentSessionPath(sessionId: string): string {
   return join(ensureDir(join(getPromaHome(), 'agent-sessions')), `${sessionId}.jsonl`)
