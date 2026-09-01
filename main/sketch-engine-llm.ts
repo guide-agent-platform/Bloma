@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { SDKQuery } from './orchestrator'
 import { findProject } from './project-service'
 import { loadPromptOverride } from './prompt-config'
+import { buildSketchInjection } from './template-injection'
 import type { SketchRequirement } from './sketch-engine'
 import { requirementAssertions, requirementStory } from './sketch-engine'
 import { categoryTemperature } from './model-resolution'
@@ -22,6 +23,9 @@ import type { MessageContentBlock } from '../shared/types'
 export interface GenerateSketchLlmInput {
   project_id: string
   requirements: SketchRequirement[]
+  /** 注入点⑤：项目模式与类型（页面清单/布局惯例切片路由）；缺省不注入（现状） */
+  mode?: import('../shared/types').ProjectMode
+  template_type?: import('../shared/types').TemplateType
   /** 用户已声明约束（T4-L1：project.constraints，随草图生成注入——「不含登录」则草图不画登录界面） */
   constraints?: string[]
   query: SDKQuery
@@ -84,7 +88,29 @@ export const DEFAULT_SYSTEM_PROMPT = `你是「Bloma 草图生成器」，负责
 
 export async function generateSketchLlm(input: GenerateSketchLlmInput): Promise<GenerateSketchLlmResult> {
   const timeoutMs = input.timeoutMs ?? 0
-  const prompt = buildPrompt(input.requirements, input.constraints)
+  // 注入点⑤（周计划 §6）：pages 清单（quick ≤3）+ longterm 布局惯例进草图 prompt；
+  // 开关关闭/参数缺失时为 null 不追加（行为=现状）
+  const sketchInjection = (() => {
+    if (!input.mode || !input.template_type) return null
+    try {
+      const backplaneLike = {
+        project_id: input.project_id,
+        name: '',
+        positioning: '',
+        requirements: input.requirements,
+        acceptance: {},
+        out_of_scope: [],
+        assumptions: [],
+      }
+      return buildSketchInjection(input.template_type, input.mode, backplaneLike)
+    } catch {
+      return null
+    }
+  })()
+  const basePrompt = buildPrompt(input.requirements, input.constraints)
+  const prompt = sketchInjection ? `${basePrompt}
+
+${sketchInjection}` : basePrompt
   let maxTokens = input.maxTokens ?? DEFAULT_MAX_TOKENS
   let truncated = false
   const attempts: SketchAttemptDetail[] = []

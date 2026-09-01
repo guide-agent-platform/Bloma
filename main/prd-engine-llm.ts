@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import type { SDKQuery } from './orchestrator'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { loadPromptOverride } from './prompt-config'
+import { buildPrdFewShotInjection, isInjectionEnabled } from './template-injection'
 import type { AgentMessage, MessageContentBlock } from '../shared/types'
 import type { PrdBackplane, SketchRequirement } from './sketch-engine'
 import { categoryTemperature } from './model-resolution'
@@ -23,6 +24,8 @@ export interface GeneratePrdLlmInput {
   session_id: string
   /** 已冻结的功能项（F-001 主题锚点 + 澄清/纠错追加项），PRD 只做语义补全、不改写。 */
   requirements: SketchRequirement[]
+  /** 注入点③：项目类型（few-shot 同类型样例路由）；缺省 personal_tool */
+  template_type?: import('../shared/types').TemplateType
   query: SDKQuery
   env: Record<string, string>
   maxTokens?: number
@@ -98,45 +101,73 @@ export async function generatePrdLlm(input: GeneratePrdLlmInput): Promise<PrdBac
   const signal = combineSignals(controller.signal, input.signal)
 
   try {
-    const prompt = buildPrompt(items, conversation)
+    // 注入点③（周计划 §6）：同类型脱敏样例 few-shot（≤500 token 硬截断）+ 解析失败
+    // 带反馈重试一次（陷阱 7：代码型 JSON 不正则修补，只走带反馈重试）；开关关闭=现状单试
+    const fewShot = isInjectionEnabled('prd') ? buildPrdFewShotInjection(input.template_type ?? 'personal_tool') : null
+    const prompt = [buildPrompt(items, conversation), fewShot].filter(Boolean).join('\n\n')
+    const systemPrompt = getSystemPrompt()
     let accumulated = ''
-    const stream = input.query(prompt, {
-      env: input.env,
-      signal,
-      sessionId: input.session_id,
-      history: [{ role: 'system', content: getSystemPrompt() }],
-      maxTokens: input.maxTokens ?? DEFAULT_MAX_TOKENS,
-      // §7.7 类别温度：判定/提取要稳、可复现（0.1）
-      temperature: categoryTemperature('prd'),
-    })
-    for await (const sdkMessage of stream) {
-      if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue
-      const text = extractText(sdkMessage.message.content)
-      if (text) accumulated += text
+    for (let attempt = 0; attempt < PRD_GENERATION_ATTEMPTS; attempt += 1) {
+      const history =
+        attempt === 0
+          ? [{ role: 'system' as const, content: systemPrompt }]
+          : [
+              { role: 'system' as const, content: systemPrompt },
+              { role: 'user' as const, content: prompt },
+              { role: 'assistant' as const, content: accumulated },
+            ]
+      const stream = input.query(attempt === 0 ? prompt : PRD_RETRY_FEEDBACK, {
+        env: input.env,
+        signal,
+        sessionId: input.session_id,
+        history,
+        maxTokens: input.maxTokens ?? DEFAULT_MAX_TOKENS,
+        // §7.7 类别温度：判定/提取要稳、可复现（0.1）
+        temperature: categoryTemperature('prd'),
+      })
+      let round = ''
+      for await (const sdkMessage of stream) {
+        if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue
+        const text = extractText(sdkMessage.message.content)
+        if (text) round += text
+      }
+      accumulated = round
+      if (controller.signal.aborted) return null
+      const parsedNow = parsePrdJson(accumulated)
+      if (parsedNow) {
+        return buildBackplaneFromParsed(parsedNow, items, input.project_id)
+      }
     }
-
-    if (controller.signal.aborted) return null
-    const parsed = parsePrdJson(accumulated)
-    if (!parsed) return null
-
-    const acceptance: Record<string, string> = {}
-    for (const item of items) {
-      acceptance[item.id] = parsed.acceptance[item.id]?.trim() || `${item.description}：核心路径可交互，边界与异常输入不崩溃。`
-    }
-
-    return {
-      project_id: input.project_id,
-      name: '', // name 由调用方回填（findProject），此处占位
-      positioning: parsed.positioning.trim() || items[0].description,
-      requirements: items,
-      acceptance,
-      out_of_scope: parsed.out_of_scope,
-      assumptions: parsed.assumptions,
-    }
+    return null
   } catch {
     return null
   } finally {
     clearTimeout(timer)
+  }
+}
+
+/** PRD 生成尝试次数（注入点③：带反馈重试一次；开关关闭时首轮即返回与现状同构）。 */
+const PRD_GENERATION_ATTEMPTS = 2
+
+/** 解析失败反馈（陷阱 7：不修补内容，只要求重输出合法 JSON）。 */
+const PRD_RETRY_FEEDBACK =
+  '你上一次的输出无法解析为有效 JSON。请重新只输出一个 JSON 对象' +
+  '（{"positioning":"…","acceptance":{"F-001":"…"},"out_of_scope":[…],"assumptions":[…]}），' +
+  '不要 markdown 代码围栏与任何解释文字，确保括号引号完整闭合。'
+
+function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequirement[], projectId: string): PrdBackplane {
+  const acceptance: Record<string, string> = {}
+  for (const item of items) {
+    acceptance[item.id] = parsed.acceptance[item.id]?.trim() || `${item.description}：核心路径可交互，边界与异常输入不崩溃。`
+  }
+  return {
+    project_id: projectId,
+    name: '', // name 由调用方回填（findProject），此处占位
+    positioning: parsed.positioning.trim() || items[0].description,
+    requirements: items,
+    acceptance,
+    out_of_scope: parsed.out_of_scope,
+    assumptions: parsed.assumptions,
   }
 }
 

@@ -13,6 +13,8 @@ import { findProject, readLastSketchRequirements } from './project-service'
 import { nextRequirementId } from './programming-orchestrator'
 import type { PrdBackplane, RequirementStatus, SketchRequirement } from './sketch-engine'
 import { requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, backplaneTemplateMeta } from './sketch-engine'
+import { parseEarsAssertion } from './ears-vocabulary'
+import { gwtRequiredCategories, isInjectionEnabled } from './template-injection'
 import { describeEffect, describeTrigger, parseBehaviorAssertion } from './behavior-assertions'
 
 /**
@@ -85,7 +87,7 @@ export function syncDocuments(input: DocumentSyncInput, backplaneOverride?: PrdB
         content: renderPrdFull(backplane),
         type: 'prd',
       })
-      files.push(...renderGwtSkeleton(backplane).map((feature) => ({
+      files.push(...renderGwtSkeleton(backplane, project.mode).map((feature) => ({
         relativePath: `features/${feature.fileName}`,
         content: feature.content,
         type: 'gwt_feature' as const,
@@ -754,32 +756,53 @@ function renderSprintPlan(projectName: string): string {
  */
 export function renderGwtSkeleton(
   backplane: PrdBackplane,
+  /** 注入点⑦（周计划 §6）：模式与等级（必测类别清单路由）；缺省不标注（现状） */
+  mode?: import('../shared/types').ProjectMode,
 ): Array<{ fileName: string; content: string }> {
+  const requiredCategories =
+    mode && isInjectionEnabled('gwt')
+      ? gwtRequiredCategories(mode, backplane.template_meta?.level === 'loose' ? 'loose' : 'standard')
+      : []
   return readRequirements(backplane.requirements).map((item) => {
     const id = safeFileName(item.id)
     const acceptance = backplane.acceptance[item.id] ?? `${item.description}：核心路径可交互，边界与异常输入不崩溃。`
     return {
       fileName: `${id}.feature`,
-      content: renderFeatureFile(item, acceptance),
+      content: renderFeatureFile(item, acceptance, requiredCategories),
     }
   })
 }
 
-function renderFeatureFile(item: SketchRequirement, acceptance: string): string {
+/** EARS 句式 → GWT 场景类别标签（注入⑦：WHEN=主路径 / WHILE=空态 / IF=异常，词表同源）。 */
+function categoryTagOf(kind: import('./ears-vocabulary').EarsPatternKind): string {
+  if (kind === 'while') return '[空态]'
+  if (kind === 'if') return '[异常]'
+  return '[主路径]'
+}
+
+function renderFeatureFile(item: SketchRequirement, acceptance: string, requiredCategories: string[] = []): string {
   const title = shortTitle(item.description)
+  const categoryHeader = requiredCategories.length
+    ? `
+  # 必测类别（工程模板测试策略）：${requiredCategories.join(' / ')}
+`
+    : ''
   const scenarios: string[] = []
   for (const assertion of requirementAssertions(item)) {
     const plan = parseBehaviorAssertion(assertion)
+    // 注入点⑦：EARS 句式类别标注（WHEN=主路径 / WHILE=空态 / IF=异常——词表同源）
+    const ears = parseEarsAssertion(assertion)
+    const categoryTag = ears.explicitPrefix ? categoryTagOf(ears.kind) : ''
     if (plan.presenceFallback || !plan.trigger || !plan.effect) {
       scenarios.push([
-        `  Scenario: 核心路径可运行（${assertion}）`,
+        `  Scenario: 核心路径可运行${categoryTag}（${assertion}）`,
         `    Given 已进入 ${title} 功能页面`,
         `    When 我执行核心操作`,
         `    Then 页面返回预期结果`,
       ].join('\n'))
     } else {
       scenarios.push([
-        `  Scenario: ${assertion}`,
+        `  Scenario: ${categoryTag ? `${categoryTag}：` : ''}${assertion}`,
         `    Given 已进入 ${title} 功能页面`,
         `    When ${describeTrigger(plan.trigger)}`,
         `    Then ${describeEffect(plan.effect)}`,
@@ -803,7 +826,7 @@ function renderFeatureFile(item: SketchRequirement, acceptance: string): string 
     ].join('\n'),
   )
   return `# GWT 骨架（由 DocumentEngine 生成，场景从行为断言派生，GWTTestRunner 执行）
-Feature: ${title}
+Feature: ${title}${categoryHeader}
 
   As a 用户
   I want ${requirementStory(item)}

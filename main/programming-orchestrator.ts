@@ -11,6 +11,7 @@ import { renderPackageJson, renderStaticServer } from './project-scaffold'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
 import { appendProjectMapToSystem, loadProjectMapBlock } from './project-map'
 import { resolveChannelEnv } from './runtime-fallback'
+import { buildLoopInjection } from './template-injection'
 import { captureConstraints, extractConstraints, readProjectConstraints } from './constraint-extractor'
 import { distillProjectMemorySafely } from './memory-distiller'
 import { generateSketch, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, backplaneTemplateMeta, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from './sketch-engine'
@@ -276,6 +277,9 @@ async function resolveSketch(input: SketchTaskInput, requirements: SketchRequire
     const result = await generateSketchLlm({
       project_id: input.project_id,
       requirements,
+      // 注入点⑤：模式与类型透传（pages/布局惯例切片）
+      mode: input.mode,
+      template_type: findProject(input.project_id).template_type,
       // 用户约束随草图注入（T4-L1）：「不含登录」→ 草图不画登录界面
       constraints: readProjectConstraints(input.project_id),
       query: input.query,
@@ -936,7 +940,17 @@ function countProjectFiles(root: string): number {
  * 背板锚定系统提示词（方案 §4.4 骨架）：PRD 背板全文常驻每轮（AutoGPT 式漂移的
  * 解药，本项目区别于 SWE-agent/Codex 的差异化锚），工作方式与终止判据显式化。
  */
-export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 'diff' | 'whole'): string {
+export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 'diff' | 'whole', templateType?: import('../shared/types').TemplateType): string {
+  // 注入点⑥（周计划 §6）：tech_skeleton/目录约定/依赖白名单进背板锚定段；
+  // 开关关闭/模板缺失为 null（行为=现状）。类型缺省从背板 template_meta 兜底。
+  const effectiveType = templateType ?? backplane.template_meta?.type ?? 'personal_tool'
+  const loopInjection = (() => {
+    try {
+      return buildLoopInjection(effectiveType)
+    } catch {
+      return null
+    }
+  })()
   const items = backplane.requirements
     .map((item) => {
       const assertions = requirementAssertions(item)
@@ -969,6 +983,8 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     outOfScope,
     '用户约束：',
     constraints,
+    '',
+    loopInjection ?? '',
     '',
     '【工作方式】',
     '逐功能项实现：write_file/edit_file 写代码 → run_preview 确认可运行 → ' +
@@ -1124,6 +1140,8 @@ export async function resolvePrdBackplane(input: MvpTaskInput, requirements: Ske
       project_id: input.project_id,
       session_id: input.session_id,
       requirements,
+      // 注入点③：项目类型透传（few-shot 同类型样例路由）
+      template_type: project.template_type,
       query: input.query,
       env,
       maxTokens,

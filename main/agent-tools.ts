@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { findProject, readLastSketchRequirements } from './project-service'
 import { scheduleProjectMapRefresh } from './project-map'
+import { isInjectionEnabled } from './template-injection'
 import { getSandboxLogs, runSandbox } from './platform-services'
 import { runGwtScenarios } from './gwt-service'
 import { planScenarios, scenarioName } from './gwt-runner'
@@ -189,6 +190,18 @@ function notWritableError(rel: string): string {
   return `「${rel}」不在可写范围内（允许：.html/.js/.css 文件与 src/ 子树）。`
 }
 
+/** 注入点⑥工具层拦截（周计划 §6）：外部 CDN script/link 引用检测（模板依赖白名单禁外部
+ * 资源）；注入点关闭时返回 null 不拦截（行为=现状）。仅拦可执行/样式外链，img/字体
+ * 等资源外链不拦（模板允许图片占位）。 */
+export function externalResourceViolation(htmlContent: string): string | null {
+  if (!isInjectionEnabled('loop')) return null
+  const scriptMatch = /<script[^>]+src\s*=\s*["']https?:\/\/[^"']+["']/i.exec(htmlContent)
+  if (scriptMatch) return `检测到外部脚本引用（${scriptMatch[0].slice(0, 80)}…）`
+  const linkMatch = /<link[^>]+href\s*=\s*["']https?:\/\/[^"']+["']/i.exec(htmlContent)
+  if (linkMatch) return `检测到外部样式引用（${linkMatch[0].slice(0, 80)}…）`
+  return null
+}
+
 /** 递归收集项目内文件（跳过非产物目录），返回相对路径列表。 */
 function collectProjectFiles(root: string, subDir = ''): string[] {
   const out: string[] = []
@@ -249,12 +262,16 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     return undefined
   }
 
-  /** 落盘前统一护栏：路径沙箱 + 可写范围 + 语法/结构校验 + 修复预算门 + meta CSP 剥离。 */
+  /** 落盘前统一护栏：路径沙箱 + 可写范围 + 语法/结构校验 + 修复预算门 + meta CSP 剥离 + 依赖白名单拦截。 */
   const validateAndWrite = async (root: string, rel: string, content: string, ctx: ToolContext): Promise<ToolOutcome> => {
     if (!isWritablePath(rel)) return { output: notWritableError(rel), isError: true }
     if (extname(rel).toLowerCase() === '.html') {
       const structureError = checkHtmlStructure(content)
       if (structureError) return { output: `${structureError}\n请修正后重新提交完整内容。`, isError: true }
+      // 注入点⑥工具层拦截（周计划 §6：loop 引白名单外包→工具层拦截）：外部 CDN
+      // script/link 引用拒绝写入（模板依赖白名单禁外部资源；开关关闭时不拦，行为=现状）
+      const cdnViolation = externalResourceViolation(content)
+      if (cdnViolation) return { output: `${cdnViolation}\n模板依赖白名单禁止外部资源（内联实现或本地文件）；请去除外链后重新提交。`, isError: true }
     }
     if (extname(rel).toLowerCase() === '.js') {
       const syntax = await jsSyntaxChecker(content)

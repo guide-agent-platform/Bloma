@@ -35,6 +35,7 @@ import { normalizeRequirementUpdate, applyNormalization } from './requirement-no
 import { buildReferenceSection } from './web-reference-extractor'
 import { findProject, updateProject, readLastSketchRequirements, recordSketchGenerated } from './project-service'
 import { refineTemplateType } from './template-inference'
+import { buildClarifyInjection } from './template-injection'
 import { captureConstraints, extractConstraints, readProjectConstraints } from './constraint-extractor'
 import { isAutoDelegationText, readPrimaryIntent } from './session-service'
 import type { PrdBackplane, SketchRequirement } from './sketch-engine'
@@ -728,11 +729,20 @@ async function tryModelDrivenGuide(
 ): Promise<boolean> {
   // 首轮判定：会话里还没有任何助手回复 = 用户尚未经历过一轮澄清（卡片答案路径不经过此处）
   const isFirstTurn = !model.history.some((turn) => turn.role === 'assistant')
+  // 注入点②（周计划 §6）：模板章节框架切片——quick 只问必填章缺口（≤3 问纪律），
+  // longterm 全章节框架；开关关闭/模板缺失时为 null，行为=现状
+  let templateSection: string | null = null
+  try {
+    templateSection = buildClarifyInjection(project?.template_type ?? 'personal_tool', input.mode)
+  } catch {
+    templateSection = null
+  }
+  const baseSystem = isFirstTurn
+    ? (loadPromptOverride('guide-system') ?? DEFAULT_GUIDE_SYSTEM_PROMPT) + FIRST_TURN_RULE
+    : loadPromptOverride('guide-system') ?? DEFAULT_GUIDE_SYSTEM_PROMPT
   const systemTurn: ConversationTurn = {
     role: 'system',
-    content: isFirstTurn
-            ? (loadPromptOverride('guide-system') ?? DEFAULT_GUIDE_SYSTEM_PROMPT) + FIRST_TURN_RULE
-            : loadPromptOverride('guide-system') ?? DEFAULT_GUIDE_SYSTEM_PROMPT,
+    content: templateSection ? `${baseSystem}\n\n${templateSection}` : baseSystem,
   }
   const history: ConversationTurn[] = [systemTurn, ...model.history]
 
