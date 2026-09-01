@@ -1,6 +1,59 @@
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { findProject } from './project-service'
+import type { ConstraintLevel, TemplateType } from '../shared/types'
+
+/** 章节标识（章节 schema 的 id 集；schema 定义在 prd-sections.ts，类型真相源在此随背板维护）。 */
+export type PrdSectionId =
+  | 'positioning'
+  | 'requirements'
+  | 'pages'
+  | 'assertions'
+  | 'gwt'
+  | 'out_of_scope'
+  | 'personas'
+  | 'glossary'
+  | 'data_model'
+  | 'interface_spec'
+
+/** 章节级 provenance（方案 §3.1：升格现有功能项级 origin，标注每章数据来源供内审 F 维对照）。 */
+export type SectionProvenance = 'user_quote' | 'clarified' | 'guide_inferred' | 'llm_generated'
+
+/** 页面清单（方案 §3.1：quick 限 ≤3；升格自 max_pages 逻辑，草图引擎消费）。 */
+export interface PrdPage {
+  name: string
+  purpose?: string
+}
+
+/** 术语表条目（longterm；LLM 提取 + 纠错回流，全 prompt 注入点统一术语）。 */
+export interface GlossaryEntry {
+  term: string
+  definition: string
+}
+
+/** 数据模型（longterm；loop/judge 对照）。 */
+export interface DataModelSpec {
+  entities: Array<{ name: string; attributes?: string[] }>
+  relations: string[]
+}
+
+/** 接口规格（longterm 标准级起；loop/judge 消费）。 */
+export interface InterfaceEndpoint {
+  endpoint: string
+  method?: string
+  request?: string
+  response?: string
+}
+
+/** 模板元信息（注入点①写入；所有注入点路由依据）。level 缺省随类型（personal_tool=loose，其余 standard）。 */
+export interface TemplateMeta {
+  type: TemplateType
+  level: ConstraintLevel
+  version: number
+}
+
+/** 模板包内容版本（template_meta.version 的当前值；模板结构变更时 +1）。 */
+export const TEMPLATE_META_VERSION = 1
 
 /**
  * 功能项（密背板格式层，2026-08-17 设计 §3.1）。
@@ -74,6 +127,55 @@ export function requirementPriority(item: SketchRequirement): 'P0' | 'P1' | 'P2'
   return item.priority ?? (item.id === 'F-001' ? 'P0' : 'P2')
 }
 
+// ---------------------------------------------------------------------------
+// 2026-09-02 P1 扩展字段读取侧兜底（旧 prd.json 零迁移；读取方一律经这些函数取值）
+// ---------------------------------------------------------------------------
+
+/** 页面清单读取：背板有 pages 用之（quick 限 ≤3，多出的截断；longterm 不截）；
+ * 缺省从 requirements 前 3 项派生（名称=功能描述截断，用途=空）——旧背板兼容路径，
+ * 草图引擎的 max_pages 语义由此升格承接。 */
+export function backplanePages(backplane: PrdBackplane, mode: 'quick' | 'longterm' = 'quick'): PrdPage[] {
+  if (backplane.pages && backplane.pages.length > 0) {
+    const list = backplane.pages.filter((page) => page.name.trim().length > 0)
+    return mode === 'quick' ? list.slice(0, 3) : list
+  }
+  return backplane.requirements.slice(0, 3).map((item) => ({
+    name: item.description.replace(/\s+/g, ' ').trim().slice(0, 20) || item.id,
+    purpose: '',
+  }))
+}
+
+/** 术语表读取：缺省 []（非 longterm 必填章，缺省不阻断）。 */
+export function backplaneGlossary(backplane: PrdBackplane): GlossaryEntry[] {
+  return (backplane.glossary ?? []).filter((entry) => entry.term.trim() && entry.definition.trim())
+}
+
+/** 目标用户读取：缺省 []。 */
+export function backplanePersonas(backplane: PrdBackplane): string[] {
+  return (backplane.personas ?? []).map((p) => p.trim()).filter(Boolean)
+}
+
+/** 接口规格读取：缺省 []。 */
+export function backplaneInterfaceSpec(backplane: PrdBackplane): InterfaceEndpoint[] {
+  return (backplane.interface_spec ?? []).filter((ep) => ep.endpoint.trim().length > 0)
+}
+
+/** 类型→缺省硬约束等级（PRD 12.3：Web 全栈/桌面工具=standard，个人小工具=loose，AI 应用二期按 standard 预留）。 */
+export function defaultConstraintLevel(type: TemplateType): ConstraintLevel {
+  return type === 'personal_tool' ? 'loose' : 'standard'
+}
+
+/** 模板元信息读取：背板缺省时按项目 template_type 兜底构造（不回写；写入由注入点①负责）。 */
+export function backplaneTemplateMeta(backplane: PrdBackplane, projectTemplateType: TemplateType): TemplateMeta {
+  if (backplane.template_meta) return backplane.template_meta
+  return { type: projectTemplateType, level: defaultConstraintLevel(projectTemplateType), version: TEMPLATE_META_VERSION }
+}
+
+/** 章节 provenance 读取：缺省 {}（未标注章节视为未声明，内审如实呈现不臆断）。 */
+export function backplaneSectionProvenance(backplane: PrdBackplane): Partial<Record<PrdSectionId, SectionProvenance>> {
+  return backplane.section_provenance ?? {}
+}
+
 /** 全局 UX 契约（§4.2）：本轮用户确认过的草图（仅「用户确认 + 非模板回退」时存在）。 */
 export interface UxContract {
   /** 草图文件相对路径（相对 documents/{project_id}/，如 sketch.html） */
@@ -125,6 +227,26 @@ export interface PrdBackplane {
   frozen_at?: string
   /** 用户阅读确认时间（PRD 确认卡「确认无误」时落盘，2026-08-26）——迭代争议仲裁锚点 */
   user_confirmed_at?: string
+
+  // ---- 以下为 2026-09-02 周计划 §5 P1 扩展字段（方案 §3.1）：全可选 + 读取侧兜底，
+  // 旧 prd.json 零迁移（沿用 requirementStory 模式，陷阱 19/42 经验）；
+  // 不动 requirements/behavior_assertions/out_of_scope/constraints/generation_guardrails
+  // 的字段语义（内审闭环锚，方案 §3.2 纪律）。 ----
+
+  /** 页面清单（两模式全量；quick 限 ≤3）。缺省时读取侧从 requirements 前 3 项派生（兼容旧背板）。 */
+  pages?: PrdPage[]
+  /** 术语表（longterm）。缺省 []。 */
+  glossary?: GlossaryEntry[]
+  /** 目标用户（longterm；12.4 标准级「目标用户」行）。缺省 []。 */
+  personas?: string[]
+  /** 数据模型（longterm）。缺省 undefined（选填章节）。 */
+  data_model?: DataModelSpec
+  /** 接口规格（longterm 标准级起；12.4「API Spec」行）。缺省 []。 */
+  interface_spec?: InterfaceEndpoint[]
+  /** 模板元信息（两模式全量；注入点① choosing_mode 判定写入）。缺省按项目 template_type 兜底。 */
+  template_meta?: TemplateMeta
+  /** 章节级 provenance（每章节生成时标注；内审 F 维对照源）。缺省 {}（未标注章节视为未声明）。 */
+  section_provenance?: Partial<Record<PrdSectionId, SectionProvenance>>
 }
 
 export interface GenerateSketchInput {
