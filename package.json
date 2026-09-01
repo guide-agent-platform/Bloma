@@ -10,6 +10,7 @@
     "build:renderer": "vite build",
     "build:main": "esbuild main/index.ts --bundle --platform=node --external:electron --external:playwright --format=esm --outfile=dist-main/main/index.js && esbuild preload/bridge.ts --bundle --platform=node --external:electron --format=cjs --outfile=dist-main/preload/bridge.cjs",
     "start": "npm run build && electron .",
+    "start:auto": "node scripts/start.mjs",
     "typecheck": "tsc --noEmit",
     "analyze:loop": "node scripts/calibrate-loop-params.mjs",
     "test:unit": "vitest run tests/unit",
