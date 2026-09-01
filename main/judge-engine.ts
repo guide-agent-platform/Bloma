@@ -4,6 +4,8 @@ import type { AgentLoopJudgeMetadata, ProjectMode } from '../shared/types'
 import { getDocumentsDir } from '../storage/config-paths'
 import type { GwtTestResult } from './gwt-service'
 import { findProject } from './project-service'
+import { TEMPLATE_META_VERSION } from './sketch-engine'
+import { isInjectionEnabled } from './template-injection'
 import { readPrdBackplane, readUxContractSketch } from './document-engine'
 import { escapeHtml, requirementAssertions, requirementPriority, type SketchRequirement } from './sketch-engine'
 import { hasInteractiveEntry } from './gwt-service'
@@ -110,6 +112,17 @@ export function runJudge(input: JudgeInput): JudgeVerdict {
   }
   const refinement = evaluateRefinementProxy(project.project_id, backplane.ux_contract, indexHtml, artifact)
   if (refinement) softConstraints.push(refinement)
+
+  // 注入点⑧（周计划 §6）：章节同步校验——轻量版本一致性（背板 template_meta.version
+  // 落后当前模板包版本时提示重建，**不扩任务完成度判定**防双口径）；开关关闭=现状。
+  // 仅 soft 提示且 passed=true，不影响 pass/suggest 走向（提示性对齐建议）。
+  if (isInjectionEnabled('judge') && backplane.template_meta && backplane.template_meta.version < TEMPLATE_META_VERSION) {
+    softConstraints.push({
+      name: '模板版本一致性',
+      passed: true,
+      detail: `PRD 由旧版模板（v${backplane.template_meta.version}）生成，当前模板包为 v${TEMPLATE_META_VERSION}；建议重新生成 PRD 以对齐最新章节口径（不影响本次交付判定）`,
+    })
+  }
 
   const hardFailed = hardConstraints.filter((item) => !item.passed)
   if (hardFailed.length > 0) {

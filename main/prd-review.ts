@@ -21,6 +21,10 @@ import type { AgentEvent, AgentSendMessageInput } from '../shared/types'
 import { recordDecision } from './decision-log'
 import { publishPrdConfirmCard } from './prd-confirm'
 import type { PrdBackplane } from './sketch-engine'
+import { defaultConstraintLevel } from './sketch-engine'
+import { isInjectionEnabled } from './template-injection'
+import { checkSectionCompleteness } from './prd-sections'
+import { parseEarsAssertion, renderForbiddenTermsForPrompt } from './ears-vocabulary'
 import type { SDKQuery } from './orchestrator'
 import { delegatedReviewEnabled, runDelegatedReview } from './review-delegation'
 import { buildConversationExcerpt, buildReadConversationHistoryTool } from './conversation-excerpt'
@@ -247,7 +251,7 @@ export async function runPrdReviewGate(opts: InternalAuditOptions): Promise<PrdR
   const { backplane, confirmedRequirements, query, env, sessionId, signal } = opts
   if (!env) {
     // 无可用渠道 env：直接规则门（不算 degraded——渠道不可用的如实降级）
-    return ruleGateReview(backplane)
+    return ruleGateReview(backplane, opts?.mode)
   }
   const abortWith = (via: 'delegation' | 'direct'): PrdReviewOutcome => ({
     verdict: 'pass',
@@ -264,7 +268,7 @@ export async function runPrdReviewGate(opts: InternalAuditOptions): Promise<PrdR
   if (attack.aborted) return abortWith(attack.via)
   if (!attack.ok) {
     // 委派+直连双失败 → 规则门（现状降级链末环）
-    return { ...ruleGateReview(backplane), degraded: true }
+    return { ...ruleGateReview(backplane, opts?.mode), degraded: true }
   }
   const firstSerious = seriousIssues(attack.issues, opts.mode)
   if (firstSerious.length === 0) {
@@ -413,13 +417,15 @@ async function runAttackerRound(opts: {
   /** 复核轮：上轮 serious issues（增量验证基准） */
   previousIssues?: PrdReviewIssue[]
   dispositions?: DefenderDisposition[]
+  /** 注入点④：模式切片（quick 章节完备性 / longterm +EARS 可测性） */
+  mode?: 'quick' | 'longterm'
 }): Promise<AttackerRoundResult> {
   const isRecheck = opts.round > 1
   const system = isRecheck ? PRD_REVIEW_RECHECK_SYSTEM_PROMPT : PRD_REVIEW_SYSTEM_PROMPT
   const goalPrefix = isRecheck ? '内审·复核 PRD' : '内审·攻击 PRD'
   const task = isRecheck
     ? buildRecheckTask(opts.backplane, opts.previousIssues ?? [], opts.dispositions ?? [], opts.conversationExcerpt)
-    : buildPrdReviewTask(opts.backplane, opts.confirmedRequirements, opts.conversationExcerpt)
+    : buildPrdReviewTask(opts.backplane, opts.confirmedRequirements, opts.conversationExcerpt, opts.mode)
 
   // ① 委派（默认）：research 只读面 + read_conversation_history
   if (delegatedReviewEnabled() && opts.env && opts.projectId && opts.requestId && opts.publish) {
@@ -483,6 +489,7 @@ function buildPrdReviewTask(
   backplane: PrdBackplane,
   confirmedRequirements: Array<{ id: string; description: string }>,
   conversationExcerpt?: string,
+  mode?: 'quick' | 'longterm',
 ): string {
   const lines = [
     '【PRD 全文（背板 JSON）】',
@@ -506,8 +513,42 @@ function buildPrdReviewTask(
   if (conversationExcerpt) {
     lines.push('', conversationExcerpt, '', '可用 read_conversation_history 工具查阅完整对话原文（F 维度证据可引用用户原话）。')
   }
+  const auditInjection = buildAuditInjection(backplane, mode)
+  if (auditInjection) lines.push('', auditInjection)
   lines.push('', '现在执行六维攻击审查，按【输出】格式给出 JSON。')
   return lines.join('\n')
+}
+
+/** 注入点④切片（周计划 §6）：章节完备性（checkSectionCompleteness 同源判定）+ longterm EARS 可测性。 */
+function buildAuditInjection(backplane: PrdBackplane, mode?: 'quick' | 'longterm'): string | null {
+  if (!isInjectionEnabled('audit')) return null
+  try {
+    const type = backplane.template_meta?.type ?? 'personal_tool'
+    const level = backplane.template_meta?.level ?? defaultConstraintLevel(type)
+    const completeness = checkSectionCompleteness(backplane, mode ?? 'quick', level)
+    const sections: string[] = []
+    if (mode === 'longterm') {
+      sections.push('【工程模板追加检查（长期模式）】')
+      sections.push(
+        completeness.missing.length
+          ? `- 章节完备性：以下必填章节缺失（level=${level}），逐项攻出：${completeness.missing.map((m) => `${m.section.label}（${m.reason}）`).join('；')}`
+          : '- 章节完备性：必填章节齐全（复核确认即可，不强行找茬）。',
+      )
+      sections.push(
+        `- EARS 可测性：行为断言含以下不可测措辞之一即为缺陷（severity=major，维度 G）：${renderForbiddenTermsForPrompt()}。一条断言只许一个触发动作（「A 并 B」复合触发=major）。`,
+      )
+    } else {
+      sections.push('【工程模板追加检查（快消模式）】')
+      sections.push(
+        completeness.missing.length
+          ? `- 章节完备性：五必填章节有缺失（${completeness.missing.map((m) => m.section.label).join('、')}），只攻缺失项，其余不找茬。`
+          : '- 章节完备性：五必填章节齐全（复核确认即可，不强行找茬）。',
+      )
+    }
+    return sections.join('\n')
+  } catch {
+    return null
+  }
 }
 
 /** 复核任务体：修订后背板 + 旧 issues + Defender 处置说明。 */
@@ -557,6 +598,8 @@ async function attackViaLlm(opts: {
   isRecheck?: boolean
   previousIssues?: PrdReviewIssue[]
   dispositions?: DefenderDisposition[]
+  /** 注入点④：模式切片（quick 章节完备性 / longterm +EARS 可测性） */
+  mode?: 'quick' | 'longterm'
   query: SDKQuery
   env: Record<string, string>
   sessionId: string
@@ -566,7 +609,7 @@ async function attackViaLlm(opts: {
   const system = opts.isRecheck ? PRD_REVIEW_RECHECK_SYSTEM_PROMPT : PRD_REVIEW_SYSTEM_PROMPT
   const task = opts.isRecheck
     ? buildRecheckTask(opts.backplane, opts.previousIssues ?? [], opts.dispositions ?? [], opts.conversationExcerpt)
-    : buildPrdReviewTask(opts.backplane, opts.confirmedRequirements, opts.conversationExcerpt)
+    : buildPrdReviewTask(opts.backplane, opts.confirmedRequirements, opts.conversationExcerpt, opts.mode)
   const prompt = [system, '', task].join('\n')
 
   const texts: string[] = []
@@ -853,8 +896,61 @@ function sanitizeReviewOptions(raw: unknown): PrdReviewOption[] {
 }
 
 /** 确定性规则门（LLM 不可用降级）：只拦硬伤，宁松勿严。附带零基础话术 + 通用选项（无 LLM 生成贴合的选项，给通用出口）。 */
-export function ruleGateReview(backplane: PrdBackplane): PrdReviewOutcome {
+export function ruleGateReview(backplane: PrdBackplane, mode?: 'quick' | 'longterm'): PrdReviewOutcome {
   const issues: PrdReviewIssue[] = []
+  // 注入点④规则门确定性检查（LLM 不可用降级同享模板体系；开关关闭=现状）：
+  // 必填章节缺失 → major；longterm 断言禁词直查 → major（禁词表三处同源）
+  if (isInjectionEnabled('audit') && backplane.template_meta) {
+    try {
+      // 模板体系检查只在模板已接入的背板上运行：template_meta 存在 = P2 之后管线
+      // 产物（buildPrdBackplane/resolvePrdBackplane 均写入）；裸对象/旧背板 = 模板
+      // 前产物，不追责（行为=现状）。
+      const type = backplane.template_meta.type
+      const level = backplane.template_meta.level ?? defaultConstraintLevel(type)
+      // 规则门宁松勿严口径：只拦「结构性缺失」（定位空/章节字段缺失），不拦
+      // 「增强链未产出」——assertions/gwt 依赖 enricher/EARS 化（可选增强，失败回退
+      // 薄清单属现状合法流）；断言薄弱交给 LLM 攻击轮质疑，不由规则门硬拦。
+      const structuralMissing = checkSectionCompleteness(backplane, mode ?? 'quick', level).missing.filter(
+        (entry) => entry.section.id !== 'assertions' && entry.section.id !== 'gwt',
+      )
+      for (const missing of structuralMissing) {
+        issues.push({
+          dimension: 'G',
+          severity: 'major',
+          location: missing.section.id,
+          claim: `必填章节「${missing.section.label}」缺失：${missing.reason}`,
+          evidence: [`章节 ${missing.section.id} 未达必填口径（mode=${mode ?? 'quick'}, level=${level}）`],
+          plain_question: `${missing.section.label}这块还没有内容，要补一下吗？`,
+          options: ruleOptions([
+            { id: 'guide', label: '按常见做法补', description: '向导按行业惯例补齐' },
+            { id: 'tell', label: '我来补充', description: '我说具体内容' },
+          ]),
+        })
+      }
+      if (mode === 'longterm') {
+        for (const item of backplane.requirements ?? []) {
+          for (const assertion of item.behavior_assertions ?? []) {
+            if (parseEarsAssertion(assertion).forbiddenResponse) {
+              issues.push({
+                dimension: 'G',
+                severity: 'major',
+                location: item.id,
+                claim: `行为断言含不可测措辞：「${assertion}」`,
+                evidence: [assertion],
+                plain_question: '这条验收说法太模糊，没法客观检查，能说得更具体吗？',
+                options: ruleOptions([
+                  { id: 'earsify', label: '改成可检验的说法', description: '自动改写成「点击 X 后出现 Y」式' },
+                  { id: 'tell', label: '我来改', description: '我自己说清楚' },
+                ]),
+              })
+            }
+          }
+        }
+      }
+    } catch {
+      // 模板检查失败不阻断规则门
+    }
+  }
   const positioning = String(backplane.positioning ?? '').trim()
   if (!positioning) {
     issues.push({
