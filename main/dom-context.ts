@@ -1,5 +1,5 @@
 import type { WebContents } from 'electron'
-import type { DomCollectContextResult } from '../shared/types'
+import type { DomCollectContextResult, DomScrollPreviewResult } from '../shared/types'
 
 /**
  * U8：点选纠错 DOM 上下文收集（对齐 api-spec §12.8 `collect_dom_context`）。
@@ -99,24 +99,33 @@ export async function collectDomContext(
 /**
  * 点选纠错滚动转发：把渲染端捕获层收到的滚轮/中键拖拽增量滚到跨域预览 iframe。
  * 渲染端无法 contentWindow.scrollBy（跨域），主进程经 frame.executeJavaScript
- * 越过同源限制执行 window.scrollBy。找不到预览子帧时返回 scrolled:false，前端静默忽略。
+ * 越过同源限制执行 window.scrollBy。滚动后读取 window.scrollX/scrollY 返回，
+ * 供渲染端精确计算弹窗/标记的跟随偏移（避免用滚轮 delta 猜测导致边界漂移）。
+ * 找不到预览子帧时返回 scrolled:false，前端静默忽略。
  */
 export async function scrollPreview(
   webContents: WebContents,
   deltaX: number,
   deltaY: number,
-): Promise<{ scrolled: boolean }> {
+): Promise<DomScrollPreviewResult> {
   const frame = findPreviewFrame(webContents)
-  if (!frame) return { scrolled: false }
+  if (!frame) return { scrolled: false, scroll_x: 0, scroll_y: 0 }
 
   const dx = Number.isFinite(deltaX) ? deltaX : 0
   const dy = Number.isFinite(deltaY) ? deltaY : 0
-  if (dx === 0 && dy === 0) return { scrolled: true }
 
   try {
     await frame.executeJavaScript(`window.scrollBy(${dx}, ${dy})`, true)
-    return { scrolled: true }
+    const pos = (await frame.executeJavaScript(
+      `({ x: window.scrollX || 0, y: window.scrollY || 0 })`,
+      true,
+    )) as { x: number; y: number }
+    return {
+      scrolled: true,
+      scroll_x: Math.round(pos?.x ?? 0),
+      scroll_y: Math.round(pos?.y ?? 0),
+    }
   } catch {
-    return { scrolled: false }
+    return { scrolled: false, scroll_x: 0, scroll_y: 0 }
   }
 }

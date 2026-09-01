@@ -42,7 +42,7 @@ describe('决策卡片消费标记（选了选项就立即隐藏卡片）', () =
     delete window.__jotai_store__
   })
 
-  it('审查卡（kind=prd_review）携带 issues → body 透传具体问题清单（2026-08-29：让用户知情后再选）', () => {
+  it('审查卡（kind=prd_review）走专用弹窗：无 questions → 内联卡不弹（options 空）', () => {
     const store = createStore()
     store.set(activeAgentSessionIdAtom, 'session-1')
     store.set(agentStreamStateFamily('session-1'), {
@@ -51,15 +51,19 @@ describe('决策卡片消费标记（选了选项就立即隐藏卡片）', () =
       events: [
         event('user_decision_required', {
           kind: 'prd_review',
-          title: '裁判发现问题，需要你定夺',
-          questions: [
-            { id: 'prd_review_override', label: '忽略问题，继续生成', description: '' },
-            { id: 'prd_review_supplement', label: '我来补充说明', description: '' },
+          title: '裁判发现几个地方需要你确认',
+          summary: '有两个地方需要你拍板',
+          review_questions: [
+            {
+              id: 'q0',
+              question: '创作怎么被播放、保存？',
+              options: [
+                { id: 'q0:play', label: '能播放', description: '' },
+                { id: 'q0:ignore', label: '这条没问题', description: '' },
+              ],
+            },
           ],
-          issues: [
-            { dimension: 'L', severity: 'major', claim: '创作闭环不成立：没有任何播放、保存功能' },
-            { dimension: 'G', severity: 'blocking', claim: '无可客观度量的验收标准' },
-          ],
+          global_options: [{ id: 'prd_review_delegate_all', label: '全部交给向导决定' }],
         }),
       ],
     })
@@ -68,11 +72,8 @@ describe('决策卡片消费标记（选了选项就立即隐藏卡片）', () =
     const wrapper = makeWrapper(store)
     const { result } = renderHook(() => useUserDecisionCards(), { wrapper })
 
-    expect(result.current?.title).toBe('裁判发现问题，需要你定夺')
-    expect(result.current?.body).toContain('【重要】创作闭环不成立')
-    expect(result.current?.body).toContain('【严重】无可客观度量的验收标准')
-    // 问题清单不占用选项位（选项仍是忽略/补充两个）
-    expect(result.current?.options).toHaveLength(2)
+    // 审查卡走专用弹窗（2026-08-30 选择题化）：内联卡不弹（questions 不存在 → options 空）
+    expect(result.current?.options).toHaveLength(0)
   })
 
   it('普通澄清卡无 issues/summary → body 为 undefined 不渲染正文区', () => {

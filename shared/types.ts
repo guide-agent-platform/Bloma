@@ -658,6 +658,8 @@ export interface AgentSendMessageInput extends RequestEnvelope {
     selected_option_id?: string
     /** PRD 确认卡 confirm 时勾选采纳的市调想法（2026-08-29 灵感参考，四段式卡同样可采纳） */
     adopted_ideas?: string[]
+    /** 裁判审查逐题选择题的答案（2026-08-30）：弹窗一次性回传，每题 issue_id/option_id/label */
+    review_answers?: Array<{ issue_id: string; option_id: string; label: string }>
   }
 }
 
@@ -942,6 +944,10 @@ export interface DomScrollPreviewInput extends RequestEnvelope {
 export interface DomScrollPreviewResult {
   /** 是否找到预览子帧并执行了滚动（找不到子帧时 false，前端静默忽略） */
   scrolled: boolean
+  /** 执行滚动后预览 iframe 的实际水平滚动位置（window.scrollX，CSS 像素） */
+  scroll_x: number
+  /** 执行滚动后预览 iframe 的实际垂直滚动位置（window.scrollY，CSS 像素） */
+  scroll_y: number
 }
 
 export interface ProjectUpgradeInput extends RequestEnvelope {
