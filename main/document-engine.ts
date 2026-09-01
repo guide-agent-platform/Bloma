@@ -453,6 +453,38 @@ function renderPrdJson(backplane: PrdBackplane): string {
   return `${JSON.stringify(backplane, null, 2)}\n`
 }
 
+/** 向盘上 prd.json 按 id 更新功能项行为断言（2026-09-02 周计划 §5 P3：EARS 化回写）。
+ * 读-改-写保留全部既有字段（含 user_confirmed_at/status/template_meta 等）；
+ * 只接受盘上已有 id 的断言替换（不新增/删除功能项，F-001 锚点不变式）；
+ * 空断言数组拒绝写入（防把断言清空）；失败返回 null 不抛错（fail-closed）。
+ * 写盘链路陷阱 42 口径：id 内部化（只查不增）、用户确认事实保留、调用方负责 abort 检查。 */
+export function updatePrdAssertions(
+  projectId: string,
+  assertionsByItem: Record<string, string[]>,
+): PrdBackplane | null {
+  try {
+    const project = findProject(projectId)
+    const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+    const path = join(dir, 'prd.json')
+    if (!existsSync(path)) return null
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as PrdBackplane
+    if (!parsed || !Array.isArray(parsed.requirements)) return null
+    let changed = false
+    const requirements = parsed.requirements.map((item): SketchRequirement => {
+      const next = assertionsByItem[item.id]
+      if (!next || next.length === 0) return item
+      changed = true
+      return { ...item, behavior_assertions: next }
+    })
+    if (!changed) return parsed
+    const updated: PrdBackplane = { ...parsed, requirements }
+    writeFileSync(path, renderPrdJson(updated), 'utf8')
+    return updated
+  } catch {
+    return null
+  }
+}
+
 /** 读盘上 prd.json 的用户确认时间（损坏/缺失 → undefined），供重建时继承确认事实。 */
 function readPersistedUserConfirmedAt(dir: string): string | undefined {
   const path = join(dir, 'prd.json')

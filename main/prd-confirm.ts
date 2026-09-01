@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentEvent, AgentSendMessageInput, ResearchIdea } from '../shared/types'
 import { recordDecision } from './decision-log'
-import { appendPrdRequirements, markPrdUserConfirmed } from './document-engine'
+import { appendPrdRequirements, markPrdUserConfirmed, updatePrdAssertions } from './document-engine'
 import { nextRequirementId, runSketchTask } from './programming-orchestrator'
-import type { PrdBackplane } from './sketch-engine'
+import { earsifyRequirements } from './requirement-earsifier'
+import { resolveChannelEnv } from './runtime-fallback'
+import type { PrdBackplane, SketchRequirement } from './sketch-engine'
 import { requirementAssertions, requirementPriority, requirementStory } from './sketch-engine'
 import type { SDKQuery } from './orchestrator'
 
@@ -181,6 +183,57 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
   }
   const confirmed = markPrdUserConfirmed(input.project_id)
   if (!confirmed) console.error('[prd-confirm] user_confirmed_at 落盘失败（prd.json 缺失/损坏），继续开草图')
+  // EARS 化改写（周计划 §5 P3，方案 §4.3：quick 唯一新增 LLM 步骤）：
+  // PRD 用户确认后、草图前；仅 P0 项断言句式升级；三层守卫失败回退原断言不阻塞。
+  // 写回 prd.json 只换 behavior_assertions（读-改-写保留 user_confirmed_at 等），
+  // 草图任务清单同步用改写后断言（GWT 派生读同一份）。
+  if (pending.signal?.aborted) return true
+  try {
+    const backplaneForEarsify = confirmed ?? undefined
+    const source = backplaneForEarsify?.requirements ?? (sketchRequirements as SketchRequirement[])
+    if (pending.query) {
+      const resolution = resolveChannelEnv({
+        channelId: pending.channel_id,
+        category: 'prd',
+        projectId: input.project_id,
+        sessionId: pending.session_id,
+      })
+      if (resolution.env && resolution.channel) {
+        const earsified = await earsifyRequirements({
+          project_id: input.project_id,
+          session_id: pending.session_id,
+          requirements: source,
+          query: pending.query,
+          env: resolution.env,
+          signal: pending.signal,
+          maxTokens: resolution.channel.max_tokens ?? 2048,
+        })
+        if (earsified.stats.earsified > 0 && !pending.signal?.aborted) {
+          const byItem: Record<string, string[]> = {}
+          for (const item of earsified.requirements) {
+            if (item.behavior_assertions?.length) byItem[item.id] = item.behavior_assertions
+          }
+          updatePrdAssertions(input.project_id, byItem)
+          sketchRequirements = earsified.requirements.map((item) => ({
+            id: item.id,
+            description: item.description,
+          }))
+          recordDecision({
+            project_id: input.project_id,
+            session_id: pending.session_id,
+            entry: {
+              type: 'requirement_earsified',
+              title: 'P0 断言 EARS 化改写',
+              why: 'PRD 用户确认后、草图前，把 P0 行为断言句式升级为 EARS（只改措辞不改语义），提升 GWT 可派生率',
+              detail: { ...earsified.stats },
+            },
+          })
+        }
+      }
+    }
+  } catch (error) {
+    console.error('[prd-confirm] EARS 化失败（回退原断言，不阻塞草图）:', error)
+  }
   recordDecision({
     project_id: input.project_id,
     session_id: pending.session_id,

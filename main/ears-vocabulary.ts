@@ -149,6 +149,9 @@ export interface EarsAssertion {
   raw: string
   /** 句式（无前缀存量断言 → when） */
   kind: EarsPatternKind
+  /** 显式句式前缀（WHEN/WHILE/IF/当/如果…）：false = 无前缀的存量「触发→效果」格式
+   * （兼容解析为 when，但不算「已 EARS 化」——句式区分度是 EARS 化的目标产物）。 */
+  explicitPrefix: boolean
   /** 触发段（WHILE 句式为状态描述；无中轴分隔时为 undefined） */
   trigger: string | undefined
   /** 效果段 */
@@ -157,7 +160,7 @@ export interface EarsAssertion {
   compoundTrigger: boolean
   /** 禁词命中（response 段含不可测措辞） */
   forbiddenResponse: boolean
-  /** 结构完整：有句式前缀 + 中轴两侧都有内容 */
+  /** 结构完整：中轴两侧都有内容（前缀可有可无——存量兼容） */
   wellFormed: boolean
 }
 
@@ -169,10 +172,12 @@ export function parseEarsAssertion(assertion: string): EarsAssertion {
   const text = assertion.trim()
   // 句式前缀识别（WHILE 先于 WHEN 匹配，防「当处于」被「当」截走）
   let kind: EarsPatternKind = 'when'
+  let explicitPrefix = false
   let rest = text
   for (const entry of PATTERN_PREFIXES) {
     if (entry.re.test(rest)) {
       kind = entry.kind
+      explicitPrefix = true
       rest = rest.replace(entry.re, '')
       break
     }
@@ -183,6 +188,7 @@ export function parseEarsAssertion(assertion: string): EarsAssertion {
   return {
     raw: text,
     kind,
+    explicitPrefix,
     trigger,
     response,
     compoundTrigger: trigger ? isCompoundTrigger(trigger) : false,

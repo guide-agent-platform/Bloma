@@ -44,6 +44,7 @@ export type DecisionType =
   | 'enrichment_stats'
   | 'agent_loop'
   | 'template_type_refined'
+  | 'requirement_earsified'
 
 export interface DecisionEntry {
   type: DecisionType
