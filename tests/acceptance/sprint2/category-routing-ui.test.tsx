@@ -93,6 +93,28 @@ describe('M5 三角色渠道配置区（ChannelSettingsPage）', () => {
     expect(select.value).toBe('ch-kimi')
   })
 
+  it('内审（2026-09-01）：裁判行多一个内审渠道下拉，可选不同厂商渠道并随 judge 角色保存', async () => {
+    const { updateSpy } = installApi({
+      views: makeViews([
+        { role: 'judge', categories: ['judge', 'audit'], audit: { effective: 'auto', channel_name: 'Kimi 渠道' } },
+      ]),
+      onUpdate: () => ({ version: 2, views: makeViews() }),
+    })
+    render(<ChannelSettingsPage />)
+
+    // 内审下拉只在裁判行出现；未配置时随主渠道（auto）
+    const auditSelect = await screen.findByLabelText('内审渠道（攻击 / 修订 / 复核）') as HTMLSelectElement
+    expect(auditSelect.value).toBe('')
+
+    // 选择内审渠道 → dirty 可保存 → payload 带 audit_channel_id（主渠道不动）
+    await act(async () => fireEvent.change(auditSelect, { target: { value: 'ch-kimi' } }))
+    await act(async () => fireEvent.click(screen.getByTestId('role-routing-save')))
+    await waitFor(() => expect(updateSpy).toHaveBeenCalledTimes(1))
+    const payload = updateSpy.mock.calls[0]![0] as CategoryRoutingRoleUpdateEnvelope
+    expect(payload.routing.judge?.audit_channel_id).toBe('ch-kimi')
+    expect(payload.routing.judge?.channel_id).toBeUndefined()
+  })
+
   it('悬空角色显示警示，「恢复自动」后保存不再携带该角色配置', async () => {
     const restored = makeViews([{ role: 'guide', channel_id: undefined, channel_name: 'Kimi 渠道', model_name: 'kimi-k2.6', effective: 'auto' }])
     const { updateSpy } = installApi({

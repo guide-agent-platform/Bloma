@@ -165,7 +165,7 @@ describe('judge-semantic 执行与 runJudgeReview 合成', () => {
     expect(result.verdict.verdict).toBe('return')
     // 审查备用链限路由配置域（闭环 PR4，审查 P1-5① 接线锁）：语义终审不得漏传 routed-only
     expect(vi.mocked(resolveChannelEnv)).toHaveBeenCalledWith(
-      expect.objectContaining({ category: 'prd', fallbackScope: 'routed-only' }),
+      expect.objectContaining({ category: 'audit', fallbackScope: 'routed-only' }),
     )
     const semantic = result.verdict.hard_constraints.find((item) => item.name === '语义忠实性（裁判审查）')
     expect(semantic?.passed).toBe(false)

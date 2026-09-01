@@ -74,6 +74,10 @@ interface UserDecisionPayload {
   /** 审查卡（kind=prd_review）携带的问题详情（2026-08-29：暴露给用户看具体的） */
   issues?: Array<{ dimension?: unknown; severity?: unknown; claim?: unknown }>
   summary?: unknown
+  /** 内审（2026-09-01）：Defender 自动修订摘要（已改了什么） */
+  defender_summary?: unknown
+  /** 内审（2026-09-01）：厂商隔离事实——false = 本次内审未隔离（如实标注不冒充） */
+  vendor_isolated?: unknown
 }
 
 // =========================================================================
@@ -131,18 +135,29 @@ function extractDecisionCards(events: AgentEvent[]): DecisionCards | null {
 }
 
 /** 决策卡正文（2026-08-29）：审查卡的问题清单（severity 徽标+问题描述），
- * 其它卡回退 summary 字段；都没有则 undefined 不渲染。 */
+ * 其它卡回退 summary 字段；都没有则 undefined 不渲染。
+ * 内审（2026-09-01）：清单前缀 Defender 自动修订摘要，后缀厂商隔离事实标注。 */
 function extractDecisionBody(payload: UserDecisionPayload): string | undefined {
   const issues = Array.isArray(payload.issues) ? payload.issues : []
   if (issues.length > 0) {
-    return issues
-      .map((issue) => {
-        const severity =
-          issue.severity === 'blocking' ? '【严重】' : issue.severity === 'major' ? '【重要】' : ''
-        const claim = typeof issue.claim === 'string' ? issue.claim.replace(/\s+/g, ' ').trim() : ''
-        return `${severity}${claim}`.slice(0, 120)
-      })
-      .join('\n')
+    const sections: string[] = []
+    if (typeof payload.defender_summary === 'string' && payload.defender_summary) {
+      sections.push(`内审已自动修订：${payload.defender_summary.slice(0, 160)}`)
+    }
+    sections.push(
+      issues
+        .map((issue) => {
+          const severity =
+            issue.severity === 'blocking' ? '【严重】' : issue.severity === 'major' ? '【重要】' : ''
+          const claim = typeof issue.claim === 'string' ? issue.claim.replace(/\s+/g, ' ').trim() : ''
+          return `${severity}${claim}`.slice(0, 120)
+        })
+        .join('\n'),
+    )
+    if (payload.vendor_isolated === false) {
+      sections.push('（本次内审与生成模型同厂商，未做厂商隔离）')
+    }
+    return sections.join('\n')
   }
   return typeof payload.summary === 'string' && payload.summary ? payload.summary : undefined
 }

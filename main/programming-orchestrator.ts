@@ -1308,13 +1308,14 @@ async function evaluateOnce(input: JudgeReviewInput): Promise<JudgeVerdict> {
   const verdict = judgeOnce(input)
   if (verdict.verdict === 'return' || !input.query) return verdict
 
-  // 渠道：优先 M5 类别路由（prd 审查类，可指快模型），失败回退跳过；
-  // 备用链限路由配置域（闭环 PR4）：终审绝不静默落到任意弱模型，找不到就 skip 留痕
+  // 渠道：优先 M5 类别路由（2026-09-01 起切 audit 内审类别——本腿是审查腿，与 PRD
+  // 内审同渠道族；可指快模型），失败回退跳过；备用链限路由配置域（闭环 PR4）：终审
+  // 绝不静默落到任意弱模型，找不到就 skip 留痕
   let env: Record<string, string> | undefined
   try {
     const resolution = resolveChannelEnv({
       channelId: input.channel_id,
-      category: 'prd',
+      category: 'audit',
       projectId: input.project_id,
       sessionId: input.session_id,
       fallbackScope: 'routed-only',

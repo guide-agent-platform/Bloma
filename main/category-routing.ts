@@ -35,7 +35,7 @@ export const ROLE_DESCRIPTIONS: Record<AgentRoutingRole, string> = {
 }
 
 /** 运行时类别常量保留；设置页不再逐类显示。 */
-export const ROUTABLE_CATEGORIES: readonly DocumentCategory[] = ['sketch', 'mvp', 'guide', 'prd', 'judge', 'summary']
+export const ROUTABLE_CATEGORIES: readonly DocumentCategory[] = ['sketch', 'mvp', 'guide', 'prd', 'judge', 'audit', 'summary']
 
 export const CATEGORY_LABELS: Record<DocumentCategory, string> = {
   sketch: '草图生成',
@@ -43,6 +43,7 @@ export const CATEGORY_LABELS: Record<DocumentCategory, string> = {
   guide: '向导澄清 / 意图判定',
   prd: 'PRD 提取 / 功能项加厚',
   judge: '裁判审查',
+  audit: '内审（攻击 / 修订 / 复核）',
   summary: 'L3 蒸馏（默认关）',
   gwt: 'GWT 执行（不走 LLM 渠道）',
 }
@@ -116,9 +117,51 @@ function sameEntry(left: CategoryRoutingEntry | undefined, right: CategoryRoutin
   return left?.channel_id === right?.channel_id && sameStringList(left?.fallback_channel_ids, right?.fallback_channel_ids)
 }
 
+/** 裁判角色的附属内审类别（2026-09 内审闭环）：允许与主渠道不同渠道（厂商隔离），
+ *  角色一致性判定（mixed）排除它，保存展开时可被 audit_channel_id 覆盖。 */
+const ROLE_ATTACHED_AUDIT: Record<AgentRoutingRole, DocumentCategory | undefined> = { guide: undefined, programming: undefined, judge: 'audit' }
+
+function resolvedAuditView(
+  role: AgentRoutingRole,
+  routing: CategoryRoutingConfig,
+  globalDefault: ReturnType<typeof getFirstEnabledChannel>,
+): CategoryRoutingRoleView['audit'] | undefined {
+  const category = ROLE_ATTACHED_AUDIT[role]
+  if (!category) return undefined
+  const entry = routing[category]
+  const configuredId = entry?.channel_id
+  let effective: NonNullable<CategoryRoutingRoleView['audit']>['effective'] = 'auto'
+  let channel = globalDefault
+  if (configuredId) {
+    const configured = getChannelByIdRaw(configuredId)
+    if (!configured) effective = 'dangling'
+    else if (configured.enabled && isAnthropicProtocolProvider(configured.provider_type)) {
+      effective = 'routed'
+      channel = configured
+    }
+  }
+  let modelName: string | undefined
+  if (channel) {
+    try {
+      modelName = resolveCategoryModel(channel, category).model
+    } catch {
+      modelName = undefined
+    }
+  }
+  return {
+    channel_id: configuredId,
+    fallback_channel_ids: entry?.fallback_channel_ids,
+    channel_name: channel?.name,
+    model_name: modelName,
+    effective,
+  }
+}
+
 function resolvedRoleView(role: AgentRoutingRole, routing: CategoryRoutingConfig, globalDefault: ReturnType<typeof getFirstEnabledChannel>): CategoryRoutingRoleView {
   const categories = [...ROLE_CATEGORIES[role]]
-  const entries = categories.map((category) => routing[category])
+  // 主类别 = 角色内除附属内审（audit）外的类别；audit 允许与主渠道不同，不参与 mixed 判定
+  const mainCategories = categories.filter((category) => ROLE_ATTACHED_AUDIT[role] !== category)
+  const entries = mainCategories.map((category) => routing[category])
   const first = entries[0]
   if (!entries.every((entry) => sameEntry(entry, first))) {
     return { role, label: ROLE_LABELS[role], description: ROLE_DESCRIPTIONS[role], categories, effective: 'mixed' }
@@ -138,7 +181,7 @@ function resolvedRoleView(role: AgentRoutingRole, routing: CategoryRoutingConfig
   let modelName: string | undefined
   if (channel) {
     try {
-      modelName = resolveCategoryModel(channel, categories[0]!).model
+      modelName = resolveCategoryModel(channel, mainCategories[0]!).model
     } catch {
       modelName = undefined
     }
@@ -153,6 +196,7 @@ function resolvedRoleView(role: AgentRoutingRole, routing: CategoryRoutingConfig
     channel_name: channel?.name,
     model_name: modelName,
     effective,
+    audit: resolvedAuditView(role, routing, globalDefault),
   }
 }
 
@@ -201,7 +245,7 @@ export function buildCategoryRoutingViews(): CategoryRoutingListResult {
   return { version: 1, views }
 }
 
-const KNOWN_CATEGORIES = new Set<string>(['guide', 'prd', 'sketch', 'mvp', 'gwt', 'judge', 'summary'])
+const KNOWN_CATEGORIES = new Set<string>(['guide', 'prd', 'sketch', 'mvp', 'gwt', 'judge', 'audit', 'summary'])
 const KNOWN_ROLES = new Set<string>(ROUTABLE_ROLES)
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -258,7 +302,9 @@ export function updateCategoryRouting(routing: unknown): CategoryRoutingListResu
   return buildCategoryRoutingViews()
 }
 
-/** 新三角色全量保存：每个角色选择展开写到其覆盖的所有运行时类别。 */
+/** 新三角色全量保存：每个角色选择展开写到其覆盖的所有运行时类别。
+ *  裁判角色附属的 audit 类别缺省随主渠道展开；显式携带 audit_channel_id 时独立生效
+ *  （2026-09 内审闭环：厂商隔离需要 audit 可指向不同厂商渠道）。 */
 export function updateCategoryRoutingRoles(routing: unknown): CategoryRoutingRoleListResult {
   if (!isRecord(routing)) throw new Error('CATEGORY_ROUTING_INVALID: routing 必须是对象')
   const cleaned: CategoryRoutingConfig = {}
@@ -267,12 +313,35 @@ export function updateCategoryRoutingRoles(routing: unknown): CategoryRoutingRol
       console.warn(`[categoryRouting] 保存时剥离未知角色键「${key}」`)
       continue
     }
+    const role = key as AgentRoutingRole
+    if (!isRecord(entry)) throw new Error(`CATEGORY_ROUTING_INVALID: routing.${key} 必须是对象`)
     const cleanedEntry = cleanRoutingEntry(key, entry)
-    if (!cleanedEntry) continue
-    for (const category of ROLE_CATEGORIES[key as AgentRoutingRole]) {
+    const attachedCategory = ROLE_ATTACHED_AUDIT[role]
+    // 附属 audit 渠道：显式指定优先；校验口径与主渠道一致（存在 + Anthropic 协议）
+    let auditChannelId: string | undefined
+    let auditFallbackIds: string[] | undefined
+    if (attachedCategory && entry.audit_channel_id !== undefined) {
+      auditChannelId = keepChannelReference(key, 'audit_channel_id', entry.audit_channel_id)
+    }
+    if (attachedCategory && entry.audit_fallback_channel_ids !== undefined) {
+      if (!Array.isArray(entry.audit_fallback_channel_ids)) throw new Error(`CATEGORY_ROUTING_INVALID: routing.${key}.audit_fallback_channel_ids 必须是字符串数组`)
+      auditFallbackIds = entry.audit_fallback_channel_ids
+        .map((id: unknown, index: number) => keepChannelReference(key, `audit_fallback_channel_ids[${index}]`, id))
+        .filter((id: string | undefined): id is string => id !== undefined)
+    }
+    // 主渠道未配且无附属 audit 配置：整个角色无内容，跳过（与旧语义一致）
+    if (!cleanedEntry && auditChannelId === undefined && !(auditFallbackIds?.length)) continue
+    for (const category of ROLE_CATEGORIES[role]) {
+      if (category === attachedCategory && (auditChannelId !== undefined || auditFallbackIds !== undefined)) {
+        cleaned[category] = {
+          ...(auditChannelId ? { channel_id: auditChannelId } : {}),
+          ...(auditFallbackIds?.length ? { fallback_channel_ids: [...auditFallbackIds] } : {}),
+        }
+        continue
+      }
       cleaned[category] = {
-        ...(cleanedEntry.channel_id ? { channel_id: cleanedEntry.channel_id } : {}),
-        ...(cleanedEntry.fallback_channel_ids?.length ? { fallback_channel_ids: [...cleanedEntry.fallback_channel_ids] } : {}),
+        ...(cleanedEntry?.channel_id ? { channel_id: cleanedEntry.channel_id } : {}),
+        ...(cleanedEntry?.fallback_channel_ids?.length ? { fallback_channel_ids: [...cleanedEntry.fallback_channel_ids] } : {}),
       }
     }
   }

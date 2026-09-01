@@ -524,6 +524,8 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onS
 interface RoleRoutingDraftRow {
   channelId?: string
   fallbackIds: string[]
+  /** 裁判角色专属（2026-09 内审闭环）：内审（audit）渠道；undefined = 随主渠道 */
+  auditChannelId?: string
 }
 
 type RoleRoutingDraft = Partial<Record<AgentRoutingRole, RoleRoutingDraftRow>>
@@ -553,7 +555,11 @@ const RoleRoutingSection: React.FC<{
     if (!views) return
     const next: RoleRoutingDraft = {}
     for (const view of views) {
-      next[view.role] = { channelId: view.channel_id, fallbackIds: [...(view.fallback_channel_ids ?? [])] }
+      next[view.role] = {
+        channelId: view.channel_id,
+        fallbackIds: [...(view.fallback_channel_ids ?? [])],
+        auditChannelId: view.audit?.channel_id,
+      }
     }
     setDraft(next)
     setDraftReady(true)
@@ -580,7 +586,8 @@ const RoleRoutingSection: React.FC<{
       const target = event.target as HTMLElement | null
       if (!target || target.tagName !== 'SELECT') return
       const aiId = target.getAttribute('data-ai-id') ?? ''
-      if (!aiId.startsWith('role-routing-select-') || (target as HTMLSelectElement).disabled) return
+      // 内审（audit）子下拉不参与主渠道滚轮循环切换（角色 key 不是合法 AgentRoutingRole）
+      if (!aiId.startsWith('role-routing-select-') || aiId.includes('-audit') || (target as HTMLSelectElement).disabled) return
       event.preventDefault()
       wheelAccRef.current += event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * 33 : event.deltaY
       const step = Math.trunc(wheelAccRef.current / 100)
@@ -606,10 +613,12 @@ const RoleRoutingSection: React.FC<{
     const routing: CategoryRoutingRoleUpdateEnvelope['routing'] = {}
     for (const role of ROLE_ORDER) {
       const row = draft[role]
-      if (!row || (!row.channelId && row.fallbackIds.length === 0)) continue
+      if (!row || (!row.channelId && row.fallbackIds.length === 0 && row.auditChannelId === undefined)) continue
       routing[role] = {
         ...(row.channelId ? { channel_id: row.channelId } : {}),
         ...(row.fallbackIds.length ? { fallback_channel_ids: [...row.fallbackIds] } : {}),
+        // 内审渠道仅裁判角色有效；undefined 不携带（main 侧缺省随主渠道展开）
+        ...(role === 'judge' && row.auditChannelId !== undefined ? { audit_channel_id: row.auditChannelId || undefined } : {}),
       }
     }
     saveRouting(routing)
@@ -644,7 +653,10 @@ const RoleRoutingSection: React.FC<{
     const row = draft[view.role]
     if (!row) return false
     if (view.effective === 'mixed') return row.channelId !== undefined || row.fallbackIds.length > 0
-    return row.channelId !== view.channel_id || JSON.stringify(row.fallbackIds) !== JSON.stringify(view.fallback_channel_ids ?? [])
+    if (row.channelId !== view.channel_id || JSON.stringify(row.fallbackIds) !== JSON.stringify(view.fallback_channel_ids ?? [])) return true
+    // 裁判角色：内审渠道独立比较（undefined = 随主渠道）
+    if (view.role === 'judge' && row.auditChannelId !== view.audit?.channel_id) return true
+    return false
   }) ?? false
 
   const selectStyle: React.CSSProperties = {
@@ -720,6 +732,19 @@ const RoleRoutingSection: React.FC<{
                 <option value="">{mixed ? '多个渠道（选择一个渠道统一）' : `自动 / 全局默认${view.channel_name && view.effective === 'auto' ? `（${view.channel_name}）` : ''}`}</option>
                 {selectable.map((channel) => <option key={channel.id} value={channel.id}>{channel.name}（{PROVIDER_LABELS[channel.provider_type] ?? channel.provider_type}）</option>)}
               </select>
+              {view.role === 'judge' && view.audit && (
+                <select
+                  aria-label="内审渠道（攻击 / 修订 / 复核）"
+                  data-ai-id="role-routing-select-judge-audit"
+                  style={selectStyle}
+                  value={row.auditChannelId ?? ''}
+                  disabled={saving}
+                  onChange={(event) => patchRow(view.role, { auditChannelId: event.target.value || undefined })}
+                >
+                  <option value="">内审随主渠道{view.audit.effective === 'auto' && view.audit.channel_name ? `（${view.audit.channel_name}）` : ''}</option>
+                  {selectable.map((channel) => <option key={channel.id} value={channel.id}>{channel.name}（{PROVIDER_LABELS[channel.provider_type] ?? channel.provider_type}）</option>)}
+                </select>
+              )}
               <button type="button" onClick={() => setExpandedRole(expanded ? null : view.role)} style={smallButtonStyle('default')} aria-expanded={expanded} disabled={saving}>
                 备用顺序{row.fallbackIds.length > 0 ? `（${row.fallbackIds.length}）` : ''}
               </button>

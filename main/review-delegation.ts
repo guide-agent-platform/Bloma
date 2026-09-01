@@ -29,7 +29,7 @@ import {
   type DelegationSummary,
 } from './agent-collaboration'
 import { buildAgentTools } from './agent-tools'
-import { createToolState, type ToolContext } from './agent-loop'
+import { createToolState, type AgentLoopTool, type ToolContext } from './agent-loop'
 import type { SDKQuery } from './orchestrator'
 
 /** 委派审查运行开关（缺省开启；测试与紧急回退用 '0' 关闭）。 */
@@ -69,6 +69,12 @@ export async function runDelegatedReview(opts: {
   timeoutMs?: number
   /** 主链路中止信号（AGENT_STOP）：abort 即停子 agent 并返回 failure:'aborted'，不降级直连 */
   signal?: AbortSignal
+  /** 追加到子 agent 工具面的定向工具（2026-09 内审闭环）：闭包携带调用方上下文
+   *  （如 read_conversation_history 的本会话 id、write_prd_draft 的草稿接收器），
+   *  仅注入需要它的审查委派，不进通用工具面。 */
+  extraTools?: AgentLoopTool[]
+  /** 子 agent 轮次上限覆盖（内审 Defender 修订轮需要比默认更紧的预算）。 */
+  maxTurns?: number
 }): Promise<DelegatedReviewOutcome> {
   if (!delegatedReviewEnabled()) return { ok: false, failure: 'disabled' }
 
@@ -92,12 +98,13 @@ export async function runDelegatedReview(opts: {
       query: opts.query,
       env: opts.env,
       maxTokens: 2048,
-      maxTurns: REVIEW_DELEGATION_MAX_TURNS,
-      delegationMaxTurns: REVIEW_DELEGATION_MAX_TURNS,
+      maxTurns: opts.maxTurns ?? REVIEW_DELEGATION_MAX_TURNS,
+      delegationMaxTurns: opts.maxTurns ?? REVIEW_DELEGATION_MAX_TURNS,
       permissionMode: 'allow-all',
       temperature: 0.1,
       system: opts.system,
       editFormat: 'diff',
+      childExtraTools: opts.extraTools,
       publish: (type, payload) => {
         opts.publish({
           event_id: randomUUID(),

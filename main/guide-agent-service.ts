@@ -26,6 +26,8 @@ import {
   resumePrdConfirmConfirmed,
 } from './prd-confirm'
 import { resolveChannelEnv } from './runtime-fallback'
+import { resolveRoutedChannelId } from './category-routing'
+import { getChannelByIdRaw } from './channel-manager'
 import type { ConversationTurn, GuideModelOptions, SDKQuery } from './orchestrator'
 import { trackAnalytics } from './platform-services'
 import { resolvePrdBackplane, runSketchTask, setProgrammingEventPublisher, nextRequirementId, refineModificationDescription } from './programming-orchestrator'
@@ -1163,31 +1165,56 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
     console.error('[guide] PRD 前移生成失败（不阻断草图）:', error)
   }
 
-  // PRD 裁判审查门（简化版 AC，2026-08-26）：PRD 落盘后、草图前。审查是独立一次
-  // 模型请求（审查者≠生成者）；渠道优先 prd 类别路由，回退收敛入口轮 env，再失败规则门。
+  // PRD 内审门（AC-Lite，2026-09-01）：PRD 落盘后、草图前。攻击→修订→复核闭环，
+  // 审查者≠生成者（渠道优先 audit 内审类别，未配时回退 prd 类别路由→入口 env）；
+  // 厂商隔离事实如实判定（audit 与生成渠道 base_url host 不同才其隔离）。
   // PRD 本身生成失败（无背板）时跳过审查直接草图（降级语义不变）。
   if (prdWritten && backplaneForReview) {
     if (aborted()) return { started: true, prd_written: prdWritten }
-    // 审查开始旁白（2026-08-29 线上：委派审查最长 120s 黑盒等待，期间 DelegationFeed
-    // 只见「子会话·调研」+子 agent 活动，用户误读为「裁判没审完就开始做草图」——
-    // 主聊天流明示裁判正在审查，时序可循）。不落盘（状态性旁白，回访不需要）。
+    // 内审开始旁白（2026-08-29 线上教训：委派审查最长 120s 黑盒等待会被误读为
+    // 「裁判没审完就开始做草图」；内审轮次更多，旁白必须先行，时序可循）。
+    // 不落盘（状态性旁白，回访不需要）。
     gatedPublish(makeGuideEvent(eventInput, 'message_delta', {
-      text: '需求已确认，正在请裁判审查这份 PRD（六维审查，约需几十秒），完成后请你定夺。',
+      text: '需求已确认，正在内审这份 PRD（先攻击检查、有问题会自动修订并复核，约需一到两分钟），完成后请你定夺。',
     }))
     let reviewEnv: Record<string, string> | undefined = pending.env
-    try {
-      // 备用链限路由配置域（闭环 PR4）：审查不静默落到任意弱模型；主渠道坏且无配置
-      // 备用时留 pending.env（向导轮同渠道）——请求失败自然走规则门降级，口径一致
-      const resolution = resolveChannelEnv({
-        channelId: pending.channel_id,
-        category: 'prd',
-        projectId: pending.project_id,
-        sessionId: pending.session_id,
-        fallbackScope: 'routed-only',
-      })
-      if (resolution.env) reviewEnv = resolution.env
-    } catch {
-      // 类别路由解析失败：用收敛入口轮 env 兑底
+    // 厂商隔离判定（设计稿 §4.3）：audit 渠道与生成渠道（prd 类别/入口渠道）
+    // base_url host 不同 → vendor_isolated=true；未配 audit 或同厂商 → false（如实标注不冒充）
+    let vendorIsolated: boolean | undefined
+    const auditChannelId = resolveRoutedChannelId('audit')
+    if (auditChannelId) {
+      const prdRoutedId = resolveRoutedChannelId('prd')
+      const auditHost = channelHostOf(getChannelByIdRaw(auditChannelId))
+      const generateChannel = pending.channel_id ? getChannelByIdRaw(pending.channel_id) : prdRoutedId ? getChannelByIdRaw(prdRoutedId) : undefined
+      const generateHost = channelHostOf(generateChannel)
+      vendorIsolated = Boolean(auditHost && generateHost && auditHost !== generateHost)
+      try {
+        const resolution = resolveChannelEnv({
+          category: 'audit',
+          projectId: pending.project_id,
+          sessionId: pending.session_id,
+          fallbackScope: 'routed-only',
+        })
+        if (resolution.env) reviewEnv = resolution.env
+      } catch {
+        // audit 路由解析失败：回退 prd 类别解析
+      }
+    }
+    if (!auditChannelId) {
+      try {
+        // 备用链限路由配置域（闭环 PR4）：审查不静默落到任意弱模型；主渠道坏且无配置
+        // 备用时留 pending.env（向导轮同渠道）——请求失败自然走规则门降级，口径一致
+        const resolution = resolveChannelEnv({
+          channelId: pending.channel_id,
+          category: 'prd',
+          projectId: pending.project_id,
+          sessionId: pending.session_id,
+          fallbackScope: 'routed-only',
+        })
+        if (resolution.env) reviewEnv = resolution.env
+      } catch {
+        // 类别路由解析失败：用收敛入口轮 env 兑底
+      }
     }
     const review = await runPrdReviewGate({
       backplane: backplaneForReview,
@@ -1199,13 +1226,34 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
       requestId: pending.request_id,
       publish: gatedPublish,
       signal,
+      mode: pending.mode,
+      vendorIsolated,
     })
     // 用户停止：不发卡、不开草图，管线就此终止（abb1a19f 断链修复）
     if (review.aborted || aborted()) return { started: true, prd_written: prdWritten }
+    // 内审收敛且带修订稿：修订稿落盘 requirement_confirmed 检查点（不带确认状态，
+    // 陷阱 19 口径——修订后「新 PRD 未确认」语义自洽，用户过目确认后才落
+    // user_confirmed_at），后续确认卡/草图任务全部改用修订稿。
+    if (review.internalAudit?.converged && review.internalAudit.revisedBackplane) {
+      backplaneForReview = review.internalAudit.revisedBackplane
+      try {
+        syncDocuments(
+          {
+            request_id: pending.request_id,
+            project_id: pending.project_id,
+            session_id: pending.session_id,
+            checkpoint: 'requirement_confirmed',
+          },
+          backplaneForReview,
+        )
+      } catch (error) {
+        console.error('[guide] 内审修订稿落盘失败（不阻断确认卡）:', error)
+      }
+    }
     if (review.verdict === 'needs_revision') {
       if (aborted()) return { started: true, prd_written: prdWritten }
       publish(makeGuideEvent(eventInput, 'message_delta', {
-        text: `需求已确认，产品需求文档已形成。裁判审查发现 ${review.issues.filter((issue) => issue.severity === 'blocking' || issue.severity === 'major').length} 个需要你定夺的问题，请看下面的卡片选择怎么处理。`,
+        text: `需求已确认，产品需求文档已形成。内审自动修订后仍有 ${review.issues.filter((issue) => issue.severity === 'blocking' || issue.severity === 'major').length} 个需要你定夺的问题，请看下面的卡片选择怎么处理。`,
       }))
       publish(makeGuideEvent(eventInput, 'message_completed', { subtype: 'success' }))
       publishPrdReviewCard({
@@ -1225,13 +1273,16 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
       })
       return { started: true, prd_written: prdWritten }
     }
-    // PRD 用户确认门（2026-08-26 改造 3）：审查通过后不直接开草图，先把背板四段式
+    // PRD 用户确认门（2026-08-26 改造 3）：内审通过后不直接开草图，先把背板四段式
     // 摊给用户确认（机器质量关已过，人语义关接力）；quick 折叠完整视图/longterm 展开。
-    // 降级话术如实：规则门降级时不自称「已通过裁判审查」。
+    // 降级话术如实：规则门降级时不自称「已通过内审」；内审收敛且带修订稿时说明改了什么。
+    const audit = review.internalAudit
     const reviewPassedCopy =
       review.mode === 'rules'
         ? '需求已确认，我把它整理成了产品需求文档。请你过目，确认无误后我开始画草图。'
-        : '需求已确认，我把它整理成了产品需求文档（已通过裁判审查）。请你过目这份 PRD，确认无误后我开始画草图。'
+        : audit?.revisedBackplane
+          ? `需求已确认，我把它整理成了产品需求文档，内审发现并自动修订了几个问题（${audit.defenderSummary ?? '已复核通过'}），修订稿已复核通过。请你过目这份 PRD，确认无误后我开始画草图。`
+          : '需求已确认，我把它整理成了产品需求文档（已通过内审）。请你过目这份 PRD，确认无误后我开始画草图。'
     if (aborted()) return { started: true, prd_written: prdWritten }
     publish(makeGuideEvent(eventInput, 'message_delta', { text: reviewPassedCopy }))
     publish(makeGuideEvent(eventInput, 'message_completed', { subtype: 'success' }))
@@ -1464,6 +1515,16 @@ function extractText(blocks: MessageContentBlock[]): string {
     .filter((block) => block.type === 'text')
     .map((block) => block.text ?? '')
     .join('')
+}
+
+/** 渠道 base_url 的 host（厂商隔离判定用；渠道缺失/非法 URL → undefined）。 */
+function channelHostOf(channel: { base_url?: string } | undefined | null): string | undefined {
+  if (!channel?.base_url) return undefined
+  try {
+    return new URL(channel.base_url.trim()).host
+  } catch {
+    return undefined
+  }
 }
 
 function makeGuideEvent(

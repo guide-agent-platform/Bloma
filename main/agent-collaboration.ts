@@ -131,6 +131,9 @@ export interface DelegationParentContext {
   publish: (type: AgentEvent['type'], payload: Record<string, unknown>) => void
   /** 子 loop 每轮埋点（programming-orchestrator 注入，session_id=子 sessionId）。 */
   onChildTurn?: (info: AgentLoopTurnInfo, child: { sessionId: string; requestId: string; role: DelegationRole }) => void
+  /** 追加到子 agent 工具面的定向工具（2026-09 内审闭环）：如 read_conversation_history /
+   *  write_prd_draft——闭包携带调用方上下文，仅注入需要它的委派（最小攻击面）。 */
+  childExtraTools?: AgentLoopTool[]
 }
 
 /** 子 agent 工具集构建器（按 role 裁剪；programming-orchestrator 注入 buildAgentTools）。 */
@@ -329,7 +332,7 @@ async function runChildLoop(opts: {
     system: buildChildSystemPrompt(parentCtx.system, role),
     task: prompt,
     historyTurns: opts.replayTurns,
-    tools: childToolsBuilder(parent.projectId, role, parentCtx.editFormat),
+    tools: [...childToolsBuilder(parent.projectId, role, parentCtx.editFormat), ...(parentCtx.childExtraTools ?? [])],
     query: parentCtx.query,
     env: parentCtx.env,
     sessionId: record.childSessionId,

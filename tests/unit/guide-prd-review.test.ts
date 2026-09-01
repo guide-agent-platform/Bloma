@@ -70,9 +70,9 @@ import { applyNormalization, normalizeRequirementUpdate } from '../../main/requi
 import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../main/orchestrator'
 
 /**
- * PRD 裁判审查门（简化版 AC，2026-08-26）：
- * - LLM 审查通过 → 草图照常（话术含「已通过裁判审查」）
- * - LLM 审查发现 blocking/major → 决策卡（忽略继续/我来补充）+ 不开草图 + 留痕
+ * PRD 内审门（AC-Lite，2026-09-01）：
+ * - LLM 攻击轮通过 → 草图照常（话术含「已通过内审」）
+ * - 内审未收敛（blocking/major 残留）→ 决策卡（忽略继续/我来补充）+ 不开草图 + 留痕
  * - override → 按原需求开草图 + prd_review_overridden 日志
  * - supplement → 提示打字补充，不开草图
  * - LLM 输出不可解析 → 规则门降级（degraded）
@@ -179,7 +179,7 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     vi.restoreAllMocks()
   })
 
-  it('审查通过（仅 minor）→ 发 PRD 确认卡挂起（改造 3：草图待用户确认），话术含「已通过裁判审查」', async () => {
+  it('审查通过（仅 minor）→ 发 PRD 确认卡挂起（改造 3：草图待用户确认），话术含「已通过内审」', async () => {
     const { query, reviewCalls } = scriptedQuery([reviewPassJson])
     await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(query))
     await resolveRequirementConfirm({ request_id: 'req-pr2', session_id: SESSION_ID, project_id: 'proj-1', decision: 'confirm' })
@@ -187,8 +187,9 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     expect(reviewCalls.length).toBe(1)
     expect(reviewCalls[0]).toContain('六维攻击面')
     expect(reviewCalls[0]).toContain('记账本')
-    // 审查备用链限路由配置域（闭环 PR4，审查 P1-5① 接线锁）：漏传 routed-only 会让
-    // 备用链静默兑底到任意启用渠道——mock 断言参数防回归
+    // 审查备用链限路由配置域（闭环 PR4）：漏传 routed-only 会让备用链静默兑底到
+    // 任意启用渠道——mock 断言参数防回归。2026-09-01 起审查渠道切 audit 内审类别
+    // （未配 audit 时回退 prd 类别解析，见 guide-agent-service）
     expect(vi.mocked(resolveChannelEnv)).toHaveBeenCalledWith(
       expect.objectContaining({ category: 'prd', fallbackScope: 'routed-only' }),
     )
@@ -199,7 +200,7 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     )
     expect(card).toBeTruthy()
     const deltas = events.filter((event) => event.type === 'message_delta').map((event) => String(event.payload.text))
-    expect(deltas.some((text) => text.includes('已通过裁判审查'))).toBe(true)
+    expect(deltas.some((text) => text.includes('已通过内审'))).toBe(true)
   })
 
   it('审查发现 blocking/major → 决策卡 + 不开草图 + prd_review 留痕（simplified_ac）', async () => {
@@ -250,7 +251,7 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     const ackDeltas = events.filter((event) => event.type === 'message_delta').map((event) => String(event.payload.text))
     expect(ackDeltas.some((text) => text.includes('请你过目'))).toBe(true)
     expect(recordDecision).toHaveBeenCalledWith(expect.objectContaining({
-      entry: expect.objectContaining({ type: 'prd_review_overridden', title: '用户忽略裁判问题，转入 PRD 过目' }),
+      entry: expect.objectContaining({ type: 'prd_review_overridden', title: '用户忽略内审残留问题，转入 PRD 过目' }),
     }))
 
     // 确认卡「确认无误」→ 过目完成才开草图，需求清单保持一致

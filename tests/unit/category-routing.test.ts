@@ -67,17 +67,18 @@ describe('category-routing（M5 类别→渠道路由）', () => {
     vi.restoreAllMocks()
   })
 
-  it('角色映射固定为向导/编程/裁判三组，gwt 不属于角色', () => {
+  it('角色映射固定为向导/编程/裁判三组，gwt 不属于角色；audit 是裁判附属类别（2026-09 内审闭环）', () => {
     expect(ROUTABLE_ROLES).toEqual(['guide', 'programming', 'judge'])
     expect(ROLE_CATEGORIES.guide).toEqual(['guide', 'prd', 'summary'])
     expect(ROLE_CATEGORIES.programming).toEqual(['sketch', 'mvp'])
-    expect(ROLE_CATEGORIES.judge).toEqual(['judge'])
+    expect(ROLE_CATEGORIES.judge).toEqual(['judge', 'audit'])
     expect(roleForCategory('guide')).toBe('guide')
     expect(roleForCategory('prd')).toBe('guide')
     expect(roleForCategory('summary')).toBe('guide')
     expect(roleForCategory('sketch')).toBe('programming')
     expect(roleForCategory('mvp')).toBe('programming')
     expect(roleForCategory('judge')).toBe('judge')
+    expect(roleForCategory('audit')).toBe('judge')
     expect(roleForCategory('gwt')).toBeUndefined()
   })
 
@@ -113,13 +114,13 @@ describe('category-routing（M5 类别→渠道路由）', () => {
     expect(guide.channel_id).toBeUndefined()
   })
 
-  it('角色保存会展开到全部关联类别，运行时类别解析随角色选择生效', () => {
+  it('角色保存会展开到全部关联类别（audit 随裁判缺省展开/可独立指定），运行时类别解析随角色选择生效', () => {
     const ds = seedChannel('ds', 'deepseek')
     const kimi = seedChannel('kimi', 'kimi-api')
     updateCategoryRoutingRoles({
       guide: { channel_id: ds.id, fallback_channel_ids: [kimi.id] },
       programming: { channel_id: kimi.id },
-      judge: { channel_id: ds.id },
+      judge: { channel_id: ds.id, audit_channel_id: kimi.id },
     })
     expect(loadCategoryRouting()).toEqual({
       guide: { channel_id: ds.id, fallback_channel_ids: [kimi.id] },
@@ -128,9 +129,11 @@ describe('category-routing（M5 类别→渠道路由）', () => {
       sketch: { channel_id: kimi.id },
       mvp: { channel_id: kimi.id },
       judge: { channel_id: ds.id },
+      audit: { channel_id: kimi.id },
     })
     expect(resolveRoutedChannelId('prd')).toBe(ds.id)
     expect(resolveRoutedChannelId('mvp')).toBe(kimi.id)
+    expect(resolveRoutedChannelId('audit')).toBe(kimi.id)
   })
 
   it('角色保存是全量覆盖，缺省角色会清除旧类别配置', () => {
@@ -353,7 +356,7 @@ describe('category-routing（M5 类别→渠道路由）', () => {
   // 视图模型（effective 三态 + label/模型预览）
   // ------------------------------------------------------------------
 
-  it('buildCategoryRoutingViews：routed/auto/dangling 三态与模型预览、6 类职责齐全', () => {
+  it('buildCategoryRoutingViews：routed/auto/dangling 三态与模型预览、7 类职责齐全', () => {
     const ds = seedChannel('ds', 'deepseek')
     const kimi = seedChannel('kimi', 'kimi-api')
     const glm = seedChannel('glm', 'zhipu-coding')
@@ -367,14 +370,15 @@ describe('category-routing（M5 类别→渠道路由）', () => {
 
     const result = buildCategoryRoutingViews()
 
-    // 6 类职责（gwt 不参与路由）
-    expect(result.views.map((view) => view.category)).toEqual(['sketch', 'mvp', 'guide', 'prd', 'judge', 'summary'])
+    // 7 类职责（gwt 不参与路由；audit 为 2026-09 内审新增）
+    expect(result.views.map((view) => view.category)).toEqual(['sketch', 'mvp', 'guide', 'prd', 'judge', 'audit', 'summary'])
     // label 与 §1 映射表逐字一致
     expect(result.views.find((view) => view.category === 'sketch')?.label).toBe('草图生成')
     expect(result.views.find((view) => view.category === 'mvp')?.label).toBe('MVP 生成')
     expect(result.views.find((view) => view.category === 'guide')?.label).toBe('向导澄清 / 意图判定')
     expect(result.views.find((view) => view.category === 'prd')?.label).toBe('PRD 提取 / 功能项加厚')
     expect(result.views.find((view) => view.category === 'judge')?.label).toBe('裁判审查')
+    expect(result.views.find((view) => view.category === 'audit')?.label).toBe('内审（攻击 / 修订 / 复核）')
     expect(result.views.find((view) => view.category === 'summary')?.label).toBe('L3 蒸馏（默认关）')
 
     const sketch = result.views.find((view) => view.category === 'sketch')!

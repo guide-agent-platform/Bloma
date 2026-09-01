@@ -37,6 +37,10 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<DocumentCategory, CategoryModelCon
   mvp: { category: 'mvp', capability: 'strongest' },
   gwt: { category: 'gwt', capability: 'strongest' },
   judge: { category: 'judge', capability: 'strongest' },
+  // 内审（2026-09-01 决议 4/7）：Attacker/Defender/复核轮专用审查腿。闪消级成本
+  // 纪律（决议 7：审查用 flash 级，顶配留给 MVP loop/spec 生成）——模型档位由用户
+  // 在 audit 渠道上自行配置快模型，路由层不强制。缺省解析与其它类别一致取渠道首选。
+  audit: { category: 'audit', capability: 'strongest' },
   // T4-L3 蒸馏（memory.json）：后台整理型任务，不映射任何阶段（categoryForStage 不含）
   summary: { category: 'summary', capability: 'strongest' },
 }
@@ -119,6 +123,8 @@ export const CATEGORY_TEMPERATURES: Record<DocumentCategory, number> = {
   mvp: 0.1,
   gwt: 0.1,
   judge: 0.1,
+  // 内审攻击/复核要确定性（2026-09-01 设计：温度 0.1）
+  audit: 0.1,
   // 蒸馏要忠实转写而非发散（§7.7 校准表新增，T4-L3）
   summary: 0.1,
 }
