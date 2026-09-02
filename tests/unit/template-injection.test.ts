@@ -181,17 +181,20 @@ describe('template-injection（P5：注入点开关与切片）', () => {
 
     it('feature 文件：EARS 句式类别标注（WHEN=主路径/WHILE=空态）+ 必测类别头注', () => {
       const bp = makeBackplane()
-      // 「计时启动」不在 parseEffect 八类词表 → 静态模式 unverified（设计内，浏览器探针兑底）；
-      // 类别标注验证用词表内断言
+      // M-4 后「计时启动」入效果词表 → 真行为场景（When/Then 骨架，非存在性兑底）；
+      // presenceFallback 分支的类别标注改用效果不可断言的断言验证
       bp.requirements = [
-        { id: 'F-001', description: '番茄钟', priority: 'P0', behavior_assertions: ['WHEN 点击开始按钮 → 计时启动', 'WHILE 列表为空 → 显示空状态'] },
+        { id: 'F-001', description: '番茄钟', priority: 'P0', behavior_assertions: ['WHEN 点击开始按钮 → 计时启动', 'WHILE 列表为空 → 显示空状态', 'WHEN 点击开始按钮 → 拥有掌控感'] },
       ]
       const features = renderGwtSkeleton(bp, 'longterm')
       const content = features[0].content
       expect(content).toContain('必测类别')
       expect(content).toContain('[空态]')
-      // presenceFallback 分支同样携带句式类别标注
-      expect(content).toContain('核心路径可运行[主路径]（WHEN 点击开始按钮')
+      // 「计时启动」走真场景骨架（M-4：效果词表放宽后可探针）
+      expect(content).toContain('Scenario: [主路径]：WHEN 点击开始按钮 → 计时启动')
+      expect(content).toContain('When 点击「开始」控件')
+      // presenceFallback 分支同样携带句式类别标注（效果不可断言 → 存在性骨架）
+      expect(content).toContain('核心路径可运行[主路径]（WHEN 点击开始按钮 → 拥有掌控感')
     })
 
     it('无 mode 参数（现状调用）→ 无头注；开关关闭 → 无类别', () => {

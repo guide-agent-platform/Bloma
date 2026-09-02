@@ -72,8 +72,14 @@ export function setWebResearchTimeoutForTests(ms: number): void {
   webResearchTimeoutMs = ms
 }
 
-/** 系统接管文件（与 mvp-engine-llm SYSTEM_FILES 同集）：模型写入会被拒绝。 */
+/** 系统接管文件（与 mvp-engine-llm SYSTEM_FILES 同集）：模型写入会被拒绝。
+ *  比较统一小写化（M-7）：Windows 大小写不敏感文件系统上 'Static-Server.js' 会实际
+ *  覆盖 static-server.js（篡改沙箱服务端含 CSP 响应头），精确匹配会被绕过。 */
 const SYSTEM_FILES = new Set(['package.json', 'static-server.js'])
+
+function isSystemFile(rel: string): boolean {
+  return SYSTEM_FILES.has(rel.toLowerCase())
+}
 
 /** 模型可写白名单后缀（静态前端产物）。 */
 const WRITABLE_EXTENSIONS = new Set(['.html', '.js', '.css'])
@@ -180,13 +186,13 @@ function resolveInsideProject(
 }
 
 function isWritablePath(rel: string): boolean {
-  if (SYSTEM_FILES.has(rel)) return false
+  if (isSystemFile(rel)) return false
   if (rel.startsWith('src/')) return true
   return WRITABLE_EXTENSIONS.has(extname(rel).toLowerCase())
 }
 
 function notWritableError(rel: string): string {
-  if (SYSTEM_FILES.has(rel)) return `「${rel}」由平台管理，不允许直接修改。`
+  if (isSystemFile(rel)) return `「${rel}」由平台管理，不允许直接修改。`
   return `「${rel}」不在可写范围内（允许：.html/.js/.css 文件与 src/ 子树）。`
 }
 
@@ -597,8 +603,13 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
           detail: { failed_count: result.failed_count, total_count: result.total_count },
         }
       }
-      // 全过显式列出场景名（ACI：空结果显式反馈 + 可核对的通过清单）
+      // 全过显式列出场景名（ACI：空结果显式反馈 + 可核对的通过清单）。
+      // M-11：同时清零失败粘性——测试全过后 test_failed/edits_after_test_failure 复位，
+      // 否则后续安全修复的 edit 仍计入旧测试失败的预算，连续 2 轮撞限即 budget_exhausted
+      // 终止，高危漏洞未修进交付。
       ctx.state.gwt_all_passed = true
+      ctx.state.test_failed = false
+      ctx.state.edits_after_test_failure = 0
       const scenarioNames = planScenarios(readLastSketchRequirements(projectId)).map((scenario) =>
         scenarioName(scenario.item.id, scenario.assertion),
       )

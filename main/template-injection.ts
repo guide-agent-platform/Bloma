@@ -94,7 +94,9 @@ export function buildSketchInjection(type: TemplateType, mode: ProjectMode, back
 
 /**
  * 注入点⑥：MVP loop 切片（tech_skeleton/目录约定/依赖白名单进背板锚定段）。
- * 追加于 buildAgentLoopSystemPrompt 项目锚之后；护栏文本与 agent-tools 工具层拦截同源。
+ * 追加于 buildAgentLoopSystemPrompt 项目锚之后。护栏话术如实描述机制边界（M-9）：
+ * 工具层拦截的是 HTML 静态外链（agent-tools externalResourceViolation）；外置模板把
+ * 白名单改宽不会同步工具层与 CSP——两者与模板白名单内容无关，不宣称「同源」。
  */
 export function buildLoopInjection(type: TemplateType): string | null {
   const template = templateIfEnabled('loop', type)
@@ -105,7 +107,9 @@ export function buildLoopInjection(type: TemplateType): string | null {
     `【工程模板（${template.name}，${template.level === 'loose' ? '宽松' : '标准'}级）】`,
     skeleton ? `技术骨架与目录约定：\n${skeleton}` : '',
     allowlist ? `依赖白名单：\n${allowlist}` : '',
-    '白名单外的依赖（外部 CDN/第三方脚本/后端框架）写入会被工具层拒绝，不要尝试。',
+    '沙箱一律禁止外部资源：HTML 中的外部 CDN/第三方脚本/样式引用（含无引号写法）会被写入检查拦截；',
+    'JS/CSS 动态加载外网资源会被安全扫描阻断；CSP（script-src self / connect-src none）在预览运行时兑底。',
+    '以上机制与模板白名单内容无关——即使模板文本看似允许，也不要引用或加载任何外部资源。',
   ]
     .filter(Boolean)
     .join('\n')

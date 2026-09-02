@@ -23,7 +23,8 @@ name: Web 全栈
 ## 依赖白名单（loop 引白名单外包 → 工具层拦截）
 
 - 允许：原生 HTML / CSS / JavaScript（ES2022），无构建链静态产物
-- 允许：localStorage / fetch（同源）
+- 允许：localStorage（本地存取数据）
+- 注意：fetch 在预览沙箱不可用（CSP 禁网）——数据一律用内联对象字面量/内嵌 script 表达，不要发起任何网络请求（含同源）
 - 禁止：外部 CDN / npm 包 / 后端框架 / 数据库（沙箱阶段）
 - 禁止：内联第三方统计/广告脚本
 

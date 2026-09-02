@@ -92,6 +92,25 @@ describe('runSecurityScan — A3 OWASP 基础静态扫描', () => {
     expect(result.issues[0].severity).toBe('low')
   })
 
+  it('M-10：.js 内动态加载外网资源（createElement script/动态 import）与 .css @import 外网 → high 阻断（导出产物只剩这道防线）', () => {
+    const root = makeTree({
+      'src/app.js': "const s = document.createElement('script'); s.src = 'https://cdn.example.com/x.js'\n",
+      'src/extra.js': "import('https://evil.example.com/mod.js')\n",
+      'src/style.css': "@import url('https://cdn.example.com/theme.css');\n",
+    })
+    const result = runSecurityScan({ project_id: 'p1', root_path: root })
+    expect(result.passed).toBe(false)
+    const categories = result.issues.map((issue) => issue.category)
+    expect(categories).toContain('external_resource')
+    expect(result.issues.filter((issue) => issue.category === 'external_resource').every((issue) => issue.severity === 'high')).toBe(true)
+    // 本地内联实现不误报
+    const clean = makeTree({
+      'src/app.js': "const el = document.createElement('div'); el.textContent = 'ok'\n",
+      'src/local.css': "@import url('./reset.css');\n",
+    })
+    expect(runSecurityScan({ project_id: 'p2', root_path: clean }).passed).toBe(true)
+  })
+
   it('跳过 node_modules / dist 目录', () => {
     const root = makeTree({
       'index.html': '<div>ok</div>',

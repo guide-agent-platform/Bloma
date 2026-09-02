@@ -25,6 +25,7 @@ export type SecurityIssueCategory =
   | 'unsafe_dom'
   | 'inline_event_handler'
   | 'insecure_resource'
+  | 'external_resource'
 
 export interface SecurityIssue {
   severity: SecuritySeverity
@@ -74,6 +75,15 @@ const SCAN_RULES: ScanRule[] = [
     // 静态字符串（innerHTML = "<b>ok</b>"）是安全写法，不命中（否则会误报引发无效修复循环）。
     pattern: /\.innerHTML\s*=\s*[^\s"']/,
     summary: '页面用了一种可能被注入额外内容的显示方式，建议改为更安全的内容写入方式',
+  },
+  {
+    category: 'external_resource',
+    severity: 'high',
+    // M-10：HTML 静态外链拦截（agent-tools）只覆盖 .html 文件；.js 内动态加载
+    // （createElement('script')+外网 src / 动态 import 外网模块 / .css @import 外网）
+    // 全盲，且导出产物脱离沙箱 CSP 后只剩这道防线——升 high 阻断交付。
+    pattern: /createElement\s*\(\s*['"]script['"]\s*\)|\bimport\s*\(\s*['"]https?:\/\/|@import\s+(?:url\s*\()\s*['"]?https?:\/\//i,
+    summary: '检测到动态加载外部资源的代码，沙箱与导出产物都不允许联网加载，请改为本地内联实现',
   },
   {
     category: 'inline_event_handler',

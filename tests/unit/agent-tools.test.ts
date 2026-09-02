@@ -172,6 +172,13 @@ describe('agent-tools（PR2 L2）', () => {
       const system = await byName(tools, 'write_file').execute({ path: 'package.json', content: '{}' }, ctx)
       expect(system.isError).toBe(true)
       expect(system.output).toContain('平台管理')
+      // M-7：大小写变体同样拒绝（Windows 大小写不敏感文件系统上 'Static-Server.js'
+      // 会实际覆盖 static-server.js——篡改沙箱服务端含 CSP 响应头）
+      const cased = await byName(tools, 'write_file').execute({ path: 'Static-Server.js', content: '// hijack' }, ctx)
+      expect(cased.isError).toBe(true)
+      expect(cased.output).toContain('平台管理')
+      const casedJson = await byName(tools, 'write_file').execute({ path: 'Package.JSON', content: '{}' }, ctx)
+      expect(casedJson.isError).toBe(true)
       const ext = await byName(tools, 'write_file').execute({ path: 'data.txt', content: 'x' }, ctx)
       expect(ext.isError).toBe(true)
       expect(ext.output).toContain('可写范围')
@@ -353,6 +360,38 @@ describe('agent-tools（PR2 L2）', () => {
         const outcome = await byName(tools, 'run_gwt_tests').execute({}, ctx)
         expect(outcome.output).toContain('全部通过（1/1')
         expect(outcome.output).toContain('F-001')
+      } finally {
+        server.close()
+      }
+    })
+
+    it('M-11：全过分支清零失败粘性——test_failed/edits_after_test_failure 复位（否则后续安全修复被旧预算堵死）', async () => {
+      const project = createProject({ request_id: 'req-t2-sticky', mode: 'quick' })
+      recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+      const server = createServer((_req, res) => {
+        if (_req.url === '/src/app.js') {
+          res.writeHead(200, { 'Content-Type': 'application/javascript' })
+          res.end("document.querySelector('button').addEventListener('click', function () {})")
+        } else {
+          res.writeHead(200, { 'Content-Type': 'text/html' })
+          res.end('<html><body><button>开始使用</button><p>记录收入与支出</p></body></html>')
+        }
+      })
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+      const port = (server.address() as AddressInfo).port
+      try {
+        const tools = buildAgentTools({ projectId: project.project_id })
+        const ctx = ctxFor(project.project_id)
+        ctx.state.preview_url = `http://127.0.0.1:${port}`
+        // 模拟此前一轮失败已烧 3 次修复预算
+        ctx.state.test_failed = true
+        ctx.state.edits_after_test_failure = 3
+        const outcome = await byName(tools, 'run_gwt_tests').execute({}, ctx)
+        expect(outcome.output).toContain('全部通过（1/1')
+        // 失败粘性清零：后续安全修复的 edit 不再计入旧测试失败预算
+        expect(ctx.state.test_failed).toBe(false)
+        expect(ctx.state.edits_after_test_failure).toBe(0)
+        expect(ctx.state.gwt_all_passed).toBe(true)
       } finally {
         server.close()
       }
