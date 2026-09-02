@@ -173,9 +173,22 @@ export function loadChildSessionSnapshot(childSessionId: string): ChildSessionSn
  * 的 task 承担（多厂商审查 fail 点修复：否则 follow-up 重复 + 连续双 user）。
  * 防御：首条非 user 的异常历史丢弃（防 Anthropic 首条非 user 400）；
  * 末尾悬空 tool_use 轮丢弃（无后续 tool_result 会触发配对校验失败）。
+ * m-14/T-7 实锤：JSONL 里截断版 tool_result（「全文见事件流」）重放时全文不可达——
+ * 续跑模型会试图引用不存在的全文；替换为如实提示（需要全文请重新调工具）。
  */
+const TRUNCATION_MARKER = '[截断，全文见事件流]'
 export function replayTurnsFrom(messages: ChildSessionMessage[]): ConversationTurn[] {
-  const turns: ConversationTurn[] = messages.map((m) => ({ role: m.role, content: m.content }))
+  const turns: ConversationTurn[] = messages.map((m) => ({
+    role: m.role,
+    content: m.content.map((block) =>
+      block.type === 'tool_result' && typeof block.content === 'string' && block.content.endsWith(TRUNCATION_MARKER)
+        ? {
+            ...block,
+            content: `${block.content.slice(0, block.content.length - TRUNCATION_MARKER.length)}…[该工具输出过长，历史中已截断；如需完整内容请重新调用工具读取]`,
+          }
+        : block,
+    ),
+  }))
   while (turns.length > 0 && turns[0]!.role !== 'user') turns.shift()
   while (turns.length > 0) {
     const last = turns[turns.length - 1]!

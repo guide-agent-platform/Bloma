@@ -247,6 +247,9 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
   } catch (error) {
     console.error('[prd-confirm] EARS 化失败（回退原断言，不阻塞草图）:', error)
   }
+  // （「PRD 用户已确认」决策日志已提前至 EARS 化 await 之前落盘，见上）
+  // m-1：用户确认是已发生的行为事实——决策日志在 EARS 化 await 之前先落（abort 落在
+  // EARS 化期间时「用户已确认」决策不得缺失），后续 ack/草图再按 abort 如实停止。
   recordDecision({
     project_id: input.project_id,
     session_id: pending.session_id,
@@ -262,6 +265,9 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
       },
     },
   })
+  // m-1：确认→停止窗口——EARS 化 await 期间用户点停止时，不再补发「已确认开始画草图」
+  // ack 与 message_completed（对齐「停止后不推进」：话术与行为不再矛盾）。
+  if (pending.signal?.aborted) return true
   const ack =
     adopted.length > 0
       ? `已确认，按这份 PRD（含采纳的 ${adopted.length} 条市调想法）开始画草图。`

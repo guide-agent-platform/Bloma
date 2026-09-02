@@ -96,7 +96,10 @@ function extractMarkdownSection(body: string, keyword: string): string {
 }
 
 /** 内置模板文本（源码运行=main/templates/；esbuild bundle 后=dist-main/main/templates/，
- * 由 build:main 复制步骤落位；import.meta.url 定位自身目录，两态同源）。 */
+ * 由 build:main 复制步骤落位；import.meta.url 定位自身目录，两态同源）。
+ *  ai_app 候选链的 personal_tool 兑底当前必被 validateTemplate 拒（frontmatter.type
+ * ≠ ai_app，m-4 实锤）——ai_app 模板包二期提供前「ai_app 取不到内置模板」是现状，
+ * 测试锁定 null；二期重写时要么提供真 ai_app.md，要么显式按 personal_tool 加载。 */
 function readBuiltinTemplate(type: TemplateType): string | null {
   const ownDir = dirname(fileURLToPath(import.meta.url))
   const candidates = type === 'ai_app' ? [TEMPLATE_FILES.ai_app, TEMPLATE_FILES.personal_tool] : [TEMPLATE_FILES[type]]

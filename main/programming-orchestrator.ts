@@ -1116,7 +1116,30 @@ export async function resolvePrdBackplane(input: MvpTaskInput, requirements: Ske
   const template = (): PrdBackplane =>
     buildPrdBackplane(findProject(input.project_id), requirements, 'sketch_confirmed')
 
-  if (!input.query) return template()
+  // m-5：模板回退重建必须留痕（对齐「模板回退必须留痕」纪律）——盘上既有 EARS 断言/
+  // story/priority 若与冻结清单不一致将被确定性模板替换，P3 收益在渠道抖动下不可累积，
+  // 此前无任何观测点；日志属附加观测，失败不阻断主链路。
+  const noteFallback = (reason: 'no_query' | 'no_channel' | 'llm_failed'): void => {
+    try {
+      recordDecision({
+        project_id: input.project_id,
+        session_id: input.session_id,
+        entry: {
+          type: 'prd_backplane_fallback',
+          title: 'PRD 背板模板回退重建',
+          why: 'PRD 渠道不可用/提取失败，背板按确定性模板重建；盘上既有 EARS 断言/story/priority 若与冻结清单不一致将被替换（降级设计，观测留痕）',
+          detail: { reason },
+        },
+      })
+    } catch {
+      // 忽略：日志失败不影响主链路
+    }
+  }
+
+  if (!input.query) {
+    noteFallback('no_query')
+    return template()
+  }
   // 渠道+类别统一收口（runtime-fallback，T9）；prd 类别解析模型，主渠道不可用已尝试
   // 切备用渠道，仍无可用回退确定性模板（PRD 提取失败不阻断生成）
   const resolution = resolveChannelEnv({
@@ -1125,7 +1148,10 @@ export async function resolvePrdBackplane(input: MvpTaskInput, requirements: Ske
     projectId: input.project_id,
     sessionId: input.session_id,
   })
-  if (!resolution.env || !resolution.channel) return template()
+  if (!resolution.env || !resolution.channel) {
+    noteFallback('no_channel')
+    return template()
+  }
   const channel = resolution.channel
   const env = resolution.env
 
@@ -1158,6 +1184,7 @@ export async function resolvePrdBackplane(input: MvpTaskInput, requirements: Ske
   ])
 
   const base = llm ?? template()
+  if (!llm) noteFallback('llm_failed')
   // 权威 id 集：冻结清单（llm 失败回退 template() 时其 requirements 可能与冻结清单
   // 不一致——template() 会把默认存在性断言/story 物化，以原始冻结清单为准保证加厚不丢）
   const frozen = llm ? base.requirements : requirements

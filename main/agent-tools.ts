@@ -531,10 +531,20 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       const resolved = resolveInsideProject(project.root_path, toolInput.path)
       if (!resolved.ok) return { output: resolved.error, isError: true }
 
-      // whole 模式：无 old_string，走整文件重写（弱渠道能力位）
+      // whole 模式：无 old_string，走整文件重写（弱渠道能力位）。
+      // m-11：与 write_file 同口径的 16k 预拦截——整文件重写语义与 write_file 同构，
+      // 绕过预拦截会让费用守卫在弱渠道（whole 模式）上失效
       if (typeof toolInput.old_string !== 'string') {
         if (typeof toolInput.content !== 'string') {
           return { output: '缺少参数：diff 模式需要 old_string + new_string，whole 模式需要 content。', isError: true }
+        }
+        const estTokens = estimateTokenCount(toolInput.content)
+        if (decideWrite(toolInput.content) === 'chunk') {
+          return {
+            output: `单次写入内容过大（约 ${estTokens} tokens，阈值 16000）。请拆分为多次写入：先写骨架文件，再分段替换补充内容。`,
+            isError: true,
+            detail: { est_tokens: estTokens, threshold: 16000 },
+          }
         }
         return validateAndWrite(project.root_path, resolved.rel, toolInput.content, ctx)
       }
@@ -924,8 +934,14 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     // 只读角色：探索/调研不需要写文件或跑测试，但可查公网资料、可向主 agent 冒泡提问
     return [read_file, list_files, grep, web_fetch, ask_delegation_question]
   }
+  if (role === 'review') {
+    // 审查角色（m-12）：话术承诺「不直接修改」，工具面同步收窄——去掉 write_file/
+    // edit_file（物理只读与话术一致，防提示词层面被诱导后真的落盘）；可跑预览/测试/
+    // 扫描验证怀疑点，但不改产物
+    return [read_file, list_files, grep, web_fetch, run_preview, run_gwt_tests, run_security_scan, ask_delegation_question]
+  }
   if (role !== 'parent') {
-    // 子 agent（implement/review/custom）：全量 9 工具 + ask 冒泡；无委派/代答/续跑工具（深度限制双保险）
+    // 子 agent（implement/custom）：全量 9 工具 + ask 冒泡；无委派/代答/续跑工具（深度限制双保险）
     return [
       read_file,
       list_files,

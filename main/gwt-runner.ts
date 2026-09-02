@@ -59,7 +59,10 @@ export async function runBrowserGwt(input: RunGwtInput): Promise<GwtTestResult |
   browserAvailable = true
   try {
     return await executeScenarios(browser, input)
-  } catch {
+  } catch (error) {
+    // m-10：探针异常降级静态兑底必须留痕（对齐「模板回退必须留痕」纪律——
+    // 此前静默 return null，降级事实无任何观测点）
+    console.error('[gwt-runner] 浏览器探针异常，降级静态兑底：', error)
     return null
   } finally {
     await browser.close().catch(() => undefined)

@@ -123,6 +123,8 @@ interface PendingPrdReview {
   backplane: PrdBackplane
   query: SDKQuery
   publish: (event: AgentEvent) => void
+  /** 停止信号（m-6）：override 转确认门时透传——确认后 EARS 化与草图生成同样可被停止 */
+  signal?: AbortSignal
   /** 内审元数据（2026-09-01）：卡面展示 Defender 已改什么/是否隔离 */
   internalAudit?: InternalAuditMeta
 }
@@ -1073,6 +1075,8 @@ export function publishPrdReviewCard(opts: {
   backplane: PrdBackplane
   query: SDKQuery
   publish: (event: AgentEvent) => void
+  /** 停止信号（m-6）：挂起方与确认卡回传后续链共享的可取消句柄 */
+  signal?: AbortSignal
 }): void {
   const { input, requirements, issues, outcome } = opts
   const serious = issues.filter((issue) => issue.severity === 'blocking' || issue.severity === 'major')
@@ -1089,6 +1093,7 @@ export function publishPrdReviewCard(opts: {
     backplane: opts.backplane,
     query: opts.query,
     publish: opts.publish,
+    signal: opts.signal,
     internalAudit: audit,
   })
 
@@ -1198,6 +1203,7 @@ export async function resumePrdReviewOverride(input: AgentSendMessageInput, note
     requirements: pending.requirements,
     query: pending.query,
     publish: pending.publish,
+    signal: pending.signal,
     reviewNote: note?.reviewNote ?? `已忽略 ${serious.length} 个内审残留问题`,
   })
   return true

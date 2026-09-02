@@ -21,6 +21,7 @@ import React, { useState } from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import {
   activeAgentSessionIdAtom,
+  globalUserErrorAtom,
   nullPrdConfirmFallback,
   prdConfirmFamily,
   projectModeAtom,
@@ -161,6 +162,7 @@ export const PrdConfirmDialog: React.FC = () => {
   const sessionId = useAtomValue(activeAgentSessionIdAtom)
   const state = useAtomValue(sessionId ? prdConfirmFamily(sessionId) : nullPrdConfirmFallback)
   const clearConfirm = useSetAtom(sessionId ? prdConfirmFamily(sessionId) : nullPrdConfirmFallback)
+  const setGlobalUserError = useSetAtom(globalUserErrorAtom)
   const mode = useAtomValue(projectModeAtom)
   const stage = useAtomValue(workflowStageAtom)
 
@@ -216,6 +218,9 @@ export const PrdConfirmDialog: React.FC = () => {
       })
     } catch (error) {
       console.error('[prd-confirm] 发送异常:', error)
+      // m-16：IPC 失败时弹窗已乐观关闭，用户对「确认未送达」零感知（pending 仍挂主进程侧）。
+      // 保持乐观关闭契约（陷阱 41：不 await IPC 驱动关闭），改走用户可见通道告知。
+      setGlobalUserError('确认没有送达（连接中断）：请直接在对话里发「确认这份 PRD」重试，或重新打开确认卡。')
     }
   }
 

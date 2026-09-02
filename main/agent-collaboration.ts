@@ -533,6 +533,15 @@ export function answerDelegationQuestion(
   if (!record.pendingQuestion) {
     throw new Error(`委派 ${delegationId} 没有待回答的问题（当前 status=${record.status}）。用 get_delegation_results 查看。`)
   }
+  // m-13：子代理在等待回答期间已终结（stop/超时/失败）——残留的 pendingQuestion 指向
+  // 已 settle 的 promise（abort 兑底已 resolve），回答无法送达；如实报错并清理残留，
+  // 不谎报「已回答成功」
+  if (record.status !== 'running') {
+    record.pendingQuestion = undefined
+    record.pendingAnswerResolve = undefined
+    record.askSignal = createAskSignal()
+    throw new Error(`委派 ${delegationId} 已结束（status=${record.status}），回答未能送达：子代理在等待回答期间已停止。`)
+  }
   record.pendingAnswerResolve?.(answer)
   record.pendingQuestion = undefined
   record.pendingAnswerResolve = undefined

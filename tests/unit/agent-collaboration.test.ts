@@ -36,7 +36,7 @@ import {
  * - 并行上限：每父 running 数 ≤ MAX_RUNNING_DELEGATIONS_PER_PARENT
  * - 幂等：同 (sessionId, toolCallId) 只 create 一次
  * - wait_for_delegations：all/any + timeout，超时不抛错返回当前状态
- * - role 裁剪：explore/research 只读，implement/review 全量，parent 含 delegate_agent
+ * - role 裁剪：explore/research 只读，implement 全量，review 无写工具（m-12），parent 含 delegate_agent
  */
 
 function textMessage(text: string): SDKMessage {
@@ -214,7 +214,7 @@ describe('委派协作 M1', () => {
     findDelegation(parentSessionId,fast.delegation_id)!.abort.abort()
   })
 
-  it('role 裁剪：explore/research 只读+ask；implement/review 全量+ask；parent 含全部委派工具', () => {
+  it('role 裁剪：explore/research 只读+ask；implement 全量+ask；review 无写工具+ask（m-12：话术「不直接修改」与工具面一致）；parent 含全部委派工具', () => {
     const readOnly = ['read_file', 'list_files', 'grep', 'web_fetch', 'ask_delegation_question']
     expect(buildAgentTools({ projectId: 'p', role: 'explore' }).map((tool) => tool.name)).toEqual(readOnly)
     expect(buildAgentTools({ projectId: 'p', role: 'research' }).map((tool) => tool.name)).toEqual(readOnly)
@@ -222,7 +222,9 @@ describe('委派协作 M1', () => {
     const full = ['read_file', 'list_files', 'grep', 'web_fetch', 'write_file', 'edit_file', 'run_preview', 'run_gwt_tests', 'run_security_scan']
     const implementTools = [...full, 'ask_delegation_question']
     expect(buildAgentTools({ projectId: 'p', role: 'implement' }).map((tool) => tool.name)).toEqual(implementTools)
-    expect(buildAgentTools({ projectId: 'p', role: 'review' }).map((tool) => tool.name)).toEqual(implementTools)
+    // review：可验证（预览/测试/扫描）但不可写（无 write_file/edit_file）
+    const reviewTools = ['read_file', 'list_files', 'grep', 'web_fetch', 'run_preview', 'run_gwt_tests', 'run_security_scan', 'ask_delegation_question']
+    expect(buildAgentTools({ projectId: 'p', role: 'review' }).map((tool) => tool.name)).toEqual(reviewTools)
 
     const parentTools = buildAgentTools({ projectId: 'p' }).map((tool) => tool.name)
     expect(parentTools).toEqual([

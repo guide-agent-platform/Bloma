@@ -183,12 +183,14 @@ function evaluateBehaviorAssertions(
     }
   }
 
-  // 运行证据优先（§8.1）：行为脚本报告里该断言的场景失败 → 退回（P3「车不位移」在此关门）
+  // 运行证据优先（§8.1）：行为脚本报告里该断言的场景失败 → 退回（P3「车不位移」在此关门）。
+  // m-9：场景名精确等值对账（`${itemId} ${assertion}`）——此前 includes(assertion) 子串匹配，
+  // 同 item 断言互为子串时（「新增一条记录」⊂「新增一条记录并高亮」）失败误归属到未失败断言
   const runtimeFailed: string[] = []
   for (const item of p0Items) {
     for (const assertion of requirementAssertions(item)) {
       const failed = failedScenarios.some(
-        (failure) => failure.scenario.startsWith(`${item.id} `) && failure.scenario.includes(assertion),
+        (failure) => failure.scenario.trim() === `${item.id} ${assertion}`.trim(),
       )
       if (failed) runtimeFailed.push(`${item.id} ${assertion}`)
     }

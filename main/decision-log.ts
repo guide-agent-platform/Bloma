@@ -46,6 +46,7 @@ export type DecisionType =
   | 'template_type_refined'
   | 'requirement_earsified'
   | 'template_override_rejected'
+  | 'prd_backplane_fallback'
 
 export interface DecisionEntry {
   type: DecisionType

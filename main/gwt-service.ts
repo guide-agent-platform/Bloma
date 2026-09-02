@@ -165,12 +165,29 @@ export function readTestReport(projectId: string): GwtTestResult | null {
 
 function renderTestReportMarkdown(result: GwtTestResult, sessionId: string): string {
   const failures = result.failure_summary.map((f) => `- **${f.scenario}**：${f.reason}`).join('\n') || '- 无'
+  // m-8：静态兑底「预览不可达/关键词未命中」的 unverified 不得呈现为全绿——
+  // 此前 N/N 通过的报告实际可能零验证，测试全绿语义失真（不变式 10 口径）
+  const unverifiedCount = result.unverified?.length ?? 0
+  const unverifiedSection = unverifiedCount
+    ? [
+        '',
+        '## 待评估（未验证）',
+        '',
+        `以下 ${unverifiedCount} 条静态启发式未命中关键词，按待评估放行（不计失败、未做行为验证）：`,
+        ...result.unverified!.map((name) => `- ${name}`),
+        '',
+      ].join('\n')
+    : ''
+  const passLine =
+    unverifiedCount > 0
+      ? `- 通过：${result.passed_count}/${result.total_count}（其中 ${unverifiedCount} 条为待评估放行，未经行为验证）`
+      : `- 通过：${result.passed_count}/${result.total_count}`
   return `# 测试报告
 
 > 会话：${sessionId} · 由 GWT 执行生成（schema 对齐 api-spec §12.4）
 
-- 通过：${result.passed_count}/${result.total_count}
-
+${passLine}
+${unverifiedSection}
 ## 未通过项
 
 ${failures}

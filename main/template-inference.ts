@@ -83,8 +83,9 @@ function inferStrength(text: string): { type: TemplateType; strength: InferenceS
 /**
  * 澄清轮类型修正（对用户透明）：用户后续话语带**显式形态信号**（strong）时更新
  * 推断；weak 信号不动已有判断（「说到计算器」不代表要把已判定的 web 项目改成小工具
- * ——可能只是网页里的一个功能）。首建兜底（personal_tool）对 weak 信号也让位——
- * 兜底本就是「没证据」的占位，任何具体词都是增量证据。
+ * ——可能只是网页里的一个功能）。weak 让位分支不可达（m-3 实锤）：weak 信号仅 AI
+ * 词族且已归 personal_tool，命中时 hit.type 恒等于兜底 personal_tool，在上方同类型
+ * 短路返回；行为=「weak 永不改判」，测试锁定，注释不再宣称兜底让位。
  *
  * 返回 undefined = 维持现状（调用方不写盘）。
  */
@@ -93,8 +94,6 @@ export function refineTemplateType(current: TemplateType, message: string): Temp
   if (hit.strength === 'none') return undefined
   if (hit.type === current) return undefined
   if (hit.strength === 'strong') return hit.type
-  // weak：仅当前值是「无证据兜底」且兜底未曾被 strong 确认时才让位——
-  // 兜底值=personal_tool 且当前就是它：weak 命中 web/desktop 以外的 personal_tool
-  // 词无意义（同类型）；weak 命中不了其它类型（AI 词已归 personal_tool），此处恒同类型
+  // weak 恒不改判（同类型短路外的可达路径只有 strong，见 doc 注释）
   return undefined
 }

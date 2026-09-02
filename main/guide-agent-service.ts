@@ -1343,6 +1343,7 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
         backplane: backplaneForReview,
         query: pending.query ?? NO_QUERY_FALLBACK,
         publish,
+        signal,
       })
       return { started: true, prd_written: prdWritten }
     }
