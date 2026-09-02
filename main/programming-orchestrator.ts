@@ -977,6 +977,17 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     '',
     '【项目锚（每轮有效，一切决策不得漂移出此范围）】',
     `产品定位：${backplane.positioning}`,
+    // 2026-09-03 长文本 PRD 常驻锚（需求工程链归向导）：全文注入，细节以其为准；
+    // 与下方功能项/断言冲突时以下方硬契约为准（GWT/裁判以结构化字段为唯一判定口径）。
+    // 旧背板无此字段时零注入（兼容）。
+    ...(backplane.prd_document
+      ? [
+          'PRD 全文（用户确认版）：',
+          '"""',
+          backplane.prd_document,
+          '"""',
+        ]
+      : []),
     '功能项（P0 必须全部实现且断言为真）：',
     items,
     '范围外（一律不做）：',
@@ -1158,8 +1169,9 @@ export async function resolvePrdBackplane(input: MvpTaskInput, requirements: Ske
   const project = findProject(input.project_id)
   // 上轮已写盘的 prd.json（如有）：重跑时其对应项既有字段并入合并底（§3.2）；首轮无 prd.json 按最后草图需求忠实重建（不含默认项）
   const existing = readPrdBackplane(input.project_id)
-  // 渠道能力上限：enricher 与 generatePrdLlm 共用同一上限，直接用渠道配置值（缺省 8192），不另设公式预算
-  const maxTokens = channel.max_tokens ?? 8192
+  // 渠道能力上限：enricher 与 generatePrdLlm 共用同一上限，直接用渠道配置值；
+  // 2026-09-03 长文本 PRD：document 字段加入后 8192 必截断，缺省上限提到 16384（渠道显式配置仍优先）
+  const maxTokens = channel.max_tokens ?? 16384
   // 并行：PRD 元数据提取 + 功能项加厚互不依赖，共用同一渠道/env/对话
   const [llm, enriched] = await Promise.all([
     generatePrdLlm({

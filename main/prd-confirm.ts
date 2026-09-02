@@ -118,6 +118,8 @@ export function publishPrdConfirmCard(opts: {
         : '请确认这份 PRD（已通过裁判审查）',
       review_note: reviewNote,
       positioning: backplane.positioning,
+      // 2026-09-03 长文本 PRD：确认卡新增全文展示段（旧背板无此字段时缺省空串，卡片自动隐藏该段）
+      document: backplane.prd_document ?? '',
       requirements: backplane.requirements.map((item) => ({
         id: item.id,
         priority: requirementPriority(item),

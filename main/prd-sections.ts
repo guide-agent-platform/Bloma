@@ -62,6 +62,17 @@ export const PRD_SECTIONS: PrdSectionDef[] = [
     consumers: ['PRD 过目卡', 'MVP loop 背板锚定段', '草图 prompt'],
   },
   {
+    id: 'prd_document',
+    label: 'PRD 全文（长文本）',
+    // 2026-09-03 形态切换第一步（需求工程链归向导）：先落字段与消费链路（过目卡主展示
+    // + loop 锚定常驻），暂不进必填矩阵——升格必填待线上验证后拍板，避免旧项目误标 missing
+    quickRequired: false,
+    longtermRequired: false,
+    source: 'llm',
+    dataFrom: 'prd_document（向导工程腿与结构化字段同调用产出；降级走 buildPrdDocumentFallback 机械拼装）',
+    consumers: ['PRD 过目卡（主展示对象）', 'MVP loop 背板锚定段'],
+  },
+  {
     id: 'requirements',
     label: '功能清单',
     quickRequired: true,

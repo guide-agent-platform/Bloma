@@ -478,6 +478,32 @@ export const PrdConfirmDialog: React.FC = () => {
           </div>
         ) : null}
 
+        {/* PRD 全文（长文本，2026-09-03 形态切换）：向导工程腿产出的用户确认版 PRD 文档；
+            quick 折叠 / longterm 展开（与完整视图一致）；旧背板无此字段时自动隐藏 */}
+        {state.document ? (
+          <details data-ai-id="prd-confirm-document" open={state.expanded} style={{ fontSize: 13 }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--color-text-secondary, #5b6472)' }}>
+              完整 PRD 文档（长文本全文——确认即以此为准）
+            </summary>
+            <div
+              data-ai-id="prd-confirm-document-body"
+              style={{
+                background: 'var(--color-bg-subtle, #f6f8fb)',
+                padding: 12,
+                borderRadius: 'var(--radius-sm)',
+                marginTop: 10,
+                maxHeight: 320,
+                overflowY: 'auto',
+                lineHeight: 1.8,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+            >
+              {state.document}
+            </div>
+          </details>
+        ) : null}
+
         {/* 完整 PRD 视图：quick 折叠 / longterm 展开 */}
         <details data-ai-id="prd-confirm-full-view" open={state.expanded} style={{ fontSize: 13 }}>
           <summary style={{ cursor: 'pointer', color: 'var(--color-text-secondary, #5b6472)' }}>查看完整 PRD（全部验收细节）</summary>

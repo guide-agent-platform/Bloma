@@ -12,7 +12,7 @@ import { getDocumentsDir } from '../storage/config-paths'
 import { findProject, readLastSketchRequirements } from './project-service'
 import { nextRequirementId } from './programming-orchestrator'
 import type { PrdBackplane, RequirementStatus, SketchRequirement } from './sketch-engine'
-import { requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, backplaneTemplateMeta } from './sketch-engine'
+import { buildPrdDocumentFallback, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, backplaneTemplateMeta } from './sketch-engine'
 import { parseEarsAssertion } from './ears-vocabulary'
 import { gwtRequiredCategories, isInjectionEnabled } from './template-injection'
 import { describeEffect, describeTrigger, parseBehaviorAssertion } from './behavior-assertions'
@@ -281,6 +281,16 @@ export function buildPrdBackplane(
     requirements: items,
     acceptance,
     out_of_scope: [...new Set(project.scope_exclusions ?? [])],
+    // 2026-09-03 长文本 PRD dual-form：确定性模板同样产出 prd_document（机械拼装，不编内容），
+    // 保证确认卡/loop 锚的消费假设恒成立（LLM 路径由工程腿产出全文，两者同源异质）
+    prd_document: buildPrdDocumentFallback({
+      positioning: items[0]?.description ?? project.name,
+      requirements: items,
+      acceptance,
+      out_of_scope: [...new Set(project.scope_exclusions ?? [])],
+      assumptions: [],
+      constraints: project.constraints,
+    }),
     // 用户约束常驻注入（T4-L1）：project.constraints 是唯一写入源（澄清门/修改门
     // 确定性提取），背板只做组装——不在这里引入第二个事实源
     ...(project.constraints?.length ? { constraints: [...new Set(project.constraints)] } : {}),

@@ -159,6 +159,8 @@ export interface PrdConfirmState {
   projectId: string
   title: string
   positioning: string
+  /** 完整长文本 PRD 全文（2026-09-03 形态切换）：确认卡全文展示段；可选——旧背板/测试夹具缺省时卡片自动隐藏 */
+  document?: string
   requirements: PrdConfirmRequirement[]
   outOfScope: string[]
   assumptions: string[]
@@ -421,6 +423,7 @@ export function setupGlobalAgentListeners(): () => void {
       if (payload?.kind === 'prd_confirm') {
         const prdPayload = payload as {
           positioning?: unknown
+          document?: unknown
           requirements?: unknown
           out_of_scope?: unknown
           assumptions?: unknown
@@ -440,6 +443,7 @@ export function setupGlobalAgentListeners(): () => void {
           projectId: String(event.project_id ?? ''),
           title: typeof payload.title === 'string' && payload.title ? payload.title : '请确认这份 PRD',
           positioning: typeof prdPayload.positioning === 'string' ? prdPayload.positioning : '',
+          document: typeof prdPayload.document === 'string' ? prdPayload.document : '',
           requirements: prdRequirements.map((item): PrdConfirmRequirement => ({
             id: String(item.id),
             priority: item.priority === 'P0' ? 'P0' : item.priority === 'P1' ? 'P1' : 'P2',
