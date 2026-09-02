@@ -278,6 +278,18 @@ export function mergeRewrite(
     }
     // 全灭 → 保留原断言（缺省兜底语义：不写入空数组）
     if (survived.length === 0) return item
+    // M-1 覆盖完备性：每条原断言须被某条存活断言覆盖（双向重叠）——否则「两条原
+    // 断言被改写成同一原断言的两个变体」的子集替换会静默丢弃用户已确认的另一条
+    // 断言（单向「与任一原断言重叠」守卫对此不可见：中文短句字符集重合天然偏高）
+    const coverageOk =
+      originals.length === 0 ||
+      originals.every((original) =>
+        survived.some((candidate) => semanticOverlap(original, candidate) >= SEMANTIC_OVERLAP_MIN),
+      )
+    if (!coverageOk) {
+      stats.dropped += survived.length
+      return item
+    }
     stats.earsified += survived.length
     return { ...item, behavior_assertions: survived }
   })

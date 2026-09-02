@@ -1382,7 +1382,12 @@ async function evaluateOnce(input: JudgeReviewInput): Promise<JudgeVerdict> {
     } catch {
       // 观测日志失败不影响主链路
     }
-    return verdict
+    // M-6：skip 在用户可见层披露（不变式 2「ack 如实」）——此前仅进 decisions.md，
+    // judge_result 与用户可见话术均不披露：语义腿没跑时规则引擎存在性基线对
+    // 「页面列了需求文字 + 一个 button」的空壳可一票通过，用户拿到 pass 无从知晓
+    const skipNote = `（语义审查未执行：${semantic.skipReason === 'no_channel' ? '无可用审查渠道' : '审查服务暂时失败'}，本次仅做了存在性与运行证据检查）`
+    publish(input, 'message_delta', { text: skipNote })
+    return { ...verdict, user_visible_summary: `${verdict.user_visible_summary}${skipNote}` }
   }
   if (semantic.constraint && !semantic.constraint.passed) {
     try {

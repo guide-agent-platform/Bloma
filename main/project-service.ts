@@ -142,7 +142,11 @@ function countConsecutiveCorrections(
 }
 
 export function upgradeProject(input: ProjectUpgradeInput): Project {
-  const project = updateProject(input.project_id, { mode: 'longterm', current_stage: 'upgrading' })
+  // M-16：升级是瞬时状态切换，直接落在合法停留态 ready（mode 已 longterm）——
+  // 此前置 upgrading 后 main 侧无任何流转消费点：打字修改诉求落无工具聊天路径
+  // （迭代链不可达）、点选纠错话术与行为双落空，永久停留直至重启。
+  // 渲染端话术「已升级为长期迭代模式…随时可以继续完善」与 ready+longterm 语义对齐。
+  const project = updateProject(input.project_id, { mode: 'longterm', current_stage: 'ready' })
   appendProjectEvent(project, 'mode_upgraded', input)
   return project
 }

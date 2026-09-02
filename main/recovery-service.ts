@@ -27,6 +27,8 @@ const INTERRUPTED_STAGES: ReadonlySet<WorkflowStage> = new Set([
   'judge_review',
   'repairing',
   'iterating',
+  // M-16：历史版本把升级后项目停在 upgrading（无出口）——启动对账按磁盘证据收敛
+  'upgrading',
 ])
 
 /** 在这些阶段中断的，即使产物完整也须注明质量门未跑完（不冒充质量结论）。 */

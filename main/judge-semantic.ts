@@ -215,10 +215,15 @@ export function parseSemanticFindings(text: string, requirements: SketchRequirem
     const requirementId = String(item.requirement_id ?? '')
     const status = String(item.status ?? '')
     if (!knownIds.has(requirementId) || !statuses.has(status)) continue
+    const evidence = typeof item.evidence === 'string' ? item.evidence.trim().slice(0, 160) : ''
+    // 证据纪律（M-6 附带）：missing/deviated 无证据 → 降级 unverified——LLM 幻觉的
+    // missing 不能无证据直接 blocking（误杀方向）；implemented/partial/unverified 不强制证据
+    const safeStatus =
+      !evidence && (status === 'missing' || status === 'deviated') ? ('unverified' as const) : (status as SemanticStatus)
     findings.push({
       requirement_id: requirementId,
-      status: status as SemanticStatus,
-      evidence: typeof item.evidence === 'string' ? item.evidence.trim().slice(0, 160) : '',
+      status: safeStatus,
+      evidence,
     })
   }
   return findings

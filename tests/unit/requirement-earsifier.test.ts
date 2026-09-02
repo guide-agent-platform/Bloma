@@ -76,6 +76,23 @@ describe('requirement-earsifier（P3：P0 断言 EARS 化 + 三层守卫）', ()
       expect(result.stats.dropped).toBe(1)
     })
 
+    it('M-1 覆盖完备性：两条原断言被改写成同一原断言的两个变体 → 整项保留原断言（子集替换丢弃用户已确认断言）', () => {
+      const result = mergeRewrite(
+        makeRequirements(),
+        [
+          {
+            id: 'F-001',
+            // 两条都是「点击开始后计时启动」的变体（与第一条原断言高重叠、与第二条低重叠）
+            behavior_assertions: ['WHEN 点击开始按钮 → 计时启动', 'WHEN 点击开始后 → 计时开始运转'],
+          },
+        ],
+        stats(),
+      )
+      // 「计时中点暂停会停下」未被任何存活断言覆盖 → 整项保留原断言，不再静默丢失
+      expect(result.requirements[0].behavior_assertions).toEqual(['点击开始后计时启动', '计时中点暂停会停下'])
+      expect(result.stats.earsified).toBe(0)
+    })
+
     it('③数量守卫：改写后超 原数+1 截断（截断发生在守卫前，dropped 计数）', () => {
       const result = mergeRewrite(
         makeRequirements(),
