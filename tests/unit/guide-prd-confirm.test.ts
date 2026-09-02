@@ -286,6 +286,37 @@ describe('PRD 用户确认门（改造 3）', () => {
     expect(decisions.some((entry) => entry.type === 'prd_confirm' && entry.title.includes('已确认'))).toBe(true)
   })
 
+  it('B-1 回归（2026-09-02 对抗审查）：盘上权威清单含 behavior_assertions 时完整传入 runSketchTask——探针链不瘦身', async () => {
+    await startConfirmFlow()
+    vi.mocked(runSketchTask).mockClear()
+    // 盘上背板（markPrdUserConfirmed 读盘返回）：enrichment 断言在场
+    vi.mocked(markPrdUserConfirmed).mockReturnValueOnce({
+      project_id: 'proj-1',
+      user_confirmed_at: '2026-09-02T00:00:00.000Z',
+      name: '记账本',
+      positioning: '记账本，记录日常收支',
+      requirements: [
+        { id: 'F-001', description: '记账本，记录日常收支', behavior_assertions: ['WHEN 点击保存按钮 → 列表新增一条记录'], priority: 'P0' },
+        { id: 'F-002', description: '按月汇总统计', behavior_assertions: ['WHEN 点击汇总按钮 → 汇总数值更新'], priority: 'P0' },
+      ],
+      acceptance: {},
+      out_of_scope: [],
+      assumptions: [],
+    } as unknown as ReturnType<typeof markPrdUserConfirmed>)
+
+    await handleGuideMessage(
+      makeInput({ content: '确认这份 PRD，开始画草图。', metadata: { source: 'card_option', selected_option_id: PRD_CONFIRM_OPTION_CONFIRM } }),
+      (event) => events.push(event),
+      makeModel(scriptedQuery()),
+    )
+
+    expect(runSketchTask).toHaveBeenCalledTimes(1)
+    const call = vi.mocked(runSketchTask).mock.calls[0]?.[0]
+    // 断言完整传入（此前被 map 瘦身为 {id, description}，GWT 探针整体退化存在性检查）
+    expect(call?.requirements?.[0]?.behavior_assertions).toEqual(['WHEN 点击保存按钮 → 列表新增一条记录'])
+    expect(call?.requirements?.[1]?.behavior_assertions).toEqual(['WHEN 点击汇总按钮 → 汇总数值更新'])
+  })
+
   it('adjust 回传带文本 → 直接进修订闭环：ack 后重走 PRD 管线出新确认卡，不再咐「指出条目」（2026-08-27 线上案例 02239079）', async () => {
     await startConfirmFlow()
     events.length = 0

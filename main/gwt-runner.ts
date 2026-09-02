@@ -223,11 +223,13 @@ async function runScenario(page: Page, scenario: ScenarioPlan): Promise<string |
   return checkEffect(scenario, before, after)
 }
 
-/** 页面状态快照：元素签名→位置 + 可见元素数 + 全文（效果探针的比对基础）。 */
+/** 页面状态快照：元素签名→位置 + 可见元素数 + 全文 + 输入框值（效果探针的比对基础）。 */
 interface PageState {
   elements: Array<{ sig: string; x: number; y: number }>
   visibleCount: number
   text: string
+  /** 所有 input/textarea 的 value 拼接（fill 触发后的 text-change 断言比对，M-4） */
+  inputValues: string
 }
 
 async function capturePageState(page: Page): Promise<PageState> {
@@ -245,11 +247,14 @@ async function capturePageState(page: Page): Promise<PageState> {
       const sig = `${el.tagName}.${el.className && typeof el.className === 'string' ? el.className : ''}#${(el.textContent ?? '').slice(0, 24)}@${Math.round(rect.width)}x${Math.round(rect.height)}`
       elements.push({ sig, x: Math.round(rect.left), y: Math.round(rect.top) })
     }
-    return { elements, visibleCount, text: document.body ? document.body.innerText : '' }
+    const fields = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea'))
+    const inputValues = fields.map((el) => el.value).join('|').slice(0, 2000)
+    return { elements, visibleCount, text: document.body ? document.body.innerText : '', inputValues }
   })
 }
 
-/** 派发触发器：按键派发到 document（keydown+keyup）；点击按文本/语义 class 找控件。 */
+/** 派发触发器：按键派发到 document（keydown+keyup）；点击/双击按文本或语义 class 找控件；
+ *  fill/select 为 M-4 新增可探针类（输入框填值派发 input+change、下拉切换选项）。 */
 async function dispatchTrigger(page: Page, trigger: AssertionPlan['trigger']): Promise<string | undefined> {
   if (!trigger) return undefined
   if (trigger.kind === 'key' && trigger.key) {
@@ -274,6 +279,60 @@ async function dispatchTrigger(page: Page, trigger: AssertionPlan['trigger']): P
       return true
     }, trigger.target)
     if (!clicked) return `找不到可点击的「${trigger.target}」控件，断言无法执行`
+    return undefined
+  }
+  if (trigger.kind === 'dblclick' && trigger.target) {
+    const hit = await page.evaluate((target) => {
+      const controls = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], a, li, tr, [class]'))
+      const hit = controls.find((el) => {
+        const text = (el.textContent ?? '').trim()
+        const cls = typeof el.className === 'string' ? el.className : ''
+        return (text.length > 0 && text.includes(target)) || cls.includes(target)
+      })
+      if (!hit) return false
+      hit.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+      return true
+    }, trigger.target)
+    if (!hit) return `找不到可双击的「${trigger.target}」目标，断言无法执行`
+    return undefined
+  }
+  if (trigger.kind === 'fill' && trigger.target) {
+    const filled = await page.evaluate((target) => {
+      const fields = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea')).filter((el) => {
+        const type = (el.getAttribute('type') || 'text').toLowerCase()
+        return type !== 'button' && type !== 'submit' && type !== 'checkbox' && type !== 'radio' && type !== 'file'
+      })
+      const generic = target === 'input'
+      const hit = fields.find((el) => {
+        const hint = `${el.id} ${el.name} ${el.getAttribute('placeholder') ?? ''} ${el.getAttribute('aria-label') ?? ''} ${typeof el.className === 'string' ? el.className : ''}`
+        return generic || hint.includes(target) || (el.textContent ?? '').includes(target)
+      })
+      if (!hit) return false
+      hit.focus()
+      hit.value = '测试输入'
+      hit.dispatchEvent(new Event('input', { bubbles: true }))
+      hit.dispatchEvent(new Event('change', { bubbles: true }))
+      return true
+    }, trigger.target)
+    if (!filled) return `找不到可输入的「${trigger.target}」输入框，断言无法执行`
+    return undefined
+  }
+  if (trigger.kind === 'select' && trigger.target) {
+    const picked = await page.evaluate((target) => {
+      const selects = Array.from(document.querySelectorAll<HTMLSelectElement>('select'))
+      if (selects.length === 0) return false
+      const hit = selects.find((el) => {
+        const hint = `${el.id} ${el.name} ${el.getAttribute('aria-label') ?? ''} ${el.previousElementSibling && el.previousElementSibling.textContent ? el.previousElementSibling.textContent : ''}`
+        return hint.includes(target)
+      }) ?? selects[0]!
+      if (hit.options.length === 0) return false
+      const next = Array.from(hit.options).find((option) => option.value !== hit.value) ?? hit.options[0]!
+      hit.value = next.value
+      hit.dispatchEvent(new Event('input', { bubbles: true }))
+      hit.dispatchEvent(new Event('change', { bubbles: true }))
+      return true
+    }, trigger.target)
+    if (!picked) return `找不到可选择的「${trigger.target}」下拉控件，断言无法执行`
     return undefined
   }
   return undefined
@@ -327,7 +386,10 @@ function checkEffect(scenario: ScenarioPlan, before: PageState, after: PageState
     return after.visibleCount > before.visibleCount ? undefined : fail('触发后页面可见元素数没有增加')
   }
   if (effect.kind === 'text-change') {
-    return after.text !== before.text ? undefined : fail('触发后页面文字没有任何变化')
+    // 比对含输入框 value（M-4）：fill 触发的「输入内容更新」类断言不落在 body.innerText
+    return after.text !== before.text || after.inputValues !== before.inputValues
+      ? undefined
+      : fail('触发后页面文字没有任何变化')
   }
   return undefined
 }

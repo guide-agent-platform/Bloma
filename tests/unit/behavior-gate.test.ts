@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { describeEffect, describeTrigger, parseBehaviorAssertion } from '../../main/behavior-assertions'
+import { parseEarsAssertion, renderTriggerVocabularyForPrompt } from '../../main/ears-vocabulary'
 import { planScenarios, scenarioName, setBrowserGwtDisabledForTests } from '../../main/gwt-runner'
 import { runGwtScenarios } from '../../main/gwt-service'
 import { runJudge } from '../../main/judge-engine'
@@ -61,6 +62,75 @@ describe('行为断言解析（parseBehaviorAssertion）', () => {
     expect(describeTrigger({ kind: 'key', key: 'ArrowRight' })).toBe('按下右方向键')
     expect(describeTrigger({ kind: 'click', target: '保存' })).toBe('点击「保存」控件')
     expect(describeEffect({ kind: 'move-right', keywords: [] })).toBe('目标元素向右位移')
+  })
+})
+
+describe('对抗审查修复回归（B-1 链 M-3/M-4/M-5，2026-09-02）', () => {
+  it('M-3：「按下保存按钮」解析为 click 而非 ArrowDown（与词表 click 条目「按下」口径一致）', () => {
+    const plan = parseBehaviorAssertion('WHEN 按下保存按钮 → 弹出确认框')
+    expect(plan.presenceFallback).toBe(false)
+    expect(plan.trigger?.kind).toBe('click')
+    expect(plan.trigger?.target).toBe('保存')
+    // 「按下回车键」的「下」不得误判方向键（命名键优先）
+    const enter = parseBehaviorAssertion('按下回车键 → 列表新增一条记录')
+    expect(enter.trigger).toEqual({ kind: 'key', key: 'Enter' })
+  })
+
+  it('M-5：显式箭头优先切分，「计时」词内单字不截断（此前双侧在「计时」的「时」处错位）', () => {
+    const ears = parseEarsAssertion('WHEN 计时中点暂停 → 计时停止')
+    expect(ears.trigger).toBe('计时中点暂停')
+    expect(ears.response).toBe('计时停止')
+    expect(ears.wellFormed).toBe(true)
+    // 效果段「计时启动/停止」入 text-change 词表（M-4）：earsifier prompt 自带示例可走通探针
+    const plan = parseBehaviorAssertion('WHEN 点击开始按钮 → 计时启动')
+    expect(plan.presenceFallback).toBe(false)
+    expect(plan.trigger?.kind).toBe('click')
+    expect(plan.effect?.kind).toBe('text-change')
+  })
+
+  it('M-5：无显式箭头时语义词兑底仍工作（存量格式，trigger ≥2 字防词内截断）', () => {
+    const ears = parseEarsAssertion('点击保存按钮后列表新增一条记录')
+    expect(ears.trigger).toBe('点击保存按钮')
+    expect(ears.response).toBe('列表新增一条记录')
+    const wordy = parseEarsAssertion('计时中点暂停后计时停止')
+    expect(wordy.trigger).toBe('计时中点暂停')
+    expect(wordy.response).toBe('计时停止')
+  })
+
+  it('M-4 互查：词表可探针子集的典型句式全部解析为行为探针（不退化 presenceFallback）', () => {
+    const samples: Array<[string, string]> = [
+      ['WHEN 点击保存按钮 → 列表新增一条记录', 'click'],
+      ['WHEN 按右方向键 → 车辆 x 坐标增加', 'key'],
+      ['WHEN 按下保存按钮 → 弹出确认框', 'click'],
+      ['WHEN 双击列表条目 → 显示详情弹层', 'dblclick'],
+      ['WHEN 在任务输入框输入内容 → 输入框内容更新', 'fill'],
+      ['WHEN 选择月份 → 汇总数值更新', 'select'],
+    ]
+    for (const [assertion, kind] of samples) {
+      const plan = parseBehaviorAssertion(assertion)
+      expect(plan.presenceFallback, assertion).toBe(false)
+      expect(plan.trigger?.kind, assertion).toBe(kind)
+    }
+  })
+
+  it('M-4：prompt 只渲染探针可执行子集（不可执行动词不诱导 EARS 化产出探针 MISS 形态）', () => {
+    const rendered = renderTriggerVocabularyForPrompt()
+    expect(rendered).toContain('点击')
+    expect(rendered).toContain('按键')
+    expect(rendered).toContain('输入')
+    expect(rendered).toContain('选择')
+    expect(rendered).toContain('双击')
+    expect(rendered).not.toContain('悬停')
+    expect(rendered).not.toContain('拖拽')
+    expect(rendered).not.toContain('滚动')
+    expect(rendered).not.toContain('聚焦')
+    expect(rendered).not.toContain('上传')
+  })
+
+  it('m-7：「当处于空列表」识别为 while（while 前缀先于 when 匹配）', () => {
+    const parsed = parseEarsAssertion('当处于空列表 → 显示空状态提示')
+    expect(parsed.kind).toBe('while')
+    expect(parsed.trigger).toBe('空列表')
   })
 })
 

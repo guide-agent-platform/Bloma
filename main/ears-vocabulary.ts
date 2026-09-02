@@ -25,10 +25,11 @@
 /** EARS 句式类别（无前缀的存量断言解析为 when，与现状「触发→效果」语义一致）。 */
 export type EarsPatternKind = 'when' | 'while' | 'if'
 
-/** 句式前缀（大小写不敏感；中文场景词与英文 EARS 关键词并认）。 */
+/** 句式前缀（大小写不敏感；中文场景词与英文 EARS 关键词并认）。
+ * 顺序（m-7 修正）：while 必须先于 when——「当处于」否则被「当」截走错标 when。 */
 const PATTERN_PREFIXES: Array<{ kind: EarsPatternKind; re: RegExp }> = [
-  { kind: 'when', re: /^\s*(?:WHEN|当)\s*[:：]?\s*/i },
   { kind: 'while', re: /^\s*(?:WHILE|当处于|处于)\s*[:：]?\s*/i },
+  { kind: 'when', re: /^\s*(?:WHEN|当)\s*[:：]?\s*/i },
   { kind: 'if', re: /^\s*(?:IF|如果|若)\s*[:：]?\s*/i },
 ]
 
@@ -55,6 +56,9 @@ export interface TriggerVocabEntry {
     | 'focus'
   /** 用户可读动作名（GWT 场景文本用） */
   label: string
+  /** 探针可执行（parseTrigger/dispatchTrigger 已实现该类）：EARS 化 prompt 只渲染
+   *  该子集（M-4）——渲染不可执行动词会诱导 EARS 化产出探针全 MISS 的断言形态。 */
+  probeable?: boolean
 }
 
 /**
@@ -65,13 +69,13 @@ export interface TriggerVocabEntry {
  * GWT 探针率不升反降。
  */
 export const TRIGGER_VOCABULARY: TriggerVocabEntry[] = [
-  { pattern: /双击|双(?:击|按)/, playwrightAction: 'dblclick', label: '双击' },
-  { pattern: /点击|单击|点按|点「|按下|勾选/, playwrightAction: 'click', label: '点击' },
-  { pattern: /输入|键入|填写|填入|录入/, playwrightAction: 'fill', label: '输入' },
-  { pattern: /选择|选中|切换(?:到)?|下拉/, playwrightAction: 'selectOption', label: '选择' },
+  { pattern: /双击|双(?:击|按)/, playwrightAction: 'dblclick', label: '双击', probeable: true },
+  { pattern: /点击|单击|点按|点「|按下|勾选/, playwrightAction: 'click', label: '点击', probeable: true },
+  { pattern: /输入|键入|填写|填入|录入/, playwrightAction: 'fill', label: '输入', probeable: true },
+  { pattern: /选择|选中|切换(?:到)?|下拉/, playwrightAction: 'selectOption', label: '选择', probeable: true },
   { pattern: /上传|附加|导入文件/, playwrightAction: 'setInputFiles', label: '上传' },
   { pattern: /勾掉|取消勾选|取消选中/, playwrightAction: 'uncheck', label: '取消勾选' },
-  { pattern: /按\s*(?:右|左|上|下)?(?:方向键|键)|按\s*[A-Za-z0-9]\s*键|按空格|按回车|按\s*esc|按下\s*(?:右|左|上|下)/i, playwrightAction: 'press', label: '按键' },
+  { pattern: /按\s*(?:右|左|上|下)?(?:方向键|键)|按\s*[A-Za-z0-9]\s*键|按空格|按回车|按\s*esc|按下\s*(?:右|左|上|下)/i, playwrightAction: 'press', label: '按键', probeable: true },
   { pattern: /悬停|移入|鼠标(?:移|停)/, playwrightAction: 'hover', label: '悬停' },
   { pattern: /拖(?:拽|动|到)/, playwrightAction: 'dragTo', label: '拖拽' },
   { pattern: /滚动|下滑|上滑|翻页/, playwrightAction: 'scroll', label: '滚动' },
@@ -111,7 +115,7 @@ export const RESPONSE_VOCABULARY: ResponseVocabEntry[] = [
   { pattern: /跳转(?:至|到)|导航(?:至|到)|前往|进入.*页/, assertionKind: 'navigation', label: '跳转/导航' },
   { pattern: /保持|仍|不变|维持/, assertionKind: 'unchanged', label: '保持不变' },
   { pattern: /新增|添加|多一条|增加一条|生成一条|入列/, assertionKind: 'item-added', label: '新增条目' },
-  { pattern: /(?:文字|文本|内容|数值|数字|状态|结果|计数).{0,6}(?:变化|改变|更新|刷新|变为)|显示为/, assertionKind: 'text-change', label: '文本/数值变化' },
+  { pattern: /(?:文字|文本|内容|数值|数字|状态|结果|计数|计时|时间|分数|得分|余额|数量).{0,6}(?:变化|改变|更新|刷新|变为|显示为|启动|停止|暂停|继续|清零|归零|重置)|显示为/, assertionKind: 'text-change', label: '文本/数值变化' },
   { pattern: /持久(?:化|保存)|保存后仍在|重开(?:后|时)仍|刷新(?:后|时)仍/, assertionKind: 'persisted', label: '持久化' },
   { pattern: /提示|警示|报错|错误信息|校验|拒绝/, assertionKind: 'prompt', label: '提示/校验' },
 ]
@@ -164,8 +168,21 @@ export interface EarsAssertion {
   wellFormed: boolean
 }
 
-/** 中轴分隔符：与 behavior-assertions.ts 的 ARROW_RE 同款家族（→/->/=>/之后就/之后/时/后）。 */
-const EARS_ARROW_RE = /^(.+?)(?:→|->|=>|之后就|之后|的时候|时|后)(.+)$/
+/** 中轴分隔（M-5 修正）：显式箭头族（→/->/=>）优先；语义词族（之后就/之后/的时候/时/后）
+ *  仅在无箭头时兑底，且要求 trigger 段 ≥2 字——防「计时中点暂停」「暂停后恢复」类
+ *  词内单字「时/后」被 lazy 匹配最早截断（中轴错位使双侧解析全盘失效）。
+ *  behavior-assertions.ts 的 parseBehaviorAssertion 与本模块共用此切分（单点真相）。 */
+const EXPLICIT_ARROW_RE = /^(.+?)(?:→|->|=>)(.+)$/
+const WORD_ARROW_RE = /^(.{2,}?)(?:之后就|之后|的时候|时|后)(.+)$/
+
+/** 按中轴切分断言（无中轴返回 undefined；trigger/effect 已 trim）。 */
+export function splitAssertionAxis(text: string): { trigger: string; effect: string } | undefined {
+  const explicit = EXPLICIT_ARROW_RE.exec(text)
+  if (explicit) return { trigger: explicit[1].trim(), effect: explicit[2].trim() }
+  const wordy = WORD_ARROW_RE.exec(text)
+  if (wordy) return { trigger: wordy[1].trim(), effect: wordy[2].trim() }
+  return undefined
+}
 
 /** 解析单条 EARS 断言（词表与句式的唯一解析入口；judge/GWT/EARS 化共用）。 */
 export function parseEarsAssertion(assertion: string): EarsAssertion {
@@ -182,9 +199,9 @@ export function parseEarsAssertion(assertion: string): EarsAssertion {
       break
     }
   }
-  const arrow = EARS_ARROW_RE.exec(rest)
-  const trigger = arrow?.[1]?.trim() || undefined
-  const response = arrow?.[2]?.trim() || undefined
+  const axis = splitAssertionAxis(rest)
+  const trigger = axis?.trigger || undefined
+  const response = axis?.effect || undefined
   return {
     raw: text,
     kind,
@@ -274,9 +291,10 @@ export function deriveGwtSkeleton(assertion: string): GwtSkeleton | null {
 // prompt 用词表渲染（EARS 化 prompt 与校验器共用同一份常量的文本形态）
 // ---------------------------------------------------------------------------
 
-/** trigger 词表文本（进 EARS 化 prompt 的「允许触发动词」清单）。 */
+/** trigger 词表文本（进 EARS 化 prompt 的「允许触发动词」清单）。
+ *  只渲染探针可执行子集（M-4）：诱导产出 runner 能执行的句式，防探针率不升反降。 */
 export function renderTriggerVocabularyForPrompt(): string {
-  return [...new Set(TRIGGER_VOCABULARY.map((entry) => entry.label))].join('、')
+  return [...new Set(TRIGGER_VOCABULARY.filter((entry) => entry.probeable).map((entry) => entry.label))].join('、')
 }
 
 /** response 词表文本（进 EARS 化 prompt 的「允许效果措辞」清单）。 */

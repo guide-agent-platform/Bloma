@@ -29,14 +29,16 @@ export const PRD_CONFIRM_OPTION_ADJUST = 'prd_confirm_adjust'
 /** 暂不确认（2026-08-27）：弹窗第三出口——关闭弹窗回对话继续，不开工、pending 消费留痕。 */
 export const PRD_CONFIRM_OPTION_DISMISS = 'prd_confirm_dismiss'
 
-/** 确认未决状态：等用户读卡确认或提出调整。 */
+/** 确认未决状态：等用户读卡确认或提出调整。
+ *  requirements 用完整 SketchRequirement（含 behavior_assertions）——GWT 行为探针从
+ *  sketch_generated 事件快照派生场景，瘦身清单会使探针整体退化为存在性检查（B-1）。 */
 interface PendingPrdConfirm {
   request_id: string
   session_id: string
   project_id: string
   mode: AgentSendMessageInput['mode']
   channel_id?: string
-  requirements: Array<{ id: string; description: string }>
+  requirements: SketchRequirement[]
   /** 市调提炼想法（2026-08-29 灵感参考）：确认时勾选采纳并入 PRD */
   ideas: ResearchIdea[]
   query: SDKQuery
@@ -65,7 +67,7 @@ export function hasPendingPrdConfirm(projectId: string): boolean {
 export function publishPrdConfirmCard(opts: {
   input: { request_id: string; session_id: string; project_id: string; mode: AgentSendMessageInput['mode']; channel_id?: string }
   backplane: PrdBackplane
-  requirements: Array<{ id: string; description: string }>
+  requirements: SketchRequirement[]
   query: SDKQuery
   publish: (event: AgentEvent) => void
   /** 市调提炼想法（2026-08-29 灵感参考）：卡面可勾选采纳 */
@@ -159,7 +161,7 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
   // 勾选采纳：只认 pending 里真实存在的 label（防篡改），去重后并入
   const adopted = (input.metadata?.adopted_ideas ?? [])
     .filter((label) => pending.ideas.some((idea) => idea.label === label))
-  let sketchRequirements = pending.requirements
+  let sketchRequirements: SketchRequirement[] = pending.requirements
   if (adopted.length > 0) {
     const additions = adopted.map((label) => ({
       description: `参考市面做法：${label.replace(/\s+/g, ' ').trim()}`,
@@ -167,10 +169,8 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
     }))
     const updatedBackplane = appendPrdRequirements(input.project_id, additions)
     if (updatedBackplane) {
-      sketchRequirements = updatedBackplane.requirements.map((item) => ({
-        id: item.id,
-        description: item.description,
-      }))
+      // 完整清单（含 behavior_assertions）：探针/judge/渲染同源，不再瘦身（B-1）
+      sketchRequirements = updatedBackplane.requirements
     } else {
       // 盘上缺失/损坏：仅并入内存清单（id 由 nextRequirementId 语义编号，防碰撞）
       const memoryMerged = [...pending.requirements]
@@ -183,6 +183,12 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
   }
   const confirmed = markPrdUserConfirmed(input.project_id)
   if (!confirmed) console.error('[prd-confirm] user_confirmed_at 落盘失败（prd.json 缺失/损坏），继续开草图')
+  // B-1：草图任务清单与 prd.json 同源——盘上权威清单含 enrichment 断言与采纳项，
+  // GWT 探针读 sketch_generated 事件快照派生场景，瘦身清单会使主路径行为探针
+  // 整体退化为「页面有元素即过」的存在性检查（与 judge 对账断言永久失配）。
+  if (confirmed?.requirements?.length) {
+    sketchRequirements = confirmed.requirements
+  }
   // EARS 化改写（周计划 §5 P3，方案 §4.3：quick 唯一新增 LLM 步骤）：
   // PRD 用户确认后、草图前；仅 P0 项断言句式升级；三层守卫失败回退原断言不阻塞。
   // 写回 prd.json 只换 behavior_assertions（读-改-写保留 user_confirmed_at 等），
@@ -213,11 +219,18 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
           for (const item of earsified.requirements) {
             if (item.behavior_assertions?.length) byItem[item.id] = item.behavior_assertions
           }
-          updatePrdAssertions(input.project_id, byItem)
-          sketchRequirements = earsified.requirements.map((item) => ({
-            id: item.id,
-            description: item.description,
-          }))
+          // 盘上写回失败时决策日志如实标注（m-2：不谎报 earsified 已落盘）
+          const writeOk = ((): boolean => {
+            try {
+              return updatePrdAssertions(input.project_id, byItem) !== null
+            } catch {
+              return false
+            }
+          })()
+          // B-1：保留完整 item（含改写后 behavior_assertions）——探针场景名与
+          // judge 对账断言同源，不再 map 瘦身丢弃断言
+          sketchRequirements = earsified.requirements
+          if (!writeOk) console.error('[prd-confirm] EARS 化断言写回 prd.json 失败：草图清单用内存改写版，盘上仍为原断言')
           recordDecision({
             project_id: input.project_id,
             session_id: pending.session_id,
@@ -225,7 +238,7 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
               type: 'requirement_earsified',
               title: 'P0 断言 EARS 化改写',
               why: 'PRD 用户确认后、草图前，把 P0 行为断言句式升级为 EARS（只改措辞不改语义），提升 GWT 可派生率',
-              detail: { ...earsified.stats },
+              detail: { ...earsified.stats, prd_write_ok: writeOk },
             },
           })
         }

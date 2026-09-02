@@ -11,12 +11,14 @@
  * hasInteractiveEntry 语义同构），绝不因「看不懂断言」退回产物（防误伤）。
  */
 
-/** 用户侧触发器：按键（含方向/空格/回车/字母数字）或点击（按钮文本/语义 class 提示）。 */
+import { parseEarsAssertion } from './ears-vocabulary'
+
+/** 用户侧触发器：按键（含方向/空格/回车/字母数字）、点击、双击、输入（fill）、下拉选择（select）。 */
 export interface BehaviorTrigger {
-  kind: 'key' | 'click'
+  kind: 'key' | 'click' | 'dblclick' | 'fill' | 'select'
   /** KeyboardEvent.key（kind=key 时） */
   key?: string
-  /** 点击目标提示：按钮文本或语义化 class 片段（kind=click 时） */
+  /** 目标提示：按钮文本/输入框语义/下拉项语义（非 key 类共用） */
   target?: string
 }
 
@@ -35,8 +37,8 @@ export interface AssertionPlan {
   presenceFallback: boolean
 }
 
-/** 触发→效果分隔符：「→」「->」「之后就」「之后」「时」「后」。 */
-const ARROW_RE = /^(.+?)(?:→|->|=>|之后就|之后|的时候|时|后)(.+)$/
+/** 触发→效果分隔符：单点真相在 ears-vocabulary.splitAssertionAxis（M-5：箭头族优先 +
+ *  语义词兑底要求 trigger ≥2 字），本模块不再维护平行正则。 */
 
 /**
  * 解析单条行为断言。
@@ -47,36 +49,57 @@ const ARROW_RE = /^(.+?)(?:→|->|=>|之后就|之后|的时候|时|后)(.+)$/
  */
 export function parseBehaviorAssertion(assertion: string): AssertionPlan {
   const text = assertion.trim()
-  const match = ARROW_RE.exec(text)
-  if (!match) return { assertion: text, presenceFallback: true }
-  const trigger = parseTrigger(match[1])
-  const effect = parseEffect(match[2])
+  // 前缀剥离 + 中轴切分单点在 ears-vocabulary（M-5：箭头族优先，语义词兜底）
+  const ears = parseEarsAssertion(text)
+  if (!ears.trigger || !ears.response) return { assertion: text, presenceFallback: true }
+  const trigger = parseTrigger(ears.trigger)
+  const effect = parseEffect(ears.response)
   if (!trigger || !effect) return { assertion: text, presenceFallback: true }
   return { assertion: text, trigger, effect, presenceFallback: false }
 }
 
-/** 解析触发器：按/点击 + 按键名或按钮提示。 */
+/** 解析触发器：按/点击/双击/输入/选择 + 按键名或目标提示。
+ * 口径（M-3/M-4，与 ears-vocabulary TRIGGER_VOCABULARY 可探针子集一致，互查测试锁定）：
+ * - 命名键（空格/回车/Esc/退格）优先于方向键判定（防「按下回车键」的「下」误判）；
+ * - 方向键要求完整词形（方向字+「方向键/箭头/键」），「按下保存按钮」的「下」不是键名，
+ *   落入 click 分支（词表 click 条目含「按下」，两处口径一致）；
+ * - click 词表含「勾选/选中」；fill/select 为 M-4 新增可探针类。 */
 function parseTrigger(raw: string): BehaviorTrigger | undefined {
   const text = raw.trim()
-  // 按键类：按右(方向键)/按左键/按上/按下方向键/按空格/按回车/按 W 键
+  // 按键类：按/敲/触发 + 完整键名（命名键先于方向键）
   if (/(按|敲|触发)/.test(text)) {
-    if (/右/.test(text)) return { kind: 'key', key: 'ArrowRight' }
-    if (/左/.test(text)) return { kind: 'key', key: 'ArrowLeft' }
-    if (/上/.test(text)) return { kind: 'key', key: 'ArrowUp' }
-    if (/下/.test(text)) return { kind: 'key', key: 'ArrowDown' }
     if (/空格|space/i.test(text)) return { kind: 'key', key: ' ' }
     if (/回车|enter/i.test(text)) return { kind: 'key', key: 'Enter' }
     if (/esc|退出键/i.test(text)) return { kind: 'key', key: 'Escape' }
     if (/删除|退格|backspace/i.test(text)) return { kind: 'key', key: 'Backspace' }
+    const direction = /右/.test(text) ? 'ArrowRight' : /左/.test(text) ? 'ArrowLeft' : /上/.test(text) ? 'ArrowUp' : /下/.test(text) ? 'ArrowDown' : undefined
+    if (direction && /(方向键|箭头|键)/.test(text)) return { kind: 'key', key: direction }
     // 「按 W 键」「按 1」等单字符键
     const singleKey = /按\s*([A-Za-z0-9])\s*键?/.exec(text)
     if (singleKey) return { kind: 'key', key: singleKey[1].toUpperCase() === singleKey[1] ? singleKey[1] : singleKey[1].toUpperCase() }
   }
-  // 点击类：点击保存按钮 / 点「开始」 / 单击提交
-  const clickMatch = /(点击|单击|点按|按下|点)\s*[「「'"“]?([^」」'"”]+?)[」」'"”]?\s*(?:按钮|键|控件|图标)?$/.exec(text)
+  // 双击类（M-4）：双击条目 / 双按XX
+  const dblMatch = /双(?:击|按)\s*[「'"“]?([^」'"”，。,]{1,12})/.exec(text)
+  if (dblMatch) {
+    const target = dblMatch[1]?.trim()
+    if (target) return { kind: 'dblclick', target }
+  }
+  // 点击类：点击保存按钮 / 点「开始」 / 单击提交 / 按下保存 / 勾选记住我（词表口径含「按下/勾选/选中」）
+  const clickMatch = /(点击|单击|点按|按下|勾选|选中|点)\s*[「「'"“]?([^」」'"”]+?)[」」'"”]?\s*(?:按钮|键|控件|图标)?$/.exec(text)
   if (clickMatch) {
     const target = clickMatch[2]?.trim()
     if (target && target.length <= 12) return { kind: 'click', target }
+  }
+  // 输入类（M-4）：在XX输入框输入… / 输入XX（无框名时目标为任意输入框）
+  if (/(输入|键入|填写|填入|录入)/.test(text)) {
+    const boxMatch = /([\u4e00-\u9fa5A-Za-z0-9]{1,8}?)\s*(?:输入框|文本框|输入域|搜索框|字段)/.exec(text)
+    return { kind: 'fill', target: boxMatch?.[1]?.trim() || 'input' }
+  }
+  // 下拉选择类（M-4）：选择XX / 下拉选XX / 切换到XX
+  const selectMatch = /(?:选择|下拉选?|切换到?)\s*[「'"“]?([^」'"”，。,]{1,12})/.exec(text)
+  if (selectMatch) {
+    const target = selectMatch[1]?.trim()
+    if (target) return { kind: 'select', target }
   }
   return undefined
 }
@@ -107,7 +130,7 @@ function parseEffect(raw: string): BehaviorEffect | undefined {
   if (/(新增|添加|加入|多一条|增加一条|记录一条|保存一条|生成一条|入账)/.test(text)) {
     return { kind: 'add-item', keywords: ['appendChild', 'insertAdjacentHTML', 'createElement', 'innerHTML', 'push(', 'unshift('] }
   }
-  if (/(文字|文本|内容|数值|数字|状态|结果).{0,6}(变化|改变|更新|刷新|变化为|变为)/.test(text)) {
+  if (/(?:文字|文本|内容|数值|数字|状态|结果|计数|计时|时间|分数|得分|余额|数量).{0,6}(?:变化|改变|更新|刷新|变化为|变为|显示为|启动|停止|暂停|继续|清零|归零|重置)/.test(text)) {
     return { kind: 'text-change', keywords: ['textContent', 'innerText', 'innerHTML', 'value'] }
   }
   return undefined
@@ -143,5 +166,8 @@ export function describeTrigger(trigger: BehaviorTrigger): string {
     }
     return keyCopy[trigger.key ?? ''] ?? `按下 ${trigger.key ?? ''} 键`
   }
+  if (trigger.kind === 'dblclick') return `双击「${trigger.target ?? ''}」目标`
+  if (trigger.kind === 'fill') return trigger.target === 'input' ? '在输入框输入内容' : `在「${trigger.target ?? ''}」输入框输入内容`
+  if (trigger.kind === 'select') return `选择「${trigger.target ?? ''}」选项`
   return `点击「${trigger.target ?? ''}」控件`
 }
