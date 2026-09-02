@@ -539,6 +539,21 @@ export function setupGlobalAgentListeners(): () => void {
         store.set(stageIndicatorLabelAtom, STAGE_LABEL_MAP[event.payload.stage as WorkflowStage] ?? '处理中')
       }
 
+      // M-14：error 事件接通 globalUserErrorAtom（此前全仓无写入点——死代码，
+      // PreviewPanel 的 error 兑底与 ChatPanel 的 alert 条永不触发）；
+      // 新一轮任何输出（message_delta）到来时清空，避免陈旧错误常驻。
+      if (isEventForCurrentProject()) {
+        if (event.type === 'error') {
+          const errorText =
+            typeof event.payload.message === 'string' && event.payload.message
+              ? event.payload.message
+              : String(event.payload.code ?? '生成失败')
+          store.set(globalUserErrorAtom, errorText)
+        } else if (event.type === 'message_delta' && typeof event.payload.text === 'string' && event.payload.text) {
+          store.set(globalUserErrorAtom, null)
+        }
+      }
+
       // Agent Loop 工具进行中（PR4）：编程阶段把阶段指示细化为「正在 {工具}」。
       // 只在生成/测试/修复/迭代阶段生效——澄清等对话阶段没有轮次语义；
       // 下一次 stage_changed 会重置回标准阶段文案，无需在此清理。

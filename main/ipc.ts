@@ -73,6 +73,7 @@ import {
   reopenProject,
   submitCorrection,
   unarchiveProject,
+  updateProject,
   upgradeProject,
 } from './project-service'
 import { cleanOrphanSessions, listSessions, loadMessages } from './session-service'
@@ -86,7 +87,7 @@ import {
 } from './category-routing'
 import { listPromptSlots, readPromptSlot, resetPromptSlot, savePromptSlot } from './prompt-service'
 import { listDocuments, readDocument, syncDocuments, isPrdUserConfirmed } from './document-engine'
-import { isCircuitBreakSettled } from './recovery-service'
+import { isCircuitBreakSettled, convergeStageFromEvidence, evaluateDiskArtifact } from './recovery-service'
 import {
   createSnapshot,
   listSnapshotDocuments,
@@ -350,7 +351,23 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
           .catch((error) => {
             // U5：用户主动停止（signal 已 abort）不再发 error 事件——渲染端已落「已停止生成」，
             // 避免两条相互矛盾的消息；只有真实失败才上报错误。
-            if (abortController.signal.aborted) return
+            if (abortController.signal.aborted) {
+              // M-15：停止后按磁盘证据回滚阶段（与启动对账/熔断回滚同口径）——否则项目
+              // 卡 generating_mvp/testing/judge_review 直至重启，后续「好了吗」落入编程
+              // 路径被模型编造成「还在生成」。
+              const projectNow = findProject(input.project_id)
+              const stage = convergeStageFromEvidence(evaluateDiskArtifact(projectNow.root_path))
+              updateProject(input.project_id, { current_stage: stage })
+              mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, {
+                event_id: randomUUID(),
+                session_id: input.session_id,
+                project_id: input.project_id,
+                type: 'stage_changed',
+                payload: { stage },
+                created_at: new Date().toISOString(),
+              })
+              return
+            }
             // 熔断回滚已完成收尾（T5）：阶段/消息/completed 事件已在回滚内发布，不再发 error
             if (isCircuitBreakSettled(error)) return
             // P1：不再静默吞错——MVP 生成/测试链失败时向渲染端发 error 事件，
@@ -456,6 +473,35 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
         // （秒级、低成本方向确认），MVP 只能经确认草图或已交付后的迭代到达）
         const stage = String(findProject(input.project_id).current_stage ?? '')
         const mode = findProject(input.project_id).mode
+        // M-14：生成中不再发「我按这处意见先调整草图」——此时 MVP/迭代后台运行
+        // 占项目锁，runAgent 会抛 AGENT_PROJECT_BUSY，承诺全落空且 error 零呈现；
+        // 如实告知等生成完成（与渲染端 handleCorrectionSubmit 守卫双保险）。
+        const BUSY_STAGES = new Set([
+          'generating_sketch',
+          'generating_mvp',
+          'testing',
+          'judge_review',
+          'repairing',
+          'iterating',
+          'upgrading',
+        ])
+        if (BUSY_STAGES.has(stage)) {
+          const busyNote = '正在生成中，这处修改意见我先记下了；等这一版完成后，你再点这里或直接告诉我，我马上按意见调整。'
+          appendJsonLine(getAgentSessionPath(input.session_id), {
+            role: 'assistant',
+            content: [{ type: 'text', text: busyNote }],
+            timestamp: Date.now(),
+          })
+          mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, {
+            event_id: randomUUID(),
+            session_id: input.session_id,
+            project_id: input.project_id,
+            type: 'message_delta',
+            payload: { text: busyNote },
+            created_at: new Date().toISOString(),
+          })
+          return result
+        }
         if (stage !== 'ready' && stage !== 'completed') {
           const sketchNote = '收到，我按这处意见先调整草图（确认草图后才会生成完整功能）。'
           appendJsonLine(getAgentSessionPath(input.session_id), {

@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { registerIpcHandlers } from '../../main/ipc'
-import { createProject, updateProject } from '../../main/project-service'
-import { resetSDKQueryForTests, setSDKQueryForTests } from '../../main/orchestrator'
+import { createProject, findProject, updateProject } from '../../main/project-service'
+import { cancelAgent, resetSDKQueryForTests, setSDKQueryForTests } from '../../main/orchestrator'
 import type { SDKQuery } from '../../main/orchestrator'
 import { getDocumentsDir } from '../../storage/config-paths'
 import { IPC_CHANNELS } from '../../shared/types'
@@ -88,6 +88,50 @@ describe('ipc confirm-sketch → runMvpTask wiring (A2-14b)', () => {
         query: sentinel,
       }),
     )
+  })
+
+  it('M-15：MVP 生成中停止 → catch 按磁盘证据回滚阶段并发 stage_changed（不再卡 generating_mvp 直至重启）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ipc-m15-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    // 磁盘证据：草图级产物（isHtmlDocument 要求内联 <style>；无交互入口）→ 收敛 sketch_ready
+    writeFileSync(join(project.root_path, 'index.html'), '<html><head><style>h1{color:#333}</style></head><body><h1>草图占位</h1></body></html>', 'utf8')
+
+    const sentEvents: Array<{ type: string; payload: { stage?: string; code?: string } }> = []
+    const handlers = new Map<string, (_event: unknown, payload: unknown) => unknown>()
+    registerIpcHandlers(
+      { handle: (channel: string, handler: (_event: unknown, payload: unknown) => unknown) => handlers.set(channel, handler) } as never,
+      { webContents: { send: (_: unknown, event: { type: string; payload: { stage?: string; code?: string } }) => sentEvents.push(event) } } as never,
+    )
+
+    // runMvpTask 内部模拟用户点停止：cancelAgent abort 后抛错（与真实链路同构）
+    runMvpTaskMock.mockImplementationOnce(async () => {
+      await cancelAgent({ request_id: 'req-stop', session_id: 'session-m15', reason: 'user_cancelled' })
+      throw new Error('ABORTED:RUN_STOPPED')
+    })
+
+    const confirmSketch = handlers.get(IPC_CHANNELS.PROJECT_CONFIRM_SKETCH)!
+    await confirmSketch!({}, {
+      request_id: 'req-cs',
+      project_id: project.project_id,
+      session_id: 'session-m15',
+      snapshot_id: 'snap-1',
+      decision: 'accepted',
+    })
+
+    // 等 fire-and-forget 链收尾（catch 回滚）
+    await new Promise((resolve) => setTimeout(resolve, 200))
+
+    // 阶段按磁盘证据回滚为 sketch_ready（此前静默 return 卡 generating_mvp）
+    expect(findProject(project.project_id).current_stage).toBe('sketch_ready')
+    const stageEvent = sentEvents.find((event) => event.type === 'stage_changed')
+    expect(stageEvent?.payload.stage).toBe('sketch_ready')
+    // U5 口径：catch 不再补发 MVP 链失败的 error——允许的 error 只有 cancelAgent 自己的
+    // AGENT_CANCELLED 停止终态（渲染端靠它落「已停止生成」）
+    const nonCancelErrors = sentEvents.filter(
+      (event) => event.type === 'error' && event.payload.code !== 'AGENT_CANCELLED',
+    )
+    expect(nonCancelErrors).toEqual([])
   })
 })
 

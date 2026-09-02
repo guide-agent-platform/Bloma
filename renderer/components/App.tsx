@@ -26,6 +26,7 @@ import {
   snapshotsListAtom,
   previewUrlsAtom,
   currentSnapshotIdAtom,
+  hasActiveStreamAtom,
   loadAgentSessions,
   loadSessionHistory,
   loadSnapshots,
@@ -170,6 +171,7 @@ const AppRoutes: React.FC = () => {
   const decisionCards = useUserDecisionCards()
   const currentProject = useAtomValue(currentProjectAtom)
   const currentStage = useAtomValue(workflowStageAtom)
+  const hasActiveStream = useAtomValue(hasActiveStreamAtom)
   const previewUrls = useAtomValue(previewUrlsAtom)
   const currentSnapshotId = useAtomValue(currentSnapshotIdAtom)
 
@@ -473,6 +475,27 @@ const AppRoutes: React.FC = () => {
     const api = window.electronAPI
     if (!api?.project?.submitCorrection) return
 
+    // M-14：生成中（或流式运行中）不再承诺「我来帮你调整」——主路径会被项目锁
+    // 拒绝（AGENT_PROJECT_BUSY），两条「我会调整」承诺全落空且 error 零呈现。
+    // 如实告知等生成完成，切断可达性。
+    const generating =
+      hasActiveStream ||
+      currentStage === 'generating_sketch' ||
+      currentStage === 'generating_mvp' ||
+      currentStage === 'testing' ||
+      currentStage === 'judge_review' ||
+      currentStage === 'repairing' ||
+      currentStage === 'iterating' ||
+      currentStage === 'upgrading'
+    if (generating) {
+      appendMessageToSession(sessionId, {
+        role: 'system',
+        content: [{ type: 'text', text: '正在生成中，这处意见我先记在心里；等这版完成后你再指给我，我马上按意见调整。' }],
+        timestamp: Date.now(),
+      })
+      return
+    }
+
     const projectId = currentProject?.project_id ?? projectList[0]?.project_id ?? ''
 
     // U8：优先使用点击时已收集的 DOM 上下文（PreviewPanel 点击即收集用于高亮）；缺失时提交前兜底收集一次。
@@ -517,7 +540,7 @@ const AppRoutes: React.FC = () => {
       user_note: payload.userNote || undefined,
       mode: payload.userNote ? 'user_note' : 'guess',
     })
-  }, [sessionId, currentProject, projectList])
+  }, [sessionId, currentProject, projectList, hasActiveStream, currentStage])
 
   // ==================== 快照回滚 ====================
 
