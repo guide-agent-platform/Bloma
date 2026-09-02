@@ -77,8 +77,27 @@ export function setWebResearchTimeoutForTests(ms: number): void {
  *  覆盖 static-server.js（篡改沙箱服务端含 CSP 响应头），精确匹配会被绕过。 */
 const SYSTEM_FILES = new Set(['package.json', 'static-server.js'])
 
+/** 8.3 短名族（T-2 实测实锤：Windows 短名别名可写覆盖系统文件——写入
+ *  'STATIC~1.JS' 实际命中 static-server.js；'PACKAG~1.JSO' 命中 package.json。
+ *  生成规则与 Windows 一致：基名前 6 字符 + ~序号 + 扩展名前 3 字符）。 */
+const SYSTEM_FILE_SHORT_NAMES = new Set(
+  [...SYSTEM_FILES].map((name) => {
+    const dot = name.lastIndexOf('.')
+    const base = name.slice(0, dot).slice(0, 6)
+    const ext = name.slice(dot + 1, dot + 4)
+    return `${base}~1.${ext}`.toLowerCase()
+  }),
+)
+
 function isSystemFile(rel: string): boolean {
-  return SYSTEM_FILES.has(rel.toLowerCase())
+  const lower = rel.toLowerCase()
+  if (SYSTEM_FILES.has(lower)) return true
+  // T-2：短名别名族（STATIC~N.JS / PACKAG~N.JSO）——~N 序号归一到 ~1 后比对
+  const base = lower.split(/[\\/]/).pop() ?? lower
+  if (/^[a-z0-9]{1,6}~\d+\.[a-z0-9]{1,3}$/.test(base)) {
+    if (SYSTEM_FILE_SHORT_NAMES.has(base.replace(/~\d+\./, '~1.'))) return true
+  }
+  return false
 }
 
 /** 模型可写白名单后缀（静态前端产物）。 */

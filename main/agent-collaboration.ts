@@ -129,6 +129,9 @@ export interface DelegationParentContext {
   /** omit 推广（2026-08-27）：子 loop 透传父渠道 providerType，Token Plan 类渠道免 400 往返 */
   providerType?: string
   publish: (type: AgentEvent['type'], payload: Record<string, unknown>) => void
+  /** 无代答者的合成父（如审查委派 review-{uuid}）——子代理提问时立即以该固定答复回传
+   *  而不挂起干等（T-5：此前无人代答，提问会挂到 120/150s 超时）。 */
+  autoAnswer?: string
   /** 子 loop 每轮埋点（programming-orchestrator 注入，session_id=子 sessionId）。 */
   onChildTurn?: (info: AgentLoopTurnInfo, child: { sessionId: string; requestId: string; role: DelegationRole }) => void
   /** 追加到子 agent 工具面的定向工具（2026-09 内审闭环）：如 read_conversation_history /
@@ -498,6 +501,19 @@ export function askDelegationQuestion(ctx: ToolContext, question: string): Promi
   if (!record) throw new Error(`未找到当前子会话对应的委派记录（child_session_id=${ctx.sessionId}）`)
   if (record.status !== 'running') throw new Error(`委派已不在运行（status=${record.status}），不能提问`)
   if (record.pendingQuestion) throw new Error('已有待回答的问题，请等待主 agent 回答后再提问')
+
+  // T-5：无代答者的合成父（审查委派）——不挂起干等超时，立即回固定答复
+  const parentCtx = parentContexts.get(record.parentSessionId)
+  if (parentCtx?.autoAnswer !== undefined) {
+    parentCtx.publish('delegation_question', {
+      delegation_id: record.delegationId,
+      child_session_id: record.childSessionId,
+      role: record.role,
+      question,
+      auto_answered: true,
+    })
+    return Promise.resolve(parentCtx.autoAnswer)
+  }
 
   record.pendingQuestion = question
   record.askSignal.resolve()

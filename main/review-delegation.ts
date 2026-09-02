@@ -105,6 +105,9 @@ export async function runDelegatedReview(opts: {
       system: opts.system,
       editFormat: 'diff',
       childExtraTools: opts.extraTools,
+      // T-5：审查委派是合成父（无真实 agent 代答）——子代理提问立即回固定答复，
+      // 不挂起干等到 120/150s 超时
+      autoAnswer: '（本审查任务没有人工或主 agent 代答：请基于任务描述与项目产物自行判定，不要再次提问。）',
       publish: (type, payload) => {
         opts.publish({
           event_id: randomUUID(),

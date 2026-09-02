@@ -885,7 +885,14 @@ export async function cancelAgent(input: AgentCancelInput): Promise<AgentCancelR
     persistTerminalMessage(target.sessionId, 'error', { code: 'AGENT_CANCELLED', message: '用户停止了本次生成' })
   }
   // message-queue：用户停止 → 不自动派发排队消息（stoppedByUser=true，停止意图优先）
-  // 并清空该会话排队消息，避免「已排队」气泡永久 limbo（审查 P2-④）
+  // 并清空该会话排队消息，避免「已排队」气泡永久 limbo（审查 P2-④）。
+  // T-4：按 project_id 停止是主取消范围——同项目其他 session 的队列同样清除/抑制，
+  // 否则后台 run 注销时 onRunComplete（非 stoppedByUser）会把它们的排队消息自动派发，
+  // 违背停止意图。
+  for (const target of targets) {
+    sessionMessageQueue.clear(target.sessionId)
+    sessionMessageQueue.onRunComplete(target.sessionId, undefined, true)
+  }
   sessionMessageQueue.onRunComplete(input.session_id, undefined, true)
   sessionMessageQueue.clear(input.session_id)
   return { cancelled: true, session_id: input.session_id }

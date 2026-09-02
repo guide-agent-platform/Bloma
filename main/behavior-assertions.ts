@@ -90,9 +90,11 @@ function parseTrigger(raw: string): BehaviorTrigger | undefined {
     const target = clickMatch[2]?.trim()
     if (target && target.length <= 12) return { kind: 'click', target }
   }
-  // 输入类（M-4）：在XX输入框输入… / 输入XX（无框名时目标为任意输入框）
+  // 输入类（M-4）：在XX输入框输入… / 输入XX（无框名时目标为任意输入框）。
+  // T-8 实测修正：开头的介词（在/向/往/于/从）先剥——否则 capture 把「在」带进
+  // target（「在任务」），真实页面 placeholder/id 不含介词导致 fill 探针全 MISS
   if (/(输入|键入|填写|填入|录入)/.test(text)) {
-    const boxMatch = /([\u4e00-\u9fa5A-Za-z0-9]{1,8}?)\s*(?:输入框|文本框|输入域|搜索框|字段)/.exec(text)
+    const boxMatch = /(?:在|向|往|于|从)?\s*([\u4e00-\u9fa5A-Za-z0-9]{1,8}?)\s*(?:输入框|文本框|输入域|搜索框|字段)/.exec(text)
     return { kind: 'fill', target: boxMatch?.[1]?.trim() || 'input' }
   }
   // 下拉选择类（M-4）：选择XX / 下拉选XX / 切换到XX

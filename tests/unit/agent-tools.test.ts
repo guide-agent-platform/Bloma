@@ -179,6 +179,16 @@ describe('agent-tools（PR2 L2）', () => {
       expect(cased.output).toContain('平台管理')
       const casedJson = await byName(tools, 'write_file').execute({ path: 'Package.JSON', content: '{}' }, ctx)
       expect(casedJson.isError).toBe(true)
+      // T-2：8.3 短名别名同样拒绝（实测写入 'STATIC~1.JS' 命中 static-server.js、
+      // 'PACKAG~1.JSO' 命中 package.json——短名扩展名截 3 字符）
+      for (const short of ['STATIC~1.JS', 'static~2.js', 'PACKAG~1.JSO', 'Packag~3.jso']) {
+        const shortOutcome = await byName(tools, 'write_file').execute({ path: short, content: '// hijack' }, ctx)
+        expect(shortOutcome.isError, short).toBe(true)
+        expect(shortOutcome.output, short).toContain('平台管理')
+      }
+      // 非系统文件的普通短名形态不受影响（创建新文件无害）
+      const benign = await byName(tools, 'write_file').execute({ path: 'MYFILE~1.JS', content: 'const x = 1' }, ctx)
+      expect(benign.isError).toBeFalsy()
       const ext = await byName(tools, 'write_file').execute({ path: 'data.txt', content: 'x' }, ctx)
       expect(ext.isError).toBe(true)
       expect(ext.output).toContain('可写范围')
