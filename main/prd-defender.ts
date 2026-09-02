@@ -34,9 +34,10 @@ export const DEFENDER_SYSTEM_PROMPT = [
   '',
   '【铁律（违反即整轮作废）】',
   '- F-001 是主题锚点：id 与 description 一字不改',
-  '- 已有功能项一个都不能删（id 不许消失）；description 只许澄清措辞、不许偷换语义',
+  '- 已有功能项一个都不能删（id 不许消失）；description 只许澄清措辞、不许偷换语义；id 不许重复（重复会使校验歧义，整稿作废）',
   '- 新增功能项至多一个，id 必须用任务给出的 next_id（补闭环用，如「只有添加没有查看」补查看项）',
   '- 不新增用户没说过的功能、不扩范围（out_of_scope 只许加不许减）',
+  '- constraints（用户约束）原样保留：不许删也不许新增——约束只能来自用户原话，修订者无权代用户声明',
   '- 不虚构用户原话：拿不准就保留原文，在处置说明里写 rejected',
   '- 修订完成后必须调用 write_prd_draft 提交完整修订背板与逐条处置，只在文本里描述改动不算交付',
   '',
@@ -148,8 +149,19 @@ function parseDispositions(raw: unknown[]): DefenderDisposition[] {
 // 代码级校验（不信任模型）
 // =========================================================================
 
-/** 修订背板强制剥除的字段：用户行为事实不继承（陷阱 19/42 口径）。 */
-const NON_INHERITABLE_FIELDS = ['user_confirmed_at', 'sketch_confirmed_at'] as const
+/** 修订背板强制剥除的字段：用户行为事实与冻结语义不继承（陷阱 19/42 口径；frozen_at 防 Defender 伪造冻结）。 */
+const NON_INHERITABLE_FIELDS = ['user_confirmed_at', 'sketch_confirmed_at', 'frozen_at'] as const
+
+/**
+ * PrdBackplane 全部合法顶层字段（与 sketch-engine.ts 类型同步维护）。
+ * Defender 修订稿白名单构造的依据：未知键一律拒收，受保护字段只继承 original。
+ */
+const BACKPLANE_KNOWN_FIELDS = new Set([
+  'project_id', 'name', 'positioning', 'requirements', 'acceptance',
+  'out_of_scope', 'constraints', 'assumptions', 'ux_contract', 'generation_guardrails',
+  'frozen_at', 'user_confirmed_at', 'sketch_confirmed_at',
+  'pages', 'glossary', 'personas', 'data_model', 'interface_spec', 'template_meta', 'section_provenance',
+])
 
 export function validateDefenderDraft(original: PrdBackplane, raw: unknown): { ok: true; draft: DefenderDraft } | { ok: false; violations: string[] } {
   const violations: string[] = []
@@ -180,6 +192,12 @@ export function validateDefenderDraft(original: PrdBackplane, raw: unknown): { o
   const draftItems: SketchRequirement[] = Array.isArray(requirements) ? (requirements as SketchRequirement[]) : []
   const draftIds = draftItems.map((item) => item.id)
 
+  // ①′ id 唯一性：重复 id 使锚点/删项/新增三道校验全部歧义（结构性穿透），一律拒收
+  const duplicateIds = [...new Set(draftIds.filter((id, index) => draftIds.indexOf(id) !== index))]
+  if (duplicateIds.length > 0) {
+    violations.push(`功能项 id 重复（${duplicateIds.join(', ')}）：锚点/删项/新增语义无法判定，整稿拒收`)
+  }
+
   // ② F-001 主题锚点不变（id 存在 + description 逐字一致）
   const anchorOriginal = (original.requirements ?? []).find((item) => item.id === 'F-001')
   const anchorDraft = draftItems.find((item) => item.id === 'F-001')
@@ -192,6 +210,23 @@ export function validateDefenderDraft(original: PrdBackplane, raw: unknown): { o
   // ③ 原 id 不可删（已确认清单不可减）
   for (const id of originalIds) {
     if (!draftIds.includes(id)) violations.push(`已有功能项 ${id} 被删除（已确认清单不可减）`)
+  }
+
+  // ③′ constraints 不许替用户新增（与 out_of_scope「只许加」对称的反向保护：
+  //    约束只能来自用户原话（澄清门/修改门提取），伪造约束会结构性限制后续所有生成）
+  const draftConstraintList = Array.isArray(draft.constraints)
+    ? (draft.constraints as unknown[]).map((item) => String(item).trim())
+    : []
+  const originalConstraintSet = new Set((original.constraints ?? []).map((item) => item.trim()))
+  const forgedConstraints = [...new Set(draftConstraintList.filter((item) => item && !originalConstraintSet.has(item)))]
+  if (forgedConstraints.length > 0) {
+    violations.push(`constraints 新增了用户未声明的约束（${forgedConstraints.join('；')}）：约束只能来自用户原话`)
+  }
+
+  // ③″ 顶层未知键一律拒收（防伪造任意元数据渗透下游：渲染/落盘全量 stringify 不过滤）
+  const unknownKeys = Object.keys(draft).filter((key) => !BACKPLANE_KNOWN_FIELDS.has(key))
+  if (unknownKeys.length > 0) {
+    violations.push(`背板含未知字段（${unknownKeys.join(', ')}）：修订稿只允许背板合法字段`)
   }
 
   // ④ 新增 id ⊆ {nextRequirementId(原)}（max+1 语义、单一新增，不猜号）
@@ -211,13 +246,21 @@ export function validateDefenderDraft(original: PrdBackplane, raw: unknown): { o
     delete (item as Partial<SketchRequirement>).status_note
   }
 
+  // 白名单构造：以 original 为权威底稿展开，只允许 Defender 改写其修订域字段。
+  // generation_guardrails/ux_contract/frozen_at/acceptance/assumptions/P1 扩展字段一律
+  // 继承 original（draft 携带的伪造值在构造中被丢弃——落盘链全量 stringify 不过滤，
+  // 伪造护栏会直接操纵后续 MVP 生成）；user_confirmed_at 剥除语义不变（重走确认门）。
   const cleaned: PrdBackplane = {
-    ...(draft as unknown as PrdBackplane),
-    project_id: original.project_id,
-    // 修订轮不改这两类声明域的语义：out_of_scope 只许加不许减、约束不许删
+    ...original,
+    name: typeof draft.name === 'string' && draft.name.trim() ? draft.name : original.name,
+    positioning: typeof draft.positioning === 'string' && draft.positioning.trim() ? draft.positioning : original.positioning,
+    requirements: draftItems,
+    // 修订轮不改这两类声明域的语义：out_of_scope 只许加不许减、约束不许删不许伪造新增
     out_of_scope: mergeOutofScope(original.out_of_scope ?? [], (draft.out_of_scope as string[]) ?? []),
     constraints: mergeConstraints(original.constraints ?? [], (draft.constraints as string[]) ?? []),
   }
+  delete cleaned.user_confirmed_at
+  delete cleaned.frozen_at
   return { ok: true, draft: { backplane: cleaned, dispositions: [] } }
 }
 
@@ -265,9 +308,11 @@ export function buildDefenderTask(opts: {
   issues: PrdReviewIssue[]
   confirmedRequirements: Array<{ id: string; description: string }>
   conversationExcerpt?: string
+  /** 裁决口径过滤后的 serious 列表（D1/mode 开关）；缺省时按 blocking/major 过滤（兼容旧调用）。 */
+  seriousOverride?: PrdReviewIssue[]
 }): string {
   const { backplane, issues, confirmedRequirements } = opts
-  const serious = issues.filter((issue) => issue.severity === 'blocking' || issue.severity === 'major')
+  const serious = opts.seriousOverride ?? issues.filter((issue) => issue.severity === 'blocking' || issue.severity === 'major')
   const nextId = nextRequirementId(backplane.requirements ?? [])
   const lines: string[] = [
     '【原 PRD 背板 JSON（修订底稿）】',

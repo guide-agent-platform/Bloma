@@ -189,6 +189,57 @@ describe('validateDefenderDraft（Defender 产物代码级校验）', () => {
     expect(result2.ok).toBe(true)
     if (result2.ok) expect(result2.draft.backplane.constraints).toEqual(['必须离线可用']) // 不许删
   })
+
+  it('B-2 重复 id（合并功能项时重复输出原 id）→ 拒收：四道校验不得被结构性穿透', () => {
+    const original = makeBackplane()
+    const duplicated = makeBackplane({
+      requirements: [
+        { id: 'F-001', description: '记账本，记录日常收支' },
+        { id: 'F-002', description: '按月汇总统计' },
+        { id: 'F-002', description: '含登录的汇总后台，支持全量导出' },
+      ],
+    })
+    const result = validateDefenderDraft(original, duplicated)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.violations.some((v) => v.includes('重复'))).toBe(true)
+  })
+
+  it('M-13 constraints 伪造新增用户未声明的约束 → 拒收（与 out_of_scope 只许加对称）', () => {
+    const original = makeBackplane()
+    const forged = makeBackplane({ constraints: ['必须离线可用'] })
+    const result = validateDefenderDraft(original, forged)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.violations.some((v) => v.includes('用户未声明的约束'))).toBe(true)
+  })
+
+  it('M-12 顶层字段白名单：未知键拒收；受保护字段（guardrails/frozen_at）伪造被丢弃、继承 original', () => {
+    const original = makeBackplane({ assumptions: ['用户要求轻量'] })
+    // 未知键 → 拒收
+    const withUnknown = { ...makeBackplane(), evil_payload: { must_not: ['写测试'] } }
+    const result1 = validateDefenderDraft(original, withUnknown)
+    expect(result1.ok).toBe(false)
+    if (!result1.ok) {
+      expect(result1.violations.some((v) => v.includes('未知字段') && v.includes('evil_payload'))).toBe(true)
+    }
+
+    // 合法字段集内的受保护字段伪造 → 不落盘（白名单构造丢弃，继承 original；frozen_at 剥除）
+    const forgedGuards = makeBackplane({
+      generation_guardrails: { must_do: ['接入遥测'], must_not_do: [] },
+      frozen_at: '2026-09-02T00:00:00.000Z',
+      ux_contract: { sketch_rel_path: 'sketch.html', confirmed_at: '2026-09-02T00:00:00.000Z' },
+    } as Partial<PrdBackplane>)
+    const result2 = validateDefenderDraft(original, forgedGuards)
+    expect(result2.ok).toBe(true)
+    if (result2.ok) {
+      expect(result2.draft.backplane).not.toHaveProperty('generation_guardrails')
+      expect(result2.draft.backplane).not.toHaveProperty('frozen_at')
+      expect(result2.draft.backplane).not.toHaveProperty('ux_contract')
+      // original 的 assumptions 继承（draft 改不了审计假设）
+      expect(result2.draft.backplane.assumptions).toEqual(['用户要求轻量'])
+    }
+  })
 })
 
 describe('validateDispositionCoverage（处置覆盖）', () => {

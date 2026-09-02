@@ -301,6 +301,7 @@ export async function runPrdReviewGate(opts: InternalAuditOptions): Promise<PrdR
     const defender = await runDefenderRound({
       backplane: currentBackplane,
       issues: currentIssues,
+      mode: opts.mode,
       confirmedRequirements,
       conversationExcerpt,
       query,
@@ -643,6 +644,7 @@ interface DefenderRoundResult {
 async function runDefenderRound(opts: {
   backplane: PrdBackplane
   issues: PrdReviewIssue[]
+  mode?: AgentSendMessageInput['mode']
   confirmedRequirements: Array<{ id: string; description: string }>
   conversationExcerpt?: string
   query: SDKQuery
@@ -653,7 +655,7 @@ async function runDefenderRound(opts: {
   requestId?: string
   publish?: (event: AgentEvent) => void
 }): Promise<DefenderRoundResult> {
-  const serious = opts.issues.filter((issue) => issue.severity === 'blocking' || issue.severity === 'major')
+  const serious = seriousIssues(opts.issues, opts.mode)
   let submitted: { backplane: unknown; dispositions: DefenderDisposition[] } | undefined
   const writeTool = buildWritePrdDraftTool((draft) => {
     submitted = { backplane: draft.backplane, dispositions: draft.dispositions }
@@ -661,6 +663,7 @@ async function runDefenderRound(opts: {
   const task = buildDefenderTask({
     backplane: opts.backplane,
     issues: opts.issues,
+    seriousOverride: serious,
     confirmedRequirements: opts.confirmedRequirements,
     conversationExcerpt: opts.conversationExcerpt,
   })
