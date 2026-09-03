@@ -14,11 +14,13 @@
  *
  * 两出口（整体确认 + 逐项异议，均复用 card_option 元数据，零新 IPC）：
  *  - 确认无误，开始画草图 → prd_confirm_confirm（主进程落 user_confirmed_at 后开草图）
- *  - 有要调整的 / 某条「这条不对」→ prd_confirm_adjust（补充文本带条目 id 回向导修订）
+ *  - 有要调整的 / 某条「这条不对」→ prd_confirm_adjust 累计池（2026-09-02 决议 7）：
+ *    调整先压栈（点 N 条「这条不对」累计 N 条，不再一条一轮），统一批量提交后
+ *    合并为一条消息回向导，一轮修订闭环统一处理；失败恢复弹窗、池内容不丢。
  */
 
-import React, { useState } from 'react'
-import { useAtomValue, useSetAtom } from 'jotai'
+import React, { useEffect, useRef, useState } from 'react'
+import { useAtomValue, useSetAtom, useStore } from 'jotai'
 import {
   activeAgentSessionIdAtom,
   globalUserErrorAtom,
@@ -27,7 +29,7 @@ import {
   projectModeAtom,
   workflowStageAtom,
 } from '../agent-atoms'
-import type { PrdConfirmRequirement } from '../agent-atoms'
+import type { PrdConfirmRequirement, PrdConfirmState } from '../agent-atoms'
 import { PRD_TERMS, priorityLabel } from '../lib/prd-terms'
 
 const primaryButtonStyle: React.CSSProperties = {
@@ -167,18 +169,56 @@ export const PrdConfirmDialog: React.FC = () => {
   const stage = useAtomValue(workflowStageAtom)
 
   const [adjustOpen, setAdjustOpen] = useState(false)
-  const [adjustText, setAdjustText] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [adoptedIdeas, setAdoptedIdeas] = useState<Set<string>>(new Set())
+  /**
+   * 累计池（2026-09-02 决议 7）：调整先压栈、统一批量提交——不再「一步一问一改」
+   * （此前每条「这条不对」= 关卡一轮修订闭环，N 条修改 N 轮，token 与轮时双浪费）。
+   * 点条目「这条不对」往池里追加（同条目不重复）；手动入口可加空行；可增删改；
+   * 一次提交合并回传，向导一轮修订统一处理。
+   */
+  const [adjustPool, setAdjustPool] = useState<Array<{ entryId: string; requirementId: string | null; text: string }>>([])
+  /** 池路径失败内联错误条（F9a 同款：恢复弹窗+池内容全保留，原地重试） */
+  const [submitError, setSubmitError] = useState<string | null>(null)
+
+  const store = useStore()
+
+  // 新确认卡到达时清上一轮内联错误（与失败恢复区分：恢复写回同一对象引用，不清）
+  const seenStateRef = useRef<PrdConfirmState | null>(null)
+  useEffect(() => {
+    if (state && seenStateRef.current !== state) {
+      setSubmitError(null)
+      seenStateRef.current = state
+    }
+  }, [state])
 
   if (!state) return null
 
   const close = (): void => {
     setAdjustOpen(false)
-    setAdjustText('')
     setSubmitting(false)
     setAdoptedIdeas(new Set())
+    setAdjustPool([])
+    setSubmitError(null)
     clearConfirm(null)
+  }
+
+  /** 池路径成功收尾：本地状态全清（atom 已隐藏清空） */
+  const resetLocalDialogState = (): void => {
+    close()
+  }
+
+  /** 池路径失败恢复：快照弹窗+池内容全保留+内联错误条；在途新卡到达则不覆盖（走全局错误通道） */
+  const restoreAfterFailure = (snapshot: PrdConfirmState, message: string): void => {
+    setSubmitting(false)
+    const current = sessionId ? store.get(prdConfirmFamily(sessionId)) : null
+    if (current === null) {
+      setSubmitError(message)
+      setAdjustOpen(true)
+      clearConfirm(snapshot)
+    } else {
+      setGlobalUserError('调整没有送达（连接中断）——已收到新的确认卡，池里的修改未提交，请在最新弹窗上重新发起调整。')
+    }
   }
 
   const toggleIdea = (label: string): void => {
@@ -194,19 +234,37 @@ export const PrdConfirmDialog: React.FC = () => {
     content: string,
     selectedOptionId: string,
     adoptedIdeaList?: string[],
+    opts?: { typed?: boolean },
   ): Promise<void> => {
     const api = window.electronAPI
     if (!api?.agent?.sendMessage || submitting) return
     setSubmitting(true)
     // 乐观关闭（2026-08-27 线上案例：点确认后弹窗不消失）：send-message 的 IPC 回传
     // 绑定主进程全链——confirm 回传含草图生成全程（可达数十秒），await 会让弹窗挂死。
-    // 先关弹窗再等 IPC；主进程侧 pending 校验失败时弹窗本就该关（旧卡/重复点击）。
-    close()
+    // 先隐藏弹窗再等 IPC；主进程侧 pending 校验失败时弹窗本就该关（旧卡/重复点击）。
+    // typed 路径（累计池批量调整，2026-09-02 决议 7）：用户输入内容不可丢——隐藏但不清
+    // 本地状态，失败时恢复弹窗+池内容全保留原地重试；纯决策路径维持 m-16 契约（关+全局通道）。
+    const snapshot = state
+    if (opts?.typed) {
+      setSubmitError(null)
+      clearConfirm(null)
+    } else {
+      close()
+    }
+    const fail = (message: string): void => {
+      if (opts?.typed) {
+        restoreAfterFailure(snapshot, message)
+      } else {
+        // m-16：IPC 失败时弹窗已乐观关闭，用户对「确认未送达」零感知（pending 仍挂主进程侧）。
+        // 保持乐观关闭契约（陷阱 41：不 await IPC 驱动关闭），改走用户可见通道告知。
+        setGlobalUserError('确认没有送达（连接中断）：请直接在对话里发「确认这份 PRD」重试，或重新打开确认卡。')
+      }
+    }
     try {
-      await api.agent.sendMessage({
+      const result = await api.agent.sendMessage({
         request_id: crypto.randomUUID(),
-        session_id: state.sessionId,
-        project_id: state.projectId,
+        session_id: snapshot.sessionId,
+        project_id: snapshot.projectId,
         content,
         mode: mode ?? 'quick',
         current_stage: stage,
@@ -216,15 +274,28 @@ export const PrdConfirmDialog: React.FC = () => {
           ...(adoptedIdeaList && adoptedIdeaList.length > 0 ? { adopted_ideas: adoptedIdeaList } : {}),
         },
       })
+      // safeInvoke 包装失败走 ok:false（此前仅 catch throw——ok:false 被当成功静默吞掉）
+      if (!result?.ok) {
+        fail(opts?.typed ? `调整没有送达（${result?.error?.user_visible_message ?? '未知错误'}）——弹窗已恢复，你的修改都还在，请重试。` : '确认没有送达：请直接在对话里发「确认这份 PRD」重试，或重新打开确认卡。')
+        return
+      }
     } catch (error) {
       console.error('[prd-confirm] 发送异常:', error)
-      // m-16：IPC 失败时弹窗已乐观关闭，用户对「确认未送达」零感知（pending 仍挂主进程侧）。
-      // 保持乐观关闭契约（陷阱 41：不 await IPC 驱动关闭），改走用户可见通道告知。
-      setGlobalUserError('确认没有送达（连接中断）：请直接在对话里发「确认这份 PRD」重试，或重新打开确认卡。')
+      fail(opts?.typed ? '调整没有送达（连接中断）——弹窗已恢复，你的修改都还在，请重试。' : '确认没有送达（连接中断）：请直接在对话里发「确认这份 PRD」重试，或重新打开确认卡。')
+      return
     }
+    if (opts?.typed) resetLocalDialogState()
   }
 
   const submitConfirm = (): void => {
+    // P2-2（2026-09-03 审计修复）：池里还有未提交的修改时，确认会静默丢弃用户已输入内容。
+    // 拦下并展开修改池提示，让用户先「一次性提交全部修改」或移除条目，不再静默丢池。
+    const pendingCount = adjustPool.filter((entry) => entry.text.trim()).length
+    if (pendingCount > 0) {
+      setAdjustOpen(true)
+      setSubmitError(`你还有 ${pendingCount} 条修改未提交——请先「一次性提交全部修改」，或把池里的条目移除后再确认。`)
+      return
+    }
     void sendMessage(
       '确认这份 PRD，开始画草图。',
       'prd_confirm_confirm',
@@ -236,16 +307,35 @@ export const PrdConfirmDialog: React.FC = () => {
     void sendMessage('稍后再说，先不确认。', 'prd_confirm_dismiss')
   }
 
-  const submitAdjust = (): void => {
-    const text = adjustText.trim()
-    if (!text) return
-    void sendMessage(text, 'prd_confirm_adjust')
+  /** 批量提交（决议 7 累计池）：多条修改合并一次回传，向导一轮修订统一处理 */
+  const submitPoolAdjust = (): void => {
+    const texts = adjustPool.map((entry) => entry.text.trim()).filter(Boolean)
+    if (texts.length === 0) return
+    void sendMessage(texts.join('\n'), 'prd_confirm_adjust', undefined, { typed: true })
   }
 
+  /** 点「这条不对」往池里压栈（同条目不重复；旧语义是替换——N 条修改只能一条一轮） */
   const openAdjustWith = (requirementId: string): void => {
     setAdjustOpen(true)
-    setAdjustText((previous) => (previous.includes(requirementId) ? previous : `${requirementId} 这条不对：`))
+    setAdjustPool((previous) => {
+      if (previous.some((entry) => entry.requirementId === requirementId)) return previous
+      return [...previous, { entryId: crypto.randomUUID(), requirementId, text: `${requirementId} 这条不对：` }]
+    })
   }
+
+  const updatePoolEntry = (entryId: string, text: string): void => {
+    setAdjustPool((previous) => previous.map((entry) => (entry.entryId === entryId ? { ...entry, text } : entry)))
+  }
+
+  const removePoolEntry = (entryId: string): void => {
+    setAdjustPool((previous) => previous.filter((entry) => entry.entryId !== entryId))
+  }
+
+  const addBlankPoolEntry = (): void => {
+    setAdjustPool((previous) => [...previous, { entryId: crypto.randomUUID(), requirementId: null, text: '' }])
+  }
+
+  const filledAdjustCount = adjustPool.filter((entry) => entry.text.trim()).length
 
   return (
     <div
@@ -421,26 +511,77 @@ export const PrdConfirmDialog: React.FC = () => {
         </details>
 
         {adjustOpen ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <textarea
-              data-ai-id="prd-confirm-adjust-input"
-              value={adjustText}
-              onChange={(event) => setAdjustText(event.target.value)}
-              placeholder="想调整哪里？指出具体条目（如「F-002 的验收不对：我想要的是导出 Excel」）…"
-              style={inputStyle}
-            />
+          <div data-ai-id="prd-confirm-adjust-pool" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <span data-ai-id="prd-confirm-adjust-pool-count" style={sectionTitleStyle}>
+              修改池（已累计 {adjustPool.length} 条）——全部改完一次性提交，向导一轮统一修订
+            </span>
+            {adjustPool.length === 0 ? (
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--color-text-secondary, #5b6472)' }}>
+                点功能条目右侧的「这条不对」逐条累计到这里，或点下方按钮手动添加一条。
+              </p>
+            ) : (
+              adjustPool.map((entry) => (
+                <div
+                  key={entry.entryId}
+                  data-ai-id={`prd-confirm-adjust-entry-${entry.requirementId ?? 'free'}`}
+                  style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+                >
+                  <textarea
+                    data-ai-id="prd-confirm-adjust-input"
+                    value={entry.text}
+                    onChange={(event) => updatePoolEntry(entry.entryId, event.target.value)}
+                    placeholder={
+                      entry.requirementId
+                        ? `${entry.requirementId} 哪里不对、要怎么改？写在这里…`
+                        : '想调整哪里？指出具体条目（如「F-002 的验收不对：我想要的是导出 Excel」）…'
+                    }
+                    style={{ ...inputStyle, minHeight: 56 }}
+                  />
+                  <button
+                    type="button"
+                    data-ai-id={`prd-confirm-adjust-remove-${entry.requirementId ?? entry.entryId.slice(0, 6)}`}
+                    style={dismissButtonStyle}
+                    onClick={() => removePoolEntry(entry.entryId)}
+                  >
+                    移除这条
+                  </button>
+                </div>
+              ))
+            )}
+            <button type="button" data-ai-id="prd-confirm-adjust-add" style={secondaryButtonStyle} onClick={addBlankPoolEntry}>
+              ＋ 再添加一条
+            </button>
+            {submitError && (
+              <div
+                data-ai-id="prd-confirm-submit-error"
+                role="alert"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: 'var(--space-2) var(--space-3)',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: 12,
+                  color: '#d64545',
+                  background: '#FEF2F2',
+                  border: '1px solid #FECACA',
+                }}
+              >
+                {submitError}
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button type="button" style={secondaryButtonStyle} onClick={() => setAdjustOpen(false)}>
-                先不调整
+                收起（修改保留在池里）
               </button>
               <button
                 type="button"
                 data-ai-id="prd-confirm-adjust-send"
-                style={{ ...primaryButtonStyle, opacity: adjustText.trim() ? 1 : 0.5 }}
-                disabled={!adjustText.trim() || submitting}
-                onClick={submitAdjust}
+                style={{ ...primaryButtonStyle, opacity: filledAdjustCount > 0 ? 1 : 0.5 }}
+                disabled={filledAdjustCount === 0 || submitting}
+                onClick={submitPoolAdjust}
               >
-                发送调整说明
+                一次性提交全部修改（{filledAdjustCount} 条）
               </button>
             </div>
           </div>
@@ -456,9 +597,20 @@ export const PrdConfirmDialog: React.FC = () => {
             >
               稍后再说
             </button>
-            <button type="button" style={secondaryButtonStyle} onClick={() => setAdjustOpen(true)}>
-              有要调整的
-            </button>
+            {adjustPool.length > 0 ? (
+              <button
+                type="button"
+                data-ai-id="prd-confirm-adjust-resume"
+                style={{ ...secondaryButtonStyle, borderColor: 'var(--color-primary, #4f6ef7)' }}
+                onClick={() => setAdjustOpen(true)}
+              >
+                继续调整（池里有 {adjustPool.length} 条）
+              </button>
+            ) : (
+              <button type="button" style={secondaryButtonStyle} onClick={() => setAdjustOpen(true)}>
+                有要调整的
+              </button>
+            )}
             <button type="button" data-ai-id="prd-confirm-submit" style={primaryButtonStyle} disabled={submitting} onClick={submitConfirm}>
               确认无误，开始画草图
             </button>
