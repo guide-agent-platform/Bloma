@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AgentEvent, AgentLoopJudgeMetadata, AgentSendMessageInput, Channel, ChannelModel, DocumentSyncResult, MessageContentBlock, Project, ProjectMode, Snapshot, SnapshotKind, TemplateType } from '../../shared/types'
+import type { ThinkingLevel } from '../../shared/reasoning-profile'
 import { getAgentSessionPath, getDocumentsDir } from '../../storage/config-paths'
 import { appendJsonLine } from '../../storage/json-store'
 import { readPrdBackplane, readUxContractSketch, syncDocuments, updateRequirementStatus, writeSecurityScanDocument } from '../document-engine'
@@ -572,6 +573,20 @@ export function resolveAgentLoopMaxTurns(mode: ProjectMode): number {
 /** 子 agent 独立轮次上限（比主 loop 小，控制委派 token 成本；按埋点标定）。 */
 const DELEGATION_MAX_TURNS = 12
 
+/**
+ * loop 思考档位解析（2026-09-03，上游 Proma 思考链分离方案落地）：BLOMA_LOOP_THINKING
+ * 可覆盖（off/low/high/max）；缺省 low——推理写进思考通道不进旁白正文（线上案例：
+ * flash 模型把推理全部写进正文，单轮 28k 字符英文独白）。DeepSeek v4/GLM 系经
+ * output_config.effort 生效（不吞 max_tokens）；不支持思考的模型/omit 渠道由
+ * buildThinkingFragment 自动落回现状，400 兼容降级兑底（orchestrator 既有链路）。
+ * 每次调用读取（与 maxTurns 同风格，便于测试与运行时调整）。
+ */
+export function resolveLoopThinkingLevel(): ThinkingLevel {
+  const raw = (process.env.BLOMA_LOOP_THINKING ?? '').trim().toLowerCase()
+  if (raw === 'off' || raw === 'low' || raw === 'high' || raw === 'max') return raw
+  return 'low'
+}
+
 /** 渠道 tool use 支持度的进程内探测缓存（key = `${channelId}:${modelName}`，重启后重新探测一次）。 */
 const toolSupportCache = new Map<string, boolean>()
 
@@ -808,6 +823,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     permissionMode: AUTOMATED_PERMISSION_MODE,
     temperature: categoryTemperature('mvp'),
     providerType: loop.channel.provider_type,
+    thinkingLevel: resolveLoopThinkingLevel(),
     signal: input.signal ?? new AbortController().signal,
     publish: (type, payload) => publish(input, type, payload),
     onTurn: (info) => {
@@ -1011,7 +1027,10 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     '【终止条件】全部 P0 断言通过 + 安全扫描无高危，才输出完成总结（含做了什么、' +
     '未解决的低优先级项）。测试未全绿不得声称完成。',
     '',
-    '【表达】面向用户的旁白与完成总结一律用中文（代码与文件内容除外）。',
+    '【表达纪律】',
+    '- 每轮工具调用前最多一句中文旁白说明意图；不向用户展示推理过程、猜测或自我怀疑（思考与推演放在思考通道，不进旁白）。',
+    '- 测试失败先读工具返回的失败详情再行动，不要在旁白里长篇分析或复述整段代码。',
+    '- 完成总结用中文且 ≤200 字：做了什么、哪些断言未通过、遗留哪些低优先级项。代码与文件内容不限语言。',
     '',
     '【护栏】路径限项目目录内；不 eval/Function；不外联 fetch/XHR；不写 CSP meta；' +
     'out_of_scope 内的功能一律不做；编辑校验失败的错误信息要读完再改。',

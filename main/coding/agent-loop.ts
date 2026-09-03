@@ -104,6 +104,9 @@ export interface AgentLoopInput {
   historyTurns?: ConversationTurn[]
   /** omit 推广（2026-08-27 队友）：透传父渠道 providerType，Token Plan 类渠道免 400 往返 */
   providerType?: string
+  /** 推理档位透传（reasoning-profile 2026-08-27）：loop 默认按 BLOMA_LOOP_THINKING 环境变量
+   * 决定思考档位，缺省 low（快速档、不吞 max_tokens）；传 off 关闭。 */
+  thinkingLevel?: import('../../shared/reasoning-profile').ThinkingLevel
   /** 剪贴板粘贴图片引用（clipboard-paste P1，2026-08-29 队友）：与 task 同轮组装 [text, ...image] 块数组 */
   images?: PastedImageRef[]
   /** 会话级 usage 聚合（费用守卫 Hook 1，2026-08-28 队友）：渠道不返回 usage 时
@@ -472,6 +475,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
         maxTokens: input.maxTokens,
         ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
         ...(input.providerType !== undefined ? { providerType: input.providerType } : {}),
+        ...(input.thinkingLevel !== undefined ? { thinkingLevel: input.thinkingLevel } : {}),
         messages: [{ role: 'system', content: wrapUp ? `${input.system}${WRAP_UP_SUFFIX}` : input.system }, ...windowMessagesWithDigest(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn)],
         tools: wrapUp ? [] : definitions,
       })) {
@@ -630,6 +634,7 @@ async function runGraceWrapUpTurn(
       sessionId: input.sessionId,
       maxTokens: input.maxTokens,
       ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
+      ...(input.thinkingLevel !== undefined ? { thinkingLevel: input.thinkingLevel } : {}),
       messages: [
         { role: 'system', content: `${input.system}${GRACE_TURN_SUFFIX}` },
         ...windowMessagesWithDigest(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn),
