@@ -9,10 +9,11 @@ import { readPrdBackplane, readUxContractSketch, renamePrdProject, syncDocuments
 import { appendProjectLearning, renderLearningsSection } from '../learnings-log'
 import { createSnapshot, runSandbox, trackAnalytics } from '../platform-services'
 import { renderPackageJson, renderStaticServer, renderSkeletonToProject, scaffoldEnabled } from '../project-scaffold'
+import { runBuildGate } from './build-gate'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../project-service'
 import { appendProjectMapToSystem, loadProjectMapBlock } from '../project-map'
 import { resolveChannelEnv } from '../runtime-fallback'
-import { loadSkeletonTemplate } from '../project-templates'
+import { loadSkeletonTemplate, type ProjectSkeleton } from '../project-templates'
 import { buildLoopInjection, buildSkeletonMapInjection } from '../template-injection'
 import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
 import { distillProjectMemorySafely } from '../memory-distiller'
@@ -741,19 +742,24 @@ function errorCodeFrom(message: string): string {
  */
 /**
  * PR-1 骨架先行（2026-09-03）：loop 启动前把骨架包确定性渲染到项目根（无 LLM）。
- * 成功 → 决策日志 skeleton_rendered + 返回骨架地图（进注入⑥）；失败/无骨架/开关关
- * → 返回 null，行为=现状从零写（fail-open：骨架是增强不是依赖，绝不阻断 MVP 生成）。
+ * 成功 → 决策日志 skeleton_rendered + 返回骨架地图（进注入⑥）与骨架对象（供 PR-2
+ * 构建门禁取 build 规约）；失败/无骨架/开关关 → 两者均 null，行为=现状从零写
+ * （fail-open：骨架是增强不是依赖，绝不阻断 MVP 生成）。
  */
-function prepareSkeletonBeforeLoop(input: MvpTaskInput, backplane: PrdBackplane, project: Project): string | null {
-  if (!scaffoldEnabled()) return null
+function prepareSkeletonBeforeLoop(
+  input: MvpTaskInput,
+  backplane: PrdBackplane,
+  project: Project,
+): { map: string | null; skeleton: ProjectSkeleton | null } {
+  if (!scaffoldEnabled()) return { map: null, skeleton: null }
   const templateType = backplane.template_meta?.type ?? 'personal_tool'
-  let skeleton = null
+  let skeleton: ProjectSkeleton | null = null
   try {
     skeleton = loadSkeletonTemplate(templateType, { project_id: input.project_id, session_id: input.session_id })
   } catch {
-    return null
+    return { map: null, skeleton: null }
   }
-  if (!skeleton) return null
+  if (!skeleton) return { map: null, skeleton: null }
   try {
     const rendered = renderSkeletonToProject(skeleton, project.root_path)
     try {
@@ -776,7 +782,7 @@ function prepareSkeletonBeforeLoop(input: MvpTaskInput, backplane: PrdBackplane,
     } catch {
       // 决策日志失败不影响骨架生效
     }
-    return buildSkeletonMapInjection(skeleton, rendered)
+    return { map: buildSkeletonMapInjection(skeleton, rendered), skeleton }
   } catch (err) {
     try {
       recordDecision({
@@ -792,7 +798,7 @@ function prepareSkeletonBeforeLoop(input: MvpTaskInput, backplane: PrdBackplane,
     } catch {
       // 决策日志失败静默
     }
-    return null
+    return { map: null, skeleton: null }
   }
 }
 
@@ -802,7 +808,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   const editFormat = loop.model?.edit_format ?? 'diff'
   const startedAt = Date.now()
   // PR-1 骨架先行：渲染成功后骨架地图随 system prompt 常驻（事实与注入同源）
-  const skeletonMap = prepareSkeletonBeforeLoop(input, backplane, project)
+  const { map: skeletonMap, skeleton } = prepareSkeletonBeforeLoop(input, backplane, project)
   // 委派协作（嫁接方案 §4.1）：注册父 loop 上下文供 delegate_agent 构建子循环；子工具集按 role 裁剪
   setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
   registerParentLoopContext(input.session_id, {
@@ -971,6 +977,16 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     throw new Error(`AGENT_LOOP_INCOMPLETE: Agent Loop 结束（${result.status}）但项目缺少 index.html，本次生成未完成`)
   }
 
+  // PR-2 构建门禁（验证性，vendor 预打包路线）：loop 后系统接管，用 Bloma 自带
+  // esbuild（零网络零安装）按 manifest.build 打包校验模块图；v1 口径 passed/failed
+  // 均不阻断交付——failed 如实落决策日志（build_gate_failed），测试报告与 judge 可见
+  await runBuildGate({
+    projectId: input.project_id,
+    sessionId: input.session_id,
+    rootPath: project.root_path,
+    skeleton,
+  })
+
   // 单次启动沙箱：启动失败的修复已内化在 loop（run_preview → logs → edit_file 自修），
   // 这里不再走 ensureSandboxRunning 的外部修复循环；仍失败则如实抛错交上层处理。
   const sandbox = await runSandbox({ request_id: input.request_id, project_id: input.project_id })
@@ -1098,8 +1114,15 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     '【护栏】路径限项目目录内；不 eval/Function；不外联 fetch/XHR；不写 CSP meta；' +
     'out_of_scope 内的功能一律不做；编辑校验失败的错误信息要读完再改。',
     '',
-    '【产物形态】入口 index.html，纯前端静态产物（平台用静态服务器托管，无构建步骤）；' +
-    '交互逻辑放 src/app.js，样式放 src/styles.css；不使用 import/ESM 模块语法。',
+    // 产物形态（PR-2 条件化）：工程骨架（带构建门禁）→ 模块化解禁（import 可选，
+    // 构建期打包校验）；无骨架 → 维持 PR-1 前现状（单文件静态产物，不用 ESM）
+    skeletonMap
+      ? '【产物形态】入口 index.html，交互逻辑入口 src/app.js，样式 src/styles.css；' +
+        '模块化可选：可将逻辑拆分为 src/ 下多个 .js 文件用 import 组织（loop 结束后构建门禁' +
+        '会打包校验模块图，import 路径错误会在构建期暴露），单文件亦可；预览沙箱直接加载源码，' +
+        '外部网络资源禁令不变。'
+      : '【产物形态】入口 index.html，纯前端静态产物（平台用静态服务器托管，无构建步骤）；' +
+        '交互逻辑放 src/app.js，样式放 src/styles.css；不使用 import/ESM 模块语法。',
   ].join('\n')
 }
 

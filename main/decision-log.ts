@@ -54,6 +54,9 @@ export type DecisionType =
   | 'skeleton_rendered'
   | 'skeleton_render_failed'
   | 'skeleton_override_rejected'
+  | 'build_gate_passed'
+  | 'build_gate_failed'
+  | 'build_gate_unavailable'
 
 export interface DecisionEntry {
   type: DecisionType

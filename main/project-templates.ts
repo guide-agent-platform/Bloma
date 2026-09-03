@@ -185,12 +185,25 @@ export interface SkeletonFileEntry {
   readonly?: boolean
 }
 
+/** 构建门禁规约（manifest v2 可选 build 段；无段 = 静态形态，行为与 PR-1 完全一致）。 */
+export interface SkeletonBuildSpec {
+  tool: 'esbuild'
+  /** 构建入口（相对项目根，通常是逻辑入口文件） */
+  entry: string
+  /** 产物路径（相对项目根） */
+  outfile: string
+  format: 'iife'
+  minify: boolean
+}
+
 /** 已加载且校验合法的骨架包（baseDir = 文件读取根，渲染时逐文件复制）。 */
 export interface ProjectSkeleton {
   type: TemplateType
   version: number
   baseDir: string
   files: SkeletonFileEntry[]
+  /** 构建门禁规约（manifest 无 build 段时缺省，静态形态） */
+  build?: SkeletonBuildSpec
   /** 来源：builtin = 内置生效；override = 外置覆盖生效；builtin_fallback = 外置非法回退内置 */
   source: 'builtin' | 'override' | 'builtin_fallback'
 }
@@ -216,7 +229,7 @@ function extnameOf(path: string): string {
   return idx >= 0 ? path.slice(idx).toLowerCase() : ''
 }
 
-/** 读取并校验一个骨架目录：manifest 存在、可解析、type 匹配、files 非空且全部真实存在。 */
+/** 读取并校验一个骨架目录：manifest 存在、可解析、type 匹配、files 非空且全部真实存在；build 段可选且字段完整才采纳。 */
 function readSkeletonDir(dir: string, expectedType: TemplateType): ProjectSkeleton | null {
   try {
     const manifestPath = join(dir, 'manifest.json')
@@ -224,6 +237,7 @@ function readSkeletonDir(dir: string, expectedType: TemplateType): ProjectSkelet
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
       type?: string
       version?: number
+      build?: Partial<SkeletonBuildSpec>
       files?: SkeletonFileEntry[]
     }
     if (manifest.type !== expectedType || !Array.isArray(manifest.files) || manifest.files.length === 0) return null
@@ -231,11 +245,25 @@ function readSkeletonDir(dir: string, expectedType: TemplateType): ProjectSkelet
       if (!entry || !isSafeSkeletonPath(entry.path)) return null
       if (!existsSync(join(dir, entry.path))) return null
     }
+    // PR-2 build 段：字段不全/入口越界 → 整段丢弃（降级静态形态），不因坏 build 段拒整个骨架
+    let build: SkeletonBuildSpec | undefined
+    const raw = manifest.build
+    if (raw && raw.tool === 'esbuild' && typeof raw.entry === 'string' && typeof raw.outfile === 'string'
+      && isSafeSkeletonPath(raw.entry) && isSafeSkeletonPath(raw.outfile)) {
+      build = {
+        tool: 'esbuild',
+        entry: raw.entry,
+        outfile: raw.outfile,
+        format: 'iife',
+        minify: raw.minify !== false,
+      }
+    }
     return {
       type: expectedType,
       version: typeof manifest.version === 'number' ? manifest.version : 1,
       baseDir: dir,
       files: manifest.files,
+      ...(build ? { build } : {}),
       source: 'builtin',
     }
   } catch {

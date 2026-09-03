@@ -156,6 +156,20 @@ describe('template-injection（P5：注入点开关与切片）', () => {
       expect(system).toContain('【项目锚') // 锚定段不受影响
     })
 
+    it('PR-2 产物形态条件化：无骨架 → 维持「不使用 import/ESM」现状话术', () => {
+      const system = buildAgentLoopSystemPrompt(makeBackplane(), 'whole')
+      expect(system).toContain('不使用 import/ESM 模块语法')
+      expect(system).not.toContain('模块化可选')
+    })
+
+    it('PR-2 产物形态条件化：工程骨架（skeletonMap）→ 解禁模块化 + 构建门禁说明', () => {
+      const system = buildAgentLoopSystemPrompt(makeBackplane(), 'whole', undefined, '工程骨架已就位（测试地图）')
+      expect(system).toContain('模块化可选')
+      expect(system).toContain('构建门禁')
+      expect(system).not.toContain('不使用 import/ESM 模块语法') // 静态约束在工程形态下解除
+      expect(system).toContain('工程骨架已就位')
+    })
+
     it('外部 CDN script 引用被工具层拦截', () => {
       const violation = externalResourceViolation('<html><script src="https://cdn.example.com/lib.js"></script></html>')
       expect(violation).toContain('外部脚本')

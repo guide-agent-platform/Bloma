@@ -1,7 +1,14 @@
 {
   "type": "web_fullstack",
-  "version": 1,
-  "description": "Web 全栈静态骨架（PR-1 骨架先行）：loop 前由系统确定性渲染，编程 Agent 在其上填充实现",
+  "version": 2,
+  "description": "Web 全栈骨架（PR-1 骨架先行 + PR-2 构建门禁）：loop 前由系统确定性渲染，编程 Agent 在其上填充实现；loop 后构建门禁用内置 esbuild 打包校验模块图",
+  "build": {
+    "tool": "esbuild",
+    "entry": "src/app.js",
+    "outfile": "dist/app.js",
+    "format": "iife",
+    "minify": true
+  },
   "files": [
     {
       "path": "index.html",
@@ -9,7 +16,7 @@
     },
     {
       "path": "src/app.js",
-      "role": "逻辑入口：状态/渲染/事件三段骨架，交互逻辑待填充"
+      "role": "逻辑入口（兼构建入口）：状态/渲染/事件三段骨架；模块化可选——可拆分 src/ 下多个 .js 用 import 组织，构建门禁会打包校验"
     },
     {
       "path": "src/styles.css",

@@ -141,6 +141,12 @@ export function buildSkeletonMapInjection(
     `本轮渲染：新写入 ${rendered.written.length} 个，已存在跳过 ${rendered.skipped.length} 个（迭代重跑不覆盖既有产物）。`,
     '填充方式：在上述骨架工作文件上实现功能项（write_file/edit_file 均可，骨架文件允许修改与扩展）；',
     'src/examples/ 下的示例仅参考模式与结构（read_file 查看），不要照抄业务内容；该目录只读，写入会被拒绝。',
+    ...(skeleton.build
+      ? [
+          `构建门禁：loop 结束后系统会用内置构建器打包校验 ${skeleton.build.entry} 的模块图（import 解析错误会在构建期暴露）；` +
+            '因此模块化组织是安全的——可拆分 src/ 下多个 .js 文件用 import 组织，也可单文件实现。',
+        ]
+      : []),
   ].join('\n')
 }
 
