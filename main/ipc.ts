@@ -64,7 +64,6 @@ import {
   confirmSketch,
   createProject,
   deleteProject,
-  exportProject,
   finalizeProject,
   findProject,
   getProjectProgressSummary,
@@ -77,6 +76,7 @@ import {
   upgradeProject,
 } from './project-service'
 import { cleanOrphanSessions, listSessions, loadMessages } from './session-service'
+import { exportProjectHandoff } from './project-export'
 import { resolveRequirementConfirm } from './guide-agent-service'
 import { createChannel, deleteChannel, fetchModels, listChannels, testChannel, testChannelDirect, updateChannel } from './channel-manager'
 import {
@@ -288,7 +288,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
       if (result.canceled || result.filePaths.length === 0) {
         return { canceled: true }
       }
-      return exportProject(input, result.filePaths[0])
+      return exportProjectHandoff(input, result.filePaths[0])
     })
   })
 

@@ -15,13 +15,15 @@
  *   在 WorkspaceShell 中 Header 下方挂载 <MvpStatusBanner />。
  */
 
-import React, { useMemo } from 'react'
-import { atom, useAtomValue } from 'jotai'
+import React, { useMemo, useState } from 'react'
+import { atom, useAtomValue, useSetAtom } from 'jotai'
 import type { AgentEvent, WorkflowStage } from '../../shared/types'
 import type { AgentStreamState } from '../agent-atoms'
 import {
   activeAgentSessionIdAtom,
   agentStreamStateFamily,
+  currentProjectAtom,
+  globalUserErrorAtom,
   workflowStageAtom,
   STAGE_LABEL_MAP,
 } from '../agent-atoms'
@@ -214,6 +216,38 @@ const VARIANT_STYLE: Record<BannerState['variant'], { bg: string; border: string
 export const MvpStatusBanner: React.FC = () => {
   const sessionId = useAtomValue(activeAgentSessionIdAtom)
   const stage = useAtomValue(workflowStageAtom)
+  const project = useAtomValue(currentProjectAtom)
+  const setGlobalError = useSetAtom(globalUserErrorAtom)
+  // PR-3 导出状态：exporting 禁用按钮；exportedPath 成功后展示位置；取消静默复位（U10 契约）
+  const [exporting, setExporting] = useState(false)
+  const [exportedPath, setExportedPath] = useState<string | null>(null)
+
+  const handleExport = async () => {
+    if (!project || exporting) return
+    setExporting(true)
+    try {
+      const api = window.electronAPI
+      if (!api?.project?.export) {
+        setGlobalError('当前环境不支持导出。')
+        return
+      }
+      const result = await api.project.export({
+        request_id: crypto.randomUUID(),
+        project_id: project.project_id,
+      })
+      if (!result.ok) {
+        // m-16 同款口径：IPC 层失败走 globalUserError，不静默吞
+        setGlobalError(result.error?.user_visible_message || result.error?.message || '导出失败，请重试。')
+        return
+      }
+      if (result.data.canceled) return // 取消导出不是错误，静默复位
+      setExportedPath(result.data.destination ?? '')
+    } catch {
+      setGlobalError('导出失败，请重试。')
+    } finally {
+      setExporting(false)
+    }
+  }
 
   // N-001 修复（2026-08-12）：使用模块级 nullSessionFallback 替代 atomFamily('__unused__')，
   // 保证所有 hooks 在每次渲染中以相同顺序调用，不违反 React Hooks 规则。
@@ -313,6 +347,48 @@ export const MvpStatusBanner: React.FC = () => {
           </p>
         )}
       </div>
+
+      {/* 右侧：导出项目按钮（PR-3，仅成果就绪态显示：ready / judge_pass） */}
+      {(banner.variant === 'ready' || banner.variant === 'judge_pass') &&
+        (exportedPath ? (
+          <span
+            data-ai-id="export-project-done"
+            title={exportedPath}
+            style={{
+              fontSize: 'var(--font-size-xs)',
+              color: style.color,
+              opacity: 0.85,
+              flexShrink: 0,
+              maxWidth: 320,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            已导出到 {exportedPath}
+          </span>
+        ) : (
+          <button
+            type="button"
+            data-ai-id="export-project-btn"
+            onClick={handleExport}
+            disabled={!project || exporting}
+            style={{
+              flexShrink: 0,
+              padding: '4px 12px',
+              fontSize: 'var(--font-size-xs)',
+              fontWeight: 600,
+              color: style.color,
+              background: '#fff',
+              border: `1px solid ${style.border}`,
+              borderRadius: 'var(--radius-md)',
+              cursor: exporting || !project ? 'not-allowed' : 'pointer',
+              opacity: !project || exporting ? 0.6 : 1,
+            }}
+          >
+            {exporting ? '导出中…' : '导出项目'}
+          </button>
+        ))}
 
       {/* 右侧 loading dots（generating 等动画状态） */}
       {style.animated && (
