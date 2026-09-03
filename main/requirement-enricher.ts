@@ -5,7 +5,7 @@ import { DEFAULT_BEHAVIOR_ASSERTION } from './sketch-engine'
 import { parseBehaviorAssertion } from './behavior-assertions'
 import { categoryTemperature } from './model-resolution'
 import { readConversation } from './prd-engine-llm'
-import type { MessageContentBlock } from '../shared/types'
+import { callLlmForJson } from './kernel/llm-call'
 
 /**
  * RequirementEnricher — 功能项加厚（2026-08-18 设计「功能项加厚：行为断言 LLM 提取」）。
@@ -113,10 +113,11 @@ const RETRY_FEEDBACK_PROMPT =
 /**
  * 功能项加厚：LLM 从对话把薄功能项补成 story + 行为断言 + 优先级。
  *
- * 解析与重试（共享同一总预算 = MAX_GENERATION_ATTEMPTS=2）：首轮输出失败时按失败
- * 类型选重试策略——截断 → 在渠道上限内升 maxTokens 后带反馈重试；JSON 解析失败 →
- * 带 parse error 回灌重试；两类信号并存可同时带反馈。重试轮无论以何种原因再次失败
- * → 预算耗尽、不再重试，返回 `null` 走既有降级（不存在第 3 次调用）。
+ * 解析与重试（共享同一总预算 = MAX_GENERATION_ATTEMPTS=2；2026-09-03 R2 尾巴：调用
+ * 循环已下沉 kernel/llm-call 标准件）：首轮输出失败时按失败类型选重试策略——截断 →
+ * truncationRetry 在渠道上限内升 maxTokens 后全新重生成；JSON 解析失败 → 带 parse
+ * error 回灌重试。重试轮无论以何种原因再次失败 → 预算耗尽、不再重试，返回 `null`
+ * 走既有降级（不存在第 3 次调用）。
  *
  * maxTokens：预算 = min(渠道上限, 4096 + 项数×600)，绝不请求超过渠道上限；预算已
  * 触渠道上限仍截断（渠道硬限）→ 升 maxTokens 不可行，直接返回 `null`。不做任何内容级修补。
@@ -128,116 +129,27 @@ export async function enrichRequirementsLlm(input: EnrichRequirementsInput): Pro
 
   // 渠道能力上限（调用侧 §3.3 传入 channel.max_tokens ?? 2048）
   const channelCap = input.maxTokens ?? DEFAULT_MAX_TOKENS
-  let maxTokens = Math.min(channelCap, BUDGET_BASE + input.requirements.length * BUDGET_PER_ITEM)
+  const initialBudget = Math.min(channelCap, BUDGET_BASE + input.requirements.length * BUDGET_PER_ITEM)
 
-  try {
-    const prompt = buildPrompt(input.requirements, conversation)
-    let lastAccumulated = ''
-    let truncated = false
-
-    for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt += 1) {
-      const accumulated = await streamAccumulate(input, prompt, maxTokens, attempt, lastAccumulated, truncated)
-      if (input.signal?.aborted) return null
-
-      const parsed = parseEnrichedJson(accumulated)
-      if (parsed) {
-        const result = sanitizeEnriched(parsed)
-        if (result) return result
-        // 结构校验不过（无任何有效项）→ 按解析失败走重试
-      }
-
-      // 解析失败：区分截断与格式错误，决定重试策略。
-      truncated = looksTruncated(accumulated)
-      lastAccumulated = accumulated
-      if (truncated) {
-        const bumped = Math.min(maxTokens * 2, channelCap)
-        // 预算已触渠道硬限仍截断：升 maxTokens 不可行，返回 null 走既有降级
-        if (bumped <= maxTokens) return null
-        maxTokens = bumped
-      }
-    }
-    return null
-  } catch {
-    return null
-  }
-}
-
-/**
- * 单次生成：流式累积 assistant 文本。重试策略与 mvp-engine-llm 对齐——截断走全新
- * 重生成（预算内升 maxTokens），格式错误把坏输出作为 assistant 轮次回灌续问。
- */
-async function streamAccumulate(
-  input: EnrichRequirementsInput,
-  prompt: string,
-  maxTokens: number,
-  attempt: number,
-  lastAccumulated: string,
-  truncated: boolean,
-): Promise<string> {
-  const history = buildRetryHistory(prompt, attempt, lastAccumulated, truncated)
-  const queryPrompt = attempt === 0 || truncated ? prompt : RETRY_FEEDBACK_PROMPT
-  let accumulated = ''
-  try {
-    const stream = input.query(queryPrompt, {
-      env: input.env,
-      signal: input.signal ?? new AbortController().signal,
-      sessionId: input.session_id,
-      history,
-      maxTokens,
-      // §7.7 类别温度：判定/提取要稳、可复现（0.1）
-      temperature: categoryTemperature('prd'),
-    })
-    for await (const sdkMessage of stream) {
-      if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue
-      const text = extractText(sdkMessage.message.content)
-      if (text) accumulated += text
-    }
-  } catch {
-    // 网络/模型错误向上抛（enrichRequirementsLlm 捕获后统一返回 null）
-    throw new Error('ENRICH_LLM_FAILED')
-  }
-  return accumulated
-}
-
-/** 重试历史：截断走全新重生成（不加脏输出），格式错误把坏输出作为 assistant 轮次回灌续问。 */
-function buildRetryHistory(prompt: string, attempt: number, lastAccumulated: string, truncated: boolean): ConversationTurnLike[] {
-  if (attempt === 0 || truncated) return [{ role: 'system', content: loadPromptOverride('enricher-system') ?? DEFAULT_SYSTEM_PROMPT }]
-  return [
-    { role: 'system', content: loadPromptOverride('enricher-system') ?? DEFAULT_SYSTEM_PROMPT },
-    { role: 'user', content: prompt },
-    { role: 'assistant', content: lastAccumulated },
-  ]
-}
-
-/** 与 orchestrator.ConversationTurn 同形的最小结构（避免反向依赖 orchestrator 运行时）。 */
-interface ConversationTurnLike {
-  role: 'system' | 'user' | 'assistant'
-  content: string
-}
-
-/** 检测模型输出是否被截断（max_tokens 用尽导致 JSON 未闭合）。只做结构判断，绝不修补内容。 */
-function looksTruncated(text: string): boolean {
-  const cleaned = text.replace(/```(?:json)?/gi, '').trim()
-  const start = cleaned.lastIndexOf('{')
-  if (start < 0) return false
-  // 模型截断惯用的省略/占位符结尾
-  if (/(?:\.\.\.|…)\s*$|\/\/\s*(?:rest|more|remaining|todo|未完|略|其余)\s*$/i.test(cleaned)) return true
-  const tail = cleaned.slice(start)
-  let depth = 0
-  let inString = false
-  let escaped = false
-  for (const ch of tail) {
-    if (inString) {
-      if (escaped) { escaped = false; continue }
-      if (ch === '\\') { escaped = true; continue }
-      if (ch === '"') inString = false
-      continue
-    }
-    if (ch === '"') { inString = true; continue }
-    if (ch === '{' || ch === '[') depth += 1
-    else if (ch === '}' || ch === ']') depth = Math.max(0, depth - 1)
-  }
-  return inString || depth > 0
+  const parsed = await callLlmForJson({
+    systemPrompt: loadPromptOverride('enricher-system') ?? DEFAULT_SYSTEM_PROMPT,
+    prompt: buildPrompt(input.requirements, conversation),
+    query: input.query,
+    env: input.env,
+    sessionId: input.session_id,
+    maxTokens: initialBudget,
+    // §7.7 类别温度：判定/提取要稳、可复现（0.1）
+    temperature: categoryTemperature('prd'),
+    attempts: MAX_GENERATION_ATTEMPTS,
+    retryFeedback: RETRY_FEEDBACK_PROMPT,
+    truncationRetry: { cap: channelCap },
+    signal: input.signal,
+    parse: (text) => {
+      const parsed = parseEnrichedJson(text)
+      return parsed ? (sanitizeEnriched(parsed) ?? undefined) : undefined
+    },
+  })
+  return parsed
 }
 
 interface ParsedEnrichedItem {
@@ -513,11 +425,4 @@ export function extractUserTexts(conversation: string): string[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
-}
-
-function extractText(blocks: MessageContentBlock[]): string {
-  return blocks
-    .filter((block) => block.type === 'text')
-    .map((block) => block.text ?? '')
-    .join('')
 }

@@ -5,6 +5,7 @@ import type { SketchRequirement } from './sketch-engine'
 import { requirementAssertions } from './sketch-engine'
 import { categoryTemperature } from './model-resolution'
 import { recordDecision } from './decision-log'
+import { callLlmForJson } from './kernel/llm-call'
 
 /**
  * RequirementNormalizer — 修改诉求并入需求清单前的归一化（2026-08-16 复测 43b47a47 发现：
@@ -96,32 +97,28 @@ export async function normalizeRequirementUpdate(
   input: NormalizeRequirementUpdateInput,
 ): Promise<RequirementNormalizationDecision> {
   if (!input.env) return fallback(input.modification)
-  try {
-    let accumulated = ''
-    const stream = input.query(buildPrompt(input.existing, input.modification, input.constraints), {
-      env: input.env,
-      signal: input.signal ?? new AbortController().signal,
-      sessionId: input.session_id,
-      history: [{ role: 'system', content: loadPromptOverride('normalizer-system') ?? DEFAULT_SYSTEM_PROMPT }],
-      maxTokens: input.maxTokens ?? DEFAULT_MAX_TOKENS,
-      // §7.7 类别温度：归一化判定要稳、可复现（0.1）
-      temperature: categoryTemperature('prd'),
-      // 推理档位试点：判定/校验类任务启用（仅 deepseek-v4* / glm 系 profile 生效，其余自动落回现状）
-      thinkingLevel: input.thinkingLevel,
-      providerType: input.providerType,
-    })
-    for await (const sdkMessage of stream) {
-      if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue
-      for (const block of sdkMessage.message.content) {
-        if (block.type === 'text' && block.text) accumulated += block.text
-      }
-    }
-    const parsed = parseDecision(accumulated)
-    if (!parsed) return fallback(input.modification)
-    return sanitize(parsed, input.existing) ?? fallback(input.modification)
-  } catch {
-    return fallback(input.modification)
-  }
+  // 2026-09-03 R2 尾巴：调用已迁 kernel/llm-call 标准件；attempts=1 保持单试现状
+  // （无带反馈重试——归一化失败回退规则清洗原文，重试收益低于延迟成本）。
+  const decision = await callLlmForJson({
+    systemPrompt: loadPromptOverride('normalizer-system') ?? DEFAULT_SYSTEM_PROMPT,
+    prompt: buildPrompt(input.existing, input.modification, input.constraints),
+    query: input.query,
+    env: input.env,
+    sessionId: input.session_id,
+    maxTokens: input.maxTokens ?? DEFAULT_MAX_TOKENS,
+    // §7.7 类别温度：归一化判定要稳、可复现（0.1）
+    temperature: categoryTemperature('prd'),
+    attempts: 1,
+    signal: input.signal,
+    // 推理档位试点：判定/校验类任务启用（仅 deepseek-v4* / glm 系 profile 生效，其余自动落回现状）
+    thinkingLevel: input.thinkingLevel,
+    providerType: input.providerType,
+    parse: (text) => {
+      const parsed = parseDecision(text)
+      return parsed ? (sanitize(parsed, input.existing) ?? undefined) : undefined
+    },
+  })
+  return decision ?? fallback(input.modification)
 }
 
 /**

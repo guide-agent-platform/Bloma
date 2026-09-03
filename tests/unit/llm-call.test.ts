@@ -7,7 +7,7 @@
  * - attempts 用尽 / parse 抛错 / 外部 abort → 一律 null（fail-closed，不抛错）。
  */
 import { describe, expect, it } from 'vitest'
-import { callLlmForJson } from '../../main/kernel/llm-call'
+import { callLlmForJson, looksJsonTruncated } from '../../main/kernel/llm-call'
 import type { SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
 import type { SDKMessage } from '../../shared/types'
 
@@ -98,5 +98,71 @@ describe('callLlmForJson', () => {
     const result = await callLlmForJson({ ...BASE, query, parse: parseJson, signal: controller.signal })
     expect(result).toBeNull()
     expect(calls[0].options.signal.aborted).toBe(true)
+  })
+
+  it('thinkingLevel/providerType 透传到 query options（normalizer 零回归契约）', async () => {
+    const { query, calls } = scriptedQuery(['{"ok":1}'])
+    await callLlmForJson({ ...BASE, query, parse: parseJson, thinkingLevel: 'high', providerType: 'deepseek' })
+    expect(calls[0].options.thinkingLevel).toBe('high')
+    expect(calls[0].options.providerType).toBe('deepseek')
+  })
+
+  it('缺省不传 thinkingLevel → options 不带有效档位（undefined，与现状一致）', async () => {
+    const { query, calls } = scriptedQuery(['{"ok":1}'])
+    await callLlmForJson({ ...BASE, query, parse: parseJson })
+    expect(calls[0].options.thinkingLevel).toBeUndefined()
+    expect(calls[0].options.providerType).toBeUndefined()
+  })
+})
+
+describe('callLlmForJson — truncationRetry（截断升预算，enricher 模式）', () => {
+  const TRUNCATED = '{"ok":1' // JSON 未闭合 → looksJsonTruncated 命中
+
+  it('截断 → 升 maxTokens 全新重生成：history 仅 system、prompt 用首轮原文', async () => {
+    const { query, calls } = scriptedQuery([TRUNCATED, '{"ok":9}'])
+    const result = await callLlmForJson({ ...BASE, query, parse: parseJson, retryFeedback: 'RETRY', truncationRetry: { cap: 1000 } })
+    expect(result).toEqual({ ok: 9 })
+    expect(calls).toHaveLength(2)
+    // 缺省 factor=2：64 → 128（cap 1000 内）
+    expect(calls[1].options.maxTokens).toBe(128)
+    // 全新重生成：prompt 不用 retryFeedback，history 不带脏输出
+    expect(calls[1].prompt).toBe('DO-TASK')
+    expect(calls[1].options.history?.map((turn) => turn.role)).toEqual(['system'])
+  })
+
+  it('非截断失败不受 truncationRetry 影响：走带反馈重试（回灌坏输出）', async () => {
+    const { query, calls } = scriptedQuery(['not-json', '{"ok":4}'])
+    const result = await callLlmForJson({ ...BASE, query, parse: parseJson, retryFeedback: 'RETRY', truncationRetry: { cap: 1000 } })
+    expect(result).toEqual({ ok: 4 })
+    expect(calls[1].prompt).toBe('RETRY')
+    expect(calls[1].options.maxTokens).toBe(64)
+    expect(calls[1].options.history?.map((turn) => turn.role)).toEqual(['system', 'user', 'assistant'])
+  })
+
+  it('预算触 cap 仍截断 → 升无可升，直接 null（不发起重试）', async () => {
+    const { query, calls } = scriptedQuery([TRUNCATED, '{"ok":9}'])
+    // 初始 64，factor 2 → 128，但 cap=64 → bumped<=maxTokens → 直接失败
+    const result = await callLlmForJson({ ...BASE, query, parse: parseJson, truncationRetry: { cap: 64 } })
+    expect(result).toBeNull()
+    expect(calls).toHaveLength(1)
+  })
+
+  it('自定义 factor：截断按 factor 升预算（cap 内）', async () => {
+    const { query, calls } = scriptedQuery([TRUNCATED, TRUNCATED, '{"ok":7}'])
+    const result = await callLlmForJson({ ...BASE, query, parse: parseJson, attempts: 3, truncationRetry: { cap: 10_000, factor: 4 } })
+    expect(result).toEqual({ ok: 7 })
+    expect(calls[1].options.maxTokens).toBe(256)
+    expect(calls[2].options.maxTokens).toBe(1024)
+  })
+})
+
+describe('looksJsonTruncated — 截断检测（自 enricher 迁入，行为锁定）', () => {
+  it('未闭合 JSON / 字符串未闭合 / 省略号结尾 → true；完整 JSON → false', () => {
+    expect(looksJsonTruncated('{"requirements":[{"id":"F-001"')).toBe(true)
+    expect(looksJsonTruncated('{"a":"未闭合')).toBe(true)
+    expect(looksJsonTruncated('{"a":1, "b":2...')).toBe(true)
+    expect(looksJsonTruncated('{"ok":1}')).toBe(false)
+    expect(looksJsonTruncated('```json\n{"ok":1}\n```')).toBe(false)
+    expect(looksJsonTruncated('no json at all')).toBe(false)
   })
 })

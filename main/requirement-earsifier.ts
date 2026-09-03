@@ -1,7 +1,5 @@
 import type { SDKQuery } from './orchestrator'
 import {
-  hasForbiddenResponse,
-  isCompoundTrigger,
   parseEarsAssertion,
   renderForbiddenTermsForPrompt,
   renderResponseVocabularyForPrompt,
@@ -10,7 +8,7 @@ import {
 import type { SketchRequirement } from './sketch-engine'
 import { requirementPriority } from './sketch-engine'
 import { categoryTemperature } from './model-resolution'
-import type { MessageContentBlock } from '../shared/types'
+import { callLlmForJson } from './kernel/llm-call'
 
 /**
  * RequirementEarsifier — P0 行为断言 EARS 化改写（2026-09-02 周计划 §5 P3，方案 §4.3）。
@@ -123,6 +121,7 @@ function bigrams(text: string): Set<string> {
 /**
  * EARS 化主入口：LLM 改写 P0 断言 + 三层守卫过滤。
  * 任何失败（无 query/env、LLM 异常、解析失败、守卫全灭）→ 原样返回输入（不阻塞主线）。
+ * 2026-09-03 R2 尾巴：调用循环已下沉 kernel/llm-call 标准件（带反馈重试一次）。
  */
 export async function earsifyRequirements(input: EarsifyInput): Promise<EarsifyResult> {
   const stats: EarsifyStats = { earsified: 0, dropped: 0, p0Items: 0 }
@@ -134,15 +133,22 @@ export async function earsifyRequirements(input: EarsifyInput): Promise<EarsifyR
     return { requirements: input.requirements, stats }
   }
 
-  try {
-    const raw = await runLlm(input, rewritable)
-    if (input.signal?.aborted) return { requirements: input.requirements, stats }
-    const parsed = parseRewrite(raw)
-    if (!parsed) return { requirements: input.requirements, stats }
-    return mergeRewrite(input.requirements, parsed, stats)
-  } catch {
-    return { requirements: input.requirements, stats }
-  }
+  const parsed = await callLlmForJson({
+    systemPrompt: EARSIFY_SYSTEM_PROMPT,
+    prompt: buildPrompt(rewritable),
+    query: input.query,
+    env: input.env,
+    sessionId: input.session_id,
+    maxTokens: input.maxTokens ?? DEFAULT_MAX_TOKENS,
+    // 判定/提取类要稳、可复现（与 enricher 同温度口径）
+    temperature: categoryTemperature('prd'),
+    attempts: MAX_ATTEMPTS,
+    retryFeedback: RETRY_FEEDBACK,
+    signal: input.signal,
+    parse: (text) => parseRewrite(text) ?? undefined,
+  })
+  if (input.signal?.aborted || !parsed) return { requirements: input.requirements, stats }
+  return mergeRewrite(input.requirements, parsed, stats)
 }
 
 /** 全部断言已良构 EARS（无需改写）的判定：幂等短路，避免重复确认浪费请求。
@@ -156,40 +162,6 @@ function assertionsAllEarsWellFormed(item: SketchRequirement): boolean {
     const ears = parseEarsAssertion(value)
     return ears.explicitPrefix && ears.wellFormed && !ears.compoundTrigger && !ears.forbiddenResponse
   })
-}
-
-async function runLlm(input: EarsifyInput, items: SketchRequirement[]): Promise<string> {
-  const prompt = buildPrompt(items)
-  let lastAccumulated = ''
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
-    const history =
-      attempt === 0
-        ? [{ role: 'system' as const, content: EARSIFY_SYSTEM_PROMPT }]
-        : [
-            { role: 'system' as const, content: EARSIFY_SYSTEM_PROMPT },
-            { role: 'user' as const, content: prompt },
-            { role: 'assistant' as const, content: lastAccumulated },
-          ]
-    const stream = input.query(attempt === 0 ? prompt : RETRY_FEEDBACK, {
-      env: input.env,
-      signal: input.signal ?? new AbortController().signal,
-      sessionId: input.session_id,
-      history,
-      maxTokens: input.maxTokens ?? DEFAULT_MAX_TOKENS,
-      // 判定/提取类要稳、可复现（与 enricher 同温度口径）
-      temperature: categoryTemperature('prd'),
-    })
-    let accumulated = ''
-    for await (const sdkMessage of stream) {
-      if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue
-      const text = extractText(sdkMessage.message.content)
-      if (text) accumulated += text
-    }
-    const parsed = parseRewrite(accumulated)
-    if (parsed) return accumulated
-    lastAccumulated = accumulated
-  }
-  throw new Error('EARSIFY_PARSE_FAILED')
 }
 
 function buildPrompt(items: SketchRequirement[]): string {
@@ -294,11 +266,4 @@ export function mergeRewrite(
     return { ...item, behavior_assertions: survived }
   })
   return { requirements, stats }
-}
-
-function extractText(blocks: MessageContentBlock[]): string {
-  return blocks
-    .filter((block) => block.type === 'text')
-    .map((block) => block.text ?? '')
-    .join('')
 }
