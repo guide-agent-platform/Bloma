@@ -177,6 +177,29 @@ export const prdConfirmFamily = atomFamily((_sessionId: string) => atom<PrdConfi
 export const nullPrdConfirmFallback = atom<PrdConfirmState | null>(null)
 
 /**
+ * 加厚追问卡数据（enrichment_clarification 流，② 2026-09-03）：PRD 定稿前
+ * 加厚腿声明的信息缺口，由 ClarificationCard 渲染。回答为开放文本（可多问合并作答），
+ * 经 card_option 元数据回传（selected_option_id='enrichment_clarification_answer'，
+ * 零新 IPC 通道）；答案由 orchestrator 统一落会话成为新接地证据。
+ */
+export interface EnrichmentClarificationQuestion {
+  for: string
+  question: string
+}
+
+export interface EnrichmentClarificationState {
+  sessionId: string
+  projectId: string
+  title: string
+  requests: EnrichmentClarificationQuestion[]
+}
+
+export const enrichmentClarificationFamily = atomFamily((_sessionId: string) => atom<EnrichmentClarificationState | null>(null))
+
+/** 无 active session 时的稳定 fallback（陷阱 10）。 */
+export const nullEnrichmentClarificationFallback = atom<EnrichmentClarificationState | null>(null)
+
+/**
  * 裁判审查逐题选择题数据（prd_review 流，2026-08-30 选择题化）：最新一条
  * kind='prd_review' 的 user_decision_required 载荷，由专用弹窗 ReviewChoicesDialog
  * 渲染。逐题结构：每题 question + 一组可点选项；另有全局「全部交给向导决定」出口。
@@ -466,6 +489,26 @@ export function setupGlobalAgentListeners(): () => void {
               }))
             : [],
         })
+      }
+      // 加厚追问卡（enrichment_clarification 流，② 2026-09-03）：PRD 定稿前的信息
+      // 缺口开放问题，写入专用 atom 由 ClarificationCard 渲染（不走内联决策卡：无选项）
+      if (payload?.kind === 'enrichment_clarification') {
+        const clarificationPayload = payload as { title?: unknown; requests?: unknown }
+        const requests = Array.isArray(clarificationPayload.requests)
+          ? (clarificationPayload.requests as Array<Record<string, unknown>>)
+              .filter((item) => typeof item?.for === 'string' && typeof item?.question === 'string')
+              .map((item) => ({ for: String(item.for), question: String(item.question) }))
+          : []
+        if (requests.length > 0) {
+          store.set(enrichmentClarificationFamily(event.session_id), {
+            sessionId: event.session_id,
+            projectId: String(event.project_id ?? ''),
+            title: typeof clarificationPayload.title === 'string' && clarificationPayload.title
+              ? clarificationPayload.title
+              : '整理 PRD 前，先确认几个关键点',
+            requests,
+          })
+        }
       }
       // 裁判审查逐题选择题（2026-08-30 选择题化）：review_questions 逐题结构 + 全局出口
       if (payload?.kind === 'prd_review') {

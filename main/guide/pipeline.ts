@@ -23,6 +23,7 @@ import { generatePrdLlm, readConversation } from '../prd-engine-llm'
 import { enrichRequirementsLlm, extractUserTexts, mergeEnrichment } from '../requirement-enricher'
 import { recordDecision } from '../decision-log'
 import type { SDKQuery } from '../orchestrator'
+import type { EnrichmentClarificationRequest } from './clarification'
 
 /**
  * PRD 收敛管线输入（MvpTaskInput 的结构子集）：resolvePrdBackplane 实际消费的
@@ -50,8 +51,15 @@ export interface PrdPipelineInput {
  * （重跑时上轮 auto priority/已厚断言成为「已有」被「只填缺省」保留）；`mergeEnrichment`
  * 返回 `{ requirements, stats }`，断言丢弃率/优先级抑制数由本调用侧落决策日志
  * （enrichment_stats）供线上标定接地守卫误杀——日志失败仅静默丢弃，不阻断主链路。
+ * 追问通路透传（② 2026-09-03，K-1）：可选 onClarification 回调——主路
+ * （runPrdPipeline）传入收集加厚腿声明的信息缺口并挂起；辅路（MVP 生成中途的
+ * syncPrdCheckpoints）不传 → 信号自然丢弃，静默降级 = 现状（生成链路中途不追问用户）。
  */
-export async function resolvePrdBackplane(input: PrdPipelineInput, requirements: SketchRequirement[]): Promise<PrdBackplane> {
+export async function resolvePrdBackplane(
+  input: PrdPipelineInput,
+  requirements: SketchRequirement[],
+  onClarification?: (requests: EnrichmentClarificationRequest[]) => void,
+): Promise<PrdBackplane> {
   const template = (): PrdBackplane =>
     buildPrdBackplane(findProject(input.project_id), requirements, 'sketch_confirmed')
 
@@ -120,7 +128,7 @@ export async function resolvePrdBackplane(input: PrdPipelineInput, requirements:
       env,
       maxTokens,
       signal: input.signal,
-    }).catch(() => null), // 异常一律降级 null，绝不因 reject 阻断主链路
+    }, onClarification).catch(() => null), // 异常一律降级 null，绝不因 reject 阻断主链路
   ])
 
   const base = llm ?? template()

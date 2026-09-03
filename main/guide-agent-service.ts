@@ -30,6 +30,18 @@ import { resolveRoutedChannelId } from './category-routing'
 import { getChannelByIdRaw } from './channel-manager'
 import type { ConversationTurn, GuideModelOptions, SDKQuery } from './orchestrator'
 import { trackAnalytics } from './platform-services'
+import {
+  detectOrphanEnrichmentClarification,
+  hasPendingEnrichmentClarification,
+  isEnrichmentClarificationAnswer,
+  recordEnrichmentClarificationAnswered,
+  recordEnrichmentClarificationExhausted,
+  recordEnrichmentClarificationTimeout,
+  shouldSuspendForEnrichmentClarification,
+  suspendForEnrichmentClarification,
+  takePendingEnrichmentClarification,
+  type EnrichmentClarificationRequest,
+} from './guide/clarification'
 import { resolvePrdBackplane, runSketchTask, setProgrammingEventPublisher, nextRequirementId, refineModificationDescription } from './programming-orchestrator'
 import { normalizeRequirementUpdate, applyNormalization } from './requirement-normalizer'
 import { buildReferenceSection } from './web-reference-extractor'
@@ -527,6 +539,59 @@ export async function handleGuideMessage(
   // confirm → user_confirmed_at 落盘 + 开草图；adjust → 消费 pending：带实质文本时直接进
   // 修订闭环（归一化并入 → 重走 PRD 管线 → 新确认卡），不再把用户咐在提示上——
   // 线上案例 02239079：用户在弹窗输入「我想要更多有趣的功能」被提示「指出具体条目」
+  // ② 加厚追问回答回传（2026-09-03）：答案已由 orchestrator sendMessage 统一落盘
+  // 为 user 轮次（「答案落会话」——下一轮 enricher 接地守卫②的 userTexts 自动命中）；
+  // 此处 consume 挂起上下文 → answered 决策行 → 整轮重跑（K-3：PRD 腿同轮吸收新答案）。
+  if (isEnrichmentClarificationAnswer(input)) {
+    const pendingClarification = takePendingEnrichmentClarification(input.project_id)
+    const answer = input.content.trim()
+    if (pendingClarification && answer) {
+      const ack = '好的，按你的回答重新整理 PRD，稍后请你确认。'
+      persistAssistant?.(ack)
+      publish(makeGuideEvent(input, 'message_delta', { text: ack }))
+      publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+      try {
+        recordEnrichmentClarificationAnswered(input, answer)
+      } catch {
+        // 决策日志失败不阻断重跑
+      }
+      await runPrdPipeline({
+        request_id: pendingClarification.request_id,
+        session_id: pendingClarification.session_id,
+        project_id: pendingClarification.project_id,
+        mode: pendingClarification.mode,
+        channel_id: pendingClarification.channel_id,
+        requirements: pendingClarification.requirements as SketchRequirement[],
+        query: pendingClarification.query,
+        env: pendingClarification.env,
+        publish,
+        signal: pendingClarification.signal,
+      })
+    } else {
+      // 卡片已过期（超时/重启后内存 pending 丢失）：答案仍已落会话成为未来接地证据，
+      // 孤儿收敛（下方 detectOrphan）会补 timeout 决策行；如实告知不装作已采纳
+      const hint = '这张追问卡已经过期（等待超时或应用重启），你的回答我已记录，会在后续整理需求时参考。'
+      persistAssistant?.(hint)
+      publish(makeGuideEvent(input, 'message_delta', { text: hint }))
+      publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+    }
+    return
+  }
+
+  // ② 孤儿挂起收敛（重启恢复）：尾部 requested 无 answered/timeout 终结且内存无
+  // pending（应用重启丢了内存态）→ 按 timeout 语义落痕收敛，后续管线不再等待。
+  // 注意 must 在追问回答分流之后：正常回答路径 take 已落 answered 终结行。
+  if (
+    !hasPendingEnrichmentClarification(input.project_id) &&
+    detectOrphanEnrichmentClarification(input.session_id)
+  ) {
+    try {
+      recordEnrichmentClarificationTimeout(input)
+    } catch {
+      // 日志失败不阻断
+    }
+  }
+
   // 啪住，困惑打「？」后整个需求流程重新澄清全链重跑（用户反馈「没法在原有基础上
   // 修改，是完全性重构」）；dismiss → 暂不确认，回对话继续不开工。
   const prdConfirmDecision = resolvePrdConfirmCardAnswer(input)
@@ -1175,18 +1240,78 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
   let prdWritten = false
   let backplaneForReview: PrdBackplane | undefined
   if (aborted()) return { started: false, prd_written: false }
+
+  // ② 加厚追问通路（2026-09-03，挂起判定在 PRD 落盘前：answered 后整轮重跑会
+  // 重新生成并落盘，挂起期间不写 prd.json）。K-1 仅主路：辅路（MVP 生成中途）
+  // 不传 onClarification，信号自然丢弃。
+  let clarificationRequests: EnrichmentClarificationRequest[] = []
   try {
     const backplane = await resolvePrdBackplane(
       {
-        request_id: pending.request_id,
         session_id: pending.session_id,
         project_id: pending.project_id,
-        mode: pending.mode,
         channel_id: pending.channel_id,
         query: pending.query,
+        signal,
       },
-      requirements,
+      requirements as SketchRequirement[],
+      (requests) => {
+        clarificationRequests = requests
+      },
     )
+    if (clarificationRequests.length > 0 && shouldSuspendForEnrichmentClarification(pending.session_id)) {
+      // 挂起：旁白先行（对齐内审旁白纪律——用户需要知道为什么还没出 PRD）+
+      // requested 决策行（detail 存 requests 原文，孤儿恢复用）+ 追问卡 + 超时 timer；
+      // 本轮管线到此为止，answered 经 sendMessage 新栈重跑（状态机图「挂起→回传→答案落会话」）
+      gatedPublish(makeGuideEvent(eventInput, 'message_delta', {
+        text: '整理 PRD 时发现几处不说清就没法写出可靠验收标准的地方，先问你两个小问题，回答后我马上出完整 PRD。',
+      }))
+      suspendForEnrichmentClarification(
+        {
+          request_id: pending.request_id,
+          session_id: pending.session_id,
+          project_id: pending.project_id,
+          mode: pending.mode,
+          channel_id: pending.channel_id,
+          requirements,
+          query: pending.query,
+          env: pending.env,
+          publish,
+          signal,
+        },
+        clarificationRequests,
+        (timeoutPending) => {
+          // 超时回退（状态机图⑤）：按已确认输入重跑——轮次守卫里 hasTimeout 标记
+          // 已使 shouldSuspend=false，本轮不再挂起，静默降级走完内审→确认卡
+          try {
+            recordEnrichmentClarificationTimeout(timeoutPending)
+          } catch {
+            // 日志失败不阻断回退
+          }
+          void runPrdPipeline({
+            request_id: timeoutPending.request_id,
+            session_id: timeoutPending.session_id,
+            project_id: timeoutPending.project_id,
+            mode: timeoutPending.mode,
+            channel_id: timeoutPending.channel_id,
+            requirements: timeoutPending.requirements as SketchRequirement[],
+            query: timeoutPending.query,
+            env: timeoutPending.env,
+            publish: timeoutPending.publish,
+            signal: timeoutPending.signal,
+          }).catch(() => undefined)
+        },
+      )
+      return { started: false, prd_written: false }
+    }
+    if (clarificationRequests.length > 0) {
+      // 有缺口但轮次守卫不过（上限/超时后）→ 状态机图④：静默降级留痕，按现状继续
+      try {
+        recordEnrichmentClarificationExhausted(pending)
+      } catch {
+        // 日志失败不影响主线
+      }
+    }
     backplaneForReview = backplane
     syncDocuments(
       {

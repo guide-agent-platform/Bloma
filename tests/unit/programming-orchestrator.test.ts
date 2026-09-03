@@ -148,7 +148,8 @@ describe('resolvePrdBackplane — 功能项加厚并行并入', () => {
     // 两路并行调用、共用渠道 max_tokens 上限
     expect(generatePrdLlm).toHaveBeenCalledTimes(1)
     expect(enrichRequirementsLlm).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(enrichRequirementsLlm)).toHaveBeenCalledWith(expect.objectContaining({ maxTokens: 4096 }))
+    // ② 后第二参为可选 onClarification（辅路不传=undefined）；只断首参字段
+    expect(vi.mocked(enrichRequirementsLlm).mock.calls[0][0]).toEqual(expect.objectContaining({ maxTokens: 4096 }))
     expect(vi.mocked(generatePrdLlm)).toHaveBeenCalledWith(expect.objectContaining({ maxTokens: 4096 }))
     // 背板字段来自 LLM
     expect(backplane.positioning).toBe('家庭记账本：记录收支并展示结余')

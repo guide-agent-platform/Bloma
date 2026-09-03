@@ -6,6 +6,7 @@ import { parseBehaviorAssertion } from './behavior-assertions'
 import { categoryTemperature } from './model-resolution'
 import { readConversation } from './prd-engine-llm'
 import { callLlmForJson } from './kernel/llm-call'
+import { sanitizeClarificationRequests, type EnrichmentClarificationRequest } from './guide/clarification'
 
 /**
  * RequirementEnricher — 功能项加厚（2026-08-18 设计「功能项加厚：行为断言 LLM 提取」）。
@@ -70,7 +71,7 @@ export const MAX_GENERATION_ATTEMPTS = 2
 const BUDGET_BASE = 4096
 const BUDGET_PER_ITEM = 600
 
-export const DEFAULT_SYSTEM_PROMPT = `你是「Bloma 需求加厚师」。把已冻结但过薄的软件功能项，补成可执行的行为契约。只输出一个 JSON 对象，不要任何多余文字，不要 markdown 代码块围栏。
+export const DEFAULT_SYSTEM_PROMPT = `你是「Bloma 向导 · 需求加厚腿」。把已冻结但过薄的软件功能项，补成可执行的行为契约。只输出一个 JSON 对象，不要任何多余文字，不要 markdown 代码块围栏。
 
 输入：功能项清单（只做语义补全，不改写 id/description/顺序）+ 用户对话原文。
 
@@ -82,13 +83,15 @@ export const DEFAULT_SYSTEM_PROMPT = `你是「Bloma 需求加厚师」。把已
      {"assertion":"<触发>→<效果>","source":"支持该断言的用户原话（逐字引用，≤30 字符）"}
    ],
    "priority":"P0"}
-]}
+],
+"clarification_requests":[{"for":"F-001","question":"影响成品形态的一句话开放问题"}]}
 
 规则：
 - 只加厚，不改写：description 是用户/向导冻结的「要做什么」，不得重写；story 是对它的故事化转述。
 - 断言必须「触发→效果」、可执行可断言（示例：「点击保存按钮→列表新增一条记录」「按右方向键→车辆 x 坐标增加」）。禁止人工验收类表述（「用户手动测试」「能正常工作」）。
 - 每条断言必须附一条 source：能从【用户对话】或该功能项 description 里逐字找到的原话。找不到支撑原话的断言直接删掉，不要编。
 - 反编造（禁止补齐式幻觉 gap-filling）：每条断言的 source 必须能从【用户对话】或该项 description 里逐字找到原话（接地守卫②据此硬验引用存在性，无逐字原话即丢弃）；断言本身可将 source 所述意图操作化为可探针的触发→效果（「点击…控件」「…文本变化」等 UI 实现措辞属允许的操作化，不算编造），但不得借「紧邻常识可推出」补出 source/description 之外用户未提及的新功能实体/新场景。无把握宁可不写。每条功能项 0~3 条断言。
+- 追问纪律（clarification_requests，可远项）：仅当存在**不问清就无法写出关键断言**的信息缺口（如「能切换音色」但不知切换方式/数量/入口）时，输出该数组，每条一个最关键的开放问题（回答后能直接转化为断言）；最多 2 条，能不问就不问——追问会打断用户，只值得为影响成品形态的缺口发问。无缺口不输出该字段。
 - priority：P0 核心必做 / P1 重要 / P2 锦上添花。
 - requirements 与输入功能项一一对应（同 id、同数量），不得新增/删除/改名。
 
@@ -100,7 +103,7 @@ export const DEFAULT_SYSTEM_PROMPT = `你是「Bloma 需求加厚师」。把已
 助手：好的，先确认一个关键点：你主要想在电脑上弹奏，还是做音色设计？
 用户：主要是弹奏，能有不同的音色切换就行
 输出：
-{"requirements":[{"id":"F-001","story":"作为音乐爱好者，我想在电脑上弹奏并切换音色合成电子音乐，以便自由创作声音","behavior_assertions":[{"assertion":"点击音色切换控件→当前音色名称文本变化","source":"能有不同的音色切换就行"}],"priority":"P0"}]}
+{"requirements":[{"id":"F-001","story":"作为音乐爱好者，我想在电脑上弹奏并切换音色合成电子音乐，以便自由创作声音","behavior_assertions":[{"assertion":"点击音色切换控件→当前音色名称文本变化","source":"能有不同的音色切换就行"}],"priority":"P0"}],"clarification_requests":[{"for":"F-001","question":"音色切换用什么交互（下拉列表/按钮组/键盘快捷键）？内置音色大概几种？"}]}
 
 只输出 JSON。`
 
@@ -121,8 +124,16 @@ const RETRY_FEEDBACK_PROMPT =
  *
  * maxTokens：预算 = min(渠道上限, 4096 + 项数×600)，绝不请求超过渠道上限；预算已
  * 触渠道上限仍截断（渠道硬限）→ 升 maxTokens 不可行，直接返回 `null`。不做任何内容级修补。
+ *
+ * 追问通路（② 2026-09-03）：可选 onClarification 回调——模型在本轮输出中主动声明
+ * 的信息缺口（K-2：触发权在模型判定，非守卫丢弃计数；K-6：追问与加厚不互斥，本轮
+ * 可用断言照常返回）。仅在解析成功（返回非 null）时回调；requests 已过确定性清洗
+ * （for 在冻结 id 集/去重/≤2 条）。回调时机在返回前，调用方可据此挂起 PRD 收敛链。
  */
-export async function enrichRequirementsLlm(input: EnrichRequirementsInput): Promise<EnrichedSketchRequirement[] | null> {
+export async function enrichRequirementsLlm(
+  input: EnrichRequirementsInput,
+  onClarification?: (requests: EnrichmentClarificationRequest[]) => void,
+): Promise<EnrichedSketchRequirement[] | null> {
   const conversation = readConversation(input.session_id)
   if (!conversation.trim()) return null
   if (!input.query || !input.env) return null
@@ -131,6 +142,9 @@ export async function enrichRequirementsLlm(input: EnrichRequirementsInput): Pro
   const channelCap = input.maxTokens ?? DEFAULT_MAX_TOKENS
   const initialBudget = Math.min(channelCap, BUDGET_BASE + input.requirements.length * BUDGET_PER_ITEM)
 
+  // 追问请求（跨重试轮以最后一轮成功 parse 的为准；失败轮的残留不回调）
+  let clarification: EnrichmentClarificationRequest[] = []
+  const frozenIds = new Set(input.requirements.map((item) => item.id))
   const parsed = await callLlmForJson({
     systemPrompt: loadPromptOverride('enricher-system') ?? DEFAULT_SYSTEM_PROMPT,
     prompt: buildPrompt(input.requirements, conversation),
@@ -145,10 +159,13 @@ export async function enrichRequirementsLlm(input: EnrichRequirementsInput): Pro
     truncationRetry: { cap: channelCap },
     signal: input.signal,
     parse: (text) => {
-      const parsed = parseEnrichedJson(text)
-      return parsed ? (sanitizeEnriched(parsed) ?? undefined) : undefined
+      const result = parseEnrichedJson(text)
+      if (!result) return undefined
+      clarification = sanitizeClarificationRequests(result.clarification_requests, frozenIds)
+      return sanitizeEnriched(result.requirements) ?? undefined
     },
   })
+  if (parsed && clarification.length > 0) onClarification?.(clarification)
   return parsed
 }
 
@@ -161,6 +178,8 @@ interface ParsedEnrichedItem {
 
 interface ParsedEnriched {
   requirements: ParsedEnrichedItem[]
+  /** 模型主动声明的信息缺口（原始形态，未经 sanitizeClarificationRequests 清洗） */
+  clarification_requests: unknown
 }
 
 function parseEnrichedJson(text: string): ParsedEnriched | undefined {
@@ -184,7 +203,7 @@ function parseEnrichedJson(text: string): ParsedEnriched | undefined {
       behavior_assertions: parseAssertions(item.behavior_assertions),
       priority: isValidPriority(item.priority) ? item.priority : undefined,
     }))
-  return { requirements: items }
+  return { requirements: items, clarification_requests: parsed.clarification_requests }
 }
 
 /** 解析断言数组：{assertion, source} 结构，逐条清洗；无 source 的保留空串由接地守卫②丢弃。 */
@@ -201,9 +220,9 @@ function parseAssertions(raw: unknown): Array<{ assertion: string; source: strin
 }
 
 /** 结构校验：id 集合去重后非空即有效（id 与冻结清单的对应由 mergeEnrichment 的权威 id 集处理）。 */
-function sanitizeEnriched(parsed: ParsedEnriched): EnrichedSketchRequirement[] | null {
-  if (parsed.requirements.length === 0) return null
-  return parsed.requirements.map((item) => ({
+function sanitizeEnriched(parsed: ParsedEnrichedItem[]): EnrichedSketchRequirement[] | null {
+  if (parsed.length === 0) return null
+  return parsed.map((item) => ({
     id: item.id,
     ...(item.story ? { story: item.story } : {}),
     ...(item.behavior_assertions?.length ? { behavior_assertions: item.behavior_assertions } : {}),

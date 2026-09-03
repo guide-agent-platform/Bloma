@@ -196,8 +196,9 @@ describe('PRD 用户确认门（改造 3）', () => {
       decision: 'confirm',
       adopted_ideas: [ideas[0].label, '嘉绗不存在的想法'],
     })
-    expect(vi.mocked(resolvePrdBackplane)).toHaveBeenCalledWith(
-      expect.anything(),
+    // ② 后主路调用带第三参 onClarification（收集追问信号），只断前两参中的清单。
+    const adoptCall = vi.mocked(resolvePrdBackplane).mock.calls.at(-1)
+    expect(adoptCall?.[1]).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ description: `参考市面做法：${ideas[0].label}` }),
       ]),

@@ -178,8 +178,10 @@ describe('需求确认弹窗（confirm_requirements）', () => {
     })
 
     expect(result).toMatchObject({ started: true, prd_written: true })
-    // PRD 前移：勾选后的需求集 + requirement_confirmed 检查点（origin 随条目透传）
-    expect(resolvePrdBackplane).toHaveBeenCalledWith(expect.anything(), [
+    // PRD 前移：勾选后的需求集 + requirement_confirmed 检查点（origin 随条目透传）。
+    // ② 后主路调用带第三参 onClarification（收集追问信号），只断前两参。
+    const prdCall = vi.mocked(resolvePrdBackplane).mock.calls[0]
+    expect(prdCall?.[1]).toEqual([
       { id: 'F-002', description: '按月汇总统计', origin: 'guide' },
     ])
     expect(syncDocuments).toHaveBeenCalledWith(

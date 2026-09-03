@@ -597,3 +597,83 @@ describe('extractUserTexts — user 轮次切分', () => {
     expect(extractUserTexts('助手：好的\n')).toEqual([])
   })
 })
+
+describe('enrichRequirementsLlm — clarification_requests 追问通路（② 2026-09-03）', () => {
+  it('输出带合法 clarification_requests → 成功时回调清洗后的请求（K-6：追问与加厚不互斥）', async () => {
+    setup()
+    seedSession('enr-clar', '我想做一个电子音乐合成器，能有不同的音色切换就行')
+    const valid = JSON.stringify({
+      requirements: [
+        {
+          id: 'F-001',
+          story: '作为音乐爱好者，我想在电脑上弹奏并切换音色',
+          behavior_assertions: [{ assertion: '点击音色切换控件→当前音色名称文本变化', source: '能有不同的音色切换就行' }],
+          priority: 'P0',
+        },
+      ],
+      clarification_requests: [
+        { for: 'F-001', question: '音色切换用什么交互（下拉/按钮组）？' },
+        { for: 'F-999', question: 'for 不在清单会被清洗丢弃' },
+      ],
+    })
+    const requests: Array<Array<{ for: string; question: string }>> = []
+    const result = await enrichRequirementsLlm(
+      {
+        session_id: 'enr-clar',
+        requirements: [{ id: 'F-001', description: '做一个电子音乐合成器' }],
+        query: queryReturning(valid),
+        env: { PATH: 'x' },
+        maxTokens: 4096,
+      },
+      (asked) => requests.push(asked),
+    )
+    expect(result).not.toBeNull()
+    expect(requests).toEqual([[{ for: 'F-001', question: '音色切换用什么交互（下拉/按钮组）？' }]])
+  })
+
+  it('输出无 clarification_requests 字段 → 不回调（追问触发权在模型，K-2）', async () => {
+    setup()
+    seedSession('enr-noclar', '我想做一个家庭记账本')
+    const valid = JSON.stringify({
+      requirements: [
+        { id: 'F-001', story: 'S1', behavior_assertions: [{ assertion: '点击保存按钮→列表新增一条记录', source: '记一笔账' }], priority: 'P0' },
+      ],
+    })
+    let called = false
+    const result = await enrichRequirementsLlm(
+      {
+        session_id: 'enr-noclar',
+        requirements: [{ id: 'F-001', description: '做一个家庭记账本' }],
+        query: queryReturning(valid),
+        env: { PATH: 'x' },
+        maxTokens: 4096,
+      },
+      () => {
+        called = true
+      },
+    )
+    expect(result).not.toBeNull()
+    expect(called).toBe(false)
+  })
+
+  it('解析失败（预算耗尽 null）→ 不回调（失败轮的残留请求不可信）', async () => {
+    setup()
+    seedSession('enr-failclar', '做一个家庭记账本')
+    const { query } = recordingQuery(['not json', 'still not json'])
+    let called = false
+    const result = await enrichRequirementsLlm(
+      {
+        session_id: 'enr-failclar',
+        requirements: [{ id: 'F-001', description: '做一个家庭记账本' }],
+        query,
+        env: { PATH: 'x' },
+        maxTokens: 7000,
+      },
+      () => {
+        called = true
+      },
+    )
+    expect(result).toBeNull()
+    expect(called).toBe(false)
+  })
+})

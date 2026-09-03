@@ -47,6 +47,10 @@ export type DecisionType =
   | 'requirement_earsified'
   | 'template_override_rejected'
   | 'prd_backplane_fallback'
+  | 'enrichment_clarification_requested'
+  | 'enrichment_clarification_answered'
+  | 'enrichment_clarification_exhausted'
+  | 'enrichment_clarification_timeout'
 
 export interface DecisionEntry {
   type: DecisionType
