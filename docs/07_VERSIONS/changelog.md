@@ -7,6 +7,74 @@
 
 **v1.1 修订说明**：同步 §5 已知待同步项状态（4 项全部已同步），新增 §5.1 目录结构重组记录。按 `workflow.md §2.4` 走修订流程，待评审后回到已确认。
 
+## 任务级模型降级选模落地：内审缺省 flash 级（2026-09-02）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | feat（组会决议 4/7「审查用 flash 级、顶配留给 MVP loop/spec 生成」） |
+| 模块 | `main/model-resolution.ts` |
+
+### 变更内容
+
+- 落地 `capability` 三档选模（此前 `balanced`/`cheap` 为预留档、一律按 strongest）：`strongest` 取渠道 models 列表序首个 enabled（与改造前一致）；`balanced`/`cheap` 优先取名称匹配 `flash`/`lite`/`turbo` 的经济档快模型、无匹配回退 strongest——名称启发式过渡，能力元数据（tier 字段）落地前使用，单模型/多档渠道行为与改造前完全一致（不因缺元数据把渠道判死）。
+- `audit`（内审 Attacker/Defender/复核轮）缺省 capability 由 `strongest` 改 `cheap`：决议 7「审查用 flash 级」落地；渠道无快模型时回退渠道首选，非强制，用户仍可按渠道选配 + 模型列表序覆盖。
+
+### 影响评估
+
+- 受影响调用点：`resolveChannelEnv`/`pickBackupChannelEnv`（runtime-fallback）、`resolvedAuditView`/`buildCategoryRoutingViews`（category-routing）——含 flash 级模型的 audit 渠道会命中快模型。
+- 测试：model-resolution 新增 3 例（audit 缺省 cheap / flash 命中 / lite-turbo 命中 + strongest 不受名称影响）；既有 7 例全过。
+
+## UX 累计池批量修改：PRD 确认弹窗「一步一问一改」改批量（2026-09-02）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | feat（组会决议 7 / 下周计划 5） |
+| 模块 | `renderer/components/PrdConfirmDialog.tsx` |
+
+### 变更内容
+
+- 替换 `adjustText` 单字段为 `adjustPool: Array<{entryId, requirementId, text}>` 累计池：`openAdjustWith(id)` 入池（按 requirementId 去重）、`updatePoolEntry`/`removePoolEntry`/`addBlankPoolEntry`、`filledAdjustCount` 计数。
+- `submitPoolAdjust()` 把池内文本以 `\n` 拼接后一次性 `sendMessage(text, 'prd_confirm_adjust', …, {typed:true})`——把「一步一问一改」收敛为「攒一起统一提交」，省 token（组会第 10 点）。
+- `sendMessage` 增 `opts.typed`：失败时 `fail()` 内联错误 + `restoreAfterFailure` 恢复快照（与 F9a 混合契约一致），勾选/文本不丢。
+
+### 影响评估
+
+- 仅 PRD 确认弹窗交互路径；新增单测 10 例（prd-confirm-adjust-pool.test.tsx：P1–P7 池操作 + F1–F2 失败恢复 + S1 渲染同步）。
+
+## 需求确认弹窗失败静默修复：F9a 混合契约 + r124 测试恢复（2026-09-02）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | fix（B 腿 r124 UX 走查 / 下周计划 6） |
+| 模块 | `renderer/components/RequirementConfirmDialog.tsx` |
+
+### 变更内容
+
+- da737d5 半合并把 c9ab674「失败不关窗」回退成乐观关闭，四路失败（confirm/supplement 各 ok:false/throw）用户零反馈、勾选/文本清空、决定静默丢失。重兑现为混合契约：提交先隐藏弹窗（IPC 回传绑定 PRD 全程可达数十秒，滞留=盲等），失败时快照写回恢复弹窗 + 勾选/文本/灵感/参考链接全保留 + submitting 复位 + 内联错误条。
+- `restoreAfterFailure` 走 `store.get(requirementConfirmFamily(sessionId))` 做竞态守卫：在途新卡不覆盖，落到全局错误通道；`seenStateRef` + `useEffect` 换新卡时清 submitError。
+- 恢复 r124 测试（N1–N5 失败恢复翻转位 + M1 aria/文案基线 + D1 降级基线，共 7 例全过）。
+
+### 影响评估
+
+- 仅需求确认弹窗；无其它文件随 da737d5 丢失（已核）。
+
+## 泳道图 + PRD 三形态实验 + P2 测试盲区收尾（2026-09-02）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | docs + test（组会决议 5/6、下周计划 3/4/6） |
+| 模块 | `docs/03_ARCHITECTURE/agent-swimlane.md`、`docs/05_PROJECT_PLAN/prd-forms-experiment.*`、`tests/unit/*` |
+
+### 变更内容
+
+- 泳道图（决议 5）：`agent-swimlane.md` 7 泳道（user/harness/guide/内审/programming/委派/judge）+ 术语表，画出全流程 Agent 调用关系（含委派结构）。
+- PRD 三形态对比实验（决议 6）：同需求（学习笔记）× 三形态（一句话/简单/完整）× 同渠道同模型（deepseek-v4-pro）各 3 轮，走生产 `generatePrdLlm`。结论：一句话→简单是决定性跃升（验收 78→367 字、EARS 1→5.3）；简单→完整不升反降（验收 367→258、EARS 5.3→3.7）但范围外 0→3 条；数据支持导师「一句话几乎必出 major」。
+- P2 测试盲区（下周计划 6）：ideas 归约（5 例）、summary 渠道回退（3 例）、ipc 入参清洗（7 例）——锁定事件→atom 清洗、summary 非角色类别回退链、validateAgentSend/validateConfirmRequirements 非法入参 fail-closed。
+
+### 影响评估
+
+- 全量 unit 1171/1171 全过（119 文件）、typecheck 0 错；实验脚本 `BLOMA_EXPERIMENT=prd-forms` 显式开启、平时 skip。
+
 ## usage 阈值竹节压缩：Agent Loop 主动交接≤2 段（2026-08-29）
 
 | 属性 | 值 |

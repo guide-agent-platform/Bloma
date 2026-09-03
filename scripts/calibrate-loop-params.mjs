@@ -1,6 +1,7 @@
-#!/usr/bin/env node
 /**
  * loop 参数标定脚本（闭环治理 PR8，随感 16/41）。
+ * （无 shebang：npm 经 `node scripts/…` 调用；且 vitest 导入本模块时 shebang 会被
+ *  转换器判为非法 token，曾致 calibrate-loop-params.test.ts 文件级失败——2026-09-02）
  *
  * 输入：{PROMA_HOME:-~/.proma}/agent-workspaces/<slug>/analytics.jsonl（含 default-software-builder）。
  * 只读不改任何配置；输出 stdout 报告表 + {PROMA_HOME}/loop-params-report.json。

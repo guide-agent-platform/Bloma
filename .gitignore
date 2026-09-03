@@ -10,3 +10,7 @@ test-results/
 .context/
 .omo/
 evidence/
+# PROMA_HOME 污染防御：Node 把 undefined/null 强转字符串后会以 cwd 为根写相对路径
+# （详见 storage/config-paths.ts getPromaHome 与 tests/support/proma-home-guard.ts）
+undefined/
+null/
