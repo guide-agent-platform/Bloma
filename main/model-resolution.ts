@@ -7,8 +7,9 @@ import { listEnabledModels } from './channel-manager'
  * 代码里不写模型名、写文档类别，由本模块单点解析到实际模型：
  * ①override（preferredModel，仅当在当前渠道 models 内时生效）
  * ②capability 默认（strongest = 渠道 models 列表序的首个 enabled，与改造前
- *   `find(item => item.enabled)` 语义一致；balanced/cheap 为预留档位，能力元数据
- *   落地前一律按 strongest 处理）
+ *   `find(item => item.enabled)` 语义一致；balanced/cheap = 优先 flash/lite/turbo 级
+ *   快模型、无匹配回退 strongest——决议 7「审查用 flash 级」的名称启发式过渡，
+ *   能力元数据 tier 字段落地前使用）
  * ③同 provider 降级链（fallbackChain ∩ enabled，供失败重试换模——一把 key 约束下
  *   不跨 provider）
  * ④无可用模型：抛 `CHANNEL_MODEL_NOT_FOUND`（明确错误，绝不硬编码模型名兜底）。
@@ -21,7 +22,8 @@ export type { DocumentCategory } from '../shared/types'
 
 export interface CategoryModelConfig {
   category: DocumentCategory
-  /** 能力标签（质量优先默认 strongest）；'balanced'/'cheap' 为预留档位，落地前按 strongest 解析 */
+  /** 能力标签（质量优先默认 strongest）；'balanced'/'cheap' 优先 flash/lite/turbo 级
+   *  快模型、无匹配回退 strongest（决议 7 降级方法论，名称启发式过渡） */
   capability: 'strongest' | 'balanced' | 'cheap'
   /** 手动档：指定模型名（仅当在当前渠道 models 内时生效，否则忽略落入 capability 默认） */
   preferredModel?: string
@@ -29,7 +31,7 @@ export interface CategoryModelConfig {
   fallbackChain?: string[]
 }
 
-/** 质量优先默认：全类别 strongest、无手动档、无降级链（行为可预期）。测试可经 setCategoryConfigForTests 覆盖。 */
+/** 质量优先默认：除内审 audit 走 cheap（flash 级，决议 7）外全类别 strongest、无手动档、无降级链（行为可预期）。测试可经 setCategoryConfigForTests 覆盖。 */
 export const DEFAULT_CATEGORY_CONFIGS: Record<DocumentCategory, CategoryModelConfig> = {
   guide: { category: 'guide', capability: 'strongest' },
   prd: { category: 'prd', capability: 'strongest' },
@@ -37,10 +39,11 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<DocumentCategory, CategoryModelCon
   mvp: { category: 'mvp', capability: 'strongest' },
   gwt: { category: 'gwt', capability: 'strongest' },
   judge: { category: 'judge', capability: 'strongest' },
-  // 内审（2026-09-01 决议 4/7）：Attacker/Defender/复核轮专用审查腿。闪消级成本
-  // 纪律（决议 7：审查用 flash 级，顶配留给 MVP loop/spec 生成）——模型档位由用户
-  // 在 audit 渠道上自行配置快模型，路由层不强制。缺省解析与其它类别一致取渠道首选。
-  audit: { category: 'audit', capability: 'strongest' },
+  // 内审（2026-09-01 决议 4/7）：Attacker/Defender/复核轮专用审查腿。决议 7「审查用
+  // flash 级、顶配留给 MVP loop/spec 生成」落地为缺省 cheap 档——优先取 audit 渠道内
+  // flash/lite/turbo 级快模型；渠道无快模型时回退渠道首选（非强制，用户仍可按渠道
+  // 选配 + 模型列表序覆盖）。
+  audit: { category: 'audit', capability: 'cheap' },
   // T4-L3 蒸馏（memory.json）：后台整理型任务，不映射任何阶段（categoryForStage 不含）
   summary: { category: 'summary', capability: 'strongest' },
 }
@@ -62,6 +65,18 @@ export interface ResolvedModel {
   fallbacks: string[]
 }
 
+/** 经济档模型名特征（决议 7「审查用 flash 级」落地）：flash/lite/turbo 级快模型。
+ *  能力元数据（tier 字段）落地前用名称启发式过渡；渠道无匹配时回退 strongest，
+ *  绝不因缺元数据把渠道判死（单模型渠道行为与改造前完全一致）。 */
+const ECONOMY_MODEL_PATTERN = /(flash|lite|turbo)/i
+
+/** ②capability 默认解析：strongest 取列表序首个 enabled；balanced/cheap 优先
+ *  flash/lite/turbo 级快模型（决议 7 降级方法论），无匹配回退 strongest。 */
+function pickCapabilityModel(enabled: ChannelModel[], capability: CategoryModelConfig['capability']): ChannelModel | undefined {
+  if (capability === 'strongest') return enabled[0]
+  return enabled.find((model) => ECONOMY_MODEL_PATTERN.test(model.name)) ?? enabled[0]
+}
+
 /**
  * 解析类别 → 模型（§6.3 管线）。渠道无任何 enabled 模型时抛
  * `CHANNEL_MODEL_NOT_FOUND`——由调用方决定语义（引导路径回规则路由 / 编程路径报可读错误）。
@@ -76,8 +91,8 @@ export function resolveCategoryModel(channel: Pick<Channel, 'models' | 'name'>, 
     return { model: config.preferredModel, fallbacks: pickFallbacks(config, enabled, config.preferredModel) }
   }
 
-  // ②capability 默认：strongest = 渠道列表序首个 enabled（balanced/cheap 预留同档）
-  const primary = enabled[0]
+  // ②capability 默认：strongest=列表序首个 enabled；balanced/cheap 优先 flash 级快模型
+  const primary = pickCapabilityModel(enabled, config.capability)
   if (!primary) {
     throw new Error(`CHANNEL_MODEL_NOT_FOUND: 渠道「${channel.name}」没有启用的模型，无法解析 ${category} 类别`)
   }

@@ -97,9 +97,35 @@ describe('model-resolution（类别 → 模型解析管线）', () => {
     }
   })
 
-  it('默认配置：全类别 strongest、无手动档（行为可预期）', () => {
+  it('默认配置：除 audit 走 cheap（flash 级）外全类别 strongest、无手动档（行为可预期）', () => {
     for (const category of ALL_CATEGORIES) {
       expect(DEFAULT_CATEGORY_CONFIGS[category]).toEqual({ category, capability: 'strongest' })
     }
+    expect(DEFAULT_CATEGORY_CONFIGS.summary).toEqual({ category: 'summary', capability: 'strongest' })
+    // 决议 7：内审缺省 flash 级（cheap），顶配留给 MVP loop/spec 生成
+    expect(DEFAULT_CATEGORY_CONFIGS.audit).toEqual({ category: 'audit', capability: 'cheap' })
+  })
+
+  it('②capability：balanced/cheap 优先 flash 级快模型，无匹配回退列表序首个（非破坏）', () => {
+    const withFlash = makeChannel([{ name: 'deepseek-v4-pro' }, { name: 'deepseek-v4-flash' }])
+    // audit 缺省 cheap → 命中 flash
+    expect(resolveCategoryModel(withFlash, 'audit').model).toBe('deepseek-v4-flash')
+    // 无 flash/lite/turbo 的渠道 → 回退列表序首个（单模型/多档渠道行为与改造前一致）
+    const noFlash = makeChannel([{ name: 'MiniMax-M3' }, { name: 'minimax-highspeed' }])
+    expect(resolveCategoryModel(noFlash, 'audit').model).toBe('MiniMax-M3')
+  })
+
+  it('②capability：cheap/balanced 也认 lite/turbo；strongest 不看名称只看列表序', () => {
+    setCategoryConfigForTests({
+      mvp: { category: 'mvp', capability: 'cheap' },
+      gwt: { category: 'gwt', capability: 'balanced' },
+    })
+    const lite = makeChannel([{ name: 'doubao-seed-2.0-pro' }, { name: 'doubao-seed-2.0-lite' }])
+    expect(resolveCategoryModel(lite, 'mvp').model).toBe('doubao-seed-2.0-lite')
+    const turbo = makeChannel([{ name: 'glm-5.2' }, { name: 'glm-5-turbo' }])
+    expect(resolveCategoryModel(turbo, 'gwt').model).toBe('glm-5-turbo')
+    // strongest 依旧取列表序首个，即使后面跟着 flash
+    const strong = makeChannel([{ name: 'a-pro' }, { name: 'a-flash' }])
+    expect(resolveCategoryModel(strong, 'sketch').model).toBe('a-pro')
   })
 })
