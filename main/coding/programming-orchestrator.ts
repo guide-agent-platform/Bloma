@@ -5,7 +5,7 @@ import type { AgentEvent, AgentLoopJudgeMetadata, AgentSendMessageInput, Channel
 import type { ThinkingLevel } from '../../shared/reasoning-profile'
 import { getAgentSessionPath, getDocumentsDir } from '../../storage/config-paths'
 import { appendJsonLine } from '../../storage/json-store'
-import { readPrdBackplane, readUxContractSketch, syncDocuments, updateRequirementStatus, writeSecurityScanDocument } from '../document-engine'
+import { readPrdBackplane, readUxContractSketch, renamePrdProject, syncDocuments, updateRequirementStatus, writeSecurityScanDocument } from '../document-engine'
 import { appendProjectLearning, renderLearningsSection } from '../learnings-log'
 import { createSnapshot, runSandbox, trackAnalytics } from '../platform-services'
 import { renderPackageJson, renderStaticServer } from '../project-scaffold'
@@ -345,6 +345,9 @@ export async function autoNameProject(input: MvpTaskInput): Promise<void> {
     deriveFallbackName(readPrimaryIntent(input.session_id) ?? '')
   if (name) {
     updateProject(input.project_id, { name, auto_named: true })
+    // A10（2026-09-03）：命名同步回填 prd.json，消除 PRD/loop 锚文本里的「未命名项目」；
+    // prd.json 尚未落盘（命名先于首写）时静默跳过——后续 syncDocuments 会带上新名重建
+    renamePrdProject(input.project_id, name)
   } else {
     // 兜底也拿不到（首句口述剥完为空）：只落标记，避免每次生成都重试
     updateProject(input.project_id, { auto_named: true })

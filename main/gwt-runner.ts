@@ -218,12 +218,53 @@ async function runScenario(page: Page, scenario: ScenarioPlan): Promise<string |
 
   const before = await capturePageState(page)
   const triggerError = await dispatchTrigger(page, scenario.plan.trigger)
-  if (triggerError) return triggerError
+  if (triggerError) {
+    // C4：找不到控件时附页面实际清单——模型可直接判断该改控件文案还是补控件
+    const inventory = await collectControlInventory(page)
+    return inventory ? `${triggerError}；探针视角：${inventory}` : triggerError
+  }
   // 交互生效的微小等待（CSS transition / requestAnimationFrame 后再采样）
   await page.waitForTimeout(150)
   const after = await capturePageState(page)
 
-  return checkEffect(scenario, before, after)
+  const failed = checkEffect(scenario, before, after)
+  if (!failed) return undefined
+  // C4：断言未满足时附触发执行事实与前后状态 + 控件清单（消除探针黑盒盲猜）
+  const trigger = scenario.plan.trigger
+  const targetDesc = !trigger
+    ? '（无触发解析）'
+    : trigger.kind === 'key'
+      ? `按键「${trigger.key ?? ''}」已派发`
+      : `目标「${trigger.target ?? ''}」已执行`
+  const inventory = await collectControlInventory(page)
+  return `${failed}（触发状态：${targetDesc}；可见元素 ${before.visibleCount}→${after.visibleCount}${inventory ? `；探针视角：${inventory}` : ''}）`
+}
+
+/** 探针视角清单（C4，2026-09-03）：失败原因附页面实际控件/输入框清单——线上案例
+ * （058c86a3）：编程 Agent 看不到探针内部，为猜「保存」控件为何不命中烧掉 24 轮。
+ * 清单直接展示探针能看见什么，把盲猜变成对账。失败路径才采集（通过零开销）。 */
+async function collectControlInventory(page: Page): Promise<string> {
+  try {
+    return await page.evaluate(() => {
+      const clickables = Array.from(
+        document.querySelectorAll<HTMLElement>('button, [role="button"], a, input[type="button"]'),
+      )
+        .map((el) => ((el.textContent ?? '').trim() || el.getAttribute('value') || '').trim())
+        .filter(Boolean)
+        .slice(0, 8)
+      const fields = Array.from(
+        document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea'),
+      )
+        .filter((el) => !['button', 'submit', 'checkbox', 'radio', 'file'].includes((el.getAttribute('type') || 'text').toLowerCase()))
+        .slice(0, 6)
+        .map((el) => el.id || el.name || el.getAttribute('placeholder') || '未命名输入框')
+      const clickText = clickables.map((t) => `「${t.slice(0, 12)}」`).join('') || '（无）'
+      const fieldText = fields.join('、') || '（无）'
+      return `可点击控件：${clickText}；输入框：${fieldText}`
+    })
+  } catch {
+    return ''
+  }
 }
 
 /** 页面状态快照：元素签名→位置 + 可见元素数 + 全文 + 输入框值（效果探针的比对基础）。 */

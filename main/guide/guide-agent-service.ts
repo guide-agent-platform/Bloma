@@ -15,6 +15,7 @@ import {
   resumePrdReviewOverride,
   runPrdReviewGate,
   takePendingPrdReview,
+  type PrdReviewIssue,
 } from '../prd-review'
 import {
   PRD_CONFIRM_OPTION_ADJUST,
@@ -489,6 +490,24 @@ export async function handleGuideMessage(
       .map((answer) => answer.label || answer.option_id)
       .filter(Boolean)
       .join('；')
+    // 定向修订指令（A6，2026-09-03）：issue 定位随答案进 normalizer，revise 目标不再靠猜。
+    // 线上案例（058c86a3）：答案 label「前一天内容，早9点推送」被拼接后 append 成 F-006/F-007
+    // 新功能项而非 revise F-003，冲突源永不消除。qN 按 buildReviewQuestions 的 index 对应
+    // pending.issues[N]；拿不到 issue 时回退纯 label（与旧行为一致）。
+    const locateReviewIssue = (issueId: string): PrdReviewIssue | undefined => {
+      const idx = /^q(\d+)$/.exec(issueId)?.[1]
+      if (idx === undefined) return undefined
+      return pending.issues[Number(idx)]
+    }
+    const directedModification = substantive
+      .map((answer) => {
+        const issue = locateReviewIssue(answer.issue_id)
+        const answerText = answer.label || answer.option_id
+        if (!issue) return answerText
+        const claim = issue.claim.length > 60 ? `${issue.claim.slice(0, 60)}…` : issue.claim
+        return `${issue.location} 的问题（${claim}）按「${answerText}」修订，修改该功能项本身，不要新增功能项`
+      })
+      .join('；')
     recordDecision({
       project_id: input.project_id,
       session_id: input.session_id,
@@ -514,7 +533,7 @@ export async function handleGuideMessage(
     const normalization = await normalizeRequirementUpdate({
       session_id: input.session_id,
       existing,
-      modification: refineModificationDescription(combined),
+      modification: refineModificationDescription(directedModification),
       constraints: readProjectConstraints(input.project_id),
       query: pending.query,
       env: undefined,

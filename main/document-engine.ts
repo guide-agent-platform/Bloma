@@ -419,6 +419,25 @@ export function isPrdUserConfirmed(projectId: string): boolean {
   }
 }
 
+/** 项目命名回填 prd.json 的 name（A10，2026-09-03）：命名腿此前只写 projects.json，
+ * PRD name 停在「未命名项目」——loop 任务文本与 PRD 过目卡都跟着错。
+ * 读-改-写只动 name，保留全部既有字段（含 user_confirmed_at）；失败静默不阻断。 */
+export function renamePrdProject(projectId: string, name: string): boolean {
+  try {
+    const project = findProject(projectId)
+    const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+    const path = join(dir, 'prd.json')
+    if (!existsSync(path)) return false
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as PrdBackplane
+    if (!parsed || !Array.isArray(parsed.requirements)) return false
+    if (typeof name !== 'string' || !name.trim()) return false
+    writeFileSync(path, renderPrdJson({ ...parsed, name: name.trim() }), 'utf8')
+    return true
+  } catch {
+    return false
+  }
+}
+
 /** 向盘上 prd.json 追加功能项（2026-08-29 灵感参考：PRD 确认卡勾选采纳市调想法）。
  * 读-改-写保留全部既有字段（含 user_confirmed_at/status 等）；**id 由本函数内部按
  * 盘上现状编号**（nextRequirementId 语义 max+1，审查修复：调用方猜号在盘上条目多于
