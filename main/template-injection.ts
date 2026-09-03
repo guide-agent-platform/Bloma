@@ -82,11 +82,15 @@ export function buildSketchInjection(type: TemplateType, mode: ProjectMode, back
   const pages = backplanePages(backplane, mode)
   const pageLines = pages.map((page) => `- ${page.name}${page.purpose ? `：${page.purpose}` : ''}`).join('\n')
   const layout = mode === 'longterm' ? templateSection(template, 'tech_skeleton') : ''
+  // B1'（2026-09-03）：视觉规范段 quick/longterm 都注入——此前 quick 只有 pages 清单，
+  // 草图视觉全凭模型默认审美（线上所有项目同款灰紫圆角卡）；规范段给模型可执行的差异基线
+  const visual = templateSection(template, '视觉规范')
   return [
     '【页面清单（按此结构出草图，不要自创页面）】',
     pageLines,
     mode === 'quick' ? '快消模式页面不超过 3 个，单屏聚焦核心流程。' : '',
     layout ? `【布局惯例】\n${layout}` : '',
+    visual ? `【视觉规范】\n${visual}` : '',
   ]
     .filter(Boolean)
     .join('\n')

@@ -38,6 +38,7 @@ import {
   recordEnrichmentClarificationAnswered,
   recordEnrichmentClarificationExhausted,
   recordEnrichmentClarificationTimeout,
+  readLastEnrichmentClarificationRequests,
   shouldSuspendForEnrichmentClarification,
   suspendForEnrichmentClarification,
   takePendingEnrichmentClarification,
@@ -574,13 +575,49 @@ export async function handleGuideMessage(
       } catch {
         // 决策日志失败不阻断重跑
       }
+      // A4（2026-09-03）：追问答案先定向 revise 目标功能项——拆 description 冻结死锁。
+      // 此前新语义只能靠断言通道（被「不改写 description」拦住）+会话接地证据间接回流，
+      // 目标项 description/story 永远是旧语义，缺口每轮重跑必然复发（058c86a3：F-003
+      // 连续两轮被问同一时间点）。答案现直接驱动 revise：normalizer 失败或判定非
+      // revise 目标项时回退原清单，答案仍作为会话接地证据（现状行为不丢）。
+      let answeredRequirements = pendingClarification.requirements as SketchRequirement[]
+      const targets = (readLastEnrichmentClarificationRequests(input.session_id) ?? [])
+        .map((request) => request.for)
+        .filter(Boolean)
+      if (targets.length > 0 && pendingClarification.query) {
+        const directedAnswer = `针对 ${targets.join('、')} 的追问，用户补充：「${answer.slice(0, 120)}」。据此修订这些功能项的描述与故事，使其反映该补充，不要新增功能项`
+        try {
+          const normalization = await normalizeRequirementUpdate({
+            session_id: input.session_id,
+            existing: answeredRequirements,
+            modification: refineModificationDescription(directedAnswer),
+            constraints: readProjectConstraints(input.project_id),
+            query: pendingClarification.query,
+            env: undefined,
+          })
+          if (
+            normalization.action === 'revise' &&
+            normalization.reviseId &&
+            targets.includes(normalization.reviseId)
+          ) {
+            answeredRequirements = applyNormalization(
+              answeredRequirements,
+              normalization,
+              nextRequirementId(answeredRequirements),
+              'correction',
+            )
+          }
+        } catch {
+          // normalizer 失败回退原清单：答案仍已落会话成接地证据，重跑照常
+        }
+      }
       await runPrdPipeline({
         request_id: pendingClarification.request_id,
         session_id: pendingClarification.session_id,
         project_id: pendingClarification.project_id,
         mode: pendingClarification.mode,
         channel_id: pendingClarification.channel_id,
-        requirements: pendingClarification.requirements as SketchRequirement[],
+        requirements: answeredRequirements,
         query: pendingClarification.query,
         env: pendingClarification.env,
         publish,

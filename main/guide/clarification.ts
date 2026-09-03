@@ -162,6 +162,19 @@ export function detectOrphanEnrichmentClarification(sessionId: string): Enrichme
   return undefined
 }
 
+/** 读取最近一次加厚追问的 requests 原文（A4，2026-09-03：回答回传时取 for 目标，
+ * 与终结状态无关——detectOrphan 在 answered 落盘后即失效，此处不受影响）。 */
+export function readLastEnrichmentClarificationRequests(sessionId: string): EnrichmentClarificationRequest[] | undefined {
+  const decisions = readDecisionLines(sessionId)
+  for (let i = decisions.length - 1; i >= 0; i -= 1) {
+    if (decisions[i].type === 'enrichment_clarification_requested') {
+      const requests = decisions[i].detail?.requests
+      return Array.isArray(requests) ? (requests as EnrichmentClarificationRequest[]) : []
+    }
+  }
+  return undefined
+}
+
 // ---------------------------------------------------------------------------
 // 决策行记录（T2 决策日志；requested 的 detail 存 requests 原文供孤儿恢复）
 // ---------------------------------------------------------------------------
