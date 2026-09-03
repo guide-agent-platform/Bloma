@@ -97,6 +97,37 @@ describe('对抗审查修复回归（B-1 链 M-3/M-4/M-5，2026-09-02）', () =>
     expect(wordy.response).toBe('计时停止')
   })
 
+  it('a8c7d17d 回溯漏洞（2026-09-04 修复）：复合框名形态 target 不再吃介词/丢语义', () => {
+    // 旧正则：懒惰 capture≥1 + 可选介词组无锚定→回溯后 capture='在'（target='在'）致 fill 探针全 MISS
+    const searchBox = parseBehaviorAssertion('WHEN 在搜索框输入关键词 → 显示匹配的历史想法')
+    expect(searchBox.trigger?.kind).toBe('fill')
+    expect(searchBox.trigger?.target).toBe('搜索') // 复合框名「搜索框」→ 语义前缀，非「在」
+    expect(searchBox.trigger?.value).toBe('关键词') // fill 值从触发器语义提取（次级发现①）
+
+    // 回归：T-8 已修形态不受影响
+    expect(parseBehaviorAssertion('WHEN 在任务输入框输入内容 → 输入框内容更新').trigger?.target).toBe('任务')
+    expect(parseBehaviorAssertion('WHEN 在搜索输入框输入 → 结果刷新').trigger?.target).toBe('搜索')
+    // 无介词复合框名：旧版 null（回退泛化），新版直接命中语义前缀
+    expect(parseBehaviorAssertion('WHEN 搜索框输入关键词 → 显示匹配结果').trigger?.target).toBe('搜索')
+    // 裸动词（无框名）：泛化 input + value 提取（不含点击——点击类优先于输入类是既有口径）
+    const bare = parseBehaviorAssertion('WHEN 输入关键词 → 状态更新')
+    expect(bare.trigger?.kind).toBe('fill')
+    expect(bare.trigger?.target).toBe('input')
+    expect(bare.trigger?.value).toBe('关键词')
+  })
+
+  it('fill 值策略：框名词里的「输入」不是动词（取第二个动词的宾语），连接词尾巴清洗', () => {
+    // 「在输入框输入内容并提交」：第一个「输入」属于框名词，value 取「内容」
+    const chained = parseBehaviorAssertion('WHEN 在输入框输入内容并提交 → 状态更新')
+    expect(chained.trigger?.kind).toBe('fill')
+    expect(chained.trigger?.target).toBe('input') // 无 label 前缀的「输入框」泛化
+    expect(chained.trigger?.value).toBe('内容') // 「并提交」尾巴已清洗，不会带进值
+
+    // value 与 target 同词时不设 value（回退固定「测试输入」，避免同词自匹配假阳性）
+    const same = parseBehaviorAssertion('WHEN 在搜索框输入搜索 → 状态更新')
+    expect(same.trigger?.value).toBeUndefined()
+  })
+
   it('M-4 互查：词表可探针子集的典型句式全部解析为行为探针（不退化 presenceFallback）', () => {
     const samples: Array<[string, string]> = [
       ['WHEN 点击保存按钮 → 列表新增一条记录', 'click'],

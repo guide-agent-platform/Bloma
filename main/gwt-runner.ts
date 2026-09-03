@@ -341,7 +341,10 @@ async function dispatchTrigger(page: Page, trigger: AssertionPlan['trigger']): P
     return undefined
   }
   if (trigger.kind === 'fill' && trigger.target) {
-    const filled = await page.evaluate((target) => {
+    // a8c7d17d 次级发现①：fill 值从固定「测试输入」改为触发器语义提取（trigger.value，
+    // 缺省仍固定值）——「输入关键词→显示匹配项」类断言需要值与效果语义对齐才能命中
+    const fillValue = trigger.value || '测试输入'
+    const filled = await page.evaluate(([target, value]) => {
       const fields = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea')).filter((el) => {
         const type = (el.getAttribute('type') || 'text').toLowerCase()
         return type !== 'button' && type !== 'submit' && type !== 'checkbox' && type !== 'radio' && type !== 'file'
@@ -353,11 +356,11 @@ async function dispatchTrigger(page: Page, trigger: AssertionPlan['trigger']): P
       })
       if (!hit) return false
       hit.focus()
-      hit.value = '测试输入'
+      hit.value = value
       hit.dispatchEvent(new Event('input', { bubbles: true }))
       hit.dispatchEvent(new Event('change', { bubbles: true }))
       return true
-    }, trigger.target)
+    }, [trigger.target, fillValue] as [string, string])
     if (!filled) return `找不到可输入的「${trigger.target}」输入框，断言无法执行`
     return undefined
   }

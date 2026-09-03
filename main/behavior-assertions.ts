@@ -20,6 +20,10 @@ export interface BehaviorTrigger {
   key?: string
   /** 目标提示：按钮文本/输入框语义/下拉项语义（非 key 类共用） */
   target?: string
+  /** 填入值（kind=fill 时；从触发器语义提取，缺省固定「测试输入」）——
+ *  与断言效果语义对齐（a8c7d17d 次级发现①：「输入关键词→显示匹配项」类
+ *  断言若填固定值，输入即过滤/无结果提示类实现无法命中） */
+  value?: string
 }
 
 /** 可探针的效果种类 + 静态启发式关键词（产物全文含其一即视为静态确认）。 */
@@ -91,11 +95,27 @@ function parseTrigger(raw: string): BehaviorTrigger | undefined {
     if (target && target.length <= 12) return { kind: 'click', target }
   }
   // 输入类（M-4）：在XX输入框输入… / 输入XX（无框名时目标为任意输入框）。
-  // T-8 实测修正：开头的介词（在/向/往/于/从）先剥——否则 capture 把「在」带进
-  // target（「在任务」），真实页面 placeholder/id 不含介词导致 fill 探针全 MISS
+  // T-8：开头的介词（在/向/往/于/从）先剥——否则 capture 把「在」带进 target。
+  // a8c7d17d 回溯漏洞修复（2026-09-04）：旧正则懒惰 capture≥1 与可选介词组无锚定
+  // 组合回溯——「在搜索框输入」介词组消费「在」后 capture 与复合框名「搜索框」
+  // 对不齐，回溯让介词组匹配空，capture='在'（target='在'）致 fill 探针全 MISS。
+  // 修法：剥介词后 ^ 锚定，capture 允许空 + 框名词入组；复合框名（搜索框）无
+  // 前缀时 target 取框名语义前缀（搜索），其余泛化 input。
   if (/(输入|键入|填写|填入|录入)/.test(text)) {
-    const boxMatch = /(?:在|向|往|于|从)?\s*([\u4e00-\u9fa5A-Za-z0-9]{1,8}?)\s*(?:输入框|文本框|输入域|搜索框|字段)/.exec(text)
-    return { kind: 'fill', target: boxMatch?.[1]?.trim() || 'input' }
+    const stripped = text.replace(/^(?:在|向|往|于|从)\s*/, '')
+    const boxMatch = /^([\u4e00-\u9fa5A-Za-z0-9]{0,8}?)\s*(输入框|文本框|输入域|搜索框|字段)/.exec(stripped)
+    let target = 'input'
+    if (boxMatch) {
+      const label = boxMatch[1]?.trim() ?? ''
+      const boxWord = boxMatch[2] ?? ''
+      target = label || (boxWord === '搜索框' ? '搜索' : 'input')
+    }
+    // fill 值：输入动词后的宾语（语义对齐断言效果），清洗连接词尾巴；
+    // 输入(?!框|域)排除框名词里的「输入」（「在输入框输入内容」取第二个动词）；
+    // 无有效宾语回退固定「测试输入」（与旧口径兼容）
+    const valueRaw = /(?:输入(?!框|域)|键入|填写|填入|录入)\s*[「'"“]?([^」'"”，。,]{1,12})/.exec(text)?.[1] ?? ''
+    const value = valueRaw.replace(/(?:之后|然后|后|并|时|前).*$/, '').trim()
+    return { kind: 'fill', target, ...(value && value !== target ? { value } : {}) }
   }
   // 下拉选择类（M-4）：选择XX / 下拉选XX / 切换到XX
   const selectMatch = /(?:选择|下拉选?|切换到?)\s*[「'"“]?([^」'"”，。,]{1,12})/.exec(text)
