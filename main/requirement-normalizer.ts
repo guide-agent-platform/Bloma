@@ -8,9 +8,12 @@ import { recordDecision } from './decision-log'
 import { callLlmForJson } from './kernel/llm-call'
 
 /**
- * RequirementNormalizer — 修改诉求并入需求清单前的归一化（2026-08-16 复测 43b47a47 发现：
- * 口语碎片原样追加污染 PRD 背板——「重新生成」被 acceptance 解释成功能、产品里长出
- * 「重新生成」按钮；「车的运行方向不对」作为独立功能项只能生成最小满足版）。
+ * RequirementNormalizer — 向导群·需求归一化腿（2026-09-03 ③归一化归位：prompt 家族化为
+ * 向导分身，与 prd-engine-llm 需求工程腿同族——独立子代理式调用、干净上下文、低温
+ * 确定性；槽位 id normalizer-system 不变，外置覆盖零迁移）。修改诉求并入需求清单
+ * 前的归一化（2026-08-16 复测 43b47a47 发现：口语碎片原样追加污染 PRD 背板——
+ * 「重新生成」被 acceptance 解释成功能、产品里长出「重新生成」按钮；「车的运行方向不对」
+ * 作为独立功能项只能生成最小满足版）。
  *
  * 归一化三件事（模型判定，确定性守卫）：
  * 1. 故事化 + 行为化（§5.2）：产出升级为密背板格式层——story（作为<角色>，我想<功能>，
@@ -71,7 +74,7 @@ export interface RequirementNormalizationDecision {
 const MAX_DESCRIPTION_LENGTH = 300
 const DEFAULT_MAX_TOKENS = 512
 
-export const DEFAULT_SYSTEM_PROMPT = `你是「Bloma 需求整理员」。用户对已生成项目提出了一条修改诉求，你要把它整理为「故事化功能项」并决定如何并入已有功能项清单。
+export const DEFAULT_SYSTEM_PROMPT = `你是「Bloma 向导 · 需求归一化腿」（向导群内的独立工程子代理：干净上下文、低温确定性产出，只做归一化判定不改写对话）。用户对已生成项目提出了一条修改诉求，你要把它整理为「故事化功能项」并决定如何并入已有功能项清单。
 
 判定规则（四选一）：
 - revise：这条诉求是对某个已有功能项的修正、细化或纠错（如「车的运行方向不对」是修正控制类功能项）。重写该功能项的故事化描述并**追加**行为断言，给出 revise_id；

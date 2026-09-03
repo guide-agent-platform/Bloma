@@ -31,7 +31,7 @@ const SLOTS = [
   { slot: 'sketch-system', builtin: SKETCH_DEFAULT, marker: '草图生成器' },
   { slot: 'guide-system', builtin: GUIDE_DEFAULT, marker: '向导 Agent' },
   { slot: 'enricher-system', builtin: ENRICHER_DEFAULT, marker: '需求加厚师' },
-  { slot: 'normalizer-system', builtin: NORMALIZER_DEFAULT, marker: '需求整理员' },
+  { slot: 'normalizer-system', builtin: NORMALIZER_DEFAULT, marker: '需求归一化腿' },
 ] as const
 
 describe('提示词外置覆盖——四引擎接入（TDD）', () => {

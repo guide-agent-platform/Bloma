@@ -61,7 +61,7 @@ const PROMPT_SLOTS: PromptSlotDef[] = [
   {
     id: 'normalizer-system',
     label: '修改诉求归一化提示词',
-    description: '把用户修改诉求整理为故事化功能项（revise/append/skip/out_of_scope 四态）。',
+    description: '向导群·需求归一化腿：把修改诉求整理为故事化功能项（revise/append/skip/out_of_scope 四态）。',
     enabled: true,
     getDefault: () => NORMALIZER_DEFAULT,
   },
