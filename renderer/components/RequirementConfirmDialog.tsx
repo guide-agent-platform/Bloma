@@ -13,15 +13,17 @@
  * 挂载方式：App 根组件常驻（同 PermissionDialog），无状态时渲染 null。
  */
 
-import React, { useMemo, useState } from 'react'
-import { useAtomValue, useSetAtom } from 'jotai'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useAtomValue, useSetAtom, useStore } from 'jotai'
 import {
+  globalUserErrorAtom,
   nullRequirementConfirmFallback,
   projectModeAtom,
   requirementConfirmFamily,
   workflowStageAtom,
   activeAgentSessionIdAtom,
 } from '../agent-atoms'
+import type { RequirementConfirmState } from '../agent-atoms'
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -62,6 +64,8 @@ export const RequirementConfirmDialog: React.FC = () => {
   const clearConfirm = useSetAtom(sessionId ? requirementConfirmFamily(sessionId) : nullRequirementConfirmFallback)
   const mode = useAtomValue(projectModeAtom)
   const stage = useAtomValue(workflowStageAtom)
+  const store = useStore()
+  const setGlobalUserError = useSetAtom(globalUserErrorAtom)
 
   const [checked, setChecked] = useState<Set<string> | null>(null)
   const [adoptedIdeas, setAdoptedIdeas] = useState<Set<string>>(new Set())
@@ -81,6 +85,17 @@ export const RequirementConfirmDialog: React.FC = () => {
     return new Set(state.requirements.map((item) => item.id))
   }, [state, checked])
 
+  // F9a 重兑现（2026-09-02，r124）：新确认卡到达时清掉上一轮的内联错误条。
+  // 与「失败恢复」区分：恢复写回的是同一对象引用（seenStateRef 命中，不清），
+  // 新事件归约出的必是新对象（引用不同，清）。ref 跨隐藏期保留旧引用。
+  const seenStateRef = useRef<RequirementConfirmState | null>(null)
+  useEffect(() => {
+    if (state && seenStateRef.current !== state) {
+      setSubmitError(null)
+      seenStateRef.current = state
+    }
+  }, [state])
+
   if (!state) return null
 
   const toggle = (id: string): void => {
@@ -93,7 +108,8 @@ export const RequirementConfirmDialog: React.FC = () => {
     })
   }
 
-  const close = (): void => {
+  /** 本地状态全清（atom 已在提交时隐藏清空，成功路径收尾用） */
+  const resetLocalDialogState = (): void => {
     setChecked(null)
     setAdoptedIdeas(new Set())
     setSupplementOpen(false)
@@ -101,7 +117,23 @@ export const RequirementConfirmDialog: React.FC = () => {
     setSubmitting(false)
     setReferenceUrl('')
     setReferenceError(false)
-    clearConfirm(null)
+    setSubmitError(null)
+  }
+
+  /**
+   * F9a 失败恢复（r124）：恢复快照弹窗+保留全部本地状态+内联错误条，可原地重试。
+   * 竞态守卫：在途期间若已到达新确认卡（atom 非 null），不覆盖新卡——旧卡数据已过期，
+   * 改走全局错误通道（m-16 同款）指引用户在最新弹窗上操作。
+   */
+  const restoreAfterFailure = (snapshot: RequirementConfirmState, message: string): void => {
+    setSubmitting(false)
+    const current = sessionId ? store.get(requirementConfirmFamily(sessionId)) : null
+    if (current === null) {
+      setSubmitError(message)
+      clearConfirm(snapshot)
+    } else {
+      setGlobalUserError('刚才的确认没有送达（连接中断）——已收到新的需求清单，请在最新弹窗中重新确认。')
+    }
   }
 
   const toggleIdea = (label: string): void => {
@@ -123,63 +155,65 @@ export const RequirementConfirmDialog: React.FC = () => {
       return
     }
     setReferenceError(false)
+    setSubmitError(null)
     setSubmitting(true)
-    // 乐观关闭（2026-08-27）：confirmRequirements 的 IPC 回传绑定 PRD 管线全程
-    // （PRD 生成+六维审查，可达数十秒），await 会让弹窗挂死——先关再等。
-    close()
+    // F9a 混合契约（2026-09-02 重兑现，r124）：da737d5 半合并曾把 c9ab674 的「失败不关窗」
+    // 回退成乐观关闭，错误分支沦为死代码（弹窗已关、错误条永不渲染、勾选清零）。
+    // 现：先隐藏弹窗（IPC 回传绑定 PRD 全程可达数十秒，滞留弹窗=盲等——3817a6f 线上案例），
+    // 失败时 restoreAfterFailure 恢复弹窗+勾选/灵感/参考链接全保留，决定不再静默丢失。
+    const snapshot = state
+    clearConfirm(null)
     try {
       const result = await api.agent.confirmRequirements({
         request_id: crypto.randomUUID(),
-        session_id: state.sessionId,
-        project_id: state.projectId,
+        session_id: snapshot.sessionId,
+        project_id: snapshot.projectId,
         decision,
         requirement_ids: decision === 'confirm' ? [...effectiveChecked] : undefined,
         adopted_ideas: decision === 'confirm' && adoptedIdeas.size > 0 ? [...adoptedIdeas] : undefined,
         reference_url: trimmedReference || undefined,
       })
-      // F9a 修复（r84）：失败不关窗——弹窗留+勾选保留+内联错误条（决定不再静默丢失）
       if (!result?.ok) {
-        setSubmitError(`提交失败：${result?.error ?? '未知错误'}——请重试`)
-        setSubmitting(false)
+        restoreAfterFailure(snapshot, result?.error?.user_visible_message ?? '提交失败，请重试。')
         return
       }
     } catch (error) {
       console.error('[requirement-confirm] 提交异常:', error)
-      setSubmitError('提交失败：连接异常——请重试')
-      setSubmitting(false)
+      restoreAfterFailure(snapshot, '提交失败：连接异常——请重试')
       return
     }
+    resetLocalDialogState()
   }
 
   const submitSupplement = async (): Promise<void> => {
     const api = window.electronAPI
     const text = supplementText.trim()
     if (!api?.agent?.sendMessage || submitting || !text) return
+    setSubmitError(null)
     setSubmitting(true)
-    // 乐观关闭（同 submitDecision：不等 IPC 返回）
-    close()
+    // F9a 混合契约（同 submitDecision）：先隐藏，失败恢复+文本保留可重发
+    const snapshot = state
+    clearConfirm(null)
     try {
       const result = await api.agent.sendMessage({
         request_id: crypto.randomUUID(),
-        session_id: state.sessionId,
-        project_id: state.projectId,
+        session_id: snapshot.sessionId,
+        project_id: snapshot.projectId,
         content: text,
         mode: mode ?? 'quick',
         current_stage: stage,
         metadata: { source: 'chat' },
       })
-      // F9a 修复（r84）：supplement 失败同样不关窗——错误条+文本保留可重发
       if (!result?.ok) {
-        setSubmitError(`发送失败：${result?.error ?? '未知错误'}——请重试`)
-        setSubmitting(false)
+        restoreAfterFailure(snapshot, result?.error?.user_visible_message ?? '发送失败，请重试。')
         return
       }
     } catch (error) {
       console.error('[requirement-confirm] 补充说明发送异常:', error)
-      setSubmitError('发送失败：连接异常——请重试')
-      setSubmitting(false)
+      restoreAfterFailure(snapshot, '发送失败：连接异常——请重试')
       return
     }
+    resetLocalDialogState()
   }
 
   const allChecked = effectiveChecked.size === state.requirements.length && state.requirements.length > 0
