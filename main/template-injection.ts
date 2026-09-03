@@ -1,5 +1,5 @@
 import type { ProjectMode, TemplateType } from '../shared/types'
-import { loadProjectTemplate, templateSection, type ProjectTemplate } from './project-templates'
+import { loadProjectTemplate, templateSection, type ProjectSkeleton, type ProjectTemplate } from './project-templates'
 import { backplanePages, type PrdBackplane } from './sketch-engine'
 
 /**
@@ -101,11 +101,14 @@ export function buildSketchInjection(type: TemplateType, mode: ProjectMode, back
  * 追加于 buildAgentLoopSystemPrompt 项目锚之后。护栏话术如实描述机制边界（M-9）：
  * 工具层拦截的是 HTML 静态外链（agent-tools externalResourceViolation）；外置模板把
  * 白名单改宽不会同步工具层与 CSP——两者与模板白名单内容无关，不宣称「同源」。
+ *
+ * PR-1 骨架先行：skeletonMap 非空 = 骨架已实际渲染到项目根，此时用骨架地图替代
+ * tech_skeleton 文字段（活真相源优先，防双口径漂移）；未渲染时维持现状文本。
  */
-export function buildLoopInjection(type: TemplateType): string | null {
+export function buildLoopInjection(type: TemplateType, skeletonMap?: string | null): string | null {
   const template = templateIfEnabled('loop', type)
   if (!template) return null
-  const skeleton = templateSection(template, 'tech_skeleton')
+  const skeleton = skeletonMap ?? templateSection(template, 'tech_skeleton')
   const allowlist = templateSection(template, '依赖白名单')
   return [
     `【工程模板（${template.name}，${template.level === 'loose' ? '宽松' : '标准'}级）】`,
@@ -117,6 +120,28 @@ export function buildLoopInjection(type: TemplateType): string | null {
   ]
     .filter(Boolean)
     .join('\n')
+}
+
+/**
+ * 骨架地图（PR-1 骨架先行）：manifest 生成的「文件树 + 职责 + 填充指令 + 只读声明」。
+ * 只在骨架实际渲染成功后由编排器传入 system prompt（事实与注入同源，不凭空宣称）；
+ * 不叠加 BLOMA_INJECT_LOOP 开关（渲染成功即事实，地图只是如实描述）。返回 null = 无骨架。
+ */
+export function buildSkeletonMapInjection(
+  skeleton: ProjectSkeleton,
+  rendered: { written: string[]; skipped: string[] },
+): string | null {
+  const lines = skeleton.files.map(
+    (entry) => `- ${entry.path}：${entry.role || '骨架文件'}${entry.readonly ? '（只读）' : ''}`,
+  )
+  return [
+    `工程骨架已就位（系统已渲染，非你创建；模板版本 v${skeleton.version}）：`,
+    '文件清单（path：职责）：',
+    ...lines,
+    `本轮渲染：新写入 ${rendered.written.length} 个，已存在跳过 ${rendered.skipped.length} 个（迭代重跑不覆盖既有产物）。`,
+    '填充方式：在上述骨架工作文件上实现功能项（write_file/edit_file 均可，骨架文件允许修改与扩展）；',
+    'src/examples/ 下的示例仅参考模式与结构（read_file 查看），不要照抄业务内容；该目录只读，写入会被拒绝。',
+  ].join('\n')
 }
 
 /**

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { getProjectTemplatePath } from '../storage/config-paths'
+import { getProjectTemplatePath, getSkeletonDirPath } from '../storage/config-paths'
 import { recordDecision } from './decision-log'
 import type { ConstraintLevel, TemplateType } from '../shared/types'
 
@@ -172,4 +172,114 @@ export function loadProjectTemplate(type: TemplateType, logContext?: { project_i
 /** 模板章节切片（按消费者取段；keyword 命中 ## 标题即取该节正文）。 */
 export function templateSection(template: ProjectTemplate, keyword: string): string {
   return extractMarkdownSection(template.body, keyword)
+}
+
+// =========================================================================
+// 骨架包（PR-1 骨架先行，2026-09-03）：loop 前由系统确定性渲染的文件骨架
+// =========================================================================
+
+/** 骨架文件条目：path 相对项目根；role 供注入⑥骨架地图；readonly 供工具面只读保护。 */
+export interface SkeletonFileEntry {
+  path: string
+  role?: string
+  readonly?: boolean
+}
+
+/** 已加载且校验合法的骨架包（baseDir = 文件读取根，渲染时逐文件复制）。 */
+export interface ProjectSkeleton {
+  type: TemplateType
+  version: number
+  baseDir: string
+  files: SkeletonFileEntry[]
+  /** 来源：builtin = 内置生效；override = 外置覆盖生效；builtin_fallback = 外置非法回退内置 */
+  source: 'builtin' | 'override' | 'builtin_fallback'
+}
+
+/** v1 仅 web_fullstack 提供骨架包（单类型验证）；其余类型无骨架 = 现状从零写。 */
+const SKELETON_DIRS: Partial<Record<TemplateType, string>> = {
+  web_fullstack: 'web-fullstack',
+}
+
+/** 骨架文件后缀白名单（与 agent-tools WRITABLE_EXTENSIONS 同集：静态前端产物）。 */
+const SKELETON_EXTENSIONS = new Set(['.html', '.js', '.css'])
+
+/** 骨架文件路径校验：非空字符串、无 ../ 与绝对路径、后缀在白名单（防 manifest 携带越界路径）。 */
+function isSafeSkeletonPath(path: string): boolean {
+  if (!path || typeof path !== 'string') return false
+  const normalized = path.replace(/\\/g, '/')
+  if (normalized.includes('..') || normalized.startsWith('/') || /^[a-zA-Z]:/.test(normalized)) return false
+  return SKELETON_EXTENSIONS.has(extnameOf(normalized))
+}
+
+function extnameOf(path: string): string {
+  const idx = path.lastIndexOf('.')
+  return idx >= 0 ? path.slice(idx).toLowerCase() : ''
+}
+
+/** 读取并校验一个骨架目录：manifest 存在、可解析、type 匹配、files 非空且全部真实存在。 */
+function readSkeletonDir(dir: string, expectedType: TemplateType): ProjectSkeleton | null {
+  try {
+    const manifestPath = join(dir, 'manifest.json')
+    if (!existsSync(manifestPath)) return null
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+      type?: string
+      version?: number
+      files?: SkeletonFileEntry[]
+    }
+    if (manifest.type !== expectedType || !Array.isArray(manifest.files) || manifest.files.length === 0) return null
+    for (const entry of manifest.files) {
+      if (!entry || !isSafeSkeletonPath(entry.path)) return null
+      if (!existsSync(join(dir, entry.path))) return null
+    }
+    return {
+      type: expectedType,
+      version: typeof manifest.version === 'number' ? manifest.version : 1,
+      baseDir: dir,
+      files: manifest.files,
+      source: 'builtin',
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 加载骨架包（单点收口）：无外置 → 内置；外置合法 → 外置；外置非法 → 回退内置 + 决策日志
+ * （skeleton_override_rejected，同 loadProjectTemplate fail-closed 口径）；
+ * 内置也缺失/非法 → null，调用方按无骨架现状运行（增强不阻断）。
+ * 未提供骨架的类型（v1 除 web_fullstack 外）直接 null。不缓存（改文件即时生效，与 md 模板同语义）。
+ */
+export function loadSkeletonTemplate(
+  type: TemplateType,
+  logContext?: { project_id?: string; session_id?: string },
+): ProjectSkeleton | null {
+  const dirName = SKELETON_DIRS[type]
+  if (!dirName) return null
+  const ownDir = dirname(fileURLToPath(import.meta.url))
+  const builtinDir = join(ownDir, 'templates', 'skeletons', dirName)
+  const builtin = readSkeletonDir(builtinDir, type)
+
+  try {
+    const overrideDir = getSkeletonDirPath(dirName)
+    if (!existsSync(join(overrideDir, 'manifest.json'))) return builtin
+    const override = readSkeletonDir(overrideDir, type)
+    if (override) return { ...override, source: 'override' }
+    try {
+      recordDecision({
+        project_id: logContext?.project_id ?? '',
+        session_id: logContext?.session_id ?? '',
+        entry: {
+          type: 'skeleton_override_rejected',
+          title: '外置骨架包非法，回退内置',
+          why: '外置骨架 manifest 缺失/type 不匹配/files 非法或文件不存在——fail-closed 回退内置骨架，不阻断生成链路',
+          detail: { template_type: type, path: overrideDir },
+        },
+      })
+    } catch {
+      // 决策日志失败不影响回退
+    }
+    return builtin ? { ...builtin, source: 'builtin_fallback' } : builtin
+  } catch {
+    return builtin
+  }
 }

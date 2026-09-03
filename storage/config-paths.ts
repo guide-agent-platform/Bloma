@@ -37,6 +37,11 @@ export function getProjectTemplatePath(type: string): string {
   return join(getPromaHome(), 'templates', `${type}.md`)
 }
 
+/** 骨架包外置覆盖目录（PR-1 骨架先行：~/.proma/templates/skeletons/{dir}/，整目录覆盖内置）。 */
+export function getSkeletonDirPath(dir: string): string {
+  return join(getPromaHome(), 'templates', 'skeletons', dir)
+}
+
 // 会话历史统一走 agent-sessions（历史遗留的 Conversation 命名已清理，见 data-model §5/§6）
 export function getAgentSessionPath(sessionId: string): string {
   return join(ensureDir(join(getPromaHome(), 'agent-sessions')), `${sessionId}.jsonl`)

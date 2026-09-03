@@ -8,11 +8,12 @@ import { appendJsonLine } from '../../storage/json-store'
 import { readPrdBackplane, readUxContractSketch, renamePrdProject, syncDocuments, updateRequirementStatus, writeSecurityScanDocument } from '../document-engine'
 import { appendProjectLearning, renderLearningsSection } from '../learnings-log'
 import { createSnapshot, runSandbox, trackAnalytics } from '../platform-services'
-import { renderPackageJson, renderStaticServer } from '../project-scaffold'
+import { renderPackageJson, renderStaticServer, renderSkeletonToProject, scaffoldEnabled } from '../project-scaffold'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../project-service'
 import { appendProjectMapToSystem, loadProjectMapBlock } from '../project-map'
 import { resolveChannelEnv } from '../runtime-fallback'
-import { buildLoopInjection } from '../template-injection'
+import { loadSkeletonTemplate } from '../project-templates'
+import { buildLoopInjection, buildSkeletonMapInjection } from '../template-injection'
 import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
 import { distillProjectMemorySafely } from '../memory-distiller'
 import { generateSketch, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from '../sketch-engine'
@@ -738,11 +739,70 @@ function errorCodeFrom(message: string): string {
  * 单次启动沙箱（启动失败分类的修复已内化在 loop：run_preview 失败 → 看日志 → edit_file），
  * 再走共用交付尾巴。沙箱起不来直接抛错（loop 已给过自修机会，不再走外部修复循环）。
  */
+/**
+ * PR-1 骨架先行（2026-09-03）：loop 启动前把骨架包确定性渲染到项目根（无 LLM）。
+ * 成功 → 决策日志 skeleton_rendered + 返回骨架地图（进注入⑥）；失败/无骨架/开关关
+ * → 返回 null，行为=现状从零写（fail-open：骨架是增强不是依赖，绝不阻断 MVP 生成）。
+ */
+function prepareSkeletonBeforeLoop(input: MvpTaskInput, backplane: PrdBackplane, project: Project): string | null {
+  if (!scaffoldEnabled()) return null
+  const templateType = backplane.template_meta?.type ?? 'personal_tool'
+  let skeleton = null
+  try {
+    skeleton = loadSkeletonTemplate(templateType, { project_id: input.project_id, session_id: input.session_id })
+  } catch {
+    return null
+  }
+  if (!skeleton) return null
+  try {
+    const rendered = renderSkeletonToProject(skeleton, project.root_path)
+    try {
+      recordDecision({
+        project_id: input.project_id,
+        session_id: input.session_id,
+        entry: {
+          type: 'skeleton_rendered',
+          title: '工程骨架先行渲染',
+          why: `loop 前按 ${templateType} 模板 v${skeleton.version} 渲染骨架（源=${skeleton.source}），编程 Agent 在骨架上填充实现；已存在文件跳过不覆盖`,
+          detail: {
+            template_type: templateType,
+            version: skeleton.version,
+            source: skeleton.source,
+            written: rendered.written,
+            skipped: rendered.skipped,
+          },
+        },
+      })
+    } catch {
+      // 决策日志失败不影响骨架生效
+    }
+    return buildSkeletonMapInjection(skeleton, rendered)
+  } catch (err) {
+    try {
+      recordDecision({
+        project_id: input.project_id,
+        session_id: input.session_id,
+        entry: {
+          type: 'skeleton_render_failed',
+          title: '骨架渲染失败，回退从零写',
+          why: '骨架渲染抛出异常（fs 故障等）——回退无骨架现状，不阻断 MVP 生成',
+          detail: { template_type: templateType, error: err instanceof Error ? err.message : String(err) },
+        },
+      })
+    } catch {
+      // 决策日志失败静默
+    }
+    return null
+  }
+}
+
 async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelContext, snapshotKind: SnapshotKind = 'mvp'): Promise<MvpTaskResult> {
   const project = findProject(input.project_id)
   const backplane = readPrdBackplane(input.project_id)
   const editFormat = loop.model?.edit_format ?? 'diff'
   const startedAt = Date.now()
+  // PR-1 骨架先行：渲染成功后骨架地图随 system prompt 常驻（事实与注入同源）
+  const skeletonMap = prepareSkeletonBeforeLoop(input, backplane, project)
   // 委派协作（嫁接方案 §4.1）：注册父 loop 上下文供 delegate_agent 构建子循环；子工具集按 role 裁剪
   setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
   registerParentLoopContext(input.session_id, {
@@ -753,7 +813,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     delegationMaxTurns: DELEGATION_MAX_TURNS,
     permissionMode: AUTOMATED_PERMISSION_MODE,
     temperature: categoryTemperature('mvp'),
-    system: buildLoopSystemWithOverride(backplane, editFormat, input.project_id),
+    system: buildLoopSystemWithOverride(backplane, editFormat, input.project_id, skeletonMap),
     editFormat,
     providerType: loop.channel.provider_type,
     publish: (type, payload) => publish(input, type, payload),
@@ -794,7 +854,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   let result: AgentLoopResult
   try {
     result = await runAgentLoop({
-    system: buildLoopSystemWithOverride(backplane, editFormat, input.project_id),
+    system: buildLoopSystemWithOverride(backplane, editFormat, input.project_id, skeletonMap),
     task: buildAgentLoopTask(backplane, input.mode),
     // toolBudget 首个生产接线（闭环 PR5）：web_research 每次都 fork 调研子代理，
     // 限 4 次防长 loop 无节制外呼；超限走既有 budgetExhausted 软着陆
@@ -962,13 +1022,13 @@ function countProjectFiles(root: string): number {
  * 背板锚定系统提示词（方案 §4.4 骨架）：PRD 背板全文常驻每轮（AutoGPT 式漂移的
  * 解药，本项目区别于 SWE-agent/Codex 的差异化锚），工作方式与终止判据显式化。
  */
-export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 'diff' | 'whole', templateType?: import('../../shared/types').TemplateType): string {
+export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 'diff' | 'whole', templateType?: import('../../shared/types').TemplateType, skeletonMap?: string | null): string {
   // 注入点⑥（周计划 §6）：tech_skeleton/目录约定/依赖白名单进背板锚定段；
   // 开关关闭/模板缺失为 null（行为=现状）。类型缺省从背板 template_meta 兜底。
   const effectiveType = templateType ?? backplane.template_meta?.type ?? 'personal_tool'
   const loopInjection = (() => {
     try {
-      return buildLoopInjection(effectiveType)
+      return buildLoopInjection(effectiveType, skeletonMap)
     } catch {
       return null
     }
@@ -1047,8 +1107,8 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
  * 背板锚定系统提示词 + 用户追加规则（D4 追加模式）：`loop-system` 覆盖文件内容追加在
  * 动态 system prompt 之后（背板锚定段不可覆盖）。无覆盖文件返回 base 本身。
  */
-function buildLoopSystemWithOverride(backplane: PrdBackplane, editFormat: 'diff' | 'whole', projectId?: string): string {
-  const base = buildAgentLoopSystemPrompt(backplane, editFormat)
+function buildLoopSystemWithOverride(backplane: PrdBackplane, editFormat: 'diff' | 'whole', projectId?: string, skeletonMap?: string | null): string {
+  const base = buildAgentLoopSystemPrompt(backplane, editFormat, undefined, skeletonMap)
   // 历史经验段（改造 2）：迭代/重生成场景下轮 fresh loop 开场即知上轮踩坑；
   // 首轮无经验返回空串零开销；renderLearningsSection 内部静默失败
   const learnings = renderLearningsSection(backplane.project_id)

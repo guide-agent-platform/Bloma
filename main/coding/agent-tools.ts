@@ -103,6 +103,16 @@ function isSystemFile(rel: string): boolean {
 /** 模型可写白名单后缀（静态前端产物）。 */
 const WRITABLE_EXTENSIONS = new Set(['.html', '.js', '.css'])
 
+/** 骨架参考示例目录（PR-1 骨架先行）：只读——防止模型改写参考实现误导后续轮次。
+ *  软保护而非安全边界（SYSTEM_FILES 才是）：目录短名变体（EXAMPLES~1/）不在防御面，
+ *  入侵后果仅为参考示例被改写，不影响系统接管文件与 CSP。 */
+const READONLY_DIR_PREFIXES = ['src/examples/']
+
+function isReadOnlyPath(rel: string): boolean {
+  const lower = rel.toLowerCase()
+  return READONLY_DIR_PREFIXES.some((prefix) => lower.startsWith(prefix))
+}
+
 /** list_files / grep 跳过的非产物目录。 */
 const SKIPPED_DIRS = new Set(['node_modules', '.git', 'dist', 'dist-main'])
 
@@ -206,12 +216,14 @@ function resolveInsideProject(
 
 function isWritablePath(rel: string): boolean {
   if (isSystemFile(rel)) return false
+  if (isReadOnlyPath(rel)) return false
   if (rel.startsWith('src/')) return true
   return WRITABLE_EXTENSIONS.has(extname(rel).toLowerCase())
 }
 
 function notWritableError(rel: string): string {
   if (isSystemFile(rel)) return `「${rel}」由平台管理，不允许直接修改。`
+  if (isReadOnlyPath(rel)) return `「${rel}」是只读参考示例（骨架包 src/examples/），不允许修改；可 read_file 参考共模式后在业务文件中实现。`
   return `「${rel}」不在可写范围内（允许：.html/.js/.css 文件与 src/ 子树）。`
 }
 

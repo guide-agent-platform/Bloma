@@ -194,6 +194,36 @@ describe('agent-tools（PR2 L2）', () => {
       expect(ext.output).toContain('可写范围')
     })
 
+    it('[PR-1] 骨架参考示例目录只读：src/examples/ 写入拒绝（含大小写变体），read_file 可读', async () => {
+      const project = createProject({ request_id: 'req-w2b', mode: 'quick' })
+      mkdirSync(join(project.root_path, 'src', 'examples'), { recursive: true })
+      writeFileSync(join(project.root_path, 'src', 'examples', 'data-module.js'), 'function createDataModule() {}', 'utf8')
+      const tools = buildAgentTools({ projectId: project.project_id })
+      const ctx = ctxFor(project.project_id)
+      for (const path of ['src/examples/data-module.js', 'src/examples/other.js', 'SRC/EXAMPLES/data-module.js', 'src/Examples/x.js']) {
+        const outcome = await byName(tools, 'write_file').execute({ path, content: '// tamper' }, ctx)
+        expect(outcome.isError, path).toBe(true)
+        expect(outcome.output, path).toContain('只读参考示例')
+      }
+      // 只读不影响读取：参考模式仍可 read_file（注入⑥引导 read_file 参考后自实现）
+      const read = await byName(tools, 'read_file').execute({ path: 'src/examples/data-module.js' }, ctx)
+      expect(read.isError).toBeFalsy()
+      expect(read.output).toContain('createDataModule')
+      // 业务目录不受影响：src/ 下其他路径照常可写
+      const ok = await byName(tools, 'write_file').execute({ path: 'src/app.js', content: 'var a = 1' }, ctx)
+      expect(ok.isError).toBeFalsy()
+    })
+
+    it('[PR-1] edit_file 同样受只读目录约束（validateAndWrite 统一护栏）', async () => {
+      const project = createProject({ request_id: 'req-w2c', mode: 'quick' })
+      mkdirSync(join(project.root_path, 'src', 'examples'), { recursive: true })
+      writeFileSync(join(project.root_path, 'src', 'examples', 'data-module.js'), 'function createDataModule() {}', 'utf8')
+      const tools = buildAgentTools({ projectId: project.project_id, editFormat: 'whole' })
+      const outcome = await byName(tools, 'edit_file').execute({ path: 'src/examples/data-module.js', content: 'function hijack() {}' }, ctxFor(project.project_id))
+      expect(outcome.isError).toBe(true)
+      expect(outcome.output).toContain('只读参考示例')
+    })
+
     it('JS 语法护栏：校验不过拒绝落盘并返回错误定位（stub）', async () => {
       const project = createProject({ request_id: 'req-w3', mode: 'quick' })
       const tools = buildAgentTools({ projectId: project.project_id })

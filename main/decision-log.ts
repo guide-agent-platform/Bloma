@@ -51,6 +51,9 @@ export type DecisionType =
   | 'enrichment_clarification_answered'
   | 'enrichment_clarification_exhausted'
   | 'enrichment_clarification_timeout'
+  | 'skeleton_rendered'
+  | 'skeleton_render_failed'
+  | 'skeleton_override_rejected'
 
 export interface DecisionEntry {
   type: DecisionType
