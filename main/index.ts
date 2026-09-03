@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { registerIpcHandlers } from './ipc'
 import { setSnapshotCaptureProvider } from './platform-services'
 import { reconcileInterruptedProjects } from './recovery-service'
+import { migrateLegacySessionsIndexOnce } from './session-service'
 import {
   setFocusWindowAction,
   setNotificationBackend,
@@ -125,6 +126,14 @@ async function reconcileInterruptedProjectsAtStartup(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  // 会话索引独立化迁移（2026-09-04）：旧共用 agent-sessions.json 里的 Bloma 条目
+  // 搬进专属 bloma-agent-sessions.json（幂等，只读旧写新不动 Proma 文件）；失败不阻断
+  try {
+    const migrated = migrateLegacySessionsIndexOnce()
+    if (migrated.migrated > 0) console.log(`[sessions] 存量索引迁移完成：${migrated.migrated} 条 Bloma 会话 → bloma-agent-sessions.json`)
+  } catch (error) {
+    console.error('[sessions] 存量索引迁移失败（不阻断启动）:', error)
+  }
   // 开窗前完成对账（恢复是纯本地文件 IO，通常毫秒级；阶段收敛先于渲染端读取，
   // 避免渲染端拿到中间态阶段又滞后于磁盘）
   await reconcileInterruptedProjectsAtStartup()

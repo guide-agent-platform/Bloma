@@ -90,7 +90,7 @@ describe('delegation 恢复（阶段 1 meta 归属 + 阶段 2 registry 恢复）
     recordSessionActivity('child-444', project.project_id)
     // 手工改索引：只有 delegation 归属、无 parent 字段（模拟旧数据）
     appendDelegationSettle('child-444', 'failed', { error: 'boom' })
-    const indexPath = join(process.env.PROMA_HOME!, 'agent-sessions.json')
+    const indexPath = join(process.env.PROMA_HOME!, 'bloma-agent-sessions.json')
     const index = readSessionsIndexRaw(indexPath)
     for (const s of index.sessions) {
       if (s.session_id === 'child-444') {
@@ -112,7 +112,7 @@ describe('delegation 恢复（阶段 1 meta 归属 + 阶段 2 registry 恢复）
     // 对齐原型场景 D：两条归属记录均无 parent 字段（孤儿态）→ 全局非唯一 → 拒绝
     recordSessionActivity('child-555', project.project_id)
     recordSessionActivity('child-555-dup', project.project_id)
-    const indexPath = join(process.env.PROMA_HOME!, 'agent-sessions.json')
+    const indexPath = join(process.env.PROMA_HOME!, 'bloma-agent-sessions.json')
     const index = readSessionsIndexRaw(indexPath)
     for (const s of index.sessions) {
       if (s.session_id === 'child-555' || s.session_id === 'child-555-dup') {
@@ -149,7 +149,7 @@ describe('delegation 恢复（阶段 1 meta 归属 + 阶段 2 registry 恢复）
       sourceDelegationId: 'deleg-0007',
     })
     appendJsonLine(getAgentSessionPath('child-777'), { role: 'assistant', content: [{ type: 'text', text: '落盘核对' }], timestamp: Date.now() })
-    expect(existsSync(join(process.env.PROMA_HOME!, 'agent-sessions.json'))).toBe(true)
+    expect(existsSync(join(process.env.PROMA_HOME!, 'bloma-agent-sessions.json'))).toBe(true)
     expect(existsSync(getAgentSessionPath('child-777'))).toBe(true)
     const restored = restoreDelegationRecord('parent-g', 'deleg-0007')
     expect(restored).toBeDefined()

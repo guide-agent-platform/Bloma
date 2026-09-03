@@ -14,6 +14,7 @@
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { rmSyncWithRetry } from './fs-retry'
 import type {
   AgentListSessionsInput,
@@ -24,7 +25,7 @@ import type {
   AgentSessionRecord,
   SessionCleanOrphansResult,
 } from '../shared/types'
-import { getAgentSessionPath, getAgentSessionsIndexPath } from '../storage/config-paths'
+import { getAgentSessionPath, getAgentSessionsIndexPath, getPromaHome } from '../storage/config-paths'
 import { readJsonFile, writeJsonFile } from '../storage/json-store'
 import { listProjects, updateProject } from './project-service'
 import { cleanupPastedImages } from './pasted-images'
@@ -226,6 +227,33 @@ function resolveSessionRecord(sessionId: string, path: string): AgentSessionReco
 
 function readSessions(): SessionsIndex {
   return readJsonFile<SessionsIndex>(getAgentSessionsIndexPath(), { version: 1, sessions: [] })
+}
+
+/**
+ * 存量迁移（2026-09-04 索引独立化）：旧共用 agent-sessions.json 里的 Bloma 条目
+ *（snake_case：session_id 字段）搬进新专属索引 bloma-agent-sessions.json。
+ * 幂等：新索引已存在 → 跳过；旧文件不存在 → 跳过。只读旧写新，绝不动 Proma 的
+ * agent-sessions.json（陷阱 40 双向兼容保守原则）。启动时调用，失败不阻断。
+ */
+export function migrateLegacySessionsIndexOnce(): { migrated: number; skipped: boolean } {
+  const newPath = getAgentSessionsIndexPath()
+  if (existsSync(newPath)) return { migrated: 0, skipped: true }
+  const legacyPath = join(getPromaHome(), 'agent-sessions.json')
+  if (!existsSync(legacyPath)) return { migrated: 0, skipped: true }
+  try {
+    const legacy = JSON.parse(readFileSync(legacyPath, 'utf8')) as { sessions?: unknown[] }
+    if (!Array.isArray(legacy.sessions)) return { migrated: 0, skipped: true }
+    // Bloma 条目判据与人工分离脚本一致：有 session_id 且无 id（Proma 条目驼峰 id）
+    const blomaItems = legacy.sessions.filter(
+      (item): item is AgentSessionRecord =>
+        !!item && typeof item === 'object' && 'session_id' in item && !('id' in item),
+    )
+    writeJsonFile(newPath, { version: 1, sessions: blomaItems } satisfies SessionsIndex)
+    return { migrated: blomaItems.length, skipped: false }
+  } catch {
+    // 旧文件损坏/不可读：不迁移不阻断（新索引按需重建）
+    return { migrated: 0, skipped: true }
+  }
 }
 
 function writeSessions(index: SessionsIndex): void {

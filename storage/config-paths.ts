@@ -25,7 +25,12 @@ export function getBlomaChannelsPath(): string { return join(getPromaHome(), 'bl
 /** M5 类别路由表（snake_case；与 Proma 共用的 channels.json 分开存放）。 */
 export function getCategoryRoutingPath(): string { return join(getPromaHome(), 'category-routing.json') }
 export function getProjectsIndexPath(): string { return join(getPromaHome(), 'projects.json') }
-export function getAgentSessionsIndexPath(): string { return join(getPromaHome(), 'agent-sessions.json') }
+/** Bloma 专属会话索引（2026-09-04 独立化，陷阱 1/40 同模式：跨 App 状态一律分文件）：
+ *  Proma 条目驼峰格式（id/title/createdAt），Bloma snake_case（session_id/status）；
+ *  双开共用 agent-sessions.json 互读对方条目渲染成空标题+NaN 时间戳（实测 475 条混入，
+ *  已人工分离备份 agent-sessions.bloma-sessions.json）。存量迁移见 session-service
+ *  migrateLegacySessionsIndexOnce（启动幂等，只读旧写新不动 Proma 文件）。 */
+export function getAgentSessionsIndexPath(): string { return join(getPromaHome(), 'bloma-agent-sessions.json') }
 
 /** 引擎 system prompt 外置覆盖路径：{PROMA_HOME}/prompts/{name}.md（文件存在即覆盖内置默认）。 */
 export function getPromptOverridePath(name: string): string {
