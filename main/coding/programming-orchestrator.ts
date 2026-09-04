@@ -1253,6 +1253,11 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     '逐功能项实现：write_file/edit_file 写代码 → run_preview 确认可运行 → ' +
     'run_gwt_tests 对照行为断言 → 失败先 read_file/grep 定位再修 → 全部 P0 断言通过后 ' +
     'run_security_scan 确认无高危。',
+    // P5 先读再改纪律（2026-09-04）：防凭记忆/凭 plan 推断文件现状（文件可能已被
+    // 修复轮或上一迭代修改）；MVP 首跑无副作用（新文件不触发）；与 P3 plan 合同
+    // 不冲突（plan 是参考，read 是事实）
+    '- 修改已存在于骨架或前轮产物中的文件前，先用 read_file 读该文件当前内容再编辑；' +
+    '禁止凭记忆或凭 plan 推断文件现状（文件可能已被修复轮或上一迭代修改）。',
     editFormat === 'diff'
       ? '编辑用 edit_file 的 diff 模式（old_string 必须与当前文件逐字一致且唯一）。'
       : '编辑用 edit_file 的 whole 模式（提供修改后的完整文件内容）。',
