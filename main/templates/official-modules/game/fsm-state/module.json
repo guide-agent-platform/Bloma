@@ -1,0 +1,12 @@
+{
+  "slug": "fsm-state",
+  "name": "显式状态机",
+  "categories": ["game"],
+  "version": 1,
+  "summary": "轻量有限状态机：状态表 + 单入口切换 + 进入/离开/更新钩子，禁止散落布尔标志拼状态",
+  "whenToUse": "游戏有明确阶段（主菜单/进行中/暂停/结束/胜利）需要互斥切换时。",
+  "whenNotToUse": "只有两三个布尔开关且无互斥关系的简单交互——不必上状态机。",
+  "files": [
+    { "path": "fsm-state.js", "role": "ESM 源码：createStateMachine(config) 返回 transition/getState/update" }
+  ]
+}

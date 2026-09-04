@@ -1,0 +1,12 @@
+{
+  "slug": "form-validation",
+  "name": "表单校验",
+  "categories": ["web_fullstack", "personal_tool", "desktop_tool"],
+  "version": 1,
+  "summary": "声明式规则校验：必填/类型/长度/正则/邮箱/数值范围，返回结构化错误，可绑定 DOM 错误提示",
+  "whenToUse": "有输入表单需要「提交前校验 + 字段级错误提示」的场景（注册/设置/记账/评论）。",
+  "whenNotToUse": "无输入的表单；或校验逻辑极简单（单个必填）——直接内联判断即可。",
+  "files": [
+    { "path": "form-validation.js", "role": "ESM 源码：validate(values, schema) + attachFieldErrors(errors)" }
+  ]
+}

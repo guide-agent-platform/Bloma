@@ -103,10 +103,10 @@ function isSystemFile(rel: string): boolean {
 /** 模型可写白名单后缀（静态前端产物）。 */
 const WRITABLE_EXTENSIONS = new Set(['.html', '.js', '.css'])
 
-/** 骨架参考示例目录（PR-1 骨架先行）：只读——防止模型改写参考实现误导后续轮次。
- *  软保护而非安全边界（SYSTEM_FILES 才是）：目录短名变体（EXAMPLES~1/）不在防御面，
- *  入侵后果仅为参考示例被改写，不影响系统接管文件与 CSP。 */
-const READONLY_DIR_PREFIXES = ['src/examples/']
+/** 只读参考目录（PR-1 骨架先行 examples + 官方模块库 official-modules）：只读——防止模型
+ *  改写参考实现误导后续轮次。软保护而非安全边界（SYSTEM_FILES 才是）：目录短名变体
+ *  （EXAMPLES~1/ 等）不在防御面，入侵后果仅为参考实现被改写，不影响系统接管文件与 CSP。 */
+const READONLY_DIR_PREFIXES = ['src/examples/', 'src/official-modules/']
 
 function isReadOnlyPath(rel: string): boolean {
   const lower = rel.toLowerCase()
@@ -223,6 +223,7 @@ function isWritablePath(rel: string): boolean {
 
 function notWritableError(rel: string): string {
   if (isSystemFile(rel)) return `「${rel}」由平台管理，不允许直接修改。`
+  if (rel.toLowerCase().startsWith('src/official-modules/')) return `「${rel}」是官方模块（只读参考），不允许修改；可 read_file 查看后复制到业务文件按需改编。`
   if (isReadOnlyPath(rel)) return `「${rel}」是只读参考示例（骨架包 src/examples/），不允许修改；可 read_file 参考共模式后在业务文件中实现。`
   return `「${rel}」不在可写范围内（允许：.html/.js/.css 文件与 src/ 子树）。`
 }

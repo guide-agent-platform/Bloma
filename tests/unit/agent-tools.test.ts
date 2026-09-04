@@ -224,6 +224,23 @@ describe('agent-tools（PR2 L2）', () => {
       expect(outcome.output).toContain('只读参考示例')
     })
 
+    it('[P1-模块] 官方模块目录只读：src/official-modules/ 写入拒绝（含大小写变体），read_file 可读', async () => {
+      const project = createProject({ request_id: 'req-w2d', mode: 'quick' })
+      mkdirSync(join(project.root_path, 'src', 'official-modules', 'game-loop'), { recursive: true })
+      writeFileSync(join(project.root_path, 'src', 'official-modules', 'game-loop', 'game-loop.js'), 'export function createGameLoop() {}', 'utf8')
+      const tools = buildAgentTools({ projectId: project.project_id })
+      const ctx = ctxFor(project.project_id)
+      for (const path of ['src/official-modules/game-loop/game-loop.js', 'SRC/OFFICIAL-MODULES/game-loop/game-loop.js']) {
+        const outcome = await byName(tools, 'write_file').execute({ path, content: '// tamper' }, ctx)
+        expect(outcome.isError, path).toBe(true)
+        expect(outcome.output, path).toContain('官方模块')
+      }
+      // 只读不影响读取：参考实现仍可 read_file
+      const read = await byName(tools, 'read_file').execute({ path: 'src/official-modules/game-loop/game-loop.js' }, ctx)
+      expect(read.isError).toBeFalsy()
+      expect(read.output).toContain('createGameLoop')
+    })
+
     it('JS 语法护栏：校验不过拒绝落盘并返回错误定位（stub）', async () => {
       const project = createProject({ request_id: 'req-w3', mode: 'quick' })
       const tools = buildAgentTools({ projectId: project.project_id })

@@ -17,6 +17,7 @@ import { appendProjectMapToSystem, loadProjectMapBlock } from '../project-map'
 import { resolveChannelEnv } from '../runtime-fallback'
 import { loadSkeletonTemplate, type ProjectSkeleton } from '../project-templates'
 import { buildLoopInjection, buildSkeletonMapInjection } from '../template-injection'
+import { buildModuleMapInjection, loadOfficialModules, modulesEnabled, renderOfficialModulesToProject } from '../module-library'
 import { focusAnchorEnabled, renderBackplaneAnchor } from '../model/prd-backplane'
 import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
 import { distillProjectMemorySafely } from '../memory-distiller'
@@ -754,61 +755,154 @@ function errorCodeFrom(message: string): string {
  * 成功 → 决策日志 skeleton_rendered + 返回骨架地图（进注入⑥）与骨架对象（供 PR-2
  * 构建门禁取 build 规约）；失败/无骨架/开关关 → 两者均 null，行为=现状从零写
  * （fail-open：骨架是增强不是依赖，绝不阻断 MVP 生成）。
+ *
+ * 官方模块库（2026-09-04）：函数内随后准备模块库（与骨架相互独立——无骨架类型也能
+ * 用模块），返回 moduleMap 供调用方与骨架地图合并注入（事实与注入同源）。
  */
 function prepareSkeletonBeforeLoop(
   input: MvpTaskInput,
   backplane: PrdBackplane,
   project: Project,
-): { map: string | null; skeleton: ProjectSkeleton | null; rendered?: { written: string[]; skipped: string[] } } {
-  if (!scaffoldEnabled()) return { map: null, skeleton: null }
+): {
+  map: string | null
+  skeleton: ProjectSkeleton | null
+  rendered?: { written: string[]; skipped: string[] }
+  moduleMap: string | null
+} {
   const templateType = backplane.template_meta?.type ?? 'personal_tool'
+
+  // === 骨架包（PR-1） ===
+  let map: string | null = null
   let skeleton: ProjectSkeleton | null = null
-  try {
-    skeleton = loadSkeletonTemplate(templateType, { project_id: input.project_id, session_id: input.session_id })
-  } catch {
-    return { map: null, skeleton: null }
+  let rendered: { written: string[]; skipped: string[] } | undefined
+  if (scaffoldEnabled()) {
+    try {
+      skeleton = loadSkeletonTemplate(templateType, { project_id: input.project_id, session_id: input.session_id })
+    } catch {
+      skeleton = null
+    }
+    if (skeleton) {
+      try {
+        rendered = renderSkeletonToProject(skeleton, project.root_path)
+        try {
+          recordDecision({
+            project_id: input.project_id,
+            session_id: input.session_id,
+            entry: {
+              type: 'skeleton_rendered',
+              title: '工程骨架先行渲染',
+              why: `loop 前按 ${templateType} 模板 v${skeleton.version} 渲染骨架（源=${skeleton.source}），编程 Agent 在骨架上填充实现；已存在文件跳过不覆盖`,
+              detail: {
+                template_type: templateType,
+                version: skeleton.version,
+                source: skeleton.source,
+                written: rendered.written,
+                skipped: rendered.skipped,
+              },
+            },
+          })
+        } catch {
+          // 决策日志失败不影响骨架生效
+        }
+        map = buildSkeletonMapInjection(skeleton, rendered)
+      } catch (err) {
+        try {
+          recordDecision({
+            project_id: input.project_id,
+            session_id: input.session_id,
+            entry: {
+              type: 'skeleton_render_failed',
+              title: '骨架渲染失败，回退从零写',
+              why: '骨架渲染抛出异常（fs 故障等）——回退无骨架现状，不阻断 MVP 生成',
+              detail: { template_type: templateType, error: err instanceof Error ? err.message : String(err) },
+            },
+          })
+        } catch {
+          // 决策日志失败静默
+        }
+        skeleton = null
+        rendered = undefined
+        map = null
+      }
+    }
   }
-  if (!skeleton) return { map: null, skeleton: null }
+
+  // === 官方模块库（P1 模块侧） ===
+  const moduleMap = prepareModuleLibrary(input, templateType, project)
+
+  return { map, skeleton, rendered, moduleMap }
+}
+
+/**
+ * 官方模块库准备（2026-09-04）：loop 启动前把适用当前产物类型的官方模块确定性物化到
+ * 项目 `src/official-modules/`（无 LLM，幂等）。成功 → 决策日志 module_rendered + 返回
+ * 模块地图（进注入⑥）；开关关/无模块/渲染异常 → null（fail-open，绝不阻断 MVP 生成）。
+ */
+function prepareModuleLibrary(input: MvpTaskInput, templateType: TemplateType, project: Project): string | null {
+  if (!modulesEnabled()) return null
   try {
-    const rendered = renderSkeletonToProject(skeleton, project.root_path)
+    const { modules, rejected } = loadOfficialModules(templateType)
+    for (const item of rejected) {
+      try {
+        recordDecision({
+          project_id: input.project_id,
+          session_id: input.session_id,
+          entry: {
+            type: 'module_rejected',
+            title: '官方模块校验失败，跳过',
+            why: `模块 ${item.slug} 校验失败跳过（不阻断生成）：${item.reason}`,
+            detail: { template_type: templateType, slug: item.slug, reason: item.reason },
+          },
+        })
+      } catch {
+        // 决策日志失败静默
+      }
+    }
+    if (modules.length === 0) return null
+    const rendered = renderOfficialModulesToProject(modules, project.root_path)
     try {
       recordDecision({
         project_id: input.project_id,
         session_id: input.session_id,
         entry: {
-          type: 'skeleton_rendered',
-          title: '工程骨架先行渲染',
-          why: `loop 前按 ${templateType} 模板 v${skeleton.version} 渲染骨架（源=${skeleton.source}），编程 Agent 在骨架上填充实现；已存在文件跳过不覆盖`,
+          type: 'module_rendered',
+          title: '官方模块库渲染',
+          why: `loop 前按 ${templateType} 类型渲染 ${modules.length} 个官方模块到 src/official-modules/（源=builtin）；已存在文件跳过不覆盖`,
           detail: {
             template_type: templateType,
-            version: skeleton.version,
-            source: skeleton.source,
+            count: modules.length,
+            slugs: modules.map((mod) => mod.slug),
             written: rendered.written,
             skipped: rendered.skipped,
           },
         },
       })
     } catch {
-      // 决策日志失败不影响骨架生效
+      // 决策日志失败不影响模块生效
     }
-    return { map: buildSkeletonMapInjection(skeleton, rendered), skeleton, rendered }
+    return buildModuleMapInjection(modules, rendered)
   } catch (err) {
     try {
       recordDecision({
         project_id: input.project_id,
         session_id: input.session_id,
         entry: {
-          type: 'skeleton_render_failed',
-          title: '骨架渲染失败，回退从零写',
-          why: '骨架渲染抛出异常（fs 故障等）——回退无骨架现状，不阻断 MVP 生成',
+          type: 'module_render_failed',
+          title: '官方模块库渲染失败，回退无模块',
+          why: '模块库渲染抛出异常——回退无模块现状，不阻断 MVP 生成',
           detail: { template_type: templateType, error: err instanceof Error ? err.message : String(err) },
         },
       })
     } catch {
       // 决策日志失败静默
     }
-    return { map: null, skeleton: null }
+    return null
   }
+}
+
+/** 资产地图合并：骨架地图 + 模块地图（两段事实描述，plan 腿与 loop system 共用）。 */
+function mergeAssetMap(skeletonMap: string | null, moduleMap: string | null): string | null {
+  return [skeletonMap, moduleMap].filter(Boolean).join('\n\n') || null
 }
 
 /** P3 分级锚定解析：focusRequirementIds 非空且开关开（BLOMA_FOCUS_ANCHOR 缺省
@@ -906,24 +1000,24 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   const backplane = readPrdBackplane(input.project_id)
   const editFormat = loop.model?.edit_format ?? 'diff'
   const startedAt = Date.now()
-  // PR-1 骨架先行：渲染成功后骨架地图随 system prompt 常驻（事实与注入同源）
-  const { map: skeletonMap, skeleton, rendered } = prepareSkeletonBeforeLoop(input, backplane, project)
+  // PR-1 骨架先行 + 官方模块库：渲染成功后骨架地图/模块地图随 system prompt 常驻（事实与注入同源）
+  const { map: skeletonMap, skeleton, rendered, moduleMap } = prepareSkeletonBeforeLoop(input, backplane, project)
   // P3 分级锚定：focus 生效时（迭代路径透传 + BLOMA_FOCUS_ANCHOR 开）背板/骨架地图
   // 裁细节不减锚；生成路径/开关关 → undefined=全量锚定现状（字节级等价）
   const focus = resolveFocusAnchor(input)
   // P3 plan 腿：loop 前单轮技术合同（D2 参考合同：偏离旁白说明，不硬拦截）；
   // 失败/关闭 fail-open 回退现状（planInjection 为 null 时拼接函数字节级=现状）。
-  // plan 腿输入用全量骨架地图（规划需要全貌），分级只作用于 loop system 注入
-  const loopPlan = await tryGenerateLoopPlanLeg(input, loop, backplane, skeletonMap, focus)
+  // plan 腿输入用全量资产地图（骨架+模块，规划需要全貌），分级只作用于 loop system 注入
+  const loopPlan = await tryGenerateLoopPlanLeg(input, loop, backplane, mergeAssetMap(skeletonMap, moduleMap), focus)
   const planInjection = loopPlan ? renderPlanInjection(loopPlan) : null
   // 骨架地图分级（注入侧，零改 prepare 语义）：plan 存在且 focus 生效时，非目标文件
-  // 降为存在性行（路径锚不丢，D3）；无 plan / 无 focus → 全量地图现状
+  // 降为存在性行（路径锚不丢，D3）；无 plan / 无 focus → 全量地图现状。模块地图不分级。
   const effectiveSkeletonMap =
     skeletonMap && focus && loopPlan && skeleton && rendered
       ? buildSkeletonMapInjection(skeleton, rendered, loopPlan.filesToTouch.map((file) => file.path))
       : skeletonMap
   const buildSystemWithPlan = (fmt: 'diff' | 'whole'): string => {
-    const base = buildLoopSystemWithOverride(backplane, fmt, input.project_id, effectiveSkeletonMap, focus)
+    const base = buildLoopSystemWithOverride(backplane, fmt, input.project_id, effectiveSkeletonMap, focus, moduleMap)
     return planInjection ? `${base}\n\n${planInjection}` : base
   }
   // 委派协作（嫁接方案 §4.1）：注册父 loop 上下文供 delegate_agent 构建子循环；子工具集按 role 裁剪
@@ -1199,7 +1293,7 @@ function countProjectFiles(root: string): number {
  * 解药，本项目区别于 SWE-agent/Codex 的差异化锚），工作方式与终止判据显式化。
  * focus（P3 分级锚定）：未传=全量现状；传入时命中项全文、其余项一行摘要（只减细节不减锚）。
  */
-export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 'diff' | 'whole', templateType?: import('../../shared/types').TemplateType, skeletonMap?: string | null, focus?: string[]): string {
+export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 'diff' | 'whole', templateType?: import('../../shared/types').TemplateType, skeletonMap?: string | null, focus?: string[], moduleMap?: string | null): string {
   // 注入点⑥（周计划 §6）：tech_skeleton/目录约定/依赖白名单进背板锚定段；
   // 开关关闭/模板缺失为 null（行为=现状）。类型缺省从背板 template_meta 兜底。
   const effectiveType = templateType ?? backplane.template_meta?.type ?? 'personal_tool'
@@ -1259,6 +1353,9 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     constraints,
     '',
     loopInjection ?? '',
+    // 官方模块库地图（2026-09-04）：独立于骨架地图注入（模块地图不影响【产物形态】判断；
+    // 事实与注入同源——只有模块实际物化成功才非 null）
+    ...(moduleMap ? ['', moduleMap] : []),
     '',
     '【工作方式】',
     '逐功能项实现：write_file/edit_file 写代码 → run_preview 确认可运行 → ' +
@@ -1308,8 +1405,8 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
  * 动态 system prompt 之后（背板锚定段不可覆盖）。无覆盖文件返回 base 本身。
  * focus（P3 分级锚定）：未传=全量现状（字节级等价，回归锁锁定）；修复轮不传（修复卡即 mini-plan）。
  */
-function buildLoopSystemWithOverride(backplane: PrdBackplane, editFormat: 'diff' | 'whole', projectId?: string, skeletonMap?: string | null, focus?: string[]): string {
-  const base = buildAgentLoopSystemPrompt(backplane, editFormat, undefined, skeletonMap, focus)
+function buildLoopSystemWithOverride(backplane: PrdBackplane, editFormat: 'diff' | 'whole', projectId?: string, skeletonMap?: string | null, focus?: string[], moduleMap?: string | null): string {
+  const base = buildAgentLoopSystemPrompt(backplane, editFormat, undefined, skeletonMap, focus, moduleMap)
   // 历史经验段（改造 2）：迭代/重生成场景下轮 fresh loop 开场即知上轮踩坑；
   // 首轮无经验返回空串零开销；renderLearningsSection 内部静默失败
   const learnings = renderLearningsSection(backplane.project_id)
@@ -1800,7 +1897,7 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
   // system 同款背板锚定 + 骨架地图（buildLoopSystemWithOverride 同款，防漂移锚不丢）；
   // 骨架幂等重渲染（已存在文件全部跳过，决策行如实记录），修复轮拿到与主 loop 一致的锚
   const backplane = readPrdBackplane(input.project_id)
-  const { map: skeletonMap, skeleton } = prepareSkeletonBeforeLoop(input, backplane, project)
+  const { map: skeletonMap, skeleton, moduleMap } = prepareSkeletonBeforeLoop(input, backplane, project)
   const result = await runRepairLoop({
     request_id: input.request_id,
     session_id: input.session_id,
@@ -1811,7 +1908,7 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
     query: input.query,
     tasks,
     round,
-    buildSystem: (editFormat) => buildLoopSystemWithOverride(backplane, editFormat, input.project_id, skeletonMap),
+    buildSystem: (editFormat) => buildLoopSystemWithOverride(backplane, editFormat, input.project_id, skeletonMap, undefined, moduleMap),
     thinkingLevel: resolveLoopThinkingLevel(),
     publish: (type, payload) => publish(input, type, payload),
   })
@@ -1949,7 +2046,7 @@ async function runBlockedTestRepair(input: {
   publish(input, 'message_delta', { text: repairNote })
 
   const backplane = readPrdBackplane(input.project_id)
-  const { map: skeletonMap } = prepareSkeletonBeforeLoop(input, backplane, project)
+  const { map: skeletonMap, moduleMap } = prepareSkeletonBeforeLoop(input, backplane, project)
   const result = await runRepairLoop({
     request_id: input.request_id,
     session_id: input.session_id,
@@ -1960,7 +2057,7 @@ async function runBlockedTestRepair(input: {
     query: input.query,
     tasks,
     round,
-    buildSystem: (editFormat) => buildLoopSystemWithOverride(backplane, editFormat, input.project_id, skeletonMap),
+    buildSystem: (editFormat) => buildLoopSystemWithOverride(backplane, editFormat, input.project_id, skeletonMap, undefined, moduleMap),
     thinkingLevel: resolveLoopThinkingLevel(),
     publish: (type, payload) => publish(input, type, payload),
   })

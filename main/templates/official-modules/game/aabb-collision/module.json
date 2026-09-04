@@ -1,0 +1,12 @@
+{
+  "slug": "aabb-collision",
+  "name": "AABB 碰撞",
+  "categories": ["game"],
+  "version": 1,
+  "summary": "轴对齐矩形碰撞：相交检测、碰撞对枚举、检测与响应分离（反弹/扣血回调由业务定）",
+  "whenToUse": "游戏需要矩形碰撞判定（子弹命中、角色撞墙、拾取判定）。",
+  "whenNotToUse": "需要精确圆形/多边形碰撞——本模块只做 AABB，圆形可先近似成外接矩形。",
+  "files": [
+    { "path": "aabb-collision.js", "role": "ESM 源码：rectIntersect / collectPairs / resolveOverlap" }
+  ]
+}

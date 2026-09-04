@@ -1,0 +1,12 @@
+{
+  "slug": "filter-list",
+  "name": "搜索过滤列表",
+  "categories": ["web_fullstack", "personal_tool", "desktop_tool"],
+  "version": 1,
+  "summary": "列表数据层：防抖搜索 + 过滤条件 + 排序 + 空态判断，渲染分离，不绑定 DOM 结构",
+  "whenToUse": "列表型产品（记账、待办、商品、笔记）需要「搜索/筛选/排序」时。",
+  "whenNotToUse": "列表很短（≤10 条）且无需筛选——直接渲染全部，不必引入状态层。",
+  "files": [
+    { "path": "filter-list.js", "role": "ESM 源码：createFilteredList(data, options) 返回数据层 API" }
+  ]
+}

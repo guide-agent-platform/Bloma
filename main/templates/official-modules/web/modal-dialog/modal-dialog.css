@@ -1,0 +1,71 @@
+/* 官方模块：弹层与确认框 —— 样式基线（复制进业务 styles.css 或 link 引用） */
+
+.bloma-modal-container {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+
+.bloma-modal-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.bloma-modal-box {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(360px, 88vw);
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.bloma-modal-title {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2329;
+}
+
+.bloma-modal-message {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #3a3f47;
+  white-space: pre-wrap;
+}
+
+.bloma-modal-actions {
+  margin-top: 18px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.bloma-modal-btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.bloma-modal-btn-secondary {
+  background: #f2f3f5;
+  color: #3a3f47;
+  border-color: #d9dce1;
+}
+
+.bloma-modal-btn-primary {
+  background: #3b6ef5;
+  color: #fff;
+}
+
+.bloma-modal-btn:focus-visible {
+  outline: 2px solid #3b6ef5;
+  outline-offset: 2px;
+}

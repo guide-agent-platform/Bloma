@@ -1,0 +1,12 @@
+{
+  "slug": "storage-state",
+  "name": "本地状态持久化",
+  "categories": ["web_fullstack", "personal_tool", "desktop_tool", "game"],
+  "version": 1,
+  "summary": "localStorage 键值状态封装：命名空间、JSON 容错、防抖落盘、存储不可用降级内存",
+  "whenToUse": "需要跨刷新保留的数据（设置、列表草稿、游戏最高分/存档、表单草稿）。",
+  "whenNotToUse": "仅单会话内使用的临时状态——用内存变量即可，不必落盘。",
+  "files": [
+    { "path": "storage-state.js", "role": "ESM 源码：createStateStore(namespace, options) 返回 get/set/update/remove/flush" }
+  ]
+}

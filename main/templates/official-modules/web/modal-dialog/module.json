@@ -1,0 +1,13 @@
+{
+  "slug": "modal-dialog",
+  "name": "弹层与确认框",
+  "categories": ["web_fullstack", "personal_tool", "desktop_tool"],
+  "version": 1,
+  "summary": "原生 DOM 弹层：遮罩 + 弹窗，确认/提示两类，Esc/遮罩关闭、焦点管理、Promise 返回",
+  "whenToUse": "需要「确认/取消」或「提示」的交互（删除确认、操作成功提示、重要信息告知）。",
+  "whenNotToUse": "内联展开即可的轻交互（不要为了弹窗而弹窗）；多步骤向导类请用独立页面/区块。",
+  "files": [
+    { "path": "modal-dialog.js", "role": "ESM 源码：confirm / alert 两个函数，返回 Promise" },
+    { "path": "modal-dialog.css", "role": "样式基线：遮罩/弹窗/按钮；复制进业务 styles.css 或 link 引用" }
+  ]
+}

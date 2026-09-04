@@ -62,6 +62,9 @@ export type DecisionType =
   | 'repair_budget_exhausted'
   | 'plan_generated'
   | 'plan_fallback'
+  | 'module_rendered'
+  | 'module_render_failed'
+  | 'module_rejected'
 
 export interface DecisionEntry {
   type: DecisionType
