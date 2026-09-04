@@ -327,6 +327,53 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
     const legArgs = mocks.generateLoopPlan.mock.calls[0][0] as { focusRequirementIds?: string[] }
     expect(legArgs.focusRequirementIds).toBeUndefined()
   })
+
+  it('P3 全关路径（三开关全 0）：字节级现状一次性回归锁（§7 实验对照组）', { timeout: 60_000 }, async () => {
+    // 基线：三开关全 0，不传 focus，plan mock 不参与（plan 腿关）
+    process.env.BLOMA_PLAN_LEG = '0'
+    process.env.BLOMA_LOOP_LOG = '0'
+    process.env.BLOMA_FOCUS_ANCHOR = '0'
+    mocks.generateLoopPlan.mockResolvedValue(SAMPLE_PLAN) // 即便会返回 plan 也不得起腿
+    const baseline = await runOnce('longterm', REQUIREMENTS)
+    expect(mocks.generateLoopPlan).not.toHaveBeenCalled()
+
+    // 全关 + focus 传入 + plan 可返回：三通道都被短路，输出与基线字节级一致
+    const focusForced = await runMvpTask({
+      request_id: `req-${Math.random().toString(36).slice(2, 8)}`,
+      session_id: `s-all-off-${Math.random().toString(36).slice(2, 8)}`,
+      project_id: (() => {
+        const project = createProject({ request_id: `req-${Math.random().toString(36).slice(2, 8)}`, mode: 'longterm' })
+        recordSketchGenerated(project.project_id, REQUIREMENTS)
+        writeFileSync(join(project.root_path, 'index.html'), '<html><body><p>记录收入与支出</p></body></html>', 'utf8')
+        return project.project_id
+      })(),
+      mode: 'longterm',
+      channel_id: channelId,
+      query: junkQuery(),
+      focusRequirementIds: ['F-001'],
+    }).then(() => {
+      const system = mocks.runAgentLoop.mock.calls[mocks.runAgentLoop.mock.calls.length - 1][0].system as string
+      const planCalls = mocks.generateLoopPlan.mock.calls.length
+      return { system, planCalls }
+    })
+
+    expect(focusForced.planCalls).toBe(0) // plan 腿全关
+    expect(focusForced.system).toBe(baseline.system) // 字节级现状
+    expect(focusForced.system).not.toContain('本轮迭代聚焦')
+    expect(focusForced.system).not.toContain('【技术合同')
+
+    // loop-log 零写盘（基线与全关两次运行都不落盘）
+    const docsRoot = join(home, 'agent-workspaces')
+    let anyLoopLog = false
+    for (const slug of readdirSync(docsRoot)) {
+      const documentsRoot = join(docsRoot, slug, 'documents')
+      if (!existsSync(documentsRoot)) continue
+      for (const id of readdirSync(documentsRoot)) {
+        if (existsSync(join(documentsRoot, id, 'loop-log.md'))) anyLoopLog = true
+      }
+    }
+    expect(anyLoopLog).toBe(false)
+  })
 })
 
 /** 反查本测试 PROMA_HOME 里最新写入的 loop-log 内容（崩溃用例无法拿到 runOnce 返回值时用）。 */
