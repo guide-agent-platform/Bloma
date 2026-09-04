@@ -465,8 +465,36 @@ describe('DocumentEngine (A2-05)', () => {
     const dir = getDocumentsDir(project.workspace_slug, project.project_id)
     const report = readFileSync(join(dir, 'mvp_tested.md'), 'utf8')
     expect(report).toContain('测试报告')
-    expect(report).toContain('total_count')
+    // P2-11：无 test-report.json 时如实写「测试尚未执行」，不再恒显「待写入」误导
+    expect(report).toContain('测试尚未执行')
+    expect(report).not.toContain('待写入')
     expect(result.documents[0].type).toBe('test_report')
+  })
+
+  it('P2-11：mvp_tested 有 test-report.json 时反映真实结果', () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-doc-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      join(dir, 'test-report.json'),
+      JSON.stringify({
+        total_count: 4,
+        passed_count: 3,
+        failed_count: 1,
+        failure_summary: [{ scenario: 'F-001 点击暂停→菜单显示', reason: '触发后没有新元素出现' }],
+      }),
+      'utf8',
+    )
+
+    syncDocuments({ request_id: 'req-sync', session_id: 'session-1', project_id: project.project_id, checkpoint: 'mvp_tested' })
+
+    const report = readFileSync(join(dir, 'mvp_tested.md'), 'utf8')
+    expect(report).toContain('GWT 已执行')
+    expect(report).toContain('3/4')
+    expect(report).toContain('未通过 1 项')
+    expect(report).toContain('F-001 点击暂停→菜单显示')
   })
 
   it('produces PlantUML and Sprint docs only for longterm projects', () => {

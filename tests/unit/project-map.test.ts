@@ -106,6 +106,19 @@ describe('generateProjectMap 生成器（S4-PMAP-001/002）', () => {
     expect(tinyIdx).toBeGreaterThanOrEqual(0)
     expect(hugeIdx).toBeLessThan(tinyIdx)
   })
+
+  it('[S4-PMAP-009] P2-14：index.html/styles.css 进地图（web 产物不再只记 app.js）', () => {
+    writeFile(
+      'index.html',
+      '<!doctype html><html><head><link rel="stylesheet" href="src/styles.css"></head><body><div id="app"></div><script src="src/app.js"></script></body></html>',
+    )
+    writeFile('src/app.js', 'document.getElementById("app").textContent = "hi"\n')
+    writeFile('src/styles.css', 'body { margin: 0 }\n.app { color: red }\n')
+    const result = generateProjectMap(root)
+    expect(result.map).toContain('index.html')
+    expect(result.map).toContain('src/styles.css')
+    expect(result.map).toContain('src/app.js')
+  })
 })
 
 describe('注入契约（S4-PMAP-003）', () => {

@@ -22,7 +22,7 @@ const REFRESH_DEBOUNCE_MS = 1_000
 // 回调用 setImmediate 脱离写盘调用栈；真正异步分片/worker 化为 P2 挂账——60s 超时保护
 // 在同步实现下无意义，已删除未用常量（诚实化）。
 
-const CODE_EXT = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.vue', '.svelte'])
+const CODE_EXT = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.vue', '.svelte', '.html', '.css'])
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'dist-main', 'build', 'test-results', 'coverage', '.tmp-flaky'])
 /** 单文件大小上限（审查收敛 R1 aliyun P1）：超大文件读入+正则成本高且对地图无价值，直接跳过 */
 const MAX_SCAN_FILE_BYTES = 512 * 1024

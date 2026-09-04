@@ -619,7 +619,13 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
           privacy_level: 'research_safe',
         },
       })
-      return upgradeProject(input)
+      const project = upgradeProject(input)
+      // P2-12（2026-09-04）：升级后补 longterm 附加文档（plantuml/sprint）——此前升级只切
+      // mode/stage 不触发 syncDocuments，导致升级项目的 plantuml/sprint 缺失（老项目 64747c51
+      // 有、后升级项目缺，升级路径未补）。upgradeProject 已把 mode 置 longterm，此处 syncDocuments
+      // 的 longterm 分支会补产出 plantuml/architecture.puml + sprint/sprint-plan.md。
+      syncDocuments({ request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, checkpoint: 'mode_upgraded' })
+      return project
     })
   })
 

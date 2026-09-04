@@ -97,7 +97,7 @@ export function syncDocuments(input: DocumentSyncInput, backplaneOverride?: PrdB
     case 'mvp_tested':
       files.push({
         relativePath: 'mvp_tested.md',
-        content: renderTestReportMount(requirements),
+        content: renderTestReportMount(requirements, dir),
         type: 'test_report',
       })
       break
@@ -772,21 +772,34 @@ MVP 的布局/结构/样式以该草图为基准，不得低于草图精致度�
 `
 }
 
-function renderTestReportMount(requirements: SketchRequirement[]): string {
+function renderTestReportMount(requirements: SketchRequirement[], dir: string): string {
+  // P2-11（2026-09-04）：mvp_tested.md 不再恒显「待写入」——writeTestReport 已先行落盘
+  // test-report.json，这里读取真实结果渲染；无报告（测试未跑）如实写「待测试」，不冒充已测。
+  const reportPath = join(dir, 'test-report.json')
+  if (existsSync(reportPath)) {
+    try {
+      const result = JSON.parse(readFileSync(reportPath, 'utf8')) as {
+        total_count?: number
+        passed_count?: number
+        failed_count?: number
+        failure_summary?: Array<{ scenario?: string; reason?: string }>
+      }
+      const total = result.total_count ?? 0
+      const passed = result.passed_count ?? 0
+      const failed = result.failed_count ?? 0
+      const failures = (result.failure_summary ?? [])
+        .map((f) => '- **' + (f.scenario ?? '') + '**：' + (f.reason ?? ''))
+        .join('\n')
+      const lines = ['# 测试报告', '', '> 状态：GWT 已执行。通过 ' + passed + '/' + total + '，未通过 ' + failed + ' 项。', '']
+      if (failed > 0) lines.push('## 未通过项', '', failures || '- 无', '')
+      return lines.join('\n')
+    } catch {
+      // 报告损坏：回退「待测试」文案，不伪造结果
+    }
+  }
   const items = readRequirements(requirements)
-  const refs = items.map((item) => `- ${item.id}：待 GWT 执行后写入结果`).join('\n')
-  return `# 测试报告（挂载）
-
-> 状态：MVP 已进入测试阶段，报告本体由 GWT 执行（A2-07）唯一写盘。（checkpoint: mvp_tested）
-
-## 期望覆盖
-
-${refs}
-
-## Schema（对齐 api-spec §12.4 run_gwt_tests）
-- \`total_count\` / \`passed_count\` / \`failed_count\`
-- \`failure_summary\`: [{ scenario, reason }]
-`
+  const refs = items.map((item) => '- ' + item.id + '：待 GWT 执行后写入结果').join('\n')
+  return ['# 测试报告', '', '> 状态：测试尚未执行，结果将在 GWT 执行后写入。', '', '## 期望覆盖', '', refs, ''].join('\n')
 }
 
 /**
