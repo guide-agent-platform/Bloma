@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { runAgentLoopPostTesting, setProgrammingEventPublisher } from '../../../main/programming-orchestrator'
+import { runAgentLoopPostTesting, resumeBlockedFlow, setProgrammingEventPublisher } from '../../../main/programming-orchestrator'
 import { createProject, findProject, updateProject } from '../../../main/project-service'
 import { recordSketchGenerated } from '../../../main/project-service'
 import { syncDocuments } from '../../../main/document-engine'
@@ -13,6 +13,7 @@ import { setSafeStorageAdapter } from '../../../main/safe-storage'
 import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../../main/platform-services'
 import { CircuitBreakSettledError } from '../../../main/recovery-service'
 import { getAgentSessionPath } from '../../../storage/config-paths'
+import { writeTestReport } from '../../../main/gwt-service'
 import type { AgentEvent } from '../../../shared/types'
 import type { SDKQuery, SDKQueryOptions } from '../../../main/orchestrator'
 import type { GwtTestResult } from '../../../main/gwt-service'
@@ -31,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   runAgentLoop: vi.fn(),
   runGwtScenarios: vi.fn(),
   circuitBreakRollback: vi.fn(),
+  runBuildGate: vi.fn(),
 }))
 
 vi.mock('../../../main/coding/agent-loop', async (importOriginal) => {
@@ -46,6 +48,11 @@ vi.mock('../../../main/gwt-service', async (importOriginal) => {
 vi.mock('../../../main/recovery-service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../main/recovery-service')>()
   return { ...actual, circuitBreakRollback: mocks.circuitBreakRollback }
+})
+
+vi.mock('../../../main/coding/build-gate', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/coding/build-gate')>()
+  return { ...actual, runBuildGate: mocks.runBuildGate }
 })
 
 function gwtFailed(): GwtTestResult {
@@ -96,6 +103,8 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     mocks.runGwtScenarios.mockReset()
     mocks.circuitBreakRollback.mockReset()
     mocks.circuitBreakRollback.mockResolvedValue({ rolled_back: false, outcome: 'delegated' })
+    mocks.runBuildGate.mockReset()
+    mocks.runBuildGate.mockResolvedValue({ status: 'skipped', durationMs: 1 })
     setProgrammingEventPublisher((event) => events.push(event))
     setSandboxRuntimeForTests({
       portAllocator: async () => 4321,
@@ -320,5 +329,165 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     const delta = events.find((event) => event.type === 'message_delta' && typeof event.payload.text === 'string' && (event.payload.text as string).includes('定向修复'))
     expect(delta).toBeTruthy()
     expect((delta?.payload.text as string)).toContain('1/1')
+  })
+})
+
+describe('PR-C：build-gate 接入 + blocked 卡先修再验（入口 B）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  let events: AgentEvent[] = []
+  let projectId = ''
+  let sessionId = ''
+  let channelId = ''
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'proma-repair-c-'))
+    events = []
+    mocks.runAgentLoop.mockReset()
+    mocks.runGwtScenarios.mockReset()
+    mocks.circuitBreakRollback.mockReset()
+    mocks.circuitBreakRollback.mockResolvedValue({ rolled_back: false, outcome: 'delegated' })
+    mocks.runBuildGate.mockReset()
+    setProgrammingEventPublisher((event) => events.push(event))
+    setSandboxRuntimeForTests({
+      portAllocator: async () => 4322,
+      healthCheck: async () => true,
+      processFactory: () => ({ stdout: { on: () => undefined }, stderr: { on: () => undefined }, once: () => undefined, kill: () => true }) as unknown as ChildProcess,
+    })
+    setSafeStorageAdapter({
+      isEncryptionAvailable: () => true,
+      encryptString: (value) => Buffer.from(`enc:${value}`, 'utf8'),
+      decryptString: (value) => value.toString('utf8').replace(/^enc:/, ''),
+    })
+    const project = createProject({ request_id: 'req-repair-c', mode: 'quick' })
+    projectId = project.project_id
+    sessionId = `s-repairc-${Math.random().toString(36).slice(2, 8)}`
+    updateProject(projectId, { via_agent_loop: true, agent_loop_status: 'completed', blocked_action: 'test_repair' })
+    recordSketchGenerated(projectId, [{ id: 'F-001', description: '记录收入与支出' }])
+    syncDocuments({ request_id: 'req-repair-c', session_id: sessionId, project_id: projectId, checkpoint: 'mvp_before_generation' })
+    writeFileSync(join(project.root_path, 'index.html'), '<html><body><p>记录收入与支出</p></body></html>', 'utf8')
+    const channel = createChannel({
+      name: 'repair-c-test',
+      provider_type: 'anthropic',
+      base_url: 'https://test.invalid',
+      api_key: 'test-key',
+      models: [{ id: 'm1', name: 'test-model', enabled: true, supports_tools: true }],
+    })
+    channelId = channel.id
+  })
+
+  afterEach(() => {
+    restorePromaHome(originalPromaHome)
+    setProgrammingEventPublisher(() => undefined)
+    clearSandboxRuntimeForTests()
+  })
+
+  function decisionLines(): string {
+    const path = getAgentSessionPath(sessionId)
+    return existsSync(path) ? readFileSync(path, 'utf8') : ''
+  }
+
+  it('buildGate failed → 修复卡追加 build 任务（GWT + build 混合），修复后重跑构建门禁留痕', async () => {
+    mocks.runGwtScenarios
+      .mockResolvedValueOnce(gwtFailed())
+      .mockResolvedValueOnce(gwtPassed())
+    mocks.runAgentLoop.mockResolvedValue(loopCompleted())
+    // 修复后 buildGate 重验：passed（PR-2b 清偿：构建失败 → 修复轮尝试修一次 → 重验留痕）
+    mocks.runBuildGate.mockResolvedValue({ status: 'passed', outfile: 'dist/app.js', durationMs: 5 })
+
+    const result = await runAgentLoopPostTesting({
+      request_id: 'req-repair-c',
+      session_id: sessionId,
+      project_id: projectId,
+      mode: 'quick',
+      preview_url: 'http://127.0.0.1:4322',
+      loop: { status: 'completed', turns: 5, finalText: '', toolCalls: [] },
+      query: junkQuery(),
+      channel_id: channelId,
+      buildGate: { status: 'failed', detail: 'Could not resolve "./utils/format" (src/app.js:41)', durationMs: 3 },
+    })
+
+    expect(result.verdict).toBe('ready')
+    // 修复卡 = GWT 任务 + build 任务（共 2 项）
+    const loopInput = mocks.runAgentLoop.mock.calls[0][0] as { task: string }
+    expect(loopInput.task).toContain('共 2 项')
+    expect(loopInput.task).toContain('构建失败')
+    expect(loopInput.task).toContain('Could not resolve')
+    // 修复轮结束后重跑构建门禁验证（结果只留痕，不影响 GWT 收敛判定）
+    expect(mocks.runBuildGate).toHaveBeenCalledTimes(1)
+    const log = decisionLines()
+    expect(log).toContain('repair_round_completed')
+    expect(log).toContain('build_gate_after')
+    expect(log).toContain('passed')
+  })
+
+  it('buildGate passed → 修复卡无 build 任务，不重跑构建门禁', async () => {
+    mocks.runGwtScenarios
+      .mockResolvedValueOnce(gwtFailed())
+      .mockResolvedValueOnce(gwtPassed())
+    mocks.runAgentLoop.mockResolvedValue(loopCompleted())
+
+    await runAgentLoopPostTesting({
+      request_id: 'req-repair-c',
+      session_id: sessionId,
+      project_id: projectId,
+      mode: 'quick',
+      preview_url: 'http://127.0.0.1:4322',
+      loop: { status: 'completed', turns: 5, finalText: '', toolCalls: [] },
+      query: junkQuery(),
+      channel_id: channelId,
+      buildGate: { status: 'passed', outfile: 'dist/app.js', durationMs: 3 },
+    })
+
+    const loopInput = mocks.runAgentLoop.mock.calls[0][0] as { task: string }
+    expect(loopInput.task).toContain('共 1 项')
+    expect(loopInput.task).not.toContain('构建失败')
+    expect(mocks.runBuildGate).not.toHaveBeenCalled()
+  })
+
+  it("blocked 卡「继续修」：先修再验（先消费 test-report 失败快照起修复轮，再走终验）", async () => {
+    // 铺上次让渡时的失败快照（test-report.json）
+    writeTestReport({ request_id: 'req-repair-c', session_id: sessionId, project_id: projectId, result: gwtFailed() })
+    mocks.runAgentLoop.mockResolvedValue(loopCompleted())
+    // 终验：修复后产物全过（终验里入口 A 预算已耗尽不再修，直接走 judge）
+    mocks.runGwtScenarios.mockResolvedValue(gwtPassed())
+
+    await resumeBlockedFlow(
+      {
+        request_id: 'req-repair-c', session_id: sessionId, project_id: projectId,
+        mode: 'quick', decision: 'continue', content: '',
+        query: junkQuery(),
+        channel_id: channelId,
+      },
+      () => undefined,
+    )
+
+    // 先修：修复卡来自 test-report.json 失败快照（含 F-005 场景）
+    expect(mocks.runAgentLoop).toHaveBeenCalledTimes(1)
+    const loopInput = mocks.runAgentLoop.mock.calls[0][0] as { task: string }
+    expect(loopInput.task).toContain('F-005')
+    // 再验：终验跑全量 GWT → 收敛
+    expect(mocks.runGwtScenarios).toHaveBeenCalled()
+    const log = decisionLines()
+    expect(log).toContain('repair_round_started')
+    expect(log).toContain('blocked_resume')
+    expect(findProject(projectId).current_stage).toBe('ready')
+  })
+
+  it('blocked 卡「继续修」：无失败快照（test-report 缺失）→ 行为=现状直接终验，不起修复轮', async () => {
+    mocks.runGwtScenarios.mockResolvedValue(gwtPassed())
+
+    await resumeBlockedFlow(
+      {
+        request_id: 'req-repair-c', session_id: sessionId, project_id: projectId,
+        mode: 'quick', decision: 'continue', content: '',
+        query: junkQuery(),
+        channel_id: channelId,
+      },
+      () => undefined,
+    )
+
+    expect(mocks.runAgentLoop).not.toHaveBeenCalled()
+    expect(mocks.runGwtScenarios).toHaveBeenCalled()
+    expect(findProject(projectId).current_stage).toBe('ready')
   })
 })

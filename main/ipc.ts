@@ -346,6 +346,8 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
               query: getSdkQuery(),
               channel_id: input.channel_id,
               signal: abortController.signal,
+              // P2 失败回流（PR-C）：构建门禁结果透传终验组装器（failed → build 修复任务）
+              ...(mvp.build_gate ? { buildGate: mvp.build_gate } : {}),
             })
           })
           .catch((error) => {

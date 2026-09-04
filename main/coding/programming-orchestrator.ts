@@ -119,6 +119,8 @@ export interface MvpTaskResult {
   via_agent_loop?: boolean
   /** Agent Loop 结果元数据（M4-B：runAgentLoopPostTesting 透传给 judge loop-aware；仅 loop 路径存在） */
   loop_result?: AgentLoopResult
+  /** 构建门禁结果（P2 失败回流 PR-C）：调用方透传终验组装器，failed 追加 build 修复任务 */
+  build_gate?: BuildGateResult
 }
 
 let programmingEventPublisher: ProgrammingEventPublisher = () => undefined
@@ -491,7 +493,7 @@ export async function runMvpTask(input: MvpTaskInput): Promise<MvpTaskResult> {
  */
 async function finalizeMvpDelivery(
   input: MvpTaskInput,
-  detail: { fileCount: number; snapshotSummary: string; readySummary: string; previewUrl: string; viaAgentLoop?: boolean; loopResult?: AgentLoopResult },
+  detail: { fileCount: number; snapshotSummary: string; readySummary: string; previewUrl: string; viaAgentLoop?: boolean; loopResult?: AgentLoopResult; buildGate?: BuildGateResult },
   snapshotKind: SnapshotKind = 'mvp',
 ): Promise<MvpTaskResult> {
   const runCommand = 'npm start'
@@ -545,6 +547,7 @@ async function finalizeMvpDelivery(
     snapshot,
     run_command: runCommand,
     ...(detail.viaAgentLoop ? { via_agent_loop: true, loop_result: detail.loopResult } : {}),
+    ...(detail.buildGate ? { build_gate: detail.buildGate } : {}),
   }
 }
 
@@ -979,9 +982,10 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   }
 
   // PR-2 构建门禁（验证性，vendor 预打包路线）：loop 后系统接管，用 Bloma 自带
-  // esbuild（零网络零安装）按 manifest.build 打包校验模块图；v1 口径 passed/failed
-  // 均不阻断交付——failed 如实落决策日志（build_gate_failed），测试报告与 judge 可见
-  await runBuildGate({
+  // esbuild（零网络零安装）按 manifest.build 打包校验模块图；P2 失败回流（PR-C）
+  // 起接住返回值：failed 时经 MvpTaskResult.build_gate 透传终验组装器追加 build 修复
+  // 任务（清偿 PR-2b：构建失败从「如实记录」升级为「记录 + 修复轮尝试修一次」）
+  const buildGate = await runBuildGate({
     projectId: input.project_id,
     sessionId: input.session_id,
     rootPath: project.root_path,
@@ -1009,6 +1013,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     previewUrl: sandbox.preview_url,
     viaAgentLoop: true,
     loopResult: result,
+    ...(buildGate ? { buildGate } : {}),
   }, snapshotKind)
 }
 
@@ -1623,7 +1628,7 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
   // system 同款背板锚定 + 骨架地图（buildLoopSystemWithOverride 同款，防漂移锚不丢）；
   // 骨架幂等重渲染（已存在文件全部跳过，决策行如实记录），修复轮拿到与主 loop 一致的锚
   const backplane = readPrdBackplane(input.project_id)
-  const { map: skeletonMap } = prepareSkeletonBeforeLoop(input, backplane, project)
+  const { map: skeletonMap, skeleton } = prepareSkeletonBeforeLoop(input, backplane, project)
   const result = await runRepairLoop({
     request_id: input.request_id,
     session_id: input.session_id,
@@ -1652,6 +1657,17 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
 
   const converged = retested.failed_count === 0
   if (converged) updateProject(input.project_id, { test_repair_count: 0 })
+  // 构建任务在修复卡里（PR-C）：修复轮结束后重跑构建门禁验证（决策日志自动落
+  // build_gate_* 新行）；结果只留痕不影响 GWT 收敛判定（passed/skipped 同理）
+  let buildGateAfter: BuildGateResult | undefined
+  if (input.buildGate?.status === 'failed' && tasks.some((task) => task.source === 'build')) {
+    buildGateAfter = await runBuildGate({
+      projectId: input.project_id,
+      sessionId: input.session_id,
+      rootPath: project.root_path,
+      skeleton,
+    })
+  }
   recordDecision({
     project_id: input.project_id,
     session_id: input.session_id,
@@ -1667,10 +1683,109 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
         failed_before: testResult.failed_count,
         failed_after: retested.failed_count,
         total_count: retested.total_count,
+        ...(buildGateAfter ? { build_gate_after: buildGateAfter.status, build_detail: buildGateAfter.detail?.slice(0, 300) } : {}),
       },
     },
   })
   return retested
+}
+
+/**
+ * 入口 B（blocked 卡「继续修」，P2 失败回流 PR-C）：上次让渡时的失败快照（test-report.json）
+ * 直接组装修复任务，先跑一轮定向修复再交回终验门禁——从「产物未变的空转重验」升级为
+ * 「先修再验」。与入口 A 的差异：入口 A 在终验现场拿新鲜失败证据；入口 B 消费上次落盘
+ * 报告（省一次注定失败的全量重验）。预算计数与入口 A 共享 test_repair_count。
+ *
+ * 任一不起修复轮的情形（无快照 / 无失败 / 预算已耗尽 / 无 query / 修复轮异常）→
+ * 行为=现状（直接终验，终验内部仍有入口 A 兜底）。cancelled → throw AGENT_CANCELLED
+ * 向上传播（U5：不终验、不改阶段；陷阱 42：不发卡、不落收尾决策）。
+ */
+async function runBlockedTestRepair(input: {
+  request_id: string
+  session_id: string
+  project_id: string
+  mode: ProjectMode
+  channel_id?: string
+  query?: SDKQuery
+  signal?: AbortSignal
+  preview_url: string
+}): Promise<void> {
+  const lastReport = readTestReport(input.project_id)
+  if (!lastReport || lastReport.failed_count === 0) return
+  const project = findProject(input.project_id)
+  const used = project.test_repair_count ?? 0
+  const budget = resolveRepairBudget(input.mode)
+  if (used >= budget) {
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'repair_budget_exhausted',
+        title: '修复预算已耗尽（继续修）',
+        why: `用户选择继续修，但已连续修复 ${used} 轮（${input.mode} 模式上限 ${budget}）仍未通过，本轮直接重验`,
+        detail: { used, budget, mode: input.mode, via: 'blocked_resume' },
+      },
+    })
+    return
+  }
+  // 无 query（存量 resume 场景）无法起修复轮：不起不报错，行为=现状重验
+  if (!input.query) return
+
+  const tasks = buildRepairTasks({ testResult: lastReport })
+  if (tasks.length === 0) return
+  throwIfAborted(input.signal)
+
+  const round = used + 1
+  updateProject(input.project_id, { test_repair_count: round })
+  recordDecision({
+    project_id: input.project_id,
+    session_id: input.session_id,
+    entry: {
+      type: 'repair_round_started',
+      title: `定向修复轮启动（继续修，第 ${round}/${budget} 轮）`,
+      why: `用户选择继续修：按上次终验失败快照回喂 ${tasks.length} 项修复任务，修复后重走终验门禁`,
+      detail: { round, budget, mode: input.mode, via: 'blocked_resume', tasks: tasks.map((task) => ({ id: task.id, source: task.source, location: task.location })) },
+    },
+  })
+  const repairNote = `继续修：按上次失败清单定向修复 ${tasks.length} 项（第 ${round}/${budget} 轮），完成后重新终验。`
+  appendJsonLine(getAgentSessionPath(input.session_id), {
+    role: 'assistant',
+    content: [{ type: 'text', text: repairNote }],
+    timestamp: Date.now(),
+  })
+  publish(input, 'message_delta', { text: repairNote })
+
+  const backplane = readPrdBackplane(input.project_id)
+  const { map: skeletonMap } = prepareSkeletonBeforeLoop(input, backplane, project)
+  const result = await runRepairLoop({
+    request_id: input.request_id,
+    session_id: input.session_id,
+    project_id: input.project_id,
+    mode: input.mode,
+    ...(input.signal ? { signal: input.signal } : {}),
+    channel_id: input.channel_id,
+    query: input.query,
+    tasks,
+    round,
+    buildSystem: (editFormat) => buildLoopSystemWithOverride(backplane, editFormat, input.project_id, skeletonMap),
+    thinkingLevel: resolveLoopThinkingLevel(),
+    publish: (type, payload) => publish(input, type, payload),
+  })
+
+  // 修复轮未完成（渠道不可用 / 异常）：不阻断，交回终验门禁按现状收口
+  if (result.status !== 'completed') return
+  throwIfAborted(input.signal)
+
+  recordDecision({
+    project_id: input.project_id,
+    session_id: input.session_id,
+    entry: {
+      type: 'repair_round_completed',
+      title: '定向修复轮完成（继续修），重新终验',
+      why: `第 ${round} 轮修复完成（${result.loopResult?.turns ?? 0} 轮 / ${result.loopResult?.toolCalls.length ?? 0} 次工具调用），产物已更新，重走终验门禁判定收敛`,
+      detail: { round, via: 'blocked_resume', loop_status: result.loopResult?.status, failed_snapshot: lastReport.failed_count },
+    },
+  })
 }
 
 export interface IterationTaskInput {
@@ -1749,6 +1864,8 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
       loop: mvp.loop_result,
       query: input.query,
       channel_id: input.channel_id,
+      // P2 失败回流（PR-C）：构建门禁结果透传终验组装器（failed → build 修复任务）
+      ...(mvp.build_gate ? { buildGate: mvp.build_gate } : {}),
     })
     // T4-L3 蒸馏兜底·触发点②（每次迭代完成后，fire-and-forget）：默认关闭，
     // 失败在内部降级并落决策，绝不阻塞迭代收尾
@@ -2119,6 +2236,8 @@ export async function resumeBlockedFlow(
       loop: mvp.loop_result,
       query: input.query,
       channel_id: input.channel_id,
+      // P2 失败回流（PR-C）：构建门禁结果透传终验组装器（failed → build 修复任务）
+      ...(mvp.build_gate ? { buildGate: mvp.build_gate } : {}),
     })
     return
   }
@@ -2126,6 +2245,11 @@ export async function resumeBlockedFlow(
   if (action === 'test_repair') {
     updateProject(input.project_id, { test_repair_count: 0 })
     const previewUrl = await ensureResumePreview(input)
+    // P2 失败回流（入口 B，PR-C）：从「空转重验」升级为「先修再验」——上次让渡时的
+    // 失败快照（test-report.json）直接组装修复任务，先跑一轮定向修复再走终验门禁，
+    // 避免产物未变重验原地失败；无失败快照 / 无预算 / 修复轮未完成 → 行为=现状重验。
+    // （终验内部仍带入口 A 的自动修复轮，两层互不冲突：预算计数共享 test_repair_count）
+    await runBlockedTestRepair({ ...input, preview_url: previewUrl })
     // loop 元数据仅在 project.via_agent_loop 时存在；存量旧项目缺省走普通终验（无修复）
     await runAgentLoopPostTesting({
       request_id: input.request_id,
