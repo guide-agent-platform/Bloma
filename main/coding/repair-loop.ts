@@ -12,14 +12,21 @@
  * - judge 与安全扫描第一版不接修复轮（防与 judge_return 双修复流打架）；
  * - 修复卡约束写卡尾而非 system prompt——任务级约束随任务消失，不污染常驻段。
  *
- * 本文件分两批落位：PR-A 纯函数（类型 + 任务组装 + 卡片渲染 + 预算/轮次解析，
- * 零行为接线）；PR-B 补 runRepairLoop（依赖注入 system 组装器，防与编程编排器
- * 循环 import）。
+ * 本文件分两批落位：PR-A 纯函数（类型 + 任务组装 + 卡片渲染 + 预算/轮次解析）；
+ * PR-B 补 runRepairLoop 运行时（依赖注入 system 组装器，防与编程编排器循环 import）。
  */
 
 import type { GwtTestResult } from '../gwt-service'
 import type { BuildGateResult } from './build-gate'
-import type { ProjectMode } from '../../shared/types'
+import type { ProjectMode, AgentEvent } from '../../shared/types'
+import type { ThinkingLevel } from '../../shared/reasoning-profile'
+import type { SDKQuery } from '../orchestrator'
+import { runAgentLoop, type AgentLoopResult } from './agent-loop'
+import { buildAgentTools } from './agent-tools'
+import { categoryTemperature } from '../model-resolution'
+import { resolveChannelEnv } from '../runtime-fallback'
+import { trackAnalytics } from '../platform-services'
+import { appendProjectLearning } from '../learnings-log'
 
 export type RepairSource = 'gwt' | 'build'
 
@@ -109,6 +116,156 @@ export function buildRepairTasks(input: { testResult: GwtTestResult; buildGate?:
     })
   }
   return tasks
+}
+
+// =========================================================================
+// 修复轮运行时（PR-B；实施稿 §4.3）
+// =========================================================================
+
+/** 修复轮 maxTokens 缺省（与主 loop DEFAULT_MAX_TOKENS 同值；渠道显式配置优先）。 */
+const REPAIR_DEFAULT_MAX_TOKENS = 16384
+
+/** 修复轮内 web_research 预算（窄任务外呼上限，实施稿 §4.3）。 */
+const REPAIR_WEB_RESEARCH_BUDGET = 2
+
+/** 统一的取消边界（与编程编排器同款口径）。 */
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new Error('AGENT_CANCELLED')
+}
+
+/** 修复模式段（追加在背板锚定 system 之后：当前处于定向修复轮，任务卡即全部工作）。 */
+const REPAIR_MODE_SECTION = [
+  '【修复模式】当前处于定向修复轮：下方的修复任务卡是本轮全部工作，完成后简要总结即可。',
+  '不要重新生成整个项目，不要改动修复任务卡之外的任何文件或功能。',
+].join('\n')
+
+export interface RepairLoopInput {
+  request_id: string
+  session_id: string
+  project_id: string
+  mode: ProjectMode
+  /** 停止信号（陷阱 42：全程贯穿；abort 后不发卡、不落收尾决策日志） */
+  signal?: AbortSignal
+  channel_id?: string
+  query: SDKQuery
+  /** 本轮修复任务（入口组装器用 buildRepairTasks 产出） */
+  tasks: RepairTask[]
+  /** 当前修复轮次（从 1 起；预算计数落 project.test_repair_count） */
+  round: number
+  /** system 组装器（编程编排器注入 buildLoopSystemWithOverride 同款背板锚定 + 骨架地图；
+   * 参数 = 修复轮解析出的 editFormat；依赖注入防与编排器循环 import） */
+  buildSystem: (editFormat: 'diff' | 'whole') => string
+  /** 思考档位（编排器解析后传入；缺省不传 = loop 内部缺省） */
+  thinkingLevel?: ThinkingLevel
+  /** 事件发布（编排器 publish 包装） */
+  publish: (type: AgentEvent['type'], payload: Record<string, unknown>) => void
+}
+
+export interface RepairRoundResult {
+  status: 'completed' | 'cancelled' | 'budget_exhausted' | 'error'
+  tasks: RepairTask[]
+  loopResult?: AgentLoopResult
+}
+
+/**
+ * 定向修复轮（入口 A/B 共用）：窄任务二次 runAgentLoop（D3：全新调用，无
+ * historyTurns；背板锚定 system + 修复卡即全部上下文）。
+ *
+ * - 渠道解析一律走 resolveChannelEnv（陷阱 23；category='mvp'，requireTools）；
+ * - 渠道不可用 / loop 异常 → status:'error' 不阻断交付链（修复轮是增强不是依赖，
+ *   调用方按现状熔断口径收口）；
+ * - cancelled → throw AGENT_CANCELLED（U5 同款：不补脚手架、不终验、不改阶段），
+ *   abort 后不发卡、不落收尾决策（陷阱 42）；
+ * - 结束沉淀 learnings（kind:'repair_outcome'，静默失败不阻断），下轮 fresh loop
+ *   经【历史经验】段注入。
+ */
+export async function runRepairLoop(input: RepairLoopInput): Promise<RepairRoundResult> {
+  throwIfAborted(input.signal)
+
+  // 渠道解析（陷阱 23）：与主 loop 同口径，勿手写解密块
+  const resolution = resolveChannelEnv({
+    channelId: input.channel_id,
+    category: 'mvp',
+    projectId: input.project_id,
+    sessionId: input.session_id,
+    requireTools: true,
+  })
+  if (!resolution.env || !resolution.channel) {
+    // fail-open：修复渠道不可用不阻断交付链，如实留痕后由入口走现状熔断
+    appendProjectLearning(input.project_id, {
+      kind: 'repair_outcome',
+      text: `修复轮（第 ${input.round} 轮）未执行：渠道不可用（${resolution.unusableReason ?? 'unknown'}）`,
+      meta: { status: 'error', round: input.round, reason: resolution.unusableReason },
+    })
+    return { status: 'error', tasks: input.tasks }
+  }
+  const env = resolution.env
+  const channel = resolution.channel
+  const editFormat = channel.models?.find((candidate) => candidate.enabled && candidate.name === env.ANTHROPIC_MODEL)?.edit_format ?? 'diff'
+
+  throwIfAborted(input.signal)
+
+  let loopResult: AgentLoopResult
+  try {
+    loopResult = await runAgentLoop({
+      system: `${input.buildSystem(editFormat)}\n\n${REPAIR_MODE_SECTION}`,
+      task: renderRepairTaskCard(input.tasks),
+      // 窄任务小预算：web_research 限 2 防长 loop 无节制外呼（主 loop 为 4）
+      toolBudget: { web_research: REPAIR_WEB_RESEARCH_BUDGET },
+      tools: buildAgentTools({
+        projectId: input.project_id,
+        editFormat,
+        // 埋点通道复用（self_repair_triggered, via:'repair_loop'）
+        onRepairRound: (round) => {
+          trackAnalytics({
+            request_id: input.request_id,
+            event: {
+              event_type: 'self_repair_triggered',
+              project_id: input.project_id,
+              session_id: input.session_id,
+              payload: { attempt: round, category: 'test_error', via: 'repair_loop' },
+              privacy_level: 'research_safe',
+            },
+          })
+        },
+      }),
+      query: input.query,
+      env,
+      sessionId: input.session_id,
+      projectId: input.project_id,
+      requestId: input.request_id,
+      maxTokens: channel.max_tokens ?? REPAIR_DEFAULT_MAX_TOKENS,
+      maxTurns: resolveRepairMaxTurns(input.mode),
+      permissionMode: 'allow-all',
+      temperature: categoryTemperature('mvp'),
+      providerType: channel.provider_type,
+      ...(input.thinkingLevel !== undefined ? { thinkingLevel: input.thinkingLevel } : {}),
+      signal: input.signal ?? new AbortController().signal,
+      publish: input.publish,
+    })
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('AGENT_CANCELLED')) throw err
+    // 修复轮自身异常不阻断交付链：如实沉淀后按现状熔断收口
+    appendProjectLearning(input.project_id, {
+      kind: 'repair_outcome',
+      text: `修复轮（第 ${input.round} 轮）异常终止：${err instanceof Error ? err.message : String(err)}`,
+      meta: { status: 'error', round: input.round },
+    })
+    return { status: 'error', tasks: input.tasks }
+  }
+
+  // U5 同款口径：取消后不补脚手架、不终验、不改阶段、不发卡（陷阱 42）
+  if (loopResult.status === 'cancelled') {
+    throw new Error(`AGENT_CANCELLED: 修复轮已取消（${loopResult.turns} 轮），中止终验`)
+  }
+
+  appendProjectLearning(input.project_id, {
+    kind: 'repair_outcome',
+    text: `修复轮（第 ${input.round} 轮）：${loopResult.status}，${loopResult.turns} 轮 / ${loopResult.toolCalls.length} 次工具调用`,
+    meta: { status: loopResult.status, round: input.round, tasks: input.tasks.map((task) => task.id) },
+  })
+
+  return { status: 'completed', tasks: input.tasks, loopResult }
 }
 
 /** 修复卡尾注三项硬约束（D5：写卡尾而非 system，随任务消失不污染常驻段）。 */

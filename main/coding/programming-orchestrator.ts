@@ -9,7 +9,8 @@ import { readPrdBackplane, readUxContractSketch, renamePrdProject, syncDocuments
 import { appendProjectLearning, renderLearningsSection } from '../learnings-log'
 import { createSnapshot, runSandbox, trackAnalytics } from '../platform-services'
 import { renderPackageJson, renderStaticServer, renderSkeletonToProject, scaffoldEnabled } from '../project-scaffold'
-import { runBuildGate } from './build-gate'
+import { runBuildGate, type BuildGateResult } from './build-gate'
+import { buildRepairTasks, resolveRepairBudget, runRepairLoop } from './repair-loop'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../project-service'
 import { appendProjectMapToSystem, loadProjectMapBlock } from '../project-map'
 import { resolveChannelEnv } from '../runtime-fallback'
@@ -1471,6 +1472,9 @@ export interface AgentLoopPostTestingInput {
   /** 语义审查腿透传（2026-08-26）：judge 规则全绿后审产物 vs PRD 忠实性 */
   query?: SDKQuery
   channel_id?: string
+  /** 构建门禁结果（P2 失败回流 PR-C 接入）：failed 时修复卡追加 build 任务；
+   *  此批先只透传不消费，PR-C 在 runMvpViaAgentLoop 侧填充 */
+  buildGate?: BuildGateResult
 }
 
 /**
@@ -1496,28 +1500,35 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
   updateProject(input.project_id, { current_stage: 'testing' })
   publish(input, 'stage_changed', { stage: 'testing' })
 
-  const testResult = await runGwtScenarios({ project_id: input.project_id, session_id: input.session_id, preview_url: input.preview_url })
+  let testResult = await runGwtScenarios({ project_id: input.project_id, session_id: input.session_id, preview_url: input.preview_url })
   throwIfAborted(input.signal)
   writeTestReport({ request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, result: testResult })
   syncDocuments({ request_id: input.request_id, project_id: input.project_id, session_id: input.session_id, checkpoint: 'mvp_tested' })
   throwIfAborted(input.signal)
 
-  // 只终验不重修：GWT 首败即熔断回滚 / 让渡（loop 内修复预算已用尽）
+  // P2 失败回流（实施稿 §4.4）：GWT 首败先定向修复再决定熔断——预算内修复轮 + 全量
+  // 重验（D2：不做失败子集，防改坏已过场景）；预算耗尽 / 修复后仍失败 → 现状熔断
+  // 口径一字不改（陷阱 37）。修复收敛则继续走安全扫描 → judge 正常链。
   if (testResult.failed_count > 0) {
-    const outcome = await circuitBreakRollback({
-      request_id: input.request_id,
-      session_id: input.session_id,
-      project_id: input.project_id,
-      reason: `终验未通过（Agent Loop 路径，${loopOutcomeNote(input.loop)}）`,
-      publish: (type, payload) => publish(input, type, payload),
-    })
-    if (outcome.rolled_back) throw new CircuitBreakSettledError()
-    const failureTitle =
-      testResult.failure_summary.length > 0
-        ? `测试未通过：${testResult.failure_summary.map((f) => f.scenario).join('、')}`
-        : '自动修复多次后测试仍未通过'
-    publishBlockedDecision(input, 'test_repair', failureTitle)
-    return { verdict: 'blocked', test_result: testResult }
+    testResult = await repairAndRetest(input, testResult)
+    throwIfAborted(input.signal)
+    if (testResult.failed_count > 0) {
+      const outcome = await circuitBreakRollback({
+        request_id: input.request_id,
+        session_id: input.session_id,
+        project_id: input.project_id,
+        reason: `终验未通过（Agent Loop 路径，${loopOutcomeNote(input.loop)}）`,
+        publish: (type, payload) => publish(input, type, payload),
+      })
+      if (outcome.rolled_back) throw new CircuitBreakSettledError()
+      const failureTitle =
+        testResult.failure_summary.length > 0
+          ? `测试未通过：${testResult.failure_summary.map((f) => f.scenario).join('、')}`
+          : '自动修复多次后测试仍未通过'
+      publishBlockedDecision(input, 'test_repair', failureTitle)
+      return { verdict: 'blocked', test_result: testResult }
+    }
+    // 修复收敛：testResult 已更新为重验结果，继续正常链
   }
 
   // 安全扫描终验（A3，OWASP 静态扫描）：高危/严重命中同样只熔断不重修
@@ -1553,6 +1564,113 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
     signal: input.signal,
   })
   return { verdict: judge.outcome, test_result: testResult, judge: judge.verdict }
+}
+
+/**
+ * GWT 首败后的定向修复轮 + 全量重验（P2 失败回流入口 A，实施稿 §4.4）。
+ *
+ * 预算：project.test_repair_count 计数（既有字段），上限 resolveRepairBudget(mode)
+ * （缺省 quick=1 / longterm=2，BLOMA_REPAIR_BUDGET 覆盖）；每轮 +1，收敛清零。
+ * 任一「不起修复轮」的情形（预算耗尽 / 无 query / 渠道不可用 / 修复轮异常）
+ * 均返回原 testResult，由调用方按现状熔断口径收口（陷阱 37 一字不改）——修复轮
+ * 是增强不是依赖，绝不阻断交付链。
+ */
+async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: GwtTestResult): Promise<GwtTestResult> {
+  const project = findProject(input.project_id)
+  const used = project.test_repair_count ?? 0
+  const budget = resolveRepairBudget(input.mode)
+  if (used >= budget) {
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'repair_budget_exhausted',
+        title: '修复预算已耗尽',
+        why: `已连续修复 ${used} 轮（${input.mode} 模式上限 ${budget}）终验仍未通过，按现状熔断口径收口`,
+        detail: { used, budget, mode: input.mode },
+      },
+    })
+    return testResult
+  }
+  // 无 query（存量项目 resume 等场景）无法起修复轮：不起不报错，走现状熔断
+  if (!input.query) return testResult
+
+  const tasks = buildRepairTasks({ testResult, ...(input.buildGate ? { buildGate: input.buildGate } : {}) })
+  if (tasks.length === 0) return testResult
+  throwIfAborted(input.signal)
+
+  const round = used + 1
+  updateProject(input.project_id, { test_repair_count: round })
+  recordDecision({
+    project_id: input.project_id,
+    session_id: input.session_id,
+    entry: {
+      type: 'repair_round_started',
+      title: `定向修复轮启动（第 ${round}/${budget} 轮）`,
+      why: `终验 ${tasks.length} 项未通过，回喂结构化修复任务后定向修复并全量重验（来源：${[...new Set(tasks.map((task) => task.source))].join('、')}）`,
+      detail: { round, budget, mode: input.mode, tasks: tasks.map((task) => ({ id: task.id, source: task.source, location: task.location })) },
+    },
+  })
+  // 旁白告知（渲染端零新组件，走既有 assistant 文案流）
+  const repairNote = `终验有 ${tasks.length} 项未通过，我先定向修复一轮（第 ${round}/${budget} 轮），完成后再全量重验。`
+  appendJsonLine(getAgentSessionPath(input.session_id), {
+    role: 'assistant',
+    content: [{ type: 'text', text: repairNote }],
+    timestamp: Date.now(),
+  })
+  publish(input, 'message_delta', { text: repairNote })
+
+  // system 同款背板锚定 + 骨架地图（buildLoopSystemWithOverride 同款，防漂移锚不丢）；
+  // 骨架幂等重渲染（已存在文件全部跳过，决策行如实记录），修复轮拿到与主 loop 一致的锚
+  const backplane = readPrdBackplane(input.project_id)
+  const { map: skeletonMap } = prepareSkeletonBeforeLoop(input, backplane, project)
+  const result = await runRepairLoop({
+    request_id: input.request_id,
+    session_id: input.session_id,
+    project_id: input.project_id,
+    mode: input.mode,
+    ...(input.signal ? { signal: input.signal } : {}),
+    channel_id: input.channel_id,
+    query: input.query,
+    tasks,
+    round,
+    buildSystem: (editFormat) => buildLoopSystemWithOverride(backplane, editFormat, input.project_id, skeletonMap),
+    thinkingLevel: resolveLoopThinkingLevel(),
+    publish: (type, payload) => publish(input, type, payload),
+  })
+
+  // 修复轮异常（渠道不可用 / loop 抛错等）：不再重验，直接走现状熔断
+  if (result.status !== 'completed') return testResult
+  throwIfAborted(input.signal)
+
+  // 全量重验（D2）+ 重写测试报告（m-8 口径：最后一轮为准）；预览先兑底拉起
+  const previewUrl = await ensureResumePreview(input)
+  const retested = await runGwtScenarios({ project_id: input.project_id, session_id: input.session_id, preview_url: previewUrl })
+  throwIfAborted(input.signal)
+  writeTestReport({ request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, result: retested })
+  syncDocuments({ request_id: input.request_id, project_id: input.project_id, session_id: input.session_id, checkpoint: 'mvp_tested' })
+
+  const converged = retested.failed_count === 0
+  if (converged) updateProject(input.project_id, { test_repair_count: 0 })
+  recordDecision({
+    project_id: input.project_id,
+    session_id: input.session_id,
+    entry: {
+      type: 'repair_round_completed',
+      title: converged ? '定向修复轮收敛' : '定向修复轮完成（未收敛）',
+      why: converged
+        ? `第 ${round} 轮修复后全量重验 ${retested.total_count} 场景全部通过，继续安全扫描与裁判终审`
+        : `第 ${round} 轮修复后全量重验仍有 ${retested.failed_count} 项未通过，按现状熔断口径收口`,
+      detail: {
+        round,
+        converged,
+        failed_before: testResult.failed_count,
+        failed_after: retested.failed_count,
+        total_count: retested.total_count,
+      },
+    },
+  })
+  return retested
 }
 
 export interface IterationTaskInput {

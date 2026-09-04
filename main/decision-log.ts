@@ -57,6 +57,9 @@ export type DecisionType =
   | 'build_gate_passed'
   | 'build_gate_failed'
   | 'build_gate_unavailable'
+  | 'repair_round_started'
+  | 'repair_round_completed'
+  | 'repair_budget_exhausted'
 
 export interface DecisionEntry {
   type: DecisionType

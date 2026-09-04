@@ -22,7 +22,7 @@ import { getDocumentsDir } from '../storage/config-paths'
 
 export interface ProjectLearning {
   recorded_at: string
-  kind: 'loop_summary' | 'loop_outcome' | 'note'
+  kind: 'loop_summary' | 'loop_outcome' | 'repair_outcome' | 'note'
   text: string
   meta?: Record<string, unknown>
 }
@@ -33,8 +33,8 @@ const TEXT_CHAR_LIMIT = 300
 const DEFAULT_INJECT_LIMIT = 6
 /** 入队去重回看窗口（条）：只与最近 N 条比对，越旧越可能已有价值退化 */
 const DEDUP_LOOKBACK = 20
-/** 注入排序的 kind 权重：异常结局（失败信号）优先于总结/备注。 */
-const KIND_WEIGHT: Record<ProjectLearning['kind'], number> = { loop_outcome: 2, note: 1, loop_summary: 1 }
+/** 注入排序的 kind 权重：异常结局（失败信号）优先于总结/备注；修复结局同为失败信号同权。 */
+const KIND_WEIGHT: Record<ProjectLearning['kind'], number> = { loop_outcome: 2, repair_outcome: 2, note: 1, loop_summary: 1 }
 /** loop_summary 时效阈值（天）：超过则注入排序沉底（不删除，条数不足时仍可入选）。 */
 const SUMMARY_STALE_DAYS = 14
 
