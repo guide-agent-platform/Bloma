@@ -6,7 +6,7 @@ import { buildPrdFewShotInjection, isInjectionEnabled } from '../template-inject
 import { callLlmForJson } from '../kernel/llm-call'
 import type { AgentMessage, MessageContentBlock } from '../../shared/types'
 import type { PrdBackplane, SketchRequirement } from '../model/prd-backplane'
-import { buildPrdDocumentFallback } from '../model/prd-backplane'
+import { buildPrdDocumentFallback, normalizePrdDocumentNewlines, reconcilePrdDocumentPriorities } from '../model/prd-backplane'
 import { categoryTemperature } from '../model-resolution'
 
 /**
@@ -171,16 +171,19 @@ function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequirement[],
   }
   const positioning = parsed.positioning.trim() || items[0].description
   // 长文本 PRD dual-form：document 缺失/空白时由结构化字段机械拼装兜底（确定性，不编内容），
-  // 保证背板 prd_document 恒存在（确认卡/loop 锚定的消费假设）
-  const prdDocument =
-    parsed.document.trim() ||
-    buildPrdDocumentFallback({
-      positioning,
-      requirements: items,
-      acceptance,
-      out_of_scope: parsed.out_of_scope,
-      assumptions: parsed.assumptions,
-    })
+  // 保证背板 prd_document 恒存在（确认卡/loop 锚定的消费假设）。
+  // P1-4/P1-5（2026-09-04）：LLM 输出的 document 先还原双重转义换行（\\n→真换行），再按结构化
+  // 字段校正 priority 标注（document 自标 P0/P1 与 requirements 冻结 priority 不一致时以结构化覆盖）。
+  const rawDocument = parsed.document.trim()
+  const prdDocument = rawDocument
+    ? reconcilePrdDocumentPriorities(normalizePrdDocumentNewlines(rawDocument), items)
+    : buildPrdDocumentFallback({
+        positioning,
+        requirements: items,
+        acceptance,
+        out_of_scope: parsed.out_of_scope,
+        assumptions: parsed.assumptions,
+      })
   return {
     project_id: projectId,
     name: '', // name 由调用方回填（findProject），此处占位

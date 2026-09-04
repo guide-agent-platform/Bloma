@@ -1,7 +1,7 @@
 import type { SDKQuery } from '../orchestrator'
 import { loadPromptOverride } from '../prompt-config'
 import type { SketchRequirement } from '../sketch-engine'
-import { DEFAULT_BEHAVIOR_ASSERTION } from '../sketch-engine'
+import { isPlaceholderAssertion } from '../sketch-engine'
 import { parseBehaviorAssertion } from '../behavior-assertions'
 import { categoryTemperature } from '../model-resolution'
 import { readConversation } from '../prd-engine-llm'
@@ -426,10 +426,12 @@ function mergeItem(
   return base
 }
 
-/** 剔除模板回退物化的默认存在性断言（presenceFallback，格式守卫①必弃）后返回真实断言。 */
+/** 剔除占位断言（P1-6：默认存在性断言及其变体——「可见且可交互」类泛化表述）后返回真实断言。
+ *  从「仅剔 DEFAULT_BEHAVIOR_ASSERTION 完全相等」升级为「识别占位断言变体」（isPlaceholderAssertion），
+ *  杜绝模型换词偷懒（「功能在页面可见」「能正常使用」等）绕过格式守卫①。 */
 function stripDefaultAssertions(assertions: string[] | undefined): string[] {
   if (!assertions) return []
-  return assertions.map((value) => value.trim()).filter((value) => value.length > 0 && value !== DEFAULT_BEHAVIOR_ASSERTION)
+  return assertions.map((value) => value.trim()).filter((value) => value.length > 0 && !isPlaceholderAssertion(value))
 }
 
 function isValidPriority(value: unknown): value is 'P0' | 'P1' | 'P2' {

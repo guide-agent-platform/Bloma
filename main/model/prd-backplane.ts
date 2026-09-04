@@ -350,3 +350,48 @@ export function buildPrdDocumentFallback(input: {
   lines.push('## 五、后台假设', ...(input.assumptions.length ? input.assumptions.map((entry) => `- ${entry}`) : ['- 无']))
   return lines.join('\n')
 }
+
+// ---------------------------------------------------------------------------
+// 2026-09-04 P1-4/P1-5/P1-6：prd_document 清洗与同源校正、占位断言识别
+// ---------------------------------------------------------------------------
+
+/**
+ * 占位断言识别（P1-6）：模型偷懒写「该功能项在产物中可见且可交互」这类等于没断言的
+ * 存在性泛化表述。判据：命中泛化词族（可见/可交互/可访问/能正常…），且整条不含任何
+ * 触发→效果结构（→/点击/按/输入/选择/双击…）——真正的行为断言一定带触发与效果。
+ * enricher 剔除（stripDefaultAssertions 升级）+ GWT 派生拦截两处共用同一判据。
+ */
+export function isPlaceholderAssertion(assertion: string): boolean {
+  const text = assertion.trim()
+  if (!text) return true
+  if (text === DEFAULT_BEHAVIOR_ASSERTION) return true
+  const hasGenericPresence = /(可见|可交互|可访问|能正常|可使用|可用|可操作|能运行|正常显示|正常使用|已实现|功能入口|入口存在)/.test(text)
+  const hasBehaviorAxis = /(→|后|当|则|点击|按|输入|键入|选择|双击|切换|拖动|滚动|新增|隐藏|显示|消失|出现|变化|更新)/.test(text)
+  return hasGenericPresence && !hasBehaviorAxis
+}
+
+/**
+ * prd_document 换行双重转义还原（P1-4）。
+ * 模型把 prompt 要求的 `\n` 又转义一次输出 `\\n`，JSON.parse 后落盘的是字面「反斜杠+n」
+ * （非真换行），prd_document 全文变单行、确认卡与 loop 锚注入拿到不可读文本。
+ * 只还原字面两字符序列（反斜杠+n），不误伤 JSON.parse 后已是真换行的正常输出。
+ */
+export function normalizePrdDocumentNewlines(document: string): string {
+  return document.replace(/\\n/g, '\n')
+}
+
+/**
+ * document 与结构化字段的 priority 同源校正（P1-5）。
+ * LLM 在 document 功能详述节里自标 P0/P1，与 requirements 冻结字段的 priority（缺省
+ * F-001=P0、其余 P2）不一致——下游两套口径。此处按结构化字段覆盖 document 里
+ * `[F-xxx]（P0/P1/P2）` 标题标注，使优先级与背板真相源一致。
+ */
+export function reconcilePrdDocumentPriorities(document: string, requirements: SketchRequirement[]): string {
+  const priorityById = new Map(requirements.map((item) => [item.id, requirementPriority(item)]))
+  return document.replace(/(\[F-\d+\])\s*[（(](P[0-2])[）)]/g, (match, idPart: string, current: string) => {
+    const id = idPart.replace(/[\[\]]/g, '')
+    const target = priorityById.get(id)
+    if (!target || target === current) return match
+    return `${idPart}（${target}）`
+  })
+}

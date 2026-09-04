@@ -143,13 +143,22 @@ async function reconcileInterruptedProject(project: Project): Promise<ReconcileO
   }
 
   const toStage = convergeStageFromEvidence(evidence)
-  updateProject(project.project_id, { current_stage: toStage, blocked_action: undefined })
-  persistReconcileMessage(project, toStage, action, restoredFrom)
+  // P0-3（2026-09-04 拍板「交用户决策」）：从质量门阶段（testing/judge_review/repairing）
+  // 中断（用户取消）的项目，磁盘产物虽完整但 GWT 未全过、终审未跑——不能冒充 ready。
+  // 收敛到 blocked_for_user_decision（blocked_action=test_repair 复用 resume 闭环：
+  // continue=重跑测试+终审 / accept=接受当前版本 / explain=回澄清）。
+  const qualityGateInterrupted = evidence === 'complete' && QUALITY_GATE_STAGES.has(project.current_stage)
+  const finalStage: WorkflowStage = qualityGateInterrupted ? 'blocked_for_user_decision' : toStage
+  updateProject(project.project_id, {
+    current_stage: finalStage,
+    blocked_action: qualityGateInterrupted ? 'test_repair' : undefined,
+  })
+  persistReconcileMessage(project, finalStage, action, restoredFrom)
 
   return {
     project_id: project.project_id,
     from_stage: project.current_stage,
-    to_stage: toStage,
+    to_stage: finalStage,
     action,
   }
 }
@@ -173,6 +182,8 @@ function persistReconcileMessage(
     if (QUALITY_GATE_STAGES.has(project.current_stage)) {
       parts.push('注意：当时的测试与裁判审查未执行完毕，此处的「可用」仅表示产物完整，不是质量结论。')
     }
+  } else if (toStage === 'blocked_for_user_decision') {
+    parts.push('磁盘上的产物是完整的，但上次运行在测试或审查未完成时被中断，还需要你决定是继续完成测试，还是保留当前版本。')
   } else if (toStage === 'sketch_ready') {
     parts.push('磁盘上目前只剩草图产物，项目已回到草图确认阶段。')
   } else {

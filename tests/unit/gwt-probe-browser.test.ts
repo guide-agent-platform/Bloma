@@ -140,4 +140,86 @@ describe('GWT 真浏览器探针（T-8：M-4 扩展触发器 fill/select/dblclic
       server.close()
     }
   })
+
+  it('P0-1：click 探针只认真可见控件——隐藏 overlay 的「暂停…」按钮不抢跑命中', { timeout: 60_000 }, async () => {
+    if (!(await playwrightAvailable())) return
+    const home = mkdtempSync(join(tmpdir(), 'proma-p01-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-p01', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [
+      { id: 'F-001', description: '暂停菜单', priority: 'P0', behavior_assertions: ['点击暂停→菜单显示'] },
+    ])
+
+    // 隐藏 overlay 里的「暂停游戏继续」按钮（display:none）在 DOM 里排在可见「暂停」按钮之前：
+    // 修复前 find 命中它（text 含「暂停」），点中 display:none 无效果 → 菜单不显示 → show 假失败。
+    // 修复后过滤可见，命中可见「暂停」按钮 → 菜单显示 → show 探针通过。
+    const HTML = `<!doctype html><html><head><style>.hidden{display:none}</style></head><body>
+<div id="menu" class="hidden"><button>暂停游戏继续</button></div>
+<button id="pause">暂停</button>
+<script>
+document.getElementById('pause').addEventListener('click', function () {
+  document.getElementById('menu').classList.remove('hidden');
+});
+</script></body></html>`
+
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+      res.end(HTML)
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+
+    try {
+      const result = await runBrowserGwt({
+        project_id: project.project_id,
+        session_id: 'session-p01',
+        preview_url: `http://127.0.0.1:${port}`,
+      })
+      expect(result).not.toBeNull()
+      expect(result!.failed_count).toBe(0)
+      expect(result!.failure_summary).toEqual([])
+    } finally {
+      server.close()
+    }
+  })
+
+  it('P0-1：探针视角清单不含 display:none 隐藏按钮（不再误导模型）', { timeout: 60_000 }, async () => {
+    if (!(await playwrightAvailable())) return
+    const home = mkdtempSync(join(tmpdir(), 'proma-p01b-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-p01b', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [
+      { id: 'F-001', description: '记录面板', priority: 'P0', behavior_assertions: ['点击保存→列表新增一条记录'] },
+    ])
+
+    // 可见「保存」按钮 + 隐藏 overlay「继续/放弃本局」按钮；点击保存无新增（add-item 必败）
+    // → 失败 reason 拼「探针视角：可点击控件…」，修复后清单只含可见「保存」，不含隐藏按钮。
+    const HTML = `<!doctype html><html><body>
+<button id="save">保存</button>
+<div style="display:none"><button>继续</button><button>放弃本局</button></div>
+<script>document.getElementById('save').addEventListener('click', function () {})</script>
+</body></html>`
+
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+      res.end(HTML)
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+
+    try {
+      const result = await runBrowserGwt({
+        project_id: project.project_id,
+        session_id: 'session-p01b',
+        preview_url: `http://127.0.0.1:${port}`,
+      })
+      expect(result).not.toBeNull()
+      expect(result!.failed_count).toBe(1)
+      expect(result!.failure_summary[0]!.reason).toContain('保存')
+      expect(result!.failure_summary[0]!.reason).not.toContain('继续')
+      expect(result!.failure_summary[0]!.reason).not.toContain('放弃本局')
+    } finally {
+      server.close()
+    }
+  })
 })

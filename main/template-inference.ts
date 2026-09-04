@@ -45,6 +45,16 @@ const TYPE_RULES: TypeRule[] = [
     pattern: /网站|网页|博客|商城|电商|店铺|后台|管理(?:系统|端|后台)|官网|落地页|论坛|社区|门户|(?:web|h5|html5)\s*(?:页面|应用|网站)?|浏览器(?:里|中|上)?(?:用|打开|访问)|在线[\u4e00-\u9fa5A-Za-z0-9]{0,4}?(?:工具|应用|平台|系统)|小程序/i,
   },
   {
+    // P1-8（2026-09-04）：游戏/互动媒体类目——游戏本质是 web 全栈产物（index.html + src/app.js +
+    // 交互逻辑 + 构建门禁），此前关键词表无游戏类目、被兜底成 personal_tool，吃不到
+    // web_fullstack 的骨架包/构建门禁/examples（「以撒复刻」类 IP 复刻需求即此误判实锤）。
+    // 归 web_fullstack 而非新增独立 game 类型：TemplateType 仅四值、游戏产物形态即 web 全栈，
+    // 复用骨架包/门禁零新增类型面；「复刻/重制」作强信号（IP 复刻几乎都指复刻游戏/软件）。
+    type: 'web_fullstack',
+    strength: 'strong',
+    pattern: /游戏|小游戏|贪吃蛇|扫雷|2048|俄罗斯方块|打砖块|飞机大战|跑酷|塔防|闯关|街机|像素风|复刻|重制/i,
+  },
+  {
     // 二期口径：AI 关键词暂归个人小工具（模板包 v1 仅三种；ai_app 类型值保留待二期模板）
     type: 'personal_tool',
     strength: 'weak',

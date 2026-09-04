@@ -35,6 +35,12 @@ describe('template-inference（P2 注入点①：PRD 12.2 关键词→类型）'
       // AI 关键词暂归个人小工具（模板包二期）
       ['调用 AI 做一个自动回复', 'personal_tool'],
       ['做一个智能问答助手', 'personal_tool'],
+      // P1-8：游戏/互动媒体类目归 web_fullstack（吃骨架包/构建门禁，不再兜底 personal_tool）
+      ['做一个贪吃蛇小游戏', 'web_fullstack'],
+      ['做个网页游戏，闯关玩法', 'web_fullstack'],
+      ['以撒复刻', 'web_fullstack'],
+      ['复刻一个扫雷', 'web_fullstack'],
+      ['做个 2048 游戏', 'web_fullstack'],
     ]
     for (const [text, expected] of cases) {
       it(`「${text}」→ ${expected}`, () => {

@@ -2,7 +2,7 @@ import type { Browser, Page } from 'playwright'
 import type { GwtTestResult, RunGwtInput } from './gwt-service'
 import { readLastSketchRequirements } from './project-service'
 import type { SketchRequirement } from './sketch-engine'
-import { requirementAssertions, requirementStory } from './sketch-engine'
+import { requirementAssertions, requirementStory, isPlaceholderAssertion } from './sketch-engine'
 import { parseBehaviorAssertion, describeEffect, type AssertionPlan } from './behavior-assertions'
 
 /**
@@ -69,18 +69,24 @@ export async function runBrowserGwt(input: RunGwtInput): Promise<GwtTestResult |
   }
 }
 
-/** 组装逐断言执行计划：每个功能项的每条 behavior_assertion 各成一个场景。 */
+/** 组装逐断言执行计划：每个功能项的每条「真实」behavior_assertion 各成一个场景。
+ *  P1-6：占位断言（「可见且可交互」类存在性泛化）不派生独立场景——同一功能项多条占位
+ *  断言派生的 presenceFallback 场景完全同构、纯冗余，虚增 total_count 制造「N/N 全绿」假象。
+ *  只保留真实行为断言；全部占位则保留一条最低档存在性回退（「至少有个入口」门槛仍在）。 */
 export function planScenarios(requirements: SketchRequirement[]): ScenarioPlan[] {
   const items = requirements.length
     ? requirements
     : [{ id: 'F-001', description: '核心功能页面可访问' }]
-  return items.flatMap((item) =>
-    requirementAssertions(item).map((assertion) => ({
+  return items.flatMap((item) => {
+    const assertions = requirementAssertions(item)
+    const real = assertions.filter((assertion) => !isPlaceholderAssertion(assertion))
+    const effective = real.length > 0 ? real : assertions.slice(0, 1)
+    return effective.map((assertion) => ({
       item,
       assertion,
       plan: parseBehaviorAssertion(assertion),
-    })),
-  )
+    }))
+  })
 }
 
 /** 场景名：`${itemId} ${assertion}`——judge 按此前缀对账运行证据。 */
@@ -246,9 +252,19 @@ async function runScenario(page: Page, scenario: ScenarioPlan): Promise<string |
 async function collectControlInventory(page: Page): Promise<string> {
   try {
     return await page.evaluate(() => {
+      // P0-1（2026-09-04）：探针视角清单只展示「真可见」控件——此前把 display:none 隐藏
+      // overlay 里的按钮（继续/放弃本局…）也列入可点击清单，F-005「点击暂停→菜单显示」
+      // 因此三连假失败（探针视角 69→69 恒不变，模型盲修 3 轮）。可见性判据与 capturePageState
+      // 的「可见元素计数」同口径：非零尺寸 + 非 hidden/none + 非零透明度。
+      const isVisible = (el: Element): boolean => {
+        const rect = el.getBoundingClientRect()
+        const style = window.getComputedStyle(el)
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) !== 0
+      }
       const clickables = Array.from(
         document.querySelectorAll<HTMLElement>('button, [role="button"], a, input[type="button"]'),
       )
+        .filter(isVisible)
         .map((el) => ((el.textContent ?? '').trim() || el.getAttribute('value') || '').trim())
         .filter(Boolean)
         .slice(0, 8)
@@ -312,8 +328,16 @@ async function dispatchTrigger(page: Page, trigger: AssertionPlan['trigger']): P
   }
   if (trigger.kind === 'click' && trigger.target) {
     const clicked = await page.evaluate((target) => {
+      // P0-1：点击匹配同样只认真可见控件——隐藏 overlay 的「继续/放弃」按钮不再抢跑命中，
+      // 保证「点击暂停」真正点到可见的暂停按钮（否则点中 display:none 控件 = 无效果 = 假失败）。
+      const isVisible = (el: Element): boolean => {
+        const rect = el.getBoundingClientRect()
+        const style = window.getComputedStyle(el)
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) !== 0
+      }
       const controls = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], input[type="button"], a, [class]'))
       const hit = controls.find((el) => {
+        if (!isVisible(el)) return false
         const text = (el.textContent ?? '').trim()
         const cls = typeof el.className === 'string' ? el.className : ''
         return (text.length > 0 && text.includes(target)) || cls.includes(target)
@@ -327,8 +351,14 @@ async function dispatchTrigger(page: Page, trigger: AssertionPlan['trigger']): P
   }
   if (trigger.kind === 'dblclick' && trigger.target) {
     const hit = await page.evaluate((target) => {
+      const isVisible = (el: Element): boolean => {
+        const rect = el.getBoundingClientRect()
+        const style = window.getComputedStyle(el)
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) !== 0
+      }
       const controls = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], a, li, tr, [class]'))
       const hit = controls.find((el) => {
+        if (!isVisible(el)) return false
         const text = (el.textContent ?? '').trim()
         const cls = typeof el.className === 'string' ? el.className : ''
         return (text.length > 0 && text.includes(target)) || cls.includes(target)
@@ -446,7 +476,15 @@ async function readRenderedText(page: Page): Promise<string> {
   return page.evaluate(() => (document.body ? document.body.innerText : ''))
 }
 
-/** 页面是否提供可交互控件（按钮/输入框/链接/表单等）。 */
+/** 页面是否提供可交互控件（按钮/输入框/链接/表单等）。P0-1：只认真可见控件，
+ *  隐藏 overlay 里的控件不计——避免「存在性兜底」被 display:none 的假控件骗过。 */
 async function hasInteractiveControl(page: Page): Promise<boolean> {
-  return page.evaluate(() => document.querySelector('button, input, select, textarea, a, form') !== null)
+  return page.evaluate(() => {
+    const isVisible = (el: Element): boolean => {
+      const rect = el.getBoundingClientRect()
+      const style = window.getComputedStyle(el)
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) !== 0
+    }
+    return Array.from(document.querySelectorAll('button, input, select, textarea, a, form')).some(isVisible)
+  })
 }

@@ -59,7 +59,7 @@ describe('startup reconcile (T1)', () => {
     return readFileSync(getAgentSessionPath(sessionId), 'utf8')
   }
 
-  it('testing 阶段中断但磁盘产物完整 → 收敛 ready，且注明质量门未跑完', async () => {
+  it('testing 阶段中断但磁盘产物完整 → 收敛 blocked_for_user_decision 交用户决策（P0-3）', async () => {
     const { projectId, sessionId } = setup()
     writeCompleteArtifact(findProject(projectId).root_path)
     updateProject(projectId, { current_stage: 'testing' })
@@ -67,12 +67,41 @@ describe('startup reconcile (T1)', () => {
     const outcomes = await reconcileInterruptedProjects()
 
     expect(outcomes).toHaveLength(1)
-    expect(outcomes[0]).toMatchObject({ project_id: projectId, from_stage: 'testing', to_stage: 'ready', action: 'disk_verified' })
-    expect(findProject(projectId).current_stage).toBe('ready')
+    expect(outcomes[0]).toMatchObject({ project_id: projectId, from_stage: 'testing', to_stage: 'blocked_for_user_decision', action: 'disk_verified' })
+    expect(findProject(projectId).current_stage).toBe('blocked_for_user_decision')
+    expect(findProject(projectId).blocked_action).toBe('test_repair')
     const text = readSessionText(sessionId)
     expect(text).toContain('[reconcile]')
     expect(text).toContain('被中断')
-    expect(text).toContain('不是质量结论')
+    expect(text).toContain('继续完成测试')
+  })
+
+  it('judge_review 阶段中断但磁盘产物完整 → 同样收敛 blocked_for_user_decision（P0-3）', async () => {
+    const { projectId, sessionId } = setup()
+    writeCompleteArtifact(findProject(projectId).root_path)
+    updateProject(projectId, { current_stage: 'judge_review' })
+
+    const outcomes = await reconcileInterruptedProjects()
+
+    expect(outcomes).toHaveLength(1)
+    expect(outcomes[0]).toMatchObject({ to_stage: 'blocked_for_user_decision' })
+    expect(findProject(projectId).current_stage).toBe('blocked_for_user_decision')
+    expect(findProject(projectId).blocked_action).toBe('test_repair')
+    expect(readSessionText(sessionId)).toContain('继续完成测试')
+  })
+
+  it('generating_mvp 阶段中断但磁盘产物完整 → 非质量门阶段，仍收敛 ready（P0-3 不改生成期）', async () => {
+    const { projectId, sessionId } = setup()
+    writeCompleteArtifact(findProject(projectId).root_path)
+    updateProject(projectId, { current_stage: 'generating_mvp' })
+
+    const outcomes = await reconcileInterruptedProjects()
+
+    expect(outcomes).toHaveLength(1)
+    expect(outcomes[0]).toMatchObject({ to_stage: 'ready' })
+    expect(findProject(projectId).current_stage).toBe('ready')
+    expect(findProject(projectId).blocked_action).toBeUndefined()
+    expect(readSessionText(sessionId)).toContain('已恢复为可用状态')
   })
 
   it('generating_mvp 中断、产物损坏但有健康快照 → 回滚快照后按证据收敛 sketch_ready', async () => {
