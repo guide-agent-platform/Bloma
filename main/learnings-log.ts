@@ -88,7 +88,13 @@ function readAllLearnings(projectId: string): ProjectLearning[] {
     for (const line of lines) {
       try {
         const parsed = JSON.parse(line) as ProjectLearning
-        if (parsed && typeof parsed.text === 'string' && parsed.text) records.push(parsed)
+        if (parsed && typeof parsed.text === 'string' && parsed.text) {
+          // P2-13（2026-09-04）：脏数据过滤——历史数据曾把模型原始工具调用输出误存为总结
+          // （text 含字面 <tool_calls>/<tool_use>），注入【历史经验】段会污染编程 agent 上下文。
+          // 读取时跳过（append-only 历史文件不动，读取侧兼容；不物理迁移）。
+          if (/<tool_(calls|use)>/.test(parsed.text)) continue
+          records.push(parsed)
+        }
       } catch {
         // 损坏行跳过
       }

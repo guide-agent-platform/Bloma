@@ -60,6 +60,25 @@ describe('learnings-log（执行经验沉淀）', () => {
     expect(recent.map((entry) => entry.text)).toEqual(['完好条目', '另一条完好'])
   })
 
+  it('P2-13：脏数据过滤——含字面 <tool_calls> 的 text 读取时跳过（不污染注入段）', () => {
+    const { projectId, path } = setup()
+    appendProjectLearning(projectId, { kind: 'note', text: '正常经验一条' })
+    // 历史脏数据：模型原始工具调用输出被误存为总结（text 含字面 <tool_calls>）
+    writeFileSync(
+      path,
+      JSON.stringify({
+        recorded_at: new Date().toISOString(),
+        kind: 'loop_summary',
+        text: '完成总结<tool_calls><tool_use name="write_file">{"path":"src/app.js"}</tool_use></tool_calls>后续',
+      }) + '\n',
+      { flag: 'a' },
+    )
+
+    const recent = readRecentLearnings(projectId, 10)
+    expect(recent.map((entry) => entry.text)).toEqual(['正常经验一条'])
+    expect(renderLearningsSection(projectId)).not.toContain('<tool_calls>')
+  })
+
   it('renderLearningsSection：无经验返回空串；有经验渲染注入段且单条截 120', () => {
     const { projectId } = setup()
     expect(renderLearningsSection(projectId)).toBe('')
