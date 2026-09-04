@@ -1150,7 +1150,7 @@ export interface DocumentSyncInput extends RequestEnvelope {
 
 export interface DocumentRef {
   document_id: string
-  type: 'prd' | 'user_story' | 'plantuml' | 'gwt_feature' | 'test_report' | 'changelog' | 'decisions'
+  type: 'prd' | 'user_story' | 'plantuml' | 'gwt_feature' | 'test_report' | 'changelog' | 'decisions' | 'plan'
   path: string
   status: 'draft' | 'synced' | 'stale' | 'confirmed'
 }

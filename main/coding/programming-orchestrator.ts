@@ -5,12 +5,13 @@ import type { AgentEvent, AgentLoopJudgeMetadata, AgentSendMessageInput, Channel
 import type { ThinkingLevel } from '../../shared/reasoning-profile'
 import { getAgentSessionPath, getDocumentsDir } from '../../storage/config-paths'
 import { appendJsonLine } from '../../storage/json-store'
-import { readPrdBackplane, readUxContractSketch, renamePrdProject, syncDocuments, updateRequirementStatus, writeSecurityScanDocument } from '../document-engine'
+import { readPrdBackplane, readUxContractSketch, renamePrdProject, syncDocuments, updateRequirementStatus, writePlanDocument, writeSecurityScanDocument } from '../document-engine'
 import { appendProjectLearning, renderLearningsSection } from '../learnings-log'
 import { createSnapshot, runSandbox, trackAnalytics } from '../platform-services'
 import { renderPackageJson, renderStaticServer, renderSkeletonToProject, scaffoldEnabled } from '../project-scaffold'
 import { runBuildGate, type BuildGateResult } from './build-gate'
 import { buildRepairTasks, resolveRepairBudget, runRepairLoop } from './repair-loop'
+import { generateLoopPlan, planLegEnabled, renderPlanInjection, renderPlanMarkdown, type LoopPlan } from './loop-planner'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../project-service'
 import { appendProjectMapToSystem, loadProjectMapBlock } from '../project-map'
 import { resolveChannelEnv } from '../runtime-fallback'
@@ -806,6 +807,75 @@ function prepareSkeletonBeforeLoop(
   }
 }
 
+/**
+ * P3 任务级契约 · plan 腿（2026-09-04）：loop 前单轮技术合同。
+ *
+ * - 开关 BLOMA_PLAN_LEG（缺省 quick=off / longterm=on，D7）；关闭/quick 缺省直接短路（零延迟）；
+ * - 任何失败 fail-open：generateLoopPlan 返回 null → plan_fallback 决策日志 + 现状注入
+ *   （注入字节级=现状）；plan.md 落盘/决策日志失败均不阻断（增强不是依赖）；
+ * - query/env 直取主 loop channel context（陷阱 23 口径：勿二次 resolve，随取随用）；
+ * - 修复轮不接 plan 腿（非目标：修复卡即 mini-plan，叠加是双重合同）。
+ */
+async function tryGenerateLoopPlanLeg(
+  input: MvpTaskInput,
+  loop: AgentLoopChannelContext,
+  backplane: PrdBackplane,
+  skeletonMap: string | null,
+): Promise<LoopPlan | null> {
+  if (!planLegEnabled(input.mode)) return null
+  const plan = await generateLoopPlan({
+    mode: input.mode,
+    backplane,
+    skeletonMap,
+    query: input.query!,
+    env: loop.env,
+    sessionId: input.session_id,
+    ...(loop.channel.provider_type !== undefined ? { providerType: loop.channel.provider_type } : {}),
+    ...(input.signal ? { signal: input.signal } : {}),
+  })
+  if (!plan) {
+    try {
+      recordDecision({
+        project_id: input.project_id,
+        session_id: input.session_id,
+        entry: {
+          type: 'plan_fallback',
+          title: '技术合同未生成，回退无合同现状',
+          why: 'plan 腿单轮调用未产出可解析计划（渠道/LLM/解析/校验失败）——fail-open 回退现状注入，不阻断 MVP 生成',
+        },
+      })
+    } catch {
+      // 决策日志失败不阻断主链路
+    }
+    return null
+  }
+  // plan.md 落盘（人读/快照回看；D1：loop 消费内存对象，双消费同一对象）
+  try {
+    writePlanDocument(input.project_id, renderPlanMarkdown(plan))
+  } catch {
+    // 落盘失败不阻断注入（合同已在内存，注入照常）
+  }
+  try {
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'plan_generated',
+        title: '技术合同已生成（plan 腿）',
+        why: `loop 前单轮规划产出参考合同：${plan.filesToTouch.length} 个目标文件、${plan.reuse.length} 个复用点、${plan.verification.length} 条验证口径；注入 system 供参考（参考合同：偏离需在旁白说明）`,
+        detail: {
+          files: plan.filesToTouch.map((file) => file.path),
+          reuse: plan.reuse.map((entry) => entry.from),
+          risks: plan.risks,
+        },
+      },
+    })
+  } catch {
+    // 静默
+  }
+  return plan
+}
+
 async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelContext, snapshotKind: SnapshotKind = 'mvp'): Promise<MvpTaskResult> {
   const project = findProject(input.project_id)
   const backplane = readPrdBackplane(input.project_id)
@@ -813,6 +883,14 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   const startedAt = Date.now()
   // PR-1 骨架先行：渲染成功后骨架地图随 system prompt 常驻（事实与注入同源）
   const { map: skeletonMap, skeleton } = prepareSkeletonBeforeLoop(input, backplane, project)
+  // P3 plan 腿：loop 前单轮技术合同（D2 参考合同：偏离旁白说明，不硬拦截）；
+  // 失败/关闭 fail-open 回退现状（planInjection 为 null 时拼接函数字节级=现状）
+  const loopPlan = await tryGenerateLoopPlanLeg(input, loop, backplane, skeletonMap)
+  const planInjection = loopPlan ? renderPlanInjection(loopPlan) : null
+  const buildSystemWithPlan = (fmt: 'diff' | 'whole'): string => {
+    const base = buildLoopSystemWithOverride(backplane, fmt, input.project_id, skeletonMap)
+    return planInjection ? `${base}\n\n${planInjection}` : base
+  }
   // 委派协作（嫁接方案 §4.1）：注册父 loop 上下文供 delegate_agent 构建子循环；子工具集按 role 裁剪
   setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
   registerParentLoopContext(input.session_id, {
@@ -823,7 +901,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     delegationMaxTurns: DELEGATION_MAX_TURNS,
     permissionMode: AUTOMATED_PERMISSION_MODE,
     temperature: categoryTemperature('mvp'),
-    system: buildLoopSystemWithOverride(backplane, editFormat, input.project_id, skeletonMap),
+    system: buildSystemWithPlan(editFormat),
     editFormat,
     providerType: loop.channel.provider_type,
     publish: (type, payload) => publish(input, type, payload),
@@ -864,7 +942,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   let result: AgentLoopResult
   try {
     result = await runAgentLoop({
-    system: buildLoopSystemWithOverride(backplane, editFormat, input.project_id, skeletonMap),
+    system: buildSystemWithPlan(editFormat),
     task: buildAgentLoopTask(backplane, input.mode),
     // toolBudget 首个生产接线（闭环 PR5）：web_research 每次都 fork 调研子代理，
     // 限 4 次防长 loop 无节制外呼；超限走既有 budgetExhausted 软着陆

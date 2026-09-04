@@ -198,6 +198,35 @@ export function writeSecurityScanDocument(projectId: string, markdown: string): 
 }
 
 /**
+ * P3 任务级三文档契约（2026-09-04）：plan 腿产出的技术合同写盘 + 清单登记。
+ *
+ * - 文件 documents/{project_id}/plan.md（markdown 人读全文由 loop-planner 渲染）；
+ * - 幂等登记（按 path 去重，同 security-scan 口径）：重跑时覆盖重写文件、清单条目不翻新
+ *   ——plan 按 checkpoint 语义重写是合理行为（实施稿 §9：每次 loop 前合同都是新鲜的）；
+ * - 不走 checkpoint switch：plan 生命周期独立于 13 阶段检查点；
+ * - syncDocuments 的 stale 标记只作用于自身产出路径，plan.md 不会被后续检查点误清。
+ */
+export function writePlanDocument(projectId: string, markdown: string): DocumentRef | null {
+  try {
+    const project = findProject(projectId)
+    const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+    const path = join(dir, 'plan.md')
+    writeFileSync(path, markdown, 'utf8')
+    const previous = readManifest(dir)
+    if (!previous.some((entry) => entry.path === path)) {
+      writeManifest(dir, [
+        ...previous,
+        { document_id: 'plan', path, type: 'plan', checkpoint: 'plan', status: 'synced' },
+      ])
+    }
+    return { document_id: 'plan', type: 'plan', path, status: 'synced' }
+  } catch {
+    return null
+  }
+}
+
+/**
  * 把 decision-log 直写的 decisions.md 登记进文档清单（幂等，按 path 去重），
  * 使文档面板（document:list）能看到并读取它。syncDocuments 重建清单时
  * decisions.md 不与其产出路径重叠，条目会作为 untouched 一直保留。

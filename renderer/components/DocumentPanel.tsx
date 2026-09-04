@@ -11,6 +11,7 @@ const TYPE_LABEL_MAP: Record<DocumentRef['type'], string> = {
   test_report: '测试报告',
   changelog: '变更记录',
   decisions: '决策日志',
+  plan: '技术合同',
 }
 
 /** 从绝对路径取文件名（跨平台） */

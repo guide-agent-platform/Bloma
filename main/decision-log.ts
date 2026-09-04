@@ -60,6 +60,8 @@ export type DecisionType =
   | 'repair_round_started'
   | 'repair_round_completed'
   | 'repair_budget_exhausted'
+  | 'plan_generated'
+  | 'plan_fallback'
 
 export interface DecisionEntry {
   type: DecisionType
