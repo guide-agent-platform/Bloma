@@ -18,6 +18,7 @@ import {
   sessionUsageFamily,
 } from './atoms'
 import type { AgentMessage, AgentStreamState, PastedImageRef, ProjectMode } from './atoms'
+import { collapseRepetitiveText } from '../stream-collapse'
 import { hasUsableChannelsAtom, chatInputDraftAtom } from './atoms-sprint2'
 import { extractPastedImages, extFromMime, toBase64DataUrl } from '../lib/paste-extract'
 
@@ -645,10 +646,13 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
 
-  const text = message.content
+  const rawText = message.content
     .filter((block) => block.type === 'text')
     .map((block) => block.text ?? '')
     .join('')
+  // 退行重复折叠（2026-09-04「查。」墙案）：显示层折叠，落盘/回放数据保留原始；
+  // system 前缀行（[decision]/[queue-dropped] 等按前缀分流）不折叠
+  const text = isSystem ? rawText : collapseRepetitiveText(rawText)
 
   // Agent Loop 落盘的轮次：assistant 轮带 tool_use、user 轮只带 tool_result（无文本）
   const hasToolBlocks = message.content.some((block) => block.type === 'tool_use' || block.type === 'tool_result')

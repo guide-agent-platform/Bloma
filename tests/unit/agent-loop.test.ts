@@ -222,6 +222,52 @@ describe('runAgentLoop（PR2 L1）', () => {
     expect(modelCalls).toBeLessThan(3)
   })
 
+  it('流式中途取消：半截旁白如实落盘取证，且不含悬空 tool_use（2026-09-04「查。」墙案）', async () => {
+    const controller = new AbortController()
+    // 模拟退行重复：正常增量后用户在流中取消，query 抛 AGENT_CANCELLED
+    const query: SDKQuery = async function* () {
+      yield textMessage('看 hidden。读。')
+      yield textMessage('查。查。查。查。查。')
+      controller.abort(new Error('AGENT_CANCELLED: user'))
+      throw new Error('AGENT_CANCELLED: user')
+    }
+    const result = await runAgentLoop(
+      baseInput({ query, signal: controller.signal, sessionId: 'session-cancel-partial' }),
+    )
+    expect(result.status).toBe('cancelled')
+
+    // 取证：半截文本进了 JSONL（此前该轮整体丢弃→「事后考察不到」）
+    const messages = readSessionJsonl('session-cancel-partial')
+    const partial = messages.find((message) => message.role === 'assistant')
+    expect(partial).toBeDefined()
+    const partialText = (partial!.content[0] as { text?: string }).text ?? ''
+    expect(partialText).toContain('看 hidden。读。')
+    expect(partialText).toContain('查。查。查。查。查。')
+    // 可重放面不进残局：无悬空 tool_use（无 tool_result 配对的一律不落）
+    expect(messages.some((message) => message.content.some((block) => block.type === 'tool_use'))).toBe(false)
+  })
+
+  it('流式中途取消且已有 tool_use 到达：仍只落 text 块（tool_use 剔除防重放 400）', async () => {
+    const controller = new AbortController()
+    const query: SDKQuery = async function* () {
+      yield textMessage('我先看一眼文件。')
+      yield toolUseMessage('t1', 'read_file', { path: 'index.html' })
+      yield textMessage('再补充一点说明')
+      controller.abort(new Error('AGENT_CANCELLED: user'))
+      throw new Error('AGENT_CANCELLED: user')
+    }
+    await runAgentLoop(
+      baseInput({ query, signal: controller.signal, sessionId: 'session-cancel-tooluse' }),
+    )
+    const messages = readSessionJsonl('session-cancel-tooluse')
+    const partial = messages.find((message) => message.role === 'assistant')!
+    // 两段文本都在（tool_use 前的已 flush 进 blocks + 取消后拼盘的 pending）
+    const joined = partial.content.map((block) => (block as { text?: string }).text ?? '').join('')
+    expect(joined).toContain('我先看一眼文件。')
+    expect(joined).toContain('再补充一点说明')
+    expect(partial.content.some((block) => block.type === 'tool_use')).toBe(false)
+  })
+
   it('JSONL 落盘：assistant tool_use 轮 + user tool_result 轮；单条 tool_result 超 4KB 截断', async () => {
     const big = tool('big', () => ({ output: 'x'.repeat(5000) }))
     const { query } = scriptedQuery([[toolUseMessage('t1', 'big')], [textMessage('完成')]])

@@ -20,8 +20,10 @@ import { windowMessagesWithDigest } from '../compacting-window'
  *   user 消息返回——并发提交不完整批次会触发 400 invalid_request_error。
  * - 工具异常不崩循环：任何执行错误转 is_error tool_result 回给模型自纠，
  *   AutoGPT 式死循环由预算/轮次兜底。
- * - 取消中断后 tool_result 缺席的残局：取消即终止 loop，不再发起下一次模型调用，
- *   会话 JSONL 停在最后一条完整轮次上（API 侧无残局可续）。
+ * - 取消中断后的残局：取消即终止 loop，不再发起下一次模型调用；流式中途取消时
+ *   已累积的半截 assistant 文本（不含悬空 tool_use）会如实落盘取证（2026-09-04
+ *   「查。」墙案：退行重复只在流中可见、事后考察不到的问题由此消除）；可重放的
+ *   历史面不进残局（tool_use 无 tool_result 配对的一律不落）。
  */
 
 // =========================================================================
@@ -506,7 +508,23 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       }
       flushTextRun()
     } catch (error) {
-      if (isLoopCancelled(error, input.signal)) return attachUsage(loopCancelled(turns, finalText, toolCalls))
+      if (isLoopCancelled(error, input.signal)) {
+        // 取消取证落盘（2026-09-04 ddee1f39「查。」墙案）：流中半截输出如实落 JSONL，
+        // 「事后考察不到」从此可查。只保留 text 块——已到的 tool_use 无 tool_result
+        // 配对，带着落盘会让恢复/续跑重放历史时 400（可重放面不进残局）；取消后
+        // 不再 emitText 追发 UI 增量。落盘失败静默，不影响取消语义。
+        try {
+          const partial = [...textParts, ...cleaner.end()].join('')
+          const textBlocks = assistantBlocks.filter((block) => block.type === 'text')
+          const blocks: MessageContentBlock[] = partial
+            ? [...textBlocks, { type: 'text', text: partial }]
+            : [...textBlocks]
+          if (blocks.length > 0) appendLoopMessage(input.sessionId, 'assistant', blocks)
+        } catch {
+          // 取证落盘失败静默（取消语义优先）
+        }
+        return attachUsage(loopCancelled(turns, finalText, toolCalls))
+      }
       throw error
     }
     if (usage) {
