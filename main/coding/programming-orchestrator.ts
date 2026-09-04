@@ -1687,6 +1687,27 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
       },
     },
   })
+  // 埋点（P2 PR-D）：修复前后 failed_count 对比进 payload，供收敛率统计（与决策日志
+  // 同名不同体系，对齐 agent_loop_completed 风格；P1 蒸馏触发条件同源受益）
+  trackAnalytics({
+    request_id: input.request_id,
+    event: {
+      event_type: 'repair_round_completed',
+      project_id: input.project_id,
+      session_id: input.session_id,
+      payload: {
+        round,
+        converged,
+        failed_before: testResult.failed_count,
+        failed_after: retested.failed_count,
+        total_count: retested.total_count,
+        mode: input.mode,
+        via: 'post_testing',
+        ...(buildGateAfter ? { build_gate_after: buildGateAfter.status } : {}),
+      },
+      privacy_level: 'research_safe',
+    },
+  })
   return retested
 }
 
@@ -1784,6 +1805,22 @@ async function runBlockedTestRepair(input: {
       title: '定向修复轮完成（继续修），重新终验',
       why: `第 ${round} 轮修复完成（${result.loopResult?.turns ?? 0} 轮 / ${result.loopResult?.toolCalls.length ?? 0} 次工具调用），产物已更新，重走终验门禁判定收敛`,
       detail: { round, via: 'blocked_resume', loop_status: result.loopResult?.status, failed_snapshot: lastReport.failed_count },
+    },
+  })
+  trackAnalytics({
+    request_id: input.request_id,
+    event: {
+      event_type: 'repair_round_completed',
+      project_id: input.project_id,
+      session_id: input.session_id,
+      payload: {
+        round,
+        converged: false, // 入口 B 修复完成但收敛判定交给后续终验，此处只标记阶段
+        failed_snapshot: lastReport.failed_count,
+        mode: input.mode,
+        via: 'blocked_resume',
+      },
+      privacy_level: 'research_safe',
     },
   })
 }

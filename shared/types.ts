@@ -1198,6 +1198,7 @@ export interface AnalyticsTrackInput extends RequestEnvelope {
       | 'mode_upgraded'
       | 'programming_execution'
       | 'self_repair_triggered'
+      | 'repair_round_completed'
       | 'agent_loop_turn'
       | 'agent_loop_completed'
       | 'judge_verdict'
