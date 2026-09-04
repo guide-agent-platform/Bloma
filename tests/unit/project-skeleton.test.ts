@@ -65,6 +65,17 @@ describe('project-skeleton（PR-1：骨架包 + 渲染 + 注入⑥骨架地图�
       expect(loadSkeletonTemplate('ai_app')).toBeNull()
     })
 
+    it('P1-9：game 复用 web_fullstack 骨架（type 修正为 game、files 与 web_fullstack 同源）', () => {
+      const game = loadSkeletonTemplate('game')
+      const web = loadSkeletonTemplate('web_fullstack')
+      expect(game).not.toBeNull()
+      expect(game!.type).toBe('game')
+      expect(web).not.toBeNull()
+      // 骨架文件清单与 web_fullstack 同源（复用，非独立骨架包）
+      expect(game!.files.map((f) => f.path)).toEqual(web!.files.map((f) => f.path))
+      expect(game!.source).toBe('builtin')
+    })
+
     it('manifest 与骨架目录同源：目录实际文件（除 manifest.json）全部在 manifest 清单内', () => {
       const skeleton = loadSkeletonTemplate('web_fullstack')!
       const declared = new Set(skeleton.files.map((entry) => entry.path))

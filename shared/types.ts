@@ -180,7 +180,7 @@ export type ProviderType =
   | 'xiaomi'
   | 'xiaomi-token-plan'
   | 'custom'
-export type TemplateType = 'web_fullstack' | 'desktop_tool' | 'personal_tool' | 'ai_app'
+export type TemplateType = 'web_fullstack' | 'desktop_tool' | 'personal_tool' | 'game' | 'ai_app'
 /** 硬约束等级（PRD 12.4 三档；严格=二期）。与 TemplateType 正交（方案 §二维度二/三）。 */
 export type ConstraintLevel = 'loose' | 'standard' | 'strict'
 export type PermissionDecision = 'allow' | 'deny'

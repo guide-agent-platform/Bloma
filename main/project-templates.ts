@@ -29,6 +29,7 @@ const TEMPLATE_FILES: Record<TemplateType, string> = {
   web_fullstack: 'web-fullstack.md',
   desktop_tool: 'desktop-tool.md',
   personal_tool: 'personal-tool.md',
+  game: 'game.md',
   ai_app: 'ai-app.md', // 二期（模板包 v1 不含，读取时回退 personal-tool 内置）
 }
 
@@ -54,7 +55,7 @@ interface TemplateFrontmatter {
 }
 
 const VALID_LEVELS = new Set<ConstraintLevel>(['loose', 'standard', 'strict'])
-const VALID_TYPES = new Set<TemplateType>(['web_fullstack', 'desktop_tool', 'personal_tool', 'ai_app'])
+const VALID_TYPES = new Set<TemplateType>(['web_fullstack', 'desktop_tool', 'personal_tool', 'game', 'ai_app'])
 
 /** 解析 frontmatter（--- 包围的首块；key: value 行集合，version 转 number）。 */
 function parseFrontmatter(text: string): { frontmatter: TemplateFrontmatter; body: string } | null {
@@ -208,9 +209,15 @@ export interface ProjectSkeleton {
   source: 'builtin' | 'override' | 'builtin_fallback'
 }
 
-/** v1 仅 web_fullstack 提供骨架包（单类型验证）；其余类型无骨架 = 现状从零写。 */
+/** v1 仅 web_fullstack 提供骨架包（单类型验证）；game 复用 web_fullstack 骨架（产物形态同为 web 全栈）；其余类型无骨架 = 现状从零写。 */
 const SKELETON_DIRS: Partial<Record<TemplateType, string>> = {
   web_fullstack: 'web-fullstack',
+  game: 'web-fullstack',
+}
+
+/** 骨架校验类型：game 复用 web_fullstack 骨架，manifest.type 是 web_fullstack，校验时按 web_fullstack。 */
+function skeletonValidateType(type: TemplateType): TemplateType {
+  return type === 'game' ? 'web_fullstack' : type
 }
 
 /** 骨架文件后缀白名单（与 agent-tools WRITABLE_EXTENSIONS 同集：静态前端产物）。 */
@@ -283,15 +290,19 @@ export function loadSkeletonTemplate(
 ): ProjectSkeleton | null {
   const dirName = SKELETON_DIRS[type]
   if (!dirName) return null
+  // game 复用 web_fullstack 骨架：manifest.type 是 web_fullstack，校验类型单独映射（skeletonValidateType）；
+  // 返回时 type 修正为传入 type（game），保持调用方看到的 skeleton.type 与项目类型一致。
+  const validateType = skeletonValidateType(type)
   const ownDir = dirname(fileURLToPath(import.meta.url))
   const builtinDir = join(ownDir, 'templates', 'skeletons', dirName)
-  const builtin = readSkeletonDir(builtinDir, type)
+  const builtinRaw = readSkeletonDir(builtinDir, validateType)
+  const builtin = builtinRaw ? { ...builtinRaw, type } : null
 
   try {
     const overrideDir = getSkeletonDirPath(dirName)
     if (!existsSync(join(overrideDir, 'manifest.json'))) return builtin
-    const override = readSkeletonDir(overrideDir, type)
-    if (override) return { ...override, source: 'override' }
+    const overrideRaw = readSkeletonDir(overrideDir, validateType)
+    if (overrideRaw) return { ...overrideRaw, type, source: 'override' }
     try {
       recordDecision({
         project_id: logContext?.project_id ?? '',

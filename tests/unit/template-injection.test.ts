@@ -235,5 +235,18 @@ describe('template-injection（P5：注入点开关与切片）', () => {
       const features = renderGwtSkeleton(makeBackplane(), 'quick')
       expect(features[0].content).toContain('Scenario:')
     })
+
+    it('P1-9：game 类型必测类别差异化（状态机/碰撞/胜负边界，替代边界/异常输入）', () => {
+      expect(gwtRequiredCategories('quick', 'standard', 'game')).toEqual(['主路径(P0)', '状态机', '碰撞', '胜负边界'])
+      const bp = makeBackplane()
+      bp.template_meta = { type: 'game', level: 'standard', version: 1 }
+      bp.requirements = [{ id: 'F-001', description: '贪吃蛇', priority: 'P0', behavior_assertions: ['点击暂停→菜单显示'] }]
+      const content = renderGwtSkeleton(bp, 'quick')[0].content
+      expect(content).toContain('状态机')
+      expect(content).toContain('碰撞')
+      expect(content).toContain('胜负边界')
+      expect(content).not.toContain('Scenario: 边界输入不崩溃')
+      expect(content).not.toContain('Scenario: 异常输入不崩溃')
+    })
   })
 })

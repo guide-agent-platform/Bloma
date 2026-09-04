@@ -18,7 +18,7 @@ vi.mock('../../main/decision-log', () => ({
 
 import { recordDecision } from '../../main/decision-log'
 
-const ALL_TYPES: TemplateType[] = ['web_fullstack', 'desktop_tool', 'personal_tool']
+const ALL_TYPES: TemplateType[] = ['web_fullstack', 'desktop_tool', 'personal_tool', 'game']
 
 describe('project-templates（P4：模板包 + 内外置加载 fail-closed）', () => {
   const originalPromaHome = process.env.PROMA_HOME
@@ -44,11 +44,12 @@ describe('project-templates（P4：模板包 + 内外置加载 fail-closed）', 
       expect(template!.source).toBe('builtin')
     })
 
-    it('等级映射符合 PRD 12.3：personal=loose，web/desktop=standard', () => {
+    it('等级映射符合 PRD 12.3：personal=loose，web/desktop/game=standard', () => {
       process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'proma-tpl-'))
       expect(loadProjectTemplate('personal_tool')?.level).toBe('loose')
       expect(loadProjectTemplate('web_fullstack')?.level).toBe('standard')
       expect(loadProjectTemplate('desktop_tool')?.level).toBe('standard')
+      expect(loadProjectTemplate('game')?.level).toBe('standard')
     })
 
     it('sample 硬截断 ≤800 字符（500 token few-shot 配额）', () => {

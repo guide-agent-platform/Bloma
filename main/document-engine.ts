@@ -7,6 +7,7 @@ import type {
   DocumentSyncInput,
   DocumentSyncResult,
   Project,
+  TemplateType,
 } from '../shared/types'
 import { getDocumentsDir } from '../storage/config-paths'
 import { findProject, readLastSketchRequirements } from './project-service'
@@ -919,16 +920,17 @@ export function renderGwtSkeleton(
   /** 注入点⑦（周计划 §6）：模式与等级（必测类别清单路由）；缺省不标注（现状） */
   mode?: import('../shared/types').ProjectMode,
 ): Array<{ fileName: string; content: string }> {
+  const templateType = backplane.template_meta?.type
   const requiredCategories =
     mode && isInjectionEnabled('gwt')
-      ? gwtRequiredCategories(mode, backplane.template_meta?.level === 'loose' ? 'loose' : 'standard')
+      ? gwtRequiredCategories(mode, backplane.template_meta?.level === 'loose' ? 'loose' : 'standard', templateType)
       : []
   return readRequirements(backplane.requirements).map((item) => {
     const id = safeFileName(item.id)
     const acceptance = backplane.acceptance[item.id] ?? `${item.description}：核心路径可交互，边界与异常输入不崩溃。`
     return {
       fileName: `${id}.feature`,
-      content: renderFeatureFile(item, acceptance, requiredCategories),
+      content: renderFeatureFile(item, acceptance, requiredCategories, templateType),
     }
   })
 }
@@ -940,7 +942,7 @@ function categoryTagOf(kind: import('./ears-vocabulary').EarsPatternKind): strin
   return '[主路径]'
 }
 
-function renderFeatureFile(item: SketchRequirement, acceptance: string, requiredCategories: string[] = []): string {
+function renderFeatureFile(item: SketchRequirement, acceptance: string, requiredCategories: string[] = [], type?: TemplateType): string {
   const title = shortTitle(item.description)
   const categoryHeader = requiredCategories.length
     ? `
@@ -969,22 +971,7 @@ function renderFeatureFile(item: SketchRequirement, acceptance: string, required
       ].join('\n'))
     }
   }
-  scenarios.push(
-    [
-      `  Scenario: 边界输入不崩溃`,
-      `    Given 已进入 ${title} 功能页面`,
-      `    When 我输入边界值`,
-      `    Then 页面不崩溃并给出可理解的反馈`,
-    ].join('\n'),
-  )
-  scenarios.push(
-    [
-      `  Scenario: 异常输入不崩溃`,
-      `    Given 已进入 ${title} 功能页面`,
-      `    When 我输入异常内容`,
-      `    Then 页面不崩溃并给出可理解的反馈`,
-    ].join('\n'),
-  )
+  scenarios.push(...robustnessScenarios(title, type))
   return `# GWT 骨架（由 DocumentEngine 生成，场景从行为断言派生，GWTTestRunner 执行）
 Feature: ${title}${categoryHeader}
 
@@ -996,6 +983,49 @@ ${scenarios.join('\n\n')}
 
   # 验收要点：${acceptance}
 `
+}
+
+/**
+ * 鲁棒性兜底场景（P1-9，2026-09-04）：game 换成玩法边界（状态机/碰撞/胜负），
+ * 非 game 保持边界/异常输入——「边界输入不崩溃/异常输入不崩溃」对游戏是空转场景。
+ */
+function robustnessScenarios(title: string, type: TemplateType | undefined): string[] {
+  if (type === 'game') {
+    return [
+      [
+        `  Scenario: 状态机切换不卡死`,
+        `    Given 已进入 ${title} 功能页面`,
+        `    When 我在主菜单 / 进行中 / 暂停 / 结束之间切换`,
+        `    Then 状态切换正确且不卡死`,
+      ].join('\n'),
+      [
+        `  Scenario: 碰撞反馈正确`,
+        `    Given 已进入 ${title} 功能页面`,
+        `    When 发生碰撞`,
+        `    Then 正确得分或扣血且无异常`,
+      ].join('\n'),
+      [
+        `  Scenario: 胜负边界判定正确`,
+        `    Given 已进入 ${title} 功能页面`,
+        `    When 生命归零或分数达标`,
+        `    Then 进入对应结局并显示结算`,
+      ].join('\n'),
+    ]
+  }
+  return [
+    [
+      `  Scenario: 边界输入不崩溃`,
+      `    Given 已进入 ${title} 功能页面`,
+      `    When 我输入边界值`,
+      `    Then 页面不崩溃并给出可理解的反馈`,
+    ].join('\n'),
+    [
+      `  Scenario: 异常输入不崩溃`,
+      `    Given 已进入 ${title} 功能页面`,
+      `    When 我输入异常内容`,
+      `    Then 页面不崩溃并给出可理解的反馈`,
+    ].join('\n'),
+  ]
 }
 
 function safeFileName(value: string): string {

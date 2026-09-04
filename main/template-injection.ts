@@ -165,9 +165,15 @@ export function buildSkeletonMapInjection(
 /**
  * 注入点⑦：GWT 必测类别（quick=P0 主路径；longterm=+边界/空态/异常）。
  * 消费方：document-engine renderGwtSkeleton（feature 文件头部标注）+ P6 judge。
+ * P1-9（2026-09-04）：game 类型差异化——「边界输入/异常输入」对游戏是空转场景，
+ * 换成状态机/碰撞/胜负边界（玩法才是游戏的验证面）。
  */
-export function gwtRequiredCategories(mode: ProjectMode, level: 'loose' | 'standard'): string[] {
+export function gwtRequiredCategories(mode: ProjectMode, level: 'loose' | 'standard', type?: TemplateType): string[] {
   if (!isInjectionEnabled('gwt')) return []
+  if (type === 'game') {
+    const game = ['主路径(P0)', '状态机', '碰撞', '胜负边界']
+    return mode === 'longterm' ? [...game, '空态'] : game
+  }
   const base = ['主路径(P0)']
   if (mode === 'longterm' || level === 'standard') return [...base, '边界', '空态', '异常']
   return [...base, '边界', '异常']
