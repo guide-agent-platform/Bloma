@@ -8,7 +8,7 @@
  * 兼容：sketch-engine.ts 对本模块全量 re-export，既有 import 零改动；
  * 新代码请直接 from './model/prd-backplane'。
  */
-import type { ConstraintLevel, TemplateType } from '../../shared/types'
+import type { ConstraintLevel, ProjectMode, TemplateType } from '../../shared/types'
 
 /** 章节标识（章节 schema 的 id 集；schema 定义在 prd-sections.ts，类型真相源在此随背板维护）。 */
 export type PrdSectionId =
@@ -133,6 +133,56 @@ export function requirementAssertions(item: SketchRequirement): string[] {
 /** 优先级读取：缺省 F-001（主题锚点）= P0、其余 P2（不触发 P0 门禁，保守兼容）。 */
 export function requirementPriority(item: SketchRequirement): 'P0' | 'P1' | 'P2' {
   return item.priority ?? (item.id === 'F-001' ? 'P0' : 'P2')
+}
+
+// ---------------------------------------------------------------------------
+// P3 迭代分级锚定（2026-09-04）：renderBackplaneAnchor + focusAnchorEnabled
+// ---------------------------------------------------------------------------
+
+/** 分级锚定总开关：BLOMA_FOCUS_ANCHOR——'0'=强制关；'1'=强制开；未设按模式缺省
+ * longterm=on / quick=off（D7 连锁：quick 延迟敏感不分级，防漂移锦优先）。 */
+export function focusAnchorEnabled(mode: ProjectMode): boolean {
+  const raw = (process.env.BLOMA_FOCUS_ANCHOR ?? '').trim().toLowerCase()
+  if (raw === '0' || raw === 'off' || raw === 'false') return false
+  if (raw === '1' || raw === 'on' || raw === 'true') return true
+  return mode === 'longterm'
+}
+
+/** 单条功能项的全文渲染（现状口径：故事+断言+范围排除+执行状态）——与 2026-09-04 前
+ * buildAgentLoopSystemPrompt 内联渲染逐字同源；抽至模型层供分级与全量两路共用。 */
+function renderRequirementFull(item: SketchRequirement): string {
+  const assertions = requirementAssertions(item)
+    .map((assertion) => `    - ${assertion}`)
+    .join('\n')
+  return (
+    `- [${item.id}]（${requirementPriority(item)}）${requirementStory(item)}` +
+    (assertions ? `\n  行为断言：\n${assertions}` : '') +
+    (item.scope_notes ? `\n  范围排除：${item.scope_notes}` : '') +
+    (item.status ? `\n  执行状态：${requirementStatusLabel(item.status)}` : '')
+  )
+}
+
+/** 未聚焦项的一行摘要（D3：只减细节不减锚——id+故事+优先级+断言计数保留，
+ * loop 知道「还有这些东西」可主动自取；断言细节折叠，探针执行面不受影响）。 */
+function renderRequirementSummary(item: SketchRequirement): string {
+  const assertionCount = requirementAssertions(item).length
+  const statusSuffix = item.status ? `，${requirementStatusLabel(item.status)}` : ''
+  return `- [${item.id}]（${requirementPriority(item)}）${requirementStory(item)}（断言 ${assertionCount} 条${statusSuffix}）——本轮未聚焦：保持现状勿重做，细节可 read prd.json 自取`
+}
+
+/**
+ * 背板功能项清单渲染（P3 分级锚定，R1 口径：背板渲染归模型层）：
+ *
+ * - focus 为空/undefined：全量全文渲染——与既有 buildAgentLoopSystemPrompt 内联渲染
+ *   逐字一致（字节级等价现状，回归锁锁定）；
+ * - focus 非空：命中项全文（描述+断言+优先级），其余项一行摘要（id+故事+优先级+断言
+ *   计数）——只减细节不减锚（D3）；P0 断言只裁注入不裁探针执行面（run_gwt_tests 仍跑全量）。
+ */
+export function renderBackplaneAnchor(backplane: PrdBackplane, focus?: string[]): string {
+  const focusSet = focus && focus.length > 0 ? new Set(focus) : undefined
+  return backplane.requirements
+    .map((item) => (focusSet ? (focusSet.has(item.id) ? renderRequirementFull(item) : renderRequirementSummary(item)) : renderRequirementFull(item)))
+    .join('\n')
 }
 
 // ---------------------------------------------------------------------------

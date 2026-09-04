@@ -17,6 +17,7 @@ import { appendProjectMapToSystem, loadProjectMapBlock } from '../project-map'
 import { resolveChannelEnv } from '../runtime-fallback'
 import { loadSkeletonTemplate, type ProjectSkeleton } from '../project-templates'
 import { buildLoopInjection, buildSkeletonMapInjection } from '../template-injection'
+import { focusAnchorEnabled, renderBackplaneAnchor } from '../model/prd-backplane'
 import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
 import { distillProjectMemorySafely } from '../memory-distiller'
 import { generateSketch, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from '../sketch-engine'
@@ -110,6 +111,9 @@ export interface MvpTaskInput {
   query?: SDKQuery
   /** 停止生成信号（U5：迭代/生成期间点停止，abort 后中止 LLM 生成） */
   signal?: AbortSignal
+  /** P3 迭代分级锚定：本轮聚焦的功能项 id（normalizer reviseId / append 新项 id）；
+ *  仅迭代路径传入，生成路径缺省=全量锚定现状。受 BLOMA_FOCUS_ANCHOR 开关门控。 */
+  focusRequirementIds?: string[]
 }
 
 export interface MvpTaskResult {
@@ -755,7 +759,7 @@ function prepareSkeletonBeforeLoop(
   input: MvpTaskInput,
   backplane: PrdBackplane,
   project: Project,
-): { map: string | null; skeleton: ProjectSkeleton | null } {
+): { map: string | null; skeleton: ProjectSkeleton | null; rendered?: { written: string[]; skipped: string[] } } {
   if (!scaffoldEnabled()) return { map: null, skeleton: null }
   const templateType = backplane.template_meta?.type ?? 'personal_tool'
   let skeleton: ProjectSkeleton | null = null
@@ -787,7 +791,7 @@ function prepareSkeletonBeforeLoop(
     } catch {
       // 决策日志失败不影响骨架生效
     }
-    return { map: buildSkeletonMapInjection(skeleton, rendered), skeleton }
+    return { map: buildSkeletonMapInjection(skeleton, rendered), skeleton, rendered }
   } catch (err) {
     try {
       recordDecision({
@@ -805,6 +809,15 @@ function prepareSkeletonBeforeLoop(
     }
     return { map: null, skeleton: null }
   }
+}
+
+/** P3 分级锚定解析：focusRequirementIds 非空且开关开（BLOMA_FOCUS_ANCHOR 缺省
+ * longterm=on / quick=off，D7 连锁）才生效；否则 undefined=全量锚定现状。 */
+function resolveFocusAnchor(input: MvpTaskInput): string[] | undefined {
+  const ids = input.focusRequirementIds
+  if (!ids || ids.length === 0) return undefined
+  if (!focusAnchorEnabled(input.mode)) return undefined
+  return ids
 }
 
 /** loop-log 追加（BLOMA_LOOP_LOG 开关 + 失败静默：诊断增强不是依赖，绝不阻断主链路）。 */
@@ -831,6 +844,7 @@ async function tryGenerateLoopPlanLeg(
   loop: AgentLoopChannelContext,
   backplane: PrdBackplane,
   skeletonMap: string | null,
+  focus?: string[],
 ): Promise<LoopPlan | null> {
   if (!planLegEnabled(input.mode)) return null
   const plan = await generateLoopPlan({
@@ -840,6 +854,7 @@ async function tryGenerateLoopPlanLeg(
     query: input.query!,
     env: loop.env,
     sessionId: input.session_id,
+    ...(focus && focus.length > 0 ? { focusRequirementIds: focus } : {}),
     ...(loop.channel.provider_type !== undefined ? { providerType: loop.channel.provider_type } : {}),
     ...(input.signal ? { signal: input.signal } : {}),
   })
@@ -892,13 +907,23 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   const editFormat = loop.model?.edit_format ?? 'diff'
   const startedAt = Date.now()
   // PR-1 骨架先行：渲染成功后骨架地图随 system prompt 常驻（事实与注入同源）
-  const { map: skeletonMap, skeleton } = prepareSkeletonBeforeLoop(input, backplane, project)
+  const { map: skeletonMap, skeleton, rendered } = prepareSkeletonBeforeLoop(input, backplane, project)
+  // P3 分级锚定：focus 生效时（迭代路径透传 + BLOMA_FOCUS_ANCHOR 开）背板/骨架地图
+  // 裁细节不减锚；生成路径/开关关 → undefined=全量锚定现状（字节级等价）
+  const focus = resolveFocusAnchor(input)
   // P3 plan 腿：loop 前单轮技术合同（D2 参考合同：偏离旁白说明，不硬拦截）；
-  // 失败/关闭 fail-open 回退现状（planInjection 为 null 时拼接函数字节级=现状）
-  const loopPlan = await tryGenerateLoopPlanLeg(input, loop, backplane, skeletonMap)
+  // 失败/关闭 fail-open 回退现状（planInjection 为 null 时拼接函数字节级=现状）。
+  // plan 腿输入用全量骨架地图（规划需要全貌），分级只作用于 loop system 注入
+  const loopPlan = await tryGenerateLoopPlanLeg(input, loop, backplane, skeletonMap, focus)
   const planInjection = loopPlan ? renderPlanInjection(loopPlan) : null
+  // 骨架地图分级（注入侧，零改 prepare 语义）：plan 存在且 focus 生效时，非目标文件
+  // 降为存在性行（路径锚不丢，D3）；无 plan / 无 focus → 全量地图现状
+  const effectiveSkeletonMap =
+    skeletonMap && focus && loopPlan && skeleton && rendered
+      ? buildSkeletonMapInjection(skeleton, rendered, loopPlan.filesToTouch.map((file) => file.path))
+      : skeletonMap
   const buildSystemWithPlan = (fmt: 'diff' | 'whole'): string => {
-    const base = buildLoopSystemWithOverride(backplane, fmt, input.project_id, skeletonMap)
+    const base = buildLoopSystemWithOverride(backplane, fmt, input.project_id, effectiveSkeletonMap, focus)
     return planInjection ? `${base}\n\n${planInjection}` : base
   }
   // 委派协作（嫁接方案 §4.1）：注册父 loop 上下文供 delegate_agent 构建子循环；子工具集按 role 裁剪
@@ -1172,8 +1197,9 @@ function countProjectFiles(root: string): number {
 /**
  * 背板锚定系统提示词（方案 §4.4 骨架）：PRD 背板全文常驻每轮（AutoGPT 式漂移的
  * 解药，本项目区别于 SWE-agent/Codex 的差异化锚），工作方式与终止判据显式化。
+ * focus（P3 分级锚定）：未传=全量现状；传入时命中项全文、其余项一行摘要（只减细节不减锚）。
  */
-export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 'diff' | 'whole', templateType?: import('../../shared/types').TemplateType, skeletonMap?: string | null): string {
+export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 'diff' | 'whole', templateType?: import('../../shared/types').TemplateType, skeletonMap?: string | null, focus?: string[]): string {
   // 注入点⑥（周计划 §6）：tech_skeleton/目录约定/依赖白名单进背板锚定段；
   // 开关关闭/模板缺失为 null（行为=现状）。类型缺省从背板 template_meta 兜底。
   const effectiveType = templateType ?? backplane.template_meta?.type ?? 'personal_tool'
@@ -1184,21 +1210,9 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
       return null
     }
   })()
-  const items = backplane.requirements
-    .map((item) => {
-      const assertions = requirementAssertions(item)
-        .map((assertion) => `    - ${assertion}`)
-        .join('\n')
-      return (
-        `- [${item.id}]（${requirementPriority(item)}）${requirementStory(item)}` +
-        (assertions ? `\n  行为断言：\n${assertions}` : '') +
-        (item.scope_notes ? `\n  范围排除：${item.scope_notes}` : '') +
-        // 活背板：带执行状态时标注（首轮/全量重生成时无 status，零开销；
-        // 部分重生成/恢复终验路径下让 loop 知道哪些项已是既成事实）
-        (item.status ? `\n  执行状态：${requirementStatusLabel(item.status)}` : '')
-      )
-    })
-    .join('\n')
+  // P3 分级锚定：功能项渲染归模型层（renderBackplaneAnchor，R1 口径）；
+  // focus 缺省=全量全文（与旧内联渲染逐字同源）
+  const items = renderBackplaneAnchor(backplane, focus)
   const outOfScope = backplane.out_of_scope.length
     ? backplane.out_of_scope.map((entry) => `- ${entry}`).join('\n')
     : '- （无）'
@@ -1222,6 +1236,11 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
         ]
       : []),
     '功能项（P0 必须全部实现且断言为真）：',
+    // P3 分级锚定提示行（仅 focus 生效时存在）：其余项断言细节已折叠但探针仍全量验证，
+    // 防止「折叠=可以不做」的误读（P0 执行面不裁，D3+硬约束 4）
+    ...(focus && focus.length > 0
+      ? [`（本轮迭代聚焦：${focus.join('、')}——其余功能项保持现状勿重做；其断言细节已折叠，但 run_gwt_tests 仍会全量验证全部 P0 断言）`]
+      : []),
     items,
     '范围外（一律不做）：',
     outOfScope,
@@ -1264,9 +1283,10 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
 /**
  * 背板锚定系统提示词 + 用户追加规则（D4 追加模式）：`loop-system` 覆盖文件内容追加在
  * 动态 system prompt 之后（背板锚定段不可覆盖）。无覆盖文件返回 base 本身。
+ * focus（P3 分级锚定）：未传=全量现状（字节级等价，回归锁锁定）；修复轮不传（修复卡即 mini-plan）。
  */
-function buildLoopSystemWithOverride(backplane: PrdBackplane, editFormat: 'diff' | 'whole', projectId?: string, skeletonMap?: string | null): string {
-  const base = buildAgentLoopSystemPrompt(backplane, editFormat, undefined, skeletonMap)
+function buildLoopSystemWithOverride(backplane: PrdBackplane, editFormat: 'diff' | 'whole', projectId?: string, skeletonMap?: string | null, focus?: string[]): string {
+  const base = buildAgentLoopSystemPrompt(backplane, editFormat, undefined, skeletonMap, focus)
   // 历史经验段（改造 2）：迭代/重生成场景下轮 fresh loop 开场即知上轮踩坑；
   // 首轮无经验返回空串零开销；renderLearningsSection 内部静默失败
   const learnings = renderLearningsSection(backplane.project_id)
@@ -1966,6 +1986,9 @@ export interface IterationTaskInput {
   signal?: AbortSignal
 }
 
+// 注：P3 分级锚定的 focusRequirementIds 由 runIterationTask 从归一化判定派生后
+// 直接并入 runMvpViaAgentLoop 调用入参（MvpTaskInput 可选字段），不经本接口。
+
 /**
  * 迭代收尾 changelog 触发（GA-03 后半 2026-08-27，PRD §7.1「每轮迭代结束后追加 Changelog」）。
  *
@@ -2019,7 +2042,18 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
     // 迭代不进入 generating_mvp 阶段（那是首次生成 MVP 的语义）：保持 iterating，
     // 只更新 PRD 背板（含合并后的需求）供 loop 增量修改，快照用 iteration 而非 mvp。
     await syncPrdCheckpoints(input, requirements)
-    const mvp = await runMvpViaAgentLoop(input, await tryResolveAgentLoop(input), 'iteration')
+    // P3 分级锚定：normalizer 判定焦点（reviseId/append 新项 id）透传 loop——
+    // 命中项全文锚定，其余项一行摘要（只减细节不减锚）；skip/out_of_scope 无焦点=全量
+    const mvp = await runMvpViaAgentLoop(
+      {
+        ...input,
+        ...(merged.focusRequirementIds && merged.focusRequirementIds.length > 0
+          ? { focusRequirementIds: merged.focusRequirementIds }
+          : {}),
+      },
+      await tryResolveAgentLoop(input),
+      'iteration',
+    )
     // Agent Loop 唯一运行时：迭代产物一律走独立门禁（只终验不重修）
     await runAgentLoopPostTesting({
       request_id: input.request_id,
@@ -2092,8 +2126,17 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
 export async function mergeIterationRequirements(
   input: IterationTaskInput,
   existing: SketchRequirement[],
-): Promise<{ requirements: SketchRequirement[]; action: 'revise' | 'append' | 'skip' | 'out_of_scope' | 'raw' }> {
-  const appendRaw = (): { requirements: SketchRequirement[]; action: 'raw' } => ({ requirements: [...existing, { id: nextRequirementId(existing), description: input.prompt }], action: 'raw' })
+): Promise<{
+  requirements: SketchRequirement[]
+  action: 'revise' | 'append' | 'skip' | 'out_of_scope' | 'raw'
+  /** P3 分级锚定：本轮聚焦功能项 id（revise 的 reviseId / append·raw 的新项 id；
+ *  skip/out_of_scope 无需求变更 → 空数组=全量锚定） */
+  focusRequirementIds?: string[]
+}> {
+  const appendRaw = (): { requirements: SketchRequirement[]; action: 'raw'; focusRequirementIds: string[] } => {
+    const newId = nextRequirementId(existing)
+    return { requirements: [...existing, { id: newId, description: input.prompt }], action: 'raw', focusRequirementIds: [newId] }
+  }
   if (!input.query) return appendRaw()
   try {
     // 约束走门（T4-L1 修改门）：修改诉求里的约束语句确定性入库，并随归一化判定注入——
@@ -2133,7 +2176,17 @@ export async function mergeIterationRequirements(
     if (normalization.via === 'llm') {
       recordRequirementNormalization(input, 'iteration', input.prompt, normalization)
     }
-    return { requirements: applyNormalization(existing, normalization, nextRequirementId(existing), 'iteration'), action: normalization.action }
+    const nextId = nextRequirementId(existing)
+    const requirements = applyNormalization(existing, normalization, nextId, 'iteration')
+    // P3 分级锚定焦点派生：revise → 目标项 id（目标缺失回退 append 形态则取新项 id）；
+    // append → 新项 id；skip/out_of_scope → 无需求变更不聚焦（全量锚定）
+    const focus: string[] = []
+    if (normalization.action === 'revise' && normalization.reviseId) {
+      focus.push(existing.some((item) => item.id === normalization.reviseId) ? normalization.reviseId : nextId)
+    } else if (normalization.action === 'append') {
+      focus.push(nextId)
+    }
+    return { requirements, action: normalization.action, ...(focus.length > 0 ? { focusRequirementIds: focus } : {}) }
   } catch {
     return appendRaw()
   }

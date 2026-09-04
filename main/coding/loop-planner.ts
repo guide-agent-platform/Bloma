@@ -290,11 +290,21 @@ export interface GenerateLoopPlanInput {
   /** 渠道 providerType（omit 黑名单判断；主 loop channel 透传） */
   providerType?: string
   signal?: AbortSignal
+  /** P3 分级锚定（迭代路径）：聚焦功能项 id——聚焦项断言全文进 prompt，其余项一行摘要；
+ *  规划只覆盖聚焦项的改动，不重做其余项 */
+  focusRequirementIds?: string[]
 }
 
-/** 任务输入（user prompt）：背板摘要 + 骨架地图 + 模板类型 + 上限提醒。 */
+/** 任务输入（user prompt）：背板摘要（focus 生效时分级渲染）+ 骨架地图 + 模板类型 + 上限提醒。 */
 function buildPlanPrompt(input: GenerateLoopPlanInput, maxFiles: number): string {
+  const focusSet = input.focusRequirementIds && input.focusRequirementIds.length > 0
+    ? new Set(input.focusRequirementIds)
+    : undefined
   const items = input.backplane.requirements.map((item) => {
+    if (focusSet && !focusSet.has(item.id)) {
+      // 未聚焦项一行摘要（只减细节不减锚）：规划不覆盖其改动，但知道存在
+      return `- [${item.id}]（${requirementPriority(item)}）${requirementStory(item)}（断言 ${requirementAssertions(item).length} 条，本轮未聚焦：保持现状勿重做）`
+    }
     const assertions = requirementAssertions(item).map((assertion) => `  - ${assertion}`).join('\n')
     return `- [${item.id}]（${requirementPriority(item)}）${requirementStory(item)}` + (assertions ? `\n${assertions}` : '')
   }).join('\n')
@@ -304,7 +314,10 @@ function buildPlanPrompt(input: GenerateLoopPlanInput, maxFiles: number): string
   const templateType = input.backplane.template_meta?.type ?? 'personal_tool'
   return [
     `产品定位：${input.backplane.positioning}`,
-    '功能项清单（id/优先级/描述/行为断言）：',
+    ...(focusSet
+      ? [`本轮迭代聚焦修改：${input.focusRequirementIds!.join('、')}——只规划聚焦项的改动，其余功能项保持现状不重做。`
+        + '聚焦功能项清单（id/优先级/描述/行为断言，未聚焦项为一行摘要）：']
+      : ['功能项清单（id/优先级/描述/行为断言）：']),
     items,
     '范围外（一律不规划）：',
     outOfScope,

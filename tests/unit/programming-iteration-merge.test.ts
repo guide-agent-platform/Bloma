@@ -63,7 +63,7 @@ describe('mergeIterationRequirements（迭代修改诉求归一化入库）', ()
     restorePromaHome(originalPromaHome)
   })
 
-  it('修正类诉求 revise 已有功能项，决策落 requirement_normalized', async () => {
+  it('修正类诉求 revise 已有功能项，决策落 requirement_normalized；focus=目标项 id（P3 分级锚定）', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-iter-merge-'))
     process.env.PROMA_HOME = home
     const merged = await mergeIterationRequirements(
@@ -73,9 +73,48 @@ describe('mergeIterationRequirements（迭代修改诉求归一化入库）', ()
     expect(merged.requirements).toHaveLength(2)
     expect(merged.requirements.find((item) => item.id === 'F-003')?.description).toBe('行进方向与按键语义一致：左转左行、右转右行')
     expect(merged.requirements.find((item) => item.id === 'F-001')?.description).toBe('做一个赛车模拟器')
+    // P3 分级锚定：revise 焦点=reviseId（目标项存在）
+    expect(merged.focusRequirementIds).toEqual(['F-003'])
     // JSONL 行是 JSON-in-JSON（decision 文本经转义），先解析行再断言解码后文本
     const decisionText = readDecisionText(getAgentSessionPath('session-merge'))
     expect(decisionText).toContain('"type":"requirement_normalized"')
+  })
+
+  it('P3：append 焦点=新项 id；raw 回退焦点=原样追加的新项 id；skip/out_of_scope 无焦点（全量锚定）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-iter-focus-'))
+    process.env.PROMA_HOME = home
+    const appended = await mergeIterationRequirements(
+      makeInput(makeQuery('{"action":"append","description":"查看历史记录","story":"作为用户我想查看历史"}'), 'test-channel'),
+      EXISTING,
+    )
+    expect(appended.action).toBe('append')
+    expect(appended.focusRequirementIds).toEqual(['F-004'])
+
+    const skipped = await mergeIterationRequirements(
+      makeInput(makeQuery('{"action":"skip","reason":"操作指令"}'), 'test-channel'),
+      EXISTING,
+    )
+    expect(skipped.action).toBe('skip')
+    expect(skipped.focusRequirementIds).toBeUndefined()
+
+    // out_of_scope 会真实写 project.scope_exclusions：需要真项目（字面 id 会让
+    // addScopeExclusion 抛错回退 raw——那是既有回退语义，非本用例目标）
+    const { createProject } = await import('../../main/project-service')
+    const realProject = createProject({ request_id: 'req-focus-scope', mode: 'quick' })
+    const outOfScope = await mergeIterationRequirements(
+      {
+        ...makeInput(makeQuery('{"action":"out_of_scope","description":"不做排行榜"}'), 'test-channel'),
+        project_id: realProject.project_id,
+      },
+      EXISTING,
+    )
+    expect(outOfScope.action).toBe('out_of_scope')
+    expect(outOfScope.focusRequirementIds).toBeUndefined()
+
+    // raw 回退（无渠道）：原样追加，焦点=新项 id（append 必入 focus，硬约束 D3 连锁）
+    const raw = await mergeIterationRequirements(makeInput(undefined), EXISTING)
+    expect(raw.action).toBe('raw')
+    expect(raw.focusRequirementIds).toEqual(['F-004'])
   })
 
   it('操作指令（「重新生成」）skip：清单原样，按原需求重生成', async () => {

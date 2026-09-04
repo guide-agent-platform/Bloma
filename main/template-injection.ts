@@ -130,10 +130,18 @@ export function buildLoopInjection(type: TemplateType, skeletonMap?: string | nu
 export function buildSkeletonMapInjection(
   skeleton: ProjectSkeleton,
   rendered: { written: string[]; skipped: string[] },
+  /** P3 分级锚定（注入侧）：聚焦文件清单（plan.filesToTouch）；未传=全量现状 */
+  focusFiles?: string[],
 ): string | null {
-  const lines = skeleton.files.map(
-    (entry) => `- ${entry.path}：${entry.role || '骨架文件'}${entry.readonly ? '（只读）' : ''}`,
-  )
+  const focusSet = focusFiles && focusFiles.length > 0
+    ? new Set(focusFiles.map((path) => path.replace(/\\/g, '/')))
+    : undefined
+  const lines = skeleton.files.map((entry) => {
+    const full = `- ${entry.path}：${entry.role || '骨架文件'}${entry.readonly ? '（只读）' : ''}`
+    if (!focusSet) return full
+    // 只减细节不减锚（D3）：非目标文件降为存在性行（路径在，职责折叠可 read 自取）
+    return focusSet.has(entry.path.replace(/\\/g, '/')) ? full : `- ${entry.path}（本轮未涉及：保持现状勿改写）`
+  })
   return [
     `工程骨架已就位（系统已渲染，非你创建；模板版本 v${skeleton.version}）：`,
     '文件清单（path：职责）：',

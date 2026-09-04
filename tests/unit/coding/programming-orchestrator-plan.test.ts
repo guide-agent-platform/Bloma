@@ -80,6 +80,7 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
   const originalPromaHome = process.env.PROMA_HOME
   const originalPlanLeg = process.env.BLOMA_PLAN_LEG
   const originalLoopLog = process.env.BLOMA_LOOP_LOG
+  const originalFocusAnchor = process.env.BLOMA_FOCUS_ANCHOR
   let home = ''
   let channelId = ''
 
@@ -88,6 +89,7 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
     process.env.PROMA_HOME = home
     delete process.env.BLOMA_PLAN_LEG
     delete process.env.BLOMA_LOOP_LOG
+    delete process.env.BLOMA_FOCUS_ANCHOR
     mocks.runAgentLoop.mockReset()
     mocks.runAgentLoop.mockResolvedValue(loopCompleted())
     mocks.generateLoopPlan.mockReset()
@@ -118,6 +120,8 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
     else process.env.BLOMA_PLAN_LEG = originalPlanLeg
     if (originalLoopLog === undefined) delete process.env.BLOMA_LOOP_LOG
     else process.env.BLOMA_LOOP_LOG = originalLoopLog
+    if (originalFocusAnchor === undefined) delete process.env.BLOMA_FOCUS_ANCHOR
+    else process.env.BLOMA_FOCUS_ANCHOR = originalFocusAnchor
     setProgrammingEventPublisher(() => undefined)
     clearSandboxRuntimeForTests()
   })
@@ -261,6 +265,67 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
     })
     const run = await runOnce('quick', REQUIREMENTS)
     expect(existsSync(join(getDocumentsDir(run.workspaceSlug, run.projectId), 'loop-log.md'))).toBe(false)
+  })
+
+  it('P3 分级锚定：focusRequirementIds 透传 plan 腿 + system 聚焦提示行与分级渲染', { timeout: 60_000 }, async () => {
+    process.env.BLOMA_FOCUS_ANCHOR = '1' // quick + 强制开（缺省 quick off，D7 连锁）
+    process.env.BLOMA_PLAN_LEG = '1' // quick 缺省不起 plan 腿，这里显式开以便断言透传
+    mocks.generateLoopPlan.mockResolvedValue(SAMPLE_PLAN)
+    const requirements = [
+      { id: 'F-001', description: '记录收入与支出', behavior_assertions: ['点击保存按钮→列表新增一条记录'], priority: 'P0' as const },
+      { id: 'F-003', description: '搜索历史', behavior_assertions: ['在搜索框输入关键词→列表过滤'], priority: 'P1' as const },
+    ]
+    const project = createProject({ request_id: `req-${Math.random().toString(36).slice(2, 8)}`, mode: 'quick' })
+    recordSketchGenerated(project.project_id, requirements)
+    writeFileSync(join(project.root_path, 'index.html'), '<html><body><p>记录收入与支出</p></body></html>', 'utf8')
+    const sessionId = `s-focus-${Math.random().toString(36).slice(2, 8)}`
+    await runMvpTask({
+      request_id: `req-${Math.random().toString(36).slice(2, 8)}`,
+      session_id: sessionId,
+      project_id: project.project_id,
+      mode: 'quick',
+      channel_id: channelId,
+      query: junkQuery(),
+      focusRequirementIds: ['F-003'],
+    })
+
+    // plan 腿收到 focus（prompt 分级渲染）
+    const legArgs = mocks.generateLoopPlan.mock.calls[0][0] as { focusRequirementIds?: string[] }
+    expect(legArgs.focusRequirementIds).toEqual(['F-003'])
+
+    // system：聚焦提示行 + 命中项断言全文 + 未聚焦项摘要（断言折叠；prd_document
+    // 全文段按规则不裁，负向断言锁定结构化功能项区块）
+    const system = mocks.runAgentLoop.mock.calls[mocks.runAgentLoop.mock.calls.length - 1][0].system as string
+    expect(system).toContain('本轮迭代聚焦：F-003')
+    expect(system).toContain('在搜索框输入关键词→列表过滤')
+    expect(system).toContain('- [F-001]（P0）记录收入与支出（断言 1 条）——本轮未聚焦')
+    expect(system).not.toContain('- [F-001]（P0）记录收入与支出\n  行为断言：')
+  })
+
+  it('P3 分级锚定开关关（BLOMA_FOCUS_ANCHOR=0）：focus 传入也不分级=全量现状', { timeout: 60_000 }, async () => {
+    process.env.BLOMA_FOCUS_ANCHOR = '0'
+    mocks.generateLoopPlan.mockResolvedValue(SAMPLE_PLAN)
+    const requirements = [
+      { id: 'F-001', description: '记录收入与支出', behavior_assertions: ['点击保存按钮→列表新增一条记录'], priority: 'P0' as const },
+    ]
+    const project = createProject({ request_id: `req-${Math.random().toString(36).slice(2, 8)}`, mode: 'longterm' })
+    recordSketchGenerated(project.project_id, requirements)
+    writeFileSync(join(project.root_path, 'index.html'), '<html><body><p>记录收入与支出</p></body></html>', 'utf8')
+    await runMvpTask({
+      request_id: `req-${Math.random().toString(36).slice(2, 8)}`,
+      session_id: `s-focus-off-${Math.random().toString(36).slice(2, 8)}`,
+      project_id: project.project_id,
+      mode: 'longterm',
+      channel_id: channelId,
+      query: junkQuery(),
+      focusRequirementIds: ['F-001'],
+    })
+    const system = mocks.runAgentLoop.mock.calls[mocks.runAgentLoop.mock.calls.length - 1][0].system as string
+    expect(system).not.toContain('本轮迭代聚焦')
+    expect(system).toContain('点击保存按钮→列表新增一条记录')
+    // plan 腿也不分 focus（开关是分级锚定总闸，plan 腿输入同受门控）
+    const legArgs = mocks.generateLoopPlan.mock.calls[0][0] as { focusRequirementIds?: string[] }
+    expect(legArgs.focusRequirementIds).toBeUndefined()
   })
 })
 
