@@ -19,10 +19,13 @@ export type PrdSectionId =
   | 'assertions'
   | 'gwt'
   | 'out_of_scope'
+  | 'constraints'
+  | 'assumptions'
   | 'personas'
   | 'glossary'
   | 'data_model'
   | 'interface_spec'
+  | 'gdd'
 
 /** 章节级 provenance（方案 §3.1：升格现有功能项级 origin，标注每章数据来源供内审 F 维对照）。 */
 export type SectionProvenance = 'user_quote' | 'clarified' | 'guide_inferred' | 'llm_generated'
@@ -313,6 +316,27 @@ export interface PrdBackplane {
    * 机械拼装兜底（确定性投影，不编内容——OpenSpec 纪律）。
    */
   prd_document?: string
+  /**
+   * 轻量 GDD（游戏设计文档，P1-7，2026-09-04）：game 类型的玩法真相源——IP 复刻/游戏类
+   * 需求的机制拆解/核心循环/数值基准，PRD 从 GDD 切片、不发明机制。
+   * 仅 game 类型生成（非 game 缺省 undefined）；缺省无 GDD（旧 prd.json 零迁移）。
+   */
+  gdd?: GameDesignDoc
+}
+
+/**
+ * 轻量 GDD 四要素（P1-7）：核心幻想（玩什么）+ 设计支柱（凭什么好玩）+ 核心循环
+ * （怎么玩）+ 数值基准（数值真相源）。由向导工程腿对 game 类型从对话提炼。
+ */
+export interface GameDesignDoc {
+  /** 核心幻想：玩家扮演什么、体验什么（一句话）。 */
+  core_fantasy: string
+  /** 设计支柱：支撑核心幻想的 2-3 条原则。 */
+  pillars: string[]
+  /** 核心循环：主玩法循环的阶段序列（如 探索→战斗→收集→升级）。 */
+  core_loop: string[]
+  /** 数值基准：关键数值/范围（生命值/得分/关卡数/道具池范围等）。 */
+  numbers: string[]
 }
 
 /**

@@ -4,6 +4,7 @@ import {
   PRD_SECTIONS_SCHEMA_VERSION,
   checkSectionCompleteness,
   clarifyGapSections,
+  renderDocumentSectionSpec,
   requiredSections,
 } from '../../main/prd-sections'
 import {
@@ -167,5 +168,25 @@ describe('PrdBackplane P1 扩展字段读取兜底（旧 prd.json 零迁移）',
     const meta = backplaneTemplateMeta(bp, 'personal_tool')
     expect(meta).toEqual({ type: 'personal_tool', level: 'loose', version: TEMPLATE_META_VERSION })
     expect(bp.template_meta).toBeUndefined()
+  })
+})
+
+describe('P2-10：document 章节由 schema 驱动（renderDocumentSectionSpec）', () => {
+  it('章节由 PRD_SECTIONS 渲染（含新增 constraints/assumptions/gdd），单一来源', () => {
+    const spec = renderDocumentSectionSpec()
+    expect(spec).toContain('产品定位')
+    expect(spec).toContain('功能清单')
+    expect(spec).toContain('范围外')
+    expect(spec).toContain('用户约束') // P2-10 新增（原 document 八节「用户约束」的 schema 化）
+    expect(spec).toContain('后台假设') // P2-10 新增
+    expect(spec).toContain('设计文档（GDD）') // P1-7 新增
+    // 不含 prd_document 自身（全文不是章节）
+    expect(spec).not.toContain('PRD 全文')
+  })
+
+  it('章节顺序与 PRD_SECTIONS 一致（加章节自动同步，不再硬编码）', () => {
+    const spec = renderDocumentSectionSpec()
+    expect(spec.indexOf('设计文档（GDD）')).toBeGreaterThan(spec.indexOf('API Spec'))
+    expect(spec.indexOf('用户约束')).toBeGreaterThan(spec.indexOf('范围外'))
   })
 })

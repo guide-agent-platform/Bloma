@@ -88,6 +88,26 @@ describe('buildAgentLoopSystemPrompt — focus 接线', () => {
     expect(prompt).toContain('- [F-001]（P0）记录想法（断言 1 条）——本轮未聚焦')
     expect(prompt).not.toContain('点击保存按钮→列表新增一条记录')
   })
+
+  it('P1-7：game 类型背板带 GDD → 注入玩法真相源段；无 GDD → 零注入', () => {
+    const withGdd: PrdBackplane = {
+      ...BACKPLANE,
+      gdd: {
+        core_fantasy: '扮演蛇在有限空间吃食物',
+        pillars: ['操作反馈即时', '风险与成长并存'],
+        core_loop: ['移动', '吃食物', '变长'],
+        numbers: ['生命 1', '初始长度 3'],
+      },
+    }
+    const prompt = buildAgentLoopSystemPrompt(withGdd, 'diff')
+    expect(prompt).toContain('玩法设计文档（GDD，机制真相源）')
+    expect(prompt).toContain('核心幻想：扮演蛇在有限空间吃食物')
+    expect(prompt).toContain('核心循环：移动 → 吃食物 → 变长')
+    expect(prompt).toContain('数值基准：生命 1；初始长度 3')
+
+    const noGdd = buildAgentLoopSystemPrompt(BACKPLANE, 'diff')
+    expect(noGdd).not.toContain('玩法设计文档')
+  })
 })
 
 describe('断言分级只影响注入不影响探针执行面（D3+硬约束 4）', () => {

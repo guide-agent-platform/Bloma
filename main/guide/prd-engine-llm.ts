@@ -5,8 +5,9 @@ import { loadPromptOverride } from '../prompt-config'
 import { buildPrdFewShotInjection, isInjectionEnabled } from '../template-injection'
 import { callLlmForJson } from '../kernel/llm-call'
 import type { AgentMessage, MessageContentBlock } from '../../shared/types'
-import type { PrdBackplane, SketchRequirement } from '../model/prd-backplane'
+import type { GameDesignDoc, PrdBackplane, SketchRequirement } from '../model/prd-backplane'
 import { buildPrdDocumentFallback, normalizePrdDocumentNewlines, reconcilePrdDocumentPriorities } from '../model/prd-backplane'
+import { renderDocumentSectionSpec } from '../prd-sections'
 import { categoryTemperature } from '../model-resolution'
 
 /**
@@ -60,23 +61,17 @@ export const DEFAULT_SYSTEM_PROMPT = `你是「Bloma 向导 · 需求工程腿�
  "positioning":"产品定位（≤120 字：目标用户 + 核心场景 + 核心价值）",
  "acceptance":{"F-001":"该功能项的验收要点 2~4 条，分号分隔（正常路径 + 边界/异常各至少 1 条）"},
  "out_of_scope":["本轮明确不做的事"],
- "assumptions":["后台做出的假设"]}
+ "assumptions":["后台做出的假设"],
+ "gdd":{"core_fantasy":"核心幻想","pillars":["支柱 1"],"core_loop":["阶段 1"],"numbers":["数值基准"]}}  // 仅 game 类型输出，非 game 省略此字段
 
 一、document（长文本 PRD 全文——用户过目与下游约束的正式形态）
-章节骨架（按序，markdown 标题组织，中文）：
+章节骨架（按序，markdown 标题组织，中文；章节由 schema 驱动，空章节写「无/待确定」不编内容）：
 # PRD：{产品名或一句话主题}
-## 一、产品定位与背景 —— 三要素（给谁用/什么场景/解决什么）+ 为什么做这件事（对话中用户表达的动机）
-## 二、目标用户与使用场景 —— 从对话提炼；对话没说清的按常见合理预期补一句并保持克制
-## 三、用户故事 —— 逐功能项一段：「作为<角色>，我想<功能>，以便<价值>」
-## 四、功能需求详述 —— 逐项：编号、描述、优先级（P0/P1/P2）、验收要点（**与 acceptance 逐字同源**）
-## 五、页面与交互约定 —— 对话能推出的界面形态与交互方式；推不出就写「待草图阶段确定」，不要编
-## 六、用户约束与非功能要求 —— 用户说过的「必须/不要」类要求与性能/隐私类诉求；无则写「无特殊约束」
-## 七、范围外 —— **与 out_of_scope 逐字同源**；为空时写「本轮无明确排除项」
-## 八、后台假设 —— **与 assumptions 逐字同源**；为空时写「无」
+${renderDocumentSectionSpec()}
 
 质量标准：
 - 篇幅自适应：对话信息薄则短（几百字即可），厚则详，以把事情说明白为上限，禁止注水。
-- document 与结构化字段必须同源一致：四/七/八节分别逐字取自 acceptance/out_of_scope/assumptions，不得出现字段之外的新功能承诺。
+- document 与结构化字段必须同源一致：功能清单/范围外/后台假设分别逐字取自 acceptance/out_of_scope/assumptions，不得出现字段之外的新功能承诺。
 - 严格基于对话内容与给定功能项，不臆造用户没提过的功能或约束；对话没细说的按同类产品常见合理预期补齐并克制表述。
 
 二、positioning（产品定位）
@@ -89,7 +84,7 @@ export const DEFAULT_SYSTEM_PROMPT = `你是「Bloma 向导 · 需求工程腿�
 - 必须覆盖：正常路径至少 1 条（用户主流程怎么算成功）+ 边界/异常输入至少 1 条（空输入/非法值/极值时系统的预期行为）。
 - 每条可观察、可判定（能转成 GWT 场景），不含实现细节（不提函数/存储/框架）。
 - 从对话中用户明确表达过的要求优先提炼；对话没细说的边界，按同类产品的常见合理预期补齐，不臆造用户没提过的新功能。
-- **冲突裁决（重要）**：当对话中用户最新、更具体的表述与某功能项 description（冻结的旧措辞）不一致时，以用户最新表述为准撰写该功能项验收要点，并在 document 第四节的对应验收要点末尾加“（依据用户原话修订）”，不得为迁就 description 旧措辞而写出与用户意图相反的验收。positioning、acceptance、document 三处对同一件事的语义必须一致，不得出现“定位说前一天、验收写当日”的分裂。
+- **冲突裁决（重要）**：当对话中用户最新、更具体的表述与某功能项 description（冻结的旧措辞）不一致时，以用户最新表述为准撰写该功能项验收要点，并在 document 功能清单节的对应验收要点末尾加“（依据用户原话修订）”，不得为迁就 description 旧措辞而写出与用户意图相反的验收。positioning、acceptance、document 三处对同一件事的语义必须一致，不得出现“定位说前一天、验收写当日”的分裂。
 - 语义重复或指向同一行为的功能项，验收要点不得互相矛盾，同一行为只描述一次。
 
 四、out_of_scope（范围外）
@@ -100,8 +95,15 @@ export const DEFAULT_SYSTEM_PROMPT = `你是「Bloma 向导 · 需求工程腿�
 - 后台必须替用户做的技术/产品决策：数据单位、存储方式（如本地保存）、界面语言、排序/汇总规则、默认值等。
 - 每条一句话说清"假设了什么"，供后续 decisions 回溯。
 
-示例（家庭记账本，功能项 F-001 记录收入与支出 / F-002 展示本月结余；document 节选）：
-{"document":"# PRD：家庭记账本\\n## 一、产品定位与背景\\n面向个人与家庭的记账工具：日常收支发生时快速记录，月底直观看到结余，帮助用户掌握花钱情况。用户想要一个比表格省事、随手能记的工具。\\n## 二、目标用户与使用场景\\n个人/家庭用户，在消费或收入发生当下快速记一笔，月底回看汇总。\\n## 三、用户故事\\n- 作为家庭成员，我想记录每笔收入与支出，以便月底清楚钱花在了哪里。\\n- 作为用户，我想按自然月看到结余，以便掌握当月收支状况。\\n## 四、功能需求详述\\n### [F-001]（P0）记录收入与支出\\n验收要点：正常：新增一笔收入或支出（金额+类型+备注）后列表立即可见并持久保存；边界：金额为空、为负或非数字时提示错误且不保存；边界：刷新或重开后已记录的账目仍在\\n### [F-002]（P0）展示本月结余\\n验收要点：正常：按自然月汇总收入与支出并显示结余金额；边界：本月无任何记录时结余显示 0 而非报错或空白\\n## 五、页面与交互约定\\n首页为记账列表+快速记一笔入口，顶部显示本月结余。\\n## 六、用户约束与非功能要求\\n无特殊约束\\n## 七、范围外\\n多用户协作；银行账户自动对接\\n## 八、后台假设\\n金额单位统一为人民币元；数据仅保存在本地，不提供云同步；结余=本月收入合计-本月支出合计",
+六、gdd（游戏设计文档，仅 game 类型输出；非 game 省略此字段）
+- core_fantasy：核心幻想——玩家扮演什么、体验什么（一句话）。
+- pillars：设计支柱 2~3 条——支撑核心幻想的可玩性原则。
+- core_loop：核心循环——主玩法循环的阶段序列（如 探索→战斗→收集→升级）。
+- numbers：数值基准——关键数值/范围（生命值/得分/关卡数/道具池范围等）。
+- 从对话提炼；对话没说细的机制按同类游戏常见合理预期补齐并克制标注「（建议）」；document 的功能清单/行为断言从 gdd 核心循环切片，不发明 gdd 之外的机制。
+
+示例（家庭记账本，功能项 F-001 记录收入与支出 / F-002 展示本月结余；document 节选关键章节）：
+{"document":"# PRD：家庭记账本\\n## 一、产品定位 —— 面向个人与家庭的记账工具：日常收支发生时快速记录，月底直观看到结余。\\n## 二、功能清单 —— 作为家庭成员，我想记录每笔收入与支出，以便月底清楚钱花在了哪里。\\n### [F-001]（P0）记录收入与支出\\n验收要点：正常：新增一笔收入或支出后列表立即可见并持久保存；边界：金额为空或非数字时提示错误且不保存\\n### [F-002]（P0）展示本月结余\\n验收要点：正常：按自然月汇总并显示结余；边界：本月无任何记录时结余显示 0\\n## 三、页面清单 —— 首页为记账列表+快速记一笔入口，顶部显示本月结余。\\n## 六、范围外 —— 多用户协作；银行账户自动对接\\n## 八、后台假设 —— 金额单位统一为人民币元；数据仅保存在本地，不提供云同步",
  "positioning":"面向个人与家庭的记账工具，在日常收支发生时快速记录，并在月底直观看到本月结余，帮助用户掌握花钱情况。",
  "acceptance":{
    "F-001":"正常：新增一笔收入或支出（金额+类型+备注）后列表立即可见并持久保存；边界：金额为空、为负或非数字时提示错误且不保存；边界：刷新或重开后已记录的账目仍在",
@@ -132,7 +134,7 @@ export async function generatePrdLlm(input: GeneratePrdLlmInput): Promise<PrdBac
     // 注入点③（周计划 §6）：同类型脱敏样例 few-shot（≤500 token 硬截断）+ 解析失败
     // 带反馈重试一次（陷阱 7：代码型 JSON 不正则修补，只走带反馈重试）；开关关闭=现状单试
     const fewShot = isInjectionEnabled('prd') ? buildPrdFewShotInjection(input.template_type ?? 'personal_tool') : null
-    const prompt = [buildPrompt(items, conversation), fewShot].filter(Boolean).join('\n\n')
+    const prompt = [buildPrompt(items, conversation, input.template_type), fewShot].filter(Boolean).join('\n\n')
     // 2026-09-03 R2：调用循环收敛至 kernel/llm-call 标准件（stream/parse/带反馈重试/abort/超时一处实现）
     const parsed = await callLlmForJson({
       systemPrompt: getSystemPrompt(),
@@ -193,6 +195,8 @@ function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequirement[],
     acceptance,
     out_of_scope: parsed.out_of_scope,
     assumptions: parsed.assumptions,
+    // P1-7：game 类型 GDD（玩法真相源）随背板冻结；非 game 缺省 undefined。
+    ...(parsed.gdd ? { gdd: parsed.gdd } : {}),
   }
 }
 
@@ -202,6 +206,7 @@ interface ParsedPrd {
   acceptance: Record<string, string>
   out_of_scope: string[]
   assumptions: string[]
+  gdd?: GameDesignDoc
 }
 
 function parsePrdJson(text: string): ParsedPrd | undefined {
@@ -226,25 +231,58 @@ function parsePrdJson(text: string): ParsedPrd | undefined {
   const stringArray = (value: unknown): string[] =>
     Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
 
+  // P1-7：gdd 解析（game 类型；四要素齐备才采纳，缺任一视为无 GDD 降级）。
+  const gdd = parseGdd(parsed.gdd)
+
   return {
     positioning: typeof parsed.positioning === 'string' ? parsed.positioning : '',
     document: typeof parsed.document === 'string' ? parsed.document : '',
     acceptance,
     out_of_scope: stringArray(parsed.out_of_scope),
     assumptions: stringArray(parsed.assumptions),
+    ...(gdd ? { gdd } : {}),
   }
 }
 
-function buildPrompt(items: SketchRequirement[], conversation: string): string {
+/** 解析 gdd 四要素（核心幻想/支柱/核心循环/数值基准）；缺核心幻想或支柱或核心循环任一即 undefined。 */
+function parseGdd(value: unknown): GameDesignDoc | undefined {
+  if (!isRecord(value)) return undefined
+  const coreFantasy = typeof value.core_fantasy === 'string' ? value.core_fantasy.trim() : ''
+  const pillars = Array.isArray(value.pillars)
+    ? value.pillars.filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+    : []
+  const coreLoop = Array.isArray(value.core_loop)
+    ? value.core_loop.filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+    : []
+  const numbers = Array.isArray(value.numbers)
+    ? value.numbers.filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+    : []
+  if (!coreFantasy || pillars.length === 0 || coreLoop.length === 0) return undefined
+  return { core_fantasy: coreFantasy, pillars, core_loop: coreLoop, numbers }
+}
+
+function buildPrompt(items: SketchRequirement[], conversation: string, templateType?: import('../../shared/types').TemplateType): string {
   const list = items.map((r) => `- ${r.id}: ${r.description}`).join('\n')
+  // P1-7（2026-09-04）：game 类型额外注入 GDD 要求——玩法真相源，PRD 从 GDD 切片；非 game 零注入。
+  const gddInstruction =
+    templateType === 'game'
+      ? [
+          '',
+          '【游戏设计文档（GDD）要求——本项目是游戏/复刻类，请额外输出 gdd 字段】',
+          '- 从对话提炼：核心幻想（玩什么）、设计支柱 2~3 条、核心循环（阶段序列）、数值基准（关键数值/范围）。',
+          '- 对话没说细的机制按同类游戏常见合理预期补齐并克制标注「（建议）」；不要凭空发明对话之外的大机制。',
+          '- document 的功能清单/行为断言从 gdd 核心循环切片，不发明 gdd 之外的机制。',
+        ].join('\n')
+      : ''
   return [
     `请从下面的对话历史中产出双形态同源 PRD：长文本全文（document）+ 结构化字段。`,
     ``,
     `任务要求：`,
-    `- document：完整长文本 PRD（章节骨架：定位与背景/目标用户与场景/用户故事/功能详述/页面与交互约定/约束/范围外/后台假设），与结构化字段同源一致。`,
+    `- document：完整长文本 PRD（章节骨架见 system prompt，与结构化字段同源一致，空章节写「无/待确定」）。`,
     `- 为每个功能项提炼 2~4 条验收要点（正常路径 + 边界/异常输入各至少 1 条），分号分隔写在同一个字符串里。`,
     `- positioning 覆盖三要素：给谁用、什么场景、解决什么问题（≤120 字）。`,
     `- 对话中信息不足的字段按约定给空数组或简短兜底，不要编造。`,
+    gddInstruction,
     ``,
     `【已冻结的功能项（不要改写，只为其补验收要点与叙事）】`,
     list,

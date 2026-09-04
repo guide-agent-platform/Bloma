@@ -1235,6 +1235,17 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
           '"""',
         ]
       : []),
+    // P1-7（2026-09-04）：game 类型 GDD（玩法真相源）常驻注入——机制拆解/核心循环/数值基准，
+    // 编程 Agent 不凭对话臆造机制；非 game 缺省零注入。
+    ...(backplane.gdd
+      ? [
+          '玩法设计文档（GDD，机制真相源）：',
+          `- 核心幻想：${backplane.gdd.core_fantasy}`,
+          `- 设计支柱：${backplane.gdd.pillars.join('；')}`,
+          `- 核心循环：${backplane.gdd.core_loop.join(' → ')}`,
+          `- 数值基准：${backplane.gdd.numbers.length ? backplane.gdd.numbers.join('；') : '（无）'}`,
+        ]
+      : []),
     '功能项（P0 必须全部实现且断言为真）：',
     // P3 分级锚定提示行（仅 focus 生效时存在）：其余项断言细节已折叠但探针仍全量验证，
     // 防止「折叠=可以不做」的误读（P0 执行面不裁，D3+硬约束 4）

@@ -118,6 +118,27 @@ export const PRD_SECTIONS: PrdSectionDef[] = [
     consumers: ['MVP loop 防扩功能', '内审 G 维'],
   },
   {
+    id: 'constraints',
+    label: '用户约束',
+    // 不进必填矩阵（机器契约可选）：document 渲染时恒有「用户约束」节（可空写「无特殊约束」）；
+    // constraints 背板字段可选，旧背板可能缺失——标 missing 会误伤存量项目。
+    quickRequired: false,
+    longtermRequired: false,
+    source: 'backplane',
+    dataFrom: 'constraints[]（T4-L1 用户声明约束：不含登录/必须离线等；可为空数组）',
+    consumers: ['MVP loop 防扩功能', 'PRD 过目卡'],
+  },
+  {
+    id: 'assumptions',
+    label: '后台假设',
+    // 同上：document 章节（可空），不进机器必填矩阵。
+    quickRequired: false,
+    longtermRequired: false,
+    source: 'backplane',
+    dataFrom: 'assumptions[]（后台技术/产品决策：单位/存储/排序/默认值；可为空数组）',
+    consumers: ['decisions 回溯', 'PRD 过目卡'],
+  },
+  {
     id: 'personas',
     label: '目标用户',
     quickRequired: false,
@@ -154,12 +175,63 @@ export const PRD_SECTIONS: PrdSectionDef[] = [
     consumers: ['MVP loop', 'judge 对照'],
     requiredFromLevel: 'standard',
   },
+  {
+    id: 'gdd',
+    label: '设计文档（GDD）',
+    // P1-7（2026-09-04）：game 类型的玩法真相源，不进必填矩阵（非 game 不生成；
+    // game 缺 GDD 由生成侧降级，不标 missing——对齐 prd_document 的「暂不进必填」口径）。
+    quickRequired: false,
+    longtermRequired: false,
+    source: 'llm',
+    dataFrom: 'gdd（game 类型玩法真相源：核心幻想/支柱/核心循环/数值基准）',
+    consumers: ['PRD 生成（从 GDD 切片）', 'loop 背板锚定段'],
+  },
 ]
 
 /** 章节 id → 定义（完备性检查/prompt 渲染共用）。 */
 export const PRD_SECTION_BY_ID: ReadonlyMap<PrdSectionId, PrdSectionDef> = new Map(
   PRD_SECTIONS.map((section) => [section.id, section]),
 )
+
+/**
+ * 每章节在 prd_document 长文本里的填充指令（P2-10，2026-09-04）：
+ * document 章节由 schema 驱动——章节标题/顺序/填充要求单一来源，不再硬编码「八节」。
+ * 空章节写「无/待确定」不编内容（OpenSpec 纪律）。
+ */
+export const DOCUMENT_SECTION_INSTRUCTIONS: Record<PrdSectionId, string> = {
+  positioning: '三要素（给谁用/什么场景/解决什么）+ 为什么做这件事（对话中用户表达的动机）',
+  prd_document: '', // 全文本身，不参与章节渲染
+  requirements: '逐功能项一段「作为<角色>，我想<功能>，以便<价值>」，并逐项给编号、优先级（P0/P1/P2）、验收要点（与 acceptance 逐字同源）',
+  pages: '对话能推出的界面形态与交互方式；推不出就写「待草图阶段确定」，不要编',
+  assertions: '逐功能项列出行为断言（EARS 形态，可执行可断言）',
+  gwt: '从行为断言派生的验收场景；无行为断言则写「由 P0 行为断言派生」',
+  out_of_scope: '与 out_of_scope 逐字同源；为空时写「本轮无明确排除项」',
+  constraints: '用户说过的「必须/不要」类要求与性能/隐私类诉求；无则写「无特殊约束」',
+  assumptions: '与 assumptions 逐字同源；为空时写「无」',
+  personas: '从对话提炼目标用户；对话没说清的按常见合理预期补一句并保持克制',
+  glossary: '对话中关键术语及定义；无则写「无」',
+  data_model: '涉及持久化数据时列出实体与关系；无则写「本轮无持久化数据」',
+  interface_spec: '端点定义（沙箱静态应用阶段可空）；无则写「静态应用无外部接口」',
+  gdd: '游戏设计文档四要素：核心幻想 / 设计支柱 / 核心循环 / 数值基准（仅 game 类型输出）',
+}
+
+/** 中文数字序号（章节标题「一、二、…十三」用；超出范围回退阿拉伯数字）。 */
+const CN_NUMBERS = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十', '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十']
+function toChineseNumber(n: number): string {
+  return CN_NUMBERS[n] ?? String(n)
+}
+
+/**
+ * 渲染 prd_document 的章节骨架（P2-10）：按 PRD_SECTIONS 顺序、跳过 prd_document 自身，
+ * 每章输出「## N、label —— 填充指令」。prd-engine-llm 的 system prompt 用它拼装，
+ * 章节与 schema 严格同源（加章节自动同步，不再硬编码八节）。
+ */
+export function renderDocumentSectionSpec(): string {
+  return PRD_SECTIONS
+    .filter((section) => section.id !== 'prd_document')
+    .map((section, index) => `## ${toChineseNumber(index + 1)}、${section.label} —— ${DOCUMENT_SECTION_INSTRUCTIONS[section.id]}`)
+    .join('\n')
+}
 
 /** 等级序（loose < standard < strict；requiredFromLevel 判定用）。 */
 const LEVEL_ORDER: Record<ConstraintLevel, number> = { loose: 0, standard: 1, strict: 2 }
@@ -261,9 +333,19 @@ export function checkSectionCompleteness(
       case 'interface_spec':
         mark('interface_spec', Array.isArray(backplane.interface_spec), 'API Spec 字段缺失')
         break
+      case 'constraints':
+        mark('constraints', Array.isArray(backplane.constraints), '用户约束字段缺失')
+        break
+      case 'assumptions':
+        mark('assumptions', Array.isArray(backplane.assumptions), '后台假设字段缺失')
+        break
       case 'data_model':
         // 选填章节不进 missing（requiredSections 已过滤，此处仅为穷尽性保护）
         present.push('data_model')
+        break
+      case 'gdd':
+        // 选填章节（game 类型专属）不进 missing——game 缺 GDD 由生成侧降级，不标 missing
+        present.push('gdd')
         break
     }
   }
