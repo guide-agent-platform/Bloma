@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type {
   DocumentReadResult,
@@ -139,10 +139,12 @@ export function syncDocuments(input: DocumentSyncInput, backplaneOverride?: PrdB
     })
   }
 
-  // 清单：被本次同步覆盖（同 path 再次产出）的旧文档标记为 stale
+  // 清单：被本次同步覆盖（同 path 再次产出）的旧文档标记为 stale。
+  // 豁免 type 'loop_log'（P3 append-only 过程日志：无「过期重写」语义，防御纵深——
+  // 结构上 loop-log.md 也从不与 checkpoint 产出路径重叠，双重保险，测试锁定）。
   const newPaths = new Set(files.map((file) => join(dir, file.relativePath)))
   const staleDocuments: DocumentRef[] = previous
-    .filter((entry) => entry.status === 'synced' && newPaths.has(entry.path))
+    .filter((entry) => entry.status === 'synced' && entry.type !== 'loop_log' && newPaths.has(entry.path))
     .map((entry) => ({ document_id: entry.document_id, type: entry.type, path: entry.path, status: 'stale' as const }))
 
   const untouched = previous.filter((entry) => !newPaths.has(entry.path))
@@ -223,6 +225,93 @@ export function writePlanDocument(projectId: string, markdown: string): Document
     return { document_id: 'plan', type: 'plan', path, status: 'synced' }
   } catch {
     return null
+  }
+}
+
+// =========================================================================
+// P3 loop-log（2026-09-04）：append-only 过程日志
+// =========================================================================
+
+/** loop-log 总开关：缺省开；BLOMA_LOOP_LOG=0/off/false 关闭（诊断噪声场景逃生门）。 */
+export function loopLogEnabled(): boolean {
+  const raw = process.env.BLOMA_LOOP_LOG
+  if (!raw) return true
+  const value = raw.trim().toLowerCase()
+  return value !== '0' && value !== 'off' && value !== 'false'
+}
+
+/** loop-log 条目：会话头（每次 runAgentLoop 一个）/ 轮次行（onTurn 实时）/ 终态节。 */
+export type LoopLogEntry =
+  | {
+      kind: 'session_start'
+      mode: import('../shared/types').ProjectMode
+      maxTurns: number
+      /** plan 摘要行（PR-B 依赖 A：filesToTouch 一行摘要；null = 未生成） */
+      planSummary?: string | null
+      /** 会话标签（「MVP 生成」/「迭代重生成」——迭代重跑新增分节不覆盖历史） */
+      label?: string
+    }
+  | {
+      kind: 'turn'
+      turn: number
+      toolCalls: Array<{ name: string; path?: string }>
+      inputTokens?: number
+      outputTokens?: number
+    }
+  | { kind: 'final'; status: string; turns: number; toolCalls: number }
+
+/** 文档头（首次创建时写入一次；后续会话分节追加）。 */
+const LOOP_LOG_DOC_HEADER = [
+  '# Agent Loop 过程记录（loop-log）',
+  '',
+  '> append-only 过程日志：每轮实时追加；取消/崩溃后磁盘证据完整（磁盘证据收敛口径直接受益）。',
+  '> 迭代重跑新增会话分节，历史永不改写。',
+  '',
+].join('\n')
+
+/**
+ * P3 loop-log 追加写盘（append-only，不走 checkpoint switch）：
+ *
+ * - 文件 documents/{project_id}/loop-log.md；首次写入文档头，之后纯追加；
+ * - 会话头：时间/mode/maxTurns/plan 摘要行；轮次：`- 轮 N：tool(path) → tool ｜ tokens`；
+ *   终态：`### 终态：status（N 轮 / M 次工具调用）`——cancelled/error 也如实写（硬约束 7）；
+ * - 清单登记幂等（type 'loop_log'，永不标 stale——见 syncDocuments 豁免）；
+ * - 每轮一次小 IO（appendFileSync 毫秒级，D4）；抛错由调用方静默（诊断增强不阻断主链路）。
+ */
+export function appendLoopLogDocument(projectId: string, entry: LoopLogEntry): void {
+  const project = findProject(projectId)
+  const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  const path = join(dir, 'loop-log.md')
+  let block: string
+  if (entry.kind === 'session_start') {
+    const head = [
+      `## ${entry.label ?? 'Agent Loop 会话'}（${new Date().toISOString()}）`,
+      '',
+      `- 模式：${entry.mode}｜轮次上限：${entry.maxTurns}`,
+      `- 技术合同：${entry.planSummary ?? '未生成（plan 腿关闭或失败）'}`,
+      '',
+    ].join('\n')
+    block = existsSync(path) ? `\n${head}` : `${LOOP_LOG_DOC_HEADER}\n${head}`
+  } else if (entry.kind === 'turn') {
+    const tools = entry.toolCalls.length > 0
+      ? entry.toolCalls.map((call) => (call.path ? `${call.name}(${call.path})` : call.name)).join(' → ')
+      : '（无工具调用）'
+    const tokens =
+      entry.inputTokens !== undefined || entry.outputTokens !== undefined
+        ? ` ｜ tokens in ${entry.inputTokens ?? '-'}/out ${entry.outputTokens ?? '-'}`
+        : ''
+    block = `- 轮 ${entry.turn}：${tools}${tokens}\n`
+  } else {
+    block = `\n### 终态：${entry.status}（${entry.turns} 轮 / ${entry.toolCalls} 次工具调用）\n`
+  }
+  appendFileSync(path, block, 'utf8')
+  const previous = readManifest(dir)
+  if (!previous.some((existing) => existing.path === path)) {
+    writeManifest(dir, [
+      ...previous,
+      { document_id: 'loop-log', path, type: 'loop_log', checkpoint: 'loop_log', status: 'synced' },
+    ])
   }
 }
 

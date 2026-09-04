@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { runAgentLoop, TOOL_WINDOW_ROUNDS, windowMessages, type AgentLoopInput, type AgentLoopTool, type ToolOutcome } from '../../main/agent-loop'
+import { runAgentLoop, TOOL_WINDOW_ROUNDS, windowMessages, type AgentLoopInput, type AgentLoopTool, type AgentLoopTurnInfo, type ToolOutcome } from '../../main/agent-loop'
 import type { AgentEvent } from '../../shared/types'
 import type { SDKMessage } from '../../shared/types'
 import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
@@ -876,5 +876,49 @@ describe('绿灯收口与宽限轮（2026-08-29 turn_limit 线上案例 eb900c57
     const result = await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 2 }))
     expect(result.status).toBe('turn_limit')
     expect(result.turns).toBe(2)
+  })
+
+  // ---- P3 loop-log（2026-09-04 PR-B）：TurnInfo.toolCalls 可选 path 提取 ----
+
+  it('P3：文件类工具的入参 path 提取进 TurnInfo（write_file 携带；非文件工具无 path 键）', async () => {
+    const writeFile = tool('write_file', () => ({ output: 'written' }))
+    const echo = tool('echo', () => ({ output: 'ok' }))
+    const turns: AgentLoopTurnInfo[] = []
+    const query: SDKQuery = async function* () {
+      yield toolUseMessage('t1', 'write_file', { path: 'src/app.js', content: 'x' })
+      yield toolUseMessage('t2', 'echo')
+      yield { type: 'result', subtype: 'success', stop_reason: 'tool_use', usage: { input_tokens: 10, output_tokens: 5 } }
+    }
+    const result = await runAgentLoop(baseInput({
+      query,
+      tools: [writeFile, echo],
+      maxTurns: 1,
+      onTurn: (info) => turns.push(info),
+    }))
+    // path 提取：仅文件类工具携带；同一轮内非文件工具不带 path 键
+    expect(turns).toHaveLength(1)
+    expect(turns[0].toolCalls).toEqual([
+      { name: 'write_file', turn: 1, path: 'src/app.js' },
+      { name: 'echo', turn: 1 },
+    ])
+    // result.toolCalls 同源继承（同一数组对象拼接）
+    expect(result.toolCalls).toEqual(turns[0].toolCalls)
+  })
+
+  it('P3：path 入参非字符串/空白时不提取（防御）；既有埋点消费方零感知（无 path 键）', async () => {
+    const echo = tool('echo', () => ({ output: 'ok' }))
+    const turns: AgentLoopTurnInfo[] = []
+    const query: SDKQuery = async function* () {
+      yield toolUseMessage('t1', 'echo', { path: 42 })
+      yield toolUseMessage('t2', 'echo', { path: '   ' })
+      yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+    }
+    await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 1, onTurn: (info) => turns.push(info) }))
+    expect(turns[0].toolCalls).toEqual([
+      { name: 'echo', turn: 1 },
+      { name: 'echo', turn: 1 },
+    ])
+    // 非文件工具的既有形态一字不增（payload 不变形，硬约束 8）
+    expect(Object.keys(turns[0].toolCalls[0])).toEqual(['name', 'turn'])
   })
 })

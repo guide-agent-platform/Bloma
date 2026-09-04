@@ -1,6 +1,6 @@
 import { restorePromaHome } from '../../support/proma-home-guard'
 import type { ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -79,6 +79,7 @@ function loopCompleted() {
 describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
   const originalPromaHome = process.env.PROMA_HOME
   const originalPlanLeg = process.env.BLOMA_PLAN_LEG
+  const originalLoopLog = process.env.BLOMA_LOOP_LOG
   let home = ''
   let channelId = ''
 
@@ -86,6 +87,7 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
     home = mkdtempSync(join(tmpdir(), 'proma-plan-'))
     process.env.PROMA_HOME = home
     delete process.env.BLOMA_PLAN_LEG
+    delete process.env.BLOMA_LOOP_LOG
     mocks.runAgentLoop.mockReset()
     mocks.runAgentLoop.mockResolvedValue(loopCompleted())
     mocks.generateLoopPlan.mockReset()
@@ -114,6 +116,8 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
     restorePromaHome(originalPromaHome)
     if (originalPlanLeg === undefined) delete process.env.BLOMA_PLAN_LEG
     else process.env.BLOMA_PLAN_LEG = originalPlanLeg
+    if (originalLoopLog === undefined) delete process.env.BLOMA_LOOP_LOG
+    else process.env.BLOMA_LOOP_LOG = originalLoopLog
     setProgrammingEventPublisher(() => undefined)
     clearSandboxRuntimeForTests()
   })
@@ -209,4 +213,71 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
     expect(mocks.generateLoopPlan).toHaveBeenCalledTimes(1)
     expect(quickForced.system).toContain('【技术合同')
   })
+
+  // ---- P3 PR-B：loop-log 接线（同一 harness；onTurn 经 mock 的 runAgentLoop 入参驱动） ----
+
+  function readLoopLog(workspaceSlug: string, projectId: string): string {
+    return readFileSync(join(getDocumentsDir(workspaceSlug, projectId), 'loop-log.md'), 'utf8')
+  }
+
+  it('loop-log 全链：会话头（含 plan 摘要行）+ 逐轮 append（带 path）+ 终态节', { timeout: 60_000 }, async () => {
+    mocks.generateLoopPlan.mockResolvedValue(SAMPLE_PLAN)
+    mocks.runAgentLoop.mockImplementation(async (loopInput: { onTurn?: (info: unknown) => void }) => {
+      loopInput.onTurn?.({ turn: 1, toolCalls: [{ name: 'write_file', turn: 1, path: 'index.html' }, { name: 'run_preview', turn: 1 }], inputTokens: 100, outputTokens: 20 })
+      loopInput.onTurn?.({ turn: 2, toolCalls: [{ name: 'edit_file', turn: 2, path: 'src/app.js' }] })
+      return loopCompleted()
+    })
+    const run = await runOnce('longterm', REQUIREMENTS)
+
+    const log = readLoopLog(run.workspaceSlug, run.projectId)
+    expect(log).toContain('# Agent Loop 过程记录（loop-log）')
+    expect(log).toContain('## MVP 生成（')
+    expect(log).toContain('- 模式：longterm｜轮次上限：40')
+    // plan 摘要行引用 plan 腿产物（B 依赖 A）
+    expect(log).toContain('2 个目标文件：index.html、src/app.js')
+    expect(log).toContain('- 轮 1：write_file(index.html) → run_preview ｜ tokens in 100/out 20')
+    expect(log).toContain('- 轮 2：edit_file(src/app.js)')
+    expect(log).toContain('### 终态：completed（3 轮 / 1 次工具调用）')
+  })
+
+  it('loop 异常抛错：终态节如实写 error（已写轮次在盘）后原样上抛', { timeout: 60_000 }, async () => {
+    mocks.runAgentLoop.mockImplementation(async (loopInput: { onTurn?: (info: unknown) => void }) => {
+      loopInput.onTurn?.({ turn: 1, toolCalls: [{ name: 'write_file', turn: 1, path: 'index.html' }] })
+      throw new Error('LOOP_BLEW_UP')
+    })
+    await expect(runOnce('quick', REQUIREMENTS)).rejects.toThrow('LOOP_BLEW_UP')
+
+    // 崩溃续写口径：已写轮次与 error 终态节都在盘上（runOnce 抛错拿不到返回值，从盘上反查最新 log）
+    const log = findLatestLoopLog()
+    expect(log).toContain('- 轮 1：write_file(index.html)')
+    expect(log).toContain('### 终态：error（1 轮 / 1 次工具调用）')
+  })
+
+  it('BLOMA_LOOP_LOG=0：零写盘（逃生门）', { timeout: 60_000 }, async () => {
+    process.env.BLOMA_LOOP_LOG = '0'
+    mocks.runAgentLoop.mockImplementation(async (loopInput: { onTurn?: (info: unknown) => void }) => {
+      loopInput.onTurn?.({ turn: 1, toolCalls: [{ name: 'write_file', turn: 1, path: 'index.html' }] })
+      return loopCompleted()
+    })
+    const run = await runOnce('quick', REQUIREMENTS)
+    expect(existsSync(join(getDocumentsDir(run.workspaceSlug, run.projectId), 'loop-log.md'))).toBe(false)
+  })
 })
+
+/** 反查本测试 PROMA_HOME 里最新写入的 loop-log 内容（崩溃用例无法拿到 runOnce 返回值时用）。 */
+function findLatestLoopLog(): string {
+  const workspacesDir = join(process.env.PROMA_HOME as string, 'agent-workspaces')
+  let best: { path: string; mtime: number } | undefined
+  for (const slug of readdirSync(workspacesDir)) {
+    const documentsRoot = join(workspacesDir, slug, 'documents')
+    if (!existsSync(documentsRoot)) continue
+    for (const id of readdirSync(documentsRoot)) {
+      const logPath = join(documentsRoot, id, 'loop-log.md')
+      if (!existsSync(logPath)) continue
+      const mtime = statSync(logPath).mtimeMs
+      if (!best || mtime > best.mtime) best = { path: logPath, mtime }
+    }
+  }
+  if (!best) throw new Error('no loop-log found')
+  return readFileSync(best.path, 'utf8')
+}

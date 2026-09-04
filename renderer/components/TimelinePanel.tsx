@@ -426,6 +426,7 @@ const DOC_TYPE_LABELS: Record<SnapshotDocumentEntry['type'], string> = {
   changelog: '变更日志',
   decisions: '决策记录',
   plan: '技术合同',
+  loop_log: 'Loop 过程记录',
 }
 
 const SnapshotDocumentsModal: React.FC<{

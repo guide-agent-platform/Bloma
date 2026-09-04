@@ -72,9 +72,18 @@ export interface AgentLoopTool {
   execute(input: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutcome>
 }
 
+/** 单次工具调用的过程记录（TurnInfo / LoopResult 共用）。
+ *  path：文件类工具（write_file/edit_file/read_file 等）携带的目标相对路径——
+ *  P3 loop-log 过程证据用；可选字段，既有埋点消费方向后兼容（payload 不变形）。 */
+export interface AgentLoopToolCallRecord {
+  name: string
+  turn: number
+  path?: string
+}
+
 export interface AgentLoopTurnInfo {
   turn: number
-  toolCalls: Array<{ name: string; turn: number }>
+  toolCalls: AgentLoopToolCallRecord[]
   inputTokens?: number
   outputTokens?: number
 }
@@ -116,7 +125,8 @@ export interface AgentLoopInput {
   temperature?: number
   signal: AbortSignal
   publish: (type: AgentEvent['type'], payload: Record<string, unknown>) => void
-  /** 每轮回调（PR3 埋点 agent_loop_turn：工具清单 + usage 若渠道返回） */
+  /** 每轮回调（PR3 埋点 agent_loop_turn：工具清单 + usage 若渠道返回；
+   *  P3 loop-log 同一回调实时 append 过程记录，零新接线） */
   onTurn?: (info: AgentLoopTurnInfo) => void
 }
 
@@ -124,7 +134,7 @@ export interface AgentLoopResult {
   status: AgentLoopStatus
   turns: number
   finalText: string
-  toolCalls: Array<{ name: string; turn: number }>
+  toolCalls: AgentLoopToolCallRecord[]
   /** 会话级 usage 聚合（费用守卫 Hook 1，2026-08-28 队友）：逐轮累计渠道返回 usage + 全块口径估算 */
   usage?: { inputTokens: number; outputTokens: number; estContextTokens: number; turnsWithUsage: number }
 }
@@ -509,7 +519,13 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     appendLoopMessage(input.sessionId, 'assistant', assistantBlocks)
 
     const turnToolUses = assistantBlocks.filter((block): block is MessageContentBlock & { type: 'tool_use'; id: string; name: string } => block.type === 'tool_use')
-    const turnCalls = turnToolUses.map((use) => ({ name: use.name, turn }))
+    // P3 loop-log：文件类工具的入参 path 提取进过程记录（write_file/edit_file 均携带；
+    // 其他工具无 path 字段则省略——可选字段，既有埋点消费方零感知）
+    const turnCalls: AgentLoopToolCallRecord[] = turnToolUses.map((use) => {
+      const rawPath = use.input?.path
+      const path = typeof rawPath === 'string' && rawPath.trim() ? rawPath.trim() : undefined
+      return { name: use.name, turn, ...(path ? { path } : {}) }
+    })
     toolCalls.push(...turnCalls)
     input.onTurn?.({ turn, toolCalls: turnCalls, inputTokens: usage?.input_tokens, outputTokens: usage?.output_tokens })
 

@@ -5,7 +5,7 @@ import type { AgentEvent, AgentLoopJudgeMetadata, AgentSendMessageInput, Channel
 import type { ThinkingLevel } from '../../shared/reasoning-profile'
 import { getAgentSessionPath, getDocumentsDir } from '../../storage/config-paths'
 import { appendJsonLine } from '../../storage/json-store'
-import { readPrdBackplane, readUxContractSketch, renamePrdProject, syncDocuments, updateRequirementStatus, writePlanDocument, writeSecurityScanDocument } from '../document-engine'
+import { appendLoopLogDocument, loopLogEnabled, readPrdBackplane, readUxContractSketch, renamePrdProject, syncDocuments, updateRequirementStatus, type LoopLogEntry, writePlanDocument, writeSecurityScanDocument } from '../document-engine'
 import { appendProjectLearning, renderLearningsSection } from '../learnings-log'
 import { createSnapshot, runSandbox, trackAnalytics } from '../platform-services'
 import { renderPackageJson, renderStaticServer, renderSkeletonToProject, scaffoldEnabled } from '../project-scaffold'
@@ -807,6 +807,16 @@ function prepareSkeletonBeforeLoop(
   }
 }
 
+/** loop-log 追加（BLOMA_LOOP_LOG 开关 + 失败静默：诊断增强不是依赖，绝不阻断主链路）。 */
+function appendLoopLogSafely(projectId: string, entry: LoopLogEntry): void {
+  if (!loopLogEnabled()) return
+  try {
+    appendLoopLogDocument(projectId, entry)
+  } catch {
+    // 写盘失败静默
+  }
+}
+
 /**
  * P3 任务级契约 · plan 腿（2026-09-04）：loop 前单轮技术合同。
  *
@@ -940,6 +950,20 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   })
 
   let result: AgentLoopResult
+  // P3 loop-log：会话头先行（mode/maxTurns/plan 摘要行——B 依赖 A 的合同存在性）；
+  // 开关关/写盘失败均静默（诊断增强不是依赖）
+  appendLoopLogSafely(input.project_id, {
+    kind: 'session_start',
+    mode: input.mode,
+    maxTurns: resolveAgentLoopMaxTurns(input.mode),
+    planSummary: loopPlan
+      ? `${loopPlan.filesToTouch.length} 个目标文件：${loopPlan.filesToTouch.map((file) => file.path).join('、')}`
+      : null,
+    label: snapshotKind === 'iteration' ? '迭代重生成' : 'MVP 生成',
+  })
+  // 异常终态的计数量口径：onTurn 已写入盘的轮次/工具数（崩溃时 loop-log 本身即证据）
+  let loggedTurns = 0
+  let loggedToolCalls = 0
   try {
     result = await runAgentLoop({
     system: buildSystemWithPlan(editFormat),
@@ -978,6 +1002,8 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     signal: input.signal ?? new AbortController().signal,
     publish: (type, payload) => publish(input, type, payload),
     onTurn: (info) => {
+      loggedTurns = Math.max(loggedTurns, info.turn)
+      loggedToolCalls += info.toolCalls.length
       trackAnalytics({
         request_id: input.request_id,
         event: {
@@ -993,13 +1019,38 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
           privacy_level: 'research_safe',
         },
       })
+      // P3 loop-log：同一回调实时 append（对齐磁盘证据哲学：取消/崩溃后过程证据已在盘上）；
+      // agent_loop_turn 埋点 payload 结构不变（硬约束 8，path 只进 loop-log）
+      appendLoopLogSafely(input.project_id, {
+        kind: 'turn',
+        turn: info.turn,
+        toolCalls: info.toolCalls.map((call) => ({ name: call.name, ...(call.path ? { path: call.path } : {}) })),
+        ...(info.inputTokens !== undefined ? { inputTokens: info.inputTokens } : {}),
+        ...(info.outputTokens !== undefined ? { outputTokens: info.outputTokens } : {}),
+      })
     },
   })
+  } catch (loopError) {
+    // P3 loop-log：异常终态如实写终态节（硬约束 7：cancelled/error 也要终态节）后原样上抛
+    appendLoopLogSafely(input.project_id, {
+      kind: 'final',
+      status: 'error',
+      turns: loggedTurns,
+      toolCalls: loggedToolCalls,
+    })
+    throw loopError
   } finally {
     // 父 loop 收尾（含用户停止/异常）：stop 全部 running 子委派 + 清幂等缓存 + 注销父上下文
     // （审计 P1-2/P2-4——只 unregister 不清理会让子 agent 后台偷跑且结果丢失）
     disposeParentDelegationState(input.session_id)
   }
+  // P3 loop-log：正常返回终态节（completed/cancelled/turn_limit/budget_exhausted 如实记录）
+  appendLoopLogSafely(input.project_id, {
+    kind: 'final',
+    status: result.status,
+    turns: result.turns,
+    toolCalls: result.toolCalls.length,
+  })
 
   const durationMs = Date.now() - startedAt
   const toolDistribution: Record<string, number> = {}
