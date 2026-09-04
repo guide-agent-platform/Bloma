@@ -162,6 +162,18 @@ describe('template-injection（P5：注入点开关与切片）', () => {
       expect(system).not.toContain('模块化可选')
     })
 
+    it('P5 模式库章节注入：常见模式范式切片进模板段（防章节静默不注入）', () => {
+      const system = buildAgentLoopSystemPrompt(makeBackplane(), 'whole')
+      expect(system).toContain('常见模式范式（实现要点提示，非必选）')
+      // personal_tool 模板差异化内容（无悬浮球/无分页）
+      expect(system).toContain('防抖 200ms')
+      expect(system).toContain('容错 JSON 损坏')
+      expect(system).not.toContain('悬浮球')
+      // 切片独立性：buildLoopInjection 直连同样携带
+      const direct = buildLoopInjection('personal_tool')
+      expect(direct).toContain('常见模式范式')
+    })
+
     it('PR-2 产物形态条件化：工程骨架（skeletonMap）→ 解禁模块化 + 构建门禁说明', () => {
       const system = buildAgentLoopSystemPrompt(makeBackplane(), 'whole', undefined, '工程骨架已就位（测试地图）')
       expect(system).toContain('模块化可选')

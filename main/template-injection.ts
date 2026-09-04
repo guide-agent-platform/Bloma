@@ -110,10 +110,14 @@ export function buildLoopInjection(type: TemplateType, skeletonMap?: string | nu
   if (!template) return null
   const skeleton = skeletonMap ?? templateSection(template, 'tech_skeleton')
   const allowlist = templateSection(template, '依赖白名单')
+  // P5 模式库章节（2026-09-04）：常见实现范式切片（任意 ## 切片，模板缺失该章时为
+  // 空串不注入）——与骨架地图正交：范式是行为模式不是目录结构，两种形态都注入
+  const patterns = templateSection(template, '常见模式范式')
   return [
     `【工程模板（${template.name}，${template.level === 'loose' ? '宽松' : '标准'}级）】`,
     skeleton ? `技术骨架与目录约定：\n${skeleton}` : '',
     allowlist ? `依赖白名单：\n${allowlist}` : '',
+    patterns ? `常见模式范式（实现要点提示，非必选）：\n${patterns}` : '',
     '沙箱一律禁止外部资源：HTML 中的外部 CDN/第三方脚本/样式引用（含无引号写法）会被写入检查拦截；',
     'JS/CSS 动态加载外网资源会被安全扫描阻断；CSP（script-src self / connect-src none）在预览运行时兑底。',
     '以上机制与模板白名单内容无关——即使模板文本看似允许，也不要引用或加载任何外部资源。',
