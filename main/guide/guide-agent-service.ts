@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import type { AgentEvent, AgentMessage, AgentSendMessageInput, MessageContentBlock, Project, ProjectMode, ResearchIdea } from '../../shared/types'
 import { getAgentSessionPath } from '../../storage/config-paths'
+import { appendJsonLine } from '../../storage/json-store'
 import { routeDialogue, type ClarificationOption } from '../dialogue-router'
 import { loadPromptOverride } from '../prompt-config'
 import { parseDecisionText, recordDecision } from '../decision-log'
@@ -500,15 +501,6 @@ export async function handleGuideMessage(
       if (idx === undefined) return undefined
       return pending.issues[Number(idx)]
     }
-    const directedModification = substantive
-      .map((answer) => {
-        const issue = locateReviewIssue(answer.issue_id)
-        const answerText = answer.label || answer.option_id
-        if (!issue) return answerText
-        const claim = issue.claim.length > 60 ? `${issue.claim.slice(0, 60)}…` : issue.claim
-        return `${issue.location} 的问题（${claim}）按「${answerText}」修订，修改该功能项本身，不要新增功能项`
-      })
-      .join('；')
     recordDecision({
       project_id: input.project_id,
       session_id: input.session_id,
@@ -530,25 +522,52 @@ export async function handleGuideMessage(
     persistAssistant?.(ack)
     publish(makeGuideEvent(input, 'message_delta', { text: ack }))
     publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+    // 答案回流后的生成 env：优先复用挂起时的 env（向导轮模型 env），缺失回退本次 model。
+    // 2026-09-05「以撒地牢」实锤：env 传 undefined 会让 normalizer 走 fallback，把修订指令
+    // 原样 append 成功能项 description 污染 PRD。补上 env 让 normalizer 走 LLM 正确 revise。
+    const reviewEnv = pending.env ?? model?.env
     const existing = pending.requirements as SketchRequirement[]
-    const normalization = await normalizeRequirementUpdate({
-      session_id: input.session_id,
-      existing,
-      modification: refineModificationDescription(directedModification),
-      constraints: readProjectConstraints(input.project_id),
-      query: pending.query,
-      env: undefined,
-    })
-    const merged = applyNormalization(existing, normalization, nextRequirementId(existing), 'correction')
+    const requirementIds = new Set(existing.map((item) => item.id))
+    // 逐 issue 处理（不再拼成一个字符串塞给 normalizer——单 decision 无法承载多 issue，且
+    // fallback 会把 issue claim 全文污染成 description）。功能项类逐个 revise；章节类
+    // （目标用户/术语表/API Spec 等非功能项）答案落盘 user 轮次，供 PRD 管线 readConversation 吸收。
+    let current = existing
+    const sectionAnswers: string[] = []
+    for (const answer of substantive) {
+      const issue = locateReviewIssue(answer.issue_id)
+      const answerText = answer.label || answer.option_id
+      if (!issue || !answerText) continue
+      if (requirementIds.has(issue.location)) {
+        const directive = `${issue.location} 的修改诉求：${answerText}`
+        const normalization = await normalizeRequirementUpdate({
+          session_id: input.session_id,
+          existing: current,
+          modification: refineModificationDescription(directive),
+          constraints: readProjectConstraints(input.project_id),
+          query: pending.query,
+          env: reviewEnv,
+        })
+        current = applyNormalization(current, normalization, nextRequirementId(current), 'correction')
+      } else {
+        sectionAnswers.push(`${issue.location}：${answerText}`)
+      }
+    }
+    if (sectionAnswers.length > 0) {
+      appendJsonLine(getAgentSessionPath(input.session_id), {
+        role: 'user',
+        content: [{ type: 'text', text: `补充说明：${sectionAnswers.join('；')}` }],
+        timestamp: Date.now(),
+      })
+    }
     await runPrdPipeline({
       request_id: input.request_id,
       session_id: input.session_id,
       project_id: input.project_id,
       mode: input.mode,
       channel_id: input.channel_id,
-      requirements: merged,
+      requirements: current,
       query: pending.query,
-      env: undefined,
+      env: reviewEnv,
       publish,
       signal: model?.signal,
     })
@@ -1524,6 +1543,7 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
         backplane: backplaneForReview,
         query: pending.query ?? NO_QUERY_FALLBACK,
         publish,
+        env: pending.env,
         signal,
       })
       return { started: true, prd_written: prdWritten }

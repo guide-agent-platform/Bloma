@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -358,6 +358,64 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     expect(vi.mocked(applyNormalization)).toHaveBeenCalled()
     const deltas = events.filter((event) => event.type === 'message_delta').map((event) => String(event.payload.text))
     expect(deltas.some((text) => text.includes('修订 PRD'))).toBe(true)
+  })
+
+  it('逐题答案：功能项类走 normalizer 简洁指令、章节类答案落盘 user 轮次，不污染 description', async () => {
+    const proj = 'proj-answers-section'
+    const inputFor = (content: string, extra?: Partial<AgentSendMessageInput>): AgentSendMessageInput => ({
+      ...makeInput(content),
+      project_id: proj,
+      ...extra,
+    })
+    // 审查 issue：功能项（F-002）+ 章节（目标用户）——复现 2026-09-05「以撒地牢」污染场景
+    const failJson = JSON.stringify({
+      issues: [
+        {
+          dimension: 'F', severity: 'major', location: 'F-002',
+          claim: '用户要的按月汇总在 PRD 里被弱化成了可选',
+          evidence: ['按月汇总统计'],
+          plain_question: '你想要的按月汇总，要不要作为主要功能？',
+          options: [{ id: 'monthly-core', label: '要，作为主要功能', description: '每月自动出汇总' }],
+        },
+        {
+          dimension: 'G', severity: 'major', location: '目标用户',
+          claim: '目标用户章节为空，无法判断为谁而做',
+          evidence: ['PRD 中无目标用户章节'],
+          plain_question: '这个工具是给谁用的？',
+          options: [{ id: 'self', label: '给自己用', description: '' }],
+        },
+      ],
+      clean_dimensions: ['I', 'Z'],
+    })
+    const { query } = scriptedQuery([failJson])
+    await handleGuideMessage(inputFor('做个记账的东西'), () => undefined, makeModel(query))
+    await resolveRequirementConfirm({ request_id: 'req-ans-sec', session_id: SESSION_ID, project_id: proj, decision: 'confirm' })
+
+    vi.mocked(normalizeRequirementUpdate).mockClear()
+    await handleGuideMessage(
+      {
+        ...inputFor('我选好了，按我的选择修订需求。'),
+        metadata: {
+          source: 'card_option',
+          review_answers: [
+            { issue_id: 'q0', option_id: 'q0:monthly-core', label: '要，作为主要功能' },
+            { issue_id: 'q1', option_id: 'q1:self', label: '给自己用' },
+          ],
+        },
+      },
+      () => undefined,
+      makeModel(scriptedQuery([reviewPassJson]).query),
+    )
+    // 功能项类走 normalizer：指令简洁（目标 id + 答案 label），不含 issue claim 全文
+    const modArg = String(vi.mocked(normalizeRequirementUpdate).mock.calls[0][0].modification)
+    expect(modArg).toContain('F-002')
+    expect(modArg).toContain('要，作为主要功能')
+    expect(modArg).not.toContain('被弱化')
+    // 章节类答案落盘 user 轮次，供 PRD 管线 readConversation 吸收
+    const sessionFile = join(process.env.PROMA_HOME ?? '', 'agent-sessions', `${SESSION_ID}.jsonl`)
+    const raw = readFileSync(sessionFile, 'utf8')
+    expect(raw).toContain('目标用户')
+    expect(raw).toContain('给自己用')
   })
 
   it('LLM 输出不可解析 → 规则门降级（degraded），正常背板放行（改造 3：发确认卡而非直接草图）', async () => {

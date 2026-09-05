@@ -117,6 +117,9 @@ interface PendingPrdReview {
   project_id: string
   mode: AgentSendMessageInput['mode']
   channel_id?: string
+  /** 审查挂起时的生成 env（向导轮模型 env）：答案回流后 normalizer 修订与 PRD 重跑需复用，
+   *  缺失会导致 normalizer 走 fallback 把修订指令原样 append 污染 description（2026-09-05 以撒地牢） */
+  env?: Record<string, string>
   requirements: Array<{ id: string; description: string }>
   issues: PrdReviewIssue[]
   /** 审查时的背板：override 后转 PRD 确认门要用（2026-08-27，不过目不开工） */
@@ -1075,6 +1078,8 @@ export function publishPrdReviewCard(opts: {
   backplane: PrdBackplane
   query: SDKQuery
   publish: (event: AgentEvent) => void
+  /** 挂起时的生成 env：答案回流后 normalizer/PRD 重跑需复用（缺失走 fallback 污染 description） */
+  env?: Record<string, string>
   /** 停止信号（m-6）：挂起方与确认卡回传后续链共享的可取消句柄 */
   signal?: AbortSignal
 }): void {
@@ -1088,6 +1093,7 @@ export function publishPrdReviewCard(opts: {
     project_id: input.project_id,
     mode: input.mode,
     channel_id: input.channel_id,
+    env: opts.env,
     requirements,
     issues,
     backplane: opts.backplane,
