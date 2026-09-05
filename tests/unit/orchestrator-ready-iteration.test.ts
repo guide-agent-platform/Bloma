@@ -160,6 +160,45 @@ describe('ready 护栏意图分流', () => {
     expect(deltas).toContain('想调整哪里直接告诉我')
   })
 
+  it('ready 阶段「生成完整程序」类诉求命中 L1「完整」→ 弹确认卡，不付 LLM 往返、不挡回固定文案', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-complete-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    let sdkCalled = false
+    setAgentStreamPublisher((event) => events.push(event))
+    setSDKQueryForTests(async function* () {
+      sdkCalled = true
+      yield { type: 'result', subtype: 'success' }
+    })
+
+    vi.mocked(findProject).mockReturnValue({
+      project_id: 'project-ready-complete',
+      current_stage: 'ready',
+    } as never)
+
+    await runAgent({
+      request_id: 'req-complete',
+      session_id: 'session-complete',
+      project_id: 'project-ready-complete',
+      content: '生成完整程序',
+      mode: 'quick',
+      current_stage: 'ready',
+      channel_id: 'test-channel',
+    })
+
+    // L1 词表命中「完整」→ 修改确认门，而非固定文案 / L3 LLM
+    expect(runIterationTaskMock).not.toHaveBeenCalled()
+    expect(sdkCalled).toBe(false)
+    const decision = events.find((event) => event.type === 'user_decision_required')
+    expect(decision?.payload.kind).toBe('iteration_confirm')
+    const deltas = events
+      .filter((event) => event.type === 'message_delta')
+      .map((event) => String(event.payload.text ?? ''))
+      .join('')
+    expect(deltas).toContain('生成完整程序')
+    expect(deltas).not.toContain('已经生成好了')
+  })
+
   it('ready 阶段「货不对板/否定」类反馈（"啥意思，我要音乐合成器"）→ 确认卡，reply 展示清洗后的「音乐合成器」', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-ready-mismatch-'))
     process.env.PROMA_HOME = home
