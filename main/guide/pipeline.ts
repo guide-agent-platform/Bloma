@@ -106,8 +106,8 @@ export async function resolvePrdBackplane(
   // 上轮已写盘的 prd.json（如有）：重跑时其对应项既有字段并入合并底（§3.2）；首轮无 prd.json 按最后草图需求忠实重建（不含默认项）
   const existing = readPrdBackplane(input.project_id)
   // 渠道能力上限：enricher 与 generatePrdLlm 共用同一上限，直接用渠道配置值；
-  // 2026-09-03 长文本 PRD：document 字段加入后 8192 必截断，缺省上限提到 16384（渠道显式配置仍优先）
-  const maxTokens = channel.max_tokens ?? 16384
+  // 2026-09-05 全渠道统一 640000（防思考型渠道零正文；渠道显式配置仍优先）
+  const maxTokens = channel.max_tokens ?? 640000
   // 并行：PRD 元数据提取 + 功能项加厚互不依赖，共用同一渠道/env/对话
   const [llm, enriched] = await Promise.all([
     generatePrdLlm({

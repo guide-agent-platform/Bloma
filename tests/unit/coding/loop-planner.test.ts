@@ -217,7 +217,7 @@ describe('generateLoopPlan — callLlmForJson 包装（D6 参数锁定）', () =
     expect(calls[0].options.temperature).toBe(PLAN_TEMPERATURE)
     expect(calls[0].options.temperature).toBe(0.2)
     expect(calls[0].options.maxTokens).toBe(PLAN_MAX_TOKENS)
-    expect(calls[0].options.maxTokens).toBe(4096)
+    expect(calls[0].options.maxTokens).toBe(640000)
     expect(calls[0].options.thinkingLevel).toBe('off')
     expect(calls[0].options.providerType).toBe('anthropic')
     expect(calls[0].options.env).toEqual({ K: 'v' })

@@ -42,7 +42,7 @@ export interface EnrichRequirementsInput {
   query: SDKQuery
   env: Record<string, string>
   signal?: AbortSignal
-  /** 渠道能力上限（channel.max_tokens ?? 2048，§3.3 传入）；enricher 预算 = min(该上限, 4096 + 项数×600)，绝不请求超过渠道上限 */
+  /** 渠道能力上限（channel.max_tokens ?? 640000，§3.3 传入）；enricher 预算 = min(该上限, 4096 + 项数×600)，绝不请求超过渠道上限 */
   maxTokens?: number
 }
 
@@ -64,7 +64,7 @@ export interface EnrichmentStats {
   prioritySuppressed: number
 }
 
-const DEFAULT_MAX_TOKENS = 2048
+const DEFAULT_MAX_TOKENS = 640000
 /** 生成尝试次数上限：首试 + 至多一次恢复重试（对齐 mvp-engine-llm 的 MAX_GENERATION_ATTEMPTS=2）。 */
 export const MAX_GENERATION_ATTEMPTS = 2
 /** 加厚输出预算基准（设计 §3.1）：4096 + 项数×600 线性放大，长清单自动扩容避免截断。 */
@@ -143,7 +143,7 @@ export async function enrichRequirementsLlm(
   if (!conversation.trim()) return null
   if (!input.query || !input.env) return null
 
-  // 渠道能力上限（调用侧 §3.3 传入 channel.max_tokens ?? 2048）
+  // 渠道能力上限（调用侧 §3.3 传入 channel.max_tokens ?? 640000）
   const channelCap = input.maxTokens ?? DEFAULT_MAX_TOKENS
   const initialBudget = Math.min(channelCap, BUDGET_BASE + input.requirements.length * BUDGET_PER_ITEM)
 

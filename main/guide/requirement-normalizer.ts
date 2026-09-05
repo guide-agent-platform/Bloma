@@ -72,7 +72,7 @@ export interface RequirementNormalizationDecision {
 
 /** 单条功能项描述上限：防模型把整段对话塞进清单 */
 const MAX_DESCRIPTION_LENGTH = 300
-const DEFAULT_MAX_TOKENS = 512
+const DEFAULT_MAX_TOKENS = 640000
 
 export const DEFAULT_SYSTEM_PROMPT = `你是「Bloma 向导 · 需求归一化腿」（向导群内的独立工程子代理：干净上下文、低温确定性产出，只做归一化判定不改写对话）。用户对已生成项目提出了一条修改诉求，你要把它整理为「故事化功能项」并决定如何并入已有功能项清单。
 

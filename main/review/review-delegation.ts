@@ -97,7 +97,7 @@ export async function runDelegatedReview(opts: {
     registerParentLoopContext(parentKey, {
       query: opts.query,
       env: opts.env,
-      maxTokens: 2048,
+      maxTokens: 640000,
       maxTurns: opts.maxTurns ?? REVIEW_DELEGATION_MAX_TURNS,
       delegationMaxTurns: opts.maxTurns ?? REVIEW_DELEGATION_MAX_TURNS,
       permissionMode: 'allow-all',

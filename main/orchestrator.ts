@@ -336,7 +336,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       // runtime-fallback 记录）：引导路径回规则路由，编程路径报可读错误。
       console.error(`[runAgent] 渠道不可用（reason=${resolution.unusableReason}，channel_id=${input.channel_id ?? 'auto'}），本次模型不参与：引导走规则路由、草图走模板`)
     }
-    const maxTokens = channel?.max_tokens ?? 1200
+    const maxTokens = channel?.max_tokens ?? 640000
     // 多轮历史（T4-L2 窗口改造）：近 N 轮原文（显式常量，默认 10——不再静默写死 20；
     // 窗口只管「最近在聊什么」）+ 全量约束扫描回灌（约束是长期不变量，来自全量 JSONL，
     // 第 1 轮说的约束在 30 轮后依然注入）。漏网的约束在此回填 project.constraints。
@@ -1088,7 +1088,7 @@ export async function* anthropicMessagesQuery(prompt: string, options: SDKQueryO
   }
   const body: Record<string, unknown> = {
     model,
-    max_tokens: options.maxTokens ?? 1200,
+    max_tokens: options.maxTokens ?? 640000,
     stream: true,
     messages,
   }
@@ -1102,7 +1102,7 @@ export async function* anthropicMessagesQuery(prompt: string, options: SDKQueryO
     if (devFragment.omit) {
       console.warn('[anthropicMessagesQuery] omit 渠道忽略 BLOMA_SHOW_THINKING（thinking 字段会 400）')
     } else {
-      const maxTokens = options.maxTokens ?? 1200
+      const maxTokens = options.maxTokens ?? 640000
       const budget = Math.min(1024, Math.floor(maxTokens / 2))
       body.thinking = { type: 'enabled', budget_tokens: Math.max(256, budget) }
     }

@@ -565,9 +565,9 @@ describe('enrichRequirementsLlm — LLM 提取', () => {
     await enrichRequirementsLlm({ session_id: 'enr-budget', requirements: [{ id: 'F-001', description: '做一个家庭记账本' }], query, env: { PATH: 'x' }, maxTokens: 7000 })
     expect(seen[0].maxTokens).toBe(4696)
     seen = []
-    // 缺省（未传 maxTokens）→ 渠道上限 2048
+    // 缺省（未传 maxTokens）→ 渠道上限 640000，预算 = min(640000, 4096+600) = 4696
     await enrichRequirementsLlm({ session_id: 'enr-budget', requirements: [{ id: 'F-001', description: '做一个家庭记账本' }], query, env: { PATH: 'x' } })
-    expect(seen[0].maxTokens).toBe(2048)
+    expect(seen[0].maxTokens).toBe(4696)
   })
 
   it('signal 已 abort → null', async () => {

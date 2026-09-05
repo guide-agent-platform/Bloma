@@ -114,7 +114,7 @@ export async function distillProjectMemory(input: DistillMemoryInput): Promise<b
       env: resolution.env,
       signal: controller.signal,
       sessionId: input.session_id,
-      maxTokens: 1024,
+      maxTokens: 640000,
       temperature: categoryTemperature('summary'),
     })
     for await (const message of stream) {

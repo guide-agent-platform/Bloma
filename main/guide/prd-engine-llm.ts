@@ -46,8 +46,8 @@ export interface GeneratePrdLlmInput {
 }
 
 /** 默认不设生成超时（2026-08-16 用户决策「取消时间限制」，与 sketch/mvp 引擎同步）；timeoutMs>0 才设 timer，供测试注入。 */
-/** 2026-09-03 长文本 PRD：document 字段加入后 8192 必截断（对齐 sketch 引擎溢出教训），缺省放宽到 16384；渠道配置上限仍优先（orchestrator 传入）。 */
-const DEFAULT_MAX_TOKENS = 16384
+/** 对齐全渠道 640000（防思考型渠道零正文）；渠道配置上限仍优先（orchestrator 传入）。 */
+const DEFAULT_MAX_TOKENS = 640000
 
 /**
  * 内置默认 system prompt。可被 `{PROMA_HOME}/prompts/prd-system.md` 全量覆盖

@@ -68,9 +68,9 @@ export class SketchLlmError extends Error {
  * `timeoutMs` 语义改为「>0 才设 timer」：默认 0 = 不限时，参数保留供测试注入短超时。
  */
 
-/** 渠道未配置 max_tokens 时的默认值：线上草图实测 18691 字符已贴 8192 token 边缘，提到 16384 与 mvp-engine-llm 同值。 */
-const DEFAULT_MAX_TOKENS = 16384
-const MAX_MAX_TOKENS = 32768
+/** 渠道未配置 max_tokens 时的默认值：对齐全渠道 640000（防思考型渠道零正文；渠道显式配置仍优先）。 */
+const DEFAULT_MAX_TOKENS = 640000
+const MAX_MAX_TOKENS = 640000
 const MAX_GENERATION_ATTEMPTS = 2
 
 export const DEFAULT_SYSTEM_PROMPT = `你是「Bloma 草图生成器」，负责把用户的想法生成一个**无交互的纯外观 HTML 草图**，用来让用户确认"软件长什么样"。只输出一个完整的 HTML 文档，不要任何解释文字，不要 markdown 代码块围栏。

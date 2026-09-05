@@ -214,7 +214,7 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
           query: pending.query,
           env: resolution.env,
           signal: pending.signal,
-          maxTokens: resolution.channel.max_tokens ?? 2048,
+          maxTokens: resolution.channel.max_tokens ?? 640000,
         })
         if (earsified.stats.earsified > 0 && !pending.signal?.aborted) {
           const byItem: Record<string, string[]> = {}

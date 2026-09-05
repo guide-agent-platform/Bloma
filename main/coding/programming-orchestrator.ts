@@ -53,8 +53,8 @@ const WEB_RESEARCH_BUDGET = 4
  */
 const AUTOMATED_PERMISSION_MODE = 'allow-all' as const
 
-/** 渠道未配置 max_tokens 时的默认上限（与旧 mvp-engine-llm 的 16384 同值，loop 路径沿用）。 */
-const DEFAULT_MAX_TOKENS = 16384
+/** 渠道未配置 max_tokens 时的默认上限（对齐全渠道 640000，防思考型渠道零正文）。 */
+const DEFAULT_MAX_TOKENS = 640000
 
 /** 项目已生成完成（ready）的统一话术：完成通知与 ready 护栏共用，避免两套语义相近的固定文案。 */
 export const READY_COMPLETION_COPY =

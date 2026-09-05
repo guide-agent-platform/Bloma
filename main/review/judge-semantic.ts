@@ -190,7 +190,7 @@ async function judgeViaLlm(opts: {
     env: opts.env,
     signal: opts.signal ?? new AbortController().signal,
     sessionId: opts.sessionId,
-    maxTokens: 2048,
+    maxTokens: 640000,
     temperature: 0.1,
   })) {
     if (message.type !== 'assistant' || !message.message) continue

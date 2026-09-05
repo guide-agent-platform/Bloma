@@ -173,7 +173,7 @@ export function internalAuditBudget(mode?: AgentSendMessageInput['mode']): numbe
 const DEFENDER_DELEGATION_TIMEOUT_MS = 150_000
 const DEFENDER_MAX_TURNS = 10
 /** Defender 直连降级路径的输出 token 上限（背板全量 JSON 产出）。 */
-const DEFENDER_DIRECT_MAX_TOKENS = 8192
+const DEFENDER_DIRECT_MAX_TOKENS = 640000
 
 // =========================================================================
 // 审查执行
@@ -626,7 +626,7 @@ async function attackViaLlm(opts: {
     env: opts.env,
     signal: opts.signal ?? new AbortController().signal,
     sessionId: opts.sessionId,
-    maxTokens: opts.maxTokens ?? 2048,
+    maxTokens: opts.maxTokens ?? 640000,
     temperature: 0.1,
   })) {
     if (message.type !== 'assistant' || !message.message) continue

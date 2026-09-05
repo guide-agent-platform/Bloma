@@ -56,7 +56,7 @@ export interface EarsifyResult {
   stats: EarsifyStats
 }
 
-const DEFAULT_MAX_TOKENS = 2048
+const DEFAULT_MAX_TOKENS = 640000
 /** 生成尝试次数上限（对齐 enricher 的 MAX_GENERATION_ATTEMPTS=2：首试+一次反馈重试）。 */
 const MAX_ATTEMPTS = 2
 /** ②语义保持阈值：双度量任一达标（字符集重合对重排宽容、对换内容敏感，实测区分度 0.5+ vs 0.25-）。 */

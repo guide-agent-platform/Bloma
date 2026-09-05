@@ -13,8 +13,8 @@
  *   回退现状注入，不阻断 MVP 生成（callLlmForJson 天然 fail-closed，语义对齐）；
  * - 路径安全（PR-A 硬约束 11）：filesToTouch 校验拒绝 `..`、绝对路径、盘符、家目录
  *   前缀——plan 是模型产物，注入前必须过代码级守卫（validateLoopPlan）；
- * - 温度 0.2 / maxTokens 4096 / thinkingLevel off / attempts 2（D6：与主 loop 同渠道
- *   同 env、独立温度/maxTokens；陷阱 17：规划短输出不吞思考预算）。
+ * - 温度 0.2 / maxTokens 640000 / thinkingLevel off / attempts 2（D6：与主 loop 同渠道
+ *   同 env、独立温度/maxTokens；对齐全渠道 640000 防思考零正文）。
  *
  * 开关（PR-D 三开关之一）：`BLOMA_PLAN_LEG`——'0'=强制关；'1'=强制开；未设时按模式
  * 缺省 quick=off / longterm=on（D7：quick 是延迟敏感的确认-生成闭环，longterm 的
@@ -64,7 +64,7 @@ export const PLAN_FILES_LIMIT: Record<ProjectMode, number> = { quick: 12, longte
 
 /** plan 腿调用参数固定值（D6：独立温度/maxTokens，与主 loop 同渠道同 env）。 */
 export const PLAN_TEMPERATURE = 0.2
-export const PLAN_MAX_TOKENS = 4096
+export const PLAN_MAX_TOKENS = 640000
 export const PLAN_ATTEMPTS = 2
 
 // =========================================================================
