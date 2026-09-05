@@ -146,7 +146,7 @@ describe('renderPlanMarkdown / renderPlanInjection — 双格式渲染', () => {
   it('注入段：参考合同声明 + 目标文件 + 验证口径 + 自测收口行；risks 不进注入', () => {
     const injection = renderPlanInjection(plan)
     expect(injection).toContain('【技术合同')
-    expect(injection).toContain('不构成硬约束')
+    expect(injection).toContain('默认架构')
     expect(injection).toContain('目标文件：')
     expect(injection).toContain('- index.html：入口与布局')
     expect(injection).toContain('复用点：')

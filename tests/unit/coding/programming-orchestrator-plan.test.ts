@@ -198,7 +198,7 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
     const injection = renderPlanInjection(SAMPLE_PLAN)
     expect(planned.system).toBe(`${baseline.system}\n\n${injection}`)
     expect(planned.system).toContain('【技术合同')
-    expect(planned.system).toContain('不构成硬约束')
+    expect(planned.system).toContain('默认架构')
 
     // plan.md 落盘 + 清单登记
     const dir = getDocumentsDir(planned.workspaceSlug, planned.projectId)

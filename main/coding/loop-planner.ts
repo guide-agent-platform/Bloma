@@ -236,7 +236,7 @@ export function renderPlanInjection(plan: LoopPlan): string {
     verificationLines.push(`- （另有 ${plan.verification.length - INJECTION_VERIFICATION_LINES} 条验证口径，按 system 锚定段断言自测）`)
   }
   return [
-    '【技术合同（plan 腿产出，参考合同——不构成硬约束：实施中若有更优判断可偏离，但须在旁白用一句话说明偏离原因）】',
+    '【技术合同（plan 腿产出，默认架构——目标文件清单是推荐的模块拆分，实施时尽量按清单逐个落文件；偏离（如合并文件）须在旁白用一句话说明原因）】',
     '目标文件：',
     ...fileLines,
     '复用点：',

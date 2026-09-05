@@ -159,7 +159,7 @@ describe('template-injection（P5：注入点开关与切片）', () => {
     it('PR-2 产物形态条件化：无骨架 → 维持「不使用 import/ESM」现状话术', () => {
       const system = buildAgentLoopSystemPrompt(makeBackplane(), 'whole')
       expect(system).toContain('不使用 import/ESM 模块语法')
-      expect(system).not.toContain('模块化可选')
+      expect(system).not.toContain('模块化优先')
     })
 
     it('P5 模式库章节注入：常见模式范式切片进模板段（防章节静默不注入）', () => {
@@ -176,7 +176,7 @@ describe('template-injection（P5：注入点开关与切片）', () => {
 
     it('PR-2 产物形态条件化：工程骨架（skeletonMap）→ 解禁模块化 + 构建门禁说明', () => {
       const system = buildAgentLoopSystemPrompt(makeBackplane(), 'whole', undefined, '工程骨架已就位（测试地图）')
-      expect(system).toContain('模块化可选')
+      expect(system).toContain('模块化优先')
       expect(system).toContain('构建门禁')
       expect(system).not.toContain('不使用 import/ESM 模块语法') // 静态约束在工程形态下解除
       expect(system).toContain('工程骨架已就位')
