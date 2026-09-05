@@ -36,7 +36,7 @@ import { readPrimaryIntent, recordSessionActivity } from '../session-service'
 import { runAgentLoop, type AgentLoopResult } from '../agent-loop'
 import { buildAgentTools } from '../agent-tools'
 import { disposeParentDelegationState, registerParentLoopContext, setChildToolsBuilder } from '../agent-collaboration'
-import { categoryTemperature } from '../model-resolution'
+import { categoryTemperature, resolveGenerationMaxTokens } from '../model-resolution'
 import type { SDKQuery, ToolDefinition } from '../orchestrator'
 import { resolvePrdBackplane } from '../guide/pipeline'
 
@@ -1025,7 +1025,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   registerParentLoopContext(input.session_id, {
     query: input.query!,
     env: loop.env,
-    maxTokens: loop.channel.max_tokens ?? DEFAULT_MAX_TOKENS,
+    maxTokens: resolveGenerationMaxTokens(loop.channel),
     maxTurns: resolveAgentLoopMaxTurns(input.mode),
     delegationMaxTurns: DELEGATION_MAX_TURNS,
     permissionMode: AUTOMATED_PERMISSION_MODE,
@@ -1112,7 +1112,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     sessionId: input.session_id,
     projectId: input.project_id,
     requestId: input.request_id,
-    maxTokens: loop.channel.max_tokens ?? DEFAULT_MAX_TOKENS,
+    maxTokens: resolveGenerationMaxTokens(loop.channel),
     maxTurns: resolveAgentLoopMaxTurns(input.mode),
     permissionMode: AUTOMATED_PERMISSION_MODE,
     temperature: categoryTemperature('mvp'),

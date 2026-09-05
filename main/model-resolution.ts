@@ -147,3 +147,19 @@ export const CATEGORY_TEMPERATURES: Record<DocumentCategory, number> = {
 export function categoryTemperature(category: DocumentCategory): number {
   return CATEGORY_TEMPERATURES[category] ?? 0.1
 }
+
+/**
+ * 生成/修复类调用（MVP loop、修复轮）的单次输出上限缺省。
+ * 对齐 Proma 渠道 maxOutputTokens=640000（2026-09-05 用户拍板全渠道统一）。
+ * 根因（2026-09-04「地牢拾荒录」双次 MVP 生成失败）：deepseek-v4-pro 在 thinking
+ * 开启时把 max_tokens 全耗在思考上，16384 被顶满后正文零字符 → loop 空转「completed」
+ * → GWT 4 项全失败 → 熔断回滚。给足输出空间让思考自然结束再产出正文。
+ */
+export const GENERATION_MAX_TOKENS = 640000
+
+/**
+ * 生成/修复类调用的 max_tokens 解析：渠道显式配置优先，缺省统一 640000（全渠道）。
+ */
+export function resolveGenerationMaxTokens(channel: { max_tokens?: number }): number {
+  return channel.max_tokens ?? GENERATION_MAX_TOKENS
+}

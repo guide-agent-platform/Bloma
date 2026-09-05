@@ -5,6 +5,7 @@ import {
   categoryTemperature,
   DEFAULT_CATEGORY_CONFIGS,
   resolveCategoryModel,
+  resolveGenerationMaxTokens,
   resetCategoryConfigsForTests,
   setCategoryConfigForTests,
   type DocumentCategory,
@@ -127,5 +128,16 @@ describe('model-resolution（类别 → 模型解析管线）', () => {
     // strongest 依旧取列表序首个，即使后面跟着 flash
     const strong = makeChannel([{ name: 'a-pro' }, { name: 'a-flash' }])
     expect(resolveCategoryModel(strong, 'sketch').model).toBe('a-pro')
+  })
+})
+
+describe('resolveGenerationMaxTokens（生成/修复轮输出上限解析）', () => {
+  it('未显式配置 → 统一 640000（对齐 Proma，防思考烧光预算零正文）', () => {
+    expect(resolveGenerationMaxTokens({})).toBe(640000)
+  })
+
+  it('渠道显式配置 max_tokens 优先（用户可手动收窄）', () => {
+    expect(resolveGenerationMaxTokens({ max_tokens: 32000 })).toBe(32000)
+    expect(resolveGenerationMaxTokens({ max_tokens: 8192 })).toBe(8192)
   })
 })

@@ -23,7 +23,7 @@ import type { ThinkingLevel } from '../../shared/reasoning-profile'
 import type { SDKQuery } from '../orchestrator'
 import { runAgentLoop, type AgentLoopResult } from './agent-loop'
 import { buildAgentTools } from './agent-tools'
-import { categoryTemperature } from '../model-resolution'
+import { categoryTemperature, resolveGenerationMaxTokens } from '../model-resolution'
 import { resolveChannelEnv } from '../runtime-fallback'
 import { trackAnalytics } from '../platform-services'
 import { appendProjectLearning } from '../learnings-log'
@@ -121,9 +121,6 @@ export function buildRepairTasks(input: { testResult: GwtTestResult; buildGate?:
 // =========================================================================
 // 修复轮运行时（PR-B；实施稿 §4.3）
 // =========================================================================
-
-/** 修复轮 maxTokens 缺省（与主 loop DEFAULT_MAX_TOKENS 同值；渠道显式配置优先）。 */
-const REPAIR_DEFAULT_MAX_TOKENS = 16384
 
 /** 修复轮内 web_research 预算（窄任务外呼上限，实施稿 §4.3）。 */
 const REPAIR_WEB_RESEARCH_BUDGET = 2
@@ -234,7 +231,7 @@ export async function runRepairLoop(input: RepairLoopInput): Promise<RepairRound
       sessionId: input.session_id,
       projectId: input.project_id,
       requestId: input.request_id,
-      maxTokens: channel.max_tokens ?? REPAIR_DEFAULT_MAX_TOKENS,
+      maxTokens: resolveGenerationMaxTokens(channel),
       maxTurns: resolveRepairMaxTurns(input.mode),
       permissionMode: 'allow-all',
       temperature: categoryTemperature('mvp'),
