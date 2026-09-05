@@ -45,6 +45,8 @@ import {
 } from './programming-orchestrator'
 import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from './requirement-normalizer'
 import { readPrdBackplane } from './document-engine'
+import { isDegenerateText } from './coding/output-integrity'
+import { createWhitespaceArtifactCleaner } from './coding/agent-loop'
 import { recordDecision } from './decision-log'
 import { captureConstraints, extractConstraints, readProjectConstraints, scanSessionConstraints } from './constraint-extractor'
 import { isCircuitBreakSettled } from './recovery-service'
@@ -275,6 +277,149 @@ function registerForegroundRun(input: AgentSendMessageInput, run: ActiveRun): vo
   if (activeSessions.has(input.session_id)) throw new Error('AGENT_SESSION_BUSY')
   acquireProjectRun(input.project_id, run.runId)
   activeSessions.set(input.session_id, run)
+}
+
+// =========================================================================
+// ready/completed 阶段模型直答（P1 自由度归还，2026-09-06）
+//
+// 此前该阶段一律 READY_COMPLETION_COPY 规则直答（反幻觉 P0 护栏）：彻底但用户每次
+// 得到同一句。现把表达交还模型，事实底线留在平台：注入事实锚（阶段/项目/功能清单）
+// + 校验（未完成措辞禁词/退行文本/长度）→ 带反馈重试一次 → 仍败回退模板（=现状，
+// 最坏零回归）。校验在平台代码执行，不依赖模型服从——护栏语义与规则直答等价。
+// =========================================================================
+
+/** ready 直答硬校验长度上限（提示词口径 300 字，此处放一倍余量防失控）。 */
+const READY_REPLY_MAX_CHARS = 800
+
+/** ready 直答开关（缺省 on）：BLOMA_READY_CHAT=0/off/false 回退纯模板现状（灰度/回滚杠杆）。 */
+function readyChatEnabled(): boolean {
+  const raw = process.env.BLOMA_READY_CHAT
+  if (raw === undefined || raw.trim() === '') return true
+  const normalized = raw.trim().toLowerCase()
+  return normalized !== '0' && normalized !== 'off' && normalized !== 'false'
+}
+
+/** ready 直答事实性禁词：命中即判无效（「还没好」惯性幻觉是规则直答的立规原因）。 */
+const READY_REPLY_BANNED =
+  /还没好|还未好|尚未(生成|完成|就绪)|还在生成|正在生成|后台(正在|在)?(跑|运行|生成)|请稍等|稍等片刻|正在处理/
+
+/** 组装事实锚：阶段/项目/模式 + PRD 功能清单（背板/索引缺失时逐项降级，不阻断直答）。 */
+function buildReadyChatFacts(projectId: string, stage: WorkflowStage): string {
+  const lines: string[] = [`- 阶段：${stage}（可运行 MVP 已生成，右侧预览区可用）`]
+  try {
+    const project = findProject(projectId)
+    lines.push(`- 项目：${project.name}（${project.mode === 'longterm' ? '长期' : '快消'}模式）`)
+  } catch {
+    // 项目索引缺失（测试环境）：降级为基础事实
+  }
+  try {
+    const items = readPrdBackplane(projectId).requirements.slice(0, 8)
+    if (items.length > 0) {
+      lines.push('- 功能清单：')
+      for (const item of items) {
+        lines.push(`  - ${item.id} ${item.description}${item.priority ? `（${item.priority}）` : ''}`)
+      }
+    }
+  } catch {
+    // 背板缺失（存量项目）：事实锚只留阶段
+  }
+  return lines.join('\n')
+}
+
+function buildReadyChatSystem(facts: string): string {
+  return [
+    '你是「向导 Agent」。用户的软件项目已经生成完成（可运行 MVP 就绪、右侧预览区可用），用户在完成后的对话里说了一句话，你要像一个真人产品经理那样直接回答。',
+    '',
+    '【项目事实（以此为准，不得编造）】',
+    facts,
+    '',
+    '【硬性底线（违反会被平台判无效并重试）】',
+    '- 项目已经生成好：不得出现「还没好」「还在生成」「后台运行」等任何未完成措辞。',
+    '- 不得承诺平台没有的能力（后端服务、真实部署、外部网络请求、多用户账号等）。',
+    '- 只回答与用户这句话相关的内容，不重复项目介绍全文，不复述功能清单。',
+    '',
+    '直接输出回复正文（简体中文口语，300 字以内），不要 JSON、不要标题、不要格式围栏。',
+  ].join('\n')
+}
+
+/** ready 直答校验：null = 通过；否则返回失败原因（反馈重试的输入）。 */
+function validateReadyReply(text: string): string | null {
+  const trimmed = text.trim()
+  if (!trimmed) return '回复为空'
+  if (trimmed.length > READY_REPLY_MAX_CHARS) return `回复过长（超过 ${READY_REPLY_MAX_CHARS} 字）`
+  if (isDegenerateText(trimmed)) return '回复混入了工具调用协议原文或退行性重复文本'
+  if (READY_REPLY_BANNED.test(trimmed)) return '回复否认了已生成状态（出现未完成措辞）'
+  return null
+}
+
+interface ReadyChatParams {
+  query: SDKQuery
+  env: Record<string, string>
+  signal: AbortSignal
+  sessionId: string
+  history: ConversationTurn[]
+  maxTokens: number
+  providerType?: string
+  system: string
+  userContent: string
+}
+
+/** 采集一次直答调用的完整文本（无 tools；ds 空白伪增量清洗复用 loop 的 cleaner，陷阱 38）。 */
+async function collectReadyChatText(params: ReadyChatParams, messages: ConversationTurn[]): Promise<string> {
+  const cleaner = createWhitespaceArtifactCleaner()
+  let text = ''
+  for await (const sdk of params.query('', {
+    env: params.env,
+    signal: params.signal,
+    sessionId: params.sessionId,
+    maxTokens: params.maxTokens,
+    ...(params.providerType !== undefined ? { providerType: params.providerType } : {}),
+    temperature: categoryTemperature('guide'),
+    messages,
+  })) {
+    if (sdk.type === 'assistant' && sdk.message) {
+      for (const block of sdk.message.content) {
+        if (block.type === 'text' && block.text) {
+          for (const piece of cleaner.push(block.text)) text += piece
+        }
+      }
+    }
+  }
+  for (const piece of cleaner.end()) text += piece
+  return text
+}
+
+/**
+ * ready 直答：一次调用 + 校验失败带反馈重试一次。不流式上屏（失败重试不污染气泡），
+ * 校验通过后由调用方整段发布。渠道故障（非取消）回退模板；用户取消向上传播不吞信号。
+ */
+async function runReadyStageChat(params: ReadyChatParams): Promise<{ text: string; ok: boolean }> {
+  const messages: ConversationTurn[] = [
+    { role: 'system', content: params.system },
+    ...params.history,
+    { role: 'user', content: [{ type: 'text', text: params.userContent }] },
+  ]
+  let first = ''
+  try {
+    first = await collectReadyChatText(params, messages)
+  } catch (error) {
+    if (params.signal.aborted) throw error
+    return { text: '', ok: false }
+  }
+  const firstProblem = validateReadyReply(first)
+  if (!firstProblem) return { text: first.trim(), ok: true }
+  try {
+    // 带反馈重试：把首次作答与失败原因放进对话，模型看得见自己错在哪
+    const second = await collectReadyChatText(params, [
+      ...messages,
+      { role: 'assistant', content: [{ type: 'text', text: first }] },
+      { role: 'user', content: [{ type: 'text', text: `你刚才的回复没有通过平台校验（${firstProblem}）。请重新回答用户这句话：「${params.userContent}」` }] },
+    ])
+    if (!validateReadyReply(second)) return { text: second.trim(), ok: true }
+  } catch (error) {
+    if (params.signal.aborted) throw error
+  }
+  return { text: first.trim(), ok: false }
 }
 
 export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendMessageResult> {
@@ -638,9 +783,25 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
         streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
         return { accepted: true, session_id: input.session_id, stream_started: true }
       }
-      // other（进度追问/闲聊）：固定完成文案 + 修改出口引导，避免「修改黑洞」的死胡同——
-      // 用户修改诉求没命中意图词时，至少要告诉他怎么说才能触发修改。
-      const guidance = `${READY_COMPLETION_COPY}\n\n想调整哪里直接告诉我，比如“加一个历史记录”。`
+      // other（进度追问/闲聊）：模型直答 + 事实校验，模板兜底（P1 自由度归还，2026-09-06）。
+      // 渠道不可用/校验不过（重试一次后仍败）回退 READY_COMPLETION_COPY + 修改出口引导
+      //（=原规则直答，反幻觉底线不降级）；直答成功则用户得到针对这句话的自然回答。
+      const fallbackCopy = `${READY_COMPLETION_COPY}\n\n想调整哪里直接告诉我，比如“加一个历史记录”。`
+      let guidance = fallbackCopy
+      if (env && readyChatEnabled()) {
+        const chat = await runReadyStageChat({
+          query: sdkQuery,
+          env,
+          signal: abortController.signal,
+          sessionId: input.session_id,
+          history,
+          maxTokens,
+          ...(channel?.provider_type !== undefined ? { providerType: channel.provider_type } : {}),
+          system: buildReadyChatSystem(buildReadyChatFacts(input.project_id, authoritativeStage)),
+          userContent: input.content,
+        })
+        if (chat.ok) guidance = chat.text
+      }
       persistAssistant(guidance)
       streamPublisher(makeEvent(input, 'message_delta', { text: guidance }))
       persistTerminalMessage(input.session_id, 'completed')

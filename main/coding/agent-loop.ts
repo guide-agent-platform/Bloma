@@ -7,6 +7,7 @@ import { prepareTaskWithSkills } from '../skill-loader'
 import { prepareRecallBlock } from '../session-recall'
 import { estimateTokenCount } from '../usage-guard'
 import { windowMessagesWithDigest } from '../compacting-window'
+import { isDegenerateText } from './output-integrity'
 
 /**
  * Agent Loop 执行器（L1，AgentLoop 改造方案 §4.2）。
@@ -149,6 +150,19 @@ const EVENT_SUMMARY_CHAR_LIMIT = 500
 
 /** 预算耗尽软着陆：连续 2 轮仍在撞预算（无进展）才终止，给模型收尾总结机会。 */
 const BUDGET_STALL_TURNS = 2
+
+/**
+ * 终轮退行重试预算（P0，2026-09-06 地牢清怪录 d066eb92 案）：传输事故（工具调用
+ * 原文漏进正文/退行重复，见 output-integrity）只带反馈重试一次——防坏渠道烧穿
+ * 轮次预算；重试仍脏则如实 turn_limit 交外部终验（终验是权威，成功话术由终验
+ * 结果决定，不再被垃圾收工轮骗到）。
+ */
+const DEGENERATE_RETRY_LIMIT = 1
+
+/** 终轮退行重试时的反馈 user 轮（模型可见；同时落 JSONL 审计）。 */
+const DEGENERATE_RETRY_FEEDBACK =
+  '【传输事故反馈】你上一轮的回复没有携带任何工具调用，且正文混入了工具调用协议原文或退行性重复文本，被平台判为无效输出。' +
+  '请重新输出这一轮：任务未完成就正常调用工具继续；确实已完成就输出干净的完成总结。不要复述无效文本。'
 
 /**
  * 收口指令（2026-08-29 线上案例 eb900c57）：GWT 全过 + 安全扫描通过 = 平台意义上的
@@ -453,6 +467,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   // 已压缩次数（竹节压缩，闭环 PR6）
   let compactions = 0
   const compactThreshold = resolveCompactThreshold()
+  // 终轮退行已重试次数（P0：传输事故只重试一次，见 DEGENERATE_RETRY_LIMIT）
+  let degenerateRetries = 0
 
   for (let turn = 1; turn <= input.maxTurns; turn += 1) {
     if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls))
@@ -547,8 +563,22 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
     toolCalls.push(...turnCalls)
     input.onTurn?.({ turn, toolCalls: turnCalls, inputTokens: usage?.input_tokens, outputTokens: usage?.output_tokens })
 
-    // 无 tool_use = 模型声明收工（真伪由外部强制终验收口，不信模型自述）
-    if (turnToolUses.length === 0) return attachUsage({ status: 'completed', turns, finalText, toolCalls })
+    // 无 tool_use = 模型声明收工（真伪由外部强制终验收口，不信模型自述）。
+    // 但「零 tool_use + 正文退行」不是声明收工，是传输事故（d066eb92：DSML 原文
+    // 漏进正文，工具调用从未送达）——带反馈重试一轮；重试仍脏则如实 turn_limit
+    // 交终验，垃圾文本不得作为完成总结进入交付链。
+    if (turnToolUses.length === 0) {
+      if (isDegenerateText(finalText)) {
+        if (degenerateRetries < DEGENERATE_RETRY_LIMIT) {
+          degenerateRetries += 1
+          appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: DEGENERATE_RETRY_FEEDBACK }])
+          messages.push({ role: 'user', content: [{ type: 'text', text: DEGENERATE_RETRY_FEEDBACK }] })
+          continue
+        }
+        return attachUsage({ status: 'turn_limit', turns, finalText, toolCalls })
+      }
+      return attachUsage({ status: 'completed', turns, finalText, toolCalls })
+    }
 
     // ---- 工具执行：串行 + 整批 tool_result 进同一条 user 消息（不变式）----
     const resultBlocks: MessageContentBlock[] = []
@@ -635,7 +665,8 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   // 补一次无 tools 的收口调用让模型交卷：出文本 → completed（外部终验仍照跑，不信自述）；
   // 仍坚持要工具 → 如实 turn_limit。宽限轮不计 turns、不发 onTurn（epilogue 不是工作轮）。
   const grace = await runGraceWrapUpTurn(input, messages, pinnedTestTurn)
-  if (grace.kind === 'text') return attachUsage({ status: 'completed', turns, finalText: grace.text, toolCalls })
+  // 宽限轮交卷文本同样不可是传输事故：退行文本不作完成总结，按 turn_limit 收口
+  if (grace.kind === 'text' && !isDegenerateText(grace.text)) return attachUsage({ status: 'completed', turns, finalText: grace.text, toolCalls })
   if (grace.kind === 'cancelled') return attachUsage(loopCancelled(turns, finalText, toolCalls))
   return attachUsage({ status: 'turn_limit', turns, finalText, toolCalls })
 }
@@ -802,7 +833,7 @@ interface WhitespaceArtifactCleaner {
  * 已知取舍：罕见 markdown「空行 + 行首空格」会被误并入上一段，视觉损失远小于
  * 当前「每词一段」的污染，接受。
  */
-function createWhitespaceArtifactCleaner(): WhitespaceArtifactCleaner {
+export function createWhitespaceArtifactCleaner(): WhitespaceArtifactCleaner {
   let pending = ''
   return {
     push(text: string): string[] {

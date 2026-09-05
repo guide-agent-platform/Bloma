@@ -34,6 +34,7 @@ import { recordDecision } from '../decision-log'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from '../recovery-service'
 import { readPrimaryIntent, recordSessionActivity } from '../session-service'
 import { runAgentLoop, type AgentLoopResult } from '../agent-loop'
+import { isDegenerateText } from './output-integrity'
 import { buildAgentTools } from '../agent-tools'
 import { disposeParentDelegationState, registerParentLoopContext, setChildToolsBuilder } from '../agent-collaboration'
 import { categoryTemperature, resolveGenerationMaxTokens } from '../model-resolution'
@@ -1202,12 +1203,16 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   })
 
   // 执行经验沉淀（2026-08-26 改造 2，ralph progress.txt 等价物）：完成总结/异常结局
-  // append-only 进 learnings.jsonl，下轮 fresh loop 经【历史经验】段注入；静默失败不阻断
+  // append-only 进 learnings.jsonl，下轮 fresh loop 经【历史经验】段注入；静默失败不阻断。
+  // 退行文本（工具调用原文漏进正文/退行重复，output-integrity）不得进经验池污染下轮
+  //（P2-13 读取侧过滤的源头堵法：脏文本在此就不落）
+  const summaryText = result.finalText.trim()
   appendProjectLearning(input.project_id, {
     kind: result.status === 'completed' ? 'loop_summary' : 'loop_outcome',
     text:
-      result.finalText.trim() ||
-      `Loop 结束（${result.status}，${result.turns} 轮 / ${result.toolCalls.length} 次工具调用）`,
+      summaryText && !isDegenerateText(summaryText)
+        ? summaryText
+        : `Loop 结束（${result.status}，${result.turns} 轮 / ${result.toolCalls.length} 次工具调用）`,
     meta: { status: result.status, turns: result.turns, tool_calls: result.toolCalls.length },
   })
 
@@ -1376,8 +1381,9 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     '',
     '【表达纪律】',
     '- 每轮工具调用前用一句中文旁白说明意图；关键决策点（架构选择、偏离技术合同、测试失败后的修复策略）可用 1–2 句说明「为什么这么做」；不向用户展示冗长推理过程或自我怀疑（思考与推演放在思考通道，不进旁白）。',
+    '- 旁白开头不要千篇一律：「现在/继续/接下来/先」这类同构开头连续不得超过两轮，换成自然的说法（读完了什么、发现了什么、为什么这么改）。',
     '- 测试失败先读工具返回的失败详情再行动，不要在旁白里长篇分析或复述整段代码。',
-    '- 完成总结用中文且 ≤200 字：做了什么、哪些断言未通过、遗留哪些低优先级项。代码与文件内容不限语言。',
+    '- 完成总结用中文、400 字以内、自然分段（不要一行流水的清单腔）：做了什么、实际效果、哪些断言未通过、遗留哪些低优先级项。代码与文件内容不限语言。',
     '',
     // P5 术语纪律（2026-09-04）：agent 间统一术语表（与裁判/Defender 同源词表，
     // 措辞按角色微调）——防多 agent 协作中的同义漂移（VibeGame glossary 借鉴）

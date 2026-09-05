@@ -968,3 +968,46 @@ describe('绿灯收口与宽限轮（2026-08-29 turn_limit 线上案例 eb900c57
     expect(Object.keys(turns[0].toolCalls[0])).toEqual(['name', 'turn'])
   })
 })
+
+describe('终轮退行守卫（P0，2026-09-06 地牢清怪录案）', () => {
+  it('零 tool_use 但正文混入工具调用原文 → 带反馈重试一轮；重试干净 → completed', async () => {
+    const { query, receivedMessages } = scriptedQuery([
+      [textMessage('我先检查一下。\n<｜｜DSML｜｜tool_calls>\n<｜｜DSML｜｜invoke name="grep">')],
+      [textMessage('检查完毕，全部完成。')],
+    ])
+    const result = await runAgentLoop(baseInput({ query, maxTurns: 3 }))
+    expect(result.status).toBe('completed')
+    expect(result.finalText).toBe('检查完毕，全部完成。')
+    // 反馈 user 轮进了模型上下文（重试可见失败原因）
+    const retryMessages = receivedMessages[1]
+    const last = retryMessages[retryMessages.length - 1]
+    expect(last.role).toBe('user')
+    expect(JSON.stringify(last.content)).toContain('传输事故反馈')
+  })
+
+  it('退行重复墙同样触发重试；重试仍脏 → 如实 turn_limit（不判 completed）', async () => {
+    const { query } = scriptedQuery([
+      [textMessage('查。'.repeat(30))],
+      [textMessage('查。'.repeat(30))],
+    ])
+    const result = await runAgentLoop(baseInput({ query, maxTurns: 3 }))
+    expect(result.status).toBe('turn_limit')
+  })
+
+  it('正常零 tool_use 收工不受影响（零回归）', async () => {
+    const { query } = scriptedQuery([[textMessage('全部完成，测试全绿。')]])
+    const result = await runAgentLoop(baseInput({ query }))
+    expect(result.status).toBe('completed')
+    expect(result.finalText).toBe('全部完成，测试全绿。')
+  })
+
+  it('宽限收口轮交卷文本退行 → turn_limit（宽限轮不作完成总结）', async () => {
+    const echo = tool('echo', () => ({ output: 'ok' }))
+    const { query } = scriptedQuery([
+      [toolUseMessage('t1', 'echo')],
+      [textMessage('查。'.repeat(40))],
+    ])
+    const result = await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 1 }))
+    expect(result.status).toBe('turn_limit')
+  })
+})

@@ -125,12 +125,13 @@ describe('ready 护栏意图分流', () => {
     )
   })
 
-  it('ready 阶段纯进度追问仍走固定完成文案，不误触发迭代', async () => {
+  it('ready 阶段纯进度追问走模型直答（P1 自由度归还），不误触发迭代', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-ready-progress-'))
     process.env.PROMA_HOME = home
     const events: AgentEvent[] = []
     setAgentStreamPublisher((event) => events.push(event))
     setSDKQueryForTests(async function* () {
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '生成好啦！点右侧预览区就能玩；想改哪里直接说。' }] } }
       yield { type: 'result', subtype: 'success' }
     })
 
@@ -154,10 +155,9 @@ describe('ready 护栏意图分流', () => {
       .filter((event) => event.type === 'message_delta')
       .map((event) => String(event.payload.text ?? ''))
       .join('')
-    expect(deltas).toContain('已经生成好了')
-    expect(deltas).toContain('右侧预览区')
-    // other 死胡同出口：告诉用户怎么说才能触发修改
-    expect(deltas).toContain('想调整哪里直接告诉我')
+    // 直答采纳模型回复，不再落固定文案
+    expect(deltas).toContain('生成好啦')
+    expect(deltas).not.toContain('想调整哪里直接告诉我，比如')
   })
 
   it('ready 阶段「生成完整程序」类诉求命中 L1「完整」→ 弹确认卡，不付 LLM 往返、不挡回固定文案', async () => {
@@ -416,14 +416,15 @@ describe('ready 护栏意图分流', () => {
     expect(deltas).toContain('确认卡片已过期')
   })
 
-  it('ready 阶段纯进度追问不触发 L3 LLM 调用（延迟不被拖累）', async () => {
+  it('ready 阶段纯进度追问不触发 L3 意图判定，唯一 LLM 往返是直答本身', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-ready-nol3-'))
     process.env.PROMA_HOME = home
     const events: AgentEvent[] = []
-    let sdkCalled = false
+    let sdkCalls = 0
     setAgentStreamPublisher((event) => events.push(event))
     setSDKQueryForTests(async function* () {
-      sdkCalled = true
+      sdkCalls += 1
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '早就好啦，预览区见。' }] } }
       yield { type: 'result', subtype: 'success' }
     })
 
@@ -443,7 +444,160 @@ describe('ready 护栏意图分流', () => {
     })
 
     expect(runIterationTaskMock).not.toHaveBeenCalled()
-    expect(sdkCalled).toBe(false)
+    // 进度门短路 L3（意图判定零往返），唯一的调用是 ready 直答
+    expect(sdkCalls).toBe(1)
+    const deltas = events
+      .filter((event) => event.type === 'message_delta')
+      .map((event) => String(event.payload.text ?? ''))
+      .join('')
+    expect(deltas).toContain('早就好啦')
+  })
+
+  it('BLOMA_READY_CHAT=off → 回退纯模板现状，零 LLM 往返', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-off-'))
+    process.env.PROMA_HOME = home
+    process.env.BLOMA_READY_CHAT = 'off'
+    try {
+      const events: AgentEvent[] = []
+      let sdkCalled = false
+      setAgentStreamPublisher((event) => events.push(event))
+      setSDKQueryForTests(async function* () {
+        sdkCalled = true
+        yield { type: 'result', subtype: 'success' }
+      })
+
+      vi.mocked(findProject).mockReturnValue({
+        project_id: 'project-ready-off',
+        current_stage: 'ready',
+      } as never)
+
+      await runAgent({
+        request_id: 'req-off',
+        session_id: 'session-off',
+        project_id: 'project-ready-off',
+        content: '好了吗',
+        mode: 'quick',
+        current_stage: 'ready',
+        channel_id: 'test-channel',
+      })
+
+      expect(sdkCalled).toBe(false)
+      const deltas = events
+        .filter((event) => event.type === 'message_delta')
+        .map((event) => String(event.payload.text ?? ''))
+        .join('')
+      expect(deltas).toContain('已经生成好了')
+      expect(deltas).toContain('想调整哪里直接告诉我')
+    } finally {
+      delete process.env.BLOMA_READY_CHAT
+    }
+  })
+
+  it('直答首次命中禁词（还没好）→ 带反馈重试一次；重试干净则采用重试结果', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-retry-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    let calls = 0
+    setAgentStreamPublisher((event) => events.push(event))
+    setSDKQueryForTests(async function* () {
+      calls += 1
+      const text = calls === 1 ? '还没好哦，再等等。' : '已经生成好啦，预览区就能玩。'
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }
+      yield { type: 'result', subtype: 'success' }
+    })
+
+    vi.mocked(findProject).mockReturnValue({
+      project_id: 'project-ready-retry',
+      current_stage: 'ready',
+    } as never)
+
+    await runAgent({
+      request_id: 'req-retry',
+      session_id: 'session-retry',
+      project_id: 'project-ready-retry',
+      content: '好了吗',
+      mode: 'quick',
+      current_stage: 'ready',
+      channel_id: 'test-channel',
+    })
+
+    expect(calls).toBe(2)
+    const deltas = events
+      .filter((event) => event.type === 'message_delta')
+      .map((event) => String(event.payload.text ?? ''))
+      .join('')
+    expect(deltas).toContain('已经生成好啦')
+    expect(deltas).not.toContain('还没好')
+    expect(deltas).not.toContain('想调整哪里直接告诉我，比如')
+  })
+
+  it('直答重试仍命中禁词 → 回退固定模板（最坏情况=现状零回归）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-fallback-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    let calls = 0
+    setAgentStreamPublisher((event) => events.push(event))
+    setSDKQueryForTests(async function* () {
+      calls += 1
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '还没好，后台正在跑。' }] } }
+      yield { type: 'result', subtype: 'success' }
+    })
+
+    vi.mocked(findProject).mockReturnValue({
+      project_id: 'project-ready-fallback',
+      current_stage: 'ready',
+    } as never)
+
+    await runAgent({
+      request_id: 'req-fallback',
+      session_id: 'session-fallback',
+      project_id: 'project-ready-fallback',
+      content: '好了吗',
+      mode: 'quick',
+      current_stage: 'ready',
+      channel_id: 'test-channel',
+    })
+
+    expect(calls).toBe(2)
+    const deltas = events
+      .filter((event) => event.type === 'message_delta')
+      .map((event) => String(event.payload.text ?? ''))
+      .join('')
+    expect(deltas).toContain('已经生成好了')
+    expect(deltas).toContain('想调整哪里直接告诉我')
+  })
+
+  it('直答渠道故障（非取消）→ 回退固定模板，不打断完成态收口', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-chdown-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    setSDKQueryForTests(async function* () {
+      throw new Error('CHANNEL_DOWN')
+    })
+
+    vi.mocked(findProject).mockReturnValue({
+      project_id: 'project-ready-chdown',
+      current_stage: 'ready',
+    } as never)
+
+    await runAgent({
+      request_id: 'req-chdown',
+      session_id: 'session-chdown',
+      project_id: 'project-ready-chdown',
+      content: '好了吗',
+      mode: 'quick',
+      current_stage: 'ready',
+      channel_id: 'test-channel',
+    })
+
+    const deltas = events
+      .filter((event) => event.type === 'message_delta')
+      .map((event) => String(event.payload.text ?? ''))
+      .join('')
+    expect(deltas).toContain('已经生成好了')
+    const completed = events.find((event) => event.type === 'completed')
+    expect(completed).toBeDefined()
   })
 
   // 「我只需要理财房贷的计算器」线上案例：无修改动词、无否定/疑问语气词，
@@ -511,14 +665,13 @@ describe('ready 护栏意图分流', () => {
     expect(decision?.payload.kind).toBe('iteration_confirm')
   })
 
-  it('ready 阶段纯寒暄应答（"谢谢"）不付 L3 LLM 往返，固定完成文案', async () => {
+  it('ready 阶段纯寒暄应答（"谢谢"）走模型直答，不再是固定文案', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-ready-ack-'))
     process.env.PROMA_HOME = home
     const events: AgentEvent[] = []
-    let sdkCalled = false
     setAgentStreamPublisher((event) => events.push(event))
     setSDKQueryForTests(async function* () {
-      sdkCalled = true
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '不客气！玩得开心，想调整随时说。' }] } }
       yield { type: 'result', subtype: 'success' }
     })
 
@@ -538,12 +691,11 @@ describe('ready 护栏意图分流', () => {
     })
 
     expect(runIterationTaskMock).not.toHaveBeenCalled()
-    expect(sdkCalled).toBe(false)
     const deltas = events
       .filter((event) => event.type === 'message_delta')
       .map((event) => String(event.payload.text ?? ''))
       .join('')
-    expect(deltas).toContain('已经生成好了')
+    expect(deltas).toContain('不客气')
   })
 })
 

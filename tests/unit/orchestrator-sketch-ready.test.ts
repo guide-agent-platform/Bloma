@@ -317,19 +317,18 @@ describe('转移阶段护栏（问题 A / P1）', () => {
     expect(deltas).not.toContain('完整代码已经生成到项目文件里')
   })
 
-  it('ready 阶段跳过 LLM 规则直答：渲染端滞后(生成中)但项目已 ready 时不调用 SDK', async () => {
+  it('ready 阶段权威阶段直答：渲染端滞后(生成中)但项目已 ready 时按 ready 护栏走模型直答', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-stage-ready-'))
     process.env.PROMA_HOME = home
     const events: AgentEvent[] = []
-    let sdkCalled = false
     setAgentStreamPublisher((event) => events.push(event))
     setSDKQueryForTests(async function* () {
-      sdkCalled = true
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '早就生成好啦，预览区见。' }] } }
       yield { type: 'result', subtype: 'success' }
     })
 
     // 渲染端阶段滞后（还以为是 generating_mvp），但项目存储里已是 ready（自动测试流完成）。
-    // ready 护栏必须跳过模型、规则直答「已经生成好了」，否则模型会延续历史惯性编「还没好」。
+    // ready 护栏按权威阶段接管：P1 起为模型直答 + 平台事实校验（禁词/兜底），不再编「还没好」。
     vi.mocked(findProject).mockReturnValue({
       project_id: 'project-ready-stale',
       current_stage: 'ready',
@@ -345,30 +344,29 @@ describe('转移阶段护栏（问题 A / P1）', () => {
       channel_id: 'test-channel',
     })
 
-    expect(sdkCalled).toBe(false)
     const deltas = events
       .filter((event) => event.type === 'message_delta')
       .map((event) => String(event.payload.text ?? ''))
       .join('')
-    expect(deltas).toContain('已经生成好了')
-    expect(deltas).toContain('右侧预览区')
+    // 直答采纳模型回复（只有 ready 护栏会走到直答，滞后阶段没有触发编程路径/草图画外音）
+    expect(deltas).toContain('早就生成好啦')
+    expect(deltas).not.toContain('还没好')
     expect(events.some((event) => event.type === 'completed')).toBe(true)
   })
 
-  it('ready 护栏以权威阶段为准：渲染端上报 sketch_ready 但项目已 ready 时直答而非确认草图', async () => {
+  it('ready 护栏以权威阶段为准：渲染端上报 sketch_ready 但项目已 ready 时按 ready 直答而非确认草图', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-stage-ready-guard-'))
     process.env.PROMA_HOME = home
     const events: AgentEvent[] = []
-    let sdkCalled = false
     setAgentStreamPublisher((event) => events.push(event))
     setSDKQueryForTests(async function* () {
-      sdkCalled = true
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '早就生成好啦，预览区见。' }] } }
       yield { type: 'result', subtype: 'success' }
     })
 
     // 最严重的滞后场景：渲染端还认为在 sketch_ready（原本会命中 sketch_ready 护栏引导「点生成完整功能」），
     // 但项目存储已 ready（MVP+测试流早已完成）。ready 护栏必须优先于 sketch_ready 护栏，
-    // 规则直答「已经生成好了」，否则用户会被反复要求「点确认」/被告知「还没好」。
+    // 走 ready 直答，否则用户会被反复要求「点确认」/被告知「还没好」。
     vi.mocked(findProject).mockReturnValue({
       project_id: 'project-ready-guard',
       current_stage: 'ready',
@@ -384,12 +382,12 @@ describe('转移阶段护栏（问题 A / P1）', () => {
       channel_id: 'test-channel',
     })
 
-    expect(sdkCalled).toBe(false)
     const deltas = events
       .filter((event) => event.type === 'message_delta')
       .map((event) => String(event.payload.text ?? ''))
       .join('')
-    expect(deltas).toContain('已经生成好了')
+    // 权威阶段 ready → ready 直答接管；sketch_ready 引导话术不得出现
+    expect(deltas).toContain('早就生成好啦')
     expect(deltas).not.toContain('生成完整功能')
     expect(events.some((event) => event.type === 'completed')).toBe(true)
   })
