@@ -1799,6 +1799,12 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
         session_id: input.session_id,
         project_id: input.project_id,
         reason: `终验未通过（Agent Loop 路径，${loopOutcomeNote(input.loop)}）`,
+        // 回滚目标快照是终验失败前的版本：如实带上已知未通过断言，防「可以继续试用」
+        // 把坏版本当健康品（随记灵 2026-09-06 案：用户回滚后「用不了」）
+        failureNote:
+          testResult.failure_summary.length > 0
+            ? `注意：这一版仍有 ${testResult.failed_count} 项行为断言未通过：${testResult.failure_summary.map((f) => f.scenario).join('、')}。你可以继续试用其他功能，也可以告诉我下一步（继续修复或换个思路重新生成）。`
+            : undefined,
         publish: (type, payload) => publish(input, type, payload),
       })
       if (outcome.rolled_back) throw new CircuitBreakSettledError()
@@ -1822,6 +1828,7 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
       session_id: input.session_id,
       project_id: input.project_id,
       reason: `安全终验未通过（Agent Loop 路径，${loopOutcomeNote(input.loop)}）`,
+      failureNote: `注意：这一版安全扫描仍有 ${security.issues.length} 处命中。你可以继续试用，也可以告诉我下一步。`,
       publish: (type, payload) => publish(input, type, payload),
     })
     if (outcome.rolled_back) throw new CircuitBreakSettledError()

@@ -67,6 +67,12 @@ export function extractConstraints(text: string): string[] {
  * 在第 30 轮之后仍要被扫出来。只认 user 角色——assistant 的转述不算用户声明。
  * 消息按文件序（时间序）处理，早轮约束排前面。
  */
+
+/** 平台合成 user 轮标记前缀：修复任务卡（P2 失败回流）/ loop 退行反馈等平台注入文本
+ * 不是用户原话——其中的「不要动其他任何文件」会被误提取为项目约束（随记灵 2026-09-06
+ * 实测：修复卡三项硬约束被确定性入库，历轮常驻注入污染上下文）。 */
+const SYNTHETIC_USER_TURN_PREFIXES = ['## 修复任务', '【传输事故反馈】']
+
 export function scanSessionConstraints(sessionId: string): string[] {
   const path = getAgentSessionPath(sessionId)
   if (!existsSync(path)) return []
@@ -84,6 +90,7 @@ export function scanSessionConstraints(sessionId: string): string[] {
       .filter((block) => block.type === 'text')
       .map((block) => block.text ?? '')
       .join('')
+    if (SYNTHETIC_USER_TURN_PREFIXES.some((prefix) => text.trimStart().startsWith(prefix))) continue
     for (const constraint of extractConstraints(text)) {
       if (!constraints.includes(constraint)) constraints.push(constraint)
     }

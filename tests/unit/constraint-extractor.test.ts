@@ -94,6 +94,16 @@ describe('T4-L2 全量扫描：首轮约束历轮可回', () => {
     expect(scanSessionConstraints('session-assistant-only')).toEqual([])
   })
 
+  it('平台合成 user 轮（修复任务卡/退行反馈）不参与约束提取', () => {
+    writeSession('session-synthetic', [
+      turn('user', '## 修复任务（共 1 项）\n三项硬约束（必须遵守）：1. 不要动其他任何文件或功能；2. 禁止重构无关代码。', 1),
+      turn('user', '【传输事故反馈】请重新输出这一轮，不要复述无效文本。', 2),
+      turn('user', '帮我做个工具，不要排行榜', 3),
+    ])
+    const constraints = scanSessionConstraints('session-synthetic')
+    expect(constraints).toEqual(['不要排行榜'])
+  })
+
   it('历史窗口是显式常量（默认 10 轮，不再静默写死 20）', () => {
     expect(HISTORY_WINDOW_TURNS).toBe(10)
   })

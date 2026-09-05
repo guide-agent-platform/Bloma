@@ -239,6 +239,10 @@ export interface CircuitBreakInput {
   project_id: string
   /** 熔断原因（如「runtime 修复循环耗尽（mvp_repair）」），进决策日志 */
   reason: string
+  /** 已知未通过项摘要（2026-09-06 地牢清怪录/随记灵案）：回滚目标快照是终验失败前
+   * 的版本，回滚后停在 ready 但断言仍不过——话术必须如实告知，不能说「可以继续试用」
+   * 把坏版本当健康品。缺省不附加（其余熔断路径零回归）。 */
+  failureNote?: string
   publish: (type: AgentEvent['type'], payload: Record<string, unknown>) => void
 }
 
@@ -305,10 +309,12 @@ export async function circuitBreakRollback(input: CircuitBreakInput): Promise<Ci
     blocked_action: undefined,
   })
 
-  // 「内容未丢失」话术对齐 self-healing-judge @S2-JUDGE-002（原 ROLLBACK_FUSE_COPY）
+  // 「内容未丢失」话术对齐 self-healing-judge @S2-JUDGE-002（原 ROLLBACK_FUSE_COPY）；
+  // failureNote：回滚目标带已知未通过断言时如实附加（随记灵 2026-09-06 案：
+  // 「可以继续试用这一版」把 F-002 坏版本当健康品，用户下一轮「用不了」）
   const message =
     stage === 'ready'
-      ? '自动修复多次都没有成功，已经自动回到之前的版本，内容都还在，没有丢失。你可以继续试用这一版，或者告诉我换个思路重新生成。'
+      ? `自动修复多次都没有成功，已经自动回到之前的版本，内容都还在，没有丢失。${input.failureNote ?? '你可以继续试用这一版，或者告诉我换个思路重新生成。'}`
       : stage === 'sketch_ready'
         ? '自动修复多次都没有成功，已经自动回到之前的版本，内容都还在，没有丢失。当前回到的是草图版本，可以重新确认草图后再生成完整功能。'
         : '自动修复多次都没有成功，已经自动回到之前的版本，但该版本没有留下可用产物。请重新描述你的想法，我们再来一次。'
