@@ -603,7 +603,8 @@ export async function handleGuideMessage(
       const targets = (readLastEnrichmentClarificationRequests(input.session_id) ?? [])
         .map((request) => request.for)
         .filter(Boolean)
-      if (targets.length > 0 && pendingClarification.query) {
+      // 「你帮我决定」是让渡信号而非具体修改，跳过定向 revise（答案已落会话，enricher 按默认收敛）
+      if (targets.length > 0 && pendingClarification.query && answer !== '你帮我决定') {
         const directedAnswer = `针对 ${targets.join('、')} 的追问，用户补充：「${answer.slice(0, 120)}」。据此修订这些功能项的描述与故事，使其反映该补充，不要新增功能项`
         try {
           const normalization = await normalizeRequirementUpdate({

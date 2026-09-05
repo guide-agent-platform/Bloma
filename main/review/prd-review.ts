@@ -110,6 +110,9 @@ export const REVIEW_OPTION_IGNORE: PrdReviewOption = {
 /** 全局让渡出口 id：用户不想逐题作答时一次性把决定权交给向导。 */
 export const PRD_REVIEW_OPTION_DELEGATE_ALL = 'prd_review_delegate_all'
 
+/** 「其他，自己填写」选项 id（renderer ReviewChoicesDialog 回传；label=用户填写文本，不受 ignore 文案判定影响）。 */
+export const PRD_REVIEW_CUSTOM_OPTION_ID = 'custom'
+
 /** 审查未过后的待决状态：用户逐题作答（选择题卡）或让渡后回流。 */
 interface PendingPrdReview {
   request_id: string
@@ -1254,7 +1257,7 @@ export function resolvePrdReviewAnswers(input: AgentSendMessageInput): PrdReview
       issue_id: answer.issue_id,
       option_id: answer.option_id,
       label: typeof answer.label === 'string' ? answer.label : '',
-      ignored: answer.option_id.endsWith(':ignore') || /没问题|不改|忽略/.test(answer.label),
+      ignored: answer.option_id.endsWith(':ignore') || (answer.option_id !== PRD_REVIEW_CUSTOM_OPTION_ID && /没问题|不改|忽略/.test(answer.label)),
     }))
   if (answers.length === 0) return undefined
   return { kind: 'answers', answers }

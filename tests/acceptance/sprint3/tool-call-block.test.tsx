@@ -111,7 +111,7 @@ describe('ToolBlocksReplay（历史回放）', () => {
 describe('ChatPanel 集成（loop 轮次进消息列表）', () => {
   afterEach(() => cleanup())
 
-  it('纯工具轮渲染为回放行，不产生空气泡；文本+工具轮两段都呈现', () => {
+  it('含工具块消息折叠进「执行过程」组；展开后呈现旁白与工具行', () => {
     // jsdom 无 scrollIntoView（ChatPanel 自动滚底用）
     Element.prototype.scrollIntoView = () => undefined
     const store = createStore()
@@ -136,12 +136,19 @@ describe('ChatPanel 集成（loop 轮次进消息列表）', () => {
         <ChatPanel />
       </Provider>,
     )
-    const replayRows = screen.getAllByTestId('tool-call-replay')
-    expect(replayRows).toHaveLength(2)
-    // 文本气泡与回放行同框
+    // 两条含工具块消息 → 两个折叠组，默认收起只显示摘要
+    const groups = screen.getAllByTestId('process-block-group')
+    expect(groups).toHaveLength(2)
+    expect(groups[0].textContent).toContain('已完成 1 步')
+    expect(groups[1].textContent).toContain('已完成 1 步')
+    // 默认折叠：旁白与工具行不渲染
+    expect(screen.queryByText('我先把页面写出来。')).toBeNull()
+    expect(screen.queryByTestId('tool-call-row')).toBeNull()
+
+    // 展开第一个折叠组：旁白 + 工具行可见
+    fireEvent.click(screen.getAllByTestId('process-block-group-toggle')[0])
     expect(screen.getByText('我先把页面写出来。')).toBeTruthy()
-    // tool_result 行回填了工具名
-    expect(replayRows[1].textContent).toContain('写入文件')
+    expect(screen.getByTestId('tool-call-row').textContent).toContain('写入文件')
   })
 })
 

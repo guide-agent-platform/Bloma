@@ -162,7 +162,7 @@ describe('② 追问通路闭环（挂起 → 回答 → 重跑）', () => {
   async function triggerPipelineWithClarification(): Promise<void> {
     vi.mocked(resolvePrdBackplane).mockImplementationOnce(
       async (_input, requirements, onClarification?: (requests: EnrichmentClarificationRequest[]) => void) => {
-        onClarification?.([{ for: 'F-001', question: '记账记录要保留多久？要不要分类标签？' }])
+        onClarification?.([{ for: 'F-001', question: '记账记录要保留多久？要不要分类标签？', options: [{ id: 'a', label: '保留一年' }] }])
         return {
           project_id: 'proj-1',
           name: '未命名项目',

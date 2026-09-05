@@ -182,9 +182,15 @@ export const nullPrdConfirmFallback = atom<PrdConfirmState | null>(null)
  * 经 card_option 元数据回传（selected_option_id='enrichment_clarification_answer'，
  * 零新 IPC 通道）；答案由 orchestrator 统一落会话成为新接地证据。
  */
+export interface EnrichmentClarificationOption {
+  id: string
+  label: string
+}
+
 export interface EnrichmentClarificationQuestion {
   for: string
   question: string
+  options?: EnrichmentClarificationOption[]
 }
 
 export interface EnrichmentClarificationState {
@@ -291,6 +297,21 @@ export interface SessionUsage {
 }
 
 export const sessionUsageFamily = atomFamily((sessionId: string) => atom<SessionUsage | undefined>(undefined))
+
+/** 新一轮生成的开始信号：上一轮已终结后，这些事件到达即视为新一轮（清空历史 events，折叠组只显示最近一轮）。 */
+const NEW_RUN_SIGNALS = new Set([
+  'message_delta',
+  'stage_changed',
+  'tool_call_started',
+  'user_decision_required',
+  'sketch_ready',
+  'mvp_ready',
+  'repairing',
+  'judge_result',
+  'retrying',
+  'loop_compaction',
+  'delegation_started',
+])
 
 export function setupGlobalAgentListeners(): () => void {
   const api = window.electronAPI?.agent
@@ -497,7 +518,15 @@ export function setupGlobalAgentListeners(): () => void {
         const requests = Array.isArray(clarificationPayload.requests)
           ? (clarificationPayload.requests as Array<Record<string, unknown>>)
               .filter((item) => typeof item?.for === 'string' && typeof item?.question === 'string')
-              .map((item) => ({ for: String(item.for), question: String(item.question) }))
+              .map((item) => ({
+                for: String(item.for),
+                question: String(item.question),
+                options: Array.isArray(item.options)
+                  ? (item.options as Array<Record<string, unknown>>)
+                      .filter((opt) => typeof opt?.id === 'string' && typeof opt?.label === 'string')
+                      .map((opt) => ({ id: String(opt.id), label: String(opt.label) }))
+                  : [],
+              }))
           : []
         if (requests.length > 0) {
           store.set(enrichmentClarificationFamily(event.session_id), {
@@ -616,11 +645,14 @@ export function setupGlobalAgentListeners(): () => void {
 
       const text = typeof event.payload.text === 'string' ? event.payload.text : ''
       const isTerminal = event.type === 'completed' || event.type === 'error'
+      // 新一轮开始（上一轮已终结，且当前是生成类事件）→ 清空历史 events/content，
+      // 折叠组只显示最近一轮工具调用，不累积多轮历史
+      const isNewRun = !previous.running && !isTerminal && NEW_RUN_SIGNALS.has(event.type)
 
       return {
         running: !isTerminal,
-        events: [...previous.events, event],
-        content: isTerminal ? '' : previous.content + text,
+        events: [...(isNewRun ? [] : previous.events), event],
+        content: isTerminal ? '' : (isNewRun ? '' : previous.content) + text,
         last_error:
           event.type === 'error'
             ? String(event.payload.code ?? 'AGENT_SDK_ERROR')

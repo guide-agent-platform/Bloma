@@ -9,16 +9,17 @@
  * 本卡在 PRD 定稿**前**收集缺口信息——回答后整轮重跑，答案落会话成为
  * 下一轮接地守卫的新证据（状态机图「答案落会话」态）。
  *
- * 出口（复用 card_option 元数据，零新 IPC 通道）：
- * - 提交回答（开放文本，可多问合并作答）→ enrichment_clarification_answer
- *   （主进程 consume 挂起上下文 → answered 决策行 → runPrdPipeline 整轮重跑）
- * - 跳过 → 同选项发送「跳过」标记（主进程按超时语义收敛：不阻塞主线）
+ * 交互（2026-09-05 选择题化）：一次只问一道，每道是选择题——
+ * 具体选项（模型生成）+「你帮我决定」+「其他，自己填写」三个出口；
+ * 模型未给出具体选项时降级为开放文本输入框（保证追问能力不丢）。
+ * 用户点选/填写后本地追加 user 气泡再回传（答案落会话 → 整轮重跑 → 下一道）。
  */
 
 import React, { useState } from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import {
   activeAgentSessionIdAtom,
+  appendMessageToSession,
   enrichmentClarificationFamily,
   globalUserErrorAtom,
   nullEnrichmentClarificationFallback,
@@ -65,6 +66,20 @@ const textareaStyle: React.CSSProperties = {
   fontFamily: 'inherit',
 }
 
+const optionButtonStyle: React.CSSProperties = {
+  display: 'block',
+  width: '100%',
+  textAlign: 'left',
+  padding: '10px 14px',
+  borderRadius: 'var(--radius-md)',
+  border: '1px solid var(--color-border, #d9dce5)',
+  background: 'var(--white, #fff)',
+  color: 'var(--color-text-primary, #2c2f3a)',
+  fontSize: 14,
+  cursor: 'pointer',
+  transition: 'border-color var(--transition-fast), background var(--transition-fast)',
+}
+
 export const ClarificationCard: React.FC = () => {
   const sessionId = useAtomValue(activeAgentSessionIdAtom)
   const state = useAtomValue(sessionId ? enrichmentClarificationFamily(sessionId) : nullEnrichmentClarificationFallback)
@@ -73,21 +88,35 @@ export const ClarificationCard: React.FC = () => {
   const mode = useAtomValue(projectModeAtom)
   const stage = useAtomValue(workflowStageAtom)
 
-  const [answerText, setAnswerText] = useState('')
+  const [customText, setCustomText] = useState('')
+  const [customMode, setCustomMode] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
   if (!state) return null
 
+  // 一次一道：取第一道追问
+  const request = state.requests[0]
+  if (!request) return null
+  const options = request.options ?? []
+  const hasOptions = options.length > 0
+
   const close = (): void => {
-    setAnswerText('')
+    setCustomText('')
+    setCustomMode(false)
     setSubmitting(false)
     clearClarification(null)
   }
 
-  const sendMessage = async (content: string, selectedOptionId: string): Promise<void> => {
+  const sendMessage = async (content: string): Promise<void> => {
     const api = window.electronAPI
     if (!api?.agent?.sendMessage || submitting) return
     setSubmitting(true)
+    // 用户选择气泡：先本地追加再回传，agent 的答复才有「用户选了什么」的上下文
+    appendMessageToSession(state.sessionId, {
+      role: 'user',
+      content: [{ type: 'text', text: content }],
+      timestamp: Date.now(),
+    })
     // 乐观关闭（陷阱 41：不 await IPC 驱动关闭；主进程 pending 校验失败时卡本就该关）
     close()
     try {
@@ -100,7 +129,7 @@ export const ClarificationCard: React.FC = () => {
         current_stage: stage,
         metadata: {
           source: 'card_option',
-          selected_option_id: selectedOptionId,
+          selected_option_id: ENRICHMENT_CLARIFICATION_OPTION_ANSWER,
         },
       })
     } catch (error) {
@@ -109,14 +138,14 @@ export const ClarificationCard: React.FC = () => {
     }
   }
 
-  const submitAnswer = (): void => {
-    const text = answerText.trim()
-    if (!text) return
-    void sendMessage(text, ENRICHMENT_CLARIFICATION_OPTION_ANSWER)
+  const submitOption = (label: string): void => {
+    void sendMessage(label)
   }
 
-  const submitSkip = (): void => {
-    void sendMessage('先按你已有的信息整理吧。', ENRICHMENT_CLARIFICATION_OPTION_ANSWER)
+  const submitCustom = (): void => {
+    const text = customText.trim()
+    if (!text) return
+    void sendMessage(text)
   }
 
   return (
@@ -148,64 +177,144 @@ export const ClarificationCard: React.FC = () => {
           {state.title}
         </h3>
         <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--color-text-secondary, #6b7280)' }}>
-          回答后我会据此重新整理 PRD 再请你确认；也可以跳过，我按已有信息整理（薄一点但不耽误开工）。
+          回答后我会据此重新整理 PRD 再请你确认。
         </p>
 
-        <ul style={{ listStyle: 'none', margin: '0 0 16px', padding: 0, display: 'grid', gap: 10 }}>
-          {state.requests.map((request, index) => (
-            <li
-              key={`${request.for}-${index}`}
-              style={{
-                padding: '10px 14px',
-                borderRadius: 'var(--radius-sm)',
-                background: 'var(--color-bg-secondary, #fafbfc)',
-                border: '1px solid var(--color-border, #eceef3)',
-                fontSize: 14,
-                lineHeight: 1.6,
-              }}
-              data-ai-id={`clarification-question-${index}`}
-            >
-              <span
-                style={{
-                  display: 'inline-block',
-                  marginRight: 8,
-                  padding: '1px 8px',
-                  borderRadius: 10,
-                  background: 'var(--color-primary-soft, #eef1fe)',
-                  color: 'var(--color-primary, #4f6ef7)',
-                  fontSize: 12,
-                  fontWeight: 600,
-                }}
-              >
-                {request.for}
-              </span>
-              {request.question}
-            </li>
-          ))}
-        </ul>
-
-        <textarea
-          value={answerText}
-          placeholder="写下你的回答（多个问题可以一起答）…"
-          onChange={(event) => setAnswerText(event.target.value)}
-          style={textareaStyle}
-          data-ai-id="clarification-answer-input"
-        />
-
-        <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 16 }}>
-          <button type="button" onClick={submitSkip} style={secondaryButtonStyle} data-ai-id="clarification-skip-button">
-            跳过，按已有信息整理
-          </button>
-          <button
-            type="button"
-            onClick={submitAnswer}
-            style={{ ...primaryButtonStyle, opacity: answerText.trim() ? 1 : 0.5 }}
-            disabled={!answerText.trim()}
-            data-ai-id="clarification-submit-button"
+        <div
+          style={{
+            padding: '12px 14px',
+            borderRadius: 'var(--radius-sm)',
+            background: 'var(--color-bg-secondary, #fafbfc)',
+            border: '1px solid var(--color-border, #eceef3)',
+            fontSize: 14,
+            lineHeight: 1.6,
+            marginBottom: 16,
+          }}
+          data-ai-id="clarification-question-0"
+        >
+          <span
+            style={{
+              display: 'inline-block',
+              marginRight: 8,
+              padding: '1px 8px',
+              borderRadius: 10,
+              background: 'var(--color-primary-soft, #eef1fe)',
+              color: 'var(--color-primary, #4f6ef7)',
+              fontSize: 12,
+              fontWeight: 600,
+            }}
           >
-            提交回答
-          </button>
+            {request.for}
+          </span>
+          {request.question}
         </div>
+
+        {hasOptions ? (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {options.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => submitOption(option.label)}
+                style={optionButtonStyle}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--color-primary, #4f6ef7)'
+                  e.currentTarget.style.background = 'var(--color-bg-subtle, #f6f8fb)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--color-border, #d9dce5)'
+                  e.currentTarget.style.background = 'var(--white, #fff)'
+                }}
+                data-ai-id={`clarification-option-${option.id}`}
+              >
+                {option.label}
+              </button>
+            ))}
+
+            <button
+              type="button"
+              onClick={() => submitOption('你帮我决定')}
+              style={optionButtonStyle}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = 'var(--color-primary, #4f6ef7)'
+                e.currentTarget.style.background = 'var(--color-bg-subtle, #f6f8fb)'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = 'var(--color-border, #d9dce5)'
+                e.currentTarget.style.background = 'var(--white, #fff)'
+              }}
+              data-ai-id="clarification-option-auto"
+            >
+              你帮我决定
+            </button>
+
+            {customMode ? (
+              <>
+                <textarea
+                  value={customText}
+                  placeholder="写下你的回答…"
+                  onChange={(event) => setCustomText(event.target.value)}
+                  style={textareaStyle}
+                  autoFocus
+                  data-ai-id="clarification-custom-input"
+                />
+                <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+                  <button type="button" onClick={() => setCustomMode(false)} style={secondaryButtonStyle}>
+                    返回选择
+                  </button>
+                  <button
+                    type="button"
+                    onClick={submitCustom}
+                    style={{ ...primaryButtonStyle, opacity: customText.trim() ? 1 : 0.5 }}
+                    disabled={!customText.trim()}
+                    data-ai-id="clarification-custom-submit"
+                  >
+                    提交回答
+                  </button>
+                </div>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setCustomMode(true)}
+                style={optionButtonStyle}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--color-primary, #4f6ef7)'
+                  e.currentTarget.style.background = 'var(--color-bg-subtle, #f6f8fb)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--color-border, #d9dce5)'
+                  e.currentTarget.style.background = 'var(--white, #fff)'
+                }}
+                data-ai-id="clarification-option-custom"
+              >
+                其他，自己填写
+              </button>
+            )}
+          </div>
+        ) : (
+          <div>
+            <textarea
+              value={customText}
+              placeholder="写下你的回答…"
+              onChange={(event) => setCustomText(event.target.value)}
+              style={textareaStyle}
+              autoFocus
+              data-ai-id="clarification-custom-input"
+            />
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 12 }}>
+              <button
+                type="button"
+                onClick={submitCustom}
+                style={{ ...primaryButtonStyle, opacity: customText.trim() ? 1 : 0.5 }}
+                disabled={!customText.trim()}
+                data-ai-id="clarification-custom-submit"
+              >
+                提交回答
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

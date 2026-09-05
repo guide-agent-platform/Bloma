@@ -612,11 +612,11 @@ describe('enrichRequirementsLlm — clarification_requests 追问通路（② 20
         },
       ],
       clarification_requests: [
-        { for: 'F-001', question: '音色切换用什么交互（下拉/按钮组）？' },
-        { for: 'F-999', question: 'for 不在清单会被清洗丢弃' },
+        { for: 'F-001', question: '音色切换用什么交互？', options: [{ id: 'dropdown', label: '下拉列表' }, { id: 'buttons', label: '按钮组' }] },
+        { for: 'F-999', question: 'for 不在清单会被清洗丢弃', options: [{ id: 'a', label: '选项A' }] },
       ],
     })
-    const requests: Array<Array<{ for: string; question: string }>> = []
+    const requests: Array<Array<{ for: string; question: string; options?: Array<{ id: string; label: string }> }>> = []
     const result = await enrichRequirementsLlm(
       {
         session_id: 'enr-clar',
@@ -628,7 +628,7 @@ describe('enrichRequirementsLlm — clarification_requests 追问通路（② 20
       (asked) => requests.push(asked),
     )
     expect(result).not.toBeNull()
-    expect(requests).toEqual([[{ for: 'F-001', question: '音色切换用什么交互（下拉/按钮组）？' }]])
+    expect(requests).toEqual([[{ for: 'F-001', question: '音色切换用什么交互？', options: [{ id: 'dropdown', label: '下拉列表' }, { id: 'buttons', label: '按钮组' }] }]])
   })
 
   it('输出无 clarification_requests 字段 → 不回调（追问触发权在模型，K-2）', async () => {

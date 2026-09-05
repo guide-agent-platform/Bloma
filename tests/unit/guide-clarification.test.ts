@@ -70,34 +70,37 @@ function makePending(sessionId: string, publish: (event: AgentEvent) => void = (
 describe('sanitizeClarificationRequests — K-2 代码侧硬边界', () => {
   const frozenIds = new Set(['F-001', 'F-002'])
 
-  it('合法请求保留；for 不在冻结集/空 question/超长 question 丢弃', () => {
+  it('合法请求保留；for 不在冻结集/空 question/超长 question/无 options 丢弃', () => {
     const cleaned = sanitizeClarificationRequests(
       [
-        { for: 'F-001', question: '音色切换用什么交互？' },
-        { for: 'F-999', question: '不在清单的功能项' },
-        { for: 'F-002', question: '   ' },
-        { for: 'F-002', question: 'x'.repeat(101) },
+        { for: 'F-001', question: '音色切换用什么交互？', options: [{ id: 'a', label: '下拉列表' }, { id: 'b', label: '按钮组' }] },
+        { for: 'F-999', question: '不在清单的功能项', options: [{ id: 'a', label: '选项' }] },
+        { for: 'F-002', question: '   ', options: [{ id: 'a', label: '选项' }] },
+        { for: 'F-002', question: 'x'.repeat(101), options: [{ id: 'a', label: '选项' }] },
+        { for: 'F-001', question: '无选项的问题', options: [] },
+        { for: 'F-001', question: '无 options 字段的问题' },
         'not-an-object',
         null,
       ],
       frozenIds,
     )
-    expect(cleaned).toEqual([{ for: 'F-001', question: '音色切换用什么交互？' }])
+    expect(cleaned).toEqual([
+      { for: 'F-001', question: '音色切换用什么交互？', options: [{ id: 'a', label: '下拉列表' }, { id: 'b', label: '按钮组' }] },
+    ])
   })
 
-  it('按 for+question 去重；上限 2 条（宁少勿多）', () => {
+  it('按 for+question 去重；上限 1 条（一次一道）', () => {
     const cleaned = sanitizeClarificationRequests(
       [
-        { for: 'F-001', question: '问题 A' },
-        { for: 'F-001', question: '问题 A' },
-        { for: 'F-001', question: '问题 B' },
-        { for: 'F-002', question: '问题 C' },
+        { for: 'F-001', question: '问题 A', options: [{ id: 'a', label: '选项 A' }] },
+        { for: 'F-001', question: '问题 A', options: [{ id: 'b', label: '选项 B' }] },
+        { for: 'F-001', question: '问题 B', options: [{ id: 'a', label: '选项 A' }] },
+        { for: 'F-002', question: '问题 C', options: [{ id: 'a', label: '选项 A' }] },
       ],
       frozenIds,
     )
     expect(cleaned).toEqual([
-      { for: 'F-001', question: '问题 A' },
-      { for: 'F-001', question: '问题 B' },
+      { for: 'F-001', question: '问题 A', options: [{ id: 'a', label: '选项 A' }] },
     ])
   })
 
@@ -128,14 +131,14 @@ describe('轮次守卫与孤儿检测 — 会话即真相源', () => {
   it('孤儿检测：requested 无终结 → 返回 requests 原文（重启恢复）', () => {
     setup()
     seedDecision('s-orphan', 'enrichment_clarification_requested', {
-      requests: [{ for: 'F-001', question: '问题 A' }],
+      requests: [{ for: 'F-001', question: '问题 A', options: [{ id: 'a', label: '选项 A' }] }],
     })
-    expect(detectOrphanEnrichmentClarification('s-orphan')).toEqual([{ for: 'F-001', question: '问题 A' }])
+    expect(detectOrphanEnrichmentClarification('s-orphan')).toEqual([{ for: 'F-001', question: '问题 A', options: [{ id: 'a', label: '选项 A' }] }])
   })
 
   it('孤儿检测：answered/timeout 终结 → 非孤儿；无关决策行 → undefined', () => {
     setup()
-    seedDecision('s-done', 'enrichment_clarification_requested', { requests: [{ for: 'F-001', question: '问题 A' }] })
+    seedDecision('s-done', 'enrichment_clarification_requested', { requests: [{ for: 'F-001', question: '问题 A', options: [{ id: 'a', label: '选项 A' }] }] })
     seedDecision('s-done', 'enrichment_clarification_answered')
     expect(detectOrphanEnrichmentClarification('s-done')).toBeUndefined()
 
@@ -150,12 +153,12 @@ describe('挂起与超时 — 状态机图①②⑤', () => {
     setup()
     const events: AgentEvent[] = []
     const pending = makePending('s-suspend', (event) => events.push(event))
-    suspendForEnrichmentClarification(pending, [{ for: 'F-001', question: '问题 A' }], () => {})
+    suspendForEnrichmentClarification(pending, [{ for: 'F-001', question: '问题 A', options: [{ id: 'a', label: '选项 A' }] }], () => {})
     expect(hasPendingEnrichmentClarification('proj-clar')).toBe(true)
     expect(events).toHaveLength(1)
     expect(events[0].type).toBe('user_decision_required')
     expect(events[0].payload).toMatchObject({ kind: 'enrichment_clarification' })
-    expect(detectOrphanEnrichmentClarification('s-suspend')).toEqual([{ for: 'F-001', question: '问题 A' }])
+    expect(detectOrphanEnrichmentClarification('s-suspend')).toEqual([{ for: 'F-001', question: '问题 A', options: [{ id: 'a', label: '选项 A' }] }])
     // take 终结（answered 语义）
     const taken = takePendingEnrichmentClarification('proj-clar')
     expect(taken?.session_id).toBe('s-suspend')
@@ -167,7 +170,7 @@ describe('挂起与超时 — 状态机图①②⑤', () => {
     setup()
     const onTimeout = vi.fn()
     const pending = makePending('s-timeout-fire', () => {})
-    suspendForEnrichmentClarification(pending, [{ for: 'F-001', question: '问题 A' }], onTimeout)
+    suspendForEnrichmentClarification(pending, [{ for: 'F-001', question: '问题 A', options: [{ id: 'a', label: '选项 A' }] }], onTimeout)
     vi.advanceTimersByTime(ENRICHMENT_CLARIFICATION_TIMEOUT_MS - 1)
     expect(onTimeout).not.toHaveBeenCalled()
     vi.advanceTimersByTime(1)
@@ -179,7 +182,7 @@ describe('挂起与超时 — 状态机图①②⑤', () => {
     vi.useFakeTimers()
     setup()
     const onTimeout = vi.fn()
-    suspendForEnrichmentClarification(makePending('s-take-first', () => {}), [{ for: 'F-001', question: '问题 A' }], onTimeout)
+    suspendForEnrichmentClarification(makePending('s-take-first', () => {}), [{ for: 'F-001', question: '问题 A', options: [{ id: 'a', label: '选项 A' }] }], onTimeout)
     takePendingEnrichmentClarification('proj-clar')
     vi.advanceTimersByTime(ENRICHMENT_CLARIFICATION_TIMEOUT_MS * 2)
     expect(onTimeout).not.toHaveBeenCalled()
@@ -190,7 +193,7 @@ describe('makeEnrichmentClarificationCardEvent — 卡片事件契约', () => {
   it('payload 携带 kind/title/requests，事件四要素齐全', () => {
     const event = makeEnrichmentClarificationCardEvent(
       { session_id: 's-card', project_id: 'p-card' },
-      [{ for: 'F-001', question: '问题 A' }],
+      [{ for: 'F-001', question: '问题 A', options: [{ id: 'a', label: '选项 A' }] }],
     )
     expect(event.type).toBe('user_decision_required')
     expect(event.session_id).toBe('s-card')
@@ -200,7 +203,7 @@ describe('makeEnrichmentClarificationCardEvent — 卡片事件契约', () => {
     expect(event.payload).toEqual({
       kind: 'enrichment_clarification',
       title: '整理 PRD 前，先确认几个关键点',
-      requests: [{ for: 'F-001', question: '问题 A' }],
+      requests: [{ for: 'F-001', question: '问题 A', options: [{ id: 'a', label: '选项 A' }] }],
     })
   })
 })

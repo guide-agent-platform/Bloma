@@ -244,7 +244,7 @@ export const ToolBlocksReplay: React.FC<{ blocks: MessageContentBlock[]; toolNam
   )
 }
 
-function safeJsonPreview(value: unknown): string {
+export function safeJsonPreview(value: unknown): string {
   if (value === undefined) return ''
   try {
     return JSON.stringify(value)

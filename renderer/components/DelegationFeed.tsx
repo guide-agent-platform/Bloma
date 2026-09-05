@@ -35,7 +35,7 @@ export const DelegationFeed: React.FC<{ sessionId: string }> = ({ sessionId }) =
   )
 }
 
-const DelegationRow: React.FC<{ item: DelegationView }> = ({ item }) => {
+export const DelegationRow: React.FC<{ item: DelegationView }> = ({ item }) => {
   const [expanded, setExpanded] = React.useState(false)
   const hasPending = Boolean(item.pending_question)
   return (

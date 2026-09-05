@@ -3,8 +3,9 @@ import { atom, useAtom, useAtomValue } from 'jotai'
 import { CardOptions } from './CardOptions'
 import type { CardOption } from './CardOptions'
 import { WaitingFeedback } from './WaitingFeedback'
-import { ToolBlocksReplay, ToolCallFeed } from './ToolCallBlock'
-import { DelegationFeed } from './DelegationFeed'
+import { ToolCallRow, deriveToolCallRecords, safeJsonPreview } from './ToolCallBlock'
+import { DelegationRow } from './DelegationFeed'
+import { ProcessBlockGroup, type ProcessItem } from './ProcessBlockGroup'
 import { Markdown } from './Markdown'
 import { ArrowUp, MessageSquare, IconAlertTriangle, IconStop } from './icons'
 import {
@@ -16,8 +17,9 @@ import {
   projectModeAtom,
   workflowStageAtom,
   sessionUsageFamily,
+  delegationsFamily,
 } from './atoms'
-import type { AgentMessage, AgentStreamState, PastedImageRef, ProjectMode } from './atoms'
+import type { AgentEvent, AgentMessage, AgentStreamState, PastedImageRef, ProjectMode } from './atoms'
 import { collapseRepetitiveText } from '../stream-collapse'
 import { hasUsableChannelsAtom, chatInputDraftAtom } from './atoms-sprint2'
 import { extractPastedImages, extFromMime, toBase64DataUrl } from '../lib/paste-extract'
@@ -383,11 +385,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               </div>
             ))}
 
-            {/* Agent Loop 实时工具流（tool_call_started/completed 事件推导的折叠行） */}
-            {hasActiveStream && streamState && <ToolCallFeed events={streamState.events} />}
-
-            {/* Agent Loop 委派协作流（delegate_agent 委派的子会话行胶囊，M4-C） */}
-            {activeSessionId && <DelegationFeed sessionId={activeSessionId} />}
+            {/* Agent Loop 执行过程折叠组（工具调用 + 委派，流式展开/结束自动收起） */}
+            {streamState && activeSessionId && (
+              <LiveProcessGroup events={streamState.events} sessionId={activeSessionId} isStreaming={hasActiveStream} />
+            )}
 
             {streamingContent && (
               <MessageBubble
@@ -619,6 +620,106 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 }
 
 /* =========================================================================
+   执行过程折叠组 — 辅助组件与归一化
+   ========================================================================= */
+
+/** 旁白行：折叠组内的过程说明文本（弱化显示）。 */
+const NarrationRow: React.FC<{ text: string }> = ({ text }) => (
+  <div
+    data-ai-id="process-narration"
+    style={{
+      fontSize: 'var(--font-size-xs)',
+      lineHeight: 1.6,
+      color: 'var(--color-text-muted)',
+      whiteSpace: 'pre-wrap',
+      wordBreak: 'break-word',
+    }}
+  >
+    {collapseRepetitiveText(text)}
+  </div>
+)
+
+/** 实时流：从事件流（工具） + 委派视图归约出过程项。 */
+const LiveProcessGroup: React.FC<{ events: AgentEvent[]; sessionId: string; isStreaming: boolean }> = ({ events, sessionId, isStreaming }) => {
+  const delegations = useAtomValue(delegationsFamily(sessionId))
+  const items = React.useMemo<ProcessItem[]>(() => {
+    const toolItems: ProcessItem[] = deriveToolCallRecords(events).map((record) => ({
+      kind: 'tool',
+      key: record.key,
+      tool: record.tool,
+      inputSummary: record.inputSummary,
+      outputSummary: record.outputSummary,
+      status: record.status,
+      durationMs: record.durationMs,
+    }))
+    const delegationItems: ProcessItem[] = delegations.map((item) => ({
+      kind: 'delegation',
+      key: item.delegation_id,
+      item,
+    }))
+    return [...toolItems, ...delegationItems]
+  }, [events, delegations])
+
+  if (items.length === 0) return null
+  return (
+    <ProcessBlockGroup
+      items={items}
+      isStreaming={isStreaming}
+      renderItem={(item) =>
+        item.kind === 'tool' ? (
+          <ToolCallRow
+            tool={item.tool}
+            inputSummary={item.inputSummary}
+            outputSummary={item.outputSummary}
+            status={item.status}
+            durationMs={item.durationMs}
+          />
+        ) : item.kind === 'delegation' ? (
+          <DelegationRow item={item.item} />
+        ) : (
+          <NarrationRow text={item.text} />
+        )
+      }
+    />
+  )
+}
+
+/** 历史回放：把单条消息的 tool_use / tool_result / 旁白 text 归约成过程项。 */
+function deriveMessageProcessItems(message: AgentMessage, toolNamesById: Record<string, string>): ProcessItem[] {
+  const items: ProcessItem[] = []
+  const narration = message.content
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text ?? '')
+    .join('')
+  if (narration.trim()) {
+    items.push({ kind: 'narration', key: 'narration', text: narration })
+  }
+  message.content.forEach((block, index) => {
+    if (block.type === 'tool_use') {
+      items.push({
+        kind: 'tool',
+        key: block.id ?? `tool-${index}`,
+        tool: block.name ?? '',
+        inputSummary: safeJsonPreview(block.input),
+        status: 'ok',
+        replay: true,
+      })
+    }
+    if (block.type === 'tool_result') {
+      items.push({
+        kind: 'tool',
+        key: block.tool_use_id ?? `result-${index}`,
+        tool: toolNamesById[block.tool_use_id ?? ''] ?? 'tool_result',
+        inputSummary: typeof block.content === 'string' ? block.content : '',
+        status: block.is_error ? 'error' : 'ok',
+        replay: true,
+      })
+    }
+  })
+  return items
+}
+
+/* =========================================================================
    MessageBubble
    ========================================================================= */
 
@@ -661,9 +762,33 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
 
   if (!text && !hasToolBlocks && imageBlocks.length === 0 && !isStreaming) return null
 
-  // 纯工具轮（无文本）：居中工具行胶囊，不占用对话气泡（陷阱 26 家族：不污染纯文本流）
-  if (!text && hasToolBlocks) {
-    return <ToolBlocksReplay blocks={message.content} toolNamesById={toolNamesById} />
+  // 含工具块的消息（assistant 的 tool_use / user 的 tool_result + 旁白）：
+  // 折叠进「执行过程」组，不占正文气泡（陷阱 26 家族：不污染纯文本流）
+  if (hasToolBlocks) {
+    const processItems = deriveMessageProcessItems(message, toolNamesById ?? {})
+    if (processItems.length === 0) return null
+    return (
+      <ProcessBlockGroup
+        items={processItems}
+        isStreaming={false}
+        renderItem={(item) =>
+          item.kind === 'tool' ? (
+            <ToolCallRow
+              tool={item.tool}
+              inputSummary={item.inputSummary}
+              outputSummary={item.outputSummary}
+              status={item.status}
+              durationMs={item.durationMs}
+              replay
+            />
+          ) : item.kind === 'delegation' ? (
+            <DelegationRow item={item.item} />
+          ) : (
+            <NarrationRow text={item.text} />
+          )
+        }
+      />
+    )
   }
 
   if (isSystem) {
@@ -835,7 +960,6 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
           </button>
         )}
       </div>
-      {hasToolBlocks && <ToolBlocksReplay blocks={message.content} toolNamesById={toolNamesById} />}
       <span
         style={{
           fontSize: 'var(--font-size-xs)',

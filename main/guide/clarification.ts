@@ -36,13 +36,20 @@ export const ENRICHMENT_CLARIFICATION_MAX_ROUNDS = 2
 /** 超时回退（拍板②）：挂起后 T 内未收到回答 → 回退现状路径（迟到答案只落会话）。 */
 export const ENRICHMENT_CLARIFICATION_TIMEOUT_MS = 10 * 60 * 1000
 
-/** 单轮追问条数上限（prompt 纪律的代码侧硬守卫）：宁少勿多，防追问卡变问卷。 */
-export const ENRICHMENT_CLARIFICATION_MAX_QUESTIONS = 2
+/** 单轮追问条数上限：一次只问一个最关键的问题（用户确认后再问下一道）。 */
+export const ENRICHMENT_CLARIFICATION_MAX_QUESTIONS = 1
 
-/** 追问请求：for=目标功能项 id（须在冻结清单内），question=一句话开放问题。 */
+/** 追问选择题的具体选项（模型生成，用户点选即答）。 */
+export interface EnrichmentClarificationOption {
+  id: string
+  label: string
+}
+
+/** 追问请求：for=目标功能项 id（须在冻结清单内），question=一个问题，options=具体选项（缺省/空=开放文本追问降级）。 */
 export interface EnrichmentClarificationRequest {
   for: string
   question: string
+  options?: EnrichmentClarificationOption[]
 }
 
 /** 挂起上下文（对齐 PendingPrdConfirm 字段族）：answered 后整轮重跑所需全部输入。 */
@@ -254,7 +261,7 @@ export function makeEnrichmentClarificationCardEvent(
     payload: {
       kind: 'enrichment_clarification',
       title: '整理 PRD 前，先确认几个关键点',
-      requests: requests.map((request) => ({ for: request.for, question: request.question })),
+      requests: requests.map((request) => ({ for: request.for, question: request.question, options: request.options ?? [] })),
     },
     created_at: new Date().toISOString(),
   }
@@ -291,9 +298,8 @@ export function suspendForEnrichmentClarification(
 // ---------------------------------------------------------------------------
 
 /**
- * 追问请求清洗：for 必须在冻结 id 集、question 去空白后非空且 ≤100 字、
- * 按 for+question 去重、上限 2 条（超出的丢弃——宁少勿多）。
- * 模型输出的任何形态问题都收敛为「丢弃该条」，不阻断可用部分。
+ * 追问请求清洗：for 必须在冻结 id 集、question 去空白后非空且 ≤100 字、按 for+question 去重、上限 1 条。
+ * 有 options=选择题；无 options 降级为开放文本（options 空数组，保证追问能力不因模型不给选项而失效）。
  */
 export function sanitizeClarificationRequests(
   raw: unknown,
@@ -310,10 +316,31 @@ export function sanitizeClarificationRequests(
     const question = typeof record.question === 'string' ? record.question.trim() : ''
     if (!forId || !frozenIds.has(forId)) continue
     if (!question || question.length > 100) continue
+    const options = sanitizeClarificationOptions(record.options)
     const key = `${forId}::${question}`
     if (seen.has(key)) continue
     seen.add(key)
-    cleaned.push({ for: forId, question })
+    cleaned.push({ for: forId, question, ...(options.length > 0 ? { options } : {}) })
+  }
+  return cleaned
+}
+
+/** 清洗具体选项：id/label 非空、label ≤30 字、去重、上限 4 条。 */
+function sanitizeClarificationOptions(raw: unknown): EnrichmentClarificationOption[] {
+  if (!Array.isArray(raw)) return []
+  const seen = new Set<string>()
+  const cleaned: EnrichmentClarificationOption[] = []
+  for (const entry of raw) {
+    if (cleaned.length >= 4) break
+    if (typeof entry !== 'object' || entry === null) continue
+    const record = entry as Record<string, unknown>
+    const id = typeof record.id === 'string' ? record.id.trim() : ''
+    const label = typeof record.label === 'string' ? record.label.trim() : ''
+    if (!id || !label || label.length > 30) continue
+    const key = `${id}::${label}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    cleaned.push({ id, label })
   }
   return cleaned
 }
