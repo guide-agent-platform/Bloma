@@ -2148,8 +2148,9 @@ export function syncIterationCompleted(input: {
  * 打通 Sprint 3「纠错 → 重新生成 → 迭代」主线：此前 ready 护栏把修改请求一律挡回固定文案，
  * 且 submitCorrection 只落盘不触发再生成。这里把修改诉求作为新功能项并入需求清单，进入
  * iterating 态后复用 runMvpTask + runAgentLoopPostTesting 完整闭环（重新生成 → 终验 → 裁判 → ready）。
+ * 返回值两调用方均不消费；「做完整的程序」定向修复分支无新 snapshot，返回 void。
  */
-export async function runIterationTask(input: IterationTaskInput): Promise<MvpTaskResult> {
+export async function runIterationTask(input: IterationTaskInput): Promise<MvpTaskResult | void> {
   updateProject(input.project_id, { current_stage: 'iterating' })
   publish(input, 'stage_changed', { stage: 'iterating' })
 
@@ -2164,6 +2165,36 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
   // ack 如实（2026-08-27 线上案例 dbe1e6fd：「换个名字」被判 skip 后仍说「按你的新想法
   // 重新生成」，用户体感记忆断层——skip 意味着诉求未入需求，必须告知而非假装采纳）
   if (merged.action === 'skip') {
+    // 「做完整的程序」类诉求路由（2026-09-06 随记灵案）：skip=无需求变更，按原清单
+    // 整版重摇（longterm 40 轮）大概率复现同一批失败。上次终验若留有未通过断言且修复
+    // 预算未耗尽，「把程序做完整」的正确动作是定向修复（复用入口 B 修复轮 + 终验门禁
+    // 收口），不动需求清单不重摇——这就是聊天里缺的「生成完整程序」渠道。无失败快照 /
+    // 预算耗尽 / 无 query → 行为=现状整版重摇。
+    const lastReport = readTestReport(input.project_id)
+    const repairUsed = findProject(input.project_id).test_repair_count ?? 0
+    if (lastReport && lastReport.failed_count > 0 && repairUsed < resolveRepairBudget(input.mode) && input.query) {
+      publishCompletionMessage(
+        input,
+        `收到「${truncateCopy(input.prompt, 20)}」——我把这理解成「把没做完的做完」：这一版还有 ${lastReport.failed_count} 项行为断言未通过，我先定向修复（不改需求清单），修完重新终验。`,
+      )
+      const previewUrl = await ensureResumePreview(input)
+      await runBlockedTestRepair({ ...input, preview_url: previewUrl })
+      const project = findProject(input.project_id)
+      // 终验门禁收口：loop 元数据按 resume 口径重建（judge 只消费 status 判异常终止态）
+      await runAgentLoopPostTesting({
+        request_id: input.request_id,
+        session_id: input.session_id,
+        project_id: input.project_id,
+        mode: input.mode,
+        preview_url: previewUrl,
+        ...(project.via_agent_loop
+          ? { loop: { status: project.agent_loop_status ?? 'turn_limit', turns: 0, finalText: '', toolCalls: [] } }
+          : {}),
+        query: input.query,
+        channel_id: input.channel_id,
+      })
+      return
+    }
     publishCompletionMessage(
       input,
       `收到「${truncateCopy(input.prompt, 20)}」——这句我没当作需求改动（判为操作指令），按原样重新生成了一版。想改哪里请直接说，比如「标题改成计算助手」。`,
