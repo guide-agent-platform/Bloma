@@ -3,6 +3,7 @@
 // 状态矩阵：idle 双按钮 / canProbe=false 禁用（create 无 baseUrl）/ busy 标签换（测试中…）/
 // 测试成功绿框 / 测试失败红框（testMsg.ok=false）/ 拉取失败 **现状锁定绿框（F1 翻转位——修后应变红）** / 拉取成功去重合并。
 // 发现 F1：fetchMsg 无 ok 标志，色逻辑 (testMsg && !testMsg.ok)?red:green 在仅 fetchMsg 时恒绿——失败也绿。
+// 2026-09-06 调整：C6 改为「模型点选列表」语义（逗号文本框已下线，详见 channel-model-picker.test.tsx）。
 
 import React from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -90,17 +91,20 @@ describe('ux-channel-probe-walkthrough r108：测试连接/拉取模型双探针
     expect(st.style.color).toBe('rgb(153, 27, 27)') // F1 修复：失败红框（原缺陷：失败也绿）
   })
 
-  it('[C6·拉取成功去重] 已有 a,b 拉回 a,c → 模型文本合并为 a,b,c', async () => {
+  it('[C6·拉取成功去重] 已有 a,b 拉回 a,c → 勾选列表合并为 a,b,c（模型点选列表改造后语义）', async () => {
     ;(window as never as Ctx).electronAPI = {
       channels: { testDirect: vi.fn(), fetchModels: vi.fn().mockResolvedValue({ ok: true, data: { models: [{ name: 'a' }, { name: 'c' }] } }) },
     }
     mountChannel()
     await openCreateForm()
     fillForm('https://api.example.com', 'sk-x')
-    const modelsInput = screen.getByPlaceholderText(/deepseek-chat/)
-    fireEvent.change(modelsInput, { target: { value: 'a, b' } })
+    fireEvent.change(screen.getByPlaceholderText(/手动添加模型/), { target: { value: 'a, b' } })
+    fireEvent.click(screen.getByRole('button', { name: '添加' }))
+    expect(await screen.findByRole('checkbox', { name: '启用模型 b' })).toBeTruthy()
+    expect(screen.queryByRole('checkbox', { name: '启用模型 c' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: /拉取模型/ }))
     await waitFor(() => expect(screen.getByRole('status').textContent).toContain('成功获取 2 个模型'))
-    expect((screen.getByPlaceholderText(/deepseek-chat/) as HTMLInputElement).value).toBe('a, b, c')
+    expect(await screen.findByRole('checkbox', { name: '启用模型 c' })).toBeTruthy()
+    expect(screen.getByText(/已启用 3 \/ 共 3/)).toBeTruthy()
   })
 })
