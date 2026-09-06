@@ -6,7 +6,7 @@ import { buildPrdFewShotInjection, isInjectionEnabled } from '../template-inject
 import { callLlmForJson } from '../kernel/llm-call'
 import type { AgentMessage, MessageContentBlock } from '../../shared/types'
 import type { GameDesignDoc, InterfaceEndpoint, PrdBackplane, SketchRequirement } from '../model/prd-backplane'
-import { buildPrdDocumentFallback, normalizePrdDocumentNewlines, reconcilePrdDocumentPriorities } from '../model/prd-backplane'
+import { buildPrdDocumentFallback, deriveInterfaceSpec, normalizePrdDocumentNewlines, reconcilePrdDocumentPriorities } from '../model/prd-backplane'
 import { renderDocumentSectionSpec } from '../prd-sections'
 import { categoryTemperature } from '../model-resolution'
 
@@ -105,8 +105,8 @@ ${renderDocumentSectionSpec()}
 
 七、interface_spec（后端 API 契约，前后端分离真相源）
 - 凡功能涉及数据留存、服务端处理或 AI 调用，逐端点列出：endpoint（一律以 /api/ 开头，平台自动挂载 server/routes）、method（GET/POST/PUT/DELETE，缺省 GET）、request（请求要点，无则写「无」）、response（响应要点，JSON 形态）。
+- **触发判定（重要）**：从验收要点/描述里的数据留存信号词判定——历史、保存、记录、持久、刷新或重开后仍在、清空、收藏、回顾、本地保留。命中任意一个就必须有 interface_spec（例：计算器的「计算历史…手动清空才清空」→ GET /api/history + POST /api/history；笔记的「刷新后仍在」→ GET/POST /api/notes）。只有确实无任何数据留存的纯展示产物才省略此字段。
 - 这是前后端共同遵守的契约：编程 Agent 按它实现 server/routes，终验按它做存活检查；端点粒度对齐功能项主流程，最多 6 条，宁缺毋滥。
-- 纯展示类、无任何数据留存的产物省略此字段（空数组亦可）。
 
 示例（家庭记账本，功能项 F-001 记录收入与支出 / F-002 展示本月结余；document 节选关键章节）：
 {"document":"# PRD：家庭记账本\\n## 一、产品定位 —— 面向个人与家庭的记账工具：日常收支发生时快速记录，月底直观看到结余。\\n## 二、功能清单 —— 作为家庭成员，我想记录每笔收入与支出，以便月底清楚钱花在了哪里。\\n### [F-001]（P0）记录收入与支出\\n验收要点：正常：新增一笔收入或支出后列表立即可见并持久保存；边界：金额为空或非数字时提示错误且不保存\\n### [F-002]（P0）展示本月结余\\n验收要点：正常：按自然月汇总并显示结余；边界：本月无任何记录时结余显示 0\\n## 三、页面清单 —— 首页为记账列表+快速记一笔入口，顶部显示本月结余。\\n## 六、范围外 —— 多用户协作；银行账户自动对接\\n## 八、后台假设 —— 金额单位统一为人民币元；数据仅保存在本地，不提供云同步",
@@ -205,7 +205,13 @@ function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequirement[],
     // P1-7：game 类型 GDD（玩法真相源）随背板冻结；非 game 缺省 undefined。
     ...(parsed.gdd ? { gdd: parsed.gdd } : {}),
     // 完整程序阶段 2：后端 API 契约随背板冻结；无后端需求缺省 undefined。
-    ...(parsed.interface_spec && parsed.interface_spec.length > 0 ? { interface_spec: parsed.interface_spec } : {}),
+    // 阶段 2.5 兜底：LLM 漏报（计算器案）但功能项命中数据留存信号 → 确定性派生最小契约
+    ...(parsed.interface_spec && parsed.interface_spec.length > 0
+      ? { interface_spec: parsed.interface_spec }
+      : ((): { interface_spec: InterfaceEndpoint[] } | undefined => {
+          const derived = deriveInterfaceSpec(items)
+          return derived ? { interface_spec: derived } : undefined
+        })()),
   }
 }
 

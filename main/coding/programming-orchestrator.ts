@@ -1399,6 +1399,10 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     '修复轮（非"重试/返工"）。首次向用户提及时可带一句白话解释，之后一致使用规范词。',
     '',
     '【护栏】路径限项目目录内；不 eval/Function；不写 CSP meta；前端不直接外联（CSP 仅放行同源 fetch，真实出网只能走同源 /api/llm 代理）；' +
+    // 完整程序阶段 2.5（2026-09-06 计算器案）：数据留存被 localStorage 绕过——「刷新后仍在」
+    // 被模型当作 localStorage 的正当理由。硬条款锁死后端持久化，堵住合理化路径
+    '数据留存类需求（保存/历史/记录/收藏/刷新或重开后仍在）一律用后端持久化：server/routes/ 路由 + ctx.readData/writeData 落 data/ 目录，' +
+    '禁止 localStorage/sessionStorage 存业务数据——PRD 说「刷新后仍在」不构成 localStorage 例外的理由，后端持久化同样满足且必须用后者；' +
     'out_of_scope 内的功能一律不做；编辑校验失败的错误信息要读完再改。',
     '',
     // 产物形态（PR-2 条件化）：工程骨架（带构建门禁）→ 模块化解禁（import 可选，

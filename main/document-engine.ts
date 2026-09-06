@@ -13,7 +13,7 @@ import { getDocumentsDir } from '../storage/config-paths'
 import { findProject, readLastSketchRequirements } from './project-service'
 import { nextRequirementId } from './programming-orchestrator'
 import type { PrdBackplane, RequirementStatus, SketchRequirement } from './sketch-engine'
-import { buildPrdDocumentFallback, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, backplaneTemplateMeta } from './sketch-engine'
+import { buildPrdDocumentFallback, deriveInterfaceSpec, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, backplaneTemplateMeta } from './sketch-engine'
 import { parseEarsAssertion } from './ears-vocabulary'
 import { gwtRequiredCategories, isInjectionEnabled } from './template-injection'
 import { describeEffect, describeTrigger, parseBehaviorAssertion } from './behavior-assertions'
@@ -393,6 +393,9 @@ export function buildPrdBackplane(
     // 供 GWT 骨架「验收要点」等存量消费方读取，新数据流一律走 requirements
     acceptance[item.id] = `${item.description}：核心路径可交互，边界与异常输入不崩溃。`
   }
+  // 完整程序阶段 2.5：模板路径同样做数据留存信号兜底——确定性派生最小契约
+  // （迭代重跑经此重建 prd.json 时契约自愈，不因重建丢失）
+  const derivedInterfaceSpec = deriveInterfaceSpec(items)
   return {
     project_id: project.project_id,
     name: project.name,
@@ -414,6 +417,7 @@ export function buildPrdBackplane(
     // 确定性提取），背板只做组装——不在这里引入第二个事实源
     ...(project.constraints?.length ? { constraints: [...new Set(project.constraints)] } : {}),
     assumptions: [],
+    ...(derivedInterfaceSpec ? { interface_spec: derivedInterfaceSpec } : {}),
     // 注入点①（周计划 §6）：模板元信息随背板落盘，下游注入点按此路由；
     // 缺省按项目 template_type 兜底构造（与读取侧 backplaneTemplateMeta 同源）
     template_meta: backplaneTemplateMeta({}, project.template_type),

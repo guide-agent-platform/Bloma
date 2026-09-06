@@ -59,10 +59,23 @@ describe('checkApiContract', () => {
     expect(failures[1].reason).toContain('HTTP 500')
   })
 
-  it('previewUrl 尾斜杠与端点拼接不失真；连接失败走 catch 分支', async () => {
-    const failures = await checkApiContract('http://127.0.0.1:1/', [{ endpoint: '/api/anything', method: 'GET' }])
+  it('previewUrl 尾斜杠与端点拼接不失真', async () => {
+    server = createServer((req, res) => {
+      res.writeHead(404)
+      res.end('Not found')
+    })
+    baseUrl = await new Promise((resolve) => {
+      server!.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${(server!.address() as { port: number }).port}`))
+    })
+    // 服务器可达（返回 404）→ 真实契约失活
+    const failures = await checkApiContract(`${baseUrl}/`, [{ endpoint: '/api/anything', method: 'GET' }])
     expect(failures).toHaveLength(1)
-    expect(failures[0].reason).toContain('契约端点探测失败')
+    expect(failures[0].reason).toContain('HTTP 404')
+  })
+
+  it('服务器不可达（连接拒绝）→ 跳过契约检查，不产生失败（测试环境/沙箱未入口径）', async () => {
+    const failures = await checkApiContract('http://127.0.0.1:1', [{ endpoint: '/api/anything', method: 'GET' }])
+    expect(failures).toEqual([])
   })
 
   it('空端点清单零探测零失败', async () => {

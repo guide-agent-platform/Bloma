@@ -18,11 +18,16 @@ const API_PROBE_TIMEOUT_MS = 2_000
 export async function checkApiContract(previewUrl: string, endpoints: InterfaceEndpoint[]): Promise<GwtFailureSummary[]> {
   const probeable = endpoints.filter((ep) => (ep.method ?? 'GET') === 'GET' && !ep.endpoint.includes(':'))
   const failures: GwtFailureSummary[] = []
+  // 服务器可达性语义：首个探测若连接即失败（沙箱未起/测试环境无真实服务器），跳过
+  // 整个契约检查——GWT 侧已处理服务器宕机口径，契约探测的前提是服务器在服务；
+  // 一旦可达，后续单端点的失败（404/5xx/超时）才是真实的契约失活。
+  let serverReachable = false
   for (const endpoint of probeable) {
     try {
       const response = await fetch(`${previewUrl.replace(/\/+$/, '')}${endpoint.endpoint}`, {
         signal: AbortSignal.timeout(API_PROBE_TIMEOUT_MS),
       })
+      serverReachable = true
       if (response.status === 404 || response.status >= 500) {
         failures.push({
           scenario: `API 契约端点：${endpoint.method ?? 'GET'} ${endpoint.endpoint}`,
@@ -30,6 +35,7 @@ export async function checkApiContract(previewUrl: string, endpoints: InterfaceE
         })
       }
     } catch (error) {
+      if (!serverReachable && isConnectionError(error)) return []
       failures.push({
         scenario: `API 契约端点：${endpoint.method ?? 'GET'} ${endpoint.endpoint}`,
         reason: `契约端点探测失败（${error instanceof Error ? error.message : 'unknown'}）`,
@@ -37,4 +43,12 @@ export async function checkApiContract(previewUrl: string, endpoints: InterfaceE
     }
   }
   return failures
+}
+
+/** 连接层错误（ECONNREFUSED/EHOSTUNREACH 等）：服务器不可达，与「可达但端点坏了」区分。 */
+function isConnectionError(error: unknown): boolean {
+  const cause = (error as { cause?: { code?: string } })?.cause?.code
+  if (cause && /^(ECONN|EHOST|ENET|EAI_AGAIN)/.test(cause)) return true
+  const message = error instanceof Error ? error.message : String(error)
+  return /fetch failed|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH/i.test(message)
 }
