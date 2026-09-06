@@ -686,6 +686,15 @@ async function fetchOpenAICompatibleModels(
 
   if (!response.ok) {
     const result = await normalizeHttpResponse(response)
+    // 404 在兼容渠道上是常态（如阿里云 compatible-mode 未开放 /models），不是密钥错。
+    // 给可执行下一步（设置页已有「手动添加模型」入口），避免用户回退到「测连接」反复试错。
+    if (response.status === 404) {
+      return {
+        success: false,
+        message: `${result.message}——该服务地址可能未开放模型列表端点（/models），可改用手动添加模型`,
+        models: [],
+      }
+    }
     return { success: false, message: result.message, models: [] }
   }
 
