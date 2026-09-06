@@ -306,14 +306,87 @@ async function defaultSnapshotCapture(): Promise<{ buffer: Buffer; extension: 's
 }
 
 const STATIC_SERVER_SCRIPT = `
-const { createReadStream, existsSync, statSync } = require('node:fs');
+const { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync } = require('node:fs');
 const { createServer } = require('node:http');
 const { extname, join, normalize, resolve, sep } = require('node:path');
 // 服务根目录由参数传入（cwd 已挪到系统临时目录，避免 Windows 下进程 cwd 锁住项目目录）
 const root = resolve(process.argv[2]);
 const port = Number(process.argv[1]);
 const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml' };
-// ---- 同源 AI 代理（Bloma 完整程序渠道，2026-09-06；与产物 static-server.js 模板同构）----
+// ---- 后端路由自动挂载（完整程序阶段 1，2026-09-06；与产物 static-server.js 模板同构）----
+const ROUTES_DIR = join(root, 'server', 'routes');
+const DATA_DIR = join(root, 'data');
+function sendJson(res, code, obj) {
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify(obj));
+}
+function dataPath(name) {
+  const safe = normalize(String(name || '')).replace(/^([/\\\\.]+)+/, '');
+  const p = resolve(join(DATA_DIR, safe + (extname(safe) ? '' : '.json')));
+  if (!p.startsWith(DATA_DIR + sep)) throw new Error('bad_data_path');
+  return p;
+}
+function readData(name, fallback) {
+  try { return JSON.parse(readFileSync(dataPath(name), 'utf8')); } catch (e) { return fallback; }
+}
+function writeData(name, value) {
+  const p = dataPath(name);
+  mkdirSync(p.slice(0, p.lastIndexOf(sep)), { recursive: true });
+  const tmp = p + '.tmp';
+  require('node:fs').writeFileSync(tmp, JSON.stringify(value, null, 2), 'utf8');
+  require('node:fs').renameSync(tmp, p);
+}
+const routes = [];
+function loadRoutes() {
+  routes.length = 0;
+  if (!existsSync(ROUTES_DIR)) return;
+  for (const file of readdirSync(ROUTES_DIR).filter((f) => f.endsWith('.js')).sort()) {
+    try {
+      const fileUrl = join(ROUTES_DIR, file);
+      // 热加载：应用可在预览运行中写路由文件，删 require 缓存让下一次请求拿到新代码
+      delete require.cache[require.resolve(fileUrl)];
+      const mod = require(fileUrl);
+      const prefix = '/api/' + file.replace(/\\.js$/, '');
+      const ctx = { dataDir: DATA_DIR, readData: readData, writeData: writeData, sendJson: sendJson };
+      for (const [key, handler] of Object.entries(mod || {})) {
+        const m = /^(GET|POST|PUT|PATCH|DELETE)\\s+\\/(.*)$/.exec(key);
+        if (!m || typeof handler !== 'function') continue;
+        // 裸 '/' 路由挂成 /api/<前缀>（无尾斜杠），与请求侧的尾斜杠归一化对齐
+        const routePath = ('/' + prefix.slice(1) + '/' + m[2].replace(/^\\/+/, '')).replace(/\\/+$/, '');
+        routes.push({ method: m[1], path: routePath, handler: handler, ctx: ctx });
+      }
+    } catch (e) {
+      console.error('[routes] 挂载失败 ' + file + ': ' + (e && e.message));
+    }
+  }
+}
+function matchRoute(method, pathname) {
+  for (let i = routes.length - 1; i >= 0; i -= 1) {
+    const r = routes[i];
+    if (r.method !== method) continue;
+    if (r.path === pathname) return r;
+    const rp = r.path.split('/'); const ap = pathname.split('/');
+    if (rp.length === ap.length && rp.some((s) => s.startsWith(':')) && rp.every((s, j) => s.startsWith(':') || s === ap[j])) {
+      const params = {}; rp.forEach((s, j) => { if (s.startsWith(':')) params[s.slice(1)] = decodeURIComponent(ap[j]); });
+      return { ...r, params: params };
+    }
+  }
+  return undefined;
+}
+async function handleApi(req, res, rawUrl) {
+  loadRoutes();
+  const hit = matchRoute(req.method, rawUrl.pathname.replace(/\\/+$/, '') || rawUrl.pathname);
+  if (!hit) { sendJson(res, 404, { error: 'not_found' }); return; }
+  const query = Object.fromEntries(rawUrl.searchParams.entries());
+  let body = undefined;
+  if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+    const raw = await new Promise((ok) => { let s = ''; req.on('data', (c) => { s += c; if (s.length > 512 * 1024) req.destroy(); }); req.on('end', () => ok(s)); req.on('error', () => ok(s)); });
+    if (raw) { try { body = JSON.parse(raw); } catch (e) { sendJson(res, 400, { error: 'bad_json' }); return; } }
+  }
+  try { await hit.handler(req, res, { ...hit.ctx, query: query, body: body, params: hit.params || {} }); }
+  catch (e) { sendJson(res, 500, { error: 'route_error', message: String(e && e.message || e).slice(0, 200) }); }
+}
+// ---- 同源 AI 代理（Bloma 完整程序渠道，2026-09-06；与产物模板同构）----
 // 前端 CSP 只放行同源（connect-src 'self'），浏览器永远不直接出网；需要真实模型
 // 能力的功能统一 POST /api/llm，由本进程（Bloma 注入 BLOMA_APP_LLM_* 环境变量）
 // 代为出网。密钥只存在于本进程环境变量，绝不写入前端代码/项目文件。
@@ -322,14 +395,9 @@ const LLM_KEY = process.env.BLOMA_APP_LLM_KEY || '';
 const LLM_MODEL = process.env.BLOMA_APP_LLM_MODEL || '';
 const LLM_PROTOCOL = process.env.BLOMA_APP_LLM_PROTOCOL === 'anthropic' ? 'anthropic' : 'openai';
 const LLM_TIMEOUT_MS = Number(process.env.BLOMA_APP_LLM_TIMEOUT_MS) || 60000;
-function sendJson(res, code, obj) {
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-  res.end(JSON.stringify(obj));
-}
 const server = createServer((req, res) => {
   const rawUrl = new URL(req.url || '/', 'http://localhost');
-  // ---- POST /api/llm：同源 AI 代理（契约见产物 static-server 模板注释）----
-  if (req.method === 'POST' && rawUrl.pathname === '/api/llm') {
+  if (rawUrl.pathname === '/api/llm' && (req.method === 'POST' || req.method === 'OPTIONS')) {
     if (req.method === 'OPTIONS') { res.writeHead(403); res.end('Forbidden'); return; }
     let raw = '';
     req.on('data', (chunk) => { raw += chunk; if (raw.length > 512 * 1024) req.destroy(); });
@@ -377,6 +445,14 @@ const server = createServer((req, res) => {
           sendJson(res, 502, { error: 'upstream_failed', message: String(err && err.message || err).slice(0, 200) });
         });
     });
+    return;
+  }
+  if (rawUrl.pathname.startsWith('/api/')) { handleApi(req, res, rawUrl).catch(() => { try { sendJson(res, 500, { error: 'route_error' }); } catch (e) {} }); return; }
+  // 后端专属目录不走静态托管：server/ 是路由代码、data/ 是运行数据，前端一律经 /api 访问
+  const staticRel = rawUrl.pathname.replace(/^\\/+/, '');
+  if (staticRel === 'server' || staticRel.startsWith('server/') || staticRel === 'data' || staticRel.startsWith('data/')) {
+    res.writeHead(404);
+    res.end('Not found');
     return;
   }
   const requested = rawUrl.pathname === '/' ? '/index.html' : decodeURIComponent(rawUrl.pathname);

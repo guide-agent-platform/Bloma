@@ -1418,6 +1418,13 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     '③严禁把密钥、API 端点、模型名写进任何项目文件（平台已注入服务器进程，前端不可见）；' +
     '④页面 URL 带 mock=1 参数时，所有 /api/llm 调用自动附加 mock:true（URL 带 mock=fail 时附加 mock:\"fail\"）——平台探针与失败态自测走此通道，返回确定性应答；' +
     '⑤AI 功能的行为断言只断言界面形态（点击后出现结果区/失败提示），不断言模型输出的具体内容。',
+    // 完整程序阶段 1（2026-09-06 用户拍板：终点是前后端分离的完整程序，静态单页只是里程碑）
+    '【前后端分离】凡涉及数据留存或服务端能力的功能，后端优先——禁止把 localStorage 当唯一数据源：',
+    '①后端路由：server/routes/<资源>.js 导出 { "GET /路径": handler, "POST /路径": handler }——文件名即路由前缀（notes.js → /api/notes/*），平台启动时自动挂载，无需注册；',
+    '②handler 写 async (req, res, ctx)；ctx 提供 readData(name, fallback) / writeData(name, value)（JSON 持久化到 data/ 目录，重启不丢，原子写）、sendJson(res, code, obj)、query、body、params；',
+    "③前端：fetch('/api/...') 调后端，处理加载/失败态；数据持久化职责在后端 data/，前端不留权威副本；",
+    '④路由内禁止出网（外部 fetch）与 require 项目目录外的模块；外部模型能力走 /api/llm；',
+    '⑤后端数据的断言写「新增项出现/状态变化」，禁止写「总数等于 N」这类依赖历史状态的断言（探针重复执行会累积数据）。',
   ].join('\n')
 }
 
