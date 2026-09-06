@@ -742,8 +742,16 @@ function routingSelectableChannels(channels: Channel[]): Channel[] {
   return channels.filter((channel) => isAnthropicProtocolProvider(channel.provider_type))
 }
 
+/**
+ * 渠道模型列表取位防御：channels.json 允许用户手改/旧版本字段缺失（类型上必填但运行时不可信），
+ * 与 main/channel-manager.ts:150 getEnabledModels 的 `(channel.models ?? [])` 口径保持一致。
+ */
+function modelsOf(channel: Channel | undefined): ChannelModel[] {
+  return channel?.models ?? []
+}
+
 function previewModelName(channel: Channel | undefined): string | undefined {
-  return channel?.models.find((model) => model.enabled)?.name
+  return modelsOf(channel).find((model) => model.enabled)?.name
 }
 
 const ROLE_ORDER: AgentRoutingRole[] = ['guide', 'programming', 'judge']
@@ -1446,8 +1454,8 @@ export const ChannelSettingsPage: React.FC = () => {
                     </span>
                   </div>
                   <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
-                    {channel.models.length > 0
-                      ? `${channel.models.length} 个模型：${channel.models.map((m) => m.name).join('、')}`
+                    {modelsOf(channel).length > 0
+                      ? `${modelsOf(channel).length} 个模型：${modelsOf(channel).map((m) => m.name).join('、')}`
                       : '未配置模型'}
                     {channel.base_url && ` · ${channel.base_url}`}
                   </p>
