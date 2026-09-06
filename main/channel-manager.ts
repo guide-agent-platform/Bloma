@@ -580,6 +580,16 @@ interface GoogleModelItem {
 /**
  * 从 DeepSeek 原生模型 API 拉取模型列表（模型端点固定在 /models）。
  */
+/**
+ * 模型列表拉取失败的统一出口：404 在兼容渠道上是常态（如阿里云 compatible-mode 未开放列表端点），
+ * 不是密钥错——补一句可执行下一步（设置页有「手动添加模型」入口），避免用户退回「测连接」反复试错。
+ * 迭代 #4 先只覆盖 OpenAI 兼容分支，本轮把同一口径铺到 deepseek/kimi/anthropic 兼容/google。
+ */
+function modelsFetchFailure(response: Response, result: ChannelTestResult): FetchModelsResult {
+  const hint = response.status === 404 ? '——该服务地址可能未开放模型列表端点，可改用手动添加模型' : ''
+  return { success: false, message: `${result.message}${hint}`, models: [] }
+}
+
 async function fetchDeepSeekModels(baseUrl: string, apiKey: string): Promise<FetchModelsResult> {
   const url = `${new URL(baseUrl.trim()).origin}/models`
   const response = await fetch(url, withTimeout({
@@ -588,8 +598,7 @@ async function fetchDeepSeekModels(baseUrl: string, apiKey: string): Promise<Fet
   }))
 
   if (!response.ok) {
-    const result = await normalizeHttpResponse(response)
-    return { success: false, message: result.message, models: [] }
+    return modelsFetchFailure(response, await normalizeHttpResponse(response))
   }
 
   const data = await response.json() as { data?: OpenAIModelItem[] }
@@ -613,8 +622,7 @@ async function fetchKimiModels(baseUrl: string, apiKey: string): Promise<FetchMo
   }))
 
   if (!response.ok) {
-    const result = await normalizeHttpResponse(response)
-    return { success: false, message: result.message, models: [] }
+    return modelsFetchFailure(response, await normalizeHttpResponse(response))
   }
 
   const data = await response.json() as { data?: OpenAIModelItem[] }
@@ -653,8 +661,7 @@ async function fetchAnthropicCompatibleModels(
   const response = await fetch(url, withTimeout({ method: 'GET', headers }))
 
   if (!response.ok) {
-    const result = await normalizeHttpResponse(response)
-    return { success: false, message: result.message, models: [] }
+    return modelsFetchFailure(response, await normalizeHttpResponse(response))
   }
 
   const data = await response.json() as { data?: AnthropicModelItem[] }
@@ -685,17 +692,7 @@ async function fetchOpenAICompatibleModels(
   }))
 
   if (!response.ok) {
-    const result = await normalizeHttpResponse(response)
-    // 404 在兼容渠道上是常态（如阿里云 compatible-mode 未开放 /models），不是密钥错。
-    // 给可执行下一步（设置页已有「手动添加模型」入口），避免用户回退到「测连接」反复试错。
-    if (response.status === 404) {
-      return {
-        success: false,
-        message: `${result.message}——该服务地址可能未开放模型列表端点（/models），可改用手动添加模型`,
-        models: [],
-      }
-    }
-    return { success: false, message: result.message, models: [] }
+    return modelsFetchFailure(response, await normalizeHttpResponse(response))
   }
 
   const data = await response.json() as { data?: OpenAIModelItem[] }
@@ -715,8 +712,7 @@ async function fetchGoogleModels(baseUrl: string, apiKey: string): Promise<Fetch
   const response = await fetch(`${url}/v1beta/models?key=${apiKey}`, withTimeout({ method: 'GET' }))
 
   if (!response.ok) {
-    const result = await normalizeHttpResponse(response)
-    return { success: false, message: result.message, models: [] }
+    return modelsFetchFailure(response, await normalizeHttpResponse(response))
   }
 
   const data = await response.json() as { models?: GoogleModelItem[] }

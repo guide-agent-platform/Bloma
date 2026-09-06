@@ -245,6 +245,26 @@ describe('fetchModels — 自动拉取模型列表（mock fetch）', () => {
     expect(result.message).toContain('手动添加模型')
   })
 
+  it('同族一致：deepseek / google 的 404 也给同一可执行引导（迭代 #6）', async () => {
+    const fetchMock = vi.fn(async () => new Response('{"error":{"message":"Not Found"}}', { status: 404 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const ds = await fetchModels({
+      provider_type: 'deepseek',
+      base_url: 'https://api.deepseek.com/anthropic',
+      api_key: 'k',
+    })
+    expect(ds.success).toBe(false)
+    expect(ds.message).toContain('手动添加模型')
+    const g = await fetchModels({
+      provider_type: 'google',
+      base_url: 'https://generativelanguage.googleapis.com',
+      api_key: 'k',
+    })
+    expect(g.success).toBe(false)
+    expect(g.message).toContain('手动添加模型')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('非 404 失败（401）不应误带手动添加引导', async () => {
     vi.stubGlobal('fetch', vi.fn(async () =>
       new Response('{"error":{"message":"invalid api key"}}', { status: 401 }),
