@@ -181,7 +181,11 @@ async function executeScenarios(browser: Browser, input: RunGwtInput): Promise<G
   const failureSummary: GwtTestResult['failure_summary'] = []
   let passedCount = 0
   try {
-    await page.goto(input.preview_url!, { waitUntil: 'domcontentloaded', timeout: 10_000 })
+    // ?mock=1（完整程序渠道，2026-09-06）：AI 功能经 /api/llm 的确定性 mock 应答收口——
+    // 探针不消耗真实模型调用、不受网络/延迟抖动影响；用户正常访问（无 mock 参数）走真实调用
+    const probedUrl = new URL(input.preview_url!)
+    probedUrl.searchParams.set('mock', '1')
+    await page.goto(probedUrl.toString(), { waitUntil: 'domcontentloaded', timeout: 10_000 })
 
     for (const scenario of scenarios) {
       // 每个场景独立快照（触发后新出现的诊断归属当前断言）；结局归约统一走

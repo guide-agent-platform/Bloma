@@ -28,9 +28,11 @@ interface SandboxProcess {
   port: number
   /** 启动命令（幂等守卫据此区分「内嵌静态服务器」与显式命令沙箱，command 不匹配不复用） */
   command?: string
+  /** LLM 代理环境签名（完整程序渠道）：env 变化即重启（幂等守卫三项比对之一） */
+  envSig: string
 }
 
-type SandboxProcessFactory = (projectRoot: string, port: number, command?: string) => ChildProcess
+type SandboxProcessFactory = (projectRoot: string, port: number, command?: string, llmEnv?: Record<string, string>) => ChildProcess
 type PortAllocator = (start: number, end: number) => Promise<number>
 type HealthCheck = (url: string) => Promise<boolean>
 type Sleep = (ms: number) => Promise<void>
@@ -66,10 +68,14 @@ export async function runSandbox(input: SandboxRunInput): Promise<SandboxRunResu
   // 幂等守卫：同一 project 已 running 且健康时直接复用（不 stop 不 spawn）。
   // 消除 runMvpViaAgentLoop 交付前对 loop 内 run_preview 沙箱的冗余重启（preview_url 抖动）；
   // 崩溃/挂起时 map 已被 exit 清理或 healthCheck 失败 → 照常走 stop+spawn 重启。
+  // llm_env 签名参与比对（完整程序渠道）：loop 内 run_preview 起的沙箱无 AI 环境，
+  // 交付时带 llm_env 的调用必须重启注入，不能复用无环境实例。
   const existing = activeSandboxes.get(project.project_id)
+  const llmEnvSig = JSON.stringify(input.llm_env ?? {})
   if (
     existing
     && existing.command === (input.command ?? undefined)
+    && existing.envSig === llmEnvSig
     && (await sandboxHealthCheck(`http://localhost:${existing.port}`))
   ) {
     return { status: 'running', preview_url: `http://localhost:${existing.port}`, port: existing.port }
@@ -82,8 +88,8 @@ export async function runSandbox(input: SandboxRunInput): Promise<SandboxRunResu
   for (let attempt = 0; attempt < MAX_PORT_ATTEMPTS; attempt += 1) {
     const port = await allocatePort(SANDBOX_PORT_START, SANDBOX_PORT_END)
     const previewUrl = `http://localhost:${port}`
-    const child = sandboxProcessFactory(project.root_path, port, input.command)
-    activeSandboxes.set(project.project_id, { process: child, port, command: input.command })
+    const child = sandboxProcessFactory(project.root_path, port, input.command, input.llm_env)
+    activeSandboxes.set(project.project_id, { process: child, port, command: input.command, envSig: llmEnvSig })
 
     // 捕获 stdout/stderr 到内部日志（供修复循环分析，不向 P0 展示堆栈）
     const appendLog = (chunk: Buffer | string): void => {
@@ -197,13 +203,13 @@ async function waitForSandbox(
 
 const ALLOWED_SANDBOX_COMMANDS = new Set(['npm run dev', 'npm start', 'node static-server'])
 
-function spawnStaticServer(projectRoot: string, port: number, command?: string): ChildProcess {
+function spawnStaticServer(projectRoot: string, port: number, command?: string, llmEnv?: Record<string, string>): ChildProcess {
+  const options = sandboxSpawnOptions(projectRoot, port, llmEnv)
   if (command) {
     const normalized = command.trim()
     if (!ALLOWED_SANDBOX_COMMANDS.has(normalized)) {
       throw new Error(`SANDBOX_COMMAND_NOT_ALLOWED: ${normalized}`)
     }
-    const options = sandboxSpawnOptions(projectRoot, port)
     const withPort = normalized.replaceAll('{port}', String(port))
     const [executable, ...args] = withPort.split(/\s+/).filter(Boolean)
     // Windows 下 npm 为 npm.cmd，spawn 无法直接执行，需经 shell 解析（静态服务器等直接 spawn）
@@ -218,7 +224,7 @@ function spawnStaticServer(projectRoot: string, port: number, command?: string):
   }
   // 内嵌脚本不占项目目录作 cwd（Windows：进程 cwd 会锁目录，回滚 rmSync 报 EBUSY），
   // 服务根目录改由参数传入；cwd 落在系统临时目录。
-  return spawn(resolveNodeExecutable(), ['-e', STATIC_SERVER_SCRIPT, String(port), projectRoot], sandboxSpawnOptions(tmpdir(), port))
+  return spawn(resolveNodeExecutable(), ['-e', STATIC_SERVER_SCRIPT, String(port), projectRoot], sandboxSpawnOptions(tmpdir(), port, llmEnv))
 }
 
 function resolveNodeExecutable(): string {
@@ -227,10 +233,12 @@ function resolveNodeExecutable(): string {
   return process.env.npm_node_execpath || process.env.NODE || 'node'
 }
 
-function sandboxSpawnOptions(projectRoot: string, port: number): SpawnOptions {
+function sandboxSpawnOptions(projectRoot: string, port: number, llmEnv?: Record<string, string>): SpawnOptions {
   return {
     cwd: projectRoot,
-    env: { PATH: process.env.PATH, Path: process.env.Path, PORT: String(port) },
+    // BLOMA_APP_LLM_*（完整程序渠道）：产物 /api/llm 同源代理的模型环境，密钥只进
+    // 本进程，前端代码/项目文件永远拿不到
+    env: { PATH: process.env.PATH, Path: process.env.Path, PORT: String(port), ...(llmEnv ?? {}) },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   }
@@ -298,15 +306,155 @@ async function defaultSnapshotCapture(): Promise<{ buffer: Buffer; extension: 's
 }
 
 const STATIC_SERVER_SCRIPT = `
-const { createReadStream, existsSync, statSync } = require('node:fs');
+const { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync } = require('node:fs');
 const { createServer } = require('node:http');
 const { extname, join, normalize, resolve, sep } = require('node:path');
 // 服务根目录由参数传入（cwd 已挪到系统临时目录，避免 Windows 下进程 cwd 锁住项目目录）
 const root = resolve(process.argv[2]);
 const port = Number(process.argv[1]);
 const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml' };
+// ---- 后端路由自动挂载（完整程序阶段 1，2026-09-06；与产物 static-server.js 模板同构）----
+const ROUTES_DIR = join(root, 'server', 'routes');
+const DATA_DIR = join(root, 'data');
+function sendJson(res, code, obj) {
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify(obj));
+}
+function dataPath(name) {
+  const safe = normalize(String(name || '')).replace(/^([/\\\\.]+)+/, '');
+  const p = resolve(join(DATA_DIR, safe + (extname(safe) ? '' : '.json')));
+  if (!p.startsWith(DATA_DIR + sep)) throw new Error('bad_data_path');
+  return p;
+}
+function readData(name, fallback) {
+  try { return JSON.parse(readFileSync(dataPath(name), 'utf8')); } catch (e) { return fallback; }
+}
+function writeData(name, value) {
+  const p = dataPath(name);
+  mkdirSync(p.slice(0, p.lastIndexOf(sep)), { recursive: true });
+  const tmp = p + '.tmp';
+  require('node:fs').writeFileSync(tmp, JSON.stringify(value, null, 2), 'utf8');
+  require('node:fs').renameSync(tmp, p);
+}
+const routes = [];
+function loadRoutes() {
+  routes.length = 0;
+  if (!existsSync(ROUTES_DIR)) return;
+  for (const file of readdirSync(ROUTES_DIR).filter((f) => f.endsWith('.js')).sort()) {
+    try {
+      const fileUrl = join(ROUTES_DIR, file);
+      // 热加载：应用可在预览运行中写路由文件，删 require 缓存让下一次请求拿到新代码
+      delete require.cache[require.resolve(fileUrl)];
+      const mod = require(fileUrl);
+      const prefix = '/api/' + file.replace(/\\.js$/, '');
+      const ctx = { dataDir: DATA_DIR, readData: readData, writeData: writeData, sendJson: sendJson };
+      for (const [key, handler] of Object.entries(mod || {})) {
+        const m = /^(GET|POST|PUT|PATCH|DELETE)\\s+\\/(.*)$/.exec(key);
+        if (!m || typeof handler !== 'function') continue;
+        // 裸 '/' 路由挂成 /api/<前缀>（无尾斜杠），与请求侧的尾斜杠归一化对齐
+        const routePath = ('/' + prefix.slice(1) + '/' + m[2].replace(/^\\/+/, '')).replace(/\\/+$/, '');
+        routes.push({ method: m[1], path: routePath, handler: handler, ctx: ctx });
+      }
+    } catch (e) {
+      console.error('[routes] 挂载失败 ' + file + ': ' + (e && e.message));
+    }
+  }
+}
+function matchRoute(method, pathname) {
+  for (let i = routes.length - 1; i >= 0; i -= 1) {
+    const r = routes[i];
+    if (r.method !== method) continue;
+    if (r.path === pathname) return r;
+    const rp = r.path.split('/'); const ap = pathname.split('/');
+    if (rp.length === ap.length && rp.some((s) => s.startsWith(':')) && rp.every((s, j) => s.startsWith(':') || s === ap[j])) {
+      const params = {}; rp.forEach((s, j) => { if (s.startsWith(':')) params[s.slice(1)] = decodeURIComponent(ap[j]); });
+      return { ...r, params: params };
+    }
+  }
+  return undefined;
+}
+async function handleApi(req, res, rawUrl) {
+  loadRoutes();
+  const hit = matchRoute(req.method, rawUrl.pathname.replace(/\\/+$/, '') || rawUrl.pathname);
+  if (!hit) { sendJson(res, 404, { error: 'not_found' }); return; }
+  const query = Object.fromEntries(rawUrl.searchParams.entries());
+  let body = undefined;
+  if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+    const raw = await new Promise((ok) => { let s = ''; req.on('data', (c) => { s += c; if (s.length > 512 * 1024) req.destroy(); }); req.on('end', () => ok(s)); req.on('error', () => ok(s)); });
+    if (raw) { try { body = JSON.parse(raw); } catch (e) { sendJson(res, 400, { error: 'bad_json' }); return; } }
+  }
+  try { await hit.handler(req, res, { ...hit.ctx, query: query, body: body, params: hit.params || {} }); }
+  catch (e) { sendJson(res, 500, { error: 'route_error', message: String(e && e.message || e).slice(0, 200) }); }
+}
+// ---- 同源 AI 代理（Bloma 完整程序渠道，2026-09-06；与产物模板同构）----
+// 前端 CSP 只放行同源（connect-src 'self'），浏览器永远不直接出网；需要真实模型
+// 能力的功能统一 POST /api/llm，由本进程（Bloma 注入 BLOMA_APP_LLM_* 环境变量）
+// 代为出网。密钥只存在于本进程环境变量，绝不写入前端代码/项目文件。
+const LLM_BASE = (process.env.BLOMA_APP_LLM_BASE_URL || '').replace(/\\/+$/, '');
+const LLM_KEY = process.env.BLOMA_APP_LLM_KEY || '';
+const LLM_MODEL = process.env.BLOMA_APP_LLM_MODEL || '';
+const LLM_PROTOCOL = process.env.BLOMA_APP_LLM_PROTOCOL === 'anthropic' ? 'anthropic' : 'openai';
+const LLM_TIMEOUT_MS = Number(process.env.BLOMA_APP_LLM_TIMEOUT_MS) || 60000;
 const server = createServer((req, res) => {
   const rawUrl = new URL(req.url || '/', 'http://localhost');
+  if (rawUrl.pathname === '/api/llm' && (req.method === 'POST' || req.method === 'OPTIONS')) {
+    if (req.method === 'OPTIONS') { res.writeHead(403); res.end('Forbidden'); return; }
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; if (raw.length > 512 * 1024) req.destroy(); });
+    req.on('end', () => {
+      let body = {};
+      try { body = JSON.parse(raw || '{}'); } catch (e) { sendJson(res, 400, { error: 'bad_json' }); return; }
+      const messages = Array.isArray(body.messages) ? body.messages : [];
+      if (body.mock) {
+        if (body.mock === 'fail') { sendJson(res, 200, { error: 'mock_failure' }); return; }
+        const lastUser = messages.slice().reverse().find((m) => m && m.role === 'user');
+        const topic = lastUser && typeof lastUser.content === 'string' ? lastUser.content.slice(0, 80) : '';
+        sendJson(res, 200, { content: '【模拟应答】已根据「' + topic + '」生成确定性结果（GWT mock 模式）。' });
+        return;
+      }
+      if (!LLM_BASE || !LLM_KEY || !LLM_MODEL) { sendJson(res, 503, { error: 'llm_not_configured' }); return; }
+      if (typeof fetch !== 'function') { sendJson(res, 500, { error: 'node_too_old' }); return; }
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+      const headers = { 'Content-Type': 'application/json' };
+      let upstreamUrl;
+      let upstreamBody;
+      if (LLM_PROTOCOL === 'anthropic') {
+        upstreamUrl = LLM_BASE + '/v1/messages';
+        headers['x-api-key'] = LLM_KEY;
+        headers['anthropic-version'] = '2023-06-01';
+        upstreamBody = { model: LLM_MODEL, max_tokens: Number(body.max_tokens) || 1024, messages: messages };
+      } else {
+        upstreamUrl = LLM_BASE + '/chat/completions';
+        headers['Authorization'] = 'Bearer ' + LLM_KEY;
+        upstreamBody = { model: LLM_MODEL, messages: messages, temperature: body.temperature, max_tokens: Number(body.max_tokens) || 1024, stream: false };
+      }
+      fetch(upstreamUrl, { method: 'POST', headers: headers, body: JSON.stringify(upstreamBody), signal: controller.signal })
+        .then(async (upstream) => {
+          clearTimeout(timer);
+          let data = {};
+          try { data = JSON.parse(await upstream.text()); } catch (e) { data = {}; }
+          if (!upstream.ok) { sendJson(res, upstream.status, { error: 'upstream_error', status: upstream.status }); return; }
+          const content = LLM_PROTOCOL === 'anthropic'
+            ? (Array.isArray(data.content) ? data.content.filter((b) => b && b.type === 'text').map((b) => b.text || '').join('') : '')
+            : (data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content || '' : '');
+          sendJson(res, 200, { content: content });
+        })
+        .catch((err) => {
+          clearTimeout(timer);
+          sendJson(res, 502, { error: 'upstream_failed', message: String(err && err.message || err).slice(0, 200) });
+        });
+    });
+    return;
+  }
+  if (rawUrl.pathname.startsWith('/api/')) { handleApi(req, res, rawUrl).catch(() => { try { sendJson(res, 500, { error: 'route_error' }); } catch (e) {} }); return; }
+  // 后端专属目录不走静态托管：server/ 是路由代码、data/ 是运行数据，前端一律经 /api 访问
+  const staticRel = rawUrl.pathname.replace(/^\\/+/, '');
+  if (staticRel === 'server' || staticRel.startsWith('server/') || staticRel === 'data' || staticRel.startsWith('data/')) {
+    res.writeHead(404);
+    res.end('Not found');
+    return;
+  }
   const requested = rawUrl.pathname === '/' ? '/index.html' : decodeURIComponent(rawUrl.pathname);
   const normalized = normalize(requested).replace(/^([/\\\\])+/, '');
   const filePath = resolve(join(root, normalized));
@@ -324,11 +472,12 @@ const server = createServer((req, res) => {
   res.writeHead(200, {
     'Content-Type': types[extname(finalPath)] || 'application/octet-stream',
     'Cache-Control': 'no-store',
-    // 生成代码不得联网：禁止 fetch/XHR/WebSocket 到任何外部地址。
+    // 生成代码不得联网：CSP 只放行同源 connect-src（完整程序渠道：AI 能力走同源
+    // /api/llm 代理，由服务器进程出网），浏览器直连外部地址仍被硬拦截。
     // script-src 不再保留 'unsafe-eval'（2026-08-17 设计 §7.0/FEAS-C3 收紧）：eval/Function()
     // 的禁令原本只写在提示词里（CSP 实含 unsafe-eval、并不拦截），收紧后该约束被真正
     // 强制——MVP 提示词已同步要求用显式 if/switch 或事件监听实现交互逻辑。
-    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; font-src 'self'",
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'",
   });
   createReadStream(finalPath).pipe(res);
 });

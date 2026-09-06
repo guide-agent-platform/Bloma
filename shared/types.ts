@@ -1020,6 +1020,10 @@ export interface SandboxRunInput extends RequestEnvelope {
   project_id: string
   command?: string
   timeout_ms?: number
+  /** 产物 AI 代理环境（完整程序渠道，2026-09-06）：注入产物 static-server 进程的
+   * BLOMA_APP_LLM_*（base/key/model/protocol）。密钥只落服务器进程 env，绝不进
+   * 前端代码/项目文件；env 签名参与沙箱幂等守卫比对（变化即重启）。 */
+  llm_env?: Record<string, string>
 }
 
 export interface SandboxRunResult {

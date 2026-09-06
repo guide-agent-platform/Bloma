@@ -5,7 +5,7 @@ import { loadPromptOverride } from '../prompt-config'
 import { buildPrdFewShotInjection, isInjectionEnabled } from '../template-injection'
 import { callLlmForJson } from '../kernel/llm-call'
 import type { AgentMessage, MessageContentBlock } from '../../shared/types'
-import type { GameDesignDoc, PrdBackplane, SketchRequirement } from '../model/prd-backplane'
+import type { GameDesignDoc, InterfaceEndpoint, PrdBackplane, SketchRequirement } from '../model/prd-backplane'
 import { buildPrdDocumentFallback, normalizePrdDocumentNewlines, reconcilePrdDocumentPriorities } from '../model/prd-backplane'
 import { renderDocumentSectionSpec } from '../prd-sections'
 import { categoryTemperature } from '../model-resolution'
@@ -62,6 +62,7 @@ export const DEFAULT_SYSTEM_PROMPT = `你是「Bloma 向导 · 需求工程腿�
  "acceptance":{"F-001":"该功能项的验收要点 2~4 条，分号分隔（正常路径 + 边界/异常各至少 1 条）"},
  "out_of_scope":["本轮明确不做的事"],
  "assumptions":["后台做出的假设"],
+ "interface_spec":[{"endpoint":"/api/records","method":"GET","request":"无","response":"{records:[{id,amount,type,note}]}"}],  // 有数据留存/后端能力/AI 调用时输出；纯展示类省略此字段
  "gdd":{"core_fantasy":"核心幻想","pillars":["支柱 1"],"core_loop":["阶段 1"],"numbers":["数值基准"]}}  // 仅 game 类型输出，非 game 省略此字段
 
 一、document（长文本 PRD 全文——用户过目与下游约束的正式形态）
@@ -102,6 +103,11 @@ ${renderDocumentSectionSpec()}
 - numbers：数值基准——关键数值/范围（生命值/得分/关卡数/道具池范围等）。
 - 从对话提炼；对话没说细的机制按同类游戏常见合理预期补齐并克制标注「（建议）」；document 的功能清单/行为断言从 gdd 核心循环切片，不发明 gdd 之外的机制。
 
+七、interface_spec（后端 API 契约，前后端分离真相源）
+- 凡功能涉及数据留存、服务端处理或 AI 调用，逐端点列出：endpoint（一律以 /api/ 开头，平台自动挂载 server/routes）、method（GET/POST/PUT/DELETE，缺省 GET）、request（请求要点，无则写「无」）、response（响应要点，JSON 形态）。
+- 这是前后端共同遵守的契约：编程 Agent 按它实现 server/routes，终验按它做存活检查；端点粒度对齐功能项主流程，最多 6 条，宁缺毋滥。
+- 纯展示类、无任何数据留存的产物省略此字段（空数组亦可）。
+
 示例（家庭记账本，功能项 F-001 记录收入与支出 / F-002 展示本月结余；document 节选关键章节）：
 {"document":"# PRD：家庭记账本\\n## 一、产品定位 —— 面向个人与家庭的记账工具：日常收支发生时快速记录，月底直观看到结余。\\n## 二、功能清单 —— 作为家庭成员，我想记录每笔收入与支出，以便月底清楚钱花在了哪里。\\n### [F-001]（P0）记录收入与支出\\n验收要点：正常：新增一笔收入或支出后列表立即可见并持久保存；边界：金额为空或非数字时提示错误且不保存\\n### [F-002]（P0）展示本月结余\\n验收要点：正常：按自然月汇总并显示结余；边界：本月无任何记录时结余显示 0\\n## 三、页面清单 —— 首页为记账列表+快速记一笔入口，顶部显示本月结余。\\n## 六、范围外 —— 多用户协作；银行账户自动对接\\n## 八、后台假设 —— 金额单位统一为人民币元；数据仅保存在本地，不提供云同步",
  "positioning":"面向个人与家庭的记账工具，在日常收支发生时快速记录，并在月底直观看到本月结余，帮助用户掌握花钱情况。",
@@ -109,7 +115,8 @@ ${renderDocumentSectionSpec()}
    "F-001":"正常：新增一笔收入或支出（金额+类型+备注）后列表立即可见并持久保存；边界：金额为空、为负或非数字时提示错误且不保存；边界：刷新或重开后已记录的账目仍在",
    "F-002":"正常：按自然月汇总收入与支出并显示结余金额；边界：本月无任何记录时结余显示 0 而非报错或空白"},
  "out_of_scope":["多用户协作","银行账户自动对接"],
- "assumptions":["金额单位统一为人民币元","数据仅保存在本地，不提供云同步","结余=本月收入合计-本月支出合计"]}
+ "assumptions":["金额单位统一为人民币元","数据仅保存在本地，不提供云同步","结余=本月收入合计-本月支出合计"],
+ "interface_spec":[{"endpoint":"/api/records","method":"GET","request":"无","response":"{records:[{id,amount,type,note,date}]}"},{"endpoint":"/api/records","method":"POST","request":"{amount:number,type:'income'|'expense',note:string}","response":"{ok:true,id}"}]}
 
 约束：
 - 严格基于对话内容提炼，不要臆造用户没提过的功能或约束。
@@ -197,6 +204,8 @@ function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequirement[],
     assumptions: parsed.assumptions,
     // P1-7：game 类型 GDD（玩法真相源）随背板冻结；非 game 缺省 undefined。
     ...(parsed.gdd ? { gdd: parsed.gdd } : {}),
+    // 完整程序阶段 2：后端 API 契约随背板冻结；无后端需求缺省 undefined。
+    ...(parsed.interface_spec && parsed.interface_spec.length > 0 ? { interface_spec: parsed.interface_spec } : {}),
   }
 }
 
@@ -207,6 +216,7 @@ interface ParsedPrd {
   out_of_scope: string[]
   assumptions: string[]
   gdd?: GameDesignDoc
+  interface_spec?: InterfaceEndpoint[]
 }
 
 function parsePrdJson(text: string): ParsedPrd | undefined {
@@ -233,6 +243,8 @@ function parsePrdJson(text: string): ParsedPrd | undefined {
 
   // P1-7：gdd 解析（game 类型；四要素齐备才采纳，缺任一视为无 GDD 降级）。
   const gdd = parseGdd(parsed.gdd)
+  // 完整程序阶段 2：interface_spec 解析（前后端契约真相源；缺省/非法 → 空数组零注入）。
+  const interfaceSpec = parseInterfaceSpec(parsed.interface_spec)
 
   return {
     positioning: typeof parsed.positioning === 'string' ? parsed.positioning : '',
@@ -241,7 +253,36 @@ function parsePrdJson(text: string): ParsedPrd | undefined {
     out_of_scope: stringArray(parsed.out_of_scope),
     assumptions: stringArray(parsed.assumptions),
     ...(gdd ? { gdd } : {}),
+    ...(interfaceSpec.length > 0 ? { interface_spec: interfaceSpec } : {}),
   }
+}
+
+/** 解析 interface_spec（完整程序阶段 2）：端点必须落在 /api/ 前缀下（平台自动挂载
+ * server/routes），缺前缀自动补；方法白名单（缺省 GET）；上限 6 条，宁缺毋滥。
+ * export：供单测直测（契约清洗规则承重，防下游挂载/探针被脏端点打穿）。 */
+export function parseInterfaceSpec(raw: unknown): InterfaceEndpoint[] {
+  if (!Array.isArray(raw)) return []
+  const out: InterfaceEndpoint[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const record = entry as Record<string, unknown>
+    const endpointRaw = typeof record.endpoint === 'string' ? record.endpoint.trim() : ''
+    if (!endpointRaw) continue
+    // 缺 /api/ 前缀自动补：'api/records'（无斜杠但带 api 段）与 '/records' 同视为缺前缀
+    const endpoint = endpointRaw.startsWith('/api/')
+      ? endpointRaw
+      : '/api/' + endpointRaw.replace(/^\/+/, '').replace(/^api\/+/, '')
+    const methodRaw = typeof record.method === 'string' ? record.method.trim().toUpperCase() : 'GET'
+    const method = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].includes(methodRaw) ? methodRaw : 'GET'
+    out.push({
+      endpoint,
+      method,
+      ...(typeof record.request === 'string' && record.request.trim() ? { request: record.request.trim().slice(0, 200) } : {}),
+      ...(typeof record.response === 'string' && record.response.trim() ? { response: record.response.trim().slice(0, 200) } : {}),
+    })
+    if (out.length >= 6) break
+  }
+  return out
 }
 
 /** 解析 gdd 四要素（核心幻想/支柱/核心循环/数值基准）；缺核心幻想或支柱或核心循环任一即 undefined。 */
