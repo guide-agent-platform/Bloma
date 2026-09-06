@@ -77,7 +77,7 @@ describe('replay-compiler：断言编译', () => {
     expect(replayAssertionText({ kind: 'anti_pattern', body: body('异常结局（timeout）：Loop 结束') } as ExperienceCard)).toBeNull()
   })
 
-  it('replayRequirements：verified 与达阈 candidate 入列、r=1 candidate 排除、上限 3、verified 优先；开关 off → []', async () => {
+  it('replayRequirements：非 retired 可编译卡全入 advisory（candidate 靠重放拿晋升证据）、上限 3、verified 优先；开关 off → []', async () => {
     const v1 = await seedCard('coding/gwt/a1', 'GWT 场景「F-001 当提交时，应保存记录」未通过：x1')
     await promoteToVerified(v1!.id, 'replay_green')
     for (let i = 2; i <= 5; i++) {
@@ -143,20 +143,20 @@ describe('replay-compiler：回流状态机 + feature 双目录', () => {
     expect(v.stats).toMatchObject({ times_matched: 1, false_positive_count: 1 })
   })
 
-  it('feature 文件：verified 进 features/、达阈 candidate 进 features-candidates/（业务清单不受影响）', async () => {
+  it('feature 文件：verified 进 features/、其余可编译 candidate 进 features-candidates/（业务清单不受影响）', async () => {
     const { getDocumentsDir } = await import('../../../storage/config-paths')
     const { createProject } = await import('../../../main/project-service')
     const project = createProject({ request_id: 'req-replay', mode: 'quick' })
     const v = await seedCard('coding/gwt/f1', 'GWT 场景「F-001 当提交时，应保存记录」未通过：x')
     await promoteToVerified(v!.id, 'replay_green')
-    const c1 = await seedCard('coding/gwt/f2', 'GWT 场景「F-002 当删除时，应二次确认」未通过：y') // r=1 不写
+    const c1 = await seedCard('coding/gwt/f2', 'GWT 场景「F-002 当删除时，应二次确认」未通过：y') // r=1 candidate 也进候选目录（advisory 资格=非 retired 可编译）
     const docsDir = getDocumentsDir(project.workspace_slug, project.project_id)
     syncReplayFeatureFiles(project.project_id, docsDir)
     const feat = readdirSync(join(docsDir, 'features')).filter((f) => f.startsWith('replay-'))
     const candDir = join(docsDir, 'features-candidates')
     expect(feat).toHaveLength(1)
     expect(feat[0]).toContain('replay-')
-    expect(existsSync(join(candDir, `replay-${fp8(c1!.fingerprint)}.feature`))).toBe(false)
+    expect(existsSync(join(candDir, `replay-${fp8(c1!.fingerprint)}.feature`))).toBe(true)
     expect(readFileSync(join(docsDir, 'features', feat[0]), 'utf8')).toContain('Scenario:')
   })
 })

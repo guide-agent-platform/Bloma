@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { experienceEnabled, isConsumable, type ExperienceCard } from './types'
+import { experienceEnabled, type ExperienceCard } from './types'
 import { readAllCards } from './experience-service'
 import type { SketchRequirement } from '../model/prd-backplane'
 
@@ -35,13 +35,17 @@ export function replayAssertionText(card: ExperienceCard): string | null {
   return null
 }
 
-/** 可重放的卡（verified 恒入；candidate 需达复发阈）。verified 优先、复发多优先，上限 3。 */
+/**
+ * 可重放的卡：非 retired anti_pattern + 可编译断言即可进 **advisory** 执行
+ * （用户计划本意：candidate 靠重放转绿拿晋升证据；advisory 不碰业务门禁，
+ * 严格 isConsumable 只约束「注入业务面/裁判面」）。verified 优先、复发多优先，上限 3。
+ */
 function replayableCards(projectId: string): ExperienceCard[] {
   void projectId // v1：账本全局（跨项目复用经验是特性）；保留参数为未来按项目过滤留缝
   if (!experienceEnabled()) return []
   try {
     return readAllCards()
-      .filter((c) => c.kind === 'anti_pattern' && isConsumable(c))
+      .filter((c) => c.kind === 'anti_pattern' && c.status !== 'retired')
       .sort(
         (a, b) =>
           (b.status === 'verified' ? 1 : 0) - (a.status === 'verified' ? 1 : 0) ||
