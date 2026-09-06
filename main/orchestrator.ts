@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type {
   AgentCancelInput,
   AgentCancelResult,
@@ -45,6 +46,7 @@ import {
 } from './programming-orchestrator'
 import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from './requirement-normalizer'
 import { readPrdBackplane } from './document-engine'
+import { backplaneInterfaceSpec } from './model/prd-backplane'
 import { isDegenerateText } from './coding/output-integrity'
 import { createWhitespaceArtifactCleaner } from './coding/agent-loop'
 import { recordDecision } from './decision-log'
@@ -303,8 +305,9 @@ function readyChatEnabled(): boolean {
 const READY_REPLY_BANNED =
   /还没好|还未好|尚未(生成|完成|就绪)|还在生成|正在生成|后台(正在|在)?(跑|运行|生成)|请稍等|稍等片刻|正在处理/
 
-/** 组装事实锚：阶段/项目/模式 + PRD 功能清单（背板/索引缺失时逐项降级，不阻断直答）。 */
-function buildReadyChatFacts(projectId: string, stage: WorkflowStage): string {
+/** 组装事实锚：阶段/项目/模式 + PRD 功能清单 + 产物成熟度（完整程序差距可计算，2026-09-06）。
+ * 背板/索引缺失时逐项降级，不阻断直答。 */
+function buildReadyChatFacts(projectId: string, stage: WorkflowStage, aiReady: boolean): string {
   const lines: string[] = [`- 阶段：${stage}（可运行 MVP 已生成，右侧预览区可用）`]
   try {
     const project = findProject(projectId)
@@ -323,6 +326,32 @@ function buildReadyChatFacts(projectId: string, stage: WorkflowStage): string {
   } catch {
     // 背板缺失（存量项目）：事实锚只留阶段
   }
+  // 产物成熟度（终点拍板 2026-09-06：终点不是 MVP，是前后端分离的完整程序）——
+  // 从磁盘/背板可计算的差距，模型据此如实回答「还差什么」并给具体建议
+  try {
+    const root = findProject(projectId).root_path
+    const routesDir = join(root, 'server', 'routes')
+    const routeCount = existsSync(routesDir) ? readdirSync(routesDir).filter((f) => f.endsWith('.js')).length : 0
+    lines.push(
+      routeCount > 0
+        ? `- 后端路由：server/routes 已有 ${routeCount} 个路由模块`
+        : '- 后端路由：尚未创建 server/routes/（数据留存仍可能在前端）',
+    )
+    lines.push(existsSync(join(root, 'data')) ? '- 数据持久化：data/ 目录已在使用' : '- 数据持久化：data/ 目录尚未建立')
+  } catch {
+    // 磁盘读取失败：跳过成熟度行
+  }
+  try {
+    const endpoints = backplaneInterfaceSpec(readPrdBackplane(projectId))
+    lines.push(
+      endpoints.length > 0
+        ? `- 接口契约：${endpoints.length} 条（${endpoints.map((ep) => `${ep.method ?? 'GET'} ${ep.endpoint}`).join('、')}）`
+        : '- 接口契约：无（纯展示类产物）',
+    )
+  } catch {
+    // 背板缺失：跳过契约行
+  }
+  lines.push(aiReady ? '- AI 能力：/api/llm 模型代理可用（渠道已注入）' : '- AI 能力：未配置（/api/llm 会返回 llm_not_configured）')
   return lines.join('\n')
 }
 
@@ -333,9 +362,13 @@ function buildReadyChatSystem(facts: string): string {
     '【项目事实（以此为准，不得编造）】',
     facts,
     '',
+    '【引导职责（终点是前后端分离的完整程序，MVP 只是里程碑）】',
+    '- 用户问「还算完整吗/还差什么/下一步/怎么导出」时：基于成熟度事实如实回答差距，并给 1~2 条具体建议（数据存到服务端、补充功能、配置真实 AI、导出部署）。',
+    '- 建议要贴合差距：缺后端路由就建议把数据存到服务端；已齐备就如实说已经比较完整并建议导出。',
+    '',
     '【硬性底线（违反会被平台判无效并重试）】',
     '- 项目已经生成好：不得出现「还没好」「还在生成」「后台运行」等任何未完成措辞。',
-    '- 不得承诺平台没有的能力（后端服务、真实部署、外部网络请求、多用户账号等）。',
+    '- 不得承诺平台没有的能力（真实部署到云、多用户账号等后端托管类能力）。',
     '- 只回答与用户这句话相关的内容，不重复项目介绍全文，不复述功能清单。',
     '',
     '直接输出回复正文（简体中文口语，300 字以内），不要 JSON、不要标题、不要格式围栏。',
@@ -797,7 +830,13 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
           history,
           maxTokens,
           ...(channel?.provider_type !== undefined ? { providerType: channel.provider_type } : {}),
-          system: buildReadyChatSystem(buildReadyChatFacts(input.project_id, authoritativeStage)),
+          system: buildReadyChatSystem(
+            buildReadyChatFacts(
+              input.project_id,
+              authoritativeStage,
+              Boolean(env?.ANTHROPIC_BASE_URL && env?.ANTHROPIC_AUTH_TOKEN && env?.ANTHROPIC_MODEL),
+            ),
+          ),
           userContent: input.content,
         })
         if (chat.ok) guidance = chat.text

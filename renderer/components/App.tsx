@@ -10,6 +10,7 @@ import { ClarificationCard } from './ClarificationCard'
 import { ReviewChoicesDialog } from './ReviewChoicesDialog'
 import { SettingsPage } from './SettingsPage'
 import { useUserDecisionCards, toCardSelectionMeta } from './ChatPanel-sprint2'
+import { globalUserErrorAtom } from '../agent-atoms'
 import type { CardOption } from './CardOptions'
 import type { PreviewStatus } from './PreviewPanel'
 import type { Snapshot, AgentMessage, Project, PastedImageRef } from './atoms'
@@ -171,6 +172,7 @@ const AppRoutes: React.FC = () => {
 
   // Sprint 2: 从 AgentEvent 提取 user_decision_required → CardOptions
   const decisionCards = useUserDecisionCards()
+  const setGlobalError = useSetAtom(globalUserErrorAtom)
   const currentProject = useAtomValue(currentProjectAtom)
   const currentStage = useAtomValue(workflowStageAtom)
   const hasActiveStream = useAtomValue(hasActiveStreamAtom)
@@ -427,6 +429,20 @@ const AppRoutes: React.FC = () => {
   const handleCardOptionSelect = useCallback((option: CardOption) => {
     const api = window.electronAPI
     if (!api?.agent?.sendMessage) return
+
+    // 就绪引导卡「导出部署」（2026-09-06）：不走聊天管道，直接调导出 IPC（与
+    // MvpStatusBanner 导出按钮同一 API/错误口径），卡片消费但不追加用户气泡
+    if (option.id === 'export_handoff') {
+      if (!api.project?.export || !currentProject) return
+      markDecisionConsumed(sessionId)
+      void api.project
+        .export({ request_id: crypto.randomUUID(), project_id: currentProject.project_id })
+        .then((result) => {
+          if (!result.ok) setGlobalError(result.error?.user_visible_message || result.error?.message || '导出失败，请重试。')
+        })
+        .catch(() => setGlobalError('导出失败，请重试。'))
+      return
+    }
 
     // 点击即有反馈：先本地追加用户气泡（与 handleSendMessage 一致），再回传后端
     appendMessageToSession(sessionId, {

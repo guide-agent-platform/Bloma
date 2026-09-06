@@ -58,9 +58,10 @@ const AUTOMATED_PERMISSION_MODE = 'allow-all' as const
 /** 渠道未配置 max_tokens 时的默认上限（对齐全渠道 640000，防思考型渠道零正文）。 */
 const DEFAULT_MAX_TOKENS = 640000
 
-/** 项目已生成完成（ready）的统一话术：完成通知与 ready 护栏共用，避免两套语义相近的固定文案。 */
+/** 项目已生成完成（ready）的统一话术：完成通知与 ready 护栏共用，避免两套语义相近的固定文案。
+ * 完成语义升级（2026-09-06 用户拍板「终点不是 MVP」）：就绪话术带走向完整产物的出口提示。 */
 export const READY_COMPLETION_COPY =
-  '已经生成好了，可以点右侧预览区的按键试用。有想调整的地方随时告诉我。'
+  'MVP 已经生成好了，可以点右侧预览区的按键试用。想走向完整产物——数据存到服务端、加功能、接真实 AI、导出部署——直接说就行。'
 
 /** 迭代/生成失败时如实告知用户的话术：不假装成功，也不把失败藏成「已经生成好了」。 */
 export const GENERATION_FAILED_COPY =
@@ -1625,6 +1626,19 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
       ? `${READY_COMPLETION_COPY}\n\n补充提示：${verdict.user_visible_summary}`
       : READY_COMPLETION_COPY
   publishCompletionMessage(input, completion)
+  // 就绪引导卡（2026-09-06 用户拍板「终点不是 MVP」）：MVP 只是里程碑——发下一步卡
+  // 引导用户走向完整产物（数据上服务端/导出部署）。复用 user_decision_required 通道
+  //（渲染端 useUserDecisionCards 扫描事件渲染卡片，选项经 card_option metadata 回传；
+  // export_handoff 由渲染端特调导出 IPC，不进聊天管道）。mvp_ready 在交付期已发，
+  // 本卡在其后到达 → 渲染端扫描顺序保证显示。
+  publish(input, 'user_decision_required', {
+    kind: 'ready_next_steps',
+    title: '当前版本已就绪——下一步走向完整产物',
+    questions: [
+      { id: 'next_backend', label: '把数据存到服务端', description: '历史/记录改用 server/routes + data/ 持久化' },
+      { id: 'export_handoff', label: '导出部署', description: '生成可独立部署的前后端工程' },
+    ],
+  })
   return { outcome: 'ready', verdict }
 }
 

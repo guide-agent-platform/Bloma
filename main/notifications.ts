@@ -107,7 +107,7 @@ export function handleAgentStreamEvent(event: AgentEvent): void {
       notifyTaskCompleted(projectId, '草图已经画好了，看看预览是不是你要的样子？确认后我继续做 MVP。')
       break
     case 'mvp_ready':
-      notifyTaskCompleted(projectId, 'MVP 已经生成好了，可以去预览区看看；后续迭代直接告诉我改哪里。')
+      notifyTaskCompleted(projectId, 'MVP 已经生成好了，可以去预览区看看；想走向完整程序（数据上服务端/加功能/导出）直接说。')
       break
     case 'user_decision_required':
       handleDecisionRequired(projectId, typeof event.payload.title === 'string' ? event.payload.title : undefined)
