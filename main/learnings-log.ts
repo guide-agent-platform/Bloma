@@ -22,7 +22,7 @@ import { getDocumentsDir } from '../storage/config-paths'
 
 export interface ProjectLearning {
   recorded_at: string
-  kind: 'loop_summary' | 'loop_outcome' | 'repair_outcome' | 'note'
+  kind: 'loop_summary' | 'loop_outcome' | 'repair_outcome' | 'error_pattern' | 'note'
   text: string
   meta?: Record<string, unknown>
 }
@@ -34,7 +34,13 @@ const DEFAULT_INJECT_LIMIT = 6
 /** 入队去重回看窗口（条）：只与最近 N 条比对，越旧越可能已有价值退化 */
 const DEDUP_LOOKBACK = 20
 /** 注入排序的 kind 权重：异常结局（失败信号）优先于总结/备注；修复结局同为失败信号同权。 */
-const KIND_WEIGHT: Record<ProjectLearning['kind'], number> = { loop_outcome: 2, repair_outcome: 2, note: 1, loop_summary: 1 }
+const KIND_WEIGHT: Record<ProjectLearning['kind'], number> = {
+  error_pattern: 3,
+  loop_outcome: 2,
+  repair_outcome: 2,
+  note: 1,
+  loop_summary: 1,
+}
 /** loop_summary 时效阈值（天）：超过则注入排序沉底（不删除，条数不足时仍可入选）。 */
 const SUMMARY_STALE_DAYS = 14
 
@@ -61,13 +67,14 @@ export function appendProjectLearning(
       text: entry.text.trim().slice(0, TEXT_CHAR_LIMIT),
       ...(entry.meta ? { meta: entry.meta } : {}),
     }
-    // 入队去重（仅 loop_summary）：迭代重生成的完成总结高度相似，同前缀刷屏挤占
-    // 注入预算；loop_outcome 不去重——重复失败恰是最该留的信号（v1 保守裁定）。
-    if (record.kind === 'loop_summary') {
+    // 入队去重（loop_summary / error_pattern）：迭代重生成的完成总结高度相似，同前缀刷屏挤占
+    // 注入预算；错误镜像卡同理（同一坑同轮多写点只留一条）；loop_outcome 不去重——
+    // 重复失败恰是最该留的信号（v1 保守裁定）。
+    if (record.kind === 'loop_summary' || record.kind === 'error_pattern') {
       const prefix = normalizeForDedup(record.text)
       const duplicated = readAllLearnings(projectId)
         .slice(-DEDUP_LOOKBACK)
-        .some((existing) => existing.kind === 'loop_summary' && normalizeForDedup(existing.text) === prefix)
+        .some((existing) => existing.kind === record.kind && normalizeForDedup(existing.text) === prefix)
       if (duplicated) return null
     }
     appendFileSync(path, `${JSON.stringify(record)}\n`, 'utf8')
@@ -137,7 +144,12 @@ export function renderLearningsSection(projectId: string, limit = DEFAULT_INJECT
   const learnings = readCuratedLearnings(projectId, limit)
   if (learnings.length === 0) return ''
   const lines = learnings.map((learning) => {
-    const label = learning.kind === 'loop_summary' ? '完成总结' : learning.kind === 'loop_outcome' ? '异常结局' : '备注'
+    if (learning.kind === 'error_pattern') {
+      // T-1 错误镜像卡：写方已组好「[tag@stage] 症状 → 规避：条件」，这里只加警示前缀
+      return `- ⚠ 坑：${learning.text.slice(0, 120)}`
+    }
+    const label =
+      learning.kind === 'loop_summary' ? '完成总结' : learning.kind === 'loop_outcome' ? '异常结局' : learning.kind === 'repair_outcome' ? '修复结局' : '备注'
     return `- [${label}] ${learning.text.slice(0, 120)}`
   })
   return ['【历史经验】（此前生成轮留下的，避免重复踩坑）', ...lines].join('\n')
