@@ -73,10 +73,10 @@ flowchart LR
 
   subgraph LANE_C["泳道 6｜编程 Agent（MVP Loop）"]
     direction TB
-    C0["⑩ 骨架先行渲染<br/>（web-fullstack 模板）"]
+    C0["⑩ 骨架先行渲染（web-fullstack 模板）<br/>+ 官方模块库 src/official-modules/（BLOMA_MODULES）<br/>→ skeletonMap+moduleMap 注入"]
     C1["⑩a Agent Loop<br/>compacting-window·钉轮·收口<br/>终轮退行守卫（重试 1→turn_limit）"]
-    C2["⑪ 沙箱工具<br/>read/write/edit<br/>run_preview/run_gwt_tests/run_security_scan<br/>写 server/routes（热加载）"]
-    C3["⑫ 交付<br/>package.json+app server<br/>/api/llm env 注入·快照含 data/"]
+    C2["⑪ 沙箱工具<br/>read/write/edit（托管文件拒绝写）<br/>run_preview/run_gwt_tests/run_security_scan<br/>写 server/routes（热加载）"]
+    C3["⑫ 交付：托管文件渲染<br/>package.json+app server（/api/llm env·data/）<br/>+ 构建门禁（esbuild 按 manifest 校验模块图）<br/>+ 快照含 data/"]
     C4["⑫a GWT 行为探针（?mock=1）<br/>EARS→Gherkin→Playwright/静态兜底<br/>+ API 契约存活检查 api-contract"]
   end
 
@@ -192,7 +192,58 @@ flowchart LR
 
 ---
 
-## 4. 渠道三角色路由（横切机制）
+## 4. 工程模板体系（模板资产与注入时机，2026-09-06 增补）
+
+工程模板是「确定性骨架 + 差异化注入」的两层机制：**模板资产**由平台在确定性时机渲染/注入（不依赖模型自觉），**业务内容**由编程 Agent 在模板上填充。对应泳道 6 的 C0（loop 前）、C1（注入消费）、C3（交付期接管）。
+
+```mermaid
+flowchart LR
+  subgraph T0["loop 前（确定性渲染，无 LLM）"]
+    S1["骨架包 skeletons/web-fullstack/<br/>manifest（build·files·readonly）<br/>+ index.html + src/styles.css + src/examples/"]
+    S2["官方模块库 official-modules/<br/>catalog+源码（web 4 模块/game 4 模块）"]
+    S3["类型化模板文档 *.md<br/>personal-tool / web-fullstack / game / desktop-tool"]
+  end
+  subgraph T1["system 组装期（template-injection 注入点）"]
+    I1["① template_meta 随背板<br/>（下游注入路由依据）"]
+    I2["② 澄清框架切片"]
+    I3["③ PRD few-shot（≤500 token 配额）"]
+    I4["⑤ 草图切片"]
+    I5["⑥ MVP loop 切片<br/>tech_skeleton/目录约定/依赖白名单"]
+    I6["skeletonMap + moduleMap<br/>（文件树+职责+只读声明）"]
+  end
+  subgraph T2["loop 运行期"]
+    W["write/edit 业务文件<br/>src/*、server/routes/* 可写"]
+    BAN["托管文件拒绝写：<br/>package.json / static-server.js"]
+  end
+  subgraph T3["交付期（平台接管）"]
+    G1["renderPackageJson / renderStaticServer<br/>（app server：/api/llm 代理 + routes 挂载）"]
+    G2["构建门禁：esbuild 按 manifest.build<br/>打包校验模块图（import 错误构建期暴露）"]
+  end
+  S1 -->|"renderSkeletonToProject（已存在跳过）"| I6
+  S2 -->|"module_rendered 写 src/official-modules/"| I6
+  S3 -->|"切片"| I1 & I2 & I3 & I4 & I5
+  I6 --> C1L["Agent Loop 在骨架上填充"]
+  C1L --> W
+  BAN --> G1
+  W --> G2
+```
+
+**模板资产清单**：
+
+| 资产 | 位置 | 渲染/注入时机 | 消费者与守卫 |
+|---|---|---|---|
+| 骨架包（web-fullstack） | `main/templates/skeletons/web-fullstack/` | loop 前 `renderSkeletonToProject`（幂等：已存在跳过，迭代不覆盖） | 编程 Agent 填充实现；`src/examples/` 只读；构建门禁按 `manifest.build` 校验 |
+| 官方功能模块库 | `main/templates/official-modules/` | loop 前渲染到 `src/official-modules/`（`module_rendered` 决策，`BLOMA_MODULES` 开关缺省开） | loop 按纪律复制改编（storage-state/modal-dialog/filter-list/form-validation；game：game-loop/fsm-state/input-control/aabb-collision） |
+| 类型化模板文档 | `main/templates/{personal-tool,web-fullstack,game,desktop-tool}.md` | 注入点②③⑤⑥ 按 `template_meta.type` 切片 | 澄清框架 / PRD few-shot / 草图 pages / loop 目录约定 |
+| 模板元信息 | 背板 `template_meta` | 注入点①随背板落盘 | 下游全部注入点路由（GWT 必测类别差异化：game=状态机/碰撞/胜负边界） |
+| 平台托管文件 | `renderPackageJson` / `renderStaticServer` | 交付期渲染（loop 工具被 `agent-tools` 拒绝写） | app server（/api/llm 代理 + server/routes 挂载）与导出 |
+| 外置提示词覆盖 | `~/.proma/prompts/{id}.md` | 文件存在即生效，改完即时生效（无需重启） | 对应引擎全量替换内置默认 |
+
+**模板类型（TemplateType）路由**：personal_tool / web_fullstack / game（P1-9）——类型决定骨架选择、模板文档切片、GWT 必测类别与 few-shot 路由；类型由对话/描述推断（游戏/复刻/重制→game）。
+
+---
+
+## 5. 渠道三角色路由（横切机制）
 
 | 类别 | 归属角色 | 说明 |
 |---|---|---|
@@ -202,7 +253,7 @@ flowchart LR
 
 ---
 
-## 5. 与导师架构建议的对照（8/30 质询点 6）
+## 6. 与导师架构建议的对照（8/30 质询点 6）
 
 | 导师建议 | 当前实现 | 差距与方向 |
 |---|---|---|
@@ -212,7 +263,7 @@ flowchart LR
 
 ---
 
-## 6. 维护约定
+## 7. 维护约定
 
 - 本图随主流程变更同步更新（变更点涉及：确认卡出口、内审闭环、委派角色集、裁判门禁、渠道路由、修复回流、完整程序契约链）。
 - 2026-09-06 修订对照实况：终轮退行守卫（output-integrity）、API 契约探测（api-contract）、修复回流入口 A/B（repair-loop）、迭代路由（skip+失败快照→定向修复）、就绪引导卡（ready_next_steps）均为本日落地。
