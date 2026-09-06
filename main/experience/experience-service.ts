@@ -10,6 +10,7 @@ import {
   isRetireEligibleCandidate,
   isStale,
   sanitizeCard,
+  type AntiPatternBody,
   type CardEnvelope,
   type CardKind,
   type ExperienceCard,
@@ -98,8 +99,8 @@ function appendCard(card: ExperienceCard): void {
   }
 }
 
-function cloneCard(card: ExperienceCard): ExperienceCard {
-  return JSON.parse(JSON.stringify(card)) as ExperienceCard
+function cloneCard<C extends ExperienceCard>(card: C): C {
+  return JSON.parse(JSON.stringify(card)) as C
 }
 
 /** 同指纹的可合并卡（非 retired），按 updated_at 最新优先。 */
@@ -180,6 +181,33 @@ async function registerCore(card: ExperienceCard): Promise<ExperienceCard> {
   appendCard(fresh)
   console.log(`${LOG} registered new card:`, fresh.id, fresh.kind, fresh.tag)
   return fresh
+}
+
+/**
+ * 幂等归因写回（T-4 用户点名要求）：已存在卡只走 update——追加同 id 新快照行，
+ * 压缩视图永远单卡，**绝不重新 insert**；归因结果与现值等同时直接返回不加行
+ * （重复精化/回灌重跑幂等）。
+ */
+export async function updateCardAttribution(
+  id: string,
+  rootCause: AntiPatternBody['root_cause'],
+): Promise<ExperienceCard | null> {
+  if (!experienceEnabled()) return null
+  const card = ensureIndex().get(id)
+  if (!card || card.status === 'retired' || card.kind !== 'anti_pattern') return null
+  const old = card.body.root_cause
+  const same =
+    old.stage === rootCause.stage &&
+    old.method === rootCause.method &&
+    old.confidence === rootCause.confidence &&
+    old.description === rootCause.description
+  if (same) return cloneCard(card)
+  const next = cloneCard(card)
+  next.body.root_cause = { ...rootCause }
+  next.updated_at = Date.now()
+  appendCard(next)
+  console.log(`${LOG} attribution refined:`, id, `${old.stage} -> ${rootCause.stage}`)
+  return next
 }
 
 /** candidate→verified 只认三种证据；retired 卡不可复活（重新观察会生成新卡）。 */

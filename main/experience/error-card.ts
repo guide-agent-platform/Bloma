@@ -9,7 +9,8 @@ import {
   type CardEnvelope,
   type ExperienceCard,
 } from './types'
-import { registerCandidateCard } from './experience-service'
+import { registerCandidateCard, updateCardAttribution } from './experience-service'
+import { attributeRootCause } from './root-cause-attributor'
 import { appendProjectLearning } from '../learnings-log'
 import type { GwtTestResult } from '../gwt-service'
 import type { BuildGateResult } from '../coding/build-gate'
@@ -216,10 +217,26 @@ export function buildCardFromJudgeReturn(verdict: JudgeVerdict, ctx: ObserveCtx)
 // =========================================================================
 
 async function persistAntiPattern(card: ExperienceCard, ctx: ObserveCtx): Promise<void> {
+  let registered: ExperienceCard | null = null
   try {
-    await registerCandidateCard(card)
+    registered = await registerCandidateCard(card)
   } catch (error) {
     console.warn('[experience] register failed, skipping:', (error as Error)?.message)
+  }
+  // T-4 归因精化：规则层零成本同步跑（无 llmCall 不触网），等值幂等不加行；
+  // 窗口折叠命中的已有卡同样精化（旧卡可能是初值 unknown）
+  if (registered && registered.kind === 'anti_pattern') {
+    try {
+      const refined = await attributeRootCause(registered)
+      if (
+        refined.stage !== registered.body.root_cause.stage ||
+        refined.confidence !== registered.body.root_cause.confidence
+      ) {
+        await updateCardAttribution(registered.id, refined)
+      }
+    } catch (error) {
+      console.warn('[experience] attribution refine failed, keeping initial:', (error as Error)?.message)
+    }
   }
   try {
     if (card.kind !== 'anti_pattern') return
