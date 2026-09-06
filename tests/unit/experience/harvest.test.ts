@@ -73,6 +73,7 @@ describe('harvest-references：流水线判定', () => {
     expect(cards).toHaveLength(1)
     expect(cards[0].kind).toBe('pattern')
     expect(cards[0].status).toBe('verified')
+    expect(String(cards[0].tag)).toMatch(/^pattern\/js\/[a-z0-9-]+$/) // slug 协议回归锁（首张 live 卡教训）
     expect((cards[0].body as { files: unknown[] }).files).toHaveLength(1)
     const fp = String(cards[0].fingerprint).slice(0, 8)
     expect(existsSync(join(root, 'bloma-ref-code', fp, 'index.js'))).toBe(true)

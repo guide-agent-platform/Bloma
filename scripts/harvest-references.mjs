@@ -168,7 +168,8 @@ export async function harvestGap(gap, deps) {
     sandbox_result: { build_pass: buildPass, smoke_test_pass: smokePass, executed_at: executedAt },
     reuse_hint: String(refined.reuse_hint ?? '').slice(0, 300),
   }
-  const tag = `pattern/${lang}/${T.keyFromSymptom(body.capability)}`
+  // slug 协议对齐：MODULE_SLUG_PATTERN 只认连字符，keyFromSymptom 下划线须转换（首张 live 卡暴露的集成 bug）
+  const tag = `pattern/${lang}/${T.keyFromSymptom(body.capability).replace(/_/g, '-')}`
   const fp = T.computeFingerprint('pattern', body)
 
   // sidecar 先写、files 随卡一次入册（body.files 单一事实源）
@@ -205,19 +206,29 @@ export async function harvestGap(gap, deps) {
 }
 
 // —— live 模式缺省实现（仅 --live）——
-async function liveSearch(query) {
-  const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
-    headers: { 'user-agent': 'Mozilla/5.0 (bloma-harvest 1.0; educational)' },
-    signal: AbortSignal.timeout(15000),
+// 实弹坑（2026-09-07 01:55 本机诊断）：DDG 按 TLS 指纹屏蔽 node fetch（undici 直接
+// fetch failed），curl/浏览器可过——live 走 curl 子进程；结果过滤 duckduckgo 广告
+// （y.js?ad_domain 系）。与产品 guide-research 的差异：Electron net 栈不被指纹屏蔽。
+function curlGet(url, timeoutSec) {
+  const r = spawnSync('curl', ['-sL', '--max-time', String(timeoutSec), '-A', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) (bloma-harvest 1.0; educational)', url], {
+    encoding: 'utf8',
+    timeout: (timeoutSec + 10) * 1000,
+    maxBuffer: 8 * 1024 * 1024,
   })
-  const html = await res.text()
+  if (r.status !== 0 || !r.stdout) throw new Error(`curl failed (status=${r.status}) for ${url.slice(0, 80)}`)
+  return r.stdout
+}
+
+async function liveSearch(query) {
+  const html = curlGet(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, 15)
   return [...html.matchAll(/<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g)]
+    .map((m) => ({ raw: m[1], title: m[2].replace(/<[^>]+>/g, '').trim() }))
+    .filter((x) => !/y\.js\?|ad_domain/i.test(x.raw))
     .slice(0, 5)
-    .map((m) => ({ url: decodeURIComponent(m[1].replace(/^.*uddq=([^&]*).*$/, '$1') || m[1]), title: m[2].replace(/<[^>]+>/g, '').trim() }))
+    .map((x) => ({ url: decodeURIComponent((/uddg=([^&]+)/.exec(x.raw) || [])[1] || x.raw), title: x.title }))
 }
 async function liveFetchHtml(url) {
-  const res = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 (bloma-harvest 1.0; educational)' }, signal: AbortSignal.timeout(15000) })
-  return (await res.text()).slice(0, 200000)
+  return curlGet(url, 15).slice(0, 200000)
 }
 
 async function main() {
