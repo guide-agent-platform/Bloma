@@ -4,7 +4,7 @@ import { RotateCw, Maximize2, Minimize2, Camera, LayoutTemplate, AlertTriangle }
 import { hasActiveStreamAtom, workflowStageAtom, globalUserErrorAtom } from './atoms'
 import type { DomCollectContextResult } from '../../shared/types'
 
-export type PreviewStatus = 'empty' | 'loading' | 'running' | 'error' | 'timeout'
+export type PreviewStatus = 'empty' | 'loading' | 'running' | 'error'
 
 export interface CorrectionPayload {
   elementSelector?: string
@@ -375,7 +375,6 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
         )}
         {displayStatus === 'running' && !previewUrl && <LoadingState label="正在准备预览…" />}
         {displayStatus === 'error' && <ErrorState label={errorLabel ?? globalError ?? undefined} onRetry={onRefresh} />}
-        {displayStatus === 'timeout' && <TimeoutState onContinueWaiting={onRefresh} />}
 
         {correctionActive && onCorrectionSubmit && (
           <CorrectionOverlay
@@ -487,25 +486,6 @@ const ErrorState: React.FC<{ label?: string; onRetry?: () => void }> = ({ label,
         cursor: 'pointer', transition: 'all var(--transition-fast)',
       }}>
         重新连接沙箱
-      </button>
-    )}
-  </div>
-)
-
-const TimeoutState: React.FC<{ onContinueWaiting?: () => void }> = ({ onContinueWaiting }) => (
-  <div style={stateWrap}>
-    <p style={{ fontSize: 'var(--font-size-lg)', fontWeight: 600, color: 'var(--color-text)', marginBottom: 'var(--space-1)' }}>这次花的时间比预期更长</p>
-    <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-5)' }}>我还在处理中，你可以先看看已经生成的部分</p>
-    {onContinueWaiting && (
-      <button onClick={onContinueWaiting} style={{
-        height: 34, padding: '0 var(--space-4)',
-        fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--white)',
-        background: 'linear-gradient(135deg, var(--color-quick), var(--color-quick-bright))',
-        borderRadius: 'var(--radius-full)',
-        boxShadow: '0 4px 12px -2px rgba(124,58,237,0.4)',
-        cursor: 'pointer',
-      }}>
-        继续等待
       </button>
     )}
   </div>

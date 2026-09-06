@@ -623,10 +623,25 @@ const AppRoutes: React.FC = () => {
 
   // ==================== 超时操作（超过 120 秒） ====================
 
+  // 新一轮生成开始时，清掉上一轮「继续等待」遗留的计时起点：waitStart 只在
+  // handleContinueWaiting 里被赋值且从不清理，若不在此复位，下一轮生成会取到这个
+  // 陈旧时间戳、一开始就弹出超时卡片（effectiveWaitStart 优先用 waitStartTime）。
+  const prevHasStreamRef = React.useRef(false)
+  React.useEffect(() => {
+    const risingEdge = hasActiveStream && !prevHasStreamRef.current
+    prevHasStreamRef.current = hasActiveStream
+    if (risingEdge) setWaitStart(undefined)
+  }, [hasActiveStream])
+
   const handleContinueWaiting = useCallback(() => {
-    // 继续等待：重置等待起点，重新计时
+    // 继续等待：先给用户明确反馈，再重置等待起点重新计时
+    appendMessageToSession(sessionId, {
+      role: 'system',
+      content: [{ type: 'text', text: '好的，我继续。生成完成后马上告诉你。' }],
+      timestamp: Date.now(),
+    })
     setWaitStart(Date.now())
-  }, [])
+  }, [sessionId])
 
   const handleViewPartial = useCallback(() => {
     // 查看已有部分：预览区已展示当前内容，加一条系统消息说明
