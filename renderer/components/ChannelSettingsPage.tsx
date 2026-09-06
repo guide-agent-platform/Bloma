@@ -738,6 +738,18 @@ interface RoleRoutingDraftRow {
 
 type RoleRoutingDraft = Partial<Record<AgentRoutingRole, RoleRoutingDraftRow>>
 
+/** 渠道列表模型摘要文案（与表单内「已启用 x / 共 y」同口径）：
+ *  Agent 实际只会用 enabled 模型（main getEnabledModels），旧文案把禁用项一并列出且不分口径，
+ *  在点选列表上线后会让用户误读「四个模型都可用」。 */
+function modelsSummary(channel: Channel | undefined): string {
+  const models = modelsOf(channel)
+  if (models.length === 0) return '未配置模型'
+  const enabled = models.filter((m) => m.enabled)
+  if (enabled.length === 0) return `未启用任何模型（共 ${models.length} 个，可在「编辑渠道」里勾选）`
+  const head = enabled.slice(0, 3).map((m) => m.name).join('、')
+  return `已启用 ${enabled.length}/${models.length}：${head}${enabled.length > 3 ? ' 等' : ''}`
+}
+
 function routingSelectableChannels(channels: Channel[]): Channel[] {
   return channels.filter((channel) => isAnthropicProtocolProvider(channel.provider_type))
 }
@@ -1454,9 +1466,7 @@ export const ChannelSettingsPage: React.FC = () => {
                     </span>
                   </div>
                   <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
-                    {modelsOf(channel).length > 0
-                      ? `${modelsOf(channel).length} 个模型：${modelsOf(channel).map((m) => m.name).join('、')}`
-                      : '未配置模型'}
+                    {modelsSummary(channel)}
                     {channel.base_url && ` · ${channel.base_url}`}
                   </p>
                 </div>

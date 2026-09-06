@@ -75,9 +75,9 @@ describe('渠道列表 models 缺字段防御（不白屏、不误计数）', ()
     expect(screen.getByRole('button', { name: /添加|新增|新建|配置/ })).toBeTruthy()
   })
 
-  it('[G2] 混合数据：有模型的仍按启用数展示，缺模型的不会把整页拖崩', async () => {
+  it('[G2] 混合数据：有模型的按「已启用 x/y」展示，缺模型的不会把整页拖崩', async () => {
     mount([CHANNEL_WITH_MODELS, CHANNEL_WITHOUT_MODELS])
-    expect(await screen.findByText(/2 个模型：model-alpha、model-beta/)).toBeTruthy()
+    expect(await screen.findByText(/已启用 1\/2：model-alpha/)).toBeTruthy()
     expect(screen.getByText(/未配置模型/)).toBeTruthy()
     // 只有 1 条缺字段记录 → 只出现一次「未配置模型」
     expect(screen.getAllByText(/未配置模型/)).toHaveLength(1)
@@ -87,6 +87,17 @@ describe('渠道列表 models 缺字段防御（不白屏、不误计数）', ()
     mount([CHANNEL_WITH_MODELS, { ...CHANNEL_WITHOUT_MODELS, id: 'ch-null', name: '空指针渠道', models: null }])
     expect(await screen.findByText('空指针渠道')).toBeTruthy()
     expect(screen.getAllByText(/未配置模型/)).toHaveLength(1)
-    expect(screen.getByText(/2 个模型：model-alpha、model-beta/)).toBeTruthy()
+    expect(screen.getByText(/已启用 1\/2：model-alpha/)).toBeTruthy()
+  })
+
+  it('[G4] 全禁用渠道说清「未启用任何模型」并给出可操作入口（不谎称可用）', async () => {
+    mount([{
+      ...CHANNEL_WITH_MODELS,
+      models: [
+        { id: 'x1', name: 'model-alpha', enabled: false },
+        { id: 'x2', name: 'model-beta', enabled: false },
+      ],
+    }])
+    expect(await screen.findByText(/未启用任何模型（共 2 个/)).toBeTruthy()
   })
 })
