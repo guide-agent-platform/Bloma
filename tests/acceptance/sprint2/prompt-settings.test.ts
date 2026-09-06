@@ -56,7 +56,7 @@ describe('Sprint 2 prompt settings IPC', () => {
     }
   })
 
-  it('[PROMPT-SETTINGS-002] read 无覆盖时返回内置默认（含需求分析师）且 has_override=false', async () => {
+  it('[PROMPT-SETTINGS-002] read 无覆盖时返回内置默认（含需求工程腿）且 has_override=false', async () => {
     useEnv()
     const harness = createIpcHarness()
 
@@ -69,7 +69,10 @@ describe('Sprint 2 prompt settings IPC', () => {
     if (!result.ok) throw new Error('expected read to succeed')
     expect(result.data.id).toBe('prd-system')
     expect(result.data.has_override).toBe(false)
-    expect(result.data.content).toContain('需求分析师')
+    // 2026-09-03 架构调整（需求工程链归向导群）后内置默认首句为「Bloma 向导 · 需求工程腿」；
+    // 旧断言锁的「需求分析师」已全域不存在（main/ 零命中），故改锁现名 + 锁定它确实不再回到旧称。
+    expect(result.data.content).toContain('需求工程腿')
+    expect(result.data.content).not.toContain('需求分析师')
     // 提示词增强质量标准仍在（防回归单行简陋版）
     expect(result.data.content).toContain('2~4 条')
   })
@@ -133,7 +136,7 @@ describe('Sprint 2 prompt settings IPC', () => {
     expect(read.ok).toBe(true)
     if (!read.ok) throw new Error('expected read to succeed')
     expect(read.data.has_override).toBe(false)
-    expect(read.data.content).toContain('需求分析师')
+    expect(read.data.content).toContain('需求工程腿')
   })
 
   it('[PROMPT-SETTINGS-005] 非法输入一律 VALIDATION_ERROR：空白内容/缺字段/非法 id', async () => {
