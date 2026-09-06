@@ -6,6 +6,8 @@ import { getDocumentsDir } from '../storage/config-paths'
 import { findProject, readLastSketchRequirements } from './project-service'
 import { escapeHtml, type SketchRequirement } from './sketch-engine'
 import { planScenarios, runBrowserGwt, scenarioName as gwtScenarioName } from './gwt-runner'
+import { replayRequirements, splitAdvisoryResults } from './experience/replay-compiler'
+import { reportReplayOutcomes } from './experience/experience-service'
 
 /**
  * GWT 服务（A2-07，方案A拆分：A 写骨架 / C 执行）。
@@ -48,13 +50,17 @@ const TEST_REPORT_MD = 'test-report.md'
 
 /** 在预览上执行 GWT 场景，返回结构化结果。 */
 export async function runGwtScenarios(input: RunGwtInput): Promise<GwtTestResult> {
-  // 真实浏览器执行器优先（A2-07 / api-spec §12.4；M3 per-assertion 行为探针）：
-  // Playwright 无头加载预览页，逐条行为断言「模拟触发 → 断言状态变化」；
-  // 浏览器不可用（未安装 chromium / 导入失败 / 启动失败 / 导航失败）时返回 null，
-  // 自动降级为下方 fetch + 正则 的静态启发式。
+  // T-5 重放场景（advisory）：合成项随真实执行器跑（浏览器/静态两条路都经
+  // planScenarios 追加），但结果从返回的 gated 计数中剔除——错误经验指导测试
+  // 而不碰交付门禁；账本回流 fire-and-forget，开关 off 时零差异。
+  const replay = replayRequirements(input.project_id)
   const browserResult = await runBrowserGwt(input)
-  if (browserResult) return browserResult
-  return runStaticScenarios(input)
+  const raw = browserResult ?? (await runStaticScenarios(input))
+  if (replay.length === 0) return raw
+  const names = new Set(replay.map((r) => gwtScenarioName(r.id, (r.behavior_assertions ?? [''])[0])))
+  const { gated, outcomes } = splitAdvisoryResults(raw, names)
+  void reportReplayOutcomes(outcomes).catch((error) => console.warn('[experience] replay report failed:', error))
+  return gated
 }
 
 /**
@@ -67,7 +73,7 @@ export async function runGwtScenarios(input: RunGwtInput): Promise<GwtTestResult
  *   真实行为判定交给浏览器行为脚本——它不可用时宁可放过不可误杀）。
  */
 async function runStaticScenarios(input: RunGwtInput): Promise<GwtTestResult> {
-  const requirements = readLastSketchRequirements(input.project_id)
+  const requirements = [...readLastSketchRequirements(input.project_id), ...replayRequirements(input.project_id)]
   const html = input.preview_url ? await fetchHtml(input.preview_url) : undefined
   const appJs = input.preview_url ? await fetchAppJs(input.preview_url) : undefined
   const artifact = `${html ?? ''}\n${appJs ?? ''}`

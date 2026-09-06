@@ -4,6 +4,7 @@ import { readLastSketchRequirements } from './project-service'
 import type { SketchRequirement } from './sketch-engine'
 import { requirementAssertions, requirementStory, isPlaceholderAssertion } from './sketch-engine'
 import { parseBehaviorAssertion, describeEffect, type AssertionPlan } from './behavior-assertions'
+import { replayRequirements } from './experience/replay-compiler'
 
 /**
  * GWT 真实执行器（A2-07 / api-spec §12.4 `run_gwt_tests`；2026-08-17 M3 重写为 per-assertion）。
@@ -173,7 +174,7 @@ export function evaluateScenarioOutcome(
 }
 
 async function executeScenarios(browser: Browser, input: RunGwtInput): Promise<GwtTestResult> {
-  const scenarios = planScenarios(readLastSketchRequirements(input.project_id))
+  const scenarios = planScenarios([...readLastSketchRequirements(input.project_id), ...replayRequirements(input.project_id)])
 
   const page = await browser.newPage()
   const diagnostics = attachPageDiagnostics(page)
