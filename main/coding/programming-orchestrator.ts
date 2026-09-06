@@ -1247,7 +1247,12 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
 
   // 单次启动沙箱：启动失败的修复已内化在 loop（run_preview → logs → edit_file 自修），
   // 这里不再走 ensureSandboxRunning 的外部修复循环；仍失败则如实抛错交上层处理。
-  const sandbox = await runSandbox({ request_id: input.request_id, project_id: input.project_id })
+  // llm_env（完整程序渠道）：交付预览即注入产物 AI 代理环境，用户看到的应用 AI 是真的
+  const sandbox = await runSandbox({
+    request_id: input.request_id,
+    project_id: input.project_id,
+    llm_env: buildAppLlmEnv(input),
+  })
   if (sandbox.status !== 'running' || !sandbox.preview_url) {
     publish(input, 'error', {
       code: 'SANDBOX_RUN_FAILED',
@@ -1392,7 +1397,7 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     '探针（非"测试脚本/自动化测试"）、骨架（非"模板项目/脚手架"）、背板（非"PRD 文档/需求文档"）、' +
     '修复轮（非"重试/返工"）。首次向用户提及时可带一句白话解释，之后一致使用规范词。',
     '',
-    '【护栏】路径限项目目录内；不 eval/Function；不外联 fetch/XHR；不写 CSP meta；' +
+    '【护栏】路径限项目目录内；不 eval/Function；不写 CSP meta；前端不直接外联（CSP 仅放行同源 fetch，真实出网只能走同源 /api/llm 代理）；' +
     'out_of_scope 内的功能一律不做；编辑校验失败的错误信息要读完再改。',
     '',
     // 产物形态（PR-2 条件化）：工程骨架（带构建门禁）→ 模块化解禁（import 可选，
@@ -1401,9 +1406,18 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
       ? '【产物形态】入口 index.html，交互逻辑入口 src/app.js，样式 src/styles.css；' +
         '模块化优先：按技术合同的目标文件拆分为 src/ 下多个 .js 文件用 import 组织（loop 结束后构建门禁' +
         '会打包校验模块图，import 路径错误会在构建期暴露）；仅当功能极简单、单文件已足够时才可合并，且须在旁白说明合并原因。' +
-        '预览沙箱直接加载源码，外部网络资源禁令不变。'
+        '预览沙箱直接加载源码，前端禁止直连外网。'
       : '【产物形态】入口 index.html，纯前端静态产物（平台用静态服务器托管，无构建步骤）；' +
         '交互逻辑放 src/app.js，样式放 src/styles.css；不使用 import/ESM 模块语法。',
+    // 完整程序渠道（2026-09-06 随记灵案：AI 功能被写成前端模拟，用户要的是真的）——
+    // 平台在沙箱注入 BLOMA_APP_LLM_*，产物经同源 /api/llm 代理调用真实模型
+    '【AI 能力接入】产品需要 AI/模型能力时必须走真实调用，禁止在前端写死模拟回复冒充 AI：' +
+    "fetch('/api/llm', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ messages: [{role:'user', content: 用户输入}], temperature: 0.7, max_tokens: 1024 }) })" +
+    '→ 成功 200 {content: \"模型回复文本\"}；失败 非200 {error: \"...\"}（llm_not_configured=预览环境未注入模型，须有失败态）。',
+    'AI 功能硬性要求：①messages 只用 user/assistant 角色；②必须实现 加载中/失败/空结果 三种界面状态，失败提示要具体；' +
+    '③严禁把密钥、API 端点、模型名写进任何项目文件（平台已注入服务器进程，前端不可见）；' +
+    '④页面 URL 带 mock=1 参数时，所有 /api/llm 调用自动附加 mock:true（URL 带 mock=fail 时附加 mock:\"fail\"）——平台探针与失败态自测走此通道，返回确定性应答；' +
+    '⑤AI 功能的行为断言只断言界面形态（点击后出现结果区/失败提示），不断言模型输出的具体内容。',
   ].join('\n')
 }
 
@@ -2684,14 +2698,42 @@ export async function resumeBlockedFlow(
 }
 
 /** 恢复测试/裁判前重新拉起沙箱，返回可用的 preview_url；起不来则抛错由上层报错。 */
-async function ensureResumePreview(input: { request_id: string; project_id: string }): Promise<string> {
+async function ensureResumePreview(input: { request_id: string; project_id: string; channel_id?: string; session_id?: string }): Promise<string> {
   const sandbox = await runSandbox({
     request_id: input.request_id,
     project_id: input.project_id,
     command: 'node static-server',
+    llm_env: buildAppLlmEnv(input),
   })
   if (sandbox.status !== 'running' || !sandbox.preview_url) {
     throw new Error(`SANDBOX_RUN_FAILED:${sandbox.error_summary?.category ?? 'unknown'}`)
   }
   return sandbox.preview_url
+}
+
+/**
+ * 产物 AI 代理环境（完整程序渠道，2026-09-06）：把 mvp 类别渠道的 base/key/model
+ * 以 BLOMA_APP_LLM_* 注入产物 static-server 进程——生成的应用经同源 /api/llm 代理
+ * 调用真实模型，AI 功能不再是前端写死的模拟。密钥只落服务器进程 env（沙箱 spawn
+ * 参数），绝不写进前端代码/项目文件；渠道不可用或字段缺失 → undefined（产物
+ * /api/llm 如实 503 llm_not_configured，前端失败态兜住）。
+ */
+function buildAppLlmEnv(input: { channel_id?: string; project_id: string }): Record<string, string> | undefined {
+  try {
+    const resolution = resolveChannelEnv({ channelId: input.channel_id, category: 'mvp', projectId: input.project_id })
+    const env = resolution.env
+    const base = env?.ANTHROPIC_BASE_URL
+    const key = env?.ANTHROPIC_AUTH_TOKEN
+    const model = env?.ANTHROPIC_MODEL
+    if (!base || !key || !model) return undefined
+    return {
+      BLOMA_APP_LLM_BASE_URL: base,
+      BLOMA_APP_LLM_KEY: key,
+      BLOMA_APP_LLM_MODEL: model,
+      BLOMA_APP_LLM_PROTOCOL: resolution.channel?.provider_type === 'anthropic' ? 'anthropic' : 'openai',
+    }
+  } catch {
+    // 渠道解析异常（测试字面 id 等）→ 无 AI 环境降级，不阻断预览
+    return undefined
+  }
 }
