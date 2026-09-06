@@ -181,6 +181,25 @@ function renderRequirementSummary(item: SketchRequirement): string {
  * - focus 非空：命中项全文（描述+断言+优先级），其余项一行摘要（id+故事+优先级+断言
  *   计数）——只减细节不减锚（D3）；P0 断言只裁注入不裁探针执行面（run_gwt_tests 仍跑全量）。
  */
+// 完整程序阶段 2.5（2026-09-06 计算器案）：数据留存信号词——LLM 漏报 interface_spec
+// 时的确定性兜底触发（历史/保存/持久/刷新或重开后仍在/清空/收藏/回顾/记录）。
+const PERSISTENCE_SIGNAL_RE = /历史|保存|持久|刷新|重开|清空|收藏|回顾|记录/
+
+/**
+ * 确定性派生最小后端契约：功能项命中数据留存信号而 LLM 未产出 interface_spec 时，
+ * 派生通用 records 资源端点（GET 列表 + POST 新增）——保证 server/routes 渠道被
+ * 强制走通（终验存活检查 + 修复回流兜底），资源命名交由 loop 对齐业务。
+ * 无信号 → undefined（纯展示产物零注入）。
+ */
+export function deriveInterfaceSpec(requirements: SketchRequirement[]): InterfaceEndpoint[] | undefined {
+  const hasSignal = requirements.some((item) => PERSISTENCE_SIGNAL_RE.test(`${item.description} ${item.story ?? ''}`))
+  if (!hasSignal) return undefined
+  return [
+    { endpoint: '/api/records', method: 'GET', request: '无', response: '{records:[…]}（业务资源，实现于 server/routes/，数据落 data/）' },
+    { endpoint: '/api/records', method: 'POST', request: '{…业务字段}', response: '{ok:true,…}' },
+  ]
+}
+
 export function renderBackplaneAnchor(backplane: PrdBackplane, focus?: string[]): string {
   const focusSet = focus && focus.length > 0 ? new Set(focus) : undefined
   const requirementsPart = backplane.requirements

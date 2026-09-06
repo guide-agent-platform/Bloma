@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseInterfaceSpec } from '../../main/guide/prd-engine-llm'
-import { renderBackplaneAnchor, type PrdBackplane } from '../../main/model/prd-backplane'
+import { deriveInterfaceSpec, renderBackplaneAnchor, type PrdBackplane } from '../../main/model/prd-backplane'
 
 /**
  * 完整程序阶段 2：interface_spec 契约清洗与锚定注入。
@@ -27,6 +27,21 @@ describe('parseInterfaceSpec（契约清洗）', () => {
     expect(parseInterfaceSpec('nope')).toEqual([])
     const many = Array.from({ length: 9 }, (_, i) => ({ endpoint: `/api/e${i}` }))
     expect(parseInterfaceSpec(many)).toHaveLength(6)
+  })
+})
+
+describe('deriveInterfaceSpec（数据留存信号确定性兜底，阶段 2.5 计算器案）', () => {
+  it('功能项命中留存信号（历史/记录/清空）→ 派生 records 最小契约', () => {
+    const derived = deriveInterfaceSpec([
+      { id: 'F-001', description: '做一个计算器' },
+      { id: 'F-005', description: '计算历史从用户首次输入开始记录，手动清空才清空' },
+    ])
+    expect(derived).toBeDefined()
+    expect(derived?.map((ep) => `${ep.method} ${ep.endpoint}`)).toEqual(['GET /api/records', 'POST /api/records'])
+  })
+
+  it('无留存信号（纯展示）→ undefined 零注入', () => {
+    expect(deriveInterfaceSpec([{ id: 'F-001', description: '展示当前时间' }])).toBeUndefined()
   })
 })
 

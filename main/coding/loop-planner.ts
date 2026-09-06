@@ -24,6 +24,7 @@
 import { callLlmForJson } from '../kernel/llm-call'
 import { loadPromptOverride } from '../prompt-config'
 import {
+  backplaneInterfaceSpec,
   requirementAssertions,
   requirementPriority,
   requirementStory,
@@ -270,6 +271,10 @@ function planSystemPrompt(maxFiles: number): string {
     '',
     '字段纪律：',
     '- filesToTouch：本轮要新建或修改的文件（相对项目根，如 index.html、src/app.js），数量上限 ' + maxFiles + '，每个附一句理由；',
+    // 完整程序阶段 2.5（2026-09-06 计算器案）：plan 只列前端文件 → loop 顺手 localStorage 满足
+    // 「刷新后仍在」，server/routes 渠道被整体绕过——架构纪律必须在合同层锁死
+    '- 架构纪律（完整程序）：凡功能含数据留存/服务端处理/模型调用，filesToTouch 必须包含对应 server/routes/<资源>.js（后端路由，文件名即 /api/ 前缀）及前端调用侧改动；' +
+      '数据持久化一律规划为后端 data/（ctx.readData/writeData），禁止规划 localStorage/sessionStorage 持久化方案；',
     '- reuse：可复用的骨架既有文件/模块，说明怎么复用；无则空数组；',
     '- verification：验证口径，每条引用 P0 断言原文或以功能项 id 开头（如「F-003 按右方向键→…」）；',
     '- risks：技术风险 0-3 条；',
@@ -312,8 +317,16 @@ function buildPlanPrompt(input: GenerateLoopPlanInput, maxFiles: number): string
     ? input.backplane.out_of_scope.map((entry) => `- ${entry}`).join('\n')
     : '- 无'
   const templateType = input.backplane.template_meta?.type ?? 'personal_tool'
+  // 完整程序阶段 2.5：契约进 plan 任务输入——plan 腿不知道接口契约就不会规划后端文件
+  const endpoints = backplaneInterfaceSpec(input.backplane)
   return [
     `产品定位：${input.backplane.positioning}`,
+    ...(endpoints.length > 0
+      ? [
+          '后端 API 契约（interface_spec，前后端真相源）——filesToTouch 必须包含对应的 server/routes 实现文件：',
+          ...endpoints.map((ep) => `- ${ep.method ?? 'GET'} ${ep.endpoint} → ${ep.response ?? 'JSON'}`),
+        ]
+      : []),
     ...(focusSet
       ? [`本轮迭代聚焦修改：${input.focusRequirementIds!.join('、')}——只规划聚焦项的改动，其余功能项保持现状不重做。`
         + '聚焦功能项清单（id/优先级/描述/行为断言，未聚焦项为一行摘要）：']

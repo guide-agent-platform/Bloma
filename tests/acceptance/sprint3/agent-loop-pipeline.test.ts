@@ -55,6 +55,20 @@ function text(text: string): MessageContentBlock {
   return { type: 'text', text }
 }
 
+/**
+ * 假沙箱的 app-server 语义（完整程序阶段 2.5）：产线沙箱服务器已具备 /api/* 路由
+ * 挂载能力，本文件的静态文件替身按此应答 200——本文件锁定的是流水线机制；契约
+ * 强制力（探测分类/可达性跳过）由 tests/unit/coding/api-contract.test.ts 锁定。
+ */
+function fakeAppApiBranch(req: { url?: string }, res: { writeHead: (code: number, headers?: Record<string, string>) => void; end: (body?: string) => void }): boolean {
+  if ((req.url ?? '').startsWith('/api/')) {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ records: [] }))
+    return true
+  }
+  return false
+}
+
 /** loop 剧本：每轮模型响应的 content blocks（工具真实执行，产出真实回填）。 */
 const LOOP_SCRIPT: MessageContentBlock[][] = [
   [text('我先把页面骨架写出来。'), toolUse('t1', 'write_file', { path: 'index.html', content: INDEX_V1 }), toolUse('t2', 'write_file', { path: 'src/app.js', content: APP_JS })],
@@ -231,6 +245,7 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
 
     // 真实静态文件服务器（动态读项目文件——模型 write_file/edit_file 后立即可见）
     const server = createServer((req, res) => {
+      if (fakeAppApiBranch(req, res)) return
       const root = findProject(project.project_id).root_path
       const path = req.url === '/' ? '/index.html' : (req.url ?? '/index.html')
       try {
@@ -322,6 +337,7 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
     recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出', priority: 'P0' }])
 
     const server = createServer((req, res) => {
+      if (fakeAppApiBranch(req, res)) return
       const root = findProject(project.project_id).root_path
       const path = req.url === '/' ? '/index.html' : (req.url ?? '/index.html')
       try {
@@ -379,6 +395,7 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
 
     // 真实静态文件服务器（delegate 子会话 read_file 也读项目文件，必须真实落盘）
     const server = createServer((req, res) => {
+      if (fakeAppApiBranch(req, res)) return
       const root = findProject(project.project_id).root_path
       const path = req.url === '/' ? '/index.html' : (req.url ?? '/index.html')
       try {
@@ -459,6 +476,7 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
     // 可切换的失败开关：初始生成走通过内容；迭代阶段走持续失败（逼出终验失败路径）
     let shouldFail = false
     const server = createServer((req, res) => {
+      if (fakeAppApiBranch(req, res)) return
       const root = findProject(project.project_id).root_path
       const path = req.url === '/' ? '/index.html' : (req.url ?? '/index.html')
       try {
@@ -548,6 +566,7 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
     recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出', priority: 'P0' }])
 
     const server = createServer((req, res) => {
+      if (fakeAppApiBranch(req, res)) return
       const root = findProject(project.project_id).root_path
       const path = req.url === '/' ? '/index.html' : (req.url ?? '/index.html')
       try {
@@ -671,6 +690,7 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
     recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
 
     const server = createServer((req, res) => {
+      if (fakeAppApiBranch(req, res)) return
       const root = findProject(project.project_id).root_path
       const path = req.url === '/' ? '/index.html' : (req.url ?? '/index.html')
       try {
@@ -745,6 +765,7 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
     recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
 
     const server = createServer((req, res) => {
+      if (fakeAppApiBranch(req, res)) return
       const root = findProject(project.project_id).root_path
       const path = req.url === '/' ? '/index.html' : (req.url ?? '/index.html')
       try {
@@ -819,6 +840,7 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
     recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出', priority: 'P0' }])
 
     const server = createServer((req, res) => {
+      if (fakeAppApiBranch(req, res)) return
       const root = findProject(project.project_id).root_path
       const path = req.url === '/' ? '/index.html' : (req.url ?? '/index.html')
       try {
@@ -868,6 +890,7 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
     recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出', priority: 'P0' }])
 
     const server = createServer((req, res) => {
+      if (fakeAppApiBranch(req, res)) return
       const root = findProject(project.project_id).root_path
       const path = req.url === '/' ? '/index.html' : (req.url ?? '/index.html')
       try {
@@ -939,6 +962,7 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
     recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出', priority: 'P0' }])
 
     const server = createServer((req, res) => {
+      if (fakeAppApiBranch(req, res)) return
       const root = findProject(project.project_id).root_path
       const path = req.url === '/' ? '/index.html' : (req.url ?? '/index.html')
       try {
