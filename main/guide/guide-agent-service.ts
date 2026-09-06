@@ -53,6 +53,7 @@ import { refineTemplateType } from '../template-inference'
 import { buildClarifyInjection } from '../template-injection'
 import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
 import { isAutoDelegationText, readPrimaryIntent } from '../session-service'
+import { ingestResearchIdeasAsCandidates } from '../experience/ref-ui-source'
 import type { PrdBackplane, SketchRequirement } from '../sketch-engine'
 import { isRecord } from '../validators'
 
@@ -1105,6 +1106,15 @@ async function startRequirementConfirmFlow(
   })
 
   const ideas = await distillResearchIdeas(research, { ...model, demand: demandText })
+
+  // G3a 市调 UI 做法投喂入册（恒 candidate，用户 2026-09-07 裁定「做产品=做 UI」定向收割）：
+  // fire-and-forget，BLOMA_EXPERIENCE off 时零副作用，失败不阻断确认弹窗。
+  void ingestResearchIdeasAsCandidates({
+    ideas,
+    demand: demandText,
+    projectId: input.project_id,
+    sessionId: input.session_id,
+  })
 
   pendingRequirementConfirms.set(input.project_id, {
     request_id: input.request_id,

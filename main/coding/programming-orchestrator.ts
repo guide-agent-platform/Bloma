@@ -19,6 +19,7 @@ import { resolveChannelEnv } from '../runtime-fallback'
 import { loadSkeletonTemplate, type ProjectSkeleton } from '../project-templates'
 import { buildLoopInjection, buildSkeletonMapInjection } from '../template-injection'
 import { buildModuleMapInjection, loadOfficialModules, modulesEnabled, renderOfficialModulesToProject } from '../module-library'
+import { listRefPatternModules, refLibraryEnabled } from '../experience/ref-source'
 import { backplaneInterfaceSpec, focusAnchorEnabled, renderBackplaneAnchor } from '../model/prd-backplane'
 import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
 import { distillProjectMemorySafely } from '../memory-distiller'
@@ -843,9 +844,13 @@ function prepareSkeletonBeforeLoop(
  * 模块地图（进注入⑥）；开关关/无模块/渲染异常 → null（fail-open，绝不阻断 MVP 生成）。
  */
 function prepareModuleLibrary(input: MvpTaskInput, templateType: TemplateType, project: Project): string | null {
-  if (!modulesEnabled()) return null
+  // G4 双内容源：官方预置（BLOMA_MODULES）+ 经验库 ref（BLOMA_REF_LIBRARY 缺省 off）；
+  // 两开关正交，均 off = 现状字节级 null；ref 经同一渲染/地图管道消费（C-1）。
+  if (!modulesEnabled() && !refLibraryEnabled()) return null
   try {
-    const { modules, rejected } = loadOfficialModules(templateType)
+    const { modules: official, rejected } = modulesEnabled() ? loadOfficialModules(templateType) : { modules: [], rejected: [] }
+    const refs = refLibraryEnabled() ? listRefPatternModules(templateType) : []
+    const modules = [...official, ...refs]
     for (const item of rejected) {
       try {
         recordDecision({
