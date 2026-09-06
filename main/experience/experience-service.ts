@@ -210,6 +210,26 @@ export async function updateCardAttribution(
   return next
 }
 
+/** 重放回流（T-5 状态机）：按 R-{fp8} 前缀定位卡——candidate 跑绿→promote replay_green；
+ * verified 跑绿→matched（注入有效证据）；verified 跑败→false_positive（防误伤，
+ * 不自动退役；真复发由人工/统计处置）。同项目重放不增 recurrence（跨项目语义）。 */
+export async function reportReplayOutcomes(
+  outcomes: Array<{ id: string; passed: boolean }>,
+): Promise<void> {
+  if (!experienceEnabled()) return
+  for (const o of outcomes) {
+    const card = [...ensureIndex().values()]
+      .filter((c) => c.kind === 'anti_pattern' && c.fingerprint.startsWith(o.id) && c.status !== 'retired')
+      .sort((a, b) => b.updated_at - a.updated_at)[0]
+    if (!card) continue
+    if (card.status === 'candidate' && o.passed) {
+      await promoteToVerified(card.id, 'replay_green')
+    } else if (card.status === 'verified') {
+      await reportInjection(card.id, o.passed ? 'matched' : 'false_positive')
+    }
+  }
+}
+
 /** candidate→verified 只认三种证据；retired 卡不可复活（重新观察会生成新卡）。 */
 export async function promoteToVerified(id: string, verifiedBy: VerificationMethod): Promise<ExperienceCard | null> {
   const card = ensureIndex().get(id)
