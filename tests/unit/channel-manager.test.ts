@@ -1,8 +1,9 @@
 import { restorePromaHome } from '../support/proma-home-guard'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { getBlomaChannelsPath } from '../../storage/config-paths'
 import {
   createChannel,
   deleteChannel,
@@ -42,6 +43,25 @@ afterEach(() => {
 })
 
 describe('渠道 CRUD（snake_case 存储契约）', () => {
+  it('缺 models 字段的存量条目在读取时归一化为空数组（迭代 #7：从源头消除脏数据）', () => {
+    writeFileSync(getBlomaChannelsPath(), JSON.stringify({
+      version: 1,
+      channels: [{
+        id: 'c-legacy', name: '缺字段渠道', provider_type: 'deepseek',
+        base_url: 'https://api.deepseek.com/anthropic', api_key: '***', enabled: true,
+      }],
+    }))
+    const listed = listChannels()
+    expect(listed).toHaveLength(1)
+    expect(listed[0]!.models).toEqual([])
+    expect(getChannelById('c-legacy')!.models).toEqual([])
+  })
+
+  it('channels 字段被手改成非数组时降级为空列表，main 侧读取不抛错', () => {
+    writeFileSync(getBlomaChannelsPath(), JSON.stringify({ version: 1, channels: null }))
+    expect(listChannels()).toEqual([])
+  })
+
   it('创建渠道后能列表、按 ID 读取（api_key 脱敏）', () => {
     const created = createChannel({
       name: '我的 DeepSeek',

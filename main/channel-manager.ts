@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import type {
   Channel,
   ChannelCreateInput,
@@ -103,6 +103,21 @@ interface ChannelsConfig {
   channels: Channel[]
 }
 
+/**
+ * 单条渠道归一化：`models` 在类型上必填，但 bloma-channels.json 是用户可手改、
+ * 且从旧共享文件迁移过来的运行时数据——缺该字段时所有 `channel.models.length` 类读取都会抛错。
+ * 迭代 #3 先在渲染层加 `?? []` 防御（当时用真缺字段数据实测崩），本轮从读取源头补齐。
+ */
+function normalizeChannelModels(raw: Channel): Channel {
+  return Array.isArray(raw.models) ? raw : { ...raw, models: [] }
+}
+
+/** 整体读取归一化：`channels` 本身不是数组（手改坏文件）时降级为空列表而不是让 main 抛错。 */
+function normalizeConfig(config: ChannelsConfig): ChannelsConfig {
+  const channels = Array.isArray(config?.channels) ? config.channels : []
+  return { version: config?.version ?? 1, channels: channels.map(normalizeChannelModels) }
+}
+
 function loadChannels(): ChannelsConfig {
   const path = getBlomaChannelsPath()
   if (!existsSync(path)) {
@@ -113,9 +128,14 @@ function loadChannels(): ChannelsConfig {
     const legacy = readJsonFile<ChannelsConfig>(getChannelsPath(), { version: 1, channels: [] })
     const migrated: ChannelsConfig = { version: 1, channels: legacy.channels.filter(isOursChannel) }
     writeJsonFile(path, migrated)
-    return migrated
+    return normalizeConfig(migrated)
   }
-  return readJsonFile<ChannelsConfig>(path, { version: 1, channels: [] })
+  // 直接读文件而不是只信 readJsonFile 的 default：缺 models 的条目要补齐后再进内存
+  try {
+    return normalizeConfig(JSON.parse(readFileSync(path, 'utf8')) as ChannelsConfig)
+  } catch {
+    return { version: 1, channels: [] }
+  }
 }
 
 function saveChannels(config: ChannelsConfig): void {
