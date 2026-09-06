@@ -183,9 +183,20 @@ function renderRequirementSummary(item: SketchRequirement): string {
  */
 export function renderBackplaneAnchor(backplane: PrdBackplane, focus?: string[]): string {
   const focusSet = focus && focus.length > 0 ? new Set(focus) : undefined
-  return backplane.requirements
+  const requirementsPart = backplane.requirements
     .map((item) => (focusSet ? (focusSet.has(item.id) ? renderRequirementFull(item) : renderRequirementSummary(item)) : renderRequirementFull(item)))
     .join('\n')
+  // 完整程序阶段 2（2026-09-06）：后端 API 契约随锚定注入——前后端真相源，loop 每轮
+  // 可见（聚焦模式不裁剪：契约是全局约束，条目少）。无 interface_spec（纯展示/旧背板）零注入。
+  const endpoints = backplaneInterfaceSpec(backplane)
+  if (endpoints.length === 0) return requirementsPart
+  const contract = endpoints
+    .map((ep) => {
+      const request = ep.request && ep.request !== '无' ? `；请求：${ep.request}` : ''
+      return `- ${ep.method ?? 'GET'} ${ep.endpoint} → 响应：${ep.response ?? 'JSON'}${request}`
+    })
+    .join('\n')
+  return `${requirementsPart}\n\n【后端 API 契约（interface_spec，前后端真相源）】按此实现 server/routes/ 下的路由并保持一致：\n${contract}`
 }
 
 // ---------------------------------------------------------------------------

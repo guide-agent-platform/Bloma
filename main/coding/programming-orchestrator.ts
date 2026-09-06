@@ -18,13 +18,13 @@ import { resolveChannelEnv } from '../runtime-fallback'
 import { loadSkeletonTemplate, type ProjectSkeleton } from '../project-templates'
 import { buildLoopInjection, buildSkeletonMapInjection } from '../template-injection'
 import { buildModuleMapInjection, loadOfficialModules, modulesEnabled, renderOfficialModulesToProject } from '../module-library'
-import { focusAnchorEnabled, renderBackplaneAnchor } from '../model/prd-backplane'
+import { backplaneInterfaceSpec, focusAnchorEnabled, renderBackplaneAnchor } from '../model/prd-backplane'
 import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
 import { distillProjectMemorySafely } from '../memory-distiller'
 import { generateSketch, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from '../sketch-engine'
 import { generateSketchLlm, SketchLlmError, type SketchAttemptDetail } from '../sketch-engine-llm'
 import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from '../requirement-normalizer'
-import { readTestReport, runGwtScenarios, writeTestReport, type GwtTestResult } from '../gwt-service'
+import { readTestReport, runGwtScenarios, writeTestReport, type GwtFailureSummary, type GwtTestResult } from '../gwt-service'
 import { renderSecurityScanMarkdown, runSecurityScan } from '../security-scan'
 import { runJudge, readArtifactText, type JudgeVerdict } from '../judge-engine'
 import { runSemanticJudgeReview } from '../judge-semantic'
@@ -35,6 +35,7 @@ import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled }
 import { readPrimaryIntent, recordSessionActivity } from '../session-service'
 import { runAgentLoop, type AgentLoopResult } from '../agent-loop'
 import { isDegenerateText } from './output-integrity'
+import { checkApiContract } from './api-contract'
 import { buildAgentTools } from '../agent-tools'
 import { disposeParentDelegationState, registerParentLoopContext, setChildToolsBuilder } from '../agent-collaboration'
 import { categoryTemperature, resolveGenerationMaxTokens } from '../model-resolution'
@@ -1790,6 +1791,26 @@ function loopOutcomeNote(loop: AgentLoopJudgeMetadata | undefined): string {
 }
 
 /**
+ * API 契约存活检查（完整程序阶段 2，2026-09-06）：探测逻辑在 coding/api-contract.ts
+ * （纯函数可测）；此处取背板 interface_spec 并把失败以 GwtFailureSummary 并入测试
+ * 结果——修复回流/熔断/让渡口径完全复用（修复轮按 location「API 契约端点：…」定修）。
+ */
+async function runGwtWithApiContract(input: { project_id: string; session_id: string; preview_url?: string }): Promise<GwtTestResult> {
+  const testResult = await runGwtScenarios(input)
+  if (!input.preview_url) return testResult
+  const endpoints = backplaneInterfaceSpec(readPrdBackplane(input.project_id))
+  if (endpoints.length === 0) return testResult
+  const apiFailures = await checkApiContract(input.preview_url, endpoints)
+  if (apiFailures.length === 0) return testResult
+  return {
+    ...testResult,
+    total_count: testResult.total_count + apiFailures.length,
+    failed_count: testResult.failed_count + apiFailures.length,
+    failure_summary: [...testResult.failure_summary, ...apiFailures],
+  }
+}
+
+/**
  * runAgentLoopPostTesting — Agent Loop 路径的独立门禁函数（M4-A，微调方案 §4）。
  *
  * 语义固定为「只终验不重修」：GWT 终验 →（通过）安全扫描 → judge 终审 → ready / 让渡，
@@ -1802,7 +1823,7 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
   updateProject(input.project_id, { current_stage: 'testing' })
   publish(input, 'stage_changed', { stage: 'testing' })
 
-  let testResult = await runGwtScenarios({ project_id: input.project_id, session_id: input.session_id, preview_url: input.preview_url })
+  let testResult = await runGwtWithApiContract({ project_id: input.project_id, session_id: input.session_id, preview_url: input.preview_url })
   throwIfAborted(input.signal)
   writeTestReport({ request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, result: testResult })
   syncDocuments({ request_id: input.request_id, project_id: input.project_id, session_id: input.session_id, checkpoint: 'mvp_tested' })
@@ -1954,7 +1975,7 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
 
   // 全量重验（D2）+ 重写测试报告（m-8 口径：最后一轮为准）；预览先兑底拉起
   const previewUrl = await ensureResumePreview(input)
-  const retested = await runGwtScenarios({ project_id: input.project_id, session_id: input.session_id, preview_url: previewUrl })
+  const retested = await runGwtWithApiContract({ project_id: input.project_id, session_id: input.session_id, preview_url: previewUrl })
   throwIfAborted(input.signal)
   writeTestReport({ request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, result: retested })
   syncDocuments({ request_id: input.request_id, project_id: input.project_id, session_id: input.session_id, checkpoint: 'mvp_tested' })
