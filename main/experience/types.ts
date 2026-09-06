@@ -301,6 +301,23 @@ export function isStale(card: CardEnvelope, nowMs = Date.now()): boolean {
   return nowMs - card.last_verified_at > EXPERIENCE_GOVERNANCE.VERIFIED_TTL_DAYS * DAY_MS
 }
 
+/**
+ * SPDX → 复用分级（G2 入册与 G4 物化的单一事实源，防两处政策漂移）：
+ * permissive 可携码物化；weak_copyleft/unknown 只存模式描述不物化代码；
+ * strong_copyleft 拒绝入册（教学项目版权红线，用户 2026-09-07 拍板）。
+ */
+export function licenseTierOf(spdx: string | undefined | null): LicenseTier {
+  const id = (spdx ?? '').trim()
+  if (!id || id.toLowerCase() === 'unknown') return 'unknown'
+  const permissive = /^(MIT|Apache-2\.0|BSD-2-Clause|BSD-3-Clause|ISC|0BSD|Unlicense|CC0-1\.0)$/i
+  const weak = /^(LGPL-2\.1|LGPL-3\.0|MPL-2\.0)$/i
+  const strong = /^(GPL-2\.0|GPL-3\.0|AGPL-3\.0|GPLv2|GPLv3)$/i
+  if (permissive.test(id)) return 'permissive'
+  if (weak.test(id)) return 'weak_copyleft'
+  if (strong.test(id)) return 'strong_copyleft'
+  return 'unknown'
+}
+
 /** candidate 超 CANDIDATE_RETIRE_DAYS 未转正 → 可自动退役（T-2 清理动作使用）。 */
 export function isRetireEligibleCandidate(card: CardEnvelope, nowMs = Date.now()): boolean {
   if (card.status !== 'candidate') return false

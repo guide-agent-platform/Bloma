@@ -8,6 +8,7 @@ import {
   experienceEnabled,
   hashProjectRef,
   isStale,
+  licenseTierOf,
   normalizeForFingerprint,
   sanitizeText,
   type AntiPatternBody,
@@ -144,6 +145,18 @@ describe('experience/types：isStale 与项目脱敏', () => {
     expect(h).toBe(hashProjectRef('proj-12345'))
     expect(h).toMatch(/^[0-9a-f]{12}$/)
     expect(h).not.toContain('proj-12345')
+  })
+
+  it('licenseTierOf 政策分级（与用户 LICENSE_TIER_MAP 对齐）', () => {
+    expect(licenseTierOf('MIT')).toBe('permissive')
+    expect(licenseTierOf('Apache-2.0')).toBe('permissive')
+    expect(licenseTierOf('BSD-3-Clause')).toBe('permissive')
+    expect(licenseTierOf('LGPL-3.0')).toBe('weak_copyleft')
+    expect(licenseTierOf('MPL-2.0')).toBe('weak_copyleft')
+    expect(licenseTierOf('GPL-3.0')).toBe('strong_copyleft')
+    expect(licenseTierOf('AGPL-3.0')).toBe('strong_copyleft')
+    expect(licenseTierOf(undefined)).toBe('unknown')
+    expect(licenseTierOf('Weird-Custom-1.0')).toBe('unknown')
   })
 })
 
