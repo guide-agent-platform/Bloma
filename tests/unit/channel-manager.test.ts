@@ -62,6 +62,15 @@ describe('渠道 CRUD（snake_case 存储契约）', () => {
     expect(listChannels()).toEqual([])
   })
 
+  // 变异回归（2026-09-06 push 前变异三件套补测）：上面 null 用例对「Array.isArray」与「?? []」两种实现
+  // 结果相同、杀不掉等价变异；只有 truthy 非数组才会让缺 Array.isArray 防御的实现崩在 channels.map。
+  it('channels 被手改成 truthy 非数组（字符串/对象）时同样降级为空列表——Array.isArray 防御的专属盲区（M1b）', () => {
+    writeFileSync(getBlomaChannelsPath(), JSON.stringify({ version: 1, channels: 'dirty-string' }))
+    expect(listChannels()).toEqual([])
+    writeFileSync(getBlomaChannelsPath(), JSON.stringify({ version: 1, channels: { '0': 'oops' } }))
+    expect(listChannels()).toEqual([])
+  })
+
   it('创建渠道后能列表、按 ID 读取（api_key 脱敏）', () => {
     const created = createChannel({
       name: '我的 DeepSeek',
