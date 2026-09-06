@@ -55,6 +55,17 @@ vi.mock('../../../main/coding/build-gate', async (importOriginal) => {
   return { ...actual, runBuildGate: mocks.runBuildGate }
 })
 
+// L0/L1 门禁（2026-09-07）：本文件测 P2 回流编排本身，门禁真实行为由
+// artifact-ui-gate/gwt-ui-gate-merge/vision-audit-gate 三个专项单测覆盖；
+// 此处 mock 成通过态（fixture 预览页无真控件，真跑 L0 会合法判败改变流程）。
+vi.mock('../../../main/coding/artifact-ui-gate', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/coding/artifact-ui-gate')>()
+  return { ...actual, uiGateEnabled: vi.fn(() => true), runArtifactUiGate: vi.fn(async () => ({ status: 'passed', failures: [] })) }
+})
+vi.mock('../../../main/coding/vision-audit-gate', () => ({
+  runVisionAuditGate: vi.fn(async () => ({ status: 'skipped', digest: '测试态：视觉审计跳过' })),
+}))
+
 function gwtFailed(): GwtTestResult {
   return {
     total_count: 2,

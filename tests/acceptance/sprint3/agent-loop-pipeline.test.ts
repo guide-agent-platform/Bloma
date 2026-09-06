@@ -206,10 +206,12 @@ function readDecisionLines(sessionId: string): string[] {
 describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → judge → ready）', () => {
   const originalPromaHome = process.env.PROMA_HOME
   const originalFlag = process.env.BLOMA_AGENT_LOOP
+  const originalVision = process.env.BLOMA_VISION_AUDIT
 
   beforeEach(() => {
     process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-accept-loop-'))
     process.env.BLOMA_AGENT_LOOP = '1'
+    process.env.BLOMA_VISION_AUDIT = '0' // 验收不真打双视觉 LLM（临时 PROMA_HOME 本就无渠道，此为双保险）
     setSafeStorageAdapter({
       isEncryptionAvailable: () => true,
       encryptString: (value) => Buffer.from(`enc:${value}`, 'utf8'),
@@ -226,6 +228,8 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
     restorePromaHome(originalPromaHome)
     if (originalFlag === undefined) delete process.env.BLOMA_AGENT_LOOP
     else process.env.BLOMA_AGENT_LOOP = originalFlag
+    if (originalVision === undefined) delete process.env.BLOMA_VISION_AUDIT
+    else process.env.BLOMA_VISION_AUDIT = originalVision
     setBrowserGwtDisabledForTests(false)
     clearSandboxRuntimeForTests()
     setProgrammingEventPublisher(() => undefined)
@@ -1042,10 +1046,12 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
     recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
     syncDocuments({ request_id: 'req-sync', session_id: 'session-1', project_id: project.project_id, checkpoint: 'mvp_before_generation' })
-    // 磁盘产物：命中 GWT 特征词 + 高危 eval（OWASP critical）→ 安全扫描 passed=false
+    // 磁盘产物：命中 GWT 特征词 + 高危 eval（OWASP critical）→ 安全扫描 passed=false；
+    // 界面为合法极简应用（L0 UI 门禁实跑：真控件+点击反应，不拦本用例要验的安全链）
+    const JUDGE004_PAGE = '<html><body><h1>记账本</h1><p>记录收入与支出，支持每日流水查看</p><input aria-label="金额"><button>记一笔</button><script>const r = eval("1+1");document.querySelector("button").addEventListener("click",function(){document.querySelector("p").textContent="已记录收入与支出，流水已更新"})</script></body></html>'
     writeFileSync(
       join(project.root_path, 'index.html'),
-      '<html><body><p>记录收入与支出</p></body></html><script>const r = eval("1+1")</script>',
+      JUDGE004_PAGE,
       'utf8',
     )
     const events: string[] = []
@@ -1053,7 +1059,7 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
 
     const server = createServer((_req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/html' })
-      res.end('<html><body><p>记录收入与支出</p></body></html>')
+      res.end(JUDGE004_PAGE)
     })
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
     const port = (server.address() as AddressInfo).port

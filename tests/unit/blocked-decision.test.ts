@@ -236,7 +236,12 @@ describe('Blocked decision resume loop (A2/A3)', () => {
       updateProject(project.project_id, { via_agent_loop: true, agent_loop_status: 'turn_limit' })
       recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
       syncDocuments({ request_id: 'req-sync', session_id: 'session-1', project_id: project.project_id, checkpoint: 'mvp_before_generation' })
-      writeFileSync(join(project.root_path, 'index.html'), '<html><body><p>记录收入与支出</p></body></html>', 'utf8')
+      // 合法极简应用（L0 UI 门禁实跑需真控件+点击反应；断言文本保留供裁判规则命中）
+      writeFileSync(
+        join(project.root_path, 'index.html'),
+        '<html><body><h1>记账本</h1><p>记录收入与支出，支持每日流水查看</p><input aria-label="金额"><button>记一笔</button><script>document.querySelector("button").addEventListener("click",function(){document.querySelector("p").textContent="已记录收入与支出，流水已更新"})</script></body></html>',
+        'utf8',
+      )
 
       const server = createServer((req, res) => {
         const root = findProject(project.project_id).root_path
