@@ -25,6 +25,7 @@ interface ReadmeBackplane {
   positioning?: string
   requirements?: Array<{ id?: string; description?: string }>
   out_of_scope?: string[]
+  interface_spec?: Array<{ endpoint?: string; method?: string; request?: string; response?: string }>
 }
 
 function readBackplaneForReadme(project: Project): ReadmeBackplane | null {
@@ -60,6 +61,7 @@ function renderReadme(project: Project, backplane: ReadmeBackplane | null): stri
     .filter((item) => item?.id && item?.description)
     .map((item) => `- [${item.id}] ${item.description}`)
   const outOfScope = (backplane?.out_of_scope ?? []).filter(Boolean)
+  const endpoints = (backplane?.interface_spec ?? []).filter((ep) => ep?.endpoint)
   return [
     `# ${project.name}`,
     '',
@@ -73,6 +75,20 @@ function renderReadme(project: Project, backplane: ReadmeBackplane | null): stri
     '',
     ...(features.length > 0 ? features : ['- （见源码实现）']),
     ...(outOfScope.length > 0 ? ['', '## 范围外（未实现）', '', ...outOfScope.map((entry) => `- ${entry}`)] : []),
+    ...(endpoints.length > 0
+      ? [
+          '',
+          '## 后端 API（前后端契约）',
+          '',
+          ...endpoints.map((ep) => `- \`${ep.method ?? 'GET'} ${ep.endpoint}\` → ${ep.response ?? 'JSON'}${ep.request && ep.request !== '无' ? `（请求：${ep.request}）` : ''}`),
+        ]
+      : []),
+    '',
+    '## 架构（前后端分离）',
+    '',
+    '- 前端：index.html + src/（浏览器侧只发同源请求，不持有任何密钥）；',
+    '- 后端：server/routes/*.js（文件名即路由前缀，notes.js → /api/notes/*），由 static-server.js 自动挂载，改完文件下一次请求即生效；',
+    '- 数据：data/ 目录（JSON 持久化，重启不丢）；快照/回滚语义包含 data/。',
     '',
     '## 启动方式',
     '',
@@ -82,20 +98,40 @@ function renderReadme(project: Project, backplane: ReadmeBackplane | null): stri
     'npm start        # 等价于 node static-server.js，默认 http://localhost:3000',
     '```',
     '',
-    '也可以直接用浏览器打开 index.html（本地数据用 localStorage 保存时推荐 npm start）。',
+    '请通过本地服务器访问（后端 API 依赖 Node 进程；直接双击 index.html 无法访问 /api/*）。',
+    '',
+    ...(endpoints.length > 0
+      ? [
+          '## AI 能力配置（可选）',
+          '',
+          '应用内的 AI 功能经同源 /api/llm 代理调用真实模型，密钥经环境变量注入服务器进程（不写入任何代码文件）：',
+          '',
+          '```bash',
+          'BLOMA_APP_LLM_BASE_URL=https://api.deepseek.com \\',
+          'BLOMA_APP_LLM_KEY=sk-你的密钥 \\',
+          'BLOMA_APP_LLM_MODEL=你的模型名 \\',
+          'npm start',
+          '```',
+          '',
+          '未配置时 /api/llm 返回 503 llm_not_configured（应用的失败态兜住，其余功能不受影响）。',
+          '',
+        ]
+      : []),
     '',
     '## 目录结构',
     '',
     '- index.html — 入口页（唯一 HTML 入口）',
-    '- src/app.js — 交互逻辑入口',
+    '- src/app.js — 前端交互逻辑入口',
     '- src/styles.css — 样式（骨架基线 + 业务扩展）',
+    '- server/routes/ — 后端 API 路由（文件名即路由前缀）',
+    '- data/ — 运行数据（JSON 持久化，随版本快照/回滚）',
     '- src/examples/ — 只读参考示例（可安全删除）',
-    '- package.json / static-server.js — 平台托管的启动配置与本地静态服务器',
+    '- package.json / static-server.js — 平台托管的启动配置与应用服务器',
     '',
     '## 继续开发',
     '',
-    '- 纯前端静态产物：无构建链、无外部依赖，改文件即生效；',
-    '- 沙箱口径延续：不引入外部 CDN/网络请求，数据内联或 localStorage；',
+    '- 无构建链、无外部依赖：改文件即生效（路由文件热加载，保存后下一次请求生效）；',
+    '- 浏览器侧仅同源请求；外部出网只发生在服务器进程（含 /api/llm 模型代理）；',
     '- 交付后本目录与 Bloma 平台解耦，可直接 git init 纳管。',
     '',
   ].join('\n')
