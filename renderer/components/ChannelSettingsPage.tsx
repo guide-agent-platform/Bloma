@@ -1679,6 +1679,9 @@ export const ChannelSettingsPage: React.FC = () => {
               </button>
             </div>
             <ChannelForm
+              // 切换编辑目标必须重挂载：useState(initial) 只在挂载时取值，无 key 时 React 复用实例
+              // 导致名称/URL/模型列表残留上一渠道，且拉取结果会 merge 进旧列表随保存写坏新渠道（目检缺陷 #1）
+              key={editingChannel?.id ?? 'create'}
               mode={editingChannel ? 'edit' : 'create'}
               channelId={editingChannel?.id}
               initial={editingChannel ? {
