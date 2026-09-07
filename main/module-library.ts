@@ -34,6 +34,8 @@ const VALID_TYPES = new Set<TemplateType>(['web_fullstack', 'desktop_tool', 'per
 
 /** 官方模块目录名（物化到项目内的只读参考目录；与 agent-tools READONLY_DIR_PREFIXES 同源）。 */
 export const OFFICIAL_MODULES_DIR = 'src/official-modules'
+/** 经验库正向参考物化目录（G4；同协议只读参考，与官方目录隔离）。 */
+export const REF_MODULES_DIR = 'src/ref-modules'
 
 /** 模块地图文本总长上限（catalog 行 + 纪律 + 统计；防上下文膨胀，超长截断）。 */
 const MAP_MAX_CHARS = 2400
@@ -54,7 +56,8 @@ export interface OfficialModule {
   files: OfficialModuleFile[]
   /** 模块源目录（渲染时逐文件复制）。 */
   baseDir: string
-  source: 'builtin'
+  /** builtin=仓内预置手写；ref=经验库 verified pattern（G4，sidecar 源）。 */
+  source: 'builtin' | 'ref'
 }
 
 export interface ModuleLoadResult {
@@ -216,9 +219,10 @@ export function renderOfficialModulesToProject(modules: OfficialModule[], rootPa
   const written: string[] = []
   const skipped: string[] = []
   for (const mod of modules) {
+    const dir = mod.source === 'ref' ? REF_MODULES_DIR : OFFICIAL_MODULES_DIR
     for (const file of mod.files) {
-      const rel = `${OFFICIAL_MODULES_DIR}/${mod.slug}/${file.path}`
-      const target = join(rootPath, OFFICIAL_MODULES_DIR, mod.slug, file.path)
+      const rel = `${dir}/${mod.slug}/${file.path}`
+      const target = join(rootPath, dir, mod.slug, file.path)
       if (existsSync(target)) {
         skipped.push(rel)
         continue
@@ -237,8 +241,10 @@ export function renderOfficialModulesToProject(modules: OfficialModule[], rootPa
  */
 export function buildModuleMapInjection(modules: OfficialModule[], rendered: ModuleRenderResult): string | null {
   if (modules.length === 0) return null
+  const hasRefs = modules.some((mod) => mod.source === 'ref')
   const catalogLines = modules.map((mod) => {
-    const parts = [`- ${mod.slug}：${mod.name}——${mod.summary}`]
+    const head = mod.source === 'ref' ? `- ref:${mod.slug}` : `- ${mod.slug}`
+    const parts = [`${head}：${mod.name}——${mod.summary}`]
     if (mod.whenToUse) parts.push(`  适用：${mod.whenToUse}`)
     if (mod.whenNotToUse) parts.push(`  不用：${mod.whenNotToUse}`)
     return parts.join('\n')
@@ -252,6 +258,9 @@ export function buildModuleMapInjection(modules: OfficialModule[], rendered: Mod
     '1. read_file 查看模块源码后，把源码复制到业务文件（src/ 下新模块或并入现有 app.js）按需改编——产物自包含，不 import src/official-modules/ 下的文件。',
     `2. ${OFFICIAL_MODULES_DIR}/ 是只读参考目录：write_file/edit_file 会被拒绝，不要改写。`,
     '3. 模块是参考资产不是功能项；是否接入、接入多少由你按功能项判断，接入后仍以行为断言（GWT）为验收口径。',
+    ...(hasRefs
+      ? ['4. 标 ref: 的条目是经验库外部参考（检索+编译沙箱出证）：src/ref-modules/ 同为只读目录；许可/出处见各模块 README，先 read 后模仿改编，勿整段复制。']
+      : []),
     `本轮渲染：新写入 ${rendered.written.length} 个文件，已存在跳过 ${rendered.skipped.length} 个。`,
   ].join('\n')
   return body.length > MAP_MAX_CHARS ? body.slice(0, MAP_MAX_CHARS) : body

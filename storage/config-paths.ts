@@ -31,6 +31,10 @@ export function getProjectsIndexPath(): string { return join(getPromaHome(), 'pr
  *  已人工分离备份 agent-sessions.bloma-sessions.json）。存量迁移见 session-service
  *  migrateLegacySessionsIndexOnce（启动幂等，只读旧写新不动 Proma 文件）。 */
 export function getAgentSessionsIndexPath(): string { return join(getPromaHome(), 'bloma-agent-sessions.json') }
+/** 经验库统一账本（2026-09-07 T-0：anti_pattern/pattern 两 kind 同文件，跨 App 状态
+ *  分文件惯例同 bloma-channels/bloma-agent-sessions）。纯路径不建目录：写方自建，
+ *  读方（空库回归锁）不该有落盘副作用。 */
+export function getExperienceIndexPath(): string { return join(getPromaHome(), 'bloma-experience.jsonl') }
 
 /** 引擎 system prompt 外置覆盖路径：{PROMA_HOME}/prompts/{name}.md（文件存在即覆盖内置默认）。 */
 export function getPromptOverridePath(name: string): string {

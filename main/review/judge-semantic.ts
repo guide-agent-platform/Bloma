@@ -25,6 +25,7 @@ import { requirementPriority } from '../sketch-engine'
 import type { SDKQuery } from '../orchestrator'
 import type { JudgeConstraint } from '../judge-engine'
 import { delegatedReviewEnabled, runDelegatedReview } from '../review-delegation'
+import { buildJudgeErrorPatternsSection } from '../experience/judge-checklist'
 import type { AgentEvent } from '../../shared/types'
 
 // =========================================================================
@@ -101,12 +102,20 @@ export async function runSemanticJudgeReview(opts: {
   if (!env) {
     return { constraint: null, findings: [], skipped: true, skipReason: 'no_channel' }
   }
+  // T-6 审查指导注入：经验库 verified 错法→【常见错法】段；空串=与现状字节级等价
+  // （两路组装均以空段过滤）。算在 no_channel 早退之后：无渠道时绝不碰账本
+  // （selectForInjection 惰性 load 会建索引，开关 off/空库必须零副作用零日志）。
+  const errorSection = opts.projectId
+    ? await buildJudgeErrorPatternsSection(opts.projectId, {
+        context_hint: `${backplane.name ?? ''} ${backplane.requirements?.map((r) => r.description).join(' ') ?? ''}`,
+      })
+    : ''
   // ① 委派审查（默认，协作过程 DelegationFeed 可视化）：子 agent 用只读工具自行查证
   //    产物，不再受 24k 内联截断限制
   if (delegatedReviewEnabled() && opts.projectId && opts.requestId && opts.publish) {
     const delegated = await runDelegatedReview({
       goal: `裁判语义审查产物 vs PRD：${backplane.name ?? '未命名项目'}`,
-      task: buildDelegatedJudgeTask(backplane, testSummary),
+      task: buildDelegatedJudgeTask(backplane, testSummary, errorSection),
       system: SEMANTIC_JUDGE_SYSTEM_PROMPT,
       query,
       env,
@@ -126,7 +135,7 @@ export async function runSemanticJudgeReview(opts: {
   }
   // ② 直连（内联产物，截断 24k）
   try {
-    const findings = await judgeViaLlm({ backplane, artifact, testSummary, query, env, sessionId, signal })
+    const findings = await judgeViaLlm({ backplane, artifact, testSummary, query, env, sessionId, signal, errorSection })
     return { constraint: deriveConstraint(findings, backplane.requirements ?? []), findings, skipped: false, via: 'direct' }
   } catch (error) {
     console.error('[judge-semantic] LLM 语义审查失败，跳过（不影响裁决）:', error)
@@ -135,7 +144,7 @@ export async function runSemanticJudgeReview(opts: {
 }
 
 /** 委派版任务：PRD 内联 + 产物改为子 agent 自查（只读工具，物理不可改）。 */
-function buildDelegatedJudgeTask(backplane: PrdBackplane, testSummary?: string): string {
+function buildDelegatedJudgeTask(backplane: PrdBackplane, testSummary?: string, errorSection?: string): string {
   const requirements = backplane.requirements ?? []
   const lines = [
     '【任务】审查生成的软件产物是否忠实实现了 PRD 的每个功能项。',
@@ -151,6 +160,7 @@ function buildDelegatedJudgeTask(backplane: PrdBackplane, testSummary?: string):
     '【产物】在本项目根目录：index.html 与 src/ 下的 js/css。用 read_file / list_files / grep 自行查证（只读，绝不修改任何文件），逐项对照后按【输出】格式给出严格 JSON。',
   ]
   if (testSummary) lines.push('', `【测试报告摘要】${testSummary}（仅供参考，以你读到的代码为准）`)
+  if (errorSection) lines.push('', errorSection)
   return lines.join('\n')
 }
 
@@ -163,12 +173,15 @@ async function judgeViaLlm(opts: {
   env: Record<string, string>
   sessionId: string
   signal?: AbortSignal
+  /** T-6 经验库【常见错法】段（空串=不注入，现状字节级） */
+  errorSection?: string
 }): Promise<SemanticFinding[]> {
   const requirements = opts.backplane.requirements ?? []
   const truncated = opts.artifact.length > ARTIFACT_CHAR_LIMIT
   const prompt = [
     SEMANTIC_JUDGE_SYSTEM_PROMPT,
     '',
+    ...(opts.errorSection ? [opts.errorSection, ''] : []),
     '【PRD 功能项】（P0=核心必须 / P1=重要 / P2=加分）',
     ...requirements.map(
       (item) =>

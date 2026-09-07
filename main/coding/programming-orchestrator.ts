@@ -13,6 +13,7 @@ import { runBuildGate, type BuildGateResult } from './build-gate'
 import { runArtifactUiGate, uiGateEnabled, uiProbeNotes, type ArtifactUiGateResult } from './artifact-ui-gate'
 import { runVisionAuditGate } from './vision-audit-gate'
 import { buildRepairTasks, resolveRepairBudget, runRepairLoop } from './repair-loop'
+import { recordFailureCards } from '../experience/error-card'
 import { generateLoopPlan, planLegEnabled, renderPlanInjection, renderPlanMarkdown, type LoopPlan } from './loop-planner'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../project-service'
 import { appendProjectMapToSystem, loadProjectMapBlock } from '../project-map'
@@ -20,6 +21,7 @@ import { resolveChannelEnv } from '../runtime-fallback'
 import { loadSkeletonTemplate, type ProjectSkeleton } from '../project-templates'
 import { buildLoopInjection, buildSkeletonMapInjection } from '../template-injection'
 import { buildModuleMapInjection, loadOfficialModules, modulesEnabled, renderOfficialModulesToProject } from '../module-library'
+import { listRefPatternModules, refLibraryEnabled } from '../experience/ref-source'
 import { backplaneInterfaceSpec, focusAnchorEnabled, renderBackplaneAnchor } from '../model/prd-backplane'
 import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
 import { distillProjectMemorySafely } from '../memory-distiller'
@@ -844,9 +846,13 @@ function prepareSkeletonBeforeLoop(
  * 模块地图（进注入⑥）；开关关/无模块/渲染异常 → null（fail-open，绝不阻断 MVP 生成）。
  */
 function prepareModuleLibrary(input: MvpTaskInput, templateType: TemplateType, project: Project): string | null {
-  if (!modulesEnabled()) return null
+  // G4 双内容源：官方预置（BLOMA_MODULES）+ 经验库 ref（BLOMA_REF_LIBRARY 缺省 off）；
+  // 两开关正交，均 off = 现状字节级 null；ref 经同一渲染/地图管道消费（C-1）。
+  if (!modulesEnabled() && !refLibraryEnabled()) return null
   try {
-    const { modules, rejected } = loadOfficialModules(templateType)
+    const { modules: official, rejected } = modulesEnabled() ? loadOfficialModules(templateType) : { modules: [], rejected: [] }
+    const refs = refLibraryEnabled() ? listRefPatternModules(templateType) : []
+    const modules = [...official, ...refs]
     for (const item of rejected) {
       try {
         recordDecision({
@@ -1219,6 +1225,15 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
         : `Loop 结束（${result.status}，${result.turns} 轮 / ${result.toolCalls.length} 次工具调用）`,
     meta: { status: result.status, turns: result.turns, tool_calls: result.toolCalls.length },
   })
+
+  // T-1 错误卡写点③：loop 异常结局（turn_limit/budget_exhausted）→ anti_pattern 候选卡
+  // （账本 + learnings 镜像双落，fire-and-forget 绝不阻断交付链；开关 off 时门面内 no-op）
+  if (result.status === 'turn_limit' || result.status === 'budget_exhausted') {
+    recordFailureCards(
+      { projectId: input.project_id, sessionId: input.session_id },
+      { abnormal: { outcomeType: 'timeout', description: `Agent Loop 未正常收尾（${result.status}，${result.turns} 轮）` } },
+    )
+  }
 
   // 用户已停止（U5，2026-08-25 线上案例）：loop 返回 cancelled 即中止交付链——
   // 不补脚手架、不起沙箱、不终验不改阶段。此前无此特判，停止后照样交付+终验+
@@ -1594,6 +1609,10 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
         },
       },
     })
+
+    // T-1 错误卡写点②：裁判退回（blocking 信号）→ anti_pattern 候选卡；同指纹窗口折叠
+    // 保证多轮退回不刷屏（fingerprint 基于 user_visible_summary）。
+    recordFailureCards({ projectId: input.project_id, sessionId: input.session_id }, { judgeVerdict: verdict })
 
     // M4-B loop-aware：loop 路径「只终验不重修」——constraint_error 不再外部文档重修
     // （loop 已内化修复，外部再修语义重复）；judge 自判 repairable=false（loop 异常终止态）
@@ -1999,6 +2018,15 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
         detail: { used, budget, mode: input.mode },
       },
     })
+    // T-1 错误卡写点①：入口 A 修复预算耗尽熔断——终验证据（GWT 逐场景 + 异常结局）成卡
+    recordFailureCards(
+      { projectId: input.project_id, sessionId: input.session_id },
+      {
+        testResult,
+        ...(input.buildGate ? { buildGate: input.buildGate } : {}),
+        abnormal: { outcomeType: 'unexpected_exit' as const, description: `修复预算耗尽（${used}/${budget}）终验仍未通过` },
+      },
+    )
     return testResult
   }
   // 无 query（存量项目 resume 等场景）无法起修复轮：不起不报错，走现状熔断
@@ -2151,6 +2179,11 @@ async function runBlockedTestRepair(input: {
         detail: { used, budget, mode: input.mode, via: 'blocked_resume' },
       },
     })
+    // T-1 错误卡写点①b：入口 B（继续修）同口径成卡（同指纹被窗口折叠，不重复刷屏）
+    recordFailureCards(
+      { projectId: input.project_id, sessionId: input.session_id },
+      { testResult: lastReport, abnormal: { outcomeType: 'unexpected_exit' as const, description: `继续修预算耗尽（${used}/${budget}）仍未通过` } },
+    )
     return
   }
   // 无 query（存量 resume 场景）无法起修复轮：不起不报错，行为=现状重验

@@ -17,6 +17,7 @@ import { buildPrdDocumentFallback, deriveInterfaceSpec, requirementAssertions, r
 import { parseEarsAssertion } from './ears-vocabulary'
 import { gwtRequiredCategories, isInjectionEnabled } from './template-injection'
 import { describeEffect, describeTrigger, parseBehaviorAssertion } from './behavior-assertions'
+import { syncReplayFeatureFiles } from './experience/replay-compiler'
 
 /**
  * DocumentEngine — 文档同步（对齐 api-spec §10.1 / architecture §7.3）。
@@ -93,6 +94,10 @@ export function syncDocuments(input: DocumentSyncInput, backplaneOverride?: PrdB
         content: feature.content,
         type: 'gwt_feature' as const,
       })))
+      // T-5：重放 feature 双目录分写（verified 进 features/，达阈 candidate 进
+      // features-candidates/）；静默失败，开关 off 零差异。执行清单由
+      // gwt-service 合成项驱动，本处仅文档化。
+      syncReplayFeatureFiles(project.project_id, getDocumentsDir(project.workspace_slug, project.project_id))
       break
     }
     case 'mvp_tested':
