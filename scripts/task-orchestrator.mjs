@@ -13,7 +13,7 @@
  *       apply 完成→targeted_scan 验证；>12h 无全量自动补排 run_full_scan。
  * 并发保护：orchestrator 自身锁文件；running 任务以 run-task 包装器 pid 存活判定。
  */
-import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, openSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, openSync, statSync } from 'node:fs'
 import { execFileSync, spawn } from 'node:child_process'
 import { readFileSync as rfs } from 'node:fs'
 import { homedir } from 'node:os'
@@ -56,6 +56,19 @@ const hasPendingOrRunning = (type) => tasks.some((t) => t.type === type && ['pen
 for (const t of tasks.filter((x) => x.status === 'running')) {
   const marker = join(LOGS, `task-${t.id}.exit`)
   if (pidAlive(t.pid) && !existsSync(marker)) {
+    // 僵尸判定（用户风险①）：pid 可能被 OS 复用/包装器假活——日志 mtime 是心跳
+    // （scheduled-grayscale 每 60s 打心跳行；断流 45min 视为僵尸，杀并走重试）
+    const logPath = join(LOGS, `task-${t.id}.log`)
+    const logIdleMin = existsSync(logPath) ? (Date.now() - statSync(logPath).mtimeMs) / 60_000 : (Date.now() - new Date(t.started_at).getTime()) / 60_000
+    if (logIdleMin > 45) {
+      try { process.kill(t.pid) } catch {}
+      t.retries += 1
+      t.status = t.retries < t.max_retries ? 'pending' : 'failed'
+      t.artifacts = { error: `ZOMBIE_LOG_IDLE_${Math.round(logIdleMin)}MIN` }
+      audit({ event: 'zombie_killed', id: t.id, type: t.type, idle_min: Math.round(logIdleMin) })
+      log(`僵尸判定：${t.id}(${t.type}) 日志断流 ${Math.round(logIdleMin)}min → ${t.status}`)
+      continue
+    }
     if (Date.now() - new Date(t.started_at).getTime() > 2 * 3600_000) {
       try { process.kill(t.pid) } catch {}
       t.status = 'failed'; t.artifacts = { error: 'TIMEOUT_2H' }; t.retries = t.max_retries
@@ -147,8 +160,15 @@ function followUp(t) {
   } else if (t.type === 'analyze_false_positives') {
     const m = /total_cases=(\d+)/.exec(String(t.artifacts?.stdout || ''))
     if (m && Number(m[1]) > 3 && !tasks.some((x) => x.type === 'apply_semantic_fix' && ['pending', 'running', 'blocked'].includes(x.status))) {
-      push({ type: 'apply_semantic_fix', priority: 80, status: 'blocked', blocked_reason: `误报案例 ${m[1]} 个：批准=改 pending（Agent 将生成同义词补丁建议 PR 草稿，不自动改产品）`, expires_at: new Date(Date.now() + 48 * 3600_000).toISOString() })
-      log(`误报 ${m[1]} 例 → apply_semantic_fix 已入队 blocked（等你批准）`)
+      // 冷却去重（用户风险④）：过期/被拒提案案例数未增长 → 不再重复生成同款提案刷屏
+      const lastDead = tasks.filter((x) => x.type === 'apply_semantic_fix' && ['expired', 'failed'].includes(x.status)).sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))[0]
+      const lastCount = Number(lastDead?.params?.proposal_case_count || 0)
+      if (lastDead && Number(m[1]) <= lastCount) {
+        log(`提案冷却：案例数 ${m[1]} 未超上次已过期提案的 ${lastCount}，跳过重复生成`)
+      } else {
+        push({ type: 'apply_semantic_fix', priority: 80, status: 'blocked', params: { proposal_case_count: Number(m[1]) }, blocked_reason: `误报案例 ${m[1]} 个：批准=改 pending（Agent 将生成同义词补丁建议 PR 草稿，不自动改产品）`, expires_at: new Date(Date.now() + 48 * 3600_000).toISOString() })
+        log(`误报 ${m[1]} 例 → apply_semantic_fix 已入队 blocked（等你批准）`)
+      }
     }
   } else if (t.type === 'apply_semantic_fix') {
     if (t.params?.verify_samples && !hasPendingOrRunning('run_targeted_scan')) push({ type: 'run_targeted_scan', priority: 85, params: { samples: t.params.verify_samples } })

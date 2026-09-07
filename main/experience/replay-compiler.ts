@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { experienceEnabled, type ExperienceCard } from './types'
-import { readAllCards } from './experience-service'
+import { isFalsePositiveQuarantined, readAllCards } from './experience-service'
 import type { SketchRequirement } from '../model/prd-backplane'
 
 /**
@@ -46,7 +46,7 @@ function replayableCards(projectId: string): ExperienceCard[] {
   try {
     return readAllCards()
       .filter((c) => c.kind === 'anti_pattern' && c.status !== 'retired')
-      .filter((c) => !(c.body as { suspected_false_positive?: boolean }).suspected_false_positive) // 误报卡不重放不产晋升证据
+      .filter((c) => !isFalsePositiveQuarantined(c)) // 误报卡不重放不产晋升证据（统一谓词）
       .sort(
         (a, b) =>
           (b.status === 'verified' ? 1 : 0) - (a.status === 'verified' ? 1 : 0) ||

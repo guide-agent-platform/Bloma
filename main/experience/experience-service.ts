@@ -260,6 +260,15 @@ export async function reportReplayOutcomes(
   }
 }
 
+/**
+ * 误报隔离统一谓词（工程化纪律，2026-09-08 用户风险评审）：
+ * **所有** anti_pattern 消费路径（注入/重放/缺口报告/未来的报表与训练集）必须过此门，
+ * 新增消费点禁止各自手写过滤条件——只许调用本函数。
+ */
+export function isFalsePositiveQuarantined(card: ExperienceCard): boolean {
+  return card.kind === 'anti_pattern' && Boolean((card.body as { suspected_false_positive?: boolean }).suspected_false_positive)
+}
+
 /** candidate→verified 只认三种证据；retired 卡不可复活（重新观察会生成新卡）。 */
 export async function promoteToVerified(id: string, verifiedBy: VerificationMethod): Promise<ExperienceCard | null> {
   const card = ensureIndex().get(id)
@@ -388,7 +397,7 @@ export async function selectForInjection(query: InjectionQuery): Promise<Experie
     const candidates = [...ensureIndex().values()]
       .filter((c) => (query.kind ? c.kind === query.kind : true))
       .filter(isConsumable)
-      .filter((c) => !(c.body as { suspected_false_positive?: boolean }).suspected_false_positive) // 误报标记卡隔离
+      .filter((c) => !isFalsePositiveQuarantined(c)) // 误报标记卡隔离（统一谓词）
       .filter((c) => query.include_stale || !isStale(c, now))
       .filter((c) => matchesFilters(c, query))
       .sort((a, b) => relevanceScore(b, query, now) - relevanceScore(a, query, now) || b.updated_at - a.updated_at)

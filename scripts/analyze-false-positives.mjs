@@ -12,7 +12,7 @@
  * 幂等：~/.proma/bloma-fp-processed.json 记已处理 history 行 ts；重复运行零副作用。
  * 输出：reports/false-positive-report-<UTC日期>.json + stdout 一行摘要（orchestrator 消费）。
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, readdirSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -44,7 +44,13 @@ for (const h of rows) {
   processed.add(h.ts)
   const healthyNames = new Set((h.artifacts || []).filter((a) => a.artifact === 'HEALTHY').map((a) => a.name))
   for (const s of h.samples || []) {
-    if (s.verdict !== 'circuit_break_settled' || !healthyNames.has(s.name) || !s.projectId || !h.temp_home) continue
+    if (s.verdict !== 'circuit_break_settled' || !healthyNames.has(s.name) || !h.temp_home) continue
+    // projectId 兜底反推（用户风险②）：旧 history 行无 projectId 时，枚举该轮 temp home
+    // 产物目录的全部项目短哈希做匹配（同轮多样本时打标范围=该轮 HEALTHY 样本产物集合，
+    // 误伤面可控——HEALTHY 判定本就是逐产物做的）
+    const gpDir = join(h.temp_home, 'agent-workspaces', 'default-software-builder', 'generated-projects')
+    const matchPids = s.projectId ? [hashProject(s.projectId)] : (existsSync(gpDir) ? readdirSync(gpDir).map(hashProject) : [])
+    if (matchPids.length === 0) continue
     // 该轮产物可见文本样本（供阶段二挖掘）
     let artifactText = ''
     try {
@@ -53,7 +59,7 @@ for (const h of rows) {
     } catch {}
     for (const c of latestById.values()) {
       if (c.kind !== 'anti_pattern' || !c.tag.startsWith('coding/gwt/')) continue
-      if (!(c.seen_projects || []).includes(hashProject(s.projectId))) continue
+      if (!(c.seen_projects || []).some((p) => matchPids.includes(p))) continue
       if (c.body.suspected_false_positive) continue
       const m = /GWT 场景「(.+?)」/.exec(c.body.symptom)
       cases.push({ card_id: c.id, tag: c.tag, assertion: m ? m[1] : c.body.symptom.slice(0, 120), artifact_text: artifactText, sample: s.name, round_ts: h.ts })

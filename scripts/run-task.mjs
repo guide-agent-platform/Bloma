@@ -10,7 +10,7 @@ import { writeFileSync } from 'node:fs'
 const sep = process.argv.indexOf('--')
 const marker = process.argv[2]
 const [cmd, ...args] = process.argv.slice(sep + 1)
-const child = spawn(cmd, args, { stdio: 'ignore', detached: false })
+const child = spawn(cmd, args, { stdio: 'inherit', detached: false })
 child.on('exit', (code) => {
   try { writeFileSync(marker, String(code ?? 1), 'utf8') } catch {}
   process.exit(0) // 包装器正常退场；marker 存在即任务结束信号

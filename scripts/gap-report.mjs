@@ -67,7 +67,8 @@ export function buildGapReport({ root, modulesDir }) {
   const promaHome = root || (envHome && envHome !== 'undefined' && envHome !== 'null' ? envHome : join(homedir(), '.proma'))
   const cards = [...loadLedgerView(join(promaHome, 'bloma-experience.jsonl')).values()].filter((c) => c.status !== 'retired')
   const verifiedPatterns = cards.filter((c) => c.kind === 'pattern' && c.status === 'verified')
-  const consumableAntis = cards.filter((c) => c.kind === 'anti_pattern' && (c.status === 'verified' || (c.recurrence ?? 1) >= 2))
+  // 误报隔离卡不进缺口统计消费面（与 main/experience isFalsePositiveQuarantined 谓词同语义）
+  const consumableAntis = cards.filter((c) => c.kind === 'anti_pattern' && !c.body?.suspected_false_positive && (c.status === 'verified' || (c.recurrence ?? 1) >= 2))
   const covered = new Set(verifiedPatterns.flatMap(capabilityTokens))
 
   const gaps = []
