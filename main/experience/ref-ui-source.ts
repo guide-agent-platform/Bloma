@@ -5,6 +5,10 @@ import { registerCandidateCard } from './experience-service'
  * G3a 市调 UI 模式入册（「做产品=做 UI」的定向收割，用户 2026-09-07 裁定）：
  * 向导市调的优质想法（label/note/source）→ **UI 类 pattern 描述卡（永不含码）**。
  *
+ * 【G3b 冻结占位（2026-09-07 用户清单第 5 步裁定）】extractor IPC 四层链接线 +
+ * UI 展示参考卡——保留产品功能定位（本模块供给链的展示端），暂不接线；
+ * 若未来确认产品不向用户展示参考卡再出移除补丁。本卡侧（G3a）已可用，不受影响。
+ *
  * - 命名空间与批跑侧互斥防撞：`pattern/ui/{slug}_{hash4}`（G2 只产 js/py/ts/universal，
  *   G3a 只占 ui 段）；哈希后缀防跨需求同题混淆；
  * - 恒 candidate：市调 snippet 未经编译/沙箱出证，晋升只走 human_review

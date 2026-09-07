@@ -1916,6 +1916,17 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
     testResult = await repairAndRetest(input, testResult)
     throwIfAborted(input.signal)
     if (testResult.failed_count > 0) {
+      // T-1 错误卡写点④（灰度 S1 实弹补位，2026-09-07）：修复轮跑完仍败的**首轮熔断**
+      // 不经 used>=budget 早退分支——此前该路径无写点，真实失败反而不成卡。
+      // 统一在熔断回滚前成卡（与①重叠时由指纹窗口折叠去重）。
+      recordFailureCards(
+        { projectId: input.project_id, sessionId: input.session_id },
+        {
+          testResult,
+          ...(input.buildGate ? { buildGate: input.buildGate } : {}),
+          abnormal: { outcomeType: 'unexpected_exit' as const, description: '修复轮执行后终验仍未通过，熔断回滚' },
+        },
+      )
       const outcome = await circuitBreakRollback({
         request_id: input.request_id,
         session_id: input.session_id,
