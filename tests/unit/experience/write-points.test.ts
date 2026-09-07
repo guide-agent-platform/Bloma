@@ -18,7 +18,7 @@ import { setSandboxRuntimeForTests, clearSandboxRuntimeForTests } from '../../..
  *   → registerCandidateCard spy 收到 coding/gwt/* 与 unknown/outcome/unexpected_exit；
  * - 写点②（裁判退回）：runJudgeReview 退回流 → spy 收到 coding/judge/*；
  * - 负断言：GWT 全过路径不产 gwt/outcome 卡（正常成功零写卡）；
- * - 源码锚：编排器内 recordFailureCards( 恰好 4 处——删除任一写点此断言必红（变异门）。
+ * - 源码锚：编排器内 recordFailureCards( 恰好 5 处（含熔断统一写点④）——删除任一写点此断言必红（变异门）。
  * mock 面复制 tests/unit/coding/programming-orchestrator-repair.test.ts 的成熟 harness。
  */
 
@@ -81,12 +81,14 @@ function spyTags(): string[] {
 
 describe('T-1 写点集成（账本门面 spy 断言）', () => {
   const originalHome = process.env.PROMA_HOME
+  const originalExp = process.env.BLOMA_EXPERIENCE
   let projectId = ''
   let sessionId = ''
   let channelId = ''
 
   beforeEach(() => {
     process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'proma-wp-'))
+    process.env.BLOMA_EXPERIENCE = '1' // 门面 gate 需要开关开；service 已 mock 不写真账本
     vi.mocked(registerCandidateCard).mockClear()
     mocks.runAgentLoop.mockReset()
     mocks.runAgentLoop.mockResolvedValue(loopCompleted())
@@ -130,6 +132,8 @@ describe('T-1 写点集成（账本门面 spy 断言）', () => {
 
   afterEach(() => {
     process.env.PROMA_HOME = originalHome
+    if (originalExp === undefined) delete process.env.BLOMA_EXPERIENCE
+    else process.env.BLOMA_EXPERIENCE = originalExp
     clearSandboxRuntimeForTests()
   })
 
@@ -174,8 +178,19 @@ describe('T-1 写点集成（账本门面 spy 断言）', () => {
     expect(spyTags().some((t) => t.startsWith('coding/judge/'))).toBe(true)
   })
 
-  it('源码锚：编排器 recordFailureCards( 恰好 4 处（删写点必红=变异门）', () => {
+  it('写点④：修复轮跑完仍败首轮熔断（灰度实弹补位路径）→ GWT 场景卡+unexpected_exit 卡', async () => {
+    // used=0 预算内 → 修复轮执行；重验仍失败 → 统一熔断前写点④
+    mocks.runGwtScenarios.mockResolvedValue(gwtFailed())
+    const out = await runAgentLoopPostTesting(baseInput())
+    await new Promise((r) => setImmediate(r))
+    expect(out.verdict).toBe('blocked')
+    const tags = spyTags()
+    expect(tags.some((t) => t.startsWith('coding/gwt/'))).toBe(true)
+    expect(tags).toContain('unknown/outcome/unexpected_exit')
+  })
+
+  it('源码锚：编排器 recordFailureCards( 恰好 5 处（含熔断统一写点④）（删写点必红=变异门）', () => {
     const source = readFileSync(join(process.cwd(), 'main/coding/programming-orchestrator.ts'), 'utf8')
-    expect((source.match(/recordFailureCards\(/g) ?? []).length).toBe(4)
+    expect((source.match(/recordFailureCards\(/g) ?? []).length).toBe(5)
   })
 })

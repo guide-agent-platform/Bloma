@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import {
   EXPERIENCE_GOVERNANCE,
+  experienceEnabled,
   computeFingerprint,
   hashProjectRef,
   keyFromSymptom,
@@ -263,6 +264,8 @@ export function recordFailureCards(
     abnormal?: { outcomeType: 'timeout' | 'interrupt' | 'unexpected_exit'; description: string }
   },
 ): void {
+  // C-2 纪律：开关 off = 零副作用（含 learnings 镜像——不加 gate 会污染现状字节级承诺）
+  if (!experienceEnabled()) return
   try {
     const cards: ExperienceCard[] = []
     if (signals.testResult) cards.push(...buildCardsFromGwtTestResult(signals.testResult, ctx))
