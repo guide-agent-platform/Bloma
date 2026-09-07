@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, appendFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { getExperienceIndexPath } from '../../storage/config-paths'
+import { getExperienceIndexPath, getGeneratedProjectsDir } from '../../storage/config-paths'
 import {
   EXPERIENCE_GOVERNANCE,
   computeFingerprint,
@@ -213,15 +213,45 @@ export async function updateCardAttribution(
 /** 重放回流（T-5 状态机）：按 R-{fp8} 前缀定位卡——candidate 跑绿→promote replay_green；
  * verified 跑绿→matched（注入有效证据）；verified 跑败→false_positive（防误伤，
  * 不自动退役；真复发由人工/统计处置）。同项目重放不增 recurrence（跨项目语义）。 */
+/**
+ * 重放目标硬 token：卡症状/GWT 断言里的 HTTP 端点（V1.1 假绿门 v1 只认这一类可精确
+ * 判定的 token；DOM 文本断言无通用"目标不存在"判法，保守视为 applicable=现状语义）。
+ */
+function replayEndpointTokens(card: ExperienceCard): string[] {
+  const b = card.body as Partial<import('./types').AntiPatternBody>
+  const text = `${b.symptom ?? ''} ${b.gwt?.when ?? ''} ${b.gwt?.then ?? ''}`
+  return [...new Set([...text.matchAll(/(?:GET|POST|PUT|DELETE|PATCH)\s+(\/[\w\-\/.]+)/g)].map((m) => m[1]))]
+}
+
+/** 项目当前产物文本（静态启发式同源目录）；读不到=''（无产物=绿也无证据价值）。 */
+function projectArtifactText(projectId: string): string {
+  const dir = join(getGeneratedProjectsDir('default-software-builder'), projectId)
+  let out = ''
+  for (const f of ['index.html', 'src/app.js', 'app.js']) {
+    try {
+      out += readFileSync(join(dir, f), 'utf8')
+    } catch {}
+  }
+  return out
+}
+
 export async function reportReplayOutcomes(
   outcomes: Array<{ id: string; passed: boolean }>,
+  projectId?: string,
 ): Promise<void> {
   if (!experienceEnabled()) return
+  const artifact = projectId ? projectArtifactText(projectId) : null
   for (const o of outcomes) {
     const card = [...ensureIndex().values()]
       .filter((c) => c.kind === 'anti_pattern' && c.fingerprint.startsWith(o.id) && c.status !== 'retired')
       .sort((a, b) => b.updated_at - a.updated_at)[0]
     if (!card) continue
+    // 相关性门（S5+S6 灰度实弹，2026-09-07）：端点类断言的目标在产物中零引用 →
+    // not_applicable——绿/红都不产晋升或降级证据（假绿曾 5 连发污染转正链路）。
+    if (artifact !== null) {
+      const tokens = replayEndpointTokens(card)
+      if (tokens.length > 0 && !tokens.some((t) => artifact.includes(t))) continue
+    }
     if (card.status === 'candidate' && o.passed) {
       await promoteToVerified(card.id, 'replay_green')
     } else if (card.status === 'verified') {

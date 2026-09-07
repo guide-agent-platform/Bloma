@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -7,6 +7,7 @@ import {
   promoteToVerified,
   readAllCards,
   reportInjection,
+  reportReplayOutcomes,
   resetExperienceIndexForTests,
   selectForInjection,
   tryRegisterCard,
@@ -98,6 +99,44 @@ describe('experience-service：注册与去重', () => {
     const raw = readFileSync(join(home, 'bloma-experience.jsonl'), 'utf8')
     expect(raw).not.toContain('alice')
     expect(raw).not.toContain('password123')
+  })
+})
+
+describe('experience-service：replay 回流产物相关性门（V1.1 假绿修复）', () => {
+  // 真实灰度 S5+S6（2026-09-07）暴露：契约卡被拉到「产物根本没有该端点」的项目上重放，
+  // 静态启发式默认放行 → 假 replay_green 晋升。无关产物的绿/红都无证据价值。
+  const contractBody = (): AntiPatternBody => ({ ...antiBody(), stage: 'coding', symptom: 'GWT 场景「API 契约端点：GET /api/records」未通过：契约端点失活（HTTP 404，路由未实现或挂载失败）' })
+  const projectId = 'pid-replay-gate'
+  const writeArtifact = (html: string) => {
+    const dir = join(home, 'agent-workspaces', 'default-software-builder', 'generated-projects', projectId)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'index.html'), html, 'utf8')
+  }
+  it('产物未引用重放端点：passed 不产晋升证据（卡保持 candidate）', async () => {
+    const card = await registerOnce(contractBody())
+    writeArtifact('<html><body>一个换算器，没有 API</body></html>')
+    await reportReplayOutcomes([{ id: card.fingerprint.slice(0, 8), passed: true }], projectId)
+    const latest = readAllCards().find((c) => c.id === card.id)
+    expect(latest?.status).toBe('candidate')
+  })
+  it('产物引用了重放端点：passed 正常晋升 verified（gate 不误伤）', async () => {
+    const card = await registerOnce(contractBody())
+    writeArtifact('<html><script>fetch("/api/records")</script></html>')
+    await reportReplayOutcomes([{ id: card.fingerprint.slice(0, 8), passed: true }], projectId)
+    const latest = readAllCards().find((c) => c.id === card.id)
+    expect(latest?.status).toBe('verified')
+    expect(latest?.verified_by).toBe('replay_green')
+  })
+  it('无端点 token 的卡（DOM 断言类）行为不变：passed 即晋升', async () => {
+    const card = await registerOnce()
+    writeArtifact('<html><body>无关内容</body></html>')
+    await reportReplayOutcomes([{ id: card.fingerprint.slice(0, 8), passed: true }], projectId)
+    expect(readAllCards().find((c) => c.id === card.id)?.status).toBe('verified')
+  })
+  it('不传 projectId（旧调用面兼容）：不设门，保持原语义', async () => {
+    const card = await registerOnce(contractBody())
+    await reportReplayOutcomes([{ id: card.fingerprint.slice(0, 8), passed: true }])
+    expect(readAllCards().find((c) => c.id === card.id)?.status).toBe('verified')
   })
 })
 

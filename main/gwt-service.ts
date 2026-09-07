@@ -59,7 +59,7 @@ export async function runGwtScenarios(input: RunGwtInput): Promise<GwtTestResult
   if (replay.length === 0) return raw
   const names = new Set(replay.map((r) => gwtScenarioName(r.id, (r.behavior_assertions ?? [''])[0])))
   const { gated, outcomes } = splitAdvisoryResults(raw, names)
-  void reportReplayOutcomes(outcomes).catch((error) => console.warn('[experience] replay report failed:', error))
+  void reportReplayOutcomes(outcomes, input.project_id).catch((error) => console.warn('[experience] replay report failed:', error))
   return gated
 }
 
