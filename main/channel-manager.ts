@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import type {
   Channel,
   ChannelCreateInput,
@@ -103,6 +103,21 @@ interface ChannelsConfig {
   channels: Channel[]
 }
 
+/**
+ * 单条渠道归一化：`models` 在类型上必填，但 bloma-channels.json 是用户可手改、
+ * 且从旧共享文件迁移过来的运行时数据——缺该字段时所有 `channel.models.length` 类读取都会抛错。
+ * 迭代 #3 先在渲染层加 `?? []` 防御（当时用真缺字段数据实测崩），本轮从读取源头补齐。
+ */
+function normalizeChannelModels(raw: Channel): Channel {
+  return Array.isArray(raw.models) ? raw : { ...raw, models: [] }
+}
+
+/** 整体读取归一化：`channels` 本身不是数组（手改坏文件）时降级为空列表而不是让 main 抛错。 */
+function normalizeConfig(config: ChannelsConfig): ChannelsConfig {
+  const channels = Array.isArray(config?.channels) ? config.channels : []
+  return { version: config?.version ?? 1, channels: channels.map(normalizeChannelModels) }
+}
+
 function loadChannels(): ChannelsConfig {
   const path = getBlomaChannelsPath()
   if (!existsSync(path)) {
@@ -113,9 +128,14 @@ function loadChannels(): ChannelsConfig {
     const legacy = readJsonFile<ChannelsConfig>(getChannelsPath(), { version: 1, channels: [] })
     const migrated: ChannelsConfig = { version: 1, channels: legacy.channels.filter(isOursChannel) }
     writeJsonFile(path, migrated)
-    return migrated
+    return normalizeConfig(migrated)
   }
-  return readJsonFile<ChannelsConfig>(path, { version: 1, channels: [] })
+  // 直接读文件而不是只信 readJsonFile 的 default：缺 models 的条目要补齐后再进内存
+  try {
+    return normalizeConfig(JSON.parse(readFileSync(path, 'utf8')) as ChannelsConfig)
+  } catch {
+    return { version: 1, channels: [] }
+  }
 }
 
 function saveChannels(config: ChannelsConfig): void {
@@ -580,6 +600,16 @@ interface GoogleModelItem {
 /**
  * 从 DeepSeek 原生模型 API 拉取模型列表（模型端点固定在 /models）。
  */
+/**
+ * 模型列表拉取失败的统一出口：404 在兼容渠道上是常态（如阿里云 compatible-mode 未开放列表端点），
+ * 不是密钥错——补一句可执行下一步（设置页有「手动添加模型」入口），避免用户退回「测连接」反复试错。
+ * 迭代 #4 先只覆盖 OpenAI 兼容分支，本轮把同一口径铺到 deepseek/kimi/anthropic 兼容/google。
+ */
+function modelsFetchFailure(response: Response, result: ChannelTestResult): FetchModelsResult {
+  const hint = response.status === 404 ? '——该服务地址可能未开放模型列表端点，可改用手动添加模型' : ''
+  return { success: false, message: `${result.message}${hint}`, models: [] }
+}
+
 async function fetchDeepSeekModels(baseUrl: string, apiKey: string): Promise<FetchModelsResult> {
   const url = `${new URL(baseUrl.trim()).origin}/models`
   const response = await fetch(url, withTimeout({
@@ -588,8 +618,7 @@ async function fetchDeepSeekModels(baseUrl: string, apiKey: string): Promise<Fet
   }))
 
   if (!response.ok) {
-    const result = await normalizeHttpResponse(response)
-    return { success: false, message: result.message, models: [] }
+    return modelsFetchFailure(response, await normalizeHttpResponse(response))
   }
 
   const data = await response.json() as { data?: OpenAIModelItem[] }
@@ -613,8 +642,7 @@ async function fetchKimiModels(baseUrl: string, apiKey: string): Promise<FetchMo
   }))
 
   if (!response.ok) {
-    const result = await normalizeHttpResponse(response)
-    return { success: false, message: result.message, models: [] }
+    return modelsFetchFailure(response, await normalizeHttpResponse(response))
   }
 
   const data = await response.json() as { data?: OpenAIModelItem[] }
@@ -653,8 +681,7 @@ async function fetchAnthropicCompatibleModels(
   const response = await fetch(url, withTimeout({ method: 'GET', headers }))
 
   if (!response.ok) {
-    const result = await normalizeHttpResponse(response)
-    return { success: false, message: result.message, models: [] }
+    return modelsFetchFailure(response, await normalizeHttpResponse(response))
   }
 
   const data = await response.json() as { data?: AnthropicModelItem[] }
@@ -685,8 +712,7 @@ async function fetchOpenAICompatibleModels(
   }))
 
   if (!response.ok) {
-    const result = await normalizeHttpResponse(response)
-    return { success: false, message: result.message, models: [] }
+    return modelsFetchFailure(response, await normalizeHttpResponse(response))
   }
 
   const data = await response.json() as { data?: OpenAIModelItem[] }
@@ -706,8 +732,7 @@ async function fetchGoogleModels(baseUrl: string, apiKey: string): Promise<Fetch
   const response = await fetch(`${url}/v1beta/models?key=${apiKey}`, withTimeout({ method: 'GET' }))
 
   if (!response.ok) {
-    const result = await normalizeHttpResponse(response)
-    return { success: false, message: result.message, models: [] }
+    return modelsFetchFailure(response, await normalizeHttpResponse(response))
   }
 
   const data = await response.json() as { models?: GoogleModelItem[] }
