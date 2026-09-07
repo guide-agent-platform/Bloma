@@ -7,8 +7,22 @@
       "added_at": "2026-09-07",
       "source": "首轮灰度",
       "requirements": [
-        { "id": "F-001", "description": "记录收入与支出", "behavior_assertions": ["点击添加后，新记录立即出现在列表中"], "priority": "P0" },
-        { "id": "F-002", "description": "按关键字搜索历史记录", "behavior_assertions": ["在搜索框输入关键字时，列表只显示包含该关键字的记录"], "priority": "P0" }
+        {
+          "id": "F-001",
+          "description": "记录收入与支出",
+          "behavior_assertions": [
+            "点击添加后，新记录立即出现在列表中"
+          ],
+          "priority": "P0"
+        },
+        {
+          "id": "F-002",
+          "description": "按关键字搜索历史记录",
+          "behavior_assertions": [
+            "在搜索框输入关键字时，列表只显示包含该关键字的记录"
+          ],
+          "priority": "P0"
+        }
       ]
     },
     "S2": {
@@ -16,9 +30,30 @@
       "added_at": "2026-09-07",
       "source": "首轮灰度",
       "requirements": [
-        { "id": "F-001", "description": "开始按钮启动 25 分钟倒计时", "behavior_assertions": ["点击开始后倒计时秒数开始逐秒减少"], "priority": "P0" },
-        { "id": "F-002", "description": "可随时暂停与继续", "behavior_assertions": ["点击暂停后秒数不再变化，点击继续后恢复减少"], "priority": "P0" },
-        { "id": "F-003", "description": "到点提醒", "behavior_assertions": ["倒计时归零时页面出现明显的完成提示"], "priority": "P0" }
+        {
+          "id": "F-001",
+          "description": "开始按钮启动 25 分钟倒计时",
+          "behavior_assertions": [
+            "点击开始后倒计时秒数开始逐秒减少"
+          ],
+          "priority": "P0"
+        },
+        {
+          "id": "F-002",
+          "description": "可随时暂停与继续",
+          "behavior_assertions": [
+            "点击暂停后秒数不再变化，点击继续后恢复减少"
+          ],
+          "priority": "P0"
+        },
+        {
+          "id": "F-003",
+          "description": "到点提醒",
+          "behavior_assertions": [
+            "倒计时归零时页面出现明显的完成提示"
+          ],
+          "priority": "P0"
+        }
       ]
     },
     "S3": {
@@ -26,9 +61,30 @@
       "added_at": "2026-09-07",
       "source": "首轮灰度",
       "requirements": [
-        { "id": "F-001", "description": "字母从顶部下落", "behavior_assertions": ["游戏开始后画面出现下落的字母元素"], "priority": "P0" },
-        { "id": "F-002", "description": "按对应键得分", "behavior_assertions": ["按下屏幕上存在的字母键后得分增加且该字母消失"], "priority": "P0" },
-        { "id": "F-003", "description": "字母落到底部判输", "behavior_assertions": ["字母到达底部后出现失败提示"], "priority": "P0" }
+        {
+          "id": "F-001",
+          "description": "字母从顶部下落",
+          "behavior_assertions": [
+            "游戏开始后画面出现下落的字母元素"
+          ],
+          "priority": "P0"
+        },
+        {
+          "id": "F-002",
+          "description": "按对应键得分",
+          "behavior_assertions": [
+            "按下屏幕上存在的字母键后得分增加且该字母消失"
+          ],
+          "priority": "P0"
+        },
+        {
+          "id": "F-003",
+          "description": "字母落到底部判输",
+          "behavior_assertions": [
+            "字母到达底部后出现失败提示"
+          ],
+          "priority": "P0"
+        }
       ]
     },
     "S4": {
@@ -36,8 +92,22 @@
       "added_at": "2026-09-07",
       "source": "首轮灰度",
       "requirements": [
-        { "id": "F-001", "description": "图片网格展示作品", "behavior_assertions": ["页面加载后可见多个作品缩略图排成网格"], "priority": "P0" },
-        { "id": "F-002", "description": "点开看大图", "behavior_assertions": ["点击缩略图后出现放大的图片视图"], "priority": "P0" }
+        {
+          "id": "F-001",
+          "description": "图片网格展示作品",
+          "behavior_assertions": [
+            "页面加载后可见多个作品缩略图排成网格"
+          ],
+          "priority": "P0"
+        },
+        {
+          "id": "F-002",
+          "description": "点开看大图",
+          "behavior_assertions": [
+            "点击缩略图后出现放大的图片视图"
+          ],
+          "priority": "P0"
+        }
       ]
     },
     "S5": {
@@ -45,8 +115,22 @@
       "added_at": "2026-09-07",
       "source": "第二轮扩充（编辑→实时渲染面）",
       "requirements": [
-        { "id": "F-001", "description": "左编辑右预览实时渲染 Markdown", "behavior_assertions": ["在编辑区输入 # 标题后，预览区出现对应的标题元素"], "priority": "P0" },
-        { "id": "F-002", "description": "笔记列表保存与切换", "behavior_assertions": ["点击新建后编辑区清空并可输入新内容"], "priority": "P0" }
+        {
+          "id": "F-001",
+          "description": "左编辑右预览实时渲染 Markdown",
+          "behavior_assertions": [
+            "在编辑区输入 # 标题后，预览区出现对应的标题元素"
+          ],
+          "priority": "P0"
+        },
+        {
+          "id": "F-002",
+          "description": "笔记列表保存与切换",
+          "behavior_assertions": [
+            "点击新建后编辑区清空并可输入新内容"
+          ],
+          "priority": "P0"
+        }
       ]
     },
     "S6": {
@@ -54,8 +138,22 @@
       "added_at": "2026-09-07",
       "source": "第二轮扩充（双向数值联动面）",
       "requirements": [
-        { "id": "F-001", "description": "长度单位互转（米/英尺）", "behavior_assertions": ["在米输入框输入 1 后英尺框显示约 3.28"], "priority": "P0" },
-        { "id": "F-002", "description": "反向换算", "behavior_assertions": ["在英尺输入框输入 3.28 后米框显示约 1"], "priority": "P0" }
+        {
+          "id": "F-001",
+          "description": "长度单位互转（米/英尺）",
+          "behavior_assertions": [
+            "在米输入框输入 1 后英尺框显示约 3.28"
+          ],
+          "priority": "P0"
+        },
+        {
+          "id": "F-002",
+          "description": "反向换算",
+          "behavior_assertions": [
+            "在英尺输入框输入 3.28 后米框显示约 1"
+          ],
+          "priority": "P0"
+        }
       ]
     },
     "S7": {
@@ -63,9 +161,30 @@
       "added_at": "2026-09-07",
       "source": "第二轮扩充（canvas 键盘控制+碰撞判定面）",
       "requirements": [
-        { "id": "F-001", "description": "方向键控制蛇转向", "behavior_assertions": ["按下方向键后蛇的移动方向改变"], "priority": "P0" },
-        { "id": "F-002", "description": "吃到食物加分并变长", "behavior_assertions": ["蛇头与食物重合后得分增加"], "priority": "P0" },
-        { "id": "F-003", "description": "撞墙结束游戏", "behavior_assertions": ["蛇头到达边界后出现游戏结束提示"], "priority": "P0" }
+        {
+          "id": "F-001",
+          "description": "方向键控制蛇转向",
+          "behavior_assertions": [
+            "按下方向键后蛇的移动方向改变"
+          ],
+          "priority": "P0"
+        },
+        {
+          "id": "F-002",
+          "description": "吃到食物加分并变长",
+          "behavior_assertions": [
+            "蛇头与食物重合后得分增加"
+          ],
+          "priority": "P0"
+        },
+        {
+          "id": "F-003",
+          "description": "撞墙结束游戏",
+          "behavior_assertions": [
+            "蛇头到达边界后出现游戏结束提示"
+          ],
+          "priority": "P0"
+        }
       ]
     },
     "S8": {
@@ -73,9 +192,99 @@
       "added_at": "2026-09-07",
       "source": "第二轮扩充（多列状态流转 CRUD 面）",
       "requirements": [
-        { "id": "F-001", "description": "在看板列间移动任务卡", "behavior_assertions": ["点击任务的右移按钮后该任务出现在下一列"], "priority": "P0" },
-        { "id": "F-002", "description": "删除任务", "behavior_assertions": ["点击删除后任务从看板上消失"], "priority": "P0" },
-        { "id": "F-003", "description": "各列显示任务计数", "behavior_assertions": ["新增任务后所在列的计数加一"], "priority": "P1" }
+        {
+          "id": "F-001",
+          "description": "在看板列间移动任务卡",
+          "behavior_assertions": [
+            "点击任务的右移按钮后该任务出现在下一列"
+          ],
+          "priority": "P0"
+        },
+        {
+          "id": "F-002",
+          "description": "删除任务",
+          "behavior_assertions": [
+            "点击删除后任务从看板上消失"
+          ],
+          "priority": "P0"
+        },
+        {
+          "id": "F-003",
+          "description": "各列显示任务计数",
+          "behavior_assertions": [
+            "新增任务后所在列的计数加一"
+          ],
+          "priority": "P1"
+        }
+      ]
+    },
+    "S9": {
+      "name": "S9-注册表单校验",
+      "added_at": "2026-09-07",
+      "source": "第三轮扩充（表单校验反馈面）",
+      "requirements": [
+        {
+          "id": "F-001",
+          "description": "必填项空值提交给出错误提示",
+          "behavior_assertions": [
+            "用户名留空点击提交后，页面出现错误提示文字"
+          ],
+          "priority": "P0"
+        },
+        {
+          "id": "F-002",
+          "description": "合法信息提交给出成功反馈",
+          "behavior_assertions": [
+            "填写用户名和邮箱后点击提交，页面出现注册成功提示"
+          ],
+          "priority": "P0"
+        }
+      ]
+    },
+    "S10": {
+      "name": "S10-折叠FAQ面板",
+      "added_at": "2026-09-07",
+      "source": "第三轮扩充（展开/收起状态切换面）",
+      "requirements": [
+        {
+          "id": "F-001",
+          "description": "点击问题展开答案",
+          "behavior_assertions": [
+            "点击第一个问题标题后，对应的答案文本变为可见"
+          ],
+          "priority": "P0"
+        },
+        {
+          "id": "F-002",
+          "description": "再次点击收起答案",
+          "behavior_assertions": [
+            "再次点击该问题标题后，答案文本消失"
+          ],
+          "priority": "P0"
+        }
+      ]
+    },
+    "S11": {
+      "name": "S11-配色选择器预览",
+      "added_at": "2026-09-07",
+      "source": "第三轮扩充（选择→预览联动面）",
+      "requirements": [
+        {
+          "id": "F-001",
+          "description": "色板选择改变预览区",
+          "behavior_assertions": [
+            "点击红色色块后，预览区背景变为红色"
+          ],
+          "priority": "P0"
+        },
+        {
+          "id": "F-002",
+          "description": "显示当前色值",
+          "behavior_assertions": [
+            "选中颜色后页面出现对应的十六进制色值文本"
+          ],
+          "priority": "P0"
+        }
       ]
     }
   }
