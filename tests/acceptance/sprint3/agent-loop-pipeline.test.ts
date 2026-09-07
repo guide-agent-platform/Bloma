@@ -1083,4 +1083,46 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
       server.close()
     }
   })
+
+  it('[S4-GATE-001] 断言横幅骗过文本型 GWT 的假界面产物 → L0 UI-GATE 判败，终验不通过不转裁判', async () => {
+    // 静态 GWT（文本断言模式）：假界面复刻 G-07dbf2c2 案——div 假按钮（0 真控件）+
+    // 把验收断言话术印进页面。若无 L0，零功能壳子会因文本断言命中而全绿出厂。
+    setBrowserGwtDisabledForTests(true)
+    const home = mkdtempSync(join(tmpdir(), 'bloma-gate-fakeui-'))
+    process.env.PROMA_HOME = home
+    const FAKE_UI_PAGE = '<html><head><style>body{font-family:sans-serif}</style></head><body><h1>记账本</h1><p>记录收入与支出，支持每日流水查看</p><div class="proma-btn">记一笔</div><p>该功能项在产物中 可见 且 可交互 — 输入内容、点击按钮、查看结果</p></body></html>'
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+    syncDocuments({ request_id: 'req-sync', session_id: 'session-1', project_id: project.project_id, checkpoint: 'mvp_before_generation' })
+    writeFileSync(join(project.root_path, 'index.html'), FAKE_UI_PAGE, 'utf8')
+    const events: string[] = []
+    setProgrammingEventPublisher((event) => events.push(event.type))
+
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/html' })
+      res.end(FAKE_UI_PAGE)
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+
+    try {
+      const result = await runAgentLoopPostTesting({
+        request_id: 'req-flow',
+        session_id: 'session-1',
+        project_id: project.project_id,
+        mode: 'quick',
+        preview_url: `http://127.0.0.1:${port}`,
+        loop: { status: 'completed', turns: 8, finalText: '完成', toolCalls: [] },
+      })
+      // 无 query 不起修复轮 → 熔断让渡（blocked 卡先修再验入口 B 由单测覆盖）
+      expect(result.verdict).toBe('blocked')
+      expect(result.test_result.failure_summary.some((f) => f.scenario.startsWith('UI-GATE '))).toBe(true)
+      expect(findProject(project.project_id).current_stage).toBe('blocked_for_user_decision')
+      expect(findProject(project.project_id).blocked_action).toBe('test_repair')
+      // 未进安全扫描/裁判：门禁在 GWT 同轮掐断
+      expect(events.filter((type) => type === 'judge_result')).toHaveLength(0)
+    } finally {
+      server.close()
+    }
+  })
 })
