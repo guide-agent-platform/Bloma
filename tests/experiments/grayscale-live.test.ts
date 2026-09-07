@@ -6,6 +6,8 @@ import { anthropicMessagesQuery } from '../../main/orchestrator'
 import { createProject, recordSketchGenerated } from '../../main/project-service'
 import { runMvpTask, runAgentLoopPostTesting, setProgrammingEventPublisher } from '../../main/coding/programming-orchestrator'
 import { setSafeStorageAdapter } from '../../main/safe-storage'
+import { attributeRootCause, needsRefinement } from '../../main/experience/root-cause-attributor'
+import { readAllCards, updateCardAttribution } from '../../main/experience/experience-service'
 import type { AgentEvent } from '../../shared/types'
 
 /**
@@ -28,13 +30,14 @@ const BASE_URL = 'https://ws-xni6wtx9e245jevi.cn-beijing.maas.aliyuncs.com/apps/
 const MODEL = 'qwen3.8-flash'
 
 let home = ''
+let realKey = ''
 const events: AgentEvent[] = []
 const log = (...a: unknown[]) => console.log(`[gs ${new Date().toISOString().slice(11, 19)}]`, ...a)
 
 beforeAll(() => {
   const keyFile = process.env.GS_KEY_FILE
   if (!keyFile || !existsSync(keyFile)) throw new Error('GS_KEY_FILE 缺失：先跑 electron channel-key-reader 产 key')
-  const realKey = JSON.parse(readFileSync(keyFile, 'utf8'))['阿里云云工'].apiKey
+  realKey = JSON.parse(readFileSync(keyFile, 'utf8'))['阿里云云工'].apiKey
   home = mkdtempSync(join(tmpdir(), 'gs-headless-'))
   process.env.PROMA_HOME = home
   process.env.BLOMA_EXPERIENCE = '1'
@@ -94,6 +97,44 @@ function readSamples(): GsSample[] {
   }
 }
 
+/** 真 LLM 单轮补全（归因 seam 驱动）：收集 assistant 消息 text 块。 */
+async function llmOnce(prompt: string): Promise<string> {
+  let out = ''
+  const stream = anthropicMessagesQuery(prompt, {
+    env: { ANTHROPIC_BASE_URL: BASE_URL, ANTHROPIC_API_KEY: realKey, ANTHROPIC_MODEL: MODEL },
+    signal: new AbortController().signal,
+    sessionId: `gs-attr-${Date.now().toString(36)}`,
+  })
+  for await (const msg of stream) {
+    if (msg.type === 'assistant' && msg.message) {
+      for (const block of msg.message.content) {
+        if (block.type === 'text') out += block.text
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * V1.1 attribution-seam：对规则层拿不准（confidence 0 + stage unknown，灰度实测即
+ * outcome 类卡占 40%）的候选卡跑真实 LLM 归因——attributeRootCause 内部强制
+ * clamp ≤ LLM_ATTRIBUTION_MAX_CONFIDENCE(0.5)，reasoning 随 root_cause 落盘（
+ * updateCardAttribution 追加快照行）。开关 off / 等值幂等由服务层既有纪律保证。
+ */
+async function runAttributionPass(): Promise<number> {
+  let refinedCount = 0
+  for (const card of readAllCards()) {
+    if (!needsRefinement(card)) continue
+    try {
+      const refined = await attributeRootCause(card, { llmCall: llmOnce })
+      if (await updateCardAttribution(card.id, refined)) refinedCount++
+    } catch (e) {
+      log('归因失败（保留规则层结果不阻塞）:', card.tag, String(e).slice(0, 80))
+    }
+  }
+  return refinedCount
+}
+
 describe('灰度全样例（headless 真链）', () => {
   for (const sample of readSamples()) {
     it(
@@ -144,6 +185,8 @@ describe('灰度全样例（headless 真链）', () => {
             log('账本卡:', c.kind, c.status, c.tag, 'r=' + c.recurrence, '|', String(c.body?.symptom ?? c.body?.capability ?? '').slice(0, 80))
           }
         }
+        const attrN = await runAttributionPass()
+        log(`attribution-seam：本轮精化 ${attrN} 张 unknown 卡（clamp≤0.5，reasoning 落盘）`)
         log(`样本收束 name=${sample.name} verdict=${verdict} cards=${cardCount}`)
         if (process.env.GS_RESULT_MARK) {
           const { appendFileSync } = await import('node:fs')
