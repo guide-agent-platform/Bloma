@@ -69,7 +69,10 @@ describe('Sprint 2 prompt settings IPC', () => {
     if (!result.ok) throw new Error('expected read to succeed')
     expect(result.data.id).toBe('prd-system')
     expect(result.data.has_override).toBe(false)
+    // 2026-09-03 架构调整（需求工程链归向导群）后内置默认首句为「Bloma 向导 · 需求工程腿」；
+    // 旧断言锁的「需求分析师」已全域不存在（main/ 零命中），故改锁现名 + 锁定它确实不再回到旧称。
     expect(result.data.content).toContain('需求工程腿')
+    expect(result.data.content).not.toContain('需求分析师')
     // 提示词增强质量标准仍在（防回归单行简陋版）
     expect(result.data.content).toContain('2~4 条')
   })

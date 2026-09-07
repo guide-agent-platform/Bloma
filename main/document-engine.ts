@@ -206,6 +206,24 @@ export function writeSecurityScanDocument(projectId: string, markdown: string): 
 }
 
 /**
+ * L1 视觉审计报告写盘 + 清单登记（幂等，按 path 去重；对齐 security-scan 先例）。
+ * 使文档面板能看到双视觉互证全文（V1 详述 + V2 纠正），裁判摘要另经 testSummary 注入。
+ */
+export function writeVisionAuditDocument(projectId: string, markdown: string): void {
+  const project = findProject(projectId)
+  const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  const path = join(dir, 'vision-audit.md')
+  writeFileSync(path, markdown, 'utf8')
+  const previous = readManifest(dir)
+  if (previous.some((entry) => entry.path === path)) return
+  writeManifest(dir, [
+    ...previous,
+    { document_id: 'vision-audit', path, type: 'test_report', checkpoint: 'vision_audit', status: 'synced' },
+  ])
+}
+
+/**
  * P3 任务级三文档契约（2026-09-04）：plan 腿产出的技术合同写盘 + 清单登记。
  *
  * - 文件 documents/{project_id}/plan.md（markdown 人读全文由 loop-planner 渲染）；

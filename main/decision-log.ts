@@ -60,6 +60,10 @@ export type DecisionType =
   | 'repair_round_started'
   | 'repair_round_completed'
   | 'repair_budget_exhausted'
+  /** L0 产物 UI 完整性硬门禁（artifact-ui-gate，2026-09-07）：探针结果必录 */
+  | 'ui_gate'
+  /** L1 双视觉审计（vision-audit-gate，2026-09-07）：passed/flagged/unavailable/skipped 均必录，绝不静默 */
+  | 'vision_audit'
   | 'plan_generated'
   | 'plan_fallback'
   | 'module_rendered'

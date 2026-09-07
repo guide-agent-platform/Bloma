@@ -161,20 +161,57 @@ interface ChannelFormProps {
   saving: boolean
 }
 
-function modelsToText(models: ChannelModel[]): string {
-  return models.map((m) => m.name).join(', ')
-}
-
+/** 逗号分隔文本 → 模型条目（手动添加/历史数据兼容；按名称去重，默认启用） */
 function textToModels(provider: ProviderType, text: string): ChannelModel[] {
-  return text
+  const seen = new Set<string>()
+  const out: ChannelModel[] = []
+  text
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
-    .map((modelName, i) => ({
-      id: `${provider}-${modelName}-${i}`,
-      name: modelName,
-      enabled: true,
-    }))
+    .forEach((modelName, i) => {
+      if (seen.has(modelName)) return
+      seen.add(modelName)
+      out.push({ id: `${provider}-${modelName}-${i}`, name: modelName, enabled: true, source: 'manual' })
+    })
+  return out
+}
+
+/** 保证同一渠道内模型 id 唯一（勾选列表按 id 定位，撞车会一次改到两条） */
+function withUniqueId(list: ChannelModel[], candidate: ChannelModel): ChannelModel {
+  const taken = new Set(list.map((m) => m.id))
+  if (!taken.has(candidate.id)) return candidate
+  let n = 1
+  while (taken.has(`${candidate.id}#${n}`)) n += 1
+  return { ...candidate, id: `${candidate.id}#${n}` }
+}
+
+/**
+ * 把拉取到的模型并入选中列表：已有条目保持原启用状态与能力位，
+ * 新条目默认启用（按名称去重）。修复旧文本框实现「拉一次模型就把全部启用位重置为 true」。
+ */
+function mergeFetchedModels(existing: ChannelModel[], provider: ProviderType, fetched: ChannelModel[]): ChannelModel[] {
+  const byName = new Map(existing.map((m) => [m.name, m]))
+  let next = existing
+  const appended: ChannelModel[] = []
+  for (const m of fetched) {
+    const name = (m.name || m.id || '').trim()
+    if (!name || byName.has(name)) continue
+    const candidate: ChannelModel = {
+      id: m.id || `${provider}-${name}-f${appended.length}`,
+      name,
+      enabled: m.enabled !== false,
+      source: 'fetched',
+      ...(m.supports_tools === undefined ? {} : { supports_tools: m.supports_tools }),
+      ...(m.edit_format === undefined ? {} : { edit_format: m.edit_format }),
+    }
+    byName.set(name, candidate)
+    appended.push(candidate)
+  }
+  if (appended.length === 0) return next
+  next = [...existing]
+  for (const cand of appended) next.push(withUniqueId(next, cand))
+  return next
 }
 
 const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onSave, onUpdate, onCancel, saving }) => {
@@ -182,7 +219,10 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onS
   const [provider, setProvider] = useState<ProviderType>(initial?.provider ?? 'deepseek')
   const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? '')
   const [apiKey, setApiKey] = useState('')
-  const [modelsText, setModelsText] = useState(initial ? modelsToText(initial.models) : '')
+  // 模型点选列表状态（用户 2026-08-30 点名：逗号文本框在阿里云 245 模型下不可用）
+  const [modelList, setModelList] = useState<ChannelModel[]>(initial?.models ?? [])
+  const [modelFilter, setModelFilter] = useState('')
+  const [newModelName, setNewModelName] = useState('')
   const [testing, setTesting] = useState(false)
   const [testMsg, setTestMsg] = useState<{ ok: boolean; message: string } | null>(null)
   const [fetching, setFetching] = useState(false)
@@ -226,7 +266,7 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onS
           // 编辑模式 Key 留空时由 main 进程回退到已保存渠道密钥
           api_key: apiKey.trim(),
           channel_id: mode === 'edit' ? channelId : undefined,
-          model_id: textToModels(provider, modelsText)[0]?.name,
+          model_id: (modelList.find((m) => m.enabled) ?? modelList[0])?.name,
         },
       })
       .then((result) => {
@@ -235,7 +275,7 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onS
       })
       .catch(() => setTestMsg({ ok: false, message: '测试失败，请重试。' }))
       .finally(() => setTesting(false))
-  }, [mode, channelId, provider, resolvedBaseUrl, apiKey, modelsText])
+  }, [mode, channelId, provider, resolvedBaseUrl, apiKey, modelList])
 
   const handleFetchModels = useCallback(() => {
     const api = window.electronAPI
@@ -261,10 +301,8 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onS
             setFetchMsg({ ok: false, message: '没有拉取到模型，可手动填写' })
             return
           }
-          // 合并进模型文本：保留已有手填项，追加新拉取项（按名称去重）
-          const existing = new Set(modelsText.split(',').map((s) => s.trim()).filter(Boolean))
-          const fresh = models.map((m) => m.name).filter((n) => !existing.has(n))
-          setModelsText([...existing, ...fresh].join(', '))
+          // 合并进勾选列表：已有条目保留启用状态，新条目默认启用（按名称去重）
+          setModelList((prev) => mergeFetchedModels(prev, provider, models))
           setFetchMsg({ ok: true, message: `成功获取 ${models.length} 个模型：${models.map((m) => m.name).slice(0, 3).join('、')}${models.length > 3 ? '…' : ''}` })
         } else {
           setFetchMsg({ ok: false, message: result.error?.user_visible_message ?? '拉取失败，请重试。' })
@@ -272,13 +310,54 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onS
       })
       .catch(() => setFetchMsg({ ok: false, message: '拉取失败，请重试。' }))
       .finally(() => setFetching(false))
-  }, [mode, channelId, provider, resolvedBaseUrl, apiKey, modelsText])
+  }, [mode, channelId, provider, resolvedBaseUrl, apiKey])
+
+  // ===== 模型勾选列表：过滤 / 开关 / 全选清空 / 手动添加 / 移除 =====
+  const keyword = modelFilter.trim().toLowerCase()
+  const filteredModels = keyword
+    ? modelList.filter((m) => `${m.name} ${m.id}`.toLowerCase().includes(keyword))
+    : modelList
+  const enabledCount = modelList.filter((m) => m.enabled).length
+
+  const handleToggleModel = (id: string) => {
+    setModelList((prev) => prev.map((m) => (m.id === id ? { ...m, enabled: !m.enabled } : m)))
+  }
+
+  const handleRemoveModel = (id: string) => {
+    setModelList((prev) => prev.filter((m) => m.id !== id))
+  }
+
+  /** 全选/清空只作用于当前筛选结果（避免搜「qwen」时误动其余 200+ 模型） */
+  const applyEnabledToFiltered = (enabled: boolean) => {
+    const ids = new Set(filteredModels.map((m) => m.id))
+    setModelList((prev) => prev.map((m) => (ids.has(m.id) ? { ...m, enabled } : m)))
+  }
+
+  /** 手动添加：支持逗号批量；重名不新增，只把已有条目重新启用 */
+  const handleAddModel = () => {
+    const names = textToModels(provider, newModelName)
+    if (names.length === 0) return
+    setModelList((prev) => {
+      const known = new Set(prev.map((m) => m.name))
+      const reEnabled = new Set(names.filter((m) => known.has(m.name)).map((m) => m.name))
+      const added = names.filter((m) => !known.has(m.name))
+      const base = reEnabled.size > 0
+        ? prev.map((m) => (reEnabled.has(m.name) ? { ...m, enabled: true } : m))
+        : prev
+      if (added.length === 0) return base
+      const merged = [...base]
+      for (const cand of added) merged.push(withUniqueId(merged, cand))
+      return merged
+    })
+    setNewModelName('')
+  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!canSave) return
 
-    const models = textToModels(provider, modelsText)
+    // 整表保存（含未启用项），使取消勾选可持久化并允许日后重新启用
+    const models = modelList
 
     if (mode === 'create') {
       onSave({
@@ -321,6 +400,21 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onS
     outline: 'none',
     boxSizing: 'border-box',
   }
+
+  const miniBtnStyle = (disabled: boolean): React.CSSProperties => ({
+    height: 26,
+    padding: '0 var(--space-3)',
+    fontSize: 'var(--font-size-xs)',
+    fontWeight: 600,
+    color: disabled ? 'var(--color-text-muted)' : 'var(--color-text)',
+    background: 'var(--glass-bg-soft)',
+    border: '1px solid var(--color-border)',
+    borderRadius: 'var(--radius-sm)',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    fontFamily: 'inherit',
+    opacity: disabled ? 0.5 : 1,
+    flexShrink: 0,
+  })
 
   return (
     <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
@@ -376,18 +470,132 @@ const ChannelForm: React.FC<ChannelFormProps> = ({ mode, channelId, initial, onS
         </p>
       </div>
 
-      {/* 模型列表 */}
+      {/* 模型点选列表（对齐 proma ChannelModel 勾选列表：每项 enabled 开关 + 搜索过滤 + 全选/清空） */}
       <div>
-        <label style={labelStyle}>可用模型（逗号分隔）</label>
-        <input
-          style={inputStyle}
-          value={modelsText}
-          onChange={(e) => setModelsText(e.target.value)}
-          placeholder="例如：deepseek-chat, deepseek-reasoner"
-        />
-        {modelsText.trim().length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+          <label style={{ ...labelStyle, marginBottom: 0 }}>可用模型（勾选启用）</label>
+          <span
+            data-ai-id="channel-model-count"
+            style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}
+          >
+            已启用 {enabledCount} / 共 {modelList.length}
+          </span>
+        </div>
+
+        {modelList.length > 0 && (
+          <>
+            {/* 搜索过滤：阿里云等渠道 200+ 模型，不可过滤即不可用 */}
+            <input
+              style={{ ...inputStyle, height: 32, marginTop: 6, marginBottom: 6 }}
+              data-ai-id="channel-model-filter"
+              value={modelFilter}
+              onChange={(e) => setModelFilter(e.target.value)}
+              placeholder="搜索模型名…"
+              aria-label="搜索模型"
+            />
+            <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 6 }}>
+              <button
+                type="button"
+                data-ai-id="channel-model-select-all"
+                onClick={() => applyEnabledToFiltered(true)}
+                disabled={filteredModels.length === 0}
+                style={miniBtnStyle(filteredModels.length === 0)}
+              >
+                全选{keyword ? `（${filteredModels.length}）` : ''}
+              </button>
+              <button
+                type="button"
+                data-ai-id="channel-model-clear"
+                onClick={() => applyEnabledToFiltered(false)}
+                disabled={filteredModels.length === 0}
+                style={miniBtnStyle(filteredModels.length === 0)}
+              >
+                清空
+              </button>
+            </div>
+            <div
+              data-ai-id="channel-model-list"
+              style={{
+                maxHeight: 200,
+                overflowY: 'auto',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-sm)',
+                background: 'var(--white)',
+                padding: 'var(--space-1) 0',
+              }}
+            >
+              {filteredModels.length === 0 && (
+                <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', padding: 'var(--space-2) var(--space-3)', margin: 0 }}>
+                  没有匹配的模型，换个关键词
+                </p>
+              )}
+              {filteredModels.map((m) => (
+                <div
+                  key={m.id}
+                  data-ai-id={`channel-model-row-${m.name}`}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 'var(--space-2)',
+                    padding: '4px var(--space-3)',
+                    opacity: m.enabled ? 1 : 0.55,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    data-ai-id={`channel-model-${m.name}`}
+                    checked={m.enabled}
+                    onChange={() => handleToggleModel(m.id)}
+                    aria-label={`启用模型 ${m.name}`}
+                    style={{ width: 14, height: 14, accentColor: 'var(--color-quick)', cursor: 'pointer', flexShrink: 0 }}
+                  />
+                  <span style={{ flex: 1, fontSize: 'var(--font-size-sm)', color: 'var(--color-text)', wordBreak: 'break-all' }}>
+                    {m.name}
+                  </span>
+                  <button
+                    type="button"
+                    data-ai-id={`channel-model-remove-${m.name}`}
+                    onClick={() => handleRemoveModel(m.id)}
+                    disabled={saving}
+                    style={{ ...miniBtnStyle(false), color: 'var(--color-text-muted)' }}
+                  >
+                    移除
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* 手动添加：保留自由输入（支持逗号批量），兼容拉不到模型的渠道 */}
+        <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: modelList.length > 0 ? 6 : 8 }}>
+          <input
+            style={{ ...inputStyle, flex: 1 }}
+            data-ai-id="channel-model-add-input"
+            value={newModelName}
+            onChange={(e) => setNewModelName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                handleAddModel()
+              }
+            }}
+            placeholder="手动添加模型，逗号可一次填多个"
+            aria-label="手动添加模型"
+          />
+          <button
+            type="button"
+            data-ai-id="channel-model-add"
+            onClick={handleAddModel}
+            disabled={newModelName.trim().length === 0}
+            style={miniBtnStyle(newModelName.trim().length === 0)}
+          >
+            添加
+          </button>
+        </div>
+        {modelList.length === 0 && (
           <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: 4 }}>
-            当前 {modelsText.split(',').filter((s) => s.trim()).length} 个模型
+            还没有模型：点上方「拉取模型」自动填入，或在这里手动添加
           </p>
         )}
       </div>
@@ -530,12 +738,32 @@ interface RoleRoutingDraftRow {
 
 type RoleRoutingDraft = Partial<Record<AgentRoutingRole, RoleRoutingDraftRow>>
 
+/** 渠道列表模型摘要文案（与表单内「已启用 x / 共 y」同口径）：
+ *  Agent 实际只会用 enabled 模型（main getEnabledModels），旧文案把禁用项一并列出且不分口径，
+ *  在点选列表上线后会让用户误读「四个模型都可用」。 */
+function modelsSummary(channel: Channel | undefined): string {
+  const models = modelsOf(channel)
+  if (models.length === 0) return '未配置模型'
+  const enabled = models.filter((m) => m.enabled)
+  if (enabled.length === 0) return `未启用任何模型（共 ${models.length} 个，可在「编辑渠道」里勾选）`
+  const head = enabled.slice(0, 3).map((m) => m.name).join('、')
+  return `已启用 ${enabled.length}/${models.length}：${head}${enabled.length > 3 ? ' 等' : ''}`
+}
+
 function routingSelectableChannels(channels: Channel[]): Channel[] {
   return channels.filter((channel) => isAnthropicProtocolProvider(channel.provider_type))
 }
 
+/**
+ * 渠道模型列表取位防御：channels.json 允许用户手改/旧版本字段缺失（类型上必填但运行时不可信），
+ * 与 main/channel-manager.ts:150 getEnabledModels 的 `(channel.models ?? [])` 口径保持一致。
+ */
+function modelsOf(channel: Channel | undefined): ChannelModel[] {
+  return channel?.models ?? []
+}
+
 function previewModelName(channel: Channel | undefined): string | undefined {
-  return channel?.models.find((model) => model.enabled)?.name
+  return modelsOf(channel).find((model) => model.enabled)?.name
 }
 
 const ROLE_ORDER: AgentRoutingRole[] = ['guide', 'programming', 'judge']
@@ -1238,9 +1466,7 @@ export const ChannelSettingsPage: React.FC = () => {
                     </span>
                   </div>
                   <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', margin: 0 }}>
-                    {channel.models.length > 0
-                      ? `${channel.models.length} 个模型：${channel.models.map((m) => m.name).join('、')}`
-                      : '未配置模型'}
+                    {modelsSummary(channel)}
                     {channel.base_url && ` · ${channel.base_url}`}
                   </p>
                 </div>
@@ -1453,6 +1679,9 @@ export const ChannelSettingsPage: React.FC = () => {
               </button>
             </div>
             <ChannelForm
+              // 切换编辑目标必须重挂载：useState(initial) 只在挂载时取值，无 key 时 React 复用实例
+              // 导致名称/URL/模型列表残留上一渠道，且拉取结果会 merge 进旧列表随保存写坏新渠道（目检缺陷 #1）
+              key={editingChannel?.id ?? 'create'}
               mode={editingChannel ? 'edit' : 'create'}
               channelId={editingChannel?.id}
               initial={editingChannel ? {
