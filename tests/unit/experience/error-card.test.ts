@@ -43,9 +43,16 @@ function gwt(n = 1): GwtTestResult {
   }
 }
 
+const originalExp = process.env.BLOMA_EXPERIENCE
 beforeEach(() => {
+  // 门面已加 C-2 门控（off=零副作用）：spy 断言需要开关开；mock 保证不写真账本
+  process.env.BLOMA_EXPERIENCE = '1'
   vi.mocked(registerCandidateCard).mockClear()
   vi.mocked(appendProjectLearning).mockClear()
+})
+afterEach(() => {
+  if (originalExp === undefined) delete process.env.BLOMA_EXPERIENCE
+  else process.env.BLOMA_EXPERIENCE = originalExp
 })
 
 describe('error-card：GWT 组装器', () => {
@@ -120,6 +127,14 @@ describe('error-card：build-gate / semantic / abnormal / judge 组装器', () =
 })
 
 describe('error-card：recordFailureCards 门面', () => {
+  it('C-2 契约：BLOMA_EXPERIENCE off = 零副作用（不注册、不镜像）', () => {
+    delete process.env.BLOMA_EXPERIENCE
+    recordFailureCards(ctx, { testResult: gwt(2) })
+    expect(registerCandidateCard).not.toHaveBeenCalled()
+    expect(appendProjectLearning).not.toHaveBeenCalled()
+    process.env.BLOMA_EXPERIENCE = '1' // 还原给后续用例（beforeEach 也会重设）
+  })
+
   it('批量注册 + learnings 镜像 error_pattern', async () => {
     recordFailureCards(ctx, { testResult: gwt(2), abnormal: { outcomeType: 'timeout', description: 'turn_limit' } })
     await new Promise((r) => setImmediate(r))
