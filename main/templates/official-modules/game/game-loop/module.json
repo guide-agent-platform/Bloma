@@ -1,0 +1,12 @@
+{
+  "slug": "game-loop",
+  "name": "游戏主循环",
+  "categories": ["game"],
+  "version": 1,
+  "summary": "requestAnimationFrame 主循环：update/render 分离、delta 时间、暂停/恢复/销毁",
+  "whenToUse": "任何基于 canvas 的实时游戏（动作/射击/平台/塔防），需要稳定的帧循环与暂停。",
+  "whenNotToUse": "无实时动画的静态页面或仅事件驱动的小游戏——不必上主循环。",
+  "files": [
+    { "path": "game-loop.js", "role": "ESM 源码：createGameLoop({ update, render }) 返回 start/pause/resume/stop/isRunning" }
+  ]
+}

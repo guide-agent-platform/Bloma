@@ -19,18 +19,23 @@ import {
   type TemporaryPromaHome,
 } from '../support/test-environment'
 
-vi.mock('../../../main/channel-manager', () => ({
-  getChannelByIdRaw: () => ({
-    id: 'test-channel',
-    name: 'Test',
-    provider_type: 'anthropic',
-    base_url: 'https://api.anthropic.com',
-    api_key: 'encrypted-test-key',
-    models: [{ id: 'claude-sonnet-4-6', name: 'Claude', enabled: true }],
-    enabled: true,
-  }),
-  decryptApiKey: () => 'test-key-from-channel',
-}))
+vi.mock('../../../main/channel-manager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/channel-manager')>()
+  return {
+    ...actual,
+    getChannelByIdRaw: () => ({
+      id: 'test-channel',
+      name: 'Test',
+      provider_type: 'anthropic',
+      base_url: 'https://api.anthropic.com',
+      api_key: 'encrypted-test-key',
+      models: [{ id: 'claude-sonnet-4-6', name: 'Claude', enabled: true }],
+      enabled: true,
+    }),
+    decryptApiKey: () => 'test-key-from-channel',
+    getFirstEnabledChannel: () => undefined,
+  }
+})
 
 describe('Sprint 1 sketch delivery acceptance', () => {
   let environment: TemporaryPromaHome | undefined
@@ -51,7 +56,7 @@ describe('Sprint 1 sketch delivery acceptance', () => {
     environment = undefined
   })
 
-  it('[S1-SKETCH-006] 草图应是含内联 CSS 与 JS 的单文件可交互 HTML', () => {
+  it('[S1-SKETCH-006] 草图应是含内联 CSS 的无交互纯外观单文件 HTML', () => {
     environment = useTemporaryPromaHome('bloma-role-c-sketch-file-')
     const project = createProject({
       request_id: 'role-c-sketch-project',
@@ -71,8 +76,13 @@ describe('Sprint 1 sketch delivery acceptance', () => {
     expect(generated.files).toHaveLength(1)
     expect(generated.files[0]?.path).toBe('index.html')
     expect(html).toMatch(/<style>[\s\S]+<\/style>/)
-    expect(html).toMatch(/<script>[\s\S]+<\/script>/)
-    expect(html).toMatch(/addEventListener|onclick=|classList\./)
+    // 无交互：不产出 <script>、无事件绑定，整页 pointer-events 禁用，控件只看不动
+    expect(html).not.toMatch(/<script>/)
+    expect(html).not.toMatch(/addEventListener|onclick=|classList\./)
+    expect(html).toContain('pointer-events: none')
+    // 外观界面：含产品外壳（顶栏 + hero + 功能区块），且区块数受 max_pages 约束
+    expect(html).toContain('topbar')
+    expect(html).toContain('hero')
     expect((html.match(/data-page=/g) ?? []).length).toBeGreaterThanOrEqual(1)
     expect((html.match(/data-page=/g) ?? []).length).toBeLessThanOrEqual(3)
   })
@@ -189,6 +199,17 @@ describe('Sprint 1 sketch delivery acceptance', () => {
     ]))
     expect(lines.every((line) => line.privacy_level === 'research_safe')).toBe(true)
     expect(JSON.stringify(lines)).not.toContain(secretRequirement)
+
+    // FIRT（research-plan §4.1）：首个可交互草图耗时 = sketch_generated.created_at - project_created.created_at。
+    // 实现上由 programming-orchestrator 在 sketch_generated payload 中写入 duration_ms。
+    const sketchEvent = lines.find((line) => line.event_type === 'sketch_generated')
+    expect(sketchEvent).toBeDefined()
+    expect(sketchEvent?.payload.duration_ms).toBeDefined()
+    expect(typeof sketchEvent?.payload.duration_ms).toBe('number')
+    expect(sketchEvent?.payload.duration_ms).toBeGreaterThanOrEqual(0)
+    // Sprint 1 验收标准：FIRT 中位数 < 60s；单测模板路径极快，断言单样本阈值。
+    expect(sketchEvent?.payload.duration_ms).toBeLessThan(60_000)
+    expect(sketchEvent?.payload.page_count).toBeDefined()
   })
 
   it('[S1-SANDBOX-001] 静态预览不得读取项目根目录之外的文件', async () => {

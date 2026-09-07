@@ -1,9 +1,13 @@
 import React from 'react'
-import { useAtomValue } from 'jotai'
+import { atom, useAtom, useAtomValue } from 'jotai'
 import { CardOptions } from './CardOptions'
 import type { CardOption } from './CardOptions'
 import { WaitingFeedback } from './WaitingFeedback'
-import { ArrowUp, MessageSquare } from './icons'
+import { ToolCallRow, deriveToolCallRecords, safeJsonPreview } from './ToolCallBlock'
+import { DelegationRow } from './DelegationFeed'
+import { ProcessBlockGroup, type ProcessItem } from './ProcessBlockGroup'
+import { Markdown } from './Markdown'
+import { ArrowUp, MessageSquare, IconAlertTriangle, IconStop } from './icons'
 import {
   activeAgentSessionIdAtom,
   agentMessagesFamily,
@@ -11,16 +15,26 @@ import {
   hasActiveStreamAtom,
   globalUserErrorAtom,
   projectModeAtom,
+  workflowStageAtom,
+  sessionUsageFamily,
+  delegationsFamily,
 } from './atoms'
-import type { AgentMessage, ProjectMode } from './atoms'
+import type { AgentEvent, AgentMessage, AgentStreamState, PastedImageRef, ProjectMode } from './atoms'
+import { collapseRepetitiveText } from '../stream-collapse'
+import { hasUsableChannelsAtom, chatInputDraftAtom } from './atoms-sprint2'
+import { extractPastedImages, extFromMime, toBase64DataUrl } from '../lib/paste-extract'
 
 export interface ChatPanelProps {
   /** 向导 Agent 发出的卡片选项（由上层从 AgentEvent 中解析） */
   cardOptions?: CardOption[]
+  /** 决策卡标题（U7：让渡偏差描述 / 澄清方向等） */
+  decisionTitle?: string
+  /** 决策卡正文（2026-08-29：审查卡的具体问题清单） */
+  decisionBody?: string
   /** 用户选择卡片选项 */
   onCardOptionSelect?: (option: CardOption) => void
-  /** 用户提交文本消息 */
-  onSendMessage?: (content: string) => void
+  /** 用户提交文本消息；粘贴图片时附带短引用数组（clipboard-paste P1，2026-08-29） */
+  onSendMessage?: (content: string, images?: PastedImageRef[]) => void
   /** 是否正在等待 Agent 响应 */
   isWaiting?: boolean
   /** 等待开始时间（用于计算已等待秒数） */
@@ -33,6 +47,29 @@ export interface ChatPanelProps {
   onViewPartial?: () => void
   /** 回访恢复：加载历史消息期间显示骨架占位（sitemap §2.6） */
   isHistoryLoading?: boolean
+  /** 停止当前生成（U4：Agent 流式生成中点击停止） */
+  onStopGeneration?: () => void
+  /** 零渠道引导卡直达按钮（QW#2 二期 P1-①②）：切到设置页，宁可给按钮不给说明书 */
+  onOpenSettings?: () => void
+}
+
+// 模块级常量：当 activeAgentSessionIdAtom 为 null 时的稳定 fallback atom，
+// 避免在 atomFamily 中创建不可回收的 '__unused__' key。
+const nullMessagesFallback = atom<AgentMessage[]>([])
+const nullStreamFallback = atom<AgentStreamState>({
+  running: false,
+  events: [],
+  content: '',
+})
+
+/** 生成类阶段 → WaitingFeedback 的「正在做什么」话术（按权威阶段展示，不再一刀切「生成可运行版本」）。 */
+const STAGE_ACTION_LABELS: Record<string, string> = {
+  generating_sketch: '生成草图',
+  generating_mvp: '生成可运行版本',
+  testing: '测试生成的版本',
+  judge_review: '审查生成的版本',
+  repairing: '自动修复问题',
+  iterating: '修改应用',
 }
 
 const glassTile: React.CSSProperties = {
@@ -50,6 +87,8 @@ const glassTile: React.CSSProperties = {
 
 export const ChatPanel: React.FC<ChatPanelProps> = ({
   cardOptions,
+  decisionTitle,
+  decisionBody,
   onCardOptionSelect,
   onSendMessage,
   isWaiting = false,
@@ -58,43 +97,149 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   onContinueWaiting,
   onViewPartial,
   isHistoryLoading = false,
+  onStopGeneration,
+  onOpenSettings,
 }) => {
   const activeSessionId = useAtomValue(activeAgentSessionIdAtom)
+  const sessionUsage = useAtomValue(sessionUsageFamily(activeSessionId ?? ''))
   const mode = useAtomValue(projectModeAtom)
   const hasActiveStream = useAtomValue(hasActiveStreamAtom)
   const globalError = useAtomValue(globalUserErrorAtom)
+  const workflowStage = useAtomValue(workflowStageAtom)
 
-  const messagesAtom = activeSessionId ? agentMessagesFamily(activeSessionId) : null
-  const messages = useAtomValue(messagesAtom ?? agentMessagesFamily('__unused__'))
-  const streamStateAtom = activeSessionId ? agentStreamStateFamily(activeSessionId) : null
-  const streamState = useAtomValue(streamStateAtom ?? agentStreamStateFamily('__unused__'))
+  /** 忙碌 = 外部等待或本地流式运行中。输入框保持可编辑（草稿），只禁发，不再整体锁死。 */
+  const busy = isWaiting || hasActiveStream
 
-  const [inputValue, setInputValue] = React.useState('')
+  const messages = useAtomValue(
+    activeSessionId ? agentMessagesFamily(activeSessionId) : nullMessagesFallback,
+  )
+  const streamState = useAtomValue(
+    activeSessionId ? agentStreamStateFamily(activeSessionId) : nullStreamFallback,
+  )
+
+  // WC-P2（2026-08-29）：草稿 atom 化——零渠道提交被拦截直达设置页后，返回工作区输入仍在
+  const [inputValue, setInputValue] = useAtom(chatInputDraftAtom)
+  const hasChannels = useAtomValue(hasUsableChannelsAtom)
+  // clipboard-paste P1（2026-08-29）：待发送粘贴图（短引用 + 内存 dataURL 预览）与降级错误
+  const [pendingImages, setPendingImages] = React.useState<Array<PastedImageRef & { dataUrl: string }>>([])
+  const [pasteError, setPasteError] = React.useState<string | null>(null)
   const messagesEndRef = React.useRef<HTMLDivElement>(null)
   const inputRef = React.useRef<HTMLTextAreaElement>(null)
 
   const streamingContent = hasActiveStream && streamState ? streamState.content : ''
 
+  // 历史回放关联表：tool_use_id → 工具名（loop 落盘的 user 轮 tool_result 只有 id，回放时回填名字）
+  const toolNamesById = React.useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const message of messages) {
+      for (const block of message.content) {
+        if (block.type === 'tool_use' && block.id && block.name) map[block.id] = block.name
+      }
+    }
+    return map
+  }, [messages])
+
   React.useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, streamingContent, cardOptions])
 
+  // 本地流计时兜底：App 未传 waitStartTime 时以流启动时刻起算，保证 WaitingFeedback
+  // 三级递进在纯流式等待下也生效（此前挂在恒 false 的 isWaiting 上，组件从未显示过）。
+  const [streamStart, setStreamStart] = React.useState<number | undefined>()
+  React.useEffect(() => {
+    if (hasActiveStream) setStreamStart((previous) => previous ?? Date.now())
+    else setStreamStart(undefined)
+  }, [hasActiveStream])
+  const effectiveWaitStart = waitStartTime ?? streamStart
+
   const [elapsed, setElapsed] = React.useState(0)
   React.useEffect(() => {
-    if (!isWaiting || !waitStartTime) {
+    if (!busy || !effectiveWaitStart) {
       setElapsed(0)
       return
     }
     const timer = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - waitStartTime) / 1000))
+      setElapsed(Math.floor((Date.now() - effectiveWaitStart) / 1000))
     }, 1000)
     return () => clearInterval(timer)
-  }, [isWaiting, waitStartTime])
+  }, [busy, effectiveWaitStart])
+
+  const busyActionLabel = STAGE_ACTION_LABELS[workflowStage] ?? waitActionLabel
+
+  // message-queue UI 收尾（ux-chatpanel-review P1-①，2026-08-28）：busy 时提交的消息由后端
+  // 排队兜底，但派发前不在 messages 流里——本地回显灰化「排队中」气泡，确认消息没丢。
+  // 出列以「消息真实进流」为派发完成信号；不用 busy→false 兜底清空——run 间隙抖动会
+  // 误清尚未派发的气泡（多厂商审查 aliyun fail 点，2026-08-28 加固）。
+  const [pendingQueue, setPendingQueue] = React.useState<string[]>([])
+  const dispatchedTexts = React.useMemo(() => {
+    const set = new Set<string>()
+    for (const message of messages) {
+      if (message.role !== 'user') continue
+      const text = message.content
+        .filter((block) => block.type === 'text')
+        .map((block) => block.text)
+        .join('\n')
+      if (text) set.add(text)
+    }
+    return set
+  }, [messages])
+  React.useEffect(() => {
+    if (dispatchedTexts.size === 0) return
+    setPendingQueue((queue) => queue.filter((t) => !dispatchedTexts.has(t)))
+  }, [dispatchedTexts])
+
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    // clipboard-paste P1（2026-08-29）：粘贴图提取→IPC 存盘→chip；纯文本零干扰（不 preventDefault）
+    const result = await extractPastedImages(e.clipboardData?.items ?? null)
+    if (!result.shouldPrevent) return
+    e.preventDefault()
+    if (result.rejected.length > 0) {
+      setPasteError(result.rejected[0].reason)
+    }
+    const api = window.electronAPI
+    for (const image of result.images) {
+      try {
+        const res = await api?.pastedImage?.save({
+          request_id: crypto.randomUUID(),
+          session_id: activeSessionId ?? 'unattached',
+          base64: image.base64,
+          ext: extFromMime(image.media_type),
+        })
+        if (res?.ok && res.data) {
+          setPendingImages((prev) => [
+            ...prev,
+            { imageId: res.data.imageId, media_type: res.data.media_type, dataUrl: toBase64DataUrl(image.base64, image.media_type) },
+          ])
+        } else {
+          setPasteError(res && !res.ok ? '图片保存失败，已改用纯文本发送' : '图片保存失败，已改用纯文本发送')
+        }
+      } catch {
+        setPasteError('图片保存失败，已改用纯文本发送')
+      }
+    }
+  }
 
   const handleSubmit = () => {
     const trimmed = inputValue.trim()
-    if (!trimmed || isWaiting) return
-    onSendMessage?.(trimmed)
+    if (!trimmed) return
+    // WC-P2（2026-08-29）：零渠道提交不裸报错——拦截发送（无渠道 run 必失败），
+    // 直达设置页；草稿保留（atom 化），连接成功返回工作区后输入仍在。
+    if (hasChannels === false) {
+      onOpenSettings?.()
+      return
+    }
+    // message-queue（2026-08-27）：生成期间也允许提交——后端排队兜底（queued:true），
+    // 消息不丢、run 完成后自动派发。busy 时发送按钮区被停止按钮替换，靠 Enter 提交。
+    if (busy) setPendingQueue((q) => [...q, trimmed])
+    // clipboard-paste P1：带图时第二参传短引用数组；无图保持单参调用形态（不传 undefined 占位，
+    // 旧 mock/子类对签名兼容性零感知）。发送后清 chip（纯文本路径零变化）。
+    const imageRefs: PastedImageRef[] | undefined = pendingImages.length
+      ? pendingImages.map(({ imageId, media_type }) => ({ imageId, media_type }))
+      : undefined
+    if (imageRefs) onSendMessage?.(trimmed, imageRefs)
+    else onSendMessage?.(trimmed)
+    setPendingImages([])
+    setPasteError(null)
     setInputValue('')
   }
 
@@ -105,7 +250,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     }
   }
 
-  const canSend = !isWaiting && inputValue.trim().length > 0
+  const canSend = !busy && inputValue.trim().length > 0
 
   return (
     <div data-ai-id="chat-panel" style={glassTile}>
@@ -195,8 +340,55 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             )}
 
             {messages.map((msg, i) => (
-              <MessageBubble key={i} message={msg} mode={mode} />
+              <MessageBubble key={i} message={msg} mode={mode} toolNamesById={toolNamesById} onOpenSettings={onOpenSettings} />
             ))}
+
+            {/* message-queue UI 收尾（P1-①）：排队中的消息灰化回显，确认不丢 */}
+            {pendingQueue.map((text, i) => (
+              <div
+                key={`queued-${i}-${text}`}
+                data-ai-id="queued-message"
+                style={{
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  alignItems: 'center',
+                  gap: 'var(--space-2)',
+                  opacity: 0.55,
+                  padding: '0 var(--space-2)',
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 'var(--font-size-xs)',
+                    color: 'var(--color-text-muted)',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: '999px',
+                    padding: '0 var(--space-2)',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  排队中
+                </span>
+                <span
+                  style={{
+                    maxWidth: '70%',
+                    background: 'var(--color-surface-muted, rgba(127,127,127,0.12))',
+                    borderRadius: 'var(--radius-md, 10px)',
+                    padding: 'var(--space-2) var(--space-3)',
+                    fontSize: 'var(--font-size-sm)',
+                    color: 'var(--color-text)',
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  {text}
+                </span>
+              </div>
+            ))}
+
+            {/* Agent Loop 执行过程折叠组（工具调用 + 委派，流式展开/结束自动收起） */}
+            {streamState && activeSessionId && (
+              <LiveProcessGroup events={streamState.events} sessionId={activeSessionId} isStreaming={hasActiveStream} />
+            )}
 
             {streamingContent && (
               <MessageBubble
@@ -206,10 +398,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               />
             )}
 
-            {isWaiting && elapsed > 5 && (
+            {busy && elapsed > 5 && (
               <WaitingFeedback
                 elapsedSeconds={elapsed}
-                actionLabel={waitActionLabel}
+                actionLabel={busyActionLabel}
                 onContinueWaiting={onContinueWaiting}
                 onViewPartial={onViewPartial}
               />
@@ -232,7 +424,41 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             )}
 
             {cardOptions && cardOptions.length > 0 && onCardOptionSelect && (
-              <CardOptions options={cardOptions} onSelect={onCardOptionSelect} disabled={isWaiting} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                {decisionTitle && (
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: 'var(--font-size-xs)',
+                      lineHeight: 1.5,
+                      color: 'var(--color-text-muted)',
+                    }}
+                  >
+                    {decisionTitle}
+                  </p>
+                )}
+                {decisionBody && (
+                  <div
+                    data-ai-id="decision-card-body"
+                    style={{
+                      margin: 0,
+                      padding: '8px 12px',
+                      fontSize: 'var(--font-size-xs)',
+                      lineHeight: 1.6,
+                      color: 'var(--color-text-secondary, #5b6472)',
+                      background: 'var(--color-bg-subtle, #f6f8fb)',
+                      borderRadius: 'var(--radius-sm)',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      maxHeight: 180,
+                      overflowY: 'auto',
+                    }}
+                  >
+                    {decisionBody}
+                  </div>
+                )}
+                <CardOptions options={cardOptions} onSelect={onCardOptionSelect} disabled={busy} />
+              </div>
             )}
           </>
         )}
@@ -242,6 +468,52 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
       {/* 输入区（胶囊） */}
       <div style={{ padding: 'var(--space-3) var(--space-4)', flexShrink: 0, borderTop: '1px solid var(--color-border)' }}>
+        {/* clipboard-paste P1（2026-08-29）：待发送图片 chip 行——缩略预览（内存 dataURL）+ 移除；存图失败降级提示 */}
+        {(pendingImages.length > 0 || pasteError) && (
+          <div
+            style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', alignItems: 'center', marginBottom: 'var(--space-2)' }}
+          >
+            {pendingImages.map((img, i) => (
+              <span
+                key={img.imageId}
+                data-ai-id="paste-image-chip"
+                title={`图片 ${i + 1}（${img.media_type}）`}
+                style={{
+                  position: 'relative',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 'var(--space-1)',
+                  padding: 'var(--space-1) var(--space-2) var(--space-1) var(--space-1)',
+                  borderRadius: 'var(--radius-full)',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--glass-bg-soft)',
+                  fontSize: 'var(--font-size-xs)',
+                  color: 'var(--color-text-muted)',
+                }}
+              >
+                <img
+                  data-ai-id="paste-image-thumb"
+                  src={img.dataUrl}
+                  alt={`粘贴图片 ${i + 1}`}
+                  style={{ width: 24, height: 24, borderRadius: 'var(--radius-full)', objectFit: 'cover' }}
+                />
+                图片{i + 1}
+                <button
+                  onClick={() => setPendingImages((prev) => prev.filter((p) => p.imageId !== img.imageId))}
+                  aria-label={`移除图片 ${i + 1}`}
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', padding: '0 2px' }}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            {pasteError && (
+              <span data-ai-id="paste-image-error" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-danger)' }}>
+                {pasteError}
+              </span>
+            )}
+          </div>
+        )}
         <div
           style={{
             display: 'flex',
@@ -259,8 +531,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={isWaiting}
-            placeholder={isWaiting ? '正在处理中…' : '描述你的想法…'}
+            onPaste={handlePaste}
+            placeholder={
+              busy
+                ? '生成中…可以继续输入，会自动排队处理'
+                : hasChannels === false
+                  ? '还没有连接 AI 模型——发送任意内容，直达设置页完成连接'
+                  : '描述你的想法…'
+            }
             rows={1}
             style={{
               flex: 1,
@@ -277,36 +555,168 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               maxHeight: 120,
             }}
           />
-          <button
-            onClick={handleSubmit}
-            disabled={!canSend}
-            aria-label="发送消息"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 36,
-              height: 36,
-              borderRadius: 'var(--radius-full)',
-              flexShrink: 0,
-              background: canSend
-                ? 'linear-gradient(135deg, var(--color-quick), var(--color-quick-bright))'
-                : 'var(--gray-200)',
-              color: canSend ? 'var(--white)' : 'var(--gray-400)',
-              boxShadow: canSend ? '0 4px 12px -2px rgba(124,58,237,0.45)' : 'none',
-              transition: 'all var(--transition-fast)',
-              cursor: canSend ? 'pointer' : 'not-allowed',
-            }}
-          >
-            <ArrowUp size={17} />
-          </button>
+          {hasActiveStream ? (
+            <button
+              onClick={onStopGeneration}
+              aria-label="停止生成"
+              title="停止生成"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 36,
+                height: 36,
+                borderRadius: 'var(--radius-full)',
+                flexShrink: 0,
+                background: 'var(--color-danger)',
+                color: 'var(--white)',
+                boxShadow: '0 4px 12px -2px rgba(220,38,38,0.45)',
+                transition: 'all var(--transition-fast)',
+                cursor: 'pointer',
+              }}
+            >
+              <IconStop size={16} />
+            </button>
+          ) : (
+            <button
+              onClick={handleSubmit}
+              disabled={!canSend}
+              aria-label="发送消息"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 36,
+                height: 36,
+                borderRadius: 'var(--radius-full)',
+                flexShrink: 0,
+                background: canSend
+                  ? 'linear-gradient(135deg, var(--color-quick), var(--color-quick-bright))'
+                  : 'var(--gray-200)',
+                color: canSend ? 'var(--white)' : 'var(--gray-400)',
+                boxShadow: canSend ? '0 4px 12px -2px rgba(124,58,237,0.45)' : 'none',
+                transition: 'all var(--transition-fast)',
+                cursor: canSend ? 'pointer' : 'not-allowed',
+              }}
+            >
+              <ArrowUp size={17} />
+            </button>
+          )}
         </div>
         <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-2)', textAlign: 'center' }}>
           按 Enter 发送，按 Shift + Enter 换行
         </p>
+        {sessionUsage && (
+          <p
+            data-ai-id="session-usage-hint"
+            style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textAlign: 'center', margin: '0 auto' }}
+          >
+            {`本会话已用 ≈${(sessionUsage.inputTokens + sessionUsage.outputTokens).toLocaleString()} tokens${sessionUsage.turnsWithUsage === 0 ? '（估算）' : ''}`}
+          </p>
+        )}
       </div>
     </div>
   )
+}
+
+/* =========================================================================
+   执行过程折叠组 — 辅助组件与归一化
+   ========================================================================= */
+
+/** 旁白行：折叠组内的过程说明文本（弱化显示）。 */
+const NarrationRow: React.FC<{ text: string }> = ({ text }) => (
+  <div
+    data-ai-id="process-narration"
+    style={{
+      fontSize: 'var(--font-size-xs)',
+      lineHeight: 1.6,
+      color: 'var(--color-text-muted)',
+      whiteSpace: 'pre-wrap',
+      wordBreak: 'break-word',
+    }}
+  >
+    {collapseRepetitiveText(text)}
+  </div>
+)
+
+/** 实时流：从事件流（工具） + 委派视图归约出过程项。 */
+const LiveProcessGroup: React.FC<{ events: AgentEvent[]; sessionId: string; isStreaming: boolean }> = ({ events, sessionId, isStreaming }) => {
+  const delegations = useAtomValue(delegationsFamily(sessionId))
+  const items = React.useMemo<ProcessItem[]>(() => {
+    const toolItems: ProcessItem[] = deriveToolCallRecords(events).map((record) => ({
+      kind: 'tool',
+      key: record.key,
+      tool: record.tool,
+      inputSummary: record.inputSummary,
+      outputSummary: record.outputSummary,
+      status: record.status,
+      durationMs: record.durationMs,
+    }))
+    const delegationItems: ProcessItem[] = delegations.map((item) => ({
+      kind: 'delegation',
+      key: item.delegation_id,
+      item,
+    }))
+    return [...toolItems, ...delegationItems]
+  }, [events, delegations])
+
+  if (items.length === 0) return null
+  return (
+    <ProcessBlockGroup
+      items={items}
+      isStreaming={isStreaming}
+      renderItem={(item) =>
+        item.kind === 'tool' ? (
+          <ToolCallRow
+            tool={item.tool}
+            inputSummary={item.inputSummary}
+            outputSummary={item.outputSummary}
+            status={item.status}
+            durationMs={item.durationMs}
+          />
+        ) : item.kind === 'delegation' ? (
+          <DelegationRow item={item.item} />
+        ) : (
+          <NarrationRow text={item.text} />
+        )
+      }
+    />
+  )
+}
+
+/** 历史回放：把单条消息的 tool_use / tool_result / 旁白 text 归约成过程项。 */
+function deriveMessageProcessItems(message: AgentMessage, toolNamesById: Record<string, string>): ProcessItem[] {
+  const items: ProcessItem[] = []
+  const narration = message.content
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text ?? '')
+    .join('')
+  if (narration.trim()) {
+    items.push({ kind: 'narration', key: 'narration', text: narration })
+  }
+  message.content.forEach((block, index) => {
+    if (block.type === 'tool_use') {
+      items.push({
+        kind: 'tool',
+        key: block.id ?? `tool-${index}`,
+        tool: block.name ?? '',
+        inputSummary: safeJsonPreview(block.input),
+        status: 'ok',
+        replay: true,
+      })
+    }
+    if (block.type === 'tool_result') {
+      items.push({
+        kind: 'tool',
+        key: block.tool_use_id ?? `result-${index}`,
+        tool: toolNamesById[block.tool_use_id ?? ''] ?? 'tool_result',
+        inputSummary: typeof block.content === 'string' ? block.content : '',
+        status: block.is_error ? 'error' : 'ok',
+        replay: true,
+      })
+    }
+  })
+  return items
 }
 
 /* =========================================================================
@@ -317,6 +727,10 @@ interface MessageBubbleProps {
   message: AgentMessage
   mode: ProjectMode | null
   isStreaming?: boolean
+  /** tool_use_id → 工具名（回放 tool_result 行用） */
+  toolNamesById?: Record<string, string>
+  /** 零渠道引导卡直达按钮回调（QW#2 二期） */
+  onOpenSettings?: () => void
 }
 
 const userBubbleBg = (mode: ProjectMode | null): string =>
@@ -329,18 +743,131 @@ const userBubbleShadow = (mode: ProjectMode | null): string =>
     ? '0 4px 12px -3px rgba(14,116,144,0.35)'
     : '0 4px 12px -3px rgba(124,58,237,0.35)'
 
-const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreaming = false }) => {
+const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreaming = false, toolNamesById, onOpenSettings }) => {
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
 
-  const text = message.content
+  const rawText = message.content
     .filter((block) => block.type === 'text')
     .map((block) => block.text ?? '')
     .join('')
+  // 退行重复折叠（2026-09-04「查。」墙案）：显示层折叠，落盘/回放数据保留原始；
+  // system 前缀行（[decision]/[queue-dropped] 等按前缀分流）不折叠
+  const text = isSystem ? rawText : collapseRepetitiveText(rawText)
 
-  if (!text && !isStreaming) return null
+  // Agent Loop 落盘的轮次：assistant 轮带 tool_use、user 轮只带 tool_result（无文本）
+  const hasToolBlocks = message.content.some((block) => block.type === 'tool_use' || block.type === 'tool_result')
+  // clipboard-paste P1（2026-08-29）：粘贴图片块——气泡内 chip 标注（缩略图回放 P2）
+  const imageBlocks = message.content.filter((block) => block.type === 'image')
+
+  if (!text && !hasToolBlocks && imageBlocks.length === 0 && !isStreaming) return null
+
+  // 含工具块的消息（assistant 的 tool_use / user 的 tool_result + 旁白）：
+  // 折叠进「执行过程」组，不占正文气泡（陷阱 26 家族：不污染纯文本流）
+  if (hasToolBlocks) {
+    const processItems = deriveMessageProcessItems(message, toolNamesById ?? {})
+    if (processItems.length === 0) return null
+    return (
+      <ProcessBlockGroup
+        items={processItems}
+        isStreaming={false}
+        renderItem={(item) =>
+          item.kind === 'tool' ? (
+            <ToolCallRow
+              tool={item.tool}
+              inputSummary={item.inputSummary}
+              outputSummary={item.outputSummary}
+              status={item.status}
+              durationMs={item.durationMs}
+              replay
+            />
+          ) : item.kind === 'delegation' ? (
+            <DelegationRow item={item.item} />
+          ) : (
+            <NarrationRow text={item.text} />
+          )
+        }
+      />
+    )
+  }
 
   if (isSystem) {
+    // [decision] 是内部决策簿记（用户面在文档面板的 decisions.md），不进聊天流
+    if (text.startsWith('[decision]')) return null
+    // [queue-dropped]（onDropped 气泡，r79）：安全网放弃派发 → 红泡告知发送失败
+    if (text.startsWith('[queue-dropped]')) {
+      return (
+        <div
+          data-ai-id="queue-dropped"
+          role="status"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--space-2)',
+            padding: 'var(--space-2) var(--space-4)',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: 'var(--font-size-sm)',
+            fontWeight: 500,
+            color: '#991B1B',
+            background: '#FEF2F2',
+            border: '1px solid #FECACA',
+          }}
+        >
+          <IconAlertTriangle size={14} />
+          {text.replace(/^\[queue-dropped\]\s*/, '')}
+        </div>
+      )
+    }
+    // [welcome-hint] 零渠道引导（QW#2 二期 P1-①，2026-08-28）：专属醒目卡片——正常字号 +
+    // 品牌色左边框 + 内嵌直达按钮。不再与 [channel-switch] 等机器簿记共用弱样式胶囊
+    //（首跑最关键的第一条提示曾是全场视觉最弱元素，font-size-xs + text-muted）。
+    const welcomeDone = text.startsWith('[welcome-hint:done]')
+    if (text.startsWith('[welcome-hint]') || welcomeDone) {
+      // done 变体（P2-④）：绿色左边框、不带直达按钮——反馈语义不再指路
+      const hint = text.replace(/^\[welcome-hint(?::done)?\]\s*/, '')
+      return (
+        <div
+          style={{
+            alignSelf: 'center',
+            maxWidth: '92%',
+            width: 'fit-content',
+            padding: 'var(--space-4)',
+            background: 'var(--glass-bg-soft)',
+            borderLeft: welcomeDone ? '3px solid #10b981' : '3px solid var(--color-quick, #7c3aed)',
+            borderRadius: 'var(--radius-md)',
+            fontSize: 'var(--font-size-sm)',
+            color: 'var(--color-text)',
+            animation: 'tile-enter 0.3s ease both',
+          }}
+        >
+          <div>{hint}</div>
+          {onOpenSettings && !welcomeDone && (
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              style={{
+                marginTop: 'var(--space-3)',
+                padding: 'var(--space-2) var(--space-4)',
+                background: 'linear-gradient(135deg, var(--color-quick, #7c3aed), var(--color-quick-bright, #9f67ff))',
+                color: 'var(--white, #fff)',
+                border: 'none',
+                borderRadius: 'var(--radius-full)',
+                fontSize: 'var(--font-size-sm)',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              ⚙️ 去连接 AI 模型
+            </button>
+          )}
+          <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-2)' }}>
+            也可以随时点右上角 ⚙️
+          </p>
+        </div>
+      )
+    }
+    // [reconcile] / [decision-card] / [channel-switch] 是机器前缀，剥掉后展示人话
+    const display = text.replace(/^\[(?:reconcile|decision-card|channel-switch)\]\s*/, '')
     return (
       <div
         style={{
@@ -356,7 +883,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
           animation: 'tile-enter 0.3s ease both',
         }}
       >
-        {text}
+        {display}
       </div>
     )
   }
@@ -385,11 +912,53 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
           boxShadow: isUser ? userBubbleShadow(mode) : 'var(--shadow-sm)',
           borderBottomRightRadius: isUser ? 'var(--radius-sm)' : undefined,
           borderBottomLeftRadius: !isUser ? 'var(--radius-sm)' : undefined,
-          whiteSpace: 'pre-wrap',
+          // user 气泡纯文本保换行；assistant 气泡走 Markdown 渲染（块级元素，pre-wrap 会叠加间距）
+          whiteSpace: isUser ? 'pre-wrap' : undefined,
           wordBreak: 'break-word',
         }}
       >
-        {text || (isStreaming ? '…' : '')}
+        {/* assistant 旁白/完成总结渲染 Markdown（模型输出天然带 md）；user 输入保持纯文本语义 */}
+        {isUser || !text ? text || (isStreaming ? '…' : '') : <Markdown text={text} />}
+        {imageBlocks.length > 0 && (
+          <span
+            data-ai-id="message-image-chip"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              marginLeft: 'var(--space-2)',
+              padding: '1px 8px',
+              borderRadius: 'var(--radius-full)',
+              background: 'rgba(255,255,255,0.25)',
+              fontSize: 'var(--font-size-xs)',
+            }}
+          >
+            🖼️ 图片 ×{imageBlocks.length}
+          </span>
+        )}
+        {/* F4（r82）：复制入口——0 基础对照 Claude/GPT 基线；clipboard 可选链防御（非安全上下文降级） */}
+        {text && (
+          <button
+            onClick={() => {
+              void navigator.clipboard?.writeText(text).catch(() => undefined)
+            }}
+            aria-label="复制"
+            title="复制"
+            style={{
+              marginTop: 'var(--space-2)',
+              alignSelf: 'flex-end',
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: 'var(--font-size-xs)',
+              color: isUser ? 'rgba(255,255,255,0.8)' : 'var(--color-text-muted)',
+              padding: '2px 6px',
+              borderRadius: 'var(--radius-sm)',
+            }}
+          >
+            复制
+          </button>
+        )}
       </div>
       <span
         style={{

@@ -14,6 +14,8 @@
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
+import { join } from 'node:path'
+import { rmSyncWithRetry } from './fs-retry'
 import type {
   AgentListSessionsInput,
   AgentListSessionsResult,
@@ -21,10 +23,12 @@ import type {
   AgentLoadMessagesResult,
   AgentMessage,
   AgentSessionRecord,
+  SessionCleanOrphansResult,
 } from '../shared/types'
-import { getAgentSessionPath, getAgentSessionsIndexPath } from '../storage/config-paths'
+import { getAgentSessionPath, getAgentSessionsIndexPath, getPromaHome } from '../storage/config-paths'
 import { readJsonFile, writeJsonFile } from '../storage/json-store'
-import { updateProject } from './project-service'
+import { listProjects, updateProject } from './project-service'
+import { cleanupPastedImages } from './pasted-images'
 
 interface SessionsIndex {
   version: number
@@ -34,8 +38,14 @@ interface SessionsIndex {
 /**
  * 记录一次会话活动：创建/更新会话索引，并回填项目"最后活跃会话"。
  * 项目不存在（如测试中的字面 project_id）时静默跳过 last_session_id 回填。
+ * delegationMeta（delegation-persistence 阶段 1，2026-08-28）：委派子会话首次记录时
+ * 写入归属字段，重启后可按 delegationId 反查子会话 JSONL。
  */
-export function recordSessionActivity(sessionId: string, projectId: string): void {
+export function recordSessionActivity(
+  sessionId: string,
+  projectId: string,
+  delegationMeta?: { parentSessionId: string; sourceDelegationId: string },
+): void {
   const index = readSessions()
   const existing = index.sessions.find((item) => item.session_id === sessionId)
   const now = new Date().toISOString()
@@ -51,6 +61,9 @@ export function recordSessionActivity(sessionId: string, projectId: string): voi
       jsonl_path: getAgentSessionPath(sessionId),
       created_at: now,
       updated_at: now,
+      ...(delegationMeta
+        ? { parent_session_id: delegationMeta.parentSessionId, source_delegation_id: delegationMeta.sourceDelegationId }
+        : {}),
     })
   }
   writeSessions(index)
@@ -71,8 +84,28 @@ export function listSessions(input: AgentListSessionsInput): AgentListSessionsRe
 }
 
 /**
+ * U11：清理孤儿会话——移除 project_id 已不在项目索引中的会话记录及其 JSONL 文件。
+ * 归档项目仍存在于项目索引（可恢复），其会话历史必须保留，故不在此清理范围。
+ * 只清理指向已删除/不存在项目的会话，以及空 project_id 的遗留会话。
+ */
+export function cleanOrphanSessions(): SessionCleanOrphansResult {
+  const validIds = new Set(listProjects('all').map((project) => project.project_id))
+  const index = readSessions()
+  const orphans = index.sessions.filter((item) => !validIds.has(item.project_id))
+  for (const orphan of orphans) {
+    const jsonl = getAgentSessionPath(orphan.session_id)
+    if (existsSync(jsonl)) rmSyncWithRetry(jsonl, { force: true })
+    // 粘贴图清理（clipboard-paste P2 兑现，r73）：孤儿会话的粘贴图目录同步回收（幂等静默）
+    cleanupPastedImages(orphan.session_id)
+  }
+  index.sessions = index.sessions.filter((item) => validIds.has(item.project_id))
+  writeSessions(index)
+  return { removed: orphans.length }
+}
+
+/**
  * 读取指定会话的 JSONL 历史消息。
- * 默认排除内部终态标记（`[terminal]` 行），支持尾部截取（limit）。
+ * 默认排除内部标记（`[terminal]` 终态行、`[decision-card]` 决策卡片选项行），支持尾部截取（limit）。
  * JSONL 存在但索引缺失时（升级前遗留数据），按文件 mtime 合成会话记录。
  */
 export function loadMessages(input: AgentLoadMessagesInput): AgentLoadMessagesResult {
@@ -96,9 +129,11 @@ export function loadMessages(input: AgentLoadMessagesInput): AgentLoadMessagesRe
     })
     .filter((message): message is AgentMessage => {
       if (!message) return false
+      // delegation-persistence（2026-08-28）：settle 行（终态标记，无 role）不是对话消息
+      if ((message as unknown as Record<string, unknown>).delegation_settle) return false
       if (!excludeTerminal) return true
       const text = message.content?.find((block) => block.type === 'text')?.text ?? ''
-      return !text.startsWith('[terminal]')
+      return !text.startsWith('[terminal]') && !text.startsWith('[decision-card]')
     })
 
   const total = all.length
@@ -109,6 +144,71 @@ export function loadMessages(input: AgentLoadMessagesInput): AgentLoadMessagesRe
     total,
     truncated: messages.length < total,
   }
+}
+
+/** 自由文本让渡长度上限：超过即视为含实际内容的话（「随便做个游戏」），不做让渡判定。 */
+const AUTO_DELEGATION_MAX_LENGTH = 16
+
+/**
+ * 自由文本让渡话术表（D1 修复）：「我还没想法/随便/你帮我决定」这类输入与点选
+ * 「你帮我决定」卡片语义相同。整句命中才触发——人称前缀与语气词尾归一后全匹配，
+ * 含实际内容的长句（「随便做个游戏」「帮我做个记账的」）不误伤。首版从宽，
+ * 靠线上对话样本迭代（对齐行为断言词表的扩充思路）。
+ */
+const AUTO_DELEGATION_PATTERN =
+  /^(?:还没想(?:法|好)?|没(?:有)?想法|没头绪|不知道(?:做|要)?什么|都(?:可以|行)|随便(?:来|做|弄|你|了)?|你(?:帮我)?决定|你来定|你看着办|听你的|交给你们?|帮我(?:挑|选)(?:一个|一下)?|无所谓)$/
+
+/**
+ * 让渡话术判定：≤16 字且整句命中（人称前缀/语气词已归一）。供两处共用，改表须两侧同步：
+ * - guide-agent-service 自由文本让渡分流（resolveAutoDelegation）
+ * - readPrimaryIntent 主题锚点豁免（让渡话术不承载主题）
+ */
+export function isAutoDelegationText(content: string): boolean {
+  const trimmed = content.trim()
+  if (trimmed.length === 0 || trimmed.length > AUTO_DELEGATION_MAX_LENGTH) return false
+  const normalized = trimmed
+    .replace(/^(?:我|我们|咱们)/, '')
+    .replace(/(?:了|呢|啊|呀|吧|呗|哦|哈)+[。.!！~～\s]*$/, '')
+  return AUTO_DELEGATION_PATTERN.test(normalized)
+}
+
+/**
+ * 纯问候语（D4 修复）：整句命中才跳过，「你好，我想做个记账本」承载主题、必须保留。
+ * 问候语不承载任何产品信息，若被当成主题锚点前置 F-001，会把真正的需求挤到 F-002。
+ */
+const GREETING_ONLY_PATTERN =
+  /^(?:(?:你|您)好(?:呀|啊)?|嗨|哈喽|哈啰|hello|hi|hey|在吗|在么|早上好|下午好|晚上好|早安|午安)[\s!！。.~～呀啊嗯]*$/i
+
+/**
+ * 从会话 JSONL 中提取"主题锚点"：首条非空 user 消息（用户最初想做什么）。
+ * 供澄清/纠错路径复用，保证后续需求累积不会丢失最初的主题。
+ * 无实质内容的消息（纯问候、让渡话术、trim 后不足 2 字）不配当锚点，跳过向下找；
+ * 全部无实质内容或无会话文件时返回 undefined。
+ */
+export function readPrimaryIntent(sessionId: string): string | undefined {
+  const path = getAgentSessionPath(sessionId)
+  if (!existsSync(path)) return undefined
+  for (const line of readFileSync(path, 'utf8').split('\n')) {
+    if (!line.trim()) continue
+    try {
+      const message = JSON.parse(line) as AgentMessage
+      if (message.role !== 'user') continue
+      const text = (message.content ?? [])
+        .map((block) => (block.type === 'text' ? (block.text ?? '') : ''))
+        .join('')
+        .trim()
+      if (
+        text.length >= 2 &&
+        !GREETING_ONLY_PATTERN.test(text) &&
+        !isAutoDelegationText(text)
+      ) {
+        return text
+      }
+    } catch {
+      // 跳过损坏行
+    }
+  }
+  return undefined
 }
 
 function resolveSessionRecord(sessionId: string, path: string): AgentSessionRecord {
@@ -127,6 +227,33 @@ function resolveSessionRecord(sessionId: string, path: string): AgentSessionReco
 
 function readSessions(): SessionsIndex {
   return readJsonFile<SessionsIndex>(getAgentSessionsIndexPath(), { version: 1, sessions: [] })
+}
+
+/**
+ * 存量迁移（2026-09-04 索引独立化）：旧共用 agent-sessions.json 里的 Bloma 条目
+ *（snake_case：session_id 字段）搬进新专属索引 bloma-agent-sessions.json。
+ * 幂等：新索引已存在 → 跳过；旧文件不存在 → 跳过。只读旧写新，绝不动 Proma 的
+ * agent-sessions.json（陷阱 40 双向兼容保守原则）。启动时调用，失败不阻断。
+ */
+export function migrateLegacySessionsIndexOnce(): { migrated: number; skipped: boolean } {
+  const newPath = getAgentSessionsIndexPath()
+  if (existsSync(newPath)) return { migrated: 0, skipped: true }
+  const legacyPath = join(getPromaHome(), 'agent-sessions.json')
+  if (!existsSync(legacyPath)) return { migrated: 0, skipped: true }
+  try {
+    const legacy = JSON.parse(readFileSync(legacyPath, 'utf8')) as { sessions?: unknown[] }
+    if (!Array.isArray(legacy.sessions)) return { migrated: 0, skipped: true }
+    // Bloma 条目判据与人工分离脚本一致：有 session_id 且无 id（Proma 条目驼峰 id）
+    const blomaItems = legacy.sessions.filter(
+      (item): item is AgentSessionRecord =>
+        !!item && typeof item === 'object' && 'session_id' in item && !('id' in item),
+    )
+    writeJsonFile(newPath, { version: 1, sessions: blomaItems } satisfies SessionsIndex)
+    return { migrated: blomaItems.length, skipped: false }
+  } catch {
+    // 旧文件损坏/不可读：不迁移不阻断（新索引按需重建）
+    return { migrated: 0, skipped: true }
+  }
 }
 
 function writeSessions(index: SessionsIndex): void {

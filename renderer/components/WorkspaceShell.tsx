@@ -3,22 +3,31 @@ import { WorkspaceHeader } from './WorkspaceHeader'
 import { ChatPanel } from './ChatPanel'
 import { PreviewPanel } from './PreviewPanel'
 import { TimelinePanel } from './TimelinePanel'
+import { MvpStatusBanner } from './MvpStatusBanner'
+import { DocumentPanel } from './DocumentPanel'
+import { CollaborationPanel } from './CollaborationPanel'
 import type { CardOption } from './CardOptions'
 import type { PreviewStatus } from './PreviewPanel'
-import type { Snapshot } from './atoms'
+import type { Snapshot, PastedImageRef } from './atoms'
+import type { DomCollectContextResult } from '../../shared/types'
 
 export interface WorkspaceShellProps {
   /* === ChatPanel props === */
   cardOptions?: CardOption[]
+  /** 决策卡标题（U7：让渡偏差描述 / 澄清方向等） */
+  decisionTitle?: string
+  /** 决策卡正文（2026-08-29：审查卡的具体问题清单） */
+  decisionBody?: string
   onCardOptionSelect?: (option: CardOption) => void
-  onSendMessage?: (content: string) => void
-  isWaiting?: boolean
+  onSendMessage?: (content: string, images?: PastedImageRef[]) => void
   waitStartTime?: number
   waitActionLabel?: string
   onContinueWaiting?: () => void
   onViewPartial?: () => void
   /** 回访恢复时是否正在加载历史消息（对话区显示骨架占位） */
   isHistoryLoading?: boolean
+  /** 停止当前生成（U4：Agent 流式生成中点击停止） */
+  onStopGeneration?: () => void
 
   /* === PreviewPanel props === */
   previewStatus?: PreviewStatus
@@ -27,13 +36,26 @@ export interface WorkspaceShellProps {
   onRefreshPreview?: () => void
   onToggleFullscreen?: () => void
   onScreenshot?: () => void
-  onCorrectionSubmit?: (payload: { position: { x: number; y: number }; userNote: string; fallbackMode: boolean }) => void
+  onCorrectionSubmit?: (payload: { position: { x: number; y: number }; userNote: string; fallbackMode: boolean; domContext?: DomCollectContextResult }) => void
+  /** 点击预览元素时向主进程收集 DOM 上下文（高亮被选区域，R-CORR-01） */
+  onCollectDomContext?: (click: { x: number; y: number }) => Promise<DomCollectContextResult | undefined>
+  /** 确认草图 → 生成完整功能（问题 A / P0-1） */
+  onConfirmSketch?: () => void
+  confirming?: boolean
+  /** iframe 加载失败（沙箱端口失效）时回调 */
+  onPreviewError?: () => void
+  /** U6：ready 阶段「标记为完成」回调 */
+  onMarkComplete?: () => void
 
   /* === TimelinePanel props === */
   onRollback?: (snapshot: Snapshot) => void
 
   /* === Header props === */
   onAllProjects?: () => void
+  /** 打开设置页回调 */
+  onOpenSettings?: () => void
+  /** 点击「升级为长期模式」回调（U1：升级接线） */
+  onUpgrade?: () => void
 }
 
 /**
@@ -66,7 +88,14 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
       }}
     >
       {/* 顶栏 */}
-      <WorkspaceHeader onAllProjects={props.onAllProjects} />
+      <WorkspaceHeader
+        onAllProjects={props.onAllProjects}
+        onOpenSettings={props.onOpenSettings}
+        onUpgrade={props.onUpgrade}
+      />
+
+      {/* MVP 状态横幅（Sprint 2） */}
+      <MvpStatusBanner />
 
       {/* 主区：对话（左 1fr ≈ 35%）+ 预览（右 2fr ≈ 65%），等高 */}
       <div
@@ -80,14 +109,17 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
       >
         <ChatPanel
           cardOptions={props.cardOptions}
+          decisionTitle={props.decisionTitle}
+          decisionBody={props.decisionBody}
           onCardOptionSelect={props.onCardOptionSelect}
           onSendMessage={props.onSendMessage}
-          isWaiting={props.isWaiting}
           waitStartTime={props.waitStartTime}
           waitActionLabel={props.waitActionLabel}
           onContinueWaiting={props.onContinueWaiting}
           onViewPartial={props.onViewPartial}
           isHistoryLoading={props.isHistoryLoading}
+          onStopGeneration={props.onStopGeneration}
+          onOpenSettings={props.onOpenSettings}
         />
         <PreviewPanel
           status={props.previewStatus}
@@ -97,11 +129,22 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
           onToggleFullscreen={props.onToggleFullscreen}
           onScreenshot={props.onScreenshot}
           onCorrectionSubmit={props.onCorrectionSubmit}
+          onCollectDomContext={props.onCollectDomContext}
+          onConfirmSketch={props.onConfirmSketch}
+          confirming={props.confirming}
+          onPreviewError={props.onPreviewError}
+          onMarkComplete={props.onMarkComplete}
         />
       </div>
 
       {/* 底部时间轴胶片条 */}
       <TimelinePanel onRollback={props.onRollback} />
+
+      {/* 文档面板抽屉（U2）：由 documentPanelExpandedAtom 门控，展开时覆盖在右侧 */}
+      <DocumentPanel />
+
+      {/* 委派协作抽屉（M4-C）：由 collaborationPanelExpandedAtom 门控，展开时覆盖在右侧 */}
+      <CollaborationPanel />
     </div>
   )
 }

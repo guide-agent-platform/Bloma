@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>应用</title>
+  <style>
+    /* 内联保底样式（isHtmlDocument 判据），完整样式见 src/styles.css */
+    html, body { margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  </style>
+  <link rel="stylesheet" href="src/styles.css">
+</head>
+<body>
+  <!-- 骨架分区（PR-1）：在此结构上填充业务内容，分区可按功能项调整 -->
+  <header class="app-header">
+    <h1 class="app-title">应用名称</h1>
+    <nav class="app-nav">
+      <!-- 导航项：按页面清单补充，当前分区激活态用 .active -->
+      <a href="#main" class="active">首页</a>
+    </nav>
+  </header>
+
+  <main id="main" class="app-main">
+    <!-- 主内容区：按功能项实现列表 / 表单 / 详情等区块形态 -->
+    <section class="panel">
+      <h2 class="panel-title">主功能区</h2>
+      <!-- TODO(实现)：功能项的交互与数据展示 -->
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title">次功能区</h2>
+      <!-- TODO(实现)：辅助功能或详情 -->
+    </section>
+  </main>
+
+  <div id="status-bar" class="status-bar" hidden></div>
+
+  <footer class="app-footer">
+    <p><!-- 页脚说明 --></p>
+  </footer>
+
+  <script src="src/app.js"></script>
+</body>
+</html>

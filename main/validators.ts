@@ -8,12 +8,6 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-export function requireString(value: Record<string, unknown>, key: string): void {
-  if (typeof value[key] !== 'string' || value[key] === '') {
-    throw new Error(`Missing required string: ${key}`)
-  }
-}
-
 export function requireValue(value: Record<string, unknown>, key: string): void {
   if (value[key] === undefined || value[key] === null || value[key] === '') {
     throw new Error(`Missing required field: ${key}`)

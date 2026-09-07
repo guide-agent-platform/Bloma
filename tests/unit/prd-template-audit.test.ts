@@ -1,0 +1,154 @@
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ruleGateReview } from '../../main/prd-review'
+import { runJudge } from '../../main/judge-engine'
+import { syncDocuments } from '../../main/document-engine'
+import { createProject, recordSketchGenerated } from '../../main/project-service'
+import type { PrdBackplane, SketchRequirement } from '../../main/sketch-engine'
+
+/** 注入点④内审变体 + ⑧judge 版本一致性（P6，最后做——消费前面所有产物）。 */
+
+vi.mock('../../main/decision-log', () => ({ recordDecision: vi.fn() }))
+
+const requirements: SketchRequirement[] = [
+  { id: 'F-001', description: '做一个番茄钟', priority: 'P0', behavior_assertions: ['点击开始按钮 → 系统优雅处理计时'] },
+]
+
+function makeBackplane(overrides: Partial<PrdBackplane> = {}): PrdBackplane {
+  return {
+    project_id: 'p1',
+    name: '番茄钟',
+    positioning: '专注计时工具',
+    requirements,
+    acceptance: {},
+    out_of_scope: [],
+    assumptions: [],
+    template_meta: { type: 'personal_tool', level: 'loose', version: 1 },
+    ...overrides,
+  }
+}
+
+describe('注入点④内审变体（章节完备性 + EARS 可测性）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'proma-p6-'))
+  })
+  afterEach(() => {
+    delete process.env.BLOMA_INJECT_AUDIT
+    delete process.env.BLOMA_INJECT_JUDGE
+    process.env.PROMA_HOME = originalPromaHome
+  })
+
+  describe('规则门确定性检查（LLM 不可用降级同享模板体系）', () => {
+    it('quick：必填章节缺失 → major issue（G 维，附人话问题与选项）', () => {
+      const backplane = makeBackplane({ positioning: '' })
+      const outcome = ruleGateReview(backplane, 'quick')
+      const missing = outcome.issues.find((issue) => issue.location === 'positioning')
+      expect(missing).toBeDefined()
+      expect(missing?.severity).toBe('major')
+      expect(missing?.dimension).toBe('G')
+      expect(missing?.plain_question).toContain('产品定位')
+      expect(outcome.verdict).toBe('needs_revision')
+    })
+
+    it('longterm：宽松模板攻出 personas/glossary；标准模板再攻出 interface_spec（12.4 矩阵）', () => {
+      const looseOutcome = ruleGateReview(makeBackplane(), 'longterm')
+      const missingIds = looseOutcome.issues.map((issue) => issue.location)
+      expect(missingIds).toContain('personas')
+      expect(missingIds).toContain('glossary')
+      expect(missingIds).not.toContain('interface_spec') // 12.4 宽松列无 API Spec 要求
+
+      const standardBackplane = makeBackplane({ template_meta: { type: 'web_fullstack', level: 'standard', version: 1 } })
+      const standardOutcome = ruleGateReview(standardBackplane, 'longterm')
+      expect(standardOutcome.issues.map((issue) => issue.location)).toContain('interface_spec')
+    })
+
+    it('longterm：断言禁词直查 → major（禁词表三处同源）', () => {
+      const outcome = ruleGateReview(
+        makeBackplane({
+          personas: ['学生'],
+          glossary: [{ term: '番茄钟', definition: '专注单元' }],
+          interface_spec: [],
+          requirements: [
+            { id: 'F-001', description: '番茄钟', priority: 'P0', behavior_assertions: ['点击开始 → 系统合理处理'] },
+          ],
+        }),
+        'longterm',
+      )
+      const forbidden = outcome.issues.find((issue) => issue.claim.includes('不可测措辞'))
+      expect(forbidden).toBeDefined()
+      expect(forbidden?.severity).toBe('major')
+      expect(forbidden?.location).toBe('F-001')
+    })
+
+    it('quick：禁词不在规则门检查范围（longterm 专属 EARS 可测性维度）', () => {
+      const outcome = ruleGateReview(makeBackplane(), 'quick')
+      expect(outcome.issues.some((issue) => issue.claim.includes('不可测措辞'))).toBe(false)
+    })
+
+    it('开关关闭 → 规则门行为=现状（无模板 issue）', () => {
+      process.env.BLOMA_INJECT_AUDIT = '0'
+      const outcome = ruleGateReview(makeBackplane({ positioning: '' }), 'quick')
+      expect(outcome.issues.some((issue) => issue.location === 'positioning' && issue.dimension === 'G' && issue.claim.includes('必填章节'))).toBe(false)
+      // 既有 F 维空定位检查不受影响（现状语义）
+      expect(outcome.issues.some((issue) => issue.dimension === 'F' && issue.location === 'positioning')).toBe(true)
+    })
+
+    it('章节齐全时规则门不追加模板 issue（宁松勿严，不强行找茬）', () => {
+      const full = makeBackplane({
+        requirements: [{ id: 'F-001', description: '番茄钟', priority: 'P0', behavior_assertions: ['点击开始按钮 → 计时启动'] }],
+      })
+      const outcome = ruleGateReview(full, 'quick')
+      expect(outcome.issues.filter((issue) => issue.claim.includes('必填章节'))).toHaveLength(0)
+    })
+  })
+})
+
+describe('注入点⑧judge 版本一致性（轻量，不扩完成度判定）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+    delete process.env.BLOMA_INJECT_JUDGE
+  })
+
+  function setupJudgeProject(backplaneOverride?: (bp: PrdBackplane) => PrdBackplane) {
+    const home = mkdtempSync(join(tmpdir(), 'proma-judge-tpl-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-tpl', mode: 'quick' })
+    const items: SketchRequirement[] = [{ id: 'F-001', description: '记录收入与支出' }]
+    recordSketchGenerated(project.project_id, items)
+    const base = makeBackplane({ project_id: project.project_id, requirements: items })
+    const backplane = backplaneOverride ? backplaneOverride(base) : base
+    // sketch_confirmed 先落 prd.json（template_meta 随盘）；mvp_before_generation 再产 features 骨架
+    syncDocuments({ request_id: 'req-sync', session_id: 's', project_id: project.project_id, checkpoint: 'sketch_confirmed' }, backplane)
+    syncDocuments({ request_id: 'req-sync2', session_id: 's', project_id: project.project_id, checkpoint: 'mvp_before_generation' })
+    writeFileSync(join(project.root_path, 'index.html'), '<p>记录收入与支出</p>', 'utf8')
+    return project
+  }
+
+  it('背板模板版本落后 → soft 提示 passed=true，不影响 pass verdict（§六：不扩完成度判定）', () => {
+    const project = setupJudgeProject((bp) => ({ ...bp, template_meta: { type: 'personal_tool', level: 'loose', version: 0 } }))
+    const verdict = runJudge({ project_id: project.project_id, mode: 'quick' })
+    const versionHint = verdict.soft_constraints.find((item) => item.name === '模板版本一致性')
+    expect(versionHint).toBeDefined()
+    expect(versionHint?.passed).toBe(true) // 仅提示，不影响判定
+    expect(versionHint?.detail).toContain('旧版模板')
+    expect(verdict.verdict).toBe('pass') // 版本落后不改变交付判定
+  })
+
+  it('版本一致 → 无该软约束', () => {
+    const project = setupJudgeProject()
+    const verdict = runJudge({ project_id: project.project_id, mode: 'quick' })
+    expect(verdict.soft_constraints.find((item) => item.name === '模板版本一致性')).toBeUndefined()
+  })
+
+  it('开关关闭 → 版本落后也不提示（现状）', () => {
+    process.env.BLOMA_INJECT_JUDGE = '0'
+    const project = setupJudgeProject((bp) => ({ ...bp, template_meta: { type: 'personal_tool', level: 'loose', version: 0 } }))
+    const verdict = runJudge({ project_id: project.project_id, mode: 'quick' })
+    expect(verdict.soft_constraints.find((item) => item.name === '模板版本一致性')).toBeUndefined()
+  })
+})

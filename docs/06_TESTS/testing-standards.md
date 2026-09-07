@@ -2,7 +2,7 @@
 
 > 项目：向导 Agent 多智能体协同开发平台
 > 文档 ID：DOC-6.2
-> 版本：v1.1 | 日期：2026-07-25 | 状态：已确认
+> 版本：v1.2 | 日期：2026-07-25 | 状态：已确认
 > 依赖：DOC-1.1 `user-stories.md`、DOC-4.1 `api-spec.md`、DOC-6.1 `test-plan.md`
 
 ---
@@ -132,6 +132,7 @@ tests/integration/local-first.test.ts
 tests/security/api-key-boundary.test.ts
 tests/regression/sprint1/mode-workspace-regression.test.tsx
 tests/acceptance/sprint0/ipc-contract.test.ts
+tests/e2e/sprint1/sketch-workflow.e2e.ts
 ```
 
 禁止使用以下低信息量文件名：
@@ -193,7 +194,8 @@ it('[S0-STORE-002] 会话事件应写入临时 PROMA_HOME', () => {
 - 所有会写文件的测试必须使用测试专属临时 `PROMA_HOME`。
 - 禁止写入真实 `~/.proma/`、桌面、下载目录或用户项目目录。
 - setup 必须在被测模块首次读取路径前设置 `PROMA_HOME`。
-- teardown 必须恢复原环境变量并清理临时目录。
+- teardown 必须恢复原环境变量并清理临时目录。恢复时原值可能是 `undefined`，直接赋值会被 Node 转成字符串 `"undefined"`（后续用例即以相对路径写到 `./undefined/`），因此须 `delete` 而非赋值；`tests/support/proma-home-guard.ts`（全局 setupFile）已做兜底归位。
+- 路径工具中「文件路径」getter 不建目录（`getProjectEventsPath`/`getAnalyticsPath`），父目录由 `json-store` 写入时自建；只有「目录」getter 才 `ensureDir`。新增读路径勿引入 mkdir 副作用。
 
 ### 7.2 Agent 与模型
 
@@ -366,6 +368,7 @@ it('[S0-IPC-004] 非法项目模式应返回失败的 ApiResult', async () => {
 | `test:regression:sprint1` | Sprint 1 既有行为与缺陷回归 | Sprint 0、独立验收 |
 | `test:acceptance:sprint0` | Sprint 0 独立阶段验收 + 必要构建 | Sprint 1、普通单元测试 |
 | `test:acceptance:sprint1` | Sprint 1 独立阶段验收 | Sprint 0、普通单元测试 |
+| `test:e2e:sprint1` | Sprint 1 Playwright Electron 用户流程 | Vitest 验收和未来 Sprint |
 | `test:e2e` | `tests/e2e/**` | 单元和静态扫描 |
 | `test:all` | 依次调用各层命令 | 用一个无 include/setup 的通用 Vitest 命令混跑所有测试 |
 
@@ -434,3 +437,4 @@ it('[S0-IPC-004] 非法项目模式应返回失败的 ApiResult', async () => {
 |---|---|---|
 | v1.0 | 2026-07-25 | 首版，定义功能域、测试 ID、文件规范、结果分类、已知失败、GWT 映射、报告字段和门禁要求 |
 | v1.1 | 2026-07-25 | 将测试摘要固化为必填章节，明确位置、必填字段、统计口径和评审检查项 |
+| v1.2 | 2026-07-25 | 增加 `.e2e.ts` 命名、Sprint 1 Electron E2E 命令和 GWT 场景稳定 ID 要求 |

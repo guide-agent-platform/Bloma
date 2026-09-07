@@ -7,6 +7,336 @@
 
 **v1.1 修订说明**：同步 §5 已知待同步项状态（4 项全部已同步），新增 §5.1 目录结构重组记录。按 `workflow.md §2.4` 走修订流程，待评审后回到已确认。
 
+## 任务级模型降级选模落地：内审缺省 flash 级（2026-09-02）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | feat（组会决议 4/7「审查用 flash 级、顶配留给 MVP loop/spec 生成」） |
+| 模块 | `main/model-resolution.ts` |
+
+### 变更内容
+
+- 落地 `capability` 三档选模（此前 `balanced`/`cheap` 为预留档、一律按 strongest）：`strongest` 取渠道 models 列表序首个 enabled（与改造前一致）；`balanced`/`cheap` 优先取名称匹配 `flash`/`lite`/`turbo` 的经济档快模型、无匹配回退 strongest——名称启发式过渡，能力元数据（tier 字段）落地前使用，单模型/多档渠道行为与改造前完全一致（不因缺元数据把渠道判死）。
+- `audit`（内审 Attacker/Defender/复核轮）缺省 capability 由 `strongest` 改 `cheap`：决议 7「审查用 flash 级」落地；渠道无快模型时回退渠道首选，非强制，用户仍可按渠道选配 + 模型列表序覆盖。
+
+### 影响评估
+
+- 受影响调用点：`resolveChannelEnv`/`pickBackupChannelEnv`（runtime-fallback）、`resolvedAuditView`/`buildCategoryRoutingViews`（category-routing）——含 flash 级模型的 audit 渠道会命中快模型。
+- 测试：model-resolution 新增 3 例（audit 缺省 cheap / flash 命中 / lite-turbo 命中 + strongest 不受名称影响）；既有 7 例全过。
+
+## UX 累计池批量修改：PRD 确认弹窗「一步一问一改」改批量（2026-09-02）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | feat（组会决议 7 / 下周计划 5） |
+| 模块 | `renderer/components/PrdConfirmDialog.tsx` |
+
+### 变更内容
+
+- 替换 `adjustText` 单字段为 `adjustPool: Array<{entryId, requirementId, text}>` 累计池：`openAdjustWith(id)` 入池（按 requirementId 去重）、`updatePoolEntry`/`removePoolEntry`/`addBlankPoolEntry`、`filledAdjustCount` 计数。
+- `submitPoolAdjust()` 把池内文本以 `\n` 拼接后一次性 `sendMessage(text, 'prd_confirm_adjust', …, {typed:true})`——把「一步一问一改」收敛为「攒一起统一提交」，省 token（组会第 10 点）。
+- `sendMessage` 增 `opts.typed`：失败时 `fail()` 内联错误 + `restoreAfterFailure` 恢复快照（与 F9a 混合契约一致），勾选/文本不丢。
+
+### 影响评估
+
+- 仅 PRD 确认弹窗交互路径；新增单测 10 例（prd-confirm-adjust-pool.test.tsx：P1–P7 池操作 + F1–F2 失败恢复 + S1 渲染同步）。
+
+## 需求确认弹窗失败静默修复：F9a 混合契约 + r124 测试恢复（2026-09-02）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | fix（B 腿 r124 UX 走查 / 下周计划 6） |
+| 模块 | `renderer/components/RequirementConfirmDialog.tsx` |
+
+### 变更内容
+
+- da737d5 半合并把 c9ab674「失败不关窗」回退成乐观关闭，四路失败（confirm/supplement 各 ok:false/throw）用户零反馈、勾选/文本清空、决定静默丢失。重兑现为混合契约：提交先隐藏弹窗（IPC 回传绑定 PRD 全程可达数十秒，滞留=盲等），失败时快照写回恢复弹窗 + 勾选/文本/灵感/参考链接全保留 + submitting 复位 + 内联错误条。
+- `restoreAfterFailure` 走 `store.get(requirementConfirmFamily(sessionId))` 做竞态守卫：在途新卡不覆盖，落到全局错误通道；`seenStateRef` + `useEffect` 换新卡时清 submitError。
+- 恢复 r124 测试（N1–N5 失败恢复翻转位 + M1 aria/文案基线 + D1 降级基线，共 7 例全过）。
+
+### 影响评估
+
+- 仅需求确认弹窗；无其它文件随 da737d5 丢失（已核）。
+
+## 泳道图 + PRD 三形态实验 + P2 测试盲区收尾（2026-09-02）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | docs + test（组会决议 5/6、下周计划 3/4/6） |
+| 模块 | `docs/03_ARCHITECTURE/agent-swimlane.md`、`docs/05_PROJECT_PLAN/prd-forms-experiment.*`、`tests/unit/*` |
+
+### 变更内容
+
+- 泳道图（决议 5）：`agent-swimlane.md` 7 泳道（user/harness/guide/内审/programming/委派/judge）+ 术语表，画出全流程 Agent 调用关系（含委派结构）。
+- PRD 三形态对比实验（决议 6）：同需求（学习笔记）× 三形态（一句话/简单/完整）× 同渠道同模型（deepseek-v4-pro）各 3 轮，走生产 `generatePrdLlm`。结论：一句话→简单是决定性跃升（验收 78→367 字、EARS 1→5.3）；简单→完整不升反降（验收 367→258、EARS 5.3→3.7）但范围外 0→3 条；数据支持导师「一句话几乎必出 major」。
+- P2 测试盲区（下周计划 6）：ideas 归约（5 例）、summary 渠道回退（3 例）、ipc 入参清洗（7 例）——锁定事件→atom 清洗、summary 非角色类别回退链、validateAgentSend/validateConfirmRequirements 非法入参 fail-closed。
+
+### 影响评估
+
+- 全量 unit 1171/1171 全过（119 文件）、typecheck 0 错；实验脚本 `BLOMA_EXPERIMENT=prd-forms` 显式开启、平时 skip。
+
+## usage 阈值竹节压缩：Agent Loop 主动交接≤2 段（2026-08-29）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | feat（闭环与上下文治理 PR6） |
+| 模块 | `main/agent-loop.ts`、`shared/types.ts`、api-spec §5.2 AgentEvent |
+
+### 变更内容
+
+- 每轮结束后（下一轮模型调用前）检查 usage：`input_tokens` ≥ 阈值（缺省 100k，`BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS` 可覆盖，`'0'` 关闭）且未达封顶 → 一次无 tools 交接小调用（复用同渠道 query/env，maxTokens 1024，携带窗口化消息含钉轮），把进展压缩成交接文档后重置 messages 为 `task + 【此前进度交接（第 N 段）】`；每 loop 至多 2 次（task+2 次交接=3 节，随感 38）。
+- 交接 LLM 失败 → 确定性 fallback（轮次/工具统计/最近进展，零 LLM）；压缩后 `pinnedTestTurn` 清空（失败细节已进交接文档）。
+- AgentEvent 新增 `loop_compaction`（at_turn / input_tokens / compactions）；渲染端归约 default 分支安全忽略（已核）。
+
+### 影响评估
+
+- 默认阈值 100k 的标定依据由 PR8 脚本回填（拍板项 B 首版值）；线上先观察 agent_loop_turn 埋点再定。
+- JSONL 审计全量照落不受影响；新增单测 5 例（触发/封顶/fallback/关闭回归/abort 退出）。
+
+## web_research 委派化查询工具 + toolBudget 首个生产接线（2026-08-29）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | feat（闭环与上下文治理 PR5） |
+| 模块 | `main/agent-tools.ts`、`main/programming-orchestrator.ts`、api-spec §12.12 |
+
+### 变更内容
+
+- 新增 `web_research` 工具（仅 parent，子代理无此工具防递归委派）：派出 role=research 只读子代理联网调研，阻塞等待收敛（上限 90s，超时停止子代理）后回灌 ≤4000 字精干结论（剥「子代理状态」头行），主 loop 上下文不进原文大段；等待经 withAbort 接入主 loop 取消信号，用户点停止立即解除。
+- `AgentLoopInput.toolBudget` 首个生产接线：`runMvpViaAgentLoop` 传 `{ web_research: 4 }`，超限走既有 budgetExhausted 软着陆。
+
+### 影响评估
+
+- parent 工具面 16→17，仅新增不改旧；api-spec 新增 §12.12。
+- 新增单测 8 例（agent-collaboration 7 + agent-tools 工具面 1），角色裁剪断言同步。
+
+## 收敛路径统一收口：点选/让渡接入 PRD 后置链（排查报告批次1，🔴1/🔴2）（2026-08-27）
+
+| 属性 | 值 |
+|------|-----|
+| **状态** | 已确认 |
+
+### 变更内容
+
+- **背景**：线上首测（会话 b1b39b20）实测点选澄清卡后直达草图——8-22 澄清死循环修复时代的「点选即开工」捷径绕过了 8-26 全套确认体系（弹窗/市调/PRD/六维审查/PRD 确认卡），确认卡在主路径 0 触发；详见桌面《guide-agent-历史遗留冲突排查报告-2026-08-27》
+- `[重构]` 抽公共链 `runPrdPipeline`（PRD 前移→六维审查→PRD 确认卡→草图），三条收敛入口统一：模型判定（弹窗确认）/点选澄清卡/让渡；固化不变式「**PRD 不过目不开工**」；无模型场景（规则路由）以 NO_QUERY_FALLBACK 走既有降级链（LLM 审查失败→规则门）
+- `[修改]` 点选卡片答案不再直接 `runSketchTask`，改入 PRD 后置链；话术改为「整理成产品需求文档，请你过目确认后再画草图」
+- `[修改]` 让渡统一（🔴2）：点选「你帮我决定」不再被 cardAnswer 截胡（预置文案偷换需求），统一走 `resolveAutoDelegation` 让渡流——决策留痕 source 区分 `card_auto`/`free_text_auto`，同样接 PRD 后置链（让渡场景「系统替你做的决定」最多，确认卡 assumptions 段价值最大）；`CARD_ANSWER_REQUIREMENTS.auto` 保留（让渡流需求源，daily/work 预置映射不变）
+- `[修复]` 规则门降级话术如实（不自称「已通过裁判审查」）；同步 guide-agent-service 两处过时注释（D3 熔断已改弹窗化）与 prompt-config 头注释（五引擎+loop-system 全量接线）
+- 市调（DDG）仍仅弹窗路径专属：市调摘要绑定弹窗 UI，点选/让渡路径无展示位（产品差异而非缺陷；后续若确认卡加市调段再评估）
+
+### 影响评估
+
+- 受影响模块：guide-agent-service（runPrdPipeline 新抽 + 三入口接线）/ prompt-config（注释）/ 测试×2 同步
+- 测试：guide 系 45/45（同步 guide-agent-service 2 例至新语义：点选挂起+原文映射、点选 auto 让渡留痕+挂起）；全量 unit 579/581（2 失败=既有 flake blocked-decision/platform-services，单跑全过）；typecheck 0
+- 线上待验证：同场景重跑「桌面轻松记→点选便签」应出现 PRD 确认卡；点选「你帮我决定」应见让渡话术+确认卡
+
+---
+
+## 活背板三件套：功能项状态回写 + PRD 用户确认门 + 执行经验沉淀（2026-08-26）
+
+| 属性 | 值 |
+|------|-----|
+| **状态** | 已确认 |
+
+### 变更内容
+
+- **改造 1 功能项状态回写（ralph 式 passes）**：`[新增]` `SketchRequirement` 可选字段 `status`（implemented/partial/missing/deviated/unverified）+ `status_note`（裁判证据，≤160 字）；`[新增]` document-engine `updateRequirementStatus`——judge 语义审查的逐项判定回写进 prd.json（pass/fail 都回写，只改状态不碰需求语义，内部全 catch 不阻断裁决流）；接线在 evaluateOnce（semantic 非 skipped 即回写）；PRD 渲染勾选态（implemented→`[x]`，其余中文标签）；loop 项目锺带执行状态行（部分重生成/恢复终验路径下让 loop 知道哪些项是既成事实）。**语义自洽点：迭代全量重生成时 syncPrdCheckpoints 重写 prd.json，status 自然清除（新产物未判定）**
+- **改造 3 PRD 用户确认门**：六维审查**通过**后、草图前，把背板以四段式确认卡摊给用户阅读确认——机器质量关（prd-review）与人语义关接力，确认的是「系统加工的理解细节」（story 化/断言/优先级/范围外/假设）而非用户已确认过的话。`[新增]` 新模块 `main/prd-confirm.ts`（发布/挂起/回传消费，复用 card_option 元数据零新 IPC）；`[新增]` 渲染端 `PrdConfirmDialog`（四段式：定位/功能清单 P0 断言展开、P1P2 折叠/明确不做的高亮/系统假设可推翻；完整视图 longterm 默认展开、quick 折叠；整体确认 + 逐项「这条不对」预填回向导）；`[新增]` PrdBackplane `user_confirmed_at` 落盘（markPrdUserConfirmed，迭代争议仲裁锚点）；DecisionType 新增 `prd_confirm`；BLOCKED_DECISION_IDS 同步两选项 id。审查 needs_revision 的 override 分支不再发卡（避免双重打断）；规则门降级话术如实（不自称「已通过裁判审查」）
+- **改造 2 执行经验沉淀（ralph progress.txt 等价物）**：`[新增]` 新模块 `main/learnings-log.ts`（append-only JSONL `documents/{id}/learnings.jsonl`，只存执行过程经验——loop 完成总结/异常结局，不存需求/决策/约束防第二事实源，零 LLM 成本）；接线 runMvpViaAgentLoop 结束点（finalText 完成总结 + 轮次/工具元数据）；`buildLoopSystemWithOverride` 新增【历史经验】段注入最近 6 条（首轮无经验零开销，下轮 fresh loop 开场即知上轮踩坑）
+
+### 影响评估
+
+- 受影响模块：sketch-engine（类型）/ document-engine（回写/确认落盘/勾选渲染）/ programming-orchestrator（回写接线/learnings/状态行）/ guide-agent-service + prd-confirm（新）/ learnings-log（新）/ agent-atoms + PrdConfirmDialog（新）+ App / decision-log（DecisionType）
+- 测试：新增 requirement-status 8 例、guide-prd-confirm 4 例、prd-confirm-dialog 4 例、learnings-log 5 例；同步既有 guide-prd-review 2 例与 guide-requirement-confirm 2 例至新语义（审查通过→确认卡挂起而非直接草图）；全量 unit 579/581（2 失败均为既有并行 flake：blocked-decision/platform-services，单跑全过）、acceptance sprint2 33/33 + sprint3 49/49、typecheck 0、docs:check 过
+- 线上待验证：确认卡全链首跑（弹窗→确认→user_confirmed_at→草图；adjust 回向导修订闭环）；judge 回写后文档面板 prd.json 勾选态；迭代重生成 learnings 注入对 loop 行为的实际影响
+- 方法论来源：snarktank/ralph（文档即状态：passes 回写/progress.txt/写给维护者的文档）；确认卡信息设计拍板：P0 断言展开 + 整体确认带逐项异议出口（用户 2026-08-26）
+
+---
+
+## 裁判审查委派化：协作过程可视化（2026-08-26）
+
+| 属性 | 值 |
+|------|-----|
+| **状态** | 已确认 |
+
+### 变更内容
+
+- `[新增]` 新模块 `main/review-delegation.ts`：PRD 六维审查与 MVP 语义审查默认升级为**真·委派子 agent**（用户拍板：协作过程可视化）——经 agent-collaboration M1–M4 派 `role='research'`（物理只读工具面 read_file/list_files/grep/web_fetch，裁判铁律「只判定不修复」由工具面保证而非提示词），生命周期事件（delegation_started/completed/failed）流入 DelegationFeed/CollaborationPanel 实时可见，子会话 JSONL 可回放
+- `[新增]` 合成父键（review-{uuid}）注册父上下文，与 MVP 主 loop 的真实注册完全隔离；finally 三件套清理（停残/注销/清状态，防孤儿子 agent）；120s 等待上限、8 轮子 agent 上限
+- `[修改]` 语义审查委派版的实质升级：产物不再内联截断 24k，子 agent 用只读工具**自行翻代码找证据**；PRD 门委派与直连共用任务体构造
+- `[修改]` 降级链：委派（默认）→ 直连 LLM（既有路径）→ 规则门；开关 BLOMA_DELEGATED_REVIEW（缺省开，='0' 回退直连）；PrdReviewOutcome/SemanticJudgeResult 增 via 字段（delegation/direct，入决策日志）
+- `[修改]` 两调用点（resolveRequirementConfirm/evaluateOnce）透传 projectId/requestId/publish；三个既有测试文件关委派走直连；渲染端零改动（M4-C 事件基建直接消费）
+
+### 影响评估
+
+- 受影响模块：review-delegation（新）/ prd-review / judge-semantic / guide-agent-service / programming-orchestrator / 测试×4
+- 测试：新增 review-delegation 5 例（接线/开关/超时/失败/拋错清理）；目标集 57/57、全量 unit 558/560 + acceptance 129/132（失败均为既有并行 flake 三件套，隔离 12/12 全过）；typecheck 0 错
+- 线上待验证：委派审查首跑（DelegationFeed 可视化效果、子 agent 只读查证质量、耗时）
+
+---
+
+## MVP 终审语义审查腿（裁判域 LLM，非 AC）（2026-08-26）
+
+| 属性 | 值 |
+|------|-----|
+| **状态** | 已确认 |
+
+### 变更内容
+
+- `[新增]` 新模块 `main/judge-semantic.ts`：MVP 终审的 LLM 语义审查腿，归裁判域（只判定不修复），与 prd-review（简化版 AC）刻意区分——审的是「产物是否忠实实现 PRD 每个功能项」，不使用 AC 方法论。逐功能项判定 implemented/partial/missing/deviated/unverified（不确定→unverified 不误杀 canvas/动画类）；证据必须引用产物代码；P0 missing/deviated→blocking、P0 partial/P1 missing/deviated→major，其余仅备注；代码级推导不信任模型自报结论；产物超长截断 24k 并如实标注
+- `[修改]` runJudgeReview 合成裁决（evaluateOnce）：规则引擎先行（return 直接进退回流，省一次 LLM）；规则全绿且 query 可用→语义审查，失败合成 return 进同一退回计数/让渡流；LLM 失败/无渠道→跳过并留痕（judge_semantic），绝不阻断交付。渠道优先 M5 prd 类别路由（可指快模型）
+- `[修改]` JudgeReviewInput/AgentLoopPostTestingInput 增 query/channel_id 透传（ipc/迭代/resume 五个调用点全部接线）；judge-engine 导出 readArtifactText 供语义审查复用；DecisionType 加 judge_semantic
+
+### 影响评估
+
+- 受影响模块：judge-semantic（新）/ programming-orchestrator / judge-engine / decision-log / ipc
+- 测试：新增 judge-semantic 6 例（解析白名单/严重度推导/合成 return+让渡留痕/全绿维持/skip 降级/截断标注）；judge 系既有 19 例、loop 门禁验收 5 例、sprint2 验收 40 例全过；全量 unit 553/555（2 失败为既有 flake，隔离全过）；typecheck 0 错
+- 线上待验证：真实渠道语义审查首跑（误杀率/命中质量）；每轮 MVP 终验增加一次 LLM 调用的耗时（建议 prd 类指快模型）
+
+---
+
+## PRD 裁判审查门：简化版 AC 对抗审计（2026-08-26）
+
+| 属性 | 值 |
+|------|-----|
+| **状态** | 已确认 |
+
+### 变更内容
+
+- `[新增]` 新模块 `main/prd-review.ts`：PRD 落盘后、草图前的裁判审查门。方法论源自用户指定 skill「ac-audit」（~/.claude/skills/ac-audit）的流程精简版——保留六维攻击面 I-F-Z-U-L-G + PRD 权重（F30/U20/L15/G15/I10/Z10）、严重度分级（blocking/major→退回，minor/suggestion→放行）、证据引用/禁编造/禁提修复方案铁律、诚实降级标注 simplified_ac；砍掉多轮循环/Defender 修复/双 Arbiter/Prober/金丝雀/重叠度实测（单轮秒级）
+- `[新增]` 独立一次模型请求（AC 铁律「审查者≠生成者」，不与 PRD 生成合并自查）；渠道优先 M5 prd 类别路由（可指快模型）、回退向导轮 env、再失败降级确定性规则门（只拦空定位/零功能项/描述过短/完全重复硬伤）——永不阻断主流程
+- `[新增]` 审查未过 → 决策卡「忽略问题继续生成 / 我来补充说明」（复用 card_option 回传，零新 IPC）：override→按原需求开草图 + 日志 prd_review_overridden；supplement→提示打字补充回向导修订。代码级裁决不信任模型自报宽松结论（按 severity 推导）
+- `[修改]` guide-agent-service：resolveRequirementConfirm 插审查门（PRD 失败时跳过审查保持原降级）；handleGuideMessage 顶部拦截审查卡回传（先于 resolveCardAnswer）；BLOCKED_DECISION_IDS 加审查卡选项 id；pending 补存 env
+- `[修改]` decision-log：DecisionType 加 prd_review / prd_review_overridden
+
+### 影响评估
+
+- 受影响模块：prd-review（新）/ guide-agent-service / decision-log
+- 测试：新增 guide-prd-review 6 例（pass 分流/卡片留痕/override+supplement/降级/解析白名单/规则门）；既有 guide 系 5 文件 26 例全过；全量 unit 546/549（3 失败为既有 flake 三件套，隔离 30/30 全过）；typecheck 0 错
+- 线上待验证：真实渠道六维审查首跑（问题命中质量/误报率）、prd 类别路由指快模型的耗时
+
+---
+
+## 渠道存储独立化：bloma-channels.json（2026-08-26）
+
+| 属性 | 值 |
+|------|-----|
+| **状态** | 已确认 |
+
+### 变更内容
+
+- `[修复]` 渠道存储从与 Proma 共用的 `~/.proma/channels.json` 迁至专属 `~/.proma/bloma-channels.json`（`config-paths.getBlomaChannelsPath`）：实测 Proma(v9) 写入共用文件时会整体丢弃本项目 snake_case 条目（2026-08-26 00:27 文件实锤，仅剩 camelCase 条目），导致双开场景下本项目渠道每次被清空、每次启动重配
+- `[新增]` loadChannels 一次性迁移：新文件不存在时从旧共用文件提取 snake_case 条目写入（空迁移也落盘作完成标记），绝不回写旧共用文件；saveChannels 只写新文件
+- `[修改]` seed-channel / diagnose-channels 脚本与 3 处测试落盘断言同步新文件名；渠道相关 6 文件 44 例全过
+- `[运维]` 用户渠道已从 8-20 备份（channels.json.bak-20260820-012132）恢复 3 条（ds/kimi/glm，safeStorage 密钥随备份时点，若后换过 key 需重填一次）
+
+### 影响评估
+
+- 受影响模块：config-paths / channel-manager / scripts×2 / 测试×4
+- 兼容性：旧共用文件不再读写（Proma 地盘）；isOursChannel 过滤语义不变；既有渠道经迁移/恢复保留
+
+---
+
+## 向导需求确认弹窗 + 市调 + PRD 前移（2026-08-26）
+
+| 属性 | 值 |
+|------|-----|
+| **状态** | 已确认 |
+
+### 变更内容
+
+**向导新增 confirm_requirements 动作（需求确认弹窗）**
+- `[新增]` 提示词三选一：需求基本成型 → 输出 confirm_requirements（requirements 清单 + research_queries 市调查询），平台执行市调后弹独立确认窗（RequirementConfirmDialog）：需求勾选清单 + 市调摘要折叠 + 三出口（确认勾选子集 / 继续补充说明→回向导 / 由向导决定），对齐「不得臆断，除非用户选择由向导决定」
+- `[新增]` 新模块 `main/guide-research.ts`：DDG html 免 key 市调（15s 超时、结果块解析、uddg 跳转解码、广告位剔除、去重 top6、失败降级 available:false 不阻断弹窗）；SSRF 防护与文本提取抽取为共享层 `main/net-guard.ts`（web_fetch 同源复用，行内标签剥除不再插入多余空格）
+- `[修改]` D3 轮次熔断语义修订：连续 2 轮不收敛由「强制 auto 开工」改为「转入需求确认弹窗」（弹窗内保留让渡出口），决策类型新增 clarification_forced_confirm/requirement_confirm_card/requirement_confirmed
+- `[新增]` PRD 前移：确认/让渡后立即 resolvePrdBackplane + syncDocuments 新检查点 requirement_confirmed（写 requirement_confirmed.md + prd.json，早于草图；失败不阻断草图）；DocumentSyncInput.checkpoint 联合类型同步
+- `[新增]` IPC 四层新通道 `agent:confirm-requirements`（confirm/delegate + requirement_ids；supplement 走既有 send-message）：shared/types → ipc.ts（含 decision 校验）→ preload/bridge → renderer；ipc-contract expectedChannels 同步
+- `[新增]` 渲染端 requirementConfirmFamily atom（事件归约 kind=requirement_confirm，extractDecisionCards 天然不弹内联卡）+ RequirementConfirmDialog 组件常驻挂载（App 根，同 PermissionDialog）
+
+### 影响评估
+
+- 受影响模块：guide-agent-service / guide-research（新）/ net-guard（新）/ document-engine / decision-log / ipc / preload-bridge / agent-atoms / RequirementConfirmDialog（新）/ App / shared-types / api-spec
+- 测试：新增 unit 15 例（guide-research 4 / guide-requirement-confirm 5 / requirement-confirm-dialog 5 含事件归约）；修订 guide-clarification-round-limit 1 例与 acceptance sprint2 guide-clarification-fixes ③（D3 新语义）；ipc-contract 同步 3 例全过；typecheck 0 错、docs:check 过
+- 线上待验证：DDG 市调真实链路（免 key 端点稳定性）、confirm 全链（市调→弹窗→确认→PRD→草图）真实渠道首跑
+
+---
+
+## 工程修复与联网工具（2026-08-25）
+
+| 属性 | 值 |
+|------|-----|
+| **状态** | 已确认 |
+
+### 变更内容
+
+**缺陷④修复：后台链路刷新会话索引**
+- `[修复]` 编程编排器后台任务（草图/MVP/迭代/终验/让渡恢复）不经 runAgent，agent-sessions.json 索引 updated_at 停在最后一次交互消息（实测后台跑完数小时仍不刷新，历史列表排序失真）——`publish()` 前置节流刷新（同会话 30s 一次，旁路容错不阻断事件）；附带后台链路回填 Project.last_session_id；新增 seam `resetSessionActivityThrottleForTests`
+
+**意图分流放行一致化（遗留待查项闭环）**
+- `[修复]` L1 修改词表先于进度子串门：「进度词 + 修改动词」混合句（「做完了没？把按钮换成蓝色」）此前被进度子串门整句吞掉、永远到不了 L1/L3；纯进度句/纯寒暄行为不变
+- `[修复]` L3 应答解析死正则：/\b(...|修改|改|...)\b/ 的 \b 仅基于 ASCII \w，中文分支永不命中，模型答「修改」被误判 other（此前只因恰好答 ASCII「modify」侥幸工作）——归一化后整 token 匹配 + ASCII \b 兜底
+
+**Agent Loop 新增 web_fetch 联网只读工具（9 工具）**
+- `[新增]` 编程/子/探索角色可用：抓取公网网页/文档→纯文本；SSRF 防护（私网/环回/链路本地/保留段 IP、localhost/.local/.internal、无点主机名拒绝，重定向终态复检）；15s 超时、2MB 响应上限、ACI 截断（缺省 12000 字符）；权限登记 warning（防 URL 夹带数据外发）；api-spec §12.10/§13 同步
+
+**工程卫生**
+- `[修复]` 删除陷阱34修复前残留的 `undefined/` 测试污染目录与空目录 `-p/`；README §3.7 失效的 `当前已完成.md` 引用改指 changelog
+
+### 影响评估
+
+- 受影响模块：programming-orchestrator / orchestrator / agent-tools / permission-service / api-spec / README
+- 测试：新增 unit 8 例（session-activity-refresh 2 / ready-iteration 意图分流 2 / agent-tools web_fetch 4 含角色裁剪与权限登记断言）；受影响单测全绿；typecheck 0 错、docs:check 过
+
+---
+
+## Sprint 3 项目管理补全 + 多项目预览 + 远程功能整合（2026-08-15）
+
+| 属性 | 值 |
+|------|-----|
+| **状态** | 已确认（随 `sprint2` push 发布） |
+
+### 变更内容
+
+**项目管理（迁移自 Proma 归档/删除 + 安全独立计数）**
+- `[新增]` 项目硬删除 `project:delete`：索引条目 + 项目/文档/快照/事件文件 + 关联会话物理清理，路径安全防护，删除前停沙箱
+- `[新增]` 取消归档 `project:unarchive`（archived → active）
+- `[新增]` 历史列表「进行中 / 已归档」视角 Tab，`project:list` 增 `scope`（active/archived/all）
+- `[新增]` 历史项目行内「归档 / 恢复 / 删除」操作 + 删除二次确认弹窗
+- `[新增]` 安全独立计数（PRD §10.5）：`Project.security_repair_count`，repair-engine 新增 `security_error` 类别，上限 3 次不计入普通退回
+
+**多项目预览**
+- `[新增]` 多项目预览地址按 project_id 隔离（`previewUrlsAtom`），各项目独立沙箱预览
+
+**澄清选项（对齐协作者工作）**
+- `[修改]` GUIDE_SYSTEM_PROMPT 澄清部分以协作者 86ff8eb 版本为准（一个明确问句 + 可点选答案、选项互斥具体、末条固定「你帮我决定」）；本地「澄清选项约束为具体子类型」（c2）因语义重复放弃（`git revert`）
+
+**渠道模型字段**
+- `[修复]` 渠道模型取 `name` 而非 `id`（id 是渠道内唯一标识，不能传 API），`buildSdkEnv` 透传 `provider_type`；含 `autoNameProject` 内部字段对齐
+
+**整合协作者已推送工作**
+- `[新增]` 决策卡片规范化：澄清选项纠偏 + 修改确认门
+- `[修复]` 回滚 EBUSY：沙箱停稳杀净 + rmSync 重试 + cwd 锁根除
+- `[新增]` 需求确认后自动命名：LLM 起名 + 口述前缀剥离兜底
+
+**工程/测试**
+- `[修复]` S2-PROJECT-001 E2E mock 补齐（`getFirstEnabledChannel` + `buildSdkEnv` PATH + `getSdkQuery` 确定性 LLM 响应）
+- `[新增]` 声明 `@playwright/test` E2E 依赖（此前未声明，依赖 node_modules 残留）
+- `[修复]` `npm audit fix` 修复 nanoid/postcss（extract-zip 需 electron breaking 升级，记录豁免）
+
+### 影响评估
+
+- 受影响文档：DOC-4.1 `api-spec.md`（v1.2，补 `project:unarchive`/`project:delete`/`project:list` scope）
+- 受影响模块：project-service / repair-engine / ipc / preload-bridge / ProjectHistoryPage / App / programming-orchestrator / guide-agent-service / agent-atoms / platform-services / session-service / orchestrator / shared-types
+- 测试：新增 S3-PROJECT-001~017 + 协作者测试（auto-name / guide-agent-service / orchestrator-ready-iteration / platform-services）；`npm run test:all` 全绿
+- 是否需要回滚测试：是（归档/删除/回滚路径已覆盖）
+
+### 协作备注
+
+- 本次 push 通过 `git merge origin/sprint2` 整合协作者 bukejiegg 的 3 个 commit（决策卡片规范化 / 回滚 EBUSY 修复 / 需求自动命名）
+- 本地「澄清选项约束」（c2）与协作者版本语义重复，已 `git revert` 放弃
+- 作者 email 已统一为 `leiyuwan22@gmail.com`（filter-branch 修正），备份分支 `backup-sprint2-pre-push` 保留
+
 ---
 
 ## 1. 版本号规则
@@ -272,6 +602,33 @@ docs/
 ## 7. 代码版本变更记录
 
 > 进入实现阶段后的代码版本修订记录，按时间倒序排列（最新在最前）。对应 git tag 与语义化版本。
+
+### v1.3（2026-08-25）
+
+| 属性 | 值 |
+|------|-----|
+| **日期** | 2026-08-25 |
+| **状态** | 待审 |
+
+**变更内容**（Agent Loop 转正唯一运行时 + 委派协作收尾 + 审计修复 + 废旧管道删除）：
+
+- `[变更]` **Agent Loop 转正**：`BLOMA_AGENT_LOOP` 缺省开启（`=0` 紧急关闭、`=1` 兼容无害），agent loop 成为 MVP 生成唯一运行时；渠道不支持工具循环 / 探测失败 / 探测无结论一律发布用户可见错误并如实抛错，不再静默回退固定管道
+- `[变更]` **路由层能力过滤**：`resolveChannelEnv`/`pickBackupChannelEnv` 增 `requireTools`，MVP 类别按 `supports_tools` 过滤（主渠道不支持 → 走备用序，全不支持 → `tools_unsupported`；`undefined` 放行探测）
+- `[新增]` **委派协作 M1~M4**：`delegate_agent`/`wait_for_delegations`/`ask_delegation_question`/`answer_delegation` 工具 + 子会话生命周期（`delegation_started`/`delegation_completed`/`delegation_failed` 事件）+ loop 门禁 + judge 终审 + 渲染端协作视图
+- `[变更]` **终验门禁 M4-A**：`runAgentLoopPostTesting` 语义固定为「只终验不重修」（GWT → 安全扫描 → judge），loop 内自测自修已用尽修复预算，不给外部修复预算
+- `[变更]` **提示词槽位**：废弃 `mvp-system`，新增 `loop-system`（追加模式，覆盖内容 append 在动态 system prompt 之后，背板锚定段不可覆盖）
+- `[移除]` **废旧管道**：删除 `mvp-engine-llm.ts` / `mvp-engine.ts` / `repair-engine.ts` 及 `resolveMvp`/`ensureSandboxRunning`/`runPostMvpTestingFlow`/管道回退分支；埋点契约不变只换来源（`self_repair_triggered` → loop `onRepairRound`；`programming_execution` 无新产生点，类型保留向后兼容历史 JSONL）
+- `[修复]` 审计报告九项：委派并发/生命周期、一致性、收尾三类（P1/P2/P3）
+- `[变更]` **存量项目**：不写迁移代码，切换前 `via_agent_loop=false` 项目在旧版完成（D6）
+
+**影响评估**：
+
+- 受影响的文档：DOC-4.1 api-spec.md（补 `delegation_*` 事件、移除旧管道专属通道）、DOC-3.4 data-model.md
+- 受影响的模块：`main/programming-orchestrator.ts`、`main/runtime-fallback.ts`、`main/agent-loop.ts`、`main/agent-tools.ts`、`main/agent-collaboration.ts`、`main/project-scaffold.ts`、`main/prompt-service.ts`、`shared/types.ts`、`main/ipc.ts`
+- 删除文件：`main/mvp-engine-llm.ts`、`main/mvp-engine.ts`、`main/repair-engine.ts` 及对应单测/验收
+- 是否需要回滚测试：是（`npm run typecheck`、`npm run test:unit`、`npm run test:acceptance:sprint0/2/3`、`npm run docs:check`）
+
+---
 
 ### v1.2（2026-08-07）
 

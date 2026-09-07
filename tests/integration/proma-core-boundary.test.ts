@@ -16,7 +16,9 @@ describe('Proma core boundary', () => {
       /safeStorage/,
       /encryptString/,
       /decryptString/,
-      /api_key/,
+      // 注意：不禁止 api_key 字段名——renderer 建渠道表单需按契约（ChannelCreateInput.api_key）
+      // 把用户新输入的 key 经 IPC 交 main 加密；读回时 main 已脱敏为 '***'。真正安全边界是
+      // safeStorage/encryptString/decryptString（renderer 不得做加密），仍在此禁止。
     ])
   })
 

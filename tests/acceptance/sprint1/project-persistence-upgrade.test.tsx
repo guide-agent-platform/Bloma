@@ -79,7 +79,8 @@ describe('Sprint 1 project persistence and upgrade acceptance', () => {
 
     expect(snapshots.some((snapshot) => snapshot.kind === 'upgrade')).toBe(true)
     expect(upgraded.data.mode).toBe('longterm')
-    expect(upgraded.data.current_stage).toBe('upgrading')
+    // M-16：升级是瞬时切换，直接落在合法停留态 ready（不再置无出口的 upgrading）
+    expect(upgraded.data.current_stage).toBe('ready')
   })
 })
 

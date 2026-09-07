@@ -1,0 +1,31 @@
+{
+  "type": "web_fullstack",
+  "version": 2,
+  "description": "Web 全栈骨架（PR-1 骨架先行 + PR-2 构建门禁）：loop 前由系统确定性渲染，编程 Agent 在其上填充实现；loop 后构建门禁用内置 esbuild 打包校验模块图",
+  "build": {
+    "tool": "esbuild",
+    "entry": "src/app.js",
+    "outfile": "dist/app.js",
+    "format": "iife",
+    "minify": true
+  },
+  "files": [
+    {
+      "path": "index.html",
+      "role": "唯一入口页：布局分区骨架（导航/主区/状态/页脚），业务内容待填充"
+    },
+    {
+      "path": "src/app.js",
+      "role": "逻辑入口（兼构建入口）：状态/渲染/事件三段骨架；模块化可选——可拆分 src/ 下多个 .js 用 import 组织，构建门禁会打包校验"
+    },
+    {
+      "path": "src/styles.css",
+      "role": "样式基线：布局与通用组件类（卡片/表单/按钮/空态），按需扩展"
+    },
+    {
+      "path": "src/examples/data-module.js",
+      "role": "只读参考示例：中性数据模块模式（内联数据 + 增删改查纯函数 + 渲染分离）——参考结构与模式，不要照抄业务内容",
+      "readonly": true
+    }
+  ]
+}

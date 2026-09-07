@@ -1,0 +1,12 @@
+{
+  "slug": "input-control",
+  "name": "键盘输入",
+  "categories": ["game"],
+  "version": 1,
+  "summary": "键盘按键态：按下/边沿检测、WASD 与方向键双通道映射、触摸端虚拟方向键兜底",
+  "whenToUse": "游戏需要方向控制/动作键（移动、跳跃、攻击），且要兼顾桌面键盘与移动触摸。",
+  "whenNotToUse": "仅鼠标/点击交互（无键盘/移动需求）。",
+  "files": [
+    { "path": "input-control.js", "role": "ESM 源码：createInputManager(mapping) 返回 isDown/wasPressed/attachTouchPad" }
+  ]
+}

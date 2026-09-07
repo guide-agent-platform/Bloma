@@ -108,7 +108,7 @@ Feature 文件：
 
 | 文档 | 说明 |
 |---|---|
-| `当前已完成.md` | 当前完成状态和剩余工作记录 |
+| `07_VERSIONS/changelog.md` | 版本变更记录（当前状态与剩余工作以 changelog + git log 为准） |
 
 ---
 
@@ -214,7 +214,7 @@ Phase 1 发布前必须满足：
 | 桌面运行 | Electron |
 | Renderer | React、React DOM、Jotai |
 | 类型与构建 | TypeScript、Vite、esbuild |
-| 自动化测试 | Vitest、Testing Library、jsdom |
+| 自动化测试 | Vitest、Testing Library、jsdom、Playwright Electron |
 
 ### 9.3 验证命令
 
@@ -227,6 +227,8 @@ npm run test:regression:sprint0
 npm run test:regression:sprint1
 npm run test:acceptance:sprint0
 npm run test:acceptance:sprint1
+npm run test:e2e:sprint1
+npm run test:e2e
 npm run test:electron-smoke
 npm run test:all
 npm run docs:check
@@ -241,3 +243,4 @@ npm run docs:check
 | v1.0 | 2026-07-10 | 首版，建立项目总览、文档导航、Proma core 约束、三人分工、实现顺序和发布门禁 |
 | v1.1 | 2026-07-25 | 增加测试编写与报告规范导航 |
 | v1.2 | 2026-07-25 | 增加开发依赖、测试命令和 Git 产物边界说明 |
+| v1.3 | 2026-07-25 | 增加 Sprint 1 Playwright Electron E2E 命令与依赖 |

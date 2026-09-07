@@ -1,13 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, isAbsolute, join, relative, resolve } from 'node:path'
 import { createServer } from 'node:net'
 import type {
   AnalyticsTrackInput,
   AnalyticsTrackResult,
-  DocumentRef,
-  DocumentSyncInput,
-  DocumentSyncResult,
   RollbackResult,
   SandboxRunInput,
   SandboxRunResult,
@@ -15,18 +14,25 @@ import type {
   SandboxStopResult,
   Snapshot,
   SnapshotCreateInput,
+  SnapshotDocumentEntry,
+  SnapshotDocumentListResult,
   SnapshotRollbackInput,
 } from '../shared/types'
 import { getAnalyticsPath, getDocumentsDir, getSnapshotsDir } from '../storage/config-paths'
 import { appendJsonLine, readJsonFile, writeJsonFile } from '../storage/json-store'
+import { readDocumentsManifest } from './document-engine'
 import { findProject, updateProject } from './project-service'
 
 interface SandboxProcess {
   process: ChildProcess
   port: number
+  /** 启动命令（幂等守卫据此区分「内嵌静态服务器」与显式命令沙箱，command 不匹配不复用） */
+  command?: string
+  /** LLM 代理环境签名（完整程序渠道）：env 变化即重启（幂等守卫三项比对之一） */
+  envSig: string
 }
 
-type SandboxProcessFactory = (projectRoot: string, port: number, command?: string) => ChildProcess
+type SandboxProcessFactory = (projectRoot: string, port: number, command?: string, llmEnv?: Record<string, string>) => ChildProcess
 type PortAllocator = (start: number, end: number) => Promise<number>
 type HealthCheck = (url: string) => Promise<boolean>
 type Sleep = (ms: number) => Promise<void>
@@ -38,7 +44,15 @@ const DEFAULT_SANDBOX_TIMEOUT_MS = 30_000
 const HEALTH_CHECK_INTERVAL_MS = 250
 const MAX_PORT_ATTEMPTS = 10
 
+/** 快照容量策略（A2-16，闭环 ATK3-G-001，architecture §14）：单项目活跃快照上限。 */
+export const MAX_SNAPSHOTS_PER_PROJECT = 100
+/** 归档保护集：保留最近 N 个 + 每种 kind 最新一个，即使超限也不归档。 */
+export const SNAPSHOT_RECENT_KEEP = 20
+
 const activeSandboxes = new Map<string, SandboxProcess>()
+
+/** 沙箱 stdout/stderr 内部日志（P0 不可见，供 A2-08 修复循环与调试分析）。 */
+const sandboxLogs = new Map<string, string>()
 let sandboxProcessFactory: SandboxProcessFactory = spawnStaticServer
 let allocatePort: PortAllocator = findAvailablePort
 let sandboxHealthCheck: HealthCheck = defaultHealthCheck
@@ -51,14 +65,38 @@ const EXIT_PORT_IN_USE = 10
 export async function runSandbox(input: SandboxRunInput): Promise<SandboxRunResult> {
   const project = findProject(input.project_id)
 
+  // 幂等守卫：同一 project 已 running 且健康时直接复用（不 stop 不 spawn）。
+  // 消除 runMvpViaAgentLoop 交付前对 loop 内 run_preview 沙箱的冗余重启（preview_url 抖动）；
+  // 崩溃/挂起时 map 已被 exit 清理或 healthCheck 失败 → 照常走 stop+spawn 重启。
+  // llm_env 签名参与比对（完整程序渠道）：loop 内 run_preview 起的沙箱无 AI 环境，
+  // 交付时带 llm_env 的调用必须重启注入，不能复用无环境实例。
+  const existing = activeSandboxes.get(project.project_id)
+  const llmEnvSig = JSON.stringify(input.llm_env ?? {})
+  if (
+    existing
+    && existing.command === (input.command ?? undefined)
+    && existing.envSig === llmEnvSig
+    && (await sandboxHealthCheck(`http://localhost:${existing.port}`))
+  ) {
+    return { status: 'running', preview_url: `http://localhost:${existing.port}`, port: existing.port }
+  }
+
   await stopSandbox(input)
+  sandboxLogs.set(input.project_id, '')
 
   const timeoutMs = input.timeout_ms ?? DEFAULT_SANDBOX_TIMEOUT_MS
   for (let attempt = 0; attempt < MAX_PORT_ATTEMPTS; attempt += 1) {
     const port = await allocatePort(SANDBOX_PORT_START, SANDBOX_PORT_END)
     const previewUrl = `http://localhost:${port}`
-    const child = sandboxProcessFactory(project.root_path, port, input.command)
-    activeSandboxes.set(project.project_id, { process: child, port })
+    const child = sandboxProcessFactory(project.root_path, port, input.command, input.llm_env)
+    activeSandboxes.set(project.project_id, { process: child, port, command: input.command, envSig: llmEnvSig })
+
+    // 捕获 stdout/stderr 到内部日志（供修复循环分析，不向 P0 展示堆栈）
+    const appendLog = (chunk: Buffer | string): void => {
+      sandboxLogs.set(input.project_id, (sandboxLogs.get(input.project_id) ?? '') + String(chunk))
+    }
+    child.stdout?.on('data', appendLog)
+    child.stderr?.on('data', appendLog)
 
     const started = await waitForSandbox(child, previewUrl, timeoutMs)
     if (started.ok) {
@@ -72,20 +110,49 @@ export async function runSandbox(input: SandboxRunInput): Promise<SandboxRunResu
     child.kill()
     activeSandboxes.delete(project.project_id)
     if (started.category !== 'port_unavailable') {
-      return { status: 'failed', error_summary: sandboxError(started.category) }
+      return { status: 'failed', error_summary: classifySandboxFailure(started.category, getSandboxLogs(input.project_id)) }
     }
   }
 
-  return { status: 'failed', error_summary: sandboxError('port_unavailable') }
+  return { status: 'failed', error_summary: classifySandboxFailure('port_unavailable', '') }
 }
 
-export function stopSandbox(_input: SandboxStopInput): SandboxStopResult {
+/** 读取沙箱内部日志（stdout/stderr 合并），供修复循环与调试使用。 */
+export function getSandboxLogs(projectId: string): string {
+  return sandboxLogs.get(projectId) ?? ''
+}
+
+export async function stopSandbox(_input: SandboxStopInput): Promise<SandboxStopResult> {
   const current = activeSandboxes.get(_input.project_id)
   if (current) {
-    current.process.kill()
     activeSandboxes.delete(_input.project_id)
+    await terminateProcessTree(current.process)
   }
   return { stopped: true }
+}
+
+/** 等待进程退出的兜底上限：超过即放弃等待（进程可能已僵死，调用方的 rmSync 重试兜底）。 */
+const TERMINATE_WAIT_MS = 2_000
+
+/**
+ * 终止沙箱进程并等待其真正退出。Windows 下两个坑（回滚 rmSync 报 EBUSY 的根因）：
+ * ① kill() 只是通知，进程退出与 cwd/句柄锁释放是异步的，不等退出就删目录会撞锁；
+ * ② shell:true 包装的 npm 命令，kill 只终止 cmd.exe 外壳，真正的 node 孙进程存活
+ *   且 cwd 仍锁着项目目录——标记 treeKillWin32 的进程用 taskkill /T /F 整树击杀。
+ * （测试注入的 mock 进程无此标记，只走 kill()，不会被真实 taskkill 误伤）
+ */
+async function terminateProcessTree(child: ChildProcess): Promise<void> {
+  // 真实运行中进程两字段为 null，已退出为数值/信号串；测试 mock 未定义视为运行中
+  const alreadyExited = (child.exitCode ?? null) !== null || (child.signalCode ?? null) !== null
+  if (alreadyExited) return
+  if (process.platform === 'win32' && (child as ChildProcess & { treeKillWin32?: boolean }).treeKillWin32 && typeof child.pid === 'number') {
+    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
+  } else {
+    child.kill()
+  }
+  const exited = new Promise<void>((resolvePromise) => child.once('exit', () => resolvePromise()))
+  const giveUp = new Promise<void>((resolvePromise) => setTimeout(resolvePromise, TERMINATE_WAIT_MS))
+  await Promise.race([exited, giveUp])
 }
 
 export function setSandboxRuntimeForTests(overrides: {
@@ -136,27 +203,43 @@ async function waitForSandbox(
 
 const ALLOWED_SANDBOX_COMMANDS = new Set(['npm run dev', 'npm start', 'node static-server'])
 
-function spawnStaticServer(projectRoot: string, port: number, command?: string): ChildProcess {
+function spawnStaticServer(projectRoot: string, port: number, command?: string, llmEnv?: Record<string, string>): ChildProcess {
+  const options = sandboxSpawnOptions(projectRoot, port, llmEnv)
   if (command) {
     const normalized = command.trim()
     if (!ALLOWED_SANDBOX_COMMANDS.has(normalized)) {
       throw new Error(`SANDBOX_COMMAND_NOT_ALLOWED: ${normalized}`)
     }
-    const [executable, ...args] = normalized.replaceAll('{port}', String(port)).split(/\s+/).filter(Boolean)
-    return spawn(executable, args, sandboxSpawnOptions(projectRoot))
+    const withPort = normalized.replaceAll('{port}', String(port))
+    const [executable, ...args] = withPort.split(/\s+/).filter(Boolean)
+    // Windows 下 npm 为 npm.cmd，spawn 无法直接执行，需经 shell 解析（静态服务器等直接 spawn）
+    const needsShell = /\.(cmd|bat)$/i.test(executable) || executable === 'npm'
+    if (needsShell) {
+      const child = spawn(withPort, { ...options, shell: true })
+      // shell 包装的进程树：kill 只杀外壳不杀孙进程，Windows 下需整树击杀（见 terminateProcessTree）
+      if (process.platform === 'win32') (child as ChildProcess & { treeKillWin32?: boolean }).treeKillWin32 = true
+      return child
+    }
+    return spawn(executable, args, options)
   }
-  return spawn(resolveNodeExecutable(), ['-e', STATIC_SERVER_SCRIPT, String(port)], sandboxSpawnOptions(projectRoot))
+  // 内嵌脚本不占项目目录作 cwd（Windows：进程 cwd 会锁目录，回滚 rmSync 报 EBUSY），
+  // 服务根目录改由参数传入；cwd 落在系统临时目录。
+  return spawn(resolveNodeExecutable(), ['-e', STATIC_SERVER_SCRIPT, String(port), projectRoot], sandboxSpawnOptions(tmpdir(), port, llmEnv))
 }
 
 function resolveNodeExecutable(): string {
-  return process.env.npm_node_execpath || process.env.NODE || process.execPath
+  // Electron 下 process.execPath 是 electron.exe 而非 node，不能当作 node 回退；
+  // 优先 npm_node_execpath / NODE，最后退回 PATH 上的 node（与 MVP 路径 spawn('node', …) 一致）。
+  return process.env.npm_node_execpath || process.env.NODE || 'node'
 }
 
-function sandboxSpawnOptions(projectRoot: string): SpawnOptions {
+function sandboxSpawnOptions(projectRoot: string, port: number, llmEnv?: Record<string, string>): SpawnOptions {
   return {
     cwd: projectRoot,
-    env: { PATH: process.env.PATH, Path: process.env.Path },
-    stdio: 'ignore',
+    // BLOMA_APP_LLM_*（完整程序渠道）：产物 /api/llm 同源代理的模型环境，密钥只进
+    // 本进程，前端代码/项目文件永远拿不到
+    env: { PATH: process.env.PATH, Path: process.env.Path, PORT: String(port), ...(llmEnv ?? {}) },
+    stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   }
 }
@@ -188,13 +271,24 @@ async function defaultHealthCheck(url: string): Promise<boolean> {
   }
 }
 
-function sandboxError(category: 'process_crashed' | 'startup_timeout' | 'port_unavailable'): SandboxRunResult['error_summary'] {
-  const summaries = {
-    process_crashed: '预览启动失败，请再试一次。',
-    startup_timeout: '预览启动时间比预期更长，请稍后重试。',
-    port_unavailable: '预览端口暂时不可用，请稍后重试。',
+/** 将沙箱启动失败分类为对 P0 可读的错误摘要（不暴露堆栈/内部标识），供 A2-08 修复循环识别依赖/语法问题。 */
+function classifySandboxFailure(
+  category: 'process_crashed' | 'startup_timeout' | 'port_unavailable',
+  stderr: string,
+): SandboxRunResult['error_summary'] {
+  if (category === 'port_unavailable') {
+    return { category: 'port_unavailable', user_visible_summary: '预览端口暂时被占用，正在换一个。' }
   }
-  return { category, user_visible_summary: summaries[category] }
+  if (category === 'startup_timeout') {
+    return { category: 'timeout_error', user_visible_summary: '预览启动时间比预期更长，请稍后重试。' }
+  }
+  if (/Cannot find module|ENOENT|npm ERR/i.test(stderr)) {
+    return { category: 'dependency_error', user_visible_summary: '预览缺少运行依赖，无法启动。' }
+  }
+  if (/SyntaxError|Unexpected token/i.test(stderr)) {
+    return { category: 'syntax_error', user_visible_summary: '预览代码存在语法错误，无法启动。' }
+  }
+  return { category: 'runtime_error', user_visible_summary: '预览启动失败，请再试一次。' }
 }
 
 function sleep(ms: number): Promise<void> {
@@ -212,14 +306,155 @@ async function defaultSnapshotCapture(): Promise<{ buffer: Buffer; extension: 's
 }
 
 const STATIC_SERVER_SCRIPT = `
-const { createReadStream, existsSync, statSync } = require('node:fs');
+const { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync } = require('node:fs');
 const { createServer } = require('node:http');
 const { extname, join, normalize, resolve, sep } = require('node:path');
-const root = process.cwd();
+// 服务根目录由参数传入（cwd 已挪到系统临时目录，避免 Windows 下进程 cwd 锁住项目目录）
+const root = resolve(process.argv[2]);
 const port = Number(process.argv[1]);
 const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml' };
+// ---- 后端路由自动挂载（完整程序阶段 1，2026-09-06；与产物 static-server.js 模板同构）----
+const ROUTES_DIR = join(root, 'server', 'routes');
+const DATA_DIR = join(root, 'data');
+function sendJson(res, code, obj) {
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify(obj));
+}
+function dataPath(name) {
+  const safe = normalize(String(name || '')).replace(/^([/\\\\.]+)+/, '');
+  const p = resolve(join(DATA_DIR, safe + (extname(safe) ? '' : '.json')));
+  if (!p.startsWith(DATA_DIR + sep)) throw new Error('bad_data_path');
+  return p;
+}
+function readData(name, fallback) {
+  try { return JSON.parse(readFileSync(dataPath(name), 'utf8')); } catch (e) { return fallback; }
+}
+function writeData(name, value) {
+  const p = dataPath(name);
+  mkdirSync(p.slice(0, p.lastIndexOf(sep)), { recursive: true });
+  const tmp = p + '.tmp';
+  require('node:fs').writeFileSync(tmp, JSON.stringify(value, null, 2), 'utf8');
+  require('node:fs').renameSync(tmp, p);
+}
+const routes = [];
+function loadRoutes() {
+  routes.length = 0;
+  if (!existsSync(ROUTES_DIR)) return;
+  for (const file of readdirSync(ROUTES_DIR).filter((f) => f.endsWith('.js')).sort()) {
+    try {
+      const fileUrl = join(ROUTES_DIR, file);
+      // 热加载：应用可在预览运行中写路由文件，删 require 缓存让下一次请求拿到新代码
+      delete require.cache[require.resolve(fileUrl)];
+      const mod = require(fileUrl);
+      const prefix = '/api/' + file.replace(/\\.js$/, '');
+      const ctx = { dataDir: DATA_DIR, readData: readData, writeData: writeData, sendJson: sendJson };
+      for (const [key, handler] of Object.entries(mod || {})) {
+        const m = /^(GET|POST|PUT|PATCH|DELETE)\\s+\\/(.*)$/.exec(key);
+        if (!m || typeof handler !== 'function') continue;
+        // 裸 '/' 路由挂成 /api/<前缀>（无尾斜杠），与请求侧的尾斜杠归一化对齐
+        const routePath = ('/' + prefix.slice(1) + '/' + m[2].replace(/^\\/+/, '')).replace(/\\/+$/, '');
+        routes.push({ method: m[1], path: routePath, handler: handler, ctx: ctx });
+      }
+    } catch (e) {
+      console.error('[routes] 挂载失败 ' + file + ': ' + (e && e.message));
+    }
+  }
+}
+function matchRoute(method, pathname) {
+  for (let i = routes.length - 1; i >= 0; i -= 1) {
+    const r = routes[i];
+    if (r.method !== method) continue;
+    if (r.path === pathname) return r;
+    const rp = r.path.split('/'); const ap = pathname.split('/');
+    if (rp.length === ap.length && rp.some((s) => s.startsWith(':')) && rp.every((s, j) => s.startsWith(':') || s === ap[j])) {
+      const params = {}; rp.forEach((s, j) => { if (s.startsWith(':')) params[s.slice(1)] = decodeURIComponent(ap[j]); });
+      return { ...r, params: params };
+    }
+  }
+  return undefined;
+}
+async function handleApi(req, res, rawUrl) {
+  loadRoutes();
+  const hit = matchRoute(req.method, rawUrl.pathname.replace(/\\/+$/, '') || rawUrl.pathname);
+  if (!hit) { sendJson(res, 404, { error: 'not_found' }); return; }
+  const query = Object.fromEntries(rawUrl.searchParams.entries());
+  let body = undefined;
+  if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+    const raw = await new Promise((ok) => { let s = ''; req.on('data', (c) => { s += c; if (s.length > 512 * 1024) req.destroy(); }); req.on('end', () => ok(s)); req.on('error', () => ok(s)); });
+    if (raw) { try { body = JSON.parse(raw); } catch (e) { sendJson(res, 400, { error: 'bad_json' }); return; } }
+  }
+  try { await hit.handler(req, res, { ...hit.ctx, query: query, body: body, params: hit.params || {} }); }
+  catch (e) { sendJson(res, 500, { error: 'route_error', message: String(e && e.message || e).slice(0, 200) }); }
+}
+// ---- 同源 AI 代理（Bloma 完整程序渠道，2026-09-06；与产物模板同构）----
+// 前端 CSP 只放行同源（connect-src 'self'），浏览器永远不直接出网；需要真实模型
+// 能力的功能统一 POST /api/llm，由本进程（Bloma 注入 BLOMA_APP_LLM_* 环境变量）
+// 代为出网。密钥只存在于本进程环境变量，绝不写入前端代码/项目文件。
+const LLM_BASE = (process.env.BLOMA_APP_LLM_BASE_URL || '').replace(/\\/+$/, '');
+const LLM_KEY = process.env.BLOMA_APP_LLM_KEY || '';
+const LLM_MODEL = process.env.BLOMA_APP_LLM_MODEL || '';
+const LLM_PROTOCOL = process.env.BLOMA_APP_LLM_PROTOCOL === 'anthropic' ? 'anthropic' : 'openai';
+const LLM_TIMEOUT_MS = Number(process.env.BLOMA_APP_LLM_TIMEOUT_MS) || 60000;
 const server = createServer((req, res) => {
   const rawUrl = new URL(req.url || '/', 'http://localhost');
+  if (rawUrl.pathname === '/api/llm' && (req.method === 'POST' || req.method === 'OPTIONS')) {
+    if (req.method === 'OPTIONS') { res.writeHead(403); res.end('Forbidden'); return; }
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; if (raw.length > 512 * 1024) req.destroy(); });
+    req.on('end', () => {
+      let body = {};
+      try { body = JSON.parse(raw || '{}'); } catch (e) { sendJson(res, 400, { error: 'bad_json' }); return; }
+      const messages = Array.isArray(body.messages) ? body.messages : [];
+      if (body.mock) {
+        if (body.mock === 'fail') { sendJson(res, 200, { error: 'mock_failure' }); return; }
+        const lastUser = messages.slice().reverse().find((m) => m && m.role === 'user');
+        const topic = lastUser && typeof lastUser.content === 'string' ? lastUser.content.slice(0, 80) : '';
+        sendJson(res, 200, { content: '【模拟应答】已根据「' + topic + '」生成确定性结果（GWT mock 模式）。' });
+        return;
+      }
+      if (!LLM_BASE || !LLM_KEY || !LLM_MODEL) { sendJson(res, 503, { error: 'llm_not_configured' }); return; }
+      if (typeof fetch !== 'function') { sendJson(res, 500, { error: 'node_too_old' }); return; }
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+      const headers = { 'Content-Type': 'application/json' };
+      let upstreamUrl;
+      let upstreamBody;
+      if (LLM_PROTOCOL === 'anthropic') {
+        upstreamUrl = LLM_BASE + '/v1/messages';
+        headers['x-api-key'] = LLM_KEY;
+        headers['anthropic-version'] = '2023-06-01';
+        upstreamBody = { model: LLM_MODEL, max_tokens: Number(body.max_tokens) || 1024, messages: messages };
+      } else {
+        upstreamUrl = LLM_BASE + '/chat/completions';
+        headers['Authorization'] = 'Bearer ' + LLM_KEY;
+        upstreamBody = { model: LLM_MODEL, messages: messages, temperature: body.temperature, max_tokens: Number(body.max_tokens) || 1024, stream: false };
+      }
+      fetch(upstreamUrl, { method: 'POST', headers: headers, body: JSON.stringify(upstreamBody), signal: controller.signal })
+        .then(async (upstream) => {
+          clearTimeout(timer);
+          let data = {};
+          try { data = JSON.parse(await upstream.text()); } catch (e) { data = {}; }
+          if (!upstream.ok) { sendJson(res, upstream.status, { error: 'upstream_error', status: upstream.status }); return; }
+          const content = LLM_PROTOCOL === 'anthropic'
+            ? (Array.isArray(data.content) ? data.content.filter((b) => b && b.type === 'text').map((b) => b.text || '').join('') : '')
+            : (data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content || '' : '');
+          sendJson(res, 200, { content: content });
+        })
+        .catch((err) => {
+          clearTimeout(timer);
+          sendJson(res, 502, { error: 'upstream_failed', message: String(err && err.message || err).slice(0, 200) });
+        });
+    });
+    return;
+  }
+  if (rawUrl.pathname.startsWith('/api/')) { handleApi(req, res, rawUrl).catch(() => { try { sendJson(res, 500, { error: 'route_error' }); } catch (e) {} }); return; }
+  // 后端专属目录不走静态托管：server/ 是路由代码、data/ 是运行数据，前端一律经 /api 访问
+  const staticRel = rawUrl.pathname.replace(/^\\/+/, '');
+  if (staticRel === 'server' || staticRel.startsWith('server/') || staticRel === 'data' || staticRel.startsWith('data/')) {
+    res.writeHead(404);
+    res.end('Not found');
+    return;
+  }
   const requested = rawUrl.pathname === '/' ? '/index.html' : decodeURIComponent(rawUrl.pathname);
   const normalized = normalize(requested).replace(/^([/\\\\])+/, '');
   const filePath = resolve(join(root, normalized));
@@ -237,8 +472,12 @@ const server = createServer((req, res) => {
   res.writeHead(200, {
     'Content-Type': types[extname(finalPath)] || 'application/octet-stream',
     'Cache-Control': 'no-store',
-    // 生成代码不得联网：禁止 fetch/XHR/WebSocket 到任何外部地址
-    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; font-src 'self'",
+    // 生成代码不得联网：CSP 只放行同源 connect-src（完整程序渠道：AI 能力走同源
+    // /api/llm 代理，由服务器进程出网），浏览器直连外部地址仍被硬拦截。
+    // script-src 不再保留 'unsafe-eval'（2026-08-17 设计 §7.0/FEAS-C3 收紧）：eval/Function()
+    // 的禁令原本只写在提示词里（CSP 实含 unsafe-eval、并不拦截），收紧后该约束被真正
+    // 强制——MVP 提示词已同步要求用显式 if/switch 或事件监听实现交互逻辑。
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'",
   });
   createReadStream(finalPath).pipe(res);
 });
@@ -259,9 +498,17 @@ export async function createSnapshot(input: SnapshotCreateInput): Promise<Snapsh
 
   mkdirSync(snapshotRoot, { recursive: true })
   cpSync(project.root_path, filesArchivePath, { recursive: true, force: true })
+  // 文档冻结（T7）：documents 目录整份归档（prd.json/decisions.md/sketch.html 都在其中；
+  // T2 落盘即导出保证 decisions.md 不是过期聚合）。目录尚不存在（如草图阶段的早期快照）
+  // 时归档路径置 undefined——metadata 不谎报有归档，回看/回滚据此如实提示。
+  let effectiveDocumentsArchivePath = documentsArchivePath
   if (documentsArchivePath) {
     const documentsDir = getDocumentsDir(project.workspace_slug, project.project_id)
-    if (existsSync(documentsDir)) cpSync(documentsDir, documentsArchivePath, { recursive: true, force: true })
+    if (existsSync(documentsDir)) {
+      cpSync(documentsDir, documentsArchivePath, { recursive: true, force: true })
+    } else {
+      effectiveDocumentsArchivePath = undefined
+    }
   }
 
   const capture = await snapshotCaptureProvider()
@@ -276,24 +523,231 @@ export async function createSnapshot(input: SnapshotCreateInput): Promise<Snapsh
     summary: input.summary,
     screenshot_path: screenshotPath,
     files_archive_path: filesArchivePath,
-    documents_archive_path: documentsArchivePath,
+    documents_archive_path: effectiveDocumentsArchivePath,
     health_status: input.health_status,
     created_at: new Date().toISOString(),
   }
   writeJsonFile(`${snapshotRoot}/metadata.json`, snapshot)
   writeJsonFile(`${snapshotDir}/${snapshotId}.json`, snapshot)
+  // A2-16 快照容量门禁：创建后立即执行归档策略
+  enforceSnapshotCapacity(project.workspace_slug, project.project_id)
   return snapshot
+}
+
+export interface SnapshotCapacityResult {
+  active_count: number
+  archived: string[]
+}
+
+/**
+ * 列出项目的活跃快照（读取 `…/snapshots/<project_id>/<snapshot_id>/metadata.json`），
+ * 按创建时间升序（时间轴胶片条从旧到新）。供 `snapshot:list` IPC 与时间轴回填。
+ */
+export function listSnapshots(projectId: string): Snapshot[] {
+  const project = findProject(projectId)
+  const snapshotDir = getSnapshotsDir(project.workspace_slug, project.project_id)
+  const snapshots: Snapshot[] = []
+  if (!existsSync(snapshotDir)) return snapshots
+  for (const entry of readdirSync(snapshotDir)) {
+    const full = join(snapshotDir, entry)
+    if (!statSync(full).isDirectory() || entry === 'archive') continue
+    const meta = readJsonFile<Snapshot | null>(join(full, 'metadata.json'), null)
+    if (!meta?.snapshot_id) continue
+    snapshots.push(meta)
+  }
+  return snapshots.sort((a, b) => a.created_at.localeCompare(b.created_at))
+}
+
+const SCREENSHOT_MIME: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  svg: 'image/svg+xml',
+}
+
+/**
+ * U9：读取某快照的截图文件，转成 base64 data URL 回传渲染端（缩略图）。
+ * 渲染进程受 CSP `img-src 'self' data: blob:` 约束，无法直接加载磁盘 file:// 截图；
+ * 主进程读文件转 data URL 后，`<img>` 可安全展示。无截图/读失败返回 null（前端回退纯色块）。
+ */
+export async function loadSnapshotScreenshot(projectId: string, snapshotId: string): Promise<string | null> {
+  const project = findProject(projectId)
+  const snapshotDir = getSnapshotsDir(project.workspace_slug, project.project_id)
+  const meta = readJsonFile<Snapshot | null>(join(snapshotDir, snapshotId, 'metadata.json'), null)
+  const screenshotPath = meta?.screenshot_path
+  if (!screenshotPath || !existsSync(screenshotPath)) return null
+
+  const ext = screenshotPath.split('.').pop()?.toLowerCase() ?? ''
+  const mime = SCREENSHOT_MIME[ext]
+  if (!mime) return null
+
+  try {
+    const base64 = readFileSync(screenshotPath).toString('base64')
+    return `data:${mime};base64,${base64}`
+  } catch {
+    return null
+  }
+}
+
+// =========================================================================
+// T7 文档版本化：快照冻结文档的回看（「当时的想法」与代码快照对齐）
+// =========================================================================
+
+export type { SnapshotDocumentEntry, SnapshotDocumentListResult } from '../shared/types'
+
+/** 读快照元数据（回看/回滚共用；不存在抛 SNAPSHOT_NOT_FOUND）。 */
+function readSnapshotMeta(projectId: string, snapshotId: string): Snapshot {
+  const project = findProject(projectId)
+  const snapshotDir = getSnapshotsDir(project.workspace_slug, project.project_id)
+  const meta = readJsonFile<Snapshot | null>(`${snapshotDir}/${snapshotId}.json`, null)
+  if (!meta?.snapshot_id) throw new Error('SNAPSHOT_NOT_FOUND')
+  return meta
+}
+
+/** 解析快照文档归档目录；快照无文档归档（include_documents=false / 当时无文档）返回 undefined。 */
+function snapshotDocumentsDir(meta: Snapshot): string | undefined {
+  if (!meta.documents_archive_path || !existsSync(meta.documents_archive_path)) return undefined
+  return meta.documents_archive_path
+}
+
+/**
+ * 列出某快照冻结的文档。manifest 从归档读取（path 按 basename 重锚定归档目录——
+ * manifest 存的是冻结时的绝对路径，直接用会读错地方）；归档在而 manifest 缺失时，
+ * 按已知固定文件名（prd.json/decisions.md）探测实际冻结的文件（读出事实，非补造历史）。
+ */
+/**
+ * manifest 存的是冻结时的绝对路径（锚在项目 documents 目录下）。读取按「相对
+ * documents 根的相对路径」重锚定归档目录——必须保留 features/ 等合法子目录
+ * （2026-08-29 线上：basename 压平子目录导致回看 features/F-001.feature、
+ * plantuml/architecture.puml 必 DOCUMENT_NOT_FOUND，live 文档面板用完整路径不受影响）。
+ * manifest 被篡改/路径越出 documents 根时回退 basename，行为交由
+ * readSnapshotDocument 的防御校验兜底（与旧逻辑一致）。
+ */
+function reanchorRelativePath(projectId: string, absolutePath: string): string {
+  const project = findProject(projectId)
+  const documentsDir = getDocumentsDir(project.workspace_slug, project.project_id)
+  const rel = relative(resolve(documentsDir), resolve(absolutePath))
+  if (!rel || rel.startsWith('..') || isAbsolute(rel)) return basename(absolutePath)
+  return rel.split(/[\\/]/).join('/')
+}
+
+export function listSnapshotDocuments(projectId: string, snapshotId: string): SnapshotDocumentListResult {
+  const meta = readSnapshotMeta(projectId, snapshotId)
+  const archiveDir = snapshotDocumentsDir(meta)
+  if (!archiveDir) return { snapshot_id: snapshotId, frozen: false, documents: [] }
+
+  const manifest = readDocumentsManifest(archiveDir)
+  const documents: SnapshotDocumentEntry[] = manifest
+    .filter((entry) => entry.status !== 'stale')
+    .map((entry) => ({
+      document_id: entry.document_id,
+      type: entry.type,
+      status: entry.status,
+      file: reanchorRelativePath(projectId, entry.path),
+    }))
+  if (documents.length > 0) return { snapshot_id: snapshotId, frozen: true, documents }
+
+  // 归档在但 manifest 缺失/为空：探测已知文档文件（老快照兜底，仍只读实际存在的文件）
+  const known: Array<{ document_id: string; type: SnapshotDocumentEntry['type']; file: string }> = [
+    { document_id: 'prd-frozen', type: 'prd', file: 'prd.json' },
+    { document_id: 'decisions-log', type: 'decisions', file: 'decisions.md' },
+  ]
+  const probed = known.filter((item) => existsSync(join(archiveDir, item.file)))
+  return {
+    snapshot_id: snapshotId,
+    frozen: true,
+    documents: probed.map((item) => ({ ...item, status: 'synced' })),
+  }
+}
+
+/**
+ * 读取某快照冻结的文档内容（时间轴回看「当时的想法」）。路径安全：文件必须落在
+ * 归档目录内（manifest 可能被篡改，重锚定为归档内相对路径后仍做防御校验；
+ * 合法子目录 features/ 等由 reanchorRelativePath 保留）。
+ */
+export function readSnapshotDocument(
+  projectId: string,
+  snapshotId: string,
+  documentId: string,
+): { snapshot_id: string; document: SnapshotDocumentEntry; content: string } {
+  const meta = readSnapshotMeta(projectId, snapshotId)
+  const archiveDir = snapshotDocumentsDir(meta)
+  if (!archiveDir) throw new Error('SNAPSHOT_DOCUMENTS_NOT_FROZEN: 该快照没有冻结文档（存量快照），无法回看当时的想法')
+  const entry = listSnapshotDocuments(projectId, snapshotId).documents.find((item) => item.document_id === documentId)
+  if (!entry) throw new Error('DOCUMENT_NOT_FOUND')
+
+  const path = resolve(archiveDir, entry.file)
+  const rel = relative(resolve(archiveDir), path)
+  if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error(`DOCUMENT_PATH_SAFETY: path outside snapshot documents archive: ${entry.file}`)
+  }
+  if (!existsSync(path)) throw new Error('DOCUMENT_NOT_FOUND')
+  return { snapshot_id: snapshotId, document: entry, content: readFileSync(path, 'utf8') }
+}
+
+/**
+ * 快照容量策略（A2-16）：单项目活跃快照超上限（100）时，按
+ * 「保留最近 N + 每 kind 最新」保护集，把最旧的其余快照归档到 archive/。
+ * 归档仅移出活跃集、不删除数据；归档合并/清理留给后续迭代。
+ */
+export function enforceSnapshotCapacity(workspaceSlug: string, projectId: string): SnapshotCapacityResult {
+  const snapshotDir = getSnapshotsDir(workspaceSlug, projectId)
+  const active = listActiveSnapshots(snapshotDir)
+  if (active.length <= MAX_SNAPSHOTS_PER_PROJECT) return { active_count: active.length, archived: [] }
+
+  // 保护集：最近 SNAPSHOT_RECENT_KEEP 个 + 每种 kind 最新一个
+  const byNewest = [...active].sort((a, b) => b.created_at.localeCompare(a.created_at))
+  const protectedIds = new Set<string>()
+  for (const snap of byNewest.slice(0, SNAPSHOT_RECENT_KEEP)) protectedIds.add(snap.snapshot_id)
+  const seenKinds = new Set<string>()
+  for (const snap of byNewest) {
+    if (seenKinds.has(snap.kind)) continue
+    seenKinds.add(snap.kind)
+    protectedIds.add(snap.snapshot_id)
+  }
+
+  // 最旧优先归档，直到活跃数回落到上限；保护集内永不归档
+  const oldestFirst = [...active].sort((a, b) => a.created_at.localeCompare(b.created_at))
+  const archiveDir = join(snapshotDir, 'archive')
+  const archived: string[] = []
+  for (const snap of oldestFirst) {
+    if (active.length - archived.length <= MAX_SNAPSHOTS_PER_PROJECT) break
+    if (protectedIds.has(snap.snapshot_id)) continue
+    const source = join(snapshotDir, snap.snapshot_id)
+    if (!existsSync(source)) continue
+    mkdirSync(archiveDir, { recursive: true })
+    renameSync(source, join(archiveDir, snap.snapshot_id))
+    const indexSource = `${source}.json`
+    if (existsSync(indexSource)) renameSync(indexSource, join(archiveDir, `${snap.snapshot_id}.json`))
+    archived.push(snap.snapshot_id)
+  }
+  return { active_count: active.length - archived.length, archived }
+}
+
+interface ActiveSnapshotMeta {
+  snapshot_id: string
+  kind: string
+  created_at: string
+}
+
+function listActiveSnapshots(snapshotDir: string): ActiveSnapshotMeta[] {
+  const result: ActiveSnapshotMeta[] = []
+  for (const entry of readdirSync(snapshotDir)) {
+    const full = join(snapshotDir, entry)
+    if (!statSync(full).isDirectory() || entry === 'archive') continue
+    const meta = readJsonFile<Snapshot | null>(join(full, 'metadata.json'), null)
+    if (!meta?.snapshot_id) continue
+    result.push({ snapshot_id: meta.snapshot_id, kind: meta.kind, created_at: meta.created_at })
+  }
+  return result
 }
 
 export async function rollbackSnapshot(input: SnapshotRollbackInput): Promise<RollbackResult> {
   const project = findProject(input.project_id)
-  const snapshotDir = getSnapshotsDir(project.workspace_slug, project.project_id)
 
-  // 1. 校验目标快照存在
-  const targetPath = `${snapshotDir}/${input.snapshot_id}.json`
-  if (!existsSync(targetPath)) throw new Error('SNAPSHOT_NOT_FOUND')
-  const target = readJsonFile<Snapshot>(targetPath, null as never)
-  if (!target) throw new Error('SNAPSHOT_NOT_FOUND')
+  // 1. 校验目标快照存在（含元数据读取，详见 restoreSnapshotFiles）
+  const snapshotDir = getSnapshotsDir(project.workspace_slug, project.project_id)
+  if (!existsSync(`${snapshotDir}/${input.snapshot_id}.json`)) throw new Error('SNAPSHOT_NOT_FOUND')
 
   // 2. 回滚前拍 guard 快照（保留回滚前状态）
   const guard = await createSnapshot({
@@ -305,26 +759,13 @@ export async function rollbackSnapshot(input: SnapshotRollbackInput): Promise<Ro
     health_status: project.current_snapshot_id ? 'healthy' : 'unhealthy',
   })
 
-  // 3. 停掉正在运行的 sandbox（否则文件句柄占用，Windows 下 rmSync 会 EPERM）
-  stopSandbox({ request_id: input.request_id, project_id: project.project_id })
+  // 文档是否随回滚（T7）：目标快照有文档归档才恢复——存量快照（T7 前无冻结）
+  // 如实报告 documents_restored=false，渲染端提示「该快照无冻结文档」，绝不补造。
+  const target = readJsonFile<Snapshot | null>(`${snapshotDir}/${input.snapshot_id}.json`, null)
+  const documentsRestored = Boolean(target?.documents_archive_path && existsSync(target.documents_archive_path))
 
-  // 4. 等待文件句柄释放（Windows 异步释放，给 200ms 缓冲）
-  await new Promise((resolve) => setTimeout(resolve, 200))
-
-  // 5. 恢复项目文件（先清空再复制，确保与快照完全一致）
-  rmSync(project.root_path, { recursive: true, force: true })
-  mkdirSync(project.root_path, { recursive: true })
-  cpSync(target.files_archive_path, project.root_path, { recursive: true, force: true })
-
-  // 6. 恢复文档（如果有）
-  if (target.documents_archive_path && existsSync(target.documents_archive_path)) {
-    const docDir = getDocumentsDir(project.workspace_slug, project.project_id)
-    rmSync(docDir, { recursive: true, force: true })
-    cpSync(target.documents_archive_path, docDir, { recursive: true, force: true })
-  }
-
-  // 7. 更新项目指针
-  updateProject(project.project_id, { current_snapshot_id: input.snapshot_id })
+  // 3~7. 停沙箱 → 恢复文件/文档 → 更新指针（与启动对账共用的恢复原语）
+  await restoreSnapshotFiles(input)
 
   // 8. 重启 sandbox
   const sandbox = await runSandbox({ request_id: input.request_id, project_id: input.project_id })
@@ -335,7 +776,49 @@ export async function rollbackSnapshot(input: SnapshotRollbackInput): Promise<Ro
     current_snapshot_id: input.snapshot_id,
     guard_snapshot_id: guard.snapshot_id,
     preview_url: sandbox.preview_url,
+    documents_restored: documentsRestored,
   }
+}
+
+/**
+ * 快照文件恢复原语（不含 guard / 沙箱重启）：
+ * 停掉运行中的沙箱并等待退出（Windows 句柄锁）→ 清空项目目录 → 复制快照文件 →
+ * 恢复文档归档（如有）→ 更新 current_snapshot_id 指针。
+ * rollbackSnapshot（完整事务）与启动对账 T1（崩溃残留恢复，不重启沙箱）共用。
+ */
+export async function restoreSnapshotFiles(input: {
+  request_id: string
+  project_id: string
+  snapshot_id: string
+}): Promise<Snapshot> {
+  const project = findProject(input.project_id)
+  const snapshotDir = getSnapshotsDir(project.workspace_slug, project.project_id)
+
+  const targetPath = `${snapshotDir}/${input.snapshot_id}.json`
+  if (!existsSync(targetPath)) throw new Error('SNAPSHOT_NOT_FOUND')
+  const target = readJsonFile<Snapshot>(targetPath, null as never)
+  if (!target) throw new Error('SNAPSHOT_NOT_FOUND')
+
+  // 停掉正在运行的 sandbox 并等待其真正退出（Windows：进程 cwd/句柄锁住项目目录，
+  // 不等退出就 rmSync 会 EBUSY/EPERM——2026-08-15 赛车项目回滚报障的根因）
+  await stopSandbox({ request_id: input.request_id, project_id: project.project_id })
+
+  // 恢复项目文件（先清空再复制，确保与快照完全一致）。
+  // maxRetries/retryDelay 兜底瞬态锁（杀毒/索引器/句柄异步释放）：
+  // Node 原生对 EBUSY/EPERM/ENOTEMPTY 自动重试，避免一次撞锁让整个回滚失败。
+  rmSync(project.root_path, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  mkdirSync(project.root_path, { recursive: true })
+  cpSync(target.files_archive_path, project.root_path, { recursive: true, force: true })
+
+  // 恢复文档（如果有）
+  if (target.documents_archive_path && existsSync(target.documents_archive_path)) {
+    const docDir = getDocumentsDir(project.workspace_slug, project.project_id)
+    rmSync(docDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+    cpSync(target.documents_archive_path, docDir, { recursive: true, force: true })
+  }
+
+  updateProject(project.project_id, { current_snapshot_id: input.snapshot_id })
+  return target
 }
 
 export function setSnapshotCaptureProvider(provider?: SnapshotCaptureProvider): void {
@@ -344,19 +827,6 @@ export function setSnapshotCaptureProvider(provider?: SnapshotCaptureProvider): 
 
 export function setSnapshotCaptureProviderForTests(provider?: SnapshotCaptureProvider): void {
   snapshotCaptureProvider = provider ?? defaultSnapshotCapture
-}
-
-export function syncDocuments(input: DocumentSyncInput): DocumentSyncResult {
-  const project = findProject(input.project_id)
-  const dir = getDocumentsDir(project.workspace_slug, project.project_id)
-  const doc: DocumentRef = {
-    document_id: randomUUID(),
-    type: input.checkpoint === 'mvp_tested' ? 'test_report' : 'prd',
-    path: `${dir}/${input.checkpoint}.md`,
-    status: 'synced',
-  }
-  writeJsonFile(doc.path, { checkpoint: input.checkpoint, changed_files: input.changed_files ?? [] })
-  return { documents: [doc], stale_documents: [] }
 }
 
 export function trackAnalytics(input: AnalyticsTrackInput): AnalyticsTrackResult {

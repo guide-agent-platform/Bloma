@@ -88,6 +88,7 @@
 | `testing-standards.md` | 功能域、测试 ID、文件写法、结果分类和测试报告规范 |
 | `reports/` | 按 Sprint 保存的测试报告和人工验收清单 |
 | `features/` | 6 个 GWT Feature 文件 |
+| `../../tests/e2e/` | 与 GWT 稳定 ID 对应的 Playwright Electron 端到端测试 |
 
 Feature 文件：
 

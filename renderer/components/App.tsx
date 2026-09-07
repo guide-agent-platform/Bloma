@@ -1,10 +1,19 @@
 import React, { useState, useCallback } from 'react'
-import { useSetAtom } from 'jotai'
+import { useSetAtom, useAtomValue } from 'jotai'
 import { ModeSelectionPage } from './ModeSelectionPage'
 import { WorkspaceShell } from './WorkspaceShell'
 import { ProjectHistoryPage } from './ProjectHistoryPage'
+import { PermissionDialog } from './PermissionDialog'
+import { RequirementConfirmDialog } from './RequirementConfirmDialog'
+import { PrdConfirmDialog } from './PrdConfirmDialog'
+import { ClarificationCard } from './ClarificationCard'
+import { ReviewChoicesDialog } from './ReviewChoicesDialog'
+import { SettingsPage } from './SettingsPage'
+import { useUserDecisionCards, toCardSelectionMeta } from './ChatPanel-sprint2'
+import { globalUserErrorAtom } from '../agent-atoms'
+import type { CardOption } from './CardOptions'
 import type { PreviewStatus } from './PreviewPanel'
-import type { Snapshot, AgentMessage, Project } from './atoms'
+import type { Snapshot, AgentMessage, Project, PastedImageRef } from './atoms'
 import {
   modeSelectedAtom,
   projectModeAtom,
@@ -13,17 +22,34 @@ import {
   STAGE_LABEL_MAP,
   currentProjectAtom,
   agentMessagesFamily,
+  appendMessageToSession,
+  markDecisionConsumed,
   activeAgentSessionIdAtom,
   snapshotsListAtom,
+  previewUrlsAtom,
+  currentSnapshotIdAtom,
+  hasActiveStreamAtom,
   loadAgentSessions,
   loadSessionHistory,
+  loadSnapshots,
 } from './atoms'
+import { refreshChannelsList, channelsListAtom, channelsLoadingAtom, hasUsableChannelsAtom, chatInputDraftAtom } from './atoms-sprint2'
 import type { ProjectMode, WorkflowStage } from './atoms'
+import type { DomCollectContextResult } from '../../shared/types'
 
 /**
- * 演示用示例草图（与 demo.html 中 SAMPLE_SKETCH 完全一致）。
+ * 这些阶段后端已产出可渲染文件（草图 / MVP）。回访恢复或重启后，旧沙箱进程已死，
+ * 需要重跑 sandbox 回填 previewUrlsAtom（P0-2）。
  */
-const SAMPLE_SKETCH = `<html><head><meta charset="UTF-8"><style>body{font-family:'Inter',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:linear-gradient(135deg,#F4F3FA,#FDF2F8);color:#1D1D1F}.app{text-align:center;padding:40px;max-width:440px;width:100%}h1{background:linear-gradient(135deg,#7C3AED,#EC4899);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:6px;font-size:22px;font-weight:700}.sub{color:#6E6E73;margin-bottom:28px;font-size:13px}.card{background:#fff;border:1px solid #E6E5EE;border-radius:16px;padding:18px 20px;margin:10px 0;text-align:left;box-shadow:0 4px 16px -4px rgba(29,29,31,.08)}.card h3{margin-bottom:2px;font-size:12px;color:#6E6E73;font-weight:500}.card .val{font-size:24px;font-weight:700;margin-top:4px}.income{color:#10B981}.expense{color:#DC2626}.balance{color:#7C3AED}</style></head><body><div class="app"><h1>记账应用 · 草图预览</h1><p class="sub">Sprint 1 演示 · 实际由编程Agent生成</p><div class="card"><h3>本月收入</h3><p class="val income">¥ 12,500</p></div><div class="card"><h3>本月支出</h3><p class="val expense">¥ 8,320</p></div><div class="card"><h3>本月结余</h3><p class="val balance">¥ 4,180</p></div></div></body></html>`
+const PREVIEW_READY_STAGES = new Set<WorkflowStage>([
+  'sketch_ready',
+  'testing',
+  'judge_review',
+  'repairing',
+  'ready',
+  'iterating',
+  'completed',
+])
 
 /* =========================================================================
    Aurora 背景
@@ -46,6 +72,11 @@ const App: React.FC = () => {
     <>
       <Aurora />
       <AppRoutes />
+      <PermissionDialog />
+      <RequirementConfirmDialog />
+      <PrdConfirmDialog />
+      <ClarificationCard />
+      <ReviewChoicesDialog />
     </>
   )
 }
@@ -55,21 +86,19 @@ const App: React.FC = () => {
    通过 Jotai hooks 直接操作 store，不依赖全局变量
    ========================================================================= */
 
-type AppRoute = 'mode-selection' | 'workspace' | 'project-history'
+type AppRoute = 'mode-selection' | 'workspace' | 'project-history' | 'settings'
 
 const AppRoutes: React.FC = () => {
   const [route, setRoute] = useState<AppRoute>('mode-selection')
   const [mode, setMode] = useState<ProjectMode | null>(null)
-  const [waiting, setWaiting] = useState(false)
   const [waitStart, setWaitStart] = useState<number | undefined>()
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>('empty')
-  const [sessionId, setSessionId] = useState<string>(() => `demo-${Date.now()}`)
-  const [samplePreviewUrl] = useState(() => {
-    try { return URL.createObjectURL(new Blob([SAMPLE_SKETCH], { type: 'text/html' })) }
-    catch { return undefined }
-  })
+  const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID())
+  const [confirmingSketch, setConfirmingSketch] = useState(false)
+  // U1：升级为长期模式的确认弹窗开关
+  const [upgradeConfirmOpen, setUpgradeConfirmOpen] = useState(false)
 
-  // 本地项目列表（演示模式）
+  // 本地项目列表（真实 IPC 返回的项目索引）
   const [projectList, setProjectList] = useState<Project[]>([])
 
   // 回访恢复：加载历史消息期间的骨架占位开关
@@ -83,9 +112,122 @@ const AppRoutes: React.FC = () => {
   const setActiveSessionId = useSetAtom(activeAgentSessionIdAtom)
   const setCurrentProject = useSetAtom(currentProjectAtom)
   const setSnapshotsList = useSetAtom(snapshotsListAtom)
+  const setPreviewUrls = useSetAtom(previewUrlsAtom)
+  const setCurrentSnapshotId = useSetAtom(currentSnapshotIdAtom)
   const setMessages = useSetAtom(agentMessagesFamily(sessionId))
+  const sessionMessages = useAtomValue(agentMessagesFamily(sessionId))
+  const setChannels = useSetAtom(channelsListAtom)
+  const setChannelsLoading = useSetAtom(channelsLoadingAtom)
+  const hasChannels = useAtomValue(hasUsableChannelsAtom)
+  // WC-P2 审查加固（2026-08-29）：草稿随会话切换重置（跨项目不串台）；设置页往返不经过此处，草稿保留语义不变
+  const resetChatInputDraft = useSetAtom(chatInputDraftAtom)
+
+  // QW#1：启动即加载渠道列表（Header 三态徽标需要，不只 Settings 页）；Settings 页复用幂等加载
+  React.useEffect(() => {
+    void refreshChannelsList(setChannels, setChannelsLoading)
+  }, [setChannels, setChannelsLoading])
+
+  // QW#2（ux-first-run-0basics I2）：进入工作区且零渠道（已决 false）→ 追加一次
+  // 引导提示（纯文本，指向右上角 ⚙️ 设置入口）；有渠道/未决（null）不打扰。
+  const zeroChannelHintShownRef = React.useRef(false)
+  React.useEffect(() => {
+    if (route !== 'workspace') return
+    if (zeroChannelHintShownRef.current) return
+    if (hasChannels !== false) return
+    // 审查 P2-③：用户已对话（含回访恢复历史/中途删渠道）时不打扰——引导只在空会话首跑显示
+    if (sessionMessages.some((m) => m.role === 'user')) return
+    zeroChannelHintShownRef.current = true
+    appendMessageToSession(sessionId, {
+      role: 'system',
+      // QW#2 二期（2026-08-28）：[welcome-hint] 前缀走 ChatPanel 专属醒目卡片（内嵌直达按钮）；
+      // 文案去黑话（API Key=门禁卡，从模型官网复制）+ 时长如实（首次约 10 分钟，不再承诺 2 分钟）
+      content: [{
+        type: 'text',
+        text: '[welcome-hint]💡 你还没连接 AI 模型。添加一个 AI 模型需要从模型官网复制一段「API Key」（相当于门禁卡），首次约 10 分钟。连接后向导就能直接为你生成。',
+      }],
+      timestamp: Date.now(),
+    })
+  }, [route, hasChannels, sessionId, sessionMessages])
+
+  // QW#2 二期 P2-④（2026-08-28）：引导已出且渠道从无到有 → 追加连接成功正反馈，
+  // 对称闭环衔接用户下一步动作（不再让用户试探性发消息确认自己搞对了）
+  const channelSuccessShownRef = React.useRef(false)
+  React.useEffect(() => {
+    if (route !== 'workspace') return
+    if (!zeroChannelHintShownRef.current) return
+    if (hasChannels !== true) return
+    if (channelSuccessShownRef.current) return
+    channelSuccessShownRef.current = true
+    appendMessageToSession(sessionId, {
+      role: 'system',
+      content: [{
+        type: 'text',
+        text: '[welcome-hint:done]✅ 连接成功！把你想做的软件告诉我吧。',
+      }],
+      timestamp: Date.now(),
+    })
+  }, [route, hasChannels, sessionId, sessionMessages])
 
   const restoreAttemptedRef = React.useRef(false)
+
+  // Sprint 2: 从 AgentEvent 提取 user_decision_required → CardOptions
+  const decisionCards = useUserDecisionCards()
+  const setGlobalError = useSetAtom(globalUserErrorAtom)
+  const currentProject = useAtomValue(currentProjectAtom)
+  const currentStage = useAtomValue(workflowStageAtom)
+  const hasActiveStream = useAtomValue(hasActiveStreamAtom)
+  const previewUrls = useAtomValue(previewUrlsAtom)
+  const currentSnapshotId = useAtomValue(currentSnapshotIdAtom)
+
+  // 当前项目预览地址（按 project_id 隔离）：从 previewUrlsAtom 取本项目沙箱地址；
+  // updatedAt 拼进 query 作 cache-buster——沙箱同端口重 serve 新产物时强制 webview 重载
+  const previewEntry = currentProject?.project_id
+    ? (previewUrls[currentProject.project_id] ?? null)
+    : null
+  const streamPreviewUrl = previewEntry
+    ? `${previewEntry.url}${previewEntry.url.includes('?') ? '&' : '?'}_r=${previewEntry.updatedAt}`
+    : null
+
+  // 写 / 清空指定项目的预览地址（多项目各自独立预览）
+  const setProjectPreview = useCallback((projectId: string, url: string | null) => {
+    setPreviewUrls((prev) => {
+      if (url) return { ...prev, [projectId]: { url, updatedAt: Date.now() } }
+      const next = { ...prev }
+      delete next[projectId]
+      return next
+    })
+  }, [setPreviewUrls])
+
+  // 回访恢复预览（P0-2）：项目已产出草图/MVP 文件时，重跑沙箱并回填 previewUrlsAtom。
+  // 旧沙箱进程已随主进程退出而亡，旧端口必死，直接重跑拿新 preview_url。
+  // 失败不再静默吞掉：显式进入 error 态（带「重新连接沙箱」重试），避免停在空态。
+  const restorePreview = useCallback((projectId: string) => {
+    const api = window.electronAPI
+    if (!api?.sandbox?.restore) {
+      setPreviewStatus('error')
+      return
+    }
+    setPreviewStatus('loading')
+    void api.sandbox.restore({ request_id: crypto.randomUUID(), project_id: projectId })
+      .then((result) => {
+        if (result?.ok && result.data.preview_url) {
+          setProjectPreview(projectId, result.data.preview_url)
+          setPreviewStatus('running')
+        } else {
+          setProjectPreview(projectId, null)
+          setPreviewStatus('error')
+        }
+      })
+      .catch(() => {
+        setProjectPreview(projectId, null)
+        setPreviewStatus('error')
+      })
+  }, [setProjectPreview])
+
+  // 离开 sketch_ready 后复位「生成中」态（由 stage_changed 事件驱动）
+  React.useEffect(() => {
+    if (currentStage !== 'sketch_ready') setConfirmingSketch(false)
+  }, [currentStage])
 
   // 启动恢复：若本地存在活动项目，直接进入工作区而不是显示两道门
   React.useEffect(() => {
@@ -109,6 +251,8 @@ const AppRoutes: React.FC = () => {
       setSessionId(restoredSessionId)
       setActiveSessionId(restoredSessionId)
       setProjectList(result.data)
+      // 时间轴数据源：恢复时回填磁盘快照列表（否则胶片条永远空）
+      void loadSnapshots(restored.project_id)
       if (restored.last_session_id) {
         setHistoryLoading(true)
         void Promise.all([
@@ -116,54 +260,57 @@ const AppRoutes: React.FC = () => {
           loadSessionHistory(restored.last_session_id),
         ]).finally(() => setHistoryLoading(false))
       }
+      // 已产出预览的项目：重跑沙箱回填预览（旧端口必死，无需校验）
+      if (PREVIEW_READY_STAGES.has(restored.current_stage)) {
+        restorePreview(restored.project_id)
+      }
       setRoute('workspace')
     })
-  }, [sessionId])
+  }, [sessionId, restorePreview])
 
   // ==================== 选择模式 → 创建工作区 ====================
 
   const handleModeSelected = useCallback((selectedMode: 'quick' | 'longterm') => {
     setMode(selectedMode)
 
-    const newProject: Project = {
-      project_id: `demo-${Date.now()}`,
-      workspace_slug: 'default-software-builder',
-      name: selectedMode === 'quick' ? '我的快速项目' : '我的长期项目',
-      mode: selectedMode,
-      template_type: 'web_fullstack',
-      status: 'active',
-      current_stage: 'clarifying',
-      root_path: '/demo',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }
+    // 复用 ModeSelectionPage 经 api.project.create 建好的真实项目（读 store 拿最新值，避开闭包过期）
+    const newProject = window.__jotai_store__?.get(currentProjectAtom) ?? null
+    if (!newProject) return // 无主进程 / 项目创建失败：不进入工作区
+
+    // 真实会话 id：后端首次 sendMessage 时经 recordSessionActivity 落会话索引并回填 last_session_id
+    const newSessionId = crypto.randomUUID()
 
     setProjectList((prev: Project[]) => [newProject, ...prev])
 
     setProjectMode(selectedMode)
     setModeSelected(true)
-    setWorkflowStage('clarifying')
-    setStageLabel(STAGE_LABEL_MAP.clarifying)
-    setActiveSessionId(sessionId)
+    setWorkflowStage(newProject.current_stage)
+    setStageLabel(STAGE_LABEL_MAP[newProject.current_stage] ?? STAGE_LABEL_MAP.clarifying)
+    setSessionId(newSessionId)
+    setActiveSessionId(newSessionId)
     setCurrentProject(newProject)
+    resetChatInputDraft('')
 
-    // D3 修复：进入工作区后 Agent 发送首条问候消息
-    const greetingMsg: AgentMessage = {
+    // D3 修复：进入工作区后 Agent 发送首条问候消息（写入新会话 family，避开闭包过期）
+    appendMessageToSession(newSessionId, {
       role: 'assistant',
       content: [{ type: 'text', text: '你好！告诉我你想做什么软件，我会一步步帮你做出来。' }],
       timestamp: Date.now(),
-    }
-    setMessages([greetingMsg])
+    })
+
+    // 新项目开始：清掉上一项目的预览地址与时间轴，避免串台
+    setProjectPreview(newProject.project_id, null)
+    setSnapshotsList([])
 
     setRoute('workspace')
-  }, [sessionId, setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject])
+  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, setProjectPreview, setSnapshotsList, resetChatInputDraft])
 
   // ==================== 从历史列表恢复项目 ====================
 
   const handleResumeProject = useCallback((project: Project) => {
     setMode(project.mode)
     // 回访恢复：沿用项目最后活跃会话，不新建会话 id（sitemap §2.6）
-    const resumeSessionId = project.last_session_id ?? `demo-resume-${Date.now()}`
+    const resumeSessionId = project.last_session_id ?? crypto.randomUUID()
 
     setProjectMode(project.mode)
     setModeSelected(true)
@@ -172,6 +319,7 @@ const AppRoutes: React.FC = () => {
     setSessionId(resumeSessionId)
     setActiveSessionId(resumeSessionId)
     setCurrentProject(project)
+    resetChatInputDraft('')
 
     setProjectList((prev: Project[]) =>
       prev.map((p) =>
@@ -181,6 +329,9 @@ const AppRoutes: React.FC = () => {
       ),
     )
 
+    // 时间轴数据源：从历史列表恢复项目时回填磁盘快照列表
+    void loadSnapshots(project.project_id)
+
     if (project.last_session_id) {
       setHistoryLoading(true)
       void Promise.all([
@@ -189,153 +340,308 @@ const AppRoutes: React.FC = () => {
       ]).finally(() => setHistoryLoading(false))
     }
 
-    setRoute('workspace')
-  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject])
-
-  // ==================== "你帮我决定" — 跳过澄清 ====================
-
-  const handleDecideForMe = useCallback(() => {
-    const systemMsg: AgentMessage = {
-      role: 'system',
-      content: [{ type: 'text', text: '好的，我根据常见场景帮你决定方向，直接开始生成草图。' }],
-      timestamp: Date.now(),
+    // 已产出预览的项目：重跑沙箱回填预览
+    if (PREVIEW_READY_STAGES.has(project.current_stage)) {
+      restorePreview(project.project_id)
     }
-    setMessages((prev: AgentMessage[]) => [...prev, systemMsg])
 
-    setWaiting(true)
-    setWaitStart(Date.now())
-    setPreviewStatus('loading')
-    setWorkflowStage('generating_sketch')
-    setStageLabel(STAGE_LABEL_MAP.generating_sketch)
-
-    // 模拟生成（1.8s 后响应）
-    setTimeout(() => {
-      setWaiting(false)
-      setPreviewStatus('running')
-
-      const assistantMsg: AgentMessage = {
-        role: 'assistant',
-        content: [{
-          type: 'text',
-          text: '我根据常见使用场景为你生成了初始草图。你可以在左侧预览效果，如果有不满意的地方，点击预览区告诉我哪里需要调整。',
-        }],
-        timestamp: Date.now(),
-      }
-      setMessages((prev: AgentMessage[]) => [...prev, assistantMsg])
-
-      setWorkflowStage('sketch_ready')
-      setStageLabel(STAGE_LABEL_MAP.sketch_ready)
-
-      setSnapshotsList([{
-        snapshot_id: `snap-demo-${Date.now()}`,
-        project_id: 'demo',
-        kind: 'sketch',
-        name: '初始草图 v1',
-        summary: '根据默认假设自动生成',
-        files_archive_path: '/demo/snapshots/sketch/files',
-        health_status: 'healthy',
-        created_at: new Date().toISOString(),
-      }])
-    }, 1800)
-  }, [setMessages, setWorkflowStage, setStageLabel, setSnapshotsList])
+    setRoute('workspace')
+  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, restorePreview, resetChatInputDraft])
 
   // ==================== 发送消息 ====================
 
-  const handleSendMessage = useCallback((content: string) => {
-    if (content.trim() === '你帮我决定' || content.trim() === '你帮我决定。') {
-      handleDecideForMe()
+  const handleSendMessage = useCallback((content: string, images?: PastedImageRef[]) => {
+    const api = window.electronAPI
+    if (!api?.agent?.sendMessage) return
+
+    // 真实链路：交给主进程 runAgent，流式事件由 setupGlobalAgentListeners 驱动 UI
+    // clipboard-paste P1（2026-08-29）：带图消息本地气泡即块数组（imageId 短引用，无 base64）
+    appendMessageToSession(sessionId, {
+      role: 'user',
+      content: images?.length
+        ? [
+            { type: 'text', text: content },
+            ...images.map((r) => ({ type: 'image' as const, imageId: r.imageId, media_type: r.media_type })),
+          ]
+        : [{ type: 'text', text: content }],
+      timestamp: Date.now(),
+    })
+    void api.agent.sendMessage({
+      request_id: crypto.randomUUID(),
+      session_id: sessionId,
+      project_id: currentProject?.project_id ?? projectList[0]?.project_id ?? '',
+      content,
+      images,
+      mode: mode ?? 'quick',
+      current_stage: currentStage,
+      metadata: { source: 'chat' },
+    }).then((result) => {
+      // message-queue（2026-08-27）：生成期间发送 → 后端入队并返回 queued:true——
+      // 追加「已排队」提示，消息不会丢，run 完成后自动处理。
+      if (result?.ok && result.data?.queued) {
+        appendMessageToSession(sessionId, {
+          role: 'system',
+          content: [{ type: 'text', text: '⏳ 已排队：当前生成完成后会自动处理这条消息。' }],
+          timestamp: Date.now(),
+        })
+        return
+      }
+      // U5 兜底：后端仍拒绝（旧后端/边缘 BUSY）→ 引导用户等待或停止，而不是消息石沉大海。
+      if (!result?.ok && result?.error?.code === 'AGENT_SESSION_BUSY') {
+        appendMessageToSession(sessionId, {
+          role: 'system',
+          content: [{ type: 'text', text: '我正在生成中，暂时没法同时处理新消息。你可以点输入框右侧的停止按钮中断当前生成，或等它完成后再发。' }],
+          timestamp: Date.now(),
+        })
+      }
+    })
+  }, [sessionId, currentProject, projectList, mode, currentStage])
+
+  // ==================== 停止生成（U4 / T3：agent:stop） ====================
+
+  /**
+   * 用户点击停止键：调 agent:stop（后端 cancelAgent 以 AGENT_CANCELLED 标记中止
+   * 查询并清除运行登记，随后发 AGENT_CANCELLED 终态事件）。带 project_id 停止同项目
+   * 全部入口的运行；只在实际取消成功时才落「已停止」提示，避免假反馈。
+   */
+  const handleStopGeneration = useCallback(async () => {
+    const api = window.electronAPI
+    if (!api?.agent?.cancel) return
+
+    const result = await api.agent.cancel({
+      request_id: crypto.randomUUID(),
+      session_id: sessionId,
+      project_id: currentProject?.project_id,
+      reason: 'user_cancelled',
+    })
+    // cancelled:false 说明没有可停止的运行（已结束/已被其他路径清掉），不写成功提示
+    if (result.ok && result.data.cancelled) {
+      appendMessageToSession(sessionId, {
+        role: 'system',
+        content: [{ type: 'text', text: '已停止生成。当前已生成的内容会保留，你可以继续补充或调整。' }],
+        timestamp: Date.now(),
+      })
+    }
+  }, [sessionId, currentProject])
+
+  // ==================== 卡片选项回传（Sprint 2：澄清卡片） ====================
+
+  const handleCardOptionSelect = useCallback((option: CardOption) => {
+    const api = window.electronAPI
+    if (!api?.agent?.sendMessage) return
+
+    // 就绪引导卡「导出部署」（2026-09-06）：不走聊天管道，直接调导出 IPC（与
+    // MvpStatusBanner 导出按钮同一 API/错误口径），卡片消费但不追加用户气泡
+    if (option.id === 'export_handoff') {
+      if (!api.project?.export || !currentProject) return
+      markDecisionConsumed(sessionId)
+      void api.project
+        .export({ request_id: crypto.randomUUID(), project_id: currentProject.project_id })
+        .then((result) => {
+          if (!result.ok) setGlobalError(result.error?.user_visible_message || result.error?.message || '导出失败，请重试。')
+        })
+        .catch(() => setGlobalError('导出失败，请重试。'))
       return
     }
 
-    const userMsg: AgentMessage = {
+    // 点击即有反馈：先本地追加用户气泡（与 handleSendMessage 一致），再回传后端
+    appendMessageToSession(sessionId, {
       role: 'user',
-      content: [{ type: 'text', text: content }],
+      content: [{ type: 'text', text: option.label }],
       timestamp: Date.now(),
-    }
-    setMessages((prev: AgentMessage[]) => [...prev, userMsg])
-
-    setWaiting(true)
-    setWaitStart(Date.now())
-    setPreviewStatus('loading')
-    setWorkflowStage('generating_sketch')
-    setStageLabel(STAGE_LABEL_MAP.generating_sketch)
-
-    setTimeout(() => {
-      setWaiting(false)
-      setPreviewStatus('running')
-
-      const assistantMsg: AgentMessage = {
-        role: 'assistant',
-        content: [{
-          type: 'text',
-          text: `收到你的需求：「${content.slice(0, 50)}${content.length > 50 ? '…' : ''}」\n\n我已经理解了你的想法。这是一个演示模式——在实际环境中，向导 Agent 将澄清需求并生成可交互草图。`,
-        }],
-        timestamp: Date.now(),
-      }
-      setMessages((prev: AgentMessage[]) => [...prev, assistantMsg])
-
-      setWorkflowStage('sketch_ready')
-      setStageLabel(STAGE_LABEL_MAP.sketch_ready)
-
-      setSnapshotsList([{
-        snapshot_id: `snap-demo-${Date.now()}`,
-        project_id: 'demo',
-        kind: 'sketch',
-        name: '验证草图 v1',
-        summary: '演示快照：包含一个简单的预览页面',
-        files_archive_path: '/demo/snapshots/sketch/files',
-        health_status: 'healthy',
-        created_at: new Date().toISOString(),
-      }])
-    }, 2000)
-  }, [handleDecideForMe, setMessages, setWorkflowStage, setStageLabel, setSnapshotsList])
+    })
+    // 立即消费决策卡片，避免「选了选项卡片还赖着不走」（草图走 LLM 的空窗期）
+    markDecisionConsumed(sessionId)
+    // 真实链路：带 card_option metadata 回传（selected_option_id 对齐契约）
+    void api.agent.sendMessage({
+      request_id: crypto.randomUUID(),
+      session_id: sessionId,
+      project_id: currentProject?.project_id ?? projectList[0]?.project_id ?? '',
+      content: option.label,
+      mode: mode ?? 'quick',
+      current_stage: currentStage,
+      metadata: toCardSelectionMeta(option.id),
+    })
+  }, [sessionId, currentProject, projectList, mode, currentStage])
 
   // ==================== 点选纠错 ====================
 
-  const handleCorrectionSubmit = useCallback((payload: { position: { x: number; y: number }; userNote: string; fallbackMode: boolean }) => {
-    const systemMsg: AgentMessage = {
+  /** U8/R-CORR-01：点击预览元素时向主进程收集该元素的 DOM 上下文（用于高亮被选区域） */
+  const handleCollectDomContext = useCallback(async (click: { x: number; y: number }) => {
+    const api = window.electronAPI
+    const projectId = currentProject?.project_id ?? projectList[0]?.project_id ?? ''
+    try {
+      const dom = await api?.dom?.collectContext?.({
+        request_id: crypto.randomUUID(),
+        project_id: projectId,
+        session_id: sessionId,
+        click,
+      })
+      if (dom?.ok && dom.data) return dom.data
+    } catch {
+      // 收集异常返回 undefined，UI 回退红点标记
+    }
+    return undefined
+  }, [sessionId, currentProject, projectList])
+
+  const handleCorrectionSubmit = useCallback(async (payload: {
+    position: { x: number; y: number }
+    userNote: string
+    fallbackMode: boolean
+    domContext?: DomCollectContextResult
+  }) => {
+    const api = window.electronAPI
+    if (!api?.project?.submitCorrection) return
+
+    // M-14：生成中（或流式运行中）不再承诺「我来帮你调整」——主路径会被项目锁
+    // 拒绝（AGENT_PROJECT_BUSY），两条「我会调整」承诺全落空且 error 零呈现。
+    // 如实告知等生成完成，切断可达性。
+    const generating =
+      hasActiveStream ||
+      currentStage === 'generating_sketch' ||
+      currentStage === 'generating_mvp' ||
+      currentStage === 'testing' ||
+      currentStage === 'judge_review' ||
+      currentStage === 'repairing' ||
+      currentStage === 'iterating' ||
+      currentStage === 'upgrading'
+    if (generating) {
+      appendMessageToSession(sessionId, {
+        role: 'system',
+        content: [{ type: 'text', text: '正在生成中，这处意见我先记在心里；等这版完成后你再指给我，我马上按意见调整。' }],
+        timestamp: Date.now(),
+      })
+      return
+    }
+
+    const projectId = currentProject?.project_id ?? projectList[0]?.project_id ?? ''
+
+    // U8：优先使用点击时已收集的 DOM 上下文（PreviewPanel 点击即收集用于高亮）；缺失时提交前兜底收集一次。
+    // 渲染进程读不到跨域预览 iframe 的 DOM，改由主进程通过 subframe.executeJavaScript 收集；
+    // 收集失败则回退纯坐标模式（bounding_rect width/height 0、fallback_mode true）。
+    let domContext: DomCollectContextResult | undefined = payload.domContext
+    if (!domContext) {
+      try {
+        const dom = await api?.dom?.collectContext?.({
+          request_id: crypto.randomUUID(),
+          project_id: projectId,
+          session_id: sessionId,
+          click: { x: payload.position.x, y: payload.position.y },
+        })
+        if (dom?.ok && dom.data && !dom.data.fallback_mode) domContext = dom.data
+      } catch {
+        // 收集异常不阻断纠错提交，回退纯坐标
+      }
+    }
+
+    // 真实链路：记录点选纠错（后端 appendProjectEvent + analytics point_correction）
+    appendMessageToSession(sessionId, {
       role: 'system',
       content: [{ type: 'text', text: `已收到你的修改意见${payload.userNote ? `：「${payload.userNote}」` : '（你猜模式）'}，我来帮你调整。` }],
       timestamp: Date.now(),
-    }
-    setMessages((prev: AgentMessage[]) => [...prev, systemMsg])
-
-    setWorkflowStage('repairing')
-    setStageLabel(STAGE_LABEL_MAP.repairing)
-    setPreviewStatus('loading')
-
-    setTimeout(() => {
-      setPreviewStatus('running')
-      setWorkflowStage('sketch_ready')
-      setStageLabel(STAGE_LABEL_MAP.sketch_ready)
-
-      const doneMsg: AgentMessage = {
-        role: 'assistant',
-        content: [{ type: 'text', text: '改好了，你看看效果？不满意随时告诉我。' }],
-        timestamp: Date.now(),
-      }
-      setMessages((prev: AgentMessage[]) => [...prev, doneMsg])
-    }, 1500)
-  }, [setMessages, setWorkflowStage, setStageLabel])
+    })
+    void api.project.submitCorrection({
+      request_id: crypto.randomUUID(),
+      project_id: projectId,
+      session_id: sessionId,
+      context: domContext
+        ? {
+            element_selector: domContext.element_selector,
+            text_content: domContext.text_content,
+            bounding_rect: domContext.bounding_rect,
+            fallback_mode: false,
+          }
+        : {
+            bounding_rect: { x: payload.position.x, y: payload.position.y, width: 0, height: 0 },
+            fallback_mode: true,
+          },
+      user_note: payload.userNote || undefined,
+      mode: payload.userNote ? 'user_note' : 'guess',
+    })
+  }, [sessionId, currentProject, projectList, hasActiveStream, currentStage])
 
   // ==================== 快照回滚 ====================
 
+  /**
+   * 真回滚（P0 修复，原为假实现：只插系统消息不调 IPC）。
+   * 走 IPC snapshot:rollback——主进程先拍 rollback_guard 保护快照，再停沙箱、
+   * 按快照恢复文件/文档、重启沙箱（危险操作，会先弹权限确认）。
+   * 成功后回填 preview_url 与当前快照指针，并刷新时间轴（会多出 guard 快照）。
+   */
   const handleRollback = useCallback((snapshot: Snapshot) => {
-    const msg: AgentMessage = {
-      role: 'system',
-      content: [{ type: 'text', text: `已经回到「${snapshot.name}」了，一切都在。要继续的话随时告诉我。` }],
-      timestamp: Date.now(),
+    const api = window.electronAPI
+    const projectId = currentProject?.project_id ?? projectList[0]?.project_id ?? ''
+    const notify = (text: string) => {
+      setMessages((prev: AgentMessage[]) => [
+        ...prev,
+        { role: 'system', content: [{ type: 'text', text }], timestamp: Date.now() },
+      ])
     }
-    setMessages((prev: AgentMessage[]) => [...prev, msg])
-    setPreviewStatus('running')
-  }, [setMessages])
+    if (!api?.snapshots?.rollback || !projectId) {
+      setPreviewStatus('error')
+      notify('回滚服务暂时连不上，这次没有回滚成功，稍后再试一次。')
+      return
+    }
+    setPreviewStatus('loading')
+    void api.snapshots.rollback({
+      request_id: crypto.randomUUID(),
+      project_id: projectId,
+      snapshot_id: snapshot.snapshot_id,
+      reason: 'user_undo',
+    })
+      .then((result) => {
+        if (result?.ok && result.data.rolled_back) {
+          if (result.data.preview_url) {
+            setProjectPreview(projectId, result.data.preview_url)
+          } else {
+            setProjectPreview(projectId, null)
+            setPreviewStatus('error')
+          }
+          setCurrentSnapshotId(result.data.current_snapshot_id)
+          void loadSnapshots(projectId)
+          // T7 如实提示：存量快照（T7 前归档）没有冻结文档，回滚只还原了代码，
+          // 文档面板仍是最新版——不静默、不补造
+          const docsNote =
+            result.data.documents_restored === false
+              ? '（这个版本比较早，没有冻结当时的文档；文档面板显示的仍是最新版。）'
+              : ''
+          notify(
+            result.data.preview_url
+              ? `已经回到「${snapshot.name}」了，预览区就是当时的版本。${docsNote}要继续的话随时告诉我。`
+              : `已经回到「${snapshot.name}」了，但预览沙箱没起来，可以点「重新连接沙箱」再看。${docsNote}`,
+          )
+        } else {
+          setPreviewStatus('error')
+          notify('回滚没有成功（快照可能已失效或被拒绝），当前版本没有被改动。')
+        }
+      })
+      .catch(() => {
+        setPreviewStatus('error')
+        notify('回滚出错了，当前版本没有被改动。可以稍后再试一次。')
+      })
+  }, [currentProject, projectList, setCurrentSnapshotId, setMessages, setProjectPreview])
 
   // ==================== 超时操作（超过 120 秒） ====================
 
+  // 新一轮生成开始时，清掉上一轮「继续等待」遗留的计时起点：waitStart 只在
+  // handleContinueWaiting 里被赋值且从不清理，若不在此复位，下一轮生成会取到这个
+  // 陈旧时间戳、一开始就弹出超时卡片（effectiveWaitStart 优先用 waitStartTime）。
+  const prevHasStreamRef = React.useRef(false)
+  React.useEffect(() => {
+    const risingEdge = hasActiveStream && !prevHasStreamRef.current
+    prevHasStreamRef.current = hasActiveStream
+    if (risingEdge) setWaitStart(undefined)
+  }, [hasActiveStream])
+
   const handleContinueWaiting = useCallback(() => {
-    // 继续等待：重置等待起点，重新计时
+    // 继续等待：先给用户明确反馈，再重置等待起点重新计时
+    appendMessageToSession(sessionId, {
+      role: 'system',
+      content: [{ type: 'text', text: '好的，我继续。生成完成后马上告诉你。' }],
+      timestamp: Date.now(),
+    })
     setWaitStart(Date.now())
-  }, [])
+  }, [sessionId])
 
   const handleViewPartial = useCallback(() => {
     // 查看已有部分：预览区已展示当前内容，加一条系统消息说明
@@ -347,6 +653,152 @@ const AppRoutes: React.FC = () => {
     setMessages((prev: AgentMessage[]) => [...prev, msg])
     setPreviewStatus('running')
   }, [setMessages])
+
+  // ==================== 确认草图 → 生成完整功能（问题 A / P0-1） ====================
+
+  const handleConfirmSketch = useCallback(() => {
+    const api = window.electronAPI
+    if (!api?.project?.confirmSketch) return
+    const projectId = currentProject?.project_id ?? projectList[0]?.project_id
+    const snapshotId = currentSnapshotId ?? currentProject?.current_snapshot_id
+    if (!projectId || !snapshotId) return
+
+    setConfirmingSketch(true)
+    appendMessageToSession(sessionId, {
+      role: 'system',
+      content: [{ type: 'text', text: '好的，我按你确认的草图开始生成完整功能，稍等一下。' }],
+      timestamp: Date.now(),
+    })
+    setPreviewStatus('loading')
+
+    void api.project.confirmSketch({
+      request_id: crypto.randomUUID(),
+      project_id: projectId,
+      session_id: sessionId,
+      snapshot_id: snapshotId,
+      decision: 'accepted',
+    }).finally(() => setConfirmingSketch(false))
+  }, [sessionId, currentProject, projectList, currentSnapshotId])
+
+  // ==================== 标记为完成（U6） ====================
+
+  const handleMarkComplete = useCallback(() => {
+    const api = window.electronAPI
+    const projectId = currentProject?.project_id ?? projectList[0]?.project_id
+    if (!api?.project?.finalize || !projectId) return
+
+    void api.project.finalize({
+      request_id: crypto.randomUUID(),
+      project_id: projectId,
+      session_id: sessionId,
+    }).then((result) => {
+      if (!result?.ok) return
+      // 后端已把项目收口到 completed（satisfaction_marked + project_finalized 埋点）；
+      // 同步渲染端，让 stage 从 ready 切到 completed，头部随之出现「升级为长期模式」入口。
+      setCurrentProject(result.data)
+      setWorkflowStage(result.data.current_stage)
+      setStageLabel(STAGE_LABEL_MAP[result.data.current_stage] ?? '已完成')
+      appendMessageToSession(sessionId, {
+        role: 'system',
+        content: [{ type: 'text', text: '已标记为完成。这个项目会保留在你的历史列表里，随时可以回来继续完善，或升级为长期模式。' }],
+        timestamp: Date.now(),
+      })
+    })
+  }, [currentProject, projectList, sessionId, setCurrentProject, setWorkflowStage, setStageLabel])
+
+  // ==================== 升级为长期模式（U1） ====================
+
+  // 点击「升级为长期模式」按钮 → 先弹确认（PRD §4.4），确认后再走 IPC
+  const handleUpgrade = useCallback(() => {
+    setUpgradeConfirmOpen(true)
+  }, [])
+
+  const handleConfirmUpgrade = useCallback(() => {
+    const api = window.electronAPI
+    const projectId = currentProject?.project_id ?? projectList[0]?.project_id
+    setUpgradeConfirmOpen(false)
+    if (!api?.project?.upgrade || !projectId) return
+
+    void api.project.upgrade({
+      request_id: crypto.randomUUID(),
+      project_id: projectId,
+      session_id: sessionId,
+    }).then((result) => {
+      if (!result?.ok) return
+      // 后端已把项目切到 longterm + upgrading 阶段并落 upgrade 快照；此处同步渲染端
+      setCurrentProject(result.data)
+      setProjectMode('longterm')
+      setWorkflowStage(result.data.current_stage)
+      setStageLabel(STAGE_LABEL_MAP[result.data.current_stage] ?? '处理中')
+      appendMessageToSession(sessionId, {
+        role: 'system',
+        content: [{ type: 'text', text: '已升级为长期迭代模式，我会持续帮你维护文档与测试。随时可以继续完善。' }],
+        timestamp: Date.now(),
+      })
+    })
+  }, [currentProject, projectList, sessionId, setCurrentProject, setProjectMode, setWorkflowStage, setStageLabel])
+
+  // ==================== 预览刷新 / 重新连接沙箱（P2） ====================
+
+  const handleRefreshPreview = useCallback(() => {
+    const api = window.electronAPI
+    const projectId = currentProject?.project_id ?? projectList[0]?.project_id
+    if (!api?.sandbox?.restore || !projectId) return
+
+    setPreviewStatus('loading')
+    void api.sandbox.restore({ request_id: crypto.randomUUID(), project_id: projectId })
+      .then((result) => {
+        if (result?.ok && result.data.preview_url) {
+          setProjectPreview(projectId, result.data.preview_url)
+          setPreviewStatus('running')
+        } else {
+          setProjectPreview(projectId, null)
+          setPreviewStatus('error')
+        }
+      })
+      .catch(() => {
+        setProjectPreview(projectId, null)
+        setPreviewStatus('error')
+      })
+  }, [currentProject, projectList, setProjectPreview])
+
+  // ==================== 预览失效兜底（P0） ====================
+
+  // iframe 加载失败（沙箱端口失效/进程已死）时：清掉失效的预览地址并进入 error 态，
+  // 让用户看到「重新连接沙箱」重试按钮，而不是停在空态或死 iframe。
+  const handlePreviewError = useCallback(() => {
+    const projectId = currentProject?.project_id ?? projectList[0]?.project_id
+    if (projectId) setProjectPreview(projectId, null)
+    setPreviewStatus('error')
+  }, [currentProject, projectList, setProjectPreview])
+
+  // ==================== 设置页入口 ====================
+
+  const handleOpenSettings = useCallback(() => {
+    setRoute('settings')
+  }, [])
+
+  // ==================== 历史列表操作同步（Sprint 3：归档/删除/恢复） ====================
+
+  // 历史项目页对项目做归档/删除/恢复后，回传最新活动列表：
+  // 1) 同步 App 的 projectList（启动恢复与 handleSendMessage 兜底都依赖它）；
+  // 2) 若当前项目已被删除（不在活动列表），清 currentProject 并回两道门。
+  const handleProjectsChanged = useCallback(
+    (list: Project[]) => {
+      setProjectList(list)
+      if (currentProject && !list.some((p) => p.project_id === currentProject.project_id)) {
+        setCurrentProject(null)
+        setProjectMode(null)
+        setModeSelected(false)
+        setRoute('mode-selection')
+      }
+    },
+    [currentProject, setProjectList, setCurrentProject, setProjectMode, setModeSelected],
+  )
+
+  // 预览地址：由 sketch_ready / mvp_ready 事件回填的沙箱地址（streamPreviewUrl）
+  const effectivePreviewUrl = streamPreviewUrl ?? undefined
+  const effectivePreviewStatus: PreviewStatus = streamPreviewUrl ? 'running' : previewStatus
 
   // ==================== 路由渲染 ====================
 
@@ -366,33 +818,159 @@ const AppRoutes: React.FC = () => {
         onResumeProject={handleResumeProject}
         onNewProject={() => setRoute('mode-selection')}
         onBackToWorkspace={() => setRoute('workspace')}
+        onProjectsChanged={handleProjectsChanged}
       />
     )
   }
 
+  if (route === 'settings') {
+    return <SettingsPage onBack={() => setRoute('workspace')} />
+  }
+
   // route === 'workspace'
   return (
-    <WorkspaceShell
-      onSendMessage={handleSendMessage}
-      isWaiting={waiting}
-      waitStartTime={waitStart}
-      waitActionLabel="生成可运行版本"
-      isHistoryLoading={historyLoading}
-      previewStatus={previewStatus}
-      previewUrl={previewStatus === 'running' ? samplePreviewUrl : undefined}
-      onRefreshPreview={() => {
-        setPreviewStatus('loading')
-        setTimeout(() => setPreviewStatus('running'), 1500)
-      }}
-      onCorrectionSubmit={handleCorrectionSubmit}
-      onRollback={handleRollback}
-      onContinueWaiting={handleContinueWaiting}
-      onViewPartial={handleViewPartial}
-      onAllProjects={projectList.length > 0 ? () => {
-        setRoute('project-history')
-      } : undefined}
-    />
+    <>
+      <WorkspaceShell
+        cardOptions={decisionCards?.options}
+        decisionTitle={decisionCards?.title}
+        decisionBody={decisionCards?.body}
+        onCardOptionSelect={handleCardOptionSelect}
+        onSendMessage={handleSendMessage}
+        waitStartTime={waitStart}
+        waitActionLabel="生成可运行版本"
+        isHistoryLoading={historyLoading}
+        previewStatus={effectivePreviewStatus}
+        previewUrl={effectivePreviewUrl}
+        onRefreshPreview={handleRefreshPreview}
+        onPreviewError={handlePreviewError}
+        onConfirmSketch={window.electronAPI?.project?.confirmSketch ? handleConfirmSketch : undefined}
+        confirming={confirmingSketch}
+        onMarkComplete={window.electronAPI?.project?.finalize ? handleMarkComplete : undefined}
+        onCorrectionSubmit={handleCorrectionSubmit}
+        onCollectDomContext={handleCollectDomContext}
+        onRollback={handleRollback}
+        onContinueWaiting={handleContinueWaiting}
+        onViewPartial={handleViewPartial}
+        onStopGeneration={handleStopGeneration}
+        onOpenSettings={handleOpenSettings}
+        onUpgrade={handleUpgrade}
+        onAllProjects={projectList.length > 0 ? () => {
+          setRoute('project-history')
+        } : undefined}
+      />
+      {upgradeConfirmOpen && (
+        <UpgradeConfirmDialog
+          onCancel={() => setUpgradeConfirmOpen(false)}
+          onConfirm={handleConfirmUpgrade}
+        />
+      )}
+    </>
   )
 }
+
+/* =========================================================================
+   UpgradeConfirmDialog — 升级为长期模式的确认弹窗（U1 / PRD §4.4）
+   ========================================================================= */
+
+const UpgradeConfirmDialog: React.FC<{
+  onCancel: () => void
+  onConfirm: () => void
+}> = ({ onCancel, onConfirm }) => (
+  <div
+    role="dialog"
+    aria-modal="true"
+    aria-label="升级为长期模式"
+    data-ai-id="upgrade-confirm-dialog"
+    style={{
+      position: 'fixed',
+      inset: 0,
+      zIndex: 1100,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'rgba(0,0,0,0.35)',
+      backdropFilter: 'blur(4px)',
+      WebkitBackdropFilter: 'blur(4px)',
+      animation: 'tile-enter 0.15s ease both',
+    }}
+    onClick={(e) => {
+      if (e.target === e.currentTarget) onCancel()
+    }}
+  >
+    <div
+      style={{
+        background: 'var(--white)',
+        borderRadius: 'var(--radius-lg)',
+        padding: 'var(--space-6)',
+        maxWidth: 420,
+        width: '90%',
+        boxShadow: 'var(--shadow-lg)',
+        animation: 'tile-enter 0.2s ease both',
+      }}
+    >
+      <p
+        style={{
+          fontSize: 'var(--font-size-md)',
+          fontWeight: 700,
+          color: 'var(--color-text)',
+          margin: '0 0 var(--space-3)',
+        }}
+      >
+        升级为长期模式？
+      </p>
+      <p
+        style={{
+          fontSize: 'var(--font-size-sm)',
+          color: 'var(--color-text)',
+          lineHeight: 'var(--line-height-base)',
+          margin: '0 0 var(--space-5)',
+        }}
+      >
+        升级后会切换到「精细打磨」模式，我会持续帮你维护 PRD / 测试报告等文档。升级前会自动保存一份当前版本快照，之后仍可回滚。
+      </p>
+      <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
+        <button
+          onClick={onCancel}
+          data-ai-id="upgrade-cancel"
+          style={{
+            height: 36,
+            padding: '0 var(--space-5)',
+            fontSize: 'var(--font-size-sm)',
+            fontWeight: 600,
+            color: 'var(--color-text)',
+            background: 'var(--color-surface-muted)',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-sm)',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            transition: 'all var(--transition-fast)',
+          }}
+        >
+          取消
+        </button>
+        <button
+          onClick={onConfirm}
+          data-ai-id="upgrade-confirm"
+          style={{
+            height: 36,
+            padding: '0 var(--space-5)',
+            fontSize: 'var(--font-size-sm)',
+            fontWeight: 600,
+            color: 'var(--white)',
+            background: 'linear-gradient(135deg, var(--color-quick), var(--color-quick-bright))',
+            border: 'none',
+            borderRadius: 'var(--radius-sm)',
+            boxShadow: '0 4px 12px -2px rgba(124,58,237,0.4)',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            transition: 'all var(--transition-fast)',
+          }}
+        >
+          确认升级
+        </button>
+      </div>
+    </div>
+  </div>
+)
 
 export default App

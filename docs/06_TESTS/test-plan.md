@@ -2,7 +2,7 @@
 
 > 项目：向导 Agent 多智能体协同开发平台  
 > 文档ID：DOC-6.1  
-> 版本：v1.1 | 日期：2026-07-25 | 状态：已完成
+> 版本：v1.2 | 日期：2026-07-25 | 状态：已完成
 > 依赖：DOC-1.1 `user-stories.md`、DOC-2.5 `interaction-spec.md`、DOC-3.1 `architecture.md`、DOC-4.1 `api-spec.md`
 
 ---
@@ -143,6 +143,12 @@ npm run test:release
 | `features/self-healing-judge.feature` | 自动修复、熔断、裁判硬约束、让渡、安全问题 |
 | `features/proma-core-boundary.feature` | IPC 四层、safeStorage、权限 Map、JSONL、全局监听器 |
 
+Sprint 1 的真实 Electron E2E 位于 `tests/e2e/sprint1/`，使用独立临时 `PROMA_HOME`，通过相同稳定 ID 与带 `@e2e` 标签的 GWT 场景对应。执行命令：
+
+```bash
+npm run test:e2e:sprint1
+```
+
 ---
 
 ## 7. 质量门禁
@@ -188,3 +194,4 @@ npm run test:release
 |------|------|----------|
 | v1.0 | 2026-07-10 | 首版，定义测试分层、范围、Mock 策略、CI、GWT 文件、质量门禁和风险补救 |
 | v1.1 | 2026-07-25 | 增加 DOC-6.2 测试编写与报告规范引用 |
+| v1.2 | 2026-07-25 | 增加 Sprint 1 Playwright Electron E2E 路径、GWT 追踪方式和执行命令 |

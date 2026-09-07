@@ -1,9 +1,10 @@
 import React from 'react'
-import { useAtomValue } from 'jotai'
+import { useAtom, useAtomValue } from 'jotai'
 import { StageIndicator } from './StageIndicator'
-import { Sparkles } from './icons'
+import { Sparkles, IconSettings } from './icons'
 import {
   canUpgradeAtom,
+  collaborationPanelExpandedAtom,
   currentProjectAtom,
   documentPanelExpandedAtom,
   networkOnlineAtom,
@@ -11,10 +12,15 @@ import {
   stageIndicatorLabelAtom,
   workflowStageAtom,
 } from './atoms'
+import { hasUsableChannelsAtom } from './atoms-sprint2'
 
 export interface WorkspaceHeaderProps {
   /** 点击"所有项目"的回调 */
   onAllProjects?: () => void
+  /** 打开设置页回调 */
+  onOpenSettings?: () => void
+  /** 点击「升级为长期模式」回调（U1：升级接线） */
+  onUpgrade?: () => void
 }
 
 const ACTIVE_STAGES = new Set([
@@ -22,14 +28,16 @@ const ACTIVE_STAGES = new Set([
   'judge_review', 'repairing', 'iterating', 'upgrading',
 ])
 
-export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects }) => {
+export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects, onOpenSettings, onUpgrade }) => {
   const project = useAtomValue(currentProjectAtom)
   const mode = useAtomValue(projectModeAtom)
   const isOnline = useAtomValue(networkOnlineAtom)
+  const hasChannels = useAtomValue(hasUsableChannelsAtom)
   const stageLabel = useAtomValue(stageIndicatorLabelAtom)
   const stage = useAtomValue(workflowStageAtom)
   const canUpgrade = useAtomValue(canUpgradeAtom)
-  const [docPanelExpanded, setDocPanelExpanded] = React.useState(false)
+  const [docPanelExpanded, setDocPanelExpanded] = useAtom(documentPanelExpandedAtom)
+  const [collabPanelExpanded, setCollabPanelExpanded] = useAtom(collaborationPanelExpandedAtom)
   const stageActive = ACTIVE_STAGES.has(stage)
 
   const modeLabel = mode === 'quick' ? '快速尝鲜' : mode === 'longterm' ? '精细打磨' : ''
@@ -105,59 +113,104 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects 
         <StageIndicator label={stageLabel} active={stageActive} />
       </div>
 
-      {/* 右侧：联网 + 文档 + 升级 + 所有项目 */}
+      {/* 右侧：AI 状态 + 文档 + 升级 + 所有项目 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-        <span
-          title={isOnline ? '已连接' : '网络离线'}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 'var(--space-1)',
-            fontSize: 'var(--font-size-xs)',
-            fontWeight: 500,
-            color: isOnline ? 'var(--color-text-muted)' : 'var(--color-danger)',
-          }}
-        >
+        {/* QW#1（ux-first-run-0basics I1）：渠道感知三态徽标——零渠道时显示「未配置 AI」
+            而非 navigator.onLine 的「已连接」（误导用户以为 AI 就绪）；有渠道且在线 → 「AI 就绪」；
+            有渠道但网络离线 → 「离线」。hasChannels 为 null（idle/loading/error）时**不渲染**，
+            避免「AI 就绪」闪变误导（审查 P1-①）。 */}
+        {hasChannels === null ? null : hasChannels === false ? (
           <span
-            style={{
-              width: 7,
-              height: 7,
-              borderRadius: '50%',
-              background: isOnline ? 'var(--color-success)' : 'var(--color-danger)',
-              display: 'inline-block',
-            }}
-          />
-          {isOnline ? '已连接' : '离线'}
-        </span>
-
-        {/* 长期迭代型：文档入口 */}
-        {mode === 'longterm' && (
-          <button
-            data-ai-id="docs-button"
-            onClick={() => setDocPanelExpanded((v) => !v)}
+            title="还没有可用的 AI 模型，去设置里连接一个"
             style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: 'var(--space-1)',
-              fontSize: 'var(--font-size-sm)',
+              fontSize: 'var(--font-size-xs)',
               fontWeight: 500,
-              color: 'var(--color-text)',
-              padding: '7px var(--space-4)',
-              borderRadius: 'var(--radius-full)',
-              background: 'var(--glass-bg-soft)',
-              border: '1px solid var(--glass-border-subtle)',
-              cursor: 'pointer',
-              transition: 'all var(--transition-fast)',
+              color: 'var(--color-warning)',
             }}
           >
-            文档
-          </button>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--color-warning)', display: 'inline-block' }} />
+            未配置 AI
+          </span>
+        ) : (
+          <span
+            title={isOnline ? 'AI 就绪' : '网络离线'}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 'var(--space-1)',
+              fontSize: 'var(--font-size-xs)',
+              fontWeight: 500,
+              color: isOnline ? 'var(--color-text-muted)' : 'var(--color-danger)',
+            }}
+          >
+            <span
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                background: isOnline ? 'var(--color-success)' : 'var(--color-danger)',
+                display: 'inline-block',
+              }}
+            />
+            {isOnline ? 'AI 就绪' : '离线'}
+          </span>
+        )}
+
+        {/* 长期迭代型：委派协作 + 文档入口（两个抽屉门控，M4-C） */}
+        {mode === 'longterm' && (
+          <>
+            <button
+              data-ai-id="collaboration-button"
+              title="委派协作"
+              onClick={() => setCollabPanelExpanded((v) => !v)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 'var(--space-1)',
+                fontSize: 'var(--font-size-sm)',
+                fontWeight: 500,
+                color: 'var(--color-text)',
+                padding: '7px var(--space-4)',
+                borderRadius: 'var(--radius-full)',
+                background: collabPanelExpanded ? 'var(--glass-bg-strong)' : 'var(--glass-bg-soft)',
+                border: '1px solid var(--glass-border-subtle)',
+                cursor: 'pointer',
+                transition: 'all var(--transition-fast)',
+              }}
+            >
+              协作
+            </button>
+            <button
+              data-ai-id="docs-button"
+              onClick={() => setDocPanelExpanded((v) => !v)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 'var(--space-1)',
+                fontSize: 'var(--font-size-sm)',
+                fontWeight: 500,
+                color: 'var(--color-text)',
+                padding: '7px var(--space-4)',
+                borderRadius: 'var(--radius-full)',
+                background: 'var(--glass-bg-soft)',
+                border: '1px solid var(--glass-border-subtle)',
+                cursor: 'pointer',
+                transition: 'all var(--transition-fast)',
+              }}
+            >
+              文档
+            </button>
+          </>
         )}
 
         {/* 快消型已完成：升级入口 */}
         {canUpgrade && (
           <button
             data-ai-id="upgrade-to-longterm-button"
+            onClick={onUpgrade}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -174,6 +227,40 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects 
             }}
           >
             升级为长期模式
+          </button>
+        )}
+
+        {/* 设置入口（Sprint 2） */}
+        {onOpenSettings && (
+          <button
+            onClick={onOpenSettings}
+            data-ai-id="settings-button"
+            title="设置（模型渠道）"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 'var(--space-1)',
+              fontSize: 'var(--font-size-sm)',
+              fontWeight: 500,
+              color: 'var(--color-text)',
+              padding: '7px var(--space-4)',
+              borderRadius: 'var(--radius-full)',
+              background: 'var(--glass-bg-soft)',
+              border: '1px solid var(--glass-border-subtle)',
+              cursor: 'pointer',
+              transition: 'all var(--transition-fast)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--glass-bg-strong)'
+              e.currentTarget.style.transform = 'translateY(-1px)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'var(--glass-bg-soft)'
+              e.currentTarget.style.transform = 'none'
+            }}
+          >
+            <IconSettings size={16} />
+            设置
           </button>
         )}
 

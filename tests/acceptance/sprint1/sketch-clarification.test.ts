@@ -3,18 +3,23 @@ import { IPC_CHANNELS, type AgentEvent, type ApiResult, type Project } from '../
 import { createIpcHarness } from '../support/ipc-harness'
 import { useTemporaryPromaHome, type TemporaryPromaHome } from '../support/test-environment'
 
-vi.mock('../../../main/channel-manager', () => ({
-  getChannelByIdRaw: () => ({
-    id: 'test-channel',
-    name: 'Test',
-    provider_type: 'anthropic',
-    base_url: 'https://api.anthropic.com',
-    api_key: 'encrypted-test-key',
-    models: [{ id: 'claude-sonnet-4-6', name: 'Claude', enabled: true }],
-    enabled: true,
-  }),
-  decryptApiKey: () => 'test-key-from-channel',
-}))
+vi.mock('../../../main/channel-manager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/channel-manager')>()
+  return {
+    ...actual,
+    getChannelByIdRaw: () => ({
+      id: 'test-channel',
+      name: 'Test',
+      provider_type: 'anthropic',
+      base_url: 'https://api.anthropic.com',
+      api_key: 'encrypted-test-key',
+      models: [{ id: 'claude-sonnet-4-6', name: 'Claude', enabled: true }],
+      enabled: true,
+    }),
+    decryptApiKey: () => 'test-key-from-channel',
+    getFirstEnabledChannel: () => undefined,
+  }
+})
 
 describe('Sprint 1 sketch clarification acceptance', () => {
   let environment: TemporaryPromaHome | undefined
@@ -39,7 +44,7 @@ describe('Sprint 1 sketch clarification acceptance', () => {
       channel_id: 'test-channel',
     }) as ApiResult<unknown>
     const decision = findEvent(harness.events, 'user_decision_required')
-    const options = decision?.payload.options as Array<{ label: string; description?: string }>
+    const options = decision?.payload.questions as Array<{ label: string; description?: string }>
 
     expect(response.ok).toBe(true)
     expect(options.length).toBeGreaterThanOrEqual(2)

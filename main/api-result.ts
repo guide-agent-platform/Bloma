@@ -27,6 +27,8 @@ export function userVisibleMessage(code: ErrorCode): string {
       return '这次操作缺少必要信息，请再试一次。'
     case 'AGENT_SESSION_BUSY':
       return '我还在处理上一条内容，请稍等一下。'
+    case 'AGENT_PROJECT_BUSY':
+      return '这个项目正在处理另一项任务，请先等待它完成或点击停止。'
     case 'AGENT_SDK_ERROR':
       return '刚才处理时遇到问题，我会换个方式继续。'
     case 'AGENT_SDK_TIMEOUT':

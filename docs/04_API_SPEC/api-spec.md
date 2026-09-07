@@ -37,20 +37,46 @@
 const IPC_CHANNELS = {
   AGENT_SEND_MESSAGE: "agent:send-message",
   AGENT_STOP: "agent:stop",
+  AGENT_LIST_SESSIONS: "agent:list-sessions",
+  AGENT_LOAD_MESSAGES: "agent:load-messages",
+  AGENT_CONFIRM_REQUIREMENTS: "agent:confirm-requirements",
+  SESSION_CLEAN_ORPHANS: "session:clean-orphans",
   AGENT_STREAM_EVENT: "agent:stream-event",
   PERMISSION_RESPONSE: "permission:response",
+  PERMISSION_SET_MODE: "permission:set-mode",
   PROJECT_CREATE: "project:create",
   PROJECT_LIST: "project:list",
   PROJECT_CONFIRM_SKETCH: "project:confirm-sketch",
   PROJECT_SUBMIT_CORRECTION: "project:submit-correction",
   PROJECT_ARCHIVE: "project:archive",
+  PROJECT_UNARCHIVE: "project:unarchive",
+  PROJECT_DELETE: "project:delete",
   PROJECT_UPGRADE: "project:upgrade",
+  PROJECT_FINALIZE: "project:finalize",
+  PROJECT_EXPORT: "project:export",
+  PROJECT_RENAME: "project:rename",
+  PROJECT_ABANDON: "project:abandon",
+  PROJECT_REOPEN: "project:reopen",
   SANDBOX_RUN: "sandbox:run",
   SANDBOX_STOP: "sandbox:stop",
+  SANDBOX_RESTORE: "sandbox:restore",
   SNAPSHOT_CREATE: "snapshot:create",
   SNAPSHOT_ROLLBACK: "snapshot:rollback",
+  SNAPSHOT_LIST: "snapshot:list",
+  SNAPSHOT_SCREENSHOT: "snapshot:screenshot",
   DOCUMENT_SYNC: "document:sync",
-  ANALYTICS_TRACK: "analytics:track"
+  DOCUMENT_LIST: "document:list",
+  DOCUMENT_READ: "document:read",
+  DOM_COLLECT_CONTEXT: "dom:collect-context",
+  DOM_SCROLL_PREVIEW: "dom:scroll-preview",
+  ANALYTICS_TRACK: "analytics:track",
+  CHANNEL_LIST: "channel:list",
+  CHANNEL_CREATE: "channel:create",
+  CHANNEL_UPDATE: "channel:update",
+  CHANNEL_TEST: "channel:test",
+  CHANNEL_TEST_DIRECT: "channel:test-direct",
+  CHANNEL_FETCH_MODELS: "channel:fetch-models",
+  CHANNEL_DELETE: "channel:delete"
 } as const;
 ```
 
@@ -235,8 +261,20 @@ type AgentEvent = {
     | "rollback_done"
     | "judge_result"
     | "user_decision_required"
+    | "retrying"
     | "error"
-    | "completed";
+    | "completed"
+    /** 权限模式切换广播（F8） */
+    | "permission_mode_changed"
+    /** 委派子 agent 冒泡提问（M3） */
+    | "delegation_question"
+    /** 委派生命周期（M4-C） */
+    | "delegation_started"
+    | "delegation_completed"
+    | "delegation_failed"
+    | "delegation_cancelled"
+    /** usage 竹节压缩（闭环 PR6）：at_turn / input_tokens / compactions */
+    | "loop_compaction";
   payload: Record<string, unknown>;
   created_at: string;
 };
@@ -322,6 +360,27 @@ type AgentLoadMessagesResult = {
 - JSONL 不存在时返回 `SESSION_NOT_FOUND`。
 - JSONL 存在但索引缺失（升级前遗留数据）时按文件 mtime 合成会话记录，不阻塞读取。
 
+### 5.6 `agent:confirm-requirements`
+
+用途：需求确认弹窗（confirm_requirements 流，2026-08-26）的决策回传。confirm=按勾选子集开工；delegate=用户主动让渡，按向导整理的清单全量开工。两条路径都会先做 PRD 前移（requirement_confirmed 检查点落盘，早于草图），失败不阻断。继续补充说明不走本通道，由渲染端直接走 `agent:send-message` 回到向导。
+
+```ts
+type AgentConfirmRequirementsInput = {
+  request_id: string;
+  session_id: string;
+  project_id: string;
+  decision: "confirm" | "delegate";
+  requirement_ids?: string[]; // confirm 时勾选的需求 id 子集；空集/缺省视为全量
+};
+
+type AgentConfirmRequirementsResult = {
+  started: boolean;     // false = 无待决弹窗（重复提交/重启丢失），幂等不报错
+  prd_written: boolean; // PRD 前移是否成功落盘
+};
+```
+
+事件配套：向导判定需求成型时经 `agent:stream-event` 推送 `user_decision_required`，`payload.kind = "requirement_confirm"`，携 `requirements`（勾选清单）与 `research`（DDG 市调摘要，`available:false` 时如实标注）；渲染端由 RequirementConfirmDialog 弹窗消费（不走内联决策卡）。
+
 ---
 
 ## 6. 权限接口
@@ -405,18 +464,19 @@ type Project = {
 ```ts
 type ProjectListInput = {
   request_id: string;
+  scope?: "active" | "archived" | "all"; // 默认 active
 };
 
-// 返回未归档项目列表，活动项目优先
+// 按视角返回项目列表：active 过滤归档，archived 只回归档，all 返回全部（活动项目优先）
 type ProjectListResult = Project[];
 ```
 
 存储：
 
 - 读取项目索引 JSON。
-- 过滤掉 `status === "archived"` 的项目，活动项目排在前面。
+- 按 `scope` 过滤：`active`（默认）过滤 `status === "archived"`；`archived` 只返回 `status === "archived"`；`all` 返回全部。活动项目排在前面。
 
-用途：应用启动时恢复活动项目与会话，避免重启后回到两道门。
+用途：应用启动时恢复活动项目与会话（scope 默认 active），避免重启后回到两道门；历史列表页「已归档」视角使用 scope=archived。
 
 ### 7.3 `project:archive`
 
@@ -437,7 +497,47 @@ type ProjectArchiveResult = Project;
 
 用途：历史项目列表提供"归档"操作，归档后不再出现在 `project:list` 返回中。
 
-### 7.4 `project:confirm-sketch`
+### 7.4 `project:unarchive`
+
+```ts
+type ProjectUnarchiveInput = {
+  request_id: string;
+  project_id: string;
+};
+
+// 取消归档：status 恢复为 "active"，重新出现在 active 视角
+type ProjectUnarchiveResult = Project;
+```
+
+存储：
+
+- 更新项目索引 JSON，将 `status` 恢复为 `active`。
+
+用途：历史项目列表「已归档」视角提供"恢复"操作，恢复后重新出现在 `project:list`（scope 默认 active）返回中。
+
+### 7.5 `project:delete`
+
+```ts
+type ProjectDeleteInput = {
+  request_id: string;
+  project_id: string;
+};
+
+// 硬删除项目：索引条目 + 项目/文档/快照/事件文件 + 关联会话
+type ProjectDeleteResult = { deleted: true };
+```
+
+存储与清理（迁移自 Proma `deleteAgentWorkspace` / `deleteConversation`）：
+
+- 从项目索引 JSON 移除该条目并落盘（先索引后文件，rm 失败只残留无引用文件，不产生孤儿索引）。
+- 从 `agent-sessions.json` 移除该项目的会话索引，并删除 `agent-sessions/{session_id}.jsonl`。
+- 物理删除 `generated-projects/{project_id}`、`documents/{project_id}`、`snapshots/{project_id}`、`events/{project_id}.jsonl`。
+- 路径安全防护：所有待删路径必须落在 workspace 根内，否则拒绝（`PROJECT_DELETE_PATH_SAFETY`）。
+- 删除前主进程先 `stopSandbox` 停止该项目沙箱，避免 Windows 文件句柄占用。
+
+用途：历史项目列表提供"删除"操作（UI 二次确认）。这是不可逆操作，会清掉用户生成的软件全部文件与对话记录。
+
+### 7.6 `project:confirm-sketch`
 
 ```ts
 type ConfirmSketchInput = {
@@ -456,7 +556,7 @@ type ConfirmSketchInput = {
 - `needs_change`：生成 revision task。
 - 决策追加写入 JSONL。
 
-### 7.5 `project:submit-correction`
+### 7.7 `project:submit-correction`
 
 ```ts
 type PointCorrectionInput = {
@@ -644,12 +744,15 @@ type AnalyticsEventInput = {
     | "conversation_submitted"
     | "guide_role_switched"
     | "sketch_generated"
+    | "sketch_fallback"
     | "mvp_delivered"
     | "user_undo"
     | "point_correction"
     | "mode_upgraded"
     | "programming_execution"
     | "self_repair_triggered"
+    | "agent_loop_turn"
+    | "agent_loop_completed"
     | "judge_verdict"
     | "satisfaction_marked"
     | "project_finalized";
@@ -829,6 +932,58 @@ MCP 工具由 Agent SDK 在 main 进程侧调用，权限由 `PermissionService.
 }
 ```
 
+### 12.10 `web_fetch`
+
+```json
+{
+  "input": {
+    "url": "https://example.com/docs",
+    "max_chars": 12000
+  },
+  "output": {
+    "output": "（终态 URL · HTTP 状态 · 类型）\n纯文本正文（超限截断并提示）",
+    "detail": {"url": "string", "status": 200, "chars": 0, "truncated": false}
+  }
+}
+```
+
+规则：仅 http/https 公网地址；内网/环回/链路本地/保留段 IP、localhost/.local/.internal、无点主机名一律拒绝；重定向终态复检；响应体上限 2MB；HTML 剔除 script/style/标签后仅保留可见文本。
+
+### 12.11 `scroll_preview`（点选纠错滚动转发）
+
+渲染端点选纠错捕获层盖在跨域预览 iframe 上方会挡住滚动；此通道把滚轮/中键拖拽的增量转发给主进程，主进程经 `subframe.executeJavaScript(window.scrollBy)` 滚动预览。
+
+```json
+{
+  "input": {
+    "delta_x": 0,
+    "delta_y": 120
+  },
+  "output": {
+    "scrolled": true
+  }
+}
+```
+
+### 12.12 `web_research`（Agent Loop 委派化联网调研，仅 parent）
+
+针对一个问题或 URL 派出只读调研子代理（role=research，工具面含 web_fetch），阻塞等待收敛后回灌精干结论；主 loop 上下文只进 ≤4000 字总结，原文抓取全部发生在子代理（随感 43「查资料 fork 出去」）。
+
+```json
+{
+  "input": {
+    "question": "Playwright 如何监听 iframe 内的 console 报错",
+    "focus": "可用的 API 与版本要求"
+  },
+  "output": {
+    "output": "调研结论：\n（≤4000 字要点 + 出处 URL，已剥子代理状态头行）",
+    "detail": { "delegation_id": "string" }
+  }
+}
+```
+
+规则：仅主 agent loop（role=parent）可用，子代理无此工具（防递归委派；research 子代理自己用 web_fetch）；收敛上限 90s，超时停止子代理并如实告知（isError）；子代理失败/取消不拋错，建议改用 web_fetch；生产 toolBudget 每 loop 限 4 次（超限软着陆）。
+
 ---
 
 ## 13. 权限等级
@@ -844,6 +999,7 @@ MCP 工具由 Agent SDK 在 main 进程侧调用，权限由 `PermissionService.
 | `generate_mvp` | warning | 写入项目文件 |
 | `run_project` | warning | 启动本地进程 |
 | `create_snapshot` | warning | 写入快照文件 |
+| `web_fetch` | warning | 公网只读抓取（SSRF 防护拒绝内网地址） |
 | `rollback_snapshot` | dangerous | 覆盖当前工作副本 |
 
 规则：
@@ -865,6 +1021,7 @@ type ErrorCode =
   | "AGENT_SDK_TIMEOUT"
   | "AGENT_CANCELLED"
   | "CHANNEL_NOT_FOUND"
+  | "SESSION_NOT_FOUND"
   | "API_KEY_DECRYPT_FAILED"
   | "PERMISSION_REQUEST_NOT_FOUND"
   | "PERMISSION_DENIED"
@@ -887,6 +1044,7 @@ type ErrorCode =
 | `AGENT_SDK_ERROR` | 是 | “刚才处理时遇到问题，我会换个方式继续。” |
 | `AGENT_SDK_TIMEOUT` | 是 | “这一步等得有点久，我会重新尝试。” |
 | `CHANNEL_NOT_FOUND` | 否 | “当前还没有可用的模型配置。” |
+| `SESSION_NOT_FOUND` | 否 | “没有找到这段对话记录。” |
 | `API_KEY_DECRYPT_FAILED` | 否 | “模型配置需要重新验证。” |
 | `PERMISSION_DENIED` | 否 | “这个操作已取消，当前内容不会被改动。” |
 | `SANDBOX_RUN_FAILED` | 是 | “预览暂时没有启动成功，我正在修复。” |
@@ -901,3 +1059,6 @@ type ErrorCode =
 |------|------|----------|
 | v1.0 | 2026-07-10 | 首版，定义 IPC、Renderer Bridge、Agent 流、权限、项目、沙箱、快照、文档、埋点、MCP 工具和错误码 |
 | v1.1 | 2026-07-10 | 按 `proma-core-demo` 对齐修订：IPC 通道 `AGENT_CANCEL` → `AGENT_STOP` 与 Proma 原版命名一致 |
+| v1.2 | 2026-08-15 | 项目管理补全：新增 `project:unarchive`（取消归档）、`project:delete`（硬删除，含清理与路径安全防护）；`project:list` 增加 `scope`（active/archived/all）视角 |
+| v1.3 | 2026-08-15 | 与 `shared/types.ts` 对齐：§2.1 IPC 通道补全至 40 个（会话/渠道/快照列表/文档读取/DOM 上下文等）；§5.2 AgentEvent 补 `retrying`；§14 错误码补 `SESSION_NOT_FOUND` |
+| v1.4 | 2026-08-25 | Agent Loop 转正唯一运行时：§5.2 AgentEvent 补 `permission_mode_changed` 与 `delegation_question`/`delegation_started`/`delegation_completed`/`delegation_failed`/`delegation_cancelled` 委派事件；§11 埋点接口与 `shared/types.ts` 对齐（新增 `agent_loop_turn`/`agent_loop_completed`，`programming_execution` 随废旧管道保留类型但无新产生点） |
