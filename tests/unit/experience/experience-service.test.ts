@@ -11,8 +11,10 @@ import {
   resetExperienceIndexForTests,
   selectForInjection,
   tryRegisterCard,
+  updateCardAttribution,
 } from '../../../main/experience/experience-service'
 import type { AntiPatternBody, ExperienceCard } from '../../../main/experience/types'
+import { attributeRootCause, needsRefinement } from '../../../main/experience/root-cause-attributor'
 
 /**
  * T-2 统一入册闸门（账本 ~/.proma/bloma-experience.jsonl）：
@@ -99,6 +101,24 @@ describe('experience-service：注册与去重', () => {
     const raw = readFileSync(join(home, 'bloma-experience.jsonl'), 'utf8')
     expect(raw).not.toContain('alice')
     expect(raw).not.toContain('password123')
+  })
+})
+
+describe('experience-service：attribution-seam 链路（unknown 卡 → LLM 精化落盘）', () => {
+  const unknownBody = (): AntiPatternBody => ({ ...antiBody(), stage: 'unknown', symptom: 'QQQ-7788 未登记结局：执行体以未知形态中止', trigger_condition: 'QQQ-7788 无任何已知规则线索', root_cause: { stage: 'unknown', description: 'unknown', method: 'rule', confidence: 0 } })
+  it('needsRefinement 卡经真实接线（fake llm seam）精化：method=llm、clamp≤0.5、reasoning 落盘', async () => {
+    const card = (await tryRegisterCard({ kind: 'anti_pattern', tag: 'unknown/outcome/timeout', body: unknownBody(), source: { type: 'abnormal_outcome', project_hash: 'p1', timestamp: Date.now() } })) as ExperienceCard
+    expect(needsRefinement(card)).toBe(true)
+    const refined = await attributeRootCause(card, {
+      llmCall: async () => JSON.stringify({ stage: 'coding', confidence: 0.9, reasoning: '长任务多轮工具调用未收敛，疑为生成侧任务分解粒度过大', possible_stages: ['coding'] }),
+    })
+    expect(refined.method).toBe('llm')
+    expect(refined.confidence).toBeLessThanOrEqual(0.5) // 强制 clamp 纪律
+    const updated = await updateCardAttribution(card.id, refined)
+    expect((updated?.body as AntiPatternBody).root_cause.reasoning).toContain('任务分解粒度')
+    const latest = readAllCards().find((c) => c.id === card.id)
+    expect((latest?.body as AntiPatternBody).root_cause.stage).toBe('coding')
+    expect(needsRefinement(latest!)).toBe(false) // 精化后不再需要二次归因
   })
 })
 
