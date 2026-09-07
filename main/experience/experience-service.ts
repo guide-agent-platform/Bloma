@@ -388,6 +388,7 @@ export async function selectForInjection(query: InjectionQuery): Promise<Experie
     const candidates = [...ensureIndex().values()]
       .filter((c) => (query.kind ? c.kind === query.kind : true))
       .filter(isConsumable)
+      .filter((c) => !(c.body as { suspected_false_positive?: boolean }).suspected_false_positive) // 误报标记卡隔离
       .filter((c) => query.include_stale || !isStale(c, now))
       .filter((c) => matchesFilters(c, query))
       .sort((a, b) => relevanceScore(b, query, now) - relevanceScore(a, query, now) || b.updated_at - a.updated_at)

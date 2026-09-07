@@ -125,6 +125,9 @@ export interface AntiPatternBody {
   review_checklist: string[]
   /** 1=轻微 2=中等 3=严重 */
   severity: 1 | 2 | 3
+  /** 误报标记（调度系统 Analyzer 打）：产物经独立检验 HEALTHY 但断言判败的卡——
+   *  保留账本供审计与探针改进消费，但**绝不进任何注入/重放池**（经验库自防误伤）。 */
+  suspected_false_positive?: boolean
 }
 
 // =========================================================================

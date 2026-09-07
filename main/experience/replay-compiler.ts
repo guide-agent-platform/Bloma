@@ -46,6 +46,7 @@ function replayableCards(projectId: string): ExperienceCard[] {
   try {
     return readAllCards()
       .filter((c) => c.kind === 'anti_pattern' && c.status !== 'retired')
+      .filter((c) => !(c.body as { suspected_false_positive?: boolean }).suspected_false_positive) // 误报卡不重放不产晋升证据
       .sort(
         (a, b) =>
           (b.status === 'verified' ? 1 : 0) - (a.status === 'verified' ? 1 : 0) ||

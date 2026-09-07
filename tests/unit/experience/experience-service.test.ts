@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -241,6 +241,21 @@ describe('experience-service：selectForInjection', () => {
     await promoteToVerified(b!.id, 'replay_green')
     const res = await selectForInjection({ kind: 'anti_pattern', context_hint: 'timer debounce unmount input handler' })
     expect(res[0].id).toBe(b!.id)
+  })
+})
+
+describe('experience-service：误报标记隔离（调度系统标记层）', () => {
+  it('suspected_false_positive 卡即使 verified 也不进注入池；未标记对照卡可选中', async () => {
+    const marked = await registerOnce()
+    await promoteToVerified(marked.id, 'replay_green')
+    const snap = { ...readAllCards().find((c) => c.id === marked.id)!, body: { ...marked.body, suspected_false_positive: true }, updated_at: Date.now() + 1000 }
+    appendFileSync(join(home, 'bloma-experience.jsonl'), JSON.stringify(snap) + String.fromCharCode(10), 'utf8')
+    resetExperienceIndexForTests()
+    const control = await registerOnce({ ...antiBody(), symptom: 'unique control symptom not marked' })
+    await promoteToVerified(control.id, 'replay_green')
+    const picked = await selectForInjection({ kind: 'anti_pattern', limit: 10, budget_chars: 5000 })
+    expect(picked.find((c) => c.id === marked.id)).toBeUndefined()
+    expect(picked.find((c) => c.id === control.id)).toBeDefined()
   })
 })
 

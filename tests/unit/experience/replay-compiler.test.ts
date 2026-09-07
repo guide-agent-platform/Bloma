@@ -1,4 +1,4 @@
-import { mkdtempSync, existsSync, readdirSync, readFileSync } from 'node:fs'
+import { appendFileSync, mkdtempSync, existsSync, readdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -71,6 +71,15 @@ describe('replay-compiler：断言编译', () => {
   it('无 gwt 时从 GWT 症状原文提取原断言（重验同一断言最高保真）', () => {
     const card = { kind: 'anti_pattern', body: body('GWT 场景「F-005 当点击删除时，应出现确认弹窗」未通过：无确认') } as ExperienceCard
     expect(replayAssertionText(card)).toBe('当点击删除时，应出现确认弹窗')
+  })
+
+  it('误报标记卡（suspected_false_positive）不进 advisory 重放池，也不产晋升证据', async () => {
+    const c = await seedCard('coding/gwt/fp1', 'GWT 场景「F-020 当点击提交时，应出现错误提示」未通过：x')
+    const marked = { ...readAllCards().find((x) => x.id === c!.id)!, body: { ...c!.body, suspected_false_positive: true }, updated_at: Date.now() + 1000 }
+    appendFileSync(join(home, 'bloma-experience.jsonl'), JSON.stringify(marked) + String.fromCharCode(10), 'utf8')
+    resetExperienceIndexForTests()
+    const reqs = replayRequirements('proj-fp')
+    expect(reqs.some((r) => r.description.includes('coding/gwt/fp1'))).toBe(false)
   })
 
   it('不可编译（结局卡无断言原文）→ null', () => {
