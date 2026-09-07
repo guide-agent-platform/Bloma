@@ -21,5 +21,7 @@ export default defineConfig({
     testTimeout: 30_000,
     // PROMA_HOME 被 teardown 写成字符串 "undefined" 时统一归位，见该文件注释
     setupFiles: [resolve(__dirname, 'tests/support/proma-home-guard.ts')],
+    // 启动时回收历史泄漏的测试临时 PROMA_HOME 目录（mkdtemp 命名模式 + 距上次修改 >30min），见该文件注释
+    globalSetup: [resolve(__dirname, 'tests/support/tmp-home-sweep.ts')],
   },
 })
