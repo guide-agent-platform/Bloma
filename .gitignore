@@ -14,3 +14,8 @@ evidence/
 # （详见 storage/config-paths.ts getPromaHome 与 tests/support/proma-home-guard.ts）
 undefined/
 null/
+
+tasks.json
+logs/
+reports/
+.gs-*.mark
