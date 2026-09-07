@@ -10,6 +10,8 @@ import { appendProjectLearning, renderLearningsSection } from '../learnings-log'
 import { createSnapshot, runSandbox, trackAnalytics } from '../platform-services'
 import { renderPackageJson, renderStaticServer, renderSkeletonToProject, scaffoldEnabled } from '../project-scaffold'
 import { runBuildGate, type BuildGateResult } from './build-gate'
+import { runArtifactUiGate, uiGateEnabled, uiProbeNotes, type ArtifactUiGateResult } from './artifact-ui-gate'
+import { runVisionAuditGate } from './vision-audit-gate'
 import { buildRepairTasks, resolveRepairBudget, runRepairLoop } from './repair-loop'
 import { generateLoopPlan, planLegEnabled, renderPlanInjection, renderPlanMarkdown, type LoopPlan } from './loop-planner'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../project-service'
@@ -1549,6 +1551,9 @@ export interface JudgeReviewInput {
   channel_id?: string
   /** 取消信号：语义审查及其委派等待期间立即停止。 */
   signal?: AbortSignal
+  /** L1 视觉审计摘要（2026-09-07）：代码参数注入裁判证据链，非提示词配置；
+   *  passed/flagged/unavailable/skipped 均传（不可用也要让裁判看见缺口）。 */
+  visualEvidence?: string
 }
 
 export interface JudgeReviewResult {
@@ -1683,9 +1688,13 @@ async function evaluateOnce(input: JudgeReviewInput): Promise<JudgeVerdict> {
   const semantic = await runSemanticJudgeReview({
     backplane,
     artifact: readArtifactText(project.root_path),
-    testSummary: testResult
-      ? `共 ${testResult.total_count} 项，通过 ${testResult.passed_count}、失败 ${testResult.failed_count}`
-      : undefined,
+    testSummary: [
+      testResult
+        ? `共 ${testResult.total_count} 项，通过 ${testResult.passed_count}、失败 ${testResult.failed_count}`
+        : '',
+      input.visualEvidence ? `视觉审计：${input.visualEvidence}` : '',
+      testResult?.unverified?.length ? `未验证项：${testResult.unverified.join('；')}` : '',
+    ].filter(Boolean).join('；') || undefined,
     query: input.query,
     env,
     sessionId: input.session_id,
@@ -1813,8 +1822,42 @@ function loopOutcomeNote(loop: AgentLoopJudgeMetadata | undefined): string {
  * （纯函数可测）；此处取背板 interface_spec 并把失败以 GwtFailureSummary 并入测试
  * 结果——修复回流/熔断/让渡口径完全复用（修复轮按 location「API 契约端点：…」定修）。
  */
-async function runGwtWithApiContract(input: { project_id: string; session_id: string; preview_url?: string }): Promise<GwtTestResult> {
+/** 导出供接线契约测试（gwt-ui-gate-merge）：L0 门禁必须每次执行不可旁路。 */
+export async function runGwtWithApiContract(input: { project_id: string; session_id: string; preview_url?: string }): Promise<GwtTestResult> {
   const testResult = await runGwtScenarios(input)
+  // L0 产物 UI 完整性硬门禁（2026-09-07）：与 api-contract 同款合并——初验与修复轮
+  // 重验共用本函数，无旁路；失败合成 UI-GATE 前缀条目进既有 repair-loop gwt 腿。
+  // 探针不可用不判败但落 unverified 可见（F9a 不静默）。
+  let gateResult: ArtifactUiGateResult | undefined
+  if (input.preview_url && uiGateEnabled()) {
+    gateResult = await runArtifactUiGate({ previewUrl: input.preview_url })
+  }
+  if (gateResult) {
+    if (gateResult.status !== 'skipped') {
+      recordDecision({
+        project_id: input.project_id,
+        session_id: input.session_id,
+        entry: {
+          type: 'ui_gate',
+          title: gateResult.status === 'failed' ? `L0 UI 完整性门禁：${gateResult.failures.length} 项判败` : `L0 UI 完整性门禁：${gateResult.status}`,
+          why: gateResult.status === 'failed' ? gateResult.failures.map((f) => f.reason).join('；').slice(0, 300) : gateResult.note ?? '探针通过',
+          detail: { status: gateResult.status, realControls: gateResult.probe?.realControls, leaked: gateResult.probe?.leakedPatterns ?? [] },
+        },
+      })
+    }
+    if (gateResult.failures.length > 0) {
+      testResult.total_count += gateResult.failures.length
+      testResult.failed_count += gateResult.failures.length
+      testResult.failure_summary = [...testResult.failure_summary, ...gateResult.failures]
+    } else if (gateResult.status === 'unavailable') {
+      testResult.unverified = [...(testResult.unverified ?? []), `UI 完整性门禁未执行（${gateResult.note ?? '探针失败'}），界面真实性未经机器探测，裁判与用户可见`]
+    }
+    // 通过态的信息位（死点击嫌疑/占位人设/console 错误）进 unverified：不判败但裁判可见
+    if (gateResult.probe) {
+      const notes = uiProbeNotes(gateResult.probe)
+      if (notes.length > 0) testResult.unverified = [...(testResult.unverified ?? []), ...notes]
+    }
+  }
   if (!input.preview_url) return testResult
   const endpoints = backplaneInterfaceSpec(readPrdBackplane(input.project_id))
   if (endpoints.length === 0) return testResult
@@ -1896,6 +1939,23 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
     return { verdict: 'blocked', test_result: testResult }
   }
 
+  // L1 双视觉审计（2026-09-07 产出物审计固化）：截图→V1 详述→V2 异构互证→报告落
+  // 项目文档 + 摘要经代码参数注入裁判语义审查腿（非提示词软约束，每次必执行）。
+  // LLM 证据不直接判败（防视觉噪声成第二套硬门禁）；unavailable/skipped 也必须
+  // 决策日志留痕并进裁判 testSummary（F9a 不静默）。
+  throwIfAborted(input.signal)
+  const vision = await runVisionAuditGate({ previewUrl: input.preview_url, projectId: input.project_id })
+  recordDecision({
+    project_id: input.project_id,
+    session_id: input.session_id,
+    entry: {
+      type: 'vision_audit',
+      title: `L1 视觉审计：${vision.status}`,
+      why: vision.digest.slice(0, 300),
+      detail: { status: vision.status, note: vision.note },
+    },
+  })
+
   // 终审（M4-B loop-aware）：judge 感知 loop 结果——completed 照常读盘判定；异常终止态让渡。
   // judge 级修复同样「只终验不重修」（repairInternalized 熔断 constraint_error 外部文档重修）。
   throwIfAborted(input.signal)
@@ -1910,6 +1970,7 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
     query: input.query,
     channel_id: input.channel_id,
     signal: input.signal,
+    visualEvidence: vision.digest,
   })
   return { verdict: judge.outcome, test_result: testResult, judge: judge.verdict }
 }
