@@ -180,9 +180,29 @@ async function main() {
   writeFileSync(REAL_LEDGER, merged.map((c) => JSON.stringify(c)).join('\n') + '\n', 'utf8')
   log(`账本合并：新增指纹 ${newFps}，总行数 ${merged.length}`)
 
+  // 4.5 产物独立可用性检验（第三方视角交叉验证 verdict：熔断≠产物不可用，
+  //     GWT 断言关键词字面化会误伤真实可用的实现——2026-09-07 S9–S11 实弹实证）
+  const artifactVerdicts = []
+  for (const d of doneLines) {
+    if (!d.projectId) continue
+    const adir = join(tempHome, 'agent-workspaces', 'default-software-builder', 'generated-projects', d.projectId)
+    if (!existsSync(join(adir, 'index.html'))) { artifactVerdicts.push({ name: d.name, artifact: 'NO_ARTIFACT' }); continue }
+    try {
+      const out = execFileSync(process.execPath, [join(REPO, 'scripts', 'verify-artifact.mjs'), adir, join(REPO, `.gs-verify-${d.projectId.slice(0, 8)}`)], { cwd: REPO, timeout: 90_000, encoding: 'utf8' })
+      const v = JSON.parse(out.slice(out.indexOf('{'))).verdict
+      artifactVerdicts.push({ name: d.name, artifact: v })
+      log(`产物检验 ${d.name}: ${v}（流水线 verdict=${d.verdict}）`)
+    } catch (e) {
+      // verify 退出码 2=有错误信号（stdout 仍含 verdict），其余按 BROKEN
+      const out = String(e.stdout || '')
+      const m = /"verdict":\s*"([A-Z_]+)"/.exec(out)
+      artifactVerdicts.push({ name: d.name, artifact: m ? m[1] : 'VERIFY_FAILED' })
+    }
+  }
+
   // 5. 历史行
   appendFileSync(HISTORY, JSON.stringify({
-    ts: Date.now(), iso: new Date().toISOString(), samples: doneLines,
+    ts: Date.now(), iso: new Date().toISOString(), samples: doneLines, artifacts: artifactVerdicts,
     cards_incoming: incoming.length, cards_new: newFps, ledger_total: merged.length,
     harness_exit: code, temp_home: tempHome,
   }) + '\n', 'utf8')

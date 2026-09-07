@@ -190,7 +190,7 @@ describe('灰度全样例（headless 真链）', () => {
         log(`样本收束 name=${sample.name} verdict=${verdict} cards=${cardCount}`)
         if (process.env.GS_RESULT_MARK) {
           const { appendFileSync } = await import('node:fs')
-          appendFileSync(process.env.GS_RESULT_MARK, JSON.stringify({ name: sample.name, verdict, cards: cardCount }) + '\n', 'utf8')
+          appendFileSync(process.env.GS_RESULT_MARK, JSON.stringify({ name: sample.name, verdict, cards: cardCount, projectId }) + '\n', 'utf8')
         }
         expect(verdict).toBeTruthy()
       },
