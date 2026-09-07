@@ -28,6 +28,30 @@ import {
 } from '../../main/agent-collaboration'
 
 /**
+ * 中止本测试遗留的 running 子循环并等待其收尾链落定。
+ * 子循环被 abort 后，agent-loop 会异步把终态 tool_result（如 AGENT_CANCELLED）写回会话 JSONL；
+ * 若不等待，写入会在 PROMA_HOME 恢复/变更后执行，落到错误目录（如 cwd 下 ./undefined/agent-sessions/，
+ * 见 storage/config-paths.ts 的 PROMA_HOME 污染防御注释）。两个宏任务拍覆盖 withAbort reject →
+ * executeToolCall catch → runAgent 写会话 → 收尾的异步链。
+ */
+async function abortAndSettleChildLoops(): Promise<void> {
+  for (const record of listDelegations(parentSessionId)) {
+    if (record.status === 'running') record.abort.abort()
+  }
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+/**
+ * 安全恢复 PROMA_HOME：本机未设时必须 delete，不能把 undefined 赋回 env
+ * （Node 会把 process.env.X = undefined 强制转成字符串 "undefined"，污染成相对路径）。
+ */
+function restorePromaHome(original: string | undefined): void {
+  if (original === undefined) delete process.env.PROMA_HOME
+  else process.env.PROMA_HOME = original
+}
+
+/**
  * 委派协作 M1 单元测试（委派协作嫁接方案 §4.1/§5，2026-08-24）。
  *
  * 锁定 Proma 模式不变式：
@@ -97,13 +121,11 @@ describe('委派协作 M1', () => {
     // 默认子工具集 = 真实 buildAgentTools（role 裁剪）；个别用例覆盖
     setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
   })
-  afterEach(() => {
-    // 中止本测试遗留的 running 子循环（防挂起泄漏），再卸载上下文
-    for (const record of listDelegations(parentSessionId)) {
-      if (record.status === 'running') record.abort.abort()
-    }
+  afterEach(async () => {
+    // 中止本测试遗留的 running 子循环并等待收尾落定（防挂起泄漏 + 防收尾写入落错目录）
+    await abortAndSettleChildLoops()
     unregisterParentLoopContext(parentSessionId)
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   it('startDelegation fire-and-forget：立即返回 delegation_id，子 loop 独立 session 跑完 → completed', async () => {
@@ -267,15 +289,16 @@ describe('M2 委派工具（agent-tools 接线，委派协作嫁接方案 §4.2�
   }
 
   // M2 describe 独立于 M1，需自备隔离：每测试独立父 sessionId + 默认子工具构建器 + 清理
+  const originalPromaHomeM2 = process.env.PROMA_HOME
   beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-collab-'))
     parentSessionId = `session-m2-${Date.now()}-${Math.random().toString(36).slice(2)}`
     setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
   })
-  afterEach(() => {
-    for (const record of listDelegations(parentSessionId)) {
-      if (record.status === 'running') record.abort.abort()
-    }
+  afterEach(async () => {
+    await abortAndSettleChildLoops()
     unregisterParentLoopContext(parentSessionId)
+    restorePromaHome(originalPromaHomeM2)
   })
 
   function parentTools(): Map<string, AgentLoopTool> {
@@ -383,15 +406,16 @@ describe('M3 提问冒泡 / 续跑（委派协作嫁接方案 §6）', () => {
   }
 
   // M3 describe 独立隔离（同 M2）：每测试独立父 sessionId + 默认子工具构建器 + 清理
+  const originalPromaHomeM3 = process.env.PROMA_HOME
   beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-collab-'))
     parentSessionId = `session-m3-${Date.now()}-${Math.random().toString(36).slice(2)}`
     setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
   })
-  afterEach(() => {
-    for (const record of listDelegations(parentSessionId)) {
-      if (record.status === 'running') record.abort.abort()
-    }
+  afterEach(async () => {
+    await abortAndSettleChildLoops()
     unregisterParentLoopContext(parentSessionId)
+    restorePromaHome(originalPromaHomeM3)
   })
 
   /**
@@ -529,12 +553,10 @@ describe('M4-C 委派生命周期事件（delegation_started/completed/failed/ca
     parentSessionId = `session-evt-${Date.now()}-${Math.random().toString(36).slice(2)}`
     setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
   })
-  afterEach(() => {
-    for (const record of listDelegations(parentSessionId)) {
-      if (record.status === 'running') record.abort.abort()
-    }
+  afterEach(async () => {
+    await abortAndSettleChildLoops()
     unregisterParentLoopContext(parentSessionId)
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   function registerParentCapturing(query: SDKQuery): Array<{ type: string; payload: Record<string, unknown> }> {
@@ -682,12 +704,10 @@ describe('审计修复回归（审计报告 2026-08-25：P1-1/P1-2/P2-4/P2-5/P2-
     parentSessionId = `session-fix-${Date.now()}-${Math.random().toString(36).slice(2)}`
     setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
   })
-  afterEach(() => {
-    for (const record of listDelegations(parentSessionId)) {
-      if (record.status === 'running') record.abort.abort()
-    }
+  afterEach(async () => {
+    await abortAndSettleChildLoops()
     unregisterParentLoopContext(parentSessionId)
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   it('P1-1：answer 后再次 wait 不因旧 askSignal 假提前返回（等满 timeout 而非立即返回）', async () => {
@@ -823,13 +843,11 @@ describe('web_research 委派化查询（闭环 PR5）', () => {
     parentSessionId = `session-web-research-${Date.now()}-${Math.random().toString(36).slice(2)}`
     setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
   })
-  afterEach(() => {
-    for (const record of listDelegations(parentSessionId)) {
-      if (record.status === 'running') record.abort.abort()
-    }
+  afterEach(async () => {
+    await abortAndSettleChildLoops()
     unregisterParentLoopContext(parentSessionId)
     setWebResearchTimeoutForTests(WEB_RESEARCH_TIMEOUT_MS)
-    process.env.PROMA_HOME = originalPromaHome
+    restorePromaHome(originalPromaHome)
   })
 
   function webResearch(): AgentLoopTool {
