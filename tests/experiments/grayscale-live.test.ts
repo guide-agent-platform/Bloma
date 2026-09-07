@@ -65,6 +65,8 @@ beforeAll(() => {
     decryptString: () => realKey,
   })
   setProgrammingEventPublisher((event) => events.push(event))
+  // 标记文件：脚本侧不解析 stdout（管道缓冲会淹没实时性），home 与逐样本结果落盘交换
+  if (process.env.GS_HOME_MARK) writeFileSync(process.env.GS_HOME_MARK, home, 'utf8')
   log('headless 环境就绪 home=', home)
 })
 
@@ -143,6 +145,10 @@ describe('灰度全样例（headless 真链）', () => {
           }
         }
         log(`样本收束 name=${sample.name} verdict=${verdict} cards=${cardCount}`)
+        if (process.env.GS_RESULT_MARK) {
+          const { appendFileSync } = await import('node:fs')
+          appendFileSync(process.env.GS_RESULT_MARK, JSON.stringify({ name: sample.name, verdict, cards: cardCount }) + '\n', 'utf8')
+        }
         expect(verdict).toBeTruthy()
       },
     )

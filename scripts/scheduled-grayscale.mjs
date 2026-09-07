@@ -17,7 +17,7 @@
  * 熔断是真实终态不是探针失败），1=链路故障（key/账本/解析失败）。
  */
 import { execFileSync, spawn } from 'node:child_process'
-import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync, writeSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -28,15 +28,32 @@ const argVal = (name, dflt) => {
   return i >= 0 && args[i + 1] ? args[i + 1] : dflt
 }
 const SAMPLES_SEL = argVal('samples', 'S1').split(',').map((s) => s.trim().toUpperCase())
+// AUTO=轮换模式：按历史计数在样本库内循环选取 1 个（夜间探针长期不重样）
+function resolveSelection(samples) {
+  if (!SAMPLES_SEL.includes('AUTO')) return SAMPLES_SEL
+  let n = 0
+  try { n = Number(readFileSync(ROTATE_IDX, 'utf8').trim()) || 0 } catch {}
+  const ids = Object.keys(samples)
+  if (!ids.length) return []
+  const pick = ids[n % ids.length]
+  try { writeFileSync(ROTATE_IDX, String(n + 1), 'utf8') } catch {}
+  log(`AUTO 轮换：计数 ${n} → 选中 ${pick}`)
+  return [pick]
+}
 const BUDGET_MS = Number(argVal('budget-min', '50')) * 60_000
 const CHANNELS = argVal('channels', join(homedir(), '.proma', 'bloma-channels.json'))
 const USERDATA = argVal('userdata', join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'bloma'))
 const REAL_LEDGER = join(homedir(), '.proma', 'bloma-experience.jsonl')
 const HISTORY = join(homedir(), '.proma', 'bloma-grayscale-history.jsonl')
 const KEY_FILE = join(REPO, '.gs-key-live.tmp.json')
+const HOME_MARK = join(REPO, '.gs-home.mark')
+const RESULT_MARK = join(REPO, '.gs-result.mark')
+const SAMPLES_FILE = join(REPO, 'scripts', 'grayscale-samples.json')
+const ROTATE_IDX = join(homedir(), '.proma', 'bloma-grayscale-rotate.idx')
 
-/** 灰度样本库（断言粒度=行为断言，源自 workbench plan/grayscale-samples.md） */
-const SAMPLES = {
+/** 内置兜底样本（外部 JSON 样本库读不到时用；主源永远是 scripts/grayscale-samples.json，
+ *  定时轮换任务只追加 JSON 不改代码） */
+const BUILTIN_SAMPLES = {
   S1: { name: 'S1-记账小工具', requirements: [
     { id: 'F-001', description: '记录收入与支出', behavior_assertions: ['点击添加后，新记录立即出现在列表中'], priority: 'P0' },
     { id: 'F-002', description: '按关键字搜索历史记录', behavior_assertions: ['在搜索框输入关键字时，列表只显示包含该关键字的记录'], priority: 'P0' }] },
@@ -53,17 +70,48 @@ const SAMPLES = {
     { id: 'F-002', description: '点开看大图', behavior_assertions: ['点击缩略图后出现放大的图片视图'], priority: 'P0' }] },
 }
 
-const log = (...a) => console.log(`[gs-script ${new Date().toISOString().slice(11, 19)}]`, ...a)
+/** 样本库加载：外置 JSON 为准（合并覆盖内置），读失败退回内置。 */
+function loadSamples() {
+  const merged = { ...BUILTIN_SAMPLES }
+  try {
+    const j = JSON.parse(readFileSync(SAMPLES_FILE, 'utf8'))
+    for (const [id, s] of Object.entries(j.samples || {})) {
+      if (s && s.name && Array.isArray(s.requirements) && s.requirements.length > 0) merged[id] = s
+    }
+  } catch (e) {
+    log('样本库 JSON 不可读（退回内置）:', String(e).slice(0, 60))
+  }
+  return merged
+}
+const SAMPLES = loadSamples()
+
+const log = (...a) => writeSync(1, `[gs-script ${new Date().toISOString().slice(11, 19)}] ${a.join(' ')}
+`)
+
+if (args.includes('--list')) {
+  for (const [id, s] of Object.entries(SAMPLES)) console.log(id, s.name, `(${s.requirements.length} 项)`, s.source || '')
+  process.exit(0)
+}
 
 function readLedger(path) {
   if (!existsSync(path)) return []
   return readFileSync(path, 'utf8').split(/\r?\n/).filter(Boolean).map((l) => JSON.parse(l))
 }
 
-/** 同指纹折叠（occurrences 相加、seen_projects 并集、recurrence=参与项目数）。 */
+/** 同指纹折叠（occurrences 相加、seen_projects 并集、recurrence=参与项目数）。
+ * 先按 id 归并取最新快照行（服务层状态变更=追加行非原地改，同卡多行是常态），
+ * 避免把同轮次的 candidate/verified 快照重复计入 occurrences（灰度 S56 实弹发现的口径 bug）。 */
 function mergeCards(base, incoming) {
+  const latestById = (cards) => {
+    const byId = new Map()
+    for (const c of cards) {
+      const prev = byId.get(c.id)
+      if (!prev || (c.updated_at || 0) >= (prev.updated_at || 0)) byId.set(c.id, c)
+    }
+    return [...byId.values()]
+  }
   const byFp = new Map()
-  for (const c of [...base, ...incoming]) {
+  for (const c of [...latestById(base), ...latestById(incoming)]) {
     const prev = byFp.get(c.fingerprint)
     if (!prev) {
       byFp.set(c.fingerprint, { ...c, seen_projects: [...new Set(c.seen_projects || [])] })
@@ -92,30 +140,35 @@ async function main() {
   log('key 就绪（渠道:', entry[0], '——明文从不落日志）')
 
   // 2. vitest harness（样本注入）
-  const selected = SAMPLES_SEL.map((s) => SAMPLES[s]).filter(Boolean)
+  const selected = resolveSelection(SAMPLES).map((s) => SAMPLES[s]).filter(Boolean)
   if (selected.length === 0) throw new Error(`--samples 无有效样本（可选 ${Object.keys(SAMPLES).join('/')}）`)
   log(`跑样本: ${selected.map((s) => s.name).join(', ')}`)
-  const outLines = []
+  rmSync(HOME_MARK, { force: true }); rmSync(RESULT_MARK, { force: true })
   const code = await new Promise((res) => {
     const child = spawn(process.execPath, [join(REPO, 'node_modules', 'vitest', 'vitest.mjs'), 'run', 'tests/experiments/grayscale-live.test.ts'], {
       cwd: REPO,
-      env: { ...process.env, GS_KEY_FILE: KEY_FILE, GS_SAMPLE_JSON: JSON.stringify(selected), BLOMA_EXPERIENCE: '1' },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, GS_KEY_FILE: KEY_FILE, GS_SAMPLE_JSON: JSON.stringify(selected), BLOMA_EXPERIENCE: '1', GS_HOME_MARK: HOME_MARK, GS_RESULT_MARK: RESULT_MARK },
+      stdio: ['ignore', 'inherit', 'inherit'],
     })
-    const grab = (buf) => { const t = String(buf); outLines.push(t); process.stdout.write(t.replace(/^/gm, '  | ')) }
-    child.stdout.on('data', grab)
-    child.stderr.on('data', grab)
+    // 心跳：每 60s 报已完成样本数（mark 文件行数），卡死与否一眼可判
+    const beat = setInterval(() => {
+      let done = 0
+      try { done = readFileSync(RESULT_MARK, 'utf8').split(/\r?\n/).filter(Boolean).length } catch {}
+      log(`心跳：样本完成 ${done}/${selected.length}`)
+    }, 60_000)
     const timer = setTimeout(() => { log('预算耗尽，杀 vitest 树'); child.kill('SIGKILL') }, BUDGET_MS)
-    child.on('exit', (c2) => { clearTimeout(timer); res(c2 ?? 1) })
+    child.on('exit', (c2) => { clearInterval(beat); clearTimeout(timer); res(c2 ?? 1) })
   })
   log('harness 退出码', code)
 
-  // 3. 解析 temp home + 样本收束行
-  const blob = outLines.join('')
-  const homeM = blob.match(/headless 环境就绪 home=\s*(\S+)/)
-  const doneLines = [...blob.matchAll(/样本收束 name=(\S+) verdict=(\S+) cards=(\d+)/g)].map((m) => ({ name: m[1], verdict: m[2], cards: Number(m[3]) }))
-  if (!homeM) throw new Error('未解析到 temp home（harness 可能在 beforeAll 前崩）')
-  const tempLedger = join(homeM[1], 'bloma-experience.jsonl')
+  // 3. 读标记文件（不走 stdout：管道缓冲不可靠）
+  let tempHome = ''
+  try { tempHome = readFileSync(HOME_MARK, 'utf8').trim() } catch {}
+  const doneLines = existsSync(RESULT_MARK)
+    ? readFileSync(RESULT_MARK, 'utf8').split(/\r?\n/).filter(Boolean).map((l) => JSON.parse(l))
+    : []
+  if (!tempHome) throw new Error('未读到 temp home 标记（harness 可能在 beforeAll 前崩）')
+  const tempLedger = join(tempHome, 'bloma-experience.jsonl')
 
   // 4. 并入真实账本（key 文件先删——合并失败也不能留密钥）
   rmSync(KEY_FILE, { force: true })
@@ -131,7 +184,7 @@ async function main() {
   appendFileSync(HISTORY, JSON.stringify({
     ts: Date.now(), iso: new Date().toISOString(), samples: doneLines,
     cards_incoming: incoming.length, cards_new: newFps, ledger_total: merged.length,
-    harness_exit: code, temp_home: homeM[1],
+    harness_exit: code, temp_home: tempHome,
   }) + '\n', 'utf8')
   log('完成。历史已写', HISTORY)
   if (!doneLines.length) throw new Error('harness 无任何样本收束（跑挂/超时）')
