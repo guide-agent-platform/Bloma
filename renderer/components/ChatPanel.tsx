@@ -339,9 +339,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               </div>
             )}
 
-            {messages.map((msg, i) => (
-              <MessageBubble key={i} message={msg} mode={mode} toolNamesById={toolNamesById} onOpenSettings={onOpenSettings} />
-            ))}
+            {/* 历史回放：相邻的工具轮消息合并成同一个「执行过程」折叠组（对齐 Proma turn 分组） */}
+            <HistoryMessages messages={messages} mode={mode} toolNamesById={toolNamesById} onOpenSettings={onOpenSettings} />
 
             {/* message-queue UI 收尾（P1-①）：排队中的消息灰化回显，确认不丢 */}
             {pendingQueue.map((text, i) => (
@@ -698,7 +697,7 @@ function deriveMessageProcessItems(message: AgentMessage, toolNamesById: Record<
     if (block.type === 'tool_use') {
       items.push({
         kind: 'tool',
-        key: block.id ?? `tool-${index}`,
+        key: `use-${block.id ?? index}`,
         tool: block.name ?? '',
         inputSummary: safeJsonPreview(block.input),
         status: 'ok',
@@ -708,7 +707,7 @@ function deriveMessageProcessItems(message: AgentMessage, toolNamesById: Record<
     if (block.type === 'tool_result') {
       items.push({
         kind: 'tool',
-        key: block.tool_use_id ?? `result-${index}`,
+        key: `result-${block.tool_use_id ?? index}`,
         tool: toolNamesById[block.tool_use_id ?? ''] ?? 'tool_result',
         inputSummary: typeof block.content === 'string' ? block.content : '',
         status: block.is_error ? 'error' : 'ok',
@@ -717,6 +716,77 @@ function deriveMessageProcessItems(message: AgentMessage, toolNamesById: Record<
     }
   })
   return items
+}
+
+/** 渲染单个过程项（tool / delegation / narration 行）。 */
+function renderProcessItem(item: ProcessItem): React.ReactNode {
+  if (item.kind === 'tool') {
+    return (
+      <ToolCallRow
+        tool={item.tool}
+        inputSummary={item.inputSummary}
+        outputSummary={item.outputSummary}
+        status={item.status}
+        durationMs={item.durationMs}
+        replay
+      />
+    )
+  }
+  if (item.kind === 'delegation') return <DelegationRow item={item.item} />
+  return <NarrationRow text={item.text} />
+}
+
+/**
+ * 历史回放：把相邻的工具轮消息（一次 Agent Loop 的 assistant(tool_use) + user(tool_result)）
+ * 合并成一个「执行过程」折叠组（对齐 Proma 的 turn 分组），不再每条消息拆一个折叠组。
+ * 用户输入 / 纯文本正文 / system 消息保持独立渲染。
+ */
+const HistoryMessages: React.FC<{
+  messages: AgentMessage[]
+  mode: ProjectMode | null
+  toolNamesById: Record<string, string>
+  onOpenSettings?: () => void
+}> = ({ messages, mode, toolNamesById, onOpenSettings }) => {
+  const nodes: React.ReactNode[] = []
+  let buffer: AgentMessage[] = []
+  const flush = (): void => {
+    if (buffer.length === 0) return
+    const buffered = buffer
+    buffer = []
+    const processItems = buffered.flatMap((message) => deriveMessageProcessItems(message, toolNamesById))
+    if (processItems.length === 0) {
+      // 无有效过程项 → 退回逐条渲染（MessageBubble 内部兜底）
+      buffered.forEach((message, index) => {
+        nodes.push(
+          <MessageBubble key={`fallback-${index}`} message={message} mode={mode} toolNamesById={toolNamesById} onOpenSettings={onOpenSettings} />,
+        )
+      })
+      return
+    }
+    nodes.push(
+      <ProcessBlockGroup
+        key={`process-${nodes.length}`}
+        items={processItems}
+        isStreaming={false}
+        renderItem={renderProcessItem}
+      />,
+    )
+  }
+  messages.forEach((message, index) => {
+    const isUserInput =
+      message.role === 'user' && message.content.some((block) => block.type === 'text' && !!block.text?.trim())
+    const hasTool = message.content.some((block) => block.type === 'tool_use' || block.type === 'tool_result')
+    if (!isUserInput && hasTool) {
+      buffer.push(message)
+      return
+    }
+    flush()
+    nodes.push(
+      <MessageBubble key={index} message={message} mode={mode} toolNamesById={toolNamesById} onOpenSettings={onOpenSettings} />,
+    )
+  })
+  flush()
+  return <>{nodes}</>
 }
 
 /* =========================================================================
