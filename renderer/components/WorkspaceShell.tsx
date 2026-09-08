@@ -23,7 +23,6 @@ export interface WorkspaceShellProps {
   waitStartTime?: number
   waitActionLabel?: string
   onContinueWaiting?: () => void
-  onViewPartial?: () => void
   /** 回访恢复时是否正在加载历史消息（对话区显示骨架占位） */
   isHistoryLoading?: boolean
   /** 停止当前生成（U4：Agent 流式生成中点击停止） */
@@ -116,7 +115,6 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
           waitStartTime={props.waitStartTime}
           waitActionLabel={props.waitActionLabel}
           onContinueWaiting={props.onContinueWaiting}
-          onViewPartial={props.onViewPartial}
           isHistoryLoading={props.isHistoryLoading}
           onStopGeneration={props.onStopGeneration}
           onOpenSettings={props.onOpenSettings}

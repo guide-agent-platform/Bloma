@@ -643,17 +643,6 @@ const AppRoutes: React.FC = () => {
     setWaitStart(Date.now())
   }, [sessionId])
 
-  const handleViewPartial = useCallback(() => {
-    // 查看已有部分：预览区已展示当前内容，加一条系统消息说明
-    const msg: AgentMessage = {
-      role: 'system',
-      content: [{ type: 'text', text: '这是目前已经生成好的部分。你可以先看看效果，我继续在后台帮你完善。' }],
-      timestamp: Date.now(),
-    }
-    setMessages((prev: AgentMessage[]) => [...prev, msg])
-    setPreviewStatus('running')
-  }, [setMessages])
-
   // ==================== 确认草图 → 生成完整功能（问题 A / P0-1） ====================
 
   const handleConfirmSketch = useCallback(() => {
@@ -850,7 +839,6 @@ const AppRoutes: React.FC = () => {
         onCollectDomContext={handleCollectDomContext}
         onRollback={handleRollback}
         onContinueWaiting={handleContinueWaiting}
-        onViewPartial={handleViewPartial}
         onStopGeneration={handleStopGeneration}
         onOpenSettings={handleOpenSettings}
         onUpgrade={handleUpgrade}

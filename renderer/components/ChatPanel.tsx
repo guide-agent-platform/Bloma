@@ -5,6 +5,8 @@ import type { CardOption } from './CardOptions'
 import { WaitingFeedback } from './WaitingFeedback'
 import { ToolCallRow, deriveToolCallRecords, safeJsonPreview } from './ToolCallBlock'
 import { DelegationRow } from './DelegationFeed'
+import { ProgressCard, buildProgressLines, countDoneSteps, mapStageToRunSteps } from './ProgressCard'
+import type { DelegationView } from '../agent-atoms'
 import { ProcessBlockGroup, type ProcessItem } from './ProcessBlockGroup'
 import { Markdown } from './Markdown'
 import { ArrowUp, MessageSquare, IconAlertTriangle, IconStop } from './icons'
@@ -43,8 +45,6 @@ export interface ChatPanelProps {
   waitActionLabel?: string
   /** 超时-继续等待 */
   onContinueWaiting?: () => void
-  /** 超时-查看已有 */
-  onViewPartial?: () => void
   /** 回访恢复：加载历史消息期间显示骨架占位（sitemap §2.6） */
   isHistoryLoading?: boolean
   /** 停止当前生成（U4：Agent 流式生成中点击停止） */
@@ -61,6 +61,7 @@ const nullStreamFallback = atom<AgentStreamState>({
   events: [],
   content: '',
 })
+const nullDelegationsFallback = atom<DelegationView[]>([])
 
 /** 生成类阶段 → WaitingFeedback 的「正在做什么」话术（按权威阶段展示，不再一刀切「生成可运行版本」）。 */
 const STAGE_ACTION_LABELS: Record<string, string> = {
@@ -95,7 +96,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   waitStartTime,
   waitActionLabel = '生成可运行版本',
   onContinueWaiting,
-  onViewPartial,
   isHistoryLoading = false,
   onStopGeneration,
   onOpenSettings,
@@ -109,6 +109,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   /** 忙碌 = 外部等待或本地流式运行中。输入框保持可编辑（草稿），只禁发，不再整体锁死。 */
   const busy = isWaiting || hasActiveStream
+
+  // 进度卡（想法 B，2026-09-08）：点击「查看进度」后从权威阶段与事件流归约过程；会话结束自动收起
+  const delegations = useAtomValue(activeSessionId ? delegationsFamily(activeSessionId) : nullDelegationsFallback)
+  const [viewingProgress, setViewingProgress] = React.useState(false)
+  React.useEffect(() => {
+    if (!busy) setViewingProgress(false)
+  }, [busy])
 
   const messages = useAtomValue(
     activeSessionId ? agentMessagesFamily(activeSessionId) : nullMessagesFallback,
@@ -401,8 +408,23 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               <WaitingFeedback
                 elapsedSeconds={elapsed}
                 actionLabel={busyActionLabel}
-                onContinueWaiting={onContinueWaiting}
-                onViewPartial={onViewPartial}
+                onContinueWaiting={() => {
+                  // 「继续等待」重置计时回到非超时态：同步收起进度卡，避免停在无按钮状态
+                  setViewingProgress(false)
+                  onContinueWaiting?.()
+                }}
+                onViewProgress={() => setViewingProgress((previous) => !previous)}
+                viewingProgress={viewingProgress}
+              />
+            )}
+
+            {viewingProgress && busy && streamState && activeSessionId && (
+              <ProgressCard
+                stageLabel={busyActionLabel}
+                steps={mapStageToRunSteps(workflowStage) ?? []}
+                lines={buildProgressLines(streamState.events, delegations)}
+                doneSteps={countDoneSteps(streamState.events, delegations)}
+                onClose={() => setViewingProgress(false)}
               />
             )}
 
