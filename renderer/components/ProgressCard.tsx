@@ -211,9 +211,11 @@ export interface ProgressCardProps {
   /** 已收尾的工具/委派步数（无模板回退时展示） */
   doneSteps: number
   onClose: () => void
+  /** 提出新想法（超时态用户可补充需求，父级聚焦输入框并提示排队，R-WAIT-04） */
+  onSuggestIdea?: () => void
 }
 
-export const ProgressCard: React.FC<ProgressCardProps> = ({ stageLabel, steps, lines, doneSteps, onClose }) => {
+export const ProgressCard: React.FC<ProgressCardProps> = ({ stageLabel, steps, lines, doneSteps, onClose, onSuggestIdea }) => {
   const progress = computeStepProgress(steps)
   const liveLine = pickLiveLine(lines)
   const inProgressExists = steps.some((step) => step.status === 'in_progress')
@@ -369,24 +371,43 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({ stageLabel, steps, l
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={onClose}
-        style={{
-          alignSelf: 'flex-start',
-          height: 30,
-          padding: '0 var(--space-3)',
-          fontSize: 'var(--font-size-xs)',
-          fontWeight: 600,
-          color: 'var(--color-text-muted)',
-          background: 'transparent',
-          border: '1px solid var(--color-border)',
-          borderRadius: 'var(--radius-full)',
-          cursor: 'pointer',
-        }}
-      >
-        收起
-      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+        <button
+          type="button"
+          onClick={onClose}
+          style={{
+            height: 30,
+            padding: '0 var(--space-3)',
+            fontSize: 'var(--font-size-xs)',
+            fontWeight: 600,
+            color: 'var(--color-text-muted)',
+            background: 'transparent',
+            border: '1px solid var(--color-border)',
+            borderRadius: 'var(--radius-full)',
+            cursor: 'pointer',
+          }}
+        >
+          收起
+        </button>
+        {onSuggestIdea && (
+          <button
+            type="button"
+            onClick={onSuggestIdea}
+            style={{
+              height: 30,
+              padding: 0,
+              fontSize: 'var(--font-size-xs)',
+              fontWeight: 600,
+              color: 'var(--color-quick)',
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            提出新想法
+          </button>
+        )}
+      </div>
     </div>
   )
 }

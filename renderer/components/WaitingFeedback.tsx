@@ -10,6 +10,8 @@ export interface WaitingFeedbackProps {
   onViewProgress?: () => void
   /** 父级是否已展开进度卡（决定按钮文案：查看进度 / 收起进度） */
   viewingProgress?: boolean
+  /** 提出新想法：等待中超时才出现；父级负责收起进度卡并聚焦输入框（R-WAIT-04） */
+  onSuggestIdea?: () => void
 }
 
 /**
@@ -18,7 +20,7 @@ export interface WaitingFeedbackProps {
  * 三级递进（interaction-spec §6）：
  * - ≤10 秒：显示当前在做什么（R-WAIT-01）
  * - >10 秒：加入安全感说明，并提供"查看进度"（R-WAIT-02）
- * - >120 秒：额外提供"继续等待"（R-WAIT-03）
+ * - >120 秒：提供"继续等待 / 查看进度 / 提出新想法"（R-WAIT-03，等待不阻塞继续输入）
  */
 export const WaitingFeedback: React.FC<WaitingFeedbackProps> = ({
   elapsedSeconds,
@@ -26,6 +28,7 @@ export const WaitingFeedback: React.FC<WaitingFeedbackProps> = ({
   onContinueWaiting,
   onViewProgress,
   viewingProgress = false,
+  onSuggestIdea,
 }) => {
   const level: WaitLevel = elapsedSeconds > 120 ? 'timeout' : elapsedSeconds > 10 ? 'long' : 'normal'
 
@@ -75,8 +78,8 @@ export const WaitingFeedback: React.FC<WaitingFeedbackProps> = ({
         </div>
       </div>
 
-      {(level === 'timeout' || level === 'long') && (onContinueWaiting || onViewProgress) && (
-        <div style={{ display: 'flex', gap: 'var(--space-2)', paddingLeft: 32 }}>
+      {(level === 'timeout' || level === 'long') && (onContinueWaiting || onViewProgress || onSuggestIdea) && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', paddingLeft: 32 }}>
           {level === 'timeout' && onContinueWaiting && (
             <button
               onClick={onContinueWaiting}
@@ -111,6 +114,24 @@ export const WaitingFeedback: React.FC<WaitingFeedbackProps> = ({
               }}
             >
               {viewingProgress ? '收起进度' : '查看进度'}
+            </button>
+          )}
+          {level === 'timeout' && onSuggestIdea && (
+            <button
+              onClick={onSuggestIdea}
+              style={{
+                height: 34,
+                padding: '0 var(--space-4)',
+                fontSize: 'var(--font-size-sm)',
+                fontWeight: 600,
+                color: 'var(--color-text)',
+                background: 'var(--glass-bg-soft)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius-full)',
+                cursor: 'pointer',
+              }}
+            >
+              提出新想法
             </button>
           )}
         </div>

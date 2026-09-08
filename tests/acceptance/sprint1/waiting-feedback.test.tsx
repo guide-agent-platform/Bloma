@@ -104,4 +104,27 @@ describe('Sprint 1 waiting feedback acceptance', () => {
     expect(screen.getByRole('button', { name: '查看进度' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: '继续等待' })).toBeNull()
   })
+
+  it('仅 >120 秒超时态提供「提出新想法」，long 态不出现，点击触发回调', () => {
+    const suggestIdea = vi.fn()
+    const { rerender } = render(
+      <WaitingFeedback
+        elapsedSeconds={121}
+        actionLabel="生成草图"
+        onSuggestIdea={suggestIdea}
+      />,
+    )
+    const button = screen.getByRole('button', { name: '提出新想法' })
+    button.click()
+    expect(suggestIdea).toHaveBeenCalledOnce()
+
+    rerender(
+      <WaitingFeedback
+        elapsedSeconds={11}
+        actionLabel="生成草图"
+        onSuggestIdea={suggestIdea}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: '提出新想法' })).toBeNull()
+  })
 })

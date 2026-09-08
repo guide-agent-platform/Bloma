@@ -113,9 +113,21 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   // 进度卡（想法 B，2026-09-08）：点击「查看进度」后从权威阶段与事件流归约过程；会话结束自动收起
   const delegations = useAtomValue(activeSessionId ? delegationsFamily(activeSessionId) : nullDelegationsFallback)
   const [viewingProgress, setViewingProgress] = React.useState(false)
+  // 提出新想法引导提示（2026-09-08）：超时态点击按钮后聚焦输入框并提示可排队提交
+  const [ideaHint, setIdeaHint] = React.useState(false)
   React.useEffect(() => {
-    if (!busy) setViewingProgress(false)
+    if (!busy) {
+      setViewingProgress(false)
+      setIdeaHint(false)
+    }
   }, [busy])
+
+  // 提出新想法：收起进度卡 + 聚焦输入框 + 显示排队引导（R-WAIT-04：等待不阻塞继续输入）
+  const handleSuggestIdea = React.useCallback(() => {
+    setViewingProgress(false)
+    setIdeaHint(true)
+    inputRef.current?.focus()
+  }, [])
 
   const messages = useAtomValue(
     activeSessionId ? agentMessagesFamily(activeSessionId) : nullMessagesFallback,
@@ -248,6 +260,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     setPendingImages([])
     setPasteError(null)
     setInputValue('')
+    setIdeaHint(false)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -415,6 +428,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                 }}
                 onViewProgress={() => setViewingProgress((previous) => !previous)}
                 viewingProgress={viewingProgress}
+                onSuggestIdea={handleSuggestIdea}
               />
             )}
 
@@ -425,7 +439,26 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                 lines={buildProgressLines(streamState.events, delegations)}
                 doneSteps={countDoneSteps(streamState.events, delegations)}
                 onClose={() => setViewingProgress(false)}
+                onSuggestIdea={handleSuggestIdea}
               />
+            )}
+
+            {ideaHint && busy && (
+              <div
+                data-ai-id="idea-hint"
+                role="note"
+                style={{
+                  fontSize: 'var(--font-size-xs)',
+                  color: 'var(--color-text-muted)',
+                  padding: 'var(--space-3) var(--space-4)',
+                  background: 'var(--glass-bg-soft)',
+                  border: '1px dashed var(--color-border)',
+                  borderRadius: 'var(--radius-sm)',
+                  maxWidth: 420,
+                }}
+              >
+                ✍️ 有新想法？直接写在下面按 Enter 发送，会排队等这一轮完成后一起处理。
+              </div>
             )}
 
             {globalError && (

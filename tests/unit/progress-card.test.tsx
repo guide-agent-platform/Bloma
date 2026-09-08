@@ -206,4 +206,20 @@ describe('ProgressCard', () => {
     fireEvent.click(screen.getByRole('button', { name: '收起' }))
     expect(onClose).toHaveBeenCalledOnce()
   })
+
+  it('提供「提出新想法」次级入口并触发回调', () => {
+    const onSuggestIdea = vi.fn()
+    render(
+      <ProgressCard
+        stageLabel="生成可运行版本"
+        steps={mapStageToRunSteps('generating_mvp')!}
+        lines={[]}
+        doneSteps={0}
+        onClose={vi.fn()}
+        onSuggestIdea={onSuggestIdea}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '提出新想法' }))
+    expect(onSuggestIdea).toHaveBeenCalledOnce()
+  })
 })
