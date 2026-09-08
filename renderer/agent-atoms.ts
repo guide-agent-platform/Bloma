@@ -648,9 +648,16 @@ export function setupGlobalAgentListeners(): () => void {
       // 新一轮开始（上一轮已终结，且当前是生成类事件）→ 清空历史 events/content，
       // 折叠组只显示最近一轮工具调用，不累积多轮历史
       const isNewRun = !previous.running && !isTerminal && NEW_RUN_SIGNALS.has(event.type)
+      // 等待决策事件（user_decision_required）不是「运行中」信号：它是「已完成、等用户
+      // 决策」的静态信号。就绪引导卡（ready_next_steps）在 completed 之后到达，若照
+      // 旧逻辑 running=!isTerminal 会被重新拉回 true → busy → 决策卡选项被禁用、UI
+      // 永久停在「生成中」。此处保持上一轮的 running：前台流中弹卡仍为 true、后台
+      // 管线完成后的引导/让渡卡仍为 false。
+      const running =
+        isTerminal ? false : event.type === 'user_decision_required' ? previous.running : true
 
       return {
-        running: !isTerminal,
+        running,
         events: [...(isNewRun ? [] : previous.events), event],
         content: isTerminal ? '' : (isNewRun ? '' : previous.content) + text,
         last_error:
