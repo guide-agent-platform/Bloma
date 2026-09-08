@@ -340,6 +340,8 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
 
   const read_file: AgentLoopTool = {
     name: 'read_file',
+    // P1-2（2026-09-08）：只读无共享态，声明 parallelSafe 可同轮并发（上限 4，见 agent-loop executeTurnToolCalls）
+    parallelSafe: true,
     description:
       '读取项目内文件的一个窗口（默认 100 行，带行号）。参数：path（项目内相对路径）、offset（起始行，1 起，可选）、limit（行数，可选）。越界时返回最近可用窗口。',
     input_schema: {
@@ -373,6 +375,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
 
   const list_files: AgentLoopTool = {
     name: 'list_files',
+    parallelSafe: true,
     description: '列出项目内文件（相对路径，深度 ≤4，最多 200 条）。参数：path（要列出的子目录，可选，缺省整个项目）。',
     input_schema: {
       type: 'object',
@@ -397,6 +400,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
 
   const grep: AgentLoopTool = {
     name: 'grep',
+    parallelSafe: true,
     description:
       '在项目文件里搜索正则模式，只返回命中文件与行号（不返回行内容，最多 50 条命中）。参数：pattern（正则）、glob（文件名过滤，如 "*.js"，可选）。',
     input_schema: {
@@ -447,6 +451,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
 
   const web_fetch: AgentLoopTool = {
     name: 'web_fetch',
+    parallelSafe: true,
     description:
       '抓取公网网页/文档并转为纯文本（只查资料，不能修改任何东西）。参数：url（http/https 公网地址）、max_chars（返回文本上限，默认 12000，最大 50000）。内网/本机地址会被拒绝；HTML 只保留可见文本。',
     input_schema: {
@@ -821,6 +826,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
   // ≤4000 字精干结论，原文抓取全部发生在 research 子代理（其工具面含 web_fetch）。
   const web_research: AgentLoopTool = {
     name: 'web_research',
+    parallelSafe: true,
     description:
       '针对一个问题或一个 URL 派出只读调研子代理：抓取/检索后总结成精干结论返回（≤4000 字），' +
       '不占用当前上下文。适合查文档、找方案、比对做法；只需抓单页原文时用 web_fetch。' +

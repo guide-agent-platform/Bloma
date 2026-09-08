@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { appendJsonLine } from '../storage/json-store'
+import { appendSessionMessage } from './session-tree'
 import { getAgentSessionPath, getAgentSessionsIndexPath } from '../storage/config-paths'
 import type { AgentSessionRecord, MessageContentBlock } from '../shared/types'
 import type { ConversationTurn } from './orchestrator'
@@ -39,7 +40,7 @@ export function appendDelegationSettle(
   status: Exclude<RestoredDelegationStatus, 'running'>,
   payload?: { resultSummary?: string; error?: string },
 ): void {
-  appendJsonLine(getAgentSessionPath(childSessionId), {
+  appendSessionMessage(childSessionId, {
     [SETTLE_FIELD]: status,
     ...(payload?.resultSummary ? { result_summary: payload.resultSummary } : {}),
     ...(payload?.error ? { error: payload.error } : {}),

@@ -273,8 +273,11 @@ type AgentEvent = {
     | "delegation_completed"
     | "delegation_failed"
     | "delegation_cancelled"
-    /** usage 竹节压缩（闭环 PR6）：at_turn / input_tokens / compactions */
-    | "loop_compaction";
+    /** usage 竹节压缩（闭环 PR6）：at_turn / input_tokens / compactions；
+     *  keep-recent 三段式（P1-1，2026-09-08）追加 keep_recent_turns（保留段轮数，'0' 恒 0） */
+    | "loop_compaction"
+    /** 运行中转向已注入（P0-1 steer，2026-09-08）：content 原文 / message 包裹全文 / at_turn / remaining */
+    | "steer_injected";
   payload: Record<string, unknown>;
   created_at: string;
 };
@@ -380,6 +383,73 @@ type AgentConfirmRequirementsResult = {
 ```
 
 事件配套：向导判定需求成型时经 `agent:stream-event` 推送 `user_decision_required`，`payload.kind = "requirement_confirm"`，携 `requirements`（勾选清单）与 `research`（DDG 市调摘要，`available:false` 时如实标注）；渲染端由 RequirementConfirmDialog 弹窗消费（不走内联决策卡）。
+
+### 5.7 `agent:steer-message`（运行中转向，P0-1，2026-09-08）
+
+用途：MVP/迭代等长生成（主 loop，delegationDepth 0）进行中，输入框消息改道本通道——
+入 steer 队列，在工具批间以 `【用户中途补充】` 包裹注入模型上下文 + JSONL 审计；
+「整批 tool_result 一条 user 消息」不变式不受影响，注入内容照常参与滑窗/竹节压缩。
+
+```ts
+// 入参形态与 AgentSendMessageInput 完全一致（validateAgentSend 同一清洗口径）
+type AgentSteerMessageInput = AgentSendMessageInput;
+
+type AgentSteerMessageResult = {
+  session_id: string;
+  /** true = 已入 steer 队列，当前主 loop 下一批间注入；注入回执气泡由 steer_injected 事件承担 */
+  steered: boolean;
+  /** 队列中待注入条数（含本次；仅 steered=true） */
+  pending?: number;
+  /** steered=false：主进程已内部回退 runAgent，结果为 send-message 语义（忙则入 SessionMessageQueue、空闲开新 run、后台项目忙则失败） */
+  fallback?: AgentSendMessageResult;
+};
+```
+
+主进程判定顺序：
+
+1. 会话有活跃主 loop（`runAgentLoop` depth 0 自注册 `steer-queue.markLoopActive`）且不带图
+   → 入队（request_id 去重），返回 `steered: true`。
+2. 否则回退 `runAgent`（与 `agent:send-message` 行为一致），返回 `steered: false` + `fallback`。
+   guide 单发 run、委派子会话（depth ≥ 1）、空闲会话均在此列；带图消息强制走回退。
+
+停止语义：用户停止（`agent:cancel`）即清空该会话 steer 队列——「停止后被注入」绝不允许；
+主 loop 自然收尾时未及注入的残余落 JSONL 保真（内容不丢，并入对话历史）。
+
+事件配套：注入成功发布 `steer_injected`（§5.2 AgentEvent；payload：content 原文 / message
+包裹全文 / at_turn / remaining），渲染端以系统气泡「已注入，将于下一轮生效」回执
+（对齐 queue_dropped 红泡模式）。
+
+### 5.8 `agent:fork-session`（会话 fork，P0-2，2026-09-08）
+
+用途：对话走错方向时从任意 user 消息重开——主进程把「源会话首行到该消息」的前缀复制
+进新会话文件（原文件一字不动），渲染端续接到新会话继续。对话回溯，与快照时间轴的
+产物回滚正交。
+
+```ts
+type AgentForkSessionInput = {
+  request_id: string;
+  session_id: string;   // 源会话
+  project_id: string;
+  entry_id?: string;        // v2 JSONL 行 id（8 位 hex）；与 entry_timestamp 至少二选一
+  entry_timestamp?: number; // 旧文件（无 id）回退锚点：目标 user 消息的落盘 timestamp(ms)
+};
+
+type AgentForkSessionResult = {
+  new_session_id: string;
+  forked: true;
+  copied_messages: number;
+};
+```
+
+主进程规则（`session-service.forkFrom`）：
+
+1. 源会话在 `activeSessions`/`backgroundRuns` → `AGENT_SESSION_BUSY`（防读到写一半）。
+2. 锚点解析：`entry_id` 优先（命中行 id）；否则 `entry_timestamp`（命中首条同 timestamp 行）。
+   锚点必须为**非空 user 文本消息**，否则 `SESSION_FORK_ENTRY_NOT_FOUND`。
+3. 复制前缀：每条按原字段逐行写入新文件，树链（id/parentId）重写为线性 v2。
+4. 索引登记：新会话记入 agent-sessions 索引，`parent_session_id` = 源会话、`fork_entry_id` = 锚点行 id。
+
+错误码：`SESSION_NOT_FOUND` / `SESSION_FORK_ENTRY_NOT_FOUND` / `AGENT_SESSION_BUSY`。
 
 ---
 
@@ -983,6 +1053,15 @@ MCP 工具由 Agent SDK 在 main 进程侧调用，权限由 `PermissionService.
 ```
 
 规则：仅主 agent loop（role=parent）可用，子代理无此工具（防递归委派；research 子代理自己用 web_fetch）；收敛上限 90s，超时停止子代理并如实告知（isError）；子代理失败/取消不拋错，建议改用 web_fetch；生产 toolBudget 每 loop 限 4 次（超限软着陆）。
+
+### 12.13 Agent Loop 工具执行语义（P1-2 只读并行，2026-09-08）
+
+Agent Loop 的单轮工具执行：同一轮响应含多个 tool_use 时，**连续 parallelSafe 段并发（上限 4）、其余串行，遇非 parallelSafe 先 join**；`tool_result` 一律按模型发出的源序打包进同一条 user 消息（「整批一条 user 消息、块序=源序」不变式）。
+
+- v1 白名单 parallelSafe：`read_file` / `list_files` / `grep` / `web_fetch` / `web_research`（只读、无共享状态序依赖）。
+- 默认串行（parallelSafe=false / 缺省）：`write_file` / `edit_file` / `run_preview` / `run_gwt_tests` / `run_security_scan` / `delegate_agent` / `wait_for_delegations` / `ask_delegation_question` / `answer_delegation_question` 等——状态序依赖：test_failed 旗标、修复预算计数、预览地址、委派状态机。
+- **有 toolBudget 预算的工具即使 parallelSafe 也退串行**（并行计数会击穿静态预算上限；生产 web_research 带预算恒串行）。
+- 事件流：`tool_call_started`/`completed` 各自启动/完成时发（渲染端逐事件渲染，无序依赖）；abort 于串行位执行前与并发段边界检查（工具内部经 ctx.signal 感知取消）。
 
 ---
 

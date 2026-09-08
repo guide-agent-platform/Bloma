@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { AgentMessage } from '../shared/types'
 import { getAgentSessionPath, getDocumentsDir } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
+import { appendSessionMessage } from './session-tree'
 import { registerDecisionsDocument } from './document-engine'
 import { findProject } from './project-service'
 import { listSessions } from './session-service'
@@ -103,7 +104,7 @@ export function recordDecision(input: RecordDecisionInput): void {
     ...input.entry,
     created_at: new Date().toISOString(),
   }
-  appendJsonLine(getAgentSessionPath(input.session_id), {
+  appendSessionMessage(input.session_id, {
     role: 'system',
     content: [{ type: 'text', text: `${DECISION_PREFIX} ${JSON.stringify(entry)}` }],
     timestamp: Date.now(),

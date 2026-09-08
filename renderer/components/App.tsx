@@ -35,7 +35,7 @@ import {
 } from './atoms'
 import { refreshChannelsList, channelsListAtom, channelsLoadingAtom, hasUsableChannelsAtom, chatInputDraftAtom } from './atoms-sprint2'
 import type { ProjectMode, WorkflowStage } from './atoms'
-import type { DomCollectContextResult } from '../../shared/types'
+import type { AgentSendMessageResult, ApiResult, DomCollectContextResult } from '../../shared/types'
 
 /**
  * 这些阶段后端已产出可渲染文件（草图 / MVP）。回访恢复或重启后，旧沙箱进程已死，
@@ -350,6 +350,31 @@ const AppRoutes: React.FC = () => {
 
   // ==================== 发送消息 ====================
 
+  // 发送/回退结果的下游处理（与 2026-08-27 起 send-message 语义一致）：
+  // queued → 「已排队」提示；BUSY → 引导等待或停止；其余失败静默（原状）
+  const handleSendOutcome = useCallback((targetSessionId: string, result: ApiResult<AgentSendMessageResult>) => {
+    if (result.ok) {
+      // message-queue（2026-08-27）：生成期间发送 → 后端入队并返回 queued:true——
+      // 追加「已排队」提示，消息不会丢，run 完成后自动处理。
+      if (result.data?.queued) {
+        appendMessageToSession(targetSessionId, {
+          role: 'system',
+          content: [{ type: 'text', text: '⏳ 已排队：当前生成完成后会自动处理这条消息。' }],
+          timestamp: Date.now(),
+        })
+      }
+      return
+    }
+    // U5 兜底：后端仍拒绝（旧后端/边缘 BUSY）→ 引导用户等待或停止，而不是消息石沉大海。
+    if (result.error?.code === 'AGENT_SESSION_BUSY') {
+      appendMessageToSession(targetSessionId, {
+        role: 'system',
+        content: [{ type: 'text', text: '我正在生成中，暂时没法同时处理新消息。你可以点输入框右侧的停止按钮中断当前生成，或等它完成后再发。' }],
+        timestamp: Date.now(),
+      })
+    }
+  }, [])
+
   const handleSendMessage = useCallback((content: string, images?: PastedImageRef[]) => {
     const api = window.electronAPI
     if (!api?.agent?.sendMessage) return
@@ -366,7 +391,7 @@ const AppRoutes: React.FC = () => {
         : [{ type: 'text', text: content }],
       timestamp: Date.now(),
     })
-    void api.agent.sendMessage({
+    const payload = {
       request_id: crypto.randomUUID(),
       session_id: sessionId,
       project_id: currentProject?.project_id ?? projectList[0]?.project_id ?? '',
@@ -374,28 +399,39 @@ const AppRoutes: React.FC = () => {
       images,
       mode: mode ?? 'quick',
       current_stage: currentStage,
-      metadata: { source: 'chat' },
-    }).then((result) => {
-      // message-queue（2026-08-27）：生成期间发送 → 后端入队并返回 queued:true——
-      // 追加「已排队」提示，消息不会丢，run 完成后自动处理。
-      if (result?.ok && result.data?.queued) {
-        appendMessageToSession(sessionId, {
-          role: 'system',
-          content: [{ type: 'text', text: '⏳ 已排队：当前生成完成后会自动处理这条消息。' }],
-          timestamp: Date.now(),
-        })
+      metadata: { source: 'chat' } as const,
+    }
+
+    const settle = async (): Promise<void> => {
+      // P0-1 steer（运行中转向，2026-09-08）：会话有前台/后台生成的流式事件（hasActiveStream）
+      // 且为纯文本消息时，输入框消息改道 agent:steer-message——主进程有活跃主 loop 则入
+      // steer 队列、工具批间注入（【用户中途补充】包裹，注入回执由 steer_injected 事件气泡
+      // 承担）；无活跃主 loop 时主进程内部回退 runAgent，语义与 send-message 完全一致
+      //（忙则入 SessionMessageQueue）。带图消息不做 steer（注入只承载文本，走既有链路）。
+      const steerChannel = api?.agent?.steerMessage
+      if (hasActiveStream && !images?.length && steerChannel) {
+        const steerResult = await steerChannel(payload)
+        if (steerResult.ok && steerResult.data.steered) return
+        if (steerResult.ok && steerResult.data.fallback) {
+          handleSendOutcome(sessionId, {
+            ok: true as const,
+            request_id: steerResult.request_id,
+            data: steerResult.data.fallback,
+          })
+          return
+        }
+        // 回退分支之外仍失败：走与 send-message 相同的错误处理（含 BUSY 引导）
+        if (!steerResult.ok) {
+          handleSendOutcome(sessionId, { ok: false as const, request_id: steerResult.request_id, error: steerResult.error })
+          return
+        }
         return
       }
-      // U5 兜底：后端仍拒绝（旧后端/边缘 BUSY）→ 引导用户等待或停止，而不是消息石沉大海。
-      if (!result?.ok && result?.error?.code === 'AGENT_SESSION_BUSY') {
-        appendMessageToSession(sessionId, {
-          role: 'system',
-          content: [{ type: 'text', text: '我正在生成中，暂时没法同时处理新消息。你可以点输入框右侧的停止按钮中断当前生成，或等它完成后再发。' }],
-          timestamp: Date.now(),
-        })
-      }
-    })
-  }, [sessionId, currentProject, projectList, mode, currentStage])
+      const result = await api.agent.sendMessage!(payload)
+      handleSendOutcome(sessionId, result)
+    }
+    void settle()
+  }, [sessionId, currentProject, projectList, mode, currentStage, hasActiveStream, handleSendOutcome])
 
   // ==================== 停止生成（U4 / T3：agent:stop） ====================
 
@@ -800,6 +836,41 @@ const AppRoutes: React.FC = () => {
   const effectivePreviewUrl = streamPreviewUrl ?? undefined
   const effectivePreviewStatus: PreviewStatus = streamPreviewUrl ? 'running' : previewStatus
 
+  // ==================== P0-2 fork：从这里重新来（2026-09-08） ====================
+
+  /**
+   * user 气泡「从这里重新来」：把当前会话从该 user 消息处 fork（主进程复制此前对话到
+   * 新会话，原会话保留），渲染端续接到新 sessionId 并加载其历史。锚点优先带 v2 行 id，
+   * 旧文件回退 entry_timestamp。fork 期间会话由主进程侧 BUSY 拒绝（此处不预判）。
+   */
+  const handleForkFromMessage = useCallback((message: AgentMessage) => {
+    const api = window.electronAPI
+    const projectId = currentProject?.project_id ?? projectList[0]?.project_id ?? ''
+    if (!api?.agent?.forkSession || !projectId) return
+    const maybeEntryId = (message as { id?: unknown }).id
+    void api.agent
+      .forkSession({
+        request_id: crypto.randomUUID(),
+        session_id: sessionId,
+        project_id: projectId,
+        ...(typeof maybeEntryId === 'string' && maybeEntryId ? { entry_id: maybeEntryId } : {}),
+        ...(typeof message.timestamp === 'number' ? { entry_timestamp: message.timestamp } : {}),
+      })
+      .then((result) => {
+        if (!result.ok) return
+        const newId = result.data.new_session_id
+        setSessionId(newId)
+        setActiveSessionId(newId)
+        resetChatInputDraft('')
+        appendMessageToSession(newId, {
+          role: 'system',
+          content: [{ type: 'text', text: '已从这里重新开始——原对话保留到这条消息，后续生成将基于它继续。' }],
+          timestamp: Date.now(),
+        })
+        void loadSessionHistory(newId)
+      })
+  }, [sessionId, currentProject, projectList, setSessionId, setActiveSessionId, resetChatInputDraft])
+
   // ==================== 路由渲染 ====================
 
   if (route === 'mode-selection') {
@@ -836,6 +907,7 @@ const AppRoutes: React.FC = () => {
         decisionBody={decisionCards?.body}
         onCardOptionSelect={handleCardOptionSelect}
         onSendMessage={handleSendMessage}
+        onForkFromMessage={handleForkFromMessage}
         waitStartTime={waitStart}
         waitActionLabel="生成可运行版本"
         isHistoryLoading={historyLoading}

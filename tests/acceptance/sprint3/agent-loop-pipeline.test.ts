@@ -556,7 +556,9 @@ describe('Agent Loop 全链（PR3：生成 → 自测 → 自修 → 终验 → 
     } finally {
       server.close()
     }
-  }, 20000)
+    // M4-A 全链用例为真实 sandbox + 子进程模拟的重负载：隔离实测约 17s，20s 余量不足，
+    // 全量并行（多 worker CPU/IO 争抢）下多次超时 → 放宽到 60s（2026-09-08 负载校准）
+  }, 60000)
 
   it('迭代成功收尾 → iteration_completed changelog 落盘（GA-03，PRD §7.1 每轮迭代后追加）', async () => {
     createChannel({

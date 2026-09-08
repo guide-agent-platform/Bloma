@@ -4,6 +4,7 @@ import type { BrowserWindow, IpcMain } from 'electron'
 import type {
   AgentCancelInput,
   AgentConfirmRequirementsInput,
+  AgentForkSessionInput,
   AgentListSessionsInput,
   AgentLoadMessagesInput,
   AgentSendMessageInput,
@@ -52,7 +53,8 @@ import type {
 } from '../shared/types'
 import { IPC_CHANNELS } from '../shared/types'
 import { fail, ok } from './api-result'
-import { cancelAgent, getSdkQuery, hasForegroundRun, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from './orchestrator'
+import { cancelAgent, getSdkQuery, hasForegroundRun, isSessionActive, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from './orchestrator'
+import { enqueueSteer, pendingSteerCount } from './steer-queue'
 import { savePastedImage } from './pasted-images'
 import { collectDomContext, scrollPreview } from './dom-context'
 import { runAgentLoopPostTesting, runIterationTask, runMvpTask, setForegroundRunChecker, setProgrammingEventPublisher } from './programming-orchestrator'
@@ -75,7 +77,7 @@ import {
   updateProject,
   upgradeProject,
 } from './project-service'
-import { cleanOrphanSessions, listSessions, loadMessages } from './session-service'
+import { cleanOrphanSessions, forkFrom, listSessions, loadMessages, setSessionActiveChecker } from './session-service'
 import { exportProjectHandoff } from './project-export'
 import { resolveRequirementConfirm } from './guide-agent-service'
 import { createChannel, deleteChannel, fetchModels, listChannels, testChannel, testChannelDirect, updateChannel } from './channel-manager'
@@ -102,6 +104,7 @@ import {
 import { hasRequestId, isRecord, requireValue } from './validators'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
+import { appendSessionMessage } from './session-tree'
 
 /** 从错误信息里提取统一的错误码前缀（如 MVP_LLM_PARSE_FAILED、SANDBOX_RUN_FAILED），缺省 AGENT_SDK_ERROR。 */
 function errorCodeFrom(error: unknown): string {
@@ -111,6 +114,8 @@ function errorCodeFrom(error: unknown): string {
 }
 
 export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow): void {
+  // P0-2 fork：活跃会话检查注入（session-service 不反向 import orchestrator——防循环依赖）
+  setSessionActiveChecker(isSessionActive)
   setAgentStreamPublisher((event) => {
     mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, event)
     // T6 后台执行通知：completed/error/user_decision_required → 系统通知（无后端注入时内部 no-op）
@@ -141,8 +146,44 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     })
   })
 
+  // P0-1 steer（运行中转向，2026-09-08）：活跃主 loop 期间输入框改道本通道。
+  // 入参与 agent:send-message 同构（validateAgentSend 同一清洗）；无活跃主 loop 时
+  //（空闲 / guide 单发 run / 后台间隙 / 带图消息）内部回退 runAgent——与 send-message
+  // 行为完全一致（忙则入 SessionMessageQueue、空闲开新 run），渲染端无需二次兜底。
+  ipcMain.handle(IPC_CHANNELS.AGENT_STEER_MESSAGE, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = validateAgentSend(payload)
+      // 带图消息不做 steer：注入只承载文本，图片走既有 send-message 链路（整体入队/开跑）
+      if ((input.images?.length ?? 0) === 0 && enqueueSteer(input.session_id, {
+        queueMessageId: input.request_id,
+        content: input.content,
+        enqueuedAt: Date.now(),
+      })) {
+        return { session_id: input.session_id, steered: true, pending: pendingSteerCount(input.session_id) }
+      }
+      const fallback = await runAgent(input)
+      return { session_id: input.session_id, steered: false, fallback }
+    })
+  })
+
   // 粘贴图存盘（clipboard-paste P1，2026-08-29）：renderer 粘贴→base64 存文件→短引用；
   // 大小校验双保险（renderer 白名单先行，主进程兜底防绕过）
+  // P0-2 fork（会话 fork，2026-09-08）：从任意 user 消息重开。渲染端 user 气泡「从这里
+  // 重新来」→ 复制前缀到新会话（原文件一字不动），返回新 sessionId 由渲染端续接。
+  ipcMain.handle(IPC_CHANNELS.AGENT_FORK_SESSION, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<AgentForkSessionInput>(payload, ['session_id', 'project_id'])
+      const hasAnchor = (input.entry_id !== undefined && String(input.entry_id).trim() !== '')
+        || typeof input.entry_timestamp === 'number'
+      if (!hasAnchor) throw new Error('SESSION_FORK_ENTRY_NOT_FOUND: 需要 entry_id 或 entry_timestamp')
+      return forkFrom(input.session_id, {
+        project_id: input.project_id,
+        entry_id: typeof input.entry_id === 'string' ? input.entry_id : undefined,
+        entry_timestamp: typeof input.entry_timestamp === 'number' ? input.entry_timestamp : undefined,
+      })
+    })
+  })
+
   ipcMain.handle(IPC_CHANNELS.PASTED_IMAGE_SAVE, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<PastedImageSaveInput>(payload, ['session_id', 'base64', 'ext'])
@@ -418,7 +459,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
       if (result.should_follow_up) {
         const followUp =
           '我注意到这里你已经连续改过两次了，怕又猜错。能再具体一点吗？比如想要改成什么内容、放在哪个位置，还是换个样子？'
-        appendJsonLine(getAgentSessionPath(input.session_id), {
+        appendSessionMessage(input.session_id, {
           role: 'assistant',
           content: [{ type: 'text', text: followUp }],
           timestamp: Date.now(),
@@ -440,7 +481,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
       if (prompt) {
         // 点选纠错原文按 user 角色回写会话 JSONL（对齐 runAgent 落盘），
         // 避免历史里出现"助手引用了用户没说过的话"的断层。
-        appendJsonLine(getAgentSessionPath(input.session_id), {
+        appendSessionMessage(input.session_id, {
           role: 'user',
           content: [{ type: 'text', text: prompt }],
           timestamp: Date.now(),
@@ -453,7 +494,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
         if (!isPrdUserConfirmed(input.project_id)) {
           const guidance =
             '收到，这处调整意见我先记下了。不过需求定稿（PRD）还没经你确认过，我先不动手重做——请回到对话里把想法告诉我，我们先一起确认需求，再按你的意见改。'
-          appendJsonLine(getAgentSessionPath(input.session_id), {
+          appendSessionMessage(input.session_id, {
             role: 'assistant',
             content: [{ type: 'text', text: guidance }],
             timestamp: Date.now(),
@@ -489,7 +530,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
         ])
         if (BUSY_STAGES.has(stage)) {
           const busyNote = '正在生成中，这处修改意见我先记下了；等这一版完成后，你再点这里或直接告诉我，我马上按意见调整。'
-          appendJsonLine(getAgentSessionPath(input.session_id), {
+          appendSessionMessage(input.session_id, {
             role: 'assistant',
             content: [{ type: 'text', text: busyNote }],
             timestamp: Date.now(),
@@ -506,7 +547,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
         }
         if (stage !== 'ready' && stage !== 'completed') {
           const sketchNote = '收到，我按这处意见先调整草图（确认草图后才会生成完整功能）。'
-          appendJsonLine(getAgentSessionPath(input.session_id), {
+          appendSessionMessage(input.session_id, {
             role: 'assistant',
             content: [{ type: 'text', text: sketchNote }],
             timestamp: Date.now(),
@@ -930,6 +971,9 @@ async function safeInvoke<T>(requestId: string, fn: () => T | Promise<T>) {
     if (message.includes('AGENT_SESSION_BUSY')) return fail<T>(requestId, 'AGENT_SESSION_BUSY', message, true)
     if (message.includes('CHANNEL_NOT_FOUND')) return fail<T>(requestId, 'CHANNEL_NOT_FOUND', message)
     if (message.includes('SESSION_NOT_FOUND')) return fail<T>(requestId, 'SESSION_NOT_FOUND', message)
+    if (message.includes('SESSION_FORK_ENTRY_NOT_FOUND')) {
+      return fail<T>(requestId, 'SESSION_FORK_ENTRY_NOT_FOUND', message)
+    }
     if (message.includes('PROJECT_NOT_FOUND')) return fail<T>(requestId, 'PROJECT_NOT_FOUND', message)
     if (message.includes('PERMISSION_REQUEST_NOT_FOUND')) return fail<T>(requestId, 'PERMISSION_REQUEST_NOT_FOUND', message)
     if (message.includes('PERMISSION_DENIED')) return fail<T>(requestId, 'PERMISSION_DENIED', message)

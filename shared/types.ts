@@ -16,6 +16,10 @@
 
 export const IPC_CHANNELS = {
   AGENT_SEND_MESSAGE: 'agent:send-message',
+  /** 运行中转向（P0-1 steer，2026-09-08）：活跃主 loop 期间输入框改道本通道，批间注入 */
+  AGENT_STEER_MESSAGE: 'agent:steer-message',
+  /** 会话 fork（P0-2，2026-09-08）：从任意 user 消息重开，复制前缀到新会话 */
+  AGENT_FORK_SESSION: 'agent:fork-session',
   PASTED_IMAGE_SAVE: 'pasted-image:save',
   AGENT_STOP: 'agent:stop',
   AGENT_LIST_SESSIONS: 'agent:list-sessions',
@@ -95,6 +99,8 @@ export type ErrorCode =
   | 'AGENT_CANCELLED'
   | 'CHANNEL_NOT_FOUND'
   | 'SESSION_NOT_FOUND'
+  /** P0-2 fork：源会话找不到目标锚点 / 锚点非 user 文本消息（缺 entry_id+entry_timestamp 也归此码） */
+  | 'SESSION_FORK_ENTRY_NOT_FOUND'
   | 'API_KEY_DECRYPT_FAILED'
   | 'PERMISSION_REQUEST_NOT_FOUND'
   | 'PERMISSION_DENIED'
@@ -673,6 +679,48 @@ export interface AgentSendMessageResult {
   queued?: boolean
 }
 
+/**
+ * 运行中转向入参（P0-1 steer，2026-09-08 pi 差距方案 §1）：**形态复用 AgentSendMessageInput**
+ * （ipc 层走 validateAgentSend 同一清洗口径，无第二套校验）。语义差异：
+ * - 会话有活跃主 loop（delegationDepth 0 的 runAgentLoop）→ 入 steer 队列，工具批间注入
+ *   （内容以 `【用户中途补充】` 包裹，模型可识别优先级）；
+ * - 无活跃主 loop（空闲 / guide 单发 run / 后台间隙）→ 主进程内部回退 runAgent，
+ *   与 agent:send-message 行为完全一致（忙则入 SessionMessageQueue、空闲则开新 run）。
+ */
+export type AgentSteerMessageInput = AgentSendMessageInput
+
+export interface AgentSteerMessageResult {
+  session_id: string
+  /** true = 已入 steer 队列，当前主 loop 下一批间注入；回执气泡由 steer_injected 事件承担 */
+  steered: boolean
+  /** 队列中待注入条数（含本次；仅 steered=true 时有意义） */
+  pending?: number
+  /** steered=false：主进程已回退 runAgent，本字段为 send-message 语义结果（含 queued） */
+  fallback?: AgentSendMessageResult
+}
+
+/**
+ * 会话 fork 入参（P0-2，2026-09-08 pi 差距方案 §2）：从源会话的某条 user 消息处重开——
+ * 把「首行到该消息」的前缀复制进新会话文件，原会话一字不动。
+ * 锚点解析：v2 文件优先 entry_id（行 id）；旧文件无 id 时按 entry_timestamp 定位。
+ */
+export interface AgentForkSessionInput extends RequestEnvelope {
+  session_id: string
+  project_id: string
+  /** v2 行 id（8 位 hex）；缺省时用 entry_timestamp */
+  entry_id?: string
+  /** 目标 user 消息的落盘 timestamp（ms）；至少与 entry_id 二选一 */
+  entry_timestamp?: number
+}
+
+export interface AgentForkSessionResult {
+  /** fork 出的新会话 id（调用方续接会话时使用） */
+  new_session_id: string
+  forked: true
+  /** 复制进新会话的消息条数 */
+  copied_messages: number
+}
+
 export interface AgentCancelInput extends RequestEnvelope {
   session_id: string
   /** 可选 project_id：同项目不同会话切换/停止时一并中止全部顶层运行。旧客户端只传 session_id 仍兼容。 */
@@ -701,6 +749,8 @@ export interface AgentSessionRecord {
   /** delegation-persistence 阶段 1（2026-08-28）：委派子会话归属——重启后按 delegationId 找回 */
   parent_session_id?: string
   source_delegation_id?: string
+  /** P0-2 fork（2026-09-08）：本会话由哪个会话的哪条消息 fork 而来（源文件一字不动） */
+  fork_entry_id?: string
 }
 
 export interface AgentListSessionsInput extends RequestEnvelope {
@@ -818,6 +868,9 @@ export interface AgentEvent {
     | 'queued_started'
     /** 排队消息派发失败（onDropped 气泡，r79）：payload.queue_message_id / reason；渲染端红泡告知 */
     | 'queue_dropped'
+    /** 运行中转向已注入（P0-1 steer，2026-09-08）：payload 含 content（原文）/ message（包裹后全文）
+     *  / at_turn（注入所在轮）/ remaining（队列余量）；渲染端回执气泡对齐 queue_dropped 模式 */
+    | 'steer_injected'
     /** 会话用量汇总（usage-guard 渲染层 2026-08-28）：loop 结束发布，渲染端显示透明条 */
     | 'usage_summary'
   payload: Record<string, unknown>
@@ -1231,6 +1284,10 @@ export type ElectronAPI = {
   }
   agent: {
     sendMessage(input: AgentSendMessageInput): Promise<ApiResult<AgentSendMessageResult>>
+    /** P0-1 steer：活跃主 loop 期间输入框改道；无活跃 loop 时主进程回退 send-message 语义 */
+    steerMessage(input: AgentSteerMessageInput): Promise<ApiResult<AgentSteerMessageResult>>
+    /** P0-2 fork：从任意 user 消息重开（复制前缀到新会话），返回新会话 id */
+    forkSession(input: AgentForkSessionInput): Promise<ApiResult<AgentForkSessionResult>>
     cancel(input: AgentCancelInput): Promise<ApiResult<AgentCancelResult>>
     listSessions(input: AgentListSessionsInput): Promise<ApiResult<AgentListSessionsResult>>
     loadMessages(input: AgentLoadMessagesInput): Promise<ApiResult<AgentLoadMessagesResult>>

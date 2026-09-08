@@ -51,6 +51,8 @@ export interface ChatPanelProps {
   onStopGeneration?: () => void
   /** 零渠道引导卡直达按钮（QW#2 二期 P1-①②）：切到设置页，宁可给按钮不给说明书 */
   onOpenSettings?: () => void
+  /** P0-2 fork（2026-09-08）：user 消息「从这里重新来」回调（消息含 timestamp/可能含 id） */
+  onForkFromMessage?: (message: AgentMessage) => void
 }
 
 // 模块级常量：当 activeAgentSessionIdAtom 为 null 时的稳定 fallback atom，
@@ -99,6 +101,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   isHistoryLoading = false,
   onStopGeneration,
   onOpenSettings,
+  onForkFromMessage,
 }) => {
   const activeSessionId = useAtomValue(activeAgentSessionIdAtom)
   const sessionUsage = useAtomValue(sessionUsageFamily(activeSessionId ?? ''))
@@ -252,6 +255,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   const canSend = !busy && inputValue.trim().length > 0
 
+  const handleForkFromMessage = React.useCallback(
+    (message: AgentMessage) => {
+      onForkFromMessage?.(message)
+    },
+    [onForkFromMessage],
+  )
+
   return (
     <div data-ai-id="chat-panel" style={glassTile}>
       {/* 磁贴头 */}
@@ -340,7 +350,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             )}
 
             {messages.map((msg, i) => (
-              <MessageBubble key={i} message={msg} mode={mode} toolNamesById={toolNamesById} onOpenSettings={onOpenSettings} />
+              <MessageBubble key={i} message={msg} mode={mode} toolNamesById={toolNamesById} onOpenSettings={onOpenSettings} onForkFromMessage={handleForkFromMessage} />
             ))}
 
             {/* message-queue UI 收尾（P1-①）：排队中的消息灰化回显，确认不丢 */}
@@ -731,6 +741,8 @@ interface MessageBubbleProps {
   toolNamesById?: Record<string, string>
   /** 零渠道引导卡直达按钮回调（QW#2 二期） */
   onOpenSettings?: () => void
+  /** P0-2 fork（2026-09-08）：user 气泡「从这里重新来」入口——父层接 IPC + 会话续接 */
+  onForkFromMessage?: (message: AgentMessage) => void
 }
 
 const userBubbleBg = (mode: ProjectMode | null): string =>
@@ -743,7 +755,7 @@ const userBubbleShadow = (mode: ProjectMode | null): string =>
     ? '0 4px 12px -3px rgba(14,116,144,0.35)'
     : '0 4px 12px -3px rgba(124,58,237,0.35)'
 
-const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreaming = false, toolNamesById, onOpenSettings }) => {
+const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreaming = false, toolNamesById, onOpenSettings, onForkFromMessage }) => {
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
 
@@ -960,6 +972,30 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
           </button>
         )}
       </div>
+      {/* P0-2 fork（2026-09-08）：user 气泡的「从这里重新来」入口——走错方向时从这条
+          user 消息重开（复制此前对话到新会话，原会话保留）；走历史回放也可见 */}
+      {isUser && text && onForkFromMessage && (
+        <button
+          type="button"
+          onClick={() => onForkFromMessage(message)}
+          aria-label="从这里重新来"
+          title="把对话回退到这条消息，从这里继续（原对话保留）"
+          style={{
+            marginTop: 'var(--space-1)',
+            alignSelf: 'flex-end',
+            background: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: 'var(--font-size-xs)',
+            color: isUser ? 'rgba(255,255,255,0.75)' : 'var(--color-text-muted)',
+            padding: '2px 6px',
+            borderRadius: 'var(--radius-sm)',
+            opacity: 0.75,
+          }}
+        >
+          ↪ 从这里重新来
+        </button>
+      )}
       <span
         style={{
           fontSize: 'var(--font-size-xs)',

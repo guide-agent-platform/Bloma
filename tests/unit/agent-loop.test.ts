@@ -2,7 +2,9 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { runAgentLoop, TOOL_WINDOW_ROUNDS, windowMessages, type AgentLoopInput, type AgentLoopTool, type AgentLoopTurnInfo, type ToolOutcome } from '../../main/agent-loop'
+import { runAgentLoop, TOOL_WINDOW_ROUNDS, windowMessages, keepRecentTurns, estimateBlocksText, type AgentLoopInput, type AgentLoopTool, type AgentLoopTurnInfo, type ToolOutcome } from '../../main/agent-loop'
+import { estimateTokenCount } from '../../main/usage-guard'
+import { drainSteerQueue, enqueueSteer, pendingSteerCount, resetSteerQueuesForTests, STEER_WRAP_PREFIX, wrapSteerContent } from '../../main/steer-queue'
 import type { AgentEvent } from '../../shared/types'
 import type { SDKMessage } from '../../shared/types'
 import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
@@ -593,15 +595,21 @@ function textOf(turn: ConversationTurn | undefined): string {
 describe('usage 竹节压缩（闭环 PR6）', () => {
   const originalPromaHome = process.env.PROMA_HOME
   const originalThreshold = process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
+  // P1-1 keep-recent（2026-09-08）：本 describe 锁定压缩「机制」（触发/封顶/fallback/关闭/abort），
+  // 保留段置 '0' 回归旧两段结构；保留段行为由下方「keep-recent 三段式压缩」describe 单独锁定。
+  const originalKeepRecent = process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS
   const echo = tool('echo', () => ({ output: 'ok' }))
 
   beforeEach(() => {
     process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-compact-'))
+    process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS = '0'
   })
   afterEach(() => {
     process.env.PROMA_HOME = originalPromaHome
     if (originalThreshold === undefined) delete process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
     else process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = originalThreshold
+    if (originalKeepRecent === undefined) delete process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS
+    else process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS = originalKeepRecent
   })
 
   it('超阈值触发：messages 重置为 task+交接（task+2 次交接=3 节），交接调用无 tools 且带交接 system', async () => {
@@ -765,16 +773,21 @@ function toolUseIdOf(turn: ConversationTurn): string | undefined {
 describe('压缩×钉轮交互修复（审查 P1-1/P1-2）', () => {
   const originalPromaHome = process.env.PROMA_HOME
   const originalThreshold = process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
+  // P1-1 keep-recent：同上——本 describe 锁钉轮坐标系机制，保留段置 '0'（配对断言不随保留段漂移）
+  const originalKeepRecent = process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS
   const echo = tool('echo', () => ({ output: 'ok' }))
 
   beforeEach(() => {
     process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-pinfix-'))
     process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS = '0'
   })
   afterEach(() => {
     process.env.PROMA_HOME = originalPromaHome
     if (originalThreshold === undefined) delete process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
     else process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = originalThreshold
+    if (originalKeepRecent === undefined) delete process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS
+    else process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS = originalKeepRecent
   })
 
   it('压缩后无新失败 → 无幻影钉（不误钉无关轮对）', async () => {
@@ -820,6 +833,159 @@ describe('压缩×钉轮交互修复（审查 P1-1/P1-2）', () => {
     const lines = readSessionJsonl('session-pinfix-fallback').map((line) => JSON.stringify(line))
     const compactionLine = lines.find((line) => line.includes('[loop-compaction]'))
     expect(compactionLine).toContain('F-002')
+  })
+})
+
+describe('keep-recent 三段式压缩（P1-1，2026-09-08 pi 差距方案）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalThreshold = process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
+  const originalKeepRecent = process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS
+  const echo = tool('echo', () => ({ output: 'ok' }))
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-keeprecent-'))
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    // 缺省 8000（除非用例显式覆盖）；afterEach 按 originalKeepRecent 归一
+    delete process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+    if (originalThreshold === undefined) delete process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
+    else process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = originalThreshold
+    if (originalKeepRecent === undefined) delete process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS
+    else process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS = originalKeepRecent
+  })
+
+  // ---- keepRecentTurns 纯函数 ----
+
+  function pairTurns(id: string, resultText: string): ConversationTurn[] {
+    return [
+      { role: 'assistant', content: [{ type: 'tool_use', id, name: 'echo', input: {} }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: resultText }] },
+    ]
+  }
+  function userTextTurn(text: string): ConversationTurn {
+    return { role: 'user', content: text }
+  }
+  function pairCost(pair: ConversationTurn[]): number {
+    return pair.reduce((n, turn) => n + estimateTokenCount(typeof turn.content === 'string' ? turn.content : estimateBlocksText(turn.content)), 0)
+  }
+
+  it('纯函数：预算充足 → tail 全保留且原序（首条 task/head 不进保留段）', () => {
+    const messages: ConversationTurn[] = [userTextTurn('任务'), ...pairTurns('t1', '结果一'), userTextTurn('【用户中途补充】补充'), ...pairTurns('t2', '结果二')]
+    const kept = keepRecentTurns(messages, 100_000)
+    expect(kept).toHaveLength(5)
+    expect(kept[0]).toEqual(pairTurns('t1', '结果一')[0])
+    expect(kept[2]).toEqual(userTextTurn('【用户中途补充】补充'))
+    expect(kept[4]).toEqual(pairTurns('t2', '结果二')[1])
+    // head（task）绝不进保留段——新首消息已含 task+交接
+    expect(kept.some((turn) => typeof turn.content === 'string' && turn.content === '任务')).toBe(false)
+  })
+
+  it('纯函数：预算恰够最新对 → 只保留该完整对（连续后缀，不拆对、不留中空）', () => {
+    const pair2 = pairTurns('t2', '结果二')
+    const messages: ConversationTurn[] = [userTextTurn('任务'), ...pairTurns('t1', '结果一'), userTextTurn('注入轮'), ...pair2]
+    const kept = keepRecentTurns(messages, pairCost(pair2))
+    expect(kept).toHaveLength(2)
+    expect(kept).toEqual(pair2)
+  })
+
+  it('纯函数：文本注入轮紧邻最新对 → 预算内连带保留（对永不拆散）', () => {
+    const pair2 = pairTurns('t2', '结果二')
+    const steer = userTextTurn('【用户中途补充】补充')
+    const steerCost = typeof steer.content === 'string' ? estimateTokenCount(steer.content) : 0
+    const messages: ConversationTurn[] = [userTextTurn('任务'), ...pairTurns('t1', '结果一'), steer, ...pair2]
+    const kept = keepRecentTurns(messages, pairCost(pair2) + steerCost)
+    expect(kept).toHaveLength(3)
+    expect(kept[0]).toEqual(steer)
+    expect(kept[1]).toEqual(pair2[0])
+    expect(kept[2]).toEqual(pair2[1])
+  })
+
+  it("纯函数：'0'/空 tail → 不保留（旧行为）", () => {
+    const messages: ConversationTurn[] = [userTextTurn('任务'), ...pairTurns('t1', '结果一')]
+    expect(keepRecentTurns(messages, 0)).toEqual([])
+    expect(keepRecentTurns([userTextTurn('任务')], 8_000)).toEqual([])
+  })
+
+  it('纯函数：单对超出整个预算 → 整对丢弃（不截断内容、由交接文档兜底）', () => {
+    const messages: ConversationTurn[] = [userTextTurn('任务'), ...pairTurns('t1', '超长结果'.repeat(200))]
+    expect(keepRecentTurns(messages, 10)).toEqual([])
+  })
+
+  // ---- 集成（runAgentLoop 全链路） ----
+
+  it('缺省预算：压缩重置为三段（task+交接+近期原文保留），保留段估算不超 8000 token', async () => {
+    const { query, turnCalls, handoffCalls } = compactQuery({ inputTokens: 5000, handoff: 'text', handoffText: '交接：布局完成，GWT 场景 3 未过，下一步修点击。' })
+    const events: Array<{ type: AgentEvent['type']; payload: Record<string, unknown> }> = []
+    await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 8, sessionId: 'session-keeprecent-default', publish: (type, payload) => events.push({ type, payload }) }))
+
+    // 第 2 轮模型调用看到三段：system + head(task+交接+保留段标记) + 保留的最新工具对（t0）
+    expect(turnCalls[1]).toHaveLength(4)
+    const head = textOf(turnCalls[1]![1])
+    expect(head).toContain('测试任务')
+    expect(head).toContain('【此前进度交接（第 1 段）】')
+    expect(head).toContain('布局完成')
+    expect(head).toContain('【近期原文保留】')
+    const retained = turnCalls[1]!.slice(2)
+    expect(retained[0]!.role).toBe('assistant')
+    expect((retained[0]!.content as Array<{ type?: string; id?: string }>).find((b) => b.type === 'tool_use')?.id).toBe('t0')
+    expect(retained[1]!.role).toBe('user')
+    const retainedTokens = retained.reduce((n, turn) => n + estimateTokenCount(typeof turn.content === 'string' ? turn.content : estimateBlocksText(turn.content)), 0)
+    expect(retainedTokens).toBeLessThanOrEqual(8_000)
+
+    // 事件与 JSONL 审计均携带保留段信息
+    const compaction = events.find((event) => event.type === 'loop_compaction')
+    expect(compaction?.payload).toMatchObject({ keep_recent_turns: 2 })
+    const lines = readSessionJsonl('session-keeprecent-default').map((line) => JSON.stringify(line))
+    expect(lines.find((line) => line.includes('[loop-compaction]'))).toContain('keep_recent=2 轮')
+
+    // 交接调用输入包含保留段之前的原文（交接在重置前发生，天然携带全量窗口）
+    expect(handoffCalls).toHaveLength(2)
+  })
+
+  it("预算 '1'（装不下任何完整对）→ 回归两段结构：无保留段标记、无保留轮", async () => {
+    process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS = '1'
+    const { query, turnCalls } = compactQuery({ inputTokens: 5000, handoff: 'text' })
+    const events: Array<{ type: AgentEvent['type']; payload: Record<string, unknown> }> = []
+    await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 8, sessionId: 'session-keeprecent-tiny', publish: (type, payload) => events.push({ type, payload }) }))
+    expect(turnCalls[1]).toHaveLength(2)
+    expect(textOf(turnCalls[1]![1])).not.toContain('【近期原文保留】')
+    expect(events.find((event) => event.type === 'loop_compaction')?.payload).toMatchObject({ keep_recent_turns: 0 })
+  })
+
+  it("KEEP_RECENT='0' 显式回归：三段完全退化为旧两段（task+交接，与 2026-08-29 行为一致）", async () => {
+    process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS = '0'
+    const { query, turnCalls } = compactQuery({ inputTokens: 5000, handoff: 'text' })
+    await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 8, sessionId: 'session-keeprecent-off' }))
+    expect(turnCalls[1]).toHaveLength(2)
+    const head = textOf(turnCalls[1]![1])
+    expect(head).toContain('【此前进度交接（第 1 段）】')
+    expect(head).not.toContain('【近期原文保留】')
+  })
+
+  it('与钉轮共存：首个测试失败轮原文经保留段存活（交接文档之外双保险），压缩封顶仍 2 次', async () => {
+    // 第 1 轮 gwt 失败（钉轮信号）→ 同轮末压缩：交接文档（LLM 文本）不含断言原文，
+    // 保留段把失败工具对原文留下——修复不再依赖单一交接文档记忆
+    const { query, turnCalls } = turnScriptQuery({ toolByTurn: (turn) => (turn === 1 ? 'gwt_fail' : 'echo'), handoff: 'text' })
+    const events: Array<{ type: AgentEvent['type'] }> = []
+    await runAgentLoop(baseInput({ query, tools: [echo, gwtFailTool()], maxTurns: 14, sessionId: 'session-keeprecent-pin', publish: (type) => events.push({ type }) }))
+
+    // 第 2 轮模型调用：三段结构 + 保留段含 F-002 断言原文
+    expect(JSON.stringify(turnCalls[1])).toContain('F-002')
+    expect(textOf(turnCalls[1]![1])).toContain('【近期原文保留】')
+    // 保留段把 token 加回上下文，但压缩次数仍受封顶约束（2 次）
+    expect(events.filter((event) => event.type === 'loop_compaction')).toHaveLength(2)
+  })
+
+  it('交接 LLM 失败 → 确定性 fallback 同样带保留段（降级路径恰最需要细节）', async () => {
+    const { query, turnCalls } = compactQuery({ inputTokens: 5000, handoff: 'throw' })
+    await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 6, sessionId: 'session-keeprecent-fallback' }))
+    expect(turnCalls[1]).toHaveLength(4)
+    const head = textOf(turnCalls[1]![1])
+    expect(head).toContain('【自动交接')
+    expect(head).toContain('【近期原文保留】')
+    expect(turnCalls[1]![2]!.role).toBe('assistant') // 保留的 t0 工具对
   })
 })
 
@@ -1009,5 +1175,161 @@ describe('终轮退行守卫（P0，2026-09-06 地牢清怪录案）', () => {
     ])
     const result = await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 1 }))
     expect(result.status).toBe('turn_limit')
+  })
+})
+
+describe('steer 运行中转向（P0-1，2026-09-08 pi 差距方案）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-steer-'))
+    resetSteerQueuesForTests()
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+    resetSteerQueuesForTests()
+  })
+
+  /** echo 工具：execute 时把给定文本入队为 steer（模拟用户在当前运行会话中途补充）。 */
+  function steerDuringTool(text: string): AgentLoopTool {
+    return {
+      name: 'steer_during',
+      description: '执行时注入一条 steer',
+      input_schema: { type: 'object', properties: {} },
+      execute: async (_input, ctx) => {
+        enqueueSteer(ctx.sessionId, { queueMessageId: `steer-${text.length}-${Date.now()}`, content: text, enqueuedAt: Date.now() })
+        return { output: 'ok' }
+      },
+    }
+  }
+
+  it('批间注入：工具执行中入队的 steer 在下一轮模型调用可见（包裹 + JSONL + 事件）', async () => {
+    const steerTool = steerDuringTool('把按钮改成蓝色')
+    const { query, receivedMessages } = scriptedQuery([
+      [toolUseMessage('t1', 'steer_during')],
+      [toolUseMessage('t2', 'echo')],
+      [textMessage('完成')],
+    ])
+    const events: Array<{ type: AgentEvent['type']; payload: Record<string, unknown> }> = []
+    const result = await runAgentLoop(baseInput({ query, tools: [steerTool, tool('echo', () => ({ output: 'ok' }))], maxTurns: 3, sessionId: 'session-steer', publish: (type, payload) => events.push({ type, payload }) }))
+    expect(result.status).toBe('completed')
+
+    // 第 2 轮模型调用（receivedMessages[1]）：task + t1 对后紧跟注入的 steer user 轮
+    const secondCall = receivedMessages[1]!
+    const steerTurn = secondCall.find((turn) => turn.role === 'user' && JSON.stringify(turn.content).includes(STEER_WRAP_PREFIX))
+    expect(steerTurn).toBeDefined()
+    expect(JSON.stringify(steerTurn!.content)).toContain(wrapSteerContent('把按钮改成蓝色'))
+    // 第 3 轮调用里 steer 仍在（未丢）
+    expect(JSON.stringify(receivedMessages[2])).toContain('把按钮改成蓝色')
+
+    // steer_injected 事件：payload 含原文/包裹全文/轮号
+    const injected = events.filter((event) => event.type === 'steer_injected')
+    expect(injected).toHaveLength(1)
+    expect(injected[0]!.payload).toMatchObject({ content: '把按钮改成蓝色', at_turn: 1 })
+
+    // JSONL 审计：注入的 user 行已落盘（与模型所见一致）
+    const lines = readSessionJsonl('session-steer')
+    expect(JSON.stringify(lines)).toContain(wrapSteerContent('把按钮改成蓝色'))
+    // 队列已排空（drain 单点取走，无残留）
+    expect(pendingSteerCount('session-steer')).toBe(0)
+  })
+
+  it('多 steer 保序注入；同一批 drain 全部进 messages', async () => {
+    let count = 0
+    const steerTool: AgentLoopTool = {
+      name: 'steer_many',
+      description: '连续注入两条 steer',
+      input_schema: { type: 'object', properties: {} },
+      execute: async () => {
+        count += 1
+        enqueueSteer('session-steer-many', { queueMessageId: `s${count}a`, content: `第一条${count}`, enqueuedAt: Date.now() })
+        enqueueSteer('session-steer-many', { queueMessageId: `s${count}b`, content: `第二条${count}`, enqueuedAt: Date.now() })
+        return { output: 'ok' }
+      },
+    }
+    const { query, receivedMessages } = scriptedQuery([
+      [toolUseMessage('t1', 'steer_many')],
+      [toolUseMessage('t2', 'steer_many')],
+      [textMessage('完成')],
+    ])
+    await runAgentLoop(baseInput({ query, tools: [steerTool], maxTurns: 3, sessionId: 'session-steer-many' }))
+
+    // 每次模型调用收到的 user 文本（保序）——steer 注入按源序出现在对应批后
+    const userTextsOf = (messages: ConversationTurn[]): string[] =>
+      messages.flatMap((turn) =>
+        turn.role === 'user'
+          ? (Array.isArray(turn.content) ? turn.content : [{ type: 'text' as const, text: turn.content }])
+              .filter((block) => block.type === 'text')
+              .map((block) => block.text ?? '')
+          : [],
+      )
+    // 第 2 轮调用（turn 2 模型请求前，第 1 批两条已注入）；第 3 轮调用（第 2 批两条已注入）
+    const call2Texts = userTextsOf(receivedMessages[1]!)
+    const call3Texts = userTextsOf(receivedMessages[2]!)
+    const hasText = (texts: string[], needle: string): boolean => texts.some((text) => text.includes(needle))
+    expect(hasText(call2Texts, '第一条1')).toBe(true)
+    expect(hasText(call2Texts, '第二条1')).toBe(true)
+    expect(hasText(call3Texts, '第一条2')).toBe(true)
+    expect(hasText(call3Texts, '第二条2')).toBe(true)
+    expect(pendingSteerCount('session-steer-many')).toBe(0)
+  })
+
+  it('委派子会话（delegationDepth≥1）不开放 steer：入队被拒（不在 loopActive）、消息零注入', async () => {
+    const steerTool = steerDuringTool('子会话不该收到')
+    const { query, receivedMessages } = scriptedQuery([[toolUseMessage('t1', 'steer_during')], [textMessage('子任务完成')]])
+    await runAgentLoop(baseInput({ query, tools: [steerTool], maxTurns: 2, sessionId: 'session-steer-child', delegationDepth: 1 }))
+    // enqueue 门：子会话未 markLoopActive → enqueueSteer 直接拒绝，队列空
+    expect(pendingSteerCount('session-steer-child')).toBe(0)
+    // 模型消息里没有包裹文本
+    expect(JSON.stringify(receivedMessages[1])).not.toContain('子会话不该收到')
+  })
+
+  it('主 loop 收尾时未及注入的残余 → 落 JSONL 保真（自然结束不丢内容）', async () => {
+    const steerTool = steerDuringTool('收尾前到达')
+    const { query } = scriptedQuery([
+      [toolUseMessage('t1', 'steer_during')],
+      [textMessage('做完')],
+    ])
+    await runAgentLoop(baseInput({ query, tools: [steerTool], maxTurns: 2, sessionId: 'session-steer-tail' }))
+    // 入队发生在 t1 execute 时 → t1 批后已注入（非残余）；这里验证队列空 + 注入已落 JSONL
+    expect(pendingSteerCount('session-steer-tail')).toBe(0)
+    expect(JSON.stringify(readSessionJsonl('session-steer-tail'))).toContain(wrapSteerContent('收尾前到达'))
+  })
+
+  it('steer 注入发生在竹节压缩检查之前：注入轮进交接输入（无特判共存）', async () => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS = '0'
+    // 第 1 轮 steer_during（execute 内入队 steer + usage 超额）→ drain 先于压缩检查，
+    // 注入的 user 轮已进 messages → requestHandoff 的窗口输入天然携带（「压缩时进交接输入」）
+    const steerTool = steerDuringTool('压缩前补充的方向')
+    let calls = 0
+    const handoffInputs: ConversationTurn[][] = []
+    const query: SDKQuery = async function* (_prompt, queryOptions) {
+      const index = calls
+      calls += 1
+      if (queryOptions.tools === undefined) {
+        handoffInputs.push((queryOptions.messages ?? []).map((turn) => ({ ...turn })))
+        yield textMessage('交接：布局完成；未解决 GWT 场景 3；下一步修点击。')
+        yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+        return
+      }
+      yield toolUseMessage(`t${index}`, index === 0 ? 'steer_during' : 'echo')
+      yield { type: 'result', subtype: 'success', stop_reason: 'tool_use', usage: { input_tokens: 5000, output_tokens: 10 } }
+    }
+    const events: Array<{ type: AgentEvent['type'] }> = []
+    await runAgentLoop(baseInput({
+      query,
+      tools: [steerTool, tool('echo', () => ({ output: 'ok' }))],
+      maxTurns: 8,
+      sessionId: 'session-steer-compact',
+      publish: (type) => events.push({ type }),
+    }))
+    expect(events.filter((event) => event.type === 'steer_injected')).toHaveLength(1)
+    // 压缩照常发生（封顶 2 次，不受注入影响）
+    expect(events.filter((event) => event.type === 'loop_compaction')).toHaveLength(2)
+    // 第 1 次压缩的交接调用输入（窗口化 messages）携带注入文本
+    expect(handoffInputs.length).toBeGreaterThan(0)
+    expect(JSON.stringify(handoffInputs[0])).toContain('压缩前补充的方向')
+    expect(pendingSteerCount('session-steer-compact')).toBe(0)
   })
 })

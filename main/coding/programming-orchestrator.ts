@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import type { AgentEvent, AgentLoopJudgeMetadata, AgentSendMessageInput, Channel, ChannelModel, DocumentSyncResult, MessageContentBlock, Project, ProjectMode, Snapshot, SnapshotKind, TemplateType } from '../../shared/types'
 import type { ThinkingLevel } from '../../shared/reasoning-profile'
 import { getAgentSessionPath, getDocumentsDir } from '../../storage/config-paths'
-import { appendJsonLine } from '../../storage/json-store'
+import { appendSessionMessage } from '../session-tree'
+import { emitAgentEvent } from '../agent-event-bus'
 import { appendLoopLogDocument, loopLogEnabled, readPrdBackplane, readUxContractSketch, renamePrdProject, syncDocuments, updateRequirementStatus, type LoopLogEntry, writePlanDocument, writeSecurityScanDocument } from '../document-engine'
 import { appendProjectLearning, renderLearningsSection } from '../learnings-log'
 import { createSnapshot, runSandbox, trackAnalytics } from '../platform-services'
@@ -149,7 +150,12 @@ export function setForegroundRunChecker(checker: (sessionId: string) => boolean)
 }
 
 export function setProgrammingEventPublisher(publisher: ProgrammingEventPublisher): void {
-  programmingEventPublisher = publisher
+  // P2-A 事件总线（2026-09-08）：接线时套一层 emit——事件先广播到 onAgentEvent 订阅面
+  // 再转发原发布目标；原发布链路零改动（行为不变，总线只读旁路）
+  programmingEventPublisher = (event) => {
+    emitAgentEvent(event)
+    publisher(event)
+  }
 }
 
 export async function runSketchTask(input: SketchTaskInput): Promise<SketchTaskResult> {
@@ -180,7 +186,7 @@ export async function runSketchTask(input: SketchTaskInput): Promise<SketchTaskR
       },
     })
     const copy = sketchFallbackCopy(fallbackReason)
-    appendJsonLine(getAgentSessionPath(input.session_id), {
+    appendSessionMessage(input.session_id, {
       role: 'assistant',
       content: [{ type: 'text', text: copy }],
       timestamp: Date.now(),
@@ -2050,7 +2056,7 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
   })
   // 旁白告知（渲染端零新组件，走既有 assistant 文案流）
   const repairNote = `终验有 ${tasks.length} 项未通过，我先定向修复一轮（第 ${round}/${budget} 轮），完成后再全量重验。`
-  appendJsonLine(getAgentSessionPath(input.session_id), {
+  appendSessionMessage(input.session_id, {
     role: 'assistant',
     content: [{ type: 'text', text: repairNote }],
     timestamp: Date.now(),
@@ -2206,7 +2212,7 @@ async function runBlockedTestRepair(input: {
     },
   })
   const repairNote = `继续修：按上次失败清单定向修复 ${tasks.length} 项（第 ${round}/${budget} 轮），完成后重新终验。`
-  appendJsonLine(getAgentSessionPath(input.session_id), {
+  appendSessionMessage(input.session_id, {
     role: 'assistant',
     content: [{ type: 'text', text: repairNote }],
     timestamp: Date.now(),
@@ -2416,7 +2422,7 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
     if (!cancelled) {
       // U12：记录本次失败的诉求，供「再试一次」一键重跑（避免用户重新打字描述）。
       setFailedIteration(input.project_id, input.prompt)
-      appendJsonLine(getAgentSessionPath(input.session_id), {
+      appendSessionMessage(input.session_id, {
         role: 'assistant',
         content: [{ type: 'text', text: GENERATION_FAILED_COPY }],
         timestamp: Date.now(),
@@ -2609,7 +2615,7 @@ function publishCompletionMessage(
   input: Pick<SketchTaskInput, 'session_id' | 'project_id'>,
   text: string,
 ): void {
-  appendJsonLine(getAgentSessionPath(input.session_id), {
+  appendSessionMessage(input.session_id, {
     role: 'assistant',
     content: [{ type: 'text', text }],
     timestamp: Date.now(),
@@ -2656,7 +2662,7 @@ function publishBlockedDecision(
   // 回到可发送状态（决策卡片仍展示，等用户点选 resume）。前台 runAgent 流除外——它自带
   // 终态，中途补发会提前熄掉运行指示（resume 的继续尝试可能跑几分钟）。
   const text = `这里需要你来定夺：${title ?? '当前进度需要你确认下一步'}。`
-  appendJsonLine(getAgentSessionPath(input.session_id), {
+  appendSessionMessage(input.session_id, {
     role: 'assistant',
     content: [{ type: 'text', text }],
     timestamp: Date.now(),

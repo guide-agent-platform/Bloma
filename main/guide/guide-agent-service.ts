@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import type { AgentEvent, AgentMessage, AgentSendMessageInput, MessageContentBlock, Project, ProjectMode, ResearchIdea } from '../../shared/types'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import { appendJsonLine } from '../../storage/json-store'
+import { appendSessionMessage } from '../session-tree'
 import { routeDialogue, type ClarificationOption } from '../dialogue-router'
 import { loadPromptOverride } from '../prompt-config'
 import { parseDecisionText, recordDecision } from '../decision-log'
@@ -554,7 +555,7 @@ export async function handleGuideMessage(
       }
     }
     if (sectionAnswers.length > 0) {
-      appendJsonLine(getAgentSessionPath(input.session_id), {
+      appendSessionMessage(input.session_id, {
         role: 'user',
         content: [{ type: 'text', text: `补充说明：${sectionAnswers.join('；')}` }],
         timestamp: Date.now(),

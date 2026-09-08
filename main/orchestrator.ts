@@ -15,8 +15,11 @@ import type {
 } from '../shared/types'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
+import { appendSessionMessage } from './session-tree'
 import { buildThinkingFragment, type ThinkingLevel } from '../shared/reasoning-profile'
 import { SessionMessageQueue, type QueueEntry } from './message-queue'
+import { clearSteerQueue } from './steer-queue'
+import { emitAgentEvent } from './agent-event-bus'
 import { hydrateMessagesImageBlocks } from './pasted-images'
 export { buildSdkEnv } from './channel-manager'
 import {
@@ -213,7 +216,12 @@ let sdkQuery: SDKQuery = queryWithRuntimeFallback
 let retrySleep: (ms: number) => Promise<void> = sleep
 
 export function setAgentStreamPublisher(publisher: StreamPublisher): void {
-  streamPublisher = publisher
+  // P2-A 事件总线（2026-09-08）：接线时套一层 emit——事件先广播到 onAgentEvent 订阅面
+  // 再转发原发布目标；原发布链路零改动（行为不变，总线只读旁路）
+  streamPublisher = (event) => {
+    emitAgentEvent(event)
+    publisher(event)
+  }
 }
 
 export function setSDKQueryForTests(query: SDKQuery): void {
@@ -1092,9 +1100,13 @@ export async function cancelAgent(input: AgentCancelInput): Promise<AgentCancelR
   for (const target of targets) {
     sessionMessageQueue.clear(target.sessionId)
     sessionMessageQueue.onRunComplete(target.sessionId, undefined, true)
+    // P0-1 steer（2026-09-08）：停止即清空待注入队列——「停止后被注入」绝不允许
+    //（注入语义以用户当前运行的 loop 存活为前提；runAgentLoop finally 另兜竞态窗口）
+    clearSteerQueue(target.sessionId)
   }
   sessionMessageQueue.onRunComplete(input.session_id, undefined, true)
   sessionMessageQueue.clear(input.session_id)
+  clearSteerQueue(input.session_id)
   return { cancelled: true, session_id: input.session_id }
 }
 
@@ -1105,7 +1117,7 @@ function isUserCancelled(error: unknown): boolean {
 }
 
 function appendAgentMessage(sessionId: string, message: AgentMessage): void {
-  appendJsonLine(getAgentSessionPath(sessionId), message)
+  appendSessionMessage(sessionId, message)
 }
 
 function persistAssistantMessages(sessionId: string, sdkMessages: SDKMessage[]): void {

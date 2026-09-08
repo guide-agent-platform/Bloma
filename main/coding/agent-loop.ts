@@ -1,6 +1,7 @@
 import type { AgentEvent, AgentLoopStatus, MessageContentBlock, PastedImageRef, PromaPermissionMode } from '../../shared/types'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import { appendJsonLine } from '../../storage/json-store'
+import { appendSessionMessage } from '../session-tree'
 import { canUseTool } from '../permission-service'
 import type { ConversationTurn, SDKQuery, ToolDefinition } from '../orchestrator'
 import { prepareTaskWithSkills } from '../skill-loader'
@@ -8,6 +9,7 @@ import { prepareRecallBlock } from '../session-recall'
 import { estimateTokenCount } from '../usage-guard'
 import { windowMessagesWithDigest } from '../compacting-window'
 import { isDegenerateText } from './output-integrity'
+import { drainSteerQueue, markLoopActive, markLoopInactive, pendingSteerCount, wrapSteerContent } from '../steer-queue'
 
 /**
  * Agent Loop 执行器（L1，AgentLoop 改造方案 §4.2）。
@@ -72,6 +74,14 @@ export interface AgentLoopTool {
   name: string
   description: string
   input_schema: Record<string, unknown>
+  /**
+   * 只读并行声明（P1-2，2026-09-08 pi 差距方案 §4）：true = 可与其他 parallelSafe 工具
+   * 同轮并发（无共享状态序依赖）。v1 白名单只读五件套：read_file / list_files / grep /
+   * web_fetch / web_research。默认缺省 false（写类/测试/委派/权限类一律串行——状态序依赖：
+   * test_failed 旗标、修复预算计数、预览地址、委派状态机）。**有 toolBudget 预算的工具
+   * 即使声明 true 也退串行**（并行计数会击穿预算上限），见 executeTurnToolCalls。
+   */
+  parallelSafe?: boolean
   execute(input: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutcome>
 }
 
@@ -200,6 +210,19 @@ function resolveCompactThreshold(): number {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : LOOP_COMPACT_INPUT_TOKENS_DEFAULT
 }
 
+// ---- keep-recent 三段式压缩（P1-1，2026-09-08 pi 差距方案）----
+
+/** 保留段 token 预算缺省：交接文档之外保留近期原文轮次（pi 参照 ~20k，bloma 缺省 8k 保守起步）。 */
+const LOOP_COMPACT_KEEP_RECENT_TOKENS_DEFAULT = 8_000
+
+/** 保留段预算可环境覆盖（'0' = 旧行为完全回归：task+交接两段、不保留原文）；无效值回缺省。 */
+function resolveKeepRecentTokens(): number {
+  const raw = process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS
+  if (raw === undefined || raw.trim() === '') return LOOP_COMPACT_KEEP_RECENT_TOKENS_DEFAULT
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : LOOP_COMPACT_KEEP_RECENT_TOKENS_DEFAULT
+}
+
 /** 交接模型不可用时的确定性拼装（零 LLM 兑底；含钉轮失败断言原文，审查 P1-2）。 */
 function deterministicHandoff(
   turn: number,
@@ -218,12 +241,13 @@ function deterministicHandoff(
   return parts.filter(Boolean).join('\n')
 }
 
-/** 钉轮对的 tool_result 文本（确定性交接兑底用，截 400 字；钉轮失效/未钉返回空）。 */
+/** 钉轮对的 tool_result 文本（确定性交接兑底用，截 400 字；钉轮失效/未钉返回空）。
+ *  P1-1 keep-recent（2026-09-08）：按配对序号定位（与钉轮赋值同口径）——保留段的
+ *  对与重置后的对统一计数，文本注入轮存在时也不再错位。 */
 function pinnedFailureExcerpt(messages: ConversationTurn[], pinnedTurn: number | undefined): string {
   if (pinnedTurn === undefined) return ''
-  const a = 2 * (pinnedTurn - 1)
-  const pair = messages.slice(1 + a, 1 + a + 2)
-  if (pair.length < 2) return ''
+  const pair = toolPairAtOrdinal(messages, pinnedTurn)
+  if (!pair) return ''
   const texts: string[] = []
   for (const turn of pair) {
     if (!Array.isArray(turn.content)) continue
@@ -234,6 +258,44 @@ function pinnedFailureExcerpt(messages: ConversationTurn[], pinnedTurn: number |
     }
   }
   return texts.join('\n').slice(0, 400)
+}
+
+/**
+ * tail（messages[1:]）中第 ordinal 个完整工具对（assistant tool_use + 紧邻 user
+ * tool_result，从 1 计，扫描时跳过文本轮）。找不到（序号越界/对不完整）返回 undefined。
+ * partitionWindow 的钉轮定位是位置算术 2*(t-1)——纯工具对 tail 下与本函数等值；
+ * 文本注入轮（退行反馈/steer）混排时位置算术会错位，本函数按真实配对计数兜底。
+ */
+function toolPairAtOrdinal(messages: ConversationTurn[], ordinal: number): [ConversationTurn, ConversationTurn] | undefined {
+  if (ordinal < 1) return undefined
+  const tail = messages.slice(1)
+  let seen = 0
+  for (let i = 0; i + 1 < tail.length; i += 1) {
+    if (tail[i]!.role === 'assistant' && isToolTurn(tail[i]!) && tail[i + 1]!.role === 'user' && isToolTurn(tail[i + 1]!)) {
+      seen += 1
+      if (seen === ordinal) return [tail[i]!, tail[i + 1]!]
+      i += 1
+    }
+  }
+  return undefined
+}
+
+/** 末位完整工具对的配对序号（钉轮赋值口径）；末位不是完整对（残局/文本轮收尾）返回
+ *  undefined——不钉，退化为固定窗口。 */
+function tailLastPairOrdinal(messages: ConversationTurn[]): number | undefined {
+  const tail = messages.slice(1)
+  if (tail.length < 2) return undefined
+  const prev = tail[tail.length - 2]!
+  const last = tail[tail.length - 1]!
+  if (!(prev.role === 'assistant' && isToolTurn(prev) && last.role === 'user' && isToolTurn(last))) return undefined
+  let pairs = 0
+  for (let i = 0; i + 1 < tail.length; i += 1) {
+    if (tail[i]!.role === 'assistant' && isToolTurn(tail[i]!) && tail[i + 1]!.role === 'user' && isToolTurn(tail[i + 1]!)) {
+      pairs += 1
+      i += 1
+    }
+  }
+  return pairs
 }
 
 /** 一次无 tools 的交接小调用（复用 input.query/env 同渠道）；任何失败返回 '' 交由确定性兑底。 */
@@ -362,6 +424,55 @@ export function estimateBlocksText(blocks: MessageContentBlock[]): string {
     .join('\n')
 }
 
+/** 单轮占用估算（keep-recent 预算累加用；与 usage_summary 的 estContextTokens 同口径）。 */
+function turnEstTokens(turn: ConversationTurn): number {
+  return estimateTokenCount(typeof turn.content === 'string' ? turn.content : estimateBlocksText(turn.content))
+}
+
+/**
+ * keep-recent 保留段（P1-1 三段式压缩）：竹节压缩重置时，在「task + 交接文档」之外
+ * 保留最近的**原文**轮次——此前压缩一发生窗口历史归零，正常对话细节全丢（pi 参照：
+ * 压缩 = 摘要 + 保留近 20k tokens 原文）。
+ *
+ * 语义（方案 §3.2）：
+ * - 预算从尾向头累加（estimateTokenCount 既有估算器），保留集恒为 messages 的**连续后缀**
+ *  （首个装不下的单元即停，不留「中空」历史）；
+ * - tool_use/tool_result 成对保留（切点永不在 tool_result，对齐 partitionWindow 按对计数的
+ *   配对保护先例）；纯文本轮（退行反馈/steer 注入等）独立成单元，不拆对；
+ * - 装不下的整对丢弃（其内容由交接文档兜底）；首条 task（head）不进保留段——新首消息
+ *   已含 task+交接；
+ * - 交接文档优先级高于保留段（预算冲突先砍保留段）；钉轮不占保留预算（钉轮失败细节已由
+ *   pinnedFailureExcerpt 进交接文档，语义共存）。
+ */
+export function keepRecentTurns(messages: ConversationTurn[], budgetTokens: number): ConversationTurn[] {
+  if (budgetTokens <= 0 || messages.length <= 1) return []
+  const tail = messages.slice(1)
+  // 尾向头先切单元：user 工具轮与其前邻 assistant 工具轮合为一个完整对；其余独立成单元。
+  // units 为「从新到旧」序。
+  const units: ConversationTurn[][] = []
+  for (let i = tail.length - 1; i >= 0; i -= 1) {
+    const current = tail[i]!
+    if (current.role === 'user' && isToolTurn(current) && i >= 1) {
+      const prev = tail[i - 1]!
+      if (prev.role === 'assistant' && isToolTurn(prev)) {
+        units.push([prev, current])
+        i -= 1
+        continue
+      }
+    }
+    units.push([current])
+  }
+  const kept: ConversationTurn[] = []
+  let used = 0
+  for (const unit of units) {
+    const cost = unit.reduce((n, turn) => n + turnEstTokens(turn), 0)
+    if (used + cost > budgetTokens) break // 连续后缀：首个装不下的单元即停
+    kept.unshift(...unit)
+    used += cost
+  }
+  return kept
+}
+
 /** 畸形粘贴引用过滤（fuzz 加固，S4-AGENT-093 队友）：非对象/缺 imageId/非法 media_type/穿越串一律滤除 */
 function sanitizePastedImageRefs(images?: PastedImageRef[]): PastedImageRef[] {
   if (!images?.length) return []
@@ -383,6 +494,30 @@ export function createToolState(delegationDepth = 0): AgentLoopToolState {
 }
 
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
+  // P0-1 steer（运行中转向，2026-09-08）：只主 loop（depth 0）开放。进入即 mark——
+  // IPC steer 通道据此判定可注入；finally 里先 drain 残余（未及批间注入的，落 JSONL 保真；
+  // abort 后的残余丢弃——取消语义优先，cancelAgent 已清队列，这里兜竞态窗口）再 unmark。
+  const isMainLoop = (input.delegationDepth ?? 0) === 0
+  if (isMainLoop) markLoopActive(input.sessionId)
+  try {
+    return await runAgentLoopImpl(input)
+  } finally {
+    if (isMainLoop) {
+      const leftovers = drainSteerQueue(input.sessionId)
+      if (leftovers.length > 0 && !input.signal.aborted) {
+        for (const entry of leftovers) {
+          // 内容不丢、并入对话历史：下一条消息/下一个 run 恢复时模型可见
+          appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: wrapSteerContent(entry.content) }])
+        }
+      }
+      markLoopInactive(input.sessionId)
+    }
+  }
+}
+
+async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult> {
+  // 主 loop（depth 0）判定：steer 批间注入只在主 loop 执行（见 wrapper 注释与下方注入点）
+  const isMainLoop = (input.delegationDepth ?? 0) === 0
   const definitions: ToolDefinition[] = input.tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
@@ -459,14 +594,15 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   // 收口态：GWT 全过 + 安全扫描通过后置位，此后模型调用停用全部工具并追加收口指令
   let wrapUp = false
   // 首个 test_failed 轮（窗口钉轮，只钉一次）：修复全程可见第一次测试失败的断言细节。
-  // 相对轮号（turn - pinBaseTurn）：压缩重置后 tail 从零计数，索引映射恒成立（审查 P1-1）
+  // 序号口径见 tailLastPairOrdinal（P1-1 后与 keep-recent 保留段共存：保留段配对计入序号）
   let pinnedTestTurn: number | undefined
-  let pinBaseTurn = 0
   // 已被钉轮/交接覆盖到的 repair_round：防粘性 test_failed 在压缩后幻影重钉（审查 P1-1）
   let pinnedRepairRound = 0
   // 已压缩次数（竹节压缩，闭环 PR6）
   let compactions = 0
   const compactThreshold = resolveCompactThreshold()
+  // keep-recent 保留段预算（P1-1 三段式压缩；'0' = 旧行为完全回归）
+  const keepRecentBudget = resolveKeepRecentTokens()
   // 终轮退行已重试次数（P0：传输事故只重试一次，见 DEGENERATE_RETRY_LIMIT）
   let degenerateRetries = 0
 
@@ -580,44 +716,39 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       return attachUsage({ status: 'completed', turns, finalText, toolCalls })
     }
 
-    // ---- 工具执行：串行 + 整批 tool_result 进同一条 user 消息（不变式）----
-    const resultBlocks: MessageContentBlock[] = []
-    let budgetStallThisTurn = false
-    for (const use of turnToolUses) {
-      if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls))
-      input.publish('tool_call_started', {
-        tool: use.name,
-        turn,
-        input_summary: summarizeJson(use.input),
-      })
-      const startedAt = Date.now()
-      const outcome = await executeToolCall(input, toolByName, budgetUsed, use, ctx)
-      if (outcome.budgetExhausted) budgetStallThisTurn = true
-      input.publish('tool_call_completed', {
-        tool: use.name,
-        turn,
-        status: outcome.isError ? 'error' : outcome.budgetExhausted ? 'budget' : 'ok',
-        duration_ms: Date.now() - startedAt,
-        output_summary: outcome.output.slice(0, EVENT_SUMMARY_CHAR_LIMIT),
-        is_error: outcome.isError === true,
-        // M4-C：结构化 detail 透传进事件流（委派工具返回 id/role/status 等，渲染端据此派生协作视图）。
-        // 限字段白名单（防敏感/超长数据泄漏）：只取委派工具的标识与状态字段，丢弃 result_summary 等长文本。
-        ...(outcome.detail ? { detail: sanitizeToolDetail(outcome.detail) } : {}),
-      })
-      resultBlocks.push({
-        type: 'tool_result',
-        tool_use_id: use.id,
-        content: outcome.output,
-        ...(outcome.isError ? { is_error: true } : {}),
-      })
-    }
+    // ---- 工具执行：连续 parallelSafe 段并发 + 其余串行；整批 tool_result 按源序进同一条 user 消息（不变式）----
+    const execution = await executeTurnToolCalls(input, toolByName, budgetUsed, turnToolUses, turn, ctx)
+    if (execution.cancelled) return attachUsage(loopCancelled(turns, finalText, toolCalls))
+    const { resultBlocks, budgetStallThisTurn } = execution
     appendLoopMessage(input.sessionId, 'user', resultBlocks)
     messages.push({ role: 'assistant', content: assistantBlocks })
     messages.push({ role: 'user', content: resultBlocks })
+
+    // ---- P0-1 steer（运行中转向）批间注入点：resultBlocks 落盘后、下一轮模型调用前 ----
+    // 主 loop 的天然批间边界：逐条 drain → JSONL 落盘 → messages.push → publish
+    // steer_injected。注入内容照常参与滑窗/竹节压缩（窗口自然滑出；压缩时进交接输入，
+    // 无需特判）。「整批 tool_result 进同一条 user 消息」不变式不受影响。
+    // 委派等待期（wait_for_delegations 阻塞中）注入照常在下一次批间生效，不打断等待。
+    if (isMainLoop) {
+      const steerEntries = drainSteerQueue(input.sessionId)
+      for (const entry of steerEntries) {
+        const wrapped = wrapSteerContent(entry.content)
+        appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: wrapped }])
+        messages.push({ role: 'user', content: [{ type: 'text', text: wrapped }] })
+        input.publish('steer_injected', {
+          content: entry.content,
+          message: wrapped,
+          at_turn: turn,
+          remaining: pendingSteerCount(input.sessionId),
+        })
+      }
+    }
+
     // 钉轮信号：出现「新的」测试失败（repair_round 增长；粘性 test_failed 不算）且
-    // 尚未钉过 → 钉本轮（相对轮号）
+    // 尚未钉过 → 钉本轮（末位完整工具对的配对序号；无保留段且各轮皆工具轮时与旧口径
+    // turn - pinBaseTurn 等值，见 tailLastPairOrdinal 注释）
     if (ctx.state.test_failed && ctx.state.repair_round > pinnedRepairRound) {
-      if (pinnedTestTurn === undefined) pinnedTestTurn = turn - pinBaseTurn
+      if (pinnedTestTurn === undefined) pinnedTestTurn = tailLastPairOrdinal(messages)
       pinnedRepairRound = ctx.state.repair_round
     }
 
@@ -642,19 +773,40 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
       if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls))
       // 确定性兑底也携带钉轮失败断言原文（审查 P1-2：交接失败恰是最需要细节的降级路径）
       const summary = handoff || deterministicHandoff(turn, toolCalls, finalText, pinnedFailureExcerpt(messages, pinnedTestTurn))
+      // keep-recent 三段式（P1-1）：task + 交接文档 + 近期原文保留段——重置在「交接文档」
+      // 之外保留最近原文轮次（预算 keepRecentBudget；'0' 时 retained 为空 = 旧行为两段）。
+      // 保留段在重置前的 messages 上计算（含本轮刚落盘的工具对）；交接 LLM 失败的确定性
+      // fallback 路径同样带保留段（降级路径恰最需要细节，对齐审查 P1-2 先例）。
+      const retained = keepRecentTurns(messages, keepRecentBudget)
       messages.length = 0
-      messages.push({ role: 'user', content: `${input.task}\n\n【此前进度交接（第 ${compactions + 1} 段）】\n${summary}` })
+      messages.push({
+        role: 'user',
+        content:
+          `${input.task}\n\n【此前进度交接（第 ${compactions + 1} 段）】\n${summary}` +
+          (retained.length > 0 ? '\n\n【近期原文保留】以下是压缩前最近的原文轮次（保真参考，未经改写，时间从早到晚）。' : ''),
+      })
+      messages.push(...retained)
       compactions += 1
-      // 重置钉轮坐标系（审查 P1-1）：基线推进到本轮，旧失败已被交接文档覆盖（repair_round
-      // 快照对齐，后续只有新失败才重钉；避免粘性 test_failed 幻影钉在无关轮对上）
-      pinBaseTurn = turn
+      // 重置钉轮坐标系（审查 P1-1）：旧失败已被交接文档覆盖（repair_round 快照对齐，
+      // 后续只有新失败才重钉；避免粘性 test_failed 幻影钉在无关轮对上）。P1-1 后配对
+      // 序号按 tail 实际配对计数（tailLastPairOrdinal），无需再维护基线轮号。
       pinnedTestTurn = undefined
       pinnedRepairRound = ctx.state.repair_round
-      input.publish('loop_compaction', { at_turn: turn, input_tokens: usage?.input_tokens, compactions })
+      input.publish('loop_compaction', {
+        at_turn: turn,
+        input_tokens: usage?.input_tokens,
+        compactions,
+        keep_recent_turns: retained.length,
+      })
       // 交接文档落 JSONL 审计（与 [channel-switch] 同一 system 行呈现模式，审查 P1-2）
-      appendJsonLine(getAgentSessionPath(input.sessionId), {
+      appendSessionMessage(input.sessionId, {
         role: 'system',
-        content: [{ type: 'text', text: `[loop-compaction] 第 ${compactions} 段交接（at_turn=${turn}，input_tokens=${usage?.input_tokens ?? '-'}）：\n${summary.slice(0, 1000)}` }],
+        content: [
+          {
+            type: 'text',
+            text: `[loop-compaction] 第 ${compactions} 段交接（at_turn=${turn}，input_tokens=${usage?.input_tokens ?? '-'}，keep_recent=${retained.length} 轮）：\n${summary.slice(0, 1000)}`,
+          },
+        ],
         timestamp: Date.now(),
       })
     }
@@ -790,6 +942,106 @@ async function executeToolCall(
   }
 }
 
+// =========================================================================
+// P1-2 只读工具并行执行（2026-09-08 pi 差距方案 §4）
+// =========================================================================
+
+/** 并发上限（保守）：读盘/网络密集的只读工具并行，避免瞬时 IO/请求洪峰。 */
+export const PARALLEL_CONCURRENCY_LIMIT = 4
+
+/** 一轮工具执行的结果：cancelled 时调用方丢弃 partial（与旧串行批后 abort 语义一致）。 */
+export type TurnToolExecution =
+  | { cancelled: true }
+  | { cancelled: false; resultBlocks: MessageContentBlock[]; budgetStallThisTurn: boolean }
+
+/**
+ * 单轮工具执行（P1-2）：保持「整批 tool_result 按源序进同一条 user 消息」不变式，
+ * 把**连续** parallelSafe（且无 toolBudget 预算）的工具并发执行，遇非 parallelSafe 先 join。
+ *
+ * 保守执行策略（方案 §4.2）：
+ * 1. 按 assistant 源序分组：连续 parallelSafe 段内并发（上限 PARALLEL_CONCURRENCY_LIMIT）；
+ *    有 toolBudget 的工具即使 parallelSafe 也退串行（并行计数会击穿静态预算上限）。
+ * 2. resultBlocks 一律按源序拼装——模型看到的 tool_result 顺序 = 模型发出的 tool_use 顺序。
+ * 3. 事件流：tool_call_started 各自启动时发、completed 各自完成时发（渲染端逐事件渲染，
+ *    无序依赖）；usage/toolCalls 记录在调用点已按源序推进（toolCalls.push 先于本函数）。
+ * 4. 取消：串行位沿用旧语义（执行前检查，partial 丢弃）；并发段启动前 + join 后检查。
+ *    工具自身异常已由 executeToolCall 转 is_error，Promise.all 不会因单工具失败 reject；
+ *    工具内部经 ctx.signal/withAbort 感知取消。
+ *
+ * 已知软风险（接受，方案 §4.2）：web_research 子代理与主 loop 并行写入交错时可能读到
+ * 中间态——其结论是建议性调研（writeFileSync 单次写入原子性兜底），不作为权威输入；
+ * 且生产面 web_research 带 toolBudget（runMvpViaAgentLoop 传 { web_research: 4 }）恒串行。
+ */
+export async function executeTurnToolCalls(
+  input: AgentLoopInput,
+  toolByName: Map<string, AgentLoopTool>,
+  budgetUsed: Record<string, number>,
+  turnToolUses: Array<MessageContentBlock & { type: 'tool_use'; id: string; name: string }>,
+  turn: number,
+  ctx: ToolContext,
+): Promise<TurnToolExecution> {
+  const resultBlocks: MessageContentBlock[] = []
+  let budgetStallThisTurn = false
+
+  // 单工具全流程：事件 + 执行；返回结果块（push 交给调用方——源序由调用方保证）。
+  const runOne = async (use: { name: string; input?: Record<string, unknown>; id?: string }): Promise<MessageContentBlock> => {
+    input.publish('tool_call_started', { tool: use.name, turn, input_summary: summarizeJson(use.input) })
+    const startedAt = Date.now()
+    const outcome = await executeToolCall(input, toolByName, budgetUsed, use, ctx)
+    if (outcome.budgetExhausted) budgetStallThisTurn = true
+    input.publish('tool_call_completed', {
+      tool: use.name,
+      turn,
+      status: outcome.isError ? 'error' : outcome.budgetExhausted ? 'budget' : 'ok',
+      duration_ms: Date.now() - startedAt,
+      output_summary: outcome.output.slice(0, EVENT_SUMMARY_CHAR_LIMIT),
+      is_error: outcome.isError === true,
+      // M4-C：结构化 detail 透传进事件流（委派工具返回 id/role/status 等，渲染端据此派生协作视图）。
+      // 限字段白名单（防敏感/超长数据泄漏）：只取委派工具的标识与状态字段，丢弃 result_summary 等长文本。
+      ...(outcome.detail ? { detail: sanitizeToolDetail(outcome.detail) } : {}),
+    })
+    return {
+      type: 'tool_result',
+      tool_use_id: use.id,
+      content: outcome.output,
+      ...(outcome.isError ? { is_error: true } : {}),
+    }
+  }
+
+  // 源序单点消费：串行位按序 push；并发段 Promise.all 保持批次内顺序（completed[i] ↔ batch[i]），
+  // join 后整体按源序 push——「整批 tool_result 一条 user 消息、块序=源序」不变式保持。
+  let index = 0
+  while (index < turnToolUses.length) {
+    if (input.signal.aborted) return { cancelled: true }
+    const use = turnToolUses[index]!
+    const tool = toolByName.get(use.name)
+    const parallelizable = tool?.parallelSafe === true && input.toolBudget?.[use.name] === undefined
+    if (!parallelizable) {
+      // 串行位：前面并发段都已 join 完，join 语义天然满足；执行前 abort 检查同旧语义
+      resultBlocks.push(await runOne(use))
+      index += 1
+      continue
+    }
+    // 切出连续 parallelSafe 段
+    let end = index
+    while (end < turnToolUses.length) {
+      const candidate = toolByName.get(turnToolUses[end]!.name)
+      if (!(candidate?.parallelSafe === true && input.toolBudget?.[turnToolUses[end]!.name] === undefined)) break
+      end += 1
+    }
+    const group = turnToolUses.slice(index, end)
+    // 并发上限内的小池：避免一次性 Promise.all 数十个只读调用打满 fd/网络
+    for (let cursor = 0; cursor < group.length; cursor += PARALLEL_CONCURRENCY_LIMIT) {
+      if (input.signal.aborted) return { cancelled: true }
+      const batch = group.slice(cursor, cursor + PARALLEL_CONCURRENCY_LIMIT)
+      const completed = await Promise.all(batch.map((item) => runOne(item)))
+      for (const block of completed) resultBlocks.push(block)
+    }
+    index = end
+  }
+  return { cancelled: false, resultBlocks, budgetStallThisTurn }
+}
+
 /**
  * 把 promise 与 AbortSignal 竞速：signal 已 abort 立即 reject AGENT_CANCELLED；
  * 中途 abort 也 reject（once 监听，settle 后移除）。用于把「可能永不 settle 的等待」
@@ -914,7 +1166,7 @@ function summarizeJson(value: unknown): string {
 
 /** loop 轮次落盘：assistant 轮（含 tool_use）与 user 轮（tool_result）照常 append JSONL。 */
 function appendLoopMessage(sessionId: string, role: 'assistant' | 'user', blocks: MessageContentBlock[]): void {
-  appendJsonLine(getAgentSessionPath(sessionId), {
+  appendSessionMessage(sessionId, {
     role,
     content: blocks.map((block) =>
       block.type === 'tool_result' && typeof block.content === 'string' && block.content.length > JSONL_TOOL_RESULT_CHAR_LIMIT

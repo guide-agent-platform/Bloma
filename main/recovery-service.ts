@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { AgentEvent, Project, RollbackResult, Snapshot, WorkflowStage } from '../shared/types'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
+import { appendSessionMessage } from './session-tree'
 import { recordDecision } from './decision-log'
 import { hasInteractiveEntry } from './gwt-service'
 import { listSnapshots, restoreSnapshotFiles, rollbackSnapshot } from './platform-services'
@@ -191,7 +192,7 @@ function persistReconcileMessage(
   }
   const text = `[reconcile] ${parts.join('')}`
 
-  appendJsonLine(getAgentSessionPath(sessionId), {
+  appendSessionMessage(sessionId, {
     role: 'system',
     content: [{ type: 'text', text }],
     timestamp: Date.now(),
@@ -341,7 +342,7 @@ export async function circuitBreakRollback(input: CircuitBreakInput): Promise<Ci
 }
 
 function appendAssistantMessage(sessionId: string, text: string): void {
-  appendJsonLine(getAgentSessionPath(sessionId), {
+  appendSessionMessage(sessionId, {
     role: 'assistant',
     content: [{ type: 'text', text }],
     timestamp: Date.now(),

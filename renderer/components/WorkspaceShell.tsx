@@ -1,6 +1,7 @@
 import React from 'react'
 import { WorkspaceHeader } from './WorkspaceHeader'
 import { ChatPanel } from './ChatPanel'
+import type { AgentMessage } from './atoms'
 import { PreviewPanel } from './PreviewPanel'
 import { TimelinePanel } from './TimelinePanel'
 import { MvpStatusBanner } from './MvpStatusBanner'
@@ -28,6 +29,8 @@ export interface WorkspaceShellProps {
   isHistoryLoading?: boolean
   /** 停止当前生成（U4：Agent 流式生成中点击停止） */
   onStopGeneration?: () => void
+  /** P0-2 fork（2026-09-08）：user 消息「从这里重新来」回调 */
+  onForkFromMessage?: (message: AgentMessage) => void
 
   /* === PreviewPanel props === */
   previewStatus?: PreviewStatus
@@ -120,6 +123,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
           isHistoryLoading={props.isHistoryLoading}
           onStopGeneration={props.onStopGeneration}
           onOpenSettings={props.onOpenSettings}
+          onForkFromMessage={props.onForkFromMessage}
         />
         <PreviewPanel
           status={props.previewStatus}

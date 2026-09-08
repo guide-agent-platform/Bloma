@@ -1,6 +1,7 @@
 import type { Channel } from '../shared/types'
 import { appendJsonLine } from '../storage/json-store'
 import { getAgentSessionPath } from '../storage/config-paths'
+import { appendSessionMessage } from './session-tree'
 import {
   buildSdkEnv,
   decryptApiKey,
@@ -392,7 +393,7 @@ export function recordChannelSwitch(record: {
   })
   // 用户可见系统行（与 T1 [reconcile] 同一呈现模式：ChatPanel 剥前缀渲染为胶囊，
   // 回访恢复时从磁盘加载可见）；[decision] 行按约定不进聊天流，用户面在 decisions.md
-  appendJsonLine(getAgentSessionPath(record.context.sessionId), {
+  appendSessionMessage(record.context.sessionId, {
     role: 'system',
     content: [{ type: 'text', text: `[channel-switch] 渠道「${fromName}」${describeTrigger(record)}，已自动切换到备用渠道「${record.to.channel.name}」重试` }],
     timestamp: Date.now(),

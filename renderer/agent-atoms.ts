@@ -358,6 +358,20 @@ export function setupGlobalAgentListeners(): () => void {
       ])
     }
 
+    // steer_injected（P0-1 运行中转向，2026-09-08）：用户中途补充已在工具批间注入——
+    // 回执气泡（对齐 queue_dropped 红泡模式：事件驱动、会话消息流内）。事件也会落入
+    // streamState.events（default 归约安全，过程视图按类型过滤未知事件零渲染）。
+    if (event.type === 'steer_injected') {
+      store.set(agentMessagesFamily(event.session_id), (previous) => [
+        ...previous,
+        {
+          role: 'system',
+          content: [{ type: 'text', text: '已注入，将于下一轮生效' }],
+          timestamp: Date.now(),
+        },
+      ])
+    }
+
     // 会话追踪：新出现的 session_id 追加到 agentSessionsAtom（已有索引的会话保持不变）
     store.set(agentSessionsAtom, (previous) => {
       if (previous.some((item) => item.session_id === event.session_id)) return previous
