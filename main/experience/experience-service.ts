@@ -2,7 +2,9 @@ import { existsSync, mkdirSync, readFileSync, appendFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { getExperienceIndexPath, getGeneratedProjectsDir } from '../../storage/config-paths'
-import {
+import { trackAnalytics } from '../platform-services'
+import { cardThreatensProtectedSurface } from './self-cert-guard'
+import { cardGovernance,
   EXPERIENCE_GOVERNANCE,
   computeFingerprint,
   experienceEnabled,
@@ -154,8 +156,10 @@ export async function registerCandidateCard(card: ExperienceCard): Promise<Exper
 }
 
 /** 入册内核：指纹窗口折叠 / **跨项目** recurrence 合并（seen_projects 单一事实源，
- * 同项目重复观测不重复计数，幂等）/ 新卡落盘。 */
-async function registerCore(card: ExperienceCard): Promise<ExperienceCard> {
+ * 同项目重复观测不重复计数，幂等）/ 新卡落盘。C1（2026-09-09）：所有注册路径必经
+ * 此处——新卡统一补治理默认值（governance 缺失时按 cardGovernance 规则派生，单点）。 */
+async function registerCore(rawCard: ExperienceCard): Promise<ExperienceCard> {
+  const card: ExperienceCard = rawCard.governance ? rawCard : { ...rawCard, governance: cardGovernance(rawCard) }
   const now = Date.now()
   const existing = findSameFingerprint(card.fingerprint, card.kind)
   if (existing) {
@@ -334,6 +338,8 @@ export interface InjectionQuery {
   include_stale?: boolean
   limit?: number
   budget_chars?: number
+  /** 曝光日志面标签（C5）：调用方标明注入面（如 'judge_checklist'）；缺省 'generic' */
+  surface?: string
 }
 
 function keywordOverlap(hint: string | undefined, card: ExperienceCard): number {
@@ -391,19 +397,51 @@ export async function selectForInjection(query: InjectionQuery): Promise<Experie
       .filter((c) => query.include_stale || !isStale(c, now))
       .filter((c) => matchesFilters(c, query))
       .sort((a, b) => relevanceScore(b, query, now) - relevanceScore(a, query, now) || b.updated_at - a.updated_at)
+    // C4 自证防护（2026-09-09）：教唆绕过受保护面的卡不得进入注入面（拦注入不删卡，fail-safe）
+    const guarded = candidates.filter((c) => {
+      const threatens = cardThreatensProtectedSurface(c)
+      if (threatens) console.warn(`${LOG} [self-cert-guard] 卡 ${c.id}（${c.tag}）命中绕过指令模式，已拦出注入面`)
+      return !threatens
+    })
     const picked: ExperienceCard[] = []
     let used = 0
-    for (const card of candidates) {
+    for (const card of guarded) {
       const cost = cardRenderCost(card)
       if (used + cost > budget) break // 整条取舍
       picked.push(cloneCard(card))
       used += cost
       if (picked.length >= limit) break
     }
+    recordExposure(query.surface ?? 'generic', candidates, guarded, picked)
     return picked
   } catch (error) {
     console.warn(`${LOG} select failed, empty list:`, (error as Error)?.message)
     return []
+  }
+}
+
+/**
+ * 曝光日志（C5，2026-09-09）：每次注入面调用落一条 analytics——可检索集/命中集/实际注入
+ * （id+状态+schema 版本）。「没效果」从此可区分 内容无效 / 没检索到 / 被拦。fire-and-forget，
+ * 失败静默（曝光日志不能反向阻断注入）。
+ */
+function recordExposure(surface: string, retrievable: ExperienceCard[], matched: ExperienceCard[], injected: ExperienceCard[]): void {
+  try {
+    trackAnalytics({
+      request_id: `exp-exposure-${Date.now()}`,
+      event: {
+        event_type: 'experience_exposure',
+        payload: {
+          surface,
+          retrievable: retrievable.slice(0, 20).map((c) => ({ id: c.id, status: c.status, tag: c.tag })),
+          matched: matched.slice(0, 20).map((c) => c.id),
+          injected: injected.map((c) => ({ id: c.id, status: c.status, schema_version: c.schema_version, tag: c.tag })),
+        },
+        privacy_level: 'research_safe',
+      },
+    })
+  } catch {
+    // 静默：曝光失败不影响注入主链路
   }
 }
 

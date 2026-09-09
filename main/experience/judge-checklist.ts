@@ -36,6 +36,7 @@ export async function buildJudgeErrorPatternsSection(
   try {
     const cards = await selectForInjection({
       kind: 'anti_pattern',
+      surface: 'judge_checklist',
       limit: opts.limit ?? EXPERIENCE_GOVERNANCE.DEFAULT_INJECT_LIMIT,
       budget_chars: opts.budget_chars ?? 1200, // 审查段预算小于编程段（裁判 prompt 已有产物全文）
       context_hint: opts.context_hint,

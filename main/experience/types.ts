@@ -41,6 +41,40 @@ export type CardSourceType =
   | 'tools_unsupported'
   | 'timeout_interrupt'
 
+/** 治理扩展块（Phase 4 C1，2026-09-09，P2 稿 §3 C1）：适用边界+机制假设+三层验证证据+回滚条件。全可选，旧卡零迁移（读侧经 cardGovernance() 归一化）。 */
+export interface CardGovernance {
+  /** 适用范围：taskTypes 缺省 ['*'] 不限；modelVersions/environmentVersions 记提取时环境供迁移验证对照 */
+  scope: { taskTypes: string[]; modelVersions?: string[]; environmentVersions?: string[] }
+  /** 作用机制假设：为什么有效（不是「上次成功了」）；缺省由归因腿结果/能力描述派生 */
+  hypothesis: string
+  /** 不适用条件（负例验证的边界声明） */
+  exclusions: string[]
+  /** 机制/迁移/负例三层验证报告 id（C2 晋升门槛消费；缺省 [] = 未做迁移验证，fail-closed 不升 active） */
+  validationReportIds: string[]
+  /** 撤销/回滚条件 */
+  rollbackConditions: string[]
+}
+
+/**
+ * 读侧治理归一化（C1 存量兼容）：旧卡无 governance 时按同规则派生默认值，不迁移不改写。
+ * hypothesis 派生：anti_pattern → root_cause.description（归因腿结果，P2 稿口径）退 symptom；
+ * pattern → capability。写入侧（error-card envelope / ref-ui-source）周同一函数产新卡默认值。
+ */
+export function cardGovernance(card: ExperienceCard): CardGovernance {
+  if (card.governance) return card.governance
+  const hypothesis =
+    card.kind === 'anti_pattern'
+      ? (card.body.root_cause.description || card.body.symptom || '').slice(0, 200)
+      : (card.body.capability || '').slice(0, 200)
+  return {
+    scope: { taskTypes: ['*'] },
+    hypothesis,
+    exclusions: [],
+    validationReportIds: [],
+    rollbackConditions: [],
+  }
+}
+
 export interface CardEnvelope {
   /** 唯一标识：node crypto.randomUUID()（替代 nanoid(21)，零新依赖） */
   id: string
@@ -85,6 +119,8 @@ export interface CardEnvelope {
     times_matched: number
     false_positive_count: number
   }
+  /** 治理扩展（C1，可选——旧卡缺失时读侧 cardGovernance() 归一化） */
+  governance?: CardGovernance
 }
 
 // =========================================================================
