@@ -97,8 +97,10 @@ for (const seed of args.seeds) {
     console.log(`[${stamp()}] ${seed}: ${done}/${args.n}，跑 #${done + 1}`)
     try {
       execSync(
-        `${envPrefix ? envPrefix + ' ' : ''}node bench/harness/l1-run.mjs --seed ${seed} --mode quick --timeout-min 30 --label ${args.label}-${done + 1}${args.promptsDir ? ` --prompts-dir "${args.promptsDir}"` : ''}`,
-        { cwd: root, stdio: 'inherit', timeout: 40 * 60_000 },
+        `node bench/harness/l1-run.mjs --seed ${seed} --mode quick --timeout-min 30 --label ${args.label}-${done + 1}${args.promptsDir ? ` --prompts-dir "${args.promptsDir}"` : ''}`,
+        // Windows 兼容（2026-09-09）：POSIX 风格 `K=V cmd` 前缀在 cmd.exe 下报「不是内部或外部命令」；
+        // 改用 options.env 传递（跨平台），l1-run 子进程同时需要父 env（PROMA_HOME/渠道等）。
+        { cwd: root, stdio: 'inherit', timeout: 40 * 60_000, env: { ...process.env, ...args.env } },
       )
     } catch (error) {
       console.error(`[${stamp()}] ${seed} #${done + 1} 失败（继续下一个）：${String(error.message).slice(0, 200)}`)
