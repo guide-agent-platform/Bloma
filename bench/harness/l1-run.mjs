@@ -38,8 +38,8 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdir
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { collectDocuments, collectSession, paths, readProjectIndex, summarizeAnalytics } from './collector.mjs'
-import { computeFlags, computeProjectMetrics } from './metrics.mjs'
+import { collectArtifacts, collectAssistantIntegrity, collectDocuments, collectSession, paths, readProjectIndex, summarizeAnalytics } from './collector.mjs'
+import { computeExtendedMetrics, computeFlags, computeProjectMetrics } from './metrics.mjs'
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url))
 const seedsFile = join(repoRoot, 'bench', 'tasks', 'seed-v0.json')
@@ -174,12 +174,15 @@ function buildEvidence(promaHome, projectId, sessionId) {
   const analyticsEvents = readJsonLines(join(p.workspace, 'analytics.jsonl'))
     .filter((e) => e.project_id === projectId || e.payload?.project_id === projectId)
   const project = readProject(promaHome, projectId)
-  // 与 scan.mjs 同构：analytics 为 collector 摘要对象（L0/L1 指标同口径）
+  const projectRoot = findProjectRoot(promaHome, projectId)
+  // 与 scan.mjs 同构：analytics 为 collector 摘要对象（L0/L1 指标同口径）+ 指标扩容数据源
   return {
     project,
     session: collectSession(sessionId, promaHome),
     docs: collectDocuments(projectId, promaHome),
     analytics: summarizeAnalytics(analyticsEvents, projectId),
+    artifacts: collectArtifacts(projectRoot),
+    assistantIntegrity: collectAssistantIntegrity(sessionId, promaHome),
     analyticsEvents,
   }
 }
@@ -290,8 +293,8 @@ async function main() {
   const collect = (chunk) => { mainLogs.push(String(chunk)); if (mainLogs.length > 600) mainLogs.shift() }
   child.stdout?.on('data', collect)
   child.stderr?.on('data', collect)
-  const dumpMainLogs = (tag) => { mkdirSync(runsRoot, { recursive: true }); writeFileSync(join(runsRoot, 'main.log'), `[${tag}]
-${mainLogs.join('')}`); console.error(`[l1] 主进程日志已落 ${join(runsRoot, 'main.log')}`) }
+  const dumpMainLogs = (tag) => { mkdirSync(runDir, { recursive: true }); writeFileSync(join(runDir, 'main.log'), `[${tag}]
+${mainLogs.join('')}`); console.error(`[l1] 主进程日志已落 ${join(runDir, 'main.log')}`) }
   log({ event: 'electron-up' })
 
   // 渠道 key 注入：L1 实例重存明文（当前实例 safeStorage 加密，后续可解）
@@ -468,6 +471,7 @@ ${mainLogs.join('')}`); console.error(`[l1] 主进程日志已落 ${join(runsRoo
     } catch { /* 沙箱未起时无副作用 */ }
 
     const evidence = buildEvidence(promaHome, projectId, sessionId)
+    evidence.terminal = terminal
     const projectRootDir = findProjectRoot(promaHome, projectId)
     const artifacts = projectRootDir && existsSync(projectRootDir) ? hashArtifacts(projectRootDir) : []
     const channelsFingerprint = (() => {
@@ -486,7 +490,7 @@ ${mainLogs.join('')}`); console.error(`[l1] 主进程日志已落 ${join(runsRoo
       },
       'run.log': audit.map((e) => `${e.t} ${e.event}${e.detail ? `｜${e.detail}` : ''}`).join('\n'),
       'evidence.json': evidence,
-      'metrics.json': { flags: computeFlags(evidence), metrics: computeProjectMetrics(evidence) },
+      'metrics.json': { flags: computeFlags(evidence), metrics: computeProjectMetrics(evidence), extended: computeExtendedMetrics(evidence) },
       'events.jsonl': (evidence.analyticsEvents || []).map((e) => JSON.stringify(e)).join('\n'),
       'session-raw.jsonl': existsSync(join(promaHome, 'agent-sessions', `${sessionId}.jsonl`))
         ? readFileSync(join(promaHome, 'agent-sessions', `${sessionId}.jsonl`), 'utf8') : '(missing)',
@@ -494,10 +498,12 @@ ${mainLogs.join('')}`); console.error(`[l1] 主进程日志已落 ${join(runsRoo
     })
 
     const s = evidence.analytics
+    const ext = computeExtendedMetrics(evidence)
     console.log('\n===== L1 run 摘要 =====')
     console.log(`seed=${seed.id} terminal=${terminal.kind}@${terminal.stage}`)
     console.log(`turns=${s.lastLoopTurns ?? '-'} tools=${s.totalToolCalls ?? '-'} repairs=${s.repairRounds} mvpDelivered=${s.mvpDelivered}`)
     console.log(`testCompleted=${s.testCompleted ? `${s.testCompleted.round}:${s.testCompleted.total ?? '?'}total/${s.testCompleted.failed}failed` : 'none'}`)
+    console.log(`capRetention=${ext.coreCapabilityRetention} leak=${ext.protocolLeakRate.toFixed(3)} empty=${ext.emptyBodyRate.toFixed(3)} violation=${ext.firstConstraintViolation.violated ? 'YES' : 'no'} tokens=${ext.effectiveDeliveryTokens ?? '-'}`)
     console.log(`archive=${runDir}`)
   } finally {
     await app.close().catch(() => undefined)

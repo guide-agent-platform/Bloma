@@ -126,3 +126,63 @@ export function computeProjectMetrics(evidence) {
     riskFlags: flags.filter((f) => f.severity !== 'info').length,
   }
 }
+
+/**
+ * 指标扩容（P0 Phase 0.5，2026-09-09）：8→14 项。新增六项全部确定性口径（零 LLM），
+ * L0（历史扫描）与 L1（在线 run 档案）同源同口径：
+ *
+ *  9  firstConstraintViolation  首次约束违规（咨询B）：产物扫描——localStorage 作唯一数据源
+ *     （无 serverRoutes/apiLlm 时 localStorage>0，即 435ca2c 渠道绕过特征）+ 密钥入码
+ * 10 coreCapabilityRetention    核心能力保留率（咨询B）：AI 意图任务中，PRD 需求保留 AI 语义
+ *     且产物有真实 AI 接入痕迹（apiLlm/aiMock 命中）的比例；非 AI 任务记 'n/a'
+ * 11 protocolLeakRate           协议泄漏率（咨询B）：assistant 正文含工具协议原文的轮次占比
+ *     （<tool_calls> 字面 / DSML 竖线标记 / 裸工具 JSON 块；与 learnings 过滤、output-integrity 同源）
+ * 12 effectiveDeliveryTokens    有效交付 token（咨询B）：终态 converged 且 mvpDelivered 时
+ *     agent_loop_completed 的 input_tokens 合计；未收敛记 null（无效交付不计入均值）
+ * 13 emptyBodyRate              空正文率（咨询B）：无 text 且无 tool_use 的 assistant 轮占比
+ *     （思考耗尽/空响应特征）
+ * 14 wrongTriggerCount          错误触发计数（咨询C）：策略/经验注入到不适用场景——P0a 口径为
+ *     会话 user 轮中【历史经验】/【常见错法】注入段计数（开关 off 时恒 0，记录基线占位）
+ */
+export function computeExtendedMetrics(evidence) {
+  const an = evidence?.analytics || {}
+  const artifacts = evidence?.artifacts || { hits: {} }
+  const integrity = evidence?.assistantIntegrity || { assistantTurns: 0, protocolLeakTurns: 0, emptyTextTurns: 0 }
+  const sessionText = (evidence?.session?.userMessages || []).map((u) => u.text).join('|')
+  const prdText = (evidence?.docs?.prd?.requirements || []).map((r) => r.description).join('|')
+  const hits = artifacts.hits || {}
+
+  // 9 首次约束违规
+  const violations = []
+  if ((hits.localStorage || 0) > 0 && (hits.serverRoutes || 0) === 0 && (hits.apiLlm || 0) === 0) {
+    violations.push({ code: 'localstorage-only', detail: `产物命中 localStorage×${hits.localStorage} 且无 serverRoutes/apiLlm——数据留存可能被前端存储绕过（435ca2c 渠道绕过特征）` })
+  }
+  if ((hits.secretPattern || 0) > 0) violations.push({ code: 'secret-in-code', detail: `产物源码疑似密钥模式×${hits.secretPattern}` })
+
+  // 10 核心能力保留
+  const wantsAI = AI_INTENT_RE.test((sessionText + '|' + (evidence?.docs?.prd?.positioning || '')).trim())
+  const keptInPrd = AI_CAPABILITY_RE.test(prdText)
+  const wiredInArtifacts = (hits.apiLlm || 0) > 0 || (hits.aiMock || 0) > 0
+  const retention = wantsAI ? (keptInPrd && wiredInArtifacts ? 1 : keptInPrd ? 0.5 : 0) : 'n/a'
+
+  // 11 协议泄漏率 / 13 空正文率
+  const turnDen = Math.max(integrity.assistantTurns, 1)
+
+  // 12 有效交付 token
+  const tokens = (an.turnTokens || []).reduce((sum, t) => sum + (Number(t.in) || 0), 0)
+  const converged = evidence?.terminal?.kind === 'converged' || ['ready', 'completed'].includes(evidence?.project?.stage || '')
+  const effective = converged && an.mvpDelivered ? tokens : null
+
+  // 14 错误触发（P0a 占位：注入段计数，人工判定相关性）
+  const injections = (sessionText.match(/【(历史经验|常见错法)[^】]*】/g) || []).length
+
+  return {
+    firstConstraintViolation: { violated: violations.length > 0, details: violations },
+    coreCapabilityRetention: retention,
+    protocolLeakRate: integrity.protocolLeakTurns / turnDen,
+    effectiveDeliveryTokens: effective,
+    emptyBodyRate: integrity.emptyTextTurns / turnDen,
+    wrongTriggerCount: injections,
+    degenerateTurns: integrity.degenerateTurns || 0,
+  }
+}

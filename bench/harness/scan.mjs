@@ -12,8 +12,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { findProjHome, paths, readProjectIndex, findSessionId, collectSession, collectDocuments, summarizeAnalytics } from './collector.mjs'
-import { computeProjectMetrics } from './metrics.mjs'
+import { findProjHome, paths, readProjectIndex, findSessionId, collectSession, collectDocuments, collectArtifacts, collectAssistantIntegrity, summarizeAnalytics } from './collector.mjs'
+import { computeExtendedMetrics, computeProjectMetrics } from './metrics.mjs'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const args = new Set(process.argv.slice(2))
@@ -68,8 +68,10 @@ async function main() {
     const session = collectSession(sid, home)
     const docs = collectDocuments(p.id, home)
     const analytics = summarizeAnalytics(analyticsByProject.get(p.id) || [], p.id)
-    const evidence = { project: p, docs, analytics, session }
+    const projectEntry = (JSON.parse(readFileSync(join(home, 'projects.json'), 'utf8')).projects || []).find((x) => x.project_id === p.id)
+    const evidence = { project: p, docs, analytics, session, artifacts: collectArtifacts(projectEntry?.root_path), assistantIntegrity: collectAssistantIntegrity(sid, home) }
     const m = computeProjectMetrics(evidence)
+    m.extended = computeExtendedMetrics(evidence)
     const seed = seedByProject.get(p.id)
     m.seed = seed ? { id: seed.id, category: seed.category, title: seed.title, expectation: seed.expectation, knownIssue: seed.knownIssue } : null
     rows.push(m)

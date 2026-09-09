@@ -69,6 +69,26 @@ node bench/harness/l1-run.mjs --seed seed-b-crud-calculator --mode quick --timeo
   requirement_confirm_card / prd_review / prd_confirm）；生成中阶段（generating_mvp/testing/…）不碰卡。
 - 脚本用户行为基线：澄清按 seed.clarificationPath 匹配（失配选首个非让渡项，耗尽让渡）；
   需求确认=全量勾选；PRD 审查退回=override 忽略；草图=accepted。每次应答落 run.log 审计。
+- 汇总报告：`node bench/harness/l1-report.mjs [--label b0]` → reports/l1-report-*.md/.json（按 seed 报分布，不报最好）。
+
+## 指标矩阵（14 项，Phase 0.5 扩容）
+
+| # | 指标 | 口径（全确定性，L0/L1 同源） |
+|---|---|---|
+| 1 | e2e 成功率 | 终态 converged（ready/completed）/ 总 run |
+| 2 | 首轮成功率 | repairRounds=0 且 converged |
+| 3 | 成本-轮数 | agent_loop_completed turns（均值/中位/p95/逐 run） |
+| 4 | 成本-耗时 | run 起止时间 |
+| 5 | 修复轮数 | repair_round_completed 计数 |
+| 6 | judge 判定 | judge_verdict pass/fail |
+| 7 | GWT 运行 | run_gwt_tests 计数 + test_completed 事件（round/total/failed） |
+| 8 | 风险标记数 | computeFlags 非 info 计数 |
+| 9 | 首次约束违规 | 产物扫描：localStorage 唯一数据源（435ca2c 渠道绕过特征）+ 密钥入码模式 |
+| 10 | 核心能力保留率 | AI 意图任务：PRD 保留 AI 语义且产物有接入痕迹=1；仅 PRD=0.5；蒸馏=0；非 AI=n/a |
+| 11 | 协议泄漏率 | assistant 正文含工具协议原文（<tool_calls>/DSML/裸工具 JSON）轮次占比 |
+| 12 | 有效交付 token | converged 且 mvpDelivered 的 input_tokens 合计（未收敛不计入均值） |
+| 13 | 空正文率 | 无 text 且无 tool_use 的 assistant 轮占比（思考耗尽特征） |
+| 14 | 错误触发计数 | 会话【历史经验】/【常见错法】注入段计数（开关 off 恒 0；P0a 占位口径，相关性人工校准） |
 
 ## 纪律
 

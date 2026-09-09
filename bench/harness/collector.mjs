@@ -10,7 +10,7 @@
  *  - 路径常量可用 BLOMA_PROMA_HOME 覆盖（默认 ~/.proma）。
  */
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -193,4 +193,76 @@ export function summarizeAnalytics(events, projectId) {
     mvpDelivered: events.some((e) => e.event_type === 'mvp_delivered'),
     turnTokens: loopCompleted.map((e) => ({ turns: e.payload?.turns, in: e.payload?.input_tokens })),
   }
+}
+
+/** 产物源码特征扫描（P0 指标扩容：首次约束违规/核心能力保留的确定性口径）。
+ *  只读产物目录（root_path），文本文件限 512KB/目录总量 8MB，返回命中特征计数而非原文。 */
+export function collectArtifacts(projectRoot) {
+  const out = { root: projectRoot, files: 0, bytes: 0, hits: {
+    localStorage: 0, serverRoutes: 0, apiLlm: 0, aiMock: 0, secretPattern: 0,
+  }, sourceSample: '' }
+  if (!projectRoot || !existsSync(projectRoot)) return out
+  const TEXT_EXT = /\.(js|mjs|cjs|html|css|json|md)$/i
+  let budget = 8 * 1024 * 1024
+  const patterns = [
+    ['localStorage', /localStorage\.(get|set|remove)Item|window\.localStorage/g],
+    ['serverRoutes', /server\/routes|\/api\/[a-z][\w-]*/g],
+    ['apiLlm', /\/api\/llm|BLOMA_APP_LLM/g],
+    ['aiMock', /\?mock=1|mock:\s*true|模拟\s*AI|模拟智能/g],
+    ['secretPattern', /sk-[A-Za-z0-9]{16,}|api[_-]?key\s*[:=]\s*['"][A-Za-z0-9_-]{16,}['"]/gi],
+  ]
+  const walk = (dir) => {
+    if (budget <= 0) return
+    for (const name of readdirSync(dir)) {
+      if (budget <= 0) return
+      if (name === 'node_modules' || name === '.git' || name === 'dist') continue
+      const abs = join(dir, name)
+      const st = statSync(abs)
+      if (st.isDirectory()) { walk(abs); continue }
+      if (!TEXT_EXT.test(name) || st.size > 512 * 1024) continue
+      out.files += 1
+      out.bytes += st.size
+      budget -= st.size
+      const text = readFileSync(abs, 'utf8')
+      for (const [key, re] of patterns) {
+        const m = text.match(re)
+        if (m) out.hits[key] += m.length
+      }
+      if (out.sourceSample.length < 4000 && /\.(js|html)$/.test(name)) {
+        out.sourceSample += `
+/* ${name} */
+` + text.slice(0, 1200)
+      }
+    }
+  }
+  try { walk(projectRoot) } catch { /* 产物目录读取异常不阻断采集 */ }
+  out.sourceSample = out.sourceSample.slice(0, 4000)
+  return out
+}
+
+/** 助手轮完整性扫描（P0 指标扩容：协议泄漏率/空正文率的确定性口径）。
+ *  - protocolLeak：正文含工具调用协议原文/内部标记（<tool_calls> 字面、DSML 竖线标记、裸 JSON 工具协议块）
+ *  - emptyText：无任何 text 块且无 tool_use（思考耗尽/空响应特征；纯工具轮不算）
+ *  与 learnings 脏数据过滤（8ebee31）、output-integrity（7d93f1e）的检测词表同源。 */
+export function collectAssistantIntegrity(sessionId, home = findProjHome()) {
+  const file = join(paths(home).sessions, `${sessionId}.jsonl`)
+  const out = { sessionId, assistantTurns: 0, protocolLeakTurns: 0, emptyTextTurns: 0, degenerateTurns: 0, leakSamples: [] }
+  if (!sessionId || !existsSync(file)) return out
+  for (const e of readJsonLines(file)) {
+    if (e.role !== 'assistant') continue
+    out.assistantTurns += 1
+    const blocks = Array.isArray(e.content) ? e.content : []
+    const texts = blocks.filter((b) => b?.type === 'text' && typeof b.text === 'string').map((b) => b.text)
+    const hasToolUse = blocks.some((b) => b?.type === 'tool_use')
+    const joined = texts.join('')
+    if (/<![a-z_]*tool[_ ]?call|<｜|tool_use\s*:\s*\{|"name"\s*:\s*"write_file"\s*,\s*"input"/.test(joined)) {
+      out.protocolLeakTurns += 1
+      if (out.leakSamples.length < 3) out.leakSamples.push(joined.slice(0, 160))
+    }
+    if (!joined.trim() && !hasToolUse) out.emptyTextTurns += 1
+    // 退行重复（stream-collapse 同源特征：单元 ≤8 字符连续重复 ≥8 次）
+    const unit = joined.length > 0 ? joined.slice(0, 8) : ''
+    if (unit && unit.repeat(8).length <= joined.length && joined.split(unit).length > 9) out.degenerateTurns += 1
+  }
+  return out
 }
