@@ -955,3 +955,61 @@ describe('W2-F4：run_gwt_tests 修复比较与计数器', () => {
     expect((ctx.state.last_gwt_failures ?? []).length).toBeGreaterThan(0)
   })
 })
+
+describe('W3-D1/D2：run_preflight 收口预检', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalPreflight = process.env.BLOMA_PREFLIGHT
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-tools-w3-'))
+    setBrowserGwtDisabledForTests(true)
+    delete process.env.BLOMA_PREFLIGHT
+  })
+  afterEach(() => {
+    restorePromaHome(originalPromaHome)
+    setBrowserGwtDisabledForTests(false)
+    clearSandboxRuntimeForTests()
+    if (originalPreflight === undefined) delete process.env.BLOMA_PREFLIGHT
+    else process.env.BLOMA_PREFLIGHT = originalPreflight
+  })
+
+  it('开关 off 不注册（字节级现状）；on 注册 run_preflight', () => {
+    const project = createProject({ request_id: 'req-w3-reg', mode: 'quick' })
+    const off = buildAgentTools({ projectId: project.project_id }).map((t) => t.name)
+    expect(off).not.toContain('run_preflight')
+    process.env.BLOMA_PREFLIGHT = '1'
+    const on = buildAgentTools({ projectId: project.project_id }).map((t) => t.name)
+    expect(on).toContain('run_preflight')
+  })
+
+  it('预检执行：按阶段报告（GWT 失败/契约豁免/UI 探针留痕/安全），preflight_passed=false 留 loop 内修', async () => {
+    process.env.BLOMA_PREFLIGHT = '1'
+    const project = createProject({ request_id: 'req-w3-run', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+    const tools = buildAgentTools({ projectId: project.project_id })
+    const ctx = ctxFor(project.project_id)
+    ctx.state.preview_url = 'http://127.0.0.1:1' // 不可达 → GWT 稳定失败、UI 探针 unavailable
+    const result = await byName(tools, 'run_preflight').execute({}, ctx)
+    expect(result.output).toContain('【收口预检】')
+    expect(result.output).toContain('① GWT 行为断言：失败')
+    expect(result.output).toContain('② API 契约：豁免')
+    expect(result.output).toContain('③ 产物 UI 审计：未执行')
+    expect(result.output).toContain('④ 安全扫描')
+    expect(result.output).toContain('收口预检未通过')
+    expect(result.output).toContain('留在当前循环内修复')
+    expect(ctx.state.preflight_passed).toBe(false)
+    expect(ctx.state.gwt_all_passed).toBe(false)
+    // 失败快照与计数口径与 run_gwt_tests 一致（终验 source 分类判据）
+    expect(ctx.state.gwt_runs).toBe(1)
+    expect((ctx.state.last_gwt_failures ?? []).length).toBeGreaterThan(0)
+  })
+
+  it('无预览时明确前置（先 run_preview），不误判', async () => {
+    process.env.BLOMA_PREFLIGHT = '1'
+    const project = createProject({ request_id: 'req-w3-nopv', mode: 'quick' })
+    const tools = buildAgentTools({ projectId: project.project_id })
+    const result = await byName(tools, 'run_preflight').execute({}, ctxFor(project.project_id))
+    expect(result.isError).toBe(true)
+    expect(result.output).toContain('run_preview')
+  })
+})

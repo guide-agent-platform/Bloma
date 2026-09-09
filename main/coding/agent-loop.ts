@@ -47,6 +47,9 @@ export interface AgentLoopToolState {
    * interface_spec 的项目 false（跑了 run_api_contract_tests 全过才 true），无契约
    * 项目 true（豁免）。确定性由宿主维护，不靠模型自报；仅 BLOMA_API_TOOL=on 时进收口判定。 */
   api_all_passed: boolean
+  /** W3-D1（咨询 D2，2026-09-09）：收口预检通过位（run_preflight 全阶段过才 true）。
+   * 仅 BLOMA_PREFLIGHT=on 时进收口判定；undefined=未跑。 */
+  preflight_passed?: boolean
   /** D3 轻量：上一次 run_gwt_tests 的失败场景名集合（本轮对比标 [新增]/[持续]，防重复修同一失败） */
   last_gwt_failures?: string[]
   /** W2-F4：run_gwt_tests 执行计数（终验 source 分类的「loop 是否自测过」判据）；无开关常更（纯内部状态） */
@@ -633,6 +636,12 @@ export function writeGuardEnabled(): boolean {
   return process.env.BLOMA_WRITE_GUARD === '1' || process.env.BLOMA_WRITE_GUARD === 'true'
 }
 
+/** W3-D1/D2 开关（咨询 D2《验证分层与收口预检》）：run_preflight 工具注册 + 收口判定升级为
+ *  「预检通过」+ prompt 工作方式/终止条件全验证面。缺省 off=字节级现状。 */
+export function preflightEnabled(): boolean {
+  return process.env.BLOMA_PREFLIGHT === '1' || process.env.BLOMA_PREFLIGHT === 'true'
+}
+
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
   // P0-1 steer（运行中转向，2026-09-08）：只主 loop（depth 0）开放。进入即 mark——
   // IPC steer 通道据此判定可注入；finally 里先 drain 残余（未及批间注入的，落 JSONL 保真；
@@ -955,7 +964,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
 
     // 收口判定（2026-08-29 线上案例 eb900c57）：GWT 全过 + 安全扫描通过 = 活已干完，
     // 下一轮起停用全部工具 + system 追加收口指令，逼模型交卷而非继续冗余验证。
-    wrapUp = ctx.state.gwt_all_passed && ctx.state.security_all_passed && (!loopApiToolEnabled() || ctx.state.api_all_passed)
+    wrapUp = ctx.state.gwt_all_passed && ctx.state.security_all_passed && (!loopApiToolEnabled() || ctx.state.api_all_passed) && (!preflightEnabled() || ctx.state.preflight_passed === true)
 
     consecutiveBudgetStallTurns = budgetStallThisTurn ? consecutiveBudgetStallTurns + 1 : 0
     if (consecutiveBudgetStallTurns >= BUDGET_STALL_TURNS) {

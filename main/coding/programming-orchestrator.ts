@@ -40,7 +40,7 @@ import { assertToolAllowed } from '../permission-service'
 import { recordDecision } from '../decision-log'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from '../recovery-service'
 import { readPrimaryIntent, recordSessionActivity } from '../session-service'
-import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../agent-loop'
+import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, preflightEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../agent-loop'
 import { isDegenerateText } from './output-integrity'
 import { checkApiContract } from './api-contract'
 import { buildAgentTools } from '../agent-tools'
@@ -1494,10 +1494,12 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     '逐功能项实现：write_file/edit_file 写代码 → run_preview 确认可运行 → ' +
     'run_gwt_tests 对照行为断言 → 失败先 read_file/grep 定位再修 → 全部 P0 断言通过后 ' +
     // D1（咨询 D，2026-09-09）：开关 on 时验证链补 API 契约（数据留存/接口类项目收口前必验）；
-    // off 保留原文（字节级现状）。
-    (loopApiToolEnabled()
-      ? 'run_api_contract_tests 验证接口契约（声明了 interface_spec 的项目）→ run_security_scan 确认无高危。'
-      : 'run_security_scan 确认无高危。'),
+    // W3-D1/D2：BLOMA_PREFLIGHT on 时验证链收口为 run_preflight 一次跑全部验证面；off 保留原文（字节级现状）。
+    (preflightEnabled()
+      ? 'run_preflight 收口预检（一次跑全部验证面：GWT 全量/API 契约/产物审计/安全）。'
+      : loopApiToolEnabled()
+        ? 'run_api_contract_tests 验证接口契约（声明了 interface_spec 的项目）→ run_security_scan 确认无高危。'
+        : 'run_security_scan 确认无高危。'),
     // P5 先读再改纪律（2026-09-04）：防凭记忆/凭 plan 推断文件现状（文件可能已被
     // 修复轮或上一迭代修改）；MVP 首跑无副作用（新文件不触发）；与 P3 plan 合同
     // 不冲突（plan 是参考，read 是事实）。
@@ -1516,9 +1518,12 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     ...(rulesRegistryEnabled() ? ['', renderRulesSection()] : []),
     '',
     // D1：开关 on 时终止条件升级为全验证面（GWT+API 契约+安全）；off 保留原文。
-    (loopApiToolEnabled()
-      ? '【终止条件】全部 P0 断言通过 + API 契约验证通过（声明了 interface_spec 的项目必须 run_api_contract_tests 全过；未声明则豁免）+ 安全扫描无高危，才输出完成总结（含做了什么、'
-      : '【终止条件】全部 P0 断言通过 + 安全扫描无高危，才输出完成总结（含做了什么、'),
+    // W3-D2：BLOMA_PREFLIGHT on 时收口条件=预检通过（GWT/API/产物审计/安全一次过）。
+    (preflightEnabled()
+      ? '【终止条件】run_preflight 收口预检全部通过（GWT 全量 + API 契约（声明了 interface_spec 的项目）+ 产物审计 + 安全扫描），才输出完成总结（含做了什么、'
+      : loopApiToolEnabled()
+        ? '【终止条件】全部 P0 断言通过 + API 契约验证通过（声明了 interface_spec 的项目必须 run_api_contract_tests 全过；未声明则豁免）+ 安全扫描无高危，才输出完成总结（含做了什么、'
+        : '【终止条件】全部 P0 断言通过 + 安全扫描无高危，才输出完成总结（含做了什么、'),
     '未解决的低优先级项）。若技术合同规划了多文件，收口前确认目标文件已覆盖（未写的文件须在旁白说明偏离原因）。' +
     '测试未全绿不得声称完成。',
     '',

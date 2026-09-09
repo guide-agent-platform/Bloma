@@ -13,8 +13,9 @@ import { planScenarios, scenarioName } from '../gwt-runner'
 import { decideWrite, estimateTokenCount } from '../usage-guard'
 import { runSecurityScan } from '../security-scan'
 import { checkApiContract } from './api-contract'
+import { runArtifactUiGate } from './artifact-ui-gate'
 import { readPrdBackplane } from '../document-engine'
-import { withAbort, loopApiToolEnabled, toolEvidenceEnabled, writeGuardEnabled, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../agent-loop'
+import { withAbort, loopApiToolEnabled, toolEvidenceEnabled, writeGuardEnabled, preflightEnabled, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../agent-loop'
 import {
   NET_FETCH_DEFAULT_CHARS,
   NET_FETCH_MAX_BYTES,
@@ -289,15 +290,17 @@ function _fileRevisions(ctx: ToolContext): Map<string, string> {
  * D2：验证状态行（宿主维护，不靠 LLM 自报）——「已验证什么 / 尚缺什么」。
  * 仅 BLOMA_TOOL_EVIDENCE=on 时被消费；返回空串表示未启用（字节级现状）。
  */
-export function validationStateLine(state: { gwt_all_passed: boolean; security_all_passed: boolean; api_all_passed: boolean }): string {
+export function validationStateLine(state: { gwt_all_passed: boolean; security_all_passed: boolean; api_all_passed: boolean; preflight_passed?: boolean }): string {
   if (!toolEvidenceEnabled()) return ''
   const done: string[] = []
   const missing: string[] = []
   ;(state.gwt_all_passed ? done : missing).push('行为断言 GWT')
   ;(state.api_all_passed ? done : missing).push('API 契约')
   ;(state.security_all_passed ? done : missing).push('安全扫描')
+  // W3-D2：预检开启时收口面增加 run_preflight（未跑/未过都在「尚缺」）
+  if (preflightEnabled()) (state.preflight_passed ? done : missing).push('收口预检 run_preflight')
   if (missing.length === 0) return '\n验证状态：行为断言/ API 契约/安全扫描均已通过——全部验证面通过，可输出完成总结。'
-  return `\n验证状态：已通过=${done.length ? done.join('、') : '（无）'}；尚缺=${missing.join('、')}${loopApiToolEnabled() && !state.api_all_passed ? '（数据留存/接口类项目收口前必须 run_api_contract_tests 通过）' : ''}。`
+  return `\n验证状态：已通过=${done.length ? done.join('、') : '（无）'}；尚缺=${missing.join('、')}${loopApiToolEnabled() && !state.api_all_passed ? '（数据留存/接口类项目收口前必须 run_api_contract_tests 通过）' : ''}${preflightEnabled() && !state.preflight_passed ? '（收口前必须 run_preflight 全部通过）' : ''}。`
 }
 
 // =========================================================================
@@ -837,6 +840,99 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     },
   }
 
+  // W3-D1（咨询 D2《验证分层与收口预检》）：收口预检宿主工具——一次调用按依赖顺序跑全部
+  // 验证面（GWT 全量 → API 契约（有声明才验）→ 产物 UI 审计 → 安全扫描）。复用终验
+  // 同款实现（规则同源、执行独立：终验仍对冻结候选独立取证）；构建门禁不在 v0 预检面
+  // （需 skeleton 上下文，终验门禁保留）。收口判定消费 preflight_passed（agent-loop
+  // wrapUp）；失败留在 loop 内修（D5）——不退出重建修复卡。仅 BLOMA_PREFLIGHT=on 注册。
+  const run_preflight: AgentLoopTool = {
+    name: 'run_preflight',
+    description:
+      '收口预检：一次调用按依赖顺序跑全部验证面（GWT 行为断言全量 → API 契约（声明了才验）→ 产物 UI 审计 → 安全扫描），给出收口判定与逐阶段失败清单。收口（输出完成总结）前必须通过本预检；失败就留在当前循环内修复后重跑，不要带病宣布完成。',
+    input_schema: { type: 'object', properties: {} },
+    execute: async (_toolInput, ctx) => {
+      if (!ctx.state.preview_url) {
+        return { output: '还没有可用的预览地址。请先调用 run_preview 启动预览，再运行收口预检。', isError: true }
+      }
+      const lines: string[] = []
+      let allPassed = true
+
+      // 阶段 1：GWT 全量（与 run_gwt_tests 同源；同步维护修复预算/失败快照口径）
+      const gwt = await runGwtScenarios({ project_id: projectId, session_id: ctx.sessionId, preview_url: ctx.state.preview_url })
+      ctx.state.gwt_runs = (ctx.state.gwt_runs ?? 0) + 1
+      if (gwt.failed_count > 0) {
+        ctx.state.test_failed = true
+        ctx.state.gwt_all_passed = false
+        ctx.state.repair_round += 1
+        options.onRepairRound?.(ctx.state.repair_round)
+        ctx.state.last_gwt_failures = gwt.failure_summary.map((f) => f.scenario)
+        allPassed = false
+        lines.push(`① GWT 行为断言：失败（${gwt.failed_count}/${gwt.total_count}）`)
+        for (const failure of gwt.failure_summary.slice(0, 10)) lines.push(`  - ${failure.scenario}：${failure.reason}`)
+      } else {
+        ctx.state.gwt_all_passed = true
+        ctx.state.test_failed = false
+        ctx.state.edits_after_test_failure = 0
+        ctx.state.last_gwt_failures = []
+        lines.push(`① GWT 行为断言：通过（${gwt.passed_count}/${gwt.total_count}）`)
+      }
+
+      // 阶段 2：API 契约（无声明豁免；同 run_api_contract_tests 口径）
+      const endpoints = readPrdBackplane(projectId)?.interface_spec ?? []
+      if (endpoints.length === 0) {
+        ctx.state.api_all_passed = true
+        lines.push('② API 契约：豁免（interface_spec 为空）')
+      } else {
+        ctx.state.api_contract_runs = (ctx.state.api_contract_runs ?? 0) + 1
+        const apiFailures = await checkApiContract(ctx.state.preview_url, endpoints)
+        ctx.state.api_all_passed = apiFailures.length === 0
+        if (apiFailures.length > 0) {
+          allPassed = false
+          lines.push(`② API 契约：失败（${apiFailures.length}/${endpoints.length}）`)
+          for (const failure of apiFailures) lines.push(`  - ${failure.scenario}：${failure.reason}`)
+        } else {
+          lines.push(`② API 契约：通过（${endpoints.length} 个端点）`)
+        }
+      }
+
+      // 阶段 3：产物 UI 审计（L0 探针；探针不可用不判败只留痕——终验 L1 视觉审计仍独立）
+      try {
+        const gate = await runArtifactUiGate({ previewUrl: ctx.state.preview_url })
+        if (gate.failures.length > 0) {
+          allPassed = false
+          lines.push(`③ 产物 UI 审计：失败（${gate.failures.length}）`)
+          for (const failure of gate.failures.slice(0, 10)) lines.push(`  - ${failure.scenario}：${failure.reason}`)
+        } else if (gate.status === 'unavailable') {
+          lines.push(`③ 产物 UI 审计：未执行（${gate.note ?? '探针失败'}）——终验仍会独立探测`)
+        } else {
+          lines.push('③ 产物 UI 审计：通过')
+        }
+      } catch {
+        lines.push('③ 产物 UI 审计：未执行（探针异常）——终验仍会独立探测')
+      }
+
+      // 阶段 4：安全扫描（静态；同 run_security_scan）
+      const security = runSecurityScan({ project_id: projectId, root_path: findProject(projectId).root_path })
+      ctx.state.security_all_passed = security.passed
+      if (!security.passed) {
+        allPassed = false
+        lines.push(`④ 安全扫描：失败（${security.issues.length} 处命中）`)
+        for (const issue of security.issues.slice(0, 10)) lines.push(`  - ${issue.severity} ${issue.file}:${issue.line}——${issue.user_visible_summary}`)
+      } else {
+        lines.push('④ 安全扫描：通过')
+      }
+
+      ctx.state.preflight_passed = allPassed
+      const verdict = allPassed
+        ? '收口预检通过：全部验证面通过，可以输出完成总结（外部终验仍会独立复核）。'
+        : '收口预检未通过：留在当前循环内修复上述失败，修复后重新 run_preflight；不要带病宣布完成。'
+      return {
+        output: `【收口预检】\n${lines.join('\n')}\n${verdict}`,
+        detail: { preflight_passed: allPassed, gwt_failed: gwt.failed_count, security_passed: security.passed },
+      }
+    },
+  }
+
   // 主 agent（parent）专属委派协作工具集：M1 delegate_agent；M2 wait/get/stop；M3 answer/continue
   const delegate_agent: AgentLoopTool = {
     name: 'delegate_agent',
@@ -1118,6 +1214,8 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
   }
   // D1：API 契约验证工具按开关注册（off=工具面与现状字节级一致）
   const apiTools = loopApiToolEnabled() ? [run_api_contract_tests] : []
+  // W3-D1：收口预检按开关注册（主/实现角色；审查角色不收口不注入）
+  const preflightTools = preflightEnabled() ? [run_preflight] : []
 
   if (role === 'review') {
     // 审查角色（m-12）：话术承诺「不直接修改」，工具面同步收窄——去掉 write_file/
@@ -1138,6 +1236,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       run_gwt_tests,
       run_security_scan,
       ...apiTools,
+      ...preflightTools,
       ask_delegation_question,
     ]
   }
@@ -1152,6 +1251,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     run_gwt_tests,
     run_security_scan,
     ...apiTools,
+    ...preflightTools,
     delegate_agent,
     web_research,
     wait_for_delegations,

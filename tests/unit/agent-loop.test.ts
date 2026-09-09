@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { runAgentLoop, TOOL_WINDOW_ROUNDS, windowMessages, keepRecentTurns, estimateBlocksText, renderCheckpointRecoveryHeader, type AgentLoopInput, type AgentLoopTool, type AgentLoopTurnInfo, type AgentLoopCompactionInfo, type LoopCheckpointSnapshot, type ToolOutcome } from '../../main/agent-loop'
+import { runAgentLoop, TOOL_WINDOW_ROUNDS, windowMessages, keepRecentTurns, estimateBlocksText, renderCheckpointRecoveryHeader, type AgentLoopInput, type AgentLoopTool, type AgentLoopTurnInfo, type AgentLoopCompactionInfo, type LoopCheckpointSnapshot, type ToolContext, type ToolOutcome } from '../../main/agent-loop'
 import { estimateTokenCount } from '../../main/usage-guard'
 import { drainSteerQueue, enqueueSteer, pendingSteerCount, resetSteerQueuesForTests, STEER_WRAP_PREFIX, wrapSteerContent } from '../../main/steer-queue'
 import type { AgentEvent } from '../../shared/types'
@@ -1570,5 +1570,58 @@ describe('W2 E2+F1（咨询 D3/D4）：loop_checkpoint v0', () => {
     const compaction = snapshots.find((s) => s.trigger === 'compaction')
     expect(compaction).toBeDefined()
     expect(compaction!.validation.candidate_fingerprint).toMatch(/^fp-[0-9a-f]+-\d+$/)
+  })
+})
+
+describe('W3-D2：收口条件升级为预检通过（BLOMA_PREFLIGHT）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalPreflight = process.env.BLOMA_PREFLIGHT
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-w3-'))
+    delete process.env.BLOMA_PREFLIGHT
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+    if (originalPreflight === undefined) delete process.env.BLOMA_PREFLIGHT
+    else process.env.BLOMA_PREFLIGHT = originalPreflight
+  })
+
+  it('预检开启：全验证面（含 preflight_passed）置位后才收口停工具；预检未过不收口', async () => {
+    // finish 工具把 gwt/security 置 true 但不动 preflight —— 预检开关 on 时不得收口
+    const finish = (extraPreflight = false): AgentLoopTool => ({
+      name: 'finish',
+      description: '测试工具 finish',
+      input_schema: { type: 'object', properties: {} },
+      execute: async (_input, ctx) => {
+        ctx.state.gwt_all_passed = true
+        ctx.state.security_all_passed = true
+        ctx.state.api_all_passed = true
+        if (extraPreflight) ctx.state.preflight_passed = true
+        return { output: 'ok' }
+      },
+    })
+    const calls: Array<{ tools: unknown; system: string }> = []
+    const query: SDKQuery = async function* (_prompt, queryOptions) {
+      calls.push({ tools: queryOptions.tools, system: String((queryOptions.messages ?? [])[0]?.content ?? '') })
+      yield toolUseMessage(`t${calls.length}`, 'finish')
+      yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+    }
+    // on：preflight 未过 → 第二轮仍带工具（不收口）
+    process.env.BLOMA_PREFLIGHT = '1'
+    await runAgentLoop(baseInput({ query, tools: [finish()], maxTurns: 2, sessionId: 'session-w3-on' }))
+    expect(calls[1]!.tools).not.toHaveLength(0)
+    // off：gwt+security 过即收口（现状口径）→ 第二轮停用工具 + 收口指令
+    delete process.env.BLOMA_PREFLIGHT
+    calls.length = 0
+    await runAgentLoop(baseInput({ query, tools: [finish()], maxTurns: 2, sessionId: 'session-w3-off' }))
+    expect(calls[1]!.tools).toHaveLength(0)
+    expect(calls[1]!.system).toContain('【收口】')
+    // on 且 preflight_passed 也置位 → 收口（D2 完整链）
+    process.env.BLOMA_PREFLIGHT = '1'
+    calls.length = 0
+    await runAgentLoop(baseInput({ query, tools: [finish(true)], maxTurns: 2, sessionId: 'session-w3-all' }))
+    expect(calls[1]!.tools).toHaveLength(0)
+    expect(calls[1]!.system).toContain('【收口】')
   })
 })
