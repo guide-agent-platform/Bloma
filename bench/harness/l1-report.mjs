@@ -32,6 +32,7 @@ function loadRuns(args) {
   if (!existsSync(runsRoot)) return []
   const runs = []
   for (const seedId of readdirSync(runsRoot)) {
+    if (seedId.startsWith('_')) continue // _debug-archive 等非基准目录不入报告
     if (args.seed && seedId !== args.seed) continue
     const seedDir = join(runsRoot, seedId)
     if (!statSync(seedDir).isDirectory()) continue

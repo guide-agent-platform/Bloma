@@ -119,9 +119,12 @@ function readPendingDecisions(sessionFile) {
       const base = { line: index, timestamp: entry.timestamp || 0, fingerprint: `${inner.type}@${entry.timestamp || index}`, options: [] }
       if (inner.type === 'clarification_card') cards.push({ ...base, kind: 'clarification', options: Array.isArray(inner.detail?.options) ? inner.detail.options.map(String) : [] })
       else if (inner.type === 'enrichment_clarification_requested') {
-        // 加厚追问（PRD 定稿前信息缺口，一次一道；requests[0].options 为候选）
+        // 加厚追问（PRD 定稿前信息缺口，一次一道；requests[0].options 为 {id,label} 对象数组）
         const first = Array.isArray(inner.detail?.requests) ? inner.detail.requests[0] : null
-        cards.push({ ...base, kind: 'enrichment_clarification', options: Array.isArray(first?.options) ? first.options.map(String) : [] })
+        const labels = (Array.isArray(first?.options) ? first.options : [])
+          .map((o) => (typeof o === 'string' ? o : String(o?.label ?? o?.description ?? '')).trim())
+          .filter(Boolean)
+        cards.push({ ...base, kind: 'enrichment_clarification', options: labels })
       }
       else if (inner.type === 'prd_review') cards.push({ ...base, kind: 'prd_review' })
       else if (inner.type === 'prd_confirm') cards.push({ ...base, kind: 'prd_confirm' })
@@ -454,6 +457,7 @@ ${mainLogs.join('')}`); console.error(`[l1] 主进程日志已落 ${join(runDir,
         // 加厚追问：普通 sendMessage + 专用 option id（ClarificationCard 同协议）；
         // 脚本用户行为=选首个候选；无候选时让渡（按常见做法整理）
         const answer = card.options.find((o) => !o.includes('帮我') && !o.includes('你来')) ?? card.options[0] ?? '你来定，按常见做法整理'
+        if (!answer || answer === '[object Object]') throw new Error('enrichment 追问选项解析异常（[object Object]）')
         await sendGuarded(() => page.evaluate(async (input) => {
           const api = window.electronAPI
           const result = await api.agent.sendMessage({
