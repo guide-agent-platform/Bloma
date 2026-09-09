@@ -24,6 +24,7 @@ import { buildLoopInjection, buildSkeletonMapInjection } from '../template-injec
 import { buildModuleMapInjection, loadOfficialModules, modulesEnabled, renderOfficialModulesToProject } from '../module-library'
 import { listRefPatternModules, refLibraryEnabled } from '../experience/ref-source'
 import { backplaneInterfaceSpec, focusAnchorEnabled, renderBackplaneAnchor } from '../model/prd-backplane'
+import { renderRulesSection, rulesRegistryEnabled } from '../rules-registry'
 import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
 import { distillProjectMemorySafely } from '../memory-distiller'
 import { generateSketch, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from '../sketch-engine'
@@ -1398,12 +1399,20 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     'run_security_scan 确认无高危。',
     // P5 先读再改纪律（2026-09-04）：防凭记忆/凭 plan 推断文件现状（文件可能已被
     // 修复轮或上一迭代修改）；MVP 首跑无副作用（新文件不触发）；与 P3 plan 合同
-    // 不冲突（plan 是参考，read 是事实）
-    '- 修改已存在于骨架或前轮产物中的文件前，先用 read_file 读该文件当前内容再编辑；' +
-    '禁止凭记忆或凭 plan 推断文件现状（文件可能已被修复轮或上一迭代修改）。',
+    // 不冲突（plan 是参考，read 是事实）。
+    // Phase 3 B2（2026-09-09）：开关 on 时本内联行让位给 rules-registry R-FILE-01
+    // （四段式完整定义单点化，防双源）；off 保留原文（字节级现状）。
+    ...(rulesRegistryEnabled()
+      ? []
+      : [
+          '- 修改已存在于骨架或前轮产物中的文件前，先用 read_file 读该文件当前内容再编辑；' +
+          '禁止凭记忆或凭 plan 推断文件现状（文件可能已被修复轮或上一迭代修改）。',
+        ]),
     editFormat === 'diff'
       ? '编辑用 edit_file 的 diff 模式（old_string 必须与当前文件逐字一致且唯一）。'
       : '编辑用 edit_file 的 whole 模式（提供修改后的完整文件内容）。',
+    // Phase 3 B2：操作契约注册表段（触发—必须—禁止替代—受阻四段式，R-* 单点定义）。
+    ...(rulesRegistryEnabled() ? ['', renderRulesSection()] : []),
     '',
     '【终止条件】全部 P0 断言通过 + 安全扫描无高危，才输出完成总结（含做了什么、' +
     '未解决的低优先级项）。若技术合同规划了多文件，收口前确认目标文件已覆盖（未写的文件须在旁白说明偏离原因）。' +
@@ -1424,9 +1433,12 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     '',
     '【护栏】路径限项目目录内；不 eval/Function；不写 CSP meta；前端不直接外联（CSP 仅放行同源 fetch，真实出网只能走同源 /api/llm 代理）；' +
     // 完整程序阶段 2.5（2026-09-06 计算器案）：数据留存被 localStorage 绕过——「刷新后仍在」
-    // 被模型当作 localStorage 的正当理由。硬条款锁死后端持久化，堵住合理化路径
-    '数据留存类需求（保存/历史/记录/收藏/刷新或重开后仍在）一律用后端持久化：server/routes/ 路由 + ctx.readData/writeData 落 data/ 目录，' +
-    '禁止 localStorage/sessionStorage 存业务数据——PRD 说「刷新后仍在」不构成 localStorage 例外的理由，后端持久化同样满足且必须用后者；' +
+    // 被模型当作 localStorage 的正当理由。硬条款锁死后端持久化，堵住合理化路径。
+    // Phase 3 B2：开关 on 时本内联条款让位给 rules-registry R-DATA-01（防双源）；off 保留原文。
+    (rulesRegistryEnabled()
+      ? ''
+      : '数据留存类需求（保存/历史/记录/收藏/刷新或重开后仍在）一律用后端持久化：server/routes/ 路由 + ctx.readData/writeData 落 data/ 目录，' +
+        '禁止 localStorage/sessionStorage 存业务数据——PRD 说「刷新后仍在」不构成 localStorage 例外的理由，后端持久化同样满足且必须用后者；') +
     'out_of_scope 内的功能一律不做；编辑校验失败的错误信息要读完再改。',
     '',
     // 产物形态（PR-2 条件化）：工程骨架（带构建门禁）→ 模块化解禁（import 可选，
