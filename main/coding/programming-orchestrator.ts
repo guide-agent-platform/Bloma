@@ -1075,6 +1075,19 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
         },
       })
     },
+    // W1-E1（咨询 D3）：子 loop 压缩观测同接入 analytics（与 onChildTurn 同模式）
+    onChildCompaction: (info, child) => {
+      trackAnalytics({
+        request_id: child.requestId,
+        event: {
+          event_type: 'agent_loop_compact',
+          project_id: input.project_id,
+          session_id: child.sessionId,
+          payload: { ...info, via: 'delegation', role: child.role },
+          privacy_level: 'research_safe',
+        },
+      })
+    },
   })
 
   recordDecision({
@@ -1172,6 +1185,19 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
         ...(info.outputTokens !== undefined ? { outputTokens: info.outputTokens } : {}),
       })
     },
+    // W1-E1（咨询 D3，2026-09-09）：竹节压缩观测埋点（压缩发生或首次跳过；纯埋点零行为变更）
+    onCompaction: (info) => {
+      trackAnalytics({
+        request_id: input.request_id,
+        event: {
+          event_type: 'agent_loop_compact',
+          project_id: input.project_id,
+          session_id: input.session_id,
+          payload: { ...info, via: 'mvp' },
+          privacy_level: 'research_safe',
+        },
+      })
+    },
   })
   } catch (loopError) {
     // P3 loop-log：异常终态如实写终态节（硬约束 7：cancelled/error 也要终态节）后原样上抛
@@ -1210,6 +1236,25 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
         total_tool_calls: result.toolCalls.length,
         duration_ms: durationMs,
         tool_distribution: toolDistribution,
+        // W1-E1（咨询 D3）：cancelled 触发源细分（phase=loop 内观察点，source=abort reason 解析，
+        // 如 user_cancelled）+ 会话级 usage 聚合（turns_with_usage=0 即渠道盲，压缩从未触发过）
+        ...(result.cancel_detail
+          ? {
+              cancel_phase: result.cancel_detail.phase,
+              ...(result.cancel_detail.source !== undefined ? { cancel_source: result.cancel_detail.source } : {}),
+              ...(result.cancel_detail.reason !== undefined ? { cancel_reason: result.cancel_detail.reason } : {}),
+            }
+          : {}),
+        ...(result.usage
+          ? {
+              usage: {
+                input_tokens_total: result.usage.inputTokens,
+                output_tokens_total: result.usage.outputTokens,
+                est_context_tokens: result.usage.estContextTokens,
+                turns_with_usage: result.usage.turnsWithUsage,
+              },
+            }
+          : {}),
       },
       privacy_level: 'research_safe',
     },

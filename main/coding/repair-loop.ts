@@ -246,6 +246,19 @@ export async function runRepairLoop(input: RepairLoopInput): Promise<RepairRound
       ...(input.thinkingLevel !== undefined ? { thinkingLevel: input.thinkingLevel } : {}),
       signal: input.signal ?? new AbortController().signal,
       publish: input.publish,
+      // W1-E1（咨询 D3，2026-09-09）：修复轮压缩观测埋点（与主 loop 同事件，via 区分）
+      onCompaction: (info) => {
+        trackAnalytics({
+          request_id: input.request_id,
+          event: {
+            event_type: 'agent_loop_compact',
+            project_id: input.project_id,
+            session_id: input.session_id,
+            payload: { ...info, via: 'repair', round: input.round },
+            privacy_level: 'research_safe',
+          },
+        })
+      },
     })
   } catch (err) {
     if (err instanceof Error && err.message.startsWith('AGENT_CANCELLED')) throw err

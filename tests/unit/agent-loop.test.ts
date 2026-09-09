@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { runAgentLoop, TOOL_WINDOW_ROUNDS, windowMessages, keepRecentTurns, estimateBlocksText, type AgentLoopInput, type AgentLoopTool, type AgentLoopTurnInfo, type ToolOutcome } from '../../main/agent-loop'
+import { runAgentLoop, TOOL_WINDOW_ROUNDS, windowMessages, keepRecentTurns, estimateBlocksText, type AgentLoopInput, type AgentLoopTool, type AgentLoopTurnInfo, type AgentLoopCompactionInfo, type ToolOutcome } from '../../main/agent-loop'
 import { estimateTokenCount } from '../../main/usage-guard'
 import { drainSteerQueue, enqueueSteer, pendingSteerCount, resetSteerQueuesForTests, STEER_WRAP_PREFIX, wrapSteerContent } from '../../main/steer-queue'
 import type { AgentEvent } from '../../shared/types'
@@ -237,6 +237,8 @@ describe('runAgentLoop（PR2 L1）', () => {
       baseInput({ query, signal: controller.signal, sessionId: 'session-cancel-partial' }),
     )
     expect(result.status).toBe('cancelled')
+    // W1-E1：取消触发源细分——流中取消被 model_stream 观察点捕获，reason 解析出 source
+    expect(result.cancel_detail).toMatchObject({ phase: 'model_stream', source: 'user' })
 
     // 取证：半截文本进了 JSONL（此前该轮整体丢弃→「事后考察不到」）
     const messages = readSessionJsonl('session-cancel-partial')
@@ -721,6 +723,127 @@ describe('usage 竹节压缩（闭环 PR6）', () => {
 
     expect(result.status).toBe('cancelled')
     expect(events.filter((event) => event.type === 'loop_compaction')).toHaveLength(0)
+  })
+
+  it('W1-E1：压缩观测埋点 onCompaction——段号/保留移除计数/交接口径/上限后首次 skip（max_compactions）', async () => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    const { query } = compactQuery({ inputTokens: 5000, handoff: 'text' })
+    const observed: AgentLoopCompactionInfo[] = []
+    const result = await runAgentLoop(baseInput({
+      query,
+      tools: [echo],
+      maxTurns: 6,
+      sessionId: 'session-compact-observe',
+      onCompaction: (info) => observed.push(info),
+    }))
+    // echo 永不停工具 → turn_limit；途中两次压缩（turn<maxTurns-3=3）+ 第 3 轮首次上限跳过
+    expect(result.status).toBe('turn_limit')
+    expect(observed).toHaveLength(3)
+    expect(observed[0]).toMatchObject({
+      at_turn: 1,
+      segment: 1,
+      trigger_input_tokens: 5000,
+      retained_turns: 0, // KEEP_RECENT='0'：旧两段结构，无保留段
+      removed_turns: 2,  // [asst(tool_use), user(tool_result)] 两轮历史被移除
+      handoff_fallback: false,
+    })
+    expect(observed[0]!.est_tokens_before!).toBeGreaterThan(0)
+    expect(observed[0]!.est_tokens_after!).toBeGreaterThan(0)
+    expect(observed[0]!.handoff_chars!).toBeGreaterThan(0)
+    expect(observed[1]).toMatchObject({ at_turn: 2, segment: 2, removed_turns: 2 })
+    // 上限后：阈值仍满足但静默跳过（E6 核查 1 定案），首次报一条 max_compactions
+    expect(observed[2]).toMatchObject({
+      at_turn: 3,
+      segment: 2,
+      skipped: true,
+      skip_reason: 'max_compactions',
+      trigger_input_tokens: 5000,
+      retained_turns: 0,
+      removed_turns: 0,
+      handoff_chars: 0,
+    })
+  })
+
+  it('W1-E1：末段保护跳过报 late_turn（turn ≥ maxTurns-3 后不再压缩）', async () => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    const { query } = compactQuery({ inputTokens: 5000, handoff: 'text' })
+    const observed: AgentLoopCompactionInfo[] = []
+    await runAgentLoop(baseInput({
+      query,
+      tools: [echo],
+      maxTurns: 5, // turn < 5-3=2：仅第 1 轮可压缩；第 2 轮起末段保护
+      sessionId: 'session-compact-late',
+      onCompaction: (info) => observed.push(info),
+    }))
+    expect(observed).toHaveLength(2)
+    expect(observed[0]).toMatchObject({ at_turn: 1, segment: 1 })
+    expect(observed[1]).toMatchObject({ at_turn: 2, skipped: true, skip_reason: 'late_turn' })
+  })
+
+  it('W1-E1：交接失败兑底路径 handoff_fallback=true，est 口径照报', async () => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    const { query } = compactQuery({ inputTokens: 5000, handoff: 'throw' })
+    const observed: AgentLoopCompactionInfo[] = []
+    await runAgentLoop(baseInput({
+      query,
+      tools: [echo],
+      maxTurns: 6,
+      sessionId: 'session-compact-fallback-observe',
+      onCompaction: (info) => observed.push(info),
+    }))
+    expect(observed[0]).toMatchObject({ segment: 1, handoff_fallback: true })
+    expect(observed[0]!.handoff_chars!).toBeGreaterThan(0) // deterministicHandoff 兑底文本
+    expect(observed[1]).toMatchObject({ segment: 2, handoff_fallback: true })
+  })
+})
+
+describe('W1-E1 取消触发源细分（cancel_detail）', () => {
+  const echo = tool('echo', () => ({ output: 'ok' }))
+
+  it('启动前已中止：turn_start 观察点 + AGENT_CANCELLED source 解析', async () => {
+    const controller = new AbortController()
+    controller.abort(new Error('AGENT_CANCELLED: user_cancelled'))
+    const result = await runAgentLoop(baseInput({
+      query: async function* () { yield { type: 'result', subtype: 'success' } },
+      tools: [echo],
+      signal: controller.signal,
+      sessionId: 'session-cancel-prestart',
+    }))
+    expect(result.status).toBe('cancelled')
+    expect(result.cancel_detail).toMatchObject({ phase: 'turn_start', source: 'user_cancelled' })
+  })
+
+  it('无 reason 的 abort（委派 stop/程序化）：source=unattributed，reason 原样保留', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const result = await runAgentLoop(baseInput({
+      query: async function* () { yield { type: 'result', subtype: 'success' } },
+      tools: [echo],
+      signal: controller.signal,
+      sessionId: 'session-cancel-noreason',
+    }))
+    expect(result.status).toBe('cancelled')
+    expect(result.cancel_detail?.phase).toBe('turn_start')
+    expect(result.cancel_detail?.source).toBe('unattributed')
+    expect(result.cancel_detail?.reason).toBeTruthy()
+  })
+
+  it('abort 在交接等待中：handoff 观察点捕获（cancel_detail 而非裸 status）', async () => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-compact-'))
+    const { query } = compactQuery({ inputTokens: 5000, handoff: 'hang' })
+    const controller = new AbortController()
+    const pending = runAgentLoop(baseInput({
+      query,
+      tools: [echo],
+      maxTurns: 6,
+      sessionId: 'session-compact-abort-detail',
+      signal: controller.signal,
+    }))
+    setTimeout(() => controller.abort(), 30)
+    const result = await pending
+    expect(result.status).toBe('cancelled')
+    expect(result.cancel_detail).toMatchObject({ phase: 'handoff', source: 'unattributed' })
   })
 })
 

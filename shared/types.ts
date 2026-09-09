@@ -1258,6 +1258,7 @@ export interface AnalyticsTrackInput extends RequestEnvelope {
       | 'repair_round_completed'
       | 'agent_loop_turn'
       | 'agent_loop_completed'
+      | 'agent_loop_compact'
       | 'test_completed'
       | 'experience_exposure'
       | 'judge_verdict'

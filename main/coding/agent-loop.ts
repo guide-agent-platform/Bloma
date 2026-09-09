@@ -102,6 +102,33 @@ export interface AgentLoopToolCallRecord {
   path?: string
 }
 
+/** W1-E1（咨询 D3，2026-09-09）：竹节压缩观测信息——纯埋点零行为变更。
+ *  编程编排层接 trackAnalytics('agent_loop_compact')；skipped=true 表示阈值满足但因
+ *  上限/末段被跳过（此前该路径完全静默，E6 核查 1 的观测补齐）。 */
+export interface AgentLoopCompactionInfo {
+  /** 触发压缩（或首次跳过）的模型轮次 */
+  at_turn: number
+  /** 第几段交接（1 起）；skipped 时为已用段数 */
+  segment: number
+  /** 触发时的渠道回报 input tokens（触发判据本身） */
+  trigger_input_tokens?: number
+  /** 重置前全量 messages 估算 token（estContextTokens 同口径：仅历史轮，不含 system/工具 schema） */
+  est_tokens_before?: number
+  /** 重置后（task+交接+保留段）估算 token */
+  est_tokens_after?: number
+  /** keep-recent 保留的原文轮数（messages[1..] 的尾部连续后缀） */
+  retained_turns: number
+  /** 被移除的历史轮数（messages[1..] 中未保留的部分；skipped 时恒 0） */
+  removed_turns: number
+  /** 交接文档字符数 */
+  handoff_chars: number
+  /** true=LLM 交接失败走了 deterministicHandoff 兑底 */
+  handoff_fallback: boolean
+  /** true=阈值满足但未压缩（每 loop 只报一次）；此时仅 at_turn/segment/trigger_input_tokens/skip_reason 有意义 */
+  skipped?: boolean
+  skip_reason?: 'max_compactions' | 'late_turn'
+}
+
 export interface AgentLoopTurnInfo {
   turn: number
   toolCalls: AgentLoopToolCallRecord[]
@@ -149,6 +176,8 @@ export interface AgentLoopInput {
   /** 每轮回调（PR3 埋点 agent_loop_turn：工具清单 + usage 若渠道返回；
    *  P3 loop-log 同一回调实时 append 过程记录，零新接线） */
   onTurn?: (info: AgentLoopTurnInfo) => void
+  /** W1-E1 压缩观测回调（埋点 agent_loop_compact：压缩发生或首次跳过；不影响行为） */
+  onCompaction?: (info: AgentLoopCompactionInfo) => void
 }
 
 export interface AgentLoopResult {
@@ -158,7 +187,14 @@ export interface AgentLoopResult {
   toolCalls: AgentLoopToolCallRecord[]
   /** 会话级 usage 聚合（费用守卫 Hook 1，2026-08-28 队友）：逐轮累计渠道返回 usage + 全块口径估算 */
   usage?: { inputTokens: number; outputTokens: number; estContextTokens: number; turnsWithUsage: number }
+  /** W1-E1（咨询 D3）：cancelled 终态的触发源观测——phase=loop 内观察点（取消被家觉的位置），
+   *  source=abort reason 解析（'AGENT_CANCELLED: <source>' 约定见 orchestrator.cancelAgent；
+   *  无 reason 的 abort 归 'unattributed'，如委派 stop/程序化中止）。纯增量字段，非 cancelled 无此字段。 */
+  cancel_detail?: { phase: LoopCancelPhase; source?: string; reason?: string }
 }
+
+/** W1-E1：取消在 loop 内可被观察的五个位置（cancel_detail.phase 的取值）。 */
+export type LoopCancelPhase = 'turn_start' | 'model_stream' | 'tool_execution' | 'handoff' | 'grace_turn'
 
 /** JSONL 审计里单条 tool_result 的截断上限（全文走事件流，防 JSONL 膨胀）。 */
 const JSONL_TOOL_RESULT_CHAR_LIMIT = 4096
@@ -432,6 +468,12 @@ export function estimateBlocksText(blocks: MessageContentBlock[]): string {
     .join('\n')
 }
 
+/** W1-E1（咨询 D3）：messages 全量 token 估算——与 usage_summary 的 estContextTokens 同口径
+ *  （仅历史轮块文本，不含 system/工具 schema；E6 核查 2 的口径已在注释里写死防漂移）。 */
+function estTokensOfMessages(list: ConversationTurn[]): number {
+  return estimateTokenCount(list.map((m) => (typeof m.content === 'string' ? m.content : estimateBlocksText(m.content))).join('\n'))
+}
+
 /** 单轮占用估算（keep-recent 预算累加用；与 usage_summary 的 estContextTokens 同口径）。 */
 function turnEstTokens(turn: ConversationTurn): number {
   return estimateTokenCount(typeof turn.content === 'string' ? turn.content : estimateBlocksText(turn.content))
@@ -640,6 +682,8 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
   let pinnedRepairRound = 0
   // 已压缩次数（竹节压缩，闭环 PR6）
   let compactions = 0
+  // W1-E1：上限/末段跳过观测是否已报过（每 loop 至多一条）
+  let compactionSkipLogged = false
   const compactThreshold = resolveCompactThreshold()
   // keep-recent 保留段预算（P1-1 三段式压缩；'0' = 旧行为完全回归）
   const keepRecentBudget = resolveKeepRecentTokens()
@@ -647,7 +691,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
   let degenerateRetries = 0
 
   for (let turn = 1; turn <= input.maxTurns; turn += 1) {
-    if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls))
+    if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls, 'turn_start', input.signal))
 
     // ---- 模型调用（L0 带 tools；messages 全量透传，system 提取由查询层负责）----
     const assistantBlocks: MessageContentBlock[] = []
@@ -715,7 +759,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         } catch {
           // 取证落盘失败静默（取消语义优先）
         }
-        return attachUsage(loopCancelled(turns, finalText, toolCalls))
+        return attachUsage(loopCancelled(turns, finalText, toolCalls, 'model_stream', input.signal))
       }
       throw error
     }
@@ -758,7 +802,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
 
     // ---- 工具执行：连续 parallelSafe 段并发 + 其余串行；整批 tool_result 按源序进同一条 user 消息（不变式）----
     const execution = await executeTurnToolCalls(input, toolByName, budgetUsed, turnToolUses, turn, ctx)
-    if (execution.cancelled) return attachUsage(loopCancelled(turns, finalText, toolCalls))
+    if (execution.cancelled) return attachUsage(loopCancelled(turns, finalText, toolCalls, 'tool_execution', input.signal))
     const { resultBlocks, budgetStallThisTurn } = execution
     appendLoopMessage(input.sessionId, 'user', resultBlocks)
     messages.push({ role: 'assistant', content: assistantBlocks })
@@ -802,22 +846,24 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     }
 
     // ---- usage 竹节压缩（闭环 PR6）：阈值触发交接，重置为 task+交接文档 ----
-    if (
-      compactThreshold > 0 &&
-      (usage?.input_tokens ?? 0) >= compactThreshold &&
-      compactions < LOOP_MAX_COMPACTIONS &&
-      turn < input.maxTurns - 3
-    ) {
-      if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls))
+    // W1-E1（咨询 D3）：阈值满足单独提取——满足但因上限/末段被跳过时报一次 skip 观测
+    // （此前该路径完全静默；纯埋点，压缩行为零变化）。E6 核查 1 定案：上限后=静默跳过。
+    const compactThresholdMet = compactThreshold > 0 && (usage?.input_tokens ?? 0) >= compactThreshold
+    if (compactThresholdMet && compactions < LOOP_MAX_COMPACTIONS && turn < input.maxTurns - 3) {
+      if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls, 'handoff', input.signal))
       const handoff = await requestHandoff(input, messages, pinnedTestTurn)
-      if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls))
+      if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls, 'handoff', input.signal))
       // 确定性兑底也携带钉轮失败断言原文（审查 P1-2：交接失败恰是最需要细节的降级路径）
       const summary = handoff || deterministicHandoff(turn, toolCalls, finalText, pinnedFailureExcerpt(messages, pinnedTestTurn))
       // keep-recent 三段式（P1-1）：task + 交接文档 + 近期原文保留段——重置在「交接文档」
       // 之外保留最近原文轮次（预算 keepRecentBudget；'0' 时 retained 为空 = 旧行为两段）。
       // 保留段在重置前的 messages 上计算（含本轮刚落盘的工具对）；交接 LLM 失败的确定性
       // fallback 路径同样带保留段（降级路径恰最需要细节，对齐审查 P1-2 先例）。
+      // W1-E1：重置前先留观测口径（est/保留/移除计数——保留段是尾部连续后缀，计数即定位）。
       const retained = keepRecentTurns(messages, keepRecentBudget)
+      const estTokensBefore = estTokensOfMessages(messages)
+      const historyTurnsBefore = messages.length - 1
+      const removedTurns = historyTurnsBefore - retained.length
       messages.length = 0
       messages.push({
         role: 'user',
@@ -837,6 +883,22 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         input_tokens: usage?.input_tokens,
         compactions,
         keep_recent_turns: retained.length,
+        // W1-E1 观测扩展（新增字段，消费方后兼容）：重置前后估算与移除/兑底口径
+        est_tokens_before: estTokensBefore,
+        est_tokens_after: estTokensOfMessages(messages),
+        removed_turns: removedTurns,
+        handoff_fallback: !handoff,
+      })
+      input.onCompaction?.({
+        at_turn: turn,
+        segment: compactions,
+        trigger_input_tokens: usage?.input_tokens,
+        est_tokens_before: estTokensBefore,
+        est_tokens_after: estTokensOfMessages(messages),
+        retained_turns: retained.length,
+        removed_turns: removedTurns,
+        handoff_chars: summary.length,
+        handoff_fallback: !handoff,
       })
       // 交接文档落 JSONL 审计（与 [channel-switch] 同一 system 行呈现模式，审查 P1-2）
       appendSessionMessage(input.sessionId, {
@@ -849,6 +911,21 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         ],
         timestamp: Date.now(),
       })
+    } else if (compactThresholdMet && !compactionSkipLogged) {
+      // W1-E1：上限/末段跳过首次发生时报一次（每 loop 至多一条防逐轮噪音）。原因优先级：
+      // 上限跳过（max_compactions）比末段保护（late_turn）更有诊断价值。
+      compactionSkipLogged = true
+      input.onCompaction?.({
+        at_turn: turn,
+        segment: compactions,
+        trigger_input_tokens: usage?.input_tokens,
+        skipped: true,
+        skip_reason: compactions >= LOOP_MAX_COMPACTIONS ? 'max_compactions' : 'late_turn',
+        retained_turns: 0,
+        removed_turns: 0,
+        handoff_chars: 0,
+        handoff_fallback: false,
+      })
     }
   }
 
@@ -859,7 +936,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
   const grace = await runGraceWrapUpTurn(input, messages, pinnedTestTurn)
   // 宽限轮交卷文本同样不可是传输事故：退行文本不作完成总结，按 turn_limit 收口
   if (grace.kind === 'text' && !isDegenerateText(grace.text)) return attachUsage({ status: 'completed', turns, finalText: grace.text, toolCalls })
-  if (grace.kind === 'cancelled') return attachUsage(loopCancelled(turns, finalText, toolCalls))
+  if (grace.kind === 'cancelled') return attachUsage(loopCancelled(turns, finalText, toolCalls, 'grace_turn', input.signal))
   return attachUsage({ status: 'turn_limit', turns, finalText, toolCalls })
 }
 
@@ -1105,8 +1182,25 @@ export function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<
   })
 }
 
-function loopCancelled(turns: number, finalText: string, toolCalls: Array<{ name: string; turn: number }>): AgentLoopResult {
-  return { status: 'cancelled', turns, finalText, toolCalls }
+/** W1-E1（咨询 D3）：从 AbortSignal.reason 解析取消来源——'AGENT_CANCELLED: <source>' 约定见
+ *  orchestrator.cancelAgent（用户停止='user_cancelled'）；无 reason 的 abort（委派 stop/程序化）
+ *  归 'unattributed'。 */
+function cancelSourceOf(signal?: AbortSignal): { source?: string; reason?: string } {
+  const reason: unknown = signal?.reason
+  if (reason === undefined) return {}
+  const message = reason instanceof Error ? reason.message : String(reason)
+  const marker = message.match(/^AGENT_CANCELLED:\s*(.+)$/)
+  return { source: marker?.[1] ?? 'unattributed', reason: message.slice(0, 200) }
+}
+
+function loopCancelled(
+  turns: number,
+  finalText: string,
+  toolCalls: Array<{ name: string; turn: number }>,
+  phase: LoopCancelPhase,
+  signal?: AbortSignal,
+): AgentLoopResult {
+  return { status: 'cancelled', turns, finalText, toolCalls, cancel_detail: { phase, ...cancelSourceOf(signal) } }
 }
 
 interface WhitespaceArtifactCleaner {

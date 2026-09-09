@@ -171,6 +171,8 @@ export function summarizeAnalytics(events, projectId) {
   const gwtRuns = loopCompleted.reduce((s, e) => s + (e.payload?.tool_distribution?.run_gwt_tests || 0), 0)
   const loopTurns = events.filter((e) => e.event_type === 'agent_loop_turn')
   const lastLoop = loopCompleted[loopCompleted.length - 1]
+  // W1-E1（咨询 D3）：竹节压缩观测 + 取消触发源细分（历史 run 无此事件＝null，不影响旧档案）
+  const compactions = events.filter((e) => e.event_type === 'agent_loop_compact')
   return {
     projectId,
     loopCompletedCount: loopCompleted.length,
@@ -178,6 +180,13 @@ export function summarizeAnalytics(events, projectId) {
     lastLoopTurns: lastLoop?.payload?.turns ?? null,
     totalToolCalls: lastLoop?.payload?.total_tool_calls ?? null,
     durationMs: lastLoop?.payload?.duration_ms ?? null,
+    cancelDetail: lastLoop?.payload?.cancel_phase
+      ? {
+          phase: lastLoop.payload.cancel_phase,
+          source: lastLoop.payload.cancel_source ?? null,
+        }
+      : null,
+    loopUsage: lastLoop?.payload?.usage ?? null,
     repairRounds: repairs.filter((e) => e.event_type === 'repair_round_completed').length,
     repairAttempts: repairs.filter((e) => e.event_type === 'self_repair_triggered').length,
     judgeEvents: judge.length,
@@ -197,6 +206,19 @@ export function summarizeAnalytics(events, projectId) {
     turnTokens: loopTurns.map((e) => ({ turns: e.payload?.turn, in: e.payload?.input_tokens, out: e.payload?.output_tokens })),
     inputTokensTotal: loopTurns.reduce((s, e) => s + (Number(e.payload?.input_tokens) || 0), 0),
     outputTokensTotal: loopTurns.reduce((s, e) => s + (Number(e.payload?.output_tokens) || 0), 0),
+    compactions: compactions.map((e) => ({
+      via: e.payload?.via ?? null,
+      atTurn: e.payload?.at_turn ?? null,
+      segment: e.payload?.segment ?? null,
+      triggerInputTokens: e.payload?.trigger_input_tokens ?? null,
+      estBefore: e.payload?.est_tokens_before ?? null,
+      estAfter: e.payload?.est_tokens_after ?? null,
+      retainedTurns: e.payload?.retained_turns ?? null,
+      removedTurns: e.payload?.removed_turns ?? null,
+      handoffFallback: e.payload?.handoff_fallback ?? null,
+      skipped: e.payload?.skipped === true,
+      skipReason: e.payload?.skip_reason ?? null,
+    })),
   }
 }
 
