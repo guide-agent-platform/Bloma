@@ -17,6 +17,8 @@
  */
 
 import type { GwtTestResult } from '../gwt-service'
+import type { RoundAnchorSpec } from '../model/prd-backplane'
+import { renderRoundAnchorBlock, roundAnchorEnabled } from '../model/prd-backplane'
 import type { BuildGateResult } from './build-gate'
 import type { ProjectMode, AgentEvent } from '../../shared/types'
 import type { ThinkingLevel } from '../../shared/reasoning-profile'
@@ -152,6 +154,8 @@ export interface RepairLoopInput {
   /** system 组装器（编程编排器注入 buildLoopSystemWithOverride 同款背板锚定 + 骨架地图；
    * 参数 = 修复轮解析出的 editFormat；依赖注入防与编排器循环 import） */
   buildSystem: (editFormat: 'diff' | 'whole') => string
+  /** Phase 3 B3：本轮锚三字段（可选；BLOMA_ROUND_ANCHOR 缺省 off=零注入字节级现状） */
+  roundAnchor?: RoundAnchorSpec
   /** 思考档位（编排器解析后传入；缺省不传 = loop 内部缺省） */
   thinkingLevel?: ThinkingLevel
   /** 事件发布（编排器 publish 包装） */
@@ -204,8 +208,11 @@ export async function runRepairLoop(input: RepairLoopInput): Promise<RepairRound
 
   let loopResult: AgentLoopResult
   try {
+    // Phase 3 B3：本轮锚（开关 off 或未传 spec → 零注入，system 与现状字节一致）
+    const roundAnchorBlock =
+      input.roundAnchor && roundAnchorEnabled() ? `\n\n${renderRoundAnchorBlock(input.roundAnchor)}` : ''
     loopResult = await runAgentLoop({
-      system: `${input.buildSystem(editFormat)}\n\n${REPAIR_MODE_SECTION}`,
+      system: `${input.buildSystem(editFormat)}\n\n${REPAIR_MODE_SECTION}${roundAnchorBlock}`,
       task: renderRepairTaskCard(input.tasks),
       // 窄任务小预算：web_research 限 2 防长 loop 无节制外呼（主 loop 为 4）
       toolBudget: { web_research: REPAIR_WEB_RESEARCH_BUDGET },

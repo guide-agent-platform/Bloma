@@ -23,7 +23,7 @@ import { loadSkeletonTemplate, type ProjectSkeleton } from '../project-templates
 import { buildLoopInjection, buildSkeletonMapInjection } from '../template-injection'
 import { buildModuleMapInjection, loadOfficialModules, modulesEnabled, renderOfficialModulesToProject } from '../module-library'
 import { listRefPatternModules, refLibraryEnabled } from '../experience/ref-source'
-import { backplaneInterfaceSpec, focusAnchorEnabled, renderBackplaneAnchor } from '../model/prd-backplane'
+import { backplaneInterfaceSpec, buildIterationRoundAnchor, buildRepairRoundAnchor, focusAnchorEnabled, renderBackplaneAnchor, renderRoundAnchorBlock, roundAnchorEnabled } from '../model/prd-backplane'
 import { renderRulesSection, rulesRegistryEnabled } from '../rules-registry'
 import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
 import { distillProjectMemorySafely } from '../memory-distiller'
@@ -1036,7 +1036,12 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
       : skeletonMap
   const buildSystemWithPlan = (fmt: 'diff' | 'whole'): string => {
     const base = buildLoopSystemWithOverride(backplane, fmt, input.project_id, effectiveSkeletonMap, focus, moduleMap)
-    return planInjection ? `${base}\n\n${planInjection}` : base
+    // Phase 3 B3：迭代轮本轮锚（聚焦路径才有；开关 off=零注入字节级现状）
+    const roundAnchorBlock =
+      focus && focus.length > 0 && roundAnchorEnabled()
+        ? `\n\n${renderRoundAnchorBlock(buildIterationRoundAnchor(backplane, focus))}`
+        : ''
+    return planInjection ? `${base}${roundAnchorBlock}\n\n${planInjection}` : `${base}${roundAnchorBlock}`
   }
   // 委派协作（嫁接方案 §4.1）：注册父 loop 上下文供 delegate_agent 构建子循环；子工具集按 role 裁剪
   setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
@@ -2129,6 +2134,8 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
     tasks,
     round,
     buildSystem: (editFormat) => buildLoopSystemWithOverride(backplane, editFormat, input.project_id, skeletonMap, undefined, moduleMap),
+    // Phase 3 B3：修复轮本轮锚（开关 off=零注入字节级现状）；完成证据=失败断言原文
+    ...(roundAnchorEnabled() ? { roundAnchor: buildRepairRoundAnchor(backplane, tasks.map((task) => task.location ?? task.claim)) } : {}),
     thinkingLevel: resolveLoopThinkingLevel(),
     publish: (type, payload) => publish(input, type, payload),
   })
@@ -2284,6 +2291,8 @@ async function runBlockedTestRepair(input: {
     tasks,
     round,
     buildSystem: (editFormat) => buildLoopSystemWithOverride(backplane, editFormat, input.project_id, skeletonMap, undefined, moduleMap),
+    // Phase 3 B3：修复轮本轮锚（开关 off=零注入字节级现状）；完成证据=失败断言原文
+    ...(roundAnchorEnabled() ? { roundAnchor: buildRepairRoundAnchor(backplane, tasks.map((task) => task.location ?? task.claim)) } : {}),
     thinkingLevel: resolveLoopThinkingLevel(),
     publish: (type, payload) => publish(input, type, payload),
   })
