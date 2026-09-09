@@ -1,7 +1,8 @@
 {
   "$schema": "seed-regress 任务卡（Phase 1 三套提示词一致性治理·第三批回归案例，2026-09-09 起草）",
-  "frozen": false,
-  "$note": "对应一致性治理文档第十节第三批 7 案例中的后 4 个（前 3 个映射既有 seed：一次性计算器=seed-b-crud-calculator、AI 日报=seed-ai-note-distilled/full、赛车=seed-game-shmup）。draft 状态：须人工复核冻结后才可作回归基准（同 seed-v0 纪律 2）。seed-iter-time-consistency 为迭代场景，当前 L1 通道只支持单轮生成，标 manualOnly（人工回归检查）。",
+  "frozen": true,
+  "frozenAt": "2026-09-09",
+  "$note": "对应一致性治理文档第十节第三批 7 案例中的后 4 个（前 3 个映射既有 seed：一次性计算器=seed-b-crud-calculator、AI 日报=seed-ai-note-distilled/full、赛车=seed-game-shmup）。已于 2026-09-09 人工复核冻结；变更须重新走人工冻结流程。seed-iter-time-consistency 为迭代场景，当前 L1 通道只支持单轮生成，标 manualOnly（人工回归检查）。",
   "seeds": [
     {
       "id": "seed-guide-delegate",

@@ -42,7 +42,7 @@ import { collectArtifacts, collectAssistantIntegrity, collectDocuments, collectS
 import { computeExtendedMetrics, computeFlags, computeProjectMetrics } from './metrics.mjs'
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url))
-const seedsFile = join(repoRoot, 'bench', 'tasks', 'seed-v0.json')
+const seedsDir = join(repoRoot, 'bench', 'tasks')
 const runsRoot = join(repoRoot, 'bench', 'runs')
 
 const TERMINAL_STAGES = new Set(['ready', 'completed'])
@@ -71,15 +71,23 @@ function parseArgs(argv) {
 // ---------------------------------------------------------------- seed ----
 
 function loadSeed(seedId) {
-  const deck = JSON.parse(readFileSync(seedsFile, 'utf8'))
-  if (!deck.frozen) { console.error('seed-v0.json 未冻结（frozen!=true），不得作在线回归基准'); process.exit(2) }
-  const seed = deck.seeds.find((s) => s.id === seedId)
-  if (!seed) { console.error(`seed 不存在：${seedId}（可选：${deck.seeds.map((s) => s.id).join(', ')}）`); process.exit(2) }
-  // clarificationPath 形如 "user: 智能总结回顾（在澄清中选…）"——取冒号后、首个全角括号前的应答文本
-  seed.script = (seed.clarificationPath || [])
-    .map((line) => String(line).replace(/^user:\s*/, '').split('（')[0].trim())
-    .filter(Boolean)
-  return seed
+  // seed-v0（主基准）+ seed-regress（Phase 1 回归案例）；都要求 frozen 才可作在线基准
+  const decks = ['seed-v0.json', 'seed-regress.json']
+    .map((name) => join(seedsDir, name))
+    .filter(existsSync)
+    .map((file) => JSON.parse(readFileSync(file, 'utf8')))
+  for (const deck of decks) {
+    const seed = deck.seeds.find((s) => s.id === seedId)
+    if (!seed) continue
+    if (!deck.frozen) { console.error(`${seedId} 所在任务卡未冻结（frozen!=true），不得作在线回归基准`); process.exit(2) }
+    if (seed.manualOnly) { console.error(`${seedId} 标 manualOnly（迭代/人工场景），L1 不支持自动跑`); process.exit(2) }
+    seed.script = (seed.clarificationPath || [])
+      .map((line) => String(line).replace(/^user:\s*/, '').split('（')[0].trim())
+      .filter(Boolean)
+    return seed
+  }
+  console.error(`seed 不存在：${seedId}（可选：${decks.flatMap((d) => d.seeds.map((s) => s.id)).join(', ')}）`)
+  process.exit(2)
 }
 
 // ------------------------------------------------------------ 会话轮询 ----
