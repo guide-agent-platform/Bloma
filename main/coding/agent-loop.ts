@@ -228,7 +228,7 @@ export interface LoopCheckpointDecision {
 export interface LoopCheckpointSnapshot {
   session_id: string
   at_turn: number
-  trigger: 'steer' | 'gwt' | 'api' | 'security' | 'compaction' | 'final'
+  trigger: 'steer' | 'gwt' | 'api' | 'security' | 'compaction' | 'projection' | 'final'
   decisions: LoopCheckpointDecision[]
   /** 工作进度 v0：已写文件集（path→版本戳；工具结果维度，非模型声明） */
   progress_files: Record<string, string>
@@ -266,6 +266,26 @@ export function renderCheckpointRecoveryHeader(task: string, snapshot: LoopCheck
         val.api_all_passed ? '过/豁免' : val.api_contract_runs > 0 ? '失败' : '未测'
       }｜安全 ${val.security_all_passed ? '过' : '未测'}`,
     '- 定位有疑问先 read_file/grep 确认现状再编辑；修复验证照常 run_gwt_tests，勿凭旧印象断言已修。',
+  ]
+  return lines.join('\n')
+}
+
+/** W5-G3（咨询 D5 §二 B 层）：检查点活跃投影——每轮 system 尾部的紧凑宿主状态
+ *  （候选指纹/仍有效转向/未闭环失败/验证状态）。与恢复头分工：恢复头=压缩后一次性完整版，
+ *  投影=每轮紧凑版（验证状态变化即最新，宿主拼装不靠模型记忆）。仅 BLOMA_LOOP_CHECKPOINT on 注入。 */
+export function renderCheckpointProjection(snapshot: LoopCheckpointSnapshot): string {
+  const active = snapshot.decisions.filter((d) => !d.superseded_by)
+  const val = snapshot.validation
+  const lines = [
+    '【检查点投影（宿主状态，勿改写；每轮更新）】',
+    `- 候选指纹：${val.candidate_fingerprint}（已写文件 ${Object.keys(snapshot.progress_files).length} 个，版本戳见 read_file 返回）`,
+    ...(active.length > 0 ? [`- 仍有效转向：${active.map((d) => d.text.slice(0, 60)).join('；')}`] : []),
+    val.last_gwt_failures.length > 0
+      ? `- 未闭环失败：${val.last_gwt_failures.slice(0, 5).join('、')}${val.last_gwt_failures.length > 5 ? ' 等' : ''}`
+      : '- 未闭环失败：无',
+    `- 验证状态：GWT ${val.gwt_all_passed ? '全过' : val.gwt_runs > 0 ? '有失败' : '未测'}｜API 契约 ${
+      val.api_all_passed ? '过/豁免' : val.api_contract_runs > 0 ? '失败' : '未测'
+    }｜安全 ${val.security_all_passed ? '过' : '未测'}`,
   ]
   return lines.join('\n')
 }
@@ -642,6 +662,11 @@ export function preflightEnabled(): boolean {
   return process.env.BLOMA_PREFLIGHT === '1' || process.env.BLOMA_PREFLIGHT === 'true'
 }
 
+/** W5-G1（咨询 D5）：旁白事件驱动五类事件版（G2 的 A/B 对照即本开关——on 无同构开头限制）。缺省 off=字节级现状。 */
+export function narrationEventsEnabled(): boolean {
+  return process.env.BLOMA_NARRATION_EVENTS === '1' || process.env.BLOMA_NARRATION_EVENTS === 'true'
+}
+
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
   // P0-1 steer（运行中转向，2026-09-08）：只主 loop（depth 0）开放。进入即 mark——
   // IPC steer 通道据此判定可注入；finally 里先 drain 残余（未及批间注入的，落 JSONL 保真；
@@ -757,6 +782,11 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     if (!input.onCheckpoint) return
     input.onCheckpoint(checkpointSnapshotOf(trigger, turn))
   }
+  // W5-G3（咨询 D5 §二 B 层）：检查点活跃投影每轮注入 system 尾部（仅 BLOMA_LOOP_CHECKPOINT on；
+  // off=input.system 原样字节不变）。每轮重建会破坏 provider 前缀缓存——观察项，
+  // 在线 A/B 时看端到端 token/耗时差。宽限轮/收口后缀不叠加投影（交卷语义优先）。
+  const systemForTurn = (base: string, turn: number): string =>
+    loopCheckpointEnabled() ? `${base}\n\n${renderCheckpointProjection(checkpointSnapshotOf('projection', turn))}` : base
   // 费用守卫 Hook 1（2026-08-28 队友）：逐轮累计渠道返回 usage（渠道不返回即全盲 → estContextTokens 兜底）
   const usageTotals = { inputTokens: 0, outputTokens: 0, turnsWithUsage: 0 }
   const attachUsage = (r: AgentLoopResult): AgentLoopResult => {
@@ -840,7 +870,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
         ...(input.providerType !== undefined ? { providerType: input.providerType } : {}),
         ...(input.thinkingLevel !== undefined ? { thinkingLevel: input.thinkingLevel } : {}),
-        messages: [{ role: 'system', content: wrapUp ? `${input.system}${WRAP_UP_SUFFIX}` : input.system }, ...windowMessagesWithDigest(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn)],
+        messages: [{ role: 'system', content: wrapUp ? `${systemForTurn(input.system, turn)}${WRAP_UP_SUFFIX}` : systemForTurn(input.system, turn) }, ...windowMessagesWithDigest(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn)],
         tools: wrapUp ? [] : definitions,
       })) {
         if (sdk.type === 'assistant' && sdk.message) {

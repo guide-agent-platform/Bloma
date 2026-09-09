@@ -1625,3 +1625,36 @@ describe('W3-D2：收口条件升级为预检通过（BLOMA_PREFLIGHT）', () =>
     expect(calls[1]!.system).toContain('【收口】')
   })
 })
+
+describe('W5-G3：检查点活跃投影每轮注入（BLOMA_LOOP_CHECKPOINT 复用）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalCheckpoint = process.env.BLOMA_LOOP_CHECKPOINT
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-g3-'))
+    delete process.env.BLOMA_LOOP_CHECKPOINT
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+    if (originalCheckpoint === undefined) delete process.env.BLOMA_LOOP_CHECKPOINT
+    else process.env.BLOMA_LOOP_CHECKPOINT = originalCheckpoint
+  })
+  it('on：每轮 system 尾部带【检查点投影】；off：system 原样字节不变', async () => {
+    const echo = tool('echo', () => ({ output: 'ok' }))
+    const systems: string[] = []
+    const query: SDKQuery = async function* (_prompt, queryOptions) {
+      systems.push(String((queryOptions.messages ?? [])[0]?.content ?? ''))
+      yield toolUseMessage(`t${systems.length}`, 'echo')
+      yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+    }
+    process.env.BLOMA_LOOP_CHECKPOINT = '1'
+    await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 2, sessionId: 'session-g3-on' }))
+    expect(systems[0]).toContain('检查点投影')
+    expect(systems[0]).toContain('候选指纹')
+    expect(systems[0]).toContain('未闭环失败：无')
+    // off：不注入（system === 原文）
+    delete process.env.BLOMA_LOOP_CHECKPOINT
+    systems.length = 0
+    await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 2, sessionId: 'session-g3-off' }))
+    expect(systems[0]).toBe('测试系统提示')
+  })
+})

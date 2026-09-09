@@ -40,7 +40,7 @@ import { assertToolAllowed } from '../permission-service'
 import { recordDecision } from '../decision-log'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from '../recovery-service'
 import { readPrimaryIntent, recordSessionActivity } from '../session-service'
-import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, preflightEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../agent-loop'
+import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, preflightEnabled, narrationEventsEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../agent-loop'
 import { isDegenerateText } from './output-integrity'
 import { checkApiContract } from './api-contract'
 import { buildAgentTools } from '../agent-tools'
@@ -1541,9 +1541,20 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     '未解决的低优先级项）。若技术合同规划了多文件，收口前确认目标文件已覆盖（未写的文件须在旁白说明偏离原因）。' +
     '测试未全绿不得声称完成。',
     '',
-    '【表达纪律】',
-    '- 每轮工具调用前用一句中文旁白说明意图；关键决策点（架构选择、偏离技术合同、测试失败后的修复策略）可用 1–2 句说明「为什么这么做」；不向用户展示冗长推理过程或自我怀疑（思考与推演放在思考通道，不进旁白）。',
-    '- 旁白开头不要千篇一律：「现在/继续/接下来/先」这类同构开头连续不得超过两轮，换成自然的说法（读完了什么、发现了什么、为什么这么改）。',
+    // W5-G1（咨询 D5）：开关 on 时旁白改事件驱动五类事件版（普通工具链不逐轮播报；同构开头限制随文案
+    // 移除——G2 的 A/B 对照即本开关）；off 保留原文四条（字节级现状）。
+    ...(narrationEventsEnabled()
+      ? [
+          '【表达纪律】',
+          '- 旁白按事件发生，不逐轮播报：仅在 ①开始明显新阶段 ②影响下一步的重要发现 ③阻塞/需授权/需用户决策 ④长操作进行中说明进展 ⑤交付或失败交接 时输出；表达「已知状态＋下一动作」（如「已定位到过滤谓词；接下来改边界条件」），不写「我将仔细分析并全面修复」式空话。',
+          '- 普通 grep→read→edit 连续执行不逐步播报；关键决策点（架构选择、偏离技术合同、修复策略切换）可用 1–2 句说明为什么这么做。',
+          '- 不把计划/工具成功/局部测试通过说成交付完成；不编造验证结果；受阻时明确原因与恢复路径。',
+        ]
+      : [
+          '【表达纪律】',
+          '- 每轮工具调用前用一句中文旁白说明意图；关键决策点（架构选择、偏离技术合同、测试失败后的修复策略）可用 1–2 句说明「为什么这么做」；不向用户展示冗长推理过程或自我怀疑（思考与推演放在思考通道，不进旁白）。',
+          '- 旁白开头不要千篇一律：「现在/继续/接下来/先」这类同构开头连续不得超过两轮，换成自然的说法（读完了什么、发现了什么、为什么这么改）。',
+        ]),
     '- 测试失败先读工具返回的失败详情再行动，不要在旁白里长篇分析或复述整段代码。',
     '- 完成总结用中文、400 字以内、自然分段（不要一行流水的清单腔）：做了什么、实际效果、哪些断言未通过、遗留哪些低优先级项。代码与文件内容不限语言。',
     '',
