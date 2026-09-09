@@ -5,6 +5,8 @@ import type { CardOption } from './CardOptions'
 import { WaitingFeedback } from './WaitingFeedback'
 import { ToolCallRow, deriveToolCallRecords, safeJsonPreview } from './ToolCallBlock'
 import { DelegationRow } from './DelegationFeed'
+import { ProgressCard, buildProgressLines, countDoneSteps, mapStageToRunSteps } from './ProgressCard'
+import type { DelegationView } from '../agent-atoms'
 import { ProcessBlockGroup, type ProcessItem } from './ProcessBlockGroup'
 import { Markdown } from './Markdown'
 import { ArrowUp, MessageSquare, IconAlertTriangle, IconStop } from './icons'
@@ -43,8 +45,6 @@ export interface ChatPanelProps {
   waitActionLabel?: string
   /** 超时-继续等待 */
   onContinueWaiting?: () => void
-  /** 超时-查看已有 */
-  onViewPartial?: () => void
   /** 回访恢复：加载历史消息期间显示骨架占位（sitemap §2.6） */
   isHistoryLoading?: boolean
   /** 停止当前生成（U4：Agent 流式生成中点击停止） */
@@ -63,6 +63,7 @@ const nullStreamFallback = atom<AgentStreamState>({
   events: [],
   content: '',
 })
+const nullDelegationsFallback = atom<DelegationView[]>([])
 
 /** 生成类阶段 → WaitingFeedback 的「正在做什么」话术（按权威阶段展示，不再一刀切「生成可运行版本」）。 */
 const STAGE_ACTION_LABELS: Record<string, string> = {
@@ -97,7 +98,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   waitStartTime,
   waitActionLabel = '生成可运行版本',
   onContinueWaiting,
-  onViewPartial,
   isHistoryLoading = false,
   onStopGeneration,
   onOpenSettings,
@@ -112,6 +112,25 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   /** 忙碌 = 外部等待或本地流式运行中。输入框保持可编辑（草稿），只禁发，不再整体锁死。 */
   const busy = isWaiting || hasActiveStream
+
+  // 进度卡（想法 B，2026-09-08）：点击「查看进度」后从权威阶段与事件流归约过程；会话结束自动收起
+  const delegations = useAtomValue(activeSessionId ? delegationsFamily(activeSessionId) : nullDelegationsFallback)
+  const [viewingProgress, setViewingProgress] = React.useState(false)
+  // 提出新想法引导提示（2026-09-08）：超时态点击按钮后聚焦输入框并提示可排队提交
+  const [ideaHint, setIdeaHint] = React.useState(false)
+  React.useEffect(() => {
+    if (!busy) {
+      setViewingProgress(false)
+      setIdeaHint(false)
+    }
+  }, [busy])
+
+  // 提出新想法：收起进度卡 + 聚焦输入框 + 显示排队引导（R-WAIT-04：等待不阻塞继续输入）
+  const handleSuggestIdea = React.useCallback(() => {
+    setViewingProgress(false)
+    setIdeaHint(true)
+    inputRef.current?.focus()
+  }, [])
 
   const messages = useAtomValue(
     activeSessionId ? agentMessagesFamily(activeSessionId) : nullMessagesFallback,
@@ -244,6 +263,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     setPendingImages([])
     setPasteError(null)
     setInputValue('')
+    setIdeaHint(false)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -349,9 +369,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               </div>
             )}
 
-            {messages.map((msg, i) => (
-              <MessageBubble key={i} message={msg} mode={mode} toolNamesById={toolNamesById} onOpenSettings={onOpenSettings} onForkFromMessage={handleForkFromMessage} />
-            ))}
+            {/* 历史回放：相邻的工具轮消息合并成同一个「执行过程」折叠组（对齐 Proma turn 分组） */}
+            <HistoryMessages messages={messages} mode={mode} toolNamesById={toolNamesById} onOpenSettings={onOpenSettings} onForkFromMessage={handleForkFromMessage} />
 
             {/* message-queue UI 收尾（P1-①）：排队中的消息灰化回显，确认不丢 */}
             {pendingQueue.map((text, i) => (
@@ -412,9 +431,44 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               <WaitingFeedback
                 elapsedSeconds={elapsed}
                 actionLabel={busyActionLabel}
-                onContinueWaiting={onContinueWaiting}
-                onViewPartial={onViewPartial}
+                onContinueWaiting={() => {
+                  // 「继续等待」重置计时回到非超时态：同步收起进度卡，避免停在无按钮状态
+                  setViewingProgress(false)
+                  onContinueWaiting?.()
+                }}
+                onViewProgress={() => setViewingProgress((previous) => !previous)}
+                viewingProgress={viewingProgress}
+                onSuggestIdea={handleSuggestIdea}
               />
+            )}
+
+            {viewingProgress && busy && streamState && activeSessionId && (
+              <ProgressCard
+                stageLabel={busyActionLabel}
+                steps={mapStageToRunSteps(workflowStage) ?? []}
+                lines={buildProgressLines(streamState.events, delegations)}
+                doneSteps={countDoneSteps(streamState.events, delegations)}
+                onClose={() => setViewingProgress(false)}
+                onSuggestIdea={handleSuggestIdea}
+              />
+            )}
+
+            {ideaHint && busy && (
+              <div
+                data-ai-id="idea-hint"
+                role="note"
+                style={{
+                  fontSize: 'var(--font-size-xs)',
+                  color: 'var(--color-text-muted)',
+                  padding: 'var(--space-3) var(--space-4)',
+                  background: 'var(--glass-bg-soft)',
+                  border: '1px dashed var(--color-border)',
+                  borderRadius: 'var(--radius-sm)',
+                  maxWidth: 420,
+                }}
+              >
+                ✍️ 有新想法？直接写在下面按 Enter 发送，会排队等这一轮完成后一起处理。
+              </div>
             )}
 
             {globalError && (
@@ -708,7 +762,7 @@ function deriveMessageProcessItems(message: AgentMessage, toolNamesById: Record<
     if (block.type === 'tool_use') {
       items.push({
         kind: 'tool',
-        key: block.id ?? `tool-${index}`,
+        key: `use-${block.id ?? index}`,
         tool: block.name ?? '',
         inputSummary: safeJsonPreview(block.input),
         status: 'ok',
@@ -718,7 +772,7 @@ function deriveMessageProcessItems(message: AgentMessage, toolNamesById: Record<
     if (block.type === 'tool_result') {
       items.push({
         kind: 'tool',
-        key: block.tool_use_id ?? `result-${index}`,
+        key: `result-${block.tool_use_id ?? index}`,
         tool: toolNamesById[block.tool_use_id ?? ''] ?? 'tool_result',
         inputSummary: typeof block.content === 'string' ? block.content : '',
         status: block.is_error ? 'error' : 'ok',
@@ -727,6 +781,78 @@ function deriveMessageProcessItems(message: AgentMessage, toolNamesById: Record<
     }
   })
   return items
+}
+
+/** 渲染单个过程项（tool / delegation / narration 行）。 */
+function renderProcessItem(item: ProcessItem): React.ReactNode {
+  if (item.kind === 'tool') {
+    return (
+      <ToolCallRow
+        tool={item.tool}
+        inputSummary={item.inputSummary}
+        outputSummary={item.outputSummary}
+        status={item.status}
+        durationMs={item.durationMs}
+        replay
+      />
+    )
+  }
+  if (item.kind === 'delegation') return <DelegationRow item={item.item} />
+  return <NarrationRow text={item.text} />
+}
+
+/**
+ * 历史回放：把相邻的工具轮消息（一次 Agent Loop 的 assistant(tool_use) + user(tool_result)）
+ * 合并成一个「执行过程」折叠组（对齐 Proma 的 turn 分组），不再每条消息拆一个折叠组。
+ * 用户输入 / 纯文本正文 / system 消息保持独立渲染。
+ */
+const HistoryMessages: React.FC<{
+  messages: AgentMessage[]
+  mode: ProjectMode | null
+  toolNamesById: Record<string, string>
+  onOpenSettings?: () => void
+  onForkFromMessage?: (message: AgentMessage) => void
+}> = ({ messages, mode, toolNamesById, onOpenSettings, onForkFromMessage }) => {
+  const nodes: React.ReactNode[] = []
+  let buffer: AgentMessage[] = []
+  const flush = (): void => {
+    if (buffer.length === 0) return
+    const buffered = buffer
+    buffer = []
+    const processItems = buffered.flatMap((message) => deriveMessageProcessItems(message, toolNamesById))
+    if (processItems.length === 0) {
+      // 无有效过程项 → 退回逐条渲染（MessageBubble 内部兜底）
+      buffered.forEach((message, index) => {
+        nodes.push(
+          <MessageBubble key={`fallback-${index}`} message={message} mode={mode} toolNamesById={toolNamesById} onOpenSettings={onOpenSettings} onForkFromMessage={onForkFromMessage} />,
+        )
+      })
+      return
+    }
+    nodes.push(
+      <ProcessBlockGroup
+        key={`process-${nodes.length}`}
+        items={processItems}
+        isStreaming={false}
+        renderItem={renderProcessItem}
+      />,
+    )
+  }
+  messages.forEach((message, index) => {
+    const isUserInput =
+      message.role === 'user' && message.content.some((block) => block.type === 'text' && !!block.text?.trim())
+    const hasTool = message.content.some((block) => block.type === 'tool_use' || block.type === 'tool_result')
+    if (!isUserInput && hasTool) {
+      buffer.push(message)
+      return
+    }
+    flush()
+    nodes.push(
+      <MessageBubble key={index} message={message} mode={mode} toolNamesById={toolNamesById} onOpenSettings={onOpenSettings} onForkFromMessage={onForkFromMessage} />,
+    )
+  })
+  flush()
+  return <>{nodes}</>
 }
 
 /* =========================================================================

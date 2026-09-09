@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -7,11 +7,14 @@ import {
   promoteToVerified,
   readAllCards,
   reportInjection,
+  reportReplayOutcomes,
   resetExperienceIndexForTests,
   selectForInjection,
   tryRegisterCard,
+  updateCardAttribution,
 } from '../../../main/experience/experience-service'
 import type { AntiPatternBody, ExperienceCard } from '../../../main/experience/types'
+import { attributeRootCause, needsRefinement } from '../../../main/experience/root-cause-attributor'
 
 /**
  * T-2 统一入册闸门（账本 ~/.proma/bloma-experience.jsonl）：
@@ -98,6 +101,62 @@ describe('experience-service：注册与去重', () => {
     const raw = readFileSync(join(home, 'bloma-experience.jsonl'), 'utf8')
     expect(raw).not.toContain('alice')
     expect(raw).not.toContain('password123')
+  })
+})
+
+describe('experience-service：attribution-seam 链路（unknown 卡 → LLM 精化落盘）', () => {
+  const unknownBody = (): AntiPatternBody => ({ ...antiBody(), stage: 'unknown', symptom: 'QQQ-7788 未登记结局：执行体以未知形态中止', trigger_condition: 'QQQ-7788 无任何已知规则线索', root_cause: { stage: 'unknown', description: 'unknown', method: 'rule', confidence: 0 } })
+  it('needsRefinement 卡经真实接线（fake llm seam）精化：method=llm、clamp≤0.5、reasoning 落盘', async () => {
+    const card = (await tryRegisterCard({ kind: 'anti_pattern', tag: 'unknown/outcome/timeout', body: unknownBody(), source: { type: 'abnormal_outcome', project_hash: 'p1', timestamp: Date.now() } })) as ExperienceCard
+    expect(needsRefinement(card)).toBe(true)
+    const refined = await attributeRootCause(card, {
+      llmCall: async () => JSON.stringify({ stage: 'coding', confidence: 0.9, reasoning: '长任务多轮工具调用未收敛，疑为生成侧任务分解粒度过大', possible_stages: ['coding'] }),
+    })
+    expect(refined.method).toBe('llm')
+    expect(refined.confidence).toBeLessThanOrEqual(0.5) // 强制 clamp 纪律
+    const updated = await updateCardAttribution(card.id, refined)
+    expect((updated?.body as AntiPatternBody).root_cause.reasoning).toContain('任务分解粒度')
+    const latest = readAllCards().find((c) => c.id === card.id)
+    expect((latest?.body as AntiPatternBody).root_cause.stage).toBe('coding')
+    expect(needsRefinement(latest!)).toBe(false) // 精化后不再需要二次归因
+  })
+})
+
+describe('experience-service：replay 回流产物相关性门（V1.1 假绿修复）', () => {
+  // 真实灰度 S5+S6（2026-09-07）暴露：契约卡被拉到「产物根本没有该端点」的项目上重放，
+  // 静态启发式默认放行 → 假 replay_green 晋升。无关产物的绿/红都无证据价值。
+  const contractBody = (): AntiPatternBody => ({ ...antiBody(), stage: 'coding', symptom: 'GWT 场景「API 契约端点：GET /api/records」未通过：契约端点失活（HTTP 404，路由未实现或挂载失败）' })
+  const projectId = 'pid-replay-gate'
+  const writeArtifact = (html: string) => {
+    const dir = join(home, 'agent-workspaces', 'default-software-builder', 'generated-projects', projectId)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'index.html'), html, 'utf8')
+  }
+  it('产物未引用重放端点：passed 不产晋升证据（卡保持 candidate）', async () => {
+    const card = await registerOnce(contractBody())
+    writeArtifact('<html><body>一个换算器，没有 API</body></html>')
+    await reportReplayOutcomes([{ id: card.fingerprint.slice(0, 8), passed: true }], projectId)
+    const latest = readAllCards().find((c) => c.id === card.id)
+    expect(latest?.status).toBe('candidate')
+  })
+  it('产物引用了重放端点：passed 正常晋升 verified（gate 不误伤）', async () => {
+    const card = await registerOnce(contractBody())
+    writeArtifact('<html><script>fetch("/api/records")</script></html>')
+    await reportReplayOutcomes([{ id: card.fingerprint.slice(0, 8), passed: true }], projectId)
+    const latest = readAllCards().find((c) => c.id === card.id)
+    expect(latest?.status).toBe('verified')
+    expect(latest?.verified_by).toBe('replay_green')
+  })
+  it('无端点 token 的卡（DOM 断言类）行为不变：passed 即晋升', async () => {
+    const card = await registerOnce()
+    writeArtifact('<html><body>无关内容</body></html>')
+    await reportReplayOutcomes([{ id: card.fingerprint.slice(0, 8), passed: true }], projectId)
+    expect(readAllCards().find((c) => c.id === card.id)?.status).toBe('verified')
+  })
+  it('不传 projectId（旧调用面兼容）：不设门，保持原语义', async () => {
+    const card = await registerOnce(contractBody())
+    await reportReplayOutcomes([{ id: card.fingerprint.slice(0, 8), passed: true }])
+    expect(readAllCards().find((c) => c.id === card.id)?.status).toBe('verified')
   })
 })
 

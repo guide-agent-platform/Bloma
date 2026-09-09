@@ -75,12 +75,12 @@ describe('Sprint 1 mode and workspace regression', () => {
         elapsedSeconds={121}
         actionLabel="生成草图"
         onContinueWaiting={vi.fn()}
-        onViewPartial={vi.fn()}
+        onViewProgress={vi.fn()}
       />,
     )
     expect(screen.getByRole('status').textContent).toContain('比预期更长')
     expect(screen.getByRole('button', { name: '继续等待' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '看看已有的' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '查看进度' })).toBeTruthy()
   })
 
   it('[S1-PROJECT-003] 选择模式进入工作区后不应返回两道门且应显示所有项目入口', async () => {
