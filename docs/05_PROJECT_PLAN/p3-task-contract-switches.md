@@ -113,3 +113,15 @@
 - G6 定案（读码，零改码）：骨架地图是事实性路径锚（文件清单+职责+渲染状态，P3 focus 时非目标文件降存在性行），不断言文件内容；代码事实由 R-FILE-01+版本戳工具化保证——无「旧骨架压过代码事实」结构性风险，G4 拆层时维持「地图=路径锚」现状。
 - G5（learnings 按 scope 相关性注入）未落地：learnings 无 scope/适用条件字段可过滤，需 schema 先行（与 Phase 4 C 系列 scope 字段联动）——登记待办。
 - G4（system 三层化/PRD 索引化）、G7（2×2 实验）按计划待 C/D 组数据与在线额度。
+
+## 11. Phase 6 W6 开关（预算与成本层，2026-09-09）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_COMPACT_EST_FALLBACK` | E4 压缩触发 est 兜底（渠道 usage 盲时用全量历史估算作判据） | **off** | 字节级现状（usage 盲→触发器失明永不压缩，W1 以撒案实锤） | 本轮无 usage 回报且 est ≥ 阈值 → 视同阈值满足（压缩/上限/末段规则照常）；确定性交接兑底附检查点段（复用 LOOP_CHECKPOINT） | `compactEstFallbackEnabled`（main/coding/agent-loop.ts） |
+| `BLOMA_EVIDENCE_CACHE` | D6 静态证据按产物指纹缓存 | **off** | 字节级现状（预检与终验各自直扫） | 安全扫描结果按 (projectId, 产物指纹) 进程内缓存复用（指纹=全量产物 path+mtime+size 聚合，任何修改即失效）；行为类（GWT/API）一律不缓存终验独立重跑 | `evidenceCacheEnabled`（main/coding/evidence-cache.ts） |
+| `BLOMA_LOOP_WINDOW_OFF` | E5 C 组实验：滑窗/摘要旁路 | **off** | 字节级现状（窗口化+digest） | 全量历史透传（仅配对重放诊断对照，长任务必爆上下文勿生产开）；E5 组态：A=现状 / B=`--env BLOMA_LOOP_CHECKPOINT=1` / C=本开关；长任务 seed=以撒 | `loopWindowOffEnabled`（main/coding/agent-loop.ts） |
+
+- F6 受阻报告不设新开关：复用 `BLOMA_LOOP_CHECKPOINT`（§7）——budget_exhausted/turn_limit 终态产出 blocked_report（候选指纹/未闭环失败/仍有效决策/验证面/建议下一步）+[loop-blocked-report] JSONL 审计行；完成/取消不产。
+- D4 预算分桶定案（读码零改码）：预算门在路径/参数/语法/CDN/版本/授权校验全部通过后才烧——协议类失败（diff 不匹配/STALE_READ/未读/越界）一律不烧预算，「协议恢复≠业务失败」结构上已成立；「修复尝试=批次+验证」单位改造需在线数据校准（登记待办）。
+- bench 验收（待额度）：`l1-batch --label w6 --env BLOMA_COMPACT_EST_FALLBACK=1` 看渠道盲项目压缩是否恢复触发；E5 三组同 seed 同 N 对照。

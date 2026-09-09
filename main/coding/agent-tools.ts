@@ -14,6 +14,7 @@ import { decideWrite, estimateTokenCount } from '../usage-guard'
 import { runSecurityScan } from '../security-scan'
 import { checkApiContract } from './api-contract'
 import { runArtifactUiGate } from './artifact-ui-gate'
+import { getCachedStaticEvidence, setCachedStaticEvidence } from './evidence-cache'
 import { readPrdBackplane } from '../document-engine'
 import { withAbort, loopApiToolEnabled, toolEvidenceEnabled, writeGuardEnabled, preflightEnabled, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../agent-loop'
 import {
@@ -963,8 +964,11 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         lines.push('③ 产物 UI 审计：未执行（探针异常）——终验仍会独立探测')
       }
 
-      // 阶段 4：安全扫描（静态；同 run_security_scan）
-      const security = runSecurityScan({ project_id: projectId, root_path: findProject(projectId).root_path })
+      // 阶段 4：安全扫描（静态；同 run_security_scan；W6-D6 按产物指纹缓存复用，终验共享）
+      const project = findProject(projectId)
+      const cachedSecurity = getCachedStaticEvidence<ReturnType<typeof runSecurityScan>>(projectId, project.root_path, 'security-scan')
+      const security = cachedSecurity ?? runSecurityScan({ project_id: projectId, root_path: project.root_path })
+      if (!cachedSecurity) setCachedStaticEvidence(projectId, project.root_path, 'security-scan', security)
       ctx.state.security_all_passed = security.passed
       if (!security.passed) {
         allPassed = false

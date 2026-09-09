@@ -1658,3 +1658,107 @@ describe('W5-G3：检查点活跃投影每轮注入（BLOMA_LOOP_CHECKPOINT 复�
     expect(systems[0]).toBe('测试系统提示')
   })
 })
+
+describe('W6（咨询 D3/D4）：预算层四件', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalCheckpoint = process.env.BLOMA_LOOP_CHECKPOINT
+  const originalThreshold = process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
+  const originalEstFallback = process.env.BLOMA_COMPACT_EST_FALLBACK
+  const originalKeepRecent = process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS
+  const echo = tool('echo', () => ({ output: 'ok' }))
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-w6-'))
+    delete process.env.BLOMA_LOOP_CHECKPOINT
+    delete process.env.BLOMA_COMPACT_EST_FALLBACK
+    process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS = '0'
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+    for (const [key, value] of [
+      ['BLOMA_LOOP_CHECKPOINT', originalCheckpoint],
+      ['BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS', originalThreshold],
+      ['BLOMA_COMPACT_EST_FALLBACK', originalEstFallback],
+      ['BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS', originalKeepRecent],
+    ] as const) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  })
+
+  it('F6：预算耗尽产出结构化受阻报告（检查点开着；含未闭环失败/验证面/建议下一步+JSONL 审计行）', async () => {
+    process.env.BLOMA_LOOP_CHECKPOINT = '1'
+    const query: SDKQuery = async function* () {
+      yield toolUseMessage('t1', 'echo')
+      yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' } // 无 usage 也可
+    }
+    const result = await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 1, sessionId: 'session-w6-blocked' }))
+    expect(result.status).toBe('turn_limit')
+    expect(result.blocked_report).toBeDefined()
+    expect(result.blocked_report!.reason).toBe('turn_limit')
+    expect(result.blocked_report!.candidate_fingerprint).toMatch(/^fp-/)
+    expect(result.blocked_report!.unresolved_failures).toEqual([])
+    expect(result.blocked_report!.verification).toMatchObject({ gwt: '未测', api: '过/豁免', security: '未测' })
+    expect(result.blocked_report!.suggested_next).toBeTruthy()
+    const jsonl = readSessionJsonl('session-w6-blocked') as Array<{ role: string; content: Array<{ type: string; text?: string }> }>
+    const reportLine = jsonl.find((m) => m.role === 'system' && m.content.some((b) => b.text?.includes('[loop-blocked-report]')))
+    expect(reportLine).toBeDefined()
+    // 开关 off：无受阻报告（字节级现状）
+    delete process.env.BLOMA_LOOP_CHECKPOINT
+    const plain = await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 1, sessionId: 'session-w6-plain' }))
+    expect(plain.blocked_report).toBeUndefined()
+  })
+
+  it('E4：渠道 usage 盲时 est 兜底触发压缩（以撒案根治位；off=触发器失明现状）', async () => {
+    // 渠道不回 usage 的查询：off 时不压缩；on 时按 est 触发
+    const queryFactory = () => {
+      const turnCalls: ConversationTurn[][] = []
+      const events: Array<{ type: AgentEvent['type'] }> = []
+      const query: SDKQuery = async function* (_prompt, queryOptions) {
+        if (queryOptions.tools === undefined) {
+          yield textMessage('交接：完成一半，场景 3 未过。')
+          yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+          return
+        }
+        turnCalls.push((queryOptions.messages ?? []).map((turn) => ({ ...turn })))
+        yield toolUseMessage(`t${turnCalls.length}`, 'echo')
+        yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' } // 无 usage 字段
+      }
+      return { query, turnCalls }
+    }
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1'
+    // off：永不压缩（现状）
+    const off = queryFactory()
+    await runAgentLoop(baseInput({ query: off.query, tools: [echo], maxTurns: 6, sessionId: 'session-w6-off' }))
+    expect(off.turnCalls[1]).toHaveLength(1 + 1 + 2) // system+task+首轮对（无重置全量累积）
+    // on：est 兜底触发
+    process.env.BLOMA_COMPACT_EST_FALLBACK = '1'
+    const on = queryFactory()
+    await runAgentLoop(baseInput({ query: on.query, tools: [echo], maxTurns: 6, sessionId: 'session-w6-on' }))
+    expect(JSON.stringify(on.turnCalls[1])).toContain('此前进度交接')
+  })
+
+  it('E4：确定性交接兑底附带检查点段（硬阈值兜底从检查点拼装）', async () => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    process.env.BLOMA_LOOP_CHECKPOINT = '1'
+    const { query, handoffCalls } = (() => {
+      const handoffCalls: ConversationTurn[][] = []
+      const query: SDKQuery = async function* (_prompt, queryOptions) {
+        if (queryOptions.tools === undefined) {
+          handoffCalls.push((queryOptions.messages ?? []).map((turn) => ({ ...turn })))
+          throw new Error('渠道 429')
+        }
+        yield toolUseMessage('t0', 'echo')
+        yield { type: 'result', subtype: 'success', stop_reason: 'tool_use', usage: { input_tokens: 5000, output_tokens: 10 } }
+      }
+      return { query, handoffCalls }
+    })()
+    await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 6, sessionId: 'session-w6-handoff' }))
+    const compactSystemLine = readSessionJsonl('session-w6-handoff') as Array<{ role: string; content: Array<{ type: string; text?: string }> }>
+    const line = compactSystemLine.find((m) => m.role === 'system' && m.content.some((b) => b.text?.includes('[loop-compaction]')))
+    expect(line).toBeDefined()
+    const text = line!.content.map((b) => b.text ?? '').join('')
+    expect(text).toContain('检查点状态')
+    expect(text).toContain('候选指纹')
+  })
+})

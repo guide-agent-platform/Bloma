@@ -202,6 +202,16 @@ export interface AgentLoopResult {
   cancel_detail?: { phase: LoopCancelPhase; source?: string; reason?: string }
   /** W2-F4：自验状态快照（终验 source 五分类判据）；由 attachUsage 从工具状态拼装 */
   validation?: LoopValidationSnapshot
+  /** W6-F6（咨询 D4 §六）：预算/轮次耗尽的结构化受阻报告（非裸终止）。仅 BLOMA_LOOP_CHECKPOINT on 且非完成终态携带。 */
+  blocked_report?: {
+    reason: 'budget_exhausted' | 'turn_limit'
+    candidate_fingerprint: string
+    unresolved_failures: string[]
+    active_decisions: string[]
+    verification: { gwt: string; api: string; security: string }
+    files_written: string[]
+    suggested_next: string
+  }
 }
 
 /** W1-E1：取消在 loop 内可被观察的五个位置（cancel_detail.phase 的取值）。 */
@@ -367,6 +377,8 @@ function deterministicHandoff(
   toolCalls: Array<{ name: string }>,
   finalText: string,
   failureExcerpt: string,
+  /** W6-E4（咨询 D3 §三 D）：检查点段——硬阈值兑底从检查点拼装而非只靠工具统计 */
+  checkpointSection?: string,
 ): string {
   const counts = new Map<string, number>()
   for (const call of toolCalls) counts.set(call.name, (counts.get(call.name) ?? 0) + 1)
@@ -375,6 +387,7 @@ function deterministicHandoff(
     `【自动交接（交接模型不可用）】已进行到第 ${turn} 轮，工具调用：${usage || '（无）'}。`,
     failureExcerpt ? `未解决的测试失败（原文）：${failureExcerpt}` : '',
     finalText.trim() ? `最近说明：${finalText.trim().slice(0, 200)}` : '',
+    ...(checkpointSection ? [checkpointSection] : []),
   ]
   return parts.filter(Boolean).join('\n')
 }
@@ -667,6 +680,18 @@ export function narrationEventsEnabled(): boolean {
   return process.env.BLOMA_NARRATION_EVENTS === '1' || process.env.BLOMA_NARRATION_EVENTS === 'true'
 }
 
+/** W6-E4（咨询 D3 §三 C/D）：压缩触发的 est 兜底——渠道 usage 盲（本轮无 usage 回报，
+ *  如 glm input_tokens 恒 0/缺失）时用全量历史估算作触发判据，防触发器失明（W1 以撒案实锤）。缺省 off=字节级现状。 */
+export function compactEstFallbackEnabled(): boolean {
+  return process.env.BLOMA_COMPACT_EST_FALLBACK === '1' || process.env.BLOMA_COMPACT_EST_FALLBACK === 'true'
+}
+
+/** W6-E5（咨询 D3 §四 C 组）：滑窗/摘要旁路——全量历史透传（仅配对重放诊断对照用，
+ *  长任务必爆上下文，勿生产开启）。缺省 off=字节级现状。 */
+export function loopWindowOffEnabled(): boolean {
+  return process.env.BLOMA_LOOP_WINDOW_OFF === '1' || process.env.BLOMA_LOOP_WINDOW_OFF === 'true'
+}
+
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
   // P0-1 steer（运行中转向，2026-09-08）：只主 loop（depth 0）开放。进入即 mark——
   // IPC steer 通道据此判定可注入；finally 里先 drain 残余（未及批间注入的，落 JSONL 保真；
@@ -792,6 +817,36 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
   const attachUsage = (r: AgentLoopResult): AgentLoopResult => {
     // W2-E3：终态事件驱动保存（取消/熔断/完成全部路径部过这里）
     emitCheckpoint('final', turns)
+    // W6-F6：预算/轮次耗尽产出结构化受阻报告（仅检查点开着；完成/取消不产）
+    let blocked: AgentLoopResult['blocked_report']
+    if (loopCheckpointEnabled() && (r.status === 'budget_exhausted' || r.status === 'turn_limit')) {
+      const snapshot = checkpointSnapshotOf('final', turns)
+      blocked = {
+        reason: r.status,
+        candidate_fingerprint: snapshot.validation.candidate_fingerprint,
+        unresolved_failures: [...snapshot.validation.last_gwt_failures],
+        active_decisions: snapshot.decisions.filter((d) => !d.superseded_by).map((d) => d.text.slice(0, 120)),
+        verification: {
+          gwt: snapshot.validation.gwt_all_passed ? '全过' : snapshot.validation.gwt_runs > 0 ? '有失败' : '未测',
+          api: snapshot.validation.api_all_passed ? '过/豁免' : snapshot.validation.api_contract_runs > 0 ? '失败' : '未测',
+          security: snapshot.validation.security_all_passed ? '过' : '未测',
+        },
+        files_written: Object.keys(snapshot.progress_files).slice(0, 30),
+        suggested_next:
+          snapshot.validation.last_gwt_failures.length > 0
+            ? `优先处理未闭环失败（${snapshot.validation.last_gwt_failures.slice(0, 3).join('、')}）；修复后完整重验，勿凭旧证据交差`
+            : '验证面未闭环（GWT/API/安全见上）；按检查点投影继续验证后收口',
+      }
+      try {
+        appendSessionMessage(input.sessionId, {
+          role: 'system',
+          content: [{ type: 'text', text: `[loop-blocked-report] ${JSON.stringify(blocked)}` }],
+          timestamp: Date.now(),
+        })
+      } catch {
+        // 取证落盘失败静默
+      }
+    }
     // 渲染层透明条数据源（v6 ② b）：loop 结束发布 usage_summary 事件（取消/熔断路径同样发布——用量是事实）
     const estContextTokens = estimateTokenCount(
       messages
@@ -807,6 +862,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     })
     return {
       ...r,
+      ...(blocked ? { blocked_report: blocked } : {}),
       usage: {
         inputTokens: usageTotals.inputTokens,
         outputTokens: usageTotals.outputTokens,
@@ -870,7 +926,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
         ...(input.providerType !== undefined ? { providerType: input.providerType } : {}),
         ...(input.thinkingLevel !== undefined ? { thinkingLevel: input.thinkingLevel } : {}),
-        messages: [{ role: 'system', content: wrapUp ? `${systemForTurn(input.system, turn)}${WRAP_UP_SUFFIX}` : systemForTurn(input.system, turn) }, ...windowMessagesWithDigest(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn)],
+        messages: [{ role: 'system', content: wrapUp ? `${systemForTurn(input.system, turn)}${WRAP_UP_SUFFIX}` : systemForTurn(input.system, turn) }, ...(loopWindowOffEnabled() ? messages : windowMessagesWithDigest(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn))],
         tools: wrapUp ? [] : definitions,
       })) {
         if (sdk.type === 'assistant' && sdk.message) {
@@ -1004,13 +1060,30 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     // ---- usage 竹节压缩（闭环 PR6）：阈值触发交接，重置为 task+交接文档 ----
     // W1-E1（咨询 D3）：阈值满足单独提取——满足但因上限/末段被跳过时报一次 skip 观测
     // （此前该路径完全静默；纯埋点，压缩行为零变化）。E6 核查 1 定案：上限后=静默跳过。
-    const compactThresholdMet = compactThreshold > 0 && (usage?.input_tokens ?? 0) >= compactThreshold
+    // W6-E4：渠道 usage 盲时（本轮无 usage）用 est 兜底判据（BLOMA_COMPACT_EST_FALLBACK，
+    // 缺省 off=现状触发器失明；W1 以撒案 24 轮 input=0 一次都没压缩的根治位）。
+    const usageBlind = usage === undefined
+    const estFallbackMet =
+      compactEstFallbackEnabled() && usageBlind && estTokensOfMessages(messages) >= compactThreshold
+    const compactThresholdMet =
+      compactThreshold > 0 && ((usage?.input_tokens ?? 0) >= compactThreshold || estFallbackMet)
     if (compactThresholdMet && compactions < LOOP_MAX_COMPACTIONS && turn < input.maxTurns - 3) {
       if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls, 'handoff', input.signal))
       const handoff = await requestHandoff(input, messages, pinnedTestTurn)
       if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls, 'handoff', input.signal))
       // 确定性兑底也携带钉轮失败断言原文（审查 P1-2：交接失败恰是最需要细节的降级路径）
-      const summary = handoff || deterministicHandoff(turn, toolCalls, finalText, pinnedFailureExcerpt(messages, pinnedTestTurn))
+      // W6-E4：检查点开着时兑底交接附带检查点段（硬阈值兜底从检查点拼装，D3 §三 D）
+      const summary =
+        handoff ||
+        deterministicHandoff(
+          turn,
+          toolCalls,
+          finalText,
+          pinnedFailureExcerpt(messages, pinnedTestTurn),
+          loopCheckpointEnabled()
+            ? renderCheckpointProjection(checkpointSnapshotOf('compaction', turn)).replace('【检查点投影（宿主状态，勿改写；每轮更新）】', '【检查点状态】')
+            : undefined,
+        )
       // keep-recent 三段式（P1-1）：task + 交接文档 + 近期原文保留段——重置在「交接文档」
       // 之外保留最近原文轮次（预算 keepRecentBudget；'0' 时 retained 为空 = 旧行为两段）。
       // 保留段在重置前的 messages 上计算（含本轮刚落盘的工具对）；交接 LLM 失败的确定性

@@ -12,6 +12,7 @@ import { createSnapshot, runSandbox, trackAnalytics } from '../platform-services
 import { renderPackageJson, renderStaticServer, renderSkeletonToProject, scaffoldEnabled } from '../project-scaffold'
 import { runBuildGate, type BuildGateResult } from './build-gate'
 import { runArtifactUiGate, uiGateEnabled, uiProbeNotes, type ArtifactUiGateResult } from './artifact-ui-gate'
+import { getCachedStaticEvidence, setCachedStaticEvidence } from './evidence-cache'
 import { runVisionAuditGate } from './vision-audit-gate'
 import { buildRepairTasks, resolveRepairBudget, runRepairLoop, repairScopeEnabled, type RepairCheckpointContext, type RepairTask } from './repair-loop'
 import { recordFailureCards } from '../experience/error-card'
@@ -2221,8 +2222,12 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
     // 修复收敛：testResult 已更新为重验结果，继续正常链
   }
 
-  // 安全扫描终验（A3，OWASP 静态扫描）：高危/严重命中同样只熔断不重修
-  let security = runSecurityScan({ project_id: input.project_id, root_path: findProject(input.project_id).root_path })
+  // 安全扫描终验（A3，OWASP 静态扫描）：高危/严重命中同样只熔断不重修。
+  // W6-D6：静态证据按产物指纹缓存——预检（run_preflight）算过且候选未变则复用，
+  // 行为类（GWT/API）仍独立重跑；开关 off=直通现状。
+  const securityCached = getCachedStaticEvidence<ReturnType<typeof runSecurityScan>>(input.project_id, findProject(input.project_id).root_path, 'security-scan')
+  let security = securityCached ?? runSecurityScan({ project_id: input.project_id, root_path: findProject(input.project_id).root_path })
+  if (!securityCached) setCachedStaticEvidence(input.project_id, findProject(input.project_id).root_path, 'security-scan', security)
   throwIfAborted(input.signal)
   writeSecurityScanDocument(input.project_id, renderSecurityScanMarkdown(security))
   if (!security.passed) {
