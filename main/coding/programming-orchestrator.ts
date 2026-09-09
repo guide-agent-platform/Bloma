@@ -1897,6 +1897,33 @@ export async function runGwtWithApiContract(input: { project_id: string; session
 }
 
 /**
+ * test_completed：GWT/终验结果的结构化证据事件（2026-09-09）。
+ *
+ * 背景：runAgentLoopPostTesting 每次写 test-report.json 后同点发送；analytics
+ * append-only 不受熔断回滚影响（回滚会把工作区 test-report 清回终验前快照，导致
+ * 事后无判定证据——见 P0 基准扫描发现）。事件即最终判定证据，供审计与 bench 采集。
+ */
+function trackTestCompleted(input: AgentLoopPostTestingInput, result: GwtTestResult, round: 'initial' | 'after_repair') {
+  trackAnalytics({
+    request_id: input.request_id,
+    event: {
+      event_type: 'test_completed',
+      project_id: input.project_id,
+      session_id: input.session_id,
+      payload: {
+        round,
+        via: 'agent_loop_post_testing',
+        total_count: result.total_count,
+        passed_count: result.passed_count,
+        failed_count: result.failed_count,
+        failures: (result.failure_summary || []).slice(0, 20).map((f) => f.scenario),
+      },
+      privacy_level: 'research_safe',
+    },
+  })
+}
+
+/**
  * runAgentLoopPostTesting — Agent Loop 路径的独立门禁函数（M4-A，微调方案 §4）。
  *
  * 语义固定为「只终验不重修」：GWT 终验 →（通过）安全扫描 → judge 终审 → ready / 让渡，
@@ -1913,6 +1940,7 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
   throwIfAborted(input.signal)
   writeTestReport({ request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, result: testResult })
   syncDocuments({ request_id: input.request_id, project_id: input.project_id, session_id: input.session_id, checkpoint: 'mvp_tested' })
+  trackTestCompleted(input, testResult, 'initial')
   throwIfAborted(input.signal)
 
   // P2 失败回流（实施稿 §4.4）：GWT 首败先定向修复再决定熔断——预算内修复轮 + 全量
@@ -2092,6 +2120,7 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
   throwIfAborted(input.signal)
   writeTestReport({ request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, result: retested })
   syncDocuments({ request_id: input.request_id, project_id: input.project_id, session_id: input.session_id, checkpoint: 'mvp_tested' })
+  trackTestCompleted(input, retested, 'after_repair')
 
   const converged = retested.failed_count === 0
   if (converged) updateProject(input.project_id, { test_repair_count: 0 })

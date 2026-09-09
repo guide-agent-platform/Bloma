@@ -14,3 +14,6 @@ evidence/
 # （详见 storage/config-paths.ts getPromaHome 与 tests/support/proma-home-guard.ts）
 undefined/
 null/
+
+# bench 离线报告（不入库）
+bench/reports/

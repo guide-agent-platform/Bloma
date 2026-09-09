@@ -1,6 +1,6 @@
 import { restorePromaHome } from '../../support/proma-home-guard'
 import type { ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -157,6 +157,25 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     return existsSync(path) ? readFileSync(path, 'utf8') : ''
   }
 
+  function readAnalyticsEvents(): Array<Record<string, unknown>> {
+    const wsRoot = join(process.env.PROMA_HOME!, 'agent-workspaces')
+    const out: Array<Record<string, unknown>> = []
+    for (const slug of readdirSync(wsRoot)) {
+      const f = join(wsRoot, slug, 'analytics.jsonl')
+      if (!existsSync(f)) continue
+      for (const l of readFileSync(f, 'utf8').split('\n').filter(Boolean)) {
+        try { out.push(JSON.parse(l)) } catch { /* 跳过坏行 */ }
+      }
+    }
+    return out
+  }
+
+  function testCompletedEvents() {
+    return readAnalyticsEvents().filter((e) => e.event_type === 'test_completed') as Array<{
+      payload: { round?: string; total_count?: number; passed_count?: number; failed_count?: number; via?: string }
+    }>
+  }
+
   function baseInput() {
     return {
       request_id: 'req-repair',
@@ -200,6 +219,15 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     const log = decisionLines()
     expect(log).toContain('repair_round_started')
     expect(log).toContain('repair_round_completed')
+    // test_completed 结构化证据（2026-09-09）：首验 initial + 重验 after_repair 各一条
+    const testEvents = testCompletedEvents()
+    expect(testEvents).toHaveLength(2)
+    expect(testEvents[0].payload.round).toBe('initial')
+    expect(testEvents[0].payload.failed_count).toBe(1)
+    expect(testEvents[0].payload.via).toBe('agent_loop_post_testing')
+    expect(testEvents[1].payload.round).toBe('after_repair')
+    expect(testEvents[1].payload.failed_count).toBe(0)
+    expect(testEvents[1].payload.total_count).toBe(2)
   })
 
   it('修复后仍失败 → 现状熔断口径一字不改：circuitBreakRollback 参数一致 + 让渡 blocked', async () => {
