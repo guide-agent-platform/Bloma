@@ -25,6 +25,7 @@ import { buildModuleMapInjection, loadOfficialModules, modulesEnabled, renderOff
 import { listRefPatternModules, refLibraryEnabled } from '../experience/ref-source'
 import { backplaneInterfaceSpec, buildIterationRoundAnchor, buildRepairRoundAnchor, focusAnchorEnabled, renderBackplaneAnchor, renderRoundAnchorBlock, roundAnchorEnabled } from '../model/prd-backplane'
 import { renderRulesSection, rulesRegistryEnabled } from '../rules-registry'
+import { renderExpressionSection } from '../prompt-expression'
 import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
 import { distillProjectMemorySafely } from '../memory-distiller'
 import { generateSketch, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from '../sketch-engine'
@@ -1354,7 +1355,7 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
   const constraints = backplane.constraints?.length
     ? backplane.constraints.map((entry) => `- ${entry}`).join('\n')
     : '- （无）'
-  return [
+  const arr = [
     '你是 Bloma 编程 Agent，用提供的工具亲手构建并验证一个可运行的应用。',
     '',
     '【项目锚（每轮有效，一切决策不得漂移出此范围）】',
@@ -1471,7 +1472,12 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     "③前端：fetch('/api/...') 调后端，处理加载/失败态；数据持久化职责在后端 data/，前端不留权威副本；",
     '④路由内禁止出网（外部 fetch）与 require 项目目录外的模块；外部模型能力走 /api/llm；',
     '⑤后端数据的断言写「新增项出现/状态变化」，禁止写「总数等于 N」这类依赖历史状态的断言（探针重复执行会累积数据）。',
-  ].join('\n')
+  ]
+  const base = arr.join('\n')
+  // Phase 3 B5（2026-09-09）：表达适配层 append-only 注入（off=字节级现状；只改表达
+  // 不改验收口径，契约层构件字节永不受本层影响——回归锁锁定 append-only）。
+  const expression = renderExpressionSection()
+  return expression ? `${base}\n\n${expression}` : base
 }
 
 /**
