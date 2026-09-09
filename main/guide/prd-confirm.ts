@@ -6,7 +6,7 @@ import { nextRequirementId, runSketchTask } from '../programming-orchestrator'
 import { earsifyRequirements } from '../requirement-earsifier'
 import { resolveChannelEnv } from '../runtime-fallback'
 import type { PrdBackplane, SketchRequirement } from '../sketch-engine'
-import { requirementAssertions, requirementPriority, requirementStory } from '../sketch-engine'
+import { backplaneAiCapabilities, requirementAssertions, requirementPriority, requirementStory } from '../sketch-engine'
 import type { SDKQuery } from '../orchestrator'
 
 /**
@@ -129,6 +129,8 @@ export function publishPrdConfirmCard(opts: {
       out_of_scope: backplane.out_of_scope,
       assumptions: backplane.assumptions ?? [],
       constraints: backplane.constraints ?? [],
+      // Phase 2 M1：能力契约块随卡过目（开关 off/无 CAP → 空数组，卡片自动隐藏该段）
+      ai_capabilities: backplaneAiCapabilities(backplane),
       expanded: input.mode === 'longterm',
       ideas,
     },

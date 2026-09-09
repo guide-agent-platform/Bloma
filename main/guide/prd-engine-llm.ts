@@ -5,8 +5,15 @@ import { loadPromptOverride } from '../prompt-config'
 import { buildPrdFewShotInjection, isInjectionEnabled } from '../template-injection'
 import { callLlmForJson } from '../kernel/llm-call'
 import type { AgentMessage, MessageContentBlock } from '../../shared/types'
-import type { GameDesignDoc, InterfaceEndpoint, PrdBackplane, SketchRequirement } from '../model/prd-backplane'
-import { buildPrdDocumentFallback, deriveInterfaceSpec, normalizePrdDocumentNewlines, reconcilePrdDocumentPriorities } from '../model/prd-backplane'
+import type { AiCapability, GameDesignDoc, InterfaceEndpoint, PrdBackplane, SketchRequirement } from '../model/prd-backplane'
+import {
+  buildPrdDocumentFallback,
+  capContractEnabled,
+  deriveAiCapabilities,
+  deriveInterfaceSpec,
+  normalizePrdDocumentNewlines,
+  reconcilePrdDocumentPriorities,
+} from '../model/prd-backplane'
 import { renderDocumentSectionSpec } from '../prd-sections'
 import { categoryTemperature } from '../model-resolution'
 
@@ -124,8 +131,26 @@ ${renderDocumentSectionSpec()}
 - 只输出 JSON，其余一律不要。`
 
 function getSystemPrompt(): string {
-  return loadPromptOverride('prd-system') ?? DEFAULT_SYSTEM_PROMPT
+  const base = loadPromptOverride('prd-system') ?? DEFAULT_SYSTEM_PROMPT
+  // Phase 2 M1：开关 off → base 原样返回（字节级现状）；on → 追加 CAP 产出指令
+  // （附在末尾不侵入既有结构，与外置覆盖叠加友好）。
+  return capContractEnabled() ? `${base}\n\n${CAP_PROMPT_ADDENDUM}` : base
 }
+
+/**
+ * 能力契约块产出指令（Phase 2 M1，仅在 BLOMA_CAP_CONTRACT=on 时追加到 system prompt 末尾）。
+ * 三处消费（loop 锚定/裁判/确认卡）读背板 ai_capabilities，与本指令同 schema。
+ */
+export const CAP_PROMPT_ADDENDUM = [
+  '【能力契约块（ai_capabilities，本段启用时必须输出）】',
+  '输出结构新增字段（与上述字段同层级；纯展示/纯 CRUD 项目省略或给空数组）：',
+  '"ai_capabilities":[{"capability_id":"CAP-01","task":"该能力承担的任务","keyProcessing":"关键处理依赖什么","ioDependency":"输入=…；输出=…；输入变化→输出如何相应变化","forbiddenSubstitutions":["固定模板冒充"],"evidence":["修改关键输入后输出变化"],"source":"user_explicit"}',
+  '- 凡功能项涉及 AI/智能/语音/自动生成/总结整理等能力（输入→智能处理→输出），必须为每条此类能力输出一条 CAP，上限 4 条。',
+  '- task 不得用「智能处理」「一键生成」类标签词代替；keyProcessing 说清该能力靠什么成立（模型调用/规则/检索）。',
+  '- forbiddenSubstitutions 从对话与需求提炼写具体（如「固定模板冒充总结」「关键词匹配冒充分析」「降级为普通增删改查」）；evidence 为行为级可观察证据。',
+  '- source：user_explicit=用户原话明确要求；confirmed_derived=从已确认需求派生；pending_assumption=未经确认的假设。',
+  '- document 的功能清单与验收不得与 CAP 矛盾；CAP 的「不算完成」优先于任何局部测试通过。',
+].join('\n')
 
 export async function generatePrdLlm(input: GeneratePrdLlmInput): Promise<PrdBackplane | null> {
   const conversation = readConversation(input.session_id)
@@ -173,8 +198,7 @@ const PRD_RETRY_FEEDBACK =
   '（{"document":"长文本 PRD 全文","positioning":"…","acceptance":{"F-001":"…"},"out_of_scope":[…],"assumptions":[…]}），' +
   '不要 markdown 代码围栏与任何解释文字，确保括号引号完整闭合、document 内换行与引号已转义。'
 
-function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequirement[], projectId: string): PrdBackplane {
-  const acceptance: Record<string, string> = {}
+export function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequirement[], projectId: string): PrdBackplane {  const acceptance: Record<string, string> = {}
   for (const item of items) {
     acceptance[item.id] = parsed.acceptance[item.id]?.trim() || `${item.description}：核心路径可交互，边界与异常输入不崩溃。`
   }
@@ -212,6 +236,16 @@ function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequirement[],
           const derived = deriveInterfaceSpec(items)
           return derived ? { interface_spec: derived } : undefined
         })()),
+    // Phase 2 M1：能力契约块随背板冻结——LLM 产出优先；漏报且命中 AI 信号 →
+    // deriveAiCapabilities 确定性派生；开关 off 整段不挂（字节级现状）。
+    ...(capContractEnabled()
+      ? {
+          ai_capabilities:
+            parsed.ai_capabilities && parsed.ai_capabilities.length > 0
+              ? parsed.ai_capabilities
+              : (deriveAiCapabilities(items) ?? []),
+        }
+      : {}),
   }
 }
 
@@ -223,6 +257,8 @@ interface ParsedPrd {
   assumptions: string[]
   gdd?: GameDesignDoc
   interface_spec?: InterfaceEndpoint[]
+  /** Phase 2 M1：能力契约块（开关 on 时 prompt 要求产出；解析容错同 interface_spec）。 */
+  ai_capabilities?: AiCapability[]
 }
 
 function parsePrdJson(text: string): ParsedPrd | undefined {
@@ -251,6 +287,8 @@ function parsePrdJson(text: string): ParsedPrd | undefined {
   const gdd = parseGdd(parsed.gdd)
   // 完整程序阶段 2：interface_spec 解析（前后端契约真相源；缺省/非法 → 空数组零注入）。
   const interfaceSpec = parseInterfaceSpec(parsed.interface_spec)
+  // Phase 2 M1：ai_capabilities 解析（能力契约块；缺省/非法 → 空数组走派生兜底）。
+  const aiCapabilities = parseAiCapabilities(parsed.ai_capabilities)
 
   return {
     positioning: typeof parsed.positioning === 'string' ? parsed.positioning : '',
@@ -260,7 +298,47 @@ function parsePrdJson(text: string): ParsedPrd | undefined {
     assumptions: stringArray(parsed.assumptions),
     ...(gdd ? { gdd } : {}),
     ...(interfaceSpec.length > 0 ? { interface_spec: interfaceSpec } : {}),
+    ...(aiCapabilities.length > 0 ? { ai_capabilities: aiCapabilities } : {}),
   }
+}
+
+/**
+ * 解析 ai_capabilities（Phase 2 M1）：capability_id 归一为 CAP-0N（接受 CAP-1/cap_01/1
+ * 等变体）；task 必填（缺则弃条）；数组字段过滤空串并限量；source 白名单外归
+ * pending_assumption（保守：来源不明不当作已确认）；上限 4 条。
+ * export：供单测直测（契约清洗承重，同 parseInterfaceSpec 口径）。
+ */
+export function parseAiCapabilities(raw: unknown): AiCapability[] {
+  if (!Array.isArray(raw)) return []
+  const out: AiCapability[] = []
+  for (const entry of raw) {
+    if (!isRecord(entry)) continue
+    const task = typeof entry.task === 'string' ? entry.task.trim() : ''
+    if (!task) continue
+    const idRaw = typeof entry.capability_id === 'string' ? entry.capability_id : ''
+    const idMatch = idRaw.match(/(\d+)/)
+    const capabilityId = `CAP-${String(idMatch ? Number(idMatch[1]) : out.length + 1).padStart(2, '0')}`
+    const list = (value: unknown): string[] =>
+      Array.isArray(value)
+        ? value.filter((v): v is string => typeof v === 'string' && v.trim().length > 0).map((v) => v.trim().slice(0, 160)).slice(0, 4)
+        : []
+    const sourceRaw = typeof entry.source === 'string' ? entry.source : ''
+    const source: AiCapability['source'] =
+      sourceRaw === 'user_explicit' || sourceRaw === 'confirmed_derived' || sourceRaw === 'pending_assumption'
+        ? sourceRaw
+        : 'pending_assumption'
+    out.push({
+      capability_id: capabilityId,
+      task: task.slice(0, 200),
+      keyProcessing: typeof entry.keyProcessing === 'string' ? entry.keyProcessing.trim().slice(0, 300) : '',
+      ioDependency: typeof entry.ioDependency === 'string' ? entry.ioDependency.trim().slice(0, 300) : '',
+      forbiddenSubstitutions: list(entry.forbiddenSubstitutions),
+      evidence: list(entry.evidence),
+      source,
+    })
+    if (out.length >= 4) break
+  }
+  return out
 }
 
 /** 解析 interface_spec（完整程序阶段 2）：端点必须落在 /api/ 前缀下（平台自动挂载

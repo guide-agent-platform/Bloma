@@ -399,6 +399,26 @@ export const PrdConfirmDialog: React.FC = () => {
           </ul>
         </div>
 
+        {/* 能力契约段（Phase 2 M1，2026-09-09）：AI/智能能力怎么算完成——缺失/空数组隐藏（开关 off/无 CAP/旧夹具） */}
+        {(state.aiCapabilities ?? []).length > 0 ? (
+          <div data-ai-id="prd-confirm-capabilities">
+            <h3 style={sectionTitleStyle}>核心能力契约（{(state.aiCapabilities ?? []).length} 条）——这些能力怎么才算完成</h3>
+            <div style={{ ...warnBlockStyle('caution'), marginTop: 6, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {state.aiCapabilities!.map((cap) => (
+                <div key={cap.capabilityId}>
+                  <div style={{ fontWeight: 600 }}>
+                    · {cap.task}
+                    {cap.forbiddenSubstitutions.length > 0 ? <span style={{ fontWeight: 400 }}>｜不算完成：{cap.forbiddenSubstitutions.join('；')}</span> : null}
+                  </div>
+                  {cap.evidence.length > 0 ? (
+                    <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>验收证据：{cap.evidence.join('；')}</div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         {/* 第三段：明确不做的（高亮——事后争议最大） */}
         <div data-ai-id="prd-confirm-out-of-scope">
           <h3 style={sectionTitleStyle}>{PRD_TERMS.outOfScope}</h3>

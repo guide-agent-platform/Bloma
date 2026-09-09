@@ -56,6 +56,99 @@ export interface InterfaceEndpoint {
   response?: string
 }
 
+// ---------------------------------------------------------------------------
+// Phase 2 M1（2026-09-09，P1 稿 §3 M1）：能力契约块 CAP（Capability Contract）
+// 防蒸馏的三方交汇点（咨询 A 能力条款 / 咨询 B 能力契约块 / 一致性治理 core_capabilities）：
+// 「智能部分真正做什么、输入输出依赖什么、什么不算完成」以结构化字段随背板冻结，
+// 编程锚定/裁判判定/PRD 确认卡三处消费同一份。开关 BLOMA_CAP_CONTRACT 缺省 off=字节级现状。
+// ---------------------------------------------------------------------------
+
+/** 能力条款来源（供裁判/内审区分已确认与假设）。 */
+export type AiCapabilitySource = 'user_explicit' | 'confirmed_derived' | 'pending_assumption'
+
+/** 能力契约块单条（P1 稿 M1 schema，字段名与 prd.json 存储一致）。 */
+export interface AiCapability {
+  /** 条款编号：CAP-01 递增（与 F-00x 功能项编号同风格） */
+  capability_id: string
+  /** 该能力承担什么任务（不可用「智能处理」类标签词代替） */
+  task: string
+  /** 关键处理：该能力依赖什么、靠什么成立 */
+  keyProcessing: string
+  /** 输入输出依赖：输入=…；输出=…；输入变化→输出如何相应变化 */
+  ioDependency: string
+  /** 哪些实现不算完成（禁止的降级替代） */
+  forbiddenSubstitutions: string[]
+  /** 验收证据（行为级、可观察） */
+  evidence: string[]
+  /** 来源：user_explicit=用户原话 / confirmed_derived=已确认需求派生 / pending_assumption=假设 */
+  source: AiCapabilitySource
+}
+
+/** BLOMA_CAP_CONTRACT 开关（缺省 off=字节级现状：无 CAP 产出/派生/注入；
+ * 与 BLOMA_REF_LIBRARY 同口径，off 时即使背板存量有 CAP 也零注入）。 */
+export function capContractEnabled(): boolean {
+  const raw = (process.env.BLOMA_CAP_CONTRACT ?? '').trim().toLowerCase()
+  return raw === '1' || raw === 'on' || raw === 'true'
+}
+
+/** 背板能力条款读取：过滤缺 task 的残条款；缺省 []。 */
+export function backplaneAiCapabilities(backplane: PrdBackplane): AiCapability[] {
+  return (backplane.ai_capabilities ?? []).filter((cap) => cap.task.trim().length > 0)
+}
+
+/**
+ * AI 能力信号词（deriveAiCapabilities 触发判据）。与 bench/harness/metrics.mjs 的
+ * AI_INTENT_RE 同源，但 ascii 「ai」收紧为词边界匹配（防 email/main/train 等
+ * 含 ai 子串的英文词误触发——bench 侧度量历史项目保持原样，不动）。
+ * 改动本表时同步评估 bench 侧口径（陷阱 22 纪律）。
+ */
+export const AI_CAPABILITY_SIGNAL_RE = /\bai\b|智能|语音|总结|整理|自动生成|自动汇总|大模型/i
+
+/**
+ * 确定性派生最小 CAP（LLM 漏报兜底，仿 deriveInterfaceSpec）：功能项命中 AI 信号
+ * 而开关开启时，为每条命中项派生一条最小能力契约（确定性模板，不编内容——只把
+ * 「该能力的智能性不可被降级替代」开成硬条款）。纯展示/纯 CRUD 零派生。
+ * 上限 3 条（派生是兜底不是主力，宁缺毋滥）。
+ */
+export function deriveAiCapabilities(requirements: SketchRequirement[]): AiCapability[] | undefined {
+  const signaled = requirements
+    .filter((item) => AI_CAPABILITY_SIGNAL_RE.test(`${item.description} ${item.story ?? ''}`))
+    .slice(0, 3)
+  if (signaled.length === 0) return undefined
+  return signaled.map((item, index) => ({
+    capability_id: `CAP-${String(index + 1).padStart(2, '0')}`,
+    task: item.description,
+    keyProcessing: '由真实模型调用完成该任务（非固定模板、非关键词匹配）',
+    ioDependency: '输入=用户内容；输出=随输入变化的智能结果；同类输入应产生一致形态的输出',
+    forbiddenSubstitutions: ['固定模板/写死结果冒充智能', '仅关键词匹配冒充理解', '把该能力降级为普通增删改查'],
+    evidence: ['修改关键输入后输出随之变化', '模型不可用时明确报错或降级提示，不假装成功'],
+    source: 'confirmed_derived',
+  }))
+}
+
+/**
+ * 能力契约渲染段（三处消费同源：loop 背板锚定 / 裁判 prompt / PRD 确认卡）。
+ * 精简引用口径（P1 稿 §6 风险项：不把全表注成每轮冗余，完整字段已在背板/prd.json）。
+ * 空数组 → 空串（零注入，off=字节级现状）。
+ */
+export function renderCapSection(caps: AiCapability[]): string {
+  if (caps.length === 0) return ''
+  const lines = caps.map((cap) => {
+    const parts = [
+      `- ${cap.capability_id}｜任务：${cap.task}`,
+      `  关键处理：${cap.keyProcessing}`,
+      `  输入输出：${cap.ioDependency}`,
+      `  不算完成：${cap.forbiddenSubstitutions.filter(Boolean).join('；') || '（未声明）'}`,
+      `  验收证据：${cap.evidence.filter(Boolean).join('；') || '（未声明）'}`,
+    ]
+    return parts.join('\n')
+  })
+  return [
+    '【能力契约（CAP，什么不算完成）】以下能力是需求核心，禁止任何降级替代；实现与判定均按「验收证据」口径执行：',
+    ...lines,
+  ].join('\n')
+}
+
 /** 模板元信息（注入点①写入；所有注入点路由依据）。level 缺省随类型（personal_tool=loose，其余 standard）。 */
 export interface TemplateMeta {
   type: TemplateType
@@ -208,14 +301,25 @@ export function renderBackplaneAnchor(backplane: PrdBackplane, focus?: string[])
   // 完整程序阶段 2（2026-09-06）：后端 API 契约随锚定注入——前后端真相源，loop 每轮
   // 可见（聚焦模式不裁剪：契约是全局约束，条目少）。无 interface_spec（纯展示/旧背板）零注入。
   const endpoints = backplaneInterfaceSpec(backplane)
-  if (endpoints.length === 0) return requirementsPart
+  if (endpoints.length === 0) return withCapSection(requirementsPart, backplane)
   const contract = endpoints
     .map((ep) => {
       const request = ep.request && ep.request !== '无' ? `；请求：${ep.request}` : ''
       return `- ${ep.method ?? 'GET'} ${ep.endpoint} → 响应：${ep.response ?? 'JSON'}${request}`
     })
     .join('\n')
-  return `${requirementsPart}\n\n【后端 API 契约（interface_spec，前后端真相源）】按此实现 server/routes/ 下的路由并保持一致：\n${contract}`
+  return withCapSection(
+    `${requirementsPart}\n\n【后端 API 契约（interface_spec，前后端真相源）】按此实现 server/routes/ 下的路由并保持一致：\n${contract}`,
+    backplane,
+  )
+}
+
+/** Phase 2 M1：CAP 段随背板锚定常驻注入（每轮 system 内重建，竹节/keep-recent 压缩
+ * 只动历史轮次动不到常驻锚——「压缩不得删 CAP」由结构保证）。开关 off 或无 CAP 零注入。 */
+function withCapSection(anchor: string, backplane: PrdBackplane): string {
+  if (!capContractEnabled()) return anchor
+  const section = renderCapSection(backplaneAiCapabilities(backplane))
+  return section ? `${anchor}\n\n${section}` : anchor
 }
 
 // ---------------------------------------------------------------------------
@@ -352,6 +456,13 @@ export interface PrdBackplane {
    * 仅 game 类型生成（非 game 缺省 undefined）；缺省无 GDD（旧 prd.json 零迁移）。
    */
   gdd?: GameDesignDoc
+  /**
+   * 能力契约块（Phase 2 M1，2026-09-09）：AI/智能类能力的硬条款——任务/关键处理/
+   * 输入输出依赖/禁止降级替代/验收证据/来源。向导工程腿产出或 deriveAiCapabilities
+   * 确定性派生；loop 锚定、裁判判定、PRD 确认卡三处消费（BLOMA_CAP_CONTRACT 缺省 off
+   * =本字段不产出不注入，旧 prd.json 零迁移）。
+   */
+  ai_capabilities?: AiCapability[]
 }
 
 /**

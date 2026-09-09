@@ -278,6 +278,44 @@ describe('PRD 确认弹窗 PrdConfirmDialog', () => {
     expect(screen.getByTestId('prd-confirm-out-of-scope').textContent).toContain('这次明确不做的')
     expect(screen.getByTestId('prd-confirm-assumptions').textContent).toContain('我们替你默认的')
   })
+
+  it('能力契约段（Phase 2 M1）：有 CAP 渲染不算完成/验收证据；无 CAP 不渲染（回归锁）', () => {
+    // 无 CAP（旧夹具/开关 off）：段落不存在
+    setState()
+    const { unmount } = renderDialog()
+    expect(screen.queryByTestId('prd-confirm-capabilities')).toBeNull()
+    unmount()
+
+    // 有 CAP：任务/不算完成/验收证据可见；缺 task 的脏条目被过滤
+    store.set(prdConfirmFamily('session-pc'), {
+      sessionId: 'session-pc',
+      projectId: 'project-pc',
+      title: '请确认这份 PRD（已通过裁判审查）',
+      positioning: 'AI 随心记',
+      requirements: [{ id: 'F-001', priority: 'P0', story: 'AI 智能总结', assertions: ['总结随笔记变化'] }],
+      outOfScope: [],
+      assumptions: [],
+      constraints: [],
+      aiCapabilities: [
+        {
+          capabilityId: 'CAP-01',
+          task: '根据笔记内容生成智能总结',
+          keyProcessing: '真实模型调用',
+          ioDependency: '笔记变化→总结变化',
+          forbiddenSubstitutions: ['固定模板冒充', '降级为普通增删改查'],
+          evidence: ['修改笔记后总结随之变化'],
+          source: 'user_explicit',
+        },
+      ],
+      expanded: false,
+      ideas: [],
+    })
+    renderDialog()
+    const section = screen.getByTestId('prd-confirm-capabilities')
+    expect(section.textContent).toContain('根据笔记内容生成智能总结')
+    expect(section.textContent).toContain('不算完成：固定模板冒充；降级为普通增删改查')
+    expect(section.textContent).toContain('验收证据：修改笔记后总结随之变化')
+  })
 })
 
 describe('prd-terms 术语表（闭环 PR7，单点维护）', () => {

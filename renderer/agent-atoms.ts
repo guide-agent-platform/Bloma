@@ -165,6 +165,8 @@ export interface PrdConfirmState {
   outOfScope: string[]
   assumptions: string[]
   constraints: string[]
+  /** 核心能力契约（Phase 2 M1，2026-09-09）：可选——缺失/空数组时卡片自动隐藏（开关 off/无 CAP/旧夹具） */
+  aiCapabilities?: PrdConfirmCapability[]
   /** 完整 PRD 视图默认展开（longterm） */
   expanded: boolean
   /** 市调提炼想法（2026-08-29 灵感参考）：确认时可勾选采纳并入 PRD */
@@ -172,6 +174,17 @@ export interface PrdConfirmState {
 }
 
 export const prdConfirmFamily = atomFamily((_sessionId: string) => atom<PrdConfirmState | null>(null))
+
+/** 核心能力契约展示型（Phase 2 M1）：主进程 AiCapability 的投影（仅展示所需字段）。 */
+export interface PrdConfirmCapability {
+  capabilityId: string
+  task: string
+  keyProcessing: string
+  ioDependency: string
+  forbiddenSubstitutions: string[]
+  evidence: string[]
+  source: string
+}
 
 /** 无 active session 时的稳定 fallback（陷阱 10）。 */
 export const nullPrdConfirmFallback = atom<PrdConfirmState | null>(null)
@@ -486,6 +499,7 @@ export function setupGlobalAgentListeners(): () => void {
           out_of_scope?: unknown
           assumptions?: unknown
           constraints?: unknown
+          ai_capabilities?: unknown
           expanded?: unknown
           ideas?: unknown
         }
@@ -513,6 +527,21 @@ export function setupGlobalAgentListeners(): () => void {
           outOfScope: stringList(prdPayload.out_of_scope),
           assumptions: stringList(prdPayload.assumptions),
           constraints: stringList(prdPayload.constraints),
+          aiCapabilities: Array.isArray(prdPayload.ai_capabilities)
+            ? (prdPayload.ai_capabilities as Array<Record<string, unknown>>)
+                .filter((item) => typeof item?.task === 'string' && item.task.trim().length > 0)
+                .map((item, index): PrdConfirmCapability => ({
+                  capabilityId: typeof item.capability_id === 'string' && item.capability_id ? item.capability_id : `CAP-${String(index + 1).padStart(2, '0')}`,
+                  task: String(item.task),
+                  keyProcessing: typeof item.keyProcessing === 'string' ? item.keyProcessing : '',
+                  ioDependency: typeof item.ioDependency === 'string' ? item.ioDependency : '',
+                  forbiddenSubstitutions: Array.isArray(item.forbiddenSubstitutions)
+                    ? item.forbiddenSubstitutions.filter((entry): entry is string => typeof entry === 'string')
+                    : [],
+                  evidence: Array.isArray(item.evidence) ? item.evidence.filter((entry): entry is string => typeof entry === 'string') : [],
+                  source: typeof item.source === 'string' ? item.source : '',
+                }))
+            : [],
           expanded: prdPayload.expanded === true,
           ideas: Array.isArray(prdPayload.ideas)
             ? (prdPayload.ideas as Array<{ label?: unknown; note?: unknown; source?: unknown }>).filter(
