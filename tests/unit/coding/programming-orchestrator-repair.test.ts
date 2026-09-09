@@ -172,7 +172,7 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
 
   function testCompletedEvents() {
     return readAnalyticsEvents().filter((e) => e.event_type === 'test_completed') as Array<{
-      payload: { round?: string; total_count?: number; passed_count?: number; failed_count?: number; via?: string }
+      payload: { round?: string; total_count?: number; passed_count?: number; failed_count?: number; via?: string; failures?: Array<{ scenario?: string; reason?: string }> }
     }>
   }
 
@@ -225,6 +225,8 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     expect(testEvents[0].payload.round).toBe('initial')
     expect(testEvents[0].payload.failed_count).toBe(1)
     expect(testEvents[0].payload.via).toBe('agent_loop_post_testing')
+    // B0 深挖补强（2026-09-09）：failures 带 reason（熔断回滚清 test-report 后唯一可回溯源）
+    expect(testEvents[0].payload.failures?.[0]).toMatchObject({ scenario: expect.any(String), reason: expect.any(String) })
     expect(testEvents[1].payload.round).toBe('after_repair')
     expect(testEvents[1].payload.failed_count).toBe(0)
     expect(testEvents[1].payload.total_count).toBe(2)

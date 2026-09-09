@@ -1933,7 +1933,13 @@ function trackTestCompleted(input: AgentLoopPostTestingInput, result: GwtTestRes
         total_count: result.total_count,
         passed_count: result.passed_count,
         failed_count: result.failed_count,
-        failures: (result.failure_summary || []).slice(0, 20).map((f) => f.scenario),
+        // B0 错误放行深挖（2026-09-09）发现：熔断回滚会清掉 test-report.json，失败 reason
+        // 只剩场景名可回溯——failures 升级为 {scenario, reason}（reason 截断 200 字）；
+        // bench collector 兼容两种形态（旧事件场景名数组仍可解析）。
+        failures: (result.failure_summary || []).slice(0, 20).map((f) => ({
+          scenario: f.scenario,
+          reason: String(f.reason ?? '').slice(0, 200),
+        })),
       },
       privacy_level: 'research_safe',
     },
