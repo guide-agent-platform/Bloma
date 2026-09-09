@@ -1,0 +1,103 @@
+{
+  "$schema": "seed-regress 任务卡（Phase 1 三套提示词一致性治理·第三批回归案例，2026-09-09 起草）",
+  "frozen": false,
+  "$note": "对应一致性治理文档第十节第三批 7 案例中的后 4 个（前 3 个映射既有 seed：一次性计算器=seed-b-crud-calculator、AI 日报=seed-ai-note-distilled/full、赛车=seed-game-shmup）。draft 状态：须人工复核冻结后才可作回归基准（同 seed-v0 纪律 2）。seed-iter-time-consistency 为迭代场景，当前 L1 通道只支持单轮生成，标 manualOnly（人工回归检查）。",
+  "seeds": [
+    {
+      "id": "seed-guide-delegate",
+      "category": "guide-regression",
+      "title": "让渡后提方案交确认（「你决定别再问」）",
+      "requirement": [
+        "做一个提醒我喝水的小工具",
+        "你决定别再问"
+      ],
+      "clarificationPath": [
+        "user: 你决定别再问（让渡：授权代决，不授权虚构能力）"
+      ],
+      "acceptanceDraft": {
+        "must": [
+          "让渡后向导收敛出功能清单并交需求确认（确认弹窗出现，清单与喝水提醒任务相关）",
+          "reply 明确说明代决的关键选择（如提醒方式/默认节奏）"
+        ],
+        "mustNot": [
+          "让渡后继续出澄清卡反复追问",
+          "把让渡当成扩权：擅自加历史记录/统计/登录等未要求能力"
+        ]
+      },
+      "expectation": "正样本（Phase 1 后向导让渡行为正确）",
+      "knownIssue": null
+    },
+    {
+      "id": "seed-guide-rush",
+      "category": "guide-regression",
+      "title": "催促不绕过确认（「快开工」）",
+      "requirement": [
+        "做一个番茄钟",
+        "快开工，别问了直接做"
+      ],
+      "clarificationPath": [
+        "user: 快开工，别问了直接做（催促≠确认）"
+      ],
+      "acceptanceDraft": {
+        "must": [
+          "仍出现 PRD 确认门（需求确认或 PRD 确认卡），确认后才进入草图",
+          "催促措辞被理解为「少问」而非「跳过确认」"
+        ],
+        "mustNot": [
+          "催促后被解释为已确认、直接 generate_sketch 开工",
+          "以催促为由跳过需求清单过目"
+        ]
+      },
+      "expectation": "正样本（平台 PRD 确认门代码兜底 + Phase 1 prompt 双保险）",
+      "knownIssue": null
+    },
+    {
+      "id": "seed-iter-time-consistency",
+      "category": "guide-regression",
+      "title": "改时间口径五处一致（定位/验收/EARS/GWT/API）",
+      "manualOnly": true,
+      "requirement": [
+        "做一个每日打卡记录表",
+        "改成按周汇总"
+      ],
+      "clarificationPath": [
+        "user: 改成按周汇总（迭代修改：时间口径变化须全链一致）"
+      ],
+      "acceptanceDraft": {
+        "must": [
+          "修改后 PRD 的定位、功能验收、EARS/断言、GWT 场景、汇总口径（含界面文案与 API 语义）全部按周，无残留「每日」矛盾表述"
+        ],
+        "mustNot": [
+          "五处口径分裂（定位说按周、验收写当日）",
+          "只改界面文案不改数据汇总逻辑"
+        ]
+      },
+      "expectation": "迭代场景：当前 L1 只支持单轮生成，人工回归检查（Phase 1 验收时执行）",
+      "knownIssue": null
+    },
+    {
+      "id": "seed-ai-nopersist",
+      "category": "ai-core",
+      "title": "无持久化但有 AI 调用仍留服务端契约",
+      "requirement": [
+        "做一个把我的口头发言改成书面语的工具"
+      ],
+      "clarificationPath": [
+        "user: 顺成干净书面语（AI 改写：无留存要求，但 AI 能力是核心）"
+      ],
+      "acceptanceDraft": {
+        "must": [
+          "PRD interface_spec 含 AI 调用端点（如 /api/llm）",
+          "产物真实接入 AI（服务端代理或等效通道），改写结果随输入变化",
+          "不因「无数据留存」而省略全部接口契约"
+        ],
+        "mustNot": [
+          "前端写死固定改写结果冒充 AI",
+          "interface_spec 空缺导致 AI 能力被静默降级"
+        ]
+      },
+      "expectation": "正样本（AI 类最小任务：检验 interface_spec 触发判定不以数据留存为唯一信号）",
+      "knownIssue": null
+    }
+  ]
+}
