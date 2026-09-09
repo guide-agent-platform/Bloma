@@ -16,6 +16,7 @@ import { createToolState, type AgentLoopTool, type ToolContext } from '../../mai
 import { createProject, findProject, recordSketchGenerated } from '../../main/project-service'
 import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/platform-services'
 import { setBrowserGwtDisabledForTests } from '../../main/gwt-runner'
+import { getDocumentsDir } from '../../storage/config-paths'
 
 /**
  * PR2 L2 工具集单元测试（不接线，直接驱动工具 execute）。
@@ -666,5 +667,236 @@ describe('web_research 工具面（闭环 PR5）', () => {
       const names = buildAgentTools({ projectId: 'p', role }).map((tool) => tool.name)
       expect(names).not.toContain('web_research')
     }
+  })
+})
+
+describe('agent-tools D 系列（咨询 D：验证协议，2026-09-09）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalApiTool = process.env.BLOMA_API_TOOL
+  const originalEvidence = process.env.BLOMA_TOOL_EVIDENCE
+  const originalWriteGuard = process.env.BLOMA_WRITE_GUARD
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-tools-d-'))
+    setJsSyntaxCheckerForTests(stubSyntaxChecker)
+    setBrowserGwtDisabledForTests(true)
+    delete process.env.BLOMA_API_TOOL
+    delete process.env.BLOMA_TOOL_EVIDENCE
+    delete process.env.BLOMA_WRITE_GUARD
+  })
+  afterEach(() => {
+    restorePromaHome(originalPromaHome)
+    setJsSyntaxCheckerForTests(undefined)
+    setBrowserGwtDisabledForTests(false)
+    clearSandboxRuntimeForTests()
+    if (originalApiTool === undefined) delete process.env.BLOMA_API_TOOL
+    else process.env.BLOMA_API_TOOL = originalApiTool
+    if (originalEvidence === undefined) delete process.env.BLOMA_TOOL_EVIDENCE
+    else process.env.BLOMA_TOOL_EVIDENCE = originalEvidence
+    if (originalWriteGuard === undefined) delete process.env.BLOMA_WRITE_GUARD
+    else process.env.BLOMA_WRITE_GUARD = originalWriteGuard
+  })
+
+  it('D1：开关 off 工具面=现状（无 run_api_contract_tests，parent 17 个）；on 注册且变 18', () => {
+    const project = createProject({ request_id: 'req-d-reg', mode: 'quick' })
+    const off = buildAgentTools({ projectId: project.project_id }).map((t) => t.name)
+    expect(off).not.toContain('run_api_contract_tests')
+    expect(off).toHaveLength(17)
+    process.env.BLOMA_API_TOOL = '1'
+    const on = buildAgentTools({ projectId: project.project_id }).map((t) => t.name)
+    expect(on).toContain('run_api_contract_tests')
+    expect(on).toHaveLength(18)
+    // review 角色同样可用（只读验证面）
+    const review = buildAgentTools({ projectId: project.project_id, role: 'review' }).map((t) => t.name)
+    expect(review).toContain('run_api_contract_tests')
+  })
+
+  it('D1：API 工具无预览先引导 run_preview（与 run_gwt_tests 同口径）', async () => {
+    process.env.BLOMA_API_TOOL = '1'
+    const project = createProject({ request_id: 'req-d-nopv', mode: 'quick' })
+    const tools = buildAgentTools({ projectId: project.project_id })
+    const outcome = await byName(tools, 'run_api_contract_tests').execute({}, ctxFor(project.project_id))
+    expect(outcome.isError).toBe(true)
+    expect(outcome.output).toContain('run_preview')
+  })
+
+  it('D1：无 interface_spec → 豁免通过并置位 api_all_passed（纯静态产物不强制跑）', async () => {
+    process.env.BLOMA_API_TOOL = '1'
+    const project = createProject({ request_id: 'req-d-exempt', mode: 'quick' })
+    const tools = buildAgentTools({ projectId: project.project_id })
+    const ctx = ctxFor(project.project_id)
+    ctx.state.api_all_passed = false // 模拟「有契约预置」，验证豁免也能翻正
+    ctx.state.preview_url = 'http://127.0.0.1:1'
+    const outcome = await byName(tools, 'run_api_contract_tests').execute({}, ctx)
+    expect(outcome.output).toContain('豁免')
+    expect(ctx.state.api_all_passed).toBe(true)
+  })
+
+  it('D1：有契约全过 → 通过并置位；有失败 → 明细含「API 契约端点」且不置位（location 口径对齐终验/修复轮）', async () => {
+    process.env.BLOMA_API_TOOL = '1'
+    const project = createProject({ request_id: 'req-d-contract', mode: 'quick' })
+    // 写最小合法背板（requirements 数组即可被 readPrdBackplane 接受）
+    const docsDir = getDocumentsDir(project.workspace_slug, project.project_id)
+    writeFileSync(
+      join(docsDir, 'prd.json'),
+      JSON.stringify({ requirements: [], interface_spec: [{ endpoint: '/api/notes', method: 'GET' }] }),
+      'utf8',
+    )
+    const tools = buildAgentTools({ projectId: project.project_id })
+    const ctx = ctxFor(project.project_id)
+
+    // 全过：本地 server 应答 /api/notes
+    const okServer = createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end('{"notes":[]}')
+    })
+    await new Promise<void>((resolve) => okServer.listen(0, '127.0.0.1', resolve))
+    const okPort = (okServer.address() as AddressInfo).port
+    ctx.state.preview_url = `http://127.0.0.1:${okPort}`
+    const passed = await byName(tools, 'run_api_contract_tests').execute({}, ctx)
+    expect(passed.output).toContain('全部应答正常')
+    expect(ctx.state.api_all_passed).toBe(true)
+    okServer.close()
+
+    // 失败：404 server
+    const badServer = createServer((_req, res) => {
+      res.writeHead(404)
+      res.end('not found')
+    })
+    await new Promise<void>((resolve) => badServer.listen(0, '127.0.0.1', resolve))
+    const badPort = (badServer.address() as AddressInfo).port
+    ctx.state.preview_url = `http://127.0.0.1:${badPort}`
+    const failed = await byName(tools, 'run_api_contract_tests').execute({}, ctx)
+    expect(failed.output).toContain('API 契约端点')
+    expect(failed.output).toContain('/api/notes')
+    expect(ctx.state.api_all_passed).toBe(false)
+    badServer.close()
+  })
+
+  it('D2：off=字节级现状（全过仍含旧收口提示）；on=验证状态行替代收口暗示，全验证面通过才说「可输出完成总结」', async () => {
+    const project = createProject({ request_id: 'req-d-evidence', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+    const server = createServer((_req, res) => {
+      if (_req.url === '/src/app.js') {
+        res.writeHead(200, { 'Content-Type': 'application/javascript' })
+        res.end("document.querySelector('button').addEventListener('click', function () {})")
+      } else {
+        res.writeHead(200, { 'Content-Type': 'text/html' })
+        res.end('<html><body><button>开始使用</button><p>记录收入与支出</p></body></html>')
+      }
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+    try {
+      // off：现状原文
+      const toolsOff = buildAgentTools({ projectId: project.project_id })
+      const ctxOff = ctxFor(project.project_id)
+      ctxOff.state.preview_url = `http://127.0.0.1:${port}`
+      const off = await byName(toolsOff, 'run_gwt_tests').execute({}, ctxOff)
+      expect(off.output).toContain('测试通过，可以继续 run_security_scan 或输出完成总结。')
+      expect(off.output).not.toContain('验证状态')
+
+      // on：尚缺 security/api → 不再出现收口暗示
+      process.env.BLOMA_TOOL_EVIDENCE = '1'
+      const toolsOn = buildAgentTools({ projectId: project.project_id })
+      const ctxOn = ctxFor(project.project_id)
+      ctxOn.state.preview_url = `http://127.0.0.1:${port}`
+      const on = await byName(toolsOn, 'run_gwt_tests').execute({}, ctxOn)
+      expect(on.output).toContain('验证状态')
+      expect(on.output).toContain('尚缺')
+      expect(on.output).not.toContain('或输出完成总结') // 仅在全部通过时出现
+      // 全验证面通过 → 明确放行
+      ctxOn.state.security_all_passed = true
+      ctxOn.state.api_all_passed = true
+      const all = await byName(toolsOn, 'run_gwt_tests').execute({}, ctxOn)
+      expect(all.output).toContain('全部验证面通过，可输出完成总结')
+    } finally {
+      server.close()
+    }
+  })
+
+  it('D3：失败条目首轮标 [新增]、同场景复跑标 [持续]（防重复修同一失败）', async () => {
+    process.env.BLOMA_TOOL_EVIDENCE = '1'
+    const project = createProject({ request_id: 'req-d-d3', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+    const tools = buildAgentTools({ projectId: project.project_id })
+    const ctx = ctxFor(project.project_id)
+    ctx.state.preview_url = 'http://127.0.0.1:1' // 不可访问 → 稳定失败
+    const first = await byName(tools, 'run_gwt_tests').execute({}, ctx)
+    expect(first.output).toContain('[新增] ')
+    const second = await byName(tools, 'run_gwt_tests').execute({}, ctx)
+    expect(second.output).toContain('[持续] ')
+  })
+
+  it('D4a：read_file 返回文件版本；STALE_READ 拦截旧版本编辑；不传 rev 零变化', async () => {
+    const project = createProject({ request_id: 'req-d-rev', mode: 'quick' })
+    const tools = buildAgentTools({ projectId: project.project_id })
+    const ctx = ctxFor(project.project_id)
+    const abs = join(project.root_path, 'src', 'app.js')
+    mkdirSync(join(abs, '..'), { recursive: true })
+    writeFileSync(abs, 'const a = 1\n', 'utf8')
+
+    const read = await byName(tools, 'read_file').execute({ path: 'src/app.js' }, ctx)
+    expect(read.output).toContain('文件版本 ')
+    const rev = (read.output.match(/文件版本 ([0-9a-f-]+)/) ?? [])[1]
+    expect(rev).toBeTruthy()
+
+    // 读后被外部修改 → 传旧 rev 被 STALE_READ 拒绝
+    writeFileSync(abs, 'const a = 2\n', 'utf8')
+    const stale = await byName(tools, 'edit_file').execute(
+      { path: 'src/app.js', old_string: 'const a = 2', new_string: 'const a = 3', expected_revision: rev },
+      ctx,
+    )
+    expect(stale.isError).toBe(true)
+    expect(stale.output).toContain('STALE_READ')
+
+    // 不传 rev → 现状行为（old_string 唯一命中即成功）
+    const ok = await byName(tools, 'edit_file').execute(
+      { path: 'src/app.js', old_string: 'const a = 2', new_string: 'const a = 3' },
+      ctx,
+    )
+    expect(ok.isError).toBeFalsy()
+    expect(readFileSync(abs, 'utf8')).toContain('const a = 3')
+  })
+
+  it('D4a：write 守卫 off=现状零变化；on=盲覆盖既有文件被拒，read 后放行，新文件不受影响', async () => {
+    const project = createProject({ request_id: 'req-d-guard', mode: 'quick' })
+    const abs = join(project.root_path, 'index.html')
+    writeFileSync(abs, '<html><body><p>旧内容</p></body></html>', 'utf8')
+
+    // off：直接覆盖（现状）
+    const toolsOff = buildAgentTools({ projectId: project.project_id })
+    const off = await byName(toolsOff, 'write_file').execute(
+      { path: 'index.html', content: '<html><body><p>新内容</p></body></html>' },
+      ctxFor(project.project_id),
+    )
+    expect(off.isError).toBeFalsy()
+
+    // on：重建文件后盲覆盖被拒
+    process.env.BLOMA_WRITE_GUARD = '1'
+    writeFileSync(abs, '<html><body><p>旧内容</p></body></html>', 'utf8')
+    const toolsOn = buildAgentTools({ projectId: project.project_id })
+    const ctx = ctxFor(project.project_id)
+    const blocked = await byName(toolsOn, 'write_file').execute(
+      { path: 'index.html', content: '<html><body><p>再覆盖</p></body></html>' },
+      ctx,
+    )
+    expect(blocked.isError).toBe(true)
+    expect(blocked.output).toContain('本轮未读取过')
+
+    // read 后放行
+    await byName(toolsOn, 'read_file').execute({ path: 'index.html' }, ctx)
+    const allowed = await byName(toolsOn, 'write_file').execute(
+      { path: 'index.html', content: '<html><body><p>读后覆盖</p></body></html>' },
+      ctx,
+    )
+    expect(allowed.isError).toBeFalsy()
+
+    // 新文件不受守卫影响
+    const fresh = await byName(toolsOn, 'write_file').execute(
+      { path: 'src/new.js', content: 'const b = 1\n' },
+      ctx,
+    )
+    expect(fresh.isError).toBeFalsy()
   })
 })

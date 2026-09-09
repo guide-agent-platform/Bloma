@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { rmSyncWithRetry } from '../fs-retry'
 import { tmpdir } from 'node:os'
 import { extname, isAbsolute, join, relative, resolve } from 'node:path'
@@ -12,7 +12,9 @@ import { runGwtScenarios } from '../gwt-service'
 import { planScenarios, scenarioName } from '../gwt-runner'
 import { decideWrite, estimateTokenCount } from '../usage-guard'
 import { runSecurityScan } from '../security-scan'
-import { withAbort, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../agent-loop'
+import { checkApiContract } from './api-contract'
+import { readPrdBackplane } from '../document-engine'
+import { withAbort, loopApiToolEnabled, toolEvidenceEnabled, writeGuardEnabled, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../agent-loop'
 import {
   NET_FETCH_DEFAULT_CHARS,
   NET_FETCH_MAX_BYTES,
@@ -264,6 +266,41 @@ function collectProjectFiles(root: string, subDir = ''): string[] {
 }
 
 // =========================================================================
+// D 系列辅助（咨询 D，2026-09-09）：文件版本戳 / 验证状态行 / 版本登记
+// =========================================================================
+
+/** D4a：文件版本戳 = mtimeMs+size 十六进制（同一 loop 内足够区分「读后已被改」）。 */
+export function fileRevisionOf(absPath: string): string {
+  try {
+    const stat = statSync(absPath)
+    return `${stat.mtimeMs.toString(16)}-${stat.size.toString(16)}`
+  } catch {
+    return 'unknown'
+  }
+}
+
+/** D4a：state.file_revisions 惰性初始化（缺省 undefined = 功能未启用前的旧 state 兼容）。 */
+function _fileRevisions(ctx: ToolContext): Map<string, string> {
+  if (!ctx.state.file_revisions) ctx.state.file_revisions = new Map()
+  return ctx.state.file_revisions
+}
+
+/**
+ * D2：验证状态行（宿主维护，不靠 LLM 自报）——「已验证什么 / 尚缺什么」。
+ * 仅 BLOMA_TOOL_EVIDENCE=on 时被消费；返回空串表示未启用（字节级现状）。
+ */
+export function validationStateLine(state: { gwt_all_passed: boolean; security_all_passed: boolean; api_all_passed: boolean }): string {
+  if (!toolEvidenceEnabled()) return ''
+  const done: string[] = []
+  const missing: string[] = []
+  ;(state.gwt_all_passed ? done : missing).push('行为断言 GWT')
+  ;(state.api_all_passed ? done : missing).push('API 契约')
+  ;(state.security_all_passed ? done : missing).push('安全扫描')
+  if (missing.length === 0) return '\n验证状态：行为断言/ API 契约/安全扫描均已通过——全部验证面通过，可输出完成总结。'
+  return `\n验证状态：已通过=${done.length ? done.join('、') : '（无）'}；尚缺=${missing.join('、')}${loopApiToolEnabled() && !state.api_all_passed ? '（数据留存/接口类项目收口前必须 run_api_contract_tests 通过）' : ''}。`
+}
+
+// =========================================================================
 // 工具集工厂
 // =========================================================================
 
@@ -324,6 +361,8 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     const abs = join(root, rel)
     mkdirSync(join(abs, '..'), { recursive: true })
     writeFileSync(abs, finalContent, 'utf8')
+    // D4a：写入成功后刷新版本快照（后续同文件 expected_revision 校验基準）
+    _fileRevisions(ctx).set(rel, fileRevisionOf(abs))
     // project-map（Graft 模式，r69）：工程产物写盘后 fire-and-forget 刷新语义地图
     //（write_file / edit_file whole / edit_file diff 三路共用本写入点）；失败静默不影响返回
     try {
@@ -353,7 +392,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       },
       required: ['path'],
     },
-    execute: async (toolInput) => {
+    execute: async (toolInput, ctx) => {
       const project = findProject(projectId)
       const resolved = resolveInsideProject(project.root_path, toolInput.path)
       if (!resolved.ok) return { output: resolved.error, isError: true }
@@ -367,8 +406,12 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       if (offset > total) offset = Math.max(1, total - limit + 1) // 越界返回最近可用窗口
       const slice = lines.slice(offset - 1, offset - 1 + limit)
       const body = slice.map((line, index) => `${offset + index} │ ${line}`).join('\n')
+      // D4a（咨询 D）：记录/返回文件版本戳（mtime+size 十六进制）——edit_file 的
+      // expected_revision 校验与 write_file 守卫共用；纯追加信息，无行为变化。
+      const revision = fileRevisionOf(resolved.abs)
+      _fileRevisions(ctx).set(resolved.rel, revision)
       return {
-        output: `（${resolved.rel} 共 ${total} 行，显示第 ${offset}~${offset + slice.length - 1} 行）\n${body}`,
+        output: `（${resolved.rel} 共 ${total} 行，显示第 ${offset}~${offset + slice.length - 1} 行｜文件版本 ${revision}）\n${body}`,
       }
     },
   }
@@ -542,6 +585,17 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       const project = findProject(projectId)
       const resolved = resolveInsideProject(project.root_path, toolInput.path)
       if (!resolved.ok) return { output: resolved.error, isError: true }
+      // D4a：write 守卫——覆盖「本轮未读过的既有文件」拦截（R-FILE-01 工具化：
+      // 盲覆盖正式 BLOMA_WRITE_GUARD=on 才拦；off 零变化。新建文件不受影响）。
+      if (existsSync(resolved.abs) && !_fileRevisions(ctx).has(resolved.rel)) {
+        if (writeGuardEnabled()) {
+          return {
+            output: `目标文件已存在且本轮未读取过：${resolved.rel}。先 read_file 获取当前内容（R-FILE-01），再决定 edit_file 精确修改或基于读取结果重写；禁止盲覆盖。`,
+            isError: true,
+            detail: { code: 'WRITE_UNREAD_TARGET', path: resolved.rel },
+          }
+        }
+      }
       // 修复预算门在 validateAndWrite 内（校验通过后才烧预算）
       return validateAndWrite(project.root_path, resolved.rel, toolInput.content, ctx)
     },
@@ -560,6 +614,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         old_string: { type: 'string', description: '（diff 模式）要替换的唯一原文片段' },
         new_string: { type: 'string', description: '（diff 模式）替换后的内容' },
         content: { type: 'string', description: '（whole 模式）修改后的完整文件内容' },
+        expected_revision: { type: 'string', description: '（可选，D4a）read_file 返回的文件版本；提供时若文件已被修改过会返回 STALE_READ 拒绝执行，需重新 read_file' },
       },
       required: editFormat === 'whole' ? ['path'] : ['path', 'old_string', 'new_string'],
     },
@@ -567,6 +622,22 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       const project = findProject(projectId)
       const resolved = resolveInsideProject(project.root_path, toolInput.path)
       if (!resolved.ok) return { output: resolved.error, isError: true }
+
+      // D4a：版本前置校验（可选参数，提供即校验——把 R-FILE-01 从「prompt 劝说」
+      // 升级为「工具强制」；不传零变化，向后兼容）。文件不存在时跳过（后续分支自有报错）。
+      if (
+        typeof toolInput.expected_revision === 'string' &&
+        existsSync(resolved.abs)
+      ) {
+        const currentRev = fileRevisionOf(resolved.abs)
+        if (currentRev !== toolInput.expected_revision) {
+          return {
+            output: `STALE_READ：${resolved.rel} 在你读取后已被修改（读时版本 ${toolInput.expected_revision}，当前 ${currentRev}）。请重新 read_file 后再编辑，禁止凭旧内容修改。`,
+            isError: true,
+            detail: { code: 'STALE_READ', path: resolved.rel },
+          }
+        }
+      }
 
       // whole 模式：无 old_string，走整文件重写（弱渠道能力位）。
       // m-11：与 write_file 同口径的 16k 预拦截——整文件重写语义与 write_file 同构，
@@ -616,7 +687,9 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       const sandbox = await runSandbox({ request_id: ctx.requestId, project_id: projectId })
       if (sandbox.status === 'running' && sandbox.preview_url) {
         ctx.state.preview_url = sandbox.preview_url
-        return { output: `预览已启动：${sandbox.preview_url}`, detail: { preview_url: sandbox.preview_url } }
+        // D2：预览就绪只证明服务可访问，未验证行为——附一行证据边界防「预览绿=可交付」误读
+        const evidence = toolEvidenceEnabled() ? '\n（预览就绪仅证明服务可访问；行为断言/ API 契约/安全均未验证。）' : ''
+        return { output: `预览已启动：${sandbox.preview_url}${evidence}`, detail: { preview_url: sandbox.preview_url } }
       }
       const logs = getSandboxLogs(projectId).slice(-SANDBOX_LOG_TAIL_LIMIT)
       return {
@@ -644,9 +717,18 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         ctx.state.gwt_all_passed = false
         ctx.state.repair_round += 1
         options.onRepairRound?.(ctx.state.repair_round)
-        const failures = result.failure_summary.map((failure) => `- ${failure.scenario}：${failure.reason}`).join('\n')
+        // D3 轻量：对比上轮失败集标 [新增]/[持续]（防重复修同一失败），跑后更新快照
+        const prev = new Set(toolEvidenceEnabled() ? (ctx.state.last_gwt_failures ?? []) : [])
+        const failures = result.failure_summary
+          .map((failure) => {
+            const tag = toolEvidenceEnabled() ? (prev.has(failure.scenario) ? '[持续] ' : '[新增] ') : ''
+            return `- ${tag}${failure.scenario}：${failure.reason}`
+          })
+          .join('\n')
+        if (toolEvidenceEnabled()) ctx.state.last_gwt_failures = result.failure_summary.map((f) => f.scenario)
+        const evidence = validationStateLine(ctx.state)
         return {
-          output: `共 ${result.total_count} 个场景：通过 ${result.passed_count}、失败 ${result.failed_count}。\n失败场景：\n${failures}`,
+          output: `共 ${result.total_count} 个场景：通过 ${result.passed_count}、失败 ${result.failed_count}。\n失败场景：\n${failures}${evidence}`,
           detail: { failed_count: result.failed_count, total_count: result.total_count },
         }
       }
@@ -657,12 +739,18 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       ctx.state.gwt_all_passed = true
       ctx.state.test_failed = false
       ctx.state.edits_after_test_failure = 0
+      if (toolEvidenceEnabled()) ctx.state.last_gwt_failures = []
       const scenarioNames = planScenarios(readLastSketchRequirements(projectId)).map((scenario) =>
         scenarioName(scenario.item.id, scenario.assertion),
       )
       const nameList = scenarioNames.length > 0 ? `\n通过场景：${scenarioNames.join('、')}` : ''
+      // D2：删旧「可以继续…或输出完成总结」收口暗示，换宿主维护的验证状态行
+      // （单次 GWT 全绿不等于可交付——API 契约/安全可能未验）。off 分支保留原句（字节级现状）。
+      const tail = toolEvidenceEnabled()
+        ? validationStateLine(ctx.state)
+        : '\n测试通过，可以继续 run_security_scan 或输出完成总结。'
       return {
-        output: `全部通过（${result.passed_count}/${result.total_count} 个场景）。${nameList}\n测试通过，可以继续 run_security_scan 或输出完成总结。`,
+        output: `全部通过（${result.passed_count}/${result.total_count} 个场景）。${nameList}${tail}`,
         detail: { passed_count: result.passed_count, total_count: result.total_count },
       }
     },
@@ -679,8 +767,10 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       if (result.passed) {
         ctx.state.security_all_passed = true
         const minor = result.issues.length - blocking.length
+        // D2：通过返回附验证状态行（尚缺项由宿主维护）
+        const evidence = validationStateLine(ctx.state)
         return {
-          output: `安全扫描通过：无高危/严重问题（扫描 ${result.scanned_files} 个文件${minor > 0 ? `，另有 ${minor} 个低/中危提示` : ''}）。`,
+          output: `安全扫描通过：无高危/严重问题（扫描 ${result.scanned_files} 个文件${minor > 0 ? `，另有 ${minor} 个低/中危提示` : ''}）。${evidence}`,
           detail: { passed: true, scanned_files: result.scanned_files },
         }
       }
@@ -689,6 +779,45 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       return {
         output: `安全扫描未通过（${blocking.length} 个高危/严重问题，扫描 ${result.scanned_files} 个文件）：\n${listing}\n请修复后重新扫描。`,
         detail: { passed: false, blocking: blocking.length },
+      }
+    },
+  }
+
+  // D1（咨询 D，2026-09-09）：API 契约验证进 loop——复用终验同款 checkApiContract，
+  // 不新建判断标准；外部终验仍独立执行（共享实现 ≠ 共享判定权）。仅 BLOMA_API_TOOL=on 注册。
+  const run_api_contract_tests: AgentLoopTool = {
+    name: 'run_api_contract_tests',
+    parallelSafe: true,
+    description:
+      '验证 PRD 接口契约（interface_spec）声明的后端 API 端点是否存活并应答（逐一探测无参 GET 端点；404/5xx/超时=契约失活）。用途：收口前证明前后端契约真实生效；不验证业务逻辑正确性（那属于行为断言）。前置：需先 run_preview。无接口契约的项目返回豁免说明。',
+    input_schema: { type: 'object', properties: {} },
+    execute: async (_toolInput, ctx) => {
+      if (!ctx.state.preview_url) {
+        return { output: '还没有可用的预览地址。请先调用 run_preview 启动预览，再验证 API 契约。', isError: true }
+      }
+      const endpoints = readPrdBackplane(projectId)?.interface_spec ?? []
+      if (endpoints.length === 0) {
+        ctx.state.api_all_passed = true
+        return {
+          output: '本项目无接口契约（interface_spec 为空，纯静态产物），API 契约验证豁免通过。',
+          detail: { exempt: true, endpoints: 0 },
+        }
+      }
+      const failures = await checkApiContract(ctx.state.preview_url, endpoints)
+      ctx.state.api_all_passed = failures.length === 0
+      if (failures.length === 0) {
+        const listing = endpoints.map((ep) => `- ${ep.method ?? 'GET'} ${ep.endpoint}`).join('\n')
+        const evidence = validationStateLine(ctx.state)
+        return {
+          output: `API 契约验证通过：${endpoints.length} 个声明端点全部应答正常。\n${listing}${evidence}`,
+          detail: { passed: true, endpoints: endpoints.length },
+        }
+      }
+      const listing = failures.map((f) => `- API 契约端点：${f.scenario} — ${f.reason}`).join('\n')
+      const evidence = validationStateLine(ctx.state)
+      return {
+        output: `API 契约验证未通过（${failures.length}/${endpoints.length} 个端点失败）：\n${listing}\n请对照 server/routes/ 的路由实现修复后重验。${evidence}`,
+        detail: { passed: false, failed: failures.length, endpoints: endpoints.length },
       }
     },
   }
@@ -972,11 +1101,14 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     // 只读角色：探索/调研不需要写文件或跑测试，但可查公网资料、可向主 agent 冒泡提问
     return [read_file, list_files, grep, web_fetch, ask_delegation_question]
   }
+  // D1：API 契约验证工具按开关注册（off=工具面与现状字节级一致）
+  const apiTools = loopApiToolEnabled() ? [run_api_contract_tests] : []
+
   if (role === 'review') {
     // 审查角色（m-12）：话术承诺「不直接修改」，工具面同步收窄——去掉 write_file/
     // edit_file（物理只读与话术一致，防提示词层面被诱导后真的落盘）；可跑预览/测试/
     // 扫描验证怀疑点，但不改产物
-    return [read_file, list_files, grep, web_fetch, run_preview, run_gwt_tests, run_security_scan, ask_delegation_question]
+    return [read_file, list_files, grep, web_fetch, run_preview, run_gwt_tests, run_security_scan, ...apiTools, ask_delegation_question]
   }
   if (role !== 'parent') {
     // 子 agent（implement/custom）：全量 9 工具 + ask 冒泡；无委派/代答/续跑工具（深度限制双保险）
@@ -990,6 +1122,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       run_preview,
       run_gwt_tests,
       run_security_scan,
+      ...apiTools,
       ask_delegation_question,
     ]
   }
@@ -1003,6 +1136,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     run_preview,
     run_gwt_tests,
     run_security_scan,
+    ...apiTools,
     delegate_agent,
     web_research,
     wait_for_delegations,

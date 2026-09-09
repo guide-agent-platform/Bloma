@@ -40,7 +40,7 @@ import { assertToolAllowed } from '../permission-service'
 import { recordDecision } from '../decision-log'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from '../recovery-service'
 import { readPrimaryIntent, recordSessionActivity } from '../session-service'
-import { runAgentLoop, type AgentLoopResult } from '../agent-loop'
+import { runAgentLoop, loopApiToolEnabled, type AgentLoopResult } from '../agent-loop'
 import { isDegenerateText } from './output-integrity'
 import { checkApiContract } from './api-contract'
 import { buildAgentTools } from '../agent-tools'
@@ -1402,7 +1402,11 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     '【工作方式】',
     '逐功能项实现：write_file/edit_file 写代码 → run_preview 确认可运行 → ' +
     'run_gwt_tests 对照行为断言 → 失败先 read_file/grep 定位再修 → 全部 P0 断言通过后 ' +
-    'run_security_scan 确认无高危。',
+    // D1（咨询 D，2026-09-09）：开关 on 时验证链补 API 契约（数据留存/接口类项目收口前必验）；
+    // off 保留原文（字节级现状）。
+    (loopApiToolEnabled()
+      ? 'run_api_contract_tests 验证接口契约（声明了 interface_spec 的项目）→ run_security_scan 确认无高危。'
+      : 'run_security_scan 确认无高危。'),
     // P5 先读再改纪律（2026-09-04）：防凭记忆/凭 plan 推断文件现状（文件可能已被
     // 修复轮或上一迭代修改）；MVP 首跑无副作用（新文件不触发）；与 P3 plan 合同
     // 不冲突（plan 是参考，read 是事实）。
@@ -1420,7 +1424,10 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     // Phase 3 B2：操作契约注册表段（触发—必须—禁止替代—受阻四段式，R-* 单点定义）。
     ...(rulesRegistryEnabled() ? ['', renderRulesSection()] : []),
     '',
-    '【终止条件】全部 P0 断言通过 + 安全扫描无高危，才输出完成总结（含做了什么、' +
+    // D1：开关 on 时终止条件升级为全验证面（GWT+API 契约+安全）；off 保留原文。
+    (loopApiToolEnabled()
+      ? '【终止条件】全部 P0 断言通过 + API 契约验证通过（声明了 interface_spec 的项目必须 run_api_contract_tests 全过；未声明则豁免）+ 安全扫描无高危，才输出完成总结（含做了什么、'
+      : '【终止条件】全部 P0 断言通过 + 安全扫描无高危，才输出完成总结（含做了什么、'),
     '未解决的低优先级项）。若技术合同规划了多文件，收口前确认目标文件已覆盖（未写的文件须在旁白说明偏离原因）。' +
     '测试未全绿不得声称完成。',
     '',

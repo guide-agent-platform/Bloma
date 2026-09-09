@@ -43,6 +43,14 @@ export interface AgentLoopToolState {
   gwt_all_passed: boolean
   /** 最近一次 run_security_scan 是否通过（收口判定，同上） */
   security_all_passed: boolean
+  /** D1（咨询 D，2026-09-09）：API 契约验证通过位。初始化按背板预置——声明了
+   * interface_spec 的项目 false（跑了 run_api_contract_tests 全过才 true），无契约
+   * 项目 true（豁免）。确定性由宿主维护，不靠模型自报；仅 BLOMA_API_TOOL=on 时进收口判定。 */
+  api_all_passed: boolean
+  /** D3 轻量：上一次 run_gwt_tests 的失败场景名集合（本轮对比标 [新增]/[持续]，防重复修同一失败） */
+  last_gwt_failures?: string[]
+  /** D4a：本轮已读文件的版本戳（path → rev）；edit_file 的 expected_revision 校验与 write_file 守卫共用 */
+  file_revisions?: Map<string, string>
   /** 测试失败后的写入类工具调用次数（edit-after-test-failure 预算，默认上限 3） */
   edits_after_test_failure: number
   /** 修复回合计数（每次新出现的 GWT 失败 +1，对应旧 test_repair_count 口径） */
@@ -487,10 +495,29 @@ export function createToolState(delegationDepth = 0): AgentLoopToolState {
     test_failed: false,
     gwt_all_passed: false,
     security_all_passed: false,
+    // D1：无契约豁免预置 true；有契约项目由调用方（runAgentLoop 入口）按背板改 false。
+    // createToolState 不知道 projectId，保持纯函数；背板感知的预置在 loopApiToolEnabled()
+    // 的消费侧做（见 runAgentLoop 内 initStateApiContract）。
+    api_all_passed: true,
     edits_after_test_failure: 0,
     repair_round: 0,
     delegation_depth: delegationDepth,
   }
+}
+
+/** D1 开关：loop 内 API 契约验证（工具注册 + 收口判定 + prompt 新文案）。缺省 off=字节级现状。 */
+export function loopApiToolEnabled(): boolean {
+  return process.env.BLOMA_API_TOOL === '1' || process.env.BLOMA_API_TOOL === 'true'
+}
+
+/** D2/D3 开关：验证工具返回的证据边界行 + 失败 [新增]/[持续] 标注。缺省 off=字节级现状。 */
+export function toolEvidenceEnabled(): boolean {
+  return process.env.BLOMA_TOOL_EVIDENCE === '1' || process.env.BLOMA_TOOL_EVIDENCE === 'true'
+}
+
+/** D4 开关：write_file 覆盖未读既有文件拦截。缺省 off=现状；off 时零变化。 */
+export function writeGuardEnabled(): boolean {
+  return process.env.BLOMA_WRITE_GUARD === '1' || process.env.BLOMA_WRITE_GUARD === 'true'
 }
 
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
@@ -558,6 +585,19 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     requestId: input.requestId,
     signal: input.signal,
     state: createToolState(input.delegationDepth ?? 0),
+  }
+  // D1（咨询 D）：背板感知的 api_all_passed 预置——声明了 interface_spec 的项目
+  // 收口前必须跑过 run_api_contract_tests（全过才 true）；无契约项目豁免 true。
+  // 读背板失败时保守 false（fail-closed：宁可多跑一次验证，不静默故行）。仅开关 on 生效；
+  // off 时保持 true 不影响既有收口判定（字节级现状）。
+  if (loopApiToolEnabled()) {
+    try {
+      const { readPrdBackplane } = await import('../document-engine')
+      const spec = readPrdBackplane(input.projectId)?.interface_spec
+      ctx.state.api_all_passed = !spec || spec.length === 0
+    } catch {
+      ctx.state.api_all_passed = false
+    }
   }
 
   let turns = 0
@@ -754,7 +794,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
 
     // 收口判定（2026-08-29 线上案例 eb900c57）：GWT 全过 + 安全扫描通过 = 活已干完，
     // 下一轮起停用全部工具 + system 追加收口指令，逼模型交卷而非继续冗余验证。
-    wrapUp = ctx.state.gwt_all_passed && ctx.state.security_all_passed
+    wrapUp = ctx.state.gwt_all_passed && ctx.state.security_all_passed && (!loopApiToolEnabled() || ctx.state.api_all_passed)
 
     consecutiveBudgetStallTurns = budgetStallThisTurn ? consecutiveBudgetStallTurns + 1 : 0
     if (consecutiveBudgetStallTurns >= BUDGET_STALL_TURNS) {
