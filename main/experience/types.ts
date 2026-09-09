@@ -24,7 +24,13 @@ import { createHash } from 'node:crypto'
 // =========================================================================
 
 export type CardKind = 'anti_pattern' | 'pattern'
-export type CardStatus = 'candidate' | 'verified' | 'retired'
+/**
+ * 生命周期（C2a，2026-09-09）：candidate → verified（机制验证：replay/sandbox/human）
+ * → active（迁移+负例验证齐备，fail-closed：promoteToActive 无证据拒升）→ retired。
+ * 拍板缺省（P2 稿 §5，可推翻）：canary 在线观察期 v1 不设（线上观察归 system 层验证，
+ * 待 L1 额度恢复）；人工复核即手工登记验证报告（registerValidationReport），自动晋升只到 verified。
+ */
+export type CardStatus = 'candidate' | 'verified' | 'active' | 'retired'
 export type VerificationMethod =
   | 'replay_green' // anti_pattern：GWT 重放测试转绿
   | 'sandbox_pass' // pattern：沙箱编译试跑通过
@@ -54,6 +60,19 @@ export interface CardGovernance {
   validationReportIds: string[]
   /** 撤销/回滚条件 */
   rollbackConditions: string[]
+  /** 三层验证报告（C2a）：机制/迁移/负例/系统；与 validationReportIds 同步 */
+  validationReports?: ValidationReport[]
+}
+
+/** 验证报告（C2a）：layer=mechanism（同失败重放，已有）/ migration（未参与提取的同类未见任务）/ negative（相近但不适用任务无误触发）/ system（检索+注入+执行成本计入后净收益）。 */
+export interface ValidationReport {
+  id: string
+  layer: 'mechanism' | 'migration' | 'negative' | 'system'
+  /** 验证任务引用（bench run id / 手工任务描述）；迁移验证任务不得参与经验提取 */
+  task_ref: string
+  outcome: 'pass' | 'fail'
+  note?: string
+  at: number
 }
 
 /**
@@ -381,6 +400,6 @@ export function keyFromSymptom(text: string): string {
 /** 消费入池资格：verified 恒可；candidate 需达复发阈值（首注册即落盘不丢数据）。 */
 export function isConsumable(card: CardEnvelope): boolean {
   if (card.status === 'retired') return false
-  if (card.status === 'verified') return true
+  if (card.status === 'verified' || card.status === 'active') return true
   return card.recurrence >= EXPERIENCE_GOVERNANCE.RECURRENCE_THRESHOLD
 }

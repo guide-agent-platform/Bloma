@@ -167,3 +167,42 @@ describe('C3：负经验类别与采集点', () => {
     expect(readAllCards()).toHaveLength(0) // 不自动写账本
   })
 })
+
+describe('C2a：晋升管线（fail-closed）', () => {
+  it('candidate 直升 active 被拒；verified 无迁移证据被拒（fail-closed 铁律）', async () => {
+    const { promoteToActive, promotionBlockers, promoteToVerified } = await import('../../../main/experience/experience-service')
+    const card = (await tryRegisterCard({ kind: 'anti_pattern', tag: 'build_gate/ts/c2a', body: antiBody('C2A case'), source: src() }))!
+    expect(await promoteToActive(card.id)).toBeNull() // candidate 直升被拒
+    const verified = (await promoteToVerified(card.id, 'replay_green'))!
+    expect(verified.status).toBe('verified')
+    expect(await promoteToActive(card.id)).toBeNull() // 无迁移+负例证据被拒
+    expect(promotionBlockers(verified).join()).toContain('迁移验证')
+    expect(promotionBlockers(verified).join()).toContain('负例验证')
+  })
+
+  it('登记迁移+负例 pass 报告后可升 active；报告留痕且 ids 同步', async () => {
+    const { promoteToActive, promoteToVerified, registerValidationReport } = await import('../../../main/experience/experience-service')
+    const card = (await tryRegisterCard({ kind: 'anti_pattern', tag: 'build_gate/ts/c2a2', body: antiBody('C2A case 2'), source: src() }))!
+    await promoteToVerified(card.id, 'replay_green')
+    await registerValidationReport(card.id, { layer: 'migration', task_ref: 'bench-run-未参与提取的同类任务', outcome: 'pass' })
+    expect(await promoteToActive(card.id)).toBeNull() // 只缺负例，仍拒
+    await registerValidationReport(card.id, { layer: 'negative', task_ref: '相近不适用任务-无误触发', outcome: 'pass' })
+    const active = await promoteToActive(card.id)
+    expect(active!.status).toBe('active')
+    expect(active!.governance!.validationReports).toHaveLength(2)
+    expect(active!.governance!.validationReportIds).toHaveLength(2)
+    // active 可消费（isConsumable）且进裁判清单
+    const picked = await selectForInjection({ kind: 'anti_pattern', surface: 'c2a-test' })
+    expect(picked.map((c) => c.id)).toContain(card.id)
+  })
+
+  it('fail 报告不计入门槛；system 层报告不充当迁移/负例', async () => {
+    const { promoteToActive, promoteToVerified, registerValidationReport } = await import('../../../main/experience/experience-service')
+    const card = (await tryRegisterCard({ kind: 'anti_pattern', tag: 'build_gate/ts/c2a3', body: antiBody('C2A case 3'), source: src() }))!
+    await promoteToVerified(card.id, 'human_review')
+    await registerValidationReport(card.id, { layer: 'migration', task_ref: 'x', outcome: 'fail' })
+    await registerValidationReport(card.id, { layer: 'negative', task_ref: 'y', outcome: 'fail' })
+    await registerValidationReport(card.id, { layer: 'system', task_ref: 'z', outcome: 'pass' })
+    expect(await promoteToActive(card.id)).toBeNull()
+  })
+})

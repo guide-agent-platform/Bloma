@@ -4,7 +4,9 @@ import { randomUUID } from 'node:crypto'
 import { getExperienceIndexPath, getGeneratedProjectsDir } from '../../storage/config-paths'
 import { trackAnalytics } from '../platform-services'
 import { cardThreatensProtectedSurface } from './self-cert-guard'
-import { cardGovernance,
+import type { ValidationReport } from './types'
+import {
+  cardGovernance,
   EXPERIENCE_GOVERNANCE,
   computeFingerprint,
   experienceEnabled,
@@ -258,7 +260,7 @@ export async function reportReplayOutcomes(
     }
     if (card.status === 'candidate' && o.passed) {
       await promoteToVerified(card.id, 'replay_green')
-    } else if (card.status === 'verified') {
+    } else if (card.status === 'verified' || card.status === 'active') {
       await reportInjection(card.id, o.passed ? 'matched' : 'false_positive')
     }
   }
@@ -275,6 +277,62 @@ export async function promoteToVerified(id: string, verifiedBy: VerificationMeth
   next.updated_at = next.last_verified_at
   appendCard(next)
   console.log(`${LOG} promoted card to verified:`, id, verifiedBy)
+  return next
+}
+
+/**
+ * C2a 晋升门槛清单（fail-closed）：升 active 需①已 verified（机制验证）②≥1 条 migration
+ * 层 pass 报告（未参与提取的同类未见任务）③≥1 条 negative 层 pass 报告（相近不适用任务
+ * 无误触发）。返回缺失项（空数组 = 可升）。
+ */
+export function promotionBlockers(card: ExperienceCard): string[] {
+  const blockers: string[] = []
+  if (card.status === 'retired') return ['卡已退役']
+  if (card.status === 'candidate') blockers.push('需先 verified（机制验证：replay/sandbox/human）')
+  const reports = card.governance?.validationReports ?? []
+  const hasPass = (layer: ValidationReport['layer']) => reports.some((r) => r.layer === layer && r.outcome === 'pass')
+  if (!hasPass('migration')) blockers.push('缺迁移验证报告（≥1 条同类未见任务 pass，任务不得参与经验提取）')
+  if (!hasPass('negative')) blockers.push('缺负例验证报告（≥1 条相近不适用任务无误触发 pass）')
+  return blockers
+}
+
+/** 手工登记验证报告（C2a 人工复核通道；也承接未来 C2b bench 自动报告）。 */
+export async function registerValidationReport(
+  id: string,
+  report: { layer: ValidationReport['layer']; task_ref: string; outcome: 'pass' | 'fail'; note?: string },
+): Promise<ExperienceCard | null> {
+  const card = ensureIndex().get(id)
+  if (!card || card.status === 'retired') return null
+  if (!report.task_ref.trim()) return null
+  const next = cloneCard(card)
+  const entry: ValidationReport = { id: randomUUID(), ...report, at: Date.now() }
+  next.governance = next.governance ?? cardGovernance(next)
+  next.governance.validationReports = [...(next.governance.validationReports ?? []), entry]
+  next.governance.validationReportIds = next.governance.validationReports.map((r) => r.id)
+  next.updated_at = Date.now()
+  appendCard(next)
+  console.log(`${LOG} validation report registered:`, id, report.layer, report.outcome)
+  return next
+}
+
+/**
+ * 升 active（C2a）：promotionBlockers 非空一律拒（fail-closed——无迁移证据的卡升不了
+ * active，P2 稿铁律）；成功后 last_verified_at 刷新。
+ */
+export async function promoteToActive(id: string): Promise<ExperienceCard | null> {
+  const card = ensureIndex().get(id)
+  if (!card) return null
+  const blockers = promotionBlockers(card)
+  if (blockers.length > 0) {
+    console.warn(`${LOG} promoteToActive blocked (fail-closed):`, id, blockers.join('；'))
+    return null
+  }
+  const next = cloneCard(card)
+  next.status = 'active'
+  next.last_verified_at = Date.now()
+  next.updated_at = next.last_verified_at
+  appendCard(next)
+  console.log(`${LOG} promoted card to active:`, id)
   return next
 }
 
@@ -359,7 +417,7 @@ function keywordOverlap(hint: string | undefined, card: ExperienceCard): number 
 
 function relevanceScore(card: ExperienceCard, query: InjectionQuery, now: number): number {
   let score = 0
-  if (card.status === 'verified') score += 10
+  if (card.status === 'verified' || card.status === 'active') score += 10
   score += Math.min(card.recurrence, 5)
   if (keywordOverlap(query.context_hint, card) > 0) score += 6 + keywordOverlap(query.context_hint, card)
   if (query.tag_prefix && card.tag.startsWith(query.tag_prefix)) score += 2

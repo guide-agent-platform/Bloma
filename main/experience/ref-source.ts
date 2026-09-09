@@ -94,7 +94,7 @@ export function listRefPatternModules(type: TemplateType, homeRoot: string = get
   try {
     const candidates: Array<{ slug: string; updatedAt: number; mod: OfficialModule }> = []
     for (const card of loadLedger(join(homeRoot, 'bloma-experience.jsonl'))) {
-      if (card.kind !== 'pattern' || card.status !== 'verified') continue
+      if (card.kind !== 'pattern' || (card.status !== 'verified' && card.status !== 'active')) continue
       const body = card.body
       if (!body || body.sandbox_result?.build_pass !== true) continue
       if (body.language_family !== 'js' && body.language_family !== 'universal') continue

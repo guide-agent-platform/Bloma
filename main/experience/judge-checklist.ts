@@ -42,7 +42,7 @@ export async function buildJudgeErrorPatternsSection(
       context_hint: opts.context_hint,
     })
     const lines = cards
-      .filter((c): c is ExperienceCard & { kind: 'anti_pattern' } => c.kind === 'anti_pattern' && c.status === 'verified')
+      .filter((c): c is ExperienceCard & { kind: 'anti_pattern' } => c.kind === 'anti_pattern' && (c.status === 'verified' || c.status === 'active'))
       .map(renderLine)
     if (lines.length === 0) return ''
     return ['【常见错法】（经验库中已验证的错法，逐项对照，防漏判）', ...lines].join('\n')
