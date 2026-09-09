@@ -78,14 +78,16 @@ export function collectSession(sessionId, home = findProjHome()) {
     const content = Array.isArray(e.content) ? e.content : []
     const text = content.map((c) => (typeof c === 'string' ? c : c?.text || '')).join('\n')
     if (role === 'user') {
-      // 跳过内部/决策合成轮与平台注入轮（如「目标：实现…输出完成总结」的 loop 任务指令），只留真实用户输入
+      // 跳过内部/决策合成轮与平台注入轮（如「目标：实现…输出完成总结」的 loop 任务指令、
+      // <session-recall> 跨会话检索注入、<current_stage> 状态段），只留真实用户输入
       const synthetic =
         text.startsWith('[') ||
+        text.startsWith('<') ||
         text.startsWith('## ') ||
         /^目标：实现「/.test(text) ||
         text.includes('按系统提示里的项目锚') ||
         text.includes('run_gwt_tests')
-      if (text && !synthetic) {
+      if (text.trim() && !synthetic) {
         out.userMessages.push({ text, timestamp: e.timestamp || 0 })
       }
     } else if (role === 'assistant') {

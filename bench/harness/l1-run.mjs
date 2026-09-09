@@ -51,7 +51,7 @@ const POLL_INTERVAL_MS = 2_500
 // ---------------------------------------------------------------- CLI ----
 
 function parseArgs(argv) {
-  const out = { seed: '', mode: 'quick', timeoutMin: 40, label: '', keepHome: false, dry: false, probe: false }
+  const out = { seed: '', mode: 'quick', timeoutMin: 40, label: '', keepHome: false, dry: false, probe: false, promptsDir: '' }
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i]
     if (a === '--seed') out.seed = argv[++i] ?? ''
@@ -61,6 +61,7 @@ function parseArgs(argv) {
     else if (a === '--keep-home') out.keepHome = true
     else if (a === '--dry') out.dry = true
     else if (a === '--probe') out.probe = true
+    else if (a === '--prompts-dir') out.promptsDir = argv[++i] ?? ''
     else { console.error(`未知参数：${a}`); process.exit(2) }
   }
   if (!['quick', 'longterm'].includes(out.mode)) { console.error('--mode 仅支持 quick|longterm'); process.exit(2) }
@@ -270,6 +271,17 @@ async function main() {
   // M5 职责分工路由随渠道同步（生产有则拷，保证 B0 与生产路由一致；平台对缺失回退 getFirstEnabledChannel）
   const routingSrc = join(dirname(channelsSrc), 'category-routing.json')
   if (existsSync(routingSrc)) { copyFileSync(routingSrc, join(promaHome, 'category-routing.json')); log({ event: 'routing-copied' }) }
+  // A/B 支持：--prompts-dir 指定外置覆盖目录（如 BLOMA/phase1-overrides/），拷入临时
+  // home 的 prompts/（全量替换语义，文件存在即生效）——不指定时不拷（=内置默认）
+  if (args.promptsDir) {
+    if (!existsSync(args.promptsDir)) { console.error(`--prompts-dir 不存在：${args.promptsDir}`); process.exit(2) }
+    const dest = join(promaHome, 'prompts')
+    mkdirSync(dest, { recursive: true })
+    for (const f of readdirSync(args.promptsDir)) {
+      if (f.endsWith('.md')) copyFileSync(join(args.promptsDir, f), join(dest, f))
+    }
+    log({ event: 'prompts-copied', detail: `${args.promptsDir}` })
+  }
   // 渠道 key 预解（生产 userData 上下文）：启动 Electron 前完成，失败早暴露
   const keysByShortId = decryptProdChannelKeys(channelsSrc)
   log({ event: 'keys-decrypted', detail: `${keysByShortId.size} 渠道` })
