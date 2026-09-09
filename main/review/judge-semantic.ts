@@ -26,6 +26,7 @@ import type { SDKQuery } from '../orchestrator'
 import type { JudgeConstraint } from '../judge-engine'
 import { delegatedReviewEnabled, runDelegatedReview } from '../review-delegation'
 import { buildJudgeErrorPatternsSection } from '../experience/judge-checklist'
+import { ANTIDEGRADE_JUDGE_RULES, antidegradeEnabled } from './judge-antidegrade'
 import type { AgentEvent } from '../../shared/types'
 
 // =========================================================================
@@ -82,6 +83,15 @@ export const SEMANTIC_JUDGE_SYSTEM_PROMPT = [
 ].join('\n')
 
 /**
+ * 语义裁判 system prompt 装配（Phase 3 B4）：开关 off 返回内置常量（字节级现状）；
+ * on 时追加反退化规则三条（CRUD≠能力完成/证据不足不得判 implemented/无需求依据控件判 deviated）。
+ * export：供单测与后续注入点复用。
+ */
+export function buildSemanticJudgeSystemPrompt(): string {
+  return antidegradeEnabled() ? `${SEMANTIC_JUDGE_SYSTEM_PROMPT}\n\n${ANTIDEGRADE_JUDGE_RULES}` : SEMANTIC_JUDGE_SYSTEM_PROMPT
+}
+
+/**
  * 语义审查主入口：LLM 逐功能项判定 → 代码级推导约束。
  * 永不抛错（增强腿）；无渠道 / LLM 失败 → skipped。
  */
@@ -116,7 +126,7 @@ export async function runSemanticJudgeReview(opts: {
     const delegated = await runDelegatedReview({
       goal: `裁判语义审查产物 vs PRD：${backplane.name ?? '未命名项目'}`,
       task: buildDelegatedJudgeTask(backplane, testSummary, errorSection),
-      system: SEMANTIC_JUDGE_SYSTEM_PROMPT,
+      system: buildSemanticJudgeSystemPrompt(),
       query,
       env,
       sessionId,
@@ -185,7 +195,7 @@ async function judgeViaLlm(opts: {
   const capSection = capContractEnabled() ? renderCapSection(backplaneAiCapabilities(opts.backplane)) : ''
   const truncated = opts.artifact.length > ARTIFACT_CHAR_LIMIT
   const prompt = [
-    SEMANTIC_JUDGE_SYSTEM_PROMPT,
+    buildSemanticJudgeSystemPrompt(),
     '',
     ...(opts.errorSection ? [opts.errorSection, ''] : []),
     '【PRD 功能项】（P0=核心必须 / P1=重要 / P2=加分）',

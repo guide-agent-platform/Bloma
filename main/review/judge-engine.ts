@@ -7,9 +7,10 @@ import { findProject } from '../project-service'
 import { TEMPLATE_META_VERSION } from '../sketch-engine'
 import { isInjectionEnabled } from '../template-injection'
 import { readPrdBackplane, readUxContractSketch } from '../document-engine'
-import { escapeHtml, requirementAssertions, requirementPriority, type SketchRequirement } from '../sketch-engine'
+import { escapeHtml, requirementAssertions, requirementPriority, backplaneAiCapabilities, type SketchRequirement } from '../sketch-engine'
 import { hasInteractiveEntry } from '../gwt-service'
 import { parseBehaviorAssertion } from '../behavior-assertions'
+import { antidegradeEnabled, detectAntidegrade } from './judge-antidegrade'
 
 /**
  * JudgeEngine（A2-10 + 2026-08-17 §8.1 行为门禁）——只判定、不修改代码。
@@ -96,7 +97,26 @@ export function runJudge(input: JudgeInput): JudgeVerdict {
   const indexHtml = readProjectHtml(project.root_path)
   const appJs = readProjectAppJs(project.root_path)
   const codeConsistency = evaluateBehaviorAssertions(requirements, indexHtml, appJs, artifact, input.test_result)
-  const hardConstraints: JudgeConstraint[] = [prdPresent, gwtCoverage, codeConsistency]
+  // Phase 3 B4（2026-09-09）：反退化硬约束（规则先行层，LLM 语义腿之前拒已知坏实现）。
+  // 开关 off=现状（约束不追加，判定逐字节不变）；ai-mock-frontend 以前端产物必含
+  // fetch('/api/llm') 的平台接入形态为口径（server 侧无需读——/api/llm 由平台产物服务器提供）。
+  const antidegrade = antidegradeEnabled()
+    ? detectAntidegrade({ artifact, caps: backplaneAiCapabilities(backplane) })
+    : []
+  const hardConstraints: JudgeConstraint[] = [
+    prdPresent,
+    gwtCoverage,
+    codeConsistency,
+    ...(antidegrade.length > 0 || antidegradeEnabled()
+      ? [
+          {
+            name: '能力反退化（已知坏实现）',
+            passed: antidegrade.length === 0,
+            detail: antidegrade.length === 0 ? '无 AI 冒充/无需求依据控件等已知坏实现形态' : antidegrade.map((f) => f.detail).join('；'),
+          },
+        ]
+      : []),
+  ]
 
   // ── 软约束 ──
   const softConstraints: JudgeConstraint[] = []
