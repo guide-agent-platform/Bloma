@@ -118,6 +118,11 @@ function readPendingDecisions(sessionFile) {
       try { inner = JSON.parse(text.slice('[decision] '.length)) } catch { continue }
       const base = { line: index, timestamp: entry.timestamp || 0, fingerprint: `${inner.type}@${entry.timestamp || index}`, options: [] }
       if (inner.type === 'clarification_card') cards.push({ ...base, kind: 'clarification', options: Array.isArray(inner.detail?.options) ? inner.detail.options.map(String) : [] })
+      else if (inner.type === 'enrichment_clarification_requested') {
+        // 加厚追问（PRD 定稿前信息缺口，一次一道；requests[0].options 为候选）
+        const first = Array.isArray(inner.detail?.requests) ? inner.detail.requests[0] : null
+        cards.push({ ...base, kind: 'enrichment_clarification', options: Array.isArray(first?.options) ? first.options.map(String) : [] })
+      }
       else if (inner.type === 'prd_review') cards.push({ ...base, kind: 'prd_review' })
       else if (inner.type === 'prd_confirm') cards.push({ ...base, kind: 'prd_confirm' })
       else if (inner.type === 'requirement_confirm_card' || inner.type === 'clarification_forced_confirm') cards.push({ ...base, kind: 'requirement_confirm' })
@@ -445,6 +450,20 @@ ${mainLogs.join('')}`); console.error(`[l1] 主进程日志已落 ${join(runDir,
           if (!result.ok) throw new Error(`sendMessage(card) failed: ${JSON.stringify(result).slice(0, 300)}`)
         }, { seq: answeredFingerprints.size, sessionId, projectId, content: pick.label, mode: args.mode }), 'clarification')
         log({ event: 'clarification-answered', detail: `${pick.mode}：「${pick.label.slice(0, 30)}」` })
+      } else if (card.kind === 'enrichment_clarification') {
+        // 加厚追问：普通 sendMessage + 专用 option id（ClarificationCard 同协议）；
+        // 脚本用户行为=选首个候选；无候选时让渡（按常见做法整理）
+        const answer = card.options.find((o) => !o.includes('帮我') && !o.includes('你来')) ?? card.options[0] ?? '你来定，按常见做法整理'
+        await sendGuarded(() => page.evaluate(async (input) => {
+          const api = window.electronAPI
+          const result = await api.agent.sendMessage({
+            request_id: `bench-l1-enrich-${input.seq}`, session_id: input.sessionId, project_id: input.projectId,
+            content: input.content, mode: input.mode, current_stage: 'blocked_for_user_decision',
+            metadata: { source: 'card_option', selected_option_id: 'enrichment_clarification_answer' },
+          })
+          if (!result.ok) throw new Error(`sendMessage(enrichment) failed: ${JSON.stringify(result).slice(0, 300)}`)
+        }, { seq: answeredFingerprints.size, sessionId, projectId, content: answer, mode: args.mode }), 'enrichment_clarification')
+        log({ event: 'enrichment-answered', detail: `「${answer.slice(0, 30)}」` })
       } else if (card.kind === 'requirement_confirm') {
         // 需求确认弹窗：独立 IPC（decision=confirm 全量勾选，脚本用户合理行为）；确认后进 PRD 管线
         await sendGuarded(() => page.evaluate(async (input) => {
