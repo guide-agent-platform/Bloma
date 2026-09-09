@@ -133,3 +133,37 @@ describe('C5：曝光日志（experience_exposure）', () => {
     expect(readExposureEvents().filter((e) => e.event_type === 'experience_exposure')).toHaveLength(0)
   })
 })
+
+describe('C3：负经验类别与采集点', () => {
+  it('antidegrade finding → negative/ 标签卡落库（antidegrade_judge 来源、severity 3）', async () => {
+    const { recordFailureCards } = await import('../../../main/experience/error-card')
+    recordFailureCards(
+      { projectId: 'proj-x' },
+      { antidegrade: [{ code: 'ai-mock-frontend', detail: '背板声明 1 条能力契约（CAP）但产物全文无 /api/llm 调用痕迹' }] },
+    )
+    await new Promise((r) => setTimeout(r, 50)) // fire-and-forget 落盘
+    const cards = readAllCards()
+    expect(cards).toHaveLength(1)
+    expect(cards[0].tag).toBe('negative/ai-mock-frontend')
+    expect(cards[0].source.type).toBe('antidegrade_judge')
+    expect(cards[0].kind === 'anti_pattern' && cards[0].body.severity).toBe(3)
+    expect(cards[0].governance?.hypothesis).toContain('/api/llm')
+  })
+
+  it('消费隔离：负经验不进 G4 正向参考（kind=pattern 查询不含 negative 卡）', async () => {
+    const { recordFailureCards } = await import('../../../main/experience/error-card')
+    recordFailureCards({ projectId: 'proj-x' }, { antidegrade: [{ code: 'cheat-control', detail: '产物含「模拟失败」控件' }] })
+    await new Promise((r) => setTimeout(r, 50))
+    const patternPicked = await selectForInjection({ kind: 'pattern' })
+    expect(patternPicked).toEqual([]) // 负经验是 anti_pattern，永不进正向参考
+  })
+
+  it('首批已知负经验种子可生成（四条，纯构建器不落盘）', async () => {
+    const { buildKnownNegativeSeedCards, KNOWN_NEGATIVE_SEEDS } = await import('../../../main/experience/error-card')
+    expect(KNOWN_NEGATIVE_SEEDS).toHaveLength(4)
+    const seeds = buildKnownNegativeSeedCards('seedhash')
+    expect(seeds).toHaveLength(4)
+    expect(seeds.every((c) => c.tag.startsWith('negative/seed-'))).toBe(true)
+    expect(readAllCards()).toHaveLength(0) // 不自动写账本
+  })
+})

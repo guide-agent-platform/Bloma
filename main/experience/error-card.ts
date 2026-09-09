@@ -262,6 +262,8 @@ export function recordFailureCards(
     buildGate?: BuildGateResult
     judgeVerdict?: JudgeVerdict
     abnormal?: { outcomeType: 'timeout' | 'interrupt' | 'unexpected_exit'; description: string }
+    /** C3（2026-09-09）：裁判反退化 findings（B4 detectAntidegrade 输出）→ 负经验卡 */
+    antidegrade?: Array<{ code: string; detail: string }>
   },
 ): void {
   // C-2 纪律：开关 off = 零副作用（含 learnings 镜像——不加 gate 会污染现状字节级承诺）
@@ -286,6 +288,11 @@ export function recordFailureCards(
         }),
       )
     }
+    // C3：负经验（成功但投机）——独立 negative/ 标签空间，只进裁判清单消费（G4 正向
+    // 参考只读 pattern kind，天然隔离）；同 code 幂等靠指纹去重。
+    for (const finding of signals.antidegrade ?? []) {
+      cards.push(buildNegativeCardFromAntidegrade(finding, ctx))
+    }
     for (const card of cards) {
       void persistAntiPattern(card, ctx).catch((error) => console.warn('[experience] persist failed:', error))
     }
@@ -293,4 +300,97 @@ export function recordFailureCards(
     // 采集是增强不是依赖：任何组装异常绝不冒到交付链
     console.warn('[experience] recordFailureCards failed, skipping:', (error as Error)?.message)
   }
+}
+
+/**
+ * 首批已知负经验种子（P2 稿 C3，从实锤案例提炼；纯构建器——启用经验库时登记，
+ * 不自动写账本防污染）。四条：模拟失败按钮/固定样例冒充 AI/关 typecheck 过构建/测试方法进产品 UI。
+ */
+export const KNOWN_NEGATIVE_SEEDS: Array<{ code: string; symptom: string; trigger: string; test: string[]; review: string[] }> = [
+  {
+    code: 'cheat-simulation-button',
+    symptom: '加「模拟失败」按钮过失败态断言（需求无此控件依据）',
+    trigger: '断言含「失败→显示提示」且模型为过断言添加异常触发控件（随记灵案实锤）',
+    test: ['需求清单无该控件依据时产物不得出现模拟/仿真失败类控件'],
+    review: ['对照需求清单核查异常控件；失败态应由真实错误路径触发'],
+  },
+  {
+    code: 'ai-fixed-sample',
+    symptom: 'AI 调用不稳定时返回固定样例冒充智能结果',
+    trigger: 'AI 能力实现含「失败时返回示例文案」分支（无报错态）',
+    test: ['修改关键输入后输出随之变化', '模型不可用时明确报错而非返回样例'],
+    review: ['检查 /api/llm 失败分支是否伪装成功；结果区文案是否写死'],
+  },
+  {
+    code: 'disable-typecheck',
+    symptom: '关闭 typecheck/构建门禁让构建通过',
+    trigger: '类型错误无法修复时模型可能提议禁用检查（自证循环高危形态）',
+    test: ['构建门禁不可被产物或经验绕过'],
+    review: ['核查 tsconfig/build 配置未被篡改；错误应修复而非禁检'],
+  },
+  {
+    code: 'test-method-in-ui',
+    symptom: '把测试方法/探针逻辑写进产品 UI',
+    trigger: '断言教学产物——模型为满足断言把测试机制做进用户界面',
+    test: ['产品 UI 不含 mock 参数处理/探针钩子等测试机制'],
+    review: ['核查 URL mock=1 处理是否仅限 /api/llm 通道而非 UI 逻辑'],
+  },
+]
+
+/** 由种子生成候选负经验卡（不落盘；登记方决定时机）。 */
+export function buildKnownNegativeSeedCards(projectHash: string): ExperienceCard[] {
+  return KNOWN_NEGATIVE_SEEDS.map((seed) =>
+    envelope(
+      'anti_pattern',
+      `negative/seed-${seed.code}`,
+      {
+        stage: 'coding',
+        symptom: seed.symptom,
+        trigger_condition: seed.trigger,
+        root_cause: { stage: 'coding', description: seed.trigger, method: 'rule', confidence: 1 },
+        test_checklist: seed.test,
+        review_checklist: seed.review,
+        severity: 3,
+      },
+      { type: 'backfill', project_hash: projectHash, timestamp: Date.now() },
+    ),
+  )
+}
+
+/**
+ * C3 负经验卡组装（裁判反退化 finding → anti_pattern 负经验）：tag 落 negative/ 空间，
+ * severity=3（投机直接拒）；审查清单面向裁判核查（与 B4 三条规则同口径）。
+ */
+function buildNegativeCardFromAntidegrade(finding: { code: string; detail: string }, ctx: ObserveCtx): ExperienceCard {
+  const checklistByCode: Record<string, { test: string[]; review: string[]; symptom: string }> = {
+    'ai-mock-frontend': {
+      symptom: 'AI 能力被前端写死/固定模板冒充（产物无 /api/llm 调用痕迹）',
+      test: ['修改关键输入后输出随之变化', '模型不可用时明确报错而非假装成功'],
+      review: ['全文搜索 /api/llm 调用路径；结果区文案是否写死'],
+    },
+    'cheat-control': {
+      symptom: '产物含无需求依据的「模拟失败」类教学控件（为过失败态断言而加）',
+      test: ['需求清单无该控件依据时不得出现'],
+      review: ['对照需求清单核查异常控件（模拟/仿真失败类）'],
+    },
+  }
+  const preset = checklistByCode[finding.code] ?? {
+    symptom: `反退化信号：${finding.code}`,
+    test: ['按能力契约验收证据核查'],
+    review: [finding.detail.slice(0, 120)],
+  }
+  return envelope('anti_pattern', `negative/${finding.code}`, {
+    stage: 'coding',
+    symptom: preset.symptom,
+    trigger_condition: finding.detail.slice(0, 200),
+    root_cause: { stage: 'coding', description: finding.detail.slice(0, 200), method: 'rule', confidence: 1 },
+    test_checklist: preset.test,
+    review_checklist: preset.review,
+    severity: 3,
+  }, {
+    type: 'antidegrade_judge',
+    project_hash: hashProjectRef(ctx.projectId),
+    timestamp: Date.now(),
+    ...(ctx.sessionId ? { session_id: ctx.sessionId } : {}),
+  })
 }

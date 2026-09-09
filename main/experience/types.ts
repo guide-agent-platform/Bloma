@@ -35,6 +35,7 @@ export type CardSourceType =
   | 'build_gate_failure'
   | 'semantic_findings'
   | 'abnormal_outcome'
+  | 'antidegrade_judge'
   | 'backfill'
   | 'web_reference'
   | 'user_feedback'

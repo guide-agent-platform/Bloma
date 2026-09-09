@@ -11,6 +11,7 @@ import { escapeHtml, requirementAssertions, requirementPriority, backplaneAiCapa
 import { hasInteractiveEntry } from '../gwt-service'
 import { parseBehaviorAssertion } from '../behavior-assertions'
 import { antidegradeEnabled, detectAntidegrade } from './judge-antidegrade'
+import { recordFailureCards } from '../experience/error-card'
 
 /**
  * JudgeEngine（A2-10 + 2026-08-17 §8.1 行为门禁）——只判定、不修改代码。
@@ -103,6 +104,11 @@ export function runJudge(input: JudgeInput): JudgeVerdict {
   const antidegrade = antidegradeEnabled()
     ? detectAntidegrade({ artifact, caps: backplaneAiCapabilities(backplane) })
     : []
+  // C3（2026-09-09）：反退化 findings 同步落负经验卡（fire-and-forget；experience 开关 off
+  // 时 recordFailureCards 内部零副作用——判定链路字节不变）
+  if (antidegrade.length > 0) {
+    recordFailureCards({ projectId: input.project_id }, { antidegrade })
+  }
   const hardConstraints: JudgeConstraint[] = [
     prdPresent,
     gwtCoverage,
