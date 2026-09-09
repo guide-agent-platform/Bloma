@@ -825,12 +825,31 @@ export interface PermissionSetModeResult {
 /** Agent Loop 结束状态（loop-aware judge M4-B 用；与 main/agent-loop 的 AgentLoopResult.status 同构）。 */
 export type AgentLoopStatus = 'completed' | 'turn_limit' | 'budget_exhausted' | 'cancelled'
 
+/** W2-F4（咨询 D2/D4，2026-09-09）：loop 自验状态的宿主快照——终验失败 source 五分类的
+ *  确定性判据（loop 是否自测过/上次失败集/验证面是否全过）。由 attachUsage 从工具状态拼装，
+ *  纯增量字段，旧调用方零感知。 */
+export interface LoopValidationSnapshot {
+  /** run_gwt_tests 执行次数（0=loop 从未自测） */
+  gwt_runs: number
+  /** run_api_contract_tests 执行次数（0=loop 从未验过 API 契约） */
+  api_contract_runs: number
+  /** 上一次 run_gwt_tests 的失败场景名集合（全过重置为空） */
+  last_gwt_failures: string[]
+  gwt_all_passed: boolean
+  api_all_passed: boolean
+  security_all_passed: boolean
+  /** 已读文件版本戳（path→rev，W2-F1 证据包/候选指纹原料）；未启用版本戳功能时为空对象 */
+  file_revisions: Record<string, string>
+}
+
 /** JudgeInput 的 loop 元数据（M4-B）：judge 对 loop 异常终止态判「不达标/让渡」，不信模型自述。 */
 export interface AgentLoopJudgeMetadata {
   status: AgentLoopStatus
   turns: number
   finalText: string
   toolCalls: Array<{ name: string; turn: number }>
+  /** W2-F4：自验状态快照（终验 source 分类用）；存量/重建路径缺省无 */
+  validation?: LoopValidationSnapshot
 }
 
 export interface AgentEvent {

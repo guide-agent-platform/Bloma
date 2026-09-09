@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { runAgentLoop, TOOL_WINDOW_ROUNDS, windowMessages, keepRecentTurns, estimateBlocksText, type AgentLoopInput, type AgentLoopTool, type AgentLoopTurnInfo, type AgentLoopCompactionInfo, type ToolOutcome } from '../../main/agent-loop'
+import { runAgentLoop, TOOL_WINDOW_ROUNDS, windowMessages, keepRecentTurns, estimateBlocksText, renderCheckpointRecoveryHeader, type AgentLoopInput, type AgentLoopTool, type AgentLoopTurnInfo, type AgentLoopCompactionInfo, type LoopCheckpointSnapshot, type ToolOutcome } from '../../main/agent-loop'
 import { estimateTokenCount } from '../../main/usage-guard'
 import { drainSteerQueue, enqueueSteer, pendingSteerCount, resetSteerQueuesForTests, STEER_WRAP_PREFIX, wrapSteerContent } from '../../main/steer-queue'
 import type { AgentEvent } from '../../shared/types'
@@ -1454,5 +1454,121 @@ describe('steer 运行中转向（P0-1，2026-09-08 pi 差距方案）', () => {
     expect(handoffInputs.length).toBeGreaterThan(0)
     expect(JSON.stringify(handoffInputs[0])).toContain('压缩前补充的方向')
     expect(pendingSteerCount('session-steer-compact')).toBe(0)
+  })
+})
+
+describe('W2 E2+F1（咨询 D3/D4）：loop_checkpoint v0', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalCheckpoint = process.env.BLOMA_LOOP_CHECKPOINT
+  const originalThreshold = process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
+  const originalKeepRecent = process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS
+  const echo = tool('echo', () => ({ output: 'ok' }))
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-ckpt-'))
+    process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS = '0'
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+    for (const [key, value] of [
+      ['BLOMA_LOOP_CHECKPOINT', originalCheckpoint],
+      ['BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS', originalThreshold],
+      ['BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS', originalKeepRecent],
+    ] as const) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  })
+
+  it('renderCheckpointRecoveryHeader：目标/指纹/仍有效转向过滤 superseded/未闭环失败/验证状态', () => {
+    const snapshot: LoopCheckpointSnapshot = {
+      session_id: 's1',
+      at_turn: 9,
+      trigger: 'compaction',
+      decisions: [
+        { id: 'steer-3-1', kind: 'steer', text: '改成月度统计口径', at_turn: 3, superseded_by: 'steer-6-1' },
+        { id: 'steer-6-1', kind: 'steer', text: '改回周口径并保留导出', at_turn: 6 },
+      ],
+      progress_files: { 'src/app.js': 'abc123-120' },
+      validation: {
+        gwt_runs: 2,
+        api_contract_runs: 0,
+        last_gwt_failures: ['F-005 搜索过滤'],
+        gwt_all_passed: false,
+        api_all_passed: true,
+        security_all_passed: false,
+        file_revisions: { 'src/app.js': 'abc123-120' },
+        candidate_fingerprint: 'fp-deadbeef-1',
+      },
+    }
+    const header = renderCheckpointRecoveryHeader('做一个记账工具\n更多细节', snapshot)
+    expect(header).toContain('【检查点恢复头')
+    expect(header).toContain('做一个记账工具')
+    expect(header).toContain('fp-deadbeef-1')
+    expect(header).toContain('改回周口径并保留导出')
+    expect(header).not.toContain('改成月度统计口径') // superseded 不注入
+    expect(header).toContain('F-005 搜索过滤')
+    expect(header).toContain('GWT 有失败')
+    expect(header).toContain('read_file/grep')
+  })
+
+  it('E3：onCheckpoint 终态触发 + result.validation 快照（gwt_runs=0 如实）', async () => {
+    const snapshots: LoopCheckpointSnapshot[] = []
+    const result = await runAgentLoop(baseInput({
+      query: async function* () {
+        yield toolUseMessage('t1', 'echo')
+        yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+      },
+      tools: [echo],
+      maxTurns: 1,
+      sessionId: 'session-ckpt-final',
+      onCheckpoint: (snapshot) => snapshots.push(snapshot),
+    }))
+    expect(result.status).toBe('turn_limit')
+    expect(result.validation).toMatchObject({ gwt_runs: 0, api_contract_runs: 0, last_gwt_failures: [] })
+    expect(snapshots.some((s) => s.trigger === 'final')).toBe(true)
+  })
+
+  it('压缩后恢复头由 checkpoint 生成（BLOMA_LOOP_CHECKPOINT on；off=零注入字节级现状）', async () => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    const { query, turnCalls } = compactQuery({ inputTokens: 5000, handoff: 'text' })
+    // on：压缩后下一轮模型请求携带恢复头
+    process.env.BLOMA_LOOP_CHECKPOINT = '1'
+    await runAgentLoop(baseInput({
+      query,
+      tools: [echo],
+      maxTurns: 6,
+      sessionId: 'session-ckpt-on',
+    }))
+    const afterCompaction = JSON.stringify(turnCalls[1])
+    expect(afterCompaction).toContain('检查点恢复头')
+    expect(afterCompaction).toContain('候选指纹')
+    // off：恢复头不出现（字节级现状）
+    const { query: query2, turnCalls: turnCalls2 } = compactQuery({ inputTokens: 5000, handoff: 'text' })
+    delete process.env.BLOMA_LOOP_CHECKPOINT
+    await runAgentLoop(baseInput({
+      query: query2,
+      tools: [echo],
+      maxTurns: 6,
+      sessionId: 'session-ckpt-off',
+    }))
+    expect(JSON.stringify(turnCalls2[1])).not.toContain('检查点恢复头')
+  })
+
+  it('E3：压缩事件触发 onCheckpoint(trigger=compaction)，快照含段后验证状态', async () => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    process.env.BLOMA_LOOP_CHECKPOINT = '1'
+    const { query } = compactQuery({ inputTokens: 5000, handoff: 'text' })
+    const snapshots: LoopCheckpointSnapshot[] = []
+    await runAgentLoop(baseInput({
+      query,
+      tools: [echo],
+      maxTurns: 6,
+      sessionId: 'session-ckpt-compaction',
+      onCheckpoint: (snapshot) => snapshots.push(snapshot),
+    }))
+    const compaction = snapshots.find((s) => s.trigger === 'compaction')
+    expect(compaction).toBeDefined()
+    expect(compaction!.validation.candidate_fingerprint).toMatch(/^fp-[0-9a-f]+-\d+$/)
   })
 })

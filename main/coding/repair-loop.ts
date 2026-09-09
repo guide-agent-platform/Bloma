@@ -23,12 +23,13 @@ import type { BuildGateResult } from './build-gate'
 import type { ProjectMode, AgentEvent } from '../../shared/types'
 import type { ThinkingLevel } from '../../shared/reasoning-profile'
 import type { SDKQuery } from '../orchestrator'
-import { runAgentLoop, type AgentLoopResult } from './agent-loop'
+import { runAgentLoop, loopCheckpointEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from './agent-loop'
 import { buildAgentTools } from './agent-tools'
 import { categoryTemperature, resolveGenerationMaxTokens } from '../model-resolution'
 import { resolveChannelEnv } from '../runtime-fallback'
 import { trackAnalytics } from '../platform-services'
 import { appendProjectLearning } from '../learnings-log'
+import { readLoopCheckpointDocument, writeLoopCheckpointDocument, type LoopRepairAttemptRecord } from '../document-engine'
 
 export type RepairSource = 'gwt' | 'build'
 
@@ -138,6 +139,12 @@ const REPAIR_MODE_SECTION = [
   '不要重新生成整个项目，不要改动修复任务卡之外的任何文件或功能。',
 ].join('\n')
 
+/** W2-F1（咨询 D4，2026-09-09）：修复证据包——候选指纹+此前修复尝试（loop-checkpoint 账本）。 */
+export interface RepairCheckpointContext {
+  candidate_fingerprint?: string
+  attempts: LoopRepairAttemptRecord[]
+}
+
 export interface RepairLoopInput {
   request_id: string
   session_id: string
@@ -156,6 +163,8 @@ export interface RepairLoopInput {
   buildSystem: (editFormat: 'diff' | 'whole') => string
   /** Phase 3 B3：本轮锚三字段（可选；BLOMA_ROUND_ANCHOR 缺省 off=零注入字节级现状） */
   roundAnchor?: RoundAnchorSpec
+  /** W2-F1：修复证据包（候选指纹+此前修复尝试；BLOMA_LOOP_CHECKPOINT 缺省 off=零注入） */
+  checkpointContext?: RepairCheckpointContext
   /** 思考档位（编排器解析后传入；缺省不传 = loop 内部缺省） */
   thinkingLevel?: ThinkingLevel
   /** 事件发布（编排器 publish 包装） */
@@ -213,7 +222,7 @@ export async function runRepairLoop(input: RepairLoopInput): Promise<RepairRound
       input.roundAnchor && roundAnchorEnabled() ? `\n\n${renderRoundAnchorBlock(input.roundAnchor)}` : ''
     loopResult = await runAgentLoop({
       system: `${input.buildSystem(editFormat)}\n\n${REPAIR_MODE_SECTION}${roundAnchorBlock}`,
-      task: renderRepairTaskCard(input.tasks),
+      task: renderRepairTaskCard(input.tasks, input.checkpointContext),
       // 窄任务小预算：web_research 限 2 防长 loop 无节制外呼（主 loop 为 4）
       toolBudget: { web_research: REPAIR_WEB_RESEARCH_BUDGET },
       tools: buildAgentTools({
@@ -258,6 +267,22 @@ export async function runRepairLoop(input: RepairLoopInput): Promise<RepairRound
             privacy_level: 'research_safe',
           },
         })
+      },
+      // W2-E2/E3：修复轮检查点投影持久化（修复期间改了什么/验证到哪，同样进账本）
+      onCheckpoint: (snapshot) => {
+        if (!loopCheckpointEnabled()) return
+        try {
+          const existing = readLoopCheckpointDocument(input.project_id)
+          writeLoopCheckpointDocument(input.project_id, {
+            version: 1,
+            project_id: input.project_id,
+            updated_at: new Date().toISOString(),
+            runtime: snapshot,
+            repair_attempts: existing?.repair_attempts ?? [],
+          })
+        } catch {
+          // 写盘失败静默
+        }
       },
     })
   } catch (err) {
@@ -319,10 +344,32 @@ function renderBuildTaskBlock(task: RepairTask): string {
  * 修复卡是纯文本不是可解析 JSON——不适用截断重试逻辑（陷阱 7 只管代码型 JSON）；
  * 修复轮产物校验靠 GWT 重验而非解析。空队列返回空串（组装器幂等：无任务即不注入）。
  */
-export function renderRepairTaskCard(tasks: RepairTask[]): string {
+/** W2-F1：修复证据包段（宿主拼装，模型勿改写；无 checkpoint 时空段=字节级现状）。 */
+function renderRepairEvidencePack(checkpoint?: RepairCheckpointContext): string[] {
+  if (!checkpoint) return []
+  const lines = ['【修复证据包（宿主生成，勿改写）】']
+  if (checkpoint.candidate_fingerprint) lines.push(`- 修改前候选指纹：${checkpoint.candidate_fingerprint}`)
+  if (checkpoint.attempts.length === 0) {
+    lines.push('- 此前修复尝试：无（本轮是第一轮定向修复）')
+  } else {
+    lines.push(`- 此前修复尝试（共 ${checkpoint.attempts.length} 轮，勿重复同样补丁）：`)
+    for (const attempt of checkpoint.attempts.slice(-3)) {
+      const touched = attempt.files_touched.length > 0 ? attempt.files_touched.join('、') : '（未见文件改动）'
+      lines.push(
+        `  - 第${attempt.round}轮 改 ${touched} → 修复 ${attempt.outcome.resolved.length}、持续 ${
+          attempt.outcome.persistent.length
+        }、新增 ${attempt.outcome.new_failures.length}${attempt.outcome.converged ? '（当轮已收敛，本次失败是新引入）' : ''}`,
+      )
+    }
+    lines.push('  - 判据：持续=同样失败仍在（换假设，勿重复同补丁）；新增=修复引入回归（先查共享影响面）')
+  }
+  return [lines.join('\n')]
+}
+
+export function renderRepairTaskCard(tasks: RepairTask[], checkpoint?: RepairCheckpointContext): string {
   if (tasks.length === 0) return ''
   const blocks = tasks.map((task) => (task.source === 'gwt' ? renderGwtTaskBlock(task) : renderBuildTaskBlock(task)))
-  return [`## 修复任务（共 ${tasks.length} 项，只修这些，不要动其他任何文件/功能）`, ...blocks, REPAIR_CARD_CONSTRAINTS.join('\n')].join(
+  return [`## 修复任务（共 ${tasks.length} 项，只修这些，不要动其他任何文件/功能）`, ...blocks, ...renderRepairEvidencePack(checkpoint), REPAIR_CARD_CONSTRAINTS.join('\n')].join(
     '\n\n',
   )
 }

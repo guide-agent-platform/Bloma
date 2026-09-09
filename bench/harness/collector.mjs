@@ -199,7 +199,16 @@ export function summarizeAnalytics(events, projectId) {
           round: lastTest.payload?.round || null,
           total: lastTest.payload?.total_count ?? null,
           failed: lastTest.payload?.failed_count ?? null,
-          failures: Array.isArray(lastTest.payload?.failures) ? lastTest.payload.failures.slice(0, 10) : [],
+          failures: Array.isArray(lastTest.payload?.failures)
+            ? lastTest.payload.failures.slice(0, 10).map((f) => ({
+                scenario: f.scenario,
+                reason: f.reason ?? null,
+                // W2-D3：终验失败来源分类（coverage_gap/environment_diff/known_failure/evidence_stale…）
+                source: f.source ?? null,
+              }))
+            : [],
+          // W2-F4：修复比较（resolved/persistent/new_failures；baseline=loop 上次自测或上轮终验）
+          comparison: lastTest.payload?.comparison ?? null,
         }
       : null,
     mvpDelivered: events.some((e) => e.event_type === 'mvp_delivered'),

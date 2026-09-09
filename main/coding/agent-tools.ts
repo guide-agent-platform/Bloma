@@ -711,24 +711,36 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         return { output: '还没有可用的预览地址。请先调用 run_preview 启动预览，再运行测试。', isError: true }
       }
       const result = await runGwtScenarios({ project_id: projectId, session_id: ctx.sessionId, preview_url: ctx.state.preview_url })
+      // W2-F4：执行计数无条件更新（终验 source 分类的确定性判据，与展示开关解耦）
+      ctx.state.gwt_runs = (ctx.state.gwt_runs ?? 0) + 1
       if (result.failed_count > 0) {
         // 修复预算口径：每次失败运行 = 一个新修复回合（对应旧 test_repair_count +1）
         ctx.state.test_failed = true
         ctx.state.gwt_all_passed = false
         ctx.state.repair_round += 1
         options.onRepairRound?.(ctx.state.repair_round)
-        // D3 轻量：对比上轮失败集标 [新增]/[持续]（防重复修同一失败），跑后更新快照
-        const prev = new Set(toolEvidenceEnabled() ? (ctx.state.last_gwt_failures ?? []) : [])
+        // D3 轻量：对比上轮失败集标 [新增]/[持续]（防重复修同一失败），跑后更新快照。
+        // W2-F4：快照更新改无条件（终验 source 分类需要；展示仍由开关控制）。
+        const prev = new Set(ctx.state.last_gwt_failures ?? [])
         const failures = result.failure_summary
           .map((failure) => {
             const tag = toolEvidenceEnabled() ? (prev.has(failure.scenario) ? '[持续] ' : '[新增] ') : ''
             return `- ${tag}${failure.scenario}：${failure.reason}`
           })
           .join('\n')
-        if (toolEvidenceEnabled()) ctx.state.last_gwt_failures = result.failure_summary.map((f) => f.scenario)
+        // W2-F4 修复比较（D4 稿：修 A 挂 B 可见，升级计数不靠模型自己数）：
+        // resolved=上轮失败本轮已过 / persistent=两轮都挂 / new=本轮新挂。开关 on 才展示。
+        const current = result.failure_summary.map((f) => f.scenario)
+        const persistent = current.filter((s) => prev.has(s))
+        const fresh = current.filter((s) => !prev.has(s))
+        const resolved = [...prev].filter((s) => !current.includes(s))
+        const comparison = toolEvidenceEnabled()
+          ? `\n较上次：修复 ${resolved.length}${resolved.length > 0 ? `（${resolved.join('、')}）` : ''}｜持续 ${persistent.length}｜新增 ${fresh.length}${fresh.length > 0 ? '（修一处坏一处，先查共享影响）' : ''}`
+          : ''
+        ctx.state.last_gwt_failures = current
         const evidence = validationStateLine(ctx.state)
         return {
-          output: `共 ${result.total_count} 个场景：通过 ${result.passed_count}、失败 ${result.failed_count}。\n失败场景：\n${failures}${evidence}`,
+          output: `共 ${result.total_count} 个场景：通过 ${result.passed_count}、失败 ${result.failed_count}。\n失败场景：\n${failures}${comparison}${evidence}`,
           detail: { failed_count: result.failed_count, total_count: result.total_count },
         }
       }
@@ -739,7 +751,8 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       ctx.state.gwt_all_passed = true
       ctx.state.test_failed = false
       ctx.state.edits_after_test_failure = 0
-      if (toolEvidenceEnabled()) ctx.state.last_gwt_failures = []
+      // W2-F4：快照复位无条件（口径同上轮更新）
+      ctx.state.last_gwt_failures = []
       const scenarioNames = planScenarios(readLastSketchRequirements(projectId)).map((scenario) =>
         scenarioName(scenario.item.id, scenario.assertion),
       )
@@ -796,6 +809,8 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         return { output: '还没有可用的预览地址。请先调用 run_preview 启动预览，再验证 API 契约。', isError: true }
       }
       const endpoints = readPrdBackplane(projectId)?.interface_spec ?? []
+      // W2-F4：执行计数（有契约才计；豁免分支不算「验过」）
+      if (endpoints.length > 0) ctx.state.api_contract_runs = (ctx.state.api_contract_runs ?? 0) + 1
       if (endpoints.length === 0) {
         ctx.state.api_all_passed = true
         return {

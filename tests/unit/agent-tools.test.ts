@@ -900,3 +900,58 @@ describe('agent-tools D 系列（咨询 D：验证协议，2026-09-09）', () =>
     expect(fresh.isError).toBeFalsy()
   })
 })
+
+describe('W2-F4：run_gwt_tests 修复比较与计数器', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalEvidence = process.env.BLOMA_TOOL_EVIDENCE
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-tools-w2-'))
+    setBrowserGwtDisabledForTests(true)
+    delete process.env.BLOMA_TOOL_EVIDENCE
+  })
+  afterEach(() => {
+    restorePromaHome(originalPromaHome)
+    setBrowserGwtDisabledForTests(false)
+    clearSandboxRuntimeForTests()
+    if (originalEvidence === undefined) delete process.env.BLOMA_TOOL_EVIDENCE
+    else process.env.BLOMA_TOOL_EVIDENCE = originalEvidence
+  })
+
+  it('较上次行：resolved 列出已修场景、新增提示回归；state 快照无条件更新（终验 source 判据）', async () => {
+    process.env.BLOMA_TOOL_EVIDENCE = '1'
+    const project = createProject({ request_id: 'req-w2-f4', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+    const tools = buildAgentTools({ projectId: project.project_id })
+    const ctx = ctxFor(project.project_id)
+    ctx.state.preview_url = 'http://127.0.0.1:1' // 不可访问 → 稳定失败集
+    // 预置上轮失败集：本轮真实失败与之既不重合（全算新增）→ resolved=预置项
+    ctx.state.last_gwt_failures = ['F-099 上轮已修场景']
+    const run = await byName(tools, 'run_gwt_tests').execute({}, ctx)
+    expect(run.output).toContain('较上次：修复 1（F-099 上轮已修场景）')
+    expect(run.output).toContain('新增 1')
+    // 计数器与快照：gwt_runs=1；last_gwt_failures 已换成本轮真实失败集
+    expect(ctx.state.gwt_runs).toBe(1)
+    const realFailures = ctx.state.last_gwt_failures ?? []
+    expect(realFailures.length).toBeGreaterThan(0)
+    expect(realFailures).not.toContain('F-099 上轮已修场景')
+    // 复跑：上轮真实失败本轮仍在 → [持续]，且 resolved=0
+    const again = await byName(tools, 'run_gwt_tests').execute({}, ctx)
+    expect(again.output).toContain('[持续] ')
+    expect(again.output).toContain('持续 1')
+    expect(ctx.state.gwt_runs).toBe(2)
+  })
+
+  it('开关 off：比较行与标注不出现，但 gwt_runs/last_gwt_failures 照常维护', async () => {
+    delete process.env.BLOMA_TOOL_EVIDENCE
+    const project = createProject({ request_id: 'req-w2-f4-off', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+    const tools = buildAgentTools({ projectId: project.project_id })
+    const ctx = ctxFor(project.project_id)
+    ctx.state.preview_url = 'http://127.0.0.1:1'
+    const run = await byName(tools, 'run_gwt_tests').execute({}, ctx)
+    expect(run.output).not.toContain('较上次')
+    expect(ctx.state.gwt_runs).toBe(1)
+    expect((ctx.state.last_gwt_failures ?? []).length).toBeGreaterThan(0)
+  })
+})

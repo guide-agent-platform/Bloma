@@ -6,14 +6,14 @@ import type { ThinkingLevel } from '../../shared/reasoning-profile'
 import { getAgentSessionPath, getDocumentsDir } from '../../storage/config-paths'
 import { appendSessionMessage } from '../session-tree'
 import { emitAgentEvent } from '../agent-event-bus'
-import { appendLoopLogDocument, loopLogEnabled, readPrdBackplane, readUxContractSketch, renamePrdProject, syncDocuments, updateRequirementStatus, type LoopLogEntry, writePlanDocument, writeSecurityScanDocument } from '../document-engine'
+import { appendLoopLogDocument, loopLogEnabled, readLoopCheckpointDocument, readPrdBackplane, readUxContractSketch, renamePrdProject, syncDocuments, updateRequirementStatus, writeLoopCheckpointDocument, writeSecurityScanDocument, type LoopLogEntry, type LoopRepairAttemptRecord, writePlanDocument } from '../document-engine'
 import { appendProjectLearning, renderLearningsSection } from '../learnings-log'
 import { createSnapshot, runSandbox, trackAnalytics } from '../platform-services'
 import { renderPackageJson, renderStaticServer, renderSkeletonToProject, scaffoldEnabled } from '../project-scaffold'
 import { runBuildGate, type BuildGateResult } from './build-gate'
 import { runArtifactUiGate, uiGateEnabled, uiProbeNotes, type ArtifactUiGateResult } from './artifact-ui-gate'
 import { runVisionAuditGate } from './vision-audit-gate'
-import { buildRepairTasks, resolveRepairBudget, runRepairLoop } from './repair-loop'
+import { buildRepairTasks, resolveRepairBudget, runRepairLoop, type RepairCheckpointContext } from './repair-loop'
 import { recordFailureCards } from '../experience/error-card'
 import { generateLoopPlan, planLegEnabled, renderPlanInjection, renderPlanMarkdown, type LoopPlan } from './loop-planner'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../project-service'
@@ -40,7 +40,7 @@ import { assertToolAllowed } from '../permission-service'
 import { recordDecision } from '../decision-log'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from '../recovery-service'
 import { readPrimaryIntent, recordSessionActivity } from '../session-service'
-import { runAgentLoop, loopApiToolEnabled, type AgentLoopResult } from '../agent-loop'
+import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../agent-loop'
 import { isDegenerateText } from './output-integrity'
 import { checkApiContract } from './api-contract'
 import { buildAgentTools } from '../agent-tools'
@@ -943,6 +943,50 @@ function appendLoopLogSafely(projectId: string, entry: LoopLogEntry): void {
   }
 }
 
+/** W2-E2/E3：检查点 runtime 投影持久化（BLOMA_LOOP_CHECKPOINT off=零写盘；失败静默不阻断）。 */
+function persistCheckpointRuntime(projectId: string, snapshot: LoopCheckpointSnapshot): void {
+  if (!loopCheckpointEnabled()) return
+  try {
+    const existing = readLoopCheckpointDocument(projectId)
+    writeLoopCheckpointDocument(projectId, {
+      version: 1,
+      project_id: projectId,
+      updated_at: new Date().toISOString(),
+      runtime: snapshot,
+      repair_attempts: existing?.repair_attempts ?? [],
+    })
+  } catch {
+    // 写盘失败静默（检查点是增强不是依赖）
+  }
+}
+
+/** W2-F1：修复证据包上下文（读检查点账本：候选指纹+此前修复尝试）。 */
+function buildRepairCheckpointContext(projectId: string): RepairCheckpointContext {
+  const doc = readLoopCheckpointDocument(projectId)
+  return {
+    ...(doc?.runtime?.validation?.candidate_fingerprint
+      ? { candidate_fingerprint: doc.runtime.validation.candidate_fingerprint }
+      : {}),
+    attempts: doc?.repair_attempts ?? [],
+  }
+}
+
+/** W2-F1：修复尝试记录追加进检查点账本（保留 runtime 投影不动）。 */
+function appendRepairAttemptRecord(projectId: string, record: LoopRepairAttemptRecord): void {
+  try {
+    const existing = readLoopCheckpointDocument(projectId)
+    writeLoopCheckpointDocument(projectId, {
+      version: 1,
+      project_id: projectId,
+      updated_at: new Date().toISOString(),
+      ...(existing?.runtime ? { runtime: existing.runtime } : {}),
+      repair_attempts: [...(existing?.repair_attempts ?? []), record].slice(-20),
+    })
+  } catch {
+    // 写盘失败静默
+  }
+}
+
 /**
  * P3 任务级契约 · plan 腿（2026-09-04）：loop 前单轮技术合同。
  *
@@ -1198,6 +1242,8 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
         },
       })
     },
+    // W2-E2/E3（咨询 D3/D4）：检查点 runtime 投影持久化（事件驱动：steer/验证工具/压缩/终态）
+    onCheckpoint: (snapshot) => persistCheckpointRuntime(input.project_id, snapshot),
   })
   } catch (loopError) {
     // P3 loop-log：异常终态如实写终态节（硬约束 7：cancelled/error 也要终态节）后原样上抛
@@ -1978,7 +2024,80 @@ export async function runGwtWithApiContract(input: { project_id: string; session
  * append-only 不受熔断回滚影响（回滚会把工作区 test-report 清回终验前快照，导致
  * 事后无判定证据——见 P0 基准扫描发现）。事件即最终判定证据，供审计与 bench 采集。
  */
-function trackTestCompleted(input: AgentLoopPostTestingInput, result: GwtTestResult, round: 'initial' | 'after_repair') {
+/** W2-D3（咨询 D2 §五）：终验失败的来源分类。目标五分类=覆盖缺口/环境差异/挑战发现/证据失效/
+ *  基础设施；v0 确定性可判三类 + Bloma 特有 known_failure（B0 错误放行口径：loop 自测已知
+ *  未修仍退出），challenge_found/infrastructure 留给 W3（judge/预检基础设施面）落地。 */
+export type TestFailureSource =
+  | 'coverage_gap'
+  | 'environment_diff'
+  | 'known_failure'
+  | 'evidence_stale'
+  | 'challenge_found'
+  | 'infrastructure'
+
+/** W2-D3：单条失败的来源判定（纯函数；baseline 两态：loop 自测基线 / 上一轮终验基线）。 */
+function classifyFailureSource(
+  scenario: string,
+  baseline: { kind: 'loop'; validation?: import('../../shared/types').LoopValidationSnapshot } | { kind: 'prev_round'; prevFailures: string[] },
+): TestFailureSource | undefined {
+  // API 契约失败：loop 从未验过 → 结构性覆盖缺口；验过仍挂 → 环境差异；上轮挂过 → 持续；否则候选已变旧证据失效
+  if (scenario.startsWith('API 契约端点')) {
+    if (baseline.kind === 'loop') {
+      if (!baseline.validation) return undefined
+      return baseline.validation.api_contract_runs > 0 ? 'environment_diff' : 'coverage_gap'
+    }
+    return baseline.prevFailures.includes(scenario) ? 'known_failure' : 'evidence_stale'
+  }
+  // 产物审计失败（UI-GATE）：loop 工具面无对应（W3 run_preflight 落地后细分）
+  if (scenario.startsWith('UI-GATE')) {
+    if (baseline.kind === 'loop') return 'coverage_gap'
+    return baseline.prevFailures.includes(scenario) ? 'known_failure' : 'evidence_stale'
+  }
+  // GWT 场景：loop 从未自测 → 覆盖缺口；上次自测就挂 → 已知未修；上次过这次挂 → 环境差异。
+  // 上轮终验基线：持续 → 已知未修；新挂 → 候选已变（修复回归）= 证据失效。
+  if (baseline.kind === 'loop') {
+    const validation = baseline.validation
+    if (!validation) return undefined
+    if (validation.gwt_runs === 0) return 'coverage_gap'
+    return validation.last_gwt_failures.includes(scenario) ? 'known_failure' : 'environment_diff'
+  }
+  return baseline.prevFailures.includes(scenario) ? 'known_failure' : 'evidence_stale'
+}
+
+/** W2-D3+F4：修复比较（resolved/persistent/new_failures；D4 稿——升级计数由宿主维护不靠模型数）。 */
+function buildFailureComparison(
+  baselineFailures: string[],
+  currentFailures: string[],
+  baselineKind: 'loop_last_run' | 'prev_round',
+): { baseline: 'loop_last_run' | 'prev_round'; resolved: string[]; persistent: string[]; new_failures: string[]; comparison_valid: true } {
+  return {
+    baseline: baselineKind,
+    resolved: baselineFailures.filter((s) => !currentFailures.includes(s)),
+    persistent: currentFailures.filter((s) => baselineFailures.includes(s)),
+    new_failures: currentFailures.filter((s) => !baselineFailures.includes(s)),
+    comparison_valid: true as const,
+  }
+}
+
+function trackTestCompleted(
+  input: AgentLoopPostTestingInput,
+  result: GwtTestResult,
+  round: 'initial' | 'after_repair',
+  /** W2-D3：after_repair 轮的基线（上一轮终验失败集）；initial 轮用 input.loop.validation */
+  prevFailures?: string[],
+) {
+  const loopValidation = round === 'initial' ? input.loop?.validation : undefined
+  const baseline =
+    round === 'initial'
+      ? ({ kind: 'loop', validation: loopValidation } as const)
+      : ({ kind: 'prev_round', prevFailures: prevFailures ?? [] } as const)
+  const currentFailures = (result.failure_summary || []).map((f) => f.scenario)
+  const comparison =
+    round === 'initial'
+      ? loopValidation
+        ? buildFailureComparison(loopValidation.last_gwt_failures, currentFailures, 'loop_last_run')
+        : undefined
+      : buildFailureComparison(prevFailures ?? [], currentFailures, 'prev_round')
   trackAnalytics({
     request_id: input.request_id,
     event: {
@@ -1993,11 +2112,17 @@ function trackTestCompleted(input: AgentLoopPostTestingInput, result: GwtTestRes
         failed_count: result.failed_count,
         // B0 错误放行深挖（2026-09-09）发现：熔断回滚会清掉 test-report.json，失败 reason
         // 只剩场景名可回溯——failures 升级为 {scenario, reason}（reason 截断 200 字）；
-        // bench collector 兼容两种形态（旧事件场景名数组仍可解析）。
-        failures: (result.failure_summary || []).slice(0, 20).map((f) => ({
-          scenario: f.scenario,
-          reason: String(f.reason ?? '').slice(0, 200),
-        })),
+        // W2-D3 再附 source（终验失败来源分类；无 loop 基线的存量路径缺省不标）。
+        failures: (result.failure_summary || []).slice(0, 20).map((f) => {
+          const source = classifyFailureSource(f.scenario, baseline)
+          return {
+            scenario: f.scenario,
+            reason: String(f.reason ?? '').slice(0, 200),
+            ...(source ? { source } : {}),
+          }
+        }),
+        // W2-F4：修复比较（resolved/persistent/new_failures；baseline=loop 上次自测或上轮终验）
+        ...(comparison ? { comparison } : {}),
       },
       privacy_level: 'research_safe',
     },
@@ -2200,6 +2325,8 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
     buildSystem: (editFormat) => buildLoopSystemWithOverride(backplane, editFormat, input.project_id, skeletonMap, undefined, moduleMap),
     // Phase 3 B3：修复轮本轮锚（开关 off=零注入字节级现状）；完成证据=失败断言原文
     ...(roundAnchorEnabled() ? { roundAnchor: buildRepairRoundAnchor(backplane, tasks.map((task) => task.location ?? task.claim)) } : {}),
+    // W2-F1：修复证据包（候选指纹+此前修复尝试；开关 off=零注入字节级现状）
+    ...(loopCheckpointEnabled() ? { checkpointContext: buildRepairCheckpointContext(input.project_id) } : {}),
     thinkingLevel: resolveLoopThinkingLevel(),
     publish: (type, payload) => publish(input, type, payload),
   })
@@ -2214,7 +2341,26 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
   throwIfAborted(input.signal)
   writeTestReport({ request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, result: retested })
   syncDocuments({ request_id: input.request_id, project_id: input.project_id, session_id: input.session_id, checkpoint: 'mvp_tested' })
-  trackTestCompleted(input, retested, 'after_repair')
+  trackTestCompleted(input, retested, 'after_repair', testResult.failure_summary.map((f) => f.scenario))
+
+  // W2-F1（咨询 D4）：修复尝试入检查点账本——下轮修复卡开场即知「之前试过什么、为何败」
+  // （候选指纹+改了什么+resolved/persistent/new 对比）。开关 off=零写盘。
+  if (loopCheckpointEnabled()) {
+    const prevFailures = testResult.failure_summary.map((f) => f.scenario)
+    const currentFailures = retested.failure_summary.map((f) => f.scenario)
+    appendRepairAttemptRecord(input.project_id, {
+      round,
+      at: new Date().toISOString(),
+      task_locations: tasks.map((task) => task.location ?? task.claim ?? '').filter(Boolean).slice(0, 10),
+      files_touched: [...new Set((result.loopResult?.toolCalls ?? []).filter((call) => call.path).map((call) => call.path!))].slice(0, 20),
+      outcome: {
+        resolved: prevFailures.filter((s) => !currentFailures.includes(s)),
+        persistent: currentFailures.filter((s) => prevFailures.includes(s)),
+        new_failures: currentFailures.filter((s) => !prevFailures.includes(s)),
+        converged: retested.failed_count === 0,
+      },
+    })
+  }
 
   const converged = retested.failed_count === 0
   if (converged) updateProject(input.project_id, { test_repair_count: 0 })
@@ -2357,6 +2503,8 @@ async function runBlockedTestRepair(input: {
     buildSystem: (editFormat) => buildLoopSystemWithOverride(backplane, editFormat, input.project_id, skeletonMap, undefined, moduleMap),
     // Phase 3 B3：修复轮本轮锚（开关 off=零注入字节级现状）；完成证据=失败断言原文
     ...(roundAnchorEnabled() ? { roundAnchor: buildRepairRoundAnchor(backplane, tasks.map((task) => task.location ?? task.claim)) } : {}),
+    // W2-F1：修复证据包（候选指纹+此前修复尝试；开关 off=零注入字节级现状）
+    ...(loopCheckpointEnabled() ? { checkpointContext: buildRepairCheckpointContext(input.project_id) } : {}),
     thinkingLevel: resolveLoopThinkingLevel(),
     publish: (type, payload) => publish(input, type, payload),
   })

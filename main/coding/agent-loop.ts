@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentLoopStatus, MessageContentBlock, PastedImageRef, PromaPermissionMode } from '../../shared/types'
+import type { AgentEvent, AgentLoopStatus, LoopValidationSnapshot, MessageContentBlock, PastedImageRef, PromaPermissionMode } from '../../shared/types'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import { appendJsonLine } from '../../storage/json-store'
 import { appendSessionMessage } from '../session-tree'
@@ -49,6 +49,10 @@ export interface AgentLoopToolState {
   api_all_passed: boolean
   /** D3 轻量：上一次 run_gwt_tests 的失败场景名集合（本轮对比标 [新增]/[持续]，防重复修同一失败） */
   last_gwt_failures?: string[]
+  /** W2-F4：run_gwt_tests 执行计数（终验 source 分类的「loop 是否自测过」判据）；无开关常更（纯内部状态） */
+  gwt_runs?: number
+  /** W2-F4：run_api_contract_tests 执行计数（同上，API 契约覆盖缺口判据） */
+  api_contract_runs?: number
   /** D4a：本轮已读文件的版本戳（path → rev）；edit_file 的 expected_revision 校验与 write_file 守卫共用 */
   file_revisions?: Map<string, string>
   /** 测试失败后的写入类工具调用次数（edit-after-test-failure 预算，默认上限 3） */
@@ -178,6 +182,8 @@ export interface AgentLoopInput {
   onTurn?: (info: AgentLoopTurnInfo) => void
   /** W1-E1 压缩观测回调（埋点 agent_loop_compact：压缩发生或首次跳过；不影响行为） */
   onCompaction?: (info: AgentLoopCompactionInfo) => void
+  /** W2-E3 检查点回调（事件驱动：steer/验证工具/压缩/终态时触发；编排层接持久化，loop 内零 IO） */
+  onCheckpoint?: (snapshot: LoopCheckpointSnapshot) => void
 }
 
 export interface AgentLoopResult {
@@ -191,10 +197,75 @@ export interface AgentLoopResult {
    *  source=abort reason 解析（'AGENT_CANCELLED: <source>' 约定见 orchestrator.cancelAgent；
    *  无 reason 的 abort 归 'unattributed'，如委派 stop/程序化中止）。纯增量字段，非 cancelled 无此字段。 */
   cancel_detail?: { phase: LoopCancelPhase; source?: string; reason?: string }
+  /** W2-F4：自验状态快照（终验 source 五分类判据）；由 attachUsage 从工具状态拼装 */
+  validation?: LoopValidationSnapshot
 }
 
 /** W1-E1：取消在 loop 内可被观察的五个位置（cancel_detail.phase 的取值）。 */
 export type LoopCancelPhase = 'turn_start' | 'model_stream' | 'tool_execution' | 'handoff' | 'grace_turn'
+
+// ---- W2 E2+F1（咨询 D3/D4）：loop_checkpoint v0 —— 宿主侧结构化运行时状态 ----
+
+/** W2 开关：检查点（快照维护+压缩后恢复头+修复证据包）。缺省 off=字节级现状（零注入零写盘）。 */
+export function loopCheckpointEnabled(): boolean {
+  return process.env.BLOMA_LOOP_CHECKPOINT === '1' || process.env.BLOMA_LOOP_CHECKPOINT === 'true'
+}
+
+/** 活跃决策 v0：用户运行中转向（steer）链——新转向 superseded_by 旧转向（不把冲突新旧同时注入）。
+ *  plan/mode 级决策在 system 内拼装，loop 不可见，待 W5-G3 投影时接入。 */
+export interface LoopCheckpointDecision {
+  id: string
+  kind: 'steer'
+  text: string
+  at_turn: number
+  superseded_by?: string
+}
+
+/** 检查点快照（E3 事件驱动更新：steer/验证工具/压缩/终态时触发；宿主全量留档，每轮只注入投影） */
+export interface LoopCheckpointSnapshot {
+  session_id: string
+  at_turn: number
+  trigger: 'steer' | 'gwt' | 'api' | 'security' | 'compaction' | 'final'
+  decisions: LoopCheckpointDecision[]
+  /** 工作进度 v0：已写文件集（path→版本戳；工具结果维度，非模型声明） */
+  progress_files: Record<string, string>
+  validation: LoopValidationSnapshot & { candidate_fingerprint: string }
+}
+
+/** 候选指纹：已读文件版本集的确定性摘要（fnv1a；同指纹=同文件集同版本状态） */
+export function candidateFingerprintOf(fileRevisions: Record<string, string>): string {
+  const basis = Object.keys(fileRevisions).sort().map((p) => `${p}:${fileRevisions[p]}`).join('\n')
+  let hash = 0x811c9dc5
+  for (let i = 0; i < basis.length; i += 1) {
+    hash ^= basis.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return `fp-${hash.toString(16).padStart(8, '0')}-${Object.keys(fileRevisions).length}`
+}
+
+/** 压缩后轻量恢复头（D3 稿 §五）：宿主从检查点拼装，不依赖模型记住全过程。
+ *  纯函数导出供单测；内容定位有疑问引导先 read_file/grep 确认（不规定重读整个项目）。 */
+export function renderCheckpointRecoveryHeader(task: string, snapshot: LoopCheckpointSnapshot): string {
+  const active = snapshot.decisions.filter((d) => !d.superseded_by)
+  const val = snapshot.validation
+  const fileCount = Object.keys(snapshot.progress_files).length
+  const lines = [
+    '【检查点恢复头（宿主生成，勿改写）】',
+    `- 当前目标：${task.split('\n')[0]!.slice(0, 80)}`,
+    `- 候选指纹：${val.candidate_fingerprint}（已写入文件 ${fileCount} 个，版本戳在 read_file 返回末尾）`,
+    active.length > 0
+      ? `- 仍有效转向：${active.map((d) => d.text.slice(0, 60)).join('；')}`
+      : '- 仍有效转向：无',
+    val.last_gwt_failures.length > 0
+      ? `- 未闭环失败：${val.last_gwt_failures.slice(0, 5).join('、')}${val.last_gwt_failures.length > 5 ? ' 等' : ''}`
+      : '- 未闭环失败：无（上轮 GWT 全过或未测）',
+    `- 验证状态：GWT ${val.gwt_all_passed ? '全过' : val.gwt_runs > 0 ? '有失败' : '未测'}｜API 契约 ${
+        val.api_all_passed ? '过/豁免' : val.api_contract_runs > 0 ? '失败' : '未测'
+      }｜安全 ${val.security_all_passed ? '过' : '未测'}`,
+    '- 定位有疑问先 read_file/grep 确认现状再编辑；修复验证照常 run_gwt_tests，勿凭旧印象断言已修。',
+  ]
+  return lines.join('\n')
+}
 
 /** JSONL 审计里单条 tool_result 的截断上限（全文走事件流，防 JSONL 膨胀）。 */
 const JSONL_TOOL_RESULT_CHAR_LIMIT = 4096
@@ -645,9 +716,43 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
   let turns = 0
   let finalText = ''
   let consecutiveBudgetStallTurns = 0
+  // W2 E2+F1（咨询 D3/D4）：检查点 v0 —— 活跃决策（steer 链，superseded_by 生效性管理）
+  const steerDecisions: LoopCheckpointDecision[] = []
+  const fileRevisionsOf = (): Record<string, string> => {
+    const out: Record<string, string> = {}
+    if (ctx.state.file_revisions) for (const [path, rev] of ctx.state.file_revisions) out[path] = rev
+    return out
+  }
+  const validationOf = (): LoopValidationSnapshot => ({
+    gwt_runs: ctx.state.gwt_runs ?? 0,
+    api_contract_runs: ctx.state.api_contract_runs ?? 0,
+    last_gwt_failures: [...(ctx.state.last_gwt_failures ?? [])],
+    gwt_all_passed: ctx.state.gwt_all_passed,
+    api_all_passed: ctx.state.api_all_passed,
+    security_all_passed: ctx.state.security_all_passed,
+    file_revisions: fileRevisionsOf(),
+  })
+  const checkpointSnapshotOf = (trigger: LoopCheckpointSnapshot['trigger'], turn: number): LoopCheckpointSnapshot => {
+    const files = fileRevisionsOf()
+    return {
+      session_id: input.sessionId,
+      at_turn: turn,
+      trigger,
+      decisions: steerDecisions.map((d) => ({ ...d })),
+      progress_files: { ...files },
+      validation: { ...validationOf(), candidate_fingerprint: candidateFingerprintOf(files) },
+    }
+  }
+  // W2-E3 事件驱动保存：steer/验证工具/压缩/终态时向宿主推送快照（编排层接持久化，loop 内零 IO）
+  const emitCheckpoint = (trigger: LoopCheckpointSnapshot['trigger'], turn: number): void => {
+    if (!input.onCheckpoint) return
+    input.onCheckpoint(checkpointSnapshotOf(trigger, turn))
+  }
   // 费用守卫 Hook 1（2026-08-28 队友）：逐轮累计渠道返回 usage（渠道不返回即全盲 → estContextTokens 兜底）
   const usageTotals = { inputTokens: 0, outputTokens: 0, turnsWithUsage: 0 }
   const attachUsage = (r: AgentLoopResult): AgentLoopResult => {
+    // W2-E3：终态事件驱动保存（取消/熔断/完成全部路径部过这里）
+    emitCheckpoint('final', turns)
     // 渲染层透明条数据源（v6 ② b）：loop 结束发布 usage_summary 事件（取消/熔断路径同样发布——用量是事实）
     const estContextTokens = estimateTokenCount(
       messages
@@ -671,6 +776,8 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         // text-only 口径在渠道全盲时会严重低估占用。
         estContextTokens,
       },
+      // W2-F4：自验状态快照随终态带出（终验 source 分类的确定性判据）
+      validation: validationOf(),
     }
   }
   // 收口态：GWT 全过 + 安全扫描通过后置位，此后模型调用停用全部工具并追加收口指令
@@ -808,6 +915,11 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     messages.push({ role: 'assistant', content: assistantBlocks })
     messages.push({ role: 'user', content: resultBlocks })
 
+    // W2-E3：验证工具执行后事件驱动保存（检查点的验证状态/候选指纹随之更新）
+    if (turnCalls.some((call) => call.name === 'run_gwt_tests')) emitCheckpoint('gwt', turn)
+    if (turnCalls.some((call) => call.name === 'run_api_contract_tests')) emitCheckpoint('api', turn)
+    if (turnCalls.some((call) => call.name === 'run_security_scan')) emitCheckpoint('security', turn)
+
     // ---- P0-1 steer（运行中转向）批间注入点：resultBlocks 落盘后、下一轮模型调用前 ----
     // 主 loop 的天然批间边界：逐条 drain → JSONL 落盘 → messages.push → publish
     // steer_injected。注入内容照常参与滑窗/竹节压缩（窗口自然滑出；压缩时进交接输入，
@@ -825,6 +937,11 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
           at_turn: turn,
           remaining: pendingSteerCount(input.sessionId),
         })
+        // W2-E2：转向即活跃决策——新转向取代全部旧转向（superseded_by 链，不把冲突新旧同时注入）
+        const steerId = `steer-${turn}-${steerDecisions.length + 1}`
+        for (const decision of steerDecisions) if (!decision.superseded_by) decision.superseded_by = steerId
+        steerDecisions.push({ id: steerId, kind: 'steer', text: wrapped.slice(0, 200), at_turn: turn })
+        emitCheckpoint('steer', turn)
       }
     }
 
@@ -872,6 +989,17 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
           (retained.length > 0 ? '\n\n【近期原文保留】以下是压缩前最近的原文轮次（保真参考，未经改写，时间从早到晚）。' : ''),
       })
       messages.push(...retained)
+      // W2 E2+F1（咨询 D3 §五）：压缩后恢复头由检查点生成——宿主拼装的短恢复（当前目标/仍有效
+      // 转向/未闭环失败/验证状态/候选指纹），不依赖模型记住全过程。开关 off=字节级现状（零注入）。
+      if (loopCheckpointEnabled()) {
+        const header = renderCheckpointRecoveryHeader(input.task, checkpointSnapshotOf('compaction', turn))
+        const first = messages[0]!
+        messages[0] = {
+          role: 'user',
+          content: typeof first.content === 'string' ? `${first.content}\n\n${header}` : first.content,
+        }
+        emitCheckpoint('compaction', turn)
+      }
       compactions += 1
       // 重置钉轮坐标系（审查 P1-1）：旧失败已被交接文档覆盖（repair_round 快照对齐，
       // 后续只有新失败才重钉；避免粘性 test_failed 幻影钉在无关轮对上）。P1-1 后配对

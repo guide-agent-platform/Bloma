@@ -1083,3 +1083,46 @@ function readManifest(dir: string): ManifestEntry[] {
 function writeManifest(dir: string, entries: ManifestEntry[]): void {
   writeFileSync(join(dir, '.document-manifest.json'), `${JSON.stringify({ version: 1, documents: entries }, null, 2)}\n`, 'utf8')
 }
+
+// ---- W2 E2+F1（咨询 D3/D4，2026-09-09）：loop-checkpoint 持久化 ----
+// documents/loop-checkpoint.json：runtime=loop 运行时投影（E3 事件驱动，每次覆盖），
+// repair_attempts=修复尝试账本（repairAndRetest 每轮追加，F1 修复证据包的历史维度）。
+// 与 loop-log.md 同一目录与直写模式（不走 checkpoint 产出路径，不进文档清单）。
+
+/** 修复轮尝试记录：改了什么 + 与上轮的结果对比（resolved/persistent/new_failures）。 */
+export interface LoopRepairAttemptRecord {
+  round: number
+  at: string
+  task_locations: string[]
+  files_touched: string[]
+  outcome: { resolved: string[]; persistent: string[]; new_failures: string[]; converged: boolean }
+}
+
+/** loop-checkpoint.json 落盘结构（version 1）。 */
+export interface LoopCheckpointDocument {
+  version: 1
+  project_id: string
+  updated_at: string
+  /** loop 运行时投影（主 loop / 修复轮 onCheckpoint 推送，后到覆盖） */
+  runtime?: import('./coding/agent-loop').LoopCheckpointSnapshot
+  repair_attempts: LoopRepairAttemptRecord[]
+}
+
+export function readLoopCheckpointDocument(projectId: string): LoopCheckpointDocument | null {
+  const project = findProject(projectId)
+  const path = join(getDocumentsDir(project.workspace_slug, project.project_id), 'loop-checkpoint.json')
+  if (!existsSync(path)) return null
+  try {
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as LoopCheckpointDocument
+    return raw && raw.version === 1 && Array.isArray(raw.repair_attempts) ? raw : null
+  } catch {
+    return null
+  }
+}
+
+export function writeLoopCheckpointDocument(projectId: string, doc: LoopCheckpointDocument): void {
+  const project = findProject(projectId)
+  const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'loop-checkpoint.json'), `${JSON.stringify(doc, null, 2)}\n`, 'utf8')
+}
