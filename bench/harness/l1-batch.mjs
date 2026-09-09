@@ -92,6 +92,7 @@ const envPrefix = Object.entries(args.env).map(([k, v]) => `${k}=${v}`).join(' '
 console.log(`[${stamp()}] === l1-batch 开始｜label=${args.label} seeds=${args.seeds.join(',')} n=${args.n}${envPrefix ? ` env=${envPrefix}` : ''}${args.promptsDir ? ` prompts=${args.promptsDir}` : ''} ===`)
 for (const seed of args.seeds) {
   let done = countDone(seed)
+  let noProgress = 0
   while (done < args.n) {
     console.log(`[${stamp()}] ${seed}: ${done}/${args.n}，跑 #${done + 1}`)
     try {
@@ -102,7 +103,17 @@ for (const seed of args.seeds) {
     } catch (error) {
       console.error(`[${stamp()}] ${seed} #${done + 1} 失败（继续下一个）：${String(error.message).slice(0, 200)}`)
     }
-    done = countDone(seed)
+    const next = countDone(seed)
+    if (next === done) {
+      noProgress += 1
+      if (noProgress >= 3) {
+        console.error(`[${stamp()}] ${seed}: 连续 ${noProgress} 次尝试无新档案（seed 无效/环境故障），中止本批防死循环`)
+        process.exit(1)
+      }
+    } else {
+      noProgress = 0
+    }
+    done = next
   }
   console.log(`[${stamp()}] ${seed}: 齐了 ${done}/${args.n}`)
 }

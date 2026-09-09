@@ -28,6 +28,7 @@ function countDone(seed) {
 const stamp = () => new Date().toISOString()
 for (const seed of SEEDS) {
   let done = countDone(seed)
+  let noProgress = 0
   while (done < TARGET) {
     console.log(`[${stamp()}] ${seed}: ${done}/${TARGET}，补跑 #${done + 1}`)
     try {
@@ -37,7 +38,12 @@ for (const seed of SEEDS) {
     } catch (error) {
       console.error(`[${stamp()}] ${seed} #${done + 1} 失败（继续下一个）：${String(error.message).slice(0, 200)}`)
     }
-    done = countDone(seed)
+    const next = countDone(seed)
+    if (next === done) {
+      noProgress += 1
+      if (noProgress >= 3) { console.error(`[${stamp()}] ${seed}: 连续 ${noProgress} 次无新档案，中止防死循环`); process.exit(1) }
+    } else noProgress = 0
+    done = next
   }
   console.log(`[${stamp()}] ${seed}: 齐了 ${done}/${TARGET}`)
 }
