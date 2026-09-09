@@ -1077,7 +1077,7 @@ describe('W4-F2/F3：修复轮修改授权边界 + repair_control 窄入口', ()
       requested_paths: ['src/store.js'],
       reason: '过滤逻辑实现在 store.js 的 deriveVisibleItems',
       change_intent: '修正过滤谓词的边界条件',
-    })
+    }, ctx)
     expect(approved.output).toContain('已批准')
     const writeAfter = await byName(tools, 'write_file').execute(
       { path: 'src/store.js', content: 'const s = 1\n' },
@@ -1091,7 +1091,7 @@ describe('W4-F2/F3：修复轮修改授权边界 + repair_control 窄入口', ()
       requested_paths: ['src/*'],
       reason: 'x',
       change_intent: 'y',
-    })
+    }, ctx)
     expect(wildcard.isError).toBe(true)
     expect(wildcard.output).toContain('不能申请全项目可写')
     // 受保护路径 → 拒绝
@@ -1101,14 +1101,14 @@ describe('W4-F2/F3：修复轮修改授权边界 + repair_control 窄入口', ()
       requested_paths: ['prd.json'],
       reason: 'x',
       change_intent: 'y',
-    })
+    }, ctx)
     expect(protectedDeny.isError).toBe(true)
     expect(protectedDeny.output).toContain('受保护')
     // 缺必填 → 用法错误
     const missing = await byName(tools, 'repair_control').execute({
       action: 'request_scope_expansion',
       issue_id: 'F-005',
-    })
+    }, ctx)
     expect(missing.isError).toBe(true)
     expect(missing.output).toContain('必填字段')
     // report_blocker → 记录 + 结构化确认
@@ -1116,7 +1116,7 @@ describe('W4-F2/F3：修复轮修改授权边界 + repair_control 窄入口', ()
       action: 'report_blocker',
       blocker_reason: '预览沙箱反复重启，测试环境不稳定',
       evidence: 'run_gwt_tests 连续 3 次 ECONNREFUSED',
-    })
+    }, ctx)
     expect(blocker.output).toContain('受阻已记录')
     expect(scope.blockers).toHaveLength(1)
     expect(scope.blockers[0]!.reason).toContain('沙箱')
