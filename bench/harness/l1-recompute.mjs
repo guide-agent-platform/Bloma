@@ -15,7 +15,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { collectSession } from './collector.mjs'
+import { collectSession, summarizeAnalytics } from './collector.mjs'
 import { computeExtendedMetrics, computeFlags, computeProjectMetrics } from './metrics.mjs'
 
 const runsRoot = fileURLToPath(new URL('../runs/', import.meta.url))
@@ -57,7 +57,9 @@ function main() {
       } finally {
         rmSync(tmpHome, { recursive: true, force: true })
       }
-      // artifacts/docs/analytics 用 run 时快照（promaHome 已清理，原始目录不可再扫）
+      // analytics 摘要按当前口径重跑（token 事实源 agent_loop_turn 等）；artifacts/docs 用
+      // run 时快照（promaHome 已清理，原始目录不可再扫）
+      if (Array.isArray(evidence.analyticsEvents)) evidence.analytics = summarizeAnalytics(evidence.analyticsEvents, evidence.project?.id)
       const next = {
         flags: computeFlags(evidence),
         metrics: computeProjectMetrics(evidence),

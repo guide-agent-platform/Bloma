@@ -169,6 +169,7 @@ export function summarizeAnalytics(events, projectId) {
   const repairs = events.filter((e) => e.event_type === 'self_repair_triggered' || e.event_type === 'repair_round_completed')
   const judge = events.filter((e) => e.event_type === 'judge_verdict' || String(e.event_type || '').includes('judge'))
   const gwtRuns = loopCompleted.reduce((s, e) => s + (e.payload?.tool_distribution?.run_gwt_tests || 0), 0)
+  const loopTurns = events.filter((e) => e.event_type === 'agent_loop_turn')
   const lastLoop = loopCompleted[loopCompleted.length - 1]
   return {
     projectId,
@@ -193,7 +194,9 @@ export function summarizeAnalytics(events, projectId) {
         }
       : null,
     mvpDelivered: events.some((e) => e.event_type === 'mvp_delivered'),
-    turnTokens: loopCompleted.map((e) => ({ turns: e.payload?.turns, in: e.payload?.input_tokens })),
+    turnTokens: loopTurns.map((e) => ({ turns: e.payload?.turn, in: e.payload?.input_tokens, out: e.payload?.output_tokens })),
+    inputTokensTotal: loopTurns.reduce((s, e) => s + (Number(e.payload?.input_tokens) || 0), 0),
+    outputTokensTotal: loopTurns.reduce((s, e) => s + (Number(e.payload?.output_tokens) || 0), 0),
   }
 }
 
