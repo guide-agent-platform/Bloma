@@ -262,6 +262,34 @@ async function injectChannelKeys(page, keysByShortId) {
   return result.filter((r) => r.injected).length
 }
 
+// ------------------------------------------------------------ 单实例锁（2026-09-09 双跑事故根治）----
+// 与 l1-batch 的进程检测互补：那是批跑器启动前拦，这是 l1-run 自身运行期锁
+// （进程检测有盲区：非 node 子进程/权限差异；文件锁是底层保险）。
+const LOCK_FILE = join(repoRoot, 'bench', 'runs', '.l1-lock')
+const LOCK_STALE_MS = 50 * 60_000 // 40min 超时 + 余量；超过视为残留接管
+
+function acquireL1Lock() {
+  mkdirSync(dirname(LOCK_FILE), { recursive: true })
+  if (existsSync(LOCK_FILE)) {
+    let info = null
+    try { info = JSON.parse(readFileSync(LOCK_FILE, 'utf8')) } catch { /* 坏锁视同残留 */ }
+    const age = info?.startedAt ? Date.now() - info.startedAt : Infinity
+    if (age < LOCK_STALE_MS) {
+      console.error(`[l1] 已有 L1 run 在跑（pid=${info?.pid ?? '?'}，${Math.round(age / 60000)} 分钟前启动）——防双跑拒启；确信无人跑可删 ${LOCK_FILE}`)
+      process.exit(3)
+    }
+    console.warn(`[l1] 锁为陈旧残留（${Math.round(age / 60000)} 分钟），接管`)
+  }
+  writeFileSync(LOCK_FILE, JSON.stringify({ pid: process.pid, startedAt: Date.now() }))
+  // exit 钩子覆盖所有退出路径（正常 finally 后/抛错/早退 process.exit）；SIGKILL 不及释放时靠陈旧接管
+  process.on('exit', () => {
+    try {
+      const current = JSON.parse(readFileSync(LOCK_FILE, 'utf8'))
+      if (current?.pid === process.pid) rmSync(LOCK_FILE, { force: true })
+    } catch { /* 已被接管或不存在：不动 */ }
+  })
+}
+
 // ------------------------------------------------------------ 主流程 ----
 
 async function main() {
@@ -272,6 +300,7 @@ async function main() {
     console.error(`渠道配置缺失：${channelsSrc}（L1 走真实 LLM，无渠道则 fail-fast；可用 BENCH_CHANNELS 指定副本）`)
     process.exit(2)
   }
+  acquireL1Lock()
 
   const gitCommit = (() => {
     try { return execSync('git rev-parse HEAD', { cwd: repoRoot }).toString().trim() } catch { return 'unknown' }
