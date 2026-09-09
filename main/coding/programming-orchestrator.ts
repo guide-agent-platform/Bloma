@@ -13,7 +13,7 @@ import { renderPackageJson, renderStaticServer, renderSkeletonToProject, scaffol
 import { runBuildGate, type BuildGateResult } from './build-gate'
 import { runArtifactUiGate, uiGateEnabled, uiProbeNotes, type ArtifactUiGateResult } from './artifact-ui-gate'
 import { runVisionAuditGate } from './vision-audit-gate'
-import { buildRepairTasks, resolveRepairBudget, runRepairLoop, type RepairCheckpointContext } from './repair-loop'
+import { buildRepairTasks, resolveRepairBudget, runRepairLoop, repairScopeEnabled, type RepairCheckpointContext, type RepairTask } from './repair-loop'
 import { recordFailureCards } from '../experience/error-card'
 import { generateLoopPlan, planLegEnabled, renderPlanInjection, renderPlanMarkdown, type LoopPlan } from './loop-planner'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../project-service'
@@ -960,15 +960,29 @@ function persistCheckpointRuntime(projectId: string, snapshot: LoopCheckpointSna
   }
 }
 
-/** W2-F1：修复证据包上下文（读检查点账本：候选指纹+此前修复尝试）。 */
+/** W4-F1：修复证据包上下文（读检查点账本：候选指纹+此前修复尝试）；连续 ≥2 轮零修复 → 升级诊断态。 */
 function buildRepairCheckpointContext(projectId: string): RepairCheckpointContext {
   const doc = readLoopCheckpointDocument(projectId)
+  const attempts = doc?.repair_attempts ?? []
+  const recent = attempts.slice(-2)
+  const escalation =
+    recent.length === 2 && recent.every((a) => a.outcome.resolved.length === 0 && !a.outcome.converged)
+      ? ('diagnosis' as const)
+      : undefined
   return {
     ...(doc?.runtime?.validation?.candidate_fingerprint
       ? { candidate_fingerprint: doc.runtime.validation.candidate_fingerprint }
       : {}),
-    attempts: doc?.repair_attempts ?? [],
+    attempts,
+    ...(escalation ? { escalation } : {}),
   }
+}
+
+/** W4-F2：从修复任务派生本轮修改授权——只认文件型 location（.js/.html/.css）；
+ *  场景锚点不当白名单（D4 裁决），派生不出即不设边界（fail-open）。 */
+function deriveAuthorizedWritePaths(tasks: RepairTask[]): string[] | undefined {
+  const paths = [...new Set(tasks.map((task) => task.location ?? '').filter((loc) => /\.(js|html|css)$/i.test(loc)))]
+  return paths.length > 0 ? paths : undefined
 }
 
 /** W2-F1：修复尝试记录追加进检查点账本（保留 runtime 投影不动）。 */
@@ -2332,6 +2346,8 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
     ...(roundAnchorEnabled() ? { roundAnchor: buildRepairRoundAnchor(backplane, tasks.map((task) => task.location ?? task.claim)) } : {}),
     // W2-F1：修复证据包（候选指纹+此前修复尝试；开关 off=零注入字节级现状）
     ...(loopCheckpointEnabled() ? { checkpointContext: buildRepairCheckpointContext(input.project_id) } : {}),
+    // W4-F2：修改授权边界（BLOMA_REPAIR_SCOPE off=无边界字节级现状；场景锚点派生不出路径则不设）
+    ...(repairScopeEnabled() && deriveAuthorizedWritePaths(tasks) ? { authorizedWritePaths: deriveAuthorizedWritePaths(tasks) } : {}),
     thinkingLevel: resolveLoopThinkingLevel(),
     publish: (type, payload) => publish(input, type, payload),
   })
@@ -2510,6 +2526,8 @@ async function runBlockedTestRepair(input: {
     ...(roundAnchorEnabled() ? { roundAnchor: buildRepairRoundAnchor(backplane, tasks.map((task) => task.location ?? task.claim)) } : {}),
     // W2-F1：修复证据包（候选指纹+此前修复尝试；开关 off=零注入字节级现状）
     ...(loopCheckpointEnabled() ? { checkpointContext: buildRepairCheckpointContext(input.project_id) } : {}),
+    // W4-F2：修改授权边界（BLOMA_REPAIR_SCOPE off=无边界字节级现状）
+    ...(repairScopeEnabled() && deriveAuthorizedWritePaths(tasks) ? { authorizedWritePaths: deriveAuthorizedWritePaths(tasks) } : {}),
     thinkingLevel: resolveLoopThinkingLevel(),
     publish: (type, payload) => publish(input, type, payload),
   })

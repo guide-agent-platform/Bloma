@@ -9,6 +9,7 @@ import type { AddressInfo } from 'node:net'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildAgentTools,
+  createWriteScope,
   EDIT_BUDGET_AFTER_TEST_FAILURE,
   setJsSyntaxCheckerForTests,
 } from '../../main/agent-tools'
@@ -1011,5 +1012,116 @@ describe('W3-D1/D2：run_preflight 收口预检', () => {
     const result = await byName(tools, 'run_preflight').execute({}, ctxFor(project.project_id))
     expect(result.isError).toBe(true)
     expect(result.output).toContain('run_preview')
+  })
+})
+
+describe('W4-F2/F3：修复轮修改授权边界 + repair_control 窄入口', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalSyntax = process.env.BLOMA_WRITE_GUARD
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-tools-w4-'))
+    setJsSyntaxCheckerForTests(stubSyntaxChecker)
+    setBrowserGwtDisabledForTests(true)
+    delete process.env.BLOMA_WRITE_GUARD
+  })
+  afterEach(() => {
+    restorePromaHome(originalPromaHome)
+    setJsSyntaxCheckerForTests(undefined)
+    setBrowserGwtDisabledForTests(false)
+    clearSandboxRuntimeForTests()
+    if (originalSyntax === undefined) delete process.env.BLOMA_WRITE_GUARD
+    else process.env.BLOMA_WRITE_GUARD = originalSyntax
+  })
+
+  it('越界写被 WRITE_SCOPE_DENIED 拦（blocked+next_actions，不诱导绕权限）；授权内照常', async () => {
+    const project = createProject({ request_id: 'req-w4-scope', mode: 'quick' })
+    const scope = createWriteScope(['src/app.js'])
+    const tools = buildAgentTools({ projectId: project.project_id, writeScope: scope })
+    const ctx = ctxFor(project.project_id)
+    // 越界 edit：被拒并给出恢复路径
+    const denied = await byName(tools, 'edit_file').execute(
+      { path: 'index.html', old_string: 'a', new_string: 'b' },
+      ctx,
+    )
+    expect(denied.isError).toBe(true)
+    expect(denied.output).toContain('WRITE_SCOPE_DENIED')
+    expect(denied.output).toContain('repair_control')
+    expect((denied.detail as { next_actions?: unknown[] }).next_actions).toBeTruthy()
+    // 授权内 write：照常（新建文件）
+    const allowed = await byName(tools, 'write_file').execute(
+      { path: 'src/app.js', content: 'const a = 1\n' },
+      ctx,
+    )
+    expect(allowed.isError).toBeFalsy()
+    // 无 holder（主 loop 现状）：不拦
+    const plainTools = buildAgentTools({ projectId: project.project_id })
+    const plain = await byName(plainTools, 'write_file').execute(
+      { path: 'index.html', content: '<html></html>' },
+      ctxFor(project.project_id),
+    )
+    expect(plain.isError).toBeFalsy()
+  })
+
+  it('repair_control：扩大申请自动批准→写放行；通配符/受保护路径拒绝；缺字段用法错误；report_blocker 记录', async () => {
+    const project = createProject({ request_id: 'req-w4-ctl', mode: 'quick' })
+    const scope = createWriteScope(['src/app.js'], ['prd.json'])
+    const tools = buildAgentTools({ projectId: project.project_id, writeScope: scope })
+    const ctx = ctxFor(project.project_id)
+    // 注册面：writeScope 在 → repair_control 在
+    expect(tools.map((t) => t.name)).toContain('repair_control')
+    // 扩大申请：普通实现文件 → 批准 + 后续写放行
+    const approved = await byName(tools, 'repair_control').execute({
+      action: 'request_scope_expansion',
+      issue_id: 'F-005',
+      requested_paths: ['src/store.js'],
+      reason: '过滤逻辑实现在 store.js 的 deriveVisibleItems',
+      change_intent: '修正过滤谓词的边界条件',
+    })
+    expect(approved.output).toContain('已批准')
+    const writeAfter = await byName(tools, 'write_file').execute(
+      { path: 'src/store.js', content: 'const s = 1\n' },
+      ctx,
+    )
+    expect(writeAfter.isError).toBeFalsy()
+    // 通配符/超量 → 拒绝「不能申请全项目可写」
+    const wildcard = await byName(tools, 'repair_control').execute({
+      action: 'request_scope_expansion',
+      issue_id: 'F-005',
+      requested_paths: ['src/*'],
+      reason: 'x',
+      change_intent: 'y',
+    })
+    expect(wildcard.isError).toBe(true)
+    expect(wildcard.output).toContain('不能申请全项目可写')
+    // 受保护路径 → 拒绝
+    const protectedDeny = await byName(tools, 'repair_control').execute({
+      action: 'request_scope_expansion',
+      issue_id: 'F-005',
+      requested_paths: ['prd.json'],
+      reason: 'x',
+      change_intent: 'y',
+    })
+    expect(protectedDeny.isError).toBe(true)
+    expect(protectedDeny.output).toContain('受保护')
+    // 缺必填 → 用法错误
+    const missing = await byName(tools, 'repair_control').execute({
+      action: 'request_scope_expansion',
+      issue_id: 'F-005',
+    })
+    expect(missing.isError).toBe(true)
+    expect(missing.output).toContain('必填字段')
+    // report_blocker → 记录 + 结构化确认
+    const blocker = await byName(tools, 'repair_control').execute({
+      action: 'report_blocker',
+      blocker_reason: '预览沙箱反复重启，测试环境不稳定',
+      evidence: 'run_gwt_tests 连续 3 次 ECONNREFUSED',
+    })
+    expect(blocker.output).toContain('受阻已记录')
+    expect(scope.blockers).toHaveLength(1)
+    expect(scope.blockers[0]!.reason).toContain('沙箱')
+    // 账本：3 次申请（批准 1 + 拒 2）
+    expect(scope.expansions).toHaveLength(3)
+    expect(scope.expansions.filter((e) => e.decision === 'approved')).toHaveLength(1)
   })
 })

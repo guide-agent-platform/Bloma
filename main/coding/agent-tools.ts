@@ -315,6 +315,30 @@ export interface BuildAgentToolsOptions {
   role?: 'parent' | DelegationRole
   /** 新修复回合开始时回调（PR3 埋点：self_repair_triggered 的 loop 路径映射） */
   onRepairRound?: (round: number) => void
+  /** W4-F2（咨询 D4）：修复轮修改授权边界——传入即启用：write_file/edit_file 越界返回
+   *  WRITE_SCOPE_DENIED + next_actions（不诱导绕权限），并注册 repair_control 窄入口。 */
+  writeScope?: WriteScopeHolder
+}
+
+/** W4-F2：授权边界持有者（宿主创建与裁决，工具层只读/申请，模型不能直改）。 */
+export interface WriteScopeHolder {
+  /** 当前允许修改的相对路径（与工具 path 入参同口径，正斜杠） */
+  authorized: Set<string>
+  /** 显式受保护路径（拒绝任何扩大申请；如 prd.json/宿主文件） */
+  protectedPaths: Set<string>
+  /** 扩大申请记录（含裁决结果；审计与 bench 可见） */
+  expansions: Array<{ issue_id?: string; paths: string[]; reason: string; at: string; decision: 'approved' | 'denied'; note?: string }>
+  /** 受阻报告（F5 升级链路的结构化输入） */
+  blockers: Array<{ reason: string; evidence?: string; at: string }>
+}
+
+export function createWriteScope(authorizedPaths: string[], protectedPaths: string[] = []): WriteScopeHolder {
+  return {
+    authorized: new Set(authorizedPaths.map((p) => p.replace(/\\/g, '/'))),
+    protectedPaths: new Set(protectedPaths.map((p) => p.replace(/\\/g, '/'))),
+    expansions: [],
+    blockers: [],
+  }
 }
 
 export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[] {
@@ -326,6 +350,28 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
    * 测试失败后的修复预算门（edit-after-test-failure ≤ 3，PR3 §4.4 口径，同构旧
    * test_repair_count）：只拦真实写入尝试（路径/参数已校验过），无效调用不烧预算。
    */
+  /**
+   * W4-F2：修改授权边界门——仅修复轮传入 writeScope 时生效（缺省无 holder=现状）。
+   * 越界返回 blocked + next_actions（恢复路径引导，不诱导改用其他文件绕权限）。
+   */
+  const guardWriteScope = (rel: string): ToolOutcome | undefined => {
+    const scope = options.writeScope
+    if (!scope || scope.authorized.has(rel)) return undefined
+    const listing = [...scope.authorized].slice(0, 8).join('、') || '（空）'
+    return {
+      output:
+        `WRITE_SCOPE_DENIED：${rel} 不在本轮修改授权内（当前授权：${listing}）。` +
+        '若根因确在授权外文件，调用 repair_control（action=request_scope_expansion，带 issue_id/requested_paths/reason/change_intent）申请扩大授权；' +
+        '批准前不要在卡内文件上做替代实现硬绕根因。',
+      isError: true,
+      detail: {
+        code: 'WRITE_SCOPE_DENIED',
+        path: rel,
+        next_actions: [{ action: 'request_scope_expansion', required: ['issue_id', 'requested_paths', 'reason', 'change_intent'] }],
+      },
+    }
+  }
+
   const guardRepairBudget = (ctx: ToolContext): ToolOutcome | undefined => {
     if (!ctx.state.test_failed) return undefined
     ctx.state.edits_after_test_failure += 1
@@ -588,6 +634,9 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       const project = findProject(projectId)
       const resolved = resolveInsideProject(project.root_path, toolInput.path)
       if (!resolved.ok) return { output: resolved.error, isError: true }
+      // W4-F2：授权边界门（仅修复轮传入 writeScope 时生效；主 loop 无 holder 零变化）
+      const writeScopeBlocked = guardWriteScope(resolved.rel)
+      if (writeScopeBlocked) return writeScopeBlocked
       // D4a：write 守卫——覆盖「本轮未读过的既有文件」拦截（R-FILE-01 工具化：
       // 盲覆盖正式 BLOMA_WRITE_GUARD=on 才拦；off 零变化。新建文件不受影响）。
       if (existsSync(resolved.abs) && !_fileRevisions(ctx).has(resolved.rel)) {
@@ -625,6 +674,9 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       const project = findProject(projectId)
       const resolved = resolveInsideProject(project.root_path, toolInput.path)
       if (!resolved.ok) return { output: resolved.error, isError: true }
+      // W4-F2：授权边界门（仅修复轮传入 writeScope 时生效；主 loop 无 holder 零变化）
+      const writeScopeBlocked = guardWriteScope(resolved.rel)
+      if (writeScopeBlocked) return writeScopeBlocked
 
       // D4a：版本前置校验（可选参数，提供即校验——把 R-FILE-01 从「prompt 劝说」
       // 升级为「工具强制」；不传零变化，向后兼容）。文件不存在时跳过（后续分支自有报错）。
@@ -933,6 +985,71 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     },
   }
 
+  // W4-F3（咨询 D4）：修复控制窄入口——判别联合四字段，宿主裁决（确定性规则，零 LLM）。
+  // 「已申请≠已授权」：request_scope_expansion 返回 approved 才算扩权；受保护路径与
+  // 全项目申请一律拒。仅修复轮传入 writeScope 时注册（主 loop 无此工具，面最小化）。
+  const repair_control: AgentLoopTool = {
+    name: 'repair_control',
+    description:
+      '修复控制窄入口（仅修复轮）：①action=request_scope_expansion——根因在授权外文件时申请扩大修改授权（必填 issue_id/requested_paths/reason/change_intent；申请绑定具体失败与文件，不能申请全项目可写）；②action=report_blocker——证据缺失/环境异常/授权不足时如实报告受阻。已申请≠已授权，以返回的裁决为准。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['request_scope_expansion', 'report_blocker'] },
+        issue_id: { type: 'string', description: '关联失败场景/断言 id（request_scope_expansion 必填）' },
+        requested_paths: { type: 'array', items: { type: 'string' }, description: '申请扩大的项目内相对路径（request_scope_expansion 必填）' },
+        reason: { type: 'string', description: '根因证据：为什么根因在这些文件（request_scope_expansion 必填）' },
+        change_intent: { type: 'string', description: '改动意图：打算怎么改（request_scope_expansion 必填）' },
+        blocker_reason: { type: 'string', description: 'report_blocker：受阻原因' },
+        evidence: { type: 'string', description: 'report_blocker：证据引用（日志/断言原文/请求记录）' },
+      },
+      required: ['action'],
+    },
+    execute: async (toolInput) => {
+      const scope = options.writeScope!
+      const now = new Date().toISOString()
+      if (toolInput.action === 'request_scope_expansion') {
+        const issueId = typeof toolInput.issue_id === 'string' ? toolInput.issue_id : ''
+        const reason = typeof toolInput.reason === 'string' ? toolInput.reason : ''
+        const intent = typeof toolInput.change_intent === 'string' ? toolInput.change_intent : ''
+        const paths = Array.isArray(toolInput.requested_paths) ? toolInput.requested_paths.filter((p): p is string => typeof p === 'string') : []
+        if (!issueId || !reason || !intent || paths.length === 0) {
+          return { output: '申请缺少必填字段（issue_id/requested_paths/reason/change_intent），补齐后重新申请。', isError: true }
+        }
+        // 裁决规则（D4 §三）：普通实现文件→自动批准；受保护/全项目/超量→拒
+        if (paths.length > 8 || paths.some((p) => p.includes('*'))) {
+          scope.expansions.push({ issue_id: issueId, paths, reason, at: now, decision: 'denied', note: 'wildcard-or-over-quota' })
+          return { output: '拒绝：不能申请全项目可写（含通配符或单次超过 8 个路径）。申请必须绑定具体失败与具体文件。', isError: true }
+        }
+        const normalized = paths.map((p) => p.replace(/\\/g, '/'))
+        const protectedHit = normalized.filter((p) => scope.protectedPaths.has(p))
+        if (protectedHit.length > 0) {
+          scope.expansions.push({ issue_id: issueId, paths: normalized, reason, at: now, decision: 'denied', note: 'protected-path' })
+          return { output: `拒绝：${protectedHit.join('、')} 是受保护文件（权威契约/宿主产物），不因修复需求开放修改。若失败源于它们，请 report_blocker 说明。`, isError: true }
+        }
+        for (const p of normalized) scope.authorized.add(p)
+        scope.expansions.push({ issue_id: issueId, paths: normalized, reason, at: now, decision: 'approved' })
+        return {
+          output:
+            `已批准：${normalized.join('、')} 加入本轮修改授权（issue=${issueId}）。` +
+            '继续前先 read_file 核对现状与文件版本；修复完成后必须完整重验（run_gwt_tests 或 run_preflight），不得凭旧证据交差。',
+        }
+      }
+      if (toolInput.action === 'report_blocker') {
+        const blockerReason = typeof toolInput.blocker_reason === 'string' ? toolInput.blocker_reason : ''
+        if (!blockerReason) return { output: 'report_blocker 缺少 blocker_reason。', isError: true }
+        const evidence = typeof toolInput.evidence === 'string' ? toolInput.evidence : undefined
+        scope.blockers.push({ reason: blockerReason, ...(evidence ? { evidence } : {}), at: now })
+        return {
+          output:
+            '受阻已记录（原因/证据进宿主账本，升级或让渡由宿主决定）。建议：①证据缺失先做区分性检查（能区分两种候选根因的那种）；' +
+            '②测试环境异常如实标注，不硬判产品缺陷；③需要独立定位可 delegate_agent(role=research 只读) 诊断。',
+        }
+      }
+      return { output: `未知 action：${String(toolInput.action)}。`, isError: true }
+    },
+  }
+
   // 主 agent（parent）专属委派协作工具集：M1 delegate_agent；M2 wait/get/stop；M3 answer/continue
   const delegate_agent: AgentLoopTool = {
     name: 'delegate_agent',
@@ -1216,6 +1333,8 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
   const apiTools = loopApiToolEnabled() ? [run_api_contract_tests] : []
   // W3-D1：收口预检按开关注册（主/实现角色；审查角色不收口不注入）
   const preflightTools = preflightEnabled() ? [run_preflight] : []
+  // W4-F3：修复控制窄入口——仅修复轮传入 writeScope 时注册（主 loop 无此工具）
+  const repairControlTools = options.writeScope ? [repair_control] : []
 
   if (role === 'review') {
     // 审查角色（m-12）：话术承诺「不直接修改」，工具面同步收窄——去掉 write_file/
@@ -1252,6 +1371,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     run_security_scan,
     ...apiTools,
     ...preflightTools,
+    ...repairControlTools,
     delegate_agent,
     web_research,
     wait_for_delegations,

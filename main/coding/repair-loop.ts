@@ -30,6 +30,15 @@ import { resolveChannelEnv } from '../runtime-fallback'
 import { trackAnalytics } from '../platform-services'
 import { appendProjectLearning } from '../learnings-log'
 import { readLoopCheckpointDocument, writeLoopCheckpointDocument, type LoopRepairAttemptRecord } from '../document-engine'
+import { createWriteScope } from './agent-tools'
+
+/** W4-F2/F3 开关（咨询 D4）：修复轮修改授权边界 + repair_control 窄入口。缺省 off=字节级现状（无边界无窄入口）。 */
+export function repairScopeEnabled(): boolean {
+  return process.env.BLOMA_REPAIR_SCOPE === '1' || process.env.BLOMA_REPAIR_SCOPE === 'true'
+}
+
+/** 受保护路径缺省（权威契约/宿主产物；拒绝任何扩大申请） */
+const PROTECTED_WRITE_PATHS = ['prd.json', 'test-report.json', 'documents/loop-checkpoint.json', 'documents/decisions.md']
 
 export type RepairSource = 'gwt' | 'build'
 
@@ -143,6 +152,8 @@ const REPAIR_MODE_SECTION = [
 export interface RepairCheckpointContext {
   candidate_fingerprint?: string
   attempts: LoopRepairAttemptRecord[]
+  /** W4-F5：宿主判定的升级态（连续 ≥2 轮修复无推进 → 诊断升级提示注入） */
+  escalation?: 'diagnosis'
 }
 
 export interface RepairLoopInput {
@@ -165,6 +176,9 @@ export interface RepairLoopInput {
   roundAnchor?: RoundAnchorSpec
   /** W2-F1：修复证据包（候选指纹+此前修复尝试；BLOMA_LOOP_CHECKPOINT 缺省 off=零注入） */
   checkpointContext?: RepairCheckpointContext
+  /** W4-F2：本轮修改授权（相对路径；仅 BLOMA_REPAIR_SCOPE on 且可从任务卡派生出文件路径时生效——
+   *  场景锚点不当白名单，派生不出即不设边界 fail-open） */
+  authorizedWritePaths?: string[]
   /** 思考档位（编排器解析后传入；缺省不传 = loop 内部缺省） */
   thinkingLevel?: ThinkingLevel
   /** 事件发布（编排器 publish 包装） */
@@ -220,7 +234,8 @@ export async function runRepairLoop(input: RepairLoopInput): Promise<RepairRound
     // Phase 3 B3：本轮锚（开关 off 或未传 spec → 零注入，system 与现状字节一致）
     const roundAnchorBlock =
       input.roundAnchor && roundAnchorEnabled() ? `\n\n${renderRoundAnchorBlock(input.roundAnchor)}` : ''
-    loopResult = await runAgentLoop({
+  const scopePaths = repairScopeEnabled() && input.authorizedWritePaths && input.authorizedWritePaths.length > 0 ? input.authorizedWritePaths : undefined
+  loopResult = await runAgentLoop({
       system: `${input.buildSystem(editFormat)}\n\n${REPAIR_MODE_SECTION}${roundAnchorBlock}`,
       task: renderRepairTaskCard(input.tasks, input.checkpointContext),
       // 窄任务小预算：web_research 限 2 防长 loop 无节制外呼（主 loop 为 4）
@@ -228,6 +243,7 @@ export async function runRepairLoop(input: RepairLoopInput): Promise<RepairRound
       tools: buildAgentTools({
         projectId: input.project_id,
         editFormat,
+        ...(scopePaths ? { writeScope: createWriteScope(scopePaths, PROTECTED_WRITE_PATHS) } : {}),
         // 埋点通道复用（self_repair_triggered, via:'repair_loop'）
         onRepairRound: (round) => {
           trackAnalytics({
@@ -362,6 +378,15 @@ function renderRepairEvidencePack(checkpoint?: RepairCheckpointContext): string[
       )
     }
     lines.push('  - 判据：持续=同样失败仍在（换假设，勿重复同补丁）；新增=修复引入回归（先查共享影响面）')
+  }
+  // W4-F5（咨询 D4 §四）：升级按证据进展——连续 ≥2 轮零修复（无 resolved）由宿主判定为诊断升级
+  if (checkpoint.escalation === 'diagnosis') {
+    lines.push(
+      '【诊断升级（宿主判定：连续多轮修复无推进）】',
+      '- 不要再重复同类补丁：换工作假设，或先做能区分两种候选根因的区分性检查',
+      '- 可 delegate_agent（role=research 只读）做独立诊断定位，返回定位与可验证建议',
+      '- 证据缺失/测试环境异常用 repair_control(action=report_blocker) 如实报告，不硬判产品缺陷',
+    )
   }
   return [lines.join('\n')]
 }

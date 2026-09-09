@@ -211,3 +211,28 @@ describe('预算与轮次解析（D6 + BLOMA_REPAIR_* 覆盖）', () => {
     expect(resolveRepairMaxTurns('longterm')).toBe(16)
   })
 })
+
+describe('W4-F5：诊断升级段渲染（连续 ≥2 轮零修复由宿主判定）', () => {
+  it('escalation=diagnosis 时修复卡注入换假设/区分性检查/只读独立诊断指引', () => {
+    const attempt = {
+      round: 1,
+      at: new Date().toISOString(),
+      task_locations: ['F-005'],
+      files_touched: ['src/app.js'],
+      outcome: { resolved: [], persistent: ['F-005'], new_failures: [], converged: false },
+    }
+    const card = renderRepairTaskCard(buildRepairTasks({ testResult: gwtResult() }), {
+      attempts: [attempt, { ...attempt, round: 2 }],
+      escalation: 'diagnosis',
+    })
+    expect(card).toContain('诊断升级')
+    expect(card).toContain('区分性检查')
+    expect(card).toContain('role=research')
+    expect(card).toContain('report_blocker')
+    // 无升级态（有修复进展）不注入
+    const calm = renderRepairTaskCard(buildRepairTasks({ testResult: gwtResult() }), {
+      attempts: [{ ...attempt, outcome: { resolved: ['F-005'], persistent: [], new_failures: [], converged: true } }],
+    })
+    expect(calm).not.toContain('诊断升级')
+  })
+})
