@@ -20,8 +20,10 @@ bench/
 ├── tasks/seed-v0.json    # 首批任务卡（六类各 1，从历史项目提炼）
 ├── harness/
 │   ├── collector.mjs     # 离线采集：projects/documents/analytics/agent-sessions → evidence
+│   ├── l1-run.mjs        # L1 在线驱动：Electron+真 IPC 全流程 → runs/<seed>/<run-id>/ 档案
 │   ├── metrics.mjs       # 指标纯函数（零依赖、可单测）
-│   └── scan.mjs          # CLI：采集 + 指标 + 失败特征检测 → reports/
+│   └── scan.mjs          # L0 CLI：采集 + 指标 + 失败特征检测 → reports/
+├── runs/                 # L1 运行档案（证据目录，不入库）
 └── reports/              # offline-report-<ts>.md / .json（不入库）
 ```
 
@@ -38,12 +40,35 @@ bench/
 ## 用法
 
 ```bash
-# 离线扫描：14 个历史项目 → 指标报告 + 失败特征提示
+# 离线扫描（L0）：14 个历史项目 → 指标报告 + 失败特征提示
 node bench/harness/scan.mjs
 
 # 指定项目子集/输出目录（后续扩展）
 node bench/harness/scan.mjs --projects 7ae665fc --out bench/reports/seed-a.md
 ```
+
+### L1 在线评测（2026-09-09）
+
+```bash
+npm run build   # 先构建 dist-main（Electron 实例跑构建产物）
+
+# 渠道预检（生产 userData 上下文解 key → L1 实例内重存 → 全渠道连通测试）
+node bench/harness/l1-run.mjs --seed seed-b-crud-calculator --probe
+
+# 单次全流程：新项目 → 注入 seed 需求 → 澄清/需求确认/PRD 门脚本应答 → MVP loop → 终态 → 采集档案
+node bench/harness/l1-run.mjs --seed seed-b-crud-calculator --mode quick --timeout-min 25 --label b0
+
+# 参数：--mode quick|longterm｜--keep-home（保留临时 PROMA_HOME 排查）｜--dry（仅环境自检）
+```
+
+- 终态 ∈ {converged@ready|completed, blocked, stalled, timeout}；run 档案落 `bench/runs/<seed>/<ts-label>/`
+  （manifest/run.log/evidence/metrics/events/session-raw/artifacts.sha/main.log，P0 稿 §5 清单）。
+- 渠道注入链：safeStorage 密文绑定 userData（陷阱 45）——生产密文先在 Roaming/bloma 上下文
+  （channel-key-reader.cjs）解出，再经 L1 实例 `channel:update` 重存（明文只过内存/临时文件，用后删）。
+- 决策驱动以会话 JSONL 的 `[decision]` JSON 行为权威（type ∈ clarification_card /
+  requirement_confirm_card / prd_review / prd_confirm）；生成中阶段（generating_mvp/testing/…）不碰卡。
+- 脚本用户行为基线：澄清按 seed.clarificationPath 匹配（失配选首个非让渡项，耗尽让渡）；
+  需求确认=全量勾选；PRD 审查退回=override 忽略；草图=accepted。每次应答落 run.log 审计。
 
 ## 纪律
 
