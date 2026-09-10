@@ -1926,6 +1926,28 @@ export async function resolveRequirementConfirm(
   if (!pending) return { started: false, prd_written: false }
   const publish = pending.publish
 
+  // P7-9b 后续批（2026-09-11）：decision_selected 其余卡接线④——需求确认弹窗
+  //（confirm/delegate；独立 IPC 通道不走 runAgent card_option 链，在此单独埋）
+  try {
+    trackAnalytics({
+      request_id: input.request_id,
+      event: {
+        event_type: 'decision_selected',
+        project_id: input.project_id,
+        session_id: input.session_id,
+        payload: {
+          stage: 'requirement_confirm',
+          action: input.decision,
+          selected_count: input.decision === 'delegate' ? undefined : (input.requirement_ids?.length ?? 0),
+          adopted_ideas_count: input.adopted_ideas?.length ?? 0,
+        },
+        privacy_level: 'research_safe',
+      },
+    })
+  } catch {
+    // 埋点失败不影响确认链
+  }
+
   const selected = pending.requirements.filter((item) => input.requirement_ids?.includes(item.id))
   const requirements =
     input.decision === 'delegate' || selected.length === 0 ? pending.requirements : selected

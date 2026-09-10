@@ -200,7 +200,7 @@
 | `clarification_responded` | guide-agent-service 四分支（点选=select/让渡=delegate/减负卡先看方案=skip/继续补充=input） | method+trailing_rounds（澄清疲劳漏斗中层；脱敏不记原文） |
 | `decision_selected` | resumeBlockedFlow 入口（v0 一处） | stage+action+blocked_action（决策卡转化） |
 
-- 待后续批次：decision_selected 其余卡（ready_next_steps/prd_confirm 等）、core_task_result（依赖交付卡「先试一次完整流程」新交互面）、issue_reported（依赖报障意图识别）——三件登记待办；J6 三指标待数据积累。
+- 后续批已接（2026-09-11）：decision_selected 其余卡四处——修改确认卡（iteration_confirm，resolveIterationDecisionFlow）/失败重试卡（iteration_retry，take 消费性之后埋）/就绪引导卡（ready_next_steps，next_backend 窄判定零误记）/需求确认弹窗（requirement_confirm，独立 IPC 通道单独埋）。仍待后续：core_task_result（依赖交付卡「先试一次完整流程」新交互面）、issue_reported（依赖报障意图识别——J7 台账发现当前用户行为模式下文本指正 0/82，v0 建议先挂行为信号）；J6 三指标待数据积累。
 
 ## 20. Phase 7 P7-7 开关（I3 转向生效确认链，2026-09-11）
 

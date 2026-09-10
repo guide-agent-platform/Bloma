@@ -21,6 +21,7 @@ import { SessionMessageQueue, type QueueEntry } from './message-queue'
 import { clearSteerQueue, rejectPendingSteer, steerConfirmEnabled, type SteerLedgerEntry } from './steer-queue'
 import { emitAgentEvent } from './agent-event-bus'
 import { hydrateMessagesImageBlocks } from './pasted-images'
+import { trackAnalytics } from './platform-services'
 export { buildSdkEnv } from './channel-manager'
 import {
   extractErrorStatusCode,
@@ -629,10 +630,46 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       return { accepted: true, session_id: input.session_id, stream_started: true }
     }
 
+    // P7-9b 后续批（2026-09-11）：decision_selected 其余卡接线③——就绪引导卡
+    //（next_backend 进迭代通道；export_handoff 走特调导出 IPC 不进本链零记录）。
+    // 窄判定零误记：只认 ready_next_steps 的专属选项 id，不碰澄清卡答案空间。
+    if (input.metadata?.source === 'card_option' && input.metadata.selected_option_id === 'next_backend') {
+      try {
+        trackAnalytics({
+          request_id: input.request_id,
+          event: {
+            event_type: 'decision_selected',
+            project_id: input.project_id,
+            session_id: input.session_id,
+            payload: { stage: 'ready_next_steps', action: 'next_backend' },
+            privacy_level: 'research_safe',
+          },
+        })
+      } catch {
+        // 埋点失败不影响迭代链（后续正常消息链路继续）
+      }
+    }
+
     // U12：失败重试卡回传（selected_option_id === 'retry'）——取出上次失败诉求原样重跑，
     // 在引导路径/ready 护栏之前拦截（与修改确认卡同理），实现「一键重试」而非重新打字。
     if (input.metadata?.source === 'card_option' && input.metadata.selected_option_id === 'retry') {
       const failedPrompt = takeFailedIteration(input.project_id)
+      // P7-9b 后续批（2026-09-11）：decision_selected 其余卡接线②——失败重试卡
+      //（埋点在消费性 take 之后，用局部变量——先埋会拿走 failedPrompt）
+      try {
+        trackAnalytics({
+          request_id: input.request_id,
+          event: {
+            event_type: 'decision_selected',
+            project_id: input.project_id,
+            session_id: input.session_id,
+            payload: { stage: 'iteration_retry', action: 'retry', has_failed_prompt: failedPrompt !== undefined },
+            privacy_level: 'research_safe',
+          },
+        })
+      } catch {
+        // 埋点失败不影响重试链
+      }
       if (failedPrompt) {
         setProgrammingEventPublisher(streamPublisher)
         await runIterationTask({
@@ -1725,6 +1762,23 @@ async function resolveIterationDecisionFlow(
 ): Promise<void> {
   const decision = input.metadata?.selected_option_id
   const pending = takePendingIteration(input.project_id)
+
+  // P7-9b 后续批（2026-09-11）：decision_selected 其余卡接线①——修改确认卡
+  //（confirm/rephrase/cancel；blocked 让渡卡已有 resumeBlockedFlow 处埋点不双记）
+  try {
+    trackAnalytics({
+      request_id: input.request_id,
+      event: {
+        event_type: 'decision_selected',
+        project_id: input.project_id,
+        session_id: input.session_id,
+        payload: { stage: 'iteration_confirm', action: decision ?? null, has_pending: pending !== undefined },
+        privacy_level: 'research_safe',
+      },
+    })
+  } catch {
+    // 埋点失败不影响决策链
+  }
 
   if (decision === 'confirm' && pending) {
     recordDecision({
