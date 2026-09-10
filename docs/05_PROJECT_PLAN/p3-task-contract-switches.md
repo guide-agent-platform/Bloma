@@ -155,3 +155,12 @@
 - J3（问的门槛三类化）与向导 prompt 合批（Phase 1 外置覆盖线），本批不落代码。
 - J4 假设摘要三分区纯呈现层无开关直接上：确认卡功能清单 origin 徽标（你说的/向导补充，payload 透传 item.origin）+ pending CAP 置顶「还需你确认的 1 件事」区块（无 pending_assumption 自动隐藏）。
 - 单测：guide-clarification-round-limit.test.ts +7 例（J1 四态/J2-① 精确去重/J2-② off 回归锁与 on 减负卡）+ prd-confirm-dialog.test.tsx +1 例（origin 徽标+pending CAP）；A/B 待额度。
+
+## 15. Phase 7 P7-9a 埋点事件（J5 北极星地基，2026-09-10；纯 append-only 零行为变更不设开关）
+
+| 事件 | 接线点 | payload |
+|---|---|---|
+| `scope_confirmed` | prd-confirm 确认回传（resumePrdConfirmConfirmed） | via=requirement_ids 清单+count+user_confirmed_at+key_tasks 标识（task_id/label/must_deliver；开关 off 缺席时 requirements 兜底）+adopted_ideas_count |
+| `delivery_presented` | ready 收敛发引导卡处（runJudgeReview ready 分支） | via/snapshot_id/delivery_status（缺席记 absent——开关 off 事实入账可归因）/**delivery_body_snapshot 声明文案快照**（append-only 留存，J6 承诺冲突率证据源；后续话术改动不回写） |
+
+- 其余五事件（project_started 扩/clarification_responded/decision_selected/core_task_result/issue_reported）待后续批次；J6 三指标待数据积累。

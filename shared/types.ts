@@ -1295,6 +1295,9 @@ export interface AnalyticsTrackInput extends RequestEnvelope {
       | 'judge_verdict'
       | 'satisfaction_marked'
       | 'project_finalized'
+      /** Phase 7 U5 J5（2026-09-10）：北极星地基事件 */
+      | 'scope_confirmed'
+      | 'delivery_presented'
     project_id?: string
     session_id?: string
     payload: Record<string, unknown>

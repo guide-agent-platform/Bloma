@@ -1814,17 +1814,42 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
   //（渲染端 useUserDecisionCards 扫描事件渲染卡片，选项经 card_option metadata 回传；
   // export_handoff 由渲染端特调导出 IPC，不进聊天管道）。mvp_ready 在交付期已发，
   // 本卡在其后到达 → 渲染端扫描顺序保证显示。
+  const deliveryBody = buildReadyDeliveryBody(input.project_id)
   publish(input, 'user_decision_required', {
     kind: 'ready_next_steps',
     title: '当前版本已就绪——下一步走向完整产物',
     // Phase 7 U1 H3：交付状态三层正文（结论/任务分组/详情提示；delivery_status
     // 缺席时 undefined 渲染端自动隐藏——开关 off 时与现状字节一致）
-    delivery_body: buildReadyDeliveryBody(input.project_id),
+    delivery_body: deliveryBody,
     questions: [
       { id: 'next_backend', label: '把数据存到服务端', description: '历史/记录改用 server/routes + data/ 持久化' },
       { id: 'export_handoff', label: '导出部署', description: '生成可独立部署的前后端工程' },
     ],
   })
+  // Phase 7 U5 J5（2026-09-10）：delivery_presented 北极星地基事件——交付声明文案
+  // 快照随事件 append-only 留存（后续话术改动不回写，J6 承诺冲突率证据源）；
+  // delivery_status 缺席时记 status_absent（开关 off 事实也入账，可归因）。try/catch
+  // 隔离不阻断 ready 收口。
+  try {
+    const project = findProject(input.project_id)
+    trackAnalytics({
+      request_id: input.request_id,
+      event: {
+        event_type: 'delivery_presented',
+        project_id: input.project_id,
+        session_id: input.session_id,
+        payload: {
+          via: 'ready_next_steps',
+          snapshot_id: project?.current_snapshot_id,
+          delivery_status: project?.delivery_status ?? 'absent',
+          delivery_body_snapshot: deliveryBody ?? '',
+        },
+        privacy_level: 'research_safe',
+      },
+    })
+  } catch {
+    // 埋点失败不影响 ready 收口
+  }
   return { outcome: 'ready', verdict }
 }
 

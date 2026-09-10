@@ -56,6 +56,7 @@ vi.mock('../../main/runtime-fallback', () => ({
 import { handleGuideMessage, resolveRequirementConfirm } from '../../main/guide-agent-service'
 import { recordDecision } from '../../main/decision-log'
 import { researchMarketSimilar } from '../../main/guide-research'
+import { trackAnalytics } from '../../main/platform-services'
 import { markPrdUserConfirmed } from '../../main/document-engine'
 import { resolvePrdBackplane, runSketchTask } from '../../main/programming-orchestrator'
 import {
@@ -274,6 +275,7 @@ describe('PRD 用户确认门（改造 3）', () => {
   it('confirm 回传 → user_confirmed_at 落盘 + 开草图 + 决策留痕', async () => {
     await startConfirmFlow()
     vi.mocked(runSketchTask).mockClear()
+    vi.mocked(trackAnalytics).mockClear()
 
     await handleGuideMessage(
       makeInput({ content: '确认这份 PRD，开始画草图。', metadata: { source: 'card_option', selected_option_id: PRD_CONFIRM_OPTION_CONFIRM } }),
@@ -285,6 +287,12 @@ describe('PRD 用户确认门（改造 3）', () => {
     expect(runSketchTask).toHaveBeenCalledTimes(1)
     const decisions = vi.mocked(recordDecision).mock.calls.map((call) => call[0].entry)
     expect(decisions.some((entry) => entry.type === 'prd_confirm' && entry.title.includes('已确认'))).toBe(true)
+    // Phase 7 U5 J5：scope_confirmed 埋点（需求版本+key_tasks 标识随确认动作留存）
+    const scoped = vi.mocked(trackAnalytics).mock.calls.map((call) => call[0].event).find((event) => event.event_type === 'scope_confirmed')
+    expect(scoped).toBeDefined()
+    expect(scoped?.payload.via).toBe('prd_confirm_card')
+    expect(Array.isArray(scoped?.payload.requirement_ids)).toBe(true)
+    expect(scoped?.payload.user_confirmed_at).toBe('2026-08-26T00:00:00.000Z')
   })
 
   it('B-1 回归（2026-09-02 对抗审查）：盘上权威清单含 behavior_assertions 时完整传入 runSketchTask——探针链不瘦身', async () => {

@@ -1,5 +1,5 @@
 import { restorePromaHome } from '../support/proma-home-guard'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -72,6 +72,14 @@ describe('Judge review trigger and return counts (A2-11)', () => {
     expect(result.verdict.verdict).toBe('pass')
     expect(findProject(project.project_id).current_stage).toBe('ready')
     expect(findProject(project.project_id).judge_return_count ?? 0).toBe(0)
+    // Phase 7 U5 J5：delivery_presented 埋点随 ready 收敛落 analytics（append-only；
+    // delivery_status 缺席时记 absent——开关 off 事实也入账可归因）
+    const analyticsPath = join(home, 'agent-workspaces', project.workspace_slug, 'analytics.jsonl')
+    expect(existsSync(analyticsPath), 'analytics.jsonl 应存在（delivery_presented 已落盘）').toBe(true)
+    const delivered = readFileSync(analyticsPath, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as { event_type?: string; payload?: Record<string, unknown> })
+    const event = delivered.find((e) => e.event_type === 'delivery_presented')
+    expect(event?.payload?.via).toBe('ready_next_steps')
+    expect(event?.payload?.delivery_status).toBe('absent')
   })
 
   it('MVP 完成到 ready 时主动下发「完成」助手消息（落盘 + message_delta + completed）', async () => {

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentEvent, AgentSendMessageInput, ResearchIdea } from '../../shared/types'
 import { recordDecision } from '../decision-log'
+import { trackAnalytics } from '../platform-services'
 import { appendPrdRequirements, markPrdUserConfirmed, updatePrdAssertions } from '../document-engine'
 import { nextRequirementId, runSketchTask } from '../programming-orchestrator'
 import { earsifyRequirements } from '../requirement-earsifier'
@@ -256,6 +257,34 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
     console.error('[prd-confirm] EARS 化失败（回退原断言，不阻塞草图）:', error)
   }
   // （「PRD 用户已确认」决策日志已提前至 EARS 化 await 之前落盘，见上）
+  // Phase 7 U5 J5（2026-09-10）：scope_confirmed 北极星地基事件——需求版本+key_tasks
+  // 标识随确认动作留存（append-only analytics；key_tasks 缺席时记 requirements 清单
+  // 兜底，事后可归因「确认时用户看到的关键任务是什么」）。失败不阻断确认链。
+  try {
+    const confirmedBackplane = confirmed ?? undefined
+    const keyTasks = confirmedBackplane ? backplaneKeyTasks(confirmedBackplane) : []
+    trackAnalytics({
+      request_id: input.request_id,
+      event: {
+        event_type: 'scope_confirmed',
+        project_id: input.project_id,
+        session_id: input.session_id,
+        payload: {
+          via: 'prd_confirm_card',
+          requirement_ids: (confirmedBackplane?.requirements ?? sketchRequirements).map((item) => item.id),
+          requirement_count: (confirmedBackplane?.requirements ?? sketchRequirements).length,
+          ...(confirmedBackplane?.user_confirmed_at ? { user_confirmed_at: confirmedBackplane.user_confirmed_at } : {}),
+          ...(keyTasks.length > 0
+            ? { key_tasks: keyTasks.map((task) => ({ task_id: task.task_id, label: task.label, must_deliver: task.must_deliver })) }
+            : {}),
+          ...(adopted.length > 0 ? { adopted_ideas_count: adopted.length } : {}),
+        },
+        privacy_level: 'research_safe',
+      },
+    })
+  } catch {
+    // 埋点失败不影响确认链
+  }
   // m-1：用户确认是已发生的行为事实——决策日志在 EARS 化 await 之前先落（abort 落在
   // EARS 化期间时「用户已确认」决策不得缺失），后续 ack/草图再按 abort 如实停止。
   recordDecision({
