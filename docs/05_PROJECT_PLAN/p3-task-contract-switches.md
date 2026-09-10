@@ -164,3 +164,9 @@
 | `delivery_presented` | ready 收敛发引导卡处（runJudgeReview ready 分支） | via/snapshot_id/delivery_status（缺席记 absent——开关 off 事实入账可归因）/**delivery_body_snapshot 声明文案快照**（append-only 留存，J6 承诺冲突率证据源；后续话术改动不回写） |
 
 - 其余五事件（project_started 扩/clarification_responded/decision_selected/core_task_result/issue_reported）待后续批次；J6 三指标待数据积累。
+
+## 16. Phase 7 P7-5（I1 进度卡 + I4 停止语义，2026-09-10；纯呈现层直接上不设开关）
+
+- I1 里程碑（mapStageToRunSteps）：MVP 3 步改用户任务语汇「制作应用→检查关键功能→最后验收」；repairing 切 4 步模板（「修复发现的问题」仅发生时插入，位置稳定不循环倒退）；ready 完成态 header 改「本轮制作已结束」（阶段结束≠功能可用，验收结论以 delivery 卡为准）；「提出新想法」改「补充或修改要求」；新增「停止本轮制作」入口（onStopGeneration 透传，title 带后果说明）。
+- I4 停止语义：停止按钮 aria-label 改「停止本轮制作」；停止后承接系统消息升级三栏（已确认=需求/草图/PRD 保留、已保存=已交付版本不受影响、尚未完成=本轮未验证内容不作交付）+三条后继路径引导（继续制作/调整需求/查看版本记录）。实施稿定性「呈现层重构」（T1 reconcile 承接已有），行为语义未变（停止本就保留成果），不设开关——渲染端无 env 透传链路，若需 A/B 先建透传（登记待办）。
+- 跳过项登记：①预计还需区间（I1）——需 analytics 按任务复杂度/阶段分组的数据积累，无数据不造假倒计时；②泳道图降级——生成等待主界面本无泳道图（工具流已是折叠组），无需降级。

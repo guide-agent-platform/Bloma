@@ -63,20 +63,28 @@ describe('mapStageToRunSteps', () => {
     expect(steps![1]).toMatchObject({ status: 'pending' })
   })
 
-  it('generating_mvp → 3 步模板，第 1 步进行中', () => {
+  it('generating_mvp → 3 步模板（制作应用→检查关键功能→最后验收），第 1 步进行中', () => {
     const steps = mapStageToRunSteps('generating_mvp')
     expect(steps).toHaveLength(3)
-    expect(steps![0]).toMatchObject({ label: '生成可运行版本', status: 'in_progress' })
+    expect(steps![0]).toMatchObject({ label: '制作应用', status: 'in_progress' })
     expect(steps![1]).toMatchObject({ status: 'pending' })
   })
 
-  it('testing / repairing 共享第 2 步（不回退已完成）', () => {
-    for (const stage of ['testing', 'repairing']) {
-      const steps = mapStageToRunSteps(stage)
-      expect(steps![0]).toMatchObject({ status: 'done' })
-      expect(steps![1]).toMatchObject({ label: '自动测试并修复', status: 'in_progress' })
-      expect(steps![2]).toMatchObject({ status: 'pending' })
-    }
+  it('testing → 3 步第 2 步「检查关键功能」进行中（修复步不出现，仅发生时）', () => {
+    const steps = mapStageToRunSteps('testing')
+    expect(steps).toHaveLength(3)
+    expect(steps![0]).toMatchObject({ status: 'done' })
+    expect(steps![1]).toMatchObject({ label: '检查关键功能', status: 'in_progress' })
+    expect(steps![2]).toMatchObject({ label: '最后验收', status: 'pending' })
+  })
+
+  it('repairing → 4 步模板（I1：修复作为独立里程碑仅发生时插入，不回退已完成）', () => {
+    const steps = mapStageToRunSteps('repairing')
+    expect(steps).toHaveLength(4)
+    expect(steps![0]).toMatchObject({ status: 'done' })
+    expect(steps![1]).toMatchObject({ label: '检查关键功能', status: 'done' })
+    expect(steps![2]).toMatchObject({ label: '修复发现的问题', status: 'in_progress' })
+    expect(steps![3]).toMatchObject({ label: '最后验收', status: 'pending' })
   })
 
   it('judge_review → 前两步完成、第 3 步进行中', () => {
@@ -171,11 +179,10 @@ describe('ProgressCard', () => {
     const live: ProgressLine[] = [
       { key: 't', kind: 'tool', label: '写入文件', detail: 'app.js', status: 'running' },
     ]
-    render(<ProgressCard stageLabel="生成可运行版本" steps={steps} lines={live} doneSteps={0} onClose={vi.fn()} />)
+    render(<ProgressCard stageLabel="制作应用" steps={steps} lines={live} doneSteps={0} onClose={vi.fn()} />)
     expect(screen.getByText('第 1 / 3 步 · 已完成 0%')).toBeTruthy()
-    expect(screen.getByText('生成可运行版本')).toBeTruthy()
     expect(screen.getByText('进行中')).toBeTruthy()
-    expect(screen.getByText('自动测试并修复')).toBeTruthy()
+    expect(screen.getByText('检查关键功能')).toBeTruthy()
     expect(screen.getByText(/正在：写入文件 · app\.js/)).toBeTruthy()
   })
 
@@ -207,19 +214,23 @@ describe('ProgressCard', () => {
     expect(onClose).toHaveBeenCalledOnce()
   })
 
-  it('提供「提出新想法」次级入口并触发回调', () => {
+  it('提供「补充或修改要求」与「停止本轮制作」入口并触发回调（I1/I4）', () => {
     const onSuggestIdea = vi.fn()
+    const onStopGeneration = vi.fn()
     render(
       <ProgressCard
-        stageLabel="生成可运行版本"
+        stageLabel="制作应用"
         steps={mapStageToRunSteps('generating_mvp')!}
         lines={[]}
         doneSteps={0}
         onClose={vi.fn()}
         onSuggestIdea={onSuggestIdea}
+        onStopGeneration={onStopGeneration}
       />,
     )
-    fireEvent.click(screen.getByRole('button', { name: '提出新想法' }))
+    fireEvent.click(screen.getByRole('button', { name: '补充或修改要求' }))
     expect(onSuggestIdea).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByTestId('progress-stop-button'))
+    expect(onStopGeneration).toHaveBeenCalledOnce()
   })
 })

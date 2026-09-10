@@ -450,6 +450,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                 doneSteps={countDoneSteps(streamState.events, delegations)}
                 onClose={() => setViewingProgress(false)}
                 onSuggestIdea={handleSuggestIdea}
+                onStopGeneration={onStopGeneration}
               />
             )}
 
@@ -622,8 +623,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           {hasActiveStream ? (
             <button
               onClick={onStopGeneration}
-              aria-label="停止生成"
-              title="停止生成"
+              aria-label="停止本轮制作"
+              title="停止本轮制作（已确认的需求与已交付版本会保留）"
               style={{
                 display: 'flex',
                 alignItems: 'center',

@@ -28,11 +28,22 @@ export interface RunStep {
   status: RunStepStatus
 }
 
-/** MVP 主链 3 步模板：generating_mvp → testing/repairing → judge_review → ready */
+/** MVP 主链 3 步模板：generating_mvp → testing → judge_review → ready（Phase 7 U5 I1
+ * 里程碑语汇对齐 E2 咨询：用户任务是「制作应用→检查关键功能→最后验收」，不是工程
+ * 阶段名；“修复发现的问题”仅发生时插入（repairing 专用 4 步模板）。 */
 const MVP_STEPS: Array<{ id: string; label: string }> = [
-  { id: 'build', label: '生成可运行版本' },
-  { id: 'test', label: '自动测试并修复' },
-  { id: 'quality', label: '质量检查' },
+  { id: 'build', label: '制作应用' },
+  { id: 'test', label: '检查关键功能' },
+  { id: 'quality', label: '最后验收' },
+]
+
+/** 修复发生时的 4 步模板（I1：修复是独立里程碑仅发生时显示，不循环倒退——
+ * testing↔repairing 来回时 repair 步位置稳定，不会把已完成步重置）。 */
+const MVP_STEPS_WITH_REPAIR: Array<{ id: string; label: string }> = [
+  MVP_STEPS[0],
+  MVP_STEPS[1],
+  { id: 'repair', label: '修复发现的问题' },
+  MVP_STEPS[2],
 ]
 
 /** 草图链 2 步模板 */
@@ -70,9 +81,11 @@ export function mapStageToRunSteps(stage: string): RunStep[] | null {
     case 'generating_mvp':
       return withStatus(MVP_STEPS, 1)
     case 'testing':
-    case 'repairing':
-      // 测试/修复共享第 2 步：两者来回时不误报已完成，避免进度"假推进"
+      // 3 步模板：修复步不出现（仅发生时——repairing 才切 4 步）
       return withStatus(MVP_STEPS, 2)
+    case 'repairing':
+      // I1：检查发现问题→修复作为独立里程碑显示（“检查发现问题，正在修复”，不假绿）
+      return withStatus(MVP_STEPS_WITH_REPAIR, 3)
     case 'judge_review':
       return withStatus(MVP_STEPS, 3)
     case 'ready':
@@ -211,18 +224,23 @@ export interface ProgressCardProps {
   /** 已收尾的工具/委派步数（无模板回退时展示） */
   doneSteps: number
   onClose: () => void
-  /** 提出新想法（超时态用户可补充需求，父级聚焦输入框并提示排队，R-WAIT-04） */
+  /** 提出新想法（超时态用户可补充需求，父级聚焦输入框并提示排队，R-WAIT-04；
+   * I1（2026-09-10）：文案改「补充或修改要求」——排队语义不变） */
   onSuggestIdea?: () => void
+  /** 停止本轮制作（I4：默认保留成果——已确认需求/草图/已交付版本不受影响） */
+  onStopGeneration?: () => void
 }
 
-export const ProgressCard: React.FC<ProgressCardProps> = ({ stageLabel, steps, lines, doneSteps, onClose, onSuggestIdea }) => {
+export const ProgressCard: React.FC<ProgressCardProps> = ({ stageLabel, steps, lines, doneSteps, onClose, onSuggestIdea, onStopGeneration }) => {
   const progress = computeStepProgress(steps)
   const liveLine = pickLiveLine(lines)
   const inProgressExists = steps.some((step) => step.status === 'in_progress')
 
   const hasTemplate = steps.length > 0
   const header = hasTemplate
-    ? `${progress.allDone ? '已完成' : `第 ${progress.current} / ${progress.total} 步`} · 已完成 ${progress.percent}%`
+    ? // I1 措辞审查：allDone 说「本轮制作已结束」而非「已完成」——阶段结束≠功能可用，
+      // 验收结论以交付说明（delivery 卡）为准
+      `${progress.allDone ? '本轮制作已结束' : `第 ${progress.current} / ${progress.total} 步`} · 已完成 ${progress.percent}%`
     : lines.length > 0 || doneSteps > 0
       ? `${stageLabel} · 已完成 ${doneSteps} 步`
       : '正在准备 / 理解你的需求…'
@@ -404,7 +422,27 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({ stageLabel, steps, l
               cursor: 'pointer',
             }}
           >
-            提出新想法
+            补充或修改要求
+          </button>
+        )}
+        {onStopGeneration && (
+          <button
+            type="button"
+            data-ai-id="progress-stop-button"
+            onClick={onStopGeneration}
+            title="停止后：已确认的需求与草图会保留，之前已交付的版本不受影响；这一轮没做完的部分不作为交付成果"
+            style={{
+              height: 30,
+              padding: 0,
+              fontSize: 'var(--font-size-xs)',
+              fontWeight: 600,
+              color: 'var(--color-danger)',
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            停止本轮制作
           </button>
         )}
       </div>

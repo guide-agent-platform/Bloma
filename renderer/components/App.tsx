@@ -452,9 +452,22 @@ const AppRoutes: React.FC = () => {
     })
     // cancelled:false 说明没有可停止的运行（已结束/已被其他路径清掉），不写成功提示
     if (result.ok && result.data.cancelled) {
+      // Phase 7 U2 I4（2026-09-10）：停止≠删除——承接话术三栏（已确认/已保存/尚未
+      // 完成）+ 后果如实（本轮未验证完成的内容不作为交付；上一交付版本不受影响）。
+      // T1 reconcileInterruptedProject 在重启时对质量门中断另有承接，此处是运行中
+      // 即时停止的呈现层（实施稿定性：呈现层重构，直接上）。
       appendMessageToSession(sessionId, {
         role: 'system',
-        content: [{ type: 'text', text: '已停止生成。当前已生成的内容会保留，你可以继续补充或调整。' }],
+        content: [{
+          type: 'text',
+          text: [
+            '已停止本轮制作。你的成果都在：',
+            '· 已确认：需求描述与已确认的草图/PRD 保留不变',
+            '· 已保存：之前已交付的版本不受影响，可随时回看',
+            '· 尚未完成：这一轮正在制作的内容没有完成验证，还不能当作可交付的应用',
+            '接下来可以：直接发消息继续制作（会重新开始这一轮的未完成部分）；或先调整需求再告诉我；也可以在版本记录里查看已保存的成果。',
+          ].join('\n'),
+        }],
         timestamp: Date.now(),
       })
     }
