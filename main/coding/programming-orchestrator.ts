@@ -42,7 +42,7 @@ import { recordDecision } from '../decision-log'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from '../recovery-service'
 import { readPrimaryIntent, recordSessionActivity } from '../session-service'
 import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, preflightEnabled, narrationEventsEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../agent-loop'
-import { deliveryStatusEnabled, recordDeliveryStatus, buildDeliveryPresentation, renderCircuitFailureNote, renderDeliveryBody } from './delivery-status'
+import { deliveryStatusEnabled, recordDeliveryStatus, buildDeliveryPresentation, renderCircuitFailureNote, renderDeliveryBody, featureIdFromScenario } from './delivery-status'
 import { isDegenerateText } from './output-integrity'
 import { checkApiContract } from './api-contract'
 import { buildAgentTools } from '../agent-tools'
@@ -94,6 +94,78 @@ const BLOCKED_DECISION_QUESTIONS: { id: BlockedDecision; label: string; descript
   { id: 'accept', label: '接受现状', description: '保留当前 MVP 先看看' },
   { id: 'explain', label: '补充说明', description: '告诉向导哪里不对' },
 ]
+
+/** Phase 7 U2 H5/H6（2026-09-10，E1 咨询）：决策卡条件化开关——BLOMA_DECISION_CONDITIONAL
+ * 缺省 off=字节级现状（固定三选项）。on 时让渡卡按失败原因条件化动作与推荐主按钮，
+ * accept 语义改「先使用已可用的部分」（不改 delivery_status、问题清单不清除持续可见）。
+ * H5（卡文案与推荐）与 H6（先用语义）同卡一体改造其用一开关，拆开会出现
+ * 「条件化卡+旧接受现状文案」的怪态（偏差已登记开关矩阵 §17）。 */
+export function decisionConditionalEnabled(): boolean {
+  const raw = (process.env.BLOMA_DECISION_CONDITIONAL ?? '').trim().toLowerCase()
+  return raw === '1' || raw === 'on' || raw === 'true'
+}
+
+/** 让渡卡条件化上下文（H5）：失败原因与可用部分判据（复用 delivery-status 归属口径）。 */
+export interface BlockedDecisionContext {
+  /** 失败场景清单（test_repair 路径；security/judge 可缺省） */
+  failures?: Array<{ scenario: string; reason?: string }>
+  /** 必交功能项集（主按钮推荐判据：有干净必交任务=存在可隔离可用部分） */
+  mustDeliverFeatureIds?: string[]
+  /** 失败类别（话术分档） */
+  reason: 'test' | 'security' | 'judge'
+}
+
+/**
+ * 条件化让渡卡选项（H5）：按失败原因生成动作体系——①修好「X」后再交付（有明确
+ * 下一步）②先使用已可用的部分（存在可隔离可用部分；H6 改名，不改 delivery_status
+ * 不清问题清单）③补充说明/调整需求（缺的是用户信息，不送回整个向导）。主按钮
+ * 按失败原因推荐+一句理由（推荐≠自动执行）；回传 id 仍为 continue/accept/explain
+ * 三值（resume 闭环零改动）。export：供单测直测（条件化承重）。 */
+export function buildBlockedQuestions(context: BlockedDecisionContext | undefined): { id: BlockedDecision; label: string; description: string }[] {
+  if (!context || !decisionConditionalEnabled()) return BLOCKED_DECISION_QUESTIONS
+  const failedIds = new Set(
+    (context.failures ?? []).map((f) => featureIdFromScenario(f.scenario)).filter((id): id is string => Boolean(id)),
+  )
+  const mustSet = new Set(context.mustDeliverFeatureIds ?? [])
+  const hasUsablePart = [...mustSet].some((id) => !failedIds.has(id))
+  const topFailedFeature = (context.failures ?? []).find((f) => {
+    const id = featureIdFromScenario(f.scenario)
+    return id && mustSet.has(id)
+  })
+  const topLabel = topFailedFeature
+    ? (featureIdFromScenario(topFailedFeature.scenario) ?? '')
+    : ''
+  const questions: { id: BlockedDecision; label: string; description: string }[] = []
+  if (context.reason === 'test') {
+    questions.push(
+      topLabel
+        ? { id: 'continue', label: `先修好${topLabel}再交付`, description: '推荐：修复目标明确，优先再修一次' }
+        : { id: 'continue', label: '继续修复', description: '推荐：再试一次修复' },
+    )
+    questions.push(
+      hasUsablePart
+        ? { id: 'accept', label: '先使用已可用的部分', description: '未通过的部分会如实登记（不算完成），随时可以再修' }
+        : { id: 'accept', label: '先保留这一版', description: '核心任务未通过，保留仅供查看，不建议当作可用版本' },
+    )
+  } else if (context.reason === 'security') {
+    questions.push(
+      { id: 'continue', label: '继续修复安全问题', description: '推荐：安全风险修好再用更稳妥' },
+      { id: 'accept', label: '先保留这一版（含安全风险）', description: '风险仍登记在案；不建议对外使用' },
+    )
+  } else {
+    // judge_return：方向性问题优先听用户说（不盲推重修）
+    questions.push(
+      { id: 'explain', label: '告诉我怎么调整', description: '推荐：审查意见需要你确认方向' },
+      { id: 'continue', label: '再试一次', description: '按当前要求重试' },
+      { id: 'accept', label: '先使用已可用的部分', description: '接受当前版本，问题保持登记' },
+    )
+  }
+  // explain 兜底追加（test/security 分支缺时补齐第三出口）
+  if (!questions.some((q) => q.id === 'explain')) {
+    questions.push({ id: 'explain', label: '补充说明', description: '告诉向导哪里不对' })
+  }
+  return questions
+}
 
 export interface SketchTaskInput {
   request_id: string
@@ -1778,7 +1850,7 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
     // 同样不再重修。首败即熔断让渡（U7：把具体退回原因带给让渡卡片）。
     const repairable = verdict.repairable === true && input.repairInternalized !== true
     if (!repairable || returns > limit) {
-      publishBlockedDecision(input, 'judge_return', verdict.user_visible_summary)
+      publishBlockedDecision(input, 'judge_return', verdict.user_visible_summary, { reason: 'judge' })
       return { outcome: 'blocked', verdict }
     }
 
@@ -2307,7 +2379,11 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
         testResult.failure_summary.length > 0
           ? `测试未通过：${testResult.failure_summary.map((f) => f.scenario).join('、')}`
           : '自动修复多次后测试仍未通过'
-      publishBlockedDecision(input, 'test_repair', failureTitle)
+      publishBlockedDecision(input, 'test_repair', failureTitle, {
+        reason: 'test',
+        failures: testResult.failure_summary,
+        mustDeliverFeatureIds: mustDeliverFeatureIdsOf(input.project_id),
+      })
       return { verdict: 'blocked', test_result: testResult }
     }
     // 修复收敛：testResult 已更新为重验结果，继续正常链
@@ -2333,7 +2409,7 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
     // Phase 7 U1 H1：安全未过=不可隔离风险→unavailable（GWT 全过也不粉饰）。
     recordPostTestingDeliveryStatus(input.project_id, testResult, false, input.loop)
     if (outcome.rolled_back) throw new CircuitBreakSettledError()
-    publishBlockedDecision(input, 'security_repair', '检测到的安全隐患反复修不好，需要你来定夺')
+    publishBlockedDecision(input, 'security_repair', '检测到的安全隐患反复修不好，需要你来定夺', { reason: 'security' })
     return { verdict: 'blocked', test_result: testResult }
   }
 
@@ -3054,6 +3130,7 @@ function publishBlockedDecision(
   input: { session_id: string; project_id: string },
   action: BlockedAction,
   title?: string,
+  context?: BlockedDecisionContext,
 ): void {
   updateProject(input.project_id, { current_stage: 'blocked_for_user_decision', blocked_action: action })
   publish(input, 'stage_changed', { stage: 'blocked_for_user_decision' })
@@ -3062,7 +3139,9 @@ function publishBlockedDecision(
     stage: 'blocked_for_user_decision',
     // U7：让渡卡片带上具体偏差描述（如「缺了按月统计功能」），落到 title 字段由渲染端展示
     title,
-    questions: BLOCKED_DECISION_QUESTIONS,
+    // Phase 7 U2 H5：条件化选项（BLOMA_DECISION_CONDITIONAL on 时按失败原因推荐主按钮；
+    // off = BLOCKED_DECISION_QUESTIONS 字节级现状）
+    questions: buildBlockedQuestions(context),
   })
   // 终态补发（2026-08-29 线上卡死案例 eb900c57）：让渡路径此前只发 stage_changed +
   // user_decision_required，渲染端 running 只有 completed/error 能复位 → UI 永久停在
@@ -3157,7 +3236,22 @@ export async function resumeBlockedFlow(
       judge_return_count: 0,
     })
     publish(input, 'stage_changed', { stage: 'ready' })
-    publishCompletionMessage(input, '好的，已保留当前版本。你可以点右侧预览区继续试用，有需要调整的随时告诉我。')
+    // Phase 7 U2 H6（BLOMA_DECISION_CONDITIONAL on）：「先使用已可用的部分」语义——
+    // 不改 delivery_status（终验链路规则字段）、不清除问题清单；accept 话术如实带上
+    // 已知未通过项（持续可见，用户接受版本也不能把未通过变成已通过）。
+    // off = 原话术字节级。
+    if (decisionConditionalEnabled()) {
+      const testReport = readTestReport(input.project_id)
+      const knownIssues = testReport && testReport.failed_count > 0
+        ? `注意：这一版仍有 ${testReport.failed_count} 项检查未通过（${testReport.failure_summary.slice(0, 3).map((f) => f.scenario).join('；')}${testReport.failed_count > 3 ? ' 等' : ''}），这些不算完成；已通过的功能可以正常使用。随时可以说「先修好没做好的」。`
+        : ''
+      publishCompletionMessage(
+        input,
+        `好的，先使用已可用的部分。${knownIssues || '你可以点右侧预览区继续试用，有需要调整的随时告诉我。'}`,
+      )
+    } else {
+      publishCompletionMessage(input, '好的，已保留当前版本。你可以点右侧预览区继续试用，有需要调整的随时告诉我。')
+    }
     return
   }
 
