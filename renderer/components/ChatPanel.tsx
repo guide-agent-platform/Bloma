@@ -20,8 +20,9 @@ import {
   workflowStageAtom,
   sessionUsageFamily,
   delegationsFamily,
+  steerStatusFamily,
 } from './atoms'
-import type { AgentEvent, AgentMessage, AgentStreamState, PastedImageRef, ProjectMode } from './atoms'
+import type { AgentEvent, AgentMessage, AgentStreamState, PastedImageRef, ProjectMode, SteerStatusChip } from './atoms'
 import { collapseRepetitiveText } from '../stream-collapse'
 import { hasUsableChannelsAtom, chatInputDraftAtom } from './atoms-sprint2'
 import { extractPastedImages, extFromMime, toBase64DataUrl } from '../lib/paste-extract'
@@ -528,6 +529,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           </>
         )}
 
+        {activeSessionId && <SteerStatusBar sessionId={activeSessionId} onStopGeneration={onStopGeneration} />}
+
         <div ref={messagesEndRef} />
       </div>
 
@@ -854,6 +857,153 @@ const HistoryMessages: React.FC<{
   })
   flush()
   return <>{nodes}</>
+}
+
+/* =========================================================================
+   SteerStatusBar（I3 转向生效确认链，P7-7，2026-09-11）
+   ========================================================================= */
+
+interface SteerStatusBarProps {
+  sessionId: string
+  /** 高档「停止本轮制作」回调（App 层接 agent:stop；复用 I4 停止承接话术） */
+  onStopGeneration?: () => void
+}
+
+/** 状态文案与配色（「这轮会做吗」的答案——与主进程账本状态一致，不由对话层宣布）。 */
+const STEER_STATUS_VIEW: Record<SteerStatusChip['status'], { label: string; dot: string; bg: string }> = {
+  received: { label: '已收到·将纳入本轮', dot: '#3b82f6', bg: '#eff6ff' },
+  pending_impact: { label: '待你确认', dot: '#f59e0b', bg: '#fffbeb' },
+  merged_this_run: { label: '已纳入本轮', dot: '#10b981', bg: '#ecfdf5' },
+  deferred_next_run: { label: '留待下一轮', dot: '#94a3b8', bg: '#f8fafc' },
+  rejected: { label: '未采用', dot: '#9ca3af', bg: '#f3f4f6' },
+}
+
+const steerSummary = (content: string): string => (content.length > 40 ? `${content.slice(0, 40)}…` : content)
+
+const SteerActionButton: React.FC<{ label: string; primary?: boolean; disabled?: boolean; onClick: () => void; 'data-ai-id'?: string }> = ({ label, primary, disabled, onClick, ...rest }) => (
+  <button
+    type="button"
+    {...rest}
+    disabled={disabled}
+    onClick={onClick}
+    style={{
+      padding: '4px 10px',
+      fontSize: 'var(--font-size-xs)',
+      borderRadius: 'var(--radius-sm)',
+      border: '1px solid ' + (primary ? 'var(--color-quick, #7c3aed)' : 'var(--color-border)'),
+      background: primary ? 'var(--color-quick, #7c3aed)' : 'var(--white)',
+      color: primary ? '#fff' : 'var(--color-text)',
+      cursor: disabled ? 'default' : 'pointer',
+      opacity: disabled ? 0.6 : 1,
+      whiteSpace: 'nowrap',
+    }}
+  >
+    {label}
+  </button>
+)
+
+/** 聊天流内嵌轻量状态条：用户生成中补充的每条 steer 一行，随主进程状态机如实翻转。
+ *  中档三选[本轮就改/本轮完成后再改/不改了]；高档 v0 建议「停止本轮」承接（§8 拍板），
+ *  保留「仍要本轮注入」降档出口。仅 BLOMA_STEER_CONFIRM=on 时主进程发 steer_status
+ *  事件驱动本组件——off 时 chips 恒空零渲染（字节级现状）。 */
+const SteerStatusBar: React.FC<SteerStatusBarProps> = ({ sessionId, onStopGeneration }) => {
+  const chips = useAtomValue(steerStatusFamily(sessionId))
+  const [resolving, setResolving] = React.useState<string | null>(null)
+
+  // 刷新/重挂后回填：主进程账本是权威答案源（steer_status 事件只推增量），
+  // 挂载时查询一次恢复状态条（同 steer_id 以主进程状态覆盖，upsert 语义在 set 内保证）。
+  React.useEffect(() => {
+    const api = window.electronAPI?.agent
+    if (!api?.steerQuery) return
+    void api.steerQuery({ request_id: crypto.randomUUID(), session_id: sessionId }).then((result) => {
+      if (!result?.ok || result.data.items.length === 0) return
+      const store = window.__jotai_store__
+      if (!store) return
+      store.set(steerStatusFamily(sessionId), (previous) => {
+        const byId = new Map(previous.map((chip) => [chip.steerId, chip]))
+        for (const item of result.data.items) {
+          const existing = byId.get(item.steer_id)
+          // 主进程状态为准回填；本地更新的 updatedAt 不回退
+          if (!existing || existing.updatedAt <= item.updated_at) {
+            byId.set(item.steer_id, {
+              steerId: item.steer_id,
+              content: item.content,
+              impact: item.impact,
+              status: item.status,
+              updatedAt: item.updated_at,
+            })
+          }
+        }
+        return [...byId.values()].sort((a, b) => a.updatedAt - b.updatedAt)
+      })
+    })
+  }, [sessionId])
+
+  const resolve = React.useCallback((steerId: string, action: 'inject_now' | 'defer' | 'reject') => {
+    const api = window.electronAPI?.agent
+    if (!api?.steerResolve) return
+    setResolving(steerId)
+    void api.steerResolve({ request_id: crypto.randomUUID(), session_id: sessionId, steer_id: steerId, action })
+      .then(() => setResolving(null))
+      .catch(() => setResolving(null)) // 状态推进由 steer_status 事件驱动；失败静默不重试（按钮可重点）
+  }, [sessionId])
+
+  if (chips.length === 0) return null
+  return (
+    <div
+      data-ai-id="steer-status-bar"
+      role="status"
+      style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', flexShrink: 0 }}
+    >
+      {chips.map((chip) => {
+        const view = STEER_STATUS_VIEW[chip.status] ?? STEER_STATUS_VIEW.rejected
+        const pending = chip.status === 'pending_impact'
+        const busy = resolving === chip.steerId
+        return (
+          <div
+            key={chip.steerId}
+            data-ai-id="steer-status-chip"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--space-2)',
+              padding: 'var(--space-2) var(--space-3)',
+              borderRadius: 'var(--radius-sm)',
+              background: view.bg,
+              border: '1px solid var(--color-border)',
+              fontSize: 'var(--font-size-xs)',
+              color: 'var(--color-text)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: view.dot, flexShrink: 0 }} />
+              <span style={{ fontWeight: 600 }}>{view.label}</span>
+              <span style={{ color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {steerSummary(chip.content)}
+              </span>
+            </div>
+            {pending && chip.impact === 'medium' && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                <span style={{ color: 'var(--color-text-muted)' }}>这条补充会改动功能或流程，这轮要怎么处理？</span>
+                <SteerActionButton data-ai-id="steer-inject-now" primary label={busy ? '处理中…' : '本轮就改'} disabled={busy} onClick={() => resolve(chip.steerId, 'inject_now')} />
+                <SteerActionButton data-ai-id="steer-defer" label="本轮完成后再改" disabled={busy} onClick={() => resolve(chip.steerId, 'defer')} />
+                <SteerActionButton data-ai-id="steer-reject" label="不改了" disabled={busy} onClick={() => resolve(chip.steerId, 'reject')} />
+              </div>
+            )}
+            {pending && chip.impact === 'high' && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                <span style={{ color: 'var(--color-text-muted)' }}>这个修改涉及核心目标或数据结构，建议停止本轮后按新需求重新安排。</span>
+                {onStopGeneration && (
+                  <SteerActionButton data-ai-id="steer-stop-run" primary label="停止本轮制作" onClick={onStopGeneration} />
+                )}
+                <SteerActionButton data-ai-id="steer-force-inject" label={busy ? '处理中…' : '仍要本轮注入'} disabled={busy} onClick={() => resolve(chip.steerId, 'inject_now')} />
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 /* =========================================================================

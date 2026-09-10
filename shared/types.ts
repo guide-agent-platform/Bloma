@@ -18,6 +18,10 @@ export const IPC_CHANNELS = {
   AGENT_SEND_MESSAGE: 'agent:send-message',
   /** 运行中转向（P0-1 steer，2026-09-08）：活跃主 loop 期间输入框改道本通道，批间注入 */
   AGENT_STEER_MESSAGE: 'agent:steer-message',
+  /** I3 转向生效确认链（P7-7，2026-09-11）：中/高档影响卡三选回执 */
+  AGENT_STEER_RESOLVE: 'agent:steer-resolve',
+  /** I3：会话 steer 状态查询（渲染端刷新后状态条恢复） */
+  AGENT_STEER_QUERY: 'agent:steer-query',
   /** 会话 fork（P0-2，2026-09-08）：从任意 user 消息重开，复制前缀到新会话 */
   AGENT_FORK_SESSION: 'agent:fork-session',
   PASTED_IMAGE_SAVE: 'pasted-image:save',
@@ -689,6 +693,16 @@ export interface AgentSendMessageResult {
  */
 export type AgentSteerMessageInput = AgentSendMessageInput
 
+/** I3 转向生效确认链（P7-7，2026-09-11，实施稿 §3）：steer 影响档位。
+ * v0 确定性关键词分级，**宁低勿高**——低档=简短确认即注入（与现状行为一致，误判代价最小）；
+ * 中档=新功能/改流程（影响卡三选）；高档=核心目标/数据模型转向（v0 建议「停止本轮」承接）。 */
+export type SteerImpact = 'low' | 'medium' | 'high'
+
+/** I3 状态机：received（已入队待注入）→ pending_impact（中/高档待用户确认）
+ * → merged_this_run（注入完成事件推进——不由对话层单方面宣布）
+ * | deferred_next_run（留待下一轮，形成可见待办）| rejected（未采用：用户选不改了/本轮停止）。 */
+export type SteerStatus = 'received' | 'pending_impact' | 'merged_this_run' | 'deferred_next_run' | 'rejected'
+
 export interface AgentSteerMessageResult {
   session_id: string
   /** true = 已入 steer 队列，当前主 loop 下一批间注入；回执气泡由 steer_injected 事件承担 */
@@ -697,6 +711,45 @@ export interface AgentSteerMessageResult {
   pending?: number
   /** steered=false：主进程已回退 runAgent，本字段为 send-message 语义结果（含 queued） */
   fallback?: AgentSendMessageResult
+  /** I3（仅 BLOMA_STEER_CONFIRM=on 时返回）：本次 steer 状态与档位。后续状态由
+   *  steer_status 事件驱动（低档 received→注入后 merged；中/高档 pending_impact 等三选）。 */
+  status?: SteerStatus
+  impact?: SteerImpact
+  steer_id?: string
+}
+
+/** I3：影响卡三选回执（中档 [本轮就改/本轮完成后再改/不改了]；高档 [仍要本轮注入] 同通道）。 */
+export interface AgentSteerResolveInput extends RequestEnvelope {
+  session_id: string
+  steer_id: string
+  /** inject_now=本轮就改（入队注入）；defer=本轮完成后再改（可见待办）；reject=不改了 */
+  action: 'inject_now' | 'defer' | 'reject'
+}
+
+export interface AgentSteerResolveResult {
+  session_id: string
+  steer_id: string
+  status: SteerStatus
+}
+
+/** I3：会话 steer 状态查询（渲染端刷新后恢复状态条）。 */
+export interface AgentSteerQueryInput extends RequestEnvelope {
+  session_id: string
+}
+
+/** 主进程账本条目镜像（steer-queue.ts SteerLedgerEntry 的传输形态）。 */
+export interface SteerStatusItem {
+  steer_id: string
+  content: string
+  impact: SteerImpact
+  status: SteerStatus
+  /** 状态最后推进时间（epoch ms） */
+  updated_at: number
+}
+
+export interface AgentSteerQueryResult {
+  session_id: string
+  items: SteerStatusItem[]
 }
 
 /**
@@ -890,8 +943,13 @@ export interface AgentEvent {
     /** 排队消息派发失败（onDropped 气泡，r79）：payload.queue_message_id / reason；渲染端红泡告知 */
     | 'queue_dropped'
     /** 运行中转向已注入（P0-1 steer，2026-09-08）：payload 含 content（原文）/ message（包裹后全文）
-     *  / at_turn（注入所在轮）/ remaining（队列余量）；渲染端回执气泡对齐 queue_dropped 模式 */
+     *  / at_turn（注入所在轮）/ remaining（队列余量）；渲染端回执气泡对齐 queue_dropped 模式。
+     *  I3（P7-7，仅 BLOMA_STEER_CONFIRM=on）：payload 追加 steer_id / status='merged_this_run'
+     *  ——注入完成是状态推进到 merged 的唯一事实源（off 时 payload 字节不变）。 */
     | 'steer_injected'
+    /** I3 转向生效确认链（P7-7，仅 on 时发）：steer 状态每次变化推送；payload 含
+     *  steer_id / content / impact / status / at。渲染端聊天流内嵌轻量状态条由此驱动。 */
+    | 'steer_status'
     /** 会话用量汇总（usage-guard 渲染层 2026-08-28）：loop 结束发布，渲染端显示透明条 */
     | 'usage_summary'
   payload: Record<string, unknown>
@@ -1331,6 +1389,10 @@ export type ElectronAPI = {
     sendMessage(input: AgentSendMessageInput): Promise<ApiResult<AgentSendMessageResult>>
     /** P0-1 steer：活跃主 loop 期间输入框改道；无活跃 loop 时主进程回退 send-message 语义 */
     steerMessage(input: AgentSteerMessageInput): Promise<ApiResult<AgentSteerMessageResult>>
+    /** I3 转向确认链：中/高档影响卡三选回执（inject_now/defer/reject） */
+    steerResolve(input: AgentSteerResolveInput): Promise<ApiResult<AgentSteerResolveResult>>
+    /** I3：会话 steer 状态查询（渲染端刷新后状态条恢复） */
+    steerQuery(input: AgentSteerQueryInput): Promise<ApiResult<AgentSteerQueryResult>>
     /** P0-2 fork：从任意 user 消息重开（复制前缀到新会话），返回新会话 id */
     forkSession(input: AgentForkSessionInput): Promise<ApiResult<AgentForkSessionResult>>
     cancel(input: AgentCancelInput): Promise<ApiResult<AgentCancelResult>>

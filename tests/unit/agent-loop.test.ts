@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { runAgentLoop, TOOL_WINDOW_ROUNDS, windowMessages, keepRecentTurns, estimateBlocksText, renderCheckpointRecoveryHeader, type AgentLoopInput, type AgentLoopTool, type AgentLoopTurnInfo, type AgentLoopCompactionInfo, type LoopCheckpointSnapshot, type ToolContext, type ToolOutcome } from '../../main/agent-loop'
 import { estimateTokenCount } from '../../main/usage-guard'
-import { drainSteerQueue, enqueueSteer, pendingSteerCount, resetSteerQueuesForTests, STEER_WRAP_PREFIX, wrapSteerContent } from '../../main/steer-queue'
+import { drainSteerQueue, enqueueSteer, getSteerStatuses, pendingSteerCount, registerSteer, resetSteerQueuesForTests, STEER_WRAP_PREFIX, wrapSteerContent } from '../../main/steer-queue'
 import type { AgentEvent } from '../../shared/types'
 import type { SDKMessage } from '../../shared/types'
 import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
@@ -1454,6 +1454,115 @@ describe('steer 运行中转向（P0-1，2026-09-08 pi 差距方案）', () => {
     expect(handoffInputs.length).toBeGreaterThan(0)
     expect(JSON.stringify(handoffInputs[0])).toContain('压缩前补充的方向')
     expect(pendingSteerCount('session-steer-compact')).toBe(0)
+  })
+})
+
+describe('I3 转向生效确认链（P7-7）：注入点与账本联动（BLOMA_STEER_CONFIRM）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalConfirm = process.env.BLOMA_STEER_CONFIRM
+
+  /** 注册式工具：execute 时走 registerSteer（与生产 IPC 入口同链：低档直接入队） */
+  function registeredSteerTool(text: string, queueId: string): AgentLoopTool {
+    return {
+      name: 'steer_registered',
+      description: '执行时登记一条 steer（I3 链）',
+      input_schema: { type: 'object', properties: {} },
+      execute: async (_input, ctx) => {
+        registerSteer(ctx.sessionId, { queueMessageId: queueId, content: text, enqueuedAt: Date.now() })
+        return { output: 'ok' }
+      },
+    }
+  }
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-i3-'))
+    resetSteerQueuesForTests()
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+    if (originalConfirm === undefined) delete process.env.BLOMA_STEER_CONFIRM
+    else process.env.BLOMA_STEER_CONFIRM = originalConfirm
+    resetSteerQueuesForTests()
+  })
+
+  it('on：低档 registerSteer → 批间注入 → steer_injected 带 steer_id/status 且账本推进 merged', async () => {
+    process.env.BLOMA_STEER_CONFIRM = '1'
+    const steerTool = registeredSteerTool('把按钮改成蓝色', 'steer-low-1')
+    const { query } = scriptedQuery([
+      [toolUseMessage('t1', 'steer_registered')],
+      [textMessage('完成')],
+    ])
+    const events: Array<{ type: AgentEvent['type']; payload: Record<string, unknown> }> = []
+    const result = await runAgentLoop(baseInput({
+      query,
+      tools: [steerTool],
+      maxTurns: 2,
+      sessionId: 'session-i3-on',
+      publish: (type, payload) => events.push({ type, payload }),
+    }))
+    expect(result.status).toBe('completed')
+    const injected = events.filter((event) => event.type === 'steer_injected')
+    expect(injected).toHaveLength(1)
+    expect(injected[0]!.payload).toMatchObject({
+      content: '把按钮改成蓝色',
+      steer_id: 'steer-low-1',
+      status: 'merged_this_run',
+    })
+    // 账本同步推进（getSteerStatuses 是「这轮会做吗」权威答案源）
+    const statuses = getSteerStatuses('session-i3-on')
+    expect(statuses).toHaveLength(1)
+    expect(statuses[0]).toMatchObject({ steerId: 'steer-low-1', status: 'merged_this_run', impact: 'low' })
+  })
+
+  it('off：enqueueSteer 无 steerId → steer_injected payload 字节级无新键、账本恒空', async () => {
+    delete process.env.BLOMA_STEER_CONFIRM
+    const steerTool: AgentLoopTool = {
+      name: 'steer_during',
+      description: '执行时入队一条 steer',
+      input_schema: { type: 'object', properties: {} },
+      execute: async (_input, ctx) => {
+        enqueueSteer(ctx.sessionId, { queueMessageId: `steer-${Date.now()}`, content: '把按钮改成蓝色', enqueuedAt: Date.now() })
+        return { output: 'ok' }
+      },
+    }
+    const { query } = scriptedQuery([
+      [toolUseMessage('t1', 'steer_during')],
+      [textMessage('完成')],
+    ])
+    const events: Array<{ type: AgentEvent['type']; payload: Record<string, unknown> }> = []
+    await runAgentLoop(baseInput({
+      query,
+      tools: [steerTool],
+      maxTurns: 2,
+      sessionId: 'session-i3-off',
+      publish: (type, payload) => events.push({ type, payload }),
+    }))
+    const injected = events.filter((event) => event.type === 'steer_injected')
+    expect(injected).toHaveLength(1)
+    expect(injected[0]!.payload).not.toHaveProperty('steer_id')
+    expect(injected[0]!.payload).not.toHaveProperty('status')
+    expect(getSteerStatuses('session-i3-off')).toEqual([])
+  })
+
+  it('on：loop 自然收尾时未及注入的残余 → 账本如实转留待下一轮（不取 merged）', async () => {
+    process.env.BLOMA_STEER_CONFIRM = '1'
+    // 终轮模型调用期间入队（模型正在流式输出时 IPC 到达）：批间注入点已过 → finally 残余路径
+    let call = 0
+    const combined: SDKQuery = async function* () {
+      call += 1
+      if (call === 1) {
+        yield toolUseMessage('t1', 'echo')
+        yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+      } else {
+        registerSteer('session-i3-tail', { queueMessageId: 'steer-late-1', content: '收尾前到达的补充', enqueuedAt: Date.now() })
+        yield textMessage('做完')
+        yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+      }
+    }
+    await runAgentLoop(baseInput({ query: combined, tools: [tool('echo', () => ({ output: 'ok' }))], maxTurns: 2, sessionId: 'session-i3-tail' }))
+    // 残余内容落 JSONL 保真（现状不变）+ 账本状态留待下一轮（非 merged——本轮没做）
+    expect(JSON.stringify(readSessionJsonl('session-i3-tail'))).toContain(wrapSteerContent('收尾前到达的补充'))
+    expect(getSteerStatuses('session-i3-tail')[0]?.status).toBe('deferred_next_run')
   })
 })
 

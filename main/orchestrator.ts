@@ -18,7 +18,7 @@ import { appendJsonLine } from '../storage/json-store'
 import { appendSessionMessage } from './session-tree'
 import { buildThinkingFragment, type ThinkingLevel } from '../shared/reasoning-profile'
 import { SessionMessageQueue, type QueueEntry } from './message-queue'
-import { clearSteerQueue } from './steer-queue'
+import { clearSteerQueue, rejectPendingSteer, steerConfirmEnabled, type SteerLedgerEntry } from './steer-queue'
 import { emitAgentEvent } from './agent-event-bus'
 import { hydrateMessagesImageBlocks } from './pasted-images'
 export { buildSdkEnv } from './channel-manager'
@@ -1101,13 +1101,37 @@ export async function cancelAgent(input: AgentCancelInput): Promise<AgentCancelR
     sessionMessageQueue.clear(target.sessionId)
     sessionMessageQueue.onRunComplete(target.sessionId, undefined, true)
     // P0-1 steer（2026-09-08）：停止即清空待注入队列——「停止后被注入」绝不允许
-    //（注入语义以用户当前运行的 loop 存活为前提；runAgentLoop finally 另兜竞态窗口）
+    //（注入语义以用户当前运行的 loop 存活为前提；runAgentLoop finally 另兜竞态窗口）。
+    // I3（P7-7，on 时）：清空前把未注入条目标 rejected——状态条如实翻「未采用·本轮
+    //  已停止」，用户提的修改不再静默消失（off 时零变化）。
+    if (steerConfirmEnabled()) rejectPendingSteer(target.sessionId)
     clearSteerQueue(target.sessionId)
   }
   sessionMessageQueue.onRunComplete(input.session_id, undefined, true)
   sessionMessageQueue.clear(input.session_id)
+  if (steerConfirmEnabled()) rejectPendingSteer(input.session_id)
   clearSteerQueue(input.session_id)
   return { cancelled: true, session_id: input.session_id }
+}
+
+/** I3 转向生效确认链（P7-7）：主进程侧发布 steer_status 事件（steer-queue 状态机
+ *  每次推进时经 setSteerStatusListener 接入ipc层→此处→streamPublisher→渲染端）。
+ *  事件形态对齐 makeEvent（steer-queue 不 import 本模块，注入式解耦）。 */
+export function publishSteerStatusEvent(entry: SteerLedgerEntry): void {
+  streamPublisher({
+    event_id: randomUUID(),
+    session_id: entry.sessionId,
+    project_id: entry.projectId,
+    type: 'steer_status',
+    payload: {
+      steer_id: entry.steerId,
+      content: entry.content,
+      impact: entry.impact,
+      status: entry.status,
+      at: entry.updatedAt,
+    },
+    created_at: new Date().toISOString(),
+  })
 }
 
 /** 用户主动取消的判定：中止信号抛出的 AbortError 或查询入口的 AGENT_CANCELLED。 */

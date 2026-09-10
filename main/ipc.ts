@@ -8,6 +8,8 @@ import type {
   AgentListSessionsInput,
   AgentLoadMessagesInput,
   AgentSendMessageInput,
+  AgentSteerQueryInput,
+  AgentSteerResolveInput,
   AnalyticsTrackInput,
   CategoryRoutingUpdateEnvelope,
   CategoryRoutingRoleUpdateEnvelope,
@@ -53,8 +55,8 @@ import type {
 } from '../shared/types'
 import { IPC_CHANNELS } from '../shared/types'
 import { fail, ok } from './api-result'
-import { cancelAgent, getSdkQuery, hasForegroundRun, isSessionActive, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from './orchestrator'
-import { enqueueSteer, pendingSteerCount } from './steer-queue'
+import { cancelAgent, getSdkQuery, hasForegroundRun, isSessionActive, publishSteerStatusEvent, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from './orchestrator'
+import { enqueueSteer, getSteerStatuses, pendingSteerCount, registerSteer, resolveSteer, setSteerStatusListener, steerConfirmEnabled } from './steer-queue'
 import { savePastedImage } from './pasted-images'
 import { collectDomContext, scrollPreview } from './dom-context'
 import { runAgentLoopPostTesting, runIterationTask, runMvpTask, setForegroundRunChecker, setProgrammingEventPublisher } from './programming-orchestrator'
@@ -116,6 +118,10 @@ function errorCodeFrom(error: unknown): string {
 export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow): void {
   // P0-2 fork：活跃会话检查注入（session-service 不反向 import orchestrator——防循环依赖）
   setSessionActiveChecker(isSessionActive)
+  // I3 转向生效确认链（P7-7）：steer-queue 状态机推进 → orchestrator 发布口 →
+  // steer_status 事件→渲染端状态条。listener 引用 orchestrator 的 publishSteerStatusEvent
+  //（其内部走 streamPublisher，接线时序与本处 setAgentStreamPublisher 之后自然生效）。
+  setSteerStatusListener((entry) => publishSteerStatusEvent(entry))
   setAgentStreamPublisher((event) => {
     mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, event)
     // T6 后台执行通知：completed/error/user_decision_required → 系统通知（无后端注入时内部 no-op）
@@ -154,15 +160,67 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     return safeInvoke(extractRequestId(payload), async () => {
       const input = validateAgentSend(payload)
       // 带图消息不做 steer：注入只承载文本，图片走既有 send-message 链路（整体入队/开跑）
-      if ((input.images?.length ?? 0) === 0 && enqueueSteer(input.session_id, {
-        queueMessageId: input.request_id,
-        content: input.content,
-        enqueuedAt: Date.now(),
-      })) {
-        return { session_id: input.session_id, steered: true, pending: pendingSteerCount(input.session_id) }
+      // I3 转向生效确认链（P7-7，BLOMA_STEER_CONFIRM on 时）：入队前先登记账本并按档位
+      //  分流——低档 received 直接入队（简短确认即注入）；中/高档 pending_impact 不入队，
+      //  影响卡三选回执走 agent:steer-resolve。off 时与 P0-1 字节级一致。
+      if ((input.images?.length ?? 0) === 0) {
+        if (steerConfirmEnabled()) {
+          const registered = registerSteer(input.session_id, {
+            queueMessageId: input.request_id,
+            content: input.content,
+            enqueuedAt: Date.now(),
+          }, input.project_id)
+          if (registered) {
+            return {
+              session_id: input.session_id,
+              steered: true,
+              pending: pendingSteerCount(input.session_id),
+              status: registered.status,
+              impact: registered.impact,
+              steer_id: registered.steerId,
+            }
+          }
+        } else if (enqueueSteer(input.session_id, {
+          queueMessageId: input.request_id,
+          content: input.content,
+          enqueuedAt: Date.now(),
+        })) {
+          return { session_id: input.session_id, steered: true, pending: pendingSteerCount(input.session_id) }
+        }
       }
       const fallback = await runAgent(input)
       return { session_id: input.session_id, steered: false, fallback }
+    })
+  })
+
+  // I3（P7-7）：影响卡三选回执——inject_now=本轮就改（入队注入）/defer=留待下一轮
+  //（可见待办）/reject=不改了。只对 pending_impact 状态有效，非法回执拒收。
+  ipcMain.handle(IPC_CHANNELS.AGENT_STEER_RESOLVE, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<AgentSteerResolveInput>(payload, ['session_id', 'steer_id', 'action'])
+      if (input.action !== 'inject_now' && input.action !== 'defer' && input.action !== 'reject') {
+        throw new Error('INVALID_STEER_ACTION')
+      }
+      const resolved = resolveSteer(input.session_id, input.steer_id, input.action)
+      if (!resolved) throw new Error('STEER_NOT_PENDING')
+      return { session_id: input.session_id, steer_id: input.steer_id, status: resolved.status }
+    })
+  })
+
+  // I3：会话 steer 状态查询（渲染端刷新后状态条恢复；「这轮会做吗」的权威答案源）
+  ipcMain.handle(IPC_CHANNELS.AGENT_STEER_QUERY, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<AgentSteerQueryInput>(payload, ['session_id'])
+      return {
+        session_id: input.session_id,
+        items: getSteerStatuses(input.session_id).map((entry) => ({
+          steer_id: entry.steerId,
+          content: entry.content,
+          impact: entry.impact,
+          status: entry.status,
+          updated_at: entry.updatedAt,
+        })),
+      }
     })
   })
 

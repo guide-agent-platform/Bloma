@@ -12,6 +12,8 @@ const root = fileURLToPath(new URL('../../..', import.meta.url))
 const expectedChannels = {
   AGENT_SEND_MESSAGE: 'agent:send-message',
   AGENT_STEER_MESSAGE: 'agent:steer-message',
+  AGENT_STEER_RESOLVE: 'agent:steer-resolve',
+  AGENT_STEER_QUERY: 'agent:steer-query',
   AGENT_FORK_SESSION: 'agent:fork-session',
   AGENT_STOP: 'agent:stop',
   AGENT_LIST_SESSIONS: 'agent:list-sessions',

@@ -9,7 +9,7 @@ import { prepareRecallBlock } from '../session-recall'
 import { estimateTokenCount } from '../usage-guard'
 import { windowMessagesWithDigest } from '../compacting-window'
 import { isDegenerateText } from './output-integrity'
-import { drainSteerQueue, markLoopActive, markLoopInactive, pendingSteerCount, wrapSteerContent } from '../steer-queue'
+import { drainSteerQueue, markLoopActive, markLoopInactive, markSteerMerged, pendingSteerCount, settleSteerEntry, steerConfirmEnabled, wrapSteerContent } from '../steer-queue'
 
 /**
  * Agent Loop 执行器（L1，AgentLoop 改造方案 §4.2）。
@@ -703,10 +703,17 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   } finally {
     if (isMainLoop) {
       const leftovers = drainSteerQueue(input.sessionId)
-      if (leftovers.length > 0 && !input.signal.aborted) {
+      if (leftovers.length > 0) {
+        // I3（on 时）残余收口：自然收尾→留待下一轮（内容已落 JSONL，下一 run 可见，
+        //  状态条如实翻转）；abort 残余→未采用（丢弃路径，与 cancel 语义一致）
         for (const entry of leftovers) {
-          // 内容不丢、并入对话历史：下一条消息/下一个 run 恢复时模型可见
-          appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: wrapSteerContent(entry.content) }])
+          if (input.signal.aborted) {
+            if (steerConfirmEnabled() && entry.steerId) settleSteerEntry(input.sessionId, entry.steerId, 'rejected')
+          } else {
+            // 内容不丢、并入对话历史：下一条消息/下一个 run 恢复时模型可见
+            appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: wrapSteerContent(entry.content) }])
+            if (steerConfirmEnabled() && entry.steerId) settleSteerEntry(input.sessionId, entry.steerId, 'deferred_next_run')
+          }
         }
       }
       markLoopInactive(input.sessionId)
@@ -1028,11 +1035,16 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         const wrapped = wrapSteerContent(entry.content)
         appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: wrapped }])
         messages.push({ role: 'user', content: [{ type: 'text', text: wrapped }] })
+        // I3（P7-7，仅 on 时）：注入完成是 merged_this_run 的唯一事实源——payload 追加
+        //  steer_id/status，状态账本同点推进（off 时 entry.steerId 缺省，字节不变）。
+        const confirmOn = steerConfirmEnabled() && entry.steerId !== undefined
+        if (confirmOn) markSteerMerged(input.sessionId, entry.steerId!)
         input.publish('steer_injected', {
           content: entry.content,
           message: wrapped,
           at_turn: turn,
           remaining: pendingSteerCount(input.sessionId),
+          ...(confirmOn ? { steer_id: entry.steerId, status: 'merged_this_run' as const } : {}),
         })
         // W2-E2：转向即活跃决策——新转向取代全部旧转向（superseded_by 链，不把冲突新旧同时注入）
         const steerId = `steer-${turn}-${steerDecisions.length + 1}`

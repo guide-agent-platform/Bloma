@@ -201,3 +201,13 @@
 | `decision_selected` | resumeBlockedFlow 入口（v0 一处） | stage+action+blocked_action（决策卡转化） |
 
 - 待后续批次：decision_selected 其余卡（ready_next_steps/prd_confirm 等）、core_task_result（依赖交付卡「先试一次完整流程」新交互面）、issue_reported（依赖报障意图识别）——三件登记待办；J6 三指标待数据积累。
+
+## 20. Phase 7 P7-7 开关（I3 转向生效确认链，2026-09-11）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_STEER_CONFIRM` | I3 steer 状态机与影响确认 | **off** | 字节级现状（P0-1 纯注入：enqueue 即入队、steer_injected payload 无新键、停止静默清空） | SteerEntry 增状态机 received → pending_impact → merged_this_run \| deferred_next_run \| rejected；影响三档确定性关键词分级（**宁低勿高**）：低=简短确认即注入（received 入队）；中（新功能/改流程）=影响卡三选 [本轮就改/本轮完成后再改/不改了]（pending_impact 不入队等回执）；高（核心目标/数据模型，窄表从严）=建议「停止本轮」承接（保留[仍要本轮注入]降档出口）。**merged_this_run 只由 agent-loop 批间注入完成事件推进**（markSteerMerged 唯一入口，received 之外不可推进——不由对话层单方面宣布）；deferred 形成可见待办（状态条常驻 + mvp_ready 交付时聊天流追加提醒）；停止时未注入条目如实标 rejected（rejectPendingSteer，不再静默消失）；loop 自然收尾残余转 deferred（内容照旧落 JSONL） | `steerConfirmEnabled`/`registerSteer`/`resolveSteer`/`markSteerMerged`/`rejectPendingSteer`/`settleSteerEntry`（main/steer-queue.ts）；注入点 payload 扩（main/coding/agent-loop.ts）；IPC AGENT_STEER_RESOLVE/AGENT_STEER_QUERY + steer_status 事件 + listener 接线（main/ipc.ts、main/orchestrator.ts publishSteerStatusEvent）；渲染端 steerStatusFamily + SteerStatusBar 聊天流内嵌状态条（renderer/agent-atoms.ts、components/ChatPanel.tsx） |
+
+- 语义对照（体验验收①：生成中问「你刚提的修改这轮会做吗？」答案与系统真实状态一致）：merged_this_run/received=会；pending_impact=待你确认；deferred_next_run=下一轮；rejected=不会。getSteerStatuses 是权威答案源（单测锁——无任何路径可在未注入时得到 merged）。
+- v0 边界与观察项：①状态条数据随会话内存不落盘（重启丢失，AGENT_STEER_QUERY 查询恢复当前会话；deferred 待办跨重启不保留——登记待办）；②账本条目随会话常驻不跨轮清扫（同会话 steer 量级个位数，「本轮」以最近一次注入为准）；③分级词表确定性（无 LLM），宁低勿高——误判低=与现状行为一致无害，误判高会拦住用户；④steer_resolved 埋点未加（resolve 三选分布观察，后续可补）。
+- 单测：steer-queue +15 例（分级四组/状态机全转移/三选回执含 loop 结束降级/markSteerMerged 唯一入口+终态不可覆盖/停止拒绝/收尾收口/listener 降级/体验验收①四场景）；agent-loop +3 例（on 注入点联动+payload 扩/off 字节级锁/收尾残余转 deferred）；renderer-steer-status 新文件 4 例（全生命周期翻转/乱序不回退/off 零 upsert/mvp_ready deferred 提醒）；ipc-contract expectedChannels +2。
