@@ -273,7 +273,13 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
         event: {
           event_type: 'project_created',
           project_id: project.project_id,
-          payload: { mode: project.mode },
+          // Phase 7 U5 J5（project_started 口径扩）：首句长度/是否带句读——北极星分母
+          // （开始首个有效项目的用户）与首句信息量分层的数据基础；不记原文（脱敏）。
+          payload: {
+            mode: project.mode,
+            initial_message_chars: (input.initial_message ?? '').trim().length,
+            has_punctuation: /[。，？！,.!?]/.test(input.initial_message ?? ''),
+          },
           privacy_level: 'research_safe',
         },
       })

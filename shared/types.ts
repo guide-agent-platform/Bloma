@@ -1303,6 +1303,9 @@ export interface AnalyticsTrackInput extends RequestEnvelope {
       /** Phase 7 U5 J5（2026-09-10）：北极星地基事件 */
       | 'scope_confirmed'
       | 'delivery_presented'
+      /** Phase 7 U5 J5（P7-9b，2026-09-10）：漏斗中层与决策转化事件 */
+      | 'clarification_responded'
+      | 'decision_selected'
     project_id?: string
     session_id?: string
     payload: Record<string, unknown>

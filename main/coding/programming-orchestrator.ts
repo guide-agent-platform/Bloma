@@ -3214,6 +3214,23 @@ export async function resumeBlockedFlow(
   // 嵌套的 runMvpTask / runAgentLoopPostTesting / runJudgeReview 走同一发布通道
   setProgrammingEventPublisher(eventPublisher)
 
+  // Phase 7 U5 J5：decision_selected 埋点（阶段+动作——决策卡转化度量；v0 接
+  // blocked 让渡卡一处，ready_next_steps 等其余卡待后续批次）
+  try {
+    trackAnalytics({
+      request_id: input.request_id,
+      event: {
+        event_type: 'decision_selected',
+        project_id: input.project_id,
+        session_id: input.session_id,
+        payload: { stage: 'blocked_for_user_decision', action: input.decision, blocked_action: findProject(input.project_id).blocked_action ?? null },
+        privacy_level: 'research_safe',
+      },
+    })
+  } catch {
+    // 埋点失败不影响 resume 链
+  }
+
   const project = findProject(input.project_id)
   const action = project.blocked_action
   // M4-A：项目由 Agent Loop 生成 → resume 走独立门禁（只终验不重修）；judge 需 loop 元数据。

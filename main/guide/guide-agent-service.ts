@@ -245,6 +245,34 @@ export function clarifyAutoRespectEnabled(): boolean {
   return raw === '1' || raw === 'on' || raw === 'true'
 }
 
+/**
+ * Phase 7 U5 J5：clarification_responded 埋点（回答方式 select|delegate|input|skip）。
+ * 澄清疲劳漏斗中层数据（E3：低价值提问下降且「这不是我要的」不升的观测基础）；
+ * 不记原文（脱敏，只记方式与当前澄清序列轮次）。
+ */
+function trackClarificationResponded(
+  input: AgentSendMessageInput,
+  method: 'select' | 'delegate' | 'input' | 'skip',
+): void {
+  try {
+    trackAnalytics({
+      request_id: input.request_id,
+      event: {
+        event_type: 'clarification_responded',
+        project_id: input.project_id,
+        session_id: input.session_id,
+        payload: {
+          method,
+          trailing_rounds: countTrailingClarificationRounds(input.session_id),
+        },
+        privacy_level: 'research_safe',
+      },
+    })
+  } catch {
+    // 埋点失败不影响澄清链
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Phase 7 U4 J2（2026-09-10，E3 咨询 J2 / P7 实施稿 §5）：两层保护。
 // ①同一问题最多换方式追问一次（同选项卡精确去重：序列内同选项集第 3 张不再注入，
@@ -608,6 +636,9 @@ export async function handleGuideMessage(
   // 收敛链（已点选方向全量带上）；继续补充→如实 ack 等用户说，计数保留（再熔断弹窗兑底）。
   const reliefAnswer = resolveClarificationReliefAnswer(input)
   if (reliefAnswer) {
+    // Phase 7 U5 J5：减负卡回答也入 clarification_responded（skip=先看方案不再答；
+    // input=继续补充）
+    trackClarificationResponded(input, reliefAnswer === 'see_plan' ? 'skip' : 'input')
     recordDecision({
       project_id: input.project_id,
       session_id: input.session_id,
@@ -947,6 +978,8 @@ export async function handleGuideMessage(
         },
       },
     })
+    // Phase 7 U5 J5：clarification_responded 埋点（回答方式=选择；漏斗中层数据）
+    trackClarificationResponded(input, 'select')
 
     // 点选回流（2026-08-27 用户拍板「向导持续跟踪用户选择」）：点选不再被平台短路直接
     // 开工——答案已在对话历史里，回流向导模型，由它跟踪全部已选内容自主决定下一步：
@@ -998,6 +1031,8 @@ export async function handleGuideMessage(
         },
       },
     })
+    // Phase 7 U5 J5：clarification_responded 埋点（回答方式=委托；E3「委托是有效授权」度量基线）
+    trackClarificationResponded(input, 'delegate')
     const ack = '好的，我来定方向，先整理成产品需求文档，请你过目确认后再画草图。'
     persistAssistant?.(ack)
     publish(makeGuideEvent(input, 'message_delta', { text: ack }))

@@ -191,3 +191,13 @@
 - I8 导出状态（纯呈现直接上）：exportProjectHandoff 每次导出写 export-info.json（源版本/导出时间/delivery_status/「平台无法观测线上环境」说明）；MvpStatusBanner 导出反馈改「已导出到 …（线上状态未知）」。
 - I7 变化摘要未完整落地（登记待办）：四维摘要（新增能力/行为变化/删除受限/验证变化——消费 comparison）依赖产物 diff 管道；v0 仅 restored 快照 summary 带「应用与数据一起回到该版」范围说明。
 - 单测：snapshot-documents +2 例（off 回归锁/on 指针链+guard 保留+内容恢复）+ project-export +2 例（export-info.json 未评估/partial 两态）；I5 文案由 timeline 既有渲染测试回归。
+
+## 19. Phase 7 P7-9b 埋点（J5 漏斗中层数据，2026-09-10；纯 append-only 不设开关）
+
+| 事件 | 接线点 | payload |
+|---|---|---|
+| `project_created`（扩） | ipc PROJECT_CREATE | +initial_message_chars/has_punctuation（首句信息量分层，不记原文） |
+| `clarification_responded` | guide-agent-service 四分支（点选=select/让渡=delegate/减负卡先看方案=skip/继续补充=input） | method+trailing_rounds（澄清疲劳漏斗中层；脱敏不记原文） |
+| `decision_selected` | resumeBlockedFlow 入口（v0 一处） | stage+action+blocked_action（决策卡转化） |
+
+- 待后续批次：decision_selected 其余卡（ready_next_steps/prd_confirm 等）、core_task_result（依赖交付卡「先试一次完整流程」新交互面）、issue_reported（依赖报障意图识别）——三件登记待办；J6 三指标待数据积累。
