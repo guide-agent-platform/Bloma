@@ -188,12 +188,20 @@ const CLARIFICATION_ENDING_DECISION_TYPES = new Set<string>([
  * 遇到澄清终止类决策行即断（新会话/无卡片从 0 起）。user/assistant 轮与 [terminal]、
  * category_route/constraint_captured 等每轮都写的会话级噪声行透明——它们不代表澄清
  * 结束；纯文本澄清（无卡片）不计——没有卡片就没有「用户点不点」的轮次语义。
+ *
+ * Phase 7 U4 J1（2026-09-10，BLOMA_CLARIFY_AUTO_RESPECT 缺省 off=原逻辑）：on 时
+ * 排除用户选择 auto（「你帮我决定」）的轮次——倒序扫描中刚扫过的最近一条
+ * clarification_answer 即当前卡片的回答；回答是 auto 让渡（detail.source=
+ * card_auto/free_text_auto 或 option_id='auto'）则该轮不计：「有效授权非不明确」，
+ * 委托不当糊涂数（E3 咨询 J1；实施稿 §0 定案：原计数与用户选择无关）。
  */
 export function countTrailingClarificationRounds(sessionId: string): number {
   const path = getAgentSessionPath(sessionId)
   if (!existsSync(path)) return 0
   const lines = readFileSync(path, 'utf8').split('\n')
+  const respectAuto = clarifyAutoRespectEnabled()
   let rounds = 0
+  let pendingAnswerIsAuto = false
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i].trim()
     if (!line) continue
@@ -206,6 +214,12 @@ export function countTrailingClarificationRounds(sessionId: string): number {
     if (message.role !== 'system') continue
     const text = extractText(message.content ?? []).trim()
     if (text.startsWith('[decision-card]')) {
+      if (respectAuto && pendingAnswerIsAuto) {
+        // 用户对该卡的回答是让渡：这轮不是「仍不明确」，不计入熔断计数
+        pendingAnswerIsAuto = false
+        continue
+      }
+      pendingAnswerIsAuto = false
       rounds += 1
       if (rounds >= CLARIFICATION_ROUND_LIMIT) return rounds // 阈值已到，更早的无需再数
       continue
@@ -213,9 +227,125 @@ export function countTrailingClarificationRounds(sessionId: string): number {
     if (text.startsWith('[decision]')) {
       const entry = parseDecisionText(text)
       if (entry && CLARIFICATION_ENDING_DECISION_TYPES.has(entry.type)) return rounds
+      if (respectAuto && entry?.type === 'clarification_answer') {
+        const detail = entry.detail as { source?: unknown; option_id?: unknown } | undefined
+        pendingAnswerIsAuto =
+          detail?.source === 'card_auto' ||
+          detail?.source === 'free_text_auto' ||
+          detail?.option_id === 'auto'
+      }
     }
   }
   return rounds
+}
+
+/** Phase 7 U4 J1 开关：BLOMA_CLARIFY_AUTO_RESPECT 缺省 off（计数原逻辑字节级）。 */
+export function clarifyAutoRespectEnabled(): boolean {
+  const raw = (process.env.BLOMA_CLARIFY_AUTO_RESPECT ?? '').trim().toLowerCase()
+  return raw === '1' || raw === 'on' || raw === 'true'
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7 U4 J2（2026-09-10，E3 咨询 J2 / P7 实施稿 §5）：两层保护。
+// ①同一问题最多换方式追问一次（同选项卡精确去重：序列内同选项集第 3 张不再注入，
+//   宁可漏判不误拦——换措辞的不同题不算重复）；②第三张连续卡→对话内减负卡
+//   替代强制弹窗（[先看方案][继续补充细节]，弹窗保留为最后兑底：已发过减负卡
+//   再熔断→原弹窗）。开关 BLOMA_CLARIFY_TWO_LAYER 缺省 off=字节级现状。
+//   注意：减负卡不落 [decision-card] 行（不计熔断轮次）、其 decision 类型不进
+//   CLARIFICATION_ENDING_DECISION_TYPES（选「继续补充」后澄清序列不断）。
+// ---------------------------------------------------------------------------
+
+/** Phase 7 U4 J2 开关：BLOMA_CLARIFY_TWO_LAYER 缺省 off。 */
+export function clarifyTwoLayerEnabled(): boolean {
+  const raw = (process.env.BLOMA_CLARIFY_TWO_LAYER ?? '').trim().toLowerCase()
+  return raw === '1' || raw === 'on' || raw === 'true'
+}
+
+/** 减负卡选项 id（回传经 send-message card_option 识别；不进通用卡答案分流）。 */
+export const CLARIFY_RELIEF_OPTION_SEE_PLAN = 'clarify_relief_see_plan'
+export const CLARIFY_RELIEF_OPTION_CONTINUE = 'clarify_relief_continue'
+
+/** 当前澄清序列界定（与 countTrailingClarificationRounds 同口径）：终止类决策之后的区段。 */
+function clarificationSequenceLines(sessionId: string): string[] {
+  const path = getAgentSessionPath(sessionId)
+  if (!existsSync(path)) return []
+  const lines = readFileSync(path, 'utf8').split('\n')
+  let start = 0
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const parsed = parseSystemLine(lines[i])
+    if (parsed?.kind !== 'decision' || !parsed.entry) continue
+    if (CLARIFICATION_ENDING_DECISION_TYPES.has(parsed.entry.type)) {
+      start = i + 1
+      break
+    }
+  }
+  return lines.slice(start)
+}
+
+/** J2-②兑底判据：当前澄清序列内已发过减负卡（再熔断直接弹窗）。 */
+function hasRecentReliefCard(sessionId: string): boolean {
+  return clarificationSequenceLines(sessionId).some((line) => {
+    const parsed = parseSystemLine(line)
+    return parsed?.kind === 'decision' && parsed.entry?.type === 'clarification_reduced_card'
+  })
+}
+
+/** J2-①同主题判据（精确版，宁漏勿误）：序列内选项集与待发卡完全相同的 [decision-card] 张数。 */
+export function countSameOptionCards(sessionId: string, labels: string[]): number {
+  const key = [...labels].map((l) => l.trim()).sort().join('｜')
+  if (!key) return 0
+  return clarificationSequenceLines(sessionId).filter((line) => {
+    try {
+      const message = JSON.parse(line.trim()) as AgentMessage
+      if (message.role !== 'system') return false
+      const text = extractText(message.content ?? []).trim()
+      if (!text.startsWith('[decision-card]')) return false
+      const cardKey = text
+        .replace(/^\[decision-card\]\s*/, '')
+        .split('｜')
+        .map((l) => l.trim())
+        .sort()
+        .join('｜')
+      return cardKey === key
+    } catch {
+      return false
+    }
+  }).length
+}
+
+/** 发减负卡（J2-②）：对话内两选项替代强制弹窗；不落 [decision-card] 行防熔断计数膨胀。 */
+function publishClarificationReliefCard(
+  input: AgentSendMessageInput,
+  publish: GuideEventPublisher,
+  reply: string,
+): void {
+  recordDecision({
+    project_id: input.project_id,
+    session_id: input.session_id,
+    entry: {
+      type: 'clarification_reduced_card',
+      title: '第三张连续卡转减负卡（先看方案/继续补充）',
+      why: `连续追问达到上限，不再出选择题——给出方案出口（${reply.slice(0, 120)}）`,
+      detail: { options: [CLARIFY_RELIEF_OPTION_SEE_PLAN, CLARIFY_RELIEF_OPTION_CONTINUE] },
+    },
+  })
+  publish(makeGuideEvent(input, 'user_decision_required', {
+    kind: 'clarification',
+    title: '可以先给你一版方案',
+    questions: [
+      { id: CLARIFY_RELIEF_OPTION_SEE_PLAN, label: '先看方案', description: '按已了解的目标出 PRD 方案，其余按推荐补齐、确认时可修改' },
+      { id: CLARIFY_RELIEF_OPTION_CONTINUE, label: '继续补充细节', description: '我还有想说的，继续聊' },
+    ],
+  }))
+}
+
+/** 减负卡回答识别（J2-②回流）。 */
+export function resolveClarificationReliefAnswer(input: AgentSendMessageInput): 'see_plan' | 'continue' | undefined {
+  if (input.metadata?.source !== 'card_option') return undefined
+  const optionId = input.metadata.selected_option_id
+  if (optionId === CLARIFY_RELIEF_OPTION_SEE_PLAN) return 'see_plan'
+  if (optionId === CLARIFY_RELIEF_OPTION_CONTINUE) return 'continue'
+  return undefined
 }
 
 /** 审查确认轮次熔断阈值（2026-08-30 用户拍板）：裁判连续出示 N 轮逐题选择题仍不过 → 不再追问，直接转 PRD 确认门过目。 */
@@ -303,6 +433,26 @@ interface CardAnswerRoute {
   requirements: SketchRequirement[]
 }
 
+/**
+ * 会话 JSONL 系统行解析（[decision-card]/[decision] 前缀归类；供澄清序列扫描共用：
+ * collectClarificationAnswers / clarificationSequenceLines / countSameOptionCards）。
+ */
+function parseSystemLine(line: string): { kind: 'card' } | { kind: 'decision'; entry: ReturnType<typeof parseDecisionText> } | undefined {
+  const trimmed = line.trim()
+  if (!trimmed) return undefined
+  let message: AgentMessage
+  try {
+    message = JSON.parse(trimmed) as AgentMessage
+  } catch {
+    return undefined
+  }
+  if (message.role !== 'system') return undefined
+  const text = extractText(message.content ?? []).trim()
+  if (text.startsWith('[decision-card]')) return { kind: 'card' }
+  if (!text.startsWith('[decision]')) return undefined
+  return { kind: 'decision', entry: parseDecisionText(text) }
+}
+
 /** 收集当前澄清序列内用户已点选的全部方向（2026-08-29 点选累积修复引入）。
  * 从会话 JSONL 尾部扫描（终止语义与 countTrailingClarificationRounds 一致：遇澄清
  * 终止类决策即断，[decision-card] 行透明），合并各轮 clarification_answer 快照中的
@@ -313,21 +463,6 @@ function collectClarificationAnswers(sessionId: string): string[] {
   const path = getAgentSessionPath(sessionId)
   if (!existsSync(path)) return []
   const lines = readFileSync(path, 'utf8').split('\n')
-  const parseSystemLine = (line: string): { kind: 'card' } | { kind: 'decision'; entry: ReturnType<typeof parseDecisionText> } | undefined => {
-    const trimmed = line.trim()
-    if (!trimmed) return undefined
-    let message: AgentMessage
-    try {
-      message = JSON.parse(trimmed) as AgentMessage
-    } catch {
-      return undefined
-    }
-    if (message.role !== 'system') return undefined
-    const text = extractText(message.content ?? []).trim()
-    if (text.startsWith('[decision-card]')) return { kind: 'card' }
-    if (!text.startsWith('[decision]')) return undefined
-    return { kind: 'decision', entry: parseDecisionText(text) }
-  }
   // 第一遍：从尾往前定位当前澄清序列的起点（最近一个终止类决策行之后；无则从头）
   let start = 0
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -467,6 +602,66 @@ export async function handleGuideMessage(
 
   // 主题锚点：首条用户消息（用户最初想做什么），澄清答案只能追加、不能覆盖主题
   const primaryIntent = readPrimaryIntent(input.session_id)
+
+  // Phase 7 U4 J2-②减负卡回答回流（2026-09-10，必须在普通卡片答案分流之前：选项 id
+  // 专属，误入 resolveCardAnswer 会把按钮文案当需求开工）。先看方案→与熔断弹窗同一
+  // 收敛链（已点选方向全量带上）；继续补充→如实 ack 等用户说，计数保留（再熔断弹窗兑底）。
+  const reliefAnswer = resolveClarificationReliefAnswer(input)
+  if (reliefAnswer) {
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'clarification_relief_answer',
+        title: reliefAnswer === 'see_plan' ? '减负卡：先看方案' : '减负卡：继续补充细节',
+        why:
+          reliefAnswer === 'see_plan'
+            ? '用户在减负卡选择「先看方案」——按已了解目标整理清单进确认门，其余按推荐补齐、确认时可修改'
+            : '用户在减负卡选择「继续补充细节」——澄清继续，计数保留（再熔断转弹窗兑底）',
+        detail: { option: reliefAnswer },
+      },
+    })
+    if (reliefAnswer === 'see_plan') {
+      const collected = collectClarificationAnswers(input.session_id)
+      const fallbackRequirements = ensurePrimaryIntent(
+        collected.length > 0
+          ? collected.map((item, index) => ({ id: `F-${String(index + 1).padStart(3, '0')}`, description: item }))
+          : primaryIntent
+            ? []
+            : [{ id: 'F-001', description: input.content.slice(0, 40) }],
+        primaryIntent,
+      )
+      if (model) {
+        await startRequirementConfirmFlow(
+          input,
+          publish,
+          model,
+          fallbackRequirements,
+          [primaryIntent ?? input.content.slice(0, 20)].filter((query) => query.trim().length > 0),
+          persistSystem,
+          true,
+        )
+      } else {
+        // 无模型配置（罕见）：降级直接进 PRD 后置链（自带确认门，不开工语义不变）
+        await runPrdPipeline({
+          request_id: input.request_id,
+          session_id: input.session_id,
+          project_id: input.project_id,
+          mode: input.mode,
+          channel_id: input.channel_id,
+          requirements: fallbackRequirements,
+          query: undefined,
+          publish,
+        })
+      }
+      return
+    }
+    const continueAck = '好的，请继续说，我在听；说完我帮你整理成方案过目。'
+    persistAssistant?.(continueAck)
+    publish(makeGuideEvent(input, 'message_delta', { text: continueAck }))
+    publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+    return
+  }
 
   // PRD 审查逐题选择题回传（2026-08-30 选择题化，必须在普通卡片答案分流之前：
   // 审查卡选项 id 专属，误入 resolveCardAnswer 会把按钮文案当需求开工）。
@@ -939,6 +1134,18 @@ async function tryModelDrivenGuide(
     parsed.action === 'ask_clarification' &&
     countTrailingClarificationRounds(input.session_id) >= CLARIFICATION_ROUND_LIMIT
   ) {
+    // Phase 7 U4 J2-②（BLOMA_CLARIFY_TWO_LAYER on 且未发过减负卡）：第三张连续卡
+    // 先转对话内减负卡（[先看方案][继续补充细节]）；「先看方案」走同款收敛链，
+    // 「继续补充」后计数保留——再熔断直接弹窗兑底（弹窗仍是最后兑底）。
+    if (clarifyTwoLayerEnabled() && !hasRecentReliefCard(input.session_id)) {
+      const reliefReply =
+        '我已了解主要目标，可以先给你一版方案，其余按推荐补齐、确认时可以修改。也可以继续补充细节。'
+      model.persistAssistant(reliefReply)
+      publish(makeGuideEvent(input, 'message_delta', { text: reliefReply }))
+      publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+      publishClarificationReliefCard(input, publish, reliefReply)
+      return true
+    }
     console.error(`[guide] 澄清轮次熔断：连续 ${CLARIFICATION_ROUND_LIMIT} 轮仍不明确，转入需求确认弹窗（不自动开工）`)
     const collected = collectClarificationAnswers(input.session_id)
     const fallbackRequirements = ensurePrimaryIntent(
@@ -972,9 +1179,27 @@ async function tryModelDrivenGuide(
   publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
 
   if (parsed.action === 'ask_clarification') {
+    // Phase 7 U4 J2-①（BLOMA_CLARIFY_TWO_LAYER on）：同一问题最多换方式追问一次——
+    // 序列内选项集与待发卡完全相同且已有 2 张（这是第 3 张）→ 不再注入同主题卡，
+    // 转减负卡出口（精确去重宁漏勿误，换措辞的不同题不算重复）。
+    const normalizedQuestions = normalizeClarificationOptions(parsed.questions)
+    if (
+      clarifyTwoLayerEnabled() &&
+      normalizedQuestions.length > 0 &&
+      !hasRecentReliefCard(input.session_id) &&
+      countSameOptionCards(input.session_id, normalizedQuestions.map((q) => q.label)) >= 2
+    ) {
+      const sameTopicReply = '这个问题我们已经讨论过一轮了——我先按已有信息出方案，其余按推荐补齐、确认时可以修改。'
+      model.persistAssistant(sameTopicReply)
+      publish(makeGuideEvent(input, 'message_delta', { text: sameTopicReply }))
+      publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+      publishClarificationReliefCard(input, publish, sameTopicReply)
+      return true
+    }
+    // 已发过减负卡：同主题不再单独拦截——熔断计数兑底（trailing 到 3 必弹窗）
     updateProject(input.project_id, { current_stage: 'blocked_for_user_decision' })
     publish(makeGuideEvent(input, 'stage_changed', { stage: 'blocked_for_user_decision' }))
-    publishClarificationCard(input, publish, normalizeClarificationOptions(parsed.questions), persistSystem, parsed.reply.trim())
+    publishClarificationCard(input, publish, normalizedQuestions, persistSystem, parsed.reply.trim())
     return true
   }
 

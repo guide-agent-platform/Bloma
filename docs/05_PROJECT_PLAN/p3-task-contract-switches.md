@@ -144,3 +144,14 @@
 - LoopValidationSnapshot 扩可选字段 `preflight_passed`（W3→H1 消费链：agent-loop validationOf 跑过才带；存量快照零迁移）。
 - 纪律：Agent/loop 工具面无写入口（updateProject 不经工具面暴露）；每次终验重算——旧版本通过不给新版本背书。
 - 单测：tests/unit/delivery-status.test.ts（25 例：规则全分支 + B0 六样本重放验收——真实失败清单全部落 partial/unavailable 无一 verified）+ repair 集成 1 例（off 零写入/on 熔断让渡落 partial）；bench A/B 待额度。
+
+## 14. Phase 7 P7-4 开关（澄清层：J1 auto 语义 + J2 两层保护，2026-09-10）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_CLARIFY_AUTO_RESPECT` | J1 auto 轮不计熔断——用户选「你帮我决定」（detail.source=card_auto/free_text_auto 或 option_id=auto）的轮次不计入 trailing 计数（倒序扫描 pendingAnswer 配对卡与回答） | **off** | 字节级现状（计数只看 [decision-card] 行，与用户选择无关——§0 定案缺陷保留） | auto 让渡轮从熔断计数剔除：委托是有效授权非不明确 | `clarifyAutoRespectEnabled`（main/guide/guide-agent-service.ts countTrailingClarificationRounds） |
+| `BLOMA_CLARIFY_TWO_LAYER` | J2 两层保护：①同主题卡精确去重（序列内选项集完全相同的第 3 张不再注入→减负卡；宁漏勿误，换措辞不算重复）②第三张连续卡→对话内减负卡（[先看方案][继续补充细节]）替代强制弹窗；「先看方案」走熔断同款收敛链（已点选方向全量带上），「继续补充」计数保留——再熔断直接弹窗兜底 | **off** | 字节级现状（熔断直接转需求确认弹窗） | 两层保护生效；减负卡不落 [decision-card] 行（不膨胀计数）、decision 类型 clarification_reduced_card/relief_answer 不进 CLARIFICATION_ENDING_DECISION_TYPES（澄清序列不断） | `clarifyTwoLayerEnabled`/`countSameOptionCards`/`publishClarificationReliefCard`/`resolveClarificationReliefAnswer`（guide-agent-service.ts） |
+
+- J3（问的门槛三类化）与向导 prompt 合批（Phase 1 外置覆盖线），本批不落代码。
+- J4 假设摘要三分区纯呈现层无开关直接上：确认卡功能清单 origin 徽标（你说的/向导补充，payload 透传 item.origin）+ pending CAP 置顶「还需你确认的 1 件事」区块（无 pending_assumption 自动隐藏）。
+- 单测：guide-clarification-round-limit.test.ts +7 例（J1 四态/J2-① 精确去重/J2-② off 回归锁与 on 减负卡）+ prd-confirm-dialog.test.tsx +1 例（origin 徽标+pending CAP）；A/B 待额度。

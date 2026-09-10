@@ -143,6 +143,11 @@ function RequirementBlock(props: { item: PrdConfirmRequirement; onDisagree: (id:
         <span>
           <span style={priorityBadgeStyle(item.priority)}>{priorityLabel(item.priority)}</span>
           <strong>{item.id}</strong>　{item.story}
+          {item.origin === 'guide' ? (
+            <span style={{ marginLeft: 6, fontSize: 11, padding: '1px 6px', borderRadius: 999, background: 'var(--color-bg-subtle, #f0f2f7)', color: 'var(--color-text-secondary, #5b6472)' }}>向导补充</span>
+          ) : item.origin === 'user' ? (
+            <span style={{ marginLeft: 6, fontSize: 11, padding: '1px 6px', borderRadius: 999, background: 'var(--color-bg-subtle, #f0f2f7)', color: 'var(--color-text-secondary, #5b6472)' }}>你说的</span>
+          ) : null}
         </span>
         <button type="button" style={disagreeLinkStyle} data-ai-id={`prd-confirm-disagree-${item.id}`} onClick={() => onDisagree(item.id)}>
           这条不对
@@ -413,6 +418,21 @@ export const PrdConfirmDialog: React.FC = () => {
             </div>
           </div>
         ) : null}
+
+        {/* 还需你确认的 1 件事（Phase 7 U4 J4）：CAP 待确认假设置顶强调——无 CAP 或无
+            pending_assumption 时自动隐藏（不摆空架子） */}
+        {(() => {
+          const pending = (state.aiCapabilities ?? []).find((cap) => cap.source === 'pending_assumption')
+          if (!pending) return null
+          return (
+            <div data-ai-id="prd-confirm-pending-cap" style={{ ...warnBlockStyle('danger'), marginTop: 6 }}>
+              <div style={{ fontWeight: 600 }}>还需你确认的 1 件事：{pending.task}</div>
+              <div style={{ fontSize: 12, marginTop: 4, opacity: 0.9 }}>
+                这是根据常见做法假设的能力，还没有经你确认。确认这份 PRD 表示同意这样做；不同意可点「有要调整的」告诉我。
+              </div>
+            </div>
+          )
+        })()}
 
         {/* 第二段：功能清单（P0 断言展开 / P1P2 折叠，逐项可异议） */}
         <div>

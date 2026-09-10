@@ -125,6 +125,8 @@ export function publishPrdConfirmCard(opts: {
         priority: requirementPriority(item),
         story: requirementStory(item),
         assertions: requirementAssertions(item),
+        // Phase 7 U4 J4：来源随卡透出（你已经决定的 vs 向导补充的）
+        ...(item.origin ? { origin: item.origin } : {}),
       })),
       out_of_scope: backplane.out_of_scope,
       assumptions: backplane.assumptions ?? [],

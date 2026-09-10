@@ -21,6 +21,9 @@ import { listSessions } from './session-service'
 export type DecisionType =
   | 'clarification_card'
   | 'clarification_answer'
+  /** Phase 7 U4 J2（2026-09-10）：对话内减负卡（先看方案/继续补充）与用户回答 */
+  | 'clarification_reduced_card'
+  | 'clarification_relief_answer'
   | 'clarification_forced_auto'
   | 'clarification_forced_confirm'
   | 'requirement_confirm_card'

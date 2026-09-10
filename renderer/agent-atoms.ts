@@ -152,6 +152,8 @@ export interface PrdConfirmRequirement {
   priority: 'P0' | 'P1' | 'P2'
   story: string
   assertions: string[]
+  /** 来源（Phase 7 U4 J4）：user=用户原话/点选，guide=向导补充；缺省不标 */
+  origin?: 'user' | 'guide'
 }
 
 export interface PrdConfirmState {
@@ -534,6 +536,7 @@ export function setupGlobalAgentListeners(): () => void {
             assertions: Array.isArray(item.assertions)
               ? item.assertions.filter((entry): entry is string => typeof entry === 'string')
               : [],
+            ...(item.origin === 'user' || item.origin === 'guide' ? { origin: item.origin } : {}),
           })),
           outOfScope: stringList(prdPayload.out_of_scope),
           assumptions: stringList(prdPayload.assumptions),

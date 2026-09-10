@@ -408,3 +408,203 @@ describe('引导对话 · 连续澄清熔断', () => {
     expect(events.some((event) => event.type === 'user_decision_required')).toBe(true)
   })
 })
+
+// ===========================================================================
+// Phase 7 U4（2026-09-10）：J1 auto 语义修正 + J2 两层保护
+// ===========================================================================
+
+describe('Phase 7 U4 · J1 auto 轮不计熔断（BLOMA_CLARIFY_AUTO_RESPECT）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  let home: string
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'proma-j1-'))
+    process.env.PROMA_HOME = home
+    mkdirSync(join(home, 'agent-sessions'), { recursive: true })
+  })
+
+  afterEach(() => {
+    restorePromaHome(originalPromaHome)
+    delete process.env.BLOMA_CLARIFY_AUTO_RESPECT
+  })
+
+  function write(lines: unknown[][]): void {
+    writeFileSync(
+      join(home, 'agent-sessions', SESSION_ID + '.jsonl'),
+      lines.flat().map((line) => JSON.stringify(line)).join('\n') + '\n',
+      'utf8',
+    )
+  }
+
+  /** 卡片 + auto 让渡回答的完整轮（answer 落在卡之后——倒序扫描配对依据） */
+  const autoRound = (options: string, source: string) => [
+    { role: 'system', content: [{ type: 'text', text: '[decision-card] ' + options }], timestamp: 1 },
+    { role: 'system', content: [{ type: 'text', text: '[decision] ' + JSON.stringify({ type: 'clarification_answer', title: '让渡', why: 'w', detail: { source } }) }], timestamp: 2 },
+  ]
+  const plainCard = (options: string) => [
+    { role: 'system', content: [{ type: 'text', text: '[decision-card] ' + options }], timestamp: 3 },
+  ]
+
+  it('开关 off（缺省）：auto 回答轮照常计数（字节级现状回归锁）', () => {
+    write([autoRound('A｜你帮我决定', 'card_auto'), plainCard('B｜你帮我决定'), plainCard('C｜你帮我决定')])
+    expect(countTrailingClarificationRounds(SESSION_ID)).toBe(3)
+  })
+
+  it('开关 on：用户让渡的轮次不计（点选 card_auto）——委托不当糊涂', () => {
+    process.env.BLOMA_CLARIFY_AUTO_RESPECT = '1'
+    write([autoRound('A｜你帮我决定', 'card_auto'), plainCard('B｜你帮我决定'), plainCard('C｜你帮我决定')])
+    expect(countTrailingClarificationRounds(SESSION_ID)).toBe(2)
+  })
+
+  it('开关 on：打字让渡（free_text_auto）同样不计；全部为 auto 轮 → 0', () => {
+    process.env.BLOMA_CLARIFY_AUTO_RESPECT = '1'
+    write([autoRound('A｜你帮我决定', 'free_text_auto'), autoRound('B｜你帮我决定', 'card_auto')])
+    expect(countTrailingClarificationRounds(SESSION_ID)).toBe(0)
+  })
+
+  it('开关 on：非 auto 点选轮照常计数（option_id 有值但非 auto）', () => {
+    process.env.BLOMA_CLARIFY_AUTO_RESPECT = '1'
+    write([
+      [
+        { role: 'system', content: [{ type: 'text', text: '[decision-card] A｜你帮我决定' }], timestamp: 1 },
+        { role: 'system', content: [{ type: 'text', text: '[decision] ' + JSON.stringify({ type: 'clarification_answer', title: '点选', why: 'w', detail: { option_id: 'answer-a' } }) }], timestamp: 2 },
+      ],
+      plainCard('B｜你帮我决定'),
+      plainCard('C｜你帮我决定'),
+    ])
+    expect(countTrailingClarificationRounds(SESSION_ID)).toBe(3)
+  })
+})
+
+describe('Phase 7 U4 · J2-① 同主题卡精确去重（countSameOptionCards）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  let home: string
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'proma-j2a-'))
+    process.env.PROMA_HOME = home
+    mkdirSync(join(home, 'agent-sessions'), { recursive: true })
+  })
+
+  afterEach(() => {
+    restorePromaHome(originalPromaHome)
+  })
+
+  function writeRaw(lines: unknown[]): void {
+    writeFileSync(
+      join(home, 'agent-sessions', SESSION_ID + '.jsonl'),
+      lines.map((line) => JSON.stringify(line)).join('\n') + '\n',
+      'utf-8',
+    )
+  }
+
+  it('选项集相同才计（顺序无关）；换措辞不误判（宁漏勿误）；空 labels → 0', async () => {
+    const { countSameOptionCards } = await import('../../main/guide-agent-service')
+    writeRaw([
+      { role: 'system', content: [{ type: 'text', text: '[decision-card] 网页版｜桌面版｜你帮我决定' }], timestamp: 1 },
+      { role: 'system', content: [{ type: 'text', text: '[decision-card] 网页版｜桌面版｜你帮我决定' }], timestamp: 2 },
+      { role: 'system', content: [{ type: 'text', text: '[decision-card] 自己用｜给大家用｜你帮我决定' }], timestamp: 3 },
+    ])
+    expect(countSameOptionCards(SESSION_ID, ['网页版', '桌面版', '你帮我决定'])).toBe(2)
+    expect(countSameOptionCards(SESSION_ID, ['你帮我决定', '桌面版', '网页版'])).toBe(2)
+    expect(countSameOptionCards(SESSION_ID, ['浏览器打开', '桌面版', '你帮我决定'])).toBe(0)
+    expect(countSameOptionCards(SESSION_ID, [])).toBe(0)
+  })
+})
+
+describe('Phase 7 U4 · J2-② 第三张连续卡减负卡（BLOMA_CLARIFY_TWO_LAYER）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  let home: string
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'proma-j2b-'))
+    process.env.PROMA_HOME = home
+    mkdirSync(join(home, 'agent-sessions'), { recursive: true })
+    vi.mocked(recordDecision).mockClear()
+    vi.mocked(runSketchTask).mockClear()
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  })
+
+  afterEach(() => {
+    restorePromaHome(originalPromaHome)
+    delete process.env.BLOMA_CLARIFY_TWO_LAYER
+    vi.restoreAllMocks()
+  })
+
+  function writeThreeCards(): void {
+    const lines: unknown[] = [{ role: 'user', content: [{ type: 'text', text: '你好' }], timestamp: 1 }]
+    for (let i = 0; i < 3; i++) {
+      lines.push(
+        { role: 'assistant', content: [{ type: 'text', text: '第' + (i + 1) + '轮问句？' }], timestamp: 2 + i },
+        { role: 'system', content: [{ type: 'text', text: '[decision-card] 选项A' + i + '｜选项B' + i + '｜你帮我决定' }], timestamp: 3 + i },
+        { role: 'system', content: [{ type: 'text', text: '[terminal] status=completed' }], timestamp: 5 + i },
+        { role: 'user', content: [{ type: 'text', text: '第' + (i + 1) + '轮回答' }], timestamp: 6 + i },
+      )
+    }
+    writeFileSync(
+      join(home, 'agent-sessions', SESSION_ID + '.jsonl'),
+      lines.map((line) => JSON.stringify(line)).join('\n') + '\n',
+      'utf-8',
+    )
+  }
+
+  function makeAskModel(): GuideModelOptions {
+    const askJson = JSON.stringify({
+      action: 'ask_clarification',
+      reply: '还想问',
+      questions: [{ id: 'answer-a', label: '记账本' }],
+    })
+    const query: SDKQuery = async function* (): AsyncGenerator<SDKMessage> {
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: askJson }] } }
+      yield { type: 'result', subtype: 'success' }
+    }
+    return {
+      query,
+      env: { PATH: 'x' },
+      signal: new AbortController().signal,
+      sessionId: SESSION_ID,
+      history: [],
+      maxTokens: 2048,
+      persistAssistant: vi.fn(),
+    }
+  }
+
+  it('开关 off（缺省）熔断 → 原需求确认弹窗（字节级现状回归锁）', async () => {
+    writeThreeCards()
+    const events: AgentEvent[] = []
+    const { handleGuideMessage } = await import('../../main/guide-agent-service')
+    await handleGuideMessage(
+      {
+        request_id: 'req-j2off', session_id: SESSION_ID, project_id: 'proj-1', content: '还是没定下来',
+        mode: 'quick', current_stage: 'blocked_for_user_decision', metadata: { source: 'chat' },
+      },
+      (event) => events.push(event),
+      makeAskModel(),
+    )
+    const confirmEvent = events.find((event) => event.type === 'user_decision_required')
+    expect(confirmEvent?.payload.kind).toBe('requirement_confirm')
+  })
+
+  it('开关 on 熔断 → 对话内减负卡（先看方案/继续补充细节），不再直接弹窗；留痕 clarification_reduced_card', async () => {
+    process.env.BLOMA_CLARIFY_TWO_LAYER = '1'
+    writeThreeCards()
+    const events: AgentEvent[] = []
+    const { handleGuideMessage } = await import('../../main/guide-agent-service')
+    await handleGuideMessage(
+      {
+        request_id: 'req-j2on', session_id: SESSION_ID, project_id: 'proj-1', content: '还是没定下来',
+        mode: 'quick', current_stage: 'blocked_for_user_decision', metadata: { source: 'chat' },
+      },
+      (event) => events.push(event),
+      makeAskModel(),
+    )
+    const cardEvent = events.find((event) => event.type === 'user_decision_required')
+    expect(cardEvent?.payload.kind).toBe('clarification')
+    expect(cardEvent?.payload.title).toBe('可以先给你一版方案')
+    const optionIds = (cardEvent?.payload.questions as Array<{ id: string }>).map((q) => q.id)
+    expect(optionIds).toEqual(['clarify_relief_see_plan', 'clarify_relief_continue'])
+    expect(recordDecision).toHaveBeenCalledWith(expect.objectContaining({
+      entry: expect.objectContaining({ type: 'clarification_reduced_card' }),
+    }))
+  })
+})
