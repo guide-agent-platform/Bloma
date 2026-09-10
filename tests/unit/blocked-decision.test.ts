@@ -458,3 +458,85 @@ describe('Phase 7 U2 · H5 决策卡条件化（buildBlockedQuestions）', () =>
     expect(buildBlockedQuestions({ reason: 'judge' })[0]).toMatchObject({ id: 'explain', label: '告诉我怎么调整' })
   })
 })
+
+// ===========================================================================
+// Phase 7 U2 尾批（2026-09-11）：H5 四问卡——「按新方案生成一个版本」第四出口
+// （消费 W4-F5 升级信号：连续 ≥2 轮修复零推进；E1 §五：有理由的备选非抽卡重来）
+// ===========================================================================
+describe('Phase 7 尾批 · H5 四问卡（regenerate 第四出口）', () => {
+  const originalSwitch = process.env.BLOMA_DECISION_CONDITIONAL
+
+  afterEach(() => {
+    if (originalSwitch === undefined) delete process.env.BLOMA_DECISION_CONDITIONAL
+    else process.env.BLOMA_DECISION_CONDITIONAL = originalSwitch
+  })
+
+  it('开关 on + test + 升级信号（escalated）→ 追加第四出口「按新方案生成一个版本」', async () => {
+    process.env.BLOMA_DECISION_CONDITIONAL = '1'
+    const { buildBlockedQuestions } = await import('../../main/programming-orchestrator')
+    const questions = buildBlockedQuestions({
+      reason: 'test',
+      failures: [{ scenario: 'F-002 搜索过滤未命中' }],
+      mustDeliverFeatureIds: ['F-001', 'F-002'],
+      escalated: true,
+    })
+    const regenerate = questions.find((q) => q.id === 'regenerate')
+    expect(regenerate).toBeDefined()
+    expect(regenerate!.label).toBe('按新方案生成一个版本')
+    expect(regenerate!.description).toContain('保留已确认需求与草图')
+    // 三原出口仍在（第四出口是追加不是替换）
+    expect(new Set(questions.slice(0, 3).map((q) => q.id))).toEqual(new Set(['continue', 'accept', 'explain']))
+  })
+
+  it('无升级信号不出现第四出口（E1 §五：预算用完但有推进不推重做）', async () => {
+    process.env.BLOMA_DECISION_CONDITIONAL = '1'
+    const { buildBlockedQuestions } = await import('../../main/programming-orchestrator')
+    const questions = buildBlockedQuestions({
+      reason: 'test',
+      failures: [{ scenario: 'F-002 搜索过滤未命中' }],
+      mustDeliverFeatureIds: ['F-001', 'F-002'],
+    })
+    expect(questions.some((q) => q.id === 'regenerate')).toBe(false)
+  })
+
+  it('security/judge 路径即使升级也不出第四出口（重做判据只在 test 链）', async () => {
+    process.env.BLOMA_DECISION_CONDITIONAL = '1'
+    const { buildBlockedQuestions } = await import('../../main/programming-orchestrator')
+    expect(buildBlockedQuestions({ reason: 'security', escalated: true }).some((q) => q.id === 'regenerate')).toBe(false)
+    expect(buildBlockedQuestions({ reason: 'judge', escalated: true }).some((q) => q.id === 'regenerate')).toBe(false)
+  })
+
+  it('开关 off：escalated 也不出第四出口（字节级现状）', async () => {
+    delete process.env.BLOMA_DECISION_CONDITIONAL
+    const { buildBlockedQuestions } = await import('../../main/programming-orchestrator')
+    const questions = buildBlockedQuestions({
+      reason: 'test',
+      failures: [{ scenario: 'F-001 x' }],
+      mustDeliverFeatureIds: ['F-001'],
+      escalated: true,
+    })
+    expect(questions.map((q) => q.id)).toEqual(['continue', 'accept', 'explain'])
+  })
+
+  it('resolveBlockedDecision：点选 regenerate 识别；自由文本「换个方案/按新方案」识别、泛泛词不误判', async () => {
+    const { resolveBlockedDecision } = await import('../../main/programming-orchestrator')
+    const home = mkdtempSync(join(tmpdir(), 'proma-blocked-4q-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    updateProject(project.project_id, { blocked_action: 'test_repair' })
+    const base = { request_id: 'req', session_id: 's', project_id: project.project_id, mode: 'quick' as const }
+    const pick = (id: string) => resolveBlockedDecision({
+      ...base, content: '', current_stage: 'blocked_for_user_decision',
+      metadata: { source: 'card_option', selected_option_id: id },
+    })
+    expect(pick('regenerate')).toBe('regenerate')
+    const freeText = (content: string) => resolveBlockedDecision({
+      ...base, content, current_stage: 'blocked_for_user_decision',
+    })
+    expect(freeText('换个方案重新做')).toBe('regenerate')
+    expect(freeText('按新方案来一版')).toBe('regenerate')
+    expect(freeText('重新生成一版')).toBe('regenerate')
+    // 泛泛词不误判：不带方案/思路信号的「重新」走 explain 兜底
+    expect(freeText('重新看看')).toBe('explain')
+  })
+})

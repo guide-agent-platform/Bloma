@@ -85,8 +85,9 @@ function throwIfAborted(signal?: AbortSignal): void {
 
 /** 被阻塞的编程操作类型（A2 resume 闭环，落盘到 Project.blocked_action） */
 export type BlockedAction = 'mvp_repair' | 'test_repair' | 'judge_return' | 'security_repair'
-/** 阻塞态让渡后用户回传的决策（A3：消费 metadata.selected_option_id 映射而来） */
-export type BlockedDecision = 'continue' | 'accept' | 'explain'
+/** 阻塞态让渡后用户回传的决策（A3：消费 metadata.selected_option_id 映射而来）。
+ *  regenerate=四问卡「按新方案生成一个版本」（H5 第四出口，仅 W4-F5 升级信号下出现）。 */
+export type BlockedDecision = 'continue' | 'accept' | 'explain' | 'regenerate'
 
 /** 阻塞态让渡卡片（A1：统一带 `id`，与引导澄清路径 questions 形态一致） */
 const BLOCKED_DECISION_QUESTIONS: { id: BlockedDecision; label: string; description: string }[] = [
@@ -113,6 +114,9 @@ export interface BlockedDecisionContext {
   mustDeliverFeatureIds?: string[]
   /** 失败类别（话术分档） */
   reason: 'test' | 'security' | 'judge'
+  /** W4-F5 升级信号（连续 ≥2 轮修复零推进）：四问卡「按新方案生成一个版本」
+ *  第四出口的判据（E1 §五：仅连续修复无进展时出现，预算用完但有推进不推） */
+  escalated?: boolean
 }
 
 /**
@@ -163,6 +167,16 @@ export function buildBlockedQuestions(context: BlockedDecisionContext | undefine
   // explain 兜底追加（test/security 分支缺时补齐第三出口）
   if (!questions.some((q) => q.id === 'explain')) {
     questions.push({ id: 'explain', label: '补充说明', description: '告诉向导哪里不对' })
+  }
+  // H5 第四出口（仅 test 路径 + W4-F5 升级信号）：「按新方案生成一个版本」四问卡。
+  // E1 §五：是有理由的备选不是「修不好就抽卡重来」——只在连续修复无进展时出现；
+  // 四问正文随卡 body 呈现（publishBlockedDecision 处拼装）。
+  if (context.reason === 'test' && context.escalated) {
+    questions.push({
+      id: 'regenerate',
+      label: '按新方案生成一个版本',
+      description: '连续多轮修复都没有减少问题时的备选；保留已确认需求与草图',
+    })
   }
   return questions
 }
@@ -2383,6 +2397,9 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
         reason: 'test',
         failures: testResult.failure_summary,
         mustDeliverFeatureIds: mustDeliverFeatureIdsOf(input.project_id),
+        // H5 四问卡判据：W4-F5 升级信号（读 loop-checkpoint 账本，连续 ≥2 轮修复零推进）。
+        // 开关 off 时 buildBlockedQuestions 字节级现状、escalated 不进卡（零行为变化）。
+        escalated: buildRepairCheckpointContext(input.project_id).escalation === 'diagnosis',
       })
       return { verdict: 'blocked', test_result: testResult }
     }
@@ -2762,6 +2779,9 @@ export interface IterationTaskInput {
   query?: SDKQuery
   /** 停止生成信号（U5：迭代期间点停止） */
   signal?: AbortSignal
+  /** H5 四问卡专用（resumeBlockedFlow regenerate 分支）：不归一化并入本次诉求，
+ *  按原需求清单整版重摇（保留已确认需求与草图；不重置修复预算）。 */
+  regenerate?: boolean
 }
 
 // 注：P3 分级锚定的 focusRequirementIds 由 runIterationTask 从归一化判定派生后
@@ -2802,13 +2822,25 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
   // 口语碎片原样入库会污染 PRD 背板（线上案例：「重新生成」被 acceptance 解释成功能、
   // 产品里长出重置按钮），归一化失败/无渠道时回退原样追加（改动前现状），不阻断迭代。
   const existing = readLastSketchRequirements(input.project_id)
-  const merged = await mergeIterationRequirements(input, existing)
+  // H5 四问卡（regenerate）：不走归一化（本次 prompt 是重摇指令非需求变更，并入会
+  // 污染清单），原需求清单直接重摇；focus 无（全量锚定与普通重摇一致）。
+  const merged = input.regenerate
+    ? ({ action: 'skip' as const, requirements: existing, focusRequirementIds: undefined } as Awaited<ReturnType<typeof mergeIterationRequirements>>)
+    : await mergeIterationRequirements(input, existing)
   const requirements = merged.requirements
   recordSketchGenerated(input.project_id, requirements)
 
   // ack 如实（2026-08-27 线上案例 dbe1e6fd：「换个名字」被判 skip 后仍说「按你的新想法
   // 重新生成」，用户体感记忆断层——skip 意味着诉求未入需求，必须告知而非假装采纳）
   if (merged.action === 'skip') {
+    // H5 四问卡 regenerate：ack 用四问承诺版（不再说"没当作需求改动"——用户是
+    // 明确选的重做，需要被告知换了什么保留了什么）
+    if (input.regenerate) {
+      publishCompletionMessage(
+        input,
+        '好的，按新方案重新生成一版：保留已确认的需求与草图，当前版本已保留为快照可随时回看；等待时间与之前一轮相当。',
+      )
+    } else {
     // 「做完整的程序」类诉求路由（2026-09-06 随记灵案）：skip=无需求变更，按原清单
     // 整版重摇（longterm 40 轮）大概率复现同一批失败。上次终验若留有未通过断言且修复
     // 预算未耗尽，「把程序做完整」的正确动作是定向修复（复用入口 B 修复轮 + 终验门禁
@@ -2843,6 +2875,7 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
       input,
       `收到「${truncateCopy(input.prompt, 20)}」——这句我没当作需求改动（判为操作指令），按原样重新生成了一版。想改哪里请直接说，比如「标题改成计算助手」。`,
     )
+    }
   } else {
     publishCompletionMessage(input, `好的，我按你的新想法「${truncateCopy(input.prompt, 20)}」重新生成一版。`)
   }
@@ -3134,11 +3167,25 @@ function publishBlockedDecision(
 ): void {
   updateProject(input.project_id, { current_stage: 'blocked_for_user_decision', blocked_action: action })
   publish(input, 'stage_changed', { stage: 'blocked_for_user_decision' })
+  // H5 四问卡正文（仅开关 on + W4-F5 升级信号 + test 路径）：必答四问随卡 body 呈现
+  //（E1 §五：为什么重做/这次换什么/保留什么/代价——没把握就直说不确定，不编成功率）
+  // 开关 off 时 payload 无 body 键（字节级现状，与选项条件化同门）。
+  const fourQuestions =
+    decisionConditionalEnabled() && context?.reason === 'test' && context?.escalated
+      ? [
+          '关于「按新方案生成一个版本」：',
+          '· 为什么重做：连续多轮修复都没有减少关键问题（每轮修复记录在案，可回看）',
+          '· 这次换什么：整体换一种实现方式，具体新方案由重新规划决定——没有把握一定比现在好',
+          '· 保留什么：已确认的需求与草图不变；当前版本保留为快照，随时可回看',
+          '· 代价：需要重新生成完整版本，等待时间与之前一轮相当；重做不重置修复预算',
+        ].join('\n')
+      : undefined
   publish(input, 'user_decision_required', {
     kind: 'blocked',
     stage: 'blocked_for_user_decision',
     // U7：让渡卡片带上具体偏差描述（如「缺了按月统计功能」），落到 title 字段由渲染端展示
     title,
+    ...(fourQuestions ? { body: fourQuestions } : {}),
     // Phase 7 U2 H5：条件化选项（BLOMA_DECISION_CONDITIONAL on 时按失败原因推荐主按钮；
     // off = BLOCKED_DECISION_QUESTIONS 字节级现状）
     questions: buildBlockedQuestions(context),
@@ -3178,7 +3225,7 @@ export function resolveBlockedDecision(input: AgentSendMessageInput): BlockedDec
 
   if (input.metadata?.source === 'card_option') {
     const id = input.metadata?.selected_option_id
-    if (id === 'accept' || id === 'explain' || id === 'continue') return id
+    if (id === 'accept' || id === 'explain' || id === 'continue' || id === 'regenerate') return id
     return 'continue'
   }
 
@@ -3186,6 +3233,8 @@ export function resolveBlockedDecision(input: AgentSendMessageInput): BlockedDec
   const text = input.content.trim()
   if (/接受|保留|现状|就这样|算了/.test(text)) return 'accept'
   if (/继续|重试|再试|再修/.test(text)) return 'continue'
+  // H5 四问卡自由文本兑底：换方案/换思路/重新生成一版（明说才认，宁漏勿误）
+  if (/换[个一]?(方案|思路)|按新方案|重新生成一版/.test(text)) return 'regenerate'
   return 'explain'
 }
 
@@ -3275,6 +3324,36 @@ export async function resumeBlockedFlow(
   if (input.decision === 'explain') {
     updateProject(input.project_id, { current_stage: 'clarifying' })
     publish(input, 'stage_changed', { stage: 'clarifying' })
+    return
+  }
+
+  // H5 四问卡回传（W4-F5 升级信号下出现的第四出口）：清阻塞 + 整版重摇。
+  // E1 §五约束：保留已确认需求与草图（不并入本次诉求，原清单直接重生成）；
+  // 重做受总预算约束不重置修复额度（test_repair_count 不清零）；当前版本已随
+  // 熔断回滚保留为快照。
+  if (input.decision === 'regenerate') {
+    updateProject(input.project_id, { current_stage: 'iterating', blocked_action: undefined })
+    publish(input, 'stage_changed', { stage: 'iterating' })
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'modification_decision',
+        title: '用户选择按新方案生成一个版本',
+        why: '四问卡回传：连续多轮修复无进展，用户选择换实现方式重做（保留需求清单与草图，当前版本保留为快照）',
+        detail: { decision: 'regenerate', blocked_action: action },
+      },
+    })
+    await runIterationTask({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+      prompt: '按新方案重新实现全部已确认需求（换一种实现方式）',
+      channel_id: input.channel_id,
+      query: input.query,
+      regenerate: true,
+    })
     return
   }
 

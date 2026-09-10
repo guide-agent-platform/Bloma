@@ -178,8 +178,8 @@
 | `BLOMA_DECISION_CONDITIONAL` | H5 让渡卡按失败原因条件化动作 + H6 accept 改「先使用已可用的部分」 | **off** | 字节级现状（固定三选项：继续尝试/接受现状/补充说明；accept 话术「已保留当前版本」） | ①test 失败→主按钮「先修好F-xxx再交付」（推荐：修复目标明确）+accept「先使用已可用的部分」（有干净必交任务时）/「先保留这一版」（全败时如实降级不建议当可用版本）；②security→主按钮「继续修复安全问题」；③judge_return→主按钮「告诉我怎么调整」（方向性优先听用户）。accept 话术升级：如实带已知未通过项清单（readTestReport），不改 delivery_status、问题清单不清除持续可见。回传 id 仍 continue/accept/explain 三值（resume 闭环零改动） | `decisionConditionalEnabled`/`buildBlockedQuestions`（main/coding/programming-orchestrator.ts）+ 三调用点 context 接线 |
 
 - 偏差登记：H5/H6 共用一开关（实施稿仅 H6 列开关名单）——两者是同一张卡的一体改造，拆开会出「条件化卡+旧接受现状文案」怪态；A/B 一起看让渡卡转化。
-- 四问卡（为什么重做/换什么/保留什么/代价——「按新方案生成一个版本」路径）未落：该动作依赖 W4 升级信号消费（连续零修复证据链），留 P7-7 批次与 I3 一起设计（登记待办）。
-- 单测：blocked-decision.test.ts +5 例（off 回归锁/条件化三分支/全败降级/H6 accept 话术与 delivery_status 不变）。
+- **四问卡已落（2026-09-11 尾批，与 I3 同批）**：开关 on + test 路径 + W4-F5 升级信号（buildRepairCheckpointContext：loop-checkpoint 账本最近 2 轮修复全部零 resolved 且未收敛）三条件同时满足时，追加第四出口 regenerate「按新方案生成一个版本」+ 卡 body 四问正文（为什么重做/这次换什么/保留什么/代价——没把握直说不确定不编成功率；重做不重置修复预算）。E1 §五纪律：无升级信号（预算用完但有推进）不出；security/judge 路径不出；off 时选项与 payload 均字节级现状。回传处理：resolveBlockedDecision 识别 regenerate（点选+自由文本「换个方案/按新方案/重新生成一版」，泛泛「重新」不误判）；resumeBlockedFlow regenerate 分支=清阻塞+决策留痕+runIterationTask(regenerate:true)——不归一化并入本次诉求（原需求清单直接重摇，保留需求与草图）、不重置 test_repair_count（受总预算约束）、跳过 skip 分支的定向修复路由（用户明确选换方案不再修）、ack 用四问承诺版。单测 +5 例（第四出口出现/无信号不出/security-judge 不出/off 字节锁/回传识别）。
+- 单测：blocked-decision.test.ts +5 例（off 回归锁/条件化三分支/全败降级/H6 accept 话术与 delivery_status 不变）+ 尾批四问卡 5 例。
 
 ## 18. Phase 7 P7-8（版本层 I5/I6/I8，2026-09-10）
 

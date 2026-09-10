@@ -145,11 +145,12 @@ const FIXED_CARD_LABELS: Record<string, string> = {
   auto: '你帮我决定',
 }
 
-/** 阻塞态让渡卡片的决策 id（accept/explain/continue）由 resumeBlockedFlow 处理，不得误入草图生成。 */
+/** 阻塞态让渡卡片的决策 id（accept/explain/continue/regenerate）由 resumeBlockedFlow 处理，不得误入草图生成。 */
 const BLOCKED_DECISION_IDS = new Set([
   'accept',
   'explain',
   'continue',
+  'regenerate',
   PRD_REVIEW_OPTION_OVERRIDE,
   PRD_REVIEW_OPTION_SUPPLEMENT,
   PRD_CONFIRM_OPTION_CONFIRM,
