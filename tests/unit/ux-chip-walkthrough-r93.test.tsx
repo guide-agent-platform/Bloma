@@ -104,7 +104,7 @@ describe('ux-chip-walkthrough r93：ChatPanel 四状态 DOM 走查（0 基础用
     const send = screen.queryByRole('button', { name: '发送消息' })
     expect(send).not.toBeNull()          // F5：未替换（注释说替换，实际仅流态替换）
     expect((send as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.queryByRole('button', { name: '停止生成' })).toBeNull()  // F5：无停止可取消
+    expect(screen.queryByRole('button', { name: '停止本轮制作' })).toBeNull()  // F5：无停止可取消
   })
 
   it('[W5b·流态] hasActiveStream：停止按钮出现、发送消失（替换语义仅在流态成立）', () => {
@@ -116,7 +116,7 @@ describe('ux-chip-walkthrough r93：ChatPanel 四状态 DOM 走查（0 基础用
       </Provider>,
     )
     // 流态：输入区整体被替换（placeholder 亦不存在）+ 停止按钮出现
-    expect(screen.getByRole('button', { name: '停止生成' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '停止本轮制作' })).toBeTruthy()
     expect(screen.queryByPlaceholderText('描述你的想法…')).toBeNull()
     expect(screen.queryByRole('button', { name: '发送消息' })).toBeNull()
   })

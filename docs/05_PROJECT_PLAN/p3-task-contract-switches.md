@@ -180,3 +180,14 @@
 - 偏差登记：H5/H6 共用一开关（实施稿仅 H6 列开关名单）——两者是同一张卡的一体改造，拆开会出「条件化卡+旧接受现状文案」怪态；A/B 一起看让渡卡转化。
 - 四问卡（为什么重做/换什么/保留什么/代价——「按新方案生成一个版本」路径）未落：该动作依赖 W4 升级信号消费（连续零修复证据链），留 P7-7 批次与 I3 一起设计（登记待办）。
 - 单测：blocked-decision.test.ts +5 例（off 回归锁/条件化三分支/全败降级/H6 accept 话术与 delivery_status 不变）。
+
+## 18. Phase 7 P7-8（版本层 I5/I6/I8，2026-09-10）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_RESTORE_AS_VERSION` | I6 恢复即新版本 | **off** | 字节级现状（回滚不拍新快照，指针指回源版本） | 回滚事务末尾拍 restored 快照（SnapshotKind 新值；derived_from 指向源版本，Snapshot/CreateInput 扩可选字段零迁移），指针前移到恢复点；恢复前状态仍由 guard 快照保留可找回；TimelinePanel 磁贴带「恢复」徽标 | `restoreAsVersionEnabled`（main/platform-services.ts rollbackSnapshot） |
+
+- I5 术语与边界句（纯呈现直接上）：RollbackConfirmModal 增 data/ 边界真话——「恢复会把应用和它在 Bloma 内保存的数据一起回到那一版；导出部署后在别处产生的数据不受影响」（沙箱数据随回滚是真实能力，如实写不套通用句）。
+- I8 导出状态（纯呈现直接上）：exportProjectHandoff 每次导出写 export-info.json（源版本/导出时间/delivery_status/「平台无法观测线上环境」说明）；MvpStatusBanner 导出反馈改「已导出到 …（线上状态未知）」。
+- I7 变化摘要未完整落地（登记待办）：四维摘要（新增能力/行为变化/删除受限/验证变化——消费 comparison）依赖产物 diff 管道；v0 仅 restored 快照 summary 带「应用与数据一起回到该版」范围说明。
+- 单测：snapshot-documents +2 例（off 回归锁/on 指针链+guard 保留+内容恢复）+ project-export +2 例（export-info.json 未评估/partial 两态）；I5 文案由 timeline 既有渲染测试回归。

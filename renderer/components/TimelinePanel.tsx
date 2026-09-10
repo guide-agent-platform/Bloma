@@ -203,7 +203,12 @@ const RollbackConfirmModal: React.FC<{
           回到「{snapshot.name}」？
         </p>
         <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-5)', lineHeight: 'var(--line-height-base)' }}>
-          回到这个版本之后，{snapshot.name} 之后的版本仍然保留在时间轴上，你可以随时再切换回来。
+          回到这个版本之后，{snapshot.name} 之后的版本仍然保留在版本记录上，你可以随时再切换回来。
+        </p>
+        {/* Phase 7 U3 I5（2026-09-10）：data/ 边界句按真实能力写——沙箱内数据随版本回滚
+            是 Bloma 的真实能力（恢复原语先清空再复制）；导出部署后的数据不归 Bloma 管。 */}
+        <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-5)', lineHeight: 'var(--line-height-base)', background: 'var(--color-surface-muted)', padding: 'var(--space-3)', borderRadius: 'var(--radius-sm)' }}>
+          恢复会把应用和它在 Bloma 内保存的数据一起回到那一版；导出部署后在别处产生的数据不受影响。
         </p>
         <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
           <button onClick={onCancel} style={{
@@ -289,8 +294,26 @@ const SnapChip: React.FC<{
     >
       {showThumbnail && <SnapshotThumb snapshot={snapshot} />}
       <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-        <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600 }}>
+        <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
           {snapshot.name}
+          {/* Phase 7 U3 I6：恢复产生的版本带指针链徽标（「从该版恢复」——区分原生新版本与
+              恢复点，用户答得清「这版是哪来的」） */}
+          {snapshot.derived_from ? (
+            <span
+              data-ai-id={`snap-derived-${snapshot.snapshot_id.slice(0, 8)}`}
+              title={`从 ${snapshot.derived_from.slice(0, 8)} 恢复而来`}
+              style={{
+                fontSize: 9,
+                padding: '0 4px',
+                borderRadius: 999,
+                background: isCurrent ? 'rgba(255,255,255,0.25)' : 'var(--color-surface-muted)',
+                color: isCurrent ? 'var(--white)' : 'var(--color-text-muted)',
+                fontWeight: 500,
+              }}
+            >
+              恢复
+            </span>
+          ) : null}
         </span>
         <span style={{ fontSize: 10, opacity: 0.7 }}>
           {new Date(snapshot.created_at).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit' })}

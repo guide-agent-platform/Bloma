@@ -179,5 +179,25 @@ export function exportProjectHandoff(input: ProjectExportInput, destination: str
   const gitignorePath = join(target, '.gitignore')
   if (!existsSync(gitignorePath)) writeFileSync(gitignorePath, renderGitignore(), 'utf8')
 
+  // Phase 7 U3 I8（2026-09-10）：导出包带版本标识（每次导出覆盖写——与 README 首写
+  // 幂等不同，导出信息应反映本次导出时点）：源版本/导出时间/交付状态已知限制。
+  // 「导出后线上状态未知」——部署后是否可用不归平台观测，UI 侧同步标注。
+  try {
+    const exportInfo = {
+      exported_at: new Date().toISOString(),
+      source_snapshot_id: project.current_snapshot_id ?? null,
+      delivery_status: project.delivery_status ?? 'not_evaluated',
+      note:
+        project.delivery_status === 'verified'
+          ? '导出时点的验证状态：关键任务已通过验证。部署后的实际状态需要你自行确认（平台无法观测线上环境）。'
+          : project.delivery_status
+            ? '导出时点的验证状态：存在未通过或未验证的部分（详见导出时的验证报告）。部署后的实际状态需要你自行确认（平台无法观测线上环境）。'
+            : '导出时点未执行交付状态评估。部署后的实际状态需要你自行确认（平台无法观测线上环境）。',
+    }
+    writeFileSync(join(target, 'export-info.json'), JSON.stringify(exportInfo, null, 2), 'utf8')
+  } catch {
+    // 导出信息失败不阻断导出主链
+  }
+
   return { canceled: false, destination: target, file_count: countFiles(target) }
 }

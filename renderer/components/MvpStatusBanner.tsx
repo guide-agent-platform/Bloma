@@ -365,7 +365,7 @@ export const MvpStatusBanner: React.FC = () => {
               whiteSpace: 'nowrap',
             }}
           >
-            已导出到 {exportedPath}
+            已导出到 {exportedPath}（线上状态未知）
           </span>
         ) : (
           <button

@@ -163,7 +163,7 @@ export const WORKFLOW_STAGES: readonly WorkflowStage[] = [
   'blocked_for_user_decision',
 ]
 
-export type SnapshotKind = 'sketch' | 'mvp' | 'iteration' | 'pre_risk' | 'upgrade' | 'rollback_guard'
+export type SnapshotKind = 'sketch' | 'mvp' | 'iteration' | 'pre_risk' | 'upgrade' | 'rollback_guard' | 'restored'
 export type ProviderType =
   | 'anthropic'
   | 'anthropic-compatible'
@@ -1135,6 +1135,8 @@ export interface SnapshotCreateInput extends RequestEnvelope {
   summary: string
   include_documents: boolean
   health_status: HealthStatus
+  /** 恢复指针（Phase 7 U3 I6）：restored 快照指向被恢复的源版本；其余 kind 忽略 */
+  derived_from?: string
 }
 
 export interface Snapshot {
@@ -1148,6 +1150,9 @@ export interface Snapshot {
   documents_archive_path?: string
   health_status: HealthStatus
   parent_snapshot_id?: string
+  /** 恢复指针（Phase 7 U3 I6，2026-09-10）：restored 快照指向被恢复的源版本——
+   * 「第 N 版·从第 M 版恢复」的指针链；其余 kind 缺省无。 */
+  derived_from?: string
   created_at: string
 }
 
