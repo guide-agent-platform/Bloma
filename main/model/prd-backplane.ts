@@ -92,6 +92,67 @@ export function capContractEnabled(): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 7 U1（2026-09-10，E1 咨询 H2 / P7 实施稿 §2）：key_tasks 关键任务块。
+// 用户语言的交付标尺——「这一版做完什么才算交付」。PRD 确认卡展示；
+// delivery_status（P7-2 H1）按 must_deliver 任务判定；与一致性治理「主任务」
+// 表述同源（后续 prompt 文字引用 key_tasks 不再另写一套）。
+// 开关 BLOMA_KEY_TASKS 缺省 off=字节级现状（不产出不注入，旧 prd.json 零迁移）。
+// ---------------------------------------------------------------------------
+
+/** 关键任务单条（字段名与 prd.json 存储一致）。 */
+export interface KeyTask {
+  /** 任务编号：KT-01 递增（定稿时统一重编号） */
+  task_id: string
+  /** 用户语言一句话任务（如「记一笔账，月底能看到这个月花了多少」；非技术术语） */
+  label: string
+  /** 关联功能项（F-xxx；P0 项必须落入某任务——定稿不变式，漏了自动补） */
+  feature_ids: string[]
+  /** 必须交付：true 时该任务未通过 → 整版不可称 verified（P7-2 delivery_status 消费） */
+  must_deliver: boolean
+}
+
+/** BLOMA_KEY_TASKS 开关：缺省 off（prd.json 无 key_tasks 键、确认卡零注入）。 */
+export function keyTasksEnabled(): boolean {
+  const raw = (process.env.BLOMA_KEY_TASKS ?? '').trim().toLowerCase()
+  return raw === '1' || raw === 'on' || raw === 'true'
+}
+
+/** 背板关键任务读取：过滤缺 label 的残条；缺省 []。 */
+export function backplaneKeyTasks(backplane: PrdBackplane): KeyTask[] {
+  return (backplane.key_tasks ?? []).filter((task) => task.label.trim().length > 0)
+}
+
+/**
+ * 关键任务定稿（挂载前清洗，供工程腿 buildBackplaneFromParsed 与单测直测）：
+ * ①LLM 产出先过功能项白名单（feature_ids ∩ requirements；悬空任务=无有效关联项
+ *   即弃条，不给下游留空承诺）；②未覆盖的 P0 项各自追加派生任务（label=故事
+ *   截断、must_deliver=true）——「P0 必落任务」不变式；③task_id 统一重编号
+ * KT-01..（追加后不跳号）；④总量截 6（LLM ≤4 + 补齐，宁全勿缺但防滥用）。
+ */
+export function finalizeKeyTasks(parsed: KeyTask[], requirements: SketchRequirement[]): KeyTask[] {
+  const validIds = new Set(requirements.map((item) => item.id))
+  const merged: KeyTask[] = []
+  for (const task of parsed.slice(0, 4)) {
+    const ids = [...new Set(task.feature_ids.filter((id) => validIds.has(id)))].slice(0, 6)
+    if (!task.label.trim() || ids.length === 0) continue
+    merged.push({ label: task.label.trim().slice(0, 80), feature_ids: ids, must_deliver: task.must_deliver, task_id: '' })
+    if (merged.length >= 6) break
+  }
+  const covered = new Set(merged.flatMap((task) => task.feature_ids))
+  for (const item of requirements) {
+    if (merged.length >= 6) break
+    if (requirementPriority(item) !== 'P0' || covered.has(item.id)) continue
+    merged.push({
+      task_id: '',
+      label: requirementStory(item).replace(/\s+/g, ' ').trim().slice(0, 60) || item.description.slice(0, 60),
+      feature_ids: [item.id],
+      must_deliver: true,
+    })
+  }
+  return merged.map((task, index) => ({ ...task, task_id: `KT-${String(index + 1).padStart(2, '0')}` }))
+}
+
+// ---------------------------------------------------------------------------
 // Phase 3 B3（2026-09-09，P1 稿 §3 M3）：round_anchor 三字段。
 // 修复轮/迭代轮的本轮范围锚——只限定本轮，不改全局契约；防止「最近错误/修复建议/
 // 自己先前的计划」被当成需求变更。开关 BLOMA_ROUND_ANCHOR 缺省 off=字节级现状
@@ -536,6 +597,13 @@ export interface PrdBackplane {
    * =本字段不产出不注入，旧 prd.json 零迁移）。
    */
   ai_capabilities?: AiCapability[]
+  /**
+   * 关键任务块（Phase 7 U1 H2，2026-09-10）：用户语言的交付标尺——这一版做完
+   * 什么才算交付。工程腿产出（LLM 优先 + finalizeKeyTasks P0 补齐）随背板冻结；
+   * PRD 确认卡展示、delivery_status 计算（P7-2）消费（BLOMA_KEY_TASKS 缺省 off
+   * =不产出，旧 prd.json 零迁移）。
+   */
+  key_tasks?: KeyTask[]
 }
 
 /**

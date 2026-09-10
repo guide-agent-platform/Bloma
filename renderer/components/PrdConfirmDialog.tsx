@@ -387,6 +387,33 @@ export const PrdConfirmDialog: React.FC = () => {
           </p>
         </div>
 
+        {/* 关键任务段（Phase 7 U1 H2，2026-09-10）：这一版做完什么才算交付——缺失/空数组隐藏（开关 off/无任务/旧夹具） */}
+        {(state.keyTasks ?? []).length > 0 ? (
+          <div data-ai-id="prd-confirm-key-tasks">
+            <h3 style={sectionTitleStyle}>这一版做完这些才算交付（关键任务）</h3>
+            <p style={{ margin: '4px 0 8px', fontSize: 12, color: 'var(--color-text-secondary, #5b6472)' }}>
+              生成完成后，我们会按下面的任务逐项验证并如实报告做到没做到。
+            </p>
+            <div style={{ ...warnBlockStyle('caution'), marginTop: 6, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {state.keyTasks!.map((task) => (
+                <div key={task.taskId}>
+                  <div style={{ fontWeight: 600 }}>
+                    · {task.label}
+                    {task.mustDeliver ? (
+                      <span style={{ fontWeight: 400 }}>｜必须做到</span>
+                    ) : (
+                      <span style={{ fontWeight: 400 }}>｜尽力完成</span>
+                    )}
+                  </div>
+                  {task.featureIds.length > 0 ? (
+                    <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>关联功能：{task.featureIds.join('、')}</div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         {/* 第二段：功能清单（P0 断言展开 / P1P2 折叠，逐项可异议） */}
         <div>
           <h3 data-ai-id="prd-confirm-requirements-title" style={sectionTitleStyle}>

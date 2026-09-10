@@ -125,3 +125,12 @@
 - F6 受阻报告不设新开关：复用 `BLOMA_LOOP_CHECKPOINT`（§7）——budget_exhausted/turn_limit 终态产出 blocked_report（候选指纹/未闭环失败/仍有效决策/验证面/建议下一步）+[loop-blocked-report] JSONL 审计行；完成/取消不产。
 - D4 预算分桶定案（读码零改码）：预算门在路径/参数/语法/CDN/版本/授权校验全部通过后才烧——协议类失败（diff 不匹配/STALE_READ/未读/越界）一律不烧预算，「协议恢复≠业务失败」结构上已成立；「修复尝试=批次+验证」单位改造需在线数据校准（登记待办）。
 - bench 验收（待额度）：`l1-batch --label w6 --env BLOMA_COMPACT_EST_FALLBACK=1` 看渠道盲项目压缩是否恢复触发；E5 三组同 seed 同 N 对照。
+
+## 12. Phase 7 P7-1 开关（key_tasks 关键任务块，2026-09-10）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_KEY_TASKS` | H2 关键任务块（用户语言的交付标尺：「这一版做完什么才算交付」） | **off** | 字节级现状（prd.json 无 key_tasks 键、system prompt 无产出指令、确认卡零注入） | prd-engine system prompt 追加 key_tasks 产出指令（LLM 提炼 2~4 个用户任务视角关键任务）；背板挂载前 finalizeKeyTasks 定稿（feature_ids 白名单过滤→悬空弃条；P0 未覆盖逐条补派生任务 must_deliver=true；task_id 重编号 KT-01..；总量截 6）；PRD 确认卡展示关键任务区（必交/尽力徽标+关联功能） | `keyTasksEnabled`/`finalizeKeyTasks`/`backplaneKeyTasks`（main/model/prd-backplane.ts）+ `parseKeyTasks`/`KEY_TASKS_PROMPT_ADDENDUM`（main/guide/prd-engine-llm.ts） |
+
+- 消费方（后续步骤接线）：P7-2 H1 delivery_status 按 must_deliver 任务判定 verified/partial/unavailable；P7-9 J5 scope_confirmed 事件记 key_tasks 标识；向导 prompt「主任务」表述合批引用 key_tasks 不另写（J3 批次）。
+- 单测：tests/unit/key-tasks.test.ts（18 例：开关/解析/定稿/挂载）+ prd-confirm-dialog.test.tsx 渲染 1 例；bench A/B 待额度（`l1-batch --label p7-1 --env BLOMA_KEY_TASKS=1`）。

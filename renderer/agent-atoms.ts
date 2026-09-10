@@ -167,6 +167,8 @@ export interface PrdConfirmState {
   constraints: string[]
   /** 核心能力契约（Phase 2 M1，2026-09-09）：可选——缺失/空数组时卡片自动隐藏（开关 off/无 CAP/旧夹具） */
   aiCapabilities?: PrdConfirmCapability[]
+  /** 关键任务（Phase 7 U1 H2，2026-09-10）：可选——缺失/空数组时卡片自动隐藏（开关 off/无任务/旧夹具） */
+  keyTasks?: PrdConfirmKeyTask[]
   /** 完整 PRD 视图默认展开（longterm） */
   expanded: boolean
   /** 市调提炼想法（2026-08-29 灵感参考）：确认时可勾选采纳并入 PRD */
@@ -184,6 +186,14 @@ export interface PrdConfirmCapability {
   forbiddenSubstitutions: string[]
   evidence: string[]
   source: string
+}
+
+/** 关键任务展示型（Phase 7 U1 H2）：主进程 KeyTask 的投影（仅展示所需字段）。 */
+export interface PrdConfirmKeyTask {
+  taskId: string
+  label: string
+  featureIds: string[]
+  mustDeliver: boolean
 }
 
 /** 无 active session 时的稳定 fallback（陷阱 10）。 */
@@ -500,6 +510,7 @@ export function setupGlobalAgentListeners(): () => void {
           assumptions?: unknown
           constraints?: unknown
           ai_capabilities?: unknown
+          key_tasks?: unknown
           expanded?: unknown
           ideas?: unknown
         }
@@ -540,6 +551,18 @@ export function setupGlobalAgentListeners(): () => void {
                     : [],
                   evidence: Array.isArray(item.evidence) ? item.evidence.filter((entry): entry is string => typeof entry === 'string') : [],
                   source: typeof item.source === 'string' ? item.source : '',
+                }))
+            : [],
+          keyTasks: Array.isArray(prdPayload.key_tasks)
+            ? (prdPayload.key_tasks as Array<Record<string, unknown>>)
+                .filter((item) => typeof item?.label === 'string' && item.label.trim().length > 0)
+                .map((item, index): PrdConfirmKeyTask => ({
+                  taskId: typeof item.task_id === 'string' && item.task_id ? item.task_id : `KT-${String(index + 1).padStart(2, '0')}`,
+                  label: String(item.label),
+                  featureIds: Array.isArray(item.feature_ids)
+                    ? item.feature_ids.filter((entry): entry is string => typeof entry === 'string')
+                    : [],
+                  mustDeliver: item.must_deliver !== false,
                 }))
             : [],
           expanded: prdPayload.expanded === true,

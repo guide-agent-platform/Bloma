@@ -316,6 +316,38 @@ describe('PRD 确认弹窗 PrdConfirmDialog', () => {
     expect(section.textContent).toContain('不算完成：固定模板冒充；降级为普通增删改查')
     expect(section.textContent).toContain('验收证据：修改笔记后总结随之变化')
   })
+
+  it('关键任务段（Phase 7 U1 H2）：有任务渲染必交徽标与关联功能；无任务不渲染（回归锁）', () => {
+    // 无 key_tasks（旧夹具/开关 off）：段落不存在
+    setState()
+    const { unmount } = renderDialog()
+    expect(screen.queryByTestId('prd-confirm-key-tasks')).toBeNull()
+    unmount()
+
+    // 有关键任务：任务/必交徽标/关联功能可见
+    store.set(prdConfirmFamily('session-pc'), {
+      sessionId: 'session-pc',
+      projectId: 'project-pc',
+      title: '请确认这份 PRD（已通过裁判审查）',
+      positioning: '家庭记账本',
+      requirements: [{ id: 'F-001', priority: 'P0', story: '记录收支', assertions: ['记录后列表实时刷新'] }],
+      outOfScope: [],
+      assumptions: [],
+      constraints: [],
+      keyTasks: [
+        { taskId: 'KT-01', label: '记一笔账，月底能看到这个月花了多少', featureIds: ['F-001', 'F-002'], mustDeliver: true },
+        { taskId: 'KT-02', label: '导出账单', featureIds: ['F-003'], mustDeliver: false },
+      ],
+      expanded: false,
+      ideas: [],
+    })
+    renderDialog()
+    const section = screen.getByTestId('prd-confirm-key-tasks')
+    expect(section.textContent).toContain('记一笔账，月底能看到这个月花了多少')
+    expect(section.textContent).toContain('必须做到')
+    expect(section.textContent).toContain('尽力完成')
+    expect(section.textContent).toContain('关联功能：F-001、F-002')
+  })
 })
 
 describe('prd-terms 术语表（闭环 PR7，单点维护）', () => {
