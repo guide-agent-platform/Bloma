@@ -439,6 +439,23 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     expect(initial.payload.failures?.[0]).toMatchObject({ source: 'coverage_gap' })
   })
 
+  it('Phase 7 U1 H1：BLOMA_DELIVERY_STATUS on → 熔断让渡路径如实落 partial（F-005 败、F-001 P0 干净）；off 零写入', async () => {
+    // 开关 off（缺省）：字节级现状——project 无 delivery_status 键
+    mocks.runGwtScenarios.mockResolvedValue(gwtFailed()) // 首验与重验都失败
+    mocks.runAgentLoop.mockResolvedValue(loopCompleted())
+    await runAgentLoopPostTesting(baseInput())
+    expect(findProject(projectId).delivery_status).toBeUndefined()
+
+    // 开关 on：同一失败形态 → P0=F-001（主题锚点）无关联失败 → partial（有独立可用任务）
+    vi.stubEnv('BLOMA_DELIVERY_STATUS', '1')
+    try {
+      await runAgentLoopPostTesting(baseInput())
+      expect(findProject(projectId).delivery_status).toBe('partial')
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
   it('W2-F1：BLOMA_LOOP_CHECKPOINT on → 修复尝试入账本 + 修复卡带证据包（候选指纹+此前尝试）', async () => {
     process.env.BLOMA_LOOP_CHECKPOINT = '1'
     process.env.BLOMA_REPAIR_BUDGET = '2'

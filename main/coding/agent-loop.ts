@@ -789,6 +789,8 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     gwt_all_passed: ctx.state.gwt_all_passed,
     api_all_passed: ctx.state.api_all_passed,
     security_all_passed: ctx.state.security_all_passed,
+    // W3→H1 消费链：预检跑过才带（undefined=未跑不影响 delivery_status 判定）
+    ...(ctx.state.preflight_passed !== undefined ? { preflight_passed: ctx.state.preflight_passed } : {}),
     file_revisions: fileRevisionsOf(),
   })
   const checkpointSnapshotOf = (trigger: LoopCheckpointSnapshot['trigger'], turn: number): LoopCheckpointSnapshot => {

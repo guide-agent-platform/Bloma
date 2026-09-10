@@ -29,7 +29,7 @@ import { renderRulesSection, rulesRegistryEnabled } from '../rules-registry'
 import { renderExpressionSection } from '../prompt-expression'
 import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
 import { distillProjectMemorySafely } from '../memory-distiller'
-import { generateSketch, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from '../sketch-engine'
+import { generateSketch, backplaneKeyTasks, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from '../sketch-engine'
 import { generateSketchLlm, SketchLlmError, type SketchAttemptDetail } from '../sketch-engine-llm'
 import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from '../requirement-normalizer'
 import { readTestReport, runGwtScenarios, writeTestReport, type GwtFailureSummary, type GwtTestResult } from '../gwt-service'
@@ -42,6 +42,7 @@ import { recordDecision } from '../decision-log'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from '../recovery-service'
 import { readPrimaryIntent, recordSessionActivity } from '../session-service'
 import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, preflightEnabled, narrationEventsEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../agent-loop'
+import { deliveryStatusEnabled, recordDeliveryStatus } from './delivery-status'
 import { isDegenerateText } from './output-integrity'
 import { checkApiContract } from './api-contract'
 import { buildAgentTools } from '../agent-tools'
@@ -2161,6 +2162,28 @@ function trackTestCompleted(
 }
 
 /**
+ * Phase 7 U1 H1：终验收口点交付状态写入（BLOMA_DELIVERY_STATUS off=零行为）。
+ * 规则计算见 coding/delivery-status.ts；key_tasks 缺席时回退 P0 功能项判定；
+ * preflight 取 loop 自验快照（W3 跑过才带，undefined 不影响判定）。
+ */
+function recordPostTestingDeliveryStatus(
+  projectId: string,
+  testResult: Pick<GwtTestResult, 'failed_count' | 'failure_summary'>,
+  securityPassed: boolean,
+  loop?: AgentLoopJudgeMetadata,
+): void {
+  if (!deliveryStatusEnabled()) return
+  const backplane = readPrdBackplane(projectId)
+  recordDeliveryStatus(projectId, {
+    keyTasks: backplaneKeyTasks(backplane),
+    p0RequirementIds: backplane.requirements.filter((item) => requirementPriority(item) === 'P0').map((item) => item.id),
+    testResult,
+    securityPassed,
+    ...(loop?.validation?.preflight_passed !== undefined ? { preflightPassed: loop.validation.preflight_passed } : {}),
+  })
+}
+
+/**
  * runAgentLoopPostTesting — Agent Loop 路径的独立门禁函数（M4-A，微调方案 §4）。
  *
  * 语义固定为「只终验不重修」：GWT 终验 →（通过）安全扫描 → judge 终审 → ready / 让渡，
@@ -2179,6 +2202,9 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
   syncDocuments({ request_id: input.request_id, project_id: input.project_id, session_id: input.session_id, checkpoint: 'mvp_tested' })
   trackTestCompleted(input, testResult, 'initial')
   throwIfAborted(input.signal)
+  // Phase 7 U1 H1：熔断回滚的目标是终验失败前版本——交付状态按 initial 失败清单判定
+  // （修复轮改善不美化回滚版状态；修复收敛路径用重验后的最终结果）。
+  const initialTestResult = testResult
 
   // P2 失败回流（实施稿 §4.4）：GWT 首败先定向修复再决定熔断——预算内修复轮 + 全量
   // 重验（D2：不做失败子集，防改坏已过场景）；预算耗尽 / 修复后仍失败 → 现状熔断
@@ -2211,6 +2237,9 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
             : undefined,
         publish: (type, payload) => publish(input, type, payload),
       })
+      // Phase 7 U1 H1：B0 错误放行主路径（circuit_rollback→ready）在此如实落
+      // partial/unavailable——「部分可用不再伪装成就绪」（用回滚目标版本的 initial 清单）。
+      recordPostTestingDeliveryStatus(input.project_id, initialTestResult, true, input.loop)
       if (outcome.rolled_back) throw new CircuitBreakSettledError()
       const failureTitle =
         testResult.failure_summary.length > 0
@@ -2239,6 +2268,8 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
       failureNote: `注意：这一版安全扫描仍有 ${security.issues.length} 处命中。你可以继续试用，也可以告诉我下一步。`,
       publish: (type, payload) => publish(input, type, payload),
     })
+    // Phase 7 U1 H1：安全未过=不可隔离风险→unavailable（GWT 全过也不粉饰）。
+    recordPostTestingDeliveryStatus(input.project_id, testResult, false, input.loop)
     if (outcome.rolled_back) throw new CircuitBreakSettledError()
     publishBlockedDecision(input, 'security_repair', '检测到的安全隐患反复修不好，需要你来定夺')
     return { verdict: 'blocked', test_result: testResult }
@@ -2248,6 +2279,9 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
   // 项目文档 + 摘要经代码参数注入裁判语义审查腿（非提示词软约束，每次必执行）。
   // LLM 证据不直接判败（防视觉噪声成第二套硬门禁）；unavailable/skipped 也必须
   // 决策日志留痕并进裁判 testSummary（F9a 不静默）。
+  // Phase 7 U1 H1：GWT+安全全过在此落 verified（后续 judge 若 blocking 退回/让渡，
+  // 项目不进 ready 交付态——blocked 不消费 delivery_status；下次终验重算不背书）。
+  recordPostTestingDeliveryStatus(input.project_id, testResult, true, input.loop)
   throwIfAborted(input.signal)
   const vision = await runVisionAuditGate({ previewUrl: input.preview_url, projectId: input.project_id })
   recordDecision({

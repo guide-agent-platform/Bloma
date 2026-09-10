@@ -134,3 +134,13 @@
 
 - 消费方（后续步骤接线）：P7-2 H1 delivery_status 按 must_deliver 任务判定 verified/partial/unavailable；P7-9 J5 scope_confirmed 事件记 key_tasks 标识；向导 prompt「主任务」表述合批引用 key_tasks 不另写（J3 批次）。
 - 单测：tests/unit/key-tasks.test.ts（18 例：开关/解析/定稿/挂载）+ prd-confirm-dialog.test.tsx 渲染 1 例；bench A/B 待额度（`l1-batch --label p7-1 --env BLOMA_KEY_TASKS=1`）。
+
+## 13. Phase 7 P7-2 开关（delivery_status 交付状态，2026-09-10）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_DELIVERY_STATUS` | H1 交付状态三态（verified/partial/unavailable）——「这一版实际验证到什么程度」的规则化结论，错误放行的产品层根治位 | **off** | 字节级现状（project 无 delivery_status 键、终验链路零计算） | 终验三收口点写入 project：①GWT 熔断回滚（用 initial 失败清单——回滚目标版本口径，修复轮改善不美化）②安全未过（unavailable）③GWT+安全全过（verified；后续 judge blocking 不进 ready 不消费）。规则：安全未过/预览不可访问→unavailable；failed=0 且 preflight≠false→verified（v0 从严：预检未过面=partial）；必交任务全关联失败→unavailable；其余（含 API 契约失活不可归属）→partial。key_tasks（P7-1）优先、P0 功能项回退；场景按 `F-xxx ` 前缀归属 | `deliveryStatusEnabled`/`computeDeliveryStatus`/`recordDeliveryStatus`（main/coding/delivery-status.ts）+ 收口接线（programming-orchestrator recordPostTestingDeliveryStatus） |
+
+- LoopValidationSnapshot 扩可选字段 `preflight_passed`（W3→H1 消费链：agent-loop validationOf 跑过才带；存量快照零迁移）。
+- 纪律：Agent/loop 工具面无写入口（updateProject 不经工具面暴露）；每次终验重算——旧版本通过不给新版本背书。
+- 单测：tests/unit/delivery-status.test.ts（25 例：规则全分支 + B0 六样本重放验收——真实失败清单全部落 partial/unavailable 无一 verified）+ repair 集成 1 例（off 零写入/on 熔断让渡落 partial）；bench A/B 待额度。

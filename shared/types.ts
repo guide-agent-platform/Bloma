@@ -838,6 +838,8 @@ export interface LoopValidationSnapshot {
   gwt_all_passed: boolean
   api_all_passed: boolean
   security_all_passed: boolean
+  /** W3 收口预检结果（BLOMA_PREFLIGHT 跑过才带；Phase 7 U1 H1 delivery_status 消费：false=有未过验证面，从严不称 verified） */
+  preflight_passed?: boolean
   /** 已读文件版本戳（path→rev，W2-F1 证据包/候选指纹原料）；未启用版本戳功能时为空对象 */
   file_revisions: Record<string, string>
 }
@@ -942,9 +944,19 @@ export interface Project {
   via_agent_loop?: boolean
   /** 最近一次 Agent Loop 的结束状态（M4-B：judge loop-aware 读；resume 时透传给终验） */
   agent_loop_status?: AgentLoopStatus
+  /**
+   * 交付状态（Phase 7 U1 H1，2026-09-10）：这一版实际验证到什么程度的三态结论。
+   * 只由终验链路规则函数计算写入（main/coding/delivery-status.ts），Agent/loop 工具面
+   * 无写入口；每次终验重算——旧版本通过不给新版本背书。BLOMA_DELIVERY_STATUS
+   * 缺省 off=不计算不写入（project 无此键，字节级现状）。
+   */
+  delivery_status?: DeliveryStatus
   created_at: string
   updated_at: string
 }
+
+/** 交付状态三态（Phase 7 U1 H1，规则见 main/coding/delivery-status.ts）。 */
+export type DeliveryStatus = 'verified' | 'partial' | 'unavailable'
 
 export interface ConfirmSketchInput extends RequestEnvelope {
   project_id: string
