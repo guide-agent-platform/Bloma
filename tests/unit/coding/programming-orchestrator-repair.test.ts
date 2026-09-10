@@ -256,6 +256,13 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     // 让渡卡带上重验后的最新失败清单（现状 failureTitle 逻辑）
     const card = events.find((event) => event.type === 'user_decision_required')
     expect(card?.payload.title).toContain('F-005')
+    // Phase 7 U1 H4：熔断 failureNote 升级四段式（功能→现象→影响→替代；无开关直接上）
+    const cbArgs = mocks.circuitBreakRollback.mock.calls[0][0] as { failureNote?: string }
+    expect(cbArgs.failureNote).toContain('【功能】')
+    expect(cbArgs.failureNote).toContain('【现象】')
+    expect(cbArgs.failureNote).toContain('【影响】')
+    expect(cbArgs.failureNote).toContain('【替代】')
+    expect(cbArgs.failureNote).toContain('F-005')
     // 修复轮消耗计数：1（未收敛不清零）
     expect(findProject(projectId).test_repair_count).toBe(1)
   })

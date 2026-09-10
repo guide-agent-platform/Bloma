@@ -42,7 +42,7 @@ import { recordDecision } from '../decision-log'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from '../recovery-service'
 import { readPrimaryIntent, recordSessionActivity } from '../session-service'
 import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, preflightEnabled, narrationEventsEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../agent-loop'
-import { deliveryStatusEnabled, recordDeliveryStatus } from './delivery-status'
+import { deliveryStatusEnabled, recordDeliveryStatus, buildDeliveryPresentation, renderCircuitFailureNote, renderDeliveryBody } from './delivery-status'
 import { isDegenerateText } from './output-integrity'
 import { checkApiContract } from './api-contract'
 import { buildAgentTools } from '../agent-tools'
@@ -1817,6 +1817,9 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
   publish(input, 'user_decision_required', {
     kind: 'ready_next_steps',
     title: '当前版本已就绪——下一步走向完整产物',
+    // Phase 7 U1 H3：交付状态三层正文（结论/任务分组/详情提示；delivery_status
+    // 缺席时 undefined 渲染端自动隐藏——开关 off 时与现状字节一致）
+    delivery_body: buildReadyDeliveryBody(input.project_id),
     questions: [
       { id: 'next_backend', label: '把数据存到服务端', description: '历史/记录改用 server/routes + data/ 持久化' },
       { id: 'export_handoff', label: '导出部署', description: '生成可独立部署的前后端工程' },
@@ -2162,7 +2165,7 @@ function trackTestCompleted(
 }
 
 /**
- * Phase 7 U1 H1：终验收口点交付状态写入（BLOMA_DELIVERY_STATUS off=零行为）。
+ * Phase 7 U1 H1/H4：终验收口点交付状态写入（BLOMA_DELIVERY_STATUS off=零行为）。
  * 规则计算见 coding/delivery-status.ts；key_tasks 缺席时回退 P0 功能项判定；
  * preflight 取 loop 自验快照（W3 跑过才带，undefined 不影响判定）。
  */
@@ -2181,6 +2184,36 @@ function recordPostTestingDeliveryStatus(
     securityPassed,
     ...(loop?.validation?.preflight_passed !== undefined ? { preflightPassed: loop.validation.preflight_passed } : {}),
   })
+}
+
+/**
+ * Phase 7 U1 H4：必交功能项集（熔断 failureNote 四段式的核心目标判定；无开关直接上）。
+ */
+function mustDeliverFeatureIdsOf(projectId: string): string[] {
+  const backplane = readPrdBackplane(projectId)
+  const keyTasks = backplaneKeyTasks(backplane)
+  if (keyTasks.length > 0) return [...new Set(keyTasks.filter((t) => t.must_deliver).flatMap((t) => t.feature_ids))]
+  return backplane.requirements.filter((item) => requirementPriority(item) === 'P0').map((item) => item.id)
+}
+
+/**
+ * Phase 7 U1 H3：ready 引导卡交付正文（三层：结论/任务分组✓×?/详情提示；无通过率数字）。
+ * delivery_status 缺席（开关 off/未终验）→ undefined 不加载荷（渲染端自动隐藏）。
+ */
+function buildReadyDeliveryBody(projectId: string): string | undefined {
+  const project = findProject(projectId)
+  if (!project?.delivery_status) return undefined
+  const testReport = readTestReport(projectId)
+  const backplane = readPrdBackplane(projectId)
+  const storyOf = new Map(backplane.requirements.map((item) => [item.id, requirementStory(item)]))
+  const presentation = buildDeliveryPresentation({
+    status: project.delivery_status,
+    keyTasks: backplaneKeyTasks(backplane),
+    p0RequirementIds: backplane.requirements.filter((item) => requirementPriority(item) === 'P0').map((item) => item.id),
+    testResult: testReport ?? { failed_count: 0, failure_summary: [] },
+    featureLabelOf: (id) => storyOf.get(id),
+  })
+  return renderDeliveryBody(presentation)
 }
 
 /**
@@ -2229,11 +2262,15 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
         session_id: input.session_id,
         project_id: input.project_id,
         reason: `终验未通过（Agent Loop 路径，${loopOutcomeNote(input.loop)}）`,
-        // 回滚目标快照是终验失败前的版本：如实带上已知未通过断言，防「可以继续试用」
-        // 把坏版本当健康品（随记灵 2026-09-06 案：用户回滚后「用不了」）
+        // 回滚目标快照是终验失败前的版本：如实带上已知未通过断言（Phase 7 U1 H4
+        // 升级为四段式：功能→现象→影响→替代；核心目标/敏感类不折叠，防「可以继续
+        // 试用」把坏版本当健康品——随记灵 2026-09-06 案）
         failureNote:
           testResult.failure_summary.length > 0
-            ? `注意：这一版仍有 ${testResult.failed_count} 项行为断言未通过：${testResult.failure_summary.map((f) => f.scenario).join('、')}。你可以继续试用其他功能，也可以告诉我下一步（继续修复或换个思路重新生成）。`
+            ? renderCircuitFailureNote({
+                failures: testResult.failure_summary,
+                mustDeliverFeatureIds: mustDeliverFeatureIdsOf(input.project_id),
+              })
             : undefined,
         publish: (type, payload) => publish(input, type, payload),
       })

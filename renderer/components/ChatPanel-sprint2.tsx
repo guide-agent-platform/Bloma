@@ -78,6 +78,8 @@ interface UserDecisionPayload {
   defender_summary?: unknown
   /** 内审（2026-09-01）：厂商隔离事实——false = 本次内审未隔离（如实标注不冒充） */
   vendor_isolated?: unknown
+  /** 交付状态三层正文（Phase 7 U1 H3，2026-09-10）：ready 引导卡携带；缺席不渲染 */
+  delivery_body?: unknown
 }
 
 // =========================================================================
@@ -122,7 +124,8 @@ function extractDecisionCards(events: AgentEvent[]): DecisionCards | null {
     // B5 防御：question 缺 id 时兜底（A1 已补 id，此处双保险，避免 key=undefined 崩坏）
     return {
       title: payload.title,
-      body: extractDecisionBody(payload),
+      // H3：交付状态三层正文优先（ready 引导卡）；无 delivery_body 走原正文链
+      body: extractDeliveryBody(payload) ?? extractDecisionBody(payload),
       options: questions.map((q, i) => ({
         id: q.id ?? q.label ?? String(i),
         label: q.label,
@@ -136,7 +139,8 @@ function extractDecisionCards(events: AgentEvent[]): DecisionCards | null {
 
 /** 决策卡正文（2026-08-29）：审查卡的问题清单（severity 徽标+问题描述），
  * 其它卡回退 summary 字段；都没有则 undefined 不渲染。
- * 内审（2026-09-01）：清单前缀 Defender 自动修订摘要，后缀厂商隔离事实标注。 */
+ * 内审（2026-09-01）：清单前缀 Defender 自动修订摘要，后缀厂商隔离事实标注。
+ * 交付状态（2026-09-10 H3）：delivery_body 优先于 summary（ready 引导卡三层正文）。 */
 function extractDecisionBody(payload: UserDecisionPayload): string | undefined {
   const issues = Array.isArray(payload.issues) ? payload.issues : []
   if (issues.length > 0) {
@@ -160,6 +164,12 @@ function extractDecisionBody(payload: UserDecisionPayload): string | undefined {
     return sections.join('\n')
   }
   return typeof payload.summary === 'string' && payload.summary ? payload.summary : undefined
+}
+
+/** 交付状态正文提取（H3）：delivery_body 为非空字符串时优先于 summary（多行文本
+ * 由 ChatPanel decisionBody 的 pre-wrap 渲染承载）。 */
+function extractDeliveryBody(payload: UserDecisionPayload): string | undefined {
+  return typeof payload.delivery_body === 'string' && payload.delivery_body.trim() ? payload.delivery_body : undefined
 }
 
 // =========================================================================

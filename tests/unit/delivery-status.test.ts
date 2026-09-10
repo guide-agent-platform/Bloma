@@ -11,11 +11,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../../main/project-service', () => ({ updateProject: vi.fn() }))
 
 import {
+  buildDeliveryPresentation,
+  buildFourPartFailure,
   computeDeliveryStatus,
   deliveryStatusEnabled,
   deliveryStatusLabel,
   featureIdFromScenario,
   recordDeliveryStatus,
+  renderCircuitFailureNote,
+  renderDeliveryBody,
   type DeliveryStatusComputationInput,
 } from '../../main/coding/delivery-status'
 import { updateProject } from '../../main/project-service'
@@ -262,5 +266,100 @@ describe('标签与结论模板（H3 消费同源）', () => {
     expect(deliveryStatusLabel('verified')).toBe('已验证')
     expect(deliveryStatusLabel('partial')).toBe('部分可用')
     expect(deliveryStatusLabel('unavailable')).toBe('不可用')
+  })
+})
+
+describe('H3 三层交付展示（buildDeliveryPresentation + renderDeliveryBody）', () => {
+  it('partial：结论句拼任务名 + 任务分组 ✓×?；断言通过率数字不进正文', () => {
+    const presentation = buildDeliveryPresentation({
+      status: 'partial',
+      keyTasks: [
+        { task_id: 'KT-01', label: '记一笔账', feature_ids: ['F-001'], must_deliver: true },
+        { task_id: 'KT-02', label: '自动总结', feature_ids: ['F-002'], must_deliver: true },
+        { task_id: 'KT-03', label: '导出', feature_ids: ['F-003'], must_deliver: false },
+      ],
+      p0RequirementIds: [],
+      testResult: failures('F-002 WHEN 输入碎片想法 → 显示AI整理后的内容'),
+    })
+    expect(presentation.conclusion).toBe('记一笔账可以使用，自动总结还没有做好。')
+    expect(presentation.taskLines).toEqual(['✓ 记一笔账', '× 自动总结', '✓ 导出'])
+    expect(renderDeliveryBody(presentation)).not.toMatch(/\d+\s*\/\s*\d+/)
+  })
+
+  it('未验证断言（unverified）→ 任务组标 ?（尚未完成验证）', () => {
+    const presentation = buildDeliveryPresentation({
+      status: 'verified',
+      keyTasks: [],
+      p0RequirementIds: ['F-001', 'F-002'],
+      testResult: { failed_count: 0, failure_summary: [], unverified: ['F-002 图表区域应呈现月度分布'] },
+    })
+    expect(presentation.taskLines).toEqual(['✓ F-001', '? F-002'])
+  })
+
+  it('unavailable：结论句如实（关键任务没完成）；detailHint 带修复引导', () => {
+    const presentation = buildDeliveryPresentation({
+      status: 'unavailable',
+      keyTasks: [],
+      p0RequirementIds: ['F-001'],
+      testResult: failures('F-001 WHEN 点击数字按钮 → 显示对应数字'),
+    })
+    expect(presentation.conclusion).toContain('不能当作可用版本')
+    expect(presentation.detailHint).toContain('先修好没做好的')
+  })
+
+  it('featureLabelOf 拼 P0 功能项故事（回退口径展示不裸号）', () => {
+    const presentation = buildDeliveryPresentation({
+      status: 'verified',
+      keyTasks: [],
+      p0RequirementIds: ['F-001'],
+      testResult: cleanResult,
+      featureLabelOf: (id) => (id === 'F-001' ? '记录收入与支出' : undefined),
+    })
+    expect(presentation.taskLines).toEqual(['✓ 记录收入与支出'])
+  })
+})
+
+describe('H4 四段式问题话术', () => {
+  it('单条四段：功能去 id 前缀拼动作句；现象/影响/替代三句人话', () => {
+    const four = buildFourPartFailure({ scenario: 'F-005 当在搜索框输入关键词时，历史列表应显示匹配的想法', reason: '断言未通过——触发状态：capture-input 未命中' })
+    expect(four.feature).toBe('F-005 当在搜索框输入关键词时，历史列表应显示匹配的想法')
+    expect(four.phenomenon).toBe('自动检查时，这一步没有得到预期结果')
+    expect(four.impact).toContain('不能当作可用来依赖')
+    expect(four.alternative).toContain('先修好这项')
+  })
+
+  it('验证工具异常 → 现象句分话术「验证工具没有完成这一项的检查，状态待确认」', () => {
+    const four = buildFourPartFailure({ scenario: 'F-001 入口检查', reason: '预览不可访问' })
+    expect(four.phenomenon).toContain('状态待确认')
+  })
+
+  it('清单默认展开 3 项（必交项已在前 3 内），其余折叠为计数行', () => {
+    const note = renderCircuitFailureNote({
+      failures: [1, 2, 3, 4, 5].map((n) => ({ scenario: `F-00${n} 场景${n}`, reason: '断言未通过' })),
+      mustDeliverFeatureIds: ['F-001'],
+    })
+    expect(note).toContain('这一版有 5 项检查未通过')
+    expect(note).toContain('【功能】')
+    expect(note).toContain('F-003 场景3')
+    expect(note).not.toContain('F-004 场景4')
+    expect(note).toContain('还有 2 项未通过')
+  })
+
+  it('敏感类（数据丢失/金额）不折叠，即使排在第 4 项以后', () => {
+    const note = renderCircuitFailureNote({
+      failures: [
+        { scenario: 'F-002 场景2', reason: '断言未通过' },
+        { scenario: 'F-003 场景3', reason: '断言未通过' },
+        { scenario: 'F-004 场景4', reason: '断言未通过' },
+        { scenario: 'F-006 点击清空→数据丢失风险', reason: '断言未通过' },
+      ],
+      mustDeliverFeatureIds: ['F-001'],
+    })
+    expect(note).toContain('F-006 点击清空→数据丢失风险')
+    expect(note).not.toContain('还有')
+  })
+
+  it('空失败清单 → 空串（调用方不附注）', () => {
+    expect(renderCircuitFailureNote({ failures: [], mustDeliverFeatureIds: [] })).toBe('')
   })
 })
