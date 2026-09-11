@@ -44,6 +44,7 @@ import { readPrimaryIntent, recordSessionActivity } from '../session-service'
 import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, preflightEnabled, narrationEventsEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../agent-loop'
 import { deliveryStatusEnabled, recordDeliveryStatus, buildDeliveryPresentation, renderCircuitFailureNote, renderDeliveryBody, featureIdFromScenario } from './delivery-status'
 import { isDegenerateText } from './output-integrity'
+import { composeDeliveryMessage, type DeliveryNarrationFacts, type DeliveryNarrationResult } from './delivery-narrator'
 import { checkApiContract } from './api-contract'
 import { buildAgentTools } from '../agent-tools'
 import { disposeParentDelegationState, registerParentLoopContext, setChildToolsBuilder } from '../agent-collaboration'
@@ -1502,7 +1503,9 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     snapshotSummary: snapshotKind === 'iteration'
       ? `已按修改意见重新生成（Agent Loop，${result.turns} 轮 / ${result.toolCalls.length} 次工具调用），进入测试阶段。`
       : `MVP 已生成（Agent Loop，${result.turns} 轮 / ${result.toolCalls.length} 次工具调用），进入测试阶段。`,
-    readySummary: result.finalText.slice(0, 200) || `Agent Loop 生成完成（${result.status}）。`,
+    // 交付话术改造（2026-09-11）：mvp_ready.summary 不再携带 loop 过程复盘文本
+    //（finalText 已降级为过程素材，交付交代由 delivery_message 专用链路发布）
+    readySummary: `MVP 生成完成（${result.status === 'completed' ? '全部验证通过' : result.status}，${result.turns} 轮 / ${result.toolCalls.length} 次工具调用）。`,
     previewUrl: sandbox.preview_url,
     viaAgentLoop: true,
     loopResult: result,
@@ -1899,12 +1902,19 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
   throwIfAborted(input.signal)
   updateProject(input.project_id, { current_stage: 'ready' })
   publish(input, 'stage_changed', { stage: 'ready' })
-  // 软建议（suggest）不再静默忽略：把可读提示附在完成通知后反馈给用户（P1）
-  const completion =
-    verdict.verdict === 'suggest'
-      ? `${READY_COMPLETION_COPY}\n\n补充提示：${verdict.user_visible_summary}`
-      : READY_COMPLETION_COPY
-  publishCompletionMessage(input, completion)
+  // 交付话术改造（2026-09-11）：loop 的过程复盘文本不再进交付链——终验通过后由
+  // 向导渠道把结构化事实改写为面向用户的通俗交付交代（delivery_message 事件）；
+  // 改写失败/渠道缺失回退 READY_COMPLETION_COPY 固定话术（不阻断交付链）。
+  // 软建议（suggest）不再静默忽略：可读提示附在交付文本后反馈给用户（P1）
+  const delivery = await composeJudgeDeliveryNarration(input)
+  const suggestNote =
+    verdict.verdict === 'suggest' && verdict.user_visible_summary
+      ? `\n\n补充提示：${verdict.user_visible_summary}`
+      : ''
+  const completion = delivery.fallback
+    ? `${READY_COMPLETION_COPY}${suggestNote}`
+    : `${delivery.text}${suggestNote}`
+  publishDeliveryMessage(input, completion, delivery.fallback)
   // MVP 就绪三按钮卡（2026-09-11 用户拍板改版）：生成完**立即**弹，让用户选
   // 保持现状（停）/ 局部优化（跳输入框说改哪里）/ 整版重做（先问方向再二次确认）。
   // 分流只依赖用户点选的选项，不依赖用户在输入框里说的话。原「下一步走向完整产物」
@@ -3187,6 +3197,78 @@ function publishCompletionMessage(
   })
   publish(input, 'message_delta', { text })
   publish(input, 'completed', { subtype: 'success' })
+}
+
+/**
+ * 最终交付文本发布（2026-09-11 交付话术改造）：向导改写产物走 delivery_message 专用
+ * 事件（渲染端据此把本轮过程文本收起，交付文本独立成泡）；JSONL 落盘与 completed
+ * 收尾语义与 publishCompletionMessage 一致。
+ */
+function publishDeliveryMessage(
+  input: Pick<SketchTaskInput, 'session_id' | 'project_id'>,
+  text: string,
+  fallback: boolean,
+): void {
+  appendSessionMessage(input.session_id, {
+    role: 'assistant',
+    content: [{ type: 'text', text }],
+    timestamp: Date.now(),
+  })
+  publish(input, 'delivery_message', { text, fallback })
+  publish(input, 'completed', { subtype: 'success' })
+}
+
+/**
+ * 组装交付改写事实包并调用向导渠道（delivery-narrator）。
+ * 事实唯一事实源：背板（产品/功能项）+ 测试报告 + loop 自验快照/过程文本 + 裁判结论；
+ * 任何读取失败不阻断交付（catch 后走兑底）。
+ */
+async function composeJudgeDeliveryNarration(
+  input: JudgeReviewInput,
+): Promise<DeliveryNarrationResult> {
+  try {
+    const backplane = readPrdBackplane(input.project_id)
+    const testResult = readTestReport(input.project_id)
+    const validation = input.loop?.validation
+    const features = backplane.requirements
+      .map((r) => (r.story?.trim() || r.description.trim()))
+      .filter(Boolean)
+    const facts: DeliveryNarrationFacts = {
+      productName: backplane.name,
+      positioning: backplane.positioning,
+      features,
+      testSummary: testResult
+        ? testResult.failed_count > 0
+          ? `${testResult.passed_count}/${testResult.total_count} 项通过，${testResult.failed_count} 项未过`
+          : `${testResult.total_count} 项行为验证全部通过`
+        : undefined,
+      securitySummary: validation
+        ? validation.security_all_passed
+          ? '安全检查通过，无高危问题'
+          : '安全检查存在未闭环项'
+        : undefined,
+      leftoverNotes: [
+        ...(validation && validation.last_gwt_failures.length > 0
+          ? [`未完全验证的场景：${validation.last_gwt_failures.slice(0, 3).join('、')}`]
+          : []),
+        // suggest 结论不入素材（2026-09-11 审计 P3-1）：同一段 user_visible_summary
+        // 已在 runJudgeReview 以「补充提示」原文附加在交付文本之后，再进素材会重复呈现
+      ],
+      // loop 过程收尾文本（复盘腔）只作素材参考，改写纪律在 delivery-narrator 系统提示词里锁死
+      ...(input.loop?.finalText?.trim() ? { processText: input.loop.finalText } : {}),
+    }
+    return await composeDeliveryMessage({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      ...(input.channel_id ? { channel_id: input.channel_id } : {}),
+      ...(input.query ? { query: input.query } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
+      facts,
+    })
+  } catch {
+    return { text: '', fallback: true }
+  }
 }
 
 /** 无人值守自动化路径的工具门禁：显式传入豁免模式，不弹 UI，危险工具仍拒绝。 */

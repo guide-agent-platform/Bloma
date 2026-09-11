@@ -32,7 +32,7 @@ export type {
 }
 export type { ElectronAPI } from '../../shared/types'
 
-export interface AgentStreamState { running: boolean; events: AgentEvent[]; content: string; last_error?: string }
+export type { AgentStreamState } from '../agent-atoms'
 export interface CorrectionPayload { position: { x: number; y: number }; userNote: string; fallbackMode: boolean }
 export interface CardOption { id: string; label: string; description?: string }
 

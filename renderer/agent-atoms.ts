@@ -76,6 +76,8 @@ export interface AgentStreamState {
   events: AgentEvent[]
   /** 累积文本 */
   content: string
+  /** 累积思考文本（thinking_delta，2026-09-11 交付话术改造：与旁白正文分道累积） */
+  thinking: string
   /** 最近错误 */
   last_error?: string
 }
@@ -85,6 +87,7 @@ export const agentStreamStateFamily = atomFamily((sessionId: string) =>
     running: false,
     events: [],
     content: '',
+    thinking: '',
   }),
 )
 
@@ -340,6 +343,7 @@ export const sessionUsageFamily = atomFamily((sessionId: string) => atom<Session
 /** 新一轮生成的开始信号：上一轮已终结后，这些事件到达即视为新一轮（清空历史 events，折叠组只显示最近一轮）。 */
 const NEW_RUN_SIGNALS = new Set([
   'message_delta',
+  'thinking_delta',
   'stage_changed',
   'tool_call_started',
   'user_decision_required',
@@ -351,6 +355,33 @@ const NEW_RUN_SIGNALS = new Set([
   'loop_compaction',
   'delegation_started',
 ])
+
+/**
+ * 流水线阶段（2026-09-11 交付话术改造）：这些阶段下产生的旁白/状态叙述属于「过程记录」，
+ * 默认折叠；区分纯对话阶段（clarifying / sketch_ready / ready / blocked）——那里的文本
+ * 是用户在等的问答/确认，不折叠。判据取整个 run 的事件流：只要出现过工具调用、思考或
+ * 任一流水线阶段，本次 run 沉淀的文本即视为过程记录（含同 run 内更早发的状态旁白，
+ * 如「需求已确认，正在内审这份 PRD」）。
+ */
+const PIPELINE_STAGES = new Set([
+  'generating_sketch',
+  'generating_mvp',
+  'testing',
+  'judge_review',
+  'repairing',
+  'iterating',
+  'upgrading',
+])
+
+/** 本次 run 是否为流水线过程（旁白/思考/工具之一出现即真）。 */
+export function isProcessRun(events: AgentEvent[]): boolean {
+  return events.some(
+    (event) =>
+      event.type === 'tool_call_started' ||
+      event.type === 'thinking_delta' ||
+      (event.type === 'stage_changed' && PIPELINE_STAGES.has(String(event.payload.stage ?? ''))),
+  )
+}
 
 /** I3（P7-7）：steer 状态条 upsert（steer_status/steer_injected 事件同口径）。
  *  事件到达顺序无保证：同 steer_id 以 updatedAt 新者胜，保序插入（新 steer 追加尾部）。 */
@@ -532,22 +563,69 @@ export function setupGlobalAgentListeners(): () => void {
       }
     }
 
-    // 终态事件：将本次运行累积的流式回复沉淀为一条助手消息，
+    // 终态事件：将本次运行累积的流式回复沉淀为一条助手消息（含思考块），
     // 修复「completed 后 running=false，流式文本消失且从未进消息列表」。
-    // 读取尚未被重置的 content（同步），随后 reducer 再清空。
+    // 读取尚未被重置的 content/thinking/events（同步），随后 reducer 再清空。
+    // 过程记录标记（2026-09-11）：本次 run 含工具/思考/流水线阶段 → 该文本归属「过程记录」，
+    // 渲染层默认折叠（可展开/收起）；纯对话 run（就绪确认/追问）不带标记，保持普通气泡。
     if (event.type === 'completed' || event.type === 'error') {
       const terminalStreamAtom = agentStreamStateFamily(event.session_id)
-      const accumulated = store.get(terminalStreamAtom)?.content ?? ''
-      if (accumulated.trim()) {
+      const streamSnapshot = store.get(terminalStreamAtom)
+      const accumulated = streamSnapshot?.content ?? ''
+      const accumulatedThinking = (streamSnapshot?.thinking ?? '').trim()
+      const processRecord =
+        event.type === 'completed' && isProcessRun(streamSnapshot?.events ?? [])
+      const blocks: AgentMessage['content'] = [
+        ...(accumulatedThinking ? [{ type: 'thinking' as const, thinking: accumulatedThinking }] : []),
+        ...(accumulated.trim() ? [{ type: 'text' as const, text: accumulated }] : []),
+      ]
+      if (blocks.length > 0) {
         store.set(agentMessagesFamily(event.session_id), (previous) => [
           ...previous,
           {
             role: 'assistant',
-            content: [{ type: 'text', text: accumulated }],
+            content: blocks,
             timestamp: Date.now(),
+            ...(processRecord ? { process_record: true } : {}),
           },
         ])
       }
+    }
+
+    // 最终交付文本（2026-09-11 交付话术改造）：先把本 run 累积的过程文本（旁白/思考）
+    // 落为一条**已收起**的「生成过程」消息，再落交付消息——次序为先过程后交付
+    //（对齐 Proma ProcessBlockGroup「尾部答案在过程组之后」）。随后清空流式累积，
+    // 避免随后的 completed 重复 flush（此时 content 已空，终态分支零动作）。
+    if (event.type === 'delivery_message' && typeof event.payload.text === 'string' && event.payload.text) {
+      const deliveryText = event.payload.text
+      const streamAtom = agentStreamStateFamily(event.session_id)
+      const snapshot = store.get(streamAtom)
+      const thinkingText = (snapshot?.thinking ?? '').trim()
+      const narrationText = snapshot?.content ?? ''
+      const processBlocks: AgentMessage['content'] = [
+        ...(thinkingText ? [{ type: 'thinking' as const, thinking: thinkingText }] : []),
+        ...(narrationText.trim() ? [{ type: 'text' as const, text: narrationText }] : []),
+      ]
+      store.set(agentMessagesFamily(event.session_id), (previous) => [
+        ...previous,
+        ...(processBlocks.length > 0
+          ? [
+              {
+                role: 'assistant' as const,
+                content: processBlocks,
+                timestamp: Date.now(),
+                process_record: true,
+              },
+            ]
+          : []),
+        {
+          role: 'assistant' as const,
+          content: [{ type: 'text' as const, text: deliveryText }],
+          timestamp: Date.now(),
+        },
+      ])
+      // 清空流式累积（本 run 的过程文本已沉淀为消息）
+      store.set(streamAtom, (previous) => ({ ...previous, content: '', thinking: '' }))
     }
 
     // 新一轮决策需求到达 → 重置消费标记，让新卡片能重新弹出
@@ -796,7 +874,14 @@ export function setupGlobalAgentListeners(): () => void {
         }
       }
 
-      const text = typeof event.payload.text === 'string' ? event.payload.text : ''
+      // 思考分离（2026-09-11）：thinking_delta 进 thinking 累积；delivery_message 的
+      // 正文已由上方专用 handler 独立成泡，不进流式 content（避免 completed 时重复上屏）
+      const text =
+        event.type !== 'thinking_delta' && event.type !== 'delivery_message' && typeof event.payload.text === 'string'
+          ? event.payload.text
+          : ''
+      const thinkingText =
+        event.type === 'thinking_delta' && typeof event.payload.text === 'string' ? event.payload.text : ''
       const isTerminal = event.type === 'completed' || event.type === 'error'
       // 新一轮开始（上一轮已终结，且当前是生成类事件）→ 清空历史 events/content，
       // 折叠组只显示最近一轮工具调用，不累积多轮历史
@@ -813,6 +898,7 @@ export function setupGlobalAgentListeners(): () => void {
         running,
         events: [...(isNewRun ? [] : previous.events), event],
         content: isTerminal ? '' : (isNewRun ? '' : previous.content) + text,
+        thinking: isTerminal ? '' : (isNewRun ? '' : previous.thinking) + thinkingText,
         last_error:
           event.type === 'error'
             ? String(event.payload.code ?? 'AGENT_SDK_ERROR')

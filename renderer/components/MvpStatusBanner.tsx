@@ -40,6 +40,7 @@ const nullSessionFallback = atom<AgentStreamState>({
   running: false,
   events: [],
   content: '',
+  thinking: '',
 })
 
 // =========================================================================

@@ -50,6 +50,7 @@ const nullStreamFallback = atom<AgentStreamState>({
   running: false,
   events: [],
   content: '',
+  thinking: '',
 })
 
 // sessionId 为空时的 consumed 兜底：必须模块级常量。

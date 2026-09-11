@@ -71,7 +71,7 @@ describe('useUserDecisionCards 决策卡提取', () => {
     store.set(decisionConsumedFamily('session-1'), false)
     store.set(agentStreamStateFamily('session-1'), {
       running: false,
-      content: '',
+      content: '', thinking: '',
       events: [
         event('user_decision_required', {
           kind: 'mvp_review',

@@ -102,7 +102,7 @@ describe('T6 后台执行 + 待决策找回（渲染端验收）', () => {
     store.set(activeAgentSessionIdAtom, 'session-a')
     store.set(agentStreamStateFamily('session-a'), {
       running: false,
-      content: '',
+      content: '', thinking: '',
       events: [
         event('session-a', 'project-a', 'user_decision_required', {
           kind: 'blocked',

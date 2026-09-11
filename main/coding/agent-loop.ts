@@ -9,6 +9,7 @@ import { prepareRecallBlock } from '../session-recall'
 import { estimateTokenCount } from '../usage-guard'
 import { windowMessagesWithDigest } from '../compacting-window'
 import { isDegenerateText } from './output-integrity'
+import { createThinkStreamSplitter } from './think-splitter'
 import { drainSteerQueue, markLoopActive, markLoopInactive, markSteerMerged, pendingSteerCount, settleSteerEntry, steerConfirmEnabled, wrapSteerContent } from '../steer-queue'
 
 /**
@@ -911,14 +912,36 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     // 裸拼接会让旁白「每词一段」；同时把连续 text 增量合并为单块落盘（对齐 guide
     // 路径的整段化，JSONL 不再落几百个碎块）。
     const cleaner = createWhitespaceArtifactCleaner()
+    // 思考分离（2026-09-11 交付话术改造）：正文增量经 <think> 流式拆块，思考片段
+    // 走 thinking_delta 事件单独上屏（渲染端默认折叠），不再混进旁白正文。
+    const thinkSplitter = createThinkStreamSplitter()
     const textParts: string[] = []
-    const emitText = (text: string): void => {
+    const thinkingParts: string[] = []
+    const pushNarration = (text: string): void => {
       // 助手旁白照常进事件流上屏（与 runAgent 的 message_delta 语义一致）
       input.publish('message_delta', { text })
       textParts.push(text)
     }
+    const pushThinking = (text: string): void => {
+      if (!text) return
+      input.publish('thinking_delta', { text })
+      thinkingParts.push(text)
+    }
+    const emitText = (text: string): void => {
+      const split = thinkSplitter.push(text)
+      for (const piece of split.narration) pushNarration(piece)
+      for (const piece of split.thinking) pushThinking(piece)
+    }
     const flushTextRun = (): void => {
       for (const piece of cleaner.end()) emitText(piece)
+      const tail = thinkSplitter.end()
+      for (const piece of tail.narration) pushNarration(piece)
+      for (const piece of tail.thinking) pushThinking(piece)
+      // 思考块先落（一轮内思考通常在正文之前）；两类块各自合并成单块，JSONL 保留原文
+      if (thinkingParts.length > 0) {
+        assistantBlocks.push({ type: 'thinking', thinking: thinkingParts.join('').trim() })
+        thinkingParts.length = 0
+      }
       if (textParts.length > 0) {
         assistantBlocks.push({ type: 'text', text: textParts.join('') })
         textParts.length = 0
@@ -942,6 +965,11 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
           for (const block of sdk.message.content) {
             if (block.type === 'text' && block.text) {
               for (const piece of cleaner.push(block.text)) emitText(piece)
+            } else if (block.type === 'thinking') {
+              // 思考通道原生块（Anthropic thinking enabled / effort 渠道）：同样走
+              // thinking_delta 单独上屏，不与旁白正文混排；落盘保留原文
+              flushTextRun()
+              if (typeof block.thinking === 'string' && block.thinking) pushThinking(block.thinking)
             } else {
               // tool_use 块前先把挂起的空白与文本段收口，保持块序与流序一致
               flushTextRun()
@@ -961,11 +989,21 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         // 配对，带着落盘会让恢复/续跑重放历史时 400（可重放面不进残局）；取消后
         // 不再 emitText 追发 UI 增量。落盘失败静默，不影响取消语义。
         try {
-          const partial = [...textParts, ...cleaner.end()].join('')
+          // 取证文本收口：cleaner 残余逐片过思考拆块器后连同 pending 尾部一并冲收
+          //（2026-09-11 思考分离：拆块器会扣住尾部 ≤5 字符防标签切断，不冲收会丢字）
+          const cancelNarration: string[] = []
+          for (const piece of cleaner.end()) cancelNarration.push(...thinkSplitter.push(piece).narration)
+          cancelNarration.push(...thinkSplitter.end().narration)
+          const partial = [...textParts, ...cancelNarration].join('')
           const textBlocks = assistantBlocks.filter((block) => block.type === 'text')
-          const blocks: MessageContentBlock[] = partial
-            ? [...textBlocks, { type: 'text', text: partial }]
-            : [...textBlocks]
+          // 未冲收的思考片段同样落盘取证（ thinking 块不进重放面，无 400 风险）
+          const thinkingBlock: MessageContentBlock | undefined =
+            thinkingParts.length > 0 ? { type: 'thinking', thinking: thinkingParts.join('').trim() } : undefined
+          const blocks: MessageContentBlock[] = [
+            ...(thinkingBlock ? [thinkingBlock] : []),
+            ...textBlocks,
+            ...(partial ? [{ type: 'text' as const, text: partial }] : []),
+          ]
           if (blocks.length > 0) appendLoopMessage(input.sessionId, 'assistant', blocks)
         } catch {
           // 取证落盘失败静默（取消语义优先）
@@ -1016,7 +1054,9 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     if (execution.cancelled) return attachUsage(loopCancelled(turns, finalText, toolCalls, 'tool_execution', input.signal))
     const { resultBlocks, budgetStallThisTurn } = execution
     appendLoopMessage(input.sessionId, 'user', resultBlocks)
-    messages.push({ role: 'assistant', content: assistantBlocks })
+    // 重放面不含思考块（2026-09-11）：思考只进 UI/JSONL，不回传模型——网关对请求侧
+    // thinking 块的兼容性未实证，且回传思考对下一轮决策零增益（现状即不回传，字节级不变）
+    messages.push({ role: 'assistant', content: assistantBlocks.filter((block) => block.type !== 'thinking') })
     messages.push({ role: 'user', content: resultBlocks })
 
     // W2-E3：验证工具执行后事件驱动保存（检查点的验证状态/候选指纹随之更新）
@@ -1209,8 +1249,15 @@ async function runGraceWrapUpTurn(
   if (input.signal.aborted) return { kind: 'cancelled' }
   const blocks: MessageContentBlock[] = []
   const textParts: string[] = []
+  const thinkingParts: string[] = []
   const cleaner = createWhitespaceArtifactCleaner()
+  // 思考分离与主循环同口径（2026-09-11）：宽限轮交卷文本里的 <think> 同样拆出折叠
+  const graceSplitter = createThinkStreamSplitter()
   const flushText = (): void => {
+    if (thinkingParts.length > 0) {
+      blocks.push({ type: 'thinking', thinking: thinkingParts.join('').trim() })
+      thinkingParts.length = 0
+    }
     if (textParts.length === 0) return
     blocks.push({ type: 'text', text: textParts.join('') })
     textParts.length = 0
@@ -1234,8 +1281,17 @@ async function runGraceWrapUpTurn(
         for (const block of sdk.message.content) {
           if (block.type === 'text' && block.text) {
             const pieces = cleaner.push(block.text)
-            for (const piece of pieces) input.publish('message_delta', { text: piece })
-            textParts.push(...pieces)
+            for (const piece of pieces) {
+              const split = graceSplitter.push(piece)
+              for (const narration of split.narration) {
+                input.publish('message_delta', { text: narration })
+                textParts.push(narration)
+              }
+              for (const thinking of split.thinking) {
+                input.publish('thinking_delta', { text: thinking })
+                thinkingParts.push(thinking)
+              }
+            }
           } else {
             flushText()
             blocks.push(block)
@@ -1244,8 +1300,26 @@ async function runGraceWrapUpTurn(
       }
     }
     for (const piece of cleaner.end()) {
-      input.publish('message_delta', { text: piece })
-      textParts.push(piece)
+      const split = graceSplitter.push(piece)
+      for (const narration of split.narration) {
+        input.publish('message_delta', { text: narration })
+        textParts.push(narration)
+      }
+      for (const thinking of split.thinking) {
+        input.publish('thinking_delta', { text: thinking })
+        thinkingParts.push(thinking)
+      }
+    }
+    {
+      const tail = graceSplitter.end()
+      for (const narration of tail.narration) {
+        input.publish('message_delta', { text: narration })
+        textParts.push(narration)
+      }
+      for (const thinking of tail.thinking) {
+        input.publish('thinking_delta', { text: thinking })
+        thinkingParts.push(thinking)
+      }
     }
     flushText()
   } catch (error) {

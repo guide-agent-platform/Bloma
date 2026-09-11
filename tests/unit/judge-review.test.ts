@@ -83,7 +83,7 @@ describe('Judge review trigger and return counts (A2-11)', () => {
     expect(questions?.map((q) => q.id)).toEqual(['keep', 'optimize', 'rebuild'])
   })
 
-  it('MVP 完成到 ready 时主动下发「完成」助手消息（落盘 + message_delta + completed）', async () => {
+  it('MVP 完成到 ready 时主动下发最终交付消息（落盘 + delivery_message + completed，2026-09-11 交付话术改造）', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-judge-complete-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
@@ -96,10 +96,12 @@ describe('Judge review trigger and return counts (A2-11)', () => {
 
     await runJudgeReview({ request_id: 'req-judge', session_id: 'session-complete', project_id: project.project_id })
 
-    // 主动完成通知：message_delta 上屏 + completed 收尾，消除「用户不知道完成了」的感知断裂
-    const delta = events.find((event) => event.type === 'message_delta')
+    // 主动完成通知（2026-09-11 交付话术改造）：无 query/向导渠道时走兑底话术，
+    // 经 delivery_message 专用事件上屏（渲染端把过程消息收起）+ completed 收尾
+    const delta = events.find((event) => event.type === 'delivery_message')
     expect(delta).toBeTruthy()
     expect(String(delta?.payload.text ?? '')).toContain('已经生成好了')
+    expect((delta?.payload as { fallback?: boolean }).fallback).toBe(true)
     expect(events.some((event) => event.type === 'completed')).toBe(true)
 
     // 落盘：会话 JSONL 里有对应助手消息（回访恢复时对话完整）
