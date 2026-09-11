@@ -59,7 +59,7 @@ import { cancelAgent, getSdkQuery, hasForegroundRun, isSessionActive, persistSte
 import { enqueueSteer, getSteerStatuses, pendingSteerCount, registerSteer, resolveSteer, setSteerStatusListener, steerConfirmEnabled } from './steer-queue'
 import { savePastedImage } from './pasted-images'
 import { collectDomContext, scrollPreview } from './dom-context'
-import { runAgentLoopPostTesting, runIterationTask, runMvpTask, setForegroundRunChecker, setProgrammingEventPublisher } from './programming-orchestrator'
+import { clearPendingReviewAction, runAgentLoopPostTesting, runIterationTask, runMvpTask, setForegroundRunChecker, setProgrammingEventPublisher } from './programming-orchestrator'
 import { handleAgentStreamEvent } from './notifications'
 import { assertToolAllowed, getPermissionMode, resolvePermission, setPermissionMode, setPermissionRequestPublisher } from './permission-service'
 import {
@@ -388,6 +388,8 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
   ipcMain.handle(IPC_CHANNELS.PROJECT_EXPORT, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<ProjectExportInput>(payload, ['project_id'])
+      // F-A 修复：导出动作说明已离开补充流，清残留标记
+      clearPendingReviewAction(input.project_id)
       const project = findProject(input.project_id)
       const result = await dialog.showOpenDialog(mainWindow, {
         title: `导出「${project.name}」`,
@@ -503,6 +505,9 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
   ipcMain.handle(IPC_CHANNELS.PROJECT_SUBMIT_CORRECTION, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<PointCorrectionInput>(payload, ['project_id', 'session_id', 'mode'])
+      // F-A 修复（2026-09-11 审计）：用户转去点选纠错说明已离开「局部优化/整版重做」
+      // 补充流，残留标记会让下一句普通诉求被误当局部修改，先清
+      clearPendingReviewAction(input.project_id)
       const result = submitCorrection(input)
 
       // S3-CORRECT-006 / research-plan §5：point_correction 埋点（含 repeat_count / fallback_mode）。

@@ -33,7 +33,7 @@ import {
   loadSessionHistory,
   loadSnapshots,
 } from './atoms'
-import { refreshChannelsList, channelsListAtom, channelsLoadingAtom, hasUsableChannelsAtom, chatInputDraftAtom } from './atoms-sprint2'
+import { refreshChannelsList, channelsListAtom, channelsLoadingAtom, hasUsableChannelsAtom, chatInputDraftAtom, requestChatInputFocus } from './atoms-sprint2'
 import type { ProjectMode, WorkflowStage } from './atoms'
 import type { AgentSendMessageResult, ApiResult, DomCollectContextResult } from '../../shared/types'
 
@@ -501,6 +501,11 @@ const AppRoutes: React.FC = () => {
     })
     // 立即消费决策卡片，避免「选了选项卡片还赖着不走」（草图走 LLM 的空窗期）
     markDecisionConsumed(sessionId)
+    // 局部优化 / 整版重做（2026-09-11 卡位改版）：聚焦聊天输入框，让用户直接补充内容
+    //（后端已置对应补充态，用户下一句即消费——局部优化直接改、整版重做转二次确认）。
+    if (option.id === 'optimize' || option.id === 'rebuild') {
+      requestChatInputFocus(option.id === 'optimize' ? '说说你想改哪里…' : '说说想往哪个方向重做…')
+    }
     // 真实链路：带 card_option metadata 回传（selected_option_id 对齐契约）
     void api.agent.sendMessage({
       request_id: crypto.randomUUID(),

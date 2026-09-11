@@ -1,5 +1,5 @@
 import React from 'react'
-import { atom, useAtom, useAtomValue } from 'jotai'
+import { atom, useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { CardOptions } from './CardOptions'
 import type { CardOption } from './CardOptions'
 import { WaitingFeedback } from './WaitingFeedback'
@@ -24,7 +24,7 @@ import {
 } from './atoms'
 import type { AgentEvent, AgentMessage, AgentStreamState, PastedImageRef, ProjectMode, SteerStatusChip } from './atoms'
 import { collapseRepetitiveText } from '../stream-collapse'
-import { hasUsableChannelsAtom, chatInputDraftAtom } from './atoms-sprint2'
+import { hasUsableChannelsAtom, chatInputDraftAtom, chatInputFocusSignalAtom, chatInputHintAtom } from './atoms-sprint2'
 import { extractPastedImages, extFromMime, toBase64DataUrl } from '../lib/paste-extract'
 
 export interface ChatPanelProps {
@@ -148,6 +148,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const [pasteError, setPasteError] = React.useState<string | null>(null)
   const messagesEndRef = React.useRef<HTMLDivElement>(null)
   const inputRef = React.useRef<HTMLTextAreaElement>(null)
+  // 输入框聚焦信号 + 提示（2026-09-11 三按钮改版）：修改确认卡点「提出意见」后递增，
+  // 这里监听并聚焦输入框（「链接到输入框，让用户输入修改需求」）。
+  const chatFocusSignal = useAtomValue(chatInputFocusSignalAtom)
+  const chatInputHint = useAtomValue(chatInputHintAtom)
+  const setChatInputHint = useSetAtom(chatInputHintAtom)
+  React.useEffect(() => {
+    if (chatFocusSignal > 0) inputRef.current?.focus()
+  }, [chatFocusSignal])
 
   const streamingContent = hasActiveStream && streamState ? streamState.content : ''
 
@@ -265,6 +273,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     setPasteError(null)
     setInputValue('')
     setIdeaHint(false)
+    // 「提出意见」提示语用后即清（发送即消费）
+    setChatInputHint(null)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -601,11 +611,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             placeholder={
-              busy
+              chatInputHint ??
+              (busy
                 ? '生成中…可以继续输入，会自动排队处理'
                 : hasChannels === false
                   ? '还没有连接 AI 模型——发送任意内容，直达设置页完成连接'
-                  : '描述你的想法…'
+                  : '描述你的想法…')
             }
             rows={1}
             style={{

@@ -213,6 +213,12 @@ export interface MvpTaskInput {
   /** P3 迭代分级锚定：本轮聚焦的功能项 id（normalizer reviseId / append 新项 id）；
  *  仅迭代路径传入，生成路径缺省=全量锚定现状。受 BLOMA_FOCUS_ANCHOR 开关门控。 */
   focusRequirementIds?: string[]
+  /** 局部修改（2026-09-11「提出意见」路径）：强制开启聚焦锚定，无视快速/长期模式默认——
+   *  用户明确只要改这一处，必须把「其余功能项保持现状勿重做」送达模型。 */
+  localOnly?: boolean
+  /** 整版重做（2026-09-11「整版重做」路径）：不聚焦（全量锚定）、允许大改；
+   *  与 localOnly 互斥语义（同时传以 rebuild 为准）。 */
+  rebuild?: boolean
 }
 
 export interface MvpTaskResult {
@@ -1015,9 +1021,13 @@ function mergeAssetMap(skeletonMap: string | null, moduleMap: string | null): st
 /** P3 分级锚定解析：focusRequirementIds 非空且开关开（BLOMA_FOCUS_ANCHOR 缺省
  * longterm=on / quick=off，D7 连锁）才生效；否则 undefined=全量锚定现状。 */
 function resolveFocusAnchor(input: MvpTaskInput): string[] | undefined {
+  // 整版重做：不聚焦（全量锚定、允许大改）——即使 normalizer 派生了焦点也忽略。
+  if (input.rebuild) return undefined
   const ids = input.focusRequirementIds
   if (!ids || ids.length === 0) return undefined
-  if (!focusAnchorEnabled(input.mode)) return undefined
+  // localOnly（「局部优化」）：强制开启聚焦，无视 quick/longterm 默认——
+  // 用户明确只要改这一处，必须把「其余保持现状勿重做」的锚定送达模型。
+  if (!input.localOnly && !focusAnchorEnabled(input.mode)) return undefined
   return ids
 }
 
@@ -1895,11 +1905,33 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
       ? `${READY_COMPLETION_COPY}\n\n补充提示：${verdict.user_visible_summary}`
       : READY_COMPLETION_COPY
   publishCompletionMessage(input, completion)
-  // 就绪引导卡（2026-09-06 用户拍板「终点不是 MVP」）：MVP 只是里程碑——发下一步卡
-  // 引导用户走向完整产物（数据上服务端/导出部署）。复用 user_decision_required 通道
-  //（渲染端 useUserDecisionCards 扫描事件渲染卡片，选项经 card_option metadata 回传；
-  // export_handoff 由渲染端特调导出 IPC，不进聊天管道）。mvp_ready 在交付期已发，
-  // 本卡在其后到达 → 渲染端扫描顺序保证显示。
+  // MVP 就绪三按钮卡（2026-09-11 用户拍板改版）：生成完**立即**弹，让用户选
+  // 保持现状（停）/ 局部优化（跳输入框说改哪里）/ 整版重做（先问方向再二次确认）。
+  // 分流只依赖用户点选的选项，不依赖用户在输入框里说的话。原「下一步走向完整产物」
+  // 引导卡（ready_next_steps）改由「保持现状」后触发（publishReadyNextStepsCard）。
+  publish(input, 'user_decision_required', {
+    kind: 'mvp_review',
+    title: '这一版你满意吗？',
+    questions: [
+      { id: 'keep', label: '保持现状', description: '就到这里，当前版本保留' },
+      { id: 'optimize', label: '局部优化', description: '去输入框说说要改哪里（只改这一处）' },
+      { id: 'rebuild', label: '整版重做', description: '换一种方式把功能重做一遍' },
+    ],
+  })
+  return { outcome: 'ready', verdict }
+}
+
+/**
+ * 「保持现状」后触发的就绪引导卡（原 runJudgeReview 内联 ready_next_steps，
+ * 2026-09-11 三按钮改版后移）：用户对 MVP 整体满意 → 顺势给「走向完整产物」引导
+ *（数据上服务端/导出部署）。复用 user_decision_required 通道；export_handoff 由
+ * 渲染端特调导出 IPC，不进聊天管道。
+ */
+export function publishReadyNextStepsCard(input: {
+  request_id: string
+  session_id: string
+  project_id: string
+}): void {
   const deliveryBody = buildReadyDeliveryBody(input.project_id)
   publish(input, 'user_decision_required', {
     kind: 'ready_next_steps',
@@ -1936,7 +1968,6 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
   } catch {
     // 埋点失败不影响 ready 收口
   }
-  return { outcome: 'ready', verdict }
 }
 
 /**
@@ -2782,6 +2813,12 @@ export interface IterationTaskInput {
   /** H5 四问卡专用（resumeBlockedFlow regenerate 分支）：不归一化并入本次诉求，
  *  按原需求清单整版重摇（保留已确认需求与草图；不重置修复预算）。 */
   regenerate?: boolean
+  /** 局部修改（2026-09-11「局部优化」路径）：强制开启聚焦锚定（quick 也生效），
+   *  其余功能项保持现状勿重做。 */
+  localOnly?: boolean
+  /** 整版重做（2026-09-11「整版重做」路径）：并入用户重做方向到需求清单，
+   *  不聚焦（全量锚定、允许大改），保留已确认需求与草图。 */
+  rebuild?: boolean
 }
 
 // 注：P3 分级锚定的 focusRequirementIds 由 runIterationTask 从归一化判定派生后
@@ -2873,11 +2910,20 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
     }
     publishCompletionMessage(
       input,
-      `收到「${truncateCopy(input.prompt, 20)}」——这句我没当作需求改动（判为操作指令），按原样重新生成了一版。想改哪里请直接说，比如「标题改成计算助手」。`,
+      input.localOnly
+        ? `收到「${truncateCopy(input.prompt, 20)}」——这句我没当成具体改动（判为操作指令），这一轮没改到功能。想改哪里请再具体说一点，比如「标题改成计算助手」。`
+        : `收到「${truncateCopy(input.prompt, 20)}」——这句我没当作需求改动（判为操作指令），按原样重新生成了一版。想改哪里请直接说，比如「标题改成计算助手」。`,
     )
     }
   } else {
-    publishCompletionMessage(input, `好的，我按你的新想法「${truncateCopy(input.prompt, 20)}」重新生成一版。`)
+    publishCompletionMessage(
+      input,
+      input.rebuild
+        ? `好的，我按你说的方向「${truncateCopy(input.prompt, 20)}」整版重做一版（保留已确认需求与草图）。`
+        : input.localOnly
+          ? `好的，我按你说的「${truncateCopy(input.prompt, 20)}」调整这一处，其余保持现状。`
+          : `好的，我按你的新想法「${truncateCopy(input.prompt, 20)}」重新生成一版。`,
+    )
   }
 
   try {
@@ -3052,20 +3098,22 @@ export function nextRequirementId(existing: SketchRequirement[]): string {
 // （存量消费者与 vi.mock 工厂零改动）。runIterationTask 本体仍在本文件
 // （与 runMvpTask 共享内部函数，拆分挂后续独立批次）。
 import {
+  clearPendingReviewAction,
   isIterationDecisionId,
   setFailedIteration,
-  setPendingIteration,
+  setPendingReviewAction,
   takeFailedIteration,
-  takePendingIteration,
+  takePendingReviewAction,
 } from '../iteration/pending'
 export {
+  clearPendingReviewAction,
   isIterationDecisionId,
   setFailedIteration,
-  setPendingIteration,
+  setPendingReviewAction,
   takeFailedIteration,
-  takePendingIteration,
+  takePendingReviewAction,
 } from '../iteration/pending'
-export type { IterationDecisionId, PendingIteration } from '../iteration/pending'
+export type { IterationDecisionId, PendingReviewAction } from '../iteration/pending'
 
 /**
  * 修改诉求 → 需求项描述：剥离否定引导与口语前缀（「啥意思，我要音乐合成器」→

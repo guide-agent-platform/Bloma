@@ -62,6 +62,23 @@ export const channelsLoadingAtom = atom<'idle' | 'loading' | 'loaded' | 'error'>
 export const chatInputDraftAtom = atom('')
 
 /**
+ * 聊天输入框聚焦信号（计数器，2026-09-11 三按钮改版）：修改确认卡点「提出意见」时
+ * 递增，ChatPanel 监听后 focus 输入框（「链接到输入框，让用户输入修改需求」）。
+ */
+export const chatInputFocusSignalAtom = atom(0)
+
+/** 「提出意见」后的输入框提示语（null=用默认 placeholder）。 */
+export const chatInputHintAtom = atom<string | null>(null)
+
+/** 请求聚焦聊天输入框（并可选设置提示语）：由 App 的卡片点选处理调用「提出意见」。 */
+export function requestChatInputFocus(hint?: string): void {
+  const store = window.__jotai_store__
+  if (!store) return
+  store.set(chatInputFocusSignalAtom, (n: number) => n + 1)
+  store.set(chatInputHintAtom, hint ?? null)
+}
+
+/**
  * 是否有可用 AI 渠道（QW#1 ux-first-run-0basics I1）：
  * null=未决（加载中/未加载）；true/false=已决（有启用渠道且含启用模型）。
  * 供 WorkspaceHeader 三态徽标（「未配置 AI / AI 就绪 / 离线」）消费，替代 navigator.onLine 误导。

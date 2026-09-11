@@ -210,9 +210,9 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     expect(mocks.runGwtScenarios).toHaveBeenCalledTimes(2)
     // 收敛 → 正常链：无熔断、无让渡卡，走到 judge 且 verdict ready
     expect(mocks.circuitBreakRollback).not.toHaveBeenCalled()
-    // 就绪引导卡（2026-09-06「终点不是 MVP」）：ready 收敛发 next_steps 卡（非让渡卡）
+    // 就绪三按钮卡（2026-09-11 卡位改版）：ready 收敛发 mvp_review 卡（非让渡卡）
     const decisionEvents = events.filter((event) => event.type === 'user_decision_required')
-    expect(decisionEvents.every((event) => (event.payload as { kind?: string }).kind === 'ready_next_steps')).toBe(true)
+    expect(decisionEvents.every((event) => (event.payload as { kind?: string }).kind === 'mvp_review')).toBe(true)
     expect(result.verdict).toBe('ready')
     expect(findProject(projectId).current_stage).toBe('ready')
     // 成功清零（与旧管道 attempt 口径对齐）
