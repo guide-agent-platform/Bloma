@@ -1155,8 +1155,8 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
         </div>
       )
     }
-    // [reconcile] / [decision-card] / [channel-switch] 是机器前缀，剥掉后展示人话
-    const display = text.replace(/^\[(?:reconcile|decision-card|channel-switch)\]\s*/, '')
+    // [reconcile] / [decision-card] / [channel-switch] / [steer-deferred] 是机器前缀，剥掉后展示人话
+    const display = text.replace(/^\[(?:reconcile|decision-card|channel-switch|steer-deferred)\]\s*/, '')
     return (
       <div
         style={{

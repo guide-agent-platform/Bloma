@@ -1171,6 +1171,22 @@ export function publishSteerStatusEvent(entry: SteerLedgerEntry): void {
   })
 }
 
+/** I3 deferred 持久化（2026-09-11 尾批）：留待下一轮达成时会话 JSONL 追加一条
+ *  [steer-deferred] system 行——状态条数据是内存态（重启丢），但待办作为文字记录
+ *  跨重启可见（HistoryMessages 回放加载）；同一条只 advance 一次，无重复落盘。
+ *  ipc 层 statusListener 单点拦截 deferred_next_run 时调用（与事件发布同源）。 */
+export function persistSteerDeferredNotice(sessionId: string, content: string): void {
+  try {
+    appendSessionMessage(sessionId, {
+      role: 'system',
+      content: [{ type: 'text', text: `[steer-deferred] 留待下一轮的修改：${content}——需要处理时直接把这条修改再发一遍即可开始下一轮。` }],
+      timestamp: Date.now(),
+    })
+  } catch {
+    // 落盘失败不阻断状态机（降级：待办仅会话内状态条可见）
+  }
+}
+
 /** 用户主动取消的判定：中止信号抛出的 AbortError 或查询入口的 AGENT_CANCELLED。 */
 function isUserCancelled(error: unknown): boolean {
   if (error instanceof Error && error.name === 'AbortError') return true

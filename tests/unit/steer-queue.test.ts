@@ -257,6 +257,21 @@ describe('I3 转向生效确认链（P7-7，BLOMA_STEER_CONFIRM）', () => {
     expect(pendingSteerCount('session-err')).toBe(1)
   })
 
+  it('deferred 达成经 listener 上报（ipc 层据此落盘 JSONL 留痕）', () => {
+    markLoopActive('session-defer')
+    const seen: Array<{ steerId: string; status: string }> = []
+    setSteerStatusListener((change) => seen.push({ steerId: change.steerId, status: change.status }))
+    registerSteer('session-defer', entry('r1', '再加一个搜索功能'))
+    resolveSteer('session-defer', 'r1', 'defer')
+    const r1Events = seen.filter((item) => item.steerId === 'r1')
+    expect(r1Events.map((item) => item.status)).toEqual(['pending_impact', 'deferred_next_run'])
+    // settleSteerEntry 的 deferred 收口同样上报（收尾残余路径）
+    registerSteer('session-defer', entry('r2', '把按钮改成蓝色'))
+    settleSteerEntry('session-defer', 'r2', 'deferred_next_run')
+    const r2Events = seen.filter((item) => item.steerId === 'r2')
+    expect(r2Events[r2Events.length - 1].status).toBe('deferred_next_run')
+  })
+
   it('体验验收①（E2）：生成中问「你刚提的修改这轮会做吗」——答案与账本状态一一对应', () => {
     // 「这轮会做吗」的答案映射（getSteerStatuses 是权威答案源）：
     const answerOf = (status: SteerLedgerEntry['status']): string => {

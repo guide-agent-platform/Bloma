@@ -55,7 +55,7 @@ import type {
 } from '../shared/types'
 import { IPC_CHANNELS } from '../shared/types'
 import { fail, ok } from './api-result'
-import { cancelAgent, getSdkQuery, hasForegroundRun, isSessionActive, publishSteerStatusEvent, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from './orchestrator'
+import { cancelAgent, getSdkQuery, hasForegroundRun, isSessionActive, persistSteerDeferredNotice, publishSteerStatusEvent, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from './orchestrator'
 import { enqueueSteer, getSteerStatuses, pendingSteerCount, registerSteer, resolveSteer, setSteerStatusListener, steerConfirmEnabled } from './steer-queue'
 import { savePastedImage } from './pasted-images'
 import { collectDomContext, scrollPreview } from './dom-context'
@@ -121,7 +121,11 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
   // I3 转向生效确认链（P7-7）：steer-queue 状态机推进 → orchestrator 发布口 →
   // steer_status 事件→渲染端状态条。listener 引用 orchestrator 的 publishSteerStatusEvent
   //（其内部走 streamPublisher，接线时序与本处 setAgentStreamPublisher 之后自然生效）。
-  setSteerStatusListener((entry) => publishSteerStatusEvent(entry))
+  // deferred 达成时同步落盘待办留痕（JSONL 跨重启可见——状态条内存态重启丢的补口）。
+  setSteerStatusListener((entry) => {
+    publishSteerStatusEvent(entry)
+    if (entry.status === 'deferred_next_run') persistSteerDeferredNotice(entry.sessionId, entry.content)
+  })
   setAgentStreamPublisher((event) => {
     mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, event)
     // T6 后台执行通知：completed/error/user_decision_required → 系统通知（无后端注入时内部 no-op）
