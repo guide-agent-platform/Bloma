@@ -265,6 +265,18 @@ export async function circuitBreakRollback(input: CircuitBreakInput): Promise<Ci
   const healthy = latestHealthySnapshot(input.project_id)
   if (!healthy) return { rolled_back: false }
 
+  // 话术口径（狗粮 52f19ab4：0 次修复轮也报「多次都没有成功」）——修复次数在清零前
+  // 如实读取；「回到之前的版本」在首次生成时语义错位，改用 Phase 7 已确立的
+  // 「保存的版本」术语（恢复到最近保存的快照，首次/迭代两态均如实）。
+  const repairsAttempted =
+    (project.test_repair_count ?? 0) + (project.security_repair_count ?? 0) + (project.runtime_repair_count ?? 0)
+  const repairPhrase =
+    repairsAttempted <= 0
+      ? '这次没能进行自动修复（触发熔断时没有可用的修复轮）'
+      : repairsAttempted === 1
+        ? '自动修复 1 轮没有成功'
+        : `自动修复 ${repairsAttempted} 轮都没有成功`
+
   let lastError: unknown
   let rollback: RollbackResult | undefined
   for (let attempt = 0; attempt < 2 && !rollback; attempt += 1) {
@@ -283,7 +295,7 @@ export async function circuitBreakRollback(input: CircuitBreakInput): Promise<Ci
 
   if (!rollback) {
     const message =
-      '自动修复多次都没有成功，回滚到上一个健康版本也没有成功。当前版本可能不完整，' +
+      `${repairPhrase}，回滚到最近保存的健康版本也没有成功。当前版本可能不完整，` +
       '你可以从底部时间轴手动选择一个快照回滚，或者告诉我重新生成一版。'
     appendAssistantMessage(input.session_id, message)
     input.publish('message_delta', { text: message })
@@ -315,10 +327,10 @@ export async function circuitBreakRollback(input: CircuitBreakInput): Promise<Ci
   // 「可以继续试用这一版」把 F-002 坏版本当健康品，用户下一轮「用不了」）
   const message =
     stage === 'ready'
-      ? `自动修复多次都没有成功，已经自动回到之前的版本，内容都还在，没有丢失。${input.failureNote ?? '你可以继续试用这一版，或者告诉我换个思路重新生成。'}`
+      ? `${repairPhrase}，已自动恢复到最近保存的版本，内容都还在，没有丢失。${input.failureNote ?? '你可以继续试用这一版，或者告诉我换个思路重新生成。'}`
       : stage === 'sketch_ready'
-        ? '自动修复多次都没有成功，已经自动回到之前的版本，内容都还在，没有丢失。当前回到的是草图版本，可以重新确认草图后再生成完整功能。'
-        : '自动修复多次都没有成功，已经自动回到之前的版本，但该版本没有留下可用产物。请重新描述你的想法，我们再来一次。'
+        ? `${repairPhrase}，已自动恢复到最近保存的版本（草图阶段），内容都还在，没有丢失。可以重新确认草图后再生成完整功能。`
+        : `${repairPhrase}，且最近保存的版本没有留下可用产物。请重新描述你的想法，我们再来一次。`
   appendAssistantMessage(input.session_id, message)
   // rollback_done 先行（渲染端契约：用它回填预览地址，与旧让渡路径一致），再收敛阶段、发消息收尾
   input.publish('rollback_done', {

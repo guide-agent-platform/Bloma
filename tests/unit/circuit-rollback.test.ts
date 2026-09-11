@@ -101,9 +101,12 @@ describe('circuit break rollback (T5)', () => {
     expect(published.find((event) => event.type === 'rollback_done')?.payload.snapshot_id).toBe(snapshot.snapshot_id)
     expect(published.find((event) => event.type === 'stage_changed')?.payload.stage).toBe('ready')
     expect(published.some((event) => event.type === 'completed')).toBe(true)
-    // 会话 JSONL 有回滚告知；决策日志记录熔断回滚
+    // 会话 JSONL 有回滚告知；话术口径（狗粮 52f19ab4）：次数如实（6 轮）+
+    // 「保存的版本」术语（首次生成不再说「回到之前的版本」）
     const session = readFileSync(getAgentSessionPath(sessionId), 'utf8')
-    expect(session).toContain('回到之前的版本')
+    expect(session).toContain('自动修复 6 轮都没有成功')
+    expect(session).toContain('已自动恢复到最近保存的版本')
+    expect(session).not.toContain('自动修复多次')
     expect(session).toContain('内容都还在，没有丢失')
     const decisions = readFileSync(
       join(getDocumentsDir(findProject(projectId).workspace_slug, projectId), 'decisions.md'),
@@ -156,8 +159,9 @@ describe('circuit break rollback (T5)', () => {
 
     expect(result.rolled_back).toBe(false)
     expect(result.error).toBeTruthy()
-    // 如实告知（会话 JSONL），不冒充成功
+    // 如实告知（会话 JSONL），不冒充成功；0 次修复轮不再谎称「多次」（狗粮 52f19ab4 口径）
     const session = readFileSync(getAgentSessionPath(sessionId), 'utf8')
-    expect(session).toContain('回滚到上一个健康版本也没有成功')
+    expect(session).toContain('这次没能进行自动修复')
+    expect(session).toContain('回滚到最近保存的健康版本也没有成功')
   })
 })

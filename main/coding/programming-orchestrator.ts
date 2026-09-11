@@ -2556,7 +2556,7 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
       const failureTitle =
         testResult.failure_summary.length > 0
           ? `测试未通过：${testResult.failure_summary.map((f) => f.scenario).join('、')}`
-          : '自动修复多次后测试仍未通过'
+          : '自动修复后测试仍未通过（无具体失败清单）'
       publishBlockedDecision(input, 'test_repair', failureTitle, {
         reason: 'test',
         failures: testResult.failure_summary,
