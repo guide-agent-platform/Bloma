@@ -15,6 +15,7 @@ import { runArtifactUiGate, uiGateEnabled, uiProbeNotes, type ArtifactUiGateResu
 import { getCachedStaticEvidence, setCachedStaticEvidence } from './evidence-cache'
 import { runVisionAuditGate } from './vision-audit-gate'
 import { buildRepairTasks, resolveRepairBudget, runRepairLoop, repairScopeEnabled, repairNoopGuardEnabled, hasWriteEditToolCall, type RepairCheckpointContext, type RepairTask } from './repair-loop'
+import { buildIterationTask, ITERATION_MODE_SECTION, iterationBriefEnabled, resolveAgentLoopMaxTurnsLocal } from './iteration-brief'
 import { recordFailureCards } from '../experience/error-card'
 import { generateLoopPlan, planLegEnabled, renderPlanInjection, renderPlanMarkdown, type LoopPlan } from './loop-planner'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../project-service'
@@ -211,6 +212,9 @@ export interface MvpTaskInput {
   query?: SDKQuery
   /** 停止生成信号（U5：迭代/生成期间点停止，abort 后中止 LLM 生成） */
   signal?: AbortSignal
+  /** Phase 8 W1：迭代路径透传的用户修改诉求原话（局部优化任务书主体；生成路径不传）。
+ *  仅 localOnly 路径消费（buildIterationTask），rebuild/全量生成忽略。 */
+  prompt?: string
   /** P3 迭代分级锚定：本轮聚焦的功能项 id（normalizer reviseId / append 新项 id）；
  *  仅迭代路径传入，生成路径缺省=全量锚定现状。受 BLOMA_FOCUS_ANCHOR 开关门控。 */
   focusRequirementIds?: string[]
@@ -695,6 +699,21 @@ export function resolveAgentLoopMaxTurns(mode: ProjectMode): number {
   return Number.isFinite(parsed) && floored > 0 ? floored : fallback
 }
 
+/**
+ * Phase 8 W1：轮次预算按任务比例收窄——局部修改轮（localOnly + 开关开）用独立档
+ * （BLOMA_LOOP_MAX_TURNS_LOCAL 缺省 12），其余路径字节级=现状 resolveAgentLoopMaxTurns。
+ * 对齐「过程按比例」原则：一行修复不应占用全量 40 轮预算，小预算快速熔断损失可控。
+ */
+export function resolveLoopMaxTurnsForInput(input: { mode: ProjectMode; localOnly?: boolean; rebuild?: boolean }): number {
+  if (iterationBriefEnabled() && input.localOnly && !input.rebuild) return resolveAgentLoopMaxTurnsLocal()
+  return resolveAgentLoopMaxTurns(input.mode)
+}
+
+/** Phase 8 W1：局部修改轮聚焦任务书是否生效（开关开 + localOnly + 非 rebuild）。 */
+export function iterationBriefActive(input: { localOnly?: boolean; rebuild?: boolean }): boolean {
+  return iterationBriefEnabled() && input.localOnly === true && input.rebuild !== true
+}
+
 /** 子 agent 独立轮次上限（比主 loop 小，控制委派 token 成本；按埋点标定）。 */
 const DELEGATION_MAX_TURNS = 12
 
@@ -1125,6 +1144,10 @@ async function tryGenerateLoopPlanLeg(
     env: loop.env,
     sessionId: input.session_id,
     ...(focus && focus.length > 0 ? { focusRequirementIds: focus } : {}),
+    // Phase 8 W2-3：局部修改轮定位合同（只改既有文件；模型给出不存在文件时硬剔除）
+    ...(iterationBriefActive(input)
+      ? { localOnly: true, localPrompt: input.prompt, projectRootPath: findProject(input.project_id).root_path }
+      : {}),
     ...(loop.channel.provider_type !== undefined ? { providerType: loop.channel.provider_type } : {}),
     ...(input.signal ? { signal: input.signal } : {}),
   })
@@ -1177,7 +1200,27 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   const editFormat = loop.model?.edit_format ?? 'diff'
   const startedAt = Date.now()
   // PR-1 骨架先行 + 官方模块库：渲染成功后骨架地图/模块地图随 system prompt 常驻（事实与注入同源）
-  const { map: skeletonMap, skeleton, rendered, moduleMap } = prepareSkeletonBeforeLoop(input, backplane, project)
+  // Phase 8 W2-2：局部修改轮跳过骨架/模块库重渲染——项目已实现（骨架幂等跳过只剩决策
+  // 噪音），文件全貌由项目地图（buildLoopSystemWithOverride 尾部注入）承担；跳过如实落决策。
+  // 非 localOnly / 开关关 = 现状渲染（字节级）。
+  if (iterationBriefActive(input)) {
+    try {
+      recordDecision({
+        project_id: input.project_id,
+        session_id: input.session_id,
+        entry: {
+          type: 'skeleton_render_skipped_local',
+          title: '局部修改轮跳过骨架/模块库重渲染',
+          why: 'localOnly 聚焦任务书生效：项目已实现，文件全貌由项目地图（system 尾部注入）承担，重渲染只产生决策噪音',
+        },
+      })
+    } catch {
+      // 决策日志失败不阻断主链路
+    }
+  }
+  const { map: skeletonMap, skeleton, rendered, moduleMap } = iterationBriefActive(input)
+    ? { map: null as string | null, skeleton: null as ProjectSkeleton | null, rendered: undefined, moduleMap: null as string | null }
+    : prepareSkeletonBeforeLoop(input, backplane, project)
   // P3 分级锚定：focus 生效时（迭代路径透传 + BLOMA_FOCUS_ANCHOR 开）背板/骨架地图
   // 裁细节不减锚；生成路径/开关关 → undefined=全量锚定现状（字节级等价）
   const focus = resolveFocusAnchor(input)
@@ -1194,12 +1237,18 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
       : skeletonMap
   const buildSystemWithPlan = (fmt: 'diff' | 'whole'): string => {
     const base = buildLoopSystemWithOverride(backplane, fmt, input.project_id, effectiveSkeletonMap, focus, moduleMap)
-    // Phase 3 B3：迭代轮本轮锚（聚焦路径才有；开关 off=零注入字节级现状）
+    // Phase 3 B3：迭代轮本轮锚（聚焦路径才有；开关 off=零注入字节级现状）。
+    // Phase 8 W1：localOnly（局部优化）强制开启——照 resolveFocusAnchor 的 localOnly
+    // 先例（用户明确只要改这一处，本轮锚必须送达；开关总开关 off 时字节级现状）。
+    const briefActive = iterationBriefActive(input)
     const roundAnchorBlock =
-      focus && focus.length > 0 && roundAnchorEnabled()
+      focus && focus.length > 0 && (roundAnchorEnabled() || briefActive)
         ? `\n\n${renderRoundAnchorBlock(buildIterationRoundAnchor(backplane, focus))}`
         : ''
-    return planInjection ? `${base}${roundAnchorBlock}\n\n${planInjection}` : `${base}${roundAnchorBlock}`
+    // Phase 8 W1：【修改模式】段（语义对齐 repair-loop REPAIR_MODE_SECTION：任务书即
+    // 全部工作，不要重新生成整个项目）；非 localOnly / 开关关 = 零注入字节级现状。
+    const iterationModeBlock = briefActive ? `\n\n${ITERATION_MODE_SECTION}` : ''
+    return planInjection ? `${base}${roundAnchorBlock}${iterationModeBlock}\n\n${planInjection}` : `${base}${roundAnchorBlock}${iterationModeBlock}`
   }
   // 委派协作（嫁接方案 §4.1）：注册父 loop 上下文供 delegate_agent 构建子循环；子工具集按 role 裁剪
   setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
@@ -1207,7 +1256,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     query: input.query!,
     env: loop.env,
     maxTokens: resolveGenerationMaxTokens(loop.channel),
-    maxTurns: resolveAgentLoopMaxTurns(input.mode),
+    maxTurns: resolveLoopMaxTurnsForInput(input),
     delegationMaxTurns: DELEGATION_MAX_TURNS,
     permissionMode: AUTOMATED_PERMISSION_MODE,
     temperature: categoryTemperature('mvp'),
@@ -1253,14 +1302,35 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     entry: {
       type: 'agent_loop',
       title: 'Agent Loop 生成启用',
-      why: `BLOMA_AGENT_LOOP=1 且渠道 ${loop.channel.name}/${loop.env.ANTHROPIC_MODEL} 支持 tool use，MVP 走 agentic loop 生成（maxTurns=${resolveAgentLoopMaxTurns(input.mode)}，edit_format=${editFormat}）`,
+      why: `BLOMA_AGENT_LOOP=1 且渠道 ${loop.channel.name}/${loop.env.ANTHROPIC_MODEL} 支持 tool use，MVP 走 agentic loop 生成（maxTurns=${resolveLoopMaxTurnsForInput(input)}，edit_format=${editFormat}${iterationBriefActive(input) ? '，局部修改轮聚焦任务书生效' : ''}）`,
       detail: {
         repair_budget_mapping: 'loop 内「GWT 失败后的 edit_file/write_file」预算 3 次，同构旧管道 test_repair_count ≤ 3',
-        max_turns: resolveAgentLoopMaxTurns(input.mode),
+        max_turns: resolveLoopMaxTurnsForInput(input),
         edit_format: editFormat,
       },
     },
   })
+
+  // Phase 8 W1：局部修改轮聚焦任务书生效如实落决策（任务书快照入账，事后可审计）
+  if (iterationBriefActive(input)) {
+    try {
+      recordDecision({
+        project_id: input.project_id,
+        session_id: input.session_id,
+        entry: {
+          type: 'iteration_brief',
+          title: '局部修改轮聚焦任务书生效',
+          why: `localOnly 路径不再使用全量 MVP 任务书：用户诉求原话即任务主体（maxTurns 收窄至 ${resolveLoopMaxTurnsForInput(input)}），system 附【修改模式】段与本轮锚`,
+          detail: {
+            task: buildIterationTask(input.prompt ?? ''),
+            max_turns: resolveLoopMaxTurnsForInput(input),
+          },
+        },
+      })
+    } catch {
+      // 决策日志失败不阻断主链路
+    }
+  }
 
   let result: AgentLoopResult
   // P3 loop-log：会话头先行（mode/maxTurns/plan 摘要行——B 依赖 A 的合同存在性）；
@@ -1268,11 +1338,11 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   appendLoopLogSafely(input.project_id, {
     kind: 'session_start',
     mode: input.mode,
-    maxTurns: resolveAgentLoopMaxTurns(input.mode),
+    maxTurns: resolveLoopMaxTurnsForInput(input),
     planSummary: loopPlan
       ? `${loopPlan.filesToTouch.length} 个目标文件：${loopPlan.filesToTouch.map((file) => file.path).join('、')}`
       : null,
-    label: snapshotKind === 'iteration' ? '迭代重生成' : 'MVP 生成',
+    label: snapshotKind === 'iteration' ? (iterationBriefActive(input) ? '迭代重生成（局部修改）' : '迭代重生成') : 'MVP 生成',
   })
   // 异常终态的计数量口径：onTurn 已写入盘的轮次/工具数（崩溃时 loop-log 本身即证据）
   let loggedTurns = 0
@@ -1280,7 +1350,8 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   try {
     result = await runAgentLoop({
     system: buildSystemWithPlan(editFormat),
-    task: buildAgentLoopTask(backplane, input.mode),
+    // Phase 8 W1：局部修改轮用聚焦任务书（用户诉求原话即任务主体）；其余路径字节级=现状
+    task: iterationBriefActive(input) && input.prompt ? buildIterationTask(input.prompt) : buildAgentLoopTask(backplane, input.mode),
     // B3（P0-B，2026-09-11）：技术合同清单透传进度对账守卫（BLOMA_LOOP_PROGRESS_NUDGE
     // off 时不读不注入字节级现状；无 plan 自然无守卫2，守卫1/3 照常）
     ...(loopProgressNudgeEnabled() && loopPlan ? { planFiles: loopPlan.filesToTouch.map((file) => file.path) } : {}),
@@ -1310,7 +1381,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     projectId: input.project_id,
     requestId: input.request_id,
     maxTokens: resolveGenerationMaxTokens(loop.channel),
-    maxTurns: resolveAgentLoopMaxTurns(input.mode),
+    maxTurns: resolveLoopMaxTurnsForInput(input),
     permissionMode: AUTOMATED_PERMISSION_MODE,
     temperature: categoryTemperature('mvp'),
     providerType: loop.channel.provider_type,

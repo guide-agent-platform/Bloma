@@ -66,6 +66,10 @@ export type DecisionType =
   | 'repair_budget_exhausted'
   /** B2（P0-B，2026-09-11 审计案 35c1a633）：修复轮零编辑不计轮——旁白与决策如实留痕 */
   | 'repair_noop_skipped'
+  /** Phase 8 W1（2026-09-11 狗粮 94f449c6 复盘）：局部修改轮聚焦任务书生效（任务书快照入账） */
+  | 'iteration_brief'
+  /** Phase 8 W2-2：局部修改轮跳过骨架/模块库重渲染（决策噪音治理，如实留痕） */
+  | 'skeleton_render_skipped_local'
   /** L0 产物 UI 完整性硬门禁（artifact-ui-gate，2026-09-07）：探针结果必录 */
   | 'ui_gate'
   /** L1 双视觉审计（vision-audit-gate，2026-09-07）：passed/flagged/unavailable/skipped 均必录，绝不静默 */

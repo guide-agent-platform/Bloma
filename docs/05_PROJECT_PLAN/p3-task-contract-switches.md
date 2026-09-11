@@ -251,3 +251,14 @@
 - 单测：prd-interface-spec +3 例（off 字节锁/on game 豁免/on 非 game 照派+旧调用兼容）；rules-registry +2 例（off 原表字节锁/on+game 仅 R-DATA-01 变体其余规则引用相等）；gwt-game-probe 新文件 9 例（开关/isMoveEffect/坐标提取四态/方向判定/契约缺口文案/prompt 注入三态）。
 - 本机配置（setx，重启 Bloma 生效）：BLOMA_GAME_DERIVE_EXEMPT=1 + BLOMA_GWT_GAME_PROBE=1（用户拍板即开）。
 - 至此审计稿全部修复项（A1/A2/A3/B1/B2/B3/C1a/C1b/C2/C3/C4/C5）落地完毕。
+
+## 24. Phase 8 工作模式对齐批开关（W1/W2，2026-09-11 狗粮 94f449c6 复盘拍板「照搬正常 agent 工作模式」）
+
+| 开关 | 控制面 | 缺省 | '0' | '1'/未设 | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_ITER_BRIEF` | W1/W2 局部修改轮聚焦任务书（iteration brief） | **on** | 字节级现状（localOnly 迭代轮照旧全量 MVP 任务书/骨架模块库重渲染/plan 全量规划/maxTurns 模式档——狗粮 94f449c6 的 37 轮 turn_limit 形态） | ①task 换聚焦任务书（用户诉求原话 + grep-first/先复现/最小变更/聚焦完成判据五要素）；②system 追加【修改模式】段（对齐修复轮 REPAIR_MODE_SECTION：任务书即全部工作，不要重新生成整个项目）；③本轮锚 localOnly 强制（照 resolveFocusAnchor 先例）；④maxTurns 收窄 local 档；⑤跳过骨架/模块库重渲染（文件全貌由项目地图承担，落 decision skeleton_render_skipped_local）；⑥plan 腿换定位合同（只改既有文件，模型给出不存在文件硬剔除，全不存在 → null fail-open）；⑦loop-log 标注「迭代重生成（局部修改）」+ decision iteration_brief 任务书快照 | `iterationBriefEnabled`/`buildIterationTask`/`ITERATION_MODE_SECTION`/`resolveAgentLoopMaxTurnsLocal`（main/coding/iteration-brief.ts）+ `resolveLoopMaxTurnsForInput`/`iterationBriefActive`/runMvpViaAgentLoop 六接线点（main/coding/programming-orchestrator.ts）+ loop-planner localOnly 分支（main/coding/loop-planner.ts）+ DecisionType 新值 `iteration_brief`/`skeleton_render_skipped_local`（main/decision-log.ts） |
+| `BLOMA_LOOP_MAX_TURNS_LOCAL` | local 档轮次预算覆盖 | **12**（未设） | — | 正整数覆盖（非法值回退 12，对齐 resolveAgentLoopMaxTurns 口径） | `resolveAgentLoopMaxTurnsLocal`（main/coding/iteration-brief.ts） |
+
+- 缺省 on 的理由：纯任务书表达层（无验证语义变化、无存储 schema 变化），且 off 形态已被狗粮实证为失败形态；逃生口 `BLOMA_ITER_BRIEF=0` 保留（与修复轮/门禁类开关缺省 off 的纪律不同，属拍板项——如需回退字节级现状设 0 即可）。
+- 单测：iteration-brief 新文件 15 例（开关三态/local 档三态/任务书五要素/修改模式段/路由含 off 字节锁与 rebuild 优先级/plan 腿定位口径与既有文件硬过滤三态）。
+- 不进本批挂账：`inspect_preview` 视觉复现工具；迭代轮 writeScope 写授权（修复轮 W4-F2 同款）；degenerate 出口与 turn_limit 状态区分；game F-001 拆分；经验库 ref-source 查询词清洗（百度百科垃圾 pattern 卡）。
