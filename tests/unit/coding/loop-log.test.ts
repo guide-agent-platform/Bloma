@@ -144,3 +144,27 @@ describe('loopLogEnabled — 开关', () => {
     expect(loopLogEnabled()).toBe(true)
   })
 })
+
+describe('P2a 终态节真实出口原因标注（degenerate_output）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  let projectId = ''
+  let dir = ''
+
+  beforeEach(() => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-looplog-p2a-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-looplog-p2a', mode: 'quick' })
+    projectId = project.project_id
+    dir = getDocumentsDir(project.workspace_slug, project.project_id)
+  })
+  afterEach(() => restorePromaHome(originalPromaHome))
+
+  it('final 携带 terminationReason → 终态行追加标注；缺省不带（字节级现状）', () => {
+    appendLoopLogDocument(projectId, { kind: 'final', status: 'turn_limit', turns: 37, toolCalls: 60, terminationReason: 'degenerate_output（末轮输出退化，非轮数耗尽）' })
+    let log = readFileSync(join(dir, 'loop-log.md'), 'utf8')
+    expect(log).toContain('### 终态：turn_limit（37 轮 / 60 次工具调用）｜degenerate_output（末轮输出退化，非轮数耗尽）')
+    appendLoopLogDocument(projectId, { kind: 'final', status: 'completed', turns: 3, toolCalls: 5 })
+    log = readFileSync(join(dir, 'loop-log.md'), 'utf8')
+    expect(log).toContain('### 终态：completed（3 轮 / 5 次工具调用）\n')
+  })
+})

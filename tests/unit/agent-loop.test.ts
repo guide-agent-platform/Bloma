@@ -125,6 +125,23 @@ describe('runAgentLoop（PR2 L1）', () => {
     expect(result.status).toBe('turn_limit')
     expect(result.turns).toBe(3)
     expect(result.toolCalls).toHaveLength(3)
+    // P2a：真实跑满轮数不带 termination_detail（与输出退化出口区分）
+    expect(result.termination_detail).toBeUndefined()
+  })
+
+  it('P2a：末轮零 tool_use 且正文退化 → 重试一次仍脏 → turn_limit 附 termination_detail（狗粮 94f449c6 形态）', async () => {
+    const dsml = (text: string) => textMessage(`正在收口。\n<｜｜DSML｜｜ calls>\n<｜｜DSML｜｜ invoke name="run_gwt_tests">\n</｜｜DSML｜｜ invoke>\n</｜｜DSML｜｜ calls>\n${text}`)
+    const { query, receivedMessages } = scriptedQuery([[dsml('一')], [dsml('二')]])
+    const result = await runAgentLoop(baseInput({ query, maxTurns: 6 }))
+    expect(result.status).toBe('turn_limit')
+    expect(result.termination_detail).toEqual({ reason: 'degenerate_output', retries: 1 })
+    // 传输事故反馈确实注入（重试轮收到的最后一条 user 消息是 DEGENERATE_RETRY_FEEDBACK 家族）
+    const lastRetryMessages = receivedMessages[1]
+    const lastUserContent = lastRetryMessages.at(-1)?.content
+    const lastUserText = Array.isArray(lastUserContent)
+      ? lastUserContent.some((b) => b.type === 'text')
+      : typeof lastUserContent === 'string' && lastUserContent.length > 0
+    expect(lastUserText).toBe(true)
   })
 
   it('同轮多个 tool_use：串行执行、整批 tool_result 打进同一条 user 消息（上游 400 不变式）', async () => {

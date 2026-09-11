@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentLoopStatus, LoopValidationSnapshot, MessageContentBlock, PastedImageRef, PromaPermissionMode } from '../../shared/types'
+import type { AgentEvent, AgentLoopStatus, LoopTerminationDetail, LoopValidationSnapshot, MessageContentBlock, PastedImageRef, PromaPermissionMode } from '../../shared/types'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import { appendJsonLine } from '../../storage/json-store'
 import { appendSessionMessage } from '../session-tree'
@@ -215,6 +215,10 @@ export interface AgentLoopResult {
     files_written: string[]
     suggested_next: string
   }
+  /** P2a（2026-09-11 狗粮 94f449c6）：异常终止的真实出口原因——status 仍为 turn_limit
+ *  （终验/裁判语义不变），degenerate_output = 末轮输出退化重试后仍脏（传输事故），
+ *  与真实跑满轮数区分，防误导归因（当晚 37/40 轮被误读「轮数耗尽」）。 */
+  termination_detail?: LoopTerminationDetail
 }
 
 /** W1-E1：取消在 loop 内可被观察的五个位置（cancel_detail.phase 的取值）。 */
@@ -1040,7 +1044,14 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
           messages.push({ role: 'user', content: [{ type: 'text', text: DEGENERATE_RETRY_FEEDBACK }] })
           continue
         }
-        return attachUsage({ status: 'turn_limit', turns, finalText, toolCalls })
+        // P2a：status 语义不变（如实 turn_limit 交终验），附真实出口原因观测
+        return attachUsage({
+          status: 'turn_limit',
+          turns,
+          finalText,
+          toolCalls,
+          termination_detail: { reason: 'degenerate_output', retries: degenerateRetries },
+        })
       }
       return attachUsage({ status: 'completed', turns, finalText, toolCalls })
     }
@@ -1262,7 +1273,15 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
   // 宽限轮交卷文本同样不可是传输事故：退行文本不作完成总结，按 turn_limit 收口
   if (grace.kind === 'text' && !isDegenerateText(grace.text)) return attachUsage({ status: 'completed', turns, finalText: grace.text, toolCalls })
   if (grace.kind === 'cancelled') return attachUsage(loopCancelled(turns, finalText, toolCalls, 'grace_turn', input.signal))
-  return attachUsage({ status: 'turn_limit', turns, finalText, toolCalls })
+  // P2a：宽限轮交卷文本仍退化（重试后仍脏）→ 同样附真实出口原因；其余（refused/failed）维持裸 turn_limit
+  const graceDegenerate = grace.kind === 'text' && isDegenerateText(grace.text)
+  return attachUsage({
+    status: 'turn_limit',
+    turns,
+    finalText,
+    toolCalls,
+    ...(graceDegenerate ? { termination_detail: { reason: 'degenerate_output' as const, retries: degenerateRetries } } : {}),
+  })
 }
 
 type GraceWrapUpOutcome = { kind: 'text'; text: string } | { kind: 'refused' } | { kind: 'cancelled' } | { kind: 'failed' }

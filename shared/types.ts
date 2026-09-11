@@ -881,6 +881,13 @@ export type AgentLoopStatus = 'completed' | 'turn_limit' | 'budget_exhausted' | 
 /** W2-F4（咨询 D2/D4，2026-09-09）：loop 自验状态的宿主快照——终验失败 source 五分类的
  *  确定性判据（loop 是否自测过/上次失败集/验证面是否全过）。由 attachUsage 从工具状态拼装，
  *  纯增量字段，旧调用方零感知。 */
+/** P2a（2026-09-11）：loop 异常终止真实出口原因（纯增量观测字段，不改 status 语义）。 */
+export interface LoopTerminationDetail {
+  reason: 'degenerate_output'
+  /** 传输事故反馈重试次数（DEGENERATE_RETRY_LIMIT 内） */
+  retries: number
+}
+
 export interface LoopValidationSnapshot {
   /** run_gwt_tests 执行次数（0=loop 从未自测） */
   gwt_runs: number
@@ -905,6 +912,10 @@ export interface AgentLoopJudgeMetadata {
   toolCalls: Array<{ name: string; turn: number }>
   /** W2-F4：自验状态快照（终验 source 分类用）；存量/重建路径缺省无 */
   validation?: LoopValidationSnapshot
+  /** P2a（2026-09-11 狗粮 94f449c6）：异常终止的真实出口原因——status 语义不变
+ *  （终验/裁判照旧），degenerate_output = 末轮输出退化（DSML/协议原文漏进正文），
+ *  与「真实跑满轮数」区分，防 turn_limit 标签误导归因与用户话术。 */
+  termination_detail?: LoopTerminationDetail
 }
 
 export interface AgentEvent {

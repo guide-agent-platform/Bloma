@@ -282,7 +282,7 @@ export type LoopLogEntry =
       inputTokens?: number
       outputTokens?: number
     }
-  | { kind: 'final'; status: string; turns: number; toolCalls: number }
+  | { kind: 'final'; status: string; turns: number; toolCalls: number; /** P2a：真实出口原因标注（如 degenerate_output） */ terminationReason?: string }
 
 /** 文档头（首次创建时写入一次；后续会话分节追加）。 */
 const LOOP_LOG_DOC_HEADER = [
@@ -327,7 +327,9 @@ export function appendLoopLogDocument(projectId: string, entry: LoopLogEntry): v
         : ''
     block = `- 轮 ${entry.turn}：${tools}${tokens}\n`
   } else {
-    block = `\n### 终态：${entry.status}（${entry.turns} 轮 / ${entry.toolCalls} 次工具调用）\n`
+    block = `\n### 终态：${entry.status}（${entry.turns} 轮 / ${entry.toolCalls} 次工具调用）${
+      entry.terminationReason ? `｜${entry.terminationReason}` : ''
+    }\n`
   }
   appendFileSync(path, block, 'utf8')
   const previous = readManifest(dir)

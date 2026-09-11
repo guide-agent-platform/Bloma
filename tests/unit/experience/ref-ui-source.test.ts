@@ -94,3 +94,42 @@ describe('ref-ui-source：市调 UI 做法入册', () => {
     expect(listRefPatternModules('personal_tool', home)).toEqual([])
   })
 })
+
+describe('P2b 词典/百科垃圾拒收（狗粮 94f449c6「纵」字案）', () => {
+  it('looksLikeDictionaryJunk：百科后缀/词典括注/词典域名/内容标记/单字名命中；正常 UI 想法放行', async () => {
+    const { looksLikeDictionaryJunk } = await import('../../../main/experience/ref-ui-source')
+    // 当晚 4 张垃圾卡的原始形态（域名与标题全部实测复现）
+    expect(looksLikeDictionaryJunk({ label: '纵（汉语文字）_百度百科', source: 'baike.baidu.com/item/纵' })).toBe(true)
+    expect(looksLikeDictionaryJunk({ label: '纵 z&#242;ng、zǒng、zōng', source: 'zdic.net' })).toBe(true)
+    expect(looksLikeDictionaryJunk({ label: '纵的意思,纵的解释,纵的拼音,纵的部首,', source: 'hanyuguoxue.com' })).toBe(true)
+    expect(looksLikeDictionaryJunk({ label: '纵怎么读_纵的拼音 - 新华字典', source: 'zidian.gushici.net' })).toBe(true)
+    // 域名缺失但标题是词典内容形态 → 内容标记兑底
+    expect(looksLikeDictionaryJunk({ label: '纵怎么读_纵的拼音', source: '' })).toBe(true)
+    expect(looksLikeDictionaryJunk({ label: '纵的意思,纵的解释,纵的拼音,纵的部首,', source: '' })).toBe(true)
+    // 单字名（剥括注/分隔符后只剩一个汉字）
+    expect(looksLikeDictionaryJunk({ label: '纵' })).toBe(true)
+    expect(looksLikeDictionaryJunk({ label: '纵 - 打飞机界面风格' })).toBe(false) // 剥分隔符后多字，放行
+    // 正常 UI 想法不误杀
+    expect(looksLikeDictionaryJunk({ label: '虚拟键盘实时弹奏', note: '点击琴键立即发声', source: 'pianoabc.com' })).toBe(false)
+    expect(looksLikeDictionaryJunk({ label: '抽奖转盘', note: '每日一次抽奖机会', source: 'lottery.example.com' })).toBe(false)
+    expect(looksLikeDictionaryJunk({ label: '' })).toBe(true)
+  })
+
+  it('入册拒收：垃圾想法不落账本、不计入返回计数；干净想法照常入册', async () => {
+    const count = await ingestResearchIdeasAsCandidates({
+      ideas: [
+        { label: '纵（汉语文字）_百度百科', note: '此曰纵，缓也……', source: 'baike.baidu.com/item/纵' },
+        { label: '纵 z&#242;ng、zǒng、zōng', note: '本义:松缓', source: 'zdic.net' },
+        { label: '纵的意思,纵的解释,纵的拼音,纵的部首,', note: '纵是多音字', source: 'hanyuguoxue.com' },
+        { label: '无尽刷分生存的经典 HUD 布局', note: '顶部血条+右上分数', source: 'shmup.example.com/best' },
+      ],
+      demand: '做一个纵版打飞机',
+      projectId: 'proj-ui-junk',
+    })
+    expect(count).toBe(1)
+    const text = ledgerText()
+    expect(text).toContain('无尽刷分生存的经典 HUD 布局')
+    expect(text).not.toContain('百度百科')
+    expect(text).not.toContain('纵（汉语文字）')
+  })
+})

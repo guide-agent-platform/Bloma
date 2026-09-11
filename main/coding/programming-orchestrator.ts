@@ -1452,6 +1452,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     status: result.status,
     turns: result.turns,
     toolCalls: result.toolCalls.length,
+    ...(result.termination_detail ? { terminationReason: 'degenerate_output（末轮输出退化，非轮数耗尽）' } : {}),
   })
 
   const durationMs = Date.now() - startedAt
@@ -1478,6 +1479,10 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
               ...(result.cancel_detail.reason !== undefined ? { cancel_reason: result.cancel_detail.reason } : {}),
             }
           : {}),
+        // P2a（2026-09-11）：异常终止真实出口原因（degenerate_output ≠ 真实跑满轮数）
+        ...(result.termination_detail
+          ? { termination_reason: result.termination_detail.reason, termination_retries: result.termination_detail.retries }
+          : {}),
         ...(result.usage
           ? {
               usage: {
@@ -1497,9 +1502,18 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     session_id: input.session_id,
     entry: {
       type: 'agent_loop',
-      title: `Agent Loop 结束（${result.status}）`,
-      why: `${result.turns} 轮、${result.toolCalls.length} 次工具调用、耗时 ${durationMs}ms；终验仍由外部代码执行（不信模型自述）`,
-      detail: { status: result.status, turns: result.turns, tool_distribution: toolDistribution },
+      title: `Agent Loop 结束（${result.status}${result.termination_detail ? '·输出退化' : ''}）`,
+      why: `${result.turns} 轮、${result.toolCalls.length} 次工具调用、耗时 ${durationMs}ms${
+        result.termination_detail
+          ? `；末轮输出退化（协议原文漏进正文，重试 ${result.termination_detail.retries} 次仍脏——非真实跑满轮数）`
+          : ''
+      }；终验仍由外部代码执行（不信模型自述）`,
+      detail: {
+        status: result.status,
+        turns: result.turns,
+        tool_distribution: toolDistribution,
+        ...(result.termination_detail ? { termination: result.termination_detail } : {}),
+      },
     },
   })
 
@@ -1522,7 +1536,14 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   if (result.status === 'turn_limit' || result.status === 'budget_exhausted') {
     recordFailureCards(
       { projectId: input.project_id, sessionId: input.session_id },
-      { abnormal: { outcomeType: 'timeout', description: `Agent Loop 未正常收尾（${result.status}，${result.turns} 轮）` } },
+      {
+        abnormal: {
+          outcomeType: 'timeout',
+          description: `Agent Loop 未正常收尾（${result.status}，${result.turns} 轮${
+            result.termination_detail ? '，末轮输出退化（传输事故）' : ''
+          }）`,
+        },
+      },
     )
   }
 
