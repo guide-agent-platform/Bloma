@@ -25,7 +25,10 @@ export interface MarketResearch {
   results: MarketResult[]
   /** 直接注入弹窗与向导上下文的汇总文本（编号列表，≤4000 字符） */
   summary: string
-  reason?: 'network' | 'empty' | `http_${number}`
+  /** R1（2026-09-11 狗粮 dd6ba98d 复盘）：dictionary_junk = 引擎返回的全部结果都被
+ *  词典/百科过滤拦截（大陆网络 cn.bing 反爬罐头页实测形态）——与 network/empty
+ *  同级如实降级，字典页绝不进弹窗与向导上下文。 */
+  reason?: 'network' | 'empty' | 'dictionary_junk' | `http_${number}`
 }
 
 /** 结果条数与摘要长度上限（弹窗上下文体积控制）。 */
@@ -100,7 +103,8 @@ export async function researchMarketSimilar(queriesInput: string[]): Promise<Mar
       continue
     }
     for (const result of outcome.results) {
-      if (!merged.has(result.url)) merged.set(result.url, result)
+      // R1：合并层二次过滤（防御深度——引擎结构变化时单点拦截失效的兑底）
+      if (!isDictionaryResult(result) && !merged.has(result.url)) merged.set(result.url, result)
     }
   }
   const results = [...merged.values()].slice(0, MAX_RESULTS)
@@ -139,8 +143,7 @@ async function searchViaEngine(
 ): Promise<MarketResearch> {
   let response: Response
   try {
-    const separator = endpoint.includes('?') ? '&' : '?'
-    response = await researchFetch(`${endpoint}${separator}q=${encodeURIComponent(query)}`, {
+    response = await researchFetch(`${endpoint}${endpoint.includes('?') ? '&' : '?'}q=${encodeURIComponent(query)}`, {
       method: 'GET',
       signal: AbortSignal.timeout(NET_FETCH_TIMEOUT_MS),
       headers,
@@ -153,11 +156,72 @@ async function searchViaEngine(
     return { available: false, queries: [query], results: [], summary: '', reason: `http_${response.status}` as `http_${number}` }
   }
   const html = await response.text()
-  const results = parse(html).slice(0, MAX_RESULTS_PER_QUERY)
-  if (results.length === 0) {
-    return { available: false, queries: [query], results: [], summary: '', reason: 'empty' }
+  const parsed = parse(html)
+  // R1（2026-09-11）：词典/百科结果过滤（cn.bing 罐头页实测：不同查询返回同一批
+  // 「纵（汉语文字）_百度百科」类结果）。全部被拦 → dictionary_junk 如实降级。
+  const clean = parsed.filter((result) => !isDictionaryResult(result))
+  if (clean.length === 0) {
+    return {
+      available: false,
+      queries: [query],
+      results: [],
+      summary: '',
+      reason: parsed.length > 0 ? 'dictionary_junk' : 'empty',
+    }
   }
+  const results = clean.slice(0, MAX_RESULTS_PER_QUERY)
   return { available: true, queries: [query], results, summary: renderSummary(results) }
+}
+
+// ---------------------------------------------------------------------------
+// R1（2026-09-11 狗粮 dd6ba98d）：词典/百科结果过滤。判定与经验库 P2b
+// （experience/ref-ui-source.ts looksLikeDictionaryJunk）同源对齐——市调搜索
+// 引擎（大陆网络 cn.bing 反爬降级/查询词分词）会把中文查询首字当词返回字典页，
+// 这类结果无任何市调价值且会污染灵感参考区与经验库。
+// ---------------------------------------------------------------------------
+
+/** 百科/词典站域名清单（狗粮实测：cn.bing 罐头页返回的全部域名）。 */
+const DICTIONARY_RESULT_DOMAINS = [
+  'baike.baidu.com',
+  'zh.wikipedia.org',
+  'zh.wiktionary.org',
+  'baike.sogou.com',
+  'dict.baidu.com',
+  'zidian.gushiwen.cn',
+  'zidian.gushici.com',
+  'zidian.gushici.net',
+  'chagushici.com',
+  'www.hgcha.com',
+  'www.guoxuedashi.net',
+  'xh.5156edu.com',
+  'cd.hwxnet.com',
+  'zdic.net',
+  'hanyuguoxue.com',
+  'kmcha.com',
+  'yuwenmi.com',
+]
+/** 词典站域名模式（zidian./cidian./baike./guoxue./wiki 前缀站，防清单追不全）。 */
+const DICTIONARY_DOMAIN_RE = /(^|\.)(zidian|cidian|baike|guoxue|wiktionary)\./i
+/** 标题词典学特征（百科后缀/词典括注/查字典内容标记）。 */
+const ENCYCLOPEDIA_TITLE_RE = /_(百度百科|维基百科|搜狗百科|快百科|头条百科|萌娘百科|词典)$/i
+const DICTIONARY_TITLE_RE = /[（(](汉语文字|汉字|词语|多音字|方言|姓氏|汉语词汇)[）)]/
+const DICTIONARY_CONTENT_RE = /(怎么读|怎么念|新华字典|汉语词典|康熙字典|说文解字|组词|笔顺)|拼音.{0,10}部首|部首.{0,10}拼音/
+
+/** 词典/百科结果判定（导出侢单测与经验库对齐校验）。 */
+export function isDictionaryResult(result: { title: string; url: string }): boolean {
+  const title = result.title.trim()
+  let hostname = ''
+  try {
+    hostname = new URL(result.url).hostname.toLowerCase()
+  } catch {
+    hostname = ''
+  }
+  if (ENCYCLOPEDIA_TITLE_RE.test(title)) return true
+  if (DICTIONARY_TITLE_RE.test(title)) return true
+  if (DICTIONARY_CONTENT_RE.test(title)) return true
+  if (DICTIONARY_RESULT_DOMAINS.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))) return true
+  if (DICTIONARY_DOMAIN_RE.test(hostname)) return true
+  return false
 }
 
 /**

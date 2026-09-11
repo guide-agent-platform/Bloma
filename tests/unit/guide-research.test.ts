@@ -178,3 +178,65 @@ describe('guide-research 市调（DDG 免 key）', () => {
     expect(result.reason).toBe('network')
   })
 })
+
+describe('R1 词典/百科结果过滤（2026-09-11 狗粮 dd6ba98d：cn.bing 罐头页）', () => {
+  afterEach(() => {
+    resetGuideResearchFetchForTests()
+  })
+
+  it('isDictionaryResult：当晚 Bing 实测六域名全拦；正常产品结果放行', async () => {
+    const { isDictionaryResult } = await import('../../main/guide-research')
+    // 当晚 cn.bing 罐头页返回的真实标题/域名（两条查询共 12 条全为词典页）
+    expect(isDictionaryResult({ title: '纵（汉语文字）_百度百科', url: 'https://baike.baidu.com/item/%E7%BA%B5' })).toBe(true)
+    expect(isDictionaryResult({ title: '纵 z&#242;ng、zǒng、zōng - 汉典', url: 'https://www.zdic.net/hans/纵' })).toBe(true)
+    expect(isDictionaryResult({ title: '纵的意思,纵的解释,纵的拼音,纵的部首,纵的笔顺-汉语国学', url: 'https://www.hanyuguoxue.com/zong' })).toBe(true)
+    expect(isDictionaryResult({ title: '纵怎么读_纵的拼音 - 新华字典', url: 'https://zidian.gushici.net/zong' })).toBe(true)
+    expect(isDictionaryResult({ title: '纵_纵怎么读_纵的意思 - 汉语字典', url: 'https://www.chagushici.com/zong' })).toBe(true)
+    expect(isDictionaryResult({ title: '《纵》的拼音,纵字的意思、组词、部首、笔画、笔顺 - 汉语查', url: 'https://www.hgcha.com/zong' })).toBe(true)
+    // 正常产品/攻略结果不误杀
+    expect(isDictionaryResult({ title: '暖雪手游全 Boss 解析攻略', url: 'https://www.gamersky.com/ent/xxx' })).toBe(false)
+    expect(isDictionaryResult({ title: '雷电战机 retro 射击游戏', url: 'https://store.steampowered.com/app/xxx' })).toBe(false)
+    expect(isDictionaryResult({ title: 'JS 弹幕引擎对比', url: 'https://github.com/topics/danmaku' })).toBe(false)
+  })
+
+  it('引擎返回全词典页 → available=false reason=dictionary_junk（如实降级，字典页不进弹窗）', async () => {
+    // DDG 网络失败 + Bing 返回当晚实测罐头页（复刻两条查询同一批结果的形态）
+    const junkBing = bingPage([
+      { title: '纵（汉语文字）_百度百科', href: 'https://baike.baidu.com/item/%E7%BA%B5', snippet: '纵，缓也' },
+      { title: '纵 z&#242;ng、zǒng、zōng - 汉典', href: 'https://www.zdic.net/hans/纵', snippet: '本义:松缓' },
+    ])
+    let call = 0
+    setGuideResearchFetchForTests((_input, _init) => {
+      call += 1
+      const url = String(_input)
+      if (url.includes('duckduckgo')) return Promise.reject(new Error('network timeout'))
+      return Promise.resolve(htmlResponse(junkBing))
+    })
+    const research = await researchMarketSimilar(['纵版打飞机 手游 关卡 Boss'])
+    expect(research.available).toBe(false)
+    // 双端均败保留主端点（DDG）失败原因（既有锁定语义）；关键保证：词典页零条进弹窗/摘要
+    expect(research.reason).toBe('network')
+    expect(research.results).toHaveLength(0)
+    expect(research.summary).toBe('')
+    expect(call).toBe(2) // DDG 失败后逐查询回退 Bing
+  })
+
+  it('混合结果：词典页剔除、真实结果保留；摘要只含干净条目', async () => {
+    const mixed = bingPage([
+      { title: '纵（汉语文字）_百度百科', href: 'https://baike.baidu.com/item/%E7%BA%B5', snippet: '纵，缓也' },
+      { title: '十大经典纵版射击游戏盘点', href: 'https://www.gamersky.com/top/shmup', snippet: '从雷电到怒首领蜂的街机回忆' },
+      { title: '弹幕射击手游推荐榜', href: 'https://www.taptap.io/topic/bullet', snippet: '2026 年热门弹幕手游' },
+    ])
+    setGuideResearchFetchForTests((_input, _init) => {
+      const url = String(_input)
+      if (url.includes('duckduckgo')) return Promise.reject(new Error('network timeout'))
+      return Promise.resolve(htmlResponse(mixed))
+    })
+    const research = await researchMarketSimilar(['纵版射击游戏 推荐'])
+    expect(research.available).toBe(true)
+    expect(research.results).toHaveLength(2)
+    expect(research.results.some((r) => r.title.includes('百度百科'))).toBe(false)
+    expect(research.summary).toContain('十大经典纵版射击游戏盘点')
+    expect(research.summary).not.toContain('百度百科')
+  })
+})
