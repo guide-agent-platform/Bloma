@@ -66,53 +66,19 @@ export function collapseRepetitiveText(text: string): string {
 }
 
 /* =========================================================================
-   工具调用协议残片折叠（2026-09-11 真机案例：DSML 原文漏进正文+历史回放）
+   工具调用协议残片检测（2026-09-11 真机案例：DSML 原文漏进正文+历史回放）
    =========================================================================
    背景：DeepSeek 系渠道在传输事故时把工具调用协议原文（DSML 标记）以文本形态
-   漏进 assistant 正文（d066eb92 同源）；JSONL 落盘保留原始证据，但显示层此前
-   只做退行重复折叠——DSML 标记经 React-Markdown 被当作原生 HTML 剥除，正文
-   渲染成空（真机表现「气泡只剩一条虚线、展开无内容」）。
-   本函数为显示层清洗：协议标签/参数对一律移除，孤立的属性尾巴（被切断的
-   `<｜｜DSML｜｜ invoke name="read_file">` 残段）在确认 DSML 场景下移除；
-   保留的前置旁白照常显示，被移除部分以折叠标注代替。落盘/回放数据不动。
+   漏进 assistant 正文（d066eb92 同源）。协议原文经 React-Markdown 会被当作原生
+   HTML 剥除——正文渲染成空（真机表现「气泡只剩一条虚线、展开无内容」）。
+   处理口径（对齐用户拍板）：含协议残片的文本**不删除、不隐藏**，由渲染层路由到
+   过程记录卡片（可折叠/展开），展开后以纯文本原样呈现。本模块只负责检测。
  */
 
-/** DSML 开/闭标记（含被切断的残段形态） */
-const DSML_TAG = /<｜｜DSML｜｜[^>]*>?|<\/｜｜DSML｜｜[^>]*>?/g
-/** DSML 参数对（标签+值整体移除，防值残留在正文） */
-const DSML_PARAMETER = /<｜｜DSML｜｜\s*parameter[^>]*>[^<]*<\/｜｜DSML｜｜\s*parameter>/g
-/** 通用 XML 风格工具协议标签（invoke/parameter/tool_calls 等） */
-const XML_TOOL_TAG = /<\/?(?:invoke|parameter|tool_calls?|function_calls?|function_results?)\b[^>]*>/gi
-/** XML 参数对（标签+值整体移除） */
-const XML_PARAMETER = /<parameter\b[^>]*>[^<]*<\/parameter>/gi
-/** 被切断的 invoke 开头残段（如 `name="read_file">`——仅在确认 DSML 场景下移除） */
-const ATTR_TAIL = /\s*[a-z_]+="[^"]{0,200}">/g
-/** 是否含工具协议特征（与 main/coding/output-integrity.ts TOOL_MARKUP_PATTERNS 同源口径） */
+/** 是否含工具调用协议特征（与 main/coding/output-integrity.ts TOOL_MARKUP_PATTERNS 同源口径） */
 const HAS_TOOL_MARKUP = /<｜｜DSML｜｜|<\/?tool_calls?[^a-z]|<\/?invoke\b|<\/?parameter\b/i
 
-/** 折叠标注（正文里被移除的协议原文以一句话代替） */
-export const TOOL_MARKUP_FOLDED_NOTE = '〔工具调用协议原文已折叠〕'
-
-/**
- * 显示层清洗：移除混进正文的工具调用协议原文。
- * - 无协议特征 → 原样返回（零改动快速路径）；
- * - 命中 → 移除协议标记/参数对/属性尾巴，保留前置旁白，追加折叠标注；
- * - 清洗后无有效正文 → 仅返回折叠标注（气泡不再渲染成空）。
- */
-export function stripToolMarkupText(text: string): string {
-  if (!text || !HAS_TOOL_MARKUP.test(text)) return text
-  const removed = text.length
-  let out = text
-    .replace(DSML_PARAMETER, ' ')
-    .replace(XML_PARAMETER, ' ')
-    .replace(DSML_TAG, ' ')
-    .replace(XML_TOOL_TAG, ' ')
-  if (/<｜｜DSML｜｜/.test(text)) out = out.replace(ATTR_TAIL, ' ')
-  out = out.replace(/\s{3,}/g, '\n\n').trim()
-  const kept = out.length
-  if (removed - kept > 40) {
-    return out ? `${out}\n\n${TOOL_MARKUP_FOLDED_NOTE}` : TOOL_MARKUP_FOLDED_NOTE
-  }
-  // 移除量很小（偶发单标记）：仍移除协议原文，但不加标注
-  return out
+/** 检测正文是否混入工具调用协议原文（显示层路由判据：命中 → 过程记录卡片原样呈现）。 */
+export function hasToolMarkupText(text: string): boolean {
+  return !!text && HAS_TOOL_MARKUP.test(text)
 }

@@ -10,7 +10,7 @@ import { createStore, Provider } from 'jotai'
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ChatPanel } from '../../renderer/components/ChatPanel'
-import { activeAgentSessionIdAtom, setupGlobalAgentListeners } from '../../renderer/agent-atoms'
+import { activeAgentSessionIdAtom, agentMessagesFamily, setupGlobalAgentListeners } from '../../renderer/agent-atoms'
 import type { AgentEvent, ElectronAPI } from '../../shared/types'
 
 let seq = 0
@@ -91,4 +91,31 @@ describe('过程记录卡片渲染', () => {
     expect(card()).toBeNull()
     expect(document.body.textContent).toContain('你说的是想做记账对吧？')
   })
+it('DSML 协议残片消息路由为过程记录卡片：展开后原文可见（2026-09-11 真机案例回归）', () => {
+  const { listener } = mountPanel()
+  const store = window.__jotai_store__ as { set: (a: unknown, v: unknown) => void }
+  // 模拟存量回放：正文混入 DSML 协议原文的传输事故消息（无 process_record 标记）
+  const leaked =
+    '文件齐了，启动预览确认可运行。name="read_file"> <｜｜DSML｜｜ parameter name="limit" string="false">30' +
+    '</｜｜DSML｜｜ parameter> <｜｜DSML｜｜ parameter name="path" string="true">src/styles.css</｜｜DSML｜｜ parameter>' +
+    ' </｜｜DSML｜｜ invoke> </｜｜DSML｜｜ calls>'
+  act(() => {
+    store.set(agentMessagesFamily('s1'), [
+      { role: 'assistant' as const, content: [{ type: 'text' as const, text: leaked }], timestamp: Date.now() },
+    ])
+  })
+  // 路由为过程记录卡片（默认收起，头行可见）
+  const record = document.querySelector('[data-ai-id="process-record"]')
+  expect(record).not.toBeNull()
+  expect(record?.textContent).toContain('过程记录')
+  // 展开后协议残片以纯文本原样可见（不再是「空头支票」）
+  fireEvent.click(record?.querySelector('button') as HTMLButtonElement)
+  expect(record?.textContent).toContain('文件齐了，启动预览确认可运行。')
+  expect(record?.textContent).toContain('read_file')
+  expect(record?.textContent).toContain('src/styles.css')
+  // 再点收回起
+  fireEvent.click(record?.querySelector('button') as HTMLButtonElement)
+  expect(record?.textContent).not.toContain('src/styles.css')
+})
+
 })

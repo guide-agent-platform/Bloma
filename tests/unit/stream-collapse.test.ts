@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { collapseRepetitiveText, stripToolMarkupText } from '../../renderer/stream-collapse'
+import { collapseRepetitiveText, hasToolMarkupText } from '../../renderer/stream-collapse'
 
 /**
  * 退行性重复折叠（2026-09-04「查。」墙案）：显示层防刷屏——落盘保留原始证据，
@@ -67,39 +67,18 @@ describe('collapseRepetitiveText — 退行重复折叠', () => {
   })
 })
 
-describe('stripToolMarkupText — 工具协议残片折叠（2026-09-11 真机案例）', () => {
-  const DSML_LEAK =
-    '文件齐了，启动预览确认可运行。name="read_file"> <｜｜DSML｜｜ parameter name="limit" string="false">30</｜｜DSML｜｜ parameter>' +
-    ' <｜｜DSML｜｜ parameter name="offset" string="false">255</｜｜DSML｜｜ parameter>' +
-    ' <｜｜DSML｜｜ parameter name="path" string="true">src/styles.css</｜｜DSML｜｜ parameter>' +
-    ' </｜｜DSML｜｜ invoke> </｜｜DSML｜｜ calls>'
-
-  it('用户实测样本：DSML 标记/参数对/属性尾巴全部移除，前置旁白保留，标注出现', () => {
-    const out = stripToolMarkupText(DSML_LEAK)
-    expect(out).toContain('文件齐了，启动预览确认可运行。')
-    expect(out).toContain('工具调用协议原文已折叠')
-    expect(out).not.toContain('DSML')
-    expect(out).not.toContain('read_file')
-    expect(out).not.toContain('src/styles.css')
-    expect(out).not.toContain('name="limit"')
+describe('hasToolMarkupText — 工具协议残片检测（2026-09-11 真机案例）', () => {
+  it('用户实测 DSML 样本命中', () => {
+    expect(
+      hasToolMarkupText(
+        'name="read_file"> <｜｜DSML｜｜ parameter name="limit" string="false">30</｜｜DSML｜｜ parameter> </｜｜DSML｜｜ calls>',
+      ),
+    ).toBe(true)
   })
-
-  it('整段泄漏（无前置旁白）→ 仅返回折叠标注（气泡不渲染成空）', () => {
-    const out = stripToolMarkupText(
-      '<｜｜DSML｜｜ invoke name="write_file"> <｜｜DSML｜｜ parameter name="path" string="true">index.html</｜｜DSML｜｜ parameter> </｜｜DSML｜｜ invoke>',
-    )
-    expect(out).toBe('〔工具调用协议原文已折叠〕')
+  it('XML 风格工具标签命中', () => {
+    expect(hasToolMarkupText('<invoke name="grep"><parameter name="pattern">todo</parameter></invoke>')).toBe(true)
   })
-
-  it('无协议特征的正常文本零改动', () => {
-    const normal = '这个单位换算器现在可以随手完成日常换算，打开右侧预览就能用。'
-    expect(stripToolMarkupText(normal)).toBe(normal)
-  })
-
-  it('XML 风格泄漏同样折叠', () => {
-    const out = stripToolMarkupText('先看一下配置。<invoke name="grep"><parameter name="pattern">todo</parameter></invoke>')
-    expect(out).toContain('先看一下配置。')
-    expect(out).not.toContain('<invoke')
-    expect(out).not.toContain('todo</parameter>')
+  it('正常旁白不误伤', () => {
+    expect(hasToolMarkupText('这个单位换算器现在可以随手完成日常换算，打开右侧预览就能用。')).toBe(false)
   })
 })

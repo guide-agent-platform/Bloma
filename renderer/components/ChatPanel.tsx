@@ -23,7 +23,7 @@ import {
   steerStatusFamily,
 } from './atoms'
 import type { AgentEvent, AgentMessage, AgentStreamState, PastedImageRef, ProjectMode, SteerStatusChip } from './atoms'
-import { collapseRepetitiveText, stripToolMarkupText } from '../stream-collapse'
+import { collapseRepetitiveText, hasToolMarkupText } from '../stream-collapse'
 import { hasUsableChannelsAtom, chatInputDraftAtom, chatInputFocusSignalAtom, chatInputHintAtom } from './atoms-sprint2'
 import { extractPastedImages, extFromMime, toBase64DataUrl } from '../lib/paste-extract'
 
@@ -717,7 +717,7 @@ const NarrationRow: React.FC<{ text: string }> = ({ text }) => (
       wordBreak: 'break-word',
     }}
   >
-    {collapseRepetitiveText(stripToolMarkupText(text))}
+    {collapseRepetitiveText(text)}
   </div>
 )
 
@@ -1091,7 +1091,7 @@ const ThinkingBlock: React.FC<{ text: string; streaming?: boolean }> = ({ text, 
             wordBreak: 'break-word',
           }}
         >
-          {collapseRepetitiveText(stripToolMarkupText(text))}
+          {collapseRepetitiveText(text)}
         </div>
       )}
     </div>
@@ -1172,13 +1172,13 @@ const ProcessRecordBubble: React.FC<{
                 wordBreak: 'break-word',
               }}
             >
-              {collapseRepetitiveText(stripToolMarkupText(thinkingText))}
+              {collapseRepetitiveText(thinkingText)}
             </div>
           </div>
         )}
         {text && (
           <div style={{ marginTop: 'var(--space-2)', fontSize: 'var(--font-size-xs)', lineHeight: 1.6, color: 'var(--color-text-muted)' }}>
-            <Markdown text={stripToolMarkupText(text)} />
+            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{collapseRepetitiveText(text)}</div>
           </div>
         )}
       </div>
@@ -1236,7 +1236,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
   // 退行重复折叠（2026-09-04「查。」墙案）：显示层折叠，落盘/回放数据保留原始；
   // system 前缀行（[decision]/[queue-dropped] 等按前缀分流）不折叠
   // 显示层清洗（2026-09-11）：DSML 等工具协议残片先进折叠（防 React-Markdown 剥 HTML 后渲染成空），再退行折叠
-  const text = isSystem ? rawText : collapseRepetitiveText(stripToolMarkupText(rawText))
+  const text = isSystem ? rawText : collapseRepetitiveText(rawText)
 
   // 思考分离（2026-09-11）：thinking 块单独折叠展示，不与旁白正文混排
   const thinkingText = message.content
@@ -1244,7 +1244,10 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
     .map((block) => (typeof block.thinking === 'string' ? block.thinking : ''))
     .filter(Boolean)
     .join('\n\n')
-  const isProcessRecord = !isUser && !isSystem && message.process_record === true
+  // 过程记录路由（2026-09-11）：流水线 run 沉淀带标记；正文混入工具协议残片（DSML
+  // 传输事故）的消息同样按过程记录呈现——展开后以纯文本原样可见，不经 Markdown 剥除
+  const isProcessRecord =
+    !isUser && !isSystem && (message.process_record === true || hasToolMarkupText(rawText))
 
   // Agent Loop 落盘的轮次：assistant 轮带 tool_use、user 轮只带 tool_result（无文本）
   const hasToolBlocks = message.content.some((block) => block.type === 'tool_use' || block.type === 'tool_result')
