@@ -23,7 +23,7 @@ import {
   steerStatusFamily,
 } from './atoms'
 import type { AgentEvent, AgentMessage, AgentStreamState, PastedImageRef, ProjectMode, SteerStatusChip } from './atoms'
-import { collapseRepetitiveText } from '../stream-collapse'
+import { collapseRepetitiveText, stripToolMarkupText } from '../stream-collapse'
 import { hasUsableChannelsAtom, chatInputDraftAtom, chatInputFocusSignalAtom, chatInputHintAtom } from './atoms-sprint2'
 import { extractPastedImages, extFromMime, toBase64DataUrl } from '../lib/paste-extract'
 
@@ -717,7 +717,7 @@ const NarrationRow: React.FC<{ text: string }> = ({ text }) => (
       wordBreak: 'break-word',
     }}
   >
-    {collapseRepetitiveText(text)}
+    {collapseRepetitiveText(stripToolMarkupText(text))}
   </div>
 )
 
@@ -1091,7 +1091,7 @@ const ThinkingBlock: React.FC<{ text: string; streaming?: boolean }> = ({ text, 
             wordBreak: 'break-word',
           }}
         >
-          {collapseRepetitiveText(text)}
+          {collapseRepetitiveText(stripToolMarkupText(text))}
         </div>
       )}
     </div>
@@ -1172,13 +1172,13 @@ const ProcessRecordBubble: React.FC<{
                 wordBreak: 'break-word',
               }}
             >
-              {collapseRepetitiveText(thinkingText)}
+              {collapseRepetitiveText(stripToolMarkupText(thinkingText))}
             </div>
           </div>
         )}
         {text && (
           <div style={{ marginTop: 'var(--space-2)', fontSize: 'var(--font-size-xs)', lineHeight: 1.6, color: 'var(--color-text-muted)' }}>
-            <Markdown text={text} />
+            <Markdown text={stripToolMarkupText(text)} />
           </div>
         )}
       </div>
@@ -1235,7 +1235,8 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
     .join('')
   // 退行重复折叠（2026-09-04「查。」墙案）：显示层折叠，落盘/回放数据保留原始；
   // system 前缀行（[decision]/[queue-dropped] 等按前缀分流）不折叠
-  const text = isSystem ? rawText : collapseRepetitiveText(rawText)
+  // 显示层清洗（2026-09-11）：DSML 等工具协议残片先进折叠（防 React-Markdown 剥 HTML 后渲染成空），再退行折叠
+  const text = isSystem ? rawText : collapseRepetitiveText(stripToolMarkupText(rawText))
 
   // 思考分离（2026-09-11）：thinking 块单独折叠展示，不与旁白正文混排
   const thinkingText = message.content
