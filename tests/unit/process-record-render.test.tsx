@@ -10,7 +10,7 @@ import { createStore, Provider } from 'jotai'
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ChatPanel } from '../../renderer/components/ChatPanel'
-import { activeAgentSessionIdAtom, agentMessagesFamily, setupGlobalAgentListeners } from '../../renderer/agent-atoms'
+import { activeAgentSessionIdAtom, setupGlobalAgentListeners } from '../../renderer/agent-atoms'
 import type { AgentEvent, ElectronAPI } from '../../shared/types'
 
 let seq = 0
@@ -91,35 +91,4 @@ describe('过程记录卡片渲染', () => {
     expect(card()).toBeNull()
     expect(document.body.textContent).toContain('你说的是想做记账对吧？')
   })
-})
-it('存量碎块 thinking（每块 0~11 字符）回放时重组为可读文本（2026-09-11 真机案例回归）', () => {
-  const { listener } = mountPanel()
-  // 模拟存量 JSONL 回放：一轮收尾 = 上百个思考碎块 + 收尾正文（无工具块、无 process_record 标记）
-  const fragments = ['我先', '分析', '需求', '，', '然后', '实现', '记账', '功能']
-  act(() => {
-    listener(
-      ev('s1', 'message_delta', { text: '' }),
-    )
-  })
-  const store = window.__jotai_store__ as { set: (a: unknown, v: unknown) => void }
-  act(() => {
-    store.set(agentMessagesFamily('s1'), [
-      {
-        role: 'assistant' as const,
-        content: [
-          ...fragments.map((thinking) => ({ type: 'thinking' as const, thinking })),
-          { type: 'text' as const, text: '这个单位换算器现在可以随手完成日常换算。' },
-        ],
-        timestamp: Date.now(),
-      },
-    ])
-  })
-  // 回放消息无标记 → 普通气泡 + ThinkingBlock（不折叠为过程卡片）
-  const record = document.querySelector('[data-ai-id="process-record"]')
-  expect(record).toBeNull()
-  const thinkingBlock = document.querySelector('[data-ai-id="thinking-block"]')
-  expect(thinkingBlock).not.toBeNull()
-  fireEvent.click(thinkingBlock?.querySelector('button') as HTMLButtonElement)
-  // '' 连接重组为连续可读句，而非被退行折叠吃成空白
-  expect(thinkingBlock?.textContent).toContain('我先分析需求，然后实现记账功能')
 })

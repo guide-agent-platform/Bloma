@@ -942,49 +942,13 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     const thinkSplitter = createThinkStreamSplitter()
     const textParts: string[] = []
     const thinkingParts: string[] = []
-    // 当前累积的块类型（2026-09-11 真机会话实锤：思考增量逐个 flush 会把一轮思考打成
-    // 上百个 0~11 字符的 JSONL 碎块，回放聚合后不可读）——思考连续累积，仅在
-    // 正文/思考切换或工具边界时收口成块，块序与流序一致
-    let pendingKind: 'text' | 'thinking' | null = null
-    const flushBlocks = (): void => {
-      if (pendingKind === 'thinking') {
-        if (thinkingParts.length > 0) {
-          assistantBlocks.push({ type: 'thinking', thinking: thinkingParts.join('').trim() })
-          thinkingParts.length = 0
-        }
-        if (textParts.length > 0) {
-          assistantBlocks.push({ type: 'text', text: textParts.join('') })
-          textParts.length = 0
-        }
-      } else {
-        if (textParts.length > 0) {
-          assistantBlocks.push({ type: 'text', text: textParts.join('') })
-          textParts.length = 0
-        }
-        if (thinkingParts.length > 0) {
-          assistantBlocks.push({ type: 'thinking', thinking: thinkingParts.join('').trim() })
-          thinkingParts.length = 0
-        }
-      }
-      pendingKind = null
-    }
     const pushNarration = (text: string): void => {
-      if (pendingKind === 'thinking' && thinkingParts.length > 0) {
-        assistantBlocks.push({ type: 'thinking', thinking: thinkingParts.join('').trim() })
-        thinkingParts.length = 0
-      }
-      pendingKind = 'text'
       // 助手旁白照常进事件流上屏（与 runAgent 的 message_delta 语义一致）
       input.publish('message_delta', { text })
       textParts.push(text)
     }
     const pushThinking = (text: string): void => {
       if (!text) return
-      if (pendingKind === 'text' && textParts.length > 0) {
-        assistantBlocks.push({ type: 'text', text: textParts.join('') })
-        textParts.length = 0
-      }
-      pendingKind = 'thinking'
       input.publish('thinking_delta', { text })
       thinkingParts.push(text)
     }
@@ -998,8 +962,15 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
       const tail = thinkSplitter.end()
       for (const piece of tail.narration) pushNarration(piece)
       for (const piece of tail.thinking) pushThinking(piece)
-      // 按流序收口成块（思考/正文各自合并为单块，JSONL 保留原文）
-      flushBlocks()
+      // 思考块先落（一轮内思考通常在正文之前）；两类块各自合并成单块，JSONL 保留原文
+      if (thinkingParts.length > 0) {
+        assistantBlocks.push({ type: 'thinking', thinking: thinkingParts.join('').trim() })
+        thinkingParts.length = 0
+      }
+      if (textParts.length > 0) {
+        assistantBlocks.push({ type: 'text', text: textParts.join('') })
+        textParts.length = 0
+      }
     }
     let stopReason: string | undefined
     let usage: { input_tokens?: number; output_tokens?: number } | undefined
@@ -1021,9 +992,9 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
               for (const piece of cleaner.push(block.text)) emitText(piece)
             } else if (block.type === 'thinking') {
               // 思考通道原生块（Anthropic thinking enabled / effort 渠道）：同样走
-              // thinking_delta 单独上屏，不与旁白正文混排；连续思考并入同一块，
-              // 不在此处 flush（2026-09-11 实锤：逐 delta flush 打出上百个碎块）
-              pushThinking(typeof block.thinking === 'string' ? block.thinking : '')
+              // thinking_delta 单独上屏，不与旁白正文混排；落盘保留原文
+              flushTextRun()
+              if (typeof block.thinking === 'string' && block.thinking) pushThinking(block.thinking)
             } else {
               // tool_use 块前先把挂起的空白与文本段收口，保持块序与流序一致
               flushTextRun()

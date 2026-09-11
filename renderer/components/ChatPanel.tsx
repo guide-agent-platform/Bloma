@@ -1237,14 +1237,12 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
   // system 前缀行（[decision]/[queue-dropped] 等按前缀分流）不折叠
   const text = isSystem ? rawText : collapseRepetitiveText(rawText)
 
-  // 思考分离（2026-09-11）：thinking 块单独折叠展示，不与旁白正文混排。
-  // 连接用 ''（流式增量语义）：存量 JSONL 一轮含上百个 0~11 字符思考碎块，
-  // 用 '\n\n' 连接会碎成不可读行且被退行折叠吃掉（真机「展开只有一条虚线」根因）
+  // 思考分离（2026-09-11）：thinking 块单独折叠展示，不与旁白正文混排
   const thinkingText = message.content
     .filter((block) => block.type === 'thinking')
     .map((block) => (typeof block.thinking === 'string' ? block.thinking : ''))
     .filter(Boolean)
-    .join('')
+    .join('\n\n')
   const isProcessRecord = !isUser && !isSystem && message.process_record === true
 
   // Agent Loop 落盘的轮次：assistant 轮带 tool_use、user 轮只带 tool_result（无文本）
