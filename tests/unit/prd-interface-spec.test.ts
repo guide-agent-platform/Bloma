@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { parseInterfaceSpec } from '../../main/guide/prd-engine-llm'
 import { deriveInterfaceSpec, renderBackplaneAnchor, requirementImpliesBackend, type PrdBackplane } from '../../main/model/prd-backplane'
 
@@ -58,7 +58,7 @@ describe('requirementImpliesBackend（C1a 后端架构后果显影，与 deriveI
       { id: 'F-008', description: '显示并本地留存历史最高分' },
     ]
     expect(deriveInterfaceSpec(items)).toBeDefined()
-    expect(items.filter(requirementImpliesBackend).map((i) => i.id)).toEqual(['F-008'])
+    expect(items.filter((i) => requirementImpliesBackend(i)).map((i) => i.id)).toEqual(['F-008'])
   })
 })
 
@@ -109,5 +109,35 @@ describe('renderBackplaneAnchor 接口契约注入', () => {
     const anchor = renderBackplaneAnchor(base)
     expect(anchor).not.toContain('API 契约')
     expect(anchor).toContain('[F-001]')
+  })
+})
+
+describe('C1b game 豁免留存派生（BLOMA_GAME_DERIVE_EXEMPT，2026-09-11 拍板）', () => {
+  const previousEnv = process.env.BLOMA_GAME_DERIVE_EXEMPT
+  const shmup = [{ id: 'F-008', description: '显示并本地留存历史最高分' }]
+
+  afterEach(() => {
+    if (previousEnv === undefined) delete process.env.BLOMA_GAME_DERIVE_EXEMPT
+    else process.env.BLOMA_GAME_DERIVE_EXEMPT = previousEnv
+  })
+
+  it('开关 off：game 类照派（字节级现状——街机游戏仍升级前后端）', () => {
+    delete process.env.BLOMA_GAME_DERIVE_EXEMPT
+    expect(deriveInterfaceSpec(shmup, 'game')).toBeDefined()
+    expect(requirementImpliesBackend(shmup[0], 'game')).toBe(true)
+  })
+
+  it('开关 on：game 类轻留存豁免——不派生契约、徽标不亮；LLM 明确报告不受影响（调用方 LLM 优先逻辑）', () => {
+    process.env.BLOMA_GAME_DERIVE_EXEMPT = '1'
+    expect(deriveInterfaceSpec(shmup, 'game')).toBeUndefined()
+    expect(requirementImpliesBackend(shmup[0], 'game')).toBe(false)
+  })
+
+  it('开关 on 但非 game：照派照亮（豁免只限 game；重数据工具类项目完整程序口径不变）', () => {
+    process.env.BLOMA_GAME_DERIVE_EXEMPT = '1'
+    expect(deriveInterfaceSpec(shmup, 'web_fullstack')).toBeDefined()
+    expect(requirementImpliesBackend(shmup[0], 'personal_tool')).toBe(true)
+    // 不传 type（旧调用兼容）：照派
+    expect(deriveInterfaceSpec(shmup)).toBeDefined()
   })
 })

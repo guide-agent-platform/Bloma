@@ -240,3 +240,14 @@
 - C5 配置级（不进仓库）：本机 `setx BLOMA_API_TOOL 1`——loop 内启用 `run_api_contract_tests` 自测工具（与 B3 守卫3 自测提醒配合，生成中即可暴露契约失活）。
 - 单测：build-gate +3 例（checkEntryWiring 四态/off 字节锁/on 承接位过与零 script 拦截）；artifact-ui-gate +4 例（off 字节锁/审计案 7 死按钮拦/锚点不进分母/活性与样本不足不判）；prd-interface-spec +2 例（requirementImpliesBackend 词表与聚合一致性）；guide-prd-confirm +1 断言（payload implies_backend 投影）；prd-confirm-dialog +1 例（徽标渲染与未命中不带）。
 - 待拍板挂账不变：C1b（game 豁免留存派生 vs「完整程序」终点口径）、C4（canvas GWT 断言走游戏侧探针，依赖 gwt-runner 扩展）。
+
+## 23. P1 拍板批开关（C1b/C4，2026-09-11 用户拍板「与建议一致，都需要改」）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_GAME_DERIVE_EXEMPT` | C1b game 豁免留存派生 | **off** | 字节级现状（game 类留存信号照派 /api/records，街机游戏升级前后端分离） | game 类 deriveInterfaceSpec 兜底不派生（localStorage 满足「最高分」类轻留存）；LLM 明确报告的 interface_spec 不受影响；requirementImpliesBackend（C1a 徽标）同步不亮；R-DATA-01 双源（rules-registry rulesForTemplateType 变体 + loop prompt 内联变体）改为「按量级分流：重业务数据后端 / 单值轻留存 localStorage」 | `gameDeriveExemptEnabled`/`deriveInterfaceSpec`/`requirementImpliesBackend`（main/model/prd-backplane.ts）；两派生调用点传 templateType（document-engine 模板路径 / prd-engine-llm LLM 路径）；`rulesForTemplateType`（main/rules-registry.ts）；内联变体（buildAgentLoopSystemPrompt） |
+| `BLOMA_GWT_GAME_PROBE` | C4 canvas 断言游戏侧探针 | **off** | 字节级现状（位移断言照走 DOM 位移判定——canvas 游戏结构性假失败） | ①game 生成 prompt 注入【游戏探针通道】契约（产物须挂 window.__g：__g.mode 阶段字符串 + __g.state() 玩家坐标快照）；②gwt-runner 位移类断言（key 触发 × move-* 效果）产物暴露 __g 时走游戏侧判定：前置进 playing（menu 态自动点开始/继续类按钮，未进入如实报）、按键派发后比对玩家坐标方向；无坐标如实指出契约缺口（不用快照变化兜底防游戏自动 tick 假绿）；无 __g 通道 → 现状 DOM 判定（字节级） | `gwtGameProbeEnabled`/`isMoveEffect`/`gamePlayerCoordOf`/`checkGameMoveEffect`/`runGameProbeScenario`（main/gwt-runner.ts）；prompt 契约段（buildAgentLoopSystemPrompt game 分支） |
+
+- 单测：prd-interface-spec +3 例（off 字节锁/on game 豁免/on 非 game 照派+旧调用兼容）；rules-registry +2 例（off 原表字节锁/on+game 仅 R-DATA-01 变体其余规则引用相等）；gwt-game-probe 新文件 9 例（开关/isMoveEffect/坐标提取四态/方向判定/契约缺口文案/prompt 注入三态）。
+- 本机配置（setx，重启 Bloma 生效）：BLOMA_GAME_DERIVE_EXEMPT=1 + BLOMA_GWT_GAME_PROBE=1（用户拍板即开）。
+- 至此审计稿全部修复项（A1/A2/A3/B1/B2/B3/C1a/C1b/C2/C3/C4/C5）落地完毕。

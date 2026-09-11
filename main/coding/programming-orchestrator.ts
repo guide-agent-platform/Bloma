@@ -24,8 +24,9 @@ import { loadSkeletonTemplate, type ProjectSkeleton } from '../project-templates
 import { buildLoopInjection, buildSkeletonMapInjection } from '../template-injection'
 import { buildModuleMapInjection, loadOfficialModules, modulesEnabled, renderOfficialModulesToProject } from '../module-library'
 import { listRefPatternModules, refLibraryEnabled } from '../experience/ref-source'
-import { backplaneInterfaceSpec, buildIterationRoundAnchor, buildRepairRoundAnchor, focusAnchorEnabled, renderBackplaneAnchor, renderRoundAnchorBlock, roundAnchorEnabled } from '../model/prd-backplane'
-import { renderRulesSection, rulesRegistryEnabled } from '../rules-registry'
+import { backplaneInterfaceSpec, buildIterationRoundAnchor, buildRepairRoundAnchor, focusAnchorEnabled, gameDeriveExemptEnabled, renderBackplaneAnchor, renderRoundAnchorBlock, roundAnchorEnabled } from '../model/prd-backplane'
+import { gwtGameProbeEnabled } from '../gwt-runner'
+import { renderRulesSection, rulesForTemplateType, rulesRegistryEnabled } from '../rules-registry'
 import { renderExpressionSection } from '../prompt-expression'
 import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
 import { distillProjectMemorySafely } from '../memory-distiller'
@@ -1591,6 +1592,17 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
           `- 数值基准：${backplane.gdd.numbers.length ? backplane.gdd.numbers.join('；') : '（无）'}`,
         ]
       : []),
+    // C4（2026-09-11 拍板）：游戏探针通道契约——位移类断言经 window.__g 读游戏状态判定
+    //（canvas 无 DOM 位移可探）；不实现通道则位移断言无法判定。开关 off 零注入。
+    ...(gwtGameProbeEnabled() && backplane.gdd
+      ? [
+          '【游戏探针通道】（终验位移断言依赖，必须实现）：在游戏入口挂 window.__g 只读通道：' +
+            '__g.mode 返回当前游戏阶段字符串（\'menu\'|\'playing\'|\'paused\'|\'gameover\' 等小写）；' +
+            '__g.state() 返回玩家状态快照（含 x/y 数字坐标——顶层 {x,y} 或 player 子对象均可，canvas 内坐标）。' +
+            '终验「按键→位移」断言会真实派发按键并经此通道读取坐标变化判定；只读暴露游戏内部状态，不含任何测试投机逻辑。' +
+            '游戏初始停在菜单态时终验会自动点开始类按钮进入 playing。',
+        ]
+      : []),
     '功能项（P0 必须全部实现且断言为真）：',
     // P3 分级锚定提示行（仅 focus 生效时存在）：其余项断言细节已折叠但探针仍全量验证，
     // 防止「折叠=可以不做」的误读（P0 执行面不裁，D3+硬约束 4）
@@ -1633,7 +1645,7 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
       ? '编辑用 edit_file 的 diff 模式（old_string 必须与当前文件逐字一致且唯一）。'
       : '编辑用 edit_file 的 whole 模式（提供修改后的完整文件内容）。',
     // Phase 3 B2：操作契约注册表段（触发—必须—禁止替代—受阻四段式，R-* 单点定义）。
-    ...(rulesRegistryEnabled() ? ['', renderRulesSection()] : []),
+    ...(rulesRegistryEnabled() ? ['', renderRulesSection(rulesForTemplateType(templateType))] : []),
     '',
     // D1：开关 on 时终止条件升级为全验证面（GWT+API 契约+安全）；off 保留原文。
     // W3-D2：BLOMA_PREFLIGHT on 时收口条件=预检通过（GWT/API/产物审计/安全一次过）。
@@ -1673,10 +1685,13 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     // 完整程序阶段 2.5（2026-09-06 计算器案）：数据留存被 localStorage 绕过——「刷新后仍在」
     // 被模型当作 localStorage 的正当理由。硬条款锁死后端持久化，堵住合理化路径。
     // Phase 3 B2：开关 on 时本内联条款让位给 rules-registry R-DATA-01（防双源）；off 保留原文。
+    // C1b（2026-09-11 拍板）：game 豁免开启时轻留存允许 localStorage（重数据仍后端）。
     (rulesRegistryEnabled()
       ? ''
-      : '数据留存类需求（保存/历史/记录/收藏/刷新或重开后仍在）一律用后端持久化：server/routes/ 路由 + ctx.readData/writeData 落 data/ 目录，' +
-        '禁止 localStorage/sessionStorage 存业务数据——PRD 说「刷新后仍在」不构成 localStorage 例外的理由，后端持久化同样满足且必须用后者；') +
+      : templateType === 'game' && gameDeriveExemptEnabled()
+        ? '数据留存按量级分流：街机游戏轻留存（最高分/最佳成绩等单值数据）可用 localStorage；重业务数据（用户内容/多记录管理）仍须后端持久化 server/routes/ 路由 + ctx.readData/writeData 落 data/ 目录；'
+        : '数据留存类需求（保存/历史/记录/收藏/刷新或重开后仍在）一律用后端持久化：server/routes/ 路由 + ctx.readData/writeData 落 data/ 目录，' +
+          '禁止 localStorage/sessionStorage 存业务数据——PRD 说「刷新后仍在」不构成 localStorage 例外的理由，后端持久化同样满足且必须用后者；') +
     'out_of_scope 内的功能一律不做；编辑校验失败的错误信息要读完再改。',
     '',
     // 产物形态（PR-2 条件化）：工程骨架（带构建门禁）→ 模块化解禁（import 可选，

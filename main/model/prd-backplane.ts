@@ -417,8 +417,14 @@ const PERSISTENCE_SIGNAL_RE = /历史|保存|持久|刷新|重开|清空|收藏|
  * 派生通用 records 资源端点（GET 列表 + POST 新增）——保证 server/routes 渠道被
  * 强制走通（终验存活检查 + 修复回流兜底），资源命名交由 loop 对齐业务。
  * 无信号 → undefined（纯展示产物零注入）。
+ *
+ * C1b（2026-09-11 拍板，审计稿 §3 C1 方案 b）：game 类豁免留存信号兑底派生——「最高分」
+ * 类轻留存允许 localStorage 满足，街机游戏不再被静默升级为前后端分离。
+ * BLOMA_GAME_DERIVE_EXEMPT 缺省 off=字节级现状（game 照派）；豁免只作用于兑底派生层，
+ * LLM 明确报告的 interface_spec 不受影响（重数据后端仍是「完整程序」终点口径）。
  */
-export function deriveInterfaceSpec(requirements: SketchRequirement[]): InterfaceEndpoint[] | undefined {
+export function deriveInterfaceSpec(requirements: SketchRequirement[], templateType?: TemplateType): InterfaceEndpoint[] | undefined {
+  if (templateType === 'game' && gameDeriveExemptEnabled()) return undefined
   const hasSignal = requirements.some((item) => PERSISTENCE_SIGNAL_RE.test(`${item.description} ${item.story ?? ''}`))
   if (!hasSignal) return undefined
   return [
@@ -431,8 +437,15 @@ export function deriveInterfaceSpec(requirements: SketchRequirement[]): Interfac
  *  同源信号词同口径——改词表单点生效）。PRD 确认卡据此给命中项显影「将要求后端」徽标：
  *  留存信号词会触发后端契约（派生或 LLM 报告同款架构后果），确认时用户看得见，
  *  不再静默升级前后端分离。纯信息显影，不改变任何行为。 */
-export function requirementImpliesBackend(item: SketchRequirement): boolean {
+export function requirementImpliesBackend(item: SketchRequirement, templateType?: TemplateType): boolean {
+  // C1b 联动：game 豁免开启时轻留存不再催生后端，徽标同步不亮
+  if (templateType === 'game' && gameDeriveExemptEnabled()) return false
   return PERSISTENCE_SIGNAL_RE.test(`${item.description} ${item.story ?? ''}`)
+}
+
+/** C1b 开关：game 类豁免留存信号兑底派生（含 C1a 徽标与 R-DATA-01 措辞联动）。缺省 off=字节级现状。 */
+export function gameDeriveExemptEnabled(): boolean {
+  return process.env.BLOMA_GAME_DERIVE_EXEMPT === '1' || process.env.BLOMA_GAME_DERIVE_EXEMPT === 'true'
 }
 
 export function renderBackplaneAnchor(backplane: PrdBackplane, focus?: string[]): string {

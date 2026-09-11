@@ -417,8 +417,9 @@ export function buildPrdBackplane(
     acceptance[item.id] = `${item.description}：核心路径可交互，边界与异常输入不崩溃。`
   }
   // 完整程序阶段 2.5：模板路径同样做数据留存信号兜底——确定性派生最小契约
-  // （迭代重跑经此重建 prd.json 时契约自愈，不因重建丢失）
-  const derivedInterfaceSpec = deriveInterfaceSpec(items)
+  // （迭代重跑经此重建 prd.json 时契约自愈，不因重建丢失）；C1b：game 豁免开启时
+  // 轻留存不派生（localStorage 即可满足，拍板 2026-09-11）
+  const derivedInterfaceSpec = deriveInterfaceSpec(items, project.template_type)
   return {
     project_id: project.project_id,
     name: project.name,

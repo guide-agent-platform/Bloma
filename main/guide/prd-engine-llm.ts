@@ -204,7 +204,7 @@ export async function generatePrdLlm(input: GeneratePrdLlmInput): Promise<PrdBac
       timeoutMs: input.timeoutMs,
       parse: parsePrdJson,
     })
-    return parsed ? buildBackplaneFromParsed(parsed, items, input.project_id) : null
+    return parsed ? buildBackplaneFromParsed(parsed, items, input.project_id, input.template_type) : null
   } catch {
     return null
   }
@@ -219,7 +219,7 @@ const PRD_RETRY_FEEDBACK =
   '（{"document":"长文本 PRD 全文","positioning":"…","acceptance":{"F-001":"…"},"out_of_scope":[…],"assumptions":[…]}），' +
   '不要 markdown 代码围栏与任何解释文字，确保括号引号完整闭合、document 内换行与引号已转义。'
 
-export function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequirement[], projectId: string): PrdBackplane {  const acceptance: Record<string, string> = {}
+export function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequirement[], projectId: string, templateType?: import('../../shared/types').TemplateType): PrdBackplane {  const acceptance: Record<string, string> = {}
   for (const item of items) {
     acceptance[item.id] = parsed.acceptance[item.id]?.trim() || `${item.description}：核心路径可交互，边界与异常输入不崩溃。`
   }
@@ -250,11 +250,12 @@ export function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequire
     // P1-7：game 类型 GDD（玩法真相源）随背板冻结；非 game 缺省 undefined。
     ...(parsed.gdd ? { gdd: parsed.gdd } : {}),
     // 完整程序阶段 2：后端 API 契约随背板冻结；无后端需求缺省 undefined。
-    // 阶段 2.5 兜底：LLM 漏报（计算器案）但功能项命中数据留存信号 → 确定性派生最小契约
+    // 阶段 2.5 兜底：LLM 漏报（计算器案）但功能项命中数据留存信号 → 确定性派生最小契约；
+    // C1b（2026-09-11 拍板）：game 豁免开启时轻留存不派生（LLM 明确报告的契约仍优先）
     ...(parsed.interface_spec && parsed.interface_spec.length > 0
       ? { interface_spec: parsed.interface_spec }
       : ((): { interface_spec: InterfaceEndpoint[] } | undefined => {
-          const derived = deriveInterfaceSpec(items)
+          const derived = deriveInterfaceSpec(items, templateType)
           return derived ? { interface_spec: derived } : undefined
         })()),
     // Phase 2 M1：能力契约块随背板冻结——LLM 产出优先；漏报且命中 AI 信号 →

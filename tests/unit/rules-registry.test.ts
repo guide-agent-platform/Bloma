@@ -6,7 +6,7 @@
  * 注册表段注入、防双源）。
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RULES_REGISTRY, renderRulesSection, rulesRegistryEnabled } from '../../main/rules-registry'
+import { RULES_REGISTRY, renderRulesSection, rulesForTemplateType, rulesRegistryEnabled } from '../../main/rules-registry'
 import { buildAgentLoopSystemPrompt } from '../../main/programming-orchestrator'
 import type { PrdBackplane } from '../../main/model/prd-backplane'
 
@@ -97,5 +97,35 @@ describe('loop prompt 接线（off=字节级现状 / on=单点定义防双源）
     expect(prompt).toContain('逐功能项实现')
     // R-OUTPUT-01 此前无 prompt 条款（新增覆盖，正文冒充已执行禁令在表内）
     expect(prompt).toContain('冒充已执行')
+  })
+})
+
+describe('C1b rulesForTemplateType（game 豁免 R-DATA-01 变体）', () => {
+  const previousEnv = process.env.BLOMA_GAME_DERIVE_EXEMPT
+
+  afterEach(() => {
+    if (previousEnv === undefined) delete process.env.BLOMA_GAME_DERIVE_EXEMPT
+    else process.env.BLOMA_GAME_DERIVE_EXEMPT = previousEnv
+  })
+
+  it('off 或非 game → 原表字节级（R-DATA-01 禁 localStorage 原文不变）', () => {
+    delete process.env.BLOMA_GAME_DERIVE_EXEMPT
+    expect(rulesForTemplateType('game')).toBe(RULES_REGISTRY)
+    process.env.BLOMA_GAME_DERIVE_EXEMPT = '1'
+    expect(rulesForTemplateType('web_fullstack')).toBe(RULES_REGISTRY)
+    expect(rulesForTemplateType(undefined)).toBe(RULES_REGISTRY)
+  })
+
+  it('on + game → 仅 R-DATA-01 变体（轻留存允许 localStorage、重数据仍后端），其余规则不动', () => {
+    process.env.BLOMA_GAME_DERIVE_EXEMPT = '1'
+    const rules = rulesForTemplateType('game')
+    expect(rules).not.toBe(RULES_REGISTRY)
+    const data = rules.find((r) => r.id === 'R-DATA-01')!
+    expect(data.must).toContain('localStorage')
+    expect(data.must).toContain('server/routes/')
+    expect(data.forbidden).toContain('重业务数据')
+    // 其余规则原样（R-FILE-01/R-OUTPUT-01 引用相等）
+    expect(rules.find((r) => r.id === 'R-FILE-01')).toBe(RULES_REGISTRY.find((r) => r.id === 'R-FILE-01'))
+    expect(rules.find((r) => r.id === 'R-OUTPUT-01')).toBe(RULES_REGISTRY.find((r) => r.id === 'R-OUTPUT-01'))
   })
 })
