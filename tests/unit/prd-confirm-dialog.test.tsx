@@ -394,6 +394,27 @@ describe('PRD 确认弹窗 PrdConfirmDialog', () => {
     renderDialog()
     expect(screen.queryByTestId('prd-confirm-pending-cap')).toBeNull()
   })
+
+  it('C1a 后端架构后果显影：留存信号词命中项带「↳ 将要求后端与数据持久化」徽标，未命中不带', () => {
+    store.set(prdConfirmFamily('session-pc'), {
+      sessionId: 'session-pc',
+      projectId: 'project-pc',
+      title: '请确认这份 PRD',
+      positioning: '复古打飞机',
+      requirements: [
+        { id: 'F-001', priority: 'P0', story: '操控飞机射击', assertions: [] },
+        { id: 'F-008', priority: 'P2', story: '显示并本地留存历史最高分', assertions: [], implies_backend: true },
+      ],
+      outOfScope: [],
+      assumptions: [],
+      constraints: [],
+      expanded: false,
+      ideas: [],
+    })
+    renderDialog()
+    expect(screen.getByTestId('prd-confirm-item-F-008').textContent).toContain('将要求后端与数据持久化')
+    expect(screen.getByTestId('prd-confirm-item-F-001').textContent).not.toContain('将要求后端')
+  })
 })
 
 describe('prd-terms 术语表（闭环 PR7，单点维护）', () => {

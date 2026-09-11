@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseInterfaceSpec } from '../../main/guide/prd-engine-llm'
-import { deriveInterfaceSpec, renderBackplaneAnchor, type PrdBackplane } from '../../main/model/prd-backplane'
+import { deriveInterfaceSpec, renderBackplaneAnchor, requirementImpliesBackend, type PrdBackplane } from '../../main/model/prd-backplane'
 
 /**
  * 完整程序阶段 2：interface_spec 契约清洗与锚定注入。
@@ -42,6 +42,23 @@ describe('deriveInterfaceSpec（数据留存信号确定性兜底，阶段 2.5 �
 
   it('无留存信号（纯展示）→ undefined 零注入', () => {
     expect(deriveInterfaceSpec([{ id: 'F-001', description: '展示当前时间' }])).toBeUndefined()
+  })
+})
+
+describe('requirementImpliesBackend（C1a 后端架构后果显影，与 deriveInterfaceSpec 同源词表）', () => {
+  it('留存信号词命中（描述或 story）→ true；纯展示 → false', () => {
+    expect(requirementImpliesBackend({ id: 'F-008', description: '显示并本地留存历史最高分' })).toBe(true)
+    expect(requirementImpliesBackend({ id: 'F-001', description: '展示当前时间', story: '作为用户看时间' })).toBe(false)
+    expect(requirementImpliesBackend({ id: 'F-002', description: '玩游戏', story: '保存游戏进度' })).toBe(true)
+  })
+
+  it('与 deriveInterfaceSpec 聚合判定一致：任一项命中即派生，逐项判定覆盖同一批项', () => {
+    const items = [
+      { id: 'F-001', description: '打飞机' },
+      { id: 'F-008', description: '显示并本地留存历史最高分' },
+    ]
+    expect(deriveInterfaceSpec(items)).toBeDefined()
+    expect(items.filter(requirementImpliesBackend).map((i) => i.id)).toEqual(['F-008'])
   })
 })
 

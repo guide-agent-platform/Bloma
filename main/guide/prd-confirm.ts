@@ -7,7 +7,7 @@ import { nextRequirementId, runSketchTask } from '../programming-orchestrator'
 import { earsifyRequirements } from '../requirement-earsifier'
 import { resolveChannelEnv } from '../runtime-fallback'
 import type { PrdBackplane, SketchRequirement } from '../sketch-engine'
-import { backplaneAiCapabilities, backplaneKeyTasks, requirementAssertions, requirementPriority, requirementStory } from '../sketch-engine'
+import { backplaneAiCapabilities, backplaneKeyTasks, requirementAssertions, requirementImpliesBackend, requirementPriority, requirementStory } from '../sketch-engine'
 import type { SDKQuery } from '../orchestrator'
 
 /**
@@ -128,6 +128,9 @@ export function publishPrdConfirmCard(opts: {
         assertions: requirementAssertions(item),
         // Phase 7 U4 J4：来源随卡透出（你已经决定的 vs 向导补充的）
         ...(item.origin ? { origin: item.origin } : {}),
+        // C1a（P1，2026-09-11 审计⑧）：后端架构后果显影——留存信号词命中项标注，
+        // 确认时用户看得到「这条会让产品需要后端与数据持久化」，不再静默升级前后端分离
+        ...(requirementImpliesBackend(item) ? { implies_backend: true } : {}),
       })),
       out_of_scope: backplane.out_of_scope,
       assumptions: backplane.assumptions ?? [],

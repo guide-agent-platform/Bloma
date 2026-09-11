@@ -228,3 +228,15 @@
 - 基础设施常开（B1 服务器侧，无行为分支）：两处同构服务器模板（renderStaticServer 产物模板 + STATIC_SERVER_SCRIPT 沙箱）loadRoutes 挂载失败登记 routeErrors + 暴露 `GET /_bloma/routes` 健康端点（返回 {mounted, errors}）——新增只读端点不动既有路径判定。
 - 单测：api-contract +3 例（off 字节锁/on 精确匹配/on 摘要与缺席降级）；programming-orchestrator-repair +3 例（零编辑×off 字节锁 / 零编辑×on 四断言 / 有编辑×on 不误伤——有编辑×off 由既有测试全量覆盖）；agent-loop +4 例（守卫 1/2/3 触发与不触发 / off 字节锁含 JSONL）；prd-interface-spec +1 例（A2 锚点渲染快照）；project-skeleton +3 例（承接位/口径对齐/_example.js CJS 样例）+ describe 语义更新。
 - 重放验收（同款 seed「做一个纵版打飞机的游戏，很复古的那种」）：预期 loop 内出现 app.js/index.html 写入、路由 CJS 挂载成功、若空口完成则零编辑守卫触发不耗预算。
+
+## 22. P1 门禁去水分批开关（C2/C3，2026-09-11 审计实施稿 P1 批；C1a 信息显影与 C5 配置见下）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_BUILD_GATE_WIRING` | C2 构建门禁接线校验 | **off** | 字节级现状（bundle 成功即 passed——440B 空壳 stub 假绿保留） | bundle 成功后解析 index.html：零 `<script src>` 或未引用构建产物路径 → `failed` 附真实原因（审计案 35c1a633 终态 index.html 零 script 的根治位；与 A1 承接位配合后正常产物必过）；index.html 缺失 → 跳过校验（上游 AGENT_LOOP_INCOMPLETE 已拦） | `buildGateWiringEnabled`/`checkEntryWiring`（main/coding/build-gate.ts）+ runBuildGate passed 分支前置 |
+| `BLOMA_UI_GATE_LIVENESS` | C3 L0 死按钮判活 | **off** | 字节级现状（判「控件真实」不判「有行为」——7 个无 JS 死按钮照样 passed） | 真按钮类（button/[role=button]）采样死亡占比 ≥80% 且 realControls ≥3 → failed 附死按钮清单；防误杀：锚点/外链/伪装控件不进分母（外链 target=_blank 被拦、纯锚点无义务改 DOM），按钮样本 ≥3 才判 | `uiGateLivenessEnabled`（main/coding/artifact-ui-gate.ts）+ analyzeUiProbe C3 段 + deadClicks 采集扩 tag 字段（纯增量，旧数据无 tag 不进分母） |
+
+- 无开关直接上（信息显影，C1a）：`requirementImpliesBackend`（prd-backplane，与 deriveInterfaceSpec 同源留存信号词表）→ PRD 确认卡 requirements 投影带 `implies_backend: true` → 渲染端 PrdConfirmDialog 蓝色徽标「↳ 将要求后端与数据持久化」——留存信号词命中项在确认时可见，不再静默升级前后端分离（审计⑧；不改变派生行为，纯呈现）。
+- C5 配置级（不进仓库）：本机 `setx BLOMA_API_TOOL 1`——loop 内启用 `run_api_contract_tests` 自测工具（与 B3 守卫3 自测提醒配合，生成中即可暴露契约失活）。
+- 单测：build-gate +3 例（checkEntryWiring 四态/off 字节锁/on 承接位过与零 script 拦截）；artifact-ui-gate +4 例（off 字节锁/审计案 7 死按钮拦/锚点不进分母/活性与样本不足不判）；prd-interface-spec +2 例（requirementImpliesBackend 词表与聚合一致性）；guide-prd-confirm +1 断言（payload implies_backend 投影）；prd-confirm-dialog +1 例（徽标渲染与未命中不带）。
+- 待拍板挂账不变：C1b（game 豁免留存派生 vs「完整程序」终点口径）、C4（canvas GWT 断言走游戏侧探针，依赖 gwt-runner 扩展）。

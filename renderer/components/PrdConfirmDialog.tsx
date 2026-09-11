@@ -148,6 +148,9 @@ function RequirementBlock(props: { item: PrdConfirmRequirement; onDisagree: (id:
           ) : item.origin === 'user' ? (
             <span style={{ marginLeft: 6, fontSize: 11, padding: '1px 6px', borderRadius: 999, background: 'var(--color-bg-subtle, #f0f2f7)', color: 'var(--color-text-secondary, #5b6472)' }}>你说的</span>
           ) : null}
+          {item.implies_backend ? (
+            <span style={{ marginLeft: 6, fontSize: 11, padding: '1px 6px', borderRadius: 999, background: 'rgba(47, 100, 190, 0.10)', color: '#2f64be' }}>↳ 将要求后端与数据持久化</span>
+          ) : null}
         </span>
         <button type="button" style={disagreeLinkStyle} data-ai-id={`prd-confirm-disagree-${item.id}`} onClick={() => onDisagree(item.id)}>
           这条不对

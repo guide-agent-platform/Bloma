@@ -22,6 +22,32 @@ import type { ProjectSkeleton } from '../project-templates'
 
 export type BuildGateStatus = 'passed' | 'failed' | 'skipped'
 
+/** C2（P1，2026-09-11 审计⑩/J）：构建门禁接线校验开关——bundle 成功后解析 index.html，
+ *  入口页零 <script src> 或未引用构建产物路径 → failed。缺省 off=字节级现状
+ *  （440B 空壳 stub 照样 passed 的假绿保留）。与 A1 配合后正常产物必过。 */
+export function buildGateWiringEnabled(): boolean {
+  return process.env.BLOMA_BUILD_GATE_WIRING === '1' || process.env.BLOMA_BUILD_GATE_WIRING === 'true'
+}
+
+/** 入口页接线校验（纯函数）：index.html 缺失 → ok（上游 AGENT_LOOP_INCOMPLETE 已拦，
+ *  门禁只管 bundle）；零 script src / 未引用构建产物 → 拒。 */
+export function checkEntryWiring(rootPath: string, outfile: string): { ok: boolean; reason?: string } {
+  const indexPath = join(rootPath, 'index.html')
+  if (!existsSync(indexPath)) return { ok: true }
+  const html = readFileSync(indexPath, 'utf8')
+  const normalize = (p: string): string => p.replace(/\\/g, '/').replace(/^\.\//, '').split('?')[0].replace(/\/$/, '')
+  const scripts = [...html.matchAll(/<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi)].map((m) => normalize(m[1] ?? ''))
+  if (scripts.length === 0) {
+    return { ok: false, reason: '入口页面 index.html 未加载任何脚本（零 <script src> 引用）——构建产物不会被页面使用，功能无法生效' }
+  }
+  const target = normalize(outfile)
+  const hit = scripts.some((src) => src === target || src.endsWith(`/${target}`))
+  if (!hit) {
+    return { ok: false, reason: `入口页面未引用构建产物 ${target}（现有引用：${scripts.join('、').slice(0, 200)}）——构建产物不会被页面加载` }
+  }
+  return { ok: true }
+}
+
 export interface BuildGateResult {
   status: BuildGateStatus
   /** 产物绝对路径（passed） */
@@ -144,6 +170,20 @@ export async function runBuildGate(opts: {
   const outfileAbs = join(opts.rootPath, spec.outfile)
 
   if (code === 0 && existsSync(outfileAbs)) {
+    // C2（P1）：接线校验——bundle 成功但入口页不加载构建产物 → failed（审计案 440B 空壳
+    // 假绿的根治位；开关 off=字节级现状直接 passed）
+    if (buildGateWiringEnabled()) {
+      const wiring = checkEntryWiring(opts.rootPath, spec.outfile)
+      if (!wiring.ok) {
+        tryLogDecision(opts.projectId, opts.sessionId, 'build_gate_failed', '构建门禁失败（入口页面未加载构建产物）', {
+          entry: spec.entry,
+          outfile: spec.outfile,
+          error: wiring.reason,
+          duration_ms: durationMs,
+        })
+        return { status: 'failed', detail: wiring.reason, durationMs }
+      }
+    }
     tryLogDecision(opts.projectId, opts.sessionId, 'build_gate_passed', '构建门禁通过', {
       entry: spec.entry,
       outfile: spec.outfile,

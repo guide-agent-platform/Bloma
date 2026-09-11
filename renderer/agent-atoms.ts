@@ -159,6 +159,9 @@ export interface PrdConfirmRequirement {
   assertions: string[]
   /** 来源（Phase 7 U4 J4）：user=用户原话/点选，guide=向导补充；缺省不标 */
   origin?: 'user' | 'guide'
+  /** 后端架构后果显影（P1 C1a，2026-09-11 审计⑧）：留存信号词命中项——这条需求
+   * 会让产品需要后端服务与数据持久化（interface_spec 契约），确认时让用户看见 */
+  implies_backend?: boolean
 }
 
 export interface PrdConfirmState {
@@ -699,6 +702,7 @@ export function setupGlobalAgentListeners(): () => void {
               ? item.assertions.filter((entry): entry is string => typeof entry === 'string')
               : [],
             ...(item.origin === 'user' || item.origin === 'guide' ? { origin: item.origin } : {}),
+            ...(item.implies_backend === true ? { implies_backend: true } : {}),
           })),
           outOfScope: stringList(prdPayload.out_of_scope),
           assumptions: stringList(prdPayload.assumptions),

@@ -265,6 +265,11 @@ describe('PRD 用户确认门（改造 3）', () => {
     // 断言物化进卡（缺省回退默认断言），P0/P2 优先级投影
     expect(payload.requirements[0].assertions.length).toBeGreaterThan(0)
     expect(payload.requirements[0].priority).toBe('P0')
+    // C1a（P1，审计⑧）：后端架构后果显影——「记录」命中留存信号词的项带 implies_backend，
+    // 纯展示项不带；确认时用户看得到这条会让产品需要后端与数据持久化
+    const reqs = payload.requirements as Array<{ id: string; implies_backend?: boolean }>
+    expect(reqs.find((r) => r.id === 'F-001')?.implies_backend).toBe(true)
+    expect(reqs.find((r) => r.id === 'F-002')?.implies_backend).toBeUndefined()
     expect(payload.expanded).toBe(false)
     // 挂起：不直接开草图，话术引导用户过目
     expect(runSketchTask).not.toHaveBeenCalled()

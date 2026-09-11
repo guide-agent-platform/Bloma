@@ -427,6 +427,14 @@ export function deriveInterfaceSpec(requirements: SketchRequirement[]): Interfac
   ]
 }
 
+/** C1a（P1，2026-09-11 审计⑧）：单条功能项是否蕴含后端持久化要求（与 deriveInterfaceSpec
+ *  同源信号词同口径——改词表单点生效）。PRD 确认卡据此给命中项显影「将要求后端」徽标：
+ *  留存信号词会触发后端契约（派生或 LLM 报告同款架构后果），确认时用户看得见，
+ *  不再静默升级前后端分离。纯信息显影，不改变任何行为。 */
+export function requirementImpliesBackend(item: SketchRequirement): boolean {
+  return PERSISTENCE_SIGNAL_RE.test(`${item.description} ${item.story ?? ''}`)
+}
+
 export function renderBackplaneAnchor(backplane: PrdBackplane, focus?: string[]): string {
   const focusSet = focus && focus.length > 0 ? new Set(focus) : undefined
   const requirementsPart = backplane.requirements
