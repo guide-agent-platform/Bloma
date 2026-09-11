@@ -1483,6 +1483,8 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
         ...(result.termination_detail
           ? { termination_reason: result.termination_detail.reason, termination_retries: result.termination_detail.retries }
           : {}),
+        // D2（2026-09-11 狗粮 dd6ba98d）：DSML 传输事故恢复轮数（只读调用救回次数）
+        ...(result.transport_recoveries !== undefined ? { transport_recoveries: result.transport_recoveries } : {}),
         ...(result.usage
           ? {
               usage: {
@@ -1507,12 +1509,13 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
         result.termination_detail
           ? `；末轮输出退化（协议原文漏进正文，重试 ${result.termination_detail.retries} 次仍脏——非真实跑满轮数）`
           : ''
-      }；终验仍由外部代码执行（不信模型自述）`,
+      }${result.transport_recoveries ? `；DSML 传输事故恢复 ${result.transport_recoveries} 次（只读调用解析回工具调用执行）` : ''}；终验仍由外部代码执行（不信模型自述）`,
       detail: {
         status: result.status,
         turns: result.turns,
         tool_distribution: toolDistribution,
         ...(result.termination_detail ? { termination: result.termination_detail } : {}),
+        ...(result.transport_recoveries !== undefined ? { transport_recoveries: result.transport_recoveries } : {}),
       },
     },
   })

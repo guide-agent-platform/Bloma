@@ -262,3 +262,13 @@
 - 缺省 on 的理由：纯任务书表达层（无验证语义变化、无存储 schema 变化），且 off 形态已被狗粮实证为失败形态；逃生口 `BLOMA_ITER_BRIEF=0` 保留（与修复轮/门禁类开关缺省 off 的纪律不同，属拍板项——如需回退字节级现状设 0 即可）。
 - 单测：iteration-brief 新文件 15 例（开关三态/local 档三态/任务书五要素/修改模式段/路由含 off 字节锁与 rebuild 优先级/plan 腿定位口径与既有文件硬过滤三态）。
 - 不进本批挂账：`inspect_preview` 视觉复现工具；迭代轮 writeScope 写授权（修复轮 W4-F2 同款）；degenerate 出口与 turn_limit 状态区分；game F-001 拆分；经验库 ref-source 查询词清洗（百度百科垃圾 pattern 卡）。
+
+## 25. D2 DSML 传输事故恢复开关（2026-09-11 狗粮 dd6ba98d「纵版打飞机」三连死根因）
+
+| 开关 | 控制面 | 缺省 | '0' | '1'/未设 | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_DSML_RECOVERY` | DSML 传输事故分级恢复 | **on** | 现状（退化一律泛化「传输事故反馈」重试一次，仍脏 → turn_limit——当晚 3/3 loop 死于此） | **只读调用直执行**：正文里的 `<｜｜DSML｜｜ invoke>` 块解析回 tool_use（意图/参数当晚实测完整：path/offset/pattern 无损），按正常轮执行（旁白保留、JSONL 原文留审计、模型侧 messages 用合成 tool_use+tool_result）；**写类不盲执行**：write_file 的 content 经 DSML 序列化疑似丢换行（line146 实锤：注释吞掉本该换行的属性），改**定向反馈**（具体列出调用意图要求标准 tool use 重发，比泛化反馈更可能逃出退化盆地）。护栏：参数值 >1024 字符/单轮 >8 invoke/工具不在册 → 降级反馈；恢复计数 transport_recoveries 入 AgentLoopResult + agent_loop_completed 埋点 + 决策日志 | `parseDsmlInvokes`/`classifyDsmlRecovery`/`buildTargetedDegenerateFeedback`/`DSML_RECOVERABLE_TOOLS`（main/coding/dsml-recovery.ts）+ agent-loop 退化分支恢复接线（assistantBlocks 重建/定向反馈/计数） |
+
+- 缺省 on 拍板理由：只读恢复零副作用、写类明确不盲执行、护栏齐备；属渠道兼容垫片而非行为实验（当晚 3/3 loop 死于 DSML，recovery 是存活前提）。
+- 单测：dsml-recovery 新文件 10 例（当晚实测三种文法解析/分级四态/定向反馈/off 现状字节级/集成三例——退化 read 轮救回含 messages 上下文断言、退化 write 轮零执行+定向反馈、开关 off 泛化反馈）。
+- 与 P2a 协作：恢复失败仍死 → termination_detail(degenerate_output) 照实入账（裁判话术「末轮输出退化（传输事故，非轮数耗尽）」）。

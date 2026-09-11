@@ -9,6 +9,7 @@ import { prepareRecallBlock } from '../session-recall'
 import { estimateTokenCount } from '../usage-guard'
 import { windowMessagesWithDigest } from '../compacting-window'
 import { isDegenerateText } from './output-integrity'
+import { buildTargetedDegenerateFeedback, classifyDsmlRecovery, dsmlRecoveryEnabled, parseDsmlInvokes } from './dsml-recovery'
 import { drainSteerQueue, markLoopActive, markLoopInactive, markSteerMerged, pendingSteerCount, settleSteerEntry, steerConfirmEnabled, wrapSteerContent } from '../steer-queue'
 
 /**
@@ -219,6 +220,9 @@ export interface AgentLoopResult {
  *  （终验/裁判语义不变），degenerate_output = 末轮输出退化重试后仍脏（传输事故），
  *  与真实跑满轮数区分，防误导归因（当晚 37/40 轮被误读「轮数耗尽」）。 */
   termination_detail?: LoopTerminationDetail
+  /** D2（2026-09-11 狗粮 dd6ba98d）：DSML 传输事故恢复轮数（只读调用解析回 tool_use
+ *  直接执行的次数）；>0 说明渠道协议泄漏发生过且被兑底救回，观测入账。 */
+  transport_recoveries?: number
 }
 
 /** W1-E1：取消在 loop 内可被观察的五个位置（cancel_detail.phase 的取值）。 */
@@ -895,6 +899,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     return {
       ...r,
       ...(blocked ? { blocked_report: blocked } : {}),
+      ...(transportRecoveries > 0 ? { transport_recoveries: transportRecoveries } : {}),
       usage: {
         inputTokens: usageTotals.inputTokens,
         outputTokens: usageTotals.outputTokens,
@@ -923,6 +928,8 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
   const keepRecentBudget = resolveKeepRecentTokens()
   // 终轮退行已重试次数（P0：传输事故只重试一次，见 DEGENERATE_RETRY_LIMIT）
   let degenerateRetries = 0
+  // D2（2026-09-11 狗粮 dd6ba98d）：DSML 传输事故恢复计数（只读调用直接执行的轮数）
+  let transportRecoveries = 0
   // B3（P0-B，2026-09-11）：进度对账三守卫状态（BLOMA_LOOP_PROGRESS_NUDGE off=零注入）
   let readOnlyStreak = 0
   const writtenFiles = new Set<string>()
@@ -1012,7 +1019,30 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     finalText = textOfBlocks(assistantBlocks)
     appendLoopMessage(input.sessionId, 'assistant', assistantBlocks)
 
-    const turnToolUses = assistantBlocks.filter((block): block is MessageContentBlock & { type: 'tool_use'; id: string; name: string } => block.type === 'tool_use')
+    const streamedToolUses = assistantBlocks.filter((block): block is MessageContentBlock & { type: 'tool_use'; id: string; name: string } => block.type === 'tool_use')
+    // D2（2026-09-11 狗粮 dd6ba98d）：DSML 传输事故恢复。JSONL 已按原文落盘（事故
+    // 证据保留）；此处的恢复只改「发给模型的 messages」与本轮执行：只读调用解析
+    // 回 tool_use 直接执行（意图/参数完整且零副作用），写类不盲执行（参数值信道
+    // 损坏会写坏代码）改定向反馈重试。开关 BLOMA_DSML_RECOVERY（缺省 on）。
+    let turnToolUses = streamedToolUses
+    let dsmlFeedbackThisTurn: string | undefined
+    if (turnToolUses.length === 0 && isDegenerateText(finalText) && dsmlRecoveryEnabled()) {
+      const parsed = parseDsmlInvokes(finalText)
+      if (parsed && classifyDsmlRecovery(parsed, new Set(toolByName.keys())) === 'execute') {
+        const recoveredUses = parsed.invokes.map((invoke, index) => ({ id: `dsml-${turn}-${index}`, name: invoke.name, input: invoke.input }))
+        // assistantBlocks 重建：丢弃退化正文块，保留协议块前的合法旁白 + 合成 tool_use。
+        // （旁白已作为 message_delta 上屏，此处只影响模型侧对话历史。）
+        assistantBlocks.length = 0
+        if (parsed.prose) assistantBlocks.push({ type: 'text', text: parsed.prose })
+        for (const use of recoveredUses) assistantBlocks.push({ type: 'tool_use', id: use.id, name: use.name, input: use.input })
+        turnToolUses = recoveredUses.map((use) => ({ ...use, type: 'tool_use' as const }))
+        transportRecoveries += 1
+        console.warn(`[agent-loop] DSML 传输事故恢复：轮 ${turn} 解析出 ${recoveredUses.length} 个只读调用（${recoveredUses.map((u) => u.name).join('、')}），按正常轮执行`)
+      } else if (parsed) {
+        // 写类/未知工具：不盲执行，构造定向反馈（具体到调用意图）供下方重试用
+        dsmlFeedbackThisTurn = buildTargetedDegenerateFeedback(parsed)
+      }
+    }
     // P3 loop-log：文件类工具的入参 path 提取进过程记录（write_file/edit_file 均携带；
     // 其他工具无 path 字段则省略——可选字段，既有埋点消费方零感知）
     const turnCalls: AgentLoopToolCallRecord[] = turnToolUses.map((use) => {
@@ -1040,8 +1070,11 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
       if (isDegenerateText(finalText)) {
         if (degenerateRetries < DEGENERATE_RETRY_LIMIT) {
           degenerateRetries += 1
-          appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: DEGENERATE_RETRY_FEEDBACK }])
-          messages.push({ role: 'user', content: [{ type: 'text', text: DEGENERATE_RETRY_FEEDBACK }] })
+          // D2：解析出调用意图时用定向反馈（具体到工具与参数），否则泛化措辞——
+          // 定向反馈比泛化重试更可能把模型从 DSML 退化盆地里拉出来
+          const feedback = dsmlFeedbackThisTurn ?? DEGENERATE_RETRY_FEEDBACK
+          appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: feedback }])
+          messages.push({ role: 'user', content: [{ type: 'text', text: feedback }] })
           continue
         }
         // P2a：status 语义不变（如实 turn_limit 交终验），附真实出口原因观测
