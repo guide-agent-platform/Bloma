@@ -313,7 +313,7 @@ export const RequirementConfirmDialog: React.FC = () => {
         {state.ideas.length > 0 ? (
           <div data-ai-id="requirement-confirm-ideas" style={{ marginTop: 4 }}>
             <p style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 600, color: 'var(--color-text, inherit)' }}>
-              灵感参考（市面上的做法）
+              灵感参考（{state.research.mode === 'agent' ? 'AI 灵感建议' : '市面上的做法'}）
             </p>
             <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--color-text-secondary, #5b6472)' }}>
               看到想要的方向就勾上，会并入需求清单一起做；不勾就仅作参考。

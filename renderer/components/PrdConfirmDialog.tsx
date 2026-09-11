@@ -504,7 +504,7 @@ export const PrdConfirmDialog: React.FC = () => {
         {/* 灵感参考（2026-08-29，市调想法可勾选采纳并入 PRD；空段隐藏） */}
         {state.ideas.length > 0 ? (
           <div data-ai-id="prd-confirm-ideas">
-            <h3 style={sectionTitleStyle}>灵感参考（市面上的做法）</h3>
+            <h3 style={sectionTitleStyle}>灵感参考（{state.ideasMode === 'agent' ? 'AI 灵感建议' : '市面上的做法'}）</h3>
             <p style={{ margin: '4px 0 8px', fontSize: 12, color: 'var(--color-text-secondary, #5b6472)' }}>
               看到想要的方向就勾上，确认后会并入这份 PRD 一起做；不勾就仅作参考。
             </p>

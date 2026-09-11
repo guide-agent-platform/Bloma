@@ -144,6 +144,8 @@ describe('PRD 用户确认门（改造 3）', () => {
   beforeEach(() => {
     // 委派审查固定关：单测走直连（委派链路由 review-delegation 专属测试覆盖）
     process.env.BLOMA_DELEGATED_REVIEW = '0'
+    // R2（2026-09-12）：市调想法来源相关用例（想法提炼/回退原始条目）钉到 scrape 模式
+    process.env.BLOMA_RESEARCH_MODE = 'scrape'
     const home = mkdtempSync(join(tmpdir(), 'proma-prd-confirm-'))
     process.env.PROMA_HOME = home
     mkdirSync(join(home, 'agent-sessions'), { recursive: true })
@@ -156,6 +158,7 @@ describe('PRD 用户确认门（改造 3）', () => {
 
   afterEach(() => {
     delete process.env.BLOMA_DELEGATED_REVIEW
+    delete process.env.BLOMA_RESEARCH_MODE
     process.env.PROMA_HOME = originalPromaHome
     vi.restoreAllMocks()
   })

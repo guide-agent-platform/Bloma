@@ -133,7 +133,7 @@ export interface RequirementConfirmState {
   projectId: string
   title: string
   requirements: Array<{ id: string; description: string; origin?: 'user' | 'guide' }>
-  research: { available: boolean; summary: string }
+  research: { available: boolean; summary: string; mode?: string }
   /** 市调提炼想法（2026-08-29 灵感参考）：可勾选采纳并入需求清单 */
   ideas: ResearchIdea[]
 }
@@ -180,6 +180,8 @@ export interface PrdConfirmState {
   expanded: boolean
   /** 市调提炼想法（2026-08-29 灵感参考）：确认时可勾选采纳并入 PRD */
   ideas: ResearchIdea[]
+  /** R2（2026-09-12）：想法来源模式（agent=纯模型灵感建议）；头标如实标注 */
+  ideasMode?: string
 }
 
 export const prdConfirmFamily = atomFamily((_sessionId: string) => atom<PrdConfirmState | null>(null))
@@ -586,6 +588,9 @@ export function setupGlobalAgentListeners(): () => void {
           research: {
             available: payload.research?.available === true,
             summary: typeof payload.research?.summary === 'string' ? payload.research.summary : '',
+            ...(typeof (payload.research as { mode?: unknown } | undefined)?.mode === 'string'
+              ? { mode: (payload.research as { mode?: string }).mode }
+              : {}),
           },
         })
       }
@@ -666,6 +671,10 @@ export function setupGlobalAgentListeners(): () => void {
                 source: typeof item.source === 'string' ? item.source : '',
               }))
             : [],
+          // R2：想法来源模式（agent=纯模型灵感建议，头标如实标注）
+          ...(typeof (prdPayload as { ideas_mode?: unknown }).ideas_mode === 'string'
+            ? { ideasMode: (prdPayload as { ideas_mode?: string }).ideas_mode }
+            : {}),
         })
       }
       // 加厚追问卡（enrichment_clarification 流，② 2026-09-03）：PRD 定稿前的信息

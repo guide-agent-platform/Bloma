@@ -1338,15 +1338,24 @@ async function startRequirementConfirmFlow(
   updateProject(input.project_id, { current_stage: 'blocked_for_user_decision' })
   publish(makeGuideEvent(input, 'stage_changed', { stage: 'blocked_for_user_decision' }))
 
-  // 市调：失败降级 available:false，弹窗照常出（增强不是依赖）
-  // 顾问式（2026-08-30）：需求+候选词 → LLM 改写聚焦查询词（失败降级候选词/需求清洗）
+  // 市调/灵感：R2（2026-09-12 用户拍板 cut 网络搜索）缺省纯模型灵感建议（零网络请求）；
+  // BLOMA_RESEARCH_MODE='scrape' 回到现状搜索链路（增强不是依赖，失败降级弹窗照常出）
   const demandText = requirements.map((item) => item.description).join('；').slice(0, 200)
-  const marketQueries = await buildResearchQueries(demandText, researchQueries, model)
-  let research: MarketResearch = { available: false, queries: marketQueries, results: [], summary: '' }
-  try {
-    research = await researchMarketSimilar(marketQueries)
-  } catch {
-    // researchMarketSimilar 内部已降级，此处双保险
+  let research: MarketResearch = { available: false, queries: [], results: [], summary: '' }
+  let ideas: ResearchIdea[] = []
+  const researchMode = researchModeResolver()
+  if (researchMode === 'scrape') {
+    // 顾问式（2026-08-30）：需求+候选词 → LLM 改写聚焦查询词（失败降级候选词/需求清洗）
+    const marketQueries = await buildResearchQueries(demandText, researchQueries, model)
+    research = { available: false, queries: marketQueries, results: [], summary: '' }
+    try {
+      research = await researchMarketSimilar(marketQueries)
+    } catch {
+      // researchMarketSimilar 内部已降级，此处双保险
+    }
+    ideas = await distillResearchIdeas(research, { ...model, demand: demandText })
+  } else {
+    ideas = await generateAgentIdeas(demandText, model)
   }
 
   persistSystem?.(`[decision-card] 需求确认：${requirements.map((item) => item.description).join('｜')}`)
@@ -1363,11 +1372,11 @@ async function startRequirementConfirmFlow(
         requirements,
         research_available: research.available,
         research_queries: researchQueries,
+        // R2：模式如实入账（agent=纯模型灵感建议，未发网络请求）
+        research_mode: researchMode,
       },
     },
   })
-
-  const ideas = await distillResearchIdeas(research, { ...model, demand: demandText })
 
   // G3a 市调 UI 做法投喂入册（恒 candidate，用户 2026-09-07 裁定「做产品=做 UI」定向收割）：
   // fire-and-forget，BLOMA_EXPERIENCE off 时零副作用，失败不阻断确认弹窗。
@@ -1401,6 +1410,8 @@ async function startRequirementConfirmFlow(
       available: research.available,
       summary: research.summary,
       results: research.results.slice(0, 6),
+      // R2：模式标记（渲染端据此把想法区头切换为「AI 灵感建议」，不冒充市调）
+      mode: researchMode,
     },
   }))
 }
@@ -1413,6 +1424,76 @@ const RESEARCH_IDEA_SYSTEM_PROMPT = [
   '只提炼搜索结果里真实出现的做法，不臆造；结果不足 3 条时有多少给多少。',
   '输出严格 JSON：{"ideas":[{"label":"…","note":"…","source":"…"}]}，不要输出其他内容。',
 ].join('\n')
+
+// ---------------------------------------------------------------------------
+// R2（2026-09-12 用户拍板「cut 掉网络搜索环节，只由 agent 提创造性建议」）：
+// 大陆网络三大 scraping 引擎全线不可靠（DDG 封锁 / cn.bing 反爬罐头 / 百度限频，
+// 见 R1 复盘），市调价值链改由模型自身产品知识承担：不发任何网络请求，向导直接
+// 就需求提出灵感建议。BLOMA_RESEARCH_MODE 缺省 agent；'scrape' 逃生口保留
+// （配好付费搜索 API/代理后可切回）。
+// ---------------------------------------------------------------------------
+
+/** 市调模式解析：'scrape'=现状搜索链路；其余（未设/'agent'）=纯模型灵感建议。 */
+export function researchModeResolver(): 'agent' | 'scrape' {
+  const raw = (process.env.BLOMA_RESEARCH_MODE ?? '').trim().toLowerCase()
+  if (raw === 'scrape' || raw === 'search' || raw === '1' || raw === 'on') return 'scrape'
+  return 'agent'
+}
+
+/** agent 灵感建议提示词：基于模型自身产品知识，不搜索、不臆造不存在的具体产品。 */
+const AGENT_IDEA_SYSTEM_PROMPT = [
+  '你是产品灵感顾问。根据【用户需求】，基于你掌握的产品与设计知识（不搜索网络）提出 3~5 条创造性灵感建议，供用户参考勾选。',
+  '方向：同类产品的经典玩法/交互模式、差异化设计点、可借鉴的成熟机制——要具体到能落进这个需求，不要泛泛而谈。',
+  '每条：label（≤20 字玩法/设计短句，如「Boss 血量阶段化弹幕」）、note（≤40 字说明参考什么与为什么值得借鉴）。',
+  '硬标准：与需求强相关、不与需求已有内容重复、宁可少给绝不硬凑；可以引经典同类产品名（如雷电、Ikaruga），但不要编造不存在的具体产品。',
+  '输出严格 JSON：{"ideas":[{"label":"…","note":"…"}]}，不要输出其他内容。',
+].join('\n')
+
+/**
+ * R2 agent 灵感建议：单轮 LLM 调用（与 distillResearchIdeas 同款管道风格）；
+ * 失败/解析失败/空数组 → []（想法区隐藏，弹窗照常——与市调降级同纪律）。
+ * idea.source 固定 'AI 建议'（渲染端来源标签如实区分，不冒充市调来源）。
+ */
+export async function generateAgentIdeas(
+  demand: string,
+  opts: { query: SDKQuery; env?: Record<string, string>; signal?: AbortSignal; sessionId?: string },
+): Promise<ResearchIdea[]> {
+  const demandText = demand.trim()
+  if (!demandText) return []
+  try {
+    let accumulated = ''
+    const stream = opts.query(`【用户需求】\n${demandText}`, {
+      env: opts.env ?? {},
+      signal: opts.signal ?? new AbortController().signal,
+      sessionId: opts.sessionId ?? '',
+      history: [{ role: 'system', content: AGENT_IDEA_SYSTEM_PROMPT }],
+      maxTokens: 800,
+    })
+    for await (const message of stream) {
+      if (message.type === 'assistant' && message.message) {
+        for (const block of message.message.content) {
+          if (block.type === 'text') accumulated += block.text
+        }
+      }
+    }
+    const start = accumulated.indexOf('{')
+    const end = accumulated.lastIndexOf('}')
+    if (start < 0 || end <= start) return []
+    const parsed = JSON.parse(accumulated.slice(start, end + 1)) as { ideas?: Array<{ label?: unknown; note?: unknown }> }
+    if (!Array.isArray(parsed.ideas)) return []
+    const ideas = parsed.ideas
+      .filter((item) => typeof item?.label === 'string' && item.label.trim().length > 0)
+      .slice(0, 5)
+      .map((item) => ({
+        label: String(item.label).replace(/\s+/g, ' ').trim().slice(0, 20),
+        note: typeof item.note === 'string' ? String(item.note).replace(/\s+/g, ' ').trim().slice(0, 40) : '',
+        source: 'AI 建议',
+      }))
+    return ideas
+  } catch {
+    return []
+  }
+}
 
 /**
  * 市调想法提炼（2026-08-29 灵感参考改造，用户拍板「向导整理提供给用户看、让他选择要不要」）：
@@ -1840,22 +1921,32 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
     // 用户完全看不到市调）。市调失败/无结果 → ideas 空，卡面不显示想法区。
     let reviewIdeas: ResearchIdea[] = []
     try {
-      // 顾问式（2026-08-30）：需求名+首条描述 → LLM 改写聚焦查询词（失败降级需求清洗）
+      // R2：缺省 agent 模式（纯模型灵感建议，零网络请求）；scrape 逃生口保留原链路
       const demandText = `${backplaneForReview.name}：${backplaneForReview.requirements[0]?.description ?? ''}`.slice(0, 200)
-      const marketQueries = await buildResearchQueries(demandText, [], {
-        query: pending.query ?? NO_QUERY_FALLBACK,
-        env: reviewEnv,
-        signal,
-        sessionId: pending.session_id,
-      })
-      const research = await researchMarketSimilar(marketQueries)
-      reviewIdeas = await distillResearchIdeas(research, {
-        query: pending.query ?? NO_QUERY_FALLBACK,
-        env: reviewEnv,
-        signal,
-        sessionId: pending.session_id,
-        demand: demandText,
-      })
+      if (researchModeResolver() === 'agent') {
+        reviewIdeas = await generateAgentIdeas(demandText, {
+          query: pending.query ?? NO_QUERY_FALLBACK,
+          env: reviewEnv,
+          signal,
+          sessionId: pending.session_id,
+        })
+      } else {
+        // 顾问式（2026-08-30）：需求名+首条描述 → LLM 改写聚焦查询词（失败降级需求清洗）
+        const marketQueries = await buildResearchQueries(demandText, [], {
+          query: pending.query ?? NO_QUERY_FALLBACK,
+          env: reviewEnv,
+          signal,
+          sessionId: pending.session_id,
+        })
+        const research = await researchMarketSimilar(marketQueries)
+        reviewIdeas = await distillResearchIdeas(research, {
+          query: pending.query ?? NO_QUERY_FALLBACK,
+          env: reviewEnv,
+          signal,
+          sessionId: pending.session_id,
+          demand: demandText,
+        })
+      }
     } catch {
       // 市调/提炼是增强不是依赖：失败不阻断确认卡
     }
@@ -1875,6 +1966,8 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
       query: pending.query ?? NO_QUERY_FALLBACK,
       publish,
       ideas: reviewIdeas,
+      // R2：模式随卡透出（agent=纯模型灵感建议）
+      ideasMode: researchModeResolver(),
       signal,
     })
     return { started: true, prd_written: prdWritten }

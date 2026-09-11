@@ -98,10 +98,14 @@ let originalPromaHome: string | undefined
 beforeEach(() => {
   originalPromaHome = process.env.PROMA_HOME
   process.env.PROMA_HOME = undefined
+  // R2（2026-09-12）：本文件测 scrape 市调管道本体（查询构造/搜索/提炼），
+  // 钉到 scrape 模式（缺省已改 agent——纯模型灵感不发网络）
+  process.env.BLOMA_RESEARCH_MODE = 'scrape'
   vi.clearAllMocks()
 })
 afterEach(() => {
   process.env.PROMA_HOME = originalPromaHome
+  delete process.env.BLOMA_RESEARCH_MODE
   vi.restoreAllMocks()
 })
 

@@ -73,6 +73,9 @@ export function publishPrdConfirmCard(opts: {
   publish: (event: AgentEvent) => void
   /** 市调提炼想法（2026-08-29 灵感参考）：卡面可勾选采纳 */
   ideas?: ResearchIdea[]
+  /** R2（2026-09-12）：想法来源模式——agent=纯模型灵感建议 / scrape=市调提炼；
+ *  渲染端据此把想法区头如实标注，不冒充市调 */
+  ideasMode?: 'agent' | 'scrape'
   /** 审查被用户 override 后转入确认门时携带：如实标注「已忽略 N 个审查问题」，
    *  卡片 title 同步变体（不再自称「已通过裁判审查」——诚实披露）。 */
   reviewNote?: string
@@ -142,6 +145,8 @@ export function publishPrdConfirmCard(opts: {
       key_tasks: backplaneKeyTasks(backplane),
       expanded: input.mode === 'longterm',
       ideas,
+      // R2：模式随卡透出（渲染端想法区头如实标注）
+      ideas_mode: opts.ideasMode ?? 'scrape',
     },
     created_at: new Date().toISOString(),
   } as AgentEvent)

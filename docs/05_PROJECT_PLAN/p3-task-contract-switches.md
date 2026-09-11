@@ -272,3 +272,13 @@
 - 缺省 on 拍板理由：只读恢复零副作用、写类明确不盲执行、护栏齐备；属渠道兼容垫片而非行为实验（当晚 3/3 loop 死于 DSML，recovery 是存活前提）。
 - 单测：dsml-recovery 新文件 10 例（当晚实测三种文法解析/分级四态/定向反馈/off 现状字节级/集成三例——退化 read 轮救回含 messages 上下文断言、退化 write 轮零执行+定向反馈、开关 off 泛化反馈）。
 - 与 P2a 协作：恢复失败仍死 → termination_detail(degenerate_output) 照实入账（裁判话术「末轮输出退化（传输事故，非轮数耗尽）」）。
+
+## 26. R2 市调模式开关（2026-09-12 用户拍板「cut 掉网络搜索环节，只由 agent 提创造性建议」）
+
+| 开关 | 控制面 | 缺省 | 'agent'/未设 | 'scrape'/'search'/'1'/'on' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_RESEARCH_MODE` | 市调/灵感来源模式 | **agent** | 纯模型灵感建议：需求确认与 PRD 确认两处均**不发任何网络请求**，向导 LLM 基于自身产品知识出 3~5 条创造性灵感（AGENT_IDEA_SYSTEM_PROMPT：同类经典玩法/交互/差异化设计，可引真实经典产品名、禁止编造；label≤20/note≤40/source='AI 建议'）；失败/解析失败 → 想法区隐藏弹窗照常。卡面头标如实显示「灵感参考（AI 灵感建议）」，决策日志 research_mode 入账 | 现状市调链路（查询词构造→DDG/Bing 搜索→R1 词典过滤→LLM 提炼；逃生口——配好付费搜索 API/代理后切回） | `researchModeResolver`/`generateAgentIdeas`（main/guide/guide-agent-service.ts）+ 需求确认/PRD 确认两接线点 + publishPrdConfirmCard ideasMode 透传（main/guide/prd-confirm.ts）+ 渲染端 research.mode/ideasMode 解析与头标（agent-atoms.ts + RequirementConfirmDialog/PrdConfirmDialog） |
+
+- 缺省 agent 拍板理由：R1 实测三大 scraping 引擎在大陆网络全线不可靠（DDG 封锁 / cn.bing 反爬罐头 / 百度限频），市调链路在最常见环境下产出为零或垃圾；模型自身产品知识在灵感参考场景下质量不低于垃圾搜索。
+- R1 词典过滤对 scrape 模式保持生效（切回时防线仍在）；agent 模式想法继续过经验库 P2b 垃圾过滤兜底。
+- 单测：guide-research-mode 新文件 5 例（模式矩阵四态/JSON 清洗+source/垃圾三态/空需求与抛错/超量截断）。
