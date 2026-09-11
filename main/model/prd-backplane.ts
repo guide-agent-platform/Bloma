@@ -442,8 +442,13 @@ export function renderBackplaneAnchor(backplane: PrdBackplane, focus?: string[])
       return `- ${ep.method ?? 'GET'} ${ep.endpoint} → 响应：${ep.response ?? 'JSON'}${request}`
     })
     .join('\n')
+  // A2（P0-A，2026-09-11 审计案 35c1a633）：路由模块契约显影——CJS 格式条款进锚。
+  // 此前契约只写在 static-server.js 注释里（主 loop 从未读过），模型按前端同款 ESM
+  // 写路由 → require SyntaxError 被 loadRoutes 静默吞掉 → 404。条款随契约段每轮可见。
+  const moduleFormatClause =
+    '路由文件模块格式（static-server 以 CommonJS require 加载，禁用 ESM import/export）：每个 server/routes/<资源>.js 写 `module.exports = { \'METHOD /path\': async (req, res, ctx) => {...} }`，键格式为 \'方法 路径\'，文件名即 /api/ 前缀（records.js → /api/records/*，样例见骨架 server/routes/_example.js）；数据用 ctx.readData/ctx.writeData 落 data/。'
   return withCapSection(
-    `${requirementsPart}\n\n【后端 API 契约（interface_spec，前后端真相源）】按此实现 server/routes/ 下的路由并保持一致：\n${contract}`,
+    `${requirementsPart}\n\n【后端 API 契约（interface_spec，前后端真相源）】按此实现 server/routes/ 下的路由并保持一致：\n${contract}\n${moduleFormatClause}`,
     backplane,
   )
 }

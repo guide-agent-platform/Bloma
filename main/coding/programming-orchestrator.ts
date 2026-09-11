@@ -14,7 +14,7 @@ import { runBuildGate, type BuildGateResult } from './build-gate'
 import { runArtifactUiGate, uiGateEnabled, uiProbeNotes, type ArtifactUiGateResult } from './artifact-ui-gate'
 import { getCachedStaticEvidence, setCachedStaticEvidence } from './evidence-cache'
 import { runVisionAuditGate } from './vision-audit-gate'
-import { buildRepairTasks, resolveRepairBudget, runRepairLoop, repairScopeEnabled, type RepairCheckpointContext, type RepairTask } from './repair-loop'
+import { buildRepairTasks, resolveRepairBudget, runRepairLoop, repairScopeEnabled, repairNoopGuardEnabled, hasWriteEditToolCall, type RepairCheckpointContext, type RepairTask } from './repair-loop'
 import { recordFailureCards } from '../experience/error-card'
 import { generateLoopPlan, planLegEnabled, renderPlanInjection, renderPlanMarkdown, type LoopPlan } from './loop-planner'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../project-service'
@@ -41,7 +41,7 @@ import { assertToolAllowed } from '../permission-service'
 import { recordDecision } from '../decision-log'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from '../recovery-service'
 import { readPrimaryIntent, recordSessionActivity } from '../session-service'
-import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, preflightEnabled, narrationEventsEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../agent-loop'
+import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, preflightEnabled, narrationEventsEnabled, loopProgressNudgeEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../agent-loop'
 import { deliveryStatusEnabled, recordDeliveryStatus, buildDeliveryPresentation, renderCircuitFailureNote, renderDeliveryBody, featureIdFromScenario } from './delivery-status'
 import { isDegenerateText } from './output-integrity'
 import { composeDeliveryMessage, type DeliveryNarrationFacts, type DeliveryNarrationResult } from './delivery-narrator'
@@ -1281,6 +1281,9 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     result = await runAgentLoop({
     system: buildSystemWithPlan(editFormat),
     task: buildAgentLoopTask(backplane, input.mode),
+    // B3（P0-B，2026-09-11）：技术合同清单透传进度对账守卫（BLOMA_LOOP_PROGRESS_NUDGE
+    // off 时不读不注入字节级现状；无 plan 自然无守卫2，守卫1/3 照常）
+    ...(loopProgressNudgeEnabled() && loopPlan ? { planFiles: loopPlan.filesToTouch.map((file) => file.path) } : {}),
     // toolBudget 首个生产接线（闭环 PR5）：web_research 每次都 fork 调研子代理，
     // 限 4 次防长 loop 无节制外呼；超限走既有 budgetExhausted 软着陆
     toolBudget: { web_research: WEB_RESEARCH_BUDGET },
@@ -2601,6 +2604,56 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
   // 修复轮异常（渠道不可用 / loop 抛错等）：不再重验，直接走现状熔断
   if (result.status !== 'completed') return testResult
   throwIfAborted(input.signal)
+
+  // B2（P0-B，2026-09-11 审计案 35c1a633）：零编辑守卫——修复轮零 write/edit 即不计轮。
+  // 旧路径：17 次全读 + 空口完成总结照样 status=completed → 全量重验逐条相同（initial=
+  // after_repair）→ 白烧一轮预算。开关 on：产物未变不重验、计数回滚、旁白如实、零编辑轮
+  // 入 loop-checkpoint 账本（files_touched=[]，W4-F5 升级信号与四问卡自然承接）；
+  // off=字节级现状（照常重验照常计轮）。
+  if (repairNoopGuardEnabled() && !hasWriteEditToolCall(result.loopResult?.toolCalls ?? [])) {
+    updateProject(input.project_id, { test_repair_count: used })
+    if (loopCheckpointEnabled()) {
+      const prevFailures = testResult.failure_summary.map((f) => f.scenario)
+      appendRepairAttemptRecord(input.project_id, {
+        round,
+        at: new Date().toISOString(),
+        task_locations: tasks.map((task) => task.location ?? task.claim ?? '').filter(Boolean).slice(0, 10),
+        files_touched: [],
+        outcome: {
+          // 产物未变：失败清单结构性不变（非猜测）；零 resolved 参与升级信号判定
+          resolved: [],
+          persistent: prevFailures,
+          new_failures: [],
+          converged: false,
+        },
+      })
+    }
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'repair_noop_skipped',
+        title: `修复轮未产生任何代码改动，不计入预算（第 ${round} 轮回退）`,
+        why: `修复轮 ${result.loopResult?.turns ?? 0} 轮 / ${result.loopResult?.toolCalls.length ?? 0} 次工具调用全部为只读，零 write_file/edit_file——产物未变不重验，预算计数回退到 ${used}/${budget}`,
+        detail: {
+          round,
+          budget,
+          turns: result.loopResult?.turns ?? 0,
+          tool_calls: result.loopResult?.toolCalls.length ?? 0,
+          tool_names: [...new Set((result.loopResult?.toolCalls ?? []).map((call) => call.name))],
+        },
+      },
+    })
+    const noopNote =
+      '刚才的修复轮没有产生任何代码改动（全部为读取操作），这一轮不计入修复预算，也不重复重验；接下来按测试未通过口径收口，你可以告诉我下一步怎么处理。'
+    appendSessionMessage(input.session_id, {
+      role: 'assistant',
+      content: [{ type: 'text', text: noopNote }],
+      timestamp: Date.now(),
+    })
+    publish(input, 'message_delta', { text: noopNote })
+    return testResult
+  }
 
   // 全量重验（D2）+ 重写测试报告（m-8 口径：最后一轮为准）；预览先兑底拉起
   const previewUrl = await ensureResumePreview(input)

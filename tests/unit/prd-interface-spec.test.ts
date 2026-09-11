@@ -70,6 +70,24 @@ describe('renderBackplaneAnchor 接口契约注入', () => {
     expect(anchor).toContain('server/routes/')
   })
 
+  it('A2 路由模块契约显影：契约段末尾追加 CJS 模块格式条款（快照）', () => {
+    const anchor = renderBackplaneAnchor({
+      ...base,
+      interface_spec: [{ endpoint: '/api/records', method: 'GET', response: '{records:[…]}' }],
+    })
+    // 锚点渲染快照：契约段头部 → 端点行 → CJS 条款（顺序与全文逐字锁定，防漂移）
+    const contractIndex = anchor.indexOf('【后端 API 契约（interface_spec，前后端真相源）】')
+    expect(contractIndex).toBeGreaterThan(0)
+    expect(anchor.slice(contractIndex)).toBe(
+      [
+        '【后端 API 契约（interface_spec，前后端真相源）】按此实现 server/routes/ 下的路由并保持一致：',
+        '- GET /api/records → 响应：{records:[…]}',
+        '路由文件模块格式（static-server 以 CommonJS require 加载，禁用 ESM import/export）：每个 server/routes/<资源>.js 写 `module.exports = { \'METHOD /path\': async (req, res, ctx) => {...} }`，键格式为 \'方法 路径\'，文件名即 /api/ 前缀（records.js → /api/records/*，样例见骨架 server/routes/_example.js）；数据用 ctx.readData/ctx.writeData 落 data/。',
+      ].join('\n'),
+    )
+    expect(anchor).not.toContain('localStorage')
+  })
+
   it('无 interface_spec → 零注入（字节级现状，旧背板/纯展示零回归）', () => {
     const anchor = renderBackplaneAnchor(base)
     expect(anchor).not.toContain('API 契约')

@@ -337,8 +337,11 @@ function writeData(name, value) {
   require('node:fs').renameSync(tmp, p);
 }
 const routes = [];
+// B1（P0-B，2026-09-11）：挂载失败登记——不再只进 console，供 /_bloma/routes 健康端点回流（与产物模板同构）
+const routeErrors = [];
 function loadRoutes() {
   routes.length = 0;
+  routeErrors.length = 0;
   if (!existsSync(ROUTES_DIR)) return;
   for (const file of readdirSync(ROUTES_DIR).filter((f) => f.endsWith('.js')).sort()) {
     try {
@@ -356,6 +359,7 @@ function loadRoutes() {
         routes.push({ method: m[1], path: routePath, handler: handler, ctx: ctx });
       }
     } catch (e) {
+      routeErrors.push({ file: file, message: String((e && e.message) || e).slice(0, 300) });
       console.error('[routes] 挂载失败 ' + file + ': ' + (e && e.message));
     }
   }
@@ -397,6 +401,12 @@ const LLM_PROTOCOL = process.env.BLOMA_APP_LLM_PROTOCOL === 'anthropic' ? 'anthr
 const LLM_TIMEOUT_MS = Number(process.env.BLOMA_APP_LLM_TIMEOUT_MS) || 60000;
 const server = createServer((req, res) => {
   const rawUrl = new URL(req.url || '/', 'http://localhost');
+  // ---- B1 健康端点：路由挂载状态（与产物模板同构；api-contract 探针 404 时取真实报错）----
+  if (rawUrl.pathname === '/_bloma/routes' && req.method === 'GET') {
+    loadRoutes();
+    sendJson(res, 200, { mounted: routes.map((r) => ({ method: r.method, path: r.path })), errors: routeErrors });
+    return;
+  }
   if (rawUrl.pathname === '/api/llm' && (req.method === 'POST' || req.method === 'OPTIONS')) {
     if (req.method === 'OPTIONS') { res.writeHead(403); res.end('Forbidden'); return; }
     let raw = '';

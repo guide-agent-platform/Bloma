@@ -1871,3 +1871,109 @@ describe('W6（咨询 D3/D4）：预算层四件', () => {
     expect(text).toContain('候选指纹')
   })
 })
+
+// ==== B3（P0-B，2026-09-11 审计案 35c1a633）：loop 进度对账三守卫 ====
+
+describe('B3 loop 进度对账三守卫（BLOMA_LOOP_PROGRESS_NUDGE）', () => {
+  const previousEnv = process.env.BLOMA_LOOP_PROGRESS_NUDGE
+
+  afterEach(() => {
+    if (previousEnv === undefined) delete process.env.BLOMA_LOOP_PROGRESS_NUDGE
+    else process.env.BLOMA_LOOP_PROGRESS_NUDGE = previousEnv
+  })
+
+  const readFile = tool('read_file', () => ({ output: '内容' }))
+  const writeFile = tool('write_file', () => ({ output: '已写' }))
+  const gwt = tool('run_gwt_tests', () => ({ output: '2 过 1 败' }))
+
+  /** N 轮只读脚本 + 末轮交卷（脚本末项重复兜底，N+1 次调用内必到交卷或 turn_limit） */
+  function readOnlyScript(turns: number): SDKMessage[][] {
+    return Array.from({ length: turns }, (_, i) => [toolUseMessage(`r${i}`, 'read_file', { path: `src/mod${i}.js` })])
+  }
+
+  function userTextsOf(messages: ConversationTurn[]): string {
+    return messages
+      .filter((turn) => turn.role === 'user')
+      .map((turn) => (typeof turn.content === 'string' ? turn.content : JSON.stringify(turn.content)))
+      .join('\n')
+  }
+
+  it('守卫1：连续 6 轮只读 → 第 7 次模型调用前注入【进度对账】提醒落盘；有写入则不注入', async () => {
+    process.env.BLOMA_LOOP_PROGRESS_NUDGE = '1'
+    // 全只读 8 轮：第 6 轮批间 streak=6 触发注入
+    const stalled = scriptedQuery([...readOnlyScript(8), [textMessage('完成')]])
+    await runAgentLoop(baseInput({ query: stalled.query, tools: [readFile], maxTurns: 12, sessionId: 'session-b3-stall' }))
+    expect(userTextsOf(stalled.receivedMessages[6])).toContain('【进度对账（宿主注入）】')
+    expect(userTextsOf(stalled.receivedMessages[6])).toContain('已连续 6 轮只读')
+    // 注入后重置：第 7 轮批间 streak=1，不重复注入
+    expect(userTextsOf(stalled.receivedMessages[7])).not.toContain('已连续 1 轮只读')
+
+    // 第 3 轮有写入 → 失速清零，后续 4 轮只读（streak 4<6）全程零注入
+    const mixed = scriptedQuery([
+      [toolUseMessage('m1', 'read_file', { path: 'src/a.js' })],
+      [toolUseMessage('m2', 'run_gwt_tests', {})],
+      [toolUseMessage('m3', 'write_file', { path: 'src/app.js' })],
+      ...readOnlyScript(4).map((turn, i) => turn.map((m) => m)),
+      [textMessage('完成')],
+    ])
+    await runAgentLoop(baseInput({ query: mixed.query, tools: [readFile, writeFile, gwt], maxTurns: 12, sessionId: 'session-b3-write' }))
+    for (const messages of mixed.receivedMessages) {
+      expect(userTextsOf(messages)).not.toContain('进度对账')
+    }
+  })
+
+  it('守卫2：轮次 ≥75% 且 plan 清单未触达 → 列名注入；全部触达不注入', async () => {
+    process.env.BLOMA_LOOP_PROGRESS_NUDGE = '1'
+    const planFiles = ['index.html', 'src/app.js', 'server/routes/records.js']
+    // maxTurns=8，75%=第 6 轮批间触发（此时零写入，清单全部未触达）
+    const untouched = scriptedQuery([...readOnlyScript(6), [textMessage('完成')]])
+    await runAgentLoop(baseInput({ query: untouched.query, tools: [readFile], maxTurns: 8, sessionId: 'session-b3-plan', planFiles }))
+    const text = userTextsOf(untouched.receivedMessages[6])
+    expect(text).toContain('尚未写入')
+    expect(text).toContain('index.html')
+    expect(text).toContain('server/routes/records.js')
+    expect(text).toContain('dist/app.js')
+
+    // 前 3 轮把清单全部写完 → 守卫2 不注入（守卫1 也因每轮有写入不触发）
+    const covered = scriptedQuery([
+      [toolUseMessage('w1', 'write_file', { path: './index.html' })],
+      [toolUseMessage('w2', 'write_file', { path: 'src/app.js' })],
+      [toolUseMessage('w3', 'write_file', { path: 'server/routes/records.js' })],
+      ...readOnlyScript(4),
+      [textMessage('完成')],
+    ])
+    await runAgentLoop(baseInput({ query: covered.query, tools: [readFile, writeFile], maxTurns: 8, sessionId: 'session-b3-covered', planFiles }))
+    for (const messages of covered.receivedMessages) {
+      expect(userTextsOf(messages)).not.toContain('尚未写入')
+    }
+  })
+
+  it('守卫3：进入后 1/3 轮次仍零验证调用 → 自测提醒；有 run_gwt_tests 则不注入', async () => {
+    process.env.BLOMA_LOOP_PROGRESS_NUDGE = '1'
+    // maxTurns=9，后 1/3=第 6 轮起；前 5 轮只读（streak 5<6 不触发守卫1，无 planFiles 不触发守卫2）
+    const unverified = scriptedQuery([...readOnlyScript(6), [textMessage('完成')]])
+    await runAgentLoop(baseInput({ query: unverified.query, tools: [readFile], maxTurns: 9, sessionId: 'session-b3-verify' }))
+    expect(userTextsOf(unverified.receivedMessages[6])).toContain('尚未运行过任何自测工具')
+
+    // 第 1 轮跑过 run_gwt_tests → verificationSeen，守卫3 全程不注入
+    const verified = scriptedQuery([
+      [toolUseMessage('v1', 'run_gwt_tests', {})],
+      ...readOnlyScript(6),
+      [textMessage('完成')],
+    ])
+    await runAgentLoop(baseInput({ query: verified.query, tools: [readFile, gwt], maxTurns: 9, sessionId: 'session-b3-gwt' }))
+    for (const messages of verified.receivedMessages) {
+      expect(userTextsOf(messages)).not.toContain('自测工具')
+    }
+  })
+
+  it('off 字节锁：开关未设零注入（messages 与 JSONL 无【进度对账】）', async () => {
+    delete process.env.BLOMA_LOOP_PROGRESS_NUDGE
+    const { query, receivedMessages } = scriptedQuery([...readOnlyScript(7), [textMessage('完成')]])
+    await runAgentLoop(baseInput({ query, tools: [readFile], maxTurns: 12, sessionId: 'session-b3-off', planFiles: ['index.html'] }))
+    for (const messages of receivedMessages) {
+      expect(userTextsOf(messages)).not.toContain('进度对账')
+    }
+    expect(readSessionJsonl('session-b3-off').some((line) => JSON.stringify(line).includes('进度对账'))).toBe(false)
+  })
+})

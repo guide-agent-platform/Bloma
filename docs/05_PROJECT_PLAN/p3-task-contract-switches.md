@@ -211,3 +211,20 @@
 - 语义对照（体验验收①：生成中问「你刚提的修改这轮会做吗？」答案与系统真实状态一致）：merged_this_run/received=会；pending_impact=待你确认；deferred_next_run=下一轮；rejected=不会。getSteerStatuses 是权威答案源（单测锁——无任何路径可在未注入时得到 merged）。
 - v0 边界与观察项：①状态条数据随会话内存不落盘（重启丢失——**deferred 已补持久化（2026-09-11 尾批）**：deferred_next_run 达成时 ipc 层 listener 单点拦截→persistSteerDeferredNotice 落会话 JSONL [steer-deferred] system 行，跨重启回放可见的文字待办；渲染端前缀剥离胶囊归类；同一条只 advance 一次无重复落盘）；②账本条目随会话常驻不跨轮清扫（同会话 steer 量级个位数，「本轮」以最近一次注入为准）；③分级词表确定性（无 LLM），宁低勿高——误判低=与现状行为一致无害，误判高会拦住用户；④steer_resolved 埋点未加（resolve 三选分布观察，后续可补）。
 - 单测：steer-queue +15 例（分级四组/状态机全转移/三选回执含 loop 结束降级/markSteerMerged 唯一入口+终态不可覆盖/停止拒绝/收尾收口/listener 降级/体验验收①四场景）；agent-loop +3 例（on 注入点联动+payload 扩/off 字节级锁/收尾残余转 deferred）；renderer-steer-status 新文件 4 例（全生命周期翻转/乱序不回退/off 零 upsert/mvp_ready deferred 提醒）；ipc-contract expectedChannels +2。
+
+## 21. P0 污染修复批开关（B1/B2/B3，2026-09-11 全链污染审计 35c1a633 案）
+
+> 背景：《Bloma-编程Agent全链污染审计与修复-20260911.md》P0-B 批——信息回流与运行时对账。
+> 同批 A1/A2（骨架口径对齐 + 路由契约显影进背板锚）属模板/提示词信息面直接上（同 J3/H3 先例，无开关）；
+> A3（BLOMA_EXPERIENCE=1 狗粮）为本机配置（setx），不进仓库。
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_ROUTE_ERROR_FEEDBACK` | B1 挂载错误回流 | **off** | 失败 reason 字节级现状（「契约端点失活（HTTP 404，路由未实现或挂载失败）」，不取健康端点） | api-contract 探针遇 404/5xx 先取 `GET /_bloma/routes` 健康端点，把真实 require 报错写进失败 reason（精确匹配 endpoint 资源段 ↔ 挂载失败文件名；不匹配附摘要；端点缺席/无错误维持现状措辞）。不改变判定语义（404 仍判失败），仅信息增强进修复任务 payload | `routeErrorFeedbackEnabled`/`routeFailureReason`/`fetchRouteMountErrors`（main/coding/api-contract.ts） |
+| `BLOMA_REPAIR_NOOP_GUARD` | B2 修复轮零编辑守卫 | **off** | 字节级现状（零编辑修复轮照样计轮、照样全量重验——B0 五案 initial=after_repair 的假修复） | repairAndRetest 判 runRepairLoop 返回的 toolCalls 无 write_file/edit_file → 不计轮（test_repair_count 回退）、不重验（产物未变重验必逐条相同）、落 decision `repair_noop_skipped` + 旁白如实「不计入预算」、零编辑轮入 loop-checkpoint 账本（files_touched=[]，W4-F5 升级信号与 H5 四问卡自然承接）；熔断收口口径不变（陷阱 37） | `repairNoopGuardEnabled`/`hasWriteEditToolCall`（main/coding/repair-loop.ts）+ repairAndRetest 守卫块（main/coding/programming-orchestrator.ts）+ DecisionType 新值 `repair_noop_skipped` |
+| `BLOMA_LOOP_PROGRESS_NUDGE` | B3 loop 进度对账三守卫 | **off** | 字节级现状（零注入，messages/JSONL 字节不变） | 主 loop 批间（steer 同点位）注入【进度对账（宿主注入）】user 消息：①连续 6 轮无 write/edit → 提醒落盘（注入后重置计数）；②轮次 ≥75% 且 plan 清单（编排器透传 planFiles）存在 → 未触达文件列名（含入口接线提示）；③进入后 1/3 轮次仍零验证工具调用（run_preview/run_gwt_tests/run_security_scan/run_api_contract_tests/run_preflight）→ 自测提醒。只挂主 loop（修复轮无 plan 上下文）；wrapUp 激活后不注入；计入滑窗/压缩管道不破坏「整批 tool_result 单条 user 消息」不变式 | `loopProgressNudgeEnabled`/`PROGRESS_READ_ONLY_TURNS`/`normalizeProgressPath` + AgentLoopInput.planFiles（main/coding/agent-loop.ts）+ runMvpViaAgentLoop 透传（main/coding/programming-orchestrator.ts） |
+
+- 无开关直接上（信息面，A1/A2）：①骨架 src/app.js 头部注释从「禁 ESM/禁网络/localStorage」改为构建链 + server/routes 口径（与完整程序硬规则对齐）；②index.html 预置 `<script src="./dist/app.js" defer>` 承接位（预览服务器 dist/ 正常静态托管、CSP script-src 'self' 允许——已核实）；③renderBackplaneAnchor【后端 API 契约】段在 interface_spec 非空时追加 CJS 模块格式条款（module.exports={'METHOD /path':fn}、require 加载、禁 ESM）；④骨架幂等预置 server/routes/_example.js（只读 CJS 样例，全注释零路由副作用）+ manifest 登记。
+- 基础设施常开（B1 服务器侧，无行为分支）：两处同构服务器模板（renderStaticServer 产物模板 + STATIC_SERVER_SCRIPT 沙箱）loadRoutes 挂载失败登记 routeErrors + 暴露 `GET /_bloma/routes` 健康端点（返回 {mounted, errors}）——新增只读端点不动既有路径判定。
+- 单测：api-contract +3 例（off 字节锁/on 精确匹配/on 摘要与缺席降级）；programming-orchestrator-repair +3 例（零编辑×off 字节锁 / 零编辑×on 四断言 / 有编辑×on 不误伤——有编辑×off 由既有测试全量覆盖）；agent-loop +4 例（守卫 1/2/3 触发与不触发 / off 字节锁含 JSONL）；prd-interface-spec +1 例（A2 锚点渲染快照）；project-skeleton +3 例（承接位/口径对齐/_example.js CJS 样例）+ describe 语义更新。
+- 重放验收（同款 seed「做一个纵版打飞机的游戏，很复古的那种」）：预期 loop 内出现 app.js/index.html 写入、路由 CJS 挂载成功、若空口完成则零编辑守卫触发不耗预算。

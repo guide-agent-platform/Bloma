@@ -15,6 +15,52 @@ import type { InterfaceEndpoint } from '../model/prd-backplane'
 /** 单端点探测超时：契约端点应答应当是本地毫秒级（基础设施超时口径，陷阱 16）。 */
 const API_PROBE_TIMEOUT_MS = 2_000
 
+/** B1（P0-B，2026-09-11 审计案 35c1a633）：挂载错误回流开关——契约端点失活时先取
+ *  /_bloma/routes 健康端点，把真实 require 报错写进失败 reason（进修复任务 payload）。
+ * 缺省 off=字节级现状（reason 维持猜测式措辞）；不改变判定语义（404/5xx 仍判失败）。 */
+export function routeErrorFeedbackEnabled(): boolean {
+  return process.env.BLOMA_ROUTE_ERROR_FEEDBACK === '1' || process.env.BLOMA_ROUTE_ERROR_FEEDBACK === 'true'
+}
+
+interface RouteMountError {
+  file: string
+  message: string
+}
+
+/** 取健康端点的挂载失败清单；端点缺席/不可达/形态异常 → null（静默降级，不动判定）。 */
+async function fetchRouteMountErrors(previewUrl: string): Promise<RouteMountError[] | null> {
+  try {
+    const response = await fetch(`${previewUrl.replace(/\/+$/, '')}/_bloma/routes`, {
+      signal: AbortSignal.timeout(API_PROBE_TIMEOUT_MS),
+    })
+    if (!response.ok) return null
+    const body = (await response.json()) as { errors?: unknown }
+    if (!Array.isArray(body?.errors)) return null
+    return body.errors.filter(
+      (item): item is RouteMountError =>
+        typeof item === 'object' &&
+        item !== null &&
+        typeof (item as { file?: unknown }).file === 'string' &&
+        typeof (item as { message?: unknown }).message === 'string',
+    )
+  } catch {
+    return null
+  }
+}
+
+/** B1 失败 reason 组装：精确匹配（endpoint 资源段 ↔ 挂载失败文件名）优先，否则附挂载失败摘要；
+ *  无健康端点/无错误 → 维持现状措辞（与 off 路径同文）。 */
+async function routeFailureReason(previewUrl: string, endpoint: string, status: number): Promise<string> {
+  const base = `契约端点失活（HTTP ${status}，路由未实现或挂载失败）`
+  const errors = await fetchRouteMountErrors(previewUrl)
+  if (!errors || errors.length === 0) return base
+  const resource = endpoint.split('/').filter(Boolean)[1]
+  const hit = resource ? errors.find((item) => item.file.replace(/\.js$/, '') === resource) : undefined
+  if (hit) return `${base}；路由文件 ${hit.file} 挂载失败：${hit.message}`
+  const digest = errors.slice(0, 3).map((item) => `${item.file}（${item.message}）`).join('、')
+  return `${base}；挂载失败文件：${digest}`
+}
+
 export async function checkApiContract(previewUrl: string, endpoints: InterfaceEndpoint[]): Promise<GwtFailureSummary[]> {
   const probeable = endpoints.filter((ep) => (ep.method ?? 'GET') === 'GET' && !ep.endpoint.includes(':'))
   const failures: GwtFailureSummary[] = []
@@ -31,7 +77,9 @@ export async function checkApiContract(previewUrl: string, endpoints: InterfaceE
       if (response.status === 404 || response.status >= 500) {
         failures.push({
           scenario: `API 契约端点：${endpoint.method ?? 'GET'} ${endpoint.endpoint}`,
-          reason: `契约端点失活（HTTP ${response.status}，路由未实现或挂载失败）`,
+          reason: routeErrorFeedbackEnabled()
+            ? await routeFailureReason(previewUrl, endpoint.endpoint, response.status)
+            : `契约端点失活（HTTP ${response.status}，路由未实现或挂载失败）`,
         })
       }
     } catch (error) {

@@ -188,6 +188,9 @@ export interface AgentLoopInput {
   onCompaction?: (info: AgentLoopCompactionInfo) => void
   /** W2-E3 检查点回调（事件驱动：steer/验证工具/压缩/终态时触发；编排层接持久化，loop 内零 IO） */
   onCheckpoint?: (snapshot: LoopCheckpointSnapshot) => void
+  /** B3（P0-B）：技术合同清单（plan 腿 filesToTouch 路径，编排器透传；仅开关 on 时参与
+   *  进度对账守卫2，off 时字段不读不注入字节级现状；修复轮不传——修复卡即 mini-plan） */
+  planFiles?: string[]
 }
 
 export interface AgentLoopResult {
@@ -693,6 +696,22 @@ export function loopWindowOffEnabled(): boolean {
   return process.env.BLOMA_LOOP_WINDOW_OFF === '1' || process.env.BLOMA_LOOP_WINDOW_OFF === 'true'
 }
 
+/** B3（P0-B，2026-09-11 审计案 35c1a633）：loop 进度对账三守卫——只读失速 / 清单对账 /
+ *  自测提醒，批间 user 消息注入（复用 DEGENERATE_RETRY_FEEDBACK 模式，与 steer 同点位）。
+ * 缺省 off=字节级现状（零注入，messages/JSONL 字节不变）。 */
+export function loopProgressNudgeEnabled(): boolean {
+  return process.env.BLOMA_LOOP_PROGRESS_NUDGE === '1' || process.env.BLOMA_LOOP_PROGRESS_NUDGE === 'true'
+}
+
+/** B3 守卫1 阈值：连续 N 轮无 write/edit 判只读失速（审计案实测 20 连续只读，6 轮早介入）。 */
+const PROGRESS_READ_ONLY_TURNS = 6
+/** B3 验证类工具集（守卫3：全程零命中且进入后 1/3 轮次→提醒自测）。 */
+const PROGRESS_VERIFICATION_TOOLS = new Set(['run_preview', 'run_gwt_tests', 'run_security_scan', 'run_api_contract_tests', 'run_preflight'])
+/** B3 路径归一化：plan 清单与工具入参 path 的统一形态（正斜杠、去 ./ 前缀）。 */
+function normalizeProgressPath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/^\.\//, '')
+}
+
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
   // P0-1 steer（运行中转向，2026-09-08）：只主 loop（depth 0）开放。进入即 mark——
   // IPC steer 通道据此判定可注入；finally 里先 drain 残余（未及批间注入的，落 JSONL 保真；
@@ -901,6 +920,12 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
   const keepRecentBudget = resolveKeepRecentTokens()
   // 终轮退行已重试次数（P0：传输事故只重试一次，见 DEGENERATE_RETRY_LIMIT）
   let degenerateRetries = 0
+  // B3（P0-B，2026-09-11）：进度对账三守卫状态（BLOMA_LOOP_PROGRESS_NUDGE off=零注入）
+  let readOnlyStreak = 0
+  const writtenFiles = new Set<string>()
+  let verificationSeen = false
+  let planNudgeDone = false
+  let verifyNudgeDone = false
 
   for (let turn = 1; turn <= input.maxTurns; turn += 1) {
     if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls, 'turn_start', input.signal))
@@ -1059,6 +1084,15 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
       return { name: use.name, turn, ...(path ? { path } : {}) }
     })
     toolCalls.push(...turnCalls)
+    // B3 状态推进：写类调用清零失速计数并登记触达文件；验证类工具标记已自测
+    const wroteThisTurn = turnCalls.some((call) => call.name === 'write_file' || call.name === 'edit_file')
+    readOnlyStreak = wroteThisTurn ? 0 : readOnlyStreak + 1
+    if (wroteThisTurn) {
+      for (const call of turnCalls) {
+        if ((call.name === 'write_file' || call.name === 'edit_file') && call.path) writtenFiles.add(normalizeProgressPath(call.path))
+      }
+    }
+    if (turnCalls.some((call) => PROGRESS_VERIFICATION_TOOLS.has(call.name))) verificationSeen = true
     input.onTurn?.({ turn, toolCalls: turnCalls, inputTokens: usage?.input_tokens, outputTokens: usage?.output_tokens })
 
     // 无 tool_use = 模型声明收工（真伪由外部强制终验收口，不信模型自述）。
@@ -1120,6 +1154,43 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         for (const decision of steerDecisions) if (!decision.superseded_by) decision.superseded_by = steerId
         steerDecisions.push({ id: steerId, kind: 'steer', text: wrapped.slice(0, 200), at_turn: turn })
         emitCheckpoint('steer', turn)
+      }
+    }
+
+    // ---- B3（P0-B，2026-09-11 审计案 35c1a633）：进度对账三守卫批间注入 ----
+    // 与 steer 同点位（resultBlocks 落盘后、下一轮模型调用前）；注入计入滑窗/压缩管道，
+    // 不破坏「整批 tool_result 单条 user 消息」不变式。开关 off=零注入字节级现状；
+    // 只挂主 loop（修复轮任务窄且无 plan 上下文）；wrapUp 激活后不再打扰（模型在交卷）。
+    if (isMainLoop && !wrapUp && loopProgressNudgeEnabled()) {
+      const nudges: string[] = []
+      // 守卫1 只读失速：连续 N 轮无 write/edit → 提醒落盘（注入后重置，再失速两计数再提）
+      if (readOnlyStreak >= PROGRESS_READ_ONLY_TURNS) {
+        nudges.push(
+          `已连续 ${readOnlyStreak} 轮只读（无 write_file/edit_file）。读取与检查足够后请立即把实现落盘：先写入口与核心模块，再逐步补齐。`,
+        )
+        readOnlyStreak = 0
+      }
+      // 守卫2 清单对账：轮次消耗 ≥75% 且 plan 清单存在 → 未触达文件列名（含入口接线）
+      if (!planNudgeDone && input.planFiles && input.planFiles.length > 0 && turn >= Math.ceil(input.maxTurns * 0.75)) {
+        const untouched = input.planFiles.filter((path) => !writtenFiles.has(normalizeProgressPath(path)))
+        if (untouched.length > 0) {
+          nudges.push(
+            `轮次已消耗 ${turn}/${input.maxTurns}，技术合同清单中以下文件尚未写入：${untouched.join('、')}。若确已不需要请在旁白说明原因；否则优先补齐（注意：index.html 未引用构建产物 dist/app.js 时页面无法加载功能）。`,
+          )
+          planNudgeDone = true
+        }
+      }
+      // 守卫3 自测提醒：进入后 1/3 轮次仍零验证工具调用
+      if (!verifyNudgeDone && !verificationSeen && turn >= Math.ceil((input.maxTurns * 2) / 3)) {
+        nudges.push(
+          `已进行 ${turn}/${input.maxTurns} 轮，尚未运行过任何自测工具（run_preview / run_gwt_tests 等）。请尽快自测一次，尽早暴露问题，不要把验证全部留到收尾。`,
+        )
+        verifyNudgeDone = true
+      }
+      if (nudges.length > 0) {
+        const nudgeText = `【进度对账（宿主注入）】\n${nudges.join('\n')}`
+        appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: nudgeText }])
+        messages.push({ role: 'user', content: [{ type: 'text', text: nudgeText }] })
       }
     }
 

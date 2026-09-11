@@ -150,6 +150,7 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     if (originalBudget === undefined) delete process.env.BLOMA_REPAIR_BUDGET
     else process.env.BLOMA_REPAIR_BUDGET = originalBudget
     delete process.env.BLOMA_LOOP_CHECKPOINT
+    delete process.env.BLOMA_REPAIR_NOOP_GUARD
     setProgrammingEventPublisher(() => undefined)
     clearSandboxRuntimeForTests()
   })
@@ -520,6 +521,81 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     expect(doc?.repair_attempts[1]?.outcome.persistent).toEqual([scenario])
   })
 
+  // ---- B2（P0-B，2026-09-11 审计案 35c1a633）：修复轮零编辑守卫四态 ----
+  // 有编辑×off：既有测试全部覆盖（loopCompleted 带 edit_file + 开关缺省未设）。
+  function loopCompletedReadOnly() {
+    return {
+      status: 'completed' as const,
+      turns: 5,
+      finalText: '已检查相关代码，未发现需要修改的地方',
+      toolCalls: [
+        { name: 'read_file', turn: 1, path: 'src/app.js' },
+        { name: 'read_file', turn: 2, path: 'server/routes/records.js' },
+        { name: 'grep', turn: 3 },
+      ],
+    }
+  }
+
+  it('B2 零编辑×off：字节级现状——照常全量重验、计轮不回退、无 repair_noop_skipped', async () => {
+    delete process.env.BLOMA_REPAIR_NOOP_GUARD
+    mocks.runGwtScenarios.mockResolvedValue(gwtFailed()) // 首验与重验都失败
+    mocks.runAgentLoop.mockResolvedValue(loopCompletedReadOnly())
+
+    const result = await runAgentLoopPostTesting(baseInput())
+
+    // 现状路径：修复轮跑完照常重验（GWT 两次）+ 预算消耗 + 熔断口径不变
+    expect(mocks.runAgentLoop).toHaveBeenCalledTimes(1)
+    expect(mocks.runGwtScenarios).toHaveBeenCalledTimes(2)
+    expect(mocks.circuitBreakRollback).toHaveBeenCalledTimes(1)
+    expect(findProject(projectId).test_repair_count).toBe(1)
+    expect(result.verdict).toBe('blocked')
+    expect(decisionLines()).not.toContain('repair_noop_skipped')
+  })
+
+  it('B2 零编辑×on：不计轮不重验——计数回退、旁白如实、账本零编辑入档、照常熔断收口', async () => {
+    process.env.BLOMA_REPAIR_NOOP_GUARD = '1'
+    process.env.BLOMA_LOOP_CHECKPOINT = '1'
+    mocks.runGwtScenarios.mockResolvedValue(gwtFailed())
+    mocks.runAgentLoop.mockResolvedValue(loopCompletedReadOnly())
+
+    const result = await runAgentLoopPostTesting(baseInput())
+
+    // 产物未变：不重验（GWT 仅首验 1 次）、预算回退到 0
+    expect(mocks.runAgentLoop).toHaveBeenCalledTimes(1)
+    expect(mocks.runGwtScenarios).toHaveBeenCalledTimes(1)
+    expect(findProject(projectId).test_repair_count).toBe(0)
+    // 决策 + 旁白如实留痕
+    const log = decisionLines()
+    expect(log).toContain('repair_noop_skipped')
+    expect(log).toContain('不计入预算')
+    const notes = events.filter((event) => event.type === 'message_delta').map((event) => (event.payload as { text?: string }).text ?? '')
+    expect(notes.some((text) => text.includes('没有产生任何代码改动'))).toBe(true)
+    // 零编辑轮入 loop-checkpoint 账本：files_touched=[]，零 resolved（W4-F5 升级信号消费）
+    const doc = readLoopCheckpointDocument(projectId)
+    expect(doc?.repair_attempts).toHaveLength(1)
+    expect(doc?.repair_attempts[0]).toMatchObject({ round: 1, files_touched: [] })
+    expect(doc?.repair_attempts[0]?.outcome.resolved).toEqual([])
+    expect(doc?.repair_attempts[0]?.outcome.converged).toBe(false)
+    // 失败仍在 → 现状熔断口径收口（陷阱 37 不变）
+    expect(mocks.circuitBreakRollback).toHaveBeenCalledTimes(1)
+    expect(result.verdict).toBe('blocked')
+  })
+
+  it('B2 有编辑×on：正常重验不计零编辑（守卫不误伤）', async () => {
+    process.env.BLOMA_REPAIR_NOOP_GUARD = '1'
+    mocks.runGwtScenarios
+      .mockResolvedValueOnce(gwtFailed())
+      .mockResolvedValueOnce(gwtPassed())
+    mocks.runAgentLoop.mockResolvedValue(loopCompleted())
+
+    const result = await runAgentLoopPostTesting(baseInput())
+
+    expect(mocks.runAgentLoop).toHaveBeenCalledTimes(1)
+    expect(mocks.runGwtScenarios).toHaveBeenCalledTimes(2)
+    expect(decisionLines()).not.toContain('repair_noop_skipped')
+    expect(result.verdict).toBe('ready')
+    expect(findProject(projectId).test_repair_count).toBe(0)
+  })
 })
 describe('PR-C：build-gate 接入 + blocked 卡先修再验（入口 B）', () => {
   const originalPromaHome = process.env.PROMA_HOME

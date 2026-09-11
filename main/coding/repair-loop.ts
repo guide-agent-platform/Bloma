@@ -37,6 +37,18 @@ export function repairScopeEnabled(): boolean {
   return process.env.BLOMA_REPAIR_SCOPE === '1' || process.env.BLOMA_REPAIR_SCOPE === 'true'
 }
 
+/** B2（P0-B，2026-09-11 审计案 35c1a633）：修复轮零编辑守卫开关——runRepairLoop 返回后判
+ *  toolCalls 无 write_file/edit_file 即不计轮（回滚 test_repair_count、不重验、旁白如实）。
+ * 缺省 off=字节级现状（零编辑照样计轮照常重验）。 */
+export function repairNoopGuardEnabled(): boolean {
+  return process.env.BLOMA_REPAIR_NOOP_GUARD === '1' || process.env.BLOMA_REPAIR_NOOP_GUARD === 'true'
+}
+
+/** B2 判定：工具调用记录里是否存在写类调用（write_file/edit_file）。 */
+export function hasWriteEditToolCall(toolCalls: Array<{ name: string; path?: string }>): boolean {
+  return toolCalls.some((call) => call.name === 'write_file' || call.name === 'edit_file')
+}
+
 /** 受保护路径缺省（权威契约/宿主产物；拒绝任何扩大申请） */
 const PROTECTED_WRITE_PATHS = ['prd.json', 'test-report.json', 'documents/loop-checkpoint.json', 'documents/decisions.md']
 
