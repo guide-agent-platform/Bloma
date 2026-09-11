@@ -398,3 +398,49 @@ export async function generateLoopPlan(input: GenerateLoopPlanInput): Promise<Lo
   }
   return parsed
 }
+
+/**
+ * W5-1（Phase 8.5，2026-09-12 狗粮 dd6ba98d）：plan 合同 checklist 化——把
+ * filesToTouch 分组为有序编号任务，提供「逐项推进、完成勾选」的工作结构
+ * （对齐本平台 agent 的任务清单工作法；plan 合同细节仍由 renderPlanInjection 提供）。
+ * 分组规则确定性：入口（index.html/styles）→ src 子目录模块 → 装配入口 → 后端路由 → 其余。
+ */
+export function renderTaskChecklist(plan: LoopPlan): string {
+  if (plan.filesToTouch.length === 0) return ''
+  const groupOf = (path: string): { order: number; label: string } => {
+    if (path === 'index.html' || path === 'src/styles.css') return { order: 0, label: '入口与样式' }
+    if (path === 'src/app.js') return { order: 2, label: '装配入口' }
+    if (path.startsWith('server/')) return { order: 3, label: '后端路由' }
+    if (path.startsWith('src/')) {
+      const sub = path.split('/')[1]
+      return sub ? { order: 1, label: `src/${sub}/ 模块` } : { order: 2, label: 'src 根模块' }
+    }
+    return { order: 4, label: '其他' }
+  }
+  const groups = new Map<string, { order: number; label: string; files: LoopPlanFile[] }>()
+  for (const file of plan.filesToTouch) {
+    const g = groupOf(file.path)
+    const key = `${g.order}|${g.label}`
+    if (!groups.has(key)) groups.set(key, { ...g, files: [] })
+    groups.get(key)!.files.push(file)
+  }
+  const ordered = [...groups.values()].sort((a, b) => a.order - b.order)
+  const items = ordered.map((group, index) => {
+    const fileList = group.files.map((file) => file.path).join('、')
+    const reasons = [...new Set(group.files.map((file) => file.reason.replace(/[。；;]$/, '')))].slice(0, 2).join('；')
+    // 轻量验证映射：验证口径里提及组内文件名关键词的行挂到该项，挂不上的留在全局清单
+    const stems = group.files.map((file) => file.path.split('/').pop()?.replace(/\.[a-z]+$/, '') ?? '')
+    const verification = plan.verification
+      .filter((entry) => stems.some((stem) => stem && entry.includes(stem)))
+      .slice(0, 2)
+    return [
+      `${index + 1}. [ ] ${group.label}：${fileList} —— ${reasons}`,
+      ...(verification.length > 0 ? [`   验证：${verification.join('；')}`] : []),
+    ].join('\n')
+  })
+  return [
+    '## 实施清单（按序推进，完成一项即勾选进入下一项）',
+    ...items,
+    '工作纪律：每项先定位（grep/地图锚点 → read 只读命中段）→ 实现 → 有验证手段时立即验证 → 勾选进入下一项；禁止先全读再全写；已完成项不重读不重写，微调用 edit_file。',
+  ].join('\n')
+}

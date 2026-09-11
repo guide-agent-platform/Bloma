@@ -282,3 +282,13 @@
 - 缺省 agent 拍板理由：R1 实测三大 scraping 引擎在大陆网络全线不可靠（DDG 封锁 / cn.bing 反爬罐头 / 百度限频），市调链路在最常见环境下产出为零或垃圾；模型自身产品知识在灵感参考场景下质量不低于垃圾搜索。
 - R1 词典过滤对 scrape 模式保持生效（切回时防线仍在）；agent 模式想法继续过经验库 P2b 垃圾过滤兜底。
 - 单测：guide-research-mode 新文件 5 例（模式矩阵四态/JSON 清洗+source/垃圾三态/空需求与抛错/超量截断）。
+
+## 27. W5 任务清单工作流开关（Phase 8.5，2026-09-12 用户反馈「编程 agent 工作流未与平台同步」——狗粮 dd6ba98d 生成轮 16 轮写后全量重读 + 6 文件完整重写第二遍）
+
+| 开关 | 控制面 | 缺省 | '0' | '1'/未设 | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_TASK_WORKFLOW` | 任务清单驱动的生成 loop | **on** | 字节级现状（静态 plan 合同 + 全量任务书「逐功能项实现」——当晚大爆炸式写完→重读→重写形态） | ①**W5-1 实施清单**：renderTaskChecklist 把 plan filesToTouch 分组为有序编号任务（入口/模块/装配/后端路由 + 验证口径映射 + 工作纪律）注入 system；②**W5-4 任务书升级**：「按实施清单逐项推进：定位→实现→立即验证→勾选；禁止先全读再全写；已完成项不重读不重写，微调用 edit_file」；③**W5-2 进度投影**（批间注入，≥2 轮间隔）：「清单 N/M + 已完成勿重写 + 读过的不要重读」；④**W5-3 守卫4 重复写**：同文件第二次全量 write_file → 提醒改 edit_file（edit 不触发）；⑤**W5-5 早验证**：≥3 文件零验证且过 1/3 轮次 → 一次性自测提醒（B3 守卫3 的前移分支） | `taskWorkflowEnabled`（main/agent-loop.ts）+ W5 批间注入块与状态区（main/coding/agent-loop.ts）+ `renderTaskChecklist`（main/coding/loop-planner.ts）+ buildSystemWithPlan checklist 拼接与 buildAgentLoopTask 分支（main/coding/programming-orchestrator.ts） |
+
+- 缺省 on 拍板理由：纯任务书/宿主注入层，无验证语义变化；off 形态当晚被实证为失败形态。
+- 只挂主 loop 生成路径（修复轮任务窄、迭代轮聚焦任务书已含工作法，均不叠加）。
+- 单测：task-workflow 新文件 7 例（checklist 分组/纪律/验证映射、守卫4 触发与 edit 不触发、投影注入与间隔抑制、早验证一次性、off 字节级）；programming-orchestrator-plan 钉 W5 关保持原字节锁。

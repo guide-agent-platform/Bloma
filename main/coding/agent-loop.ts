@@ -710,6 +710,15 @@ export function loopProgressNudgeEnabled(): boolean {
   return process.env.BLOMA_LOOP_PROGRESS_NUDGE === '1' || process.env.BLOMA_LOOP_PROGRESS_NUDGE === 'true'
 }
 
+/** W5（Phase 8.5，2026-09-12 狗粮 dd6ba98d 复盘「工作流同步 2.0」）：任务清单工作流
+ *  ——进度投影 / 重复写守卫 / 早验证，批间注入与 B3 同点位。缺省 on（纯 prompt/
+ *  宿主注入层，无验证语义变化）；'0'/'off'/'false'=字节级现状逃生口。 */
+export function taskWorkflowEnabled(): boolean {
+  const raw = (process.env.BLOMA_TASK_WORKFLOW ?? '').trim().toLowerCase()
+  if (raw === '0' || raw === 'off' || raw === 'false') return false
+  return true
+}
+
 /** B3 守卫1 阈值：连续 N 轮无 write/edit 判只读失速（审计案实测 20 连续只读，6 轮早介入）。 */
 const PROGRESS_READ_ONLY_TURNS = 6
 /** B3 验证类工具集（守卫3：全程零命中且进入后 1/3 轮次→提醒自测）。 */
@@ -936,6 +945,11 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
   let verificationSeen = false
   let planNudgeDone = false
   let verifyNudgeDone = false
+  // W5（Phase 8.5，2026-09-12）：任务清单工作流状态（BLOMA_TASK_WORKFLOW off=零注入）
+  const fileWriteCounts = new Map<string, number>()
+  let checklistProjectedFiles = 0
+  let lastProjectionTurn = -2
+  let earlyVerifyNudged = false
 
   for (let turn = 1; turn <= input.maxTurns; turn += 1) {
     if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls, 'turn_start', input.signal))
@@ -1056,7 +1070,12 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     readOnlyStreak = wroteThisTurn ? 0 : readOnlyStreak + 1
     if (wroteThisTurn) {
       for (const call of turnCalls) {
-        if ((call.name === 'write_file' || call.name === 'edit_file') && call.path) writtenFiles.add(normalizeProgressPath(call.path))
+        if ((call.name === 'write_file' || call.name === 'edit_file') && call.path) {
+          const normalized = normalizeProgressPath(call.path)
+          writtenFiles.add(normalized)
+          // W5：只计全量重写（write_file），edit_file 是正确姿势不计数
+          if (call.name === 'write_file') fileWriteCounts.set(normalized, (fileWriteCounts.get(normalized) ?? 0) + 1)
+        }
       }
     }
     if (turnCalls.some((call) => PROGRESS_VERIFICATION_TOOLS.has(call.name))) verificationSeen = true
@@ -1166,6 +1185,47 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         const nudgeText = `【进度对账（宿主注入）】\n${nudges.join('\n')}`
         appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: nudgeText }])
         messages.push({ role: 'user', content: [{ type: 'text', text: nudgeText }] })
+      }
+    }
+
+    // ---- W5（Phase 8.5，2026-09-12 狗粮 dd6ba98d）：任务清单工作流批间注入 ----
+    // 与 B3 同点位同模式；开关独立（BLOMA_TASK_WORKFLOW 缺省 on）。只挂主 loop
+    // （修复/迭代轮任务窄）；wrapUp 后不打扰；无 planFiles 时不启用（清单不存在）。
+    if (isMainLoop && !wrapUp && taskWorkflowEnabled() && input.planFiles && input.planFiles.length > 0) {
+      const w5Nudges: string[] = []
+      // 守卫4 重复写：本轮出现同文件第二次及以上的全量 write_file → 改用 edit_file
+      //（对症当晚「state/loop/input/collision 等 6 文件完整重写第二遍」病灶）
+      const rewrittenThisTurn = [
+        ...new Set(
+          turnCalls
+            .filter((call) => call.name === 'write_file' && call.path && (fileWriteCounts.get(normalizeProgressPath(call.path)) ?? 0) >= 2)
+            .map((call) => normalizeProgressPath(call.path!)),
+        ),
+      ]
+      if (rewrittenThisTurn.length > 0) {
+        w5Nudges.push(
+          `${rewrittenThisTurn.join('、')} 本轮已完整写过；若确需微调请用 edit_file 改差异段，不要整文件重写（已完成清单项勿重做）。`,
+        )
+      }
+      // 进度投影：新文件完成且距上次投影 ≥2 轮（防刷屏）——把「清单 N/M + 勿重写」
+      // 的工作感持续送达，防写后丢任务感陷入全量重读
+      const doneInPlan = input.planFiles.filter((path) => writtenFiles.has(normalizeProgressPath(path)))
+      if (writtenFiles.size > checklistProjectedFiles && turn - lastProjectionTurn >= 2) {
+        checklistProjectedFiles = writtenFiles.size
+        lastProjectionTurn = turn
+        w5Nudges.push(
+          `【清单进度】实施清单文件已完成 ${doneInPlan.length}/${input.planFiles.length}；已完成文件勿重写（微调用 edit_file），按清单继续下一项，读过的内容不要重读。`,
+        )
+      }
+      // 早验证（B3 守卫3 的前移分支）：写完 ≥3 个文件仍零验证且已过 1/3 轮次
+      if (!earlyVerifyNudged && !verificationSeen && writtenFiles.size >= 3 && turn >= Math.ceil(input.maxTurns / 3)) {
+        earlyVerifyNudged = true
+        w5Nudges.push('已写入 3 个以上文件但尚未运行任何自测：现在就 run_preview 拉起预览（或跑一次 run_gwt_tests），尽早暴露问题，不要把验证全部留到收尾。')
+      }
+      if (w5Nudges.length > 0) {
+        const w5Text = `【任务清单工作流（宿主注入）】\n${w5Nudges.join('\n')}`
+        appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: w5Text }])
+        messages.push({ role: 'user', content: [{ type: 'text', text: w5Text }] })
       }
     }
 

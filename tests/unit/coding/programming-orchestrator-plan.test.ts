@@ -82,6 +82,7 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
   const originalLoopLog = process.env.BLOMA_LOOP_LOG
   const originalFocusAnchor = process.env.BLOMA_FOCUS_ANCHOR
   const originalModules = process.env.BLOMA_MODULES
+  const originalTaskWorkflow = process.env.BLOMA_TASK_WORKFLOW
   let home = ''
   let channelId = ''
 
@@ -91,6 +92,9 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
     delete process.env.BLOMA_PLAN_LEG
     delete process.env.BLOMA_LOOP_LOG
     delete process.env.BLOMA_FOCUS_ANCHOR
+    // W5（Phase 8.5）：本文件锁 plan 注入组合的原口径——钉 W5 关（checklist 追加
+    // 属新行为，正向覆盖见 task-workflow.test.ts）
+    process.env.BLOMA_TASK_WORKFLOW = '0'
     // 官方模块库是新增增强：P3 plan 腿「字节级现状」回归锁关闭模块库，保持现状语义
     //（独立开关 BLOMA_MODULES 关闭=现状；模块库正向接线见 module-library 测试）
     process.env.BLOMA_MODULES = '0'
@@ -128,6 +132,8 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
     else process.env.BLOMA_FOCUS_ANCHOR = originalFocusAnchor
     if (originalModules === undefined) delete process.env.BLOMA_MODULES
     else process.env.BLOMA_MODULES = originalModules
+    if (originalTaskWorkflow === undefined) delete process.env.BLOMA_TASK_WORKFLOW
+    else process.env.BLOMA_TASK_WORKFLOW = originalTaskWorkflow
     setProgrammingEventPublisher(() => undefined)
     clearSandboxRuntimeForTests()
   })

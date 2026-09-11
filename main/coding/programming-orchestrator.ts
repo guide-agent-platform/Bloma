@@ -17,7 +17,7 @@ import { runVisionAuditGate } from './vision-audit-gate'
 import { buildRepairTasks, resolveRepairBudget, runRepairLoop, repairScopeEnabled, repairNoopGuardEnabled, hasWriteEditToolCall, type RepairCheckpointContext, type RepairTask } from './repair-loop'
 import { buildIterationTask, ITERATION_MODE_SECTION, iterationBriefEnabled, resolveAgentLoopMaxTurnsLocal } from './iteration-brief'
 import { recordFailureCards } from '../experience/error-card'
-import { generateLoopPlan, planLegEnabled, renderPlanInjection, renderPlanMarkdown, type LoopPlan } from './loop-planner'
+import { generateLoopPlan, planLegEnabled, renderPlanInjection, renderPlanMarkdown, renderTaskChecklist, type LoopPlan } from './loop-planner'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../project-service'
 import { appendProjectMapToSystem, loadProjectMapBlock } from '../project-map'
 import { resolveChannelEnv } from '../runtime-fallback'
@@ -43,7 +43,7 @@ import { assertToolAllowed } from '../permission-service'
 import { recordDecision } from '../decision-log'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from '../recovery-service'
 import { readPrimaryIntent, recordSessionActivity } from '../session-service'
-import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, preflightEnabled, narrationEventsEnabled, loopProgressNudgeEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../agent-loop'
+import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, preflightEnabled, narrationEventsEnabled, loopProgressNudgeEnabled, taskWorkflowEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../agent-loop'
 import { deliveryStatusEnabled, recordDeliveryStatus, buildDeliveryPresentation, renderCircuitFailureNote, renderDeliveryBody, featureIdFromScenario } from './delivery-status'
 import { isDegenerateText } from './output-integrity'
 import { checkApiContract } from './api-contract'
@@ -1248,7 +1248,12 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     // Phase 8 W1：【修改模式】段（语义对齐 repair-loop REPAIR_MODE_SECTION：任务书即
     // 全部工作，不要重新生成整个项目）；非 localOnly / 开关关 = 零注入字节级现状。
     const iterationModeBlock = briefActive ? `\n\n${ITERATION_MODE_SECTION}` : ''
-    return planInjection ? `${base}${roundAnchorBlock}${iterationModeBlock}\n\n${planInjection}` : `${base}${roundAnchorBlock}${iterationModeBlock}`
+    // W5-1（Phase 8.5）：实施清单（checklist 化 plan）——生成路径且开关开时注入，
+    // 提供逐项推进工作结构；局部修改轮不叠加（聚焦任务书已含工作法）
+    const checklistBlock = !briefActive && taskWorkflowEnabled() && loopPlan ? `\n\n${renderTaskChecklist(loopPlan)}` : ''
+    return planInjection
+      ? `${base}${roundAnchorBlock}${iterationModeBlock}\n\n${planInjection}${checklistBlock}`
+      : `${base}${roundAnchorBlock}${iterationModeBlock}${checklistBlock}`
   }
   // 委派协作（嫁接方案 §4.1）：注册父 loop 上下文供 delegate_agent 构建子循环；子工具集按 role 裁剪
   setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
@@ -1351,7 +1356,11 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     result = await runAgentLoop({
     system: buildSystemWithPlan(editFormat),
     // Phase 8 W1：局部修改轮用聚焦任务书（用户诉求原话即任务主体）；其余路径字节级=现状
-    task: iterationBriefActive(input) && input.prompt ? buildIterationTask(input.prompt) : buildAgentLoopTask(backplane, input.mode),
+    // Phase 8 W1 / W5-4：局部修改轮用聚焦任务书；生成路径任务书在 W5 开时升级为
+    // 「逐项推进工作法」（对齐正常 agent 工作流）；其余路径字节级=现状全量任务书
+    task: iterationBriefActive(input) && input.prompt
+      ? buildIterationTask(input.prompt)
+      : buildAgentLoopTask(backplane, input.mode, input),
     // B3（P0-B，2026-09-11）：技术合同清单透传进度对账守卫（BLOMA_LOOP_PROGRESS_NUDGE
     // off 时不读不注入字节级现状；无 plan 自然无守卫2，守卫1/3 照常）
     ...(loopProgressNudgeEnabled() && loopPlan ? { planFiles: loopPlan.filesToTouch.map((file) => file.path) } : {}),
@@ -1844,7 +1853,18 @@ function buildLoopSystemWithOverride(backplane: PrdBackplane, editFormat: 'diff'
 }
 
 /** 初始 user 消息：任务指令（背板细节在 system，这里只给行动指令）。 */
-function buildAgentLoopTask(backplane: PrdBackplane, mode: ProjectMode): string {
+function buildAgentLoopTask(backplane: PrdBackplane, mode: ProjectMode, input?: MvpTaskInput): string {
+  // W5-4（Phase 8.5，2026-09-12 狗粮 dd6ba98d）：任务清单工作法升级——逐项推进/
+  // 定位后读/即验证/不重写（对齐正常 agent 工作流）；开关关或缺省关=字节级现状全量任务书
+  if (input && taskWorkflowEnabled()) {
+    return [
+      `目标：实现「${backplane.name}」的可运行 MVP（${mode === 'quick' ? '快速模式' : '长期模式'}）。`,
+      '按系统提示里的实施清单逐项推进：每项先定位（grep / 地图锚点 → read 只读命中段），再实现，',
+      '有验证手段时立即验证（run_preview 可随时拉起）；完成一项勾选进入下一项。',
+      '禁止先全读再全写；已完成项不重读、不重写，微调用 edit_file。',
+      '收尾：run_gwt_tests 全部 P0 断言通过 + run_security_scan 无高危后输出完成总结（说明各项完成情况）。',
+    ].join('\n')
+  }
   return [
     `目标：实现「${backplane.name}」的可运行 MVP（${mode === 'quick' ? '快速模式' : '长期模式'}）。`,
     '按系统提示里的项目锚逐功能项实现，用工具自测（run_preview + run_gwt_tests + run_security_scan），' +
