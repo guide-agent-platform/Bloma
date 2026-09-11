@@ -109,7 +109,7 @@ describe('ux-chip-walkthrough r93：ChatPanel 四状态 DOM 走查（0 基础用
 
   it('[W5b·流态] hasActiveStream：停止按钮出现、发送消失（替换语义仅在流态成立）', () => {
     store.set(activeAgentSessionIdAtom, 'walk-s1')
-    store.set(agentStreamStateFamily('walk-s1'), { running: true, events: [], content: '', thinking: '' })
+    store.set(agentStreamStateFamily('walk-s1'), { running: true, events: [], content: '' })
     render(
       <Provider store={store}>
         <ChatPanel onSendMessage={vi.fn()} />

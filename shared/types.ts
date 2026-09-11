@@ -564,11 +564,8 @@ export interface CategoryRoutingUpdateEnvelope extends RequestEnvelope {
 // =========================================================================
 
 export interface MessageContentBlock {
-  type: 'text' | 'tool_use' | 'tool_result' | 'image' | 'thinking'
+  type: 'text' | 'tool_use' | 'tool_result' | 'image'
   text?: string
-  /** thinking 块专用：思考/过程文本（对齐 Proma SDKThinkingBlock）。思考内容默认折叠展示，
-   *  不进交付链；落盘 JSONL 保留原文供展开查看（对齐「落盘保留证据、显示层折叠」先例） */
-  thinking?: string
   id?: string
   name?: string
   input?: Record<string, unknown>
@@ -607,10 +604,6 @@ export interface AgentMessage {
   role: 'user' | 'assistant' | 'system'
   content: MessageContentBlock[]
   timestamp: number
-  /** assistant 消息专用：本条是**过程记录**（旁白/思考/阶段状态），渲染层以收起态呈现且可展开/收起
-   * （渲染层标记，不落盘）。由流水线运行（含工具调用/思考/生成测试等阶段）的终态 flush，
-   * 或交付到达时的过程沉淀置位；纯对话回复（就绪确认/追问）不置位。 */
-  process_record?: boolean
 }
 
 export interface SDKMessage {
@@ -959,12 +952,6 @@ export interface AgentEvent {
     | 'steer_status'
     /** 会话用量汇总（usage-guard 渲染层 2026-08-28）：loop 结束发布，渲染端显示透明条 */
     | 'usage_summary'
-    /** 思考过程增量（2026-09-11 交付话术改造）：loop 模型思考通道/<think> 拆块后的思考文本，
-     *  渲染端单独累积为思考块，默认折叠不与旁白正文混排。payload.text */
-    | 'thinking_delta'
-    /** 最终交付文本（2026-09-11）：向导渠道把结构化事实改写为面向用户的通俗交付交代，
-     *  MVP 就绪时发布；payload.text（交付文本）/ fallback（是否走了 READY_COMPLETION_COPY 兑底） */
-    | 'delivery_message'
   payload: Record<string, unknown>
   created_at: string
 }

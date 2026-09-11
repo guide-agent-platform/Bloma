@@ -1477,12 +1477,6 @@ export async function* anthropicMessagesQuery(prompt: string, options: SDKQueryO
   // 请求体里的 image 块都在此统一转 base64（最近 4 图全量，更早降级；JSONL/内存全程短引用）
   const messages = hydrateMessagesImageBlocks(
     options.messages ? nonSystemTurns : [...nonSystemTurns, promptTurn],
-  ).map((turn) =>
-    // 思考块不回传渠道（2026-09-11）：thinking 块只进 UI/JSONL，会话恢复/重放时
-    // 混入请求体会被部分渠道 400——请求组装处统一过滤（防御性单点）
-    Array.isArray(turn.content)
-      ? { ...turn, content: turn.content.filter((block) => block.type !== 'thinking') }
-      : turn,
   )
 
   // 开发插件：BLOMA_SHOW_THINKING=1 时启用 extended thinking 并把思考打印到终端。
@@ -1656,20 +1650,14 @@ export async function* anthropicMessagesQuery(prompt: string, options: SDKQueryO
           else if (parsed.delta?.type === 'thinking_delta') thinkingDeltaCount += 1
           else otherDeltaCount += 1
         }
-        // 思考过程增量（2026-09-11 交付话术改造）：此前静默吞掉，现在透传为 thinking 块——
-        // agent-loop 侧走 thinking_delta 事件单独上屏（渲染端默认折叠，不与旁白混排）；
-        // 文本-only 消费方（collect/guide/judge）本就只取 text 块，零感知。
-        // BLOMA_SHOW_THINKING=1 时照旧打印主进程终端（dev 调试通道保留）。
+        // 思考过程增量：仅打印到主进程终端（BLOMA_SHOW_THINKING 时），不进 SDKMessage / 事件 / UI / JSONL
         if (
+          showThinking &&
           parsed.type === 'content_block_delta' &&
           parsed.delta?.type === 'thinking_delta' &&
           typeof parsed.delta.thinking === 'string'
         ) {
-          if (showThinking) logThinking(options.sessionId, parsed.delta.thinking)
-          yield {
-            type: 'assistant',
-            message: { role: 'assistant', content: [{ type: 'thinking', thinking: parsed.delta.thinking }] },
-          }
+          logThinking(options.sessionId, parsed.delta.thinking)
           continue
         }
         if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta' && typeof parsed.delta.text === 'string') {

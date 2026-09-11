@@ -59,7 +59,7 @@ describe('MvpStatusBanner 导出项目按钮（PR-3）', () => {
     store.set(agentStreamStateFamily('session-exp'), {
       running: false,
       events: [mvpReadyEvent()],
-      content: '', thinking: '',
+      content: '',
     } as never)
   })
 
@@ -129,7 +129,7 @@ describe('MvpStatusBanner 导出项目按钮（PR-3）', () => {
     store.set(agentStreamStateFamily('session-exp'), {
       running: false,
       events: [],
-      content: '', thinking: '',
+      content: '',
     } as never)
     renderBanner()
     // 无 mvp_ready 事件且阶段非就绪 → 横幅走 generating 变体或不可见，均不应出现导出按钮

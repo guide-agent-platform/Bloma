@@ -47,7 +47,7 @@ describe('决策卡片消费标记（选了选项就立即隐藏卡片）', () =
     store.set(activeAgentSessionIdAtom, 'session-1')
     store.set(agentStreamStateFamily('session-1'), {
       running: false,
-      content: '', thinking: '',
+      content: '',
       events: [
         event('user_decision_required', {
           kind: 'prd_review',
@@ -81,7 +81,7 @@ describe('决策卡片消费标记（选了选项就立即隐藏卡片）', () =
     store.set(activeAgentSessionIdAtom, 'session-1')
     store.set(agentStreamStateFamily('session-1'), {
       running: false,
-      content: '', thinking: '',
+      content: '',
       events: [
         event('user_decision_required', {
           kind: 'clarification',
@@ -102,7 +102,7 @@ describe('决策卡片消费标记（选了选项就立即隐藏卡片）', () =
     store.set(activeAgentSessionIdAtom, 'session-1')
     store.set(agentStreamStateFamily('session-1'), {
       running: false,
-      content: '', thinking: '',
+      content: '',
       events: [
         event('user_decision_required', {
           questions: [{ id: 'daily', label: '生活工具', description: '记账提醒' }],
@@ -133,7 +133,7 @@ describe('决策卡片消费标记（选了选项就立即隐藏卡片）', () =
     store.set(activeAgentSessionIdAtom, 'session-1')
     store.set(agentStreamStateFamily('session-1'), {
       running: false,
-      content: '', thinking: '',
+      content: '',
       events: [event('user_decision_required', { questions: [{ id: 'a', label: 'A' }] })],
     })
     // 注入测试 store

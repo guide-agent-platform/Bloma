@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { collapseRepetitiveText, hasToolMarkupText } from '../../renderer/stream-collapse'
+import { collapseRepetitiveText } from '../../renderer/stream-collapse'
 
 /**
  * 退行性重复折叠（2026-09-04「查。」墙案）：显示层防刷屏——落盘保留原始证据，
@@ -64,21 +64,5 @@ describe('collapseRepetitiveText — 退行重复折叠', () => {
   it('系统决策行形态不受影响（无 ≥8 连续重复单元）', () => {
     const decision = '[decision] {"type":"agent_loop","title":"Agent Loop 结束（cancelled）","why":"24 轮、29 次工具调用"}'
     expect(collapseRepetitiveText(decision)).toBe(decision)
-  })
-})
-
-describe('hasToolMarkupText — 工具协议残片检测（2026-09-11 真机案例）', () => {
-  it('用户实测 DSML 样本命中', () => {
-    expect(
-      hasToolMarkupText(
-        'name="read_file"> <｜｜DSML｜｜ parameter name="limit" string="false">30</｜｜DSML｜｜ parameter> </｜｜DSML｜｜ calls>',
-      ),
-    ).toBe(true)
-  })
-  it('XML 风格工具标签命中', () => {
-    expect(hasToolMarkupText('<invoke name="grep"><parameter name="pattern">todo</parameter></invoke>')).toBe(true)
-  })
-  it('正常旁白不误伤', () => {
-    expect(hasToolMarkupText('这个单位换算器现在可以随手完成日常换算，打开右侧预览就能用。')).toBe(false)
   })
 })

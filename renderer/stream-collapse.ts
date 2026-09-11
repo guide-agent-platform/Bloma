@@ -64,21 +64,3 @@ export function collapseRepetitiveText(text: string): string {
   }
   return out.join('')
 }
-
-/* =========================================================================
-   工具调用协议残片检测（2026-09-11 真机案例：DSML 原文漏进正文+历史回放）
-   =========================================================================
-   背景：DeepSeek 系渠道在传输事故时把工具调用协议原文（DSML 标记）以文本形态
-   漏进 assistant 正文（d066eb92 同源）。协议原文经 React-Markdown 会被当作原生
-   HTML 剥除——正文渲染成空（真机表现「气泡只剩一条虚线、展开无内容」）。
-   处理口径（对齐用户拍板）：含协议残片的文本**不删除、不隐藏**，由渲染层路由到
-   过程记录卡片（可折叠/展开），展开后以纯文本原样呈现。本模块只负责检测。
- */
-
-/** 是否含工具调用协议特征（与 main/coding/output-integrity.ts TOOL_MARKUP_PATTERNS 同源口径） */
-const HAS_TOOL_MARKUP = /<｜｜DSML｜｜|<\/?tool_calls?[^a-z]|<\/?invoke\b|<\/?parameter\b/i
-
-/** 检测正文是否混入工具调用协议原文（显示层路由判据：命中 → 过程记录卡片原样呈现）。 */
-export function hasToolMarkupText(text: string): boolean {
-  return !!text && HAS_TOOL_MARKUP.test(text)
-}

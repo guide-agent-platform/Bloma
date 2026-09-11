@@ -23,7 +23,7 @@ import {
   steerStatusFamily,
 } from './atoms'
 import type { AgentEvent, AgentMessage, AgentStreamState, PastedImageRef, ProjectMode, SteerStatusChip } from './atoms'
-import { collapseRepetitiveText, hasToolMarkupText } from '../stream-collapse'
+import { collapseRepetitiveText } from '../stream-collapse'
 import { hasUsableChannelsAtom, chatInputDraftAtom, chatInputFocusSignalAtom, chatInputHintAtom } from './atoms-sprint2'
 import { extractPastedImages, extFromMime, toBase64DataUrl } from '../lib/paste-extract'
 
@@ -63,7 +63,6 @@ const nullStreamFallback = atom<AgentStreamState>({
   running: false,
   events: [],
   content: '',
-  thinking: '',
 })
 const nullDelegationsFallback = atom<DelegationView[]>([])
 
@@ -158,11 +157,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     if (chatFocusSignal > 0) inputRef.current?.focus()
   }, [chatFocusSignal])
 
-  // 过程文本不依赖 running 门控（2026-09-11）：只要本会话有累积内容/思考就展示过程记录卡片——
-  // 否则「running 已复位但终态消息尚未落列」的窗口会整卡消失（真机反馈「生成中没收到卡片」）
-  const streamingContent = streamState ? streamState.content : ''
-  // 思考分离（2026-09-11）：流式思考文本单独渲染为折叠块，不与旁白正文混排
-  const streamingThinking = streamState ? streamState.thinking : ''
+  const streamingContent = hasActiveStream && streamState ? streamState.content : ''
 
   // 历史回放关联表：tool_use_id → 工具名（loop 落盘的 user 轮 tool_result 只有 id，回放时回填名字）
   const toolNamesById = React.useMemo(() => {
@@ -177,7 +172,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   React.useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, streamingContent, streamingThinking, cardOptions])
+  }, [messages, streamingContent, cardOptions])
 
   // 本地流计时兜底：App 未传 waitStartTime 时以流启动时刻起算，保证 WaitingFeedback
   // 三级递进在纯流式等待下也生效（此前挂在恒 false 的 isWaiting 上，组件从未显示过）。
@@ -355,7 +350,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         ) : (
           <>
             {/* 空状态 */}
-            {messages.length === 0 && !streamingContent && !streamingThinking && !isWaiting && (
+            {messages.length === 0 && !streamingContent && !isWaiting && (
               <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: 'var(--space-6)' }}>
                 <div>
                   <span
@@ -435,10 +430,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               <LiveProcessGroup events={streamState.events} sessionId={activeSessionId} isStreaming={hasActiveStream} />
             )}
 
-            {/* 生成中的旁白/思考也收进过程记录卡片（默认收起，只留一行「生成中…」）
-              ——现场不展示专业性过程文本，可手动展开查看 */}
-            {(streamingContent || streamingThinking) && (
-              <LiveProcessRecord text={streamingContent} thinkingText={streamingThinking} />
+            {streamingContent && (
+              <MessageBubble
+                message={{ role: 'assistant', content: [{ type: 'text', text: streamingContent }], timestamp: Date.now() }}
+                mode={mode}
+                isStreaming
+              />
             )}
 
             {busy && elapsed > 5 && (
@@ -1024,182 +1021,6 @@ const SteerStatusBar: React.FC<SteerStatusBarProps> = ({ sessionId, onStopGenera
    MessageBubble
    ========================================================================= */
 
-/* =========================================================================
-   ThinkingBlock — 思考过程折叠块（2026-09-11 交付话术改造）
-   Proma ContentBlock ThinkingBlock 口径：默认折叠、虚线边框、「思考过程」标签；
-   流式中显示脉冲点；展开/收起可往复。与回复气泡视觉区分（虚线 + 淡底 + 小字号）。
-   ========================================================================= */
-const ThinkingBlock: React.FC<{ text: string; streaming?: boolean }> = ({ text, streaming = false }) => {
-  const [expanded, setExpanded] = React.useState(false)
-  if (!text.trim()) return null
-  return (
-    <div
-      data-ai-id="thinking-block"
-      style={{
-        width: '100%',
-        margin: '0 0 var(--space-2)',
-        border: '1px dashed var(--color-border)',
-        borderRadius: 'var(--radius-sm)',
-        background: 'var(--glass-bg-soft)',
-        overflow: 'hidden',
-      }}
-    >
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-        title={expanded ? '收起思考过程' : '展开思考过程'}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          width: '100%',
-          padding: '4px 10px',
-          background: 'transparent',
-          border: 'none',
-          cursor: 'pointer',
-          fontSize: 'var(--font-size-xs)',
-          color: 'var(--color-text-muted)',
-          textAlign: 'left',
-        }}
-      >
-        <span>{expanded ? '▾' : '▸'}</span>
-        <span>思考过程{streaming ? '…' : ''}</span>
-        {streaming && (
-          <span
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              background: 'var(--color-quick, #7c3aed)',
-              animation: 'pulse 1.2s ease-in-out infinite',
-            }}
-          />
-        )}
-        {!streaming && !expanded && <span style={{ opacity: 0.7 }}>已收起</span>}
-      </button>
-      {expanded && (
-        <div
-          style={{
-            maxHeight: 220,
-            overflowY: 'auto',
-            padding: '2px 10px 8px',
-            fontSize: 'var(--font-size-xs)',
-            lineHeight: 1.6,
-            color: 'var(--color-text-muted)',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-          }}
-        >
-          {collapseRepetitiveText(text)}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/* =========================================================================
-   ProcessRecordBubble — 过程记录卡片（2026-09-11）
-   流水线 run 沉淀的旁白/思考（如「需求已确认，正在内审这份 PRD」）折叠于此，
-   与回复气泡视觉区分：虚线边框 + 淡底 + 小字号；展开/收起可往复。
-   ========================================================================= */
-const ProcessRecordBubble: React.FC<{
-  thinkingText: string
-  text: string
-  expanded: boolean
-  onToggle: () => void
-  /** 生成中：头部显示脉冲点 + 「生成中…」（内容随流式更新，仍可展开） */
-  streaming?: boolean
-}> = ({ thinkingText, text, expanded, onToggle, streaming = false }) => (
-  <div
-    data-ai-id="process-record"
-    style={{
-      alignSelf: 'flex-start',
-      maxWidth: '84%',
-      border: '1px dashed var(--color-border)',
-      borderRadius: 'var(--radius-md)',
-      background: 'var(--glass-bg-soft)',
-      overflow: 'hidden',
-      animation: 'tile-enter 0.3s ease both',
-    }}
-  >
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-expanded={expanded}
-      title={expanded ? '收起过程记录' : '展开过程记录'}      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        width: '100%',
-        padding: '6px var(--space-4)',
-        background: 'transparent',
-        border: 'none',
-        cursor: 'pointer',
-        fontSize: 'var(--font-size-xs)',
-        color: 'var(--color-text-muted)',
-        textAlign: 'left',
-      }}
-    >
-      <span>{expanded ? '▾' : '▸'}</span>
-      <span style={{ fontWeight: 600, letterSpacing: '0.02em' }}>过程记录</span>
-      {streaming && (
-        <span
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: '50%',
-            background: 'var(--color-quick, #7c3aed)',
-            animation: 'pulse 1.2s ease-in-out infinite',
-          }}
-        />
-      )}
-      <span style={{ marginLeft: 'auto', opacity: 0.7 }}>{streaming ? '生成中…' : expanded ? '点击收起' : '点击展开'}</span>
-    </button>
-    {expanded && (
-      <div style={{ padding: '0 var(--space-4) var(--space-3)', borderTop: '1px dashed var(--color-border)' }}>
-        {thinkingText && (
-          <div style={{ marginTop: 'var(--space-2)' }}>
-            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', opacity: 0.85, marginBottom: 4 }}>
-              思考过程
-            </div>
-            <div
-              style={{
-                fontSize: 'var(--font-size-xs)',
-                lineHeight: 1.6,
-                color: 'var(--color-text-muted)',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-              }}
-            >
-              {collapseRepetitiveText(thinkingText)}
-            </div>
-          </div>
-        )}
-        {text && (
-          <div style={{ marginTop: 'var(--space-2)', fontSize: 'var(--font-size-xs)', lineHeight: 1.6, color: 'var(--color-text-muted)' }}>
-            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{collapseRepetitiveText(text)}</div>
-          </div>
-        )}
-      </div>
-    )}
-  </div>
-)
-
-/** 生成中的过程记录（自持展开态）：内容随流式更新，默认收起，可随时展开查看。 */
-const LiveProcessRecord: React.FC<{ text: string; thinkingText: string }> = ({ text, thinkingText }) => {
-  const [expanded, setExpanded] = React.useState(false)
-  return (
-    <ProcessRecordBubble
-      thinkingText={thinkingText}
-      text={text}
-      expanded={expanded}
-      onToggle={() => setExpanded((v) => !v)}
-      streaming
-    />
-  )
-}
-
 interface MessageBubbleProps {
   message: AgentMessage
   mode: ProjectMode | null
@@ -1225,9 +1046,6 @@ const userBubbleShadow = (mode: ProjectMode | null): string =>
 const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreaming = false, toolNamesById, onOpenSettings, onForkFromMessage }) => {
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
-  // 过程记录（2026-09-11）：流水线 run 沉淀的旁白/思考，或交付时的过程沉淀。
-  // 渲染为可往复折叠的「过程记录」卡片（与回复气泡视觉区分）；展开后仍可收起。
-  const [recordExpanded, setRecordExpanded] = React.useState(false)
 
   const rawText = message.content
     .filter((block) => block.type === 'text')
@@ -1235,38 +1053,14 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
     .join('')
   // 退行重复折叠（2026-09-04「查。」墙案）：显示层折叠，落盘/回放数据保留原始；
   // system 前缀行（[decision]/[queue-dropped] 等按前缀分流）不折叠
-  // 显示层清洗（2026-09-11）：DSML 等工具协议残片先进折叠（防 React-Markdown 剥 HTML 后渲染成空），再退行折叠
   const text = isSystem ? rawText : collapseRepetitiveText(rawText)
-
-  // 思考分离（2026-09-11）：thinking 块单独折叠展示，不与旁白正文混排
-  const thinkingText = message.content
-    .filter((block) => block.type === 'thinking')
-    .map((block) => (typeof block.thinking === 'string' ? block.thinking : ''))
-    .filter(Boolean)
-    .join('\n\n')
-  // 过程记录路由（2026-09-11）：流水线 run 沉淀带标记；正文混入工具协议残片（DSML
-  // 传输事故）的消息同样按过程记录呈现——展开后以纯文本原样可见，不经 Markdown 剥除
-  const isProcessRecord =
-    !isUser && !isSystem && (message.process_record === true || hasToolMarkupText(rawText))
 
   // Agent Loop 落盘的轮次：assistant 轮带 tool_use、user 轮只带 tool_result（无文本）
   const hasToolBlocks = message.content.some((block) => block.type === 'tool_use' || block.type === 'tool_result')
   // clipboard-paste P1（2026-08-29）：粘贴图片块——气泡内 chip 标注（缩略图回放 P2）
   const imageBlocks = message.content.filter((block) => block.type === 'image')
 
-  if (!text && !hasToolBlocks && imageBlocks.length === 0 && !thinkingText && !isStreaming) return null
-
-  // 过程记录卡片（与回复气泡视觉区分：虚线边框 + 淡底 + 小字号；展开/收起可往复）
-  if (isProcessRecord) {
-    return (
-      <ProcessRecordBubble
-        thinkingText={thinkingText}
-        text={text}
-        expanded={recordExpanded}
-        onToggle={() => setRecordExpanded((v) => !v)}
-      />
-    )
-  }
+  if (!text && !hasToolBlocks && imageBlocks.length === 0 && !isStreaming) return null
 
   // 含工具块的消息（assistant 的 tool_use / user 的 tool_result + 旁白）：
   // 折叠进「执行过程」组，不占正文气泡（陷阱 26 家族：不污染纯文本流）
@@ -1423,8 +1217,6 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
           wordBreak: 'break-word',
         }}
       >
-        {/* 思考过程折叠块（2026-09-11）：不与旁白正文混排，默认收起 */}
-        {!isUser && thinkingText && <ThinkingBlock text={thinkingText} streaming={isStreaming} />}
         {/* assistant 旁白/完成总结渲染 Markdown（模型输出天然带 md）；user 输入保持纯文本语义 */}
         {isUser || !text ? text || (isStreaming ? '…' : '') : <Markdown text={text} />}
         {imageBlocks.length > 0 && (

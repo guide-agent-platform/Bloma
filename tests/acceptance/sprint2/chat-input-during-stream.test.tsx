@@ -35,7 +35,7 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
     const store = createStore()
     store.set(activeAgentSessionIdAtom, 'session-1')
     store.set(workflowStageAtom, 'generating_sketch')
-    store.set(agentStreamStateFamily('session-1'), { running: true, events: [], content: '', thinking: '' })
+    store.set(agentStreamStateFamily('session-1'), { running: true, events: [], content: '' })
     window.__jotai_store__ = store
 
     const onSend = vi.fn()
@@ -72,7 +72,7 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
 
     const store = createStore()
     store.set(activeAgentSessionIdAtom, 'session-1')
-    store.set(agentStreamStateFamily('session-1'), { running: false, events: [], content: '', thinking: '' })
+    store.set(agentStreamStateFamily('session-1'), { running: false, events: [], content: '' })
     window.__jotai_store__ = store
 
     const onSendMessage = vi.fn()
@@ -101,7 +101,7 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
     const store = createStore()
     store.set(activeAgentSessionIdAtom, 'session-1')
     store.set(workflowStageAtom, 'generating_sketch')
-    store.set(agentStreamStateFamily('session-1'), { running: true, events: [], content: '', thinking: '' })
+    store.set(agentStreamStateFamily('session-1'), { running: true, events: [], content: '' })
     window.__jotai_store__ = store
 
     const onSend = vi.fn()
@@ -128,7 +128,7 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
 
     const store = createStore()
     store.set(activeAgentSessionIdAtom, 'session-1')
-    store.set(agentStreamStateFamily('session-1'), { running: true, events: [], content: '', thinking: '' })
+    store.set(agentStreamStateFamily('session-1'), { running: true, events: [], content: '' })
     window.__jotai_store__ = store
 
     const onSend = vi.fn()
@@ -145,7 +145,7 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
 
     // 后端队列派发：run 结束 + 用户消息进流（agentMessagesFamily）→ 气泡出列
     act(() => {
-      store.set(agentStreamStateFamily('session-1'), { running: false, events: [], content: '', thinking: '' })
+      store.set(agentStreamStateFamily('session-1'), { running: false, events: [], content: '' })
       store.set(agentMessagesFamily('session-1'), [
         {
           role: 'user',
@@ -170,7 +170,7 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
 
     const store = createStore()
     store.set(activeAgentSessionIdAtom, 'session-1')
-    store.set(agentStreamStateFamily('session-1'), { running: true, events: [], content: '', thinking: '' })
+    store.set(agentStreamStateFamily('session-1'), { running: true, events: [], content: '' })
     window.__jotai_store__ = store
 
     const onSend = vi.fn()
@@ -187,7 +187,7 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
 
     // run A 结束（busy→false）但消息尚未派发进流（异步间隙）——气泡必须保留
     act(() => {
-      store.set(agentStreamStateFamily('session-1'), { running: false, events: [], content: '', thinking: '' })
+      store.set(agentStreamStateFamily('session-1'), { running: false, events: [], content: '' })
     })
     rerender(
       <Provider store={store}>
@@ -208,7 +208,7 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
     const store = createStore()
     store.set(activeAgentSessionIdAtom, 'session-1')
     store.set(workflowStageAtom, 'generating_mvp')
-    store.set(agentStreamStateFamily('session-1'), { running: true, events: [], content: '', thinking: '' })
+    store.set(agentStreamStateFamily('session-1'), { running: true, events: [], content: '' })
     window.__jotai_store__ = store
 
     const onSend = vi.fn()
@@ -245,7 +245,7 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
     const store = createStore()
     store.set(activeAgentSessionIdAtom, 'session-1')
     store.set(workflowStageAtom, 'generating_mvp')
-    store.set(agentStreamStateFamily('session-1'), { running: true, events: [], content: '', thinking: '' })
+    store.set(agentStreamStateFamily('session-1'), { running: true, events: [], content: '' })
     window.__jotai_store__ = store
 
     const onSend = vi.fn()
