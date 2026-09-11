@@ -195,3 +195,58 @@ describe('W5 批间注入（进度投影 / 守卫4 重复写 / 早验证）', ()
     expect(allUsers).not.toContain('清单进度')
   })
 })
+
+describe('W5+（狗粮 52f19ab4 增强）：清单完成后零验证的重复强提醒 + grace 退化补口', () => {
+  const originalHome = process.env.PROMA_HOME
+  const PLAN_FILES = ['index.html', 'src/app.js']
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-w5p-'))
+    delete process.env.BLOMA_TASK_WORKFLOW
+    delete process.env.BLOMA_DSML_RECOVERY
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalHome
+  })
+
+  it('清单全部完成后零验证 → 每 2 轮重复「不要再通读，立即 run_gwt_tests」（JSONL 实次 ≥2）', async () => {
+    const readTool = tool('read_file', () => ({ output: '内容' }))
+    const writes: SDKMessage[][] = [
+      [toolUseMessage('w1', 'write_file', { path: 'index.html', content: 'x' })],
+      [toolUseMessage('w2', 'write_file', { path: 'src/app.js', content: 'x' })],
+    ]
+    // 之后 6 轮纯读（模型自查读档形态）
+    const reads: SDKMessage[][] = Array.from({ length: 6 }, (_, i) => [toolUseMessage(`r${i}`, 'read_file', { path: 'src/game/m.js', offset: i * 100 })])
+    const { query } = scriptedQuery([...writes, ...reads, [textMessage('总结')]] as SDKMessage[][])
+    await runAgentLoop(baseInput({ query, tools: [readTool], planFiles: PLAN_FILES, maxTurns: 12 }))
+    // 从会话 JSONL 数注入实次（每次注入追加一行 user；消息快照会重复，不能作计数源）
+    const { readFileSync } = await import('node:fs')
+    const { getAgentSessionPath } = await import('../../../storage/config-paths')
+    const jsonl = readFileSync(getAgentSessionPath('session-w5'), 'utf8')
+    const strongCount = jsonl.split('\n').filter((line) => line.includes('不要再通读自己写的文件') && line.includes('立即运行 run_gwt_tests')).length
+    expect(strongCount).toBeGreaterThanOrEqual(2)
+  })
+
+  it('宽限交卷轮退化（DSML 读意图）→ 注入「工具已停用」后再给一次交卷机会，第二次干净文本 → completed', async () => {
+    const readTool = tool('read_file', () => ({ output: '内容' }))
+    const writeTool = tool('write_file', () => ({ output: '已写入' }))
+    const dsml = [
+      '<｜｜DSML｜｜ calls>',
+      '<｜｜DSML｜｜ invoke name="read_file">',
+      '<｜｜DSML｜｜ parameter name="path" string="true">src/app.js</｜｜DSML｜｜ parameter>',
+      '</｜｜DSML｜｜ invoke>',
+      '</｜｜DSML｜｜ calls>',
+    ].join('\n')
+    const { query, receivedMessages } = scriptedQuery([
+      [toolUseMessage('w1', 'write_file', { path: 'src/app.js', content: 'x' })],
+      [textMessage(dsml)],          // 最后一轮正常轮：退化（触发 D2 只读恢复执行 read）→ 下轮起 maxTurns 用尽
+      [textMessage(dsml)],          // grace 第 1 次：仍想读 → 退化
+      [textMessage('已完成：入口与逻辑均已写入，自测待外部终验。')], // grace 第 2 次：干净交卷
+    ] as SDKMessage[][])
+    const result = await runAgentLoop(baseInput({ query, tools: [readTool, writeTool], maxTurns: 2, planFiles: ['src/app.js'] }))
+    expect(result.status).toBe('completed')
+    expect(result.transport_recoveries).toBeGreaterThanOrEqual(1)
+    const distinct = new Set(receivedMessages.flatMap(userTexts))
+    expect([...distinct].some((t) => t.includes('工具调用已全部停用') && t.includes('read_file'))).toBe(true)
+  })
+})

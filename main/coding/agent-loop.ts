@@ -950,6 +950,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
   let checklistProjectedFiles = 0
   let lastProjectionTurn = -2
   let earlyVerifyNudged = false
+  let lastVerifyRepeatTurn = -2
 
   for (let turn = 1; turn <= input.maxTurns; turn += 1) {
     if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls, 'turn_start', input.signal))
@@ -1217,10 +1218,18 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
           `【清单进度】实施清单文件已完成 ${doneInPlan.length}/${input.planFiles.length}；已完成文件勿重写（微调用 edit_file），按清单继续下一项，读过的内容不要重读。`,
         )
       }
-      // 早验证（B3 守卫3 的前移分支）：写完 ≥3 个文件仍零验证且已过 1/3 轮次
+      // 早验证（B3 守卫3 的前移分支）：写完 ≥3 个文件仍零验证且已过 1/3 轮次（一次性）
+      // + 狗粮 52f19ab4 增强：清单全部完成后零验证 → 每 2 轮重复强提醒（祈使句）——
+      //   当晚清单 10/10 后模型仍花 12 轮通读自己的文件而不跑测试，一次性劝告被无视
       if (!earlyVerifyNudged && !verificationSeen && writtenFiles.size >= 3 && turn >= Math.ceil(input.maxTurns / 3)) {
         earlyVerifyNudged = true
         w5Nudges.push('已写入 3 个以上文件但尚未运行任何自测：现在就 run_preview 拉起预览（或跑一次 run_gwt_tests），尽早暴露问题，不要把验证全部留到收尾。')
+      }
+      if (!verificationSeen && doneInPlan.length >= input.planFiles.length && turn - lastVerifyRepeatTurn >= 2) {
+        lastVerifyRepeatTurn = turn
+        w5Nudges.push(
+          `实施清单已全部完成（${doneInPlan.length}/${input.planFiles.length}）——不要再通读自己写的文件，读不能代替测试：立即运行 run_gwt_tests（必要时先 run_preview），按结果决定收口或修复。`,
+        )
       }
       if (w5Nudges.length > 0) {
         const w5Text = `【任务清单工作流（宿主注入）】\n${w5Nudges.join('\n')}`
@@ -1362,7 +1371,22 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
   // 该案例产物第 20 轮已全部就绪（测试/扫描全过），只差「输出完成总结」这个动作被挤掉。
   // 补一次无 tools 的收口调用让模型交卷：出文本 → completed（外部终验仍照跑，不信自述）；
   // 仍坚持要工具 → 如实 turn_limit。宽限轮不计 turns、不发 onTurn（epilogue 不是工作轮）。
-  const grace = await runGraceWrapUpTurn(input, messages, pinnedTestTurn)
+  let grace = await runGraceWrapUpTurn(input, messages, pinnedTestTurn)
+  // D2 补口（狗粮 52f19ab4，2026-09-12）：宽限交卷轮退化但解析出工具意图 → 明确告知
+  // 工具已停用，再给一次交卷机会（当晚 40 轮耗尽后模型在无 tools 交卷调用里仍想
+  // read_file → DSML 原文死；主循环的 D2 恢复不覆盖 grace 路径）
+  if (grace.kind === 'text' && isDegenerateText(grace.text) && dsmlRecoveryEnabled()) {
+    const parsedGrace = parseDsmlInvokes(grace.text)
+    if (parsedGrace) {
+      const graceFeedback = [
+        '【收口指令（宿主注入）】工具调用已全部停用（检测到你仍想调用 ' + parsedGrace.invokes.map((invoke) => invoke.name).join('、') + '）。',
+        '无需再读取或修改任何文件——请直接输出完成总结：逐项说明已完成的实施清单项与自测情况；未验证的部分如实说明。',
+      ].join('\n')
+      appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: graceFeedback }])
+      messages.push({ role: 'user', content: [{ type: 'text', text: graceFeedback }] })
+      grace = await runGraceWrapUpTurn(input, messages, pinnedTestTurn)
+    }
+  }
   // 宽限轮交卷文本同样不可是传输事故：退行文本不作完成总结，按 turn_limit 收口
   if (grace.kind === 'text' && !isDegenerateText(grace.text)) return attachUsage({ status: 'completed', turns, finalText: grace.text, toolCalls })
   if (grace.kind === 'cancelled') return attachUsage(loopCancelled(turns, finalText, toolCalls, 'grace_turn', input.signal))
