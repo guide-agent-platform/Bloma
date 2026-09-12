@@ -72,15 +72,31 @@ for (const h of rows) {
 }
 
 mkdirSync(REPORTS, { recursive: true })
-const reportPath = join(REPORTS, `false-positive-report-${nowIso().slice(0, 10)}.json`)
-const prevReport = existsSync(reportPath) ? JSON.parse(readFileSync(reportPath, 'utf8')) : null
+// 累积权威报告（canon）：阈值语义必须跨日累积——按日分文件会让 total_cases 每天归零，
+// orchestrator 的「>3 才提提案」判定随之失效（2026-09-08 00:30 实跑暴露）。
+const canonPath = join(REPORTS, 'false-positive-report.json')
+const dayPath = join(REPORTS, `false-positive-report-${nowIso().slice(0, 10)}.json`)
+function loadCases(path) {
+  try { return JSON.parse(readFileSync(path, 'utf8')).false_positive_cases || [] } catch { return [] }
+}
+const known = new Map()
+for (const c of loadCases(canonPath)) known.set(c.card_id, c)
+// 首次迁移：把历史按日文件并进 canon（避免既有案例丢失）
+if (!existsSync(canonPath)) {
+  for (const f of readdirSync(REPORTS).filter((n) => /^false-positive-report-\d{4}-\d{2}-\d{2}\.json$/.test(n))) {
+    for (const c of loadCases(join(REPORTS, f))) if (!known.has(c.card_id)) known.set(c.card_id, c)
+  }
+}
+for (const c of cases) known.set(c.card_id, c)
+const allCases = [...known.values()]
 const report = {
   generated_at: nowIso(),
   scanned_history_rows: rows.length,
-  false_positive_cases: (prevReport?.false_positive_cases || []).concat(cases),
+  false_positive_cases: allCases,
   newly_marked: newlyMarked.length,
   ledger_total_lines: readFileSync(LEDGER, 'utf8').split(/\r?\n/).filter(Boolean).length,
 }
-writeFileSync(reportPath, JSON.stringify(report, null, 1), 'utf8')
+writeFileSync(canonPath, JSON.stringify(report, null, 1), 'utf8')
+writeFileSync(dayPath, JSON.stringify({ ...report, day_snapshot: true }, null, 1), 'utf8')
 writeFileSync(PROCESSED, [...processed].join('\n'), 'utf8')
-console.log(`FP_ANALYZE done: rounds=${rows.length} newly_marked=${newlyMarked.length} total_cases=${report.false_positive_cases.length} report=${reportPath}`)
+console.log(`FP_ANALYZE done: rounds=${rows.length} newly_marked=${newlyMarked.length} total_cases=${allCases.length} report=${canonPath}`)

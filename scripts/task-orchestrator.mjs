@@ -129,10 +129,11 @@ for (const t of pending) {
     // 同步快任务（纯统计 <10s）
     t.status = 'running'; t.started_at = now(); save()
     try {
-      const out = spawnSyncNode('analyze-false-positives.mjs')
-      t.status = 'completed'; t.completed_at = now(); t.artifacts = { stdout: out.split('\n').pop() }
+      const out = spawnSyncNode('analyze-false-positives.mjs').trim()
+      const summary = out.split('\n').filter(Boolean).pop() || ''
+      t.status = 'completed'; t.completed_at = now(); t.artifacts = { stdout: summary }
       followUp(t)
-      log('analyze 完成:', out.split('\n').pop())
+      log('analyze 完成:', summary)
     } catch (e) {
       t.retries += 1; t.status = t.retries < t.max_retries ? 'pending' : 'failed'; t.artifacts = { error: String(e).slice(0, 200) }
     }
