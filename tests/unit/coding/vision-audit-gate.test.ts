@@ -1,23 +1,29 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import {
-  visionAuditEnabled, deriveChatBaseUrl, resolveVisionPair, buildV2Prompt, digestVisionReport,
-  pickVisionEndpoint, parseMaxTokensCap,
-  type ChannelLike,
+  visionAuditEnabled, deriveChatBaseUrl, resolveVisionRoles, resolveVisionPair, pickVisionEndpoint,
+  BLIND_DESCRIBE_PROMPT, buildComparePrompt, extractJson, parseCompareOutput, digestVisionReport,
+  parseMaxTokensCap,
+  type ChannelLike, type VisionProblem,
 } from '../../../main/coding/vision-audit-gate'
 
 /**
- * L1 双视觉审计门禁——纯函数单测。模型对固定：V1=deepseek-v4-flash-vision-exp / V2=qwen-vl-max
- * （用户 2026-09-06 指定：仅此两渠道有余额）。
+ * L1 视觉审计链路——纯函数单测。
+ * 链路（2026-09-12 重构）：A 盲描述(JSON+坐标) → B 盲描述(独立) → 对照审核(二次识别→问题 JSON) → 编程模型修复。
+ * 角色可选配、不绑定厂商；默认全 flash 档（本机限制）。
  */
 
 const DS: ChannelLike = {
   id: 'ch-ds', name: 'ds', base_url: 'https://api.deepseek.com/anthropic',
-  api_key: 'hex-ds', models: [{ id: 'deepseek-v4-flash', enabled: true }, { id: 'deepseek-v4-flash-vision-exp', enabled: true }],
+  api_key: 'hex-ds', models: [{ id: 'deepseek-flash', enabled: true }, { id: 'deepseek-v4-flash-vision-exp', enabled: true }],
   enabled: true,
 }
-const ALI: ChannelLike = {
-  id: 'ch-ali', name: '阿里云云工', base_url: 'https://ws-x.demo.aliyuncs.com/compatible-mode/v1',
-  api_key: 'hex-ali', models: [{ id: 'qwen-vl-max', enabled: true }], enabled: true,
+const ZHIPU: ChannelLike = {
+  id: 'ch-zhipu', name: '智谱视觉', base_url: 'https://open.bigmodel.cn/api/paas/v4',
+  api_key: 'hex-zp', models: [{ id: 'glm-4v-flash', enabled: true }, { id: 'glm-4.6v', enabled: true }], enabled: true,
+}
+const QWEN: ChannelLike = {
+  id: 'ch-qwen', name: '通义千问', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  api_key: 'hex-qw', models: [{ id: 'qwen3-vl-flash', enabled: true }, { id: 'qwen3-vl-plus', enabled: true }], enabled: true,
 }
 const decrypt = (hex: string) => `plain(${hex})`
 
@@ -27,130 +33,148 @@ describe('visionAuditEnabled（紧急逃生门，缺省开）', () => {
     if (saved === undefined) delete process.env.BLOMA_VISION_AUDIT
     else process.env.BLOMA_VISION_AUDIT = saved
   })
-  it('未设置 → 启用', () => {
+  it("未设置 → 启用；'0' → 停用", () => {
     delete process.env.BLOMA_VISION_AUDIT
     expect(visionAuditEnabled()).toBe(true)
-  })
-  it("'0' → 停用", () => {
     process.env.BLOMA_VISION_AUDIT = '0'
     expect(visionAuditEnabled()).toBe(false)
   })
 })
 
 describe('deriveChatBaseUrl', () => {
-  it('ds anthropic 地址 → 根域 chat 端点', () => {
+  it('anthropic 根 / compatible-mode / 尾斜杠三种形态', () => {
     expect(deriveChatBaseUrl('https://api.deepseek.com/anthropic')).toBe('https://api.deepseek.com')
-  })
-  it('compatible-mode/v1 原样保留', () => {
-    expect(deriveChatBaseUrl('https://ws-x.demo.aliyuncs.com/compatible-mode/v1')).toBe('https://ws-x.demo.aliyuncs.com/compatible-mode/v1')
-  })
-  it('尾斜杠归一', () => {
+    expect(deriveChatBaseUrl('https://dashscope.aliyuncs.com/compatible-mode/v1')).toBe('https://dashscope.aliyuncs.com/compatible-mode/v1')
     expect(deriveChatBaseUrl('https://api.deepseek.com/anthropic/')).toBe('https://api.deepseek.com')
   })
 })
 
-describe('resolveVisionPair（从渠道表挑 V1/V2，密钥经注入的解密函数出明文）', () => {
-  it('两模型齐备 → V1=ds、V2=qwen', () => {
-    const pair = resolveVisionPair([DS, ALI], decrypt)
-    expect(pair).not.toBeNull()
-    expect(pair!.v1.model).toBe('deepseek-v4-flash-vision-exp')
-    expect(pair!.v1.chatBase).toBe('https://api.deepseek.com')
-    expect(pair!.v1.apiKey).toBe('plain(hex-ds)')
-    expect(pair!.v2.model).toBe('qwen-vl-max')
-    expect(pair!.v2.apiKey).toBe('plain(hex-ali)')
-  })
-  it('缺任一模型 → null（上层落 unavailable，绝不静默假通过）', () => {
-    expect(resolveVisionPair([DS], decrypt)).toBeNull()
-    expect(resolveVisionPair([ALI], decrypt)).toBeNull()
-  })
-  it('禁用渠道不参与挑选', () => {
-    expect(resolveVisionPair([{ ...DS, enabled: false }, ALI], decrypt)).toBeNull()
-  })
-  it('models 字符串形态兼容', () => {
-    const str: ChannelLike = { ...ALI, models: ['qwen-vl-max'] as never }
-    expect(resolveVisionPair([DS, str], decrypt)?.v2.model).toBe('qwen-vl-max')
-  })
-  it('seed 变体名（前后缀污染）子串兼容命中', () => {
-    const mangled: ChannelLike = { ...DS, models: [{ id: 'deepseek-deepseek-v4-flash-vision-exp-1', enabled: true }] }
-    expect(resolveVisionPair([mangled, ALI], decrypt)?.v1.model).toBe('deepseek-v4-flash-vision-exp')
-  })
-})
-
-describe('buildV2Prompt', () => {
-  it('V1 报告全文内嵌（互证依赖）', () => {
-    const p = buildV2Prompt('V1-REPORT-TEXT')
-    expect(p).toContain('V1-REPORT-TEXT')
-    expect(p).toContain('遗漏')
-    expect(p).toContain('不真实')
-    expect(p).toContain('若某类没有发现，写「无」')
-  })
-})
-
-describe('digestVisionReport（给裁判的紧凑证据）', () => {
-  it('V2 有发现 → flagged，摘要含计数与截断', () => {
-    const v2 = '## 遗漏\n1. 元素A\n2. 元素B\n\n## 不具体修正\n1. 颜色X\n\n## 不真实纠正\n无'
-    const d = digestVisionReport('x'.repeat(3000), v2)
-    expect(d.flagged).toBe(true)
-    expect(d.digest).toContain('视觉审计')
-    expect(d.digest).toContain('遗漏2')
-    expect(d.digest.length).toBeLessThanOrEqual(400)
-  })
-  it('V2 三类全无 → 不 flagged', () => {
-    const d = digestVisionReport('v1', '## 遗漏\n无\n## 不具体修正\n无\n## 不真实纠正\n无')
-    expect(d.flagged).toBe(false)
-  })
-})
-
-const ZHIPU: ChannelLike = {
-  id: 'ch-zhipu', name: '智谱视觉', base_url: 'https://open.bigmodel.cn/api/paas/v4',
-  api_key: 'hex-zp', models: [{ id: 'glm-4v-flash', enabled: true }, { id: 'glm-4.6v', enabled: true }], enabled: true,
-}
-const DASHSCOPE: ChannelLike = {
-  id: 'ch-qwen', name: '通义千问', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-  api_key: 'hex-qw', models: [{ id: 'qwen3-vl-flash', enabled: true }, { id: 'qwen3.8-flash', enabled: true }], enabled: true,
-}
-
-describe('角色偏好链（2026-09-12 分工：glm + qwen 视觉，ds 不参与视觉）', () => {
-  it('智谱(glm-4v-flash) + 通义千问(qwen3-vl-flash) → V1=glm、V2=qwen、跨渠道', () => {
-    const pair = resolveVisionPair([ZHIPU, DASHSCOPE], decrypt)
-    expect(pair).not.toBeNull()
-    expect(pair!.v1.model).toBe('glm-4v-flash')
-    expect(pair!.v1.channelName).toBe('智谱视觉')
-    expect(pair!.v2.model).toBe('qwen3-vl-flash')
-    expect(pair!.v2.channelName).toBe('通义千问')
+describe('角色解析（A/B/对照，跨渠道优先，不绑定厂商）', () => {
+  it('智谱(A) + 通义千问(B) → A=glm-4v-flash、B=qwen3-vl-flash、对照缺省复用 B', () => {
+    const roles = resolveVisionRoles([ZHIPU, QWEN], decrypt)
+    expect(roles!.a.model).toBe('glm-4v-flash')
+    expect(roles!.b.model).toBe('qwen3-vl-flash')
+    expect(roles!.compare.model).toBe('qwen3-vl-flash')
+    expect(roles!.compare.channelName).toBe('通义千问')
+    expect(roles!.a.apiKey).toBe('plain(hex-zp)')
   })
 
-  it('V2 优先换渠道：两模型同渠道时仍能选出（次优解不判失败）', () => {
-    const both: ChannelLike = { ...ZHIPU, id: 'ch-both', name: '混合渠道', models: [{ id: 'glm-4v-flash', enabled: true }, { id: 'qwen3-vl-flash', enabled: true }] }
-    const pair = resolveVisionPair([both], decrypt)
-    expect(pair!.v1.model).toBe('glm-4v-flash')
-    expect(pair!.v2.model).toBe('qwen3-vl-flash')
-    expect(pair!.v1.channelName).toBe(pair!.v2.channelName)
+  it('B 优先换渠道；只剩一家时同渠道为次优解（不判失败）', () => {
+    const both: ChannelLike = {
+      ...ZHIPU, id: 'ch-both', name: '混合渠道',
+      models: [{ id: 'glm-4v-flash', enabled: true }, { id: 'qwen3-vl-flash', enabled: true }],
+    }
+    const roles = resolveVisionRoles([both], decrypt)
+    expect(roles!.a.channelName).toBe(roles!.b.channelName)
   })
 
-  it('ds 渠道不再被当作视觉来源（新配置下 V1 不落 ds）', () => {
-    // ds 含历史视觉模型，但智谱在链前 → V1 必须仍选 glm
-    const dsWithVision: ChannelLike = { ...DS, models: [{ id: 'deepseek-v4-flash-vision-exp', enabled: true }] }
-    const pair = resolveVisionPair([dsWithVision, ZHIPU, DASHSCOPE], decrypt)
+  it('ds 不再被当作视觉来源（A 必须仍选 glm）', () => {
+    const roles = resolveVisionRoles([DS, ZHIPU, QWEN], decrypt)
+    expect(roles!.a.model).toBe('glm-4v-flash')
+  })
+
+  it('兼容旧名 resolveVisionPair：v1/v2 == A/B', () => {
+    const pair = resolveVisionPair([ZHIPU, QWEN], decrypt)
     expect(pair!.v1.model).toBe('glm-4v-flash')
     expect(pair!.v2.model).toBe('qwen3-vl-flash')
   })
 
-  it('pickVisionEndpoint：excludeChannelId 生效（错开渠道）', () => {
-    const hit = pickVisionEndpoint([ZHIPU, DASHSCOPE], ['qwen3-vl-flash'], ZHIPU.id)
-    expect(hit?.channel.id).toBe('ch-qwen')
-    expect(pickVisionEndpoint([ZHIPU, DASHSCOPE], ['qwen3-vl-flash'], 'ch-qwen')).toBeUndefined()
+  it('缺 A 或缺 B → null（上层落 unavailable，绝不静默）', () => {
+    expect(resolveVisionRoles([QWEN], decrypt)).toBeNull()
+    expect(resolveVisionRoles([ZHIPU], decrypt)).toBeNull()
+  })
+
+  it('禁用渠道不参与', () => {
+    expect(resolveVisionRoles([{ ...ZHIPU, enabled: false }, QWEN], decrypt)).toBeNull()
+  })
+
+  it('pickVisionEndpoint：excludeChannelId 语义', () => {
+    expect(pickVisionEndpoint([ZHIPU, QWEN], ['qwen3-vl-flash'], ZHIPU.id)?.channel.id).toBe('ch-qwen')
+    expect(pickVisionEndpoint([ZHIPU, QWEN], ['qwen3-vl-flash'], 'ch-qwen')).toBeUndefined()
   })
 })
 
-describe('max_tokens 上限自适应（跨厂商差异）', () => {
-  it('解析智谱实测报错里的上限 1024', () => {
+describe('盲描述与对照审核提示词', () => {
+  it('盲描述要求 JSON + 坐标，且明确禁止推测/评价', () => {
+    expect(BLIND_DESCRIBE_PROMPT).toContain('bbox')
+    expect(BLIND_DESCRIBE_PROMPT).toContain('只输出一个 JSON 对象')
+    expect(BLIND_DESCRIBE_PROMPT).toContain('禁止评价好坏')
+    expect(BLIND_DESCRIBE_PROMPT).toContain('uncertain')
+  })
+  it('对照审核内嵌两份独立描述，并要求以原图为准、拿不准降级不删', () => {
+    const p = buildComparePrompt('A-JSON', 'B-JSON')
+    expect(p).toContain('A-JSON')
+    expect(p).toContain('B-JSON')
+    expect(p).toContain('problems')
+    expect(p).toContain('以原图为准')
+    expect(p).toContain('拿不准的降 severity，不要删')
+  })
+})
+
+describe('extractJson（容忍围栏/噪声）', () => {
+  it('裸 JSON / 围栏 / 前后文字 三种都能抠出', () => {
+    expect(extractJson<{ a: number }>('{"a":1}')?.a).toBe(1)
+    expect(extractJson<{ a: number }>('```json\n{"a":2}\n```')?.a).toBe(2)
+    expect(extractJson<{ a: number }>('好的，结果如下：{"a":3} 以上。')?.a).toBe(3)
+  })
+  it('无 JSON → undefined', () => {
+    expect(extractJson('没有任何对象')).toBeUndefined()
+  })
+})
+
+describe('parseCompareOutput（问题 JSON → VisionProblem[]）', () => {
+  const good = JSON.stringify({
+    problems: [
+      { kind: 'omission', severity: 'high', claim: '缺少保存按钮', bbox: [10, 20, 80, 32], evidence: '右上角无按钮', suggest_fix: '提供保存入口' },
+      { kind: 'false_claim', severity: 'weird', claim: '空态文案被误述', bbox: null, evidence: '图中为「暂无数据」', suggest_fix: '如实显示空态' },
+      { kind: 'not-a-kind', severity: 'high', claim: '非法类型应丢弃' },
+      { kind: 'state_error', severity: 'low', claim: '' },
+    ],
+    corrections: [{ who: 'A', claim: 'x', actual: 'y' }],
+    confidence: 'medium',
+  })
+  it('保留合法条目、丢弃非法 kind/空 claim、severity 非法回落 medium、bbox 校验', () => {
+    const out = parseCompareOutput(good)
+    expect(out.parsed).toBe(true)
+    expect(out.problems).toHaveLength(2)
+    expect(out.problems[0]).toMatchObject({ kind: 'omission', severity: 'high' })
+    expect(out.problems[0].bbox).toEqual([10, 20, 80, 32])
+    expect(out.problems[1].severity).toBe('medium')
+    expect(out.problems[1].bbox).toBeNull()
+    expect(out.confidence).toBe('medium')
+  })
+  it('非 JSON 输出 → parsed=false 且空问题（不猜）', () => {
+    const out = parseCompareOutput('抱歉我没法分析')
+    expect(out.parsed).toBe(false)
+    expect(out.problems).toEqual([])
+  })
+  it('问题条数上限 30（防爆）', () => {
+    const many = JSON.stringify({ problems: Array.from({ length: 50 }, (_, i) => ({ kind: 'omission', severity: 'low', claim: `p${i}` })) })
+    expect(parseCompareOutput(many).problems).toHaveLength(30)
+  })
+})
+
+describe('digestVisionReport（裁判摘要）', () => {
+  const problems: VisionProblem[] = [
+    { kind: 'omission', severity: 'high', claim: '缺少保存按钮', bbox: null, evidence: '', suggest_fix: '' },
+    { kind: 'inaccurate', severity: 'low', claim: '颜色描述偏差', bbox: null, evidence: '', suggest_fix: '' },
+  ]
+  it('有问题 → flagged，摘要含计数与 high 数、长度 ≤400', () => {
+    const { digest, flagged } = digestVisionReport('a'.repeat(500), 'b'.repeat(300), problems)
+    expect(flagged).toBe(true)
+    expect(digest).toContain('问题 2 条')
+    expect(digest).toContain('high 1')
+    expect(digest.length).toBeLessThanOrEqual(400)
+  })
+  it('无问题 → 不 flagged', () => {
+    expect(digestVisionReport('a', 'b', []).flagged).toBe(false)
+  })
+})
+
+describe('max_tokens 上限自适应', () => {
+  it('解析智谱实测报错（中文范围）；英文方括号范围；解析不出返回 undefined', () => {
     expect(parseMaxTokensCap('{"error":{"code":"1210","message":"max_tokens参数非法：限制数值范围[1,1024]"}}')).toBe(1024)
-  })
-  it('--  其它措辞（英文/方括号）同样解析', () => {
     expect(parseMaxTokensCap('max_tokens must be in range [1, 4096]')).toBe(4096)
-  })
-  it('解析不到则返回 undefined（不猜数值）', () => {
     expect(parseMaxTokensCap('{"error":"model not found"}')).toBeUndefined()
   })
 })
