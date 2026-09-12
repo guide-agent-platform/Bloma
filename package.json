@@ -26,7 +26,8 @@
     "lint": "tsc --noEmit",
     "docs:check": "node scripts/docs-check.mjs",
     "seed:channel": "electron scripts/seed-channel.cjs",
-    "seed:skills": "node scripts/seed-skills.cjs"
+    "seed:skills": "node scripts/seed-skills.cjs",
+    "audit:artifact": "node scripts/artifact-probe.mjs"
   },
   "dependencies": {
     "electron": "^39.0.0",
