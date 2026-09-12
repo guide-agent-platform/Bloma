@@ -26,8 +26,17 @@ import type { AgentEvent } from '../../shared/types'
  *   不把该路径判为测试失败——灰度要的就是失败样例的卡质量。
  */
 
-const BASE_URL = 'https://ws-xni6wtx9e245jevi.cn-beijing.maas.aliyuncs.com/apps/anthropic'
-const MODEL = 'qwen3.8-flash'
+// 渠道/模型由环境注入（GS_CHANNEL/GS_MODEL，scheduled-grayscale 从 grayscale-config.json
+// 读默认值）——2026-09-12 起支持 deepseek 等任意 anthropic 兼容渠道。
+const FALLBACK_BASE_URL = 'https://ws-xni6wtx9e245jevi.cn-beijing.maas.aliyuncs.com/apps/anthropic'
+let BASE_URL = FALLBACK_BASE_URL
+let MODEL = 'qwen3.8-flash'
+/** 渠道 base → anthropic 端点：阿里云 compatible-mode 需换 /apps/anthropic；deepseek 等已是 /anthropic 原样用。 */
+function normalizeAnthropicBase(base: string | undefined): string {
+  if (!base) return FALLBACK_BASE_URL
+  if (base.includes('/compatible-mode')) return base.replace(/\/compatible-mode\/v1\/?$/, '/apps/anthropic')
+  return base.replace(/\/+$/, '')
+}
 
 let home = ''
 let realKey = ''
@@ -37,7 +46,15 @@ const log = (...a: unknown[]) => console.log(`[gs ${new Date().toISOString().sli
 beforeAll(() => {
   const keyFile = process.env.GS_KEY_FILE
   if (!keyFile || !existsSync(keyFile)) throw new Error('GS_KEY_FILE 缺失：先跑 electron channel-key-reader 产 key')
-  realKey = JSON.parse(readFileSync(keyFile, 'utf8'))['阿里云云工'].apiKey
+  const chans = JSON.parse(readFileSync(keyFile, 'utf8'))
+  const wanted = process.env.GS_CHANNEL || '阿里云云工'
+  const entry = chans[wanted] || chans['阿里云云工']
+  if (!entry || !entry.apiKey) {
+    throw new Error(`渠道 ${wanted} 无可用 key；可用渠道：${Object.keys(chans).filter((k) => !k.startsWith('id:')).join(', ')}`)
+  }
+  realKey = entry.apiKey
+  BASE_URL = normalizeAnthropicBase(entry.baseUrl)
+  MODEL = process.env.GS_MODEL || MODEL
   home = mkdtempSync(join(tmpdir(), 'gs-headless-'))
   process.env.PROMA_HOME = home
   process.env.BLOMA_EXPERIENCE = '1'
@@ -70,7 +87,7 @@ beforeAll(() => {
   setProgrammingEventPublisher((event) => events.push(event))
   // 标记文件：脚本侧不解析 stdout（管道缓冲会淹没实时性），home 与逐样本结果落盘交换
   if (process.env.GS_HOME_MARK) writeFileSync(process.env.GS_HOME_MARK, home, 'utf8')
-  log('headless 环境就绪 home=', home)
+  log(`headless 环境就绪 home=${home} | 渠道=${process.env.GS_CHANNEL || '阿里云云工'} | 模型=${MODEL} | base=${BASE_URL}`)
 })
 
 type GsSample = {
@@ -101,7 +118,8 @@ function readSamples(): GsSample[] {
 async function llmOnce(prompt: string): Promise<string> {
   let out = ''
   const stream = anthropicMessagesQuery(prompt, {
-    env: { ANTHROPIC_BASE_URL: BASE_URL, ANTHROPIC_API_KEY: realKey, ANTHROPIC_MODEL: MODEL },
+    // 产品 query 读 ANTHROPIC_AUTH_TOKEN 且要求 PATH 在场（ANTHROPIC_API_KEY 仅兼容旧路径）
+    env: { ...process.env, ANTHROPIC_AUTH_TOKEN: realKey, ANTHROPIC_API_KEY: realKey, ANTHROPIC_BASE_URL: BASE_URL, ANTHROPIC_MODEL: MODEL } as Record<string, string>,
     signal: new AbortController().signal,
     sessionId: `gs-attr-${Date.now().toString(36)}`,
   })

@@ -46,6 +46,7 @@ const USERDATA = argVal('userdata', join(process.env.APPDATA || join(homedir(), 
 const REAL_LEDGER = join(homedir(), '.proma', 'bloma-experience.jsonl')
 const HISTORY = join(homedir(), '.proma', 'bloma-grayscale-history.jsonl')
 const KEY_FILE = join(REPO, '.gs-key-live.tmp.json')
+const CONFIG_FILE = join(REPO, 'scripts', 'grayscale-config.json')
 const HOME_MARK = join(REPO, '.gs-home.mark')
 const RESULT_MARK = join(REPO, '.gs-result.mark')
 const SAMPLES_FILE = join(REPO, 'scripts', 'grayscale-samples.json')
@@ -135,9 +136,14 @@ async function main() {
     { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'], timeout: 90_000 })
   if (!existsSync(KEY_FILE)) throw new Error('key reader 未产出文件（safeStorage 不可用？渠道未配置？）')
   const keyJson = JSON.parse(readFileSync(KEY_FILE, 'utf8'))
-  const entry = Object.entries(keyJson).find(([, v]) => v && v.apiKey)
+  let fileCfg = {}
+  try { fileCfg = JSON.parse(readFileSync(CONFIG_FILE, 'utf8')) } catch {}
+  const wantChannel = argVal('channel', fileCfg.channel || '')
+  const wantModel = argVal('model', fileCfg.model || '')
+  let entry = wantChannel ? Object.entries(keyJson).find(([k, v]) => k === wantChannel && v && v.apiKey) : null
+  if (!entry) entry = Object.entries(keyJson).find(([k, v]) => !k.startsWith('id:') && v && v.apiKey)
   if (!entry) throw new Error('key reader 产物无可用 apiKey')
-  log('key 就绪（渠道:', entry[0], '——明文从不落日志）')
+  log(`key 就绪（渠道: ${entry[0]}${wantModel ? ' | 模型: ' + wantModel : ''}——明文从不落日志）`)
 
   // 2. vitest harness（样本注入）
   const selected = resolveSelection(SAMPLES).map((s) => SAMPLES[s]).filter(Boolean)
@@ -147,7 +153,7 @@ async function main() {
   const code = await new Promise((res) => {
     const child = spawn(process.execPath, [join(REPO, 'node_modules', 'vitest', 'vitest.mjs'), 'run', 'tests/experiments/grayscale-live.test.ts'], {
       cwd: REPO,
-      env: { ...process.env, GS_KEY_FILE: KEY_FILE, GS_SAMPLE_JSON: JSON.stringify(selected), BLOMA_EXPERIENCE: '1', GS_HOME_MARK: HOME_MARK, GS_RESULT_MARK: RESULT_MARK },
+      env: { ...process.env, GS_KEY_FILE: KEY_FILE, GS_SAMPLE_JSON: JSON.stringify(selected), BLOMA_EXPERIENCE: '1', GS_HOME_MARK: HOME_MARK, GS_RESULT_MARK: RESULT_MARK, GS_CHANNEL: entry[0], ...(wantModel ? { GS_MODEL: wantModel } : {}) },
       stdio: ['ignore', 'inherit', 'inherit'],
     })
     // 心跳：每 60s 报已完成样本数（mark 文件行数），卡死与否一眼可判

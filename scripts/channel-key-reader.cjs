@@ -15,7 +15,8 @@ app.whenReady().then(() => {
     try {
       const buf = enc.length > 60 && /^[0-9a-f]+$/i.test(enc) ? Buffer.from(enc, 'hex') : Buffer.from(enc, 'base64')
       const plain = safeStorage.decryptString(buf)
-      result[c.name || c.id] = { provider: c.provider || c.provider_type, baseUrl: c.baseUrl || c.base_url, apiKey: plain }
+      const models = (c.models || []).filter((m) => m && m.enabled !== false).map((m) => m.id || m.name).filter(Boolean)
+      result[c.name || c.id] = { provider: c.provider || c.provider_type, baseUrl: c.baseUrl || c.base_url, models, apiKey: plain }
       // 同名渠道支持：额外按 id 前 8 位索引（不被同名覆盖）
       const shortId = String(c.id || '').slice(0, 8)
       if (shortId) result['id:' + shortId] = result[c.name || c.id]
