@@ -7,6 +7,108 @@
 
 **v1.1 修订说明**：同步 §5 已知待同步项状态（4 项全部已同步），新增 §5.1 目录结构重组记录。按 `workflow.md §2.4` 走修订流程，待评审后回到已确认。
 
+## 扩展 A 期：AgentEvent 事件总线订阅面（P2-A）（2026-09-08）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | feat（pi harness 差距方案 §5 A 期；B/C 期 gate 后另立） |
+| 模块 | `main/agent-event-bus.ts`（新）、`main/orchestrator.ts`、`main/coding/programming-orchestrator.ts` |
+
+### 变更内容
+
+- 新模块 `main/agent-event-bus.ts`：`onAgentEvent(type, handler)`（type 支持单事件名或 `'*'` 全量；返回幂等退订）→ `emitAgentEvent(event)` 广播。**A 期只抽订阅面、不改行为**：无 block/改参能力，B/C 期（钩子/注册）gate 后另立。
+- 两条发布接缝套层接线：`setAgentStreamPublisher`（orchestrator）与 `setProgrammingEventPublisher`（programming-orchestrator）在接线时把事件先 `emitAgentEvent` 广播到订阅面再转发原目标——原发布链路零改动，总线只读旁路。默认 no-op 发布者在未接线时不广播（单测环境事件不进总线，与现状一致）。
+- 订阅方抛错只 console 留痕、绝不阻断发布链路（降级链铁律：对齐委派超时/审查降级先例）。
+- `resetAgentEventBusForTests()` 测试 seam。
+
+### 影响评估
+
+- 行为零变化（纯内部缝）；全事件可订阅（含 delegation_* / loop_compaction / steer_injected / usage_summary）。
+- 测试：agent-event-bus.test.ts 6 例（类型订阅/全量订阅/退订幂等/抛错隔离/orchestrator 接缝真实路径/编程接缝接线安全）；typecheck 0 错。
+
+## 会话 fork：从任意 user 消息重开（P0-2）（2026-09-08）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | feat（pi harness 差距方案 §2，P0-2） |
+| 模块 | `main/session-tree.ts`（新）、`main/session-service.ts`、`shared/types.ts`、`main/ipc.ts`、`preload/bridge.ts`、renderer（ChatPanel/WorkspaceShell/App）、api-spec §5.8、data-model JSONL v2 |
+
+### 变更内容
+
+- JSONL 会话行 v2：新写入每行带 `id`（8 位 hex，`nextSessionEntryId`）与 `parentId`（前一行 id，首行 null）——**旧文件零迁移**（读侧对未知字段天然透明，不加头部行免去全读路径过滤改造）。收敛全部 20 处会话 JSONL 直写点（agent-loop / orchestrator / programming-orchestrator / ipc / guide-agent-service / recovery-service / runtime-fallback / decision-log / delegation-persistence）走新 helper `appendSessionMessage(sessionId, message)`（`main/session-tree.ts`，含 resetSessionTreeForTests）。
+- 父会话链接不落 JSONL 头，改记索引：`AgentSessionRecord` 增 `fork_entry_id`（`parent_session_id` 复用既有字段）。
+- `session-service.forkFrom(sessionId, {project_id, entry_id?, entry_timestamp?, new_session_id?})`：活跃会话拒绝（`AGENT_SESSION_BUSY`，复用 isSessionActive）；锚点解析 entry_id（v2 行 id）优先、旧文件回退 entry_timestamp（须命中 user 文本消息，否则 `SESSION_FORK_ENTRY_NOT_FOUND`）；复制「首行到锚点」前缀进新会话文件（树链重写为线性 v2），**原文件一字不动**；索引登记新会话（parent_session_id/fork_entry_id）。
+- IPC 四层 `agent:fork-session`（入参 AgentForkSessionInput / 结果 AgentForkSessionResult）；ErrorCode 增 `SESSION_FORK_ENTRY_NOT_FOUND`。
+- Renderer：user 气泡「↪ 从这里重新来」入口（ChatPanel → WorkspaceShell → App 三级 prop 透传）；点击 fork 成功后续接新 sessionId（setActiveSessionId + loadSessionHistory + 草稿复位 + 系统提示气泡「已从这里重新开始…」）。
+- 与项目快照正交：时间轴管产物回滚、fork 管对话回溯，互不接管。
+
+### 影响评估
+
+- 风险最大处（读路径全覆盖）由「不加头部行 + 只增可选字段」消解：conversation-excerpt / session-service / continue 重放 / agent-monitor 等读侧零改动（session-fork 测试覆盖 loadMessages 读 v2 链字段无干扰）。
+- 既有线性会话与委派子会话照常写入（链字段伴随，无行为变化）；委派子会话 v1 只读不 fork（树链照写，为将来留门）。
+- 测试：session-fork.test.ts 8 例（链写入/前缀复制+原文件字节不动/旧文件零迁移/entry_id 定位与拒绝/活跃 BUSY/索引登记/读兼容）；typecheck 0 错。
+
+## 只读工具并行执行：连续 parallelSafe 段并发 + 源序回注（P1-2）（2026-09-08）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | feat（pi harness 差距方案 §4，P1-2） |
+| 模块 | `main/coding/agent-loop.ts`、`main/coding/agent-tools.ts`、api-spec §12.13 |
+
+### 变更内容
+
+- `AgentLoopTool` 增声明 `parallelSafe?: boolean`：v1 白名单 true = `read_file` / `list_files` / `grep` / `web_fetch` / `web_research`（agent-tools.ts 五处标注）；写类/测试/预览/委派/问答工具默认 false（状态序依赖：test_failed 旗标、修复预算计数、预览地址、委派状态机）。
+- 执行段抽 `executeTurnToolCalls`（导出，单测友好）：按 assistant 源序切**连续** parallelSafe 段 → 段内 Promise.all（并发上限 `PARALLEL_CONCURRENCY_LIMIT=4` 小池），遇非 parallelSafe 先 join 再串行；`tool_result` 一律按源序打包进同一条 user 消息（「整批一条 user 消息、块序=源序」不变式逐字节保持）。**有 toolBudget 预算的工具即使 parallelSafe 也退串行**（防并行计数击穿静态预算；生产 web_research 恒串行）。
+- 事件流：tool_call_started/completed 各自启动/完成时发；usage/toolCalls 记录调用点已按源序推进（零改动）。取消：串行位执行前检查同旧语义；并发段边界检查。
+- 已知软风险（接受）：web_research 子代理与主 loop 并行写入交错读中间态——建议性调研 + writeFileSync 单次原子性兜底，不作权威输入。
+
+### 影响评估
+
+- 写轮（全非 parallelSafe）行为与现状逐字节一致（agent-tools / agent-loop / delegation 等 13 文件 183 例回归全过）；只读密集轮 wall-time 缩短（3×80ms 并发实测 ~89ms）。
+- 测试：新文件 agent-loop-parallel.test.ts 7 例（wall-time 并发/源序回注/混合 join/预算退串行/abort 传播/写类串行回归/E2E 集成）。
+
+## 运行中转向：steer 队列批间注入（P0-1）（2026-09-08）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | feat（pi harness 差距方案 §1，P0-1） |
+| 模块 | `main/steer-queue.ts`（新）、`main/coding/agent-loop.ts`、`main/ipc.ts`、`preload/bridge.ts`、`renderer/agent-atoms.ts`、`renderer/components/App.tsx`、`shared/types.ts`、api-spec §5.7/§5.2 |
+
+### 变更内容
+
+- 新模块 `main/steer-queue.ts`：`steerQueues: Map<sessionId, SteerEntry[]>` + `loopActiveSessions` 注册表，enqueue / drain / clear / markLoopActive·Inactive / pendingSteerCount / wrapSteerContent（`【用户中途补充】`包裹）全套同步 API（纯内存，单测友好）。
+- `runAgentLoop` 拆 wrapper + impl：depth 0 进入 markLoopActive、finally 先 drain 残余（未及注入的落 JSONL 保真；abort 后丢弃——取消语义优先）再 unmark；**批间注入点**在工具批 resultBlocks 落盘后、下一轮模型调用前（含压缩检查前）：逐条 JSONL → messages.push → publish `steer_injected`（content/message/at_turn/remaining）。委派等待期（wait_for_delegations 阻塞）注入照常下一批间生效，不打断等待。
+- IPC 四层新通道 `agent:steer-message`：入参 `AgentSteerMessageInput = AgentSendMessageInput`（validateAgentSend 同一清洗）；有活跃主 loop 且不带图 → 入队返回 steered:true；否则主进程内部回退 `runAgent`（steered:false + fallback，与 send-message 语义逐字节一致——guide 单发/委派子会话/空闲全在此列）。子会话（depth≥1）不注册也不注入（enqueue 门直接拒绝）。
+- `agent:cancel` 清空该会话 steer 队列（「停止后被注入」绝不允许；runAgentLoop finally 另兜竞态窗口）。
+- Renderer：App.handleSendMessage 在 `hasActiveStream`（前台/后台生成的流式事件）且纯文本时改道 steer 通道，steered:false 时按 fallback 结果走既有 queued/BUSY 处理（抽出 handleSendOutcome 复用）；`steer_injected` 事件显式归约——系统气泡「已注入，将于下一轮生效」（对齐 queue_dropped 红泡模式）。
+- api-spec §5.7 新通道 + §5.2 AgentEvent 增 `steer_injected`。
+
+### 影响评估
+
+- 行为变化只在活跃主 loop 期间的输入框消息：从「后台生成时 send-message 撞 PROJECT_BUSY 静默丢消息 / 前台忙则排队干等」变为「批间注入（最快下一轮生效）」；空闲/guide/排队路径零变化（回退语义逐字节一致）。
+- 注入消息照常参与滑窗/竹节压缩（压缩时进交接输入、窗口自然滑出，无特判）。
+- 测试：steer-queue 单测 6 例 + agent-loop steer 集成 6 例（批间注入/多保序/子会话门/收尾残余/压缩共存/JSONL 事件）；typecheck 0 错；全量 unit 1573/1574（1 例 platform-services 全量并发 flaky，单独跑 12/12 过，与本次无关）。
+
+## keep-recent 三段式压缩：竹节压缩保留近期原文（P1-1）（2026-09-08）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | feat（pi harness 差距方案 §3，P1-1） |
+| 模块 | `main/coding/agent-loop.ts`、api-spec §5.2 AgentEvent |
+
+### 变更内容
+
+- 竹节压缩重置从两段（`task + 【此前进度交接】`）改三段：`task + 交接文档 + 近期原文保留段`——此前压缩一发生窗口历史归零、正常对话细节全丢（pi 参照：摘要 + 保留近 20k tokens 原文；bloma 缺省 8k 保守起步）。
+- 新纯函数 `keepRecentTurns(messages, budgetTokens)`：预算从尾向头累加（`estimateTokenCount`/`estimateBlocksText` 既有估算器），保留集恒为连续后缀；tool_use/tool_result 成对保留（切点永不在 tool_result，对齐 partitionWindow 配对保护先例）；装不下的整对丢弃（交接文档兜底）；head（task）不进保留段。
+- 新配置 `BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS`（缺省 8000，`'0'` = 旧行为完全回归，无效值回缺省）。交接 LLM 失败的确定性 fallback 路径同样带保留段（降级路径恰最需要细节，对齐审查 P1-2 先例）。保留段标记 `【近期原文保留】` 并入 head 文本（对齐 digest 并入 head 模式，不新增消息、零角色交替风险）。
+- 钉轮索引口径修正（与保留段共存的必要修复）：`pinnedTestTurn` 赋值从「相对轮号 turn - pinBaseTurn」改为「tail 末位完整工具对的配对序号」（`tailLastPairOrdinal`），`pinnedFailureExcerpt` 同步按配对序号定位（`toolPairAtOrdinal`）。保留段的配对计入序号；无保留段且各轮皆工具轮时与旧口径等值（回归等价）；文本注入轮（退行反馈/steer）混排时不再错位（旧口径该场景钉定位会失配——partitionWindow 校验不过则静默不钉）。`pinBaseTurn` 变量移除。
+- `loop_compaction` 事件 payload 追加 `keep_recent_turns`；JSONL `[loop-compaction]` 审计行追加 `keep_recent=N 轮`。
+
+### 影响评估
+
+- 触发面：仅压缩分支（默认阈值 100k，线上低频）；保留段 ≤8k token 远低于阈值，不会引发压缩风暴，封顶 2 次不变。
+- 测试：agent-loop 新增 11 例（keepRecentTurns 纯函数 5 + 集成 6：缺省三段/预算不足回归/'0' 显式回归/钉轮共存/fallback 带保留段/事件与 JSONL 审计）；既有压缩 5 例与压缩×钉轮 3 例以 `KEEP_RECENT='0'` 锁定机制回归（断言零改动）全过；agent-loop 全量 53/53、相邻 5 文件 63/63、typecheck 0 错。
+
 ## 任务级模型降级选模落地：内审缺省 flash 级（2026-09-02）
 
 | 属性 | 值 |

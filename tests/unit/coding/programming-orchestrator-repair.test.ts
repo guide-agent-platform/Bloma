@@ -1,13 +1,13 @@
 import { restorePromaHome } from '../../support/proma-home-guard'
 import type { ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runAgentLoopPostTesting, resumeBlockedFlow, setProgrammingEventPublisher } from '../../../main/programming-orchestrator'
 import { createProject, findProject, updateProject } from '../../../main/project-service'
 import { recordSketchGenerated } from '../../../main/project-service'
-import { syncDocuments } from '../../../main/document-engine'
+import { syncDocuments, readLoopCheckpointDocument, writeLoopCheckpointDocument } from '../../../main/document-engine'
 import { createChannel } from '../../../main/channel-manager'
 import { setSafeStorageAdapter } from '../../../main/safe-storage'
 import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../../main/platform-services'
@@ -109,6 +109,7 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
   beforeEach(() => {
     process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'proma-repair-'))
     delete process.env.BLOMA_REPAIR_BUDGET
+    delete process.env.BLOMA_LOOP_CHECKPOINT
     events = []
     mocks.runAgentLoop.mockReset()
     mocks.runGwtScenarios.mockReset()
@@ -148,6 +149,8 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     restorePromaHome(originalPromaHome)
     if (originalBudget === undefined) delete process.env.BLOMA_REPAIR_BUDGET
     else process.env.BLOMA_REPAIR_BUDGET = originalBudget
+    delete process.env.BLOMA_LOOP_CHECKPOINT
+    delete process.env.BLOMA_REPAIR_NOOP_GUARD
     setProgrammingEventPublisher(() => undefined)
     clearSandboxRuntimeForTests()
   })
@@ -155,6 +158,25 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
   function decisionLines(): string {
     const path = getAgentSessionPath(sessionId)
     return existsSync(path) ? readFileSync(path, 'utf8') : ''
+  }
+
+  function readAnalyticsEvents(): Array<Record<string, unknown>> {
+    const wsRoot = join(process.env.PROMA_HOME!, 'agent-workspaces')
+    const out: Array<Record<string, unknown>> = []
+    for (const slug of readdirSync(wsRoot)) {
+      const f = join(wsRoot, slug, 'analytics.jsonl')
+      if (!existsSync(f)) continue
+      for (const l of readFileSync(f, 'utf8').split('\n').filter(Boolean)) {
+        try { out.push(JSON.parse(l)) } catch { /* 跳过坏行 */ }
+      }
+    }
+    return out
+  }
+
+  function testCompletedEvents() {
+    return readAnalyticsEvents().filter((e) => e.event_type === 'test_completed') as Array<{
+      payload: { round?: string; total_count?: number; passed_count?: number; failed_count?: number; via?: string; failures?: Array<{ scenario?: string; reason?: string; source?: string }>; comparison?: { baseline?: string; resolved?: string[]; persistent?: string[]; new_failures?: string[] } }
+    }>
   }
 
   function baseInput() {
@@ -189,9 +211,9 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     expect(mocks.runGwtScenarios).toHaveBeenCalledTimes(2)
     // 收敛 → 正常链：无熔断、无让渡卡，走到 judge 且 verdict ready
     expect(mocks.circuitBreakRollback).not.toHaveBeenCalled()
-    // 就绪引导卡（2026-09-06「终点不是 MVP」）：ready 收敛发 next_steps 卡（非让渡卡）
+    // 就绪三按钮卡（2026-09-11 卡位改版）：ready 收敛发 mvp_review 卡（非让渡卡）
     const decisionEvents = events.filter((event) => event.type === 'user_decision_required')
-    expect(decisionEvents.every((event) => (event.payload as { kind?: string }).kind === 'ready_next_steps')).toBe(true)
+    expect(decisionEvents.every((event) => (event.payload as { kind?: string }).kind === 'mvp_review')).toBe(true)
     expect(result.verdict).toBe('ready')
     expect(findProject(projectId).current_stage).toBe('ready')
     // 成功清零（与旧管道 attempt 口径对齐）
@@ -200,6 +222,17 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     const log = decisionLines()
     expect(log).toContain('repair_round_started')
     expect(log).toContain('repair_round_completed')
+    // test_completed 结构化证据（2026-09-09）：首验 initial + 重验 after_repair 各一条
+    const testEvents = testCompletedEvents()
+    expect(testEvents).toHaveLength(2)
+    expect(testEvents[0].payload.round).toBe('initial')
+    expect(testEvents[0].payload.failed_count).toBe(1)
+    expect(testEvents[0].payload.via).toBe('agent_loop_post_testing')
+    // B0 深挖补强（2026-09-09）：failures 带 reason（熔断回滚清 test-report 后唯一可回溯源）
+    expect(testEvents[0].payload.failures?.[0]).toMatchObject({ scenario: expect.any(String), reason: expect.any(String) })
+    expect(testEvents[1].payload.round).toBe('after_repair')
+    expect(testEvents[1].payload.failed_count).toBe(0)
+    expect(testEvents[1].payload.total_count).toBe(2)
   })
 
   it('修复后仍失败 → 现状熔断口径一字不改：circuitBreakRollback 参数一致 + 让渡 blocked', async () => {
@@ -224,6 +257,13 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     // 让渡卡带上重验后的最新失败清单（现状 failureTitle 逻辑）
     const card = events.find((event) => event.type === 'user_decision_required')
     expect(card?.payload.title).toContain('F-005')
+    // Phase 7 U1 H4：熔断 failureNote 升级四段式（功能→现象→影响→替代；无开关直接上）
+    const cbArgs = mocks.circuitBreakRollback.mock.calls[0][0] as { failureNote?: string }
+    expect(cbArgs.failureNote).toContain('【功能】')
+    expect(cbArgs.failureNote).toContain('【现象】')
+    expect(cbArgs.failureNote).toContain('【影响】')
+    expect(cbArgs.failureNote).toContain('【替代】')
+    expect(cbArgs.failureNote).toContain('F-005')
     // 修复轮消耗计数：1（未收敛不清零）
     expect(findProject(projectId).test_repair_count).toBe(1)
   })
@@ -343,8 +383,220 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     expect(delta).toBeTruthy()
     expect((delta?.payload.text as string)).toContain('1/1')
   })
-})
 
+  it('W2-D3：终验失败 source 分类——loop 自测已知未修 → known_failure；从未自测 → coverage_gap', async () => {
+    const scenario = gwtFailed().failure_summary[0]!.scenario
+    // 场景一：loop 自测过且上次就挂该场景 → known_failure（B0 错误放行口径）
+    mocks.runGwtScenarios.mockResolvedValue(gwtFailed()) // 首验与重验都挂
+    mocks.runAgentLoop.mockResolvedValue(loopCompleted())
+    await runAgentLoopPostTesting({
+      ...baseInput(),
+      loop: {
+        status: 'completed',
+        turns: 8,
+        finalText: '',
+        toolCalls: [],
+        validation: {
+          gwt_runs: 2,
+          api_contract_runs: 0,
+          last_gwt_failures: [scenario],
+          gwt_all_passed: false,
+          api_all_passed: true,
+          security_all_passed: false,
+          file_revisions: {},
+        },
+      },
+    })
+    let events = testCompletedEvents()
+    expect(events[0].payload.failures?.[0]).toMatchObject({ scenario, source: 'known_failure' })
+    expect(events[0].payload.comparison).toMatchObject({
+      baseline: 'loop_last_run',
+      persistent: [scenario],
+      resolved: [],
+      new_failures: [],
+    })
+    // after_repair 仍挂 → 基线切上轮终验，persistent 口径一致
+    expect(events[1].payload.comparison).toMatchObject({ baseline: 'prev_round', persistent: [scenario] })
+    expect(events[1].payload.failures?.[0]).toMatchObject({ source: 'known_failure' })
+
+    // 场景二（新会话状态重置）：loop 从未自测 → coverage_gap
+    mocks.runGwtScenarios.mockReset().mockResolvedValue(gwtFailed())
+    mocks.runAgentLoop.mockReset().mockResolvedValue(loopCompleted())
+    mocks.circuitBreakRollback.mockResolvedValue({ rolled_back: false, outcome: 'delegated' })
+    await runAgentLoopPostTesting({
+      ...baseInput(),
+      loop: {
+        status: 'completed',
+        turns: 8,
+        finalText: '',
+        toolCalls: [],
+        validation: {
+          gwt_runs: 0,
+          api_contract_runs: 0,
+          last_gwt_failures: [],
+          gwt_all_passed: false,
+          api_all_passed: true,
+          security_all_passed: false,
+          file_revisions: {},
+        },
+      },
+    })
+    events = testCompletedEvents()
+    // analytics append-only：两场景同测试内累积，取最后一条 initial（场景二）
+    const initial = events.filter((e) => e.payload.round === 'initial').at(-1)!
+    expect(initial.payload.failures?.[0]).toMatchObject({ source: 'coverage_gap' })
+  })
+
+  it('Phase 7 U1 H1：BLOMA_DELIVERY_STATUS on → 熔断让渡路径如实落 partial（F-005 败、F-001 P0 干净）；off 零写入', async () => {
+    // 开关 off（缺省）：字节级现状——project 无 delivery_status 键
+    mocks.runGwtScenarios.mockResolvedValue(gwtFailed()) // 首验与重验都失败
+    mocks.runAgentLoop.mockResolvedValue(loopCompleted())
+    await runAgentLoopPostTesting(baseInput())
+    expect(findProject(projectId).delivery_status).toBeUndefined()
+
+    // 开关 on：同一失败形态 → P0=F-001（主题锚点）无关联失败 → partial（有独立可用任务）
+    vi.stubEnv('BLOMA_DELIVERY_STATUS', '1')
+    try {
+      await runAgentLoopPostTesting(baseInput())
+      expect(findProject(projectId).delivery_status).toBe('partial')
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('W2-F1：BLOMA_LOOP_CHECKPOINT on → 修复尝试入账本 + 修复卡带证据包（候选指纹+此前尝试）', async () => {
+    process.env.BLOMA_LOOP_CHECKPOINT = '1'
+    process.env.BLOMA_REPAIR_BUDGET = '2'
+    // 预置第 1 轮尝试记录 + 已用 1 轮 → 本轮 round=2，修复卡应含历史
+    const scenario = gwtFailed().failure_summary[0]!.scenario
+    writeLoopCheckpointDocument(projectId, {
+      version: 1,
+      project_id: projectId,
+      updated_at: new Date().toISOString(),
+      runtime: {
+        session_id: sessionId,
+        at_turn: 20,
+        trigger: 'final',
+        decisions: [],
+        progress_files: { 'src/app.js': 'aaa-100' },
+        validation: {
+          gwt_runs: 1,
+          api_contract_runs: 0,
+          last_gwt_failures: [scenario],
+          gwt_all_passed: false,
+          api_all_passed: true,
+          security_all_passed: false,
+          file_revisions: { 'src/app.js': 'aaa-100' },
+          candidate_fingerprint: 'fp-aaaa-1',
+        },
+      },
+      repair_attempts: [
+        {
+          round: 1,
+          at: new Date().toISOString(),
+          task_locations: [scenario],
+          files_touched: ['src/app.js'],
+          outcome: { resolved: [], persistent: [scenario], new_failures: [], converged: false },
+        },
+      ],
+    })
+    updateProject(projectId, { test_repair_count: 1 })
+    mocks.runGwtScenarios.mockResolvedValue(gwtFailed()) // 首验与重验都失败
+    mocks.runAgentLoop.mockResolvedValue({ ...loopCompleted(), toolCalls: [{ name: 'edit_file', turn: 1, path: 'src/app.js' }] })
+
+    await runAgentLoopPostTesting(baseInput())
+
+    // 修复卡带证据包：候选指纹 + 此前尝试（勿重复同样补丁）
+    const loopInput = mocks.runAgentLoop.mock.calls[0][0] as { task: string; onCheckpoint?: unknown }
+    expect(loopInput.task).toContain('修复证据包')
+    expect(loopInput.task).toContain('fp-aaaa-1')
+    expect(loopInput.task).toContain('第1轮 改 src/app.js')
+    expect(loopInput.task).toContain('持续 1')
+    // 修复轮 onCheckpoint 已接线（检查点投影持久化）
+    expect(typeof loopInput.onCheckpoint).toBe('function')
+    // 账本：追加了本轮（round=2）尝试，files_touched 来自修复 loop 工具调用 path
+    const doc = readLoopCheckpointDocument(projectId)
+    expect(doc?.repair_attempts).toHaveLength(2)
+    expect(doc?.repair_attempts[1]).toMatchObject({ round: 2, files_touched: ['src/app.js'] })
+    expect(doc?.repair_attempts[1]?.outcome.persistent).toEqual([scenario])
+  })
+
+  // ---- B2（P0-B，2026-09-11 审计案 35c1a633）：修复轮零编辑守卫四态 ----
+  // 有编辑×off：既有测试全部覆盖（loopCompleted 带 edit_file + 开关缺省未设）。
+  function loopCompletedReadOnly() {
+    return {
+      status: 'completed' as const,
+      turns: 5,
+      finalText: '已检查相关代码，未发现需要修改的地方',
+      toolCalls: [
+        { name: 'read_file', turn: 1, path: 'src/app.js' },
+        { name: 'read_file', turn: 2, path: 'server/routes/records.js' },
+        { name: 'grep', turn: 3 },
+      ],
+    }
+  }
+
+  it('B2 零编辑×off：字节级现状——照常全量重验、计轮不回退、无 repair_noop_skipped', async () => {
+    delete process.env.BLOMA_REPAIR_NOOP_GUARD
+    mocks.runGwtScenarios.mockResolvedValue(gwtFailed()) // 首验与重验都失败
+    mocks.runAgentLoop.mockResolvedValue(loopCompletedReadOnly())
+
+    const result = await runAgentLoopPostTesting(baseInput())
+
+    // 现状路径：修复轮跑完照常重验（GWT 两次）+ 预算消耗 + 熔断口径不变
+    expect(mocks.runAgentLoop).toHaveBeenCalledTimes(1)
+    expect(mocks.runGwtScenarios).toHaveBeenCalledTimes(2)
+    expect(mocks.circuitBreakRollback).toHaveBeenCalledTimes(1)
+    expect(findProject(projectId).test_repair_count).toBe(1)
+    expect(result.verdict).toBe('blocked')
+    expect(decisionLines()).not.toContain('repair_noop_skipped')
+  })
+
+  it('B2 零编辑×on：不计轮不重验——计数回退、旁白如实、账本零编辑入档、照常熔断收口', async () => {
+    process.env.BLOMA_REPAIR_NOOP_GUARD = '1'
+    process.env.BLOMA_LOOP_CHECKPOINT = '1'
+    mocks.runGwtScenarios.mockResolvedValue(gwtFailed())
+    mocks.runAgentLoop.mockResolvedValue(loopCompletedReadOnly())
+
+    const result = await runAgentLoopPostTesting(baseInput())
+
+    // 产物未变：不重验（GWT 仅首验 1 次）、预算回退到 0
+    expect(mocks.runAgentLoop).toHaveBeenCalledTimes(1)
+    expect(mocks.runGwtScenarios).toHaveBeenCalledTimes(1)
+    expect(findProject(projectId).test_repair_count).toBe(0)
+    // 决策 + 旁白如实留痕
+    const log = decisionLines()
+    expect(log).toContain('repair_noop_skipped')
+    expect(log).toContain('不计入预算')
+    const notes = events.filter((event) => event.type === 'message_delta').map((event) => (event.payload as { text?: string }).text ?? '')
+    expect(notes.some((text) => text.includes('没有产生任何代码改动'))).toBe(true)
+    // 零编辑轮入 loop-checkpoint 账本：files_touched=[]，零 resolved（W4-F5 升级信号消费）
+    const doc = readLoopCheckpointDocument(projectId)
+    expect(doc?.repair_attempts).toHaveLength(1)
+    expect(doc?.repair_attempts[0]).toMatchObject({ round: 1, files_touched: [] })
+    expect(doc?.repair_attempts[0]?.outcome.resolved).toEqual([])
+    expect(doc?.repair_attempts[0]?.outcome.converged).toBe(false)
+    // 失败仍在 → 现状熔断口径收口（陷阱 37 不变）
+    expect(mocks.circuitBreakRollback).toHaveBeenCalledTimes(1)
+    expect(result.verdict).toBe('blocked')
+  })
+
+  it('B2 有编辑×on：正常重验不计零编辑（守卫不误伤）', async () => {
+    process.env.BLOMA_REPAIR_NOOP_GUARD = '1'
+    mocks.runGwtScenarios
+      .mockResolvedValueOnce(gwtFailed())
+      .mockResolvedValueOnce(gwtPassed())
+    mocks.runAgentLoop.mockResolvedValue(loopCompleted())
+
+    const result = await runAgentLoopPostTesting(baseInput())
+
+    expect(mocks.runAgentLoop).toHaveBeenCalledTimes(1)
+    expect(mocks.runGwtScenarios).toHaveBeenCalledTimes(2)
+    expect(decisionLines()).not.toContain('repair_noop_skipped')
+    expect(result.verdict).toBe('ready')
+    expect(findProject(projectId).test_repair_count).toBe(0)
+  })
+})
 describe('PR-C：build-gate 接入 + blocked 卡先修再验（入口 B）', () => {
   const originalPromaHome = process.env.PROMA_HOME
   let events: AgentEvent[] = []

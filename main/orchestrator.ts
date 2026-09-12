@@ -15,9 +15,13 @@ import type {
 } from '../shared/types'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
+import { appendSessionMessage } from './session-tree'
 import { buildThinkingFragment, type ThinkingLevel } from '../shared/reasoning-profile'
 import { SessionMessageQueue, type QueueEntry } from './message-queue'
+import { clearSteerQueue, rejectPendingSteer, steerConfirmEnabled, type SteerLedgerEntry } from './steer-queue'
+import { emitAgentEvent } from './agent-event-bus'
 import { hydrateMessagesImageBlocks } from './pasted-images'
+import { trackAnalytics } from './platform-services'
 export { buildSdkEnv } from './channel-manager'
 import {
   extractErrorStatusCode,
@@ -32,17 +36,19 @@ import { categoryForStage, categoryTemperature } from './model-resolution'
 import { handleGuideMessage } from './guide-agent-service'
 import {
   READY_COMPLETION_COPY,
+  clearPendingReviewAction,
   isIterationDecisionId,
   nextRequirementId,
+  publishReadyNextStepsCard,
   refineModificationDescription,
   resolveBlockedDecision,
   resumeBlockedFlow,
   runIterationTask,
   runSketchTask,
-  setPendingIteration,
+  setPendingReviewAction,
   setProgrammingEventPublisher,
   takeFailedIteration,
-  takePendingIteration,
+  takePendingReviewAction,
 } from './programming-orchestrator'
 import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from './requirement-normalizer'
 import { readPrdBackplane } from './document-engine'
@@ -213,7 +219,12 @@ let sdkQuery: SDKQuery = queryWithRuntimeFallback
 let retrySleep: (ms: number) => Promise<void> = sleep
 
 export function setAgentStreamPublisher(publisher: StreamPublisher): void {
-  streamPublisher = publisher
+  // P2-A 事件总线（2026-09-08）：接线时套一层 emit——事件先广播到 onAgentEvent 订阅面
+  // 再转发原发布目标；原发布链路零改动（行为不变，总线只读旁路）
+  streamPublisher = (event) => {
+    emitAgentEvent(event)
+    publisher(event)
+  }
 }
 
 export function setSDKQueryForTests(query: SDKQuery): void {
@@ -593,6 +604,9 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     // 阻塞态决策回传（A2/A3）：blocked_action 存在时优先恢复被阻塞的编程操作
     const blockedDecision = resolveBlockedDecision(input)
     if (blockedDecision !== undefined) {
+      // F-A 修复（2026-09-11 审计）：用户转点阻塞卡说明已离开「局部优化/整版重做」
+      // 补充流，残留标记会让下一句普通诉求被误当局部修改，先清
+      clearPendingReviewAction(input.project_id)
       if (blockedDecision === 'explain') {
         // 补充说明：清阻塞 + 回澄清，内容交给引导路径重新理解
         await resumeBlockedFlow(
@@ -611,9 +625,9 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       return { accepted: true, session_id: input.session_id, stream_started: true }
     }
 
-    // 修改确认卡回传（confirm/rephrase/cancel）：必须在引导路径之前拦截——
-    // 此刻权威阶段是 blocked_for_user_decision，若落入 handleGuideMessage 会被
-    // resolveCardAnswer 当成澄清卡答案误入草图生成。
+    // 修改确认卡回传（keep/refine/regenerate，2026-09-11 三按钮改版）：必须在引导路径
+    // 之前拦截——此刻权威阶段是 blocked_for_user_decision，若落入 handleGuideMessage
+    // 会被 resolveCardAnswer 当成澄清卡答案误入草图生成。
     if (input.metadata?.source === 'card_option' && isIterationDecisionId(input.metadata.selected_option_id)) {
       await resolveIterationDecisionFlow(input, streamPublisher, sdkQuery, abortController.signal)
       persistTerminalMessage(input.session_id, 'completed')
@@ -621,10 +635,48 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       return { accepted: true, session_id: input.session_id, stream_started: true }
     }
 
+    // P7-9b 后续批（2026-09-11）：decision_selected 其余卡接线③——就绪引导卡
+    //（next_backend 进迭代通道；export_handoff 走特调导出 IPC 不进本链零记录）。
+    // 窄判定零误记：只认 ready_next_steps 的专属选项 id，不碰澄清卡答案空间。
+    if (input.metadata?.source === 'card_option' && input.metadata.selected_option_id === 'next_backend') {
+      // F-A 修复：同上——用户转点引导卡，清残留补充态
+      clearPendingReviewAction(input.project_id)
+      try {
+        trackAnalytics({
+          request_id: input.request_id,
+          event: {
+            event_type: 'decision_selected',
+            project_id: input.project_id,
+            session_id: input.session_id,
+            payload: { stage: 'ready_next_steps', action: 'next_backend' },
+            privacy_level: 'research_safe',
+          },
+        })
+      } catch {
+        // 埋点失败不影响迭代链（后续正常消息链路继续）
+      }
+    }
+
     // U12：失败重试卡回传（selected_option_id === 'retry'）——取出上次失败诉求原样重跑，
     // 在引导路径/ready 护栏之前拦截（与修改确认卡同理），实现「一键重试」而非重新打字。
     if (input.metadata?.source === 'card_option' && input.metadata.selected_option_id === 'retry') {
       const failedPrompt = takeFailedIteration(input.project_id)
+      // P7-9b 后续批（2026-09-11）：decision_selected 其余卡接线②——失败重试卡
+      //（埋点在消费性 take 之后，用局部变量——先埋会拿走 failedPrompt）
+      try {
+        trackAnalytics({
+          request_id: input.request_id,
+          event: {
+            event_type: 'decision_selected',
+            project_id: input.project_id,
+            session_id: input.session_id,
+            payload: { stage: 'iteration_retry', action: 'retry', has_failed_prompt: failedPrompt !== undefined },
+            privacy_level: 'research_safe',
+          },
+        })
+      } catch {
+        // 埋点失败不影响重试链
+      }
       if (failedPrompt) {
         setProgrammingEventPublisher(streamPublisher)
         await runIterationTask({
@@ -652,6 +704,45 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       persistTerminalMessage(input.session_id, 'completed')
       streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
       return { accepted: true, session_id: input.session_id, stream_started: true }
+    }
+
+    // F-B 修复（2026-09-11 审计）：二次确认态（blocked）下用户打字 = 补充/修改重做方向，
+    // 更新方向并重发确认卡——绝不落入引导路径（否则确认卡悬挂、用户被引去澄清对话、
+    // 补充的话被当无关输入）。取消词清态回 ready；进度/寒暄放回标记交回常规。
+    if (authoritativeStage === 'blocked_for_user_decision' && input.metadata?.source !== 'card_option') {
+      const pendingReview = takePendingReviewAction(input.project_id)
+      if (pendingReview?.kind === 'rebuild_confirm') {
+        const trimmed = input.content.trim()
+        if (REFINE_CANCEL_RE.test(trimmed)) {
+          const copy = '好，先保持现在的版本。想改的时候再说。'
+          persistAssistant(copy)
+          streamPublisher(makeEvent(input, 'message_delta', { text: copy }))
+          persistTerminalMessage(input.session_id, 'completed')
+          streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
+          return { accepted: true, session_id: input.session_id, stream_started: true }
+        }
+        if (!PROGRESS_QUERY_RE.test(trimmed) && !TRIVIAL_ACK_RE.test(trimmed)) {
+          const direction = refineModificationDescription(trimmed) || trimmed
+          setPendingReviewAction(input.project_id, { kind: 'rebuild_confirm', direction })
+          recordDecision({
+            project_id: input.project_id,
+            session_id: input.session_id,
+            entry: {
+              type: 'modification_decision',
+              title: '整版重做方向已更新，重新确认',
+              why: `二次确认态下用户补充方向：「${direction}」；更新方向并重发确认卡（不打断确认流）`,
+            },
+          })
+          publishRebuildConfirmCard(input, streamPublisher, direction, persistAssistant, persistSystem)
+          persistTerminalMessage(input.session_id, 'completed')
+          streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
+          return { accepted: true, session_id: input.session_id, stream_started: true }
+        }
+        // 进度/寒暄：放回标记，交回常规（后续走 blocked 引导应答）
+        setPendingReviewAction(input.project_id, pendingReview)
+      } else if (pendingReview) {
+        setPendingReviewAction(input.project_id, pendingReview)
+      }
     }
 
     if (shouldUseGuideAgent(authoritativeStage)) {
@@ -772,6 +863,76 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     // 但必须做意图分流：识别到修改/调整/纠错类输入时，进入迭代重新生成流程，
     // 而不是一律返回固定文案——否则「已生成后继续改」会被挡成「修改黑洞」。
     if (authoritativeStage === 'ready' || authoritativeStage === 'completed') {
+      // 「局部优化 / 整版重做」补充态（2026-09-11 卡位改版）：用户在就绪三按钮卡上点了
+      // 局部优化/整版重做后，这一句就是他要说的话——
+      //  - optimize          → 直接走局部修改（localOnly，不弹卡）；
+      //  - rebuild_direction → 收集方向后转二次确认卡（不直接重做）；
+      //  - rebuild_confirm   → 等用户点二次确认卡，文不消费；
+      //  - 取消词            → 清标记回 ready。
+      const pendingReview = takePendingReviewAction(input.project_id)
+      if (pendingReview && pendingReview.kind === 'rebuild_confirm') {
+        // rebuild_confirm 态的主处理在 blocked 阶段拦截（见 guide 路由前）——
+        // publishRebuildConfirmCard 会把阶段置为 blocked_for_user_decision，用户打字
+        // 到不了这里；此处仅兼容异常残留（阶段被外部改回 ready），放回交回常规处理
+        setPendingReviewAction(input.project_id, pendingReview)
+      } else if (pendingReview) {
+        const trimmed = input.content.trim()
+        if (REFINE_CANCEL_RE.test(trimmed)) {
+          const copy = '好，先保持现在的版本。想改的时候再说。'
+          persistAssistant(copy)
+          streamPublisher(makeEvent(input, 'message_delta', { text: copy }))
+          persistTerminalMessage(input.session_id, 'completed')
+          streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
+          return { accepted: true, session_id: input.session_id, stream_started: true }
+        }
+        // 纯进度追问/寒暄不是具体诉求：不误起迭代，交回下方常规处理
+        if (!PROGRESS_QUERY_RE.test(trimmed) && !TRIVIAL_ACK_RE.test(trimmed)) {
+          if (pendingReview.kind === 'optimize') {
+            const localPrompt = refineModificationDescription(trimmed) || trimmed
+            recordDecision({
+              project_id: input.project_id,
+              session_id: input.session_id,
+              entry: {
+                type: 'modification_decision',
+                title: '局部优化（用户补充诉求）',
+                why: `就绪卡「局部优化」后补充的诉求：「${localPrompt}」；按局部修改处理（其余功能项保持现状）`,
+              },
+            })
+            setProgrammingEventPublisher(streamPublisher)
+            await runIterationTask({
+              request_id: input.request_id,
+              session_id: input.session_id,
+              project_id: input.project_id,
+              mode: input.mode,
+              prompt: localPrompt,
+              channel_id: input.channel_id,
+              query: sdkQuery,
+              signal: abortController.signal,
+              localOnly: true,
+            })
+            persistTerminalMessage(input.session_id, 'completed')
+            streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
+            return { accepted: true, session_id: input.session_id, stream_started: true }
+          }
+          // rebuild_direction：收集重做方向 → 二次确认卡（防误触），先不重做
+          const direction = refineModificationDescription(trimmed) || trimmed
+          setPendingReviewAction(input.project_id, { kind: 'rebuild_confirm', direction })
+          recordDecision({
+            project_id: input.project_id,
+            session_id: input.session_id,
+            entry: {
+              type: 'modification_decision',
+              title: '整版重做方向已收集，等待二次确认',
+              why: `就绪卡「整版重做」后补充的方向：「${direction}」；已转二次确认卡，确认后才重做`,
+            },
+          })
+          publishRebuildConfirmCard(input, streamPublisher, direction, persistAssistant, persistSystem)
+          persistTerminalMessage(input.session_id, 'completed')
+          streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
+          return { accepted: true, session_id: input.session_id, stream_started: true }
+        }
+      }
+
       const intent = await resolveModificationIntent({
         content: input.content,
         project_id: input.project_id,
@@ -783,35 +944,31 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
         providerType: channel?.provider_type,
       })
       if (intent === 'modify') {
-        // 修改确认门：修改是破坏性最大的操作（整版重造），必须与草图/MVP 一样先过一道
-        // 确认。直接开跑曾是「修改黑洞」的反面——误触发词表（如「换个话题」）会白白
-        // 重生成整版，且整句口语被逐字并入需求清单污染 PRD 背板。确认后才进入迭代。
-        const description = refineModificationDescription(input.content)
-        setPendingIteration(input.project_id, { raw: input.content, description })
+        // 用户直接打字提修改（未走就绪卡）：一律按「局部优化」处理（轻量局部修改），
+        // 不再弹确认卡——是轻量还是整版重做只由用户在就绪卡上的选项决定
+        //（2026-09-11 定案：分流只看用户选项，不看用户在输入框里说的话）。
+        const localPrompt = refineModificationDescription(input.content) || input.content.trim()
         recordDecision({
           project_id: input.project_id,
           session_id: input.session_id,
           entry: {
-            type: 'modification_gate',
-            title: '触发修改确认门',
-            why: `识别到修改诉求，原话「${input.content}」清洗为「${description}」；修改是整版重造，必须先过用户确认`,
+            type: 'modification_decision',
+            title: '用户提修改（默认局部优化）',
+            why: `ready 阶段直接打字提修改「${input.content}」；按局部优化处理（其余功能项保持现状）`,
           },
         })
-        updateProject(input.project_id, { current_stage: 'blocked_for_user_decision' })
-        streamPublisher(makeEvent(input, 'stage_changed', { stage: 'blocked_for_user_decision' }))
-        const confirmCopy = `我理解你想改：「${truncateForCopy(description, 40)}」，确认按这个方向重新生成一版吗？`
-        persistAssistant(confirmCopy)
-        persistSystem(`[decision-card] 对，就这样改｜不对，我重新说｜不改了`)
-        streamPublisher(makeEvent(input, 'message_delta', { text: confirmCopy }))
-        streamPublisher(makeEvent(input, 'user_decision_required', {
-          kind: 'iteration_confirm',
-          title: '确认修改方向',
-          questions: [
-            { id: 'confirm', label: '对，就这样改', description: '按这个修改点重新生成一版' },
-            { id: 'rephrase', label: '不对，我重新说', description: '再说一次你想怎么改' },
-            { id: 'cancel', label: '不改了', description: '保持当前版本' },
-          ],
-        }))
+        setProgrammingEventPublisher(streamPublisher)
+        await runIterationTask({
+          request_id: input.request_id,
+          session_id: input.session_id,
+          project_id: input.project_id,
+          mode: input.mode,
+          prompt: localPrompt,
+          channel_id: input.channel_id,
+          query: sdkQuery,
+          signal: abortController.signal,
+          localOnly: true,
+        })
         persistTerminalMessage(input.session_id, 'completed')
         streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
         return { accepted: true, session_id: input.session_id, stream_started: true }
@@ -1092,10 +1249,54 @@ export async function cancelAgent(input: AgentCancelInput): Promise<AgentCancelR
   for (const target of targets) {
     sessionMessageQueue.clear(target.sessionId)
     sessionMessageQueue.onRunComplete(target.sessionId, undefined, true)
+    // P0-1 steer（2026-09-08）：停止即清空待注入队列——「停止后被注入」绝不允许
+    //（注入语义以用户当前运行的 loop 存活为前提；runAgentLoop finally 另兜竞态窗口）。
+    // I3（P7-7，on 时）：清空前把未注入条目标 rejected——状态条如实翻「未采用·本轮
+    //  已停止」，用户提的修改不再静默消失（off 时零变化）。
+    if (steerConfirmEnabled()) rejectPendingSteer(target.sessionId)
+    clearSteerQueue(target.sessionId)
   }
   sessionMessageQueue.onRunComplete(input.session_id, undefined, true)
   sessionMessageQueue.clear(input.session_id)
+  if (steerConfirmEnabled()) rejectPendingSteer(input.session_id)
+  clearSteerQueue(input.session_id)
   return { cancelled: true, session_id: input.session_id }
+}
+
+/** I3 转向生效确认链（P7-7）：主进程侧发布 steer_status 事件（steer-queue 状态机
+ *  每次推进时经 setSteerStatusListener 接入ipc层→此处→streamPublisher→渲染端）。
+ *  事件形态对齐 makeEvent（steer-queue 不 import 本模块，注入式解耦）。 */
+export function publishSteerStatusEvent(entry: SteerLedgerEntry): void {
+  streamPublisher({
+    event_id: randomUUID(),
+    session_id: entry.sessionId,
+    project_id: entry.projectId,
+    type: 'steer_status',
+    payload: {
+      steer_id: entry.steerId,
+      content: entry.content,
+      impact: entry.impact,
+      status: entry.status,
+      at: entry.updatedAt,
+    },
+    created_at: new Date().toISOString(),
+  })
+}
+
+/** I3 deferred 持久化（2026-09-11 尾批）：留待下一轮达成时会话 JSONL 追加一条
+ *  [steer-deferred] system 行——状态条数据是内存态（重启丢），但待办作为文字记录
+ *  跨重启可见（HistoryMessages 回放加载）；同一条只 advance 一次，无重复落盘。
+ *  ipc 层 statusListener 单点拦截 deferred_next_run 时调用（与事件发布同源）。 */
+export function persistSteerDeferredNotice(sessionId: string, content: string): void {
+  try {
+    appendSessionMessage(sessionId, {
+      role: 'system',
+      content: [{ type: 'text', text: `[steer-deferred] 留待下一轮的修改：${content}——需要处理时直接把这条修改再发一遍即可开始下一轮。` }],
+      timestamp: Date.now(),
+    })
+  } catch {
+    // 落盘失败不阻断状态机（降级：待办仅会话内状态条可见）
+  }
 }
 
 /** 用户主动取消的判定：中止信号抛出的 AbortError 或查询入口的 AGENT_CANCELLED。 */
@@ -1105,7 +1306,7 @@ function isUserCancelled(error: unknown): boolean {
 }
 
 function appendAgentMessage(sessionId: string, message: AgentMessage): void {
-  appendJsonLine(getAgentSessionPath(sessionId), message)
+  appendSessionMessage(sessionId, message)
 }
 
 function persistAssistantMessages(sessionId: string, sdkMessages: SDKMessage[]): void {
@@ -1675,10 +1876,40 @@ function truncateForCopy(value: string, max: number): string {
 }
 
 /**
- * 修改确认卡三决策的分发：
- * - confirm：取出 pending，以清洗后的修改描述进入迭代（不再弹任何确认）；
- * - rephrase/cancel：终结 pending，回到 ready 并如实告知；
- * - pending 已丢失（如重启后点旧卡）：如实说明过期，回 ready 请用户重说。
+ * 发「确认整版重做」二次确认卡（防误触，2026-09-11 卡位改版）。
+ * rebuild_direction 收集到方向后与 rebuild_confirm 态更新方向后共用，保证两处
+ * 卡文案/选项/阶段流转一致；阶段随卡进入 blocked_for_user_decision。
+ */
+function publishRebuildConfirmCard(
+  input: AgentSendMessageInput,
+  streamPublisher: (event: AgentEvent) => void,
+  direction: string,
+  persistAssistant: (text: string) => void,
+  persistSystem: (text: string) => void,
+): void {
+  updateProject(input.project_id, { current_stage: 'blocked_for_user_decision' })
+  streamPublisher(makeEvent(input, 'stage_changed', { stage: 'blocked_for_user_decision' }))
+  const confirmCopy = `你要按「${truncateForCopy(direction, 40)}」整版重做——确认吗？重做会保留已确认的需求与草图，当前版本也会存为快照。`
+  persistAssistant(confirmCopy)
+  persistSystem('[decision-card] 确定整版重做｜再想想')
+  streamPublisher(makeEvent(input, 'message_delta', { text: confirmCopy }))
+  streamPublisher(makeEvent(input, 'user_decision_required', {
+    kind: 'rebuild_confirm',
+    title: '确认整版重做',
+    questions: [
+      { id: 'rebuild_confirm', label: '确定整版重做', description: '换一种方式重做（保留需求与草图）' },
+      { id: 'rebuild_cancel', label: '再想想', description: '先不重做，保持当前版本' },
+    ],
+  }))
+}
+
+/**
+ * MVP 就绪卡 / 二次确认卡的决策分发（2026-09-11 卡位改版）：
+ * - keep            保持现状：回 ready，随后发「走向完整产物」引导卡（ready_next_steps）；
+ * - optimize        局部优化：置 optimize 补充态 + 回 ready，等用户输入框说改哪里 → 局部修改；
+ * - rebuild         整版重做：置 rebuild_direction 补充态 + 回 ready，等用户说重做方向 → 二次确认；
+ * - rebuild_confirm 二次确认卡「确定整版重做」：取出已收集方向 → 整版重做（rebuild: true）；
+ * - rebuild_cancel  二次确认卡「再想想」：清态回 ready，保持当前版本。
  * 任一决策都会把阶段收敛回 ready / iterating，绝不悬在 blocked_for_user_decision。
  */
 async function resolveIterationDecisionFlow(
@@ -1688,56 +1919,129 @@ async function resolveIterationDecisionFlow(
   signal?: AbortSignal,
 ): Promise<void> {
   const decision = input.metadata?.selected_option_id
-  const pending = takePendingIteration(input.project_id)
+  const pendingAction = takePendingReviewAction(input.project_id)
 
-  if (decision === 'confirm' && pending) {
+  // P7-9b 后续批：decision_selected 埋点（就绪卡与二次确认卡同通道）
+  try {
+    trackAnalytics({
+      request_id: input.request_id,
+      event: {
+        event_type: 'decision_selected',
+        project_id: input.project_id,
+        session_id: input.session_id,
+        payload: { stage: 'mvp_review', action: decision ?? null, has_pending_action: pendingAction !== undefined },
+        privacy_level: 'research_safe',
+      },
+    })
+  } catch {
+    // 埋点失败不影响决策链
+  }
+
+  // 整版重做二次确认：确定 → 按已收集方向重做（方向并入需求清单，保留草图）
+  if (decision === 'rebuild_confirm' && pendingAction?.direction) {
+    const direction = pendingAction.direction
     recordDecision({
       project_id: input.project_id,
       session_id: input.session_id,
       entry: {
         type: 'modification_decision',
-        title: '用户确认修改',
-        why: `用户在确认卡点选「对，就这样改」，按已确认的修改点「${pending.description}」进入迭代重新生成`,
-        detail: { raw: pending.raw, description: pending.description },
+        title: '用户确认整版重做',
+        why: `二次确认通过，按方向「${direction}」整版重做（并入需求清单；保留草图；当前版本存快照）`,
+        detail: { direction },
       },
     })
     setProgrammingEventPublisher(streamPublisher)
+    updateProject(input.project_id, { current_stage: 'iterating' })
+    streamPublisher(makeEvent(input, 'stage_changed', { stage: 'iterating' }))
     await runIterationTask({
       request_id: input.request_id,
       session_id: input.session_id,
       project_id: input.project_id,
       mode: input.mode,
-      prompt: pending.description,
+      prompt: direction,
       channel_id: input.channel_id,
       query: sdkQuery,
       signal,
+      rebuild: true,
     })
     return
   }
 
-  const copy =
-    decision === 'confirm'
-      ? '刚才的确认卡片已过期，想修改的话请再说一次。'
-      : decision === 'rephrase'
-        ? '好的，你想怎么改，直接说就行。'
-        : '好的，先保持现在的版本。'
+  // 局部优化 / 整版重做：置补充态 + 回 ready，等用户在输入框补充（下一句消费）
+  if (decision === 'optimize' || decision === 'rebuild') {
+    const kind = decision === 'optimize' ? 'optimize' : 'rebuild_direction'
+    setPendingReviewAction(input.project_id, { kind })
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'modification_decision',
+        title: decision === 'optimize' ? '用户选择局部优化' : '用户选择整版重做（待问方向）',
+        why:
+          decision === 'optimize'
+            ? '就绪卡点「局部优化」；聚焦输入框，等用户说改哪里后走局部修改'
+            : '就绪卡点「整版重做」；聚焦输入框，等用户说重做方向后转二次确认',
+      },
+    })
+    const copy =
+      decision === 'optimize'
+        ? '好，说说你想改哪里——越具体越好，比如「标题改成计算助手」「把这个按钮换成蓝色」。'
+        : '好，说说你想往哪个方向重做——比如「改用卡片式布局」「把记账改成记时间」；说完我再跟你确认一次。'
+    updateProject(input.project_id, { current_stage: 'ready' })
+    streamPublisher(makeEvent(input, 'stage_changed', { stage: 'ready' }))
+    appendAgentMessage(input.session_id, {
+      role: 'assistant',
+      content: [{ type: 'text', text: copy }],
+      timestamp: Date.now(),
+    })
+    streamPublisher(makeEvent(input, 'message_delta', { text: copy }))
+    return
+  }
+
+  // keep：保持现状 → 回 ready + 顺势发「走向完整产物」引导卡
+  if (decision === 'keep') {
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'modification_decision',
+        title: '用户保持现状',
+        why: '就绪卡点「保持现状」；不改动，进入「走向完整产物」引导',
+      },
+    })
+    const copy = '好，那就保持这个版本。'
+    updateProject(input.project_id, { current_stage: 'ready' })
+    streamPublisher(makeEvent(input, 'stage_changed', { stage: 'ready' }))
+    appendAgentMessage(input.session_id, {
+      role: 'assistant',
+      content: [{ type: 'text', text: copy }],
+      timestamp: Date.now(),
+    })
+    streamPublisher(makeEvent(input, 'message_delta', { text: copy }))
+    // 引导卡走 programming-orchestrator 的 publish，需先接线事件发布器
+    setProgrammingEventPublisher(streamPublisher)
+    publishReadyNextStepsCard({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+    })
+    return
+  }
+
+  // rebuild_cancel（再想想）/ 待定状态丢失（如重启后点旧卡）
+  const expired = decision === 'rebuild_confirm'
+  const copy = expired
+    ? '刚才的重做确认已过期，想重做的话请再说一次方向。'
+    : '好，先保持现在的版本。'
   recordDecision({
     project_id: input.project_id,
     session_id: input.session_id,
     entry: {
       type: 'modification_decision',
-      title:
-        decision === 'confirm'
-          ? '确认卡已过期'
-          : decision === 'rephrase'
-            ? '用户要求重新描述'
-            : '用户放弃本次修改',
-      why:
-        decision === 'confirm'
-          ? '用户点了「对，就这样改」但待确认修改已丢失（如重启后点旧卡），回 ready 请用户重说'
-          : decision === 'rephrase'
-            ? `用户点「不对，我重新说」，放弃修改点「${pending?.description ?? '（已丢失）'}」，回 ready 等待重述`
-            : `用户点「不改了」，放弃修改点「${pending?.description ?? '（已丢失）'}」，保持当前版本`,
+      title: expired ? '重做确认卡已过期' : '用户放弃/保持当前版本',
+      why: expired
+        ? '用户点了「确定整版重做」但已收集方向丢失（如重启后点旧卡），回 ready 请用户重说'
+        : `决策 id=${decision ?? '空'}（如「再想想」），保持当前版本`,
     },
   })
   updateProject(input.project_id, { current_stage: 'ready' })
@@ -1767,6 +2071,14 @@ function isModificationIntent(text: string): boolean {
   //   实锤——completed 阶段用户说「生成完整程序」被 L1 漏、L3 判 other，固定文案挡回。
   return /(修改|改一改|改下|改一下|调整|纠错|重做|重来|重新|完整|补全|优化|修正|不要|不需要|只需要|只要|不用|就够了|去掉|删除|删掉|加一个|加个|加上|新增|变成|换成|改成|再来|换个|不对|不是|不满意|搞错|做错|错了|偏了|货不对板|啥意思|什么意思|这不是|我要的是|我想要的是|应该是)/.test(trimmed)
 }
+
+/**
+ * 「局部优化 / 整版重做」补充态的取消词（2026-09-11 卡位改版）：用户在卡上点了
+ * 局部优化/整版重做后改主意，整句即取消/保持现状时清标记回 ready，不误入修改。
+ * 整句锚定 + 词组可重复（覆盖「算了，不用了」类合并说法；避免「算了，改成蓝色」
+ * 含取消词的真修改诉求被误拦）。
+ */
+const REFINE_CANCEL_RE = /^((算了|不用了|不用改了|没事|没事了|保持现状|不改了|先不改|取消|暂时不用|就这样)[吧了。.!！~～，,\s]*)+$/
 
 /** 纯进度追问（好了吗/怎么样了）——固定「other」，绝不进修改/LLM 判定（延迟立场）。 */
 const PROGRESS_QUERY_RE = /(好了吗|好了没|好没好|做完了吗|做完了没|完成了吗|完成了没|怎么样|怎么样了|进展|进度|状态)/

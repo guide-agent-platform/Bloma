@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { AgentMessage } from '../shared/types'
 import { getAgentSessionPath, getDocumentsDir } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
+import { appendSessionMessage } from './session-tree'
 import { registerDecisionsDocument } from './document-engine'
 import { findProject } from './project-service'
 import { listSessions } from './session-service'
@@ -20,6 +21,9 @@ import { listSessions } from './session-service'
 export type DecisionType =
   | 'clarification_card'
   | 'clarification_answer'
+  /** Phase 7 U4 J2（2026-09-10）：对话内减负卡（先看方案/继续补充）与用户回答 */
+  | 'clarification_reduced_card'
+  | 'clarification_relief_answer'
   | 'clarification_forced_auto'
   | 'clarification_forced_confirm'
   | 'requirement_confirm_card'
@@ -60,6 +64,12 @@ export type DecisionType =
   | 'repair_round_started'
   | 'repair_round_completed'
   | 'repair_budget_exhausted'
+  /** B2（P0-B，2026-09-11 审计案 35c1a633）：修复轮零编辑不计轮——旁白与决策如实留痕 */
+  | 'repair_noop_skipped'
+  /** Phase 8 W1（2026-09-11 狗粮 94f449c6 复盘）：局部修改轮聚焦任务书生效（任务书快照入账） */
+  | 'iteration_brief'
+  /** Phase 8 W2-2：局部修改轮跳过骨架/模块库重渲染（决策噪音治理，如实留痕） */
+  | 'skeleton_render_skipped_local'
   /** L0 产物 UI 完整性硬门禁（artifact-ui-gate，2026-09-07）：探针结果必录 */
   | 'ui_gate'
   /** L1 双视觉审计（vision-audit-gate，2026-09-07）：passed/flagged/unavailable/skipped 均必录，绝不静默 */
@@ -103,7 +113,7 @@ export function recordDecision(input: RecordDecisionInput): void {
     ...input.entry,
     created_at: new Date().toISOString(),
   }
-  appendJsonLine(getAgentSessionPath(input.session_id), {
+  appendSessionMessage(input.session_id, {
     role: 'system',
     content: [{ type: 'text', text: `${DECISION_PREFIX} ${JSON.stringify(entry)}` }],
     timestamp: Date.now(),

@@ -4,17 +4,20 @@ import { join } from 'node:path'
 import type { AgentEvent, AgentLoopJudgeMetadata, AgentSendMessageInput, Channel, ChannelModel, DocumentSyncResult, MessageContentBlock, Project, ProjectMode, Snapshot, SnapshotKind, TemplateType } from '../../shared/types'
 import type { ThinkingLevel } from '../../shared/reasoning-profile'
 import { getAgentSessionPath, getDocumentsDir } from '../../storage/config-paths'
-import { appendJsonLine } from '../../storage/json-store'
-import { appendLoopLogDocument, loopLogEnabled, readPrdBackplane, readUxContractSketch, renamePrdProject, syncDocuments, updateRequirementStatus, type LoopLogEntry, writePlanDocument, writeSecurityScanDocument } from '../document-engine'
+import { appendSessionMessage } from '../session-tree'
+import { emitAgentEvent } from '../agent-event-bus'
+import { appendLoopLogDocument, loopLogEnabled, readLoopCheckpointDocument, readPrdBackplane, readUxContractSketch, renamePrdProject, syncDocuments, updateRequirementStatus, writeLoopCheckpointDocument, writeSecurityScanDocument, type LoopLogEntry, type LoopRepairAttemptRecord, writePlanDocument } from '../document-engine'
 import { appendProjectLearning, renderLearningsSection } from '../learnings-log'
 import { createSnapshot, runSandbox, trackAnalytics } from '../platform-services'
 import { renderPackageJson, renderStaticServer, renderSkeletonToProject, scaffoldEnabled } from '../project-scaffold'
 import { runBuildGate, type BuildGateResult } from './build-gate'
 import { runArtifactUiGate, uiGateEnabled, uiProbeNotes, type ArtifactUiGateResult } from './artifact-ui-gate'
+import { getCachedStaticEvidence, setCachedStaticEvidence } from './evidence-cache'
 import { runVisionAuditGate } from './vision-audit-gate'
-import { buildRepairTasks, resolveRepairBudget, runRepairLoop } from './repair-loop'
+import { buildRepairTasks, resolveRepairBudget, runRepairLoop, repairScopeEnabled, repairNoopGuardEnabled, hasWriteEditToolCall, type RepairCheckpointContext, type RepairTask } from './repair-loop'
+import { buildIterationTask, ITERATION_MODE_SECTION, iterationBriefEnabled, resolveAgentLoopMaxTurnsLocal } from './iteration-brief'
 import { recordFailureCards } from '../experience/error-card'
-import { generateLoopPlan, planLegEnabled, renderPlanInjection, renderPlanMarkdown, type LoopPlan } from './loop-planner'
+import { generateLoopPlan, planLegEnabled, renderPlanInjection, renderPlanMarkdown, renderTaskChecklist, type LoopPlan } from './loop-planner'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../project-service'
 import { appendProjectMapToSystem, loadProjectMapBlock } from '../project-map'
 import { resolveChannelEnv } from '../runtime-fallback'
@@ -22,10 +25,13 @@ import { loadSkeletonTemplate, type ProjectSkeleton } from '../project-templates
 import { buildLoopInjection, buildSkeletonMapInjection } from '../template-injection'
 import { buildModuleMapInjection, loadOfficialModules, modulesEnabled, renderOfficialModulesToProject } from '../module-library'
 import { listRefPatternModules, refLibraryEnabled } from '../experience/ref-source'
-import { backplaneInterfaceSpec, focusAnchorEnabled, renderBackplaneAnchor } from '../model/prd-backplane'
+import { backplaneInterfaceSpec, buildIterationRoundAnchor, buildRepairRoundAnchor, focusAnchorEnabled, gameDeriveExemptEnabled, renderBackplaneAnchor, renderRoundAnchorBlock, roundAnchorEnabled } from '../model/prd-backplane'
+import { gwtGameProbeEnabled } from '../gwt-runner'
+import { renderRulesSection, rulesForTemplateType, rulesRegistryEnabled } from '../rules-registry'
+import { renderExpressionSection } from '../prompt-expression'
 import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
 import { distillProjectMemorySafely } from '../memory-distiller'
-import { generateSketch, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from '../sketch-engine'
+import { generateSketch, backplaneKeyTasks, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from '../sketch-engine'
 import { generateSketchLlm, SketchLlmError, type SketchAttemptDetail } from '../sketch-engine-llm'
 import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from '../requirement-normalizer'
 import { readTestReport, runGwtScenarios, writeTestReport, type GwtFailureSummary, type GwtTestResult } from '../gwt-service'
@@ -37,7 +43,8 @@ import { assertToolAllowed } from '../permission-service'
 import { recordDecision } from '../decision-log'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from '../recovery-service'
 import { readPrimaryIntent, recordSessionActivity } from '../session-service'
-import { runAgentLoop, type AgentLoopResult } from '../agent-loop'
+import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, preflightEnabled, narrationEventsEnabled, loopProgressNudgeEnabled, taskWorkflowEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../agent-loop'
+import { deliveryStatusEnabled, recordDeliveryStatus, buildDeliveryPresentation, renderCircuitFailureNote, renderDeliveryBody, featureIdFromScenario } from './delivery-status'
 import { isDegenerateText } from './output-integrity'
 import { checkApiContract } from './api-contract'
 import { buildAgentTools } from '../agent-tools'
@@ -80,8 +87,9 @@ function throwIfAborted(signal?: AbortSignal): void {
 
 /** 被阻塞的编程操作类型（A2 resume 闭环，落盘到 Project.blocked_action） */
 export type BlockedAction = 'mvp_repair' | 'test_repair' | 'judge_return' | 'security_repair'
-/** 阻塞态让渡后用户回传的决策（A3：消费 metadata.selected_option_id 映射而来） */
-export type BlockedDecision = 'continue' | 'accept' | 'explain'
+/** 阻塞态让渡后用户回传的决策（A3：消费 metadata.selected_option_id 映射而来）。
+ *  regenerate=四问卡「按新方案生成一个版本」（H5 第四出口，仅 W4-F5 升级信号下出现）。 */
+export type BlockedDecision = 'continue' | 'accept' | 'explain' | 'regenerate'
 
 /** 阻塞态让渡卡片（A1：统一带 `id`，与引导澄清路径 questions 形态一致） */
 const BLOCKED_DECISION_QUESTIONS: { id: BlockedDecision; label: string; description: string }[] = [
@@ -89,6 +97,91 @@ const BLOCKED_DECISION_QUESTIONS: { id: BlockedDecision; label: string; descript
   { id: 'accept', label: '接受现状', description: '保留当前 MVP 先看看' },
   { id: 'explain', label: '补充说明', description: '告诉向导哪里不对' },
 ]
+
+/** Phase 7 U2 H5/H6（2026-09-10，E1 咨询）：决策卡条件化开关——BLOMA_DECISION_CONDITIONAL
+ * 缺省 off=字节级现状（固定三选项）。on 时让渡卡按失败原因条件化动作与推荐主按钮，
+ * accept 语义改「先使用已可用的部分」（不改 delivery_status、问题清单不清除持续可见）。
+ * H5（卡文案与推荐）与 H6（先用语义）同卡一体改造其用一开关，拆开会出现
+ * 「条件化卡+旧接受现状文案」的怪态（偏差已登记开关矩阵 §17）。 */
+export function decisionConditionalEnabled(): boolean {
+  const raw = (process.env.BLOMA_DECISION_CONDITIONAL ?? '').trim().toLowerCase()
+  return raw === '1' || raw === 'on' || raw === 'true'
+}
+
+/** 让渡卡条件化上下文（H5）：失败原因与可用部分判据（复用 delivery-status 归属口径）。 */
+export interface BlockedDecisionContext {
+  /** 失败场景清单（test_repair 路径；security/judge 可缺省） */
+  failures?: Array<{ scenario: string; reason?: string }>
+  /** 必交功能项集（主按钮推荐判据：有干净必交任务=存在可隔离可用部分） */
+  mustDeliverFeatureIds?: string[]
+  /** 失败类别（话术分档） */
+  reason: 'test' | 'security' | 'judge'
+  /** W4-F5 升级信号（连续 ≥2 轮修复零推进）：四问卡「按新方案生成一个版本」
+ *  第四出口的判据（E1 §五：仅连续修复无进展时出现，预算用完但有推进不推） */
+  escalated?: boolean
+}
+
+/**
+ * 条件化让渡卡选项（H5）：按失败原因生成动作体系——①修好「X」后再交付（有明确
+ * 下一步）②先使用已可用的部分（存在可隔离可用部分；H6 改名，不改 delivery_status
+ * 不清问题清单）③补充说明/调整需求（缺的是用户信息，不送回整个向导）。主按钮
+ * 按失败原因推荐+一句理由（推荐≠自动执行）；回传 id 仍为 continue/accept/explain
+ * 三值（resume 闭环零改动）。export：供单测直测（条件化承重）。 */
+export function buildBlockedQuestions(context: BlockedDecisionContext | undefined): { id: BlockedDecision; label: string; description: string }[] {
+  if (!context || !decisionConditionalEnabled()) return BLOCKED_DECISION_QUESTIONS
+  const failedIds = new Set(
+    (context.failures ?? []).map((f) => featureIdFromScenario(f.scenario)).filter((id): id is string => Boolean(id)),
+  )
+  const mustSet = new Set(context.mustDeliverFeatureIds ?? [])
+  const hasUsablePart = [...mustSet].some((id) => !failedIds.has(id))
+  const topFailedFeature = (context.failures ?? []).find((f) => {
+    const id = featureIdFromScenario(f.scenario)
+    return id && mustSet.has(id)
+  })
+  const topLabel = topFailedFeature
+    ? (featureIdFromScenario(topFailedFeature.scenario) ?? '')
+    : ''
+  const questions: { id: BlockedDecision; label: string; description: string }[] = []
+  if (context.reason === 'test') {
+    questions.push(
+      topLabel
+        ? { id: 'continue', label: `先修好${topLabel}再交付`, description: '推荐：修复目标明确，优先再修一次' }
+        : { id: 'continue', label: '继续修复', description: '推荐：再试一次修复' },
+    )
+    questions.push(
+      hasUsablePart
+        ? { id: 'accept', label: '先使用已可用的部分', description: '未通过的部分会如实登记（不算完成），随时可以再修' }
+        : { id: 'accept', label: '先保留这一版', description: '核心任务未通过，保留仅供查看，不建议当作可用版本' },
+    )
+  } else if (context.reason === 'security') {
+    questions.push(
+      { id: 'continue', label: '继续修复安全问题', description: '推荐：安全风险修好再用更稳妥' },
+      { id: 'accept', label: '先保留这一版（含安全风险）', description: '风险仍登记在案；不建议对外使用' },
+    )
+  } else {
+    // judge_return：方向性问题优先听用户说（不盲推重修）
+    questions.push(
+      { id: 'explain', label: '告诉我怎么调整', description: '推荐：审查意见需要你确认方向' },
+      { id: 'continue', label: '再试一次', description: '按当前要求重试' },
+      { id: 'accept', label: '先使用已可用的部分', description: '接受当前版本，问题保持登记' },
+    )
+  }
+  // explain 兜底追加（test/security 分支缺时补齐第三出口）
+  if (!questions.some((q) => q.id === 'explain')) {
+    questions.push({ id: 'explain', label: '补充说明', description: '告诉向导哪里不对' })
+  }
+  // H5 第四出口（仅 test 路径 + W4-F5 升级信号）：「按新方案生成一个版本」四问卡。
+  // E1 §五：是有理由的备选不是「修不好就抽卡重来」——只在连续修复无进展时出现；
+  // 四问正文随卡 body 呈现（publishBlockedDecision 处拼装）。
+  if (context.reason === 'test' && context.escalated) {
+    questions.push({
+      id: 'regenerate',
+      label: '按新方案生成一个版本',
+      description: '连续多轮修复都没有减少问题时的备选；保留已确认需求与草图',
+    })
+  }
+  return questions
+}
 
 export interface SketchTaskInput {
   request_id: string
@@ -119,9 +212,18 @@ export interface MvpTaskInput {
   query?: SDKQuery
   /** 停止生成信号（U5：迭代/生成期间点停止，abort 后中止 LLM 生成） */
   signal?: AbortSignal
+  /** Phase 8 W1：迭代路径透传的用户修改诉求原话（局部优化任务书主体；生成路径不传）。
+ *  仅 localOnly 路径消费（buildIterationTask），rebuild/全量生成忽略。 */
+  prompt?: string
   /** P3 迭代分级锚定：本轮聚焦的功能项 id（normalizer reviseId / append 新项 id）；
  *  仅迭代路径传入，生成路径缺省=全量锚定现状。受 BLOMA_FOCUS_ANCHOR 开关门控。 */
   focusRequirementIds?: string[]
+  /** 局部修改（2026-09-11「提出意见」路径）：强制开启聚焦锚定，无视快速/长期模式默认——
+   *  用户明确只要改这一处，必须把「其余功能项保持现状勿重做」送达模型。 */
+  localOnly?: boolean
+  /** 整版重做（2026-09-11「整版重做」路径）：不聚焦（全量锚定）、允许大改；
+   *  与 localOnly 互斥语义（同时传以 rebuild 为准）。 */
+  rebuild?: boolean
 }
 
 export interface MvpTaskResult {
@@ -149,7 +251,12 @@ export function setForegroundRunChecker(checker: (sessionId: string) => boolean)
 }
 
 export function setProgrammingEventPublisher(publisher: ProgrammingEventPublisher): void {
-  programmingEventPublisher = publisher
+  // P2-A 事件总线（2026-09-08）：接线时套一层 emit——事件先广播到 onAgentEvent 订阅面
+  // 再转发原发布目标；原发布链路零改动（行为不变，总线只读旁路）
+  programmingEventPublisher = (event) => {
+    emitAgentEvent(event)
+    publisher(event)
+  }
 }
 
 export async function runSketchTask(input: SketchTaskInput): Promise<SketchTaskResult> {
@@ -180,7 +287,7 @@ export async function runSketchTask(input: SketchTaskInput): Promise<SketchTaskR
       },
     })
     const copy = sketchFallbackCopy(fallbackReason)
-    appendJsonLine(getAgentSessionPath(input.session_id), {
+    appendSessionMessage(input.session_id, {
       role: 'assistant',
       content: [{ type: 'text', text: copy }],
       timestamp: Date.now(),
@@ -592,6 +699,21 @@ export function resolveAgentLoopMaxTurns(mode: ProjectMode): number {
   return Number.isFinite(parsed) && floored > 0 ? floored : fallback
 }
 
+/**
+ * Phase 8 W1：轮次预算按任务比例收窄——局部修改轮（localOnly + 开关开）用独立档
+ * （BLOMA_LOOP_MAX_TURNS_LOCAL 缺省 12），其余路径字节级=现状 resolveAgentLoopMaxTurns。
+ * 对齐「过程按比例」原则：一行修复不应占用全量 40 轮预算，小预算快速熔断损失可控。
+ */
+export function resolveLoopMaxTurnsForInput(input: { mode: ProjectMode; localOnly?: boolean; rebuild?: boolean }): number {
+  if (iterationBriefEnabled() && input.localOnly && !input.rebuild) return resolveAgentLoopMaxTurnsLocal()
+  return resolveAgentLoopMaxTurns(input.mode)
+}
+
+/** Phase 8 W1：局部修改轮聚焦任务书是否生效（开关开 + localOnly + 非 rebuild）。 */
+export function iterationBriefActive(input: { localOnly?: boolean; rebuild?: boolean }): boolean {
+  return iterationBriefEnabled() && input.localOnly === true && input.rebuild !== true
+}
+
 /** 子 agent 独立轮次上限（比主 loop 小，控制委派 token 成本；按埋点标定）。 */
 const DELEGATION_MAX_TURNS = 12
 
@@ -919,9 +1041,13 @@ function mergeAssetMap(skeletonMap: string | null, moduleMap: string | null): st
 /** P3 分级锚定解析：focusRequirementIds 非空且开关开（BLOMA_FOCUS_ANCHOR 缺省
  * longterm=on / quick=off，D7 连锁）才生效；否则 undefined=全量锚定现状。 */
 function resolveFocusAnchor(input: MvpTaskInput): string[] | undefined {
+  // 整版重做：不聚焦（全量锚定、允许大改）——即使 normalizer 派生了焦点也忽略。
+  if (input.rebuild) return undefined
   const ids = input.focusRequirementIds
   if (!ids || ids.length === 0) return undefined
-  if (!focusAnchorEnabled(input.mode)) return undefined
+  // localOnly（「局部优化」）：强制开启聚焦，无视 quick/longterm 默认——
+  // 用户明确只要改这一处，必须把「其余保持现状勿重做」的锚定送达模型。
+  if (!input.localOnly && !focusAnchorEnabled(input.mode)) return undefined
   return ids
 }
 
@@ -930,6 +1056,64 @@ function appendLoopLogSafely(projectId: string, entry: LoopLogEntry): void {
   if (!loopLogEnabled()) return
   try {
     appendLoopLogDocument(projectId, entry)
+  } catch {
+    // 写盘失败静默
+  }
+}
+
+/** W2-E2/E3：检查点 runtime 投影持久化（BLOMA_LOOP_CHECKPOINT off=零写盘；失败静默不阻断）。 */
+function persistCheckpointRuntime(projectId: string, snapshot: LoopCheckpointSnapshot): void {
+  if (!loopCheckpointEnabled()) return
+  try {
+    const existing = readLoopCheckpointDocument(projectId)
+    writeLoopCheckpointDocument(projectId, {
+      version: 1,
+      project_id: projectId,
+      updated_at: new Date().toISOString(),
+      runtime: snapshot,
+      repair_attempts: existing?.repair_attempts ?? [],
+    })
+  } catch {
+    // 写盘失败静默（检查点是增强不是依赖）
+  }
+}
+
+/** W4-F1：修复证据包上下文（读检查点账本：候选指纹+此前修复尝试）；连续 ≥2 轮零修复 → 升级诊断态。 */
+function buildRepairCheckpointContext(projectId: string): RepairCheckpointContext {
+  const doc = readLoopCheckpointDocument(projectId)
+  const attempts = doc?.repair_attempts ?? []
+  const recent = attempts.slice(-2)
+  const escalation =
+    recent.length === 2 && recent.every((a) => a.outcome.resolved.length === 0 && !a.outcome.converged)
+      ? ('diagnosis' as const)
+      : undefined
+  return {
+    ...(doc?.runtime?.validation?.candidate_fingerprint
+      ? { candidate_fingerprint: doc.runtime.validation.candidate_fingerprint }
+      : {}),
+    attempts,
+    ...(escalation ? { escalation } : {}),
+  }
+}
+
+/** W4-F2：从修复任务派生本轮修改授权——只认文件型 location（.js/.html/.css）；
+ *  场景锚点不当白名单（D4 裁决），派生不出即不设边界（fail-open）。 */
+function deriveAuthorizedWritePaths(tasks: RepairTask[]): string[] | undefined {
+  const paths = [...new Set(tasks.map((task) => task.location ?? '').filter((loc) => /\.(js|html|css)$/i.test(loc)))]
+  return paths.length > 0 ? paths : undefined
+}
+
+/** W2-F1：修复尝试记录追加进检查点账本（保留 runtime 投影不动）。 */
+function appendRepairAttemptRecord(projectId: string, record: LoopRepairAttemptRecord): void {
+  try {
+    const existing = readLoopCheckpointDocument(projectId)
+    writeLoopCheckpointDocument(projectId, {
+      version: 1,
+      project_id: projectId,
+      updated_at: new Date().toISOString(),
+      ...(existing?.runtime ? { runtime: existing.runtime } : {}),
+      repair_attempts: [...(existing?.repair_attempts ?? []), record].slice(-20),
+    })
   } catch {
     // 写盘失败静默
   }
@@ -960,6 +1144,10 @@ async function tryGenerateLoopPlanLeg(
     env: loop.env,
     sessionId: input.session_id,
     ...(focus && focus.length > 0 ? { focusRequirementIds: focus } : {}),
+    // Phase 8 W2-3：局部修改轮定位合同（只改既有文件；模型给出不存在文件时硬剔除）
+    ...(iterationBriefActive(input)
+      ? { localOnly: true, localPrompt: input.prompt, projectRootPath: findProject(input.project_id).root_path }
+      : {}),
     ...(loop.channel.provider_type !== undefined ? { providerType: loop.channel.provider_type } : {}),
     ...(input.signal ? { signal: input.signal } : {}),
   })
@@ -1012,7 +1200,27 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   const editFormat = loop.model?.edit_format ?? 'diff'
   const startedAt = Date.now()
   // PR-1 骨架先行 + 官方模块库：渲染成功后骨架地图/模块地图随 system prompt 常驻（事实与注入同源）
-  const { map: skeletonMap, skeleton, rendered, moduleMap } = prepareSkeletonBeforeLoop(input, backplane, project)
+  // Phase 8 W2-2：局部修改轮跳过骨架/模块库重渲染——项目已实现（骨架幂等跳过只剩决策
+  // 噪音），文件全貌由项目地图（buildLoopSystemWithOverride 尾部注入）承担；跳过如实落决策。
+  // 非 localOnly / 开关关 = 现状渲染（字节级）。
+  if (iterationBriefActive(input)) {
+    try {
+      recordDecision({
+        project_id: input.project_id,
+        session_id: input.session_id,
+        entry: {
+          type: 'skeleton_render_skipped_local',
+          title: '局部修改轮跳过骨架/模块库重渲染',
+          why: 'localOnly 聚焦任务书生效：项目已实现，文件全貌由项目地图（system 尾部注入）承担，重渲染只产生决策噪音',
+        },
+      })
+    } catch {
+      // 决策日志失败不阻断主链路
+    }
+  }
+  const { map: skeletonMap, skeleton, rendered, moduleMap } = iterationBriefActive(input)
+    ? { map: null as string | null, skeleton: null as ProjectSkeleton | null, rendered: undefined, moduleMap: null as string | null }
+    : prepareSkeletonBeforeLoop(input, backplane, project)
   // P3 分级锚定：focus 生效时（迭代路径透传 + BLOMA_FOCUS_ANCHOR 开）背板/骨架地图
   // 裁细节不减锚；生成路径/开关关 → undefined=全量锚定现状（字节级等价）
   const focus = resolveFocusAnchor(input)
@@ -1029,7 +1237,23 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
       : skeletonMap
   const buildSystemWithPlan = (fmt: 'diff' | 'whole'): string => {
     const base = buildLoopSystemWithOverride(backplane, fmt, input.project_id, effectiveSkeletonMap, focus, moduleMap)
-    return planInjection ? `${base}\n\n${planInjection}` : base
+    // Phase 3 B3：迭代轮本轮锚（聚焦路径才有；开关 off=零注入字节级现状）。
+    // Phase 8 W1：localOnly（局部优化）强制开启——照 resolveFocusAnchor 的 localOnly
+    // 先例（用户明确只要改这一处，本轮锚必须送达；开关总开关 off 时字节级现状）。
+    const briefActive = iterationBriefActive(input)
+    const roundAnchorBlock =
+      focus && focus.length > 0 && (roundAnchorEnabled() || briefActive)
+        ? `\n\n${renderRoundAnchorBlock(buildIterationRoundAnchor(backplane, focus))}`
+        : ''
+    // Phase 8 W1：【修改模式】段（语义对齐 repair-loop REPAIR_MODE_SECTION：任务书即
+    // 全部工作，不要重新生成整个项目）；非 localOnly / 开关关 = 零注入字节级现状。
+    const iterationModeBlock = briefActive ? `\n\n${ITERATION_MODE_SECTION}` : ''
+    // W5-1（Phase 8.5）：实施清单（checklist 化 plan）——生成路径且开关开时注入，
+    // 提供逐项推进工作结构；局部修改轮不叠加（聚焦任务书已含工作法）
+    const checklistBlock = !briefActive && taskWorkflowEnabled() && loopPlan ? `\n\n${renderTaskChecklist(loopPlan)}` : ''
+    return planInjection
+      ? `${base}${roundAnchorBlock}${iterationModeBlock}\n\n${planInjection}${checklistBlock}`
+      : `${base}${roundAnchorBlock}${iterationModeBlock}${checklistBlock}`
   }
   // 委派协作（嫁接方案 §4.1）：注册父 loop 上下文供 delegate_agent 构建子循环；子工具集按 role 裁剪
   setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
@@ -1037,7 +1261,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     query: input.query!,
     env: loop.env,
     maxTokens: resolveGenerationMaxTokens(loop.channel),
-    maxTurns: resolveAgentLoopMaxTurns(input.mode),
+    maxTurns: resolveLoopMaxTurnsForInput(input),
     delegationMaxTurns: DELEGATION_MAX_TURNS,
     permissionMode: AUTOMATED_PERMISSION_MODE,
     temperature: categoryTemperature('mvp'),
@@ -1062,6 +1286,19 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
         },
       })
     },
+    // W1-E1（咨询 D3）：子 loop 压缩观测同接入 analytics（与 onChildTurn 同模式）
+    onChildCompaction: (info, child) => {
+      trackAnalytics({
+        request_id: child.requestId,
+        event: {
+          event_type: 'agent_loop_compact',
+          project_id: input.project_id,
+          session_id: child.sessionId,
+          payload: { ...info, via: 'delegation', role: child.role },
+          privacy_level: 'research_safe',
+        },
+      })
+    },
   })
 
   recordDecision({
@@ -1070,14 +1307,35 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     entry: {
       type: 'agent_loop',
       title: 'Agent Loop 生成启用',
-      why: `BLOMA_AGENT_LOOP=1 且渠道 ${loop.channel.name}/${loop.env.ANTHROPIC_MODEL} 支持 tool use，MVP 走 agentic loop 生成（maxTurns=${resolveAgentLoopMaxTurns(input.mode)}，edit_format=${editFormat}）`,
+      why: `BLOMA_AGENT_LOOP=1 且渠道 ${loop.channel.name}/${loop.env.ANTHROPIC_MODEL} 支持 tool use，MVP 走 agentic loop 生成（maxTurns=${resolveLoopMaxTurnsForInput(input)}，edit_format=${editFormat}${iterationBriefActive(input) ? '，局部修改轮聚焦任务书生效' : ''}）`,
       detail: {
         repair_budget_mapping: 'loop 内「GWT 失败后的 edit_file/write_file」预算 3 次，同构旧管道 test_repair_count ≤ 3',
-        max_turns: resolveAgentLoopMaxTurns(input.mode),
+        max_turns: resolveLoopMaxTurnsForInput(input),
         edit_format: editFormat,
       },
     },
   })
+
+  // Phase 8 W1：局部修改轮聚焦任务书生效如实落决策（任务书快照入账，事后可审计）
+  if (iterationBriefActive(input)) {
+    try {
+      recordDecision({
+        project_id: input.project_id,
+        session_id: input.session_id,
+        entry: {
+          type: 'iteration_brief',
+          title: '局部修改轮聚焦任务书生效',
+          why: `localOnly 路径不再使用全量 MVP 任务书：用户诉求原话即任务主体（maxTurns 收窄至 ${resolveLoopMaxTurnsForInput(input)}），system 附【修改模式】段与本轮锚`,
+          detail: {
+            task: buildIterationTask(input.prompt ?? ''),
+            max_turns: resolveLoopMaxTurnsForInput(input),
+          },
+        },
+      })
+    } catch {
+      // 决策日志失败不阻断主链路
+    }
+  }
 
   let result: AgentLoopResult
   // P3 loop-log：会话头先行（mode/maxTurns/plan 摘要行——B 依赖 A 的合同存在性）；
@@ -1085,11 +1343,11 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   appendLoopLogSafely(input.project_id, {
     kind: 'session_start',
     mode: input.mode,
-    maxTurns: resolveAgentLoopMaxTurns(input.mode),
+    maxTurns: resolveLoopMaxTurnsForInput(input),
     planSummary: loopPlan
       ? `${loopPlan.filesToTouch.length} 个目标文件：${loopPlan.filesToTouch.map((file) => file.path).join('、')}`
       : null,
-    label: snapshotKind === 'iteration' ? '迭代重生成' : 'MVP 生成',
+    label: snapshotKind === 'iteration' ? (iterationBriefActive(input) ? '迭代重生成（局部修改）' : '迭代重生成') : 'MVP 生成',
   })
   // 异常终态的计数量口径：onTurn 已写入盘的轮次/工具数（崩溃时 loop-log 本身即证据）
   let loggedTurns = 0
@@ -1097,7 +1355,15 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   try {
     result = await runAgentLoop({
     system: buildSystemWithPlan(editFormat),
-    task: buildAgentLoopTask(backplane, input.mode),
+    // Phase 8 W1：局部修改轮用聚焦任务书（用户诉求原话即任务主体）；其余路径字节级=现状
+    // Phase 8 W1 / W5-4：局部修改轮用聚焦任务书；生成路径任务书在 W5 开时升级为
+    // 「逐项推进工作法」（对齐正常 agent 工作流）；其余路径字节级=现状全量任务书
+    task: iterationBriefActive(input) && input.prompt
+      ? buildIterationTask(input.prompt)
+      : buildAgentLoopTask(backplane, input.mode, input),
+    // B3（P0-B，2026-09-11）：技术合同清单透传进度对账守卫（BLOMA_LOOP_PROGRESS_NUDGE
+    // off 时不读不注入字节级现状；无 plan 自然无守卫2，守卫1/3 照常）
+    ...(loopProgressNudgeEnabled() && loopPlan ? { planFiles: loopPlan.filesToTouch.map((file) => file.path) } : {}),
     // toolBudget 首个生产接线（闭环 PR5）：web_research 每次都 fork 调研子代理，
     // 限 4 次防长 loop 无节制外呼；超限走既有 budgetExhausted 软着陆
     toolBudget: { web_research: WEB_RESEARCH_BUDGET },
@@ -1124,7 +1390,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     projectId: input.project_id,
     requestId: input.request_id,
     maxTokens: resolveGenerationMaxTokens(loop.channel),
-    maxTurns: resolveAgentLoopMaxTurns(input.mode),
+    maxTurns: resolveLoopMaxTurnsForInput(input),
     permissionMode: AUTOMATED_PERMISSION_MODE,
     temperature: categoryTemperature('mvp'),
     providerType: loop.channel.provider_type,
@@ -1159,6 +1425,21 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
         ...(info.outputTokens !== undefined ? { outputTokens: info.outputTokens } : {}),
       })
     },
+    // W1-E1（咨询 D3，2026-09-09）：竹节压缩观测埋点（压缩发生或首次跳过；纯埋点零行为变更）
+    onCompaction: (info) => {
+      trackAnalytics({
+        request_id: input.request_id,
+        event: {
+          event_type: 'agent_loop_compact',
+          project_id: input.project_id,
+          session_id: input.session_id,
+          payload: { ...info, via: 'mvp' },
+          privacy_level: 'research_safe',
+        },
+      })
+    },
+    // W2-E2/E3（咨询 D3/D4）：检查点 runtime 投影持久化（事件驱动：steer/验证工具/压缩/终态）
+    onCheckpoint: (snapshot) => persistCheckpointRuntime(input.project_id, snapshot),
   })
   } catch (loopError) {
     // P3 loop-log：异常终态如实写终态节（硬约束 7：cancelled/error 也要终态节）后原样上抛
@@ -1180,6 +1461,7 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     status: result.status,
     turns: result.turns,
     toolCalls: result.toolCalls.length,
+    ...(result.termination_detail ? { terminationReason: 'degenerate_output（末轮输出退化，非轮数耗尽）' } : {}),
   })
 
   const durationMs = Date.now() - startedAt
@@ -1197,6 +1479,31 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
         total_tool_calls: result.toolCalls.length,
         duration_ms: durationMs,
         tool_distribution: toolDistribution,
+        // W1-E1（咨询 D3）：cancelled 触发源细分（phase=loop 内观察点，source=abort reason 解析，
+        // 如 user_cancelled）+ 会话级 usage 聚合（turns_with_usage=0 即渠道盲，压缩从未触发过）
+        ...(result.cancel_detail
+          ? {
+              cancel_phase: result.cancel_detail.phase,
+              ...(result.cancel_detail.source !== undefined ? { cancel_source: result.cancel_detail.source } : {}),
+              ...(result.cancel_detail.reason !== undefined ? { cancel_reason: result.cancel_detail.reason } : {}),
+            }
+          : {}),
+        // P2a（2026-09-11）：异常终止真实出口原因（degenerate_output ≠ 真实跑满轮数）
+        ...(result.termination_detail
+          ? { termination_reason: result.termination_detail.reason, termination_retries: result.termination_detail.retries }
+          : {}),
+        // D2（2026-09-11 狗粮 dd6ba98d）：DSML 传输事故恢复轮数（只读调用救回次数）
+        ...(result.transport_recoveries !== undefined ? { transport_recoveries: result.transport_recoveries } : {}),
+        ...(result.usage
+          ? {
+              usage: {
+                input_tokens_total: result.usage.inputTokens,
+                output_tokens_total: result.usage.outputTokens,
+                est_context_tokens: result.usage.estContextTokens,
+                turns_with_usage: result.usage.turnsWithUsage,
+              },
+            }
+          : {}),
       },
       privacy_level: 'research_safe',
     },
@@ -1206,9 +1513,19 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     session_id: input.session_id,
     entry: {
       type: 'agent_loop',
-      title: `Agent Loop 结束（${result.status}）`,
-      why: `${result.turns} 轮、${result.toolCalls.length} 次工具调用、耗时 ${durationMs}ms；终验仍由外部代码执行（不信模型自述）`,
-      detail: { status: result.status, turns: result.turns, tool_distribution: toolDistribution },
+      title: `Agent Loop 结束（${result.status}${result.termination_detail ? '·输出退化' : ''}）`,
+      why: `${result.turns} 轮、${result.toolCalls.length} 次工具调用、耗时 ${durationMs}ms${
+        result.termination_detail
+          ? `；末轮输出退化（协议原文漏进正文，重试 ${result.termination_detail.retries} 次仍脏——非真实跑满轮数）`
+          : ''
+      }${result.transport_recoveries ? `；DSML 传输事故恢复 ${result.transport_recoveries} 次（只读调用解析回工具调用执行）` : ''}；终验仍由外部代码执行（不信模型自述）`,
+      detail: {
+        status: result.status,
+        turns: result.turns,
+        tool_distribution: toolDistribution,
+        ...(result.termination_detail ? { termination: result.termination_detail } : {}),
+        ...(result.transport_recoveries !== undefined ? { transport_recoveries: result.transport_recoveries } : {}),
+      },
     },
   })
 
@@ -1231,7 +1548,14 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   if (result.status === 'turn_limit' || result.status === 'budget_exhausted') {
     recordFailureCards(
       { projectId: input.project_id, sessionId: input.session_id },
-      { abnormal: { outcomeType: 'timeout', description: `Agent Loop 未正常收尾（${result.status}，${result.turns} 轮）` } },
+      {
+        abnormal: {
+          outcomeType: 'timeout',
+          description: `Agent Loop 未正常收尾（${result.status}，${result.turns} 轮${
+            result.termination_detail ? '，末轮输出退化（传输事故）' : ''
+          }）`,
+        },
+      },
     )
   }
 
@@ -1342,7 +1666,7 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
   const constraints = backplane.constraints?.length
     ? backplane.constraints.map((entry) => `- ${entry}`).join('\n')
     : '- （无）'
-  return [
+  const arr = [
     '你是 Bloma 编程 Agent，用提供的工具亲手构建并验证一个可运行的应用。',
     '',
     '【项目锚（每轮有效，一切决策不得漂移出此范围）】',
@@ -1369,6 +1693,17 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
           `- 数值基准：${backplane.gdd.numbers.length ? backplane.gdd.numbers.join('；') : '（无）'}`,
         ]
       : []),
+    // C4（2026-09-11 拍板）：游戏探针通道契约——位移类断言经 window.__g 读游戏状态判定
+    //（canvas 无 DOM 位移可探）；不实现通道则位移断言无法判定。开关 off 零注入。
+    ...(gwtGameProbeEnabled() && backplane.gdd
+      ? [
+          '【游戏探针通道】（终验位移断言依赖，必须实现）：在游戏入口挂 window.__g 只读通道：' +
+            '__g.mode 返回当前游戏阶段字符串（\'menu\'|\'playing\'|\'paused\'|\'gameover\' 等小写）；' +
+            '__g.state() 返回玩家状态快照（含 x/y 数字坐标——顶层 {x,y} 或 player 子对象均可，canvas 内坐标）。' +
+            '终验「按键→位移」断言会真实派发按键并经此通道读取坐标变化判定；只读暴露游戏内部状态，不含任何测试投机逻辑。' +
+            '游戏初始停在菜单态时终验会自动点开始类按钮进入 playing。',
+        ]
+      : []),
     '功能项（P0 必须全部实现且断言为真）：',
     // P3 分级锚定提示行（仅 focus 生效时存在）：其余项断言细节已折叠但探针仍全量验证，
     // 防止「折叠=可以不做」的误读（P0 执行面不裁，D3+硬约束 4）
@@ -1389,23 +1724,54 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     '【工作方式】',
     '逐功能项实现：write_file/edit_file 写代码 → run_preview 确认可运行 → ' +
     'run_gwt_tests 对照行为断言 → 失败先 read_file/grep 定位再修 → 全部 P0 断言通过后 ' +
-    'run_security_scan 确认无高危。',
+    // D1（咨询 D，2026-09-09）：开关 on 时验证链补 API 契约（数据留存/接口类项目收口前必验）；
+    // W3-D1/D2：BLOMA_PREFLIGHT on 时验证链收口为 run_preflight 一次跑全部验证面；off 保留原文（字节级现状）。
+    (preflightEnabled()
+      ? 'run_preflight 收口预检（一次跑全部验证面：GWT 全量/API 契约/产物审计/安全）。'
+      : loopApiToolEnabled()
+        ? 'run_api_contract_tests 验证接口契约（声明了 interface_spec 的项目）→ run_security_scan 确认无高危。'
+        : 'run_security_scan 确认无高危。'),
     // P5 先读再改纪律（2026-09-04）：防凭记忆/凭 plan 推断文件现状（文件可能已被
     // 修复轮或上一迭代修改）；MVP 首跑无副作用（新文件不触发）；与 P3 plan 合同
-    // 不冲突（plan 是参考，read 是事实）
-    '- 修改已存在于骨架或前轮产物中的文件前，先用 read_file 读该文件当前内容再编辑；' +
-    '禁止凭记忆或凭 plan 推断文件现状（文件可能已被修复轮或上一迭代修改）。',
+    // 不冲突（plan 是参考，read 是事实）。
+    // Phase 3 B2（2026-09-09）：开关 on 时本内联行让位给 rules-registry R-FILE-01
+    // （四段式完整定义单点化，防双源）；off 保留原文（字节级现状）。
+    ...(rulesRegistryEnabled()
+      ? []
+      : [
+          '- 修改已存在于骨架或前轮产物中的文件前，先用 read_file 读该文件当前内容再编辑；' +
+          '禁止凭记忆或凭 plan 推断文件现状（文件可能已被修复轮或上一迭代修改）。',
+        ]),
     editFormat === 'diff'
       ? '编辑用 edit_file 的 diff 模式（old_string 必须与当前文件逐字一致且唯一）。'
       : '编辑用 edit_file 的 whole 模式（提供修改后的完整文件内容）。',
+    // Phase 3 B2：操作契约注册表段（触发—必须—禁止替代—受阻四段式，R-* 单点定义）。
+    ...(rulesRegistryEnabled() ? ['', renderRulesSection(rulesForTemplateType(templateType))] : []),
     '',
-    '【终止条件】全部 P0 断言通过 + 安全扫描无高危，才输出完成总结（含做了什么、' +
+    // D1：开关 on 时终止条件升级为全验证面（GWT+API 契约+安全）；off 保留原文。
+    // W3-D2：BLOMA_PREFLIGHT on 时收口条件=预检通过（GWT/API/产物审计/安全一次过）。
+    (preflightEnabled()
+      ? '【终止条件】run_preflight 收口预检全部通过（GWT 全量 + API 契约（声明了 interface_spec 的项目）+ 产物审计 + 安全扫描），才输出完成总结（含做了什么、'
+      : loopApiToolEnabled()
+        ? '【终止条件】全部 P0 断言通过 + API 契约验证通过（声明了 interface_spec 的项目必须 run_api_contract_tests 全过；未声明则豁免）+ 安全扫描无高危，才输出完成总结（含做了什么、'
+        : '【终止条件】全部 P0 断言通过 + 安全扫描无高危，才输出完成总结（含做了什么、'),
     '未解决的低优先级项）。若技术合同规划了多文件，收口前确认目标文件已覆盖（未写的文件须在旁白说明偏离原因）。' +
     '测试未全绿不得声称完成。',
     '',
-    '【表达纪律】',
-    '- 每轮工具调用前用一句中文旁白说明意图；关键决策点（架构选择、偏离技术合同、测试失败后的修复策略）可用 1–2 句说明「为什么这么做」；不向用户展示冗长推理过程或自我怀疑（思考与推演放在思考通道，不进旁白）。',
-    '- 旁白开头不要千篇一律：「现在/继续/接下来/先」这类同构开头连续不得超过两轮，换成自然的说法（读完了什么、发现了什么、为什么这么改）。',
+    // W5-G1（咨询 D5）：开关 on 时旁白改事件驱动五类事件版（普通工具链不逐轮播报；同构开头限制随文案
+    // 移除——G2 的 A/B 对照即本开关）；off 保留原文四条（字节级现状）。
+    ...(narrationEventsEnabled()
+      ? [
+          '【表达纪律】',
+          '- 旁白按事件发生，不逐轮播报：仅在 ①开始明显新阶段 ②影响下一步的重要发现 ③阻塞/需授权/需用户决策 ④长操作进行中说明进展 ⑤交付或失败交接 时输出；表达「已知状态＋下一动作」（如「已定位到过滤谓词；接下来改边界条件」），不写「我将仔细分析并全面修复」式空话。',
+          '- 普通 grep→read→edit 连续执行不逐步播报；关键决策点（架构选择、偏离技术合同、修复策略切换）可用 1–2 句说明为什么这么做。',
+          '- 不把计划/工具成功/局部测试通过说成交付完成；不编造验证结果；受阻时明确原因与恢复路径。',
+        ]
+      : [
+          '【表达纪律】',
+          '- 每轮工具调用前用一句中文旁白说明意图；关键决策点（架构选择、偏离技术合同、测试失败后的修复策略）可用 1–2 句说明「为什么这么做」；不向用户展示冗长推理过程或自我怀疑（思考与推演放在思考通道，不进旁白）。',
+          '- 旁白开头不要千篇一律：「现在/继续/接下来/先」这类同构开头连续不得超过两轮，换成自然的说法（读完了什么、发现了什么、为什么这么改）。',
+        ]),
     '- 测试失败先读工具返回的失败详情再行动，不要在旁白里长篇分析或复述整段代码。',
     '- 完成总结用中文、400 字以内、自然分段（不要一行流水的清单腔）：做了什么、实际效果、哪些断言未通过、遗留哪些低优先级项。代码与文件内容不限语言。',
     '',
@@ -1418,9 +1784,15 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     '',
     '【护栏】路径限项目目录内；不 eval/Function；不写 CSP meta；前端不直接外联（CSP 仅放行同源 fetch，真实出网只能走同源 /api/llm 代理）；' +
     // 完整程序阶段 2.5（2026-09-06 计算器案）：数据留存被 localStorage 绕过——「刷新后仍在」
-    // 被模型当作 localStorage 的正当理由。硬条款锁死后端持久化，堵住合理化路径
-    '数据留存类需求（保存/历史/记录/收藏/刷新或重开后仍在）一律用后端持久化：server/routes/ 路由 + ctx.readData/writeData 落 data/ 目录，' +
-    '禁止 localStorage/sessionStorage 存业务数据——PRD 说「刷新后仍在」不构成 localStorage 例外的理由，后端持久化同样满足且必须用后者；' +
+    // 被模型当作 localStorage 的正当理由。硬条款锁死后端持久化，堵住合理化路径。
+    // Phase 3 B2：开关 on 时本内联条款让位给 rules-registry R-DATA-01（防双源）；off 保留原文。
+    // C1b（2026-09-11 拍板）：game 豁免开启时轻留存允许 localStorage（重数据仍后端）。
+    (rulesRegistryEnabled()
+      ? ''
+      : templateType === 'game' && gameDeriveExemptEnabled()
+        ? '数据留存按量级分流：街机游戏轻留存（最高分/最佳成绩等单值数据）可用 localStorage；重业务数据（用户内容/多记录管理）仍须后端持久化 server/routes/ 路由 + ctx.readData/writeData 落 data/ 目录；'
+        : '数据留存类需求（保存/历史/记录/收藏/刷新或重开后仍在）一律用后端持久化：server/routes/ 路由 + ctx.readData/writeData 落 data/ 目录，' +
+          '禁止 localStorage/sessionStorage 存业务数据——PRD 说「刷新后仍在」不构成 localStorage 例外的理由，后端持久化同样满足且必须用后者；') +
     'out_of_scope 内的功能一律不做；编辑校验失败的错误信息要读完再改。',
     '',
     // 产物形态（PR-2 条件化）：工程骨架（带构建门禁）→ 模块化解禁（import 可选，
@@ -1448,7 +1820,12 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     "③前端：fetch('/api/...') 调后端，处理加载/失败态；数据持久化职责在后端 data/，前端不留权威副本；",
     '④路由内禁止出网（外部 fetch）与 require 项目目录外的模块；外部模型能力走 /api/llm；',
     '⑤后端数据的断言写「新增项出现/状态变化」，禁止写「总数等于 N」这类依赖历史状态的断言（探针重复执行会累积数据）。',
-  ].join('\n')
+  ]
+  const base = arr.join('\n')
+  // Phase 3 B5（2026-09-09）：表达适配层 append-only 注入（off=字节级现状；只改表达
+  // 不改验收口径，契约层构件字节永不受本层影响——回归锁锁定 append-only）。
+  const expression = renderExpressionSection()
+  return expression ? `${base}\n\n${expression}` : base
 }
 
 /**
@@ -1476,7 +1853,18 @@ function buildLoopSystemWithOverride(backplane: PrdBackplane, editFormat: 'diff'
 }
 
 /** 初始 user 消息：任务指令（背板细节在 system，这里只给行动指令）。 */
-function buildAgentLoopTask(backplane: PrdBackplane, mode: ProjectMode): string {
+function buildAgentLoopTask(backplane: PrdBackplane, mode: ProjectMode, input?: MvpTaskInput): string {
+  // W5-4（Phase 8.5，2026-09-12 狗粮 dd6ba98d）：任务清单工作法升级——逐项推进/
+  // 定位后读/即验证/不重写（对齐正常 agent 工作流）；开关关或缺省关=字节级现状全量任务书
+  if (input && taskWorkflowEnabled()) {
+    return [
+      `目标：实现「${backplane.name}」的可运行 MVP（${mode === 'quick' ? '快速模式' : '长期模式'}）。`,
+      '按系统提示里的实施清单逐项推进：每项先定位（grep / 地图锚点 → read 只读命中段），再实现，',
+      '有验证手段时立即验证（run_preview 可随时拉起）；完成一项勾选进入下一项。',
+      '禁止先全读再全写；已完成项不重读、不重写，微调用 edit_file。',
+      '收尾：run_gwt_tests 全部 P0 断言通过 + run_security_scan 无高危后输出完成总结（说明各项完成情况）。',
+    ].join('\n')
+  }
   return [
     `目标：实现「${backplane.name}」的可运行 MVP（${mode === 'quick' ? '快速模式' : '长期模式'}）。`,
     '按系统提示里的项目锚逐功能项实现，用工具自测（run_preview + run_gwt_tests + run_security_scan），' +
@@ -1619,7 +2007,7 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
     // 同样不再重修。首败即熔断让渡（U7：把具体退回原因带给让渡卡片）。
     const repairable = verdict.repairable === true && input.repairInternalized !== true
     if (!repairable || returns > limit) {
-      publishBlockedDecision(input, 'judge_return', verdict.user_visible_summary)
+      publishBlockedDecision(input, 'judge_return', verdict.user_visible_summary, { reason: 'judge' })
       return { outcome: 'blocked', verdict }
     }
 
@@ -1650,20 +2038,69 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
       ? `${READY_COMPLETION_COPY}\n\n补充提示：${verdict.user_visible_summary}`
       : READY_COMPLETION_COPY
   publishCompletionMessage(input, completion)
-  // 就绪引导卡（2026-09-06 用户拍板「终点不是 MVP」）：MVP 只是里程碑——发下一步卡
-  // 引导用户走向完整产物（数据上服务端/导出部署）。复用 user_decision_required 通道
-  //（渲染端 useUserDecisionCards 扫描事件渲染卡片，选项经 card_option metadata 回传；
-  // export_handoff 由渲染端特调导出 IPC，不进聊天管道）。mvp_ready 在交付期已发，
-  // 本卡在其后到达 → 渲染端扫描顺序保证显示。
+  // MVP 就绪三按钮卡（2026-09-11 用户拍板改版）：生成完**立即**弹，让用户选
+  // 保持现状（停）/ 局部优化（跳输入框说改哪里）/ 整版重做（先问方向再二次确认）。
+  // 分流只依赖用户点选的选项，不依赖用户在输入框里说的话。原「下一步走向完整产物」
+  // 引导卡（ready_next_steps）改由「保持现状」后触发（publishReadyNextStepsCard）。
+  publish(input, 'user_decision_required', {
+    kind: 'mvp_review',
+    title: '这一版你满意吗？',
+    questions: [
+      { id: 'keep', label: '保持现状', description: '就到这里，当前版本保留' },
+      { id: 'optimize', label: '局部优化', description: '去输入框说说要改哪里（只改这一处）' },
+      { id: 'rebuild', label: '整版重做', description: '换一种方式把功能重做一遍' },
+    ],
+  })
+  return { outcome: 'ready', verdict }
+}
+
+/**
+ * 「保持现状」后触发的就绪引导卡（原 runJudgeReview 内联 ready_next_steps，
+ * 2026-09-11 三按钮改版后移）：用户对 MVP 整体满意 → 顺势给「走向完整产物」引导
+ *（数据上服务端/导出部署）。复用 user_decision_required 通道；export_handoff 由
+ * 渲染端特调导出 IPC，不进聊天管道。
+ */
+export function publishReadyNextStepsCard(input: {
+  request_id: string
+  session_id: string
+  project_id: string
+}): void {
+  const deliveryBody = buildReadyDeliveryBody(input.project_id)
   publish(input, 'user_decision_required', {
     kind: 'ready_next_steps',
     title: '当前版本已就绪——下一步走向完整产物',
+    // Phase 7 U1 H3：交付状态三层正文（结论/任务分组/详情提示；delivery_status
+    // 缺席时 undefined 渲染端自动隐藏——开关 off 时与现状字节一致）
+    delivery_body: deliveryBody,
     questions: [
       { id: 'next_backend', label: '把数据存到服务端', description: '历史/记录改用 server/routes + data/ 持久化' },
       { id: 'export_handoff', label: '导出部署', description: '生成可独立部署的前后端工程' },
     ],
   })
-  return { outcome: 'ready', verdict }
+  // Phase 7 U5 J5（2026-09-10）：delivery_presented 北极星地基事件——交付声明文案
+  // 快照随事件 append-only 留存（后续话术改动不回写，J6 承诺冲突率证据源）；
+  // delivery_status 缺席时记 status_absent（开关 off 事实也入账，可归因）。try/catch
+  // 隔离不阻断 ready 收口。
+  try {
+    const project = findProject(input.project_id)
+    trackAnalytics({
+      request_id: input.request_id,
+      event: {
+        event_type: 'delivery_presented',
+        project_id: input.project_id,
+        session_id: input.session_id,
+        payload: {
+          via: 'ready_next_steps',
+          snapshot_id: project?.current_snapshot_id,
+          delivery_status: project?.delivery_status ?? 'absent',
+          delivery_body_snapshot: deliveryBody ?? '',
+        },
+        privacy_level: 'research_safe',
+      },
+    })
+  } catch {
+    // 埋点失败不影响 ready 收口
+  }
 }
 
 /**
@@ -1891,6 +2328,170 @@ export async function runGwtWithApiContract(input: { project_id: string; session
 }
 
 /**
+ * test_completed：GWT/终验结果的结构化证据事件（2026-09-09）。
+ *
+ * 背景：runAgentLoopPostTesting 每次写 test-report.json 后同点发送；analytics
+ * append-only 不受熔断回滚影响（回滚会把工作区 test-report 清回终验前快照，导致
+ * 事后无判定证据——见 P0 基准扫描发现）。事件即最终判定证据，供审计与 bench 采集。
+ */
+/** W2-D3（咨询 D2 §五）：终验失败的来源分类。目标五分类=覆盖缺口/环境差异/挑战发现/证据失效/
+ *  基础设施；v0 确定性可判三类 + Bloma 特有 known_failure（B0 错误放行口径：loop 自测已知
+ *  未修仍退出），challenge_found/infrastructure 留给 W3（judge/预检基础设施面）落地。 */
+export type TestFailureSource =
+  | 'coverage_gap'
+  | 'environment_diff'
+  | 'known_failure'
+  | 'evidence_stale'
+  | 'challenge_found'
+  | 'infrastructure'
+
+/** W2-D3：单条失败的来源判定（纯函数；baseline 两态：loop 自测基线 / 上一轮终验基线）。 */
+function classifyFailureSource(
+  scenario: string,
+  baseline: { kind: 'loop'; validation?: import('../../shared/types').LoopValidationSnapshot } | { kind: 'prev_round'; prevFailures: string[] },
+): TestFailureSource | undefined {
+  // API 契约失败：loop 从未验过 → 结构性覆盖缺口；验过仍挂 → 环境差异；上轮挂过 → 持续；否则候选已变旧证据失效
+  if (scenario.startsWith('API 契约端点')) {
+    if (baseline.kind === 'loop') {
+      if (!baseline.validation) return undefined
+      return baseline.validation.api_contract_runs > 0 ? 'environment_diff' : 'coverage_gap'
+    }
+    return baseline.prevFailures.includes(scenario) ? 'known_failure' : 'evidence_stale'
+  }
+  // 产物审计失败（UI-GATE）：loop 工具面无对应（W3 run_preflight 落地后细分）
+  if (scenario.startsWith('UI-GATE')) {
+    if (baseline.kind === 'loop') return 'coverage_gap'
+    return baseline.prevFailures.includes(scenario) ? 'known_failure' : 'evidence_stale'
+  }
+  // GWT 场景：loop 从未自测 → 覆盖缺口；上次自测就挂 → 已知未修；上次过这次挂 → 环境差异。
+  // 上轮终验基线：持续 → 已知未修；新挂 → 候选已变（修复回归）= 证据失效。
+  if (baseline.kind === 'loop') {
+    const validation = baseline.validation
+    if (!validation) return undefined
+    if (validation.gwt_runs === 0) return 'coverage_gap'
+    return validation.last_gwt_failures.includes(scenario) ? 'known_failure' : 'environment_diff'
+  }
+  return baseline.prevFailures.includes(scenario) ? 'known_failure' : 'evidence_stale'
+}
+
+/** W2-D3+F4：修复比较（resolved/persistent/new_failures；D4 稿——升级计数由宿主维护不靠模型数）。 */
+function buildFailureComparison(
+  baselineFailures: string[],
+  currentFailures: string[],
+  baselineKind: 'loop_last_run' | 'prev_round',
+): { baseline: 'loop_last_run' | 'prev_round'; resolved: string[]; persistent: string[]; new_failures: string[]; comparison_valid: true } {
+  return {
+    baseline: baselineKind,
+    resolved: baselineFailures.filter((s) => !currentFailures.includes(s)),
+    persistent: currentFailures.filter((s) => baselineFailures.includes(s)),
+    new_failures: currentFailures.filter((s) => !baselineFailures.includes(s)),
+    comparison_valid: true as const,
+  }
+}
+
+function trackTestCompleted(
+  input: AgentLoopPostTestingInput,
+  result: GwtTestResult,
+  round: 'initial' | 'after_repair',
+  /** W2-D3：after_repair 轮的基线（上一轮终验失败集）；initial 轮用 input.loop.validation */
+  prevFailures?: string[],
+) {
+  const loopValidation = round === 'initial' ? input.loop?.validation : undefined
+  const baseline =
+    round === 'initial'
+      ? ({ kind: 'loop', validation: loopValidation } as const)
+      : ({ kind: 'prev_round', prevFailures: prevFailures ?? [] } as const)
+  const currentFailures = (result.failure_summary || []).map((f) => f.scenario)
+  const comparison =
+    round === 'initial'
+      ? loopValidation
+        ? buildFailureComparison(loopValidation.last_gwt_failures, currentFailures, 'loop_last_run')
+        : undefined
+      : buildFailureComparison(prevFailures ?? [], currentFailures, 'prev_round')
+  trackAnalytics({
+    request_id: input.request_id,
+    event: {
+      event_type: 'test_completed',
+      project_id: input.project_id,
+      session_id: input.session_id,
+      payload: {
+        round,
+        via: 'agent_loop_post_testing',
+        total_count: result.total_count,
+        passed_count: result.passed_count,
+        failed_count: result.failed_count,
+        // B0 错误放行深挖（2026-09-09）发现：熔断回滚会清掉 test-report.json，失败 reason
+        // 只剩场景名可回溯——failures 升级为 {scenario, reason}（reason 截断 200 字）；
+        // W2-D3 再附 source（终验失败来源分类；无 loop 基线的存量路径缺省不标）。
+        failures: (result.failure_summary || []).slice(0, 20).map((f) => {
+          const source = classifyFailureSource(f.scenario, baseline)
+          return {
+            scenario: f.scenario,
+            reason: String(f.reason ?? '').slice(0, 200),
+            ...(source ? { source } : {}),
+          }
+        }),
+        // W2-F4：修复比较（resolved/persistent/new_failures；baseline=loop 上次自测或上轮终验）
+        ...(comparison ? { comparison } : {}),
+      },
+      privacy_level: 'research_safe',
+    },
+  })
+}
+
+/**
+ * Phase 7 U1 H1/H4：终验收口点交付状态写入（BLOMA_DELIVERY_STATUS off=零行为）。
+ * 规则计算见 coding/delivery-status.ts；key_tasks 缺席时回退 P0 功能项判定；
+ * preflight 取 loop 自验快照（W3 跑过才带，undefined 不影响判定）。
+ */
+function recordPostTestingDeliveryStatus(
+  projectId: string,
+  testResult: Pick<GwtTestResult, 'failed_count' | 'failure_summary'>,
+  securityPassed: boolean,
+  loop?: AgentLoopJudgeMetadata,
+): void {
+  if (!deliveryStatusEnabled()) return
+  const backplane = readPrdBackplane(projectId)
+  recordDeliveryStatus(projectId, {
+    keyTasks: backplaneKeyTasks(backplane),
+    p0RequirementIds: backplane.requirements.filter((item) => requirementPriority(item) === 'P0').map((item) => item.id),
+    testResult,
+    securityPassed,
+    ...(loop?.validation?.preflight_passed !== undefined ? { preflightPassed: loop.validation.preflight_passed } : {}),
+  })
+}
+
+/**
+ * Phase 7 U1 H4：必交功能项集（熔断 failureNote 四段式的核心目标判定；无开关直接上）。
+ */
+function mustDeliverFeatureIdsOf(projectId: string): string[] {
+  const backplane = readPrdBackplane(projectId)
+  const keyTasks = backplaneKeyTasks(backplane)
+  if (keyTasks.length > 0) return [...new Set(keyTasks.filter((t) => t.must_deliver).flatMap((t) => t.feature_ids))]
+  return backplane.requirements.filter((item) => requirementPriority(item) === 'P0').map((item) => item.id)
+}
+
+/**
+ * Phase 7 U1 H3：ready 引导卡交付正文（三层：结论/任务分组✓×?/详情提示；无通过率数字）。
+ * delivery_status 缺席（开关 off/未终验）→ undefined 不加载荷（渲染端自动隐藏）。
+ */
+function buildReadyDeliveryBody(projectId: string): string | undefined {
+  const project = findProject(projectId)
+  if (!project?.delivery_status) return undefined
+  const testReport = readTestReport(projectId)
+  const backplane = readPrdBackplane(projectId)
+  const storyOf = new Map(backplane.requirements.map((item) => [item.id, requirementStory(item)]))
+  const presentation = buildDeliveryPresentation({
+    status: project.delivery_status,
+    keyTasks: backplaneKeyTasks(backplane),
+    p0RequirementIds: backplane.requirements.filter((item) => requirementPriority(item) === 'P0').map((item) => item.id),
+    testResult: testReport ?? { failed_count: 0, failure_summary: [] },
+    featureLabelOf: (id) => storyOf.get(id),
+  })
+  return renderDeliveryBody(presentation)
+}
+
+/**
  * runAgentLoopPostTesting — Agent Loop 路径的独立门禁函数（M4-A，微调方案 §4）。
  *
  * 语义固定为「只终验不重修」：GWT 终验 →（通过）安全扫描 → judge 终审 → ready / 让渡，
@@ -1907,7 +2508,11 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
   throwIfAborted(input.signal)
   writeTestReport({ request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, result: testResult })
   syncDocuments({ request_id: input.request_id, project_id: input.project_id, session_id: input.session_id, checkpoint: 'mvp_tested' })
+  trackTestCompleted(input, testResult, 'initial')
   throwIfAborted(input.signal)
+  // Phase 7 U1 H1：熔断回滚的目标是终验失败前版本——交付状态按 initial 失败清单判定
+  // （修复轮改善不美化回滚版状态；修复收敛路径用重验后的最终结果）。
+  const initialTestResult = testResult
 
   // P2 失败回流（实施稿 §4.4）：GWT 首败先定向修复再决定熔断——预算内修复轮 + 全量
   // 重验（D2：不做失败子集，防改坏已过场景）；预算耗尽 / 修复后仍失败 → 现状熔断
@@ -1932,27 +2537,45 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
         session_id: input.session_id,
         project_id: input.project_id,
         reason: `终验未通过（Agent Loop 路径，${loopOutcomeNote(input.loop)}）`,
-        // 回滚目标快照是终验失败前的版本：如实带上已知未通过断言，防「可以继续试用」
-        // 把坏版本当健康品（随记灵 2026-09-06 案：用户回滚后「用不了」）
+        // 回滚目标快照是终验失败前的版本：如实带上已知未通过断言（Phase 7 U1 H4
+        // 升级为四段式：功能→现象→影响→替代；核心目标/敏感类不折叠，防「可以继续
+        // 试用」把坏版本当健康品——随记灵 2026-09-06 案）
         failureNote:
           testResult.failure_summary.length > 0
-            ? `注意：这一版仍有 ${testResult.failed_count} 项行为断言未通过：${testResult.failure_summary.map((f) => f.scenario).join('、')}。你可以继续试用其他功能，也可以告诉我下一步（继续修复或换个思路重新生成）。`
+            ? renderCircuitFailureNote({
+                failures: testResult.failure_summary,
+                mustDeliverFeatureIds: mustDeliverFeatureIdsOf(input.project_id),
+              })
             : undefined,
         publish: (type, payload) => publish(input, type, payload),
       })
+      // Phase 7 U1 H1：B0 错误放行主路径（circuit_rollback→ready）在此如实落
+      // partial/unavailable——「部分可用不再伪装成就绪」（用回滚目标版本的 initial 清单）。
+      recordPostTestingDeliveryStatus(input.project_id, initialTestResult, true, input.loop)
       if (outcome.rolled_back) throw new CircuitBreakSettledError()
       const failureTitle =
         testResult.failure_summary.length > 0
           ? `测试未通过：${testResult.failure_summary.map((f) => f.scenario).join('、')}`
-          : '自动修复多次后测试仍未通过'
-      publishBlockedDecision(input, 'test_repair', failureTitle)
+          : '自动修复后测试仍未通过（无具体失败清单）'
+      publishBlockedDecision(input, 'test_repair', failureTitle, {
+        reason: 'test',
+        failures: testResult.failure_summary,
+        mustDeliverFeatureIds: mustDeliverFeatureIdsOf(input.project_id),
+        // H5 四问卡判据：W4-F5 升级信号（读 loop-checkpoint 账本，连续 ≥2 轮修复零推进）。
+        // 开关 off 时 buildBlockedQuestions 字节级现状、escalated 不进卡（零行为变化）。
+        escalated: buildRepairCheckpointContext(input.project_id).escalation === 'diagnosis',
+      })
       return { verdict: 'blocked', test_result: testResult }
     }
     // 修复收敛：testResult 已更新为重验结果，继续正常链
   }
 
-  // 安全扫描终验（A3，OWASP 静态扫描）：高危/严重命中同样只熔断不重修
-  let security = runSecurityScan({ project_id: input.project_id, root_path: findProject(input.project_id).root_path })
+  // 安全扫描终验（A3，OWASP 静态扫描）：高危/严重命中同样只熔断不重修。
+  // W6-D6：静态证据按产物指纹缓存——预检（run_preflight）算过且候选未变则复用，
+  // 行为类（GWT/API）仍独立重跑；开关 off=直通现状。
+  const securityCached = getCachedStaticEvidence<ReturnType<typeof runSecurityScan>>(input.project_id, findProject(input.project_id).root_path, 'security-scan')
+  let security = securityCached ?? runSecurityScan({ project_id: input.project_id, root_path: findProject(input.project_id).root_path })
+  if (!securityCached) setCachedStaticEvidence(input.project_id, findProject(input.project_id).root_path, 'security-scan', security)
   throwIfAborted(input.signal)
   writeSecurityScanDocument(input.project_id, renderSecurityScanMarkdown(security))
   if (!security.passed) {
@@ -1964,8 +2587,10 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
       failureNote: `注意：这一版安全扫描仍有 ${security.issues.length} 处命中。你可以继续试用，也可以告诉我下一步。`,
       publish: (type, payload) => publish(input, type, payload),
     })
+    // Phase 7 U1 H1：安全未过=不可隔离风险→unavailable（GWT 全过也不粉饰）。
+    recordPostTestingDeliveryStatus(input.project_id, testResult, false, input.loop)
     if (outcome.rolled_back) throw new CircuitBreakSettledError()
-    publishBlockedDecision(input, 'security_repair', '检测到的安全隐患反复修不好，需要你来定夺')
+    publishBlockedDecision(input, 'security_repair', '检测到的安全隐患反复修不好，需要你来定夺', { reason: 'security' })
     return { verdict: 'blocked', test_result: testResult }
   }
 
@@ -1973,6 +2598,9 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
   // 项目文档 + 摘要经代码参数注入裁判语义审查腿（非提示词软约束，每次必执行）。
   // LLM 证据不直接判败（防视觉噪声成第二套硬门禁）；unavailable/skipped 也必须
   // 决策日志留痕并进裁判 testSummary（F9a 不静默）。
+  // Phase 7 U1 H1：GWT+安全全过在此落 verified（后续 judge 若 blocking 退回/让渡，
+  // 项目不进 ready 交付态——blocked 不消费 delivery_status；下次终验重算不背书）。
+  recordPostTestingDeliveryStatus(input.project_id, testResult, true, input.loop)
   throwIfAborted(input.signal)
   const vision = await runVisionAuditGate({ previewUrl: input.preview_url, projectId: input.project_id })
   recordDecision({
@@ -2061,7 +2689,7 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
   })
   // 旁白告知（渲染端零新组件，走既有 assistant 文案流）
   const repairNote = `终验有 ${tasks.length} 项未通过，我先定向修复一轮（第 ${round}/${budget} 轮），完成后再全量重验。`
-  appendJsonLine(getAgentSessionPath(input.session_id), {
+  appendSessionMessage(input.session_id, {
     role: 'assistant',
     content: [{ type: 'text', text: repairNote }],
     timestamp: Date.now(),
@@ -2083,6 +2711,12 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
     tasks,
     round,
     buildSystem: (editFormat) => buildLoopSystemWithOverride(backplane, editFormat, input.project_id, skeletonMap, undefined, moduleMap),
+    // Phase 3 B3：修复轮本轮锚（开关 off=零注入字节级现状）；完成证据=失败断言原文
+    ...(roundAnchorEnabled() ? { roundAnchor: buildRepairRoundAnchor(backplane, tasks.map((task) => task.location ?? task.claim)) } : {}),
+    // W2-F1：修复证据包（候选指纹+此前修复尝试；开关 off=零注入字节级现状）
+    ...(loopCheckpointEnabled() ? { checkpointContext: buildRepairCheckpointContext(input.project_id) } : {}),
+    // W4-F2：修改授权边界（BLOMA_REPAIR_SCOPE off=无边界字节级现状；场景锚点派生不出路径则不设）
+    ...(repairScopeEnabled() && deriveAuthorizedWritePaths(tasks) ? { authorizedWritePaths: deriveAuthorizedWritePaths(tasks) } : {}),
     thinkingLevel: resolveLoopThinkingLevel(),
     publish: (type, payload) => publish(input, type, payload),
   })
@@ -2091,12 +2725,82 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
   if (result.status !== 'completed') return testResult
   throwIfAborted(input.signal)
 
+  // B2（P0-B，2026-09-11 审计案 35c1a633）：零编辑守卫——修复轮零 write/edit 即不计轮。
+  // 旧路径：17 次全读 + 空口完成总结照样 status=completed → 全量重验逐条相同（initial=
+  // after_repair）→ 白烧一轮预算。开关 on：产物未变不重验、计数回滚、旁白如实、零编辑轮
+  // 入 loop-checkpoint 账本（files_touched=[]，W4-F5 升级信号与四问卡自然承接）；
+  // off=字节级现状（照常重验照常计轮）。
+  if (repairNoopGuardEnabled() && !hasWriteEditToolCall(result.loopResult?.toolCalls ?? [])) {
+    updateProject(input.project_id, { test_repair_count: used })
+    if (loopCheckpointEnabled()) {
+      const prevFailures = testResult.failure_summary.map((f) => f.scenario)
+      appendRepairAttemptRecord(input.project_id, {
+        round,
+        at: new Date().toISOString(),
+        task_locations: tasks.map((task) => task.location ?? task.claim ?? '').filter(Boolean).slice(0, 10),
+        files_touched: [],
+        outcome: {
+          // 产物未变：失败清单结构性不变（非猜测）；零 resolved 参与升级信号判定
+          resolved: [],
+          persistent: prevFailures,
+          new_failures: [],
+          converged: false,
+        },
+      })
+    }
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'repair_noop_skipped',
+        title: `修复轮未产生任何代码改动，不计入预算（第 ${round} 轮回退）`,
+        why: `修复轮 ${result.loopResult?.turns ?? 0} 轮 / ${result.loopResult?.toolCalls.length ?? 0} 次工具调用全部为只读，零 write_file/edit_file——产物未变不重验，预算计数回退到 ${used}/${budget}`,
+        detail: {
+          round,
+          budget,
+          turns: result.loopResult?.turns ?? 0,
+          tool_calls: result.loopResult?.toolCalls.length ?? 0,
+          tool_names: [...new Set((result.loopResult?.toolCalls ?? []).map((call) => call.name))],
+        },
+      },
+    })
+    const noopNote =
+      '刚才的修复轮没有产生任何代码改动（全部为读取操作），这一轮不计入修复预算，也不重复重验；接下来按测试未通过口径收口，你可以告诉我下一步怎么处理。'
+    appendSessionMessage(input.session_id, {
+      role: 'assistant',
+      content: [{ type: 'text', text: noopNote }],
+      timestamp: Date.now(),
+    })
+    publish(input, 'message_delta', { text: noopNote })
+    return testResult
+  }
+
   // 全量重验（D2）+ 重写测试报告（m-8 口径：最后一轮为准）；预览先兑底拉起
   const previewUrl = await ensureResumePreview(input)
   const retested = await runGwtWithApiContract({ project_id: input.project_id, session_id: input.session_id, preview_url: previewUrl })
   throwIfAborted(input.signal)
   writeTestReport({ request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, result: retested })
   syncDocuments({ request_id: input.request_id, project_id: input.project_id, session_id: input.session_id, checkpoint: 'mvp_tested' })
+  trackTestCompleted(input, retested, 'after_repair', testResult.failure_summary.map((f) => f.scenario))
+
+  // W2-F1（咨询 D4）：修复尝试入检查点账本——下轮修复卡开场即知「之前试过什么、为何败」
+  // （候选指纹+改了什么+resolved/persistent/new 对比）。开关 off=零写盘。
+  if (loopCheckpointEnabled()) {
+    const prevFailures = testResult.failure_summary.map((f) => f.scenario)
+    const currentFailures = retested.failure_summary.map((f) => f.scenario)
+    appendRepairAttemptRecord(input.project_id, {
+      round,
+      at: new Date().toISOString(),
+      task_locations: tasks.map((task) => task.location ?? task.claim ?? '').filter(Boolean).slice(0, 10),
+      files_touched: [...new Set((result.loopResult?.toolCalls ?? []).filter((call) => call.path).map((call) => call.path!))].slice(0, 20),
+      outcome: {
+        resolved: prevFailures.filter((s) => !currentFailures.includes(s)),
+        persistent: currentFailures.filter((s) => prevFailures.includes(s)),
+        new_failures: currentFailures.filter((s) => !prevFailures.includes(s)),
+        converged: retested.failed_count === 0,
+      },
+    })
+  }
 
   const converged = retested.failed_count === 0
   if (converged) updateProject(input.project_id, { test_repair_count: 0 })
@@ -2217,7 +2921,7 @@ async function runBlockedTestRepair(input: {
     },
   })
   const repairNote = `继续修：按上次失败清单定向修复 ${tasks.length} 项（第 ${round}/${budget} 轮），完成后重新终验。`
-  appendJsonLine(getAgentSessionPath(input.session_id), {
+  appendSessionMessage(input.session_id, {
     role: 'assistant',
     content: [{ type: 'text', text: repairNote }],
     timestamp: Date.now(),
@@ -2237,6 +2941,12 @@ async function runBlockedTestRepair(input: {
     tasks,
     round,
     buildSystem: (editFormat) => buildLoopSystemWithOverride(backplane, editFormat, input.project_id, skeletonMap, undefined, moduleMap),
+    // Phase 3 B3：修复轮本轮锚（开关 off=零注入字节级现状）；完成证据=失败断言原文
+    ...(roundAnchorEnabled() ? { roundAnchor: buildRepairRoundAnchor(backplane, tasks.map((task) => task.location ?? task.claim)) } : {}),
+    // W2-F1：修复证据包（候选指纹+此前修复尝试；开关 off=零注入字节级现状）
+    ...(loopCheckpointEnabled() ? { checkpointContext: buildRepairCheckpointContext(input.project_id) } : {}),
+    // W4-F2：修改授权边界（BLOMA_REPAIR_SCOPE off=无边界字节级现状）
+    ...(repairScopeEnabled() && deriveAuthorizedWritePaths(tasks) ? { authorizedWritePaths: deriveAuthorizedWritePaths(tasks) } : {}),
     thinkingLevel: resolveLoopThinkingLevel(),
     publish: (type, payload) => publish(input, type, payload),
   })
@@ -2283,6 +2993,15 @@ export interface IterationTaskInput {
   query?: SDKQuery
   /** 停止生成信号（U5：迭代期间点停止） */
   signal?: AbortSignal
+  /** H5 四问卡专用（resumeBlockedFlow regenerate 分支）：不归一化并入本次诉求，
+ *  按原需求清单整版重摇（保留已确认需求与草图；不重置修复预算）。 */
+  regenerate?: boolean
+  /** 局部修改（2026-09-11「局部优化」路径）：强制开启聚焦锚定（quick 也生效），
+   *  其余功能项保持现状勿重做。 */
+  localOnly?: boolean
+  /** 整版重做（2026-09-11「整版重做」路径）：并入用户重做方向到需求清单，
+   *  不聚焦（全量锚定、允许大改），保留已确认需求与草图。 */
+  rebuild?: boolean
 }
 
 // 注：P3 分级锚定的 focusRequirementIds 由 runIterationTask 从归一化判定派生后
@@ -2323,13 +3042,25 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
   // 口语碎片原样入库会污染 PRD 背板（线上案例：「重新生成」被 acceptance 解释成功能、
   // 产品里长出重置按钮），归一化失败/无渠道时回退原样追加（改动前现状），不阻断迭代。
   const existing = readLastSketchRequirements(input.project_id)
-  const merged = await mergeIterationRequirements(input, existing)
+  // H5 四问卡（regenerate）：不走归一化（本次 prompt 是重摇指令非需求变更，并入会
+  // 污染清单），原需求清单直接重摇；focus 无（全量锚定与普通重摇一致）。
+  const merged = input.regenerate
+    ? ({ action: 'skip' as const, requirements: existing, focusRequirementIds: undefined } as Awaited<ReturnType<typeof mergeIterationRequirements>>)
+    : await mergeIterationRequirements(input, existing)
   const requirements = merged.requirements
   recordSketchGenerated(input.project_id, requirements)
 
   // ack 如实（2026-08-27 线上案例 dbe1e6fd：「换个名字」被判 skip 后仍说「按你的新想法
   // 重新生成」，用户体感记忆断层——skip 意味着诉求未入需求，必须告知而非假装采纳）
   if (merged.action === 'skip') {
+    // H5 四问卡 regenerate：ack 用四问承诺版（不再说"没当作需求改动"——用户是
+    // 明确选的重做，需要被告知换了什么保留了什么）
+    if (input.regenerate) {
+      publishCompletionMessage(
+        input,
+        '好的，按新方案重新生成一版：保留已确认的需求与草图，当前版本已保留为快照可随时回看；等待时间与之前一轮相当。',
+      )
+    } else {
     // 「做完整的程序」类诉求路由（2026-09-06 随记灵案）：skip=无需求变更，按原清单
     // 整版重摇（longterm 40 轮）大概率复现同一批失败。上次终验若留有未通过断言且修复
     // 预算未耗尽，「把程序做完整」的正确动作是定向修复（复用入口 B 修复轮 + 终验门禁
@@ -2362,10 +3093,20 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
     }
     publishCompletionMessage(
       input,
-      `收到「${truncateCopy(input.prompt, 20)}」——这句我没当作需求改动（判为操作指令），按原样重新生成了一版。想改哪里请直接说，比如「标题改成计算助手」。`,
+      input.localOnly
+        ? `收到「${truncateCopy(input.prompt, 20)}」——这句我没当成具体改动（判为操作指令），这一轮没改到功能。想改哪里请再具体说一点，比如「标题改成计算助手」。`
+        : `收到「${truncateCopy(input.prompt, 20)}」——这句我没当作需求改动（判为操作指令），按原样重新生成了一版。想改哪里请直接说，比如「标题改成计算助手」。`,
     )
+    }
   } else {
-    publishCompletionMessage(input, `好的，我按你的新想法「${truncateCopy(input.prompt, 20)}」重新生成一版。`)
+    publishCompletionMessage(
+      input,
+      input.rebuild
+        ? `好的，我按你说的方向「${truncateCopy(input.prompt, 20)}」整版重做一版（保留已确认需求与草图）。`
+        : input.localOnly
+          ? `好的，我按你说的「${truncateCopy(input.prompt, 20)}」调整这一处，其余保持现状。`
+          : `好的，我按你的新想法「${truncateCopy(input.prompt, 20)}」重新生成一版。`,
+    )
   }
 
   try {
@@ -2427,7 +3168,7 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
     if (!cancelled) {
       // U12：记录本次失败的诉求，供「再试一次」一键重跑（避免用户重新打字描述）。
       setFailedIteration(input.project_id, input.prompt)
-      appendJsonLine(getAgentSessionPath(input.session_id), {
+      appendSessionMessage(input.session_id, {
         role: 'assistant',
         content: [{ type: 'text', text: GENERATION_FAILED_COPY }],
         timestamp: Date.now(),
@@ -2540,20 +3281,22 @@ export function nextRequirementId(existing: SketchRequirement[]): string {
 // （存量消费者与 vi.mock 工厂零改动）。runIterationTask 本体仍在本文件
 // （与 runMvpTask 共享内部函数，拆分挂后续独立批次）。
 import {
+  clearPendingReviewAction,
   isIterationDecisionId,
   setFailedIteration,
-  setPendingIteration,
+  setPendingReviewAction,
   takeFailedIteration,
-  takePendingIteration,
+  takePendingReviewAction,
 } from '../iteration/pending'
 export {
+  clearPendingReviewAction,
   isIterationDecisionId,
   setFailedIteration,
-  setPendingIteration,
+  setPendingReviewAction,
   takeFailedIteration,
-  takePendingIteration,
+  takePendingReviewAction,
 } from '../iteration/pending'
-export type { IterationDecisionId, PendingIteration } from '../iteration/pending'
+export type { IterationDecisionId, PendingReviewAction } from '../iteration/pending'
 
 /**
  * 修改诉求 → 需求项描述：剥离否定引导与口语前缀（「啥意思，我要音乐合成器」→
@@ -2620,7 +3363,7 @@ function publishCompletionMessage(
   input: Pick<SketchTaskInput, 'session_id' | 'project_id'>,
   text: string,
 ): void {
-  appendJsonLine(getAgentSessionPath(input.session_id), {
+  appendSessionMessage(input.session_id, {
     role: 'assistant',
     content: [{ type: 'text', text }],
     timestamp: Date.now(),
@@ -2651,15 +3394,32 @@ function publishBlockedDecision(
   input: { session_id: string; project_id: string },
   action: BlockedAction,
   title?: string,
+  context?: BlockedDecisionContext,
 ): void {
   updateProject(input.project_id, { current_stage: 'blocked_for_user_decision', blocked_action: action })
   publish(input, 'stage_changed', { stage: 'blocked_for_user_decision' })
+  // H5 四问卡正文（仅开关 on + W4-F5 升级信号 + test 路径）：必答四问随卡 body 呈现
+  //（E1 §五：为什么重做/这次换什么/保留什么/代价——没把握就直说不确定，不编成功率）
+  // 开关 off 时 payload 无 body 键（字节级现状，与选项条件化同门）。
+  const fourQuestions =
+    decisionConditionalEnabled() && context?.reason === 'test' && context?.escalated
+      ? [
+          '关于「按新方案生成一个版本」：',
+          '· 为什么重做：连续多轮修复都没有减少关键问题（每轮修复记录在案，可回看）',
+          '· 这次换什么：整体换一种实现方式，具体新方案由重新规划决定——没有把握一定比现在好',
+          '· 保留什么：已确认的需求与草图不变；当前版本保留为快照，随时可回看',
+          '· 代价：需要重新生成完整版本，等待时间与之前一轮相当；重做不重置修复预算',
+        ].join('\n')
+      : undefined
   publish(input, 'user_decision_required', {
     kind: 'blocked',
     stage: 'blocked_for_user_decision',
     // U7：让渡卡片带上具体偏差描述（如「缺了按月统计功能」），落到 title 字段由渲染端展示
     title,
-    questions: BLOCKED_DECISION_QUESTIONS,
+    ...(fourQuestions ? { body: fourQuestions } : {}),
+    // Phase 7 U2 H5：条件化选项（BLOMA_DECISION_CONDITIONAL on 时按失败原因推荐主按钮；
+    // off = BLOCKED_DECISION_QUESTIONS 字节级现状）
+    questions: buildBlockedQuestions(context),
   })
   // 终态补发（2026-08-29 线上卡死案例 eb900c57）：让渡路径此前只发 stage_changed +
   // user_decision_required，渲染端 running 只有 completed/error 能复位 → UI 永久停在
@@ -2667,7 +3427,7 @@ function publishBlockedDecision(
   // 回到可发送状态（决策卡片仍展示，等用户点选 resume）。前台 runAgent 流除外——它自带
   // 终态，中途补发会提前熄掉运行指示（resume 的继续尝试可能跑几分钟）。
   const text = `这里需要你来定夺：${title ?? '当前进度需要你确认下一步'}。`
-  appendJsonLine(getAgentSessionPath(input.session_id), {
+  appendSessionMessage(input.session_id, {
     role: 'assistant',
     content: [{ type: 'text', text }],
     timestamp: Date.now(),
@@ -2696,7 +3456,7 @@ export function resolveBlockedDecision(input: AgentSendMessageInput): BlockedDec
 
   if (input.metadata?.source === 'card_option') {
     const id = input.metadata?.selected_option_id
-    if (id === 'accept' || id === 'explain' || id === 'continue') return id
+    if (id === 'accept' || id === 'explain' || id === 'continue' || id === 'regenerate') return id
     return 'continue'
   }
 
@@ -2704,6 +3464,8 @@ export function resolveBlockedDecision(input: AgentSendMessageInput): BlockedDec
   const text = input.content.trim()
   if (/接受|保留|现状|就这样|算了/.test(text)) return 'accept'
   if (/继续|重试|再试|再修/.test(text)) return 'continue'
+  // H5 四问卡自由文本兑底：换方案/换思路/重新生成一版（明说才认，宁漏勿误）
+  if (/换[个一]?(方案|思路)|按新方案|重新生成一版/.test(text)) return 'regenerate'
   return 'explain'
 }
 
@@ -2732,6 +3494,23 @@ export async function resumeBlockedFlow(
   // 嵌套的 runMvpTask / runAgentLoopPostTesting / runJudgeReview 走同一发布通道
   setProgrammingEventPublisher(eventPublisher)
 
+  // Phase 7 U5 J5：decision_selected 埋点（阶段+动作——决策卡转化度量；v0 接
+  // blocked 让渡卡一处，ready_next_steps 等其余卡待后续批次）
+  try {
+    trackAnalytics({
+      request_id: input.request_id,
+      event: {
+        event_type: 'decision_selected',
+        project_id: input.project_id,
+        session_id: input.session_id,
+        payload: { stage: 'blocked_for_user_decision', action: input.decision, blocked_action: findProject(input.project_id).blocked_action ?? null },
+        privacy_level: 'research_safe',
+      },
+    })
+  } catch {
+    // 埋点失败不影响 resume 链
+  }
+
   const project = findProject(input.project_id)
   const action = project.blocked_action
   // M4-A：项目由 Agent Loop 生成 → resume 走独立门禁（只终验不重修）；judge 需 loop 元数据。
@@ -2754,13 +3533,58 @@ export async function resumeBlockedFlow(
       judge_return_count: 0,
     })
     publish(input, 'stage_changed', { stage: 'ready' })
-    publishCompletionMessage(input, '好的，已保留当前版本。你可以点右侧预览区继续试用，有需要调整的随时告诉我。')
+    // Phase 7 U2 H6（BLOMA_DECISION_CONDITIONAL on）：「先使用已可用的部分」语义——
+    // 不改 delivery_status（终验链路规则字段）、不清除问题清单；accept 话术如实带上
+    // 已知未通过项（持续可见，用户接受版本也不能把未通过变成已通过）。
+    // off = 原话术字节级。
+    if (decisionConditionalEnabled()) {
+      const testReport = readTestReport(input.project_id)
+      const knownIssues = testReport && testReport.failed_count > 0
+        ? `注意：这一版仍有 ${testReport.failed_count} 项检查未通过（${testReport.failure_summary.slice(0, 3).map((f) => f.scenario).join('；')}${testReport.failed_count > 3 ? ' 等' : ''}），这些不算完成；已通过的功能可以正常使用。随时可以说「先修好没做好的」。`
+        : ''
+      publishCompletionMessage(
+        input,
+        `好的，先使用已可用的部分。${knownIssues || '你可以点右侧预览区继续试用，有需要调整的随时告诉我。'}`,
+      )
+    } else {
+      publishCompletionMessage(input, '好的，已保留当前版本。你可以点右侧预览区继续试用，有需要调整的随时告诉我。')
+    }
     return
   }
 
   if (input.decision === 'explain') {
     updateProject(input.project_id, { current_stage: 'clarifying' })
     publish(input, 'stage_changed', { stage: 'clarifying' })
+    return
+  }
+
+  // H5 四问卡回传（W4-F5 升级信号下出现的第四出口）：清阻塞 + 整版重摇。
+  // E1 §五约束：保留已确认需求与草图（不并入本次诉求，原清单直接重生成）；
+  // 重做受总预算约束不重置修复额度（test_repair_count 不清零）；当前版本已随
+  // 熔断回滚保留为快照。
+  if (input.decision === 'regenerate') {
+    updateProject(input.project_id, { current_stage: 'iterating', blocked_action: undefined })
+    publish(input, 'stage_changed', { stage: 'iterating' })
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'modification_decision',
+        title: '用户选择按新方案生成一个版本',
+        why: '四问卡回传：连续多轮修复无进展，用户选择换实现方式重做（保留需求清单与草图，当前版本保留为快照）',
+        detail: { decision: 'regenerate', blocked_action: action },
+      },
+    })
+    await runIterationTask({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+      prompt: '按新方案重新实现全部已确认需求（换一种实现方式）',
+      channel_id: input.channel_id,
+      query: input.query,
+      regenerate: true,
+    })
     return
   }
 

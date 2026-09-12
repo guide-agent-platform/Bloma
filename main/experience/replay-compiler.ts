@@ -49,7 +49,7 @@ function replayableCards(projectId: string): ExperienceCard[] {
       .filter((c) => !isFalsePositiveQuarantined(c)) // 误报卡不重放不产晋升证据（统一谓词）
       .sort(
         (a, b) =>
-          (b.status === 'verified' ? 1 : 0) - (a.status === 'verified' ? 1 : 0) ||
+          (b.status !== 'candidate' && b.status !== 'retired' ? 1 : 0) - (a.status !== 'candidate' && a.status !== 'retired' ? 1 : 0) ||
           b.recurrence - a.recurrence,
       )
       .slice(0, 3)
@@ -139,7 +139,7 @@ export function syncReplayFeatureFiles(projectId: string, docsDir: string): void
       const assertion = replayAssertionText(card)
       if (!assertion) continue
       const fileName = `replay-${fp8(card.fingerprint)}.feature`
-      const dir = card.status === 'verified' ? join(docsDir, 'features') : join(docsDir, 'features-candidates')
+      const dir = card.status !== 'candidate' && card.status !== 'retired' ? join(docsDir, 'features') : join(docsDir, 'features-candidates')
       mkdirSync(dir, { recursive: true })
       writeFileSync(join(dir, fileName), renderReplayFeature(card, assertion), 'utf8')
     }

@@ -23,6 +23,8 @@
 
 import { callLlmForJson } from '../kernel/llm-call'
 import { loadPromptOverride } from '../prompt-config'
+import { existsSync } from 'fs'
+import { join } from 'path'
 import {
   backplaneInterfaceSpec,
   requirementAssertions,
@@ -261,7 +263,7 @@ export function planLegEnabled(mode: ProjectMode): boolean {
 }
 
 /** system prompt（角色/输出契约/纪律；maxFiles 动态内嵌进任务输入上限说明）。 */
-function planSystemPrompt(maxFiles: number): string {
+function planSystemPrompt(maxFiles: number, localOnly = false): string {
   return [
     '你是「Bloma 编程 · 技术规划腿」（loop 前单轮调用的架构子代理：干净上下文、低温确定性产出，只规划不实现）。',
     '输入是 PRD 背板摘要（功能项清单 + P0 断言）与工程骨架地图，你要产出一份技术合同 JSON，供编程 Agent Loop 作为参考合同常驻执行。',
@@ -270,7 +272,8 @@ function planSystemPrompt(maxFiles: number): string {
     '{"filesToTouch":[{"path":"src/app.js","reason":"承载核心交互逻辑"}],"reuse":[{"from":"src/styles.css（骨架）","how":"样式直接扩展不重写"}],"verification":["F-001 按右方向键→车辆 x 坐标增加"],"risks":["方向键断言依赖焦点管理，需先聚焦再按键"],"involvedRequirementIds":["F-001"]}',
     '',
     '字段纪律：',
-    '- filesToTouch：本轮要新建或修改的文件（相对项目根，如 index.html、src/app.js），数量上限 ' + maxFiles + '，每个附一句理由；',
+    // Phase 8 W2-3：局部修改轮——只改既有文件，禁止新建（定位合同语义）
+    '- filesToTouch：' + (localOnly ? '本轮要修改的既有文件（局部修改轮：禁止规划新建文件，禁止规划与诉求无关的功能）' : '本轮要新建或修改的文件') + '（相对项目根，如 index.html、src/app.js），数量上限 ' + maxFiles + '，每个附一句理由；',
     // 完整程序阶段 2.5（2026-09-06 计算器案）：plan 只列前端文件 → loop 顺手 localStorage 满足
     // 「刷新后仍在」，server/routes 渠道被整体绕过——架构纪律必须在合同层锁死
     '- 架构纪律（完整程序）：凡功能含数据留存/服务端处理/模型调用，filesToTouch 必须包含对应 server/routes/<资源>.js（后端路由，文件名即 /api/ 前缀）及前端调用侧改动；' +
@@ -298,10 +301,34 @@ export interface GenerateLoopPlanInput {
   /** P3 分级锚定（迭代路径）：聚焦功能项 id——聚焦项断言全文进 prompt，其余项一行摘要；
  *  规划只覆盖聚焦项的改动，不重做其余项 */
   focusRequirementIds?: string[]
+  /** Phase 8 W2-3：局部修改轮定位合同——规划任务改为「定位修改点与影响面」,
+ *  filesToTouch 限定既有文件（禁止新建文件合同）；需与 projectRootPath 同时传 */
+  localOnly?: boolean
+  /** 局部修改轮的用户诉求原话（定位合同的定位目标） */
+  localPrompt?: string
+  /** 项目根绝对路径（localOnly 时用于「既有文件」存在性过滤） */
+  projectRootPath?: string
 }
 
 /** 任务输入（user prompt）：背板摘要（focus 生效时分级渲染）+ 骨架地图 + 模板类型 + 上限提醒。 */
 function buildPlanPrompt(input: GenerateLoopPlanInput, maxFiles: number): string {
+  // Phase 8 W2-3：局部修改轮定位合同——任务从「规划实现」改为「定位修改点与影响面」,
+  // 核心约束：只输出需要修改的既有文件，禁止规划新建文件/无关功能（狗粮 94f449c6:
+  // 全量规划口径产出「新建 game-core.js」合同直接误导模型重做全项目）。
+  if (input.localOnly) {
+    return [
+      `产品定位：${input.backplane.positioning}`,
+      `【本轮用户修改诉求（局部优化，其余保持现状）】${input.localPrompt ?? '（未提供，按聚焦功能项定位）'}`,
+      ...(input.focusRequirementIds && input.focusRequirementIds.length > 0
+        ? [`诉求归入的功能项：${input.focusRequirementIds.join('、')}（断言见背板锚）`]
+        : []),
+      '项目已实现并在运行（不是从零新建）：请定位诉求对应的修改点与影响面，输出技术合同 JSON。',
+      '硬约束：',
+      '- filesToTouch 只包含需要修改的既有文件（禁止新建文件；不确定文件名时用 grep 关键词描述在 reason 里）；',
+      '- 不规划与诉求无关的功能、不重做既有功能；',
+      `- filesToTouch 数量上限 ${Math.min(maxFiles, 6)}（局部修改应远小于全量）。`,
+    ].join('\n')
+  }
   const focusSet = input.focusRequirementIds && input.focusRequirementIds.length > 0
     ? new Set(input.focusRequirementIds)
     : undefined
@@ -346,9 +373,9 @@ function buildPlanPrompt(input: GenerateLoopPlanInput, maxFiles: number): string
  * 调用方 fail-open 回退现状注入。attempts 2 = 首轮 + 带反馈重试一次。
  */
 export async function generateLoopPlan(input: GenerateLoopPlanInput): Promise<LoopPlan | null> {
-  const maxFiles = PLAN_FILES_LIMIT[input.mode]
-  return callLlmForJson({
-    systemPrompt: loadPromptOverride('plan-system') ?? planSystemPrompt(maxFiles),
+  const maxFiles = input.localOnly ? Math.min(PLAN_FILES_LIMIT[input.mode], 6) : PLAN_FILES_LIMIT[input.mode]
+  const parsed = await callLlmForJson({
+    systemPrompt: loadPromptOverride('plan-system') ?? planSystemPrompt(maxFiles, input.localOnly === true),
     prompt: buildPlanPrompt(input, maxFiles),
     query: input.query,
     env: input.env,
@@ -361,4 +388,59 @@ export async function generateLoopPlan(input: GenerateLoopPlanInput): Promise<Lo
     ...(input.signal ? { signal: input.signal } : {}),
     parse: (text) => parseLoopPlan(text, { maxFiles }),
   })
+  // Phase 8 W2-3：局部修改轮硬过滤——模型仍给出不存在的文件时直接剔除（定位合同
+  // 的语义就是「改既有文件」）；剔除后为空 → 返回 null（无合同优于误导性合同，
+  // 调用方 fail-open 回退无 plan 现状，任务书本身已携带定位指令）。
+  if (parsed && input.localOnly && input.projectRootPath) {
+    const existing = parsed.filesToTouch.filter((file) => existsSync(join(input.projectRootPath!, file.path)))
+    if (existing.length === 0) return null
+    return { ...parsed, filesToTouch: existing }
+  }
+  return parsed
+}
+
+/**
+ * W5-1（Phase 8.5，2026-09-12 狗粮 dd6ba98d）：plan 合同 checklist 化——把
+ * filesToTouch 分组为有序编号任务，提供「逐项推进、完成勾选」的工作结构
+ * （对齐本平台 agent 的任务清单工作法；plan 合同细节仍由 renderPlanInjection 提供）。
+ * 分组规则确定性：入口（index.html/styles）→ src 子目录模块 → 装配入口 → 后端路由 → 其余。
+ */
+export function renderTaskChecklist(plan: LoopPlan): string {
+  if (plan.filesToTouch.length === 0) return ''
+  const groupOf = (path: string): { order: number; label: string } => {
+    if (path === 'index.html' || path === 'src/styles.css') return { order: 0, label: '入口与样式' }
+    if (path === 'src/app.js') return { order: 2, label: '装配入口' }
+    if (path.startsWith('server/')) return { order: 3, label: '后端路由' }
+    if (path.startsWith('src/')) {
+      const sub = path.split('/')[1]
+      return sub ? { order: 1, label: `src/${sub}/ 模块` } : { order: 2, label: 'src 根模块' }
+    }
+    return { order: 4, label: '其他' }
+  }
+  const groups = new Map<string, { order: number; label: string; files: LoopPlanFile[] }>()
+  for (const file of plan.filesToTouch) {
+    const g = groupOf(file.path)
+    const key = `${g.order}|${g.label}`
+    if (!groups.has(key)) groups.set(key, { ...g, files: [] })
+    groups.get(key)!.files.push(file)
+  }
+  const ordered = [...groups.values()].sort((a, b) => a.order - b.order)
+  const items = ordered.map((group, index) => {
+    const fileList = group.files.map((file) => file.path).join('、')
+    const reasons = [...new Set(group.files.map((file) => file.reason.replace(/[。；;]$/, '')))].slice(0, 2).join('；')
+    // 轻量验证映射：验证口径里提及组内文件名关键词的行挂到该项，挂不上的留在全局清单
+    const stems = group.files.map((file) => file.path.split('/').pop()?.replace(/\.[a-z]+$/, '') ?? '')
+    const verification = plan.verification
+      .filter((entry) => stems.some((stem) => stem && entry.includes(stem)))
+      .slice(0, 2)
+    return [
+      `${index + 1}. [ ] ${group.label}：${fileList} —— ${reasons}`,
+      ...(verification.length > 0 ? [`   验证：${verification.join('；')}`] : []),
+    ].join('\n')
+  })
+  return [
+    '## 实施清单（按序推进，完成一项即勾选进入下一项）',
+    ...items,
+    '工作纪律：每项先定位（grep/地图锚点 → read 只读命中段）→ 实现 → 有验证手段时立即验证 → 勾选进入下一项；禁止先全读再全写；已完成项不重读不重写，微调用 edit_file。',
+  ].join('\n')
 }

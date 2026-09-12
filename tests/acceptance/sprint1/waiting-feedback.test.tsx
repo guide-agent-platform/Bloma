@@ -68,25 +68,63 @@ describe('Sprint 1 waiting feedback acceptance', () => {
     expect(status.textContent).toMatch(/安全|放心|不会影响/)
   })
 
-  it('[S1-UI-006] 超过 120 秒时应提供继续等待和查看已有部分两个操作', () => {
+  it('[S1-UI-006] 超过 120 秒时应提供继续等待和查看进度两个操作', () => {
     const continueWaiting = vi.fn()
-    const viewPartial = vi.fn()
+    const viewProgress = vi.fn()
     render(
       <WaitingFeedback
         elapsedSeconds={121}
         actionLabel="生成验证草图"
         onContinueWaiting={continueWaiting}
-        onViewPartial={viewPartial}
+        onViewProgress={viewProgress}
       />,
     )
 
     screen.getByRole('button', { name: '继续等待' }).click()
-    screen.getByRole('button', { name: '看看已有的' }).click()
+    screen.getByRole('button', { name: '查看进度' }).click()
     expect(continueWaiting).toHaveBeenCalledOnce()
-    expect(viewPartial).toHaveBeenCalledOnce()
+    expect(viewProgress).toHaveBeenCalledOnce()
 
     const appSource = readFileSync(join(root, 'renderer', 'components', 'App.tsx'), 'utf8')
     expect(appSource).toMatch(/onContinueWaiting=/)
-    expect(appSource).toMatch(/onViewPartial=/)
+    // v2（2026-09-08）：超时卡不再承诺「已生成部分」，进度接线在 ChatPanel（步骤映射 + 事件归约）
+    const chatSource = readFileSync(join(root, 'renderer', 'components', 'ChatPanel.tsx'), 'utf8')
+    expect(chatSource).toMatch(/onViewProgress=/)
+    expect(chatSource).toMatch(/mapStageToRunSteps/)
+  })
+
+  it('超过 10 秒（long 态）即提供「查看进度」入口，无需等到 120 秒', () => {
+    render(
+      <WaitingFeedback
+        elapsedSeconds={11}
+        actionLabel="生成草图"
+        onViewProgress={vi.fn()}
+      />,
+    )
+    expect(screen.getByRole('button', { name: '查看进度' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '继续等待' })).toBeNull()
+  })
+
+  it('仅 >120 秒超时态提供「提出新想法」，long 态不出现，点击触发回调', () => {
+    const suggestIdea = vi.fn()
+    const { rerender } = render(
+      <WaitingFeedback
+        elapsedSeconds={121}
+        actionLabel="生成草图"
+        onSuggestIdea={suggestIdea}
+      />,
+    )
+    const button = screen.getByRole('button', { name: '提出新想法' })
+    button.click()
+    expect(suggestIdea).toHaveBeenCalledOnce()
+
+    rerender(
+      <WaitingFeedback
+        elapsedSeconds={11}
+        actionLabel="生成草图"
+        onSuggestIdea={suggestIdea}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: '提出新想法' })).toBeNull()
   })
 })

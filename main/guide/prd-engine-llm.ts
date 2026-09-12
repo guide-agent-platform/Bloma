@@ -5,8 +5,17 @@ import { loadPromptOverride } from '../prompt-config'
 import { buildPrdFewShotInjection, isInjectionEnabled } from '../template-injection'
 import { callLlmForJson } from '../kernel/llm-call'
 import type { AgentMessage, MessageContentBlock } from '../../shared/types'
-import type { GameDesignDoc, InterfaceEndpoint, PrdBackplane, SketchRequirement } from '../model/prd-backplane'
-import { buildPrdDocumentFallback, deriveInterfaceSpec, normalizePrdDocumentNewlines, reconcilePrdDocumentPriorities } from '../model/prd-backplane'
+import type { AiCapability, GameDesignDoc, InterfaceEndpoint, KeyTask, PrdBackplane, SketchRequirement } from '../model/prd-backplane'
+import {
+  buildPrdDocumentFallback,
+  capContractEnabled,
+  deriveAiCapabilities,
+  deriveInterfaceSpec,
+  finalizeKeyTasks,
+  keyTasksEnabled,
+  normalizePrdDocumentNewlines,
+  reconcilePrdDocumentPriorities,
+} from '../model/prd-backplane'
 import { renderDocumentSectionSpec } from '../prd-sections'
 import { categoryTemperature } from '../model-resolution'
 
@@ -124,8 +133,45 @@ ${renderDocumentSectionSpec()}
 - 只输出 JSON，其余一律不要。`
 
 function getSystemPrompt(): string {
-  return loadPromptOverride('prd-system') ?? DEFAULT_SYSTEM_PROMPT
+  const base = loadPromptOverride('prd-system') ?? DEFAULT_SYSTEM_PROMPT
+  // Phase 2 M1：开关 off → base 原样返回（字节级现状）；on → 追加 CAP 产出指令
+  // （附在末尾不侵入既有结构，与外置覆盖叠加友好）。
+  // Phase 7 U1 H2：同模式追加 key_tasks 产出指令（两开关独立，互不干扰字节级现状）。
+  let prompt = base
+  if (capContractEnabled()) prompt = `${prompt}\n\n${CAP_PROMPT_ADDENDUM}`
+  if (keyTasksEnabled()) prompt = `${prompt}\n\n${KEY_TASKS_PROMPT_ADDENDUM}`
+  return prompt
 }
+
+/**
+ * 能力契约块产出指令（Phase 2 M1，仅在 BLOMA_CAP_CONTRACT=on 时追加到 system prompt 末尾）。
+ * 三处消费（loop 锚定/裁判/确认卡）读背板 ai_capabilities，与本指令同 schema。
+ */
+export const CAP_PROMPT_ADDENDUM = [
+  '【能力契约块（ai_capabilities，本段启用时必须输出）】',
+  '输出结构新增字段（与上述字段同层级；纯展示/纯 CRUD 项目省略或给空数组）：',
+  '"ai_capabilities":[{"capability_id":"CAP-01","task":"该能力承担的任务","keyProcessing":"关键处理依赖什么","ioDependency":"输入=…；输出=…；输入变化→输出如何相应变化","forbiddenSubstitutions":["固定模板冒充"],"evidence":["修改关键输入后输出变化"],"source":"user_explicit"}',
+  '- 凡功能项涉及 AI/智能/语音/自动生成/总结整理等能力（输入→智能处理→输出），必须为每条此类能力输出一条 CAP，上限 4 条。',
+  '- task 不得用「智能处理」「一键生成」类标签词代替；keyProcessing 说清该能力靠什么成立（模型调用/规则/检索）。',
+  '- forbiddenSubstitutions 从对话与需求提炼写具体（如「固定模板冒充总结」「关键词匹配冒充分析」「降级为普通增删改查」）；evidence 为行为级可观察证据。',
+  '- source：user_explicit=用户原话明确要求；confirmed_derived=从已确认需求派生；pending_assumption=未经确认的假设。',
+  '- document 的功能清单与验收不得与 CAP 矛盾；CAP 的「不算完成」优先于任何局部测试通过。',
+].join('\n')
+
+/**
+ * 关键任务块产出指令（Phase 7 U1 H2，仅在 BLOMA_KEY_TASKS=on 时追加到 system prompt 末尾）。
+ * 消费方：PRD 确认卡展示 + delivery_status 计算（P7-2）读背板 key_tasks，与本指令同 schema。
+ */
+export const KEY_TASKS_PROMPT_ADDENDUM = [
+  '【关键任务块（key_tasks，本段启用时必须输出）】',
+  '输出结构新增字段（与上述字段同层级）：',
+  '"key_tasks":[{"task_id":"KT-01","label":"用户语言的一句话任务（如：记一笔账，月底能看到这个月花了多少）","feature_ids":["F-001","F-002"],"must_deliver":true}]',
+  '- 从已确认功能项提炼 2~4 个「做完才算这一版交付」的关键任务，用用户任务视角的语言写：动词开头、说清用户能完成什么，不用技术术语。',
+  '- 每个 P0 功能项必须落入至少一个任务（硬约束；系统会自动补齐遗漏，但请尽量自己写好）。',
+  '- label 不复制功能项描述原文，而是任务视角的合并表述（例：F-001 记账 + F-002 结余 →「记一笔账，月底能看到这个月花了多少」）。',
+  '- must_deliver=true 表示必须做到（做不到这一版不能算完成）；确属锦上添花、可整体失败的才标 false；不确定时一律 true。',
+  '- document 的功能清单与 key_tasks 不得矛盾；任务里承诺的功能项必须在功能清单内。',
+].join('\n')
 
 export async function generatePrdLlm(input: GeneratePrdLlmInput): Promise<PrdBackplane | null> {
   const conversation = readConversation(input.session_id)
@@ -158,7 +204,7 @@ export async function generatePrdLlm(input: GeneratePrdLlmInput): Promise<PrdBac
       timeoutMs: input.timeoutMs,
       parse: parsePrdJson,
     })
-    return parsed ? buildBackplaneFromParsed(parsed, items, input.project_id) : null
+    return parsed ? buildBackplaneFromParsed(parsed, items, input.project_id, input.template_type) : null
   } catch {
     return null
   }
@@ -173,8 +219,7 @@ const PRD_RETRY_FEEDBACK =
   '（{"document":"长文本 PRD 全文","positioning":"…","acceptance":{"F-001":"…"},"out_of_scope":[…],"assumptions":[…]}），' +
   '不要 markdown 代码围栏与任何解释文字，确保括号引号完整闭合、document 内换行与引号已转义。'
 
-function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequirement[], projectId: string): PrdBackplane {
-  const acceptance: Record<string, string> = {}
+export function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequirement[], projectId: string, templateType?: import('../../shared/types').TemplateType): PrdBackplane {  const acceptance: Record<string, string> = {}
   for (const item of items) {
     acceptance[item.id] = parsed.acceptance[item.id]?.trim() || `${item.description}：核心路径可交互，边界与异常输入不崩溃。`
   }
@@ -205,13 +250,27 @@ function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequirement[],
     // P1-7：game 类型 GDD（玩法真相源）随背板冻结；非 game 缺省 undefined。
     ...(parsed.gdd ? { gdd: parsed.gdd } : {}),
     // 完整程序阶段 2：后端 API 契约随背板冻结；无后端需求缺省 undefined。
-    // 阶段 2.5 兜底：LLM 漏报（计算器案）但功能项命中数据留存信号 → 确定性派生最小契约
+    // 阶段 2.5 兜底：LLM 漏报（计算器案）但功能项命中数据留存信号 → 确定性派生最小契约；
+    // C1b（2026-09-11 拍板）：game 豁免开启时轻留存不派生（LLM 明确报告的契约仍优先）
     ...(parsed.interface_spec && parsed.interface_spec.length > 0
       ? { interface_spec: parsed.interface_spec }
       : ((): { interface_spec: InterfaceEndpoint[] } | undefined => {
-          const derived = deriveInterfaceSpec(items)
+          const derived = deriveInterfaceSpec(items, templateType)
           return derived ? { interface_spec: derived } : undefined
         })()),
+    // Phase 2 M1：能力契约块随背板冻结——LLM 产出优先；漏报且命中 AI 信号 →
+    // deriveAiCapabilities 确定性派生；开关 off 整段不挂（字节级现状）。
+    ...(capContractEnabled()
+      ? {
+          ai_capabilities:
+            parsed.ai_capabilities && parsed.ai_capabilities.length > 0
+              ? parsed.ai_capabilities
+              : (deriveAiCapabilities(items) ?? []),
+        }
+      : {}),
+    // Phase 7 U1 H2：关键任务块随背板冻结——LLM 产出优先，finalizeKeyTasks 做
+    // 白名单过滤+P0 补齐+重编号；开关 off 整段不挂（字节级现状）。
+    ...(keyTasksEnabled() ? { key_tasks: finalizeKeyTasks(parsed.key_tasks ?? [], items) } : {}),
   }
 }
 
@@ -223,6 +282,10 @@ interface ParsedPrd {
   assumptions: string[]
   gdd?: GameDesignDoc
   interface_spec?: InterfaceEndpoint[]
+  /** Phase 2 M1：能力契约块（开关 on 时 prompt 要求产出；解析容错同 interface_spec）。 */
+  ai_capabilities?: AiCapability[]
+  /** Phase 7 U1 H2：关键任务块（开关 on 时 prompt 要求产出；形状级清洗，定稿在 finalizeKeyTasks）。 */
+  key_tasks?: KeyTask[]
 }
 
 function parsePrdJson(text: string): ParsedPrd | undefined {
@@ -251,6 +314,10 @@ function parsePrdJson(text: string): ParsedPrd | undefined {
   const gdd = parseGdd(parsed.gdd)
   // 完整程序阶段 2：interface_spec 解析（前后端契约真相源；缺省/非法 → 空数组零注入）。
   const interfaceSpec = parseInterfaceSpec(parsed.interface_spec)
+  // Phase 2 M1：ai_capabilities 解析（能力契约块；缺省/非法 → 空数组走派生兜底）。
+  const aiCapabilities = parseAiCapabilities(parsed.ai_capabilities)
+  // Phase 7 U1 H2：key_tasks 解析（关键任务块；缺省/非法 → 空数组走 P0 补齐兜底）。
+  const keyTasks = parseKeyTasks(parsed.key_tasks)
 
   return {
     positioning: typeof parsed.positioning === 'string' ? parsed.positioning : '',
@@ -260,7 +327,77 @@ function parsePrdJson(text: string): ParsedPrd | undefined {
     assumptions: stringArray(parsed.assumptions),
     ...(gdd ? { gdd } : {}),
     ...(interfaceSpec.length > 0 ? { interface_spec: interfaceSpec } : {}),
+    ...(aiCapabilities.length > 0 ? { ai_capabilities: aiCapabilities } : {}),
+    ...(keyTasks.length > 0 ? { key_tasks: keyTasks } : {}),
   }
+}
+
+/**
+ * 解析 ai_capabilities（Phase 2 M1）：capability_id 归一为 CAP-0N（接受 CAP-1/cap_01/1
+ * 等变体）；task 必填（缺则弃条）；数组字段过滤空串并限量；source 白名单外归
+ * pending_assumption（保守：来源不明不当作已确认）；上限 4 条。
+ * export：供单测直测（契约清洗承重，同 parseInterfaceSpec 口径）。
+ */
+export function parseAiCapabilities(raw: unknown): AiCapability[] {
+  if (!Array.isArray(raw)) return []
+  const out: AiCapability[] = []
+  for (const entry of raw) {
+    if (!isRecord(entry)) continue
+    const task = typeof entry.task === 'string' ? entry.task.trim() : ''
+    if (!task) continue
+    const idRaw = typeof entry.capability_id === 'string' ? entry.capability_id : ''
+    const idMatch = idRaw.match(/(\d+)/)
+    const capabilityId = `CAP-${String(idMatch ? Number(idMatch[1]) : out.length + 1).padStart(2, '0')}`
+    const list = (value: unknown): string[] =>
+      Array.isArray(value)
+        ? value.filter((v): v is string => typeof v === 'string' && v.trim().length > 0).map((v) => v.trim().slice(0, 160)).slice(0, 4)
+        : []
+    const sourceRaw = typeof entry.source === 'string' ? entry.source : ''
+    const source: AiCapability['source'] =
+      sourceRaw === 'user_explicit' || sourceRaw === 'confirmed_derived' || sourceRaw === 'pending_assumption'
+        ? sourceRaw
+        : 'pending_assumption'
+    out.push({
+      capability_id: capabilityId,
+      task: task.slice(0, 200),
+      keyProcessing: typeof entry.keyProcessing === 'string' ? entry.keyProcessing.trim().slice(0, 300) : '',
+      ioDependency: typeof entry.ioDependency === 'string' ? entry.ioDependency.trim().slice(0, 300) : '',
+      forbiddenSubstitutions: list(entry.forbiddenSubstitutions),
+      evidence: list(entry.evidence),
+      source,
+    })
+    if (out.length >= 4) break
+  }
+  return out
+}
+
+/**
+ * 解析 key_tasks（Phase 7 U1 H2）：形状级清洗——label 必填（缺则弃条）；
+ * feature_ids 过滤非字符串并去重（白名单校验与 P0 补齐在 finalizeKeyTasks，
+ * 因 parse 阶段无 requirements 上下文）；must_deliver 非 false 一律归 true
+ * （保守：关键任务缺省必交，与「从严 v0」一致）；上限 4 条。
+ * export：供单测直测（契约清洗承重，同 parseAiCapabilities 口径）。
+ */
+export function parseKeyTasks(raw: unknown): KeyTask[] {
+  if (!Array.isArray(raw)) return []
+  const out: KeyTask[] = []
+  for (const entry of raw) {
+    if (!isRecord(entry)) continue
+    const label = typeof entry.label === 'string' ? entry.label.trim() : ''
+    if (!label) continue
+    const featureIds = Array.isArray(entry.feature_ids)
+      ? [...new Set(entry.feature_ids.filter((v): v is string => typeof v === 'string' && v.trim().length > 0))].slice(0, 6)
+      : []
+    if (featureIds.length === 0) continue
+    out.push({
+      task_id: typeof entry.task_id === 'string' ? entry.task_id : '',
+      label: label.slice(0, 80),
+      feature_ids: featureIds,
+      must_deliver: entry.must_deliver !== false,
+    })
+    if (out.length >= 4) break
+  }
+  return out
 }
 
 /** 解析 interface_spec（完整程序阶段 2）：端点必须落在 /api/ 前缀下（平台自动挂载

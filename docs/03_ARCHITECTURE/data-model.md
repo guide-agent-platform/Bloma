@@ -153,10 +153,15 @@ erDiagram
 | `metadata_json` | json | 否 | 结构化元数据 |
 | `created_at` | datetime | 是 | 创建时间 |
 
-消息不单独保存在数据库中，运行时以 JSONL 行格式追加写入：
+消息不单独保存在数据库中，运行时以 JSONL 行格式追加写入。
+
+**行结构 v2（2026-09-08 P0-2 fork）**：新写入的行额外携带 `id`（8 位 hex）与 `parentId`
+（前一行 id，首行 `null`），形成会话树链（从任意 user 消息 fork 的前提）。旧文件（无链
+字段）零迁移：读取时对未知字段透明、按线性序归一。父会话链接记在会话索引
+（`parent_session_id` / `fork_entry_id`），不落 JSONL 头。
 
 ```json
-{"role":"assistant","content":[{"type":"text","text":"..."}],"timestamp":1783699200000}
+{"role":"assistant","content":[{"type":"text","text":"..."}],"timestamp":1783699200000,"id":"3f9a2c1d","parentId":"8b4e71a0"}
 ```
 
 ---

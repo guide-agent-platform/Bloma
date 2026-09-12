@@ -143,6 +143,14 @@ function RequirementBlock(props: { item: PrdConfirmRequirement; onDisagree: (id:
         <span>
           <span style={priorityBadgeStyle(item.priority)}>{priorityLabel(item.priority)}</span>
           <strong>{item.id}</strong>　{item.story}
+          {item.origin === 'guide' ? (
+            <span style={{ marginLeft: 6, fontSize: 11, padding: '1px 6px', borderRadius: 999, background: 'var(--color-bg-subtle, #f0f2f7)', color: 'var(--color-text-secondary, #5b6472)' }}>向导补充</span>
+          ) : item.origin === 'user' ? (
+            <span style={{ marginLeft: 6, fontSize: 11, padding: '1px 6px', borderRadius: 999, background: 'var(--color-bg-subtle, #f0f2f7)', color: 'var(--color-text-secondary, #5b6472)' }}>你说的</span>
+          ) : null}
+          {item.implies_backend ? (
+            <span style={{ marginLeft: 6, fontSize: 11, padding: '1px 6px', borderRadius: 999, background: 'rgba(47, 100, 190, 0.10)', color: '#2f64be' }}>↳ 将要求后端与数据持久化</span>
+          ) : null}
         </span>
         <button type="button" style={disagreeLinkStyle} data-ai-id={`prd-confirm-disagree-${item.id}`} onClick={() => onDisagree(item.id)}>
           这条不对
@@ -387,6 +395,48 @@ export const PrdConfirmDialog: React.FC = () => {
           </p>
         </div>
 
+        {/* 关键任务段（Phase 7 U1 H2，2026-09-10）：这一版做完什么才算交付——缺失/空数组隐藏（开关 off/无任务/旧夹具） */}
+        {(state.keyTasks ?? []).length > 0 ? (
+          <div data-ai-id="prd-confirm-key-tasks">
+            <h3 style={sectionTitleStyle}>这一版做完这些才算交付（关键任务）</h3>
+            <p style={{ margin: '4px 0 8px', fontSize: 12, color: 'var(--color-text-secondary, #5b6472)' }}>
+              生成完成后，我们会按下面的任务逐项验证并如实报告做到没做到。
+            </p>
+            <div style={{ ...warnBlockStyle('caution'), marginTop: 6, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {state.keyTasks!.map((task) => (
+                <div key={task.taskId}>
+                  <div style={{ fontWeight: 600 }}>
+                    · {task.label}
+                    {task.mustDeliver ? (
+                      <span style={{ fontWeight: 400 }}>｜必须做到</span>
+                    ) : (
+                      <span style={{ fontWeight: 400 }}>｜尽力完成</span>
+                    )}
+                  </div>
+                  {task.featureIds.length > 0 ? (
+                    <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>关联功能：{task.featureIds.join('、')}</div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {/* 还需你确认的 1 件事（Phase 7 U4 J4）：CAP 待确认假设置顶强调——无 CAP 或无
+            pending_assumption 时自动隐藏（不摆空架子） */}
+        {(() => {
+          const pending = (state.aiCapabilities ?? []).find((cap) => cap.source === 'pending_assumption')
+          if (!pending) return null
+          return (
+            <div data-ai-id="prd-confirm-pending-cap" style={{ ...warnBlockStyle('danger'), marginTop: 6 }}>
+              <div style={{ fontWeight: 600 }}>还需你确认的 1 件事：{pending.task}</div>
+              <div style={{ fontSize: 12, marginTop: 4, opacity: 0.9 }}>
+                这是根据常见做法假设的能力，还没有经你确认。确认这份 PRD 表示同意这样做；不同意可点「有要调整的」告诉我。
+              </div>
+            </div>
+          )
+        })()}
+
         {/* 第二段：功能清单（P0 断言展开 / P1P2 折叠，逐项可异议） */}
         <div>
           <h3 data-ai-id="prd-confirm-requirements-title" style={sectionTitleStyle}>
@@ -398,6 +448,26 @@ export const PrdConfirmDialog: React.FC = () => {
             ))}
           </ul>
         </div>
+
+        {/* 能力契约段（Phase 2 M1，2026-09-09）：AI/智能能力怎么算完成——缺失/空数组隐藏（开关 off/无 CAP/旧夹具） */}
+        {(state.aiCapabilities ?? []).length > 0 ? (
+          <div data-ai-id="prd-confirm-capabilities">
+            <h3 style={sectionTitleStyle}>核心能力契约（{(state.aiCapabilities ?? []).length} 条）——这些能力怎么才算完成</h3>
+            <div style={{ ...warnBlockStyle('caution'), marginTop: 6, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {state.aiCapabilities!.map((cap) => (
+                <div key={cap.capabilityId}>
+                  <div style={{ fontWeight: 600 }}>
+                    · {cap.task}
+                    {cap.forbiddenSubstitutions.length > 0 ? <span style={{ fontWeight: 400 }}>｜不算完成：{cap.forbiddenSubstitutions.join('；')}</span> : null}
+                  </div>
+                  {cap.evidence.length > 0 ? (
+                    <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>验收证据：{cap.evidence.join('；')}</div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         {/* 第三段：明确不做的（高亮——事后争议最大） */}
         <div data-ai-id="prd-confirm-out-of-scope">
@@ -434,7 +504,7 @@ export const PrdConfirmDialog: React.FC = () => {
         {/* 灵感参考（2026-08-29，市调想法可勾选采纳并入 PRD；空段隐藏） */}
         {state.ideas.length > 0 ? (
           <div data-ai-id="prd-confirm-ideas">
-            <h3 style={sectionTitleStyle}>灵感参考（市面上的做法）</h3>
+            <h3 style={sectionTitleStyle}>灵感参考（{state.ideasMode === 'agent' ? 'AI 灵感建议' : '市面上的做法'}）</h3>
             <p style={{ margin: '4px 0 8px', fontSize: 12, color: 'var(--color-text-secondary, #5b6472)' }}>
               看到想要的方向就勾上，确认后会并入这份 PRD 一起做；不勾就仅作参考。
             </p>

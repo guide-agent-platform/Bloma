@@ -28,8 +28,9 @@ export interface UiProbeData {
   realByTag: Record<string, number>
   /** class/文本像按钮却是 div/span 的伪装控件（上限 12 条） */
   pretendWidgets: { tag: string; cls: string; text: string }[]
-  /** 对按钮类元素的点击活性采样：domChanged=false 即死点击 */
-  deadClicks: { text: string; clicked: boolean; domChanged: boolean }[]
+  /** 对按钮类元素的点击活性采样：domChanged=false 即死点击；tag=采样元素类型
+   *  （button/role-button=真按钮类，a=锚点链接，div/span=伪装控件）供 C3 判活分档 */
+  deadClicks: { text: string; clicked: boolean; domChanged: boolean; tag?: string }[]
   /** 命中的内部验收话术黑名单 id（不含 placeholder-persona，那是信息位） */
   leakedPatterns: string[]
   placeholderPersona: boolean
@@ -55,6 +56,14 @@ const PLACEHOLDER_PERSONA_RE = /J\.\s*Doe|John Doe|lorem ipsum|example\.com/i
 /** 紧急逃生门（对齐 BLOMA_AGENT_LOOP 口径：仅显式 '0' 关闭，缺省硬执行）。 */
 export function uiGateEnabled(): boolean {
   return process.env.BLOMA_UI_GATE !== '0'
+}
+
+/** C3（P1，2026-09-11 审计⑩/K）：死按钮判活开关——按钮类采样点击死亡占比 ≥80% 且
+ *  realControls ≥3 → failed（7 个无 JS 死按钮照样 passed 的假绿根治位）。
+ * 防误杀：仅统计真按钮类（button/[role=button]），锚点/外链/伪装控件不进分母。
+ * 缺省 off=字节级现状。 */
+export function uiGateLivenessEnabled(): boolean {
+  return process.env.BLOMA_UI_GATE_LIVENESS === '1' || process.env.BLOMA_UI_GATE_LIVENESS === 'true'
 }
 
 /** 纯判定：探针数据 → 合成失败清单（scenario 统一 `UI-GATE ` 前缀，claim 供修复卡）。 */
@@ -87,6 +96,22 @@ export function analyzeUiProbe(probe: UiProbeData): GwtFailureSummary[] {
       scenario: 'UI-GATE 按钮类控件点击必须产生可见界面变化（DOM 变更或导航）',
       reason: `真控件 0 且采样点击 ${actionable.length} 个按钮类元素（${actionable.map((d) => d.text).join('、').slice(0, 120)}）全部无任何反应`,
     })
+  }
+
+  // C3（P1，2026-09-11 审计⑩/K）：死按钮判活——真按钮类（button/[role=button]）采样
+  // 死亡占比 ≥80% 且真控件充足 → failed；锚点/外链/伪装控件不进分母（防误杀：外链
+  // 点击不换页可能是 target=_blank 被拦，纯锚点无义务改 DOM）。开关 off=字节级现状。
+  if (uiGateLivenessEnabled()) {
+    const buttonSamples = probe.deadClicks.filter((d) => d.tag === 'button' || d.tag === 'role-button')
+    if (buttonSamples.length >= 3 && probe.realControls >= 3) {
+      const dead = buttonSamples.filter((d) => !d.domChanged)
+      if (dead.length / buttonSamples.length >= 0.8) {
+        failures.push({
+          scenario: 'UI-GATE 按钮类控件大面积无响应（点击后界面无任何变化，死按钮界面不构成可用软件）',
+          reason: `真控件 ${probe.realControls} 个但按钮类采样 ${buttonSamples.length} 个中 ${dead.length} 个点击无反应：${dead.map((d) => d.text).join('、').slice(0, 160)}`,
+        })
+      }
+    }
   }
 
   if (probe.leakedPatterns.length > 0) {
@@ -173,16 +198,22 @@ export async function runArtifactUiGate(input: {
     const bodyTextForLeakScan = await page.evaluate(() => document.body?.innerText || '')
     const leakedPatterns = ASSERTION_LEAK_PATTERNS.filter((p) => p.re.test(bodyTextForLeakScan)).map((p) => p.id)
 
-    // 点击活性采样：优先伪装控件，其次按钮类真控件
-    const candidates = [...base.pretendWidgets.map((w) => w.text), ...await page.$$eval(
-      'button, [role="button"], a[href]:not([href="#"])',
-      (els) => els.map((e) => (e.textContent || '').trim()).filter((t) => t.length > 0 && t.length < 24),
-    )]
-    const deadClicks: { text: string; clicked: boolean; domChanged: boolean }[] = []
+    // 点击活性采样：优先伪装控件，其次按钮类真控件（C3：tag 随采样记录供判活分档）
+    const candidates: Array<{ text: string; tag: string }> = [
+      ...base.pretendWidgets.map((w) => ({ text: w.text, tag: w.tag })),
+      ...await page.$$eval(
+        'button, [role="button"], a[href]:not([href="#"])',
+        (els) => els.map((e) => ({
+          text: (e.textContent || '').trim(),
+          tag: e.tagName.toLowerCase() === 'button' ? 'button' : (e.getAttribute('role') === 'button' ? 'role-button' : 'a'),
+        })).filter((c) => c.text.length > 0 && c.text.length < 24),
+      ),
+    ]
+    const deadClicks: { text: string; clicked: boolean; domChanged: boolean; tag?: string }[] = []
     let sampled = 0
-    for (const text of candidates) {
+    for (const cand of candidates) {
       if (sampled >= clickLimit) break
-      const el = await page.$(`text="${text}"`)
+      const el = await page.$(`text="${cand.text}"`)
       if (!el) continue
       const before = await page.evaluate(() => (document.body?.innerHTML || '').length)
       const errBefore = consoleErrors.length
@@ -190,7 +221,7 @@ export async function runArtifactUiGate(input: {
       await page.waitForTimeout(450)
       const after = await page.evaluate(() => (document.body?.innerHTML || '').length)
       const navigated = page.url() !== input.previewUrl.replace(/\/$/, '')
-      deadClicks.push({ text, clicked: true, domChanged: after !== before || navigated || consoleErrors.length > errBefore })
+      deadClicks.push({ text: cand.text, tag: cand.tag, clicked: true, domChanged: after !== before || navigated || consoleErrors.length > errBefore })
       sampled++
       if (navigated) break // 导航后页面已换，采样终止（视为有反应）
     }

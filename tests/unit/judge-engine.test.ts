@@ -169,6 +169,21 @@ describe('JudgeEngine loop-aware（M4-B：异常终止态不凭产物放行）',
     expect(verdict.soft_constraints).toEqual([])
   })
 
+  it('P2a：turn_limit + termination_detail(degenerate_output) → 用户话术如实标注「输出退化」而非「轮数耗尽」（狗粮 94f449c6）', () => {
+    const project = perfectProject()
+    const verdict = runJudge({
+      project_id: project.project_id,
+      mode: 'quick',
+      loop: { status: 'turn_limit', turns: 37, finalText: '', toolCalls: [], termination_detail: { reason: 'degenerate_output', retries: 1 } },
+    })
+    expect(verdict.verdict).toBe('return')
+    expect(verdict.user_visible_summary).toContain('末轮输出退化')
+    expect(verdict.user_visible_summary).toContain('非轮数耗尽')
+    expect(verdict.user_visible_summary).not.toContain('达到轮次上限')
+    const loopConstraint = verdict.hard_constraints.find((item) => item.name === 'Agent Loop 完成状态')
+    expect(loopConstraint?.detail).toContain('末轮输出退化')
+  })
+
   it('loop completed → 走原读盘判定，产物达标即 pass', () => {
     const project = perfectProject()
     const verdict = runJudge({

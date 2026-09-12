@@ -1,5 +1,5 @@
 import { restorePromaHome } from '../support/proma-home-guard'
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -66,12 +66,21 @@ describe('Judge review trigger and return counts (A2-11)', () => {
     syncDocuments({ request_id: 'req-sync', session_id: 'session-1', project_id: project.project_id, checkpoint: 'mvp_before_generation' })
     writeFileSync(join(project.root_path, 'index.html'), '<p>记录收入与支出</p>', 'utf8')
 
+    const events: Array<{ type: string; payload: Record<string, unknown> }> = []
+    setProgrammingEventPublisher((event) => events.push({ type: event.type, payload: event.payload as Record<string, unknown> }))
+
     const result = await runJudgeReview({ request_id: 'req-judge', session_id: 'session-1', project_id: project.project_id })
 
     expect(result.outcome).toBe('ready')
     expect(result.verdict.verdict).toBe('pass')
     expect(findProject(project.project_id).current_stage).toBe('ready')
     expect(findProject(project.project_id).judge_return_count ?? 0).toBe(0)
+    // MVP 就绪三按钮卡（2026-09-11 卡位改版）：ready 收敛即发 mvp_review 卡
+    //（原「走向完整产物」引导卡与 delivery_presented 埋点后移到「保持现状」分支）
+    const card = events.find((event) => event.type === 'user_decision_required')
+    expect((card?.payload as { kind?: string }).kind).toBe('mvp_review')
+    const questions = (card?.payload as { questions?: Array<{ id: string }> }).questions
+    expect(questions?.map((q) => q.id)).toEqual(['keep', 'optimize', 'rebuild'])
   })
 
   it('MVP 完成到 ready 时主动下发「完成」助手消息（落盘 + message_delta + completed）', async () => {

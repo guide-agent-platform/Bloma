@@ -24,7 +24,13 @@ import { createHash } from 'node:crypto'
 // =========================================================================
 
 export type CardKind = 'anti_pattern' | 'pattern'
-export type CardStatus = 'candidate' | 'verified' | 'retired'
+/**
+ * 生命周期（C2a，2026-09-09）：candidate → verified（机制验证：replay/sandbox/human）
+ * → active（迁移+负例验证齐备，fail-closed：promoteToActive 无证据拒升）→ retired。
+ * 拍板缺省（P2 稿 §5，可推翻）：canary 在线观察期 v1 不设（线上观察归 system 层验证，
+ * 待 L1 额度恢复）；人工复核即手工登记验证报告（registerValidationReport），自动晋升只到 verified。
+ */
+export type CardStatus = 'candidate' | 'verified' | 'active' | 'retired'
 export type VerificationMethod =
   | 'replay_green' // anti_pattern：GWT 重放测试转绿
   | 'sandbox_pass' // pattern：沙箱编译试跑通过
@@ -35,11 +41,59 @@ export type CardSourceType =
   | 'build_gate_failure'
   | 'semantic_findings'
   | 'abnormal_outcome'
+  | 'antidegrade_judge'
   | 'backfill'
   | 'web_reference'
   | 'user_feedback'
   | 'tools_unsupported'
   | 'timeout_interrupt'
+
+/** 治理扩展块（Phase 4 C1，2026-09-09，P2 稿 §3 C1）：适用边界+机制假设+三层验证证据+回滚条件。全可选，旧卡零迁移（读侧经 cardGovernance() 归一化）。 */
+export interface CardGovernance {
+  /** 适用范围：taskTypes 缺省 ['*'] 不限；modelVersions/environmentVersions 记提取时环境供迁移验证对照 */
+  scope: { taskTypes: string[]; modelVersions?: string[]; environmentVersions?: string[] }
+  /** 作用机制假设：为什么有效（不是「上次成功了」）；缺省由归因腿结果/能力描述派生 */
+  hypothesis: string
+  /** 不适用条件（负例验证的边界声明） */
+  exclusions: string[]
+  /** 机制/迁移/负例三层验证报告 id（C2 晋升门槛消费；缺省 [] = 未做迁移验证，fail-closed 不升 active） */
+  validationReportIds: string[]
+  /** 撤销/回滚条件 */
+  rollbackConditions: string[]
+  /** 三层验证报告（C2a）：机制/迁移/负例/系统；与 validationReportIds 同步 */
+  validationReports?: ValidationReport[]
+}
+
+/** 验证报告（C2a）：layer=mechanism（同失败重放，已有）/ migration（未参与提取的同类未见任务）/ negative（相近但不适用任务无误触发）/ system（检索+注入+执行成本计入后净收益）。 */
+export interface ValidationReport {
+  id: string
+  layer: 'mechanism' | 'migration' | 'negative' | 'system'
+  /** 验证任务引用（bench run id / 手工任务描述）；迁移验证任务不得参与经验提取 */
+  task_ref: string
+  outcome: 'pass' | 'fail'
+  note?: string
+  at: number
+}
+
+/**
+ * 读侧治理归一化（C1 存量兼容）：旧卡无 governance 时按同规则派生默认值，不迁移不改写。
+ * hypothesis 派生：anti_pattern → root_cause.description（归因腿结果，P2 稿口径）退 symptom；
+ * pattern → capability。写入侧（error-card envelope / ref-ui-source）周同一函数产新卡默认值。
+ */
+export function cardGovernance(card: ExperienceCard): CardGovernance {
+  if (card.governance) return card.governance
+  const hypothesis =
+    card.kind === 'anti_pattern'
+      ? (card.body.root_cause.description || card.body.symptom || '').slice(0, 200)
+      : (card.body.capability || '').slice(0, 200)
+  return {
+    scope: { taskTypes: ['*'] },
+    hypothesis,
+    exclusions: [],
+    validationReportIds: [],
+    rollbackConditions: [],
+  }
+}
 
 export interface CardEnvelope {
   /** 唯一标识：node crypto.randomUUID()（替代 nanoid(21)，零新依赖） */
@@ -85,6 +139,8 @@ export interface CardEnvelope {
     times_matched: number
     false_positive_count: number
   }
+  /** 治理扩展（C1，可选——旧卡缺失时读侧 cardGovernance() 归一化） */
+  governance?: CardGovernance
 }
 
 // =========================================================================
@@ -347,6 +403,6 @@ export function keyFromSymptom(text: string): string {
 /** 消费入池资格：verified 恒可；candidate 需达复发阈值（首注册即落盘不丢数据）。 */
 export function isConsumable(card: CardEnvelope): boolean {
   if (card.status === 'retired') return false
-  if (card.status === 'verified') return true
+  if (card.status === 'verified' || card.status === 'active') return true
   return card.recurrence >= EXPERIENCE_GOVERNANCE.RECURRENCE_THRESHOLD
 }

@@ -51,6 +51,7 @@ export {
   appendMessageToSession, markDecisionConsumed, clearPermissionRequest, resetProjectState,
   loadAgentSessions, loadSessionHistory, loadSnapshots,
   sessionUsageFamily,
+  steerStatusFamily, type SteerStatusChip,
 } from '../agent-atoms'
 
 export const workspaceWaitingAtom = atom<boolean>(false)

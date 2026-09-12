@@ -15,7 +15,12 @@ evidence/
 undefined/
 null/
 
+# 调度系统运行时状态（事件驱动工作流）
 tasks.json
 logs/
 reports/
 .gs-*.mark
+
+# bench 离线报告与 L1 运行档案（不入库）
+bench/reports/
+bench/runs/

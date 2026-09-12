@@ -337,8 +337,11 @@ function writeData(name, value) {
   require('node:fs').renameSync(tmp, p);
 }
 const routes = [];
+// B1（P0-B，2026-09-11）：挂载失败登记——不再只进 console，供 /_bloma/routes 健康端点回流（与产物模板同构）
+const routeErrors = [];
 function loadRoutes() {
   routes.length = 0;
+  routeErrors.length = 0;
   if (!existsSync(ROUTES_DIR)) return;
   for (const file of readdirSync(ROUTES_DIR).filter((f) => f.endsWith('.js')).sort()) {
     try {
@@ -356,6 +359,7 @@ function loadRoutes() {
         routes.push({ method: m[1], path: routePath, handler: handler, ctx: ctx });
       }
     } catch (e) {
+      routeErrors.push({ file: file, message: String((e && e.message) || e).slice(0, 300) });
       console.error('[routes] 挂载失败 ' + file + ': ' + (e && e.message));
     }
   }
@@ -397,6 +401,12 @@ const LLM_PROTOCOL = process.env.BLOMA_APP_LLM_PROTOCOL === 'anthropic' ? 'anthr
 const LLM_TIMEOUT_MS = Number(process.env.BLOMA_APP_LLM_TIMEOUT_MS) || 60000;
 const server = createServer((req, res) => {
   const rawUrl = new URL(req.url || '/', 'http://localhost');
+  // ---- B1 健康端点：路由挂载状态（与产物模板同构；api-contract 探针 404 时取真实报错）----
+  if (rawUrl.pathname === '/_bloma/routes' && req.method === 'GET') {
+    loadRoutes();
+    sendJson(res, 200, { mounted: routes.map((r) => ({ method: r.method, path: r.path })), errors: routeErrors });
+    return;
+  }
   if (rawUrl.pathname === '/api/llm' && (req.method === 'POST' || req.method === 'OPTIONS')) {
     if (req.method === 'OPTIONS') { res.writeHead(403); res.end('Forbidden'); return; }
     let raw = '';
@@ -525,6 +535,7 @@ export async function createSnapshot(input: SnapshotCreateInput): Promise<Snapsh
     files_archive_path: filesArchivePath,
     documents_archive_path: effectiveDocumentsArchivePath,
     health_status: input.health_status,
+    ...(input.derived_from ? { derived_from: input.derived_from } : {}),
     created_at: new Date().toISOString(),
   }
   writeJsonFile(`${snapshotRoot}/metadata.json`, snapshot)
@@ -770,14 +781,44 @@ export async function rollbackSnapshot(input: SnapshotRollbackInput): Promise<Ro
   // 8. 重启 sandbox
   const sandbox = await runSandbox({ request_id: input.request_id, project_id: input.project_id })
 
+  // 9. Phase 7 U3 I6（BLOMA_RESTORE_AS_VERSION on）：恢复即新版本——恢复后的状态拍
+  // restored 快照（derived_from 指向源版本），时间线上「恢复」是前进动作而非后退；
+  // 后续新版本从恢复点继续，源版本到恢复前之间的版本由 guard 快照保留可找回。
+  // off = 不拍（字节级现状：回滚后无新版本记录）。
+  let restoredSnapshotId: string | undefined
+  if (restoreAsVersionEnabled()) {
+    try {
+      const restored = await createSnapshot({
+        request_id: input.request_id,
+        project_id: input.project_id,
+        kind: 'restored',
+        summary: `从「${target?.name ?? input.snapshot_id.slice(0, 8)}」恢复的版本：应用与它在 Bloma 内保存的数据一起回到那一版；恢复前的状态已由保护快照保留`,
+        include_documents: true,
+        health_status: 'healthy',
+        derived_from: input.snapshot_id,
+      })
+      restoredSnapshotId = restored.snapshot_id
+      // 指针前移到恢复点（restoreSnapshotFiles 先指回源版本，restored 拍完后指新版本）
+      updateProject(input.project_id, { current_snapshot_id: restored.snapshot_id })
+    } catch (error) {
+      console.error('[snapshot] restored 快照创建失败（不影响回滚结果）:', error)
+    }
+  }
+
   return {
     rolled_back: true,
     project_id: project.project_id,
-    current_snapshot_id: input.snapshot_id,
+    current_snapshot_id: restoredSnapshotId ?? input.snapshot_id,
     guard_snapshot_id: guard.snapshot_id,
     preview_url: sandbox.preview_url,
     documents_restored: documentsRestored,
   }
+}
+
+/** Phase 7 U3 I6 开关：BLOMA_RESTORE_AS_VERSION 缺省 off（回滚不拍 restored 快照）。 */
+export function restoreAsVersionEnabled(): boolean {
+  const raw = (process.env.BLOMA_RESTORE_AS_VERSION ?? '').trim().toLowerCase()
+  return raw === '1' || raw === 'on' || raw === 'true'
 }
 
 /**

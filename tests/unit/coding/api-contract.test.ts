@@ -1,6 +1,6 @@
 import { createServer, type Server } from 'node:http'
 import { afterEach, describe, expect, it } from 'vitest'
-import { checkApiContract } from '../../../main/coding/api-contract'
+import { checkApiContract, routeErrorFeedbackEnabled } from '../../../main/coding/api-contract'
 
 /**
  * API 契约存活检查（完整程序阶段 2）：interface_spec 无参 GET 端点探测——
@@ -81,5 +81,78 @@ describe('checkApiContract', () => {
   it('空端点清单零探测零失败', async () => {
     const failures = await checkApiContract('http://127.0.0.1:1', [])
     expect(failures).toEqual([])
+  })
+})
+
+describe('B1 挂载错误回流（BLOMA_ROUTE_ERROR_FEEDBACK）', () => {
+  let server: Server | undefined
+  const previousEnv = process.env.BLOMA_ROUTE_ERROR_FEEDBACK
+
+  /** 同构健康端点测试服务器：/_bloma/routes 返回挂载失败清单（模拟 ESM 路由 require 报错） */
+  async function startHealthServer(errors: Array<{ file: string; message: string }>): Promise<string> {
+    server = createServer((req, res) => {
+      if (req.url === '/_bloma/routes') {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ mounted: [], errors }))
+        return
+      }
+      res.writeHead(404)
+      res.end('Not found')
+    })
+    return new Promise((resolve) => {
+      server!.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${(server!.address() as { port: number }).port}`))
+    })
+  }
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => (server ? server.close(() => resolve()) : resolve()))
+    server = undefined
+    if (previousEnv === undefined) delete process.env.BLOMA_ROUTE_ERROR_FEEDBACK
+    else process.env.BLOMA_ROUTE_ERROR_FEEDBACK = previousEnv
+  })
+
+  it('开关缺省 off：reason 字节级现状（不取健康端点）', async () => {
+    delete process.env.BLOMA_ROUTE_ERROR_FEEDBACK
+    expect(routeErrorFeedbackEnabled()).toBe(false)
+    let healthProbed = false
+    server = createServer((req, res) => {
+      if (req.url === '/_bloma/routes') {
+        healthProbed = true
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ mounted: [], errors: [{ file: 'records.js', message: 'Cannot use import statement outside a module' }] }))
+        return
+      }
+      res.writeHead(404)
+      res.end('Not found')
+    })
+    const baseUrl = await new Promise<string>((resolve) => {
+      server!.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${(server!.address() as { port: number }).port}`))
+    })
+    const failures = await checkApiContract(baseUrl, [{ endpoint: '/api/records', method: 'GET' }])
+    expect(failures).toHaveLength(1)
+    expect(failures[0].reason).toBe('契约端点失活（HTTP 404，路由未实现或挂载失败）')
+    expect(healthProbed).toBe(false)
+  })
+
+  it('开关 on：资源段精确匹配挂载失败文件 → 真实 require 报错进 reason', async () => {
+    process.env.BLOMA_ROUTE_ERROR_FEEDBACK = '1'
+    const baseUrl = await startHealthServer([{ file: 'records.js', message: 'Cannot use import statement outside a module' }])
+    const failures = await checkApiContract(baseUrl, [{ endpoint: '/api/records', method: 'GET' }])
+    expect(failures).toHaveLength(1)
+    expect(failures[0].reason).toBe(
+      '契约端点失活（HTTP 404，路由未实现或挂载失败）；路由文件 records.js 挂载失败：Cannot use import statement outside a module',
+    )
+  })
+
+  it('开关 on：资源段不匹配时附挂载失败摘要；健康端点缺席/无错误时维持现状措辞', async () => {
+    process.env.BLOMA_ROUTE_ERROR_FEEDBACK = '1'
+    const baseUrl = await startHealthServer([{ file: 'notes.js', message: 'Unexpected token export' }])
+    const failures = await checkApiContract(baseUrl, [{ endpoint: '/api/records', method: 'GET' }])
+    expect(failures[0].reason).toBe('契约端点失活（HTTP 404，路由未实现或挂载失败）；挂载失败文件：notes.js（Unexpected token export）')
+
+    await new Promise<void>((resolve) => (server ? server.close(() => resolve()) : resolve()))
+    const bareUrl = await startHealthServer([])
+    const failures2 = await checkApiContract(bareUrl, [{ endpoint: '/api/records', method: 'GET' }])
+    expect(failures2[0].reason).toBe('契约端点失活（HTTP 404，路由未实现或挂载失败）')
   })
 })

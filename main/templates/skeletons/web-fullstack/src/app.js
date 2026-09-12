@@ -1,7 +1,11 @@
 /**
  * 应用逻辑入口（骨架）：状态 / 渲染 / 事件 三段式。
- * 沙箱约束：无构建链、无外部资源、不使用 import/ESM 模块语法、不发起任何网络请求；
- * 数据一律内联或 localStorage。数据模块参考 src/examples/data-module.js 的模式。
+ * 工程链：本文件是构建入口——收尾时平台用 esbuild 打包为 dist/app.js（IIFE），
+ * 页面 index.html 已预置 <script src="./dist/app.js" defer> 承接位；src/ 下的模块
+ * 可用 import / ESM 组织（构建门禁会打包校验模块图），本骨架文件自身保持零依赖 IIFE。
+ * 数据口径：数据留存按 PRD 契约走 server/routes 后端路由（data/ 持久化，见
+ * server/routes/_example.js 样例）；localStorage 只能作临时缓存，不得作为唯一持久化。
+ * 需要模型能力的功能走同源 /api/llm 代理，浏览器不直接外联。
  */
 (function () {
   'use strict';

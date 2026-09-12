@@ -43,3 +43,252 @@
 ## 4. 线上待验入口
 
 见桌面《Bloma-P3任务级契约实施稿-20260904.md》§8（longterm 实弹 plan 质量 / quick 延迟无感 / loop-log 崩溃取证 / 迭代分级实跑 / glm 渠道兼容）。
+
+---
+
+## 5. Phase 2 新增开关（CAP 能力契约块，2026-09-09）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_CAP_CONTRACT` | 能力契约块 CAP（AI 能力硬条款：产出/派生/三处注入） | **off** | 字节级现状（prd.json 无 ai_capabilities、锚定/裁判/确认卡零注入） | prd-engine-llm prompt 追加产出指令 + LLM 漏报时 deriveAiCapabilities 确定性派生 + renderCapSection 随背板锚定/裁判 prompt/PRD 确认卡三处同源注入 | `capContractEnabled`（model/prd-backplane.ts） |
+| `BLOMA_RULES_REGISTRY` | 操作契约 ID 注册表（R-FILE-01/R-DATA-01/R-OUTPUT-01 四段式） | **off** | 字节级现状（内联原文保留） | loop prompt 内联条款让位，注册表段单点定义（每条规则只出现一次完整定义，防双源） | `rulesRegistryEnabled`（main/rules-registry.ts） |
+| `BLOMA_ROUND_ANCHOR` | round_anchor 三字段（修复轮/迭代轮本轮错：must_preserve/out_of_scope/completion_evidence） | **off** | 字节级现状（修复/迭代轮 system 不含本轮错段） | 修复轮（两入口）/迭代聚焦路径注入确定性派生的本轮错（P1 稿原定不设开关；因代码先行落地、A/B 后置改设开关保单因子纯净，2026-09-09 偏差登记） | `roundAnchorEnabled`（model/prd-backplane.ts） |
+| `BLOMA_JUDGE_ANTIDEGRADE` | 裁判反退化（静态检测 ai-mock-frontend/cheat-control 进硬约束 + 语义裁判反退化规则三条） | **off** | 字节级现状（runJudge 不追加约束、裁判 prompt 不变） | 有 CAP 而产物无 /api/llm→AI 冒充拒；模拟失败类教学控件拒；语义裁判「证据不足不得判 implemented」（P1 稿原定不设开关，偏差同 B3） | `antidegradeEnabled`（review/judge-antidegrade.ts） |
+| `BLOMA_EXPRESSION_LAYER` | 表达适配层（B5 MVP：思考型模型表达段 append-only 注入 loop prompt 尾部） | **off（null）** | 字节级现状（无表达段） | `thinking`=思考型四纪律（明确即执行/不输出内部推理/阻塞报告/终轮必出摘要）；`standard`=预留（当前等同 off）；契约层构件字节永不受本层影响（回归锁） | `expressionLayerEnabled`（main/prompt-expression.ts） |
+
+- 依据：《Bloma-P1提示词契约与能力块实施稿-20260909.md》§3 M1 / §4。
+- 压缩语义：CAP 随背板锚定进每轮 system 常驻段，竹节/keep-recent 压缩只动历史轮次——「压缩不得删 CAP」由结构保证。
+- bench 验收（B1 完成标志）：随心记负样本 CAP 检出 missing；AI 正样本（随心记AI/语顺精灵球）CAP 完整注入。
+
+## 6. Phase D 批次 1 开关（咨询 D 问题1：Loop 工具面与验证协议，2026-09-09）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_API_TOOL` | loop 内 API 契约验证工具 run_api_contract_tests + 收口判定 + prompt 工作方式/终止条件全验证面口径 | **off** | 字节级现状（工具不注册、收口判定不含 API 位、prompt 原文） | 注册 run_api_contract_tests（复用终验同款 checkApiContract+backplane interface_spec）；AgentLoopToolState.api_all_passed 按背板预置（有 interface_spec=false、无=豁免 true、读背板失败 fail-closed false）；wrapUp 加 `!api_all_passed` 拦收口 | `loopApiToolEnabled`（main/coding/agent-loop.ts） |
+| `BLOMA_TOOL_EVIDENCE` | 验证工具返回的证据边界行 + 失败 [新增]/[持续] 标注 | **off** | 字节级现状（run_gwt_tests 收口暗示原文保留、无标注） | validationStateLine 宿主维护验证状态行；run_gwt_tests 全过删旧「可继续…或输出完成总结」换动态行；失败条目对比 state.last_gwt_failures 标注；run_preview/run_security_scan 附证据边界 | `toolEvidenceEnabled`（main/coding/agent-loop.ts） |
+| `BLOMA_WRITE_GUARD` | write_file 盲覆盖守卫（覆盖未读过的既有文件拦截） | **off** | 字节级现状（write_file 直接写） | write 目标是既有文件且 state.file_revisions 无该文件读取记录→拒绝并要求先 read_file（新建文件不受影响） | `writeGuardEnabled`（main/coding/agent-loop.ts） |
+
+- 依据：《Bloma-咨询D-Loop工具面与验证协议-20260909.md》D1/D2/D3/D4a。
+- 附带零开关改动（常开，纯信息附加）：read_file 返回文件版本戳（mtime+size 十六进制）；edit_file 增可选 expected_revision（不传零变化；传了且不匹配→STALE_READ 拒执行）；R-FILE-01 注册表文案补版本戳用法。
+- bench 验收（待额度）：`l1-batch --label d1 --env BLOMA_API_TOOL=1` 对比 B0，看「loop 全绿终验失败比例」是否下降。
+
+## 7. Phase 6 W2 开关（loop_checkpoint v0，2026-09-09）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_LOOP_CHECKPOINT` | loop_checkpoint v0：检查点维护+压缩后恢复头+修复证据包+账本落盘 | **off** | 字节级现状（零注入零写盘） | ①压缩后 reset 消息追加检查点恢复头（当前目标/仍有效转向/未闭环失败/验证状态/候选指纹）；②主/修复轮 onCheckpoint 投影持久化 documents/loop-checkpoint.json（steer/验证工具/压缩/终态事件驱动）；③修复卡追加【修复证据包】（候选指纹+此前修复尝试 resolved/persistent/new 对比）；④修复轮收尾追加尝试入账本 | `loopCheckpointEnabled`（main/coding/agent-loop.ts） |
+
+- 依据：《Bloma-咨询D3-Loop长任务检查点与压缩》E2/E3 + 《Bloma-咨询D4-修复轮授权边界与失败升级》F1；互锁合并 F1+E2 同一 checkpoint。
+- 无开关常更（纯内部/埋点，非行为）：state.gwt_runs/api_contract_runs/last_gwt_failures 计数与快照；AgentLoopResult.validation；test_completed 的 source/comparison 扩展（D3+F4）。
+- `BLOMA_TOOL_EVIDENCE` 含义扩展（W2-F4）：on 时 run_gwt_tests 除证据边界行/标注外，另输出「较上次：修复 X｜持续 Y｜新增 Z」修复比较行——仍单因子控制「验证证据面」。
+- bench 验收（待额度）：`l1-batch --label w2 --env BLOMA_LOOP_CHECKPOINT=1` 对比 B0，看修复轮零改善（B0：5/5 initial=after_repair）是否被持久化对比打破。
+
+## 8. Phase 6 W3 开关（收口预检，2026-09-09）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_PREFLIGHT` | run_preflight 收口预检工具 + 收口判定升级 + prompt 全验证面 | **off** | 字节级现状（工具不注册、wrapUp 不含预检位、prompt 原文） | ①注册 run_preflight（一次跑全部验证面：GWT 全量→API 契约→产物 UI 审计→安全，按依赖分阶段；构建门禁不在 v0 预检面——需 skeleton 上下文，终验保留）；②wrapUp 加 preflight_passed 拦收口（失败留 loop 内修，D5）；③工作方式/终止条件改全验证面口径；④validationStateLine 增预检位 | `preflightEnabled`（main/coding/agent-loop.ts） |
+
+- 依据：《Bloma-咨询D-验证分层与收口预检》D1/D2/D5；同源独立原则——工具复用终验同款实现（runGwtScenarios/checkApiContract/runArtifactUiGate/runSecurityScan），终验仍对冻结候选独立取证。
+- UI 探针 unavailable 不判败只留痕（与终验口径一致）；预检维护 state.gwt_runs/last_gwt_failures/api_contract_runs（终验 source 分类同源判据）。
+- bench 验收（待额度）：`l1-batch --label w3 --env BLOMA_PREFLIGHT=1` 对比 B0，看「终验首次发现确定性违约（coverage_gap 类）」占比是否下降。
+
+## 9. Phase 6 W4 开关（修复轮授权边界，2026-09-09）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_REPAIR_SCOPE` | 修复轮修改授权边界 + repair_control 窄入口 | **off** | 字节级现状（无边界、无窄入口工具，write/edit 全域可写） | ①write_file/edit_file 越界 → WRITE_SCOPE_DENIED + next_actions（授权集=任务卡可派生的文件型 location；场景锚点不当白名单，派生不出 fail-open 不设边界）；②注册 repair_control（request_scope_expansion 判别联合四必填，宿主确定性裁决：普通实现文件自动批准入授权集/受保护路径拒/通配符与起量拒；report_blocker 受阻记录进账本）；③受保护路径缺省 prd.json/test-report.json/loop-checkpoint.json/decisions.md；④升级判定（F5）：连续 ≥2 轮零修复 → 修复卡注入【诊断升级】（换假设/区分性检查/delegate 只读诊断/report_blocker） | `repairScopeEnabled`（main/coding/repair-loop.ts） |
+
+- 依据：《Bloma-咨询D4-修复轮授权边界与失败升级》F2/F3/F5；裁决：全项目读取正确/不带 plan 正确/场景锚点不当白名单。
+- 与 BLOMA_WRITE_GUARD 正交：GUARD 拦盲覆盖（未读），SCOPE 拦越界（授权外）；两者可叠加。
+- bench 验收（待额度）：`l1-batch --label w4 --env BLOMA_REPAIR_SCOPE=1` 对比 B0，看「根因在卡外→卡内替代实现」类失败是否下降。
+
+## 10. Phase 6 W5 开关（表达与上下文层，2026-09-09）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_NARRATION_EVENTS` | G1 旁白事件驱动五类事件版（G2 同构开头限制的去留即本开关 A/B 对照） | **off** | 字节级现状（每轮旁白+同构开头限制原文） | 表达纪律段替换为：仅新阶段/重要发现/阻塞需决策/长操作进展/交付失败交接五类事件才旁白，普通工具链不逐轮播报；同构开头限制随文案移除；真实性纪律保留 | `narrationEventsEnabled`（main/coding/agent-loop.ts） |
+
+- G3（检查点活跃投影每轮注入）不设新开关：复用 `BLOMA_LOOP_CHECKPOINT`（§7）——on 时 system 尾部追加【检查点投影】（候选指纹/仍有效转向/未闭环失败/验证状态，每轮重建）；观察项：每轮 system 变化会破坏 provider 前缀缓存，在线 A/B 看端到端 token/耗时。
+- G6 定案（读码，零改码）：骨架地图是事实性路径锚（文件清单+职责+渲染状态，P3 focus 时非目标文件降存在性行），不断言文件内容；代码事实由 R-FILE-01+版本戳工具化保证——无「旧骨架压过代码事实」结构性风险，G4 拆层时维持「地图=路径锚」现状。
+- G5（learnings 按 scope 相关性注入）未落地：learnings 无 scope/适用条件字段可过滤，需 schema 先行（与 Phase 4 C 系列 scope 字段联动）——登记待办。
+- G4（system 三层化/PRD 索引化）、G7（2×2 实验）按计划待 C/D 组数据与在线额度。
+
+## 11. Phase 6 W6 开关（预算与成本层，2026-09-09）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_COMPACT_EST_FALLBACK` | E4 压缩触发 est 兜底（渠道 usage 盲时用全量历史估算作判据） | **off** | 字节级现状（usage 盲→触发器失明永不压缩，W1 以撒案实锤） | 本轮无 usage 回报且 est ≥ 阈值 → 视同阈值满足（压缩/上限/末段规则照常）；确定性交接兑底附检查点段（复用 LOOP_CHECKPOINT） | `compactEstFallbackEnabled`（main/coding/agent-loop.ts） |
+| `BLOMA_EVIDENCE_CACHE` | D6 静态证据按产物指纹缓存 | **off** | 字节级现状（预检与终验各自直扫） | 安全扫描结果按 (projectId, 产物指纹) 进程内缓存复用（指纹=全量产物 path+mtime+size 聚合，任何修改即失效）；行为类（GWT/API）一律不缓存终验独立重跑 | `evidenceCacheEnabled`（main/coding/evidence-cache.ts） |
+| `BLOMA_LOOP_WINDOW_OFF` | E5 C 组实验：滑窗/摘要旁路 | **off** | 字节级现状（窗口化+digest） | 全量历史透传（仅配对重放诊断对照，长任务必爆上下文勿生产开）；E5 组态：A=现状 / B=`--env BLOMA_LOOP_CHECKPOINT=1` / C=本开关；长任务 seed=以撒 | `loopWindowOffEnabled`（main/coding/agent-loop.ts） |
+
+- F6 受阻报告不设新开关：复用 `BLOMA_LOOP_CHECKPOINT`（§7）——budget_exhausted/turn_limit 终态产出 blocked_report（候选指纹/未闭环失败/仍有效决策/验证面/建议下一步）+[loop-blocked-report] JSONL 审计行；完成/取消不产。
+- D4 预算分桶定案（读码零改码）：预算门在路径/参数/语法/CDN/版本/授权校验全部通过后才烧——协议类失败（diff 不匹配/STALE_READ/未读/越界）一律不烧预算，「协议恢复≠业务失败」结构上已成立；「修复尝试=批次+验证」单位改造需在线数据校准（登记待办）。
+- bench 验收（待额度）：`l1-batch --label w6 --env BLOMA_COMPACT_EST_FALLBACK=1` 看渠道盲项目压缩是否恢复触发；E5 三组同 seed 同 N 对照。
+
+## 12. Phase 7 P7-1 开关（key_tasks 关键任务块，2026-09-10）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_KEY_TASKS` | H2 关键任务块（用户语言的交付标尺：「这一版做完什么才算交付」） | **off** | 字节级现状（prd.json 无 key_tasks 键、system prompt 无产出指令、确认卡零注入） | prd-engine system prompt 追加 key_tasks 产出指令（LLM 提炼 2~4 个用户任务视角关键任务）；背板挂载前 finalizeKeyTasks 定稿（feature_ids 白名单过滤→悬空弃条；P0 未覆盖逐条补派生任务 must_deliver=true；task_id 重编号 KT-01..；总量截 6）；PRD 确认卡展示关键任务区（必交/尽力徽标+关联功能） | `keyTasksEnabled`/`finalizeKeyTasks`/`backplaneKeyTasks`（main/model/prd-backplane.ts）+ `parseKeyTasks`/`KEY_TASKS_PROMPT_ADDENDUM`（main/guide/prd-engine-llm.ts） |
+
+- 消费方（后续步骤接线）：P7-2 H1 delivery_status 按 must_deliver 任务判定 verified/partial/unavailable；P7-9 J5 scope_confirmed 事件记 key_tasks 标识；向导 prompt「主任务」表述合批引用 key_tasks 不另写（J3 批次）。
+- 单测：tests/unit/key-tasks.test.ts（18 例：开关/解析/定稿/挂载）+ prd-confirm-dialog.test.tsx 渲染 1 例；bench A/B 待额度（`l1-batch --label p7-1 --env BLOMA_KEY_TASKS=1`）。
+
+## 13. Phase 7 P7-2 开关（delivery_status 交付状态，2026-09-10）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_DELIVERY_STATUS` | H1 交付状态三态（verified/partial/unavailable）——「这一版实际验证到什么程度」的规则化结论，错误放行的产品层根治位 | **off** | 字节级现状（project 无 delivery_status 键、终验链路零计算） | 终验三收口点写入 project：①GWT 熔断回滚（用 initial 失败清单——回滚目标版本口径，修复轮改善不美化）②安全未过（unavailable）③GWT+安全全过（verified；后续 judge blocking 不进 ready 不消费）。规则：安全未过/预览不可访问→unavailable；failed=0 且 preflight≠false→verified（v0 从严：预检未过面=partial）；必交任务全关联失败→unavailable；其余（含 API 契约失活不可归属）→partial。key_tasks（P7-1）优先、P0 功能项回退；场景按 `F-xxx ` 前缀归属 | `deliveryStatusEnabled`/`computeDeliveryStatus`/`recordDeliveryStatus`（main/coding/delivery-status.ts）+ 收口接线（programming-orchestrator recordPostTestingDeliveryStatus） |
+
+- LoopValidationSnapshot 扩可选字段 `preflight_passed`（W3→H1 消费链：agent-loop validationOf 跑过才带；存量快照零迁移）。
+- 纪律：Agent/loop 工具面无写入口（updateProject 不经工具面暴露）；每次终验重算——旧版本通过不给新版本背书。
+- 单测：tests/unit/delivery-status.test.ts（25 例：规则全分支 + B0 六样本重放验收——真实失败清单全部落 partial/unavailable 无一 verified）+ repair 集成 1 例（off 零写入/on 熔断让渡落 partial）；bench A/B 待额度。
+
+## 14. Phase 7 P7-4 开关（澄清层：J1 auto 语义 + J2 两层保护，2026-09-10）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_CLARIFY_AUTO_RESPECT` | J1 auto 轮不计熔断——用户选「你帮我决定」（detail.source=card_auto/free_text_auto 或 option_id=auto）的轮次不计入 trailing 计数（倒序扫描 pendingAnswer 配对卡与回答） | **off** | 字节级现状（计数只看 [decision-card] 行，与用户选择无关——§0 定案缺陷保留） | auto 让渡轮从熔断计数剔除：委托是有效授权非不明确 | `clarifyAutoRespectEnabled`（main/guide/guide-agent-service.ts countTrailingClarificationRounds） |
+| `BLOMA_CLARIFY_TWO_LAYER` | J2 两层保护：①同主题卡精确去重（序列内选项集完全相同的第 3 张不再注入→减负卡；宁漏勿误，换措辞不算重复）②第三张连续卡→对话内减负卡（[先看方案][继续补充细节]）替代强制弹窗；「先看方案」走熔断同款收敛链（已点选方向全量带上），「继续补充」计数保留——再熔断直接弹窗兜底 | **off** | 字节级现状（熔断直接转需求确认弹窗） | 两层保护生效；减负卡不落 [decision-card] 行（不膨胀计数）、decision 类型 clarification_reduced_card/relief_answer 不进 CLARIFICATION_ENDING_DECISION_TYPES（澄清序列不断） | `clarifyTwoLayerEnabled`/`countSameOptionCards`/`publishClarificationReliefCard`/`resolveClarificationReliefAnswer`（guide-agent-service.ts） |
+
+- J3（问的门槛三类化）与向导 prompt 合批（Phase 1 外置覆盖线），本批不落代码。
+- J4 假设摘要三分区纯呈现层无开关直接上：确认卡功能清单 origin 徽标（你说的/向导补充，payload 透传 item.origin）+ pending CAP 置顶「还需你确认的 1 件事」区块（无 pending_assumption 自动隐藏）。
+- 单测：guide-clarification-round-limit.test.ts +7 例（J1 四态/J2-① 精确去重/J2-② off 回归锁与 on 减负卡）+ prd-confirm-dialog.test.tsx +1 例（origin 徽标+pending CAP）；A/B 待额度。
+
+## 15. Phase 7 P7-9a 埋点事件（J5 北极星地基，2026-09-10；纯 append-only 零行为变更不设开关）
+
+| 事件 | 接线点 | payload |
+|---|---|---|
+| `scope_confirmed` | prd-confirm 确认回传（resumePrdConfirmConfirmed） | via=requirement_ids 清单+count+user_confirmed_at+key_tasks 标识（task_id/label/must_deliver；开关 off 缺席时 requirements 兜底）+adopted_ideas_count |
+| `delivery_presented` | ready 收敛发引导卡处（runJudgeReview ready 分支） | via/snapshot_id/delivery_status（缺席记 absent——开关 off 事实入账可归因）/**delivery_body_snapshot 声明文案快照**（append-only 留存，J6 承诺冲突率证据源；后续话术改动不回写） |
+
+- 其余五事件（project_started 扩/clarification_responded/decision_selected/core_task_result/issue_reported）待后续批次；J6 三指标待数据积累。
+
+## 16. Phase 7 P7-5（I1 进度卡 + I4 停止语义，2026-09-10；纯呈现层直接上不设开关）
+
+- I1 里程碑（mapStageToRunSteps）：MVP 3 步改用户任务语汇「制作应用→检查关键功能→最后验收」；repairing 切 4 步模板（「修复发现的问题」仅发生时插入，位置稳定不循环倒退）；ready 完成态 header 改「本轮制作已结束」（阶段结束≠功能可用，验收结论以 delivery 卡为准）；「提出新想法」改「补充或修改要求」；新增「停止本轮制作」入口（onStopGeneration 透传，title 带后果说明）。
+- I4 停止语义：停止按钮 aria-label 改「停止本轮制作」；停止后承接系统消息升级三栏（已确认=需求/草图/PRD 保留、已保存=已交付版本不受影响、尚未完成=本轮未验证内容不作交付）+三条后继路径引导（继续制作/调整需求/查看版本记录）。实施稿定性「呈现层重构」（T1 reconcile 承接已有），行为语义未变（停止本就保留成果），不设开关——渲染端无 env 透传链路，若需 A/B 先建透传（登记待办）。
+- 跳过项登记：①预计还需区间（I1）——需 analytics 按任务复杂度/阶段分组的数据积累，无数据不造假倒计时；②泳道图降级——生成等待主界面本无泳道图（工具流已是折叠组），无需降级。
+
+## 17. Phase 7 P7-6 开关（H5 决策卡条件化 + H6 先用语义，2026-09-10）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_DECISION_CONDITIONAL` | H5 让渡卡按失败原因条件化动作 + H6 accept 改「先使用已可用的部分」 | **off** | 字节级现状（固定三选项：继续尝试/接受现状/补充说明；accept 话术「已保留当前版本」） | ①test 失败→主按钮「先修好F-xxx再交付」（推荐：修复目标明确）+accept「先使用已可用的部分」（有干净必交任务时）/「先保留这一版」（全败时如实降级不建议当可用版本）；②security→主按钮「继续修复安全问题」；③judge_return→主按钮「告诉我怎么调整」（方向性优先听用户）。accept 话术升级：如实带已知未通过项清单（readTestReport），不改 delivery_status、问题清单不清除持续可见。回传 id 仍 continue/accept/explain 三值（resume 闭环零改动） | `decisionConditionalEnabled`/`buildBlockedQuestions`（main/coding/programming-orchestrator.ts）+ 三调用点 context 接线 |
+
+- 偏差登记：H5/H6 共用一开关（实施稿仅 H6 列开关名单）——两者是同一张卡的一体改造，拆开会出「条件化卡+旧接受现状文案」怪态；A/B 一起看让渡卡转化。
+- **四问卡已落（2026-09-11 尾批，与 I3 同批）**：开关 on + test 路径 + W4-F5 升级信号（buildRepairCheckpointContext：loop-checkpoint 账本最近 2 轮修复全部零 resolved 且未收敛）三条件同时满足时，追加第四出口 regenerate「按新方案生成一个版本」+ 卡 body 四问正文（为什么重做/这次换什么/保留什么/代价——没把握直说不确定不编成功率；重做不重置修复预算）。E1 §五纪律：无升级信号（预算用完但有推进）不出；security/judge 路径不出；off 时选项与 payload 均字节级现状。回传处理：resolveBlockedDecision 识别 regenerate（点选+自由文本「换个方案/按新方案/重新生成一版」，泛泛「重新」不误判）；resumeBlockedFlow regenerate 分支=清阻塞+决策留痕+runIterationTask(regenerate:true)——不归一化并入本次诉求（原需求清单直接重摇，保留需求与草图）、不重置 test_repair_count（受总预算约束）、跳过 skip 分支的定向修复路由（用户明确选换方案不再修）、ack 用四问承诺版。单测 +5 例（第四出口出现/无信号不出/security-judge 不出/off 字节锁/回传识别）。
+- 单测：blocked-decision.test.ts +5 例（off 回归锁/条件化三分支/全败降级/H6 accept 话术与 delivery_status 不变）+ 尾批四问卡 5 例。
+
+## 18. Phase 7 P7-8（版本层 I5/I6/I8，2026-09-10）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_RESTORE_AS_VERSION` | I6 恢复即新版本 | **off** | 字节级现状（回滚不拍新快照，指针指回源版本） | 回滚事务末尾拍 restored 快照（SnapshotKind 新值；derived_from 指向源版本，Snapshot/CreateInput 扩可选字段零迁移），指针前移到恢复点；恢复前状态仍由 guard 快照保留可找回；TimelinePanel 磁贴带「恢复」徽标 | `restoreAsVersionEnabled`（main/platform-services.ts rollbackSnapshot） |
+
+- I5 术语与边界句（纯呈现直接上）：RollbackConfirmModal 增 data/ 边界真话——「恢复会把应用和它在 Bloma 内保存的数据一起回到那一版；导出部署后在别处产生的数据不受影响」（沙箱数据随回滚是真实能力，如实写不套通用句）。
+- I8 导出状态（纯呈现直接上）：exportProjectHandoff 每次导出写 export-info.json（源版本/导出时间/delivery_status/「平台无法观测线上环境」说明）；MvpStatusBanner 导出反馈改「已导出到 …（线上状态未知）」。
+- I7 变化摘要未完整落地（登记待办）：四维摘要（新增能力/行为变化/删除受限/验证变化——消费 comparison）依赖产物 diff 管道；v0 仅 restored 快照 summary 带「应用与数据一起回到该版」范围说明。
+- 单测：snapshot-documents +2 例（off 回归锁/on 指针链+guard 保留+内容恢复）+ project-export +2 例（export-info.json 未评估/partial 两态）；I5 文案由 timeline 既有渲染测试回归。
+
+## 19. Phase 7 P7-9b 埋点（J5 漏斗中层数据，2026-09-10；纯 append-only 不设开关）
+
+| 事件 | 接线点 | payload |
+|---|---|---|
+| `project_created`（扩） | ipc PROJECT_CREATE | +initial_message_chars/has_punctuation（首句信息量分层，不记原文） |
+| `clarification_responded` | guide-agent-service 四分支（点选=select/让渡=delegate/减负卡先看方案=skip/继续补充=input） | method+trailing_rounds（澄清疲劳漏斗中层；脱敏不记原文） |
+| `decision_selected` | resumeBlockedFlow 入口（v0 一处） | stage+action+blocked_action（决策卡转化） |
+
+- 后续批已接（2026-09-11）：decision_selected 其余卡四处——修改确认卡（iteration_confirm，resolveIterationDecisionFlow）/失败重试卡（iteration_retry，take 消费性之后埋）/就绪引导卡（ready_next_steps，next_backend 窄判定零误记）/需求确认弹窗（requirement_confirm，独立 IPC 通道单独埋）。仍待后续：core_task_result（依赖交付卡「先试一次完整流程」新交互面）、issue_reported（依赖报障意图识别——J7 台账发现当前用户行为模式下文本指正 0/82，v0 建议先挂行为信号）；J6 三指标待数据积累。
+
+## 20. Phase 7 P7-7 开关（I3 转向生效确认链，2026-09-11）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_STEER_CONFIRM` | I3 steer 状态机与影响确认 | **off** | 字节级现状（P0-1 纯注入：enqueue 即入队、steer_injected payload 无新键、停止静默清空） | SteerEntry 增状态机 received → pending_impact → merged_this_run \| deferred_next_run \| rejected；影响三档确定性关键词分级（**宁低勿高**）：低=简短确认即注入（received 入队）；中（新功能/改流程）=影响卡三选 [本轮就改/本轮完成后再改/不改了]（pending_impact 不入队等回执）；高（核心目标/数据模型，窄表从严）=建议「停止本轮」承接（保留[仍要本轮注入]降档出口）。**merged_this_run 只由 agent-loop 批间注入完成事件推进**（markSteerMerged 唯一入口，received 之外不可推进——不由对话层单方面宣布）；deferred 形成可见待办（状态条常驻 + mvp_ready 交付时聊天流追加提醒）；停止时未注入条目如实标 rejected（rejectPendingSteer，不再静默消失）；loop 自然收尾残余转 deferred（内容照旧落 JSONL） | `steerConfirmEnabled`/`registerSteer`/`resolveSteer`/`markSteerMerged`/`rejectPendingSteer`/`settleSteerEntry`（main/steer-queue.ts）；注入点 payload 扩（main/coding/agent-loop.ts）；IPC AGENT_STEER_RESOLVE/AGENT_STEER_QUERY + steer_status 事件 + listener 接线（main/ipc.ts、main/orchestrator.ts publishSteerStatusEvent）；渲染端 steerStatusFamily + SteerStatusBar 聊天流内嵌状态条（renderer/agent-atoms.ts、components/ChatPanel.tsx） |
+
+- 语义对照（体验验收①：生成中问「你刚提的修改这轮会做吗？」答案与系统真实状态一致）：merged_this_run/received=会；pending_impact=待你确认；deferred_next_run=下一轮；rejected=不会。getSteerStatuses 是权威答案源（单测锁——无任何路径可在未注入时得到 merged）。
+- v0 边界与观察项：①状态条数据随会话内存不落盘（重启丢失——**deferred 已补持久化（2026-09-11 尾批）**：deferred_next_run 达成时 ipc 层 listener 单点拦截→persistSteerDeferredNotice 落会话 JSONL [steer-deferred] system 行，跨重启回放可见的文字待办；渲染端前缀剥离胶囊归类；同一条只 advance 一次无重复落盘）；②账本条目随会话常驻不跨轮清扫（同会话 steer 量级个位数，「本轮」以最近一次注入为准）；③分级词表确定性（无 LLM），宁低勿高——误判低=与现状行为一致无害，误判高会拦住用户；④steer_resolved 埋点未加（resolve 三选分布观察，后续可补）。
+- 单测：steer-queue +15 例（分级四组/状态机全转移/三选回执含 loop 结束降级/markSteerMerged 唯一入口+终态不可覆盖/停止拒绝/收尾收口/listener 降级/体验验收①四场景）；agent-loop +3 例（on 注入点联动+payload 扩/off 字节级锁/收尾残余转 deferred）；renderer-steer-status 新文件 4 例（全生命周期翻转/乱序不回退/off 零 upsert/mvp_ready deferred 提醒）；ipc-contract expectedChannels +2。
+
+## 21. P0 污染修复批开关（B1/B2/B3，2026-09-11 全链污染审计 35c1a633 案）
+
+> 背景：《Bloma-编程Agent全链污染审计与修复-20260911.md》P0-B 批——信息回流与运行时对账。
+> 同批 A1/A2（骨架口径对齐 + 路由契约显影进背板锚）属模板/提示词信息面直接上（同 J3/H3 先例，无开关）；
+> A3（BLOMA_EXPERIENCE=1 狗粮）为本机配置（setx），不进仓库。
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_ROUTE_ERROR_FEEDBACK` | B1 挂载错误回流 | **off** | 失败 reason 字节级现状（「契约端点失活（HTTP 404，路由未实现或挂载失败）」，不取健康端点） | api-contract 探针遇 404/5xx 先取 `GET /_bloma/routes` 健康端点，把真实 require 报错写进失败 reason（精确匹配 endpoint 资源段 ↔ 挂载失败文件名；不匹配附摘要；端点缺席/无错误维持现状措辞）。不改变判定语义（404 仍判失败），仅信息增强进修复任务 payload | `routeErrorFeedbackEnabled`/`routeFailureReason`/`fetchRouteMountErrors`（main/coding/api-contract.ts） |
+| `BLOMA_REPAIR_NOOP_GUARD` | B2 修复轮零编辑守卫 | **off** | 字节级现状（零编辑修复轮照样计轮、照样全量重验——B0 五案 initial=after_repair 的假修复） | repairAndRetest 判 runRepairLoop 返回的 toolCalls 无 write_file/edit_file → 不计轮（test_repair_count 回退）、不重验（产物未变重验必逐条相同）、落 decision `repair_noop_skipped` + 旁白如实「不计入预算」、零编辑轮入 loop-checkpoint 账本（files_touched=[]，W4-F5 升级信号与 H5 四问卡自然承接）；熔断收口口径不变（陷阱 37） | `repairNoopGuardEnabled`/`hasWriteEditToolCall`（main/coding/repair-loop.ts）+ repairAndRetest 守卫块（main/coding/programming-orchestrator.ts）+ DecisionType 新值 `repair_noop_skipped` |
+| `BLOMA_LOOP_PROGRESS_NUDGE` | B3 loop 进度对账三守卫 | **off** | 字节级现状（零注入，messages/JSONL 字节不变） | 主 loop 批间（steer 同点位）注入【进度对账（宿主注入）】user 消息：①连续 6 轮无 write/edit → 提醒落盘（注入后重置计数）；②轮次 ≥75% 且 plan 清单（编排器透传 planFiles）存在 → 未触达文件列名（含入口接线提示）；③进入后 1/3 轮次仍零验证工具调用（run_preview/run_gwt_tests/run_security_scan/run_api_contract_tests/run_preflight）→ 自测提醒。只挂主 loop（修复轮无 plan 上下文）；wrapUp 激活后不注入；计入滑窗/压缩管道不破坏「整批 tool_result 单条 user 消息」不变式 | `loopProgressNudgeEnabled`/`PROGRESS_READ_ONLY_TURNS`/`normalizeProgressPath` + AgentLoopInput.planFiles（main/coding/agent-loop.ts）+ runMvpViaAgentLoop 透传（main/coding/programming-orchestrator.ts） |
+
+- 无开关直接上（信息面，A1/A2）：①骨架 src/app.js 头部注释从「禁 ESM/禁网络/localStorage」改为构建链 + server/routes 口径（与完整程序硬规则对齐）；②index.html 预置 `<script src="./dist/app.js" defer>` 承接位（预览服务器 dist/ 正常静态托管、CSP script-src 'self' 允许——已核实）；③renderBackplaneAnchor【后端 API 契约】段在 interface_spec 非空时追加 CJS 模块格式条款（module.exports={'METHOD /path':fn}、require 加载、禁 ESM）；④骨架幂等预置 server/routes/_example.js（只读 CJS 样例，全注释零路由副作用）+ manifest 登记。
+- 基础设施常开（B1 服务器侧，无行为分支）：两处同构服务器模板（renderStaticServer 产物模板 + STATIC_SERVER_SCRIPT 沙箱）loadRoutes 挂载失败登记 routeErrors + 暴露 `GET /_bloma/routes` 健康端点（返回 {mounted, errors}）——新增只读端点不动既有路径判定。
+- 单测：api-contract +3 例（off 字节锁/on 精确匹配/on 摘要与缺席降级）；programming-orchestrator-repair +3 例（零编辑×off 字节锁 / 零编辑×on 四断言 / 有编辑×on 不误伤——有编辑×off 由既有测试全量覆盖）；agent-loop +4 例（守卫 1/2/3 触发与不触发 / off 字节锁含 JSONL）；prd-interface-spec +1 例（A2 锚点渲染快照）；project-skeleton +3 例（承接位/口径对齐/_example.js CJS 样例）+ describe 语义更新。
+- 重放验收（同款 seed「做一个纵版打飞机的游戏，很复古的那种」）：预期 loop 内出现 app.js/index.html 写入、路由 CJS 挂载成功、若空口完成则零编辑守卫触发不耗预算。
+
+## 22. P1 门禁去水分批开关（C2/C3，2026-09-11 审计实施稿 P1 批；C1a 信息显影与 C5 配置见下）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_BUILD_GATE_WIRING` | C2 构建门禁接线校验 | **off** | 字节级现状（bundle 成功即 passed——440B 空壳 stub 假绿保留） | bundle 成功后解析 index.html：零 `<script src>` 或未引用构建产物路径 → `failed` 附真实原因（审计案 35c1a633 终态 index.html 零 script 的根治位；与 A1 承接位配合后正常产物必过）；index.html 缺失 → 跳过校验（上游 AGENT_LOOP_INCOMPLETE 已拦） | `buildGateWiringEnabled`/`checkEntryWiring`（main/coding/build-gate.ts）+ runBuildGate passed 分支前置 |
+| `BLOMA_UI_GATE_LIVENESS` | C3 L0 死按钮判活 | **off** | 字节级现状（判「控件真实」不判「有行为」——7 个无 JS 死按钮照样 passed） | 真按钮类（button/[role=button]）采样死亡占比 ≥80% 且 realControls ≥3 → failed 附死按钮清单；防误杀：锚点/外链/伪装控件不进分母（外链 target=_blank 被拦、纯锚点无义务改 DOM），按钮样本 ≥3 才判 | `uiGateLivenessEnabled`（main/coding/artifact-ui-gate.ts）+ analyzeUiProbe C3 段 + deadClicks 采集扩 tag 字段（纯增量，旧数据无 tag 不进分母） |
+
+- 无开关直接上（信息显影，C1a）：`requirementImpliesBackend`（prd-backplane，与 deriveInterfaceSpec 同源留存信号词表）→ PRD 确认卡 requirements 投影带 `implies_backend: true` → 渲染端 PrdConfirmDialog 蓝色徽标「↳ 将要求后端与数据持久化」——留存信号词命中项在确认时可见，不再静默升级前后端分离（审计⑧；不改变派生行为，纯呈现）。
+- C5 配置级（不进仓库）：本机 `setx BLOMA_API_TOOL 1`——loop 内启用 `run_api_contract_tests` 自测工具（与 B3 守卫3 自测提醒配合，生成中即可暴露契约失活）。
+- 单测：build-gate +3 例（checkEntryWiring 四态/off 字节锁/on 承接位过与零 script 拦截）；artifact-ui-gate +4 例（off 字节锁/审计案 7 死按钮拦/锚点不进分母/活性与样本不足不判）；prd-interface-spec +2 例（requirementImpliesBackend 词表与聚合一致性）；guide-prd-confirm +1 断言（payload implies_backend 投影）；prd-confirm-dialog +1 例（徽标渲染与未命中不带）。
+- 待拍板挂账不变：C1b（game 豁免留存派生 vs「完整程序」终点口径）、C4（canvas GWT 断言走游戏侧探针，依赖 gwt-runner 扩展）。
+
+## 23. P1 拍板批开关（C1b/C4，2026-09-11 用户拍板「与建议一致，都需要改」）
+
+| 开关 | 控制面 | 缺省 | '0'/未设 | '1' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_GAME_DERIVE_EXEMPT` | C1b game 豁免留存派生 | **off** | 字节级现状（game 类留存信号照派 /api/records，街机游戏升级前后端分离） | game 类 deriveInterfaceSpec 兜底不派生（localStorage 满足「最高分」类轻留存）；LLM 明确报告的 interface_spec 不受影响；requirementImpliesBackend（C1a 徽标）同步不亮；R-DATA-01 双源（rules-registry rulesForTemplateType 变体 + loop prompt 内联变体）改为「按量级分流：重业务数据后端 / 单值轻留存 localStorage」 | `gameDeriveExemptEnabled`/`deriveInterfaceSpec`/`requirementImpliesBackend`（main/model/prd-backplane.ts）；两派生调用点传 templateType（document-engine 模板路径 / prd-engine-llm LLM 路径）；`rulesForTemplateType`（main/rules-registry.ts）；内联变体（buildAgentLoopSystemPrompt） |
+| `BLOMA_GWT_GAME_PROBE` | C4 canvas 断言游戏侧探针 | **off** | 字节级现状（位移断言照走 DOM 位移判定——canvas 游戏结构性假失败） | ①game 生成 prompt 注入【游戏探针通道】契约（产物须挂 window.__g：__g.mode 阶段字符串 + __g.state() 玩家坐标快照）；②gwt-runner 位移类断言（key 触发 × move-* 效果）产物暴露 __g 时走游戏侧判定：前置进 playing（menu 态自动点开始/继续类按钮，未进入如实报）、按键派发后比对玩家坐标方向；无坐标如实指出契约缺口（不用快照变化兜底防游戏自动 tick 假绿）；无 __g 通道 → 现状 DOM 判定（字节级） | `gwtGameProbeEnabled`/`isMoveEffect`/`gamePlayerCoordOf`/`checkGameMoveEffect`/`runGameProbeScenario`（main/gwt-runner.ts）；prompt 契约段（buildAgentLoopSystemPrompt game 分支） |
+
+- 单测：prd-interface-spec +3 例（off 字节锁/on game 豁免/on 非 game 照派+旧调用兼容）；rules-registry +2 例（off 原表字节锁/on+game 仅 R-DATA-01 变体其余规则引用相等）；gwt-game-probe 新文件 9 例（开关/isMoveEffect/坐标提取四态/方向判定/契约缺口文案/prompt 注入三态）。
+- 本机配置（setx，重启 Bloma 生效）：BLOMA_GAME_DERIVE_EXEMPT=1 + BLOMA_GWT_GAME_PROBE=1（用户拍板即开）。
+- 至此审计稿全部修复项（A1/A2/A3/B1/B2/B3/C1a/C1b/C2/C3/C4/C5）落地完毕。
+
+## 24. Phase 8 工作模式对齐批开关（W1/W2，2026-09-11 狗粮 94f449c6 复盘拍板「照搬正常 agent 工作模式」）
+
+| 开关 | 控制面 | 缺省 | '0' | '1'/未设 | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_ITER_BRIEF` | W1/W2 局部修改轮聚焦任务书（iteration brief） | **on** | 字节级现状（localOnly 迭代轮照旧全量 MVP 任务书/骨架模块库重渲染/plan 全量规划/maxTurns 模式档——狗粮 94f449c6 的 37 轮 turn_limit 形态） | ①task 换聚焦任务书（用户诉求原话 + grep-first/先复现/最小变更/聚焦完成判据五要素）；②system 追加【修改模式】段（对齐修复轮 REPAIR_MODE_SECTION：任务书即全部工作，不要重新生成整个项目）；③本轮锚 localOnly 强制（照 resolveFocusAnchor 先例）；④maxTurns 收窄 local 档；⑤跳过骨架/模块库重渲染（文件全貌由项目地图承担，落 decision skeleton_render_skipped_local）；⑥plan 腿换定位合同（只改既有文件，模型给出不存在文件硬剔除，全不存在 → null fail-open）；⑦loop-log 标注「迭代重生成（局部修改）」+ decision iteration_brief 任务书快照 | `iterationBriefEnabled`/`buildIterationTask`/`ITERATION_MODE_SECTION`/`resolveAgentLoopMaxTurnsLocal`（main/coding/iteration-brief.ts）+ `resolveLoopMaxTurnsForInput`/`iterationBriefActive`/runMvpViaAgentLoop 六接线点（main/coding/programming-orchestrator.ts）+ loop-planner localOnly 分支（main/coding/loop-planner.ts）+ DecisionType 新值 `iteration_brief`/`skeleton_render_skipped_local`（main/decision-log.ts） |
+| `BLOMA_LOOP_MAX_TURNS_LOCAL` | local 档轮次预算覆盖 | **12**（未设） | — | 正整数覆盖（非法值回退 12，对齐 resolveAgentLoopMaxTurns 口径） | `resolveAgentLoopMaxTurnsLocal`（main/coding/iteration-brief.ts） |
+
+- 缺省 on 的理由：纯任务书表达层（无验证语义变化、无存储 schema 变化），且 off 形态已被狗粮实证为失败形态；逃生口 `BLOMA_ITER_BRIEF=0` 保留（与修复轮/门禁类开关缺省 off 的纪律不同，属拍板项——如需回退字节级现状设 0 即可）。
+- 单测：iteration-brief 新文件 15 例（开关三态/local 档三态/任务书五要素/修改模式段/路由含 off 字节锁与 rebuild 优先级/plan 腿定位口径与既有文件硬过滤三态）。
+- 不进本批挂账：`inspect_preview` 视觉复现工具；迭代轮 writeScope 写授权（修复轮 W4-F2 同款）；degenerate 出口与 turn_limit 状态区分；game F-001 拆分；经验库 ref-source 查询词清洗（百度百科垃圾 pattern 卡）。
+
+## 25. D2 DSML 传输事故恢复开关（2026-09-11 狗粮 dd6ba98d「纵版打飞机」三连死根因）
+
+| 开关 | 控制面 | 缺省 | '0' | '1'/未设 | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_DSML_RECOVERY` | DSML 传输事故分级恢复 | **on** | 现状（退化一律泛化「传输事故反馈」重试一次，仍脏 → turn_limit——当晚 3/3 loop 死于此） | **只读调用直执行**：正文里的 `<｜｜DSML｜｜ invoke>` 块解析回 tool_use（意图/参数当晚实测完整：path/offset/pattern 无损），按正常轮执行（旁白保留、JSONL 原文留审计、模型侧 messages 用合成 tool_use+tool_result）；**写类不盲执行**：write_file 的 content 经 DSML 序列化疑似丢换行（line146 实锤：注释吞掉本该换行的属性），改**定向反馈**（具体列出调用意图要求标准 tool use 重发，比泛化反馈更可能逃出退化盆地）。护栏：参数值 >1024 字符/单轮 >8 invoke/工具不在册 → 降级反馈；恢复计数 transport_recoveries 入 AgentLoopResult + agent_loop_completed 埋点 + 决策日志 | `parseDsmlInvokes`/`classifyDsmlRecovery`/`buildTargetedDegenerateFeedback`/`DSML_RECOVERABLE_TOOLS`（main/coding/dsml-recovery.ts）+ agent-loop 退化分支恢复接线（assistantBlocks 重建/定向反馈/计数） |
+
+- 缺省 on 拍板理由：只读恢复零副作用、写类明确不盲执行、护栏齐备；属渠道兼容垫片而非行为实验（当晚 3/3 loop 死于 DSML，recovery 是存活前提）。
+- 单测：dsml-recovery 新文件 10 例（当晚实测三种文法解析/分级四态/定向反馈/off 现状字节级/集成三例——退化 read 轮救回含 messages 上下文断言、退化 write 轮零执行+定向反馈、开关 off 泛化反馈）。
+- 与 P2a 协作：恢复失败仍死 → termination_detail(degenerate_output) 照实入账（裁判话术「末轮输出退化（传输事故，非轮数耗尽）」）。
+
+## 26. R2 市调模式开关（2026-09-12 用户拍板「cut 掉网络搜索环节，只由 agent 提创造性建议」）
+
+| 开关 | 控制面 | 缺省 | 'agent'/未设 | 'scrape'/'search'/'1'/'on' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_RESEARCH_MODE` | 市调/灵感来源模式 | **agent** | 纯模型灵感建议：需求确认与 PRD 确认两处均**不发任何网络请求**，向导 LLM 基于自身产品知识出 3~5 条创造性灵感（AGENT_IDEA_SYSTEM_PROMPT：同类经典玩法/交互/差异化设计，可引真实经典产品名、禁止编造；label≤20/note≤40/source='AI 建议'）；失败/解析失败 → 想法区隐藏弹窗照常。卡面头标如实显示「灵感参考（AI 灵感建议）」，决策日志 research_mode 入账 | 现状市调链路（查询词构造→DDG/Bing 搜索→R1 词典过滤→LLM 提炼；逃生口——配好付费搜索 API/代理后切回） | `researchModeResolver`/`generateAgentIdeas`（main/guide/guide-agent-service.ts）+ 需求确认/PRD 确认两接线点 + publishPrdConfirmCard ideasMode 透传（main/guide/prd-confirm.ts）+ 渲染端 research.mode/ideasMode 解析与头标（agent-atoms.ts + RequirementConfirmDialog/PrdConfirmDialog） |
+
+- 缺省 agent 拍板理由：R1 实测三大 scraping 引擎在大陆网络全线不可靠（DDG 封锁 / cn.bing 反爬罐头 / 百度限频），市调链路在最常见环境下产出为零或垃圾；模型自身产品知识在灵感参考场景下质量不低于垃圾搜索。
+- R1 词典过滤对 scrape 模式保持生效（切回时防线仍在）；agent 模式想法继续过经验库 P2b 垃圾过滤兜底。
+- 单测：guide-research-mode 新文件 5 例（模式矩阵四态/JSON 清洗+source/垃圾三态/空需求与抛错/超量截断）。
+
+## 27. W5 任务清单工作流开关（Phase 8.5，2026-09-12 用户反馈「编程 agent 工作流未与平台同步」——狗粮 dd6ba98d 生成轮 16 轮写后全量重读 + 6 文件完整重写第二遍）
+
+| 开关 | 控制面 | 缺省 | '0' | '1'/未设 | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_TASK_WORKFLOW` | 任务清单驱动的生成 loop | **on** | 字节级现状（静态 plan 合同 + 全量任务书「逐功能项实现」——当晚大爆炸式写完→重读→重写形态） | ①**W5-1 实施清单**：renderTaskChecklist 把 plan filesToTouch 分组为有序编号任务（入口/模块/装配/后端路由 + 验证口径映射 + 工作纪律）注入 system；②**W5-4 任务书升级**：「按实施清单逐项推进：定位→实现→立即验证→勾选；禁止先全读再全写；已完成项不重读不重写，微调用 edit_file」；③**W5-2 进度投影**（批间注入，≥2 轮间隔）：「清单 N/M + 已完成勿重写 + 读过的不要重读」；④**W5-3 守卫4 重复写**：同文件第二次全量 write_file → 提醒改 edit_file（edit 不触发）；⑤**W5-5 早验证**：≥3 文件零验证且过 1/3 轮次 → 一次性自测提醒（B3 守卫3 的前移分支） | `taskWorkflowEnabled`（main/agent-loop.ts）+ W5 批间注入块与状态区（main/coding/agent-loop.ts）+ `renderTaskChecklist`（main/coding/loop-planner.ts）+ buildSystemWithPlan checklist 拼接与 buildAgentLoopTask 分支（main/coding/programming-orchestrator.ts） |
+
+- 缺省 on 拍板理由：纯任务书/宿主注入层，无验证语义变化；off 形态当晚被实证为失败形态。
+- 只挂主 loop 生成路径（修复轮任务窄、迭代轮聚焦任务书已含工作法，均不叠加）。
+- 单测：task-workflow 新文件 7 例（checklist 分组/纪律/验证映射、守卫4 触发与 edit 不触发、投影注入与间隔抑制、早验证一次性、off 字节级）；programming-orchestrator-plan 钉 W5 关保持原字节锁。

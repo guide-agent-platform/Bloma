@@ -383,16 +383,12 @@ test.describe('真实渠道全流程（注入生产渠道配置）', () => {
       // loop 完成留痕
       await waitForDecision(bloma.promaHome, sessionId, 'agent_loop', 30_000)
 
-      // 打字修改 → 修改确认门（iteration_confirm）
+      // 打字修改 → 直接局部优化（MVP 就绪卡改版后：打字提修改不再弹确认门）
       await sendUser(bloma.page, {
         sessionId, projectId, content: '把主标题改成「每日饮水」',
         stage: 'ready',
       })
-      await waitForDecision(bloma.promaHome, sessionId, '触发修改确认门', 60_000)
-      await sendUser(bloma.page, {
-        sessionId, projectId, content: '对，就这样改',
-        option: 'confirm', stage: 'blocked_for_user_decision',
-      })
+      await waitForDecision(bloma.promaHome, sessionId, '用户提修改（默认局部优化）', 60_000)
       // 迭代 loop → 回 ready
       const iterDeadline = Date.now() + 300_000
       while (Date.now() < iterDeadline) {

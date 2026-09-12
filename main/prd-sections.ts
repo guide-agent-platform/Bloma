@@ -171,7 +171,7 @@ export const PRD_SECTIONS: PrdSectionDef[] = [
     quickRequired: false,
     longtermRequired: true,
     source: 'llm',
-    dataFrom: 'interface_spec[]（12.4 标准级起；沙箱静态应用阶段可空数组）',
+    dataFrom: 'interface_spec[]（12.4 标准级起；按需输出：有数据留存/后端/AI 能用时逐端点列出）',
     consumers: ['MVP loop', 'judge 对照'],
     requiredFromLevel: 'standard',
   },
@@ -211,7 +211,7 @@ export const DOCUMENT_SECTION_INSTRUCTIONS: Record<PrdSectionId, string> = {
   personas: '从对话提炼目标用户；对话没说清的按常见合理预期补一句并保持克制',
   glossary: '对话中关键术语及定义；无则写「无」',
   data_model: '涉及持久化数据时列出实体与关系；无则写「本轮无持久化数据」',
-  interface_spec: '端点定义（沙箱静态应用阶段可空）；无则写「静态应用无外部接口」',
+  interface_spec: '端点定义（描述目标产品契约，不描述草图能力限制；确无外部接口的纯展示产物写「无外部接口」）',
   gdd: '游戏设计文档四要素：核心幻想 / 设计支柱 / 核心循环 / 数值基准（仅 game 类型输出）',
 }
 
@@ -270,7 +270,7 @@ export interface SectionCompleteness {
  * - gwt：assertions 派生可达（有 ≥1 条可派生断言即视为章节成立；逐场景覆盖在 §7 实验度量）；
  * - out_of_scope：字段存在（可为空数组——「用户没拒绝任何东西」是合法事实）；
  * - personas/glossary：非空数组；
- * - interface_spec：字段存在（可为空数组——沙箱静态应用阶段合法）。
+ * - interface_spec：字段存在（可为空数组——仅当目标产品确无外部接口时合法，不以草图为由豁免）。
  */
 export function checkSectionCompleteness(
   backplane: PrdBackplane,

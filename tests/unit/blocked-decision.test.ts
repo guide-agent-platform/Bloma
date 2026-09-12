@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { syncDocuments } from '../../main/document-engine'
+import { writeTestReport } from '../../main/gwt-service'
 import {
   resolveBlockedDecision,
   resumeBlockedFlow,
@@ -128,6 +129,37 @@ describe('Blocked decision resume loop (A2/A3)', () => {
       expect(after.test_repair_count).toBe(0)
       expect(after.judge_return_count).toBe(0)
       expect(events.some((event) => event.type === 'stage_changed' && event.payload.stage === 'ready')).toBe(true)
+    })
+
+    it('Phase 7 U2 H6：accept 开关 on → 话术「先使用已可用的部分」+已知未通过项持续可见；delivery_status 不被 accept 改写', async () => {
+      process.env.BLOMA_DECISION_CONDITIONAL = '1'
+      try {
+        const project = makeBlockedProject('test_repair')
+        recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记账' }])
+        syncDocuments({ request_id: 'req', session_id: 's', project_id: project.project_id, checkpoint: 'mvp_tested' })
+        // 终验报告落盘：1 项失败（accept 话术应如实带上，问题清单不清除）
+        writeTestReport({
+          request_id: 'req', session_id: 's', project_id: project.project_id,
+          result: { total_count: 2, passed_count: 1, failed_count: 1, failure_summary: [{ scenario: 'F-005 搜索过滤未命中', reason: '断言未通过' }] },
+        })
+        updateProject(project.project_id, { delivery_status: 'partial' })
+        const events: AgentEvent[] = []
+        setProgrammingEventPublisher((event) => events.push(event))
+
+        await resumeBlockedFlow(
+          { request_id: 'req', session_id: 's', project_id: project.project_id, mode: 'quick', decision: 'accept', content: '' },
+          (event) => events.push(event),
+        )
+
+        const completion = events.find((event) => event.type === 'message_delta')
+        expect(String(completion?.payload.text ?? '')).toContain('先使用已可用的部分')
+        expect(String(completion?.payload.text ?? '')).toContain('1 项检查未通过')
+        expect(String(completion?.payload.text ?? '')).toContain('F-005')
+        // H6 验收：accept 后 delivery_status 不变、问题仍可见（不被接受动作改写）
+        expect(findProject(project.project_id).delivery_status).toBe('partial')
+      } finally {
+        delete process.env.BLOMA_DECISION_CONDITIONAL
+      }
     })
 
     it('explain → clears the block and returns to the clarifying stage', async () => {
@@ -373,3 +405,138 @@ function makeChildProcess(): ChildProcess {
   Object.assign(emitter, { kill: vi.fn(() => true), pid: 1000 })
   return emitter
 }
+
+// ===========================================================================
+// Phase 7 U2 H5/H6（2026-09-10）：决策卡条件化 + 先用语义（BLOMA_DECISION_CONDITIONAL）
+// ===========================================================================
+describe('Phase 7 U2 · H5 决策卡条件化（buildBlockedQuestions）', () => {
+  const originalSwitch = process.env.BLOMA_DECISION_CONDITIONAL
+
+  afterEach(() => {
+    if (originalSwitch === undefined) delete process.env.BLOMA_DECISION_CONDITIONAL
+    else process.env.BLOMA_DECISION_CONDITIONAL = originalSwitch
+  })
+
+  it('开关 off（缺省）→ 固定三选项（字节级现状回归锁）', async () => {
+    const { buildBlockedQuestions } = await import('../../main/programming-orchestrator')
+    const questions = buildBlockedQuestions({ reason: 'test', failures: [{ scenario: 'F-001 x' }], mustDeliverFeatureIds: ['F-001'] })
+    expect(questions.map((q) => q.label)).toEqual(['继续尝试', '接受现状', '补充说明'])
+  })
+
+  it('开关 on + test 失败（有必交失败+有可用部分）→ 主按钮=先修好X再交付（推荐），accept=先使用已可用的部分', async () => {
+    process.env.BLOMA_DECISION_CONDITIONAL = '1'
+    const { buildBlockedQuestions } = await import('../../main/programming-orchestrator')
+    const questions = buildBlockedQuestions({
+      reason: 'test',
+      failures: [{ scenario: 'F-002 搜索过滤未命中' }],
+      mustDeliverFeatureIds: ['F-001', 'F-002'],
+    })
+    expect(questions[0]).toMatchObject({ id: 'continue', label: '先修好F-002再交付' })
+    expect(questions[0].description).toContain('推荐')
+    expect(questions[1]).toMatchObject({ id: 'accept', label: '先使用已可用的部分' })
+    expect(questions[1].description).toContain('不算完成')
+    // 回传 id 集仍是三值（resume 闭环零改动）
+    expect(new Set(questions.map((q) => q.id))).toEqual(new Set(['continue', 'accept', 'explain']))
+  })
+
+  it('开关 on + test 全败（无可用部分）→ accept 文案如实降级（核心任务未通过不建议当可用版本）', async () => {
+    process.env.BLOMA_DECISION_CONDITIONAL = '1'
+    const { buildBlockedQuestions } = await import('../../main/programming-orchestrator')
+    const questions = buildBlockedQuestions({
+      reason: 'test',
+      failures: [{ scenario: 'F-001 入口失败' }, { scenario: 'F-002 主流程失败' }],
+      mustDeliverFeatureIds: ['F-001', 'F-002'],
+    })
+    expect(questions[1].label).toBe('先保留这一版')
+    expect(questions[1].description).toContain('不建议当作可用版本')
+  })
+
+  it('开关 on + security → 主按钮=继续修复安全问题；judge → 主按钮=告诉我怎么调整（方向性优先听用户）', async () => {
+    process.env.BLOMA_DECISION_CONDITIONAL = '1'
+    const { buildBlockedQuestions } = await import('../../main/programming-orchestrator')
+    expect(buildBlockedQuestions({ reason: 'security' })[0].label).toBe('继续修复安全问题')
+    expect(buildBlockedQuestions({ reason: 'judge' })[0]).toMatchObject({ id: 'explain', label: '告诉我怎么调整' })
+  })
+})
+
+// ===========================================================================
+// Phase 7 U2 尾批（2026-09-11）：H5 四问卡——「按新方案生成一个版本」第四出口
+// （消费 W4-F5 升级信号：连续 ≥2 轮修复零推进；E1 §五：有理由的备选非抽卡重来）
+// ===========================================================================
+describe('Phase 7 尾批 · H5 四问卡（regenerate 第四出口）', () => {
+  const originalSwitch = process.env.BLOMA_DECISION_CONDITIONAL
+
+  afterEach(() => {
+    if (originalSwitch === undefined) delete process.env.BLOMA_DECISION_CONDITIONAL
+    else process.env.BLOMA_DECISION_CONDITIONAL = originalSwitch
+  })
+
+  it('开关 on + test + 升级信号（escalated）→ 追加第四出口「按新方案生成一个版本」', async () => {
+    process.env.BLOMA_DECISION_CONDITIONAL = '1'
+    const { buildBlockedQuestions } = await import('../../main/programming-orchestrator')
+    const questions = buildBlockedQuestions({
+      reason: 'test',
+      failures: [{ scenario: 'F-002 搜索过滤未命中' }],
+      mustDeliverFeatureIds: ['F-001', 'F-002'],
+      escalated: true,
+    })
+    const regenerate = questions.find((q) => q.id === 'regenerate')
+    expect(regenerate).toBeDefined()
+    expect(regenerate!.label).toBe('按新方案生成一个版本')
+    expect(regenerate!.description).toContain('保留已确认需求与草图')
+    // 三原出口仍在（第四出口是追加不是替换）
+    expect(new Set(questions.slice(0, 3).map((q) => q.id))).toEqual(new Set(['continue', 'accept', 'explain']))
+  })
+
+  it('无升级信号不出现第四出口（E1 §五：预算用完但有推进不推重做）', async () => {
+    process.env.BLOMA_DECISION_CONDITIONAL = '1'
+    const { buildBlockedQuestions } = await import('../../main/programming-orchestrator')
+    const questions = buildBlockedQuestions({
+      reason: 'test',
+      failures: [{ scenario: 'F-002 搜索过滤未命中' }],
+      mustDeliverFeatureIds: ['F-001', 'F-002'],
+    })
+    expect(questions.some((q) => q.id === 'regenerate')).toBe(false)
+  })
+
+  it('security/judge 路径即使升级也不出第四出口（重做判据只在 test 链）', async () => {
+    process.env.BLOMA_DECISION_CONDITIONAL = '1'
+    const { buildBlockedQuestions } = await import('../../main/programming-orchestrator')
+    expect(buildBlockedQuestions({ reason: 'security', escalated: true }).some((q) => q.id === 'regenerate')).toBe(false)
+    expect(buildBlockedQuestions({ reason: 'judge', escalated: true }).some((q) => q.id === 'regenerate')).toBe(false)
+  })
+
+  it('开关 off：escalated 也不出第四出口（字节级现状）', async () => {
+    delete process.env.BLOMA_DECISION_CONDITIONAL
+    const { buildBlockedQuestions } = await import('../../main/programming-orchestrator')
+    const questions = buildBlockedQuestions({
+      reason: 'test',
+      failures: [{ scenario: 'F-001 x' }],
+      mustDeliverFeatureIds: ['F-001'],
+      escalated: true,
+    })
+    expect(questions.map((q) => q.id)).toEqual(['continue', 'accept', 'explain'])
+  })
+
+  it('resolveBlockedDecision：点选 regenerate 识别；自由文本「换个方案/按新方案」识别、泛泛词不误判', async () => {
+    const { resolveBlockedDecision } = await import('../../main/programming-orchestrator')
+    const home = mkdtempSync(join(tmpdir(), 'proma-blocked-4q-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    updateProject(project.project_id, { blocked_action: 'test_repair' })
+    const base = { request_id: 'req', session_id: 's', project_id: project.project_id, mode: 'quick' as const }
+    const pick = (id: string) => resolveBlockedDecision({
+      ...base, content: '', current_stage: 'blocked_for_user_decision',
+      metadata: { source: 'card_option', selected_option_id: id },
+    })
+    expect(pick('regenerate')).toBe('regenerate')
+    const freeText = (content: string) => resolveBlockedDecision({
+      ...base, content, current_stage: 'blocked_for_user_decision',
+    })
+    expect(freeText('换个方案重新做')).toBe('regenerate')
+    expect(freeText('按新方案来一版')).toBe('regenerate')
+    expect(freeText('重新生成一版')).toBe('regenerate')
+    // 泛泛词不误判：不带方案/思路信号的「重新」走 explain 兜底
+    expect(freeText('重新看看')).toBe('explain')
+  })
+})

@@ -118,3 +118,75 @@ describe('uiGateEnabled（紧急逃生门，缺省开）', () => {
     expect(uiGateEnabled()).toBe(true)
   })
 })
+
+describe('C3 死按钮判活（BLOMA_UI_GATE_LIVENESS，2026-09-11 审计案 35c1a633：7 个无 JS 死按钮照样 passed）', () => {
+  const previousEnv = process.env.BLOMA_UI_GATE_LIVENESS
+
+  afterEach(() => {
+    if (previousEnv === undefined) delete process.env.BLOMA_UI_GATE_LIVENESS
+    else process.env.BLOMA_UI_GATE_LIVENESS = previousEnv
+  })
+
+  /** 审计案形态：7 个真按钮全部无 JS 死点击 */
+  function deadButtonProbe(over: Partial<UiProbeData> = {}): UiProbeData {
+    return probe({
+      realControls: 7,
+      realByTag: { button: 7 },
+      deadClicks: [
+        { text: '开始游戏', clicked: true, domChanged: false, tag: 'button' },
+        { text: '暂停', clicked: true, domChanged: false, tag: 'button' },
+        { text: '投币', clicked: true, domChanged: false, tag: 'button' },
+        { text: '重开', clicked: true, domChanged: false, tag: 'button' },
+        { text: '设置', clicked: true, domChanged: false, tag: 'button' },
+      ],
+      ...over,
+    })
+  }
+
+  it('开关 off=字节级现状：7 死按钮零新增失败（假绿保留，回归锁）', () => {
+    delete process.env.BLOMA_UI_GATE_LIVENESS
+    expect(analyzeUiProbe(deadButtonProbe())).toEqual([])
+  })
+
+  it('开关 on：真按钮类死亡占比 ≥80% 且 realControls ≥3 → failed 附死按钮清单', () => {
+    process.env.BLOMA_UI_GATE_LIVENESS = '1'
+    const failures = analyzeUiProbe(deadButtonProbe())
+    expect(failures).toHaveLength(1)
+    expect(failures[0].scenario).toContain('按钮类控件大面积无响应')
+    expect(failures[0].reason).toContain('5 个中 5 个')
+    expect(failures[0].reason).toContain('开始游戏')
+  })
+
+  it('防误杀①：锚点/外链死点击不进分母（仅按钮类统计）', () => {
+    process.env.BLOMA_UI_GATE_LIVENESS = '1'
+    // 2 个死按钮 + 3 个死锚点：按钮占比 100% 但样本 <3 → 不判；锚点从不进分母
+    const failures = analyzeUiProbe(deadButtonProbe({
+      deadClicks: [
+        { text: '开始', clicked: true, domChanged: false, tag: 'button' },
+        { text: '暂停', clicked: true, domChanged: false, tag: 'button' },
+        { text: '文档', clicked: true, domChanged: false, tag: 'a' },
+        { text: '关于', clicked: true, domChanged: false, tag: 'a' },
+        { text: '外链', clicked: true, domChanged: false, tag: 'a' },
+      ],
+    }))
+    expect(failures).toEqual([])
+  })
+
+  it('防误杀②：多数按钮有活性（≥1/5 命中 → 占比 80% 不到）或样本不足 → 不判', () => {
+    process.env.BLOMA_UI_GATE_LIVENESS = '1'
+    // 5 个中 1 个有反应（80% 边界内不触发：dead 4/5=80% 恰好触发？——4/5=0.8>=0.8 触发；用 2 个活性）
+    const alive = analyzeUiProbe(deadButtonProbe({
+      deadClicks: [
+        { text: '开始游戏', clicked: true, domChanged: false, tag: 'button' },
+        { text: '暂停', clicked: true, domChanged: false, tag: 'button' },
+        { text: '投币', clicked: true, domChanged: false, tag: 'button' },
+        { text: '音效', clicked: true, domChanged: true, tag: 'button' },
+        { text: '帮助', clicked: true, domChanged: true, tag: 'button' },
+      ],
+    }))
+    expect(alive).toEqual([])
+    // realControls <3（小页面）不判
+    const small = analyzeUiProbe(deadButtonProbe({ realControls: 2 }))
+    expect(small).toEqual([])
+  })
+})

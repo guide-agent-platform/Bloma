@@ -1,0 +1,221 @@
+{
+  "$schema": "seed-v0 任务卡（P0a 草稿）",
+  "frozen": true,
+  "frozenAt": "2026-09-09",
+  "$note": "acceptance 判据已于 2026-09-09 人工复核冻结（冻结时同步修正计算器 must#3 表述歧义），此后作为回归基准；变更须重新走人工冻结流程。冻结条件见 bench/README.md 纪律 2。",
+  "seeds": [
+    {
+      "id": "seed-b-crud-calculator",
+      "category": "basic-crud",
+      "title": "多功能计算器",
+      "source": {
+        "projectId": "00ad0a52-918c-476f-9c8a-29b6332a74f3",
+        "name": "多功能计算器",
+        "stage": "ready",
+        "created": "2026-08-18",
+        "note": "老管道样本（无 agent loop、无 plan/loop-log），有 test-report.json；作 basic-crud 能力基线，不用于 loop 类指标对照"
+      },
+      "requirement": [
+        "帮我做一个计算器",
+        "普通计算器",
+        "我需要更多按键"
+      ],
+      "clarificationPath": [
+        "user: 普通计算器（在澄清选项中选普通计算器）",
+        "user: 我需要更多按键（要求补充常用运算按键）"
+      ],
+      "acceptanceDraft": {
+        "must": [
+          "能进行四则运算并即时显示结果",
+          "提供常用扩展功能按键（至少含百分比、开方、正负号、清除之一）",
+          "连续输入时结果不丢失、无明显错误"
+        ],
+        "mustNot": [
+          "界面纯静态、点击无响应",
+          "为过断言出现无需求依据的控件"
+        ]
+      },
+      "expectation": "正样本（基础工程能力基线）",
+      "knownIssue": null
+    },
+    {
+      "id": "seed-ai-note-distilled",
+      "category": "ai-core",
+      "title": "随心记（AI 总结，已知蒸馏失败）",
+      "source": {
+        "projectId": "7ae665fc-0fae-4a27-b499-8aa32d652255",
+        "name": "随心记",
+        "stage": "ready",
+        "created": "2026-09-06",
+        "note": "已知失败样本：PRD 仅 3 需求项、AI 能力语义在澄清/PRD 中丢失；loop 3 次含 repair 5 次，最后一次 cancelled（6 turns）。无 test-report.json。"
+      },
+      "requirement": [
+        "做一个ai随心记",
+        "智能总结回顾"
+      ],
+      "clarificationPath": [
+        "user: 智能总结回顾（在澄清中选「AI 自动整理/总结」方向）"
+      ],
+      "acceptanceDraft": {
+        "must": [
+          "可新增并保存一条随手记录，刷新后仍在",
+          "AI 总结内容随记录内容变化（变形测试：修改记录后总结应相应变化）",
+          "AI 总结能引用/对应到具体记录内容，而非空泛套话"
+        ],
+        "mustNot": [
+          "以固定模板或写死文本冒充 AI 总结",
+          "只实现记录的增删改查而完全没有智能总结能力",
+          "无需求依据的「模拟 AI 按钮」等测试投机控件"
+        ]
+      },
+      "expectation": "负样本：应能稳定复现「蒸馏过素 / AI 能力丢失」",
+      "knownIssue": "distilled-ai"
+    },
+    {
+      "id": "seed-ai-note-full",
+      "category": "ai-core",
+      "title": "随心记AI（完整 AI 能力，正样本对照）",
+      "source": {
+        "projectId": "d4093076-5c99-4d3e-bd69-0f330f3cbbce",
+        "name": "随心记AI",
+        "stage": "ready",
+        "created": "2026-09-04",
+        "note": "正样本对照：9 需求项、语音转文字合并 + 按天/周 AI 总结；loop completed（16 turns, repair 2）。无 test-report.json。"
+      },
+      "requirement": [
+        "做一个随心记，可以ai总结的那种",
+        "文字+语音",
+        "语音转文字合并",
+        "按时间自动汇总",
+        "用户自己定"
+      ],
+      "clarificationPath": [
+        "user: 文字+语音（输入形态含语音）",
+        "user: 语音转文字合并（录完自动转文字合并保存）",
+        "user: 按时间自动汇总（按天/周 AI 自动汇总）",
+        "user: 用户自己定（汇总节奏由用户设置）"
+      ],
+      "acceptanceDraft": {
+        "must": [
+          "支持文字与语音两种方式记录",
+          "语音录制后自动转文字，转写与该次记录合并为同一条",
+          "可按天/周自动汇总并生成 AI 总结，节奏由用户设置",
+          "AI 总结可回看且随记录变化"
+        ],
+        "mustNot": [
+          "只存语音不转文字，或语音与文字分条保存",
+          "AI 总结为固定文本/不随记录变化"
+        ]
+      },
+      "expectation": "正样本（对照 seed-ai-note-distilled，衡量澄清与 PRD 保真）",
+      "knownIssue": null
+    },
+    {
+      "id": "seed-game-shmup",
+      "category": "game",
+      "title": "纵版空战（纵版清版打飞机）",
+      "source": {
+        "projectId": "476847e5-d49b-45f7-9c4f-8bbc6882111b",
+        "name": "纵版空战",
+        "stage": "ready",
+        "created": "2026-09-08",
+        "note": "最新成功样本：loop completed（9 turns, 25 tools, repair 2）；澄清与 PRD 审查门有多次退回复审记录。无 test-report.json（GWT 证据待查落盘位置）。"
+      },
+      "requirement": [
+        "做一个纵版打飞机的游戏",
+        "经典街机清版"
+      ],
+      "clarificationPath": [
+        "user: 经典街机清版（澄清选型）",
+        "PRD 审查修订：补术语定义（纵版/清版）、补全核心玩法、补验收与优先级"
+      ],
+      "acceptanceDraft": {
+        "must": [
+          "点击开始后玩家飞机显示并可操控移动",
+          "可发射子弹并击落敌人（击中判定可观察）",
+          "消灭当前波次全部敌人后过关（清版）",
+          "被击中有失败/生命损失反馈，可重新开始"
+        ],
+        "mustNot": [
+          "飞机静止不可操控、无敌人或纯静态画面",
+          "无需求依据的测试投机控件"
+        ]
+      },
+      "expectation": "正样本（game 类型最新基线，可对照 loop 成功成本）",
+      "knownIssue": null
+    },
+    {
+      "id": "seed-game-isaac-hard",
+      "category": "game",
+      "title": "以撒的挑战（复刻核心玩法，长循环失败样本）",
+      "source": {
+        "projectId": "a9755cd9-f3cf-465d-ac04-596ecf823b83",
+        "name": "以撒的挑战",
+        "stage": "ready",
+        "created": "2026-09-04",
+        "note": "已知失败样本：10 需求复杂 game；loop 24 turns 后 cancelled、mvp_delivered=false、repair 3 次未收敛。对应长上下文/退行风险区间。"
+      },
+      "requirement": [
+        "做一个以撒的结合",
+        "复刻核心玩法",
+        "纯单机离线",
+        "自动，门口"
+      ],
+      "clarificationPath": [
+        "user: 复刻核心玩法（随机地牢、道具组合、Boss战）",
+        "user: 纯单机离线（无联网）",
+        "user: 自动/你来决定（存档与暂停等补齐项由平台补充）"
+      ],
+      "acceptanceDraft": {
+        "must": [
+          "随机生成地牢关卡且可探索（重复游玩地图不同）",
+          "道具拾取后对角色产生可观察效果",
+          "存在可挑战的 Boss 战斗",
+          "支持本地存档/读档，中断后可继续",
+          "提供暂停菜单"
+        ],
+        "mustNot": [
+          "地牢固定无随机性",
+          "出现任何联网依赖",
+          "道具无实际效果（纯收集计数）"
+        ]
+      },
+      "expectation": "负样本：应能复现「复杂需求长循环未收敛」；用于预算与停止条件调优",
+      "knownIssue": "loop-unfinished"
+    },
+    {
+      "id": "seed-ai-voice-polish",
+      "category": "ai-core",
+      "title": "语顺精灵球（语音顺话 AI + 接口契约）",
+      "source": {
+        "projectId": "d9633c2f-4617-4c0a-af48-63aadbedb55f",
+        "name": "语顺精灵球",
+        "stage": "ready",
+        "created": "2026-09-06",
+        "note": "正样本：6 需求项、含 interface_spec；loop completed（14 turns, repair 3）。语音功能依赖麦克风权限（产物线在途）。"
+      },
+      "requirement": [
+        "做一个语音输入，带口语矫正的精灵球",
+        "顺成干净的话"
+      ],
+      "clarificationPath": [
+        "user: 顺成干净的话（把啰嗦/卡顿的原话顺成一句干净表达）"
+      ],
+      "acceptanceDraft": {
+        "must": [
+          "按住按钮录音，松手结束并显示识别出的原话",
+          "将原话顺成干净、通顺、无卡顿的表达，且随原话变化",
+          "同时展示原话与顺后话，可对比",
+          "历史记录按时间保存、可回看删除",
+          "顺后表达可收藏复用"
+        ],
+        "mustNot": [
+          "顺话为固定模板或不随原话变化",
+          "录音后无转写/顺话能力（只剩按钮壳）"
+        ]
+      },
+      "expectation": "正样本（AI + 前后端接口契约形态）；录音需 mock/回放轨道（双轨见 P0 实施稿 §7）",
+      "knownIssue": null
+    }
+  ]
+}

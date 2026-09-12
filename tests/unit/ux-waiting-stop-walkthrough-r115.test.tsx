@@ -53,11 +53,11 @@ describe('ux-waiting-stop-walkthrough r115：等待期操作入口（F5 修复�
     expect(screen.queryByRole('button', { name: '停止生成' })).toBeNull() // F3 翻转位：hasActiveStream→busy 后应非空
   })
 
-  it('[W3·流中] hasActiveStream → 停止可见（原行为回归）', () => {
+  it('[W3·流中] hasActiveStream → 停止可见（原行为回归；I4 文案=停止本轮制作）', () => {
     store.set(activeAgentSessionIdAtom, 's1')
     store.set(agentStreamStateFamily('s1'), { running: true, events: [], content: '' } as never)
     mount()
-    expect(screen.getByRole('button', { name: '停止生成' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '停止本轮制作' })).toBeTruthy()
   })
 
   it('[W4·等待不丢输入] isWaiting → 输入框仍可编辑（草稿不锁死，等待结束可续发）', () => {

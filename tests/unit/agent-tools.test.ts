@@ -9,6 +9,7 @@ import type { AddressInfo } from 'node:net'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildAgentTools,
+  createWriteScope,
   EDIT_BUDGET_AFTER_TEST_FAILURE,
   setJsSyntaxCheckerForTests,
 } from '../../main/agent-tools'
@@ -16,6 +17,7 @@ import { createToolState, type AgentLoopTool, type ToolContext } from '../../mai
 import { createProject, findProject, recordSketchGenerated } from '../../main/project-service'
 import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/platform-services'
 import { setBrowserGwtDisabledForTests } from '../../main/gwt-runner'
+import { getDocumentsDir } from '../../storage/config-paths'
 
 /**
  * PR2 L2 工具集单元测试（不接线，直接驱动工具 execute）。
@@ -666,5 +668,460 @@ describe('web_research 工具面（闭环 PR5）', () => {
       const names = buildAgentTools({ projectId: 'p', role }).map((tool) => tool.name)
       expect(names).not.toContain('web_research')
     }
+  })
+})
+
+describe('agent-tools D 系列（咨询 D：验证协议，2026-09-09）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalApiTool = process.env.BLOMA_API_TOOL
+  const originalEvidence = process.env.BLOMA_TOOL_EVIDENCE
+  const originalWriteGuard = process.env.BLOMA_WRITE_GUARD
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-tools-d-'))
+    setJsSyntaxCheckerForTests(stubSyntaxChecker)
+    setBrowserGwtDisabledForTests(true)
+    delete process.env.BLOMA_API_TOOL
+    delete process.env.BLOMA_TOOL_EVIDENCE
+    delete process.env.BLOMA_WRITE_GUARD
+  })
+  afterEach(() => {
+    restorePromaHome(originalPromaHome)
+    setJsSyntaxCheckerForTests(undefined)
+    setBrowserGwtDisabledForTests(false)
+    clearSandboxRuntimeForTests()
+    if (originalApiTool === undefined) delete process.env.BLOMA_API_TOOL
+    else process.env.BLOMA_API_TOOL = originalApiTool
+    if (originalEvidence === undefined) delete process.env.BLOMA_TOOL_EVIDENCE
+    else process.env.BLOMA_TOOL_EVIDENCE = originalEvidence
+    if (originalWriteGuard === undefined) delete process.env.BLOMA_WRITE_GUARD
+    else process.env.BLOMA_WRITE_GUARD = originalWriteGuard
+  })
+
+  it('D1：开关 off 工具面=现状（无 run_api_contract_tests，parent 17 个）；on 注册且变 18', () => {
+    const project = createProject({ request_id: 'req-d-reg', mode: 'quick' })
+    const off = buildAgentTools({ projectId: project.project_id }).map((t) => t.name)
+    expect(off).not.toContain('run_api_contract_tests')
+    expect(off).toHaveLength(17)
+    process.env.BLOMA_API_TOOL = '1'
+    const on = buildAgentTools({ projectId: project.project_id }).map((t) => t.name)
+    expect(on).toContain('run_api_contract_tests')
+    expect(on).toHaveLength(18)
+    // review 角色同样可用（只读验证面）
+    const review = buildAgentTools({ projectId: project.project_id, role: 'review' }).map((t) => t.name)
+    expect(review).toContain('run_api_contract_tests')
+  })
+
+  it('D1：API 工具无预览先引导 run_preview（与 run_gwt_tests 同口径）', async () => {
+    process.env.BLOMA_API_TOOL = '1'
+    const project = createProject({ request_id: 'req-d-nopv', mode: 'quick' })
+    const tools = buildAgentTools({ projectId: project.project_id })
+    const outcome = await byName(tools, 'run_api_contract_tests').execute({}, ctxFor(project.project_id))
+    expect(outcome.isError).toBe(true)
+    expect(outcome.output).toContain('run_preview')
+  })
+
+  it('D1：无 interface_spec → 豁免通过并置位 api_all_passed（纯静态产物不强制跑）', async () => {
+    process.env.BLOMA_API_TOOL = '1'
+    const project = createProject({ request_id: 'req-d-exempt', mode: 'quick' })
+    const tools = buildAgentTools({ projectId: project.project_id })
+    const ctx = ctxFor(project.project_id)
+    ctx.state.api_all_passed = false // 模拟「有契约预置」，验证豁免也能翻正
+    ctx.state.preview_url = 'http://127.0.0.1:1'
+    const outcome = await byName(tools, 'run_api_contract_tests').execute({}, ctx)
+    expect(outcome.output).toContain('豁免')
+    expect(ctx.state.api_all_passed).toBe(true)
+  })
+
+  it('D1：有契约全过 → 通过并置位；有失败 → 明细含「API 契约端点」且不置位（location 口径对齐终验/修复轮）', async () => {
+    process.env.BLOMA_API_TOOL = '1'
+    const project = createProject({ request_id: 'req-d-contract', mode: 'quick' })
+    // 写最小合法背板（requirements 数组即可被 readPrdBackplane 接受）
+    const docsDir = getDocumentsDir(project.workspace_slug, project.project_id)
+    writeFileSync(
+      join(docsDir, 'prd.json'),
+      JSON.stringify({ requirements: [], interface_spec: [{ endpoint: '/api/notes', method: 'GET' }] }),
+      'utf8',
+    )
+    const tools = buildAgentTools({ projectId: project.project_id })
+    const ctx = ctxFor(project.project_id)
+
+    // 全过：本地 server 应答 /api/notes
+    const okServer = createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end('{"notes":[]}')
+    })
+    await new Promise<void>((resolve) => okServer.listen(0, '127.0.0.1', resolve))
+    const okPort = (okServer.address() as AddressInfo).port
+    ctx.state.preview_url = `http://127.0.0.1:${okPort}`
+    const passed = await byName(tools, 'run_api_contract_tests').execute({}, ctx)
+    expect(passed.output).toContain('全部应答正常')
+    expect(ctx.state.api_all_passed).toBe(true)
+    okServer.close()
+
+    // 失败：404 server
+    const badServer = createServer((_req, res) => {
+      res.writeHead(404)
+      res.end('not found')
+    })
+    await new Promise<void>((resolve) => badServer.listen(0, '127.0.0.1', resolve))
+    const badPort = (badServer.address() as AddressInfo).port
+    ctx.state.preview_url = `http://127.0.0.1:${badPort}`
+    const failed = await byName(tools, 'run_api_contract_tests').execute({}, ctx)
+    expect(failed.output).toContain('API 契约端点')
+    expect(failed.output).toContain('/api/notes')
+    expect(ctx.state.api_all_passed).toBe(false)
+    badServer.close()
+  })
+
+  it('D2：off=字节级现状（全过仍含旧收口提示）；on=验证状态行替代收口暗示，全验证面通过才说「可输出完成总结」', async () => {
+    const project = createProject({ request_id: 'req-d-evidence', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+    const server = createServer((_req, res) => {
+      if (_req.url === '/src/app.js') {
+        res.writeHead(200, { 'Content-Type': 'application/javascript' })
+        res.end("document.querySelector('button').addEventListener('click', function () {})")
+      } else {
+        res.writeHead(200, { 'Content-Type': 'text/html' })
+        res.end('<html><body><button>开始使用</button><p>记录收入与支出</p></body></html>')
+      }
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+    try {
+      // off：现状原文
+      const toolsOff = buildAgentTools({ projectId: project.project_id })
+      const ctxOff = ctxFor(project.project_id)
+      ctxOff.state.preview_url = `http://127.0.0.1:${port}`
+      const off = await byName(toolsOff, 'run_gwt_tests').execute({}, ctxOff)
+      expect(off.output).toContain('测试通过，可以继续 run_security_scan 或输出完成总结。')
+      expect(off.output).not.toContain('验证状态')
+
+      // on：尚缺 security/api → 不再出现收口暗示
+      process.env.BLOMA_TOOL_EVIDENCE = '1'
+      const toolsOn = buildAgentTools({ projectId: project.project_id })
+      const ctxOn = ctxFor(project.project_id)
+      ctxOn.state.preview_url = `http://127.0.0.1:${port}`
+      const on = await byName(toolsOn, 'run_gwt_tests').execute({}, ctxOn)
+      expect(on.output).toContain('验证状态')
+      expect(on.output).toContain('尚缺')
+      expect(on.output).not.toContain('或输出完成总结') // 仅在全部通过时出现
+      // 全验证面通过 → 明确放行
+      ctxOn.state.security_all_passed = true
+      ctxOn.state.api_all_passed = true
+      const all = await byName(toolsOn, 'run_gwt_tests').execute({}, ctxOn)
+      expect(all.output).toContain('全部验证面通过，可输出完成总结')
+    } finally {
+      server.close()
+    }
+  })
+
+  it('D3：失败条目首轮标 [新增]、同场景复跑标 [持续]（防重复修同一失败）', async () => {
+    process.env.BLOMA_TOOL_EVIDENCE = '1'
+    const project = createProject({ request_id: 'req-d-d3', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+    const tools = buildAgentTools({ projectId: project.project_id })
+    const ctx = ctxFor(project.project_id)
+    ctx.state.preview_url = 'http://127.0.0.1:1' // 不可访问 → 稳定失败
+    const first = await byName(tools, 'run_gwt_tests').execute({}, ctx)
+    expect(first.output).toContain('[新增] ')
+    const second = await byName(tools, 'run_gwt_tests').execute({}, ctx)
+    expect(second.output).toContain('[持续] ')
+  })
+
+  it('D4a：read_file 返回文件版本；STALE_READ 拦截旧版本编辑；不传 rev 零变化', async () => {
+    const project = createProject({ request_id: 'req-d-rev', mode: 'quick' })
+    const tools = buildAgentTools({ projectId: project.project_id })
+    const ctx = ctxFor(project.project_id)
+    const abs = join(project.root_path, 'src', 'app.js')
+    mkdirSync(join(abs, '..'), { recursive: true })
+    writeFileSync(abs, 'const a = 1\n', 'utf8')
+
+    const read = await byName(tools, 'read_file').execute({ path: 'src/app.js' }, ctx)
+    expect(read.output).toContain('文件版本 ')
+    const rev = (read.output.match(/文件版本 ([0-9a-f-]+)/) ?? [])[1]
+    expect(rev).toBeTruthy()
+
+    // 读后被外部修改 → 传旧 rev 被 STALE_READ 拒绝
+    writeFileSync(abs, 'const a = 2\n', 'utf8')
+    const stale = await byName(tools, 'edit_file').execute(
+      { path: 'src/app.js', old_string: 'const a = 2', new_string: 'const a = 3', expected_revision: rev },
+      ctx,
+    )
+    expect(stale.isError).toBe(true)
+    expect(stale.output).toContain('STALE_READ')
+
+    // 不传 rev → 现状行为（old_string 唯一命中即成功）
+    const ok = await byName(tools, 'edit_file').execute(
+      { path: 'src/app.js', old_string: 'const a = 2', new_string: 'const a = 3' },
+      ctx,
+    )
+    expect(ok.isError).toBeFalsy()
+    expect(readFileSync(abs, 'utf8')).toContain('const a = 3')
+  })
+
+  it('D4a：write 守卫 off=现状零变化；on=盲覆盖既有文件被拒，read 后放行，新文件不受影响', async () => {
+    const project = createProject({ request_id: 'req-d-guard', mode: 'quick' })
+    const abs = join(project.root_path, 'index.html')
+    writeFileSync(abs, '<html><body><p>旧内容</p></body></html>', 'utf8')
+
+    // off：直接覆盖（现状）
+    const toolsOff = buildAgentTools({ projectId: project.project_id })
+    const off = await byName(toolsOff, 'write_file').execute(
+      { path: 'index.html', content: '<html><body><p>新内容</p></body></html>' },
+      ctxFor(project.project_id),
+    )
+    expect(off.isError).toBeFalsy()
+
+    // on：重建文件后盲覆盖被拒
+    process.env.BLOMA_WRITE_GUARD = '1'
+    writeFileSync(abs, '<html><body><p>旧内容</p></body></html>', 'utf8')
+    const toolsOn = buildAgentTools({ projectId: project.project_id })
+    const ctx = ctxFor(project.project_id)
+    const blocked = await byName(toolsOn, 'write_file').execute(
+      { path: 'index.html', content: '<html><body><p>再覆盖</p></body></html>' },
+      ctx,
+    )
+    expect(blocked.isError).toBe(true)
+    expect(blocked.output).toContain('本轮未读取过')
+
+    // read 后放行
+    await byName(toolsOn, 'read_file').execute({ path: 'index.html' }, ctx)
+    const allowed = await byName(toolsOn, 'write_file').execute(
+      { path: 'index.html', content: '<html><body><p>读后覆盖</p></body></html>' },
+      ctx,
+    )
+    expect(allowed.isError).toBeFalsy()
+
+    // 新文件不受守卫影响
+    const fresh = await byName(toolsOn, 'write_file').execute(
+      { path: 'src/new.js', content: 'const b = 1\n' },
+      ctx,
+    )
+    expect(fresh.isError).toBeFalsy()
+  })
+})
+
+describe('W2-F4：run_gwt_tests 修复比较与计数器', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalEvidence = process.env.BLOMA_TOOL_EVIDENCE
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-tools-w2-'))
+    setBrowserGwtDisabledForTests(true)
+    delete process.env.BLOMA_TOOL_EVIDENCE
+  })
+  afterEach(() => {
+    restorePromaHome(originalPromaHome)
+    setBrowserGwtDisabledForTests(false)
+    clearSandboxRuntimeForTests()
+    if (originalEvidence === undefined) delete process.env.BLOMA_TOOL_EVIDENCE
+    else process.env.BLOMA_TOOL_EVIDENCE = originalEvidence
+  })
+
+  it('较上次行：resolved 列出已修场景、新增提示回归；state 快照无条件更新（终验 source 判据）', async () => {
+    process.env.BLOMA_TOOL_EVIDENCE = '1'
+    const project = createProject({ request_id: 'req-w2-f4', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+    const tools = buildAgentTools({ projectId: project.project_id })
+    const ctx = ctxFor(project.project_id)
+    ctx.state.preview_url = 'http://127.0.0.1:1' // 不可访问 → 稳定失败集
+    // 预置上轮失败集：本轮真实失败与之既不重合（全算新增）→ resolved=预置项
+    ctx.state.last_gwt_failures = ['F-099 上轮已修场景']
+    const run = await byName(tools, 'run_gwt_tests').execute({}, ctx)
+    expect(run.output).toContain('较上次：修复 1（F-099 上轮已修场景）')
+    expect(run.output).toContain('新增 1')
+    // 计数器与快照：gwt_runs=1；last_gwt_failures 已换成本轮真实失败集
+    expect(ctx.state.gwt_runs).toBe(1)
+    const realFailures = ctx.state.last_gwt_failures ?? []
+    expect(realFailures.length).toBeGreaterThan(0)
+    expect(realFailures).not.toContain('F-099 上轮已修场景')
+    // 复跑：上轮真实失败本轮仍在 → [持续]，且 resolved=0
+    const again = await byName(tools, 'run_gwt_tests').execute({}, ctx)
+    expect(again.output).toContain('[持续] ')
+    expect(again.output).toContain('持续 1')
+    expect(ctx.state.gwt_runs).toBe(2)
+  })
+
+  it('开关 off：比较行与标注不出现，但 gwt_runs/last_gwt_failures 照常维护', async () => {
+    delete process.env.BLOMA_TOOL_EVIDENCE
+    const project = createProject({ request_id: 'req-w2-f4-off', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+    const tools = buildAgentTools({ projectId: project.project_id })
+    const ctx = ctxFor(project.project_id)
+    ctx.state.preview_url = 'http://127.0.0.1:1'
+    const run = await byName(tools, 'run_gwt_tests').execute({}, ctx)
+    expect(run.output).not.toContain('较上次')
+    expect(ctx.state.gwt_runs).toBe(1)
+    expect((ctx.state.last_gwt_failures ?? []).length).toBeGreaterThan(0)
+  })
+})
+
+describe('W3-D1/D2：run_preflight 收口预检', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalPreflight = process.env.BLOMA_PREFLIGHT
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-tools-w3-'))
+    setBrowserGwtDisabledForTests(true)
+    delete process.env.BLOMA_PREFLIGHT
+  })
+  afterEach(() => {
+    restorePromaHome(originalPromaHome)
+    setBrowserGwtDisabledForTests(false)
+    clearSandboxRuntimeForTests()
+    if (originalPreflight === undefined) delete process.env.BLOMA_PREFLIGHT
+    else process.env.BLOMA_PREFLIGHT = originalPreflight
+  })
+
+  it('开关 off 不注册（字节级现状）；on 注册 run_preflight', () => {
+    const project = createProject({ request_id: 'req-w3-reg', mode: 'quick' })
+    const off = buildAgentTools({ projectId: project.project_id }).map((t) => t.name)
+    expect(off).not.toContain('run_preflight')
+    process.env.BLOMA_PREFLIGHT = '1'
+    const on = buildAgentTools({ projectId: project.project_id }).map((t) => t.name)
+    expect(on).toContain('run_preflight')
+  })
+
+  it('预检执行：按阶段报告（GWT 失败/契约豁免/UI 探针留痕/安全），preflight_passed=false 留 loop 内修', async () => {
+    process.env.BLOMA_PREFLIGHT = '1'
+    const project = createProject({ request_id: 'req-w3-run', mode: 'quick' })
+    recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
+    const tools = buildAgentTools({ projectId: project.project_id })
+    const ctx = ctxFor(project.project_id)
+    ctx.state.preview_url = 'http://127.0.0.1:1' // 不可达 → GWT 稳定失败、UI 探针 unavailable
+    const result = await byName(tools, 'run_preflight').execute({}, ctx)
+    expect(result.output).toContain('【收口预检】')
+    expect(result.output).toContain('① GWT 行为断言：失败')
+    expect(result.output).toContain('② API 契约：豁免')
+    expect(result.output).toContain('③ 产物 UI 审计：未执行')
+    expect(result.output).toContain('④ 安全扫描')
+    expect(result.output).toContain('收口预检未通过')
+    expect(result.output).toContain('留在当前循环内修复')
+    expect(ctx.state.preflight_passed).toBe(false)
+    expect(ctx.state.gwt_all_passed).toBe(false)
+    // 失败快照与计数口径与 run_gwt_tests 一致（终验 source 分类判据）
+    expect(ctx.state.gwt_runs).toBe(1)
+    expect((ctx.state.last_gwt_failures ?? []).length).toBeGreaterThan(0)
+  })
+
+  it('无预览时明确前置（先 run_preview），不误判', async () => {
+    process.env.BLOMA_PREFLIGHT = '1'
+    const project = createProject({ request_id: 'req-w3-nopv', mode: 'quick' })
+    const tools = buildAgentTools({ projectId: project.project_id })
+    const result = await byName(tools, 'run_preflight').execute({}, ctxFor(project.project_id))
+    expect(result.isError).toBe(true)
+    expect(result.output).toContain('run_preview')
+  })
+})
+
+describe('W4-F2/F3：修复轮修改授权边界 + repair_control 窄入口', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalSyntax = process.env.BLOMA_WRITE_GUARD
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-tools-w4-'))
+    setJsSyntaxCheckerForTests(stubSyntaxChecker)
+    setBrowserGwtDisabledForTests(true)
+    delete process.env.BLOMA_WRITE_GUARD
+  })
+  afterEach(() => {
+    restorePromaHome(originalPromaHome)
+    setJsSyntaxCheckerForTests(undefined)
+    setBrowserGwtDisabledForTests(false)
+    clearSandboxRuntimeForTests()
+    if (originalSyntax === undefined) delete process.env.BLOMA_WRITE_GUARD
+    else process.env.BLOMA_WRITE_GUARD = originalSyntax
+  })
+
+  it('越界写被 WRITE_SCOPE_DENIED 拦（blocked+next_actions，不诱导绕权限）；授权内照常', async () => {
+    const project = createProject({ request_id: 'req-w4-scope', mode: 'quick' })
+    const scope = createWriteScope(['src/app.js'])
+    const tools = buildAgentTools({ projectId: project.project_id, writeScope: scope })
+    const ctx = ctxFor(project.project_id)
+    // 越界 edit：被拒并给出恢复路径
+    const denied = await byName(tools, 'edit_file').execute(
+      { path: 'index.html', old_string: 'a', new_string: 'b' },
+      ctx,
+    )
+    expect(denied.isError).toBe(true)
+    expect(denied.output).toContain('WRITE_SCOPE_DENIED')
+    expect(denied.output).toContain('repair_control')
+    expect((denied.detail as { next_actions?: unknown[] }).next_actions).toBeTruthy()
+    // 授权内 write：照常（新建文件）
+    const allowed = await byName(tools, 'write_file').execute(
+      { path: 'src/app.js', content: 'const a = 1\n' },
+      ctx,
+    )
+    expect(allowed.isError).toBeFalsy()
+    // 无 holder（主 loop 现状）：不拦
+    const plainTools = buildAgentTools({ projectId: project.project_id })
+    const plain = await byName(plainTools, 'write_file').execute(
+      { path: 'index.html', content: '<html></html>' },
+      ctxFor(project.project_id),
+    )
+    expect(plain.isError).toBeFalsy()
+  })
+
+  it('repair_control：扩大申请自动批准→写放行；通配符/受保护路径拒绝；缺字段用法错误；report_blocker 记录', async () => {
+    const project = createProject({ request_id: 'req-w4-ctl', mode: 'quick' })
+    const scope = createWriteScope(['src/app.js'], ['prd.json'])
+    const tools = buildAgentTools({ projectId: project.project_id, writeScope: scope })
+    const ctx = ctxFor(project.project_id)
+    // 注册面：writeScope 在 → repair_control 在
+    expect(tools.map((t) => t.name)).toContain('repair_control')
+    // 扩大申请：普通实现文件 → 批准 + 后续写放行
+    const approved = await byName(tools, 'repair_control').execute({
+      action: 'request_scope_expansion',
+      issue_id: 'F-005',
+      requested_paths: ['src/store.js'],
+      reason: '过滤逻辑实现在 store.js 的 deriveVisibleItems',
+      change_intent: '修正过滤谓词的边界条件',
+    }, ctx)
+    expect(approved.output).toContain('已批准')
+    const writeAfter = await byName(tools, 'write_file').execute(
+      { path: 'src/store.js', content: 'const s = 1\n' },
+      ctx,
+    )
+    expect(writeAfter.isError).toBeFalsy()
+    // 通配符/超量 → 拒绝「不能申请全项目可写」
+    const wildcard = await byName(tools, 'repair_control').execute({
+      action: 'request_scope_expansion',
+      issue_id: 'F-005',
+      requested_paths: ['src/*'],
+      reason: 'x',
+      change_intent: 'y',
+    }, ctx)
+    expect(wildcard.isError).toBe(true)
+    expect(wildcard.output).toContain('不能申请全项目可写')
+    // 受保护路径 → 拒绝
+    const protectedDeny = await byName(tools, 'repair_control').execute({
+      action: 'request_scope_expansion',
+      issue_id: 'F-005',
+      requested_paths: ['prd.json'],
+      reason: 'x',
+      change_intent: 'y',
+    }, ctx)
+    expect(protectedDeny.isError).toBe(true)
+    expect(protectedDeny.output).toContain('受保护')
+    // 缺必填 → 用法错误
+    const missing = await byName(tools, 'repair_control').execute({
+      action: 'request_scope_expansion',
+      issue_id: 'F-005',
+    }, ctx)
+    expect(missing.isError).toBe(true)
+    expect(missing.output).toContain('必填字段')
+    // report_blocker → 记录 + 结构化确认
+    const blocker = await byName(tools, 'repair_control').execute({
+      action: 'report_blocker',
+      blocker_reason: '预览沙箱反复重启，测试环境不稳定',
+      evidence: 'run_gwt_tests 连续 3 次 ECONNREFUSED',
+    }, ctx)
+    expect(blocker.output).toContain('受阻已记录')
+    expect(scope.blockers).toHaveLength(1)
+    expect(scope.blockers[0]!.reason).toContain('沙箱')
+    // 账本：3 次申请（批准 1 + 拒 2）
+    expect(scope.expansions).toHaveLength(3)
+    expect(scope.expansions.filter((e) => e.decision === 'approved')).toHaveLength(1)
   })
 })

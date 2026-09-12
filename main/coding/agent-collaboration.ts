@@ -9,6 +9,7 @@ import {
   type AgentLoopResult,
   type AgentLoopTool,
   type AgentLoopTurnInfo,
+  type AgentLoopCompactionInfo,
   type ToolContext,
 } from '../agent-loop'
 
@@ -134,6 +135,8 @@ export interface DelegationParentContext {
   autoAnswer?: string
   /** 子 loop 每轮埋点（programming-orchestrator 注入，session_id=子 sessionId）。 */
   onChildTurn?: (info: AgentLoopTurnInfo, child: { sessionId: string; requestId: string; role: DelegationRole }) => void
+  /** W1-E1：子 loop 压缩观测埋点（agent_loop_compact via=delegation；同 onChildTurn 模式）。 */
+  onChildCompaction?: (info: AgentLoopCompactionInfo, child: { sessionId: string; requestId: string; role: DelegationRole }) => void
   /** 追加到子 agent 工具面的定向工具（2026-09 内审闭环）：如 read_conversation_history /
    *  write_prd_draft——闭包携带调用方上下文，仅注入需要它的委派（最小攻击面）。 */
   childExtraTools?: AgentLoopTool[]
@@ -354,6 +357,9 @@ async function runChildLoop(opts: {
     },
     onTurn: parentCtx.onChildTurn
       ? (info) => parentCtx.onChildTurn!(info, { sessionId: record.childSessionId, requestId: childRequestId, role })
+      : undefined,
+    onCompaction: parentCtx.onChildCompaction
+      ? (info) => parentCtx.onChildCompaction!(info, { sessionId: record.childSessionId, requestId: childRequestId, role })
       : undefined,
   })
 }

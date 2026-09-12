@@ -36,12 +36,13 @@ export async function buildJudgeErrorPatternsSection(
   try {
     const cards = await selectForInjection({
       kind: 'anti_pattern',
+      surface: 'judge_checklist',
       limit: opts.limit ?? EXPERIENCE_GOVERNANCE.DEFAULT_INJECT_LIMIT,
       budget_chars: opts.budget_chars ?? 1200, // 审查段预算小于编程段（裁判 prompt 已有产物全文）
       context_hint: opts.context_hint,
     })
     const lines = cards
-      .filter((c): c is ExperienceCard & { kind: 'anti_pattern' } => c.kind === 'anti_pattern' && c.status === 'verified')
+      .filter((c): c is ExperienceCard & { kind: 'anti_pattern' } => c.kind === 'anti_pattern' && (c.status === 'verified' || c.status === 'active'))
       .map(renderLine)
     if (lines.length === 0) return ''
     return ['【常见错法】（经验库中已验证的错法，逐项对照，防漏判）', ...lines].join('\n')

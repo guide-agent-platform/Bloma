@@ -40,6 +40,8 @@
     <p><!-- 页脚说明 --></p>
   </footer>
 
-  <script src="src/app.js"></script>
+  <!-- 构建产物承接位：加载 esbuild 打包产物 dist/app.js（构建门禁产出）。业务逻辑写在
+       src/app.js 及 src/ 模块里，经构建打包注入本页；勿在此内联业务脚本。 -->
+  <script src="./dist/app.js" defer></script>
 </body>
 </html>

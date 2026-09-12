@@ -169,3 +169,26 @@ describe('focusAnchorEnabled — 开关矩阵（D7 连锁）', () => {
     expect(focusAnchorEnabled('quick')).toBe(true)
   })
 })
+
+describe('W5-G1：表达纪律段开关（BLOMA_NARRATION_EVENTS）', () => {
+  const original = process.env.BLOMA_NARRATION_EVENTS
+  afterEach(() => {
+    if (original === undefined) delete process.env.BLOMA_NARRATION_EVENTS
+    else process.env.BLOMA_NARRATION_EVENTS = original
+  })
+  it('off=现状原文（每轮旁白+同构开头限制）；on=五类事件版（无同构开头限制）', () => {
+    delete process.env.BLOMA_NARRATION_EVENTS
+    const off = buildAgentLoopSystemPrompt(BACKPLANE, 'diff', undefined, null)
+    expect(off).toContain('每轮工具调用前用一句中文旁白说明意图')
+    expect(off).toContain('同构开头连续不得超过两轮')
+    expect(off).not.toContain('旁白按事件发生')
+    process.env.BLOMA_NARRATION_EVENTS = '1'
+    const on = buildAgentLoopSystemPrompt(BACKPLANE, 'diff', undefined, null)
+    expect(on).toContain('旁白按事件发生，不逐轮播报')
+    expect(on).toContain('①开始明显新阶段')
+    expect(on).not.toContain('同构开头连续不得超过两轮') // G2 的去留由本开关 A/B 对照
+    expect(on).not.toContain('每轮工具调用前用一句中文旁白说明意图')
+    // 真实性纪律保留（两条公共线不动）
+    expect(on).toContain('测试失败先读工具返回的失败详情')
+  })
+})

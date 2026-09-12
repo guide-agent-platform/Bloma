@@ -36,6 +36,8 @@ import type {
   ProjectMode,
   ResearchIdea,
   Snapshot,
+  SteerImpact,
+  SteerStatus,
   WorkflowStage,
 } from '../shared/types'
 
@@ -131,7 +133,7 @@ export interface RequirementConfirmState {
   projectId: string
   title: string
   requirements: Array<{ id: string; description: string; origin?: 'user' | 'guide' }>
-  research: { available: boolean; summary: string }
+  research: { available: boolean; summary: string; mode?: string }
   /** 市调提炼想法（2026-08-29 灵感参考）：可勾选采纳并入需求清单 */
   ideas: ResearchIdea[]
 }
@@ -152,6 +154,11 @@ export interface PrdConfirmRequirement {
   priority: 'P0' | 'P1' | 'P2'
   story: string
   assertions: string[]
+  /** 来源（Phase 7 U4 J4）：user=用户原话/点选，guide=向导补充；缺省不标 */
+  origin?: 'user' | 'guide'
+  /** 后端架构后果显影（P1 C1a，2026-09-11 审计⑧）：留存信号词命中项——这条需求
+   * 会让产品需要后端服务与数据持久化（interface_spec 契约），确认时让用户看见 */
+  implies_backend?: boolean
 }
 
 export interface PrdConfirmState {
@@ -165,13 +172,38 @@ export interface PrdConfirmState {
   outOfScope: string[]
   assumptions: string[]
   constraints: string[]
+  /** 核心能力契约（Phase 2 M1，2026-09-09）：可选——缺失/空数组时卡片自动隐藏（开关 off/无 CAP/旧夹具） */
+  aiCapabilities?: PrdConfirmCapability[]
+  /** 关键任务（Phase 7 U1 H2，2026-09-10）：可选——缺失/空数组时卡片自动隐藏（开关 off/无任务/旧夹具） */
+  keyTasks?: PrdConfirmKeyTask[]
   /** 完整 PRD 视图默认展开（longterm） */
   expanded: boolean
   /** 市调提炼想法（2026-08-29 灵感参考）：确认时可勾选采纳并入 PRD */
   ideas: ResearchIdea[]
+  /** R2（2026-09-12）：想法来源模式（agent=纯模型灵感建议）；头标如实标注 */
+  ideasMode?: string
 }
 
 export const prdConfirmFamily = atomFamily((_sessionId: string) => atom<PrdConfirmState | null>(null))
+
+/** 核心能力契约展示型（Phase 2 M1）：主进程 AiCapability 的投影（仅展示所需字段）。 */
+export interface PrdConfirmCapability {
+  capabilityId: string
+  task: string
+  keyProcessing: string
+  ioDependency: string
+  forbiddenSubstitutions: string[]
+  evidence: string[]
+  source: string
+}
+
+/** 关键任务展示型（Phase 7 U1 H2）：主进程 KeyTask 的投影（仅展示所需字段）。 */
+export interface PrdConfirmKeyTask {
+  taskId: string
+  label: string
+  featureIds: string[]
+  mustDeliver: boolean
+}
 
 /** 无 active session 时的稳定 fallback（陷阱 10）。 */
 export const nullPrdConfirmFallback = atom<PrdConfirmState | null>(null)
@@ -246,6 +278,18 @@ export const agentMessagesFamily = atomFamily((_sessionId: string) =>
   atom<AgentMessage[]>([]),
 )
 
+/** I3 转向生效确认链（P7-7）：会话级 steer 状态条数据（steer_status 事件 upsert；
+ *  主进程账本镜像——「这轮会做吗」的权威答案源在主进程 getSteerStatuses）。 */
+export interface SteerStatusChip {
+  steerId: string
+  content: string
+  impact: SteerImpact
+  status: SteerStatus
+  updatedAt: number
+}
+
+export const steerStatusFamily = atomFamily((_sessionId: string) => atom<SteerStatusChip[]>([]))
+
 // =========================================================================
 // 4. 权限请求队列（对齐 A）
 // =========================================================================
@@ -313,6 +357,24 @@ const NEW_RUN_SIGNALS = new Set([
   'delegation_started',
 ])
 
+/** I3（P7-7）：steer 状态条 upsert（steer_status/steer_injected 事件同口径）。
+ *  事件到达顺序无保证：同 steer_id 以 updatedAt 新者胜，保序插入（新 steer 追加尾部）。 */
+function upsertSteerChip(
+  store: NonNullable<Window['__jotai_store__']>,
+  sessionId: string,
+  chip: SteerStatusChip,
+): void {
+  store.set(steerStatusFamily(sessionId), (previous) => {
+    const index = previous.findIndex((item) => item.steerId === chip.steerId)
+    if (index === -1) return [...previous, chip]
+    const existing = previous[index]
+    if (existing.updatedAt > chip.updatedAt) return previous // 乱序田事件不回退状态
+    const next = [...previous]
+    next[index] = chip
+    return next
+  })
+}
+
 export function setupGlobalAgentListeners(): () => void {
   const api = window.electronAPI?.agent
   const store = window.__jotai_store__
@@ -356,6 +418,72 @@ export function setupGlobalAgentListeners(): () => void {
           timestamp: Date.now(),
         },
       ])
+    }
+
+    // steer_injected（P0-1 运行中转向，2026-09-08）：用户中途补充已在工具批间注入——
+    // 回执气泡（对齐 queue_dropped 红泡模式：事件驱动、会话消息流内）。事件也会落入
+    // streamState.events（default 归约安全，过程视图按类型过滤未知事件零渲染）。
+    // I3（P7-7）：on 时 payload 带 steer_id/status=merged_this_run——同步 upsert 状态条
+    //（与 steer_status 双保险，两事件同点发出）；off 时 payload 无新键零行为变化。
+    if (event.type === 'steer_injected') {
+      const steerId = typeof event.payload.steer_id === 'string' ? event.payload.steer_id : undefined
+      if (steerId) {
+        upsertSteerChip(store, event.session_id, {
+          steerId,
+          content: typeof event.payload.content === 'string' ? event.payload.content : '',
+          impact: 'low',
+          status: 'merged_this_run',
+          updatedAt: Date.now(),
+        })
+      }
+      store.set(agentMessagesFamily(event.session_id), (previous) => [
+        ...previous,
+        {
+          role: 'system',
+          content: [{ type: 'text', text: '已注入，将于下一轮生效' }],
+          timestamp: Date.now(),
+        },
+      ])
+    }
+
+    // steer_status（I3 转向生效确认链，P7-7，仅 on 时主进程发）：状态条 upsert——
+    // 已收到→待确认→已纳入本轮/留待下一轮/未采用，随主进程账本推进如实翻转。
+    if (event.type === 'steer_status') {
+      const p = event.payload as { steer_id?: string; content?: string; impact?: SteerImpact; status?: SteerStatus; at?: number }
+      if (p.steer_id && p.status) {
+        upsertSteerChip(store, event.session_id, {
+          steerId: p.steer_id,
+          content: p.content ?? '',
+          impact: p.impact ?? 'low',
+          status: p.status,
+          updatedAt: typeof p.at === 'number' ? p.at : Date.now(),
+        })
+      }
+    }
+
+    // I3：mvp_ready（本轮交付）时若存在留待下一轮的 steer——聊天流内追加待办提醒
+    //（交付后再确认：用户看到后可直接发消息开始下一轮修改，无需翻状态条）。
+    if (event.type === 'mvp_ready') {
+      const deferred = (store.get(steerStatusFamily(event.session_id)) ?? []).filter(
+        (chip) => chip.status === 'deferred_next_run',
+      )
+      if (deferred.length > 0) {
+        store.set(agentMessagesFamily(event.session_id), (previous) => [
+          ...previous,
+          {
+            role: 'system',
+            content: [{
+              type: 'text',
+              text: [
+                '本轮制作已交付。你之前留待下一轮的修改：',
+                ...deferred.map((chip) => `· ${chip.content}`),
+                '需要现在处理时，直接把这条修改再发一遍即可开始下一轮。',
+              ].join('\n'),
+            }],
+            timestamp: Date.now(),
+          },
+        ])
+      }
     }
 
     // 会话追踪：新出现的 session_id 追加到 agentSessionsAtom（已有索引的会话保持不变）
@@ -460,6 +588,9 @@ export function setupGlobalAgentListeners(): () => void {
           research: {
             available: payload.research?.available === true,
             summary: typeof payload.research?.summary === 'string' ? payload.research.summary : '',
+            ...(typeof (payload.research as { mode?: unknown } | undefined)?.mode === 'string'
+              ? { mode: (payload.research as { mode?: string }).mode }
+              : {}),
           },
         })
       }
@@ -472,6 +603,8 @@ export function setupGlobalAgentListeners(): () => void {
           out_of_scope?: unknown
           assumptions?: unknown
           constraints?: unknown
+          ai_capabilities?: unknown
+          key_tasks?: unknown
           expanded?: unknown
           ideas?: unknown
         }
@@ -495,10 +628,39 @@ export function setupGlobalAgentListeners(): () => void {
             assertions: Array.isArray(item.assertions)
               ? item.assertions.filter((entry): entry is string => typeof entry === 'string')
               : [],
+            ...(item.origin === 'user' || item.origin === 'guide' ? { origin: item.origin } : {}),
+            ...(item.implies_backend === true ? { implies_backend: true } : {}),
           })),
           outOfScope: stringList(prdPayload.out_of_scope),
           assumptions: stringList(prdPayload.assumptions),
           constraints: stringList(prdPayload.constraints),
+          aiCapabilities: Array.isArray(prdPayload.ai_capabilities)
+            ? (prdPayload.ai_capabilities as Array<Record<string, unknown>>)
+                .filter((item) => typeof item?.task === 'string' && item.task.trim().length > 0)
+                .map((item, index): PrdConfirmCapability => ({
+                  capabilityId: typeof item.capability_id === 'string' && item.capability_id ? item.capability_id : `CAP-${String(index + 1).padStart(2, '0')}`,
+                  task: String(item.task),
+                  keyProcessing: typeof item.keyProcessing === 'string' ? item.keyProcessing : '',
+                  ioDependency: typeof item.ioDependency === 'string' ? item.ioDependency : '',
+                  forbiddenSubstitutions: Array.isArray(item.forbiddenSubstitutions)
+                    ? item.forbiddenSubstitutions.filter((entry): entry is string => typeof entry === 'string')
+                    : [],
+                  evidence: Array.isArray(item.evidence) ? item.evidence.filter((entry): entry is string => typeof entry === 'string') : [],
+                  source: typeof item.source === 'string' ? item.source : '',
+                }))
+            : [],
+          keyTasks: Array.isArray(prdPayload.key_tasks)
+            ? (prdPayload.key_tasks as Array<Record<string, unknown>>)
+                .filter((item) => typeof item?.label === 'string' && item.label.trim().length > 0)
+                .map((item, index): PrdConfirmKeyTask => ({
+                  taskId: typeof item.task_id === 'string' && item.task_id ? item.task_id : `KT-${String(index + 1).padStart(2, '0')}`,
+                  label: String(item.label),
+                  featureIds: Array.isArray(item.feature_ids)
+                    ? item.feature_ids.filter((entry): entry is string => typeof entry === 'string')
+                    : [],
+                  mustDeliver: item.must_deliver !== false,
+                }))
+            : [],
           expanded: prdPayload.expanded === true,
           ideas: Array.isArray(prdPayload.ideas)
             ? (prdPayload.ideas as Array<{ label?: unknown; note?: unknown; source?: unknown }>).filter(
@@ -509,6 +671,10 @@ export function setupGlobalAgentListeners(): () => void {
                 source: typeof item.source === 'string' ? item.source : '',
               }))
             : [],
+          // R2：想法来源模式（agent=纯模型灵感建议，头标如实标注）
+          ...(typeof (prdPayload as { ideas_mode?: unknown }).ideas_mode === 'string'
+            ? { ideasMode: (prdPayload as { ideas_mode?: string }).ideas_mode }
+            : {}),
         })
       }
       // 加厚追问卡（enrichment_clarification 流，② 2026-09-03）：PRD 定稿前的信息
@@ -648,9 +814,16 @@ export function setupGlobalAgentListeners(): () => void {
       // 新一轮开始（上一轮已终结，且当前是生成类事件）→ 清空历史 events/content，
       // 折叠组只显示最近一轮工具调用，不累积多轮历史
       const isNewRun = !previous.running && !isTerminal && NEW_RUN_SIGNALS.has(event.type)
+      // 等待决策事件（user_decision_required）不是「运行中」信号：它是「已完成、等用户
+      // 决策」的静态信号。就绪引导卡（ready_next_steps）在 completed 之后到达，若照
+      // 旧逻辑 running=!isTerminal 会被重新拉回 true → busy → 决策卡选项被禁用、UI
+      // 永久停在「生成中」。此处保持上一轮的 running：前台流中弹卡仍为 true、后台
+      // 管线完成后的引导/让渡卡仍为 false。
+      const running =
+        isTerminal ? false : event.type === 'user_decision_required' ? previous.running : true
 
       return {
-        running: !isTerminal,
+        running,
         events: [...(isNewRun ? [] : previous.events), event],
         content: isTerminal ? '' : (isNewRun ? '' : previous.content) + text,
         last_error:

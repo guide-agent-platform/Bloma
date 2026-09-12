@@ -35,6 +35,65 @@ export function setBrowserGwtDisabledForTests(disabled: boolean): void {
   disabledForTests = disabled
 }
 
+/** C4（2026-09-11 拍板，审计⑩/L）：游戏侧探针开关——位移类断言优先走 window.__g
+ *  游戏状态通道（canvas 游戏 DOM 位移结构性不可过的根治位）+ game 生成时 prompt 注入
+ *  【游戏探针通道】契约。缺省 off=字节级现状（照走 DOM 位移判定）。 */
+export function gwtGameProbeEnabled(): boolean {
+  return process.env.BLOMA_GWT_GAME_PROBE === '1' || process.env.BLOMA_GWT_GAME_PROBE === 'true'
+}
+
+/** C4：位移类效果判定（move-*）——游戏侧探针只接管这类断言。 */
+export function isMoveEffect(effect: AssertionPlan['effect']): boolean {
+  return !!effect && ['move-right', 'move-left', 'move-up', 'move-down'].includes(effect.kind)
+}
+
+/** C4：从 __g.state() 快照提取玩家坐标（顶层 {x,y} 或 player 子对象均可；无则 undefined）。 */
+export function gamePlayerCoordOf(stateJson: string): { x: number; y: number } | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(stateJson)
+  } catch {
+    return undefined
+  }
+  if (typeof parsed !== 'object' || parsed === null) return undefined
+  const top = parsed as Record<string, unknown>
+  const cand = (typeof top.player === 'object' && top.player !== null ? top.player : top) as Record<string, unknown>
+  if (typeof cand.x === 'number' && Number.isFinite(cand.x) && typeof cand.y === 'number' && Number.isFinite(cand.y)) {
+    return { x: cand.x, y: cand.y }
+  }
+  return undefined
+}
+
+/** C4：游戏侧效果判定（纯函数）——玩家坐标方向校验；无坐标时如实指出契约缺口
+ *  （不快照变化兜底：游戏自动 tick 会假绿）。返回 undefined=通过。 */
+export function checkGameMoveEffect(
+  scenario: Pick<ScenarioPlan, 'plan' | 'assertion'>,
+  beforeStateJson: string,
+  afterStateJson: string,
+): string | undefined {
+  const { effect } = scenario.plan
+  const { assertion } = scenario
+  if (!effect || !assertion) return undefined
+  const expected = describeEffect(effect)
+  const fail = (actual: string): string =>
+    `断言未满足：${assertion}（预期${expected}，实际${actual}；游戏侧探针 window.__g.state 判定）`
+  const before = gamePlayerCoordOf(beforeStateJson)
+  const after = gamePlayerCoordOf(afterStateJson)
+  if (!before || !after) {
+    return fail(
+      '__g.state() 未暴露玩家坐标（需返回含 x/y 数字的顶层对象或 player 子对象）——请按【游戏探针通道】契约暴露，否则位移断言无法判定',
+    )
+  }
+  const dx = after.x - before.x
+  const dy = after.y - before.y
+  const minDelta = 2
+  if (effect.kind === 'move-right') return dx >= minDelta ? undefined : fail(`玩家坐标 x ${before.x}→${after.x}（未右移）`)
+  if (effect.kind === 'move-left') return dx <= -minDelta ? undefined : fail(`玩家坐标 x ${before.x}→${after.x}（未左移）`)
+  if (effect.kind === 'move-up') return dy <= -minDelta ? undefined : fail(`玩家坐标 y ${before.y}→${after.y}（未上移）`)
+  if (effect.kind === 'move-down') return dy >= minDelta ? undefined : fail(`玩家坐标 y ${before.y}→${after.y}（未下移）`)
+  return undefined
+}
+
 /** 单条断言的执行计划（含所属功能项，供场景命名与裁判对账）。 */
 interface ScenarioPlan {
   item: SketchRequirement
@@ -227,6 +286,13 @@ async function runScenario(page: Page, scenario: ScenarioPlan): Promise<string |
     return `页面缺少功能入口：${requirementStory(scenario.item)}`
   }
 
+  // C4（2026-09-11 拍板）：游戏侧探针——位移类断言且产物暴露了 window.__g 通道时，
+  // 读游戏状态判定（canvas 无 DOM 位移可探）；无通道 → 现状 DOM 判定（字节级）。
+  if (gwtGameProbeEnabled() && scenario.plan.trigger.kind === 'key' && isMoveEffect(scenario.plan.effect)) {
+    const game = await runGameProbeScenario(page, scenario)
+    if (game.handled) return game.reason
+  }
+
   const before = await capturePageState(page)
   const triggerError = await dispatchTrigger(page, scenario.plan.trigger)
   if (triggerError) {
@@ -316,6 +382,96 @@ async function capturePageState(page: Page): Promise<PageState> {
     const inputValues = fields.map((el) => el.value).join('|').slice(0, 2000)
     return { elements, visibleCount, text: document.body ? document.body.innerText : '', inputValues }
   })
+}
+
+// ---- C4（2026-09-11 拍板）：游戏侧探针通道（window.__g）----
+// 通道契约（game 生成时 prompt 注入【游戏探针通道】段）：
+//   __g.mode  → 当前游戏阶段字符串（'menu'|'playing'|'paused'|'gameover' 等，小写）；
+//   __g.state() → 玩家状态快照（含 x/y 数字坐标，顶层或 player 子对象）。
+// 探针消费：位移类断言读状态判定；前置进入 playing 态（menu 时点开始类按钮）。
+
+/** 读 __g.mode（通道缺失/形态异常 → null，不抛错）。 */
+async function readGameMode(page: Page): Promise<string | null> {
+  try {
+    return await page.evaluate(() => {
+      const g = (window as unknown as { __g?: { mode?: unknown } }).__g
+      if (!g) return null
+      const mode = typeof g.mode === 'function' ? (g.mode as () => unknown)() : g.mode
+      return typeof mode === 'string' ? mode.toLowerCase() : null
+    })
+  } catch {
+    return null
+  }
+}
+
+/** 读 __g.state() 的 JSON 快照（通道缺失/state 非函数/抛错 → null）。 */
+async function readGameState(page: Page): Promise<string | null> {
+  try {
+    return await page.evaluate(() => {
+      const g = (window as unknown as { __g?: { state?: unknown } }).__g
+      if (!g || typeof g.state !== 'function') return null
+      try {
+        return JSON.stringify((g.state as () => unknown)())
+      } catch {
+        return null
+      }
+    })
+  } catch {
+    return null
+  }
+}
+
+/** 进入 playing 态：点可见的「开始/继续/重新」类按钮（探针视角与 dispatchTrigger
+ *  click 同款可见性判据；点击是尽力而为，复查 mode 由调用方把关）。 */
+async function clickStartControl(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const isVisible = (el: Element): boolean => {
+      const rect = el.getBoundingClientRect()
+      const style = window.getComputedStyle(el)
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) !== 0
+    }
+    const controls = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], input[type="button"]'))
+    const hit = controls.find((el) =>
+      isVisible(el) && /开始|start|继续|resume|重新/i.test((el.textContent ?? el.getAttribute('value') ?? '').trim()),
+    )
+    hit?.click()
+  }).catch(() => undefined)
+}
+
+/** 游戏侧探针场景：handled=true 表示已接管（reason=失败原因或 undefined=通过）；
+ *  handled=false=产物未暴露 __g 通道，交回现状 DOM 判定。 */
+async function runGameProbeScenario(
+  page: Page,
+  scenario: ScenarioPlan,
+): Promise<{ handled: boolean; reason?: string }> {
+  const modeInitial = await readGameMode(page)
+  const stateInitial = await readGameState(page)
+  if (modeInitial === null && stateInitial === null) return { handled: false }
+
+  // 前置：进入 playing 态（审计案探针停在待开始屏的根治位）
+  if (modeInitial !== null && modeInitial !== 'playing') {
+    await clickStartControl(page)
+    await page.waitForTimeout(600)
+    const modeAfter = await readGameMode(page)
+    if (modeAfter !== null && modeAfter !== 'playing') {
+      return {
+        handled: true,
+        reason: `断言未执行：游戏处于 ${modeAfter} 态（探针已尝试点击开始/继续类按钮未进入 playing）——位移断言需要游戏进行中；若开始入口不是常规按钮，请在旁白说明入口`,
+      }
+    }
+  }
+
+  const beforeState = await readGameState(page)
+  await dispatchTrigger(page, scenario.plan.trigger)
+  await page.waitForTimeout(450)
+  const afterState = await readGameState(page)
+  if (beforeState === null || afterState === null) {
+    return {
+      handled: true,
+      reason: `断言未满足：${scenario.assertion}（__g.state() 不可读——请按【游戏探针通道】契约暴露玩家状态函数，否则位移断言无法判定）`,
+    }
+  }
+  return { handled: true, reason: checkGameMoveEffect(scenario, beforeState, afterState) }
 }
 
 /** 派发触发器：按键派发到 document（keydown+keyup）；点击/双击按文本或语义 class 找控件；

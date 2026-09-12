@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { rmSyncWithRetry } from '../fs-retry'
 import { tmpdir } from 'node:os'
 import { extname, isAbsolute, join, relative, resolve } from 'node:path'
@@ -12,7 +12,11 @@ import { runGwtScenarios } from '../gwt-service'
 import { planScenarios, scenarioName } from '../gwt-runner'
 import { decideWrite, estimateTokenCount } from '../usage-guard'
 import { runSecurityScan } from '../security-scan'
-import { withAbort, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../agent-loop'
+import { checkApiContract } from './api-contract'
+import { runArtifactUiGate } from './artifact-ui-gate'
+import { getCachedStaticEvidence, setCachedStaticEvidence } from './evidence-cache'
+import { readPrdBackplane } from '../document-engine'
+import { withAbort, loopApiToolEnabled, toolEvidenceEnabled, writeGuardEnabled, preflightEnabled, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../agent-loop'
 import {
   NET_FETCH_DEFAULT_CHARS,
   NET_FETCH_MAX_BYTES,
@@ -264,6 +268,43 @@ function collectProjectFiles(root: string, subDir = ''): string[] {
 }
 
 // =========================================================================
+// D 系列辅助（咨询 D，2026-09-09）：文件版本戳 / 验证状态行 / 版本登记
+// =========================================================================
+
+/** D4a：文件版本戳 = mtimeMs+size 十六进制（同一 loop 内足够区分「读后已被改」）。 */
+export function fileRevisionOf(absPath: string): string {
+  try {
+    const stat = statSync(absPath)
+    return `${stat.mtimeMs.toString(16)}-${stat.size.toString(16)}`
+  } catch {
+    return 'unknown'
+  }
+}
+
+/** D4a：state.file_revisions 惰性初始化（缺省 undefined = 功能未启用前的旧 state 兼容）。 */
+function _fileRevisions(ctx: ToolContext): Map<string, string> {
+  if (!ctx.state.file_revisions) ctx.state.file_revisions = new Map()
+  return ctx.state.file_revisions
+}
+
+/**
+ * D2：验证状态行（宿主维护，不靠 LLM 自报）——「已验证什么 / 尚缺什么」。
+ * 仅 BLOMA_TOOL_EVIDENCE=on 时被消费；返回空串表示未启用（字节级现状）。
+ */
+export function validationStateLine(state: { gwt_all_passed: boolean; security_all_passed: boolean; api_all_passed: boolean; preflight_passed?: boolean }): string {
+  if (!toolEvidenceEnabled()) return ''
+  const done: string[] = []
+  const missing: string[] = []
+  ;(state.gwt_all_passed ? done : missing).push('行为断言 GWT')
+  ;(state.api_all_passed ? done : missing).push('API 契约')
+  ;(state.security_all_passed ? done : missing).push('安全扫描')
+  // W3-D2：预检开启时收口面增加 run_preflight（未跑/未过都在「尚缺」）
+  if (preflightEnabled()) (state.preflight_passed ? done : missing).push('收口预检 run_preflight')
+  if (missing.length === 0) return '\n验证状态：行为断言/ API 契约/安全扫描均已通过——全部验证面通过，可输出完成总结。'
+  return `\n验证状态：已通过=${done.length ? done.join('、') : '（无）'}；尚缺=${missing.join('、')}${loopApiToolEnabled() && !state.api_all_passed ? '（数据留存/接口类项目收口前必须 run_api_contract_tests 通过）' : ''}${preflightEnabled() && !state.preflight_passed ? '（收口前必须 run_preflight 全部通过）' : ''}。`
+}
+
+// =========================================================================
 // 工具集工厂
 // =========================================================================
 
@@ -275,6 +316,30 @@ export interface BuildAgentToolsOptions {
   role?: 'parent' | DelegationRole
   /** 新修复回合开始时回调（PR3 埋点：self_repair_triggered 的 loop 路径映射） */
   onRepairRound?: (round: number) => void
+  /** W4-F2（咨询 D4）：修复轮修改授权边界——传入即启用：write_file/edit_file 越界返回
+   *  WRITE_SCOPE_DENIED + next_actions（不诱导绕权限），并注册 repair_control 窄入口。 */
+  writeScope?: WriteScopeHolder
+}
+
+/** W4-F2：授权边界持有者（宿主创建与裁决，工具层只读/申请，模型不能直改）。 */
+export interface WriteScopeHolder {
+  /** 当前允许修改的相对路径（与工具 path 入参同口径，正斜杠） */
+  authorized: Set<string>
+  /** 显式受保护路径（拒绝任何扩大申请；如 prd.json/宿主文件） */
+  protectedPaths: Set<string>
+  /** 扩大申请记录（含裁决结果；审计与 bench 可见） */
+  expansions: Array<{ issue_id?: string; paths: string[]; reason: string; at: string; decision: 'approved' | 'denied'; note?: string }>
+  /** 受阻报告（F5 升级链路的结构化输入） */
+  blockers: Array<{ reason: string; evidence?: string; at: string }>
+}
+
+export function createWriteScope(authorizedPaths: string[], protectedPaths: string[] = []): WriteScopeHolder {
+  return {
+    authorized: new Set(authorizedPaths.map((p) => p.replace(/\\/g, '/'))),
+    protectedPaths: new Set(protectedPaths.map((p) => p.replace(/\\/g, '/'))),
+    expansions: [],
+    blockers: [],
+  }
 }
 
 export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[] {
@@ -286,6 +351,28 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
    * 测试失败后的修复预算门（edit-after-test-failure ≤ 3，PR3 §4.4 口径，同构旧
    * test_repair_count）：只拦真实写入尝试（路径/参数已校验过），无效调用不烧预算。
    */
+  /**
+   * W4-F2：修改授权边界门——仅修复轮传入 writeScope 时生效（缺省无 holder=现状）。
+   * 越界返回 blocked + next_actions（恢复路径引导，不诱导改用其他文件绕权限）。
+   */
+  const guardWriteScope = (rel: string): ToolOutcome | undefined => {
+    const scope = options.writeScope
+    if (!scope || scope.authorized.has(rel)) return undefined
+    const listing = [...scope.authorized].slice(0, 8).join('、') || '（空）'
+    return {
+      output:
+        `WRITE_SCOPE_DENIED：${rel} 不在本轮修改授权内（当前授权：${listing}）。` +
+        '若根因确在授权外文件，调用 repair_control（action=request_scope_expansion，带 issue_id/requested_paths/reason/change_intent）申请扩大授权；' +
+        '批准前不要在卡内文件上做替代实现硬绕根因。',
+      isError: true,
+      detail: {
+        code: 'WRITE_SCOPE_DENIED',
+        path: rel,
+        next_actions: [{ action: 'request_scope_expansion', required: ['issue_id', 'requested_paths', 'reason', 'change_intent'] }],
+      },
+    }
+  }
+
   const guardRepairBudget = (ctx: ToolContext): ToolOutcome | undefined => {
     if (!ctx.state.test_failed) return undefined
     ctx.state.edits_after_test_failure += 1
@@ -324,6 +411,8 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     const abs = join(root, rel)
     mkdirSync(join(abs, '..'), { recursive: true })
     writeFileSync(abs, finalContent, 'utf8')
+    // D4a：写入成功后刷新版本快照（后续同文件 expected_revision 校验基準）
+    _fileRevisions(ctx).set(rel, fileRevisionOf(abs))
     // project-map（Graft 模式，r69）：工程产物写盘后 fire-and-forget 刷新语义地图
     //（write_file / edit_file whole / edit_file diff 三路共用本写入点）；失败静默不影响返回
     try {
@@ -340,6 +429,8 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
 
   const read_file: AgentLoopTool = {
     name: 'read_file',
+    // P1-2（2026-09-08）：只读无共享态，声明 parallelSafe 可同轮并发（上限 4，见 agent-loop executeTurnToolCalls）
+    parallelSafe: true,
     description:
       '读取项目内文件的一个窗口（默认 100 行，带行号）。参数：path（项目内相对路径）、offset（起始行，1 起，可选）、limit（行数，可选）。越界时返回最近可用窗口。',
     input_schema: {
@@ -351,7 +442,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       },
       required: ['path'],
     },
-    execute: async (toolInput) => {
+    execute: async (toolInput, ctx) => {
       const project = findProject(projectId)
       const resolved = resolveInsideProject(project.root_path, toolInput.path)
       if (!resolved.ok) return { output: resolved.error, isError: true }
@@ -365,14 +456,19 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       if (offset > total) offset = Math.max(1, total - limit + 1) // 越界返回最近可用窗口
       const slice = lines.slice(offset - 1, offset - 1 + limit)
       const body = slice.map((line, index) => `${offset + index} │ ${line}`).join('\n')
+      // D4a（咨询 D）：记录/返回文件版本戳（mtime+size 十六进制）——edit_file 的
+      // expected_revision 校验与 write_file 守卫共用；纯追加信息，无行为变化。
+      const revision = fileRevisionOf(resolved.abs)
+      _fileRevisions(ctx).set(resolved.rel, revision)
       return {
-        output: `（${resolved.rel} 共 ${total} 行，显示第 ${offset}~${offset + slice.length - 1} 行）\n${body}`,
+        output: `（${resolved.rel} 共 ${total} 行，显示第 ${offset}~${offset + slice.length - 1} 行｜文件版本 ${revision}）\n${body}`,
       }
     },
   }
 
   const list_files: AgentLoopTool = {
     name: 'list_files',
+    parallelSafe: true,
     description: '列出项目内文件（相对路径，深度 ≤4，最多 200 条）。参数：path（要列出的子目录，可选，缺省整个项目）。',
     input_schema: {
       type: 'object',
@@ -397,6 +493,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
 
   const grep: AgentLoopTool = {
     name: 'grep',
+    parallelSafe: true,
     description:
       '在项目文件里搜索正则模式，只返回命中文件与行号（不返回行内容，最多 50 条命中）。参数：pattern（正则）、glob（文件名过滤，如 "*.js"，可选）。',
     input_schema: {
@@ -447,6 +544,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
 
   const web_fetch: AgentLoopTool = {
     name: 'web_fetch',
+    parallelSafe: true,
     description:
       '抓取公网网页/文档并转为纯文本（只查资料，不能修改任何东西）。参数：url（http/https 公网地址）、max_chars（返回文本上限，默认 12000，最大 50000）。内网/本机地址会被拒绝；HTML 只保留可见文本。',
     input_schema: {
@@ -537,6 +635,20 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       const project = findProject(projectId)
       const resolved = resolveInsideProject(project.root_path, toolInput.path)
       if (!resolved.ok) return { output: resolved.error, isError: true }
+      // W4-F2：授权边界门（仅修复轮传入 writeScope 时生效；主 loop 无 holder 零变化）
+      const writeScopeBlocked = guardWriteScope(resolved.rel)
+      if (writeScopeBlocked) return writeScopeBlocked
+      // D4a：write 守卫——覆盖「本轮未读过的既有文件」拦截（R-FILE-01 工具化：
+      // 盲覆盖正式 BLOMA_WRITE_GUARD=on 才拦；off 零变化。新建文件不受影响）。
+      if (existsSync(resolved.abs) && !_fileRevisions(ctx).has(resolved.rel)) {
+        if (writeGuardEnabled()) {
+          return {
+            output: `目标文件已存在且本轮未读取过：${resolved.rel}。先 read_file 获取当前内容（R-FILE-01），再决定 edit_file 精确修改或基于读取结果重写；禁止盲覆盖。`,
+            isError: true,
+            detail: { code: 'WRITE_UNREAD_TARGET', path: resolved.rel },
+          }
+        }
+      }
       // 修复预算门在 validateAndWrite 内（校验通过后才烧预算）
       return validateAndWrite(project.root_path, resolved.rel, toolInput.content, ctx)
     },
@@ -555,6 +667,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         old_string: { type: 'string', description: '（diff 模式）要替换的唯一原文片段' },
         new_string: { type: 'string', description: '（diff 模式）替换后的内容' },
         content: { type: 'string', description: '（whole 模式）修改后的完整文件内容' },
+        expected_revision: { type: 'string', description: '（可选，D4a）read_file 返回的文件版本；提供时若文件已被修改过会返回 STALE_READ 拒绝执行，需重新 read_file' },
       },
       required: editFormat === 'whole' ? ['path'] : ['path', 'old_string', 'new_string'],
     },
@@ -562,6 +675,25 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       const project = findProject(projectId)
       const resolved = resolveInsideProject(project.root_path, toolInput.path)
       if (!resolved.ok) return { output: resolved.error, isError: true }
+      // W4-F2：授权边界门（仅修复轮传入 writeScope 时生效；主 loop 无 holder 零变化）
+      const writeScopeBlocked = guardWriteScope(resolved.rel)
+      if (writeScopeBlocked) return writeScopeBlocked
+
+      // D4a：版本前置校验（可选参数，提供即校验——把 R-FILE-01 从「prompt 劝说」
+      // 升级为「工具强制」；不传零变化，向后兼容）。文件不存在时跳过（后续分支自有报错）。
+      if (
+        typeof toolInput.expected_revision === 'string' &&
+        existsSync(resolved.abs)
+      ) {
+        const currentRev = fileRevisionOf(resolved.abs)
+        if (currentRev !== toolInput.expected_revision) {
+          return {
+            output: `STALE_READ：${resolved.rel} 在你读取后已被修改（读时版本 ${toolInput.expected_revision}，当前 ${currentRev}）。请重新 read_file 后再编辑，禁止凭旧内容修改。`,
+            isError: true,
+            detail: { code: 'STALE_READ', path: resolved.rel },
+          }
+        }
+      }
 
       // whole 模式：无 old_string，走整文件重写（弱渠道能力位）。
       // m-11：与 write_file 同口径的 16k 预拦截——整文件重写语义与 write_file 同构，
@@ -611,7 +743,9 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       const sandbox = await runSandbox({ request_id: ctx.requestId, project_id: projectId })
       if (sandbox.status === 'running' && sandbox.preview_url) {
         ctx.state.preview_url = sandbox.preview_url
-        return { output: `预览已启动：${sandbox.preview_url}`, detail: { preview_url: sandbox.preview_url } }
+        // D2：预览就绪只证明服务可访问，未验证行为——附一行证据边界防「预览绿=可交付」误读
+        const evidence = toolEvidenceEnabled() ? '\n（预览就绪仅证明服务可访问；行为断言/ API 契约/安全均未验证。）' : ''
+        return { output: `预览已启动：${sandbox.preview_url}${evidence}`, detail: { preview_url: sandbox.preview_url } }
       }
       const logs = getSandboxLogs(projectId).slice(-SANDBOX_LOG_TAIL_LIMIT)
       return {
@@ -633,15 +767,36 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         return { output: '还没有可用的预览地址。请先调用 run_preview 启动预览，再运行测试。', isError: true }
       }
       const result = await runGwtScenarios({ project_id: projectId, session_id: ctx.sessionId, preview_url: ctx.state.preview_url })
+      // W2-F4：执行计数无条件更新（终验 source 分类的确定性判据，与展示开关解耦）
+      ctx.state.gwt_runs = (ctx.state.gwt_runs ?? 0) + 1
       if (result.failed_count > 0) {
         // 修复预算口径：每次失败运行 = 一个新修复回合（对应旧 test_repair_count +1）
         ctx.state.test_failed = true
         ctx.state.gwt_all_passed = false
         ctx.state.repair_round += 1
         options.onRepairRound?.(ctx.state.repair_round)
-        const failures = result.failure_summary.map((failure) => `- ${failure.scenario}：${failure.reason}`).join('\n')
+        // D3 轻量：对比上轮失败集标 [新增]/[持续]（防重复修同一失败），跑后更新快照。
+        // W2-F4：快照更新改无条件（终验 source 分类需要；展示仍由开关控制）。
+        const prev = new Set(ctx.state.last_gwt_failures ?? [])
+        const failures = result.failure_summary
+          .map((failure) => {
+            const tag = toolEvidenceEnabled() ? (prev.has(failure.scenario) ? '[持续] ' : '[新增] ') : ''
+            return `- ${tag}${failure.scenario}：${failure.reason}`
+          })
+          .join('\n')
+        // W2-F4 修复比较（D4 稿：修 A 挂 B 可见，升级计数不靠模型自己数）：
+        // resolved=上轮失败本轮已过 / persistent=两轮都挂 / new=本轮新挂。开关 on 才展示。
+        const current = result.failure_summary.map((f) => f.scenario)
+        const persistent = current.filter((s) => prev.has(s))
+        const fresh = current.filter((s) => !prev.has(s))
+        const resolved = [...prev].filter((s) => !current.includes(s))
+        const comparison = toolEvidenceEnabled()
+          ? `\n较上次：修复 ${resolved.length}${resolved.length > 0 ? `（${resolved.join('、')}）` : ''}｜持续 ${persistent.length}｜新增 ${fresh.length}${fresh.length > 0 ? '（修一处坏一处，先查共享影响）' : ''}`
+          : ''
+        ctx.state.last_gwt_failures = current
+        const evidence = validationStateLine(ctx.state)
         return {
-          output: `共 ${result.total_count} 个场景：通过 ${result.passed_count}、失败 ${result.failed_count}。\n失败场景：\n${failures}`,
+          output: `共 ${result.total_count} 个场景：通过 ${result.passed_count}、失败 ${result.failed_count}。\n失败场景：\n${failures}${comparison}${evidence}`,
           detail: { failed_count: result.failed_count, total_count: result.total_count },
         }
       }
@@ -652,12 +807,19 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       ctx.state.gwt_all_passed = true
       ctx.state.test_failed = false
       ctx.state.edits_after_test_failure = 0
+      // W2-F4：快照复位无条件（口径同上轮更新）
+      ctx.state.last_gwt_failures = []
       const scenarioNames = planScenarios(readLastSketchRequirements(projectId)).map((scenario) =>
         scenarioName(scenario.item.id, scenario.assertion),
       )
       const nameList = scenarioNames.length > 0 ? `\n通过场景：${scenarioNames.join('、')}` : ''
+      // D2：删旧「可以继续…或输出完成总结」收口暗示，换宿主维护的验证状态行
+      // （单次 GWT 全绿不等于可交付——API 契约/安全可能未验）。off 分支保留原句（字节级现状）。
+      const tail = toolEvidenceEnabled()
+        ? validationStateLine(ctx.state)
+        : '\n测试通过，可以继续 run_security_scan 或输出完成总结。'
       return {
-        output: `全部通过（${result.passed_count}/${result.total_count} 个场景）。${nameList}\n测试通过，可以继续 run_security_scan 或输出完成总结。`,
+        output: `全部通过（${result.passed_count}/${result.total_count} 个场景）。${nameList}${tail}`,
         detail: { passed_count: result.passed_count, total_count: result.total_count },
       }
     },
@@ -674,8 +836,10 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       if (result.passed) {
         ctx.state.security_all_passed = true
         const minor = result.issues.length - blocking.length
+        // D2：通过返回附验证状态行（尚缺项由宿主维护）
+        const evidence = validationStateLine(ctx.state)
         return {
-          output: `安全扫描通过：无高危/严重问题（扫描 ${result.scanned_files} 个文件${minor > 0 ? `，另有 ${minor} 个低/中危提示` : ''}）。`,
+          output: `安全扫描通过：无高危/严重问题（扫描 ${result.scanned_files} 个文件${minor > 0 ? `，另有 ${minor} 个低/中危提示` : ''}）。${evidence}`,
           detail: { passed: true, scanned_files: result.scanned_files },
         }
       }
@@ -685,6 +849,208 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         output: `安全扫描未通过（${blocking.length} 个高危/严重问题，扫描 ${result.scanned_files} 个文件）：\n${listing}\n请修复后重新扫描。`,
         detail: { passed: false, blocking: blocking.length },
       }
+    },
+  }
+
+  // D1（咨询 D，2026-09-09）：API 契约验证进 loop——复用终验同款 checkApiContract，
+  // 不新建判断标准；外部终验仍独立执行（共享实现 ≠ 共享判定权）。仅 BLOMA_API_TOOL=on 注册。
+  const run_api_contract_tests: AgentLoopTool = {
+    name: 'run_api_contract_tests',
+    parallelSafe: true,
+    description:
+      '验证 PRD 接口契约（interface_spec）声明的后端 API 端点是否存活并应答（逐一探测无参 GET 端点；404/5xx/超时=契约失活）。用途：收口前证明前后端契约真实生效；不验证业务逻辑正确性（那属于行为断言）。前置：需先 run_preview。无接口契约的项目返回豁免说明。',
+    input_schema: { type: 'object', properties: {} },
+    execute: async (_toolInput, ctx) => {
+      if (!ctx.state.preview_url) {
+        return { output: '还没有可用的预览地址。请先调用 run_preview 启动预览，再验证 API 契约。', isError: true }
+      }
+      const endpoints = readPrdBackplane(projectId)?.interface_spec ?? []
+      // W2-F4：执行计数（有契约才计；豁免分支不算「验过」）
+      if (endpoints.length > 0) ctx.state.api_contract_runs = (ctx.state.api_contract_runs ?? 0) + 1
+      if (endpoints.length === 0) {
+        ctx.state.api_all_passed = true
+        return {
+          output: '本项目无接口契约（interface_spec 为空，纯静态产物），API 契约验证豁免通过。',
+          detail: { exempt: true, endpoints: 0 },
+        }
+      }
+      const failures = await checkApiContract(ctx.state.preview_url, endpoints)
+      ctx.state.api_all_passed = failures.length === 0
+      if (failures.length === 0) {
+        const listing = endpoints.map((ep) => `- ${ep.method ?? 'GET'} ${ep.endpoint}`).join('\n')
+        const evidence = validationStateLine(ctx.state)
+        return {
+          output: `API 契约验证通过：${endpoints.length} 个声明端点全部应答正常。\n${listing}${evidence}`,
+          detail: { passed: true, endpoints: endpoints.length },
+        }
+      }
+      const listing = failures.map((f) => `- API 契约端点：${f.scenario} — ${f.reason}`).join('\n')
+      const evidence = validationStateLine(ctx.state)
+      return {
+        output: `API 契约验证未通过（${failures.length}/${endpoints.length} 个端点失败）：\n${listing}\n请对照 server/routes/ 的路由实现修复后重验。${evidence}`,
+        detail: { passed: false, failed: failures.length, endpoints: endpoints.length },
+      }
+    },
+  }
+
+  // W3-D1（咨询 D2《验证分层与收口预检》）：收口预检宿主工具——一次调用按依赖顺序跑全部
+  // 验证面（GWT 全量 → API 契约（有声明才验）→ 产物 UI 审计 → 安全扫描）。复用终验
+  // 同款实现（规则同源、执行独立：终验仍对冻结候选独立取证）；构建门禁不在 v0 预检面
+  // （需 skeleton 上下文，终验门禁保留）。收口判定消费 preflight_passed（agent-loop
+  // wrapUp）；失败留在 loop 内修（D5）——不退出重建修复卡。仅 BLOMA_PREFLIGHT=on 注册。
+  const run_preflight: AgentLoopTool = {
+    name: 'run_preflight',
+    description:
+      '收口预检：一次调用按依赖顺序跑全部验证面（GWT 行为断言全量 → API 契约（声明了才验）→ 产物 UI 审计 → 安全扫描），给出收口判定与逐阶段失败清单。收口（输出完成总结）前必须通过本预检；失败就留在当前循环内修复后重跑，不要带病宣布完成。',
+    input_schema: { type: 'object', properties: {} },
+    execute: async (_toolInput, ctx) => {
+      if (!ctx.state.preview_url) {
+        return { output: '还没有可用的预览地址。请先调用 run_preview 启动预览，再运行收口预检。', isError: true }
+      }
+      const lines: string[] = []
+      let allPassed = true
+
+      // 阶段 1：GWT 全量（与 run_gwt_tests 同源；同步维护修复预算/失败快照口径）
+      const gwt = await runGwtScenarios({ project_id: projectId, session_id: ctx.sessionId, preview_url: ctx.state.preview_url })
+      ctx.state.gwt_runs = (ctx.state.gwt_runs ?? 0) + 1
+      if (gwt.failed_count > 0) {
+        ctx.state.test_failed = true
+        ctx.state.gwt_all_passed = false
+        ctx.state.repair_round += 1
+        options.onRepairRound?.(ctx.state.repair_round)
+        ctx.state.last_gwt_failures = gwt.failure_summary.map((f) => f.scenario)
+        allPassed = false
+        lines.push(`① GWT 行为断言：失败（${gwt.failed_count}/${gwt.total_count}）`)
+        for (const failure of gwt.failure_summary.slice(0, 10)) lines.push(`  - ${failure.scenario}：${failure.reason}`)
+      } else {
+        ctx.state.gwt_all_passed = true
+        ctx.state.test_failed = false
+        ctx.state.edits_after_test_failure = 0
+        ctx.state.last_gwt_failures = []
+        lines.push(`① GWT 行为断言：通过（${gwt.passed_count}/${gwt.total_count}）`)
+      }
+
+      // 阶段 2：API 契约（无声明豁免；同 run_api_contract_tests 口径）
+      const endpoints = readPrdBackplane(projectId)?.interface_spec ?? []
+      if (endpoints.length === 0) {
+        ctx.state.api_all_passed = true
+        lines.push('② API 契约：豁免（interface_spec 为空）')
+      } else {
+        ctx.state.api_contract_runs = (ctx.state.api_contract_runs ?? 0) + 1
+        const apiFailures = await checkApiContract(ctx.state.preview_url, endpoints)
+        ctx.state.api_all_passed = apiFailures.length === 0
+        if (apiFailures.length > 0) {
+          allPassed = false
+          lines.push(`② API 契约：失败（${apiFailures.length}/${endpoints.length}）`)
+          for (const failure of apiFailures) lines.push(`  - ${failure.scenario}：${failure.reason}`)
+        } else {
+          lines.push(`② API 契约：通过（${endpoints.length} 个端点）`)
+        }
+      }
+
+      // 阶段 3：产物 UI 审计（L0 探针；探针不可用不判败只留痕——终验 L1 视觉审计仍独立）
+      try {
+        const gate = await runArtifactUiGate({ previewUrl: ctx.state.preview_url })
+        if (gate.failures.length > 0) {
+          allPassed = false
+          lines.push(`③ 产物 UI 审计：失败（${gate.failures.length}）`)
+          for (const failure of gate.failures.slice(0, 10)) lines.push(`  - ${failure.scenario}：${failure.reason}`)
+        } else if (gate.status === 'unavailable') {
+          lines.push(`③ 产物 UI 审计：未执行（${gate.note ?? '探针失败'}）——终验仍会独立探测`)
+        } else {
+          lines.push('③ 产物 UI 审计：通过')
+        }
+      } catch {
+        lines.push('③ 产物 UI 审计：未执行（探针异常）——终验仍会独立探测')
+      }
+
+      // 阶段 4：安全扫描（静态；同 run_security_scan；W6-D6 按产物指纹缓存复用，终验共享）
+      const project = findProject(projectId)
+      const cachedSecurity = getCachedStaticEvidence<ReturnType<typeof runSecurityScan>>(projectId, project.root_path, 'security-scan')
+      const security = cachedSecurity ?? runSecurityScan({ project_id: projectId, root_path: project.root_path })
+      if (!cachedSecurity) setCachedStaticEvidence(projectId, project.root_path, 'security-scan', security)
+      ctx.state.security_all_passed = security.passed
+      if (!security.passed) {
+        allPassed = false
+        lines.push(`④ 安全扫描：失败（${security.issues.length} 处命中）`)
+        for (const issue of security.issues.slice(0, 10)) lines.push(`  - ${issue.severity} ${issue.file}:${issue.line}——${issue.user_visible_summary}`)
+      } else {
+        lines.push('④ 安全扫描：通过')
+      }
+
+      ctx.state.preflight_passed = allPassed
+      const verdict = allPassed
+        ? '收口预检通过：全部验证面通过，可以输出完成总结（外部终验仍会独立复核）。'
+        : '收口预检未通过：留在当前循环内修复上述失败，修复后重新 run_preflight；不要带病宣布完成。'
+      return {
+        output: `【收口预检】\n${lines.join('\n')}\n${verdict}`,
+        detail: { preflight_passed: allPassed, gwt_failed: gwt.failed_count, security_passed: security.passed },
+      }
+    },
+  }
+
+  // W4-F3（咨询 D4）：修复控制窄入口——判别联合四字段，宿主裁决（确定性规则，零 LLM）。
+  // 「已申请≠已授权」：request_scope_expansion 返回 approved 才算扩权；受保护路径与
+  // 全项目申请一律拒。仅修复轮传入 writeScope 时注册（主 loop 无此工具，面最小化）。
+  const repair_control: AgentLoopTool = {
+    name: 'repair_control',
+    description:
+      '修复控制窄入口（仅修复轮）：①action=request_scope_expansion——根因在授权外文件时申请扩大修改授权（必填 issue_id/requested_paths/reason/change_intent；申请绑定具体失败与文件，不能申请全项目可写）；②action=report_blocker——证据缺失/环境异常/授权不足时如实报告受阻。已申请≠已授权，以返回的裁决为准。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['request_scope_expansion', 'report_blocker'] },
+        issue_id: { type: 'string', description: '关联失败场景/断言 id（request_scope_expansion 必填）' },
+        requested_paths: { type: 'array', items: { type: 'string' }, description: '申请扩大的项目内相对路径（request_scope_expansion 必填）' },
+        reason: { type: 'string', description: '根因证据：为什么根因在这些文件（request_scope_expansion 必填）' },
+        change_intent: { type: 'string', description: '改动意图：打算怎么改（request_scope_expansion 必填）' },
+        blocker_reason: { type: 'string', description: 'report_blocker：受阻原因' },
+        evidence: { type: 'string', description: 'report_blocker：证据引用（日志/断言原文/请求记录）' },
+      },
+      required: ['action'],
+    },
+    execute: async (toolInput) => {
+      const scope = options.writeScope!
+      const now = new Date().toISOString()
+      if (toolInput.action === 'request_scope_expansion') {
+        const issueId = typeof toolInput.issue_id === 'string' ? toolInput.issue_id : ''
+        const reason = typeof toolInput.reason === 'string' ? toolInput.reason : ''
+        const intent = typeof toolInput.change_intent === 'string' ? toolInput.change_intent : ''
+        const paths = Array.isArray(toolInput.requested_paths) ? toolInput.requested_paths.filter((p): p is string => typeof p === 'string') : []
+        if (!issueId || !reason || !intent || paths.length === 0) {
+          return { output: '申请缺少必填字段（issue_id/requested_paths/reason/change_intent），补齐后重新申请。', isError: true }
+        }
+        // 裁决规则（D4 §三）：普通实现文件→自动批准；受保护/全项目/超量→拒
+        if (paths.length > 8 || paths.some((p) => p.includes('*'))) {
+          scope.expansions.push({ issue_id: issueId, paths, reason, at: now, decision: 'denied', note: 'wildcard-or-over-quota' })
+          return { output: '拒绝：不能申请全项目可写（含通配符或单次超过 8 个路径）。申请必须绑定具体失败与具体文件。', isError: true }
+        }
+        const normalized = paths.map((p) => p.replace(/\\/g, '/'))
+        const protectedHit = normalized.filter((p) => scope.protectedPaths.has(p))
+        if (protectedHit.length > 0) {
+          scope.expansions.push({ issue_id: issueId, paths: normalized, reason, at: now, decision: 'denied', note: 'protected-path' })
+          return { output: `拒绝：${protectedHit.join('、')} 是受保护文件（权威契约/宿主产物），不因修复需求开放修改。若失败源于它们，请 report_blocker 说明。`, isError: true }
+        }
+        for (const p of normalized) scope.authorized.add(p)
+        scope.expansions.push({ issue_id: issueId, paths: normalized, reason, at: now, decision: 'approved' })
+        return {
+          output:
+            `已批准：${normalized.join('、')} 加入本轮修改授权（issue=${issueId}）。` +
+            '继续前先 read_file 核对现状与文件版本；修复完成后必须完整重验（run_gwt_tests 或 run_preflight），不得凭旧证据交差。',
+        }
+      }
+      if (toolInput.action === 'report_blocker') {
+        const blockerReason = typeof toolInput.blocker_reason === 'string' ? toolInput.blocker_reason : ''
+        if (!blockerReason) return { output: 'report_blocker 缺少 blocker_reason。', isError: true }
+        const evidence = typeof toolInput.evidence === 'string' ? toolInput.evidence : undefined
+        scope.blockers.push({ reason: blockerReason, ...(evidence ? { evidence } : {}), at: now })
+        return {
+          output:
+            '受阻已记录（原因/证据进宿主账本，升级或让渡由宿主决定）。建议：①证据缺失先做区分性检查（能区分两种候选根因的那种）；' +
+            '②测试环境异常如实标注，不硬判产品缺陷；③需要独立定位可 delegate_agent(role=research 只读) 诊断。',
+        }
+      }
+      return { output: `未知 action：${String(toolInput.action)}。`, isError: true }
     },
   }
 
@@ -821,6 +1187,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
   // ≤4000 字精干结论，原文抓取全部发生在 research 子代理（其工具面含 web_fetch）。
   const web_research: AgentLoopTool = {
     name: 'web_research',
+    parallelSafe: true,
     description:
       '针对一个问题或一个 URL 派出只读调研子代理：抓取/检索后总结成精干结论返回（≤4000 字），' +
       '不占用当前上下文。适合查文档、找方案、比对做法；只需抓单页原文时用 web_fetch。' +
@@ -966,11 +1333,18 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     // 只读角色：探索/调研不需要写文件或跑测试，但可查公网资料、可向主 agent 冒泡提问
     return [read_file, list_files, grep, web_fetch, ask_delegation_question]
   }
+  // D1：API 契约验证工具按开关注册（off=工具面与现状字节级一致）
+  const apiTools = loopApiToolEnabled() ? [run_api_contract_tests] : []
+  // W3-D1：收口预检按开关注册（主/实现角色；审查角色不收口不注入）
+  const preflightTools = preflightEnabled() ? [run_preflight] : []
+  // W4-F3：修复控制窄入口——仅修复轮传入 writeScope 时注册（主 loop 无此工具）
+  const repairControlTools = options.writeScope ? [repair_control] : []
+
   if (role === 'review') {
     // 审查角色（m-12）：话术承诺「不直接修改」，工具面同步收窄——去掉 write_file/
     // edit_file（物理只读与话术一致，防提示词层面被诱导后真的落盘）；可跑预览/测试/
     // 扫描验证怀疑点，但不改产物
-    return [read_file, list_files, grep, web_fetch, run_preview, run_gwt_tests, run_security_scan, ask_delegation_question]
+    return [read_file, list_files, grep, web_fetch, run_preview, run_gwt_tests, run_security_scan, ...apiTools, ask_delegation_question]
   }
   if (role !== 'parent') {
     // 子 agent（implement/custom）：全量 9 工具 + ask 冒泡；无委派/代答/续跑工具（深度限制双保险）
@@ -984,6 +1358,8 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       run_preview,
       run_gwt_tests,
       run_security_scan,
+      ...apiTools,
+      ...preflightTools,
       ask_delegation_question,
     ]
   }
@@ -997,6 +1373,9 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     run_preview,
     run_gwt_tests,
     run_security_scan,
+    ...apiTools,
+    ...preflightTools,
+    ...repairControlTools,
     delegate_agent,
     web_research,
     wait_for_delegations,

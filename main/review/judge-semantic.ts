@@ -21,11 +21,12 @@
  */
 
 import type { PrdBackplane, SketchRequirement } from '../sketch-engine'
-import { requirementPriority } from '../sketch-engine'
+import { backplaneAiCapabilities, capContractEnabled, renderCapSection, requirementPriority } from '../sketch-engine'
 import type { SDKQuery } from '../orchestrator'
 import type { JudgeConstraint } from '../judge-engine'
 import { delegatedReviewEnabled, runDelegatedReview } from '../review-delegation'
 import { buildJudgeErrorPatternsSection } from '../experience/judge-checklist'
+import { ANTIDEGRADE_JUDGE_RULES, antidegradeEnabled } from './judge-antidegrade'
 import type { AgentEvent } from '../../shared/types'
 
 // =========================================================================
@@ -82,6 +83,15 @@ export const SEMANTIC_JUDGE_SYSTEM_PROMPT = [
 ].join('\n')
 
 /**
+ * 语义裁判 system prompt 装配（Phase 3 B4）：开关 off 返回内置常量（字节级现状）；
+ * on 时追加反退化规则三条（CRUD≠能力完成/证据不足不得判 implemented/无需求依据控件判 deviated）。
+ * export：供单测与后续注入点复用。
+ */
+export function buildSemanticJudgeSystemPrompt(): string {
+  return antidegradeEnabled() ? `${SEMANTIC_JUDGE_SYSTEM_PROMPT}\n\n${ANTIDEGRADE_JUDGE_RULES}` : SEMANTIC_JUDGE_SYSTEM_PROMPT
+}
+
+/**
  * 语义审查主入口：LLM 逐功能项判定 → 代码级推导约束。
  * 永不抛错（增强腿）；无渠道 / LLM 失败 → skipped。
  */
@@ -116,7 +126,7 @@ export async function runSemanticJudgeReview(opts: {
     const delegated = await runDelegatedReview({
       goal: `裁判语义审查产物 vs PRD：${backplane.name ?? '未命名项目'}`,
       task: buildDelegatedJudgeTask(backplane, testSummary, errorSection),
-      system: SEMANTIC_JUDGE_SYSTEM_PROMPT,
+      system: buildSemanticJudgeSystemPrompt(),
       query,
       env,
       sessionId,
@@ -146,6 +156,9 @@ export async function runSemanticJudgeReview(opts: {
 /** 委派版任务：PRD 内联 + 产物改为子 agent 自查（只读工具，物理不可改）。 */
 function buildDelegatedJudgeTask(backplane: PrdBackplane, testSummary?: string, errorSection?: string): string {
   const requirements = backplane.requirements ?? []
+  // Phase 2 M1：能力契约段（开关 off/无 CAP → 空串零注入，字节级现状）；
+  // 与 loop 锚定/确认卡同源 renderCapSection——三处消费同一份。
+  const capSection = capContractEnabled() ? renderCapSection(backplaneAiCapabilities(backplane)) : ''
   const lines = [
     '【任务】审查生成的软件产物是否忠实实现了 PRD 的每个功能项。',
     '',
@@ -156,6 +169,7 @@ function buildDelegatedJudgeTask(backplane: PrdBackplane, testSummary?: string, 
           item.behavior_assertions?.length ? `（验收：${item.behavior_assertions.join('；')}）` : ''
         }`,
     ),
+    ...(capSection ? ['', capSection, '', '【能力契约判定】命中 CAP 的功能项：局部测试通过不算完成，必须按各条「验收证据」核查；命中「不算完成」清单的实现判 deviated 并引用证据。'] : []),
     '',
     '【产物】在本项目根目录：index.html 与 src/ 下的 js/css。用 read_file / list_files / grep 自行查证（只读，绝不修改任何文件），逐项对照后按【输出】格式给出严格 JSON。',
   ]
@@ -177,9 +191,11 @@ async function judgeViaLlm(opts: {
   errorSection?: string
 }): Promise<SemanticFinding[]> {
   const requirements = opts.backplane.requirements ?? []
+  // Phase 2 M1：能力契约段（与委派路径/loop 锚定同源；off/无 CAP 零注入）
+  const capSection = capContractEnabled() ? renderCapSection(backplaneAiCapabilities(opts.backplane)) : ''
   const truncated = opts.artifact.length > ARTIFACT_CHAR_LIMIT
   const prompt = [
-    SEMANTIC_JUDGE_SYSTEM_PROMPT,
+    buildSemanticJudgeSystemPrompt(),
     '',
     ...(opts.errorSection ? [opts.errorSection, ''] : []),
     '【PRD 功能项】（P0=核心必须 / P1=重要 / P2=加分）',
@@ -189,6 +205,7 @@ async function judgeViaLlm(opts: {
           item.behavior_assertions?.length ? `（验收：${item.behavior_assertions.join('；')}）` : ''
         }`,
     ),
+    ...(capSection ? ['', capSection, '', '【能力契约判定】命中 CAP 的功能项：局部测试通过不算完成，必须按各条「验收证据」核查；命中「不算完成」清单的实现判 deviated 并引用证据。'] : []),
     '',
     `【产物代码】${truncated ? `（超长已截断至前 ${ARTIFACT_CHAR_LIMIT} 字符）` : ''}`,
     truncated ? opts.artifact.slice(0, ARTIFACT_CHAR_LIMIT) : opts.artifact,

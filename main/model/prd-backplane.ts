@@ -56,6 +56,233 @@ export interface InterfaceEndpoint {
   response?: string
 }
 
+// ---------------------------------------------------------------------------
+// Phase 2 M1（2026-09-09，P1 稿 §3 M1）：能力契约块 CAP（Capability Contract）
+// 防蒸馏的三方交汇点（咨询 A 能力条款 / 咨询 B 能力契约块 / 一致性治理 core_capabilities）：
+// 「智能部分真正做什么、输入输出依赖什么、什么不算完成」以结构化字段随背板冻结，
+// 编程锚定/裁判判定/PRD 确认卡三处消费同一份。开关 BLOMA_CAP_CONTRACT 缺省 off=字节级现状。
+// ---------------------------------------------------------------------------
+
+/** 能力条款来源（供裁判/内审区分已确认与假设）。 */
+export type AiCapabilitySource = 'user_explicit' | 'confirmed_derived' | 'pending_assumption'
+
+/** 能力契约块单条（P1 稿 M1 schema，字段名与 prd.json 存储一致）。 */
+export interface AiCapability {
+  /** 条款编号：CAP-01 递增（与 F-00x 功能项编号同风格） */
+  capability_id: string
+  /** 该能力承担什么任务（不可用「智能处理」类标签词代替） */
+  task: string
+  /** 关键处理：该能力依赖什么、靠什么成立 */
+  keyProcessing: string
+  /** 输入输出依赖：输入=…；输出=…；输入变化→输出如何相应变化 */
+  ioDependency: string
+  /** 哪些实现不算完成（禁止的降级替代） */
+  forbiddenSubstitutions: string[]
+  /** 验收证据（行为级、可观察） */
+  evidence: string[]
+  /** 来源：user_explicit=用户原话 / confirmed_derived=已确认需求派生 / pending_assumption=假设 */
+  source: AiCapabilitySource
+}
+
+/** BLOMA_CAP_CONTRACT 开关（缺省 off=字节级现状：无 CAP 产出/派生/注入；
+ * 与 BLOMA_REF_LIBRARY 同口径，off 时即使背板存量有 CAP 也零注入）。 */
+export function capContractEnabled(): boolean {
+  const raw = (process.env.BLOMA_CAP_CONTRACT ?? '').trim().toLowerCase()
+  return raw === '1' || raw === 'on' || raw === 'true'
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7 U1（2026-09-10，E1 咨询 H2 / P7 实施稿 §2）：key_tasks 关键任务块。
+// 用户语言的交付标尺——「这一版做完什么才算交付」。PRD 确认卡展示；
+// delivery_status（P7-2 H1）按 must_deliver 任务判定；与一致性治理「主任务」
+// 表述同源（后续 prompt 文字引用 key_tasks 不再另写一套）。
+// 开关 BLOMA_KEY_TASKS 缺省 off=字节级现状（不产出不注入，旧 prd.json 零迁移）。
+// ---------------------------------------------------------------------------
+
+/** 关键任务单条（字段名与 prd.json 存储一致）。 */
+export interface KeyTask {
+  /** 任务编号：KT-01 递增（定稿时统一重编号） */
+  task_id: string
+  /** 用户语言一句话任务（如「记一笔账，月底能看到这个月花了多少」；非技术术语） */
+  label: string
+  /** 关联功能项（F-xxx；P0 项必须落入某任务——定稿不变式，漏了自动补） */
+  feature_ids: string[]
+  /** 必须交付：true 时该任务未通过 → 整版不可称 verified（P7-2 delivery_status 消费） */
+  must_deliver: boolean
+}
+
+/** BLOMA_KEY_TASKS 开关：缺省 off（prd.json 无 key_tasks 键、确认卡零注入）。 */
+export function keyTasksEnabled(): boolean {
+  const raw = (process.env.BLOMA_KEY_TASKS ?? '').trim().toLowerCase()
+  return raw === '1' || raw === 'on' || raw === 'true'
+}
+
+/** 背板关键任务读取：过滤缺 label 的残条；缺省 []。 */
+export function backplaneKeyTasks(backplane: PrdBackplane): KeyTask[] {
+  return (backplane.key_tasks ?? []).filter((task) => task.label.trim().length > 0)
+}
+
+/**
+ * 关键任务定稿（挂载前清洗，供工程腿 buildBackplaneFromParsed 与单测直测）：
+ * ①LLM 产出先过功能项白名单（feature_ids ∩ requirements；悬空任务=无有效关联项
+ *   即弃条，不给下游留空承诺）；②未覆盖的 P0 项各自追加派生任务（label=故事
+ *   截断、must_deliver=true）——「P0 必落任务」不变式；③task_id 统一重编号
+ * KT-01..（追加后不跳号）；④总量截 6（LLM ≤4 + 补齐，宁全勿缺但防滥用）。
+ */
+export function finalizeKeyTasks(parsed: KeyTask[], requirements: SketchRequirement[]): KeyTask[] {
+  const validIds = new Set(requirements.map((item) => item.id))
+  const merged: KeyTask[] = []
+  for (const task of parsed.slice(0, 4)) {
+    const ids = [...new Set(task.feature_ids.filter((id) => validIds.has(id)))].slice(0, 6)
+    if (!task.label.trim() || ids.length === 0) continue
+    merged.push({ label: task.label.trim().slice(0, 80), feature_ids: ids, must_deliver: task.must_deliver, task_id: '' })
+    if (merged.length >= 6) break
+  }
+  const covered = new Set(merged.flatMap((task) => task.feature_ids))
+  for (const item of requirements) {
+    if (merged.length >= 6) break
+    if (requirementPriority(item) !== 'P0' || covered.has(item.id)) continue
+    merged.push({
+      task_id: '',
+      label: requirementStory(item).replace(/\s+/g, ' ').trim().slice(0, 60) || item.description.slice(0, 60),
+      feature_ids: [item.id],
+      must_deliver: true,
+    })
+  }
+  return merged.map((task, index) => ({ ...task, task_id: `KT-${String(index + 1).padStart(2, '0')}` }))
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3 B3（2026-09-09，P1 稿 §3 M3）：round_anchor 三字段。
+// 修复轮/迭代轮的本轮范围锚——只限定本轮，不改全局契约；防止「最近错误/修复建议/
+// 自己先前的计划」被当成需求变更。开关 BLOMA_ROUND_ANCHOR 缺省 off=字节级现状
+// （P1 稿原定不设开关，因当前落地顺序为代码先行、A/B 后置，为保 p1 A/B 单因子
+// 纯净性改设开关——偏差已登记开关矩阵 §5）。
+// ---------------------------------------------------------------------------
+
+/** 本轮锚三字段（P1 稿 M3 schema）。 */
+export interface RoundAnchorSpec {
+  /** 本轮不得破坏的能力 */
+  must_preserve: string[]
+  /** 本轮不许做（不顺手的重构/换库/改需求） */
+  out_of_scope: string[]
+  /** 怎么算修好/做完（行为级） */
+  completion_evidence: string[]
+}
+
+/** BLOMA_ROUND_ANCHOR 开关：缺省 off（修复/迭代轮 prompt 与现状字节一致）。 */
+export function roundAnchorEnabled(): boolean {
+  const raw = (process.env.BLOMA_ROUND_ANCHOR ?? '').trim().toLowerCase()
+  return raw === '1' || raw === 'on' || raw === 'true'
+}
+
+/** 渲染本轮锚段；空 spec 返回空串（零注入）。 */
+export function renderRoundAnchorBlock(spec: RoundAnchorSpec): string {
+  const list = (title: string, entries: string[]): string =>
+    entries.filter(Boolean).length > 0 ? `  ${title}：${entries.filter(Boolean).join('；')}` : ''
+  const lines = [
+    '【本轮锚（round_anchor）】只限定本轮范围，不改全局契约；最近错误、修复建议或你先前的计划不自动构成需求变更：',
+    list('必须保留（本轮不得破坏）', spec.must_preserve),
+    list('本轮不许做', spec.out_of_scope),
+    list('完成证据（怎么算修好，行为级）', spec.completion_evidence),
+  ].filter(Boolean)
+  return lines.length > 1 ? lines.join('\n') : ''
+}
+
+const p0Items = (backplane: PrdBackplane): SketchRequirement[] =>
+  backplane.requirements.filter((item) => requirementPriority(item) === 'P0')
+
+/** 修复轮本轮锚（确定性派生）：必须保留=P0 能力；完成证据=失败断言原文+全量重验。 */
+export function buildRepairRoundAnchor(backplane: PrdBackplane, failedAssertions: string[]): RoundAnchorSpec {
+  return {
+    must_preserve: p0Items(backplane).map((item) => `${item.id} ${requirementStory(item)}`),
+    out_of_scope: [
+      '不在失败清单内的功能不做改动',
+      '不顺手重构、换库、调目录结构或改需求语义',
+      ...backplane.out_of_scope.slice(0, 3),
+    ],
+    completion_evidence: [...failedAssertions.filter(Boolean).slice(0, 6), '全部 P0 断言重验通过（run_gwt_tests 全量）'],
+  }
+}
+
+/** 迭代轮本轮锚（确定性派生）：聚焦项之外保持现状；完成证据=聚焦项断言+其余不回退。 */
+export function buildIterationRoundAnchor(backplane: PrdBackplane, focus: string[]): RoundAnchorSpec {
+  const focusSet = new Set(focus)
+  const p0 = p0Items(backplane)
+  const others = p0.filter((item) => !focusSet.has(item.id))
+  const focused = p0.filter((item) => focusSet.has(item.id))
+  return {
+    must_preserve: others.length > 0 ? others.map((item) => `${item.id} ${requirementStory(item)}`) : ['全部 P0 功能项断言保持通过'],
+    out_of_scope: [
+      '聚焦项之外的功能不做改动（保持现状勿重做）',
+      '不顺手重构、换库或扩大改动面',
+      ...backplane.out_of_scope.slice(0, 3),
+    ],
+    completion_evidence: [
+      ...focused.flatMap((item) => requirementAssertions(item).slice(0, 2)),
+      '其余 P0 断言不回退（run_gwt_tests 全量）',
+    ],
+  }
+}
+
+/** 背板能力条款读取：过滤缺 task 的残条款；缺省 []。 */
+export function backplaneAiCapabilities(backplane: PrdBackplane): AiCapability[] {
+  return (backplane.ai_capabilities ?? []).filter((cap) => cap.task.trim().length > 0)
+}
+
+/**
+ * AI 能力信号词（deriveAiCapabilities 触发判据）。与 bench/harness/metrics.mjs 的
+ * AI_INTENT_RE 同源，但 ascii 「ai」收紧为词边界匹配（防 email/main/train 等
+ * 含 ai 子串的英文词误触发——bench 侧度量历史项目保持原样，不动）。
+ * 改动本表时同步评估 bench 侧口径（陷阱 22 纪律）。
+ */
+export const AI_CAPABILITY_SIGNAL_RE = /\bai\b|智能|语音|总结|整理|自动生成|自动汇总|大模型/i
+
+/**
+ * 确定性派生最小 CAP（LLM 漏报兜底，仿 deriveInterfaceSpec）：功能项命中 AI 信号
+ * 而开关开启时，为每条命中项派生一条最小能力契约（确定性模板，不编内容——只把
+ * 「该能力的智能性不可被降级替代」开成硬条款）。纯展示/纯 CRUD 零派生。
+ * 上限 3 条（派生是兜底不是主力，宁缺毋滥）。
+ */
+export function deriveAiCapabilities(requirements: SketchRequirement[]): AiCapability[] | undefined {
+  const signaled = requirements
+    .filter((item) => AI_CAPABILITY_SIGNAL_RE.test(`${item.description} ${item.story ?? ''}`))
+    .slice(0, 3)
+  if (signaled.length === 0) return undefined
+  return signaled.map((item, index) => ({
+    capability_id: `CAP-${String(index + 1).padStart(2, '0')}`,
+    task: item.description,
+    keyProcessing: '由真实模型调用完成该任务（非固定模板、非关键词匹配）',
+    ioDependency: '输入=用户内容；输出=随输入变化的智能结果；同类输入应产生一致形态的输出',
+    forbiddenSubstitutions: ['固定模板/写死结果冒充智能', '仅关键词匹配冒充理解', '把该能力降级为普通增删改查'],
+    evidence: ['修改关键输入后输出随之变化', '模型不可用时明确报错或降级提示，不假装成功'],
+    source: 'confirmed_derived',
+  }))
+}
+
+/**
+ * 能力契约渲染段（三处消费同源：loop 背板锚定 / 裁判 prompt / PRD 确认卡）。
+ * 精简引用口径（P1 稿 §6 风险项：不把全表注成每轮冗余，完整字段已在背板/prd.json）。
+ * 空数组 → 空串（零注入，off=字节级现状）。
+ */
+export function renderCapSection(caps: AiCapability[]): string {
+  if (caps.length === 0) return ''
+  const lines = caps.map((cap) => {
+    const parts = [
+      `- ${cap.capability_id}｜任务：${cap.task}`,
+      `  关键处理：${cap.keyProcessing}`,
+      `  输入输出：${cap.ioDependency}`,
+      `  不算完成：${cap.forbiddenSubstitutions.filter(Boolean).join('；') || '（未声明）'}`,
+      `  验收证据：${cap.evidence.filter(Boolean).join('；') || '（未声明）'}`,
+    ]
+    return parts.join('\n')
+  })
+  return [
+    '【能力契约（CAP，什么不算完成）】以下能力是需求核心，禁止任何降级替代；实现与判定均按「验收证据」口径执行：',
+    ...lines,
+  ].join('\n')
+}
+
 /** 模板元信息（注入点①写入；所有注入点路由依据）。level 缺省随类型（personal_tool=loose，其余 standard）。 */
 export interface TemplateMeta {
   type: TemplateType
@@ -190,14 +417,35 @@ const PERSISTENCE_SIGNAL_RE = /历史|保存|持久|刷新|重开|清空|收藏|
  * 派生通用 records 资源端点（GET 列表 + POST 新增）——保证 server/routes 渠道被
  * 强制走通（终验存活检查 + 修复回流兜底），资源命名交由 loop 对齐业务。
  * 无信号 → undefined（纯展示产物零注入）。
+ *
+ * C1b（2026-09-11 拍板，审计稿 §3 C1 方案 b）：game 类豁免留存信号兑底派生——「最高分」
+ * 类轻留存允许 localStorage 满足，街机游戏不再被静默升级为前后端分离。
+ * BLOMA_GAME_DERIVE_EXEMPT 缺省 off=字节级现状（game 照派）；豁免只作用于兑底派生层，
+ * LLM 明确报告的 interface_spec 不受影响（重数据后端仍是「完整程序」终点口径）。
  */
-export function deriveInterfaceSpec(requirements: SketchRequirement[]): InterfaceEndpoint[] | undefined {
+export function deriveInterfaceSpec(requirements: SketchRequirement[], templateType?: TemplateType): InterfaceEndpoint[] | undefined {
+  if (templateType === 'game' && gameDeriveExemptEnabled()) return undefined
   const hasSignal = requirements.some((item) => PERSISTENCE_SIGNAL_RE.test(`${item.description} ${item.story ?? ''}`))
   if (!hasSignal) return undefined
   return [
     { endpoint: '/api/records', method: 'GET', request: '无', response: '{records:[…]}（业务资源，实现于 server/routes/，数据落 data/）' },
     { endpoint: '/api/records', method: 'POST', request: '{…业务字段}', response: '{ok:true,…}' },
   ]
+}
+
+/** C1a（P1，2026-09-11 审计⑧）：单条功能项是否蕴含后端持久化要求（与 deriveInterfaceSpec
+ *  同源信号词同口径——改词表单点生效）。PRD 确认卡据此给命中项显影「将要求后端」徽标：
+ *  留存信号词会触发后端契约（派生或 LLM 报告同款架构后果），确认时用户看得见，
+ *  不再静默升级前后端分离。纯信息显影，不改变任何行为。 */
+export function requirementImpliesBackend(item: SketchRequirement, templateType?: TemplateType): boolean {
+  // C1b 联动：game 豁免开启时轻留存不再催生后端，徽标同步不亮
+  if (templateType === 'game' && gameDeriveExemptEnabled()) return false
+  return PERSISTENCE_SIGNAL_RE.test(`${item.description} ${item.story ?? ''}`)
+}
+
+/** C1b 开关：game 类豁免留存信号兑底派生（含 C1a 徽标与 R-DATA-01 措辞联动）。缺省 off=字节级现状。 */
+export function gameDeriveExemptEnabled(): boolean {
+  return process.env.BLOMA_GAME_DERIVE_EXEMPT === '1' || process.env.BLOMA_GAME_DERIVE_EXEMPT === 'true'
 }
 
 export function renderBackplaneAnchor(backplane: PrdBackplane, focus?: string[]): string {
@@ -208,14 +456,30 @@ export function renderBackplaneAnchor(backplane: PrdBackplane, focus?: string[])
   // 完整程序阶段 2（2026-09-06）：后端 API 契约随锚定注入——前后端真相源，loop 每轮
   // 可见（聚焦模式不裁剪：契约是全局约束，条目少）。无 interface_spec（纯展示/旧背板）零注入。
   const endpoints = backplaneInterfaceSpec(backplane)
-  if (endpoints.length === 0) return requirementsPart
+  if (endpoints.length === 0) return withCapSection(requirementsPart, backplane)
   const contract = endpoints
     .map((ep) => {
       const request = ep.request && ep.request !== '无' ? `；请求：${ep.request}` : ''
       return `- ${ep.method ?? 'GET'} ${ep.endpoint} → 响应：${ep.response ?? 'JSON'}${request}`
     })
     .join('\n')
-  return `${requirementsPart}\n\n【后端 API 契约（interface_spec，前后端真相源）】按此实现 server/routes/ 下的路由并保持一致：\n${contract}`
+  // A2（P0-A，2026-09-11 审计案 35c1a633）：路由模块契约显影——CJS 格式条款进锚。
+  // 此前契约只写在 static-server.js 注释里（主 loop 从未读过），模型按前端同款 ESM
+  // 写路由 → require SyntaxError 被 loadRoutes 静默吞掉 → 404。条款随契约段每轮可见。
+  const moduleFormatClause =
+    '路由文件模块格式（static-server 以 CommonJS require 加载，禁用 ESM import/export）：每个 server/routes/<资源>.js 写 `module.exports = { \'METHOD /path\': async (req, res, ctx) => {...} }`，键格式为 \'方法 路径\'，文件名即 /api/ 前缀（records.js → /api/records/*，样例见骨架 server/routes/_example.js）；数据用 ctx.readData/ctx.writeData 落 data/。'
+  return withCapSection(
+    `${requirementsPart}\n\n【后端 API 契约（interface_spec，前后端真相源）】按此实现 server/routes/ 下的路由并保持一致：\n${contract}\n${moduleFormatClause}`,
+    backplane,
+  )
+}
+
+/** Phase 2 M1：CAP 段随背板锚定常驻注入（每轮 system 内重建，竹节/keep-recent 压缩
+ * 只动历史轮次动不到常驻锚——「压缩不得删 CAP」由结构保证）。开关 off 或无 CAP 零注入。 */
+function withCapSection(anchor: string, backplane: PrdBackplane): string {
+  if (!capContractEnabled()) return anchor
+  const section = renderCapSection(backplaneAiCapabilities(backplane))
+  return section ? `${anchor}\n\n${section}` : anchor
 }
 
 // ---------------------------------------------------------------------------
@@ -352,6 +616,20 @@ export interface PrdBackplane {
    * 仅 game 类型生成（非 game 缺省 undefined）；缺省无 GDD（旧 prd.json 零迁移）。
    */
   gdd?: GameDesignDoc
+  /**
+   * 能力契约块（Phase 2 M1，2026-09-09）：AI/智能类能力的硬条款——任务/关键处理/
+   * 输入输出依赖/禁止降级替代/验收证据/来源。向导工程腿产出或 deriveAiCapabilities
+   * 确定性派生；loop 锚定、裁判判定、PRD 确认卡三处消费（BLOMA_CAP_CONTRACT 缺省 off
+   * =本字段不产出不注入，旧 prd.json 零迁移）。
+   */
+  ai_capabilities?: AiCapability[]
+  /**
+   * 关键任务块（Phase 7 U1 H2，2026-09-10）：用户语言的交付标尺——这一版做完
+   * 什么才算交付。工程腿产出（LLM 优先 + finalizeKeyTasks P0 补齐）随背板冻结；
+   * PRD 确认卡展示、delivery_status 计算（P7-2）消费（BLOMA_KEY_TASKS 缺省 off
+   * =不产出，旧 prd.json 零迁移）。
+   */
+  key_tasks?: KeyTask[]
 }
 
 /**

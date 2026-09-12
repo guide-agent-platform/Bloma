@@ -4,9 +4,12 @@ import type { BrowserWindow, IpcMain } from 'electron'
 import type {
   AgentCancelInput,
   AgentConfirmRequirementsInput,
+  AgentForkSessionInput,
   AgentListSessionsInput,
   AgentLoadMessagesInput,
   AgentSendMessageInput,
+  AgentSteerQueryInput,
+  AgentSteerResolveInput,
   AnalyticsTrackInput,
   CategoryRoutingUpdateEnvelope,
   CategoryRoutingRoleUpdateEnvelope,
@@ -52,10 +55,11 @@ import type {
 } from '../shared/types'
 import { IPC_CHANNELS } from '../shared/types'
 import { fail, ok } from './api-result'
-import { cancelAgent, getSdkQuery, hasForegroundRun, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from './orchestrator'
+import { cancelAgent, getSdkQuery, hasForegroundRun, isSessionActive, persistSteerDeferredNotice, publishSteerStatusEvent, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from './orchestrator'
+import { enqueueSteer, getSteerStatuses, pendingSteerCount, registerSteer, resolveSteer, setSteerStatusListener, steerConfirmEnabled } from './steer-queue'
 import { savePastedImage } from './pasted-images'
 import { collectDomContext, scrollPreview } from './dom-context'
-import { runAgentLoopPostTesting, runIterationTask, runMvpTask, setForegroundRunChecker, setProgrammingEventPublisher } from './programming-orchestrator'
+import { clearPendingReviewAction, runAgentLoopPostTesting, runIterationTask, runMvpTask, setForegroundRunChecker, setProgrammingEventPublisher } from './programming-orchestrator'
 import { handleAgentStreamEvent } from './notifications'
 import { assertToolAllowed, getPermissionMode, resolvePermission, setPermissionMode, setPermissionRequestPublisher } from './permission-service'
 import {
@@ -75,7 +79,7 @@ import {
   updateProject,
   upgradeProject,
 } from './project-service'
-import { cleanOrphanSessions, listSessions, loadMessages } from './session-service'
+import { cleanOrphanSessions, forkFrom, listSessions, loadMessages, setSessionActiveChecker } from './session-service'
 import { exportProjectHandoff } from './project-export'
 import { resolveRequirementConfirm } from './guide-agent-service'
 import { createChannel, deleteChannel, fetchModels, listChannels, testChannel, testChannelDirect, updateChannel } from './channel-manager'
@@ -102,6 +106,7 @@ import {
 import { hasRequestId, isRecord, requireValue } from './validators'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
+import { appendSessionMessage } from './session-tree'
 
 /** 从错误信息里提取统一的错误码前缀（如 MVP_LLM_PARSE_FAILED、SANDBOX_RUN_FAILED），缺省 AGENT_SDK_ERROR。 */
 function errorCodeFrom(error: unknown): string {
@@ -111,6 +116,16 @@ function errorCodeFrom(error: unknown): string {
 }
 
 export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow): void {
+  // P0-2 fork：活跃会话检查注入（session-service 不反向 import orchestrator——防循环依赖）
+  setSessionActiveChecker(isSessionActive)
+  // I3 转向生效确认链（P7-7）：steer-queue 状态机推进 → orchestrator 发布口 →
+  // steer_status 事件→渲染端状态条。listener 引用 orchestrator 的 publishSteerStatusEvent
+  //（其内部走 streamPublisher，接线时序与本处 setAgentStreamPublisher 之后自然生效）。
+  // deferred 达成时同步落盘待办留痕（JSONL 跨重启可见——状态条内存态重启丢的补口）。
+  setSteerStatusListener((entry) => {
+    publishSteerStatusEvent(entry)
+    if (entry.status === 'deferred_next_run') persistSteerDeferredNotice(entry.sessionId, entry.content)
+  })
   setAgentStreamPublisher((event) => {
     mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, event)
     // T6 后台执行通知：completed/error/user_decision_required → 系统通知（无后端注入时内部 no-op）
@@ -141,8 +156,96 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     })
   })
 
+  // P0-1 steer（运行中转向，2026-09-08）：活跃主 loop 期间输入框改道本通道。
+  // 入参与 agent:send-message 同构（validateAgentSend 同一清洗）；无活跃主 loop 时
+  //（空闲 / guide 单发 run / 后台间隙 / 带图消息）内部回退 runAgent——与 send-message
+  // 行为完全一致（忙则入 SessionMessageQueue、空闲开新 run），渲染端无需二次兜底。
+  ipcMain.handle(IPC_CHANNELS.AGENT_STEER_MESSAGE, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = validateAgentSend(payload)
+      // 带图消息不做 steer：注入只承载文本，图片走既有 send-message 链路（整体入队/开跑）
+      // I3 转向生效确认链（P7-7，BLOMA_STEER_CONFIRM on 时）：入队前先登记账本并按档位
+      //  分流——低档 received 直接入队（简短确认即注入）；中/高档 pending_impact 不入队，
+      //  影响卡三选回执走 agent:steer-resolve。off 时与 P0-1 字节级一致。
+      if ((input.images?.length ?? 0) === 0) {
+        if (steerConfirmEnabled()) {
+          const registered = registerSteer(input.session_id, {
+            queueMessageId: input.request_id,
+            content: input.content,
+            enqueuedAt: Date.now(),
+          }, input.project_id)
+          if (registered) {
+            return {
+              session_id: input.session_id,
+              steered: true,
+              pending: pendingSteerCount(input.session_id),
+              status: registered.status,
+              impact: registered.impact,
+              steer_id: registered.steerId,
+            }
+          }
+        } else if (enqueueSteer(input.session_id, {
+          queueMessageId: input.request_id,
+          content: input.content,
+          enqueuedAt: Date.now(),
+        })) {
+          return { session_id: input.session_id, steered: true, pending: pendingSteerCount(input.session_id) }
+        }
+      }
+      const fallback = await runAgent(input)
+      return { session_id: input.session_id, steered: false, fallback }
+    })
+  })
+
+  // I3（P7-7）：影响卡三选回执——inject_now=本轮就改（入队注入）/defer=留待下一轮
+  //（可见待办）/reject=不改了。只对 pending_impact 状态有效，非法回执拒收。
+  ipcMain.handle(IPC_CHANNELS.AGENT_STEER_RESOLVE, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<AgentSteerResolveInput>(payload, ['session_id', 'steer_id', 'action'])
+      if (input.action !== 'inject_now' && input.action !== 'defer' && input.action !== 'reject') {
+        throw new Error('INVALID_STEER_ACTION')
+      }
+      const resolved = resolveSteer(input.session_id, input.steer_id, input.action)
+      if (!resolved) throw new Error('STEER_NOT_PENDING')
+      return { session_id: input.session_id, steer_id: input.steer_id, status: resolved.status }
+    })
+  })
+
+  // I3：会话 steer 状态查询（渲染端刷新后状态条恢复；「这轮会做吗」的权威答案源）
+  ipcMain.handle(IPC_CHANNELS.AGENT_STEER_QUERY, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<AgentSteerQueryInput>(payload, ['session_id'])
+      return {
+        session_id: input.session_id,
+        items: getSteerStatuses(input.session_id).map((entry) => ({
+          steer_id: entry.steerId,
+          content: entry.content,
+          impact: entry.impact,
+          status: entry.status,
+          updated_at: entry.updatedAt,
+        })),
+      }
+    })
+  })
+
   // 粘贴图存盘（clipboard-paste P1，2026-08-29）：renderer 粘贴→base64 存文件→短引用；
   // 大小校验双保险（renderer 白名单先行，主进程兜底防绕过）
+  // P0-2 fork（会话 fork，2026-09-08）：从任意 user 消息重开。渲染端 user 气泡「从这里
+  // 重新来」→ 复制前缀到新会话（原文件一字不动），返回新 sessionId 由渲染端续接。
+  ipcMain.handle(IPC_CHANNELS.AGENT_FORK_SESSION, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<AgentForkSessionInput>(payload, ['session_id', 'project_id'])
+      const hasAnchor = (input.entry_id !== undefined && String(input.entry_id).trim() !== '')
+        || typeof input.entry_timestamp === 'number'
+      if (!hasAnchor) throw new Error('SESSION_FORK_ENTRY_NOT_FOUND: 需要 entry_id 或 entry_timestamp')
+      return forkFrom(input.session_id, {
+        project_id: input.project_id,
+        entry_id: typeof input.entry_id === 'string' ? input.entry_id : undefined,
+        entry_timestamp: typeof input.entry_timestamp === 'number' ? input.entry_timestamp : undefined,
+      })
+    })
+  })
+
   ipcMain.handle(IPC_CHANNELS.PASTED_IMAGE_SAVE, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<PastedImageSaveInput>(payload, ['session_id', 'base64', 'ext'])
@@ -232,7 +335,13 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
         event: {
           event_type: 'project_created',
           project_id: project.project_id,
-          payload: { mode: project.mode },
+          // Phase 7 U5 J5（project_started 口径扩）：首句长度/是否带句读——北极星分母
+          // （开始首个有效项目的用户）与首句信息量分层的数据基础；不记原文（脱敏）。
+          payload: {
+            mode: project.mode,
+            initial_message_chars: (input.initial_message ?? '').trim().length,
+            has_punctuation: /[。，？！,.!?]/.test(input.initial_message ?? ''),
+          },
           privacy_level: 'research_safe',
         },
       })
@@ -279,6 +388,8 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
   ipcMain.handle(IPC_CHANNELS.PROJECT_EXPORT, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<ProjectExportInput>(payload, ['project_id'])
+      // F-A 修复：导出动作说明已离开补充流，清残留标记
+      clearPendingReviewAction(input.project_id)
       const project = findProject(input.project_id)
       const result = await dialog.showOpenDialog(mainWindow, {
         title: `导出「${project.name}」`,
@@ -394,6 +505,9 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
   ipcMain.handle(IPC_CHANNELS.PROJECT_SUBMIT_CORRECTION, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<PointCorrectionInput>(payload, ['project_id', 'session_id', 'mode'])
+      // F-A 修复（2026-09-11 审计）：用户转去点选纠错说明已离开「局部优化/整版重做」
+      // 补充流，残留标记会让下一句普通诉求被误当局部修改，先清
+      clearPendingReviewAction(input.project_id)
       const result = submitCorrection(input)
 
       // S3-CORRECT-006 / research-plan §5：point_correction 埋点（含 repeat_count / fallback_mode）。
@@ -418,7 +532,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
       if (result.should_follow_up) {
         const followUp =
           '我注意到这里你已经连续改过两次了，怕又猜错。能再具体一点吗？比如想要改成什么内容、放在哪个位置，还是换个样子？'
-        appendJsonLine(getAgentSessionPath(input.session_id), {
+        appendSessionMessage(input.session_id, {
           role: 'assistant',
           content: [{ type: 'text', text: followUp }],
           timestamp: Date.now(),
@@ -440,7 +554,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
       if (prompt) {
         // 点选纠错原文按 user 角色回写会话 JSONL（对齐 runAgent 落盘），
         // 避免历史里出现"助手引用了用户没说过的话"的断层。
-        appendJsonLine(getAgentSessionPath(input.session_id), {
+        appendSessionMessage(input.session_id, {
           role: 'user',
           content: [{ type: 'text', text: prompt }],
           timestamp: Date.now(),
@@ -453,7 +567,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
         if (!isPrdUserConfirmed(input.project_id)) {
           const guidance =
             '收到，这处调整意见我先记下了。不过需求定稿（PRD）还没经你确认过，我先不动手重做——请回到对话里把想法告诉我，我们先一起确认需求，再按你的意见改。'
-          appendJsonLine(getAgentSessionPath(input.session_id), {
+          appendSessionMessage(input.session_id, {
             role: 'assistant',
             content: [{ type: 'text', text: guidance }],
             timestamp: Date.now(),
@@ -489,7 +603,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
         ])
         if (BUSY_STAGES.has(stage)) {
           const busyNote = '正在生成中，这处修改意见我先记下了；等这一版完成后，你再点这里或直接告诉我，我马上按意见调整。'
-          appendJsonLine(getAgentSessionPath(input.session_id), {
+          appendSessionMessage(input.session_id, {
             role: 'assistant',
             content: [{ type: 'text', text: busyNote }],
             timestamp: Date.now(),
@@ -506,7 +620,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
         }
         if (stage !== 'ready' && stage !== 'completed') {
           const sketchNote = '收到，我按这处意见先调整草图（确认草图后才会生成完整功能）。'
-          appendJsonLine(getAgentSessionPath(input.session_id), {
+          appendSessionMessage(input.session_id, {
             role: 'assistant',
             content: [{ type: 'text', text: sketchNote }],
             timestamp: Date.now(),
@@ -930,6 +1044,9 @@ async function safeInvoke<T>(requestId: string, fn: () => T | Promise<T>) {
     if (message.includes('AGENT_SESSION_BUSY')) return fail<T>(requestId, 'AGENT_SESSION_BUSY', message, true)
     if (message.includes('CHANNEL_NOT_FOUND')) return fail<T>(requestId, 'CHANNEL_NOT_FOUND', message)
     if (message.includes('SESSION_NOT_FOUND')) return fail<T>(requestId, 'SESSION_NOT_FOUND', message)
+    if (message.includes('SESSION_FORK_ENTRY_NOT_FOUND')) {
+      return fail<T>(requestId, 'SESSION_FORK_ENTRY_NOT_FOUND', message)
+    }
     if (message.includes('PROJECT_NOT_FOUND')) return fail<T>(requestId, 'PROJECT_NOT_FOUND', message)
     if (message.includes('PERMISSION_REQUEST_NOT_FOUND')) return fail<T>(requestId, 'PERMISSION_REQUEST_NOT_FOUND', message)
     if (message.includes('PERMISSION_DENIED')) return fail<T>(requestId, 'PERMISSION_DENIED', message)

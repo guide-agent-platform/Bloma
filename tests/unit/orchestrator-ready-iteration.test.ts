@@ -40,12 +40,17 @@ vi.mock('../../main/project-service', async (importOriginal) => {
 })
 
 /**
- * ready 护栏意图分流（「修改黑洞」修复）+ 修改确认门。
- * - 已生成完成后，修改类输入 → 先弹「修改确认卡」（不直接整版重造）；
- * - 用户点「对，就这样改」→ 才进入迭代重新生成（runIterationTask，prompt 为清洗后的描述）；
- * - 纯进度追问（好了吗）→ 固定完成文案 + 修改出口引导，不误触发迭代。
+ * ready 护栏意图分流（2026-09-11 卡位改版后）。
+ *
+ * 新语义：MVP 就绪三按钮卡（keep/optimize/rebuild）在生成完即弹（在 runJudgeReview 侧发，
+ * 本文件不覆盖其触发点）。本文件覆盖**回传决策与打字分流**：
+ * - 用户直接打字提修改 → 一律按「局部优化」（localOnly），不再弹确认卡；
+ * - 就绪卡 keep → 回 ready + 发引导卡；
+ * - 就绪卡 optimize → 补充态 → 用户补充 → 局部修改；
+ * - 就绪卡 rebuild → 补充态 → 用户说方向 → 二次确认卡 → 确定 → 整版重做（rebuild）；
+ * - 纯进度追问/寒暄 → 直答，不误触发迭代。
  */
-describe('ready 护栏意图分流', () => {
+describe('ready 护栏意图分流（MVP 就绪卡改版后）', () => {
   const originalPromaHome = process.env.PROMA_HOME
 
   afterEach(() => {
@@ -56,8 +61,8 @@ describe('ready 护栏意图分流', () => {
     runIterationTaskMock.mockClear()
   })
 
-  it('ready 阶段修改请求先弹确认卡；点「对，就这样改」后才以清洗后描述进入迭代', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'proma-ready-iter-'))
+  it('ready 阶段直接打字提修改 → 直接走局部优化（localOnly），不弹确认卡', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-local-'))
     process.env.PROMA_HOME = home
     const events: AgentEvent[] = []
     let sdkCalled = false
@@ -67,65 +72,31 @@ describe('ready 护栏意图分流', () => {
       yield { type: 'result', subtype: 'success' }
     })
 
-    vi.mocked(findProject).mockReturnValue({
-      project_id: 'project-ready-iter',
-      current_stage: 'ready',
-    } as never)
+    vi.mocked(findProject).mockReturnValue({ project_id: 'project-local', current_stage: 'ready' } as never)
 
-    // 第一轮：修改诉求 → 确认卡（不是直接重生成）
     await runAgent({
-      request_id: 'req-iter',
-      session_id: 'session-iter',
-      project_id: 'project-ready-iter',
-      content: '能不能改成那种九个数字按键的那种',
+      request_id: 'req-local',
+      session_id: 'session-local',
+      project_id: 'project-local',
+      content: '把标题改成计算助手',
       mode: 'quick',
       current_stage: 'ready',
       channel_id: 'test-channel',
-    })
-
-    expect(runIterationTaskMock).not.toHaveBeenCalled()
-    expect(sdkCalled).toBe(false)
-    const decision = events.find((event) => event.type === 'user_decision_required')
-    expect(decision?.payload.kind).toBe('iteration_confirm')
-    expect(decision?.payload.questions).toEqual([
-      expect.objectContaining({ id: 'confirm', label: '对，就这样改' }),
-      expect.objectContaining({ id: 'rephrase', label: '不对，我重新说' }),
-      expect.objectContaining({ id: 'cancel', label: '不改了' }),
-    ])
-    // 确认卡 reply 展示清洗后的修改点，用户认得出
-    const deltas = events
-      .filter((event) => event.type === 'message_delta')
-      .map((event) => String(event.payload.text ?? ''))
-      .join('')
-    expect(deltas).toContain('改成那种九个数字按键的那种')
-    expect(deltas).not.toContain('已经生成好了')
-
-    // 第二轮：点「对，就这样改」→ 迭代开跑，prompt 是剥离「能不能」后的描述
-    events.length = 0
-    vi.mocked(findProject).mockReturnValue({
-      project_id: 'project-ready-iter',
-      current_stage: 'blocked_for_user_decision',
-    } as never)
-    await runAgent({
-      request_id: 'req-iter-2',
-      session_id: 'session-iter',
-      project_id: 'project-ready-iter',
-      content: '对，就这样改',
-      mode: 'quick',
-      current_stage: 'blocked_for_user_decision',
-      channel_id: 'test-channel',
-      metadata: { source: 'card_option', selected_option_id: 'confirm' },
     })
 
     expect(runIterationTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        project_id: 'project-ready-iter',
-        prompt: '改成那种九个数字按键的那种',
+        project_id: 'project-local',
+        prompt: expect.stringContaining('计算助手'),
+        localOnly: true,
       }),
     )
+    // 直接打字不弹卡、不付 LLM 意图判定
+    expect(events.some((event) => event.type === 'user_decision_required')).toBe(false)
+    expect(sdkCalled).toBe(false)
   })
 
-  it('ready 阶段纯进度追问走模型直答（P1 自由度归还），不误触发迭代', async () => {
+  it('ready 阶段纯进度追问走模型直答，不误触发迭代', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-ready-progress-'))
     process.env.PROMA_HOME = home
     const events: AgentEvent[] = []
@@ -135,10 +106,7 @@ describe('ready 护栏意图分流', () => {
       yield { type: 'result', subtype: 'success' }
     })
 
-    vi.mocked(findProject).mockReturnValue({
-      project_id: 'project-ready-progress',
-      current_stage: 'ready',
-    } as never)
+    vi.mocked(findProject).mockReturnValue({ project_id: 'project-ready-progress', current_stage: 'ready' } as never)
 
     await runAgent({
       request_id: 'req-progress',
@@ -155,257 +123,258 @@ describe('ready 护栏意图分流', () => {
       .filter((event) => event.type === 'message_delta')
       .map((event) => String(event.payload.text ?? ''))
       .join('')
-    // 直答采纳模型回复，不再落固定文案
     expect(deltas).toContain('生成好啦')
-    expect(deltas).not.toContain('想调整哪里直接告诉我，比如')
   })
 
-  it('ready 阶段「生成完整程序」类诉求命中 L1「完整」→ 弹确认卡，不付 LLM 往返、不挡回固定文案', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'proma-ready-complete-'))
-    process.env.PROMA_HOME = home
-    const events: AgentEvent[] = []
-    let sdkCalled = false
-    setAgentStreamPublisher((event) => events.push(event))
-    setSDKQueryForTests(async function* () {
-      sdkCalled = true
-      yield { type: 'result', subtype: 'success' }
-    })
-
-    vi.mocked(findProject).mockReturnValue({
-      project_id: 'project-ready-complete',
-      current_stage: 'ready',
-    } as never)
-
-    await runAgent({
-      request_id: 'req-complete',
-      session_id: 'session-complete',
-      project_id: 'project-ready-complete',
-      content: '生成完整程序',
-      mode: 'quick',
-      current_stage: 'ready',
-      channel_id: 'test-channel',
-    })
-
-    // L1 词表命中「完整」→ 修改确认门，而非固定文案 / L3 LLM
-    expect(runIterationTaskMock).not.toHaveBeenCalled()
-    expect(sdkCalled).toBe(false)
-    const decision = events.find((event) => event.type === 'user_decision_required')
-    expect(decision?.payload.kind).toBe('iteration_confirm')
-    const deltas = events
-      .filter((event) => event.type === 'message_delta')
-      .map((event) => String(event.payload.text ?? ''))
-      .join('')
-    expect(deltas).toContain('生成完整程序')
-    expect(deltas).not.toContain('已经生成好了')
-  })
-
-  it('ready 阶段「货不对板/否定」类反馈（"啥意思，我要音乐合成器"）→ 确认卡，reply 展示清洗后的「音乐合成器」', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'proma-ready-mismatch-'))
-    process.env.PROMA_HOME = home
-    const events: AgentEvent[] = []
-    setAgentStreamPublisher((event) => events.push(event))
-    setSDKQueryForTests(async function* () {
-      yield { type: 'result', subtype: 'success' }
-    })
-
-    vi.mocked(findProject).mockReturnValue({
-      project_id: 'project-ready-mismatch',
-      current_stage: 'ready',
-    } as never)
-
-    await runAgent({
-      request_id: 'req-mismatch',
-      session_id: 'session-mismatch',
-      project_id: 'project-ready-mismatch',
-      content: '啥意思，我要音乐合成器',
-      mode: 'quick',
-      current_stage: 'ready',
-      channel_id: 'test-channel',
-    })
-
-    // 不直接重生成，先确认；否定引导与口语前缀被清洗后展示
-    expect(runIterationTaskMock).not.toHaveBeenCalled()
-    const decision = events.find((event) => event.type === 'user_decision_required')
-    expect(decision?.payload.kind).toBe('iteration_confirm')
-    const deltas = events
-      .filter((event) => event.type === 'message_delta')
-      .map((event) => String(event.payload.text ?? ''))
-      .join('')
-    expect(deltas).toContain('「音乐合成器」')
-  })
-
-  it('ready 阶段模糊否定（L1 未命中、L2 疑似）经 L3 LLM 兜底判为修改 → 弹确认卡（非直接迭代）', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'proma-ready-l3-'))
-    process.env.PROMA_HOME = home
-    const events: AgentEvent[] = []
-    setAgentStreamPublisher((event) => events.push(event))
-    // L3 兜底调用：模型回答 modify
-    setSDKQueryForTests(async function* () {
-      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'modify' }] } }
-      yield { type: 'result', subtype: 'success' }
-    })
-
-    vi.mocked(findProject).mockReturnValue({
-      project_id: 'project-ready-l3',
-      workspace_slug: 'default-software-builder',
-      current_stage: 'ready',
-    } as never)
-
-    await runAgent({
-      request_id: 'req-l3',
-      session_id: 'session-l3',
-      project_id: 'project-ready-l3',
-      content: '怎么感觉不太对劲，这跟我想要的不一样啊',
-      mode: 'quick',
-      current_stage: 'ready',
-      channel_id: 'test-channel',
-    })
-
-    expect(runIterationTaskMock).not.toHaveBeenCalled()
-    const decision = events.find((event) => event.type === 'user_decision_required')
-    expect(decision?.payload.kind).toBe('iteration_confirm')
-  })
-
-  it('「进度词 + 修改动词」混合句（做完了没？把按钮换成蓝色）→ L1 命中弹确认卡，不被进度子串门挡回', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'proma-ready-mixed-'))
-    process.env.PROMA_HOME = home
-    const events: AgentEvent[] = []
-    let sdkCalled = false
-    setAgentStreamPublisher((event) => events.push(event))
-    setSDKQueryForTests(async function* () {
-      sdkCalled = true
-      yield { type: 'result', subtype: 'success' }
-    })
-
-    vi.mocked(findProject).mockReturnValue({
-      project_id: 'project-ready-mixed',
-      current_stage: 'ready',
-    } as never)
-
-    await runAgent({
-      request_id: 'req-mixed',
-      session_id: 'session-mixed',
-      project_id: 'project-ready-mixed',
-      content: '做完了没？把按钮换成蓝色',
-      mode: 'quick',
-      current_stage: 'ready',
-      channel_id: 'test-channel',
-    })
-
-    // 放行一致化回归：此前「做完了没」进度子串优先于 L1，整句被判 other 挡回固定文案
-    expect(runIterationTaskMock).not.toHaveBeenCalled()
-    expect(sdkCalled).toBe(false) // L1 毫秒级命中，无需 LLM 往返
-    const decision = events.find((event) => event.type === 'user_decision_required')
-    expect(decision?.payload.kind).toBe('iteration_confirm')
-    const deltas = events
-      .filter((event) => event.type === 'message_delta')
-      .map((event) => String(event.payload.text ?? ''))
-      .join('')
-    expect(deltas).not.toContain('已经生成好了')
-  })
-
-  it('L3 兜底应答为中文「修改」仍判 modify → 弹确认卡（\b 死正则回归）', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'proma-ready-l3-zh-'))
-    process.env.PROMA_HOME = home
-    const events: AgentEvent[] = []
-    setAgentStreamPublisher((event) => events.push(event))
-    setSDKQueryForTests(async function* () {
-      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '修改' }] } }
-      yield { type: 'result', subtype: 'success' }
-    })
-
-    vi.mocked(findProject).mockReturnValue({
-      project_id: 'project-ready-l3-zh',
-      workspace_slug: 'default-software-builder',
-      current_stage: 'ready',
-    } as never)
-
-    await runAgent({
-      request_id: 'req-l3-zh',
-      session_id: 'session-l3-zh',
-      project_id: 'project-ready-l3-zh',
-      content: '这配色看着有点刺眼',
-      mode: 'quick',
-      current_stage: 'ready',
-      channel_id: 'test-channel',
-    })
-
-    // 旧解析 /\b(...|修改|...)\b/ 的中文分支永不命中（\b 仅 ASCII），中文应答被误判 other
-    expect(runIterationTaskMock).not.toHaveBeenCalled()
-    const decision = events.find((event) => event.type === 'user_decision_required')
-    expect(decision?.payload.kind).toBe('iteration_confirm')
-  })
-
-  it('确认卡「不对，我重新说」/「不改了」→ 不迭代、pending 终结、阶段回 ready 并如实告知', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'proma-ready-rephrase-'))
+  it('就绪卡「保持现状」→ 回 ready 并顺势发「走向完整产物」引导卡，不迭代', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-keep-'))
     process.env.PROMA_HOME = home
     const events: AgentEvent[] = []
     setAgentStreamPublisher((event) => events.push(event))
     setSDKQueryForTests(defaultTestQuery)
 
-    for (const [projectId, optionId, label, expectedCopy] of [
-      ['project-rephrase', 'rephrase', '不对，我重新说', '好的，你想怎么改，直接说就行。'],
-      ['project-cancel', 'cancel', '不改了', '好的，先保持现在的版本。'],
-    ] as const) {
-      // 先制造 pending：ready 阶段修改诉求 → 确认卡
-      vi.mocked(findProject).mockReturnValue({ project_id: projectId, current_stage: 'ready' } as never)
-      await runAgent({
-        request_id: `req-${optionId}-1`,
-        session_id: `session-${optionId}`,
-        project_id: projectId,
-        content: '加一个历史记录',
-        mode: 'quick',
-        current_stage: 'ready',
-        channel_id: 'test-channel',
-      })
-      // 点决策卡
-      vi.mocked(findProject).mockReturnValue({ project_id: projectId, current_stage: 'blocked_for_user_decision' } as never)
-      await runAgent({
-        request_id: `req-${optionId}-2`,
-        session_id: `session-${optionId}`,
-        project_id: projectId,
-        content: label,
-        mode: 'quick',
-        current_stage: 'blocked_for_user_decision',
-        channel_id: 'test-channel',
-        metadata: { source: 'card_option', selected_option_id: optionId },
-      })
-    }
+    vi.mocked(findProject).mockReturnValue({ project_id: 'project-keep', current_stage: 'blocked_for_user_decision' } as never)
+    await runAgent({
+      request_id: 'req-keep',
+      session_id: 'session-keep',
+      project_id: 'project-keep',
+      content: '保持现状',
+      mode: 'quick',
+      current_stage: 'blocked_for_user_decision',
+      channel_id: 'test-channel',
+      metadata: { source: 'card_option', selected_option_id: 'keep' },
+    })
 
     expect(runIterationTaskMock).not.toHaveBeenCalled()
-    const deltas = events
-      .filter((event) => event.type === 'message_delta')
-      .map((event) => String(event.payload.text ?? ''))
-      .join('\n')
-    expect(deltas).toContain('好的，你想怎么改，直接说就行。')
-    expect(deltas).toContain('好的，先保持现在的版本。')
+    const decision = events.find((event) => event.type === 'user_decision_required')
+    expect(decision?.payload.kind).toBe('ready_next_steps')
     const stageEvents = events
       .filter((event) => event.type === 'stage_changed')
       .map((event) => String(event.payload.stage))
     expect(stageEvents).toContain('ready')
   })
 
-  it('确认卡过期（如重启后点旧卡，pending 已丢）→ 不迭代，如实说明过期并回 ready', async () => {
+  it('就绪卡「局部优化」→ 置补充态 + 回 ready；用户补充后走局部修改（localOnly），不再弹卡', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-optimize-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    setSDKQueryForTests(defaultTestQuery)
+
+    // 点「局部优化」
+    vi.mocked(findProject).mockReturnValue({ project_id: 'project-optimize', current_stage: 'blocked_for_user_decision' } as never)
+    await runAgent({
+      request_id: 'req-opt-1',
+      session_id: 'session-opt',
+      project_id: 'project-optimize',
+      content: '局部优化',
+      mode: 'quick',
+      current_stage: 'blocked_for_user_decision',
+      channel_id: 'test-channel',
+      metadata: { source: 'card_option', selected_option_id: 'optimize' },
+    })
+    expect(runIterationTaskMock).not.toHaveBeenCalled()
+    expect(
+      events
+        .filter((event) => event.type === 'message_delta')
+        .map((event) => String(event.payload.text ?? ''))
+        .join(''),
+    ).toContain('说说你想改哪里')
+
+    // 用户补充具体诉求 → 直接局部修改
+    events.length = 0
+    vi.mocked(findProject).mockReturnValue({ project_id: 'project-optimize', current_stage: 'ready' } as never)
+    await runAgent({
+      request_id: 'req-opt-2',
+      session_id: 'session-opt',
+      project_id: 'project-optimize',
+      content: '标题改成计算助手',
+      mode: 'quick',
+      current_stage: 'ready',
+      channel_id: 'test-channel',
+    })
+    expect(runIterationTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({ project_id: 'project-optimize', prompt: expect.stringContaining('计算助手'), localOnly: true }),
+    )
+    expect(events.some((event) => event.type === 'user_decision_required')).toBe(false)
+  })
+
+  it('就绪卡「整版重做」→ 置补充态；用户说方向 → 弹二次确认卡（不立即重做）→ 确定后整版重做（rebuild）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-rebuild-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    setSDKQueryForTests(defaultTestQuery)
+
+    // 点「整版重做」
+    vi.mocked(findProject).mockReturnValue({ project_id: 'project-rebuild', current_stage: 'blocked_for_user_decision' } as never)
+    await runAgent({
+      request_id: 'req-rebuild-1',
+      session_id: 'session-rebuild',
+      project_id: 'project-rebuild',
+      content: '整版重做',
+      mode: 'quick',
+      current_stage: 'blocked_for_user_decision',
+      channel_id: 'test-channel',
+      metadata: { source: 'card_option', selected_option_id: 'rebuild' },
+    })
+    expect(runIterationTaskMock).not.toHaveBeenCalled()
+    expect(
+      events
+        .filter((event) => event.type === 'message_delta')
+        .map((event) => String(event.payload.text ?? ''))
+        .join(''),
+    ).toContain('想往哪个方向重做')
+
+    // 用户说重做方向 → 二次确认卡（先不重做）
+    events.length = 0
+    vi.mocked(findProject).mockReturnValue({ project_id: 'project-rebuild', current_stage: 'ready' } as never)
+    await runAgent({
+      request_id: 'req-rebuild-2',
+      session_id: 'session-rebuild',
+      project_id: 'project-rebuild',
+      content: '改用卡片式布局',
+      mode: 'quick',
+      current_stage: 'ready',
+      channel_id: 'test-channel',
+    })
+    expect(runIterationTaskMock).not.toHaveBeenCalled()
+    const confirmCard = events.find((event) => event.type === 'user_decision_required')
+    expect(confirmCard?.payload.kind).toBe('rebuild_confirm')
+    const questions = confirmCard?.payload.questions as Array<{ id: string }> | undefined
+    expect(questions?.map((q) => q.id)).toEqual(['rebuild_confirm', 'rebuild_cancel'])
+
+    // 点「确定整版重做」→ 整版重做（rebuild: true，带已收集方向）
+    events.length = 0
+    vi.mocked(findProject).mockReturnValue({ project_id: 'project-rebuild', current_stage: 'blocked_for_user_decision' } as never)
+    await runAgent({
+      request_id: 'req-rebuild-3',
+      session_id: 'session-rebuild',
+      project_id: 'project-rebuild',
+      content: '确定整版重做',
+      mode: 'quick',
+      current_stage: 'blocked_for_user_decision',
+      channel_id: 'test-channel',
+      metadata: { source: 'card_option', selected_option_id: 'rebuild_confirm' },
+    })
+    expect(runIterationTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        project_id: 'project-rebuild',
+        prompt: expect.stringContaining('卡片式布局'),
+        rebuild: true,
+      }),
+    )
+
+    // UNPROVEN-2 补证（2026-09-11 审计）：真实 mergeIterationRequirements 把方向并入
+    // 需求清单（F1 修复锁：无渠道/无 query 时走回退追加，方向原文仍在清单中）
+    const { mergeIterationRequirements } = await import('../../main/programming-orchestrator')
+    const mergedRebuild = await mergeIterationRequirements(
+      {
+        request_id: 'req-merge-verify',
+        session_id: 'session-rebuild',
+        project_id: 'project-rebuild',
+        mode: 'quick',
+        prompt: '改用卡片式布局',
+      },
+      [{ id: 'F-001', description: '记录收入与支出', behavior_assertions: [], priority: 'P0' as const }],
+    )
+    expect(mergedRebuild.requirements.some((r) => String(r.description).includes('卡片式布局'))).toBe(true)
+  })
+
+  it('二次确认态打字补充方向 → 更新方向并重发确认卡，不静默跑局部修改（F-B 修复）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-rebuild-fb-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    setSDKQueryForTests(defaultTestQuery)
+
+    // 就绪卡「整版重做」→ 说方向 → 二次确认卡
+    vi.mocked(findProject).mockReturnValue({ project_id: 'project-fb', current_stage: 'blocked_for_user_decision' } as never)
+    await runAgent({
+      request_id: 'req-fb-1', session_id: 'session-fb', project_id: 'project-fb',
+      content: '整版重做', mode: 'quick', current_stage: 'blocked_for_user_decision',
+      channel_id: 'test-channel', metadata: { source: 'card_option', selected_option_id: 'rebuild' },
+    })
+    vi.mocked(findProject).mockReturnValue({ project_id: 'project-fb', current_stage: 'ready' } as never)
+    await runAgent({
+      request_id: 'req-fb-2', session_id: 'session-fb', project_id: 'project-fb',
+      content: '改用卡片式布局', mode: 'quick', current_stage: 'ready', channel_id: 'test-channel',
+    })
+
+    // 确认卡挂着时打字补充方向（blocked 态、无卡 metadata）→ 更新方向重发确认卡
+    events.length = 0
+    vi.mocked(findProject).mockReturnValue({ project_id: 'project-fb', current_stage: 'blocked_for_user_decision' } as never)
+    await runAgent({
+      request_id: 'req-fb-3', session_id: 'session-fb', project_id: 'project-fb',
+      content: '再改成深色主题', mode: 'quick', current_stage: 'blocked_for_user_decision',
+      channel_id: 'test-channel',
+    })
+    expect(runIterationTaskMock).not.toHaveBeenCalled()
+    const confirmCard = events.find((event) => event.type === 'user_decision_required')
+    expect(confirmCard?.payload.kind).toBe('rebuild_confirm')
+    expect(
+      events
+        .filter((event) => event.type === 'message_delta')
+        .map((event) => String(event.payload.text ?? ''))
+        .join(''),
+    ).toContain('深色主题')
+
+    // 点「确定整版重做」→ 用更新后的方向重做
+    events.length = 0
+    await runAgent({
+      request_id: 'req-fb-4', session_id: 'session-fb', project_id: 'project-fb',
+      content: '确定整版重做', mode: 'quick', current_stage: 'blocked_for_user_decision',
+      channel_id: 'test-channel', metadata: { source: 'card_option', selected_option_id: 'rebuild_confirm' },
+    })
+    expect(runIterationTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: expect.stringContaining('深色主题'), rebuild: true }),
+    )
+  })
+
+  it('二次确认卡「再想想」→ 不重做，回 ready 保持当前版本', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-rebuild-cancel-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    setSDKQueryForTests(defaultTestQuery)
+
+    vi.mocked(findProject).mockReturnValue({ project_id: 'project-rc', current_stage: 'blocked_for_user_decision' } as never)
+    await runAgent({
+      request_id: 'req-rc',
+      session_id: 'session-rc',
+      project_id: 'project-rc',
+      content: '再想想',
+      mode: 'quick',
+      current_stage: 'blocked_for_user_decision',
+      channel_id: 'test-channel',
+      metadata: { source: 'card_option', selected_option_id: 'rebuild_cancel' },
+    })
+
+    expect(runIterationTaskMock).not.toHaveBeenCalled()
+    const deltas = events
+      .filter((event) => event.type === 'message_delta')
+      .map((event) => String(event.payload.text ?? ''))
+      .join('')
+    expect(deltas).toContain('先保持现在的版本')
+  })
+
+  it('二次确认（状态丢失，无已收集方向）→ 如实说明过期，不重做', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-ready-expired-'))
     process.env.PROMA_HOME = home
     const events: AgentEvent[] = []
     setAgentStreamPublisher((event) => events.push(event))
     setSDKQueryForTests(defaultTestQuery)
 
-    vi.mocked(findProject).mockReturnValue({
-      project_id: 'project-expired',
-      current_stage: 'blocked_for_user_decision',
-    } as never)
-
+    vi.mocked(findProject).mockReturnValue({ project_id: 'project-expired', current_stage: 'blocked_for_user_decision' } as never)
     await runAgent({
       request_id: 'req-expired',
       session_id: 'session-expired',
       project_id: 'project-expired',
-      content: '对，就这样改',
+      content: '确定整版重做',
       mode: 'quick',
       current_stage: 'blocked_for_user_decision',
       channel_id: 'test-channel',
-      metadata: { source: 'card_option', selected_option_id: 'confirm' },
+      metadata: { source: 'card_option', selected_option_id: 'rebuild_confirm' },
     })
 
     expect(runIterationTaskMock).not.toHaveBeenCalled()
@@ -413,259 +382,10 @@ describe('ready 护栏意图分流', () => {
       .filter((event) => event.type === 'message_delta')
       .map((event) => String(event.payload.text ?? ''))
       .join('')
-    expect(deltas).toContain('确认卡片已过期')
+    expect(deltas).toContain('过期')
   })
 
-  it('ready 阶段纯进度追问不触发 L3 意图判定，唯一 LLM 往返是直答本身', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'proma-ready-nol3-'))
-    process.env.PROMA_HOME = home
-    const events: AgentEvent[] = []
-    let sdkCalls = 0
-    setAgentStreamPublisher((event) => events.push(event))
-    setSDKQueryForTests(async function* () {
-      sdkCalls += 1
-      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '早就好啦，预览区见。' }] } }
-      yield { type: 'result', subtype: 'success' }
-    })
-
-    vi.mocked(findProject).mockReturnValue({
-      project_id: 'project-ready-nol3',
-      current_stage: 'ready',
-    } as never)
-
-    await runAgent({
-      request_id: 'req-nol3',
-      session_id: 'session-nol3',
-      project_id: 'project-ready-nol3',
-      content: '好了吗',
-      mode: 'quick',
-      current_stage: 'ready',
-      channel_id: 'test-channel',
-    })
-
-    expect(runIterationTaskMock).not.toHaveBeenCalled()
-    // 进度门短路 L3（意图判定零往返），唯一的调用是 ready 直答
-    expect(sdkCalls).toBe(1)
-    const deltas = events
-      .filter((event) => event.type === 'message_delta')
-      .map((event) => String(event.payload.text ?? ''))
-      .join('')
-    expect(deltas).toContain('早就好啦')
-  })
-
-  it('BLOMA_READY_CHAT=off → 回退纯模板现状，零 LLM 往返', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'proma-ready-off-'))
-    process.env.PROMA_HOME = home
-    process.env.BLOMA_READY_CHAT = 'off'
-    try {
-      const events: AgentEvent[] = []
-      let sdkCalled = false
-      setAgentStreamPublisher((event) => events.push(event))
-      setSDKQueryForTests(async function* () {
-        sdkCalled = true
-        yield { type: 'result', subtype: 'success' }
-      })
-
-      vi.mocked(findProject).mockReturnValue({
-        project_id: 'project-ready-off',
-        current_stage: 'ready',
-      } as never)
-
-      await runAgent({
-        request_id: 'req-off',
-        session_id: 'session-off',
-        project_id: 'project-ready-off',
-        content: '好了吗',
-        mode: 'quick',
-        current_stage: 'ready',
-        channel_id: 'test-channel',
-      })
-
-      expect(sdkCalled).toBe(false)
-      const deltas = events
-        .filter((event) => event.type === 'message_delta')
-        .map((event) => String(event.payload.text ?? ''))
-        .join('')
-      expect(deltas).toContain('已经生成好了')
-      expect(deltas).toContain('想调整哪里直接告诉我')
-    } finally {
-      delete process.env.BLOMA_READY_CHAT
-    }
-  })
-
-  it('直答首次命中禁词（还没好）→ 带反馈重试一次；重试干净则采用重试结果', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'proma-ready-retry-'))
-    process.env.PROMA_HOME = home
-    const events: AgentEvent[] = []
-    let calls = 0
-    setAgentStreamPublisher((event) => events.push(event))
-    setSDKQueryForTests(async function* () {
-      calls += 1
-      const text = calls === 1 ? '还没好哦，再等等。' : '已经生成好啦，预览区就能玩。'
-      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }
-      yield { type: 'result', subtype: 'success' }
-    })
-
-    vi.mocked(findProject).mockReturnValue({
-      project_id: 'project-ready-retry',
-      current_stage: 'ready',
-    } as never)
-
-    await runAgent({
-      request_id: 'req-retry',
-      session_id: 'session-retry',
-      project_id: 'project-ready-retry',
-      content: '好了吗',
-      mode: 'quick',
-      current_stage: 'ready',
-      channel_id: 'test-channel',
-    })
-
-    expect(calls).toBe(2)
-    const deltas = events
-      .filter((event) => event.type === 'message_delta')
-      .map((event) => String(event.payload.text ?? ''))
-      .join('')
-    expect(deltas).toContain('已经生成好啦')
-    expect(deltas).not.toContain('还没好')
-    expect(deltas).not.toContain('想调整哪里直接告诉我，比如')
-  })
-
-  it('直答重试仍命中禁词 → 回退固定模板（最坏情况=现状零回归）', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'proma-ready-fallback-'))
-    process.env.PROMA_HOME = home
-    const events: AgentEvent[] = []
-    let calls = 0
-    setAgentStreamPublisher((event) => events.push(event))
-    setSDKQueryForTests(async function* () {
-      calls += 1
-      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '还没好，后台正在跑。' }] } }
-      yield { type: 'result', subtype: 'success' }
-    })
-
-    vi.mocked(findProject).mockReturnValue({
-      project_id: 'project-ready-fallback',
-      current_stage: 'ready',
-    } as never)
-
-    await runAgent({
-      request_id: 'req-fallback',
-      session_id: 'session-fallback',
-      project_id: 'project-ready-fallback',
-      content: '好了吗',
-      mode: 'quick',
-      current_stage: 'ready',
-      channel_id: 'test-channel',
-    })
-
-    expect(calls).toBe(2)
-    const deltas = events
-      .filter((event) => event.type === 'message_delta')
-      .map((event) => String(event.payload.text ?? ''))
-      .join('')
-    expect(deltas).toContain('已经生成好了')
-    expect(deltas).toContain('想调整哪里直接告诉我')
-  })
-
-  it('直答渠道故障（非取消）→ 回退固定模板，不打断完成态收口', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'proma-ready-chdown-'))
-    process.env.PROMA_HOME = home
-    const events: AgentEvent[] = []
-    setAgentStreamPublisher((event) => events.push(event))
-    setSDKQueryForTests(async function* () {
-      throw new Error('CHANNEL_DOWN')
-    })
-
-    vi.mocked(findProject).mockReturnValue({
-      project_id: 'project-ready-chdown',
-      current_stage: 'ready',
-    } as never)
-
-    await runAgent({
-      request_id: 'req-chdown',
-      session_id: 'session-chdown',
-      project_id: 'project-ready-chdown',
-      content: '好了吗',
-      mode: 'quick',
-      current_stage: 'ready',
-      channel_id: 'test-channel',
-    })
-
-    const deltas = events
-      .filter((event) => event.type === 'message_delta')
-      .map((event) => String(event.payload.text ?? ''))
-      .join('')
-    expect(deltas).toContain('已经生成好了')
-    const completed = events.find((event) => event.type === 'completed')
-    expect(completed).toBeDefined()
-  })
-
-  // 「我只需要理财房贷的计算器」线上案例：无修改动词、无否定/疑问语气词，
-  // 曾连漏 L1/L2 两层被 READY_COMPLETION_COPY 挡回（用户只能靠点选纠错按钮绕过）。
-  it('ready 阶段缩小范围类平静陈述（"我只需要理财房贷的计算器"）L1 直命中 → 确认卡，不付 LLM 往返', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'proma-ready-scope-'))
-    process.env.PROMA_HOME = home
-    const events: AgentEvent[] = []
-    let sdkCalled = false
-    setAgentStreamPublisher((event) => events.push(event))
-    setSDKQueryForTests(async function* () {
-      sdkCalled = true
-      yield { type: 'result', subtype: 'success' }
-    })
-
-    vi.mocked(findProject).mockReturnValue({
-      project_id: 'project-ready-scope',
-      current_stage: 'ready',
-    } as never)
-
-    await runAgent({
-      request_id: 'req-scope',
-      session_id: 'session-scope',
-      project_id: 'project-ready-scope',
-      content: '我只需要理财房贷的计算器',
-      mode: 'quick',
-      current_stage: 'ready',
-      channel_id: 'test-channel',
-    })
-
-    expect(runIterationTaskMock).not.toHaveBeenCalled()
-    expect(sdkCalled).toBe(false)
-    const decision = events.find((event) => event.type === 'user_decision_required')
-    expect(decision?.payload.kind).toBe('iteration_confirm')
-  })
-
-  it('ready 阶段平静陈述（零语气标记，L1 未命中）默认进 L3：LLM 判 modify → 确认卡', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'proma-ready-l3-plain-'))
-    process.env.PROMA_HOME = home
-    const events: AgentEvent[] = []
-    setAgentStreamPublisher((event) => events.push(event))
-    setSDKQueryForTests(async function* () {
-      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'modify' }] } }
-      yield { type: 'result', subtype: 'success' }
-    })
-
-    vi.mocked(findProject).mockReturnValue({
-      project_id: 'project-ready-l3-plain',
-      workspace_slug: 'default-software-builder',
-      current_stage: 'ready',
-    } as never)
-
-    await runAgent({
-      request_id: 'req-l3-plain',
-      session_id: 'session-l3-plain',
-      project_id: 'project-ready-l3-plain',
-      content: '界面太花了',
-      mode: 'quick',
-      current_stage: 'ready',
-      channel_id: 'test-channel',
-    })
-
-    expect(runIterationTaskMock).not.toHaveBeenCalled()
-    const decision = events.find((event) => event.type === 'user_decision_required')
-    expect(decision?.payload.kind).toBe('iteration_confirm')
-  })
-
-  it('ready 阶段纯寒暄应答（"谢谢"）走模型直答，不再是固定文案', async () => {
+  it('ready 阶段纯寒暄应答（"谢谢"）走模型直答，不误触发迭代', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-ready-ack-'))
     process.env.PROMA_HOME = home
     const events: AgentEvent[] = []
@@ -675,10 +395,7 @@ describe('ready 护栏意图分流', () => {
       yield { type: 'result', subtype: 'success' }
     })
 
-    vi.mocked(findProject).mockReturnValue({
-      project_id: 'project-ready-ack',
-      current_stage: 'ready',
-    } as never)
+    vi.mocked(findProject).mockReturnValue({ project_id: 'project-ready-ack', current_stage: 'ready' } as never)
 
     await runAgent({
       request_id: 'req-ack',

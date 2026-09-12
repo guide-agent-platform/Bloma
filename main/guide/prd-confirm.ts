@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentEvent, AgentSendMessageInput, ResearchIdea } from '../../shared/types'
 import { recordDecision } from '../decision-log'
+import { trackAnalytics } from '../platform-services'
 import { appendPrdRequirements, markPrdUserConfirmed, updatePrdAssertions } from '../document-engine'
 import { nextRequirementId, runSketchTask } from '../programming-orchestrator'
 import { earsifyRequirements } from '../requirement-earsifier'
 import { resolveChannelEnv } from '../runtime-fallback'
 import type { PrdBackplane, SketchRequirement } from '../sketch-engine'
-import { requirementAssertions, requirementPriority, requirementStory } from '../sketch-engine'
+import { backplaneAiCapabilities, backplaneKeyTasks, backplaneTemplateMeta, requirementAssertions, requirementImpliesBackend, requirementPriority, requirementStory } from '../sketch-engine'
 import type { SDKQuery } from '../orchestrator'
 
 /**
@@ -72,6 +73,9 @@ export function publishPrdConfirmCard(opts: {
   publish: (event: AgentEvent) => void
   /** 市调提炼想法（2026-08-29 灵感参考）：卡面可勾选采纳 */
   ideas?: ResearchIdea[]
+  /** R2（2026-09-12）：想法来源模式——agent=纯模型灵感建议 / scrape=市调提炼；
+ *  渲染端据此把想法区头如实标注，不冒充市调 */
+  ideasMode?: 'agent' | 'scrape'
   /** 审查被用户 override 后转入确认门时携带：如实标注「已忽略 N 个审查问题」，
    *  卡片 title 同步变体（不再自称「已通过裁判审查」——诚实披露）。 */
   reviewNote?: string
@@ -125,12 +129,24 @@ export function publishPrdConfirmCard(opts: {
         priority: requirementPriority(item),
         story: requirementStory(item),
         assertions: requirementAssertions(item),
+        // Phase 7 U4 J4：来源随卡透出（你已经决定的 vs 向导补充的）
+        ...(item.origin ? { origin: item.origin } : {}),
+        // C1a（P1，2026-09-11 审计⑧）：后端架构后果显影——留存信号词命中项标注，
+        // 确认时用户看得到「这条会让产品需要后端与数据持久化」，不再静默升级前后端分离；
+        // C1b 联动：game 豁免开启时轻留存不催生后端，徽标不亮
+        ...(requirementImpliesBackend(item, backplaneTemplateMeta(backplane, 'personal_tool').type) ? { implies_backend: true } : {}),
       })),
       out_of_scope: backplane.out_of_scope,
       assumptions: backplane.assumptions ?? [],
       constraints: backplane.constraints ?? [],
+      // Phase 2 M1：能力契约块随卡过目（开关 off/无 CAP → 空数组，卡片自动隐藏该段）
+      ai_capabilities: backplaneAiCapabilities(backplane),
+      // Phase 7 U1 H2：关键任务随卡过目（开关 off/无任务 → 空数组，卡片自动隐藏该段）
+      key_tasks: backplaneKeyTasks(backplane),
       expanded: input.mode === 'longterm',
       ideas,
+      // R2：模式随卡透出（渲染端想法区头如实标注）
+      ideas_mode: opts.ideasMode ?? 'scrape',
     },
     created_at: new Date().toISOString(),
   } as AgentEvent)
@@ -250,6 +266,34 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
     console.error('[prd-confirm] EARS 化失败（回退原断言，不阻塞草图）:', error)
   }
   // （「PRD 用户已确认」决策日志已提前至 EARS 化 await 之前落盘，见上）
+  // Phase 7 U5 J5（2026-09-10）：scope_confirmed 北极星地基事件——需求版本+key_tasks
+  // 标识随确认动作留存（append-only analytics；key_tasks 缺席时记 requirements 清单
+  // 兜底，事后可归因「确认时用户看到的关键任务是什么」）。失败不阻断确认链。
+  try {
+    const confirmedBackplane = confirmed ?? undefined
+    const keyTasks = confirmedBackplane ? backplaneKeyTasks(confirmedBackplane) : []
+    trackAnalytics({
+      request_id: input.request_id,
+      event: {
+        event_type: 'scope_confirmed',
+        project_id: input.project_id,
+        session_id: input.session_id,
+        payload: {
+          via: 'prd_confirm_card',
+          requirement_ids: (confirmedBackplane?.requirements ?? sketchRequirements).map((item) => item.id),
+          requirement_count: (confirmedBackplane?.requirements ?? sketchRequirements).length,
+          ...(confirmedBackplane?.user_confirmed_at ? { user_confirmed_at: confirmedBackplane.user_confirmed_at } : {}),
+          ...(keyTasks.length > 0
+            ? { key_tasks: keyTasks.map((task) => ({ task_id: task.task_id, label: task.label, must_deliver: task.must_deliver })) }
+            : {}),
+          ...(adopted.length > 0 ? { adopted_ideas_count: adopted.length } : {}),
+        },
+        privacy_level: 'research_safe',
+      },
+    })
+  } catch {
+    // 埋点失败不影响确认链
+  }
   // m-1：用户确认是已发生的行为事实——决策日志在 EARS 化 await 之前先落（abort 落在
   // EARS 化期间时「用户已确认」决策不得缺失），后续 ack/草图再按 abort 如实停止。
   recordDecision({

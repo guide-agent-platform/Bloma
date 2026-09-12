@@ -16,6 +16,14 @@
 
 export const IPC_CHANNELS = {
   AGENT_SEND_MESSAGE: 'agent:send-message',
+  /** 运行中转向（P0-1 steer，2026-09-08）：活跃主 loop 期间输入框改道本通道，批间注入 */
+  AGENT_STEER_MESSAGE: 'agent:steer-message',
+  /** I3 转向生效确认链（P7-7，2026-09-11）：中/高档影响卡三选回执 */
+  AGENT_STEER_RESOLVE: 'agent:steer-resolve',
+  /** I3：会话 steer 状态查询（渲染端刷新后状态条恢复） */
+  AGENT_STEER_QUERY: 'agent:steer-query',
+  /** 会话 fork（P0-2，2026-09-08）：从任意 user 消息重开，复制前缀到新会话 */
+  AGENT_FORK_SESSION: 'agent:fork-session',
   PASTED_IMAGE_SAVE: 'pasted-image:save',
   AGENT_STOP: 'agent:stop',
   AGENT_LIST_SESSIONS: 'agent:list-sessions',
@@ -95,6 +103,8 @@ export type ErrorCode =
   | 'AGENT_CANCELLED'
   | 'CHANNEL_NOT_FOUND'
   | 'SESSION_NOT_FOUND'
+  /** P0-2 fork：源会话找不到目标锚点 / 锚点非 user 文本消息（缺 entry_id+entry_timestamp 也归此码） */
+  | 'SESSION_FORK_ENTRY_NOT_FOUND'
   | 'API_KEY_DECRYPT_FAILED'
   | 'PERMISSION_REQUEST_NOT_FOUND'
   | 'PERMISSION_DENIED'
@@ -157,7 +167,7 @@ export const WORKFLOW_STAGES: readonly WorkflowStage[] = [
   'blocked_for_user_decision',
 ]
 
-export type SnapshotKind = 'sketch' | 'mvp' | 'iteration' | 'pre_risk' | 'upgrade' | 'rollback_guard'
+export type SnapshotKind = 'sketch' | 'mvp' | 'iteration' | 'pre_risk' | 'upgrade' | 'rollback_guard' | 'restored'
 export type ProviderType =
   | 'anthropic'
   | 'anthropic-compatible'
@@ -673,6 +683,97 @@ export interface AgentSendMessageResult {
   queued?: boolean
 }
 
+/**
+ * 运行中转向入参（P0-1 steer，2026-09-08 pi 差距方案 §1）：**形态复用 AgentSendMessageInput**
+ * （ipc 层走 validateAgentSend 同一清洗口径，无第二套校验）。语义差异：
+ * - 会话有活跃主 loop（delegationDepth 0 的 runAgentLoop）→ 入 steer 队列，工具批间注入
+ *   （内容以 `【用户中途补充】` 包裹，模型可识别优先级）；
+ * - 无活跃主 loop（空闲 / guide 单发 run / 后台间隙）→ 主进程内部回退 runAgent，
+ *   与 agent:send-message 行为完全一致（忙则入 SessionMessageQueue、空闲则开新 run）。
+ */
+export type AgentSteerMessageInput = AgentSendMessageInput
+
+/** I3 转向生效确认链（P7-7，2026-09-11，实施稿 §3）：steer 影响档位。
+ * v0 确定性关键词分级，**宁低勿高**——低档=简短确认即注入（与现状行为一致，误判代价最小）；
+ * 中档=新功能/改流程（影响卡三选）；高档=核心目标/数据模型转向（v0 建议「停止本轮」承接）。 */
+export type SteerImpact = 'low' | 'medium' | 'high'
+
+/** I3 状态机：received（已入队待注入）→ pending_impact（中/高档待用户确认）
+ * → merged_this_run（注入完成事件推进——不由对话层单方面宣布）
+ * | deferred_next_run（留待下一轮，形成可见待办）| rejected（未采用：用户选不改了/本轮停止）。 */
+export type SteerStatus = 'received' | 'pending_impact' | 'merged_this_run' | 'deferred_next_run' | 'rejected'
+
+export interface AgentSteerMessageResult {
+  session_id: string
+  /** true = 已入 steer 队列，当前主 loop 下一批间注入；回执气泡由 steer_injected 事件承担 */
+  steered: boolean
+  /** 队列中待注入条数（含本次；仅 steered=true 时有意义） */
+  pending?: number
+  /** steered=false：主进程已回退 runAgent，本字段为 send-message 语义结果（含 queued） */
+  fallback?: AgentSendMessageResult
+  /** I3（仅 BLOMA_STEER_CONFIRM=on 时返回）：本次 steer 状态与档位。后续状态由
+   *  steer_status 事件驱动（低档 received→注入后 merged；中/高档 pending_impact 等三选）。 */
+  status?: SteerStatus
+  impact?: SteerImpact
+  steer_id?: string
+}
+
+/** I3：影响卡三选回执（中档 [本轮就改/本轮完成后再改/不改了]；高档 [仍要本轮注入] 同通道）。 */
+export interface AgentSteerResolveInput extends RequestEnvelope {
+  session_id: string
+  steer_id: string
+  /** inject_now=本轮就改（入队注入）；defer=本轮完成后再改（可见待办）；reject=不改了 */
+  action: 'inject_now' | 'defer' | 'reject'
+}
+
+export interface AgentSteerResolveResult {
+  session_id: string
+  steer_id: string
+  status: SteerStatus
+}
+
+/** I3：会话 steer 状态查询（渲染端刷新后恢复状态条）。 */
+export interface AgentSteerQueryInput extends RequestEnvelope {
+  session_id: string
+}
+
+/** 主进程账本条目镜像（steer-queue.ts SteerLedgerEntry 的传输形态）。 */
+export interface SteerStatusItem {
+  steer_id: string
+  content: string
+  impact: SteerImpact
+  status: SteerStatus
+  /** 状态最后推进时间（epoch ms） */
+  updated_at: number
+}
+
+export interface AgentSteerQueryResult {
+  session_id: string
+  items: SteerStatusItem[]
+}
+
+/**
+ * 会话 fork 入参（P0-2，2026-09-08 pi 差距方案 §2）：从源会话的某条 user 消息处重开——
+ * 把「首行到该消息」的前缀复制进新会话文件，原会话一字不动。
+ * 锚点解析：v2 文件优先 entry_id（行 id）；旧文件无 id 时按 entry_timestamp 定位。
+ */
+export interface AgentForkSessionInput extends RequestEnvelope {
+  session_id: string
+  project_id: string
+  /** v2 行 id（8 位 hex）；缺省时用 entry_timestamp */
+  entry_id?: string
+  /** 目标 user 消息的落盘 timestamp（ms）；至少与 entry_id 二选一 */
+  entry_timestamp?: number
+}
+
+export interface AgentForkSessionResult {
+  /** fork 出的新会话 id（调用方续接会话时使用） */
+  new_session_id: string
+  forked: true
+  /** 复制进新会话的消息条数 */
+  copied_messages: number
+}
+
 export interface AgentCancelInput extends RequestEnvelope {
   session_id: string
   /** 可选 project_id：同项目不同会话切换/停止时一并中止全部顶层运行。旧客户端只传 session_id 仍兼容。 */
@@ -701,6 +802,8 @@ export interface AgentSessionRecord {
   /** delegation-persistence 阶段 1（2026-08-28）：委派子会话归属——重启后按 delegationId 找回 */
   parent_session_id?: string
   source_delegation_id?: string
+  /** P0-2 fork（2026-09-08）：本会话由哪个会话的哪条消息 fork 而来（源文件一字不动） */
+  fork_entry_id?: string
 }
 
 export interface AgentListSessionsInput extends RequestEnvelope {
@@ -775,12 +878,44 @@ export interface PermissionSetModeResult {
 /** Agent Loop 结束状态（loop-aware judge M4-B 用；与 main/agent-loop 的 AgentLoopResult.status 同构）。 */
 export type AgentLoopStatus = 'completed' | 'turn_limit' | 'budget_exhausted' | 'cancelled'
 
+/** W2-F4（咨询 D2/D4，2026-09-09）：loop 自验状态的宿主快照——终验失败 source 五分类的
+ *  确定性判据（loop 是否自测过/上次失败集/验证面是否全过）。由 attachUsage 从工具状态拼装，
+ *  纯增量字段，旧调用方零感知。 */
+/** P2a（2026-09-11）：loop 异常终止真实出口原因（纯增量观测字段，不改 status 语义）。 */
+export interface LoopTerminationDetail {
+  reason: 'degenerate_output'
+  /** 传输事故反馈重试次数（DEGENERATE_RETRY_LIMIT 内） */
+  retries: number
+}
+
+export interface LoopValidationSnapshot {
+  /** run_gwt_tests 执行次数（0=loop 从未自测） */
+  gwt_runs: number
+  /** run_api_contract_tests 执行次数（0=loop 从未验过 API 契约） */
+  api_contract_runs: number
+  /** 上一次 run_gwt_tests 的失败场景名集合（全过重置为空） */
+  last_gwt_failures: string[]
+  gwt_all_passed: boolean
+  api_all_passed: boolean
+  security_all_passed: boolean
+  /** W3 收口预检结果（BLOMA_PREFLIGHT 跑过才带；Phase 7 U1 H1 delivery_status 消费：false=有未过验证面，从严不称 verified） */
+  preflight_passed?: boolean
+  /** 已读文件版本戳（path→rev，W2-F1 证据包/候选指纹原料）；未启用版本戳功能时为空对象 */
+  file_revisions: Record<string, string>
+}
+
 /** JudgeInput 的 loop 元数据（M4-B）：judge 对 loop 异常终止态判「不达标/让渡」，不信模型自述。 */
 export interface AgentLoopJudgeMetadata {
   status: AgentLoopStatus
   turns: number
   finalText: string
   toolCalls: Array<{ name: string; turn: number }>
+  /** W2-F4：自验状态快照（终验 source 分类用）；存量/重建路径缺省无 */
+  validation?: LoopValidationSnapshot
+  /** P2a（2026-09-11 狗粮 94f449c6）：异常终止的真实出口原因——status 语义不变
+ *  （终验/裁判照旧），degenerate_output = 末轮输出退化（DSML/协议原文漏进正文），
+ *  与「真实跑满轮数」区分，防 turn_limit 标签误导归因与用户话术。 */
+  termination_detail?: LoopTerminationDetail
 }
 
 export interface AgentEvent {
@@ -818,6 +953,14 @@ export interface AgentEvent {
     | 'queued_started'
     /** 排队消息派发失败（onDropped 气泡，r79）：payload.queue_message_id / reason；渲染端红泡告知 */
     | 'queue_dropped'
+    /** 运行中转向已注入（P0-1 steer，2026-09-08）：payload 含 content（原文）/ message（包裹后全文）
+     *  / at_turn（注入所在轮）/ remaining（队列余量）；渲染端回执气泡对齐 queue_dropped 模式。
+     *  I3（P7-7，仅 BLOMA_STEER_CONFIRM=on）：payload 追加 steer_id / status='merged_this_run'
+     *  ——注入完成是状态推进到 merged 的唯一事实源（off 时 payload 字节不变）。 */
+    | 'steer_injected'
+    /** I3 转向生效确认链（P7-7，仅 on 时发）：steer 状态每次变化推送；payload 含
+     *  steer_id / content / impact / status / at。渲染端聊天流内嵌轻量状态条由此驱动。 */
+    | 'steer_status'
     /** 会话用量汇总（usage-guard 渲染层 2026-08-28）：loop 结束发布，渲染端显示透明条 */
     | 'usage_summary'
   payload: Record<string, unknown>
@@ -870,9 +1013,19 @@ export interface Project {
   via_agent_loop?: boolean
   /** 最近一次 Agent Loop 的结束状态（M4-B：judge loop-aware 读；resume 时透传给终验） */
   agent_loop_status?: AgentLoopStatus
+  /**
+   * 交付状态（Phase 7 U1 H1，2026-09-10）：这一版实际验证到什么程度的三态结论。
+   * 只由终验链路规则函数计算写入（main/coding/delivery-status.ts），Agent/loop 工具面
+   * 无写入口；每次终验重算——旧版本通过不给新版本背书。BLOMA_DELIVERY_STATUS
+   * 缺省 off=不计算不写入（project 无此键，字节级现状）。
+   */
+  delivery_status?: DeliveryStatus
   created_at: string
   updated_at: string
 }
+
+/** 交付状态三态（Phase 7 U1 H1，规则见 main/coding/delivery-status.ts）。 */
+export type DeliveryStatus = 'verified' | 'partial' | 'unavailable'
 
 export interface ConfirmSketchInput extends RequestEnvelope {
   project_id: string
@@ -1051,6 +1204,8 @@ export interface SnapshotCreateInput extends RequestEnvelope {
   summary: string
   include_documents: boolean
   health_status: HealthStatus
+  /** 恢复指针（Phase 7 U3 I6）：restored 快照指向被恢复的源版本；其余 kind 忽略 */
+  derived_from?: string
 }
 
 export interface Snapshot {
@@ -1064,6 +1219,9 @@ export interface Snapshot {
   documents_archive_path?: string
   health_status: HealthStatus
   parent_snapshot_id?: string
+  /** 恢复指针（Phase 7 U3 I6，2026-09-10）：restored 快照指向被恢复的源版本——
+   * 「第 N 版·从第 M 版恢复」的指针链；其余 kind 缺省无。 */
+  derived_from?: string
   created_at: string
 }
 
@@ -1205,9 +1363,18 @@ export interface AnalyticsTrackInput extends RequestEnvelope {
       | 'repair_round_completed'
       | 'agent_loop_turn'
       | 'agent_loop_completed'
+      | 'agent_loop_compact'
+      | 'test_completed'
+      | 'experience_exposure'
       | 'judge_verdict'
       | 'satisfaction_marked'
       | 'project_finalized'
+      /** Phase 7 U5 J5（2026-09-10）：北极星地基事件 */
+      | 'scope_confirmed'
+      | 'delivery_presented'
+      /** Phase 7 U5 J5（P7-9b，2026-09-10）：漏斗中层与决策转化事件 */
+      | 'clarification_responded'
+      | 'decision_selected'
     project_id?: string
     session_id?: string
     payload: Record<string, unknown>
@@ -1231,6 +1398,14 @@ export type ElectronAPI = {
   }
   agent: {
     sendMessage(input: AgentSendMessageInput): Promise<ApiResult<AgentSendMessageResult>>
+    /** P0-1 steer：活跃主 loop 期间输入框改道；无活跃 loop 时主进程回退 send-message 语义 */
+    steerMessage(input: AgentSteerMessageInput): Promise<ApiResult<AgentSteerMessageResult>>
+    /** I3 转向确认链：中/高档影响卡三选回执（inject_now/defer/reject） */
+    steerResolve(input: AgentSteerResolveInput): Promise<ApiResult<AgentSteerResolveResult>>
+    /** I3：会话 steer 状态查询（渲染端刷新后状态条恢复） */
+    steerQuery(input: AgentSteerQueryInput): Promise<ApiResult<AgentSteerQueryResult>>
+    /** P0-2 fork：从任意 user 消息重开（复制前缀到新会话），返回新会话 id */
+    forkSession(input: AgentForkSessionInput): Promise<ApiResult<AgentForkSessionResult>>
     cancel(input: AgentCancelInput): Promise<ApiResult<AgentCancelResult>>
     listSessions(input: AgentListSessionsInput): Promise<ApiResult<AgentListSessionsResult>>
     loadMessages(input: AgentLoadMessagesInput): Promise<ApiResult<AgentLoadMessagesResult>>

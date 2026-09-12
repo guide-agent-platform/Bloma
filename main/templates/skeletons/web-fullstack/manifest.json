@@ -12,11 +12,11 @@
   "files": [
     {
       "path": "index.html",
-      "role": "唯一入口页：布局分区骨架（导航/主区/状态/页脚），业务内容待填充"
+      "role": "唯一入口页：布局分区骨架（导航/主区/状态/页脚）；已预置构建产物承接位 <script src=\"./dist/app.js\" defer>——业务逻辑写 src/ 模块经构建打包注入，勿内联业务脚本"
     },
     {
       "path": "src/app.js",
-      "role": "逻辑入口（兼构建入口）：状态/渲染/事件三段骨架；模块化可选——可拆分 src/ 下多个 .js 用 import 组织，构建门禁会打包校验"
+      "role": "逻辑入口（兼构建入口）：状态/渲染/事件三段骨架；src/ 下模块可用 import/ESM 组织，收尾由平台 esbuild 打包为 dist/app.js 供页面加载；数据持久化按 PRD 契约走 server/routes 后端（禁 localStorage 作唯一持久化）"
     },
     {
       "path": "src/styles.css",
@@ -25,6 +25,11 @@
     {
       "path": "src/examples/data-module.js",
       "role": "只读参考示例：中性数据模块模式（内联数据 + 增删改查纯函数 + 渲染分离）——参考结构与模式，不要照抄业务内容",
+      "readonly": true
+    },
+    {
+      "path": "server/routes/_example.js",
+      "role": "只读参考样例：server/routes 路由模块的 CJS 格式（module.exports={'METHOD /path':fn}，static-server require 加载禁 ESM；文件名即 /api/ 前缀）——实现业务路由时按此格式新建 <资源>.js，不要直接改本文件",
       "readonly": true
     }
   ]

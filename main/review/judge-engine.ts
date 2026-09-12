@@ -1,15 +1,17 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { AgentLoopJudgeMetadata, ProjectMode } from '../../shared/types'
+import type { AgentLoopJudgeMetadata, LoopTerminationDetail, ProjectMode } from '../../shared/types'
 import { getDocumentsDir } from '../../storage/config-paths'
 import type { GwtTestResult } from '../gwt-service'
 import { findProject } from '../project-service'
 import { TEMPLATE_META_VERSION } from '../sketch-engine'
 import { isInjectionEnabled } from '../template-injection'
 import { readPrdBackplane, readUxContractSketch } from '../document-engine'
-import { escapeHtml, requirementAssertions, requirementPriority, type SketchRequirement } from '../sketch-engine'
+import { escapeHtml, requirementAssertions, requirementPriority, backplaneAiCapabilities, type SketchRequirement } from '../sketch-engine'
 import { hasInteractiveEntry } from '../gwt-service'
 import { parseBehaviorAssertion } from '../behavior-assertions'
+import { antidegradeEnabled, detectAntidegrade } from './judge-antidegrade'
+import { recordFailureCards } from '../experience/error-card'
 
 /**
  * JudgeEngine（A2-10 + 2026-08-17 §8.1 行为门禁）——只判定、不修改代码。
@@ -55,16 +57,18 @@ export function runJudge(input: JudgeInput): JudgeVerdict {
   // M4-B loop-aware 分支（在磁盘读判之前）：loop 未正常收尾（turn_limit / budget_exhausted /
   // cancelled）→ 硬约束失败且 repairable=false——产物即使「能跑」也不放行，绝不凭模型自述放行。
   if (input.loop && input.loop.status !== 'completed') {
+    const termination = input.loop.termination_detail
+    const statusLabel = loopStatusLabel(input.loop.status, termination)
     const loopConstraint: JudgeConstraint = {
       name: 'Agent Loop 完成状态',
       passed: false,
-      detail: `自动生成未正常收尾（${loopStatusLabel(input.loop.status)}，${input.loop.turns} 轮），产物不能直接交付`,
+      detail: `自动生成未正常收尾（${statusLabel}，${input.loop.turns} 轮），产物不能直接交付`,
     }
     return {
       verdict: 'return',
       hard_constraints: [loopConstraint],
       soft_constraints: [],
-      user_visible_summary: `自动生成没有正常收尾（${loopStatusLabel(input.loop.status)}），需要你决定怎么处理。`,
+      user_visible_summary: `自动生成没有正常收尾（${statusLabel}），需要你决定怎么处理。`,
       repairable: false,
     }
   }
@@ -96,7 +100,31 @@ export function runJudge(input: JudgeInput): JudgeVerdict {
   const indexHtml = readProjectHtml(project.root_path)
   const appJs = readProjectAppJs(project.root_path)
   const codeConsistency = evaluateBehaviorAssertions(requirements, indexHtml, appJs, artifact, input.test_result)
-  const hardConstraints: JudgeConstraint[] = [prdPresent, gwtCoverage, codeConsistency]
+  // Phase 3 B4（2026-09-09）：反退化硬约束（规则先行层，LLM 语义腿之前拒已知坏实现）。
+  // 开关 off=现状（约束不追加，判定逐字节不变）；ai-mock-frontend 以前端产物必含
+  // fetch('/api/llm') 的平台接入形态为口径（server 侧无需读——/api/llm 由平台产物服务器提供）。
+  const antidegrade = antidegradeEnabled()
+    ? detectAntidegrade({ artifact, caps: backplaneAiCapabilities(backplane) })
+    : []
+  // C3（2026-09-09）：反退化 findings 同步落负经验卡（fire-and-forget；experience 开关 off
+  // 时 recordFailureCards 内部零副作用——判定链路字节不变）
+  if (antidegrade.length > 0) {
+    recordFailureCards({ projectId: input.project_id }, { antidegrade })
+  }
+  const hardConstraints: JudgeConstraint[] = [
+    prdPresent,
+    gwtCoverage,
+    codeConsistency,
+    ...(antidegrade.length > 0 || antidegradeEnabled()
+      ? [
+          {
+            name: '能力反退化（已知坏实现）',
+            passed: antidegrade.length === 0,
+            detail: antidegrade.length === 0 ? '无 AI 冒充/无需求依据控件等已知坏实现形态' : antidegrade.map((f) => f.detail).join('；'),
+          },
+        ]
+      : []),
+  ]
 
   // ── 软约束 ──
   const softConstraints: JudgeConstraint[] = []
@@ -275,8 +303,11 @@ function extractCssClasses(html: string): string[] {
   return [...classes]
 }
 
-/** Agent Loop 异常终止态 → 用户可读标签（loop-aware judge 的 user_visible_summary 用）。 */
-function loopStatusLabel(status: AgentLoopJudgeMetadata['status']): string {
+/** Agent Loop 异常终止态 → 用户可读标签（loop-aware judge 的 user_visible_summary 用）。
+ *  P2a（2026-09-11 狗粮 94f449c6）：degenerate_output 出口如实标注「输出退化」而非
+ *  「达到轮次上限」——当晚 37/40 轮被误读为轮数耗尽，实际是末轮 DSML 传输事故。 */
+function loopStatusLabel(status: AgentLoopJudgeMetadata['status'], termination?: LoopTerminationDetail): string {
+  if (termination?.reason === 'degenerate_output') return `末轮输出退化（传输事故，非轮数耗尽）`
   switch (status) {
     case 'turn_limit':
       return '达到轮次上限'

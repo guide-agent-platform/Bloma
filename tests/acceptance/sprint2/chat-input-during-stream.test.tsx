@@ -197,4 +197,76 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
     expect(screen.getByText('抖动场景消息')).toBeTruthy()
     expect(screen.getByText('排队中')).toBeTruthy()
   })
+
+  // 「提出新想法」动作链（2026-09-08）：超时态点击 → 收起进度卡 + 聚焦输入框 + 灰字排队提示；
+  // Enter 提交后提示消失、消息走既有 message-queue（不丢、run 完派发）。
+  it('超时态点击「提出新想法」：提示出现 + 输入框聚焦，Enter 提交后提示消失并入队', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-08T00:00:00.000Z'))
+    Element.prototype.scrollIntoView = vi.fn()
+
+    const store = createStore()
+    store.set(activeAgentSessionIdAtom, 'session-1')
+    store.set(workflowStageAtom, 'generating_mvp')
+    store.set(agentStreamStateFamily('session-1'), { running: true, events: [], content: '' })
+    window.__jotai_store__ = store
+
+    const onSend = vi.fn()
+    const { container } = render(
+      <Provider store={store}>
+        <ChatPanel onSendMessage={onSend} />
+      </Provider>,
+    )
+
+    // 推进到超时态（>120s）：等待卡出现「提出新想法」
+    act(() => {
+      vi.advanceTimersByTime(121_000)
+    })
+    const ideaButton = screen.getByRole('button', { name: '提出新想法' })
+    expect(container.querySelector('[data-ai-id=idea-hint]')).toBeNull()
+
+    fireEvent.click(ideaButton)
+    expect(container.querySelector('[data-ai-id=idea-hint]')).toBeTruthy()
+    const input = screen.getByRole('textbox')
+    expect(document.activeElement).toBe(input)
+
+    fireEvent.change(input, { target: { value: '再加一个排行榜' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onSend).toHaveBeenCalledWith('再加一个排行榜')
+    expect(container.querySelector('[data-ai-id=idea-hint]')).toBeNull()
+    expect(screen.getByText('排队中')).toBeTruthy()
+  })
+
+  it('进度卡内「提出新想法」：点击后收起进度卡并显示排队提示', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-08T00:00:00.000Z'))
+    Element.prototype.scrollIntoView = vi.fn()
+
+    const store = createStore()
+    store.set(activeAgentSessionIdAtom, 'session-1')
+    store.set(workflowStageAtom, 'generating_mvp')
+    store.set(agentStreamStateFamily('session-1'), { running: true, events: [], content: '' })
+    window.__jotai_store__ = store
+
+    const onSend = vi.fn()
+    const { container } = render(
+      <Provider store={store}>
+        <ChatPanel onSendMessage={onSend} />
+      </Provider>,
+    )
+
+    act(() => {
+      vi.advanceTimersByTime(121_000)
+    })
+    fireEvent.click(screen.getByRole('button', { name: '查看进度' }))
+    expect(container.querySelector('[data-ai-id=progress-card]')).toBeTruthy()
+
+    // 超时态等待卡与进度卡各有一个同名按钮，后者是进度卡内链接
+    const ideaButtons = screen.getAllByRole('button', { name: '提出新想法' })
+    expect(ideaButtons).toHaveLength(2)
+    fireEvent.click(ideaButtons[1])
+
+    expect(container.querySelector('[data-ai-id=progress-card]')).toBeNull()
+    expect(container.querySelector('[data-ai-id=idea-hint]')).toBeTruthy()
+  })
 })

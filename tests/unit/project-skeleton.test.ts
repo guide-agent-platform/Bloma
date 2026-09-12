@@ -162,7 +162,7 @@ describe('project-skeleton（PR-1：骨架包 + 渲染 + 注入⑥骨架地图�
     })
   })
 
-  describe('骨架内容自检（沙箱口径：静态产物 / 禁外联 / 禁 ESM）', () => {
+  describe('骨架内容自检（工程链口径：骨架源文件零依赖可直接加载；产物经 esbuild 打包后加载）', () => {
     it('index.html：以 </html> 结尾、含 <style>（isHtmlDocument 判据）、结构标签配平', () => {
       const skeleton = loadSkeletonTemplate('web_fullstack')!
       const html = readFileSync(join(skeleton.baseDir, 'index.html'), 'utf8')
@@ -178,13 +178,47 @@ describe('project-skeleton（PR-1：骨架包 + 渲染 + 注入⑥骨架地图�
       expect(html).not.toMatch(/<link[^>]+href\s*=\s*["']https?:\/\//i)
     })
 
-    it.each(['src/app.js', 'src/examples/data-module.js'])('%s：无 fetch/XHR/import/外链（骨架不教坏 agent）', (path) => {
+    it('A1 script 承接位：index.html 预置构建产物引用 dist/app.js（不再直接引源文件）', () => {
+      const skeleton = loadSkeletonTemplate('web_fullstack')!
+      const html = readFileSync(join(skeleton.baseDir, 'index.html'), 'utf8')
+      expect(html).toContain('<script src="./dist/app.js" defer></script>')
+      expect(html).not.toContain('<script src="src/app.js">')
+    })
+
+    it.each(['src/app.js', 'src/examples/data-module.js'])('%s：无 fetch/XHR/import/外链（骨架源文件自身零依赖，可直接加载）', (path) => {
       const skeleton = loadSkeletonTemplate('web_fullstack')!
       const js = readFileSync(join(skeleton.baseDir, path), 'utf8')
       expect(js).not.toMatch(/\bfetch\s*\(/)
       expect(js).not.toMatch(/XMLHttpRequest/)
       expect(js).not.toMatch(/^\s*import\s/m)
       expect(js).not.toMatch(/https?:\/\//)
+    })
+
+    it('A1 口径对齐：app.js 头部注释不再禁 ESM/localStorage 唯一化，改为构建链 + server/routes 口径', () => {
+      const skeleton = loadSkeletonTemplate('web_fullstack')!
+      const js = readFileSync(join(skeleton.baseDir, 'src/app.js'), 'utf8')
+      // 旧矛盾注释（禁 ESM / 禁网络 / localStorage 内联）必须清除——审计案 35c1a633 根因①
+      expect(js).not.toContain('不使用 import/ESM 模块语法')
+      expect(js).not.toContain('不发起任何网络请求')
+      expect(js).not.toContain('数据一律内联或 localStorage')
+      // 新口径：构建链与后端持久化显影
+      expect(js).toContain('dist/app.js')
+      expect(js).toContain('server/routes')
+    })
+
+    it('A2 路由样例：server/routes/_example.js 在骨架清单内，CJS 格式（module.exports，无 ESM 语法）且不挂真实路由', () => {
+      const skeleton = loadSkeletonTemplate('web_fullstack')!
+      const entry = skeleton.files.find((file) => file.path === 'server/routes/_example.js')
+      expect(entry).toBeDefined()
+      expect(entry?.readonly).toBe(true)
+      const js = readFileSync(join(skeleton.baseDir, 'server/routes/_example.js'), 'utf8')
+      expect(js).toContain("module.exports = {}")
+      expect(js).toContain("'GET /'")
+      // 真实路由代码全部在注释里（样例不挂载任何端点，require 零副作用）
+      expect(js.replace(/^\s*(\/\/|\*|\/\*\*).*$/gm, '')).not.toMatch(/module\.exports\s*=\s*\{[^}]/)
+      // CJS 契约关键词（static-server require 加载 / 禁 ESM）必有一数
+      expect(js).toContain('CommonJS')
+      expect(js).toContain('禁用 ESM')
     })
 
     it('examples 中性：不含业务化中文词条（防照抄业务内容）', () => {

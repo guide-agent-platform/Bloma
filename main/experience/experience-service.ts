@@ -2,7 +2,11 @@ import { existsSync, mkdirSync, readFileSync, appendFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { getExperienceIndexPath, getGeneratedProjectsDir } from '../../storage/config-paths'
+import { trackAnalytics } from '../platform-services'
+import { cardThreatensProtectedSurface } from './self-cert-guard'
+import type { ValidationReport } from './types'
 import {
+  cardGovernance,
   EXPERIENCE_GOVERNANCE,
   computeFingerprint,
   experienceEnabled,
@@ -154,8 +158,10 @@ export async function registerCandidateCard(card: ExperienceCard): Promise<Exper
 }
 
 /** 入册内核：指纹窗口折叠 / **跨项目** recurrence 合并（seen_projects 单一事实源，
- * 同项目重复观测不重复计数，幂等）/ 新卡落盘。 */
-async function registerCore(card: ExperienceCard): Promise<ExperienceCard> {
+ * 同项目重复观测不重复计数，幂等）/ 新卡落盘。C1（2026-09-09）：所有注册路径必经
+ * 此处——新卡统一补治理默认值（governance 缺失时按 cardGovernance 规则派生，单点）。 */
+async function registerCore(rawCard: ExperienceCard): Promise<ExperienceCard> {
+  const card: ExperienceCard = rawCard.governance ? rawCard : { ...rawCard, governance: cardGovernance(rawCard) }
   const now = Date.now()
   const existing = findSameFingerprint(card.fingerprint, card.kind)
   if (existing) {
@@ -254,7 +260,7 @@ export async function reportReplayOutcomes(
     }
     if (card.status === 'candidate' && o.passed) {
       await promoteToVerified(card.id, 'replay_green')
-    } else if (card.status === 'verified') {
+    } else if (card.status === 'verified' || card.status === 'active') {
       await reportInjection(card.id, o.passed ? 'matched' : 'false_positive')
     }
   }
@@ -280,6 +286,62 @@ export async function promoteToVerified(id: string, verifiedBy: VerificationMeth
   next.updated_at = next.last_verified_at
   appendCard(next)
   console.log(`${LOG} promoted card to verified:`, id, verifiedBy)
+  return next
+}
+
+/**
+ * C2a 晋升门槛清单（fail-closed）：升 active 需①已 verified（机制验证）②≥1 条 migration
+ * 层 pass 报告（未参与提取的同类未见任务）③≥1 条 negative 层 pass 报告（相近不适用任务
+ * 无误触发）。返回缺失项（空数组 = 可升）。
+ */
+export function promotionBlockers(card: ExperienceCard): string[] {
+  const blockers: string[] = []
+  if (card.status === 'retired') return ['卡已退役']
+  if (card.status === 'candidate') blockers.push('需先 verified（机制验证：replay/sandbox/human）')
+  const reports = card.governance?.validationReports ?? []
+  const hasPass = (layer: ValidationReport['layer']) => reports.some((r) => r.layer === layer && r.outcome === 'pass')
+  if (!hasPass('migration')) blockers.push('缺迁移验证报告（≥1 条同类未见任务 pass，任务不得参与经验提取）')
+  if (!hasPass('negative')) blockers.push('缺负例验证报告（≥1 条相近不适用任务无误触发 pass）')
+  return blockers
+}
+
+/** 手工登记验证报告（C2a 人工复核通道；也承接未来 C2b bench 自动报告）。 */
+export async function registerValidationReport(
+  id: string,
+  report: { layer: ValidationReport['layer']; task_ref: string; outcome: 'pass' | 'fail'; note?: string },
+): Promise<ExperienceCard | null> {
+  const card = ensureIndex().get(id)
+  if (!card || card.status === 'retired') return null
+  if (!report.task_ref.trim()) return null
+  const next = cloneCard(card)
+  const entry: ValidationReport = { id: randomUUID(), ...report, at: Date.now() }
+  next.governance = next.governance ?? cardGovernance(next)
+  next.governance.validationReports = [...(next.governance.validationReports ?? []), entry]
+  next.governance.validationReportIds = next.governance.validationReports.map((r) => r.id)
+  next.updated_at = Date.now()
+  appendCard(next)
+  console.log(`${LOG} validation report registered:`, id, report.layer, report.outcome)
+  return next
+}
+
+/**
+ * 升 active（C2a）：promotionBlockers 非空一律拒（fail-closed——无迁移证据的卡升不了
+ * active，P2 稿铁律）；成功后 last_verified_at 刷新。
+ */
+export async function promoteToActive(id: string): Promise<ExperienceCard | null> {
+  const card = ensureIndex().get(id)
+  if (!card) return null
+  const blockers = promotionBlockers(card)
+  if (blockers.length > 0) {
+    console.warn(`${LOG} promoteToActive blocked (fail-closed):`, id, blockers.join('；'))
+    return null
+  }
+  const next = cloneCard(card)
+  next.status = 'active'
+  next.last_verified_at = Date.now()
+  next.updated_at = next.last_verified_at
+  appendCard(next)
+  console.log(`${LOG} promoted card to active:`, id)
   return next
 }
 
@@ -343,6 +405,8 @@ export interface InjectionQuery {
   include_stale?: boolean
   limit?: number
   budget_chars?: number
+  /** 曝光日志面标签（C5）：调用方标明注入面（如 'judge_checklist'）；缺省 'generic' */
+  surface?: string
 }
 
 function keywordOverlap(hint: string | undefined, card: ExperienceCard): number {
@@ -362,7 +426,7 @@ function keywordOverlap(hint: string | undefined, card: ExperienceCard): number 
 
 function relevanceScore(card: ExperienceCard, query: InjectionQuery, now: number): number {
   let score = 0
-  if (card.status === 'verified') score += 10
+  if (card.status === 'verified' || card.status === 'active') score += 10
   score += Math.min(card.recurrence, 5)
   if (keywordOverlap(query.context_hint, card) > 0) score += 6 + keywordOverlap(query.context_hint, card)
   if (query.tag_prefix && card.tag.startsWith(query.tag_prefix)) score += 2
@@ -401,19 +465,51 @@ export async function selectForInjection(query: InjectionQuery): Promise<Experie
       .filter((c) => query.include_stale || !isStale(c, now))
       .filter((c) => matchesFilters(c, query))
       .sort((a, b) => relevanceScore(b, query, now) - relevanceScore(a, query, now) || b.updated_at - a.updated_at)
+    // C4 自证防护（2026-09-09）：教唆绕过受保护面的卡不得进入注入面（拦注入不删卡，fail-safe）
+    const guarded = candidates.filter((c) => {
+      const threatens = cardThreatensProtectedSurface(c)
+      if (threatens) console.warn(`${LOG} [self-cert-guard] 卡 ${c.id}（${c.tag}）命中绕过指令模式，已拦出注入面`)
+      return !threatens
+    })
     const picked: ExperienceCard[] = []
     let used = 0
-    for (const card of candidates) {
+    for (const card of guarded) {
       const cost = cardRenderCost(card)
       if (used + cost > budget) break // 整条取舍
       picked.push(cloneCard(card))
       used += cost
       if (picked.length >= limit) break
     }
+    recordExposure(query.surface ?? 'generic', candidates, guarded, picked)
     return picked
   } catch (error) {
     console.warn(`${LOG} select failed, empty list:`, (error as Error)?.message)
     return []
+  }
+}
+
+/**
+ * 曝光日志（C5，2026-09-09）：每次注入面调用落一条 analytics——可检索集/命中集/实际注入
+ * （id+状态+schema 版本）。「没效果」从此可区分 内容无效 / 没检索到 / 被拦。fire-and-forget，
+ * 失败静默（曝光日志不能反向阻断注入）。
+ */
+function recordExposure(surface: string, retrievable: ExperienceCard[], matched: ExperienceCard[], injected: ExperienceCard[]): void {
+  try {
+    trackAnalytics({
+      request_id: `exp-exposure-${Date.now()}`,
+      event: {
+        event_type: 'experience_exposure',
+        payload: {
+          surface,
+          retrievable: retrievable.slice(0, 20).map((c) => ({ id: c.id, status: c.status, tag: c.tag })),
+          matched: matched.slice(0, 20).map((c) => c.id),
+          injected: injected.map((c) => ({ id: c.id, status: c.status, schema_version: c.schema_version, tag: c.tag })),
+        },
+        privacy_level: 'research_safe',
+      },
+    })
+  } catch {
+    // 静默：曝光失败不影响注入主链路
   }
 }
 

@@ -115,6 +115,9 @@ describe('需求确认弹窗（confirm_requirements）', () => {
   beforeEach(() => {
     // 委派审查默认开启：单测固定走直连路径（委派链路由 review-delegation 专属测试覆盖）
     process.env.BLOMA_DELEGATED_REVIEW = '0'
+    // R2（2026-09-12）：本文件多数用例验证 scrape 市调链路（搜索/想法提炼），
+    // 钉到 scrape；agent 模式专属用例内自行改回
+    process.env.BLOMA_RESEARCH_MODE = 'scrape'
     home = mkdtempSync(join(tmpdir(), 'proma-req-confirm-'))
     process.env.PROMA_HOME = home
     mkdirSync(join(home, 'agent-sessions'), { recursive: true })
@@ -135,8 +138,30 @@ describe('需求确认弹窗（confirm_requirements）', () => {
 
   afterEach(() => {
     delete process.env.BLOMA_DELEGATED_REVIEW
+    delete process.env.BLOMA_RESEARCH_MODE
     process.env.PROMA_HOME = originalPromaHome
     vi.restoreAllMocks()
+  })
+
+  it('R2 缺省 agent 模式：零网络请求（researchMarketSimilar 零调用），想法来自模型灵感且 source=AI 建议', async () => {
+    delete process.env.BLOMA_RESEARCH_MODE
+    let call = 0
+    const query: SDKQuery = async function* () {
+      call += 1
+      // 首调：向导判定需求成型；次调：agent 灵感建议 JSON
+      const text = call === 1 ? confirmJson : JSON.stringify({ ideas: [{ label: '账单日历视图', note: '按日历看收支分布，超支日标红' }] })
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }
+      yield { type: 'result', subtype: 'success' }
+    }
+    const model: GuideModelOptions = { ...makeModel(), query }
+    await handleGuideMessage(makeInput(), (event) => events.push(event), model, undefined, persistSystem)
+    expect(researchMarketSimilar).not.toHaveBeenCalled()
+    const card = events.find((event) => event.type === 'user_decision_required')
+    expect(card).toBeTruthy()
+    const payload = JSON.stringify(card?.payload)
+    expect(payload).toContain('账单日历视图')
+    expect(payload).toContain('AI 建议')
+    expect(payload).toContain('"mode":"agent"')
   })
 
   it('模型判定需求成型 → 执行市调并弹确认窗，不直接开工', async () => {

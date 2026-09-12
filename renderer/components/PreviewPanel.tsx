@@ -129,10 +129,16 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
     }
   }, [])
 
-  const effectiveStatus: PreviewStatus =
-    status === 'empty' && (hasStream || ['generating_sketch', 'generating_mvp'].includes(stage))
-      ? 'loading'
-      : status
+  // 预览区显示由「是否有可渲染 URL」与「是否活跃生成」驱动，不再信任 status='running'：
+  // 历史遗留的 running 无 URL 会抢占初始空态，误显示「正在准备预览」。
+  // 空态只在「无 URL 且无活跃生成」时出现；其余准备中状态统一显示「正在准备预览」。
+  const effectiveStatus: PreviewStatus = previewUrl
+    ? 'running'
+    : status === 'error'
+      ? 'error'
+      : status === 'loading' || hasStream || ['generating_sketch', 'generating_mvp'].includes(stage)
+        ? 'loading'
+        : 'empty'
 
   const displayStatus: PreviewStatus =
     effectiveStatus !== 'error' && globalError ? 'error' : effectiveStatus
@@ -373,7 +379,6 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
             )}
           </>
         )}
-        {displayStatus === 'running' && !previewUrl && <LoadingState label="正在准备预览…" />}
         {displayStatus === 'error' && <ErrorState label={errorLabel ?? globalError ?? undefined} onRetry={onRefresh} />}
 
         {correctionActive && onCorrectionSubmit && (
@@ -463,7 +468,7 @@ const EmptyState: React.FC = () => (
 const LoadingState: React.FC<{ label?: string }> = ({ label }) => (
   <div style={stateWrap}>
     <div style={{ width: 42, height: 42, border: '3px solid var(--color-border)', borderTopColor: 'var(--color-quick)', borderRadius: '50%', animation: 'spin 0.8s linear infinite', marginBottom: 'var(--space-5)' }} />
-    <p style={{ fontSize: 'var(--font-size-lg)', fontWeight: 600, color: 'var(--color-text)' }}>{label ?? '正在生成预览…'}</p>
+    <p style={{ fontSize: 'var(--font-size-lg)', fontWeight: 600, color: 'var(--color-text)' }}>{label ?? '正在准备预览…'}</p>
     <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-muted)', marginTop: 'var(--space-1)' }}>这个过程只发生在安全环境里</p>
   </div>
 )

@@ -34,6 +34,54 @@ function slugifyLabel(label: string): string {
   return ascii || 'mode'
 }
 
+// ---------------------------------------------------------------------------
+// P2b（2026-09-11 狗粮 94f449c6 污染复盘）：词典/百科类结果不入册 UI 模式卡。
+// 当晚项目名「纵版雷霆战机」首字被市调搜出百度百科/新华字典词条，4 张
+// 「UI 做法：纵（汉语文字）_百度百科」垃圾 candidate 卡入账——市调搜索把项目名
+// 词汇当查询词命中词典页，入册侧必须自行判断拒收（上游搜索词清洗另行挂账）。
+// ---------------------------------------------------------------------------
+
+/** 标题尾缀的百科后缀（搜索结果页标题常规形态：主题_百度百科）。 */
+const ENCYCLOPEDIA_SUFFIX_RE = /_(百度百科|维基百科|搜狗百科|快百科|头条百科|萌娘百科)$/i
+/** 括注里的词典学美名（「纵（汉语文字）」形态）。 */
+const DICTIONARY_PAREN_RE = /[（(](汉语文字|汉字|词语|多音字|方言|姓氏|汉字词组|汉语词汇)[）)]/
+/** 词典/百科域名（source 命中即拒收；狗粮 94f449c6 实测形态全量登记）。 */
+const DICTIONARY_DOMAINS = [
+  'baike.baidu.com',
+  'zh.wikipedia.org',
+  'baike.sogou.com',
+  'dict.baidu.com',
+  'zidian.gushiwen.cn',
+  'zidian.gushici.net',
+  'www.guoxuedashi.net',
+  'xh.5156edu.com',
+  'cd.hwxnet.com',
+  'zdic.net',
+  'hanyuguoxue.com',
+]
+/** 通用词典站域名模式（zidian./cidian./baike. 前缀站，防清单追不全）。 */
+const DICTIONARY_DOMAIN_RE = /(^|\.)(zidian|cidian|baike|guoxue)\./i
+/** 标题里的词典学内容标记（「纵怎么读_纵的拼音 - 新华字典」形态，域名缺失时兑底）。 */
+const DICTIONARY_CONTENT_RE = /(怎么读|新华字典|汉语词典|汉典|康熙字典|说文解字|多音字)|拼音.{0,8}部首|部首.{0,8}拼音/
+
+/** 词典/百科类「UI 想法」识别：真 UI 模式卡不会以单字为名、不会引词典释义。 */
+export function looksLikeDictionaryJunk(idea: { label: string; note?: string; source?: string }): boolean {
+  const label = String(idea.label ?? '').trim()
+  const source = String(idea.source ?? '')
+  if (!label) return true
+  if (ENCYCLOPEDIA_SUFFIX_RE.test(label)) return true
+  if (DICTIONARY_PAREN_RE.test(label)) return true
+  const lowerSource = source.toLowerCase()
+  if (DICTIONARY_DOMAINS.some((domain) => lowerSource.includes(domain))) return true
+  if (DICTIONARY_DOMAIN_RE.test(lowerSource)) return true
+  if (DICTIONARY_CONTENT_RE.test(label)) return true
+  // 剥掉括注/分隔符后只剩单个汉字的「模式名」不可能承载 UI 做法（「纵」字案形态）；
+  // 保留两字词（如「抽奖」）不误杀
+  const stripped = label.replace(/[（(][^）)]*[）)]/g, '').replace(/[_\-|/·、，,。:：]+/g, '').trim()
+  if (/^[\u4e00-\u9fff]$/.test(stripped)) return true
+  return false
+}
+
 function shortHash(text: string): string {
   return computeFingerprint('anti_pattern', { stage: 'unknown', symptom: text } as never).slice(0, 4)
 }
@@ -48,6 +96,11 @@ export async function registerUiModeCard(input: {
   try {
     const label = String(input.idea?.label ?? '').trim()
     if (!label) return null
+    // P2b：词典/百科垃圾拒收（狗粮 94f449c6「纵」字案）——不入账不计数
+    if (looksLikeDictionaryJunk(input.idea)) {
+      console.warn(`[experience] ui mode card rejected (dictionary junk): ${label.slice(0, 40)}`)
+      return null
+    }
     const key = `${label}|${String(input.idea.note ?? '').trim()}|${String(input.idea.source ?? '').trim()}`
     const slug = `${slugifyLabel(label)}_${shortHash(key)}`
     const body = {
@@ -105,6 +158,8 @@ export async function ingestResearchIdeasAsCandidates(input: {
     if (!process.env.BLOMA_EXPERIENCE || !['1', 'on', 'true'].includes(process.env.BLOMA_EXPERIENCE.trim().toLowerCase())) return 0
     let count = 0
     for (const idea of input.ideas.slice(0, 5)) {
+      // P2b：入册前过滤（与 registerUiModeCard 双保险——批量入口也能统计到干净条数）
+      if (looksLikeDictionaryJunk(idea)) continue
       if ((await registerUiModeCard({ ...input, idea })) !== null) count++
     }
     if (count > 0) console.log(`[experience] ui mode cards registered: ${count}`)

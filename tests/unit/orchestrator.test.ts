@@ -618,3 +618,30 @@ async function* defaultTestQuery(): AsyncGenerator<SDKMessage> {
   }
   yield { type: 'result', subtype: 'success' }
 }
+
+// ===========================================================================
+// I3 deferred 持久化（2026-09-11 尾批）：留待下一轮达成时会话 JSONL 留痕
+// ===========================================================================
+describe('I3 steer deferred 持久化（persistSteerDeferredNotice）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+
+  afterEach(() => {
+    if (originalPromaHome === undefined) delete process.env.PROMA_HOME
+    else process.env.PROMA_HOME = originalPromaHome
+  })
+
+  it('deferred 落盘 [steer-deferred] system 行（跨重启回放可见）；写盘失败静默不抛', async () => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'proma-steer-defer-'))
+    const { persistSteerDeferredNotice } = await import('../../main/orchestrator')
+    persistSteerDeferredNotice('session-defer-1', '再加一个搜索功能')
+    const lines = readFileSync(getAgentSessionPath('session-defer-1'), 'utf8').split('\n').filter(Boolean)
+    const row = JSON.parse(lines[lines.length - 1])
+    expect(row.role).toBe('system')
+    const text = row.content[0].text
+    expect(text).toContain('[steer-deferred]')
+    expect(text).toContain('留待下一轮的修改：再加一个搜索功能')
+    // 坏 home 路径：静默降级不抛（待办仅会话内状态条可见）
+    process.env.PROMA_HOME = join(tmpdir(), 'nonexistent-steer-defer-xyz')
+    expect(() => persistSteerDeferredNotice('session-defer-2', 'x')).not.toThrow()
+  })
+})

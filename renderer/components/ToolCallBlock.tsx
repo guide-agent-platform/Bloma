@@ -23,6 +23,17 @@ export const TOOL_UI_LABELS: Record<string, string> = {
   run_preview: '启动预览',
   run_gwt_tests: '运行功能测试',
   run_security_scan: '运行安全扫描',
+  /** 联网与委派工具（agent-tools.ts 工具面，2026-09-08 补全供进度卡/过程块 P0 可读） */
+  web_fetch: '读取网页资料',
+  web_research: '联网调研资料',
+  delegate_agent: '派出子助手处理',
+  wait_for_delegations: '等待子助手完成',
+  get_delegation_results: '获取子助手结果',
+  stop_delegation: '停止子助手',
+  stop_delegations: '停止子助手',
+  ask_delegation_question: '向子助手提问',
+  answer_delegation_question: '回复子助手提问',
+  continue_delegation: '让子助手继续',
   /** 历史回放里无法经 tool_use_id 关联到工具名时的兜底标签 */
   tool_result: '工具结果',
 }

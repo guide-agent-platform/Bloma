@@ -82,6 +82,7 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
   const originalLoopLog = process.env.BLOMA_LOOP_LOG
   const originalFocusAnchor = process.env.BLOMA_FOCUS_ANCHOR
   const originalModules = process.env.BLOMA_MODULES
+  const originalTaskWorkflow = process.env.BLOMA_TASK_WORKFLOW
   let home = ''
   let channelId = ''
 
@@ -91,6 +92,9 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
     delete process.env.BLOMA_PLAN_LEG
     delete process.env.BLOMA_LOOP_LOG
     delete process.env.BLOMA_FOCUS_ANCHOR
+    // W5（Phase 8.5）：本文件锁 plan 注入组合的原口径——钉 W5 关（checklist 追加
+    // 属新行为，正向覆盖见 task-workflow.test.ts）
+    process.env.BLOMA_TASK_WORKFLOW = '0'
     // 官方模块库是新增增强：P3 plan 腿「字节级现状」回归锁关闭模块库，保持现状语义
     //（独立开关 BLOMA_MODULES 关闭=现状；模块库正向接线见 module-library 测试）
     process.env.BLOMA_MODULES = '0'
@@ -128,6 +132,8 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
     else process.env.BLOMA_FOCUS_ANCHOR = originalFocusAnchor
     if (originalModules === undefined) delete process.env.BLOMA_MODULES
     else process.env.BLOMA_MODULES = originalModules
+    if (originalTaskWorkflow === undefined) delete process.env.BLOMA_TASK_WORKFLOW
+    else process.env.BLOMA_TASK_WORKFLOW = originalTaskWorkflow
     setProgrammingEventPublisher(() => undefined)
     clearSandboxRuntimeForTests()
   })
@@ -332,6 +338,58 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
     // plan 腿也不分 focus（开关是分级锚定总闸，plan 腿输入同受门控）
     const legArgs = mocks.generateLoopPlan.mock.calls[0][0] as { focusRequirementIds?: string[] }
     expect(legArgs.focusRequirementIds).toBeUndefined()
+  })
+
+  it('localOnly（「提出意见」局部修改）：开关显式关也强制聚焦（其余保持现状勿重做）', { timeout: 60_000 }, async () => {
+    process.env.BLOMA_FOCUS_ANCHOR = '0' // 开关显式关，localOnly 仍应强制生效
+    mocks.generateLoopPlan.mockResolvedValue(SAMPLE_PLAN)
+    const requirements = [
+      { id: 'F-001', description: '记录收入与支出', behavior_assertions: ['点击保存按钮→列表新增一条记录'], priority: 'P0' as const },
+      { id: 'F-003', description: '搜索历史', behavior_assertions: ['在搜索框输入关键词→列表过滤'], priority: 'P0' as const },
+    ]
+    const project = createProject({ request_id: `req-${Math.random().toString(36).slice(2, 8)}`, mode: 'quick' })
+    recordSketchGenerated(project.project_id, requirements)
+    writeFileSync(join(project.root_path, 'index.html'), '<html><body><p>记录收入与支出</p></body></html>', 'utf8')
+    await runMvpTask({
+      request_id: `req-${Math.random().toString(36).slice(2, 8)}`,
+      session_id: `s-localonly-${Math.random().toString(36).slice(2, 8)}`,
+      project_id: project.project_id,
+      mode: 'quick',
+      channel_id: channelId,
+      query: junkQuery(),
+      focusRequirementIds: ['F-003'],
+      localOnly: true,
+    })
+    const system = mocks.runAgentLoop.mock.calls[mocks.runAgentLoop.mock.calls.length - 1][0].system as string
+    // 强制聚焦：命中项断言全文锚定，未聚焦项降为「保持现状勿重做」摘要
+    expect(system).toContain('本轮迭代聚焦：F-003')
+    expect(system).toContain('- [F-001]（P0）记录收入与支出（断言 1 条）——本轮未聚焦')
+  })
+
+  it('rebuild（整版重做）：即使 focus 传入也全量锚定（不聚焦、允许大改）', { timeout: 60_000 }, async () => {
+    process.env.BLOMA_FOCUS_ANCHOR = '1' // 开关显式开，rebuild 仍应不聚焦
+    mocks.generateLoopPlan.mockResolvedValue(SAMPLE_PLAN)
+    const requirements = [
+      { id: 'F-001', description: '记录收入与支出', behavior_assertions: ['点击保存按钮→列表新增一条记录'], priority: 'P0' as const },
+      { id: 'F-003', description: '搜索历史', behavior_assertions: ['在搜索框输入关键词→列表过滤'], priority: 'P0' as const },
+    ]
+    const project = createProject({ request_id: `req-${Math.random().toString(36).slice(2, 8)}`, mode: 'longterm' })
+    recordSketchGenerated(project.project_id, requirements)
+    writeFileSync(join(project.root_path, 'index.html'), '<html><body><p>记录收入与支出</p></body></html>', 'utf8')
+    await runMvpTask({
+      request_id: `req-${Math.random().toString(36).slice(2, 8)}`,
+      session_id: `s-rebuild-${Math.random().toString(36).slice(2, 8)}`,
+      project_id: project.project_id,
+      mode: 'longterm',
+      channel_id: channelId,
+      query: junkQuery(),
+      focusRequirementIds: ['F-003'],
+      rebuild: true,
+    })
+    const system = mocks.runAgentLoop.mock.calls[mocks.runAgentLoop.mock.calls.length - 1][0].system as string
+    // 整版重做：不聚焦（无聚焦提示行，两项全文渲染）
+    expect(system).not.toContain('本轮迭代聚焦')
+    expect(system).toContain('在搜索框输入关键词→列表过滤')
   })
 
   it('P3 全关路径（三开关全 0）：字节级现状一次性回归锁（§7 实验对照组）', { timeout: 60_000 }, async () => {

@@ -282,7 +282,7 @@ export type LoopLogEntry =
       inputTokens?: number
       outputTokens?: number
     }
-  | { kind: 'final'; status: string; turns: number; toolCalls: number }
+  | { kind: 'final'; status: string; turns: number; toolCalls: number; /** P2a：真实出口原因标注（如 degenerate_output） */ terminationReason?: string }
 
 /** 文档头（首次创建时写入一次；后续会话分节追加）。 */
 const LOOP_LOG_DOC_HEADER = [
@@ -327,7 +327,9 @@ export function appendLoopLogDocument(projectId: string, entry: LoopLogEntry): v
         : ''
     block = `- 轮 ${entry.turn}：${tools}${tokens}\n`
   } else {
-    block = `\n### 终态：${entry.status}（${entry.turns} 轮 / ${entry.toolCalls} 次工具调用）\n`
+    block = `\n### 终态：${entry.status}（${entry.turns} 轮 / ${entry.toolCalls} 次工具调用）${
+      entry.terminationReason ? `｜${entry.terminationReason}` : ''
+    }\n`
   }
   appendFileSync(path, block, 'utf8')
   const previous = readManifest(dir)
@@ -417,8 +419,9 @@ export function buildPrdBackplane(
     acceptance[item.id] = `${item.description}：核心路径可交互，边界与异常输入不崩溃。`
   }
   // 完整程序阶段 2.5：模板路径同样做数据留存信号兜底——确定性派生最小契约
-  // （迭代重跑经此重建 prd.json 时契约自愈，不因重建丢失）
-  const derivedInterfaceSpec = deriveInterfaceSpec(items)
+  // （迭代重跑经此重建 prd.json 时契约自愈，不因重建丢失）；C1b：game 豁免开启时
+  // 轻留存不派生（localStorage 即可满足，拍板 2026-09-11）
+  const derivedInterfaceSpec = deriveInterfaceSpec(items, project.template_type)
   return {
     project_id: project.project_id,
     name: project.name,
@@ -1082,4 +1085,47 @@ function readManifest(dir: string): ManifestEntry[] {
 
 function writeManifest(dir: string, entries: ManifestEntry[]): void {
   writeFileSync(join(dir, '.document-manifest.json'), `${JSON.stringify({ version: 1, documents: entries }, null, 2)}\n`, 'utf8')
+}
+
+// ---- W2 E2+F1（咨询 D3/D4，2026-09-09）：loop-checkpoint 持久化 ----
+// documents/loop-checkpoint.json：runtime=loop 运行时投影（E3 事件驱动，每次覆盖），
+// repair_attempts=修复尝试账本（repairAndRetest 每轮追加，F1 修复证据包的历史维度）。
+// 与 loop-log.md 同一目录与直写模式（不走 checkpoint 产出路径，不进文档清单）。
+
+/** 修复轮尝试记录：改了什么 + 与上轮的结果对比（resolved/persistent/new_failures）。 */
+export interface LoopRepairAttemptRecord {
+  round: number
+  at: string
+  task_locations: string[]
+  files_touched: string[]
+  outcome: { resolved: string[]; persistent: string[]; new_failures: string[]; converged: boolean }
+}
+
+/** loop-checkpoint.json 落盘结构（version 1）。 */
+export interface LoopCheckpointDocument {
+  version: 1
+  project_id: string
+  updated_at: string
+  /** loop 运行时投影（主 loop / 修复轮 onCheckpoint 推送，后到覆盖） */
+  runtime?: import('./coding/agent-loop').LoopCheckpointSnapshot
+  repair_attempts: LoopRepairAttemptRecord[]
+}
+
+export function readLoopCheckpointDocument(projectId: string): LoopCheckpointDocument | null {
+  const project = findProject(projectId)
+  const path = join(getDocumentsDir(project.workspace_slug, project.project_id), 'loop-checkpoint.json')
+  if (!existsSync(path)) return null
+  try {
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as LoopCheckpointDocument
+    return raw && raw.version === 1 && Array.isArray(raw.repair_attempts) ? raw : null
+  } catch {
+    return null
+  }
+}
+
+export function writeLoopCheckpointDocument(projectId: string, doc: LoopCheckpointDocument): void {
+  const project = findProject(projectId)
+  const dir = getDocumentsDir(project.workspace_slug, project.project_id)
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'loop-checkpoint.json'), `${JSON.stringify(doc, null, 2)}\n`, 'utf8')
 }

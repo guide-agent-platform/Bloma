@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { getDocumentsDir } from '../../storage/config-paths'
-import { createProject } from '../../main/project-service'
+import { createProject, updateProject } from '../../main/project-service'
 import { exportProjectHandoff } from '../../main/project-export'
 
 /**
@@ -75,8 +75,8 @@ describe('project-export（PR-3：移交增强导出）', () => {
     expect(readme).toContain('npm start')
 
     expect(readFileSync(join(target, '.gitignore'), 'utf8')).toContain('node_modules/')
-    // file_count 如实统计：index.html + src/app.js + package.json + README + .gitignore = 5
-    expect(result.file_count).toBe(5)
+    // file_count 如实统计：index.html + src/app.js + package.json + README + .gitignore + export-info.json（I8）= 6
+    expect(result.file_count).toBe(6)
   })
 
   it('幂等：目标已有 README/.gitignore 不覆盖（重复导出不改写用户侧文件）', () => {
@@ -121,5 +121,50 @@ describe('project-export（PR-3：移交增强导出）', () => {
     const result = exportProjectHandoff({ request_id: 'r1', project_id: project.project_id }, dest)
     expect(result.destination).toMatch(/测试项目/)
     expect(existsSync(join(result.destination!, 'index.html'))).toBe(true)
+  })
+})
+
+// ===========================================================================
+// Phase 7 U3 I8（2026-09-10）：导出包带版本标识与已知限制
+// ===========================================================================
+describe('project-export · I8 导出版本标识（export-info.json）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  let outDir: string
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'proma-exp-i8-'))
+    outDir = mkdtempSync(join(tmpdir(), 'exp-out-'))
+  })
+
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+  })
+
+  /** I8 专用最小项目（不依赖 PRD 夹具）：一个可导出的产物页即可 */
+  function seedMinimal(): { project_id: string; root_path: string } {
+    const project = createProject({ request_id: 'req-export-i8', mode: 'quick', initial_message: '导出标识测试' })
+    writeFileSync(join(project.root_path, 'index.html'), '<html><body>i8</body></html>', 'utf8')
+    return { project_id: project.project_id, root_path: project.root_path }
+  }
+
+  it('导出写 export-info.json：源版本+导出时间+未评估态说明（线上状态未知口径）', () => {
+    const project = seedMinimal()
+    const result = exportProjectHandoff({ request_id: 'req', project_id: project.project_id }, outDir)
+    expect(result.canceled).toBe(false)
+    const infoPath = join(result.destination ?? '', 'export-info.json')
+    expect(existsSync(infoPath)).toBe(true)
+    const info = JSON.parse(readFileSync(infoPath, 'utf8')) as Record<string, unknown>
+    expect(typeof info.exported_at).toBe('string')
+    expect(info.delivery_status).toBe('not_evaluated')
+    expect(String(info.note)).toContain('平台无法观测线上环境')
+  })
+
+  it('delivery_status 随导出时点如实记录（partial 时说明存在未通过部分）', () => {
+    const project = seedMinimal()
+    updateProject(project.project_id, { delivery_status: 'partial' })
+    const result = exportProjectHandoff({ request_id: 'req', project_id: project.project_id }, outDir)
+    const info = JSON.parse(readFileSync(join(result.destination!, 'export-info.json'), 'utf8')) as Record<string, unknown>
+    expect(info.delivery_status).toBe('partial')
+    expect(String(info.note)).toContain('未通过或未验证')
   })
 })

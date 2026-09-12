@@ -79,8 +79,11 @@ function writeData(name, value) {
 }
 function dirnameOf(p) { const i = p.lastIndexOf(sep); return i <= 0 ? p.slice(0, 1) : p.slice(0, i); }
 const routes = [];
+// B1（P0-B，2026-09-11 审计案 35c1a633）：挂载失败登记——不再只进 console，供 /_bloma/routes 健康端点回流
+const routeErrors = [];
 function loadRoutes() {
   routes.length = 0;
+  routeErrors.length = 0;
   if (!existsSync(ROUTES_DIR)) return;
   for (const file of readdirSync(ROUTES_DIR).filter((f) => f.endsWith('.js')).sort()) {
     try {
@@ -100,6 +103,7 @@ function loadRoutes() {
         routes[routes.length - 1].ctx = ctx;
       }
     } catch (e) {
+      routeErrors.push({ file: file, message: String((e && e.message) || e).slice(0, 300) });
       console.error('[routes] 挂载失败 ' + file + ': ' + (e && e.message));
     }
   }
@@ -143,6 +147,12 @@ const LLM_PROTOCOL = process.env.BLOMA_APP_LLM_PROTOCOL === 'anthropic' ? 'anthr
 const LLM_TIMEOUT_MS = Number(process.env.BLOMA_APP_LLM_TIMEOUT_MS) || 60000;
 const server = createServer((req, res) => {
   const rawUrl = new URL(req.url || '/', 'http://localhost');
+  // ---- B1 健康端点：路由挂载状态（api-contract 探针 404 时取真实 require 报错回流修复任务）----
+  if (rawUrl.pathname === '/_bloma/routes' && req.method === 'GET') {
+    loadRoutes();
+    sendJson(res, 200, { mounted: routes.map((r) => ({ method: r.method, path: r.path })), errors: routeErrors });
+    return;
+  }
   // ---- 后端 API：/api/llm 代理 + server/routes 挂载端点 ----
   if (rawUrl.pathname === '/api/llm' && (req.method === 'POST' || req.method === 'OPTIONS')) {
     if (req.method === 'OPTIONS') { res.writeHead(403); res.end('Forbidden'); return; }

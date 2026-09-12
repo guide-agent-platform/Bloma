@@ -26,6 +26,10 @@ import type {
   AgentListSessionsInput,
   AgentLoadMessagesInput,
   AgentSendMessageInput,
+  AgentSteerMessageInput,
+  AgentSteerQueryInput,
+  AgentSteerResolveInput,
+  AgentForkSessionInput,
   AnalyticsTrackInput,
   CategoryRoutingUpdateEnvelope,
   CategoryRoutingRoleUpdateEnvelope,
@@ -78,6 +82,14 @@ const electronAPI: ElectronAPI = {
   agent: {
     sendMessage: (input: AgentSendMessageInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_SEND_MESSAGE, input),
+    steerMessage: (input: AgentSteerMessageInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_STEER_MESSAGE, input),
+    steerResolve: (input: AgentSteerResolveInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_STEER_RESOLVE, input),
+    steerQuery: (input: AgentSteerQueryInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_STEER_QUERY, input),
+    forkSession: (input: AgentForkSessionInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_FORK_SESSION, input),
     cancel: (input: AgentCancelInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.AGENT_STOP, input),
     listSessions: (input: AgentListSessionsInput) =>

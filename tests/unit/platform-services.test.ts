@@ -350,7 +350,10 @@ describe('PlatformServices snapshot capacity (A2-16)', () => {
 
     // 显式调用与 createSnapshot 内联触发一致
     expect(enforceSnapshotCapacity(project.workspace_slug, project.project_id).archived).toEqual([])
-  }, 15_000) // 105 个快照的真实文件 I/O 在 Windows 上接近 5s 默认超时，放宽以避免并行负载下偶发超时
+    // 105 个真实快照目录/文件 I/O：隔离实测 ~4-7s；全量并行（多 worker 争抢 + Windows 实时
+    // 扫描 tmp 下上千新建目录）实测 15s/30s 均被突破 → 放宽到 60s（2026-09-08 负载校准，
+    // 与 agent-loop-pipeline M4-A 全链用例同水位）
+  }, 60_000)
 })
 
 function makeChildProcess(): { process: ChildProcess; kill: ReturnType<typeof vi.fn> } {

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createProject } from '../../main/project-service'
+import { createProject, findProject } from '../../main/project-service'
 import {
   clearSandboxRuntimeForTests,
   createSnapshot,
@@ -212,5 +212,77 @@ describe('T7 snapshot document versioning', () => {
     })
     Object.assign(emitter, { kill, pid: 1000 })
     return { process: emitter, kill }
+  }
+})
+
+// ===========================================================================
+// Phase 7 U3 I6（2026-09-10）：恢复即新版本（BLOMA_RESTORE_AS_VERSION）
+// ===========================================================================
+describe('I6 restored 快照（恢复即新版本）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+
+  afterEach(() => {
+    restorePromaHome(originalPromaHome)
+    clearSandboxRuntimeForTests()
+    delete process.env.BLOMA_RESTORE_AS_VERSION
+  })
+
+  function makeChildProcess(): { process: ChildProcess } {
+    const emitter = new EventEmitter() as ChildProcess
+    Object.assign(emitter, { kill: () => { emitter.emit('exit'); return true }, pid: 1001 })
+    return { process: emitter }
+  }
+
+  async function seedWithSnapshot(): Promise<{ projectId: string; snapshotId: string }> {
+    const home = mkdtempSync(join(tmpdir(), 'proma-i6-'))
+    process.env.PROMA_HOME = home
+    const project = createProject({ request_id: 'req-i6', mode: 'quick' })
+    writeFileSync(join(project.root_path, 'index.html'), '<html><body>v1</body></html>', 'utf8')
+    const snap = await createSnapshot({
+      request_id: 'req-i6-snap', project_id: project.project_id,
+      kind: 'mvp', summary: '版本一', include_documents: true, health_status: 'healthy',
+    })
+    // 模拟版本二：回滚目标之后有新内容（guard 会保留）
+    writeFileSync(join(project.root_path, 'index.html'), '<html><body>v2</body></html>', 'utf8')
+    setSandboxRuntimeForTests({
+      portAllocator: async () => 3201,
+      healthCheck: async () => true,
+      processFactory: () => makeChildProcess().process,
+    })
+    return { projectId: project.project_id, snapshotId: snap.snapshot_id }
+  }
+
+  it('开关 off（缺省）→ 回滚不拍 restored 快照（字节级现状回归锁）', async () => {
+    const { projectId, snapshotId } = await seedWithSnapshot()
+    const result = await rollbackSnapshot({ request_id: 'req-i6-off', project_id: projectId, snapshot_id: snapshotId, reason: 'user_undo' })
+    expect(result.rolled_back).toBe(true)
+    expect(result.current_snapshot_id).toBe(snapshotId)
+  }, 15_000)
+
+  it('开关 on → 恢复即新版本：restored 快照带 derived_from 指针、指针前移、guard 保留恢复前状态', async () => {
+    process.env.BLOMA_RESTORE_AS_VERSION = '1'
+    const { projectId, snapshotId } = await seedWithSnapshot()
+    const result = await rollbackSnapshot({ request_id: 'req-i6-on', project_id: projectId, snapshot_id: snapshotId, reason: 'user_undo' })
+    expect(result.rolled_back).toBe(true)
+    // 指针前移到恢复点（不再指源版本）
+    expect(result.current_snapshot_id).not.toBe(snapshotId)
+    // restored 快照元数据：kind/derived_from/summary 语义
+    const restoredMeta = JSON.parse(
+      readFileSync(join(getSnapshotsDirOf(projectId), `${result.current_snapshot_id}.json`), 'utf8'),
+    ) as { kind?: string; derived_from?: string; summary?: string }
+    expect(restoredMeta.kind).toBe('restored')
+    expect(restoredMeta.derived_from).toBe(snapshotId)
+    expect(String(restoredMeta.summary)).toContain('恢复的版本')
+    // guard 仍在（恢复前 v2 状态保留可找回）
+    expect(result.guard_snapshot_id).toBeTruthy()
+    // 当前产物内容=源版本（恢复语义不变）
+    const project = findProject(projectId)
+    expect(readFileSync(join(project.root_path, 'index.html'), 'utf8')).toContain('v1')
+    expect(project.current_snapshot_id).toBe(result.current_snapshot_id)
+  }, 15_000)
+
+  function getSnapshotsDirOf(projectId: string): string {
+    const project = findProject(projectId)
+    return join(process.env.PROMA_HOME as string, 'agent-workspaces', project.workspace_slug, 'snapshots', projectId)
   }
 })

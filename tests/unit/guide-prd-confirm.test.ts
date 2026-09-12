@@ -56,6 +56,7 @@ vi.mock('../../main/runtime-fallback', () => ({
 import { handleGuideMessage, resolveRequirementConfirm } from '../../main/guide-agent-service'
 import { recordDecision } from '../../main/decision-log'
 import { researchMarketSimilar } from '../../main/guide-research'
+import { trackAnalytics } from '../../main/platform-services'
 import { markPrdUserConfirmed } from '../../main/document-engine'
 import { resolvePrdBackplane, runSketchTask } from '../../main/programming-orchestrator'
 import {
@@ -143,6 +144,8 @@ describe('PRD 用户确认门（改造 3）', () => {
   beforeEach(() => {
     // 委派审查固定关：单测走直连（委派链路由 review-delegation 专属测试覆盖）
     process.env.BLOMA_DELEGATED_REVIEW = '0'
+    // R2（2026-09-12）：市调想法来源相关用例（想法提炼/回退原始条目）钉到 scrape 模式
+    process.env.BLOMA_RESEARCH_MODE = 'scrape'
     const home = mkdtempSync(join(tmpdir(), 'proma-prd-confirm-'))
     process.env.PROMA_HOME = home
     mkdirSync(join(home, 'agent-sessions'), { recursive: true })
@@ -155,6 +158,7 @@ describe('PRD 用户确认门（改造 3）', () => {
 
   afterEach(() => {
     delete process.env.BLOMA_DELEGATED_REVIEW
+    delete process.env.BLOMA_RESEARCH_MODE
     process.env.PROMA_HOME = originalPromaHome
     vi.restoreAllMocks()
   })
@@ -264,6 +268,11 @@ describe('PRD 用户确认门（改造 3）', () => {
     // 断言物化进卡（缺省回退默认断言），P0/P2 优先级投影
     expect(payload.requirements[0].assertions.length).toBeGreaterThan(0)
     expect(payload.requirements[0].priority).toBe('P0')
+    // C1a（P1，审计⑧）：后端架构后果显影——「记录」命中留存信号词的项带 implies_backend，
+    // 纯展示项不带；确认时用户看得到这条会让产品需要后端与数据持久化
+    const reqs = payload.requirements as Array<{ id: string; implies_backend?: boolean }>
+    expect(reqs.find((r) => r.id === 'F-001')?.implies_backend).toBe(true)
+    expect(reqs.find((r) => r.id === 'F-002')?.implies_backend).toBeUndefined()
     expect(payload.expanded).toBe(false)
     // 挂起：不直接开草图，话术引导用户过目
     expect(runSketchTask).not.toHaveBeenCalled()
@@ -274,6 +283,7 @@ describe('PRD 用户确认门（改造 3）', () => {
   it('confirm 回传 → user_confirmed_at 落盘 + 开草图 + 决策留痕', async () => {
     await startConfirmFlow()
     vi.mocked(runSketchTask).mockClear()
+    vi.mocked(trackAnalytics).mockClear()
 
     await handleGuideMessage(
       makeInput({ content: '确认这份 PRD，开始画草图。', metadata: { source: 'card_option', selected_option_id: PRD_CONFIRM_OPTION_CONFIRM } }),
@@ -285,6 +295,12 @@ describe('PRD 用户确认门（改造 3）', () => {
     expect(runSketchTask).toHaveBeenCalledTimes(1)
     const decisions = vi.mocked(recordDecision).mock.calls.map((call) => call[0].entry)
     expect(decisions.some((entry) => entry.type === 'prd_confirm' && entry.title.includes('已确认'))).toBe(true)
+    // Phase 7 U5 J5：scope_confirmed 埋点（需求版本+key_tasks 标识随确认动作留存）
+    const scoped = vi.mocked(trackAnalytics).mock.calls.map((call) => call[0].event).find((event) => event.event_type === 'scope_confirmed')
+    expect(scoped).toBeDefined()
+    expect(scoped?.payload.via).toBe('prd_confirm_card')
+    expect(Array.isArray(scoped?.payload.requirement_ids)).toBe(true)
+    expect(scoped?.payload.user_confirmed_at).toBe('2026-08-26T00:00:00.000Z')
   })
 
   it('B-1 回归（2026-09-02 对抗审查）：盘上权威清单含 behavior_assertions 时完整传入 runSketchTask——探针链不瘦身', async () => {

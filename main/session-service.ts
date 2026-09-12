@@ -14,9 +14,11 @@
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { rmSyncWithRetry } from './fs-retry'
 import type {
+  AgentForkSessionResult,
   AgentListSessionsInput,
   AgentListSessionsResult,
   AgentLoadMessagesInput,
@@ -27,6 +29,18 @@ import type {
 } from '../shared/types'
 import { getAgentSessionPath, getAgentSessionsIndexPath, getPromaHome } from '../storage/config-paths'
 import { readJsonFile, writeJsonFile } from '../storage/json-store'
+import { appendSessionMessage } from './session-tree'
+
+/**
+ * 会话活跃检查器（P0-2 fork 的 BUSY 判定）：由 ipc 层接线注入 orchestrator.isSessionActive
+ * ——session-service 不反向 import orchestrator（两模块互引会形成循环依赖，vitest 模块
+ * 初始化序下破坏委派运行时状态）。缺省 false = 未接线环境（纯单测）不拒绝。
+ */
+let sessionActiveChecker: (sessionId: string) => boolean = () => false
+
+export function setSessionActiveChecker(checker: (sessionId: string) => boolean): void {
+  sessionActiveChecker = checker
+}
 import { listProjects, updateProject } from './project-service'
 import { cleanupPastedImages } from './pasted-images'
 
@@ -44,7 +58,7 @@ interface SessionsIndex {
 export function recordSessionActivity(
   sessionId: string,
   projectId: string,
-  delegationMeta?: { parentSessionId: string; sourceDelegationId: string },
+  delegationMeta?: { parentSessionId: string; sourceDelegationId?: string },
 ): void {
   const index = readSessions()
   const existing = index.sessions.find((item) => item.session_id === sessionId)
@@ -148,6 +162,90 @@ export function loadMessages(input: AgentLoadMessagesInput): AgentLoadMessagesRe
 
 /** 自由文本让渡长度上限：超过即视为含实际内容的话（「随便做个游戏」），不做让渡判定。 */
 const AUTO_DELEGATION_MAX_LENGTH = 16
+
+/** JSONL 行解析：损坏行跳过（与 loadMessages 同口径）。 */
+function parseSessionLines(path: string): Array<Record<string, unknown>> {
+  if (!existsSync(path)) return []
+  return readFileSync(path, 'utf8')
+    .split('\n')
+    .filter((line) => line.trim().length > 0)
+    .map((line): Record<string, unknown> | undefined => {
+      try {
+        return JSON.parse(line) as Record<string, unknown>
+      } catch {
+        return undefined
+      }
+    })
+    .filter((message): message is Record<string, unknown> => message !== undefined)
+}
+
+/** 目标锚点是否为可 fork 的 user 消息（非空文本/含 text 块）。 */
+function isForkableUserMessage(line: Record<string, unknown>): boolean {
+  if (line.role !== 'user') return false
+  const content = line.content
+  if (typeof content === 'string') return content.trim().length > 0
+  if (Array.isArray(content)) {
+    return content.some(
+      (block) =>
+        block && typeof block === 'object' && (block as { type?: unknown; text?: unknown }).type === 'text'
+        && typeof (block as { text?: unknown }).text === 'string'
+        && ((block as { text?: unknown }).text as string).trim().length > 0,
+    )
+  }
+  return false
+}
+
+/**
+ * 会话 fork（P0-2，2026-09-08 pi 差距方案 §2）：从源会话的某条 user 消息处重开——
+ * 把「首行到该消息」的前缀原样复制进新会话文件（树链重写为线性 v2），原文件一字不动；
+ * 索引登记新会话（parent_session_id = 源会话，fork_entry_id = 锚点行 id）。
+ *
+ * 锚点解析：entry_id（v2 行 id）优先；旧文件（无 id）按 entry_timestamp 定位。
+ * 活跃会话拒绝（BUSY）——与 send-message 忙语义一致，防 fork 读到写一半的文件。
+ */
+export function forkFrom(
+  sessionId: string,
+  opts: { project_id: string; entry_id?: string; entry_timestamp?: number; new_session_id?: string },
+): AgentForkSessionResult {
+  if (sessionActiveChecker(sessionId)) throw new Error('AGENT_SESSION_BUSY')
+  const sourcePath = getAgentSessionPath(sessionId)
+  if (!existsSync(sourcePath)) throw new Error('SESSION_NOT_FOUND')
+  const hasAnchor = (opts.entry_id !== undefined && opts.entry_id !== '') || typeof opts.entry_timestamp === 'number'
+  if (!hasAnchor) throw new Error('SESSION_FORK_ENTRY_NOT_FOUND: 需要 entry_id 或 entry_timestamp')
+
+  const lines = parseSessionLines(sourcePath)
+  // 找锚点下标（升序遍历保「首个命中」语义，链上下文自然正确）
+  let anchorIndex = -1
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!
+    if (opts.entry_id && line.id === opts.entry_id) {
+      anchorIndex = i
+      break
+    }
+    if (typeof opts.entry_timestamp === 'number' && line.timestamp === opts.entry_timestamp) {
+      anchorIndex = i
+      break
+    }
+  }
+  if (anchorIndex < 0) throw new Error('SESSION_FORK_ENTRY_NOT_FOUND')
+  const anchor = lines[anchorIndex]!
+  if (!isForkableUserMessage(anchor)) throw new Error('SESSION_FORK_ENTRY_NOT_FOUND: fork 锚点必须是 user 文本消息')
+
+  const newSessionId = opts.new_session_id ?? randomUUID()
+  const prefix = lines.slice(0, anchorIndex + 1)
+  for (const line of prefix) appendSessionMessage(newSessionId, line)
+
+  recordSessionActivity(newSessionId, opts.project_id, { parentSessionId: sessionId, sourceDelegationId: undefined })
+  // fork 归属补记：新记录追加 fork_entry_id（源锚点行 id；旧文件无 id 时为 undefined）
+  const index = readSessions()
+  const created = index.sessions.find((item) => item.session_id === newSessionId)
+  if (created && typeof anchor.id === 'string') created.fork_entry_id = anchor.id
+  if (created) writeSessions(index)
+
+  return { new_session_id: newSessionId, forked: true, copied_messages: prefix.length }
+}
+
+/** 自由文本让渡话术判定：≤16 字且整句命中（人称前缀/语气词已归一）。供两处共用，改表须两侧同步：
 
 /**
  * 自由文本让渡话术表（D1 修复）：「我还没想法/随便/你帮我决定」这类输入与点选

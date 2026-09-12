@@ -2,7 +2,9 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { runAgentLoop, TOOL_WINDOW_ROUNDS, windowMessages, type AgentLoopInput, type AgentLoopTool, type AgentLoopTurnInfo, type ToolOutcome } from '../../main/agent-loop'
+import { runAgentLoop, TOOL_WINDOW_ROUNDS, windowMessages, keepRecentTurns, estimateBlocksText, renderCheckpointRecoveryHeader, type AgentLoopInput, type AgentLoopTool, type AgentLoopTurnInfo, type AgentLoopCompactionInfo, type LoopCheckpointSnapshot, type ToolContext, type ToolOutcome } from '../../main/agent-loop'
+import { estimateTokenCount } from '../../main/usage-guard'
+import { drainSteerQueue, enqueueSteer, getSteerStatuses, pendingSteerCount, registerSteer, resetSteerQueuesForTests, STEER_WRAP_PREFIX, wrapSteerContent } from '../../main/steer-queue'
 import type { AgentEvent } from '../../shared/types'
 import type { SDKMessage } from '../../shared/types'
 import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
@@ -123,6 +125,23 @@ describe('runAgentLoop（PR2 L1）', () => {
     expect(result.status).toBe('turn_limit')
     expect(result.turns).toBe(3)
     expect(result.toolCalls).toHaveLength(3)
+    // P2a：真实跑满轮数不带 termination_detail（与输出退化出口区分）
+    expect(result.termination_detail).toBeUndefined()
+  })
+
+  it('P2a：末轮零 tool_use 且正文退化 → 重试一次仍脏 → turn_limit 附 termination_detail（狗粮 94f449c6 形态）', async () => {
+    const dsml = (text: string) => textMessage(`正在收口。\n<｜｜DSML｜｜ calls>\n<｜｜DSML｜｜ invoke name="run_gwt_tests">\n</｜｜DSML｜｜ invoke>\n</｜｜DSML｜｜ calls>\n${text}`)
+    const { query, receivedMessages } = scriptedQuery([[dsml('一')], [dsml('二')]])
+    const result = await runAgentLoop(baseInput({ query, maxTurns: 6 }))
+    expect(result.status).toBe('turn_limit')
+    expect(result.termination_detail).toEqual({ reason: 'degenerate_output', retries: 1 })
+    // 传输事故反馈确实注入（重试轮收到的最后一条 user 消息是 DEGENERATE_RETRY_FEEDBACK 家族）
+    const lastRetryMessages = receivedMessages[1]
+    const lastUserContent = lastRetryMessages.at(-1)?.content
+    const lastUserText = Array.isArray(lastUserContent)
+      ? lastUserContent.some((b) => b.type === 'text')
+      : typeof lastUserContent === 'string' && lastUserContent.length > 0
+    expect(lastUserText).toBe(true)
   })
 
   it('同轮多个 tool_use：串行执行、整批 tool_result 打进同一条 user 消息（上游 400 不变式）', async () => {
@@ -235,6 +254,8 @@ describe('runAgentLoop（PR2 L1）', () => {
       baseInput({ query, signal: controller.signal, sessionId: 'session-cancel-partial' }),
     )
     expect(result.status).toBe('cancelled')
+    // W1-E1：取消触发源细分——流中取消被 model_stream 观察点捕获，reason 解析出 source
+    expect(result.cancel_detail).toMatchObject({ phase: 'model_stream', source: 'user' })
 
     // 取证：半截文本进了 JSONL（此前该轮整体丢弃→「事后考察不到」）
     const messages = readSessionJsonl('session-cancel-partial')
@@ -593,15 +614,21 @@ function textOf(turn: ConversationTurn | undefined): string {
 describe('usage 竹节压缩（闭环 PR6）', () => {
   const originalPromaHome = process.env.PROMA_HOME
   const originalThreshold = process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
+  // P1-1 keep-recent（2026-09-08）：本 describe 锁定压缩「机制」（触发/封顶/fallback/关闭/abort），
+  // 保留段置 '0' 回归旧两段结构；保留段行为由下方「keep-recent 三段式压缩」describe 单独锁定。
+  const originalKeepRecent = process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS
   const echo = tool('echo', () => ({ output: 'ok' }))
 
   beforeEach(() => {
     process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-compact-'))
+    process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS = '0'
   })
   afterEach(() => {
     process.env.PROMA_HOME = originalPromaHome
     if (originalThreshold === undefined) delete process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
     else process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = originalThreshold
+    if (originalKeepRecent === undefined) delete process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS
+    else process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS = originalKeepRecent
   })
 
   it('超阈值触发：messages 重置为 task+交接（task+2 次交接=3 节），交接调用无 tools 且带交接 system', async () => {
@@ -714,6 +741,127 @@ describe('usage 竹节压缩（闭环 PR6）', () => {
     expect(result.status).toBe('cancelled')
     expect(events.filter((event) => event.type === 'loop_compaction')).toHaveLength(0)
   })
+
+  it('W1-E1：压缩观测埋点 onCompaction——段号/保留移除计数/交接口径/上限后首次 skip（max_compactions）', async () => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    const { query } = compactQuery({ inputTokens: 5000, handoff: 'text' })
+    const observed: AgentLoopCompactionInfo[] = []
+    const result = await runAgentLoop(baseInput({
+      query,
+      tools: [echo],
+      maxTurns: 6,
+      sessionId: 'session-compact-observe',
+      onCompaction: (info) => observed.push(info),
+    }))
+    // echo 永不停工具 → turn_limit；途中两次压缩（turn<maxTurns-3=3）+ 第 3 轮首次上限跳过
+    expect(result.status).toBe('turn_limit')
+    expect(observed).toHaveLength(3)
+    expect(observed[0]).toMatchObject({
+      at_turn: 1,
+      segment: 1,
+      trigger_input_tokens: 5000,
+      retained_turns: 0, // KEEP_RECENT='0'：旧两段结构，无保留段
+      removed_turns: 2,  // [asst(tool_use), user(tool_result)] 两轮历史被移除
+      handoff_fallback: false,
+    })
+    expect(observed[0]!.est_tokens_before!).toBeGreaterThan(0)
+    expect(observed[0]!.est_tokens_after!).toBeGreaterThan(0)
+    expect(observed[0]!.handoff_chars!).toBeGreaterThan(0)
+    expect(observed[1]).toMatchObject({ at_turn: 2, segment: 2, removed_turns: 2 })
+    // 上限后：阈值仍满足但静默跳过（E6 核查 1 定案），首次报一条 max_compactions
+    expect(observed[2]).toMatchObject({
+      at_turn: 3,
+      segment: 2,
+      skipped: true,
+      skip_reason: 'max_compactions',
+      trigger_input_tokens: 5000,
+      retained_turns: 0,
+      removed_turns: 0,
+      handoff_chars: 0,
+    })
+  })
+
+  it('W1-E1：末段保护跳过报 late_turn（turn ≥ maxTurns-3 后不再压缩）', async () => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    const { query } = compactQuery({ inputTokens: 5000, handoff: 'text' })
+    const observed: AgentLoopCompactionInfo[] = []
+    await runAgentLoop(baseInput({
+      query,
+      tools: [echo],
+      maxTurns: 5, // turn < 5-3=2：仅第 1 轮可压缩；第 2 轮起末段保护
+      sessionId: 'session-compact-late',
+      onCompaction: (info) => observed.push(info),
+    }))
+    expect(observed).toHaveLength(2)
+    expect(observed[0]).toMatchObject({ at_turn: 1, segment: 1 })
+    expect(observed[1]).toMatchObject({ at_turn: 2, skipped: true, skip_reason: 'late_turn' })
+  })
+
+  it('W1-E1：交接失败兑底路径 handoff_fallback=true，est 口径照报', async () => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    const { query } = compactQuery({ inputTokens: 5000, handoff: 'throw' })
+    const observed: AgentLoopCompactionInfo[] = []
+    await runAgentLoop(baseInput({
+      query,
+      tools: [echo],
+      maxTurns: 6,
+      sessionId: 'session-compact-fallback-observe',
+      onCompaction: (info) => observed.push(info),
+    }))
+    expect(observed[0]).toMatchObject({ segment: 1, handoff_fallback: true })
+    expect(observed[0]!.handoff_chars!).toBeGreaterThan(0) // deterministicHandoff 兑底文本
+    expect(observed[1]).toMatchObject({ segment: 2, handoff_fallback: true })
+  })
+})
+
+describe('W1-E1 取消触发源细分（cancel_detail）', () => {
+  const echo = tool('echo', () => ({ output: 'ok' }))
+
+  it('启动前已中止：turn_start 观察点 + AGENT_CANCELLED source 解析', async () => {
+    const controller = new AbortController()
+    controller.abort(new Error('AGENT_CANCELLED: user_cancelled'))
+    const result = await runAgentLoop(baseInput({
+      query: async function* () { yield { type: 'result', subtype: 'success' } },
+      tools: [echo],
+      signal: controller.signal,
+      sessionId: 'session-cancel-prestart',
+    }))
+    expect(result.status).toBe('cancelled')
+    expect(result.cancel_detail).toMatchObject({ phase: 'turn_start', source: 'user_cancelled' })
+  })
+
+  it('无 reason 的 abort（委派 stop/程序化）：source=unattributed，reason 原样保留', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const result = await runAgentLoop(baseInput({
+      query: async function* () { yield { type: 'result', subtype: 'success' } },
+      tools: [echo],
+      signal: controller.signal,
+      sessionId: 'session-cancel-noreason',
+    }))
+    expect(result.status).toBe('cancelled')
+    expect(result.cancel_detail?.phase).toBe('turn_start')
+    expect(result.cancel_detail?.source).toBe('unattributed')
+    expect(result.cancel_detail?.reason).toBeTruthy()
+  })
+
+  it('abort 在交接等待中：handoff 观察点捕获（cancel_detail 而非裸 status）', async () => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-compact-'))
+    const { query } = compactQuery({ inputTokens: 5000, handoff: 'hang' })
+    const controller = new AbortController()
+    const pending = runAgentLoop(baseInput({
+      query,
+      tools: [echo],
+      maxTurns: 6,
+      sessionId: 'session-compact-abort-detail',
+      signal: controller.signal,
+    }))
+    setTimeout(() => controller.abort(), 30)
+    const result = await pending
+    expect(result.status).toBe('cancelled')
+    expect(result.cancel_detail).toMatchObject({ phase: 'handoff', source: 'unattributed' })
+  })
 })
 
 /** 压缩×钉轮交互修复测试 query：可按轮指定工具名（gwt_fail/echo），usage 恒超额。 */
@@ -765,16 +913,21 @@ function toolUseIdOf(turn: ConversationTurn): string | undefined {
 describe('压缩×钉轮交互修复（审查 P1-1/P1-2）', () => {
   const originalPromaHome = process.env.PROMA_HOME
   const originalThreshold = process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
+  // P1-1 keep-recent：同上——本 describe 锁钉轮坐标系机制，保留段置 '0'（配对断言不随保留段漂移）
+  const originalKeepRecent = process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS
   const echo = tool('echo', () => ({ output: 'ok' }))
 
   beforeEach(() => {
     process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-pinfix-'))
     process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS = '0'
   })
   afterEach(() => {
     process.env.PROMA_HOME = originalPromaHome
     if (originalThreshold === undefined) delete process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
     else process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = originalThreshold
+    if (originalKeepRecent === undefined) delete process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS
+    else process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS = originalKeepRecent
   })
 
   it('压缩后无新失败 → 无幻影钉（不误钉无关轮对）', async () => {
@@ -820,6 +973,159 @@ describe('压缩×钉轮交互修复（审查 P1-1/P1-2）', () => {
     const lines = readSessionJsonl('session-pinfix-fallback').map((line) => JSON.stringify(line))
     const compactionLine = lines.find((line) => line.includes('[loop-compaction]'))
     expect(compactionLine).toContain('F-002')
+  })
+})
+
+describe('keep-recent 三段式压缩（P1-1，2026-09-08 pi 差距方案）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalThreshold = process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
+  const originalKeepRecent = process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS
+  const echo = tool('echo', () => ({ output: 'ok' }))
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-keeprecent-'))
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    // 缺省 8000（除非用例显式覆盖）；afterEach 按 originalKeepRecent 归一
+    delete process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+    if (originalThreshold === undefined) delete process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
+    else process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = originalThreshold
+    if (originalKeepRecent === undefined) delete process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS
+    else process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS = originalKeepRecent
+  })
+
+  // ---- keepRecentTurns 纯函数 ----
+
+  function pairTurns(id: string, resultText: string): ConversationTurn[] {
+    return [
+      { role: 'assistant', content: [{ type: 'tool_use', id, name: 'echo', input: {} }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: resultText }] },
+    ]
+  }
+  function userTextTurn(text: string): ConversationTurn {
+    return { role: 'user', content: text }
+  }
+  function pairCost(pair: ConversationTurn[]): number {
+    return pair.reduce((n, turn) => n + estimateTokenCount(typeof turn.content === 'string' ? turn.content : estimateBlocksText(turn.content)), 0)
+  }
+
+  it('纯函数：预算充足 → tail 全保留且原序（首条 task/head 不进保留段）', () => {
+    const messages: ConversationTurn[] = [userTextTurn('任务'), ...pairTurns('t1', '结果一'), userTextTurn('【用户中途补充】补充'), ...pairTurns('t2', '结果二')]
+    const kept = keepRecentTurns(messages, 100_000)
+    expect(kept).toHaveLength(5)
+    expect(kept[0]).toEqual(pairTurns('t1', '结果一')[0])
+    expect(kept[2]).toEqual(userTextTurn('【用户中途补充】补充'))
+    expect(kept[4]).toEqual(pairTurns('t2', '结果二')[1])
+    // head（task）绝不进保留段——新首消息已含 task+交接
+    expect(kept.some((turn) => typeof turn.content === 'string' && turn.content === '任务')).toBe(false)
+  })
+
+  it('纯函数：预算恰够最新对 → 只保留该完整对（连续后缀，不拆对、不留中空）', () => {
+    const pair2 = pairTurns('t2', '结果二')
+    const messages: ConversationTurn[] = [userTextTurn('任务'), ...pairTurns('t1', '结果一'), userTextTurn('注入轮'), ...pair2]
+    const kept = keepRecentTurns(messages, pairCost(pair2))
+    expect(kept).toHaveLength(2)
+    expect(kept).toEqual(pair2)
+  })
+
+  it('纯函数：文本注入轮紧邻最新对 → 预算内连带保留（对永不拆散）', () => {
+    const pair2 = pairTurns('t2', '结果二')
+    const steer = userTextTurn('【用户中途补充】补充')
+    const steerCost = typeof steer.content === 'string' ? estimateTokenCount(steer.content) : 0
+    const messages: ConversationTurn[] = [userTextTurn('任务'), ...pairTurns('t1', '结果一'), steer, ...pair2]
+    const kept = keepRecentTurns(messages, pairCost(pair2) + steerCost)
+    expect(kept).toHaveLength(3)
+    expect(kept[0]).toEqual(steer)
+    expect(kept[1]).toEqual(pair2[0])
+    expect(kept[2]).toEqual(pair2[1])
+  })
+
+  it("纯函数：'0'/空 tail → 不保留（旧行为）", () => {
+    const messages: ConversationTurn[] = [userTextTurn('任务'), ...pairTurns('t1', '结果一')]
+    expect(keepRecentTurns(messages, 0)).toEqual([])
+    expect(keepRecentTurns([userTextTurn('任务')], 8_000)).toEqual([])
+  })
+
+  it('纯函数：单对超出整个预算 → 整对丢弃（不截断内容、由交接文档兜底）', () => {
+    const messages: ConversationTurn[] = [userTextTurn('任务'), ...pairTurns('t1', '超长结果'.repeat(200))]
+    expect(keepRecentTurns(messages, 10)).toEqual([])
+  })
+
+  // ---- 集成（runAgentLoop 全链路） ----
+
+  it('缺省预算：压缩重置为三段（task+交接+近期原文保留），保留段估算不超 8000 token', async () => {
+    const { query, turnCalls, handoffCalls } = compactQuery({ inputTokens: 5000, handoff: 'text', handoffText: '交接：布局完成，GWT 场景 3 未过，下一步修点击。' })
+    const events: Array<{ type: AgentEvent['type']; payload: Record<string, unknown> }> = []
+    await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 8, sessionId: 'session-keeprecent-default', publish: (type, payload) => events.push({ type, payload }) }))
+
+    // 第 2 轮模型调用看到三段：system + head(task+交接+保留段标记) + 保留的最新工具对（t0）
+    expect(turnCalls[1]).toHaveLength(4)
+    const head = textOf(turnCalls[1]![1])
+    expect(head).toContain('测试任务')
+    expect(head).toContain('【此前进度交接（第 1 段）】')
+    expect(head).toContain('布局完成')
+    expect(head).toContain('【近期原文保留】')
+    const retained = turnCalls[1]!.slice(2)
+    expect(retained[0]!.role).toBe('assistant')
+    expect((retained[0]!.content as Array<{ type?: string; id?: string }>).find((b) => b.type === 'tool_use')?.id).toBe('t0')
+    expect(retained[1]!.role).toBe('user')
+    const retainedTokens = retained.reduce((n, turn) => n + estimateTokenCount(typeof turn.content === 'string' ? turn.content : estimateBlocksText(turn.content)), 0)
+    expect(retainedTokens).toBeLessThanOrEqual(8_000)
+
+    // 事件与 JSONL 审计均携带保留段信息
+    const compaction = events.find((event) => event.type === 'loop_compaction')
+    expect(compaction?.payload).toMatchObject({ keep_recent_turns: 2 })
+    const lines = readSessionJsonl('session-keeprecent-default').map((line) => JSON.stringify(line))
+    expect(lines.find((line) => line.includes('[loop-compaction]'))).toContain('keep_recent=2 轮')
+
+    // 交接调用输入包含保留段之前的原文（交接在重置前发生，天然携带全量窗口）
+    expect(handoffCalls).toHaveLength(2)
+  })
+
+  it("预算 '1'（装不下任何完整对）→ 回归两段结构：无保留段标记、无保留轮", async () => {
+    process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS = '1'
+    const { query, turnCalls } = compactQuery({ inputTokens: 5000, handoff: 'text' })
+    const events: Array<{ type: AgentEvent['type']; payload: Record<string, unknown> }> = []
+    await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 8, sessionId: 'session-keeprecent-tiny', publish: (type, payload) => events.push({ type, payload }) }))
+    expect(turnCalls[1]).toHaveLength(2)
+    expect(textOf(turnCalls[1]![1])).not.toContain('【近期原文保留】')
+    expect(events.find((event) => event.type === 'loop_compaction')?.payload).toMatchObject({ keep_recent_turns: 0 })
+  })
+
+  it("KEEP_RECENT='0' 显式回归：三段完全退化为旧两段（task+交接，与 2026-08-29 行为一致）", async () => {
+    process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS = '0'
+    const { query, turnCalls } = compactQuery({ inputTokens: 5000, handoff: 'text' })
+    await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 8, sessionId: 'session-keeprecent-off' }))
+    expect(turnCalls[1]).toHaveLength(2)
+    const head = textOf(turnCalls[1]![1])
+    expect(head).toContain('【此前进度交接（第 1 段）】')
+    expect(head).not.toContain('【近期原文保留】')
+  })
+
+  it('与钉轮共存：首个测试失败轮原文经保留段存活（交接文档之外双保险），压缩封顶仍 2 次', async () => {
+    // 第 1 轮 gwt 失败（钉轮信号）→ 同轮末压缩：交接文档（LLM 文本）不含断言原文，
+    // 保留段把失败工具对原文留下——修复不再依赖单一交接文档记忆
+    const { query, turnCalls } = turnScriptQuery({ toolByTurn: (turn) => (turn === 1 ? 'gwt_fail' : 'echo'), handoff: 'text' })
+    const events: Array<{ type: AgentEvent['type'] }> = []
+    await runAgentLoop(baseInput({ query, tools: [echo, gwtFailTool()], maxTurns: 14, sessionId: 'session-keeprecent-pin', publish: (type) => events.push({ type }) }))
+
+    // 第 2 轮模型调用：三段结构 + 保留段含 F-002 断言原文
+    expect(JSON.stringify(turnCalls[1])).toContain('F-002')
+    expect(textOf(turnCalls[1]![1])).toContain('【近期原文保留】')
+    // 保留段把 token 加回上下文，但压缩次数仍受封顶约束（2 次）
+    expect(events.filter((event) => event.type === 'loop_compaction')).toHaveLength(2)
+  })
+
+  it('交接 LLM 失败 → 确定性 fallback 同样带保留段（降级路径恰最需要细节）', async () => {
+    const { query, turnCalls } = compactQuery({ inputTokens: 5000, handoff: 'throw' })
+    await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 6, sessionId: 'session-keeprecent-fallback' }))
+    expect(turnCalls[1]).toHaveLength(4)
+    const head = textOf(turnCalls[1]![1])
+    expect(head).toContain('【自动交接')
+    expect(head).toContain('【近期原文保留】')
+    expect(turnCalls[1]![2]!.role).toBe('assistant') // 保留的 t0 工具对
   })
 })
 
@@ -1009,5 +1315,682 @@ describe('终轮退行守卫（P0，2026-09-06 地牢清怪录案）', () => {
     ])
     const result = await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 1 }))
     expect(result.status).toBe('turn_limit')
+  })
+})
+
+describe('steer 运行中转向（P0-1，2026-09-08 pi 差距方案）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-steer-'))
+    resetSteerQueuesForTests()
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+    resetSteerQueuesForTests()
+  })
+
+  /** echo 工具：execute 时把给定文本入队为 steer（模拟用户在当前运行会话中途补充）。 */
+  function steerDuringTool(text: string): AgentLoopTool {
+    return {
+      name: 'steer_during',
+      description: '执行时注入一条 steer',
+      input_schema: { type: 'object', properties: {} },
+      execute: async (_input, ctx) => {
+        enqueueSteer(ctx.sessionId, { queueMessageId: `steer-${text.length}-${Date.now()}`, content: text, enqueuedAt: Date.now() })
+        return { output: 'ok' }
+      },
+    }
+  }
+
+  it('批间注入：工具执行中入队的 steer 在下一轮模型调用可见（包裹 + JSONL + 事件）', async () => {
+    const steerTool = steerDuringTool('把按钮改成蓝色')
+    const { query, receivedMessages } = scriptedQuery([
+      [toolUseMessage('t1', 'steer_during')],
+      [toolUseMessage('t2', 'echo')],
+      [textMessage('完成')],
+    ])
+    const events: Array<{ type: AgentEvent['type']; payload: Record<string, unknown> }> = []
+    const result = await runAgentLoop(baseInput({ query, tools: [steerTool, tool('echo', () => ({ output: 'ok' }))], maxTurns: 3, sessionId: 'session-steer', publish: (type, payload) => events.push({ type, payload }) }))
+    expect(result.status).toBe('completed')
+
+    // 第 2 轮模型调用（receivedMessages[1]）：task + t1 对后紧跟注入的 steer user 轮
+    const secondCall = receivedMessages[1]!
+    const steerTurn = secondCall.find((turn) => turn.role === 'user' && JSON.stringify(turn.content).includes(STEER_WRAP_PREFIX))
+    expect(steerTurn).toBeDefined()
+    expect(JSON.stringify(steerTurn!.content)).toContain(wrapSteerContent('把按钮改成蓝色'))
+    // 第 3 轮调用里 steer 仍在（未丢）
+    expect(JSON.stringify(receivedMessages[2])).toContain('把按钮改成蓝色')
+
+    // steer_injected 事件：payload 含原文/包裹全文/轮号
+    const injected = events.filter((event) => event.type === 'steer_injected')
+    expect(injected).toHaveLength(1)
+    expect(injected[0]!.payload).toMatchObject({ content: '把按钮改成蓝色', at_turn: 1 })
+
+    // JSONL 审计：注入的 user 行已落盘（与模型所见一致）
+    const lines = readSessionJsonl('session-steer')
+    expect(JSON.stringify(lines)).toContain(wrapSteerContent('把按钮改成蓝色'))
+    // 队列已排空（drain 单点取走，无残留）
+    expect(pendingSteerCount('session-steer')).toBe(0)
+  })
+
+  it('多 steer 保序注入；同一批 drain 全部进 messages', async () => {
+    let count = 0
+    const steerTool: AgentLoopTool = {
+      name: 'steer_many',
+      description: '连续注入两条 steer',
+      input_schema: { type: 'object', properties: {} },
+      execute: async () => {
+        count += 1
+        enqueueSteer('session-steer-many', { queueMessageId: `s${count}a`, content: `第一条${count}`, enqueuedAt: Date.now() })
+        enqueueSteer('session-steer-many', { queueMessageId: `s${count}b`, content: `第二条${count}`, enqueuedAt: Date.now() })
+        return { output: 'ok' }
+      },
+    }
+    const { query, receivedMessages } = scriptedQuery([
+      [toolUseMessage('t1', 'steer_many')],
+      [toolUseMessage('t2', 'steer_many')],
+      [textMessage('完成')],
+    ])
+    await runAgentLoop(baseInput({ query, tools: [steerTool], maxTurns: 3, sessionId: 'session-steer-many' }))
+
+    // 每次模型调用收到的 user 文本（保序）——steer 注入按源序出现在对应批后
+    const userTextsOf = (messages: ConversationTurn[]): string[] =>
+      messages.flatMap((turn) =>
+        turn.role === 'user'
+          ? (Array.isArray(turn.content) ? turn.content : [{ type: 'text' as const, text: turn.content }])
+              .filter((block) => block.type === 'text')
+              .map((block) => block.text ?? '')
+          : [],
+      )
+    // 第 2 轮调用（turn 2 模型请求前，第 1 批两条已注入）；第 3 轮调用（第 2 批两条已注入）
+    const call2Texts = userTextsOf(receivedMessages[1]!)
+    const call3Texts = userTextsOf(receivedMessages[2]!)
+    const hasText = (texts: string[], needle: string): boolean => texts.some((text) => text.includes(needle))
+    expect(hasText(call2Texts, '第一条1')).toBe(true)
+    expect(hasText(call2Texts, '第二条1')).toBe(true)
+    expect(hasText(call3Texts, '第一条2')).toBe(true)
+    expect(hasText(call3Texts, '第二条2')).toBe(true)
+    expect(pendingSteerCount('session-steer-many')).toBe(0)
+  })
+
+  it('委派子会话（delegationDepth≥1）不开放 steer：入队被拒（不在 loopActive）、消息零注入', async () => {
+    const steerTool = steerDuringTool('子会话不该收到')
+    const { query, receivedMessages } = scriptedQuery([[toolUseMessage('t1', 'steer_during')], [textMessage('子任务完成')]])
+    await runAgentLoop(baseInput({ query, tools: [steerTool], maxTurns: 2, sessionId: 'session-steer-child', delegationDepth: 1 }))
+    // enqueue 门：子会话未 markLoopActive → enqueueSteer 直接拒绝，队列空
+    expect(pendingSteerCount('session-steer-child')).toBe(0)
+    // 模型消息里没有包裹文本
+    expect(JSON.stringify(receivedMessages[1])).not.toContain('子会话不该收到')
+  })
+
+  it('主 loop 收尾时未及注入的残余 → 落 JSONL 保真（自然结束不丢内容）', async () => {
+    const steerTool = steerDuringTool('收尾前到达')
+    const { query } = scriptedQuery([
+      [toolUseMessage('t1', 'steer_during')],
+      [textMessage('做完')],
+    ])
+    await runAgentLoop(baseInput({ query, tools: [steerTool], maxTurns: 2, sessionId: 'session-steer-tail' }))
+    // 入队发生在 t1 execute 时 → t1 批后已注入（非残余）；这里验证队列空 + 注入已落 JSONL
+    expect(pendingSteerCount('session-steer-tail')).toBe(0)
+    expect(JSON.stringify(readSessionJsonl('session-steer-tail'))).toContain(wrapSteerContent('收尾前到达'))
+  })
+
+  it('steer 注入发生在竹节压缩检查之前：注入轮进交接输入（无特判共存）', async () => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS = '0'
+    // 第 1 轮 steer_during（execute 内入队 steer + usage 超额）→ drain 先于压缩检查，
+    // 注入的 user 轮已进 messages → requestHandoff 的窗口输入天然携带（「压缩时进交接输入」）
+    const steerTool = steerDuringTool('压缩前补充的方向')
+    let calls = 0
+    const handoffInputs: ConversationTurn[][] = []
+    const query: SDKQuery = async function* (_prompt, queryOptions) {
+      const index = calls
+      calls += 1
+      if (queryOptions.tools === undefined) {
+        handoffInputs.push((queryOptions.messages ?? []).map((turn) => ({ ...turn })))
+        yield textMessage('交接：布局完成；未解决 GWT 场景 3；下一步修点击。')
+        yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+        return
+      }
+      yield toolUseMessage(`t${index}`, index === 0 ? 'steer_during' : 'echo')
+      yield { type: 'result', subtype: 'success', stop_reason: 'tool_use', usage: { input_tokens: 5000, output_tokens: 10 } }
+    }
+    const events: Array<{ type: AgentEvent['type'] }> = []
+    await runAgentLoop(baseInput({
+      query,
+      tools: [steerTool, tool('echo', () => ({ output: 'ok' }))],
+      maxTurns: 8,
+      sessionId: 'session-steer-compact',
+      publish: (type) => events.push({ type }),
+    }))
+    expect(events.filter((event) => event.type === 'steer_injected')).toHaveLength(1)
+    // 压缩照常发生（封顶 2 次，不受注入影响）
+    expect(events.filter((event) => event.type === 'loop_compaction')).toHaveLength(2)
+    // 第 1 次压缩的交接调用输入（窗口化 messages）携带注入文本
+    expect(handoffInputs.length).toBeGreaterThan(0)
+    expect(JSON.stringify(handoffInputs[0])).toContain('压缩前补充的方向')
+    expect(pendingSteerCount('session-steer-compact')).toBe(0)
+  })
+})
+
+describe('I3 转向生效确认链（P7-7）：注入点与账本联动（BLOMA_STEER_CONFIRM）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalConfirm = process.env.BLOMA_STEER_CONFIRM
+
+  /** 注册式工具：execute 时走 registerSteer（与生产 IPC 入口同链：低档直接入队） */
+  function registeredSteerTool(text: string, queueId: string): AgentLoopTool {
+    return {
+      name: 'steer_registered',
+      description: '执行时登记一条 steer（I3 链）',
+      input_schema: { type: 'object', properties: {} },
+      execute: async (_input, ctx) => {
+        registerSteer(ctx.sessionId, { queueMessageId: queueId, content: text, enqueuedAt: Date.now() })
+        return { output: 'ok' }
+      },
+    }
+  }
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-i3-'))
+    resetSteerQueuesForTests()
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+    if (originalConfirm === undefined) delete process.env.BLOMA_STEER_CONFIRM
+    else process.env.BLOMA_STEER_CONFIRM = originalConfirm
+    resetSteerQueuesForTests()
+  })
+
+  it('on：低档 registerSteer → 批间注入 → steer_injected 带 steer_id/status 且账本推进 merged', async () => {
+    process.env.BLOMA_STEER_CONFIRM = '1'
+    const steerTool = registeredSteerTool('把按钮改成蓝色', 'steer-low-1')
+    const { query } = scriptedQuery([
+      [toolUseMessage('t1', 'steer_registered')],
+      [textMessage('完成')],
+    ])
+    const events: Array<{ type: AgentEvent['type']; payload: Record<string, unknown> }> = []
+    const result = await runAgentLoop(baseInput({
+      query,
+      tools: [steerTool],
+      maxTurns: 2,
+      sessionId: 'session-i3-on',
+      publish: (type, payload) => events.push({ type, payload }),
+    }))
+    expect(result.status).toBe('completed')
+    const injected = events.filter((event) => event.type === 'steer_injected')
+    expect(injected).toHaveLength(1)
+    expect(injected[0]!.payload).toMatchObject({
+      content: '把按钮改成蓝色',
+      steer_id: 'steer-low-1',
+      status: 'merged_this_run',
+    })
+    // 账本同步推进（getSteerStatuses 是「这轮会做吗」权威答案源）
+    const statuses = getSteerStatuses('session-i3-on')
+    expect(statuses).toHaveLength(1)
+    expect(statuses[0]).toMatchObject({ steerId: 'steer-low-1', status: 'merged_this_run', impact: 'low' })
+  })
+
+  it('off：enqueueSteer 无 steerId → steer_injected payload 字节级无新键、账本恒空', async () => {
+    delete process.env.BLOMA_STEER_CONFIRM
+    const steerTool: AgentLoopTool = {
+      name: 'steer_during',
+      description: '执行时入队一条 steer',
+      input_schema: { type: 'object', properties: {} },
+      execute: async (_input, ctx) => {
+        enqueueSteer(ctx.sessionId, { queueMessageId: `steer-${Date.now()}`, content: '把按钮改成蓝色', enqueuedAt: Date.now() })
+        return { output: 'ok' }
+      },
+    }
+    const { query } = scriptedQuery([
+      [toolUseMessage('t1', 'steer_during')],
+      [textMessage('完成')],
+    ])
+    const events: Array<{ type: AgentEvent['type']; payload: Record<string, unknown> }> = []
+    await runAgentLoop(baseInput({
+      query,
+      tools: [steerTool],
+      maxTurns: 2,
+      sessionId: 'session-i3-off',
+      publish: (type, payload) => events.push({ type, payload }),
+    }))
+    const injected = events.filter((event) => event.type === 'steer_injected')
+    expect(injected).toHaveLength(1)
+    expect(injected[0]!.payload).not.toHaveProperty('steer_id')
+    expect(injected[0]!.payload).not.toHaveProperty('status')
+    expect(getSteerStatuses('session-i3-off')).toEqual([])
+  })
+
+  it('on：loop 自然收尾时未及注入的残余 → 账本如实转留待下一轮（不取 merged）', async () => {
+    process.env.BLOMA_STEER_CONFIRM = '1'
+    // 终轮模型调用期间入队（模型正在流式输出时 IPC 到达）：批间注入点已过 → finally 残余路径
+    let call = 0
+    const combined: SDKQuery = async function* () {
+      call += 1
+      if (call === 1) {
+        yield toolUseMessage('t1', 'echo')
+        yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+      } else {
+        registerSteer('session-i3-tail', { queueMessageId: 'steer-late-1', content: '收尾前到达的补充', enqueuedAt: Date.now() })
+        yield textMessage('做完')
+        yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+      }
+    }
+    await runAgentLoop(baseInput({ query: combined, tools: [tool('echo', () => ({ output: 'ok' }))], maxTurns: 2, sessionId: 'session-i3-tail' }))
+    // 残余内容落 JSONL 保真（现状不变）+ 账本状态留待下一轮（非 merged——本轮没做）
+    expect(JSON.stringify(readSessionJsonl('session-i3-tail'))).toContain(wrapSteerContent('收尾前到达的补充'))
+    expect(getSteerStatuses('session-i3-tail')[0]?.status).toBe('deferred_next_run')
+  })
+})
+
+describe('W2 E2+F1（咨询 D3/D4）：loop_checkpoint v0', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalCheckpoint = process.env.BLOMA_LOOP_CHECKPOINT
+  const originalThreshold = process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
+  const originalKeepRecent = process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS
+  const echo = tool('echo', () => ({ output: 'ok' }))
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-ckpt-'))
+    process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS = '0'
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+    for (const [key, value] of [
+      ['BLOMA_LOOP_CHECKPOINT', originalCheckpoint],
+      ['BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS', originalThreshold],
+      ['BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS', originalKeepRecent],
+    ] as const) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  })
+
+  it('renderCheckpointRecoveryHeader：目标/指纹/仍有效转向过滤 superseded/未闭环失败/验证状态', () => {
+    const snapshot: LoopCheckpointSnapshot = {
+      session_id: 's1',
+      at_turn: 9,
+      trigger: 'compaction',
+      decisions: [
+        { id: 'steer-3-1', kind: 'steer', text: '改成月度统计口径', at_turn: 3, superseded_by: 'steer-6-1' },
+        { id: 'steer-6-1', kind: 'steer', text: '改回周口径并保留导出', at_turn: 6 },
+      ],
+      progress_files: { 'src/app.js': 'abc123-120' },
+      validation: {
+        gwt_runs: 2,
+        api_contract_runs: 0,
+        last_gwt_failures: ['F-005 搜索过滤'],
+        gwt_all_passed: false,
+        api_all_passed: true,
+        security_all_passed: false,
+        file_revisions: { 'src/app.js': 'abc123-120' },
+        candidate_fingerprint: 'fp-deadbeef-1',
+      },
+    }
+    const header = renderCheckpointRecoveryHeader('做一个记账工具\n更多细节', snapshot)
+    expect(header).toContain('【检查点恢复头')
+    expect(header).toContain('做一个记账工具')
+    expect(header).toContain('fp-deadbeef-1')
+    expect(header).toContain('改回周口径并保留导出')
+    expect(header).not.toContain('改成月度统计口径') // superseded 不注入
+    expect(header).toContain('F-005 搜索过滤')
+    expect(header).toContain('GWT 有失败')
+    expect(header).toContain('read_file/grep')
+  })
+
+  it('E3：onCheckpoint 终态触发 + result.validation 快照（gwt_runs=0 如实）', async () => {
+    const snapshots: LoopCheckpointSnapshot[] = []
+    const result = await runAgentLoop(baseInput({
+      query: async function* () {
+        yield toolUseMessage('t1', 'echo')
+        yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+      },
+      tools: [echo],
+      maxTurns: 1,
+      sessionId: 'session-ckpt-final',
+      onCheckpoint: (snapshot) => snapshots.push(snapshot),
+    }))
+    expect(result.status).toBe('turn_limit')
+    expect(result.validation).toMatchObject({ gwt_runs: 0, api_contract_runs: 0, last_gwt_failures: [] })
+    expect(snapshots.some((s) => s.trigger === 'final')).toBe(true)
+  })
+
+  it('压缩后恢复头由 checkpoint 生成（BLOMA_LOOP_CHECKPOINT on；off=零注入字节级现状）', async () => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    const { query, turnCalls } = compactQuery({ inputTokens: 5000, handoff: 'text' })
+    // on：压缩后下一轮模型请求携带恢复头
+    process.env.BLOMA_LOOP_CHECKPOINT = '1'
+    await runAgentLoop(baseInput({
+      query,
+      tools: [echo],
+      maxTurns: 6,
+      sessionId: 'session-ckpt-on',
+    }))
+    const afterCompaction = JSON.stringify(turnCalls[1])
+    expect(afterCompaction).toContain('检查点恢复头')
+    expect(afterCompaction).toContain('候选指纹')
+    // off：恢复头不出现（字节级现状）
+    const { query: query2, turnCalls: turnCalls2 } = compactQuery({ inputTokens: 5000, handoff: 'text' })
+    delete process.env.BLOMA_LOOP_CHECKPOINT
+    await runAgentLoop(baseInput({
+      query: query2,
+      tools: [echo],
+      maxTurns: 6,
+      sessionId: 'session-ckpt-off',
+    }))
+    expect(JSON.stringify(turnCalls2[1])).not.toContain('检查点恢复头')
+  })
+
+  it('E3：压缩事件触发 onCheckpoint(trigger=compaction)，快照含段后验证状态', async () => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    process.env.BLOMA_LOOP_CHECKPOINT = '1'
+    const { query } = compactQuery({ inputTokens: 5000, handoff: 'text' })
+    const snapshots: LoopCheckpointSnapshot[] = []
+    await runAgentLoop(baseInput({
+      query,
+      tools: [echo],
+      maxTurns: 6,
+      sessionId: 'session-ckpt-compaction',
+      onCheckpoint: (snapshot) => snapshots.push(snapshot),
+    }))
+    const compaction = snapshots.find((s) => s.trigger === 'compaction')
+    expect(compaction).toBeDefined()
+    expect(compaction!.validation.candidate_fingerprint).toMatch(/^fp-[0-9a-f]+-\d+$/)
+  })
+})
+
+describe('W3-D2：收口条件升级为预检通过（BLOMA_PREFLIGHT）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalPreflight = process.env.BLOMA_PREFLIGHT
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-w3-'))
+    delete process.env.BLOMA_PREFLIGHT
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+    if (originalPreflight === undefined) delete process.env.BLOMA_PREFLIGHT
+    else process.env.BLOMA_PREFLIGHT = originalPreflight
+  })
+
+  it('预检开启：全验证面（含 preflight_passed）置位后才收口停工具；预检未过不收口', async () => {
+    // finish 工具把 gwt/security 置 true 但不动 preflight —— 预检开关 on 时不得收口
+    const finish = (extraPreflight = false): AgentLoopTool => ({
+      name: 'finish',
+      description: '测试工具 finish',
+      input_schema: { type: 'object', properties: {} },
+      execute: async (_input, ctx) => {
+        ctx.state.gwt_all_passed = true
+        ctx.state.security_all_passed = true
+        ctx.state.api_all_passed = true
+        if (extraPreflight) ctx.state.preflight_passed = true
+        return { output: 'ok' }
+      },
+    })
+    const calls: Array<{ tools: unknown; system: string }> = []
+    const query: SDKQuery = async function* (_prompt, queryOptions) {
+      calls.push({ tools: queryOptions.tools, system: String((queryOptions.messages ?? [])[0]?.content ?? '') })
+      yield toolUseMessage(`t${calls.length}`, 'finish')
+      yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+    }
+    // on：preflight 未过 → 第二轮仍带工具（不收口）
+    process.env.BLOMA_PREFLIGHT = '1'
+    await runAgentLoop(baseInput({ query, tools: [finish()], maxTurns: 2, sessionId: 'session-w3-on' }))
+    expect(calls[1]!.tools).not.toHaveLength(0)
+    // off：gwt+security 过即收口（现状口径）→ 第二轮停用工具 + 收口指令
+    delete process.env.BLOMA_PREFLIGHT
+    calls.length = 0
+    await runAgentLoop(baseInput({ query, tools: [finish()], maxTurns: 2, sessionId: 'session-w3-off' }))
+    expect(calls[1]!.tools).toHaveLength(0)
+    expect(calls[1]!.system).toContain('【收口】')
+    // on 且 preflight_passed 也置位 → 收口（D2 完整链）
+    process.env.BLOMA_PREFLIGHT = '1'
+    calls.length = 0
+    await runAgentLoop(baseInput({ query, tools: [finish(true)], maxTurns: 2, sessionId: 'session-w3-all' }))
+    expect(calls[1]!.tools).toHaveLength(0)
+    expect(calls[1]!.system).toContain('【收口】')
+  })
+})
+
+describe('W5-G3：检查点活跃投影每轮注入（BLOMA_LOOP_CHECKPOINT 复用）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalCheckpoint = process.env.BLOMA_LOOP_CHECKPOINT
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-g3-'))
+    delete process.env.BLOMA_LOOP_CHECKPOINT
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+    if (originalCheckpoint === undefined) delete process.env.BLOMA_LOOP_CHECKPOINT
+    else process.env.BLOMA_LOOP_CHECKPOINT = originalCheckpoint
+  })
+  it('on：每轮 system 尾部带【检查点投影】；off：system 原样字节不变', async () => {
+    const echo = tool('echo', () => ({ output: 'ok' }))
+    const systems: string[] = []
+    const query: SDKQuery = async function* (_prompt, queryOptions) {
+      systems.push(String((queryOptions.messages ?? [])[0]?.content ?? ''))
+      yield toolUseMessage(`t${systems.length}`, 'echo')
+      yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+    }
+    process.env.BLOMA_LOOP_CHECKPOINT = '1'
+    await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 2, sessionId: 'session-g3-on' }))
+    expect(systems[0]).toContain('检查点投影')
+    expect(systems[0]).toContain('候选指纹')
+    expect(systems[0]).toContain('未闭环失败：无')
+    // off：不注入（system === 原文）
+    delete process.env.BLOMA_LOOP_CHECKPOINT
+    systems.length = 0
+    await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 2, sessionId: 'session-g3-off' }))
+    expect(systems[0]).toBe('测试系统提示')
+  })
+})
+
+describe('W6（咨询 D3/D4）：预算层四件', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalCheckpoint = process.env.BLOMA_LOOP_CHECKPOINT
+  const originalThreshold = process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
+  const originalEstFallback = process.env.BLOMA_COMPACT_EST_FALLBACK
+  const originalKeepRecent = process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS
+  const echo = tool('echo', () => ({ output: 'ok' }))
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-w6-'))
+    delete process.env.BLOMA_LOOP_CHECKPOINT
+    delete process.env.BLOMA_COMPACT_EST_FALLBACK
+    process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS = '0'
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+    for (const [key, value] of [
+      ['BLOMA_LOOP_CHECKPOINT', originalCheckpoint],
+      ['BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS', originalThreshold],
+      ['BLOMA_COMPACT_EST_FALLBACK', originalEstFallback],
+      ['BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS', originalKeepRecent],
+    ] as const) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  })
+
+  it('F6：预算耗尽产出结构化受阻报告（检查点开着；含未闭环失败/验证面/建议下一步+JSONL 审计行）', async () => {
+    process.env.BLOMA_LOOP_CHECKPOINT = '1'
+    const query: SDKQuery = async function* () {
+      yield toolUseMessage('t1', 'echo')
+      yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' } // 无 usage 也可
+    }
+    const result = await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 1, sessionId: 'session-w6-blocked' }))
+    expect(result.status).toBe('turn_limit')
+    expect(result.blocked_report).toBeDefined()
+    expect(result.blocked_report!.reason).toBe('turn_limit')
+    expect(result.blocked_report!.candidate_fingerprint).toMatch(/^fp-/)
+    expect(result.blocked_report!.unresolved_failures).toEqual([])
+    expect(result.blocked_report!.verification).toMatchObject({ gwt: '未测', api: '过/豁免', security: '未测' })
+    expect(result.blocked_report!.suggested_next).toBeTruthy()
+    const jsonl = readSessionJsonl('session-w6-blocked') as Array<{ role: string; content: Array<{ type: string; text?: string }> }>
+    const reportLine = jsonl.find((m) => m.role === 'system' && m.content.some((b) => b.text?.includes('[loop-blocked-report]')))
+    expect(reportLine).toBeDefined()
+    // 开关 off：无受阻报告（字节级现状）
+    delete process.env.BLOMA_LOOP_CHECKPOINT
+    const plain = await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 1, sessionId: 'session-w6-plain' }))
+    expect(plain.blocked_report).toBeUndefined()
+  })
+
+  it('E4：渠道 usage 盲时 est 兜底触发压缩（以撒案根治位；off=触发器失明现状）', async () => {
+    // 渠道不回 usage 的查询：off 时不压缩；on 时按 est 触发
+    const queryFactory = () => {
+      const turnCalls: ConversationTurn[][] = []
+      const events: Array<{ type: AgentEvent['type'] }> = []
+      const query: SDKQuery = async function* (_prompt, queryOptions) {
+        if (queryOptions.tools === undefined) {
+          yield textMessage('交接：完成一半，场景 3 未过。')
+          yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+          return
+        }
+        turnCalls.push((queryOptions.messages ?? []).map((turn) => ({ ...turn })))
+        yield toolUseMessage(`t${turnCalls.length}`, 'echo')
+        yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' } // 无 usage 字段
+      }
+      return { query, turnCalls }
+    }
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1'
+    // off：永不压缩（现状）
+    const off = queryFactory()
+    await runAgentLoop(baseInput({ query: off.query, tools: [echo], maxTurns: 6, sessionId: 'session-w6-off' }))
+    expect(off.turnCalls[1]).toHaveLength(1 + 1 + 2) // system+task+首轮对（无重置全量累积）
+    // on：est 兜底触发
+    process.env.BLOMA_COMPACT_EST_FALLBACK = '1'
+    const on = queryFactory()
+    await runAgentLoop(baseInput({ query: on.query, tools: [echo], maxTurns: 6, sessionId: 'session-w6-on' }))
+    expect(JSON.stringify(on.turnCalls[1])).toContain('此前进度交接')
+  })
+
+  it('E4：确定性交接兑底附带检查点段（硬阈值兜底从检查点拼装）', async () => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    process.env.BLOMA_LOOP_CHECKPOINT = '1'
+    const { query, handoffCalls } = (() => {
+      const handoffCalls: ConversationTurn[][] = []
+      const query: SDKQuery = async function* (_prompt, queryOptions) {
+        if (queryOptions.tools === undefined) {
+          handoffCalls.push((queryOptions.messages ?? []).map((turn) => ({ ...turn })))
+          throw new Error('渠道 429')
+        }
+        yield toolUseMessage('t0', 'echo')
+        yield { type: 'result', subtype: 'success', stop_reason: 'tool_use', usage: { input_tokens: 5000, output_tokens: 10 } }
+      }
+      return { query, handoffCalls }
+    })()
+    await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 6, sessionId: 'session-w6-handoff' }))
+    const compactSystemLine = readSessionJsonl('session-w6-handoff') as Array<{ role: string; content: Array<{ type: string; text?: string }> }>
+    const line = compactSystemLine.find((m) => m.role === 'system' && m.content.some((b) => b.text?.includes('[loop-compaction]')))
+    expect(line).toBeDefined()
+    const text = line!.content.map((b) => b.text ?? '').join('')
+    expect(text).toContain('检查点状态')
+    expect(text).toContain('候选指纹')
+  })
+})
+
+// ==== B3（P0-B，2026-09-11 审计案 35c1a633）：loop 进度对账三守卫 ====
+
+describe('B3 loop 进度对账三守卫（BLOMA_LOOP_PROGRESS_NUDGE）', () => {
+  const previousEnv = process.env.BLOMA_LOOP_PROGRESS_NUDGE
+
+  afterEach(() => {
+    if (previousEnv === undefined) delete process.env.BLOMA_LOOP_PROGRESS_NUDGE
+    else process.env.BLOMA_LOOP_PROGRESS_NUDGE = previousEnv
+  })
+
+  const readFile = tool('read_file', () => ({ output: '内容' }))
+  const writeFile = tool('write_file', () => ({ output: '已写' }))
+  const gwt = tool('run_gwt_tests', () => ({ output: '2 过 1 败' }))
+
+  /** N 轮只读脚本 + 末轮交卷（脚本末项重复兜底，N+1 次调用内必到交卷或 turn_limit） */
+  function readOnlyScript(turns: number): SDKMessage[][] {
+    return Array.from({ length: turns }, (_, i) => [toolUseMessage(`r${i}`, 'read_file', { path: `src/mod${i}.js` })])
+  }
+
+  function userTextsOf(messages: ConversationTurn[]): string {
+    return messages
+      .filter((turn) => turn.role === 'user')
+      .map((turn) => (typeof turn.content === 'string' ? turn.content : JSON.stringify(turn.content)))
+      .join('\n')
+  }
+
+  it('守卫1：连续 6 轮只读 → 第 7 次模型调用前注入【进度对账】提醒落盘；有写入则不注入', async () => {
+    process.env.BLOMA_LOOP_PROGRESS_NUDGE = '1'
+    // 全只读 8 轮：第 6 轮批间 streak=6 触发注入
+    const stalled = scriptedQuery([...readOnlyScript(8), [textMessage('完成')]])
+    await runAgentLoop(baseInput({ query: stalled.query, tools: [readFile], maxTurns: 12, sessionId: 'session-b3-stall' }))
+    expect(userTextsOf(stalled.receivedMessages[6])).toContain('【进度对账（宿主注入）】')
+    expect(userTextsOf(stalled.receivedMessages[6])).toContain('已连续 6 轮只读')
+    // 注入后重置：第 7 轮批间 streak=1，不重复注入
+    expect(userTextsOf(stalled.receivedMessages[7])).not.toContain('已连续 1 轮只读')
+
+    // 第 3 轮有写入 → 失速清零，后续 4 轮只读（streak 4<6）全程零注入
+    const mixed = scriptedQuery([
+      [toolUseMessage('m1', 'read_file', { path: 'src/a.js' })],
+      [toolUseMessage('m2', 'run_gwt_tests', {})],
+      [toolUseMessage('m3', 'write_file', { path: 'src/app.js' })],
+      ...readOnlyScript(4).map((turn, i) => turn.map((m) => m)),
+      [textMessage('完成')],
+    ])
+    await runAgentLoop(baseInput({ query: mixed.query, tools: [readFile, writeFile, gwt], maxTurns: 12, sessionId: 'session-b3-write' }))
+    for (const messages of mixed.receivedMessages) {
+      expect(userTextsOf(messages)).not.toContain('进度对账')
+    }
+  })
+
+  it('守卫2：轮次 ≥75% 且 plan 清单未触达 → 列名注入；全部触达不注入', async () => {
+    process.env.BLOMA_LOOP_PROGRESS_NUDGE = '1'
+    const planFiles = ['index.html', 'src/app.js', 'server/routes/records.js']
+    // maxTurns=8，75%=第 6 轮批间触发（此时零写入，清单全部未触达）
+    const untouched = scriptedQuery([...readOnlyScript(6), [textMessage('完成')]])
+    await runAgentLoop(baseInput({ query: untouched.query, tools: [readFile], maxTurns: 8, sessionId: 'session-b3-plan', planFiles }))
+    const text = userTextsOf(untouched.receivedMessages[6])
+    expect(text).toContain('尚未写入')
+    expect(text).toContain('index.html')
+    expect(text).toContain('server/routes/records.js')
+    expect(text).toContain('dist/app.js')
+
+    // 前 3 轮把清单全部写完 → 守卫2 不注入（守卫1 也因每轮有写入不触发）
+    const covered = scriptedQuery([
+      [toolUseMessage('w1', 'write_file', { path: './index.html' })],
+      [toolUseMessage('w2', 'write_file', { path: 'src/app.js' })],
+      [toolUseMessage('w3', 'write_file', { path: 'server/routes/records.js' })],
+      ...readOnlyScript(4),
+      [textMessage('完成')],
+    ])
+    await runAgentLoop(baseInput({ query: covered.query, tools: [readFile, writeFile], maxTurns: 8, sessionId: 'session-b3-covered', planFiles }))
+    for (const messages of covered.receivedMessages) {
+      expect(userTextsOf(messages)).not.toContain('尚未写入')
+    }
+  })
+
+  it('守卫3：进入后 1/3 轮次仍零验证调用 → 自测提醒；有 run_gwt_tests 则不注入', async () => {
+    process.env.BLOMA_LOOP_PROGRESS_NUDGE = '1'
+    // maxTurns=9，后 1/3=第 6 轮起；前 5 轮只读（streak 5<6 不触发守卫1，无 planFiles 不触发守卫2）
+    const unverified = scriptedQuery([...readOnlyScript(6), [textMessage('完成')]])
+    await runAgentLoop(baseInput({ query: unverified.query, tools: [readFile], maxTurns: 9, sessionId: 'session-b3-verify' }))
+    expect(userTextsOf(unverified.receivedMessages[6])).toContain('尚未运行过任何自测工具')
+
+    // 第 1 轮跑过 run_gwt_tests → verificationSeen，守卫3 全程不注入
+    const verified = scriptedQuery([
+      [toolUseMessage('v1', 'run_gwt_tests', {})],
+      ...readOnlyScript(6),
+      [textMessage('完成')],
+    ])
+    await runAgentLoop(baseInput({ query: verified.query, tools: [readFile, gwt], maxTurns: 9, sessionId: 'session-b3-gwt' }))
+    for (const messages of verified.receivedMessages) {
+      expect(userTextsOf(messages)).not.toContain('自测工具')
+    }
+  })
+
+  it('off 字节锁：开关未设零注入（messages 与 JSONL 无【进度对账】）', async () => {
+    delete process.env.BLOMA_LOOP_PROGRESS_NUDGE
+    const { query, receivedMessages } = scriptedQuery([...readOnlyScript(7), [textMessage('完成')]])
+    await runAgentLoop(baseInput({ query, tools: [readFile], maxTurns: 12, sessionId: 'session-b3-off', planFiles: ['index.html'] }))
+    for (const messages of receivedMessages) {
+      expect(userTextsOf(messages)).not.toContain('进度对账')
+    }
+    expect(readSessionJsonl('session-b3-off').some((line) => JSON.stringify(line).includes('进度对账'))).toBe(false)
   })
 })

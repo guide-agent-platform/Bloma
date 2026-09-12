@@ -278,6 +278,143 @@ describe('PRD 确认弹窗 PrdConfirmDialog', () => {
     expect(screen.getByTestId('prd-confirm-out-of-scope').textContent).toContain('这次明确不做的')
     expect(screen.getByTestId('prd-confirm-assumptions').textContent).toContain('我们替你默认的')
   })
+
+  it('能力契约段（Phase 2 M1）：有 CAP 渲染不算完成/验收证据；无 CAP 不渲染（回归锁）', () => {
+    // 无 CAP（旧夹具/开关 off）：段落不存在
+    setState()
+    const { unmount } = renderDialog()
+    expect(screen.queryByTestId('prd-confirm-capabilities')).toBeNull()
+    unmount()
+
+    // 有 CAP：任务/不算完成/验收证据可见；缺 task 的脏条目被过滤
+    store.set(prdConfirmFamily('session-pc'), {
+      sessionId: 'session-pc',
+      projectId: 'project-pc',
+      title: '请确认这份 PRD（已通过裁判审查）',
+      positioning: 'AI 随心记',
+      requirements: [{ id: 'F-001', priority: 'P0', story: 'AI 智能总结', assertions: ['总结随笔记变化'] }],
+      outOfScope: [],
+      assumptions: [],
+      constraints: [],
+      aiCapabilities: [
+        {
+          capabilityId: 'CAP-01',
+          task: '根据笔记内容生成智能总结',
+          keyProcessing: '真实模型调用',
+          ioDependency: '笔记变化→总结变化',
+          forbiddenSubstitutions: ['固定模板冒充', '降级为普通增删改查'],
+          evidence: ['修改笔记后总结随之变化'],
+          source: 'user_explicit',
+        },
+      ],
+      expanded: false,
+      ideas: [],
+    })
+    renderDialog()
+    const section = screen.getByTestId('prd-confirm-capabilities')
+    expect(section.textContent).toContain('根据笔记内容生成智能总结')
+    expect(section.textContent).toContain('不算完成：固定模板冒充；降级为普通增删改查')
+    expect(section.textContent).toContain('验收证据：修改笔记后总结随之变化')
+  })
+
+  it('关键任务段（Phase 7 U1 H2）：有任务渲染必交徽标与关联功能；无任务不渲染（回归锁）', () => {
+    // 无 key_tasks（旧夹具/开关 off）：段落不存在
+    setState()
+    const { unmount } = renderDialog()
+    expect(screen.queryByTestId('prd-confirm-key-tasks')).toBeNull()
+    unmount()
+
+    // 有关键任务：任务/必交徽标/关联功能可见
+    store.set(prdConfirmFamily('session-pc'), {
+      sessionId: 'session-pc',
+      projectId: 'project-pc',
+      title: '请确认这份 PRD（已通过裁判审查）',
+      positioning: '家庭记账本',
+      requirements: [{ id: 'F-001', priority: 'P0', story: '记录收支', assertions: ['记录后列表实时刷新'] }],
+      outOfScope: [],
+      assumptions: [],
+      constraints: [],
+      keyTasks: [
+        { taskId: 'KT-01', label: '记一笔账，月底能看到这个月花了多少', featureIds: ['F-001', 'F-002'], mustDeliver: true },
+        { taskId: 'KT-02', label: '导出账单', featureIds: ['F-003'], mustDeliver: false },
+      ],
+      expanded: false,
+      ideas: [],
+    })
+    renderDialog()
+    const section = screen.getByTestId('prd-confirm-key-tasks')
+    expect(section.textContent).toContain('记一笔账，月底能看到这个月花了多少')
+    expect(section.textContent).toContain('必须做到')
+    expect(section.textContent).toContain('尽力完成')
+    expect(section.textContent).toContain('关联功能：F-001、F-002')
+  })
+
+  it('J4 假设摘要（Phase 7 U4）：origin 徽标（你说的/向导补充）+ pending CAP 置顶「还需确认 1 件事」', () => {
+    store.set(prdConfirmFamily('session-pc'), {
+      sessionId: 'session-pc',
+      projectId: 'project-pc',
+      title: '请确认这份 PRD',
+      positioning: 'AI 随心记',
+      requirements: [
+        { id: 'F-001', priority: 'P0', story: '随手记想法', assertions: ['记录后保存'], origin: 'user' },
+        { id: 'F-002', priority: 'P1', story: '智能整理', assertions: ['按分类整理'], origin: 'guide' },
+      ],
+      outOfScope: [],
+      assumptions: ['数据仅存本地'],
+      constraints: [],
+      aiCapabilities: [
+        { capabilityId: 'CAP-01', task: '按内容自动打标签', keyProcessing: '模型调用', ioDependency: '输入笔记', forbiddenSubstitutions: [], evidence: [], source: 'pending_assumption' },
+      ],
+      expanded: false,
+      ideas: [],
+    })
+    renderDialog()
+    // origin 徽标：功能清单内逐项标注来源
+    expect(screen.getByTestId('prd-confirm-item-F-001').textContent).toContain('你说的')
+    expect(screen.getByTestId('prd-confirm-item-F-002').textContent).toContain('向导补充')
+    // 第三分区：pending CAP 置顶强调
+    const pending = screen.getByTestId('prd-confirm-pending-cap')
+    expect(pending.textContent).toContain('还需你确认的 1 件事')
+    expect(pending.textContent).toContain('按内容自动打标签')
+
+    // 无 pending CAP 时区块隐藏（不摆空架子）
+    cleanup()
+    store.set(prdConfirmFamily('session-pc'), {
+      sessionId: 'session-pc',
+      projectId: 'project-pc',
+      title: '请确认这份 PRD',
+      positioning: '记账本',
+      requirements: [{ id: 'F-001', priority: 'P0', story: '记账', assertions: [] }],
+      outOfScope: [],
+      assumptions: [],
+      constraints: [],
+      expanded: false,
+      ideas: [],
+    })
+    renderDialog()
+    expect(screen.queryByTestId('prd-confirm-pending-cap')).toBeNull()
+  })
+
+  it('C1a 后端架构后果显影：留存信号词命中项带「↳ 将要求后端与数据持久化」徽标，未命中不带', () => {
+    store.set(prdConfirmFamily('session-pc'), {
+      sessionId: 'session-pc',
+      projectId: 'project-pc',
+      title: '请确认这份 PRD',
+      positioning: '复古打飞机',
+      requirements: [
+        { id: 'F-001', priority: 'P0', story: '操控飞机射击', assertions: [] },
+        { id: 'F-008', priority: 'P2', story: '显示并本地留存历史最高分', assertions: [], implies_backend: true },
+      ],
+      outOfScope: [],
+      assumptions: [],
+      constraints: [],
+      expanded: false,
+      ideas: [],
+    })
+    renderDialog()
+    expect(screen.getByTestId('prd-confirm-item-F-008').textContent).toContain('将要求后端与数据持久化')
+    expect(screen.getByTestId('prd-confirm-item-F-001').textContent).not.toContain('将要求后端')
+  })
 })
 
 describe('prd-terms 术语表（闭环 PR7，单点维护）', () => {
