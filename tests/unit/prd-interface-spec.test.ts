@@ -141,3 +141,45 @@ describe('C1b game 豁免留存派生（BLOMA_GAME_DERIVE_EXEMPT，2026-09-11 �
     expect(deriveInterfaceSpec(shmup)).toBeDefined()
   })
 })
+
+describe('W1.2 外部服务信号派生（Phase 9，B 站播放器案 214397c3）', () => {
+  // B 站案原始需求形态：留存词表零命中 → interface_spec 空 → 契约豁免 → 前端发明
+  // /api/bili 后端缺失无人拦。外部服务信号命中后必须强制走通契约四环节。
+  const bili = [{ id: 'F-001', description: '输入 BV 号在线播放对应 B 站视频，画面加简介信息' }]
+  const localOnly = [{ id: 'F-001', description: '打开本地视频文件并播放，支持常见格式' }]
+  const voice = [{ id: 'F-001', description: '语音输入转文字保存笔记' }]
+  const plain = [{ id: 'F-001', description: '展示当前时间和一句问候' }]
+
+  it('B 站式在线播放需求：派生 /api/external 占位代理端点（B 站案零派生修复）', () => {
+    const derived = deriveInterfaceSpec(bili, 'personal_tool')
+    expect(derived).toBeDefined()
+    expect(derived!.some((ep) => ep.endpoint === '/api/external')).toBe(true)
+    // 响应必须携带同源代理语义与路由落点（喂给背板锚定与 plan）
+    const ext = derived!.find((ep) => ep.endpoint === '/api/external')!
+    expect(ext.response).toContain('同源代理')
+    expect(ext.response).toContain('server/routes/')
+  })
+
+  it('纯本地文件播放（B 站案另一半需求）：不触发外部信号（本地 blob 播放无需后端）', () => {
+    expect(deriveInterfaceSpec(localOnly, 'personal_tool')).toBeUndefined()
+    expect(requirementImpliesBackend(localOnly[0], 'personal_tool')).toBe(false)
+  })
+
+  it('语音输入词命中（输入侧才触发；语音播报类纯前端词不在词表）', () => {
+    const derived = deriveInterfaceSpec(voice, 'personal_tool')!
+    // 「保存笔记」同时命中留存 → 三端点合并派生
+    expect(derived.some((ep) => ep.endpoint === '/api/records')).toBe(true)
+    expect(derived.some((ep) => ep.endpoint === '/api/external')).toBe(true)
+    expect(requirementImpliesBackend(voice[0], 'personal_tool')).toBe(true)
+  })
+
+  it('纯展示需求：零派生（词表不泛化，误伤为零）', () => {
+    expect(deriveInterfaceSpec(plain, 'personal_tool')).toBeUndefined()
+  })
+
+  it('requirementImpliesBackend 徽标同步亮（C1a 显影路沿旧链路自动生效）', () => {
+    expect(requirementImpliesBackend(bili[0], 'personal_tool')).toBe(true)
+    // 故事字段命中同口径
+    expect(requirementImpliesBackend({ id: 'F-002', description: '视频管理', story: '扫码登录后同步收藏' }, 'personal_tool')).toBe(true)
+  })
+})

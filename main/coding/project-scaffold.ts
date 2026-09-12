@@ -13,6 +13,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { PRODUCT_CSP } from './product-csp'
 import type { ProjectSkeleton } from '../project-templates'
 
 function slugify(value: string): string {
@@ -230,7 +231,8 @@ const server = createServer((req, res) => {
     'Content-Type': types[extname(finalPath)] || 'application/octet-stream',
     'Cache-Control': 'no-store',
     // CSP 只放行同源 connect-src：AI 能力走本进程 /api/llm 代理，浏览器直连外部仍硬拦
-    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'",
+    // CSP 单一真相源：./product-csp.ts（沙箱脚本与产物模板两处同构引用）
+    'Content-Security-Policy': ${JSON.stringify(PRODUCT_CSP)},
   });
   createReadStream(finalPath).pipe(res);
 });

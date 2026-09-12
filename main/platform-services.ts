@@ -22,6 +22,7 @@ import { getAnalyticsPath, getDocumentsDir, getSnapshotsDir } from '../storage/c
 import { appendJsonLine, readJsonFile, writeJsonFile } from '../storage/json-store'
 import { readDocumentsManifest } from './document-engine'
 import { findProject, updateProject } from './project-service'
+import { PRODUCT_CSP } from './coding/product-csp'
 
 interface SandboxProcess {
   process: ChildProcess
@@ -487,7 +488,8 @@ const server = createServer((req, res) => {
     // script-src 不再保留 'unsafe-eval'（2026-08-17 设计 §7.0/FEAS-C3 收紧）：eval/Function()
     // 的禁令原本只写在提示词里（CSP 实含 unsafe-eval、并不拦截），收紧后该约束被真正
     // 强制——MVP 提示词已同步要求用显式 if/switch 或事件监听实现交互逻辑。
-    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'",
+    // CSP 单一真相源：main/coding/product-csp.ts（沙箱脚本与产物模板两处同构引用）。
+    'Content-Security-Policy': ${JSON.stringify(PRODUCT_CSP)},
   });
   createReadStream(finalPath).pipe(res);
 });

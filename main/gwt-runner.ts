@@ -110,7 +110,9 @@ export async function runBrowserGwt(input: RunGwtInput): Promise<GwtTestResult |
   try {
     // 动态导入：playwright 不进 esbuild 主进程 bundle（见 package.json build:main --external:playwright）
     const { chromium } = await import('playwright')
-    browser = await chromium.launch({ headless: true })
+    // W1.4：fake media device——getUserMedia/录音类产物在无头探针里拿确定性假流，
+    // 权限自动通过（探针是独立 Playwright 进程，不走 Electron permission handler）。
+    browser = await chromium.launch({ headless: true, args: ['--use-fake-device-for-media-stream'] })
   } catch {
     browserAvailable = false
     return null
@@ -247,6 +249,32 @@ async function executeScenarios(browser: Browser, input: RunGwtInput): Promise<G
     probedUrl.searchParams.set('mock', '1')
     await page.goto(probedUrl.toString(), { waitUntil: 'domcontentloaded', timeout: 10_000 })
 
+    // 媒体启动健康探针（W1.4，Phase 9）：页面 goto 后、场景循环前注入确定性检查——
+    // 自动加载的 video/audio 若已报错（外链被 CSP 拦/格式不支持/404 源）即判败。
+    // 只判确定性 error（不等待播放推进，交互后才设 src 的场景归静态对账层）；
+    // --use-fake-device-for-media-stream 给 getUserMedia 类产物确定性假流。
+    const probeStartupMediaErrors = async (): Promise<void> => {
+      const mediaErrors = await page
+        .evaluate(() => {
+          const out: string[] = []
+          document.querySelectorAll('video, audio').forEach((el, i) => {
+            const m = el as HTMLMediaElement
+            if (m.error) {
+              const codeName: Record<number, string> = { 1: '加载中止', 2: '网络错误', 3: '解码失败', 4: '源不支持/不可达' }
+              out.push(
+                `媒体元素 #${i + 1}（${m.tagName.toLowerCase()}）加载失败：${codeName[m.error.code] ?? `错误码 ${m.error.code}`}${m.src ? `，源 ${String(m.src).slice(0, 60)}` : ''}`,
+              )
+            }
+          })
+          return out
+        })
+        .catch(() => [] as string[])
+      for (const err of mediaErrors) {
+        failureSummary.push({ scenario: '媒体健康探针（video/audio 加载失败）', reason: err })
+      }
+    }
+    await probeStartupMediaErrors()
+
     for (const scenario of scenarios) {
       // 每个场景独立快照（触发后新出现的诊断归属当前断言）；结局归约统一走
       // evaluateScenarioOutcome（诊断只附加不替换，不改通过/失败判定）
@@ -262,10 +290,12 @@ async function executeScenarios(browser: Browser, input: RunGwtInput): Promise<G
       })
     }
 
+    // W1.4：媒体探针失败计入总数（与 failure_summary 长度对齐，防口径分裂）
+    const probeFailures = failureSummary.length - (scenarios.length - passedCount)
     return {
-      total_count: scenarios.length,
+      total_count: scenarios.length + probeFailures,
       passed_count: passedCount,
-      failed_count: scenarios.length - passedCount,
+      failed_count: scenarios.length - passedCount + probeFailures,
       failure_summary: failureSummary,
     }
   } finally {

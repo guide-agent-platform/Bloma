@@ -292,3 +292,13 @@
 - 缺省 on 拍板理由：纯任务书/宿主注入层，无验证语义变化；off 形态当晚被实证为失败形态。
 - 只挂主 loop 生成路径（修复轮任务窄、迭代轮聚焦任务书已含工作法，均不叠加）。
 - 单测：task-workflow 新文件 7 例（checklist 分组/纪律/验证映射、守卫4 触发与 edit 不触发、投影注入与间隔抑制、早验证一次性、off 字节级）；programming-orchestrator-plan 钉 W5 关保持原字节锁。
+
+## 28. Phase 9 W1 终验静态对账开关（2026-09-12 B 站播放器案 214397c3——假绿交付三死因：blob 媒体被 CSP 拦 / 前端发明 /api/bili 后端零存在 / 外链直连 CSP+防盗链）
+
+| 开关 | 控制面 | 缺省 | off/未设 | '1'/'true' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_API_RECONCILE` | 终验静态对账族：API 三方对账 + 媒体源纪律 | **off** | 字节级现状（interface_spec 空即契约豁免，前端发明 API 无人拦——B 站案形态） | ①**反向对账**：产物 src/index.html 扫描 `'/api/<前缀>'` 引用 ⇄ server/routes/ 文件清单——引用前缀无路由文件 → 失败（B 站案主死因）；②**正向对账**：interface_spec 端点前缀 ⇄ 路由（W1.2 占位端点 /api/external 例外：有路由目录即履行，零路由必红）；③**媒体源纪律**：硬编码外链媒体源（`<video src="https://…`、`.src = 'https://…`）→ 失败（外链必走同源代理）。失败并入 runGwtWithApiContract（与 L0 门禁/api-contract 同款合并位），decision api_reconcile 入账；项目缺失 fail-open 跳过 | `apiReconcileEnabled`/`reconcileApiUsage`/`checkMediaSourceDiscipline`（main/coding/api-reconcile.ts）+ runGwtWithApiContract 接线（programming-orchestrator.ts） |
+
+- 无开关直上项（W1 批）：**产物 CSP 补 `media-src 'self' blob:`**——单一真相源 main/coding/product-csp.ts，沙箱脚本与 static-server 模板两处插值引用（`'Content-Security-Policy': ${JSON.stringify(PRODUCT_CSP)}`），product-csp 测试锁两处一致（B1 基础设施先例）；**deriveInterfaceSpec 外部服务信号词**（直连/在线播放/语音输入/bilibili 等）派生 /api/external 占位端点 + requirementImpliesBackend 徽标同步（C1a 显影路）；**loop【媒体纪律】段**（禁扩展名直判/canPlayType 实测承诺/blob 本地播放/外链同源代理/DASH 分片不可直给）；**gwt-runner** launch 加 `--use-fake-device-for-media-stream` + 媒体启动健康探针（自动加载的 video/audio error 即判败，计数与 failure_summary 对齐）。
+- 单测：product-csp 新文件 3 例（字段/模板插值/沙箱引用）；prd-interface-spec +5 例（B 站式派生/纯本地不误伤/语音叠加/纯展示零派生/徽标同步）；api-reconcile 新文件 7 例（B 站案形态必红/齐备绿/占位豁免语义/内置与只读目录豁免/off 字节级/外链直连红/blob 不误伤）。
+- 验收实证：B 站产物 214397c3 现场对账红（反向 /api/bili 命中）——同款产物在开关 on 后不可能再假绿（Phase 9 验收第 5 条）。本机 setx 待用户拍板（狗粮前 `setx BLOMA_API_RECONCILE 1` + 重启 Bloma）。

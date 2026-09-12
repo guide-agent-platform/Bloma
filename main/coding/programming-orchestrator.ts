@@ -47,6 +47,7 @@ import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, preflightEnabl
 import { deliveryStatusEnabled, recordDeliveryStatus, buildDeliveryPresentation, renderCircuitFailureNote, renderDeliveryBody, featureIdFromScenario } from './delivery-status'
 import { isDegenerateText } from './output-integrity'
 import { checkApiContract } from './api-contract'
+import { apiReconcileEnabled, checkMediaSourceDiscipline, reconcileApiUsage } from './api-reconcile'
 import { buildAgentTools } from '../agent-tools'
 import { disposeParentDelegationState, registerParentLoopContext, setChildToolsBuilder } from '../agent-collaboration'
 import { categoryTemperature, resolveGenerationMaxTokens } from '../model-resolution'
@@ -1748,6 +1749,14 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     // Phase 3 B2：操作契约注册表段（触发—必须—禁止替代—受阻四段式，R-* 单点定义）。
     ...(rulesRegistryEnabled() ? ['', renderRulesSection(rulesForTemplateType(templateType))] : []),
     '',
+    // W1.4【媒体纪律】（Phase 9，2026-09-12，B 站播放器案 214397c3）：媒体能力四条硬边界。
+    // 无开关直接上（纯提示词层，与术语纪律同级别；静态对账/探针层另有兜底）。
+    '【媒体纪律】涉及音视频播放/录音时：' +
+    '①禁止按文件扩展名宣称播放支持（mkv/avi 等容器 Chromium 不支持）——支持列表必须基于 video.canPlayType() 实测或只承诺 mp4/webm 等已验证组合，格式不符给明确提示；' +
+    '②本地文件播放用 URL.createObjectURL 生成 blob: 源（CSP 已放行 media-src blob:）；' +
+    '③外部音视频流（B站/YouTube 等第三方）必须经 server/routes/ 同源代理转发，禁止 video.src/audio.src 直连外链——CSP 只放同源，且第三方 CDN 有 Referer 防盗链，直连必败；' +
+    '④分离流（DASH 的 m4s 等音视频分片）不能直接给 <video> src——要么后端代理选单一流（mp4/flv 直链），要么明确说明需 MSE 不在 MVP 范围。',
+    '',
     // D1：开关 on 时终止条件升级为全验证面（GWT+API 契约+安全）；off 保留原文。
     // W3-D2：BLOMA_PREFLIGHT on 时收口条件=预检通过（GWT/API/产物审计/安全一次过）。
     (preflightEnabled()
@@ -2316,6 +2325,33 @@ export async function runGwtWithApiContract(input: { project_id: string; session
   }
   if (!input.preview_url) return testResult
   const endpoints = backplaneInterfaceSpec(readPrdBackplane(input.project_id))
+  // W1.3 静态三方对账（B 站案主死因拦截位）：前端引用⇄路由⇄契约。纯磁盘确定性，
+  // 无需预览运行，放在 api-contract 探测之前（对账红时探测也会红，但对账给出可修复的具体措辞）。
+  // 项目缺失/读不到 root 时静默跳过（对账是增强不是依赖，fail-open 与经验库同纪律）。
+  try {
+    const project = findProject(input.project_id)
+    if (project && apiReconcileEnabled()) {
+      const specPrefixes = endpoints.map((ep) => ep.endpoint.split('/').filter(Boolean)[1]).filter((p): p is string => Boolean(p))
+      const reconcileFailures = [...reconcileApiUsage({ projectRoot: project.root_path, specPrefixes }), ...checkMediaSourceDiscipline(project.root_path)]
+    if (reconcileFailures.length > 0) {
+      recordDecision({
+        project_id: input.project_id,
+        session_id: input.session_id,
+        entry: {
+          type: 'agent_loop',
+          title: `API 三方对账：${reconcileFailures.length} 项不一致`,
+          why: reconcileFailures.map((f) => f.reason).join('；').slice(0, 300),
+          detail: { kind: 'api_reconcile', count: reconcileFailures.length },
+        },
+      })
+      testResult.total_count += reconcileFailures.length
+      testResult.failed_count += reconcileFailures.length
+      testResult.failure_summary = [...testResult.failure_summary, ...reconcileFailures]
+    }
+    }
+  } catch {
+    /* 项目缺失 → 对账跳过（终验其余面照常） */
+  }
   if (endpoints.length === 0) return testResult
   const apiFailures = await checkApiContract(input.preview_url, endpoints)
   if (apiFailures.length === 0) return testResult

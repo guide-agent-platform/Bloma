@@ -412,6 +412,24 @@ function renderRequirementSummary(item: SketchRequirement): string {
 // 时的确定性兜底触发（历史/保存/持久/刷新或重开后仍在/清空/收藏/回顾/记录）。
 const PERSISTENCE_SIGNAL_RE = /历史|保存|持久|刷新|重开|清空|收藏|回顾|记录/
 
+/** Phase 9 W1.2（2026-09-12，B 站播放器案 214397c3）：外部服务信号——需求要求直连/
+ *  在线消费第三方平台（视频/语音/登录态）时，前端无法也不得直连外网（CSP
+ *  connect-src 'self'），必须由产物服务端做同源代理。此类需求此前不触发任何契约
+ *  派生（留存词表只认数据留存）→ interface_spec 为空 → 终验契约豁免 →
+ *  前端自行发明 /api/bili 调用而 server/routes 缺失无人拦（假绿交付）。
+ *  命中即派生占位代理端点，强制走通 plan/routes/终验/背板锚定四环节；
+ *  具体子路径与资源命名由 loop 对齐业务（与 records 派生同哲学）。
+ *  词表保守：只收输入侧语音词（语音播报等纯前端能力不误伤）、具体平台名。 */
+const EXTERNAL_SERVICE_SIGNAL_RE = /直连|在线播放|在线看|在线听|第三方|视频源|音频源|语音输入|语音录入|录音|听写|转文字|扫码登录|bilibili|哔哩哔哩|b站|youtube|优酷|爱奇艺|腾讯视频|抖音|网易云音乐|spotify/
+
+/** W1.2：外部服务占位代理端点（与 records 派生端点同构的兑底形态）。 */
+const EXTERNAL_SERVICE_ENDPOINT: InterfaceEndpoint = {
+  endpoint: '/api/external',
+  method: 'GET',
+  request: '无（转发参数由实现按目标服务定义）',
+  response: '{…}外部服务同源代理：服务端进程出网调用第三方（视频流/API/AI/语音），前端一律经本代理——浏览器直连外网被 CSP 拦截；路由实现于 server/routes/（CJS 模块格式，见骨架 _example.js）',
+}
+
 /**
  * 确定性派生最小后端契约：功能项命中数据留存信号而 LLM 未产出 interface_spec 时，
  * 派生通用 records 资源端点（GET 列表 + POST 新增）——保证 server/routes 渠道被
@@ -425,12 +443,20 @@ const PERSISTENCE_SIGNAL_RE = /历史|保存|持久|刷新|重开|清空|收藏|
  */
 export function deriveInterfaceSpec(requirements: SketchRequirement[], templateType?: TemplateType): InterfaceEndpoint[] | undefined {
   if (templateType === 'game' && gameDeriveExemptEnabled()) return undefined
-  const hasSignal = requirements.some((item) => PERSISTENCE_SIGNAL_RE.test(`${item.description} ${item.story ?? ''}`))
-  if (!hasSignal) return undefined
-  return [
-    { endpoint: '/api/records', method: 'GET', request: '无', response: '{records:[…]}（业务资源，实现于 server/routes/，数据落 data/）' },
-    { endpoint: '/api/records', method: 'POST', request: '{…业务字段}', response: '{ok:true,…}' },
-  ]
+  const texts = requirements.map((item) => `${item.description} ${item.story ?? ''}`)
+  const endpoints: InterfaceEndpoint[] = []
+  // 留存腿（原有语义不变）：records 双端点
+  if (texts.some((t) => PERSISTENCE_SIGNAL_RE.test(t))) {
+    endpoints.push(
+      { endpoint: '/api/records', method: 'GET', request: '无', response: '{records:[…]}（业务资源，实现于 server/routes/，数据落 data/）' },
+      { endpoint: '/api/records', method: 'POST', request: '{…业务字段}', response: '{ok:true,…}' },
+    )
+  }
+  // 外部服务腿（W1.2）：占位代理端点；与留存叠加时合并派生
+  if (texts.some((t) => EXTERNAL_SERVICE_SIGNAL_RE.test(t))) {
+    endpoints.push(EXTERNAL_SERVICE_ENDPOINT)
+  }
+  return endpoints.length > 0 ? endpoints : undefined
 }
 
 /** C1a（P1，2026-09-11 审计⑧）：单条功能项是否蕴含后端持久化要求（与 deriveInterfaceSpec
@@ -440,7 +466,9 @@ export function deriveInterfaceSpec(requirements: SketchRequirement[], templateT
 export function requirementImpliesBackend(item: SketchRequirement, templateType?: TemplateType): boolean {
   // C1b 联动：game 豁免开启时轻留存不再催生后端，徽标同步不亮
   if (templateType === 'game' && gameDeriveExemptEnabled()) return false
-  return PERSISTENCE_SIGNAL_RE.test(`${item.description} ${item.story ?? ''}`)
+  const text = `${item.description} ${item.story ?? ''}`
+  // W1.2：外部服务信号同样蕴含后端（同源代理是必经路径），徽标同步亮
+  return PERSISTENCE_SIGNAL_RE.test(text) || EXTERNAL_SERVICE_SIGNAL_RE.test(text)
 }
 
 /** C1b 开关：game 类豁免留存信号兑底派生（含 C1a 徽标与 R-DATA-01 措辞联动）。缺省 off=字节级现状。 */
