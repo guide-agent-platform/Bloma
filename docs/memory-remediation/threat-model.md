@@ -1,7 +1,7 @@
 # 记忆栈威胁模型（Bloma）
 
 > 版本：v1（2026-09-12，记忆栈审计裁定 §7 / D0）
-> 适用代码基线：`sprint2`（本地 HEAD 含 D0 改动；净化出口 + L3 冻结见 commit `d943b7a`）
+> 适用代码基线：分支 `d0-memory-remediation`（PR #18，base=sprint2）；净化出口 + L3 冻结 = `926e625`（迁移自 `d943b7a`），D0 注入改造 + 撤销名单 + 门禁 = `dff260e`
 > 状态：**待独立复核签字**（安全 Owner 之外的架构 Owner 或指定 Reviewer；签字落 PR review 或本文 footer）
 
 ---
