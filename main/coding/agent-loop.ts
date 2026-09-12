@@ -6,6 +6,7 @@ import { canUseTool } from '../permission-service'
 import type { ConversationTurn, SDKQuery, ToolDefinition } from '../orchestrator'
 import { prepareTaskWithSkills } from '../skill-loader'
 import { prepareRecallBlock } from '../session-recall'
+import { renderLearningsSection } from '../learnings-log'
 import { estimateTokenCount } from '../usage-guard'
 import { windowMessagesWithDigest } from '../compacting-window'
 import { isDegenerateText } from './output-integrity'
@@ -778,7 +779,16 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     prepareTaskWithSkills(input.task, input.projectId),
     prepareRecallBlock(input.task, input.delegationDepth ?? 0),
   ])
-  const task = recallBlock ? `${recallBlock}\n${skillPrep.content}` : skillPrep.content
+  // 历史经验（记忆栈审计裁定 §5，D0）：从 system prompt 迁到**任务头**，与 recall/skill 同层；
+  // 用 <untrusted-memory> 标记降级为非指令上下文（记忆是模型输出派生，不享指令面权重，
+  // 且内容已过统一净化：转义边界 + 拦绕过指令，见 memory-sanitize）。
+  // 仅主 loop（depth 0）注入（与 <session-recall> 同款门控）；首轮无经验 / 名单不可读 → 空块。
+  // 迁移路径：待 §11 统一出口契约 renderMemory() 落地后接管（本处为临时补丁）。
+  const learningsSection = isMainLoop ? renderLearningsSection(input.projectId) : ''
+  const learningsBlock = learningsSection
+    ? `<untrusted-memory source="learnings" trust="advisory">\n${learningsSection}\n</untrusted-memory>`
+    : ''
+  const task = [learningsBlock, recallBlock, skillPrep.content].filter(Boolean).join('\n')
   // clipboard-paste P1（2026-08-29）：带图时首条 user 轮为 [text, ...image 短引用] 块数组；
   // 水合只在 anthropicMessagesQuery 请求体边界发生（JSONL/模型历史全程轻量）。
   const pastedImageRefs = sanitizePastedImageRefs(input.images)

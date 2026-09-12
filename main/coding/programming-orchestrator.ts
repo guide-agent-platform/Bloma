@@ -7,7 +7,7 @@ import { getAgentSessionPath, getDocumentsDir } from '../../storage/config-paths
 import { appendSessionMessage } from '../session-tree'
 import { emitAgentEvent } from '../agent-event-bus'
 import { appendLoopLogDocument, loopLogEnabled, readLoopCheckpointDocument, readPrdBackplane, readUxContractSketch, renamePrdProject, syncDocuments, updateRequirementStatus, writeLoopCheckpointDocument, writeSecurityScanDocument, type LoopLogEntry, type LoopRepairAttemptRecord, writePlanDocument } from '../document-engine'
-import { appendProjectLearning, renderLearningsSection } from '../learnings-log'
+import { appendProjectLearning } from '../learnings-log'
 import { createSnapshot, runSandbox, trackAnalytics } from '../platform-services'
 import { renderPackageJson, renderStaticServer, renderSkeletonToProject, scaffoldEnabled } from '../project-scaffold'
 import { runBuildGate, type BuildGateResult } from './build-gate'
@@ -1836,16 +1836,16 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
  * 动态 system prompt 之后（背板锚定段不可覆盖）。无覆盖文件返回 base 本身。
  * focus（P3 分级锚定）：未传=全量现状（字节级等价，回归锁锁定）；修复轮不传（修复卡即 mini-plan）。
  */
-function buildLoopSystemWithOverride(backplane: PrdBackplane, editFormat: 'diff' | 'whole', projectId?: string, skeletonMap?: string | null, focus?: string[], moduleMap?: string | null): string {
+export function buildLoopSystemWithOverride(backplane: PrdBackplane, editFormat: 'diff' | 'whole', projectId?: string, skeletonMap?: string | null, focus?: string[], moduleMap?: string | null): string {
   const base = buildAgentLoopSystemPrompt(backplane, editFormat, undefined, skeletonMap, focus, moduleMap)
-  // 历史经验段（改造 2）：迭代/重生成场景下轮 fresh loop 开场即知上轮踩坑；
-  // 首轮无经验返回空串零开销；renderLearningsSection 内部静默失败
-  const learnings = renderLearningsSection(backplane.project_id)
+  // 历史经验段已于 2026-09-12 迁出 system prompt（记忆栈审计裁定 §5，D0）：改由 agent-loop
+  // 任务头注入 <untrusted-memory source="learnings">——system 是**常驻指令面**，而记忆是模型
+  // 输出派生（可能受用户贴的第三方内容影响），不应享有指令面权重。
+  // 迁移路径：待 §11 统一出口契约 renderMemory() 落地后接管（本处为临时补丁）。
   const override = loadPromptOverride('loop-system')
-  // 并集：本地 learnings 经验段 + 队友 project-map 注入（2026-08-29 合入）
   // project-map（Graft 模式，r69）：代码结构语义地图注入 system 尾部——定位代码优先按锚点
   // read_file，避免每轮 grep 漫游（冷会话重探索问题）；地图缺失/项目读取失败静默不注入。
-  const withOverride = [base, learnings, override ? `【用户自定义规则】\n${override}` : ''].filter(Boolean).join('\n\n')
+  const withOverride = [base, override ? `【用户自定义规则】\n${override}` : ''].filter(Boolean).join('\n\n')
   if (!projectId) return withOverride
   try {
     const project = findProject(projectId)

@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { findProject } from './project-service'
 import { sanitizeForInjection, sanitizeForStorage } from './memory-sanitize'
+import { isMemoryTextRevoked, loadRevocationIndex, revocationBlocksLayer } from './memory-revocation'
 import { getDocumentsDir } from '../storage/config-paths'
 
 /**
@@ -20,8 +21,13 @@ import { getDocumentsDir } from '../storage/config-paths'
  * - 注入安全（2026-09-12 记忆栈审计裁定 ②）：文本是**模型输出**，写入侧过
  *   sanitizeForStorage（转义+截断）、注入侧过 sanitizeForInjection（转义+绕过指令
  *   检测）——记忆投毒的唯一现实入口，两侧都设防；
- * - 注入消费方：buildLoopSystemWithOverride 的【历史经验】段（下轮 fresh loop
- *   开场即知上轮踩过什么坑——迭代重生成场景的防漂移增益）。
+ * - 撤销名单（裁定 §8，D0）：渲染时校验 `~/.proma/bloma-revocation-index.json`——命中即跳过
+ *   （**只读侧排除，不改写原始 JSONL**）；名单**损坏不可读 → 本层整体不注入**（fail-closed），
+ *   名单**缺失 → 空名单照常注入**（readable=true）；
+ * - 注入位置（裁定 §5，D0）：本段**不再进 system prompt**，改由 agent-loop 任务头注入
+ *   （<untrusted-memory source="learnings" trust="advisory">）——§5 为临时补丁，
+ *   待 §11 统一出口契约 renderMemory() 落地后迁移；
+ * - 注入消费方：agent-loop 任务头（下轮 fresh loop 开场即知上轮踩过什么坑——防漂移增益）。
  */
 
 export interface ProjectLearning {
@@ -145,10 +151,15 @@ export function readCuratedLearnings(projectId: string, limit = DEFAULT_INJECT_L
  * 单条渲染截 120 字，保持注入预算可控。
  */
 export function renderLearningsSection(projectId: string, limit = DEFAULT_INJECT_LIMIT): string {
+  // 撤销名单（D0）：名单存在但损坏/不可读 → 本层整体不注入（fail-closed）；缺失 = 空名单照常
+  const revocation = loadRevocationIndex()
+  if (revocationBlocksLayer(revocation)) return ''
   const learnings = readCuratedLearnings(projectId, limit)
   if (learnings.length === 0) return ''
   const lines: string[] = []
   for (const learning of learnings) {
+    // 已撤销条目不进任何注入面（只读侧排除）
+    if (isMemoryTextRevoked(learning.text, revocation)) continue
     // 注入侧统一净化（2026-09-12 审计裁定 ②）：边界转义 + 拦绕过指令；命中那么条不入段
     // （拦注入不删数据，原始 JSONL 不动）
     const sanitized = sanitizeForInjection(learning.text, { limit: 120 })

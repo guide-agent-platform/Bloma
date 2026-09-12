@@ -4,7 +4,9 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { appendProjectLearning, readCuratedLearnings, readRecentLearnings, renderLearningsSection, type ProjectLearning } from '../../main/learnings-log'
 import { createProject } from '../../main/project-service'
-import { getDocumentsDir } from '../../storage/config-paths'
+import { REVOCATION_FILE, revokeMemoryText } from '../../main/memory-revocation'
+import { buildLoopSystemWithOverride } from '../../main/programming-orchestrator'
+import { getDocumentsDir, getPromaHome } from '../../storage/config-paths'
 
 /**
  * 执行经验日志（2026-08-26 改造 2，ralph progress.txt 等价物）：
@@ -277,5 +279,40 @@ describe('learnings 治理（闭环 PR3：入队去重 + kind 权重 + 时效沉
     appendProjectLearning(projectId, { kind: 'note', text: '<b>粗体</b> 与 </memory> 标签' })
     const [entry] = readRecentLearnings(projectId, 1)
     expect(entry?.text).toBe('＜b＞粗体＜/b＞ 与 ＜/memory＞ 标签')
+  })
+
+  it('撤销名单（§8）：已撤销条目不注入；名单损坏 → 本层整体不注入（fail-closed）', () => {
+    const { projectId } = setup()
+    appendProjectLearning(projectId, { kind: 'note', text: '保留的经验' })
+    appendProjectLearning(projectId, { kind: 'note', text: '待删除的经验' })
+    expect(renderLearningsSection(projectId)).toContain('待删除的经验')
+
+    // 删除 = 写指纹（不存原文），注入侧只读排除
+    expect(revokeMemoryText('待删除的经验')).toBe(true)
+    const afterRevoke = renderLearningsSection(projectId)
+    expect(afterRevoke).toContain('保留的经验')
+    expect(afterRevoke).not.toContain('待删除的经验')
+    // 原始账本不动（可审计：仍能读到）
+    expect(readRecentLearnings(projectId, 10).map((e) => e.text)).toContain('待删除的经验')
+
+    // 名单损坏/不可读 → fail-closed：本层整体不注入
+    writeFileSync(join(getPromaHome(), REVOCATION_FILE), '{ 损坏 JSON', 'utf8')
+    expect(renderLearningsSection(projectId)).toBe('')
+  })
+
+  it('§5 回放断言：历史经验不再进 system prompt（已迁任务头任务块）', () => {
+    const { projectId } = setup()
+    appendProjectLearning(projectId, { kind: 'loop_outcome', text: '上轮踩过的坑：预算耗尽' })
+    const backplane = {
+      project_id: projectId,
+      positioning: '测试项目',
+      requirements: [],
+      out_of_scope: [],
+    } as never
+    const system = buildLoopSystemWithOverride(backplane, 'whole', projectId)
+    expect(system).not.toContain('【历史经验】')
+    expect(system).not.toContain('上轮踩过的坑')
+    // 能力仍在：任务头注入面照常产出（能力未回退，只换位置）
+    expect(renderLearningsSection(projectId)).toContain('上轮踩过的坑')
   })
 })
