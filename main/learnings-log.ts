@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path'
 import { findProject } from './project-service'
 import { sanitizeForInjection, sanitizeForStorage } from './memory-sanitize'
 import { isMemoryTextRevoked, loadRevocationIndex, revocationBlocksLayer } from './memory-revocation'
+import { recordMemoryUsage } from './memory-usage'
 import { getDocumentsDir } from '../storage/config-paths'
 
 /**
@@ -157,6 +158,7 @@ export function renderLearningsSection(projectId: string, limit = DEFAULT_INJECT
   const learnings = readCuratedLearnings(projectId, limit)
   if (learnings.length === 0) return ''
   const lines: string[] = []
+  const injectedTexts: string[] = []
   for (const learning of learnings) {
     // 已撤销条目不进任何注入面（只读侧排除）
     if (isMemoryTextRevoked(learning.text, revocation)) continue
@@ -164,6 +166,8 @@ export function renderLearningsSection(projectId: string, limit = DEFAULT_INJECT
     // （拦注入不删数据，原始 JSONL 不动）
     const sanitized = sanitizeForInjection(learning.text, { limit: 120 })
     if (sanitized.blocked || !sanitized.text) continue
+    // 使用埋点（S-2）：本条目将被注入 → 记一次（只存指纹，不存原文；防抖落盘，失败静默）
+    injectedTexts.push(learning.text)
     if (learning.kind === 'error_pattern') {
       // T-1 错误镜像卡：写方已组好「[tag@stage] 症状 → 规避：条件」，这里只加警示前缀
       lines.push(`- ⚠ 坑：${sanitized.text}`)
@@ -174,5 +178,10 @@ export function renderLearningsSection(projectId: string, limit = DEFAULT_INJECT
     lines.push(`- [${label}] ${sanitized.text}`)
   }
   if (lines.length === 0) return ''
+  try {
+    recordMemoryUsage(injectedTexts)
+  } catch {
+    // 静默：埋点不得影响注入与生成
+  }
   return ['【历史经验】（此前生成轮留下的，避免重复踩坑）', ...lines].join('\n')
 }

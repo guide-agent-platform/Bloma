@@ -12,7 +12,7 @@
 | 1 | `learnings-log` | 读 `learnings.jsonl` + 写 append | 每轮 loop 收尾写 1 次；每轮 loop 渲染读 1 次 | 文件行数 × ≤300 字 | 静默失败（不注入 / 不写） |
 | 2 | `session-recall` | **构建会话索引**（扫 `agent-sessions/*.jsonl`） | **仅指代词任务触发**；mtime+size 未变则复用 | 全量 ~1.0s（原型 557 会话实测）；增量 ~0s | 抛错 → 返回 null（本层不注入） |
 | 3 | `project-map` | 扫用户项目生成地图 | 写盘后防抖 1s 触发一次 | 小项目 <50 文件，同步扫描 ~10ms 级 | 静默不注入 |
-| 4 | `memory-usage` sidecar（待建，S-2） | 写 `last_used_at` | 注入渲染时，**防抖** | 待定（S-2） | 只影响 UI 显示 |
+| 4 | `memory-usage` sidecar（**已建**，S-2） | 写 `last_used_at` + count（**只存指纹**） | 仅注入渲染时；**防抖 1s** 落盘（`main/memory-usage.ts`） | 与撤销名单**分文件**（`~/.proma/bloma-memory-usage.json`） | **fail-open**：损坏只影响 UI 显示，不影响注入 |
 | 5 | `memory-revocation` | **读** `bloma-revocation-index.json` | **仅在触发的召回/渲染时**（见下） | 文件 40B/条（5000 条 ≈ 200KB） | 不可读 → **受覆盖层整体不注入（fail-closed）** |
 
 ## 2. 撤销名单的读频率（为何不加缓存）

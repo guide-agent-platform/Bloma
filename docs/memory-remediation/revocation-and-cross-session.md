@@ -54,7 +54,8 @@
 - ✅ **learnings**：`renderLearningsSection` 渲染时校验名单；名单不可读 → 本层返回空串（整体不注入）。
 - ✅ **session-recall**（4a，`prepareRecallBlock`）：名单不可读 → 本层返回 null（整体不注入）；命中撤销 → **整条 hit 丢弃**（既查命中片段，也查该会话文件内任何被索引消息，防同一文本经 intent/同会话其他片段泄漏）。单测 `[S4-RECALL-015/016]`。
 - ⏳ **§11 统一出口 `renderMemory()`**：落地后撤销校验收敛为单一出口（各层不再各自读取名单）；本阶段两处接线均为**临时补丁**，代码已标迁移路径。
-- ⏳ 删除入口（UI / IPC）落地时调用 `revokeMemoryText`（UI 排下一批）。
+- ⏳ 删除入口（UI / IPC）落地时**必须同时调两件**：`revokeMemoryText(原文)`（写指纹，只读侧排除）+ `forgetMemoryUsage([原文])`（清理使用记录，进删除范围）。也可先调 `forgetMemoryUsage` 再调 `revokeMemoryText`；两件都失败则删除应报错（fail-closed 删除语义）。
+- ✅ **使用埋点 sidecar**（S-2，`main/memory-usage.ts`）：与撤销名单**分文件**（`~/.proma/bloma-memory-usage.json`）、防抖 1s、只存指纹；⚠️ 与名单相反它是 **fail-open**（损坏只影响 UI 显示）。
 
 ## 5.1 IO 记账（重要）
 

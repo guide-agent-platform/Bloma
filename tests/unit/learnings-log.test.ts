@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { appendProjectLearning, readCuratedLearnings, readRecentLearnings, renderLearningsSection, type ProjectLearning } from '../../main/learnings-log'
 import { createProject } from '../../main/project-service'
 import { REVOCATION_FILE, revokeMemoryText } from '../../main/memory-revocation'
+import { flushMemoryUsage, getLastUsedAt, resetMemoryUsageForTests } from '../../main/memory-usage'
 import { buildLoopSystemWithOverride } from '../../main/programming-orchestrator'
 import { getDocumentsDir, getPromaHome } from '../../storage/config-paths'
 
@@ -314,5 +315,18 @@ describe('learnings 治理（闭环 PR3：入队去重 + kind 权重 + 时效沉
     expect(system).not.toContain('上轮踩过的坑')
     // 能力仍在：任务头注入面照常产出（能力未回退，只换位置）
     expect(renderLearningsSection(projectId)).toContain('上轮踩过的坑')
+  })
+
+  it('§S-2 使用埋点：注入渲染时记录 last_used_at（只存指纹；未注入的不记）', () => {
+    const { projectId } = setup()
+    appendProjectLearning(projectId, { kind: 'note', text: '被注入的经验' })
+    appendProjectLearning(projectId, { kind: 'note', text: '被撤销的经验' })
+    revokeMemoryText('被撤销的经验')
+    resetMemoryUsageForTests()
+
+    renderLearningsSection(projectId)
+    flushMemoryUsage()
+    expect(getLastUsedAt('被注入的经验')).toBeTypeOf('number')
+    expect(getLastUsedAt('被撤销的经验')).toBeUndefined()
   })
 })
