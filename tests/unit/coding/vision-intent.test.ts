@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  backplaneHash, buildIntentList, intentListFresh, renderIntentListForPrompt,
+  backplaneHash, buildIntentList, intentListFresh, renderIntentListForPrompt, BACKPLANE_HASH_FIELDS,
 } from '../../../main/coding/vision-intent'
 
 /**
@@ -75,5 +75,46 @@ describe('renderIntentListForPrompt（给对照审核者的基准文本）', () 
     expect(text).toContain('prd.json#requirements/F-002')
     expect(text).toContain('唯一基准')
     expect(text).not.toMatch(/\.ts:\d+/)
+  })
+})
+
+describe('backplaneHash 覆盖范围（评审 #8）', () => {
+  it('显式覆盖清单包含全部基准来源字段', () => {
+    expect([...BACKPLANE_HASH_FIELDS]).toEqual(['positioning', 'requirements', 'acceptance', 'out_of_scope', 'constraints', 'prd_document'])
+  })
+  it('acceptance 变化 → hash 变（不漏报 stale）', () => {
+    const a = backplaneHash(backplane({ acceptance: { 'F-001': '蛇吃到食物变长' } } as never))
+    const b = backplaneHash(backplane({ acceptance: { 'F-001': '改过的验收要点' } } as never))
+    expect(a).not.toBe(b)
+  })
+  it('prd_document 变化 → hash 变（实体名来源在全文里）', () => {
+    const a = backplaneHash(backplane({ prd_document: '贪吃蛇：有蛇、食物、分数' } as never))
+    const b = backplaneHash(backplane({ prd_document: '贪吃蛇：有蛇、食物、分数、关卡' } as never))
+    expect(a).not.toBe(b)
+  })
+  it('噪声字段不参与（UI 状态/时间戳变化不影响 hash）', () => {
+    const a = backplaneHash(backplane())
+    const withNoise = { ...backplane(), updated_at: '2026-09-12', ui_state: { tab: 'open' } }
+    expect(backplaneHash(withNoise as never)).toBe(a)
+  })
+})
+
+describe('手工实体清单接口（评审 #5：第 3 步前先用人工构造清单验证接口）', () => {
+  it('带具体实体名的清单能渲染出实体（蛇/食物/分数），供对照审核做符合性判定', () => {
+    const handmade = {
+      backplane_hash: 'manual-fixture',
+      generated_at: new Date().toISOString(),
+      sources_used: ['manual'],
+      items: [
+        { element_id: 'snake', source: 'backplane', claimed: true, expected_role: 'feature', expected_text: '蛇（可移动的游戏实体）', expected_state: 'visible', evidence_ref: 'manual#snake', backplane_hash: 'manual-fixture' },
+        { element_id: 'food', source: 'backplane', claimed: true, expected_role: 'feature', expected_text: '食物', expected_state: 'visible', evidence_ref: 'manual#food', backplane_hash: 'manual-fixture' },
+        { element_id: 'score', source: 'backplane', claimed: true, expected_role: 'feature', expected_text: '分数', expected_state: 'visible', evidence_ref: 'manual#score', backplane_hash: 'manual-fixture' },
+      ],
+    } as never
+    const text = renderIntentListForPrompt(handmade)
+    expect(text).toContain('snake')
+    expect(text).toContain('食物')
+    expect(text).toContain('分数')
+    expect(text).toContain('唯一基准')
   })
 })

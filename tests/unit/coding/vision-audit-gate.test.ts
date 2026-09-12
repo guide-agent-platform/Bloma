@@ -3,7 +3,8 @@ import {
   visionAuditEnabled, deriveChatBaseUrl, resolveVisionRoles, resolveVisionPair, pickVisionEndpoint,
   BLIND_DESCRIBE_PROMPT, buildComparePrompt, extractJson, parseCompareOutput, digestVisionReport,
   parseMaxTokensCap, productProblems, normalizeTarget, defaultTargetForKind,
-  buildVisionRequest, VISION_TEMPERATURE, VISION_FRAMES, VISION_FRAME_INTERVAL_MS, VISION_VIEWPORT,
+  buildVisionRequest, VISION_TEMPERATURE, VISION_FRAMES, VISION_FRAME_INTERVAL_MS, VISION_VIEWPORT, VISION_WINDOW_MS,
+  confirmationRequiredProblems,
   type ChannelLike, type VisionProblem,
 } from '../../../main/coding/vision-audit-gate'
 
@@ -191,7 +192,9 @@ describe('Q5 修复白名单（productProblems）', () => {
       ],
     }))
     const product = productProblems(out.problems)
-    expect(product.map((p) => p.claim)).toEqual(['缺导出按钮', '状态被误述'])
+    // 缺导出按钮属"不存在"类断言 → 需二次窗口确认（评审 #3），不进白名单
+    expect(product.map((p) => p.claim)).toEqual(['状态被误述'])
+    expect(confirmationRequiredProblems(out.problems).map((p) => p.claim)).toEqual(['缺导出按钮'])
   })
 })
 
@@ -236,9 +239,10 @@ describe('采样参数固定（⑦）与多帧（⑥）', () => {
     expect(content).toHaveLength(1 + frames.length)
     for (const block of content.slice(1)) expect(block.image_url!.url.startsWith('data:image/png;base64,')).toBe(true)
   })
-  it('缺省采样参数：3 帧 / 900ms / 1440×900（裁定 ⑥ 的三档默认）', () => {
-    expect(VISION_FRAMES).toBe(3)
-    expect(VISION_FRAME_INTERVAL_MS).toBe(900)
+  it('缺省采样窗口 ≈5s（评审 #3：窗口须覆盖最慢游戏周期，不是只看帧数）', () => {
+    expect(VISION_FRAMES).toBe(5)
+    expect(VISION_FRAME_INTERVAL_MS).toBe(1000)
+    expect(VISION_WINDOW_MS).toBeGreaterThanOrEqual(5000)
     expect(VISION_VIEWPORT).toEqual({ width: 1440, height: 900 })
   })
   it('盲描述与对照审核提示词都写明多帧存在性规则', () => {
@@ -246,5 +250,32 @@ describe('采样参数固定（⑦）与多帧（⑥）', () => {
     expect(BLIND_DESCRIBE_PROMPT).toContain('frames_seen')
     expect(BLIND_DESCRIBE_PROMPT).toContain('任一帧可见即视为存在')
     expect(buildComparePrompt('A', 'B')).toContain('任一帧可见即视为存在')
+  })
+})
+
+describe('缺证据类问题需二次窗口确认（评审 #3）', () => {
+  it('omission / missing_element 自动标记 needs_confirmation', () => {
+    const out = parseCompareOutput(JSON.stringify({
+      problems: [
+        { kind: 'missing_element', severity: 'high', claim: '缺蛇' },
+        { kind: 'omission', severity: 'medium', claim: '缺少分数显示' },
+        { kind: 'state_error', severity: 'high', claim: '按钮状态不可辨' },
+        { kind: 'false_claim', severity: 'low', claim: '颜色描述偏差' },
+      ],
+    }))
+    expect(out.problems[0].needs_confirmation).toBe(true)
+    expect(out.problems[1].needs_confirmation).toBe(true)
+    expect(out.problems[2].needs_confirmation).toBeUndefined()
+    expect(out.problems[3].needs_confirmation).toBeUndefined()
+  })
+  it('白名单排除待确认项；待确认清单单独可取', () => {
+    const out = parseCompareOutput(JSON.stringify({
+      problems: [
+        { kind: 'missing_element', severity: 'critical', claim: '缺蛇' },
+        { kind: 'false_claim', severity: 'high', claim: '状态被误述', root_cause: 'product' },
+      ],
+    }))
+    expect(productProblems(out.problems).map((p) => p.claim)).toEqual(['状态被误述'])
+    expect(confirmationRequiredProblems(out.problems).map((p) => p.claim)).toEqual(['缺蛇'])
   })
 })

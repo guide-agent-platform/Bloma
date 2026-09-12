@@ -46,13 +46,26 @@ export interface IntentList {
   items: IntentItem[]
 }
 
-/** 背板稳定子集哈希：参与语义的部分（定位 + 功能项 + 范围外 + 约束），忽略时间戳等噪声。 */
-export function backplaneHash(backplane: Pick<PrdBackplane, 'positioning' | 'requirements' | 'out_of_scope' | 'constraints'>): string {
+/**
+ * 背板哈希的**覆盖范围（显式定义，评审 #8）**——凡属"基准来源"的字段都必须入哈希，
+ * 否则背板变了而 hash 不变 → intentListFresh 漏报 stale：
+ *   positioning / requirements(id+description) / acceptance(逐条) / out_of_scope / constraints
+ *   / prd_document（用户确认版 PRD 全文，实体名的来源；取其长度+内容哈希，避免超长序列化）
+ * 明确不参与：时间戳、UI 状态、会话 id 等噪声字段。
+ */
+export const BACKPLANE_HASH_FIELDS = ['positioning', 'requirements', 'acceptance', 'out_of_scope', 'constraints', 'prd_document'] as const
+
+export function backplaneHash(backplane: Pick<PrdBackplane, 'positioning' | 'requirements' | 'out_of_scope' | 'constraints'> & Partial<Pick<PrdBackplane, 'acceptance' | 'prd_document'>>): string {
+  const acceptance = Object.entries(backplane.acceptance ?? {}).map(([k, v]) => `${k}=${v}`).sort()
+  const prdDoc = (backplane.prd_document ?? '').trim()
   const stable = {
     positioning: backplane.positioning ?? '',
     requirements: (backplane.requirements ?? []).map((r) => ({ id: r.id, description: r.description ?? '' })),
+    acceptance,
     out_of_scope: backplane.out_of_scope ?? [],
     constraints: backplane.constraints ?? [],
+    prd_document_hash: prdDoc ? createHash('sha256').update(prdDoc).digest('hex').slice(0, 16) : '',
+    prd_document_chars: prdDoc.length,
   }
   return createHash('sha256').update(JSON.stringify(stable)).digest('hex').slice(0, 16)
 }
