@@ -1,5 +1,6 @@
 import { selectForInjection } from './experience-service'
 import { experienceEnabled, EXPERIENCE_GOVERNANCE, type ExperienceCard } from './types'
+import { sanitizeForInjection } from '../memory-sanitize'
 
 /**
  * T-6 裁判清单注入（「错误经验为审查做指导」的落点）：
@@ -22,9 +23,16 @@ export interface JudgeSectionOptions {
   context_hint?: string
 }
 
-function renderLine(card: ExperienceCard & { kind: 'anti_pattern' }): string {
-  const focus = card.body.review_checklist.slice(0, 2).join('；')
-  return `- [${card.tag}] ${card.body.symptom}${focus ? ` → 审查关注：${focus}` : ''}`
+function renderLine(card: ExperienceCard & { kind: 'anti_pattern' }): string | null {
+  // 注入面统一净化（2026-09-12 记忆栈审计裁定 ②）：与 learnings/跨会话语录共用同一出口；
+  // 命中绕过指令那么卡不入段（self-cert-guard 已在入库侧拦一道，这里防御性再拦）。
+  const tag = sanitizeForInjection(card.tag, { limit: 40 })
+  const symptom = sanitizeForInjection(card.body.symptom, { limit: 140 })
+  if (tag.blocked || symptom.blocked || !symptom.text) return null
+  const focusRaw = card.body.review_checklist.slice(0, 2).join('；')
+  const focus = sanitizeForInjection(focusRaw, { limit: 120 })
+  if (focus.blocked) return null
+  return `- [${tag.text}] ${symptom.text}${focus.text ? ` → 审查关注：${focus.text}` : ''}`
 }
 
 export async function buildJudgeErrorPatternsSection(
@@ -44,6 +52,7 @@ export async function buildJudgeErrorPatternsSection(
     const lines = cards
       .filter((c): c is ExperienceCard & { kind: 'anti_pattern' } => c.kind === 'anti_pattern' && (c.status === 'verified' || c.status === 'active'))
       .map(renderLine)
+      .filter((line): line is string => line !== null)
     if (lines.length === 0) return ''
     return ['【常见错法】（经验库中已验证的错法，逐项对照，防漏判）', ...lines].join('\n')
   } catch {

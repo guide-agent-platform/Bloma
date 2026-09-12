@@ -1,6 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { findProject } from './project-service'
+import { sanitizeForInjection, sanitizeForStorage } from './memory-sanitize'
 import { getDocumentsDir } from '../storage/config-paths'
 
 /**
@@ -16,6 +17,9 @@ import { getDocumentsDir } from '../storage/config-paths'
  *   loop_outcome 失败必须全留不去重）+ 注入排序（kind 权重 outcome 优先、
  *   过期 >14 天的 summary 沉底但条数不足时仍入选）；
  * - 全链路静默失败（增强腿）：文件 IO/项目缺失不抛错、不阻断生成；
+ * - 注入安全（2026-09-12 记忆栈审计裁定 ②）：文本是**模型输出**，写入侧过
+ *   sanitizeForStorage（转义+截断）、注入侧过 sanitizeForInjection（转义+绕过指令
+ *   检测）——记忆投毒的唯一现实入口，两侧都设防；
  * - 注入消费方：buildLoopSystemWithOverride 的【历史经验】段（下轮 fresh loop
  *   开场即知上轮踩过什么坑——迭代重生成场景的防漂移增益）。
  */
@@ -64,7 +68,7 @@ export function appendProjectLearning(
     const record: ProjectLearning = {
       recorded_at: new Date().toISOString(),
       kind: entry.kind,
-      text: entry.text.trim().slice(0, TEXT_CHAR_LIMIT),
+      text: sanitizeForStorage(entry.text, { limit: TEXT_CHAR_LIMIT }),
       ...(entry.meta ? { meta: entry.meta } : {}),
     }
     // 入队去重（loop_summary / error_pattern）：迭代重生成的完成总结高度相似，同前缀刷屏挤占
@@ -143,14 +147,21 @@ export function readCuratedLearnings(projectId: string, limit = DEFAULT_INJECT_L
 export function renderLearningsSection(projectId: string, limit = DEFAULT_INJECT_LIMIT): string {
   const learnings = readCuratedLearnings(projectId, limit)
   if (learnings.length === 0) return ''
-  const lines = learnings.map((learning) => {
+  const lines: string[] = []
+  for (const learning of learnings) {
+    // 注入侧统一净化（2026-09-12 审计裁定 ②）：边界转义 + 拦绕过指令；命中那么条不入段
+    // （拦注入不删数据，原始 JSONL 不动）
+    const sanitized = sanitizeForInjection(learning.text, { limit: 120 })
+    if (sanitized.blocked || !sanitized.text) continue
     if (learning.kind === 'error_pattern') {
       // T-1 错误镜像卡：写方已组好「[tag@stage] 症状 → 规避：条件」，这里只加警示前缀
-      return `- ⚠ 坑：${learning.text.slice(0, 120)}`
+      lines.push(`- ⚠ 坑：${sanitized.text}`)
+      continue
     }
     const label =
       learning.kind === 'loop_summary' ? '完成总结' : learning.kind === 'loop_outcome' ? '异常结局' : learning.kind === 'repair_outcome' ? '修复结局' : '备注'
-    return `- [${label}] ${learning.text.slice(0, 120)}`
-  })
+    lines.push(`- [${label}] ${sanitized.text}`)
+  }
+  if (lines.length === 0) return ''
   return ['【历史经验】（此前生成轮留下的，避免重复踩坑）', ...lines].join('\n')
 }

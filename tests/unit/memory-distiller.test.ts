@@ -23,7 +23,9 @@ import type { SDKMessage } from '../../shared/types'
  * - 触发失败三类注入点（报错/超时/产物不合 schema）任一 → 不阻塞主流程、
  *   如实落 T2 决策日志、退回 L2（验收②）；
  * - 蒸馏产物与背板重叠/冲突的条目确定性丢弃，背板为准（验收③）；
- * - memory.json 只存背板装不下的对话性记忆，注入 MVP 提示词为提示级参考。
+ * - memory.json 只存背板装不下的对话性记忆；**注入面未实现**——本层已于 2026-09-12
+ *   冻结（记忆栈审计裁定 ①）：生产触发点已移除，本单测改为直接调用 distill 验证落库/
+ *   降级/背板去重三类行为；若要启用必须先补注入面（见模块头注）。
  */
 
 const originalPromaHome = process.env.PROMA_HOME

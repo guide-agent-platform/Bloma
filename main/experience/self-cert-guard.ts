@@ -10,6 +10,7 @@
  */
 
 import type { ExperienceCard } from './types'
+import { containsBypassInstruction } from '../memory-sanitize'
 
 /** 受保护面（单点定义；他处引用勿散写）。 */
 export const PROTECTED_SURFACES = [
@@ -22,11 +23,10 @@ export const PROTECTED_SURFACES = [
 ] as const
 
 /**
- * 教唆绕过受保护面的指令模式（保守窄匹配：动词+受保护面组合；诊断性提及不命中）。
- * 例命中：「关闭 typecheck 让构建通过」「跳过 judge 门禁」「绕过安全扫描」。
+ * 教唆绕过受保护面的指令检测：**单点定义已迁至 `main/memory-sanitize.ts`**
+ * （2026-09-12 记忆栈审计裁定 ②：三类注入面收敛到同一净化出口）。语义不变——
+ * 保守窄匹配（动词+受保护面组合）、诊断性提及不命中。
  */
-const BYPASS_INSTRUCTION_RE =
-  /(关闭|跳过|绕过|禁用|注释掉|删掉|去掉|mock\s*掉)[^。\n;；]{0,24}(typecheck|构建门禁|build\s*gate|judge|裁判|门禁|断言|gwt|探针|安全扫描|security|api\s*contract|契约探测)/i
 
 /** 提取卡内可注入文本面（checklist/summary/hint/root_cause 描述）做模式检测。 */
 function injectableText(card: ExperienceCard): string {
@@ -44,7 +44,7 @@ function injectableText(card: ExperienceCard): string {
 /** 卡内容是否教唆绕过受保护面（true = 不得注入）。 */
 export function cardThreatensProtectedSurface(card: ExperienceCard): boolean {
   try {
-    return BYPASS_INSTRUCTION_RE.test(injectableText(card))
+    return containsBypassInstruction(injectableText(card))
   } catch {
     // 检测自身失败 → fail-safe 视为威胁（拦注入不删卡）
     return true

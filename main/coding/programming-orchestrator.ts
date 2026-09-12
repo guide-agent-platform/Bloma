@@ -30,7 +30,6 @@ import { gwtGameProbeEnabled } from '../gwt-runner'
 import { renderRulesSection, rulesForTemplateType, rulesRegistryEnabled } from '../rules-registry'
 import { renderExpressionSection } from '../prompt-expression'
 import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
-import { distillProjectMemorySafely } from '../memory-distiller'
 import { generateSketch, backplaneKeyTasks, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from '../sketch-engine'
 import { generateSketchLlm, SketchLlmError, type SketchAttemptDetail } from '../sketch-engine-llm'
 import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from '../requirement-normalizer'
@@ -582,14 +581,9 @@ export async function runMvpTask(input: MvpTaskInput): Promise<MvpTaskResult> {
   publish(input, 'stage_changed', { stage: 'generating_mvp' })
   updateProject(input.project_id, { current_stage: 'generating_mvp' })
 
-  // T4-L3 蒸馏兜底·触发点①（草图确认后，fire-and-forget）：默认关闭
-  // （BLOMA_MEMORY_DISTILL=1），失败在内部降级并落决策，绝不阻塞 MVP 生成
-  distillProjectMemorySafely({
-    project_id: input.project_id,
-    session_id: input.session_id,
-    channel_id: input.channel_id,
-    query: input.query,
-  })
+  // T4-L3 蒸馏层已于 2026-09-12 冻结（记忆栈审计裁定 ①）：本层默认关闭且**未接注入面**
+  // （memory.json 无任何读取方），生产触发点一律移除——不再「写了没人读」。层代码与单测
+  // 保留作实验资产；若将来要启用，须先实现注入面并经产品决策（见 .context 记忆栈审计）。
 
   const requirements = readLastSketchRequirements(input.project_id)
   await syncPrdCheckpoints(input, requirements)
@@ -3174,14 +3168,7 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
       // P2 失败回流（PR-C）：构建门禁结果透传终验组装器（failed → build 修复任务）
       ...(mvp.build_gate ? { buildGate: mvp.build_gate } : {}),
     })
-    // T4-L3 蒸馏兜底·触发点②（每次迭代完成后，fire-and-forget）：默认关闭，
-    // 失败在内部降级并落决策，绝不阻塞迭代收尾
-    distillProjectMemorySafely({
-      project_id: input.project_id,
-      session_id: input.session_id,
-      channel_id: input.channel_id,
-      query: input.query,
-    })
+    // T4-L3 蒸馏触发点②已于 2026-09-12 冻结并移除（同上：本层无注入面，不再生产写入）
     // GA-03（PRD §7.1 触发节点「每轮迭代结束后」）：追加 Changelog，合并本轮功能项
     // 清单；fire-and-forget——写盘失败静默降级，不阻断迭代成功收尾
     syncIterationCompleted({

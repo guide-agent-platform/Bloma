@@ -21,9 +21,15 @@ import type { PrdBackplane } from './sketch-engine'
  * **默认关闭**（BLOMA_MEMORY_DISTILL=1 才启用）：设计要求 L1+L2 线上实测有漏才
  * 启用本层；开关是 main 进程环境变量而非用户配置（「明确不做：不暴露配置面」）。
  *
- * 触发点两个稳定检查位：草图确认后（runMvpTask 入口）/ 每次迭代完成后（runIterationTask
- * 尾部），均 fire-and-forget——报错 / 超时 / 产物不合 schema 任一即判失败退回 L2，
- * 绝不阻塞主流程，失败落 T2 决策日志如实记录（成功不落：memory.json 本身就是记录）。
+ * **冻结（2026-09-12，记忆栈审计裁定 ①）**：本层**未接注入面**—— readProjectMemory
+ * 在启用后也无任何生产调用方（字段级搜索零命中；单测注释曾声称「注入 MVP 提示词为
+ * 提示级参考」，但该注入从未实现），故 runMvpTask / runIterationTask 两处生产触发点已
+ * 移除，**生产路径不会写入**。代码保留作实验资产（可直接调用的库 + 单测）；将来要启用
+ * 必须先补注入面（拼进 MVP/迭代 loop system）并过产品决策，**不得只接触发点**。
+ *
+ * 保留的实验调用约定：distillProjectMemory 报错 / 超时 / 产物不合 schema 任一即判失败
+ * 退回 L2，绝不阻塞主流程，失败落 T2 决策日志如实记录（成功不落：memory.json 本身即记录）；
+ * fire-and-forget 包装 distillProjectMemorySafely 仍可用。
  */
 
 const MEMORY_FILE = 'memory.json'
@@ -55,7 +61,8 @@ export function setMemoryDistillEnabledForTests(enabled: boolean): void {
   distillEnabled = enabled
 }
 
-/** 读取已蒸馏的项目记忆；无文件/损坏返回 undefined（退回 L2，不报错）。 */
+/** 读取已蒸馏的项目记忆；无文件/损坏返回 undefined（退回 L2，不报错）。
+ *  实验层：当前无生产调用方（2026-09-12 冻结，见模块头注）。 */
 export function readProjectMemory(projectId: string): ProjectMemory | undefined {
   try {
     const project = findProject(projectId)
