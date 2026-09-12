@@ -90,7 +90,7 @@
 | 会话 JSONL（注入后文本落盘） | **只读侧排除**（撤销名单），**不改写转录**（审计一致性） |
 | 检索索引（`.session-recall-index.json`） | 无需因删除失效（其失效只由会话文件 mtime/size 触发）；召回结果再经撤销名单过滤 |
 | 使用埋点 sidecar | 一并删除（独立文件） |
-| 快照（`snapshots/{projectId}/{id}/documents`） | 新快照：归档时按文件粒度排除 `learnings.jsonl` / `memory.json` / `project-map.md`（保留 `prd.json`）；**存量快照**：一次性清理或登记为不可逆边界 + UI 明示"回滚较早期版本可能恢复已删记忆" |
+| 快照（`snapshots/{projectId}/{id}/documents`） | 新快照：**建议**归档时按文件粒度排除 `learnings.jsonl` / `memory.json` / `project-map.md`（保留 `prd.json`）——**待第 2 项确认**（它同时定义“记忆跨回滚存续”语义）；**存量快照**：一次性清理或登记为不可逆边界 + UI 明示（现状：只读扫描报告 `snapshot-inventory.md` 显示含记忆文件快照 = 0） |
 | 项目导出（exportProjectHandoff） | **不带走记忆产物**（只复制 `project.root_path`；记忆在 `~/.proma/{workspace}/documents/` 下）——已核实 |
 
 ## 8. 硬边界（不随删除清除）
@@ -100,16 +100,20 @@
 3. 含 documents 的**历史快照**在按文件粒度排除生效前存在复活风险；
 4. **日志类衍生痕迹**不随删除清除：`decision-log` 与 `documents/decisions.md`（同被快照归档）含 `memory_distilled` 等记忆派生摘要，且决策日志是审计账、不删；UI 明示"删除不清除日志类衍生痕迹"。
 
-## 9. 语义变更登记（需产品/安全确认）
+## 9. 语义变更登记（需产品/安全确认，确认人须含非实现者）
 
-**记忆跨回滚存续**：新快照归档排除记忆文件后，回滚**不再恢复**记忆，且不会删除现有记忆（`cpSync` 不剪除目标端多余文件）。
-净效果：回滚到旧版本后，loop 仍带着回滚前的经验继续。对"防漂移"大概率是增益，但属**产品可见行为变更**，未获确认前不得视为默认正确。
+**记忆跨回滚存续**（待确认）：若新快照归档排除记忆文件，则回滚**不再恢复**记忆，且不会删除现有记忆（`cpSync` 不剪除目标端多余文件）。
+净效果：回滚到旧版本后，loop 仍带着回滚前的经验继续。对“防漂移”大概率是增益，但属**产品可见行为变更**，未获确认前不得视为默认正确。
+
+**截断 vs 可恢复载体（待一并裁定）**：撤销名单有上限（丢最旧），而会话转录与历史快照仍可能恢复被删文本 → 老指纹被截断后该文本会重新变为可注入。三者（归档排除 / 存量清理 / 指纹截断）必须作为一个决策一起定，详见 `revocation-and-cross-session.md` §7。
 
 ## 10. 已核实事实（避免重复怀疑）
 
 - `documents/` 位于 `~/.proma/{workspace}/documents/{projectId}/`，**不在 agent 工具可达范围**（`read_file` 根 = 项目根；`READONLY_DIR_PREFIXES` 仅覆盖 `src/examples/`、`src/official-modules/`）；
 - `decisions.md` **无 prompt 注入点**（不被自动注入），但会登记进文档清单并在文档面板可读（`decision-log.ts:158`、`document-engine.listDocuments`）；
 - `learnings` 注入位置已由 system prompt 迁至任务头（裁定 §5），回放断言见 `tests/unit/learnings-log.test.ts`；
+- `session-recall` 已接撤销过滤（4a）：命中撤销 → 整条 hit 丢弃；名单不可读 → 本层不注入（`[S4-RECALL-015/016]`）；
+- 存量快照只读扫描：含记忆文件快照 = 0（见 `snapshot-inventory.md`）；
 - 生产入口可达集不含 memory-distiller（门禁用例 `tests/unit/memory-reachability.test.ts`，含变异自证）。
 
 ---

@@ -49,13 +49,29 @@
 3. 所有受覆盖层下次渲染即排除；
 4. 删除后**可验证**：单测覆盖"删除 → 渲染为空 / 召回不再命中 / 原始数据仍可读"。
 
-## 5. 待接线（本 Sprint / Sprint2）
+## 5. 接线状态（4a 已落地，2026-09-12）
 
-- `session-recall` 的召回结果接入撤销过滤（当前 `prepareRecallBlock` 尚未校验名单）；
-- 统一出口 `renderMemory()`（§11 契约）落地后，撤销校验收敛为**单一出口**，各层不再各自读取名单；
-- 删除入口（UI / IPC）落地时调用 `revokeMemoryText`（UI 排下一批）。
+- ✅ **learnings**：`renderLearningsSection` 渲染时校验名单；名单不可读 → 本层返回空串（整体不注入）。
+- ✅ **session-recall**（4a，`prepareRecallBlock`）：名单不可读 → 本层返回 null（整体不注入）；命中撤销 → **整条 hit 丢弃**（既查命中片段，也查该会话文件内任何被索引消息，防同一文本经 intent/同会话其他片段泄漏）。单测 `[S4-RECALL-015/016]`。
+- ⏳ **§11 统一出口 `renderMemory()`**：落地后撤销校验收敛为单一出口（各层不再各自读取名单）；本阶段两处接线均为**临时补丁**，代码已标迁移路径。
+- ⏳ 删除入口（UI / IPC）落地时调用 `revokeMemoryText`（UI 排下一批）。
+
+## 5.1 IO 记账（重要）
+
+`loadRevocationIndex` **每次调用读文件、无模块级缓存**（`existsSync` + `readFileSync` + `JSON.parse`）。原因：缓存 TTL = 删除生效延迟 = 复活窗口，与 fail-closed 目标冲突。
+
+→ 注入侧 IO 暂为 **5 处**：learnings 读写、会话索引构建、项目地图扫描、sidecar 埋点写、**撤销名单读**。
+每次频率为**任务级**（每轮 loop 渲染各一次），相对 `buildSessionIndex`（全量重扫会话 JSONL，实测 ~1.0s）可忽略；收敛点 = §11 契约（一次读取、多出口复用）。
 
 ## 6. 已验证用例
 
 见 `tests/unit/memory-revocation.test.ts`：缺失=空名单、指纹同源（转义前后命中）、幂等、**不存原文**（文件内容断言）、损坏 fail-closed、损坏下可重建、超限丢最旧、原子写无残留。
 learnings 侧集成断言见 `tests/unit/learnings-log.test.ts`（撤销条目不注入 + 名单损坏整体不注入 + 原始账本仍可读）。
+session-recall 侧集成断言见 `tests/unit/session-recall.test.ts` `[S4-RECALL-015/016]`（撤销后不再召回 + 名单不可读整体不注入）。
+
+## 7. 未决：截断 vs 可恢复载体（进第 2 项决策一并裁定）
+
+撤销名单现有 `MAX_FINGERPRINTS` 上限（丢最旧）。若某文本**仍可能从其他载体恢复**（会话转录、含 documents 的历史快照、回滚），则其指纹**不得被截断**——否则该文本会重新变为可注入，「删除不可复活」被截断策略破坏。
+
+候选方案（待裁定）：① 指纹加 `retain_until` / `recoverable` 标记，与快照保留期联动；② 取消截断或大幅提高上限（代价：文件增长）；③ 做归档排除（①-a）后确认无载体残留，再允许截断。
+

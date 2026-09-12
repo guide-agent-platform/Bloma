@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { buildSessionIndex, searchSessions, prepareRecallBlock } from '../../main/session-recall'
+import { REVOCATION_FILE, revokeMemoryText } from '../../main/memory-revocation'
 import { getPromaHome } from '../../storage/config-paths'
 
 /**
@@ -185,5 +186,25 @@ describe('prepareRecallBlock（agent-loop 注入块）', () => {
     seedSession('s-a.jsonl', [blomaLine('user', '做一个番茄钟')])
     const block = await prepareRecallBlock('继续上次的事情', 0)
     expect(block).toBeNull()
+  })
+
+  it('[S4-RECALL-015] 撤销名单命中 → 该会话不再被召回（D0 §8 / 4a：删除旁路只读侧排除）', async () => {
+    const secret = '密钥只写程序，不要落到渲染层'
+    seedSession('s-secret.jsonl', [blomaLine('user', '渠道安全怎么保证'), blomaLine('assistant', secret)])
+    const task = '继续上次的渠道安全工作'
+    expect(await prepareRecallBlock(task, 0)).toContain('渠道安全')
+
+    // 删除 = 写指纹（不存原文）→ 再召回时该会话整条丢弃（含同文件其他被索引消息命中）
+    expect(revokeMemoryText(secret)).toBe(true)
+    expect(await prepareRecallBlock(task, 0)).toBeNull()
+  })
+
+  it('[S4-RECALL-016] 撤销名单不可读 → 本层整体不注入（fail-closed；缺失=空名单照常）', async () => {
+    seedSession('s-a.jsonl', [blomaLine('user', '帮我做记账本'), blomaLine('assistant', '已生成记账本草稿')])
+    const task = '继续上次的记账本'
+    expect(await prepareRecallBlock(task, 0)).toContain('记账本')
+
+    writeFileSync(join(getPromaHome(), REVOCATION_FILE), '{ 损坏 JSON', 'utf8')
+    expect(await prepareRecallBlock(task, 0)).toBeNull()
   })
 })

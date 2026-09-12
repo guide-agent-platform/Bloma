@@ -3,6 +3,7 @@ import { createInterface } from 'node:readline'
 import { join } from 'node:path'
 import { getPromaHome } from '../storage/config-paths'
 import { sanitizeForInjection } from './memory-sanitize'
+import { isMemoryTextRevoked, loadRevocationIndex, revocationBlocksLayer } from './memory-revocation'
 
 /**
  * session-recall —— 跨会话内容检索（BM25 + CJK bigram；2026-08-28 guidance v5 ② 转正）。
@@ -214,15 +215,25 @@ export async function prepareRecallBlock(task: string, delegationDepth = 0, excl
   if (delegationDepth > 0) return null
   if (!containsAnaphora(task)) return null
   try {
+    // 撤销名单（D0 §8 / 4a，**临时补丁**）：名单存在但不可读 → 本层**整体不注入**（fail-closed）；
+    // 名单缺失 = 空名单照常。每次调用读文件、无缓存（缓存 TTL = 删除生效延迟 = 复活窗口，
+    // 与 fail-closed 目标冲突）；迁移路径：待 §11 统一出口 renderMemory() 接管（一次读取、多出口复用）。
+    const revocation = loadRevocationIndex()
+    if (revocationBlocksLayer(revocation)) return null
     const { index } = await buildSessionIndex()
-  // r52 aliyun high 采纳：排除当前会话自身（防同会话历史自我召回混淆边界）
-  if (excludeFile) index.files = index.files.filter((f) => f.name !== excludeFile)
+    // r52 aliyun high 采纳：排除当前会话自身（防同会话历史自我召回混淆边界）
+    if (excludeFile) index.files = index.files.filter((f) => f.name !== excludeFile)
     const hits = await searchSessions(index, firstSentence(task), 3)
     if (!hits.length) return null
     // 注入面统一净化（2026-09-12 记忆栈审计裁定 ②）：与 learnings / 经验卡共用同一出口
     // （转义边界 + 拦绕过指令）；命中那么条不入段，其余照常。
     const lines: string[] = []
     for (const h of hits) {
+      // 撤销命中 → 整条 hit 丢弃：既查命中片段，也查该会话文件内**任何被索引消息**
+      // （防同一文本经 intent 或同会话其他片段泄漏）
+      const indexedFile = index.files.find((f) => f.name === h.file)
+      const revokedInFile = indexedFile ? indexedFile.msgs.some((m) => isMemoryTextRevoked(m.text, revocation)) : false
+      if (revokedInFile || isMemoryTextRevoked(h.best.text, revocation) || isMemoryTextRevoked(h.intent, revocation)) continue
       const date = h.span[0] ? new Date(h.span[0]).toISOString().slice(0, 10) : '?'
       const intent = sanitizeForInjection(h.intent, { limit: 80 })
       const snippet = sanitizeForInjection(h.best.text, { limit: 120 })
