@@ -13,7 +13,7 @@
  *       apply 完成→targeted_scan 验证；>12h 无全量自动补排 run_full_scan。
  * 并发保护：orchestrator 自身锁文件；running 任务以 run-task 包装器 pid 存活判定。
  */
-import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, openSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, openSync, statSync, rmSync } from 'node:fs'
 import { execFileSync, spawn } from 'node:child_process'
 import { readFileSync as rfs } from 'node:fs'
 import { homedir } from 'node:os'
@@ -145,6 +145,10 @@ for (const t of pending) {
     if (!samples) { t.status = 'failed'; t.artifacts = { error: 'no samples' }; continue }
     const marker = join(LOGS, `task-${t.id}.exit`)
     const out = join(LOGS, `task-${t.id}.log`)
+    // 启动前必须清旧 marker（2026-09-12 本体 bug）：同一 id 重试时旧 marker 仍在，
+    // 下一轮醒来会走 existsSync(marker) 分支把**仍在跑的任务**误判为已收口（按旧退出码
+    // 处理并再启一份 → 重复扫描）。
+    rmSync(marker, { force: true })
     const fd = openSync(out, 'a')
     const child = spawn(process.execPath, [join(REPO, 'scripts', 'run-task.mjs'), marker, '--', process.execPath, join(REPO, 'scripts', 'scheduled-grayscale.mjs'), '--samples', samples, '--budget-min', '300'], { stdio: ['ignore', fd, fd], detached: true, cwd: REPO })
     child.unref()
