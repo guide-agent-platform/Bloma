@@ -3,6 +3,7 @@ import {
   visionAuditEnabled, deriveChatBaseUrl, resolveVisionRoles, resolveVisionPair, pickVisionEndpoint,
   BLIND_DESCRIBE_PROMPT, buildComparePrompt, extractJson, parseCompareOutput, digestVisionReport,
   parseMaxTokensCap, productProblems, normalizeTarget, defaultTargetForKind,
+  buildVisionRequest, VISION_TEMPERATURE, VISION_FRAMES, VISION_FRAME_INTERVAL_MS, VISION_VIEWPORT,
   type ChannelLike, type VisionProblem,
 } from '../../../main/coding/vision-audit-gate'
 
@@ -217,5 +218,33 @@ describe('max_tokens 上限自适应', () => {
     expect(parseMaxTokensCap('{"error":{"code":"1210","message":"max_tokens参数非法：限制数值范围[1,1024]"}}')).toBe(1024)
     expect(parseMaxTokensCap('max_tokens must be in range [1, 4096]')).toBe(4096)
     expect(parseMaxTokensCap('{"error":"model not found"}')).toBeUndefined()
+  })
+})
+
+describe('采样参数固定（⑦）与多帧（⑥）', () => {
+  const ep = { chatBase: 'https://x', apiKey: 'k', model: 'glm-4v-flash', channelName: '智谱视觉' }
+  it('请求体：温度固定、多帧图块数 = frames、文本块在首位', () => {
+    const frames = [Buffer.from('a'), Buffer.from('b'), Buffer.from('c')]
+    const req = buildVisionRequest(ep, 'INSTR', frames, 1024) as {
+      temperature: number; max_tokens: number; messages: { content: { type: string; image_url?: { url: string } }[] }[]
+    }
+    expect(req.temperature).toBe(VISION_TEMPERATURE)
+    expect(VISION_TEMPERATURE).toBe(0)
+    expect(req.max_tokens).toBe(1024)
+    const content = req.messages[0].content
+    expect(content[0].type).toBe('text')
+    expect(content).toHaveLength(1 + frames.length)
+    for (const block of content.slice(1)) expect(block.image_url!.url.startsWith('data:image/png;base64,')).toBe(true)
+  })
+  it('缺省采样参数：3 帧 / 900ms / 1440×900（裁定 ⑥ 的三档默认）', () => {
+    expect(VISION_FRAMES).toBe(3)
+    expect(VISION_FRAME_INTERVAL_MS).toBe(900)
+    expect(VISION_VIEWPORT).toEqual({ width: 1440, height: 900 })
+  })
+  it('盲描述与对照审核提示词都写明多帧存在性规则', () => {
+    expect(BLIND_DESCRIBE_PROMPT).toContain('多帧规则')
+    expect(BLIND_DESCRIBE_PROMPT).toContain('frames_seen')
+    expect(BLIND_DESCRIBE_PROMPT).toContain('任一帧可见即视为存在')
+    expect(buildComparePrompt('A', 'B')).toContain('任一帧可见即视为存在')
   })
 })

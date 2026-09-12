@@ -163,7 +163,8 @@ export function resolveVisionPair(channels: ChannelLike[], decrypt: (hex: string
  * 输出：带坐标的完整 JSON 描述（bbox 单位像素，原点图片左上角）。
  */
 export const BLIND_DESCRIBE_PROMPT = [
-  '你是 UI 截图观察员。只输出一个 JSON 对象，不要解释文字、不要 markdown 围栏。',
+  '你是 UI 截图观察员。你会收到**同一屏幕按时间顺序采样的多帧截图**（帧号 1..N，视口一致）。',
+  '只输出一个 JSON 对象，不要解释文字、不要 markdown 围栏。',
   '结构：',
   '{',
   '  "viewport": {"w": <int>, "h": <int>},',
@@ -172,12 +173,14 @@ export const BLIND_DESCRIBE_PROMPT = [
   '    {"id": "e1", "type": "button|input|textarea|select|checkbox|radio|link|text|heading|icon|image|card|nav|table|list|canvas|badge|other",',
   '     "text": "逐字原文（无文字写空串）", "bbox": [left, top, width, height],',
   '     "state": "default|selected|hover|disabled|loading|error|empty|unknown",',
-  '     "style": "可判定的视觉特征（颜色/字号层级/圆角/描边/阴影）", "note": "其它值得记录的事实"}',
+  '     "style": "可判定的视觉特征（颜色/字号层级/圆角/描边/阴影）", "frames_seen": [1,2,3], "note": "其它值得记录的事实"}',
   '  ],',
   '  "states_visible": ["当前可见状态（空态/加载/错误/选中…）"],',
   '  "uncertain": ["无法确认的点，不要猜"]',
   '}',
-  '坐标约定：以图片左上角为原点、单位像素，bbox=[左, 上, 宽, 高]。元素尽量列全（含纯文字与图标）。',
+  '坐标约定：以图片左上角为原点、单位像素，bbox=[左, 上, 宽, 高]（各帧视口一致，坐标通用）。',
+  '多帧规则：**任一帧可见即视为存在**；bbox 取该元素首个可见帧的位置，并用 frames_seen 记录它在哪些帧出现（如 [1,3]）。',
+  '三帧都不可见才算不存在。元素尽量列全（含纯文字与图标）。',
   '禁止评价好坏、禁止给建议、禁止推测图片之外的内容；看不到的写进 uncertain。',
 ].join('\n')
 
@@ -186,7 +189,8 @@ export const BLIND_DESCRIBE_PROMPT = [
  */
 export function buildComparePrompt(aJson: string, bJson: string): string {
   return [
-    '你是 UI 截图审核员。下面有两份**互相独立**产出的同一张截图的描述 JSON（观察员A、观察员B），以及原图。',
+    '你是 UI 截图审核员。下面有两份**互相独立**产出的同一屏幕的描述 JSON（观察员A、观察员B），以及**同一屏幕按时间顺序采样的多帧截图**。',
+  '多帧规则：任一帧可见即视为存在；跨帧才可见的元素（如游戏实体/动画）不得判为缺失。',
     '任务：对照原图做二次识别，核查两份描述的真实性与准确性，输出一个 JSON 对象（不要解释文字、不要围栏）。',
     '结构：',
     '{',
@@ -312,6 +316,16 @@ export function digestVisionReport(aText: string, bText: string, problems: Visio
 
 /** 视觉调用 max_tokens 缺省（env 可覆盖）。 */
 const VISION_MAX_TOKENS = Number(process.env.BLOMA_VISION_MAX_TOKENS || 8192)
+
+/**
+ * 采样参数（⑥⑦，2026-09-12 裁定）：固定帧数/间隔/视口/温度。
+ * 理由：单帧判 canvas 游戏会自相矛盾（蛇可能在两帧之间移动/未出现）；温度不固定则复验不可比
+ * （实测同图两模型输出 960 / 5365 字）。注意 temperature=0 也不完全确定 → 判据仍按元素级状态，不做文本比对。
+ */
+export const VISION_FRAMES = Number(process.env.BLOMA_VISION_FRAMES || 3)
+export const VISION_FRAME_INTERVAL_MS = Number(process.env.BLOMA_VISION_FRAME_INTERVAL_MS || 900)
+export const VISION_VIEWPORT = { width: 1440, height: 900 }
+export const VISION_TEMPERATURE = Number(process.env.BLOMA_VISION_TEMPERATURE || 0)
 /** 已探测到的厂商上限缓存（按模型名）：避免每次调用都先吃一个 400（评审 ③）。 */
 const MAX_TOKENS_CAP_CACHE = new Map<string, number>()
 
@@ -328,18 +342,36 @@ export function parseMaxTokensCap(errorText: string): number | undefined {
   return Number.isFinite(cap) && cap > 0 ? cap : undefined
 }
 
-async function chatVision(ep: VisionEndpoint, instruction: string, imagePng: Buffer, timeoutMs: number): Promise<string> {
+/** 纯函数：构造 OpenAI 兼容请求体（多帧图 + 固定温度）——便于单测断言参数固定（⑦）。 */
+export function buildVisionRequest(
+  ep: VisionEndpoint,
+  instruction: string,
+  frames: Buffer[],
+  maxTokens: number,
+): Record<string, unknown> {
+  return {
+    model: ep.model,
+    max_tokens: maxTokens,
+    temperature: VISION_TEMPERATURE,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text: instruction },
+        ...frames.map((frame) => ({
+          type: 'image_url',
+          image_url: { url: `data:image/png;base64,${frame.toString('base64')}` },
+        })),
+      ],
+    }],
+  }
+}
+
+async function chatVision(ep: VisionEndpoint, instruction: string, frames: Buffer[], timeoutMs: number): Promise<string> {
   const post = async (maxTokens: number) => fetch(`${ep.chatBase}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ep.apiKey}` },
     signal: AbortSignal.timeout(timeoutMs),
-    body: JSON.stringify({
-      model: ep.model, max_tokens: maxTokens,
-      messages: [{ role: 'user', content: [
-        { type: 'text', text: instruction },
-        { type: 'image_url', image_url: { url: `data:image/png;base64,${imagePng.toString('base64')}` } },
-      ] }],
-    }),
+    body: JSON.stringify(buildVisionRequest(ep, instruction, frames, maxTokens)),
   })
 
   // 已探测过该模型上限 → 直接按上限请求，零浪费
@@ -363,17 +395,33 @@ async function chatVision(ep: VisionEndpoint, instruction: string, imagePng: Buf
   return text
 }
 
-async function screenshotPreview(previewUrl: string, timeoutMs: number): Promise<Buffer> {
+/**
+ * 多帧采样（⑥，2026-09-12 裁定）：固定视口、固定间隔、按时间顺序。
+ * 3 帧、间隔 900ms、视口 1440×900 为缺省；任一帧可见即视为元素存在（提高 canvas/动画类产物的判定稳定性）。
+ */
+export async function captureFrames(
+  previewUrl: string,
+  opts?: { frames?: number; intervalMs?: number; timeoutMs?: number },
+): Promise<Buffer[]> {
+  const frameCount = Math.max(1, opts?.frames ?? VISION_FRAMES)
+  const intervalMs = Math.max(0, opts?.intervalMs ?? VISION_FRAME_INTERVAL_MS)
   const browser = await chromium.launch({ headless: true })
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
-    await page.goto(previewUrl, { waitUntil: 'load', timeout: timeoutMs })
+    const page = await browser.newPage({ viewport: VISION_VIEWPORT })
+    await page.goto(previewUrl, { waitUntil: 'load', timeout: opts?.timeoutMs ?? 40_000 })
     await page.waitForTimeout(1200)
-    return await page.screenshot({ type: 'png', fullPage: true })
+    const frames: Buffer[] = []
+    for (let i = 0; i < frameCount; i++) {
+      frames.push(await page.screenshot({ type: 'png', fullPage: true }))
+      if (i < frameCount - 1) await page.waitForTimeout(intervalMs)
+    }
+    return frames
   } finally {
     await browser.close().catch(() => {})
   }
 }
+
+
 
 /**
  * 运行 L1 视觉审计（三段调用：A 盲描述 → B 盲描述 → 对照审核）。
@@ -403,18 +451,19 @@ export async function runVisionAuditGate(input: {
     }
   }
   try {
-    const png = await screenshotPreview(input.previewUrl, Math.min(timeoutMs, 40_000))
-    // ① A、② B 各自独立盲描述（同一提示词、互不可见）
-    const a = await chatVision(roles.a, BLIND_DESCRIBE_PROMPT, png, timeoutMs)
-    const b = await chatVision(roles.b, BLIND_DESCRIBE_PROMPT, png, timeoutMs)
-    // ③ 对照审核：两份独立描述 + 原图 → 二次识别 + 真实性问题 JSON
-    const compareRaw = await chatVision(roles.compare, buildComparePrompt(a, b), png, timeoutMs)
+    const frames = await captureFrames(input.previewUrl, { timeoutMs: Math.min(timeoutMs, 40_000) })
+    // ① A、② B 各自独立盲描述（同一提示词、多帧、互不可见）
+    const a = await chatVision(roles.a, BLIND_DESCRIBE_PROMPT, frames, timeoutMs)
+    const b = await chatVision(roles.b, BLIND_DESCRIBE_PROMPT, frames, timeoutMs)
+    // ③ 对照审核：两份独立描述 + 多帧原图 → 二次识别 + 真实性问题 JSON
+    const compareRaw = await chatVision(roles.compare, buildComparePrompt(a, b), frames, timeoutMs)
     const compare = parseCompareOutput(compareRaw)
     const { digest, flagged } = digestVisionReport(a, b, compare.problems)
 
     writeVisionAuditDocument(input.projectId, [
       '# 视觉审计报告（L1：盲描述A + 盲描述B + 对照审核）', '',
       `> 生成：${new Date().toISOString()} | A=${roles.a.model}（${roles.a.channelName}）| B=${roles.b.model}（${roles.b.channelName}）| 对照审核=${roles.compare.model}（${roles.compare.channelName}）`,
+      `> 采样：${frames.length} 帧 / 间隔 ${VISION_FRAME_INTERVAL_MS}ms / 视口 ${VISION_VIEWPORT.width}×${VISION_VIEWPORT.height} / temperature=${VISION_TEMPERATURE}`,
       `> 修复者角色：${VISION_FIXER_ROLE}（Bloma 编程模型；本报告只产出问题，不判败、不改代码）`,
       `> 结论：${flagged ? `对照审核提出 ${compare.problems.length} 条问题（产品侧 ${compare.problems.filter((p) => p.target === 'product').length} / 描述质量 ${compare.problems.filter((p) => p.target === 'description').length}）` : '两份描述经对照审核未发现实质问题'}`, '',
       '## 观察员A 盲描述（JSON）', '```json', a, '```', '',
