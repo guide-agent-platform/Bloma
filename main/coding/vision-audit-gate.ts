@@ -51,10 +51,28 @@ export interface VisionEndpoint {
   channelName: string
 }
 
-/** 对照审核产出的单条问题（面向"让编程模型去改"，不含实现方式）。 */
+/**
+ * 对照审核产出的单条问题（面向"让编程模型去改"，不含实现方式）。
+ *
+ * Q5 路由规则（2026-09-12 裁定，已决）：
+ *  - target='product'   → 允许组装 RepairTask(source='vision') 交编程模型；
+ *  - target='description' → 进观察员质量队列（改提示词/换模型/重描述），**不回喂代码**；
+ *  - 默认值由 kind 推导：omission/missing_element/state_error/layout_error → product；
+ *    inaccurate/false_claim → description；
+ *  - root_cause 可改判：observer → description；product → product（如 false_claim 根因是
+ *    控件缺失/状态不可辨/渲染错误/可访问性问题）；ambiguous 不改判。
+ *  - 混合问题必须拆条（由提示词约束），不整包丢给编程模型。
+ */
+export type ProblemTarget = 'description' | 'product'
+export type ProblemRootCause = 'observer' | 'product' | 'ambiguous'
+
 export interface VisionProblem {
   kind: 'omission' | 'inaccurate' | 'false_claim' | 'missing_element' | 'state_error' | 'layout_error'
-  severity: 'high' | 'medium' | 'low'
+  severity: 'low' | 'medium' | 'high' | 'critical'
+  /** Q5：该问题该谁处理（默认按 kind 推导，root_cause 可改判） */
+  target: ProblemTarget
+  /** Q5：根因归属（观察员描述失误 / 产品实现问题 / 不确定） */
+  root_cause: ProblemRootCause
   claim: string
   bbox: [number, number, number, number] | null
   evidence: string
@@ -175,8 +193,9 @@ export function buildComparePrompt(aJson: string, bJson: string): string {
     '  "agree": ["两份一致且复核为真的要点"],',
     '  "corrections": [{"who": "A|B|both", "claim": "被纠正的描述", "actual": "图中实际情况", "bbox": [l,t,w,h] 或 null}],',
     '  "problems": [',
-    '    {"kind": "omission|inaccurate|false_claim|missing_element|state_error|layout_error",',
-    '     "severity": "high|medium|low",',
+    '    {"target": "description|product", "root_cause": "observer|product|ambiguous",',
+    '     "kind": "omission|missing_element|state_error|layout_error|inaccurate|false_claim",',
+    '     "severity": "low|medium|high|critical",',
     '     "claim": "问题一句话（面向产品，不写代码建议）",',
     '     "bbox": [l,t,w,h] 或 null,',
     '     "evidence": "图中位置与可见证据",',
@@ -186,6 +205,13 @@ export function buildComparePrompt(aJson: string, bJson: string): string {
     '}',
     '规则：只报能在图上指认的问题；两份都没提、图上也没有的不要报；两份一致但都错时以原图为准（写 corrections 并计入 problems）；',
     '拿不准的降 severity，不要删；不要为凑数而报。',
+    '',
+    '【target / root_cause 判定规则（必须遵守）】',
+    ' - 默认：omission / missing_element / state_error / layout_error → target=product；inaccurate / false_claim → target=description。',
+    ' - 若 false_claim 的根因是产品侧（控件缺失、状态不可辨、渲染错误、可访问性问题）→ root_cause=product 且 target=product。',
+    ' - 若 missing_element 只是观察员自己没看到 → root_cause=observer 且 target=description。',
+    ' - 拿不准根因时 root_cause=ambiguous，并沿用 kind 默认 target。',
+    ' - **混合问题必须拆成多条**（描述失误与产品缺陷不要写进同一条），每条只归一个 target。',
     '',
     '=== 观察员A JSON ===',
     aJson,
@@ -208,12 +234,34 @@ export function extractJson<T = unknown>(text: string): T | undefined {
   }
 }
 
+/** Q5 默认路由：kind → target（root_cause 可改判）。 */
+export function defaultTargetForKind(kind: VisionProblem['kind']): ProblemTarget {
+  return kind === 'inaccurate' || kind === 'false_claim' ? 'description' : 'product'
+}
+
+/**
+ * Q5 归一：target 缺失/非法时按 kind 推导；root_cause 明确时改判（observer→description、product→product）。
+ * 导出供修复协调器的白名单复核复用。
+ */
+export function normalizeTarget(kind: VisionProblem['kind'], rawTarget: unknown, rootCause: ProblemRootCause): ProblemTarget {
+  if (rootCause === 'observer') return 'description'
+  if (rootCause === 'product') return 'product'
+  if (rawTarget === 'description' || rawTarget === 'product') return rawTarget
+  return defaultTargetForKind(kind)
+}
+
+/** 修复白名单：只有 target='product' 才允许组装 RepairTask(source='vision') 交编程模型。 */
+export function productProblems(problems: VisionProblem[]): VisionProblem[] {
+  return problems.filter((p) => p.target === 'product')
+}
+
 /** 解析对照审核输出 → 问题清单（非法/缺字段的条目丢弃，只保留可指认的问题）。 */
 export function parseCompareOutput(text: string): { problems: VisionProblem[]; corrections: unknown[]; confidence?: string; parsed: boolean } {
   const json = extractJson<{ problems?: unknown; corrections?: unknown; confidence?: unknown }>(text)
   if (!json) return { problems: [], corrections: [], parsed: false }
   const kinds = ['omission', 'inaccurate', 'false_claim', 'missing_element', 'state_error', 'layout_error']
-  const sevs = ['high', 'medium', 'low']
+  const sevs = ['low', 'medium', 'high', 'critical']
+  const rootCauses = ['observer', 'product', 'ambiguous']
   const problems: VisionProblem[] = (Array.isArray(json.problems) ? json.problems : [])
     .map((raw): VisionProblem | undefined => {
       const p = raw as Record<string, unknown>
@@ -225,9 +273,13 @@ export function parseCompareOutput(text: string): { problems: VisionProblem[]; c
       const bbox = Array.isArray(bboxRaw) && bboxRaw.length === 4 && bboxRaw.every((n) => typeof n === 'number')
         ? (bboxRaw as [number, number, number, number])
         : null
+      const rootCause = (rootCauses.includes(String(p.root_cause)) ? String(p.root_cause) : 'ambiguous') as ProblemRootCause
+      const typedKind = kind as VisionProblem['kind']
       return {
-        kind: kind as VisionProblem['kind'],
+        kind: typedKind,
         severity: (sevs.includes(severity) ? severity : 'medium') as VisionProblem['severity'],
+        target: normalizeTarget(typedKind, p.target, rootCause),
+        root_cause: rootCause,
         claim,
         bbox,
         evidence: String(p.evidence || '').slice(0, 400),
@@ -244,14 +296,15 @@ export function parseCompareOutput(text: string): { problems: VisionProblem[]; c
   }
 }
 
-/** 摘要（≤400 字）：两份描述长度 + 问题计数/分档 + 前两条问题原文。 */
+/** 摘要（≤400 字）：两份描述长度 + 问题计数（含 product/description 分档）+ 前两条产品侧问题。 */
 export function digestVisionReport(aText: string, bText: string, problems: VisionProblem[]): { digest: string; flagged: boolean } {
-  const high = problems.filter((p) => p.severity === 'high').length
+  const product = productProblems(problems)
+  const high = product.filter((p) => p.severity === 'high' || p.severity === 'critical').length
   const flagged = problems.length > 0
-  const top = problems.slice(0, 2).map((p) => `[${p.severity}/${p.kind}] ${p.claim}`).join(' ｜ ')
+  const top = product.slice(0, 2).map((p) => `[${p.severity}/${p.kind}] ${p.claim}`).join(' ｜ ')
   const digest = [
     `视觉审计: A/B 盲描述 ${aText.length}/${bText.length} 字`,
-    `问题 ${problems.length} 条（high ${high}）`,
+    `问题 ${problems.length} 条（产品侧 ${product.length}，high/critical ${high}；描述质量 ${problems.length - product.length} 不回喂代码）`,
     top ? `要点: ${top}` : '',
   ].filter(Boolean).join('；').slice(0, 400)
   return { digest, flagged }
@@ -363,7 +416,7 @@ export async function runVisionAuditGate(input: {
       '# 视觉审计报告（L1：盲描述A + 盲描述B + 对照审核）', '',
       `> 生成：${new Date().toISOString()} | A=${roles.a.model}（${roles.a.channelName}）| B=${roles.b.model}（${roles.b.channelName}）| 对照审核=${roles.compare.model}（${roles.compare.channelName}）`,
       `> 修复者角色：${VISION_FIXER_ROLE}（Bloma 编程模型；本报告只产出问题，不判败、不改代码）`,
-      `> 结论：${flagged ? `对照审核提出 ${compare.problems.length} 条问题（high ${compare.problems.filter((p) => p.severity === 'high').length}）` : '两份描述经对照审核未发现实质问题'}`, '',
+      `> 结论：${flagged ? `对照审核提出 ${compare.problems.length} 条问题（产品侧 ${compare.problems.filter((p) => p.target === 'product').length} / 描述质量 ${compare.problems.filter((p) => p.target === 'description').length}）` : '两份描述经对照审核未发现实质问题'}`, '',
       '## 观察员A 盲描述（JSON）', '```json', a, '```', '',
       '## 观察员B 盲描述（JSON）', '```json', b, '```', '',
       '## 对照审核（二次识别 + 真实性核查）', '```json', compareRaw, '```', '',

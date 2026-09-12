@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import {
   visionAuditEnabled, deriveChatBaseUrl, resolveVisionRoles, resolveVisionPair, pickVisionEndpoint,
   BLIND_DESCRIBE_PROMPT, buildComparePrompt, extractJson, parseCompareOutput, digestVisionReport,
-  parseMaxTokensCap,
+  parseMaxTokensCap, productProblems, normalizeTarget, defaultTargetForKind,
   type ChannelLike, type VisionProblem,
 } from '../../../main/coding/vision-audit-gate'
 
@@ -101,13 +101,16 @@ describe('盲描述与对照审核提示词', () => {
     expect(BLIND_DESCRIBE_PROMPT).toContain('禁止评价好坏')
     expect(BLIND_DESCRIBE_PROMPT).toContain('uncertain')
   })
-  it('对照审核内嵌两份独立描述，并要求以原图为准、拿不准降级不删', () => {
+  it('对照审核内嵌两份独立描述，并要求以原图为准、拿不准降级不删、混合问题拆条', () => {
     const p = buildComparePrompt('A-JSON', 'B-JSON')
     expect(p).toContain('A-JSON')
     expect(p).toContain('B-JSON')
     expect(p).toContain('problems')
     expect(p).toContain('以原图为准')
     expect(p).toContain('拿不准的降 severity，不要删')
+    expect(p).toContain('target')
+    expect(p).toContain('root_cause')
+    expect(p).toContain('混合问题必须拆成多条')
   })
 })
 
@@ -122,7 +125,7 @@ describe('extractJson（容忍围栏/噪声）', () => {
   })
 })
 
-describe('parseCompareOutput（问题 JSON → VisionProblem[]）', () => {
+describe('parseCompareOutput（问题 JSON → VisionProblem[] + Q5 路由）', () => {
   const good = JSON.stringify({
     problems: [
       { kind: 'omission', severity: 'high', claim: '缺少保存按钮', bbox: [10, 20, 80, 32], evidence: '右上角无按钮', suggest_fix: '提供保存入口' },
@@ -143,6 +146,29 @@ describe('parseCompareOutput（问题 JSON → VisionProblem[]）', () => {
     expect(out.problems[1].bbox).toBeNull()
     expect(out.confidence).toBe('medium')
   })
+  it('Q5 默认推导：omission→product、false_claim→description、root_cause 缺省 ambiguous', () => {
+    const out = parseCompareOutput(good)
+    expect(out.problems[0]).toMatchObject({ target: 'product', root_cause: 'ambiguous' })
+    expect(out.problems[1]).toMatchObject({ target: 'description', root_cause: 'ambiguous' })
+  })
+  it('Q5 root_cause 改判：product 升级 false_claim；observer 降级 missing_element', () => {
+    const out = parseCompareOutput(JSON.stringify({
+      problems: [
+        { kind: 'false_claim', severity: 'high', claim: '状态不可辨导致误述', root_cause: 'product' },
+        { kind: 'missing_element', severity: 'medium', claim: '观察员漏看了一个图标', root_cause: 'observer' },
+        { kind: 'missing_element', severity: 'high', claim: '产品缺少导出入口', root_cause: 'product' },
+      ],
+    }))
+    expect(out.problems[0]).toMatchObject({ target: 'product', root_cause: 'product' })
+    expect(out.problems[1]).toMatchObject({ target: 'description', root_cause: 'observer' })
+    expect(out.problems[2]).toMatchObject({ target: 'product', root_cause: 'product' })
+  })
+  it('Q5 target 非法值→按 kind 推导；critical 档保留', () => {
+    const out = parseCompareOutput(JSON.stringify({
+      problems: [{ kind: 'layout_error', severity: 'critical', target: '乱七八糟', claim: '主区被遮挡' }],
+    }))
+    expect(out.problems[0]).toMatchObject({ target: 'product', severity: 'critical' })
+  })
   it('非 JSON 输出 → parsed=false 且空问题（不猜）', () => {
     const out = parseCompareOutput('抱歉我没法分析')
     expect(out.parsed).toBe(false)
@@ -154,16 +180,31 @@ describe('parseCompareOutput（问题 JSON → VisionProblem[]）', () => {
   })
 })
 
+describe('Q5 修复白名单（productProblems）', () => {
+  it('只有 target=product 进编程模型；description 不回喂代码', () => {
+    const out = parseCompareOutput(JSON.stringify({
+      problems: [
+        { kind: 'omission', severity: 'high', claim: '缺导出按钮' },
+        { kind: 'inaccurate', severity: 'low', claim: '颜色描述偏差' },
+        { kind: 'false_claim', severity: 'high', claim: '状态被误述', root_cause: 'product' },
+      ],
+    }))
+    const product = productProblems(out.problems)
+    expect(product.map((p) => p.claim)).toEqual(['缺导出按钮', '状态被误述'])
+  })
+})
+
 describe('digestVisionReport（裁判摘要）', () => {
   const problems: VisionProblem[] = [
-    { kind: 'omission', severity: 'high', claim: '缺少保存按钮', bbox: null, evidence: '', suggest_fix: '' },
-    { kind: 'inaccurate', severity: 'low', claim: '颜色描述偏差', bbox: null, evidence: '', suggest_fix: '' },
+    { kind: 'omission', severity: 'high', target: 'product', root_cause: 'ambiguous', claim: '缺少保存按钮', bbox: null, evidence: '', suggest_fix: '' },
+    { kind: 'inaccurate', severity: 'low', target: 'description', root_cause: 'observer', claim: '颜色描述偏差', bbox: null, evidence: '', suggest_fix: '' },
   ]
-  it('有问题 → flagged，摘要含计数与 high 数、长度 ≤400', () => {
+  it('有问题 → flagged；摘要区分产品侧/描述质量，长度 ≤400', () => {
     const { digest, flagged } = digestVisionReport('a'.repeat(500), 'b'.repeat(300), problems)
     expect(flagged).toBe(true)
     expect(digest).toContain('问题 2 条')
-    expect(digest).toContain('high 1')
+    expect(digest).toContain('产品侧 1')
+    expect(digest).toContain('描述质量 1')
     expect(digest.length).toBeLessThanOrEqual(400)
   })
   it('无问题 → 不 flagged', () => {
