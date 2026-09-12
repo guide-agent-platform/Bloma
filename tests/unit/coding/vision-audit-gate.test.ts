@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import {
   visionAuditEnabled, deriveChatBaseUrl, resolveVisionPair, buildV2Prompt, digestVisionReport,
+  pickVisionEndpoint, parseMaxTokensCap,
   type ChannelLike,
 } from '../../../main/coding/vision-audit-gate'
 
@@ -97,5 +98,59 @@ describe('digestVisionReport（给裁判的紧凑证据）', () => {
   it('V2 三类全无 → 不 flagged', () => {
     const d = digestVisionReport('v1', '## 遗漏\n无\n## 不具体修正\n无\n## 不真实纠正\n无')
     expect(d.flagged).toBe(false)
+  })
+})
+
+const ZHIPU: ChannelLike = {
+  id: 'ch-zhipu', name: '智谱视觉', base_url: 'https://open.bigmodel.cn/api/paas/v4',
+  api_key: 'hex-zp', models: [{ id: 'glm-4v-flash', enabled: true }, { id: 'glm-4.6v', enabled: true }], enabled: true,
+}
+const DASHSCOPE: ChannelLike = {
+  id: 'ch-qwen', name: '通义千问', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  api_key: 'hex-qw', models: [{ id: 'qwen3-vl-flash', enabled: true }, { id: 'qwen3.8-flash', enabled: true }], enabled: true,
+}
+
+describe('角色偏好链（2026-09-12 分工：glm + qwen 视觉，ds 不参与视觉）', () => {
+  it('智谱(glm-4v-flash) + 通义千问(qwen3-vl-flash) → V1=glm、V2=qwen、跨渠道', () => {
+    const pair = resolveVisionPair([ZHIPU, DASHSCOPE], decrypt)
+    expect(pair).not.toBeNull()
+    expect(pair!.v1.model).toBe('glm-4v-flash')
+    expect(pair!.v1.channelName).toBe('智谱视觉')
+    expect(pair!.v2.model).toBe('qwen3-vl-flash')
+    expect(pair!.v2.channelName).toBe('通义千问')
+  })
+
+  it('V2 优先换渠道：两模型同渠道时仍能选出（次优解不判失败）', () => {
+    const both: ChannelLike = { ...ZHIPU, id: 'ch-both', name: '混合渠道', models: [{ id: 'glm-4v-flash', enabled: true }, { id: 'qwen3-vl-flash', enabled: true }] }
+    const pair = resolveVisionPair([both], decrypt)
+    expect(pair!.v1.model).toBe('glm-4v-flash')
+    expect(pair!.v2.model).toBe('qwen3-vl-flash')
+    expect(pair!.v1.channelName).toBe(pair!.v2.channelName)
+  })
+
+  it('ds 渠道不再被当作视觉来源（新配置下 V1 不落 ds）', () => {
+    // ds 含历史视觉模型，但智谱在链前 → V1 必须仍选 glm
+    const dsWithVision: ChannelLike = { ...DS, models: [{ id: 'deepseek-v4-flash-vision-exp', enabled: true }] }
+    const pair = resolveVisionPair([dsWithVision, ZHIPU, DASHSCOPE], decrypt)
+    expect(pair!.v1.model).toBe('glm-4v-flash')
+    expect(pair!.v2.model).toBe('qwen3-vl-flash')
+  })
+
+  it('pickVisionEndpoint：excludeChannelId 生效（错开渠道）', () => {
+    const hit = pickVisionEndpoint([ZHIPU, DASHSCOPE], ['qwen3-vl-flash'], ZHIPU.id)
+    expect(hit?.channel.id).toBe('ch-qwen')
+    expect(pickVisionEndpoint([ZHIPU, DASHSCOPE], ['qwen3-vl-flash'], 'ch-qwen')).toBeUndefined()
+  })
+})
+
+describe('max_tokens 上限自适应（跨厂商差异）', () => {
+  it('解析智谱实测报错里的上限 1024', () => {
+    expect(parseMaxTokensCap('{"error":{"code":"1210","message":"max_tokens参数非法：限制数值范围[1,1024]"}}')).toBe(1024)
+  })
+  it('--  其它措辞（英文/方括号）同样解析', () => {
+    expect(parseMaxTokensCap('max_tokens must be in range [1, 4096]')).toBe(4096)
+  })
+  it('解析不到则返回 undefined（不猜数值）', () => {
+    expect(parseMaxTokensCap('{"error":"model not found"}')).toBeUndefined()
   })
 })

@@ -21,8 +21,22 @@ import { listEnabledRawChannels, decryptApiKey } from '../channel-manager'
 import { writeVisionAuditDocument } from '../document-engine'
 import { chromium } from 'playwright'
 
-export const VISION_V1_MODEL = process.env.BLOMA_VISION_V1_MODEL || 'deepseek-v4-flash-vision-exp'
-export const VISION_V2_MODEL = process.env.BLOMA_VISION_V2_MODEL || 'qwen-vl-max'
+/** 显式覆盖（空 = 走角色偏好链）。保留环境变量入口，便于临时切模型而不改代码。 */
+export const VISION_V1_MODEL = process.env.BLOMA_VISION_V1_MODEL || ''
+export const VISION_V2_MODEL = process.env.BLOMA_VISION_V2_MODEL || ''
+
+/**
+ * 角色偏好链（按序尝试，从启用渠道表里解析；env 覆盖优先）。
+ *
+ * 设计意图（用户 2026-09-12 分工）：**视觉理解用 glm + qwen，ds 只负责写程序**。
+ *  - V1 观察员（只描述）偏好智谱 glm 系快模型；
+ *  - V2 异构审核员（只挑错）偏好通义千问 qwen-vl 系快模型；
+ *  - 两者默认落在**不同厂商**，且 V2 优先选与 V1 不同的渠道（异构互证的前提是盲区不共享）。
+ *  - 链末保留历史默认（ds 视觉实验模型）：仅为向后兼容——旧渠道表里只有它时仍能跑；
+ *    新配置（glm/qwen 就绪）下永远不会选到它。
+ */
+export const V1_PREFERENCE = ['glm-4v-flash', 'glm-4.6v', 'deepseek-v4-flash-vision-exp']
+export const V2_PREFERENCE = ['qwen3-vl-flash', 'qwen-vl-max', 'qwen3-vl-plus']
 
 export interface ChannelLike {
   id: string
@@ -69,20 +83,41 @@ function hasModel(channel: ChannelLike, model: string): boolean {
   return ids.includes(model) || ids.some((id) => id.includes(model))
 }
 
-/** 纯挑选：从渠道表解析 V1/V2 端点（解密函数注入，测试不碰 safeStorage）。缺任一 → null。 */
+/** 按候选链挑一个可用端点；excludeChannelId 用于优先错开厂商渠道（拿不到再放开）。 */
+export function pickVisionEndpoint(
+  channels: ChannelLike[],
+  candidates: string[],
+  excludeChannelId?: string,
+): { channel: ChannelLike; model: string } | undefined {
+  for (const model of candidates) {
+    if (!model) continue
+    const hit = channels.find((c) => c.enabled && c.id !== excludeChannelId && hasModel(c, model))
+    if (hit) return { channel: hit, model }
+  }
+  return undefined
+}
+
+/**
+ * 纯挑选：从渠道表解析 V1/V2 端点（解密函数注入，测试不碰 safeStorage）。缺任一 → null。
+ * 选择顺序：env 显式指定 → 角色偏好链；V2 优先与 V1 不同渠道（跨厂商异构）。
+ */
 export function resolveVisionPair(channels: ChannelLike[], decrypt: (hex: string) => string): { v1: VisionEndpoint; v2: VisionEndpoint } | null {
-  const find = (model: string): ChannelLike | undefined =>
-    channels.find((c) => c.enabled && hasModel(c, model))
-  const v1c = find(VISION_V1_MODEL)
-  const v2c = find(VISION_V2_MODEL)
-  if (!v1c || !v2c) return null
-  const mk = (c: ChannelLike, model: string): VisionEndpoint => ({
-    chatBase: deriveChatBaseUrl(c.base_url),
-    apiKey: decrypt(c.api_key),
+  const v1Candidates = VISION_V1_MODEL ? [VISION_V1_MODEL] : V1_PREFERENCE
+  const v2Candidates = VISION_V2_MODEL ? [VISION_V2_MODEL] : V2_PREFERENCE
+
+  const v1 = pickVisionEndpoint(channels, v1Candidates)
+  if (!v1) return null
+  // V2 优先换渠道（跨厂商）；同渠道是次优解（说明只剩一家可用），不直接判失败
+  const v2 = pickVisionEndpoint(channels, v2Candidates, v1.channel.id) ?? pickVisionEndpoint(channels, v2Candidates)
+  if (!v2) return null
+
+  const mk = ({ channel, model }: { channel: ChannelLike; model: string }): VisionEndpoint => ({
+    chatBase: deriveChatBaseUrl(channel.base_url),
+    apiKey: decrypt(channel.api_key),
     model,
-    channelName: c.name,
+    channelName: channel.name,
   })
-  return { v1: mk(v1c, VISION_V1_MODEL), v2: mk(v2c, VISION_V2_MODEL) }
+  return { v1: mk(v1), v2: mk(v2) }
 }
 
 const V1_PROMPT = [
@@ -133,19 +168,46 @@ export function digestVisionReport(v1: string, v2: string): { digest: string; fl
   return { digest, flagged }
 }
 
+/** 视觉调用 max_tokens 缺省（env 可覆盖）；部分厂商上限更小，见 parseMaxTokensCap 自适应降档。 */
+const VISION_MAX_TOKENS = Number(process.env.BLOMA_VISION_MAX_TOKENS || 8192)
+
+/**
+ * 从 400 报错里解析厂商声明的 max_tokens 上限。
+ * 实测样例（2026-09-12 智谱 glm-4v-flash）：
+ *   {"error":{"code":"1210","message":"max_tokens参数非法：限制数值范围[1,1024]"}} → 1024
+ * 解析失败返回 undefined（调用方保持原值，不猜）。
+ */
+export function parseMaxTokensCap(errorText: string): number | undefined {
+  // ① 括号范围 [1, N]（中英通用：限制数值范围[1,1024] / range [1, 4096]）
+  const range = errorText.match(/\[\s*\d+\s*,\s*(\d{2,6})\s*\]/)
+  // ② 兜底：max_tokens 关键词后第一个 ≥2 位数字（如 "max_tokens limit is 2048"）
+  const afterKw = errorText.match(/max_tokens[^\d]{0,24}(\d{2,6})/i)
+  const cap = Number(range?.[1] ?? afterKw?.[1])
+  return Number.isFinite(cap) && cap > 0 ? cap : undefined
+}
+
 async function chatVision(ep: VisionEndpoint, instruction: string, imagePng: Buffer, timeoutMs: number): Promise<string> {
-  const resp = await fetch(`${ep.chatBase}/chat/completions`, {
+  const post = async (maxTokens: number) => fetch(`${ep.chatBase}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ep.apiKey}` },
     signal: AbortSignal.timeout(timeoutMs),
     body: JSON.stringify({
-      model: ep.model, max_tokens: 8192,
+      model: ep.model, max_tokens: maxTokens,
       messages: [{ role: 'user', content: [
         { type: 'text', text: instruction },
         { type: 'image_url', image_url: { url: `data:image/png;base64,${imagePng.toString('base64')}` } },
       ] }],
     }),
   })
+
+  let resp = await post(VISION_MAX_TOKENS)
+  if (resp.status === 400 && VISION_MAX_TOKENS > 1024) {
+    // 厂商 max_tokens 上限差异（glm-4v-flash=1024）：解析上限后降档重试一次，不猜数值
+    const bodyText = await resp.text().catch(() => '')
+    const cap = parseMaxTokensCap(bodyText)
+    if (cap && cap < VISION_MAX_TOKENS) resp = await post(cap)
+    else throw new Error(`${ep.model} HTTP 400: ${bodyText.slice(0, 200)}`)
+  }
   if (!resp.ok) throw new Error(`${ep.model} HTTP ${resp.status}: ${(await resp.text().catch(() => '')).slice(0, 200)}`)
   const json = await resp.json() as { choices?: { message?: { content?: string } }[] }
   const text = json.choices?.[0]?.message?.content || ''
