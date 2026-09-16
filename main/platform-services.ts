@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { createServer } from 'node:net'
 import type {
   AnalyticsTrackInput,
@@ -509,7 +509,13 @@ export async function createSnapshot(input: SnapshotCreateInput): Promise<Snapsh
   const documentsArchivePath = input.include_documents ? `${snapshotRoot}/documents` : undefined
 
   mkdirSync(snapshotRoot, { recursive: true })
-  cpSync(project.root_path, filesArchivePath, { recursive: true, force: true })
+  cpSync(project.root_path, filesArchivePath, {
+    recursive: true,
+    force: true,
+    // Phase 10 W1-1：归档排除受保护顶层目录（.git 版本史 / data-backups 备份）——
+    // 回滚不回退它们（见 restoreSnapshotFiles 的挪出/挪回）；不存在时零影响。
+    filter: (src: string) => !isPreservedToplevel(project.root_path, src),
+  })
   // 文档冻结（T7）：documents 目录整份归档（prd.json/decisions.md/sketch.html 都在其中；
   // T2 落盘即导出保证 decisions.md 不是过期聚合）。目录尚不存在（如草图阶段的早期快照）
   // 时归档路径置 undefined——metadata 不谎报有归档，回看/回滚据此如实提示。
@@ -829,6 +835,16 @@ export function restoreAsVersionEnabled(): boolean {
  * 恢复文档归档（如有）→ 更新 current_snapshot_id 指针。
  * rollbackSnapshot（完整事务）与启动对账 T1（崩溃残留恢复，不重启沙箱）共用。
  */
+/** Phase 10 W1-1：快照/恢复双侧排除的顶层目录（基础设施常开，与 BLOMA_PROJECT_GIT 开关无关）。 */
+export const SNAPSHOT_PRESERVED_TOPLEVEL = ['.git', 'data-backups'] as const
+
+function isPreservedToplevel(rootPath: string, src: string): boolean {
+  const rel = relative(rootPath, src)
+  if (!rel || rel.startsWith('..')) return false
+  const first = rel.split(sep)[0]
+  return (SNAPSHOT_PRESERVED_TOPLEVEL as readonly string[]).includes(first)
+}
+
 export async function restoreSnapshotFiles(input: {
   request_id: string
   project_id: string
@@ -849,9 +865,27 @@ export async function restoreSnapshotFiles(input: {
   // 恢复项目文件（先清空再复制，确保与快照完全一致）。
   // maxRetries/retryDelay 兜底瞬态锁（杀毒/索引器/句柄异步释放）：
   // Node 原生对 EBUSY/EPERM/ENOTEMPTY 自动重试，避免一次撞锁让整个回滚失败。
-  rmSync(project.root_path, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
-  mkdirSync(project.root_path, { recursive: true })
-  cpSync(target.files_archive_path, project.root_path, { recursive: true, force: true })
+  // Phase 10 W1-1：恢复前把受保护顶层目录挪出（同盘 rename 零拷贝）——.git 是产物
+  // 版本史（回滚不回退历史）、data-backups 是回滚前用户数据备份（W1-2）。归档本就
+  // 不含它们（createSnapshot filter）；挪回前若归档带回同名目录（历史遗留）让位删除。
+  const preserved: Array<{ temp: string; dest: string }> = []
+  for (const name of SNAPSHOT_PRESERVED_TOPLEVEL) {
+    const dest = join(project.root_path, name)
+    if (!existsSync(dest)) continue
+    const temp = `${project.root_path}.__preserve_${name}_${Date.now()}`
+    renameSync(dest, temp)
+    preserved.push({ temp, dest })
+  }
+  try {
+    rmSync(project.root_path, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+    mkdirSync(project.root_path, { recursive: true })
+    cpSync(target.files_archive_path, project.root_path, { recursive: true, force: true })
+  } finally {
+    for (const p of preserved) {
+      if (existsSync(p.dest)) rmSync(p.dest, { recursive: true, force: true })
+      renameSync(p.temp, p.dest)
+    }
+  }
 
   // 恢复文档（如果有）
   if (target.documents_archive_path && existsSync(target.documents_archive_path)) {

@@ -40,6 +40,7 @@ import { runSemanticJudgeReview } from '../judge-semantic'
 import { loadPromptOverride } from '../prompt-config'
 import { assertToolAllowed } from '../permission-service'
 import { recordDecision } from '../decision-log'
+import { commitProjectState } from './project-git'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from '../recovery-service'
 import { readPrimaryIntent, recordSessionActivity } from '../session-service'
 import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, preflightEnabled, narrationEventsEnabled, loopProgressNudgeEnabled, taskWorkflowEnabled, compactToolEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../agent-loop'
@@ -603,6 +604,16 @@ export async function runMvpTask(input: MvpTaskInput): Promise<MvpTaskResult> {
   return runMvpViaAgentLoop(input, await tryResolveAgentLoop(input))
 }
 
+/** Phase 10 W1-1 接线：产物 git 生命周期提交（fail-open；跳过仅记 decision，不阻塞主链路）。 */
+function commitProjectLifecycle(projectId: string, sessionId: string, kind: string, summary: string): void {
+  try {
+    const r = commitProjectState(findProject(projectId).root_path, { kind, summary })
+    if (!r.ok && r.reason && r.reason !== 'disabled' && r.reason !== 'nothing_to_commit') {
+      recordDecision({ project_id: projectId, session_id: sessionId, entry: { type: 'project_git', title: '产物 git 提交跳过', why: `fail-open：${r.reason}`, detail: { kind, reason: r.reason } } })
+    }
+  } catch { /* fail-open：绝不阻塞主链路 */ }
+}
+
 /**
  * MVP 产物就绪后的交付尾巴（权限门 → mvp 快照 → mvp_delivered 埋点 → testing →
  * mvp_ready），管道路径与 Agent Loop 路径共用，保证两条路的检查点语义一致。
@@ -623,6 +634,8 @@ async function finalizeMvpDelivery(
     include_documents: true,
     health_status: 'healthy',
   })
+  // Phase 10 W1-1：产物 git 交付点提交（首次 mvp / 迭代交付两态）
+  commitProjectLifecycle(input.project_id, input.session_id, snapshotKind === 'mvp' ? 'mvp_delivered' : 'iteration_delivered', `交付快照 ${snapshot.snapshot_id.slice(0, 8)}（${detail.snapshotSummary}）`)
 
   // 迭代快照不记 mvp_delivered（那是首次交付 MVP 的埋点；点选纠错的 point_correction 已在 ipc.ts 记录）
   if (snapshotKind === 'mvp') {
@@ -2555,6 +2568,8 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
   throwIfAborted(input.signal)
   updateProject(input.project_id, { current_stage: 'testing' })
   publish(input, 'stage_changed', { stage: 'testing' })
+  // Phase 10 W1-1：生成轮结束态提交（终验开始前，首个生命周期提交点）
+  commitProjectLifecycle(input.project_id, input.session_id, 'testing_begin', 'Agent Loop 生成轮结束，终验开始')
 
   let testResult = await runGwtWithApiContract({ project_id: input.project_id, session_id: input.session_id, preview_url: input.preview_url })
   throwIfAborted(input.signal)
@@ -2729,6 +2744,8 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
 
   const round = used + 1
   updateProject(input.project_id, { test_repair_count: round })
+  // Phase 10 W1-1：修复轮前提交（修复前状态入库）
+  commitProjectLifecycle(input.project_id, input.session_id, 'repair_begin', `定向修复轮（第 ${round}/${budget} 轮，${tasks.length} 项）开始`)
   recordDecision({
     project_id: input.project_id,
     session_id: input.session_id,
@@ -2776,6 +2793,8 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
   // 修复轮异常（渠道不可用 / loop 抛错等）：不再重验，直接走现状熔断
   if (result.status !== 'completed') return testResult
   throwIfAborted(input.signal)
+  // Phase 10 W1-1：修复轮结束提交（修复后状态入库，后续重验不丢中间态）
+  commitProjectLifecycle(input.project_id, input.session_id, 'repair_loop_end', `定向修复轮（第 ${round}/${budget} 轮）结束`)
 
   // B2（P0-B，2026-09-11 审计案 35c1a633）：零编辑守卫——修复轮零 write/edit 即不计轮。
   // 旧路径：17 次全读 + 空口完成总结照样 status=completed → 全量重验逐条相同（initial=
@@ -2962,6 +2981,8 @@ async function runBlockedTestRepair(input: {
 
   const round = used + 1
   updateProject(input.project_id, { test_repair_count: round })
+  // Phase 10 W1-1：入口 B（继续修）修复轮前提交
+  commitProjectLifecycle(input.project_id, input.session_id, 'repair_begin', `继续修定向修复轮（第 ${round}/${budget} 轮，${tasks.length} 项）开始`)
   recordDecision({
     project_id: input.project_id,
     session_id: input.session_id,

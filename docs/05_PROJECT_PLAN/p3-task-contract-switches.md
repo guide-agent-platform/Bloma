@@ -324,3 +324,13 @@
 - 单测：guide-loop 新文件 7 例（off 字节锁/决策→卡照旧/自由对话收口/三连提醒+清零/失败回退/工具校验+单次预算/测试报告事实工具）。
 - 已知 v1 取舍（登记）：决策路径下 loop 旁白与路由块 reply 可能双气泡（提示词已约束不重复，狗粮观察）；free_chat 计数为内存态（跨重启丢失，防线只防当场不收敛）。
 - 狗粮：`setx BLOMA_GUIDE_LOOP 1` + 重启 Bloma；预期体验：向导可闲聊/被追问/自己查 PRD 与测试报告再问，收敛卡时机由模型判断。
+
+## §31 Phase 10 W1-1——产物 git 化（2026-09-16，咨询 G 收口·真实项目交付体系）
+
+| 开关 | 控制面 | 缺省 | off/未设 | '1'/'true' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_PROJECT_GIT` | 产物工作区 git 版本管理（host 单点执行，loop 工具面无 git 操作） | **off** | 不 init 不 commit（字节级现状） | `ensureProjectRepo` 幂等 init（.gitignore=data//data-backups//node_modules//dist//*.log/.DS_Store + autocrlf=false + .gitattributes LF + 无全局身份时仓库局部身份兜底）+ `commitProjectState` 生命周期提交（结构化 message `[bloma:kind] summary`）；接线点：终验开始（testing_begin）/交付（mvp_delivered·iteration_delivered）/修复轮前后（repair_begin·repair_loop_end，入口 A/B 双接线）/熔断回滚前后（rollback_pre·rollback_post，recovery-service）——fail-open：git 缺失/失败返回 reason 记 decision project_git 后跳过，绝不阻塞主链路 | `main/coding/project-git.ts` + 编排器接线（commitProjectLifecycle ≤15 行/点）+ `main/recovery-service.ts` circuitBreakRollback |
+
+- **基础设施常开（与本开关无关）**：快照/恢复双侧排除 `.git`/`data-backups`（`SNAPSHOT_PRESERVED_TOPLEVEL`，platform-services）——归档 cpSync filter 排除 + 恢复前挪出/恢复后挪回（同盘 rename）+ finally 兜底；回滚不回退版本史与备份；目录不存在时行为字节级不变。
+- 单测：project-git 新文件 9 例（开关三态/off 不建 .git/root_missing fail-open/幂等 init+gitignore 手写行保留+autocrlf/commit+hash+nothing_to_commit+summary 压平/无全局身份局部兜底可提交/data 与 data-backups 被 ignore/归档排除+恢复保留+data 仍精确回滚+挪出零残留——后组不依赖 git 二进制）。
+- 狗粮：`setx BLOMA_PROJECT_GIT 1` + 重启 Bloma；观察点：项目目录出现 .git、决策日志/decisions.md 出现 [bloma:*] 提交、回滚后 git log 连续。

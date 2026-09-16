@@ -9,6 +9,7 @@ import { hasInteractiveEntry } from './gwt-service'
 import { listSnapshots, restoreSnapshotFiles, rollbackSnapshot } from './platform-services'
 import { findProject, listProjects, updateProject } from './project-service'
 import { isHtmlDocument } from './sketch-engine-llm'
+import { commitProjectState } from './coding/project-git'
 
 /**
  * 恢复服务（长期型改造 T1 + T5）——崩溃对账与熔断回滚共用的状态收敛逻辑。
@@ -265,6 +266,10 @@ export async function circuitBreakRollback(input: CircuitBreakInput): Promise<Ci
   const healthy = latestHealthySnapshot(input.project_id)
   if (!healthy) return { rolled_back: false }
 
+  // Phase 10 W1-1：回滚前提交（失败态入库；fail-open 模块内部永不抛错）。恢复原语
+  // 排除 .git（SNAPSHOT_PRESERVED_TOPLEVEL），版本史跨回滚连续累积。
+  commitProjectState(project.root_path, { kind: 'rollback_pre', summary: `熔断回滚前（${input.reason.slice(0, 80)}）` })
+
   // 话术口径（狗粮 52f19ab4：0 次修复轮也报「多次都没有成功」）——修复次数在清零前
   // 如实读取；「回到之前的版本」在首次生成时语义错位，改用 Phase 7 已确立的
   // 「保存的版本」术语（恢复到最近保存的快照，首次/迭代两态均如实）。
@@ -288,6 +293,8 @@ export async function circuitBreakRollback(input: CircuitBreakInput): Promise<Ci
         // reason 受 api-spec 枚举约束，取熔断专用值；完整语境在决策日志里
         reason: 'repair_fuse',
       })
+      // Phase 10 W1-1：回滚后提交（恢复态入库——重演在版本史里可见为一次反向提交）
+      commitProjectState(project.root_path, { kind: 'rollback_post', summary: `熔断回滚完成（恢复到 ${healthy.snapshot_id.slice(0, 8)}）` })
     } catch (error) {
       lastError = error
     }
