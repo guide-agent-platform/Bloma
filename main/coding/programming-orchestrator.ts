@@ -42,7 +42,8 @@ import { assertToolAllowed } from '../permission-service'
 import { recordDecision } from '../decision-log'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from '../recovery-service'
 import { readPrimaryIntent, recordSessionActivity } from '../session-service'
-import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, preflightEnabled, narrationEventsEnabled, loopProgressNudgeEnabled, taskWorkflowEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../agent-loop'
+import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, preflightEnabled, narrationEventsEnabled, loopProgressNudgeEnabled, taskWorkflowEnabled, compactToolEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../agent-loop'
+import { browserToolsEnabled } from './preview-browser'
 import { deliveryStatusEnabled, recordDeliveryStatus, buildDeliveryPresentation, renderCircuitFailureNote, renderDeliveryBody, featureIdFromScenario } from './delivery-status'
 import { isDegenerateText } from './output-integrity'
 import { checkApiContract } from './api-contract'
@@ -1797,6 +1798,27 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
         : '数据留存类需求（保存/历史/记录/收藏/刷新或重开后仍在）一律用后端持久化：server/routes/ 路由 + ctx.readData/writeData 落 data/ 目录，' +
           '禁止 localStorage/sessionStorage 存业务数据——PRD 说「刷新后仍在」不构成 localStorage 例外的理由，后端持久化同样满足且必须用后者；') +
     'out_of_scope 内的功能一律不做；编辑校验失败的错误信息要读完再改。',
+    '',
+    // W1（Phase 10，2026-09-16，同步 Proma Browser工具族）：预览视觉检查契约。
+    // 仅 BLOMA_BROWSER_TOOLS=on 时注入（工具同步注册）；off 时零注入字节级现状。
+    ...(browserToolsEnabled()
+      ? [
+          '【预览视觉检查】preview_* 浏览器工具可驱动真实渲染的产物页面（同源限制，仅预览源）：',
+          '- UI 类修复优先「改前 preview_observe 看结构 → 改后 preview_navigate+preview_observe/preview_click 验证」，不要只凭 GWT 文本断言下结论；',
+          '- 点击/输入类行为用 preview_click/preview_fill 实际走一遍（带 wait_for 等动态渲染），配套 preview_extract 取业务结果；',
+          '- 页面报错优先看工具返回里的「最近控制台错误」；截图 preview_screenshot 仅存档用，文本证据优先 observe/extract；',
+          '- 预览地址由 run_preview 提供；外部资源不可访问（须走 server/routes 同源代理，与 CSP 口径一致）；',
+          '- 浏览器证据与 GWT 断言互补不互替：收口仍以验证面（GWT/安全/契约）为准。',
+        ]
+      : []),
+    // W2（Phase 10，同步 Proma CompactContext）：显式压缩契约。仅 BLOMA_COMPACT_TOOL=on 时注入。
+    ...(compactToolEnabled()
+      ? [
+          '',
+          '【上下文压缩】完成一个大阶段（如某功能项全绿）或察觉历史过长时，可调用 compact_context 主动交接收缩窗口（保留近期原文与未闭环失败）；' +
+            '调用后本轮结束生效，无需重复调用；未完成阶段不要滥用（交接有损）。',
+        ]
+      : []),
     '',
     // 产物形态（PR-2 条件化）：工程骨架（带构建门禁）→ 模块化解禁（import 可选，
     // 构建期打包校验）；无骨架 → 维持 PR-1 前现状（单文件静态产物，不用 ESM）

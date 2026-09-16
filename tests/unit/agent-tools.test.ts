@@ -660,9 +660,14 @@ describe('agent-tools（PR2 L2）', () => {
 
 describe('web_research 工具面（闭环 PR5）', () => {
   it('仅 parent 可见：research/implement/explore 子代理无 web_research（防递归委派）', () => {
+    delete process.env.BLOMA_BROWSER_TOOLS
+    delete process.env.BLOMA_COMPACT_TOOL
+    delete process.env.BLOMA_API_TOOL
     const parentNames = buildAgentTools({ projectId: 'p' }).map((tool) => tool.name)
     expect(parentNames).toContain('web_research')
-    expect(parentNames).toHaveLength(17)
+    // W3（Phase 10）：find 只读工具无条件注册，基线 17→18；浏览器/压缩开关必须显式钉 off
+    // （并发测试文件共享 process.env，见 scrape 管道同款先例）
+    expect(parentNames).toHaveLength(18)
 
     for (const role of ['research', 'explore', 'implement', 'review', 'custom'] as const) {
       const names = buildAgentTools({ projectId: 'p', role }).map((tool) => tool.name)
@@ -684,6 +689,8 @@ describe('agent-tools D 系列（咨询 D：验证协议，2026-09-09）', () =>
     delete process.env.BLOMA_API_TOOL
     delete process.env.BLOMA_TOOL_EVIDENCE
     delete process.env.BLOMA_WRITE_GUARD
+    delete process.env.BLOMA_BROWSER_TOOLS
+    delete process.env.BLOMA_COMPACT_TOOL
   })
   afterEach(() => {
     restorePromaHome(originalPromaHome)
@@ -698,15 +705,15 @@ describe('agent-tools D 系列（咨询 D：验证协议，2026-09-09）', () =>
     else process.env.BLOMA_WRITE_GUARD = originalWriteGuard
   })
 
-  it('D1：开关 off 工具面=现状（无 run_api_contract_tests，parent 17 个）；on 注册且变 18', () => {
+  it('D1：开关 off 工具面=现状（无 run_api_contract_tests，parent 含 find 共 18 个）；on 注册且变 19', () => {
     const project = createProject({ request_id: 'req-d-reg', mode: 'quick' })
     const off = buildAgentTools({ projectId: project.project_id }).map((t) => t.name)
     expect(off).not.toContain('run_api_contract_tests')
-    expect(off).toHaveLength(17)
+    expect(off).toHaveLength(18)
     process.env.BLOMA_API_TOOL = '1'
     const on = buildAgentTools({ projectId: project.project_id }).map((t) => t.name)
     expect(on).toContain('run_api_contract_tests')
-    expect(on).toHaveLength(18)
+    expect(on).toHaveLength(19)
     // review 角色同样可用（只读验证面）
     const review = buildAgentTools({ projectId: project.project_id, role: 'review' }).map((t) => t.name)
     expect(review).toContain('run_api_contract_tests')

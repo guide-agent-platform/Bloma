@@ -16,7 +16,8 @@ import { checkApiContract } from './api-contract'
 import { runArtifactUiGate } from './artifact-ui-gate'
 import { getCachedStaticEvidence, setCachedStaticEvidence } from './evidence-cache'
 import { readPrdBackplane } from '../document-engine'
-import { withAbort, loopApiToolEnabled, toolEvidenceEnabled, writeGuardEnabled, preflightEnabled, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../agent-loop'
+import { withAbort, loopApiToolEnabled, toolEvidenceEnabled, writeGuardEnabled, preflightEnabled, compactToolEnabled, MAX_EXPLICIT_COMPACTIONS, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../agent-loop'
+import { browserToolsEnabled, buildPreviewBrowserTools } from './preview-browser'
 import {
   NET_FETCH_DEFAULT_CHARS,
   NET_FETCH_MAX_BYTES,
@@ -266,6 +267,20 @@ function collectProjectFiles(root: string, subDir = ''): string[] {
   }
   return out.sort()
 }
+
+/** W3（Phase 10）：find 工具的 glob→正则（支持 * 单段与 ** 跨目录；Windows 大小写不敏感）。 */
+function globToRegExp(pattern: string): RegExp {
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*\*\/?/g, '\u0000')
+    .replace(/\*/g, '[^/]*')
+    .replace(/\?/g, '[^/]')
+    .replace(/\u0000/g, '.*')
+  return new RegExp(`^${escaped}$`, 'i')
+}
+
+/** find 返回上限（与 LIST_ENTRY_LIMIT 同档）。 */
+const FIND_ENTRY_LIMIT = 100
 
 // =========================================================================
 // D 系列辅助（咨询 D，2026-09-09）：文件版本戳 / 验证状态行 / 版本登记
@@ -1329,9 +1344,72 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     },
   }
 
+  /** W2（Phase 10，同步 Proma CompactContext）：显式压缩——模型完成大阶段后主动交接口收缩窗口。
+ *  只置位请求标志（不直接动 messages——压缩必须在 loop 的安全点执行，与自动压缩同路径
+ *  同语义：交接 LLM/keep-recent/检查点恢复头/观测埋点全部复用）；不占修复预算与写入预算。 */
+  const compact_context: AgentLoopTool = {
+    name: 'compact_context',
+    description:
+      '主动压缩上下文：把已完成的工作交接成一段摘要并重置对话窗口（保留近期原文与未闭环失败信息）。适合刚完成一个大阶段、或察觉上下文过长影响跟踪时调用；本轮工具结果落盘后立即生效。',
+    input_schema: { type: 'object', properties: {} },
+    execute: async (_toolInput, ctx) => {
+      const used = ctx.state.explicit_compactions ?? 0
+      if (used >= MAX_EXPLICIT_COMPACTIONS) {
+        return {
+          output: `显式压缩已达上限（${MAX_EXPLICIT_COMPACTIONS} 次）。请基于当前上下文继续工作，或直接输出完成总结。`,
+          isError: true,
+        }
+      }
+      if (ctx.state.compact_requested) {
+        return { output: '已登记一次压缩，请勿重复调用；本轮结束后立即生效。' }
+      }
+      ctx.state.compact_requested = true
+      return {
+        output: `已登记压缩（第 ${used + 1}/${MAX_EXPLICIT_COMPACTIONS} 次显式压缩）：本轮工具结果落盘后立即执行，窗口重置为任务+交接文档+近期保留，未闭环失败会进恢复头。下一轮请依据恢复头继续。`,
+        detail: { registered: true },
+      }
+    },
+  }
+
+  /** W3（Phase 10，同步 Proma find）：glob 文件名搜索——list_files 看目录、grep 挖内容，
+   *  find 按模式定位文件（星号单段、双星跨目录，如所有 js 或 game-前缀模块）。只读并行五件套同档。 */
+  const find: AgentLoopTool = {
+    name: 'find',
+    parallelSafe: true,
+    description:
+      '按 glob 模式搜索项目文件名（如 "src/**/*.js"、"*.css"），返回相对路径（最多 100 条）。支持 * 单段通配与 ** 跨目录通配；路径匹配不区分大小写（Windows 语义）。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        pattern: { type: 'string', description: 'glob 模式，如 src/**/*.js 或 *.html' },
+        path: { type: 'string', description: '限定搜索的子目录（可选，缺省全项目）' },
+      },
+      required: ['pattern'],
+    },
+    execute: async (toolInput) => {
+      const project = findProject(projectId)
+      const pattern = String(toolInput.pattern ?? '').trim()
+      if (!pattern) return { output: '缺少 pattern 参数（glob 模式，如 src/**/*.js）。', isError: true }
+      let subDir = ''
+      if (typeof toolInput.path === 'string' && toolInput.path.trim()) {
+        const resolved = resolveInsideProject(project.root_path, toolInput.path)
+        if (!resolved.ok) return { output: resolved.error, isError: true }
+        subDir = resolved.rel
+      }
+      const matcher = globToRegExp(pattern)
+      const hits = collectProjectFiles(project.root_path, subDir).filter((rel) => matcher.test(rel))
+      if (hits.length === 0) {
+        return { output: `无匹配文件（模式 ${pattern}${subDir ? `，目录 ${subDir}/` : ''}）。可用 list_files 查看实际文件清单。` }
+      }
+      const shown = hits.slice(0, FIND_ENTRY_LIMIT)
+      const truncation = hits.length > shown.length ? `\n（共 ${hits.length} 个匹配，仅显示前 ${FIND_ENTRY_LIMIT} 个）` : ''
+      return { output: `匹配 ${hits.length} 个文件：\n${shown.join('\n')}${truncation}`, detail: { count: hits.length } }
+    },
+  }
+
   if (role === 'explore' || role === 'research') {
     // 只读角色：探索/调研不需要写文件或跑测试，但可查公网资料、可向主 agent 冒泡提问
-    return [read_file, list_files, grep, web_fetch, ask_delegation_question]
+    return [read_file, list_files, find, grep, web_fetch, ask_delegation_question]
   }
   // D1：API 契约验证工具按开关注册（off=工具面与现状字节级一致）
   const apiTools = loopApiToolEnabled() ? [run_api_contract_tests] : []
@@ -1339,18 +1417,23 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
   const preflightTools = preflightEnabled() ? [run_preflight] : []
   // W4-F3：修复控制窄入口——仅修复轮传入 writeScope 时注册（主 loop 无此工具）
   const repairControlTools = options.writeScope ? [repair_control] : []
+  // W1（Phase 10，预览浏览器工具族）：仅主 loop 注册（BLOMA_BROWSER_TOOLS 缺省 off）
+  const browserTools = browserToolsEnabled() ? buildPreviewBrowserTools(projectId) : []
+  // W2（Phase 10，显式压缩）：仅主 loop 注册（BLOMA_COMPACT_TOOL 缺省 off）
+  const compactTools = compactToolEnabled() ? [compact_context] : []
 
   if (role === 'review') {
     // 审查角色（m-12）：话术承诺「不直接修改」，工具面同步收窄——去掉 write_file/
     // edit_file（物理只读与话术一致，防提示词层面被诱导后真的落盘）；可跑预览/测试/
     // 扫描验证怀疑点，但不改产物
-    return [read_file, list_files, grep, web_fetch, run_preview, run_gwt_tests, run_security_scan, ...apiTools, ask_delegation_question]
+    return [read_file, list_files, find, grep, web_fetch, run_preview, run_gwt_tests, run_security_scan, ...apiTools, ask_delegation_question]
   }
   if (role !== 'parent') {
     // 子 agent（implement/custom）：全量 9 工具 + ask 冒泡；无委派/代答/续跑工具（深度限制双保险）
     return [
       read_file,
       list_files,
+      find,
       grep,
       web_fetch,
       write_file,
@@ -1366,6 +1449,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
   return [
     read_file,
     list_files,
+    find,
     grep,
     web_fetch,
     write_file,
@@ -1376,6 +1460,8 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     ...apiTools,
     ...preflightTools,
     ...repairControlTools,
+    ...browserTools,
+    ...compactTools,
     delegate_agent,
     web_research,
     wait_for_delegations,

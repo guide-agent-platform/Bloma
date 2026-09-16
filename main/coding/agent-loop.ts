@@ -11,6 +11,7 @@ import { estimateTokenCount } from '../usage-guard'
 import { windowMessagesWithDigest } from '../compacting-window'
 import { isDegenerateText } from './output-integrity'
 import { buildTargetedDegenerateFeedback, classifyDsmlRecovery, dsmlRecoveryEnabled, parseDsmlInvokes } from './dsml-recovery'
+import { closePreviewBrowserSession } from './preview-browser'
 import { drainSteerQueue, markLoopActive, markLoopInactive, markSteerMerged, pendingSteerCount, settleSteerEntry, steerConfirmEnabled, wrapSteerContent } from '../steer-queue'
 
 /**
@@ -60,6 +61,11 @@ export interface AgentLoopToolState {
   api_contract_runs?: number
   /** D4a：本轮已读文件的版本戳（path → rev）；edit_file 的 expected_revision 校验与 write_file 守卫共用 */
   file_revisions?: Map<string, string>
+  /** W2（Phase 10，2026-09-16）：模型已登记的显式压缩请求（compact_context 工具置位；
+   *  loop 在本轮工具结果落盘后与自动压缩同路径处理并复位） */
+  compact_requested?: boolean
+  /** W2：已完成的显式压缩次数（上限 MAX_EXPLICIT_COMPACTIONS，由 loop 在实际压缩后自增） */
+  explicit_compactions?: number
   /** 测试失败后的写入类工具调用次数（edit-after-test-failure 预算，默认上限 3） */
   edits_after_test_failure: number
   /** 修复回合计数（每次新出现的 GWT 失败 +1，对应旧 test_repair_count 口径） */
@@ -136,6 +142,8 @@ export interface AgentLoopCompactionInfo {
   /** true=阈值满足但未压缩（每 loop 只报一次）；此时仅 at_turn/segment/trigger_input_tokens/skip_reason 有意义 */
   skipped?: boolean
   skip_reason?: 'max_compactions' | 'late_turn'
+  /** W2（Phase 10）：触发源——auto=usage/est 阈值（缺省值，存量兼容）；explicit=compact_context 工具登记 */
+  trigger?: 'auto' | 'explicit'
 }
 
 export interface AgentLoopTurnInfo {
@@ -671,6 +679,16 @@ export function loopApiToolEnabled(): boolean {
   return process.env.BLOMA_API_TOOL === '1' || process.env.BLOMA_API_TOOL === 'true'
 }
 
+/** W2（Phase 10，2026-09-16，同步 Proma CompactContext）：显式压缩工具 compact_context 开关。
+ * 缺省 off=字节级现状（工具不注册、loop 无显式触发路径）。对位 W1-E6 发现的「压缩失明」：
+ * glm 渠道 input_tokens 恒 0 时自动触发器失效，模型可在完成大阶段后主动交接口收缩窗口。 */
+export function compactToolEnabled(): boolean {
+  return process.env.BLOMA_COMPACT_TOOL === '1' || process.env.BLOMA_COMPACT_TOOL === 'true'
+}
+
+/** W2：显式压缩次数上限（独立于自动压缩的 LOOP_MAX_COMPACTIONS=2；防模型滥用交接轮次烧额度）。 */
+export const MAX_EXPLICIT_COMPACTIONS = 4
+
 /** D2/D3 开关：验证工具返回的证据边界行 + 失败 [新增]/[持续] 标注。缺省 off=字节级现状。 */
 export function toolEvidenceEnabled(): boolean {
   return process.env.BLOMA_TOOL_EVIDENCE === '1' || process.env.BLOMA_TOOL_EVIDENCE === 'true'
@@ -738,6 +756,9 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
   try {
     return await runAgentLoopImpl(input)
   } finally {
+    // W1（Phase 10，预览浏览器工具族）：loop 结束即关同会话的持久浏览器句柄
+    // （开关 off 时无会话，重载 map 查找零成本）；看门狗仅作跨 run 泄漏兑底。
+    void closePreviewBrowserSession(input.sessionId).catch(() => undefined)
     if (isMainLoop) {
       const leftovers = drainSteerQueue(input.sessionId)
       if (leftovers.length > 0) {
@@ -1275,7 +1296,19 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
       compactEstFallbackEnabled() && usageBlind && estTokensOfMessages(messages) >= compactThreshold
     const compactThresholdMet =
       compactThreshold > 0 && ((usage?.input_tokens ?? 0) >= compactThreshold || estFallbackMet)
-    if (compactThresholdMet && compactions < LOOP_MAX_COMPACTIONS && turn < input.maxTurns - 3) {
+    // W2（Phase 10）：显式压缩——compact_context 工具置位后在本安全点（本轮工具对已落盘）
+    // 与自动压缩同路径处理；独立计数（不占用自动压缩的 LOOP_MAX_COMPACTIONS 预算），
+    // 自动触发器失明（glm input_tokens=0）时它是模型侧唯一的主动收缩出口。
+    const explicitCompactRequested = ctx.state.compact_requested === true
+    ctx.state.compact_requested = false
+    const explicitEligible =
+      explicitCompactRequested &&
+      (ctx.state.explicit_compactions ?? 0) < MAX_EXPLICIT_COMPACTIONS &&
+      turn < input.maxTurns - 1
+    if (
+      (compactThresholdMet && compactions < LOOP_MAX_COMPACTIONS && turn < input.maxTurns - 3) ||
+      explicitEligible
+    ) {
       if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls, 'handoff', input.signal))
       const handoff = await requestHandoff(input, messages, pinnedTestTurn)
       if (input.signal.aborted) return attachUsage(loopCancelled(turns, finalText, toolCalls, 'handoff', input.signal))
@@ -1302,10 +1335,12 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
       const historyTurnsBefore = messages.length - 1
       const removedTurns = historyTurnsBefore - retained.length
       messages.length = 0
+      // W2：段号 = 自动+显式总段数（无显式时与现状字节一致）；计数分离——显式不占自动预算
+      const segmentNo = compactions + (ctx.state.explicit_compactions ?? 0) + 1
       messages.push({
         role: 'user',
         content:
-          `${input.task}\n\n【此前进度交接（第 ${compactions + 1} 段）】\n${summary}` +
+          `${input.task}\n\n【此前进度交接（第 ${segmentNo} 段）】\n${summary}` +
           (retained.length > 0 ? '\n\n【近期原文保留】以下是压缩前最近的原文轮次（保真参考，未经改写，时间从早到晚）。' : ''),
       })
       messages.push(...retained)
@@ -1320,7 +1355,8 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         }
         emitCheckpoint('compaction', turn)
       }
-      compactions += 1
+      if (explicitEligible) ctx.state.explicit_compactions = (ctx.state.explicit_compactions ?? 0) + 1
+      else compactions += 1
       // 重置钉轮坐标系（审查 P1-1）：旧失败已被交接文档覆盖（repair_round 快照对齐，
       // 后续只有新失败才重钉；避免粘性 test_failed 幻影钉在无关轮对上）。P1-1 后配对
       // 序号按 tail 实际配对计数（tailLastPairOrdinal），无需再维护基线轮号。
@@ -1330,6 +1366,9 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         at_turn: turn,
         input_tokens: usage?.input_tokens,
         compactions,
+        // W2：显式触发观测（缺省 auto 保持存量字段形态，新增字段消费方后兼容）
+        trigger: explicitEligible ? 'explicit' : 'auto',
+        explicit_compactions: ctx.state.explicit_compactions ?? 0,
         keep_recent_turns: retained.length,
         // W1-E1 观测扩展（新增字段，消费方后兼容）：重置前后估算与移除/兑底口径
         est_tokens_before: estTokensBefore,
@@ -1339,7 +1378,8 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
       })
       input.onCompaction?.({
         at_turn: turn,
-        segment: compactions,
+        segment: segmentNo,
+        trigger: explicitEligible ? 'explicit' : 'auto',
         trigger_input_tokens: usage?.input_tokens,
         est_tokens_before: estTokensBefore,
         est_tokens_after: estTokensOfMessages(messages),
@@ -1354,7 +1394,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         content: [
           {
             type: 'text',
-            text: `[loop-compaction] 第 ${compactions} 段交接（at_turn=${turn}，input_tokens=${usage?.input_tokens ?? '-'}，keep_recent=${retained.length} 轮）：\n${summary.slice(0, 1000)}`,
+            text: `[loop-compaction] 第 ${segmentNo} 段交接（at_turn=${turn}，input_tokens=${usage?.input_tokens ?? '-'}，keep_recent=${retained.length} 轮${explicitEligible ? '，trigger=explicit' : ''}）：\n${summary.slice(0, 1000)}`,
           },
         ],
         timestamp: Date.now(),

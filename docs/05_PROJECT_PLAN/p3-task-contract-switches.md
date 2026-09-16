@@ -302,3 +302,15 @@
 - 无开关直上项（W1 批）：**产物 CSP 补 `media-src 'self' blob:`**——单一真相源 main/coding/product-csp.ts，沙箱脚本与 static-server 模板两处插值引用（`'Content-Security-Policy': ${JSON.stringify(PRODUCT_CSP)}`），product-csp 测试锁两处一致（B1 基础设施先例）；**deriveInterfaceSpec 外部服务信号词**（直连/在线播放/语音输入/bilibili 等）派生 /api/external 占位端点 + requirementImpliesBackend 徽标同步（C1a 显影路）；**loop【媒体纪律】段**（禁扩展名直判/canPlayType 实测承诺/blob 本地播放/外链同源代理/DASH 分片不可直给）；**gwt-runner** launch 加 `--use-fake-device-for-media-stream` + 媒体启动健康探针（自动加载的 video/audio error 即判败，计数与 failure_summary 对齐）。
 - 单测：product-csp 新文件 3 例（字段/模板插值/沙箱引用）；prd-interface-spec +5 例（B 站式派生/纯本地不误伤/语音叠加/纯展示零派生/徽标同步）；api-reconcile 新文件 7 例（B 站案形态必红/齐备绿/占位豁免语义/内置与只读目录豁免/off 字节级/外链直连红/blob 不误伤）。
 - 验收实证：B 站产物 214397c3 现场对账红（反向 /api/bili 命中）——同款产物在开关 on 后不可能再假绿（Phase 9 验收第 5 条）。本机 setx 待用户拍板（狗粮前 `setx BLOMA_API_RECONCILE 1` + 重启 Bloma）。
+
+## §29 Phase 10 W1/W2——上游工具同步批（2026-09-16，同步 Proma 工具调用库）
+
+| 开关 | 控制面 | 缺省 | off/未设 | '1'/'true' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_BROWSER_TOOLS` | 预览浏览器工具族（主 loop 八件套） | **off** | 工具零注册、提示词零注入（字节级现状） | 注册 preview_navigate/observe/click/fill/press/extract/screenshot/wait_for（持久 Playwright 会话按 sessionId 缓存，loop finally + 5min 闲置看门狗双保险关闭）；**同源硬边界**：只允许 preview_url origin（外域拒绝并提示走 server/routes 同源代理）；selector-first（CSS 语义与 GWT/修复轮一致，非上游 a11y ref）；截图落盘 documents/preview-shots/ 不回传图像块（loop 工具结果无 image 通道）；observe/extract 附最近控制台错误；loop 系统提示词【预览视觉检查】段（UI 修复改前 observe→改后 click 验证；浏览器证据与 GWT 互补不互替） | `browserToolsEnabled`/`buildPreviewBrowserTools`/`assertSameOrigin`/`closePreviewBrowserSession`（main/coding/preview-browser.ts）+ buildAgentTools parent 注册 + agent-loop finally 清理 + buildAgentLoopSystemPrompt 契约段 |
+| `BLOMA_COMPACT_TOOL` | 显式压缩工具 compact_context（主 loop） | **off** | 工具零注册、提示词零注入（字节级现状） | 模型完成大阶段后主动调用：置位 state.compact_requested → 本轮工具对落盘后与自动压缩**同路径**执行（交接 LLM/keep-recent/检查点恢复头/观测全复用）；独立计数上限 MAX_EXPLICIT_COMPACTIONS=4（不占自动压缩 LOOP_MAX_COMPACTIONS=2 预算）；loop_compaction 事件与 onCompaction 带 trigger='explicit'；自动触发器失明（glm input_tokens=0，W1-E6 结论）时是模型侧唯一主动收缩出口；提示词【上下文压缩】段（完成大阶段再调、交接有损勿滥用） | `compactToolEnabled`/`MAX_EXPLICIT_COMPACTIONS`（main/coding/agent-loop.ts）+ compact_context 工具（main/coding/agent-tools.ts）+ 触发管线（agent-loop.ts 压缩段）+ buildAgentLoopSystemPrompt 契约段 |
+
+- 无开关直上项（W3）：**find（glob 文件名搜索）**——只读并行件（与 read_file/list_files/grep 同档无条件注册，全角色），`globToRegExp` 支持 `*` 单段与 `**` 跨目录、Windows 大小写不敏感；计数锁基线 17→18（agent-tools.test.ts 两处），D1 describe beforeEach 钉 BLOMA_BROWSER_TOOLS/BLOMA_COMPACT_TOOL off。
+- 不同步项（决策留档防重复评估）：Terminal\*/bash（沙箱写权限边界，给 shell 摧毁零依赖/白名单/CSP 三道防线）；Task\*/Todo\*（进度由 W5 renderTaskChecklist 确定性投影，双源打架）；Upload/ExecuteJavaScript/DomAction/Hover/Drag/SelectOption（v1 场景外，Observe/Click/Fill/Extract 覆盖 90% 检查）；多标签族（产物单页单源）；set_delegation_thinking_level（Bloma 委派无 thinking 概念）；MCP 三族（宿主平台能力非产物 Agent 工具）。
+- 单测：preview-browser 新文件 12 例（同源守卫纯函数 4/注册与开关 6/真浏览器集成 1 组 skip-guard）；compact-tool 新文件 5 例（off 字节锁/注册面/显式触发与窗口重置/上限 4/自动预算分离）。
+- 狗粮：`setx BLOMA_BROWSER_TOOLS 1` + `setx BLOMA_COMPACT_TOOL 1` + 重启 Bloma（本批两开关均未 setx）。
