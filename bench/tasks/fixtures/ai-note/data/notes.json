@@ -1,0 +1,272 @@
+[
+  {
+    "id": "n001",
+    "kind": "text",
+    "content": "早会定了周三交原型，先把列表页画出来",
+    "transcript": null,
+    "createdAt": "2026-09-01T08:00:00+08:00",
+    "updatedAt": "2026-09-01T08:00:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n002",
+    "kind": "text",
+    "content": "地铁上想到：总结按钮可以放底部常驻，不用进菜单",
+    "transcript": null,
+    "createdAt": "2026-09-01T09:07:00+08:00",
+    "updatedAt": "2026-09-01T09:07:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n003",
+    "kind": "text",
+    "content": "买咖啡豆 68 元，月底记账要对一下",
+    "transcript": null,
+    "createdAt": "2026-09-01T10:14:00+08:00",
+    "updatedAt": "2026-09-01T10:14:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n004",
+    "kind": "text",
+    "content": "妈妈生日 10 月 3 号，提前订蛋糕",
+    "transcript": null,
+    "createdAt": "2026-09-02T11:21:00+08:00",
+    "updatedAt": "2026-09-02T11:21:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n005",
+    "kind": "text",
+    "content": "把《人月神话》第三章看完，进度落后两天",
+    "transcript": null,
+    "createdAt": "2026-09-02T12:28:00+08:00",
+    "updatedAt": "2026-09-02T12:28:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n006",
+    "kind": "text",
+    "content": "冰箱里没鸡蛋和牛奶了",
+    "transcript": null,
+    "createdAt": "2026-09-03T13:35:00+08:00",
+    "updatedAt": "2026-09-03T13:35:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n007",
+    "kind": "text",
+    "content": "体检报告出来了，尿酸偏高，少喝啤酒",
+    "transcript": null,
+    "createdAt": "2026-09-03T14:42:00+08:00",
+    "updatedAt": "2026-09-03T14:42:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n008",
+    "kind": "text",
+    "content": "想法：给随心记加个快捷短语，常用的话一键插入",
+    "transcript": null,
+    "createdAt": "2026-09-04T15:49:00+08:00",
+    "updatedAt": "2026-09-04T15:49:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n009",
+    "kind": "text",
+    "content": "下午 3 点和小 C 对埋点口径，别迟到",
+    "transcript": null,
+    "createdAt": "2026-09-04T16:56:00+08:00",
+    "updatedAt": "2026-09-04T16:56:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n010",
+    "kind": "text",
+    "content": "跑步 5 公里，配速 6'40''，膝盖不疼了",
+    "transcript": null,
+    "createdAt": "2026-09-05T17:03:00+08:00",
+    "updatedAt": "2026-09-05T17:03:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n011",
+    "kind": "text",
+    "content": "水费 87 电费 143，这个月偏高",
+    "transcript": null,
+    "createdAt": "2026-09-05T18:10:00+08:00",
+    "updatedAt": "2026-09-05T18:10:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n012",
+    "kind": "text",
+    "content": "图书馆借的书 9 月 28 号到期，别忘还",
+    "transcript": null,
+    "createdAt": "2026-09-06T19:17:00+08:00",
+    "updatedAt": "2026-09-06T19:17:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n013",
+    "kind": "text",
+    "content": "读到一句好话：先完成，再完美",
+    "transcript": null,
+    "createdAt": "2026-09-06T08:24:00+08:00",
+    "updatedAt": "2026-09-06T08:24:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n014",
+    "kind": "text",
+    "content": "理发 35 元",
+    "transcript": null,
+    "createdAt": "2026-09-07T09:31:00+08:00",
+    "updatedAt": "2026-09-07T09:31:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n015",
+    "kind": "text",
+    "content": "组会 B 讲的泳道图改版要提意见：泳道太多看不过来",
+    "transcript": null,
+    "createdAt": "2026-09-07T10:38:00+08:00",
+    "updatedAt": "2026-09-07T10:38:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n016",
+    "kind": "text",
+    "content": "晚上失眠到两点，今天早点睡",
+    "transcript": null,
+    "createdAt": "2026-09-08T11:45:00+08:00",
+    "updatedAt": "2026-09-08T11:45:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n017",
+    "kind": "text",
+    "content": "买了机械键盘轴体，润一下应该更顺",
+    "transcript": null,
+    "createdAt": "2026-09-08T12:52:00+08:00",
+    "updatedAt": "2026-09-08T12:52:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n018",
+    "kind": "text",
+    "content": "导师说论文实验组要加对照组，统计功效重新算",
+    "transcript": null,
+    "createdAt": "2026-09-08T13:59:00+08:00",
+    "updatedAt": "2026-09-08T13:59:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n019",
+    "kind": "text",
+    "content": "外卖红包省了 6 块，薅到就是赚到",
+    "transcript": null,
+    "createdAt": "2026-09-09T14:06:00+08:00",
+    "updatedAt": "2026-09-09T14:06:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n020",
+    "kind": "text",
+    "content": "阳台的绿萝该换盆了，土都板结",
+    "transcript": null,
+    "createdAt": "2026-09-09T15:13:00+08:00",
+    "updatedAt": "2026-09-09T15:13:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n021",
+    "kind": "voice",
+    "content": "那个就是嗯……明天上午十点跟导师碰一下，嗯，主要聊开题的方向，就这样",
+    "transcript": "那个就是嗯……明天上午十点跟导师碰一下，嗯，主要聊开题的方向，就这样",
+    "createdAt": "2026-09-10T16:20:00+08:00",
+    "updatedAt": "2026-09-10T16:20:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n022",
+    "kind": "voice",
+    "content": "呃想到一个点子，就是呃，笔记可以按地点自动打标签，对，地点",
+    "transcript": "呃想到一个点子，就是呃，笔记可以按地点自动打标签，对，地点",
+    "createdAt": "2026-09-10T17:27:00+08:00",
+    "updatedAt": "2026-09-10T17:27:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n023",
+    "kind": "voice",
+    "content": "提醒一下自己，周五之前要把报销单交给行政",
+    "transcript": "提醒一下自己，周五之前要把报销单交给行政",
+    "createdAt": "2026-09-11T18:34:00+08:00",
+    "updatedAt": "2026-09-11T18:34:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n024",
+    "kind": "voice",
+    "content": "嗯……今天跑了三公里，状态还行，就是最后一公里有点喘",
+    "transcript": "嗯……今天跑了三公里，状态还行，就是最后一公里有点喘",
+    "createdAt": "2026-09-11T19:41:00+08:00",
+    "updatedAt": "2026-09-11T19:41:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n025",
+    "kind": "voice",
+    "content": "这个店的名字叫老王烧烤，下次带小李来吃，他家的烤茄子不错",
+    "transcript": "这个店的名字叫老王烧烤，下次带小李来吃，他家的烤茄子不错",
+    "createdAt": "2026-09-12T08:48:00+08:00",
+    "updatedAt": "2026-09-12T08:48:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n026",
+    "kind": "voice",
+    "content": "呃，总结一下今天，上午改 bug，下午开会，晚上摸鱼，效率一般",
+    "transcript": "呃，总结一下今天，上午改 bug，下午开会，晚上摸鱼，效率一般",
+    "createdAt": "2026-09-12T09:55:00+08:00",
+    "updatedAt": "2026-09-12T09:55:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n027",
+    "kind": "voice",
+    "content": "对了，妈让我国庆回家的时候带一盒茶叶回去",
+    "transcript": "对了，妈让我国庆回家的时候带一盒茶叶回去",
+    "createdAt": "2026-09-13T10:02:00+08:00",
+    "updatedAt": "2026-09-13T10:02:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n028",
+    "kind": "voice",
+    "content": "嗯……论文里面那个公式的符号要统一，上次被批了",
+    "transcript": "嗯……论文里面那个公式的符号要统一，上次被批了",
+    "createdAt": "2026-09-13T11:09:00+08:00",
+    "updatedAt": "2026-09-13T11:09:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n029",
+    "kind": "voice",
+    "content": "买了个新鼠标垫，900 乘 400 的，桌面正好",
+    "transcript": "买了个新鼠标垫，900 乘 400 的，桌面正好",
+    "createdAt": "2026-09-14T12:16:00+08:00",
+    "updatedAt": "2026-09-14T12:16:00+08:00",
+    "summary": null
+  },
+  {
+    "id": "n030",
+    "kind": "voice",
+    "content": "提醒，明天降温，穿外套",
+    "transcript": "提醒，明天降温，穿外套",
+    "createdAt": "2026-09-14T13:23:00+08:00",
+    "updatedAt": "2026-09-14T13:23:00+08:00",
+    "summary": null
+  }
+]

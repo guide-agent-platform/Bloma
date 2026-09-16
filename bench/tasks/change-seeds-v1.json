@@ -1,0 +1,309 @@
+{
+  "$schema": "change-seeds-v1 变更任务卡（Phase 10 W0，2026-09-16）",
+  "frozen": false,
+  "$note": "Phase 10 变更实验任务集：起点=seed-v0 基础 seed 跑至 ready，再施加变更指令（l1-batch --label w3-change 消费）。四类：A=state-boundary 状态机/边界；B=data-schema 数据结构变更保历史；C=interaction-regression 交互变更保回归；D=upgrade 升级类（依赖 W1-6 export-manifest + BLOMA_DATA_MIGRATE，先占位）。holdout=true 的条目调优轮禁用，仅复测轮使用（防过拟合固定题目）。frozen 待人工复核后置 true；fixtures 形状须先用对应 seed 实际产物 data/ 校准后再冻结。",
+  "baseSeedsRef": "bench/tasks/seed-v0.json",
+  "sampleProject": "seed-ai-note-full（随心记AI——Phase 10 样板项目，2026-09-16 拍板）",
+  "changeSeeds": [
+    {
+      "id": "chg-a-note-empty-guard",
+      "category": "state-boundary",
+      "title": "随心记AI：空内容不得保存",
+      "base": { "seedId": "seed-ai-note-full", "note": "样板项目主验证线" },
+      "changeInstruction": "空白内容（纯空格）不能保存成记录，保存按钮要给提示；已有记录编辑成空也一样",
+      "preconditions": null,
+      "acceptance": {
+        "mustNew": [
+          "空/纯空格内容点保存被拒绝并出现提示，记录列表不新增条目",
+          "把已有记录编辑为空内容保存同样被拒绝，原内容不变"
+        ],
+        "mustPreserve": [
+          "可新增并保存一条随手记录，刷新后仍在",
+          "AI 总结内容随记录内容变化"
+        ],
+        "mustNot": ["为过断言把输入框禁用导致正常内容也无法输入"]
+      },
+      "budget": "quick",
+      "holdout": false,
+      "expectation": "边界输入守卫：新规则不破坏主流程"
+    },
+    {
+      "id": "chg-a-calc-divzero",
+      "category": "state-boundary",
+      "title": "计算器：除零与格式边界",
+      "base": { "seedId": "seed-b-crud-calculator", "note": null },
+      "changeInstruction": "除以零要显示错误提示不能崩溃，连按等号或运算符也不能出现 NaN 或卡死",
+      "preconditions": null,
+      "acceptance": {
+        "mustNew": [
+          "除以零显示错误提示，界面仍可继续操作",
+          "连续运算符/等号连按不出现 NaN/undefined/Infinity 显示"
+        ],
+        "mustPreserve": [
+          "能进行四则运算并即时显示结果",
+          "连续输入时结果不丢失、无明显错误"
+        ],
+        "mustNot": ["静默吞掉非法输入无任何反馈"]
+      },
+      "budget": "quick",
+      "holdout": true,
+      "expectation": "holdout 边界样本：调优轮禁用"
+    },
+    {
+      "id": "chg-a-shmup-statemachine",
+      "category": "state-boundary",
+      "title": "纵版空战：三态状态机边界",
+      "base": { "seedId": "seed-game-shmup", "note": "C4 游戏探针通道可用（window.__g）" },
+      "changeInstruction": "开始前不能开火，游戏里才能暂停；game over 之后只能重开或回主菜单，不能直接继续这局",
+      "preconditions": null,
+      "acceptance": {
+        "mustNew": [
+          "menu 态按开火/暂停无效果",
+          "playing 态可暂停且恢复后继续",
+          "game over 后无「继续本局」入口，只有重开/回菜单"
+        ],
+        "mustPreserve": [
+          "点击开始后玩家飞机显示并可操控移动",
+          "被击中有失败/生命损失反馈，可重新开始"
+        ],
+        "mustNot": ["把 game over 改成永不触发来回避边界"]
+      },
+      "budget": "quick",
+      "holdout": false,
+      "expectation": "状态机禁令断言（负向断言靶子）"
+    },
+    {
+      "id": "chg-a-voice-recording-lock",
+      "category": "state-boundary",
+      "title": "语顺精灵球：录音态互斥",
+      "base": { "seedId": "seed-ai-voice-polish", "note": "录音走 mock/回放轨道" },
+      "changeInstruction": "按住录音的过程中，历史/收藏区域的操作都不响应，松手处理完才恢复",
+      "preconditions": null,
+      "acceptance": {
+        "mustNew": [
+          "录音中点收藏/删除历史无效果，结束后可正常操作",
+          "录音中不会产生半截/重复的历史条目"
+        ],
+        "mustPreserve": [
+          "按住按钮录音，松手结束并显示识别出的原话",
+          "历史记录按时间保存、可回看删除"
+        ],
+        "mustNot": ["用全局禁用点击掩盖实现（录音外的页面区域不受影响）"]
+      },
+      "budget": "quick",
+      "holdout": false,
+      "expectation": "互斥态边界：只锁相关操作不全局锁死"
+    },
+    {
+      "id": "chg-b-note-tag-field",
+      "category": "data-schema",
+      "title": "随心记AI：加必填分类标签（保历史）",
+      "base": { "seedId": "seed-ai-note-full", "note": "样板项目主验证线" },
+      "changeInstruction": "给每条记录加一个分类标签，新记录必须选标签才能保存；以前的老记录不用动，显示成「未分类」就行",
+      "preconditions": { "fixture": "fixtures/ai-note/data/notes.json", "injectAs": "项目 data/（30 条历史记录，含文字条与语音合并条）" },
+      "acceptance": {
+        "mustNew": [
+          "新记录不选标签保存被拒绝并有提示",
+          "全部旧记录仍存在且内容完整，标签显示为「未分类」",
+          "按标签筛选能看到对应记录"
+        ],
+        "mustPreserve": [
+          "可新增并保存一条随手记录，刷新后仍在",
+          "AI 总结内容随记录内容变化"
+        ],
+        "mustNot": ["丢弃/清空旧记录再重建", "标签仅前端显示未持久化"]
+      },
+      "budget": "quick",
+      "holdout": false,
+      "expectation": "B 类主靶：data schema 演进+历史兼容（data-migration 纪律靶子）"
+    },
+    {
+      "id": "chg-b-note-archive",
+      "category": "data-schema",
+      "title": "随心记AI：归档状态字段（保历史）",
+      "base": { "seedId": "seed-ai-note-full", "note": "与 chg-b-note-tag-field 共用 fixture，不同实例跑" },
+      "changeInstruction": "加一个归档功能，归档的记录不出现在日常列表，去归档区能看；以前的所有记录默认都是未归档",
+      "preconditions": { "fixture": "fixtures/ai-note/data/notes.json", "injectAs": "项目 data/（30 条历史记录）" },
+      "acceptance": {
+        "mustNew": [
+          "任一旧记录可归档，日常列表即时消失",
+          "归档区可见全部已归档记录且内容完整",
+          "全部旧记录初始均为未归档态"
+        ],
+        "mustPreserve": [
+          "可新增并保存一条随手记录，刷新后仍在",
+          "AI 总结内容随记录内容变化"
+        ],
+        "mustNot": ["归档=删除（数据必须仍可取回）", "AI 总结因归档条目报错"]
+      },
+      "budget": "quick",
+      "holdout": false,
+      "expectation": "状态字段演进：软删除语义不丢数据"
+    },
+    {
+      "id": "chg-b-voice-favorite-meta",
+      "category": "data-schema",
+      "title": "语顺精灵球：收藏加备注字段（保历史）",
+      "base": { "seedId": "seed-ai-voice-polish", "note": null },
+      "changeInstruction": "收藏的顺后话可以加备注说明，老收藏没有备注就显示空，不影响使用",
+      "preconditions": { "fixture": "fixtures/voice-polish/data/favorites.json", "injectAs": "项目 data/（20 条历史收藏）" },
+      "acceptance": {
+        "mustNew": [
+          "任一收藏可编辑备注并保存，刷新后仍在",
+          "全部老收藏仍存在、原话/顺后话内容完整，备注为空不报错"
+        ],
+        "mustPreserve": [
+          "顺后表达可收藏复用",
+          "历史记录按时间保存、可回看删除"
+        ],
+        "mustNot": ["旧收藏数据被重写丢弃字段"]
+      },
+      "budget": "quick",
+      "holdout": true,
+      "expectation": "holdout 数据兼容样本：调优轮禁用"
+    },
+    {
+      "id": "chg-b-shmup-highscore",
+      "category": "data-schema",
+      "title": "纵版空战：最高分与存档字段演进（保历史）",
+      "base": { "seedId": "seed-game-shmup", "note": "game 类轻留存 localStorage 口径（C1b）；探针 window.__g" },
+      "changeInstruction": "记录历史最高分，游戏结束显示是否破纪录；另外给存档加生命上限字段，老的存档读出来要能正常玩",
+      "preconditions": { "fixture": "fixtures/shmup/data/save.json", "injectAs": "localStorage 存档样本（旧结构无 highScore/maxLives 字段）" },
+      "acceptance": {
+        "mustNew": [
+          "一局结束后最高分被记录，再玩破纪录时有提示",
+          "旧结构存档载入不报错，缺失字段取默认值正常游玩"
+        ],
+        "mustPreserve": [
+          "点击开始后玩家飞机显示并可操控移动",
+          "被击中有失败/生命损失反馈，可重新开始"
+        ],
+        "mustNot": ["旧存档载入即清档", "最高分每局都被重置"]
+      },
+      "budget": "quick",
+      "holdout": false,
+      "expectation": "无 data/ 目录形态的等价数据兼容验证"
+    },
+    {
+      "id": "chg-c-note-list-density",
+      "category": "interaction-regression",
+      "title": "随心记AI：列表紧凑视图（overlay 案同型）",
+      "base": { "seedId": "seed-ai-note-full", "note": "94f449c6 迭代失败案同型任务" },
+      "changeInstruction": "记录列表太占地方了，加一个紧凑/详细两种视图切换，其他别动",
+      "preconditions": { "fixture": "fixtures/ai-note/data/notes.json", "injectAs": "项目 data/（30 条历史记录）" },
+      "acceptance": {
+        "mustNew": [
+          "切换到紧凑视图每条记录占用明显变小，可切回详细视图",
+          "两种视图下记录条数一致、内容一致"
+        ],
+        "mustPreserve": [
+          "可新增并保存一条随手记录，刷新后仍在",
+          "AI 总结内容随记录内容变化"
+        ],
+        "mustNot": ["切换视图丢记录/触发重新拉取出错", "顺手重构无关模块"]
+      },
+      "budget": "quick",
+      "holdout": false,
+      "expectation": "C 类主靶：纯 UI 变更不碰数据语义（对照 94f449c6 失败）"
+    },
+    {
+      "id": "chg-c-calc-keypad-layout",
+      "category": "interaction-regression",
+      "title": "计算器：按键布局重排",
+      "base": { "seedId": "seed-b-crud-calculator", "note": null },
+      "changeInstruction": "把最常用的按键排到顺手的位置，等号和清除做大一点，功能不变",
+      "preconditions": null,
+      "acceptance": {
+        "mustNew": [
+          "等号/清除键视觉尺寸大于普通数字键",
+          "全部原有按键仍然存在且各自功能不变"
+        ],
+        "mustPreserve": [
+          "能进行四则运算并即时显示结果",
+          "提供常用扩展功能按键",
+          "连续输入时结果不丢失、无明显错误"
+        ],
+        "mustNot": ["重排过程中删掉扩展按键"]
+      },
+      "budget": "quick",
+      "holdout": false,
+      "expectation": "重构类变更：外观变功能不变"
+    },
+    {
+      "id": "chg-c-voice-history-filter",
+      "category": "interaction-regression",
+      "title": "语顺精灵球：历史筛选只看收藏",
+      "base": { "seedId": "seed-ai-voice-polish", "note": null },
+      "changeInstruction": "历史记录那里加个筛选，能只看收藏的，取消筛选又看到全部",
+      "preconditions": { "fixture": "fixtures/voice-polish/data/history.json", "injectAs": "项目 data/（20 条历史，其中 ≥5 条已收藏）" },
+      "acceptance": {
+        "mustNew": [
+          "开启筛选后仅显示收藏条目",
+          "取消筛选恢复全部条目，条数与筛选前一致"
+        ],
+        "mustPreserve": [
+          "历史记录按时间保存、可回看删除",
+          "顺后表达可收藏复用"
+        ],
+        "mustNot": ["筛选实现为删除非收藏条目"]
+      },
+      "budget": "quick",
+      "holdout": true,
+      "expectation": "holdout 回归样本：调优轮禁用"
+    },
+    {
+      "id": "chg-d-note-upgrade-v2",
+      "category": "upgrade",
+      "title": "随心记AI：v1 导出包升级（占位，依赖 W1-6）",
+      "base": { "seedId": "seed-ai-note-full", "note": "前置：v1 产物导出+fixtures/ai-note 数据注入" },
+      "changeInstruction": "（升级导出流程验证）v1 导出包升级到含分类标签的 v2：新代码+旧数据自动迁移+校验报告",
+      "preconditions": { "fixture": "fixtures/ai-note/data/notes.json", "injectAs": "v1 导出包 data/" },
+      "acceptance": {
+        "mustNew": [
+          "升级后旧记录全部存在且标签为「未分类」",
+          "升级包内 upgrade-report.json 行数/关键字段校验通过"
+        ],
+        "mustPreserve": ["可新增并保存记录，刷新后仍在"],
+        "mustNot": ["升级过程要求用户手动改数据文件"]
+      },
+      "budget": "quick",
+      "holdout": false,
+      "expectation": "D 类占位：export-manifest 落地后启用"
+    },
+    {
+      "id": "chg-d-voice-upgrade-meta",
+      "category": "upgrade",
+      "title": "语顺精灵球：v1 导出包升级备注字段（占位，依赖 W1-6）",
+      "base": { "seedId": "seed-ai-voice-polish", "note": null },
+      "changeInstruction": "（升级导出流程验证）v1 导出包升级到含备注字段的 v2",
+      "preconditions": { "fixture": "fixtures/voice-polish/data/favorites.json", "injectAs": "v1 导出包 data/" },
+      "acceptance": {
+        "mustNew": ["升级后老收藏全部存在且备注为空可用"],
+        "mustPreserve": ["顺后表达可收藏复用"],
+        "mustNot": ["升级丢收藏"]
+      },
+      "budget": "quick",
+      "holdout": false,
+      "expectation": "D 类占位：第二个升级样本"
+    },
+    {
+      "id": "chg-d-rollback-code-only",
+      "category": "upgrade",
+      "title": "随心记AI：升级失败回滚保数据（占位，依赖 W1-2/W1-6）",
+      "base": { "seedId": "seed-ai-note-full", "note": "平台语义验证卡：BLOMA_ROLLBACK_CODE_ONLY + data-backups" },
+      "changeInstruction": "（平台语义验证）制造变更失败回滚：代码回滚到旧版本，data/ 保留当前状态且备份生成",
+      "preconditions": { "fixture": "fixtures/ai-note/data/notes.json", "injectAs": "项目 data/（30 条，回滚前追加 5 条新记录）" },
+      "acceptance": {
+        "mustNew": [
+          "回滚后代码为旧版本，data-backups/ 生成备份",
+          "回滚后 data/ 仍为回滚前状态（35 条），非快照时点（30 条）"
+        ],
+        "mustPreserve": ["旧版本功能正常可用"],
+        "mustNot": ["回滚静默丢用户数据"]
+      },
+      "budget": "quick",
+      "holdout": false,
+      "expectation": "D 类占位：回滚代码/数据分离的端到端锁"
+    }
+  ]
+}
