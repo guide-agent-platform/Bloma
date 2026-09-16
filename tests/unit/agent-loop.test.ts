@@ -1835,8 +1835,8 @@ describe('W6（咨询 D3/D4）：预算层四件', () => {
     expect(plain.blocked_report).toBeUndefined()
   })
 
-  it('E4：渠道 usage 盲时 est 兜底触发压缩（以撒案根治位；off=触发器失明现状）', async () => {
-    // 渠道不回 usage 的查询：off 时不压缩；on 时按 est 触发
+  it('E4：渠道 usage 盲时 est 兜底触发压缩（以撒案根治位；2026-09-16 缺省翻转 on，=0 为逃生口）', async () => {
+    // 渠道不回 usage 的查询：缺省（on）按 est 触发；显式 =0 回触发器失明现状（逃生口）
     const queryFactory = () => {
       const turnCalls: ConversationTurn[][] = []
       const events: Array<{ type: AgentEvent['type'] }> = []
@@ -1853,15 +1853,15 @@ describe('W6（咨询 D3/D4）：预算层四件', () => {
       return { query, turnCalls }
     }
     process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1'
-    // off：永不压缩（现状）
+    // 缺省 on（2026-09-16 起缺省，上下文同步 Proma 批）：est 兜底触发
+    const onByDefault = queryFactory()
+    await runAgentLoop(baseInput({ query: onByDefault.query, tools: [echo], maxTurns: 6, sessionId: 'session-w6-on-default' }))
+    expect(JSON.stringify(onByDefault.turnCalls[1])).toContain('此前进度交接')
+    // 显式 off（逃生口，=旧现状）：永不压缩
+    process.env.BLOMA_COMPACT_EST_FALLBACK = '0'
     const off = queryFactory()
     await runAgentLoop(baseInput({ query: off.query, tools: [echo], maxTurns: 6, sessionId: 'session-w6-off' }))
     expect(off.turnCalls[1]).toHaveLength(1 + 1 + 2) // system+task+首轮对（无重置全量累积）
-    // on：est 兜底触发
-    process.env.BLOMA_COMPACT_EST_FALLBACK = '1'
-    const on = queryFactory()
-    await runAgentLoop(baseInput({ query: on.query, tools: [echo], maxTurns: 6, sessionId: 'session-w6-on' }))
-    expect(JSON.stringify(on.turnCalls[1])).toContain('此前进度交接')
   })
 
   it('E4：确定性交接兑底附带检查点段（硬阈值兜底从检查点拼装）', async () => {

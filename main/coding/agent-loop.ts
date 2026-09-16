@@ -480,8 +480,9 @@ async function requestHandoff(input: AgentLoopInput, messages: ConversationTurn[
       maxTokens: LOOP_HANDOFF_MAX_TOKENS,
       messages: [
         { role: 'system', content: LOOP_HANDOFF_SYSTEM },
-        // 钉轮一并携带（PR2）：交接文档必须看得到首个测试失败轮的断言原文
-        ...windowMessages(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn),
+        // 钉轮一并携带（PR2）；2026-09-16 上下文同步 Proma：全量模式下交接输入也用全量
+        // （滑窗模式下维持有界窗口）——否则交接文档只覆盖最近 8 轮，早期进展金丢。
+        ...(loopWindowOffEnabled() ? messages : windowMessages(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn)),
       ],
     })) {
       if (sdk.type === 'assistant' && sdk.message) {
@@ -713,13 +714,21 @@ export function narrationEventsEnabled(): boolean {
 /** W6-E4（咨询 D3 §三 C/D）：压缩触发的 est 兜底——渠道 usage 盲（本轮无 usage 回报，
  *  如 glm input_tokens 恒 0/缺失）时用全量历史估算作触发判据，防触发器失明（W1 以撒案实锤）。缺省 off=字节级现状。 */
 export function compactEstFallbackEnabled(): boolean {
-  return process.env.BLOMA_COMPACT_EST_FALLBACK === '1' || process.env.BLOMA_COMPACT_EST_FALLBACK === 'true'
+  // 2026-09-16 缺省翻转 on（用户拍板「上下文向 Proma 同步」）：全量+压缩模式下 est 兼底是
+  // 唯一安全带（盲渠道否则无界膨胀到 400）；逃生口 =0/'false' 回旧现状。
+  const raw = process.env.BLOMA_COMPACT_EST_FALLBACK
+  return raw !== '0' && raw !== 'false'
 }
 
 /** W6-E5（咨询 D3 §四 C 组）：滑窗/摘要旁路——全量历史透传（仅配对重放诊断对照用，
  *  长任务必爆上下文，勿生产开启）。缺省 off=字节级现状。 */
 export function loopWindowOffEnabled(): boolean {
-  return process.env.BLOMA_LOOP_WINDOW_OFF === '1' || process.env.BLOMA_LOOP_WINDOW_OFF === 'true'
+  // 2026-09-16 缺省翻转 on（用户拍板「上下文向 Proma 同步」）：全量历史+竹节压缩为缺省
+  // 上下文模型（对齐 Proma）；滑窗 8 轮+digest 退为逃生口（=0/'false' 回滑窗现状，
+  // digest 空提取病灶随之退位）。原「长任务必爆上下文勿生产开启」前提失效：
+  // 现与 compactEstFallbackEnabled 新缺省强制配套，触发有保底。
+  const raw = process.env.BLOMA_LOOP_WINDOW_OFF
+  return raw !== '0' && raw !== 'false'
 }
 
 /** B3（P0-B，2026-09-11 审计案 35c1a633）：loop 进度对账三守卫——只读失速 / 清单对账 /
@@ -1482,7 +1491,8 @@ async function runGraceWrapUpTurn(
       ...(input.thinkingLevel !== undefined ? { thinkingLevel: input.thinkingLevel } : {}),
       messages: [
         { role: 'system', content: `${input.system}${GRACE_TURN_SUFFIX}` },
-        ...windowMessagesWithDigest(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn),
+        // 2026-09-16 上下文同步 Proma：与主路径同口径（全量模式传全量；滑窗逃生口维持窗口）
+        ...(loopWindowOffEnabled() ? messages : windowMessagesWithDigest(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn)),
       ],
       // 空数组而非缺省：与「无 tools 的交接调用」在调用方可区分（tools === undefined）
       tools: [],
