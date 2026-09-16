@@ -1,28 +1,39 @@
 /**
- * vision-audit-gate.ts — L1 双视觉审计门禁（2026-09-07，产出物审计管线固化）。
+ * vision-audit-gate.ts — L1 视觉审计门禁（终验链内的强制视觉证据采集）。
  *
- * 定位：终验链里 GWT/安全过后的**强制视觉证据采集**：对预览页截图，V1（观察员，
- * 只描述不评价）→ V2（异构审核员，对照图找 V1 的遗漏/不具体/不真实）双模型互证，
- * 报告落项目文档（文档面板可见），摘要以代码注入方式进裁判语义审查腿的 testSummary
- * （不是提示词配置，是调用参数——每次执行必然携带）。
+ * 链路（2026-09-12 重构，用户口径：链路不绑定厂商/模型，每个角色可选配）：
+ *   ① 观察员A（盲描述）：只看截图，产出**带坐标的完整 JSON 描述**；
+ *   ② 观察员B（盲描述）：**独立**调用同一提示词——先自己描述，**不允许先看 A 的结果**；
+ *   ③ 对照审核者：拿 A/B 两份 JSON + 原图做二次识别，核查真实性与准确性，产出**问题 JSON**（带 bbox 证据）；
+ *   ④ 修复者：问题交给 **Bloma 编程模型**（category mvp 的编码渠道）去改——本模块只产出问题，
+ *      不自己修、不判败（判败权在 L0 确定性探针与裁判）。
  *
- * 模型对（用户 2026-09-06 指定，仅此两渠道有余额）：
- *   V1 = deepseek-v4-flash-vision-exp（ds 渠道）；V2 = qwen-vl-max（阿里云云工渠道）。
- *   两路均 OpenAI chat 协议（ds 渠道 base_url 存的是 /anthropic，需派生根域）。
+ * 角色可选配（默认 flash 档；本机限制：三家只用 flash，换档自行覆盖）：
+ *   BLOMA_VISION_V1_MODEL      观察员A 模型（默认链：glm-4v-flash → glm-4.6v → ds 视觉）
+ *   BLOMA_VISION_V2_MODEL      观察员B 模型（默认链：qwen3-vl-flash → qwen-vl-max → qwen3-vl-plus）
+ *   BLOMA_VISION_COMPARE_MODEL 对照审核者模型（缺省复用观察员B 的端点）
+ *   BLOMA_VISION_FIXER_ROLE    修复者角色（缺省 'coding'，即 Bloma 编程模型；由编程链解析，不在本模块选模型）
  *
- * 权威性边界（与 L0 的分工）：
- * - L0（artifact-ui-gate）确定性判"界面是不是真的"，失败进修复回流；
- * - L1 是 LLM 证据，**不直接判败**——发现以摘要进裁判，由裁判（只判定不修复）决定
- *   return/让渡；避免视觉噪声变成第二套硬门禁误杀交付。
- * - 基础设施失败（无渠道/超时/HTTP 错）→ status='unavailable'：绝不静默，调用方必须
- *   把"视觉审计未执行"落到决策日志与裁判可见处（F9a 不静默纪律）。
+ * 权威性边界：
+ * - LLM 输出永不判败、永不自动改代码；只作为证据（报告 + 摘要 + 结构化问题）交给裁判与修复者；
+ * - 基础设施失败（无渠道/超时/HTTP 错）→ status='unavailable'，调用方必须落到决策日志与裁判可见处（F9a 不静默）。
  */
 import { listEnabledRawChannels, decryptApiKey } from '../channel-manager'
-import { writeVisionAuditDocument } from '../document-engine'
+import { writeVisionAuditDocument, writeVisionProblemsDocument } from '../document-engine'
 import { chromium } from 'playwright'
 
-export const VISION_V1_MODEL = process.env.BLOMA_VISION_V1_MODEL || 'deepseek-v4-flash-vision-exp'
-export const VISION_V2_MODEL = process.env.BLOMA_VISION_V2_MODEL || 'qwen-vl-max'
+/** 显式覆盖（空 = 走角色偏好链）。 */
+export const VISION_V1_MODEL = process.env.BLOMA_VISION_V1_MODEL || ''
+export const VISION_V2_MODEL = process.env.BLOMA_VISION_V2_MODEL || ''
+export const VISION_COMPARE_MODEL = process.env.BLOMA_VISION_COMPARE_MODEL || ''
+export const VISION_FIXER_ROLE = process.env.BLOMA_VISION_FIXER_ROLE || 'coding'
+
+/**
+ * 角色偏好链（按序尝试；env 覆盖优先）。默认全为 flash 档（本机限制）。
+ * 链末保留历史默认仅为向后兼容（旧渠道表里只有它时仍能跑）。
+ */
+export const V1_PREFERENCE = ['glm-4v-flash', 'glm-4.6v', 'deepseek-v4-flash-vision-exp']
+export const V2_PREFERENCE = ['qwen3-vl-flash', 'qwen-vl-max', 'qwen3-vl-plus']
 
 export interface ChannelLike {
   id: string
@@ -40,10 +51,46 @@ export interface VisionEndpoint {
   channelName: string
 }
 
+/**
+ * 对照审核产出的单条问题（面向"让编程模型去改"，不含实现方式）。
+ *
+ * Q5 路由规则（2026-09-12 裁定，已决）：
+ *  - target='product'   → 允许组装 RepairTask(source='vision') 交编程模型；
+ *  - target='description' → 进观察员质量队列（改提示词/换模型/重描述），**不回喂代码**；
+ *  - 默认值由 kind 推导：omission/missing_element/state_error/layout_error → product；
+ *    inaccurate/false_claim → description；
+ *  - root_cause 可改判：observer → description；product → product（如 false_claim 根因是
+ *    控件缺失/状态不可辨/渲染错误/可访问性问题）；ambiguous 不改判。
+ *  - 混合问题必须拆条（由提示词约束），不整包丢给编程模型。
+ */
+export type ProblemTarget = 'description' | 'product'
+export type ProblemRootCause = 'observer' | 'product' | 'ambiguous'
+
+export interface VisionProblem {
+  kind: 'omission' | 'inaccurate' | 'false_claim' | 'missing_element' | 'state_error' | 'layout_error'
+  severity: 'low' | 'medium' | 'high' | 'critical'
+  /** Q5：该问题该谁处理（默认按 kind 推导，root_cause 可改判） */
+  target: ProblemTarget
+  /** Q5：根因归属（观察员描述失误 / 产品实现问题 / 不确定） */
+  root_cause: ProblemRootCause
+  claim: string
+  bbox: [number, number, number, number] | null
+  evidence: string
+  suggest_fix: string
+  /**
+   * 是否需二次观测窗口确认（评审 #3）：`omission` / `missing_element` 属"不存在"类断言，
+   * 单窗口（即便 5s）也可能撞上隐藏/开场间隙 → **不得直接进 product 白名单**，
+   * 需 planner 再采一轮窗口复核后才放行。
+   */
+  needs_confirmation?: boolean
+}
+
 export interface VisionGateResult {
   status: 'passed' | 'flagged' | 'unavailable' | 'skipped'
   /** 给裁判 testSummary 的紧凑证据（≤400 字）；unavailable/skipped 时为可见说明 */
   digest: string
+  /** 结构化问题（交给编程模型修复用；无问题为空数组） */
+  problems?: VisionProblem[]
   note?: string
 }
 
@@ -69,105 +116,355 @@ function hasModel(channel: ChannelLike, model: string): boolean {
   return ids.includes(model) || ids.some((id) => id.includes(model))
 }
 
-/** 纯挑选：从渠道表解析 V1/V2 端点（解密函数注入，测试不碰 safeStorage）。缺任一 → null。 */
-export function resolveVisionPair(channels: ChannelLike[], decrypt: (hex: string) => string): { v1: VisionEndpoint; v2: VisionEndpoint } | null {
-  const find = (model: string): ChannelLike | undefined =>
-    channels.find((c) => c.enabled && hasModel(c, model))
-  const v1c = find(VISION_V1_MODEL)
-  const v2c = find(VISION_V2_MODEL)
-  if (!v1c || !v2c) return null
-  const mk = (c: ChannelLike, model: string): VisionEndpoint => ({
-    chatBase: deriveChatBaseUrl(c.base_url),
-    apiKey: decrypt(c.api_key),
-    model,
-    channelName: c.name,
-  })
-  return { v1: mk(v1c, VISION_V1_MODEL), v2: mk(v2c, VISION_V2_MODEL) }
+/** 按候选链挑一个可用端点；excludeChannelId 用于优先错开厂商渠道（拿不到再放开）。 */
+export function pickVisionEndpoint(
+  channels: ChannelLike[],
+  candidates: string[],
+  excludeChannelId?: string,
+): { channel: ChannelLike; model: string } | undefined {
+  for (const model of candidates) {
+    if (!model) continue
+    const hit = channels.find((c) => c.enabled && c.id !== excludeChannelId && hasModel(c, model))
+    if (hit) return { channel: hit, model }
+  }
+  return undefined
 }
 
-const V1_PROMPT = [
-  '你是 UI 截图观察员（只描述，不评价，不建议，不推测图片之外的信息）。',
-  '请完整、客观地描述这张软件界面截图的全部内容，用结构化 Markdown 清单输出，从上到下、从左到右逐项覆盖：',
-  '1) 整体布局结构与层级；2) 所有可见文字逐字转录并标注位置；3) 每个按钮、卡片、图标、图形的形状、颜色、相对位置、大小关系；',
-  '4) 可见的交互状态（选中/悬停/禁用/加载/空态/错误态），没有就写「未见」；5) 背景、圆角、阴影、边框、间距与字号层级。',
-  '要求：宁多勿漏；只写图中确实存在的内容；无法确认的写「不确定」。',
+function mkEndpoint(channel: ChannelLike, model: string, decrypt: (hex: string) => string): VisionEndpoint {
+  return { chatBase: deriveChatBaseUrl(channel.base_url), apiKey: decrypt(channel.api_key), model, channelName: channel.name }
+}
+
+/**
+ * 纯挑选：解析三个角色端点（解密函数注入，测试不碰 safeStorage）。
+ * A 缺失 → null（无审计可言）；B 优先换渠道（跨厂商异构），同渠道为次优解；对照审核缺省复用 B。
+ */
+export function resolveVisionRoles(
+  channels: ChannelLike[],
+  decrypt: (hex: string) => string,
+): { a: VisionEndpoint; b: VisionEndpoint; compare: VisionEndpoint } | null {
+  const aCandidates = VISION_V1_MODEL ? [VISION_V1_MODEL] : V1_PREFERENCE
+  const bCandidates = VISION_V2_MODEL ? [VISION_V2_MODEL] : V2_PREFERENCE
+
+  const a = pickVisionEndpoint(channels, aCandidates)
+  if (!a) return null
+  const b = pickVisionEndpoint(channels, bCandidates, a.channel.id) ?? pickVisionEndpoint(channels, bCandidates)
+  if (!b) return null
+
+  const comparePick = VISION_COMPARE_MODEL ? pickVisionEndpoint(channels, [VISION_COMPARE_MODEL]) : undefined
+  return {
+    a: mkEndpoint(a.channel, a.model, decrypt),
+    b: mkEndpoint(b.channel, b.model, decrypt),
+    compare: comparePick ? mkEndpoint(comparePick.channel, comparePick.model, decrypt) : mkEndpoint(b.channel, b.model, decrypt),
+  }
+}
+
+/** 兼容旧名（既有测试/调用点）：A→V1、B→V2。 */
+export function resolveVisionPair(channels: ChannelLike[], decrypt: (hex: string) => string): { v1: VisionEndpoint; v2: VisionEndpoint } | null {
+  const roles = resolveVisionRoles(channels, decrypt)
+  return roles ? { v1: roles.a, v2: roles.b } : null
+}
+
+/**
+ * 盲描述提示（A、B 各自独立调用，互不可见——互证有效的前提）。
+ * 输出：带坐标的完整 JSON 描述（bbox 单位像素，原点图片左上角）。
+ */
+export const BLIND_DESCRIBE_PROMPT = [
+  '你是 UI 截图观察员。你会收到**同一屏幕按时间顺序采样的多帧截图**（帧号 1..N，视口一致）。',
+  '只输出一个 JSON 对象，不要解释文字、不要 markdown 围栏。',
+  '结构：',
+  '{',
+  '  "viewport": {"w": <int>, "h": <int>},',
+  '  "screen": {"title": "界面标题原文", "purpose": "这个界面在做什么（一句话）", "layout": "布局结构（分栏/层级/对齐）"},',
+  '  "elements": [',
+  '    {"id": "e1", "type": "button|input|textarea|select|checkbox|radio|link|text|heading|icon|image|card|nav|table|list|canvas|badge|other",',
+  '     "text": "逐字原文（无文字写空串）", "bbox": [left, top, width, height],',
+  '     "state": "default|selected|hover|disabled|loading|error|empty|unknown",',
+  '     "style": "可判定的视觉特征（颜色/字号层级/圆角/描边/阴影）", "frames_seen": [1,2,3], "note": "其它值得记录的事实"}',
+  '  ],',
+  '  "states_visible": ["当前可见状态（空态/加载/错误/选中…）"],',
+  '  "uncertain": ["无法确认的点，不要猜"]',
+  '}',
+  '坐标约定：以图片左上角为原点、单位像素，bbox=[左, 上, 宽, 高]（各帧视口一致，坐标通用）。',
+  '多帧规则：**任一帧可见即视为存在**；bbox 取该元素首个可见帧的位置，并用 frames_seen 记录它在哪些帧出现（如 [1,3]）。',
+  '三帧都不可见才算不存在。元素尽量列全（含纯文字与图标）。',
+  '禁止评价好坏、禁止给建议、禁止推测图片之外的内容；看不到的写进 uncertain。',
 ].join('\n')
 
-/** V2 指令：内嵌 V1 全文做互证（异构模型审计补漏）。 */
-export function buildV2Prompt(v1Report: string): string {
+/**
+ * 对照审核提示：给 A/B 两份**各自独立产出**的盲描述 JSON + 原图，要求二次识别后产出问题 JSON。
+ */
+export function buildComparePrompt(aJson: string, bJson: string): string {
   return [
-    '你是 UI 截图审核员。下面给出的是另一个模型对这张软件界面截图的观察报告（V1）。',
-    '你的任务是对照图片逐条核查 V1，只输出三类发现（仍不评价设计好坏）：',
-    '① 遗漏：图中清晰可见、但 V1 没有提到的元素/文字/状态；',
-    '② 不具体：V1 提到了但描述含糊，应补充精确信息；③ 不真实：V1 声称存在、但图中实际没有或矛盾的内容。',
-    '输出结构化 Markdown：## 遗漏 / ## 不具体修正 / ## 不真实纠正；每条注明图中位置证据。',
-    '若某类没有发现，写「无」。不确定的一律不要编造；V1 正确时不要为凑数而纠正。',
+    '你是 UI 截图审核员。下面有两份**互相独立**产出的同一屏幕的描述 JSON（观察员A、观察员B），以及**同一屏幕按时间顺序采样的多帧截图**。',
+  '多帧规则：任一帧可见即视为存在；跨帧才可见的元素（如游戏实体/动画）不得判为缺失。',
+    '任务：对照原图做二次识别，核查两份描述的真实性与准确性，输出一个 JSON 对象（不要解释文字、不要围栏）。',
+    '结构：',
+    '{',
+    '  "agree": ["两份一致且复核为真的要点"],',
+    '  "corrections": [{"who": "A|B|both", "claim": "被纠正的描述", "actual": "图中实际情况", "bbox": [l,t,w,h] 或 null}],',
+    '  "problems": [',
+    '    {"target": "description|product", "root_cause": "observer|product|ambiguous",',
+    '     "kind": "omission|missing_element|state_error|layout_error|inaccurate|false_claim",',
+    '     "severity": "low|medium|high|critical",',
+    '     "claim": "问题一句话（面向产品，不写代码建议）",',
+    '     "bbox": [l,t,w,h] 或 null,',
+    '     "evidence": "图中位置与可见证据",',
+    '     "suggest_fix": "期望的界面表现（用户视角，非实现方式）"}',
+    '  ],',
+    '  "confidence": "high|medium|low"',
+    '}',
+    '规则：只报能在图上指认的问题；两份都没提、图上也没有的不要报；两份一致但都错时以原图为准（写 corrections 并计入 problems）；',
+    '拿不准的降 severity，不要删；不要为凑数而报。',
     '',
-    '=== V1 报告开始 ===',
-    v1Report,
-    '=== V1 报告结束 ===',
+    '【target / root_cause 判定规则（必须遵守）】',
+    ' - 默认：omission / missing_element / state_error / layout_error → target=product；inaccurate / false_claim → target=description。',
+    ' - 若 false_claim 的根因是产品侧（控件缺失、状态不可辨、渲染错误、可访问性问题）→ root_cause=product 且 target=product。',
+    ' - 若 missing_element 只是观察员自己没看到 → root_cause=observer 且 target=description。',
+    ' - 拿不准根因时 root_cause=ambiguous，并沿用 kind 默认 target。',
+    ' - **混合问题必须拆成多条**（描述失误与产品缺陷不要写进同一条），每条只归一个 target。',
+    '',
+    '=== 观察员A JSON ===',
+    aJson,
+    '=== 观察员B JSON ===',
+    bJson,
   ].join('\n')
 }
 
-function countItems(section: string | undefined): number {
-  if (!section) return 0
-  const body = section.split('\n').filter((l) => /^\s*(\d+\.|[-*])\s+\S/.test(l) && !/^\s*\d+\.\s*无\s*$/.test(l) && l.trim() !== '无' && !/^\s*[-*]\s*无/.test(l))
-  return body.length
+/** 从模型输出里抠出 JSON（容忍围栏/前后噪声）；失败返回 undefined。 */
+export function extractJson<T = unknown>(text: string): T | undefined {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/)
+  const candidate = fenced?.[1] ?? text
+  const start = candidate.indexOf('{')
+  const end = candidate.lastIndexOf('}')
+  if (start < 0 || end <= start) return undefined
+  try {
+    return JSON.parse(candidate.slice(start, end + 1)) as T
+  } catch {
+    return undefined
+  }
 }
 
-/** V1+V2 → 裁判摘要（≤400 字）：三类计数 + 前两条发现原文截断。 */
-export function digestVisionReport(v1: string, v2: string): { digest: string; flagged: boolean } {
-  const section = (name: string) => {
-    const m = v2.match(new RegExp(`##\\s*${name}[^\\n]*\\n([\\s\\S]*?)(?=\\n##\\s|$)`))
-    return m?.[1]
+/** Q5 默认路由：kind → target（root_cause 可改判）。 */
+export function defaultTargetForKind(kind: VisionProblem['kind']): ProblemTarget {
+  return kind === 'inaccurate' || kind === 'false_claim' ? 'description' : 'product'
+}
+
+/**
+ * Q5 归一：target 缺失/非法时按 kind 推导；root_cause 明确时改判（observer→description、product→product）。
+ * 导出供修复协调器的白名单复核复用。
+ */
+export function normalizeTarget(kind: VisionProblem['kind'], rawTarget: unknown, rootCause: ProblemRootCause): ProblemTarget {
+  if (rootCause === 'observer') return 'description'
+  if (rootCause === 'product') return 'product'
+  if (rawTarget === 'description' || rawTarget === 'product') return rawTarget
+  return defaultTargetForKind(kind)
+}
+
+/**
+ * 修复白名单（评审 #3 收紧）：`target='product'` **且** 不存在类断言已获二次窗口确认。
+ * 未确认的缺失类问题走 confirmationRequiredProblems()，由 planner 复核后再放行。
+ */
+export function productProblems(problems: VisionProblem[]): VisionProblem[] {
+  return problems.filter((p) => p.target === 'product' && p.needs_confirmation !== true)
+}
+
+/** 待二次窗口确认的问题（缺证据类断言）：进 planner 复核，不进白名单。 */
+export function confirmationRequiredProblems(problems: VisionProblem[]): VisionProblem[] {
+  return problems.filter((p) => p.needs_confirmation === true)
+}
+
+/** 解析对照审核输出 → 问题清单（非法/缺字段的条目丢弃，只保留可指认的问题）。 */
+export function parseCompareOutput(text: string): { problems: VisionProblem[]; corrections: unknown[]; confidence?: string; parsed: boolean } {
+  const json = extractJson<{ problems?: unknown; corrections?: unknown; confidence?: unknown }>(text)
+  if (!json) return { problems: [], corrections: [], parsed: false }
+  const kinds = ['omission', 'inaccurate', 'false_claim', 'missing_element', 'state_error', 'layout_error']
+  const sevs = ['low', 'medium', 'high', 'critical']
+  const rootCauses = ['observer', 'product', 'ambiguous']
+  const problems: VisionProblem[] = (Array.isArray(json.problems) ? json.problems : [])
+    .map((raw): VisionProblem | undefined => {
+      const p = raw as Record<string, unknown>
+      const kind = String(p.kind || '')
+      const severity = String(p.severity || 'medium')
+      const claim = String(p.claim || '').trim()
+      if (!claim || !kinds.includes(kind)) return undefined
+      const bboxRaw = p.bbox
+      const bbox = Array.isArray(bboxRaw) && bboxRaw.length === 4 && bboxRaw.every((n) => typeof n === 'number')
+        ? (bboxRaw as [number, number, number, number])
+        : null
+      const rootCause = (rootCauses.includes(String(p.root_cause)) ? String(p.root_cause) : 'ambiguous') as ProblemRootCause
+      const typedKind = kind as VisionProblem['kind']
+      // 缺失类断言（"不存在"）需二次窗口确认，不直接进白名单（评审 #3）
+      const absenceKind = typedKind === 'omission' || typedKind === 'missing_element'
+      return {
+        kind: typedKind,
+        severity: (sevs.includes(severity) ? severity : 'medium') as VisionProblem['severity'],
+        target: normalizeTarget(typedKind, p.target, rootCause),
+        root_cause: rootCause,
+        claim,
+        bbox,
+        evidence: String(p.evidence || '').slice(0, 400),
+        suggest_fix: String(p.suggest_fix || '').slice(0, 400),
+        ...(absenceKind ? { needs_confirmation: true } : {}),
+      }
+    })
+    .filter((x): x is VisionProblem => x !== undefined)
+    .slice(0, 30)
+  return {
+    problems,
+    corrections: Array.isArray(json.corrections) ? json.corrections : [],
+    confidence: typeof json.confidence === 'string' ? json.confidence : undefined,
+    parsed: true,
   }
-  const omissions = countItems(section('遗漏'))
-  const vague = countItems(section('不具体修正'))
-  const falseClaims = countItems(section('不真实纠正'))
-  const flagged = omissions > 0 || falseClaims > 0
-  const topLines = (v2.match(/^\s*(?:\d+\.|[-*])\s+(?!无)\S.*$/gm) || []).slice(0, 2).map((l) => l.trim().slice(0, 90))
+}
+
+/** 摘要（≤400 字）：两份描述长度 + 问题计数（含 product/description 分档）+ 前两条产品侧问题。 */
+export function digestVisionReport(aText: string, bText: string, problems: VisionProblem[]): { digest: string; flagged: boolean } {
+  const product = productProblems(problems)
+  const high = product.filter((p) => p.severity === 'high' || p.severity === 'critical').length
+  const flagged = problems.length > 0
+  const top = product.slice(0, 2).map((p) => `[${p.severity}/${p.kind}] ${p.claim}`).join(' ｜ ')
   const digest = [
-    `视觉审计: V1 详述 ${v1.length} 字; V2 互证发现 遗漏${omissions}/不具体${vague}/不真实${falseClaims}`,
-    topLines.length ? `要点: ${topLines.join(' ｜ ')}` : '',
+    `视觉审计: A/B 盲描述 ${aText.length}/${bText.length} 字`,
+    `问题 ${problems.length} 条（产品侧 ${product.length}，high/critical ${high}；描述质量 ${problems.length - product.length} 不回喂代码）`,
+    top ? `要点: ${top}` : '',
   ].filter(Boolean).join('；').slice(0, 400)
   return { digest, flagged }
 }
 
-async function chatVision(ep: VisionEndpoint, instruction: string, imagePng: Buffer, timeoutMs: number): Promise<string> {
-  const resp = await fetch(`${ep.chatBase}/chat/completions`, {
+/** 视觉调用 max_tokens 缺省（env 可覆盖）。 */
+const VISION_MAX_TOKENS = Number(process.env.BLOMA_VISION_MAX_TOKENS || 8192)
+
+/**
+ * 采样参数（⑥⑦，2026-09-12 裁定）：固定帧数/间隔/视口/温度。
+ * 理由：单帧判 canvas 游戏会自相矛盾（蛇可能在两帧之间移动/未出现）；温度不固定则复验不可比
+ * （实测同图两模型输出 960 / 5365 字）。注意 temperature=0 也不完全确定 → 判据仍按元素级状态，不做文本比对。
+ */
+/**
+ * 观测窗口 = 帧数 × 间隔。**必须覆盖最慢的游戏/动画状态周期**，只看帧数会误判：
+ * 3 帧 × 900ms = 1.8s 的窗口可能正好落在蛇隐藏/开局前/状态切换间隙 → 三帧都无 → 误判 missing。
+ * 故默认 5 帧 × 1000ms = **约 5s 窗口**（评审 #3）；产品可配。
+ */
+export const VISION_FRAMES = Number(process.env.BLOMA_VISION_FRAMES || 5)
+export const VISION_FRAME_INTERVAL_MS = Number(process.env.BLOMA_VISION_FRAME_INTERVAL_MS || 1000)
+export const VISION_WINDOW_MS = VISION_FRAMES * VISION_FRAME_INTERVAL_MS
+export const VISION_VIEWPORT = { width: 1440, height: 900 }
+export const VISION_TEMPERATURE = Number(process.env.BLOMA_VISION_TEMPERATURE || 0)
+/** 已探测到的厂商上限缓存（按模型名）：避免每次调用都先吃一个 400（评审 ③）。 */
+const MAX_TOKENS_CAP_CACHE = new Map<string, number>()
+
+/**
+ * 从 400 报错里解析厂商声明的 max_tokens 上限。
+ * 实测样例（2026-09-12 智谱 glm-4v-flash）：
+ *   {"error":{"code":"1210","message":"max_tokens参数非法：限制数值范围[1,1024]"}} → 1024
+ * 解析失败返回 undefined（调用方保持原值，不猜）。
+ */
+export function parseMaxTokensCap(errorText: string): number | undefined {
+  const range = errorText.match(/\[\s*\d+\s*,\s*(\d{2,6})\s*\]/)
+  const afterKw = errorText.match(/max_tokens[^\d]{0,24}(\d{2,6})/i)
+  const cap = Number(range?.[1] ?? afterKw?.[1])
+  return Number.isFinite(cap) && cap > 0 ? cap : undefined
+}
+
+/** 纯函数：构造 OpenAI 兼容请求体（多帧图 + 固定温度）——便于单测断言参数固定（⑦）。 */
+export function buildVisionRequest(
+  ep: VisionEndpoint,
+  instruction: string,
+  frames: Buffer[],
+  maxTokens: number,
+): Record<string, unknown> {
+  return {
+    model: ep.model,
+    max_tokens: maxTokens,
+    temperature: VISION_TEMPERATURE,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text: instruction },
+        ...frames.map((frame) => ({
+          type: 'image_url',
+          image_url: { url: `data:image/png;base64,${frame.toString('base64')}` },
+        })),
+      ],
+    }],
+  }
+}
+
+export interface VisionCallTrace {
+  role: string
+  model: string
+  channel: string
+  responseId?: string
+  systemFingerprint?: string
+}
+
+async function chatVision(ep: VisionEndpoint, instruction: string, frames: Buffer[], timeoutMs: number, traces?: VisionCallTrace[], role?: string): Promise<string> {
+  const post = async (maxTokens: number) => fetch(`${ep.chatBase}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ep.apiKey}` },
     signal: AbortSignal.timeout(timeoutMs),
-    body: JSON.stringify({
-      model: ep.model, max_tokens: 8192,
-      messages: [{ role: 'user', content: [
-        { type: 'text', text: instruction },
-        { type: 'image_url', image_url: { url: `data:image/png;base64,${imagePng.toString('base64')}` } },
-      ] }],
-    }),
+    body: JSON.stringify(buildVisionRequest(ep, instruction, frames, maxTokens)),
   })
+
+  // 已探测过该模型上限 → 直接按上限请求，零浪费
+  const cachedCap = MAX_TOKENS_CAP_CACHE.get(ep.model)
+  const initial = cachedCap ? Math.min(cachedCap, VISION_MAX_TOKENS) : VISION_MAX_TOKENS
+  let resp = await post(initial)
+  if (resp.status === 400) {
+    const bodyText = await resp.text().catch(() => '')
+    const cap = parseMaxTokensCap(bodyText)
+    if (cap && cap < initial) {
+      MAX_TOKENS_CAP_CACHE.set(ep.model, cap)
+      resp = await post(cap)
+    } else {
+      throw new Error(`${ep.model} HTTP 400: ${bodyText.slice(0, 200)}`)
+    }
+  }
   if (!resp.ok) throw new Error(`${ep.model} HTTP ${resp.status}: ${(await resp.text().catch(() => '')).slice(0, 200)}`)
-  const json = await resp.json() as { choices?: { message?: { content?: string } }[] }
+  const json = await resp.json() as { id?: string; system_fingerprint?: string; choices?: { message?: { content?: string } }[] }
   const text = json.choices?.[0]?.message?.content || ''
   if (!text.trim()) throw new Error(`${ep.model} 返回空内容`)
+  // 溯源（评审 #4）：复验可比性不只看采样参数，还要能对齐模型/渠道/响应指纹
+  traces?.push({
+    role: role ?? 'unknown',
+    model: ep.model,
+    channel: ep.channelName,
+    ...(json.id ? { responseId: json.id } : {}),
+    ...(json.system_fingerprint ? { systemFingerprint: json.system_fingerprint } : {}),
+  })
   return text
 }
 
-async function screenshotPreview(previewUrl: string, timeoutMs: number): Promise<Buffer> {
+/**
+ * 多帧采样（⑥，2026-09-12 裁定）：固定视口、固定间隔、按时间顺序。
+ * 3 帧、间隔 900ms、视口 1440×900 为缺省；任一帧可见即视为元素存在（提高 canvas/动画类产物的判定稳定性）。
+ */
+export async function captureFrames(
+  previewUrl: string,
+  opts?: { frames?: number; intervalMs?: number; timeoutMs?: number },
+): Promise<Buffer[]> {
+  const frameCount = Math.max(1, opts?.frames ?? VISION_FRAMES)
+  const intervalMs = Math.max(0, opts?.intervalMs ?? VISION_FRAME_INTERVAL_MS)
   const browser = await chromium.launch({ headless: true })
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
-    await page.goto(previewUrl, { waitUntil: 'load', timeout: timeoutMs })
+    const page = await browser.newPage({ viewport: VISION_VIEWPORT })
+    await page.goto(previewUrl, { waitUntil: 'load', timeout: opts?.timeoutMs ?? 40_000 })
     await page.waitForTimeout(1200)
-    return await page.screenshot({ type: 'png', fullPage: true })
+    const frames: Buffer[] = []
+    for (let i = 0; i < frameCount; i++) {
+      frames.push(await page.screenshot({ type: 'png', fullPage: true }))
+      if (i < frameCount - 1) await page.waitForTimeout(intervalMs)
+    }
+    return frames
   } finally {
     await browser.close().catch(() => {})
   }
 }
 
+
+
 /**
- * 运行 L1 双视觉审计。任何一步失败 → unavailable（可见，不静默）；成功 → passed/flagged
- * 并把完整 V1/V2 报告写进项目文档（vision-audit.md，文档面板可见）。
+ * 运行 L1 视觉审计（三段调用：A 盲描述 → B 盲描述 → 对照审核）。
+ * 任何一步失败 → unavailable（可见，不静默）；成功 → 报告 + 结构化问题落项目文档。
  */
 export async function runVisionAuditGate(input: {
   previewUrl: string
@@ -178,28 +475,55 @@ export async function runVisionAuditGate(input: {
     return { status: 'skipped', digest: '视觉审计未执行（BLOMA_VISION_AUDIT=0 紧急停用）', note: 'env kill switch' }
   }
   const timeoutMs = input.timeoutMs ?? 180_000
-  let pair: ReturnType<typeof resolveVisionPair>
+  let roles: ReturnType<typeof resolveVisionRoles>
   try {
     // 必须用 raw 渠道列表：listChannels() 返回脱敏 api_key='***'，解密会得到空串（401 现场）
-    pair = resolveVisionPair(listEnabledRawChannels() as unknown as ChannelLike[], decryptApiKey)
+    roles = resolveVisionRoles(listEnabledRawChannels() as unknown as ChannelLike[], decryptApiKey)
   } catch (e) {
     return { status: 'unavailable', digest: `视觉审计未执行（渠道读取失败：${(e as Error).message.slice(0, 80)}）`, note: 'channel_error' }
   }
-  if (!pair) {
-    return { status: 'unavailable', digest: `视觉审计未执行（缺渠道：V1=${VISION_V1_MODEL} / V2=${VISION_V2_MODEL} 需任一启用渠道含该模型）`, note: 'no_channel' }
+  if (!roles) {
+    return {
+      status: 'unavailable',
+      digest: `视觉审计未执行（缺观察员渠道：A=${VISION_V1_MODEL || V1_PREFERENCE.join('/')} / B=${VISION_V2_MODEL || V2_PREFERENCE.join('/')} 需任一启用渠道含该模型）`,
+      note: 'no_channel',
+    }
   }
   try {
-    const png = await screenshotPreview(input.previewUrl, Math.min(timeoutMs, 40_000))
-    const v1 = await chatVision(pair.v1, V1_PROMPT, png, timeoutMs)
-    const v2 = await chatVision(pair.v2, buildV2Prompt(v1), png, timeoutMs)
-    const { digest, flagged } = digestVisionReport(v1, v2)
+    const frames = await captureFrames(input.previewUrl, { timeoutMs: Math.min(timeoutMs, 40_000) })
+    const traces: VisionCallTrace[] = []
+    // ① A、② B 各自独立盲描述（同一提示词、多帧、互不可见）
+    const a = await chatVision(roles.a, BLIND_DESCRIBE_PROMPT, frames, timeoutMs, traces, 'observerA')
+    const b = await chatVision(roles.b, BLIND_DESCRIBE_PROMPT, frames, timeoutMs, traces, 'observerB')
+    // ③ 对照审核：两份独立描述 + 多帧原图 → 二次识别 + 真实性问题 JSON
+    const compareRaw = await chatVision(roles.compare, buildComparePrompt(a, b), frames, timeoutMs, traces, 'compare')
+    const compare = parseCompareOutput(compareRaw)
+    const { digest, flagged } = digestVisionReport(a, b, compare.problems)
+
     writeVisionAuditDocument(input.projectId, [
-      '# 视觉审计报告（L1 双视觉互证）', '',
-      `> 生成：${new Date().toISOString()} | V1=${pair.v1.model}（${pair.v1.channelName}）| V2=${pair.v2.model}（${pair.v2.channelName}）`,
-      `> 结论：${flagged ? 'V2 对 V1 有实质补漏/纠正' : 'V1 报告经 V2 核查无实质问题'}`, '',
-      '## V1 详述', v1, '', '## V2 互证', v2, '',
+      '# 视觉审计报告（L1：盲描述A + 盲描述B + 对照审核）', '',
+      `> 生成：${new Date().toISOString()} | A=${roles.a.model}（${roles.a.channelName}）| B=${roles.b.model}（${roles.b.channelName}）| 对照审核=${roles.compare.model}（${roles.compare.channelName}）`,
+      `> 采样：${frames.length} 帧 / 间隔 ${VISION_FRAME_INTERVAL_MS}ms（观测窗口 ≈${Math.round(VISION_WINDOW_MS / 1000)}s）/ 视口 ${VISION_VIEWPORT.width}×${VISION_VIEWPORT.height} / temperature=${VISION_TEMPERATURE}`,
+      `> 溯源（复验可比性）：${traces.map((t) => `${t.role}=${t.model}@${t.channel}${t.systemFingerprint ? `#${t.systemFingerprint}` : ''}${t.responseId ? `(${t.responseId})` : ''}`).join(' | ')}`,
+      `> 已知局限：任一帧可见即判 present（过渡帧闪现可能被计为存在，第一版接受）；缺失类问题需二次窗口确认（needs_confirmation）才进修复白名单`,
+      `> 修复者角色：${VISION_FIXER_ROLE}（Bloma 编程模型；本报告只产出问题，不判败、不改代码）`,
+      `> 结论：${flagged ? `对照审核提出 ${compare.problems.length} 条问题（产品侧 ${compare.problems.filter((p) => p.target === 'product').length} / 描述质量 ${compare.problems.filter((p) => p.target === 'description').length}）` : '两份描述经对照审核未发现实质问题'}`, '',
+      '## 观察员A 盲描述（JSON）', '```json', a, '```', '',
+      '## 观察员B 盲描述（JSON）', '```json', b, '```', '',
+      '## 对照审核（二次识别 + 真实性核查）', '```json', compareRaw, '```', '',
     ].join('\n'))
-    return { status: flagged ? 'flagged' : 'passed', digest }
+    writeVisionProblemsDocument(input.projectId, JSON.stringify({
+      generated_at: new Date().toISOString(),
+      roles: { a: roles.a.model, b: roles.b.model, compare: roles.compare.model, fixer: VISION_FIXER_ROLE },
+      sampling: { frames: frames.length, intervalMs: VISION_FRAME_INTERVAL_MS, windowMs: VISION_WINDOW_MS, viewport: VISION_VIEWPORT, temperature: VISION_TEMPERATURE },
+      traces,
+      problems_total: compare.problems.length,
+      problems_product: compare.problems.filter((p) => p.target === 'product' && p.needs_confirmation !== true).length,
+      problems_needs_confirmation: compare.problems.filter((p) => p.needs_confirmation === true).length,
+      problems: compare.problems,
+    }, null, 2))
+
+    return { status: flagged ? 'flagged' : 'passed', digest, problems: compare.problems }
   } catch (e) {
     return { status: 'unavailable', digest: `视觉审计未执行（${(e as Error).message.slice(0, 160)}）`, note: 'run_error' }
   }
