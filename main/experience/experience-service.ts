@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { getExperienceIndexPath, getGeneratedProjectsDir } from '../../storage/config-paths'
 import { trackAnalytics } from '../platform-services'
 import { cardThreatensProtectedSurface } from './self-cert-guard'
+import { foldedFingerprints, readLifecycleRows } from './event-log'
 import type { ValidationReport } from './types'
 import {
   cardGovernance,
@@ -55,10 +56,13 @@ export interface RegisterInput {
 
 // —— 内存索引（启动惰性加载，写操作增量维护）——
 let cardsById: Map<string, ExperienceCard> | null = null
+/** 治理行折叠出的卡（隔离区）：不入消费面，但可审计/迁移回看（W2.2 灵感区读取口用）。 */
+let foldedById: Map<string, ExperienceCard> = new Map()
 
 /** 测试/脚本 seam：换 PROMA_HOME 后强制重载。 */
 export function resetExperienceIndexForTests(): void {
   cardsById = null
+  foldedById = new Map()
 }
 
 function ensureIndex(): Map<string, ExperienceCard> {
@@ -72,7 +76,11 @@ function ensureIndex(): Map<string, ExperienceCard> {
       for (const line of lines) {
         if (!line.trim()) continue
         try {
-          const card = JSON.parse(line) as ExperienceCard
+          const parsed = JSON.parse(line) as Record<string, unknown>
+          // F 系列 W2（2026-09-16）：v2 事件行/治理行不是卡——显式跳过不算坏行；
+          // 治理行经 foldedFingerprints 折叠消费面（materialized view，附卡行不动）。
+          if (parsed.record_type === 'event' || parsed.record_type === 'lifecycle') continue
+          const card = parsed as unknown as ExperienceCard
           if (card && typeof card.id === 'string' && typeof card.fingerprint === 'string' && card.body) {
             map.set(card.id, card) // 后行覆盖前行
           } else {
@@ -86,6 +94,20 @@ function ensureIndex(): Map<string, ExperienceCard> {
     }
   } catch (error) {
     console.warn(`${LOG} ledger load failed, start empty:`, (error as Error)?.message)
+  }
+  // 治理行折叠：被 quarantine/reclassify/retire/supersede 的卡不进任何读取面
+  try {
+    const folded = foldedFingerprints()
+    if (folded.size > 0) {
+      for (const [id, card] of [...map.entries()]) {
+        if (folded.has(card.fingerprint)) {
+          map.delete(id)
+          foldedById.set(id, card)
+        }
+      }
+    }
+  } catch {
+    // 折叠失败不阻断加载（展开原始卡，保守可见）
   }
   cardsById = map
   return map
@@ -434,7 +456,9 @@ function relevanceScore(card: ExperienceCard, query: InjectionQuery, now: number
 function matchesFilters(card: ExperienceCard, query: InjectionQuery): boolean {
   if (query.tag_prefix && !card.tag.startsWith(query.tag_prefix)) return false
   if (query.stage) {
-    if (card.kind !== 'anti_pattern' || card.body.stage !== query.stage) return false
+    if (card.kind === 'anti_pattern' && card.body.stage === query.stage) return true
+    if (card.kind === 'rule' && card.body.applies_when.stage === query.stage) return true
+    return false
   }
   if (query.capability) {
     if (card.kind !== 'pattern' || !card.body.capability.toLowerCase().includes(query.capability.toLowerCase())) return false
@@ -503,16 +527,40 @@ function recordExposure(surface: string, retrievable: ExperienceCard[], matched:
   }
 }
 
-/** 注入渲染成本估算：anti 按 symptom 长度 + 标签开销；pattern 按 summary。 */
+/** 注入渲染成本估算：anti 按 symptom、pattern 按 summary、rule 按 failure_mode + 标签开销。 */
 function cardRenderCost(card: ExperienceCard): number {
-  const body = card.body as { symptom?: string; implementation_summary?: string }
-  const core = Math.min(400, (body.symptom ?? body.implementation_summary ?? '').length)
+  const body = card.body as { symptom?: string; implementation_summary?: string; failure_mode?: string }
+  const core = Math.min(400, (body.symptom || body.implementation_summary || body.failure_mode || '').length)
   return core + card.tag.length + 32
 }
 
 /** 账本压缩视图（gap-report/回灌脚本/统计用）。 */
 export function readAllCards(): ExperienceCard[] {
   return [...ensureIndex().values()].map(cloneCard)
+}
+
+/**
+ * F 系列 W2.2 灵感区读取口（2026-09-16 Phase 10 承接）：被 card_reclassified 迁出的
+ * 灵感卡（R2 市调时代产物）——供向导灵感参考卡「历史灵感」来源位消费（UI 接线 v1）。
+ * 只回 tag+一句话（symptom/summary 择一），不回流消费面。
+ */
+export function listReclassifiedInspirations(): Array<{ tag: string; title: string }> {
+  try {
+    const reclassified = new Set(
+      readLifecycleRows()
+        .filter((row) => row.kind === 'card_reclassified')
+        .map((row) => row.target_fingerprint),
+    )
+    const out: Array<{ tag: string; title: string }> = []
+    for (const card of foldedById.values()) {
+      if (!reclassified.has(card.fingerprint)) continue
+      const body = card.body as { symptom?: string; implementation_summary?: string }
+      out.push({ tag: card.tag, title: (body.symptom ?? body.implementation_summary ?? card.tag).slice(0, 80) })
+    }
+    return out
+  } catch {
+    return []
+  }
 }
 
 export { isConsumable, isStale }

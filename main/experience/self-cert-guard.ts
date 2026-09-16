@@ -38,6 +38,10 @@ function injectableText(card: ExperienceCard): string {
       ...(card.body.review_checklist ?? []),
     ].join('\n')
   }
+  if (card.kind === 'rule') {
+    // v2 规则卡：失败形态+建议动作是注入面（W3 renderRuleInjection 同源字段）
+    return [card.body.failure_mode, ...card.body.recommended_actions, card.body.verification.check].join('\n')
+  }
   return [card.body.capability, card.body.implementation_summary, card.body.reuse_hint].join('\n')
 }
 

@@ -59,6 +59,24 @@ async function registerOnce(body = antiBody()) {
   return card as ExperienceCard
 }
 
+/** F 系列 W2.3（冻结 v1 注入后）：注入机制测试统一用 v2 rule 卡夹具。 */
+function ruleBody(text = 'TypeScript build fails with TS2345: argument type mismatch') {
+  return {
+    rule_kind: 'execution_rule' as const,
+    applies_when: { stage: 'build_gate' },
+    failure_mode: text,
+    recommended_actions: ['按报错修类型'],
+    verification: { check: 'build gate passed' },
+    causal_status: 'hypothesis' as const,
+    rev: 1,
+  }
+}
+
+async function registerRuleOnce(text?: string, tag = 'rule/build/types') {
+  const card = await tryRegisterCard({ kind: 'rule', tag, body: ruleBody(text), source: src() })
+  return card as ExperienceCard
+}
+
 describe('experience-service：注册与去重', () => {
   it('首次注册 → candidate recurrence=1 落盘；开关 off 时 no-op 返回 null', async () => {
     const card = await registerOnce()
@@ -194,11 +212,11 @@ describe('experience-service：状态机与统计', () => {
 
 describe('experience-service：selectForInjection', () => {
   async function seedFixture() {
-    // A: verified coding 卡；B: candidate recurrence=1（不可消费）；C: verified 但 stale
-    const a = await registerOnce(antiBody('TypeError: not a function'))
+    // A: verified rule 卡；B: candidate recurrence=1（不可消费）；C: verified 但 stale
+    const a = await registerRuleOnce('TypeError: not a function')
     await promoteToVerified(a!.id, 'replay_green')
-    const b = await registerOnce(antiBody('canvas rAF loop leaks on restart'))
-    const c = await registerOnce(antiBody('unhandled rejection in async init'))
+    const b = await registerRuleOnce('canvas rAF loop leaks on restart')
+    const c = await registerRuleOnce('unhandled rejection in async init')
     await promoteToVerified(c!.id, 'human_review')
     const stored = readAllCards().find((x) => x.id === c!.id)!
     const staleCard = { ...stored, last_verified_at: Date.now() - 91 * 86_400_000 }
@@ -209,25 +227,25 @@ describe('experience-service：selectForInjection', () => {
 
   it('只返回 verified || recurrence>=2；默认排除 stale；include_stale 可放宽', async () => {
     const { a, b, c } = await seedFixture()
-    const ids = (await selectForInjection({ kind: 'anti_pattern' })).map((x) => x.id)
+    const ids = (await selectForInjection({ kind: 'rule' })).map((x) => x.id)
     expect(ids).toContain(a!.id)
     expect(ids).not.toContain(b!.id) // candidate r=1
     expect(ids).not.toContain(c!.id) // stale
-    const withStale = await selectForInjection({ kind: 'anti_pattern', include_stale: true })
+    const withStale = await selectForInjection({ kind: 'rule', include_stale: true })
     expect(withStale.map((x) => x.id)).toContain(c!.id)
   })
 
   it('tag_prefix 过滤 + limit + budget_chars 整条取舍（不出现半条卡文本）', async () => {
     const { a } = await seedFixture()
     for (let i = 0; i < 8; i++) {
-      const card = await registerOnce(antiBody(`canvas frame budget exceeded scenario ${i} ${'x'.repeat(200)}`))
+      const card = await registerRuleOnce(`canvas frame budget exceeded scenario ${i} ${'x'.repeat(200)}`)
       await promoteToVerified(card!.id, 'replay_green')
     }
-    const canvasOnly = await selectForInjection({ kind: 'anti_pattern', tag_prefix: 'build_gate/' })
+    const canvasOnly = await selectForInjection({ kind: 'rule', tag_prefix: 'build_gate/' })
     expect(canvasOnly.every((x) => x.tag.startsWith('build_gate/'))).toBe(true)
-    const limited = await selectForInjection({ kind: 'anti_pattern', limit: 3 })
+    const limited = await selectForInjection({ kind: 'rule', limit: 3 })
     expect(limited).toHaveLength(3)
-    const budgeted = await selectForInjection({ kind: 'anti_pattern', budget_chars: 400 })
+    const budgeted = await selectForInjection({ kind: 'rule', budget_chars: 400 })
     expect(budgeted.length).toBeGreaterThan(0)
     expect(budgeted.length).toBeLessThan(8)
     const total = budgeted.reduce((n, x) => n + (x.kind === 'anti_pattern' ? x.body.symptom.length : 0), 0)
@@ -235,11 +253,11 @@ describe('experience-service：selectForInjection', () => {
   })
 
   it('context_hint 关键词重叠参与排序（提示匹配的卡靠前）', async () => {
-    const a = await registerOnce(antiBody('TypeError: not a function'))
+    const a = await registerRuleOnce('TypeError: not a function')
     await promoteToVerified(a!.id, 'replay_green')
-    const b = await registerOnce(antiBody('debounce timer leaks on unmount'))
+    const b = await registerRuleOnce('debounce timer leaks on unmount')
     await promoteToVerified(b!.id, 'replay_green')
-    const res = await selectForInjection({ kind: 'anti_pattern', context_hint: 'timer debounce unmount input handler' })
+    const res = await selectForInjection({ kind: 'rule', context_hint: 'timer debounce unmount input handler' })
     expect(res[0].id).toBe(b!.id)
   })
 })
@@ -269,7 +287,7 @@ describe('experience-service：健壮性', () => {
     }
     expect(Date.now() - start).toBeLessThan(5000)
     const t0 = performance.now()
-    await selectForInjection({ kind: 'anti_pattern', limit: 5 })
+    await selectForInjection({ kind: 'rule', limit: 5 })
     expect(performance.now() - t0).toBeLessThan(100)
   })
 })

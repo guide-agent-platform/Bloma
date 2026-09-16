@@ -189,16 +189,16 @@ describe('T-4 updateCardAttribution 幂等写回', () => {
     expect(await updateCardAttribution('nope', { stage: 'coding', description: 'd', method: 'rule', confidence: 1 })).toBeNull()
   })
 
-  it('集成：recordFailureCards 落 build_gate 卡后被规则层自动精化为 coding', async () => {
+  it('集成（W2.1 语义）：recordFailureCards 只落事件行不产卡（归因腿无新卡可精化）', async () => {
     recordFailureCards(
       { projectId: 'proj-attr', sessionId: 's' },
       { buildGate: { status: 'failed', detail: 'Could not resolve "./missing"', durationMs: 2 } },
     )
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setImmediate(r))
-    const cards = readAllCards()
-    expect(cards).toHaveLength(1)
-    const b = cards[0].kind === 'anti_pattern' ? cards[0].body : null
-    expect(b?.root_cause).toMatchObject({ stage: 'coding', method: 'rule', confidence: 1 })
+    expect(readAllCards()).toHaveLength(0)
+    const { readExperienceEvents } = await import('../../../main/experience/event-log')
+    const events = readExperienceEvents()
+    expect(events.some((e) => e.event_type === 'build_gate_failure')).toBe(true)
   })
 })

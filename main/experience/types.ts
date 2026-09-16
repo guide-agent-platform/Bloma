@@ -23,7 +23,7 @@ import { createHash } from 'node:crypto'
 // 信封层（所有卡共有）
 // =========================================================================
 
-export type CardKind = 'anti_pattern' | 'pattern'
+export type CardKind = 'anti_pattern' | 'pattern' | 'rule'
 /**
  * 生命周期（C2a，2026-09-09）：candidate → verified（机制验证：replay/sandbox/human）
  * → active（迁移+负例验证齐备，fail-closed：promoteToActive 无证据拒升）→ retired。
@@ -85,7 +85,9 @@ export function cardGovernance(card: ExperienceCard): CardGovernance {
   const hypothesis =
     card.kind === 'anti_pattern'
       ? (card.body.root_cause.description || card.body.symptom || '').slice(0, 200)
-      : (card.body.capability || '').slice(0, 200)
+      : card.kind === 'rule'
+        ? card.body.failure_mode.slice(0, 200)
+        : (card.body.capability || '').slice(0, 200)
   return {
     scope: { taskTypes: ['*'] },
     hypothesis,
@@ -93,6 +95,39 @@ export function cardGovernance(card: ExperienceCard): CardGovernance {
     validationReportIds: [],
     rollbackConditions: [],
   }
+}
+
+// =========================================================================
+// v2 规则卡体（F 系列 W3，咨询 F Q1.4 规则层；Phase 10 W2 承接 2026-09-16）
+// 行动规则的卡体 schema：旧 anti_pattern 卡（symptom/trigger_condition/root_cause 原文
+// 复制）随存量隔离不再消费；v2 卡只走本 schema，产出仅人工确认（种子常量先行）。
+// =========================================================================
+
+export type RuleKind = 'execution_rule' | 'clarification_rule' | 'verification_rule'
+export type CausalStatus = 'unknown' | 'hypothesis' | 'supported'
+
+export interface RuleCardBody {
+  rule_kind: RuleKind
+  /** 适用条件（受控词表匹配；hard filter） */
+  applies_when: {
+    stage?: string
+    template_types?: string[]
+    capabilities?: string[]
+  }
+  /** 不遵守时的失败形态（事实描述，不归因） */
+  failure_mode: string
+  /** 现在执行的 n 步（引用真实工具与检查语义） */
+  recommended_actions: string[]
+  /** 完成证据与假阳性提示 */
+  verification: { check: string; false_positive_hint?: string }
+  /** 明确不适用场景 */
+  exceptions?: string[]
+  causal_status: CausalStatus
+  /** 证据引用（事件行 event_id 或案例标识） */
+  evidence_refs?: string[]
+  applicability?: { platform?: string; channel?: string; capability?: string }
+  /** 规则语义版本（同 id 修订递增；注入去重用） */
+  rev?: number
 }
 
 export interface CardEnvelope {
@@ -221,6 +256,7 @@ export interface PatternBody {
 export type ExperienceCard =
   | (CardEnvelope & { kind: 'anti_pattern'; body: AntiPatternBody })
   | (CardEnvelope & { kind: 'pattern'; body: PatternBody })
+  | (CardEnvelope & { kind: 'rule'; body: RuleCardBody })
 
 // =========================================================================
 // 治理常量（全局唯一定义处，消费端一律引用）
@@ -315,6 +351,12 @@ export function sanitizeCard<C extends ExperienceCard>(card: C): C {
     if (typeof rc.reasoning === 'string') rc.reasoning = s(rc.reasoning)
     body.test_checklist = Array.isArray(body.test_checklist) ? (body.test_checklist as unknown[]).map((x) => s(String(x))) : []
     body.review_checklist = Array.isArray(body.review_checklist) ? (body.review_checklist as unknown[]).map((x) => s(String(x))) : []
+  } else if (out.kind === 'rule') {
+    body.failure_mode = s(String(body.failure_mode ?? ''))
+    body.recommended_actions = Array.isArray(body.recommended_actions) ? (body.recommended_actions as unknown[]).map((x) => s(String(x))) : []
+    const v = (body.verification ?? {}) as Record<string, unknown>
+    v.check = s(String(v.check ?? ''))
+    if (typeof out.source.session_id === 'string') out.source.session_id = s(out.source.session_id)
   } else {
     body.capability = s(String(body.capability ?? ''))
     body.implementation_summary = s(String(body.implementation_summary ?? ''))
@@ -334,11 +376,14 @@ export function normalizeForFingerprint(text: string): string {
 }
 
 /** 语义指纹（sha256 前 16 hex，xxhash 零依赖替身）。 */
-export function computeFingerprint(kind: CardKind, body: AntiPatternBody | PatternBody): string {
+export function computeFingerprint(kind: CardKind, body: AntiPatternBody | PatternBody | RuleCardBody): string {
   let raw: string
   if (kind === 'anti_pattern') {
     const b = body as AntiPatternBody
     raw = `${b.stage}|${b.symptom}`
+  } else if (kind === 'rule') {
+    const b = body as RuleCardBody
+    raw = `rule|${b.rule_kind}|${b.failure_mode}`
   } else {
     const b = body as PatternBody
     raw = `${b.capability}|${b.api_signature}`
@@ -400,6 +445,10 @@ export function keyFromSymptom(text: string): string {
 /** 消费入池资格：verified 恒可；candidate 需达复发阈值（首注册即落盘不丢数据）。 */
 export function isConsumable(card: CardEnvelope): boolean {
   if (card.status === 'retired') return false
+  // F 系列 W2.3（Phase 10 承接 2026-09-16）：旧消费面立即冻结——注入/裁判面只放行
+  // v2 rule 卡（v1 anti_pattern/pattern 的 symptom/root_cause 原文复制旧病不再消费；
+  // 拍板 D2：无 verified v2 卡时裁判【常见错法】恒空，不降门槛不伪造）。
+  if (card.kind !== 'rule') return false
   if (card.status === 'verified' || card.status === 'active') return true
   return card.recurrence >= EXPERIENCE_GOVERNANCE.RECURRENCE_THRESHOLD
 }

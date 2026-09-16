@@ -384,3 +384,15 @@
 - **重要环境陷阱（实测入档）**：Windows Node 22.22.0 `fs.cpSync(recursive:true)` 源目录名含非 ASCII（中文项目名）→ **段错误杀进程**（copyFileSync 安全）——本模块一律逐文件复制（PR-3 copyProjectTree 同款规避先例）；快照/恢复路径的 cpSync 源均为 ASCII（uuid 目录）不受影响。
 - 单测：export-manifest 新文件 6 例（开关三态/manifest 构建写读回环排除集/漂移三分类+无 manifest clean/git 无仓库 undefined/升级全链（新代码+数据携带+备份+迁移+报告+落地源零触碰）/无迁移 none 态）。
 - 狗粮：`setx BLOMA_EXPORT_V2 1` + 重启；观察点：导出包出现 export-manifest.json 且 export-info 带 git_commit。
+
+## §37 Phase 10 W2——经验库采集事件化+存量隔离（2026-09-16，承接 F 系列 Wave 2 拍板 D1/D2）
+
+| 开关 | 控制面 | 缺省 | 语义变化 | 落点 |
+|---|---|---|---|---|
+| `BLOMA_EXPERIENCE`（既有，语义收窄） | 新事件采集（不改卡消费——消费面已结构性冻结） | **off** | on 时四写点+C3 改落 **v2 事件行**（`record_type:event`：observations 只记事实不产卡不归因，root_cause 停写）；off=零副作用 | `main/experience/event-log.ts`（新，事件/治理行唯一读写面）+ error-card.ts 改写（recordFailureCards 签名不变六写点零改动） |
+
+- **结构性冻结（无开关，拍板 2.3/D2）**：`isConsumable` 只放行 v2 `rule` 卡——v1 anti_pattern/pattern 全部退出注入/裁判消费面（【常见错法】在无 verified 规则卡时恒空，不降门槛不伪造）；账本加载器跳过 v2 行不告警 + 治理行折叠（quarantine/reclassify/retire/supersede 离开全部读取面，折叠区可审计）。
+- **v2 规则卡类型**：CardKind 增 'rule'（RuleCardBody：rule_kind/applies_when/failure_mode/recommended_actions/verification/exceptions/causal_status/evidence_refs/rev）；指纹/净化/治理/自证防护/judge 渲染/注入成本全链适配。
+- **存量迁移**：`scripts/migrate-experience-v2.mjs`（幂等 migration_id=v2-isolation-20260916）：pattern 卡→card_reclassified（灵感区，`listReclassifiedInspirations()` 读取口，向导接线 v1）+ 其余 v1 卡→card_quarantined（root_cause=symptom 复制未经证实如实入 reason）；--dry-run 支持。
+- 单测：experience 族 14 文件 111 例全绿（error-card/write-points 改事件断言；service/governance/judge-checklist 注入夹具换 rule；root-cause 集成改「不产卡」断言；迁移脚本 E2E spawn 真 node）。
+- 狗粮观察：`BLOMA_EXPERIENCE=1` 时账本出现 record_type:event 行；老卡不再进任何注入面。

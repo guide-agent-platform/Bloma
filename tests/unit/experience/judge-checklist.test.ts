@@ -4,24 +4,24 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { buildJudgeErrorPatternsSection } from '../../../main/experience/judge-checklist'
 import { promoteToVerified, resetExperienceIndexForTests, tryRegisterCard } from '../../../main/experience/experience-service'
-import type { AntiPatternBody } from '../../../main/experience/types'
+import type { RuleCardBody } from '../../../main/experience/types'
 
 /**
- * T-6 裁判清单注入（为审查做指导）：
- * - buildJudgeErrorPatternsSection：verified anti_pattern → 【常见错法】段
- * - 空账本 / 开关 off → 空串（调用方 filter(Boolean) 保证与现状字节级等价——关键回归锁）
- * - 段含 tag/symptom/审查关注/review_checklist；预算收缩条数
+ * T-6 裁判清单注入（W2.3 冻结 v1 后只认 v2 rule 卡；拍板 D2——无 verified 规则卡恒空）：
+ * - buildJudgeErrorPatternsSection：verified rule → 【常见错法】段
+ * - 空账本 / 开关 off → 空串（调用方 filter(Boolean) 保证字节级等价——关键回归锁）
+ * - 段含 tag/failure_mode/审查关注（动作+验证）；预算收缩条数
  */
 
-function body(symptom: string, review: string[]): AntiPatternBody {
+function body(failure: string, actions: string[]): RuleCardBody {
   return {
-    stage: 'coding',
-    symptom,
-    trigger_condition: 't',
-    root_cause: { stage: 'coding', description: 'd', method: 'rule', confidence: 1 },
-    test_checklist: [],
-    review_checklist: review,
-    severity: 3,
+    rule_kind: 'execution_rule',
+    applies_when: { stage: 'coding' },
+    failure_mode: failure,
+    recommended_actions: actions,
+    verification: { check: '终验通过' },
+    causal_status: 'hypothesis',
+    rev: 1,
   }
 }
 
@@ -49,7 +49,7 @@ describe('judge-checklist：审查指导注入段', () => {
 
   it('candidate（未 verified）不注入；verified 产【常见错法】段含审查关注', async () => {
     const cand = await tryRegisterCard({
-      kind: 'anti_pattern',
+      kind: 'rule',
       tag: 'coding/gwt/save_missing',
       body: body('GWT 场景「F-001 当提交时，应保存记录」未通过：无保存', ['检查提交事件绑定']),
       source: { type: 'gwt_failure', project_hash: 'p1', timestamp: Date.now() },
@@ -66,7 +66,7 @@ describe('judge-checklist：审查指导注入段', () => {
   it('预算极小时段仍产但收缩条数（不腰斩格式头）', async () => {
     for (let i = 0; i < 5; i++) {
       const c = await tryRegisterCard({
-        kind: 'anti_pattern',
+        kind: 'rule',
         tag: `coding/gwt/u${i}`,
         body: body(`错误症状 ${i} ${'详'.repeat(200)}`, [`关注点 ${i}`]),
         source: { type: 'gwt_failure', project_hash: 'p1', timestamp: Date.now() },

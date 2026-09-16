@@ -13,12 +13,11 @@ import { createChannel } from '../../../main/channel-manager'
 import { setSandboxRuntimeForTests, clearSandboxRuntimeForTests } from '../../../main/platform-services'
 
 /**
- * T-1 写点集成测试（用户计划 §3.1.2 变异要求的落点）：
- * - 写点①（入口 A 修复预算耗尽熔断）：runAgentLoopPostTesting 预算已尽 + GWT 有失败
- *   → registerCandidateCard spy 收到 coding/gwt/* 与 unknown/outcome/unexpected_exit；
- * - 写点②（裁判退回）：runJudgeReview 退回流 → spy 收到 coding/judge/*；
- * - 负断言：GWT 全过路径不产 gwt/outcome 卡（正常成功零写卡）；
- * - 源码锚：编排器内 recordFailureCards( 恰好 5 处（含熔断统一写点④）——删除任一写点此断言必红（变异门）。
+ * F 系列 W2.1（2026-09-16 Phase 10 承接）：写点集成改事件行断言——
+ * - 写点①（入口 A 修复预算耗尽熔断）：gwt_failure + abnormal_outcome 事件成对；
+ * - 写点②（裁判退回）：judge_return 事件；
+ * - 负断言：GWT 全过路径零事件行；
+ * - 源码锚：编排器内 recordFailureCards( 恰好 5 处（删写点必红=变异门）。
  * mock 面复制 tests/unit/coding/programming-orchestrator-repair.test.ts 的成熟 harness。
  */
 
@@ -45,12 +44,12 @@ vi.mock('../../../main/coding/build-gate', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../main/coding/build-gate')>()
   return { ...actual, runBuildGate: mocks.runBuildGate }
 })
-vi.mock('../../../main/experience/experience-service', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/experience/experience-service')>()
-  return { ...actual, registerCandidateCard: vi.fn(async (card: unknown) => card) }
-})
+vi.mock('../../../main/experience/event-log', () => ({
+  appendExperienceEvent: vi.fn(() => null),
+}))
 
-import { registerCandidateCard } from '../../../main/experience/experience-service'
+import { appendExperienceEvent } from '../../../main/experience/event-log'
+import type { AppendEventInput } from '../../../main/experience/event-log'
 import { runAgentLoopPostTesting } from '../../../main/coding/programming-orchestrator'
 
 function gwtFailed(): GwtTestResult {
@@ -75,8 +74,8 @@ function junkQuery(): SDKQuery {
   }
 }
 
-function spyTags(): string[] {
-  return vi.mocked(registerCandidateCard).mock.calls.map((call) => (call[0] as { tag: string }).tag)
+function spyEventTypes(): string[] {
+  return vi.mocked(appendExperienceEvent).mock.calls.map((call) => (call[0] as AppendEventInput).eventType)
 }
 
 describe('T-1 写点集成（账本门面 spy 断言）', () => {
@@ -89,7 +88,7 @@ describe('T-1 写点集成（账本门面 spy 断言）', () => {
   beforeEach(() => {
     process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'proma-wp-'))
     process.env.BLOMA_EXPERIENCE = '1' // 门面 gate 需要开关开；service 已 mock 不写真账本
-    vi.mocked(registerCandidateCard).mockClear()
+    vi.mocked(appendExperienceEvent).mockClear()
     mocks.runAgentLoop.mockReset()
     mocks.runAgentLoop.mockResolvedValue(loopCompleted())
     mocks.runGwtScenarios.mockReset()
@@ -150,23 +149,24 @@ describe('T-1 写点集成（账本门面 spy 断言）', () => {
     }
   }
 
-  it('写点①：修复预算耗尽熔断 → GWT 场景卡 + unexpected_exit 结局卡成对落账本', async () => {
+  it('写点①：修复预算耗尽熔断 → gwt_failure + abnormal_outcome 事件成对落账本', async () => {
     updateProject(projectId, { test_repair_count: 1 }) // quick 预算缺省 1，已耗尽
     mocks.runGwtScenarios.mockResolvedValue(gwtFailed())
     await runAgentLoopPostTesting(baseInput())
     await new Promise((r) => setImmediate(r))
-    const tags = spyTags()
-    expect(tags.some((t) => t.startsWith('coding/gwt/'))).toBe(true)
-    expect(tags).toContain('unknown/outcome/unexpected_exit')
+    const types = spyEventTypes()
+    expect(types).toContain('gwt_failure')
+    expect(types).toContain('abnormal_outcome')
   })
 
-  it('负断言：GWT 全过的健康路径不产 gwt/outcome 卡', async () => {
+  it('负断言：GWT 全过的健康路径零事件行', async () => {
     updateProject(projectId, { test_repair_count: 1 })
     mocks.runGwtScenarios.mockResolvedValue(gwtPassed())
     await runAgentLoopPostTesting(baseInput())
     await new Promise((r) => setImmediate(r))
-    const tags = spyTags()
-    expect(tags.some((t) => t.startsWith('coding/gwt/') || t.startsWith('unknown/outcome/'))).toBe(false)
+    const types = spyEventTypes()
+    expect(types).not.toContain('gwt_failure')
+    expect(types).not.toContain('abnormal_outcome')
   })
 
   it('写点②：裁判退回流每轮退回产 coding/judge/* 卡', async () => {
@@ -175,7 +175,7 @@ describe('T-1 写点集成（账本门面 spy 断言）', () => {
     const result = await runJudgeReview({ request_id: 'req-wp2', session_id: sessionId, project_id: p2.project_id })
     await new Promise((r) => setImmediate(r))
     expect(result.verdict.verdict).toBe('return')
-    expect(spyTags().some((t) => t.startsWith('coding/judge/'))).toBe(true)
+    expect(spyEventTypes()).toContain('judge_return')
   })
 
   it('写点④：修复轮跑完仍败首轮熔断（灰度实弹补位路径）→ GWT 场景卡+unexpected_exit 卡', async () => {
@@ -184,9 +184,9 @@ describe('T-1 写点集成（账本门面 spy 断言）', () => {
     const out = await runAgentLoopPostTesting(baseInput())
     await new Promise((r) => setImmediate(r))
     expect(out.verdict).toBe('blocked')
-    const tags = spyTags()
-    expect(tags.some((t) => t.startsWith('coding/gwt/'))).toBe(true)
-    expect(tags).toContain('unknown/outcome/unexpected_exit')
+    const types = spyEventTypes()
+    expect(types).toContain('gwt_failure')
+    expect(types).toContain('abnormal_outcome')
   })
 
   it('源码锚：编排器 recordFailureCards( 恰好 5 处（含熔断统一写点④）（删写点必红=变异门）', () => {
