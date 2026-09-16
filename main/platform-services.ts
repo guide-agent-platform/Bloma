@@ -830,6 +830,16 @@ export function restoreAsVersionEnabled(): boolean {
 }
 
 /**
+ * Phase 10 W1-2 开关：BLOMA_ROLLBACK_CODE_ONLY 缺省 off（data/ 随快照精确回滚=现状）。
+ * on：回滚只回代码与文档——data/ 先备份到 data-backups/<快照短id>-<时间戳>/ 再保护性
+ * 保留（真实使用语义：用户数据不因代码回滚而丢失）；沙箱实验语义仍可用 off 回现状。
+ */
+export function rollbackCodeOnlyEnabled(): boolean {
+  const raw = (process.env.BLOMA_ROLLBACK_CODE_ONLY ?? '').trim().toLowerCase()
+  return raw === '1' || raw === 'on' || raw === 'true'
+}
+
+/**
  * 快照文件恢复原语（不含 guard / 沙箱重启）：
  * 停掉运行中的沙箱并等待退出（Windows 句柄锁）→ 清空项目目录 → 复制快照文件 →
  * 恢复文档归档（如有）→ 更新 current_snapshot_id 指针。
@@ -868,8 +878,20 @@ export async function restoreSnapshotFiles(input: {
   // Phase 10 W1-1：恢复前把受保护顶层目录挪出（同盘 rename 零拷贝）——.git 是产物
   // 版本史（回滚不回退历史）、data-backups 是回滚前用户数据备份（W1-2）。归档本就
   // 不含它们（createSnapshot filter）；挪回前若归档带回同名目录（历史遗留）让位删除。
+  // Phase 10 W1-2（BLOMA_ROLLBACK_CODE_ONLY on）：data/ 同样保护——先整份备份到
+  // data-backups/ 再随受保护目录一起挪出，回滚只回代码与文档（用户数据不丢）。
+  const codeOnly = rollbackCodeOnlyEnabled()
+  const dataPath = join(project.root_path, 'data')
+  if (codeOnly && existsSync(dataPath)) {
+    const backupDir = join(project.root_path, 'data-backups', `${input.snapshot_id.slice(0, 8)}-${Date.now()}`)
+    mkdirSync(backupDir, { recursive: true })
+    cpSync(dataPath, backupDir, { recursive: true, force: true })
+  }
+  const preservedNames: string[] = codeOnly
+    ? [...SNAPSHOT_PRESERVED_TOPLEVEL, 'data']
+    : [...SNAPSHOT_PRESERVED_TOPLEVEL]
   const preserved: Array<{ temp: string; dest: string }> = []
-  for (const name of SNAPSHOT_PRESERVED_TOPLEVEL) {
+  for (const name of preservedNames) {
     const dest = join(project.root_path, name)
     if (!existsSync(dest)) continue
     const temp = `${project.root_path}.__preserve_${name}_${Date.now()}`

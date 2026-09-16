@@ -334,3 +334,13 @@
 - **基础设施常开（与本开关无关）**：快照/恢复双侧排除 `.git`/`data-backups`（`SNAPSHOT_PRESERVED_TOPLEVEL`，platform-services）——归档 cpSync filter 排除 + 恢复前挪出/恢复后挪回（同盘 rename）+ finally 兜底；回滚不回退版本史与备份；目录不存在时行为字节级不变。
 - 单测：project-git 新文件 9 例（开关三态/off 不建 .git/root_missing fail-open/幂等 init+gitignore 手写行保留+autocrlf/commit+hash+nothing_to_commit+summary 压平/无全局身份局部兜底可提交/data 与 data-backups 被 ignore/归档排除+恢复保留+data 仍精确回滚+挪出零残留——后组不依赖 git 二进制）。
 - 狗粮：`setx BLOMA_PROJECT_GIT 1` + 重启 Bloma；观察点：项目目录出现 .git、决策日志/decisions.md 出现 [bloma:*] 提交、回滚后 git log 连续。
+
+## §32 Phase 10 W1-2——回滚代码/数据分离（2026-09-16，咨询 G 收口·真实项目交付体系）
+
+| 开关 | 控制面 | 缺省 | off/未设 | '1'/'true' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_ROLLBACK_CODE_ONLY` | restoreSnapshotFiles 的 data/ 语义 | **off** | data/ 随快照精确回滚（字节级现状，snapshot-data-rollback 既有锁钉死） | 回滚只回代码与文档——data/ 先整份备份到 `data-backups/<快照短id>-<时间戳>/` 再保护性保留（与 .git 同款挪出/挪回，preservedNames 增补 data）；适用 restoreSnapshotFiles 全部调用方（rollbackSnapshot 熔断/IPC 回滚 + T1 崩溃对账）；备份目录本身被快照/恢复双侧排除（§31） | `rollbackCodeOnlyEnabled` + restoreSnapshotFiles（main/platform-services.ts） |
+
+- 单测：rollback-code-only 新文件 5 例（开关三态/off 字节级现状 data 精确回滚/on data 保留+备份内容=回滚前+代码仍回滚/二次回滚备份独立不覆盖/无 data 目录豁免）。
+- 已知边界（登记）：I5 回滚弹窗文案两口径展示依赖渲染端 env 透传（I4 先例同款待办）；on 模式下「恢复即新版本」的版本说明需带 data 保留语义（I6 文案后续随拍）。
+- 狗粮：`setx BLOMA_ROLLBACK_CODE_ONLY 1` + 重启 Bloma；观察点：熔断回滚后用户数据仍在 + data-backups/ 出现备份。
