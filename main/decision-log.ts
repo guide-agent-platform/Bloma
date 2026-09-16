@@ -19,6 +19,8 @@ import { listSessions } from './session-service'
  */
 
 export type DecisionType =
+  /** Phase 10 向导 loop 化（2026-09-16）：BLOMA_GUIDE_LOOP on 时每轮决策/自由对话的观测行 */
+  | 'guide_loop'
   | 'clarification_card'
   | 'clarification_answer'
   /** Phase 7 U4 J2（2026-09-10）：对话内减负卡（先看方案/继续补充）与用户回答 */

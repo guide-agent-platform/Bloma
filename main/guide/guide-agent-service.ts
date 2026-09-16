@@ -33,6 +33,8 @@ import { resolveRoutedChannelId } from '../category-routing'
 import { getChannelByIdRaw } from '../channel-manager'
 import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../orchestrator'
 import { trackAnalytics } from '../platform-services'
+import { runAgentLoop } from '../agent-loop'
+import { buildGuideTools, guideLoopEnabled, type GuideDecision } from './guide-tools'
 import {
   detectOrphanEnrichmentClarification,
   hasPendingEnrichmentClarification,
@@ -122,6 +124,18 @@ interface GuideRequirementItem {
 const FIRST_TURN_RULE = `
 
 本轮提示：这是用户在本次会话的第一条消息。绝大多数一句话想法都还不足以直接开工——若你对需求的理解还写不出具体可验收的功能清单，必须先输出 ask_clarification（问最影响成品形态的那个未知点）；只有用户首条消息已经足够具体时才可输出 confirm_requirements。无论哪种，都不允许跳过确认直接开工——平台有 PRD 确认门兜底。`
+
+/** 向导 loop 化附录（Phase 10，2026-09-16，BLOMA_GUIDE_LOOP=on 时追加到 system 尾部）：
+ *  覆盖「只输出 JSON」旧格式指令——决策改由 guide_decide 工具提交，旁白可自然对话，
+ *  可先用只读事实工具了解项目现状。护栏（确认门/熔断/让渡）不变，全部在宿主侧。 */
+const GUIDE_LOOP_ADDENDUM = `
+
+【对话与决策（工具模式）】本段优先级最高，与上文格式指令冲突时以本段为准：
+- 不要输出 JSON 文本。结构化决策用 guide_decide 工具提交（参数含义与旧格式一致）。
+- 可以自然对话：呼应用户的想法、补充建议、回答追问；旁白写给用户看（简体中文），不要提前复述 guide_decide 里将提交的 reply。
+- 需要了解项目现状时，先调用 read_prd_backplane / read_test_report / list_project_files 再决定问什么（迭代类需求尤其先看报告）。
+- 除纯寒暄/纯答疑外，每轮应以一次 guide_decide 结束：问最影响成品形态的关键问题（ask_clarification），或需求已闭环时整理清单确认（confirm_requirements）。
+- 决策提交后即等待用户回应，不要继续输出。`
 
 /**
  * 规则路由三张固定卡片（日常生活/工作提效/你帮我决定）→ 草图需求扩写。
@@ -1093,6 +1107,108 @@ export async function handleGuideMessage(
  *
  * 任何失败（网络 / 非 JSON / 校验不过）都返回 false，由调用方回退规则路由。
  */
+// ---- 向导 loop 化（Phase 10，2026-09-16）：模型调用层的 loop 实现 ----
+
+/** free_chat 连续计数（内存态：进程内有效；决策即清零——跨重启丢失可接受，防线只防当场聊天不收敛）。 */
+const freeChatStreaks = new Map<string, number>()
+
+function freeChatStreakOf(sessionId: string): number {
+  return freeChatStreaks.get(sessionId) ?? 0
+}
+
+function bumpFreeChatStreak(sessionId: string): void {
+  freeChatStreaks.set(sessionId, freeChatStreakOf(sessionId) + 1)
+}
+
+function resetFreeChatStreak(sessionId: string): void {
+  freeChatStreaks.delete(sessionId)
+}
+
+/** GuideDecision（工具入参）→ GuideParsed（既有路由块输入）的轻量归一。 */
+function normalizeGuideDecisionToParsed(decision: GuideDecision): GuideParsed {
+  if (decision.action === 'ask_clarification') {
+    return { action: 'ask_clarification', reply: String(decision.reply ?? ''), questions: Array.isArray(decision.questions) ? decision.questions : [] }
+  }
+  if (decision.action === 'confirm_requirements') {
+    return {
+      action: 'confirm_requirements',
+      reply: String(decision.reply ?? ''),
+      requirements: Array.isArray(decision.requirements) ? decision.requirements : [],
+      research_queries: Array.isArray(decision.research_queries) ? decision.research_queries : [],
+    }
+  }
+  return { action: 'generate_sketch', reply: String(decision.reply ?? ''), requirements: Array.isArray(decision.requirements) ? decision.requirements : [] }
+}
+
+type GuideLoopOutcome =
+  | { kind: 'decision'; decision: GuideParsed }
+  | { kind: 'free_chat'; text: string }
+  | { kind: 'failed' }
+
+/**
+ * 向导 loop 轮（BLOMA_GUIDE_LOOP=on）：一次用户消息 = 一次 loop run。
+ * - 自由度：模型可先调只读事实工具、可自然对话（旁白经 message_delta 上屏并落 JSONL）；
+ * - 收敛口：guide_decide 工具提交决策（onDecide 持有者带回）；
+ * - 防线：free_chat 连续 ≥3 轮时，task 尾部注入宿主提醒（只影响本轮模型可见，不落盘）；
+ * - 事件面：只转发 message_delta（渲染端零改动），tool_call/loop_* 事件不上屏；
+ * - delegationDepth=1：退出主 loop 专属注入（steer/B3/W5/learnings 不适用向导）。
+ * 任何异常/取消 → failed，调用方回退规则路由（与旧路径同款兜底）。
+ */
+async function runGuideLoopTurn(
+  input: AgentSendMessageInput,
+  publish: GuideEventPublisher,
+  model: GuideModelOptions,
+  baseSystem: string,
+): Promise<GuideLoopOutcome> {
+  const holder: { decision: GuideDecision | null } = { decision: null }
+  const tools = buildGuideTools(input.project_id, { onDecide: (decision) => { holder.decision = decision } })
+  const reminder = freeChatStreakOf(input.session_id) >= 3
+    ? '\n\n【宿主提醒】已连续多轮自由对话未收敛：请在本轮用 guide_decide 提交决策（问一个关键问题，或需求已闭环时整理清单确认）。'
+    : ''
+  let result: Awaited<ReturnType<typeof runAgentLoop>> | undefined
+  try {
+    result = await runAgentLoop({
+      system: `${baseSystem}${GUIDE_LOOP_ADDENDUM}`,
+      task: `${input.content}${reminder}`,
+      historyTurns: model.history,
+      tools,
+      query: model.query,
+      env: model.env,
+      signal: model.signal,
+      sessionId: model.sessionId,
+      projectId: input.project_id,
+      requestId: input.request_id,
+      maxTokens: model.maxTokens,
+      maxTurns: 6,
+      permissionMode: 'allow-all',
+      delegationDepth: 1,
+      ...(model.temperature !== undefined ? { temperature: model.temperature } : {}),
+      publish: (type, payload) => {
+        if (type === 'message_delta') publish(makeGuideEvent(input, 'message_delta', payload))
+      },
+    })
+  } catch {
+    return { kind: 'failed' }
+  }
+  if (!result) return { kind: 'failed' }
+  if (holder.decision) {
+    try {
+      recordDecision({
+        project_id: input.project_id,
+        session_id: input.session_id,
+        entry: { type: 'guide_loop', title: `向导决策：${holder.decision.action}`, why: holder.decision.reply.slice(0, 120), detail: { via: 'loop', outcome: 'decision', action: holder.decision.action } },
+      })
+    } catch {
+      /* 决策日志失败不影响流程 */
+    }
+    return { kind: 'decision', decision: normalizeGuideDecisionToParsed(holder.decision) }
+  }
+  if ((result.status === 'completed' || result.status === 'turn_limit') && result.finalText.trim()) {
+    return { kind: 'free_chat', text: result.finalText }
+  }
+  return { kind: 'failed' }
+}
+
 async function tryModelDrivenGuide(
   input: AgentSendMessageInput,
   publish: GuideEventPublisher,
@@ -1120,28 +1236,58 @@ async function tryModelDrivenGuide(
   }
   const history: ConversationTurn[] = [systemTurn, ...model.history]
 
-  // 只做内部累积：模型流式吐的是原始 JSON，不发布 message_delta，避免结构泄露
-  let accumulated = ''
-  try {
-    const stream = model.query(input.content, {
-      env: model.env,
-      signal: model.signal,
-      sessionId: model.sessionId,
-      history,
-      maxTokens: model.maxTokens,
-      temperature: model.temperature,
-    })
-    for await (const sdkMessage of stream) {
-      if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue
-      const text = extractText(sdkMessage.message.content)
-      if (text) accumulated += text
+  // —— 模型调用层两态（Phase 10 向导 loop 化，2026-09-16）——
+  // on：runAgentLoop + 向导工具面（自由对话 + 只读事实 + guide_decide 决策工具）；
+  //     决策经工具原生入参提交（根治 parseGuideJson 的 PARSE_FAILED/截断旧病），
+  //     下游路由/熔断/确认门零改动。
+  // off：单次流式 JSON + parseGuideJson（字节级现状）。
+  let parsed: GuideParsed | null = null
+  if (guideLoopEnabled()) {
+    const loop = await runGuideLoopTurn(input, publish, model, baseSystem)
+    if (loop.kind === 'decision') {
+      parsed = loop.decision
+      resetFreeChatStreak(input.session_id)
+    } else if (loop.kind === 'free_chat') {
+      // 纯聊天：旁白已由 loop 上屏+落 JSONL，这里只收口事件；阶段不动，等下一条用户消息
+      bumpFreeChatStreak(input.session_id)
+      try {
+        recordDecision({
+          project_id: input.project_id,
+          session_id: input.session_id,
+          entry: { type: 'guide_loop', title: '向导自由对话轮（未决策）', why: `free_chat 连续 ${freeChatStreakOf(input.session_id)} 轮`, detail: { via: 'loop', outcome: 'free_chat' } },
+        })
+      } catch {
+        /* 决策日志失败不影响对话 */
+      }
+      publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+      return true
+    } else {
+      // 失败/取消：回退规则路由（与旧路径同款兜底）
+      return false
     }
-  } catch {
-    // 模型不可用/网络错误：回退规则路由（不打断澄清流程）
-    return false
+  } else {
+    // 只做内部累积：模型流式吐的是原始 JSON，不发布 message_delta，避免结构泄露
+    let accumulated = ''
+    try {
+      const stream = model.query(input.content, {
+        env: model.env,
+        signal: model.signal,
+        sessionId: model.sessionId,
+        history,
+        maxTokens: model.maxTokens,
+        temperature: model.temperature,
+      })
+      for await (const sdkMessage of stream) {
+        if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue
+        const text = extractText(sdkMessage.message.content)
+        if (text) accumulated += text
+      }
+    } catch {
+      // 模型不可用/网络错误：回退规则路由（不打断澄清流程）
+      return false
+    }
+    parsed = parseGuideJson(accumulated) ?? null
   }
-
-  const parsed = parseGuideJson(accumulated)
   if (!parsed) return false
 
   // 首轮护栏（代码级，不信任提示词）：模型无视 FIRST_TURN_RULE 直接 generate_sketch 时降级为澄清，

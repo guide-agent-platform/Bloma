@@ -314,3 +314,13 @@
 - 不同步项（决策留档防重复评估）：Terminal\*/bash（沙箱写权限边界，给 shell 摧毁零依赖/白名单/CSP 三道防线）；Task\*/Todo\*（进度由 W5 renderTaskChecklist 确定性投影，双源打架）；Upload/ExecuteJavaScript/DomAction/Hover/Drag/SelectOption（v1 场景外，Observe/Click/Fill/Extract 覆盖 90% 检查）；多标签族（产物单页单源）；set_delegation_thinking_level（Bloma 委派无 thinking 概念）；MCP 三族（宿主平台能力非产物 Agent 工具）。
 - 单测：preview-browser 新文件 12 例（同源守卫纯函数 4/注册与开关 6/真浏览器集成 1 组 skip-guard）；compact-tool 新文件 5 例（off 字节锁/注册面/显式触发与窗口重置/上限 4/自动预算分离）。
 - 狗粮：`setx BLOMA_BROWSER_TOOLS 1` + `setx BLOMA_COMPACT_TOOL 1` + 重启 Bloma（本批两开关均未 setx）。
+
+## §30 Phase 10——向导 loop 化（2026-09-16，「直接同步 loop，只改工具」拍板项）
+
+| 开关 | 控制面 | 缺省 | off/未设 | '1'/'true' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_GUIDE_LOOP` | 向导澄清腿的模型调用层 | **off** | 单次流式 JSON + parseGuideJson（字节级现状） | 澄清腿换 `runAgentLoop` + 向导工具面（main/guide/guide-tools.ts）：**guide_decide** 决策提交口（每 run 一次，参数与旧 JSON 同构，原生 tool_use 入参根治 PARSE_FAILED/截断旧病）+ **read_prd_backplane / read_test_report / list_project_files** 三只读事实工具（向导首次能看见产物）；模型可自由对话（旁白经 message_delta 上屏+落 JSONL），纯聊天轮只收口不弹卡不改阶段；连续 ≥3 轮 free_chat → 下轮 task 注入宿主提醒；失败/取消回退规则路由（同旧兜底）；delegationDepth=1 退出 steer/B3/W5/learnings 主 loop 专属注入；事件面只转发 message_delta（渲染端零改动）。**下游零改动**：首轮护栏/熔断/减负卡/确认门/runPrdPipeline 全部照旧（决策对象同构直进路由块）；决策日志新类型 guide_loop（decision/free_chat 观测） | `guideLoopEnabled`/`buildGuideTools`（main/guide/guide-tools.ts）+ `runGuideLoopTurn`/两态调用层（main/guide/guide-agent-service.ts）+ DecisionType 新值 guide_loop |
+
+- 单测：guide-loop 新文件 7 例（off 字节锁/决策→卡照旧/自由对话收口/三连提醒+清零/失败回退/工具校验+单次预算/测试报告事实工具）。
+- 已知 v1 取舍（登记）：决策路径下 loop 旁白与路由块 reply 可能双气泡（提示词已约束不重复，狗粮观察）；free_chat 计数为内存态（跨重启丢失，防线只防当场不收敛）。
+- 狗粮：`setx BLOMA_GUIDE_LOOP 1` + 重启 Bloma；预期体验：向导可闲聊/被追问/自己查 PRD 与测试报告再问，收敛卡时机由模型判断。
