@@ -396,3 +396,16 @@
 - **存量迁移**：`scripts/migrate-experience-v2.mjs`（幂等 migration_id=v2-isolation-20260916）：pattern 卡→card_reclassified（灵感区，`listReclassifiedInspirations()` 读取口，向导接线 v1）+ 其余 v1 卡→card_quarantined（root_cause=symptom 复制未经证实如实入 reason）；--dry-run 支持。
 - 单测：experience 族 14 文件 111 例全绿（error-card/write-points 改事件断言；service/governance/judge-checklist 注入夹具换 rule；root-cause 集成改「不产卡」断言；迁移脚本 E2E spawn 真 node）。
 - 狗粮观察：`BLOMA_EXPERIENCE=1` 时账本出现 record_type:event 行；老卡不再进任何注入面。
+
+## §38 Phase 10 W2-2/W3——单点消费闭环（2026-09-16，承接 F 系列 Wave 3）
+
+| 开关 | 控制面 | 缺省 | off/未设 | '1'/'true' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_EXP_RULE_INJECT` | 行动规则注入（loop 启动前，与 plan/W5 清单同位） | **off** | mergeAssetMap 第三参=null（注入段字节级缺失） | `buildRuleInjectionMap`：种子登记（EXP-API-001 人工成文→human_review verified，幂等）→ 受控词表硬过滤匹配（stage×template_types×capabilities，≤3 张同 revision 去重）→ 「条件—动作—证据」渲染（适用头/风险/现在执行 n 步/完成证据+假阳性提示/不适用行）并入 plan 腿资产地图；**action_observed**：交付点回看 loop 工具调用序列（run_api_contract_tests 被调→exposure 六档之 action_observed 行，一次性） | `main/experience/rule-injection.ts`（新）+ mergeAssetMap 三参接线（programming-orchestrator）+ finalizeMvpDelivery 动作观测 |
+
+- **EXP-API-001 种子**（咨询 F Q1.4 样板，causal_status=hypothesis，证据=B 站 214397c3+shmup 476847e5）：「涉及服务端外部能力时必须核对前端调用/契约/挂载路由/真实探测，不得只交付前端外壳」——行动步骤引用 run_api_contract_tests 与 api-reconcile 语义；verified 后裁判【常见错法】面自然可见（D2 语义内，非降门槛）。
+- **曝光六档**：exposure 事件 payload 增 levels 三档计数（eligible/retrieved/injected）；action_observed 本批落地；check_passed/delivery_observed 挂终验/交付事件（登记待接）。
+- **data_migration_failed 接线**：终验迁移演练失败 → 事件行（高优先级诊断队列）。
+- **W5 负例已锁**：纯本地任务（无能力面/personal_tool）必须排除 EXP-API-001（测试钉）。
+- 单测：rule-injection 新文件 8 例 + experience 族 15 文件 119 例全绿；loop-planner/iteration/repair 回归 71 例全绿。
+- 狗粮：`setx BLOMA_EXP_RULE_INJECT 1`（配合 BLOMA_EXPERIENCE=1）+ 重启；观察点：B 站式需求 loop system 出现【行动规则】段且模型调 run_api_contract_tests。

@@ -18,6 +18,8 @@ import { buildRepairTasks, resolveRepairBudget, runRepairLoop, repairScopeEnable
 import { buildIterationTask, ITERATION_MODE_SECTION, iterationBriefEnabled, resolveAgentLoopMaxTurnsLocal } from './iteration-brief'
 import { appendContextPack, buildContextPack } from './context-pack'
 import { buildChangeContractBlock, changeContractEnabled, deriveChangeContract, roundAnchorFromChangeContract } from './change-contract'
+import { buildRuleInjectionMap, deriveCapabilitiesFromBackplane, recordRuleActionObserved } from '../experience/rule-injection'
+import { appendExperienceEvent } from '../experience/event-log'
 import { recordFailureCards } from '../experience/error-card'
 import { generateLoopPlan, planLegEnabled, renderPlanInjection, renderPlanMarkdown, renderTaskChecklist, type LoopPlan } from './loop-planner'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../project-service'
@@ -639,6 +641,8 @@ async function finalizeMvpDelivery(
   })
   // Phase 10 W1-1：产物 git 交付点提交（首次 mvp / 迭代交付两态）
   commitProjectLifecycle(input.project_id, input.session_id, snapshotKind === 'mvp' ? 'mvp_delivered' : 'iteration_delivered', `交付快照 ${snapshot.snapshot_id.slice(0, 8)}（${detail.snapshotSummary}）`)
+  // Phase 10 W3：行动规则 action_observed（被注入项目回看工具调用序列；未注入零副作用）
+  recordRuleActionObserved(input.project_id, (detail.loopResult?.toolCalls ?? []).map((t) => t.name))
 
   // 迭代快照不记 mvp_delivered（那是首次交付 MVP 的埋点；点选纠错的 point_correction 已在 ipc.ts 记录）
   if (snapshotKind === 'mvp') {
@@ -1046,8 +1050,8 @@ function prepareModuleLibrary(input: MvpTaskInput, templateType: TemplateType, p
 }
 
 /** 资产地图合并：骨架地图 + 模块地图（两段事实描述，plan 腿与 loop system 共用）。 */
-function mergeAssetMap(skeletonMap: string | null, moduleMap: string | null): string | null {
-  return [skeletonMap, moduleMap].filter(Boolean).join('\n\n') || null
+function mergeAssetMap(skeletonMap: string | null, moduleMap: string | null, ruleMap?: string | null): string | null {
+  return [skeletonMap, moduleMap, ruleMap].filter(Boolean).join('\n\n') || null
 }
 
 /** P3 分级锚定解析：focusRequirementIds 非空且开关开（BLOMA_FOCUS_ANCHOR 缺省
@@ -1238,8 +1242,15 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   const focus = resolveFocusAnchor(input)
   // P3 plan 腿：loop 前单轮技术合同（D2 参考合同：偏离旁白说明，不硬拦截）；
   // 失败/关闭 fail-open 回退现状（planInjection 为 null 时拼接函数字节级=现状）。
-  // plan 腿输入用全量资产地图（骨架+模块，规划需要全貌），分级只作用于 loop system 注入
-  const loopPlan = await tryGenerateLoopPlanLeg(input, loop, backplane, mergeAssetMap(skeletonMap, moduleMap), focus)
+  // plan 腿输入用全量资产地图（骨架+模块，规划需要全貌），分级只作用于 loop system 注入。
+  // Phase 10 W3：行动规则第三参（BLOMA_EXP_RULE_INJECT off=null 字节级；条件—动作—证据）
+  const ruleMap = await buildRuleInjectionMap({
+    projectId: input.project_id,
+    stage: 'implement',
+    templateType: findProject(input.project_id).template_type,
+    capabilities: deriveCapabilitiesFromBackplane(backplane),
+  })
+  const loopPlan = await tryGenerateLoopPlanLeg(input, loop, backplane, mergeAssetMap(skeletonMap, moduleMap, ruleMap), focus)
   const planInjection = loopPlan ? renderPlanInjection(loopPlan) : null
   // 骨架地图分级（注入侧，零改 prepare 语义）：plan 存在且 focus 生效时，非目标文件
   // 降为存在性行（路径锚不丢，D3）；无 plan / 无 focus → 全量地图现状。模块地图不分级。
@@ -2407,6 +2418,15 @@ export async function runGwtWithApiContract(input: { project_id: string; session
         testResult.total_count += drill.failures.length
         testResult.failed_count += drill.failures.length
         testResult.failure_summary = [...testResult.failure_summary, ...drill.failures]
+        // Phase 10 W2：迁移演练失败进经验事件行（高优先级诊断队列，W3 消费）
+        appendExperienceEvent({
+          projectId: input.project_id,
+          runId: input.session_id ?? input.project_id,
+          eventType: 'data_migration_failed',
+          stage: 'testing',
+          observations: drill.failures.map((f) => `${f.scenario}：${f.reason}`),
+          evidenceRefs: ['documents/test-report.json'],
+        })
       }
     }
   } catch {

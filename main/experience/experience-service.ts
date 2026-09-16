@@ -515,6 +515,9 @@ function recordExposure(surface: string, retrievable: ExperienceCard[], matched:
         event_type: 'experience_exposure',
         payload: {
           surface,
+          // W3.5 曝光六档前三档（计数）；action_observed 在 rule-injection，check_passed/
+          // delivery_observed 由终验/交付事件接线（登记）
+          levels: { eligible: retrievable.length, retrieved: matched.length, injected: injected.length },
           retrievable: retrievable.slice(0, 20).map((c) => ({ id: c.id, status: c.status, tag: c.tag })),
           matched: matched.slice(0, 20).map((c) => c.id),
           injected: injected.map((c) => ({ id: c.id, status: c.status, schema_version: c.schema_version, tag: c.tag })),
