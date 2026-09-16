@@ -16,6 +16,7 @@ import { getCachedStaticEvidence, setCachedStaticEvidence } from './evidence-cac
 import { runVisionAuditGate } from './vision-audit-gate'
 import { buildRepairTasks, resolveRepairBudget, runRepairLoop, repairScopeEnabled, repairNoopGuardEnabled, hasWriteEditToolCall, type RepairCheckpointContext, type RepairTask } from './repair-loop'
 import { buildIterationTask, ITERATION_MODE_SECTION, iterationBriefEnabled, resolveAgentLoopMaxTurnsLocal } from './iteration-brief'
+import { appendContextPack } from './context-pack'
 import { recordFailureCards } from '../experience/error-card'
 import { generateLoopPlan, planLegEnabled, renderPlanInjection, renderPlanMarkdown, renderTaskChecklist, type LoopPlan } from './loop-planner'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../project-service'
@@ -1367,8 +1368,9 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     // Phase 8 W1：局部修改轮用聚焦任务书（用户诉求原话即任务主体）；其余路径字节级=现状
     // Phase 8 W1 / W5-4：局部修改轮用聚焦任务书；生成路径任务书在 W5 开时升级为
     // 「逐项推进工作法」（对齐正常 agent 工作流）；其余路径字节级=现状全量任务书
+    // Phase 10 W1-3：聚焦任务书尾部追加项目侦察包（BLOMA_CONTEXT_PACK off=字节级）
     task: iterationBriefActive(input) && input.prompt
-      ? buildIterationTask(input.prompt)
+      ? appendContextPack({ projectId: input.project_id, sessionId: input.session_id, task: buildIterationTask(input.prompt), changeQuery: input.prompt })
       : buildAgentLoopTask(backplane, input.mode, input),
     // B3（P0-B，2026-09-11）：技术合同清单透传进度对账守卫（BLOMA_LOOP_PROGRESS_NUDGE
     // off 时不读不注入字节级现状；无 plan 自然无守卫2，守卫1/3 照常）

@@ -344,3 +344,13 @@
 - 单测：rollback-code-only 新文件 5 例（开关三态/off 字节级现状 data 精确回滚/on data 保留+备份内容=回滚前+代码仍回滚/二次回滚备份独立不覆盖/无 data 目录豁免）。
 - 已知边界（登记）：I5 回滚弹窗文案两口径展示依赖渲染端 env 透传（I4 先例同款待办）；on 模式下「恢复即新版本」的版本说明需带 data 保留语义（I6 文案后续随拍）。
 - 狗粮：`setx BLOMA_ROLLBACK_CODE_ONLY 1` + 重启 Bloma；观察点：熔断回滚后用户数据仍在 + data-backups/ 出现备份。
+
+## §33 Phase 10 W1-3——项目侦察包 ContextPack（2026-09-16，咨询 G 收口·真实项目交付体系）
+
+| 开关 | 控制面 | 缺省 | off/未设 | '1'/'true' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_CONTEXT_PACK` | 迭代/修复轮 task 头的确定性侦察包注入 | **off** | `appendContextPack` 返回原 task 字节级（不触 fs） | task 尾部追加【项目侦察包】段：代码文件清单（≤60，跳 node_modules/dist/data/.git）+ 后端契约⇄`server/routes/` 文件对账（both/backplane/routes_dir 三态+对账 hints）+ `data/` JSON 形状采样（array/object+首条键，坏 JSON 标 unreadable）+ 可复用模块目录（src/official-modules/ 子目录）+ 上次终验基线（test-report 通过数+未过场景）+ 诉求关键词→文件名影响面提示；零 LLM 纯组装 <1s；空态如实为空不编造（openQuestions v0 恒空占位）；渲染段 2200 字符预算确定性截断；段尾明示「速览非任务，定位仍以 grep/地图锚点为准」防喂包反退化 | `main/coding/context-pack.ts`（ContextPack 类型进 shared/types）+ 迭代接线（programming-orchestrator localOnly task）+ 修复接线（repair-loop renderRepairTaskCard 尾）+ DecisionType 新值 context_pack（组装留痕含统计） |
+
+- 单测：context-pack 新文件 11 例（开关三态/off 字节级/空项目全空态/对账 both 无 hint/对账双向 hints/data 采样+坏 JSON/影响面命中/基线含未过场景/60 文件截断+段预算/可复用模块清单/决策留痕 detail）。
+- fail-open：组装/渲染/决策任一失败返回原任务（测试锁 off 路径；catch 全包）。
+- 狗粮：`setx BLOMA_CONTEXT_PACK 1` + 重启 Bloma；观察点：迭代轮任务书尾部出现侦察包、读癖轮次是否下降（对照 94f449c6 的 49 次 read_file）。

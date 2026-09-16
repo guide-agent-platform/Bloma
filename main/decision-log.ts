@@ -19,6 +19,8 @@ import { listSessions } from './session-service'
  */
 
 export type DecisionType =
+  /** Phase 10 W1-3（2026-09-16）：侦察包组装注入观测（BLOMA_CONTEXT_PACK on 时） */
+  | 'context_pack'
   /** Phase 10 W1-1（2026-09-16）：产物 git 生命周期提交跳过记录（fail-open 观测） */
   | 'project_git'
   /** Phase 10 向导 loop 化（2026-09-16）：BLOMA_GUIDE_LOOP on 时每轮决策/自由对话的观测行 */

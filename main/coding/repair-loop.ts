@@ -31,6 +31,7 @@ import { trackAnalytics } from '../platform-services'
 import { appendProjectLearning } from '../learnings-log'
 import { readLoopCheckpointDocument, writeLoopCheckpointDocument, type LoopRepairAttemptRecord } from '../document-engine'
 import { createWriteScope } from './agent-tools'
+import { appendContextPack } from './context-pack'
 
 /** W4-F2/F3 开关（咨询 D4）：修复轮修改授权边界 + repair_control 窄入口。缺省 off=字节级现状（无边界无窄入口）。 */
 export function repairScopeEnabled(): boolean {
@@ -249,7 +250,8 @@ export async function runRepairLoop(input: RepairLoopInput): Promise<RepairRound
   const scopePaths = repairScopeEnabled() && input.authorizedWritePaths && input.authorizedWritePaths.length > 0 ? input.authorizedWritePaths : undefined
   loopResult = await runAgentLoop({
       system: `${input.buildSystem(editFormat)}\n\n${REPAIR_MODE_SECTION}${roundAnchorBlock}`,
-      task: renderRepairTaskCard(input.tasks, input.checkpointContext),
+      // Phase 10 W1-3：修复任务卡尾部追加项目侦察包（BLOMA_CONTEXT_PACK off=字节级）
+      task: appendContextPack({ projectId: input.project_id, sessionId: input.session_id, task: renderRepairTaskCard(input.tasks, input.checkpointContext) }),
       // 窄任务小预算：web_research 限 2 防长 loop 无节制外呼（主 loop 为 4）
       toolBudget: { web_research: REPAIR_WEB_RESEARCH_BUDGET },
       tools: buildAgentTools({

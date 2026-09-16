@@ -1487,6 +1487,43 @@ export type ElectronAPI = {
 // 15. 全局类型声明
 // =========================================================================
 
+// ---------------------------------------------------------------------------
+// Phase 10 W1-3（2026-09-16，咨询 G 收口）：ContextPack 侦察包——变更前确定性组装的
+// 项目事实速览（代码文件/契约与路由对账/数据形状/可复用模块/基线测试），供迭代轮/
+// 修复轮 task 头注入。零 LLM 纯组装；空态如实为空不编造（openQuestions v0 恒空占位）。
+// ---------------------------------------------------------------------------
+
+/** 契约/路由来源双标（对账用）：背板 interface_spec vs server/routes 目录卖描。 */
+export type ContextPackRouteSource = 'backplane' | 'routes_dir' | 'both'
+
+export interface ContextPackRoute {
+  label: string
+  source: ContextPackRouteSource
+}
+
+export interface ContextPackDataFile {
+  file: string
+  shape: 'array' | 'object' | 'file' | 'unreadable'
+  sampleKeys: string[]
+}
+
+export interface ContextPackBaseline {
+  total: number
+  passed: number
+  failed: number
+  failedScenarios: string[]
+}
+
+export interface ContextPack {
+  codeFiles: string[]
+  routes: ContextPackRoute[]
+  dataFiles: ContextPackDataFile[]
+  reusableModules: string[]
+  baseline: ContextPackBaseline | null
+  affectedHints: string[]
+  openQuestions: string[]
+}
+
 declare global {
   interface Window {
     electronAPI?: ElectronAPI
