@@ -36,9 +36,13 @@ function mvpReadyEvent(): AgentEvent {
 describe('MvpStatusBanner 导出项目按钮（PR-3）', () => {
   let store: ReturnType<typeof createStore>
   let exportMock: ReturnType<typeof vi.fn>
+  let upgradeMock: ReturnType<typeof vi.fn>
+  let switchStateMock: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     exportMock = vi.fn()
+    upgradeMock = vi.fn()
+    switchStateMock = vi.fn(async () => ({ ok: true, data: { switches: {} } }))
     store = createStore()
     window.__jotai_store__ = store as never
     store.set(activeAgentSessionIdAtom, 'session-exp')
@@ -54,7 +58,8 @@ describe('MvpStatusBanner 导出项目按钮（PR-3）', () => {
       updated_at: new Date().toISOString(),
     } as never)
     window.electronAPI = {
-      project: { export: exportMock },
+      project: { export: exportMock, upgradeExport: upgradeMock },
+      app: { switchState: switchStateMock },
     } as unknown as ElectronAPI
     store.set(agentStreamStateFamily('session-exp'), {
       running: false,
@@ -134,5 +139,108 @@ describe('MvpStatusBanner 导出项目按钮（PR-3）', () => {
     renderBanner()
     // 无 mvp_ready 事件且阶段非就绪 → 横幅走 generating 变体或不可见，均不应出现导出按钮
     expect(screen.queryByTestId('export-project-btn')).toBeNull()
+  })
+})
+
+describe('MvpStatusBanner 升级导出（Phase 10 落地旅程）', () => {
+  let store: ReturnType<typeof createStore>
+  let exportMock: ReturnType<typeof vi.fn>
+  let upgradeMock: ReturnType<typeof vi.fn>
+  let switchStateMock: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    exportMock = vi.fn()
+    upgradeMock = vi.fn()
+    switchStateMock = vi.fn(async () => ({ ok: true, data: { switches: {} } }))
+    store = createStore()
+    window.__jotai_store__ = store as never
+    store.set(activeAgentSessionIdAtom, 'session-exp')
+    store.set(currentProjectAtom, {
+      project_id: 'project-exp',
+      name: '测试项目',
+      workspace_slug: 'default-software-builder',
+      mode: 'quick',
+      status: 'active',
+      current_stage: 'ready',
+      security_repair_count: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    } as never)
+    window.electronAPI = {
+      project: { export: exportMock, upgradeExport: upgradeMock },
+      app: { switchState: switchStateMock },
+    } as unknown as ElectronAPI
+    store.set(agentStreamStateFamily('session-exp'), {
+      running: false,
+      events: [mvpReadyEvent()],
+      content: '',
+    } as never)
+  })
+
+  afterEach(() => {
+    delete window.electronAPI
+    delete window.__jotai_store__
+    cleanup()
+  })
+
+  function renderBanner(): void {
+    render(
+      <Provider store={store}>
+        <MvpStatusBanner />
+      </Provider>,
+    )
+  }
+
+  async function exportOnce(): Promise<void> {
+    exportMock.mockResolvedValue({ ok: true, data: { canceled: false, destination: 'D:/out/测试项目', file_count: 5 } })
+    renderBanner()
+    fireEvent.click(screen.getByTestId('export-project-btn'))
+    await waitFor(() => expect(screen.getByTestId('export-project-done')).toBeTruthy())
+  }
+
+  it('导出前无升级按钮；导出后出现，点击调 upgradeExport 带项目 id，成功显示迁移结果', async () => {
+    exportMock.mockResolvedValue({ ok: true, data: { canceled: false, destination: 'D:/out/测试项目', file_count: 5 } })
+    renderBanner()
+    expect(screen.queryByTestId('upgrade-export-btn')).toBeNull()
+    fireEvent.click(screen.getByTestId('export-project-btn'))
+    await waitFor(() => expect(screen.getByTestId('export-project-done')).toBeTruthy())
+
+    upgradeMock.mockResolvedValue({
+      ok: true,
+      data: { canceled: false, target: 'D:/out/测试项目-upgraded', migration: 'ran', summary: '迁移通过（1→2，1 个数据文件）', drift: { clean: true, changed: 0, missing: 0, extra: 0 } },
+    })
+    fireEvent.click(screen.getByTestId('upgrade-export-btn'))
+    await waitFor(() => {
+      expect(upgradeMock).toHaveBeenCalledWith(expect.objectContaining({ project_id: 'project-exp' }))
+      expect(screen.getByTestId('upgrade-export-note').textContent).toContain('迁移通过')
+    })
+  })
+
+  it('迁移失败口径如实：旧数据已携带备份+报告指引；漂移痕迹如实呈现', async () => {
+    await exportOnce()
+    upgradeMock.mockResolvedValue({
+      ok: true,
+      data: { canceled: false, target: 'D:/out/测试项目-upgraded', migration: 'failed', summary: '演练失败', drift: { clean: false, changed: 2, missing: 1, extra: 1 } },
+    })
+    fireEvent.click(screen.getByTestId('upgrade-export-btn'))
+    await waitFor(() => {
+      const note = screen.getByTestId('upgrade-export-note').textContent ?? ''
+      expect(note).toContain('迁移未过')
+      expect(note).toContain('已原样携带并备份')
+      expect(note).toContain('手改痕迹 4 处')
+    })
+  })
+
+  it('取消升级静默复位；IPC 失败走 globalUserError', async () => {
+    await exportOnce()
+    upgradeMock.mockResolvedValue({ ok: true, data: { canceled: true } })
+    fireEvent.click(screen.getByTestId('upgrade-export-btn'))
+    await waitFor(() => expect(upgradeMock).toHaveBeenCalledTimes(1))
+    expect(screen.queryByTestId('upgrade-export-note')).toBeNull()
+    expect(store.get(globalUserErrorAtom)).toBeNull()
+
+    upgradeMock.mockResolvedValue({ ok: false, error: { message: 'boom' } })
+    fireEvent.click(screen.getByTestId('upgrade-export-btn'))
+    await waitFor(() => expect(store.get(globalUserErrorAtom)).not.toBeNull())
   })
 })

@@ -44,6 +44,8 @@ export const IPC_CHANNELS = {
   PROJECT_FINALIZE: 'project:finalize',
   PROJECT_EXPORT: 'project:export',
   PROJECT_RENAME: 'project:rename',
+  PROJECT_UPGRADE_EXPORT: 'project:upgrade-export',
+  APP_SWITCH_STATE: 'app:switch-state',
   PROJECT_ABANDON: 'project:abandon',
   PROJECT_REOPEN: 'project:reopen',
   SANDBOX_RUN: 'sandbox:run',
@@ -1140,6 +1142,31 @@ export interface ProjectExportInput extends RequestEnvelope {
   project_id: string
 }
 
+/**
+ * Phase 10 落地旅程（2026-09-16）：升级导出——选旧导出包目录，平台产「新代码+旧数据+
+ * 真实迁移+报告」的升级包（W1-6 upgradeExport 的 IPC 化）。主进程弹系统目录选择器
+ * 选落地产物，destination=其父目录（<名>-upgraded）。
+ */
+export interface ProjectUpgradeExportInput extends RequestEnvelope {
+  project_id: string
+}
+
+export interface ProjectUpgradeExportResult {
+  canceled: boolean
+  target?: string
+  /** ran=迁移已执行 | none=无需迁移 | failed=迁移失败（详见 upgrade-report.json） */
+  migration?: 'ran' | 'none' | 'failed'
+  summary?: string
+  drift?: { changed: number; missing: number; extra: number; clean: boolean }
+}
+
+/** Phase 10：实验开关只读面板（渲染端 I5 两口径文案/设置页用；I4 透传待办的窄收口）。 */
+export interface AppSwitchStateInput extends RequestEnvelope {}
+
+export interface AppSwitchStateResult {
+  switches: Record<string, boolean>
+}
+
 /** U13：项目重命名——零基础用户的首个项目名来自首句口述，改名提升列表辨识度。 */
 export interface ProjectRenameInput extends RequestEnvelope {
   project_id: string
@@ -1394,6 +1421,10 @@ export interface AnalyticsTrackResult {
 // =========================================================================
 
 export type ElectronAPI = {
+  app: {
+    /** 实验开关只读状态（Phase 10 落地旅程：I5 两口径文案等渲染端消费） */
+    switchState(input: AppSwitchStateInput): Promise<ApiResult<AppSwitchStateResult>>
+  }
   pastedImage: {
     /** 剪贴板粘贴图存盘（clipboard-paste P1）：base64→{PROMA_HOME}/pasted-images/<sessionId>/，返回短引用 */
     save(input: PastedImageSaveInput): Promise<ApiResult<PastedImageSaveResult>>
@@ -1427,6 +1458,8 @@ export type ElectronAPI = {
     unarchive(input: ProjectUnarchiveInput): Promise<ApiResult<Project>>
     delete(input: ProjectDeleteInput): Promise<ApiResult<{ deleted: true }>>
     export(input: ProjectExportInput): Promise<ApiResult<ProjectExportResult>>
+    /** Phase 10 落地旅程：升级导出（旧导出包→新代码+旧数据+迁移+报告） */
+    upgradeExport(input: ProjectUpgradeExportInput): Promise<ApiResult<ProjectUpgradeExportResult>>
     rename(input: ProjectRenameInput): Promise<ApiResult<Project>>
     abandon(input: ProjectAbandonInput): Promise<ApiResult<Project>>
     reopen(input: ProjectReopenInput): Promise<ApiResult<Project>>

@@ -420,3 +420,16 @@
 - 登记待办：停止信号（AGENT_CANCELLED 源=user）与「快速返回修改」行为信号待接（J7 三通道余一）；confirmed_failure 终验 GWT 失败面可再扩（现对账+迁移两处客观源）。
 - 单测：orchestrator-ready-iteration 13 例（含 W4 新 4 例：开关 on 卡替代/负面项事件+埋点+话术/暂不反馈引导/改变需求行为信号）；experience 族回归 132 例全绿。
 - 狗粮：`setx BLOMA_FEEDBACK_CARD 1` + 重启；观察点：点「保持现状」先出反馈卡；选「关键功能无效」后 bloma-experience.jsonl 出 issue_hypothesis 行、analytics 出 issue_reported。
+
+## §40 Phase 10 落地旅程 UI（2026-09-16 深夜补批）——纯呈现直接上（I1/J4 先例）+两条新 IPC
+
+| 通道/组件 | 内容 | 开关 |
+|---|---|---|
+| `app:switch-state`（IPC 四层+契约） | 实验开关注读面板：main/experiment-switches.ts 白名单注册表（≥10 项 BLOMA_*）→ Record<id,on/off>；渲染端 use-experiment-switches hook（模块级缓存一次拉取，失败 null=fail-open 按现状口径渲染）。**I4「渲染端无 env 透传」待办的窄收口**（不透传全量 env 只给白名单） | 无（只读） |
+| `project:upgrade-export`（IPC 四层+契约） | 升级导出 UI 化：系统目录选择器选旧导出包 → W1-6 upgradeExport（新代码+携旧数据+pre-upgrade 备份+真实迁移+upgrade-report+新 manifest）；结果行如实呈现迁移三态与漂移痕迹（失败口径=「旧数据已原样携带并备份，明细见包内 upgrade-report.json」） | 无（能力已由 W1-6 承载） |
+| MvpStatusBanner | 导出后出现「升级导出」按钮（data-ai-id=upgrade-export-btn，样式克隆导出按钮）+结果行（upgrade-export-note）；ROLLBACK_CODE_ONLY 开启时横幅信息位「｜回滚保护数据」 | 无 |
+| TimelinePanel I5 两口径 | 回滚弹窗 data/ 句按 BLOMA_ROLLBACK_CODE_ONLY 实况切换：on=「恢复只回退应用代码；数据先自动备份（data-backups/）并保留不回退」/off 或未知=现状句 | 随实况 |
+| ready 交付卡成熟度行 | buildReadyDeliveryBody 首行「成熟度：完整程序（N 路由·M 数据文件·K 契约）/MVP+（服务端已有，data/ 尚无真实数据）/MVP（静态前端形态…）」——09-06 挂账三态徽标的文本态落地（磁盘+背板确定性判定） | 无（纯呈现） |
+
+- 单测：mvp-status-export 扩 3 例（升级按钮时序/失败如实口径含漂移/取消与 IPC 失败）+ experiment-switches 2 例（注册表完整性+实况三态）；sprint0 契约+export-manifest 回归 18 例全绿。
+- 登记待办：设置页「实验开关」可视管理面（写入侧，bloma-switches.json 启动加载方案已论证）；TimelinePanel 两口径组件级测试（hook fail-open 已由注册表测试覆盖语义）。

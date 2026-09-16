@@ -57,6 +57,8 @@ import type {
   ProjectCreateInput,
   ProjectDeleteInput,
   ProjectExportInput,
+  ProjectUpgradeExportInput,
+  AppSwitchStateInput,
   ProjectFinalizeInput,
   ProjectListInput,
   ProjectReopenInput,
@@ -76,6 +78,10 @@ import type {
 } from '../shared/types'
 
 const electronAPI: ElectronAPI = {
+  app: {
+    switchState: (input: AppSwitchStateInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.APP_SWITCH_STATE, input),
+  },
   pastedImage: {
     save: (input: PastedImageSaveInput) => ipcRenderer.invoke(IPC_CHANNELS.PASTED_IMAGE_SAVE, input),
   },
@@ -125,6 +131,8 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_DELETE, input),
     export: (input: ProjectExportInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_EXPORT, input),
+    upgradeExport: (input: ProjectUpgradeExportInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_UPGRADE_EXPORT, input),
     rename: (input: ProjectRenameInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_RENAME, input),
     abandon: (input: ProjectAbandonInput) =>

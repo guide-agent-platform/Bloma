@@ -1,4 +1,5 @@
 import React from 'react'
+import { useExperimentSwitches } from '../hooks/use-experiment-switches'
 import { useAtom, useAtomValue } from 'jotai'
 import { ChevronUp } from './icons'
 import { timelineExpandedAtom, snapshotsListAtom, selectedSnapshotAtom } from './atoms'
@@ -177,6 +178,9 @@ const RollbackConfirmModal: React.FC<{
   onConfirm: () => void
   onCancel: () => void
 }> = ({ snapshot, onConfirm, onCancel }) => {
+  // Phase 10 W1-2：回滚语义两口径（BLOMA_ROLLBACK_CODE_ONLY on=数据保留口径；
+  // null=未知按现状口径渲染，fail-open 不阻塞弹窗）
+  const experimentSwitches = useExperimentSwitches()
   return (
     <div
       role="dialog"
@@ -208,7 +212,9 @@ const RollbackConfirmModal: React.FC<{
         {/* Phase 7 U3 I5（2026-09-10）：data/ 边界句按真实能力写——沙箱内数据随版本回滚
             是 Bloma 的真实能力（恢复原语先清空再复制）；导出部署后的数据不归 Bloma 管。 */}
         <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-5)', lineHeight: 'var(--line-height-base)', background: 'var(--color-surface-muted)', padding: 'var(--space-3)', borderRadius: 'var(--radius-sm)' }}>
-          恢复会把应用和它在 Bloma 内保存的数据一起回到那一版；导出部署后在别处产生的数据不受影响。
+          {experimentSwitches?.BLOMA_ROLLBACK_CODE_ONLY === true
+            ? '恢复只回退应用代码；你在 Bloma 内保存的最新数据会先自动备份（data-backups/）并保留不回退。导出部署后在别处产生的数据不受影响。'
+            : '恢复会把应用和它在 Bloma 内保存的数据一起回到那一版；导出部署后在别处产生的数据不受影响。'}
         </p>
         <div style={{ display: 'flex', gap: 'var(--space-3)', justifyContent: 'flex-end' }}>
           <button onClick={onCancel} style={{

@@ -37,6 +37,8 @@ import type {
   ProjectCreateInput,
   ProjectDeleteInput,
   ProjectExportInput,
+  ProjectUpgradeExportInput,
+  AppSwitchStateResult,
   ProjectFinalizeInput,
   ProjectListInput,
   ProjectReopenInput,
@@ -81,6 +83,9 @@ import {
 } from './project-service'
 import { cleanOrphanSessions, forkFrom, listSessions, loadMessages, setSessionActiveChecker } from './session-service'
 import { exportProjectHandoff } from './project-export'
+import { upgradeExport } from './coding/export-manifest'
+import { readExperimentSwitches } from './experiment-switches'
+import { dirname } from 'node:path'
 import { resolveRequirementConfirm } from './guide-agent-service'
 import { createChannel, deleteChannel, fetchModels, listChannels, testChannel, testChannelDirect, updateChannel } from './channel-manager'
 import {
@@ -400,6 +405,51 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
         return { canceled: true }
       }
       return exportProjectHandoff(input, result.filePaths[0])
+    })
+  })
+
+  // Phase 10 落地旅程（2026-09-16）：升级导出——系统目录选择器选旧导出包，平台产
+  // 「新代码+携带旧数据（pre-upgrade 备份）+真实迁移+upgrade-report+新 manifest」
+  // 的升级包（与导出同款交互形态；失败明细在升级包内 upgrade-report.json）。
+  ipcMain.handle(IPC_CHANNELS.PROJECT_UPGRADE_EXPORT, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<ProjectUpgradeExportInput>(payload, ['project_id'])
+      const project = findProject(input.project_id)
+      const picked = await dialog.showOpenDialog(mainWindow, {
+        title: `升级「${project.name}」——选择旧导出包目录`,
+        buttonLabel: '从这个版本升级',
+        properties: ['openDirectory'],
+      })
+      if (picked.canceled || picked.filePaths.length === 0) {
+        return { canceled: true }
+      }
+      const landedRoot = picked.filePaths[0]
+      const result = await upgradeExport({
+        projectRoot: project.root_path,
+        landedRoot,
+        destination: dirname(landedRoot),
+        projectName: project.name,
+      })
+      return {
+        canceled: false,
+        target: result.target,
+        migration: result.migration,
+        summary: result.summary,
+        drift: {
+          clean: result.drift.clean,
+          changed: result.drift.changed.length,
+          missing: result.drift.missing.length,
+          extra: result.drift.extra.length,
+        },
+      }
+    })
+  })
+
+  // Phase 10：实验开关注读面板（白名单实况；I5 两口径文案等渲染端消费）。
+  ipcMain.handle(IPC_CHANNELS.APP_SWITCH_STATE, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const result: AppSwitchStateResult = { switches: readExperimentSwitches() }
+      return result
     })
   })
 

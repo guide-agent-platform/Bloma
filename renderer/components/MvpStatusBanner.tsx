@@ -16,6 +16,7 @@
  */
 
 import React, { useMemo, useState } from 'react'
+import { useExperimentSwitches } from '../hooks/use-experiment-switches'
 import { atom, useAtomValue, useSetAtom } from 'jotai'
 import type { AgentEvent, WorkflowStage } from '../../shared/types'
 import type { AgentStreamState } from '../agent-atoms'
@@ -221,6 +222,46 @@ export const MvpStatusBanner: React.FC = () => {
   // PR-3 导出状态：exporting 禁用按钮；exportedPath 成功后展示位置；取消静默复位（U10 契约）
   const [exporting, setExporting] = useState(false)
   const [exportedPath, setExportedPath] = useState<string | null>(null)
+  // Phase 10 落地旅程（2026-09-16）：升级导出——旧导出包→新代码+旧数据+迁移+报告
+  const [upgrading, setUpgrading] = useState(false)
+  const [upgradeNote, setUpgradeNote] = useState<string | null>(null)
+  const experimentSwitches = useExperimentSwitches()
+
+  const handleUpgradeExport = async () => {
+    if (!project || upgrading) return
+    setUpgrading(true)
+    setUpgradeNote(null)
+    try {
+      const api = window.electronAPI
+      if (!api?.project?.upgradeExport) {
+        setGlobalError('当前环境不支持升级导出。')
+        return
+      }
+      const result = await api.project.upgradeExport({
+        request_id: crypto.randomUUID(),
+        project_id: project.project_id,
+      })
+      if (!result.ok) {
+        setGlobalError(result.error?.user_visible_message || result.error?.message || '升级导出失败，请重试。')
+        return
+      }
+      if (result.data.canceled) return // 取消不是错误，静默复位
+      const d = result.data
+      const driftCount = d.drift ? d.drift.changed + d.drift.missing + d.drift.extra : 0
+      const driftNote = d.drift && !d.drift.clean ? `；旧包有手改痕迹 ${driftCount} 处（不合并，详见报告）` : ''
+      setUpgradeNote(
+        d.migration === 'failed'
+          ? `升级包已生成（${d.target ?? ''}）：迁移未过——旧数据已原样携带并备份，明细见包内 upgrade-report.json${driftNote}`
+          : d.migration === 'ran'
+            ? `升级完成（${d.target ?? ''}）：${d.summary ?? '迁移已执行'}${driftNote}`
+            : `升级包已生成（${d.target ?? ''}）：无需迁移，旧数据原样携带${driftNote}`,
+      )
+    } catch {
+      setGlobalError('升级导出失败，请重试。')
+    } finally {
+      setUpgrading(false)
+    }
+  }
 
   const handleExport = async () => {
     if (!project || exporting) return
@@ -389,6 +430,49 @@ export const MvpStatusBanner: React.FC = () => {
             {exporting ? '导出中…' : '导出项目'}
           </button>
         ))}
+
+      {/* Phase 10 落地旅程：升级导出（导出后出现——旧导出包→新版本，数据先备份再迁移） */}
+      {(banner.variant === 'ready' || banner.variant === 'judge_pass') && exportedPath && (
+        <button
+          type="button"
+          data-ai-id="upgrade-export-btn"
+          onClick={handleUpgradeExport}
+          disabled={!project || upgrading}
+          title="选择旧的导出包目录，生成升级版：新代码+你的旧数据（先备份）+自动迁移+升级报告"
+          style={{
+            flexShrink: 0,
+            padding: '4px 12px',
+            fontSize: 'var(--font-size-xs)',
+            fontWeight: 600,
+            color: style.color,
+            background: '#fff',
+            border: `1px solid ${style.border}`,
+            borderRadius: 'var(--radius-md)',
+            cursor: upgrading || !project ? 'not-allowed' : 'pointer',
+            opacity: !project || upgrading ? 0.6 : 1,
+          }}
+        >
+          {upgrading ? '升级中…' : '升级导出'}
+        </button>
+      )}
+      {upgradeNote && (
+        <span
+          data-ai-id="upgrade-export-note"
+          title={upgradeNote}
+          style={{
+            fontSize: 'var(--font-size-xs)',
+            color: style.color,
+            opacity: 0.85,
+            flexShrink: 1,
+            maxWidth: 420,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {upgradeNote}
+        </span>
+      )}
 
       {/* 右侧 loading dots（generating 等动画状态） */}
       {style.animated && (

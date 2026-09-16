@@ -2665,6 +2665,26 @@ function buildReadyDeliveryBody(projectId: string): string | undefined {
   if (!project?.delivery_status) return undefined
   const testReport = readTestReport(projectId)
   const backplane = readPrdBackplane(projectId)
+  // Phase 10 落地旅程（2026-09-16）：成熟度三态行（09-06 挂账的徽标——文本态落地）：
+  // 完整程序=路由模块在用 或 契约端点存在 且 data/ 有真实数据文件；MVP=已交付本轮产物；
+  // 静态草图=更早形态。确定性判定（磁盘+背板），不猜。
+  const maturity = (() => {
+    try {
+      const root = project.root_path
+      const routesDir = join(root, 'server', 'routes')
+      const routeFiles = existsSync(routesDir) ? readdirSync(routesDir).filter((f) => f.endsWith('.js') && !f.startsWith('_')) : []
+      const dataDir = join(root, 'data')
+      const dataFiles = existsSync(dataDir) ? readdirSync(dataDir).filter((f) => f.endsWith('.json')) : []
+      const specCount = (backplane.interface_spec ?? []).filter((ep) => ep.endpoint.trim()).length
+      if ((routeFiles.length > 0 || specCount > 0) && dataFiles.length > 0) {
+        return `完整程序（${routeFiles.length} 个服务端路由 · ${dataFiles.length} 个数据文件 · ${specCount} 条接口契约）`
+      }
+      if (routeFiles.length > 0 || specCount > 0) return `MVP+（服务端已有：${routeFiles.length} 路由/${specCount} 契约；data/ 尚无真实数据）`
+      return 'MVP（静态前端形态——数据留存走「把数据存到服务端」可升完整程序）'
+    } catch {
+      return 'MVP'
+    }
+  })()
   const storyOf = new Map(backplane.requirements.map((item) => [item.id, requirementStory(item)]))
   const presentation = buildDeliveryPresentation({
     status: project.delivery_status,
@@ -2673,7 +2693,10 @@ function buildReadyDeliveryBody(projectId: string): string | undefined {
     testResult: testReport ?? { failed_count: 0, failure_summary: [] },
     featureLabelOf: (id) => storyOf.get(id),
   })
-  return renderDeliveryBody(presentation)
+  const body = renderDeliveryBody(presentation)
+  return body ? `成熟度：${maturity}
+
+${body}` : `成熟度：${maturity}`
 }
 
 /**
