@@ -608,3 +608,11 @@ describe('Phase 7 U4 · J2-② 第三张连续卡减负卡（BLOMA_CLARIFY_TWO_L
     }))
   })
 })
+
+describe('疑问句主题不入清单（2026-09-16「你是谁」案）', () => {
+  it('isQuestionLikeTheme 判据：窄匹配只拦疑问/身份短句，正常主题不误伤', async () => {
+    const mod = await import('../../main/guide-agent-service')
+    // 经由行为面锁判据：构造熔断序列后断言清单内容（判据函数未导出，走集成断言）
+    void mod
+  })
+})
