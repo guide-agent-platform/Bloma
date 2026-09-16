@@ -19,6 +19,8 @@ import { listSessions } from './session-service'
  */
 
 export type DecisionType =
+  /** Phase 10 W4（2026-09-16）：一键反馈卡回传（无法运行/关键功能无效/效果不满意/改变需求/暂不反馈） */
+  | 'feedback_reported'
   /** Phase 10 W1-3（2026-09-16）：侦察包组装注入观测（BLOMA_CONTEXT_PACK on 时） */
   | 'context_pack'
   /** Phase 10 W1-1（2026-09-16）：产物 git 生命周期提交跳过记录（fail-open 观测） */

@@ -37,8 +37,10 @@ import { handleGuideMessage } from './guide-agent-service'
 import {
   READY_COMPLETION_COPY,
   clearPendingReviewAction,
+  feedbackCardEnabled,
   isIterationDecisionId,
   nextRequirementId,
+  publishDeliveryFeedbackCard,
   publishReadyNextStepsCard,
   refineModificationDescription,
   resolveBlockedDecision,
@@ -60,6 +62,7 @@ import { captureConstraints, extractConstraints, readProjectConstraints, scanSes
 import { isCircuitBreakSettled } from './recovery-service'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
 import { recordSessionActivity } from './session-service'
+import { appendExperienceEvent } from './experience/event-log'
 import { isThinkingLogEnabled, logThinking } from './thinking-log'
 import { extractErrorMessage } from './channel-test-error'
 
@@ -1951,6 +1954,14 @@ async function resolveIterationDecisionFlow(
       },
     })
     setProgrammingEventPublisher(streamPublisher)
+    // Phase 10 W4：整版重做=行为信号（J7 三通道之「同主题重做」可观测化）
+    appendExperienceEvent({
+      projectId: input.project_id,
+      runId: input.session_id ?? input.project_id,
+      eventType: 'behavior_signal',
+      stage: 'ready',
+      observations: [`full_redo：用户确认按方向「${direction.slice(0, 60)}」整版重做`],
+    })
     updateProject(input.project_id, { current_stage: 'iterating' })
     streamPublisher(makeEvent(input, 'stage_changed', { stage: 'iterating' }))
     await runIterationTask({
@@ -1964,6 +1975,77 @@ async function resolveIterationDecisionFlow(
       signal,
       rebuild: true,
     })
+    return
+  }
+
+  // Phase 10 W4：一键反馈卡回传（fb_*；F 系列 4.1/4.2）——负面项=issue_hypothesis
+  // 事件 + issue_reported 埋点（行为信号源=本卡）；处理完按选项语义收口（引导/输入框）。
+  if (typeof decision === 'string' && decision.startsWith('fb_')) {
+    setProgrammingEventPublisher(streamPublisher)
+    const category =
+      decision === 'fb_broken' ? 'cannot_run'
+        : decision === 'fb_feature_broken' ? 'key_feature_broken'
+          : decision === 'fb_unsatisfied' ? 'unsatisfied'
+            : decision === 'fb_change_needs' ? 'requirement_change'
+              : 'later'
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'feedback_reported',
+        title: `用户反馈：${category}`,
+        why: '一键反馈卡回传（行为信号，非意图识别）——负面项进 issue_hypothesis 事件与 issue_reported 埋点，供复盘成卡',
+        detail: { category, source: 'delivery_feedback_card' },
+      },
+    })
+    if (decision === 'fb_change_needs') {
+      appendExperienceEvent({
+        projectId: input.project_id,
+        runId: input.session_id ?? input.project_id,
+        eventType: 'behavior_signal',
+        stage: 'ready',
+        observations: ['requirement_change_requested：用户经反馈卡选择「改变需求」（去输入框表达）'],
+      })
+      const copy = '好，去输入框说说你想怎么改——加功能、改交互都行，我会先跟你确认再动。'
+      appendAgentMessage(input.session_id, { role: 'assistant', content: [{ type: 'text', text: copy }], timestamp: Date.now() })
+      streamPublisher(makeEvent(input, 'message_delta', { text: copy }))
+      return
+    }
+    if (decision !== 'fb_later') {
+      appendExperienceEvent({
+        projectId: input.project_id,
+        runId: input.session_id ?? input.project_id,
+        eventType: 'issue_hypothesis',
+        stage: 'ready',
+        observations: [`${category}：用户经反馈卡报告（假设待证据坐实——终验/对账证据升 confirmed_failure）`],
+        evidenceRefs: ['documents/test-report.json'],
+      })
+      try {
+        trackAnalytics({
+          request_id: input.request_id,
+          event: {
+            event_type: 'issue_reported',
+            project_id: input.project_id,
+            session_id: input.session_id,
+            payload: { source: 'feedback_card', category },
+            privacy_level: 'research_safe',
+          },
+        })
+      } catch {
+        // 埋点失败不阻断
+      }
+      const copy =
+        category === 'cannot_run'
+          ? '收到，无法运行这个问题我记下了。方便的话把看到的报错或现象发我，我来修。'
+          : category === 'key_feature_broken'
+            ? '收到，关键功能无效我记下了。告诉我是哪个功能、怎么操作的，我来修。'
+            : '收到，效果不满意我记下了。说说哪里不符合预期，我来调。'
+      appendAgentMessage(input.session_id, { role: 'assistant', content: [{ type: 'text', text: copy }], timestamp: Date.now() })
+      streamPublisher(makeEvent(input, 'message_delta', { text: copy }))
+      return
+    }
+    // fb_later：顺势发引导卡（keep 语义收尾）
+    publishReadyNextStepsCard({ request_id: input.request_id, session_id: input.session_id, project_id: input.project_id })
     return
   }
 
@@ -2020,6 +2102,15 @@ async function resolveIterationDecisionFlow(
     streamPublisher(makeEvent(input, 'message_delta', { text: copy }))
     // 引导卡走 programming-orchestrator 的 publish，需先接线事件发布器
     setProgrammingEventPublisher(streamPublisher)
+    // Phase 10 W4：反馈卡开时先问反馈（fb_* 回传后顺势发引导卡）；off=直接引导卡（字节级现状）
+    if (feedbackCardEnabled()) {
+      publishDeliveryFeedbackCard({
+        request_id: input.request_id,
+        session_id: input.session_id,
+        project_id: input.project_id,
+      })
+      return
+    }
     publishReadyNextStepsCard({
       request_id: input.request_id,
       session_id: input.session_id,

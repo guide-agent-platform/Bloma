@@ -409,3 +409,14 @@
 - **W5 负例已锁**：纯本地任务（无能力面/personal_tool）必须排除 EXP-API-001（测试钉）。
 - 单测：rule-injection 新文件 8 例 + experience 族 15 文件 119 例全绿；loop-planner/iteration/repair 回归 71 例全绿。
 - 狗粮：`setx BLOMA_EXP_RULE_INJECT 1`（配合 BLOMA_EXPERIENCE=1）+ 重启；观察点：B 站式需求 loop system 出现【行动规则】段且模型调 run_api_contract_tests。
+
+## §39 Phase 10 W4——一键反馈卡+行为信号三分离（2026-09-16，承接 F 系列 Wave 4）
+
+| 开关 | 控制面 | 缺省 | off/未设 | '1'/'true' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_FEEDBACK_CARD` | 「保持现状」后的反馈卡（反馈优先于引导） | **off** | keep 直接发 ready_next_steps 引导卡（字节级现状） | keep 后先发**一键反馈卡**（kind=delivery_feedback，五选项：无法运行/关键功能无效/效果不满意/改变需求/暂不反馈；走通用 user_decision_required+card_option 通道，**零新 IPC 零新渲染组件**）；fb_* 回传路由：负面三项→**issue_hypothesis** 事件行+**issue_reported** 埋点（Phase 7 待办转正，源=反馈卡行为信号非意图识别）+如实话术引导描述问题；改变需求→**behavior_signal**（requirement_change_requested）+输入框引导；暂不反馈→顺势发引导卡 | `publishDeliveryFeedbackCard`（programming-orchestrator）+ keep 分支与 fb_* 路由（orchestrator）+ `isIterationDecisionId` 扩 fb_ 前缀（iteration/pending） |
+
+- **行为信号三分离落地**（F 4.2）：behavior_signal（rebuild_confirm 整版重做信号 + fb_change_needs）/ issue_hypothesis（反馈卡负面项）/ confirmed_failure（**客观证据**：api-reconcile 对账失败接线 runGwtWithApiContract；与 data_migration_failed 并列）——三类事件 kind 均已带写点。
+- 登记待办：停止信号（AGENT_CANCELLED 源=user）与「快速返回修改」行为信号待接（J7 三通道余一）；confirmed_failure 终验 GWT 失败面可再扩（现对账+迁移两处客观源）。
+- 单测：orchestrator-ready-iteration 13 例（含 W4 新 4 例：开关 on 卡替代/负面项事件+埋点+话术/暂不反馈引导/改变需求行为信号）；experience 族回归 132 例全绿。
+- 狗粮：`setx BLOMA_FEEDBACK_CARD 1` + 重启；观察点：点「保持现状」先出反馈卡；选「关键功能无效」后 bloma-experience.jsonl 出 issue_hypothesis 行、analytics 出 issue_reported。

@@ -1375,6 +1375,8 @@ export interface AnalyticsTrackInput extends RequestEnvelope {
       /** Phase 7 U5 J5（P7-9b，2026-09-10）：漏斗中层与决策转化事件 */
       | 'clarification_responded'
       | 'decision_selected'
+      /** Phase 10 W4（F 系列 4.2 转正，2026-09-16）：报障行为信号——源=一键反馈卡（非意图识别） */
+      | 'issue_reported'
     project_id?: string
     session_id?: string
     payload: Record<string, unknown>

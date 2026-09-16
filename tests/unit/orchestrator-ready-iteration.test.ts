@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runAgent, setAgentStreamPublisher, setSDKQueryForTests } from '../../main/orchestrator'
 import { findProject } from '../../main/project-service'
+import { readFileSync } from 'node:fs'
+import { readExperienceEvents } from '../../main/experience/event-log'
 import type { AgentEvent, SDKMessage } from '../../shared/types'
 
 const { runIterationTaskMock } = vi.hoisted(() => ({
@@ -413,6 +415,95 @@ describe('ready 护栏意图分流（MVP 就绪卡改版后）', () => {
       .map((event) => String(event.payload.text ?? ''))
       .join('')
     expect(deltas).toContain('不客气')
+  })
+})
+
+describe('Phase 10 W4：一键反馈卡（BLOMA_FEEDBACK_CARD）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const originalExp = process.env.BLOMA_EXPERIENCE
+  const originalFb = process.env.BLOMA_FEEDBACK_CARD
+
+  afterEach(() => {
+    restorePromaHome(originalPromaHome)
+    setAgentStreamPublisher(() => undefined)
+    setSDKQueryForTests(defaultTestQuery)
+    vi.mocked(findProject).mockReset()
+    if (originalExp === undefined) delete process.env.BLOMA_EXPERIENCE
+    else process.env.BLOMA_EXPERIENCE = originalExp
+    if (originalFb === undefined) delete process.env.BLOMA_FEEDBACK_CARD
+    else process.env.BLOMA_FEEDBACK_CARD = originalFb
+  })
+
+  it('keep + 开关 on：反馈卡替代引导卡（五选项 fb_*）；off 由既有 keep 用例锁（直接引导卡）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-fb-on-'))
+    process.env.PROMA_HOME = home
+    process.env.BLOMA_FEEDBACK_CARD = '1'
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    vi.mocked(findProject).mockReturnValue({ project_id: 'project-fb-on', current_stage: 'blocked_for_user_decision' } as never)
+    await runAgent({
+      request_id: 'req-fb-on', session_id: 'session-fb', project_id: 'project-fb-on',
+      content: '保持现状', mode: 'quick', current_stage: 'blocked_for_user_decision', channel_id: 'test-channel',
+      metadata: { source: 'card_option', selected_option_id: 'keep' },
+    })
+    const decision = events.find((event) => event.type === 'user_decision_required')
+    expect(decision?.payload.kind).toBe('delivery_feedback')
+    const ids = (decision?.payload.questions as Array<{ id: string }>).map((q) => q.id)
+    expect(ids).toEqual(['fb_broken', 'fb_feature_broken', 'fb_unsatisfied', 'fb_change_needs', 'fb_later'])
+  })
+
+  it('fb_feature_broken：issue_hypothesis 事件行 + issue_reported 埋点 + 引导修的话术', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-fb-neg-'))
+    process.env.PROMA_HOME = home
+    process.env.BLOMA_EXPERIENCE = '1'
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    vi.mocked(findProject).mockReturnValue({ project_id: 'project-fb-neg', workspace_slug: 'default-software-builder', current_stage: 'ready' } as never)
+    await runAgent({
+      request_id: 'req-fb-neg', session_id: 'session-fbn', project_id: 'project-fb-neg',
+      content: '关键功能无效', mode: 'quick', current_stage: 'ready', channel_id: 'test-channel',
+      metadata: { source: 'card_option', selected_option_id: 'fb_feature_broken' },
+    })
+    const exp = readExperienceEvents()
+    expect(exp.some((e) => e.event_type === 'issue_hypothesis' && e.observations[0].includes('key_feature_broken'))).toBe(true)
+    const analytics = readFileSync(join(home, 'agent-workspaces', 'default-software-builder', 'analytics.jsonl'), 'utf8')
+    expect(analytics).toContain('issue_reported')
+    expect(analytics).toContain('feedback_card')
+    const deltas = events.filter((e) => e.type === 'message_delta').map((e) => String(e.payload.text ?? '')).join('')
+    expect(deltas).toContain('哪个功能')
+  })
+
+  it('fb_later：顺势发引导卡（ready_next_steps）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-fb-later-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    vi.mocked(findProject).mockReturnValue({ project_id: 'project-fb-later', workspace_slug: 'default-software-builder', current_stage: 'ready' } as never)
+    await runAgent({
+      request_id: 'req-fb-later', session_id: 'session-fbl', project_id: 'project-fb-later',
+      content: '暂不反馈', mode: 'quick', current_stage: 'ready', channel_id: 'test-channel',
+      metadata: { source: 'card_option', selected_option_id: 'fb_later' },
+    })
+    const decision = events.find((event) => event.type === 'user_decision_required')
+    expect(decision?.payload.kind).toBe('ready_next_steps')
+  })
+
+  it('fb_change_needs：behavior_signal 事件（requirement_change_requested）+ 输入框引导话术', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-fb-change-'))
+    process.env.PROMA_HOME = home
+    process.env.BLOMA_EXPERIENCE = '1'
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    vi.mocked(findProject).mockReturnValue({ project_id: 'project-fb-change', workspace_slug: 'default-software-builder', current_stage: 'ready' } as never)
+    await runAgent({
+      request_id: 'req-fb-chg', session_id: 'session-fbc', project_id: 'project-fb-change',
+      content: '改变需求', mode: 'quick', current_stage: 'ready', channel_id: 'test-channel',
+      metadata: { source: 'card_option', selected_option_id: 'fb_change_needs' },
+    })
+    const exp = readExperienceEvents()
+    expect(exp.some((e) => e.event_type === 'behavior_signal' && e.observations[0].includes('requirement_change_requested'))).toBe(true)
+    const deltas = events.filter((e) => e.type === 'message_delta').map((e) => String(e.payload.text ?? '')).join('')
+    expect(deltas).toContain('输入框')
   })
 })
 

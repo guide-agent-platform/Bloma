@@ -2133,6 +2133,36 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
   return { outcome: 'ready', verdict }
 }
 
+/** Phase 10 W4：BLOMA_FEEDBACK_CARD 缺省 off（keep 直接发引导卡=现状字节级）。 */
+export function feedbackCardEnabled(): boolean {
+  const raw = (process.env.BLOMA_FEEDBACK_CARD ?? '').trim().toLowerCase()
+  return raw === '1' || raw === 'on' || raw === 'true'
+}
+
+/**
+ * Phase 10 W4（F 系列 4.1）：一键反馈卡——「保持现状」后、引导卡前非强制出卡
+ *（反馈优先于引导：用户可能根本用不了，引导无意义）。选负面项→issue_hypothesis
+ * 事件+issue_reported 埋点（行为信号源=本卡，非意图识别）；选项 id 前缀 fb_。
+ */
+export function publishDeliveryFeedbackCard(input: {
+  request_id: string
+  session_id: string
+  project_id: string
+}): void {
+  if (!feedbackCardEnabled()) return
+  publish(input, 'user_decision_required', {
+    kind: 'delivery_feedback',
+    title: '这一版用下来怎么样？',
+    questions: [
+      { id: 'fb_broken', label: '无法运行', description: '打不开或直接报错' },
+      { id: 'fb_feature_broken', label: '关键功能无效', description: '某个功能点了没反应/结果不对' },
+      { id: 'fb_unsatisfied', label: '效果不满意', description: '能用，但不是我想要的效果' },
+      { id: 'fb_change_needs', label: '改变需求', description: '想加/改功能，去输入框说' },
+      { id: 'fb_later', label: '暂不反馈', description: '先跳过' },
+    ],
+  })
+}
+
 /**
  * 「保持现状」后触发的就绪引导卡（原 runJudgeReview 内联 ready_next_steps，
  * 2026-09-11 三按钮改版后移）：用户对 MVP 整体满意 → 顺势给「走向完整产物」引导
@@ -2443,6 +2473,16 @@ export async function runGwtWithApiContract(input: { project_id: string; session
       const specPrefixes = endpoints.map((ep) => ep.endpoint.split('/').filter(Boolean)[1]).filter((p): p is string => Boolean(p))
       const reconcileFailures = [...reconcileApiUsage({ projectRoot: project.root_path, specPrefixes }), ...checkMediaSourceDiscipline(project.root_path)]
     if (reconcileFailures.length > 0) {
+      // Phase 10 W4.3：对账失败=confirmed_failure 事件行（客观证据坐实，区别于用户反馈的
+      // issue_hypothesis；高优先级诊断队列，供复盘成规则卡）
+      appendExperienceEvent({
+        projectId: input.project_id,
+        runId: input.session_id ?? input.project_id,
+        eventType: 'confirmed_failure',
+        stage: 'testing',
+        observations: reconcileFailures.map((f) => f.reason).slice(0, 5),
+        evidenceRefs: ['documents/test-report.json'],
+      })
       recordDecision({
         project_id: input.project_id,
         session_id: input.session_id,

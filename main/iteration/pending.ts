@@ -23,7 +23,18 @@
  *
  * 旧 id（confirm/rephrase/cancel）废弃：卡片为内存级生命周期，无持久化兼容负担。
  */
-export type IterationDecisionId = 'keep' | 'optimize' | 'rebuild' | 'rebuild_confirm' | 'rebuild_cancel'
+export type IterationDecisionId =
+  | 'keep'
+  | 'optimize'
+  | 'rebuild'
+  | 'rebuild_confirm'
+  | 'rebuild_cancel'
+  /** Phase 10 W4（2026-09-16）：一键反馈卡五选项（进入同一决策链，路由在 fb_ 分支） */
+  | 'fb_broken'
+  | 'fb_feature_broken'
+  | 'fb_unsatisfied'
+  | 'fb_change_needs'
+  | 'fb_later'
 
 // ==================== 局部优化 / 整版重做补充态（2026-09-11 卡位改版） ====================
 
@@ -77,5 +88,12 @@ export function takeFailedIteration(projectId: string): string | undefined {
 }
 
 export function isIterationDecisionId(id: string | undefined): id is IterationDecisionId {
-  return id === 'keep' || id === 'optimize' || id === 'rebuild' || id === 'rebuild_confirm' || id === 'rebuild_cancel'
+  return (
+    id === 'keep' ||
+    id === 'optimize' ||
+    id === 'rebuild' ||
+    id === 'rebuild_confirm' ||
+    id === 'rebuild_cancel' ||
+    (typeof id === 'string' && id.startsWith('fb_'))
+  )
 }
