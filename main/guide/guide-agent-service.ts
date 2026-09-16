@@ -181,6 +181,19 @@ const AUTO_ESCAPE_OPTION: ClarificationOption = {
 /** 澄清轮次熔断阈值：连续出示 N 张澄清卡仍不明确 → 代码级转入需求确认弹窗（D3 修订 2026-08-26；原「强制 auto 开工」语义已被弹窗化取代）。 */
 const CLARIFICATION_ROUND_LIMIT = 3
 
+/** 疑问句/身份类短句判据（窄匹配，宁漏勿误）：这类文本是对向导的提问，不是需求主题——
+ *  不得进入需求清单（2026-09-16 线上案例：用户问「你是谁」，三轮点选后熔断，主题句
+ *  兜底把它酿成 F-001「你是谁」功能项）。只拦短疑问句与「你/您+是/叫」类身份问句；
+ *  正常主题（做/写/帮我…）不受影响。 */
+function isQuestionLikeTheme(text: string): boolean {
+  const t = text.replace(/\s+/g, '').trim()
+  if (!t || t.length > 16) return false
+  if (/[？?]$/.test(t)) return true
+  if (/^[你您](是|叫|会|能).{0,6}(谁|什么|名字)/.test(t)) return true
+  if (/(吗|呢)[！!。.]*$/.test(t)) return true
+  return false
+}
+
 /** 澄清终止类决策：出现即代表澄清已收敛（开工/迭代/裁判/回滚），连续计数在此截断。
  * 2026-08-27 点选回流修订：clarification_answer（用户点选了某个选项）不再视为终点——
  * 回流模式下用户答完当前问题，向导可能继续追问下一未知点（持续跟踪），澄清结束
@@ -527,6 +540,8 @@ function collectClarificationAnswers(sessionId: string): string[] {
       const description =
         typeof item?.description === 'string' ? item.description.replace(/\s+/g, ' ').trim() : ''
       if (!description || collected.includes(description)) continue
+      // 疑问句/身份类短句不是需求（「你是谁」案）：不进熔断兑底清单
+      if (isQuestionLikeTheme(description)) continue
       collected.push(description)
     }
   }
@@ -545,6 +560,8 @@ function ensurePrimaryIntent(
   if (!primaryIntent) return requirements
   const normalized = primaryIntent.replace(/\s+/g, ' ').trim()
   if (!normalized) return requirements
+  // 疑问句/身份类短句不能当主题锚点（「你是谁」案）：不前置为 F-001
+  if (isQuestionLikeTheme(normalized)) return requirements
   const hasTheme = requirements.some((item) => {
     const description = item.description.replace(/\s+/g, ' ').trim()
     return description.includes(normalized) || normalized.includes(description)
@@ -677,6 +694,13 @@ export async function handleGuideMessage(
             : [{ id: 'F-001', description: input.content.slice(0, 40) }],
         primaryIntent,
       )
+      if (fallbackRequirements.length === 0) {
+        // 「你是谁」案补口：全疑问句被过滤 → 纯文本问目标，不弹空确认窗
+        const askText = '我还不知道你想做什么——用一句话告诉我你想做的产品（比如「做一个记账本」），我们马上开始。'
+        publish(makeGuideEvent(input, 'message_delta', { text: askText }))
+        publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+        return
+      }
       if (model) {
         await startRequirementConfirmFlow(
           input,
@@ -1338,6 +1362,14 @@ async function tryModelDrivenGuide(
           : [{ id: 'F-001', description: input.content.slice(0, 40) }],
       primaryIntent,
     )
+    if (fallbackRequirements.length === 0) {
+      // 「你是谁」案补口：主题与点选全是疑问句被过滤 → 不弹空清单确认窗，纯文本问一句目标
+      const askText = '我还不知道你想做什么——用一句话告诉我你想做的产品（比如「做一个记账本」），我们马上开始。'
+      model.persistAssistant(askText)
+      publish(makeGuideEvent(input, 'message_delta', { text: askText }))
+      publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+      return true
+    }
     await startRequirementConfirmFlow(
       input,
       publish,

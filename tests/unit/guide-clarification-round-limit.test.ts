@@ -609,10 +609,94 @@ describe('Phase 7 U4 · J2-② 第三张连续卡减负卡（BLOMA_CLARIFY_TWO_L
   })
 })
 
-describe('疑问句主题不入清单（2026-09-16「你是谁」案）', () => {
-  it('isQuestionLikeTheme 判据：窄匹配只拦疑问/身份短句，正常主题不误伤', async () => {
-    const mod = await import('../../main/guide-agent-service')
-    // 经由行为面锁判据：构造熔断序列后断言清单内容（判据函数未导出，走集成断言）
-    void mod
+describe('疑问句主题不入清单（2026-09-16「你是谁」案 efbd347a）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  let home: string
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'proma-question-theme-'))
+    process.env.PROMA_HOME = home
+    mkdirSync(join(home, 'agent-sessions'), { recursive: true })
+  })
+  afterEach(() => {
+    restorePromaHome(originalPromaHome)
+  })
+
+  function writeSession(lines: unknown[]): void {
+    writeFileSync(
+      join(home, 'agent-sessions', `${SESSION_ID}.jsonl`),
+      lines.map((line) => JSON.stringify(line)).join('\n') + '\n',
+      'utf-8',
+    )
+  }
+
+  const answer = (descriptions: string[]) => ({
+    role: 'system',
+    content: [
+      {
+        type: 'text',
+        text: `[decision] {"type":"clarification_answer","title":"用户点选澄清答案","why":"w","detail":{"requirements":${JSON.stringify(descriptions.map((d) => ({ description: d })))}}}`,
+      },
+    ],
+    timestamp: 4,
+  })
+
+  it('熔断兑底清单：主题「你是谁」被过滤，正常点选方向保留（不弹含疑问句的确认卡）', async () => {
+    // 复刻线上案例：首轮 answer 快照含主题「你是谁」，后续三轮点选正常方向
+    writeSession([
+      { role: 'user', content: [{ type: 'text', text: '你是谁' }], timestamp: 1 },
+      { role: 'assistant', content: [{ type: 'text', text: '先聊聊你想做什么' }], timestamp: 2 },
+      { role: 'system', content: [{ type: 'text', text: '[decision-card] 帮我处理某件事｜帮我做点好玩的东西｜你帮我决定' }], timestamp: 3 },
+      answer(['你是谁', '帮我做点好玩的东西']),
+      { role: 'system', content: [{ type: 'text', text: '[terminal] status=completed' }], timestamp: 5 },
+      { role: 'user', content: [{ type: 'text', text: '帮我做点好玩的东西' }], timestamp: 6 },
+      { role: 'system', content: [{ type: 'text', text: '[decision-card] 生成搞怪内容｜解压小玩具｜你帮我决定' }], timestamp: 7 },
+      answer(['生成搞怪内容']),
+      { role: 'system', content: [{ type: 'text', text: '[terminal] status=completed' }], timestamp: 8 },
+      { role: 'user', content: [{ type: 'text', text: '生成搞怪内容' }], timestamp: 9 },
+      { role: 'system', content: [{ type: 'text', text: '[decision-card] 输入文字变搞怪｜上传照片变搞怪｜你帮我决定' }], timestamp: 10 },
+      answer(['输入文字变搞怪']),
+      { role: 'system', content: [{ type: 'text', text: '[terminal] status=completed' }], timestamp: 11 },
+    ])
+
+    const json = JSON.stringify({
+      action: 'ask_clarification',
+      reply: '还想再确认一个点。',
+      questions: [{ id: 'auto', label: '你帮我决定' }],
+    })
+    const persistAssistant = vi.fn()
+    const query: SDKQuery = async function* (): AsyncGenerator<SDKMessage> {
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: json }] } }
+      yield { type: 'result', subtype: 'success' }
+    }
+    const events: AgentEvent[] = []
+    await handleGuideMessage(
+      {
+        request_id: 'req-q',
+        session_id: SESSION_ID,
+        project_id: 'proj-1',
+        content: '输入文字变搞怪',
+        mode: 'quick',
+        current_stage: 'clarifying',
+        metadata: { source: 'card_option', selected_option_id: 'answer-a' },
+      },
+      (event) => events.push(event),
+      {
+        query,
+        env: {},
+        signal: new AbortController().signal,
+        sessionId: SESSION_ID,
+        history: [],
+        maxTokens: 1024,
+        persistAssistant,
+      },
+    )
+    // 需求确认卡（或其上游决策事件）不得再含「你是谁」
+    const allText = events.map((e) => JSON.stringify(e.payload)).join('\n')
+    expect(allText).not.toContain('你是谁')
+    // 正常点选方向保留（确认卡存在且含方向项）
+    const confirmCard = events.find((e) => e.type === 'user_decision_required')
+    expect(confirmCard).toBeDefined()
+    expect(allText).toContain('帮我做点好玩的东西')
   })
 })
