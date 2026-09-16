@@ -354,3 +354,13 @@
 - 单测：context-pack 新文件 11 例（开关三态/off 字节级/空项目全空态/对账 both 无 hint/对账双向 hints/data 采样+坏 JSON/影响面命中/基线含未过场景/60 文件截断+段预算/可复用模块清单/决策留痕 detail）。
 - fail-open：组装/渲染/决策任一失败返回原任务（测试锁 off 路径；catch 全包）。
 - 狗粮：`setx BLOMA_CONTEXT_PACK 1` + 重启 Bloma；观察点：迭代轮任务书尾部出现侦察包、读癖轮次是否下降（对照 94f449c6 的 49 次 read_file）。
+
+## §34 Phase 10 W1-4——变更契约 ChangeContract（2026-09-16，咨询 G 收口·真实项目交付体系）
+
+| 开关 | 控制面 | 缺省 | off/未设 | '1'/'true' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_CHANGE_CONTRACT` | 迭代/修复轮 system 的变更契约段 + 迭代锚派生源 | **off** | 零派生零注入（字节级现状，anchor 走既有 buildIterationRoundAnchor/buildRepairRoundAnchor） | ①`deriveChangeContract` 确定性派生：goal=诉求原话；mustPreserve=契约端点保持行+既有数据行（≤4 数据文件）；outOfScope=固定守卫+背板范围外前 3；**三向验收**——positive=聚焦项行为断言（≤2/项）、negative=不变量词表扫描（非负/非空/唯一/上限/时间边界/禁止类，命中生成「违规输入必须拒绝不得静默通过」行，无命中如实为空，≤8）、compat=API 存活+旧数据读取断言；baseline=testReport 通过数+gitCommit（W1-1 开启时）；②迭代轮 anchor 改由契约投影（`roundAnchorFromChangeContract`，注入链零改动）；修复轮 anchor 保持既有+追加契约段；③fail-open 派生失败回退既有锚路径 | `main/coding/change-contract.ts`（ChangeContract 类型进 shared/types）+ 迭代接线（programming-orchestrator buildSystemWithPlan）+ 修复接线（repair-loop system） |
+
+- 单测：change-contract 新文件 12 例（开关三态/off 空串/空背板空态如实/不变量三类命中与无命中/mustPreserve 端点+数据/无 spec 无数据 compat 空/outOfScope 组装/baseline 两态+gitCommit/正向验收聚焦断言/渲染空段省略与基线两态/锚投影映射+回退/on 前导段）。
+- 登记：修改确认卡契约摘要展示留 v1；LLM 加厚负向断言留 v1（词表先行防编造）。
+- 狗粮：`setx BLOMA_CHANGE_CONTRACT 1` + 重启 Bloma；观察点：迭代轮 system 出现【变更契约】段、负向断言是否进 GWT 生成原料（随记灵案「断言措辞驱使实现扭曲」的对症线）。

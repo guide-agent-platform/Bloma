@@ -16,7 +16,8 @@ import { getCachedStaticEvidence, setCachedStaticEvidence } from './evidence-cac
 import { runVisionAuditGate } from './vision-audit-gate'
 import { buildRepairTasks, resolveRepairBudget, runRepairLoop, repairScopeEnabled, repairNoopGuardEnabled, hasWriteEditToolCall, type RepairCheckpointContext, type RepairTask } from './repair-loop'
 import { buildIterationTask, ITERATION_MODE_SECTION, iterationBriefEnabled, resolveAgentLoopMaxTurnsLocal } from './iteration-brief'
-import { appendContextPack } from './context-pack'
+import { appendContextPack, buildContextPack } from './context-pack'
+import { buildChangeContractBlock, changeContractEnabled, deriveChangeContract, roundAnchorFromChangeContract } from './change-contract'
 import { recordFailureCards } from '../experience/error-card'
 import { generateLoopPlan, planLegEnabled, renderPlanInjection, renderPlanMarkdown, renderTaskChecklist, type LoopPlan } from './loop-planner'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../project-service'
@@ -1250,20 +1251,43 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     // Phase 3 B3：迭代轮本轮锚（聚焦路径才有；开关 off=零注入字节级现状）。
     // Phase 8 W1：localOnly（局部优化）强制开启——照 resolveFocusAnchor 的 localOnly
     // 先例（用户明确只要改这一处，本轮锚必须送达；开关总开关 off 时字节级现状）。
+    // Phase 10 W1-4：契约激活时本轮锚由变更契约派生（见下方 changeContract 块）。
     const briefActive = iterationBriefActive(input)
-    const roundAnchorBlock =
-      focus && focus.length > 0 && (roundAnchorEnabled() || briefActive)
-        ? `\n\n${renderRoundAnchorBlock(buildIterationRoundAnchor(backplane, focus))}`
-        : ''
     // Phase 8 W1：【修改模式】段（语义对齐 repair-loop REPAIR_MODE_SECTION：任务书即
     // 全部工作，不要重新生成整个项目）；非 localOnly / 开关关 = 零注入字节级现状。
     const iterationModeBlock = briefActive ? `\n\n${ITERATION_MODE_SECTION}` : ''
+    // Phase 10 W1-4：变更契约（BLOMA_CHANGE_CONTRACT on 时：契约派生本轮锚 + system
+    // 增【变更契约】段；off 零派生零注入字节级。fail-open：派生失败回退既有锚路径）
+    let changeContractBlock = ''
+    let contractAnchorBlock: string | null = null
+    if (changeContractEnabled()) {
+      try {
+        const lastReport = readTestReport(input.project_id)
+        const pack = buildContextPack(input.project_id, input.prompt)
+        const contract = deriveChangeContract({
+          goal: input.prompt ?? '',
+          backplane,
+          ...(focus && focus.length > 0 ? { focus } : {}),
+          dataFiles: pack.dataFiles.map((d) => d.file),
+          baseline: lastReport ? { passed: lastReport.passed_count, total: lastReport.total_count } : null,
+        })
+        contractAnchorBlock = `\n\n${renderRoundAnchorBlock(roundAnchorFromChangeContract(contract))}`
+        changeContractBlock = buildChangeContractBlock(contract)
+      } catch {
+        // fail-open：契约派生失败回退既有锚路径
+      }
+    }
+    const roundAnchorBlock =
+      contractAnchorBlock ??
+      (focus && focus.length > 0 && (roundAnchorEnabled() || briefActive)
+        ? `\n\n${renderRoundAnchorBlock(buildIterationRoundAnchor(backplane, focus))}`
+        : '')
     // W5-1（Phase 8.5）：实施清单（checklist 化 plan）——生成路径且开关开时注入，
     // 提供逐项推进工作结构；局部修改轮不叠加（聚焦任务书已含工作法）
     const checklistBlock = !briefActive && taskWorkflowEnabled() && loopPlan ? `\n\n${renderTaskChecklist(loopPlan)}` : ''
     return planInjection
-      ? `${base}${roundAnchorBlock}${iterationModeBlock}\n\n${planInjection}${checklistBlock}`
-      : `${base}${roundAnchorBlock}${iterationModeBlock}${checklistBlock}`
+      ? `${base}${roundAnchorBlock}${iterationModeBlock}${changeContractBlock}\n\n${planInjection}${checklistBlock}`
+      : `${base}${roundAnchorBlock}${iterationModeBlock}${changeContractBlock}${checklistBlock}`
   }
   // 委派协作（嫁接方案 §4.1）：注册父 loop 上下文供 delegate_agent 构建子循环；子工具集按 role 裁剪
   setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))

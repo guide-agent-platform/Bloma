@@ -1524,6 +1524,38 @@ export interface ContextPack {
   openQuestions: string[]
 }
 
+// ---------------------------------------------------------------------------
+// Phase 10 W1-4（2026-09-16，咨询 G 收口）：ChangeContract 变更契约——RoundAnchor
+// 的一般化：变更目标/必须保留（兼容性）/范围外/三向验收（正向/负向/兼容）/基线。
+// 负向断言 v0 从不变量词表确定性派生（非负/非空/唯一/上限/时间边界/禁止类），
+// 无命中如实为空不编造；LLM 加厚留 v1。
+// ---------------------------------------------------------------------------
+
+export interface ChangeContractAcceptance {
+  /** 本变更的正向验收（来自聚焦项断言/诉求） */
+  positive: string[]
+  /** 负向断言：违反规则的输入必须被拒绝（状态机禁令/不变量） */
+  negative: string[]
+  /** 兼容性约束：既有契约端点与数据在变更后保持可用 */
+  compat: string[]
+}
+
+export interface ChangeContractBaseline {
+  testReportPresent: boolean
+  passed: number
+  total: number
+  /** 产物 git 基线（W1-1 开启时为短 hash；未启用时缺省） */
+  gitCommit?: string
+}
+
+export interface ChangeContract {
+  goal: string
+  mustPreserve: string[]
+  outOfScope: string[]
+  acceptance: ChangeContractAcceptance
+  baseline: ChangeContractBaseline
+}
+
 declare global {
   interface Window {
     electronAPI?: ElectronAPI

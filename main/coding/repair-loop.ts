@@ -29,7 +29,9 @@ import { categoryTemperature, resolveGenerationMaxTokens } from '../model-resolu
 import { resolveChannelEnv } from '../runtime-fallback'
 import { trackAnalytics } from '../platform-services'
 import { appendProjectLearning } from '../learnings-log'
-import { readLoopCheckpointDocument, writeLoopCheckpointDocument, type LoopRepairAttemptRecord } from '../document-engine'
+import { readLoopCheckpointDocument, writeLoopCheckpointDocument, type LoopRepairAttemptRecord, readPrdBackplane } from '../document-engine'
+import { readTestReport } from '../gwt-service'
+import { buildChangeContractBlock, changeContractEnabled, deriveChangeContract } from './change-contract'
 import { createWriteScope } from './agent-tools'
 import { appendContextPack } from './context-pack'
 
@@ -247,9 +249,27 @@ export async function runRepairLoop(input: RepairLoopInput): Promise<RepairRound
     // Phase 3 B3：本轮锚（开关 off 或未传 spec → 零注入，system 与现状字节一致）
     const roundAnchorBlock =
       input.roundAnchor && roundAnchorEnabled() ? `\n\n${renderRoundAnchorBlock(input.roundAnchor)}` : ''
+    // Phase 10 W1-4：变更契约段（BLOMA_CHANGE_CONTRACT on 时派生并追加；off 零注入
+    // 字节级；fail-open 派生失败不阻断修复轮）
+    let changeContractBlock = ''
+    if (changeContractEnabled()) {
+      try {
+        const backplane = readPrdBackplane(input.project_id)
+        const lastReport = readTestReport(input.project_id)
+        changeContractBlock = buildChangeContractBlock(
+          deriveChangeContract({
+            goal: `修复 ${input.tasks.length} 项失败：${input.tasks.map((t) => t.location ?? t.claim).filter(Boolean).slice(0, 3).join('、')}`,
+            backplane,
+            baseline: lastReport ? { passed: lastReport.passed_count, total: lastReport.total_count } : null,
+          }),
+        )
+      } catch {
+        // fail-open
+      }
+    }
   const scopePaths = repairScopeEnabled() && input.authorizedWritePaths && input.authorizedWritePaths.length > 0 ? input.authorizedWritePaths : undefined
   loopResult = await runAgentLoop({
-      system: `${input.buildSystem(editFormat)}\n\n${REPAIR_MODE_SECTION}${roundAnchorBlock}`,
+      system: `${input.buildSystem(editFormat)}\n\n${REPAIR_MODE_SECTION}${roundAnchorBlock}${changeContractBlock}`,
       // Phase 10 W1-3：修复任务卡尾部追加项目侦察包（BLOMA_CONTEXT_PACK off=字节级）
       task: appendContextPack({ projectId: input.project_id, sessionId: input.session_id, task: renderRepairTaskCard(input.tasks, input.checkpointContext) }),
       // 窄任务小预算：web_research 限 2 防长 loop 无节制外呼（主 loop 为 4）
