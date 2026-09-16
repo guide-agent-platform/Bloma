@@ -130,6 +130,8 @@ describe('让渡话术表 isAutoDelegationText', () => {
 
 describe('引导对话 · 自由文本让渡分流', () => {
   beforeEach(() => {
+    // 2026-09-16: BLOMA_GUIDE_LOOP default-on; pin legacy path for this file
+    process.env.BLOMA_GUIDE_LOOP = '0'
     vi.mocked(runSketchTask).mockClear()
     vi.mocked(recordDecision).mockClear()
   })

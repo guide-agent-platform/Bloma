@@ -129,8 +129,9 @@ describe('向导 loop 化（BLOMA_GUIDE_LOOP）', () => {
     vi.restoreAllMocks()
   })
 
-  it('缺省 off：单次流式 JSON 现状（query 无 tools），决策照旧经 parseGuideJson 路由', async () => {
-    delete process.env.BLOMA_GUIDE_LOOP
+  it('缺省 on（2026-09-16 翻转）+ =0 逃生口：旧单次流式 JSON 路径仍可用', async () => {
+    expect(guideLoopEnabled()).toBe(true)
+    process.env.BLOMA_GUIDE_LOOP = '0'
     expect(guideLoopEnabled()).toBe(false)
     const json = JSON.stringify(decideAskJson)
     const model = makeModel(() => [
@@ -139,7 +140,7 @@ describe('向导 loop 化（BLOMA_GUIDE_LOOP）', () => {
     ])
     const events: AgentEvent[] = []
     await handleGuideMessage(makeInput(), (event) => events.push(event), model)
-    // 单次调用、无工具面（现状口径）
+    // 旧路径：单次调用、无工具面
     expect(model.captured.prompts).toHaveLength(1)
     expect(model.captured.toolCounts[0]).toBe(0)
     const card = events.find((e) => e.type === 'user_decision_required')

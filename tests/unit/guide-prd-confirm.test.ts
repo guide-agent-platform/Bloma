@@ -142,6 +142,8 @@ describe('PRD 用户确认门（改造 3）', () => {
   let events: AgentEvent[]
 
   beforeEach(() => {
+    // 2026-09-16: BLOMA_GUIDE_LOOP default-on; pin legacy path for this file
+    process.env.BLOMA_GUIDE_LOOP = '0'
     // 委派审查固定关：单测走直连（委派链路由 review-delegation 专属测试覆盖）
     process.env.BLOMA_DELEGATED_REVIEW = '0'
     // R2（2026-09-12）：市调想法来源相关用例（想法提炼/回退原始条目）钉到 scrape 模式

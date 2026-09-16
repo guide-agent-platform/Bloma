@@ -90,6 +90,8 @@ const generateSketchJson = JSON.stringify({
 
 describe('引导首轮澄清硬护栏', () => {
   beforeEach(() => {
+    // 2026-09-16: BLOMA_GUIDE_LOOP default-on; pin legacy path for this file
+    process.env.BLOMA_GUIDE_LOOP = '0'
     vi.mocked(runSketchTask).mockClear()
     vi.mocked(updateProject).mockClear()
   })

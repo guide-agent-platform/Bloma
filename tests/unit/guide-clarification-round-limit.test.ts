@@ -3,6 +3,9 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// 2026-09-16 FILE-LEVEL 钉：BLOMA_GUIDE_LOOP 缺省翻转 on，本文件全部用例锁旧单次 JSON 路径
+process.env.BLOMA_GUIDE_LOOP = '0'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
 
 vi.mock('../../main/programming-orchestrator', () => ({
@@ -72,6 +75,8 @@ describe('countTrailingClarificationRounds 尾随澄清轮计数', () => {
   let home: string
 
   beforeEach(() => {
+    // 2026-09-16: BLOMA_GUIDE_LOOP default-on; pin legacy path for this file
+    process.env.BLOMA_GUIDE_LOOP = '0'
     home = mkdtempSync(join(tmpdir(), 'proma-round-'))
     process.env.PROMA_HOME = home
     mkdirSync(join(home, 'agent-sessions'), { recursive: true })

@@ -5,6 +5,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+// 2026-09-16 FILE-LEVEL 钉：BLOMA_GUIDE_LOOP 缺省翻转 on，本文件全部用例锁旧单次 JSON 路径
+process.env.BLOMA_GUIDE_LOOP = '0'
 import { runAgent, setAgentStreamPublisher, setSDKQueryForTests } from '../../main/orchestrator'
 
 vi.mock('../../main/channel-manager', async (importOriginal) => {

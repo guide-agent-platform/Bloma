@@ -138,6 +138,8 @@ describe('② 追问通路闭环（挂起 → 回答 → 重跑）', () => {
   let home: string | undefined
 
   beforeEach(() => {
+    // 2026-09-16: BLOMA_GUIDE_LOOP default-on; pin legacy path for this file
+    process.env.BLOMA_GUIDE_LOOP = '0'
     process.env.BLOMA_DELEGATED_REVIEW = '0'
     home = mkdtempSync(join(tmpdir(), 'proma-clar-loop-'))
     process.env.PROMA_HOME = home

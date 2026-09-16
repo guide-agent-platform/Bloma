@@ -20,7 +20,12 @@ import type { AgentLoopTool } from '../agent-loop'
 
 /** 开关：off = 向导澄清腿维持单次流式 JSON 现状（字节级）。 */
 export function guideLoopEnabled(): boolean {
-  return process.env.BLOMA_GUIDE_LOOP === '1' || process.env.BLOMA_GUIDE_LOOP === 'true'
+  // 2026-09-16 缺省翻转 on（用户拍板「直接接向导 agent」）：向导澄清腿缺省走 agent loop
+  // （自由对话 + 只读事实工具 + guide_decide 决策口），旧单次 JSON 路径退为逃生口
+  // （=0/'false'）；「你是谁」类非需求输入由模型 free_chat 语义自然处理，不再依赖
+  // 关键词硬门槛（isQuestionLikeTheme 仅作旧路径兑底，见 guide-agent-service）。
+  const raw = process.env.BLOMA_GUIDE_LOOP
+  return raw !== '0' && raw !== 'false'
 }
 
 /** 向导结构化决策（与 guide-agent-service 的 GuideParsed 同构；由服务侧归一为路由输入）。 */

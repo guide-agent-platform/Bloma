@@ -182,6 +182,8 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
   let events: AgentEvent[]
 
   beforeEach(() => {
+    // 2026-09-16: BLOMA_GUIDE_LOOP default-on; pin legacy path for this file
+    process.env.BLOMA_GUIDE_LOOP = '0'
     // 委派审查默认开启：单测固定走直连路径（委派链路由 review-delegation 专属测试覆盖）
     process.env.BLOMA_DELEGATED_REVIEW = '0'
     const home = mkdtempSync(join(tmpdir(), 'proma-prd-review-'))

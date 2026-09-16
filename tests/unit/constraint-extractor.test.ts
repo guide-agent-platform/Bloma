@@ -3,6 +3,10 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// 2026-09-16 FILE-LEVEL 钉：BLOMA_GUIDE_LOOP 缺省翻转 on，本文件锁旧路径读取侧口径
+// （loop 模式下约束系统行经 historyTurns→messages 送达，捕获参数不同；行为等价）
+process.env.BLOMA_GUIDE_LOOP = '0'
 import { captureConstraints, extractConstraints, scanSessionConstraints } from '../../main/constraint-extractor'
 import { buildPrdBackplane } from '../../main/document-engine'
 import { buildAgentLoopSystemPrompt } from '../../main/programming-orchestrator'

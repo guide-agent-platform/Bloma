@@ -113,6 +113,8 @@ describe('需求确认弹窗（confirm_requirements）', () => {
   let persistSystem: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
+    // 2026-09-16: BLOMA_GUIDE_LOOP default-on; pin legacy path for this file
+    process.env.BLOMA_GUIDE_LOOP = '0'
     // 委派审查默认开启：单测固定走直连路径（委派链路由 review-delegation 专属测试覆盖）
     process.env.BLOMA_DELEGATED_REVIEW = '0'
     // R2（2026-09-12）：本文件多数用例验证 scrape 市调链路（搜索/想法提炼），
