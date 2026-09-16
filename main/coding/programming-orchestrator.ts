@@ -51,6 +51,7 @@ import { deliveryStatusEnabled, recordDeliveryStatus, buildDeliveryPresentation,
 import { isDegenerateText } from './output-integrity'
 import { checkApiContract } from './api-contract'
 import { apiReconcileEnabled, checkMediaSourceDiscipline, reconcileApiUsage } from './api-reconcile'
+import { checkDataMigrationDiscipline, dataMigrateContractSection, dataMigrateEnabled, runMigrationDrill, type MigrationDrillResult } from './data-migration'
 import { buildAgentTools } from '../agent-tools'
 import { disposeParentDelegationState, registerParentLoopContext, setChildToolsBuilder } from '../agent-collaboration'
 import { categoryTemperature, resolveGenerationMaxTokens } from '../model-resolution'
@@ -1889,7 +1890,10 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
   // Phase 3 B5（2026-09-09）：表达适配层 append-only 注入（off=字节级现状；只改表达
   // 不改验收口径，契约层构件字节永不受本层影响——回归锁锁定 append-only）。
   const expression = renderExpressionSection()
-  return expression ? `${base}\n\n${expression}` : base
+  // Phase 10 W1-5：【数据迁移纪律】段（BLOMA_DATA_MIGRATE off='' 零注入字节级）
+  const dataMigrate = dataMigrateContractSection()
+  const withExpression = expression ? `${base}\n\n${expression}` : base
+  return dataMigrate ? `${withExpression}\n\n${dataMigrate}` : withExpression
 }
 
 /**
@@ -2377,6 +2381,36 @@ export async function runGwtWithApiContract(input: { project_id: string; session
       const notes = uiProbeNotes(gateResult.probe)
       if (notes.length > 0) testResult.unverified = [...(testResult.unverified ?? []), ...notes]
     }
+  }
+  // Phase 10 W1-5：数据迁移门（BLOMA_DATA_MIGRATE on 时；纯磁盘检查不依赖预览，
+  // 放 preview_url 卫语前——drill 失败以 GwtFailureSummary 并入，api-reconcile 同款）。
+  try {
+    const project = findProject(input.project_id)
+    if (project && dataMigrateEnabled()) {
+      const discipline = checkDataMigrationDiscipline(project.root_path)
+      let drill: MigrationDrillResult | null = null
+      if (discipline.status === 'drill') drill = await runMigrationDrill(project.root_path)
+      recordDecision({
+        project_id: input.project_id,
+        session_id: input.session_id,
+        entry: {
+          type: 'agent_loop',
+          title: `数据迁移门：${drill ? drill.summary : discipline.note}`,
+          why: drill ? drill.summary : discipline.note,
+          detail: { kind: 'data_migrate_check', status: drill ? drill.status : discipline.status, ...(drill ? drill.detail : {}) },
+        },
+      })
+      if (discipline.status === 'unversioned') {
+        testResult.unverified = [...(testResult.unverified ?? []), `数据迁移门：${discipline.note}`]
+      }
+      if (drill && drill.failures.length > 0) {
+        testResult.total_count += drill.failures.length
+        testResult.failed_count += drill.failures.length
+        testResult.failure_summary = [...testResult.failure_summary, ...drill.failures]
+      }
+    }
+  } catch {
+    // fail-open：迁移门异常不阻断终验（与 api-reconcile 同纪律）
   }
   if (!input.preview_url) return testResult
   const endpoints = backplaneInterfaceSpec(readPrdBackplane(input.project_id))

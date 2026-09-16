@@ -364,3 +364,13 @@
 - 单测：change-contract 新文件 12 例（开关三态/off 空串/空背板空态如实/不变量三类命中与无命中/mustPreserve 端点+数据/无 spec 无数据 compat 空/outOfScope 组装/baseline 两态+gitCommit/正向验收聚焦断言/渲染空段省略与基线两态/锚投影映射+回退/on 前导段）。
 - 登记：修改确认卡契约摘要展示留 v1；LLM 加厚负向断言留 v1（词表先行防编造）。
 - 狗粮：`setx BLOMA_CHANGE_CONTRACT 1` + 重启 Bloma；观察点：迭代轮 system 出现【变更契约】段、负向断言是否进 GWT 生成原料（随记灵案「断言措辞驱使实现扭曲」的对症线）。
+
+## §35 Phase 10 W1-5——数据迁移守卫（2026-09-16，咨询 G 收口·真实项目交付体系）
+
+| 开关 | 控制面 | 缺省 | off/未设 | '1'/'true' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_DATA_MIGRATE` | 数据结构变更的迁移纪律与终验演练 | **off** | 纪律段零注入、终验零接入（字节级现状） | ①loop system 追加【数据迁移纪律】段（首写 data/ 建版本文件 `ctx.writeData('schema-version','1')`→data/schema-version.json；改结构必带 `server/routes/_migrate.js` CJS `{from,to,run(ctx)}`；禁弃旧数据重建）；②终验 `runGwtWithApiContract` 增数据迁移门（preview_url 卫语前，纯磁盘）：discipline 四态（no_data/unversioned/ok/drill）+ drill 态执行**迁移演练**——data/ 临时副本上 createRequire 加载 _migrate.js 执行 run(ctx)（ctx 与产物同款 readData/writeData 语义），校验版本到位/数组行数不减/首条标识字段（id/*Id）不漂移/无异常；失败以 GwtFailureSummary 并入修复回流；unversioned 进 unverified 裁判可见；源 data/ 零触碰；decision kind=data_migrate_check | `main/coding/data-migration.ts` + 终验接线（programming-orchestrator）+ 纪律段接线（buildLoopSystemWithOverride）+ 骨架只读样例 `server/routes/_migrate.example.js`（manifest 登记 readonly） |
+
+- 约定修正记录：版本文件定为 `data/schema-version.json`（JSON 字符串、走 ctx 原生 writeData）而非 `.schema-version`——产物 ctx 的 dataPath 对无扩展名自动补 .json，点文件写不进去（测试实证）；骨架 manifest 白名单（.html/.js/.css）也不允许无扩展名文件，版本文件由模型按纪律自建。
+- 单测：data-migration 新文件 9 例（开关三态+纪律段/四态扫描/pass 全过+源数据零触碰/丢行/版本未写+标识漂移/覆盖不到+已在目标/抛错+契约不完整/skip 两态）；模板/构建门/注入回归 53 例全绿。
+- 狗粮：`setx BLOMA_DATA_MIGRATE 1` + 重启；观察点：B 类 seed（chg-b-note-tag-field）变更后终验是否红「无迁移」或演练不过。
