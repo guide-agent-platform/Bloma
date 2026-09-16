@@ -374,3 +374,13 @@
 - 约定修正记录：版本文件定为 `data/schema-version.json`（JSON 字符串、走 ctx 原生 writeData）而非 `.schema-version`——产物 ctx 的 dataPath 对无扩展名自动补 .json，点文件写不进去（测试实证）；骨架 manifest 白名单（.html/.js/.css）也不允许无扩展名文件，版本文件由模型按纪律自建。
 - 单测：data-migration 新文件 9 例（开关三态+纪律段/四态扫描/pass 全过+源数据零触碰/丢行/版本未写+标识漂移/覆盖不到+已在目标/抛错+契约不完整/skip 两态）；模板/构建门/注入回归 53 例全绿。
 - 狗粮：`setx BLOMA_DATA_MIGRATE 1` + 重启；观察点：B 类 seed（chg-b-note-tag-field）变更后终验是否红「无迁移」或演练不过。
+
+## §36 Phase 10 W1-6——导出清单与升级导出（2026-09-16，咨询 G 收口·真实项目交付体系）
+
+| 开关 | 控制面 | 缺省 | off/未设 | '1'/'true' | 落点 |
+|---|---|---|---|---|---|
+| `BLOMA_EXPORT_V2` | 导出包 manifest 与 v2 字段 | **off** | exportProjectHandoff 行为字节级现状 | ①导出包写 `export-manifest.json`（sha256-16 相对路径清单，排除集与导出复制同构 node_modules/.git/dist/dist-main；**data/ 入册**——升级要认数据）+ export-info v2 字段（project_id/source_snapshot_id/**git_commit**（W1-1 未启用时 null 如实）/manifest 概要）；②`detectDrift(landedRoot)` 落地产物对账（手改/缺失/新增三分类，只检测不合并）；③`upgradeExport` 升级导出（函数级，IPC/UI 接线登记 v1）：新代码树+携带落地产物 data/（先备份 data-backups/pre-upgrade/）+**真实执行 _migrate 迁移**（复用 W1-5 executeMigration，含版本/行数/标识校验）+upgrade-report.json（漂移+迁移结果+责任边界话术）+重建 manifest | `main/coding/export-manifest.ts` + 导出接线（project-export.ts exportProjectHandoff） |
+
+- **重要环境陷阱（实测入档）**：Windows Node 22.22.0 `fs.cpSync(recursive:true)` 源目录名含非 ASCII（中文项目名）→ **段错误杀进程**（copyFileSync 安全）——本模块一律逐文件复制（PR-3 copyProjectTree 同款规避先例）；快照/恢复路径的 cpSync 源均为 ASCII（uuid 目录）不受影响。
+- 单测：export-manifest 新文件 6 例（开关三态/manifest 构建写读回环排除集/漂移三分类+无 manifest clean/git 无仓库 undefined/升级全链（新代码+数据携带+备份+迁移+报告+落地源零触碰）/无迁移 none 态）。
+- 狗粮：`setx BLOMA_EXPORT_V2 1` + 重启；观察点：导出包出现 export-manifest.json 且 export-info 带 git_commit。

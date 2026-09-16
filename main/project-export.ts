@@ -15,6 +15,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFi
 import { join } from 'node:path'
 import { getDocumentsDir } from '../storage/config-paths'
 import { findProject } from './project-service'
+import { buildExportManifest, exportManifestEnabled, MANIFEST_FILE, readProjectGitCommit, writeExportManifest } from './coding/export-manifest'
 import type { ProjectExportInput, ProjectExportResult, Project } from '../shared/types'
 
 /** 导出排除目录（防御性：当前产物形态干净，为后续工程形态预留；与 agent-tools SKIPPED_DIRS 同集）。 */
@@ -197,6 +198,26 @@ export function exportProjectHandoff(input: ProjectExportInput, destination: str
     writeFileSync(join(target, 'export-info.json'), JSON.stringify(exportInfo, null, 2), 'utf8')
   } catch {
     // 导出信息失败不阻断导出主链
+  }
+
+  // Phase 10 W1-6（BLOMA_EXPORT_V2 off=字节级现状）：导出包带文件 manifest 与
+  // v2 字段（project_id/git 基线）——漂移对账与升级链的地基；fail-open 不阻断导出。
+  if (exportManifestEnabled()) {
+    try {
+      const manifest = buildExportManifest(target)
+      writeExportManifest(target, manifest)
+      const v2 = {
+        exported_at: new Date().toISOString(),
+        project_id: project.project_id,
+        source_snapshot_id: project.current_snapshot_id ?? null,
+        git_commit: readProjectGitCommit(project.root_path) ?? null,
+        manifest: { file: MANIFEST_FILE, files: Object.keys(manifest).length, algorithm: 'sha256-16' },
+        note: 'export-manifest.json 是本包文件清单（升级前可用其对账手改）；升级流程见 upgrade-report 约定。',
+      }
+      writeFileSync(join(target, 'export-info.json'), JSON.stringify(v2, null, 2), 'utf8')
+    } catch {
+      // manifest 失败不阻断导出主链
+    }
   }
 
   return { canceled: false, destination: target, file_count: countFiles(target) }

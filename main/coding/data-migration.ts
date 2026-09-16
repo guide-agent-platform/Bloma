@@ -138,14 +138,35 @@ export interface MigrationDrillResult {
 
 /** 终验迁移演练：data/ 临时副本上执行 _migrate.run 并校验；任何异常/校验不过=失败。 */
 export async function runMigrationDrill(projectRoot: string): Promise<MigrationDrillResult> {
-  const migratePath = join(projectRoot, 'server', 'routes', '_migrate.js')
   const dataDir = join(projectRoot, 'data')
+  const migratePath = join(projectRoot, 'server', 'routes', '_migrate.js')
   if (!existsSync(migratePath)) {
     return { status: 'skip', summary: '无 _migrate.js，跳过演练', failures: [], detail: {} }
   }
+  if (readVersionFile(dataDir) === null && !existsSync(dataDir)) {
+    return { status: 'skip', summary: '无 data/ 目录，跳过演练', failures: [], detail: {} }
+  }
+  const tempData = mkdtempSync(join(tmpdir(), 'proma-migrate-drill-'))
+  try {
+    cpSync(dataDir, tempData, { recursive: true, force: true })
+    return await executeMigration(projectRoot, tempData)
+  } finally {
+    rmSync(tempData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  }
+}
+
+/**
+ * 在指定 dataDir 上真实执行迁移并校验（W1-6 升级导出复用；终验演练传临时副本，
+ * 升级导出传目标包 data/）。加载/版本判定/执行/校验四步，任何异常=失败如实返回。
+ */
+export async function executeMigration(projectRoot: string, dataDir: string): Promise<MigrationDrillResult> {
+  const migratePath = join(projectRoot, 'server', 'routes', '_migrate.js')
+  if (!existsSync(migratePath)) {
+    return { status: 'skip', summary: '无 _migrate.js，跳过', failures: [], detail: {} }
+  }
   const currentVersion = readVersionFile(dataDir)
   if (currentVersion === null) {
-    return { status: 'skip', summary: '无 schema-version.json，跳过演练', failures: [], detail: {} }
+    return { status: 'skip', summary: '无 schema-version.json，跳过', failures: [], detail: {} }
   }
   let migrate: { from?: string; to?: string; run?: (ctx: unknown) => unknown | Promise<unknown> }
   try {
@@ -181,11 +202,8 @@ export async function runMigrationDrill(projectRoot: string): Promise<MigrationD
       detail: { current: currentVersion, from, to },
     }
   }
-  const tempData = mkdtempSync(join(tmpdir(), 'proma-migrate-drill-'))
-  try {
-    cpSync(dataDir, tempData, { recursive: true, force: true })
-    const before = snapshotData(tempData)
-    const ctx = buildDrillCtx(tempData)
+  const before = snapshotData(dataDir)
+    const ctx = buildDrillCtx(dataDir)
     try {
       await migrate.run(ctx)
     } catch (err) {
@@ -197,11 +215,11 @@ export async function runMigrationDrill(projectRoot: string): Promise<MigrationD
       }
     }
     const failures: GwtFailureSummary[] = []
-    const afterVersion = readVersionFile(tempData) ?? ''
+    const afterVersion = readVersionFile(dataDir) ?? ''
     if (afterVersion !== to) {
       failures.push({ scenario: '数据迁移演练：版本到位', reason: `迁移后 schema-version 应为 ${to}，实际为「${afterVersion || '（缺失）'}」——迁移完必须 ctx.writeData('schema-version', '${to}')` })
     }
-    const after = snapshotData(tempData)
+    const after = snapshotData(dataDir)
     for (const arr of before.arrays) {
       const afterArr = after.arrays.find((a) => a.file === arr.file)
       if (!afterArr) {
@@ -220,13 +238,10 @@ export async function runMigrationDrill(projectRoot: string): Promise<MigrationD
     if (failures.length > 0) {
       return { status: 'fail', summary: `迁移演练 ${failures.length} 项不过`, failures, detail: { from, to, files: before.arrays.length } }
     }
-    return {
-      status: 'pass',
-      summary: `迁移演练通过（${from}→${to}，${before.arrays.length} 个数据文件、行数与标识校验全过）`,
-      failures: [],
-      detail: { from, to, files: before.arrays.length, parseable: before.parseable },
-    }
-  } finally {
-    rmSync(tempData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  return {
+    status: 'pass',
+    summary: `迁移通过（${from}→${to}，${before.arrays.length} 个数据文件、行数与标识校验全过）`,
+    failures: [],
+    detail: { from, to, files: before.arrays.length, parseable: before.parseable },
   }
 }
