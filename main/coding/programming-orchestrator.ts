@@ -2978,6 +2978,11 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
     query: input.query,
     tasks,
     round,
+    // R1-providers（狗粮 7601e5ae #496）：上轮预算耗尽时被信道丢弃的写类意图回喛——
+    // 只在存在时注入（缺省零注入字节级不变）
+    ...(input.loop?.termination_detail?.dropped_tool_intents?.length
+      ? { droppedToolIntents: input.loop.termination_detail.dropped_tool_intents }
+      : {}),
     buildSystem: (editFormat) => buildLoopSystemWithOverride(backplane, editFormat, input.project_id, skeletonMap, undefined, moduleMap),
     // Phase 3 B3：修复轮本轮锚（开关 off=零注入字节级现状）；完成证据=失败断言原文
     ...(roundAnchorEnabled() ? { roundAnchor: buildRepairRoundAnchor(backplane, tasks.map((task) => task.location ?? task.claim)) } : {}),

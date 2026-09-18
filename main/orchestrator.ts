@@ -69,6 +69,7 @@ import { recordSessionActivity } from './session-service'
 import { appendExperienceEvent } from './experience/event-log'
 import { isThinkingLogEnabled, logThinking } from './thinking-log'
 import { extractErrorMessage } from './channel-test-error'
+import { anthropicMessagesQueryViaProviders, providerAdapterEnabled } from './providers/loop-query'
 
 export type StreamPublisher = (event: AgentEvent) => void
 
@@ -1761,9 +1762,13 @@ export async function* anthropicMessagesQuery(prompt: string, options: SDKQueryO
  * 与 [channel-switch] 系统行，绝不静默。
  */
 async function* queryWithRuntimeFallback(prompt: string, options: SDKQueryOptions): AsyncGenerator<SDKMessage> {
+  // R1-providers（2026-09-19「照抄 Proma」）：传输层换上游 providers 口径（首字节超时/
+  // 首事件前重试/多工具并行装配/双认证头），BLOMA_PROVIDER_ADAPTER=0 字节级回旧路径。
+  // T9 被动渠道回退包裹层不变：两路径均经同一回退语义。
+  const baseQuery = providerAdapterEnabled() ? anthropicMessagesQueryViaProviders : anthropicMessagesQuery
   const context = readFallbackContext(options.env)
   let emitted = false
-  const iterator = anthropicMessagesQuery(prompt, options)[Symbol.asyncIterator]()
+  const iterator = baseQuery(prompt, options)[Symbol.asyncIterator]()
   try {
     for (;;) {
       const next = await iterator.next()
@@ -1782,7 +1787,7 @@ async function* queryWithRuntimeFallback(prompt: string, options: SDKQueryOption
       to: backup,
       statusCode,
     })
-    yield* anthropicMessagesQuery(prompt, {
+    yield* baseQuery(prompt, {
       ...options,
       env: backup.env,
       // 备用渠道有自己的 max_tokens 上限（16384 主渠道对备用渠道可能 400）

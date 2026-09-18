@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createChannel } from '../../main/channel-manager'
 import { setSafeStorageAdapter } from '../../main/safe-storage'
 import { getSdkQuery, resetSDKQueryForTests } from '../../main/orchestrator'
+import { setSseRetryWaitBudgetForTests } from '../../main/providers/sse-reader'
 import {
   isInfrastructureFailure,
   readFallbackContext,
@@ -119,11 +120,15 @@ describe('runtime channel fallback · T9 请求期被动切换', () => {
     process.env.PROMA_HOME = home
     resetSDKQueryForTests()
     resetChannelSwitchThrottleForTests()
+    // R1-providers：上游同渠道自愈重试（指数退避）在单测里会拖慢套件——禁用后
+    // 首败直接交给 T9 被动切换，与旧路径钉点语义对齐
+    setSseRetryWaitBudgetForTests(0)
   })
 
   afterEach(() => {
     restorePromaHome(originalPromaHome)
     vi.unstubAllGlobals()
+    setSseRetryWaitBudgetForTests()
   })
 
   it('首调基础设施故障（500）→ 切备用渠道重试一次，任务完成且决策日志含切换记录（验收正向）', async () => {
@@ -222,7 +227,7 @@ describe('runtime channel fallback · T9 请求期被动切换', () => {
 
     const resolution = resolveChannelEnv({ channelId: undefined, category: 'sketch', projectId: 'p-fallback', sessionId: 's-fallback' })
     expect(resolution.env).toBeDefined()
-    await expect(collect(getSdkQuery(), '画草图', resolution.env!)).rejects.toThrow('SDK request failed with 503')
+    await expect(collect(getSdkQuery(), '画草图', resolution.env!)).rejects.toThrow('provider API 错误 (503)')
     expect(readSystemLines('s-fallback').some((line) => line.includes('[channel-switch]'))).toBe(false)
   })
 

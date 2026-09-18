@@ -448,3 +448,12 @@
 - 单测：real-skeleton 6 + preview-runtime 5 + right-dock-tabs 5 + agent-tools 变体 1 + api-contract POST 2 + security-scan serverOnly 1 + gwt-service 事件兜底 1 + circuit-rollback fix_now 断言 + orchestrator-plan 换包接线 1；全量 2107 例 12 败=61b7b58 基线存量逐条吻合（agent-loop 9/agent-collab 2/permission flake 1），零回归。
 - **W6 验收实测（2026-09-18 18:04）**：①real-fullstack 全链冒烟（骨架→vendor 复制→spawn node server.js）全过——GET / 200 text/html、静态资源 200、POST /api/llm 无 env 如实 503 带 hint、未注册路由 404 带 path JSON、日志 listening 可回流；②纯静态态 file server 真实起进程探活（preview-runtime 测试）；③两态判定链实测（「记录收入与支出」命中留存词→派生契约→real-fullstack，orchestrator-plan 接线测试）；④开关 off 全量单测=基线画像零回归。**待狗粮**：setx 开关+重启，新需求同诉求复刻（期望：Express 路由约定下无全路径键死法、右侧面板可见、熔断卡出现）。
 - 挂账：GWT 行为场景的 runner 探针对新句式（重开后数据仍在）的解析覆盖待实测校准；旧路径 static-server 语义待新线稳定后整体退役评估。
+
+## §42 照抄 Proma 稳健性对齐（2026-09-19，依据《Bloma-Proma稳健性对齐实施稿-20260919》；上游参照 proma-upstream @ bf3e98c）
+
+| 通道/件 | 内容 | 开关 |
+|---|---|---|
+| `BLOMA_PROVIDER_ADAPTER` | loop 查询传输层换上游 providers 口径（main/providers/：sse-reader 首字节超时 30s+首事件前指数退避重试 5 次/30s 预算+多工具调用并行装配+thinking/签名块容错+双认证头+provider 差异化 URL 解析）；SDKQuery 外壳与调用方零改动；=0/false/off 回旧 anthropicMessagesQuery 字节级 | **on**（缺省；逃生口 =0） |
+| R0 六杀手（70ed2ff） | real-fullstack 终验/run_gwt_tests 前陈旧检测重建 dist（dist-rebuild.ts）；list_files/find 对 node_modules 如实说明；服务入口指纹进 runSandbox 幂等守卫第四项；约束抓取宿主注入拦截+sanitizeConstraints 消费端清洗；归一化 out_of_scope 反转守卫（isScopeInversion）；回滚 data 无条件备份+话术如实（RollbackResult.data_backup_dir） | 随变体标记/无开关（旧路径字节不变） |
+| R1-loop（2ffc8e6） | dsml-display-filter 流式 holdback 呈现净化（只拦 publish，JSONL 原文/模型侧历史不变）；LoopTerminationDetail.dropped_tool_intents 写类意图不丢；NARRATION_EVENTS 分支中文条款 | 无（质量门常开；DSML 恢复 D2 既有 BLOMA_DSML_RECOVERY 不变） |
+

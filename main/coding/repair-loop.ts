@@ -191,6 +191,9 @@ export interface RepairLoopInput {
   roundAnchor?: RoundAnchorSpec
   /** W2-F1：修复证据包（候选指纹+此前修复尝试；BLOMA_LOOP_CHECKPOINT 缺省 off=零注入） */
   checkpointContext?: RepairCheckpointContext
+  /** R1-providers（2026-09-19 狗粮 7601e5ae #496）：上一轮预算耗尽时被信道丢弃的写类
+   *  DSML 调用意图（工具名:path）——如实回喛修复任务卡，防正确修复动作无声蒸发 */
+  droppedToolIntents?: string[]
   /** W4-F2：本轮修改授权（相对路径；仅 BLOMA_REPAIR_SCOPE on 且可从任务卡派生出文件路径时生效——
    *  场景锚点不当白名单，派生不出即不设边界 fail-open） */
   authorizedWritePaths?: string[]
@@ -271,7 +274,7 @@ export async function runRepairLoop(input: RepairLoopInput): Promise<RepairRound
   loopResult = await runAgentLoop({
       system: `${input.buildSystem(editFormat)}\n\n${REPAIR_MODE_SECTION}${roundAnchorBlock}${changeContractBlock}`,
       // Phase 10 W1-3：修复任务卡尾部追加项目侦察包（BLOMA_CONTEXT_PACK off=字节级）
-      task: appendContextPack({ projectId: input.project_id, sessionId: input.session_id, task: renderRepairTaskCard(input.tasks, input.checkpointContext) }),
+      task: appendContextPack({ projectId: input.project_id, sessionId: input.session_id, task: renderRepairTaskCard(input.tasks, input.checkpointContext, input.droppedToolIntents) }),
       // 窄任务小预算：web_research 限 2 防长 loop 无节制外呼（主 loop 为 4）
       toolBudget: { web_research: REPAIR_WEB_RESEARCH_BUDGET },
       tools: buildAgentTools({
@@ -425,10 +428,16 @@ function renderRepairEvidencePack(checkpoint?: RepairCheckpointContext): string[
   return [lines.join('\n')]
 }
 
-export function renderRepairTaskCard(tasks: RepairTask[], checkpoint?: RepairCheckpointContext): string {
+export function renderRepairTaskCard(tasks: RepairTask[], checkpoint?: RepairCheckpointContext, droppedToolIntents?: string[]): string {
   if (tasks.length === 0) return ''
   const blocks = tasks.map((task) => (task.source === 'gwt' ? renderGwtTaskBlock(task) : renderBuildTaskBlock(task)))
-  return [`## 修复任务（共 ${tasks.length} 项，只修这些，不要动其他任何文件/功能）`, ...blocks, ...renderRepairEvidencePack(checkpoint), REPAIR_CARD_CONSTRAINTS.join('\n')].join(
+  // R1-providers（2026-09-19 狗粮 7601e5ae #496）：上一轮预算耗尽时被信道丢弃的写类调用
+  // 意图如实回喛——狗粮实锤被丢弃的 write_file:dist/app.js 重建正是唯一正确修复动作。
+  const droppedBlock = droppedToolIntents?.length
+    ? [`【上轮未途的调用意图】上一轮结束时模型仍想执行（但轮次预算已尽未落盘）：${droppedToolIntents.join('、')}。若与本轮失败相关，优先核实对应产物状态（例如想写 dist/ 产物 → 先确认构建产物是否陈旧再改源码）。`
+      , ''].join('\n')
+    : ''
+  return [`## 修复任务（共 ${tasks.length} 项，只修这些，不要动其他任何文件/功能）`, ...blocks, ...renderRepairEvidencePack(checkpoint), droppedBlock, REPAIR_CARD_CONSTRAINTS.join('\n')].filter(Boolean).join(
     '\n\n',
   )
 }
