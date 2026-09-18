@@ -20,6 +20,15 @@ function basename(path: string): string {
   return path.split(/[\\/]/).pop() ?? path
 }
 
+/** W6（用户拍板 2026-09-18）：产物文件只读查看融入文档面板（右侧 dock 已撤）。
+ *  快捷入口覆盖常见关键件；手输路径兑底任意产物文件；基础设施目录由主进程拒绝。 */
+const QUICK_PRODUCT_FILES = ['index.html', 'server.js', 'package.json', 'src/app.js']
+
+type SelectedView =
+  | { kind: 'document'; document: DocumentRef; content: string }
+  | { kind: 'file'; path: string; content: string; truncated?: boolean }
+  | null
+
 /**
  * 文档面板（U2）——长期模式顶部「文档」按钮展开的抽屉。
  * 列出项目已产出的 PRD / GWT / 测试报告等文档，点击读取内容展示。
@@ -31,8 +40,10 @@ export const DocumentPanel: React.FC = () => {
   const project = useAtomValue(currentProjectAtom)
   const [documents, setDocuments] = React.useState<DocumentRef[]>([])
   const [loading, setLoading] = React.useState(false)
-  const [selected, setSelected] = React.useState<{ document: DocumentRef; content: string } | null>(null)
+  const [selected, setSelected] = React.useState<SelectedView>(null)
   const [reading, setReading] = React.useState(false)
+  const [filePath, setFilePath] = React.useState('')
+  const [fileError, setFileError] = React.useState('')
 
   React.useEffect(() => {
     if (!expanded || !project) return
@@ -58,7 +69,34 @@ export const DocumentPanel: React.FC = () => {
     void api.documents
       .read({ request_id: crypto.randomUUID(), project_id: project.project_id, document_id: doc.document_id })
       .then((result) => {
-        if (result.ok) setSelected(result.data)
+        if (result.ok) setSelected({ kind: 'document', document: doc, content: result.data.content })
+      })
+      .finally(() => setReading(false))
+  }
+
+  /** 产物文件打开（W6）：主进程校验项目根内+拒基础设施目录/二进制，256KB 截断如实标注 */
+  const handleOpenFile = (rawPath: string) => {
+    const trimmed = rawPath.trim()
+    if (!project || !trimmed) return
+    const api = window.electronAPI
+    if (!api?.project?.fileRead) {
+      setFileError('当前环境不支持文件查看（preload 桥未就绪）。')
+      return
+    }
+    setReading(true)
+    setFileError('')
+    void api.project
+      .fileRead({ request_id: crypto.randomUUID(), project_id: project.project_id, path: trimmed })
+      .then((result) => {
+        if (result.ok) {
+          setSelected({ kind: 'file', path: result.data.path, content: result.data.content, truncated: result.data.truncated })
+        } else {
+          setSelected(null)
+          setFileError(result.error.user_visible_message || result.error.message)
+        }
+      })
+      .catch((error: unknown) => {
+        setFileError(error instanceof Error ? error.message : String(error))
       })
       .finally(() => setReading(false))
   }
@@ -121,7 +159,7 @@ export const DocumentPanel: React.FC = () => {
           </p>
         ) : (
           documents.map((doc) => {
-            const active = selected?.document.document_id === doc.document_id
+            const active = selected?.kind === 'document' && selected.document.document_id === doc.document_id
             return (
               <button
                 key={doc.document_id}
@@ -153,11 +191,88 @@ export const DocumentPanel: React.FC = () => {
         )}
       </div>
 
+      {/* 产物文件（W6：文件渲染融入文档面板——右侧 dock 已按用户拍板撤除） */}
+      <div
+        data-ai-id="document-panel-files"
+        style={{
+          flexShrink: 0, padding: 'var(--space-3)', borderBottom: '1px solid var(--color-border)',
+          display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', alignItems: 'center',
+        }}
+      >
+        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginRight: 'var(--space-1)' }}>产物文件：</span>
+        {QUICK_PRODUCT_FILES.map((path) => (
+          <button
+            key={path}
+            type="button"
+            data-ai-id="document-panel-file-quick"
+            onClick={() => handleOpenFile(path)}
+            style={{
+              fontSize: 'var(--font-size-xs)', padding: '2px var(--space-2)', cursor: 'pointer',
+              color: selected?.kind === 'file' && selected.path === path ? 'var(--color-text)' : 'var(--color-text-muted)',
+              background: selected?.kind === 'file' && selected.path === path ? 'var(--glass-bg-strong)' : 'transparent',
+              border: '1px solid var(--color-border)', borderRadius: 'var(--radius-full)', fontFamily: 'inherit',
+            }}
+          >
+            {path}
+          </button>
+        ))}
+        <span style={{ display: 'inline-flex', gap: 'var(--space-1)', marginLeft: 'auto' }}>
+          <input
+            value={filePath}
+            placeholder="其他文件路径…"
+            data-ai-id="document-panel-file-input"
+            onChange={(event) => setFilePath(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') handleOpenFile(filePath)
+            }}
+            style={{
+              fontSize: 'var(--font-size-xs)', padding: '2px var(--space-2)', width: 120,
+              color: 'var(--color-text)', background: 'transparent',
+              border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', fontFamily: 'inherit',
+            }}
+          />
+          <button
+            type="button"
+            data-ai-id="document-panel-file-open"
+            onClick={() => handleOpenFile(filePath)}
+            style={{
+              fontSize: 'var(--font-size-xs)', padding: '2px var(--space-2)', cursor: 'pointer',
+              color: 'var(--color-text)', background: 'transparent',
+              border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', fontFamily: 'inherit',
+            }}
+          >
+            打开
+          </button>
+        </span>
+        {fileError ? (
+          <span data-ai-id="document-panel-file-error" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-danger, #e5484d)', width: '100%' }}>
+            {fileError}
+          </span>
+        ) : null}
+      </div>
+
       {/* 文档内容 */}
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 'var(--space-4) var(--space-5)' }}>
         {reading ? (
           <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>读取中…</p>
-        ) : selected ? (
+        ) : selected?.kind === 'file' ? (
+          <div>
+            <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', margin: '0 0 var(--space-2)' }}>
+              {selected.path}
+              {selected.truncated ? '（超过 256KB，已截断）' : ''} · 只读
+            </p>
+            <pre
+              data-ai-id="document-file-content"
+              style={{
+                margin: 0, fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+                fontSize: 'var(--font-size-xs)', lineHeight: 1.7, color: 'var(--color-text)',
+                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              }}
+            >
+              {selected.content}
+            </pre>
+          </div>
+        ) : selected?.kind === 'document' ? (
           <pre
             data-ai-id="document-content"
             style={{
@@ -170,7 +285,7 @@ export const DocumentPanel: React.FC = () => {
           </pre>
         ) : (
           <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
-            从左侧选择一份文档查看内容。
+            从上方选择文档或产物文件查看内容。
           </p>
         )}
       </div>

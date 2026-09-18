@@ -31,7 +31,6 @@ import type {
   PastedImageSaveInput,
   PermissionSetModeInput,
   PointCorrectionInput,
-  PreviewLogsInput,
   ProjectFileReadInput,
   PromptReadInput,
   PromptResetInput,
@@ -103,7 +102,6 @@ import { listDocuments, readDocument, syncDocuments, isPrdUserConfirmed } from '
 import { isCircuitBreakSettled, convergeStageFromEvidence, evaluateDiskArtifact } from './recovery-service'
 import {
   createSnapshot,
-  getSandboxLogs,
   listSnapshotDocuments,
   listSnapshots,
   loadSnapshotScreenshot,
@@ -963,16 +961,7 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     })
   })
 
-  // W4 右侧弹出标签：预览服务日志快照（渲染端轮询；真实脚手架产物的一手调试证据）
-  ipcMain.handle(IPC_CHANNELS.PREVIEW_LOGS, async (_event, payload: unknown) => {
-    return safeInvoke(extractRequestId(payload), async () => {
-      const input = requireFields<PreviewLogsInput>(payload, ['project_id'])
-      findProject(input.project_id) // 缺项目时 findProject 自抛 PROJECT_NOT_FOUND
-      return { logs: getSandboxLogs(input.project_id) }
-    })
-  })
-
-  // W4 右侧弹出标签：产物文件只读查看（项目根内；拒基础设施目录/标记/二进制；256KB 截断）
+  // W4/W6 文档面板：产物文件只读查看（项目根内；拒基础设施目录/标记/二进制；256KB 截断）
   ipcMain.handle(IPC_CHANNELS.PROJECT_FILE_READ, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<ProjectFileReadInput>(payload, ['project_id', 'path'])

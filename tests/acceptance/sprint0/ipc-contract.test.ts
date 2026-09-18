@@ -36,7 +36,6 @@ const expectedChannels = {
   PROJECT_EXPORT: 'project:export',
   PROJECT_RENAME: 'project:rename',
   PROJECT_UPGRADE_EXPORT: 'project:upgrade-export',
-  PREVIEW_LOGS: 'preview:logs',
   PROJECT_FILE_READ: 'project:file-read',
   APP_SWITCH_STATE: 'app:switch-state',
   PROJECT_ABANDON: 'project:abandon',

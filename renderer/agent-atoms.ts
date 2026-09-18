@@ -956,14 +956,6 @@ export const stageIndicatorLabelAtom = atom<string>('选择模式')
  * 2026-08-27 线上案例「迭代后预览内容没变」） */
 export const previewUrlsAtom = atom<Record<string, { url: string; updatedAt: number }>>({})
 
-/** W4 右侧弹出标签（不动现有布局，position:fixed 覆盖层）：dock 开合/活跃标签/文件查看状态。
- *  模块级常量（陷阱 10：禁渲染路径内联创建 atom）。预览标签复用 previewUrlsAtom（双入口拍板：
- *  聊天流内 PreviewPanel 照旧，dock 是第二入口）；日志标签轮询 preview.logs；文件标签只读查看。 */
-export type RightDockTab = 'preview' | 'logs' | 'files'
-export const rightDockOpenAtom = atom(false)
-export const rightDockActiveTabAtom = atom<RightDockTab>('preview')
-export const rightDockFileAtom = atom<{ path: string; content: string; truncated?: boolean } | null>(null)
-
 /** 最近一次 sketch_ready / mvp_ready 事件带回的快照 id；null = 尚无快照（供「确认草图」回传） */
 export const currentSnapshotIdAtom = atom<string | null>(null)
 
