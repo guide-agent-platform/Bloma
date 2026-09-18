@@ -45,6 +45,10 @@ export const IPC_CHANNELS = {
   PROJECT_EXPORT: 'project:export',
   PROJECT_RENAME: 'project:rename',
   PROJECT_UPGRADE_EXPORT: 'project:upgrade-export',
+  /** W4 右侧弹出标签：预览服务日志（真实脚手架产物的一手调试证据，轮询拉取） */
+  PREVIEW_LOGS: 'preview:logs',
+  /** W4 右侧弹出标签：产物文件只读查看（项目根内、拒基础设施目录与二进制） */
+  PROJECT_FILE_READ: 'project:file-read',
   APP_SWITCH_STATE: 'app:switch-state',
   PROJECT_ABANDON: 'project:abandon',
   PROJECT_REOPEN: 'project:reopen',
@@ -1369,6 +1373,30 @@ export interface DocumentReadResult {
   content: string
 }
 
+/** W4 右侧弹出标签：产物文件只读查看（project:file-read）。 */
+export interface ProjectFileReadInput extends RequestEnvelope {
+  project_id: string
+  /** 项目根相对路径（如 index.html / server.js / src/app.js） */
+  path: string
+}
+
+export interface ProjectFileReadResult {
+  path: string
+  content: string
+  /** 超大小上限（256KB）时截断并标记 */
+  truncated: boolean
+  bytes: number
+}
+
+/** W4 右侧弹出标签：预览服务日志快照（preview:logs，渲染端轮询）。 */
+export interface PreviewLogsInput extends RequestEnvelope {
+  project_id: string
+}
+
+export interface PreviewLogsResult {
+  logs: string
+}
+
 // =========================================================================
 // 13. 分析/埋点
 // =========================================================================
@@ -1460,6 +1488,8 @@ export type ElectronAPI = {
     export(input: ProjectExportInput): Promise<ApiResult<ProjectExportResult>>
     /** Phase 10 落地旅程：升级导出（旧导出包→新代码+旧数据+迁移+报告） */
     upgradeExport(input: ProjectUpgradeExportInput): Promise<ApiResult<ProjectUpgradeExportResult>>
+    /** W4 右侧弹出标签：产物文件只读查看（拒 node_modules/.git/data-backups 与二进制） */
+    fileRead(input: ProjectFileReadInput): Promise<ApiResult<ProjectFileReadResult>>
     rename(input: ProjectRenameInput): Promise<ApiResult<Project>>
     abandon(input: ProjectAbandonInput): Promise<ApiResult<Project>>
     reopen(input: ProjectReopenInput): Promise<ApiResult<Project>>
@@ -1472,6 +1502,10 @@ export type ElectronAPI = {
     run(input: SandboxRunInput): Promise<ApiResult<SandboxRunResult>>
     stop(input: SandboxStopInput): Promise<ApiResult<SandboxStopResult>>
     restore(input: SandboxRunInput): Promise<ApiResult<SandboxRunResult>>
+  }
+  preview: {
+    /** W4：预览服务日志快照（真实脚手架产物的一手调试证据） */
+    logs(input: PreviewLogsInput): Promise<ApiResult<PreviewLogsResult>>
   }
   snapshots: {
     create(input: SnapshotCreateInput): Promise<ApiResult<Snapshot>>

@@ -57,6 +57,7 @@ import type {
   ProjectCreateInput,
   ProjectDeleteInput,
   ProjectExportInput,
+  ProjectFileReadInput,
   ProjectUpgradeExportInput,
   AppSwitchStateInput,
   ProjectFinalizeInput,
@@ -67,6 +68,7 @@ import type {
   ProjectUpgradeInput,
   RequestEnvelope,
   PastedImageSaveInput,
+  PreviewLogsInput,
   SandboxRunInput,
   SandboxStopInput,
   SnapshotCreateInput,
@@ -133,6 +135,8 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_EXPORT, input),
     upgradeExport: (input: ProjectUpgradeExportInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_UPGRADE_EXPORT, input),
+    fileRead: (input: ProjectFileReadInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_FILE_READ, input),
     rename: (input: ProjectRenameInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_RENAME, input),
     abandon: (input: ProjectAbandonInput) =>
@@ -155,6 +159,10 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.SANDBOX_STOP, input),
     restore: (input: SandboxRunInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.SANDBOX_RESTORE, input),
+  },
+  preview: {
+    logs: (input: PreviewLogsInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PREVIEW_LOGS, input),
   },
   snapshots: {
     create: (input: SnapshotCreateInput) =>

@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { dialog } from 'electron'
 import type { BrowserWindow, IpcMain } from 'electron'
 import type {
@@ -29,6 +31,8 @@ import type {
   PastedImageSaveInput,
   PermissionSetModeInput,
   PointCorrectionInput,
+  PreviewLogsInput,
+  ProjectFileReadInput,
   PromptReadInput,
   PromptResetInput,
   PromptSaveInput,
@@ -99,6 +103,7 @@ import { listDocuments, readDocument, syncDocuments, isPrdUserConfirmed } from '
 import { isCircuitBreakSettled, convergeStageFromEvidence, evaluateDiskArtifact } from './recovery-service'
 import {
   createSnapshot,
+  getSandboxLogs,
   listSnapshotDocuments,
   listSnapshots,
   loadSnapshotScreenshot,
@@ -955,6 +960,39 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<DocumentReadInput>(payload, ['project_id', 'document_id'])
       return readDocument(input.project_id, input.document_id)
+    })
+  })
+
+  // W4 右侧弹出标签：预览服务日志快照（渲染端轮询；真实脚手架产物的一手调试证据）
+  ipcMain.handle(IPC_CHANNELS.PREVIEW_LOGS, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<PreviewLogsInput>(payload, ['project_id'])
+      findProject(input.project_id) // 缺项目时 findProject 自抛 PROJECT_NOT_FOUND
+      return { logs: getSandboxLogs(input.project_id) }
+    })
+  })
+
+  // W4 右侧弹出标签：产物文件只读查看（项目根内；拒基础设施目录/标记/二进制；256KB 截断）
+  ipcMain.handle(IPC_CHANNELS.PROJECT_FILE_READ, async (_event, payload: unknown) => {
+    return safeInvoke(extractRequestId(payload), async () => {
+      const input = requireFields<ProjectFileReadInput>(payload, ['project_id', 'path'])
+      const project = findProject(input.project_id) // 缺项目时自抛 PROJECT_NOT_FOUND
+      const rel = String(input.path).replace(/\\/g, '/').replace(/^\.\//, '')
+      if (!rel || rel.includes('..') || /^[a-zA-Z]:/.test(rel) || rel.startsWith('/')) {
+        throw new Error('FILE_READ_BAD_PATH: 路径必须是项目内相对路径')
+      }
+      const lower = rel.toLowerCase()
+      const denied = lower.startsWith('node_modules/') || lower.startsWith('.git/') || lower.startsWith('data-backups/') || lower === '.bloma-real-variant'
+      if (denied) throw new Error('FILE_READ_DENIED: 该路径不属于产物文件（基础设施/平台管理件）')
+      const abs = join(project.root_path, rel)
+      const stat = statSync(abs)
+      if (!stat.isFile()) throw new Error('FILE_READ_NOT_FILE: 目标不是文件')
+      const buf = readFileSync(abs)
+      // 二进制喰探（前 8KB 出现 NUL 即判二进制，只读视图不支持）
+      if (buf.subarray(0, 8192).includes(0)) throw new Error('FILE_READ_BINARY: 二进制文件不支持文本查看')
+      const MAX = 256 * 1024
+      const truncated = buf.byteLength > MAX
+      return { path: rel, content: buf.subarray(0, MAX).toString('utf8'), truncated, bytes: buf.byteLength }
     })
   })
 

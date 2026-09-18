@@ -4,6 +4,7 @@ import { ChatPanel } from './ChatPanel'
 import type { AgentMessage } from './atoms'
 import { PreviewPanel } from './PreviewPanel'
 import { TimelinePanel } from './TimelinePanel'
+import { RightDockTabs } from './RightDockTabs'
 import { MvpStatusBanner } from './MvpStatusBanner'
 import { DocumentPanel } from './DocumentPanel'
 import { CollaborationPanel } from './CollaborationPanel'
@@ -147,6 +148,10 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
 
       {/* 委派协作抽屉（M4-C）：由 collaborationPanelExpandedAtom 门控，展开时覆盖在右侧 */}
       <CollaborationPanel />
+
+      {/* W4 右侧弹出标签（真实脚手架改造）：fixed 覆盖层不动文档流布局——预览/服务日志/文件三标签，
+          不弹不占位（右缘把手常驻）；与 DocumentPanel/CollaborationPanel 抽屉互不干涉（z 层独立） */}
+      <RightDockTabs />
     </div>
   )
 }
