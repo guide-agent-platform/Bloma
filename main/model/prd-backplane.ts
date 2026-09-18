@@ -417,6 +417,8 @@ function renderRequirementSummary(item: SketchRequirement): string {
  */
 // 完整程序阶段 2.5（2026-09-06 计算器案）：数据留存信号词——LLM 漏报 interface_spec
 // 时的确定性兜底触发（历史/保存/持久/刷新或重开后仍在/清空/收藏/回顾/记录）。
+// ⚠️ 双源同步义务（2026-09-18）：与 prd-engine-llm 提示词「七、interface_spec 触发判定」
+// 词表互指——改任一处须同步另一处（措辞语汇允许行为化差异，词面集合保持一致）。
 const PERSISTENCE_SIGNAL_RE = /历史|保存|持久|刷新|重开|清空|收藏|回顾|记录/
 
 /** Phase 9 W1.2（2026-09-12，B 站播放器案 214397c3）：外部服务信号——需求要求直连/
