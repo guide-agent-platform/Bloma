@@ -1854,7 +1854,7 @@ function loadConversationHistory(sessionId: string, limit = HISTORY_WINDOW_TURNS
   for (const turn of turns) {
     if (turn.role === 'assistant' && isStallReply(turn.content)) continue
     const previous = filtered[filtered.length - 1]
-    if (previous && previous.role === 'assistant' && previous.content === turn.content) continue
+    if (previous && previous.role === turn.role && previous.content === turn.content) continue
     filtered.push(turn)
   }
   // 窗口只按 user/assistant 轮计数：decision-card 回灌行不占窗口名额，跟随相邻轮

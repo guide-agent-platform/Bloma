@@ -36,7 +36,33 @@ export function nextSessionEntryId(): string {
  * 泛型约束 object：既有调用点既传具名接口（AgentMessage）也传内联对象字面量（可能带
  * 额外字段如 delegation_settle），不可收窄为单一具名类型。
  */
+/** 幂等护栏内存态：与 lastIds 同生命周期（测试 seam 一并清理）。 */
+const lastAppendedUser = new Map<string, { signature: string; at: number }>()
+
+/** 同内容 user 双写判定窗口（毫秒）：点选回流与 orchestrator 下一轮输入在同一秒内双写。 */
+const USER_DUPLICATE_WINDOW_MS = 3_000
+
 export function appendSessionMessage<T extends object>(sessionId: string, message: T): void {
+  // R2（2026-09-19 狗粮 7601e5ae 实证）：同一用户输入被两条路径双写（点选回流先记
+  // 一条、orchestrator 下一轮输入再记一条；两轮连续点选时同文本三重）。回放气泡
+  // 重复展示、模型上下文重复回灌。幂等护栏：与上一条 user 记录完全同内容且 3 秒
+  // 内 → 跳过。重启后内存签名丢失至多退回双写现状（读侧 loadConversationHistory
+  // 连续去重兑底）；助手轮与工具结果不受影响。
+  const role = (message as { role?: unknown }).role
+  const timestamp = (message as { timestamp?: unknown }).timestamp
+  const content = (message as { content?: unknown }).content
+  // tool_result 批（loop 侧）不适用：同批重复的合法工具结果（如连续 run_preview 同
+  // 文案）会被误吞——护栏只针对用户输入文本的双写形态。
+  const carriesToolResult = Array.isArray(content)
+    && content.some((block) => block && typeof block === 'object' && (block as { type?: unknown }).type === 'tool_result')
+  if (role === 'user' && !carriesToolResult && typeof timestamp === 'number') {
+    const signature = JSON.stringify(content ?? null)
+    const prev = lastAppendedUser.get(sessionId)
+    if (prev && prev.signature === signature && Math.abs(timestamp - prev.at) <= USER_DUPLICATE_WINDOW_MS) {
+      return
+    }
+    lastAppendedUser.set(sessionId, { signature, at: timestamp })
+  }
   const id = nextSessionEntryId()
   const parentId = lastIds.get(sessionId) ?? null
   appendJsonLine(getAgentSessionPath(sessionId), { ...message, id, parentId })
@@ -46,4 +72,5 @@ export function appendSessionMessage<T extends object>(sessionId: string, messag
 /** 测试 seam：清空 per-session lastId，保证用例间不串扰。 */
 export function resetSessionTreeForTests(): void {
   lastIds.clear()
+  lastAppendedUser.clear()
 }
