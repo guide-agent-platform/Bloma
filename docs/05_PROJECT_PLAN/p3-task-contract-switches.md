@@ -433,3 +433,18 @@
 
 - 单测：mvp-status-export 扩 3 例（升级按钮时序/失败如实口径含漂移/取消与 IPC 失败）+ experiment-switches 2 例（注册表完整性+实况三态）；sprint0 契约+export-manifest 回归 18 例全绿。
 - 登记待办：设置页「实验开关」可视管理面（写入侧，bloma-switches.json 启动加载方案已论证）；TimelinePanel 两口径组件级测试（hook fail-open 已由注册表测试覆盖语义）。
+
+## §41 W1-W6 真实脚手架与预览呈现改造（2026-09-18，依据《Bloma-真实脚手架与预览呈现改造实施稿-20260918》）
+
+| 通道/件 | 内容 | 开关 |
+|---|---|---|
+| `BLOMA_REAL_SCAFFOLD` | **总开关（缺省 off=字节级现状）**：on 时 web 形态类型（web_fullstack/personal_tool/game）新项目按 interface_spec 两态判定换 real-static / real-fullstack 骨架包（Express 真实工程：可见 server.js+package.json+llm-proxy 读 env+db.js 原子写）；「沙箱」概念消失——预览分流按 `.bloma-real-variant` 标记（骨架渲染时落盘，随快照恢复）：fullstack→spawn node server.js（cwd 钉根+PORT/BLOMA_APP_LLM_* env）、static→零约定只读 file server、无标记→旧注入路径字节级不变 | **off**（狗粮：setx BLOMA_REAL_SCAFFOLD 1+重启；vendor 已预装 ~/.proma/bloma-vendor/express@4.21.2） |
+| 变体标记 `.bloma-real-variant` | 预览分流/交付链注入门/工具面写边界三处统一权威判定（根治文件存在性启发双缺陷：旧路径 loop 期无 static-server.js 误判/real-static 误注入）；agent 写入被拒（SYSTEM_FILES） | 基础设施常开（无开关——标记不存在即旧路径，零影响） |
+| 工具面变体分流（agent-tools） | 真实工程件皆产物可写（package.json/server.js/任意后缀），仅拒 node_modules/.git/data-backups/标记；web_fetch 预览 origin 放行（state.preview_url 同源+重定向同源）；契约失败输出附预览地址+日志尾+变体感知指引 | 随标记（无标记=旧规则字节级） |
+| RightDockTabs（W4 渲染端） | 右缘把手→dock 覆盖层三标签（预览 iframe 双入口/服务日志 2s 轮询 preview:logs/文件只读 project:file-read）；fixed 不动现有布局 | 纯呈现直接上 |
+| 终验治理（W5 无开关直接上） | API 契约 POST 无参端点空体探测（404=未挂载）；GWT 留存语义强制行为场景（禁「可见且可交互」兜底）；安全扫描 serverOnly 域（child_process critical/直连外网 high）；熔断→ready 补发 mvp_review 卡（failureNote 非空主选项 fix_now）；readTestReport 回退 test_completed 事件 | 无（质量门，旧路径同享 POST 探测/留存场景/事件兜底） |
+
+- 快照排除集增 node_modules（vendor 钉版供货确定性可重建，归档不膨胀；回滚后 ensureVendorNodeModules 幂等补拷）；sandboxLogs 32KB 环形截尾；run_preview 成功态回流日志尾。
+- 单测：real-skeleton 6 + preview-runtime 5 + right-dock-tabs 5 + agent-tools 变体 1 + api-contract POST 2 + security-scan serverOnly 1 + gwt-service 事件兜底 1 + circuit-rollback fix_now 断言 + orchestrator-plan 换包接线 1；全量 2107 例 12 败=61b7b58 基线存量逐条吻合（agent-loop 9/agent-collab 2/permission flake 1），零回归。
+- **W6 验收实测（2026-09-18 18:04）**：①real-fullstack 全链冒烟（骨架→vendor 复制→spawn node server.js）全过——GET / 200 text/html、静态资源 200、POST /api/llm 无 env 如实 503 带 hint、未注册路由 404 带 path JSON、日志 listening 可回流；②纯静态态 file server 真实起进程探活（preview-runtime 测试）；③两态判定链实测（「记录收入与支出」命中留存词→派生契约→real-fullstack，orchestrator-plan 接线测试）；④开关 off 全量单测=基线画像零回归。**待狗粮**：setx 开关+重启，新需求同诉求复刻（期望：Express 路由约定下无全路径键死法、右侧面板可见、熔断卡出现）。
+- 挂账：GWT 行为场景的 runner 探针对新句式（重开后数据仍在）的解析覆盖待实测校准；旧路径 static-server 语义待新线稳定后整体退役评估。
