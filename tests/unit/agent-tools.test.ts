@@ -591,6 +591,30 @@ describe('agent-tools（PR2 L2）', () => {
       expect(fetchSpy).not.toHaveBeenCalled()
     })
 
+    it('W3 补丁（21:07 狗粮实锤）：预览 origin 同源响应放行——修复轮自查 API/页面不再被终态复检误杀', async () => {
+      const project = createProject({ request_id: 'req-wf-w3b', mode: 'quick' })
+      const fetchSpy = vi.fn(async () =>
+        fakeResponse({
+          ok: false,
+          status: 404,
+          url: 'http://localhost:3001/api/records',
+          contentType: 'application/json',
+          body: '{"error":"not_found"}',
+        }),
+      )
+      vi.stubGlobal('fetch', fetchSpy)
+      const tool = byName(buildAgentTools({ projectId: project.project_id }), 'web_fetch')
+      const ctx = ctxFor(project.project_id)
+      ctx.state.preview_url = 'http://localhost:3001'
+
+      const result = await tool.execute({ url: 'http://localhost:3001/api/records' }, ctx)
+      // 终态同源：不再是「重定向到了不允许的地址」，而是如实拿到 404 口径（可判读）
+      expect(result.isError).toBe(true)
+      expect(result.output).toContain('HTTP 404')
+      expect(result.output).not.toContain('重定向到了不允许的地址')
+      expect(fetchSpy).toHaveBeenCalledOnce()
+    })
+
     it('公网 HTML → 剧本/样式剔除、标签剥离、实体解码、保留可见文本', async () => {
       const project = createProject({ request_id: 'req-wf-2', mode: 'quick' })
       const fetchSpy = vi.fn(async () =>

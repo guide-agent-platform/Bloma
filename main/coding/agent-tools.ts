@@ -633,9 +633,23 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
           isError: true,
         }
       }
-      // 重定向终态复检：防公网 302 跳内网（redirect:'follow' 后 response.url 为终态）
-      const finalUrl = assertPublicHttpUrl(response.url || guarded.url.toString())
-      if (!finalUrl.ok) {
+      // 重定向终态复检：防公网 302 跳内网（redirect:'follow' 后 response.url 为终态）；
+      // W3 补丁（2026-09-18 21:07 狗粮实锤）：预览 origin 内的响应（含同源重定向）放行——
+      // 上批只改了初审，终态仍把 localhost 同源响应当「重定向到不允许的地址」拒掉，
+      // 修复轮自查通路全断（模型只能读文件打转→noop→熔断白修）
+      const finalRaw = response.url || guarded.url.toString()
+      let finalOk: boolean
+      if (previewOrigin) {
+        try {
+          finalOk = new URL(finalRaw).origin === previewOrigin
+        } catch {
+          finalOk = false
+        }
+        if (!finalOk) finalOk = assertPublicHttpUrl(finalRaw).ok
+      } else {
+        finalOk = assertPublicHttpUrl(finalRaw).ok
+      }
+      if (!finalOk) {
         return { output: `重定向到了不允许的地址（${response.url}），已拒绝。`, isError: true }
       }
       if (!response.ok) {
