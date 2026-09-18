@@ -91,6 +91,13 @@ export function capContractEnabled(): boolean {
   return raw === '1' || raw === 'on' || raw === 'true'
 }
 
+/** W1 真实脚手架开关（本地镜像 project-templates.realScaffoldEnabled——model 层不
+ *  import 引擎模块，依赖倒置口径；两处同步义务由 real-skeleton 测试锁定）。 */
+export function realScaffoldEnabled(): boolean {
+  const raw = (process.env.BLOMA_REAL_SCAFFOLD ?? '').trim().toLowerCase()
+  return raw === '1' || raw === 'on' || raw === 'true'
+}
+
 // ---------------------------------------------------------------------------
 // Phase 7 U1（2026-09-10，E1 咨询 H2 / P7 实施稿 §2）：key_tasks 关键任务块。
 // 用户语言的交付标尺——「这一版做完什么才算交付」。PRD 确认卡展示；
@@ -497,8 +504,11 @@ export function renderBackplaneAnchor(backplane: PrdBackplane, focus?: string[])
   // P0-2（2026-09-18 本月流水账案）：旧措辞「键格式为 '方法 路径'」未说明是前缀之后的
   // 相对路径，模型按 Express 直觉写全路径 'GET /api/records' → 被拼成
   // /api/records/api/records 全端点 404。改为正反例显式锁死相对路径语义。
-  const moduleFormatClause =
-    '路由文件模块格式（static-server 以 CommonJS require 加载，禁用 ESM import/export）：每个 server/routes/<资源>.js 写 `module.exports = { \'METHOD /path\': async (req, res, ctx) => {...} }`。键里的路径写【文件名前缀之后的相对路径】——文件名已决定 /api/ 前缀：records.js 里 \'GET /\' 即 GET /api/records，\'PUT /:id\' 即 PUT /api/records/:id。禁止写全路径：\'GET /api/records\' 会被拼成 /api/records/api/records 导致全部端点 404。样例见骨架 server/routes/_example.js；数据用 ctx.readData/ctx.writeData 落 data/。'
+  // W1 真实脚手架（BLOMA_REAL_SCAFFOLD on）：real-fullstack 产物是 Express 真实工程，
+  // 条款换业界标准口径（app.get 注册 + PORT/db/llm 约定），不再讲旧注入式挂载规则。
+  const moduleFormatClause = realScaffoldEnabled()
+    ? '路由实现（Express 业界标准）：后端路由写在 server.js 或 server/ 下模块，用 app.get(\'/api/xxx\', handler) 等标准写法注册；数据经 server/db.js 的 readData/writeData 落 data/；服务从 process.env.PORT 读端口（平台拉起时注入）。/api/llm 代理已在 server/llm-proxy.js 预置（读 BLOMA_APP_LLM_* 环境变量，禁把密钥写进代码）。'
+    : '路由文件模块格式（static-server 以 CommonJS require 加载，禁用 ESM import/export）：每个 server/routes/<资源>.js 写 `module.exports = { \'METHOD /path\': async (req, res, ctx) => {...} }`。键里的路径写【文件名前缀之后的相对路径】——文件名已决定 /api/ 前缀：records.js 里 \'GET /\' 即 GET /api/records，\'PUT /:id\' 即 PUT /api/records/:id。禁止写全路径：\'GET /api/records\' 会被拼成 /api/records/api/records 导致全部端点 404。样例见骨架 server/routes/_example.js；数据用 ctx.readData/ctx.writeData 落 data/。'
   return withCapSection(
     `${requirementsPart}\n\n【后端 API 契约（interface_spec，前后端真相源）】按此实现 server/routes/ 下的路由并保持一致：\n${contract}\n${moduleFormatClause}`,
     backplane,

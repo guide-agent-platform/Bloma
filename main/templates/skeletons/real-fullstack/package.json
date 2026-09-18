@@ -1,0 +1,12 @@
+{
+  "name": "bloma-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bloma 生成的真实工程产物（real-fullstack）：npm start 启动（平台注入 PORT 与 BLOMA_APP_LLM_* 环境变量）。",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

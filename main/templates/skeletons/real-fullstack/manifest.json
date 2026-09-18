@@ -1,0 +1,53 @@
+{
+  "type": "web_fullstack",
+  "variant": "real-fullstack",
+  "version": 1,
+  "description": "真实脚手架·全栈（W1，2026-09-18 改造）：interface_spec 非空时的形态——业界标准 Express 工程（npm start = node server.js，PORT/BLOMA_APP_LLM_* 由平台拉起时注入）；server.js/package.json 皆为 agent 可见可改的真实文件，平台不再注入 static-server",
+  "build": {
+    "tool": "esbuild",
+    "entry": "src/app.js",
+    "outfile": "dist/app.js",
+    "format": "iife",
+    "minify": true
+  },
+  "files": [
+    {
+      "path": "package.json",
+      "role": "真实工程清单：scripts.start=node server.js；dependencies 声明 express（node_modules 由平台 vendor 钉版供货，快照排除、回滚幂等补拷；导出后 npm install 还原）"
+    },
+    {
+      "path": "server.js",
+      "role": "应用服务器入口（agent 可见可改）：Express 标准 app.get/post 路由 + 静态托管 + CSP 中间件 + 404/错误兜底；业务路由按 PRD【后端 API 契约】在此或 server/ 下实现"
+    },
+    {
+      "path": "server/llm-proxy.js",
+      "role": "预置 AI 代理：/api/llm 同源代理读 BLOMA_APP_LLM_* 环境变量（密钥只在进程环境，禁入代码）；mock 三态（true/fail/未配置 503）"
+    },
+    {
+      "path": "server/db.js",
+      "role": "数据持久化帮助函数：readData/writeData 落 data/*.json（原子写 tmp+rename，重启不丢）；语义与旧路径 ctx.readData/writeData 对齐"
+    },
+    {
+      "path": "index.html",
+      "role": "唯一入口页：布局分区骨架；预置构建产物承接位 <script src=\"./dist/app.js\" defer>；数据一律经同源 /api/* 走后端"
+    },
+    {
+      "path": "src/app.js",
+      "role": "逻辑入口（兼构建入口）：数据一律 fetch('/api/...') 走后端（Express 路由），localStorage 仅临时缓存；需要模型能力走 /api/llm"
+    },
+    {
+      "path": "src/styles.css",
+      "role": "样式基线：布局与通用组件类（卡片/表单/按钮/空态），按需扩展"
+    },
+    {
+      "path": "src/examples/data-module.js",
+      "role": "只读参考示例：中性数据模块模式——参考结构与模式，不要照抄业务内容",
+      "readonly": true
+    },
+    {
+      "path": "server/routes/_migrate.example.js",
+      "role": "只读参考样例：数据迁移模块约定（data/.schema-version 版本号 + _migrate.js {from,to,run(ctx)}；改 data/ 结构必带迁移禁弃旧数据；终验有临时副本迁移演练）——改数据结构时按此新建 _migrate.js，不要直接改本文件",
+      "readonly": true
+    }
+  ]
+}

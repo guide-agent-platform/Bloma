@@ -25,7 +25,7 @@ import { generateLoopPlan, planLegEnabled, renderPlanInjection, renderPlanMarkdo
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../project-service'
 import { appendProjectMapToSystem, loadProjectMapBlock } from '../project-map'
 import { resolveChannelEnv } from '../runtime-fallback'
-import { loadSkeletonTemplate, type ProjectSkeleton } from '../project-templates'
+import { loadRealScaffoldTemplate, loadSkeletonTemplate, realScaffoldEnabled, REAL_SCAFFOLD_TYPES, type ProjectSkeleton } from '../project-templates'
 import { buildLoopInjection, buildSkeletonMapInjection } from '../template-injection'
 import { buildModuleMapInjection, loadOfficialModules, modulesEnabled, renderOfficialModulesToProject } from '../module-library'
 import { listRefPatternModules, refLibraryEnabled } from '../experience/ref-source'
@@ -922,7 +922,16 @@ function prepareSkeletonBeforeLoop(
   let rendered: { written: string[]; skipped: string[] } | undefined
   if (scaffoldEnabled()) {
     try {
-      skeleton = loadSkeletonTemplate(templateType, { project_id: input.project_id, session_id: input.session_id })
+      // W1 真实脚手架（BLOMA_REAL_SCAFFOLD）：web 形态类型的新项目按 interface_spec 两态判定
+      // （非空→ real-fullstack Express 真实工程；空→ real-static 纯静态一等公民）；
+      // 判定依据是 PRD 契约本身（背板），与旧路径「模板类型猜测」解耦。
+      const useRealScaffold = realScaffoldEnabled() && REAL_SCAFFOLD_TYPES.has(templateType)
+      skeleton = useRealScaffold
+        ? loadRealScaffoldTemplate(backplaneInterfaceSpec(backplane).length > 0, {
+            project_id: input.project_id,
+            session_id: input.session_id,
+          })
+        : loadSkeletonTemplate(templateType, { project_id: input.project_id, session_id: input.session_id })
     } catch {
       skeleton = null
     }
@@ -936,9 +945,10 @@ function prepareSkeletonBeforeLoop(
             entry: {
               type: 'skeleton_rendered',
               title: '工程骨架先行渲染',
-              why: `loop 前按 ${templateType} 模板 v${skeleton.version} 渲染骨架（源=${skeleton.source}），编程 Agent 在骨架上填充实现；已存在文件跳过不覆盖`,
+              why: `loop 前按 ${templateType} 模板 v${skeleton.version} 渲染骨架（源=${skeleton.source}${skeleton.variant ? `，真实脚手架变体=${skeleton.variant}` : ''}），编程 Agent 在骨架上填充实现；已存在文件跳过不覆盖`,
               detail: {
                 template_type: templateType,
+                variant: skeleton.variant,
                 version: skeleton.version,
                 source: skeleton.source,
                 written: rendered.written,
@@ -1615,9 +1625,14 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
     throw new Error(`AGENT_CANCELLED: Agent Loop 已取消（${result.turns} 轮），中止交付`)
   }
 
-  // loop 工具无权写系统接管文件，由平台补齐（与管道路径 generateMvpLlm 行为一致）
-  writeFileSync(join(project.root_path, 'package.json'), renderPackageJson(project.name), 'utf8')
-  writeFileSync(join(project.root_path, 'static-server.js'), renderStaticServer(), 'utf8')
+  // loop 工具无权写系统接管文件，由平台补齐（与管道路径 generateMvpLlm 行为一致）。
+  // W1 真实脚手架（real-fullstack）：server.js/package.json 是 agent 可见可改的真实工程文件
+  // （骨架预置），平台不再注入 static-server——以根目录 server.js 为标记跳过两件系统接管
+  // 文件（旧路径产物永远不会有根 server.js，判定无歧义）；预览由 W2 preview-runtime 接管。
+  if (!existsSync(join(project.root_path, 'server.js'))) {
+    writeFileSync(join(project.root_path, 'package.json'), renderPackageJson(project.name), 'utf8')
+    writeFileSync(join(project.root_path, 'static-server.js'), renderStaticServer(), 'utf8')
+  }
 
   if (!existsSync(join(project.root_path, 'index.html'))) {
     // loop 未产出入口文件（turn_limit/预算耗尽的典型残局）：如实报错，不假装交付

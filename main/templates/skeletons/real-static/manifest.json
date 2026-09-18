@@ -1,0 +1,32 @@
+{
+  "type": "web_fullstack",
+  "variant": "real-static",
+  "version": 1,
+  "description": "真实脚手架·纯静态（W1，2026-09-18 改造）：interface_spec 为空时的合法一等形态——无服务器、无后端约定，数据持久化 localStorage 即为正解；平台预览以零约定只读 file server 直接渲染",
+  "build": {
+    "tool": "esbuild",
+    "entry": "src/app.js",
+    "outfile": "dist/app.js",
+    "format": "iife",
+    "minify": true
+  },
+  "files": [
+    {
+      "path": "index.html",
+      "role": "唯一入口页：布局分区骨架（导航/主区/状态/页脚）；已预置构建产物承接位 <script src=\"./dist/app.js\" defer>——业务逻辑写 src/ 模块经构建打包注入，勿内联业务脚本"
+    },
+    {
+      "path": "src/app.js",
+      "role": "逻辑入口（兼构建入口）：状态/渲染/事件三段骨架；纯静态形态——localStorage 持久化合法（刷新/重开仍在），无 /api/* 可调"
+    },
+    {
+      "path": "src/styles.css",
+      "role": "样式基线：布局与通用组件类（卡片/表单/按钮/空态），按需扩展"
+    },
+    {
+      "path": "src/examples/data-module.js",
+      "role": "只读参考示例：中性数据模块模式（内联数据 + 增删改查纯函数 + 渲染分离）——参考结构与模式，不要照抄业务内容",
+      "readonly": true
+    }
+  ]
+}

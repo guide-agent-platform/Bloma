@@ -200,6 +200,9 @@ export interface SkeletonBuildSpec {
 /** 已加载且校验合法的骨架包（baseDir = 文件读取根，渲染时逐文件复制）。 */
 export interface ProjectSkeleton {
   type: TemplateType
+  /** 真实脚手架变体（W1，2026-09-18 改造）：real-static（纯静态一等公民）/ real-fullstack（Express 真实工程）。
+ *  旧骨架包无 variant 字段；两态判定在 loadRealScaffoldTemplate（interface_spec 非空→ fullstack）。 */
+  variant?: 'real-static' | 'real-fullstack'
   version: number
   baseDir: string
   files: SkeletonFileEntry[]
@@ -223,8 +226,9 @@ function skeletonValidateType(type: TemplateType): TemplateType {
   return type === 'game' || type === 'personal_tool' ? 'web_fullstack' : type
 }
 
-/** 骨架文件后缀白名单（与 agent-tools WRITABLE_EXTENSIONS 同集：静态前端产物）。 */
-const SKELETON_EXTENSIONS = new Set(['.html', '.js', '.css'])
+/** 骨架文件后缀白名单（与 agent-tools WRITABLE_EXTENSIONS 同集：静态前端产物；
+ *  W1（2026-09-18）：real-fullstack 携带 package.json，增 .json）。 */
+const SKELETON_EXTENSIONS = new Set(['.html', '.js', '.css', '.json'])
 
 /** 骨架文件路径校验：非空字符串、无 ../ 与绝对路径、后缀在白名单（防 manifest 携带越界路径）。 */
 function isSafeSkeletonPath(path: string): boolean {
@@ -246,6 +250,7 @@ function readSkeletonDir(dir: string, expectedType: TemplateType): ProjectSkelet
     if (!existsSync(manifestPath)) return null
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
       type?: string
+      variant?: string
       version?: number
       build?: Partial<SkeletonBuildSpec>
       files?: SkeletonFileEntry[]
@@ -270,6 +275,7 @@ function readSkeletonDir(dir: string, expectedType: TemplateType): ProjectSkelet
     }
     return {
       type: expectedType,
+      variant: manifest.variant === 'real-static' || manifest.variant === 'real-fullstack' ? manifest.variant : undefined,
       version: typeof manifest.version === 'number' ? manifest.version : 1,
       baseDir: dir,
       files: manifest.files,
@@ -324,4 +330,49 @@ export function loadSkeletonTemplate(
   } catch {
     return builtin
   }
+}
+
+// =========================================================================
+// W1 真实脚手架（2026-09-18 改造，BLOMA_REAL_SCAFFOLD 缺省 off = 字节级现状）
+// =========================================================================
+
+/** 真实脚手架总开关：缺省 off（旧注入式 static-server 路径字节级不变）。
+ *  on 时 web 形态类型的新项目改用 real-static / real-fullstack 骨架包：
+ *  产物同步业界标准（Express / npm start），平台不再注入 static-server；
+ *  「沙箱」退化为预览呈现（零约定只读 file server / 后台 spawn node server.js）。 */
+export function realScaffoldEnabled(): boolean {
+  const raw = (process.env.BLOMA_REAL_SCAFFOLD ?? '').trim().toLowerCase()
+  return raw === '1' || raw === 'on' || raw === 'true'
+}
+
+/** 参与真实脚手架的 web 形态类型；desktop_tool / ai_app 维持旧路径（v0 不扩）。 */
+export const REAL_SCAFFOLD_TYPES: ReadonlySet<string> = new Set(['web_fullstack', 'personal_tool', 'game'])
+
+/** 两态判定加载器：interface_spec 非空 → real-fullstack（Express 真实工程）；
+ *  空 → real-static（纯静态一等公民，localStorage 持久化合法）。
+ *  判定依据是 PRD 契约本身（背板），不是模板类型猜测——纯静态是合法终态。
+ *  骨架包缺失/非法 → null（fail-open 回旧路径，不阻断生成）。 */
+export function loadRealScaffoldTemplate(
+  hasBackendContract: boolean,
+  logContext?: { project_id?: string; session_id?: string },
+): ProjectSkeleton | null {
+  const dirName = hasBackendContract ? 'real-fullstack' : 'real-static'
+  const ownDir = dirname(fileURLToPath(import.meta.url))
+  const raw = readSkeletonDir(join(ownDir, 'templates', 'skeletons', dirName), 'web_fullstack')
+  if (raw) return raw
+  try {
+    recordDecision({
+      project_id: logContext?.project_id ?? '',
+      session_id: logContext?.session_id ?? '',
+      entry: {
+        type: 'skeleton_render_failed',
+        title: '真实脚手架包非法，回退旧路径',
+        why: `real-${hasBackendContract ? 'fullstack' : 'static'} 骨架包缺失或 manifest 非法——fail-open 回退旧注入式路径，不阻断生成`,
+        detail: { variant: dirName },
+      },
+    })
+  } catch {
+    // 决策日志失败不影响回退
+  }
+  return null
 }

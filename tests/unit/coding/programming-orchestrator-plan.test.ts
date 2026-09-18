@@ -232,6 +232,25 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
     expect(quickForced.system).toContain('【技术合同')
   })
 
+  it('W1 真实脚手架（BLOMA_REAL_SCAFFOLD=1，无后端契约→ real-static）：骨架图换包+决策留痕变体', { timeout: 60_000 }, async () => {
+    const previous = process.env.BLOMA_REAL_SCAFFOLD
+    process.env.BLOMA_REAL_SCAFFOLD = '1'
+    mocks.generateLoopPlan.mockResolvedValue(SAMPLE_PLAN)
+    try {
+      const run = await runOnce('longterm', REQUIREMENTS)
+      // 两态判定：REQUIREMENTS「记录收入与支出」命中留存信号词 → deriveInterfaceSpec 派生
+      // records 契约 → interface_spec 非空 → real-fullstack（Express 真实工程；与旧路径派生口径一致）
+      expect(run.decisions).toContain('真实脚手架变体=real-fullstack')
+      // 骨架地图换包：real-fullstack 含 server.js/package.json 工程件；不含旧包的 _example.js（两者互斥可辨）
+      expect(run.system).toContain('工程骨架已就位')
+      expect(run.system).toContain('server.js')
+      expect(run.system).not.toContain('server/routes/_example.js')
+    } finally {
+      if (previous === undefined) delete process.env.BLOMA_REAL_SCAFFOLD
+      else process.env.BLOMA_REAL_SCAFFOLD = previous
+    }
+  })
+
   // ---- P3 PR-B：loop-log 接线（同一 harness；onTurn 经 mock 的 runAgentLoop 入参驱动） ----
 
   function readLoopLog(workspaceSlug: string, projectId: string): string {
