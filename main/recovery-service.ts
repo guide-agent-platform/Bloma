@@ -347,6 +347,28 @@ export async function circuitBreakRollback(input: CircuitBreakInput): Promise<Ci
   input.publish('stage_changed', { stage })
   input.publish('message_delta', { text: message })
   input.publish('completed', { subtype: 'success' })
+  // W5（2026-09-18 本月流水账案）：熔断→ready 也发 mvp_review 卡——田掉引导链断点。
+  // B0 实锤错误放行 5/5 走本路径，而 mvp_review/ready_next_steps 只在健康路径发布，
+  // 「最该被引导的会话反而零引导」。failureNote 非空（带已知未通过项）时主选项
+  // fix_now（先修这一项，进定向修复轮）；决策路由在 orchestrator 同一消费口。
+  if (stage === 'ready') {
+    const hasKnownFailures = Boolean(input.failureNote && input.failureNote.trim())
+    input.publish('user_decision_required', {
+      kind: 'mvp_review',
+      title: hasKnownFailures ? '这一版有未通过项——先修还是先用？' : '这一版你满意吗？',
+      questions: hasKnownFailures
+        ? [
+            { id: 'fix_now', label: '先修这一项', description: '定向修复已知未通过项，修完重新终验（不改需求清单）' },
+            { id: 'keep', label: '接受当前版本', description: '先保留这一版，之后可随时再修' },
+            { id: 'optimize', label: '局部优化', description: '去输入框说说要改哪里（只改这一处）' },
+          ]
+        : [
+            { id: 'keep', label: '保持现状', description: '就到这里，当前版本保留' },
+            { id: 'optimize', label: '局部优化', description: '去输入框说说要改哪里（只改这一处）' },
+            { id: 'rebuild', label: '整版重做', description: '换一种方式把功能重做一遍' },
+          ],
+    })
+  }
   recordDecision({
     project_id: input.project_id,
     session_id: input.session_id,

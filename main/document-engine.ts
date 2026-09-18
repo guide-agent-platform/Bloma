@@ -1008,6 +1008,12 @@ function categoryTagOf(kind: import('./ears-vocabulary').EarsPatternKind): strin
   return '[主路径]'
 }
 
+/** W5（2026-09-18 本月流水账案）：数据留存语义词——功能项含这些词时，存在性兜底升级为
+ *  行为场景（重开后数据仍在），否则 F-006 类「数据保存本机」会被「可见且可交互」糊弄过关
+ *  （当天 7/9 场景存在性断言假绿的直接成因）。词表与 deriveInterfaceSpec 留存信号司源不同用途：
+ *  这里只收「重开/刷新后仍在」的行为可验证语义，收窄防误伤。 */
+const DATA_RETENTION_RE = /重新打开|关闭[^。]{0,6}(?:页面|窗口|应用)?[^。]{0,4}(?:仍|还)|刷新[^。]{0,8}(?:仍|还)|(?:仍|还)在|不丢失|留存|保存后|持久/
+
 function renderFeatureFile(item: SketchRequirement, acceptance: string, requiredCategories: string[] = [], type?: TemplateType): string {
   const title = shortTitle(item.description)
   const categoryHeader = requiredCategories.length
@@ -1022,12 +1028,22 @@ function renderFeatureFile(item: SketchRequirement, acceptance: string, required
     const ears = parseEarsAssertion(assertion)
     const categoryTag = ears.explicitPrefix ? categoryTagOf(ears.kind) : ''
     if (plan.presenceFallback || !plan.trigger || !plan.effect) {
-      scenarios.push([
-        `  Scenario: 核心路径可运行${categoryTag}（${assertion}）`,
-        `    Given 已进入 ${title} 功能页面`,
-        `    When 我执行核心操作`,
-        `    Then 页面返回预期结果`,
-      ].join('\n'))
+      // W5：留存语义断言禁用存在性兑底——升级为「重开后数据仍在」行为场景
+      if (DATA_RETENTION_RE.test(assertion) || DATA_RETENTION_RE.test(item.description)) {
+        scenarios.push([
+          `  Scenario: 数据留存行为${categoryTag}（${assertion}）`,
+          `    Given 已进入 ${title} 功能页面且已存在用户保存的数据`,
+          `    When 重新加载页面（关闭后重新打开）`,
+          `    Then 原有数据仍然显示且可用`,
+        ].join('\n'))
+      } else {
+        scenarios.push([
+          `  Scenario: 核心路径可运行${categoryTag}（${assertion}）`,
+          `    Given 已进入 ${title} 功能页面`,
+          `    When 我执行核心操作`,
+          `    Then 页面返回预期结果`,
+        ].join('\n'))
+      }
     } else {
       scenarios.push([
         `  Scenario: ${categoryTag ? `${categoryTag}：` : ''}${assertion}`,

@@ -52,6 +52,10 @@ interface ScanRule {
   severity: SecuritySeverity
   pattern: RegExp
   summary: string
+  /** W5（2026-09-18 真实脚手架）：仅产物服务器代码生效（server.js 与 server/ 子树）——
+   *  前端 fetch('/api/...') 合法，不能按全局行规则误杀；真实工程后端权力变大，
+   *  扫描面同步扩到进程生成/出网两类硬红线。 */
+  serverOnly?: boolean
 }
 
 /** 扫描规则：按严重度从高到低排列，同一行命中首个规则即止（避免重复上报）。 */
@@ -97,6 +101,23 @@ const SCAN_RULES: ScanRule[] = [
     pattern: /(?:src|href|url)\s*[:=]\s*["']http:\/\//i,
     summary: '页面引用了一个不够安全的网络资源链接，建议换成加密的安全链接',
   },
+  // ---- W5：产物服务器硬红线（serverOnly——前端同款写法合法，不进全局面） ----
+  {
+    category: 'dangerous_execution',
+    severity: 'critical',
+    serverOnly: true,
+    pattern: /\brequire\s*\(\s*['"]child_process['"]\s*\)|\bfrom\s+['"]child_process['"]|\bspawnSync\s*\(|\bexecSync\s*\(/,
+    summary: '产物服务器代码调用了进程生成能力（child_process/exec/spawn），不在产物能力面内，请移除',
+  },
+  {
+    category: 'external_resource',
+    severity: 'high',
+    serverOnly: true,
+    // fetch('https://…') 直连外网（同源 '/api/…' 相对路径合法不命中）；
+    // axios/https.request/net.connect 同类。真实外部服务应走同源代理模式。
+    pattern: /\bfetch\s*\(\s*['"]https?:\/\/|\baxios\b|\bhttps?\s*\.\s*request\s*\(|\bnet\s*\.\s*connect\s*\(/,
+    summary: '产物服务器代码重连外网服务；外部能力应走同源代理或平台 /api/llm 渠道，请移除直连',
+  },
 ]
 
 /** 参与扫描的产物扩展名（生成 MVP 的静态前端产物）。 */
@@ -134,15 +155,19 @@ export function runSecurityScan(input: SecurityScanInput): SecurityScanResult {
       continue
     }
     const lines = content.split('\n')
+    // W5：serverOnly 规则只在产物服务器代码上生效（server.js 与 server/ 子树）
+    const rel = relative(input.root_path, file).replace(/\\/g, '/')
+    const isServerFile = rel === 'server.js' || rel.startsWith('server/')
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index]
       for (const rule of SCAN_RULES) {
+        if (rule.serverOnly && !isServerFile) continue
         if (rule.pattern.test(line)) {
           issues.push({
             severity: rule.severity,
             category: rule.category,
             user_visible_summary: rule.summary,
-            file: relative(input.root_path, file).replace(/\\/g, '/'),
+            file: rel,
             line: index + 1,
           })
           break

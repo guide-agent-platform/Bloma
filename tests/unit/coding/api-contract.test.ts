@@ -48,15 +48,35 @@ describe('checkApiContract', () => {
       { endpoint: '/api/ok', method: 'GET' },
       { endpoint: '/api/missing', method: 'GET' },
       { endpoint: '/api/boom', method: 'GET' },
-      { endpoint: '/api/submit', method: 'POST' }, // 写类端点跳过
+      // W5：无参 POST 不再跳过——404=未挂载计失活（本案写类端点挂错位置不可见的根治位）
+      { endpoint: '/api/submit', method: 'POST' },
       { endpoint: '/api/records/:id', method: 'GET' }, // 带参端点跳过
       { endpoint: '/api/no-method' }, // 缺省 GET
     ])
-    expect(failures).toHaveLength(2)
+    expect(failures).toHaveLength(3)
     expect(failures[0].scenario).toBe('API 契约端点：GET /api/missing')
     expect(failures[0].reason).toContain('HTTP 404')
     expect(failures[1].scenario).toBe('API 契约端点：GET /api/boom')
     expect(failures[1].reason).toContain('HTTP 500')
+    expect(failures[2].scenario).toBe('API 契约端点：POST /api/submit')
+    expect(failures[2].reason).toContain('404') // 口径随 BLOMA_ROUTE_ERROR_FEEDBACK 环境分流（本机已 setx）
+  })
+
+  it('W5：POST 无参端点空体探测——非 404（含 400 校验拒绝）不算失败（路由存在即可）', async () => {
+    server = createServer((req, res) => {
+      if (req.url === '/api/records' && req.method === 'POST') {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: '金额需为正数' })) // 空体 {} 被业务校验拒绝——路由存在
+        return
+      }
+      res.writeHead(404)
+      res.end('Not found')
+    })
+    baseUrl = await new Promise((resolve) => {
+      server!.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${(server!.address() as { port: number }).port}`))
+    })
+    const failures = await checkApiContract(baseUrl, [{ endpoint: '/api/records', method: 'POST' }])
+    expect(failures).toHaveLength(0)
   })
 
   it('previewUrl 尾斜杠与端点拼接不失真', async () => {

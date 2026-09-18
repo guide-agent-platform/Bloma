@@ -4,11 +4,13 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { dirname } from 'node:path'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { afterEach, describe, expect, it } from 'vitest'
 import { readTestReport, runGwtScenarios, writeTestReport } from '../../main/gwt-service'
 import { setBrowserGwtDisabledForTests } from '../../main/gwt-runner'
 import { createProject, recordSketchGenerated } from '../../main/project-service'
-import { getDocumentsDir } from '../../storage/config-paths'
+import { getAnalyticsPath, getDocumentsDir } from '../../storage/config-paths'
 
 describe('GWT service (A2-07)', () => {
   const originalPromaHome = process.env.PROMA_HOME
@@ -127,5 +129,31 @@ describe('GWT service (A2-07)', () => {
     expect(readFileSync(join(dir, 'test-report.json'), 'utf8')).toContain('passed_count')
     expect(readFileSync(join(dir, 'test-report.md'), 'utf8')).toContain('测试报告')
     expect(readTestReport(project.project_id)).toEqual(result)
+  })
+
+  it('W5：test-report.json 被熔断回滚清除 → 回退 analytics test_completed 事件还原失败清单（append-only 不受回滚影响）', () => {
+    const project = createProject({ request_id: 'req-fallback', mode: 'quick' })
+    // 不写 test-report.json（模拟回滚清除）；只落 analytics 事件
+    const analyticsLine = JSON.stringify({
+      event_type: 'test_completed',
+      project_id: project.project_id,
+      payload: {
+        total_count: 10,
+        passed_count: 9,
+        failed_count: 1,
+        failures: [{ scenario: 'API 契约端点：GET /api/records', reason: '契约端点失活（HTTP 404）' }],
+      },
+    })
+    const analyticsPath = getAnalyticsPath(project.workspace_slug)
+    mkdirSync(dirname(analyticsPath), { recursive: true })
+    writeFileSync(analyticsPath, `${analyticsLine}${String.fromCharCode(10)}`, 'utf8')
+
+    const report = readTestReport(project.project_id)
+    expect(report).not.toBeNull()
+    expect(report!.failed_count).toBe(1)
+    expect(report!.failure_summary[0].scenario).toContain('GET /api/records')
+    // 无文件且无事件的取不到（如实 null）
+    const bare = createProject({ request_id: 'req-bare', mode: 'quick' })
+    expect(readTestReport(bare.project_id)).toBeNull()
   })
 })

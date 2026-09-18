@@ -3106,7 +3106,7 @@ async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: Gwt
  * 行为=现状（直接终验，终验内部仍有入口 A 兜底）。cancelled → throw AGENT_CANCELLED
  * 向上传播（U5：不终验、不改阶段；陷阱 42：不发卡、不落收尾决策）。
  */
-async function runBlockedTestRepair(input: {
+export async function runBlockedTestRepair(input: {
   request_id: string
   session_id: string
   project_id: string
@@ -3906,7 +3906,7 @@ export async function resumeBlockedFlow(
 }
 
 /** 恢复测试/裁判前重新拉起沙箱，返回可用的 preview_url；起不来则抛错由上层报错。 */
-async function ensureResumePreview(input: { request_id: string; project_id: string; channel_id?: string; session_id?: string }): Promise<string> {
+export async function ensureResumePreview(input: { request_id: string; project_id: string; channel_id?: string; session_id?: string }): Promise<string> {
   const sandbox = await runSandbox({
     request_id: input.request_id,
     project_id: input.project_id,

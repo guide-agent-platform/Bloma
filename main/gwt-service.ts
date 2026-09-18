@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { DocumentRef } from '../shared/types'
-import { getDocumentsDir } from '../storage/config-paths'
+import { getAnalyticsPath, getDocumentsDir } from '../storage/config-paths'
 import { findProject, readLastSketchRequirements } from './project-service'
 import { escapeHtml, type SketchRequirement } from './sketch-engine'
 import { planScenarios, runBrowserGwt, scenarioName as gwtScenarioName } from './gwt-runner'
@@ -157,16 +157,58 @@ export function writeTestReport(input: {
   return { document_id: randomUUID(), type: 'test_report', path: join(dir, TEST_REPORT_JSON), status: 'synced' }
 }
 
-/** 读取最近一次测试报告；尚无报告时返回 null（供 A2-10 裁判读取）。 */
+/** 读取最近一次测试报告；尚无报告时返回 null（供 A2-10 裁判读取）。
+ *  W5（2026-09-18 本月流水账案）：熔断回滚会清掉 documents/ 下的 test-report.json，
+ *  「生成完整程序」定向修复判据与修复轮据此双双断粮（文件缺席≠无失败）。回退链：
+ *  文件 → analytics 的 test_completed 事件（append-only，回滚不影响，09-09 落的
+ *  证据源）——按项目取最近一条，失败清单从事件 payload 还原。 */
 export function readTestReport(projectId: string): GwtTestResult | null {
   const project = findProject(projectId)
   const absolute = join(getDocumentsDir(project.workspace_slug, project.project_id), TEST_REPORT_JSON)
-  if (!existsSync(absolute)) return null
-  try {
-    return JSON.parse(readFileSync(absolute, 'utf8')) as GwtTestResult
-  } catch {
-    return null
+  if (existsSync(absolute)) {
+    try {
+      return JSON.parse(readFileSync(absolute, 'utf8')) as GwtTestResult
+    } catch {
+      /* 损坏文件继续走事件回退 */
+    }
   }
+  return readLastTestCompletedEvent(project.workspace_slug, projectId)
+}
+
+/** 从 analytics JSONL 取项目最近一条 test_completed 事件，还原最小测试报告。 */
+function readLastTestCompletedEvent(workspaceSlug: string, projectId: string): GwtTestResult | null {
+  const analyticsPath = getAnalyticsPath(workspaceSlug)
+  if (!existsSync(analyticsPath)) return null
+  try {
+    const lines = readFileSync(analyticsPath, 'utf8').split('\n')
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      const line = lines[i].trim()
+      if (!line) continue
+      let parsed: { event_type?: string; project_id?: string; payload?: {
+        total_count?: number; passed_count?: number; failed_count?: number
+        failures?: Array<{ scenario?: unknown; reason?: unknown }>
+      } }
+      try {
+        parsed = JSON.parse(line)
+      } catch {
+        continue
+      }
+      if (parsed.event_type !== 'test_completed' || parsed.project_id !== projectId) continue
+      const payload = parsed.payload ?? {}
+      const failed = typeof payload.failed_count === 'number' ? payload.failed_count : 0
+      return {
+        total_count: typeof payload.total_count === 'number' ? payload.total_count : 0,
+        passed_count: typeof payload.passed_count === 'number' ? payload.passed_count : 0,
+        failed_count: failed,
+        failure_summary: (Array.isArray(payload.failures) ? payload.failures : [])
+          .filter((f): f is { scenario: string; reason: string } => typeof f?.scenario === 'string' && typeof f?.reason === 'string')
+          .map((f) => ({ scenario: f.scenario, reason: f.reason })),
+      }
+    }
+  } catch {
+    /* 读不了事件就如实 null */
+  }
+  return null
 }
 
 function renderTestReportMarkdown(result: GwtTestResult, sessionId: string): string {

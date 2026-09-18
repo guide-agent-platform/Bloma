@@ -5,6 +5,7 @@ import type {
   AgentCancelInput,
   AgentCancelResult,
   AgentEvent,
+  AgentLoopJudgeMetadata,
   AgentMessage,
   AgentSendMessageInput,
   AgentSendMessageResult,
@@ -45,6 +46,9 @@ import {
   refineModificationDescription,
   resolveBlockedDecision,
   resumeBlockedFlow,
+  runBlockedTestRepair,
+  ensureResumePreview,
+  runAgentLoopPostTesting,
   runIterationTask,
   runSketchTask,
   setPendingReviewAction,
@@ -2050,6 +2054,38 @@ async function resolveIterationDecisionFlow(
   }
 
   // 局部优化 / 整版重做：置补充态 + 回 ready，等用户在输入框补充（下一句消费）
+  // W5（2026-09-18 本月流水账案）：熔断→ready 的 mvp_review 卡第四选项——定向修复已知
+  // 未通过项（复用入口 B 修复轮 + 终验门禁收口，与「生成完整程序」skip 分支同链；
+  // 判据读 test_completed 事件兑底，回滚清掉的 test-report.json 不再断粮）。
+  if (decision === 'fix_now') {
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'modification_decision',
+        title: '用户选择先修已知未通过项',
+        why: '熔断回滚后的 mvp_review 卡 fix_now：定向修复轮（不改需求清单）+ 终验门禁收口',
+        detail: { via: 'circuit_mvp_review' },
+      },
+    })
+    setProgrammingEventPublisher(streamPublisher)
+    updateProject(input.project_id, { current_stage: 'repairing' })
+    streamPublisher(makeEvent(input, 'stage_changed', { stage: 'repairing' }))
+    const previewUrl = await ensureResumePreview(input)
+    await runBlockedTestRepair({ ...input, preview_url: previewUrl })
+    await runAgentLoopPostTesting({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: input.mode,
+      preview_url: previewUrl,
+      ...(findProject(input.project_id).via_agent_loop
+        ? { loop: { status: findProject(input.project_id).agent_loop_status ?? 'completed', turns: 0, finalText: '', toolCalls: [] } satisfies AgentLoopJudgeMetadata }
+        : {}),
+    })
+    return
+  }
+
   if (decision === 'optimize' || decision === 'rebuild') {
     const kind = decision === 'optimize' ? 'optimize' : 'rebuild_direction'
     setPendingReviewAction(input.project_id, { kind })

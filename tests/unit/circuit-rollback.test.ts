@@ -82,6 +82,8 @@ describe('circuit break rollback (T5)', () => {
       session_id: sessionId,
       project_id: projectId,
       reason: 'test 修复循环耗尽（test_repair）',
+      // W5：带已知未通过项 → mvp_review 卡主选项 fix_now
+      failureNote: '注意：这一版有 1 项检查未通过，已如实登记（不会当作「已完成」）。',
       publish: (type, payload) => published.push({ type, payload }),
     })
 
@@ -101,6 +103,13 @@ describe('circuit break rollback (T5)', () => {
     expect(published.find((event) => event.type === 'rollback_done')?.payload.snapshot_id).toBe(snapshot.snapshot_id)
     expect(published.find((event) => event.type === 'stage_changed')?.payload.stage).toBe('ready')
     expect(published.some((event) => event.type === 'completed')).toBe(true)
+    // W5（本月流水账案）：熔断→ready 也发 mvp_review 卡——引导链断点补齐；
+    // 带 failureNote（已知未通过项）时主选项 fix_now（先修这一项）
+    const review = published.find((event) => event.type === 'user_decision_required')
+    expect(review?.payload.kind).toBe('mvp_review')
+    const questions = (review?.payload.questions as Array<{ id: string }>) ?? []
+    expect(questions.map((q) => q.id)).toContain('fix_now')
+    expect(questions.map((q) => q.id)).toContain('keep')
     // 会话 JSONL 有回滚告知；话术口径（狗粮 52f19ab4）：次数如实（6 轮）+
     // 「保存的版本」术语（首次生成不再说「回到之前的版本」）
     const session = readFileSync(getAgentSessionPath(sessionId), 'utf8')

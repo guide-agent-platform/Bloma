@@ -90,6 +90,10 @@ async function routeFailureReason(previewUrl: string, endpoint: string, status: 
 
 export async function checkApiContract(previewUrl: string, endpoints: InterfaceEndpoint[]): Promise<GwtFailureSummary[]> {
   const probeable = endpoints.filter((ep) => (ep.method ?? 'GET') === 'GET' && !ep.endpoint.includes(':'))
+  // W5（本月流水账案）：写类端点挂载探测——POST 无参端点发空 JSON 体，404=未挂载
+  // （本案四端点全部挂错位置，GET 探测只能看见 1/4；空体 400/422=路由存在且校验拒绝，
+  // 属合格）。PUT/DELETE 带路径参不探（业务 404 与挂载缺失 404 不可区分，误报成本高）。
+  const probeablePost = endpoints.filter((ep) => ep.method === 'POST' && !ep.endpoint.includes(':'))
   const failures: GwtFailureSummary[] = []
   // 服务器可达性语义：首个探测若连接即失败（沙箱未起/测试环境无真实服务器），跳过
   // 整个契约检查——GWT 侧已处理服务器宕机口径，契约探测的前提是服务器在服务；
@@ -114,6 +118,31 @@ export async function checkApiContract(previewUrl: string, endpoints: InterfaceE
       failures.push({
         scenario: `API 契约端点：${endpoint.method ?? 'GET'} ${endpoint.endpoint}`,
         reason: `契约端点探测失败（${error instanceof Error ? error.message : 'unknown'}）`,
+      })
+    }
+  }
+  for (const endpoint of probeablePost) {
+    try {
+      const response = await fetch(`${previewUrl.replace(/\/+$/, '')}${endpoint.endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+        signal: AbortSignal.timeout(API_PROBE_TIMEOUT_MS),
+      })
+      serverReachable = true
+      if (response.status === 404) {
+        failures.push({
+          scenario: `API 契约端点：POST ${endpoint.endpoint}`,
+          reason: routeErrorFeedbackEnabled()
+            ? await routeFailureReason(previewUrl, endpoint.endpoint, response.status)
+            : `写类端点未挂载（HTTP 404；空体 400/422 属校验拒绝不算失败）`,
+        })
+      }
+    } catch (error) {
+      if (!serverReachable && isConnectionError(error)) return []
+      failures.push({
+        scenario: `API 契约端点：POST ${endpoint.endpoint}`,
+        reason: `写类端点探测失败（${error instanceof Error ? error.message : 'unknown'}）`,
       })
     }
   }
