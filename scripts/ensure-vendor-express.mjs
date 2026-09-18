@@ -17,7 +17,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 // 与 storage/config-paths.getPromaHome 同口径（mjs 不能 import TS；两处同步义务）
-function promaHome(): string {
+function promaHome() {
   const trimmed = process.env.PROMA_HOME ? process.env.PROMA_HOME.trim() : ''
   if (trimmed && trimmed !== 'undefined' && trimmed !== 'null') return trimmed
   return join(homedir(), '.proma')
