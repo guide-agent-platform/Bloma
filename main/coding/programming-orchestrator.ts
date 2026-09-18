@@ -1717,7 +1717,7 @@ function countProjectFiles(root: string): number {
  * 解药，本项目区别于 SWE-agent/Codex 的差异化锚），工作方式与终止判据显式化。
  * focus（P3 分级锚定）：未传=全量现状；传入时命中项全文、其余项一行摘要（只减细节不减锚）。
  */
-export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 'diff' | 'whole', templateType?: import('../../shared/types').TemplateType, skeletonMap?: string | null, focus?: string[], moduleMap?: string | null): string {
+export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 'diff' | 'whole', templateType?: import('../../shared/types').TemplateType, skeletonMap?: string | null, focus?: string[], moduleMap?: string | null, realFullstack?: boolean): string {
   // 注入点⑥（周计划 §6）：tech_skeleton/目录约定/依赖白名单进背板锚定段；
   // 开关关闭/模板缺失为 null（行为=现状）。类型缺省从背板 template_meta 兜底。
   const effectiveType = templateType ?? backplane.template_meta?.type ?? 'personal_tool'
@@ -1913,13 +1913,28 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     '③严禁把密钥、API 端点、模型名写进任何项目文件（平台已注入服务器进程，前端不可见）；' +
     '④页面 URL 带 mock=1 参数时，所有 /api/llm 调用自动附加 mock:true（URL 带 mock=fail 时附加 mock:\"fail\"）——平台探针与失败态自测走此通道，返回确定性应答；' +
     '⑤AI 功能的行为断言只断言界面形态（点击后出现结果区/失败提示），不断言模型输出的具体内容。',
-    // 完整程序阶段 1（2026-09-06 用户拍板：终点是前后端分离的完整程序，静态单页只是里程碑）
-    '【前后端分离】凡涉及数据留存或服务端能力的功能，后端优先——禁止把 localStorage 当唯一数据源：',
-    '①后端路由：server/routes/<资源>.js 导出 { "GET /路径": handler, "POST /路径": handler }——文件名即路由前缀（notes.js → /api/notes/*），平台启动时自动挂载，无需注册；',
-    '②handler 写 async (req, res, ctx)；ctx 提供 readData(name, fallback) / writeData(name, value)（JSON 持久化到 data/ 目录，重启不丢，原子写）、sendJson(res, code, obj)、query、body、params；',
-    "③前端：fetch('/api/...') 调后端，处理加载/失败态；数据持久化职责在后端 data/，前端不留权威副本；",
-    '④路由内禁止出网（外部 fetch）与 require 项目目录外的模块；外部模型能力走 /api/llm；',
-    '⑤后端数据的断言写「新增项出现/状态变化」，禁止写「总数等于 N」这类依赖历史状态的断言（探针重复执行会累积数据）。',
+    // 完整程序阶段 1（2026-09-06 用户拍板：终点是前后端分离的完整程序，静态单页只是里程碑）。
+    // 交接面治理（2026-09-18 21:55 狗粮实锤）：本段是旧注入式路径的 CJS 挂载约定，
+    // real-fullstack 项目与背板锚 Express 口径同时注入会两套约定打架（狗粮里模型确实
+    // 按旧约定自建了挂载器）。分支：real-fullstack 换 Express 口径；旧路径/real-static
+    // 保持原文字节不变（real-static 无留存功能，本段不触发）。
+    ...(realFullstack
+      ? [
+          '【前后端分离·Express】凡涉及数据留存或服务端能力的功能，后端优先——禁止把 localStorage 当唯一数据源：',
+          "①后端路由：在 server.js（或其 require 的 server/ 模块）用 Express 标准写法注册：app.get('/api/xxx', async (req, res) => {...})、app.post(...)；骨架 server.js 已是完整入口，不要自建挂载约定；",
+          '②数据持久化用 server/db.js 的 readData(name, fallback) / writeData(name, value)（JSON 落 data/ 目录，重启不丢，原子写）；响应 res.json(obj)；请求体 req.body、查询 req.query；',
+          "③前端：fetch('/api/...') 调后端，处理加载/失败态；数据持久化职责在后端 data/，前端不留权威副本；",
+          '④路由内禁止出网（外部 fetch）与 require 项目目录外的模块；外部模型能力走 /api/llm（server/llm-proxy.js 已预置）；',
+          '⑤后端数据的断言写「新增项出现/状态变化」，禁止写「总数等于 N」这类依赖历史状态的断言（探针重复执行会累积数据）。',
+        ]
+      : [
+          '【前后端分离】凡涉及数据留存或服务端能力的功能，后端优先——禁止把 localStorage 当唯一数据源：',
+          '①后端路由：server/routes/<资源>.js 导出 { "GET /路径": handler, "POST /路径": handler }——文件名即路由前缀（notes.js → /api/notes/*），平台启动时自动挂载，无需注册；',
+          '②handler 写 async (req, res, ctx)；ctx 提供 readData(name, fallback) / writeData(name, value)（JSON 持久化到 data/ 目录，重启不丢，原子写）、sendJson(res, code, obj)、query、body、params；',
+          "③前端：fetch('/api/...') 调后端，处理加载/失败态；数据持久化职责在后端 data/，前端不留权威副本；",
+          '④路由内禁止出网（外部 fetch）与 require 项目目录外的模块；外部模型能力走 /api/llm；',
+          '⑤后端数据的断言写「新增项出现/状态变化」，禁止写「总数等于 N」这类依赖历史状态的断言（探针重复执行会累积数据）。',
+        ]),
   ]
   const base = arr.join('\n')
   // Phase 3 B5（2026-09-09）：表达适配层 append-only 注入（off=字节级现状；只改表达
@@ -1937,7 +1952,17 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
  * focus（P3 分级锚定）：未传=全量现状（字节级等价，回归锁锁定）；修复轮不传（修复卡即 mini-plan）。
  */
 export function buildLoopSystemWithOverride(backplane: PrdBackplane, editFormat: 'diff' | 'whole', projectId?: string, skeletonMap?: string | null, focus?: string[], moduleMap?: string | null): string {
-  const base = buildAgentLoopSystemPrompt(backplane, editFormat, undefined, skeletonMap, focus, moduleMap)
+  // 交接面治理（2026-09-18）：按产物变体标记分支【前后端分离】段口径（real-fullstack
+  // 与背板锚 Express 口径同源；无标记/旧路径=null 走原文，字节级不变）
+  let realFullstack = false
+  if (projectId) {
+    try {
+      realFullstack = readRealScaffoldVariant(findProject(projectId).root_path) === 'real-fullstack'
+    } catch {
+      realFullstack = false
+    }
+  }
+  const base = buildAgentLoopSystemPrompt(backplane, editFormat, undefined, skeletonMap, focus, moduleMap, realFullstack)
   // 历史经验段已于 2026-09-12 迁出 system prompt（记忆栈审计裁定 §5，D0）：改由 agent-loop
   // 任务头注入 <untrusted-memory source="learnings">——system 是**常驻指令面**，而记忆是模型
   // 输出派生（可能受用户贴的第三方内容影响），不应享有指令面权重。

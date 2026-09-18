@@ -245,6 +245,10 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
       expect(run.system).toContain('工程骨架已就位')
       expect(run.system).toContain('server.js')
       expect(run.system).not.toContain('server/routes/_example.js')
+      // 交接面治理：real-fullstack 的 loop system【前后端分离】段换 Express 口径（旧 CJS
+      // 挂载约定不再与背板锚 Express 口径同时注入——狗粮实锤模型曾按旧约定自建挂载器）
+      expect(run.system).toContain('【前后端分离·Express】')
+      expect(run.system).not.toContain('文件名即路由前缀')
     } finally {
       if (previous === undefined) delete process.env.BLOMA_REAL_SCAFFOLD
       else process.env.BLOMA_REAL_SCAFFOLD = previous

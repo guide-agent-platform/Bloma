@@ -583,7 +583,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     name: 'web_fetch',
     parallelSafe: true,
     description:
-      '抓取公网网页/文档并转为纯文本（只查资料，不能修改任何东西）。参数：url（http/https 公网地址）、max_chars（返回文本上限，默认 12000，最大 50000）。内网/本机地址会被拒绝；HTML 只保留可见文本。',
+      '抓取公网网页/文档并转为纯文本（只查资料，不能修改任何东西）。参数：url（http/https 公网地址）、max_chars（返回文本上限，默认 12000，最大 50000）。内网/本机地址会被拒绝；例外：与当前预览地址同源的 URL 放行（可用于自查 /api 端点与页面实况）。HTML 只保留可见文本。',
     input_schema: {
       type: 'object',
       properties: {
@@ -931,7 +931,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     name: 'run_api_contract_tests',
     parallelSafe: true,
     description:
-      '验证 PRD 接口契约（interface_spec）声明的后端 API 端点是否存活并应答（逐一探测无参 GET 端点；404/5xx/超时=契约失活）。用途：收口前证明前后端契约真实生效；不验证业务逻辑正确性（那属于行为断言）。前置：需先 run_preview。无接口契约的项目返回豁免说明。',
+      '验证 PRD 接口契约（interface_spec）声明的后端 API 端点是否存活并应答（无参 GET 端点逐一探测；无参 POST 端点发空 JSON 体探挂载——404=未挂载计失活，400/422=校验拒绝不算失败；GET 5xx/超时=契约失活）。用途：收口前证明前后端契约真实生效；不验证业务逻辑正确性（那属于行为断言）。前置：需先 run_preview。无接口契约的项目返回豁免说明。',
     input_schema: { type: 'object', properties: {} },
     execute: async (_toolInput, ctx) => {
       if (!ctx.state.preview_url) {
