@@ -92,6 +92,11 @@ export function recordSessionActivity(
 /** 列出会话记录；可按项目过滤，按最近活跃时间倒序 */
 export function listSessions(input: AgentListSessionsInput): AgentListSessionsResult {
   const sessions = readSessions().sessions
+    // 委派子会话（source_delegation_id 非空：审查/协作的审计件）不是用户对话——不出现在
+    // 会话列表（2026-09-19 实测 870 个子会话把列表刷成清一色「未命名对话」）。注意 fork
+    // 分支会话也带 parent_session_id 但是真实用户对话，必须可见——判据用 source_delegation_id。
+    // 子会话仍留在索引与磁盘，供审计回查（按 session_id 直读不受此过滤影响）。
+    .filter((item) => !item.source_delegation_id)
     .filter((item) => !input.project_id || item.project_id === input.project_id)
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
   return { sessions }
@@ -321,6 +326,15 @@ function resolveSessionRecord(sessionId: string, path: string): AgentSessionReco
     created_at: modifiedAt,
     updated_at: modifiedAt,
   }
+}
+
+/** 测试 seam：直接读写会话索引（模拟委派子会话等非 recordSessionActivity 形态）。 */
+export function readSessionsForTest(): SessionsIndex {
+  return readSessions()
+}
+
+export function writeSessionsForTest(index: SessionsIndex): void {
+  writeSessions(index)
 }
 
 function readSessions(): SessionsIndex {

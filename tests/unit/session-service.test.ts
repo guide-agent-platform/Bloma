@@ -9,7 +9,9 @@ import {
   listSessions,
   loadMessages,
   readPrimaryIntent,
+  readSessionsForTest,
   recordSessionActivity,
+  writeSessionsForTest,
 } from '../../main/session-service'
 import { getAgentSessionPath } from '../../storage/config-paths'
 
@@ -98,6 +100,41 @@ describe('SessionService 会话索引', () => {
 
       const all = listSessions({ request_id: 'req-2' }).sessions
       expect(all.map((s) => s.session_id)).toEqual(['session-old', 'session-new'])
+    } finally {
+      restorePromaHome(originalHome)
+    }
+  })
+
+  it('listSessions 过滤委派子会话（source_delegation_id 非空不出列表——未命名对话刷屏根治；fork 分支可见）', () => {
+    const originalHome = process.env.PROMA_HOME
+    const home = useTemporaryHome('session-child-filter-')
+    try {
+      recordSessionActivity('session-main', 'project-z')
+      // 直接写入索引：模拟委派子会话（review-delegation 建的审查件）与 fork 分支会话
+      const index = readSessionsForTest()
+      index.sessions.push({
+        session_id: 'child-a',
+        project_id: 'project-z',
+        status: 'active',
+        jsonl_path: join(home, 'agent-sessions', 'child-a.jsonl'),
+        created_at: '2026-09-19T00:00:00.000Z',
+        updated_at: '2026-09-19T00:00:01.000Z',
+        parent_session_id: 'review-xyz',
+        source_delegation_id: 'dlg-1',
+      } as never)
+      index.sessions.push({
+        session_id: 'fork-a',
+        project_id: 'project-z',
+        status: 'active',
+        jsonl_path: join(home, 'agent-sessions', 'fork-a.jsonl'),
+        created_at: '2026-09-19T00:00:02.000Z',
+        updated_at: '2026-09-19T00:00:03.000Z',
+        parent_session_id: 'session-main',
+        fork_entry_id: 'entry-9',
+      } as never)
+      writeSessionsForTest(index)
+      const listed = listSessions({ request_id: 'req-3' }).sessions
+      expect(listed.map((s) => s.session_id)).toEqual(['fork-a', 'session-main'])
     } finally {
       restorePromaHome(originalHome)
     }
