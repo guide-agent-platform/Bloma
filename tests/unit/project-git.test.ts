@@ -200,8 +200,8 @@ describe('快照/恢复排除 .git 与 data-backups（不依赖 git 二进制）
     })
   }
 
-  it('受保护顶层目录清单为 [.git, data-backups]', () => {
-    expect([...SNAPSHOT_PRESERVED_TOPLEVEL]).toEqual(['.git', 'data-backups'])
+  it('受保护顶层目录清单为 [.git, data-backups, node_modules]（W2：vendor 钉版供货确定性可重建，不进归档）', () => {
+    expect([...SNAPSHOT_PRESERVED_TOPLEVEL]).toEqual(['.git', 'data-backups', 'node_modules'])
   })
 
   it('归档不含 .git/data-backups；恢复后二者保留恢复前状态、data/ 仍精确回滚', async () => {

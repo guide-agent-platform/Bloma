@@ -59,6 +59,13 @@ app.use((err, req, res, next) => { // eslint-disable-line @typescript-eslint/no-
   res.status(500).json({ error: 'route_error', message: String((err && err.message) || err).slice(0, 200) });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`[server] listening on http://127.0.0.1:${PORT}`);
+});
+
+// 端口被占（EADDRINUSE）按平台约定退出码 10（预览引擎据此自动换端口重试，与旧静态服务器同口径）
+server.on('error', (err) => {
+  if (err && err.code === 'EADDRINUSE') process.exit(10);
+  console.error('[server] 监听失败:', err && err.stack ? err.stack : err);
+  process.exit(1);
 });

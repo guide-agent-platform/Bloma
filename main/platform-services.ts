@@ -23,6 +23,7 @@ import { appendJsonLine, readJsonFile, writeJsonFile } from '../storage/json-sto
 import { readDocumentsManifest } from './document-engine'
 import { findProject, updateProject } from './project-service'
 import { PRODUCT_CSP } from './coding/product-csp'
+import { resolveRealScaffoldSpawn } from './coding/preview-runtime'
 
 interface SandboxProcess {
   process: ChildProcess
@@ -92,9 +93,13 @@ export async function runSandbox(input: SandboxRunInput): Promise<SandboxRunResu
     const child = sandboxProcessFactory(project.root_path, port, input.command, input.llm_env)
     activeSandboxes.set(project.project_id, { process: child, port, command: input.command, envSig: llmEnvSig })
 
-    // 捕获 stdout/stderr 到内部日志（供修复循环分析，不向 P0 展示堆栈）
+    // 捕获 stdout/stderr 到内部日志（供修复循环分析，不向 P0 展示堆栈）；W2：真实服务器
+    // 可能长呱呱刷屏，环形截尾保留最近 32KB（失败回流/成功尾部部不受影响）
     const appendLog = (chunk: Buffer | string): void => {
-      sandboxLogs.set(input.project_id, (sandboxLogs.get(input.project_id) ?? '') + String(chunk))
+      const prev = sandboxLogs.get(input.project_id) ?? ''
+      let next = prev + String(chunk)
+      if (next.length > 32_768) next = next.slice(-32_768)
+      sandboxLogs.set(input.project_id, next)
     }
     child.stdout?.on('data', appendLog)
     child.stderr?.on('data', appendLog)
@@ -205,6 +210,12 @@ async function waitForSandbox(
 const ALLOWED_SANDBOX_COMMANDS = new Set(['npm run dev', 'npm start', 'node static-server'])
 
 function spawnStaticServer(projectRoot: string, port: number, command?: string, llmEnv?: Record<string, string>): ChildProcess {
+  // W2 预览引擎（真实脚手架）：按产物标记分流——real-fullstack(spawn node server.js+
+  // vendor 供货) / real-static(零约定只读 file server)；旧注入路径(static-server.js 在)
+  // 返回 null 走原逻辑，字节级不变。real 标记优先于 command（real 项目的 npm start ≡
+  // node server.js，直接 spawn 免 shell 包装树击杀与 npm 查找）。
+  const realSpawn = resolveRealScaffoldSpawn(projectRoot, port, llmEnv)
+  if (realSpawn) return realSpawn
   const options = sandboxSpawnOptions(projectRoot, port, llmEnv)
   if (command) {
     const normalized = command.trim()
@@ -845,8 +856,10 @@ export function rollbackCodeOnlyEnabled(): boolean {
  * 恢复文档归档（如有）→ 更新 current_snapshot_id 指针。
  * rollbackSnapshot（完整事务）与启动对账 T1（崩溃残留恢复，不重启沙箱）共用。
  */
-/** Phase 10 W1-1：快照/恢复双侧排除的顶层目录（基础设施常开，与 BLOMA_PROJECT_GIT 开关无关）。 */
-export const SNAPSHOT_PRESERVED_TOPLEVEL = ['.git', 'data-backups'] as const
+/** Phase 10 W1-1：快照/恢复双侧排除的顶层目录（基础设施常开，与 BLOMA_PROJECT_GIT 开关无关）。
+ *  W2（2026-09-18）：增 node_modules——vendor 钉版供货确定性可重建（回滚后预览引擎幂等补拷），
+ *  归档含它只会膨胀快照（Express 依赖树 MB 级）。旧项目无此目录零影响。 */
+export const SNAPSHOT_PRESERVED_TOPLEVEL = ['.git', 'data-backups', 'node_modules'] as const
 
 function isPreservedToplevel(rootPath: string, src: string): boolean {
   const rel = relative(rootPath, src)

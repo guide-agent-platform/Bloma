@@ -760,7 +760,11 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         ctx.state.preview_url = sandbox.preview_url
         // D2：预览就绪只证明服务可访问，未验证行为——附一行证据边界防「预览绿=可交付」误读
         const evidence = toolEvidenceEnabled() ? '\n（预览就绪仅证明服务可访问；行为断言/ API 契约/安全均未验证。）' : ''
-        return { output: `预览已启动：${sandbox.preview_url}${evidence}`, detail: { preview_url: sandbox.preview_url } }
+        // W2：成功态也回流最近服务日志（真实服务器下运行期堆栈/路由错误是一手调试证据，
+        // 不等失败才可见；静态旧路径日志安静时零增加）
+        const tail = getSandboxLogs(projectId).trim().slice(-1200)
+        const logSection = tail ? `\n最近服务日志：\n${tail}` : ''
+        return { output: `预览已启动：${sandbox.preview_url}${evidence}${logSection}`, detail: { preview_url: sandbox.preview_url } }
       }
       const logs = getSandboxLogs(projectId).slice(-SANDBOX_LOG_TAIL_LIMIT)
       return {
