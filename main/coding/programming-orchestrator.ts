@@ -11,6 +11,7 @@ import { appendProjectLearning } from '../learnings-log'
 import { createSnapshot, runSandbox, trackAnalytics } from '../platform-services'
 import { renderPackageJson, renderStaticServer, renderSkeletonToProject, scaffoldEnabled } from '../project-scaffold'
 import { runBuildGate, type BuildGateResult } from './build-gate'
+import { rebuildRealFullstackDist } from './dist-rebuild'
 import { runArtifactUiGate, uiGateEnabled, uiProbeNotes, type ArtifactUiGateResult } from './artifact-ui-gate'
 import { getCachedStaticEvidence, setCachedStaticEvidence } from './evidence-cache'
 import { runVisionAuditGate } from './vision-audit-gate'
@@ -34,7 +35,7 @@ import { backplaneInterfaceSpec, buildIterationRoundAnchor, buildRepairRoundAnch
 import { gwtGameProbeEnabled } from '../gwt-runner'
 import { renderRulesSection, rulesForTemplateType, rulesRegistryEnabled } from '../rules-registry'
 import { renderExpressionSection } from '../prompt-expression'
-import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
+import { captureConstraints, extractConstraints, readProjectConstraints, sanitizeConstraints } from '../constraint-extractor'
 import { generateSketch, backplaneKeyTasks, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, type GenerateSketchResult, type PrdBackplane, type SketchRequirement } from '../sketch-engine'
 import { generateSketchLlm, SketchLlmError, type SketchAttemptDetail } from '../sketch-engine-llm'
 import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from '../requirement-normalizer'
@@ -1734,8 +1735,9 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
   const outOfScope = backplane.out_of_scope.length
     ? backplane.out_of_scope.map((entry) => `- ${entry}`).join('\n')
     : '- （无）'
-  const constraints = backplane.constraints?.length
-    ? backplane.constraints.map((entry) => `- ${entry}`).join('\n')
+  // R0.4：背板 constraints 消费端兑底清洗（存量项目如 7601e5ae 仍带宿主注入残留）
+  const constraints = sanitizeConstraints(backplane.constraints).length
+    ? sanitizeConstraints(backplane.constraints).map((entry) => `- ${entry}`).join('\n')
     : '- （无）'
   const arr = [
     '你是 Bloma 编程 Agent，用提供的工具亲手构建并验证一个可运行的应用。',
@@ -2438,6 +2440,10 @@ function loopOutcomeNote(loop: AgentLoopJudgeMetadata | undefined): string {
  */
 /** 导出供接线契约测试（gwt-ui-gate-merge）：L0 门禁必须每次执行不可旁路。 */
 export async function runGwtWithApiContract(input: { project_id: string; session_id: string; preview_url?: string }): Promise<GwtTestResult> {
+  // R0.1（2026-09-19 狗粮 7601e5ae）：real-fullstack 终验前陈旧检测重建 dist——修复/
+  // 迭代轮只改 src 不重建的构建断链根治位；非 fullstack 变体 no-op（旧路径字节不变）。
+  // 陈旧才建幂等：生成轮后首次终验 dist 刚由构建门禁产出，不重复构建。
+  await rebuildRealFullstackDist({ projectId: input.project_id, sessionId: input.session_id })
   const testResult = await runGwtScenarios(input)
   // L0 产物 UI 完整性硬门禁（2026-09-07）：与 api-contract 同款合并——初验与修复轮
   // 重验共用本函数，无旁路；失败合成 UI-GATE 前缀条目进既有 repair-loop gwt 腿。

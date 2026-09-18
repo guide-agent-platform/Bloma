@@ -13,7 +13,7 @@
  * 解析与 platform-services.resolveNodeExecutable 同口径（3 行重复，注释互指）。
  */
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, type Dirent } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { getPromaHome } from '../../storage/config-paths'
@@ -44,6 +44,42 @@ export function readRealScaffoldVariant(projectRoot: string): RealScaffoldVarian
   } catch {
     return null
   }
+}
+
+/** R0.3（2026-09-19 狗衆 7601e5ae）：real-fullstack 服务入口指纹——server.js + package.json
+ *  + server/ 子树的 size+mtime 摘要。runSandbox 幂等守卫比对：server 端代码已变而旧
+ *  进程还在跑 → 不复用、重启（模型 loop 内改 server.js 永不生效的根治位；狗衆实锤模型
+ *  自诊「预览进程仍在跑旧版 server.js」却无任何重启手段）。非 fullstack 返回 null（守卫
+ *  直通，旧路径行为不变）。 */
+export function realFullstackServerFingerprint(projectRoot: string): string | null {
+  if (readRealScaffoldVariant(projectRoot) !== 'real-fullstack') return null
+  const parts: string[] = []
+  const push = (abs: string, rel: string): void => {
+    try {
+      const s = statSync(abs)
+      parts.push(`${rel}:${s.size}-${Math.round(s.mtimeMs)}`)
+    } catch {
+      // 文件缺失跳过——入口缺失由 spawn 自身报错如实可见，指纹不越权拦截
+    }
+  }
+  push(join(projectRoot, 'server.js'), 'server.js')
+  push(join(projectRoot, 'package.json'), 'package.json')
+  const walk = (abs: string, rel: string): void => {
+    let entries: Dirent[]
+    try {
+      entries = readdirSync(abs, { withFileTypes: true }) as Dirent[]
+    } catch {
+      return
+    }
+    for (const entry of [...entries].sort((a, b) => a.name.localeCompare(b.name))) {
+      const childAbs = join(abs, entry.name)
+      const childRel = `${rel}/${entry.name}`
+      if (entry.isDirectory()) walk(childAbs, childRel)
+      else if (entry.isFile()) push(childAbs, childRel)
+    }
+  }
+  walk(join(projectRoot, 'server'), 'server')
+  return parts.length > 0 ? parts.join('|') : null
 }
 
 export function writeRealScaffoldMarker(projectRoot: string, variant: RealScaffoldVariant): void {

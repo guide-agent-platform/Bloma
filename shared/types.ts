@@ -1326,6 +1326,9 @@ export interface RollbackResult {
   preview_url?: string
   /** T7：文档是否随回滚恢复（目标快照无冻结文档时为 false——存量快照如实提示缺失，不补造） */
   documents_restored?: boolean
+  /** R0.6（2026-09-19 狗粮 7601e5ae）：回滚前 data/ 存在时无条件备份到的目录
+   *  （data-backups/<短id>-<ts>，相对项目根）；未存在 data/ 时缺省。消费方话术据此如实。 */
+  data_backup_dir?: string
 }
 
 // =========================================================================

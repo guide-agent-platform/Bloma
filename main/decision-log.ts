@@ -69,6 +69,8 @@ export type DecisionType =
   | 'build_gate_passed'
   | 'build_gate_failed'
   | 'build_gate_unavailable'
+  /** R0.1（2026-09-19 狗粮 7601e5ae）：real-fullstack 终验/测试前 dist 陈旧重建留痕（构建断链根治位） */
+  | 'dist_rebuild'
   | 'repair_round_started'
   | 'repair_round_completed'
   | 'repair_budget_exhausted'

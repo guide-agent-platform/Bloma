@@ -66,6 +66,8 @@ export interface RequirementNormalizationDecision {
   reviseId?: string
   /** action=out_of_scope 时的范围声明（调用方并入 project.scope_exclusions） */
   outOfScope?: string
+  /** R0.5（2026-09-19 狗粮 7601e5ae）：范围声明被反转守卫拦下时如实留痕（action 已降级 skip） */
+  guard_note?: string
   /** 决策来源：llm=模型归一化；fallback=规则清洗原文原样追加（改动前现状） */
   via: 'llm' | 'fallback'
 }
@@ -121,7 +123,20 @@ export async function normalizeRequirementUpdate(
       return parsed ? (sanitize(parsed, input.existing) ?? undefined) : undefined
     },
   })
-  return decision ?? fallback(input.modification)
+  const resolved = decision ?? fallback(input.modification)
+  // R0.5：out_of_scope 语义反转守卫——正向祈使诉求被归一化为否定式范围声明（狗粮实锤：
+  // 「把数据存到服务端」→「不做服务端存储，流水数据仅保存在本机」，与诉求方向相反且
+  // 与 interface_spec 自相矛盾，还永久入库污染背板）。拦下后降级 skip（清单原样；
+  // 局部迭代仍按诉求原文跑——狗粮实证该路径模型能如实回报「已实现」，用户侧无害）。
+  if (resolved.action === 'out_of_scope' && resolved.outOfScope && isScopeInversion(input.modification, resolved.outOfScope)) {
+    return {
+      action: 'skip',
+      description: '',
+      via: 'llm',
+      guard_note: `范围声明「${resolved.outOfScope}」与正向诉求方向相反（疑似把诉求反转成了否定式排除），已拒绝入库；按原清单处理，修改诉求原文交给局部迭代`,
+    }
+  }
+  return resolved
 }
 
 /**
@@ -212,13 +227,14 @@ export function recordRequirementNormalization(
         : decision.action === 'out_of_scope'
           ? `判定为范围声明「${decision.outOfScope ?? decision.description}」并入范围外，不入功能项`
           : '判定为操作指令不入需求清单，按原清单重新生成'
+  const guardSuffix = decision.guard_note ? `（${decision.guard_note}）` : ''
   recordDecision({
     project_id: input.project_id,
     session_id: input.session_id,
     entry: {
       type: 'requirement_normalized',
       title: '修改诉求归一化入库',
-      why: `修改诉求「${modification}」→ ${actionCopy}`,
+      why: `修改诉求「${modification}」→ ${actionCopy}${guardSuffix}`,
       detail: {
         stage,
         action: decision.action,
@@ -236,6 +252,21 @@ export function recordRequirementNormalization(
 
 function fallback(modification: string): RequirementNormalizationDecision {
   return { action: 'append', description: modification, via: 'fallback' }
+}
+
+/** R0.5（2026-09-19 狗粮 7601e5ae）：out_of_scope 反转守卫判定（纯函数，导出供测试）。
+ *  正向诉求：含添加/变更类动词且无否定标记；否定式范围声明：含否定词或「仅/只」开头。
+ *  两者同时成立 = 归一化把用户要的东西写成了不要的东西 → 拒绝入库。 */
+const AFFIRMATIVE_REQUEST_RE = /(把|将|增加|添加|加上|改成|改为|换成|需要|要有|想要|希望|支持|提供|保存到|存到|放到|导出|接入|接上|启用|打开|开启)/
+const NEGATION_RE = /(不要|不想|不用|无需|不含|不包括|不涉及|不需要|别做|别加|别用|禁止|不做|去掉|移除|删掉|取消|关闭|关掉)/
+
+export function isScopeInversion(modification: string, outOfScope: string): boolean {
+  const mod = modification.trim()
+  const scope = outOfScope.trim()
+  if (!mod || !scope) return false
+  const modAffirmative = AFFIRMATIVE_REQUEST_RE.test(mod) && !NEGATION_RE.test(mod)
+  const scopeNegative = NEGATION_RE.test(scope) || /^(仅|只)/.test(scope)
+  return modAffirmative && scopeNegative
 }
 
 interface ParsedDecision {

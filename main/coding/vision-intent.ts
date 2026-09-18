@@ -17,6 +17,7 @@
  * 人工可审：清单落项目文档 intent-list.json（文档面板可见），每项带 evidence_ref 指回原文位置。
  */
 import { createHash } from 'node:crypto'
+import { sanitizeConstraints } from '../constraint-extractor'
 import type { PrdBackplane } from '../model/prd-backplane'
 
 /** 意图项：一个"应当存在于画面"的元素/特性的声明。 */
@@ -63,7 +64,7 @@ export function backplaneHash(backplane: Pick<PrdBackplane, 'positioning' | 'req
     requirements: (backplane.requirements ?? []).map((r) => ({ id: r.id, description: r.description ?? '' })),
     acceptance,
     out_of_scope: backplane.out_of_scope ?? [],
-    constraints: backplane.constraints ?? [],
+    constraints: sanitizeConstraints(backplane.constraints ?? []),
     prd_document_hash: prdDoc ? createHash('sha256').update(prdDoc).digest('hex').slice(0, 16) : '',
     prd_document_chars: prdDoc.length,
   }

@@ -42,7 +42,8 @@ const CONSTRAINT_MAX_PER_TEXT = 5;
  */
 export function readProjectConstraints(projectId: string): string[] {
   try {
-    return findProject(projectId).constraints ?? []
+    // R0.4：读取侧兑底清洗存量污染（写入侧已根治；存量项目如 7601e5ae 背板仍有注入残留）
+    return sanitizeConstraints(findProject(projectId).constraints ?? [])
   } catch {
     return []
   }
@@ -68,10 +69,52 @@ export function extractConstraints(text: string): string[] {
  * 消息按文件序（时间序）处理，早轮约束排前面。
  */
 
-/** 平台合成 user 轮标记前缀：修复任务卡（P2 失败回流）/ loop 退行反馈等平台注入文本
- * 不是用户原话——其中的「不要动其他任何文件」会被误提取为项目约束（随记灵 2026-09-06
- * 实测：修复卡三项硬约束被确定性入库，历轮常驻注入污染上下文）。 */
-const SYNTHETIC_USER_TURN_PREFIXES = ['## 修复任务', '【传输事故反馈】']
+/** 平台合成 user 轮拦截（R0.4 根治版，2026-09-19 狗粮 7601e5ae 实锤）：旧版两点前缀
+ *  黑名单追不上注入面扩张——本轮「收口指令/任务书工作方式/进度对账」等宿主注入文本
+ *  全被确定性提取为「用户约束」永久入库（含「无需再读取或修改任何文件——请直接输出
+ *  完成总结」，每轮常驻注入=教模型别读文件直接交卷）。改为两类结构性信号：
+ *  ①开头前缀黑名单（平台注入轮均有固定开头：任务卡/任务书/循环目标/learnings 注入）；
+ *  ②全文含「（宿主注入）」标记即整轮丢弃（所有【XXX（宿主注入）】类标记的统一信号）。
+ *  用户真实输入不含这些开头与标记——白名单语义的确定性拦截。 */
+const SYNTHETIC_USER_TURN_PREFIXES = [
+  '## 修复任务',
+  '【传输事故反馈】',
+  '目标：',
+  '<untrusted-memory',
+  '【收口指令',
+  '【进度对账',
+  '【任务清单工作流',
+  '【修改模式】',
+  '【本轮任务】',
+  '【工作方式】',
+]
+const HOST_INJECTION_MARKER = '（宿主注入）'
+
+/** 历史污染指纹（R0.4 消费端防御性清洗）：狗粮实锤入库的宿主注入话术原文片段。
+ *  只列确定性指纹（宁漏勿误：疑似但不确定的知「无需登录配置」不入列——用户真会说）。 */
+const HOST_CONSTRAINT_FINGERPRINTS = [
+  '（宿主注入）',
+  '无需再读取或修改任何文件',
+  '禁止先全读再全写',
+  '读过的内容不要重读',
+  '不要整文件重写（已完成清单项勿重做）',
+  '若确已不需要请在旁白说明原因',
+  '三项硬约束',
+  '禁止重构与本轮修复无关的代码',
+  '不要把验证全部留到收尾',
+  '不要动其他任何文件',
+  '不要改动其他任何文件',
+  '完成总结：逐项说明已完成的实施清单项',
+]
+
+/** 约束列表防御性清洗：剔除命中毒词指纹的宿主注入残留（写入侧已根治，此处兑底
+ *  存量污染——读取/注入两侧共用，不带状态、幂等）。 */
+export function sanitizeConstraints(constraints: string[] | undefined | null): string[] {
+  if (!constraints || constraints.length === 0) return []
+  return constraints.filter(
+    (entry) => typeof entry === 'string' && !HOST_CONSTRAINT_FINGERPRINTS.some((fp) => entry.includes(fp)),
+  )
+}
 
 export function scanSessionConstraints(sessionId: string): string[] {
   const path = getAgentSessionPath(sessionId)
@@ -91,6 +134,7 @@ export function scanSessionConstraints(sessionId: string): string[] {
       .map((block) => block.text ?? '')
       .join('')
     if (SYNTHETIC_USER_TURN_PREFIXES.some((prefix) => text.trimStart().startsWith(prefix))) continue
+    if (text.includes(HOST_INJECTION_MARKER)) continue
     for (const constraint of extractConstraints(text)) {
       if (!constraints.includes(constraint)) constraints.push(constraint)
     }

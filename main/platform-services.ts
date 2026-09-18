@@ -23,7 +23,7 @@ import { appendJsonLine, readJsonFile, writeJsonFile } from '../storage/json-sto
 import { readDocumentsManifest } from './document-engine'
 import { findProject, updateProject } from './project-service'
 import { PRODUCT_CSP } from './coding/product-csp'
-import { resolveRealScaffoldSpawn } from './coding/preview-runtime'
+import { realFullstackServerFingerprint, resolveRealScaffoldSpawn } from './coding/preview-runtime'
 
 interface SandboxProcess {
   process: ChildProcess
@@ -32,6 +32,10 @@ interface SandboxProcess {
   command?: string
   /** LLM 代理环境签名（完整程序渠道）：env 变化即重启（幂等守卫三项比对之一） */
   envSig: string
+  /** R0.3（2026-09-19 狗衆 7601e5ae）：real-fullstack 服务入口指纹（server.js/package.json/
+   *  server/ 子树）——server 端代码变更即重启，防「旧进程继续跑旧代码」假反馈。可选字段：
+   *  旧沙箱/非 fullstack 一律 null 语义，守卫用 ?? null 归一化比对。 */
+  serverSig?: string | null
 }
 
 type SandboxProcessFactory = (projectRoot: string, port: number, command?: string, llmEnv?: Record<string, string>) => ChildProcess
@@ -74,10 +78,14 @@ export async function runSandbox(input: SandboxRunInput): Promise<SandboxRunResu
   // 交付时带 llm_env 的调用必须重启注入，不能复用无环境实例。
   const existing = activeSandboxes.get(project.project_id)
   const llmEnvSig = JSON.stringify(input.llm_env ?? {})
+  // R0.3：real-fullstack 服务入口指纹——幂等守卫第四项比对。旧沙箱无 serverSig
+  //  （undefined）与 null 归一化后相等：非 fullstack 路径行为字节不变。
+  const serverSig = realFullstackServerFingerprint(project.root_path)
   if (
     existing
     && existing.command === (input.command ?? undefined)
     && existing.envSig === llmEnvSig
+    && (existing.serverSig ?? null) === (serverSig ?? null)
     && (await sandboxHealthCheck(`http://localhost:${existing.port}`))
   ) {
     return { status: 'running', preview_url: `http://localhost:${existing.port}`, port: existing.port }
@@ -91,7 +99,7 @@ export async function runSandbox(input: SandboxRunInput): Promise<SandboxRunResu
     const port = await allocatePort(SANDBOX_PORT_START, SANDBOX_PORT_END)
     const previewUrl = `http://localhost:${port}`
     const child = sandboxProcessFactory(project.root_path, port, input.command, input.llm_env)
-    activeSandboxes.set(project.project_id, { process: child, port, command: input.command, envSig: llmEnvSig })
+    activeSandboxes.set(project.project_id, { process: child, port, command: input.command, envSig: llmEnvSig, serverSig })
 
     // 捕获 stdout/stderr 到内部日志（供修复循环分析，不向 P0 展示堆栈）；W2：真实服务器
     // 可能长呱呱刷屏，环形截尾保留最近 32KB（失败回流/成功尾部部不受影响）
@@ -795,7 +803,7 @@ export async function rollbackSnapshot(input: SnapshotRollbackInput): Promise<Ro
   const documentsRestored = Boolean(target?.documents_archive_path && existsSync(target.documents_archive_path))
 
   // 3~7. 停沙箱 → 恢复文件/文档 → 更新指针（与启动对账共用的恢复原语）
-  await restoreSnapshotFiles(input)
+  const restored = await restoreSnapshotFiles(input)
 
   // 8. 重启 sandbox
   const sandbox = await runSandbox({ request_id: input.request_id, project_id: input.project_id })
@@ -831,6 +839,7 @@ export async function rollbackSnapshot(input: SnapshotRollbackInput): Promise<Ro
     guard_snapshot_id: guard.snapshot_id,
     preview_url: sandbox.preview_url,
     documents_restored: documentsRestored,
+    ...(restored.dataBackupDir ? { data_backup_dir: restored.dataBackupDir } : {}),
   }
 }
 
@@ -868,11 +877,18 @@ function isPreservedToplevel(rootPath: string, src: string): boolean {
   return (SNAPSHOT_PRESERVED_TOPLEVEL as readonly string[]).includes(first)
 }
 
+/** R0.6：恢复原语返回值——目标快照 + 回滚前 data/ 备份目录（存在时）。 */
+export interface RestoreSnapshotOutcome {
+  snapshot: Snapshot
+  /** 回滚前 data/ 存在时无条件备份的目录（data-backups/<短id>-<ts>，绝对路径） */
+  dataBackupDir?: string
+}
+
 export async function restoreSnapshotFiles(input: {
   request_id: string
   project_id: string
   snapshot_id: string
-}): Promise<Snapshot> {
+}): Promise<RestoreSnapshotOutcome> {
   const project = findProject(input.project_id)
   const snapshotDir = getSnapshotsDir(project.workspace_slug, project.project_id)
 
@@ -893,12 +909,16 @@ export async function restoreSnapshotFiles(input: {
   // 不含它们（createSnapshot filter）；挪回前若归档带回同名目录（历史遗留）让位删除。
   // Phase 10 W1-2（BLOMA_ROLLBACK_CODE_ONLY on）：data/ 同样保护——先整份备份到
   // data-backups/ 再随受保护目录一起挪出，回滚只回代码与文档（用户数据不丢）。
+  // R0.6（2026-09-19 狗粮 7601e5ae）：备份无条件化——off 语义下 data/ 虽随快照回滚
+  // （目录被清空重建），但回滚前的数据先整份备份到 data-backups/（狗粮实锤四次熔断
+  // 后 data/ 无声消失且话术称「内容都还在」；备份让数据可找回，话术据此如实）。
   const codeOnly = rollbackCodeOnlyEnabled()
   const dataPath = join(project.root_path, 'data')
-  if (codeOnly && existsSync(dataPath)) {
-    const backupDir = join(project.root_path, 'data-backups', `${input.snapshot_id.slice(0, 8)}-${Date.now()}`)
-    mkdirSync(backupDir, { recursive: true })
-    cpSync(dataPath, backupDir, { recursive: true, force: true })
+  let dataBackupDir: string | undefined
+  if (existsSync(dataPath)) {
+    dataBackupDir = join(project.root_path, 'data-backups', `${input.snapshot_id.slice(0, 8)}-${Date.now()}`)
+    mkdirSync(dataBackupDir, { recursive: true })
+    cpSync(dataPath, dataBackupDir, { recursive: true, force: true })
   }
   const preservedNames: string[] = codeOnly
     ? [...SNAPSHOT_PRESERVED_TOPLEVEL, 'data']
@@ -930,7 +950,7 @@ export async function restoreSnapshotFiles(input: {
   }
 
   updateProject(project.project_id, { current_snapshot_id: input.snapshot_id })
-  return target
+  return { snapshot: target, ...(dataBackupDir ? { dataBackupDir } : {}) }
 }
 
 export function setSnapshotCaptureProvider(provider?: SnapshotCaptureProvider): void {

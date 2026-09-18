@@ -331,12 +331,18 @@ export async function circuitBreakRollback(input: CircuitBreakInput): Promise<Ci
 
   // 「内容未丢失」话术对齐 self-healing-judge @S2-JUDGE-002（原 ROLLBACK_FUSE_COPY）；
   // failureNote：回滚目标带已知未通过断言时如实附加（随记灵 2026-09-06 案：
-  // 「可以继续试用这一版」把 F-002 坏版本当健康品，用户下一轮「用不了」）
+  // 「可以继续试用这一版」把 F-002 坏版本当健康品，用户下一轮「用不了」）。
+  // R0.6（2026-09-19 狗粮 7601e5ae）：话术不再一律称「内容都还在」——恢复的是代码与
+  // 文档；使用数据（data/）不随版本回滚，回滚前已整份备份（restoreSnapshotFiles 无条件
+  // 备份），狗粮实锤旧话术与磁盘事实矛盾（data/ 被清空却说没丢失）。
+  const dataNote = rollback.data_backup_dir
+    ? `使用数据不随版本回滚，回滚前的数据已备份到 data-backups/${(rollback.data_backup_dir.split(/[\\/]/).pop() ?? '')}，需要时可以找回。`
+    : ''
   const message =
     stage === 'ready'
-      ? `${repairPhrase}，已自动恢复到最近保存的版本，内容都还在，没有丢失。${input.failureNote ?? '你可以继续试用这一版，或者告诉我换个思路重新生成。'}`
+      ? `${repairPhrase}，已自动恢复到最近保存的版本（代码与文档）。${dataNote}${input.failureNote ?? '你可以继续试用这一版，或者告诉我换个思路重新生成。'}`
       : stage === 'sketch_ready'
-        ? `${repairPhrase}，已自动恢复到最近保存的版本（草图阶段），内容都还在，没有丢失。可以重新确认草图后再生成完整功能。`
+        ? `${repairPhrase}，已自动恢复到最近保存的版本（草图阶段）。${dataNote}可以重新确认草图后再生成完整功能。`
         : `${repairPhrase}，且最近保存的版本没有留下可用产物。请重新描述你的想法，我们再来一次。`
   appendAssistantMessage(input.session_id, message)
   // rollback_done 先行（渲染端契约：用它回填预览地址，与旧让渡路径一致），再收敛阶段、发消息收尾

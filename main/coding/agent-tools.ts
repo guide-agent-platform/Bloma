@@ -9,6 +9,7 @@ import { scheduleProjectMapRefresh } from '../project-map'
 import { isInjectionEnabled } from '../template-injection'
 import { getSandboxLogs, runSandbox } from '../platform-services'
 import { readRealScaffoldVariant } from './preview-runtime'
+import { rebuildRealFullstackDist } from './dist-rebuild'
 import { runGwtScenarios } from '../gwt-service'
 import { planScenarios, scenarioName } from '../gwt-runner'
 import { decideWrite, estimateTokenCount } from '../usage-guard'
@@ -520,6 +521,15 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         subDir = resolved.rel
       }
       const files = collectProjectFiles(project.root_path, subDir)
+      // R0.2（2026-09-19 狗粮 7601e5ae）：平台托管目录不再伪装成「空目录」——模型据
+      // 「目录为空」误判 express 未 vendor、白白零依赖重写；如实说明托管与供货保证。
+      const topDir = subDir.split('/')[0]
+      if (topDir && SKIPPED_DIRS.has(topDir)) {
+        const managed = topDir === 'node_modules'
+          ? 'node_modules 由平台托管（vendor 供货已保证 express 等依赖可用），不在产物清单中，也不允许直接修改'
+          : `${topDir}/ 是平台基础设施目录，不在产物清单中`
+        return { output: `${managed}。不要据此判断依赖缺失：判断后端可运行性请 run_preview，判断依赖声明请读 package.json。` }
+      }
       if (files.length === 0) return { output: `目录为空（${subDir || '项目根目录'}）。` }
       const shown = files.slice(0, LIST_ENTRY_LIMIT)
       const head = subDir ? `${subDir}/ 下` : '项目文件清单'
@@ -839,6 +849,9 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       if (!ctx.state.preview_url) {
         return { output: '还没有可用的预览地址。请先调用 run_preview 启动预览，再运行测试。', isError: true }
       }
+      // R0.1（2026-09-19 狗粮 7601e5ae）：模型侧测试与平台终验同口径——测试前确保
+      // dist 是 src 最新构建（防「改完 src 测旧 bundle」的假红反馈回路；非 fullstack no-op）
+      await rebuildRealFullstackDist({ projectId, sessionId: ctx.sessionId })
       const result = await runGwtScenarios({ project_id: projectId, session_id: ctx.sessionId, preview_url: ctx.state.preview_url })
       // W2-F4：执行计数无条件更新（终验 source 分类的确定性判据，与展示开关解耦）
       ctx.state.gwt_runs = (ctx.state.gwt_runs ?? 0) + 1
@@ -1464,7 +1477,12 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       const matcher = globToRegExp(pattern)
       const hits = collectProjectFiles(project.root_path, subDir).filter((rel) => matcher.test(rel))
       if (hits.length === 0) {
-        return { output: `无匹配文件（模式 ${pattern}${subDir ? `，目录 ${subDir}/` : ''}）。可用 list_files 查看实际文件清单。` }
+        // R0.2：命中不了平台托管目录（node_modules 等）时如实说明，防「找不到 = 不存在」误判
+        const targetsManaged = [pattern, subDir].some((seg) => seg && seg.split('/').includes('node_modules'))
+        const managedNote = targetsManaged
+          ? '\n注：node_modules 由平台托管（vendor 供货已保证 express 等依赖可用），不出现在文件清单中——无匹配不等于依赖缺失，请勿据此改用零依赖实现。'
+          : ''
+        return { output: `无匹配文件（模式 ${pattern}${subDir ? `，目录 ${subDir}/` : ''}）。可用 list_files 查看实际文件清单。${managedNote}` }
       }
       const shown = hits.slice(0, FIND_ENTRY_LIMIT)
       const truncation = hits.length > shown.length ? `\n（共 ${hits.length} 个匹配，仅显示前 ${FIND_ENTRY_LIMIT} 个）` : ''

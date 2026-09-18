@@ -116,7 +116,10 @@ describe('circuit break rollback (T5)', () => {
     expect(session).toContain('自动修复 6 轮都没有成功')
     expect(session).toContain('已自动恢复到最近保存的版本')
     expect(session).not.toContain('自动修复多次')
-    expect(session).toContain('内容都还在，没有丢失')
+    // R0.6（2026-09-19 狗粮 7601e5ae）：话术不再一律称「内容都还在」——恢复范
+    // 围如实为代码与文档；data/ 有备份时如实说明，无 data/ 时不再位称数据未丢
+    expect(session).toContain('（代码与文档）')
+    expect(session).not.toContain('内容都还在，没有丢失')
     const decisions = readFileSync(
       join(getDocumentsDir(findProject(projectId).workspace_slug, projectId), 'decisions.md'),
       'utf8',
