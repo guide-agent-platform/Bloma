@@ -26,6 +26,7 @@ import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketc
 import { appendProjectMapToSystem, loadProjectMapBlock } from '../project-map'
 import { resolveChannelEnv } from '../runtime-fallback'
 import { loadRealScaffoldTemplate, loadSkeletonTemplate, realScaffoldEnabled, REAL_SCAFFOLD_TYPES, type ProjectSkeleton } from '../project-templates'
+import { readRealScaffoldVariant, writeRealScaffoldMarker } from './preview-runtime'
 import { buildLoopInjection, buildSkeletonMapInjection } from '../template-injection'
 import { buildModuleMapInjection, loadOfficialModules, modulesEnabled, renderOfficialModulesToProject } from '../module-library'
 import { listRefPatternModules, refLibraryEnabled } from '../experience/ref-source'
@@ -938,6 +939,14 @@ function prepareSkeletonBeforeLoop(
     if (skeleton) {
       try {
         rendered = renderSkeletonToProject(skeleton, project.root_path)
+        // W3：真实脚手架标记落盘（预览/交付链/工具面的权威判定源；随快照归档恢复）
+        if (skeleton.variant) {
+          try {
+            writeRealScaffoldMarker(project.root_path, skeleton.variant)
+          } catch {
+            // 标记写失败不影响骨架生效（运行时回旧路径行为，fail-open）
+          }
+        }
         try {
           recordDecision({
             project_id: input.project_id,
@@ -1626,10 +1635,10 @@ async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopChannelCon
   }
 
   // loop 工具无权写系统接管文件，由平台补齐（与管道路径 generateMvpLlm 行为一致）。
-  // W1 真实脚手架（real-fullstack）：server.js/package.json 是 agent 可见可改的真实工程文件
-  // （骨架预置），平台不再注入 static-server——以根目录 server.js 为标记跳过两件系统接管
-  // 文件（旧路径产物永远不会有根 server.js，判定无歧义）；预览由 W2 preview-runtime 接管。
-  if (!existsSync(join(project.root_path, 'server.js'))) {
+  // W1/W3 真实脚手架：标记文件判定（real-static 与 real-fullstack 一并跳过——real-static
+  // 无 server.js，旧 server.js 存在性启发会漏判给纯静态产物注入 static-server，破坏「零约定
+  // file server」分流）；旧路径（无标记）行为字节级不变。
+  if (!readRealScaffoldVariant(project.root_path)) {
     writeFileSync(join(project.root_path, 'package.json'), renderPackageJson(project.name), 'utf8')
     writeFileSync(join(project.root_path, 'static-server.js'), renderStaticServer(), 'utf8')
   }

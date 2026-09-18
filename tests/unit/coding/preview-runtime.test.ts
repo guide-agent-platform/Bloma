@@ -6,9 +6,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   ensureVendorNodeModules,
   getVendorNodeModulesDir,
-  isRealFullstackProject,
+  readRealScaffoldVariant,
   resolveRealScaffoldSpawn,
   STATIC_FILE_SERVER_SCRIPT,
+  writeRealScaffoldMarker,
 } from '../../../main/coding/preview-runtime'
 import { SNAPSHOT_PRESERVED_TOPLEVEL } from '../../../main/platform-services'
 import { restorePromaHome } from '../../support/proma-home-guard'
@@ -64,10 +65,24 @@ describe('W2 预览引擎 preview-runtime', () => {
     children = []
   })
 
-  it('产物标记分流：server.js→fullstack；static-server.js→null（旧路径回退）；皆无→file server', async () => {
+  it('标记文件：写入/读回往返；非法内容/缺席 → null；旧路径 loop 期（无标记无 static-server.js）也回 null（W3 回归锁——文件存在性启发会误伤）', () => {
+    const root = mkdtempSync(join(tmpdir(), 'w2-marker-'))
+    expect(readRealScaffoldVariant(root)).toBeNull()
+    writeRealScaffoldMarker(root, 'real-fullstack')
+    expect(readRealScaffoldVariant(root)).toBe('real-fullstack')
+    writeRealScaffoldMarker(root, 'real-static')
+    expect(readRealScaffoldVariant(root)).toBe('real-static')
+    writeFileSync(join(root, '.bloma-real-variant'), 'garbage', 'utf8')
+    expect(readRealScaffoldVariant(root)).toBeNull()
+    // 旧路径 loop 期：无标记、无 static-server.js（交付链才注入）→ 必须回 null 走旧预览
+    const oldLoopRoot = mkdtempSync(join(tmpdir(), 'w2-oldloop-'))
+    expect(resolveRealScaffoldSpawn(oldLoopRoot, 0)).toBeNull()
+  })
+
+  it('产物标记分流：real-fullstack 标记→spawn；旧路径 static-server.js 在→null；real-static 标记→file server', async () => {
     const fullstackRoot = mkdtempSync(join(tmpdir(), 'w2-full-'))
     writeFileSync(join(fullstackRoot, 'server.js'), 'console.log("no-listen")', 'utf8')
-    expect(isRealFullstackProject(fullstackRoot)).toBe(true)
+    writeRealScaffoldMarker(fullstackRoot, 'real-fullstack')
     const full = resolveRealScaffoldSpawn(fullstackRoot, 0)
     expect(full).not.toBeNull()
     children.push(full!)
@@ -79,6 +94,7 @@ describe('W2 预览引擎 preview-runtime', () => {
     expect(resolveRealScaffoldSpawn(oldRoot, 0)).toBeNull()
 
     const staticRoot = mkdtempSync(join(tmpdir(), 'w2-static-'))
+    writeRealScaffoldMarker(staticRoot, 'real-static')
     expect(resolveRealScaffoldSpawn(staticRoot, 0)).not.toBeNull()
   })
 

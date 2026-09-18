@@ -8,6 +8,7 @@ import { findProject, readLastSketchRequirements } from '../project-service'
 import { scheduleProjectMapRefresh } from '../project-map'
 import { isInjectionEnabled } from '../template-injection'
 import { getSandboxLogs, runSandbox } from '../platform-services'
+import { readRealScaffoldVariant } from './preview-runtime'
 import { runGwtScenarios } from '../gwt-service'
 import { planScenarios, scenarioName } from '../gwt-runner'
 import { decideWrite, estimateTokenCount } from '../usage-guard'
@@ -79,8 +80,10 @@ export function setWebResearchTimeoutForTests(ms: number): void {
 
 /** 系统接管文件（与 mvp-engine-llm SYSTEM_FILES 同集）：模型写入会被拒绝。
  *  比较统一小写化（M-7）：Windows 大小写不敏感文件系统上 'Static-Server.js' 会实际
- *  覆盖 static-server.js（篡改沙箱服务端含 CSP 响应头），精确匹配会被绕过。 */
-const SYSTEM_FILES = new Set(['package.json', 'static-server.js'])
+ *  覆盖 static-server.js（篡改沙箱服务端含 CSP 响应头），精确匹配会被绕过。
+ *  W3：增 .bloma-real-variant 标记（平台管理，防 agent 篡改形态判定）。真实脚手架项目
+ *  里 package.json/server.js 是产物文件可写——变体感知由 isSystemFile(rel, realVariant) 分流。 */
+const SYSTEM_FILES = new Set(['package.json', 'static-server.js', '.bloma-real-variant'])
 
 /** 8.3 短名族（T-2 实测实锤：Windows 短名别名可写覆盖系统文件——写入
  *  'STATIC~1.JS' 实际命中 static-server.js；'PACKAG~1.JSO' 命中 package.json。
@@ -94,8 +97,11 @@ const SYSTEM_FILE_SHORT_NAMES = new Set(
   }),
 )
 
-function isSystemFile(rel: string): boolean {
+function isSystemFile(rel: string, realVariant = false): boolean {
   const lower = rel.toLowerCase()
+  // W3：真实脚手架项目里只有变体标记是平台管理件（package.json/server.js 皆是产物）；
+  // 旧路径维持全集字节级不变
+  if (realVariant) return lower === '.bloma-real-variant'
   if (SYSTEM_FILES.has(lower)) return true
   // T-2：短名别名族（STATIC~N.JS / PACKAG~N.JSO）——~N 序号归一到 ~1 后比对
   const base = lower.split(/[\\/]/).pop() ?? lower
@@ -219,17 +225,25 @@ function resolveInsideProject(
   return { ok: true, abs, rel }
 }
 
-function isWritablePath(rel: string): boolean {
-  if (isSystemFile(rel)) return false
+function isWritablePath(rel: string, realVariant = false): boolean {
+  if (isSystemFile(rel, realVariant)) return false
   if (isReadOnlyPath(rel)) return false
+  if (realVariant) {
+    // W3：真实工程件皆产物——项目内任意文件可写；仅排除基础设施目录（vendor 供货/
+    // 版本史/回滚备份，非 agent 职责）
+    const lower = rel.toLowerCase()
+    if (lower.startsWith('node_modules/') || lower.startsWith('.git/') || lower.startsWith('data-backups/')) return false
+    return true
+  }
   if (rel.startsWith('src/')) return true
   return WRITABLE_EXTENSIONS.has(extname(rel).toLowerCase())
 }
 
-function notWritableError(rel: string): string {
-  if (isSystemFile(rel)) return `「${rel}」由平台管理，不允许直接修改。`
+function notWritableError(rel: string, realVariant = false): string {
+  if (isSystemFile(rel, realVariant)) return `「${rel}」由平台管理，不允许直接修改。`
   if (rel.toLowerCase().startsWith('src/official-modules/')) return `「${rel}」是官方模块（只读参考），不允许修改；可 read_file 查看后复制到业务文件按需改编。`
   if (isReadOnlyPath(rel)) return `「${rel}」是只读参考示例（骨架包 src/examples/），不允许修改；可 read_file 参考共模式后在业务文件中实现。`
+  if (realVariant) return `「${rel}」不在可写范围内（node_modules/.git/data-backups 是平台基础设施，不允许修改）。`
   return `「${rel}」不在可写范围内（允许：.html/.js/.css 文件与 src/ 子树）。`
 }
 
@@ -361,6 +375,14 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
   const editFormat = options.editFormat ?? 'diff'
   const projectId = options.projectId
   const role = options.role ?? 'parent'
+  // W3：真实脚手架变体（标记文件权威判定，骨架渲染时已落盘）——写边界/系统件集合/
+  // 修复引导话术按变体分流；旧路径（无标记或项目缺席）false，行为字节级不变
+  let realVariant = false
+  try {
+    realVariant = readRealScaffoldVariant(findProject(projectId).root_path) !== null
+  } catch {
+    realVariant = false
+  }
 
   /**
    * 测试失败后的修复预算门（edit-after-test-failure ≤ 3，PR3 §4.4 口径，同构旧
@@ -404,7 +426,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
 
   /** 落盘前统一护栏：路径沙箱 + 可写范围 + 语法/结构校验 + 修复预算门 + meta CSP 剥离 + 依赖白名单拦截。 */
   const validateAndWrite = async (root: string, rel: string, content: string, ctx: ToolContext): Promise<ToolOutcome> => {
-    if (!isWritablePath(rel)) return { output: notWritableError(rel), isError: true }
+    if (!isWritablePath(rel, realVariant)) return { output: notWritableError(rel, realVariant), isError: true }
     if (extname(rel).toLowerCase() === '.html') {
       const structureError = checkHtmlStructure(content)
       if (structureError) return { output: `${structureError}\n请修正后重新提交完整内容。`, isError: true }
@@ -570,11 +592,29 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       },
       required: ['url'],
     },
-    execute: async (toolInput) => {
+    execute: async (toolInput, ctx) => {
       if (typeof toolInput.url !== 'string' || !toolInput.url.trim()) {
         return { output: '缺少 url 参数。', isError: true }
       }
-      const guarded = assertPublicHttpUrl(toolInput.url.trim())
+      const rawUrl = toolInput.url.trim()
+      // W3：预览 origin 放行（真实脚手架产物需要能探自己的 /api 与健康端点；仅限当前
+      // 预览 origin——run_preview 已把地址放进 state；外域照走公网守卫不变）
+      let previewOrigin: string | null = null
+      try {
+        previewOrigin = ctx.state.preview_url ? new URL(ctx.state.preview_url).origin : null
+      } catch {
+        previewOrigin = null
+      }
+      let localUrl: URL | null = null
+      if (previewOrigin) {
+        try {
+          const candidate = new URL(rawUrl)
+          if (candidate.origin === previewOrigin) localUrl = candidate
+        } catch {
+          /* 非法 URL 落回公网守卫拿规范报错 */
+        }
+      }
+      const guarded = localUrl ? { ok: true as const, url: localUrl } : assertPublicHttpUrl(rawUrl)
       if (!guarded.ok) return { output: guarded.error, isError: true }
       const maxChars = Math.min(
         Math.max(Math.trunc(numberOr(toolInput.max_chars, NET_FETCH_DEFAULT_CHARS)), 500),
@@ -905,9 +945,16 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       }
       const listing = failures.map((f) => `- API 契约端点：${f.scenario} — ${f.reason}`).join('\n')
       const evidence = validationStateLine(ctx.state)
+      // W3：失败输出附预览地址与服务日志尾部（真实服务器下运行期堆栈是一手证据；
+      // 修复指引按变体分流——Express 项目指 server.js，旧路径指 server/routes/）
+      const fixGuide = realVariant
+        ? '请对照 server.js / server/ 下的路由实现修复后重验（Express：app.get/post 注册）。'
+        : '请对照 server/routes/ 的路由实现修复后重验。'
+      const logTail = getSandboxLogs(projectId).trim().slice(-SANDBOX_LOG_TAIL_LIMIT)
+      const logSection = logTail ? `\n服务日志尾部：\n${logTail}` : ''
       return {
-        output: `API 契约验证未通过（${failures.length}/${endpoints.length} 个端点失败）：\n${listing}\n请对照 server/routes/ 的路由实现修复后重验。${evidence}`,
-        detail: { passed: false, failed: failures.length, endpoints: endpoints.length },
+        output: `API 契约验证未通过（${failures.length}/${endpoints.length} 个端点失败；预览 ${ctx.state.preview_url}）：\n${listing}\n${fixGuide}${logSection}${evidence}`,
+        detail: { passed: false, failed: failures.length, endpoints: endpoints.length, preview_url: ctx.state.preview_url },
       }
     },
   }

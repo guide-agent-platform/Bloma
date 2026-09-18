@@ -13,7 +13,7 @@
  * 解析与 platform-services.resolveNodeExecutable 同口径（3 行重复，注释互指）。
  */
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { getPromaHome } from '../../storage/config-paths'
@@ -25,7 +25,29 @@ function resolveNodeExecutable(): string {
 
 /** real-fullstack 产物标记：根目录 server.js（骨架预置、agent 可改；旧路径永无此文件）。 */
 export function isRealFullstackProject(projectRoot: string): boolean {
-  return existsSync(join(projectRoot, 'server.js'))
+  return readRealScaffoldVariant(projectRoot) === 'real-fullstack'
+}
+
+/** 真实脚手架变体标记文件（骨架渲染时写入项目根，随快照归档/恢复）：
+ *  W3（2026-09-18）引入——运行时/交付链/工具面都以它为权威判定，而非文件存在性启发。
+ *  背景：旧路径项目 loop 期间 static-server.js 尚未落盘（交付链才注入），靠「无
+ *  static-server.js」判 real-static 会误伤旧路径 loop 期预览；server.js 只覆盖
+ *  fullstack 不覆盖 real-static。标记文件是唯一三处（预览/交付/工具面）一致且跨重启、
+ *  跨快照恢复稳定的真相源。agent 写入被工具面拒绝（平台管理文件）。 */
+export const REAL_VARIANT_MARKER = '.bloma-real-variant'
+export type RealScaffoldVariant = 'real-static' | 'real-fullstack'
+
+export function readRealScaffoldVariant(projectRoot: string): RealScaffoldVariant | null {
+  try {
+    const raw = readFileSync(join(projectRoot, REAL_VARIANT_MARKER), 'utf8').trim()
+    return raw === 'real-static' || raw === 'real-fullstack' ? raw : null
+  } catch {
+    return null
+  }
+}
+
+export function writeRealScaffoldMarker(projectRoot: string, variant: RealScaffoldVariant): void {
+  writeFileSync(join(projectRoot, REAL_VARIANT_MARKER), variant, 'utf8')
 }
 
 /** vendor 钉版依赖根：~/.proma/bloma-vendor/express/node_modules（scripts/ensure-vendor-express.mjs 预装）。 */
@@ -109,7 +131,9 @@ export function resolveRealScaffoldSpawn(
   port: number,
   llmEnv?: Record<string, string>,
 ): ChildProcess | null {
-  if (isRealFullstackProject(projectRoot)) {
+  // W3：标记文件为权威判定（旧路径 loop 期 static-server.js 尚未落盘，文件存在性启发会误伤）
+  const variant = readRealScaffoldVariant(projectRoot)
+  if (variant === 'real-fullstack') {
     ensureVendorNodeModules(projectRoot)
     const options: SpawnOptions = {
       cwd: projectRoot,
@@ -119,12 +143,14 @@ export function resolveRealScaffoldSpawn(
     }
     return spawn(resolveNodeExecutable(), ['server.js'], options)
   }
-  if (existsSync(join(projectRoot, 'static-server.js'))) return null
-  // real-static：零约定只读 file server（cwd 落临时目录，根目录参数传入——与旧内嵌脚本同口径）
-  return spawn(resolveNodeExecutable(), ['-e', STATIC_FILE_SERVER_SCRIPT, String(port), projectRoot], {
-    cwd: tmpdir(),
-    env: { PATH: process.env.PATH, Path: process.env.Path },
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-  })
+  if (variant === 'real-static') {
+    // 零约定只读 file server（cwd 落临时目录，根目录参数传入——与旧内嵌脚本同口径）
+    return spawn(resolveNodeExecutable(), ['-e', STATIC_FILE_SERVER_SCRIPT, String(port), projectRoot], {
+      cwd: tmpdir(),
+      env: { PATH: process.env.PATH, Path: process.env.Path },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    })
+  }
+  return null
 }

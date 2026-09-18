@@ -16,6 +16,7 @@ import {
 import { createToolState, type AgentLoopTool, type ToolContext } from '../../main/agent-loop'
 import { createProject, findProject, recordSketchGenerated } from '../../main/project-service'
 import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/platform-services'
+import { writeRealScaffoldMarker } from '../../main/coding/preview-runtime'
 import { setBrowserGwtDisabledForTests } from '../../main/gwt-runner'
 import { getDocumentsDir } from '../../storage/config-paths'
 
@@ -194,6 +195,28 @@ describe('agent-tools（PR2 L2）', () => {
       const ext = await byName(tools, 'write_file').execute({ path: 'data.txt', content: 'x' }, ctx)
       expect(ext.isError).toBe(true)
       expect(ext.output).toContain('可写范围')
+    })
+
+    it('[W3] 真实脚手架变体写边界：package.json/server.js/任意后缀皆产物可写；node_modules/.git/data-backups/标记拒绝', async () => {
+      const project = createProject({ request_id: 'req-w3-real', mode: 'quick' })
+      writeRealScaffoldMarker(project.root_path, 'real-fullstack')
+      const tools = buildAgentTools({ projectId: project.project_id })
+      const ctx = ctxFor(project.project_id)
+      // package.json 是真实工程件（可改）；server/ 下路由模块可建；任意后缀（README.md）可写
+      const pkg = await byName(tools, 'write_file').execute({ path: 'package.json', content: '{"name":"app"}' }, ctx)
+      expect(pkg.isError).toBeFalsy()
+      const route = await byName(tools, 'write_file').execute({ path: 'server/routes/notes.js', content: 'module.exports = {}' }, ctx)
+      expect(route.isError).toBeFalsy()
+      const md = await byName(tools, 'write_file').execute({ path: 'README.md', content: '# app' }, ctx)
+      expect(md.isError).toBeFalsy()
+      // 基础设施目录与变体标记拒绝
+      for (const path of ['node_modules/evil.js', '.git/config', 'data-backups/x.json']) {
+        const outcome = await byName(tools, 'write_file').execute({ path, content: 'x' }, ctx)
+        expect(outcome.isError, path).toBe(true)
+      }
+      const marker = await byName(tools, 'write_file').execute({ path: '.bloma-real-variant', content: 'real-static' }, ctx)
+      expect(marker.isError).toBe(true)
+      expect(marker.output).toContain('平台管理')
     })
 
     it('[PR-1] 骨架参考示例目录只读：src/examples/ 写入拒绝（含大小写变体），read_file 可读', async () => {
