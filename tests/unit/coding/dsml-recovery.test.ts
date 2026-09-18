@@ -219,7 +219,8 @@ describe('runAgentLoop 集成 — 退化轮恢复', () => {
     ])
     const result = await runAgentLoop(baseInput({ query, tools: [writeTool] }))
     expect(result.status).toBe('turn_limit')
-    expect(result.termination_detail).toEqual({ reason: 'degenerate_output', retries: 1 })
+    // R1-loop（狗粮 7601e5ae #496）：写类意图不再无声丢弃，随出口留痕供终验/修复消费
+    expect(result.termination_detail).toEqual({ reason: 'degenerate_output', retries: 1, dropped_tool_intents: ['write_file:src/game/entities.js'] })
     expect(executed).toHaveLength(0)
     // 定向反馈（非泛化）：列出 write_file 意图
     const feedback = receivedMessages[1].filter((m) => m.role === 'user').at(-1)

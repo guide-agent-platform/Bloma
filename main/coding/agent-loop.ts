@@ -11,6 +11,7 @@ import { estimateTokenCount } from '../usage-guard'
 import { windowMessagesWithDigest } from '../compacting-window'
 import { isDegenerateText } from './output-integrity'
 import { buildTargetedDegenerateFeedback, classifyDsmlRecovery, dsmlRecoveryEnabled, parseDsmlInvokes } from './dsml-recovery'
+import { createDsmlDisplayFilter } from './dsml-display-filter'
 import { closePreviewBrowserSession } from './preview-browser'
 import { drainSteerQueue, markLoopActive, markLoopInactive, markSteerMerged, pendingSteerCount, settleSteerEntry, steerConfirmEnabled, wrapSteerContent } from '../steer-queue'
 
@@ -1002,10 +1003,14 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     // 裸拼接会让旁白「每词一段」；同时把连续 text 增量合并为单块落盘（对齐 guide
     // 路径的整段化，JSONL 不再落几百个碎块）。
     const cleaner = createWhitespaceArtifactCleaner()
+    // R1-loop（2026-09-19 狗粮 7601e5ae）：DSML 协议残片呈现过滤——只拦 publish，
+    // textParts/assistantBlocks 仍存原文（JSONL 留档、模型侧历史不变）；跨增量
+    // 分裂标记由 holdback 状态机扣住裁决。
+    const dsmlFilter = createDsmlDisplayFilter()
     const textParts: string[] = []
     const emitText = (text: string): void => {
       // 助手旁白照常进事件流上屏（与 runAgent 的 message_delta 语义一致）
-      input.publish('message_delta', { text })
+      for (const piece of dsmlFilter.push(text)) input.publish('message_delta', { text: piece })
       textParts.push(text)
     }
     const flushTextRun = (): void => {
@@ -1045,6 +1050,8 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         }
       }
       flushTextRun()
+      // R1-loop：冲出被扣住的标记前缀（若最终不是 DSML 开标记）
+      for (const piece of dsmlFilter.end()) input.publish('message_delta', { text: piece })
     } catch (error) {
       if (isLoopCancelled(error, input.signal)) {
         // 取消取证落盘（2026-09-04 ddee1f39「查。」墙案）：流中半截输出如实落 JSONL，
@@ -1081,6 +1088,10 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     // 损坏会写坏代码）改定向反馈重试。开关 BLOMA_DSML_RECOVERY（缺省 on）。
     let turnToolUses = streamedToolUses
     let dsmlFeedbackThisTurn: string | undefined
+    // R1-loop（2026-09-19 狗粮 7601e5ae #496）：写类 DSML 意图在预算边界不丢——重试
+    // 耗尽收口时随 termination_detail 留痕（狗粮实锤被丢弃的 write_file 重建 dist
+    // 意图正是唯一正确修复动作，信息价值已验证）
+    let dsmlDroppedIntents: string[] | undefined
     if (turnToolUses.length === 0 && isDegenerateText(finalText) && dsmlRecoveryEnabled()) {
       const parsed = parseDsmlInvokes(finalText)
       if (parsed && classifyDsmlRecovery(parsed, new Set(toolByName.keys())) === 'execute') {
@@ -1096,6 +1107,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
       } else if (parsed) {
         // 写类/未知工具：不盲执行，构造定向反馈（具体到调用意图）供下方重试用
         dsmlFeedbackThisTurn = buildTargetedDegenerateFeedback(parsed)
+        dsmlDroppedIntents = parsed.invokes.map((invoke) => `${invoke.name}${typeof invoke.input?.path === 'string' && invoke.input.path ? `:${invoke.input.path}` : ''}`)
       }
     }
     // P3 loop-log：文件类工具的入参 path 提取进过程记录（write_file/edit_file 均携带；
@@ -1137,13 +1149,18 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
           messages.push({ role: 'user', content: [{ type: 'text', text: feedback }] })
           continue
         }
-        // P2a：status 语义不变（如实 turn_limit 交终验），附真实出口原因观测
+        // P2a：status 语义不变（如实 turn_limit 交终验），附真实出口原因观测；
+        // R1-loop：写类 DSML 意图随出口留痕（不再无声丢弃）
         return attachUsage({
           status: 'turn_limit',
           turns,
           finalText,
           toolCalls,
-          termination_detail: { reason: 'degenerate_output', retries: degenerateRetries },
+          termination_detail: {
+            reason: 'degenerate_output',
+            retries: degenerateRetries,
+            ...(dsmlDroppedIntents?.length ? { dropped_tool_intents: dsmlDroppedIntents } : {}),
+          },
         })
       }
       return attachUsage({ status: 'completed', turns, finalText, toolCalls })
@@ -1476,6 +1493,8 @@ async function runGraceWrapUpTurn(
   const blocks: MessageContentBlock[] = []
   const textParts: string[] = []
   const cleaner = createWhitespaceArtifactCleaner()
+  // R1-loop：与主循环同口径的 DSML 呈现过滤（狗粮 8 例中 7 例发生在宽限/收口轮）
+  const dsmlFilter = createDsmlDisplayFilter()
   const flushText = (): void => {
     if (textParts.length === 0) return
     blocks.push({ type: 'text', text: textParts.join('') })
@@ -1501,7 +1520,9 @@ async function runGraceWrapUpTurn(
         for (const block of sdk.message.content) {
           if (block.type === 'text' && block.text) {
             const pieces = cleaner.push(block.text)
-            for (const piece of pieces) input.publish('message_delta', { text: piece })
+            for (const piece of pieces) {
+              for (const display of dsmlFilter.push(piece)) input.publish('message_delta', { text: display })
+            }
             textParts.push(...pieces)
           } else {
             flushText()
@@ -1511,9 +1532,10 @@ async function runGraceWrapUpTurn(
       }
     }
     for (const piece of cleaner.end()) {
-      input.publish('message_delta', { text: piece })
+      for (const display of dsmlFilter.push(piece)) input.publish('message_delta', { text: display })
       textParts.push(piece)
     }
+    for (const display of dsmlFilter.end()) input.publish('message_delta', { text: display })
     flushText()
   } catch (error) {
     if (isLoopCancelled(error, input.signal)) return { kind: 'cancelled' }

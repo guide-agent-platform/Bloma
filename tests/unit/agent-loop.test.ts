@@ -134,7 +134,8 @@ describe('runAgentLoop（PR2 L1）', () => {
     const { query, receivedMessages } = scriptedQuery([[dsml('一')], [dsml('二')]])
     const result = await runAgentLoop(baseInput({ query, maxTurns: 6 }))
     expect(result.status).toBe('turn_limit')
-    expect(result.termination_detail).toEqual({ reason: 'degenerate_output', retries: 1 })
+    // R1-loop：意图不再无声丢弃——dropped_tool_intents 随出口留痕（狗粮 7601e5ae #496）
+    expect(result.termination_detail).toEqual({ reason: 'degenerate_output', retries: 1, dropped_tool_intents: ['run_gwt_tests'] })
     // 传输事故反馈确实注入（重试轮收到的最后一条 user 消息是 DEGENERATE_RETRY_FEEDBACK 家族）
     const lastRetryMessages = receivedMessages[1]
     const lastUserContent = lastRetryMessages.at(-1)?.content
