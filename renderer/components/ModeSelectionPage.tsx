@@ -20,9 +20,15 @@ export const ModeSelectionPage: React.FC<ModeSelectionPageProps> = ({
   const [, setCurrentProject] = useAtom(currentProjectAtom)
   const [isSelecting, setIsSelecting] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  // 双建竞态根治（2026-09-19 实证：projects.json 里 42 个未命名 quick 项目成对出现、
+  // 同对时间差仅 70-90ms）：state 守卫是异步更新，两次快速触发都在重渲染前读到
+  // isSelecting=false 而双双过闸——同步 ref 拦面。仅成功路径不复位（已进入工作区，
+  // 组件即将卸载）；失败/异常路径复位允许重试。
+  const selectingRef = React.useRef(false)
 
   const handleSelect = async (mode: 'quick' | 'longterm') => {
-    if (isSelecting) return // 防止双击重复创建
+    if (selectingRef.current) return // 同步闸：防双击/双触发重复建项目（state 版拦不住）
+    selectingRef.current = true
     setIsSelecting(true)
     setError(null)
 
@@ -53,6 +59,9 @@ export const ModeSelectionPage: React.FC<ModeSelectionPageProps> = ({
       setError('项目创建失败，请重试。')
     } finally {
       setIsSelecting(false)
+      // 同步闸只在创建在途期间拦截（污染对时间差 70-90ms = 在途双触发窗口）；
+      // 完成即复位——成功后真实路径已跳转工作区，同页二次触发仅存在于测试/异常场景
+      selectingRef.current = false
     }
   }
 
