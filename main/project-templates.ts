@@ -209,15 +209,18 @@ export interface ProjectSkeleton {
   source: 'builtin' | 'override' | 'builtin_fallback'
 }
 
-/** v1 仅 web_fullstack 提供骨架包（单类型验证）；game 复用 web_fullstack 骨架（产物形态同为 web 全栈）；其余类型无骨架 = 现状从零写。 */
+/** 骨架目录映射：game 复用 web_fullstack（产物形态同为 web 全栈）；personal_tool 同样复用
+ * （2026-09-18 本月流水账案止血：无骨架 → _example.js 不预置 → 路由键约定无样例可参照，
+ * 404 六次盲调不可恢复；个人工具型产物与 web 全栈同形态，直接复用）；其余类型无骨架 = 现状从零写。 */
 const SKELETON_DIRS: Partial<Record<TemplateType, string>> = {
   web_fullstack: 'web-fullstack',
   game: 'web-fullstack',
+  personal_tool: 'web-fullstack',
 }
 
-/** 骨架校验类型：game 复用 web_fullstack 骨架，manifest.type 是 web_fullstack，校验时按 web_fullstack。 */
+/** 骨架校验类型：game/personal_tool 复用 web_fullstack 骨架（manifest.type 是 web_fullstack），校验时按 web_fullstack。 */
 function skeletonValidateType(type: TemplateType): TemplateType {
-  return type === 'game' ? 'web_fullstack' : type
+  return type === 'game' || type === 'personal_tool' ? 'web_fullstack' : type
 }
 
 /** 骨架文件后缀白名单（与 agent-tools WRITABLE_EXTENSIONS 同集：静态前端产物）。 */

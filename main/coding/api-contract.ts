@@ -27,38 +27,65 @@ interface RouteMountError {
   message: string
 }
 
-/** 取健康端点的挂载失败清单；端点缺席/不可达/形态异常 → null（静默降级，不动判定）。 */
-async function fetchRouteMountErrors(previewUrl: string): Promise<RouteMountError[] | null> {
+interface RouteMountInfo {
+  mounted: string[]
+  errors: RouteMountError[]
+}
+
+/** 取健康端点的挂载状态（mounted 清单 + 挂载失败清单）；端点缺席/不可达/形态异常 → null（静默降级，不动判定）。 */
+async function fetchRouteHealth(previewUrl: string): Promise<RouteMountInfo | null> {
   try {
     const response = await fetch(`${previewUrl.replace(/\/+$/, '')}/_bloma/routes`, {
       signal: AbortSignal.timeout(API_PROBE_TIMEOUT_MS),
     })
     if (!response.ok) return null
-    const body = (await response.json()) as { errors?: unknown }
+    const body = (await response.json()) as { mounted?: unknown; errors?: unknown }
     if (!Array.isArray(body?.errors)) return null
-    return body.errors.filter(
+    const errors = body.errors.filter(
       (item): item is RouteMountError =>
         typeof item === 'object' &&
         item !== null &&
         typeof (item as { file?: unknown }).file === 'string' &&
         typeof (item as { message?: unknown }).message === 'string',
     )
+    const mounted = Array.isArray(body?.mounted)
+      ? body.mounted
+          .filter(
+            (item): item is { method: unknown; path: unknown } =>
+              typeof item === 'object' &&
+              item !== null &&
+              typeof (item as { method?: unknown }).method === 'string' &&
+              typeof (item as { path?: unknown }).path === 'string',
+          )
+          .map((item) => `${item.method} ${item.path}`)
+      : []
+    return { mounted, errors }
   } catch {
     return null
   }
 }
 
 /** B1 失败 reason 组装：精确匹配（endpoint 资源段 ↔ 挂载失败文件名）优先，否则附挂载失败摘要；
- *  无健康端点/无错误 → 维持现状措辞（与 off 路径同文）。 */
+ *  无挂载报错但有 mounted 清单时附实际挂载路由与全路径提示（P0-3，2026-09-18 本月流水账案：
+ *  模块加载成功但路由键写了全路径 'GET /api/records'，被文件名前缀拼成
+ *  /api/records/api/records——旧 reason 只有猜测式措辞，模型六次盲调不可恢复）；
+ *  无健康端点 → 维持现状措辞（与 off 路径同文）。 */
 async function routeFailureReason(previewUrl: string, endpoint: string, status: number): Promise<string> {
   const base = `契约端点失活（HTTP ${status}，路由未实现或挂载失败）`
-  const errors = await fetchRouteMountErrors(previewUrl)
-  if (!errors || errors.length === 0) return base
-  const resource = endpoint.split('/').filter(Boolean)[1]
-  const hit = resource ? errors.find((item) => item.file.replace(/\.js$/, '') === resource) : undefined
-  if (hit) return `${base}；路由文件 ${hit.file} 挂载失败：${hit.message}`
-  const digest = errors.slice(0, 3).map((item) => `${item.file}（${item.message}）`).join('、')
-  return `${base}；挂载失败文件：${digest}`
+  const health = await fetchRouteHealth(previewUrl)
+  if (!health) return base
+  if (health.errors.length > 0) {
+    const resource = endpoint.split('/').filter(Boolean)[1]
+    const hit = resource ? health.errors.find((item) => item.file.replace(/\.js$/, '') === resource) : undefined
+    if (hit) return `${base}；路由文件 ${hit.file} 挂载失败：${hit.message}`
+    const digest = health.errors.slice(0, 3).map((item) => `${item.file}（${item.message}）`).join('、')
+    return `${base}；挂载失败文件：${digest}`
+  }
+  if (health.mounted.length > 0) {
+    const digest = health.mounted.slice(0, 6).join('、')
+    return `${base}；服务器实际挂载的路由：${digest}——目标端点不在其中时，多为路由键写了全路径（键应写文件名前缀之后的相对路径，如 'GET /'，文件名已是 /api/ 前缀）`
+  }
+  return base
 }
 
 export async function checkApiContract(previewUrl: string, endpoints: InterfaceEndpoint[]): Promise<GwtFailureSummary[]> {

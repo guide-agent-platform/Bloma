@@ -88,12 +88,15 @@ describe('B1 挂载错误回流（BLOMA_ROUTE_ERROR_FEEDBACK）', () => {
   let server: Server | undefined
   const previousEnv = process.env.BLOMA_ROUTE_ERROR_FEEDBACK
 
-  /** 同构健康端点测试服务器：/_bloma/routes 返回挂载失败清单（模拟 ESM 路由 require 报错） */
-  async function startHealthServer(errors: Array<{ file: string; message: string }>): Promise<string> {
+  /** 同构健康端点测试服务器：/_bloma/routes 返回挂载失败清单 + mounted 清单（模拟 ESM 路由 require 报错 / 挂错位置两口径） */
+  async function startHealthServer(
+    errors: Array<{ file: string; message: string }>,
+    mounted: Array<{ method: string; path: string }> = [],
+  ): Promise<string> {
     server = createServer((req, res) => {
       if (req.url === '/_bloma/routes') {
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ mounted: [], errors }))
+        res.end(JSON.stringify({ mounted, errors }))
         return
       }
       res.writeHead(404)
@@ -154,5 +157,18 @@ describe('B1 挂载错误回流（BLOMA_ROUTE_ERROR_FEEDBACK）', () => {
     const bareUrl = await startHealthServer([])
     const failures2 = await checkApiContract(bareUrl, [{ endpoint: '/api/records', method: 'GET' }])
     expect(failures2[0].reason).toBe('契约端点失活（HTTP 404，路由未实现或挂载失败）')
+  })
+
+  it('开关 on（P0-3 本月流水账案）：无挂载报错但有 mounted 清单 → 附实际挂载路由与全路径提示', async () => {
+    process.env.BLOMA_ROUTE_ERROR_FEEDBACK = '1'
+    const baseUrl = await startHealthServer([], [
+      { method: 'GET', path: '/api/records/api/records' },
+      { method: 'POST', path: '/api/records/api/records' },
+    ])
+    const failures = await checkApiContract(baseUrl, [{ endpoint: '/api/records', method: 'GET' }])
+    expect(failures).toHaveLength(1)
+    expect(failures[0].reason).toBe(
+      '契约端点失活（HTTP 404，路由未实现或挂载失败）；服务器实际挂载的路由：GET /api/records/api/records、POST /api/records/api/records——目标端点不在其中时，多为路由键写了全路径（键应写文件名前缀之后的相对路径，如 \'GET /\'，文件名已是 /api/ 前缀）',
+    )
   })
 })

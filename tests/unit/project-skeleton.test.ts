@@ -59,10 +59,15 @@ describe('project-skeleton（PR-1：骨架包 + 渲染 + 注入⑥骨架地图�
       }
     })
 
-    it('v1 仅 web_fullstack 提供骨架：personal_tool / desktop_tool / ai_app 均为 null（现状从零写）', () => {
-      expect(loadSkeletonTemplate('personal_tool')).toBeNull()
+    it('desktop_tool / ai_app 无骨架（现状从零写）；personal_tool 复用 web_fullstack 骨架（2026-09-18 止血：路由样例 _example.js 随骨架预置，不再出现「样例不存在」的信息断点）', () => {
       expect(loadSkeletonTemplate('desktop_tool')).toBeNull()
       expect(loadSkeletonTemplate('ai_app')).toBeNull()
+      const personal = loadSkeletonTemplate('personal_tool')
+      const web = loadSkeletonTemplate('web_fullstack')
+      expect(personal).not.toBeNull()
+      expect(personal!.type).toBe('personal_tool')
+      expect(personal!.files.map((f) => f.path)).toEqual(web!.files.map((f) => f.path))
+      expect(personal!.files.some((f) => f.path === 'server/routes/_example.js')).toBe(true)
     })
 
     it('P1-9：game 复用 web_fullstack 骨架（type 修正为 game、files 与 web_fullstack 同源）', () => {

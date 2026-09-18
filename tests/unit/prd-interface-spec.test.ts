@@ -99,7 +99,7 @@ describe('renderBackplaneAnchor 接口契约注入', () => {
       [
         '【后端 API 契约（interface_spec，前后端真相源）】按此实现 server/routes/ 下的路由并保持一致：',
         '- GET /api/records → 响应：{records:[…]}',
-        '路由文件模块格式（static-server 以 CommonJS require 加载，禁用 ESM import/export）：每个 server/routes/<资源>.js 写 `module.exports = { \'METHOD /path\': async (req, res, ctx) => {...} }`，键格式为 \'方法 路径\'，文件名即 /api/ 前缀（records.js → /api/records/*，样例见骨架 server/routes/_example.js）；数据用 ctx.readData/ctx.writeData 落 data/。',
+        '路由文件模块格式（static-server 以 CommonJS require 加载，禁用 ESM import/export）：每个 server/routes/<资源>.js 写 `module.exports = { \'METHOD /path\': async (req, res, ctx) => {...} }`。键里的路径写【文件名前缀之后的相对路径】——文件名已决定 /api/ 前缀：records.js 里 \'GET /\' 即 GET /api/records，\'PUT /:id\' 即 PUT /api/records/:id。禁止写全路径：\'GET /api/records\' 会被拼成 /api/records/api/records 导致全部端点 404。样例见骨架 server/routes/_example.js；数据用 ctx.readData/ctx.writeData 落 data/。',
       ].join('\n'),
     )
     expect(anchor).not.toContain('localStorage')
