@@ -1271,14 +1271,14 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
           style={{
             marginTop: 'var(--space-1)',
             alignSelf: 'flex-end',
-            background: 'transparent',
+            background: 'var(--color-quick-soft)',
             border: 'none',
             cursor: 'pointer',
             fontSize: 'var(--font-size-xs)',
-            color: isUser ? 'rgba(255,255,255,0.75)' : 'var(--color-text-muted)',
-            padding: '2px 6px',
-            borderRadius: 'var(--radius-sm)',
-            opacity: 0.75,
+            fontWeight: 600,
+            color: 'var(--color-quick)',
+            padding: '3px 10px',
+            borderRadius: 'var(--radius-full)',
           }}
         >
           ↪ 从这里重新来
