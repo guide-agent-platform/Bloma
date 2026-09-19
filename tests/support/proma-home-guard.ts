@@ -1,6 +1,17 @@
 import { afterEach, beforeEach } from 'vitest'
 
 /**
+ * 全局密闭守卫（2026-09-19 验收批发现）：本机 setx 的实验开关会随新进程环境渗入测试
+ * （BLOMA_REAL_SCAFFOLD 等 10 个）——未钉开关的测试随机器环境漂移（prd-interface-spec
+ * 快照实证：setx 后隔天新终端跑套件即红）。清扫后所有开关回落代码缺省值；需要 on 的
+ * 用例在测试内显式设 env（既有模式），密闭且与机器环境无关。PROMA_HOME 同理由下方
+ * 钩子兑底。
+ */
+for (const key of Object.keys(process.env)) {
+  if (key.startsWith('BLOMA_')) delete process.env[key]
+}
+
+/**
  * 全局兜底：防止 `PROMA_HOME` 被污染成字符串 "undefined"。
  *
  * Node 里 `process.env.X = undefined` 会强制转成字符串 `"undefined"`，因此 teardown 里

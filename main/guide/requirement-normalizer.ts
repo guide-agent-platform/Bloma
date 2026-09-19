@@ -269,6 +269,18 @@ export function isScopeInversion(modification: string, outOfScope: string): bool
   return modAffirmative && scopeNegative
 }
 
+/** 审查答案路由（2026-09-19 狗粮 a602709f 实证修复）：定位含功能项 id 的复合形式
+ *  （「F-001 / requirements 全表」「F-002 / F-006」）与全等 id 同等对待，返回命中的
+ *  功能项 id（无则 undefined 走章节类旁路）。旧版全等匹配把复合定位全部漏进「补充
+ *  说明」user 轮，吸收依赖 PRD 重跑时模型自读——狗粮实锤用户亲答「要，关掉还在」
+ *  在 Defender 失败+轮次熔断路径上蒸发（PRD 无留存项、GWT 无留存断言、产物 data/
+ *  从未创建）。 */
+export function resolveRoutedRequirementId(location: string, requirementIds: Set<string>): string | undefined {
+  if (requirementIds.has(location)) return location
+  const mentioned = [...location.matchAll(/F-\d+/g)].map((m) => m[0])
+  return mentioned.find((id) => requirementIds.has(id))
+}
+
 interface ParsedDecision {
   action: RequirementNormalizationAction
   description: string

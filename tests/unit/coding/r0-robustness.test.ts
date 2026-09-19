@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { realFullstackServerFingerprint, writeRealScaffoldMarker } from '../../../main/coding/preview-runtime'
-import { isScopeInversion } from '../../../main/guide/requirement-normalizer'
+import { isScopeInversion, resolveRoutedRequirementId } from '../../../main/guide/requirement-normalizer'
 import { extractConstraints, sanitizeConstraints, scanSessionConstraints } from '../../../main/constraint-extractor'
 import { getAgentSessionPath } from '../../../storage/config-paths'
 import { restorePromaHome } from '../../support/proma-home-guard'
@@ -89,6 +89,18 @@ describe('R0.4 约束抓取宿主注入拦截与存量清洗', () => {
     expect(scanned.some((entry) => entry.includes('不要动其他任何文件'))).toBe(false)
   })
 
+  it('审查答题回写轮不产生约束（狗粮 a602709f 补丁：「我选好了…」「补充说明：…」是 UI 选项回显）', () => {
+    const sessionId = 'r04-review-echo'
+    const lines = [
+      JSON.stringify({ role: 'user', content: [{ type: 'text', text: '我选好了，按下面的选择修订：' }], timestamp: 1 }),
+      JSON.stringify({ role: 'user', content: [{ type: 'text', text: '补充说明：F-001 / requirements 全表：要，关掉还在；工程模板追加检查·章节完备性：做的人只能自己猜；要不要拦' }], timestamp: 2 }),
+      JSON.stringify({ role: 'user', content: [{ type: 'text', text: '确认这份 PRD，开始画草图。' }], timestamp: 3 }),
+    ]
+    writeFileSync(getAgentSessionPath(sessionId), lines.join('\n') + '\n', 'utf8')
+    const scanned = scanSessionConstraints(sessionId)
+    expect(scanned).toEqual([])
+  })
+
   it('sanitizeConstraints 剔除狗粮实锤的注入残留，保留正常约束', () => {
     const polluted = [
       '无需登录配置',
@@ -121,5 +133,24 @@ describe('R0.5 out_of_scope 语义反转守卫', () => {
   it('正向诉求 × 正面范围澄清不是反转（如仅本机单用户）', () => {
     expect(isScopeInversion('加一个导出功能', '仅支持导出为 JSON')).toBe(true) // 仅 开头视为否定式口径
     expect(isScopeInversion('加一个导出功能', '导出为 JSON 或 CSV')).toBe(false)
+  })
+})
+
+describe('审查答案路由 resolveRoutedRequirementId（狗粮 a602709f 答案蒸发修复）', () => {
+  const ids = new Set(['F-001', 'F-002', 'F-005', 'F-006'])
+
+  it('全等定位照田命中', () => {
+    expect(resolveRoutedRequirementId('F-002', ids)).toBe('F-002')
+  })
+
+  it('复合定位命中首个存在的功能项 id（旧版全等匹配漏进补充说明旁路的形态）', () => {
+    expect(resolveRoutedRequirementId('F-001 / requirements 全表', ids)).toBe('F-001')
+    expect(resolveRoutedRequirementId('F-002 / F-006', ids)).toBe('F-002')
+    expect(resolveRoutedRequirementId('F-005：分类默认值', ids)).toBe('F-005')
+  })
+
+  it('章节类/不存在 id 返回 undefined 走补充说明旁路', () => {
+    expect(resolveRoutedRequirementId('工程模板追加检查·章节完备性', ids)).toBeUndefined()
+    expect(resolveRoutedRequirementId('F-099 / 不存在的项', ids)).toBeUndefined()
   })
 })

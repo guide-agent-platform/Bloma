@@ -127,8 +127,8 @@ describe('SessionService 会话索引', () => {
         project_id: 'project-z',
         status: 'active',
         jsonl_path: join(home, 'agent-sessions', 'fork-a.jsonl'),
-        created_at: '2026-09-19T00:00:02.000Z',
-        updated_at: '2026-09-19T00:00:03.000Z',
+        created_at: '2999-01-01T00:00:02.000Z',
+        updated_at: '2999-01-01T00:00:03.000Z',
         parent_session_id: 'session-main',
         fork_entry_id: 'entry-9',
       } as never)

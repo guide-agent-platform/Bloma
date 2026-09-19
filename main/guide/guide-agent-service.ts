@@ -49,7 +49,7 @@ import {
   type EnrichmentClarificationRequest,
 } from './clarification'
 import { resolvePrdBackplane, runSketchTask, setProgrammingEventPublisher, nextRequirementId, refineModificationDescription } from '../programming-orchestrator'
-import { normalizeRequirementUpdate, applyNormalization } from '../requirement-normalizer'
+import { normalizeRequirementUpdate, applyNormalization, resolveRoutedRequirementId } from '../requirement-normalizer'
 import { buildReferenceSection } from '../web-reference-extractor'
 import { findProject, updateProject, readLastSketchRequirements, recordSketchGenerated } from '../project-service'
 import { refineTemplateType } from '../template-inference'
@@ -804,8 +804,9 @@ export async function handleGuideMessage(
       const issue = locateReviewIssue(answer.issue_id)
       const answerText = answer.label || answer.option_id
       if (!issue || !answerText) continue
-      if (requirementIds.has(issue.location)) {
-        const directive = `${issue.location} 的修改诉求：${answerText}`
+      const routedId = issue.location ? resolveRoutedRequirementId(issue.location, requirementIds) : undefined
+      if (routedId) {
+        const directive = `${routedId} 的修改诉求：${answerText}`
         const normalization = await normalizeRequirementUpdate({
           session_id: input.session_id,
           existing: current,
@@ -2037,6 +2038,7 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
             },
           },
         })
+        const seriousLeft = review.issues.filter((issue) => issue.severity === 'blocking' || issue.severity === 'major').length
         const roundLimitCopy = `需求已确认，产品需求文档已形成。裁判已经连续检查了 ${PRD_REVIEW_ROUND_LIMIT} 轮，剩下的小问题不再逐条追问了——请你直接过目这份 PRD，有要改的直接说，确认无误我就开工。`
         publish(makeGuideEvent(eventInput, 'message_delta', { text: roundLimitCopy }))
         publish(makeGuideEvent(eventInput, 'message_completed', { subtype: 'success' }))
@@ -2052,7 +2054,9 @@ async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: b
           requirements,
           query: pending.query ?? NO_QUERY_FALLBACK,
           publish,
-          reviewNote: `已连续 ${PRD_REVIEW_ROUND_LIMIT} 轮确认`,
+          // 狗粮 a602709f 实证：盲过目确认漏掉用户亲答的「要，关掉还在」。答案已定向并入
+          // 需求清单（resolveRoutedRequirementId），但残余未解问题数如实告知，提醒重点过目。
+          reviewNote: `已连续 ${PRD_REVIEW_ROUND_LIMIT} 轮确认；你此前的逐题作答已并入下方需求清单，仍有 ${seriousLeft} 个较严重问题未解，请重点过目功能清单是否覆盖你的要求`,
           signal,
         })
         return { started: true, prd_written: prdWritten }

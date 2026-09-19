@@ -45,6 +45,12 @@ vi.mock('../../main/guide-research', () => ({
 vi.mock('../../main/requirement-normalizer', () => ({
   normalizeRequirementUpdate: vi.fn(async () => ({ action: 'append', via: 'rules' })),
   applyNormalization: vi.fn((existing: unknown[]) => existing),
+  // 狗粮 a602709f 修复批新增导出：真实实现（纯函数，无需 mock 行为）
+  resolveRoutedRequirementId: (location: string, ids: Set<string>): string | undefined => {
+    if (ids.has(location)) return location
+    const mentioned = [...location.matchAll(/F-\d+/g)].map((m) => m[0])
+    return mentioned.find((id) => ids.has(id))
+  },
 }))
 vi.mock('../../main/runtime-fallback', () => ({
   // 类别路由解析固定失败 → 审查 env 走 pending（向导轮 env）回退路径
