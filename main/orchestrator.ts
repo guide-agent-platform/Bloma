@@ -834,7 +834,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
         // skip 意味着诉求未入需求，必须告知而非假装采纳（与 runIterationTask 口径一致）。
         const ack =
           normalization.action === 'skip'
-            ? `收到「${truncateForCopy(input.content, 40)}」——这句我没当作需求改动（判为操作指令），按原样重新生成了一版。想改哪里请直接说，比如「标题改成计算助手」。`
+            ? `收到「${truncateForCopy(input.content, 40)}」——这句我没当作需求改动（判为操作指令），按原样重新生成了一版。想改哪里请直接说，比如「把页面标题的文字改一下」。`
             : `好的，按「${truncateForCopy(description, 40)}」调整草图，重新生成一版。`
         persistAssistant(ack)
         streamPublisher(makeEvent(input, 'message_delta', { text: ack }))
@@ -2108,7 +2108,7 @@ async function resolveIterationDecisionFlow(
     })
     const copy =
       decision === 'optimize'
-        ? '好，说说你想改哪里——越具体越好，比如「标题改成计算助手」「把这个按钮换成蓝色」。'
+        ? '好，说说你想改哪里——越具体越好，比如「把页面标题的文字改一下」「把这个按钮换成蓝色」。'
         : '好，说说你想往哪个方向重做——比如「改用卡片式布局」「把记账改成记时间」；说完我再跟你确认一次。'
     updateProject(input.project_id, { current_stage: 'ready' })
     streamPublisher(makeEvent(input, 'stage_changed', { stage: 'ready' }))

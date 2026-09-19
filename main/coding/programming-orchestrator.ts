@@ -3371,8 +3371,8 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
     publishCompletionMessage(
       input,
       input.localOnly
-        ? `收到「${truncateCopy(input.prompt, 20)}」——这句我没当成具体改动（判为操作指令），这一轮没改到功能。想改哪里请再具体说一点，比如「标题改成计算助手」。`
-        : `收到「${truncateCopy(input.prompt, 20)}」——这句我没当作需求改动（判为操作指令），按原样重新生成了一版。想改哪里请直接说，比如「标题改成计算助手」。`,
+        ? `收到「${truncateCopy(input.prompt, 20)}」——这句我没当成具体改动（判为操作指令），这一轮没改到功能。想改哪里请再具体说一点，比如「把页面标题的文字改一下」。`
+        : `收到「${truncateCopy(input.prompt, 20)}」——这句我没当作需求改动（判为操作指令），按原样重新生成了一版。想改哪里请直接说，比如「把页面标题的文字改一下」。`,
     )
     }
   } else {
