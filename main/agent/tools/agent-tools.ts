@@ -8,30 +8,11 @@ import { findProject, readLastSketchRequirements } from '../../project/project-s
 import { isInjectionEnabled } from '../prompting/template-injection'
 import { decideWrite, estimateTokenCount } from '../loop/usage-guard'
 import { withAbort, loopApiToolEnabled, toolEvidenceEnabled, writeGuardEnabled, preflightEnabled, compactToolEnabled, MAX_EXPLICIT_COMPACTIONS, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../loop/agent-loop'
-import {
-  NET_FETCH_DEFAULT_CHARS,
-  NET_FETCH_MAX_BYTES,
-  NET_FETCH_MAX_CHARS_LIMIT,
-  NET_FETCH_TIMEOUT_MS,
-  assertPublicHttpUrl,
-  htmlToText,
-} from '../../platform/net/net-guard'
-import {
-  answerDelegationQuestion,
-  askDelegationQuestion,
-  continueDelegation,
-  delegateAgentOnce,
-  findDelegation,
-  getDelegationSummary,
-  listDelegations,
-  startDelegation,
-  stopDelegation,
-  stopDelegations,
-  waitForDelegations,
-  type DelegationRole,
-  type DelegationSummary,
-  type StartDelegationResult,
-} from '../delegation/agent-collaboration'
+import { buildDelegationTools } from '../delegation/delegation-tools'
+import { buildWebFetch, buildWebResearch } from './web-tools'
+// 向后兼容 re-export（setWebResearchTimeoutForTests 随 web_research 迁至 web-tools；存量 import 零改动）
+export { WEB_RESEARCH_TIMEOUT_MS, setWebResearchTimeoutForTests } from './web-tools'
+import type { DelegationRole } from '../delegation/agent-collaboration'
 
 /**
  * Agent Loop 工具集（L2，AgentLoop 改造方案 §4.3；委派协作嫁接方案 §4.2）。
@@ -57,15 +38,8 @@ import {
 export const EDIT_BUDGET_AFTER_TEST_FAILURE = 3
 
 /** web_research 回灌主 loop 的结论上限（字符）。 */
-const WEB_RESEARCH_MAX_CHARS = 4000
+export const WEB_RESEARCH_MAX_CHARS = 4000
 /** web_research 调研子代理的收敛上限（毫秒）。 */
-export const WEB_RESEARCH_TIMEOUT_MS = 90_000
-let webResearchTimeoutMs = WEB_RESEARCH_TIMEOUT_MS
-
-/** 测试 seam：缩短 web_research 等待上限（超时/取消用例不等真实 90s）。 */
-export function setWebResearchTimeoutForTests(ms: number): void {
-  webResearchTimeoutMs = ms
-}
 
 /** 系统接管文件（与 mvp-engine-llm SYSTEM_FILES 同集）：模型写入会被拒绝。
  *  比较统一小写化（M-7）：Windows 大小写不敏感文件系统上 'Static-Server.js' 会实际
@@ -574,104 +548,6 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     },
   }
 
-  const web_fetch: AgentLoopTool = {
-    name: 'web_fetch',
-    parallelSafe: true,
-    description:
-      '抓取公网网页/文档并转为纯文本（只查资料，不能修改任何东西）。参数：url（http/https 公网地址）、max_chars（返回文本上限，默认 12000，最大 50000）。内网/本机地址会被拒绝；例外：与当前预览地址同源的 URL 放行（可用于自查 /api 端点与页面实况）。HTML 只保留可见文本。',
-    input_schema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string', description: '要抓取的公网 http/https 地址' },
-        max_chars: { type: 'number', description: '返回文本字符上限（默认 12000）' },
-      },
-      required: ['url'],
-    },
-    execute: async (toolInput, ctx) => {
-      if (typeof toolInput.url !== 'string' || !toolInput.url.trim()) {
-        return { output: '缺少 url 参数。', isError: true }
-      }
-      const rawUrl = toolInput.url.trim()
-      // W3：预览 origin 放行（真实脚手架产物需要能探自己的 /api 与健康端点；仅限当前
-      // 预览 origin——run_preview 已把地址放进 state；外域照走公网守卫不变）
-      let previewOrigin: string | null = null
-      try {
-        previewOrigin = ctx.state.preview_url ? new URL(ctx.state.preview_url).origin : null
-      } catch {
-        previewOrigin = null
-      }
-      let localUrl: URL | null = null
-      if (previewOrigin) {
-        try {
-          const candidate = new URL(rawUrl)
-          if (candidate.origin === previewOrigin) localUrl = candidate
-        } catch {
-          /* 非法 URL 落回公网守卫拿规范报错 */
-        }
-      }
-      const guarded = localUrl ? { ok: true as const, url: localUrl } : assertPublicHttpUrl(rawUrl)
-      if (!guarded.ok) return { output: guarded.error, isError: true }
-      const maxChars = Math.min(
-        Math.max(Math.trunc(numberOr(toolInput.max_chars, NET_FETCH_DEFAULT_CHARS)), 500),
-        NET_FETCH_MAX_CHARS_LIMIT,
-      )
-      let response: Response
-      try {
-        response = await fetch(guarded.url, {
-          signal: AbortSignal.timeout(NET_FETCH_TIMEOUT_MS),
-          redirect: 'follow',
-          headers: { accept: 'text/html,application/json,text/plain,*/*' },
-        })
-      } catch (error) {
-        return {
-          output: `抓取失败（${guarded.url.hostname}）：${error instanceof Error ? error.message : String(error)}`,
-          isError: true,
-        }
-      }
-      // 重定向终态复检：防公网 302 跳内网（redirect:'follow' 后 response.url 为终态）；
-      // W3 补丁（2026-09-18 21:07 狗粮实锤）：预览 origin 内的响应（含同源重定向）放行——
-      // 上批只改了初审，终态仍把 localhost 同源响应当「重定向到不允许的地址」拒掉，
-      // 修复轮自查通路全断（模型只能读文件打转→noop→熔断白修）
-      const finalRaw = response.url || guarded.url.toString()
-      let finalOk: boolean
-      if (previewOrigin) {
-        try {
-          finalOk = new URL(finalRaw).origin === previewOrigin
-        } catch {
-          finalOk = false
-        }
-        if (!finalOk) finalOk = assertPublicHttpUrl(finalRaw).ok
-      } else {
-        finalOk = assertPublicHttpUrl(finalRaw).ok
-      }
-      if (!finalOk) {
-        return { output: `重定向到了不允许的地址（${response.url}），已拒绝。`, isError: true }
-      }
-      if (!response.ok) {
-        return { output: `目标返回 HTTP ${response.status}（${guarded.url.hostname}），未抓取正文。`, isError: true }
-      }
-      const contentType = response.headers.get('content-type') ?? ''
-      if (!/text\/|json|xml|javascript/i.test(contentType)) {
-        return { output: `不支持的响应类型（content-type: ${contentType || '未知'}），只支持文本类内容。`, isError: true }
-      }
-      const buffer = await response.arrayBuffer()
-      if (buffer.byteLength > NET_FETCH_MAX_BYTES) {
-        return { output: `响应过大（${buffer.byteLength} 字节 > 上限 ${NET_FETCH_MAX_BYTES}），已放弃。`, isError: true }
-      }
-      const raw = new TextDecoder('utf-8', { fatal: false }).decode(buffer)
-      const text = /html/i.test(contentType) ? htmlToText(raw) : raw
-      if (!text.trim()) return { output: `抓取成功但页面无可提取文本（${response.url}）。` }
-      const truncated = text.length > maxChars
-      const body = truncated
-        ? `${text.slice(0, maxChars)}\n…（已截断，原文 ${text.length} 字符，可用 max_chars 调大上限重试）`
-        : text
-      return {
-        output: `（${response.url} · HTTP ${response.status} · ${contentType.split(';')[0]}）\n${body}`,
-        detail: { url: response.url, status: response.status, chars: text.length, truncated },
-      }
-    },
-  }
-
   const write_file: AgentLoopTool = {
     name: 'write_file',
     description:
@@ -799,280 +675,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     },
   }
 
-  // 主 agent（parent）专属委派协作工具集：M1 delegate_agent；M2 wait/get/stop；M3 answer/continue
-  const delegate_agent: AgentLoopTool = {
-    name: 'delegate_agent',
-    description:
-      '委派一个真实协作子会话并行处理独立子任务（fire-and-forget：立即返回 delegation_id，不阻塞当前轮）。' +
-      '子会话是独立 agent，仅限 1 层深度（子代理不能再委派）。适合长耗时、可并行、需要独立追踪的任务。' +
-      '用 wait_for_delegations 收集结果、get_delegation_results 读取摘要。',
-    input_schema: {
-      type: 'object',
-      properties: {
-        task: { type: 'string', description: '发给子 agent 的完整任务说明，必须自包含必要上下文' },
-        role: {
-          type: 'string',
-          enum: ['explore', 'research', 'implement', 'review', 'custom'],
-          description: '子任务角色：explore 探索代码库 / research 调研 / implement 实现 / review 审查 / custom 自定义',
-        },
-        expectedOutput: { type: 'string', description: '希望子 agent 最终返回的格式或要点（可选）' },
-      },
-      required: ['task'],
-    },
-    execute: async (toolInput, ctx) => {
-      const created = delegateAgentOnce(ctx.sessionId, ctx.toolCallId, () =>
-        startDelegation(ctx, {
-          task: String(toolInput.task ?? ''),
-          role: normalizeDelegationRole(toolInput.role),
-          expectedOutput: typeof toolInput.expectedOutput === 'string' ? toolInput.expectedOutput : undefined,
-        }),
-      )
-      return {
-        output:
-          `已委派协作子会话（delegation_id=${created.delegation_id}，role=${created.role}，status=${created.status}）。` +
-          '用 wait_for_delegations 等待结果、get_delegation_results 读取摘要。',
-        detail: { ...created },
-      }
-    },
-  }
-
-  const wait_for_delegations: AgentLoopTool = {
-    name: 'wait_for_delegations',
-    description:
-      '阻塞等待委派子会话收敛（本工具调用会挂起当前轮直到等待完成或超时）。' +
-      'strategy=all 等全部完成、any 等任一完成；超时（timeout_ms，缺省 600000ms）返回当前状态不抛错，由父 agent 决定继续等还是停止。' +
-      'delegation_ids 缺省 = 等待当前全部委派。',
-    input_schema: {
-      type: 'object',
-      properties: {
-        delegation_ids: { type: 'array', items: { type: 'string' }, description: '要等待的委派 ID 列表（缺省=当前全部）' },
-        strategy: { type: 'string', enum: ['all', 'any'], description: 'all=全部收敛（默认）/ any=任一完成即返回' },
-        timeout_ms: { type: 'number', description: '等待上限（毫秒，缺省 600000）' },
-      },
-    },
-    execute: async (toolInput, ctx) => {
-      const summaries = await waitForDelegations(ctx, {
-        delegationIds: stringArrayOrUndefined(toolInput.delegation_ids),
-        strategy: toolInput.strategy === 'any' ? 'any' : 'all',
-        timeout_ms: optionalNumberOr(toolInput.timeout_ms),
-      })
-      return {
-        output: `委派等待返回（${summaries.length} 个）：\n${formatDelegationSummaries(summaries)}`,
-        detail: { summaries },
-      }
-    },
-  }
-
-  const get_delegation_results: AgentLoopTool = {
-    name: 'get_delegation_results',
-    description:
-      '非阻塞读取委派子会话的状态摘要（delegation_id / role / status / goal / result_summary），不做等待。' +
-      'delegation_ids 缺省 = 当前全部委派；已终结记录保留最近 50 条。',
-    input_schema: {
-      type: 'object',
-      properties: {
-        delegation_ids: { type: 'array', items: { type: 'string' }, description: '要读取的委派 ID 列表（缺省=当前全部）' },
-      },
-    },
-    execute: async (toolInput, ctx) => {
-      const ids = stringArrayOrUndefined(toolInput.delegation_ids)
-      const records =
-        ids && ids.length > 0
-          ? ids.map((id) => {
-              const record = findDelegation(ctx.sessionId, id)
-              if (!record) throw new Error(`未找到当前会话下的委派: ${id}`)
-              return record
-            })
-          : listDelegations(ctx.sessionId)
-      const summaries = records.map(getDelegationSummary)
-      return {
-        output: `委派状态摘要（${summaries.length} 个）：\n${formatDelegationSummaries(summaries)}`,
-        detail: { summaries },
-      }
-    },
-  }
-
-  const stop_delegation: AgentLoopTool = {
-    name: 'stop_delegation',
-    description:
-      '停止一个委派子会话：中止其子循环、状态置 cancelled、解除正在等待它的 wait_for_delegations 阻塞，返回该委派当前摘要。',
-    input_schema: {
-      type: 'object',
-      properties: { delegation_id: { type: 'string', description: '要停止的委派 ID' } },
-      required: ['delegation_id'],
-    },
-    execute: async (toolInput, ctx) => {
-      if (typeof toolInput.delegation_id !== 'string' || !toolInput.delegation_id.trim()) {
-        return { output: '缺少 delegation_id 参数。', isError: true }
-      }
-      const summary = stopDelegation(ctx.sessionId, toolInput.delegation_id.trim())
-      return { output: `已停止委派 ${summary.delegation_id}（status=${summary.status}）。`, detail: { ...summary } }
-    },
-  }
-
-  const stop_delegations: AgentLoopTool = {
-    name: 'stop_delegations',
-    description: '批量停止委派子会话。delegation_ids 缺省 = 停止当前全部委派；返回被停止的委派摘要列表。',
-    input_schema: {
-      type: 'object',
-      properties: {
-        delegation_ids: { type: 'array', items: { type: 'string' }, description: '要停止的委派 ID 列表（缺省=当前全部）' },
-      },
-    },
-    execute: async (toolInput, ctx) => {
-      const summaries = stopDelegations(ctx.sessionId, stringArrayOrUndefined(toolInput.delegation_ids))
-      return {
-        output: `已停止 ${summaries.length} 个委派：\n${formatDelegationSummaries(summaries)}`,
-        detail: { summaries },
-      }
-    },
-  }
-
-  // 委派化联网调研（闭环 PR5，随感 43「查资料 fork 出去」）：主 loop 上下文只进
-  // ≤4000 字精干结论，原文抓取全部发生在 research 子代理（其工具面含 web_fetch）。
-  const web_research: AgentLoopTool = {
-    name: 'web_research',
-    parallelSafe: true,
-    description:
-      '针对一个问题或一个 URL 派出只读调研子代理：抓取/检索后总结成精干结论返回（≤4000 字），' +
-      '不占用当前上下文。适合查文档、找方案、比对做法；只需抓单页原文时用 web_fetch。' +
-      '参数：question（要查清的问题，或直接给 URL）、focus（关注点，可选）。',
-    input_schema: {
-      type: 'object',
-      properties: {
-        question: { type: 'string', description: '要查清的问题或目标 URL' },
-        focus: { type: 'string', description: '重点关注哪方面（可选）' },
-      },
-      required: ['question'],
-    },
-    execute: async (toolInput, ctx) => {
-      const question = String(toolInput.question ?? '').trim()
-      if (!question) return { output: '缺少 question 参数。', isError: true }
-      const focus = typeof toolInput.focus === 'string' && toolInput.focus.trim() ? toolInput.focus.trim() : undefined
-      let started: StartDelegationResult | undefined
-      try {
-        started = startDelegation(ctx, {
-          task:
-            `联网调研并总结（你是只读调研子代理，不能修改任何文件）：\n问题：${question}` +
-            `${focus ? `\n重点关注：${focus}` : ''}\n` +
-            `要求：用 web_fetch 抓取必要页面后，输出不超过 2000 字的中文结论（要点+出处 URL），不要贴原文大段。`,
-          role: 'research',
-          expectedOutput: '≤2000 字中文结论 + 出处 URL',
-        })
-        // withAbort：主 loop 取消时立即解除等待（waitForDelegations 本体不监听外部
-        // signal，见 abb1a19f 缺陷①的同类问题）；孤儿清理由 runMvpViaAgentLoop 的
-        // finally disposeParentDelegationState 兑底。
-        const summaries = await withAbort(
-          waitForDelegations(ctx, { strategy: 'all', delegationIds: [started.delegation_id], timeout_ms: webResearchTimeoutMs }),
-          ctx.signal,
-        )
-        const summary = summaries[0]
-        if (!summary || summary.status === 'running') {
-          stopDelegation(ctx.sessionId, started.delegation_id)
-          // 子代理冒泡提问（审查 P1-3）：waitForDelegations 对 askSignal 提前返回，这不是超时；
-          // 如实转述问题并建议改路，不得谎报「未收敛」击杀有进展的子代理
-          if (summary?.pending_question) {
-            return {
-              output: `调研子代理中途需要澄清问题：「${summary.pending_question.slice(0, 200)}」。这类问题不适合委派调研：可把 question 拆得更具体后重试，或改用 web_fetch 直接抓取。`,
-              isError: true,
-            }
-          }
-          return {
-            output: `调研子代理 ${Math.round(webResearchTimeoutMs / 1000)}s 内未收敛，已停止。请基于已有信息继续，或缩小问题后重试。`,
-            isError: true,
-          }
-        }
-        if (summary.status !== 'completed' || !summary.result_summary) {
-          return { output: `调研子代理未成功（status=${summary.status}）。可改用 web_fetch 直接抓取。`, isError: true }
-        }
-        // 剥「子代理状态：」头行（同 review-delegation），内部运行指标不进模型上下文
-        const body = summary.result_summary.split('\n').slice(1).join('\n').trim()
-        // 空结论显式化（审查 P2-3）：完成但无产出不能假装成功，给重试/替代建议
-        if (!body) {
-          return { output: '调研子代理完成了任务但没有产出结论（可能空响应）。可重试一次，或改用 web_fetch 直接抓取。', isError: true }
-        }
-        return { output: `调研结论：\n${body.slice(0, WEB_RESEARCH_MAX_CHARS)}`, detail: { delegation_id: started.delegation_id } }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        if (ctx.signal.aborted || message.includes('AGENT_CANCELLED')) {
-          return { output: `调研等待已随主任务取消中止（委派 ${started?.delegation_id ?? '未知'}，由平台收尾停止）。`, isError: true }
-        }
-        return { output: `调研委派失败：${message}。可改用 web_fetch 直接抓取。`, isError: true }
-      }
-    },
-  }
-
   // 子 agent（委派子会话）专属：向主 agent 挂起提问（M3 冒泡）。主 agent 用 answer_delegation_question 代答。
-  const ask_delegation_question: AgentLoopTool = {
-    name: 'ask_delegation_question',
-    description:
-      '（协作子 agent）向主 agent 提问：遇到需要用户决策、额外信息或授权确认时调用。' +
-      '本工具会挂起等待主 agent 回答，回答返回后继续执行；主 agent 也可用 stop_delegation 中止。',
-    input_schema: {
-      type: 'object',
-      properties: { question: { type: 'string', description: '要问主 agent 的问题（一次一个，需决策的具体问题）' } },
-      required: ['question'],
-    },
-    execute: async (toolInput, ctx) => {
-      if (typeof toolInput.question !== 'string' || !toolInput.question.trim()) {
-        return { output: '缺少 question 参数。', isError: true }
-      }
-      if (ctx.state.delegation_depth < 1) {
-        return { output: 'ask_delegation_question 只在委派子会话（子 agent）里可用。', isError: true }
-      }
-      const answer = await askDelegationQuestion(ctx, toolInput.question.trim())
-      return { output: `主 agent 回答：${answer}` }
-    },
-  }
-
-  const answer_delegation_question: AgentLoopTool = {
-    name: 'answer_delegation_question',
-    description:
-      '回答委派子 agent 冒泡的问题（子 agent 调 ask_delegation_question 挂起）。' +
-      '回答会回传给子 agent 的挂起点，子 agent 继续执行。用 get_delegation_results 查看哪些委派有 pending_question。',
-    input_schema: {
-      type: 'object',
-      properties: {
-        delegation_id: { type: 'string', description: '要回答的委派 ID' },
-        answer: { type: 'string', description: '给子 agent 的回答（决策/信息/授权）' },
-      },
-      required: ['delegation_id', 'answer'],
-    },
-    execute: async (toolInput, ctx) => {
-      const delegationId = String(toolInput.delegation_id ?? '')
-      const answer = String(toolInput.answer ?? '')
-      if (!delegationId.trim()) return { output: '缺少 delegation_id 参数。', isError: true }
-      if (!answer.trim()) return { output: '缺少 answer 参数。', isError: true }
-      const result = answerDelegationQuestion(ctx.sessionId, delegationId.trim(), answer.trim())
-      return { output: `已回答委派 ${result.delegation_id} 的问题。`, detail: { ...result } }
-    },
-  }
-
-  const continue_delegation: AgentLoopTool = {
-    name: 'continue_delegation',
-    description:
-      '让一个已终结（completed/failed/cancelled）的委派继续：用新任务指令重启同一子会话（同一 child session，JSONL 追加轮）。' +
-      '正在运行中的委派不能续跑（先 wait 或 stop）。适合「已拿到初稿 → 追加一轮修改/验证」。',
-    input_schema: {
-      type: 'object',
-      properties: {
-        delegation_id: { type: 'string', description: '要续跑的委派 ID（已终结）' },
-        task: { type: 'string', description: '追加给子 agent 的新任务指令（自包含，含上一轮结果引用）' },
-      },
-      required: ['delegation_id', 'task'],
-    },
-    execute: async (toolInput, ctx) => {
-      const delegationId = String(toolInput.delegation_id ?? '')
-      const task = String(toolInput.task ?? '')
-      if (!delegationId.trim()) return { output: '缺少 delegation_id 参数。', isError: true }
-      if (!task.trim()) return { output: '缺少 task 参数。', isError: true }
-      const result = continueDelegation(ctx, delegationId.trim(), task.trim())
-      return {
-        output: `已继续委派 ${result.delegation_id}（role=${result.role}，child_session=${result.child_session_id}，status=${result.status}）。用 wait_for_delegations 收集续跑结果。`,
-        detail: { ...result },
-      }
-    },
-  }
 
   /** W2（Phase 10，同步 Proma CompactContext）：显式压缩——模型完成大阶段后主动交接口收缩窗口。
  *  只置位请求标志（不直接动 messages——压缩必须在 loop 的安全点执行，与自动压缩同路径
@@ -1144,7 +747,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
 
   if (role === 'explore' || role === 'research') {
     // 只读角色：探索/调研不需要写文件或跑测试，但可查公网资料、可向主 agent 冒泡提问
-    return [read_file, list_files, find, grep, web_fetch, ask_delegation_question]
+    return [read_file, list_files, find, grep, buildWebFetch(), ...buildDelegationTools(role)]
   }
   // W2（Phase 10，显式压缩）：仅主 loop 注册（BLOMA_COMPACT_TOOL 缺省 off）
   const compactTools = compactToolEnabled() ? [compact_context] : []
@@ -1153,7 +756,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     // 审查角色（m-12）：话术承诺「不直接修改」，工具面同步收窄——去掉 write_file/
     // edit_file（物理只读与话术一致，防提示词层面被诱导后真的落盘）；可跑预览/测试/
     // 扫描验证怀疑点，但不改产物
-    return [read_file, list_files, find, grep, web_fetch, ask_delegation_question]
+    return [read_file, list_files, find, grep, buildWebFetch(), ...buildDelegationTools(role)]
   }
   if (role !== 'parent') {
     // 子 agent（implement/custom）：通用件+ask 冒泡；领域验证面由 buildDomainTools 拼接（PR4c）
@@ -1162,10 +765,10 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       list_files,
       find,
       grep,
-      web_fetch,
+      buildWebFetch(),
       write_file,
       edit_file,
-      ask_delegation_question,
+      ...buildDelegationTools(role),
     ]
   }
   return [
@@ -1173,49 +776,19 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     list_files,
     find,
     grep,
-    web_fetch,
+    buildWebFetch(),
     write_file,
     edit_file,
     ...compactTools,
-    delegate_agent,
-    web_research,
-    wait_for_delegations,
-    get_delegation_results,
-    stop_delegation,
-    stop_delegations,
-    answer_delegation_question,
-    continue_delegation,
+    ...buildDelegationTools('parent'),
+    buildWebResearch(projectId),
   ]
 }
 
-function normalizeDelegationRole(value: unknown): DelegationRole {
-  if (value === 'explore' || value === 'research' || value === 'implement' || value === 'review' || value === 'custom') {
-    return value
-  }
-  return 'custom'
-}
 
-function numberOr(value: unknown, fallback: number): number {
+export function numberOr(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
 
 /** 可选毫秒数：非有效数字返回 undefined（让 waitForDelegations 用内置缺省超时）。 */
-function optionalNumberOr(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function stringArrayOrUndefined(value: unknown): string[] | undefined {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : undefined
-}
-
 /** 委派摘要的可读列表（模型视角）：id / role / status，completed 附结果摘要前 200 字，失败附错误。 */
-function formatDelegationSummaries(summaries: DelegationSummary[]): string {
-  if (summaries.length === 0) return '（无委派记录）'
-  return summaries
-    .map((summary) => {
-      const result = summary.status === 'completed' && summary.result_summary ? `｜${summary.result_summary.slice(0, 200)}` : ''
-      const error = summary.error ? `｜${summary.error}` : ''
-      return `- ${summary.delegation_id} role=${summary.role} status=${summary.status}${result}${error}`
-    })
-    .join('\n')
-}
