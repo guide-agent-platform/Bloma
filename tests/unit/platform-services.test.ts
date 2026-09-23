@@ -6,18 +6,9 @@ import { join } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createProject } from '../../main/project/project-service'
-import {
-  MAX_SNAPSHOTS_PER_PROJECT,
-  SNAPSHOT_RECENT_KEEP,
-  clearSandboxRuntimeForTests,
-  createSnapshot,
-  enforceSnapshotCapacity,
-  runSandbox,
-  setSandboxRuntimeForTests,
-  setSnapshotCaptureProviderForTests,
-  stopSandbox,
-  trackAnalytics,
-} from '../../main/delivery/platform-services'
+import { clearSandboxRuntimeForTests, runSandbox, setSandboxRuntimeForTests, stopSandbox } from '../../main/delivery/sandbox'
+import { MAX_SNAPSHOTS_PER_PROJECT, SNAPSHOT_RECENT_KEEP, createSnapshot, enforceSnapshotCapacity, setSnapshotCaptureProviderForTests } from '../../main/delivery/snapshots'
+import { trackAnalytics } from '../../main/delivery/track-analytics'
 import { getAnalyticsPath, getSnapshotsDir } from '../../storage/config-paths'
 
 describe('PlatformServices sandbox runtime', () => {

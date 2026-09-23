@@ -8,7 +8,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runAgent, setAgentStreamPublisher, setSDKQueryForTests } from '../../main/orchestration/orchestrator'
 import { createProject, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../../main/project/project-service'
 import { getAgentSessionPath } from '../../storage/config-paths'
-import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests, setSnapshotCaptureProviderForTests } from '../../main/delivery/platform-services'
+import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/delivery/sandbox'
+import { setSnapshotCaptureProviderForTests } from '../../main/delivery/snapshots'
 import type { AgentEvent, SDKMessage, WorkflowStage } from '../../shared/types'
 
 vi.mock('../../main/platform/llm/channel-manager', async (importOriginal) => {

@@ -22,7 +22,7 @@ import { SessionMessageQueue, type QueueEntry } from '../platform/sessions/messa
 import { clearSteerQueue, rejectPendingSteer, steerConfirmEnabled, type SteerLedgerEntry } from '../agent/loop/steer-queue'
 import { emitAgentEvent } from '../platform/events/agent-event-bus'
 import { hydrateMessagesImageBlocks } from '../platform/shell/pasted-images'
-import { trackAnalytics } from '../delivery/platform-services'
+import { trackAnalytics } from '../delivery/track-analytics'
 export { buildSdkEnv } from '../platform/llm/channel-manager'
 import {
   extractErrorStatusCode,

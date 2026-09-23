@@ -6,14 +6,8 @@ import { join } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createProject, findProject } from '../../main/project/project-service'
-import {
-  clearSandboxRuntimeForTests,
-  createSnapshot,
-  listSnapshotDocuments,
-  readSnapshotDocument,
-  rollbackSnapshot,
-  setSandboxRuntimeForTests,
-} from '../../main/delivery/platform-services'
+import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/delivery/sandbox'
+import { createSnapshot, listSnapshotDocuments, readSnapshotDocument, rollbackSnapshot } from '../../main/delivery/snapshots'
 import { getDocumentsDir } from '../../storage/config-paths'
 
 const FROZEN_CONTENT = `# Decisions 版本一\n- [decision] 禁止联网\n`

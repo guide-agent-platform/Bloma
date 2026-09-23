@@ -56,7 +56,7 @@ vi.mock('../../main/platform/llm/runtime-fallback', () => ({
 import { handleGuideMessage, resolveRequirementConfirm } from '../../main/guide/guide-agent-service'
 import { recordDecision } from '../../main/project/decision-log'
 import { researchMarketSimilar } from '../../main/guide/guide-research'
-import { trackAnalytics } from '../../main/delivery/platform-services'
+import { trackAnalytics } from '../../main/delivery/track-analytics'
 import { markPrdUserConfirmed } from '../../main/project/document-engine'
 import { resolvePrdBackplane, runSketchTask } from '../../main/coding/programming-orchestrator'
 import {

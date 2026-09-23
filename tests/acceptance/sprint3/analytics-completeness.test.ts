@@ -8,11 +8,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createIpcHarness } from '../support/ipc-harness'
 import type { ApiResult, Project } from '../../../shared/types'
 import { clearPendingRequests, getPendingRequests, resolvePermission } from '../../../main/agent/permissions/permission-service'
-import {
-  clearSandboxRuntimeForTests,
-  setSandboxRuntimeForTests,
-  setSnapshotCaptureProviderForTests,
-} from '../../../main/delivery/platform-services'
+import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../../main/delivery/sandbox'
+import { setSnapshotCaptureProviderForTests } from '../../../main/delivery/snapshots'
 
 /**
  * Sprint 3 · T8 埋点重核

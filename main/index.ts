@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { registerIpcHandlers } from './ipc'
-import { setSnapshotCaptureProvider } from './delivery/platform-services'
+import { setSnapshotCaptureProvider } from './delivery/snapshots'
 import { reconcileInterruptedProjects } from './orchestration/recovery-service'
 import { migrateLegacySessionsIndexOnce } from './platform/sessions/session-service'
 import {

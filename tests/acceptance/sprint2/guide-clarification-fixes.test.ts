@@ -33,11 +33,8 @@ vi.mock('../../../main/guide/guide-research', () => ({
   })),
 }))
 import { createProject, findProject, readLastSketchRequirements } from '../../../main/project/project-service'
-import {
-  clearSandboxRuntimeForTests,
-  setSandboxRuntimeForTests,
-  setSnapshotCaptureProviderForTests,
-} from '../../../main/delivery/platform-services'
+import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../../main/delivery/sandbox'
+import { setSnapshotCaptureProviderForTests } from '../../../main/delivery/snapshots'
 import { makeChildProcess, useTemporaryPromaHome } from '../support/test-environment'
 import type { AgentEvent, SDKMessage } from '../../../shared/types'
 

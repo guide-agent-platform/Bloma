@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentEvent, AgentSendMessageInput, ResearchIdea } from '../../shared/types'
 import { recordDecision } from '../project/decision-log'
-import { trackAnalytics } from '../delivery/platform-services'
+import { trackAnalytics } from '../delivery/track-analytics'
 import { appendPrdRequirements, markPrdUserConfirmed, updatePrdAssertions } from '../project/document-engine'
 import { nextRequirementId, runSketchTask } from '../coding/programming-orchestrator'
 import { earsifyRequirements } from './requirement-earsifier'

@@ -6,13 +6,8 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createProject, findProject } from '../../main/project/project-service'
 import { recordSessionActivity } from '../../main/platform/sessions/session-service'
-import {
-  clearSandboxRuntimeForTests,
-  createSnapshot,
-  restoreSnapshotFiles,
-  rollbackCodeOnlyEnabled,
-  setSandboxRuntimeForTests,
-} from '../../main/delivery/platform-services'
+import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/delivery/sandbox'
+import { createSnapshot, restoreSnapshotFiles, rollbackCodeOnlyEnabled } from '../../main/delivery/snapshots'
 
 /**
  * Phase 10 W1-2（2026-09-16，咨询 G 收口）：回滚语义修复——代码与数据分离。

@@ -15,7 +15,7 @@ import {
 } from '../../main/agent/tools/agent-tools'
 import { createToolState, type AgentLoopTool, type ToolContext } from '../../main/agent/loop/agent-loop'
 import { createProject, findProject, recordSketchGenerated } from '../../main/project/project-service'
-import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/delivery/platform-services'
+import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/delivery/sandbox'
 import { writeRealScaffoldMarker } from '../../main/coding/preview-runtime'
 import { setBrowserGwtDisabledForTests } from '../../main/verification/gwt-runner'
 import { getDocumentsDir } from '../../storage/config-paths'

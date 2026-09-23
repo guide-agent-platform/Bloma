@@ -29,11 +29,8 @@ vi.mock('../../main/platform/llm/channel-manager', async (importOriginal) => {
 })
 import { createProject, findProject, readLastSketchRequirements } from '../../main/project/project-service'
 import { PRD_CONFIRM_OPTION_CONFIRM } from '../../main/guide/prd-confirm'
-import {
-  clearSandboxRuntimeForTests,
-  setSandboxRuntimeForTests,
-  setSnapshotCaptureProviderForTests,
-} from '../../main/delivery/platform-services'
+import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/delivery/sandbox'
+import { setSnapshotCaptureProviderForTests } from '../../main/delivery/snapshots'
 import type { AgentEvent, SDKMessage } from '../../shared/types'
 
 // timeout 30s：本文件用例含真实 IO（mkdtemp/createProject 写盘/runAgent 子流程），

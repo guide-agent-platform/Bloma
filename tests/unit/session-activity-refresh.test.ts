@@ -11,11 +11,8 @@ import {
   runSketchTask,
   setProgrammingEventPublisher,
 } from '../../main/coding/programming-orchestrator'
-import {
-  clearSandboxRuntimeForTests,
-  setSandboxRuntimeForTests,
-  setSnapshotCaptureProviderForTests,
-} from '../../main/delivery/platform-services'
+import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/delivery/sandbox'
+import { setSnapshotCaptureProviderForTests } from '../../main/delivery/snapshots'
 import { decryptApiKey, getFirstEnabledChannel } from '../../main/platform/llm/channel-manager'
 import { listSessions } from '../../main/platform/sessions/session-service'
 import type { SDKQuery } from '../../main/orchestration/orchestrator'

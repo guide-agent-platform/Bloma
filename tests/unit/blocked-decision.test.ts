@@ -17,11 +17,8 @@ import {
 import { createProject, findProject, recordSketchGenerated, updateProject } from '../../main/project/project-service'
 import { createChannel } from '../../main/platform/llm/channel-manager'
 import { setSafeStorageAdapter } from '../../main/platform/storage/safe-storage'
-import {
-  clearSandboxRuntimeForTests,
-  setSandboxRuntimeForTests,
-  setSnapshotCaptureProviderForTests,
-} from '../../main/delivery/platform-services'
+import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/delivery/sandbox'
+import { setSnapshotCaptureProviderForTests } from '../../main/delivery/snapshots'
 import { setBrowserGwtDisabledForTests } from '../../main/verification/gwt-runner'
 import type { SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 import type { AgentEvent, MessageContentBlock, SDKMessage } from '../../shared/types'

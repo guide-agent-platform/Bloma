@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { registerIpcHandlers } from '../../../main/ipc'
-import { clearSandboxRuntimeForTests, stopSandbox } from '../../../main/delivery/platform-services'
+import { clearSandboxRuntimeForTests, stopSandbox } from '../../../main/delivery/sandbox'
 import { updateProject } from '../../../main/project/project-service'
 import { IPC_CHANNELS, type AgentEvent, type ApiResult, type Project } from '../../../shared/types'
 

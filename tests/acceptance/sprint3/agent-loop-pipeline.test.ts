@@ -12,7 +12,7 @@ import { createProject, findProject, recordSketchGenerated } from '../../../main
 import { syncDocuments } from '../../../main/project/document-engine'
 import { createChannel } from '../../../main/platform/llm/channel-manager'
 import { setSafeStorageAdapter } from '../../../main/platform/storage/safe-storage'
-import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../../main/delivery/platform-services'
+import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../../main/delivery/sandbox'
 import { setBrowserGwtDisabledForTests } from '../../../main/verification/gwt-runner'
 import { getAnalyticsPath, getAgentSessionPath, getDocumentsDir } from '../../../storage/config-paths'
 import { listDelegations } from '../../../main/agent/delegation/agent-collaboration'

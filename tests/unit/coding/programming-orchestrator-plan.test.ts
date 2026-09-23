@@ -8,7 +8,7 @@ import { runMvpTask, setProgrammingEventPublisher } from '../../../main/coding/p
 import { createProject, recordSketchGenerated } from '../../../main/project/project-service'
 import { createChannel } from '../../../main/platform/llm/channel-manager'
 import { setSafeStorageAdapter } from '../../../main/platform/storage/safe-storage'
-import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../../main/delivery/platform-services'
+import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../../main/delivery/sandbox'
 import { getAgentSessionPath, getDocumentsDir } from '../../../storage/config-paths'
 import { renderPlanInjection, type LoopPlan } from '../../../main/agent/loop/loop-planner'
 import type { SDKQuery, SDKQueryOptions } from '../../../main/orchestration/orchestrator'

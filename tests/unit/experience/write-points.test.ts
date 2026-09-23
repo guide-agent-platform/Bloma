@@ -10,7 +10,7 @@ import { createProject, updateProject, recordSketchGenerated, findProject } from
 import { syncDocuments } from '../../../main/project/document-engine'
 import { setSafeStorageAdapter } from '../../../main/platform/storage/safe-storage'
 import { createChannel } from '../../../main/platform/llm/channel-manager'
-import { setSandboxRuntimeForTests, clearSandboxRuntimeForTests } from '../../../main/delivery/platform-services'
+import { setSandboxRuntimeForTests, clearSandboxRuntimeForTests } from '../../../main/delivery/sandbox'
 
 /**
  * F 系列 W2.1（2026-09-16 Phase 10 承接）：写点集成改事件行断言——

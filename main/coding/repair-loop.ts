@@ -27,7 +27,7 @@ import { runAgentLoop, loopCheckpointEnabled, type AgentLoopResult, type LoopChe
 import { buildAgentTools } from '../agent/tools/agent-tools'
 import { categoryTemperature, resolveGenerationMaxTokens } from '../platform/llm/model-resolution'
 import { resolveChannelEnv } from '../platform/llm/runtime-fallback'
-import { trackAnalytics } from '../delivery/platform-services'
+import { trackAnalytics } from '../delivery/track-analytics'
 import { appendProjectLearning } from '../project/learnings-log'
 import { readLoopCheckpointDocument, writeLoopCheckpointDocument, type LoopRepairAttemptRecord, readPrdBackplane } from '../project/document-engine'
 import { readTestReport } from '../verification/gwt-service'

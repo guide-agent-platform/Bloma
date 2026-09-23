@@ -110,7 +110,7 @@ const WHITELIST = new Set<string>([
   'R1|main/agent/tools -> main/coding/dist-rebuild',
   'R1|main/agent/tools -> main/coding/preview-browser',
   'R1|main/agent/tools -> main/coding/preview-runtime',
-  'R1|main/agent/tools -> main/delivery/platform-services',
+  'R1|main/agent/tools -> main/delivery/sandbox',
   'R1|main/agent/tools -> main/project/document-engine',
   'R1|main/agent/tools -> main/project/project-map',
   'R1|main/agent/tools -> main/project/project-service',

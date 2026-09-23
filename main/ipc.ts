@@ -100,17 +100,9 @@ import {
 import { listPromptSlots, readPromptSlot, resetPromptSlot, savePromptSlot } from './agent/prompting/prompt-service'
 import { listDocuments, readDocument, syncDocuments, isPrdUserConfirmed } from './project/document-engine'
 import { isCircuitBreakSettled, convergeStageFromEvidence, evaluateDiskArtifact } from './orchestration/recovery-service'
-import {
-  createSnapshot,
-  listSnapshotDocuments,
-  listSnapshots,
-  loadSnapshotScreenshot,
-  readSnapshotDocument,
-  rollbackSnapshot,
-  runSandbox,
-  stopSandbox,
-  trackAnalytics,
-} from './delivery/platform-services'
+import { runSandbox, stopSandbox } from './delivery/sandbox'
+import { createSnapshot, listSnapshotDocuments, listSnapshots, loadSnapshotScreenshot, readSnapshotDocument, rollbackSnapshot } from './delivery/snapshots'
+import { trackAnalytics } from './delivery/track-analytics'
 import { hasRequestId, isRecord, requireValue } from '../shared/validators'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'

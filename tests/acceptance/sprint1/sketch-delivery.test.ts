@@ -1,14 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  clearSandboxRuntimeForTests,
-  createSnapshot,
-  runSandbox,
-  setSandboxRuntimeForTests,
-  setSnapshotCaptureProviderForTests,
-  stopSandbox,
-} from '../../../main/delivery/platform-services'
+import { clearSandboxRuntimeForTests, runSandbox, setSandboxRuntimeForTests, stopSandbox } from '../../../main/delivery/sandbox'
+import { createSnapshot, setSnapshotCaptureProviderForTests } from '../../../main/delivery/snapshots'
 import { runAgent, setAgentStreamPublisher } from '../../../main/orchestration/orchestrator'
 import { createProject } from '../../../main/project/project-service'
 import { generateSketch } from '../../../main/coding/sketch-engine'

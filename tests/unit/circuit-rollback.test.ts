@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { circuitBreakRollback } from '../../main/orchestration/recovery-service'
 import { createProject, findProject, updateProject } from '../../main/project/project-service'
 import { recordSessionActivity } from '../../main/platform/sessions/session-service'
-import { clearSandboxRuntimeForTests, createSnapshot, setSandboxRuntimeForTests } from '../../main/delivery/platform-services'
+import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/delivery/sandbox'
+import { createSnapshot } from '../../main/delivery/snapshots'
 import { getAgentSessionPath, getDocumentsDir, getSnapshotsDir } from '../../storage/config-paths'
 
 /**

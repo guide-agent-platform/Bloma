@@ -7,11 +7,8 @@ import type { ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createProject, findProject } from '../../main/project/project-service'
 import { runSketchTask, setProgrammingEventPublisher } from '../../main/coding/programming-orchestrator'
-import {
-  clearSandboxRuntimeForTests,
-  setSandboxRuntimeForTests,
-  setSnapshotCaptureProviderForTests,
-} from '../../main/delivery/platform-services'
+import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/delivery/sandbox'
+import { setSnapshotCaptureProviderForTests } from '../../main/delivery/snapshots'
 import type { SDKQuery } from '../../main/orchestration/orchestrator'
 import type { SDKMessage } from '../../shared/types'
 

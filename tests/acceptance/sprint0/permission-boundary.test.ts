@@ -18,11 +18,8 @@ import {
 } from '../../../main/agent/permissions/permission-service'
 import { runSketchTask, setProgrammingEventPublisher } from '../../../main/coding/programming-orchestrator'
 import { createProject } from '../../../main/project/project-service'
-import {
-  clearSandboxRuntimeForTests,
-  setSandboxRuntimeForTests,
-  setSnapshotCaptureProviderForTests,
-} from '../../../main/delivery/platform-services'
+import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../../main/delivery/sandbox'
+import { setSnapshotCaptureProviderForTests } from '../../../main/delivery/snapshots'
 
 describe('Sprint 0 permission boundary acceptance', () => {
   afterEach(() => {

@@ -7,13 +7,9 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createProject, findProject } from '../../main/project/project-service'
 import { recordSessionActivity } from '../../main/platform/sessions/session-service'
-import {
-  clearSandboxRuntimeForTests,
-  createSnapshot,
-  restoreSnapshotFiles,
-  setSandboxRuntimeForTests,
-  SNAPSHOT_PRESERVED_TOPLEVEL,
-} from '../../main/delivery/platform-services'
+import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/delivery/sandbox'
+import { createSnapshot, restoreSnapshotFiles } from '../../main/delivery/snapshots'
+import { SNAPSHOT_PRESERVED_TOPLEVEL } from '../../main/delivery/snapshots' /* PR3a-UNKNOWN 需人工确认 */
 import {
   commitProjectState,
   ensureProjectRepo,
