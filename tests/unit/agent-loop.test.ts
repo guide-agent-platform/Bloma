@@ -96,6 +96,7 @@ describe('runAgentLoop（PR2 L1）', () => {
     const home = mkdtempSync(join(tmpdir(), 'bloma-loop-'))
     process.env.PROMA_HOME = home
   })
+
   afterEach(() => {
     process.env.PROMA_HOME = originalPromaHome
   })
@@ -340,6 +341,8 @@ describe('runAgentLoop（PR2 L1）', () => {
   })
 
   it('F4：长 loop 最后一次模型调用 messages 有界，JSONL 仍全量', async () => {
+    // 09-16 缺省已翻全量历史；本用例显式回滑窗验证 F4 窗口语义
+    process.env.BLOMA_LOOP_WINDOW_OFF = '0'
     const echo = tool('echo', () => ({ output: 'ok' }))
     const script = Array.from({ length: 12 }, (_, i) => [toolUseMessage(`t${i}`, 'echo')])
     const { query, receivedMessages } = scriptedQuery(script)

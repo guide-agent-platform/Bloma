@@ -119,11 +119,22 @@ describe('经验库 e2e（真浏览器/真 fs/真 HTTP 预览）', () => {
   it('③ 裁判直连路：真实 judge-semantic 组装的 prompt 含 verified 卡【常见错法】段（假 query 捕获）', async () => {
     process.env.BLOMA_EXPERIENCE = '1'
     const projectId = setupProject()
+    // W2 拍板（D2）：裁判【常见错法】只消费 v2 rule 卡（无 verified 规则卡时恒空）——
+    // 原用例注册 anti_pattern 卡期待注入已过时，改注册万能 rule 卡（applies_when 空=全场景）
     const c = await tryRegisterCard({
-      kind: 'anti_pattern',
-      tag: 'coding/gwt/judge_e2e',
-      body: gwtBody('GWT 场景「F-001 输入关键词过滤列表内容」未通过：capture-input 未命中'),
-      source: { type: 'gwt_failure', project_hash: 'p1', timestamp: Date.now() },
+      kind: 'rule',
+      tag: 'rule/gwt/judge_e2e',
+      body: {
+        rule_kind: 'execution_rule',
+        applies_when: {},
+        failure_mode: 'GWT 场景「F-001 输入关键词过滤列表内容」未通过：capture-input 未命中',
+        recommended_actions: ['修复过滤逻辑后重跑 run_gwt_tests'],
+        verification: { check: 'run_gwt_tests 全绿' },
+        causal_status: 'hypothesis',
+        evidence_refs: ['e2e-③'],
+        rev: 1,
+      },
+      source: { type: 'backfill', project_hash: 'p1', timestamp: Date.now() },
     })
     await (await import('../../main/experience/experience-service')).promoteToVerified(c!.id, 'replay_green')
     const { runSemanticJudgeReview } = await import('../../main/review/judge-semantic')
@@ -145,7 +156,7 @@ describe('经验库 e2e（真浏览器/真 fs/真 HTTP 预览）', () => {
     const joined = prompts.join('\n')
     if (joined) {
       expect(joined).toContain('【常见错法】')
-      expect(joined).toContain('coding/gwt/judge_e2e')
+      expect(joined).toContain('rule/gwt/judge_e2e')
     } else {
       // skipped（无渠道降级）也必须已构造过 errorSection——走直连前计算；此处断言降级无害
       expect(result.skipReason).toBeTruthy()

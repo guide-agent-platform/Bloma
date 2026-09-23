@@ -6,6 +6,7 @@ import type { SDKMessage } from '../../shared/types'
 import type { SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 import { createToolState, type AgentLoopTool, type ToolContext } from '../../main/agent/loop/agent-loop'
 import { buildAgentTools, setWebResearchTimeoutForTests, WEB_RESEARCH_TIMEOUT_MS } from '../../main/agent/tools/agent-tools'
+import { buildDomainTools } from '../../main/coding/tool-handlers'
 import {
   MAX_RUNNING_DELEGATIONS_PER_PARENT,
   answerDelegationQuestion,
@@ -237,33 +238,37 @@ describe('委派协作 M1', () => {
   })
 
   it('role 裁剪：explore/research 只读+ask；implement 全量+ask；review 无写工具+ask（m-12：话术「不直接修改」与工具面一致）；parent 含全部委派工具', () => {
-    const readOnly = ['read_file', 'list_files', 'grep', 'web_fetch', 'ask_delegation_question']
-    expect(buildAgentTools({ projectId: 'p', role: 'explore' }).map((tool) => tool.name)).toEqual(readOnly)
-    expect(buildAgentTools({ projectId: 'p', role: 'research' }).map((tool) => tool.name)).toEqual(readOnly)
+    // PR4c/d 口径：生产装配=buildAgentTools（通用件）+buildDomainTools（领域验证面）两拼；
+    // W3 后只读五件套含 find；09-16 前旧断言面（无 find、单 builder）已过时。
+    const surface = (role?: 'explore' | 'research' | 'implement' | 'review') =>
+      [...buildAgentTools({ projectId: 'p', ...(role ? { role } : {}) }), ...buildDomainTools({ projectId: 'p', ...(role ? { role } : {}) })].map((tool) => tool.name)
+    const readOnly = ['read_file', 'list_files', 'find', 'grep', 'web_fetch', 'ask_delegation_question']
+    expect(surface('explore')).toEqual(readOnly)
+    expect(surface('research')).toEqual(readOnly)
 
-    const full = ['read_file', 'list_files', 'grep', 'web_fetch', 'write_file', 'edit_file', 'run_preview', 'run_gwt_tests', 'run_security_scan']
-    const implementTools = [...full, 'ask_delegation_question']
-    expect(buildAgentTools({ projectId: 'p', role: 'implement' }).map((tool) => tool.name)).toEqual(implementTools)
+    const genericFull = ['read_file', 'list_files', 'find', 'grep', 'web_fetch', 'write_file', 'edit_file']
+    const domainVerify = ['run_preview', 'run_gwt_tests', 'run_security_scan']
+    expect(surface('implement')).toEqual([...genericFull, 'ask_delegation_question', ...domainVerify])
     // review：可验证（预览/测试/扫描）但不可写（无 write_file/edit_file）
-    const reviewTools = ['read_file', 'list_files', 'grep', 'web_fetch', 'run_preview', 'run_gwt_tests', 'run_security_scan', 'ask_delegation_question']
-    expect(buildAgentTools({ projectId: 'p', role: 'review' }).map((tool) => tool.name)).toEqual(reviewTools)
+    expect(surface('review')).toEqual(['read_file', 'list_files', 'find', 'grep', 'web_fetch', 'ask_delegation_question', ...domainVerify])
 
-    const parentTools = buildAgentTools({ projectId: 'p' }).map((tool) => tool.name)
+    const parentTools = surface()
     expect(parentTools).toEqual([
-      ...full,
+      ...genericFull,
       'delegate_agent',
-      'web_research',
       'wait_for_delegations',
       'get_delegation_results',
       'stop_delegation',
       'stop_delegations',
       'answer_delegation_question',
       'continue_delegation',
+      'web_research',
+      ...domainVerify,
     ])
     // 子 agent 无委派/代答/续跑工具（深度限制双保险）；parent 无 ask（父不是子会话）
-    expect(implementTools).not.toContain('delegate_agent')
-    expect(implementTools).not.toContain('answer_delegation_question')
-    expect(implementTools).not.toContain('continue_delegation')
+    expect(surface('implement')).not.toContain('delegate_agent')
+    expect(surface('implement')).not.toContain('answer_delegation_question')
+    expect(surface('implement')).not.toContain('continue_delegation')
     expect(parentTools).not.toContain('ask_delegation_question')
   })
 
@@ -377,10 +382,13 @@ describe('M2 委派工具（agent-tools 接线，委派协作嫁接方案 §4.2�
   })
 
   it('role 裁剪：parent 含全部委派工具；implement 子 agent 只含 ask 不含委派/代答/续跑', () => {
-    const full = ['read_file', 'list_files', 'grep', 'web_fetch', 'write_file', 'edit_file', 'run_preview', 'run_gwt_tests', 'run_security_scan']
+    // PR4c/d 口径：两拼装配（通用件+领域面）；W3 后含 find
+    const surface = (role?: 'implement') =>
+      [...buildAgentTools({ projectId: 'p', ...(role ? { role } : {}) }), ...buildDomainTools({ projectId: 'p', ...(role ? { role } : {}) })].map((tool) => tool.name)
+    const genericFull = ['read_file', 'list_files', 'find', 'grep', 'web_fetch', 'write_file', 'edit_file']
+    const domainVerify = ['run_preview', 'run_gwt_tests', 'run_security_scan']
     const delegationTools = [
       'delegate_agent',
-      'web_research',
       'wait_for_delegations',
       'get_delegation_results',
       'stop_delegation',
@@ -388,11 +396,11 @@ describe('M2 委派工具（agent-tools 接线，委派协作嫁接方案 §4.2�
       'answer_delegation_question',
       'continue_delegation',
     ]
-    expect(buildAgentTools({ projectId: 'p' }).map((tool) => tool.name)).toEqual([...full, ...delegationTools])
+    expect(surface()).toEqual([...genericFull, ...delegationTools, 'web_research', ...domainVerify])
 
-    const implementNames = buildAgentTools({ projectId: 'p', role: 'implement' }).map((tool) => tool.name)
-    expect(implementNames).toEqual([...full, 'ask_delegation_question'])
-    for (const name of delegationTools) expect(implementNames).not.toContain(name)
+    const implementNames = surface('implement')
+    expect(implementNames).toEqual([...genericFull, 'ask_delegation_question', ...domainVerify])
+    for (const name of [...delegationTools, 'web_research']) expect(implementNames).not.toContain(name)
     expect(implementNames).toContain('ask_delegation_question')
   })
 })
