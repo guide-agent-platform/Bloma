@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { getDocumentsDir } from '../../storage/config-paths'
-import { createProject, updateProject } from '../../main/project-service'
-import { exportProjectHandoff } from '../../main/project-export'
+import { createProject, updateProject } from '../../main/project/project-service'
+import { exportProjectHandoff } from '../../main/delivery/project-export'
 
 /**
  * PR-3 导出移交增强（2026-09-03）：排除非产物目录、README.md（prd.json 驱动）与

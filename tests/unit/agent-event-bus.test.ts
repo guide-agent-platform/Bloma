@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AgentEvent } from '../../shared/types'
-import { emitAgentEvent, onAgentEvent, resetAgentEventBusForTests } from '../../main/agent-event-bus'
-import { cancelAgent, setAgentStreamPublisher } from '../../main/orchestrator'
+import { emitAgentEvent, onAgentEvent, resetAgentEventBusForTests } from '../../main/platform/events/agent-event-bus'
+import { cancelAgent, setAgentStreamPublisher } from '../../main/orchestration/orchestrator'
 import { setProgrammingEventPublisher } from '../../main/coding/programming-orchestrator'
 
 /**

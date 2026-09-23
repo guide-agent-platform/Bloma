@@ -4,15 +4,15 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFil
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createProject, findProject } from '../../main/project-service'
-import { recordSessionActivity } from '../../main/session-service'
+import { createProject, findProject } from '../../main/project/project-service'
+import { recordSessionActivity } from '../../main/platform/sessions/session-service'
 import {
   clearSandboxRuntimeForTests,
   createSnapshot,
   restoreSnapshotFiles,
   rollbackCodeOnlyEnabled,
   setSandboxRuntimeForTests,
-} from '../../main/platform-services'
+} from '../../main/delivery/platform-services'
 
 /**
  * Phase 10 W1-2（2026-09-16，咨询 G 收口）：回滚语义修复——代码与数据分离。

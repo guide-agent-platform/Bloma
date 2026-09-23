@@ -21,7 +21,9 @@ import { afterAll, describe, expect, it } from 'vitest'
 
 const REPO_ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)))
 const MAIN_ENTRY = join(REPO_ROOT, 'main', 'index.ts')
-const TARGET_MODULE = 'main/memory-distiller'
+// PR2 归位后蒸馏层新路径（原 main/memory-distiller.ts → main/agent/loop/memory-distiller.ts）。
+// 旧路径已不存在，若不改判据门禁会恒绿变假门禁（模块被删层视为通过的本意是“真删了才通过”）。
+const TARGET_MODULE = 'main/agent/loop/memory-distiller'
 
 const FROM_RE = /(?:^|\n)\s*(?:import|export)[\s\S]{0,400}?from\s*['"]([^'"]+)['"]/g
 const SIDE_EFFECT_IMPORT_RE = /(?:^|\n)\s*import\s*['"]([^'"]+)['"]/g
@@ -105,10 +107,11 @@ describe('memory-reachability（记忆栈可达性门禁）', () => {
     expect(findDynamicReferences(REPO_ROOT, reachable, 'memory-distiller')).toEqual([])
   })
 
-  it('可达集覆盖 export * 过渡桩（样例：经桩到达真实实现）', () => {
+  it('可达集覆盖跨层真实实现（样例：agent-loop，PR2 归位后位于 main/agent/loop/）', () => {
     const reachable = collectReachableModules(MAIN_ENTRY, REPO_ROOT)
-    // main/*.ts 平铺桩 `export * from './coding/...'`：真实实现必须可达，证明解析规则生效
-    expect([...reachable].some((rel) => rel === 'main/coding/agent-loop.ts')).toBe(true)
+    // 旧版验证 export * 过渡桩可达（PR1 已删桩）；本版改为验证迁移后真实实现仍从入口可达，
+    // 证明解析规则对子目录层级生效
+    expect([...reachable].some((rel) => rel === 'main/agent/loop/agent-loop.ts')).toBe(true)
   })
 
   it('自证（变异）：夹具链 index → a → memory-distiller 必须被判为可达', () => {

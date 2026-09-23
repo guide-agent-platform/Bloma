@@ -19,7 +19,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { ledgerPath, promaHome, sha256, upsertCard } from './lib/experience-ledger.mjs'
+import { ledgerPath, promaHome, sha256, upsertCard } from './lib/experience-ledger'
 
 /** types.ts 经 esbuild 现场打包复用（与 backfill 同法，零实现漂移）。 */
 async function loadTypes(repoRoot) {

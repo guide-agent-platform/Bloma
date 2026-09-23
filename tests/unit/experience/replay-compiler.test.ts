@@ -17,7 +17,7 @@ import {
   reportReplayOutcomes,
 } from '../../../main/experience/experience-service'
 import type { AntiPatternBody, ExperienceCard } from '../../../main/experience/types'
-import type { GwtTestResult } from '../../../main/gwt-service'
+import type { GwtTestResult } from '../../../main/verification/gwt-service'
 
 /**
  * T-5 错误重放断言：verified/达阈 anti_pattern 编译为 R-{fp8} 建议性场景——
@@ -145,7 +145,7 @@ describe('replay-compiler：回流状态机 + feature 双目录', () => {
 
   it('feature 文件：verified 进 features/、其余可编译 candidate 进 features-candidates/（业务清单不受影响）', async () => {
     const { getDocumentsDir } = await import('../../../storage/config-paths')
-    const { createProject } = await import('../../../main/project-service')
+    const { createProject } = await import('../../../main/project/project-service')
     const project = createProject({ request_id: 'req-replay', mode: 'quick' })
     const v = await seedCard('coding/gwt/f1', 'GWT 场景「F-001 当提交时，应保存记录」未通过：x')
     await promoteToVerified(v!.id, 'replay_green')
@@ -163,13 +163,13 @@ describe('replay-compiler：回流状态机 + feature 双目录', () => {
 
 describe('runGwtScenarios advisory 包裹（静态路集成，变异门：摘除包裹必红）', () => {
   it('执行结果不含 R- 条目（failure_summary/unverified 均已剥离业务口径）', async () => {
-    const { createProject, recordSketchGenerated } = await import('../../../main/project-service')
+    const { createProject, recordSketchGenerated } = await import('../../../main/project/project-service')
     const project = createProject({ request_id: 'req-adv', mode: 'quick' })
     recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入' }])
     const c = await seedCard('coding/gwt/adv', 'GWT 场景「F-001 当点击删除时，应出现确认弹窗」未通过：无确认')
     await promoteToVerified(c!.id, 'replay_green')
-    const { runGwtScenarios } = await import('../../../main/gwt-service')
-    const { setBrowserGwtDisabledForTests } = await import('../../../main/gwt-runner')
+    const { runGwtScenarios } = await import('../../../main/verification/gwt-service')
+    const { setBrowserGwtDisabledForTests } = await import('../../../main/verification/gwt-runner')
     setBrowserGwtDisabledForTests(true)
     try {
       const result = await runGwtScenarios({ project_id: project.project_id, session_id: 's-adv' })

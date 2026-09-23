@@ -9,7 +9,7 @@ import {
   loadRevocationIndex,
   revocationBlocksLayer,
   revokeMemoryText,
-} from '../../main/memory-revocation'
+} from '../../main/agent/loop/memory-revocation'
 
 /** 测试用：与 fingerprintMemoryText 同口径（避免为造超限名单重复实现）。 */
 const fingerprinMemoryTextForTest = (text: string): string => fingerprintMemoryText(text)

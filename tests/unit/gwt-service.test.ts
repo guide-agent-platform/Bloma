@@ -7,9 +7,9 @@ import { join } from 'node:path'
 import { dirname } from 'node:path'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { afterEach, describe, expect, it } from 'vitest'
-import { readTestReport, runGwtScenarios, writeTestReport } from '../../main/gwt-service'
-import { setBrowserGwtDisabledForTests } from '../../main/gwt-runner'
-import { createProject, recordSketchGenerated } from '../../main/project-service'
+import { readTestReport, runGwtScenarios, writeTestReport } from '../../main/verification/gwt-service'
+import { setBrowserGwtDisabledForTests } from '../../main/verification/gwt-runner'
+import { createProject, recordSketchGenerated } from '../../main/project/project-service'
 import { getAnalyticsPath, getDocumentsDir } from '../../storage/config-paths'
 
 describe('GWT service (A2-07)', () => {

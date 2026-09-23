@@ -34,12 +34,12 @@ vi.mock('../../main/coding/programming-orchestrator', () => ({
   }),
   refineModificationDescription: vi.fn((text: string) => text.trim()),
 }))
-vi.mock('../../main/platform-services', () => ({ trackAnalytics: vi.fn() }))
-vi.mock('../../main/document-engine', () => ({
+vi.mock('../../main/delivery/platform-services', () => ({ trackAnalytics: vi.fn() }))
+vi.mock('../../main/project/document-engine', () => ({
   syncDocuments: vi.fn(() => ({ documents: [], stale_documents: [] })),
   markPrdUserConfirmed: vi.fn(() => ({ project_id: 'proj-1', user_confirmed_at: '2026-08-26T00:00:00.000Z' })),
 }))
-vi.mock('../../main/project-service', () => ({
+vi.mock('../../main/project/project-service', () => ({
   findProject: vi.fn(() => ({
     project_id: 'proj-1',
     workspace_slug: 'default-software-builder',
@@ -51,8 +51,8 @@ vi.mock('../../main/project-service', () => ({
   })),
   updateProject: vi.fn(),
 }))
-vi.mock('../../main/session-service', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/session-service')>()
+vi.mock('../../main/platform/sessions/session-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/platform/sessions/session-service')>()
   return { ...actual, readPrimaryIntent: vi.fn((): string | undefined => undefined) }
 })
 // decision-log 刻意不 mock：轮次守卫/孤儿检测依赖真实会话 JSONL 决策行
@@ -60,16 +60,16 @@ vi.mock('../../main/guide/guide-research', () => ({
   normalizeResearchQuery: (q: string) => q,
   researchMarketSimilar: vi.fn(async (queries: string[]) => ({ available: false, queries, results: [], summary: '' })),
 }))
-vi.mock('../../main/runtime-fallback', () => ({
+vi.mock('../../main/platform/llm/runtime-fallback', () => ({
   resolveChannelEnv: vi.fn(() => ({ env: undefined, channel: undefined })),
 }))
 
 import { handleGuideMessage, resolveRequirementConfirm } from '../../main/guide/guide-agent-service'
 import { resolvePrdBackplane } from '../../main/coding/programming-orchestrator'
-import { syncDocuments } from '../../main/document-engine'
+import { syncDocuments } from '../../main/project/document-engine'
 import { hasPendingEnrichmentClarification, takePendingEnrichmentClarification, type EnrichmentClarificationRequest } from '../../main/guide/clarification'
 import { getAgentSessionPath } from '../../storage/config-paths'
-import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../main/orchestrator'
+import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../main/orchestration/orchestrator'
 
 const SESSION_ID = 'sess-clar-loop'
 

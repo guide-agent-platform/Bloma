@@ -5,13 +5,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runMvpTask, setProgrammingEventPublisher } from '../../../main/coding/programming-orchestrator'
-import { createProject, recordSketchGenerated } from '../../../main/project-service'
-import { createChannel } from '../../../main/channel-manager'
-import { setSafeStorageAdapter } from '../../../main/safe-storage'
-import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../../main/platform-services'
+import { createProject, recordSketchGenerated } from '../../../main/project/project-service'
+import { createChannel } from '../../../main/platform/llm/channel-manager'
+import { setSafeStorageAdapter } from '../../../main/platform/storage/safe-storage'
+import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../../main/delivery/platform-services'
 import { getAgentSessionPath, getDocumentsDir } from '../../../storage/config-paths'
-import { renderPlanInjection, type LoopPlan } from '../../../main/coding/loop-planner'
-import type { SDKQuery, SDKQueryOptions } from '../../../main/orchestrator'
+import { renderPlanInjection, type LoopPlan } from '../../../main/agent/loop/loop-planner'
+import type { SDKQuery, SDKQueryOptions } from '../../../main/orchestration/orchestrator'
 
 /**
  * P3 任务级三文档契约 · PR-A 接线（runMvpViaAgentLoop plan 腿）。
@@ -32,20 +32,20 @@ const mocks = vi.hoisted(() => ({
   generateLoopPlan: vi.fn(),
 }))
 
-vi.mock('../../../main/coding/agent-loop', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/coding/agent-loop')>()
+vi.mock('../../../main/agent/loop/agent-loop', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/agent/loop/agent-loop')>()
   return { ...actual, runAgentLoop: mocks.runAgentLoop }
 })
 
 // 编排器经 main/agent-loop.ts 原位桩 re-export 导入（R4 迁移手法），桩路径与真实路径
 // 需分别登记同一 mock（delegation-failure 同款）；两个登记指向同一个 mock fn。
-vi.mock('../../../main/coding/agent-loop', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/coding/agent-loop')>()
+vi.mock('../../../main/agent/loop/agent-loop', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/agent/loop/agent-loop')>()
   return { ...actual, runAgentLoop: mocks.runAgentLoop }
 })
 
-vi.mock('../../../main/coding/loop-planner', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/coding/loop-planner')>()
+vi.mock('../../../main/agent/loop/loop-planner', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/agent/loop/loop-planner')>()
   return { ...actual, generateLoopPlan: mocks.generateLoopPlan }
 })
 

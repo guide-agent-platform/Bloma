@@ -8,10 +8,10 @@ import {
   isMemoryDistillEnabled,
   readProjectMemory,
   setMemoryDistillEnabledForTests,
-} from '../../main/memory-distiller'
-import { createChannel } from '../../main/channel-manager'
-import { setSafeStorageAdapter } from '../../main/safe-storage'
-import { createProject, findProject } from '../../main/project-service'
+} from '../../main/agent/loop/memory-distiller'
+import { createChannel } from '../../main/platform/llm/channel-manager'
+import { setSafeStorageAdapter } from '../../main/platform/storage/safe-storage'
+import { createProject, findProject } from '../../main/project/project-service'
 import { getAgentSessionPath, getDocumentsDir } from '../../storage/config-paths'
 import type { SDKMessage } from '../../shared/types'
 
@@ -255,7 +255,7 @@ describe('T4-L3 蒸馏层 · 单一事实源仲裁（验收③）', () => {
     // 背板已承载：约束「不含登录」+ 功能项「记账本」——蒸馏产物重复收录这些即第二份事实源
     const { captureConstraints } = await import('../../main/guide/constraint-extractor')
     captureConstraints({ project_id: project.project_id, session_id: 'session-dup', constraints: ['不含登录'], source: 'guide_gate' })
-    const { readLastSketchRequirements, recordSketchGenerated } = await import('../../main/project-service')
+    const { readLastSketchRequirements, recordSketchGenerated } = await import('../../main/project/project-service')
     recordSketchGenerated(project.project_id, [
       { id: 'F-001', description: '记账本' },
       { id: 'F-002', description: '导出记录' },

@@ -18,8 +18,8 @@
  * - LLM 输出永不判败、永不自动改代码；只作为证据（报告 + 摘要 + 结构化问题）交给裁判与修复者；
  * - 基础设施失败（无渠道/超时/HTTP 错）→ status='unavailable'，调用方必须落到决策日志与裁判可见处（F9a 不静默）。
  */
-import { listEnabledRawChannels, decryptApiKey } from '../channel-manager'
-import { writeVisionAuditDocument, writeVisionProblemsDocument } from '../document-engine'
+import { listEnabledRawChannels, decryptApiKey } from '../platform/llm/channel-manager'
+import { writeVisionAuditDocument, writeVisionProblemsDocument } from '../project/document-engine'
 import { chromium } from 'playwright'
 
 /** 显式覆盖（空 = 走角色偏好链）。 */

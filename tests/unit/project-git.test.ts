@@ -5,15 +5,15 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFil
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createProject, findProject } from '../../main/project-service'
-import { recordSessionActivity } from '../../main/session-service'
+import { createProject, findProject } from '../../main/project/project-service'
+import { recordSessionActivity } from '../../main/platform/sessions/session-service'
 import {
   clearSandboxRuntimeForTests,
   createSnapshot,
   restoreSnapshotFiles,
   setSandboxRuntimeForTests,
   SNAPSHOT_PRESERVED_TOPLEVEL,
-} from '../../main/platform-services'
+} from '../../main/delivery/platform-services'
 import {
   commitProjectState,
   ensureProjectRepo,

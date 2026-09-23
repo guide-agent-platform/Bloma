@@ -17,8 +17,8 @@
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { recordDecision } from '../decision-log'
-import type { ProjectSkeleton } from '../project-templates'
+import { recordDecision } from '../project/decision-log'
+import type { ProjectSkeleton } from '../project/project-templates'
 
 export type BuildGateStatus = 'passed' | 'failed' | 'skipped'
 

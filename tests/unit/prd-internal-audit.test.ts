@@ -14,7 +14,7 @@
 
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import type { SDKMessage } from '../../shared/types'
-import type { SDKQuery } from '../../main/orchestrator'
+import type { SDKQuery } from '../../main/orchestration/orchestrator'
 import type { PrdBackplane } from '../../main/coding/sketch-engine'
 import {
   internalAuditBudget,
@@ -28,7 +28,7 @@ import {
   validateDefenderDraft,
   validateDispositionCoverage,
 } from '../../main/review/prd-defender'
-import { buildConversationExcerpt, buildReadConversationHistoryTool } from '../../main/conversation-excerpt'
+import { buildConversationExcerpt, buildReadConversationHistoryTool } from '../../main/agent/loop/conversation-excerpt'
 
 // =========================================================================
 // 测试基建

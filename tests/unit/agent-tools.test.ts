@@ -12,12 +12,12 @@ import {
   createWriteScope,
   EDIT_BUDGET_AFTER_TEST_FAILURE,
   setJsSyntaxCheckerForTests,
-} from '../../main/coding/agent-tools'
-import { createToolState, type AgentLoopTool, type ToolContext } from '../../main/coding/agent-loop'
-import { createProject, findProject, recordSketchGenerated } from '../../main/project-service'
-import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/platform-services'
+} from '../../main/agent/tools/agent-tools'
+import { createToolState, type AgentLoopTool, type ToolContext } from '../../main/agent/loop/agent-loop'
+import { createProject, findProject, recordSketchGenerated } from '../../main/project/project-service'
+import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/delivery/platform-services'
 import { writeRealScaffoldMarker } from '../../main/coding/preview-runtime'
-import { setBrowserGwtDisabledForTests } from '../../main/gwt-runner'
+import { setBrowserGwtDisabledForTests } from '../../main/verification/gwt-runner'
 import { getDocumentsDir } from '../../storage/config-paths'
 
 /**
@@ -699,7 +699,7 @@ describe('agent-tools（PR2 L2）', () => {
       const parent = buildAgentTools({ projectId: project.project_id })
       expect(parent.map((tool) => tool.name)).toContain('web_fetch')
 
-      const { TOOL_PERMISSION_REGISTRY } = await import('../../main/permission-service')
+      const { TOOL_PERMISSION_REGISTRY } = await import('../../main/agent/permissions/permission-service')
       expect(TOOL_PERMISSION_REGISTRY.web_fetch).toBe('warning')
     })
   })

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import type { GwtTestResult } from '../../../main/gwt-service'
+import type { GwtTestResult } from '../../../main/verification/gwt-service'
 import type { BuildGateResult } from '../../../main/coding/build-gate'
 import {
   buildRepairTasks,

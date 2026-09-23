@@ -4,10 +4,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { circuitBreakRollback } from '../../main/recovery-service'
-import { createProject, findProject, updateProject } from '../../main/project-service'
-import { recordSessionActivity } from '../../main/session-service'
-import { clearSandboxRuntimeForTests, createSnapshot, setSandboxRuntimeForTests } from '../../main/platform-services'
+import { circuitBreakRollback } from '../../main/orchestration/recovery-service'
+import { createProject, findProject, updateProject } from '../../main/project/project-service'
+import { recordSessionActivity } from '../../main/platform/sessions/session-service'
+import { clearSandboxRuntimeForTests, createSnapshot, setSandboxRuntimeForTests } from '../../main/delivery/platform-services'
 import { getAgentSessionPath, getDocumentsDir, getSnapshotsDir } from '../../storage/config-paths'
 
 /**

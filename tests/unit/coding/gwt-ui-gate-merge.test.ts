@@ -6,12 +6,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
  * 结构保证：初始终验与修复轮重验走同一函数，无法旁路。
  */
 
-vi.mock('../../../main/gwt-service', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/gwt-service')>()
+vi.mock('../../../main/verification/gwt-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/verification/gwt-service')>()
   return { ...actual, runGwtScenarios: vi.fn(async () => ({ total_count: 3, passed_count: 3, failed_count: 0, failure_summary: [] })) }
 })
-vi.mock('../../../main/document-engine', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/document-engine')>()
+vi.mock('../../../main/project/document-engine', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/project/document-engine')>()
   return { ...actual, readPrdBackplane: vi.fn(() => '') }
 })
 vi.mock('../../../main/coding/artifact-ui-gate', () => ({
@@ -22,8 +22,8 @@ vi.mock('../../../main/coding/api-contract', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../main/coding/api-contract')>()
   return { ...actual, checkApiContract: vi.fn(), backplaneInterfaceSpec: vi.fn(() => []) }
 })
-vi.mock('../../../main/decision-log', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/decision-log')>()
+vi.mock('../../../main/project/decision-log', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/project/decision-log')>()
   return { ...actual, recordDecision: vi.fn() }
 })
 

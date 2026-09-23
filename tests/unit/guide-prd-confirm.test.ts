@@ -23,12 +23,12 @@ vi.mock('../../main/coding/programming-orchestrator', () => ({
   }),
   refineModificationDescription: vi.fn((text: string) => text.trim()),
 }))
-vi.mock('../../main/platform-services', () => ({ trackAnalytics: vi.fn() }))
-vi.mock('../../main/document-engine', () => ({
+vi.mock('../../main/delivery/platform-services', () => ({ trackAnalytics: vi.fn() }))
+vi.mock('../../main/project/document-engine', () => ({
   syncDocuments: vi.fn(() => ({ documents: [], stale_documents: [] })),
   markPrdUserConfirmed: vi.fn(() => ({ project_id: 'proj-1', user_confirmed_at: '2026-08-26T00:00:00.000Z' })),
 }))
-vi.mock('../../main/project-service', () => ({
+vi.mock('../../main/project/project-service', () => ({
   findProject: vi.fn(() => ({
     project_id: 'proj-1',
     workspace_slug: 'default-software-builder',
@@ -40,31 +40,31 @@ vi.mock('../../main/project-service', () => ({
   })),
   updateProject: vi.fn(),
 }))
-vi.mock('../../main/session-service', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/session-service')>()
+vi.mock('../../main/platform/sessions/session-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/platform/sessions/session-service')>()
   return { ...actual, readPrimaryIntent: vi.fn((): string | undefined => undefined) }
 })
-vi.mock('../../main/decision-log', () => ({ recordDecision: vi.fn(), parseDecisionText: vi.fn() }))
+vi.mock('../../main/project/decision-log', () => ({ recordDecision: vi.fn(), parseDecisionText: vi.fn() }))
 vi.mock('../../main/guide/guide-research', () => ({
     normalizeResearchQuery: (q: string) => q,
   researchMarketSimilar: vi.fn(async (queries: string[]) => ({ available: false, queries, results: [], summary: '' })),
 }))
-vi.mock('../../main/runtime-fallback', () => ({
+vi.mock('../../main/platform/llm/runtime-fallback', () => ({
   resolveChannelEnv: vi.fn(() => ({ env: undefined, channel: undefined })),
 }))
 
 import { handleGuideMessage, resolveRequirementConfirm } from '../../main/guide/guide-agent-service'
-import { recordDecision } from '../../main/decision-log'
+import { recordDecision } from '../../main/project/decision-log'
 import { researchMarketSimilar } from '../../main/guide/guide-research'
-import { trackAnalytics } from '../../main/platform-services'
-import { markPrdUserConfirmed } from '../../main/document-engine'
+import { trackAnalytics } from '../../main/delivery/platform-services'
+import { markPrdUserConfirmed } from '../../main/project/document-engine'
 import { resolvePrdBackplane, runSketchTask } from '../../main/coding/programming-orchestrator'
 import {
   PRD_CONFIRM_OPTION_ADJUST,
   PRD_CONFIRM_OPTION_CONFIRM,
   resolvePrdConfirmCardAnswer,
 } from '../../main/guide/prd-confirm'
-import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../main/orchestrator'
+import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../main/orchestration/orchestrator'
 
 /**
  * PRD 用户确认门（2026-08-26 改造 3）：

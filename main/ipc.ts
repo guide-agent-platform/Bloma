@@ -59,14 +59,14 @@ import type {
   SnapshotScreenshotInput,
 } from '../shared/types'
 import { IPC_CHANNELS } from '../shared/types'
-import { fail, ok } from './api-result'
-import { cancelAgent, getSdkQuery, hasForegroundRun, isSessionActive, persistSteerDeferredNotice, publishSteerStatusEvent, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from './orchestrator'
-import { enqueueSteer, getSteerStatuses, pendingSteerCount, registerSteer, resolveSteer, setSteerStatusListener, steerConfirmEnabled } from './steer-queue'
-import { savePastedImage } from './pasted-images'
-import { collectDomContext, scrollPreview } from './dom-context'
+import { fail, ok } from '../shared/api-result'
+import { cancelAgent, getSdkQuery, hasForegroundRun, isSessionActive, persistSteerDeferredNotice, publishSteerStatusEvent, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from './orchestration/orchestrator'
+import { enqueueSteer, getSteerStatuses, pendingSteerCount, registerSteer, resolveSteer, setSteerStatusListener, steerConfirmEnabled } from './agent/loop/steer-queue'
+import { savePastedImage } from './platform/shell/pasted-images'
+import { collectDomContext, scrollPreview } from './verification/dom-context'
 import { clearPendingReviewAction, runAgentLoopPostTesting, runIterationTask, runMvpTask, setForegroundRunChecker, setProgrammingEventPublisher } from './coding/programming-orchestrator'
-import { handleAgentStreamEvent } from './notifications'
-import { assertToolAllowed, getPermissionMode, resolvePermission, setPermissionMode, setPermissionRequestPublisher } from './permission-service'
+import { handleAgentStreamEvent } from './platform/shell/notifications'
+import { assertToolAllowed, getPermissionMode, resolvePermission, setPermissionMode, setPermissionRequestPublisher } from './agent/permissions/permission-service'
 import {
   abandonProject,
   archiveProject,
@@ -83,23 +83,23 @@ import {
   unarchiveProject,
   updateProject,
   upgradeProject,
-} from './project-service'
-import { cleanOrphanSessions, forkFrom, listSessions, loadMessages, setSessionActiveChecker } from './session-service'
-import { exportProjectHandoff } from './project-export'
+} from './project/project-service'
+import { cleanOrphanSessions, forkFrom, listSessions, loadMessages, setSessionActiveChecker } from './platform/sessions/session-service'
+import { exportProjectHandoff } from './delivery/project-export'
 import { upgradeExport } from './coding/export-manifest'
-import { readExperimentSwitches } from './experiment-switches'
+import { readExperimentSwitches } from './platform/shell/experiment-switches'
 import { dirname } from 'node:path'
 import { resolveRequirementConfirm } from './guide/guide-agent-service'
-import { createChannel, deleteChannel, fetchModels, listChannels, testChannel, testChannelDirect, updateChannel } from './channel-manager'
+import { createChannel, deleteChannel, fetchModels, listChannels, testChannel, testChannelDirect, updateChannel } from './platform/llm/channel-manager'
 import {
   buildCategoryRoutingRoleViews,
   buildCategoryRoutingViews,
   updateCategoryRouting,
   updateCategoryRoutingRoles,
-} from './category-routing'
-import { listPromptSlots, readPromptSlot, resetPromptSlot, savePromptSlot } from './prompt-service'
-import { listDocuments, readDocument, syncDocuments, isPrdUserConfirmed } from './document-engine'
-import { isCircuitBreakSettled, convergeStageFromEvidence, evaluateDiskArtifact } from './recovery-service'
+} from './platform/llm/category-routing'
+import { listPromptSlots, readPromptSlot, resetPromptSlot, savePromptSlot } from './agent/prompting/prompt-service'
+import { listDocuments, readDocument, syncDocuments, isPrdUserConfirmed } from './project/document-engine'
+import { isCircuitBreakSettled, convergeStageFromEvidence, evaluateDiskArtifact } from './orchestration/recovery-service'
 import {
   createSnapshot,
   listSnapshotDocuments,
@@ -110,11 +110,11 @@ import {
   runSandbox,
   stopSandbox,
   trackAnalytics,
-} from './platform-services'
-import { hasRequestId, isRecord, requireValue } from './validators'
+} from './delivery/platform-services'
+import { hasRequestId, isRecord, requireValue } from '../shared/validators'
 import { getAgentSessionPath } from '../storage/config-paths'
 import { appendJsonLine } from '../storage/json-store'
-import { appendSessionMessage } from './session-tree'
+import { appendSessionMessage } from './platform/sessions/session-tree'
 
 /** 从错误信息里提取统一的错误码前缀（如 MVP_LLM_PARSE_FAILED、SANDBOX_RUN_FAILED），缺省 AGENT_SDK_ERROR。 */
 function errorCodeFrom(error: unknown): string {

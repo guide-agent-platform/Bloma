@@ -3,11 +3,11 @@ import { existsSync, readFileSync } from 'node:fs'
 import type { AgentEvent, AgentMessage, AgentSendMessageInput, MessageContentBlock, Project, ProjectMode, ResearchIdea } from '../../shared/types'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import { appendJsonLine } from '../../storage/json-store'
-import { appendSessionMessage } from '../session-tree'
-import { routeDialogue, type ClarificationOption } from '../dialogue-router'
-import { loadPromptOverride } from '../prompt-config'
-import { parseDecisionText, recordDecision } from '../decision-log'
-import { syncDocuments } from '../document-engine'
+import { appendSessionMessage } from '../platform/sessions/session-tree'
+import { routeDialogue, type ClarificationOption } from '../orchestration/dialogue-router'
+import { loadPromptOverride } from '../agent/prompting/prompt-config'
+import { parseDecisionText, recordDecision } from '../project/decision-log'
+import { syncDocuments } from '../project/document-engine'
 import { researchMarketSimilar, normalizeResearchQuery, type MarketResearch } from './guide-research'
 import {
   PRD_REVIEW_OPTION_OVERRIDE,
@@ -28,12 +28,12 @@ import {
   resolvePrdConfirmCardAnswer,
   resumePrdConfirmConfirmed,
 } from './prd-confirm'
-import { resolveChannelEnv } from '../runtime-fallback'
-import { resolveRoutedChannelId } from '../category-routing'
-import { getChannelByIdRaw } from '../channel-manager'
-import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../orchestrator'
-import { trackAnalytics } from '../platform-services'
-import { runAgentLoop } from '../coding/agent-loop'
+import { resolveChannelEnv } from '../platform/llm/runtime-fallback'
+import { resolveRoutedChannelId } from '../platform/llm/category-routing'
+import { getChannelByIdRaw } from '../platform/llm/channel-manager'
+import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../orchestration/orchestrator'
+import { trackAnalytics } from '../delivery/platform-services'
+import { runAgentLoop } from '../agent/loop/agent-loop'
 import { buildGuideTools, guideLoopEnabled, type GuideDecision } from './guide-tools'
 import {
   detectOrphanEnrichmentClarification,
@@ -51,14 +51,14 @@ import {
 import { resolvePrdBackplane, runSketchTask, setProgrammingEventPublisher, nextRequirementId, refineModificationDescription } from '../coding/programming-orchestrator'
 import { normalizeRequirementUpdate, applyNormalization, resolveRoutedRequirementId } from './requirement-normalizer'
 import { buildReferenceSection } from './web-reference-extractor'
-import { findProject, updateProject, readLastSketchRequirements, recordSketchGenerated } from '../project-service'
-import { refineTemplateType } from '../template-inference'
-import { buildClarifyInjection } from '../template-injection'
+import { findProject, updateProject, readLastSketchRequirements, recordSketchGenerated } from '../project/project-service'
+import { refineTemplateType } from './template-inference'
+import { buildClarifyInjection } from '../agent/prompting/template-injection'
 import { captureConstraints, extractConstraints, readProjectConstraints } from './constraint-extractor'
-import { isAutoDelegationText, readPrimaryIntent } from '../session-service'
+import { isAutoDelegationText, readPrimaryIntent } from '../platform/sessions/session-service'
 import { ingestResearchIdeasAsCandidates } from '../experience/ref-ui-source'
 import type { PrdBackplane, SketchRequirement } from '../coding/sketch-engine'
-import { isRecord } from '../validators'
+import { isRecord } from '../../shared/validators'
 
 type GuideEventPublisher = (event: AgentEvent) => void
 

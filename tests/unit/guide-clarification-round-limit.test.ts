@@ -12,7 +12,7 @@ vi.mock('../../main/coding/programming-orchestrator', () => ({
   runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
   setProgrammingEventPublisher: vi.fn(),
 }))
-vi.mock('../../main/platform-services', () => ({
+vi.mock('../../main/delivery/platform-services', () => ({
   trackAnalytics: vi.fn(),
 }))
 vi.mock('../../main/guide/guide-research', () => ({
@@ -20,7 +20,7 @@ vi.mock('../../main/guide/guide-research', () => ({
     normalizeResearchQuery: (q: string) => q,
   researchMarketSimilar: vi.fn(async () => ({ available: false, queries: [], results: [], summary: '' })),
 }))
-vi.mock('../../main/project-service', () => ({
+vi.mock('../../main/project/project-service', () => ({
   findProject: vi.fn(() => ({
     project_id: 'proj-1',
     workspace_slug: 'default-software-builder',
@@ -33,11 +33,11 @@ vi.mock('../../main/project-service', () => ({
   })),
   updateProject: vi.fn(),
 }))
-vi.mock('../../main/session-service', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/session-service')>()
+vi.mock('../../main/platform/sessions/session-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/platform/sessions/session-service')>()
   return { ...actual, readPrimaryIntent: vi.fn((): string | undefined => undefined) }
 })
-vi.mock('../../main/decision-log', () => ({
+vi.mock('../../main/project/decision-log', () => ({
   recordDecision: vi.fn(),
   parseDecisionText: (text: string) => {
     // 真实 parseDecisionText 依赖读盘导出，测试内联同构实现（含 detail，供点选累积扫描）
@@ -57,9 +57,9 @@ vi.mock('../../main/decision-log', () => ({
 
 // vi.mock 提升：import 必须在 mock 声明之后拿 mock 实例
 import { countTrailingClarificationRounds, handleGuideMessage } from '../../main/guide/guide-agent-service'
-import { recordDecision } from '../../main/decision-log'
+import { recordDecision } from '../../main/project/decision-log'
 import { runSketchTask } from '../../main/coding/programming-orchestrator'
-import type { ConversationTurn, GuideModelOptions, SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
+import type { ConversationTurn, GuideModelOptions, SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 
 /**
  * 连续澄清轮次熔断（D3 修复）：模型驱动澄清此前无代码级轮次上限——首轮护栏只管

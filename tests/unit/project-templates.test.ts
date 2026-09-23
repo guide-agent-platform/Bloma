@@ -7,16 +7,16 @@ import {
   SAMPLE_MAX_CHARS,
   loadProjectTemplate,
   templateSection,
-} from '../../main/project-templates'
+} from '../../main/project/project-templates'
 import type { TemplateType } from '../../shared/types'
 
 /** 模板包加载器（P4）：内置三包结构齐、外置覆盖生效、非法外置 fail-closed 回退+决策日志。 */
 
-vi.mock('../../main/decision-log', () => ({
+vi.mock('../../main/project/decision-log', () => ({
   recordDecision: vi.fn(),
 }))
 
-import { recordDecision } from '../../main/decision-log'
+import { recordDecision } from '../../main/project/decision-log'
 
 const ALL_TYPES: TemplateType[] = ['web_fullstack', 'desktop_tool', 'personal_tool', 'game']
 

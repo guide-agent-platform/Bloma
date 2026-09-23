@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { PrdBackplane } from '../../../main/model/prd-backplane'
 import type { SDKMessage } from '../../../shared/types'
-import type { SDKQuery, SDKQueryOptions } from '../../../main/orchestrator'
+import type { SDKQuery, SDKQueryOptions } from '../../../main/orchestration/orchestrator'
 import {
   PLAN_ATTEMPTS,
   PLAN_FILES_LIMIT,
@@ -14,7 +14,7 @@ import {
   renderPlanInjection,
   renderPlanMarkdown,
   validateLoopPlan,
-} from '../../../main/coding/loop-planner'
+} from '../../../main/agent/loop/loop-planner'
 
 /**
  * P3 任务级三文档契约 · PR-A：plan 腿纯函数地基。

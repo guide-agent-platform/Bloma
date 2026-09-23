@@ -20,10 +20,10 @@ vi.mock('../../main/coding/programming-orchestrator', () => ({
   runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
   setProgrammingEventPublisher: vi.fn(),
 }))
-vi.mock('../../main/platform-services', () => ({
+vi.mock('../../main/delivery/platform-services', () => ({
   trackAnalytics: vi.fn(),
 }))
-vi.mock('../../main/project-service', () => ({
+vi.mock('../../main/project/project-service', () => ({
   findProject: vi.fn(() => ({
     project_id: 'proj-1',
     workspace_slug: 'default-software-builder',
@@ -36,11 +36,11 @@ vi.mock('../../main/project-service', () => ({
   })),
   updateProject: vi.fn(),
 }))
-vi.mock('../../main/session-service', () => ({
+vi.mock('../../main/platform/sessions/session-service', () => ({
   readPrimaryIntent: vi.fn(() => undefined),
   isAutoDelegationText: () => false,
 }))
-vi.mock('../../main/decision-log', () => ({
+vi.mock('../../main/project/decision-log', () => ({
   recordDecision: vi.fn(),
   parseDecisionText: vi.fn(() => []),
 }))
@@ -51,7 +51,7 @@ vi.mock('../../main/guide/guide-research', () => ({
 
 import { handleGuideMessage } from '../../main/guide/guide-agent-service'
 import { buildGuideTools, guideLoopEnabled, type GuideDecision } from '../../main/guide/guide-tools'
-import type { ConversationTurn, GuideModelOptions, SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
+import type { ConversationTurn, GuideModelOptions, SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 
 const ORIGINAL_GUIDE_LOOP = process.env.BLOMA_GUIDE_LOOP
 const ORIGINAL_PROMA_HOME = process.env.PROMA_HOME

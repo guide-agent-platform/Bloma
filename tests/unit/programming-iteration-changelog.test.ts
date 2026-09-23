@@ -5,12 +5,12 @@ const { syncDocumentsMock } = vi.hoisted(() => ({
   syncDocumentsMock: vi.fn(() => ({ documents: [{ type: 'changelog', status: 'synced' }], stale_documents: [] })),
 }))
 
-vi.mock('../../main/document-engine', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/document-engine')>()
+vi.mock('../../main/project/document-engine', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/project/document-engine')>()
   return { ...actual, syncDocuments: syncDocumentsMock }
 })
 
-vi.mock('../../main/project-service', () => ({
+vi.mock('../../main/project/project-service', () => ({
   findProject: () => ({
     project_id: 'project-iter-changelog',
     name: '迭代变更记录项目',
@@ -29,7 +29,7 @@ vi.mock('../../main/project-service', () => ({
   recordSketchGenerated: vi.fn(),
 }))
 
-vi.mock('../../main/channel-manager', () => ({
+vi.mock('../../main/platform/llm/channel-manager', () => ({
   getChannelByIdRaw: () => undefined,
   decryptApiKey: () => '',
   getFirstEnabledChannel: () => undefined,

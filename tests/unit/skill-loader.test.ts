@@ -11,9 +11,9 @@ import {
   preparePromptWithSkills,
   prepareTaskWithSkills,
   resolveSkillRoots,
-} from '../../main/skill-loader'
-import { createProject } from '../../main/project-service'
-import { setSafeStorageAdapter } from '../../main/safe-storage'
+} from '../../main/platform/mcp/skill-loader'
+import { createProject } from '../../main/project/project-service'
+import { setSafeStorageAdapter } from '../../main/platform/storage/safe-storage'
 import { getPromaHome } from '../../storage/config-paths'
 
 /**

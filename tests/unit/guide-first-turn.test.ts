@@ -5,10 +5,10 @@ vi.mock('../../main/coding/programming-orchestrator', () => ({
   runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
   setProgrammingEventPublisher: vi.fn(),
 }))
-vi.mock('../../main/platform-services', () => ({
+vi.mock('../../main/delivery/platform-services', () => ({
   trackAnalytics: vi.fn(),
 }))
-vi.mock('../../main/project-service', () => ({
+vi.mock('../../main/project/project-service', () => ({
   findProject: vi.fn(() => ({
     project_id: 'proj-1',
     workspace_slug: 'default-software-builder',
@@ -21,20 +21,20 @@ vi.mock('../../main/project-service', () => ({
   })),
   updateProject: vi.fn(),
 }))
-vi.mock('../../main/session-service', () => ({
+vi.mock('../../main/platform/sessions/session-service', () => ({
   readPrimaryIntent: vi.fn(() => undefined),
   // guide-agent-service 的自由文本让渡分流依赖同一模块的话术表（单点维护），mock 须同步提供
   isAutoDelegationText: (content: string) => /^(?:我还没想法|随便|你帮我决定)$/.test(content.trim()),
 }))
-vi.mock('../../main/decision-log', () => ({
+vi.mock('../../main/project/decision-log', () => ({
   recordDecision: vi.fn(),
 }))
 
 // vi.mock 提升：import 必须在 mock 声明之后拿 mock 实例
 import { handleGuideMessage } from '../../main/guide/guide-agent-service'
 import { runSketchTask } from '../../main/coding/programming-orchestrator'
-import { updateProject } from '../../main/project-service'
-import type { ConversationTurn, GuideModelOptions, SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
+import { updateProject } from '../../main/project/project-service'
+import type { ConversationTurn, GuideModelOptions, SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 
 /**
  * 首轮澄清硬护栏（2026-08-16 赛车模拟器案例）：

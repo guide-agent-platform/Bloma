@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getSkeletonDirPath } from '../../storage/config-paths'
-import { loadSkeletonTemplate } from '../../main/project-templates'
+import { loadSkeletonTemplate } from '../../main/project/project-templates'
 import { renderSkeletonToProject, scaffoldEnabled } from '../../main/coding/project-scaffold'
-import { buildLoopInjection, buildSkeletonMapInjection } from '../../main/template-injection'
+import { buildLoopInjection, buildSkeletonMapInjection } from '../../main/agent/prompting/template-injection'
 
 /**
  * PR-1 骨架先行（2026-09-03）：骨架包加载（内置/外置/fail-closed）、确定性渲染幂等、
@@ -13,11 +13,11 @@ import { buildLoopInjection, buildSkeletonMapInjection } from '../../main/templa
  * 陷阱 42 三锁对应：渲染幂等（已存在跳过）、决策行落盘（mock 断言）、内容自检。
  */
 
-vi.mock('../../main/decision-log', () => ({
+vi.mock('../../main/project/decision-log', () => ({
   recordDecision: vi.fn(),
 }))
 
-import { recordDecision } from '../../main/decision-log'
+import { recordDecision } from '../../main/project/decision-log'
 
 /** 递归列出目录下全部相对路径文件（同源校验：目录实际文件 ⊆ manifest 清单）。 */
 function listFilesRecursive(root: string, subDir = ''): string[] {

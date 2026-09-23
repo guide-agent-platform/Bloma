@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { assertPublicHttpUrl, isDisallowedIpLiteral } from '../../main/net-guard'
+import { assertPublicHttpUrl, isDisallowedIpLiteral } from '../../main/platform/net/net-guard'
 
 /**
  * SSRF 防护专项（T-1 实测加固，2026-09-02 对抗审查）：

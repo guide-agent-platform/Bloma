@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { checkGameMoveEffect, gamePlayerCoordOf, gwtGameProbeEnabled, isMoveEffect } from '../../main/gwt-runner'
+import { checkGameMoveEffect, gamePlayerCoordOf, gwtGameProbeEnabled, isMoveEffect } from '../../main/verification/gwt-runner'
 import { buildAgentLoopSystemPrompt } from '../../main/coding/programming-orchestrator'
-import type { AssertionPlan } from '../../main/behavior-assertions'
+import type { AssertionPlan } from '../../main/verification/behavior-assertions'
 
 /**
  * C4（2026-09-11 拍板）：canvas 游戏「按键→位移」断言的游戏侧探针通道——

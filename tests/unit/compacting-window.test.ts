@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { DIGEST_HEADER_PREFIX, DIGEST_MAX_CHARS, windowMessagesWithDigest, extractKeyLines } from '../../main/compacting-window'
-import { TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, windowMessages } from '../../main/coding/agent-loop'
-import type { ConversationTurn } from '../../main/orchestrator'
+import { DIGEST_HEADER_PREFIX, DIGEST_MAX_CHARS, windowMessagesWithDigest, extractKeyLines } from '../../main/agent/loop/compacting-window'
+import { TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, windowMessages } from '../../main/agent/loop/agent-loop'
+import type { ConversationTurn } from '../../main/orchestration/orchestrator'
 
 /**
  * CompactingWindow 移植（compacting-window-port.md，2026-08-28 TDD）：Bloma 的

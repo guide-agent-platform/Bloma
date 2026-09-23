@@ -18,17 +18,17 @@ vi.mock('../../main/review/judge-engine', async (importOriginal) => {
     })),
   }
 })
-vi.mock('../../main/runtime-fallback', () => ({
+vi.mock('../../main/platform/llm/runtime-fallback', () => ({
   // 类别路由固定给出可用 env（语义腿必跑，判定才会回写）
   resolveChannelEnv: vi.fn(() => ({ env: { ANTHROPIC_AUTH_TOKEN: 'k', ANTHROPIC_BASE_URL: 'https://example.com' }, channel: { id: 'ch-1' } })),
 }))
 
 import { runJudgeReview, setProgrammingEventPublisher } from '../../main/coding/programming-orchestrator'
-import { syncDocuments, updateRequirementStatus, markPrdUserConfirmed } from '../../main/document-engine'
-import { createProject, findProject, recordSketchGenerated } from '../../main/project-service'
+import { syncDocuments, updateRequirementStatus, markPrdUserConfirmed } from '../../main/project/document-engine'
+import { createProject, findProject, recordSketchGenerated } from '../../main/project/project-service'
 import { getDocumentsDir } from '../../storage/config-paths'
 import type { PrdBackplane, SketchRequirement } from '../../main/coding/sketch-engine'
-import type { SDKQuery } from '../../main/orchestrator'
+import type { SDKQuery } from '../../main/orchestration/orchestrator'
 
 /**
  * 活背板（2026-08-26，ralph 式 passes）：

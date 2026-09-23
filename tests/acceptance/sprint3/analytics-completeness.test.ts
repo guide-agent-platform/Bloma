@@ -7,12 +7,12 @@ import type { ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createIpcHarness } from '../support/ipc-harness'
 import type { ApiResult, Project } from '../../../shared/types'
-import { clearPendingRequests, getPendingRequests, resolvePermission } from '../../../main/permission-service'
+import { clearPendingRequests, getPendingRequests, resolvePermission } from '../../../main/agent/permissions/permission-service'
 import {
   clearSandboxRuntimeForTests,
   setSandboxRuntimeForTests,
   setSnapshotCaptureProviderForTests,
-} from '../../../main/platform-services'
+} from '../../../main/delivery/platform-services'
 
 /**
  * Sprint 3 · T8 埋点重核

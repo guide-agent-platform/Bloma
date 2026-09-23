@@ -3,8 +3,8 @@ import { IPC_CHANNELS, type AgentEvent, type ApiResult, type Project } from '../
 import { createIpcHarness } from '../support/ipc-harness'
 import { useTemporaryPromaHome, type TemporaryPromaHome } from '../support/test-environment'
 
-vi.mock('../../../main/channel-manager', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/channel-manager')>()
+vi.mock('../../../main/platform/llm/channel-manager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/platform/llm/channel-manager')>()
   return {
     ...actual,
     getChannelByIdRaw: () => ({

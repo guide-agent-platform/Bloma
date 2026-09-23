@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   loadChildSessionSnapshot,
   replayTurnsFrom,
-} from '../../main/delegation-persistence'
+} from '../../main/agent/delegation/delegation-persistence'
 import { appendJsonLine } from '../../storage/json-store'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import type { MessageContentBlock } from '../../shared/types'

@@ -21,9 +21,9 @@
  * 开关 BLOMA_DELIVERY_STATUS 缺省 off=字节级现状（project 无此键、零计算）。
  */
 import type { DeliveryStatus } from '../../shared/types'
-import type { GwtTestResult } from '../gwt-service'
+import type { GwtTestResult } from '../verification/gwt-service'
 import type { KeyTask } from '../model/prd-backplane'
-import { updateProject } from '../project-service'
+import { updateProject } from '../project/project-service'
 
 // ---------------------------------------------------------------------------
 // Phase 7 U1 H3/H4（2026-09-10，P7 实施稿 §2）：交付呈现层——三层展示与四段式话术。\n// 纯呈现层（实施稿 §7 定直接上，不设开关）：H3 消费 delivery_status（BLOMA_

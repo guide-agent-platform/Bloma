@@ -1,12 +1,12 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { SDKQuery } from '../orchestrator'
-import { findProject } from '../project-service'
-import { loadPromptOverride } from '../prompt-config'
-import { buildSketchInjection } from '../template-injection'
+import type { SDKQuery } from '../orchestration/orchestrator'
+import { findProject } from '../project/project-service'
+import { loadPromptOverride } from '../agent/prompting/prompt-config'
+import { buildSketchInjection } from '../agent/prompting/template-injection'
 import type { SketchRequirement } from './sketch-engine'
 import { requirementAssertions, requirementStory } from './sketch-engine'
-import { categoryTemperature } from '../model-resolution'
+import { categoryTemperature } from '../platform/llm/model-resolution'
 import type { MessageContentBlock } from '../../shared/types'
 
 /**

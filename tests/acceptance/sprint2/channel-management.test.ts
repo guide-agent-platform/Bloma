@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ApiResult } from '../../../shared/types'
 import { IPC_CHANNELS } from '../../../shared/types'
-import { setSafeStorageAdapter } from '../../../main/safe-storage'
+import { setSafeStorageAdapter } from '../../../main/platform/storage/safe-storage'
 import { createIpcHarness } from '../support/ipc-harness'
 import { useTemporaryPromaHome, type TemporaryPromaHome } from '../support/test-environment'
 

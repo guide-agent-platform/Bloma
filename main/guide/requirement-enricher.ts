@@ -1,12 +1,12 @@
-import type { SDKQuery } from '../orchestrator'
-import { loadPromptOverride } from '../prompt-config'
+import type { SDKQuery } from '../orchestration/orchestrator'
+import { loadPromptOverride } from '../agent/prompting/prompt-config'
 import type { SketchRequirement } from '../coding/sketch-engine'
 import { isPlaceholderAssertion } from '../coding/sketch-engine'
-import { parseBehaviorAssertion } from '../behavior-assertions'
-import { categoryTemperature } from '../model-resolution'
+import { parseBehaviorAssertion } from '../verification/behavior-assertions'
+import { categoryTemperature } from '../platform/llm/model-resolution'
 import { readConversation } from './prd-engine-llm'
 import { callLlmForJson } from '../kernel/llm-call'
-import { sanitizeClarificationRequests, type EnrichmentClarificationRequest } from '../guide/clarification'
+import { sanitizeClarificationRequests, type EnrichmentClarificationRequest } from './clarification'
 
 /**
  * RequirementEnricher — 功能项加厚（2026-08-18 设计「功能项加厚：行为断言 LLM 提取」）。

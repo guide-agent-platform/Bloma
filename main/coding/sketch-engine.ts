@@ -7,7 +7,7 @@
  */
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { findProject } from '../project-service'
+import { findProject } from '../project/project-service'
 
 export * from '../model/prd-backplane'
 import type { SketchRequirement } from '../model/prd-backplane'

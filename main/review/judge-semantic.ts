@@ -22,7 +22,7 @@
 
 import type { PrdBackplane, SketchRequirement } from '../coding/sketch-engine'
 import { backplaneAiCapabilities, capContractEnabled, renderCapSection, requirementPriority } from '../coding/sketch-engine'
-import type { SDKQuery } from '../orchestrator'
+import type { SDKQuery } from '../orchestration/orchestrator'
 import type { JudgeConstraint } from './judge-engine'
 import { delegatedReviewEnabled, runDelegatedReview } from './review-delegation'
 import { buildJudgeErrorPatternsSection } from '../experience/judge-checklist'

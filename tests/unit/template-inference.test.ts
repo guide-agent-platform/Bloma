@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_TEMPLATE_TYPE, inferTemplateType, refineTemplateType } from '../../main/template-inference'
+import { DEFAULT_TEMPLATE_TYPE, inferTemplateType, refineTemplateType } from '../../main/guide/template-inference'
 import type { TemplateType } from '../../shared/types'
 
 describe('template-inference（P2 注入点①：PRD 12.2 关键词→类型）', () => {

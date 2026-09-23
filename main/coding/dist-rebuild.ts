@@ -14,9 +14,9 @@
 
 import { readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { findProject } from '../project-service'
-import { recordDecision } from '../decision-log'
-import { loadRealScaffoldTemplate, type SkeletonBuildSpec } from '../project-templates'
+import { findProject } from '../project/project-service'
+import { recordDecision } from '../project/decision-log'
+import { loadRealScaffoldTemplate, type SkeletonBuildSpec } from '../project/project-templates'
 import { readRealScaffoldVariant } from './preview-runtime'
 import { runBuildGate } from './build-gate'
 

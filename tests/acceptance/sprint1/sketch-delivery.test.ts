@@ -8,9 +8,9 @@ import {
   setSandboxRuntimeForTests,
   setSnapshotCaptureProviderForTests,
   stopSandbox,
-} from '../../../main/platform-services'
-import { runAgent, setAgentStreamPublisher } from '../../../main/orchestrator'
-import { createProject } from '../../../main/project-service'
+} from '../../../main/delivery/platform-services'
+import { runAgent, setAgentStreamPublisher } from '../../../main/orchestration/orchestrator'
+import { createProject } from '../../../main/project/project-service'
 import { generateSketch } from '../../../main/coding/sketch-engine'
 import type { AgentEvent, ApiResult, Project } from '../../../shared/types'
 import {
@@ -19,8 +19,8 @@ import {
   type TemporaryPromaHome,
 } from '../support/test-environment'
 
-vi.mock('../../../main/channel-manager', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/channel-manager')>()
+vi.mock('../../../main/platform/llm/channel-manager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/platform/llm/channel-manager')>()
   return {
     ...actual,
     getChannelByIdRaw: () => ({

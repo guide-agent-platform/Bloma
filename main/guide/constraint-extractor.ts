@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs'
 import type { AgentMessage } from '../../shared/types'
 import { getAgentSessionPath } from '../../storage/config-paths'
-import { addConstraints, findProject } from '../project-service'
-import { recordDecision } from '../decision-log'
+import { addConstraints, findProject } from '../project/project-service'
+import { recordDecision } from '../project/decision-log'
 
 /**
  * 用户约束的确定性提取（长期型改造 T4-L1/L2 主路，2026-08-18 修订版设计）。

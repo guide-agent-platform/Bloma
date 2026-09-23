@@ -3,17 +3,17 @@ import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { registerIpcHandlers } from './ipc'
-import { setSnapshotCaptureProvider } from './platform-services'
-import { reconcileInterruptedProjects } from './recovery-service'
-import { migrateLegacySessionsIndexOnce } from './session-service'
+import { setSnapshotCaptureProvider } from './delivery/platform-services'
+import { reconcileInterruptedProjects } from './orchestration/recovery-service'
+import { migrateLegacySessionsIndexOnce } from './platform/sessions/session-service'
 import {
   setFocusWindowAction,
   setNotificationBackend,
   setWindowFocusedHook,
   startPendingDecisionReminderLoop,
-} from './notifications'
+} from './platform/shell/notifications'
 import { MAIN_FRAME_CSP, shouldInjectMainFrameCsp } from './csp'
-import { createCrashGuard } from './renderer-crash-guard'
+import { createCrashGuard } from './platform/shell/renderer-crash-guard'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 

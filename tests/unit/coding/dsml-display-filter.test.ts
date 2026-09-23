@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createDsmlDisplayFilter } from '../../../main/coding/dsml-display-filter'
+import { createDsmlDisplayFilter } from '../../../main/agent/loop/dsml-display-filter'
 
 /**
  * R1-loop（2026-09-19 狗粮 7601e5ae）：DSML 协议残片呈现过滤器。

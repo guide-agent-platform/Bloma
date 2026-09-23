@@ -3,7 +3,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { correctionRegionKey, createProject, submitCorrection } from '../../../main/project-service'
+import { correctionRegionKey, createProject, submitCorrection } from '../../../main/project/project-service'
 import type { CorrectionContext, PointCorrectionInput } from '../../../shared/types'
 
 /**

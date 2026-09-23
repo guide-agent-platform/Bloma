@@ -18,7 +18,7 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, wri
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve, sep } from 'node:path'
-import type { GwtFailureSummary } from '../gwt-service'
+import type { GwtFailureSummary } from '../verification/gwt-service'
 
 /** 开关解析（与 apiReconcileEnabled 同风格，每次调用读取）。 */
 export function dataMigrateEnabled(): boolean {

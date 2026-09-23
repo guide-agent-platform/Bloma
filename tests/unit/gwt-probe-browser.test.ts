@@ -5,8 +5,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { restorePromaHome } from '../support/proma-home-guard'
-import { createProject, recordSketchGenerated } from '../../main/project-service'
-import { runBrowserGwt } from '../../main/gwt-runner'
+import { createProject, recordSketchGenerated } from '../../main/project/project-service'
+import { runBrowserGwt } from '../../main/verification/gwt-runner'
 
 /**
  * T-8 真浏览器探针集成测试（2026-09-02 对抗审查补证据）：

@@ -79,9 +79,9 @@ export interface AdvisoryOutcome {
  * 计数口径与 gwt-service 一致：total = passed + failed，unverified 不计入。
  */
 export function splitAdvisoryResults(
-  raw: import('../gwt-service').GwtTestResult,
+  raw: import('../verification/gwt-service').GwtTestResult,
   replayNames: Set<string>,
-): { gated: import('../gwt-service').GwtTestResult; outcomes: AdvisoryOutcome[] } {
+): { gated: import('../verification/gwt-service').GwtTestResult; outcomes: AdvisoryOutcome[] } {
   if (replayNames.size === 0) return { gated: raw, outcomes: [] }
   const failedR = raw.failure_summary.filter((f) => replayNames.has(f.scenario))
   const unverifiedR = (raw.unverified ?? []).filter((u) => replayNames.has(u))

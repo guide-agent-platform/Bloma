@@ -8,10 +8,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 // 2026-09-16 FILE-LEVEL 钉：BLOMA_GUIDE_LOOP 缺省翻转 on，本文件全部用例锁旧单次 JSON 路径
 process.env.BLOMA_GUIDE_LOOP = '0'
-import { runAgent, setAgentStreamPublisher, setSDKQueryForTests } from '../../main/orchestrator'
+import { runAgent, setAgentStreamPublisher, setSDKQueryForTests } from '../../main/orchestration/orchestrator'
 
-vi.mock('../../main/channel-manager', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/channel-manager')>()
+vi.mock('../../main/platform/llm/channel-manager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/platform/llm/channel-manager')>()
   return {
     ...actual,
     getChannelByIdRaw: () => ({
@@ -27,13 +27,13 @@ vi.mock('../../main/channel-manager', async (importOriginal) => {
     getFirstEnabledChannel: () => undefined,
   }
 })
-import { createProject, findProject, readLastSketchRequirements } from '../../main/project-service'
+import { createProject, findProject, readLastSketchRequirements } from '../../main/project/project-service'
 import { PRD_CONFIRM_OPTION_CONFIRM } from '../../main/guide/prd-confirm'
 import {
   clearSandboxRuntimeForTests,
   setSandboxRuntimeForTests,
   setSnapshotCaptureProviderForTests,
-} from '../../main/platform-services'
+} from '../../main/delivery/platform-services'
 import type { AgentEvent, SDKMessage } from '../../shared/types'
 
 // timeout 30s：本文件用例含真实 IO（mkdtemp/createProject 写盘/runAgent 子流程），

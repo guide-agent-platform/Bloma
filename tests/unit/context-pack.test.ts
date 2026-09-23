@@ -3,11 +3,11 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createProject, findProject } from '../../main/project-service'
-import { recordSessionActivity } from '../../main/session-service'
-import { writeTestReport } from '../../main/gwt-service'
+import { createProject, findProject } from '../../main/project/project-service'
+import { recordSessionActivity } from '../../main/platform/sessions/session-service'
+import { writeTestReport } from '../../main/verification/gwt-service'
 import type { PrdBackplane } from '../../main/model/prd-backplane'
-import { recordDecision } from '../../main/decision-log'
+import { recordDecision } from '../../main/project/decision-log'
 import {
   appendContextPack,
   buildContextPack,
@@ -16,7 +16,7 @@ import {
 } from '../../main/coding/context-pack'
 
 // 决策留痕断言用 mock（context-pack 与本测试图内仅 recordDecision 消费面）
-vi.mock('../../main/decision-log', () => ({
+vi.mock('../../main/project/decision-log', () => ({
   DECISION_PREFIX: '[decision]',
   recordDecision: vi.fn(),
   exportDecisionsMd: vi.fn(),

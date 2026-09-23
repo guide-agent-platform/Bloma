@@ -3,14 +3,14 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createChannel, getFirstEnabledChannel, updateChannel } from '../../main/channel-manager'
-import { setSafeStorageAdapter } from '../../main/safe-storage'
-import { resetCategoryRoutingForTests, saveCategoryRouting } from '../../main/category-routing'
+import { createChannel, getFirstEnabledChannel, updateChannel } from '../../main/platform/llm/channel-manager'
+import { setSafeStorageAdapter } from '../../main/platform/storage/safe-storage'
+import { resetCategoryRoutingForTests, saveCategoryRouting } from '../../main/platform/llm/category-routing'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import {
   resolveChannelEnv,
   resetCategoryRouteThrottleForTests,
-} from '../../main/runtime-fallback'
+} from '../../main/platform/llm/runtime-fallback'
 
 /**
  * 渠道自动回退的密钥解密守卫（getFirstEnabledChannel）。

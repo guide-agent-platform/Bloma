@@ -6,7 +6,7 @@
  * 注册表段注入、防双源）。
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RULES_REGISTRY, renderRulesSection, rulesForTemplateType, rulesRegistryEnabled } from '../../main/rules-registry'
+import { RULES_REGISTRY, renderRulesSection, rulesForTemplateType, rulesRegistryEnabled } from '../../main/agent/prompting/rules-registry'
 import { buildAgentLoopSystemPrompt } from '../../main/coding/programming-orchestrator'
 import type { PrdBackplane } from '../../main/model/prd-backplane'
 

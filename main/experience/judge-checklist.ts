@@ -1,6 +1,6 @@
 import { selectForInjection } from './experience-service'
 import { experienceEnabled, EXPERIENCE_GOVERNANCE, type ExperienceCard } from './types'
-import { sanitizeForInjection } from '../memory-sanitize'
+import { sanitizeForInjection } from '../agent/loop/memory-sanitize'
 
 /**
  * T-6 裁判清单注入（「错误经验为审查做指导」的落点）：

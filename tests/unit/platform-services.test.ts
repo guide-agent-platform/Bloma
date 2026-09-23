@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createProject } from '../../main/project-service'
+import { createProject } from '../../main/project/project-service'
 import {
   MAX_SNAPSHOTS_PER_PROJECT,
   SNAPSHOT_RECENT_KEEP,
@@ -17,7 +17,7 @@ import {
   setSnapshotCaptureProviderForTests,
   stopSandbox,
   trackAnalytics,
-} from '../../main/platform-services'
+} from '../../main/delivery/platform-services'
 import { getAnalyticsPath, getSnapshotsDir } from '../../storage/config-paths'
 
 describe('PlatformServices sandbox runtime', () => {

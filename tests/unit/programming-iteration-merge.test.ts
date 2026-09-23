@@ -7,8 +7,8 @@ import { mergeIterationRequirements } from '../../main/coding/programming-orches
 import { getAgentSessionPath } from '../../storage/config-paths'
 import type { SDKMessage } from '../../shared/types'
 
-vi.mock('../../main/channel-manager', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/channel-manager')>()
+vi.mock('../../main/platform/llm/channel-manager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/platform/llm/channel-manager')>()
   return {
     ...actual,
     getChannelByIdRaw: () => ({
@@ -99,7 +99,7 @@ describe('mergeIterationRequirements（迭代修改诉求归一化入库）', ()
 
     // out_of_scope 会真实写 project.scope_exclusions：需要真项目（字面 id 会让
     // addScopeExclusion 抛错回退 raw——那是既有回退语义，非本用例目标）
-    const { createProject } = await import('../../main/project-service')
+    const { createProject } = await import('../../main/project/project-service')
     const realProject = createProject({ request_id: 'req-focus-scope', mode: 'quick' })
     const outOfScope = await mergeIterationRequirements(
       {

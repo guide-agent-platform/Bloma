@@ -12,8 +12,8 @@ import {
   listChannels,
   testChannelDirect,
   updateChannel,
-} from '../../main/channel-manager'
-import { setSafeStorageAdapter } from '../../main/safe-storage'
+} from '../../main/platform/llm/channel-manager'
+import { setSafeStorageAdapter } from '../../main/platform/storage/safe-storage'
 
 /**
  * 渠道管理 CRUD / 直接测试 / 模型拉取测试（S2-AGENT）。

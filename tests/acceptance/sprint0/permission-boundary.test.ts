@@ -15,14 +15,14 @@ import {
   getPendingRequests,
   resolvePermission,
   setPermissionRequestPublisher,
-} from '../../../main/permission-service'
+} from '../../../main/agent/permissions/permission-service'
 import { runSketchTask, setProgrammingEventPublisher } from '../../../main/coding/programming-orchestrator'
-import { createProject } from '../../../main/project-service'
+import { createProject } from '../../../main/project/project-service'
 import {
   clearSandboxRuntimeForTests,
   setSandboxRuntimeForTests,
   setSnapshotCaptureProviderForTests,
-} from '../../../main/platform-services'
+} from '../../../main/delivery/platform-services'
 
 describe('Sprint 0 permission boundary acceptance', () => {
   afterEach(() => {

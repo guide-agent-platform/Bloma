@@ -18,16 +18,16 @@
 
 import { randomUUID } from 'node:crypto'
 import type { AgentEvent, AgentSendMessageInput } from '../../shared/types'
-import { recordDecision } from '../decision-log'
+import { recordDecision } from '../project/decision-log'
 import { publishPrdConfirmCard } from '../guide/prd-confirm'
 import type { PrdBackplane } from '../coding/sketch-engine'
 import { defaultConstraintLevel } from '../coding/sketch-engine'
-import { isInjectionEnabled } from '../template-injection'
+import { isInjectionEnabled } from '../agent/prompting/template-injection'
 import { checkSectionCompleteness } from '../guide/prd-sections'
 import { parseEarsAssertion, renderForbiddenTermsForPrompt } from '../guide/ears-vocabulary'
-import type { SDKQuery } from '../orchestrator'
+import type { SDKQuery } from '../orchestration/orchestrator'
 import { delegatedReviewEnabled, runDelegatedReview } from './review-delegation'
-import { buildConversationExcerpt, buildReadConversationHistoryTool } from '../conversation-excerpt'
+import { buildConversationExcerpt, buildReadConversationHistoryTool } from '../agent/loop/conversation-excerpt'
 import {
   DEFENDER_SYSTEM_PROMPT,
   buildDefenderTask,

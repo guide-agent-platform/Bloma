@@ -9,7 +9,7 @@ import {
   resetCategoryConfigsForTests,
   setCategoryConfigForTests,
   type DocumentCategory,
-} from '../../main/model-resolution'
+} from '../../main/platform/llm/model-resolution'
 
 /**
  * 文档类别 → 模型路由（§6，M4）：代码里写类别不写模型名。

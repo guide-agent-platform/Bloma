@@ -3,17 +3,17 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createChannel } from '../../main/channel-manager'
-import { setSafeStorageAdapter } from '../../main/safe-storage'
-import { getSdkQuery, resetSDKQueryForTests } from '../../main/orchestrator'
-import { setSseRetryWaitBudgetForTests } from '../../main/providers/sse-reader'
+import { createChannel } from '../../main/platform/llm/channel-manager'
+import { setSafeStorageAdapter } from '../../main/platform/storage/safe-storage'
+import { getSdkQuery, resetSDKQueryForTests } from '../../main/orchestration/orchestrator'
+import { setSseRetryWaitBudgetForTests } from '../../main/platform/upstream/providers/sse-reader'
 import {
   isInfrastructureFailure,
   readFallbackContext,
   resolveChannelEnv,
   resetChannelSwitchThrottleForTests,
-} from '../../main/runtime-fallback'
-import { resetCategoryRoutingForTests, setCategoryRoutingForTests } from '../../main/category-routing'
+} from '../../main/platform/llm/runtime-fallback'
+import { resetCategoryRoutingForTests, setCategoryRoutingForTests } from '../../main/platform/llm/category-routing'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import type { SDKMessage } from '../../shared/types'
 

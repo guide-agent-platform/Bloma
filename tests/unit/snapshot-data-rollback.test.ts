@@ -4,9 +4,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createProject, findProject } from '../../main/project-service'
-import { recordSessionActivity } from '../../main/session-service'
-import { clearSandboxRuntimeForTests, createSnapshot, restoreSnapshotFiles, setSandboxRuntimeForTests } from '../../main/platform-services'
+import { createProject, findProject } from '../../main/project/project-service'
+import { recordSessionActivity } from '../../main/platform/sessions/session-service'
+import { clearSandboxRuntimeForTests, createSnapshot, restoreSnapshotFiles, setSandboxRuntimeForTests } from '../../main/delivery/platform-services'
 
 /**
  * 完整程序阶段 3（2026-09-06）：data/ 运行数据纳入快照/回滚语义锁定。

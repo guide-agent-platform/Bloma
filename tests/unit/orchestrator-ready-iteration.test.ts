@@ -3,8 +3,8 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { runAgent, setAgentStreamPublisher, setSDKQueryForTests } from '../../main/orchestrator'
-import { findProject } from '../../main/project-service'
+import { runAgent, setAgentStreamPublisher, setSDKQueryForTests } from '../../main/orchestration/orchestrator'
+import { findProject } from '../../main/project/project-service'
 import { readFileSync } from 'node:fs'
 import { readExperienceEvents } from '../../main/experience/event-log'
 import type { AgentEvent, SDKMessage } from '../../shared/types'
@@ -13,8 +13,8 @@ const { runIterationTaskMock } = vi.hoisted(() => ({
   runIterationTaskMock: vi.fn(async () => ({ preview_url: 'http://localhost:1' })),
 }))
 
-vi.mock('../../main/channel-manager', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/channel-manager')>()
+vi.mock('../../main/platform/llm/channel-manager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/platform/llm/channel-manager')>()
   return {
     ...actual,
     getChannelByIdRaw: () => ({
@@ -36,8 +36,8 @@ vi.mock('../../main/coding/programming-orchestrator', async (importOriginal) => 
   return { ...actual, runIterationTask: runIterationTaskMock }
 })
 
-vi.mock('../../main/project-service', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../../main/project-service')>()
+vi.mock('../../main/project/project-service', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../main/project/project-service')>()
   return { ...original, findProject: vi.fn(), updateProject: vi.fn(() => ({})) }
 })
 

@@ -5,7 +5,7 @@ import {
   normalizeHttpResponse,
   normalizeRequestError,
   summarizeDetail,
-} from '../../main/channel-test-error'
+} from '../../main/platform/llm/channel-test-error'
 
 /**
  * 渠道连接测试错误归一化纯函数测试（S2-AGENT）。

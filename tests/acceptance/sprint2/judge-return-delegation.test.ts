@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { runJudgeReview, setProgrammingEventPublisher } from '../../../main/coding/programming-orchestrator'
-import { createProject, findProject } from '../../../main/project-service'
+import { createProject, findProject } from '../../../main/project/project-service'
 import type { AgentEvent } from '../../../shared/types'
 
 /**

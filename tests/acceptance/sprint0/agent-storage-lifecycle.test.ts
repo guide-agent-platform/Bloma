@@ -9,9 +9,9 @@ import {
   setAgentStreamPublisher,
   setRetrySleepForTests,
   setSDKQueryForTests,
-} from '../../../main/orchestrator'
-import { createProject, findProject, updateProject } from '../../../main/project-service'
-import { listSessions, loadMessages } from '../../../main/session-service'
+} from '../../../main/orchestration/orchestrator'
+import { createProject, findProject, updateProject } from '../../../main/project/project-service'
+import { listSessions, loadMessages } from '../../../main/platform/sessions/session-service'
 import type { SDKMessage } from '../../../shared/types'
 import {
   listFilesRecursively,
@@ -20,8 +20,8 @@ import {
   type TemporaryPromaHome,
 } from '../support/test-environment'
 
-vi.mock('../../../main/channel-manager', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/channel-manager')>()
+vi.mock('../../../main/platform/llm/channel-manager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/platform/llm/channel-manager')>()
   return {
     ...actual,
     getChannelByIdRaw: () => ({

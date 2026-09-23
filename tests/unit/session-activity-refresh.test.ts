@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createProject, findProject } from '../../main/project-service'
+import { createProject, findProject } from '../../main/project/project-service'
 import {
   resetSessionActivityThrottleForTests,
   runSketchTask,
@@ -15,14 +15,14 @@ import {
   clearSandboxRuntimeForTests,
   setSandboxRuntimeForTests,
   setSnapshotCaptureProviderForTests,
-} from '../../main/platform-services'
-import { decryptApiKey, getFirstEnabledChannel } from '../../main/channel-manager'
-import { listSessions } from '../../main/session-service'
-import type { SDKQuery } from '../../main/orchestrator'
+} from '../../main/delivery/platform-services'
+import { decryptApiKey, getFirstEnabledChannel } from '../../main/platform/llm/channel-manager'
+import { listSessions } from '../../main/platform/sessions/session-service'
+import type { SDKQuery } from '../../main/orchestration/orchestrator'
 import type { Channel, SDKMessage } from '../../shared/types'
 
-vi.mock('../../main/channel-manager', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/channel-manager')>()
+vi.mock('../../main/platform/llm/channel-manager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/platform/llm/channel-manager')>()
   // importOriginal + spread 保住 buildSdkEnv 等真实实现（陷阱 2）
   return {
     ...actual,

@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { loadPromptOverride } from '../../main/prompt-config'
+import { loadPromptOverride } from '../../main/agent/prompting/prompt-config'
 import {
   DEFAULT_SYSTEM_PROMPT as SKETCH_DEFAULT,
 } from '../../main/coding/sketch-engine-llm'

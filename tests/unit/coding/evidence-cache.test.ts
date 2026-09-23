@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { clearEvidenceCacheForTests, computeArtifactFingerprint, getCachedStaticEvidence, setCachedStaticEvidence } from '../../../main/coding/evidence-cache'
+import { clearEvidenceCacheForTests, computeArtifactFingerprint, getCachedStaticEvidence, setCachedStaticEvidence } from '../../../main/verification/evidence-cache'
 
 describe('W6-D6：静态证据按产物指纹缓存', () => {
   const original = process.env.BLOMA_EVIDENCE_CACHE

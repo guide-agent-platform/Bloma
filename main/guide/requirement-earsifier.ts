@@ -1,4 +1,4 @@
-import type { SDKQuery } from '../orchestrator'
+import type { SDKQuery } from '../orchestration/orchestrator'
 import {
   parseEarsAssertion,
   renderForbiddenTermsForPrompt,
@@ -7,7 +7,7 @@ import {
 } from './ears-vocabulary'
 import type { SketchRequirement } from '../coding/sketch-engine'
 import { requirementPriority } from '../coding/sketch-engine'
-import { categoryTemperature } from '../model-resolution'
+import { categoryTemperature } from '../platform/llm/model-resolution'
 import { callLlmForJson } from '../kernel/llm-call'
 
 /**

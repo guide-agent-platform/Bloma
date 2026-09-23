@@ -9,7 +9,7 @@ import {
   extractZhipuCodingTeamApiToken,
   parseZhipuTeamCredentials,
   resolveFirstTestModelId,
-} from '../../main/channel-presets'
+} from '../../main/platform/llm/channel-presets'
 
 /**
  * 渠道预设常量与智谱团队凭据解析测试（S2-AGENT）。

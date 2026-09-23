@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { callLlmForJson, looksJsonTruncated } from '../../main/kernel/llm-call'
-import type { SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
+import type { SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 import type { SDKMessage } from '../../shared/types'
 
 function fakeMsg(text: string): SDKMessage {

@@ -7,7 +7,7 @@ import {
   evaluateScenarioOutcome,
   newDiagnosticsSince,
   snapshotDiagnostics,
-} from '../../main/gwt-runner'
+} from '../../main/verification/gwt-runner'
 
 /**
  * PR1（随感 39 诊断补盲）纯函数单测：pageerror / console / requestfailed 三路采集、

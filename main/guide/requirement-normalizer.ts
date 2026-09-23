@@ -1,10 +1,10 @@
-import type { SDKQuery } from '../orchestrator'
+import type { SDKQuery } from '../orchestration/orchestrator'
 import type { ThinkingLevel } from '../../shared/reasoning-profile'
-import { loadPromptOverride } from '../prompt-config'
+import { loadPromptOverride } from '../agent/prompting/prompt-config'
 import type { SketchRequirement } from '../coding/sketch-engine'
 import { requirementAssertions } from '../coding/sketch-engine'
-import { categoryTemperature } from '../model-resolution'
-import { recordDecision } from '../decision-log'
+import { categoryTemperature } from '../platform/llm/model-resolution'
+import { recordDecision } from '../project/decision-log'
 import { callLlmForJson } from '../kernel/llm-call'
 
 /**

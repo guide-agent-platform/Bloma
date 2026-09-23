@@ -7,23 +7,23 @@ import type { ChildProcess } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { syncDocuments } from '../../main/document-engine'
-import { writeTestReport } from '../../main/gwt-service'
+import { syncDocuments } from '../../main/project/document-engine'
+import { writeTestReport } from '../../main/verification/gwt-service'
 import {
   resolveBlockedDecision,
   resumeBlockedFlow,
   setProgrammingEventPublisher,
 } from '../../main/coding/programming-orchestrator'
-import { createProject, findProject, recordSketchGenerated, updateProject } from '../../main/project-service'
-import { createChannel } from '../../main/channel-manager'
-import { setSafeStorageAdapter } from '../../main/safe-storage'
+import { createProject, findProject, recordSketchGenerated, updateProject } from '../../main/project/project-service'
+import { createChannel } from '../../main/platform/llm/channel-manager'
+import { setSafeStorageAdapter } from '../../main/platform/storage/safe-storage'
 import {
   clearSandboxRuntimeForTests,
   setSandboxRuntimeForTests,
   setSnapshotCaptureProviderForTests,
-} from '../../main/platform-services'
-import { setBrowserGwtDisabledForTests } from '../../main/gwt-runner'
-import type { SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
+} from '../../main/delivery/platform-services'
+import { setBrowserGwtDisabledForTests } from '../../main/verification/gwt-runner'
+import type { SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 import type { AgentEvent, MessageContentBlock, SDKMessage } from '../../shared/types'
 
 /**

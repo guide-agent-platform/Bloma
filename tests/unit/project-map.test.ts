@@ -8,7 +8,7 @@ import {
   generateProjectMap,
   loadProjectMapBlock,
   scheduleProjectMapRefresh,
-} from '../../main/project-map'
+} from '../../main/project/project-map'
 import { restorePromaHome } from '../support/proma-home-guard'
 
 /**

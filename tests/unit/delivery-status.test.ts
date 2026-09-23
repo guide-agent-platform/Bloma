@@ -8,7 +8,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../../main/project-service', () => ({ updateProject: vi.fn() }))
+vi.mock('../../main/project/project-service', () => ({ updateProject: vi.fn() }))
 
 import {
   buildDeliveryPresentation,
@@ -22,8 +22,8 @@ import {
   renderDeliveryBody,
   type DeliveryStatusComputationInput,
 } from '../../main/coding/delivery-status'
-import { updateProject } from '../../main/project-service'
-import type { GwtFailureSummary, GwtTestResult } from '../../main/gwt-service'
+import { updateProject } from '../../main/project/project-service'
+import type { GwtFailureSummary, GwtTestResult } from '../../main/verification/gwt-service'
 
 afterEach(() => {
   vi.unstubAllEnvs()

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { anthropicMessagesQuery, type SDKQueryOptions } from '../../main/orchestrator'
+import { anthropicMessagesQuery, type SDKQueryOptions } from '../../main/orchestration/orchestrator'
 import type { MessageContentBlock, SDKMessage } from '../../shared/types'
 
 /**

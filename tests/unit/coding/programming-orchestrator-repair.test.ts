@@ -5,18 +5,18 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runAgentLoopPostTesting, resumeBlockedFlow, setProgrammingEventPublisher } from '../../../main/coding/programming-orchestrator'
-import { createProject, findProject, updateProject } from '../../../main/project-service'
-import { recordSketchGenerated } from '../../../main/project-service'
-import { syncDocuments, readLoopCheckpointDocument, writeLoopCheckpointDocument } from '../../../main/document-engine'
-import { createChannel } from '../../../main/channel-manager'
-import { setSafeStorageAdapter } from '../../../main/safe-storage'
-import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../../main/platform-services'
-import { CircuitBreakSettledError } from '../../../main/recovery-service'
+import { createProject, findProject, updateProject } from '../../../main/project/project-service'
+import { recordSketchGenerated } from '../../../main/project/project-service'
+import { syncDocuments, readLoopCheckpointDocument, writeLoopCheckpointDocument } from '../../../main/project/document-engine'
+import { createChannel } from '../../../main/platform/llm/channel-manager'
+import { setSafeStorageAdapter } from '../../../main/platform/storage/safe-storage'
+import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../../main/delivery/platform-services'
+import { CircuitBreakSettledError } from '../../../main/orchestration/recovery-service'
 import { getAgentSessionPath } from '../../../storage/config-paths'
-import { writeTestReport } from '../../../main/gwt-service'
+import { writeTestReport } from '../../../main/verification/gwt-service'
 import type { AgentEvent } from '../../../shared/types'
-import type { SDKQuery, SDKQueryOptions } from '../../../main/orchestrator'
-import type { GwtTestResult } from '../../../main/gwt-service'
+import type { SDKQuery, SDKQueryOptions } from '../../../main/orchestration/orchestrator'
+import type { GwtTestResult } from '../../../main/verification/gwt-service'
 
 /**
  * P2 失败回流 · 入口 A（PR-B）：runAgentLoopPostTesting GWT 首败 → 定向修复轮 →
@@ -35,18 +35,18 @@ const mocks = vi.hoisted(() => ({
   runBuildGate: vi.fn(),
 }))
 
-vi.mock('../../../main/coding/agent-loop', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/coding/agent-loop')>()
+vi.mock('../../../main/agent/loop/agent-loop', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/agent/loop/agent-loop')>()
   return { ...actual, runAgentLoop: mocks.runAgentLoop }
 })
 
-vi.mock('../../../main/gwt-service', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/gwt-service')>()
+vi.mock('../../../main/verification/gwt-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/verification/gwt-service')>()
   return { ...actual, runGwtScenarios: mocks.runGwtScenarios }
 })
 
-vi.mock('../../../main/recovery-service', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/recovery-service')>()
+vi.mock('../../../main/orchestration/recovery-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/orchestration/recovery-service')>()
   return { ...actual, circuitBreakRollback: mocks.circuitBreakRollback }
 })
 

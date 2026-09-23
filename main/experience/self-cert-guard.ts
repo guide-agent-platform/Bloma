@@ -10,7 +10,7 @@
  */
 
 import type { ExperienceCard } from './types'
-import { containsBypassInstruction } from '../memory-sanitize'
+import { containsBypassInstruction } from '../agent/loop/memory-sanitize'
 
 /** 受保护面（单点定义；他处引用勿散写）。 */
 export const PROTECTED_SURFACES = [

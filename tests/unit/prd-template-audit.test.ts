@@ -4,13 +4,13 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ruleGateReview } from '../../main/review/prd-review'
 import { runJudge } from '../../main/review/judge-engine'
-import { syncDocuments } from '../../main/document-engine'
-import { createProject, recordSketchGenerated } from '../../main/project-service'
+import { syncDocuments } from '../../main/project/document-engine'
+import { createProject, recordSketchGenerated } from '../../main/project/project-service'
 import type { PrdBackplane, SketchRequirement } from '../../main/coding/sketch-engine'
 
 /** 注入点④内审变体 + ⑧judge 版本一致性（P6，最后做——消费前面所有产物）。 */
 
-vi.mock('../../main/decision-log', () => ({ recordDecision: vi.fn() }))
+vi.mock('../../main/project/decision-log', () => ({ recordDecision: vi.fn() }))
 
 const requirements: SketchRequirement[] = [
   { id: 'F-001', description: '做一个番茄钟', priority: 'P0', behavior_assertions: ['点击开始按钮 → 系统优雅处理计时'] },

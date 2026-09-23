@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { appendPrdRequirements, isPrdUserConfirmed, listDocuments, markPrdUserConfirmed, readDocument, syncDocuments } from '../../main/document-engine'
-import { createProject, recordSketchGenerated, updateProject } from '../../main/project-service'
+import { appendPrdRequirements, isPrdUserConfirmed, listDocuments, markPrdUserConfirmed, readDocument, syncDocuments } from '../../main/project/document-engine'
+import { createProject, recordSketchGenerated, updateProject } from '../../main/project/project-service'
 import { getDocumentsDir } from '../../storage/config-paths'
 
 describe('DocumentEngine (A2-05)', () => {

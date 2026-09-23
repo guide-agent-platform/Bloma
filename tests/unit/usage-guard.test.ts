@@ -10,7 +10,7 @@ import {
   getSessionUsageRatioById,
   decideSessionReuse,
   decideWrite,
-} from '../../main/usage-guard'
+} from '../../main/agent/loop/usage-guard'
 
 /**
  * Usage-Guard 三件套（2026-08-28，费用守卫 P2，r56 原型 20/20 转正）：

@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { registerUxContract, type MvpTaskInput } from '../../main/coding/programming-orchestrator'
-import { readPrdBackplane, readUxContractSketch, syncDocuments } from '../../main/document-engine'
-import { createProject, findProject, updateProject } from '../../main/project-service'
+import { readPrdBackplane, readUxContractSketch, syncDocuments } from '../../main/project/document-engine'
+import { createProject, findProject, updateProject } from '../../main/project/project-service'
 import { getDocumentsDir } from '../../storage/config-paths'
 
 /**

@@ -14,10 +14,10 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createChannel, updateChannel } from '../../main/channel-manager'
-import { setSafeStorageAdapter } from '../../main/safe-storage'
-import { resetCategoryRoutingForTests, saveCategoryRouting } from '../../main/category-routing'
-import { resetCategoryRouteThrottleForTests, resolveChannelEnv } from '../../main/runtime-fallback'
+import { createChannel, updateChannel } from '../../main/platform/llm/channel-manager'
+import { setSafeStorageAdapter } from '../../main/platform/storage/safe-storage'
+import { resetCategoryRoutingForTests, saveCategoryRouting } from '../../main/platform/llm/category-routing'
+import { resetCategoryRouteThrottleForTests, resolveChannelEnv } from '../../main/platform/llm/runtime-fallback'
 
 function workingSafeStorage(): void {
   setSafeStorageAdapter({

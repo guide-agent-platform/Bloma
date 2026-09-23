@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { archiveProject, createProject, findProject } from '../../main/project-service'
+import { archiveProject, createProject, findProject } from '../../main/project/project-service'
 import {
   cleanOrphanSessions,
   listSessions,
@@ -12,7 +12,7 @@ import {
   readSessionsForTest,
   recordSessionActivity,
   writeSessionsForTest,
-} from '../../main/session-service'
+} from '../../main/platform/sessions/session-service'
 import { getAgentSessionPath } from '../../storage/config-paths'
 
 function sleep(ms: number): Promise<void> {

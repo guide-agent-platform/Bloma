@@ -3,9 +3,9 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { syncDocuments } from '../../main/document-engine'
+import { syncDocuments } from '../../main/project/document-engine'
 import { runJudgeReview, setForegroundRunChecker, setProgrammingEventPublisher } from '../../main/coding/programming-orchestrator'
-import { createProject, findProject, recordSketchGenerated } from '../../main/project-service'
+import { createProject, findProject, recordSketchGenerated } from '../../main/project/project-service'
 
 describe('Judge review trigger and return counts (A2-11)', () => {
   const originalPromaHome = process.env.PROMA_HOME

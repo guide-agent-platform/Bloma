@@ -9,10 +9,10 @@ import {
   resolveAgentLoopMaxTurnsLocal,
 } from '../../../main/coding/iteration-brief'
 import { iterationBriefActive, resolveLoopMaxTurnsForInput } from '../../../main/coding/programming-orchestrator'
-import { generateLoopPlan } from '../../../main/coding/loop-planner'
+import { generateLoopPlan } from '../../../main/agent/loop/loop-planner'
 import type { PrdBackplane } from '../../../main/model/prd-backplane'
 import type { SDKMessage } from '../../../shared/types'
-import type { SDKQuery, SDKQueryOptions } from '../../../main/orchestrator'
+import type { SDKQuery, SDKQueryOptions } from '../../../main/orchestration/orchestrator'
 
 /**
  * Phase 8 W1/W2（2026-09-11 狗粮 94f449c6 复盘「照搬正常 agent 工作模式」）：

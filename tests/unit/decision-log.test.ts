@@ -3,12 +3,12 @@ import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { exportDecisionsMd, recordDecision } from '../../main/decision-log'
-import { listDocuments, readDocument } from '../../main/document-engine'
-import { createProject, findProject } from '../../main/project-service'
+import { exportDecisionsMd, recordDecision } from '../../main/project/decision-log'
+import { listDocuments, readDocument } from '../../main/project/document-engine'
+import { createProject, findProject } from '../../main/project/project-service'
 import { getAgentSessionPath, getDocumentsDir } from '../../storage/config-paths'
 import { appendJsonLine } from '../../storage/json-store'
-import { recordSessionActivity } from '../../main/session-service'
+import { recordSessionActivity } from '../../main/platform/sessions/session-service'
 
 /** 决策日志（长期型改造 T2）：落盘 → decisions.md 同步重导出 → 历史行如实聚合。 */
 describe('decision-log (T2)', () => {

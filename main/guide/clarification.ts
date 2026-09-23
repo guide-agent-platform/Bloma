@@ -20,9 +20,9 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { getAgentSessionPath } from '../../storage/config-paths'
-import { recordDecision } from '../decision-log'
+import { recordDecision } from '../project/decision-log'
 import type { AgentEvent, AgentMessage, AgentSendMessageInput } from '../../shared/types'
-import type { SDKQuery } from '../orchestrator'
+import type { SDKQuery } from '../orchestration/orchestrator'
 
 /** 事件发布器（与 guide-agent-service.GuideEventPublisher 同构；本地签名避免反向依赖编排层）。 */
 type ClarificationEventPublisher = (event: AgentEvent) => void

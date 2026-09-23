@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createProject } from '../../../main/project-service'
+import { createProject } from '../../../main/project/project-service'
 import { useTemporaryPromaHome, type TemporaryPromaHome } from '../support/test-environment'
 
 const root = fileURLToPath(new URL('../../..', import.meta.url))

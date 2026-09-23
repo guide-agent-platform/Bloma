@@ -13,8 +13,8 @@ import {
   setReminderIntervalForTests,
   setWindowFocusedHook,
   type NotificationBackend,
-} from '../../main/notifications'
-import { createProject, updateProject } from '../../main/project-service'
+} from '../../main/platform/shell/notifications'
+import { createProject, updateProject } from '../../main/project/project-service'
 import type { AgentEvent, Project } from '../../shared/types'
 
 const REMINDER_INTERVAL = 60_000

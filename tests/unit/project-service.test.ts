@@ -16,8 +16,8 @@ import {
   renameProject,
   reopenProject,
   unarchiveProject,
-} from '../../main/project-service'
-import { recordSessionActivity } from '../../main/session-service'
+} from '../../main/project/project-service'
+import { recordSessionActivity } from '../../main/platform/sessions/session-service'
 import {
   getAgentSessionPath,
   getAgentSessionsIndexPath,

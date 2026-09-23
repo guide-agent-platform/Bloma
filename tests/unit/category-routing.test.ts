@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Channel } from '../../shared/types'
-import { createChannel, updateChannel } from '../../main/channel-manager'
-import { setSafeStorageAdapter } from '../../main/safe-storage'
+import { createChannel, updateChannel } from '../../main/platform/llm/channel-manager'
+import { setSafeStorageAdapter } from '../../main/platform/storage/safe-storage'
 import { getCategoryRoutingPath } from '../../storage/config-paths'
 import {
   buildCategoryRoutingViews,
@@ -21,7 +21,7 @@ import {
   setCategoryRoutingForTests,
   updateCategoryRouting,
   updateCategoryRoutingRoles,
-} from '../../main/category-routing'
+} from '../../main/platform/llm/category-routing'
 
 /**
  * 类别 → 渠道路由（M5）：每个职责可固定走某家厂商渠道，未配置类别保持全局自动。

@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { canRecoverRenderer, createCrashGuard } from '../../main/renderer-crash-guard'
+import { canRecoverRenderer, createCrashGuard } from '../../main/platform/shell/renderer-crash-guard'
 
 /**
  * Renderer-Crash-Guard（v7 Top3，2026-08-29 移植转正）：

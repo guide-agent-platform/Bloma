@@ -3,8 +3,8 @@ import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { buildSessionIndex, searchSessions, prepareRecallBlock } from '../../main/session-recall'
-import { REVOCATION_FILE, revokeMemoryText } from '../../main/memory-revocation'
+import { buildSessionIndex, searchSessions, prepareRecallBlock } from '../../main/agent/loop/session-recall'
+import { REVOCATION_FILE, revokeMemoryText } from '../../main/agent/loop/memory-revocation'
 import { getPromaHome } from '../../storage/config-paths'
 
 /**

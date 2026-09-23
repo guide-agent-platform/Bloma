@@ -2,10 +2,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { forkFrom, listSessions, loadMessages, recordSessionActivity, setSessionActiveChecker } from '../../main/session-service'
-import { appendSessionMessage, resetSessionTreeForTests } from '../../main/session-tree'
+import { forkFrom, listSessions, loadMessages, recordSessionActivity, setSessionActiveChecker } from '../../main/platform/sessions/session-service'
+import { appendSessionMessage, resetSessionTreeForTests } from '../../main/platform/sessions/session-tree'
 import { getAgentSessionPath, getAgentSessionsIndexPath } from '../../storage/config-paths'
-import { isSessionActive, registerBackgroundRun, unregisterBackgroundRun } from '../../main/orchestrator'
+import { isSessionActive, registerBackgroundRun, unregisterBackgroundRun } from '../../main/orchestration/orchestrator'
 
 /**
  * P0-2 会话 fork（2026-09-08 pi 差距方案 §2）。

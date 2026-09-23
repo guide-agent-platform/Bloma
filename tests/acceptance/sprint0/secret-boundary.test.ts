@@ -7,12 +7,12 @@ import {
   decryptApiKey,
   getChannelByIdRaw,
   listChannels,
-} from '../../../main/channel-manager'
+} from '../../../main/platform/llm/channel-manager'
 import {
   decryptSecret,
   encryptSecret,
   setSafeStorageAdapter,
-} from '../../../main/safe-storage'
+} from '../../../main/platform/storage/safe-storage'
 import { useTemporaryPromaHome, type TemporaryPromaHome } from '../support/test-environment'
 
 const root = fileURLToPath(new URL('../../..', import.meta.url))

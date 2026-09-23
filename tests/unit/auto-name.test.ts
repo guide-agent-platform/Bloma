@@ -20,8 +20,8 @@ const { findProjectMock, updateProjectMock, readPrimaryIntentMock, readPrdBackpl
   })),
 }))
 
-vi.mock('../../main/channel-manager', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/channel-manager')>()
+vi.mock('../../main/platform/llm/channel-manager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/platform/llm/channel-manager')>()
   return {
     ...actual,
     getChannelByIdRaw: () => ({
@@ -38,18 +38,18 @@ vi.mock('../../main/channel-manager', async (importOriginal) => {
   }
 })
 
-vi.mock('../../main/project-service', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/project-service')>()
+vi.mock('../../main/project/project-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/project/project-service')>()
   return { ...actual, findProject: findProjectMock, updateProject: updateProjectMock }
 })
 
-vi.mock('../../main/document-engine', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/document-engine')>()
+vi.mock('../../main/project/document-engine', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/project/document-engine')>()
   return { ...actual, readPrdBackplane: readPrdBackplaneMock }
 })
 
-vi.mock('../../main/session-service', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/session-service')>()
+vi.mock('../../main/platform/sessions/session-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/platform/sessions/session-service')>()
   return { ...actual, readPrimaryIntent: readPrimaryIntentMock }
 })
 

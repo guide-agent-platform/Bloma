@@ -21,7 +21,7 @@ import {
   wrapSteerContent,
   type SteerLedgerEntry,
   type SteerStatusListener,
-} from '../../main/steer-queue'
+} from '../../main/agent/loop/steer-queue'
 
 /**
  * SteerQueue 单元测试（P0-1 运行中转向，2026-09-08 pi 差距方案 §1）。

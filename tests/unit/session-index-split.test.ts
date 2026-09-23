@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { getAgentSessionsIndexPath } from '../../storage/config-paths'
-import { migrateLegacySessionsIndexOnce, recordSessionActivity } from '../../main/session-service'
+import { migrateLegacySessionsIndexOnce, recordSessionActivity } from '../../main/platform/sessions/session-service'
 
 /**
  * 会话索引独立化（2026-09-04，陷阱 1/40 同模式）：Bloma 索引改 bloma-agent-sessions.json，

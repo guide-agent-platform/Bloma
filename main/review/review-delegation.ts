@@ -27,10 +27,10 @@ import {
   unregisterParentLoopContext,
   waitForDelegations,
   type DelegationSummary,
-} from '../coding/agent-collaboration'
-import { buildAgentTools } from '../coding/agent-tools'
-import { createToolState, type AgentLoopTool, type ToolContext } from '../coding/agent-loop'
-import type { SDKQuery } from '../orchestrator'
+} from '../agent/delegation/agent-collaboration'
+import { buildAgentTools } from '../agent/tools/agent-tools'
+import { createToolState, type AgentLoopTool, type ToolContext } from '../agent/loop/agent-loop'
+import type { SDKQuery } from '../orchestration/orchestrator'
 
 /** 委派审查运行开关（缺省开启；测试与紧急回退用 '0' 关闭）。 */
 export function delegatedReviewEnabled(): boolean {

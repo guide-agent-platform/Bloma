@@ -11,9 +11,9 @@ import {
   type ToolContext,
   type ToolOutcome,
   type TurnToolExecution,
-} from '../../main/coding/agent-loop'
+} from '../../main/agent/loop/agent-loop'
 import type { SDKMessage } from '../../shared/types'
-import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
+import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import { readFileSync } from 'node:fs'
 

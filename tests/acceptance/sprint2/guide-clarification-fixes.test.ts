@@ -2,10 +2,10 @@ import { restorePromaHome } from '../../support/proma-home-guard'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { runAgent, setAgentStreamPublisher, setSDKQueryForTests } from '../../../main/orchestrator'
+import { runAgent, setAgentStreamPublisher, setSDKQueryForTests } from '../../../main/orchestration/orchestrator'
 
-vi.mock('../../../main/channel-manager', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/channel-manager')>()
+vi.mock('../../../main/platform/llm/channel-manager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/platform/llm/channel-manager')>()
   return {
     ...actual,
     getChannelByIdRaw: () => ({
@@ -32,12 +32,12 @@ vi.mock('../../../main/guide/guide-research', () => ({
     reason: 'empty',
   })),
 }))
-import { createProject, findProject, readLastSketchRequirements } from '../../../main/project-service'
+import { createProject, findProject, readLastSketchRequirements } from '../../../main/project/project-service'
 import {
   clearSandboxRuntimeForTests,
   setSandboxRuntimeForTests,
   setSnapshotCaptureProviderForTests,
-} from '../../../main/platform-services'
+} from '../../../main/delivery/platform-services'
 import { makeChildProcess, useTemporaryPromaHome } from '../support/test-environment'
 import type { AgentEvent, SDKMessage } from '../../../shared/types'
 

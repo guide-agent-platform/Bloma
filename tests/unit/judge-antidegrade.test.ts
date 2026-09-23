@@ -12,11 +12,11 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { syncDocuments } from '../../main/document-engine'
+import { syncDocuments } from '../../main/project/document-engine'
 import { runJudge } from '../../main/review/judge-engine'
 import { buildSemanticJudgeSystemPrompt, SEMANTIC_JUDGE_SYSTEM_PROMPT } from '../../main/review/judge-semantic'
 import { antidegradeEnabled, detectAntidegrade } from '../../main/review/judge-antidegrade'
-import { createProject, recordSketchGenerated } from '../../main/project-service'
+import { createProject, recordSketchGenerated } from '../../main/project/project-service'
 import type { AiCapability } from '../../main/model/prd-backplane'
 
 afterEach(() => {

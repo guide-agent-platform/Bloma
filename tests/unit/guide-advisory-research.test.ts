@@ -10,9 +10,9 @@ vi.mock('../../main/coding/programming-orchestrator', () => ({
   })),
   setProgrammingEventPublisher: vi.fn(),
 }))
-vi.mock('../../main/platform-services', () => ({ trackAnalytics: vi.fn() }))
-vi.mock('../../main/document-engine', () => ({ syncDocuments: vi.fn(() => ({ documents: [], stale_documents: [] })) }))
-vi.mock('../../main/project-service', () => ({
+vi.mock('../../main/delivery/platform-services', () => ({ trackAnalytics: vi.fn() }))
+vi.mock('../../main/project/document-engine', () => ({ syncDocuments: vi.fn(() => ({ documents: [], stale_documents: [] })) }))
+vi.mock('../../main/project/project-service', () => ({
   findProject: vi.fn(() => ({
     project_id: 'proj-1',
     workspace_slug: 'default-software-builder',
@@ -24,11 +24,11 @@ vi.mock('../../main/project-service', () => ({
   })),
   updateProject: vi.fn(),
 }))
-vi.mock('../../main/session-service', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/session-service')>()
+vi.mock('../../main/platform/sessions/session-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/platform/sessions/session-service')>()
   return { ...actual, readPrimaryIntent: vi.fn((): string | undefined => undefined) }
 })
-vi.mock('../../main/decision-log', () => ({ recordDecision: vi.fn(), parseDecisionText: vi.fn() }))
+vi.mock('../../main/project/decision-log', () => ({ recordDecision: vi.fn(), parseDecisionText: vi.fn() }))
 vi.mock('../../main/guide/guide-research', () => ({
   normalizeResearchQuery: (q: string) => q,
   researchMarketSimilar: vi.fn(async (queries: string[]) => ({
@@ -41,7 +41,7 @@ vi.mock('../../main/guide/guide-research', () => ({
 
 import { handleGuideMessage } from '../../main/guide/guide-agent-service'
 import { researchMarketSimilar } from '../../main/guide/guide-research'
-import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../main/orchestrator'
+import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../main/orchestration/orchestrator'
 
 const SESSION_ID = 'sess-advisory'
 

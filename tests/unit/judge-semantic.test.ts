@@ -18,24 +18,24 @@ vi.mock('../../main/review/judge-engine', async (importOriginal) => {
     })),
   }
 })
-vi.mock('../../main/runtime-fallback', () => ({
+vi.mock('../../main/platform/llm/runtime-fallback', () => ({
   // 类别路由固定给出可用 env（语义腿必跑）；skip 分支用独立用例直测 runSemanticJudgeReview
   resolveChannelEnv: vi.fn(() => ({ env: { ANTHROPIC_AUTH_TOKEN: 'k', ANTHROPIC_BASE_URL: 'https://example.com' }, channel: { id: 'ch-1' } })),
 }))
 
 import { runJudgeReview, setProgrammingEventPublisher } from '../../main/coding/programming-orchestrator'
-import { resolveChannelEnv } from '../../main/runtime-fallback'
+import { resolveChannelEnv } from '../../main/platform/llm/runtime-fallback'
 import { runJudge } from '../../main/review/judge-engine'
-import { syncDocuments } from '../../main/document-engine'
-import { createProject, findProject } from '../../main/project-service'
-import { recordSessionActivity } from '../../main/session-service'
+import { syncDocuments } from '../../main/project/document-engine'
+import { createProject, findProject } from '../../main/project/project-service'
+import { recordSessionActivity } from '../../main/platform/sessions/session-service'
 import {
   deriveConstraint,
   parseSemanticFindings,
   runSemanticJudgeReview,
   type SemanticFinding,
 } from '../../main/review/judge-semantic'
-import type { ConversationTurn, SDKQuery } from '../../main/orchestrator'
+import type { ConversationTurn, SDKQuery } from '../../main/orchestration/orchestrator'
 import type { SketchRequirement } from '../../main/coding/sketch-engine'
 
 /**

@@ -14,7 +14,7 @@ import { DEFAULT_BEHAVIOR_ASSERTION, type SketchRequirement } from '../../main/c
 import { getAgentSessionPath } from '../../storage/config-paths'
 import { appendJsonLine } from '../../storage/json-store'
 import type { SDKMessage } from '../../shared/types'
-import type { SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
+import type { SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 
 /**
  * 功能项加厚（2026-08-18 设计 §5 测试计划）单元测试。

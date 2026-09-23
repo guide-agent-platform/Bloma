@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { appendSessionMessage, resetSessionTreeForTests } from '../../main/session-tree'
+import { appendSessionMessage, resetSessionTreeForTests } from '../../main/platform/sessions/session-tree'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import { restorePromaHome } from '../support/proma-home-guard'
 

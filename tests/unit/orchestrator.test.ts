@@ -15,12 +15,12 @@ import {
   setSDKQueryForTests,
   shouldRetry,
   unregisterBackgroundRun,
-} from '../../main/orchestrator'
+} from '../../main/orchestration/orchestrator'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import type { AgentEvent, SDKMessage } from '../../shared/types'
 
-vi.mock('../../main/channel-manager', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/channel-manager')>()
+vi.mock('../../main/platform/llm/channel-manager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/platform/llm/channel-manager')>()
   return {
     ...actual,
     getChannelByIdRaw: () => ({
@@ -632,7 +632,7 @@ describe('I3 steer deferred 持久化（persistSteerDeferredNotice）', () => {
 
   it('deferred 落盘 [steer-deferred] system 行（跨重启回放可见）；写盘失败静默不抛', async () => {
     process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'proma-steer-defer-'))
-    const { persistSteerDeferredNotice } = await import('../../main/orchestrator')
+    const { persistSteerDeferredNotice } = await import('../../main/orchestration/orchestrator')
     persistSteerDeferredNotice('session-defer-1', '再加一个搜索功能')
     const lines = readFileSync(getAgentSessionPath('session-defer-1'), 'utf8').split('\n').filter(Boolean)
     const row = JSON.parse(lines[lines.length - 1])

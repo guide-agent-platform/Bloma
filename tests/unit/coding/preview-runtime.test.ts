@@ -11,7 +11,7 @@ import {
   STATIC_FILE_SERVER_SCRIPT,
   writeRealScaffoldMarker,
 } from '../../../main/coding/preview-runtime'
-import { SNAPSHOT_PRESERVED_TOPLEVEL } from '../../../main/platform-services'
+import { SNAPSHOT_PRESERVED_TOPLEVEL } from '../../../main/delivery/platform-services'
 import { restorePromaHome } from '../../support/proma-home-guard'
 
 /**

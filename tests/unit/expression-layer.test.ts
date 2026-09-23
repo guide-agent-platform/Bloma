@@ -6,7 +6,7 @@
  * （off 与 on 的 prompt 去掉表达段后逐字节相等）。
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { expressionLayerEnabled, renderExpressionSection, THINKING_EXPRESSION_SECTION } from '../../main/prompt-expression'
+import { expressionLayerEnabled, renderExpressionSection, THINKING_EXPRESSION_SECTION } from '../../main/agent/prompting/prompt-expression'
 import { buildAgentLoopSystemPrompt } from '../../main/coding/programming-orchestrator'
 import type { PrdBackplane } from '../../main/model/prd-backplane'
 

@@ -9,15 +9,15 @@ import {
   buildSketchInjection,
   gwtRequiredCategories,
   isInjectionEnabled,
-} from '../../main/template-injection'
-import { externalResourceViolation } from '../../main/coding/agent-tools'
+} from '../../main/agent/prompting/template-injection'
+import { externalResourceViolation } from '../../main/agent/tools/agent-tools'
 import { buildAgentLoopSystemPrompt } from '../../main/coding/programming-orchestrator'
-import { renderGwtSkeleton } from '../../main/document-engine'
+import { renderGwtSkeleton } from '../../main/project/document-engine'
 import type { PrdBackplane, SketchRequirement } from '../../main/coding/sketch-engine'
 
 /** 注入点②-⑦接线（P5）：每点独立开关（=现状语义）+ 切片内容。 */
 
-vi.mock('../../main/decision-log', () => ({ recordDecision: vi.fn() }))
+vi.mock('../../main/project/decision-log', () => ({ recordDecision: vi.fn() }))
 
 const requirements: SketchRequirement[] = [
   { id: 'F-001', description: '番茄钟', priority: 'P0', behavior_assertions: ['WHEN 点击开始按钮 → 计时启动', 'WHILE 列表为空 → 显示空状态'] },

@@ -2,10 +2,10 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { runAgentLoop, taskWorkflowEnabled, type AgentLoopInput, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../../../main/coding/agent-loop'
-import { renderTaskChecklist, type LoopPlan } from '../../../main/coding/loop-planner'
+import { runAgentLoop, taskWorkflowEnabled, type AgentLoopInput, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../../../main/agent/loop/agent-loop'
+import { renderTaskChecklist, type LoopPlan } from '../../../main/agent/loop/loop-planner'
 import type { SDKMessage } from '../../../shared/types'
-import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../../main/orchestrator'
+import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../../main/orchestration/orchestrator'
 
 /**
  * W5（Phase 8.5，2026-09-12 狗粮 dd6ba98d「工作流同步 2.0」）：任务清单驱动的生成 loop。

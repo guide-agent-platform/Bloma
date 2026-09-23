@@ -3,7 +3,7 @@ import { mkdtempSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createProject } from '../../main/project-service'
+import { createProject } from '../../main/project/project-service'
 import { getAnalyticsPath, getProjectEventsPath } from '../../storage/config-paths'
 import { appendJsonLine } from '../../storage/json-store'
 

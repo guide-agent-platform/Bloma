@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { userVisibleMessage } from '../../main/api-result'
+import { userVisibleMessage } from '../../shared/api-result'
 import type { ErrorCode } from '../../shared/types'
 
 describe('ApiResult user-visible messages', () => {

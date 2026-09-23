@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../../main/coding/agent-collaboration', () => ({
+vi.mock('../../main/agent/delegation/agent-collaboration', () => ({
   registerParentLoopContext: vi.fn(),
   unregisterParentLoopContext: vi.fn(),
   disposeParentDelegationState: vi.fn(),
@@ -36,8 +36,8 @@ import {
   stopDelegations,
   unregisterParentLoopContext,
   waitForDelegations,
-} from '../../main/coding/agent-collaboration'
-import type { SDKQuery } from '../../main/orchestrator'
+} from '../../main/agent/delegation/agent-collaboration'
+import type { SDKQuery } from '../../main/orchestration/orchestrator'
 import type { SDKMessage } from '../../shared/types'
 
 /**

@@ -6,7 +6,7 @@ import {
   getPermissionMode,
   resolvePermission,
   setPermissionMode,
-} from '../../main/permission-service'
+} from '../../main/agent/permissions/permission-service'
 import type { PromaPermissionMode } from '../../shared/types'
 
 describe('PermissionService', () => {

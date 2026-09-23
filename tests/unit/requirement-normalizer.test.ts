@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from '../../main/guide/requirement-normalizer'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import type { SDKMessage } from '../../shared/types'
-import type { SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
+import type { SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 
 /**
  * 修改诉求归一化（2026-08-16 复测 43b47a47：口语碎片原样入库污染 PRD 背板）。

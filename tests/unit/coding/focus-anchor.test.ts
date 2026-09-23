@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { buildAgentLoopSystemPrompt } from '../../../main/coding/programming-orchestrator'
-import { buildSkeletonMapInjection } from '../../../main/template-injection'
-import { renderGwtSkeleton } from '../../../main/document-engine'
+import { buildSkeletonMapInjection } from '../../../main/agent/prompting/template-injection'
+import { renderGwtSkeleton } from '../../../main/project/document-engine'
 import { focusAnchorEnabled, renderBackplaneAnchor, type PrdBackplane } from '../../../main/model/prd-backplane'
-import type { ProjectSkeleton } from '../../../main/project-templates'
+import type { ProjectSkeleton } from '../../../main/project/project-templates'
 
 /**
  * P3 任务级三文档契约 · PR-C：迭代分级锚定（renderBackplaneAnchor）。

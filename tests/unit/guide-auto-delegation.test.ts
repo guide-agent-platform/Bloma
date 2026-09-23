@@ -5,10 +5,10 @@ vi.mock('../../main/coding/programming-orchestrator', () => ({
   runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
   setProgrammingEventPublisher: vi.fn(),
 }))
-vi.mock('../../main/platform-services', () => ({
+vi.mock('../../main/delivery/platform-services', () => ({
   trackAnalytics: vi.fn(),
 }))
-vi.mock('../../main/project-service', () => ({
+vi.mock('../../main/project/project-service', () => ({
   findProject: vi.fn(() => ({
     project_id: 'proj-1',
     workspace_slug: 'default-software-builder',
@@ -21,21 +21,21 @@ vi.mock('../../main/project-service', () => ({
   })),
   updateProject: vi.fn(),
 }))
-vi.mock('../../main/session-service', async (importOriginal) => {
+vi.mock('../../main/platform/sessions/session-service', async (importOriginal) => {
   // 话术表走真实实现（单点维护），只 mock 掉读盘的 readPrimaryIntent
-  const actual = await importOriginal<typeof import('../../main/session-service')>()
+  const actual = await importOriginal<typeof import('../../main/platform/sessions/session-service')>()
   return { ...actual, readPrimaryIntent: vi.fn((): string | undefined => undefined) }
 })
-vi.mock('../../main/decision-log', () => ({
+vi.mock('../../main/project/decision-log', () => ({
   recordDecision: vi.fn(),
 }))
 
 // vi.mock 提升：import 必须在 mock 声明之后拿 mock 实例
 import { handleGuideMessage } from '../../main/guide/guide-agent-service'
-import { recordDecision } from '../../main/decision-log'
+import { recordDecision } from '../../main/project/decision-log'
 import { runSketchTask } from '../../main/coding/programming-orchestrator'
-import { isAutoDelegationText } from '../../main/session-service'
-import type { ConversationTurn, GuideModelOptions, SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
+import { isAutoDelegationText } from '../../main/platform/sessions/session-service'
+import type { ConversationTurn, GuideModelOptions, SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 
 /**
  * 自由文本让渡（D1 修复，2026-08-22 线上案例「我还没想法」被原样重问）：

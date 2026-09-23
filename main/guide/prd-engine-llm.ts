@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs'
-import type { SDKQuery } from '../orchestrator'
+import type { SDKQuery } from '../orchestration/orchestrator'
 import { getAgentSessionPath } from '../../storage/config-paths'
-import { loadPromptOverride } from '../prompt-config'
-import { buildPrdFewShotInjection, isInjectionEnabled } from '../template-injection'
+import { loadPromptOverride } from '../agent/prompting/prompt-config'
+import { buildPrdFewShotInjection, isInjectionEnabled } from '../agent/prompting/template-injection'
 import { callLlmForJson } from '../kernel/llm-call'
 import type { AgentMessage, MessageContentBlock } from '../../shared/types'
 import type { AiCapability, GameDesignDoc, InterfaceEndpoint, KeyTask, PrdBackplane, SketchRequirement } from '../model/prd-backplane'
@@ -17,7 +17,7 @@ import {
   reconcilePrdDocumentPriorities,
 } from '../model/prd-backplane'
 import { renderDocumentSectionSpec } from './prd-sections'
-import { categoryTemperature } from '../model-resolution'
+import { categoryTemperature } from '../platform/llm/model-resolution'
 
 /**
  * PrdEngineLlm — 向导群·需求工程腿（2026-09-03 架构调整：需求工程链归向导）。

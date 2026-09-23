@@ -16,7 +16,7 @@
  *   cap 仍截断 → 直接返回 null（升无可升）。截断检测 looksJsonTruncated 同件导出。
  */
 
-import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../orchestrator'
+import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../orchestration/orchestrator'
 import type { MessageContentBlock, SDKMessage } from '../../shared/types'
 import type { ThinkingLevel } from '../../shared/reasoning-profile'
 

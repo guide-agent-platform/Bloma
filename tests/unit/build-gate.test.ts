@@ -11,8 +11,8 @@ import {
   setNodeExecutableForTests,
 } from '../../main/coding/build-gate'
 import { getSkeletonDirPath } from '../../storage/config-paths'
-import { loadSkeletonTemplate } from '../../main/project-templates'
-import type { ProjectSkeleton } from '../../main/project-templates'
+import { loadSkeletonTemplate } from '../../main/project/project-templates'
+import type { ProjectSkeleton } from '../../main/project/project-templates'
 
 /**
  * PR-2 验证性构建门禁（vendor 预打包路线，2026-09-03）：
@@ -21,9 +21,9 @@ import type { ProjectSkeleton } from '../../main/project-templates'
  * 决策日志 mock 断言类型与 detail（v1 口径：failed 也不阻断交付）。
  */
 
-vi.mock('../../main/decision-log', () => ({ recordDecision: vi.fn() }))
+vi.mock('../../main/project/decision-log', () => ({ recordDecision: vi.fn() }))
 
-import { recordDecision } from '../../main/decision-log'
+import { recordDecision } from '../../main/project/decision-log'
 
 describe('build-gate（PR-2：验证性构建门禁，真实 esbuild）', () => {
   const originalPromaHome = process.env.PROMA_HOME
@@ -67,7 +67,7 @@ describe('build-gate（PR-2：验证性构建门禁，真实 esbuild）', () => 
 
   it('passed：模块化入口（import 子模块）打包成功，产物落盘且 minify，决策日志 build_gate_passed', async () => {
     const root = makeRoot()
-    writeFileSync(join(root, 'src', 'app.js'), "import { add } from './util.js'\nwindow.result = add(1, 2)\n", 'utf8')
+    writeFileSync(join(root, 'src', 'app.js'), "import { add } from './util'\nwindow.result = add(1, 2)\n", 'utf8')
     writeFileSync(join(root, 'src', 'util.js'), 'export function add(a, b) { return a + b }\n', 'utf8')
 
     const result = await runBuildGate({
@@ -85,7 +85,7 @@ describe('build-gate（PR-2：验证性构建门禁，真实 esbuild）', () => 
 
   it('failed：import 解析错误（缺失模块）→ 构建失败如实记录，不抛错（v1 不阻断）', async () => {
     const root = makeRoot()
-    writeFileSync(join(root, 'src', 'app.js'), "import { x } from './missing.js'\nconsole.log(x)\n", 'utf8')
+    writeFileSync(join(root, 'src', 'app.js'), "import { x } from './missing'\nconsole.log(x)\n", 'utf8')
 
     const result = await runBuildGate({
       projectId: 'p1', sessionId: 's1', rootPath: root, skeleton: skeletonWithBuild(),

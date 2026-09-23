@@ -11,7 +11,7 @@ import {
   renderTriggerVocabularyForPrompt,
   RESPONSE_FORBIDDEN_TERMS,
 } from '../../main/guide/ears-vocabulary'
-import { parseBehaviorAssertion } from '../../main/behavior-assertions'
+import { parseBehaviorAssertion } from '../../main/verification/behavior-assertions'
 
 describe('ears-vocabulary（P1：词表单点模块）', () => {
   describe('parseEarsAssertion：句式解析', () => {

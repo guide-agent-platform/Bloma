@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { KNOWN_EXPERIMENT_SWITCHES, readExperimentSwitches } from '../../main/experiment-switches'
+import { KNOWN_EXPERIMENT_SWITCHES, readExperimentSwitches } from '../../main/platform/shell/experiment-switches'
 
 /**
  * Phase 10 落地旅程（2026-09-16）：实验开关注册表——app:switch-state 白名单出口的

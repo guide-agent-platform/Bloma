@@ -3,9 +3,9 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { syncDocuments } from '../../../main/document-engine'
-import { writeTestReport, runGwtScenarios } from '../../../main/gwt-service'
-import { createProject, findProject, recordSketchGenerated } from '../../../main/project-service'
+import { syncDocuments } from '../../../main/project/document-engine'
+import { writeTestReport, runGwtScenarios } from '../../../main/verification/gwt-service'
+import { createProject, findProject, recordSketchGenerated } from '../../../main/project/project-service'
 import { getDocumentsDir } from '../../../storage/config-paths'
 
 /**

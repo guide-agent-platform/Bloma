@@ -1,14 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentEvent, AgentSendMessageInput, ResearchIdea } from '../../shared/types'
-import { recordDecision } from '../decision-log'
-import { trackAnalytics } from '../platform-services'
-import { appendPrdRequirements, markPrdUserConfirmed, updatePrdAssertions } from '../document-engine'
+import { recordDecision } from '../project/decision-log'
+import { trackAnalytics } from '../delivery/platform-services'
+import { appendPrdRequirements, markPrdUserConfirmed, updatePrdAssertions } from '../project/document-engine'
 import { nextRequirementId, runSketchTask } from '../coding/programming-orchestrator'
 import { earsifyRequirements } from './requirement-earsifier'
-import { resolveChannelEnv } from '../runtime-fallback'
+import { resolveChannelEnv } from '../platform/llm/runtime-fallback'
 import type { PrdBackplane, SketchRequirement } from '../coding/sketch-engine'
 import { backplaneAiCapabilities, backplaneKeyTasks, backplaneTemplateMeta, requirementAssertions, requirementImpliesBackend, requirementPriority, requirementStory } from '../coding/sketch-engine'
-import type { SDKQuery } from '../orchestrator'
+import type { SDKQuery } from '../orchestration/orchestrator'
 
 /**
  * PRD 用户确认门（2026-08-26，改造 3）：六维审查**通过**后、草图前，

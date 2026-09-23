@@ -4,7 +4,7 @@ import {
   escapeMemoryDelimiters,
   sanitizeForInjection,
   sanitizeForStorage,
-} from '../../main/memory-sanitize'
+} from '../../main/agent/loop/memory-sanitize'
 
 /**
  * 记忆注入面统一净化（2026-09-12，记忆栈审计裁定 ②）。

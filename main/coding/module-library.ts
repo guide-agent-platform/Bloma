@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { mainRootDir } from '../platform/paths'
 import type { TemplateType } from '../../shared/types'
 
 /**
@@ -93,9 +93,9 @@ function isSafeModulePath(path: string): boolean {
   return MODULE_FILE_EXTENSIONS.has(extnameOf(normalized))
 }
 
-/** 内置模块源根目录（源码运行=main/templates/；esbuild bundle 后=dist-main/main/templates/，两态同源）。注：本文件在 main/coding/ 下，需回一级到 main/templates（PR1 归位后路径加深一层）。 */
+/** 内置模块源根目录（两态由 platform/paths 的向上搜索统一定位：源码=main/templates/，bundle=dist-main/main/templates/；PR1 曾用相对回退 '..' 但只对源码态成立，dist 态会指到 dist-main/templates，本版根治）。 */
 function moduleRootDir(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), '..', 'templates', 'official-modules')
+  return join(mainRootDir(), 'templates', 'official-modules')
 }
 
 /**

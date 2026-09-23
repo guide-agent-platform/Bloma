@@ -3,14 +3,14 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { GwtTestResult } from '../../../main/gwt-service'
-import type { SDKQuery, SDKQueryOptions } from '../../../main/orchestrator'
+import type { GwtTestResult } from '../../../main/verification/gwt-service'
+import type { SDKQuery, SDKQueryOptions } from '../../../main/orchestration/orchestrator'
 import { runJudgeReview, setProgrammingEventPublisher } from '../../../main/coding/programming-orchestrator'
-import { createProject, updateProject, recordSketchGenerated, findProject } from '../../../main/project-service'
-import { syncDocuments } from '../../../main/document-engine'
-import { setSafeStorageAdapter } from '../../../main/safe-storage'
-import { createChannel } from '../../../main/channel-manager'
-import { setSandboxRuntimeForTests, clearSandboxRuntimeForTests } from '../../../main/platform-services'
+import { createProject, updateProject, recordSketchGenerated, findProject } from '../../../main/project/project-service'
+import { syncDocuments } from '../../../main/project/document-engine'
+import { setSafeStorageAdapter } from '../../../main/platform/storage/safe-storage'
+import { createChannel } from '../../../main/platform/llm/channel-manager'
+import { setSandboxRuntimeForTests, clearSandboxRuntimeForTests } from '../../../main/delivery/platform-services'
 
 /**
  * F 系列 W2.1（2026-09-16 Phase 10 承接）：写点集成改事件行断言——
@@ -28,16 +28,16 @@ const mocks = vi.hoisted(() => ({
   runBuildGate: vi.fn(),
 }))
 
-vi.mock('../../../main/coding/agent-loop', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/coding/agent-loop')>()
+vi.mock('../../../main/agent/loop/agent-loop', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/agent/loop/agent-loop')>()
   return { ...actual, runAgentLoop: mocks.runAgentLoop }
 })
-vi.mock('../../../main/gwt-service', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/gwt-service')>()
+vi.mock('../../../main/verification/gwt-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/verification/gwt-service')>()
   return { ...actual, runGwtScenarios: mocks.runGwtScenarios }
 })
-vi.mock('../../../main/recovery-service', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/recovery-service')>()
+vi.mock('../../../main/orchestration/recovery-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/orchestration/recovery-service')>()
   return { ...actual, circuitBreakRollback: mocks.circuitBreakRollback }
 })
 vi.mock('../../../main/coding/build-gate', async (importOriginal) => {

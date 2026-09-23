@@ -14,9 +14,9 @@ import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { restorePromaHome } from '../../support/proma-home-guard'
-import { createProject, recordSketchGenerated } from '../../../main/project-service'
-import { createToolState, type ToolContext } from '../../../main/coding/agent-loop'
-import { buildAgentTools } from '../../../main/coding/agent-tools'
+import { createProject, recordSketchGenerated } from '../../../main/project/project-service'
+import { createToolState, type ToolContext } from '../../../main/agent/loop/agent-loop'
+import { buildAgentTools } from '../../../main/agent/tools/agent-tools'
 import {
   assertSameOrigin,
   browserToolsEnabled,

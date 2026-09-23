@@ -3,11 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { syncDocuments } from '../../../main/document-engine'
-import { runGwtScenarios, writeTestReport } from '../../../main/gwt-service'
+import { syncDocuments } from '../../../main/project/document-engine'
+import { runGwtScenarios, writeTestReport } from '../../../main/verification/gwt-service'
 import { runJudge } from '../../../main/review/judge-engine'
 import { runJudgeReview, setProgrammingEventPublisher } from '../../../main/coding/programming-orchestrator'
-import { createProject, findProject, recordSketchGenerated } from '../../../main/project-service'
+import { createProject, findProject, recordSketchGenerated } from '../../../main/project/project-service'
 import { getDocumentsDir } from '../../../storage/config-paths'
 
 /**

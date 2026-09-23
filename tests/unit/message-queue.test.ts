@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { SessionMessageQueue, isRequeueableDispatchError } from '../../main/message-queue'
+import { SessionMessageQueue, isRequeueableDispatchError } from '../../main/platform/sessions/message-queue'
 
 /**
  * S4-QUEUE-001~008：会话消息队列（message-queue-port.md，蓝本 Proma

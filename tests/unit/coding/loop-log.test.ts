@@ -8,8 +8,8 @@ import {
   listDocuments,
   loopLogEnabled,
   syncDocuments,
-} from '../../../main/document-engine'
-import { createProject, recordSketchGenerated } from '../../../main/project-service'
+} from '../../../main/project/document-engine'
+import { createProject, recordSketchGenerated } from '../../../main/project/project-service'
 import { getDocumentsDir } from '../../../storage/config-paths'
 
 /**

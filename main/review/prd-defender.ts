@@ -88,7 +88,7 @@ export type DefenderFailure = Extract<DefenderOutcome, { ok: false }>['failure']
  * requirement_confirmed 检查点上的 prd.json 不被触碰，修订稿重走用户过目门。
  */
 export function buildWritePrdDraftTool(onDraft: (draft: DefenderDraft) => void): {
-  tool: import('../coding/agent-loop').AgentLoopTool
+  tool: import('../agent/loop/agent-loop').AgentLoopTool
   hasDraft: () => boolean
 } {
   let submitted = false

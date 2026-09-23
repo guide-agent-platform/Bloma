@@ -14,10 +14,10 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import type { ContextPack, ContextPackDataFile, ContextPackRoute } from '../../shared/types'
-import { findProject } from '../project-service'
-import { readPrdBackplane } from '../document-engine'
-import { recordDecision } from '../decision-log'
-import { readTestReport } from '../gwt-service'
+import { findProject } from '../project/project-service'
+import { readPrdBackplane } from '../project/document-engine'
+import { recordDecision } from '../project/decision-log'
+import { readTestReport } from '../verification/gwt-service'
 import type { InterfaceEndpoint, PrdBackplane } from '../model/prd-backplane'
 
 /** 开关解析（与 iterationBriefEnabled 同风格，每次调用读取）。 */

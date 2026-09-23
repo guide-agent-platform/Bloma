@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createChannel, decryptApiKey, getChannelByIdRaw, listChannels } from '../../../main/channel-manager'
-import { setSafeStorageAdapter } from '../../../main/safe-storage'
+import { createChannel, decryptApiKey, getChannelByIdRaw, listChannels } from '../../../main/platform/llm/channel-manager'
+import { setSafeStorageAdapter } from '../../../main/platform/storage/safe-storage'
 import { IPC_CHANNELS } from '../../../shared/types'
 
 const root = fileURLToPath(new URL('../../..', import.meta.url))

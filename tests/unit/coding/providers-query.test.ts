@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { ANTHROPIC_SSE_ADAPTER } from '../../../main/providers/anthropic-sse-adapter'
-import { streamSSE } from '../../../main/providers/sse-reader'
-import { anthropicMessagesQueryViaProviders, providerAdapterEnabled } from '../../../main/providers/loop-query'
-import type { ProviderRequest, StreamEvent } from '../../../main/providers/types'
+import { ANTHROPIC_SSE_ADAPTER } from '../../../main/platform/upstream/providers/anthropic-sse-adapter'
+import { streamSSE } from '../../../main/platform/upstream/providers/sse-reader'
+import { anthropicMessagesQueryViaProviders, providerAdapterEnabled } from '../../../main/platform/upstream/providers/loop-query'
+import type { ProviderRequest, StreamEvent } from '../../../main/platform/upstream/providers/types'
 
 /**
  * R1-providers（2026-09-19「照抄 Proma」）：上游传输层搬运的回归锁。

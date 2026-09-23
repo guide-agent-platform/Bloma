@@ -15,13 +15,13 @@ vi.mock('../../main/coding/programming-orchestrator', () => ({
   refineModificationDescription: vi.fn((text: string) => text),
   nextRequirementId: vi.fn((existing: Array<{ id: string }>) => `F-${String(existing.length + 1).padStart(3, '0')}`),
 }))
-vi.mock('../../main/platform-services', () => ({ trackAnalytics: vi.fn() }))
-vi.mock('../../main/document-engine', () => ({
+vi.mock('../../main/delivery/platform-services', () => ({ trackAnalytics: vi.fn() }))
+vi.mock('../../main/project/document-engine', () => ({
   syncDocuments: vi.fn(() => ({ documents: [], stale_documents: [] })),
   markPrdUserConfirmed: vi.fn(() => ({ user_confirmed_at: '2026-08-27T02:00:00.000Z' })),
   isPrdUserConfirmed: vi.fn(() => false),
 }))
-vi.mock('../../main/project-service', () => ({
+vi.mock('../../main/project/project-service', () => ({
   findProject: vi.fn(() => ({
     project_id: 'proj-1',
     workspace_slug: 'default-software-builder',
@@ -33,11 +33,11 @@ vi.mock('../../main/project-service', () => ({
   })),
   updateProject: vi.fn(),
 }))
-vi.mock('../../main/session-service', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/session-service')>()
+vi.mock('../../main/platform/sessions/session-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/platform/sessions/session-service')>()
   return { ...actual, readPrimaryIntent: vi.fn((): string | undefined => undefined) }
 })
-vi.mock('../../main/decision-log', () => ({ recordDecision: vi.fn(), parseDecisionText: vi.fn() }))
+vi.mock('../../main/project/decision-log', () => ({ recordDecision: vi.fn(), parseDecisionText: vi.fn() }))
 vi.mock('../../main/guide/guide-research', () => ({
     normalizeResearchQuery: (q: string) => q,
   researchMarketSimilar: vi.fn(async (queries: string[]) => ({ available: false, queries, results: [], summary: '' })),
@@ -52,7 +52,7 @@ vi.mock('../../main/guide/requirement-normalizer', () => ({
     return mentioned.find((id) => ids.has(id))
   },
 }))
-vi.mock('../../main/runtime-fallback', () => ({
+vi.mock('../../main/platform/llm/runtime-fallback', () => ({
   // 类别路由解析固定失败 → 审查 env 走 pending（向导轮 env）回退路径
   resolveChannelEnv: vi.fn(() => ({ env: undefined, channel: undefined })),
 }))
@@ -61,8 +61,8 @@ import {
   handleGuideMessage,
   resolveRequirementConfirm,
 } from '../../main/guide/guide-agent-service'
-import { resolveChannelEnv } from '../../main/runtime-fallback'
-import { recordDecision } from '../../main/decision-log'
+import { resolveChannelEnv } from '../../main/platform/llm/runtime-fallback'
+import { recordDecision } from '../../main/project/decision-log'
 import { resolvePrdBackplane, runSketchTask } from '../../main/coding/programming-orchestrator'
 import {
   PRD_REVIEW_OPTION_DELEGATE_ALL,
@@ -72,7 +72,7 @@ import {
 } from '../../main/review/prd-review'
 import { PRD_CONFIRM_OPTION_CONFIRM } from '../../main/guide/prd-confirm'
 import { applyNormalization, normalizeRequirementUpdate } from '../../main/guide/requirement-normalizer'
-import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../main/orchestrator'
+import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../main/orchestration/orchestrator'
 
 /**
  * PRD 内审门（AC-Lite，2026-09-01）：

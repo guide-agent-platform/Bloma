@@ -3,12 +3,12 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { runAgentLoop, estimateBlocksText, type AgentLoopInput } from '../../main/coding/agent-loop'
-import { anthropicMessagesQuery } from '../../main/orchestrator'
+import { runAgentLoop, estimateBlocksText, type AgentLoopInput } from '../../main/agent/loop/agent-loop'
+import { anthropicMessagesQuery } from '../../main/orchestration/orchestrator'
 import type { MessageContentBlock, SDKMessage } from '../../shared/types'
-import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
+import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 import { getAgentSessionPath } from '../../storage/config-paths'
-import { savePastedImage } from '../../main/pasted-images'
+import { savePastedImage } from '../../main/platform/shell/pasted-images'
 
 /**
  * 剪贴板图片粘贴 P1（clipboard-image-paste，2026-08-29 r67）：loop 侧贯通 + JSONL 契约 + API 边界水合。

@@ -37,7 +37,7 @@ describe('PRODUCT_CSP 单一真相源', () => {
   })
 
   it('沙箱内嵌脚本同样引用真相源（源码文本含插值表达式）', () => {
-    const src = readFileSync(join(repoRoot, 'main/platform-services.ts'), 'utf8')
+    const src = readFileSync(join(repoRoot, 'main/delivery/platform-services.ts'), 'utf8')
     expect(src).toContain("'Content-Security-Policy': ${JSON.stringify(PRODUCT_CSP)}")
     // 防退回硬编码：源码里不应再有第二个完整 CSP 字符串字面量
     const literalCount = (src.match(/default-src 'self'/g) || []).length

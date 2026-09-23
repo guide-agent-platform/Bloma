@@ -14,7 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { PRODUCT_CSP } from './product-csp'
-import type { ProjectSkeleton } from '../project-templates'
+import type { ProjectSkeleton } from '../project/project-templates'
 
 function slugify(value: string): string {
   return value

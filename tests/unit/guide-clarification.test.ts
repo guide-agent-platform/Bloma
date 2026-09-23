@@ -27,7 +27,7 @@ import {
   takePendingEnrichmentClarification,
   type PendingEnrichmentClarification,
 } from '../../main/guide/clarification'
-import { recordDecision } from '../../main/decision-log'
+import { recordDecision } from '../../main/project/decision-log'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import type { AgentEvent } from '../../shared/types'
 

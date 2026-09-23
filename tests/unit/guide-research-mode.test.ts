@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { generateAgentIdeas, researchModeResolver } from '../../main/guide/guide-agent-service'
 import type { SDKMessage } from '../../shared/types'
-import type { SDKQuery } from '../../main/orchestrator'
+import type { SDKQuery } from '../../main/orchestration/orchestrator'
 
 /**
  * R2（2026-09-12 用户拍板「cut 掉网络搜索环节，只由 agent 提创造性建议」）：

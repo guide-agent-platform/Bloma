@@ -15,11 +15,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AgentEvent, SDKMessage } from '../../../shared/types'
-import type { ConversationTurn, SDKQuery } from '../../../main/orchestrator'
+import type { ConversationTurn, SDKQuery } from '../../../main/orchestration/orchestrator'
 import { getAgentSessionPath } from '../../../storage/config-paths'
-import { runAgentLoop, compactToolEnabled, MAX_EXPLICIT_COMPACTIONS, type AgentLoopInput, type AgentLoopTool, type ToolOutcome } from '../../../main/coding/agent-loop'
-import { buildAgentTools } from '../../../main/coding/agent-tools'
-import { createProject } from '../../../main/project-service'
+import { runAgentLoop, compactToolEnabled, MAX_EXPLICIT_COMPACTIONS, type AgentLoopInput, type AgentLoopTool, type ToolOutcome } from '../../../main/agent/loop/agent-loop'
+import { buildAgentTools } from '../../../main/agent/tools/agent-tools'
+import { createProject } from '../../../main/project/project-service'
 
 const originalPromaHome = process.env.PROMA_HOME
 const originalCompactTool = process.env.BLOMA_COMPACT_TOOL

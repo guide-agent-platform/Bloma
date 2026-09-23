@@ -7,10 +7,10 @@ import {
   convergeStageFromEvidence,
   evaluateDiskArtifact,
   reconcileInterruptedProjects,
-} from '../../main/recovery-service'
-import { createProject, findProject, updateProject } from '../../main/project-service'
-import { recordSessionActivity } from '../../main/session-service'
-import { createSnapshot } from '../../main/platform-services'
+} from '../../main/orchestration/recovery-service'
+import { createProject, findProject, updateProject } from '../../main/project/project-service'
+import { recordSessionActivity } from '../../main/platform/sessions/session-service'
+import { createSnapshot } from '../../main/delivery/platform-services'
 import { getAgentSessionPath, getDocumentsDir } from '../../storage/config-paths'
 
 /**

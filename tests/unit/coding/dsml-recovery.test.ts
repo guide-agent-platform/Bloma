@@ -2,16 +2,16 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { runAgentLoop, type AgentLoopInput, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../../../main/coding/agent-loop'
+import { runAgentLoop, type AgentLoopInput, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../../../main/agent/loop/agent-loop'
 import {
   DSML_RECOVERABLE_TOOLS,
   buildTargetedDegenerateFeedback,
   classifyDsmlRecovery,
   dsmlRecoveryEnabled,
   parseDsmlInvokes,
-} from '../../../main/coding/dsml-recovery'
+} from '../../../main/agent/loop/dsml-recovery'
 import type { SDKMessage } from '../../../shared/types'
-import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../../main/orchestrator'
+import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../../main/orchestration/orchestrator'
 
 /**
  * D2 DSML 传输事故恢复（2026-09-11 狗粮 dd6ba98d：三 loop 死于渠道把工具调用

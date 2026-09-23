@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { generateSketchLlm, SketchLlmError, type GenerateSketchLlmInput } from '../../main/coding/sketch-engine-llm'
-import type { SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
-import { createProject, findProject } from '../../main/project-service'
+import type { SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
+import { createProject, findProject } from '../../main/project/project-service'
 import type { SDKMessage } from '../../shared/types'
 
 /**

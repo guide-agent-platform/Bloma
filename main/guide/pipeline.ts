@@ -15,14 +15,14 @@
  * syncPrdCheckpoints 辅路）零改动。
  */
 
-import { buildPrdBackplane, readPrdBackplane } from '../document-engine'
-import { findProject } from '../project-service'
-import { resolveChannelEnv } from '../runtime-fallback'
+import { buildPrdBackplane, readPrdBackplane } from '../project/document-engine'
+import { findProject } from '../project/project-service'
+import { resolveChannelEnv } from '../platform/llm/runtime-fallback'
 import { backplaneTemplateMeta, type PrdBackplane, type SketchRequirement } from '../coding/sketch-engine'
 import { generatePrdLlm, readConversation } from './prd-engine-llm'
 import { enrichRequirementsLlm, extractUserTexts, mergeEnrichment } from './requirement-enricher'
-import { recordDecision } from '../decision-log'
-import type { SDKQuery } from '../orchestrator'
+import { recordDecision } from '../project/decision-log'
+import type { SDKQuery } from '../orchestration/orchestrator'
 import type { EnrichmentClarificationRequest } from './clarification'
 
 /**

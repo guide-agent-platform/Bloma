@@ -8,7 +8,7 @@ import {
   type ExperienceCard,
 } from './types'
 import { appendExperienceEvent } from './event-log'
-import type { GwtTestResult } from '../gwt-service'
+import type { GwtTestResult } from '../verification/gwt-service'
 import type { BuildGateResult } from '../coding/build-gate'
 import type { JudgeVerdict } from '../review/judge-engine'
 

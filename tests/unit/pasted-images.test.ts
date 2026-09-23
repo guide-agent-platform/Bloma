@@ -9,10 +9,10 @@ import {
   hydrateMessagesImageBlocks,
   resolvePastedImagePath,
   savePastedImage,
-} from '../../main/pasted-images'
-import { createProject, deleteProject } from '../../main/project-service'
-import { recordSessionActivity } from '../../main/session-service'
-import type { ConversationTurn } from '../../main/orchestrator'
+} from '../../main/platform/shell/pasted-images'
+import { createProject, deleteProject } from '../../main/project/project-service'
+import { recordSessionActivity } from '../../main/platform/sessions/session-service'
+import type { ConversationTurn } from '../../main/orchestration/orchestrator'
 import type { MessageContentBlock } from '../../shared/types'
 import { restorePromaHome } from '../support/proma-home-guard'
 

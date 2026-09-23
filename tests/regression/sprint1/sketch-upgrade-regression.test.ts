@@ -4,12 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { registerIpcHandlers } from '../../../main/ipc'
-import { clearSandboxRuntimeForTests, stopSandbox } from '../../../main/platform-services'
-import { updateProject } from '../../../main/project-service'
+import { clearSandboxRuntimeForTests, stopSandbox } from '../../../main/delivery/platform-services'
+import { updateProject } from '../../../main/project/project-service'
 import { IPC_CHANNELS, type AgentEvent, type ApiResult, type Project } from '../../../shared/types'
 
-vi.mock('../../../main/channel-manager', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/channel-manager')>()
+vi.mock('../../../main/platform/llm/channel-manager', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/platform/llm/channel-manager')>()
   return {
     ...actual,
     getChannelByIdRaw: () => ({

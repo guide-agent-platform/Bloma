@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { runAgentLoop, withAbort, type AgentLoopInput, type AgentLoopTool, type ToolOutcome } from '../../main/coding/agent-loop'
-import { canUseTool } from '../../main/permission-service'
+import { runAgentLoop, withAbort, type AgentLoopInput, type AgentLoopTool, type ToolOutcome } from '../../main/agent/loop/agent-loop'
+import { canUseTool } from '../../main/agent/permissions/permission-service'
 import type { SDKMessage } from '../../shared/types'
-import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
+import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 
 /**
  * F3 权限防御单测：Agent Loop 的 executeToolCall 在非 allow-all 下不得落 pending 挂起。
@@ -13,7 +13,7 @@ import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../main/orc
  * - 方案 D：withAbort 把 canUseTool 等待纳入 AbortSignal 竞速，取消可中断
  */
 
-vi.mock('../../main/permission-service', () => ({ canUseTool: vi.fn() }))
+vi.mock('../../main/agent/permissions/permission-service', () => ({ canUseTool: vi.fn() }))
 
 const mockCanUseTool = vi.mocked(canUseTool)
 

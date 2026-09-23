@@ -11,7 +11,7 @@
  * 硬过滤验证）。
  * 开关 BLOMA_EXP_RULE_INJECT：'1'/'on'/'true'=开；未设/'0'/'off'/'false'=关（缺省 off）。
  */
-import { trackAnalytics } from '../platform-services'
+import { trackAnalytics } from '../delivery/platform-services'
 import { selectForInjection, tryRegisterCard, promoteToVerified, readAllCards } from './experience-service'
 import { experienceEnabled, type ExperienceCard, type RuleCardBody } from './types'
 

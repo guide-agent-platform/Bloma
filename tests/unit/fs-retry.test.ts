@@ -7,7 +7,7 @@ import {
   POSIX_RETRYABLE,
   DEFAULT_RETRYABLE_CODES,
   type FsRetryDeps,
-} from '../../main/fs-retry'
+} from '../../main/platform/storage/fs-retry'
 
 /**
  * S4-FSRETRY-001~007：fs-retry 移植（fs-retry-and-runtime-guards.md P1，蓝本 Proma

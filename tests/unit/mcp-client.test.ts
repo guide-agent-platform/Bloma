@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
-import { MiniMcpClient } from '../../main/mcp-client'
+import { MiniMcpClient } from '../../main/platform/mcp/mcp-client'
 
 /**
  * MCP stdio 客户端（mcp-support-port r70 转正，原型 8/8 + 三陷阱文档化）：

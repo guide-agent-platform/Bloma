@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { renderSecurityScanMarkdown, runSecurityScan } from '../../main/security-scan'
+import { renderSecurityScanMarkdown, runSecurityScan } from '../../main/verification/security-scan'
 
 /**
  * A3 OWASP 安全扫描器（run_security_scan）单元测试。

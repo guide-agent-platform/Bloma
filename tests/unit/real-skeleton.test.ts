@@ -6,7 +6,7 @@ import {
   loadRealScaffoldTemplate,
   realScaffoldEnabled,
   REAL_SCAFFOLD_TYPES,
-} from '../../main/project-templates'
+} from '../../main/project/project-templates'
 import { PRODUCT_CSP } from '../../main/coding/product-csp'
 import {
   realScaffoldEnabled as anchorRealScaffoldEnabled,

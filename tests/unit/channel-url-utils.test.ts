@@ -5,7 +5,7 @@ import {
   resolveAnthropicMessagesUrl,
   resolveAnthropicModelsUrl,
   resolveOpenAIModelsUrl,
-} from '../../main/channel-url-utils'
+} from '../../main/platform/llm/channel-url-utils'
 
 /**
  * URL 规范化纯函数测试（S2-AGENT）。

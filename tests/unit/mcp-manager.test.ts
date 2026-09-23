@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { McpServerManager, validateMcpCommand, type McpManagerOptions } from '../../main/mcp-manager'
+import { McpServerManager, validateMcpCommand, type McpManagerOptions } from '../../main/platform/mcp/mcp-manager'
 
 /**
  * MCP server 生命周期管理器（mcp-support-port 第二步，r71）：

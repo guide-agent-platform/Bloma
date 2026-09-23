@@ -10,8 +10,8 @@ import {
   loadMemoryUsage,
   recordMemoryUsage,
   resetMemoryUsageForTests,
-} from '../../main/memory-usage'
-import { REVOCATION_FILE, getRevocationIndexPath } from '../../main/memory-revocation'
+} from '../../main/agent/loop/memory-usage'
+import { REVOCATION_FILE, getRevocationIndexPath } from '../../main/agent/loop/memory-revocation'
 import { restorePromaHome } from '../support/proma-home-guard'
 
 /**

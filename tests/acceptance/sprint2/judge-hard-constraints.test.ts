@@ -3,9 +3,9 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { syncDocuments } from '../../../main/document-engine'
+import { syncDocuments } from '../../../main/project/document-engine'
 import { runJudge } from '../../../main/review/judge-engine'
-import { createProject, recordSketchGenerated } from '../../../main/project-service'
+import { createProject, recordSketchGenerated } from '../../../main/project/project-service'
 import { getDocumentsDir } from '../../../storage/config-paths'
 
 /**

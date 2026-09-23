@@ -9,7 +9,7 @@
  * SSRF 防护对固定 DDG 端点不构成风险面（不自拼用户 URL）；结果链接仅展示不请求。
  */
 
-import { NET_FETCH_TIMEOUT_MS, htmlToText } from '../net-guard'
+import { NET_FETCH_TIMEOUT_MS, htmlToText } from '../platform/net/net-guard'
 
 /** 单条市调结果：标题 / 链接 / 摘要（均来自搜索结果页，未抓取目标页）。 */
 export interface MarketResult {
