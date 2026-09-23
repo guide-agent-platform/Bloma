@@ -17,7 +17,11 @@ import { restorePromaHome } from '../../support/proma-home-guard'
 import { createProject, recordSketchGenerated } from '../../../main/project/project-service'
 import { createToolState, type ToolContext } from '../../../main/agent/loop/agent-loop'
 import { buildAgentTools } from '../../../main/agent/tools/agent-tools'
+import { buildDomainTools, domainToolOptionsDefaults } from '../../../main/coding/tool-handlers'
 import {
+
+/** PR4c：生产装配=通用件+领域件拼接；测试沿用同一口径 */
+
   assertSameOrigin,
   browserToolsEnabled,
   buildPreviewBrowserTools,
@@ -27,6 +31,12 @@ import {
   setPageProviderForTests,
   type PreviewPage,
 } from '../../../main/coding/preview-browser'
+
+/** PR4c：生产装配=通用件+领域件拼接（含变体/地图刷新缺省补全）；测试沿用同一口径 */
+const composeTools = (o: Parameters<typeof buildAgentTools>[0]) => {
+  const full = { ...o, ...domainToolOptionsDefaults(o.projectId) }
+  return [...buildAgentTools(full), ...buildDomainTools(full)]
+}
 
 const ORIGINAL_BROWSER_TOOLS = process.env.BLOMA_BROWSER_TOOLS
 
@@ -96,7 +106,7 @@ describe('工具注册与开关（假 page）', () => {
     delete process.env.BLOMA_BROWSER_TOOLS
     expect(browserToolsEnabled()).toBe(false)
     const project = createProject({ request_id: 'req-pb-off', mode: 'quick' })
-    const names = buildAgentTools({ projectId: project.project_id }).map((tool) => tool.name)
+    const names = composeTools({ projectId: project.project_id }).map((tool) => tool.name)
     expect(names.some((name) => name.startsWith('preview_'))).toBe(false)
     // find（W3 无条件只读件）在，浏览器族不在
     expect(names).toContain('find')
@@ -105,12 +115,12 @@ describe('工具注册与开关（假 page）', () => {
   it('开关 on：主 loop 注册 8 件套；子角色（review/implement）不注册（v1 只挂主 loop）', () => {
     process.env.BLOMA_BROWSER_TOOLS = '1'
     const project = createProject({ request_id: 'req-pb-on', mode: 'quick' })
-    const parent = buildAgentTools({ projectId: project.project_id }).map((tool) => tool.name)
+    const parent = composeTools({ projectId: project.project_id }).map((tool) => tool.name)
     expect(parent.filter((name) => name.startsWith('preview_')).sort()).toEqual(
       ['preview_click', 'preview_extract', 'preview_fill', 'preview_navigate', 'preview_observe', 'preview_press', 'preview_screenshot', 'preview_wait_for'].sort(),
     )
     for (const role of ['review', 'implement', 'research'] as const) {
-      const names = buildAgentTools({ projectId: project.project_id, role }).map((tool) => tool.name)
+      const names = composeTools({ projectId: project.project_id, role }).map((tool) => tool.name)
       expect(names.some((name) => name.startsWith('preview_'))).toBe(false)
     }
   })

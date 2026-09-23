@@ -13,12 +13,20 @@ import {
   EDIT_BUDGET_AFTER_TEST_FAILURE,
   setJsSyntaxCheckerForTests,
 } from '../../main/agent/tools/agent-tools'
+import { buildDomainTools, domainToolOptionsDefaults } from '../../main/coding/tool-handlers'
 import { createToolState, type AgentLoopTool, type ToolContext } from '../../main/agent/loop/agent-loop'
 import { createProject, findProject, recordSketchGenerated } from '../../main/project/project-service'
 import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/delivery/sandbox'
 import { writeRealScaffoldMarker } from '../../main/coding/preview-runtime'
 import { setBrowserGwtDisabledForTests } from '../../main/verification/gwt-runner'
 import { getDocumentsDir } from '../../storage/config-paths'
+
+/** PR4c：生产装配=通用件+领域件拼接（含变体/地图刷新缺省补全）；测试沿用同一口径 */
+const composeTools = (o: Parameters<typeof buildAgentTools>[0]) => {
+  const full = { ...o, ...domainToolOptionsDefaults(o.projectId) }
+  return [...buildAgentTools(full), ...buildDomainTools(full)]
+}
+
 
 /**
  * PR2 L2 工具集单元测试（不接线，直接驱动工具 execute）。
@@ -79,7 +87,7 @@ describe('agent-tools（PR2 L2）', () => {
     it('read_file：默认窗口 100 行带行号，头尾提示总行数', async () => {
       const project = createProject({ request_id: 'req-r1', mode: 'quick' })
       writeFileSync(join(project.root_path, 'index.html'), Array.from({ length: 130 }, (_, i) => `第${i + 1}行`).join('\n'), 'utf8')
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const outcome = await byName(tools, 'read_file').execute({ path: 'index.html' }, ctxFor(project.project_id))
       expect(outcome.output).toContain('共 130 行，显示第 1~100 行')
       expect(outcome.output).toContain('1 │ 第1行')
@@ -90,7 +98,7 @@ describe('agent-tools（PR2 L2）', () => {
     it('read_file：offset 越界回退最近可用窗口', async () => {
       const project = createProject({ request_id: 'req-r2', mode: 'quick' })
       writeFileSync(join(project.root_path, 'a.js'), 'l1\nl2\nl3\nl4\nl5', 'utf8')
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const outcome = await byName(tools, 'read_file').execute({ path: 'a.js', offset: 99, limit: 2 }, ctxFor(project.project_id))
       expect(outcome.output).toContain('显示第 4~5 行')
       expect(outcome.output).toContain('5 │ l5')
@@ -98,7 +106,7 @@ describe('agent-tools（PR2 L2）', () => {
 
     it('read_file：文件不存在 → is_error 并引导 list_files', async () => {
       const project = createProject({ request_id: 'req-r3', mode: 'quick' })
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const outcome = await byName(tools, 'read_file').execute({ path: 'nope.js' }, ctxFor(project.project_id))
       expect(outcome.isError).toBe(true)
       expect(outcome.output).toContain('文件不存在')
@@ -112,7 +120,7 @@ describe('agent-tools（PR2 L2）', () => {
       writeFileSync(join(project.root_path, 'src', 'app.js'), 'x', 'utf8')
       mkdirSync(join(project.root_path, 'node_modules', 'pkg'), { recursive: true })
       writeFileSync(join(project.root_path, 'node_modules', 'pkg', 'i.js'), 'x', 'utf8')
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const outcome = await byName(tools, 'list_files').execute({}, ctxFor(project.project_id))
       expect(outcome.output).toContain('index.html')
       expect(outcome.output).toContain('src/app.js')
@@ -123,7 +131,7 @@ describe('agent-tools（PR2 L2）', () => {
       const project = createProject({ request_id: 'req-g1', mode: 'quick' })
       mkdirSync(join(project.root_path, 'src'), { recursive: true })
       writeFileSync(join(project.root_path, 'src', 'app.js'), 'const a = 1\nconst target = 2\n', 'utf8')
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const hit = await byName(tools, 'grep').execute({ pattern: 'target', glob: '*.js' }, ctxFor(project.project_id))
       expect(hit.output).toContain('src/app.js:2')
       expect(hit.output).not.toContain('const target = 2')
@@ -138,7 +146,7 @@ describe('agent-tools（PR2 L2）', () => {
   describe('write_file / edit_file（编辑护栏前置）', () => {
     it('[S4-AGENT-054] write_file 超大内容预拦截：≥16k tokens 拒绝并引导分块（费用守卫 Hook 3，2026-08-28）', async () => {
       const project = createProject({ request_id: 'req-w-big', mode: 'quick' })
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const huge = 'x'.repeat(70_000) // 70000 ASCII ≈ 17500 tokens ≥ 16k 阈值
       const outcome = await byName(tools, 'write_file').execute({ path: 'big.html', content: huge }, ctxFor(project.project_id))
       expect(outcome.isError).toBe(true)
@@ -150,7 +158,7 @@ describe('agent-tools（PR2 L2）', () => {
 
     it('[S4-AGENT-055] 正常大小写入不受影响（零回归）', async () => {
       const project = createProject({ request_id: 'req-w-ok', mode: 'quick' })
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const outcome = await byName(tools, 'write_file').execute({ path: 'ok.html', content: '<html><body>ok</body></html>' }, ctxFor(project.project_id))
       expect(outcome.isError).toBeFalsy()
       expect(existsSync(join(project.root_path, 'ok.html'))).toBe(true)
@@ -158,7 +166,7 @@ describe('agent-tools（PR2 L2）', () => {
 
     it('路径沙箱：../ 逃逸、绝对路径、盘符路径一律拒绝', async () => {
       const project = createProject({ request_id: 'req-w1', mode: 'quick' })
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const ctx = ctxFor(project.project_id)
       for (const path of ['../escape.js', 'a/../../escape.js', 'C:/Windows/evil.js', '/etc/passwd']) {
         const outcome = await byName(tools, 'write_file').execute({ path, content: 'x' }, ctx)
@@ -170,7 +178,7 @@ describe('agent-tools（PR2 L2）', () => {
 
     it('可写范围：系统文件与白名单外后缀拒绝', async () => {
       const project = createProject({ request_id: 'req-w2', mode: 'quick' })
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const ctx = ctxFor(project.project_id)
       const system = await byName(tools, 'write_file').execute({ path: 'package.json', content: '{}' }, ctx)
       expect(system.isError).toBe(true)
@@ -200,7 +208,7 @@ describe('agent-tools（PR2 L2）', () => {
     it('[W3] 真实脚手架变体写边界：package.json/server.js/任意后缀皆产物可写；node_modules/.git/data-backups/标记拒绝', async () => {
       const project = createProject({ request_id: 'req-w3-real', mode: 'quick' })
       writeRealScaffoldMarker(project.root_path, 'real-fullstack')
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const ctx = ctxFor(project.project_id)
       // package.json 是真实工程件（可改）；server/ 下路由模块可建；任意后缀（README.md）可写
       const pkg = await byName(tools, 'write_file').execute({ path: 'package.json', content: '{"name":"app"}' }, ctx)
@@ -223,7 +231,7 @@ describe('agent-tools（PR2 L2）', () => {
       const project = createProject({ request_id: 'req-w2b', mode: 'quick' })
       mkdirSync(join(project.root_path, 'src', 'examples'), { recursive: true })
       writeFileSync(join(project.root_path, 'src', 'examples', 'data-module.js'), 'function createDataModule() {}', 'utf8')
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const ctx = ctxFor(project.project_id)
       for (const path of ['src/examples/data-module.js', 'src/examples/other.js', 'SRC/EXAMPLES/data-module.js', 'src/Examples/x.js']) {
         const outcome = await byName(tools, 'write_file').execute({ path, content: '// tamper' }, ctx)
@@ -243,7 +251,7 @@ describe('agent-tools（PR2 L2）', () => {
       const project = createProject({ request_id: 'req-w2c', mode: 'quick' })
       mkdirSync(join(project.root_path, 'src', 'examples'), { recursive: true })
       writeFileSync(join(project.root_path, 'src', 'examples', 'data-module.js'), 'function createDataModule() {}', 'utf8')
-      const tools = buildAgentTools({ projectId: project.project_id, editFormat: 'whole' })
+      const tools = composeTools({ projectId: project.project_id, editFormat: 'whole' })
       const outcome = await byName(tools, 'edit_file').execute({ path: 'src/examples/data-module.js', content: 'function hijack() {}' }, ctxFor(project.project_id))
       expect(outcome.isError).toBe(true)
       expect(outcome.output).toContain('只读参考示例')
@@ -253,7 +261,7 @@ describe('agent-tools（PR2 L2）', () => {
       const project = createProject({ request_id: 'req-w2d', mode: 'quick' })
       mkdirSync(join(project.root_path, 'src', 'official-modules', 'game-loop'), { recursive: true })
       writeFileSync(join(project.root_path, 'src', 'official-modules', 'game-loop', 'game-loop.js'), 'export function createGameLoop() {}', 'utf8')
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const ctx = ctxFor(project.project_id)
       for (const path of ['src/official-modules/game-loop/game-loop.js', 'SRC/OFFICIAL-MODULES/game-loop/game-loop.js']) {
         const outcome = await byName(tools, 'write_file').execute({ path, content: '// tamper' }, ctx)
@@ -268,7 +276,7 @@ describe('agent-tools（PR2 L2）', () => {
 
     it('JS 语法护栏：校验不过拒绝落盘并返回错误定位（stub）', async () => {
       const project = createProject({ request_id: 'req-w3', mode: 'quick' })
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const outcome = await byName(tools, 'write_file').execute({ path: 'src/app.js', content: 'SYNTAX_ERROR const x =' }, ctxFor(project.project_id))
       expect(outcome.isError).toBe(true)
       expect(outcome.output).toContain('JS 语法校验未通过')
@@ -279,7 +287,7 @@ describe('agent-tools（PR2 L2）', () => {
     it('真实 node --check：语法错误拒绝、合法内容放行', async () => {
       setJsSyntaxCheckerForTests(undefined)
       const project = createProject({ request_id: 'req-w3b', mode: 'quick' })
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const ctx = ctxFor(project.project_id)
       const bad = await byName(tools, 'write_file').execute({ path: 'src/bad.js', content: 'const x = {' }, ctx)
       expect(bad.isError).toBe(true)
@@ -291,7 +299,7 @@ describe('agent-tools（PR2 L2）', () => {
 
     it('HTML 结构护栏：script 不配平/缺 </html> 拒绝', async () => {
       const project = createProject({ request_id: 'req-w4', mode: 'quick' })
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const ctx = ctxFor(project.project_id)
       const unbalanced = await byName(tools, 'write_file').execute({ path: 'index.html', content: '<html><head></head><body><script>var a = 1;</body></html>' }, ctx)
       expect(unbalanced.isError).toBe(true)
@@ -304,7 +312,7 @@ describe('agent-tools（PR2 L2）', () => {
 
     it('成功写入返回字节数并剥离 meta CSP', async () => {
       const project = createProject({ request_id: 'req-w5', mode: 'quick' })
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const content = '<html><head><meta http-equiv="Content-Security-Policy" content="script-src \'self\'"></head><body><script>var a=1;</script></body></html>'
       const outcome = await byName(tools, 'write_file').execute({ path: 'index.html', content }, ctxFor(project.project_id))
       expect(outcome.isError).toBeUndefined()
@@ -318,7 +326,7 @@ describe('agent-tools（PR2 L2）', () => {
       const project = createProject({ request_id: 'req-e1', mode: 'quick' })
       mkdirSync(join(project.root_path, 'src'), { recursive: true })
       writeFileSync(join(project.root_path, 'src', 'app.js'), 'const title = "旧标题";\nconsole.log(title);\n', 'utf8')
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const ctx = ctxFor(project.project_id)
 
       const miss = await byName(tools, 'edit_file').execute({ path: 'src/app.js', old_string: '不存在片段', new_string: 'x' }, ctx)
@@ -341,7 +349,7 @@ describe('agent-tools（PR2 L2）', () => {
       const project = createProject({ request_id: 'req-e3', mode: 'quick' })
       mkdirSync(join(project.root_path, 'src'), { recursive: true })
       writeFileSync(join(project.root_path, 'src', 'app.js'), 'const a = 1;\n', 'utf8')
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const outcome = await byName(tools, 'edit_file').execute({ path: 'src/app.js', old_string: 'const a = 1' }, ctxFor(project.project_id))
       expect(outcome.isError).toBe(true)
       expect(outcome.output).toContain('new_string')
@@ -350,7 +358,7 @@ describe('agent-tools（PR2 L2）', () => {
 
     it('edit_file schema：diff 模式 required 含 path/old_string/new_string', async () => {
       const project = createProject({ request_id: 'req-e4', mode: 'quick' })
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const edit = byName(tools, 'edit_file')
       expect(edit.input_schema.required).toEqual(['path', 'old_string', 'new_string'])
     })
@@ -358,7 +366,7 @@ describe('agent-tools（PR2 L2）', () => {
     it('edit_file whole 模式：content 整文件重写（弱渠道能力位）', async () => {
       const project = createProject({ request_id: 'req-e2', mode: 'quick' })
       writeFileSync(join(project.root_path, 'index.html'), '<html><head></head><body>旧</body></html>', 'utf8')
-      const tools = buildAgentTools({ projectId: project.project_id, editFormat: 'whole' })
+      const tools = composeTools({ projectId: project.project_id, editFormat: 'whole' })
       const outcome = await byName(tools, 'edit_file').execute({ path: 'index.html', content: '<html><head></head><body>新</body></html>' }, ctxFor(project.project_id))
       expect(outcome.isError).toBeUndefined()
       expect(readFileSync(join(project.root_path, 'index.html'), 'utf8')).toContain('新')
@@ -375,7 +383,7 @@ describe('agent-tools（PR2 L2）', () => {
         portAllocator: async () => 3971,
         healthCheck: async () => true,
       })
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const ctx = ctxFor(project.project_id)
       const outcome = await byName(tools, 'run_preview').execute({}, ctx)
       expect(outcome.isError).toBeUndefined()
@@ -396,7 +404,7 @@ describe('agent-tools（PR2 L2）', () => {
         healthCheck: async () => false,
         sleep: async () => new Promise((resolve) => setTimeout(resolve, 1)),
       })
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const outcome = await byName(tools, 'run_preview').execute({}, ctxFor(project.project_id))
       expect(outcome.isError).toBe(true)
       expect(outcome.output).toContain('预览启动失败')
@@ -406,7 +414,7 @@ describe('agent-tools（PR2 L2）', () => {
     it('run_gwt_tests：无预览先引导 run_preview；有预览跑静态兜底并输出计数', async () => {
       const project = createProject({ request_id: 'req-t1', mode: 'quick' })
       recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const ctx = ctxFor(project.project_id)
 
       const noPreview = await byName(tools, 'run_gwt_tests').execute({}, ctx)
@@ -436,7 +444,7 @@ describe('agent-tools（PR2 L2）', () => {
       await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
       const port = (server.address() as AddressInfo).port
       try {
-        const tools = buildAgentTools({ projectId: project.project_id })
+        const tools = composeTools({ projectId: project.project_id })
         const ctx = ctxFor(project.project_id)
         ctx.state.preview_url = `http://127.0.0.1:${port}`
         const outcome = await byName(tools, 'run_gwt_tests').execute({}, ctx)
@@ -462,7 +470,7 @@ describe('agent-tools（PR2 L2）', () => {
       await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
       const port = (server.address() as AddressInfo).port
       try {
-        const tools = buildAgentTools({ projectId: project.project_id })
+        const tools = composeTools({ projectId: project.project_id })
         const ctx = ctxFor(project.project_id)
         ctx.state.preview_url = `http://127.0.0.1:${port}`
         // 模拟此前一轮失败已烧 3 次修复预算
@@ -483,7 +491,7 @@ describe('agent-tools（PR2 L2）', () => {
       const project = createProject({ request_id: 'req-t3', mode: 'quick' })
       recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
       const repairRounds: number[] = []
-      const tools = buildAgentTools({ projectId: project.project_id, onRepairRound: (round) => repairRounds.push(round) })
+      const tools = composeTools({ projectId: project.project_id, onRepairRound: (round) => repairRounds.push(round) })
       const ctx = ctxFor(project.project_id)
       ctx.state.preview_url = 'http://127.0.0.1:1' // 不可达 → 测试失败
       const gwt = await byName(tools, 'run_gwt_tests').execute({}, ctx)
@@ -505,7 +513,7 @@ describe('agent-tools（PR2 L2）', () => {
     it('修复预算：语法校验失败的写入不递增，合法写入递增 1', async () => {
       const project = createProject({ request_id: 'req-t4', mode: 'quick' })
       recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const ctx = ctxFor(project.project_id)
       ctx.state.preview_url = 'http://127.0.0.1:1' // 不可达 → 测试失败
       const gwt = await byName(tools, 'run_gwt_tests').execute({}, ctx)
@@ -526,7 +534,7 @@ describe('agent-tools（PR2 L2）', () => {
       const project = createProject({ request_id: 'req-s1', mode: 'quick' })
       mkdirSync(join(project.root_path, 'src'), { recursive: true })
       writeFileSync(join(project.root_path, 'src', 'evil.js'), 'eval(userInput)\n', 'utf8')
-      const tools = buildAgentTools({ projectId: project.project_id })
+      const tools = composeTools({ projectId: project.project_id })
       const ctx = ctxFor(project.project_id)
 
       const bad = await byName(tools, 'run_security_scan').execute({}, ctx)
@@ -568,7 +576,7 @@ describe('agent-tools（PR2 L2）', () => {
       const project = createProject({ request_id: 'req-wf-1', mode: 'quick' })
       const fetchSpy = vi.fn()
       vi.stubGlobal('fetch', fetchSpy)
-      const tool = byName(buildAgentTools({ projectId: project.project_id }), 'web_fetch')
+      const tool = byName(composeTools({ projectId: project.project_id }), 'web_fetch')
       const ctx = ctxFor(project.project_id)
 
       for (const url of [
@@ -603,7 +611,7 @@ describe('agent-tools（PR2 L2）', () => {
         }),
       )
       vi.stubGlobal('fetch', fetchSpy)
-      const tool = byName(buildAgentTools({ projectId: project.project_id }), 'web_fetch')
+      const tool = byName(composeTools({ projectId: project.project_id }), 'web_fetch')
       const ctx = ctxFor(project.project_id)
       ctx.state.preview_url = 'http://localhost:3001'
 
@@ -628,7 +636,7 @@ describe('agent-tools（PR2 L2）', () => {
       vi.stubGlobal('fetch', fetchSpy)
       const ctx = ctxFor(project.project_id)
 
-      const result = await byName(buildAgentTools({ projectId: project.project_id }), 'web_fetch').execute(
+      const result = await byName(composeTools({ projectId: project.project_id }), 'web_fetch').execute(
         { url: 'https://example.com/docs' },
         ctx,
       )
@@ -651,7 +659,7 @@ describe('agent-tools（PR2 L2）', () => {
         'fetch',
         vi.fn(async () => fakeResponse({ body: long, contentType: 'text/plain' })),
       )
-      const truncated = await byName(buildAgentTools({ projectId: project.project_id }), 'web_fetch').execute(
+      const truncated = await byName(composeTools({ projectId: project.project_id }), 'web_fetch').execute(
         { url: 'https://example.com/big' },
         ctx,
       )
@@ -662,7 +670,7 @@ describe('agent-tools（PR2 L2）', () => {
         'fetch',
         vi.fn(async () => fakeResponse({ ok: false, status: 404 })),
       )
-      const missing = await byName(buildAgentTools({ projectId: project.project_id }), 'web_fetch').execute(
+      const missing = await byName(composeTools({ projectId: project.project_id }), 'web_fetch').execute(
         { url: 'https://example.com/none' },
         ctx,
       )
@@ -673,7 +681,7 @@ describe('agent-tools（PR2 L2）', () => {
         'fetch',
         vi.fn(async () => fakeResponse({ contentType: 'image/png' })),
       )
-      const binary = await byName(buildAgentTools({ projectId: project.project_id }), 'web_fetch').execute(
+      const binary = await byName(composeTools({ projectId: project.project_id }), 'web_fetch').execute(
         { url: 'https://example.com/logo.png' },
         ctx,
       )
@@ -684,7 +692,7 @@ describe('agent-tools（PR2 L2）', () => {
         'fetch',
         vi.fn(async () => fakeResponse({ url: 'http://192.168.0.1/redirected' })),
       )
-      const redirected = await byName(buildAgentTools({ projectId: project.project_id }), 'web_fetch').execute(
+      const redirected = await byName(composeTools({ projectId: project.project_id }), 'web_fetch').execute(
         { url: 'https://example.com/go' },
         ctx,
       )
@@ -694,9 +702,9 @@ describe('agent-tools（PR2 L2）', () => {
 
     it('角色裁剪：explore/research 含 web_fetch；权限登记为 warning', async () => {
       const project = createProject({ request_id: 'req-wf-4', mode: 'quick' })
-      const explore = buildAgentTools({ projectId: project.project_id, role: 'explore' })
+      const explore = composeTools({ projectId: project.project_id, role: 'explore' })
       expect(explore.map((tool) => tool.name)).toContain('web_fetch')
-      const parent = buildAgentTools({ projectId: project.project_id })
+      const parent = composeTools({ projectId: project.project_id })
       expect(parent.map((tool) => tool.name)).toContain('web_fetch')
 
       const { TOOL_PERMISSION_REGISTRY } = await import('../../main/agent/permissions/permission-service')
@@ -710,14 +718,14 @@ describe('web_research 工具面（闭环 PR5）', () => {
     delete process.env.BLOMA_BROWSER_TOOLS
     delete process.env.BLOMA_COMPACT_TOOL
     delete process.env.BLOMA_API_TOOL
-    const parentNames = buildAgentTools({ projectId: 'p' }).map((tool) => tool.name)
+    const parentNames = composeTools({ projectId: 'p' }).map((tool) => tool.name)
     expect(parentNames).toContain('web_research')
     // W3（Phase 10）：find 只读工具无条件注册，基线 17→18；浏览器/压缩开关必须显式钉 off
     // （并发测试文件共享 process.env，见 scrape 管道同款先例）
     expect(parentNames).toHaveLength(18)
 
     for (const role of ['research', 'explore', 'implement', 'review', 'custom'] as const) {
-      const names = buildAgentTools({ projectId: 'p', role }).map((tool) => tool.name)
+      const names = composeTools({ projectId: 'p', role }).map((tool) => tool.name)
       expect(names).not.toContain('web_research')
     }
   })
@@ -754,22 +762,22 @@ describe('agent-tools D 系列（咨询 D：验证协议，2026-09-09）', () =>
 
   it('D1：开关 off 工具面=现状（无 run_api_contract_tests，parent 含 find 共 18 个）；on 注册且变 19', () => {
     const project = createProject({ request_id: 'req-d-reg', mode: 'quick' })
-    const off = buildAgentTools({ projectId: project.project_id }).map((t) => t.name)
+    const off = composeTools({ projectId: project.project_id }).map((t) => t.name)
     expect(off).not.toContain('run_api_contract_tests')
     expect(off).toHaveLength(18)
     process.env.BLOMA_API_TOOL = '1'
-    const on = buildAgentTools({ projectId: project.project_id }).map((t) => t.name)
+    const on = composeTools({ projectId: project.project_id }).map((t) => t.name)
     expect(on).toContain('run_api_contract_tests')
     expect(on).toHaveLength(19)
     // review 角色同样可用（只读验证面）
-    const review = buildAgentTools({ projectId: project.project_id, role: 'review' }).map((t) => t.name)
+    const review = composeTools({ projectId: project.project_id, role: 'review' }).map((t) => t.name)
     expect(review).toContain('run_api_contract_tests')
   })
 
   it('D1：API 工具无预览先引导 run_preview（与 run_gwt_tests 同口径）', async () => {
     process.env.BLOMA_API_TOOL = '1'
     const project = createProject({ request_id: 'req-d-nopv', mode: 'quick' })
-    const tools = buildAgentTools({ projectId: project.project_id })
+    const tools = composeTools({ projectId: project.project_id })
     const outcome = await byName(tools, 'run_api_contract_tests').execute({}, ctxFor(project.project_id))
     expect(outcome.isError).toBe(true)
     expect(outcome.output).toContain('run_preview')
@@ -778,7 +786,7 @@ describe('agent-tools D 系列（咨询 D：验证协议，2026-09-09）', () =>
   it('D1：无 interface_spec → 豁免通过并置位 api_all_passed（纯静态产物不强制跑）', async () => {
     process.env.BLOMA_API_TOOL = '1'
     const project = createProject({ request_id: 'req-d-exempt', mode: 'quick' })
-    const tools = buildAgentTools({ projectId: project.project_id })
+    const tools = composeTools({ projectId: project.project_id })
     const ctx = ctxFor(project.project_id)
     ctx.state.api_all_passed = false // 模拟「有契约预置」，验证豁免也能翻正
     ctx.state.preview_url = 'http://127.0.0.1:1'
@@ -797,7 +805,7 @@ describe('agent-tools D 系列（咨询 D：验证协议，2026-09-09）', () =>
       JSON.stringify({ requirements: [], interface_spec: [{ endpoint: '/api/notes', method: 'GET' }] }),
       'utf8',
     )
-    const tools = buildAgentTools({ projectId: project.project_id })
+    const tools = composeTools({ projectId: project.project_id })
     const ctx = ctxFor(project.project_id)
 
     // 全过：本地 server 应答 /api/notes
@@ -844,7 +852,7 @@ describe('agent-tools D 系列（咨询 D：验证协议，2026-09-09）', () =>
     const port = (server.address() as AddressInfo).port
     try {
       // off：现状原文
-      const toolsOff = buildAgentTools({ projectId: project.project_id })
+      const toolsOff = composeTools({ projectId: project.project_id })
       const ctxOff = ctxFor(project.project_id)
       ctxOff.state.preview_url = `http://127.0.0.1:${port}`
       const off = await byName(toolsOff, 'run_gwt_tests').execute({}, ctxOff)
@@ -853,7 +861,7 @@ describe('agent-tools D 系列（咨询 D：验证协议，2026-09-09）', () =>
 
       // on：尚缺 security/api → 不再出现收口暗示
       process.env.BLOMA_TOOL_EVIDENCE = '1'
-      const toolsOn = buildAgentTools({ projectId: project.project_id })
+      const toolsOn = composeTools({ projectId: project.project_id })
       const ctxOn = ctxFor(project.project_id)
       ctxOn.state.preview_url = `http://127.0.0.1:${port}`
       const on = await byName(toolsOn, 'run_gwt_tests').execute({}, ctxOn)
@@ -874,7 +882,7 @@ describe('agent-tools D 系列（咨询 D：验证协议，2026-09-09）', () =>
     process.env.BLOMA_TOOL_EVIDENCE = '1'
     const project = createProject({ request_id: 'req-d-d3', mode: 'quick' })
     recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
-    const tools = buildAgentTools({ projectId: project.project_id })
+    const tools = composeTools({ projectId: project.project_id })
     const ctx = ctxFor(project.project_id)
     ctx.state.preview_url = 'http://127.0.0.1:1' // 不可访问 → 稳定失败
     const first = await byName(tools, 'run_gwt_tests').execute({}, ctx)
@@ -885,7 +893,7 @@ describe('agent-tools D 系列（咨询 D：验证协议，2026-09-09）', () =>
 
   it('D4a：read_file 返回文件版本；STALE_READ 拦截旧版本编辑；不传 rev 零变化', async () => {
     const project = createProject({ request_id: 'req-d-rev', mode: 'quick' })
-    const tools = buildAgentTools({ projectId: project.project_id })
+    const tools = composeTools({ projectId: project.project_id })
     const ctx = ctxFor(project.project_id)
     const abs = join(project.root_path, 'src', 'app.js')
     mkdirSync(join(abs, '..'), { recursive: true })
@@ -920,7 +928,7 @@ describe('agent-tools D 系列（咨询 D：验证协议，2026-09-09）', () =>
     writeFileSync(abs, '<html><body><p>旧内容</p></body></html>', 'utf8')
 
     // off：直接覆盖（现状）
-    const toolsOff = buildAgentTools({ projectId: project.project_id })
+    const toolsOff = composeTools({ projectId: project.project_id })
     const off = await byName(toolsOff, 'write_file').execute(
       { path: 'index.html', content: '<html><body><p>新内容</p></body></html>' },
       ctxFor(project.project_id),
@@ -930,7 +938,7 @@ describe('agent-tools D 系列（咨询 D：验证协议，2026-09-09）', () =>
     // on：重建文件后盲覆盖被拒
     process.env.BLOMA_WRITE_GUARD = '1'
     writeFileSync(abs, '<html><body><p>旧内容</p></body></html>', 'utf8')
-    const toolsOn = buildAgentTools({ projectId: project.project_id })
+    const toolsOn = composeTools({ projectId: project.project_id })
     const ctx = ctxFor(project.project_id)
     const blocked = await byName(toolsOn, 'write_file').execute(
       { path: 'index.html', content: '<html><body><p>再覆盖</p></body></html>' },
@@ -977,7 +985,7 @@ describe('W2-F4：run_gwt_tests 修复比较与计数器', () => {
     process.env.BLOMA_TOOL_EVIDENCE = '1'
     const project = createProject({ request_id: 'req-w2-f4', mode: 'quick' })
     recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
-    const tools = buildAgentTools({ projectId: project.project_id })
+    const tools = composeTools({ projectId: project.project_id })
     const ctx = ctxFor(project.project_id)
     ctx.state.preview_url = 'http://127.0.0.1:1' // 不可访问 → 稳定失败集
     // 预置上轮失败集：本轮真实失败与之既不重合（全算新增）→ resolved=预置项
@@ -1001,7 +1009,7 @@ describe('W2-F4：run_gwt_tests 修复比较与计数器', () => {
     delete process.env.BLOMA_TOOL_EVIDENCE
     const project = createProject({ request_id: 'req-w2-f4-off', mode: 'quick' })
     recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
-    const tools = buildAgentTools({ projectId: project.project_id })
+    const tools = composeTools({ projectId: project.project_id })
     const ctx = ctxFor(project.project_id)
     ctx.state.preview_url = 'http://127.0.0.1:1'
     const run = await byName(tools, 'run_gwt_tests').execute({}, ctx)
@@ -1030,10 +1038,10 @@ describe('W3-D1/D2：run_preflight 收口预检', () => {
 
   it('开关 off 不注册（字节级现状）；on 注册 run_preflight', () => {
     const project = createProject({ request_id: 'req-w3-reg', mode: 'quick' })
-    const off = buildAgentTools({ projectId: project.project_id }).map((t) => t.name)
+    const off = composeTools({ projectId: project.project_id }).map((t) => t.name)
     expect(off).not.toContain('run_preflight')
     process.env.BLOMA_PREFLIGHT = '1'
-    const on = buildAgentTools({ projectId: project.project_id }).map((t) => t.name)
+    const on = composeTools({ projectId: project.project_id }).map((t) => t.name)
     expect(on).toContain('run_preflight')
   })
 
@@ -1041,7 +1049,7 @@ describe('W3-D1/D2：run_preflight 收口预检', () => {
     process.env.BLOMA_PREFLIGHT = '1'
     const project = createProject({ request_id: 'req-w3-run', mode: 'quick' })
     recordSketchGenerated(project.project_id, [{ id: 'F-001', description: '记录收入与支出' }])
-    const tools = buildAgentTools({ projectId: project.project_id })
+    const tools = composeTools({ projectId: project.project_id })
     const ctx = ctxFor(project.project_id)
     ctx.state.preview_url = 'http://127.0.0.1:1' // 不可达 → GWT 稳定失败、UI 探针 unavailable
     const result = await byName(tools, 'run_preflight').execute({}, ctx)
@@ -1062,7 +1070,7 @@ describe('W3-D1/D2：run_preflight 收口预检', () => {
   it('无预览时明确前置（先 run_preview），不误判', async () => {
     process.env.BLOMA_PREFLIGHT = '1'
     const project = createProject({ request_id: 'req-w3-nopv', mode: 'quick' })
-    const tools = buildAgentTools({ projectId: project.project_id })
+    const tools = composeTools({ projectId: project.project_id })
     const result = await byName(tools, 'run_preflight').execute({}, ctxFor(project.project_id))
     expect(result.isError).toBe(true)
     expect(result.output).toContain('run_preview')
@@ -1091,7 +1099,7 @@ describe('W4-F2/F3：修复轮修改授权边界 + repair_control 窄入口', ()
   it('越界写被 WRITE_SCOPE_DENIED 拦（blocked+next_actions，不诱导绕权限）；授权内照常', async () => {
     const project = createProject({ request_id: 'req-w4-scope', mode: 'quick' })
     const scope = createWriteScope(['src/app.js'])
-    const tools = buildAgentTools({ projectId: project.project_id, writeScope: scope })
+    const tools = composeTools({ projectId: project.project_id, writeScope: scope })
     const ctx = ctxFor(project.project_id)
     // 越界 edit：被拒并给出恢复路径
     const denied = await byName(tools, 'edit_file').execute(
@@ -1109,7 +1117,7 @@ describe('W4-F2/F3：修复轮修改授权边界 + repair_control 窄入口', ()
     )
     expect(allowed.isError).toBeFalsy()
     // 无 holder（主 loop 现状）：不拦
-    const plainTools = buildAgentTools({ projectId: project.project_id })
+    const plainTools = composeTools({ projectId: project.project_id })
     const plain = await byName(plainTools, 'write_file').execute(
       { path: 'index.html', content: '<html></html>' },
       ctxFor(project.project_id),
@@ -1120,7 +1128,7 @@ describe('W4-F2/F3：修复轮修改授权边界 + repair_control 窄入口', ()
   it('repair_control：扩大申请自动批准→写放行；通配符/受保护路径拒绝；缺字段用法错误；report_blocker 记录', async () => {
     const project = createProject({ request_id: 'req-w4-ctl', mode: 'quick' })
     const scope = createWriteScope(['src/app.js'], ['prd.json'])
-    const tools = buildAgentTools({ projectId: project.project_id, writeScope: scope })
+    const tools = composeTools({ projectId: project.project_id, writeScope: scope })
     const ctx = ctxFor(project.project_id)
     // 注册面：writeScope 在 → repair_control 在
     expect(tools.map((t) => t.name)).toContain('repair_control')

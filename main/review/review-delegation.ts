@@ -29,6 +29,7 @@ import {
   type DelegationSummary,
 } from '../agent/delegation/agent-collaboration'
 import { buildAgentTools } from '../agent/tools/agent-tools'
+import { buildDomainTools, domainToolOptionsDefaults } from '../coding/tool-handlers'
 import { createToolState, type AgentLoopTool, type ToolContext } from '../agent/loop/agent-loop'
 import type { SDKQuery } from '../orchestration/orchestrator'
 
@@ -79,7 +80,7 @@ export async function runDelegatedReview(opts: {
   if (!delegatedReviewEnabled()) return { ok: false, failure: 'disabled' }
 
   // 子 agent 工具构建器防御性注册（与 runMvpViaAgentLoop 同款；重复注册幂等）
-  setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
+  setChildToolsBuilder((projectId, role, editFormat) => [...buildAgentTools({ projectId, role, editFormat }), ...buildDomainTools({ projectId, role, editFormat })])
 
   // 合成父键：与真实 loop 的父上下文注册完全隔离，事件归属靠闭包里的真实 id
   const parentKey = `review-${randomUUID()}`

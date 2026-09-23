@@ -66,6 +66,7 @@ import { checkApiContract } from '../api-contract'
 import { apiReconcileEnabled, checkMediaSourceDiscipline, reconcileApiUsage } from '../api-reconcile'
 import { checkDataMigrationDiscipline, dataMigrateContractSection, dataMigrateEnabled, runMigrationDrill, type MigrationDrillResult } from '../data-migration'
 import { buildAgentTools } from '../../agent/tools/agent-tools'
+import { buildDomainTools, domainToolOptionsDefaults } from '../tool-handlers'
 import { disposeParentDelegationState, registerParentLoopContext, setChildToolsBuilder } from '../../agent/delegation/agent-collaboration'
 import { categoryTemperature, resolveGenerationMaxTokens } from '../../platform/llm/model-resolution'
 import type { SDKQuery, ToolDefinition } from '../../orchestration/orchestrator'
@@ -825,7 +826,7 @@ export async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopCha
       : `${base}${roundAnchorBlock}${iterationModeBlock}${changeContractBlock}${checklistBlock}`
   }
   // 委派协作（嫁接方案 §4.1）：注册父 loop 上下文供 delegate_agent 构建子循环；子工具集按 role 裁剪
-  setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
+  setChildToolsBuilder((projectId, role, editFormat) => [...buildAgentTools({ projectId, role, editFormat, ...domainToolOptionsDefaults(projectId) }), ...buildDomainTools({ projectId, role, editFormat, ...domainToolOptionsDefaults(projectId) })])
   registerParentLoopContext(input.session_id, {
     query: input.query!,
     env: loop.env,
@@ -937,23 +938,32 @@ export async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopCha
     // toolBudget 首个生产接线（闭环 PR5）：web_research 每次都 fork 调研子代理，
     // 限 4 次防长 loop 无节制外呼；超限走既有 budgetExhausted 软着陆
     toolBudget: { web_research: WEB_RESEARCH_BUDGET },
-    tools: buildAgentTools({
-      projectId: input.project_id,
-      editFormat,
-      // 修复预算映射（§4.4）：loop 内每个新失败回合 = 一次 self_repair，attempt 口径与旧管道对齐
-      onRepairRound: (round) => {
-        trackAnalytics({
-          request_id: input.request_id,
-          event: {
-            event_type: 'self_repair_triggered',
-            project_id: input.project_id,
-            session_id: input.session_id,
-            payload: { attempt: round, category: 'test_error', via: 'agent_loop' },
-            privacy_level: 'research_safe',
-          },
-        })
-      },
-    }),
+    tools: [
+      ...buildAgentTools({
+        projectId: input.project_id,
+        editFormat,
+        ...domainToolOptionsDefaults(input.project_id),
+        // 修复预算映射（§4.4）：loop 内每个新失败回合 = 一次 self_repair，attempt 口径与旧管道对齐
+        onRepairRound: (round) => {
+          trackAnalytics({
+            request_id: input.request_id,
+            event: {
+              event_type: 'self_repair_triggered',
+              project_id: input.project_id,
+              session_id: input.session_id,
+              payload: { attempt: round, category: 'test_error', via: 'agent_loop' },
+              privacy_level: 'research_safe',
+            },
+          })
+        },
+      }),
+      // PR4c：领域验证面（run_preview/gwt/security/api/preflight/browser）在编排层拼接
+      ...buildDomainTools({
+        projectId: input.project_id,
+        editFormat,
+        ...domainToolOptionsDefaults(input.project_id),
+      }),
+    ],
     query: input.query!,
     env: loop.env,
     sessionId: input.session_id,

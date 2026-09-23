@@ -104,20 +104,8 @@ function collectViolations(): string[] {
  * 消减方法：修掉对应耦合后删除条目；集合精确相等断言保证「只减不增」。
  */
 const WHITELIST = new Set<string>([
-  // ── 主题一：agent/tools 工具面直接 import 领域能力（PR4 tool-handlers 注入反转的目标战场）
-  'R1|main/agent/tools -> main/coding/api-contract',
-  'R1|main/agent/tools -> main/coding/artifact-ui-gate',
-  'R1|main/agent/tools -> main/coding/dist-rebuild',
-  'R1|main/agent/tools -> main/coding/preview-browser',
-  'R1|main/agent/tools -> main/coding/preview-runtime',
-  'R1|main/agent/tools -> main/delivery/sandbox',
-  'R1|main/agent/tools -> main/project/document-engine',
-  'R1|main/agent/tools -> main/project/project-map',
+  // ── 主题一：agent/tools 仅余文件工具的项目根解析（ToolContext 携带 root 后消除；PR4c 已迁出 12 项领域工具面）
   'R1|main/agent/tools -> main/project/project-service',
-  'R1|main/agent/tools -> main/verification/evidence-cache',
-  'R1|main/agent/tools -> main/verification/gwt-runner',
-  'R1|main/agent/tools -> main/verification/gwt-service',
-  'R1|main/agent/tools -> main/verification/security-scan',
   // ── 主题二：agent/loop 收口/上下文构建引用领域件（PR3 拆 programming-orchestrator 时一并评估归属）
   'R1|main/agent/loop -> main/coding/output-integrity',
   'R1|main/agent/loop -> main/coding/preview-browser',

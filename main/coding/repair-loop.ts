@@ -25,6 +25,7 @@ import type { ThinkingLevel } from '../../shared/reasoning-profile'
 import type { SDKQuery } from '../orchestration/orchestrator'
 import { runAgentLoop, loopCheckpointEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../agent/loop/agent-loop'
 import { buildAgentTools } from '../agent/tools/agent-tools'
+import { buildDomainTools, domainToolOptionsDefaults } from './tool-handlers'
 import { categoryTemperature, resolveGenerationMaxTokens } from '../platform/llm/model-resolution'
 import { resolveChannelEnv } from '../platform/llm/runtime-fallback'
 import { trackAnalytics } from '../delivery/track-analytics'
@@ -277,24 +278,34 @@ export async function runRepairLoop(input: RepairLoopInput): Promise<RepairRound
       task: appendContextPack({ projectId: input.project_id, sessionId: input.session_id, task: renderRepairTaskCard(input.tasks, input.checkpointContext, input.droppedToolIntents) }),
       // 窄任务小预算：web_research 限 2 防长 loop 无节制外呼（主 loop 为 4）
       toolBudget: { web_research: REPAIR_WEB_RESEARCH_BUDGET },
-      tools: buildAgentTools({
-        projectId: input.project_id,
-        editFormat,
-        ...(scopePaths ? { writeScope: createWriteScope(scopePaths, PROTECTED_WRITE_PATHS) } : {}),
-        // 埋点通道复用（self_repair_triggered, via:'repair_loop'）
-        onRepairRound: (round) => {
-          trackAnalytics({
-            request_id: input.request_id,
-            event: {
-              event_type: 'self_repair_triggered',
-              project_id: input.project_id,
-              session_id: input.session_id,
-              payload: { attempt: round, category: 'test_error', via: 'repair_loop' },
-              privacy_level: 'research_safe',
-            },
-          })
-        },
-      }),
+      tools: [
+        ...buildAgentTools({
+          projectId: input.project_id,
+          editFormat,
+          ...domainToolOptionsDefaults(input.project_id),
+          ...(scopePaths ? { writeScope: createWriteScope(scopePaths, PROTECTED_WRITE_PATHS) } : {}),
+          // 埋点通道复用（self_repair_triggered, via:'repair_loop'）
+          onRepairRound: (round) => {
+            trackAnalytics({
+              request_id: input.request_id,
+              event: {
+                event_type: 'self_repair_triggered',
+                project_id: input.project_id,
+                session_id: input.session_id,
+                payload: { attempt: round, category: 'test_error', via: 'repair_loop' },
+                privacy_level: 'research_safe',
+              },
+            })
+          },
+        }),
+        // PR4c：领域验证面 + 修复控制窄入口（writeScope 与上方同源；repair_control 在此注册）
+        ...buildDomainTools({
+          projectId: input.project_id,
+          editFormat,
+          ...domainToolOptionsDefaults(input.project_id),
+          ...(scopePaths ? { writeScope: createWriteScope(scopePaths, PROTECTED_WRITE_PATHS) } : {}),
+        }),
+      ],
       query: input.query,
       env,
       sessionId: input.session_id,
