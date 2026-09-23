@@ -145,7 +145,7 @@ const WHITELIST = new Set<string>([
   'R1|main/platform/upstream/providers -> main/agent/loop/thinking-log',
   // ── 主题六：domain 反向依赖 orchestration（PR4 治理：改事件化或回调注入，禁止新增）
   'R1|main/coding/stages -> main/orchestration/recovery-service',
-  'R1|main/guide -> main/orchestration/dialogue-router',
+  'R1|main/guide/stages -> main/orchestration/dialogue-router',
 ])
 
 describe('layer-rules 层规则（PR2 立规批）', () => {
@@ -167,14 +167,15 @@ describe('layer-rules 层规则（PR2 立规批）', () => {
 
   it('R7: 单文件 ≤800 行——超标须白名单登记（只减不增）', () => {
     const OVERSIZE_WHITELIST = new Set([
-      // PR4 拆解目标：guide-agent-service（澄清/PRD 流/市调三缝）、orchestrator（意图路由/状态机/落盘）、
+      // PR4 拆解目标：orchestrator（意图路由/状态机/落盘）、
       // agent-tools（tool-handlers 注入反转时拆组）、ipc（按通道族模块化）、prd-review（六维审查逐维拆）、
       // document-engine（文档同步与背板读写分离）。
-      // 长期豁免：generate（runMvpViaAgentLoop 主循环内聚）、agent-loop（loop 生命周期商内聚）。
-      'main/guide/guide-agent-service.ts',
+      // 长期豁免：generate（runMvpViaAgentLoop 主循环内聚）、agent-loop（loop 生命周期商内聚）、
+      // guide-pipeline（handleGuideMessage 主分流商内聚）。
       'main/orchestration/orchestrator.ts',
       'main/coding/stages/generate.ts',
       'main/agent/loop/agent-loop.ts',
+      'main/guide/stages/guide-pipeline.ts',
       'main/agent/tools/agent-tools.ts',
       'main/ipc.ts',
       'main/review/prd-review.ts',
