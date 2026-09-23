@@ -34,6 +34,7 @@ const DOMAIN_GROUPS = [
   'delivery', 'model', 'kernel', 'iteration',
 ] as const
 const TOP_RANK: Record<string, number> = {
+  ipc: 0, // PR4d：IPC 通道族目录=entry 延伸（接线层，可向下 import 任意层）
   orchestration: 1,
   agent: 3,
   platform: 4,
@@ -163,8 +164,7 @@ describe('layer-rules 层规则（PR2 立规批）', () => {
       'main/coding/stages/generate.ts',
       'main/agent/loop/agent-loop.ts',
       'main/guide/stages/guide-pipeline.ts',
-          'main/ipc.ts',
-      'main/review/prd-review.ts',
+              'main/review/prd-review.ts',
       'main/project/document-engine.ts',
       // 契约层类型聚合：shared/types 是四层契约的唯一真相源，长期豁免（如需治理按域拆 types/ 子目录）
       'shared/types.ts',

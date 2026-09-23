@@ -1,5 +1,5 @@
 import { restorePromaHome } from '../../support/proma-home-guard'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -21,7 +21,13 @@ describe('Sprint 0 Proma core security regression', () => {
   })
 
   it('[S0-IPC-001] 每个共享 IPC channel 都应由 main 注册并由 preload 白名单暴露', () => {
-    const mainIpc = readFileSync(join(root, 'main', 'ipc.ts'), 'utf8')
+    // PR4d：通道注册拆入 main/ipc/ 六件（hub + 五族）；扫描范围改为 hub+族目录拼接
+    const ipcDir = join(root, 'main', 'ipc')
+    const familySources = readdirSync(ipcDir)
+      .filter((f) => f.endsWith('.ts'))
+      .map((f) => readFileSync(join(ipcDir, f), 'utf8'))
+      .join('\n')
+    const mainIpc = readFileSync(join(root, 'main', 'ipc.ts'), 'utf8') + '\n' + familySources
     const preload = readFileSync(join(root, 'preload', 'bridge.ts'), 'utf8')
 
     for (const name of Object.keys(IPC_CHANNELS)) {
