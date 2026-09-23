@@ -165,7 +165,6 @@ describe('layer-rules 层规则（PR2 立规批）', () => {
       'main/agent/loop/agent-loop.ts',
       'main/guide/stages/guide-pipeline.ts',
               'main/review/prd-review.ts',
-      'main/project/document-engine.ts',
       // 契约层类型聚合：shared/types 是四层契约的唯一真相源，长期豁免（如需治理按域拆 types/ 子目录）
       'shared/types.ts',
     ])
