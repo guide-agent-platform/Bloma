@@ -10,7 +10,7 @@ vi.mock('../../main/coding/programming-orchestrator', () => ({
   })),
   setProgrammingEventPublisher: vi.fn(),
 }))
-vi.mock('../../main/delivery/platform-services', () => ({ trackAnalytics: vi.fn() }))
+vi.mock('../../main/delivery/track-analytics', () => ({ trackAnalytics: vi.fn() }))
 vi.mock('../../main/project/document-engine', () => ({ syncDocuments: vi.fn(() => ({ documents: [], stale_documents: [] })) }))
 vi.mock('../../main/project/project-service', () => ({
   findProject: vi.fn(() => ({

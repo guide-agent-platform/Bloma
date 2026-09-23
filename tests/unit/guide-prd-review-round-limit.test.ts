@@ -8,7 +8,7 @@ vi.mock('../../main/coding/programming-orchestrator', () => ({
   runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
   setProgrammingEventPublisher: vi.fn(),
 }))
-vi.mock('../../main/delivery/platform-services', () => ({
+vi.mock('../../main/delivery/track-analytics', () => ({
   trackAnalytics: vi.fn(),
 }))
 vi.mock('../../main/guide/guide-research', () => ({

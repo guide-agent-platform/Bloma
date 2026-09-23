@@ -190,7 +190,9 @@ describe('T-1 写点集成（账本门面 spy 断言）', () => {
   })
 
   it('源码锚：编排器 recordFailureCards( 恰好 5 处（含熔断统一写点④）（删写点必红=变异门）', () => {
-    const source = readFileSync(join(process.cwd(), 'main/coding/programming-orchestrator.ts'), 'utf8')
+    const source = ['generate', 'judge-review', 'final-verify', 'repair', 'iterate']
+      .map((f) => readFileSync(join(process.cwd(), 'main/coding/stages/' + f + '.ts'), 'utf8'))
+      .join('\n')
     expect((source.match(/recordFailureCards\(/g) ?? []).length).toBe(5)
   })
 })

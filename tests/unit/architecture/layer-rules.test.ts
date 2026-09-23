@@ -144,7 +144,7 @@ const WHITELIST = new Set<string>([
   // ── 主题五：上游贴面适配（loop-query 是薄适配层，允许引用本仓运行时件；保持与上游 diff 最小）
   'R1|main/platform/upstream/providers -> main/agent/loop/thinking-log',
   // ── 主题六：domain 反向依赖 orchestration（PR4 治理：改事件化或回调注入，禁止新增）
-  'R1|main/coding -> main/orchestration/recovery-service',
+  'R1|main/coding/stages -> main/orchestration/recovery-service',
   'R1|main/guide -> main/orchestration/dialogue-router',
 ])
 
@@ -163,6 +163,32 @@ describe('layer-rules 层规则（PR2 立规批）', () => {
       return s.includes('过渡桩') || (/^export \* from /m.test(s) && s.split('\n').length <= 6)
     })
     expect(stubs, `残留桩: ${stubs.join(', ')}`).toEqual([])
+  })
+
+  it('R7: 单文件 ≤800 行——超标须白名单登记（只减不增）', () => {
+    const OVERSIZE_WHITELIST = new Set([
+      // PR4 拆解目标：guide-agent-service（澄清/PRD 流/市调三缝）、orchestrator（意图路由/状态机/落盘）、
+      // agent-tools（tool-handlers 注入反转时拆组）、ipc（按通道族模块化）、prd-review（六维审查逐维拆）、
+      // document-engine（文档同步与背板读写分离）。
+      // 长期豁免：generate（runMvpViaAgentLoop 主循环内聚）、agent-loop（loop 生命周期商内聚）。
+      'main/guide/guide-agent-service.ts',
+      'main/orchestration/orchestrator.ts',
+      'main/coding/stages/generate.ts',
+      'main/agent/loop/agent-loop.ts',
+      'main/agent/tools/agent-tools.ts',
+      'main/ipc.ts',
+      'main/review/prd-review.ts',
+      'main/project/document-engine.ts',
+    ])
+    const oversize: string[] = []
+    for (const file of walkTs(join(REPO, 'main')).concat(walkTs(join(REPO, 'shared')))) {
+      const count = readFileSync(file, 'utf8').split('\n').length
+      if (count > 800) {
+        const rel = toPosix(file).replace(toPosix(REPO), '').replace(/^\//, '')
+        if (!OVERSIZE_WHITELIST.has(rel)) oversize.push(`${rel} (${count} 行)`)
+      }
+    }
+    expect(oversize.sort(), `新增超标文件须先登记 OVERSIZE_WHITELIST：\n${oversize.join('\n')}`).toEqual([])
   })
 
   it('R1: 依赖只向下（类型导入豁免）——违规集合与白名单精确相等（只减不增）', () => {

@@ -15,7 +15,7 @@ vi.mock('../../main/coding/programming-orchestrator', () => ({
   refineModificationDescription: vi.fn((text: string) => text),
   nextRequirementId: vi.fn((existing: Array<{ id: string }>) => `F-${String(existing.length + 1).padStart(3, '0')}`),
 }))
-vi.mock('../../main/delivery/platform-services', () => ({ trackAnalytics: vi.fn() }))
+vi.mock('../../main/delivery/track-analytics', () => ({ trackAnalytics: vi.fn() }))
 vi.mock('../../main/project/document-engine', () => ({
   syncDocuments: vi.fn(() => ({ documents: [], stale_documents: [] })),
   markPrdUserConfirmed: vi.fn(() => ({ user_confirmed_at: '2026-08-27T02:00:00.000Z' })),
