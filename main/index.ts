@@ -126,6 +126,7 @@ async function reconcileInterruptedProjectsAtStartup(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  configureMediaPermissions()
   // 会话索引独立化迁移（2026-09-04）：旧共用 agent-sessions.json 里的 Bloma 条目
   // 搬进专属 bloma-agent-sessions.json（幂等，只读旧写新不动 Proma 文件）；失败不阻断
   try {
@@ -228,5 +229,30 @@ function configureWebContents(contents: WebContents): void {
     }
     if (parent) void dialog.showMessageBox(parent, options)
     else void dialog.showMessageBox(options)
+  })
+}
+
+/**
+ * 授予产物沙箱 iframe 的麦克风（media/audio 采集）权限——「语顺精灵球」等录音产物需要 getUserMedia。
+ *
+ * Electron 对未处理的权限请求默认拒绝；产物预览跑在 localhost 沙箱 iframe 里，必须显式放行。
+ * 判断用 requestingUrl / requestingOrigin（发起请求的 iframe 来源），不能用 webContents.getURL()——
+ * 后者返回顶层主窗 URL（file:// 或 dev server），拿不到实际发起权限请求的 iframe 来源。
+ * 仅对 http://localhost / http://127.0.0.1 授予 media 权限，避免把麦克风权限扩大到整个应用面。
+ */
+function configureMediaPermissions(): void {
+  const isLocalPreview = (url: string): boolean => {
+    try {
+      const u = new URL(url)
+      return u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1')
+    } catch {
+      return false
+    }
+  }
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
+    callback(permission === 'media' && isLocalPreview(details.requestingUrl))
+  })
+  session.defaultSession.setPermissionCheckHandler((_wc, permission, requestingOrigin) => {
+    return permission === 'media' && isLocalPreview(requestingOrigin)
   })
 }

@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工程模板体系 · 三层脚手架</title>
+<style>
+  :root{
+    --bg:#f4f4ee;
+    --ink:#141414;
+    --ink-soft:#55554f;
+    --blue:#2340c8;      /* IKB */
+    --blue-deep:#16245c;
+    --lime:#f2e14b;      /* 柠檬黄 */
+    --orange:#ff5c1a;    /* 安全橙 */
+    --green:#b8e986;     /* 柠檬绿 */
+    --line:#dcdcd2;
+    --card:#ffffff;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:100%;height:100%}
+  body{
+    font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    background:var(--bg);
+    color:var(--ink);
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  .deck{
+    width:100vw;height:100vh;
+    display:grid;
+    grid-template-rows:auto auto 1fr auto auto;
+    padding:4.2vh 4vw 3.2vh;
+    gap:0;
+  }
+
+  /* ---------- header ---------- */
+  .tag{
+    font-size:1.5vh;letter-spacing:.28em;font-weight:700;
+    color:var(--blue);text-transform:uppercase;
+    display:flex;align-items:center;gap:.8em;
+  }
+  .tag::before{content:"";width:2.6vw;height:2px;background:var(--blue);}
+  .title{
+    font-size:6.8vh;font-weight:800;letter-spacing:-.01em;line-height:1.05;
+    color:var(--ink);margin-top:.4vh;
+  }
+  .title em{font-style:normal;color:var(--blue)}
+  .subtitle{
+    margin-top:1.2vh;font-size:2.1vh;color:var(--ink-soft);
+    display:flex;align-items:center;gap:1.4em;flex-wrap:wrap;
+  }
+  .subtitle .chip{
+    background:var(--lime);color:#141414;font-weight:700;
+    padding:.5vh 1.1vw;border-radius:2px;font-size:1.9vh;
+  }
+
+  /* ---------- timeline ---------- */
+  .timeline{
+    display:grid;grid-template-columns:repeat(4,1fr);
+    margin-top:2.6vh;border-top:2px solid var(--ink);
+  }
+  .phase{
+    padding:1.4vh 1.6vw 0;position:relative;border-right:1px solid var(--line);
+  }
+  .phase:last-child{border-right:none}
+  .phase::before{
+    content:"";position:absolute;top:-7px;left:0;width:10px;height:10px;
+    background:var(--blue);border:2px solid var(--bg);border-radius:50%;
+  }
+  .phase .ph-n{font-size:1.4vh;font-weight:800;color:var(--blue);letter-spacing:.14em}
+  .phase .ph-t{font-size:2.0vh;font-weight:700;margin-top:.3vh}
+  .phase .ph-d{font-size:1.5vh;color:var(--ink-soft);margin-top:.5vh;line-height:1.5}
+
+  /* ---------- three layers ---------- */
+  .layers{
+    display:grid;grid-template-columns:repeat(3,1fr);
+    gap:1.6vw;margin-top:2.2vh;
+  }
+  .layer{
+    background:var(--card);border:1px solid var(--line);
+    border-top:5px solid var(--blue);
+    padding:2.2vh 1.7vw 2vh;display:flex;flex-direction:column;
+  }
+  .layer.l2{border-top-color:var(--orange)}
+  .layer.l3{border-top-color:var(--green)}
+  .layer .lnum{
+    font-size:1.5vh;font-weight:800;letter-spacing:.18em;color:var(--ink-soft);
+  }
+  .layer .ltitle{font-size:3.0vh;font-weight:800;margin-top:.6vh;line-height:1.1}
+  .layer .lsub{font-size:1.7vh;color:var(--blue);font-weight:700;margin-top:.8vh}
+  .layer.l2 .lsub{color:var(--orange)}
+  .layer.l3 .lsub{color:#3f7d1a}
+  .layer .lbody{font-size:1.62vh;color:var(--ink-soft);line-height:1.62;margin-top:1vh}
+  .layer .lbody b{color:var(--ink);font-weight:700}
+  .layer .lfoot{
+    margin-top:auto;padding-top:1.4vh;font-size:1.5vh;font-weight:700;
+    color:#fff;background:var(--blue);padding:.9vh 1vw;border-radius:2px;
+  }
+  .layer.l2 .lfoot{background:var(--orange)}
+  .layer.l3 .lfoot{background:#4c9a1a}
+
+  /* ---------- modules ---------- */
+  .modules{margin-top:2.2vh}
+  .mod-h{
+    font-size:1.5vh;font-weight:800;letter-spacing:.18em;color:var(--ink-soft);
+    display:flex;align-items:center;gap:.8em;
+  }
+  .mod-h::after{content:"";flex:1;height:1px;background:var(--line)}
+  .mod-grid{
+    display:grid;grid-template-columns:repeat(8,1fr);gap:.8vw;margin-top:1.2vh;
+  }
+  .mod{
+    background:var(--card);border:1px solid var(--line);
+    padding:1.1vh .7vw;text-align:center;
+  }
+  .mod .slug{font-size:1.65vh;font-weight:800;color:var(--blue-deep);font-family:ui-monospace,Menlo,Consolas,monospace}
+  .mod .cn{font-size:1.45vh;color:var(--ink-soft);margin-top:.4vh}
+  .mod.g .slug{color:#b34a00}
+  .mod.g{border-top:3px solid var(--orange)}
+  .mod.w{border-top:3px solid var(--blue)}
+
+  /* ---------- status ---------- */
+  .status{
+    margin-top:2vh;display:flex;align-items:center;gap:2vw;
+    font-size:1.7vh;font-weight:700;
+  }
+  .status .ok{color:#3f7d1a}
+  .status .warn{color:#b34a00}
+</style>
+</head>
+<body>
+<div class="deck">
+
+  <div>
+    <div class="tag">工程模板体系 · Template Scaffold</div>
+    <div class="title">三层脚手架 · <em>确定性骨架 + 差异化注入</em></div>
+    <div class="subtitle">
+      <span class="chip">不靠模型自觉</span>
+      <span>模板资产由平台在确定性时机渲染 / 注入，业务内容才交给编程 Agent 填充</span>
+    </div>
+  </div>
+
+  <div class="timeline">
+    <div class="phase">
+      <div class="ph-n">STEP 1</div>
+      <div class="ph-t">loop 前</div>
+      <div class="ph-d">确定性渲染 · 零 LLM<br>物化骨架 / 模块</div>
+    </div>
+    <div class="phase">
+      <div class="ph-n">STEP 2</div>
+      <div class="ph-t">system 组装期</div>
+      <div class="ph-d">template-injection 注入点<br>骨架地图 + 模块地图</div>
+    </div>
+    <div class="phase">
+      <div class="ph-n">STEP 3</div>
+      <div class="ph-t">loop 运行期</div>
+      <div class="ph-d">write/edit 业务文件<br>托管文件拒绝写</div>
+    </div>
+    <div class="phase">
+      <div class="ph-n">STEP 4</div>
+      <div class="ph-t">交付期</div>
+      <div class="ph-d">平台接管<br>esbuild 构建门禁</div>
+    </div>
+  </div>
+
+  <div class="layers">
+    <div class="layer">
+      <div class="lnum">LAYER 01</div>
+      <div class="ltitle">骨架先行</div>
+      <div class="lsub">web-fullstack 骨架包</div>
+      <div class="lbody">
+        <b>manifest.json</b>（build / files / readonly 声明）＋ <b>index.html</b> ＋ <b>src/</b><br><br>
+        幂等物化到项目，<b>已存在即跳过</b>，迭代不覆盖。
+      </div>
+      <div class="lfoot">确定性渲染 · 无 LLM</div>
+    </div>
+
+    <div class="layer l2">
+      <div class="lnum">LAYER 02</div>
+      <div class="ltitle">官方模块库</div>
+      <div class="lsub">8 个验证过的实现参考</div>
+      <div class="lbody">
+        loop 前物化到 <b>src/official-modules/</b>（纯 fs）→ 模块地图随 system 注入 → Agent <b>复制改编</b>而非重造。<br><br>
+        只读软保护 · 开关 <b>BLOMA_MODULES</b>
+      </div>
+      <div class="lfoot">物化 + 只读 + 地图注入</div>
+    </div>
+
+    <div class="layer l3">
+      <div class="lnum">LAYER 03</div>
+      <div class="ltitle">plan 任务合同</div>
+      <div class="lsub">loop 前单轮技术规划</div>
+      <div class="lbody">
+        产出 <b>plan.md</b>：目标文件 / 复用点 / 验证口径，让 loop 开场即知<b>该碰哪些文件、复用哪些资产</b>。<br><br>
+        开关 <b>BLOMA_PLAN_LEG</b>（quick 关 / longterm 开）
+      </div>
+      <div class="lfoot">技术合同注入 system</div>
+    </div>
+  </div>
+
+  <div class="modules">
+    <div class="mod-h">官方模块库 · 首批 8 模块</div>
+    <div class="mod-grid">
+      <div class="mod w"><div class="slug">storage-state</div><div class="cn">本地持久化</div></div>
+      <div class="mod w"><div class="slug">modal-dialog</div><div class="cn">弹层确认框</div></div>
+      <div class="mod w"><div class="slug">form-validation</div><div class="cn">表单校验</div></div>
+      <div class="mod w"><div class="slug">filter-list</div><div class="cn">搜索过滤</div></div>
+      <div class="mod g"><div class="slug">game-loop</div><div class="cn">游戏主循环</div></div>
+      <div class="mod g"><div class="slug">fsm-state</div><div class="cn">状态机</div></div>
+      <div class="mod g"><div class="slug">input-control</div><div class="cn">键盘输入</div></div>
+      <div class="mod g"><div class="slug">aabb-collision</div><div class="cn">AABB 碰撞</div></div>
+    </div>
+  </div>
+
+  <div class="status">
+    <span class="ok">● 代码 + 资产已全部落地（4 模板文档 / web-fullstack 骨架 / 8 模块）</span>
+    <span class="warn">● 线上待验：web · game 各一轮实弹 MVP（模块取用 / 只读不改 / 产物自包含）</span>
+  </div>
+
+</div>
+</body>
+</html>
