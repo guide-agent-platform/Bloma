@@ -172,7 +172,6 @@ describe('layer-rules 层规则（PR2 立规批）', () => {
       // document-engine（文档同步与背板读写分离）。
       // 长期豁免：generate（runMvpViaAgentLoop 主循环内聚）、agent-loop（loop 生命周期商内聚）、
       // guide-pipeline（handleGuideMessage 主分流商内聚）。
-      'main/orchestration/orchestrator.ts',
       'main/coding/stages/generate.ts',
       'main/agent/loop/agent-loop.ts',
       'main/guide/stages/guide-pipeline.ts',
