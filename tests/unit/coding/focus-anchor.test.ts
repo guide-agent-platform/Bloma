@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { buildAgentLoopSystemPrompt } from '../../../main/programming-orchestrator'
+import { buildAgentLoopSystemPrompt } from '../../../main/coding/programming-orchestrator'
 import { buildSkeletonMapInjection } from '../../../main/template-injection'
 import { renderGwtSkeleton } from '../../../main/document-engine'
 import { focusAnchorEnabled, renderBackplaneAnchor, type PrdBackplane } from '../../../main/model/prd-backplane'

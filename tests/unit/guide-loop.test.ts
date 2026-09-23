@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
 
-vi.mock('../../main/programming-orchestrator', () => ({
+vi.mock('../../main/coding/programming-orchestrator', () => ({
   runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
   setProgrammingEventPublisher: vi.fn(),
 }))
@@ -44,12 +44,12 @@ vi.mock('../../main/decision-log', () => ({
   recordDecision: vi.fn(),
   parseDecisionText: vi.fn(() => []),
 }))
-vi.mock('../../main/guide-research', () => ({
+vi.mock('../../main/guide/guide-research', () => ({
   researchMarketSimilar: vi.fn(async () => ({ available: false, items: [] })),
   normalizeResearchQuery: vi.fn((q: string) => q),
 }))
 
-import { handleGuideMessage } from '../../main/guide-agent-service'
+import { handleGuideMessage } from '../../main/guide/guide-agent-service'
 import { buildGuideTools, guideLoopEnabled, type GuideDecision } from '../../main/guide/guide-tools'
 import type { ConversationTurn, GuideModelOptions, SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
 

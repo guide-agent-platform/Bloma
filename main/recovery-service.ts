@@ -8,7 +8,7 @@ import { recordDecision } from './decision-log'
 import { hasInteractiveEntry } from './gwt-service'
 import { listSnapshots, restoreSnapshotFiles, rollbackSnapshot } from './platform-services'
 import { findProject, listProjects, updateProject } from './project-service'
-import { isHtmlDocument } from './sketch-engine-llm'
+import { isHtmlDocument } from './coding/sketch-engine-llm'
 import { commitProjectState } from './coding/project-git'
 
 /**

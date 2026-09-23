@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
 
-vi.mock('../../main/programming-orchestrator', () => ({
+vi.mock('../../main/coding/programming-orchestrator', () => ({
   runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
   resolvePrdBackplane: vi.fn(async (_input: unknown, requirements: unknown) => ({
     name: '未命名项目',
@@ -29,7 +29,7 @@ vi.mock('../../main/session-service', async (importOriginal) => {
   return { ...actual, readPrimaryIntent: vi.fn((): string | undefined => undefined) }
 })
 vi.mock('../../main/decision-log', () => ({ recordDecision: vi.fn(), parseDecisionText: vi.fn() }))
-vi.mock('../../main/guide-research', () => ({
+vi.mock('../../main/guide/guide-research', () => ({
   normalizeResearchQuery: (q: string) => q,
   researchMarketSimilar: vi.fn(async (queries: string[]) => ({
     available: true,
@@ -39,8 +39,8 @@ vi.mock('../../main/guide-research', () => ({
   })),
 }))
 
-import { handleGuideMessage } from '../../main/guide-agent-service'
-import { researchMarketSimilar } from '../../main/guide-research'
+import { handleGuideMessage } from '../../main/guide/guide-agent-service'
+import { researchMarketSimilar } from '../../main/guide/guide-research'
 import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../main/orchestrator'
 
 const SESSION_ID = 'sess-advisory'

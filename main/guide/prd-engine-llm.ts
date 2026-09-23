@@ -16,7 +16,7 @@ import {
   normalizePrdDocumentNewlines,
   reconcilePrdDocumentPriorities,
 } from '../model/prd-backplane'
-import { renderDocumentSectionSpec } from '../prd-sections'
+import { renderDocumentSectionSpec } from './prd-sections'
 import { categoryTemperature } from '../model-resolution'
 
 /**

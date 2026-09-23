@@ -20,11 +20,11 @@
  * - 其余（P2、unverified）→ 不构成失败，仅入 detail 备查
  */
 
-import type { PrdBackplane, SketchRequirement } from '../sketch-engine'
-import { backplaneAiCapabilities, capContractEnabled, renderCapSection, requirementPriority } from '../sketch-engine'
+import type { PrdBackplane, SketchRequirement } from '../coding/sketch-engine'
+import { backplaneAiCapabilities, capContractEnabled, renderCapSection, requirementPriority } from '../coding/sketch-engine'
 import type { SDKQuery } from '../orchestrator'
-import type { JudgeConstraint } from '../judge-engine'
-import { delegatedReviewEnabled, runDelegatedReview } from '../review-delegation'
+import type { JudgeConstraint } from './judge-engine'
+import { delegatedReviewEnabled, runDelegatedReview } from './review-delegation'
 import { buildJudgeErrorPatternsSection } from '../experience/judge-checklist'
 import { ANTIDEGRADE_JUDGE_RULES, antidegradeEnabled } from './judge-antidegrade'
 import type { AgentEvent } from '../../shared/types'

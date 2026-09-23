@@ -4,9 +4,9 @@ import {
   renderForbiddenTermsForPrompt,
   renderResponseVocabularyForPrompt,
   renderTriggerVocabularyForPrompt,
-} from '../ears-vocabulary'
-import type { SketchRequirement } from '../sketch-engine'
-import { requirementPriority } from '../sketch-engine'
+} from './ears-vocabulary'
+import type { SketchRequirement } from '../coding/sketch-engine'
+import { requirementPriority } from '../coding/sketch-engine'
 import { categoryTemperature } from '../model-resolution'
 import { callLlmForJson } from '../kernel/llm-call'
 

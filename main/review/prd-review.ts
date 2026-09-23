@@ -19,14 +19,14 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentEvent, AgentSendMessageInput } from '../../shared/types'
 import { recordDecision } from '../decision-log'
-import { publishPrdConfirmCard } from '../prd-confirm'
-import type { PrdBackplane } from '../sketch-engine'
-import { defaultConstraintLevel } from '../sketch-engine'
+import { publishPrdConfirmCard } from '../guide/prd-confirm'
+import type { PrdBackplane } from '../coding/sketch-engine'
+import { defaultConstraintLevel } from '../coding/sketch-engine'
 import { isInjectionEnabled } from '../template-injection'
-import { checkSectionCompleteness } from '../prd-sections'
-import { parseEarsAssertion, renderForbiddenTermsForPrompt } from '../ears-vocabulary'
+import { checkSectionCompleteness } from '../guide/prd-sections'
+import { parseEarsAssertion, renderForbiddenTermsForPrompt } from '../guide/ears-vocabulary'
 import type { SDKQuery } from '../orchestrator'
-import { delegatedReviewEnabled, runDelegatedReview } from '../review-delegation'
+import { delegatedReviewEnabled, runDelegatedReview } from './review-delegation'
 import { buildConversationExcerpt, buildReadConversationHistoryTool } from '../conversation-excerpt'
 import {
   DEFENDER_SYSTEM_PROMPT,
@@ -36,7 +36,7 @@ import {
   validateDispositionCoverage,
   type DefenderDisposition,
   type DefenderFailure,
-} from '../prd-defender'
+} from './prd-defender'
 
 // =========================================================================
 // 类型

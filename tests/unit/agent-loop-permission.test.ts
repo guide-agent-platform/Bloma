@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { runAgentLoop, withAbort, type AgentLoopInput, type AgentLoopTool, type ToolOutcome } from '../../main/agent-loop'
+import { runAgentLoop, withAbort, type AgentLoopInput, type AgentLoopTool, type ToolOutcome } from '../../main/coding/agent-loop'
 import { canUseTool } from '../../main/permission-service'
 import type { SDKMessage } from '../../shared/types'
 import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../main/orchestrator'

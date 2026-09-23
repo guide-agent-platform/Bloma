@@ -1,4 +1,4 @@
-import { partitionWindow } from './agent-loop'
+import { partitionWindow } from './coding/agent-loop'
 import type { ConversationTurn } from './orchestrator'
 
 /**

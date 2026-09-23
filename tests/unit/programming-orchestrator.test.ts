@@ -3,18 +3,18 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
-import { resolvePrdBackplane } from '../../main/programming-orchestrator'
-import { generatePrdLlm } from '../../main/prd-engine-llm'
-import { enrichRequirementsLlm, mergeEnrichment, type EnrichedSketchRequirement } from '../../main/requirement-enricher'
+import { resolvePrdBackplane } from '../../main/coding/programming-orchestrator'
+import { generatePrdLlm } from '../../main/guide/prd-engine-llm'
+import { enrichRequirementsLlm, mergeEnrichment, type EnrichedSketchRequirement } from '../../main/guide/requirement-enricher'
 import { createChannel } from '../../main/channel-manager'
 import { setSafeStorageAdapter } from '../../main/safe-storage'
 import { createProject, recordSketchGenerated } from '../../main/project-service'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import { appendJsonLine } from '../../storage/json-store'
 import type { Channel, SDKMessage } from '../../shared/types'
-import type { MvpTaskInput } from '../../main/programming-orchestrator'
+import type { MvpTaskInput } from '../../main/coding/programming-orchestrator'
 import type { SDKQuery } from '../../main/orchestrator'
-import type { PrdBackplane, SketchRequirement } from '../../main/sketch-engine'
+import type { PrdBackplane, SketchRequirement } from '../../main/coding/sketch-engine'
 
 /**
  * 功能项加厚（2026-08-18 设计 §5 编排器测试计划）：resolvePrdBackplane 并行两路
@@ -47,13 +47,13 @@ const ENRICHED: EnrichedSketchRequirement[] = [
   },
 ]
 
-vi.mock('../../main/prd-engine-llm', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/prd-engine-llm')>()
+vi.mock('../../main/guide/prd-engine-llm', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/guide/prd-engine-llm')>()
   return { ...actual, generatePrdLlm: vi.fn() }
 })
 
-vi.mock('../../main/requirement-enricher', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/requirement-enricher')>()
+vi.mock('../../main/guide/requirement-enricher', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/guide/requirement-enricher')>()
   return {
     ...actual,
     enrichRequirementsLlm: vi.fn(),

@@ -10,10 +10,10 @@ import {
   gwtRequiredCategories,
   isInjectionEnabled,
 } from '../../main/template-injection'
-import { externalResourceViolation } from '../../main/agent-tools'
-import { buildAgentLoopSystemPrompt } from '../../main/programming-orchestrator'
+import { externalResourceViolation } from '../../main/coding/agent-tools'
+import { buildAgentLoopSystemPrompt } from '../../main/coding/programming-orchestrator'
 import { renderGwtSkeleton } from '../../main/document-engine'
-import type { PrdBackplane, SketchRequirement } from '../../main/sketch-engine'
+import type { PrdBackplane, SketchRequirement } from '../../main/coding/sketch-engine'
 
 /** 注入点②-⑦接线（P5）：每点独立开关（=现状语义）+ 切片内容。 */
 

@@ -4,14 +4,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../../main/programming-orchestrator', () => ({
+vi.mock('../../main/coding/programming-orchestrator', () => ({
   runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
   setProgrammingEventPublisher: vi.fn(),
 }))
 vi.mock('../../main/platform-services', () => ({
   trackAnalytics: vi.fn(),
 }))
-vi.mock('../../main/guide-research', () => ({
+vi.mock('../../main/guide/guide-research', () => ({
   normalizeResearchQuery: (q: string) => q,
   researchMarketSimilar: vi.fn(async () => ({ available: false, queries: [], results: [], summary: '' })),
 }))
@@ -50,7 +50,7 @@ vi.mock('../../main/decision-log', () => ({
   },
 }))
 
-import { countTrailingPrdReviewRounds } from '../../main/guide-agent-service'
+import { countTrailingPrdReviewRounds } from '../../main/guide/guide-agent-service'
 
 /**
  * 审查确认轮次熔断（2026-08-30 用户拍板「确认环节最多两轮」）：

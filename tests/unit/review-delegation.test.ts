@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../../main/agent-collaboration', () => ({
+vi.mock('../../main/coding/agent-collaboration', () => ({
   registerParentLoopContext: vi.fn(),
   unregisterParentLoopContext: vi.fn(),
   disposeParentDelegationState: vi.fn(),
@@ -28,7 +28,7 @@ vi.mock('../../main/agent-collaboration', () => ({
 import {
   delegatedReviewEnabled,
   runDelegatedReview,
-} from '../../main/review-delegation'
+} from '../../main/review/review-delegation'
 import {
   disposeParentDelegationState,
   registerParentLoopContext,
@@ -36,7 +36,7 @@ import {
   stopDelegations,
   unregisterParentLoopContext,
   waitForDelegations,
-} from '../../main/agent-collaboration'
+} from '../../main/coding/agent-collaboration'
 import type { SDKQuery } from '../../main/orchestrator'
 import type { SDKMessage } from '../../shared/types'
 

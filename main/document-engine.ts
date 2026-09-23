@@ -11,10 +11,10 @@ import type {
 } from '../shared/types'
 import { getDocumentsDir } from '../storage/config-paths'
 import { findProject, readLastSketchRequirements } from './project-service'
-import { nextRequirementId } from './programming-orchestrator'
-import type { PrdBackplane, RequirementStatus, SketchRequirement } from './sketch-engine'
-import { buildPrdDocumentFallback, deriveInterfaceSpec, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, backplaneTemplateMeta } from './sketch-engine'
-import { parseEarsAssertion } from './ears-vocabulary'
+import { nextRequirementId } from './coding/programming-orchestrator'
+import type { PrdBackplane, RequirementStatus, SketchRequirement } from './coding/sketch-engine'
+import { buildPrdDocumentFallback, deriveInterfaceSpec, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, backplaneTemplateMeta } from './coding/sketch-engine'
+import { parseEarsAssertion } from './guide/ears-vocabulary'
 import { gwtRequiredCategories, isInjectionEnabled } from './template-injection'
 import { describeEffect, describeTrigger, parseBehaviorAssertion } from './behavior-assertions'
 import { syncReplayFeatureFiles } from './experience/replay-compiler'
@@ -1002,7 +1002,7 @@ export function renderGwtSkeleton(
 }
 
 /** EARS 句式 → GWT 场景类别标签（注入⑦：WHEN=主路径 / WHILE=空态 / IF=异常，词表同源）。 */
-function categoryTagOf(kind: import('./ears-vocabulary').EarsPatternKind): string {
+function categoryTagOf(kind: import('./guide/ears-vocabulary').EarsPatternKind): string {
   if (kind === 'while') return '[空态]'
   if (kind === 'if') return '[异常]'
   return '[主路径]'

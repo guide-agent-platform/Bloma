@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { listRefPatternModules } from '../../../main/experience/ref-source'
-import { buildModuleMapInjection, renderOfficialModulesToProject, REF_MODULES_DIR } from '../../../main/module-library'
-import type { OfficialModule } from '../../../main/module-library'
+import { buildModuleMapInjection, renderOfficialModulesToProject, REF_MODULES_DIR } from '../../../main/coding/module-library'
+import type { OfficialModule } from '../../../main/coding/module-library'
 
 /**
  * G4 正向参考消费（C-1 约束落点）：账本 verified pattern + sidecar → ref 模块列表，

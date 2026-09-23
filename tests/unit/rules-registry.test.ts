@@ -7,7 +7,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RULES_REGISTRY, renderRulesSection, rulesForTemplateType, rulesRegistryEnabled } from '../../main/rules-registry'
-import { buildAgentLoopSystemPrompt } from '../../main/programming-orchestrator'
+import { buildAgentLoopSystemPrompt } from '../../main/coding/programming-orchestrator'
 import type { PrdBackplane } from '../../main/model/prd-backplane'
 
 afterEach(() => {

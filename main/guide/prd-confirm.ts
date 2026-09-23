@@ -3,11 +3,11 @@ import type { AgentEvent, AgentSendMessageInput, ResearchIdea } from '../../shar
 import { recordDecision } from '../decision-log'
 import { trackAnalytics } from '../platform-services'
 import { appendPrdRequirements, markPrdUserConfirmed, updatePrdAssertions } from '../document-engine'
-import { nextRequirementId, runSketchTask } from '../programming-orchestrator'
-import { earsifyRequirements } from '../requirement-earsifier'
+import { nextRequirementId, runSketchTask } from '../coding/programming-orchestrator'
+import { earsifyRequirements } from './requirement-earsifier'
 import { resolveChannelEnv } from '../runtime-fallback'
-import type { PrdBackplane, SketchRequirement } from '../sketch-engine'
-import { backplaneAiCapabilities, backplaneKeyTasks, backplaneTemplateMeta, requirementAssertions, requirementImpliesBackend, requirementPriority, requirementStory } from '../sketch-engine'
+import type { PrdBackplane, SketchRequirement } from '../coding/sketch-engine'
+import { backplaneAiCapabilities, backplaneKeyTasks, backplaneTemplateMeta, requirementAssertions, requirementImpliesBackend, requirementPriority, requirementStory } from '../coding/sketch-engine'
 import type { SDKQuery } from '../orchestrator'
 
 /**

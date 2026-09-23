@@ -13,7 +13,7 @@ import {
   resolveBlockedDecision,
   resumeBlockedFlow,
   setProgrammingEventPublisher,
-} from '../../main/programming-orchestrator'
+} from '../../main/coding/programming-orchestrator'
 import { createProject, findProject, recordSketchGenerated, updateProject } from '../../main/project-service'
 import { createChannel } from '../../main/channel-manager'
 import { setSafeStorageAdapter } from '../../main/safe-storage'
@@ -418,14 +418,14 @@ describe('Phase 7 U2 · H5 决策卡条件化（buildBlockedQuestions）', () =>
   })
 
   it('开关 off（缺省）→ 固定三选项（字节级现状回归锁）', async () => {
-    const { buildBlockedQuestions } = await import('../../main/programming-orchestrator')
+    const { buildBlockedQuestions } = await import('../../main/coding/programming-orchestrator')
     const questions = buildBlockedQuestions({ reason: 'test', failures: [{ scenario: 'F-001 x' }], mustDeliverFeatureIds: ['F-001'] })
     expect(questions.map((q) => q.label)).toEqual(['继续尝试', '接受现状', '补充说明'])
   })
 
   it('开关 on + test 失败（有必交失败+有可用部分）→ 主按钮=先修好X再交付（推荐），accept=先使用已可用的部分', async () => {
     process.env.BLOMA_DECISION_CONDITIONAL = '1'
-    const { buildBlockedQuestions } = await import('../../main/programming-orchestrator')
+    const { buildBlockedQuestions } = await import('../../main/coding/programming-orchestrator')
     const questions = buildBlockedQuestions({
       reason: 'test',
       failures: [{ scenario: 'F-002 搜索过滤未命中' }],
@@ -441,7 +441,7 @@ describe('Phase 7 U2 · H5 决策卡条件化（buildBlockedQuestions）', () =>
 
   it('开关 on + test 全败（无可用部分）→ accept 文案如实降级（核心任务未通过不建议当可用版本）', async () => {
     process.env.BLOMA_DECISION_CONDITIONAL = '1'
-    const { buildBlockedQuestions } = await import('../../main/programming-orchestrator')
+    const { buildBlockedQuestions } = await import('../../main/coding/programming-orchestrator')
     const questions = buildBlockedQuestions({
       reason: 'test',
       failures: [{ scenario: 'F-001 入口失败' }, { scenario: 'F-002 主流程失败' }],
@@ -453,7 +453,7 @@ describe('Phase 7 U2 · H5 决策卡条件化（buildBlockedQuestions）', () =>
 
   it('开关 on + security → 主按钮=继续修复安全问题；judge → 主按钮=告诉我怎么调整（方向性优先听用户）', async () => {
     process.env.BLOMA_DECISION_CONDITIONAL = '1'
-    const { buildBlockedQuestions } = await import('../../main/programming-orchestrator')
+    const { buildBlockedQuestions } = await import('../../main/coding/programming-orchestrator')
     expect(buildBlockedQuestions({ reason: 'security' })[0].label).toBe('继续修复安全问题')
     expect(buildBlockedQuestions({ reason: 'judge' })[0]).toMatchObject({ id: 'explain', label: '告诉我怎么调整' })
   })
@@ -473,7 +473,7 @@ describe('Phase 7 尾批 · H5 四问卡（regenerate 第四出口）', () => {
 
   it('开关 on + test + 升级信号（escalated）→ 追加第四出口「按新方案生成一个版本」', async () => {
     process.env.BLOMA_DECISION_CONDITIONAL = '1'
-    const { buildBlockedQuestions } = await import('../../main/programming-orchestrator')
+    const { buildBlockedQuestions } = await import('../../main/coding/programming-orchestrator')
     const questions = buildBlockedQuestions({
       reason: 'test',
       failures: [{ scenario: 'F-002 搜索过滤未命中' }],
@@ -490,7 +490,7 @@ describe('Phase 7 尾批 · H5 四问卡（regenerate 第四出口）', () => {
 
   it('无升级信号不出现第四出口（E1 §五：预算用完但有推进不推重做）', async () => {
     process.env.BLOMA_DECISION_CONDITIONAL = '1'
-    const { buildBlockedQuestions } = await import('../../main/programming-orchestrator')
+    const { buildBlockedQuestions } = await import('../../main/coding/programming-orchestrator')
     const questions = buildBlockedQuestions({
       reason: 'test',
       failures: [{ scenario: 'F-002 搜索过滤未命中' }],
@@ -501,14 +501,14 @@ describe('Phase 7 尾批 · H5 四问卡（regenerate 第四出口）', () => {
 
   it('security/judge 路径即使升级也不出第四出口（重做判据只在 test 链）', async () => {
     process.env.BLOMA_DECISION_CONDITIONAL = '1'
-    const { buildBlockedQuestions } = await import('../../main/programming-orchestrator')
+    const { buildBlockedQuestions } = await import('../../main/coding/programming-orchestrator')
     expect(buildBlockedQuestions({ reason: 'security', escalated: true }).some((q) => q.id === 'regenerate')).toBe(false)
     expect(buildBlockedQuestions({ reason: 'judge', escalated: true }).some((q) => q.id === 'regenerate')).toBe(false)
   })
 
   it('开关 off：escalated 也不出第四出口（字节级现状）', async () => {
     delete process.env.BLOMA_DECISION_CONDITIONAL
-    const { buildBlockedQuestions } = await import('../../main/programming-orchestrator')
+    const { buildBlockedQuestions } = await import('../../main/coding/programming-orchestrator')
     const questions = buildBlockedQuestions({
       reason: 'test',
       failures: [{ scenario: 'F-001 x' }],
@@ -519,7 +519,7 @@ describe('Phase 7 尾批 · H5 四问卡（regenerate 第四出口）', () => {
   })
 
   it('resolveBlockedDecision：点选 regenerate 识别；自由文本「换个方案/按新方案」识别、泛泛词不误判', async () => {
-    const { resolveBlockedDecision } = await import('../../main/programming-orchestrator')
+    const { resolveBlockedDecision } = await import('../../main/coding/programming-orchestrator')
     const home = mkdtempSync(join(tmpdir(), 'proma-blocked-4q-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })

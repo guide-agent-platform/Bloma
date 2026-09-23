@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { syncDocuments } from '../../../main/document-engine'
-import { runJudge } from '../../../main/judge-engine'
+import { runJudge } from '../../../main/review/judge-engine'
 import { createProject, recordSketchGenerated } from '../../../main/project-service'
 import { getDocumentsDir } from '../../../storage/config-paths'
 

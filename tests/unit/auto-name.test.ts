@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
-import { autoNameProject, deriveFallbackName } from '../../main/programming-orchestrator'
+import { autoNameProject, deriveFallbackName } from '../../main/coding/programming-orchestrator'
 import type { SDKMessage } from '../../shared/types'
 
 const { findProjectMock, updateProjectMock, readPrimaryIntentMock, readPrdBackplaneMock } = vi.hoisted(() => ({

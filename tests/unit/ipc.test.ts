@@ -38,8 +38,8 @@ const { runMvpTaskMock, runIterationTaskMock } = vi.hoisted(() => ({
   runIterationTaskMock: vi.fn(async () => ({ preview_url: 'http://localhost:1' })),
 }))
 
-vi.mock('../../main/programming-orchestrator', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/programming-orchestrator')>()
+vi.mock('../../main/coding/programming-orchestrator', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/coding/programming-orchestrator')>()
   return {
     ...actual,
     runMvpTask: runMvpTaskMock,

@@ -9,8 +9,8 @@ import {
   mergeEnrichment,
   extractUserTexts,
   type EnrichedSketchRequirement,
-} from '../../main/requirement-enricher'
-import { DEFAULT_BEHAVIOR_ASSERTION, type SketchRequirement } from '../../main/sketch-engine'
+} from '../../main/guide/requirement-enricher'
+import { DEFAULT_BEHAVIOR_ASSERTION, type SketchRequirement } from '../../main/coding/sketch-engine'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import { appendJsonLine } from '../../storage/json-store'
 import type { SDKMessage } from '../../shared/types'

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { analyzeEvents, percentile } from '../../scripts/calibrate-loop-params.mjs'
-import { resolveAgentLoopMaxTurns } from '../../main/programming-orchestrator'
+import { resolveAgentLoopMaxTurns } from '../../main/coding/programming-orchestrator'
 
 /**
  * 闭环治理 PR8：loop 参数标定脚本（纯函数部分）+ maxTurns env 覆盖。

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { syncIterationCompleted } from '../../main/programming-orchestrator'
+import { syncIterationCompleted } from '../../main/coding/programming-orchestrator'
 
 const { syncDocumentsMock } = vi.hoisted(() => ({
   syncDocumentsMock: vi.fn(() => ({ documents: [{ type: 'changelog', status: 'synced' }], stale_documents: [] })),

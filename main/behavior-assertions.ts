@@ -11,7 +11,7 @@
  * hasInteractiveEntry 语义同构），绝不因「看不懂断言」退回产物（防误伤）。
  */
 
-import { parseEarsAssertion } from './ears-vocabulary'
+import { parseEarsAssertion } from './guide/ears-vocabulary'
 
 /** 用户侧触发器：按键（含方向/空格/回车/字母数字）、点击、双击、输入（fill）、下拉选择（select）。 */
 export interface BehaviorTrigger {

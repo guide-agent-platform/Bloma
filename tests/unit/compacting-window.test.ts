@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DIGEST_HEADER_PREFIX, DIGEST_MAX_CHARS, windowMessagesWithDigest, extractKeyLines } from '../../main/compacting-window'
-import { TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, windowMessages } from '../../main/agent-loop'
+import { TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, windowMessages } from '../../main/coding/agent-loop'
 import type { ConversationTurn } from '../../main/orchestrator'
 
 /**

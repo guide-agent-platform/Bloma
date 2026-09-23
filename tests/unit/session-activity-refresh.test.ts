@@ -10,7 +10,7 @@ import {
   resetSessionActivityThrottleForTests,
   runSketchTask,
   setProgrammingEventPublisher,
-} from '../../main/programming-orchestrator'
+} from '../../main/coding/programming-orchestrator'
 import {
   clearSandboxRuntimeForTests,
   setSandboxRuntimeForTests,

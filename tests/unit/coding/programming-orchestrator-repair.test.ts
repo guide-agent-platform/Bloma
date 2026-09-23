@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } fro
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { runAgentLoopPostTesting, resumeBlockedFlow, setProgrammingEventPublisher } from '../../../main/programming-orchestrator'
+import { runAgentLoopPostTesting, resumeBlockedFlow, setProgrammingEventPublisher } from '../../../main/coding/programming-orchestrator'
 import { createProject, findProject, updateProject } from '../../../main/project-service'
 import { recordSketchGenerated } from '../../../main/project-service'
 import { syncDocuments, readLoopCheckpointDocument, writeLoopCheckpointDocument } from '../../../main/document-engine'
@@ -101,6 +101,9 @@ function junkQuery(): SDKQuery {
 describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', () => {
   const originalPromaHome = process.env.PROMA_HOME
   const originalBudget = process.env.BLOMA_REPAIR_BUDGET
+  // 裁判走直连路（与 guide-* 测试同款惯例）：修复轮测试焦点在修复门禁，
+  // 委派审查子代理会额外消耗 runAgentLoop spy 计数（PR1 删桩后 mock 边界统一所致）
+  const originalDelegatedReview = process.env.BLOMA_DELEGATED_REVIEW
   let events: AgentEvent[] = []
   let projectId = ''
   let sessionId = ''
@@ -110,6 +113,7 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'proma-repair-'))
     delete process.env.BLOMA_REPAIR_BUDGET
     delete process.env.BLOMA_LOOP_CHECKPOINT
+    process.env.BLOMA_DELEGATED_REVIEW = '0'
     events = []
     mocks.runAgentLoop.mockReset()
     mocks.runGwtScenarios.mockReset()
@@ -147,6 +151,8 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
 
   afterEach(() => {
     restorePromaHome(originalPromaHome)
+    if (originalDelegatedReview === undefined) delete process.env.BLOMA_DELEGATED_REVIEW
+    else process.env.BLOMA_DELEGATED_REVIEW = originalDelegatedReview
     if (originalBudget === undefined) delete process.env.BLOMA_REPAIR_BUDGET
     else process.env.BLOMA_REPAIR_BUDGET = originalBudget
     delete process.env.BLOMA_LOOP_CHECKPOINT
@@ -599,6 +605,7 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
 })
 describe('PR-C：build-gate 接入 + blocked 卡先修再验（入口 B）', () => {
   const originalPromaHome = process.env.PROMA_HOME
+  const originalDelegatedReview = process.env.BLOMA_DELEGATED_REVIEW
   let events: AgentEvent[] = []
   let projectId = ''
   let sessionId = ''
@@ -606,6 +613,7 @@ describe('PR-C：build-gate 接入 + blocked 卡先修再验（入口 B）', () 
 
   beforeEach(() => {
     process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'proma-repair-c-'))
+    process.env.BLOMA_DELEGATED_REVIEW = '0'
     events = []
     mocks.runAgentLoop.mockReset()
     mocks.runGwtScenarios.mockReset()
@@ -642,6 +650,8 @@ describe('PR-C：build-gate 接入 + blocked 卡先修再验（入口 B）', () 
 
   afterEach(() => {
     restorePromaHome(originalPromaHome)
+    if (originalDelegatedReview === undefined) delete process.env.BLOMA_DELEGATED_REVIEW
+    else process.env.BLOMA_DELEGATED_REVIEW = originalDelegatedReview
     setProgrammingEventPublisher(() => undefined)
     clearSandboxRuntimeForTests()
   })

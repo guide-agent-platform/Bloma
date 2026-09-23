@@ -15,19 +15,19 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import type { SDKMessage } from '../../shared/types'
 import type { SDKQuery } from '../../main/orchestrator'
-import type { PrdBackplane } from '../../main/sketch-engine'
+import type { PrdBackplane } from '../../main/coding/sketch-engine'
 import {
   internalAuditBudget,
   internalAuditMajorGateEnabled,
   parseReviewIssues,
   PRD_REVIEW_RECHECK_SYSTEM_PROMPT,
   runPrdReviewGate,
-} from '../../main/prd-review'
+} from '../../main/review/prd-review'
 import {
   buildDefenderTask,
   validateDefenderDraft,
   validateDispositionCoverage,
-} from '../../main/prd-defender'
+} from '../../main/review/prd-defender'
 import { buildConversationExcerpt, buildReadConversationHistoryTool } from '../../main/conversation-excerpt'
 
 // =========================================================================

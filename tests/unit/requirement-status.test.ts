@@ -5,11 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SDKMessage } from '../../shared/types'
 
 // 规则引擎固定 pass（本文件只测状态回写链路）；readArtifactText 保真实实现
-vi.mock('../../main/judge-engine', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/judge-engine')>()
+vi.mock('../../main/review/judge-engine', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/review/judge-engine')>()
   return {
     ...actual,
-    runJudge: vi.fn((): import('../../main/judge-engine').JudgeVerdict => ({
+    runJudge: vi.fn((): import('../../main/review/judge-engine').JudgeVerdict => ({
       verdict: 'pass',
       hard_constraints: [],
       soft_constraints: [],
@@ -23,11 +23,11 @@ vi.mock('../../main/runtime-fallback', () => ({
   resolveChannelEnv: vi.fn(() => ({ env: { ANTHROPIC_AUTH_TOKEN: 'k', ANTHROPIC_BASE_URL: 'https://example.com' }, channel: { id: 'ch-1' } })),
 }))
 
-import { runJudgeReview, setProgrammingEventPublisher } from '../../main/programming-orchestrator'
+import { runJudgeReview, setProgrammingEventPublisher } from '../../main/coding/programming-orchestrator'
 import { syncDocuments, updateRequirementStatus, markPrdUserConfirmed } from '../../main/document-engine'
 import { createProject, findProject, recordSketchGenerated } from '../../main/project-service'
 import { getDocumentsDir } from '../../storage/config-paths'
-import type { PrdBackplane, SketchRequirement } from '../../main/sketch-engine'
+import type { PrdBackplane, SketchRequirement } from '../../main/coding/sketch-engine'
 import type { SDKQuery } from '../../main/orchestrator'
 
 /**

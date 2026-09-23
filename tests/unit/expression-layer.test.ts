@@ -7,7 +7,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { expressionLayerEnabled, renderExpressionSection, THINKING_EXPRESSION_SECTION } from '../../main/prompt-expression'
-import { buildAgentLoopSystemPrompt } from '../../main/programming-orchestrator'
+import { buildAgentLoopSystemPrompt } from '../../main/coding/programming-orchestrator'
 import type { PrdBackplane } from '../../main/model/prd-backplane'
 
 afterEach(() => {

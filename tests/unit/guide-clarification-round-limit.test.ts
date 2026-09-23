@@ -8,14 +8,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 process.env.BLOMA_GUIDE_LOOP = '0'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
 
-vi.mock('../../main/programming-orchestrator', () => ({
+vi.mock('../../main/coding/programming-orchestrator', () => ({
   runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
   setProgrammingEventPublisher: vi.fn(),
 }))
 vi.mock('../../main/platform-services', () => ({
   trackAnalytics: vi.fn(),
 }))
-vi.mock('../../main/guide-research', () => ({
+vi.mock('../../main/guide/guide-research', () => ({
   // 市调在单测中固定降级（不打真实网络）；弹窗流程可用性由 guide-research 专属测试覆盖
     normalizeResearchQuery: (q: string) => q,
   researchMarketSimilar: vi.fn(async () => ({ available: false, queries: [], results: [], summary: '' })),
@@ -56,9 +56,9 @@ vi.mock('../../main/decision-log', () => ({
 }))
 
 // vi.mock 提升：import 必须在 mock 声明之后拿 mock 实例
-import { countTrailingClarificationRounds, handleGuideMessage } from '../../main/guide-agent-service'
+import { countTrailingClarificationRounds, handleGuideMessage } from '../../main/guide/guide-agent-service'
 import { recordDecision } from '../../main/decision-log'
-import { runSketchTask } from '../../main/programming-orchestrator'
+import { runSketchTask } from '../../main/coding/programming-orchestrator'
 import type { ConversationTurn, GuideModelOptions, SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
 
 /**
@@ -504,7 +504,7 @@ describe('Phase 7 U4 · J2-① 同主题卡精确去重（countSameOptionCards�
   }
 
   it('选项集相同才计（顺序无关）；换措辞不误判（宁漏勿误）；空 labels → 0', async () => {
-    const { countSameOptionCards } = await import('../../main/guide-agent-service')
+    const { countSameOptionCards } = await import('../../main/guide/guide-agent-service')
     writeRaw([
       { role: 'system', content: [{ type: 'text', text: '[decision-card] 网页版｜桌面版｜你帮我决定' }], timestamp: 1 },
       { role: 'system', content: [{ type: 'text', text: '[decision-card] 网页版｜桌面版｜你帮我决定' }], timestamp: 2 },
@@ -577,7 +577,7 @@ describe('Phase 7 U4 · J2-② 第三张连续卡减负卡（BLOMA_CLARIFY_TWO_L
   it('开关 off（缺省）熔断 → 原需求确认弹窗（字节级现状回归锁）', async () => {
     writeThreeCards()
     const events: AgentEvent[] = []
-    const { handleGuideMessage } = await import('../../main/guide-agent-service')
+    const { handleGuideMessage } = await import('../../main/guide/guide-agent-service')
     await handleGuideMessage(
       {
         request_id: 'req-j2off', session_id: SESSION_ID, project_id: 'proj-1', content: '还是没定下来',
@@ -594,7 +594,7 @@ describe('Phase 7 U4 · J2-② 第三张连续卡减负卡（BLOMA_CLARIFY_TWO_L
     process.env.BLOMA_CLARIFY_TWO_LAYER = '1'
     writeThreeCards()
     const events: AgentEvent[] = []
-    const { handleGuideMessage } = await import('../../main/guide-agent-service')
+    const { handleGuideMessage } = await import('../../main/guide/guide-agent-service')
     await handleGuideMessage(
       {
         request_id: 'req-j2on', session_id: SESSION_ID, project_id: 'proj-1', content: '还是没定下来',

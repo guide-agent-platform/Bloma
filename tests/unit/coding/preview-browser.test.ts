@@ -15,7 +15,7 @@ import type { AddressInfo } from 'node:net'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { restorePromaHome } from '../../support/proma-home-guard'
 import { createProject, recordSketchGenerated } from '../../../main/project-service'
-import { createToolState, type ToolContext } from '../../../main/agent-loop'
+import { createToolState, type ToolContext } from '../../../main/coding/agent-loop'
 import { buildAgentTools } from '../../../main/coding/agent-tools'
 import {
   assertSameOrigin,

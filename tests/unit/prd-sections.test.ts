@@ -6,7 +6,7 @@ import {
   clarifyGapSections,
   renderDocumentSectionSpec,
   requiredSections,
-} from '../../main/prd-sections'
+} from '../../main/guide/prd-sections'
 import {
   backplaneGlossary,
   backplanePages,
@@ -15,7 +15,7 @@ import {
   defaultConstraintLevel,
   TEMPLATE_META_VERSION,
   type PrdBackplane,
-} from '../../main/sketch-engine'
+} from '../../main/coding/sketch-engine'
 
 function makeBackplane(overrides: Partial<PrdBackplane> = {}): PrdBackplane {
   return {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { checkGameMoveEffect, gamePlayerCoordOf, gwtGameProbeEnabled, isMoveEffect } from '../../main/gwt-runner'
-import { buildAgentLoopSystemPrompt } from '../../main/programming-orchestrator'
+import { buildAgentLoopSystemPrompt } from '../../main/coding/programming-orchestrator'
 import type { AssertionPlan } from '../../main/behavior-assertions'
 
 /**

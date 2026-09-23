@@ -31,8 +31,8 @@ vi.mock('../../main/channel-manager', async (importOriginal) => {
   }
 })
 
-vi.mock('../../main/programming-orchestrator', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/programming-orchestrator')>()
+vi.mock('../../main/coding/programming-orchestrator', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/coding/programming-orchestrator')>()
   return { ...actual, runIterationTask: runIterationTaskMock }
 })
 
@@ -269,7 +269,7 @@ describe('ready 护栏意图分流（MVP 就绪卡改版后）', () => {
 
     // UNPROVEN-2 补证（2026-09-11 审计）：真实 mergeIterationRequirements 把方向并入
     // 需求清单（F1 修复锁：无渠道/无 query 时走回退追加，方向原文仍在清单中）
-    const { mergeIterationRequirements } = await import('../../main/programming-orchestrator')
+    const { mergeIterationRequirements } = await import('../../main/coding/programming-orchestrator')
     const mergedRebuild = await mergeIterationRequirements(
       {
         request_id: 'req-merge-verify',

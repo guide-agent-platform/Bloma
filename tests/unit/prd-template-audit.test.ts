@@ -2,11 +2,11 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ruleGateReview } from '../../main/prd-review'
-import { runJudge } from '../../main/judge-engine'
+import { ruleGateReview } from '../../main/review/prd-review'
+import { runJudge } from '../../main/review/judge-engine'
 import { syncDocuments } from '../../main/document-engine'
 import { createProject, recordSketchGenerated } from '../../main/project-service'
-import type { PrdBackplane, SketchRequirement } from '../../main/sketch-engine'
+import type { PrdBackplane, SketchRequirement } from '../../main/coding/sketch-engine'
 
 /** 注入点④内审变体 + ⑧judge 版本一致性（P6，最后做——消费前面所有产物）。 */
 

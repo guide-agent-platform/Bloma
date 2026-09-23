@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AgentEvent, SDKMessage } from '../../../shared/types'
 import type { ConversationTurn, SDKQuery } from '../../../main/orchestrator'
 import { getAgentSessionPath } from '../../../storage/config-paths'
-import { runAgentLoop, compactToolEnabled, MAX_EXPLICIT_COMPACTIONS, type AgentLoopInput, type AgentLoopTool, type ToolOutcome } from '../../../main/agent-loop'
+import { runAgentLoop, compactToolEnabled, MAX_EXPLICIT_COMPACTIONS, type AgentLoopInput, type AgentLoopTool, type ToolOutcome } from '../../../main/coding/agent-loop'
 import { buildAgentTools } from '../../../main/coding/agent-tools'
 import { createProject } from '../../../main/project-service'
 

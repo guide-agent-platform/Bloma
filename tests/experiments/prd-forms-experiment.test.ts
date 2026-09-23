@@ -152,7 +152,7 @@ describeExperiment('PRD 三形态同环境对比实验（决议 6）', { timeout
   })
 
   it('三形态 × 同渠道同模型 → generatePrdLlm 产物度量', async () => {
-    const { generatePrdLlm } = await import('../../main/prd-engine-llm')
+    const { generatePrdLlm } = await import('../../main/guide/prd-engine-llm')
     const { anthropicMessagesQuery } = await import('../../main/orchestrator')
 
     const spec = resolveChannelSpec()

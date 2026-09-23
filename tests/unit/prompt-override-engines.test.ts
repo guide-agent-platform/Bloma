@@ -6,14 +6,14 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { loadPromptOverride } from '../../main/prompt-config'
 import {
   DEFAULT_SYSTEM_PROMPT as SKETCH_DEFAULT,
-} from '../../main/sketch-engine-llm'
+} from '../../main/coding/sketch-engine-llm'
 import {
   DEFAULT_SYSTEM_PROMPT as ENRICHER_DEFAULT,
-} from '../../main/requirement-enricher'
+} from '../../main/guide/requirement-enricher'
 import {
   DEFAULT_SYSTEM_PROMPT as NORMALIZER_DEFAULT,
-} from '../../main/requirement-normalizer'
-import { DEFAULT_GUIDE_SYSTEM_PROMPT as GUIDE_DEFAULT } from '../../main/guide-agent-service'
+} from '../../main/guide/requirement-normalizer'
+import { DEFAULT_GUIDE_SYSTEM_PROMPT as GUIDE_DEFAULT } from '../../main/guide/guide-agent-service'
 
 /**
  * 提示词外置覆盖接入全部五引擎（TDD，先红后绿）

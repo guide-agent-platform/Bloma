@@ -27,9 +27,9 @@ import {
   unregisterParentLoopContext,
   waitForDelegations,
   type DelegationSummary,
-} from '../agent-collaboration'
-import { buildAgentTools } from '../agent-tools'
-import { createToolState, type AgentLoopTool, type ToolContext } from '../agent-loop'
+} from '../coding/agent-collaboration'
+import { buildAgentTools } from '../coding/agent-tools'
+import { createToolState, type AgentLoopTool, type ToolContext } from '../coding/agent-loop'
 import type { SDKQuery } from '../orchestrator'
 
 /** 委派审查运行开关（缺省开启；测试与紧急回退用 '0' 关闭）。 */

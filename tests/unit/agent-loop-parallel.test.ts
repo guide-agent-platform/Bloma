@@ -11,7 +11,7 @@ import {
   type ToolContext,
   type ToolOutcome,
   type TurnToolExecution,
-} from '../../main/agent-loop'
+} from '../../main/coding/agent-loop'
 import type { SDKMessage } from '../../shared/types'
 import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
 import { getAgentSessionPath } from '../../storage/config-paths'

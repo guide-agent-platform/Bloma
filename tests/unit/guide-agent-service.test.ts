@@ -28,7 +28,7 @@ vi.mock('../../main/channel-manager', async (importOriginal) => {
   }
 })
 import { createProject, findProject, readLastSketchRequirements } from '../../main/project-service'
-import { PRD_CONFIRM_OPTION_CONFIRM } from '../../main/prd-confirm'
+import { PRD_CONFIRM_OPTION_CONFIRM } from '../../main/guide/prd-confirm'
 import {
   clearSandboxRuntimeForTests,
   setSandboxRuntimeForTests,

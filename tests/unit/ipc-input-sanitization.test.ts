@@ -19,8 +19,8 @@ const { resolveRequirementConfirmMock } = vi.hoisted(() => ({
   resolveRequirementConfirmMock: vi.fn(async (_input: { adopted_ideas?: string[] }, _signal: AbortSignal) => ({ ok: true })),
 }))
 
-vi.mock('../../main/guide-agent-service', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/guide-agent-service')>()
+vi.mock('../../main/guide/guide-agent-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/guide/guide-agent-service')>()
   return { ...actual, resolveRequirementConfirm: resolveRequirementConfirmMock }
 })
 

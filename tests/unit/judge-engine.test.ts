@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { syncDocuments } from '../../main/document-engine'
-import { readGwtFeatureIds, runJudge } from '../../main/judge-engine'
+import { readGwtFeatureIds, runJudge } from '../../main/review/judge-engine'
 import { createProject, recordSketchGenerated } from '../../main/project-service'
 
 describe('JudgeEngine (A2-10)', () => {

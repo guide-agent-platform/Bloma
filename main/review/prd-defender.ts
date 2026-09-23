@@ -21,9 +21,9 @@
  *   违规即 Defender 轮失败 → 内审视为未收敛 → 走用户知情决策卡。
  */
 
-import type { PrdBackplane, SketchRequirement } from '../sketch-engine'
-import { nextRequirementId } from '../programming-orchestrator'
-import type { PrdReviewIssue } from '../prd-review'
+import type { PrdBackplane, SketchRequirement } from '../coding/sketch-engine'
+import { nextRequirementId } from '../coding/programming-orchestrator'
+import type { PrdReviewIssue } from './prd-review'
 
 // =========================================================================
 // Defender system prompt
@@ -88,7 +88,7 @@ export type DefenderFailure = Extract<DefenderOutcome, { ok: false }>['failure']
  * requirement_confirmed 检查点上的 prd.json 不被触碰，修订稿重走用户过目门。
  */
 export function buildWritePrdDraftTool(onDraft: (draft: DefenderDraft) => void): {
-  tool: import('../agent-loop').AgentLoopTool
+  tool: import('../coding/agent-loop').AgentLoopTool
   hasDraft: () => boolean
 } {
   let submitted = false

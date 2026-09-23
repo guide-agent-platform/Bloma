@@ -12,8 +12,8 @@ import {
   createWriteScope,
   EDIT_BUDGET_AFTER_TEST_FAILURE,
   setJsSyntaxCheckerForTests,
-} from '../../main/agent-tools'
-import { createToolState, type AgentLoopTool, type ToolContext } from '../../main/agent-loop'
+} from '../../main/coding/agent-tools'
+import { createToolState, type AgentLoopTool, type ToolContext } from '../../main/coding/agent-loop'
 import { createProject, findProject, recordSketchGenerated } from '../../main/project-service'
 import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/platform-services'
 import { writeRealScaffoldMarker } from '../../main/coding/preview-runtime'

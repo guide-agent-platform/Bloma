@@ -3,11 +3,11 @@ import { dirname } from 'node:path'
 import type { PromptSlotDetail, PromptSlotId, PromptSlotInfo } from '../shared/types'
 import { getPromptOverridePath, ensureDir } from '../storage/config-paths'
 import { loadPromptOverride } from './prompt-config'
-import { DEFAULT_SYSTEM_PROMPT as PRD_DEFAULT } from './prd-engine-llm'
-import { DEFAULT_SYSTEM_PROMPT as SKETCH_DEFAULT } from './sketch-engine-llm'
-import { DEFAULT_GUIDE_SYSTEM_PROMPT as GUIDE_DEFAULT } from './guide-agent-service'
-import { DEFAULT_SYSTEM_PROMPT as ENRICHER_DEFAULT } from './requirement-enricher'
-import { DEFAULT_SYSTEM_PROMPT as NORMALIZER_DEFAULT } from './requirement-normalizer'
+import { DEFAULT_SYSTEM_PROMPT as PRD_DEFAULT } from './guide/prd-engine-llm'
+import { DEFAULT_SYSTEM_PROMPT as SKETCH_DEFAULT } from './coding/sketch-engine-llm'
+import { DEFAULT_GUIDE_SYSTEM_PROMPT as GUIDE_DEFAULT } from './guide/guide-agent-service'
+import { DEFAULT_SYSTEM_PROMPT as ENRICHER_DEFAULT } from './guide/requirement-enricher'
+import { DEFAULT_SYSTEM_PROMPT as NORMALIZER_DEFAULT } from './guide/requirement-normalizer'
 
 /**
  * PromptService — 引擎 system prompt 外置覆盖的界面化配置服务。

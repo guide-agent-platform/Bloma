@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SDKMessage } from '../../shared/types'
 import type { SDKQuery } from '../../main/orchestrator'
-import { createToolState, runAgentLoop } from '../../main/agent-loop'
+import { createToolState, runAgentLoop } from '../../main/coding/agent-loop'
 import {
   findDelegation,
   getDelegationSummary,
@@ -14,7 +14,7 @@ import {
   setChildToolsBuilder,
   startDelegation,
   unregisterParentLoopContext,
-} from '../../main/agent-collaboration'
+} from '../../main/coding/agent-collaboration'
 
 /**
  * delegation_failed 的 AbortError 归一化（H1，2026-08-25 经典方法补盲）。
@@ -40,8 +40,8 @@ function abortError(): Error {
   return error
 }
 
-vi.mock('../../main/agent-loop', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/agent-loop')>()
+vi.mock('../../main/coding/agent-loop', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/coding/agent-loop')>()
   return { ...actual, runAgentLoop: vi.fn() }
 })
 

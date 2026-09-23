@@ -6,7 +6,7 @@ import { appendProjectLearning, readCuratedLearnings, readRecentLearnings, rende
 import { createProject } from '../../main/project-service'
 import { REVOCATION_FILE, revokeMemoryText } from '../../main/memory-revocation'
 import { flushMemoryUsage, getLastUsedAt, resetMemoryUsageForTests } from '../../main/memory-usage'
-import { buildLoopSystemWithOverride } from '../../main/programming-orchestrator'
+import { buildLoopSystemWithOverride } from '../../main/coding/programming-orchestrator'
 import { getDocumentsDir, getPromaHome } from '../../storage/config-paths'
 
 /**

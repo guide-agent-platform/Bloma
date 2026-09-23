@@ -253,7 +253,7 @@ describe('T4-L3 蒸馏层 · 单一事实源仲裁（验收③）', () => {
     const project = createProject({ request_id: 'req-dup', mode: 'quick', initial_message: '记账应用' })
     seedSession('session-dup')
     // 背板已承载：约束「不含登录」+ 功能项「记账本」——蒸馏产物重复收录这些即第二份事实源
-    const { captureConstraints } = await import('../../main/constraint-extractor')
+    const { captureConstraints } = await import('../../main/guide/constraint-extractor')
     captureConstraints({ project_id: project.project_id, session_id: 'session-dup', constraints: ['不含登录'], source: 'guide_gate' })
     const { readLastSketchRequirements, recordSketchGenerated } = await import('../../main/project-service')
     recordSketchGenerated(project.project_id, [

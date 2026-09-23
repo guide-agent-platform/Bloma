@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import { findProject } from '../project-service'
 import { readPrdBackplane } from '../document-engine'
 import { getDocumentsDir } from '../../storage/config-paths'
-import type { AgentLoopTool } from '../agent-loop'
+import type { AgentLoopTool } from '../coding/agent-loop'
 
 /** 开关：off = 向导澄清腿维持单次流式 JSON 现状（字节级）。 */
 export function guideLoopEnabled(): boolean {

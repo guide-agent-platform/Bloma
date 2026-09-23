@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { realFullstackServerFingerprint, writeRealScaffoldMarker } from '../../../main/coding/preview-runtime'
 import { isScopeInversion, resolveRoutedRequirementId } from '../../../main/guide/requirement-normalizer'
-import { extractConstraints, sanitizeConstraints, scanSessionConstraints } from '../../../main/constraint-extractor'
+import { extractConstraints, sanitizeConstraints, scanSessionConstraints } from '../../../main/guide/constraint-extractor'
 import { getAgentSessionPath } from '../../../storage/config-paths'
 import { restorePromaHome } from '../../support/proma-home-guard'
 

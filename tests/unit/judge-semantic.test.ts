@@ -5,11 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SDKMessage } from '../../shared/types'
 
 // 规则引擎固定 pass（本文件只测语义腿的合成与降级）；readArtifactText 保真实实现
-vi.mock('../../main/judge-engine', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/judge-engine')>()
+vi.mock('../../main/review/judge-engine', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../main/review/judge-engine')>()
   return {
     ...actual,
-    runJudge: vi.fn((): import('../../main/judge-engine').JudgeVerdict => ({
+    runJudge: vi.fn((): import('../../main/review/judge-engine').JudgeVerdict => ({
       verdict: 'pass',
       hard_constraints: [],
       soft_constraints: [],
@@ -23,9 +23,9 @@ vi.mock('../../main/runtime-fallback', () => ({
   resolveChannelEnv: vi.fn(() => ({ env: { ANTHROPIC_AUTH_TOKEN: 'k', ANTHROPIC_BASE_URL: 'https://example.com' }, channel: { id: 'ch-1' } })),
 }))
 
-import { runJudgeReview, setProgrammingEventPublisher } from '../../main/programming-orchestrator'
+import { runJudgeReview, setProgrammingEventPublisher } from '../../main/coding/programming-orchestrator'
 import { resolveChannelEnv } from '../../main/runtime-fallback'
-import { runJudge } from '../../main/judge-engine'
+import { runJudge } from '../../main/review/judge-engine'
 import { syncDocuments } from '../../main/document-engine'
 import { createProject, findProject } from '../../main/project-service'
 import { recordSessionActivity } from '../../main/session-service'
@@ -34,9 +34,9 @@ import {
   parseSemanticFindings,
   runSemanticJudgeReview,
   type SemanticFinding,
-} from '../../main/judge-semantic'
+} from '../../main/review/judge-semantic'
 import type { ConversationTurn, SDKQuery } from '../../main/orchestrator'
-import type { SketchRequirement } from '../../main/sketch-engine'
+import type { SketchRequirement } from '../../main/coding/sketch-engine'
 
 /**
  * MVP 语义审查腿（judge-semantic，2026-08-26，裁判域 LLM，非 AC）：

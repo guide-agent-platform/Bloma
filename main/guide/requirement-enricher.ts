@@ -1,10 +1,10 @@
 import type { SDKQuery } from '../orchestrator'
 import { loadPromptOverride } from '../prompt-config'
-import type { SketchRequirement } from '../sketch-engine'
-import { isPlaceholderAssertion } from '../sketch-engine'
+import type { SketchRequirement } from '../coding/sketch-engine'
+import { isPlaceholderAssertion } from '../coding/sketch-engine'
 import { parseBehaviorAssertion } from '../behavior-assertions'
 import { categoryTemperature } from '../model-resolution'
-import { readConversation } from '../prd-engine-llm'
+import { readConversation } from './prd-engine-llm'
 import { callLlmForJson } from '../kernel/llm-call'
 import { sanitizeClarificationRequests, type EnrichmentClarificationRequest } from '../guide/clarification'
 

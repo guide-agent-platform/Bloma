@@ -16,7 +16,7 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import type { AgentMessage } from '../shared/types'
-import type { AgentLoopTool } from './agent-loop'
+import type { AgentLoopTool } from './coding/agent-loop'
 import { getAgentSessionPath } from '../storage/config-paths'
 
 /** 摘录进 task 的用户原话轮上限（控 token：F 维对照源 ≈2k 预算）。 */

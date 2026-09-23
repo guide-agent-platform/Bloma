@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { runAgentLoop, type AgentLoopInput, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../../../main/agent-loop'
+import { runAgentLoop, type AgentLoopInput, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../../../main/coding/agent-loop'
 import {
   DSML_RECOVERABLE_TOOLS,
   buildTargetedDegenerateFeedback,

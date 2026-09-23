@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
 
-vi.mock('../../main/programming-orchestrator', () => ({
+vi.mock('../../main/coding/programming-orchestrator', () => ({
   runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
   resolvePrdBackplane: vi.fn(async (_input: unknown, requirements: unknown) => ({
     name: '未命名项目',
@@ -45,7 +45,7 @@ vi.mock('../../main/session-service', async (importOriginal) => {
   return { ...actual, readPrimaryIntent: vi.fn((): string | undefined => undefined) }
 })
 vi.mock('../../main/decision-log', () => ({ recordDecision: vi.fn(), parseDecisionText: vi.fn() }))
-vi.mock('../../main/guide-research', () => ({
+vi.mock('../../main/guide/guide-research', () => ({
     normalizeResearchQuery: (q: string) => q,
   researchMarketSimilar: vi.fn(async (queries: string[]) => ({ available: false, queries, results: [], summary: '' })),
 }))
@@ -53,17 +53,17 @@ vi.mock('../../main/runtime-fallback', () => ({
   resolveChannelEnv: vi.fn(() => ({ env: undefined, channel: undefined })),
 }))
 
-import { handleGuideMessage, resolveRequirementConfirm } from '../../main/guide-agent-service'
+import { handleGuideMessage, resolveRequirementConfirm } from '../../main/guide/guide-agent-service'
 import { recordDecision } from '../../main/decision-log'
-import { researchMarketSimilar } from '../../main/guide-research'
+import { researchMarketSimilar } from '../../main/guide/guide-research'
 import { trackAnalytics } from '../../main/platform-services'
 import { markPrdUserConfirmed } from '../../main/document-engine'
-import { resolvePrdBackplane, runSketchTask } from '../../main/programming-orchestrator'
+import { resolvePrdBackplane, runSketchTask } from '../../main/coding/programming-orchestrator'
 import {
   PRD_CONFIRM_OPTION_ADJUST,
   PRD_CONFIRM_OPTION_CONFIRM,
   resolvePrdConfirmCardAnswer,
-} from '../../main/prd-confirm'
+} from '../../main/guide/prd-confirm'
 import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../main/orchestrator'
 
 /**

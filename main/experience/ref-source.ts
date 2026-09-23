@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { getPromaHome } from '../../storage/config-paths'
-import { MODULE_SLUG_PATTERN, type OfficialModule } from '../module-library'
+import { MODULE_SLUG_PATTERN, type OfficialModule } from '../coding/module-library'
 import type { TemplateType } from '../../shared/types'
 import { licenseTierOf } from './types'
 

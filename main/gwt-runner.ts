@@ -1,8 +1,8 @@
 import type { Browser, Page } from 'playwright'
 import type { GwtTestResult, RunGwtInput } from './gwt-service'
 import { readLastSketchRequirements } from './project-service'
-import type { SketchRequirement } from './sketch-engine'
-import { requirementAssertions, requirementStory, isPlaceholderAssertion } from './sketch-engine'
+import type { SketchRequirement } from './coding/sketch-engine'
+import { requirementAssertions, requirementStory, isPlaceholderAssertion } from './coding/sketch-engine'
 import { parseBehaviorAssertion, describeEffect, type AssertionPlan } from './behavior-assertions'
 import { replayRequirements } from './experience/replay-compiler'
 

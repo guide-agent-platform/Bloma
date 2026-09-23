@@ -4,8 +4,8 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { SDKMessage } from '../../shared/types'
 import type { SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
-import { createToolState, type AgentLoopTool, type ToolContext } from '../../main/agent-loop'
-import { buildAgentTools, setWebResearchTimeoutForTests, WEB_RESEARCH_TIMEOUT_MS } from '../../main/agent-tools'
+import { createToolState, type AgentLoopTool, type ToolContext } from '../../main/coding/agent-loop'
+import { buildAgentTools, setWebResearchTimeoutForTests, WEB_RESEARCH_TIMEOUT_MS } from '../../main/coding/agent-tools'
 import {
   MAX_RUNNING_DELEGATIONS_PER_PARENT,
   answerDelegationQuestion,
@@ -25,7 +25,7 @@ import {
   unregisterParentLoopContext,
   waitForDelegations,
   type StartDelegationResult,
-} from '../../main/agent-collaboration'
+} from '../../main/coding/agent-collaboration'
 
 /**
  * 中止本测试遗留的 running 子循环并等待其收尾链落定。

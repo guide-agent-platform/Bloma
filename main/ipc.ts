@@ -64,7 +64,7 @@ import { cancelAgent, getSdkQuery, hasForegroundRun, isSessionActive, persistSte
 import { enqueueSteer, getSteerStatuses, pendingSteerCount, registerSteer, resolveSteer, setSteerStatusListener, steerConfirmEnabled } from './steer-queue'
 import { savePastedImage } from './pasted-images'
 import { collectDomContext, scrollPreview } from './dom-context'
-import { clearPendingReviewAction, runAgentLoopPostTesting, runIterationTask, runMvpTask, setForegroundRunChecker, setProgrammingEventPublisher } from './programming-orchestrator'
+import { clearPendingReviewAction, runAgentLoopPostTesting, runIterationTask, runMvpTask, setForegroundRunChecker, setProgrammingEventPublisher } from './coding/programming-orchestrator'
 import { handleAgentStreamEvent } from './notifications'
 import { assertToolAllowed, getPermissionMode, resolvePermission, setPermissionMode, setPermissionRequestPublisher } from './permission-service'
 import {
@@ -89,7 +89,7 @@ import { exportProjectHandoff } from './project-export'
 import { upgradeExport } from './coding/export-manifest'
 import { readExperimentSwitches } from './experiment-switches'
 import { dirname } from 'node:path'
-import { resolveRequirementConfirm } from './guide-agent-service'
+import { resolveRequirementConfirm } from './guide/guide-agent-service'
 import { createChannel, deleteChannel, fetchModels, listChannels, testChannel, testChannelDirect, updateChannel } from './channel-manager'
 import {
   buildCategoryRoutingRoleViews,

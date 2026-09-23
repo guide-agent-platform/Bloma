@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
 
-vi.mock('../../main/programming-orchestrator', () => ({
+vi.mock('../../main/coding/programming-orchestrator', () => ({
   runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
   // 默认实现：不带追问的背板（重跑轮走这里）
   resolvePrdBackplane: vi.fn(async (_input: unknown, requirements: unknown) => ({
@@ -56,7 +56,7 @@ vi.mock('../../main/session-service', async (importOriginal) => {
   return { ...actual, readPrimaryIntent: vi.fn((): string | undefined => undefined) }
 })
 // decision-log 刻意不 mock：轮次守卫/孤儿检测依赖真实会话 JSONL 决策行
-vi.mock('../../main/guide-research', () => ({
+vi.mock('../../main/guide/guide-research', () => ({
   normalizeResearchQuery: (q: string) => q,
   researchMarketSimilar: vi.fn(async (queries: string[]) => ({ available: false, queries, results: [], summary: '' })),
 }))
@@ -64,8 +64,8 @@ vi.mock('../../main/runtime-fallback', () => ({
   resolveChannelEnv: vi.fn(() => ({ env: undefined, channel: undefined })),
 }))
 
-import { handleGuideMessage, resolveRequirementConfirm } from '../../main/guide-agent-service'
-import { resolvePrdBackplane } from '../../main/programming-orchestrator'
+import { handleGuideMessage, resolveRequirementConfirm } from '../../main/guide/guide-agent-service'
+import { resolvePrdBackplane } from '../../main/coding/programming-orchestrator'
 import { syncDocuments } from '../../main/document-engine'
 import { hasPendingEnrichmentClarification, takePendingEnrichmentClarification, type EnrichmentClarificationRequest } from '../../main/guide/clarification'
 import { getAgentSessionPath } from '../../storage/config-paths'

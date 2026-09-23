@@ -8,7 +8,7 @@ import {
   modulesEnabled,
   renderOfficialModulesToProject,
   type OfficialModule,
-} from '../../main/module-library'
+} from '../../main/coding/module-library'
 
 /**
  * 官方模块库单元测试（P1 模块侧）：加载（内置资产 + fixture 注入）、坏模块/外链依赖

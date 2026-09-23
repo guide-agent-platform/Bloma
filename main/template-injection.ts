@@ -1,6 +1,6 @@
 import type { ProjectMode, TemplateType } from '../shared/types'
 import { loadProjectTemplate, templateSection, type ProjectSkeleton, type ProjectTemplate } from './project-templates'
-import { backplanePages, type PrdBackplane } from './sketch-engine'
+import { backplanePages, type PrdBackplane } from './coding/sketch-engine'
 
 /**
  * TemplateInjection — §6 注入点开关与切片构造（2026-09-02 周计划 §6 P5）。

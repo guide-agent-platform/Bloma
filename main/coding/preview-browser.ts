@@ -25,7 +25,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { getDocumentsDir } from '../../storage/config-paths'
 import { findProject } from '../project-service'
-import type { AgentLoopTool, ToolContext, ToolOutcome } from '../agent-loop'
+import type { AgentLoopTool, ToolContext, ToolOutcome } from './agent-loop'
 
 /** 开关：off = buildAgentTools 不注册本工具族（字节级现状）。 */
 export function browserToolsEnabled(): boolean {

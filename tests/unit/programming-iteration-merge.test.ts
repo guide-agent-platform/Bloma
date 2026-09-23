@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mergeIterationRequirements } from '../../main/programming-orchestrator'
+import { mergeIterationRequirements } from '../../main/coding/programming-orchestrator'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import type { SDKMessage } from '../../shared/types'
 

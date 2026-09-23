@@ -34,7 +34,7 @@ import {
   resolveChannelEnv,
 } from './runtime-fallback'
 import { categoryForStage, categoryTemperature } from './model-resolution'
-import { handleGuideMessage } from './guide-agent-service'
+import { handleGuideMessage } from './guide/guide-agent-service'
 import {
   READY_COMPLETION_COPY,
   clearPendingReviewAction,
@@ -55,14 +55,14 @@ import {
   setProgrammingEventPublisher,
   takeFailedIteration,
   takePendingReviewAction,
-} from './programming-orchestrator'
-import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from './requirement-normalizer'
+} from './coding/programming-orchestrator'
+import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from './guide/requirement-normalizer'
 import { readPrdBackplane } from './document-engine'
 import { backplaneInterfaceSpec } from './model/prd-backplane'
 import { isDegenerateText } from './coding/output-integrity'
 import { createWhitespaceArtifactCleaner } from './coding/agent-loop'
 import { recordDecision } from './decision-log'
-import { captureConstraints, extractConstraints, readProjectConstraints, scanSessionConstraints } from './constraint-extractor'
+import { captureConstraints, extractConstraints, readProjectConstraints, scanSessionConstraints } from './guide/constraint-extractor'
 import { isCircuitBreakSettled } from './recovery-service'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from './project-service'
 import { recordSessionActivity } from './session-service'

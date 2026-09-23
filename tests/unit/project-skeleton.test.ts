@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getSkeletonDirPath } from '../../storage/config-paths'
 import { loadSkeletonTemplate } from '../../main/project-templates'
-import { renderSkeletonToProject, scaffoldEnabled } from '../../main/project-scaffold'
+import { renderSkeletonToProject, scaffoldEnabled } from '../../main/coding/project-scaffold'
 import { buildLoopInjection, buildSkeletonMapInjection } from '../../main/template-injection'
 
 /**

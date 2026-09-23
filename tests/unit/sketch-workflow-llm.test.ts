@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createProject, findProject } from '../../main/project-service'
-import { runSketchTask, setProgrammingEventPublisher } from '../../main/programming-orchestrator'
+import { runSketchTask, setProgrammingEventPublisher } from '../../main/coding/programming-orchestrator'
 import {
   clearSandboxRuntimeForTests,
   setSandboxRuntimeForTests,

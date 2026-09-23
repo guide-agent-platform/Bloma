@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
 
-vi.mock('../../main/programming-orchestrator', () => ({
+vi.mock('../../main/coding/programming-orchestrator', () => ({
   runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
   resolvePrdBackplane: vi.fn(async (_input: unknown, requirements: unknown) => ({
     name: '未命名项目',
@@ -38,11 +38,11 @@ vi.mock('../../main/session-service', async (importOriginal) => {
   return { ...actual, readPrimaryIntent: vi.fn((): string | undefined => undefined) }
 })
 vi.mock('../../main/decision-log', () => ({ recordDecision: vi.fn(), parseDecisionText: vi.fn() }))
-vi.mock('../../main/guide-research', () => ({
+vi.mock('../../main/guide/guide-research', () => ({
     normalizeResearchQuery: (q: string) => q,
   researchMarketSimilar: vi.fn(async (queries: string[]) => ({ available: false, queries, results: [], summary: '' })),
 }))
-vi.mock('../../main/requirement-normalizer', () => ({
+vi.mock('../../main/guide/requirement-normalizer', () => ({
   normalizeRequirementUpdate: vi.fn(async () => ({ action: 'append', via: 'rules' })),
   applyNormalization: vi.fn((existing: unknown[]) => existing),
   // 狗粮 a602709f 修复批新增导出：真实实现（纯函数，无需 mock 行为）
@@ -60,18 +60,18 @@ vi.mock('../../main/runtime-fallback', () => ({
 import {
   handleGuideMessage,
   resolveRequirementConfirm,
-} from '../../main/guide-agent-service'
+} from '../../main/guide/guide-agent-service'
 import { resolveChannelEnv } from '../../main/runtime-fallback'
 import { recordDecision } from '../../main/decision-log'
-import { resolvePrdBackplane, runSketchTask } from '../../main/programming-orchestrator'
+import { resolvePrdBackplane, runSketchTask } from '../../main/coding/programming-orchestrator'
 import {
   PRD_REVIEW_OPTION_DELEGATE_ALL,
   buildReviewQuestions,
   parseReviewIssues,
   ruleGateReview,
-} from '../../main/prd-review'
-import { PRD_CONFIRM_OPTION_CONFIRM } from '../../main/prd-confirm'
-import { applyNormalization, normalizeRequirementUpdate } from '../../main/requirement-normalizer'
+} from '../../main/review/prd-review'
+import { PRD_CONFIRM_OPTION_CONFIRM } from '../../main/guide/prd-confirm'
+import { applyNormalization, normalizeRequirementUpdate } from '../../main/guide/requirement-normalizer'
 import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../main/orchestrator'
 
 /**

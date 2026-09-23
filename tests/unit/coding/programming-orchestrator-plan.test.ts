@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFile
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { runMvpTask, setProgrammingEventPublisher } from '../../../main/programming-orchestrator'
+import { runMvpTask, setProgrammingEventPublisher } from '../../../main/coding/programming-orchestrator'
 import { createProject, recordSketchGenerated } from '../../../main/project-service'
 import { createChannel } from '../../../main/channel-manager'
 import { setSafeStorageAdapter } from '../../../main/safe-storage'
@@ -39,8 +39,8 @@ vi.mock('../../../main/coding/agent-loop', async (importOriginal) => {
 
 // 编排器经 main/agent-loop.ts 原位桩 re-export 导入（R4 迁移手法），桩路径与真实路径
 // 需分别登记同一 mock（delegation-failure 同款）；两个登记指向同一个 mock fn。
-vi.mock('../../../main/agent-loop', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/agent-loop')>()
+vi.mock('../../../main/coding/agent-loop', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/coding/agent-loop')>()
   return { ...actual, runAgentLoop: mocks.runAgentLoop }
 })
 

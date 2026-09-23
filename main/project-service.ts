@@ -23,7 +23,7 @@ import type {
   WorkflowStage,
 } from '../shared/types'
 import { WORKFLOW_STAGES } from '../shared/types'
-import type { SketchRequirement } from './sketch-engine'
+import type { SketchRequirement } from './coding/sketch-engine'
 import { inferTemplateType, refineTemplateType } from './template-inference'
 import {
   getAgentSessionPath,

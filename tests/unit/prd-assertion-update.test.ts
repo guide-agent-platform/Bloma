@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { syncDocuments, updatePrdAssertions } from '../../main/document-engine'
 import { createProject, recordSketchGenerated } from '../../main/project-service'
 import { getDocumentsDir } from '../../storage/config-paths'
-import type { PrdBackplane, SketchRequirement } from '../../main/sketch-engine'
+import type { PrdBackplane, SketchRequirement } from '../../main/coding/sketch-engine'
 
 /**
  * updatePrdAssertions 写盘链路（2026-09-02 周计划 §5 P3：EARS 化回写；陷阱 42 口径）：

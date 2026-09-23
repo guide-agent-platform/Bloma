@@ -8,7 +8,7 @@ import { routeDialogue, type ClarificationOption } from '../dialogue-router'
 import { loadPromptOverride } from '../prompt-config'
 import { parseDecisionText, recordDecision } from '../decision-log'
 import { syncDocuments } from '../document-engine'
-import { researchMarketSimilar, normalizeResearchQuery, type MarketResearch } from '../guide-research'
+import { researchMarketSimilar, normalizeResearchQuery, type MarketResearch } from './guide-research'
 import {
   PRD_REVIEW_OPTION_OVERRIDE,
   PRD_REVIEW_OPTION_SUPPLEMENT,
@@ -18,7 +18,7 @@ import {
   runPrdReviewGate,
   takePendingPrdReview,
   type PrdReviewIssue,
-} from '../prd-review'
+} from '../review/prd-review'
 import {
   PRD_CONFIRM_OPTION_ADJUST,
   PRD_CONFIRM_OPTION_CONFIRM,
@@ -27,13 +27,13 @@ import {
   publishPrdConfirmCard,
   resolvePrdConfirmCardAnswer,
   resumePrdConfirmConfirmed,
-} from '../prd-confirm'
+} from './prd-confirm'
 import { resolveChannelEnv } from '../runtime-fallback'
 import { resolveRoutedChannelId } from '../category-routing'
 import { getChannelByIdRaw } from '../channel-manager'
 import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../orchestrator'
 import { trackAnalytics } from '../platform-services'
-import { runAgentLoop } from '../agent-loop'
+import { runAgentLoop } from '../coding/agent-loop'
 import { buildGuideTools, guideLoopEnabled, type GuideDecision } from './guide-tools'
 import {
   detectOrphanEnrichmentClarification,
@@ -48,16 +48,16 @@ import {
   takePendingEnrichmentClarification,
   type EnrichmentClarificationRequest,
 } from './clarification'
-import { resolvePrdBackplane, runSketchTask, setProgrammingEventPublisher, nextRequirementId, refineModificationDescription } from '../programming-orchestrator'
-import { normalizeRequirementUpdate, applyNormalization, resolveRoutedRequirementId } from '../requirement-normalizer'
-import { buildReferenceSection } from '../web-reference-extractor'
+import { resolvePrdBackplane, runSketchTask, setProgrammingEventPublisher, nextRequirementId, refineModificationDescription } from '../coding/programming-orchestrator'
+import { normalizeRequirementUpdate, applyNormalization, resolveRoutedRequirementId } from './requirement-normalizer'
+import { buildReferenceSection } from './web-reference-extractor'
 import { findProject, updateProject, readLastSketchRequirements, recordSketchGenerated } from '../project-service'
 import { refineTemplateType } from '../template-inference'
 import { buildClarifyInjection } from '../template-injection'
-import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
+import { captureConstraints, extractConstraints, readProjectConstraints } from './constraint-extractor'
 import { isAutoDelegationText, readPrimaryIntent } from '../session-service'
 import { ingestResearchIdeasAsCandidates } from '../experience/ref-ui-source'
-import type { PrdBackplane, SketchRequirement } from '../sketch-engine'
+import type { PrdBackplane, SketchRequirement } from '../coding/sketch-engine'
 import { isRecord } from '../validators'
 
 type GuideEventPublisher = (event: AgentEvent) => void

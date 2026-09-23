@@ -18,7 +18,7 @@ import { checkApiContract } from './api-contract'
 import { runArtifactUiGate } from './artifact-ui-gate'
 import { getCachedStaticEvidence, setCachedStaticEvidence } from './evidence-cache'
 import { readPrdBackplane } from '../document-engine'
-import { withAbort, loopApiToolEnabled, toolEvidenceEnabled, writeGuardEnabled, preflightEnabled, compactToolEnabled, MAX_EXPLICIT_COMPACTIONS, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../agent-loop'
+import { withAbort, loopApiToolEnabled, toolEvidenceEnabled, writeGuardEnabled, preflightEnabled, compactToolEnabled, MAX_EXPLICIT_COMPACTIONS, type AgentLoopTool, type ToolContext, type ToolOutcome } from './agent-loop'
 import { browserToolsEnabled, buildPreviewBrowserTools } from './preview-browser'
 import {
   NET_FETCH_DEFAULT_CHARS,
@@ -43,7 +43,7 @@ import {
   type DelegationRole,
   type DelegationSummary,
   type StartDelegationResult,
-} from '../agent-collaboration'
+} from './agent-collaboration'
 
 /**
  * Agent Loop 工具集（L2，AgentLoop 改造方案 §4.3；委派协作嫁接方案 §4.2）。

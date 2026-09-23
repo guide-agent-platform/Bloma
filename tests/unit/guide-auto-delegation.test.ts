@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
 
-vi.mock('../../main/programming-orchestrator', () => ({
+vi.mock('../../main/coding/programming-orchestrator', () => ({
   runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
   setProgrammingEventPublisher: vi.fn(),
 }))
@@ -31,9 +31,9 @@ vi.mock('../../main/decision-log', () => ({
 }))
 
 // vi.mock 提升：import 必须在 mock 声明之后拿 mock 实例
-import { handleGuideMessage } from '../../main/guide-agent-service'
+import { handleGuideMessage } from '../../main/guide/guide-agent-service'
 import { recordDecision } from '../../main/decision-log'
-import { runSketchTask } from '../../main/programming-orchestrator'
+import { runSketchTask } from '../../main/coding/programming-orchestrator'
 import { isAutoDelegationText } from '../../main/session-service'
 import type { ConversationTurn, GuideModelOptions, SDKQuery, SDKQueryOptions } from '../../main/orchestrator'
 

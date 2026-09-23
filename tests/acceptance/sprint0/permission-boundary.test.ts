@@ -16,7 +16,7 @@ import {
   resolvePermission,
   setPermissionRequestPublisher,
 } from '../../../main/permission-service'
-import { runSketchTask, setProgrammingEventPublisher } from '../../../main/programming-orchestrator'
+import { runSketchTask, setProgrammingEventPublisher } from '../../../main/coding/programming-orchestrator'
 import { createProject } from '../../../main/project-service'
 import {
   clearSandboxRuntimeForTests,

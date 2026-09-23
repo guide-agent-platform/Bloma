@@ -7,16 +7,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // 2026-09-16 FILE-LEVEL 钉：BLOMA_GUIDE_LOOP 缺省翻转 on，本文件锁旧路径读取侧口径
 // （loop 模式下约束系统行经 historyTurns→messages 送达，捕获参数不同；行为等价）
 process.env.BLOMA_GUIDE_LOOP = '0'
-import { captureConstraints, extractConstraints, scanSessionConstraints } from '../../main/constraint-extractor'
+import { captureConstraints, extractConstraints, scanSessionConstraints } from '../../main/guide/constraint-extractor'
 import { buildPrdBackplane } from '../../main/document-engine'
-import { buildAgentLoopSystemPrompt } from '../../main/programming-orchestrator'
-import { generateSketchLlm } from '../../main/sketch-engine-llm'
+import { buildAgentLoopSystemPrompt } from '../../main/coding/programming-orchestrator'
+import { generateSketchLlm } from '../../main/coding/sketch-engine-llm'
 import { HISTORY_WINDOW_TURNS, runAgent, setAgentStreamPublisher, setSDKQueryForTests } from '../../main/orchestrator'
 import { createChannel } from '../../main/channel-manager'
 import { setSafeStorageAdapter } from '../../main/safe-storage'
 import { createProject, findProject } from '../../main/project-service'
 import { getAgentSessionPath } from '../../storage/config-paths'
-import type { PrdBackplane, SketchRequirement } from '../../main/sketch-engine'
+import type { PrdBackplane, SketchRequirement } from '../../main/coding/sketch-engine'
 import type { AgentMessage, SDKMessage } from '../../shared/types'
 
 /**

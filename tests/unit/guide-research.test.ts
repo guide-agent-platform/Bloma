@@ -6,7 +6,7 @@ import {
   researchMarketSimilar,
   resetGuideResearchFetchForTests,
   setGuideResearchFetchForTests,
-} from '../../main/guide-research'
+} from '../../main/guide/guide-research'
 
 /** 构造 DDG html 结果页（含 uddg 跳转链 / 直链 / 广告位三种形态）。 */
 function ddgPage(results: Array<{ title: string; href: string; snippet: string; ad?: boolean }>): string {
@@ -185,7 +185,7 @@ describe('R1 词典/百科结果过滤（2026-09-11 狗粮 dd6ba98d：cn.bing �
   })
 
   it('isDictionaryResult：当晚 Bing 实测六域名全拦；正常产品结果放行', async () => {
-    const { isDictionaryResult } = await import('../../main/guide-research')
+    const { isDictionaryResult } = await import('../../main/guide/guide-research')
     // 当晚 cn.bing 罐头页返回的真实标题/域名（两条查询共 12 条全为词典页）
     expect(isDictionaryResult({ title: '纵（汉语文字）_百度百科', url: 'https://baike.baidu.com/item/%E7%BA%B5' })).toBe(true)
     expect(isDictionaryResult({ title: '纵 z&#242;ng、zǒng、zōng - 汉典', url: 'https://www.zdic.net/hans/纵' })).toBe(true)

@@ -7,7 +7,7 @@ import {
   fetchForReference,
   FetchTimeoutError,
   type DesignReferenceCard,
-} from '../../main/web-reference-extractor'
+} from '../../main/guide/web-reference-extractor'
 
 /**
  * 网页设计参考提取器（2026-08-28，guidance v5 排队区头名，r15 原型 12/12 转正）：

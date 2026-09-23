@@ -8,7 +8,7 @@ import { findProject } from './project-service'
 import { readPrdBackplane } from './document-engine'
 import { resolveChannelEnv } from './runtime-fallback'
 import type { SDKQuery } from './orchestrator'
-import type { PrdBackplane } from './sketch-engine'
+import type { PrdBackplane } from './coding/sketch-engine'
 
 /**
  * T4-L3 蒸馏层（兜底，2026-08-18 修订版设计）。

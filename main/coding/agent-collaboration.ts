@@ -11,7 +11,7 @@ import {
   type AgentLoopTurnInfo,
   type AgentLoopCompactionInfo,
   type ToolContext,
-} from '../agent-loop'
+} from './agent-loop'
 
 /**
  * 委派协作协调器（委派协作嫁接方案 §4.1，2026-08-24）。

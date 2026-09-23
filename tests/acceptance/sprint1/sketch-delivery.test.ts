@@ -11,7 +11,7 @@ import {
 } from '../../../main/platform-services'
 import { runAgent, setAgentStreamPublisher } from '../../../main/orchestrator'
 import { createProject } from '../../../main/project-service'
-import { generateSketch } from '../../../main/sketch-engine'
+import { generateSketch } from '../../../main/coding/sketch-engine'
 import type { AgentEvent, ApiResult, Project } from '../../../shared/types'
 import {
   makeChildProcess,
