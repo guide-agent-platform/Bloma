@@ -25,6 +25,7 @@
 
 import { atom, type Atom, type WritableAtom } from 'jotai'
 import { atomFamily } from 'jotai/utils'
+import { isDesktopPhaseId } from './lib/desktop-stages'
 import type {
   AgentEvent,
   AgentMessage,
@@ -775,10 +776,18 @@ export function setupGlobalAgentListeners(): () => void {
         })
       }
 
-      // 阶段变更：同步全局工作流阶段（只接受当前项目的事件，防止后台项目挤占 UI）
+      // 阶段变更：同步全局工作流阶段（只接受当前项目的事件，防止后台项目挤占 UI）。
+      // 桌面调度员线分流（渲染端适配批，2026-09-24）：stage 值属于桌面阶段 id
+      //（desktop-* 前缀 ∪ delivered）时写入 desktopPhaseAtom，不碰 workflowStageAtom
+      //——web 阶段状态机（澄清卡/MvpStatusBanner/草图确认弹窗等消费面）零接触。
       if (event.type === 'stage_changed' && event.payload.stage && isEventForCurrentProject()) {
-        store.set(workflowStageAtom, event.payload.stage as WorkflowStage)
-        store.set(stageIndicatorLabelAtom, STAGE_LABEL_MAP[event.payload.stage as WorkflowStage] ?? '处理中')
+        const stageValue = String(event.payload.stage)
+        if (isDesktopPhaseId(stageValue)) {
+          store.set(desktopPhaseAtom, stageValue)
+        } else {
+          store.set(workflowStageAtom, stageValue as WorkflowStage)
+          store.set(stageIndicatorLabelAtom, STAGE_LABEL_MAP[stageValue as WorkflowStage] ?? '处理中')
+        }
       }
 
       // M-14：error 事件接通 globalUserErrorAtom（此前全仓无写入点——死代码，
@@ -925,6 +934,11 @@ export const projectModeAtom = atom<ProjectMode | null>(null)
 
 /** 工作流当前阶段 */
 export const workflowStageAtom = atom<WorkflowStage>('choosing_mode')
+
+/** 桌面调度员线当前阶段（desktop-arch 等；null=非桌面线）——stage_changed 事件
+ *  分流写入（桌面 id 不进 workflowStageAtom）；项目恢复/切换时从
+ *  Project.desktop_phase 回填（App.tsx 三处恢复点），resetProjectState 清空。 */
+export const desktopPhaseAtom = atom<string | null>(null)
 
 /** 模式选择是否已完成 */
 export const modeSelectedAtom = atom<boolean>(false)
@@ -1125,6 +1139,7 @@ export function resetProjectState(): void {
   store.set(snapshotsListAtom, [])
   store.set(selectedSnapshotAtom, null)
   store.set(stageIndicatorLabelAtom, '选择模式')
+  store.set(desktopPhaseAtom, null)
 }
 
 // =========================================================================

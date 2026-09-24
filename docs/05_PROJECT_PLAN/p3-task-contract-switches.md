@@ -519,3 +519,17 @@
 - R1 边界：desktop 域零运行时依赖 orchestration（SDKQuery 类型导入豁免）；事件发布/落盘经 DesktopRouteDeps 注入（orchestration 层适配 makeEvent/appendAgentMessage；prd-confirm 适配用 session-tree 真源头）。
 - 单测 11 例（判定矩阵/推进落盘+自动续跑/终态收口/确认卡协议/凭据链状态化重跑/非法选项/拒收续接/驱动 fail 拒推/断流未收口）；全量 225 文件 2349 例零失败。
 - 剩余狗粮：真机全流程（setx 后重启）+渲染端桌面阶段展示（stage_changed 未发，桌面阶段经 message_delta 播报）+Android 线。
+
+### §45.4 桌面线渲染端适配（2026-09-25）
+
+| 件 | 内容 | 开关 |
+|---|---|---|
+| desktop-route.ts（本批） | 推进三处补发 stage_changed（stage=桌面 id：enterDesktopLine/advance 落盘/终态收口）——渲染端阶段条数据源，复用现有事件通道零新增 IPC | 随桌面线（无独立开关） |
+| renderer/lib/desktop-stages.ts（新） | 桌面阶段 id 判定（desktop- 前缀 ∪ delivered）+ 短名/全名表——渲染端自持投影（不 import main），未知 id 降级原样显示（插阶段零代码改动在渲染端同样成立） | — |
+| agent-atoms.ts | desktopPhaseAtom（新）+ stage_changed 事件分流（桌面 id 写 desktopPhaseAtom 不碰 workflowStageAtom——web 阶段状态机零接触）+ resetProjectState 清空 | — |
+| App.tsx / atoms.ts | 三处项目恢复/切换点回填 desktopPhase（Project.desktop_phase）；atoms 转发桩同步导出 | — |
+| DesktopStageBar.tsx（新） | 五节点阶段条（选型›骨架›实现›验收›交付）：当前琥珀高亮+呼吸感、已过 ✓ 灰显、未知 id 尾部追加；WorkspaceHeader 桌面线激活时替换 web 阶段胶囊（桌面线期间 web 阶段停在「澄清需求」，继续显示误导） | — |
+
+- 确认卡核对结论：桌面确认卡（kind=desktop_phase_confirm + questions）走既有通用决策卡（extractDecisionCards 按 questions 渲染），点选回传 card_option 正是接线批消费形态——开箱即用零改动。
+- 单测 +6（组件显示判定/节点状态/事件相位优先/未知 id 降级，jsdom）；路由 +2 断言（推进/终态 stage_changed）；全量 226 文件 2355 例零失败。
+- 剩余狗粮：真机全流程 + 观察员度量 + Android 线。

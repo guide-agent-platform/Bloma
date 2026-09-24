@@ -18,6 +18,7 @@ import {
   modeSelectedAtom,
   projectModeAtom,
   workflowStageAtom,
+  desktopPhaseAtom,
   stageIndicatorLabelAtom,
   STAGE_LABEL_MAP,
   currentProjectAtom,
@@ -108,6 +109,7 @@ const AppRoutes: React.FC = () => {
   const setProjectMode = useSetAtom(projectModeAtom)
   const setModeSelected = useSetAtom(modeSelectedAtom)
   const setWorkflowStage = useSetAtom(workflowStageAtom)
+  const setDesktopPhase = useSetAtom(desktopPhaseAtom)
   const setStageLabel = useSetAtom(stageIndicatorLabelAtom)
   const setActiveSessionId = useSetAtom(activeAgentSessionIdAtom)
   const setCurrentProject = useSetAtom(currentProjectAtom)
@@ -248,6 +250,7 @@ const AppRoutes: React.FC = () => {
       setModeSelected(true)
       setWorkflowStage(restored.current_stage)
       setStageLabel(STAGE_LABEL_MAP[restored.current_stage] ?? '处理中')
+      setDesktopPhase(restored.desktop_phase ?? null)
       setSessionId(restoredSessionId)
       setActiveSessionId(restoredSessionId)
       setProjectList(result.data)
@@ -286,6 +289,7 @@ const AppRoutes: React.FC = () => {
     setModeSelected(true)
     setWorkflowStage(newProject.current_stage)
     setStageLabel(STAGE_LABEL_MAP[newProject.current_stage] ?? STAGE_LABEL_MAP.clarifying)
+    setDesktopPhase(newProject.desktop_phase ?? null)
     setSessionId(newSessionId)
     setActiveSessionId(newSessionId)
     setCurrentProject(newProject)
@@ -316,6 +320,7 @@ const AppRoutes: React.FC = () => {
     setModeSelected(true)
     setWorkflowStage(project.current_stage)
     setStageLabel(STAGE_LABEL_MAP[project.current_stage] ?? project.current_stage)
+    setDesktopPhase(project.desktop_phase ?? null)
     setSessionId(resumeSessionId)
     setActiveSessionId(resumeSessionId)
     setCurrentProject(project)

@@ -47,6 +47,7 @@ export {
   correctionModalVisibleAtom, correctionUserNoteAtom, correctionContextAtom,
   snapshotsListAtom, isQuickModeAtom, isLongtermModeAtom, documentPanelVisibleAtom,
   hasActiveStreamAtom, canUpgradeAtom, previewUrlsAtom, currentSnapshotIdAtom, STAGE_LABEL_MAP,
+  desktopPhaseAtom,
   delegationsFamily, emptyDelegationsFallback,
   appendMessageToSession, markDecisionConsumed, clearPermissionRequest, resetProjectState,
   loadAgentSessions, loadSessionHistory, loadSnapshots,

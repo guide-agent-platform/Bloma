@@ -108,6 +108,7 @@ export async function enterDesktopLine(
   if (!shouldEnterDesktopLine(project)) return false
   const projectName = project?.name ?? input.projectId
   updateProject(input.projectId, { desktop_phase: 'desktop-arch' })
+  deps.publish(input, 'stage_changed', { stage: 'desktop-arch' })
   deps.publish(input, 'message_delta', { text: `PRD 已确认。本项目为桌面品类，切换到桌面调度员线：从「桌面选型与架构」阶段开始（web 草图流程跳过）。` })
   await runDesktopStage(input, query, env, 'desktop-arch', deps, projectName, 0)
   return true
@@ -264,12 +265,14 @@ async function settleDesktopStage(
       // 终态（delivered）：终态字段收口，不续跑（delivered 是哨兵节点，无任务可跑）
       const finalPhase = next ?? 'delivered'
       updateProject(input.projectId, { desktop_phase: finalPhase, status: 'completed', current_stage: 'completed' })
+      deps.publish(input, 'stage_changed', { stage: finalPhase })
       deps.publish(input, 'message_delta', { text: `桌面线交付完成（阶段「${phaseId}」→ ${finalPhase}）。产物在项目目录，后续迭代走既有流程。` })
       deps.persistSystem(input.sessionId, `[decision] desktop-advance ${phaseId} → ${finalPhase}（终态）`)
       deps.complete(input.sessionId, input.projectId)
       return
     }
     updateProject(input.projectId, { desktop_phase: next })
+    deps.publish(input, 'stage_changed', { stage: next })
     deps.persistSystem(input.sessionId, `[decision] desktop-advance ${phaseId} → ${next}`)
     if (chainDepth + 1 >= MAX_AUTO_ADVANCE_CHAIN) {
       deps.publish(input, 'message_delta', { text: `阶段「${phaseId}」已通过门禁推进到「${next}」。本轮自动推进预算已用完——发送任意消息继续下一阶段。` })

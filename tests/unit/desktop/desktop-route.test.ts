@@ -163,13 +163,17 @@ describe('判定矩阵（开关字节锁）', () => {
 })
 
 describe('handleDesktopDispatchMessage 消息路由', () => {
-  it('普通消息：调度员 run → 推进 → desktop_phase 落盘 + 自动续跑下一阶段', async () => {
+  it('普通消息：调度员 run → 推进 → desktop_phase 落盘 + 自动续跑下一阶段 + stage_changed 事件（渲染端阶段条数据源）', async () => {
     const { deps, events } = collectorDeps()
     await handleDesktopDispatchMessage(routeInput(), deps)
     expect(record.desktop_phase).not.toBe('desktop-scaffold')
     expect(['desktop-implement', 'desktop-verify', 'delivered']).toContain(record.desktop_phase)
     const advanceBroadcast = events.find((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('自动进入'))
     expect(advanceBroadcast).toBeTruthy()
+    // 阶段推进事件：每个推进节点一条 stage_changed（stage=桌面 id）
+    const stageEvents = events.filter((e) => e.type === 'stage_changed' && typeof e.payload.stage === 'string')
+    expect(stageEvents.length).toBeGreaterThanOrEqual(1)
+    expect(stageEvents.some((e) => String(e.payload.stage).startsWith('desktop-'))).toBe(true)
   })
 
   it('推进链达预算上限后停（提示用户继续）', async () => {
@@ -179,17 +183,19 @@ describe('handleDesktopDispatchMessage 消息路由', () => {
     expect(MAX_AUTO_ADVANCE_CHAIN).toBe(3)
   })
 
-  it('delivered 终态：desktop_phase/status/current_stage 收口', async () => {
+  it('delivered 终态：desktop_phase/status/current_stage 收口 + stage_changed', async () => {
     writeValidContract()
     record.desktop_phase = 'desktop-verify'
     record.desktop_confirmed_phases = ['desktop-verify']
-    const { deps } = collectorDeps()
+    const { deps, events } = collectorDeps()
     await handleDesktopDispatchMessage(routeInput({
       query: scriptedQuery([[textMessage('验证全过。\nPHASE_ADVANCE: delivered')]]),
     }), deps)
     expect(record.desktop_phase).toBe('delivered')
     expect((record as unknown as { status?: string }).status).toBe('completed')
     expect((record as unknown as { current_stage?: string }).current_stage).toBe('completed')
+    // 终态也发 stage_changed（渲染端阶段条跳到「交付」）
+    expect(events.some((e) => e.type === 'stage_changed' && e.payload.stage === 'delivered')).toBe(true)
   })
 
   it('confirmation-required：发确认卡（选项 id 前缀协议）且不推进', async () => {

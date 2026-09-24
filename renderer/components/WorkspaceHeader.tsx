@@ -1,6 +1,7 @@
 import React from 'react'
 import { useAtom, useAtomValue } from 'jotai'
 import { StageIndicator } from './StageIndicator'
+import { DesktopStageBar } from './DesktopStageBar'
 import { Sparkles, IconSettings } from './icons'
 import {
   canUpgradeAtom,
@@ -35,6 +36,11 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects,
   const hasChannels = useAtomValue(hasUsableChannelsAtom)
   const stageLabel = useAtomValue(stageIndicatorLabelAtom)
   const stage = useAtomValue(workflowStageAtom)
+  // 桌面调度员线阶段条（渲染端适配批）：桌面线激活（desktop_tool 品类且已进入
+  // desktop_phase）时替换 web 阶段胶囊——桌面线期间 web 阶段停在「澄清需求」，
+  // 继续显示会误导；非桌面线回退 web 胶囊。
+  const desktopLineActive =
+    project?.template_type === 'desktop_tool' && typeof project.desktop_phase === 'string'
   const canUpgrade = useAtomValue(canUpgradeAtom)
   const [docPanelExpanded, setDocPanelExpanded] = useAtom(documentPanelExpandedAtom)
   const [collabPanelExpanded, setCollabPanelExpanded] = useAtom(collaborationPanelExpandedAtom)
@@ -110,7 +116,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects,
             {modeLabel}
           </span>
         )}
-        <StageIndicator label={stageLabel} active={stageActive} />
+        {desktopLineActive ? <DesktopStageBar /> : <StageIndicator label={stageLabel} active={stageActive} />}
       </div>
 
       {/* 右侧：AI 状态 + 文档 + 升级 + 所有项目 */}
