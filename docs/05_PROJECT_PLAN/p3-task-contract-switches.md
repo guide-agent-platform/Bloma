@@ -498,3 +498,11 @@
 
 - 故障注入 23 例：推进伪造四腿（句中引用/跳级/伪造枚举/分歧目标）、围栏硬拦（execute 永不触达+is_error 教育回填）、挂起工具模式（任务书指引形态：toolUse query+execute 永不 resolve，宽限 race 容忍既有裸 await 设计）、断流 fail-soft、驱动挂载四腿（pass+报告落盘/fail 拒推/契约缺失/契约不合法）；全量 223 文件 2326 例零失败。
 - 待狗粮项：意图路由层分流（桌面品类项目自动进调度员线）与 confirmedPhases 凭据链（决策卡/批次 E 闭环）为编排器侧后续接线，本批已留齐注入位。
+
+### §45.2 批次 E 拒收教育闭环（2026-09-24，同日收官）
+
+| 件 | 内容 | 开关 |
+|---|---|---|
+| advance-rejection-loop.ts（批次 E） | 拒收四要素闭环：①可见（教育注入，复用 buildGateRejectionEdu 三段式单一真源）②驱动（systemInitiated 续接指令 buildContinuationDirective——拒后立即续跑不等用户）③防环（同阶段闭环 ≤2 次）④降级（第 3 次起转人工无续接）；三态拒因登记（target-deny/gate-deny/confirmation-required）；推进成功计数清零+拒因清除；纯函数+账本注入（RejectionLedger 调用方持有，读写分离；web 线可复用同一闭环模式） | 随调度员线接线后生效（无独立开关；接线层待狗粮项挂载） |
+
+- 单测 12 例（三态归类/闭环决策/防环降级/清零/续接指令要素）；全量 224 文件 2338 例零失败。五批次（A/B/C/D/E）收官：fcfa436→02df9c6→0235853→85c4089→本批。
