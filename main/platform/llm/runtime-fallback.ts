@@ -10,7 +10,17 @@ import {
   listEnabledRawChannels,
 } from './channel-manager'
 import { getCategoryFallbackChannelIds, resolveRoutedChannelId } from './category-routing'
-import { recordDecision } from '../../project/decision-log'
+// PR4 后续：决策落档改注入（平台件不反向依赖 domain 决策日志；entry 层接线 recordDecision）。
+// 未接线时静默丢弃（单测/局部场景不落档），行为位等价于旧直连在项目缺席时的容错路径。
+export interface FallbackDecisionSinkInput {
+  project_id?: string
+  session_id: string
+  entry: Record<string, unknown>
+}
+let decisionSink: ((input: FallbackDecisionSinkInput) => void) | null = null
+export function setDecisionSink(sink: ((input: FallbackDecisionSinkInput) => void) | null): void {
+  decisionSink = sink
+}
 import { resolveCategoryModel, type DocumentCategory } from './model-resolution'
 
 /**
@@ -373,7 +383,7 @@ export function recordChannelSwitch(record: {
   }
   recentSwitchLogs.set(dedupeKey, now)
 
-  recordDecision({
+  decisionSink?.({
     project_id: record.context.projectId,
     session_id: record.context.sessionId,
     entry: {
@@ -438,7 +448,7 @@ function recordCategoryRoute(record: {
   }
   recentRouteLogs.set(dedupeKey, now)
 
-  recordDecision({
+  decisionSink?.({
     project_id: record.projectId,
     session_id: record.sessionId,
     entry: {

@@ -14,6 +14,12 @@ import {
 } from './platform/shell/notifications'
 import { MAIN_FRAME_CSP, shouldInjectMainFrameCsp } from './csp'
 import { createCrashGuard } from './platform/shell/renderer-crash-guard'
+// PR4 后续：平台件决策 sink 接线（runtime-fallback 不再反向依赖 domain 决策日志）
+import { setDecisionSink } from './platform/llm/runtime-fallback'
+import { setProjectTouchHandler } from './platform/sessions/session-service'
+import { setNotificationProjectHooks } from './platform/shell/notifications'
+import { recordDecision } from './project/decision-log'
+import { findProject, listProjects, updateProject } from './project/project-service'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -127,6 +133,34 @@ async function reconcileInterruptedProjectsAtStartup(): Promise<void> {
 
 app.whenReady().then(async () => {
   configureMediaPermissions()
+  // 渠道切换/类别路由决策落档 sink 接线（entry 层 composition；未接线时静默）
+  setDecisionSink((input) => {
+    try {
+      recordDecision(input as unknown as Parameters<typeof recordDecision>[0])
+    } catch {
+      /* 项目/会话缺席：静默，等价旧直连容错路径 */
+    }
+  })
+  // 会话创建后的项目 last_session_id 触碰接线（包装内吞 PROJECT_NOT_FOUND，等价旧容错）
+  setProjectTouchHandler((projectId, patch) => {
+    try {
+      updateProject(projectId, patch)
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes('PROJECT_NOT_FOUND')) throw error
+    }
+  })
+  // 通知链路的项目信息/阻塞清单接线（未接或缺席=不弹/兑底文案，等价旧容错）
+  setNotificationProjectHooks({
+    projectInfo: (projectId) => {
+      try {
+        const project = findProject(projectId)
+        return { stage: project.current_stage, name: project.name }
+      } catch {
+        return null
+      }
+    },
+    blockedProjects: () => listProjects('active'),
+  })
   // 会话索引独立化迁移（2026-09-04）：旧共用 agent-sessions.json 里的 Bloma 条目
   // 搬进专属 bloma-agent-sessions.json（幂等，只读旧写新不动 Proma 文件）；失败不阻断
   try {

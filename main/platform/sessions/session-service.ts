@@ -41,7 +41,13 @@ let sessionActiveChecker: (sessionId: string) => boolean = () => false
 export function setSessionActiveChecker(checker: (sessionId: string) => boolean): void {
   sessionActiveChecker = checker
 }
-import { listProjects, updateProject } from '../../project/project-service'
+// PR4 后续：项目触碰改注入（平台件不反向依赖 domain 项目服务；entry 层接线 updateProject）。
+// 未接线时跳过（等价旧容错路径）；cleanOrphanSessions 的有效项目集改参数传入。
+export type ProjectTouchHandler = (projectId: string, patch: { last_session_id: string }) => void
+let projectTouchHandler: ProjectTouchHandler | null = null
+export function setProjectTouchHandler(handler: ProjectTouchHandler | null): void {
+  projectTouchHandler = handler
+}
 import { cleanupPastedImages } from '../shell/pasted-images'
 
 interface SessionsIndex {
@@ -82,11 +88,8 @@ export function recordSessionActivity(
   }
   writeSessions(index)
 
-  try {
-    updateProject(projectId, { last_session_id: sessionId })
-  } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes('PROJECT_NOT_FOUND')) throw error
-  }
+  // PR4 后续：项目触碰改注入（entry 层接线，包装内吞 PROJECT_NOT_FOUND，等价旧容错语义）
+  projectTouchHandler?.(projectId, { last_session_id: sessionId })
 }
 
 /** 列出会话记录；可按项目过滤，按最近活跃时间倒序 */
@@ -107,8 +110,9 @@ export function listSessions(input: AgentListSessionsInput): AgentListSessionsRe
  * 归档项目仍存在于项目索引（可恢复），其会话历史必须保留，故不在此清理范围。
  * 只清理指向已删除/不存在项目的会话，以及空 project_id 的遗留会话。
  */
-export function cleanOrphanSessions(): SessionCleanOrphansResult {
-  const validIds = new Set(listProjects('all').map((project) => project.project_id))
+export function cleanOrphanSessions(validProjectIds?: Set<string>): SessionCleanOrphansResult {
+  // PR4 后续：有效项目集由调用方（ipc/agent-sessions，entry 层）传入；缺省空集仅供测试
+  const validIds = validProjectIds ?? new Set<string>()
   const index = readSessions()
   const orphans = index.sessions.filter((item) => !validIds.has(item.project_id))
   for (const orphan of orphans) {

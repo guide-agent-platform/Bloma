@@ -245,7 +245,7 @@ export function registerAgentSessionsIpc(ipcMain: IpcMain, mainWindow: BrowserWi
   ipcMain.handle(IPC_CHANNELS.SESSION_CLEAN_ORPHANS, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       requireFields<RequestEnvelope>(payload, [])
-      return cleanOrphanSessions()
+      return cleanOrphanSessions(new Set(listProjects('all').map((p) => p.project_id)))
     })
   })
 

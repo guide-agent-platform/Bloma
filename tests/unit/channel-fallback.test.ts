@@ -10,7 +10,9 @@ import { getAgentSessionPath } from '../../storage/config-paths'
 import {
   resolveChannelEnv,
   resetCategoryRouteThrottleForTests,
+  setDecisionSink,
 } from '../../main/platform/llm/runtime-fallback'
+import { recordDecision } from '../../main/project/decision-log'
 
 /**
  * 渠道自动回退的密钥解密守卫（getFirstEnabledChannel）。
@@ -130,6 +132,8 @@ describe('category routing × resolveChannelEnv（M5）', () => {
     workingSafeStorage()
     resetCategoryRoutingForTests()
     resetCategoryRouteThrottleForTests()
+    // PR4 后续：平台件已去域依赖，测试接真源（与 main/index 接线同款）
+    setDecisionSink((input) => recordDecision(input as unknown as Parameters<typeof recordDecision>[0]))
     vi.restoreAllMocks()
   })
 

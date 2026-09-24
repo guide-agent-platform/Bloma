@@ -126,10 +126,6 @@ const WHITELIST = new Set<string>([
   'R1|main/agent/prompting -> main/model/prd-backplane',
   'R1|main/agent/prompting -> main/project/project-templates',
   // ── 主题四：platform 反向依赖 domain（真违规，治理方向=事件化或函数下沉；PR3 治理）
-  'R1|main/platform/llm -> main/project/decision-log',
-  'R1|main/platform/mcp -> main/project/project-service',
-  'R1|main/platform/sessions -> main/project/project-service',
-  'R1|main/platform/shell -> main/project/project-service',
   // ── 主题五：上游贴面适配（loop-query 是薄适配层，允许引用本仓运行时件；保持与上游 diff 最小）
   'R1|main/platform/upstream/providers -> main/agent/loop/thinking-log',
   // ── 主题六：domain 反向依赖 orchestration（PR4 治理：改事件化或回调注入，禁止新增）

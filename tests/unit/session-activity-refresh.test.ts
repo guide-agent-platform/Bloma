@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createProject, findProject } from '../../main/project/project-service'
+import { createProject, findProject, updateProject } from '../../main/project/project-service'
 import {
   resetSessionActivityThrottleForTests,
   runSketchTask,
@@ -14,7 +14,16 @@ import {
 import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/delivery/sandbox'
 import { setSnapshotCaptureProviderForTests } from '../../main/delivery/snapshots'
 import { decryptApiKey, getFirstEnabledChannel } from '../../main/platform/llm/channel-manager'
-import { listSessions } from '../../main/platform/sessions/session-service'
+import { listSessions, setProjectTouchHandler } from '../../main/platform/sessions/session-service'
+
+// PR4 后续：平台件已去域依赖，测试接真源（与 main/index 接线同款；项目缺席静默）
+setProjectTouchHandler((projectId, patch) => {
+  try {
+    updateProject(projectId, patch)
+  } catch {
+    /* 测试场景项目缺席静默 */
+  }
+})
 import type { SDKQuery } from '../../main/orchestration/orchestrator'
 import type { Channel, SDKMessage } from '../../shared/types'
 

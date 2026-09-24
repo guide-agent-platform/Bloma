@@ -15,7 +15,20 @@
  */
 
 import type { AgentEvent, Project } from '../../../shared/types'
-import { findProject, listProjects } from '../../project/project-service'
+// PR4 后续：项目信息/阻塞清单改注入（平台件不反向依赖 domain 项目服务；entry 层与测试接线真源）。
+// 未接线时：stage 空（不弹 completed 通知）、名称兜底「项目」、阻塞扫描空集——全部等价旧容错路径。
+export interface NotificationProjectInfo {
+  stage: string
+  name: string
+}
+export interface NotificationProjectHooks {
+  projectInfo: (projectId: string) => NotificationProjectInfo | null
+  blockedProjects: () => Array<{ project_id: string; current_stage: string; name?: string; blocked_action?: string }>
+}
+let projectHooks: NotificationProjectHooks | null = null
+export function setNotificationProjectHooks(hooks: NotificationProjectHooks | null): void {
+  projectHooks = hooks
+}
 
 type ProjectBlockedAction = Project['blocked_action']
 
@@ -126,12 +139,8 @@ export function handleAgentStreamEvent(event: AgentEvent): void {
 function handleCompleted(projectId: string): void {
   // completed 是通用终态：引导澄清轮次也会发。只对「真完成」（当前阶段 ready/completed）
   // 弹系统通知——MVP / 迭代 / 修复闭环；澄清轮次用户正对着聊天窗，通知纯属打扰。
-  let stage: string
-  try {
-    stage = findProject(projectId).current_stage
-  } catch {
-    stage = ''
-  }
+  // PR4 后续：stage 查询改注入（未接线/项目缺席=空串，不弹，等价旧容错）
+  const stage = projectHooks?.projectInfo(projectId)?.stage ?? ''
   if (stage === 'ready' || stage === 'completed') {
     notifyTaskCompleted(projectId, '生成和测试都跑完了，可以点开预览看看；想调整直接告诉我。')
   }
@@ -166,13 +175,8 @@ function focusWindow(): void {
 }
 
 function projectName(projectId: string): string {
-  try {
-    const name = findProject(projectId).name
-    return name || '项目'
-  } catch {
-    // 项目索引缺失（测试字面 id / 已删除）时用兜底文案，不把通知链路打挂
-    return '项目'
-  }
+  // 项目索引缺失（测试字面 id / 已删除）时用兜底文案，不把通知链路打挂
+  return projectHooks?.projectInfo(projectId)?.name || '项目'
 }
 
 // =========================================================================
@@ -195,7 +199,7 @@ export interface PendingDecisionScanResult {
  * 清理已脱离阻塞项目的旧状态（忽略标记/时间戳），保证新一轮阻塞能重新提醒。
  */
 export function scanPendingDecisionsForReminder(now: number): PendingDecisionScanResult {
-  const pending = listProjects('active').filter((p) => p.current_stage === 'blocked_for_user_decision')
+  const pending = (projectHooks?.blockedProjects() ?? []).filter((p) => p.current_stage === 'blocked_for_user_decision')
   const pendingIds = new Set(pending.map((p) => p.project_id))
 
   for (const key of [...lastNotifiedAt.keys()]) {
@@ -224,7 +228,7 @@ export function scanPendingDecisionsForReminder(now: number): PendingDecisionSca
     lastNotifiedAt.set(project.project_id, now)
     showSystem(
       project.project_id,
-      `「${project.name}」还在等你决策`,
+      `「${project.name ?? projectName(project.project_id)}」还在等你决策`,
       blockedDecisionBody(project.blocked_action),
       {
         onClick: focusWindow,
@@ -236,7 +240,7 @@ export function scanPendingDecisionsForReminder(now: number): PendingDecisionSca
   return { notified, pending: [...pendingIds], skippedFocused, skippedIgnored }
 }
 
-function blockedDecisionBody(action: ProjectBlockedAction | undefined): string {
+function blockedDecisionBody(action: string | undefined): string {
   switch (action) {
     case 'mvp_repair':
       return 'MVP 预览反复启动失败，我停在这里等你选：继续修复 / 接受现状 / 换个做法。'

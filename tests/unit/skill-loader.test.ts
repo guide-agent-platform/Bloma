@@ -176,14 +176,14 @@ describe('preparePromptWithSkills（注入）', () => {
 describe('resolveSkillRoots（两级白名单根）', () => {
   it('[S4-AGENT-030] 项目级 <root>/.bloma/skills 优先 + 全局 <PROMA_HOME>/skills 兜底', () => {
     const project = createProject({ request_id: 'req-skill-roots', mode: 'quick' })
-    const roots = resolveSkillRoots(project.project_id)
+    const roots = resolveSkillRoots(project.root_path)
     expect(roots).toHaveLength(2)
     expect(roots[0]).toBe(join(project.root_path, '.bloma', 'skills'))
     expect(roots[1]).toBe(join(getPromaHome(), 'skills'))
   })
 
   it('[S4-AGENT-031] 项目不存在 → 只回全局根（不抛 PROJECT_NOT_FOUND）', () => {
-    const roots = resolveSkillRoots('no-such-project')
+    const roots = resolveSkillRoots(undefined)
     expect(roots).toHaveLength(1)
     expect(roots[0]).toBe(join(getPromaHome(), 'skills'))
   })
@@ -226,7 +226,7 @@ describe('审查加固（r51 multi-vendor review 采纳项）', () => {
     const projectSkillRoot = join(project.root_path, '.bloma', 'skills')
     await mkdir(join(projectSkillRoot, 'dup-x'), { recursive: true })
     await writeFile(join(projectSkillRoot, 'dup-x', 'SKILL.md'), '---\nname: dup-x\n---\n项目版内容', 'utf8')
-    const prep = await prepareTaskWithSkills('用 /skill:dup-x', project.project_id)
+    const prep = await prepareTaskWithSkills('用 /skill:dup-x', project.root_path)
     expect(prep.activatedSkills).toEqual(['dup-x'])
     expect(prep.content).toContain('项目版内容')
     expect(prep.content).not.toContain('全局版内容')

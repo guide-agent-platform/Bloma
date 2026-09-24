@@ -12,8 +12,10 @@ import {
   readFallbackContext,
   resolveChannelEnv,
   resetChannelSwitchThrottleForTests,
+  setDecisionSink,
 } from '../../main/platform/llm/runtime-fallback'
 import { resetCategoryRoutingForTests, setCategoryRoutingForTests } from '../../main/platform/llm/category-routing'
+import { recordDecision } from '../../main/project/decision-log'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import type { SDKMessage } from '../../shared/types'
 
@@ -120,6 +122,8 @@ describe('runtime channel fallback · T9 请求期被动切换', () => {
     process.env.PROMA_HOME = home
     resetSDKQueryForTests()
     resetChannelSwitchThrottleForTests()
+    // PR4 后续：平台件已去域依赖，测试接真源（与 main/index 接线同款）
+    setDecisionSink((input) => recordDecision(input as unknown as Parameters<typeof recordDecision>[0]))
     // R1-providers：上游同渠道自愈重试（指数退避）在单测里会拖慢套件——禁用后
     // 首败直接交给 T9 被动切换，与旧路径钉点语义对齐
     setSseRetryWaitBudgetForTests(0)

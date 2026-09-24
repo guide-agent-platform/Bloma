@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { archiveProject, createProject, findProject } from '../../main/project/project-service'
+import { archiveProject, createProject, findProject, listProjects, updateProject } from '../../main/project/project-service'
 import {
   cleanOrphanSessions,
   listSessions,
@@ -11,8 +11,18 @@ import {
   readPrimaryIntent,
   readSessionsForTest,
   recordSessionActivity,
+  setProjectTouchHandler,
   writeSessionsForTest,
 } from '../../main/platform/sessions/session-service'
+
+// PR4 后续：平台件已去域依赖，测试接真源（与 main/index 接线同款；项目缺席静默）
+setProjectTouchHandler((projectId, patch) => {
+  try {
+    updateProject(projectId, patch)
+  } catch {
+    /* 测试场景项目缺席静默 */
+  }
+})
 import { getAgentSessionPath } from '../../storage/config-paths'
 
 function sleep(ms: number): Promise<void> {
@@ -155,7 +165,7 @@ describe('SessionService 清理孤儿会话（U11）', () => {
         { role: 'user', content: [{ type: 'text', text: 'x' }], timestamp: 1 },
       ])
 
-      const result = cleanOrphanSessions()
+      const result = cleanOrphanSessions(new Set(listProjects('all').map((p) => p.project_id)))
 
       expect(result.removed).toBe(1)
       const ids = listSessions({ request_id: 'req-3' }).sessions.map((s) => s.session_id)

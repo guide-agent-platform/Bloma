@@ -9,7 +9,16 @@ import {
   reconcileInterruptedProjects,
 } from '../../main/orchestration/recovery-service'
 import { createProject, findProject, updateProject } from '../../main/project/project-service'
-import { recordSessionActivity } from '../../main/platform/sessions/session-service'
+import { recordSessionActivity, setProjectTouchHandler } from '../../main/platform/sessions/session-service'
+
+// PR4 后续：平台件已去域依赖，测试接真源（与 main/index 接线同款；项目缺席静默）
+setProjectTouchHandler((projectId, patch) => {
+  try {
+    updateProject(projectId, patch)
+  } catch {
+    /* 测试场景项目缺席静默 */
+  }
+})
 import { createSnapshot } from '../../main/delivery/snapshots'
 import { getAgentSessionPath, getDocumentsDir } from '../../storage/config-paths'
 

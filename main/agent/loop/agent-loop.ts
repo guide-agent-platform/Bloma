@@ -5,6 +5,7 @@ import { appendSessionMessage } from '../../platform/sessions/session-tree'
 import { canUseTool } from '../permissions/permission-service'
 import type { ConversationTurn, SDKQuery, ToolDefinition } from '../../orchestration/orchestrator'
 import { prepareTaskWithSkills } from '../../platform/mcp/skill-loader'
+import { findProject } from '../../project/project-service' // 白名单既有项（agent/loop→project-service，目录级）；skill 根解析上提至此
 import { prepareRecallBlock } from './session-recall'
 import { renderLearningsSection } from '../../project/learnings-log'
 import { estimateTokenCount } from './usage-guard'
@@ -806,8 +807,16 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
   // JSONL 落注入后文本——审计=模型实际所见，continue 重放一致。
   // 跨会话检索（guidance v5 ②）：主 loop（depth 0）指代词任务前置 <session-recall> 历史摘录
   // （模块内失败静默）；与 skill 注入一次拼接，任务原文始终在最后。
+  // 项目级 skill 根（PR4 后续：平台件 skill-loader 已去域依赖，根路径在此解析后传入；
+  // 项目缺席（孤儿/单测）跳过项目级根，只回全局根，与旧语义一致）
+  let skillProjectRoot: string | undefined
+  try {
+    skillProjectRoot = findProject(input.projectId).root_path
+  } catch {
+    skillProjectRoot = undefined
+  }
   const [skillPrep, recallBlock] = await Promise.all([
-    prepareTaskWithSkills(input.task, input.projectId),
+    prepareTaskWithSkills(input.task, skillProjectRoot),
     prepareRecallBlock(input.task, input.delegationDepth ?? 0),
   ])
   // 历史经验（记忆栈审计裁定 §5，D0）：从 system prompt 迁到**任务头**，与 recall/skill 同层；

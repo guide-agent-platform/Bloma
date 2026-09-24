@@ -3,7 +3,6 @@ import { realpathSync } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { getPromaHome } from '../../../storage/config-paths'
-import { findProject } from '../../project/project-service'
 
 /**
  * Skill 机制（2026-08-28，guidance v5 ①）：团队 SOP 的文件级沉淀 + 按需注入。
@@ -180,14 +179,10 @@ export async function preparePromptWithSkills(lookup: Map<string, DiscoveredSkil
  * 项目级 `<projectRoot>/.bloma/skills/` + 全局 `<PROMA_HOME>/skills/`，项目优先。
  * 项目不存在（孤儿 id/单测场景）→ 只回全局根，不抛 PROJECT_NOT_FOUND。
  */
-export function resolveSkillRoots(projectId?: string): string[] {
+export function resolveSkillRoots(projectRoot?: string): string[] {
   const roots: string[] = []
-  if (projectId) {
-    try {
-      roots.push(join(findProject(projectId).root_path, '.bloma', 'skills'))
-    } catch {
-      // 项目不存在 → 跳过项目级根
-    }
+  if (projectRoot) {
+    roots.push(join(projectRoot, '.bloma', 'skills'))
   }
   roots.push(join(getPromaHome(), 'skills'))
   return roots
@@ -197,8 +192,8 @@ export function resolveSkillRoots(projectId?: string): string[] {
  * agent-loop 一次 hook 入口：任务含 /skill: 命令时发现+注入；无命令零 IO 返回原文。
  * 委派子 loop 复用同一 runAgentLoop 入口，自动获得同等能力。
  */
-export async function prepareTaskWithSkills(task: string, projectId?: string): Promise<PreparedPrompt> {
+export async function prepareTaskWithSkills(task: string, projectRoot?: string): Promise<PreparedPrompt> {
   if (extractSkillCommandNames(task).length === 0) return { content: task, activatedSkills: [] }
-  const skills = await discoverSkills(resolveSkillRoots(projectId))
+  const skills = await discoverSkills(resolveSkillRoots(projectRoot))
   return preparePromptWithSkills(buildSkillLookup(skills), task)
 }

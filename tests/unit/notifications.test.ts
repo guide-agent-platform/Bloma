@@ -10,11 +10,12 @@ import {
   resetNotificationRuntimeForTests,
   scanPendingDecisionsForReminder,
   setNotificationBackend,
+  setNotificationProjectHooks,
   setReminderIntervalForTests,
   setWindowFocusedHook,
   type NotificationBackend,
 } from '../../main/platform/shell/notifications'
-import { createProject, updateProject } from '../../main/project/project-service'
+import { createProject, findProject, listProjects, updateProject } from '../../main/project/project-service'
 import type { AgentEvent, Project } from '../../shared/types'
 
 const REMINDER_INTERVAL = 60_000
@@ -41,6 +42,18 @@ describe('T6 后台执行通知（完成/失败/需决策 + 待决策持续提�
     home = mkdtempSync(join(tmpdir(), 'proma-t6-notify-'))
     process.env.PROMA_HOME = home
     project = createProject({ request_id: 'req-t6', mode: 'quick' })
+    // PR4 后续：通知件已去域依赖，测试接真源（与 main/index 接线同款）
+    setNotificationProjectHooks({
+      projectInfo: (projectId) => {
+        try {
+          const p = findProject(projectId)
+          return { stage: p.current_stage, name: p.name }
+        } catch {
+          return null
+        }
+      },
+      blockedProjects: () => listProjects('active'),
+    })
     shown = []
     const backend: NotificationBackend = {
       show: (notification, hooks) => {
