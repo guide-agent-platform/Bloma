@@ -489,3 +489,12 @@
 - 架构验证点（实施稿验收 3）：dispatcher-phases.test 的「插入 desktop-package 打包自检阶段」用例演示——插阶段只改阶段表数据，validateDesktopPhaseTable 与查询函数自动成立。
 - 接线规划：批次 B（品类底稿回填产物路径数据）→ 批次 C（driver 门禁执行器）→ 批次 D（调度员 loop 挂载开关+围栏）→ 批次 E（拒收教育闭环 systemInitiated 续接）。
 - 单测 65 例（阶段表 17/围栏 31/提示词 12/开关 5）；全量基线 218 文件 2240 例零失败（原基线 214/2175，+4 文件 +65 例全为新增）。
+
+### §45.1 批次 D 接线（2026-09-24，同日接续）
+
+| 件 | 内容 | 开关 |
+|---|---|---|
+| dispatcher-loop.ts（批次 D） | 调度员会话运行器 runDesktopDispatcherLoop：开关二道防线→阶段解析→工具面装配（只读五件+委派族 parent+web_research，wrapWithDispatcherGate 围栏包装——write_file/edit_file 误装配也硬拦）→buildDispatcherSystemPrompt→runAgentLoop（断流 fail-soft 转 error）→收口 finalizeDesktopDispatch（manual 确认凭据+evaluateAdvance 三关）；desktop-verify 专用收口：契约读取→runContractDriver→报告落盘 00_VERIFY/driver-report.json→routing≠pass 拒推进；AssistantTurnCollector 轮次累积（message_delta+onTurn 轮界+残余 flush——中段标记不漏扫）；新拒因 confirmation-required 入 AdvanceDecision | 同 `BLOMA_DESKTOP_DISPATCH`（off=web 线字节级现状，not-enabled/not-managed 双分流） |
+
+- 故障注入 23 例：推进伪造四腿（句中引用/跳级/伪造枚举/分歧目标）、围栏硬拦（execute 永不触达+is_error 教育回填）、挂起工具模式（任务书指引形态：toolUse query+execute 永不 resolve，宽限 race 容忍既有裸 await 设计）、断流 fail-soft、驱动挂载四腿（pass+报告落盘/fail 拒推/契约缺失/契约不合法）；全量 223 文件 2326 例零失败。
+- 待狗粮项：意图路由层分流（桌面品类项目自动进调度员线）与 confirmedPhases 凭据链（决策卡/批次 E 闭环）为编排器侧后续接线，本批已留齐注入位。
