@@ -13,6 +13,9 @@ import {
 import type { Channel } from '../../shared/types'
 import {
   DelegationChannelError,
+  resolveDelegationChannelOverride,
+} from '../../main/agent/delegation/delegation-channel'
+import {
   disposeParentDelegationState,
   findDelegation,
   getDelegationSummary,
@@ -101,16 +104,14 @@ describe('C1 委派渠道覆盖解析', () => {
     vi.mocked(getChannelByIdRaw).mockRestore
   })
 
-  it('channelId 缺省 → null（继承父渠道，零行为变化）', async () => {
-    const { resolveDelegationChannelOverride } = await import('../../main/agent/delegation/agent-collaboration')
+  it('channelId 缺省 → null（继承父渠道，零行为变化）', () => {
     expect(resolveDelegationChannelOverride({})).toBeNull()
     expect(resolveDelegationChannelOverride({ channelId: '  ' })).toBeNull()
     expect(getChannelByIdRaw).not.toHaveBeenCalled()
   })
 
-  it('有效渠道 + 显式模型名 → 专属 env（token/model/base_url 换轨）', async () => {
+  it('有效渠道 + 显式模型名 → 专属 env（token/model/base_url 换轨）', () => {
     vi.mocked(getChannelByIdRaw).mockReturnValue(makeChannel())
-    const { resolveDelegationChannelOverride } = await import('../../main/agent/delegation/agent-collaboration')
 
     const override = resolveDelegationChannelOverride({ channelId: 'zhipu-main', modelId: 'GLM-5.3' })
     expect(override).not.toBeNull()
@@ -121,7 +122,7 @@ describe('C1 委派渠道覆盖解析', () => {
     expect(override!.providerType).toBe('zhipu')
   })
 
-  it('跨渠道未传 modelId → 自动选首个支持工具的已启用模型（跳过禁用与不支持工具项）', async () => {
+  it('跨渠道未传 modelId → 自动选首个支持工具的已启用模型（跳过禁用与不支持工具项）', () => {
     const channel = makeChannel({
       models: [
         { id: 'm1', name: 'Model-NoTools', enabled: true, supports_tools: false },
@@ -130,16 +131,14 @@ describe('C1 委派渠道覆盖解析', () => {
       ],
     })
     vi.mocked(getChannelByIdRaw).mockReturnValue(channel)
-    const { resolveDelegationChannelOverride } = await import('../../main/agent/delegation/agent-collaboration')
 
     const override = resolveDelegationChannelOverride({ channelId: 'zhipu-main' })
     expect(override!.modelName).toBe('Model-OK')
   })
 
-  it('渠道不存在/禁用 → 教育文案列出可用渠道', async () => {
+  it('渠道不存在/禁用 → 教育文案列出可用渠道', () => {
     vi.mocked(getChannelByIdRaw).mockReturnValue(undefined)
     vi.mocked(listChannels).mockReturnValue([makeChannel()])
-    const { resolveDelegationChannelOverride } = await import('../../main/agent/delegation/agent-collaboration')
 
     expect(() => resolveDelegationChannelOverride({ channelId: 'nope' })).toThrow(DelegationChannelError)
     try {
@@ -156,9 +155,8 @@ describe('C1 委派渠道覆盖解析', () => {
     expect(() => resolveDelegationChannelOverride({ channelId: 'zhipu-main' })).toThrow(DelegationChannelError)
   })
 
-  it('模型未启用 → 教育文案列出该渠道已启用模型', async () => {
+  it('模型未启用 → 教育文案列出该渠道已启用模型', () => {
     vi.mocked(getChannelByIdRaw).mockReturnValue(makeChannel())
-    const { resolveDelegationChannelOverride } = await import('../../main/agent/delegation/agent-collaboration')
 
     try {
       resolveDelegationChannelOverride({ channelId: 'zhipu-main', modelId: 'GLM-5.2' })
@@ -171,21 +169,19 @@ describe('C1 委派渠道覆盖解析', () => {
     }
   })
 
-  it('显式指定不支持工具的模型 → 拒绝并说明原因', async () => {
+  it('显式指定不支持工具的模型 → 拒绝并说明原因', () => {
     vi.mocked(getChannelByIdRaw).mockReturnValue(makeChannel())
-    const { resolveDelegationChannelOverride } = await import('../../main/agent/delegation/agent-collaboration')
 
     expect(() =>
       resolveDelegationChannelOverride({ channelId: 'zhipu-main', modelId: 'GLM-4.6V' }),
     ).toThrow(/不支持工具调用/)
   })
 
-  it('密钥不可解 → 渠道密钥文案指引重存 Key', async () => {
+  it('密钥不可解 → 渠道密钥文案指引重存 Key', () => {
     vi.mocked(getChannelByIdRaw).mockReturnValue(makeChannel())
     vi.mocked(decryptApiKey).mockImplementation(() => {
       throw new Error('safeStorage decrypt failed')
     })
-    const { resolveDelegationChannelOverride } = await import('../../main/agent/delegation/agent-collaboration')
 
     expect(() => resolveDelegationChannelOverride({ channelId: 'zhipu-main' })).toThrow(/密钥不可解/)
   })

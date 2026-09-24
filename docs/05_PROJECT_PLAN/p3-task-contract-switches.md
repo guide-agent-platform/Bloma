@@ -457,3 +457,14 @@
 | R0 六杀手（70ed2ff） | real-fullstack 终验/run_gwt_tests 前陈旧检测重建 dist（dist-rebuild.ts）；list_files/find 对 node_modules 如实说明；服务入口指纹进 runSandbox 幂等守卫第四项；约束抓取宿主注入拦截+sanitizeConstraints 消费端清洗；归一化 out_of_scope 反转守卫（isScopeInversion）；回滚 data 无条件备份+话术如实（RollbackResult.data_backup_dir） | 随变体标记/无开关（旧路径字节不变） |
 | R1-loop（2ffc8e6） | dsml-display-filter 流式 holdback 呈现净化（只拦 publish，JSONL 原文/模型侧历史不变）；LoopTerminationDetail.dropped_tool_intents 写类意图不丢；NARRATION_EVENTS 分支中文条款 | 无（质量门常开；DSML 恢复 D2 既有 BLOMA_DSML_RECOVERY 不变） |
 
+
+## §43 协作机制改造（2026-09-24，依据《Bloma-协作机制改造清单-20260924》；批次 1+2）
+
+| 通道/件 | 内容 | 开关 |
+|---|---|---|
+| C1 委派渠道参数（b37f008） | delegate_agent 新增 channelId/modelId（缺省继承父渠道零变化）；delegation-channel.ts 解析子会话专属 env（query 复用换 env 即换渠道）；跨渠道未传 modelId 自动选首个 supports_tools≠false 已启用模型；渠道钉死不降级；四类失败带教育文案；record.channelOverride 子 loop/continue 共用；summary 携带渠道摘要 | 无（参数缺省即现状） |
+| C2 渠道家族断言（b37f008） | channel-family.ts：provider 归一厂商族（zhipu 三形态→zhipu 等）；中转聚合类保守独立；assertReviewFamilyDiversity 同族抛错（C3 地基） | 无（纯函数，C3 消费） |
+| C4 委派观察哨（本批） | delegation-watch.ts：全局哨兵周期扫描 running 委派；软超时 8min 经 steer 队列批间注入催办（父无活跃 loop 降级 warn；只催一次）；硬超时 12min stopDelegation 强停+注入式观察者回调（编排器将来接 decision-log）；ask 挂起（pendingQuestion）时钟重置不计费；终态状态惰性清理；扫描数据源 setDelegationScanSource 模块尾单向注入（零静态环） | `BLOMA_DELEGATION_WATCH` **off**（狗粮后翻转；'1'/'true'/'on' 生效） |
+
+- 已知限制：重启恢复的委派 continue 回退继承父渠道（channelOverride env 含密钥仅内存）；观察哨阈值集中可调（测试 seam setDelegationWatchThresholdsForTests）。
+- 单测：C1+C2 16 例 + C4 5 例（ask 重置/软一次+降级/硬强停+观察者/惰性清理/真实定时器集成）；全量 212 文件 2160 例零失败。

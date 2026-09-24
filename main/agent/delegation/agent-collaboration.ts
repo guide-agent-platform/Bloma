@@ -5,7 +5,7 @@ import type { AgentEvent, PromaPermissionMode } from '../../../shared/types'
 import type { SDKQuery } from '../../orchestration/orchestrator'
 import type { ConversationTurn } from '../../orchestration/orchestrator'
 import { resolveDelegationChannelOverride, type DelegationChannelOverride } from './delegation-channel'
-export { DelegationChannelError, resolveDelegationChannelOverride } from './delegation-channel'
+import { ensureDelegationWatchStarted, setDelegationScanSource } from './delegation-watch'
 import {
   runAgentLoop,
   type AgentLoopResult,
@@ -62,9 +62,8 @@ export interface DelegateAgentArgs {
   role?: DelegationRole
   expectedOutput?: string
   title?: string
-  /** C1（2026-09-24）：跨渠道委派——子会话使用指定渠道而非继承父会话渠道。 */
+  /** C1（2026-09-24）：跨渠道委派（指定渠道而非继承父渠道；modelId 须属该渠道已启用，未传自动选首个支持工具项）。 */
   channelId?: string
-  /** C1：指定子会话模型（须属于 channelId 渠道且已启用；跨渠道未传时自动选首个支持工具的已启用模型）。 */
   modelId?: string
 }
 
@@ -119,8 +118,6 @@ export interface DelegationRecord {
   pendingQuestion?: string
   /** ask_delegation_question 挂起的 resolve（answer 时回调，把答案回传子 loop）。 */
   pendingAnswerResolve?: (answer: string) => void
-  /** C1：委派渠道覆盖（子 loop 与 continue 续跑都从 record 取用）。env 仅存内存
-   *  （含密钥不落盘）；重启恢复后回退继承父渠道（已知限制，见 delegation-channel.ts）。 */
   channelOverride?: DelegationChannelOverride
 }
 
@@ -238,10 +235,10 @@ export function startDelegation(parent: ToolContext, args: DelegateAgentArgs): S
     completion,
     resolveCompletion,
     askSignal: createAskSignal(),
-    // C1：渠道覆盖创建期解析（配置错误在委派创建期拒绝，不留到子 loop 运行期才 400）
     channelOverride: resolveDelegationChannelOverride(args) ?? undefined,
   }
   delegations.set(delegationId, record)
+  ensureDelegationWatchStarted()
   // delegation-persistence 阶段 1（2026-08-28）：子会话索引写归属 meta——重启后
   // restoreDelegationRecord 可按 delegationId 找回子会话 JSONL（内存 registry 重启即丢）
   try {
@@ -353,8 +350,7 @@ async function runChildLoop(opts: {
     historyTurns: opts.replayTurns,
     tools: [...childToolsBuilder(parent.projectId, role, parentCtx.editFormat), ...(parentCtx.childExtraTools ?? [])],
     query: parentCtx.query,
-    // C1：渠道覆盖从 record 取（startDelegation 解析后存入）——query 函数复用，
-    // env/providerType/maxTokens 换成子渠道专属值；continue 续跑同源取用。
+    // C1：渠道覆盖从 record 取（query 复用，env/providerType/maxTokens 换子渠道值；continue 同源）
     env: record.channelOverride?.env ?? parentCtx.env,
     sessionId: record.childSessionId,
     projectId: parent.projectId,
@@ -393,9 +389,7 @@ export function getDelegationSummary(record: DelegationRecord): DelegationSummar
     error: record.error,
     started_at: record.startedAt,
     pending_question: record.pendingQuestion,
-    channel: record.channelOverride
-      ? `${record.channelOverride.channelName}/${record.channelOverride.modelName}`
-      : undefined,
+    channel: record.channelOverride ? `${record.channelOverride.channelName}/${record.channelOverride.modelName}` : undefined,
   }
 }
 
@@ -403,6 +397,10 @@ export function findDelegation(parentSessionId: string, delegationId: string): D
   const record = delegations.get(delegationId)
   if (!record || record.parentSessionId !== parentSessionId) return undefined
   return record
+}
+
+function forEachRunningDelegation(fn: (record: DelegationRecord) => void): void {
+  for (const record of delegations.values()) if (record.status === 'running') fn(record)
 }
 
 export function listDelegations(parentSessionId: string): DelegationRecord[] {
@@ -797,3 +795,5 @@ function errorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
   return message.length > 500 ? `${message.slice(0, 500)}…` : message
 }
+
+setDelegationScanSource({ forEachRunningDelegation, stopDelegation })
