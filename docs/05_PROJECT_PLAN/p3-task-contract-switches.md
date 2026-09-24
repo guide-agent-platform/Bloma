@@ -468,3 +468,13 @@
 
 - 已知限制：重启恢复的委派 continue 回退继承父渠道（channelOverride env 含密钥仅内存）；观察哨阈值集中可调（测试 seam setDelegationWatchThresholdsForTests）。
 - 单测：C1+C2 16 例 + C4 5 例（ask 重置/软一次+降级/硬强停+观察者/惰性清理/真实定时器集成）；全量 212 文件 2160 例零失败。
+
+## §44 C3 异构攻防审查（2026-09-24 批次 3，依据《Bloma-协作机制改造清单-20260924》）
+
+| 通道/件 | 内容 | 开关 |
+|---|---|---|
+| C3 攻防轮次（本批） | adversarial-review.ts：语义裁判单委派升级为「攻击者→防御者→（争议复核）」——攻击者（异渠道 A，只读 research）出五态判定；防御者（异渠道 B）逐条 confirmed/refuted（反驳须引用产物证据，无证据不采信）；refuted 的 blocking 项交回攻击者带防御者证据终审（攻击者合计 ≤2 轮，禁第 3 轮）；反驳项降级 unverified 留痕（evidence 前缀[防御者反驳]）；复核失败按防御者版诚实收敛。渠道代码解析不进模型可写参数；攻防互异族硬校验（C2）；裁判只判定铁律不变（结论仍走 deriveConstraint）；result.via='adversarial' + adversarial 元信息（轮次/被反驳项） | `BLOMA_ADVERSARIAL_REVIEW` **off**；渠道 `BLOMA_ADVERSARIAL_ATTACKER`/`BLOMA_ADVERSARIAL_DEFENDER`（bloma-channels 渠道 id，缺省=未配置→诚实降级单委派） |
+
+- 降级链：开关 off / 渠道未配置/禁用 / 同族 / 任一轮失败 → 现状单委派语义腿（judge-semantic warn 日志）→ 既有直连/规则门不变。
+- 已知限制：作者渠道在语义腿上下文不可靠可得，author 族断言留待编排器接线；每腿 120s 委派超时上限不变（攻防最坏 ~480s 时延，on 自担）。
+- 单测 12 例（渠道就绪三态/状态机六腿/verdicts 幻觉防御两腿/on 集成腿攻防三委派带异渠道/off 腿真实单委派链端到端零攻防进入）；全量 213 文件 2172 例零失败。

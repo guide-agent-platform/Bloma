@@ -25,6 +25,7 @@ import { backplaneAiCapabilities, capContractEnabled, renderCapSection, requirem
 import type { SDKQuery } from '../orchestration/orchestrator'
 import type { JudgeConstraint } from './judge-engine'
 import { delegatedReviewEnabled, runDelegatedReview } from './review-delegation'
+import { adversarialReviewEnabled, runAdversarialSemanticReview } from './adversarial-review'
 import { buildJudgeErrorPatternsSection } from '../experience/judge-checklist'
 import { ANTIDEGRADE_JUDGE_RULES, antidegradeEnabled } from './judge-antidegrade'
 import type { AgentEvent } from '../../shared/types'
@@ -47,8 +48,10 @@ export interface SemanticJudgeResult {
   findings: SemanticFinding[]
   skipped: boolean
   skipReason?: 'no_channel' | 'llm_failed'
-  /** 未跳过时的执行方式：delegation = 委派子 agent（可视化）；direct = 平台直连 */
-  via?: 'delegation' | 'direct'
+  /** 未跳过时的执行方式：adversarial = 攻防轮次（C3）；delegation = 委派子 agent（可视化）；direct = 平台直连 */
+  via?: 'adversarial' | 'delegation' | 'direct'
+  /** C3 攻防元信息（via=adversarial 时在场：轮次与被反驳项，可观测面） */
+  adversarial?: { rounds: number; refuted: string[] }
 }
 
 /** 产物文本截断上限（防超长产物撑爆审查请求；截断在 prompt 中如实标注） */
@@ -127,6 +130,32 @@ export async function runSemanticJudgeReview(opts: {
   // ① 委派审查（默认，协作过程 DelegationFeed 可视化）：子 agent 用只读工具自行查证
   //    产物，不再受 24k 内联截断限制
   if (delegatedReviewEnabled() && opts.projectId && opts.requestId && opts.publish) {
+    // ①' C3 攻防轮次（BLOMA_ADVERSARIAL_REVIEW on 且攻/防渠道就绪）：异族攻击者→防御者
+    //    →争议复核（攻击者合计 ≤2 轮）；任何不就绪/失败均诚实降级单委派（下方 ①）。
+    if (adversarialReviewEnabled()) {
+      const adversarial = await runAdversarialSemanticReview({
+        goal: `裁判语义审查产物 vs PRD：${backplane.name ?? '未命名项目'}`,
+        baseTask: buildDelegatedJudgeTask(backplane, testSummary, errorSection),
+        system: buildSemanticJudgeSystemPrompt(),
+        requirements: backplane.requirements ?? [],
+        query,
+        env,
+        sessionId,
+        projectId: opts.projectId,
+        requestId: opts.requestId,
+        publish: opts.publish,
+      })
+      if (adversarial.ok && adversarial.findings) {
+        return {
+          constraint: deriveConstraint(adversarial.findings, backplane.requirements ?? []),
+          findings: adversarial.findings,
+          skipped: false,
+          via: 'adversarial',
+          adversarial: { rounds: adversarial.rounds ?? 1, refuted: adversarial.refuted ?? [] },
+        }
+      }
+      console.warn('[judge-semantic] 攻防轮次不就绪/失败，降级单委派:', adversarial.failure)
+    }
     const delegated = await runDelegatedReview({
       goal: `裁判语义审查产物 vs PRD：${backplane.name ?? '未命名项目'}`,
       task: buildDelegatedJudgeTask(backplane, testSummary, errorSection),

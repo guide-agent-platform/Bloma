@@ -76,6 +76,9 @@ export async function runDelegatedReview(opts: {
   extraTools?: AgentLoopTool[]
   /** 子 agent 轮次上限覆盖（内审 Defender 修订轮需要比默认更紧的预算）。 */
   maxTurns?: number
+  /** C3（2026-09-24）：跨渠道委派——攻击者/防御者异族审查用（C1 参数透传，缺省继承父渠道）。 */
+  channelId?: string
+  modelId?: string
 }): Promise<DelegatedReviewOutcome> {
   if (!delegatedReviewEnabled()) return { ok: false, failure: 'disabled' }
 
@@ -129,6 +132,8 @@ export async function runDelegatedReview(opts: {
       task: `${opts.goal}\n\n${opts.task}`,
       role: 'research',
       expectedOutput: '按任务要求输出严格 JSON 裁决',
+      channelId: opts.channelId,
+      modelId: opts.modelId,
     })
 
     const summaries = await Promise.race([
