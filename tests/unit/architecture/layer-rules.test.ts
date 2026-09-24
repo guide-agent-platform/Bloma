@@ -31,7 +31,7 @@ const REPORT = fileURLToPath(new URL('./layer-violations-report.txt', import.met
 
 const DOMAIN_GROUPS = [
   'guide', 'coding', 'review', 'experience', 'project', 'verification',
-  'delivery', 'model', 'kernel', 'iteration',
+  'delivery', 'model', 'kernel', 'iteration', 'desktop',
 ] as const
 const TOP_RANK: Record<string, number> = {
   ipc: 0, // PR4d：IPC 通道族目录=entry 延伸（接线层，可向下 import 任意层）

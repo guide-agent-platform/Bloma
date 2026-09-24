@@ -478,3 +478,14 @@
 - 降级链：开关 off / 渠道未配置/禁用 / 同族 / 任一轮失败 → 现状单委派语义腿（judge-semantic warn 日志）→ 既有直连/规则门不变。
 - 已知限制：作者渠道在语义腿上下文不可靠可得，author 族断言留待编排器接线；每腿 120s 委派超时上限不变（攻防最坏 ~480s 时延，on 自担）。
 - 单测 12 例（渠道就绪三态/状态机六腿/verdicts 幻觉防御两腿/on 集成腿攻防三委派带异渠道/off 腿真实单委派链端到端零攻防进入）；全量 213 文件 2172 例零失败。
+
+## §45 桌面品类调度员线（2026-09-24 批次 A，依据《Bloma-桌面品类迁移实施稿-20260924》）
+
+| 通道/件 | 内容 | 开关 |
+|---|---|---|
+| 桌面线总闸（本批） | main/desktop/ 四件纯函数地基：dispatcher-phases（PhaseNode 阶段表 schema+数据+完整性校验，id 开放 string 插阶段零代码改动）/ dispatcher-gate（PHASE_ADVANCE 推进三关：锚定收集∪行首/目标唯一性 next 单值/产物存在性；canUseTool 白名单 write_file/edit_file/Write/Edit 硬拦+拒收教育文案三段式）/ dispatcher-prompt（调度员系统提示词按阶段数据动态构建）/ dispatcher-switch（开关读取器） | `BLOMA_DESKTOP_DISPATCH` **off**（缺省字节锁，仅 1/true/on 开启；批次 D 接线时成为唯一生效条件） |
+
+- web 线（13 阶段管线）零接触：批次 A 全部为新增纯函数模块，无任何既有文件 import 它；layer-rules DOMAIN_GROUPS 登记 desktop 为 domain（rank 2）。
+- 架构验证点（实施稿验收 3）：dispatcher-phases.test 的「插入 desktop-package 打包自检阶段」用例演示——插阶段只改阶段表数据，validateDesktopPhaseTable 与查询函数自动成立。
+- 接线规划：批次 B（品类底稿回填产物路径数据）→ 批次 C（driver 门禁执行器）→ 批次 D（调度员 loop 挂载开关+围栏）→ 批次 E（拒收教育闭环 systemInitiated 续接）。
+- 单测 65 例（阶段表 17/围栏 31/提示词 12/开关 5）；全量基线 218 文件 2240 例零失败（原基线 214/2175，+4 文件 +65 例全为新增）。
