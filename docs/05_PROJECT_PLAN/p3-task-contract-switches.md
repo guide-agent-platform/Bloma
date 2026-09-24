@@ -506,3 +506,16 @@
 | advance-rejection-loop.ts（批次 E） | 拒收四要素闭环：①可见（教育注入，复用 buildGateRejectionEdu 三段式单一真源）②驱动（systemInitiated 续接指令 buildContinuationDirective——拒后立即续跑不等用户）③防环（同阶段闭环 ≤2 次）④降级（第 3 次起转人工无续接）；三态拒因登记（target-deny/gate-deny/confirmation-required）；推进成功计数清零+拒因清除；纯函数+账本注入（RejectionLedger 调用方持有，读写分离；web 线可复用同一闭环模式） | 随调度员线接线后生效（无独立开关；接线层待狗粮项挂载） |
 
 - 单测 12 例（三态归类/闭环决策/防环降级/清零/续接指令要素）；全量 224 文件 2338 例零失败。五批次（A/B/C/D/E）收官：fcfa436→02df9c6→0235853→85c4089→本批。
+
+### §45.3 桌面线编排接线（2026-09-24 接线批——意图分流+PRD 改道+凭据链）
+
+| 件 | 内容 | 开关 |
+|---|---|---|
+| desktop-route.ts（接线批） | 桌面线路由器：isDesktopLineActive（开关×品类×desktop_phase 三要素）→ handleDesktopDispatchMessage 接管全部消息（含确认卡回传）；确认凭据链（confirmation-required 拒收→user_decision_required 确认卡，选项 id=desktop_confirm:\<phase\>→card_option 回传→desktop_confirmed_phases 登记→重跑收口放行）；推进链（advance→desktop_phase 落盘+自动续跑，MAX_AUTO_ADVANCE_CHAIN=3 段预算；终态/非接管节点不续跑直接收口 status=completed）；拒收闭环挂账（批次 E 账本接入：教育+续接驱动+防环+降级） | 同 `BLOMA_DESKTOP_DISPATCH`（三处消费点全字节锁） |
+| agent-dispatch.ts 分流插入 | runAgent 权威阶段解析后、blockedDecision 前插入（防御读取 findProject——测试环境无记录不阻断主链）；off 时 isDesktopLineActive 恒 false 零行为 | 同上 |
+| prd-confirm.ts 改道插入 | PRD 确认 ack 后：shouldEnterDesktopLine（开关+desktop_tool）→ enterDesktopLine（desktop_phase=desktop-arch 起跑，跳过 web 草图流） | 同上 |
+| shared/types.ts | Project +desktop_phase/desktop_confirmed_phases 可选字段（current_stage 保持 web 语义不扩枚举） | — |
+
+- R1 边界：desktop 域零运行时依赖 orchestration（SDKQuery 类型导入豁免）；事件发布/落盘经 DesktopRouteDeps 注入（orchestration 层适配 makeEvent/appendAgentMessage；prd-confirm 适配用 session-tree 真源头）。
+- 单测 11 例（判定矩阵/推进落盘+自动续跑/终态收口/确认卡协议/凭据链状态化重跑/非法选项/拒收续接/驱动 fail 拒推/断流未收口）；全量 225 文件 2349 例零失败。
+- 剩余狗粮：真机全流程（setx 后重启）+渲染端桌面阶段展示（stage_changed 未发，桌面阶段经 message_delta 播报）+Android 线。

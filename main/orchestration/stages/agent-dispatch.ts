@@ -39,6 +39,7 @@ import {
 } from '../../platform/llm/runtime-fallback'
 import { categoryForStage, categoryTemperature } from '../../platform/llm/model-resolution'
 import { handleGuideMessage } from '../../guide/guide-agent-service'
+import { handleDesktopDispatchMessage, isDesktopLineActive } from '../../desktop/desktop-route'
 import {
   READY_COMPLETION_COPY,
   clearPendingReviewAction,
@@ -218,6 +219,42 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
           persistAssistant,
         }
       : undefined
+
+    // ── 桌面调度员线分流（BLOMA_DESKTOP_DISPATCH 字节锁；off 时 isDesktopLineActive
+    // 恒 false 零行为变化）：桌面线接管后全部消息（含确认卡回传）归桌面路由——
+    // 卡回传凭据链/阶段推进/拒收闭环都在路由内闭环，不落入下方 web 线护栏与编程路径。
+    // 防御读取：项目索引缺失（测试环境）不阻断主链（与上方权威阶段解析同容错）。 ──
+    let desktopProject: ReturnType<typeof findProject> | undefined
+    try {
+      desktopProject = findProject(input.project_id)
+    } catch {
+      // 项目记录缺失：桌面线不可能激活，继续原路径
+    }
+    if (isDesktopLineActive(desktopProject)) {
+      await handleDesktopDispatchMessage(
+        {
+          projectId: input.project_id,
+          sessionId: input.session_id,
+          requestId: input.request_id,
+          content: input.content,
+          cardOptionId: input.metadata?.source === 'card_option' ? input.metadata.selected_option_id : undefined,
+          query: sdkQuery,
+          env: env ?? {},
+          maxTokens,
+          signal: abortController.signal,
+        },
+        {
+          publish: (_target, type, payload) => streamPublisher(makeEvent(input, type, payload)),
+          persistAssistant,
+          persistSystem,
+          complete: (sessionId) => {
+            persistTerminalMessage(sessionId, 'completed')
+            streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
+          },
+        },
+      )
+      return { accepted: true, session_id: input.session_id, stream_started: true }
+    }
 
     // 阻塞态决策回传（A2/A3）：blocked_action 存在时优先恢复被阻塞的编程操作
     const blockedDecision = resolveBlockedDecision(input)

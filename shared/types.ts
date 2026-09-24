@@ -1014,6 +1014,11 @@ export interface Project {
   scope_exclusions?: string[]
   /** 用户声明过的约束（T4-L1：「不含登录」「必须离线可用」），buildPrdBackplane 时并入 constraints 常驻注入 */
   constraints?: string[]
+  /** 桌面调度员线（批次 D/E 接线）：当前桌面阶段 id（desktop-arch 等；缺省未进入桌面线）。
+   *  current_stage 保持 web 语义不变——桌面线进度独立于此字段，避免扩 WORKFLOW_STAGES 破坏 web 线校验。 */
+  desktop_phase?: string
+  /** 桌面调度员线：用户已确认收口的阶段 id 集（manual 门禁凭据；确认卡回传登记） */
+  desktop_confirmed_phases?: string[]
   /** U16：最近进展摘要（取自最近一次 sketch_generated 需求，列表卡片纯展示用，不经落盘） */
   progress_summary?: string
   /** 最近一次 MVP 生成是否走 Agent Loop（M4-A：resume 时据此选「只终验不重修」路径） */
