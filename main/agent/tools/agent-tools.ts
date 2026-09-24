@@ -513,7 +513,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     execute: async (toolInput) => {
       const project = findProject(projectId)
       if (typeof toolInput.pattern !== 'string' || !toolInput.pattern) {
-        return { output: '缺少 pattern 参数。', isError: true }
+        return { output: '缺少 pattern 参数（要搜索的正则或字面文本，如 "localStorage" 或 "api/records"）。', isError: true }
       }
       let regex: RegExp
       try {
