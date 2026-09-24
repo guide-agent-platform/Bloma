@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "description": "工程契约样例（批次 C 驱动执行器消费）：desktop-scaffold 阶段按实际选型改造；声明制——驱动必须在此注册才可被执行器 spawn",
+  "entry": "app.py",
+  "driver": {
+    "command": ["python", "driver-skeleton.py"],
+    "timeout_ms": 60000,
+    "exit_code_semantics": { "0": "pass", "1": "fail-route-repair", "2": "blocked-no-repair" },
+    "assert_readback": "stdout 行级锚点（PASS/FAIL/BLOCKED/SUMMARY）"
+  },
+  "self_check": {
+    "command": ["python", "app.py", "--self-check"],
+    "expect_exit": 0,
+    "expect_stdout_contains": "SELF-CHECK-OK"
+  },
+  "env_whitelist": [],
+  "components": [],
+  "packaging": {
+    "tool": "pyinstaller",
+    "args": ["--onefile", "--windowed"],
+    "smoke": {
+      "command": ["dist/{{project_name}}.exe", "--self-check"],
+      "expect_exit": 0
+    }
+  },
+  "notes": [
+    "env_whitelist：驱动/程序运行允许透传的环境变量名（缺省空=全隔离；批次 C 执行器强制）",
+    "components：环境清单确认的组件 id（对齐 category-brief.ts DESKTOP_COMPONENTS）",
+    "command 里的 python 在批次 C 执行器侧解析为 venv 内解释器（Scripts/python.exe）"
+  ]
+}

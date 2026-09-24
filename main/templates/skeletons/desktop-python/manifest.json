@@ -1,0 +1,33 @@
+{
+  "type": "desktop_tool",
+  "variant": "python-p1-skeleton",
+  "version": 1,
+  "description": "桌面品类 Python 骨架（批次 B，2026-09-24）：P1 快速验证路径的最小骨架——app.py 主程序骨架（组件按环境清单结论接入）+ driver-skeleton.py 驱动断言骨架（先断言后实现）+ contract.json 工程契约样例（批次 C 驱动执行消费）。由桌面调度员线在 desktop-scaffold 阶段复制进沙箱后改造，不走 web 线真实脚手架注册表。",
+  "runtime": {
+    "interpreter": "python",
+    "isolation": "venv",
+    "notes": "Windows 侧禁用 python3（MS Store 空壳）；venv 内解释器为 Scripts/python.exe"
+  },
+  "files": [
+    {
+      "path": "app.py",
+      "role": "主程序骨架：组件接入位（托盘/热键/录音/通知按 env-checklist 结论启用，未确认组件保持注释态）；--self-check 自检模式供打包冒烟与驱动探活"
+    },
+    {
+      "path": "driver-skeleton.py",
+      "role": "驱动断言骨架：每个 GWT 场景一个 assert_* 函数（先写断言后写实现）；退出码 0=全过 / 1=有失败 / 2=阻塞（环境缺失）——失败三分类路由的判定源"
+    },
+    {
+      "path": "contract.json",
+      "role": "工程契约样例（批次 C schema 消费）：声明驱动命令、入口、环境变量白名单、组件依赖；scaffold 阶段按实际选型改造后必须保持可解析"
+    },
+    {
+      "path": "requirements.txt",
+      "role": "依赖清单：只列环境清单确认过的组件（[实证]/[推断] 级），待 Spike 组件不入内"
+    },
+    {
+      "path": "README.md",
+      "role": "骨架说明：运行/调试/打包三条入口命令 + 组件启用检查单"
+    }
+  ]
+}

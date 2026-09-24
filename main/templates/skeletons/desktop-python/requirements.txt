@@ -1,0 +1,9 @@
+# 依赖清单（骨架态为空——只列环境清单确认过的组件）
+# 启用组件时按 category-brief.ts 对应 pipPackage 追加，例如：
+# pystray
+# Pillow
+# pynput
+# sounddevice
+# numpy
+# winotify
+# pyinstaller
