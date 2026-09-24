@@ -1,4 +1,21 @@
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach } from 'vitest'
+
+/**
+ * PROMA_HOME global isolation (2026-09-25 test pollution fix):
+ * Redirect all test disk writes (createProject / recordSessionActivity /
+ * appendSessionMessage ...) into a per-process temp dir. Before this guard only
+ * scrubbed polluted values — most tests never set PROMA_HOME themselves, so two
+ * test days accumulated 80 unnamed empty projects in the real projects.json and
+ * 13 non-UUID test session jsonl files in the real agent-sessions/ (user saw a
+ * flood of empty conversations in the app). Tests that set PROMA_HOME themselves
+ * still win: this assignment runs at setup-module load, any later assignment
+ * overrides it; clearPollutedPromaHome only removes polluted values.
+ */
+const TEST_PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-vitest-home-'))
+process.env.PROMA_HOME = TEST_PROMA_HOME
 
 /**
  * 全局密闭守卫（2026-09-19 验收批发现）：本机 setx 的实验开关会随新进程环境渗入测试
