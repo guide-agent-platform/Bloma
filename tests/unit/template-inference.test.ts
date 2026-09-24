@@ -19,6 +19,9 @@ describe('template-inference（P2 注入点①：PRD 12.2 关键词→类型）'
       ['要一个本地应用，断网也能用', 'desktop_tool'],
       ['做个 Windows 程序监控温度', 'desktop_tool'],
       ['效率工具，装在电脑上', 'desktop_tool'],
+      // 2026-09-25 狗粮实证：「桌面+具体产品名」也是强载体信号（桌面计算器案例）
+      ['桌面计算器', 'desktop_tool'],
+      ['做一个桌面日历带倒计时', 'desktop_tool'],
       // M-2：功能词不得抢跑载体词——「效率工具网站/在线效率工具」是网页载体
       ['效率工具网站', 'web_fullstack'],
       ['在线效率工具', 'web_fullstack'],
