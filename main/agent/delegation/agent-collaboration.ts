@@ -4,6 +4,8 @@ import { recordSessionActivity } from '../../platform/sessions/session-service'
 import type { AgentEvent, PromaPermissionMode } from '../../../shared/types'
 import type { SDKQuery } from '../../orchestration/orchestrator'
 import type { ConversationTurn } from '../../orchestration/orchestrator'
+import { resolveDelegationChannelOverride, type DelegationChannelOverride } from './delegation-channel'
+export { DelegationChannelError, resolveDelegationChannelOverride } from './delegation-channel'
 import {
   runAgentLoop,
   type AgentLoopResult,
@@ -60,6 +62,10 @@ export interface DelegateAgentArgs {
   role?: DelegationRole
   expectedOutput?: string
   title?: string
+  /** C1（2026-09-24）：跨渠道委派——子会话使用指定渠道而非继承父会话渠道。 */
+  channelId?: string
+  /** C1：指定子会话模型（须属于 channelId 渠道且已启用；跨渠道未传时自动选首个支持工具的已启用模型）。 */
+  modelId?: string
 }
 
 export interface StartDelegationResult {
@@ -80,6 +86,8 @@ export interface DelegationSummary {
   started_at: number
   /** 子 agent 通过 ask_delegation_question 挂起提问中（父 agent 应尽快 answer）。 */
   pending_question?: string
+  /** C1：委派渠道覆盖摘要（如「智谱/GLM-5.3」；缺省 = 继承父会话渠道）。 */
+  channel?: string
 }
 
 /** 子 agent 提问信号：ask 时 resolve，wait_for_delegations 据此提前返回让父代答。 */
@@ -111,6 +119,9 @@ export interface DelegationRecord {
   pendingQuestion?: string
   /** ask_delegation_question 挂起的 resolve（answer 时回调，把答案回传子 loop）。 */
   pendingAnswerResolve?: (answer: string) => void
+  /** C1：委派渠道覆盖（子 loop 与 continue 续跑都从 record 取用）。env 仅存内存
+   *  （含密钥不落盘）；重启恢复后回退继承父渠道（已知限制，见 delegation-channel.ts）。 */
+  channelOverride?: DelegationChannelOverride
 }
 
 /** 父 loop 运行上下文（构建子 AgentLoopInput 所需；runMvpViaAgentLoop 注册）。 */
@@ -227,6 +238,8 @@ export function startDelegation(parent: ToolContext, args: DelegateAgentArgs): S
     completion,
     resolveCompletion,
     askSignal: createAskSignal(),
+    // C1：渠道覆盖创建期解析（配置错误在委派创建期拒绝，不留到子 loop 运行期才 400）
+    channelOverride: resolveDelegationChannelOverride(args) ?? undefined,
   }
   delegations.set(delegationId, record)
   // delegation-persistence 阶段 1（2026-08-28）：子会话索引写归属 meta——重启后
@@ -340,16 +353,18 @@ async function runChildLoop(opts: {
     historyTurns: opts.replayTurns,
     tools: [...childToolsBuilder(parent.projectId, role, parentCtx.editFormat), ...(parentCtx.childExtraTools ?? [])],
     query: parentCtx.query,
-    env: parentCtx.env,
+    // C1：渠道覆盖从 record 取（startDelegation 解析后存入）——query 函数复用，
+    // env/providerType/maxTokens 换成子渠道专属值；continue 续跑同源取用。
+    env: record.channelOverride?.env ?? parentCtx.env,
     sessionId: record.childSessionId,
     projectId: parent.projectId,
     requestId: childRequestId,
-    maxTokens: parentCtx.maxTokens,
+    maxTokens: record.channelOverride?.maxTokens ?? parentCtx.maxTokens,
     maxTurns,
     permissionMode: parentCtx.permissionMode,
     delegationDepth: parent.state.delegation_depth + 1,
     temperature: parentCtx.temperature,
-    providerType: parentCtx.providerType,
+    providerType: record.channelOverride?.providerType ?? parentCtx.providerType,
     signal: record.abort.signal,
     // 子 agent 聊天类事件（message_delta 等）不进父会话聊天流（见白名单注释）
     publish: (type, payload) => {
@@ -378,6 +393,9 @@ export function getDelegationSummary(record: DelegationRecord): DelegationSummar
     error: record.error,
     started_at: record.startedAt,
     pending_question: record.pendingQuestion,
+    channel: record.channelOverride
+      ? `${record.channelOverride.channelName}/${record.channelOverride.modelName}`
+      : undefined,
   }
 }
 

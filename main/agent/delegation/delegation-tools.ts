@@ -39,6 +39,17 @@ export function buildDelegationTools(role: 'parent' | DelegationRole): AgentLoop
           description: '子任务角色：explore 探索代码库 / research 调研 / implement 实现 / review 审查 / custom 自定义',
         },
         expectedOutput: { type: 'string', description: '希望子 agent 最终返回的格式或要点（可选）' },
+        channelId: {
+          type: 'string',
+          description:
+            '可选：跨渠道委派——子会话使用指定渠道（渠道设置中的渠道 ID）而非继承当前会话渠道。' +
+            '用于异构审查、多模型协作（如用不同厂商模型交叉审查产出）。渠道不可用时委派会被拒绝并列出可用渠道。',
+        },
+        modelId: {
+          type: 'string',
+          description:
+            '可选：指定子会话模型（须属于 channelId 渠道且已启用）。跨渠道未指定时自动选该渠道首个支持工具的已启用模型。',
+        },
       },
       required: ['task'],
     },
@@ -48,6 +59,8 @@ export function buildDelegationTools(role: 'parent' | DelegationRole): AgentLoop
           task: String(toolInput.task ?? ''),
           role: normalizeDelegationRole(toolInput.role),
           expectedOutput: typeof toolInput.expectedOutput === 'string' ? toolInput.expectedOutput : undefined,
+          channelId: typeof toolInput.channelId === 'string' ? toolInput.channelId : undefined,
+          modelId: typeof toolInput.modelId === 'string' ? toolInput.modelId : undefined,
         }),
       )
       return {
