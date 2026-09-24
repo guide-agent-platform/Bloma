@@ -7,7 +7,7 @@ import {
   convergeStageFromEvidence,
   evaluateDiskArtifact,
   reconcileInterruptedProjects,
-} from '../../main/orchestration/recovery-service'
+} from '../../main/project/recovery-service'
 import { createProject, findProject, updateProject } from '../../main/project/project-service'
 import { recordSessionActivity, setProjectTouchHandler } from '../../main/platform/sessions/session-service'
 

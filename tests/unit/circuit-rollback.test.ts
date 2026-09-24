@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { circuitBreakRollback } from '../../main/orchestration/recovery-service'
+import { circuitBreakRollback } from '../../main/project/recovery-service'
 import { createProject, findProject, updateProject } from '../../main/project/project-service'
 import { recordSessionActivity } from '../../main/platform/sessions/session-service'
 import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/delivery/sandbox'

@@ -129,8 +129,6 @@ const WHITELIST = new Set<string>([
   // ── 主题五：上游贴面适配（loop-query 是薄适配层，允许引用本仓运行时件；保持与上游 diff 最小）
   'R1|main/platform/upstream/providers -> main/agent/loop/thinking-log',
   // ── 主题六：domain 反向依赖 orchestration（PR4 治理：改事件化或回调注入，禁止新增）
-  'R1|main/coding/stages -> main/orchestration/recovery-service',
-  'R1|main/guide/stages -> main/orchestration/dialogue-router',
 ])
 
 describe('layer-rules 层规则（PR2 立规批）', () => {

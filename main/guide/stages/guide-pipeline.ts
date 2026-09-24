@@ -8,7 +8,7 @@ import type { AgentEvent, AgentMessage, AgentSendMessageInput, MessageContentBlo
 import { getAgentSessionPath } from '../../../storage/config-paths'
 import { appendJsonLine } from '../../../storage/json-store'
 import { appendSessionMessage } from '../../platform/sessions/session-tree'
-import { routeDialogue, type ClarificationOption } from '../../orchestration/dialogue-router'
+import { routeDialogue, type ClarificationOption } from '../dialogue-router'
 import { loadPromptOverride } from '../../agent/prompting/prompt-config'
 import { parseDecisionText, recordDecision } from '../../project/decision-log'
 import { syncDocuments } from '../../project/document-engine'

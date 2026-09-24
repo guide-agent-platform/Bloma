@@ -36,8 +36,8 @@ vi.mock('../../../main/verification/gwt-service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../main/verification/gwt-service')>()
   return { ...actual, runGwtScenarios: mocks.runGwtScenarios }
 })
-vi.mock('../../../main/orchestration/recovery-service', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/orchestration/recovery-service')>()
+vi.mock('../../../main/project/recovery-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/project/recovery-service')>()
   return { ...actual, circuitBreakRollback: mocks.circuitBreakRollback }
 })
 vi.mock('../../../main/coding/build-gate', async (importOriginal) => {

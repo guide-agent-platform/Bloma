@@ -102,7 +102,7 @@ import {
 } from '../platform/llm/category-routing'
 import { listPromptSlots, readPromptSlot, resetPromptSlot, savePromptSlot } from '../agent/prompting/prompt-service'
 import { listDocuments, readDocument, syncDocuments, isPrdUserConfirmed } from '../project/document-engine'
-import { isCircuitBreakSettled, convergeStageFromEvidence, evaluateDiskArtifact } from '../orchestration/recovery-service'
+import { isCircuitBreakSettled, convergeStageFromEvidence, evaluateDiskArtifact } from '../project/recovery-service'
 import { runSandbox, stopSandbox } from '../delivery/sandbox'
 import { createSnapshot, listSnapshotDocuments, listSnapshots, loadSnapshotScreenshot, readSnapshotDocument, rollbackSnapshot } from '../delivery/snapshots'
 import { trackAnalytics } from '../delivery/track-analytics'

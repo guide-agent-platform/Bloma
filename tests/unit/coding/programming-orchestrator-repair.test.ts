@@ -11,7 +11,7 @@ import { syncDocuments, readLoopCheckpointDocument, writeLoopCheckpointDocument 
 import { createChannel } from '../../../main/platform/llm/channel-manager'
 import { setSafeStorageAdapter } from '../../../main/platform/storage/safe-storage'
 import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../../main/delivery/sandbox'
-import { CircuitBreakSettledError } from '../../../main/orchestration/recovery-service'
+import { CircuitBreakSettledError } from '../../../main/project/recovery-service'
 import { getAgentSessionPath } from '../../../storage/config-paths'
 import { writeTestReport } from '../../../main/verification/gwt-service'
 import type { AgentEvent } from '../../../shared/types'
@@ -45,8 +45,8 @@ vi.mock('../../../main/verification/gwt-service', async (importOriginal) => {
   return { ...actual, runGwtScenarios: mocks.runGwtScenarios }
 })
 
-vi.mock('../../../main/orchestration/recovery-service', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/orchestration/recovery-service')>()
+vi.mock('../../../main/project/recovery-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/project/recovery-service')>()
   return { ...actual, circuitBreakRollback: mocks.circuitBreakRollback }
 })
 
