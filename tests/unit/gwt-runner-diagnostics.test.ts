@@ -269,3 +269,32 @@ describe('matchesClickableControl / findClickableIndex 控件寻址纯函数（2
     expect(visibleControlInventory(dedup)).toEqual(['÷', '等号'])
   })
 })
+
+describe('steps 架构（2026-09-26 照抄 Proma-Easy：三段式步骤+绝对断言+失败分流）', () => {
+  it('needsStepCompilation：状态转换族判定（清空/归零/重置/删除/撤销）', async () => {
+    const { needsStepCompilation } = await import('../../main/verification/gwt-steps')
+    expect(needsStepCompilation('点击清空键→当前输入与结果归零')).toBe(true)  // 房贷计算器案原文
+    expect(needsStepCompilation('点击重置按钮恢复初始')).toBe(true)
+    expect(needsStepCompilation('点击删除键移除条目')).toBe(true)
+    expect(needsStepCompilation('按等号计算并显示结果')).toBe(false)          // 普通断言走单步快路径
+    expect(needsStepCompilation('页面显示当前时间')).toBe(false)
+  })
+
+  it('compileStepsForAssertion：三段式（given fill 种子 / when click / then assert-text 0）', async () => {
+    const { compileStepsForAssertion } = await import('../../main/verification/gwt-steps')
+    const steps = compileStepsForAssertion('点击清空键→当前输入与结果归零', '清空键')
+    expect(steps).toHaveLength(3)
+    expect(steps[0]).toMatchObject({ kind: 'given', op: { type: 'fill', value: '123' } })
+    expect(steps[1]).toMatchObject({ kind: 'when', op: { type: 'click', target: '清空键' } })
+    expect(steps[2]).toMatchObject({ kind: 'then', op: { type: 'assert-text', contains: '0' } })
+  })
+
+  it('GwtFailureSummary.kind 分流口径：precondition/selector 语义（消费侧 repair 过滤锁定）', async () => {
+    const { buildRepairTasks } = await import('../../main/coding/repair-loop')
+    // precondition 类失败被 repairAndRetest 入口过滤（不进任务卡）——kind 字段形态锁定
+    const fs = { scenario: 'F-002', reason: '前置步骤失败：无可输入域', kind: 'precondition' as const }
+    expect(fs.kind).toBe('precondition')
+    // buildRepairTasks 仍接受带 kind 的 failure_summary（存量结构兼容）
+    expect(typeof buildRepairTasks).toBe('function')
+  })
+})

@@ -25,6 +25,12 @@ import { reportReplayOutcomes } from '../experience/experience-service'
 export interface GwtFailureSummary {
   scenario: string
   reason: string
+  /**
+   * 失败归类（2026-09-26 照抄批·对方 AC L-001 回炉分流）：product=产品类（进修复轮）；
+   * precondition=前置缺失（不可自动验证——不烧修复预算）；selector=映射类（找不到控件，
+   * 失败原因带控件清单可修——修复轮处理）。缺省（存量/静态兜底路径）按 product 对待。
+   */
+  kind?: 'product' | 'precondition' | 'selector'
 }
 
 export interface GwtTestResult {

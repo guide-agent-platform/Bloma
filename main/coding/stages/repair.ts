@@ -138,7 +138,24 @@ export async function repairAndRetest(input: AgentLoopPostTestingInput, testResu
   // 无 query（存量项目 resume 等场景）无法起修复轮：不起不报错，走现状熔断
   if (!input.query) return testResult
 
-  const tasks = buildRepairTasks({ testResult, ...(input.buildGate ? { buildGate: input.buildGate } : {}) })
+  // 失败归类分流（2026-09-26 照抄批·对方 AC L-001）：precondition 类失败（步骤路径
+  // 前置缺失——不可自动验证）不进修复轮不烧预算；selector 类保留（失败原因带控件
+  // 清单，修复轮可修——F-005 补标注案实证有效）。
+  const actionable = (testResult.failure_summary ?? []).filter((f) => f.kind !== 'precondition')
+  if (actionable.length === 0 && (testResult.failure_summary ?? []).length > 0) {
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'repair_round_skipped',
+        title: '全部失败为前置缺失型，不入修复预算',
+        why: `${testResult.failure_summary?.length ?? 0} 项失败均属「断言需要前置输入但页面无可输入域」——不可自动验证（功能未必有缺陷），修复轮无从下手；如实登记待人工核验或补充可输入交互`,
+        detail: { precondition_count: testResult.failure_summary?.length ?? 0 },
+      },
+    })
+    return testResult
+  }
+  const tasks = buildRepairTasks({ testResult: { ...testResult, failure_summary: actionable }, ...(input.buildGate ? { buildGate: input.buildGate } : {}) })
   if (tasks.length === 0) return testResult
   throwIfAborted(input.signal)
 

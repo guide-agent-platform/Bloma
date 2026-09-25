@@ -1,5 +1,6 @@
 import type { Browser, Page } from 'playwright'
 import type { GwtTestResult, RunGwtInput } from './gwt-service'
+import { compileStepsForAssertion, needsStepCompilation, runStepScenario, type GwtStep } from './gwt-steps'
 import { readLastSketchRequirements } from '../project/project-service'
 import type { SketchRequirement } from '../coding/sketch-engine'
 import { requirementAssertions, requirementStory, isPlaceholderAssertion } from '../coding/sketch-engine'
@@ -287,6 +288,11 @@ async function executeScenarios(browser: Browser, input: RunGwtInput): Promise<G
       failureSummary.push({
         scenario: scenarioName(scenario.item.id, scenario.assertion),
         reason,
+        // 失败归类（照抄批·对方 AC L-001 分流 v1）：按 reason 特征标 kind——
+        // precondition（步骤路径前置失败）/ selector（找不到控件，含单步路径）→
+        // 消费侧据此分流；其余缺省 product（进修复轮）。
+        ...(reason.includes('前置步骤失败') ? { kind: 'precondition' as const } : {}),
+        ...(reason.includes('找不到可点击的') || reason.includes('找不到可双击的') ? { kind: 'selector' as const } : {}),
       })
     }
 
@@ -321,6 +327,15 @@ async function runScenario(page: Page, scenario: ScenarioPlan): Promise<string |
   if (gwtGameProbeEnabled() && scenario.plan.trigger.kind === 'key' && isMoveEffect(scenario.plan.effect)) {
     const game = await runGameProbeScenario(page, scenario)
     if (game.handled) return game.reason
+  }
+
+  // steps 快路径挂载（2026-09-26 照抄批）：状态转换族断言（清空/归零/重置——空态触发
+  // 无可观测变化）走三段式步骤执行器（fill 种子→click→assert-text 绝对断言）；
+  // 其余断言保持单步现状（15/16 可过的路径字节级不动）。
+  if (scenario.plan.trigger?.kind === 'click' && needsStepCompilation(scenario.assertion)) {
+    const stepResult = await runStepScenario(page, compileStepsForAssertion(scenario.assertion, scenario.plan.trigger.target))
+    if (!stepResult) return undefined
+    return `${stepResult.reason}（步骤路径：given 填充 → when 触发 → then 绝对断言）`
   }
 
   const before = await capturePageState(page)
@@ -588,7 +603,7 @@ export function visibleControlInventory(snapshots: readonly ControlSnapshot[]): 
 
 /** 控件快照采集薄壳（挂账①）：可见性/文本/类名/提示属性一次采集回传——
  * 判定逻辑零内联（Node 侧纯函数消费）；选择器按 click/dblclick 分支差异传入。 */
-async function collectControlSnapshots(page: Page, selector: string): Promise<ControlSnapshot[]> {
+export async function collectControlSnapshots(page: Page, selector: string): Promise<ControlSnapshot[]> {
   return page.evaluate((sel) => {
     const isVisible = (el: Element): boolean => {
       const rect = el.getBoundingClientRect()
