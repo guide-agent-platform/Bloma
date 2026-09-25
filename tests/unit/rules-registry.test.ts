@@ -129,3 +129,17 @@ describe('C1b rulesForTemplateType（game 豁免 R-DATA-01 变体）', () => {
     expect(rules.find((r) => r.id === 'R-OUTPUT-01')).toBe(RULES_REGISTRY.find((r) => r.id === 'R-OUTPUT-01'))
   })
 })
+
+describe('并行协作段（2026-09-25 自由度批三：编程 loop 委派编排自由度）', () => {
+  it('生成 loop system 含【并行协作】段（委派/wait/get 工具指引——基建已有，提示词补位）', async () => {
+    const { buildLoopSystemWithOverride } = await import('../../main/coding/stages/loop-prompt')
+    const prompt = buildLoopSystemWithOverride(
+      { name: 'p', positioning: 'pos', requirements: [{ id: 'F-001', description: 'x' }], out_of_scope: [], constraints: [] } as never,
+      'diff',
+    )
+    expect(prompt).toContain('【并行协作】')
+    expect(prompt).toContain('delegate_agent')
+    expect(prompt).toContain('wait_for_delegations')
+    expect(prompt).toContain('单干也完全可以') // 不强制委派——自由而非义务
+  })
+})
