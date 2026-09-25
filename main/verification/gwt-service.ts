@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { DocumentRef } from '../../shared/types'
 import { getAnalyticsPath, getDocumentsDir } from '../../storage/config-paths'
@@ -37,6 +38,73 @@ export interface GwtTestResult {
    * 由行为脚本/LLM 裁判兜底。信息性字段，裁判不作硬约束依据。
    */
   unverified?: string[]
+  /**
+   * 产物入口聚合指纹（2026-09-25 挂账②，对方 entryFingerprint 直译——多文件聚合口径）：
+   * index.html + src/** 递归 + dist/app.js 逐文件 sha256 组合。报告落盘时计算；
+   * 消费侧（checkEntryFingerprintFresh）比对当前产物——验证后被改可检测。
+   */
+  entry_fingerprint?: EntryFingerprint
+}
+
+/** 产物入口聚合指纹（多文件口径）。 */
+export interface EntryFingerprint {
+  /** 关键产物文件内容的组合 sha256（hex） */
+  sha256: string
+  /** 关键产物文件总字节数 */
+  size: number
+  /** 参与指纹的文件数 */
+  files: number
+}
+
+/**
+ * 计算产物入口聚合指纹：index.html + src/**（递归）+ dist/app.js。
+ * 逐文件读内容进 hash 流（内容 + 相对路径，防同名挪位），返回组合指纹；
+ * index.html 不存在返回 null（无入口可指纹——消费侧按无可比处理，不误报）。
+ */
+export function computeEntryFingerprint(projectRoot: string): EntryFingerprint | null {
+  const entry = join(projectRoot, 'index.html')
+  if (!existsSync(entry)) return null
+  const hash = createHash('sha256')
+  let size = 0
+  let files = 0
+  const absorb = (abs: string, rel: string): void => {
+    const content = readFileSync(abs)
+    hash.update(rel)
+    hash.update(content)
+    size += content.length
+    files += 1
+  }
+  absorb(entry, 'index.html')
+  const srcRoot = join(projectRoot, 'src')
+  const walk = (dir: string, prefix: string): void => {
+    if (!existsSync(dir)) return
+    for (const name of readdirSync(dir).sort()) {
+      if (name === 'node_modules' || name.startsWith('.')) continue
+      const abs = join(dir, name)
+      if (statSync(abs).isDirectory()) walk(abs, `${prefix}${name}/`)
+      else absorb(abs, `${prefix}${name}`)
+    }
+  }
+  walk(srcRoot, 'src/')
+  const distEntry = join(projectRoot, 'dist', 'app.js')
+  if (existsSync(distEntry)) absorb(distEntry, 'dist/app.js')
+  return { sha256: hash.digest('hex'), size, files }
+}
+
+/**
+ * 报告新鲜度校验（消费侧，对方 checkGwtDeliveryFacts b 道直译的最小版）：
+ * 比对最近测试报告的 entry_fingerprint 与当前产物指纹。
+ * true=一致（历史结论仍有效）/ false=验证后产物被修改（历史全绿结论失效）/
+ * null=无可比（旧报告无指纹字段，或产物入口缺失——不误报）。
+ */
+export function checkEntryFingerprintFresh(projectId: string): boolean | null {
+  const report = readTestReport(projectId)
+  if (!report?.entry_fingerprint) return null
+  const project = findProject(projectId)
+  if (!project) return null
+  const current = computeEntryFingerprint(project.root_path)
+  if (!current) return null
+  return current.sha256 === report.entry_fingerprint.sha256
 }
 
 export interface RunGwtInput {
@@ -151,6 +219,9 @@ export function writeTestReport(input: {
   result: GwtTestResult
 }): DocumentRef {
   const project = findProject(input.project_id)
+  // 挂账②：报告附带产物指纹（落盘时点口径——消费侧据此检测验证后篡改）
+  const fingerprint = computeEntryFingerprint(project.root_path)
+  if (fingerprint) input.result.entry_fingerprint = fingerprint
   const dir = getDocumentsDir(project.workspace_slug, project.project_id)
   writeFileSync(join(dir, TEST_REPORT_JSON), `${JSON.stringify(input.result, null, 2)}\n`, 'utf8')
   writeFileSync(join(dir, TEST_REPORT_MD), renderTestReportMarkdown(input.result, input.session_id), 'utf8')

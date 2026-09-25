@@ -517,7 +517,7 @@ const CLICK_SYMBOL_SYNONYMS: ReadonlyArray<readonly [string, string]> = [
   ['运算符|操作符|算符', '^[+−×÷*/-]'],
   ['等号|等于|计算|求值|出结果', '^[=＝]+$'],
   ['清空|清除|归零|重置', '^(c|ce|ac|clear|清空|清除)$'],
-  ['退格|删除|删一位|撤销', '^(⌫|⌦|del|delete|backspace|退格)$'],
+  ['退格|删除|删一位|撤销', '^(⌫|⌦|del|delete|backspace|退格|删除)$'],
   ['减号|负号', '^[−-]'],
   ['减号|负号', '^[−-]$'],
   ['乘号', '^[×*x]$'],
@@ -539,6 +539,72 @@ export function symbolSynonymMatches(target: string, label: string): boolean {
   return false
 }
 
+/** 控件快照（evaluate 一次采集回传；判定全部在 Node 侧纯函数——2026-09-25 挂账①
+ * 采集-判定分离：消 evaluate 内联匹配的测试盲区，DOM 语义匹配逻辑单测可覆盖）。 */
+export interface ControlSnapshot {
+  /** 控件在采集数组中的索引（回点点击用） */
+  index: number
+  /** 可见性（getBoundingClientRect + computed style 快照） */
+  visible: boolean
+  /** textContent.trim() */
+  text: string
+  /** className（string 形态；SVG 等 object 形态取空串） */
+  className: string
+  /** aria-label/title/data-ai-id/value 空格拼接 */
+  hints: string
+}
+
+/** 单控件多信号匹配（纯函数）：textContent/className/hints 包含 ∨ 符号同义词互认。 */
+export function matchesClickableControl(snapshot: ControlSnapshot, target: string): boolean {
+  if (!snapshot.visible) return false
+  const { text, className, hints } = snapshot
+  if (text.length > 0 && text.includes(target)) return true
+  if (className.includes(target) || hints.includes(target)) return true
+  const label = text.length > 0 ? text : (hints.split(/\s+/)[0] ?? '')
+  return symbolSynonymMatches(target, label)
+}
+
+/** 快照数组寻址（纯函数）：首个匹配的可点击控件索引；未命中返回 -1。
+ * click/dblclick 探针的控件寻址判定单一真源（采集在 evaluate，判定在这里）。 */
+export function findClickableIndex(snapshots: readonly ControlSnapshot[], target: string): number {
+  for (const snapshot of snapshots) {
+    if (matchesClickableControl(snapshot, target)) return snapshot.index
+  }
+  return -1
+}
+
+/** 失败回喂清单（纯函数）：可见控件识别标签去重/限长/上限 24——与失败原因拼接解耦可测。 */
+export function visibleControlInventory(snapshots: readonly ControlSnapshot[]): string[] {
+  const labels = snapshots
+    .filter((snapshot) => snapshot.visible)
+    .map((snapshot) => {
+      if (snapshot.text.length > 0) return snapshot.text.slice(0, 20)
+      return (snapshot.hints.split(/\s+/)[0] ?? '').slice(0, 20)
+    })
+    .filter((label) => label.length > 0)
+  return [...new Set(labels)].slice(0, 24)
+}
+
+
+/** 控件快照采集薄壳（挂账①）：可见性/文本/类名/提示属性一次采集回传——
+ * 判定逻辑零内联（Node 侧纯函数消费）；选择器按 click/dblclick 分支差异传入。 */
+async function collectControlSnapshots(page: Page, selector: string): Promise<ControlSnapshot[]> {
+  return page.evaluate((sel) => {
+    const isVisible = (el: Element): boolean => {
+      const rect = el.getBoundingClientRect()
+      const style = window.getComputedStyle(el)
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) !== 0
+    }
+    const controls = Array.from(document.querySelectorAll<HTMLElement>(sel))
+    return controls.map((el, index) => ({
+      index,
+      visible: isVisible(el),
+      text: (el.textContent ?? '').trim(),
+      className: typeof el.className === 'string' ? el.className : '',
+      hints: `${el.getAttribute('aria-label') ?? ''} ${el.getAttribute('title') ?? ''} ${el.getAttribute('data-ai-id') ?? ''} ${(el as HTMLInputElement).value ?? ''}`.trim(),
+    }))
+  }, selector)
+}
 
 async function dispatchTrigger(page: Page, trigger: AssertionPlan['trigger']): Promise<string | undefined> {
   if (!trigger) return undefined
@@ -552,103 +618,42 @@ async function dispatchTrigger(page: Page, trigger: AssertionPlan['trigger']): P
     return undefined
   }
   if (trigger.kind === 'click' && trigger.target) {
-    const clicked = await page.evaluate(([target, synonyms]) => {
-      // P0-1：点击匹配同样只认真可见控件——隐藏 overlay 的「继续/放弃」按钮不再抢跑命中，
-      // 保证「点击暂停」真正点到可见的暂停按钮（否则点中 display:none 控件 = 无效果 = 假失败）。
-      // 2026-09-25 修复（随手计算器案）：匹配面从 text/class 两维扩到 aria-label/title/
-      // data-ai-id/value + 符号同义词（「运算符」↔÷×−、清空↔C 等）——此前功能词断言
-      // 匹配不到符号控件（假失败），修复轮补 title 也读不到。
-      const isVisible = (el: Element): boolean => {
-        const rect = el.getBoundingClientRect()
-        const style = window.getComputedStyle(el)
-        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) !== 0
-      }
-      const labelHintsOf = (el: HTMLElement): string =>
-        `${el.getAttribute('aria-label') ?? ''} ${el.getAttribute('title') ?? ''} ${el.getAttribute('data-ai-id') ?? ''} ${(el as HTMLInputElement).value ?? ''}`.trim()
-      const controls = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], input[type="button"], a, [class]'))
-      const hit = controls.find((el) => {
-        if (!isVisible(el)) return false
-        const text = (el.textContent ?? '').trim()
-        const cls = typeof el.className === 'string' ? el.className : ''
-        const hints = labelHintsOf(el)
-        if (text.length > 0 && text.includes(target)) return true
-        if (cls.includes(target) || hints.includes(target)) return true
-        const label = text.length > 0 ? text : (hints.split(/\s+/)[0] ?? '')
-        return synonyms.some(
-          ([wordSource, symSource]) => new RegExp(wordSource, 'i').test(target) && new RegExp(symSource, 'i').test(label),
-        )
-      })
-      if (!hit) {
-        // 失败回喂（2026-09-25 对照审核落地）：枚举可见控件的识别标签进失败原因——
-        // 修复轮按清单直接对齐（改断言目标或补标注），一次收敛；竞品 selector-wait
-        // 回炉重映射的轻量等价。清单去重、单标签限长、上限 24 项防刷屏。
-        const labels = controls
-          .filter((el) => isVisible(el))
-          .map((el) => {
-            const text = (el.textContent ?? '').trim()
-            if (text.length > 0) return text.slice(0, 20)
-            const hints = labelHintsOf(el)
-            return (hints.split(/\s+/)[0] ?? '').slice(0, 20)
-          })
-          .filter((label) => label.length > 0)
-        return [...new Set(labels)].slice(0, 24)
-      }
-      hit.click()
-      return true
-    }, [trigger.target, CLICK_SYMBOL_SYNONYMS] as const)
-    if (clicked !== true) {
-      const inventory = Array.isArray(clicked) && clicked.length > 0
-        ? `；页面可见控件：${clicked.join('、')}——请把断言目标改为清单中的实际控件（或为其补 title/aria-label 标注）`
-        : '；页面无可见可点击控件'
-      return `找不到可点击的「${trigger.target}」控件${inventory}`
+    // 2026-09-25 挂账①（采集-判定分离）：evaluate 只做采集薄壳（快照+点击两跳），
+    // 匹配判定走 Node 侧纯函数 findClickableIndex——消 evaluate 内联测试盲区。
+    // 采集/点击两跳间隔内 DOM 理论可变（本地 file:// 页面毫秒级往返，暴露面与
+    // 原「浏览器内 find 后 click」同级，可接受）。
+    const snapshots = await collectControlSnapshots(page, 'button, [role="button"], input[type="button"], a, [class]')
+    const hitIndex = findClickableIndex(snapshots, trigger.target)
+    if (hitIndex < 0) {
+      const inventory = visibleControlInventory(snapshots)
+      return `找不到可点击的「${trigger.target}」控件${
+        inventory.length > 0
+          ? `；页面可见控件：${inventory.join('、')}——请把断言目标改为清单中的实际控件（或为其补 title/aria-label 标注）`
+          : '；页面无可见可点击控件'
+      }`
     }
+    await page.evaluate((index) => {
+      const controls = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], input[type="button"], a, [class]'))
+      controls[index]?.click()
+    }, hitIndex)
     return undefined
   }
   if (trigger.kind === 'dblclick' && trigger.target) {
-    const hit = await page.evaluate(([target, synonyms]) => {
-      const isVisible = (el: Element): boolean => {
-        const rect = el.getBoundingClientRect()
-        const style = window.getComputedStyle(el)
-        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) !== 0
-      }
-      // 2026-09-25 修复（与 click 分支同源）：匹配面扩展 + 符号同义词
-      const labelHintsOf = (el: HTMLElement): string =>
-        `${el.getAttribute('aria-label') ?? ''} ${el.getAttribute('title') ?? ''} ${el.getAttribute('data-ai-id') ?? ''} ${(el as HTMLInputElement).value ?? ''}`.trim()
-      const controls = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], a, li, tr, [class]'))
-      const hit = controls.find((el) => {
-        if (!isVisible(el)) return false
-        const text = (el.textContent ?? '').trim()
-        const cls = typeof el.className === 'string' ? el.className : ''
-        const hints = labelHintsOf(el)
-        if (text.length > 0 && text.includes(target)) return true
-        if (cls.includes(target) || hints.includes(target)) return true
-        const label = text.length > 0 ? text : (hints.split(/\s+/)[0] ?? '')
-        return synonyms.some(
-          ([wordSource, symSource]) => new RegExp(wordSource, 'i').test(target) && new RegExp(symSource, 'i').test(label),
-        )
-      })
-      if (!hit) {
-        // 失败回喂（与 click 分支同源）：可见控件清单进失败原因
-        const labels = controls
-          .filter((el) => isVisible(el))
-          .map((el) => {
-            const text = (el.textContent ?? '').trim()
-            if (text.length > 0) return text.slice(0, 20)
-            const hints = labelHintsOf(el)
-            return (hints.split(/\s+/)[0] ?? '').slice(0, 20)
-          })
-          .filter((label) => label.length > 0)
-        return [...new Set(labels)].slice(0, 24)
-      }
-      hit.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
-      return true
-    }, [trigger.target, CLICK_SYMBOL_SYNONYMS] as const)
-    if (hit !== true) {
-      const inventory = Array.isArray(hit) && hit.length > 0
-        ? `；页面可见控件：${hit.join('、')}——请把断言目标改为清单中的实际控件（或为其补 title/aria-label 标注）`
-        : '；页面无可见可点击控件'
-      return `找不到可双击的「${trigger.target}」目标${inventory}`
+    // 挂账①（与 click 分支同源）：采集-判定分离
+    const snapshots = await collectControlSnapshots(page, 'button, [role="button"], a, li, tr, [class]')
+    const hitIndex = findClickableIndex(snapshots, trigger.target)
+    if (hitIndex < 0) {
+      const inventory = visibleControlInventory(snapshots)
+      return `找不到可双击的「${trigger.target}」目标${
+        inventory.length > 0
+          ? `；页面可见控件：${inventory.join('、')}——请把断言目标改为清单中的实际控件（或为其补 title/aria-label 标注）`
+          : '；页面无可见可点击控件'
+      }`
     }
+    await page.evaluate((index) => {
+      const controls = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], a, li, tr, [class]'))
+      controls[index]?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+    }, hitIndex)
     return undefined
   }
   if (trigger.kind === 'fill' && trigger.target) {

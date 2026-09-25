@@ -157,3 +157,41 @@ describe('GWT service (A2-07)', () => {
     expect(readTestReport(bare.project_id)).toBeNull()
   })
 })
+
+describe('产物入口指纹（挂账②：报告带指纹+新鲜度校验）', () => {
+  it('computeEntryFingerprint：多文件聚合稳定（同内容同序同哈希；改一字节即变；index 缺失为 null）', async () => {
+    const { computeEntryFingerprint } = await import('../../main/verification/gwt-service')
+    const fs = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const root = fs.mkdtempSync(join(tmpdir(), 'fp-'))
+    fs.mkdirSync(join(root, 'src'), { recursive: true })
+    fs.writeFileSync(join(root, 'index.html'), '<html>入口</html>')
+    fs.writeFileSync(join(root, 'src', 'app.js'), 'console.log(1)')
+    const a = computeEntryFingerprint(root)
+    const b = computeEntryFingerprint(root)
+    expect(a).not.toBeNull()
+    expect(b).toEqual(a) // 确定性
+    expect(a!.files).toBe(2)
+    fs.writeFileSync(join(root, 'src', 'app.js'), 'console.log(2)') // 改一字节
+    expect(computeEntryFingerprint(root)!.sha256).not.toBe(a!.sha256)
+    fs.rmSync(join(root, 'index.html'))
+    expect(computeEntryFingerprint(root)).toBeNull() // 无入口
+    fs.rmSync(root, { recursive: true, force: true })
+  })
+
+  it('同名文件挪位改变指纹（路径参与哈希）', async () => {
+    const { computeEntryFingerprint } = await import('../../main/verification/gwt-service')
+    const fs = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const root = fs.mkdtempSync(join(tmpdir(), 'fp2-'))
+    fs.mkdirSync(join(root, 'src', 'sub'), { recursive: true })
+    fs.writeFileSync(join(root, 'index.html'), '<html></html>')
+    fs.writeFileSync(join(root, 'src', 'a.js'), 'X')
+    const a = computeEntryFingerprint(root)
+    fs.renameSync(join(root, 'src', 'a.js'), join(root, 'src', 'sub', 'a.js')) // 挪位
+    expect(computeEntryFingerprint(root)!.sha256).not.toBe(a!.sha256)
+    fs.rmSync(root, { recursive: true, force: true })
+  })
+})

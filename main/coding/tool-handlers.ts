@@ -15,7 +15,7 @@ import { rebuildRealFullstackDist } from './dist-rebuild'
 import { checkApiContract } from './api-contract'
 import { runArtifactUiGate } from './artifact-ui-gate'
 import { planScenarios, scenarioName } from '../verification/gwt-runner'
-import { runGwtScenarios } from '../verification/gwt-service'
+import { checkEntryFingerprintFresh, runGwtScenarios } from '../verification/gwt-service'
 import { runSecurityScan } from '../verification/security-scan'
 import { getCachedStaticEvidence, setCachedStaticEvidence } from '../verification/evidence-cache'
 import { browserToolsEnabled, buildPreviewBrowserTools } from './preview-browser'
@@ -67,7 +67,13 @@ export function buildDomainTools(options: BuildAgentToolsOptions): AgentLoopTool
       }
       // R0.1（2026-09-19 狗粮 7601e5ae）：模型侧测试与平台终验同口径——测试前确保
       // dist 是 src 最新构建（防「改完 src 测旧 bundle」的假红反馈回路；非 fullstack no-op）
+      // 挂账②：指纹新鲜度校验在 rebuild 之前（比对「上次验证时产物」vs 当前——
+      // 产物在验证后被改过则显式警示，历史全绿结论失效）
+      const stale = checkEntryFingerprintFresh(projectId)
       await rebuildRealFullstackDist({ projectId, sessionId: ctx.sessionId })
+      const staleNote = stale === false
+        ? '⚠ 产物自上次测试验证后被修改，历史测试结论已失效（本次结果为准）\n'
+        : ''
       const result = await runGwtScenarios({ project_id: projectId, session_id: ctx.sessionId, preview_url: ctx.state.preview_url })
       // W2-F4：执行计数无条件更新（终验 source 分类的确定性判据，与展示开关解耦）
       ctx.state.gwt_runs = (ctx.state.gwt_runs ?? 0) + 1
@@ -98,7 +104,7 @@ export function buildDomainTools(options: BuildAgentToolsOptions): AgentLoopTool
         ctx.state.last_gwt_failures = current
         const evidence = validationStateLine(ctx.state)
         return {
-          output: `共 ${result.total_count} 个场景：通过 ${result.passed_count}、失败 ${result.failed_count}。\n失败场景：\n${failures}${comparison}${evidence}`,
+          output: `${staleNote}共 ${result.total_count} 个场景：通过 ${result.passed_count}、失败 ${result.failed_count}。\n失败场景：\n${failures}${comparison}${evidence}`,
           detail: { failed_count: result.failed_count, total_count: result.total_count },
         }
       }
@@ -121,7 +127,7 @@ export function buildDomainTools(options: BuildAgentToolsOptions): AgentLoopTool
         ? validationStateLine(ctx.state)
         : '\n测试通过，可以继续 run_security_scan 或输出完成总结。'
       return {
-        output: `全部通过（${result.passed_count}/${result.total_count} 个场景）。${nameList}${tail}`,
+        output: `${staleNote}全部通过（${result.passed_count}/${result.total_count} 个场景）。${nameList}${tail}`,
         detail: { passed_count: result.passed_count, total_count: result.total_count },
       }
     },

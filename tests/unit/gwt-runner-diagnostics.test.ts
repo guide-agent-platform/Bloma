@@ -8,6 +8,7 @@ import {
   newDiagnosticsSince,
   snapshotDiagnostics,
 } from '../../main/verification/gwt-runner'
+import type { ControlSnapshot } from '../../main/verification/gwt-runner'
 
 /**
  * PR1（随感 39 诊断补盲）纯函数单测：pageerror / console / requestfailed 三路采集、
@@ -209,5 +210,62 @@ describe('symbolSynonymMatches 符号同义词匹配（2026-09-25 随手计算�
     const { symbolSynonymMatches } = await import('../../main/verification/gwt-runner')
     // 解析侧已抽出 target（「运算符」），但容错：带「键/按钮」后缀也认
     expect(symbolSynonymMatches('运算符键', '÷')).toBe(true)
+  })
+})
+
+describe('matchesClickableControl / findClickableIndex 控件寻址纯函数（2026-09-25 挂账①采集-判定分离）', () => {
+  it('随手计算器案端到端语义：快照（符号控件）× target（功能词断言）经同义词命中', async () => {
+    const { findClickableIndex } = await import('../../main/verification/gwt-runner')
+    const page: ControlSnapshot[] = [
+      { index: 0, visible: true, text: '7', className: 'btn num', hints: '' },
+      { index: 1, visible: true, text: '÷', className: 'btn op', hints: '' },
+      { index: 2, visible: true, text: '×', className: 'btn op', hints: '' },
+      { index: 3, visible: true, text: '=', className: 'btn op', hints: '' },
+      { index: 4, visible: true, text: 'C', className: 'btn fn', hints: '' },
+      { index: 5, visible: false, text: '隐藏的运算符', className: '', hints: '' }, // 不可见不参与（P0-1）
+    ]
+    expect(findClickableIndex(page, '运算符')).toBe(1) // 首个命中：÷
+    expect(findClickableIndex(page, '等号')).toBe(3)
+    expect(findClickableIndex(page, '清空')).toBe(4)
+    expect(findClickableIndex(page, '不存在的控件')).toBe(-1)
+  })
+
+  it('多信号：textContent/className/hints 各自独立命中', async () => {
+    const { matchesClickableControl } = await import('../../main/verification/gwt-runner')
+    const base: ControlSnapshot = { index: 0, visible: true, text: '', className: '', hints: '' }
+    expect(matchesClickableControl({ ...base, text: '开始游戏' }, '开始')).toBe(true)
+    expect(matchesClickableControl({ ...base, className: 'pause-btn' }, 'pause')).toBe(true)
+    expect(matchesClickableControl({ ...base, hints: 'aria-label 提交表单 title=submit data-ai-id=send-btn' }, 'submit')).toBe(true)
+    expect(matchesClickableControl({ ...base, text: '确认' }, '无关词')).toBe(false)
+  })
+
+  it('hints 兜底标签走符号同义词（text 空时取 hints 首词）', async () => {
+    const { matchesClickableControl } = await import('../../main/verification/gwt-runner')
+    const iconOnly: ControlSnapshot = { index: 0, visible: true, text: '', className: 'icon-btn', hints: 'del' }
+    expect(matchesClickableControl(iconOnly, '退格')).toBe(true) // hints 首词「del」↔ 退格同组
+    const iconCn = { ...iconOnly, hints: '删除' }
+    expect(matchesClickableControl(iconCn, '退格')).toBe(true) // 中文别名同样命中（title="删除" 的图标按钮）
+  })
+
+  it('不可见控件永远不命中（P0-1 隐藏 overlay 不抢跑）', async () => {
+    const { matchesClickableControl, findClickableIndex } = await import('../../main/verification/gwt-runner')
+    const hidden: ControlSnapshot = { index: 0, visible: false, text: '运算符', className: '', hints: '' }
+    expect(matchesClickableControl(hidden, '运算符')).toBe(false)
+    expect(findClickableIndex([hidden], '运算符')).toBe(-1)
+  })
+
+  it('visibleControlInventory：去重/限长/上限（失败回喂清单）', async () => {
+    const { visibleControlInventory } = await import('../../main/verification/gwt-runner')
+    const many = Array.from({ length: 40 }, (_, i) => ({ index: i, visible: true, text: `按钮${i}`, className: '', hints: '' })) as ControlSnapshot[]
+    const inventory = visibleControlInventory(many)
+    expect(inventory).toHaveLength(24)
+    expect(inventory[0]).toBe('按钮0')
+    const dedup: ControlSnapshot[] = [
+      { index: 0, visible: true, text: '÷', className: '', hints: '' },
+      { index: 1, visible: true, text: '÷', className: '', hints: '' },
+      { index: 2, visible: false, text: '隐藏', className: '', hints: '' },
+      { index: 3, visible: true, text: '', className: '', hints: '等号' },
+    ]
+    expect(visibleControlInventory(dedup)).toEqual(['÷', '等号'])
   })
 })
