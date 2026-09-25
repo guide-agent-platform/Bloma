@@ -44,6 +44,12 @@ export interface GwtTestResult {
    * 消费侧（checkEntryFingerprintFresh）比对当前产物——验证后被改可检测。
    */
   entry_fingerprint?: EntryFingerprint
+  /**
+   * 探针降级标记（2026-09-25 对齐批·环境豁免）：true = 浏览器探针不可用，结果是
+   * 静态启发式兜底判定——失败不可归因产物缺陷（静态口径的假红/待评估），
+   * 修复轮据此不烧预算（对齐 Proma-Easy「环境类不入修复循环」铁律）。
+   */
+  probe_degraded?: boolean
 }
 
 /** 产物入口聚合指纹（多文件口径）。 */
@@ -124,6 +130,8 @@ export async function runGwtScenarios(input: RunGwtInput): Promise<GwtTestResult
   const replay = replayRequirements(input.project_id)
   const browserResult = await runBrowserGwt(input)
   const raw = browserResult ?? (await runStaticScenarios(input))
+  // 环境豁免标记：探针缺席走静态兜底时置位（修复轮消费——环境类不烧预算）
+  if (!browserResult) raw.probe_degraded = true
   if (replay.length === 0) return raw
   const names = new Set(replay.map((r) => gwtScenarioName(r.id, (r.behavior_assertions ?? [''])[0])))
   const { gated, outcomes } = splitAdvisoryResults(raw, names)

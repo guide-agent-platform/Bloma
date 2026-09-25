@@ -71,7 +71,11 @@ export interface RepairTask {
 }
 
 /** 修复预算缺省（D6：quick 延迟敏感 1 轮；longterm 2 轮）；BLOMA_REPAIR_BUDGET 覆盖。 */
-export const REPAIR_BUDGET_DEFAULTS: Record<ProjectMode, number> = { quick: 1, longterm: 2 }
+/**
+ * 修复预算（2026-09-25 对齐 Proma-Easy）：quick=2 / longterm=3——3 轮内至少
+ * 覆盖两种不同策略（REPAIR_STRATEGY_SEQUENCE），1-2 轮预算容不下策略轮换。
+ */
+export const REPAIR_BUDGET_DEFAULTS: Record<ProjectMode, number> = { quick: 2, longterm: 3 }
 
 /** 修复轮 maxTurns 缺省（窄任务小预算，远小于主 loop 24/40）；BLOMA_REPAIR_TURNS 覆盖。 */
 export const REPAIR_MAX_TURNS_DEFAULTS: Record<ProjectMode, number> = { quick: 12, longterm: 16 }
@@ -158,11 +162,47 @@ function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new Error('AGENT_CANCELLED')
 }
 
-/** 修复模式段（追加在背板锚定 system 之后：当前处于定向修复轮，任务卡即全部工作）。 */
-const REPAIR_MODE_SECTION = [
-  '【修复模式】当前处于定向修复轮：下方的修复任务卡是本轮全部工作，完成后简要总结即可。',
-  '不要重新生成整个项目，不要改动修复任务卡之外的任何文件或功能。',
-].join('\n')
+/**
+ * 修复策略序列（2026-09-25 对齐 Proma-Easy REPAIR_STRATEGY_SEQUENCE，文案自写）：
+ * 每轮强制换策略——3 次内至少 2 种不同手段，堵死「同思路反复微调」的空转漂移
+ * （随手计算器案：第 2 轮 16 轮全只读漂移）。
+ */
+export const REPAIR_STRATEGY_SEQUENCE = ['direct-fix', 're-read-design', 'alternate-approach'] as const
+
+export type RepairStrategy = (typeof REPAIR_STRATEGY_SEQUENCE)[number]
+
+/** 轮次 → 策略（超出序列长度循环取尾——alternate-approach 语义对后续轮次仍成立）。 */
+export function repairStrategyForRound(round: number): RepairStrategy {
+  if (round <= 0) return 'direct-fix'
+  const idx = Math.min(round - 1, REPAIR_STRATEGY_SEQUENCE.length - 1)
+  return REPAIR_STRATEGY_SEQUENCE[idx]!
+}
+
+/** 策略指令段（轮次感知；追加在背板锚定 system 之后）。零编辑守卫随每轮注入
+ * （配合 repairNoopGuard：零编辑轮回退不计——指令层先打招呼）。 */
+export function buildRepairModeSection(round: number): string {
+  const strategy = repairStrategyForRound(round)
+  const zeroEditGuard = '本轮结束时必须存在至少一次 write_file/edit_file——零编辑的修复轮视为无效（会被回退不计入预算）。'
+  if (strategy === 're-read-design') {
+    return [
+      '【修复模式·策略二：重读设计】上一轮定向修复未收敛——先重读项目锚（PRD 需求与验收要点）与失败场景涉及的设计意图，列出「设计要求 vs 当前实现」的具体偏差，再按偏差逐项修改。',
+      '不要重新生成整个项目，不要改动修复任务卡之外的任何文件或功能。',
+      zeroEditGuard,
+    ].join('\n')
+  }
+  if (strategy === 'alternate-approach') {
+    return [
+      '【修复模式·策略三：换实现路径】前两轮同思路修复仍未收敛——放弃在原处反复微调，为失败场景换一种实现路径（不同的 DOM 结构 / 不同的算法 / 不同的模块组织），改完说明新路径与旧路径的差异。',
+      '不要重新生成整个项目，不要改动修复任务卡之外的任何文件或功能。',
+      zeroEditGuard,
+    ].join('\n')
+  }
+  return [
+    '【修复模式·策略一：定向修复】当前处于定向修复轮：下方的修复任务卡是本轮全部工作，完成后简要总结即可。',
+    '不要重新生成整个项目，不要改动修复任务卡之外的任何文件或功能。',
+    zeroEditGuard,
+  ].join('\n')
+}
 
 /** W2-F1（咨询 D4，2026-09-09）：修复证据包——候选指纹+此前修复尝试（loop-checkpoint 账本）。 */
 export interface RepairCheckpointContext {
@@ -273,7 +313,7 @@ export async function runRepairLoop(input: RepairLoopInput): Promise<RepairRound
     }
   const scopePaths = repairScopeEnabled() && input.authorizedWritePaths && input.authorizedWritePaths.length > 0 ? input.authorizedWritePaths : undefined
   loopResult = await runAgentLoop({
-      system: `${input.buildSystem(editFormat)}\n\n${REPAIR_MODE_SECTION}${roundAnchorBlock}${changeContractBlock}`,
+      system: `${input.buildSystem(editFormat)}\n\n${buildRepairModeSection(input.round)}${roundAnchorBlock}${changeContractBlock}`,
       // Phase 10 W1-3：修复任务卡尾部追加项目侦察包（BLOMA_CONTEXT_PACK off=字节级）
       task: appendContextPack({ projectId: input.project_id, sessionId: input.session_id, task: renderRepairTaskCard(input.tasks, input.checkpointContext, input.droppedToolIntents) }),
       // 窄任务小预算：web_research 限 2 防长 loop 无节制外呼（主 loop 为 4）

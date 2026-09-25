@@ -88,6 +88,27 @@ import { AgentLoopPostTestingInput, runGwtWithApiContract, trackTestCompleted } 
  * 是增强不是依赖，绝不阻断交付链。
  */
 export async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: GwtTestResult): Promise<GwtTestResult> {
+  // 2026-09-25 对齐批·环境豁免（Proma-Easy「环境类不入修复循环」铁律直译）：
+  // 浏览器探针不可用（probe_degraded）时的失败是静态兜底口径——不可归因产物缺陷，
+  // 修复轮修不了「探针缺席」，不烧预算不计数；如实留痕转既有终验口径。
+  if (testResult.probe_degraded === true && testResult.failed_count > 0) {
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'repair_round_skipped',
+        title: '环境类失败不入修复预算（探针降级）',
+        why: `浏览器探针不可用，GWT 走静态兜底判定（失败 ${testResult.failed_count} 项不可归因产物缺陷）——不起修复轮、不烧预算；恢复探针后重验即恢复全预算`,
+        detail: { probe_degraded: true, failed_count: testResult.failed_count },
+      },
+    })
+    appendSessionMessage(input.session_id, {
+      role: 'assistant',
+      content: [{ type: 'text', text: '本轮验证的浏览器探针不可用（走静态兜底判定），失败项无法归因到产物缺陷——不消耗修复预算。恢复预览/浏览器环境后重新验证即可。' }],
+      timestamp: Date.now(),
+    })
+    return testResult
+  }
   const project = findProject(input.project_id)
   const used = project.test_repair_count ?? 0
   const budget = resolveRepairBudget(input.mode)

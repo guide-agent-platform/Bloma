@@ -284,8 +284,8 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     expect(events.some((event) => event.type === 'user_decision_required')).toBe(false)
   })
 
-  it('预算耗尽（quick 上限 1 已用）→ 不起修复轮，落 repair_budget_exhausted，直接现状熔断', async () => {
-    updateProject(projectId, { test_repair_count: 1 })
+  it('预算耗尽（quick 上限 2 已用，2026-09-25 对齐拍板）→ 不起修复轮，落 repair_budget_exhausted，直接现状熔断', async () => {
+    updateProject(projectId, { test_repair_count: 2 })
     mocks.runGwtScenarios.mockResolvedValueOnce(gwtFailed())
 
     const result = await runAgentLoopPostTesting(baseInput())
@@ -298,8 +298,8 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     expect(decisionLines()).not.toContain('repair_round_started')
   })
 
-  it('longterm 预算缺省 2：已用 1 仍起修复轮；已用 2 不起', async () => {
-    updateProject(projectId, { test_repair_count: 1 })
+  it('longterm 预算缺省 3（2026-09-25 对齐拍板）：已用 2 仍起修复轮；已用 3 不起', async () => {
+    updateProject(projectId, { test_repair_count: 2 })
     mocks.runGwtScenarios
       .mockResolvedValueOnce(gwtFailed())
       .mockResolvedValueOnce(gwtPassed())
@@ -309,18 +309,18 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     expect(mocks.runAgentLoop).toHaveBeenCalledTimes(1)
     expect(result.verdict).toBe('ready')
 
-    // 第二段：已用 2 → 预算耗尽不起修复轮
+    // 第二段：已用 3 → 预算耗尽不起修复轮
     mocks.runAgentLoop.mockClear()
     mocks.runGwtScenarios.mockReset()
-    updateProject(projectId, { test_repair_count: 2 })
+    updateProject(projectId, { test_repair_count: 3 })
     mocks.runGwtScenarios.mockResolvedValueOnce(gwtFailed())
     await runAgentLoopPostTesting({ ...baseInput(), mode: 'longterm' })
     expect(mocks.runAgentLoop).not.toHaveBeenCalled()
   })
 
-  it('BLOMA_REPAIR_BUDGET 覆盖生效：quick 已用 1，上限提为 2 → 仍起修复轮', async () => {
-    process.env.BLOMA_REPAIR_BUDGET = '2'
-    updateProject(projectId, { test_repair_count: 1 })
+  it('BLOMA_REPAIR_BUDGET 覆盖生效：quick 已用 2（新缺省已耗尽），上限提为 3 → 仍起修复轮', async () => {
+    process.env.BLOMA_REPAIR_BUDGET = '3'
+    updateProject(projectId, { test_repair_count: 2 })
     mocks.runGwtScenarios
       .mockResolvedValueOnce(gwtFailed())
       .mockResolvedValueOnce(gwtPassed())
@@ -387,7 +387,7 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     await runAgentLoopPostTesting(baseInput())
     const delta = events.find((event) => event.type === 'message_delta' && typeof event.payload.text === 'string' && (event.payload.text as string).includes('定向修复'))
     expect(delta).toBeTruthy()
-    expect((delta?.payload.text as string)).toContain('1/1')
+    expect((delta?.payload.text as string)).toContain('1/2')
   })
 
   it('W2-D3：终验失败 source 分类——loop 自测已知未修 → known_failure；从未自测 → coverage_gap', async () => {

@@ -72,6 +72,7 @@ export type DecisionType =
   /** R0.1（2026-09-19 狗粮 7601e5ae）：real-fullstack 终验/测试前 dist 陈旧重建留痕（构建断链根治位） */
   | 'dist_rebuild'
   | 'repair_round_started'
+  | 'repair_round_skipped'
   | 'repair_round_completed'
   | 'repair_budget_exhausted'
   /** B2（P0-B，2026-09-11 审计案 35c1a633）：修复轮零编辑不计轮——旁白与决策如实留痕 */
