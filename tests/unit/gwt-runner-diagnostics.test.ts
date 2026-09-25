@@ -178,3 +178,36 @@ describe('gwt-runner 页面诊断采集（PR1）', () => {
     expect(reason).not.toContain('x.js') // 第 4 条之后不拼
   })
 })
+
+describe('symbolSynonymMatches 符号同义词匹配（2026-09-25 随手计算器案修复）', () => {
+  it('功能词 ↔ 符号键互认（随手计算器案：断言「运算符」匹配 ÷×−控件）', async () => {
+    const { symbolSynonymMatches } = await import('../../main/verification/gwt-runner')
+    expect(symbolSynonymMatches('运算符', '÷')).toBe(true)
+    expect(symbolSynonymMatches('运算符', '×')).toBe(true)
+    expect(symbolSynonymMatches('运算符', '−')).toBe(true)
+    expect(symbolSynonymMatches('运算符', '+')).toBe(true)
+    expect(symbolSynonymMatches('等号', '=')).toBe(true)
+    expect(symbolSynonymMatches('清空', 'C')).toBe(true)
+    expect(symbolSynonymMatches('清空', 'AC')).toBe(true)
+    expect(symbolSynonymMatches('清空', 'ce')).toBe(true)
+    expect(symbolSynonymMatches('退格', '⌫')).toBe(true)
+    expect(symbolSynonymMatches('删除', 'DEL')).toBe(true)
+    expect(symbolSynonymMatches('确认', 'ok')).toBe(true)
+    expect(symbolSynonymMatches('发送', 'send')).toBe(true)
+  })
+
+  it('不误配：数字键/无关文本/空值', async () => {
+    const { symbolSynonymMatches } = await import('../../main/verification/gwt-runner')
+    expect(symbolSynonymMatches('运算符', '5')).toBe(false)
+    expect(symbolSynonymMatches('数字', '5')).toBe(false) // 「数字」不在功能词表——原两维匹配仍兜底
+    expect(symbolSynonymMatches('运算符', '清空面板')).toBe(false)
+    expect(symbolSynonymMatches('', '5')).toBe(false)
+    expect(symbolSynonymMatches('等号', '')).toBe(false)
+  })
+
+  it('target 含上下文词也命中（「点击运算符键」整句作 target 的宽容性）', async () => {
+    const { symbolSynonymMatches } = await import('../../main/verification/gwt-runner')
+    // 解析侧已抽出 target（「运算符」），但容错：带「键/按钮」后缀也认
+    expect(symbolSynonymMatches('运算符键', '÷')).toBe(true)
+  })
+})

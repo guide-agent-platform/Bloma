@@ -506,6 +506,40 @@ async function runGameProbeScenario(
 
 /** 派发触发器：按键派发到 document（keydown+keyup）；点击/双击按文本或语义 class 找控件；
  *  fill/select 为 M-4 新增可探针类（输入框填值派发 input+change、下拉切换选项）。 */
+
+/**
+ * 点击目标符号同义词表（2026-09-25 随手计算器案修复）：行为断言用功能词（「点击运算符键」）
+ * 而实际控件显示符号（÷ × −）——text/class 两维匹配必落空，修复轮补 title 也读不到。
+ * 表为 [target 功能词正则源, 控件标签符号/别名正则源] 对（别名一律小写——匹配带 i flag）；
+ * 解析侧词表不动（陷阱 22 三处口径纪律——本表是执行侧匹配宽容度，不新增解析能力）。
+ */
+const CLICK_SYMBOL_SYNONYMS: ReadonlyArray<readonly [string, string]> = [
+  ['运算符|操作符|算符', '^[+−×÷*/-]'],
+  ['等号|等于|计算|求值|出结果', '^[=＝]+$'],
+  ['清空|清除|归零|重置', '^(c|ce|ac|clear|清空|清除)$'],
+  ['退格|删除|删一位|撤销', '^(⌫|⌦|del|delete|backspace|退格)$'],
+  ['减号|负号', '^[−-]'],
+  ['减号|负号', '^[−-]$'],
+  ['乘号', '^[×*x]$'],
+  ['除号', '^[÷/]$'],
+  ['小数点|点号', '^[.]$'],
+  ['确认|确定|提交|发送', '^(ok|确认|确定|提交|发送|send|submit)$'],
+]
+
+/**
+ * 符号同义词匹配（纯函数，可单测）：target 是功能词且控件标签是对应符号/别名时互认。
+ * label 为控件首选可见标签（textContent 优先，空则取 aria-label/title）。
+ */
+export function symbolSynonymMatches(target: string, label: string): boolean {
+  if (!target || !label) return false
+  for (const [wordSource, symSource] of CLICK_SYMBOL_SYNONYMS) {
+    if (!new RegExp(wordSource, 'i').test(target)) continue
+    if (new RegExp(symSource, 'i').test(label)) return true
+  }
+  return false
+}
+
+
 async function dispatchTrigger(page: Page, trigger: AssertionPlan['trigger']): Promise<string | undefined> {
   if (!trigger) return undefined
   if (trigger.kind === 'key' && trigger.key) {
@@ -518,46 +552,66 @@ async function dispatchTrigger(page: Page, trigger: AssertionPlan['trigger']): P
     return undefined
   }
   if (trigger.kind === 'click' && trigger.target) {
-    const clicked = await page.evaluate((target) => {
+    const clicked = await page.evaluate(([target, synonyms]) => {
       // P0-1：点击匹配同样只认真可见控件——隐藏 overlay 的「继续/放弃」按钮不再抢跑命中，
       // 保证「点击暂停」真正点到可见的暂停按钮（否则点中 display:none 控件 = 无效果 = 假失败）。
+      // 2026-09-25 修复（随手计算器案）：匹配面从 text/class 两维扩到 aria-label/title/
+      // data-ai-id/value + 符号同义词（「运算符」↔÷×−、清空↔C 等）——此前功能词断言
+      // 匹配不到符号控件（假失败），修复轮补 title 也读不到。
       const isVisible = (el: Element): boolean => {
         const rect = el.getBoundingClientRect()
         const style = window.getComputedStyle(el)
         return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) !== 0
       }
+      const labelHintsOf = (el: HTMLElement): string =>
+        `${el.getAttribute('aria-label') ?? ''} ${el.getAttribute('title') ?? ''} ${el.getAttribute('data-ai-id') ?? ''} ${(el as HTMLInputElement).value ?? ''}`.trim()
       const controls = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], input[type="button"], a, [class]'))
       const hit = controls.find((el) => {
         if (!isVisible(el)) return false
         const text = (el.textContent ?? '').trim()
         const cls = typeof el.className === 'string' ? el.className : ''
-        return (text.length > 0 && text.includes(target)) || cls.includes(target)
+        const hints = labelHintsOf(el)
+        if (text.length > 0 && text.includes(target)) return true
+        if (cls.includes(target) || hints.includes(target)) return true
+        const label = text.length > 0 ? text : (hints.split(/\s+/)[0] ?? '')
+        return synonyms.some(
+          ([wordSource, symSource]) => new RegExp(wordSource, 'i').test(target) && new RegExp(symSource, 'i').test(label),
+        )
       })
       if (!hit) return false
       hit.click()
       return true
-    }, trigger.target)
+    }, [trigger.target, CLICK_SYMBOL_SYNONYMS] as const)
     if (!clicked) return `找不到可点击的「${trigger.target}」控件，断言无法执行`
     return undefined
   }
   if (trigger.kind === 'dblclick' && trigger.target) {
-    const hit = await page.evaluate((target) => {
+    const hit = await page.evaluate(([target, synonyms]) => {
       const isVisible = (el: Element): boolean => {
         const rect = el.getBoundingClientRect()
         const style = window.getComputedStyle(el)
         return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) !== 0
       }
+      // 2026-09-25 修复（与 click 分支同源）：匹配面扩展 + 符号同义词
+      const labelHintsOf = (el: HTMLElement): string =>
+        `${el.getAttribute('aria-label') ?? ''} ${el.getAttribute('title') ?? ''} ${el.getAttribute('data-ai-id') ?? ''} ${(el as HTMLInputElement).value ?? ''}`.trim()
       const controls = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], a, li, tr, [class]'))
       const hit = controls.find((el) => {
         if (!isVisible(el)) return false
         const text = (el.textContent ?? '').trim()
         const cls = typeof el.className === 'string' ? el.className : ''
-        return (text.length > 0 && text.includes(target)) || cls.includes(target)
+        const hints = labelHintsOf(el)
+        if (text.length > 0 && text.includes(target)) return true
+        if (cls.includes(target) || hints.includes(target)) return true
+        const label = text.length > 0 ? text : (hints.split(/\s+/)[0] ?? '')
+        return synonyms.some(
+          ([wordSource, symSource]) => new RegExp(wordSource, 'i').test(target) && new RegExp(symSource, 'i').test(label),
+        )
       })
       if (!hit) return false
       hit.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
       return true
-    }, trigger.target)
+    }, [trigger.target, CLICK_SYMBOL_SYNONYMS] as const)
     if (!hit) return `找不到可双击的「${trigger.target}」目标，断言无法执行`
     return undefined
   }
