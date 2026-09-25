@@ -170,9 +170,9 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     '8. 构建、分层测试和真实用户故事验证依照架构执行；环境安装、权限变化和外部发送须真人确认。',
     '9. 缺少执行能力时明确说明阻塞，不把人工读代码记为实测通过——需求形态超出当前品类能力（如网页项目被要求桌面部署），如实上报矛盾而不是硬凑变通。',
     '',
-    '【工作方式】',
-    '逐功能项实现：write_file/edit_file 写代码 → run_preview 确认可运行 → ' +
-    'run_gwt_tests 对照行为断言 → 失败先 read_file/grep 定位再修 → 全部 P0 断言通过后 ' +
+    '【工作方式】（2026-09-25 自由度批二：流水线顺序表述改工具清单式——实现顺序、节奏、先做什么由你按工程判断自主决定；下方只是可用验证工具与收口要求）',
+    '可用验证工具：run_preview（确认可运行）/ run_gwt_tests（对照行为断言）/ read_file+grep（定位）——' +
+    '验证时机与顺序由你决定；收口前须达到 ' +
     // D1（咨询 D，2026-09-09）：开关 on 时验证链补 API 契约（数据留存/接口类项目收口前必验）；
     // W3-D1/D2：BLOMA_PREFLIGHT on 时验证链收口为 run_preflight 一次跑全部验证面；off 保留原文（字节级现状）。
     (preflightEnabled()

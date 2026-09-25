@@ -94,7 +94,7 @@ describe('loop prompt 接线（off=字节级现状 / on=单点定义防双源）
     // 护栏与工作方式的其余内容不受影响
     expect(prompt).toContain('路径限项目目录内')
     expect(prompt).toContain('out_of_scope 内的功能一律不做')
-    expect(prompt).toContain('逐功能项实现')
+    expect(prompt).toContain('可用验证工具')
     // R-OUTPUT-01 此前无 prompt 条款（新增覆盖，正文冒充已执行禁令在表内）
     expect(prompt).toContain('冒充已执行')
   })

@@ -77,6 +77,34 @@ function validateDecision(raw: Record<string, unknown>): { ok: true; decision: G
 }
 
 /** 向导工具集：一个决策出口 + 三个只读事实工具。 */
+/**
+ * 桌面形态诉求与品类错配检测（2026-09-25）：confirm_requirements 的需求文本命中
+ * 桌面载体词（复用 template-inference 的品类判定词族——桌面+类词/桌面程序/exe/安装包/
+ * 桌面端部署），而项目 template_type 非 desktop_tool。返回提示文案（给模型→转告用户）；
+ * 无错配返回 null。提示不阻断流程（用户可坚持现品类——如实告知即可）。
+ */
+function detectDesktopFormMismatch(decision: GuideDecision, projectId: string): string | null {
+  if (decision.action !== 'confirm_requirements') return null
+  const texts = (decision.requirements ?? []).map((item) => item.description)
+  const desktopRe = /桌面(?:软件|应用|端|工具|程序)|以桌面(?:应用|程序|形式)|桌面环境(?:直接)?(?:启动|运行)|(?:打包成|生成|制作)\s*exe|安装包/
+  const hits = texts.filter((text) => desktopRe.test(text))
+  if (hits.length === 0) return null
+  let templateType = ''
+  try {
+    const project = findProject(projectId)
+    templateType = project?.template_type ?? ''
+  } catch {
+    return null // 项目索引缺失（测试环境）不误报
+  }
+  if (templateType === 'desktop_tool') return null
+  return (
+    `【品类形态提示】需求清单中有 ${hits.length} 条桌面形态诉求（如「${hits[0]!.slice(0, 30)}」），` +
+    '但本项目按 ' + (templateType || '其他') + ' 品类构建（网页/工具形态，无法真实以桌面程序交付）。' +
+    '请在给用户的回复中如实说明：若确需桌面程序，建议新开项目并在首条描述写明「桌面程序」（如「做一个桌面程序：计算器」），' +
+    '平台将走桌面交付线（真实桌面程序+打包）；若网页版可接受则继续。'
+  )
+}
+
 export function buildGuideTools(projectId: string, options: GuideToolsOptions): AgentLoopTool[] {
   let decided = false
 
@@ -137,7 +165,14 @@ export function buildGuideTools(projectId: string, options: GuideToolsOptions): 
           : validated.decision.action === 'confirm_requirements'
             ? `已提交需求清单（${validated.decision.requirements?.length ?? 0} 条）待用户确认`
             : '已提交开工决策（PRD 确认门兜底）'
-      return { output: summary, detail: { action: validated.decision.action } }
+      // 判型回溯钩子（2026-09-25 自由度批二）：需求清单涌现桌面形态诉求而品类不是
+      // desktop_tool（判型在首条消息定死不回溯——F-009 案实锤：网页品类被要求桌面部署，
+      // 模型只能硬凑）——工具层如实提示模型转告用户改道，需求矛盾不再无声吞下。
+      const desktopHint = detectDesktopFormMismatch(validated.decision, projectId)
+      const output = desktopHint ? `${summary}
+
+${desktopHint}` : summary
+      return { output, detail: { action: validated.decision.action, ...(desktopHint ? { desktop_form_mismatch: true } : {}) } }
     },
   }
 
