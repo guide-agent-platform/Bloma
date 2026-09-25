@@ -280,13 +280,22 @@ describe('steps 架构（2026-09-26 照抄 Proma-Easy：三段式步骤+绝对�
     expect(needsStepCompilation('页面显示当前时间')).toBe(false)
   })
 
-  it('compileStepsForAssertion：三段式（given fill 种子 / when click / then assert-text 0）', async () => {
-    const { compileStepsForAssertion } = await import('../../main/verification/gwt-steps')
-    const steps = compileStepsForAssertion('点击清空键→当前输入与结果归零', '清空键')
-    expect(steps).toHaveLength(3)
-    expect(steps[0]).toMatchObject({ kind: 'given', op: { type: 'fill', value: '123' } })
-    expect(steps[1]).toMatchObject({ kind: 'when', op: { type: 'click', target: '清空键' } })
-    expect(steps[2]).toMatchObject({ kind: 'then', op: { type: 'assert-text', contains: '0' } })
+  it('compileResetSteps：clear 族三段式（seed-state 种入 / click / assert-reset 绑定种入域）', async () => {
+    const { compileResetSteps } = await import('../../main/verification/gwt-steps')
+    const compiled = compileResetSteps('点击清空键→当前输入与结果归零', '清空键')
+    expect(compiled.status).toBe('compiled')
+    if (compiled.status !== 'compiled') return
+    expect(compiled.intent).toBe('clear')
+    expect(compiled.steps).toHaveLength(3)
+    expect(compiled.steps[0]).toMatchObject({ kind: 'given', op: { type: 'seed-state', value: '123' } })
+    expect(compiled.steps[1]).toMatchObject({ kind: 'when', op: { type: 'click', target: '清空键' } })
+    expect(compiled.steps[2]).toMatchObject({ kind: 'then', op: { type: 'assert-reset' } })
+  })
+
+  it('compileResetSteps：delete/undo 族 mapping 阻断（审计 P0-01 fail-closed）', async () => {
+    const { compileResetSteps } = await import('../../main/verification/gwt-steps')
+    expect(compileResetSteps('点击删除键移除条目', '删除键').status).toBe('mapping_blocked')
+    expect(compileResetSteps('点击撤销按钮→上一次修改恢复', '撤销').status).toBe('mapping_blocked')
   })
 
   it('GwtFailureSummary.kind 分流口径：precondition/selector 语义（消费侧 repair 过滤锁定）', async () => {

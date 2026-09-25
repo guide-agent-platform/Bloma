@@ -141,7 +141,8 @@ export async function repairAndRetest(input: AgentLoopPostTestingInput, testResu
   // 失败归类分流（2026-09-26 照抄批·对方 AC L-001）：precondition 类失败（步骤路径
   // 前置缺失——不可自动验证）不进修复轮不烧预算；selector 类保留（失败原因带控件
   // 清单，修复轮可修——F-005 补标注案实证有效）。
-  const actionable = (testResult.failure_summary ?? []).filter((f) => f.kind !== 'precondition')
+  // 审计修复批：mapping（编译器无法构造可靠步骤）与 precondition 同属测试侧能力缺口——不进修复轮不烧预算
+  const actionable = (testResult.failure_summary ?? []).filter((f) => f.kind !== 'precondition' && f.kind !== 'mapping')
   if (actionable.length === 0 && (testResult.failure_summary ?? []).length > 0) {
     recordDecision({
       project_id: input.project_id,

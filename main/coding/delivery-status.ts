@@ -199,7 +199,7 @@ export interface DeliveryStatusComputationInput {
   /** 兜底任务源：P0 功能项 id（无 key_tasks 时 must_deliver 任务的等价口径） */
   p0RequirementIds: string[]
   /** 终验结果（失败场景按 `F-xxx 断言` 前缀归属功能项） */
-  testResult: Pick<GwtTestResult, 'failed_count' | 'failure_summary'>
+  testResult: Pick<GwtTestResult, 'failed_count' | 'failure_summary' | 'unverified' | 'probe_degraded'>
   /** 安全扫描是否通过（未过=不可隔离风险→unavailable） */
   securityPassed: boolean
   /** 收口预检结果（W3；开关 off/未跑=undefined 不影响判定；false=有未过验证面→从严 partial） */
@@ -233,7 +233,12 @@ function mustDeliverFeatureSets(input: DeliveryStatusComputationInput): string[]
 export function computeDeliveryStatus(input: DeliveryStatusComputationInput): DeliveryStatus {
   if (!input.securityPassed) return 'unavailable'
   if (input.testResult.failure_summary.some((f) => f.reason.includes('预览不可访问'))) return 'unavailable'
-  if (input.testResult.failed_count === 0) return input.preflightPassed === false ? 'partial' : 'verified'
+  if (input.testResult.failed_count === 0) {
+    // 审计 P0-02：待评估/探针降级（静态口径）不得冒充 verified——
+    // 未验证面从严判 partial（实际运行证据是 verified 的前置条件）
+    if ((input.testResult.unverified?.length ?? 0) > 0 || input.testResult.probe_degraded === true) return 'partial'
+    return input.preflightPassed === false ? 'partial' : 'verified'
+  }
   const failedFeatureIds = new Set(
     input.testResult.failure_summary.map((f) => featureIdFromScenario(f.scenario)).filter((id): id is string => Boolean(id)),
   )

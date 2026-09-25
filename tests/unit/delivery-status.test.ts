@@ -73,6 +73,17 @@ describe('computeDeliveryStatus（规则全分支）', () => {
     expect(computeDeliveryStatus(input({}))).toBe('verified')
   })
 
+  it('审计 P0-02：全过但有 unverified → partial（待评估不得冒充 verified）；探针降级同理', () => {
+    expect(
+      computeDeliveryStatus(input({ testResult: { failed_count: 0, failure_summary: [], unverified: ['F-001 车辆向右移动'] } })),
+    ).toBe('partial')
+    expect(
+      computeDeliveryStatus(input({ testResult: { failed_count: 0, failure_summary: [], probe_degraded: true } })),
+    ).toBe('partial')
+    // 无未验证面且未降级才 verified（审计反例 unverified-static-to-verified 堵死）
+    expect(computeDeliveryStatus(input({}))).toBe('verified')
+  })
+
   it('安全未过 → unavailable（GWT 全过也不粉饰）', () => {
     expect(computeDeliveryStatus(input({ securityPassed: false }))).toBe('unavailable')
   })

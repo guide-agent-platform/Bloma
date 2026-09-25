@@ -248,6 +248,16 @@ function evaluateBehaviorAssertions(
     }
   }
   const pendingNote = pending.length > 0 ? `；待评估（静态无法确认，运行验证兜底）：${pending.join('、')}` : ''
+  // 审计 P0-02：静态未确认的待评估断言，只有在同轮拿到运行验证证据（探针未降级、
+  // 运行场景无失败）时才允许硬约束通过；探针降级/无运行证据时待评估不得冒充行为已满足。
+  const hasRuntimeEvidence = testResult !== undefined && testResult.probe_degraded !== true
+  if (pending.length > 0 && !hasRuntimeEvidence) {
+    return {
+      name: 'P0 行为断言可满足性',
+      passed: false,
+      detail: `${behavioral} 条 P0 行为断言静态未确认（${pendingNote}）且无运行验证证据（探针降级或测试未跑）——待评估不得冒充行为已满足，恢复浏览器验证后重测`,
+    }
+  }
   return {
     name: 'P0 行为断言可满足性',
     passed: true,

@@ -16,6 +16,7 @@ import { checkApiContract } from './api-contract'
 import { runArtifactUiGate } from './artifact-ui-gate'
 import { planScenarios, scenarioName } from '../verification/gwt-runner'
 import { checkEntryFingerprintFresh, runGwtScenarios } from '../verification/gwt-service'
+import { isPlaceholderAssertion } from './sketch-engine'
 import { runSecurityScan } from '../verification/security-scan'
 import { getCachedStaticEvidence, setCachedStaticEvidence } from '../verification/evidence-cache'
 import { browserToolsEnabled, buildPreviewBrowserTools } from './preview-browser'
@@ -106,6 +107,26 @@ export function buildDomainTools(options: BuildAgentToolsOptions): AgentLoopTool
         return {
           output: `${staleNote}共 ${result.total_count} 个场景：通过 ${result.passed_count}、失败 ${result.failed_count}。\n失败场景：\n${failures}${comparison}${evidence}`,
           detail: { failed_count: result.failed_count, total_count: result.total_count },
+        }
+      }
+      // 审计 P0-02：无失败但有待评估/探针降级 → 不得宣称全过（fail-closed：待评估不计入
+      // 通过，静态口径不构成运行验证证据）——gwt_all_passed 维持 false，不进入 wrapUp 收口。
+      const unverifiedCount = result.unverified?.length ?? 0
+      // 探针降级只在存在真实行为断言时阻断：行为断言需要运行证据；占位断言（存在性）
+      // 的静态证据与断言类型匹配，可正常收敛（模板静态兑底 UX 保留）。
+      const hasBehaviorScenarios = planScenarios(readLastSketchRequirements(projectId))
+        .some((scenario) => !isPlaceholderAssertion(scenario.assertion))
+      const degradedBlocks = result.probe_degraded === true && hasBehaviorScenarios
+      if (unverifiedCount > 0 || degradedBlocks) {
+        const unverifiedList = unverifiedCount > 0
+          ? `\n待评估场景（未计入通过，需行为验证证据才能收口）：\n${(result.unverified ?? []).map((n) => `- ${n}`).join('\n')}`
+          : ''
+        const degradedNote = degradedBlocks
+          ? '\n浏览器探针不可用——行为断言需运行验证证据，本次静态口径不能收口；恢复预览/浏览器后重新 run_gwt_tests。'
+          : ''
+        return {
+          output: `${staleNote}共 ${result.total_count} 个场景：通过 ${result.passed_count}、失败 ${result.failed_count}、待评估 ${unverifiedCount}。${unverifiedList}${degradedNote}\n本次不能宣称测试全过。${validationStateLine(ctx.state)}`,
+          detail: { passed_count: result.passed_count, total_count: result.total_count, unverified_count: unverifiedCount, probe_degraded: result.probe_degraded === true },
         }
       }
       // 全过显式列出场景名（ACI：空结果显式反馈 + 可核对的通过清单）。

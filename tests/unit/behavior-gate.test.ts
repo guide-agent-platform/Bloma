@@ -247,7 +247,7 @@ describe('裁判行为门禁（P3：车不位移必退回）', () => {
     expect(constraint?.detail).toContain('静态确认')
   })
 
-  it('静态兜底：词表命中但产物未现关键词 → 待评估不退回（防 SVG/canvas 误杀）', () => {
+  it('静态兜底：canvas 合法实现无关键词 → 待评估；无运行证据时不得冒充行为已满足（审计 P0-02 fail-closed）', () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-judge-canvas-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
@@ -265,11 +265,23 @@ describe('裁判行为门禁（P3：车不位移必退回）', () => {
     mkdirSync(join(project.root_path, 'src'), { recursive: true })
     writeFileSync(join(project.root_path, 'src', 'app.js'), "document.addEventListener('keydown', function(e){ if(e.key==='ArrowRight'){ ctx.fillRect(x+=4, y, 2, 2); } })", 'utf8')
 
+    // 无运行验证证据（测试未跑）：待评估不得冒充行为已满足——退回而非放行
     const verdict = runJudge({ project_id: project.project_id, mode: 'quick' })
-    expect(verdict.verdict).toBe('pass')
+    expect(verdict.verdict).toBe('return')
     const constraint = verdict.hard_constraints.find((item) => item.name === 'P0 行为断言可满足性')
-    expect(constraint?.passed).toBe(true)
+    expect(constraint?.passed).toBe(false)
     expect(constraint?.detail).toContain('待评估')
+    expect(constraint?.detail).toContain('运行验证证据')
+
+    // 有运行验证证据（探针未降级、无失败）：静态待评估不阻断——防 canvas 误杀依旧成立
+    const withRuntime = runJudge({
+      project_id: project.project_id,
+      mode: 'quick',
+      test_result: { total_count: 1, passed_count: 1, failed_count: 0, failure_summary: [] },
+    })
+    const runtimeConstraint = withRuntime.hard_constraints.find((item) => item.name === 'P0 行为断言可满足性')
+    expect(runtimeConstraint?.passed).toBe(true)
+    expect(runtimeConstraint?.detail).toContain('待评估')
   })
 })
 
@@ -316,6 +328,12 @@ describe('GWT 静态兜底 per-assertion（无浏览器环境）', () => {
       })
       expect(result.failed_count).toBe(0)
       expect(result.failure_summary).toEqual([])
+      // 审计 P0-02 互斥态锁定：解析失败的真实行为断言 → 待评估（不计通过）；
+      // 词表命中 → 通过。passed = total - failed - unverified，绝不冒充全绿。
+      expect(result.unverified).toEqual(['F-001 按下方向键→画布重绘'])
+      expect(result.passed_count).toBe(1)
+      expect(result.total_count).toBe(2)
+      expect(result.probe_degraded).toBe(true)
     } finally {
       server.close()
     }

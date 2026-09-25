@@ -106,7 +106,8 @@ export function splitAdvisoryResults(
     failure_summary: raw.failure_summary.filter((f) => !replayNames.has(f.scenario)),
     ...(raw.unverified ? { unverified: (raw.unverified ?? []).filter((u) => !replayNames.has(u)) } : {}),
   }
-  gated.passed_count = Math.max(0, gated.total_count - gated.failed_count)
+  // 审计 P0-02：待评估不计入通过（互斥态）——passed = total - failed - unverified
+  gated.passed_count = Math.max(0, gated.total_count - gated.failed_count - (gated.unverified?.length ?? 0))
   return { gated, outcomes }
 }
 

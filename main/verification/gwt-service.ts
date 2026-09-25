@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { DocumentRef } from '../../shared/types'
 import { getAnalyticsPath, getDocumentsDir } from '../../storage/config-paths'
 import { findProject, readLastSketchRequirements } from '../project/project-service'
-import { escapeHtml, type SketchRequirement } from '../coding/sketch-engine'
+import { escapeHtml, isPlaceholderAssertion, type SketchRequirement } from '../coding/sketch-engine'
 import { planScenarios, runBrowserGwt, scenarioName as gwtScenarioName } from './gwt-runner'
 import { replayRequirements, splitAdvisoryResults } from '../experience/replay-compiler'
 import { reportReplayOutcomes } from '../experience/experience-service'
@@ -29,8 +29,10 @@ export interface GwtFailureSummary {
    * 失败归类（2026-09-26 照抄批·对方 AC L-001 回炉分流）：product=产品类（进修复轮）；
    * precondition=前置缺失（不可自动验证——不烧修复预算）；selector=映射类（找不到控件，
    * 失败原因带控件清单可修——修复轮处理）。缺省（存量/静态兜底路径）按 product 对待。
+   * mapping=编译器无法构造可靠步骤（删除/撤销族、未实现 op）——测试侧能力缺口，
+   * 不烧预算不放行（审计修复批补全）。缺省（存量/静态兑底路径）按 product 对待。
    */
-  kind?: 'product' | 'precondition' | 'selector'
+  kind?: 'product' | 'precondition' | 'selector' | 'mapping'
 }
 
 export interface GwtTestResult {
@@ -148,11 +150,11 @@ export async function runGwtScenarios(input: RunGwtInput): Promise<GwtTestResult
 /**
  * 静态启发式兜底（无浏览器环境）：逐条断言判定（§8.1 有界静态启发式）。
  *
- * - 存在性断言（默认断言/解析不出触发与效果）：需求原文转义后出现在 HTML，或
- *   产物整体具备「交互控件 + 脚本逻辑」（hasInteractiveEntry 一票语义，与改造前同构）；
+ * - 占位断言（「可见且可交互」类泛化）：存在性静态可证——需求原文转义出现在 HTML，或
+ *   产物整体具备「交互控件 + 脚本逻辑」→ 通过（存在性语义与静态证据类型匹配）；
+ * - 真实行为断言解析失败：存在性回退不能证明行为 → 待评估（不计通过，审计 P0-02）；
  * - 行为断言：效果词表关键词出现在产物全文（HTML+JS）→ 静态确认通过；未现关键词 →
- *   **待评估不计失败**（防 SVG/canvas/@keyframes 等不落关键词的合法实现被误退回，
- *   真实行为判定交给浏览器行为脚本——它不可用时宁可放过不可误杀）。
+ *   待评估（不计通过不计失败——防 SVG/canvas 等合法实现被误杀，但绝不冒充通过）。
  */
 async function runStaticScenarios(input: RunGwtInput): Promise<GwtTestResult> {
   const requirements = [...readLastSketchRequirements(input.project_id), ...replayRequirements(input.project_id)]
@@ -168,7 +170,12 @@ async function runStaticScenarios(input: RunGwtInput): Promise<GwtTestResult> {
     const name = gwtScenarioName(scenario.item.id, scenario.assertion)
     const { plan } = scenario
     if (plan.presenceFallback || !plan.effect) {
-      // 存在性断言：需求原文转义匹配（模板产物）或整体交互入口（LLM 产物）一票通过
+      if (!isPlaceholderAssertion(scenario.assertion)) {
+        // 真实行为断言解析失败：任意交互入口不能证明行为——待评估（审计 P0-02）
+        unverified.push(name)
+        continue
+      }
+      // 占位断言：存在性语义静态可证（模板原文匹配 / LLM 产物交互入口一票）
       const marker = escapeHtml(scenario.item.description)
       const ok = html !== undefined && (html.includes(marker) || functionalEntry)
       if (ok) {
@@ -181,18 +188,17 @@ async function runStaticScenarios(input: RunGwtInput): Promise<GwtTestResult> {
       }
       continue
     }
-    // 行为断言：关键词静态确认；未命中 → 待评估（不计失败，不触发修复循环）
+    // 行为断言：关键词静态确认；未命中 → 待评估（不计通过不计失败，不冒充全绿）
     const keywordHit = plan.effect.keywords.some((keyword) => artifact.includes(keyword))
     if (keywordHit) {
       passedCount += 1
     } else {
       unverified.push(name)
-      passedCount += 1
     }
   }
 
   return {
-    total_count: failureSummary.length + passedCount,
+    total_count: failureSummary.length + passedCount + unverified.length,
     passed_count: passedCount,
     failed_count: failureSummary.length,
     failure_summary: failureSummary,
@@ -313,7 +319,7 @@ function renderTestReportMarkdown(result: GwtTestResult, sessionId: string): str
     : ''
   const passLine =
     unverifiedCount > 0
-      ? `- 通过：${result.passed_count}/${result.total_count}（其中 ${unverifiedCount} 条为待评估放行，未经行为验证）`
+      ? `- 通过：${result.passed_count}/${result.total_count}；待评估：${unverifiedCount}（未计入通过——需行为验证证据）`
       : `- 通过：${result.passed_count}/${result.total_count}`
   return `# 测试报告
 

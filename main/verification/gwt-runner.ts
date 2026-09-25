@@ -1,6 +1,6 @@
 import type { Browser, Page } from 'playwright'
 import type { GwtTestResult, RunGwtInput } from './gwt-service'
-import { compileStepsForAssertion, needsStepCompilation, runStepScenario, type GwtStep } from './gwt-steps'
+import { compileResetSteps, hasInteractiveControl, needsStepCompilation, runStepScenario, type GwtStep, type StepFailureKind } from './gwt-steps'
 import { readLastSketchRequirements } from '../project/project-service'
 import type { SketchRequirement } from '../coding/sketch-engine'
 import { requirementAssertions, requirementStory, isPlaceholderAssertion } from '../coding/sketch-engine'
@@ -242,6 +242,7 @@ async function executeScenarios(browser: Browser, input: RunGwtInput): Promise<G
   const diagnostics = attachPageDiagnostics(page)
 
   const failureSummary: GwtTestResult['failure_summary'] = []
+  const unverifiedNames: Array<{ scenario: string; reason: string }> = []
   let passedCount = 0
   try {
     // ?mock=1（完整程序渠道，2026-09-06）：AI 功能经 /api/llm 的确定性 mock 应答收口——
@@ -278,31 +279,38 @@ async function executeScenarios(browser: Browser, input: RunGwtInput): Promise<G
 
     for (const scenario of scenarios) {
       // 每个场景独立快照（触发后新出现的诊断归属当前断言）；结局归约统一走
-      // evaluateScenarioOutcome（诊断只附加不替换，不改通过/失败判定）
+      // evaluateScenarioOutcome（诊断只附加不替换，不改通过/失败判定）。
+      // unverified（测试映射缺口）独立归集：不计通过、不算失败（审计 P0-02 互斥态）。
       const before = snapshotDiagnostics(diagnostics)
-      const reason = evaluateScenarioOutcome(await runScenario(page, scenario), diagnostics, before)
-      if (reason === undefined) {
+      const raw = await runScenario(page, scenario)
+      if (raw === undefined) {
         passedCount += 1
         continue
       }
+      if (typeof raw === 'object' && 'unverified' in raw) {
+        unverifiedNames.push({ scenario: scenarioName(scenario.item.id, scenario.assertion), reason: raw.reason })
+        continue
+      }
+      const reason = evaluateScenarioOutcome(typeof raw === 'string' ? raw : raw.reason, diagnostics, before)
       failureSummary.push({
         scenario: scenarioName(scenario.item.id, scenario.assertion),
-        reason,
-        // 失败归类（照抄批·对方 AC L-001 分流 v1）：按 reason 特征标 kind——
-        // precondition（步骤路径前置失败）/ selector（找不到控件，含单步路径）→
-        // 消费侧据此分流；其余缺省 product（进修复轮）。
-        ...(reason.includes('前置步骤失败') ? { kind: 'precondition' as const } : {}),
-        ...(reason.includes('找不到可点击的') || reason.includes('找不到可双击的') ? { kind: 'selector' as const } : {}),
+        reason: reason ?? '场景执行失败（原因缺失）',
+        // 失败归类：显式 kind 优先（步骤路径 typed 透传）；单步路径按 reason 特征
+        // 文本启发式兜底（precondition/selector → 消费侧分流，其余缺省 product）。
+        ...(typeof raw === 'object' && raw.kind ? { kind: raw.kind } : {}),
+        ...(reason?.includes('前置步骤失败') ? { kind: 'precondition' as const } : {}),
+        ...(reason?.includes('找不到可点击的') || reason?.includes('找不到可双击的') ? { kind: 'selector' as const } : {}),
       })
     }
 
     // W1.4：媒体探针失败计入总数（与 failure_summary 长度对齐，防口径分裂）
-    const probeFailures = failureSummary.length - (scenarios.length - passedCount)
+    const probeFailures = failureSummary.length - (scenarios.length - passedCount - unverifiedNames.length)
     return {
       total_count: scenarios.length + probeFailures,
       passed_count: passedCount,
-      failed_count: scenarios.length - passedCount + probeFailures,
+      failed_count: scenarios.length - passedCount - unverifiedNames.length + probeFailures,
       failure_summary: failureSummary,
+      ...(unverifiedNames.length ? { unverified: unverifiedNames.map((u) => u.scenario) } : {}),
     }
   } finally {
     await page.close().catch(() => undefined)
@@ -313,13 +321,22 @@ async function executeScenarios(browser: Browser, input: RunGwtInput): Promise<G
  * 执行单条断言场景。返回 undefined = 通过；返回字符串 = 失败原因（P0 可读）。
  * 行为探针失败的原因要写明「触发→预期效果→实际」三层，供裁判退回与修复定位。
  */
-async function runScenario(page: Page, scenario: ScenarioPlan): Promise<string | undefined> {
+/** 场景结局：undefined=通过；string/{reason,kind}=失败（kind 显式优先，文本启发式兜底）；
+ *  {unverified,reason}=测试映射缺口——待评估：不计通过也不算产品失败（审计 P0-02 互斥态）。 */
+export type ScenarioOutcome = undefined | string | { reason: string; kind?: StepFailureKind } | { unverified: true; reason: string }
+
+async function runScenario(page: Page, scenario: ScenarioPlan): Promise<ScenarioOutcome> {
   if (scenario.plan.presenceFallback || !scenario.plan.trigger || !scenario.plan.effect) {
-    // 存在性兜底（默认断言/无法解析）：渲染文本含功能项故事，或页面提供交互控件
-    const renderedText = await readRenderedText(page)
-    const hasControl = await hasInteractiveControl(page)
-    if (renderedText.includes(requirementStory(scenario.item)) || hasControl) return undefined
-    return `页面缺少功能入口：${requirementStory(scenario.item)}`
+    // 存在性兜底：占位断言（「可见且可交互」类泛化）语义即存在性——静态/控件证明可通过。
+    // 真实行为断言解析失败时，任意可交互控件不能证明行为（审计反例
+    // unparsed-desktop-requirement-unrelated-control）→ unverified 待评估，不放行。
+    if (isPlaceholderAssertion(scenario.assertion)) {
+      const renderedText = await readRenderedText(page)
+      const hasControl = await hasInteractiveControl(page)
+      if (renderedText.includes(requirementStory(scenario.item)) || hasControl) return undefined
+      return `页面缺少功能入口：${requirementStory(scenario.item)}`
+    }
+    return { unverified: true, reason: '断言无法解析为可执行行为（触发/效果缺失），存在性回退不足以证明行为——待评估（需补测试映射或人工核验）' }
   }
 
   // C4（2026-09-11 拍板）：游戏侧探针——位移类断言且产物暴露了 window.__g 通道时，
@@ -333,9 +350,13 @@ async function runScenario(page: Page, scenario: ScenarioPlan): Promise<string |
   // 无可观测变化）走三段式步骤执行器（fill 种子→click→assert-text 绝对断言）；
   // 其余断言保持单步现状（15/16 可过的路径字节级不动）。
   if (scenario.plan.trigger?.kind === 'click' && needsStepCompilation(scenario.assertion)) {
-    const stepResult = await runStepScenario(page, compileStepsForAssertion(scenario.assertion, scenario.plan.trigger.target))
+    const compiled = compileResetSteps(scenario.assertion, scenario.plan.trigger.target)
+    if (compiled.status === 'mapping_blocked') {
+      return { reason: `映射编译失败：${compiled.reason}`, kind: 'mapping' }
+    }
+    const stepResult = await runStepScenario(page, compiled.steps)
     if (!stepResult) return undefined
-    return `${stepResult.reason}（步骤路径：given 填充 → when 触发 → then 绝对断言）`
+    return { reason: `${stepResult.reason}（步骤路径：given 种入 → when 触发 → then 绑定种入域的精确断言）`, kind: stepResult.kind }
   }
 
   const before = await capturePageState(page)
@@ -775,17 +796,4 @@ function checkEffect(scenario: ScenarioPlan, before: PageState, after: PageState
 /** 读取渲染后的页面文本（浏览器解码/执行 JS 后的最终文本）。 */
 async function readRenderedText(page: Page): Promise<string> {
   return page.evaluate(() => (document.body ? document.body.innerText : ''))
-}
-
-/** 页面是否提供可交互控件（按钮/输入框/链接/表单等）。P0-1：只认真可见控件，
- *  隐藏 overlay 里的控件不计——避免「存在性兜底」被 display:none 的假控件骗过。 */
-async function hasInteractiveControl(page: Page): Promise<boolean> {
-  return page.evaluate(() => {
-    const isVisible = (el: Element): boolean => {
-      const rect = el.getBoundingClientRect()
-      const style = window.getComputedStyle(el)
-      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) !== 0
-    }
-    return Array.from(document.querySelectorAll('button, input, select, textarea, a, form')).some(isVisible)
-  })
 }
