@@ -119,7 +119,10 @@ ${renderDocumentSectionSpec()}
 
 七、interface_spec（后端 API 契约，前后端分离真相源）
 - 凡功能涉及数据留存、服务端处理或 AI 调用，逐端点列出：endpoint（一律以 /api/ 开头，平台自动挂载 server/routes）、method（GET/POST/PUT/DELETE，缺省 GET）、request（请求要点，无则写「无」）、response（响应要点，JSON 形态）。
-- **触发判定（重要）**：从验收要点/描述里的数据留存信号词判定——历史、保存、记录、持久、刷新或重开后仍在、清空、收藏、回顾、本地保留（重开后仍在）。命中任意一个就必须有 interface_spec（例：计算器的「计算历史…手动清空才清空」→ GET /api/history + POST /api/history；笔记的「刷新后仍在」→ GET/POST /api/notes）。只有确实无任何数据留存的纯展示产物才省略此字段。
+- **触发判定（2026-09-25 收紧：本地工具不上后端）**：分品类判定——
+  ① web_fullstack（用户明确要做网站/平台）：数据留存信号词（历史、保存、记录、持久、刷新或重开后仍在、清空、收藏、回顾）命中即必须有 interface_spec（例：记账应用的「记录每笔收支并持久保存」→ GET/POST /api/records）。
+  ② personal_tool / desktop_tool / game / ai_app（本地工具品类）：留存词**不再触发**后端——本地持久化（localStorage）是合法一等实现，省略 interface_spec；只有需求明确要求跨端/服务端语义（多端同步、云端、共享给他人、账号、多人协作）时才编 interface_spec。
+  ③ 市调灵感（「参考市面做法」类）不改变形态判定——灵感只在本地产物能力内采纳（纸带式记录 → 本地留存展示，不上后端）。
 - 这是前后端共同遵守的契约：编程 Agent 按它实现 server/routes，终验按它做存活检查；端点粒度对齐功能项主流程，最多 6 条，宁缺毋滥。
 
 示例（家庭记账本，功能项 F-001 记录收入与支出 / F-002 展示本月结余；document 节选关键章节）：

@@ -421,6 +421,25 @@ function renderRequirementSummary(item: SketchRequirement): string {
 // 词表互指——改任一处须同步另一处（措辞语汇允许行为化差异，词面集合保持一致）。
 const PERSISTENCE_SIGNAL_RE = /历史|保存|持久|刷新|重开|清空|收藏|回顾|记录/
 
+/** 强后端信号（2026-09-25 用户拍板「向 Proma-Easy 靠齐」，随手计算器案 a5105491/efea7b4a
+ * 根治）：需求明确要求跨端/服务端语义（多端同步/云端/共享/账号/多人）才升后端。
+ * 背景：此前「记录/历史」等留存词命中即编 interface_spec（LLM 触发判定与派生兜底
+ * 同源），市调灵感一条「纸带式记录」就能把 personal_tool 本地计算器抬升成
+ * Express 全栈工程——全家桶骨架稀释生成轮数（107 轮中 60 次 read），
+ * 违背本地工具品类语义。 */
+const STRONG_BACKEND_SIGNAL_RE = /多端|多设备|同步|云端|云同步|共享|分享给|账号|注册登录|多人|服务端|后端/
+
+/** 本地优先品类：留存信号词不催生后端（localStorage 持久化是合法一等实现）；
+ *  web_fullstack（用户明确要做网站/平台）保留原信号词判定。 */
+const LOCAL_FIRST_TYPES: ReadonlySet<string> = new Set(['personal_tool', 'desktop_tool', 'game', 'ai_app'])
+
+/** 本地优先判定（deriveInterfaceSpec / requirementImpliesBackend 共用单点）：
+ * 本地优先品类 ∧ 无强后端信号 → 留存腿豁免。 */
+function localFirstPersistenceExempt(texts: string[], templateType?: string): boolean {
+  if (!templateType || !LOCAL_FIRST_TYPES.has(templateType)) return false
+  return !texts.some((t) => STRONG_BACKEND_SIGNAL_RE.test(t))
+}
+
 /** Phase 9 W1.2（2026-09-12，B 站播放器案 214397c3）：外部服务信号——需求要求直连/
  *  在线消费第三方平台（视频/语音/登录态）时，前端无法也不得直连外网（CSP
  *  connect-src 'self'），必须由产物服务端做同源代理。此类需求此前不触发任何契约
@@ -454,8 +473,9 @@ export function deriveInterfaceSpec(requirements: SketchRequirement[], templateT
   if (templateType === 'game' && gameDeriveExemptEnabled()) return undefined
   const texts = requirements.map((item) => `${item.description} ${item.story ?? ''}`)
   const endpoints: InterfaceEndpoint[] = []
-  // 留存腿（原有语义不变）：records 双端点
-  if (texts.some((t) => PERSISTENCE_SIGNAL_RE.test(t))) {
+  // 留存腿：records 双端点（2026-09-25 收紧——本地优先品类无强后端信号时豁免，
+  // 留存走 localStorage 合法；外部服务腿不豁免：CSP 直连第三方仍需产物服务端代理）
+  if (texts.some((t) => PERSISTENCE_SIGNAL_RE.test(t)) && !localFirstPersistenceExempt(texts, templateType)) {
     endpoints.push(
       { endpoint: '/api/records', method: 'GET', request: '无', response: '{records:[…]}（业务资源，实现于 server/routes/，数据落 data/）' },
       { endpoint: '/api/records', method: 'POST', request: '{…业务字段}', response: '{ok:true,…}' },
@@ -476,8 +496,12 @@ export function requirementImpliesBackend(item: SketchRequirement, templateType?
   // C1b 联动：game 豁免开启时轻留存不再催生后端，徽标同步不亮
   if (templateType === 'game' && gameDeriveExemptEnabled()) return false
   const text = `${item.description} ${item.story ?? ''}`
-  // W1.2：外部服务信号同样蕴含后端（同源代理是必经路径），徽标同步亮
-  return PERSISTENCE_SIGNAL_RE.test(text) || EXTERNAL_SERVICE_SIGNAL_RE.test(text)
+  // 2026-09-25 本地优先豁免：留存词不催生后端（品类语义，与 deriveInterfaceSpec 单点同源）。
+  // 判定序：外部服务信号独立蕴含后端（CSP 同源代理必经）——先于留存豁免检查；
+  // 留存词仅在无豁免时催生（voice 案：「语音输入转文字保存笔记」external 亮、留存不亮）
+  if (EXTERNAL_SERVICE_SIGNAL_RE.test(text)) return true
+  if (PERSISTENCE_SIGNAL_RE.test(text) && localFirstPersistenceExempt([text], templateType)) return false
+  return PERSISTENCE_SIGNAL_RE.test(text)
 }
 
 /** C1b 开关：game 类豁免留存信号兑底派生（含 C1a 徽标与 R-DATA-01 措辞联动）。缺省 off=字节级现状。 */

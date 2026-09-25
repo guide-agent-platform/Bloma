@@ -121,10 +121,10 @@ describe('C1b game 豁免留存派生（BLOMA_GAME_DERIVE_EXEMPT，2026-09-11 �
     else process.env.BLOMA_GAME_DERIVE_EXEMPT = previousEnv
   })
 
-  it('开关 off：game 类照派（字节级现状——街机游戏仍升级前后端）', () => {
+  it('开关 off：game 类留存腿豁免（2026-09-25 拍板「本地工具不上后端」——game 属本地优先品类，C1b 开关被品类语义覆盖）', () => {
     delete process.env.BLOMA_GAME_DERIVE_EXEMPT
-    expect(deriveInterfaceSpec(shmup, 'game')).toBeDefined()
-    expect(requirementImpliesBackend(shmup[0], 'game')).toBe(true)
+    expect(deriveInterfaceSpec(shmup, 'game')).toBeUndefined()
+    expect(requirementImpliesBackend(shmup[0], 'game')).toBe(false)
   })
 
   it('开关 on：game 类轻留存豁免——不派生契约、徽标不亮；LLM 明确报告不受影响（调用方 LLM 优先逻辑）', () => {
@@ -136,7 +136,8 @@ describe('C1b game 豁免留存派生（BLOMA_GAME_DERIVE_EXEMPT，2026-09-11 �
   it('开关 on 但非 game：照派照亮（豁免只限 game；重数据工具类项目完整程序口径不变）', () => {
     process.env.BLOMA_GAME_DERIVE_EXEMPT = '1'
     expect(deriveInterfaceSpec(shmup, 'web_fullstack')).toBeDefined()
-    expect(requirementImpliesBackend(shmup[0], 'personal_tool')).toBe(true)
+    // 2026-09-25 拍板：personal_tool 同属本地优先——留存徽标不再亮（localStorage 合法）
+    expect(requirementImpliesBackend(shmup[0], 'personal_tool')).toBe(false)
     // 不传 type（旧调用兼容）：照派
     expect(deriveInterfaceSpec(shmup)).toBeDefined()
   })
@@ -167,8 +168,8 @@ describe('W1.2 外部服务信号派生（Phase 9，B 站播放器案 214397c3�
 
   it('语音输入词命中（输入侧才触发；语音播报类纯前端词不在词表）', () => {
     const derived = deriveInterfaceSpec(voice, 'personal_tool')!
-    // 「保存笔记」同时命中留存 → 三端点合并派生
-    expect(derived.some((ep) => ep.endpoint === '/api/records')).toBe(true)
+    // 2026-09-25 拍板：personal_tool 留存腿豁免（保存笔记走 localStorage）——只派生外部服务代理端点
+    expect(derived.some((ep) => ep.endpoint === '/api/records')).toBe(false)
     expect(derived.some((ep) => ep.endpoint === '/api/external')).toBe(true)
     expect(requirementImpliesBackend(voice[0], 'personal_tool')).toBe(true)
   })
@@ -181,5 +182,31 @@ describe('W1.2 外部服务信号派生（Phase 9，B 站播放器案 214397c3�
     expect(requirementImpliesBackend(bili[0], 'personal_tool')).toBe(true)
     // 故事字段命中同口径
     expect(requirementImpliesBackend({ id: 'F-002', description: '视频管理', story: '扫码登录后同步收藏' }, 'personal_tool')).toBe(true)
+  })
+})
+
+describe('本地优先豁免（2026-09-25 拍板「向 Proma-Easy 靠齐」——随手计算器案根治）', () => {
+  const calculatorTape = [{ id: 'F-009', description: '参考市面做法：PCalc 纸带式记录' }]
+  const strongBackend = [{ id: 'F-001', description: '记账数据多端同步，云端保存' }]
+  const webLedger = [{ id: 'F-001', description: '记录每笔收入与支出并持久保存' }]
+
+  it('灵感劫持案原文：personal_tool 计算器「纸带式记录」零派生（localStorage 合法）', () => {
+    expect(deriveInterfaceSpec(calculatorTape, 'personal_tool')).toBeUndefined()
+    expect(requirementImpliesBackend(calculatorTape[0], 'personal_tool')).toBe(false)
+  })
+
+  it('强后端词（多端同步/云端）不受豁免：照派照亮', () => {
+    expect(deriveInterfaceSpec(strongBackend, 'personal_tool')).toBeDefined()
+    expect(requirementImpliesBackend(strongBackend[0], 'personal_tool')).toBe(true)
+  })
+
+  it('web_fullstack 品类保留原信号词判定（记录/保存照派）', () => {
+    expect(deriveInterfaceSpec(webLedger, 'web_fullstack')).toBeDefined()
+    expect(requirementImpliesBackend(webLedger[0], 'web_fullstack')).toBe(true)
+  })
+
+  it('desktop_tool 同属本地优先（桌面线品类语义一致）', () => {
+    expect(deriveInterfaceSpec([{ id: 'F-1', description: '剪贴板历史记录' }], 'desktop_tool')).toBeUndefined()
+    expect(requirementImpliesBackend({ id: 'F-1', description: '剪贴板历史记录' }, 'desktop_tool')).toBe(false)
   })
 })

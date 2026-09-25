@@ -238,17 +238,17 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
     mocks.generateLoopPlan.mockResolvedValue(SAMPLE_PLAN)
     try {
       const run = await runOnce('longterm', REQUIREMENTS)
-      // 两态判定：REQUIREMENTS「记录收入与支出」命中留存信号词 → deriveInterfaceSpec 派生
-      // records 契约 → interface_spec 非空 → real-fullstack（Express 真实工程；与旧路径派生口径一致）
-      expect(run.decisions).toContain('真实脚手架变体=real-fullstack')
-      // 骨架地图换包：real-fullstack 含 server.js/package.json 工程件；不含旧包的 _example.js（两者互斥可辨）
+      // 2026-09-25 拍板「本地工具不上后端」：本项目判型 personal_tool（本地记账工具），
+      // 「记录」留存词被本地优先豁免 → 零契约派生 → real-static（测试名自此名副其实）。
+      // 旧语义（留存词→records 契约→real-fullstack）已废——随手计算器案正是其过度工程实证。
+      expect(run.decisions).toContain('真实脚手架变体=real-static')
+      // 骨架地图换包：real-static 纯静态件（无 server.js/package.json——两者互斥可辨）
       expect(run.system).toContain('工程骨架已就位')
-      expect(run.system).toContain('server.js')
       expect(run.system).not.toContain('server/routes/_example.js')
-      // 交接面治理：real-fullstack 的 loop system【前后端分离】段换 Express 口径（旧 CJS
-      // 挂载约定不再与背板锚 Express 口径同时注入——狗粮实锤模型曾按旧约定自建挂载器）
-      expect(run.system).toContain('【前后端分离·Express】')
-      expect(run.system).not.toContain('文件名即路由前缀')
+      // 2026-09-25 拍板后本场景为 real-static（本地工具留存豁免→零契约）：
+      // 纯静态产物无【前后端分离·Express】段（该段仅 fullstack 变体注入）；
+      // 旧 CJS 挂载约定照旧不注入
+      expect(run.system).not.toContain('【前后端分离·Express】')
     } finally {
       if (previous === undefined) delete process.env.BLOMA_REAL_SCAFFOLD
       else process.env.BLOMA_REAL_SCAFFOLD = previous
