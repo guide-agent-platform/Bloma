@@ -578,11 +578,30 @@ async function dispatchTrigger(page: Page, trigger: AssertionPlan['trigger']): P
           ([wordSource, symSource]) => new RegExp(wordSource, 'i').test(target) && new RegExp(symSource, 'i').test(label),
         )
       })
-      if (!hit) return false
+      if (!hit) {
+        // 失败回喂（2026-09-25 对照审核落地）：枚举可见控件的识别标签进失败原因——
+        // 修复轮按清单直接对齐（改断言目标或补标注），一次收敛；竞品 selector-wait
+        // 回炉重映射的轻量等价。清单去重、单标签限长、上限 24 项防刷屏。
+        const labels = controls
+          .filter((el) => isVisible(el))
+          .map((el) => {
+            const text = (el.textContent ?? '').trim()
+            if (text.length > 0) return text.slice(0, 20)
+            const hints = labelHintsOf(el)
+            return (hints.split(/\s+/)[0] ?? '').slice(0, 20)
+          })
+          .filter((label) => label.length > 0)
+        return [...new Set(labels)].slice(0, 24)
+      }
       hit.click()
       return true
     }, [trigger.target, CLICK_SYMBOL_SYNONYMS] as const)
-    if (!clicked) return `找不到可点击的「${trigger.target}」控件，断言无法执行`
+    if (clicked !== true) {
+      const inventory = Array.isArray(clicked) && clicked.length > 0
+        ? `；页面可见控件：${clicked.join('、')}——请把断言目标改为清单中的实际控件（或为其补 title/aria-label 标注）`
+        : '；页面无可见可点击控件'
+      return `找不到可点击的「${trigger.target}」控件${inventory}`
+    }
     return undefined
   }
   if (trigger.kind === 'dblclick' && trigger.target) {
@@ -608,11 +627,28 @@ async function dispatchTrigger(page: Page, trigger: AssertionPlan['trigger']): P
           ([wordSource, symSource]) => new RegExp(wordSource, 'i').test(target) && new RegExp(symSource, 'i').test(label),
         )
       })
-      if (!hit) return false
+      if (!hit) {
+        // 失败回喂（与 click 分支同源）：可见控件清单进失败原因
+        const labels = controls
+          .filter((el) => isVisible(el))
+          .map((el) => {
+            const text = (el.textContent ?? '').trim()
+            if (text.length > 0) return text.slice(0, 20)
+            const hints = labelHintsOf(el)
+            return (hints.split(/\s+/)[0] ?? '').slice(0, 20)
+          })
+          .filter((label) => label.length > 0)
+        return [...new Set(labels)].slice(0, 24)
+      }
       hit.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
       return true
     }, [trigger.target, CLICK_SYMBOL_SYNONYMS] as const)
-    if (!hit) return `找不到可双击的「${trigger.target}」目标，断言无法执行`
+    if (hit !== true) {
+      const inventory = Array.isArray(hit) && hit.length > 0
+        ? `；页面可见控件：${hit.join('、')}——请把断言目标改为清单中的实际控件（或为其补 title/aria-label 标注）`
+        : '；页面无可见可点击控件'
+      return `找不到可双击的「${trigger.target}」目标${inventory}`
+    }
     return undefined
   }
   if (trigger.kind === 'fill' && trigger.target) {
