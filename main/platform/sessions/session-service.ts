@@ -93,6 +93,74 @@ export function recordSessionActivity(
 }
 
 /** 列出会话记录；可按项目过滤，按最近活跃时间倒序 */
+/**
+ * 会话多轮历史读取（2026-09-25 自由度批上提自 orchestration/dispatch-support——修复轮
+ * 续接消费；真身唯一，dispatch-support re-export 保旧消费者零改动）。
+ * 读 JSONL 最近 N 轮 user/assistant 文本：过滤 [terminal]/system（例外 [decision-card]
+ * 转可读回灌）、「还没好」类冗余回复与连续重复轮。
+ */
+export const HISTORY_WINDOW_TURNS = 10
+
+function extractTurnText(blocks: Array<{ type: string; text?: string }>): string {
+  return blocks
+    .filter((block) => block.type === 'text')
+    .map((block) => block.text ?? '')
+    .join('')
+}
+
+/** 检测「还没好/还在生成」类冗余助手回复（历史回灌的自我强化源过滤）。 */
+export function isStallReply(text: string): boolean {
+  if (text.length > 50) return false
+  return /(还没好|还没呢|还没完成|还没生成完|还在生成|还在跑|还在做|还在处理|后台还在|看不到进度|看不到后台|请稍等|稍等一下|马上就好)/.test(text)
+}
+
+export function loadConversationHistory(
+  sessionId: string,
+  limit = HISTORY_WINDOW_TURNS,
+): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
+  const path = getAgentSessionPath(sessionId)
+  if (!existsSync(path)) return []
+  const turns: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = []
+  for (const line of readFileSync(path, 'utf8').split('\n')) {
+    if (!line.trim()) continue
+    let message: { role?: string; content?: unknown }
+    try {
+      message = JSON.parse(line) as { role?: string; content?: unknown }
+    } catch {
+      continue
+    }
+    const blocks = Array.isArray(message.content) ? (message.content as Array<{ type: string; text?: string }>) : []
+    const text = typeof message.content === 'string' ? message.content : extractTurnText(blocks)
+    if (message.role === 'system') {
+      if (text.startsWith('[decision-card]')) {
+        turns.push({ role: 'system', content: `【上轮已向用户出示的选项】${text.slice('[decision-card]'.length).trim()}` })
+      }
+      continue
+    }
+    if (message.role !== 'user' && message.role !== 'assistant') continue
+    if (!text || text.startsWith('[terminal]')) continue
+    turns.push({ role: message.role, content: text })
+  }
+  const filtered = turns.filter((turn) => {
+    if (turn.role === 'assistant' && isStallReply(turn.content)) return false
+    return true
+  }).filter((turn, i, arr) => {
+    const previous = arr[i - 1]
+    return !(previous && previous.role === turn.role && previous.content === turn.content)
+  })
+  let start = 0
+  let keptTurns = 0
+  for (let i = filtered.length - 1; i >= 0; i--) {
+    if (filtered[i]!.role === 'system') continue
+    keptTurns++
+    if (keptTurns > limit) {
+      start = i + 1
+      break
+    }
+  }
+  return filtered.slice(start)
+}
+
 export function listSessions(input: AgentListSessionsInput): AgentListSessionsResult {
   const sessions = readSessions().sessions
     // 委派子会话（source_delegation_id 非空：审查/协作的审计件）不是用户对话——不出现在

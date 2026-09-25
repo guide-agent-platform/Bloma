@@ -428,73 +428,10 @@ export async function* anthropicMessagesQuery(prompt: string, options: SDKQueryO
  * 窗口内原文承载「最近在聊什么」；长期不变量（用户约束）不靠窗口，由
  * scanSessionConstraints 全量扫描 + project.constraints 背板注入承载。
  */
-export const HISTORY_WINDOW_TURNS = 10
-
-/**
- * 读取会话 JSONL 中最近 N 轮 user/assistant 对话文本，作为 SDK 多轮历史。
- * 排除内部终态标记（[terminal]）与 system 消息——唯一例外是 [decision-card]
- * 选项行（D2 修复）：转成模型可读措辞回灌，否则模型看不到自己上轮给过什么
- * 选项，会原样重问甚至把具体选项退化成抽象类目。其余 system 行
- * （[decision]/[reconcile]/[channel-switch]）维持过滤，防止历史污染模型上下文。
- */
-export function loadConversationHistory(sessionId: string, limit = HISTORY_WINDOW_TURNS): ConversationTurn[] {
-  const path = getAgentSessionPath(sessionId)
-  if (!existsSync(path)) return []
-  // 本函数产出的轮次 content 一律是提取后的纯文本（loop 的块数组轮次不经此路径）
-  const turns: Array<{ role: ConversationTurn['role']; content: string }> = []
-  for (const line of readFileSync(path, 'utf8').split('\n')) {
-    if (!line.trim()) continue
-    let message: AgentMessage
-    try {
-      message = JSON.parse(line) as AgentMessage
-    } catch {
-      continue
-    }
-    if (message.role === 'system') {
-      const text = extractText(message.content)
-      if (text.startsWith('[decision-card]')) {
-        turns.push({
-          role: 'system',
-          content: `【上轮已向用户出示的选项】${text.slice('[decision-card]'.length).trim()}`,
-        })
-      }
-      continue
-    }
-    if (message.role !== 'user' && message.role !== 'assistant') continue
-    const text = extractText(message.content)
-    if (!text || text.startsWith('[terminal]')) continue
-    turns.push({ role: message.role, content: text })
-  }
-
-  // 过滤「还没好/还在生成」类冗余助手轮次 + 去重连续相同助手回复（P1）：
-  // 这些历史被回灌后会让模型延续「还没好/后台还在跑」的错误阶段认知（自我强化）。
-  const filtered: ConversationTurn[] = []
-  for (const turn of turns) {
-    if (turn.role === 'assistant' && isStallReply(turn.content)) continue
-    const previous = filtered[filtered.length - 1]
-    if (previous && previous.role === turn.role && previous.content === turn.content) continue
-    filtered.push(turn)
-  }
-  // 窗口只按 user/assistant 轮计数：decision-card 回灌行不占窗口名额，跟随相邻轮
-  // 进出窗口——所附着的对话被挤出窗口时一并丢弃，防止孤立的选项行悬空无上下文
-  let start = 0
-  let keptTurns = 0
-  for (let i = filtered.length - 1; i >= 0; i--) {
-    if (filtered[i].role === 'system') continue
-    keptTurns++
-    if (keptTurns > limit) {
-      start = i + 1
-      break
-    }
-  }
-  return filtered.slice(start)
-}
-
-/** 检测「还没好/还在生成」类冗余助手回复（P1：自我强化源，需从历史中过滤）。 */
-export function isStallReply(text: string): boolean {
-  if (text.length > 50) return false
-  return /(还没好|还没呢|还没完成|还没生成完|还在生成|还在跑|还在做|还在处理|后台还在|看不到进度|看不到后台|请稍等|稍等一下|马上就好)/.test(text)
-}
+// 2026-09-25 自由度批：loadConversationHistory/isStallReply/HISTORY_WINDOW_TURNS 真身
+// 上提 platform/sessions/session-service（修复轮续接消费，R1：coding 不得向上 import
+// orchestration）；此处 re-export 保旧消费者零改动。
+export { loadConversationHistory, isStallReply, HISTORY_WINDOW_TURNS } from '../../platform/sessions/session-service'
 
 export function shouldUseGuideAgent(stage: AgentSendMessageInput['current_stage']): boolean {
   return stage === 'clarifying' || stage === 'blocked_for_user_decision'

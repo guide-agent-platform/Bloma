@@ -66,6 +66,7 @@ import { buildAgentTools } from '../../agent/tools/agent-tools'
 import { disposeParentDelegationState, registerParentLoopContext, setChildToolsBuilder } from '../../agent/delegation/agent-collaboration'
 import { categoryTemperature, resolveGenerationMaxTokens } from '../../platform/llm/model-resolution'
 import type { SDKQuery, ToolDefinition } from '../../orchestration/orchestrator'
+import { loadConversationHistory } from '../../platform/sessions/session-service'
 import { resolvePrdBackplane } from '../../guide/pipeline'
 
 // R3 迁移过渡：resolvePrdBackplane 已迁 guide/pipeline（向导群·PRD 收敛管线），
@@ -178,6 +179,9 @@ export async function repairAndRetest(input: AgentLoopPostTestingInput, testResu
     query: input.query,
     tasks,
     round,
+    // 自由度批（2026-09-25）：修复续接（搬 Proma-Easy「修复优先续接不重派」）——
+    // 会话历史重放进 loop，模型带完整工作记忆修复，不再从零重读文件
+    historyTurns: loadConversationHistory(input.session_id, 30), // 窗口 30：生成轮工作记忆主体覆盖（默认 10 偏窄）
     // R1-providers（狗粮 7601e5ae #496）：上轮预算耗尽时被信道丢弃的写类意图回喛——
     // 只在存在时注入（缺省零注入字节级不变）
     ...(input.loop?.termination_detail?.dropped_tool_intents?.length
@@ -417,6 +421,8 @@ export async function runBlockedTestRepair(input: {
     query: input.query,
     tasks,
     round,
+    // 自由度批（2026-09-25）：修复续接（同上——历史重放带完整工作记忆）
+    historyTurns: loadConversationHistory(input.session_id, 30), // 窗口 30：生成轮工作记忆主体覆盖（默认 10 偏窄）
     buildSystem: (editFormat) => buildLoopSystemWithOverride(backplane, editFormat, input.project_id, skeletonMap, undefined, moduleMap),
     // Phase 3 B3：修复轮本轮锚（开关 off=零注入字节级现状）；完成证据=失败断言原文
     ...(roundAnchorEnabled() ? { roundAnchor: buildRepairRoundAnchor(backplane, tasks.map((task) => task.location ?? task.claim)) } : {}),

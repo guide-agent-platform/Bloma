@@ -22,7 +22,7 @@ import { renderRoundAnchorBlock, roundAnchorEnabled } from '../model/prd-backpla
 import type { BuildGateResult } from './build-gate'
 import type { ProjectMode, AgentEvent } from '../../shared/types'
 import type { ThinkingLevel } from '../../shared/reasoning-profile'
-import type { SDKQuery } from '../orchestration/orchestrator'
+import type { ConversationTurn, SDKQuery } from '../orchestration/orchestrator'
 import { runAgentLoop, loopCheckpointEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../agent/loop/agent-loop'
 import { buildAgentTools } from '../agent/tools/agent-tools'
 import { buildDomainTools, domainToolOptionsDefaults } from './tool-handlers'
@@ -183,10 +183,12 @@ export function repairStrategyForRound(round: number): RepairStrategy {
 export function buildRepairModeSection(round: number): string {
   const strategy = repairStrategyForRound(round)
   const zeroEditGuard = '本轮结束时必须存在至少一次 write_file/edit_file——零编辑的修复轮视为无效（会被回退不计入预算）。'
+  const continuationNote = '【续接】你的此前工作轮次（含上一轮生成/修复的完整记录）已附在历史中——基于已有理解直接继续，不要从零重读全部文件。'
   if (strategy === 're-read-design') {
     return [
       '【修复模式·策略二：重读设计】上一轮定向修复未收敛——先重读项目锚（PRD 需求与验收要点）与失败场景涉及的设计意图，列出「设计要求 vs 当前实现」的具体偏差，再按偏差逐项修改。',
       '不要重新生成整个项目，不要改动修复任务卡之外的任何文件或功能。',
+      continuationNote,
       zeroEditGuard,
     ].join('\n')
   }
@@ -194,12 +196,14 @@ export function buildRepairModeSection(round: number): string {
     return [
       '【修复模式·策略三：换实现路径】前两轮同思路修复仍未收敛——放弃在原处反复微调，为失败场景换一种实现路径（不同的 DOM 结构 / 不同的算法 / 不同的模块组织），改完说明新路径与旧路径的差异。',
       '不要重新生成整个项目，不要改动修复任务卡之外的任何文件或功能。',
+      continuationNote,
       zeroEditGuard,
     ].join('\n')
   }
   return [
     '【修复模式·策略一：定向修复】当前处于定向修复轮：下方的修复任务卡是本轮全部工作，完成后简要总结即可。',
     '不要重新生成整个项目，不要改动修复任务卡之外的任何文件或功能。',
+    continuationNote,
     zeroEditGuard,
   ].join('\n')
 }
@@ -225,6 +229,10 @@ export interface RepairLoopInput {
   tasks: RepairTask[]
   /** 当前修复轮次（从 1 起；预算计数落 project.test_repair_count） */
   round: number
+  /** 续接历史（2026-09-25 自由度批·搬 Proma-Easy「修复优先续接不重派」语义）：
+   *  调用方经 loadConversationHistory 收集的会话轮次——模型带着完整工作记忆修复，
+   *  不再每轮从零重读文件（historyTurns 是 runAgentLoop 既有续跑机制，零新原理）。 */
+  historyTurns?: ConversationTurn[]
   /** system 组装器（编程编排器注入 buildLoopSystemWithOverride 同款背板锚定 + 骨架地图；
    * 参数 = 修复轮解析出的 editFormat；依赖注入防与编排器循环 import） */
   buildSystem: (editFormat: 'diff' | 'whole') => string
@@ -314,6 +322,7 @@ export async function runRepairLoop(input: RepairLoopInput): Promise<RepairRound
   const scopePaths = repairScopeEnabled() && input.authorizedWritePaths && input.authorizedWritePaths.length > 0 ? input.authorizedWritePaths : undefined
   loopResult = await runAgentLoop({
       system: `${input.buildSystem(editFormat)}\n\n${buildRepairModeSection(input.round)}${roundAnchorBlock}${changeContractBlock}`,
+      historyTurns: input.historyTurns,
       // Phase 10 W1-3：修复任务卡尾部追加项目侦察包（BLOMA_CONTEXT_PACK off=字节级）
       task: appendContextPack({ projectId: input.project_id, sessionId: input.session_id, task: renderRepairTaskCard(input.tasks, input.checkpointContext, input.droppedToolIntents) }),
       // 窄任务小预算：web_research 限 2 防长 loop 无节制外呼（主 loop 为 4）
