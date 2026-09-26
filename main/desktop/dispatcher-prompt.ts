@@ -41,6 +41,8 @@ export interface DispatcherPromptContext {
   workspaceHint?: string
   /** 已完成阶段 id 列表（进度感知；缺省=空——接线层按权威阶段推导）。 */
   completedPhases?: string[]
+  /** 需求摘要（首跑修复：PRD 背板 → 调度员与子会话的唯一需求注入路径；缺省不出需求段）。 */
+  requirementsDigest?: string
 }
 
 /**
@@ -68,6 +70,11 @@ export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherProm
         : '') +
       '你的职责是编排本阶段工作：委派、等待、核验、与用户交互；阶段内的时机与参数由你自主决策。',
   )
+
+  // 1b. 项目需求（首跑修复：此前调度员与子会话均无需求注入路径——PRD 背板摘要由此进入上下文）
+  if (ctx.requirementsDigest) {
+    sections.push(`【项目需求（唯一真相源，不得改写）】\n${ctx.requirementsDigest}`)
+  }
 
   // 2. 任务书
   sections.push(`【本阶段任务书】\n${rendered.text}`)
@@ -97,6 +104,30 @@ export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherProm
   }
 
   return sections.join('\n\n')
+}
+
+/**
+ * 子会话基底 system（桌面线 worker 视角，2026-09-26 首跑修复）：项目/阶段/产物目录/
+ * 阶段约束/需求摘要——不含调度员纪律段（「不写文件/靠委派」是调度员专属规则，
+ * 子会话恰恰负责落盘）。委派机制会在其上再叠 role 说明与任务（buildChildSystemPrompt）。
+ */
+export function buildDesktopChildBaseSystem(
+  node: PhaseNode,
+  ctx: { projectName: string; requirementsDigest?: string },
+): string {
+  const parts: string[] = [
+    `你正在为「${ctx.projectName}」项目工作：Windows 桌面品类交付流水线，当前阶段「${node.title}」（${node.id}）。`,
+    node.outputPath
+      ? `本阶段产物目录：${node.outputPath}/（相对项目根目录）。`
+      : '本阶段产物写入项目根目录（相对路径）。',
+  ]
+  if (node.constraints.length > 0) {
+    parts.push(`【阶段约束】\n${node.constraints.map((constraint, index) => `${index + 1}. ${constraint}`).join('\n')}`)
+  }
+  if (ctx.requirementsDigest) {
+    parts.push(`【项目需求（唯一真相源，不得改写；清单外新功能一律不做）】\n${ctx.requirementsDigest}`)
+  }
+  return parts.join('\n\n')
 }
 
 /**

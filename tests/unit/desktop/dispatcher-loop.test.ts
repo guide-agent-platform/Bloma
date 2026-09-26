@@ -9,7 +9,7 @@
  *
  * 密闭性：BLOMA_DESKTOP_DISPATCH 显式设/还原（陷阱 53）。
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SDKMessage } from '../../../shared/types'
 import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../../main/orchestration/orchestrator'
 import type { AgentLoopTool } from '../../../main/agent/loop/agent-loop'
@@ -22,6 +22,18 @@ import {
   type DesktopDispatchRunInput,
 } from '../../../main/desktop/dispatcher-loop'
 import { DESKTOP_PHASES } from '../../../main/desktop/dispatcher-phases'
+
+// ── 委派接线探测（2026-09-26 首跑修复）：agent-collaboration 注册面做 spy（call-through 保真）──
+vi.mock('../../../main/agent/delegation/agent-collaboration', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../../../main/agent/delegation/agent-collaboration')>()
+  return {
+    ...mod,
+    registerParentLoopContext: vi.fn(mod.registerParentLoopContext),
+    unregisterParentLoopContext: vi.fn(mod.unregisterParentLoopContext),
+    disposeParentDelegationState: vi.fn(mod.disposeParentDelegationState),
+    setChildToolsBuilder: vi.fn(mod.setChildToolsBuilder),
+  }
+})
 
 // ── 环境密闭（开关） ──
 const SWITCH = 'BLOMA_DESKTOP_DISPATCH'
@@ -365,5 +377,62 @@ describe('装配面与累积器单元', () => {
       [{ type: 'text', text: '第一轮前半' }],
       [{ type: 'text', text: '第二轮后半' }],
     ])
+  })
+})
+
+describe('委派通道接线腿（2026-09-26 首跑修复）', () => {
+  it('运行期注册父循环上下文 + 子工具构建器，收尾 dispose（delegate_agent 可用性）', async () => {
+    const ac = await import('../../../main/agent/delegation/agent-collaboration')
+    const registerSpy = vi.mocked(ac.registerParentLoopContext)
+    const builderSpy = vi.mocked(ac.setChildToolsBuilder)
+    const disposeSpy = vi.mocked(ac.disposeParentDelegationState)
+    registerSpy.mockClear()
+    builderSpy.mockClear()
+    disposeSpy.mockClear()
+
+    const { query, receivedMessages } = scriptedQuery([[textMessage('完成')]])
+    const result = await runDesktopDispatcherLoop(baseInput({
+      query,
+      requirementsDigest: 'F-001 [P0] 托盘倒计时工具',
+      artifactExists: allExist,
+    }))
+    expect(result.status).toBe('completed')
+
+    // 父上下文：会话 id + 关键配置项（delegate_agent 取用面）
+    expect(registerSpy).toHaveBeenCalledTimes(1)
+    expect(registerSpy).toHaveBeenCalledWith('session-desktop', expect.objectContaining({
+      delegationMaxTurns: 12,
+      permissionMode: 'allow-all',
+    }))
+    const context = registerSpy.mock.calls[0]![1]
+    // 子会话基底带需求摘要（worker 能看到 PRD 需求）
+    expect(context.system).toContain('【项目需求')
+    expect(context.system).toContain('F-001')
+
+    // 子工具构建器已装配且能产出写工具（worker 落盘产物）
+    expect(builderSpy).toHaveBeenCalled()
+    const builder = builderSpy.mock.calls[builderSpy.mock.calls.length - 1]![0]
+    const childTools = builder('proj-desktop', 'implement', 'diff')
+    expect(childTools.some((tool) => tool.name === 'write_file')).toBe(true)
+
+    // 调度员自身 system 也带需求段（首轮 messages 的 system 轮）
+    const systemTurn = receivedMessages[0]?.find((turn) => turn.role === 'system')
+    expect(String(systemTurn?.content ?? '')).toContain('【项目需求')
+
+    // 收尾注销（父 loop 结束即清）
+    expect(disposeSpy).toHaveBeenCalledWith('session-desktop')
+  })
+
+  it('loop 异常（断流）也不漏 dispose（finally 语义）', async () => {
+    const ac = await import('../../../main/agent/delegation/agent-collaboration')
+    const disposeSpy = vi.mocked(ac.disposeParentDelegationState)
+    disposeSpy.mockClear()
+    const broken: SDKQuery = async function* () {
+      yield textMessage('半截')
+      throw new Error('STREAM_BROKEN: delegation-leg')
+    }
+    const result = await runDesktopDispatcherLoop(baseInput({ query: broken }))
+    expect(result.status).toBe('error')
+    expect(disposeSpy).toHaveBeenCalledWith('session-desktop')
   })
 })

@@ -11,6 +11,8 @@
  *   3. 工具面：只读五件（buildAgentTools research 裁剪筛选）+ 委派族（parent 全量）
  *      + web_research + 测试注入位（toolsOverride）；每个工具 execute 前过
  *      checkDispatcherToolGate 围栏（write_file/edit_file 即便误装配也被硬拦）；
+ *   3b. 委派接线（2026-09-26 首跑修复）：注册父 loop 上下文 + 子工具集构建器——
+ *      delegate_agent 可用性前提；收尾 disposeParentDelegationState（含异常路径）。
  *   4. 系统提示词：buildDispatcherSystemPrompt（阶段数据动态构建）；
  *   5. runAgentLoop（压缩/steer/DSML 恢复/检查点全继承；permissionMode=allow-all
  *      对齐自动化管线惯例，围栏在工具包装层不在权限链——不动 web 线 permission-service）；
@@ -30,9 +32,11 @@ import { runAgentLoop } from '../agent/loop/agent-loop'
 import { buildAgentTools } from '../agent/tools/agent-tools'
 import { buildWebResearch } from '../agent/tools/web-tools'
 import { buildDelegationTools } from '../agent/delegation/delegation-tools'
+import { disposeParentDelegationState, registerParentLoopContext, setChildToolsBuilder } from '../agent/delegation/agent-collaboration'
+import { categoryTemperature } from '../platform/llm/model-resolution'
 import { getDesktopPhase, type PhaseNode } from './dispatcher-phases'
 import { checkDispatcherToolGate, evaluateAdvance, type AdvanceDecision } from './dispatcher-gate'
-import { buildDispatcherSystemPrompt } from './dispatcher-prompt'
+import { buildDesktopChildBaseSystem, buildDispatcherSystemPrompt } from './dispatcher-prompt'
 import { isDesktopDispatchEnabled } from './dispatcher-switch'
 import { parseProjectContract } from './contract-schema'
 import { runContractDriver, execFileDriverSpawn, type DriverExecutionReport } from './process-driver'
@@ -60,6 +64,8 @@ export interface DesktopDispatchRunInput {
   publish: (type: AgentEvent['type'], payload: Record<string, unknown>) => void
   /** 项目名（提示词模板与产物占位符共用） */
   projectName: string
+  /** 需求摘要（首跑修复：PRD 背板 → 调度员系统提示词与子会话基底；编排层装配，缺省不注入） */
+  requirementsDigest?: string
   /** 项目沙箱根（产物验证/契约读取/驱动 cwd 的解析根）。 */
   sandboxRoot?: string
   /** 用户已确认的阶段 id 集（manual 门禁凭据——确认链由编排层/批次 E 维护） */
@@ -95,6 +101,9 @@ export interface DesktopDispatchRunResult {
 
 /** 只读五件（buildAgentTools research 裁剪里筛——勿整拿：research 面带 ask 冒泡版委派）。 */
 const READONLY_TOOL_NAMES = new Set(['read_file', 'list_files', 'find', 'grep', 'web_fetch'])
+
+/** 子会话独立轮次上限（对齐 coding 线 DELEGATION_MAX_TURNS=12；就近自持避免跨域常量依赖）。 */
+const DESKTOP_DELEGATION_MAX_TURNS = 12
 
 /**
  * 装配调度员工具面：只读五件 + 委派族（parent）+ web_research。
@@ -233,9 +242,35 @@ export async function runDesktopDispatcherLoop(input: DesktopDispatchRunInput): 
   const system = buildDispatcherSystemPrompt(node, {
     projectName: input.projectName,
     completedPhases: [],
+    workspaceHint: '产物按相对路径写入（项目目录即工作根；如 00_ARCH/、00_SCAFFOLD/、00_VERIFY/）。',
+    ...(input.requirementsDigest ? { requirementsDigest: input.requirementsDigest } : {}),
   })
 
-  const loopResult = await runAgentLoopSafe(input, node, tools, system, publish, collector)
+  // ── 委派协作接线（2026-09-26 首跑修复）──
+  // 首跑实证：工具面带 delegate_agent，但本路径从未注册父 loop 上下文——一调用即抛
+  // 「未找到父循环上下文」。对齐 coding generate.ts 的注册契约：父上下文（query/env/
+  // 预算/权限/发布）+ 子工具集构建器（worker 需要文件写工具落盘产物）。
+  registerParentLoopContext(input.sessionId, {
+    query: input.query,
+    env: input.env,
+    maxTokens: input.maxTokens,
+    maxTurns: input.maxTurns ?? 24,
+    delegationMaxTurns: DESKTOP_DELEGATION_MAX_TURNS,
+    permissionMode: 'allow-all',
+    temperature: categoryTemperature('mvp'),
+    system: buildDesktopChildBaseSystem(node, {
+      projectName: input.projectName,
+      ...(input.requirementsDigest ? { requirementsDigest: input.requirementsDigest } : {}),
+    }),
+    editFormat: 'diff',
+    publish,
+  })
+  setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
+
+  const loopResult = await runAgentLoopSafe(input, node, tools, system, publish, collector).finally(() =>
+    // 收尾（含异常路径）：stop 未收敛子委派 + 清幂等缓存 + 注销父上下文
+    disposeParentDelegationState(input.sessionId),
+  )
 
   if ('safeError' in loopResult) {
     return { status: 'error', phase: node }

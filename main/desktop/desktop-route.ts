@@ -30,6 +30,7 @@ import { isDesktopDispatchEnabled } from './dispatcher-switch'
 import { runDesktopDispatcherLoop, type DesktopDispatchRunInput, type DesktopDispatchRunResult } from './dispatcher-loop'
 import { clearRejectionOnAdvance, createRejectionLedger, decideRejectionLoop, registerRejection, type RejectionLedger } from './advance-rejection-loop'
 import { computeEntryFingerprint } from '../verification/gwt-service'
+import { readDesktopRequirementsDigest } from './requirement-digest'
 
 // =========================================================================
 // 桌面线判定
@@ -72,6 +73,8 @@ export interface DesktopRouteDeps {
   complete: (sessionId: string, projectId: string, outcome?: 'success' | 'incomplete') => void
   /** 驱动 spawn 注入（可选；生产缺省 execFileDriverSpawn，测试桩 pass/fail）。 */
   driverSpawn?: DesktopDispatchRunInput['driverSpawn']
+  /** 需求摘要注入（首跑修复：PRD 背板 → 调度员系统提示词与子会话基底；编排层装配，缺省不注入）。 */
+  requirementsDigest?: (projectId: string) => string | undefined
 }
 
 // =========================================================================
@@ -219,6 +222,10 @@ async function runDesktopStage(
   }
   const project = findProject(input.projectId)
   const sandboxRoot = project?.root_path
+  // 首跑修复：需求摘要（PRD 背板 → 调度员/子会话上下文；deps 覆写位供测试与异地装配）
+  const requirementsDigest = deps.requirementsDigest
+    ? deps.requirementsDigest(input.projectId)
+    : readDesktopRequirementsDigest(input.projectId)
 
   const loopInput: DesktopDispatchRunInput = {
     projectId: input.projectId,
@@ -230,11 +237,13 @@ async function runDesktopStage(
     env,
     maxTokens: 640000,
     signal: input.signal ?? new AbortController().signal,
-    publish: (_type, payload) => {
-      // 调度员 loop 的过程事件（message_delta/tool_*）直通渲染端（type 由 loop 已定）
-      deps.publish(input, 'message_delta', payload)
+    publish: (type, payload) => {
+      // 调度员 loop 的过程事件按原类型直通渲染端（首跑修复：此前误折叠为 message_delta，
+      // tool_call/delegation 等事件类型丢失——工具行与协作胶囊的实时显示都依赖真实类型）。
+      deps.publish(input, type, payload)
     },
     projectName,
+    requirementsDigest,
     sandboxRoot,
     confirmedPhases: new Set(project?.desktop_confirmed_phases ?? []),
     driverSpawn: deps.driverSpawn,

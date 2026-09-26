@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildAdvanceProtocolSection,
+  buildDesktopChildBaseSystem,
   buildDispatcherSystemPrompt,
   buildToolDisciplineSection,
   renderTaskTemplate,
@@ -113,5 +114,31 @@ describe('buildToolDisciplineSection', () => {
     })
     expect(withExtra).toContain('本阶段附加工具：run_desktop_preview')
     expect(buildToolDisciplineSection(DESKTOP_PHASES['desktop-arch'])).not.toContain('本阶段附加工具')
+  })
+})
+
+describe('需求摘要与子会话基底（2026-09-26 首跑修复）', () => {
+  it('requirementsDigest 渲染【项目需求】段；缺省不出', () => {
+    const withDigest = buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-arch'], {
+      projectName: 'p',
+      requirementsDigest: 'F-001 [P0] 托盘倒计时工具',
+    })
+    expect(withDigest).toContain('【项目需求')
+    expect(withDigest).toContain('F-001 [P0]')
+    const without = buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-arch'], { projectName: 'p' })
+    expect(without).not.toContain('【项目需求')
+  })
+
+  it('子会话基底：项目/阶段/产物目录/约束/需求；不泄漏调度员纪律', () => {
+    const base = buildDesktopChildBaseSystem(DESKTOP_PHASES['desktop-arch'], {
+      projectName: 'timer',
+      requirementsDigest: 'F-001 [P0] 托盘倒计时工具',
+    })
+    expect(base).toContain('timer')
+    expect(base).toContain('desktop-arch')
+    expect(base).toContain('00_ARCH/')
+    expect(base).toContain('【阶段约束】')
+    expect(base).toContain('【项目需求')
+    expect(base).not.toContain('你不直接写文件')
   })
 })

@@ -83,6 +83,10 @@ function textMessage(text: string): SDKMessage {
   return { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }
 }
 
+function toolUseMessage(id: string, name: string, input: Record<string, unknown> = {}): SDKMessage {
+  return { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id, name, input }] } }
+}
+
 function scriptedQuery(responses: SDKMessage[][]): SDKQuery {
   let call = 0
   return async function* (_prompt: string, _options: SDKQueryOptions) {
@@ -311,5 +315,26 @@ describe('handleDesktopDispatchMessage 消息路由', () => {
     const tell = events.find((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('未收口'))
     expect(tell).toBeTruthy()
     expect(record.desktop_phase).toBe('desktop-scaffold')
+  })
+})
+
+describe('事件直通与需求注入（2026-09-26 首跑修复）', () => {
+  it('loop 过程事件按原类型直通（tool_call_started/completed 不再被折叠为 message_delta）', async () => {
+    const { deps, events } = collectorDeps()
+    await handleDesktopDispatchMessage(routeInput({
+      query: scriptedQuery([
+        [toolUseMessage('t1', 'read_file', { path: '00_SCAFFOLD/contract.json' }), textMessage('读完了。')],
+        [textMessage('完成。\n<!-- PHASE_ADVANCE: desktop-implement -->')],
+      ]),
+    }), deps)
+    expect(events.some((event) => event.type === 'tool_call_started')).toBe(true)
+    expect(events.some((event) => event.type === 'tool_call_completed')).toBe(true)
+  })
+
+  it('需求摘要注入：deps.requirementsDigest 按项目 id 装配（进调度员上下文链路）', async () => {
+    const digest = vi.fn(() => 'F-001 [P0] 托盘倒计时工具')
+    const { deps } = collectorDeps({ requirementsDigest: digest })
+    await handleDesktopDispatchMessage(routeInput(), deps)
+    expect(digest).toHaveBeenCalledWith('p1')
   })
 })
