@@ -913,7 +913,16 @@ describe('agent-tools D 系列（咨询 D：验证协议，2026-09-09）', () =>
     expect(stale.isError).toBe(true)
     expect(stale.output).toContain('STALE_READ')
 
-    // 不传 rev → 现状行为（old_string 唯一命中即成功）
+    // P1-06（2026-09-26 审计）：不传 rev 也拦——提交点校验基准取本会话读到的版本
+    //（原「不传零变化」正是审计点名的漏洞：读后被外部修改仍能凭旧内容改写）
+    const alsoStale = await byName(tools, 'edit_file').execute(
+      { path: 'src/app.js', old_string: 'const a = 2', new_string: 'const a = 3' },
+      ctx,
+    )
+    expect(alsoStale.isError).toBe(true)
+    expect(alsoStale.output).toContain('STALE_READ')
+    // 重新 read_file 刷新版本基准 → 编辑成功
+    await byName(tools, 'read_file').execute({ path: 'src/app.js' }, ctx)
     const ok = await byName(tools, 'edit_file').execute(
       { path: 'src/app.js', old_string: 'const a = 2', new_string: 'const a = 3' },
       ctx,

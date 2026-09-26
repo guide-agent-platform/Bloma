@@ -8,6 +8,7 @@ import { findProject, readLastSketchRequirements } from '../../project/project-s
 import { isInjectionEnabled } from '../prompting/template-injection'
 import { decideWrite, estimateTokenCount } from '../loop/usage-guard'
 import { withAbort, loopApiToolEnabled, toolEvidenceEnabled, writeGuardEnabled, preflightEnabled, compactToolEnabled, MAX_EXPLICIT_COMPACTIONS, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../loop/agent-loop'
+import { commitFileWrite, fileRevisionOf, fileRevisionsOf } from './write-lease'
 import { buildDelegationTools } from '../delegation/delegation-tools'
 import { buildWebFetch, buildWebResearch } from './web-tools'
 // 向后兼容 re-export（setWebResearchTimeoutForTests 随 web_research 迁至 web-tools；存量 import 零改动）
@@ -263,21 +264,9 @@ const FIND_ENTRY_LIMIT = 100
 // D 系列辅助（咨询 D，2026-09-09）：文件版本戳 / 验证状态行 / 版本登记
 // =========================================================================
 
-/** D4a：文件版本戳 = mtimeMs+size 十六进制（同一 loop 内足够区分「读后已被改」）。 */
-export function fileRevisionOf(absPath: string): string {
-  try {
-    const stat = statSync(absPath)
-    return `${stat.mtimeMs.toString(16)}-${stat.size.toString(16)}`
-  } catch {
-    return 'unknown'
-  }
-}
-
-/** D4a：state.file_revisions 惰性初始化（缺省 undefined = 功能未启用前的旧 state 兼容）。 */
-function _fileRevisions(ctx: ToolContext): Map<string, string> {
-  if (!ctx.state.file_revisions) ctx.state.file_revisions = new Map()
-  return ctx.state.file_revisions
-}
+/** D4a/P1-06：文件版本戳与版本记录已下沉 write-lease（提交点 CAS 与写租约同模块）；
+ *  fileRevisionOf 由下方 import 绑定后 re-export，保持既有 import 路径零改动。 */
+export { fileRevisionOf }
 
 /**
  * D2：验证状态行（宿主维护，不靠 LLM 自报）——「已验证什么 / 尚缺什么」。
@@ -386,7 +375,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
   }
 
   /** 落盘前统一护栏：路径沙箱 + 可写范围 + 语法/结构校验 + 修复预算门 + meta CSP 剥离 + 依赖白名单拦截。 */
-  const validateAndWrite = async (root: string, rel: string, content: string, ctx: ToolContext): Promise<ToolOutcome> => {
+  const validateAndWrite = async (root: string, rel: string, content: string, ctx: ToolContext, expectedRevision?: string): Promise<ToolOutcome> => {
     if (!isWritablePath(rel, realVariant)) return { output: notWritableError(rel, realVariant), isError: true }
     if (extname(rel).toLowerCase() === '.html') {
       const structureError = checkHtmlStructure(content)
@@ -407,10 +396,20 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     if (budget) return budget
     const finalContent = extname(rel).toLowerCase() === '.html' ? stripMetaCsp(content) : content
     const abs = join(root, rel)
-    mkdirSync(join(abs, '..'), { recursive: true })
-    writeFileSync(abs, finalContent, 'utf8')
-    // D4a：写入成功后刷新版本快照（后续同文件 expected_revision 校验基準）
-    _fileRevisions(ctx).set(rel, fileRevisionOf(abs))
+    // P1-06（2026-09-26 运行审计）：提交点写入原语——CAS 版本校验（收窄 TOCTOU：
+    // 语法校验 await 之后、写盘之前；基准取显式传入或会话读写的版本，宿主强制）
+    // + 写租约临界区互斥（并行写者冲突拒绝并教育；单会话零影响；TTL 兜底）。
+    const committed = commitFileWrite({
+      projectId: ctx.projectId,
+      root,
+      rel,
+      finalContent,
+      ctx,
+      ...(expectedRevision ? { expectedRevision } : {}),
+    })
+    if (!committed.ok) {
+      return { output: committed.output, isError: true, detail: { code: committed.code, path: rel } }
+    }
     // project-map（Graft 模式，r69）：PR4c 改回调注入（去域依赖；缺省不刷新）
     try {
       options.onProjectFilesChanged?.(root)
@@ -456,7 +455,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       // D4a（咨询 D）：记录/返回文件版本戳（mtime+size 十六进制）——edit_file 的
       // expected_revision 校验与 write_file 守卫共用；纯追加信息，无行为变化。
       const revision = fileRevisionOf(resolved.abs)
-      _fileRevisions(ctx).set(resolved.rel, revision)
+      fileRevisionsOf(ctx).set(resolved.rel, revision)
       return {
         output: `（${resolved.rel} 共 ${total} 行，显示第 ${offset}~${offset + slice.length - 1} 行｜文件版本 ${revision}）\n${body}`,
       }
@@ -580,7 +579,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       if (writeScopeBlocked) return writeScopeBlocked
       // D4a：write 守卫——覆盖「本轮未读过的既有文件」拦截（R-FILE-01 工具化：
       // 盲覆盖正式 BLOMA_WRITE_GUARD=on 才拦；off 零变化。新建文件不受影响）。
-      if (existsSync(resolved.abs) && !_fileRevisions(ctx).has(resolved.rel)) {
+      if (existsSync(resolved.abs) && !fileRevisionsOf(ctx).has(resolved.rel)) {
         if (writeGuardEnabled()) {
           return {
             output: `目标文件已存在且本轮未读取过：${resolved.rel}。先 read_file 获取当前内容（R-FILE-01），再决定 edit_file 精确修改或基于读取结果重写；禁止盲覆盖。`,
@@ -671,7 +670,9 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         return { output: `old_string 在 ${resolved.rel} 中命中 ${count} 处，不唯一。请扩大上下文使片段唯一。`, isError: true }
       }
       const next = current.replace(toolInput.old_string, toolInput.new_string)
-      return validateAndWrite(project.root_path, resolved.rel, next, ctx)
+      // P1-06：模型显式 expected_revision 优先；未传时用本会话读到的版本作提交点校验基准
+      const revisionBasis = typeof toolInput.expected_revision === 'string' ? toolInput.expected_revision : undefined
+      return validateAndWrite(project.root_path, resolved.rel, next, ctx, revisionBasis)
     },
   }
 
