@@ -30,6 +30,16 @@ import { realFullstackServerFingerprint, resolveRealScaffoldSpawn } from '../cod
 type SnapshotCaptureProvider = () => Promise<{ buffer: Buffer; extension: 'png' | 'jpg' | 'svg' } | undefined>
 /** 快照容量策略（A2-16，闭环 ATK3-G-001，architecture §14）：单项目活跃快照上限。 */
 export const MAX_SNAPSHOTS_PER_PROJECT = 100
+
+/** 快照上限解析（2026-09-26 专项）：BLOMA_SNAPSHOT_CAP 正整数覆盖，缺省 100。
+ *  可注入的价值：① 容量门禁可运维调参；② 容量回归测试用小上限，避免 100+ 次
+ *  快照递归复制在全量并发下拖爆 60s 超时（长期红噪音）。 */
+export function resolveSnapshotCap(): number {
+  const raw = (process.env.BLOMA_SNAPSHOT_CAP ?? '').trim()
+  if (!raw) return MAX_SNAPSHOTS_PER_PROJECT
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) && Math.floor(parsed) > 0 ? Math.floor(parsed) : MAX_SNAPSHOTS_PER_PROJECT
+}
 /** 归档保护集：保留最近 N 个 + 每种 kind 最新一个，即使超限也不归档。 */
 export const SNAPSHOT_RECENT_KEEP = 20
 let snapshotCaptureProvider: SnapshotCaptureProvider = defaultSnapshotCapture
@@ -257,7 +267,8 @@ export function readSnapshotDocument(
 export function enforceSnapshotCapacity(workspaceSlug: string, projectId: string): SnapshotCapacityResult {
   const snapshotDir = getSnapshotsDir(workspaceSlug, projectId)
   const active = listActiveSnapshots(snapshotDir)
-  if (active.length <= MAX_SNAPSHOTS_PER_PROJECT) return { active_count: active.length, archived: [] }
+  const cap = resolveSnapshotCap()
+  if (active.length <= cap) return { active_count: active.length, archived: [] }
 
   // 保护集：最近 SNAPSHOT_RECENT_KEEP 个 + 每种 kind 最新一个
   const byNewest = [...active].sort((a, b) => b.created_at.localeCompare(a.created_at))
@@ -275,7 +286,7 @@ export function enforceSnapshotCapacity(workspaceSlug: string, projectId: string
   const archiveDir = join(snapshotDir, 'archive')
   const archived: string[] = []
   for (const snap of oldestFirst) {
-    if (active.length - archived.length <= MAX_SNAPSHOTS_PER_PROJECT) break
+    if (active.length - archived.length <= cap) break
     if (protectedIds.has(snap.snapshot_id)) continue
     const source = join(snapshotDir, snap.snapshot_id)
     if (!existsSync(source)) continue

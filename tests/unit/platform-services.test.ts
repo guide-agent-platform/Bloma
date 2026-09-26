@@ -7,7 +7,7 @@ import type { ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createProject } from '../../main/project/project-service'
 import { clearSandboxRuntimeForTests, runSandbox, setSandboxRuntimeForTests, stopSandbox } from '../../main/delivery/sandbox'
-import { MAX_SNAPSHOTS_PER_PROJECT, SNAPSHOT_RECENT_KEEP, createSnapshot, enforceSnapshotCapacity, setSnapshotCaptureProviderForTests } from '../../main/delivery/snapshots'
+import { SNAPSHOT_RECENT_KEEP, createSnapshot, enforceSnapshotCapacity, resolveSnapshotCap, setSnapshotCaptureProviderForTests } from '../../main/delivery/snapshots'
 import { trackAnalytics } from '../../main/delivery/track-analytics'
 import { getAnalyticsPath, getSnapshotsDir } from '../../storage/config-paths'
 
@@ -300,8 +300,12 @@ describe('PlatformServices snapshot capacity (A2-16)', () => {
     const project = createProject({ request_id: 'req-cap', mode: 'quick' })
     setSnapshotCaptureProviderForTests(async () => ({ extension: 'png', buffer: Buffer.from('fake') }))
 
+    // 2026-09-26 专项：上限用小值注入（默认 100 时本用例建 105 个快照，每次递归
+    // 复制 + 归档扫描；全量并发下拖爆 60s 超时——长期红噪音）。25 > 最近保留 20。
+    process.env.BLOMA_SNAPSHOT_CAP = '25'
+    const cap = resolveSnapshotCap()
     const ids: string[] = []
-    const total = MAX_SNAPSHOTS_PER_PROJECT + 5
+    const total = cap + 5
     for (let i = 0; i < total; i += 1) {
       // 首个用稀有 kind（upgrade），其余全 mvp —— 验证「每 kind 最新」保护独立于新旧
       const snapshot = await createSnapshot({
@@ -324,8 +328,8 @@ describe('PlatformServices snapshot capacity (A2-16)', () => {
       : []
 
     // 活跃快照回落到上限内，超出的恰好归档
-    expect(active.length).toBeLessThanOrEqual(MAX_SNAPSHOTS_PER_PROJECT)
-    expect(active.length).toBe(MAX_SNAPSHOTS_PER_PROJECT)
+    expect(active.length).toBeLessThanOrEqual(cap)
+    expect(active.length).toBe(cap)
     expect(archived).toHaveLength(5)
 
     // 最近 N 个全部保留
@@ -338,6 +342,7 @@ describe('PlatformServices snapshot capacity (A2-16)', () => {
     for (const old of ids.slice(1, 6)) {
       expect(archived).toContain(old)
     }
+    delete process.env.BLOMA_SNAPSHOT_CAP
 
     // 显式调用与 createSnapshot 内联触发一致
     expect(enforceSnapshotCapacity(project.workspace_slug, project.project_id).archived).toEqual([])

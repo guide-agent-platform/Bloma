@@ -213,7 +213,17 @@ export interface AgentLoopResult {
   finalText: string
   toolCalls: AgentLoopToolCallRecord[]
   /** 会话级 usage 聚合（费用守卫 Hook 1，2026-08-28 队友）：逐轮累计渠道返回 usage + 全块口径估算 */
-  usage?: { inputTokens: number; outputTokens: number; estContextTokens: number; turnsWithUsage: number }
+  usage?: {
+    inputTokens: number
+    outputTokens: number
+    estContextTokens: number
+    turnsWithUsage: number
+    /** P2-02：交接/宽限等辅助模型调用（不计入 turns，但计成本） */
+    handoffCalls?: number
+    graceCalls?: number
+    auxEstTokens?: number
+    estTotalTokens?: number
+  }
   /** W1-E1（咨询 D3）：cancelled 终态的触发源观测——phase=loop 内观察点（取消被家觉的位置），
    *  source=abort reason 解析（'AGENT_CANCELLED: <source>' 约定见 orchestrator.cancelAgent；
    *  无 reason 的 abort 归 'unattributed'，如委派 stop/程序化中止）。纯增量字段，非 cancelled 无此字段。 */
@@ -692,6 +702,16 @@ export function compactToolEnabled(): boolean {
   return process.env.BLOMA_COMPACT_TOOL === '1' || process.env.BLOMA_COMPACT_TOOL === 'true'
 }
 
+/** P2-02（2026-09-26 运行审计）：成本硬上限（tokens；0/缺省=不限）——累计口径含
+ *  主循环 usage + 交接/宽限估算（审计：maxTurns 不是总模型调用/总 token 预算）。
+ *  达到即进入可解释 budget_exhausted + termination_detail.reason='cost_limit' 终态。 */
+export function resolveLoopCostLimitTokens(): number {
+  const raw = (process.env.BLOMA_LOOP_COST_LIMIT_TOKENS ?? '').trim()
+  if (!raw) return 0
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) && Math.floor(parsed) > 0 ? Math.floor(parsed) : 0
+}
+
 /** W2：显式压缩次数上限（独立于自动压缩的 LOOP_MAX_COMPACTIONS=2；防模型滥用交接轮次烧额度）。 */
 export const MAX_EXPLICIT_COMPACTIONS = 4
 
@@ -912,6 +932,9 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     loopCheckpointEnabled() ? `${base}\n\n${renderCheckpointProjection(checkpointSnapshotOf('projection', turn))}` : base
   // 费用守卫 Hook 1（2026-08-28 队友）：逐轮累计渠道返回 usage（渠道不返回即全盲 → estContextTokens 兜底）
   const usageTotals = { inputTokens: 0, outputTokens: 0, turnsWithUsage: 0 }
+  // P2-02：辅助模型调用成本（交接/宽限）——审计「主轮次数不计交接和宽限总结」，
+  // 统一累计供成本上限判定与 usage_summary 如实呈现
+  const auxCost = { handoffCalls: 0, graceCalls: 0, auxEstTokens: 0 }
   const attachUsage = (r: AgentLoopResult): AgentLoopResult => {
     // W2-E3：终态事件驱动保存（取消/熔断/完成全部路径部过这里）
     emitCheckpoint('final', turns)
@@ -966,6 +989,12 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         inputTokens: usageTotals.inputTokens,
         outputTokens: usageTotals.outputTokens,
         turnsWithUsage: usageTotals.turnsWithUsage,
+        // P2-02：统一成本口径——主循环 tokens + 交接/宽限调用与估算（审计：
+        // maxTurns 不是总模型调用/总 token 预算，成本事实须完整可见）
+        handoffCalls: auxCost.handoffCalls,
+        graceCalls: auxCost.graceCalls,
+        auxEstTokens: auxCost.auxEstTokens,
+        estTotalTokens: usageTotals.inputTokens + usageTotals.outputTokens + auxCost.auxEstTokens,
         // 全块口径（r55 low 池采纳）：tool_result 内容与 tool_use input 都占上下文，
         // text-only 口径在渠道全盲时会严重低估占用。
         estContextTokens,
@@ -1343,6 +1372,19 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     wrapUp = ctx.state.gwt_all_passed && ctx.state.security_all_passed && (!loopApiToolEnabled() || ctx.state.api_all_passed) && (!preflightEnabled() || ctx.state.preflight_passed === true)
 
     consecutiveBudgetStallTurns = budgetStallThisTurn ? consecutiveBudgetStallTurns + 1 : 0
+    // ---- P2-02：成本硬上限（每轮末检查；opt-in 缺省 0=不限，行为零变化）----
+    // 累计 = 主循环 usage + 交接/宽限估算；达限立即进入可解释终态（不静默烧额度）
+    const costLimit = resolveLoopCostLimitTokens()
+    const observedCost = usageTotals.inputTokens + usageTotals.outputTokens + auxCost.auxEstTokens
+    if (costLimit > 0 && observedCost >= costLimit) {
+      return attachUsage({
+        status: 'budget_exhausted',
+        turns,
+        finalText,
+        toolCalls,
+        termination_detail: { reason: 'cost_limit' as const, retries: 0, limit: costLimit, observed: observedCost },
+      })
+    }
     if (consecutiveBudgetStallTurns >= BUDGET_STALL_TURNS) {
       return attachUsage({ status: 'budget_exhausted', turns, finalText, toolCalls })
     }
@@ -1352,7 +1394,9 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     // （此前该路径完全静默；纯埋点，压缩行为零变化）。E6 核查 1 定案：上限后=静默跳过。
     // W6-E4：渠道 usage 盲时（本轮无 usage）用 est 兜底判据（BLOMA_COMPACT_EST_FALLBACK，
     // 缺省 off=现状触发器失明；W1 以撒案 24 轮 input=0 一次都没压缩的根治位）。
-    const usageBlind = usage === undefined
+    // P2-02：usage 可信度区分——input_tokens 缺失或为 0 都算盲（旧口径仅 undefined 算盲，
+    // provider 恒返 0 时估算兜底不启用 → 自动压缩触发器失明）
+    const usageBlind = usage === undefined || (usage.input_tokens ?? 0) <= 0
     const estFallbackMet =
       compactEstFallbackEnabled() && usageBlind && estTokensOfMessages(messages) >= compactThreshold
     const compactThresholdMet =
@@ -1393,6 +1437,9 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
       // W1-E1：重置前先留观测口径（est/保留/移除计数——保留段是尾部连续后缀，计数即定位）。
       const retained = keepRecentTurns(messages, keepRecentBudget)
       const estTokensBefore = estTokensOfMessages(messages)
+      // P2-02：交接调用计入统一成本口径（不计 turns，但计成本——审计原文）
+      auxCost.handoffCalls += 1
+      auxCost.auxEstTokens += estTokensBefore + estimateTokenCount(summary)
       const historyTurnsBefore = messages.length - 1
       const removedTurns = historyTurnsBefore - retained.length
       messages.length = 0
@@ -1482,7 +1529,11 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
   // 该案例产物第 20 轮已全部就绪（测试/扫描全过），只差「输出完成总结」这个动作被挤掉。
   // 补一次无 tools 的收口调用让模型交卷：出文本 → completed（外部终验仍照跑，不信自述）；
   // 仍坚持要工具 → 如实 turn_limit。宽限轮不计 turns、不发 onTurn（epilogue 不是工作轮）。
+  // P2-02：宽限交卷调用计入统一成本口径（不计 turns，但计成本）
+  auxCost.graceCalls += 1
+  auxCost.auxEstTokens += estTokensOfMessages(messages)
   let grace = await runGraceWrapUpTurn(input, messages, pinnedTestTurn)
+  if (grace.kind === 'text') auxCost.auxEstTokens += estimateTokenCount(grace.text)
   // D2 补口（狗粮 52f19ab4，2026-09-12）：宽限交卷轮退化但解析出工具意图 → 明确告知
   // 工具已停用，再给一次交卷机会（当晚 40 轮耗尽后模型在无 tools 交卷调用里仍想
   // read_file → DSML 原文死；主循环的 D2 恢复不覆盖 grace 路径）
@@ -1495,7 +1546,10 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
       ].join('\n')
       appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: graceFeedback }])
       messages.push({ role: 'user', content: [{ type: 'text', text: graceFeedback }] })
+      auxCost.graceCalls += 1
+      auxCost.auxEstTokens += estTokensOfMessages(messages)
       grace = await runGraceWrapUpTurn(input, messages, pinnedTestTurn)
+      if (grace.kind === 'text') auxCost.auxEstTokens += estimateTokenCount(grace.text)
     }
   }
   // 宽限轮交卷文本同样不可是传输事故：退行文本不作完成总结，按 turn_limit 收口。
