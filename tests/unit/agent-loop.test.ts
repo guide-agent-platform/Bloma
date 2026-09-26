@@ -243,6 +243,36 @@ describe('runAgentLoop（PR2 L1）', () => {
     expect(modelCalls).toBeLessThan(3)
   })
 
+  it('P1-04 批次取消配对完整：已完成工具结果+未执行占位随取消落盘（无悬空 tool_use）', async () => {
+    const controller = new AbortController()
+    const fast = tool('fast', () => ({ output: 'fast-done' }))
+    const hung = tool('hung', () => new Promise<ToolOutcome>(() => {}))
+    const query: SDKQuery = async function* () {
+      yield toolUseMessage('t1', 'fast')
+      yield toolUseMessage('t2', 'hung')
+      yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+    }
+    const input = baseInput({ query, tools: [fast, hung], signal: controller.signal })
+    const promise = runAgentLoop(input)
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    controller.abort(new Error('AGENT_CANCELLED: user'))
+    const result = await promise
+    expect(result.status).toBe('cancelled')
+    // 会话历史：assistant tool_use(t1,t2) 之后的 user 消息必须含 t1 真结果 + t2 取消占位
+    const lines = readSessionJsonl(input.sessionId)
+    const assistantToolUse = lines.find((line) => line.role === 'assistant' && line.content?.some((b) => b.type === 'tool_use'))
+    expect(assistantToolUse).toBeDefined()
+    const userAfter = lines.find((line) => line.role === 'user' && Array.isArray(line.content) && line.content.some((b) => b.type === 'tool_result'))
+    expect(userAfter).toBeDefined()
+    const results = userAfter?.content ?? []
+    expect(results.some((b) => b.type === 'tool_result' && b.content === 'fast-done')).toBe(true)
+    expect(results.some((b) => b.type === 'tool_result' && b.is_error === true && (b.content ?? '').includes('取消'))).toBe(true)
+    // 配对完整：每个 tool_use 都有对应 tool_result（重放不再 400）
+    const useIds = new Set((assistantToolUse?.content ?? []).filter((b) => b.type === 'tool_use').map((b) => (b as { id?: string }).id))
+    const resultIds = new Set(results.filter((b) => b.type === 'tool_result').map((b) => (b as { tool_use_id?: string }).tool_use_id))
+    for (const id of useIds) expect(resultIds.has(id)).toBe(true)
+  })
+
   it('流式中途取消：半截旁白如实落盘取证，且不含悬空 tool_use（2026-09-04「查。」墙案）', async () => {
     const controller = new AbortController()
     // 模拟退行重复：正常增量后用户在流中取消，query 抛 AGENT_CANCELLED

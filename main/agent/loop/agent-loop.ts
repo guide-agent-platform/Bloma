@@ -1177,7 +1177,23 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
 
     // ---- 工具执行：连续 parallelSafe 段并发 + 其余串行；整批 tool_result 按源序进同一条 user 消息（不变式）----
     const execution = await executeTurnToolCalls(input, toolByName, budgetUsed, turnToolUses, turn, ctx)
-    if (execution.cancelled) return attachUsage(loopCancelled(turns, finalText, toolCalls, 'tool_execution', input.signal))
+    if (execution.cancelled) {
+      // P1-04（2026-09-26 运行审计）：批次取消不再丢已完成结果——assistant tool_use
+      // 已落盘，若整批丢弃已收集的 tool_result，会话历史会留下未配对 tool_use；
+      // 已完成工具照常保存，未执行/被中断的补 cancelled 占位结果，配对完整可重放。
+      const covered = new Set((execution.partialResults ?? []).map((block) => (block.type === 'tool_result' ? block.tool_use_id : undefined)))
+      const completionBlocks: MessageContentBlock[] = [...(execution.partialResults ?? [])]
+      for (const use of turnToolUses) {
+        if (!covered.has(use.id)) {
+          completionBlocks.push({ type: 'tool_result', tool_use_id: use.id, content: '本次运行已被取消，该工具调用未执行完成。', is_error: true })
+        }
+      }
+      if (completionBlocks.length > 0) {
+        appendLoopMessage(input.sessionId, 'user', completionBlocks)
+        messages.push({ role: 'user', content: completionBlocks })
+      }
+      return attachUsage(loopCancelled(turns, finalText, toolCalls, 'tool_execution', input.signal))
+    }
     const { resultBlocks, budgetStallThisTurn } = execution
     appendLoopMessage(input.sessionId, 'user', resultBlocks)
     messages.push({ role: 'assistant', content: assistantBlocks })
@@ -1604,8 +1620,13 @@ async function executeToolCall(
   }
 
   try {
-    return await tool.execute(toolInput, ctx)
+    // P1-04（2026-09-26 运行审计）：工具执行与取消信号竞速——等待可取消，永不
+    // settle 的工具不再挂死 loop（与权限门禁同款 withAbort 语义）。注意：竞速只
+    // 停止等待，不替代资源终止——工具自身的资源回收由 ctx.signal 驱动（各工具
+    // 自理，如 web_fetch 的超时 signal；kill/close 句柄挂账）。
+    return await withAbort(tool.execute(toolInput, ctx), input.signal)
   } catch (error) {
+    if (input.signal.aborted) throw error // 取消向上传播为批次取消，不吞成 is_error
     // 工具异常不崩循环：错误摘要回给模型自纠（AutoGPT 式死循环由预算/轮次兜底）
     return { output: `工具执行出错：${errorMessage(error)}`, isError: true }
   }
@@ -1618,9 +1639,10 @@ async function executeToolCall(
 /** 并发上限（保守）：读盘/网络密集的只读工具并行，避免瞬时 IO/请求洪峰。 */
 export const PARALLEL_CONCURRENCY_LIMIT = 4
 
-/** 一轮工具执行的结果：cancelled 时调用方丢弃 partial（与旧串行批后 abort 语义一致）。 */
+/** 一轮工具执行的结果：cancelled 时携带 partialResults（已完成工具的结果块，
+ *  2026-09-26 审计 P1-04：不再整批丢弃——调用方补齐配对 tool_result 后落盘）。 */
 export type TurnToolExecution =
-  | { cancelled: true }
+  | { cancelled: true; partialResults?: MessageContentBlock[] }
   | { cancelled: false; resultBlocks: MessageContentBlock[]; budgetStallThisTurn: boolean }
 
 /**
@@ -1681,13 +1703,19 @@ export async function executeTurnToolCalls(
   // join 后整体按源序 push——「整批 tool_result 一条 user 消息、块序=源序」不变式保持。
   let index = 0
   while (index < turnToolUses.length) {
-    if (input.signal.aborted) return { cancelled: true }
+    if (input.signal.aborted) return { cancelled: true, partialResults: resultBlocks }
     const use = turnToolUses[index]!
     const tool = toolByName.get(use.name)
     const parallelizable = tool?.parallelSafe === true && input.toolBudget?.[use.name] === undefined
     if (!parallelizable) {
-      // 串行位：前面并发段都已 join 完，join 语义天然满足；执行前 abort 检查同旧语义
-      resultBlocks.push(await runOne(use))
+      // 串行位：前面并发段都已 join 完，join 语义天然满足；执行中 abort 转批次取消
+      //（P1-04：已完成结果随 partialResults 保留，不丢弃）
+      try {
+        resultBlocks.push(await runOne(use))
+      } catch (error) {
+        if (input.signal.aborted) return { cancelled: true, partialResults: resultBlocks }
+        throw error
+      }
       index += 1
       continue
     }
@@ -1699,12 +1727,23 @@ export async function executeTurnToolCalls(
       end += 1
     }
     const group = turnToolUses.slice(index, end)
-    // 并发上限内的小池：避免一次性 Promise.all 数十个只读调用打满 fd/网络
+    // 并发上限内的小池：避免一次性 Promise.all 数十个只读调用打满 fd/网络。
+    // P1-04：allSettled 化——取消时同批已完成的结果保留（Promise.all 会丢），
+    // 非取消 reject（理论不发生，executeToolCall 已兕底）向上抛。
     for (let cursor = 0; cursor < group.length; cursor += PARALLEL_CONCURRENCY_LIMIT) {
-      if (input.signal.aborted) return { cancelled: true }
+      if (input.signal.aborted) return { cancelled: true, partialResults: resultBlocks }
       const batch = group.slice(cursor, cursor + PARALLEL_CONCURRENCY_LIMIT)
-      const completed = await Promise.all(batch.map((item) => runOne(item)))
-      for (const block of completed) resultBlocks.push(block)
+      const settled = await Promise.allSettled(batch.map((item) => runOne(item)))
+      if (input.signal.aborted) {
+        settled.forEach((outcome, i) => {
+          if (outcome.status === 'fulfilled') resultBlocks.push(outcome.value)
+        })
+        return { cancelled: true, partialResults: resultBlocks }
+      }
+      for (const outcome of settled) {
+        if (outcome.status === 'rejected') throw outcome.reason
+        resultBlocks.push(outcome.value)
+      }
     }
     index = end
   }

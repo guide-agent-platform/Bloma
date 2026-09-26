@@ -162,7 +162,48 @@ describe('executeTurnToolCalls 分组并行（P1-2）', () => {
     expect(order).toEqual(['begin', 'end', 'begin', 'end'])
   })
 
-  it('abort 传播：工具批后检查信号 → 中断串行位（partial 丢弃，与旧串行批间 abort 一致）', async () => {
+  it('P1-04 批次取消保留已完成结果：串行位执行中 abort → partialResults 携带已完成块（不整批丢弃）', async () => {
+    // 审计反例：第一个工具完成副作用后取消第二个，旧口径整批 {cancelled:true} 丢弃已收集结果
+    const hung = {
+      ...makeTool('edit_file'),
+      execute: () => new Promise<ToolOutcome>(() => { /* 永不 settle（模拟不响应取消的工具） */ }),
+    }
+    const done = makeTool('read_file', { parallelSafe: false })
+    const controller = new AbortController()
+    const h = directHarness([done, hung], { signal: controller.signal })
+    const executionPromise = runTurn(h, [use('d1', 'read_file'), use('h1', 'edit_file')])
+    // 第一个工具完成后、第二个挂起中取消
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    controller.abort(new Error('AGENT_CANCELLED: user_cancelled'))
+    const execution = await executionPromise
+    expect(execution.cancelled).toBe(true)
+    if (execution.cancelled) {
+      expect(execution.partialResults ?? []).toHaveLength(1)
+      expect((execution.partialResults ?? [])[0]).toMatchObject({ type: 'tool_result', tool_use_id: 'd1', content: 'result-read_file' })
+    }
+  })
+
+  it('P1-04 并发段 allSettled：同批部分完成时取消 → fulfilled 结果保留，未完成不产生幽灵结果', async () => {
+    const fast = makeTool('read_file', { parallelSafe: true, delayMs: 10 })
+    const hungRead = {
+      ...makeTool('grep', { parallelSafe: true }),
+      execute: () => new Promise<ToolOutcome>(() => {}),
+    }
+    const controller = new AbortController()
+    const h = directHarness([fast, hungRead], { signal: controller.signal })
+    const executionPromise = runTurn(h, [use('f1', 'read_file'), use('g1', 'grep')])
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    controller.abort(new Error('AGENT_CANCELLED'))
+    const execution = await executionPromise
+    expect(execution.cancelled).toBe(true)
+    if (execution.cancelled) {
+      const partial = execution.partialResults ?? []
+      expect(partial.some((block) => block.type === 'tool_result' && block.tool_use_id === 'f1')).toBe(true)
+      expect(partial.some((block) => block.type === 'tool_result' && block.tool_use_id === 'g1')).toBe(false)
+    }
+  })
+
+    it('abort 传播：工具批后检查信号 → 中断串行位（partial 丢弃，与旧串行批间 abort 一致）', async () => {
     const order: string[] = []
     const reader = makeTool('read_file', { parallelSafe: true, delayMs: 60 })
     const writer = makeTool('write_file', {})

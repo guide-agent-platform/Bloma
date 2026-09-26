@@ -265,13 +265,13 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       if (blockedDecision === 'explain') {
         // 补充说明：清阻塞 + 回澄清，内容交给引导路径重新理解
         await resumeBlockedFlow(
-          { request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, mode: input.mode, decision: 'explain', content: input.content, query: sdkQuery, channel_id: input.channel_id },
+          { request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, mode: input.mode, decision: 'explain', content: input.content, query: sdkQuery, channel_id: input.channel_id, signal: abortController.signal },
           streamPublisher,
         )
         await handleGuideMessage(input, streamPublisher, guideOptions, persistAssistant, persistSystem)
       } else {
         await resumeBlockedFlow(
-          { request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, mode: input.mode, decision: blockedDecision, content: input.content, query: sdkQuery, channel_id: input.channel_id },
+          { request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, mode: input.mode, decision: blockedDecision, content: input.content, query: sdkQuery, channel_id: input.channel_id, signal: abortController.signal },
           streamPublisher,
         )
       }

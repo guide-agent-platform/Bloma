@@ -285,6 +285,9 @@ export interface ResumeBlockedInput {
   content: string
   query?: SDKQuery
   channel_id?: string
+  /** P1-04（2026-09-26 运行审计）：取消信号贯穿 Resume 恢复链——嵌套重生成/
+   *  修复轮/终验共用同一信号，用户停止能传导到恢复流程内部。 */
+  signal?: AbortSignal
 }
 
 /**
@@ -414,6 +417,7 @@ export async function resumeBlockedFlow(
       session_id: input.session_id,
       project_id: input.project_id,
       mode: input.mode,
+      ...(input.signal ? { signal: input.signal } : {}),
       preview_url: mvp.preview_url,
       loop: mvp.loop_result,
       query: input.query,
@@ -432,13 +436,14 @@ export async function resumeBlockedFlow(
     // 失败快照（test-report.json）直接组装修复任务，先跑一轮定向修复再走终验门禁，
     // 避免产物未变重验原地失败；无失败快照 / 无预算 / 修复轮未完成 → 行为=现状重验。
     // （终验内部仍带入口 A 的自动修复轮，两层互不冲突：预算计数共享 test_repair_count）
-    await runBlockedTestRepair({ ...input, preview_url: previewUrl })
+    await runBlockedTestRepair({ ...input, preview_url: previewUrl, ...(input.signal ? { signal: input.signal } : {}) })
     // loop 元数据仅在 project.via_agent_loop 时存在；存量旧项目缺省走普通终验（无修复）
     await runAgentLoopPostTesting({
       request_id: input.request_id,
       session_id: input.session_id,
       project_id: input.project_id,
       mode: input.mode,
+      ...(input.signal ? { signal: input.signal } : {}),
       preview_url: previewUrl,
       loop: loopMeta,
       query: input.query,
@@ -469,6 +474,7 @@ export async function resumeBlockedFlow(
       session_id: input.session_id,
       project_id: input.project_id,
       mode: input.mode,
+      ...(input.signal ? { signal: input.signal } : {}),
       preview_url: previewUrl,
       loop: loopMeta,
       query: input.query,
