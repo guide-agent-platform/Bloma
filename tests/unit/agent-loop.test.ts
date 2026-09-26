@@ -116,7 +116,7 @@ describe('runAgentLoop（PR2 L1）', () => {
     const result = await runAgentLoop(baseInput({ query, tools: [echo] }))
     expect(result.status).toBe('completed')
     expect(result.turns).toBe(2)
-    expect(result.toolCalls).toEqual([{ name: 'echo', turn: 1 }])
+    expect(result.toolCalls).toEqual([{ name: 'echo', turn: 1, status: 'ok' }]) // P1-05：执行结果回填
   })
 
   it('每轮都要求工具 → maxTurns 耗尽返回 turn_limit', async () => {
@@ -367,7 +367,7 @@ describe('runAgentLoop（PR2 L1）', () => {
       maxTurns: 1,
       onTurn: (info) => turns.push({ turn: info.turn, toolCalls: info.toolCalls, inputTokens: info.inputTokens }),
     }))
-    expect(turns).toEqual([{ turn: 1, toolCalls: [{ name: 'echo', turn: 1 }], inputTokens: 100 }])
+    expect(turns).toEqual([{ turn: 1, toolCalls: [{ name: 'echo', turn: 1, status: 'ok' }], inputTokens: 100 }])
   })
 
   it('F4：长 loop 最后一次模型调用 messages 有界，JSONL 仍全量', async () => {
@@ -1284,8 +1284,8 @@ describe('绿灯收口与宽限轮（2026-08-29 turn_limit 线上案例 eb900c57
     // path 提取：仅文件类工具携带；同一轮内非文件工具不带 path 键
     expect(turns).toHaveLength(1)
     expect(turns[0].toolCalls).toEqual([
-      { name: 'write_file', turn: 1, path: 'src/app.js' },
-      { name: 'echo', turn: 1 },
+      { name: 'write_file', turn: 1, path: 'src/app.js', status: 'ok' },
+      { name: 'echo', turn: 1, status: 'ok' },
     ])
     // result.toolCalls 同源继承（同一数组对象拼接）
     expect(result.toolCalls).toEqual(turns[0].toolCalls)
@@ -1301,11 +1301,11 @@ describe('绿灯收口与宽限轮（2026-08-29 turn_limit 线上案例 eb900c57
     }
     await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 1, onTurn: (info) => turns.push(info) }))
     expect(turns[0].toolCalls).toEqual([
-      { name: 'echo', turn: 1 },
-      { name: 'echo', turn: 1 },
+      { name: 'echo', turn: 1, status: 'ok' },
+      { name: 'echo', turn: 1, status: 'ok' },
     ])
     // 非文件工具的既有形态一字不增（payload 不变形，硬约束 8）
-    expect(Object.keys(turns[0].toolCalls[0])).toEqual(['name', 'turn'])
+    expect(Object.keys(turns[0].toolCalls[0])).toEqual(['name', 'turn', 'status']) // P1-05：新增可选执行结果键（与 path 同款渐进式）
   })
 })
 

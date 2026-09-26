@@ -42,15 +42,19 @@ export function repairScopeEnabled(): boolean {
 }
 
 /** B2（P0-B，2026-09-11 审计案 35c1a633）：修复轮零编辑守卫开关——runRepairLoop 返回后判
- *  toolCalls 无 write_file/edit_file 即不计轮（回滚 test_repair_count、不重验、旁白如实）。
- * 缺省 off=字节级现状（零编辑照样计轮照常重验）。 */
+ *  工具调用无有效 write_file/edit_file 即不计轮（回滚 test_repair_count、不重验、旁白如实）。
+ * 2026-09-26 审计 P1-05：缺省翻转为 on——提示词对「零编辑不计预算」的承诺无条件化，
+ *  代码缺省 off 造成承诺与事实分裂（审计原文）；关闭需显式 0/off/false。 */
 export function repairNoopGuardEnabled(): boolean {
-  return process.env.BLOMA_REPAIR_NOOP_GUARD === '1' || process.env.BLOMA_REPAIR_NOOP_GUARD === 'true'
+  const raw = (process.env.BLOMA_REPAIR_NOOP_GUARD ?? '').trim().toLowerCase()
+  return raw !== '0' && raw !== 'off' && raw !== 'false'
 }
 
-/** B2 判定：工具调用记录里是否存在写类调用（write_file/edit_file）。 */
-export function hasWriteEditToolCall(toolCalls: Array<{ name: string; path?: string }>): boolean {
-  return toolCalls.some((call) => call.name === 'write_file' || call.name === 'edit_file')
+/** B2 判定：工具调用记录里是否存在有效写类调用（write_file/edit_file）。
+ *  2026-09-26 审计 P1-05：只认工具名会把拒绝/失败的写入也算改动——status='error'
+ *  的写调用不算有效写入（修复轮结束时的 status 回填由 agent-loop 源序对齐）。 */
+export function hasWriteEditToolCall(toolCalls: Array<{ name: string; path?: string; status?: 'ok' | 'error' }>): boolean {
+  return toolCalls.some((call) => (call.name === 'write_file' || call.name === 'edit_file') && call.status !== 'error')
 }
 
 /** 受保护路径缺省（权威契约/宿主产物；拒绝任何扩大申请） */

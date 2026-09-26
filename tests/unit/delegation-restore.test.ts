@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createProject } from '../../main/project/project-service'
 import { loadMessages, recordSessionActivity } from '../../main/platform/sessions/session-service'
-import { appendDelegationSettle, reconcileRunningDelegations, restoreDelegationRecord } from '../../main/agent/delegation/delegation-persistence'
+import { appendDelegationSettle, reconcileAllRunningDelegations, reconcileRunningDelegations, restoreDelegationRecord } from '../../main/agent/delegation/delegation-persistence'
 import { appendJsonLine, readJsonFile, writeJsonFile } from '../../storage/json-store'
 import { getAgentSessionPath } from '../../storage/config-paths'
 
@@ -192,7 +192,21 @@ describe('reconcileRunningDelegations（启动对账：重启中断的委派自�
     // 对账后：running → cancelled（终态），已完成的委派不受影响
     expect(restoreDelegationRecord('parent-rc', 'deleg-rc-1')!.status).toBe('cancelled')
     expect(restoreDelegationRecord('parent-rc', 'deleg-rc-2')!.status).toBe('completed')
-    // 幂等：再跑一次无新对账项
+    expect(reconcileAllRunningDelegations()).toBe(0) // P1-09：全量对账幂等（已终态不重复）
     expect(reconcileRunningDelegations('parent-rc')).toHaveLength(0)
+
+  })
+  it('P1-09 全量模式：跨父会话的 running 委派一并对账（生产启动接线形态）', () => {
+    useTemporaryHome('deleg-reconcile-all-')
+    const project = createProject({ request_id: 'req-rca', mode: 'quick' })
+    recordSessionActivity('rca-child-a', project.project_id, { parentSessionId: 'parent-a', sourceDelegationId: 'deleg-a' })
+    recordSessionActivity('rca-child-b', project.project_id, { parentSessionId: 'parent-b', sourceDelegationId: 'deleg-b' })
+    appendJsonLine(getAgentSessionPath('rca-child-a'), { role: 'assistant', content: [{ type: 'text', text: '进行中' }], timestamp: Date.now() })
+    appendJsonLine(getAgentSessionPath('rca-child-b'), { role: 'assistant', content: [{ type: 'text', text: '进行中' }], timestamp: Date.now() })
+    // 定向对账只收 parent-a；全量对账跨父收齐（生产启动接线消费的正是全量形态）
+    expect(reconcileRunningDelegations('parent-a')).toHaveLength(1)
+    expect(reconcileAllRunningDelegations()).toBeGreaterThanOrEqual(1)
+    // 全量后再无残留
+    expect(reconcileAllRunningDelegations()).toBe(0)
   })
 })

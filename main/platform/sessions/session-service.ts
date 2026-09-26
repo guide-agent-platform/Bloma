@@ -114,9 +114,35 @@ export function isStallReply(text: string): boolean {
   return /(还没好|还没呢|还没完成|还没生成完|还在生成|还在跑|还在做|还在处理|后台还在|看不到进度|看不到后台|请稍等|稍等一下|马上就好)/.test(text)
 }
 
+/** 工具轨迹摘要（2026-09-26 审计 P1-05）：修复续接不再只有文本——assistant 轮附
+ *  本轮工具调用清单（名字[:path]），user 轮的 tool_result 回执转可读一行（✓/✗ 计数），
+ *  模型带工作记忆修复而非从零重读。轻量文本形态（结构化块重放已有先例：委派子会话
+ *  的 loadChildSessionSnapshot/replayTurnsFrom；主会话块级重放挂账）。 */
+function summarizeToolUses(blocks: Array<{ type: string; name?: string; input?: { path?: unknown } }>): string {
+  const uses = blocks.filter((b) => b.type === 'tool_use')
+  if (uses.length === 0) return ''
+  return `[本轮工具] ${uses.map((b) => {
+    const path = typeof b.input?.path === 'string' && b.input.path ? `:${b.input.path}` : ''
+    return `${b.name ?? '?'}${path}`
+  }).join('、')}`
+}
+
+function summarizeToolResults(blocks: Array<{ type: string; is_error?: boolean }>): string {
+  const results = blocks.filter((b) => b.type === 'tool_result')
+  if (results.length === 0) return ''
+  const failed = results.filter((b) => b.is_error === true).length
+  return `[工具结果回执] ${results.length} 次调用：${results.length - failed} 成功、${failed} 失败`
+}
+
+export interface LoadConversationHistoryOptions {
+  /** 附工具轨迹摘要（修复续接用；缺省 false 旧消费者零变化）。 */
+  includeToolTrace?: boolean
+}
+
 export function loadConversationHistory(
   sessionId: string,
   limit = HISTORY_WINDOW_TURNS,
+  options: LoadConversationHistoryOptions = {},
 ): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
   const path = getAgentSessionPath(sessionId)
   if (!existsSync(path)) return []
@@ -129,7 +155,9 @@ export function loadConversationHistory(
     } catch {
       continue
     }
-    const blocks = Array.isArray(message.content) ? (message.content as Array<{ type: string; text?: string }>) : []
+    const blocks = Array.isArray(message.content)
+      ? (message.content as Array<{ type: string; text?: string; name?: string; input?: { path?: unknown }; is_error?: boolean }>)
+      : []
     const text = typeof message.content === 'string' ? message.content : extractTurnText(blocks)
     if (message.role === 'system') {
       if (text.startsWith('[decision-card]')) {
@@ -138,6 +166,21 @@ export function loadConversationHistory(
       continue
     }
     if (message.role !== 'user' && message.role !== 'assistant') continue
+    // P1-05 工具轨迹：assistant 轮附工具清单；纯 tool_result 的 user 轮转回执摘要行
+    //（旧口径 text 为空直接跳过——修复模型看不到自己上轮干了什么）。
+    if (options.includeToolTrace) {
+      if (message.role === 'assistant') {
+        const toolLine = summarizeToolUses(blocks)
+        if (!text && !toolLine) continue
+        turns.push({ role: 'assistant', content: toolLine ? (text ? `${text}\n${toolLine}` : toolLine) : text })
+        continue
+      }
+      if (message.role === 'user' && !text) {
+        const receipt = summarizeToolResults(blocks)
+        if (receipt) turns.push({ role: 'user', content: receipt })
+        continue
+      }
+    }
     if (!text || text.startsWith('[terminal]')) continue
     turns.push({ role: message.role, content: text })
   }

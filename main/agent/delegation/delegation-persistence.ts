@@ -207,6 +207,19 @@ export function replayTurnsFrom(messages: ChildSessionMessage[]): ConversationTu
  * 幂等：已终态（有 settle 行）的委派不重复处理。
  */
 export function reconcileRunningDelegations(parentSessionId: string): RestoredDelegationRecord[] {
+  return reconcileDelegationsInternal(parentSessionId)
+}
+
+/**
+ * 生产启动全量对账（2026-09-26 运行审计 P1-09）：跨所有父会话扫描未 settle 的委派
+ * 并标记重启中断——此前 reconcileRunningDelegations 只有定义无生产接线，重启后
+ * running 委派账本悬置。返回对账条数；失败不抛（启动 fail-open）。
+ */
+export function reconcileAllRunningDelegations(): number {
+  return reconcileDelegationsInternal(undefined).length
+}
+
+function reconcileDelegationsInternal(parentSessionId: string | undefined): RestoredDelegationRecord[] {
   const indexPath = getAgentSessionsIndexPath()
   if (!existsSync(indexPath)) return []
   let sessions: AgentSessionRecord[]
@@ -219,12 +232,13 @@ export function reconcileRunningDelegations(parentSessionId: string): RestoredDe
   const reconciled: RestoredDelegationRecord[] = []
   for (const session of sessions) {
     if (!session.source_delegation_id) continue
-    if (session.parent_session_id && session.parent_session_id !== parentSessionId) continue
+    // 全量模式（parentSessionId=undefined）不过滤父会话；定向模式只对账指定父
+    if (parentSessionId !== undefined && session.parent_session_id && session.parent_session_id !== parentSessionId) continue
     const snap = loadChildSessionSnapshot(session.session_id)
     if (snap.lastSettle) continue // 已终态，不动
     const record: RestoredDelegationRecord = {
       delegationId: session.source_delegation_id,
-      parentSessionId: session.parent_session_id ?? parentSessionId,
+      parentSessionId: session.parent_session_id ?? parentSessionId ?? '',
       childSessionId: session.session_id,
       status: 'cancelled',
       finished: true,

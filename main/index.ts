@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { registerIpcHandlers } from './ipc'
 import { setSnapshotCaptureProvider } from './delivery/snapshots'
 import { reconcileInterruptedProjects } from './project/recovery-service'
+import { reconcileAllRunningDelegations } from './agent/delegation/delegation-persistence'
 import { migrateLegacySessionsIndexOnce } from './platform/sessions/session-service'
 import {
   setFocusWindowAction,
@@ -172,6 +173,15 @@ app.whenReady().then(async () => {
   // 开窗前完成对账（恢复是纯本地文件 IO，通常毫秒级；阶段收敛先于渲染端读取，
   // 避免渲染端拿到中间态阶段又滞后于磁盘）
   await reconcileInterruptedProjectsAtStartup()
+  // 2026-09-26 运行审计 P1-09：委派账本启动对账——重启时仍在跑的子委派统一标记
+  // 「应用重启中断」并落 settle 行（此前只有定义无生产接线，running 账本悬置）；
+  // fail-open 不阻断启动。
+  try {
+    const reconciledDelegations = reconcileAllRunningDelegations()
+    if (reconciledDelegations > 0) console.log(`[delegation] 启动对账：${reconciledDelegations} 个重启中断的委派已标记 cancelled`)
+  } catch (error) {
+    console.error('[delegation] 启动对账失败（不阻断启动）:', error)
+  }
   await createMainWindow()
 })
 

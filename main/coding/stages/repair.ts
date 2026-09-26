@@ -220,7 +220,7 @@ export async function repairAndRetest(input: AgentLoopPostTestingInput, testResu
     round,
     // 自由度批（2026-09-25）：修复续接（搬 Proma-Easy「修复优先续接不重派」）——
     // 会话历史重放进 loop，模型带完整工作记忆修复，不再从零重读文件
-    historyTurns: loadConversationHistory(input.session_id, 30), // 窗口 30：生成轮工作记忆主体覆盖（默认 10 偏窄）
+    historyTurns: loadConversationHistory(input.session_id, 30, { includeToolTrace: true }), // 窗口 30：生成轮工作记忆主体覆盖（默认 10 偏窄）
     // R1-providers（狗粮 7601e5ae #496）：上轮预算耗尽时被信道丢弃的写类意图回喛——
     // 只在存在时注入（缺省零注入字节级不变）
     ...(input.loop?.termination_detail?.dropped_tool_intents?.length
@@ -358,6 +358,7 @@ export async function repairAndRetest(input: AgentLoopPostTestingInput, testResu
       detail: {
         round,
         converged,
+        loop_status: result.loopResult?.status, // P1-05：修复轮 loop 真实出口如实随决策（turn_limit 等不再隐没）
         failed_before: testResult.failed_count,
         failed_after: retested.failed_count,
         total_count: retested.total_count,
@@ -536,7 +537,7 @@ export async function runBlockedTestRepair(input: {
     tasks,
     round,
     // 自由度批（2026-09-25）：修复续接（同上——历史重放带完整工作记忆）
-    historyTurns: loadConversationHistory(input.session_id, 30), // 窗口 30：生成轮工作记忆主体覆盖（默认 10 偏窄）
+    historyTurns: loadConversationHistory(input.session_id, 30, { includeToolTrace: true }), // 窗口 30：生成轮工作记忆主体覆盖（默认 10 偏窄）
     buildSystem: (editFormat) => buildLoopSystemWithOverride(backplane, editFormat, input.project_id, skeletonMap, undefined, moduleMap),
     // Phase 3 B3：修复轮本轮锚（开关 off=零注入字节级现状）；完成证据=失败断言原文
     ...(roundAnchorEnabled() ? { roundAnchor: buildRepairRoundAnchor(backplane, tasks.map((task) => task.location ?? task.claim)) } : {}),
@@ -558,8 +559,8 @@ export async function runBlockedTestRepair(input: {
     entry: {
       type: 'repair_round_completed',
       title: '定向修复轮完成（继续修），重新终验',
-      why: `第 ${round} 轮修复完成（${result.loopResult?.turns ?? 0} 轮 / ${result.loopResult?.toolCalls.length ?? 0} 次工具调用），产物已更新，重走终验门禁判定收敛`,
-      detail: { round, via: 'blocked_resume', loop_status: result.loopResult?.status, failed_snapshot: lastReport.failed_count },
+      why: `第 ${round} 轮修复完成（${result.loopResult?.turns ?? 0} 轮 / ${result.loopResult?.toolCalls.length ?? 0} 次工具调用，loop 出口 ${result.loopResult?.status ?? '未知'}），${hasWriteEditToolCall(result.loopResult?.toolCalls ?? []) ? '产物已更新' : '未见有效写类调用（产物可能未变）'}，重走终验门禁判定收敛`,
+      detail: { round, via: 'blocked_resume', loop_status: result.loopResult?.status, artifact_updated: hasWriteEditToolCall(result.loopResult?.toolCalls ?? []), failed_snapshot: lastReport.failed_count },
     },
   })
   trackAnalytics({

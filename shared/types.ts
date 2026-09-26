@@ -887,9 +887,9 @@ export type AgentLoopStatus = 'completed' | 'turn_limit' | 'budget_exhausted' | 
  *  纯增量字段，旧调用方零感知。 */
 /** P2a（2026-09-11）：loop 异常终止真实出口原因（纯增量观测字段，不改 status 语义）。 */
 export interface LoopTerminationDetail {
-  reason: 'degenerate_output'
-  /** 传输事故反馈重试次数（DEGENERATE_RETRY_LIMIT 内） */
-  retries: number
+  reason: 'degenerate_output' | 'grace_wrap_up'
+  /** 传输事故反馈重试次数（DEGENERATE_RETRY_LIMIT 内；grace_wrap_up 不携带） */
+  retries?: number
   /** R1-loop（2026-09-19 狗粮 7601e5ae #496）：重试耗尽时被丢弃的写类 DSML 调用意图
    *  （工具名[:path]，如 write_file:dist/app.js）——不再无声丢弃，供终验/修复消费 */
   dropped_tool_intents?: string[]

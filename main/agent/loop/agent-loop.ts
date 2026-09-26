@@ -112,11 +112,14 @@ export interface AgentLoopTool {
 
 /** 单次工具调用的过程记录（TurnInfo / LoopResult 共用）。
  *  path：文件类工具（write_file/edit_file/read_file 等）携带的目标相对路径——
- *  P3 loop-log 过程证据用；可选字段，既有埋点消费方向后兼容（payload 不变形）。 */
+ *  P3 loop-log 过程证据用；可选字段，既有埋点消费方向后兼容（payload 不变形）。
+ *  status（2026-09-26 审计 P1-05）：ok/error——执行结果回填，消费方可区分「发过
+ *  写调用」与「有效写入」（拒绝/失败写入不再被计入有效修改）。 */
 export interface AgentLoopToolCallRecord {
   name: string
   turn: number
   path?: string
+  status?: 'ok' | 'error'
 }
 
 /** W1-E1（咨询 D3，2026-09-09）：竹节压缩观测信息——纯埋点零行为变更。
@@ -1195,6 +1198,13 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
       return attachUsage(loopCancelled(turns, finalText, toolCalls, 'tool_execution', input.signal))
     }
     const { resultBlocks, budgetStallThisTurn } = execution
+    // P1-05（2026-09-26 审计）：本轮工具调用回填执行结果——resultBlocks 与 turnToolUses
+    // 按源序对齐，拒绝/失败写入（is_error）不再被下游零编辑守卫计为有效修改。
+    resultBlocks.forEach((block, i) => {
+      if (block.type !== 'tool_result') return
+      const call = turnCalls[i]
+      if (call) call.status = block.is_error === true ? 'error' : 'ok'
+    })
     appendLoopMessage(input.sessionId, 'user', resultBlocks)
     messages.push({ role: 'assistant', content: assistantBlocks })
     messages.push({ role: 'user', content: resultBlocks })
@@ -1488,8 +1498,13 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
       grace = await runGraceWrapUpTurn(input, messages, pinnedTestTurn)
     }
   }
-  // 宽限轮交卷文本同样不可是传输事故：退行文本不作完成总结，按 turn_limit 收口
-  if (grace.kind === 'text' && !isDegenerateText(grace.text)) return attachUsage({ status: 'completed', turns, finalText: grace.text, toolCalls })
+  // 宽限轮交卷文本同样不可是传输事故：退行文本不作完成总结，按 turn_limit 收口。
+  // P1-05（2026-09-26 审计）：宽限交卷的 completed 附 termination_detail.grace_wrap_up
+  // 观测——status 语义不变（外部终验权威、不信自述），但出口可区分「轮内完成」与
+  // 「预算耗尽后交卷」，下游不再把两者混计。
+  if (grace.kind === 'text' && !isDegenerateText(grace.text)) {
+    return attachUsage({ status: 'completed', turns, finalText: grace.text, toolCalls, termination_detail: { reason: 'grace_wrap_up' as const } })
+  }
   if (grace.kind === 'cancelled') return attachUsage(loopCancelled(turns, finalText, toolCalls, 'grace_turn', input.signal))
   // P2a：宽限轮交卷文本仍退化（重试后仍脏）→ 同样附真实出口原因；其余（refused/failed）维持裸 turn_limit
   const graceDegenerate = grace.kind === 'text' && isDegenerateText(grace.text)

@@ -548,7 +548,7 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
   }
 
   it('B2 零编辑×off：零编辑轮照常计轮重验（2026-09-26 预算循环语义：用满预算才熔断）', async () => {
-    delete process.env.BLOMA_REPAIR_NOOP_GUARD
+    process.env.BLOMA_REPAIR_NOOP_GUARD = '0' // 2026-09-26 P1-05：守卫缺省翻 on——off 需显式
     mocks.runGwtScenarios.mockResolvedValue(gwtFailed()) // 首验与重验都失败
     mocks.runAgentLoop.mockResolvedValue(loopCompletedReadOnly())
 
