@@ -1,6 +1,6 @@
 import type { Browser, Page } from 'playwright'
 import type { GwtTestResult, RunGwtInput } from './gwt-service'
-import { compileResetSteps, hasInteractiveControl, needsStepCompilation, runStepScenario, type GwtStep, type StepFailureKind } from './gwt-steps'
+import { capturePageState, compileResetSteps, hasInteractiveControl, needsStepCompilation, runStepScenario, type GwtStep, type StepFailureKind, type PageState } from './gwt-steps'
 import { readLastSketchRequirements } from '../project/project-service'
 import type { SketchRequirement } from '../coding/sketch-engine'
 import { requirementAssertions, requirementStory, isPlaceholderAssertion } from '../coding/sketch-engine'
@@ -96,7 +96,7 @@ export function checkGameMoveEffect(
 }
 
 /** 单条断言的执行计划（含所属功能项，供场景命名与裁判对账）。 */
-interface ScenarioPlan {
+export interface ScenarioPlan {
   item: SketchRequirement
   assertion: string
   plan: AssertionPlan
@@ -250,6 +250,11 @@ async function executeScenarios(browser: Browser, input: RunGwtInput): Promise<G
     const probedUrl = new URL(input.preview_url!)
     probedUrl.searchParams.set('mock', '1')
     await page.goto(probedUrl.toString(), { waitUntil: 'domcontentloaded', timeout: 10_000 })
+    const scenarioNavigate = async (): Promise<void> => {
+      // 2026-09-26 审计 P1-01：每场景重新导航隔离状态（场景 A 残留不再污染场景 B）；
+      // 导航失败不阻断（脏状态风险低于整轮崩溃）。
+      await page.goto(probedUrl.toString(), { waitUntil: 'domcontentloaded', timeout: 10_000 }).catch(() => undefined)
+    }
 
     // 媒体启动健康探针（W1.4，Phase 9）：页面 goto 后、场景循环前注入确定性检查——
     // 自动加载的 video/audio 若已报错（外链被 CSP 拦/格式不支持/404 源）即判败。
@@ -281,6 +286,8 @@ async function executeScenarios(browser: Browser, input: RunGwtInput): Promise<G
       // 每个场景独立快照（触发后新出现的诊断归属当前断言）；结局归约统一走
       // evaluateScenarioOutcome（诊断只附加不替换，不改通过/失败判定）。
       // unverified（测试映射缺口）独立归集：不计通过、不算失败（审计 P0-02 互斥态）。
+      // 首个场景刚导航过不重复（媒体探针后的干净初态）；后续每场景重新导航。
+      if (scenario !== scenarios[0]) await scenarioNavigate()
       const before = snapshotDiagnostics(diagnostics)
       const raw = await runScenario(page, scenario)
       if (raw === undefined) {
@@ -335,6 +342,17 @@ async function runScenario(page: Page, scenario: ScenarioPlan): Promise<Scenario
       const hasControl = await hasInteractiveControl(page)
       if (renderedText.includes(requirementStory(scenario.item)) || hasControl) return undefined
       return `页面缺少功能入口：${requirementStory(scenario.item)}`
+    }
+    // 2026-09-26 审计 P1-01：状态转换族断言优先走 steps 编译（解析失败≠无步骤
+    // 可执行；目标可从断言文本提取）；steps 也编不出才 unverified 待评估。
+    if (needsStepCompilation(scenario.assertion)) {
+      const compiled = compileResetSteps(scenario.assertion, scenario.plan.trigger?.target)
+      if (compiled.status === 'compiled') {
+        const stepResult = await runStepScenario(page, compiled.steps)
+        if (!stepResult) return undefined
+        return { reason: `${stepResult.reason}（步骤路径：given 种入 → when 触发 → then 绑定种入域的精确断言）`, kind: stepResult.kind }
+      }
+      return { unverified: true, reason: `映射编译失败：${compiled.status === 'mapping_blocked' ? compiled.reason : '无法分类意图'}——待评估（需测试映射补齐）` }
     }
     return { unverified: true, reason: '断言无法解析为可执行行为（触发/效果缺失），存在性回退不足以证明行为——待评估（需补测试映射或人工核验）' }
   }
@@ -420,35 +438,6 @@ async function collectControlInventory(page: Page): Promise<string> {
   }
 }
 
-/** 页面状态快照：元素签名→位置 + 可见元素数 + 全文 + 输入框值（效果探针的比对基础）。 */
-interface PageState {
-  elements: Array<{ sig: string; x: number; y: number }>
-  visibleCount: number
-  text: string
-  /** 所有 input/textarea 的 value 拼接（fill 触发后的 text-change 断言比对，M-4） */
-  inputValues: string
-}
-
-async function capturePageState(page: Page): Promise<PageState> {
-  return page.evaluate(() => {
-    const elements: Array<{ sig: string; x: number; y: number }> = []
-    let visibleCount = 0
-    const all = document.querySelectorAll<HTMLElement>('*')
-    // 上限采样（防超大 DOM 把探针拖垮）
-    for (let index = 0; index < all.length && index < 500; index += 1) {
-      const el = all[index]
-      const rect = el.getBoundingClientRect()
-      const style = window.getComputedStyle(el)
-      const visible = rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) !== 0
-      if (visible) visibleCount += 1
-      const sig = `${el.tagName}.${el.className && typeof el.className === 'string' ? el.className : ''}#${(el.textContent ?? '').slice(0, 24)}@${Math.round(rect.width)}x${Math.round(rect.height)}`
-      elements.push({ sig, x: Math.round(rect.left), y: Math.round(rect.top) })
-    }
-    const fields = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea'))
-    const inputValues = fields.map((el) => el.value).join('|').slice(0, 2000)
-    return { elements, visibleCount, text: document.body ? document.body.innerText : '', inputValues }
-  })
-}
 
 // ---- C4（2026-09-11 拍板）：游戏侧探针通道（window.__g）----
 // 通道契约（game 生成时 prompt 注入【游戏探针通道】段）：
@@ -738,7 +727,7 @@ async function dispatchTrigger(page: Page, trigger: AssertionPlan['trigger']): P
 }
 
 /** 效果探针：按效果种类比对前后状态。返回失败原因或 undefined（通过）。 */
-function checkEffect(scenario: ScenarioPlan, before: PageState, after: PageState): string | undefined {
+export function checkEffect(scenario: ScenarioPlan, before: PageState, after: PageState): string | undefined {
   const { effect, trigger, assertion } = scenario.plan
   if (!effect || !trigger) return undefined
   const expected = describeEffect(effect)
@@ -785,7 +774,17 @@ function checkEffect(scenario: ScenarioPlan, before: PageState, after: PageState
     return after.visibleCount > before.visibleCount ? undefined : fail('触发后页面可见元素数没有增加')
   }
   if (effect.kind === 'text-change') {
-    // 比对含输入框 value（M-4）：fill 触发的「输入内容更新」类断言不落在 body.innerText
+    // 期望值精确判定（审计 P1-01）：「得到 0.5」要求页面出现该值，计时器跳动不再假绿；
+    // 非计时断言排除纯时间文本变化（计时/时钟类 timeBound 豁免——变化本身就是时间文本）。
+    if (effect.expectedValue !== undefined) {
+      const hit = after.text.includes(effect.expectedValue) || after.inputValues.includes(effect.expectedValue)
+      return hit ? undefined : fail(`触发后页面未出现期望值「${effect.expectedValue}」`)
+    }
+    if (effect.timeBound !== true) {
+      const stripTime = (input: string): string => input.replace(/\d{1,2}:\d{2}(?::\d{2})?/g, '')
+      if (stripTime(before.text) !== stripTime(after.text) || after.inputValues !== before.inputValues) return undefined
+      return fail('触发后页面文字没有任何变化（仅有时钟类文本跳动不算行为变化）')
+    }
     return after.text !== before.text || after.inputValues !== before.inputValues
       ? undefined
       : fail('触发后页面文字没有任何变化')

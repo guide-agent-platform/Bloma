@@ -31,6 +31,11 @@ export interface BehaviorEffect {
   kind: 'move-right' | 'move-left' | 'move-up' | 'move-down' | 'hide' | 'show' | 'add-item' | 'text-change'
   /** 静态启发式关键词（§8.1 词表映射）：SVG transform/CSS @keyframes 等同义实现也在此列 */
   keywords: string[]
+  /** 期望值（2026-09-26 审计 P1-01）：「得到 0.5/显示为 XX/输出 XX」类断言捕获的
+   *  精确结果值——探针据此要求页面出现该值，而非任意文本变化（假绿收紧）。 */
+  expectedValue?: string
+  /** 计时/时间类文本变化（时钟/秒表）：不受时间剥离比较约束（变化本身就是时间文本）。 */
+  timeBound?: boolean
 }
 
 export interface AssertionPlan {
@@ -76,11 +81,33 @@ function parseTrigger(raw: string): BehaviorTrigger | undefined {
     if (/回车|enter/i.test(text)) return { kind: 'key', key: 'Enter' }
     if (/esc|退出键/i.test(text)) return { kind: 'key', key: 'Escape' }
     if (/删除|退格|backspace/i.test(text)) return { kind: 'key', key: 'Backspace' }
-    const direction = /右/.test(text) ? 'ArrowRight' : /左/.test(text) ? 'ArrowLeft' : /上/.test(text) ? 'ArrowUp' : /下/.test(text) ? 'ArrowDown' : undefined
-    if (direction && /(方向键|箭头|键)/.test(text)) return { kind: 'key', key: direction }
-    // 「按 W 键」「按 1」等单字符键
+    // 方向键完整词形（2026-09-26 审计 P1-01：「按下…键」的「下」+任意「键」字
+    // 散匹配曾把「按下键盘数字键」译成 ArrowDown——ef 实录假测试根因。现在
+    // 要求方向字与「方向键/箭头」邻接复合词形，或英文键名/箭头符号。
+    for (const [pattern, key] of [
+      [/(右方向键|右箭头|向右键|ArrowRight|→)/i, 'ArrowRight'],
+      [/(左方向键|左箭头|向左键|ArrowLeft|←)/i, 'ArrowLeft'],
+      [/(上方向键|上箭头|向上键|ArrowUp|↑)/i, 'ArrowUp'],
+      [/(下方向键|下箭头|向下键|ArrowDown|↓)/i, 'ArrowDown'],
+    ] as Array<[RegExp, string]>) {
+      if (pattern.test(text)) return { kind: 'key', key }
+    }
+    // 裸简写「按左键/按上键」（旧口径兼容）：限定「按」后紧跟方向字（按(?!下)
+    // 排除「按下键盘…」的动词形态），且方向字后不接「盘」（键盘）。
+    const bareDirection = /^(按(?!下)|敲|触发)\s*(左|右|上|下)\s*键(?!盘)/.exec(text)
+    if (bareDirection) {
+      const bareKeyMap: Record<string, string> = { 左: 'ArrowLeft', 右: 'ArrowRight', 上: 'ArrowUp', 下: 'ArrowDown' }
+      return { kind: 'key', key: bareKeyMap[bareDirection[2]] }
+    }
+    // 具体数字键（「按 7」「按数字键 5」）
+    const digitKey = /(?:按\s*([0-9])\s*键?|数字键\s*([0-9]))/.exec(text)
+    if (digitKey) return { kind: 'key', key: digitKey[1] ?? digitKey[2] }
+    // 「按 W 键」等单字符键
     const singleKey = /按\s*([A-Za-z0-9])\s*键?/.exec(text)
     if (singleKey) return { kind: 'key', key: singleKey[1].toUpperCase() === singleKey[1] ? singleKey[1] : singleKey[1].toUpperCase() }
+    // 键族泛指（数字键/字母键/任意键，无具体键值）：不可映射为具体按键——
+    // 不猜不误译，落入存在性回退→待评估（P0 语义），而非错误的方向键/click
+    if (/(数字键|字母键|任意键)/.test(text)) return undefined
   }
   // 双击类（M-4）：双击条目 / 双按XX
   const dblMatch = /双(?:击|按)\s*[「'"“]?([^」'"”，。,]{1,12})/.exec(text)
@@ -131,29 +158,35 @@ function parseEffect(raw: string): BehaviorEffect | undefined {
   const text = raw.trim()
   // 位移类：x 坐标增加/向右移动/右移/水平右移……（SVG transform/CSS translate/left 均为同义实现）
   const MOVE_KEYWORDS = ['translate', 'transform', 'left', 'right', 'top', 'bottom', 'margin', 'grid', 'flex']
-  if (/(x\s*坐标|横坐标|水平方向|向右|右移|往右)/.test(text) && /(增加|变大|增大|移动|前进|加速)/.test(text)) {
+  if (/(x\s*坐标|横坐标|水平方向|向右|右移|往右)/.test(text) && /(增加|变大|增大|移动|移|前进|加速)/.test(text)) {
     return { kind: 'move-right', keywords: MOVE_KEYWORDS }
   }
-  if (/(x\s*坐标|横坐标|水平方向|向左|左移|往左)/.test(text) && /(减小|减少|变小|移动|后退|倒退)/.test(text)) {
+  if (/(x\s*坐标|横坐标|水平方向|向左|左移|往左)/.test(text) && /(减小|减少|变小|移动|移|后退|倒退)/.test(text)) {
     return { kind: 'move-left', keywords: MOVE_KEYWORDS }
   }
-  if (/(y\s*坐标|纵坐标|垂直方向|向下|下移|往下)/.test(text) && /(增加|变大|移动|下降|下落)/.test(text)) {
+  if (/(y\s*坐标|纵坐标|垂直方向|向下|下移|往下|下落|落下|坠落)/.test(text) && /(增加|变大|移动|移|下降|下落)/.test(text)) {
     return { kind: 'move-down', keywords: MOVE_KEYWORDS }
   }
-  if (/(y\s*坐标|纵坐标|垂直方向|向上|上移|往上)/.test(text) && /(减小|减少|变小|移动|上升|上浮)/.test(text)) {
+  if (/(y\s*坐标|纵坐标|垂直方向|向上|上移|往上)/.test(text) && /(减小|减少|变小|移动|移|上升|上浮)/.test(text)) {
     return { kind: 'move-up', keywords: MOVE_KEYWORDS }
   }
   if (/(隐藏|消失|不见了|关闭|收起)/.test(text)) {
     return { kind: 'hide', keywords: ['hidden', 'display', 'visibility', 'opacity', 'remove', 'classList'] }
+  }
+  // 文本变化类先于 show 判定（2026-09-26 审计 P1-01：「显示区文本变化」曾因「显示」
+  // 先命中被译为 show（新元素出现）——ef 实录第二例假测试。名词表含显示区/画布等区域词；
+  // 「得到 0.5/显示为 XX」捕获期望值，探针要求页面出现该值而非任意变化。
+  // 期望值模式不要求名词前缀（2026-09-26 审计 P1-01：「按角度制得到 0.5」的「角度制」不在名词表也能映射）
+  const expectedValue = /(?:得到|得出|输出|计算出|算出|结果为|显示为|变为)\s*([0-9]+(?:\.[0-9]+)?%?)/.exec(text)?.[1]
+  const textChange = expectedValue !== undefined || /(?:文字|文本|内容|数值|数字|状态|结果|计数|计时|时间|分数|得分|余额|数量|显示区|显示屏|屏幕|画布|结果区).{0,6}(?:变化|改变|更新|刷新|变为|显示为|启动|停止|暂停|继续|清零|归零|重置)/.test(text)
+  if (textChange) {
+    return { kind: 'text-change', keywords: ['textContent', 'innerText', 'innerHTML', 'value'], ...(expectedValue ? { expectedValue } : {}), ...(/(计时|时间|时钟)/.test(text) ? { timeBound: true } : {}) }
   }
   if (/(显示|出现|可见|展开|弹出)/.test(text)) {
     return { kind: 'show', keywords: ['display', 'visibility', 'opacity', 'classList', 'style'] }
   }
   if (/(新增|添加|加入|多一条|增加一条|记录一条|保存一条|生成一条|入账)/.test(text)) {
     return { kind: 'add-item', keywords: ['appendChild', 'insertAdjacentHTML', 'createElement', 'innerHTML', 'push(', 'unshift('] }
-  }
-  if (/(?:文字|文本|内容|数值|数字|状态|结果|计数|计时|时间|分数|得分|余额|数量).{0,6}(?:变化|改变|更新|刷新|变化为|变为|显示为|启动|停止|暂停|继续|清零|归零|重置)/.test(text)) {
-    return { kind: 'text-change', keywords: ['textContent', 'innerText', 'innerHTML', 'value'] }
   }
   return undefined
 }

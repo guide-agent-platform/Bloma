@@ -83,6 +83,8 @@ export type ResetCompilation =
  * - delete/undo：mapping_blocked——删除需绑定具体记录项、撤销需构造两步前态，
  *   规则编译器无法给出可靠谓词；生成通用替代断言（v1 的「页面包含 0」）是假绿来源，
  *   明令禁止。后续由 steps LLM 编译器补齐（schema 已对齐，零结构改动挂账）。
+ * target 缺席时从断言文本提取触发目标（2026-09-26 审计 P1-01：解析失败的
+ * 状态转换断言优先走 steps 而非存在性回退）。
  */
 export function compileResetSteps(assertion: string, target: string | undefined): ResetCompilation {
   const intent = classifyResetIntent(assertion)
@@ -103,15 +105,23 @@ export function compileResetSteps(assertion: string, target: string | undefined)
       reason: `撤销类断言「${assertion}」需要两步前态与回退谓词，当前规则编译器无法可靠映射——需 steps LLM 编译器；本条不计为产品缺陷、不烧修复预算`,
     }
   }
+  const resolvedTarget = target ?? extractResetTarget(assertion)
   return {
     status: 'compiled',
     intent,
     steps: [
       { kind: 'given', text: '种入状态 123（有数字键盘则按键种入显示区，否则填入输入域并记录初值）', op: { type: 'seed-state', value: '123' } },
-      { kind: 'when', text: `执行触发：${target ?? ''}`, op: { type: 'click', target: target ?? '' } },
+      { kind: 'when', text: `执行触发：${resolvedTarget ?? ''}`, op: { type: 'click', target: resolvedTarget ?? '' } },
       { kind: 'then', text: '种入域回到初始/零态（清空生效——绑定种入域的精确谓词，非页面包含 0）', op: { type: 'assert-reset' } },
     ],
   }
+}
+
+/** 从断言文本提取触发目标（解析器给不出 trigger.target 时的兑底）：
+ *  「清空/重置/归零/撤销/删除…（键|按钮|控件）」名词短语，供语义匹配器寻址。 */
+function extractResetTarget(assertion: string): string | undefined {
+  const match = /(清空|重置|归零|清零|清除|撤销|撤回|删除|恢复初始)(?:键|按钮|控件|图标|链接)?/.exec(assertion)
+  return match ? match[0] : undefined
 }
 
 /** 种入域上下文（seed-state 采集，assert-reset 消费；同一次 runStepScenario 内传递）。 */
@@ -326,6 +336,38 @@ export async function hasInteractiveControl(page: Page): Promise<boolean> {
       return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) !== 0
     }
     return Array.from(document.querySelectorAll('button, input, select, textarea, a, form')).some(isVisible)
+  })
+}
+
+/** 页面状态快照（单步快路径探针的 before/after 比对基座；2026-09-26 自 gwt-runner
+ *  迁入——sig 中的时间文本已剥离：时钟跳动不改变元素身份，防 show/位移类断言被计时器假绿）。 */
+/** 页面状态快照：元素签名→位置 + 可见元素数 + 全文 + 输入框值（效果探针的比对基础）。 */
+export interface PageState {
+  elements: Array<{ sig: string; x: number; y: number }>
+  visibleCount: number
+  text: string
+  /** 所有 input/textarea 的 value 拼接（fill 触发后的 text-change 断言比对，M-4） */
+  inputValues: string
+}
+
+export async function capturePageState(page: Page): Promise<PageState> {
+  return page.evaluate(() => {
+    const elements: Array<{ sig: string; x: number; y: number }> = []
+    let visibleCount = 0
+    const all = document.querySelectorAll<HTMLElement>('*')
+    // 上限采样（防超大 DOM 把探针拖垮）
+    for (let index = 0; index < all.length && index < 500; index += 1) {
+      const el = all[index]
+      const rect = el.getBoundingClientRect()
+      const style = window.getComputedStyle(el)
+      const visible = rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) !== 0
+      if (visible) visibleCount += 1
+      const sig = `${el.tagName}.${el.className && typeof el.className === 'string' ? el.className : ''}#${(el.textContent ?? '').replace(/\d{1,2}:\d{2}(?::\d{2})?/g, '').slice(0, 24)}@${Math.round(rect.width)}x${Math.round(rect.height)}`
+      elements.push({ sig, x: Math.round(rect.left), y: Math.round(rect.top) })
+    }
+    const fields = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea'))
+    const inputValues = fields.map((el) => el.value).join('|').slice(0, 2000)
+    return { elements, visibleCount, text: document.body ? document.body.innerText : '', inputValues }
   })
 }
 
