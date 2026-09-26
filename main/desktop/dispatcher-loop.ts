@@ -13,6 +13,8 @@
  *      checkDispatcherToolGate 围栏（write_file/edit_file 即便误装配也被硬拦）；
  *   3b. 委派接线（2026-09-26 首跑修复）：注册父 loop 上下文 + 子工具集构建器——
  *      delegate_agent 可用性前提；收尾 disposeParentDelegationState（含异常路径）。
+ *   3c. 子会话面（2026-09-26 首跑深修）：真实工程写范围（realFullstackVariant）+
+ *      probe_desktop_env 环境探测工具；本 loop 关闭进度对账注入（非写型 loop 误注入）。
  *   4. 系统提示词：buildDispatcherSystemPrompt（阶段数据动态构建）；
  *   5. runAgentLoop（压缩/steer/DSML 恢复/检查点全继承；permissionMode=allow-all
  *      对齐自动化管线惯例，围栏在工具包装层不在权限链——不动 web 线 permission-service）；
@@ -34,10 +36,12 @@ import { buildWebResearch } from '../agent/tools/web-tools'
 import { buildDelegationTools } from '../agent/delegation/delegation-tools'
 import { disposeParentDelegationState, registerParentLoopContext, setChildToolsBuilder } from '../agent/delegation/agent-collaboration'
 import { categoryTemperature } from '../platform/llm/model-resolution'
+import type { DelegationRunRole } from '../../shared/delegation-run-context'
 import { getDesktopPhase, type PhaseNode } from './dispatcher-phases'
 import { checkDispatcherToolGate, evaluateAdvance, type AdvanceDecision } from './dispatcher-gate'
 import { buildDesktopChildBaseSystem, buildDispatcherSystemPrompt } from './dispatcher-prompt'
 import { isDesktopDispatchEnabled } from './dispatcher-switch'
+import { execFileProbeSpawn, isDesktopEnvReady, probeDesktopEnv, type ProbeSpawn } from './check-env'
 import { parseProjectContract } from './contract-schema'
 import { runContractDriver, execFileDriverSpawn, type DriverExecutionReport } from './process-driver'
 
@@ -112,6 +116,43 @@ const DESKTOP_DELEGATION_MAX_TURNS = 12
 export function buildDispatcherTools(projectId: string): AgentLoopTool[] {
   const readonly = buildAgentTools({ projectId, role: 'research' }).filter((t) => READONLY_TOOL_NAMES.has(t.name))
   return [...readonly, ...buildDelegationTools('parent'), buildWebResearch(projectId)]
+}
+
+/**
+ * 桌面线子会话工具集（首跑深修 2026-09-26）：真实工程件皆产物——项目内除基础设施
+ * 目录（node_modules/.git/data-backups）外皆可写。原缺省走 web 静态规则（src/ 子树 +
+ * .html/.js/.css），会拒绝 00_ARCH/*.md|.json、.py 等桌面交付物（首跑实证：门禁
+ * 产物写不进去，架构子会话只能写探测文件）。realFullstackVariant 语义即「真实工程件」，
+ * 命名沿用既有选项，后续统一。
+ */
+export function buildDesktopChildTools(projectId: string, role: DelegationRunRole, editFormat: 'diff' | 'whole'): AgentLoopTool[] {
+  return buildAgentTools({ projectId, role, editFormat, realFullstackVariant: true })
+}
+
+/**
+ * 桌面环境探测工具（首跑深修）：在真实主机执行 env 探测并回读结果——desktop-arch
+ * 环境清单 [实证] 的唯一实测来源（此前子会话无任何执行通道，只能阻塞或编造）。
+ * 探测项/三分类/超时复用 check-env；spawn 可注入（测试桩零真实子进程）。
+ */
+export function buildDesktopEnvProbeTool(spawn: ProbeSpawn = execFileProbeSpawn): AgentLoopTool {
+  return {
+    name: 'probe_desktop_env',
+    description:
+      '在真实主机探测 Windows 桌面开发环境（python 版本 / venv 模块 / PyInstaller 打包器），' +
+      '逐项返回真实命令、状态（ok/not-found/timeout/exec-failed）与输出。' +
+      'desktop-arch 环境清单与选型结论的 [实证] 来源；失败项按分类如实报告，不要编造。',
+    input_schema: { type: 'object', properties: {} },
+    execute: async () => {
+      const results = await probeDesktopEnv(spawn)
+      const lines = results.map(
+        (item) => `- ${item.id}: ${item.status}${item.version ? ` (v${item.version})` : ''}｜${item.detail}｜命令: ${item.probeCommand}`,
+      )
+      return {
+        output: `桌面环境探测结果（真实执行，非推断）：\n${lines.join('\n')}\n就绪判定（三项全 ok）：${isDesktopEnvReady(results) ? '是' : '否'}`,
+        detail: { results },
+      }
+    },
+  }
 }
 
 /**
@@ -264,8 +305,10 @@ export async function runDesktopDispatcherLoop(input: DesktopDispatchRunInput): 
     }),
     editFormat: 'diff',
     publish,
+    // 首跑深修：子会话专用执行通道（环境探测）；仅注入本父会话产生的委派子会话
+    childExtraTools: [buildDesktopEnvProbeTool()],
   })
-  setChildToolsBuilder((projectId, role, editFormat) => buildAgentTools({ projectId, role, editFormat }))
+  setChildToolsBuilder(buildDesktopChildTools)
 
   const loopResult = await runAgentLoopSafe(input, node, tools, system, publish, collector).finally(() =>
     // 收尾（含异常路径）：stop 未收敛子委派 + 清幂等缓存 + 注销父上下文
@@ -313,6 +356,8 @@ async function runAgentLoopSafe(
       maxTokens: input.maxTokens,
       maxTurns: input.maxTurns ?? 24,
       permissionMode: 'allow-all',
+      // 首跑深修：调度员不写文件/不带自测工具——web 线进度对账三守卫不适用（首跑被反复误注入）
+      disableProgressNudge: true,
       signal: input.signal,
       publish,
       onTurn: () => collector.onTurnBoundary(),

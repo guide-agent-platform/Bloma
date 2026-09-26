@@ -322,6 +322,17 @@ describe('M2 委派工具（agent-tools 接线，委派协作嫁接方案 §4.2�
     expect(outcome.detail).toHaveProperty('summaries')
   })
 
+  it('摘要展示（首跑深修）：长结果不再被 200 字符截断——4000 字符内全量展示', async () => {
+    const longTail = `尾标记-${'x'.repeat(600)}-END`
+    registerParent(oneShotQuery(longTail))
+    startDelegation(parentContext(), { task: '长结果任务', role: 'explore' })
+    const outcome = await parentTools().get('wait_for_delegations')!.execute({}, parentContext())
+    expect(outcome.isError).toBeUndefined()
+    expect(outcome.output).toContain('尾标记-')
+    expect(outcome.output).toContain('-END')
+    expect(outcome.output).not.toContain('已截断')
+  })
+
   it('wait_for_delegations：strategy=any + timeout_ms 超时不抛错返回当前状态', async () => {
     setChildToolsBuilder(() => [hang])
     registerParent(toolUseQuery('hang'))

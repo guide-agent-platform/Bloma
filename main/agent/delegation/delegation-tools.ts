@@ -258,11 +258,22 @@ function stringArrayOrUndefined(value: unknown): string[] | undefined {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : undefined
 }
 
+/** 委派摘要展示上限（字符/条）：首跑实证（2026-09-26）原 200 字符只够 teaser——父代理
+ *  无法读取子结果详情，反复重查/被迫二次探测。4000 对齐「主 loop 只进精干结论」既有
+ *  口径；需要完整产出时应让子代理落盘到项目文件（写范围已支持）。 */
+const DELEGATION_SUMMARY_DISPLAY_LIMIT = 4000
+
+function clipDelegationSummary(text: string): string {
+  if (text.length <= DELEGATION_SUMMARY_DISPLAY_LIMIT) return text
+  return `${text.slice(0, DELEGATION_SUMMARY_DISPLAY_LIMIT)}…（已截断：共 ${text.length} 字符；完整产出请让子代理写入项目文件）`
+}
+
 function formatDelegationSummaries(summaries: DelegationSummary[]): string {
   if (summaries.length === 0) return '（无委派记录）'
   return summaries
     .map((summary) => {
-      const result = summary.status === 'completed' && summary.result_summary ? `｜${summary.result_summary.slice(0, 200)}` : ''
+      const result =
+        summary.status === 'completed' && summary.result_summary ? `｜${clipDelegationSummary(summary.result_summary)}` : ''
       const error = summary.error ? `｜${summary.error}` : ''
       return `- ${summary.delegation_id} role=${summary.role} status=${summary.status}${result}${error}`
     })

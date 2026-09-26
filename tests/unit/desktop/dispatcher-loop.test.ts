@@ -16,12 +16,14 @@ import type { AgentLoopTool } from '../../../main/agent/loop/agent-loop'
 import {
   AssistantTurnCollector,
   DRIVER_REPORT_PATH,
+  buildDesktopEnvProbeTool,
   buildDispatcherTools,
   runDesktopDispatcherLoop,
   wrapWithDispatcherGate,
   type DesktopDispatchRunInput,
 } from '../../../main/desktop/dispatcher-loop'
 import { DESKTOP_PHASES } from '../../../main/desktop/dispatcher-phases'
+import { ProbeError } from '../../../main/desktop/check-env'
 
 // ── 委派接线探测（2026-09-26 首跑修复）：agent-collaboration 注册面做 spy（call-through 保真）──
 vi.mock('../../../main/agent/delegation/agent-collaboration', async (importOriginal) => {
@@ -408,6 +410,8 @@ describe('委派通道接线腿（2026-09-26 首跑修复）', () => {
     // 子会话基底带需求摘要（worker 能看到 PRD 需求）
     expect(context.system).toContain('【项目需求')
     expect(context.system).toContain('F-001')
+    // 子会话面（首跑深修）：环境探测工具随父上下文注入子会话
+    expect(context.childExtraTools?.some((tool) => tool.name === 'probe_desktop_env')).toBe(true)
 
     // 子工具构建器已装配且能产出写工具（worker 落盘产物）
     expect(builderSpy).toHaveBeenCalled()
@@ -434,5 +438,20 @@ describe('委派通道接线腿（2026-09-26 首跑修复）', () => {
     const result = await runDesktopDispatcherLoop(baseInput({ query: broken }))
     expect(result.status).toBe('error')
     expect(disposeSpy).toHaveBeenCalledWith('session-desktop')
+  })
+
+  it('probe_desktop_env：注入 spawn 桩 → 逐项三分类与就绪判定（不真跑子进程）', async () => {
+    const okTool = buildDesktopEnvProbeTool(async () => ({ code: 0, stdout: 'Python 3.13.7', stderr: '' }))
+    const ok = await okTool.execute({}, {} as never)
+    expect(String(ok.output)).toContain('python: ok')
+    expect(String(ok.output)).toContain('Python 3.13.7')
+    expect(String(ok.output)).toContain('就绪判定（三项全 ok）：是')
+
+    const missingTool = buildDesktopEnvProbeTool(async () => {
+      throw new ProbeError('not-found', '命令不存在：python')
+    })
+    const missing = await missingTool.execute({}, {} as never)
+    expect(String(missing.output)).toContain('not-found')
+    expect(String(missing.output)).toContain('就绪判定（三项全 ok）：否')
   })
 })

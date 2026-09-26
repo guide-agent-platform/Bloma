@@ -2027,4 +2027,20 @@ describe('B3 loop 进度对账三守卫（BLOMA_LOOP_PROGRESS_NUDGE）', () => {
     }
     expect(readSessionJsonl('session-b3-off').some((line) => JSON.stringify(line).includes('进度对账'))).toBe(false)
   })
+
+  it('disableProgressNudge：非写型 loop（调度员）关闭三守卫注入（首跑深修）', async () => {
+    process.env.BLOMA_LOOP_PROGRESS_NUDGE = '1'
+    const { query, receivedMessages } = scriptedQuery([...readOnlyScript(8), [textMessage('完成')]])
+    await runAgentLoop(baseInput({
+      query,
+      tools: [readFile],
+      maxTurns: 12,
+      sessionId: 'session-b3-disabled',
+      planFiles: ['index.html'],
+      disableProgressNudge: true,
+    }))
+    for (const messages of receivedMessages) {
+      expect(userTextsOf(messages)).not.toContain('进度对账')
+    }
+  })
 })

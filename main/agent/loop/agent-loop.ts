@@ -178,6 +178,9 @@ export interface AgentLoopInput {
   permissionMode: PromaPermissionMode
   /** 委派深度（缺省 0 = 主 agent；子 agent = 父深度+1，写入工具 state） */
   delegationDepth?: number
+  /** 非写型 loop（调度员等）关闭 B3 进度对账三守卫注入（守卫假设具备写/自测工具；
+   *  首跑实证：纯委派调度员触发只读失速误注入。缺省 false=现状）。 */
+  disableProgressNudge?: boolean
   /** 续跑重放历史轮次（delegation continue 阶段 3，2026-08-28 队友）：作为 messages 开头
    * 传入模型，task 仍是最新 user 轮；不写入 JSONL——重放轮已在子会话文件里 */
   historyTurns?: ConversationTurn[]
@@ -1277,7 +1280,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     // 与 steer 同点位（resultBlocks 落盘后、下一轮模型调用前）；注入计入滑窗/压缩管道，
     // 不破坏「整批 tool_result 单条 user 消息」不变式。开关 off=零注入字节级现状；
     // 只挂主 loop（修复轮任务窄且无 plan 上下文）；wrapUp 激活后不再打扰（模型在交卷）。
-    if (isMainLoop && !wrapUp && loopProgressNudgeEnabled()) {
+    if (isMainLoop && !wrapUp && loopProgressNudgeEnabled() && !input.disableProgressNudge) {
       const nudges: string[] = []
       // 守卫1 只读失速：连续 N 轮无 write/edit → 提醒落盘（注入后重置，再失速两计数再提）
       if (readOnlyStreak >= PROGRESS_READ_ONLY_TURNS) {
