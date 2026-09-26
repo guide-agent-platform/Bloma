@@ -1,4 +1,20 @@
 import { randomUUID } from 'node:crypto'
+import {
+  ISOLATION_NOTE,
+  acquireChildRunContext,
+  formatWorktreeNote,
+  invokeChildLoopWithContext,
+  summarizeChildResult,
+  type ChildRunContext,
+  type ChildRunContextProvider,
+  buildChildSystemPrompt,
+  buildDelegationPrompt,
+} from './child-run-context'
+
+/** P1-06：子运行上下文接口 re-export（coding 层 worktree 隔离经此注入）。 */
+export { setChildRunContextProvider } from './child-run-context'
+/** 提示词纯函数 re-export（R7 拆出后保持既有 import 路径）。 */
+export { buildChildSystemPrompt, buildDelegationPrompt } from './child-run-context'
 import { appendDelegationSettle, loadChildSessionSnapshot, replayTurnsFrom } from './delegation-persistence'
 import { recordSessionActivity } from '../../platform/sessions/session-service'
 import type { AgentEvent, PromaPermissionMode } from '../../../shared/types'
@@ -53,7 +69,8 @@ const DEFAULT_DELEGATION_WAIT_TIMEOUT_MS = 600_000
 // 类型
 // =========================================================================
 
-export type DelegationRole = 'explore' | 'research' | 'implement' | 'review' | 'custom'
+export type { DelegationRunRole as DelegationRole } from '../../../shared/delegation-run-context'
+import type { DelegationRunRole as DelegationRole } from '../../../shared/delegation-run-context'
 
 export type DelegationStatus = 'running' | 'completed' | 'failed' | 'cancelled'
 
@@ -116,6 +133,8 @@ export interface DelegationRecord {
   askSignal: AskSignal
   /** 子 agent 挂起提问的问题（待父 answer；父答后清空）。 */
   pendingQuestion?: string
+  /** P1-06：worktree 隔离运行上下文结果（合并/冲突/丢弃如实；内部字段）。 */
+  worktreeMeta?: Record<string, unknown>
   /** ask_delegation_question 挂起的 resolve（answer 时回调，把答案回传子 loop）。 */
   pendingAnswerResolve?: (answer: string) => void
   channelOverride?: DelegationChannelOverride
@@ -153,6 +172,7 @@ export interface DelegationParentContext {
 /** 子 agent 工具集构建器（按 role 裁剪；programming-orchestrator 注入 buildAgentTools）。 */
 export type ChildToolsBuilder = (projectId: string, role: DelegationRole, editFormat: 'diff' | 'whole') => AgentLoopTool[]
 
+
 export interface WaitForDelegationsArgs {
   delegationIds?: string[]
   strategy?: 'all' | 'any'
@@ -178,6 +198,7 @@ let childToolsBuilder: ChildToolsBuilder = () => {
   throw new Error('子 agent 工具集构建器未注入（programming-orchestrator 应在 runMvpViaAgentLoop 注册 setChildToolsBuilder）')
 }
 
+
 // =========================================================================
 // 注册表（父上下文 / 子工具构建器）
 // =========================================================================
@@ -185,6 +206,7 @@ let childToolsBuilder: ChildToolsBuilder = () => {
 export function setChildToolsBuilder(builder: ChildToolsBuilder): void {
   childToolsBuilder = builder
 }
+
 
 /** 注册父 loop 上下文（runMvpViaAgentLoop 起跑前调用，结束后 unregister）。 */
 export function registerParentLoopContext(sessionId: string, context: DelegationParentContext): void {
@@ -290,7 +312,7 @@ export function startDelegation(parent: ToolContext, args: DelegateAgentArgs): S
 /** 子 loop 正常结束：落 result summary 并置 completed（非 running 状态不覆盖，如已被 stop）。 */
 function settleChildLoop(record: DelegationRecord, result: AgentLoopResult): void {
   if (record.status !== 'running') return
-  record.resultSummary = summarizeChildResult(result)
+  record.resultSummary = summarizeChildResult(result, DELEGATION_RESULT_CHAR_LIMIT) + formatWorktreeNote(record.worktreeMeta)
   record.status = 'completed'
   // persistence：终态落盘（重启后 JSONL 末行推断依据）
   try {
@@ -305,7 +327,9 @@ function settleChildLoop(record: DelegationRecord, result: AgentLoopResult): voi
 /** 子 loop 异常结束：落 error 并置 failed（非 running 状态不覆盖）。 */
 function settleChildLoopError(record: DelegationRecord, error: unknown): void {
   if (record.status !== 'running') return
-  record.error = errorMessage(error)
+  const carriedMeta = (error as { childWorktreeMeta?: Record<string, unknown> } | undefined)?.childWorktreeMeta
+  if (carriedMeta) record.worktreeMeta = { ...(record.worktreeMeta ?? {}), ...carriedMeta }
+  record.error = errorMessage(error) + formatWorktreeNote(record.worktreeMeta)
   record.status = 'failed'
   try {
     appendDelegationSettle(record.childSessionId, 'failed', { error: record.error })
@@ -315,6 +339,7 @@ function settleChildLoopError(record: DelegationRecord, error: unknown): void {
   record.resolveCompletion()
   publishDelegationEvent(record.parentSessionId, 'delegation_failed', record)
 }
+
 
 /** 子 agent 事件白名单：仅委派生命周期与工具行事件可进入父会话事件流。
  * 子 agent 的 message_delta / message_completed 是内部旁白（审查六维分析、探索过程
@@ -344,8 +369,13 @@ async function runChildLoop(opts: {
   const { parent, parentCtx, record, prompt, role } = opts
   const childRequestId = randomUUID()
   const maxTurns = Math.max(1, Math.min(parentCtx.delegationMaxTurns, parentCtx.maxTurns))
-  return runAgentLoop({
-    system: buildChildSystemPrompt(parentCtx.system, role),
+  // P1-06 收尾：子运行上下文（worktree 隔离）；provider 未注册/开关 off → 零变化
+  const runContext = acquireChildRunContext({ projectId: parent.projectId, delegationId: record.delegationId, childSessionId: record.childSessionId, role })
+  const isolationNote = runContext?.rootOverride
+    ? '\n\n【隔离工作模式】你在独立分支的工作树上实现（改动不直接进项目主目录）；本会话不提供预览/测试/安全验证工具——验证由父会话在合并后统一执行，请专注于实现与逻辑自检。'
+    : ''
+  const invoke = (): Promise<AgentLoopResult> => runAgentLoop({
+    system: `${buildChildSystemPrompt(parentCtx.system, role)}${isolationNote}`,
     task: prompt,
     historyTurns: opts.replayTurns,
     tools: [...childToolsBuilder(parent.projectId, role, parentCtx.editFormat), ...(parentCtx.childExtraTools ?? [])],
@@ -373,6 +403,9 @@ async function runChildLoop(opts: {
       ? (info) => parentCtx.onChildCompaction!(info, { sessionId: record.childSessionId, requestId: childRequestId, role })
       : undefined,
   })
+  const { result, meta } = await invokeChildLoopWithContext(runContext, invoke)
+  if (meta) record.worktreeMeta = { ...(record.worktreeMeta ?? {}), ...meta }
+  return result
 }
 
 // =========================================================================
@@ -714,53 +747,11 @@ function pruneFinishedDelegations(): void {
   }
 }
 
-// =========================================================================
-// 提示词构造（纯函数，可测）
-// =========================================================================
-
-const ROLE_INSTRUCTIONS: Record<DelegationRole, string> = {
-  explore: '职责：探索代码库——梳理文件结构、定位相关实现、报告事实性发现。只读操作，不做修改。',
-  research: '职责：调研——阅读相关代码与文档，形成结论或对比方案。只读操作，不做修改。',
-  implement: '职责：实现——编写/修改项目文件完成子任务。遵循平台工具护栏（路径沙箱、语法校验、可写范围）。',
-  review: '职责：审查——阅读代码指出问题（正确性/可维护性/安全隐患），给出文件定位与建议，不直接修改。',
-  custom: '职责：按主 agent 在任务里给出的具体指令工作。',
-}
-
-/** 子 agent system prompt：父背板 system + role 行为说明 + 委派边界规则。 */
-export function buildChildSystemPrompt(parentSystem: string, role: DelegationRole): string {
-  return `${parentSystem}
-
-<delegation_context>
-你是主 agent 委派的一名协作子 agent（role=${role}）。
-${ROLE_INSTRUCTIONS[role]}
-边界：
-- 只负责完成本任务；完成后用纯文本输出结果摘要，不要输出「我将…」式的过程承诺。
-- 你不能再委派其他子 agent（深度限制）；需要额外信息时用现有工具自行获取。
-- 不向用户提问；确实受阻时，如实说明阻塞原因并输出当前进展。
-</delegation_context>`
-}
-
-export function buildDelegationPrompt(opts: {
-  role: DelegationRole
-  task: string
-  expectedOutput?: string
-}): string {
-  const expected = opts.expectedOutput
-    ? `期望输出：${opts.expectedOutput}\n（最终回复请以一行「结论:」开头的标记句总结关键信息——标记句会被上下文压缩保留，格式：结论: <要点>）`
-    : '完成后用简洁文本输出结果摘要（关键发现/完成清单/未完成项与原因）。最终回复以一行「结论:」开头的标记句总结（会被上下文压缩保留）。'
-  return `协作子任务（role=${opts.role}）：\n${opts.task}\n\n${expected}`
-}
 
 // =========================================================================
 // 工具函数
 // =========================================================================
 
-function summarizeChildResult(result: AgentLoopResult): string {
-  const header = `子代理状态：${result.status}（${result.turns} 轮，${result.toolCalls.length} 次工具调用）`
-  const body = result.finalText.trim()
-  const full = body ? `${header}\n${body}` : header
-  return truncateText(full, DELEGATION_RESULT_CHAR_LIMIT)
-}
 
 function createDelegationCompletion(): { completion: Promise<void>; resolveCompletion: () => void } {
   let resolveCompletion!: () => void

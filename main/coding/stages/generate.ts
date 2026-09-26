@@ -67,7 +67,8 @@ import { apiReconcileEnabled, checkMediaSourceDiscipline, reconcileApiUsage } fr
 import { checkDataMigrationDiscipline, dataMigrateContractSection, dataMigrateEnabled, runMigrationDrill, type MigrationDrillResult } from '../data-migration'
 import { buildAgentTools } from '../../agent/tools/agent-tools'
 import { buildDomainTools, domainToolOptionsDefaults } from '../tool-handlers'
-import { disposeParentDelegationState, registerParentLoopContext, setChildToolsBuilder } from '../../agent/delegation/agent-collaboration'
+import { disposeParentDelegationState, registerParentLoopContext, setChildRunContextProvider, setChildToolsBuilder } from '../../agent/delegation/agent-collaboration'
+import { buildDelegationWorktreeProvider } from '../worktree-isolation'
 import { categoryTemperature, resolveGenerationMaxTokens } from '../../platform/llm/model-resolution'
 import type { SDKQuery, ToolDefinition } from '../../orchestration/orchestrator'
 import { resolvePrdBackplane } from '../../guide/pipeline'
@@ -829,6 +830,9 @@ export async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopCha
   }
   // 委派协作（嫁接方案 §4.1）：注册父 loop 上下文供 delegate_agent 构建子循环；子工具集按 role 裁剪
   setChildToolsBuilder((projectId, role, editFormat) => [...buildAgentTools({ projectId, role, editFormat, ...domainToolOptionsDefaults(projectId) }), ...buildDomainTools({ projectId, role, editFormat, ...domainToolOptionsDefaults(projectId) })])
+  // P1-06 收尾：装配 worktree 隔离 provider 到 agent 注入位（开关 BLOMA_DELEGATION_WORKTREE
+  // 缺省 off=零变化；工厂形态保持依赖倒置：coding 不 import agent）
+  setChildRunContextProvider(buildDelegationWorktreeProvider())
   registerParentLoopContext(input.session_id, {
     query: input.query!,
     env: loop.env,

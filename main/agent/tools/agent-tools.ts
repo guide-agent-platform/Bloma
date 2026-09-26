@@ -9,6 +9,7 @@ import { isInjectionEnabled } from '../prompting/template-injection'
 import { decideWrite, estimateTokenCount } from '../loop/usage-guard'
 import { withAbort, loopApiToolEnabled, toolEvidenceEnabled, writeGuardEnabled, preflightEnabled, compactToolEnabled, MAX_EXPLICIT_COMPACTIONS, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../loop/agent-loop'
 import { commitFileWrite, fileRevisionOf, fileRevisionsOf } from './write-lease'
+import { resolveProjectRoot } from '../../../shared/project-root-override'
 import { buildDelegationTools } from '../delegation/delegation-tools'
 import { buildWebFetch, buildWebResearch } from './web-tools'
 // 向后兼容 re-export（setWebResearchTimeoutForTests 随 web_research 迁至 web-tools；存量 import 零改动）
@@ -330,6 +331,9 @@ export function createWriteScope(authorizedPaths: string[], protectedPaths: stri
 export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[] {
   const editFormat = options.editFormat ?? 'diff'
   const projectId = options.projectId
+  // P1-06 收尾：项目根经 kernel 覆盖解析——worktree 隔离模式下子会话的读写落独立工作树（
+  // 覆盖缺省=主目录，行为零变化）
+  const projectRoot = (): string => resolveProjectRoot(projectId, () => findProject(projectId).root_path)
   const role = options.role ?? 'parent'
   // W3：真实脚手架变体——PR4c 改由调用方注入（去域依赖；缺省 false=旧路径字节级）
   const realVariant = options.realFullstackVariant ?? false
@@ -440,7 +444,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     },
     execute: async (toolInput, ctx) => {
       const project = findProject(projectId)
-      const resolved = resolveInsideProject(project.root_path, toolInput.path)
+      const resolved = resolveInsideProject(projectRoot(), toolInput.path)
       if (!resolved.ok) return { output: resolved.error, isError: true }
       if (!existsSync(resolved.abs)) {
         return { output: `文件不存在：${resolved.rel}。可用 list_files 查看项目文件清单。`, isError: true }
@@ -474,11 +478,11 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       const project = findProject(projectId)
       let subDir = ''
       if (typeof toolInput.path === 'string' && toolInput.path.trim()) {
-        const resolved = resolveInsideProject(project.root_path, toolInput.path)
+        const resolved = resolveInsideProject(projectRoot(), toolInput.path)
         if (!resolved.ok) return { output: resolved.error, isError: true }
         subDir = resolved.rel
       }
-      const files = collectProjectFiles(project.root_path, subDir)
+      const files = collectProjectFiles(projectRoot(), subDir)
       // R0.2（2026-09-19 狗粮 7601e5ae）：平台托管目录不再伪装成「空目录」——模型据
       // 「目录为空」误判 express 未 vendor、白白零依赖重写；如实说明托管与供货保证。
       const topDir = subDir.split('/')[0]
@@ -522,11 +526,11 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       }
       const glob = typeof toolInput.glob === 'string' && toolInput.glob.trim() ? toolInput.glob.trim().replace(/^\*/, '') : ''
       const hits: string[] = []
-      for (const rel of collectProjectFiles(project.root_path)) {
+      for (const rel of collectProjectFiles(projectRoot())) {
         if (glob && !rel.endsWith(glob)) continue
         let content: string
         try {
-          content = readFileSync(join(project.root_path, rel), 'utf8')
+          content = readFileSync(join(projectRoot(), rel), 'utf8')
         } catch {
           continue
         }
@@ -572,7 +576,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         }
       }
       const project = findProject(projectId)
-      const resolved = resolveInsideProject(project.root_path, toolInput.path)
+      const resolved = resolveInsideProject(projectRoot(), toolInput.path)
       if (!resolved.ok) return { output: resolved.error, isError: true }
       // W4-F2：授权边界门（仅修复轮传入 writeScope 时生效；主 loop 无 holder 零变化）
       const writeScopeBlocked = guardWriteScope(resolved.rel)
@@ -589,7 +593,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         }
       }
       // 修复预算门在 validateAndWrite 内（校验通过后才烧预算）
-      return validateAndWrite(project.root_path, resolved.rel, toolInput.content, ctx)
+      return validateAndWrite(projectRoot(), resolved.rel, toolInput.content, ctx)
     },
   }
 
@@ -612,7 +616,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     },
     execute: async (toolInput, ctx) => {
       const project = findProject(projectId)
-      const resolved = resolveInsideProject(project.root_path, toolInput.path)
+      const resolved = resolveInsideProject(projectRoot(), toolInput.path)
       if (!resolved.ok) return { output: resolved.error, isError: true }
       // W4-F2：授权边界门（仅修复轮传入 writeScope 时生效；主 loop 无 holder 零变化）
       const writeScopeBlocked = guardWriteScope(resolved.rel)
@@ -649,7 +653,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
             detail: { est_tokens: estTokens, threshold: 16000 },
           }
         }
-        return validateAndWrite(project.root_path, resolved.rel, toolInput.content, ctx)
+        return validateAndWrite(projectRoot(), resolved.rel, toolInput.content, ctx)
       }
 
       // diff 模式：new_string 必须显式提供（可为空串但不能缺省，缺省静默删除是隐蔽 bug）
@@ -672,7 +676,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       const next = current.replace(toolInput.old_string, toolInput.new_string)
       // P1-06：模型显式 expected_revision 优先；未传时用本会话读到的版本作提交点校验基准
       const revisionBasis = typeof toolInput.expected_revision === 'string' ? toolInput.expected_revision : undefined
-      return validateAndWrite(project.root_path, resolved.rel, next, ctx, revisionBasis)
+      return validateAndWrite(projectRoot(), resolved.rel, next, ctx, revisionBasis)
     },
   }
 
@@ -726,12 +730,12 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       if (!pattern) return { output: '缺少 pattern 参数（glob 模式，如 src/**/*.js）。', isError: true }
       let subDir = ''
       if (typeof toolInput.path === 'string' && toolInput.path.trim()) {
-        const resolved = resolveInsideProject(project.root_path, toolInput.path)
+        const resolved = resolveInsideProject(projectRoot(), toolInput.path)
         if (!resolved.ok) return { output: resolved.error, isError: true }
         subDir = resolved.rel
       }
       const matcher = globToRegExp(pattern)
-      const hits = collectProjectFiles(project.root_path, subDir).filter((rel) => matcher.test(rel))
+      const hits = collectProjectFiles(projectRoot(), subDir).filter((rel) => matcher.test(rel))
       if (hits.length === 0) {
         // R0.2：命中不了平台托管目录（node_modules 等）时如实说明，防「找不到 = 不存在」误判
         const targetsManaged = [pattern, subDir].some((seg) => seg && seg.split('/').includes('node_modules'))

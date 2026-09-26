@@ -5,6 +5,7 @@
  * 调用方拼接：[...buildAgentTools(o), ...buildDomainTools(o)]（角色裁剪两边各自持半）。
  */
 import type { AgentLoopTool } from '../agent/loop/agent-loop'
+import { hasProjectRootOverride } from '../../shared/project-root-override'
 import { loopApiToolEnabled, preflightEnabled, toolEvidenceEnabled } from '../agent/loop/agent-loop'
 import type { BuildAgentToolsOptions } from '../agent/tools/agent-tools'
 import { validationStateLine, SANDBOX_LOG_TAIL_LIMIT } from '../agent/tools/agent-tools'
@@ -25,6 +26,10 @@ import { scheduleProjectMapRefresh } from '../project/project-map'
 
 export function buildDomainTools(options: BuildAgentToolsOptions): AgentLoopTool[] {
   const { projectId } = options
+  // P1-06 收尾：worktree 隔离模式（子会话根被覆盖）下不提供领域验证工具——预览/GWT/
+  // 安全/契约/预检都绑「项目根」，在隔离工作树上跑会得到与主目录不一致的结论（假验证）；
+  // 审计口径：验证绑定同一稳定候选版本——隔离实现的验证统一由父会话在合并后执行。
+  if (hasProjectRootOverride()) return []
   // 与 buildAgentTools 同款缺省：role 未传 = parent（否则 undefined 落进子分支，parent 专属工具族丢失）
   const role = options.role ?? 'parent'
   // PR4c：变体判定由调用方注入（与 buildAgentTools 的 realFullstackVariant 同源）
