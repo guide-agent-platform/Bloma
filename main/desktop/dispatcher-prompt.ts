@@ -94,8 +94,9 @@ export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherProm
   if (node.requiresUserConfirmation) {
     sections.push(
       '【确认纪律】\n' +
-        '本阶段收口需要用户确认：门禁全部通过后，先用 guide_decide 发起确认（决策卡），' +
-        '取得用户同意后才输出推进标记。用户未确认前不得推进；被拒时按用户意见返工。',
+        '本阶段收口需要用户确认：门禁全部通过后，直接在回复末尾输出推进标记即可——' +
+        '平台裁决边界会自动向用户发起确认卡并等待确认（你不需要、也无法自己发卡，不要让子会话代办）。' +
+        '用户确认前阶段不会推进；用户被拒时按意见返工。',
     )
   }
 
@@ -179,6 +180,11 @@ export function buildToolDisciplineSection(node: PhaseNode): string {
     '你不直接写文件：write_file/edit_file 被裁决边界硬拦。一切落盘工作（建骨架、写实现、' +
       '写报告）都通过 delegate_agent 委派子会话完成；你负责拆解任务书、指定渠道与验收标准、' +
       '用只读工具核验产物。',
+  )
+  lines.push(
+    '落盘类子任务一律用 role=implement 委派（research/explore 子会话只读、没有写文件工具）；' +
+      '子会话挂起提问（摘要里的 pending_question）时尽快用 answer_delegation_question 代答，' +
+      '否则它会一直挂起、且 wait_for_delegations 会反复提前返回。',
   )
   if (node.extraTools.length > 0) {
     lines.push(`本阶段附加工具：${node.extraTools.join('、')}。`)

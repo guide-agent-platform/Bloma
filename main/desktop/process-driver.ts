@@ -20,6 +20,7 @@
  * spawn 注入式（DriverSpawn）：单测零真实子进程；生产 execFileDriverSpawn。
  */
 
+import { execFile } from 'node:child_process'
 import { violatesCommandBlacklist, type ProjectContract } from './contract-schema'
 
 // =========================================================================
@@ -284,7 +285,7 @@ export async function runContractDriver(input: RunDriverInput): Promise<DriverEx
 
 /** 生产驱动 spawn：execFile + 超时强杀 + ENOENT/超时翻译（cwd 强制——契约相对根）。 */
 export function execFileDriverSpawn(request: DriverCommandRequest): Promise<{ code: number; stdout: string; stderr: string }> {
-  const { execFile } = require('node:child_process') as typeof import('node:child_process')
+  // 首跑深修（2026-09-26）：原惰性 require 在 esbuild ESM 产物里抛 Dynamic require 错误——改静态 import
   const [command, ...args] = request.command
   return new Promise((resolve, reject) => {
     execFile(

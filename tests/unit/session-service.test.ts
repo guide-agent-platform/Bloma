@@ -64,6 +64,24 @@ describe('SessionService 会话索引', () => {
     }
   })
 
+  it('委派子会话活动只入索引、不改写 last_session_id（首跑深修 2026-09-26）', () => {
+    const originalHome = process.env.PROMA_HOME
+    useTemporaryHome('session-child-meta-')
+    try {
+      const project = createProject({ request_id: 'req-1', mode: 'quick' })
+      recordSessionActivity('session-main', project.project_id)
+      expect(findProject(project.project_id).last_session_id).toBe('session-main')
+
+      recordSessionActivity('session-child', project.project_id, { parentSessionId: 'session-main', sourceDelegationId: 'd-1' })
+      // 子会话照常入索引（含归属字段；listSessions 会过滤子会话，用原始索引核对）
+      const child = readSessionsForTest().sessions.find((item) => item.session_id === 'session-child')
+      expect((child as { parent_session_id?: string } | undefined)?.parent_session_id).toBe('session-main')
+      expect(findProject(project.project_id).last_session_id).toBe('session-main')
+    } finally {
+      restorePromaHome(originalHome)
+    }
+  })
+
   it('再次调用只刷新 updated_at，保留 created_at', async () => {
     const originalHome = process.env.PROMA_HOME
     const home = useTemporaryHome('session-update-')

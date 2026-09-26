@@ -15,6 +15,8 @@
  * 单测零真实子进程；真实探测留给接线后的集成路径。
  */
 
+import { execFile } from 'node:child_process'
+
 // =========================================================================
 // 类型与分类
 // =========================================================================
@@ -150,11 +152,11 @@ export function isDesktopEnvReady(results: readonly ProbeResult[]): boolean {
 // 生产实现（execFile；延迟导入边界由调用方负责——模块被单测 import 时不触发）
 // =========================================================================
 
-/** 生产 spawn：execFile + 超时 + ENOENT/超时翻译。 */
+/** 生产 spawn：execFile + 超时 + ENOENT/超时翻译。
+ *  首跑深修（2026-09-26）：原惰性 require('node:child_process') 在 esbuild ESM 产物里
+ *  抛「Dynamic require of "node:child_process" is not supported」——改为静态 import
+ *  （node 内建在 vitest 与打包产物双侧均可用）。 */
 export function execFileProbeSpawn(command: string, args: readonly string[], timeoutMs: number): Promise<{ code: number; stdout: string; stderr: string }> {
-  // 动态 require 隔离：单测 import 本模块不拉 child_process（vitest 环境 node 内建可用，
-  // 此处防御的是未来测试环境变化；正常运行零开销）
-  const { execFile } = require('node:child_process') as typeof import('node:child_process')
   return new Promise((resolve, reject) => {
     execFile(
       command,

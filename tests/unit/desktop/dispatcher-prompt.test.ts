@@ -64,10 +64,12 @@ describe('buildDispatcherSystemPrompt 组装序', () => {
     expect(prompt).toContain('2. 新约束乙')
   })
 
-  it('requiresUserConfirmation 阶段渲染确认纪律段；无需确认阶段不渲染', () => {
+  it('requiresUserConfirmation 阶段渲染确认纪律段（平台发卡；无 guide_decide 不可行动指令）；无需确认阶段不渲染', () => {
     const withConfirm = buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-implement'], ctx)
     expect(withConfirm).toContain('【确认纪律】')
-    expect(withConfirm).toContain('guide_decide')
+    expect(withConfirm).toContain('推进标记')
+    expect(withConfirm).toContain('平台裁决边界会自动向用户发起确认卡')
+    expect(withConfirm).not.toContain('guide_decide')
     const withoutConfirm = buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-scaffold'], ctx)
     expect(withoutConfirm).not.toContain('【确认纪律】')
   })
@@ -101,10 +103,12 @@ describe('buildAdvanceProtocolSection', () => {
 })
 
 describe('buildToolDisciplineSection', () => {
-  it('写文件硬拦 + 委派路径说明', () => {
+  it('写文件硬拦 + 委派路径说明（含 role 选择与代答纪律）', () => {
     const section = buildToolDisciplineSection(DESKTOP_PHASES['desktop-arch'])
     expect(section).toContain('不直接写文件')
     expect(section).toContain('delegate_agent')
+    expect(section).toContain('role=implement')
+    expect(section).toContain('answer_delegation_question')
   })
 
   it('extraTools 渲染附加工具行；空则不出该行', () => {

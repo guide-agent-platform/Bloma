@@ -89,7 +89,12 @@ export function recordSessionActivity(
   writeSessions(index)
 
   // PR4 后续：项目触碰改注入（entry 层接线，包装内吞 PROJECT_NOT_FOUND，等价旧容错语义）
-  projectTouchHandler?.(projectId, { last_session_id: sessionId })
+  // 首跑深修（2026-09-26）：委派子会话（delegationMeta 存在）的活动**不得**改写项目
+  // last_session_id——否则历史回访会打开某个子会话（实证：项目恢复落到写探测子会话，
+  // 用户「继续」被当子任务接着跑）。子会话仍正常入索引（含归属字段）。
+  if (!delegationMeta) {
+    projectTouchHandler?.(projectId, { last_session_id: sessionId })
+  }
 }
 
 /** 列出会话记录；可按项目过滤，按最近活跃时间倒序 */

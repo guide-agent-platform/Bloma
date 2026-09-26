@@ -478,13 +478,18 @@ export async function waitForDelegations(
     timer.unref?.()
   })
 
-  // 子 agent 提问信号：任一 ask_delegation_question 挂起即提前返回（父 agent 据此代答，
-  // 而不是干等到 timeout）。不参与 Promise.any 的终结判定，仅作 race 的提前出路。
-  const questionSignals = records.map((record) => record.askSignal.promise)
+  // 子 agent 提问信号：仅取**运行中**记录（首跑深修 2026-09-26：已终结/已停止记录的
+  // 遗留已解析信号会让每次等待瞬间返回——wait 变 no-op，父 agent 误判「无进展」并错误
+  // 停掉真在跑的委派）。任一挂起提问即提前返回（父 agent 据此代答）；空集用永不落定
+  // promise 兜底（Promise.any([]) 会立即拒绝）。
+  const questionSignals = records
+    .filter((record) => record.status === 'running')
+    .map((record) => record.askSignal.promise)
+  const questionRace: Promise<unknown> = questionSignals.length > 0 ? Promise.any(questionSignals) : new Promise(() => {})
   if (args.strategy === 'any') {
-    await Promise.race([Promise.any(records.map((record) => record.completion)), Promise.any(questionSignals), timeout])
+    await Promise.race([Promise.any(records.map((record) => record.completion)), questionRace, timeout])
   } else {
-    await Promise.race([Promise.all(records.map((record) => record.completion)), Promise.any(questionSignals), timeout])
+    await Promise.race([Promise.all(records.map((record) => record.completion)), questionRace, timeout])
   }
   return records.map(getDelegationSummary)
 }

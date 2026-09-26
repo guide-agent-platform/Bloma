@@ -295,7 +295,7 @@ export async function runDesktopDispatcherLoop(input: DesktopDispatchRunInput): 
     query: input.query,
     env: input.env,
     maxTokens: input.maxTokens,
-    maxTurns: input.maxTurns ?? 24,
+    maxTurns: input.maxTurns ?? 40,
     delegationMaxTurns: DESKTOP_DELEGATION_MAX_TURNS,
     permissionMode: 'allow-all',
     temperature: categoryTemperature('mvp'),
@@ -354,7 +354,8 @@ async function runAgentLoopSafe(
       projectId: input.projectId,
       requestId: input.requestId,
       maxTokens: input.maxTokens,
-      maxTurns: input.maxTurns ?? 24,
+      // 首跑深修：24 轮两轮都在收口/确认卡前耗尽——桌面阶段按 longterm 档给 40
+      maxTurns: input.maxTurns ?? 40,
       permissionMode: 'allow-all',
       // 首跑深修：调度员不写文件/不带自测工具——web 线进度对账三守卫不适用（首跑被反复误注入）
       disableProgressNudge: true,

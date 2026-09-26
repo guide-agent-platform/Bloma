@@ -490,6 +490,30 @@ describe('M3 提问冒泡 / 续跑（委派协作嫁接方案 §6）', () => {
     expect(summary.result_summary).toContain('收到回答')
   })
 
+  it('wait 不被已终结记录的遗留提问信号短路：慢子会话照常等待到完成（首跑深修）', async () => {
+    // child1：提问后被停止（cancel 留下已解析的 askSignal）
+    registerParent(askQuery('会被停止的提问'))
+    const asked = startDelegation(parentContext(), { task: '提问后停止', role: 'implement' })
+    await waitForDelegations(parentContext(), { delegationIds: [asked.delegation_id], timeout_ms: 2000 })
+    expect(stopDelegation(parentSessionId, asked.delegation_id).status).toBe('cancelled')
+
+    // child2：120ms 后才完成的慢子会话
+    const slowQuery: SDKQuery = async function* () {
+      await new Promise((resolve) => setTimeout(resolve, 120))
+      yield textMessage('慢完成')
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+    registerParent(slowQuery)
+    const slow = startDelegation(parentContext(), { task: '慢任务', role: 'explore' })
+
+    const summaries = await waitForDelegations(parentContext(), {
+      delegationIds: [asked.delegation_id, slow.delegation_id],
+      timeout_ms: 5000,
+    })
+    // 旧实现：被 child1 的遗留信号短路 → 立即返回、child2 仍 running；修复后：等到 child2 完成
+    expect(summaries.find((s) => s.delegation_id === slow.delegation_id)?.status).toBe('completed')
+  })
+
   it('父侧 answer 工具接线：answer_delegation_question 回传回答并解除子挂起', async () => {
     registerParent(askQuery('测试用例放哪个目录？'))
     const created = startDelegation(parentContext(), { task: '写测试', role: 'implement' })
