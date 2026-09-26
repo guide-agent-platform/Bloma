@@ -71,7 +71,9 @@ export interface EntryFingerprint {
 }
 
 /**
- * 计算产物入口聚合指纹：index.html + src/**（递归）+ dist/app.js。
+ * 计算产物入口聚合指纹：index.html + src/**（递归）+ server/**（递归）+ package.json/
+ * package-lock.json + dist/app.js（2026-09-26 审计 P1-07 扩面：原口径漏后端与依赖
+ * 清单——只改 server/*.js 不使指纹失效会放行「验证后被改」）。
  * 逐文件读内容进 hash 流（内容 + 相对路径，防同名挪位），返回组合指纹；
  * index.html 不存在返回 null（无入口可指纹——消费侧按无可比处理，不误报）。
  */
@@ -100,6 +102,12 @@ export function computeEntryFingerprint(projectRoot: string): EntryFingerprint |
     }
   }
   walk(srcRoot, 'src/')
+  // P1-07：后端与依赖清单纳入指纹（见头部注释）
+  walk(join(projectRoot, 'server'), 'server/')
+  for (const name of ['package.json', 'package-lock.json']) {
+    const abs = join(projectRoot, name)
+    if (existsSync(abs)) absorb(abs, name)
+  }
   const distEntry = join(projectRoot, 'dist', 'app.js')
   if (existsSync(distEntry)) absorb(distEntry, 'dist/app.js')
   return { sha256: hash.digest('hex'), size, files }

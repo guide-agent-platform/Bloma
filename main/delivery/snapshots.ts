@@ -87,6 +87,7 @@ export async function createSnapshot(input: SnapshotCreateInput): Promise<Snapsh
     files_archive_path: filesArchivePath,
     documents_archive_path: effectiveDocumentsArchivePath,
     health_status: input.health_status,
+    ...(input.verification ? { verification: input.verification } : {}),
     ...(input.derived_from ? { derived_from: input.derived_from } : {}),
     created_at: new Date().toISOString(),
   }

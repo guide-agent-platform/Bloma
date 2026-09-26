@@ -177,4 +177,59 @@ describe('circuit break rollback (T5)', () => {
     expect(session).toContain('这次没能进行自动修复')
     expect(session).toContain('回滚到最近保存的健康版本也没有成功')
   })
+
+  it('P1-07 回滚优先已验证快照：verified 较旧 + recoverable 较新 → 选 verified，恢复依据如实落盘', async () => {
+    const { projectId, sessionId } = setup()
+    writeCompleteArtifact(findProject(projectId).root_path)
+    // 先落 verified（较旧），再落 recoverable（较新）
+    const verified = await createSnapshot({
+      request_id: 'req-v', project_id: projectId, kind: 'mvp', summary: '已验证快照',
+      include_documents: false, health_status: 'healthy', verification: 'verified',
+    })
+    const recoverable = await createSnapshot({
+      request_id: 'req-r', project_id: projectId, kind: 'mvp', summary: '可预览快照',
+      include_documents: false, health_status: 'healthy', verification: 'recoverable',
+    })
+    // 修复循环把文件改坏
+    writeFileSync(join(findProject(projectId).root_path, 'index.html'), '<html><body>坏了', 'utf8')
+    updateProject(projectId, { current_stage: 'blocked_for_user_decision', test_repair_count: 1 })
+
+    const result = await circuitBreakRollback({
+      request_id: 'req-circuit', session_id: sessionId, project_id: projectId,
+      reason: 'test 修复循环耗尽（test_repair）', publish: () => undefined,
+    })
+
+    expect(result.rolled_back).toBe(true)
+    expect(result.snapshot_id).toBe(verified.snapshot_id) // 优先 verified 而非更新的 recoverable
+    expect(result.snapshot_id).not.toBe(recoverable.snapshot_id)
+    const session = readFileSync(getAgentSessionPath(sessionId), 'utf8')
+    expect(session).toContain('已验证版本（该版本已通过全部验证）')
+    const decisions = readFileSync(
+      join(getDocumentsDir(findProject(projectId).workspace_slug, projectId), 'decisions.md'),
+      'utf8',
+    )
+    expect(decisions).toContain('restore_basis')
+    expect(decisions).toContain('verified')
+  })
+
+  it('P1-07 无 verified 时回退可预览快照：话术如实标注未经终验（不冒充已验证）', async () => {
+    const { projectId, sessionId } = setup()
+    writeCompleteArtifact(findProject(projectId).root_path)
+    await createSnapshot({
+      request_id: 'req-r2', project_id: projectId, kind: 'mvp', summary: '可预览快照',
+      include_documents: false, health_status: 'healthy',
+    }) // 存量形态：无 verification 字段
+    writeFileSync(join(findProject(projectId).root_path, 'index.html'), '<html><body>坏了', 'utf8')
+    updateProject(projectId, { current_stage: 'blocked_for_user_decision' })
+
+    const result = await circuitBreakRollback({
+      request_id: 'req-circuit2', session_id: sessionId, project_id: projectId,
+      reason: 'test 修复循环耗尽（test_repair）', publish: () => undefined,
+    })
+
+    expect(result.rolled_back).toBe(true)
+    const session = readFileSync(getAgentSessionPath(sessionId), 'utf8')
+    expect(session).toContain('尚未通过终验，仅确认可预览')
+    expect(session).not.toContain('已通过全部验证')
+  })
 })

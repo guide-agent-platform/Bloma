@@ -144,6 +144,8 @@ export async function finalizeMvpDelivery(
     summary: detail.snapshotSummary,
     include_documents: true,
     health_status: 'healthy',
+    // P1-07：终验前快照只是可预览交付点（healthy=磁盘完整可预览），非已验证——显式分级，防回滚把 recoverable 当全绿
+    verification: 'recoverable',
   })
   // Phase 10 W1-1：产物 git 交付点提交（首次 mvp / 迭代交付两态）
   commitProjectLifecycle(input.project_id, input.session_id, snapshotKind === 'mvp' ? 'mvp_delivered' : 'iteration_delivered', `交付快照 ${snapshot.snapshot_id.slice(0, 8)}（${detail.snapshotSummary}）`)

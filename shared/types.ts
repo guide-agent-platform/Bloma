@@ -1262,6 +1262,10 @@ export interface SnapshotCreateInput extends RequestEnvelope {
   health_status: HealthStatus
   /** 恢复指针（Phase 7 U3 I6）：restored 快照指向被恢复的源版本；其余 kind 忽略 */
   derived_from?: string
+  /** 验证分级（2026-09-26 运行审计 P1-07）：verified=全部验证门（GWT/安全/裁判）
+ *  通过后落的快照；recoverable=仅可预览（终验前/未过）。缺省按 recoverable 理解
+ *  （存量快照无字段同）。回滚优先选 verified，话术如实区分恢复依据。 */
+  verification?: 'verified' | 'recoverable'
 }
 
 export interface Snapshot {
@@ -1274,6 +1278,8 @@ export interface Snapshot {
   files_archive_path: string
   documents_archive_path?: string
   health_status: HealthStatus
+  /** 验证分级（P1-07）：verified=全部验证门通过后落的快照；缺省/未标=recoverable。 */
+  verification?: 'verified' | 'recoverable'
   parent_snapshot_id?: string
   /** 恢复指针（Phase 7 U3 I6，2026-09-10）：restored 快照指向被恢复的源版本——
    * 「第 N 版·从第 M 版恢复」的指针链；其余 kind 缺省无。 */

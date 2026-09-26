@@ -2,10 +2,10 @@ import { restorePromaHome } from '../support/proma-home-guard'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { syncDocuments } from '../../main/project/document-engine'
 import { runJudgeReview, setForegroundRunChecker, setProgrammingEventPublisher } from '../../main/coding/programming-orchestrator'
-import { createProject, findProject, recordSketchGenerated } from '../../main/project/project-service'
+import { createProject, findProject, recordSketchGenerated, updateProject } from '../../main/project/project-service'
 
 describe('Judge review trigger and return counts (A2-11)', () => {
   const originalPromaHome = process.env.PROMA_HOME
@@ -13,6 +13,7 @@ describe('Judge review trigger and return counts (A2-11)', () => {
   afterEach(() => {
     restorePromaHome(originalPromaHome)
     setProgrammingEventPublisher(() => undefined)
+    vi.unstubAllEnvs()
   })
 
   it('lets go after 2 returns for a quick project', async () => {
@@ -208,5 +209,19 @@ describe('Judge review loop-aware fuse（M4-B：只终验不重修）', () => {
     expect(result.verdict.verdict).toBe('pass')
     expect(findProject(project.project_id).current_stage).toBe('ready')
     expect(findProject(project.project_id).judge_return_count ?? 0).toBe(0)
+  })
+
+  it('P1-07：裁判退回时重算交付状态——进 judge 前的 verified 不代签未交付结论（→ partial）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-judge-delivery-'))
+    process.env.PROMA_HOME = home
+    vi.stubEnv('BLOMA_DELIVERY_STATUS', '1')
+    const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    // 先按「GWT/安全全过」写 verified（模拟进 judge 前的终验收口）
+    updateProject(project.project_id, { delivery_status: 'verified' })
+    setProgrammingEventPublisher(() => undefined)
+    const result = await runJudgeReview({ request_id: 'req-judge', session_id: 'session-1', project_id: project.project_id })
+    expect(result.outcome).toBe('blocked')
+    // 裁判门未过 → 规则计算 partial（合成 JUDGE 失败项无 F 前缀 → 归属不可解析）
+    expect(findProject(project.project_id).delivery_status).toBe('partial')
   })
 })

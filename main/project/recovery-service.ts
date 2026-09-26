@@ -98,6 +98,16 @@ function isLoopStyleEntry(html: string): boolean {
   )
 }
 
+/** P1-07（2026-09-26 运行审计）：最近一个已验证快照（全部验证门通过后落的 verified
+ *  分级）——回滚优先恢复它；缺省未标分级的存量快照不算 verified（不代签）。 */
+export function latestVerifiedSnapshot(projectId: string): Snapshot | undefined {
+  const snapshots = listSnapshots(projectId)
+  for (let index = snapshots.length - 1; index >= 0; index -= 1) {
+    if (snapshots[index].verification === 'verified') return snapshots[index]
+  }
+  return undefined
+}
+
 /** 最近一个健康快照（health_status === 'healthy'，复用 Snapshot 既有字段）；无则 undefined。 */
 export function latestHealthySnapshot(projectId: string): Snapshot | undefined {
   const snapshots = listSnapshots(projectId)
@@ -264,8 +274,12 @@ export interface CircuitBreakResult {
  */
 export async function circuitBreakRollback(input: CircuitBreakInput): Promise<CircuitBreakResult> {
   const project = findProject(input.project_id)
-  const healthy = latestHealthySnapshot(input.project_id)
+  // P1-07：回滚目标优先「已验证快照」（全部验证门通过）；无 verified 才退最近健康
+  // 快照（可预览但未经终验——存量快照亦按可预览理解，不冒充已验证）。
+  const verifiedSnapshot = latestVerifiedSnapshot(input.project_id)
+  const healthy = verifiedSnapshot ?? latestHealthySnapshot(input.project_id)
   if (!healthy) return { rolled_back: false }
+  const restoreBasis = verifiedSnapshot ? 'verified' : 'recoverable'
 
   // Phase 10 W1-1：回滚前提交（失败态入库；fail-open 模块内部永不抛错）。恢复原语
   // 排除 .git（SNAPSHOT_PRESERVED_TOPLEVEL），版本史跨回滚连续累积。
@@ -295,7 +309,7 @@ export async function circuitBreakRollback(input: CircuitBreakInput): Promise<Ci
         reason: 'repair_fuse',
       })
       // Phase 10 W1-1：回滚后提交（恢复态入库——重演在版本史里可见为一次反向提交）
-      commitProjectState(project.root_path, { kind: 'rollback_post', summary: `熔断回滚完成（恢复到 ${healthy.snapshot_id.slice(0, 8)}）` })
+      commitProjectState(project.root_path, { kind: 'rollback_post', summary: `熔断回滚完成（恢复到 ${healthy.snapshot_id.slice(0, 8)}·${restoreBasis}）` })
     } catch (error) {
       lastError = error
     }
@@ -343,7 +357,7 @@ export async function circuitBreakRollback(input: CircuitBreakInput): Promise<Ci
     : ''
   const message =
     stage === 'ready'
-      ? `${repairPhrase}，已自动恢复到最近保存的版本（代码与文档）。${dataNote}${input.failureNote ?? '你可以继续试用这一版，或者告诉我换个思路重新生成。'}`
+      ? `${repairPhrase}，已自动恢复到最近保存的${restoreBasis === 'verified' ? '已验证版本（该版本已通过全部验证）' : '版本（该版本尚未通过终验，仅确认可预览）'}（代码与文档）。${dataNote}${input.failureNote ?? '你可以继续试用这一版，或者告诉我换个思路重新生成。'}`
       : stage === 'sketch_ready'
         ? `${repairPhrase}，已自动恢复到最近保存的版本（草图阶段）。${dataNote}可以重新确认草图后再生成完整功能。`
         : `${repairPhrase}，且最近保存的版本没有留下可用产物。请重新描述你的想法，我们再来一次。`
@@ -384,8 +398,8 @@ export async function circuitBreakRollback(input: CircuitBreakInput): Promise<Ci
     entry: {
       type: 'circuit_rollback',
       title: '修复循环耗尽，熔断回滚',
-      why: `${input.reason}，已回滚到健康快照并按磁盘证据收敛为 ${stage}`,
-      detail: { reason: input.reason, snapshot_id: healthy.snapshot_id, stage },
+      why: `${input.reason}，已回滚到${restoreBasis === 'verified' ? '已验证快照' : '可预览快照（未过终验）'}并按磁盘证据收敛为 ${stage}`,
+      detail: { reason: input.reason, snapshot_id: healthy.snapshot_id, stage, restore_basis: restoreBasis },
     },
   })
   return { rolled_back: true, stage, snapshot_id: healthy.snapshot_id }

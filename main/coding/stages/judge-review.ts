@@ -14,6 +14,7 @@ import { appendLoopLogDocument, loopLogEnabled, readLoopCheckpointDocument, read
 import { appendProjectLearning } from '../../project/learnings-log'
 import { runSandbox } from '../../delivery/sandbox'
 import { createSnapshot } from '../../delivery/snapshots'
+import { commitProjectLifecycle } from './generate'
 import { trackAnalytics } from '../../delivery/track-analytics'
 import { renderPackageJson, renderStaticServer, renderSkeletonToProject, scaffoldEnabled } from '../project-scaffold'
 import { runBuildGate, type BuildGateResult } from '../build-gate'
@@ -74,7 +75,7 @@ export { resolvePrdBackplane }
 
 import { READY_COMPLETION_COPY, publish, publishCompletionMessage, throwIfAborted } from './stage-runtime'
 import { publishBlockedDecision } from './blocked-flow'
-import { buildReadyDeliveryBody } from './final-verify'
+import { buildReadyDeliveryBody, recordPostTestingDeliveryStatus } from './final-verify'
 
 export interface GwtTestingResult {
   verdict: 'ready' | 'blocked'
@@ -152,6 +153,21 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
     // 同样不再重修。首败即熔断让渡（U7：把具体退回原因带给让渡卡片）。
     const repairable = verdict.repairable === true && input.repairInternalized !== true
     if (!repairable || returns > limit) {
+      // P1-07（2026-09-26 运行审计）：裁判退回也是未交付——「进 judge 前写入」的交付
+      // 状态（GWT+安全全过时的 verified）不能代签行为硬约束未满足的结论；用统一
+      // 交付状态计算器重算（合成「裁判门未通过」失败项 → 规则得 partial，不冒充）。
+      // 开关 off 时零写入（recordPostTestingDeliveryStatus 内部门控）。
+      recordPostTestingDeliveryStatus(
+        input.project_id,
+        {
+          // 合成失败项无 F 前缀 → 归属不可解析 → 规则计算得 partial（有未交付面，不冒充 verified）；
+          // 判据与 GWT/安全失败同源，不新增状态写死。
+          failed_count: 1,
+          failure_summary: [{ scenario: 'JUDGE 行为门禁未通过', reason: verdict.user_visible_summary }],
+        },
+        true,
+        input.loop,
+      )
       publishBlockedDecision(input, 'judge_return', verdict.user_visible_summary, { reason: 'judge' })
       return { outcome: 'blocked', verdict }
     }
@@ -175,6 +191,23 @@ export async function runJudgeReview(input: JudgeReviewInput): Promise<JudgeRevi
   }
 
   throwIfAborted(input.signal)
+  // P1-07（2026-09-26 运行审计）：全部验证门（GWT+安全+裁判）通过后的 verified 快照——
+  // 与终验前的 recoverable 快照分级；回滚优先恢复 verified（恢复依据如实可查）。
+  // fail-open：快照失败不阻断 ready 收口（磁盘/权限异常时宁可不落也不卡交付）。
+  try {
+    const verifiedSnapshot = await createSnapshot({
+      request_id: input.request_id,
+      project_id: input.project_id,
+      kind: 'mvp',
+      summary: `终验通过（裁判 ${verdict.verdict}）：GWT+安全+裁判全绿的已验证交付点`,
+      include_documents: true,
+      health_status: 'healthy',
+      verification: 'verified',
+    })
+    commitProjectLifecycle(input.project_id, input.session_id, 'iteration_delivered', `已验证快照 ${verifiedSnapshot.snapshot_id.slice(0, 8)}（终验全绿）`)
+  } catch (error) {
+    console.warn('[judge-review] verified 快照落盘失败（不阻断 ready 收口）:', error)
+  }
   updateProject(input.project_id, { current_stage: 'ready' })
   publish(input, 'stage_changed', { stage: 'ready' })
   // 软建议（suggest）不再静默忽略：把可读提示附在完成通知后反馈给用户（P1）
