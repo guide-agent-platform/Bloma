@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runAgent, setAgentStreamPublisher, setSDKQueryForTests } from '../../main/orchestration/orchestrator'
+import { setPendingReviewAction } from '../../main/coding/programming-orchestrator'
 import { findProject } from '../../main/project/project-service'
 import { readFileSync } from 'node:fs'
 import { readExperienceEvents } from '../../main/experience/event-log'
@@ -504,6 +505,59 @@ describe('Phase 10 W4：一键反馈卡（BLOMA_FEEDBACK_CARD）', () => {
     expect(exp.some((e) => e.event_type === 'behavior_signal' && e.observations[0].includes('requirement_change_requested'))).toBe(true)
     const deltas = events.filter((e) => e.type === 'message_delta').map((e) => String(e.payload.text ?? '')).join('')
     expect(deltas).toContain('输入框')
+  })
+
+  it('P2-01 next_backend：类型化迭代命令（补后端持久化）——不再只清态+埋点落通用分流', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-backend-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    runIterationTaskMock.mockClear() // 本 describe 不复用前块 afterEach 清理
+    vi.mocked(findProject).mockReturnValue({ project_id: 'project-backend', current_stage: 'ready' } as never)
+    await runAgent({
+      request_id: 'req-next-backend',
+      session_id: 'session-next-backend',
+      project_id: 'project-backend',
+      content: '走向完整程序',
+      mode: 'quick',
+      current_stage: 'ready',
+      channel_id: 'test-channel',
+      metadata: { source: 'card_option', selected_option_id: 'next_backend' },
+    })
+    // 类型化命令：直接进迭代任务（携带后端能力要求），而非落普通消息分流
+    expect(runIterationTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        project_id: 'project-backend',
+        prompt: expect.stringContaining('server/routes/'),
+      }),
+    )
+    const backendCall = runIterationTaskMock.mock.calls[0] as unknown as Array<{ prompt?: string }>
+    expect(backendCall[0]?.prompt).toContain('前后端分离')
+    expect(events.some((event) => event.type === 'completed')).toBe(true)
+  })
+
+  it('P2-01 自然语言取消（算了）：与按钮取消共用状态迁移 → 回 ready（旧口径只发话术不迁阶段）', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-ready-cancel-'))
+    process.env.PROMA_HOME = home
+    const events: AgentEvent[] = []
+    setAgentStreamPublisher((event) => events.push(event))
+    runIterationTaskMock.mockClear()
+    // 直接构造 rebuild_confirm 待确认态（pendingReviewAction 为编程侧真实内存态）
+    setPendingReviewAction('project-cancel', { kind: 'rebuild_confirm', direction: '改用卡片式布局' })
+    // 二次确认态下打字取消词 → 迁移回 ready
+    events.length = 0
+    vi.mocked(findProject).mockReturnValue({ project_id: 'project-cancel', current_stage: 'blocked_for_user_decision' } as never)
+    await runAgent({
+      request_id: 'req-cancel-2',
+      session_id: 'session-cancel',
+      project_id: 'project-cancel',
+      content: '算了',
+      mode: 'quick',
+      current_stage: 'blocked_for_user_decision',
+      channel_id: 'test-channel',
+    })
+    expect(events.some((event) => event.type === 'stage_changed' && (event.payload as { stage?: string }).stage === 'ready')).toBe(true)
+    expect(runIterationTaskMock).not.toHaveBeenCalled()
   })
 })
 

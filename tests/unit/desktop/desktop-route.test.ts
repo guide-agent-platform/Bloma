@@ -208,27 +208,58 @@ describe('handleDesktopDispatchMessage 消息路由', () => {
     expect(card).toBeTruthy()
     expect(card?.payload.kind).toBe('desktop_phase_confirm')
     const questions = (card?.payload.questions as Array<{ id: string }>) ?? []
-    expect(questions.some((q) => q.id === `${DESKTOP_CONFIRM_OPTION_PREFIX}desktop-arch`)).toBe(true)
+    // P2-01：选项 id 现在是 desktop_confirm:<phase>:<nonce>（卡绑定一次性凭据）
+    expect(questions.some((q) => q.id.startsWith(`${DESKTOP_CONFIRM_OPTION_PREFIX}desktop-arch:`))).toBe(true)
+    expect((record as unknown as { desktop_confirm_nonce?: string }).desktop_confirm_nonce).toBeTruthy()
     expect(record.desktop_phase).toBe('desktop-arch') // 未推进
   })
 
-  it('卡回传：凭据登记 + 重跑该阶段并推进（状态化链路）', async () => {
+  it('卡回传：凭据登记 + 重跑该阶段并推进（状态化链路；带匹配 nonce）', async () => {
     record.desktop_phase = 'desktop-arch'
+    ;(record as Record<string, unknown>).desktop_confirm_nonce = 'n-current'
     const { deps } = collectorDeps()
     await handleDesktopDispatchMessage(routeInput({
-      cardOptionId: `${DESKTOP_CONFIRM_OPTION_PREFIX}desktop-arch`,
+      cardOptionId: `${DESKTOP_CONFIRM_OPTION_PREFIX}desktop-arch:n-current`,
       query: scriptedQuery([[textMessage('确认后推进。\n<!-- PHASE_ADVANCE: desktop-scaffold -->')]]),
     }), deps)
     expect(record.desktop_confirmed_phases).toContain('desktop-arch')
     expect(['desktop-scaffold', 'desktop-implement', 'desktop-verify', 'delivered']).toContain(record.desktop_phase)
   })
 
-  it('非法卡选项：如实告知不推进不崩', async () => {
+  it('P2-01 旧卡/伪造卡（nonce 不匹配）：不登记凭据、不推进、如实告知已失效', async () => {
+    record.desktop_phase = 'desktop-arch'
+    ;(record as Record<string, unknown>).desktop_confirm_nonce = 'n-current'
     const { deps, events } = collectorDeps()
-    await handleDesktopDispatchMessage(routeInput({ cardOptionId: 'desktop_confirm:not-a-phase' }), deps)
-    const tell = events.find((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('不匹配'))
+    await handleDesktopDispatchMessage(routeInput({ cardOptionId: 'desktop_confirm:desktop-arch:n-stale' }), deps)
+    const tell = events.find((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('确认未生效'))
     expect(tell).toBeTruthy()
-    expect(record.desktop_phase).toBe('desktop-scaffold')
+    expect((record.desktop_confirmed_phases as string[]).length).toBe(0) // 未登记凭据
+    expect(record.desktop_phase).toBe('desktop-arch') // 未推进
+  })
+
+  it('P2-01 阶段已推进的旧卡（nonce 匹配但 phase 过期）：不重放旧阶段', async () => {
+    record.desktop_phase = 'desktop-implement' // 当前阶段已推进
+    ;(record as Record<string, unknown>).desktop_confirm_nonce = 'n-current'
+    const { deps, events } = collectorDeps()
+    await handleDesktopDispatchMessage(routeInput({ cardOptionId: 'desktop_confirm:desktop-arch:n-current' }), deps)
+    const tell = events.find((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('已过期'))
+    expect(tell).toBeTruthy()
+    expect(record.desktop_phase).toBe('desktop-implement')
+  })
+
+  it('P2-01 产物在确认前被改（指纹不一致）：卡失效，不登记', async () => {
+    record.desktop_phase = 'desktop-arch'
+    ;(record as Record<string, unknown>).desktop_confirm_nonce = 'n-current'
+    // 发卡时指纹记录为「改动前」；随后产物被改
+    writeFileSync(join(sandboxRoot, 'index.html'), '<html><body>v1</body></html>', 'utf8')
+    const { computeEntryFingerprint } = await import('../../../main/verification/gwt-service')
+    ;(record as Record<string, unknown>).desktop_confirm_fingerprint = computeEntryFingerprint(sandboxRoot)!.sha256
+    writeFileSync(join(sandboxRoot, 'index.html'), '<html><body>v2</body></html>', 'utf8')
+    const { deps, events } = collectorDeps()
+    await handleDesktopDispatchMessage(routeInput({ cardOptionId: 'desktop_confirm:desktop-arch:n-current' }), deps)
+    const tell = events.find((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('已被修改'))
+    expect(tell).toBeTruthy()
+    expect((record.desktop_confirmed_phases as string[]).length).toBe(0)
   })
 
   it('拒收（no-marks）：教育播报 + 续接驱动同阶段重跑（第二次带标记推进）', async () => {

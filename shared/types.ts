@@ -983,6 +983,14 @@ export interface ProjectCreateInput extends RequestEnvelope {
   initial_message?: string
 }
 
+/** 单次 run 的能力开关事实（2026-09-26 运行审计 P2-03；实现见 main/coding/capability-manifest.ts）。 */
+export interface CapabilityManifest {
+  at: string
+  session_id: string
+  switches: Record<string, boolean>
+  notes: string[]
+}
+
 /** 修复账本条目（2026-09-26 运行审计 P1-02；实现见 main/coding/repair-ledger.ts）。 */
 export interface RepairLedgerEntry {
   at: string
@@ -1021,6 +1029,9 @@ export interface Project {
   repair_total_attempts?: number
   /** 修复账本（append-only，容量 50）：epoch 开启/尝试/零编辑/豁免/耗尽/收敛事件流。 */
   repair_ledger?: RepairLedgerEntry[]
+  /** 最近一次 run 的能力开关事实（P2-03：每 run 落盘真实开关值——「函数存在」
+   *  不等于「现网生效」，裁判/审计/下一次 run 据实判断）。 */
+  capability_manifest?: import('../main/coding/capability-manifest').CapabilityManifest
   /** 被阻塞的编程操作（A2 resume 闭环）：非阻塞态为 undefined */
   blocked_action?: 'mvp_repair' | 'test_repair' | 'judge_return' | 'security_repair'
   /** 需求确认后已自动命名过（autoNameProject）：此后不再覆盖，保住用户手动改名 */
@@ -1038,6 +1049,10 @@ export interface Project {
   desktop_phase?: string
   /** 桌面调度员线：用户已确认收口的阶段 id 集（manual 门禁凭据；确认卡回传登记） */
   desktop_confirmed_phases?: string[]
+  /** 待确认卡的 nonce（P2-01：确认回传须匹配——旧卡/伪造卡失效，不重放旧阶段）。 */
+  desktop_confirm_nonce?: string
+  /** 发卡时的产物指纹（P2-01：确认前产物被改 → 卡失效，需按当前产物重新确认）。 */
+  desktop_confirm_fingerprint?: string
   /** U16：最近进展摘要（取自最近一次 sketch_generated 需求，列表卡片纯展示用，不经落盘） */
   progress_summary?: string
   /** 最近一次 MVP 生成是否走 Agent Loop（M4-A：resume 时据此选「只终验不重修」路径） */

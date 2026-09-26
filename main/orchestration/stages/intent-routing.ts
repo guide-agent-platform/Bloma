@@ -88,6 +88,18 @@ import { appendAgentMessage, makeEvent } from './persistence'
  * - rebuild_cancel  二次确认卡「再想想」：清态回 ready，保持当前版本。
  * 任一决策都会把阶段收敛回 ready / iterating，绝不悬在 blocked_for_user_decision。
  */
+/** P2-01（2026-09-26 运行审计）：取消/保持现状的统一状态迁移——按钮「保持现状」与
+ *  自然语言取消词（「先不改」「算了」…）共用，防两条路径状态漂移（旧口径自然语言
+ *  取消只发话术不迁阶段，项目悬在 blocked_for_user_decision）。 */
+export function migrateToReadyAfterCancel(
+  input: AgentSendMessageInput,
+  streamPublisher: (event: AgentEvent) => void,
+  makeEventFn: (input: AgentSendMessageInput, type: AgentEvent['type'], payload: Record<string, unknown>) => AgentEvent,
+): void {
+  updateProject(input.project_id, { current_stage: 'ready', blocked_action: undefined })
+  streamPublisher(makeEventFn(input, 'stage_changed', { stage: 'ready' }))
+}
+
 export async function resolveIterationDecisionFlow(
   input: AgentSendMessageInput,
   streamPublisher: (event: AgentEvent) => void,
@@ -297,8 +309,8 @@ export async function resolveIterationDecisionFlow(
       },
     })
     const copy = '好，那就保持这个版本。'
-    updateProject(input.project_id, { current_stage: 'ready' })
-    streamPublisher(makeEvent(input, 'stage_changed', { stage: 'ready' }))
+    // P2-01：与自然语言取消词共用同一状态迁移
+    migrateToReadyAfterCancel(input, streamPublisher, makeEvent)
     appendAgentMessage(input.session_id, {
       role: 'assistant',
       content: [{ type: 'text', text: copy }],

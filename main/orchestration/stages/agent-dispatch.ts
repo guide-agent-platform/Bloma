@@ -83,7 +83,7 @@ import { buildReadyChatFacts, buildReadyChatSystem, readyChatEnabled, runReadySt
 import { cancelAgent } from './lifecycle'
 import { appendAgentMessage, convertSDKMessage, detectCodeDelivery, extractAssistantText, isUserCancelled, makeEvent, persistAssistantMessages, persistTerminalMessage, publishRunEvent } from './persistence'
 import { HISTORY_WINDOW_TURNS, buildProgrammingSystemTurn, loadConversationHistory, publishRebuildConfirmCard, shouldUseGuideAgent, truncateForCopy } from './dispatch-support'
-import { PROGRESS_QUERY_RE, REFINE_CANCEL_RE, TRIVIAL_ACK_RE, resolveIterationDecisionFlow, resolveModificationIntent } from './intent-routing'
+import { PROGRESS_QUERY_RE, REFINE_CANCEL_RE, TRIVIAL_ACK_RE, migrateToReadyAfterCancel, resolveIterationDecisionFlow, resolveModificationIntent } from './intent-routing'
 
 export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendMessageResult> {
   if (activeSessions.has(input.session_id)) {
@@ -247,9 +247,10 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
           publish: (_target, type, payload) => streamPublisher(makeEvent(input, type, payload)),
           persistAssistant,
           persistSystem,
-          complete: (sessionId) => {
+          complete: (sessionId, _projectId, outcome) => {
             persistTerminalMessage(sessionId, 'completed')
-            streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
+            // P2-01：未收口/取消不再冒充成功终态（subtype 供渲染端与下游区分）
+            streamPublisher(makeEvent(input, 'completed', { subtype: outcome === 'incomplete' ? 'incomplete' : 'success' }))
           },
         },
       )
@@ -308,8 +309,38 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
           },
         })
       } catch {
-        // 埋点失败不影响迭代链（后续正常消息链路继续）
+        // 埋点失败不影响迭代链
       }
+      // P2-01（2026-09-26 运行审计）：类型化迭代命令——「升级为真实后端完整程序」
+      // 不是普通消息，直接映射为迭代任务（携带需求变化=补后端持久化/契约，能力要求
+      // =前后端分离），不再落通用消息分流等模型猜（旧口径只清态+埋点）。
+      const backendDirective =
+        '把当前版本升级为前后端分离的真实完整程序：数据留存走后端持久化（server/routes/ 路由 + ctx.readData/writeData 落 data/ 目录），' +
+        '接口按技术合同实现并按契约验证；不改需求清单，保留现有前端交互与行为断言。'
+      recordDecision({
+        project_id: input.project_id,
+        session_id: input.session_id,
+        entry: {
+          type: 'modification_decision',
+          title: '用户选择「走向完整程序（后端）」',
+          why: '就绪引导卡 next_backend 选项 → 类型化迭代命令（补后端持久化与接口契约，保留现有前端行为）',
+          detail: { directive: backendDirective.slice(0, 120) },
+        },
+      })
+      setProgrammingEventPublisher(streamPublisher)
+      await runIterationTask({
+        request_id: input.request_id,
+        session_id: input.session_id,
+        project_id: input.project_id,
+        mode: input.mode,
+        prompt: backendDirective,
+        channel_id: input.channel_id,
+        query: sdkQuery,
+        signal: abortController.signal,
+      })
+      persistTerminalMessage(input.session_id, 'completed')
+      streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
+      return { accepted: true, session_id: input.session_id, stream_started: true }
     }
 
     // U12：失败重试卡回传（selected_option_id === 'retry'）——取出上次失败诉求原样重跑，
@@ -370,6 +401,8 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
         const trimmed = input.content.trim()
         if (REFINE_CANCEL_RE.test(trimmed)) {
           const copy = '好，先保持现在的版本。想改的时候再说。'
+          // P2-01：状态迁移与按钮取消共用（旧口径只发话术不迁阶段，项目悬在 blocked）
+          migrateToReadyAfterCancel(input, streamPublisher, makeEvent)
           persistAssistant(copy)
           streamPublisher(makeEvent(input, 'message_delta', { text: copy }))
           persistTerminalMessage(input.session_id, 'completed')
@@ -534,6 +567,8 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
         const trimmed = input.content.trim()
         if (REFINE_CANCEL_RE.test(trimmed)) {
           const copy = '好，先保持现在的版本。想改的时候再说。'
+          // P2-01：状态迁移与按钮取消共用（旧口径只发话术不迁阶段，项目悬在 blocked）
+          migrateToReadyAfterCancel(input, streamPublisher, makeEvent)
           persistAssistant(copy)
           streamPublisher(makeEvent(input, 'message_delta', { text: copy }))
           persistTerminalMessage(input.session_id, 'completed')

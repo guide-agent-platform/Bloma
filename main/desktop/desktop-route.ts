@@ -19,6 +19,7 @@
  * 零行为变化。
  */
 
+import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { AgentEvent } from '../../shared/types'
@@ -28,6 +29,7 @@ import { getDesktopPhase, getNextDesktopPhase } from './dispatcher-phases'
 import { isDesktopDispatchEnabled } from './dispatcher-switch'
 import { runDesktopDispatcherLoop, type DesktopDispatchRunInput, type DesktopDispatchRunResult } from './dispatcher-loop'
 import { clearRejectionOnAdvance, createRejectionLedger, decideRejectionLoop, registerRejection, type RejectionLedger } from './advance-rejection-loop'
+import { computeEntryFingerprint } from '../verification/gwt-service'
 
 // =========================================================================
 // 桌面线判定
@@ -64,8 +66,10 @@ export interface DesktopRouteDeps {
   persistAssistant: (sessionId: string, text: string) => void
   /** 内部标记落盘（生产=appendAgentMessage system role）。 */
   persistSystem: (sessionId: string, text: string) => void
-  /** 终态事件（生产=persistTerminalMessage+completed 事件；路由收尾统一调）。 */
-  complete: (sessionId: string, projectId: string) => void
+  /** 终态事件（生产=persistTerminalMessage+completed 事件；路由收尾统一调）。
+   *  P2-01：outcome 区分成功收口与未收口/取消——成功终态与未收口不再共用同一 success 事件
+   *  （旧口径桌面未收口也发 subtype:success，下游/渲染端误当跑完）。 */
+  complete: (sessionId: string, projectId: string, outcome?: 'success' | 'incomplete') => void
   /** 驱动 spawn 注入（可选；生产缺省 execFileDriverSpawn，测试桩 pass/fail）。 */
   driverSpawn?: DesktopDispatchRunInput['driverSpawn']
 }
@@ -151,13 +155,32 @@ export async function handleDesktopDispatchMessage(
   const projectName = project?.name ?? input.projectId
   const phaseId = project?.desktop_phase ?? 'desktop-arch'
 
-  // ── 确认卡回传：凭据登记 + 重跑收口 ──
+  // ── 确认卡回传：校验卡有效性（nonce/阶段/产物指纹）→ 凭据登记 + 重跑收口 ──
   if (input.cardOptionId && input.cardOptionId.startsWith(DESKTOP_CONFIRM_OPTION_PREFIX)) {
-    const confirmedPhase = input.cardOptionId.slice(DESKTOP_CONFIRM_OPTION_PREFIX.length)
+    // 选项 id 协议：desktop_confirm:<phase>[:<nonce>]（nonce 段为 P2-01 新增；旧卡无此段）
+    const [, rawPhase, cardNonce] = input.cardOptionId.split(':')
+    const confirmedPhase = (rawPhase ?? '').trim()
+    // P2-01（2026-09-26 运行审计）：确认卡绑定阶段+nonce+产物指纹——旧卡不得重跑旧阶段。
+    const staleReason =
+      cardNonce !== project?.desktop_confirm_nonce || !project?.desktop_confirm_nonce
+        ? '该确认卡已失效（不是当前待确认卡——可能已被新卡替换或已使用过）'
+        : confirmedPhase !== project?.desktop_phase
+          ? `该确认卡已过期（阶段已推进到「${project?.desktop_phase ?? '未知'}」）`
+          : (() => {
+              const expected = project?.desktop_confirm_fingerprint
+              if (!expected) return undefined
+              const current = computeEntryFingerprint(project!.root_path)
+              return current && current.sha256 !== expected ? '产物在确认前已被修改（指纹不一致）' : undefined
+            })()
+    if (staleReason) {
+      deps.publish(input, 'message_delta', { text: `确认未生效：${staleReason}。请按当前阶段的待办重新确认或继续说明诉求。` })
+      deps.complete(input.sessionId, input.projectId, 'incomplete')
+      return
+    }
     if (getDesktopPhase(confirmedPhase)) {
       const existing = new Set(project?.desktop_confirmed_phases ?? [])
       existing.add(confirmedPhase)
-      updateProject(input.projectId, { desktop_confirmed_phases: [...existing] })
+      updateProject(input.projectId, { desktop_confirmed_phases: [...existing], desktop_confirm_nonce: undefined, desktop_confirm_fingerprint: undefined })
       deps.persistSystem(input.sessionId, `[decision-card] 桌面阶段确认：${confirmedPhase}（凭据已登记）`)
       deps.publish(input, 'message_delta', { text: `已确认「${getDesktopPhase(confirmedPhase)?.title ?? confirmedPhase}」，继续推进。` })
       await runDesktopStage({ projectId: input.projectId, sessionId: input.sessionId, requestId: input.requestId, content: input.content, signal: input.signal }, input.query, input.env, confirmedPhase, deps, projectName, 0)
@@ -165,7 +188,7 @@ export async function handleDesktopDispatchMessage(
     }
     // 非法选项 id：如实告知，不推进不崩
     deps.publish(input, 'message_delta', { text: '收到确认回传，但选项不匹配任何桌面阶段——已忽略。请继续说明你的诉求。' })
-    deps.complete(input.sessionId, input.projectId)
+    deps.complete(input.sessionId, input.projectId, 'incomplete')
     return
   }
 
@@ -249,7 +272,7 @@ async function settleDesktopStage(
   if (result.status !== 'completed' || !result.advance) {
     const why = result.status === 'cancelled' ? '已停止' : '运行异常中断'
     deps.publish(input, 'message_delta', { text: `桌面阶段「${phaseId}」本轮未收口（${why}）。阶段进度未变化，可重新发起。` })
-    deps.complete(input.sessionId, input.projectId)
+    deps.complete(input.sessionId, input.projectId, 'incomplete')
     return
   }
 
@@ -293,11 +316,19 @@ async function settleDesktopStage(
     // 发确认卡（凭据链入口）；教育文案同步可见
     deps.publish(input, 'message_delta', { text: action.education })
     deps.persistSystem(input.sessionId, `[decision-card] 桌面阶段确认｜继续沟通（${phaseId}）`)
+    // P2-01：卡绑定当前阶段 + 一次性 nonce + 发卡时产物指纹（确认回传须全部匹配）
+    const confirmNonce = randomUUID()
+    // 发卡上下文无外层 project 变量：就地读取（阶段收口后产物指纹）
+    const confirmFingerprint = computeEntryFingerprint(findProject(input.projectId)?.root_path ?? '')?.sha256
+    updateProject(input.projectId, {
+      desktop_confirm_nonce: confirmNonce,
+      ...(confirmFingerprint ? { desktop_confirm_fingerprint: confirmFingerprint } : { desktop_confirm_fingerprint: undefined }),
+    })
     deps.publish(input, 'user_decision_required', {
       kind: 'desktop_phase_confirm',
       title: `确认·${getDesktopPhase(phaseId)?.title ?? phaseId}`,
       questions: [
-        { id: `${DESKTOP_CONFIRM_OPTION_PREFIX}${phaseId}`, label: '确认通过', description: '本阶段产出与验收结论确认无误，推进到下一阶段' },
+        { id: `${DESKTOP_CONFIRM_OPTION_PREFIX}${phaseId}:${confirmNonce}`, label: '确认通过', description: '本阶段产出与验收结论确认无误，推进到下一阶段' },
         { id: 'desktop_confirm:cancel', label: '还有问题', description: '在对话里说明问题，调度员继续处理' },
       ],
     })

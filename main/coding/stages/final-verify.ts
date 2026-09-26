@@ -55,6 +55,7 @@ import { recordDecision } from '../../project/decision-log'
 import { commitProjectState } from '../project-git'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from '../../project/recovery-service'
 import { readPrimaryIntent, recordSessionActivity } from '../../platform/sessions/session-service'
+import { recordCapabilityManifest } from '../capability-manifest'
 import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, preflightEnabled, narrationEventsEnabled, loopProgressNudgeEnabled, taskWorkflowEnabled, compactToolEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../../agent/loop/agent-loop'
 import { browserToolsEnabled } from '../preview-browser'
 import { deliveryStatusEnabled, recordDeliveryStatus, buildDeliveryPresentation, renderCircuitFailureNote, renderDeliveryBody, featureIdFromScenario } from '../delivery-status'
@@ -448,6 +449,9 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
   publish(input, 'stage_changed', { stage: 'testing' })
   // Phase 10 W1-1：生成轮结束态提交（终验开始前，首个生命周期提交点）
   commitProjectLifecycle(input.project_id, input.session_id, 'testing_begin', 'Agent Loop 生成轮结束，终验开始')
+  // P2-03（2026-09-26 运行审计）：本次 run 的能力开关事实落盘（每 run 一条，
+  // 「函数存在」不再等于「现网生效」——未启用的保护能力在下游按未启用口径理解）
+  recordCapabilityManifest(input.project_id, input.session_id)
 
   let testResult = await runGwtWithApiContract({ project_id: input.project_id, session_id: input.session_id, preview_url: input.preview_url })
   throwIfAborted(input.signal)
