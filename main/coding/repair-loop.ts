@@ -32,6 +32,7 @@ import { trackAnalytics } from '../delivery/track-analytics'
 import { appendProjectLearning } from '../project/learnings-log'
 import { readLoopCheckpointDocument, writeLoopCheckpointDocument, type LoopRepairAttemptRecord, readPrdBackplane } from '../project/document-engine'
 import { readTestReport } from '../verification/gwt-service'
+import { browserToolsEnabled } from './preview-browser'
 import { buildChangeContractBlock, changeContractEnabled, deriveChangeContract } from './change-contract'
 import { createWriteScope } from '../agent/tools/agent-tools'
 import { appendContextPack } from './context-pack'
@@ -427,13 +428,21 @@ export async function runRepairLoop(input: RepairLoopInput): Promise<RepairRound
   return { status: 'completed', tasks: input.tasks, loopResult }
 }
 
-/** 修复卡尾注三项硬约束（D5：写卡尾而非 system，随任务消失不污染常驻段）。 */
-const REPAIR_CARD_CONSTRAINTS = [
-  '三项硬约束（必须遵守）：',
-  '1. 只修复上面列出的项，不要改动其他任何文件或功能；',
-  '2. 每完成一项修复，立即用浏览器自验：run_preview 打开页面，手动触发对应操作确认效果；',
-  '3. 禁止重构与本轮修复无关的代码。',
-]
+/** 修复卡尾注三项硬约束（D5：写卡尾而非 system，随任务消失不污染常驻段）。
+ *  P1-08（2026-09-26 运行审计）：自验指引按实际可用工具如实——旧口径统一要求
+ *  「浏览器手动触发」（preview_* 交互工具受 BLOMA_BROWSER_TOOLS 控制且只给主 loop），
+ *  工具不在手上时该指引不可执行。 */
+function buildRepairCardConstraints(): string[] {
+  const selfCheck = browserToolsEnabled()
+    ? '2. 每完成一项修复，立即自验：run_preview 打开页面，用 preview_observe/preview_click 实际触发对应操作确认效果（工具在手）；'
+    : '2. 每完成一项修复，立即自验：run_preview 确认页面可运行 + run_gwt_tests 对照对应断言确认效果（preview 点击类工具本轮未启用）；'
+  return [
+    '三项硬约束（必须遵守）：',
+    '1. 只修复上面列出的项，不要改动其他任何文件或功能；',
+    selfCheck,
+    '3. 禁止重构与本轮修复无关的代码。',
+  ]
+}
 
 function renderGwtTaskBlock(task: RepairTask): string {
   const anchor = task.location ? itemIdFromScenario(task.location) : undefined
@@ -501,7 +510,7 @@ export function renderRepairTaskCard(tasks: RepairTask[], checkpoint?: RepairChe
     ? [`【上轮未途的调用意图】上一轮结束时模型仍想执行（但轮次预算已尽未落盘）：${droppedToolIntents.join('、')}。若与本轮失败相关，优先核实对应产物状态（例如想写 dist/ 产物 → 先确认构建产物是否陈旧再改源码）。`
       , ''].join('\n')
     : ''
-  return [`## 修复任务（共 ${tasks.length} 项，只修这些，不要动其他任何文件/功能）`, ...blocks, ...renderRepairEvidencePack(checkpoint), droppedBlock, REPAIR_CARD_CONSTRAINTS.join('\n')].filter(Boolean).join(
+  return [`## 修复任务（共 ${tasks.length} 项，只修这些，不要动其他任何文件/功能）`, ...blocks, ...renderRepairEvidencePack(checkpoint), droppedBlock, buildRepairCardConstraints().join('\n')].filter(Boolean).join(
     '\n\n',
   )
 }

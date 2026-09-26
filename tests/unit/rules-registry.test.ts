@@ -71,9 +71,16 @@ describe('loop prompt 接线（off=字节级现状 / on=单点定义防双源）
     const prompt = buildAgentLoopSystemPrompt(backplane, 'diff')
     // R-FILE-01 内联原文
     expect(prompt).toContain('先用 read_file 读该文件当前内容再编辑')
-    // R-DATA-01 内联原文
-    expect(prompt).toContain('禁止 localStorage/sessionStorage 存业务数据')
-    expect(prompt).toContain('不构成 localStorage 例外的理由')
+    // R-DATA-01 内联原文（P1-08：内容由能力档案按品类生成——personal_tool 且无强后端
+    // 信号时本地存储为合法一等实现；旧口径「一律禁止 localStorage」与留存豁免判定矛盾）
+    expect(prompt).toContain('以本地持久化（localStorage）为合法一等实现')
+    // 强后端信号（多端同步）时仍落后端禁止条文
+    const serverPrompt = buildAgentLoopSystemPrompt(
+      { ...backplane, requirements: [{ id: 'F-001', description: '多端同步的记账数据，云端共享' }] },
+      'diff',
+    )
+    expect(serverPrompt).toContain('禁止 localStorage/sessionStorage 存业务数据')
+    expect(serverPrompt).toContain('不构成 localStorage 例外的理由')
     // 无注册表痕迹
     expect(prompt).not.toContain('R-FILE-01')
     expect(prompt).not.toContain('R-DATA-01')

@@ -80,10 +80,24 @@ import { runMvpTask } from './generate'
  * 解药，本项目区别于 SWE-agent/Codex 的差异化锚），工作方式与终止判据显式化。
  * focus（P3 分级锚定）：未传=全量现状；传入时命中项全文、其余项一行摘要（只减细节不减锚）。
  */
+import { DELEGATE_CAPABILITY_LINE, renderDataPolicyClause, renderProductShapeSection, resolveCapabilityProfile } from '../capability-profile'
+import { localFirstPersistenceExempt } from '../../model/prd-backplane'
+
 export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 'diff' | 'whole', templateType?: import('../../../shared/types').TemplateType, skeletonMap?: string | null, focus?: string[], moduleMap?: string | null, realFullstack?: boolean): string {
   // 注入点⑥（周计划 §6）：tech_skeleton/目录约定/依赖白名单进背板锚定段；
   // 开关关闭/模板缺失为 null（行为=现状）。类型缺省从背板 template_meta 兜底。
   const effectiveType = templateType ?? backplane.template_meta?.type ?? 'personal_tool'
+  // P1-08（2026-09-26 运行审计）：能力档案单一真相源——产物形态/数据策略/角色能力
+  // 三段由它生成，消除「总体承诺、品类能力、工具注册分别手写」的三处矛盾。
+  const capabilityProfile = resolveCapabilityProfile({
+    templateType: effectiveType,
+    skeletonMap,
+    ...(realFullstack === true ? { realFullstack: true } : {}),
+    persistenceExempt: localFirstPersistenceExempt(
+      backplane.requirements.map((item) => `${item.description} ${item.story ?? ''}`),
+      effectiveType,
+    ),
+  })
   const loopInjection = (() => {
     try {
       return buildLoopInjection(effectiveType, skeletonMap)
@@ -175,7 +189,7 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     // 委派基建全在（delegate_agent 族已在工具面、子会话经 setChildToolsBuilder 拿完整
     // 项目域工具读写同一项目目录）——此前唯一缺的是提示词从未告知模型可以委派（单干文化）。
     '【并行协作】（可选，按任务规模自行判断）：delegate_agent 可把独立子任务委派给子会话并行处理',
-    '（子会话拥有同一项目的完整读写与验证工具，产出直接落项目目录）。适合：相互独立的模块实现、',
+    `${DELEGATE_CAPABILITY_LINE}。适合：相互独立的模块实现、`,
     '测试场景补齐、代码调研。委派是 fire-and-forget——立即返回 id，用 wait_for_delegations 等待',
     '完成、get_delegation_results 读结果摘要后再继续；不要对同一文件同时委派与自改。单干也完全可以。',
     '可用验证工具：run_preview（确认可运行）/ run_gwt_tests（对照行为断言）/ read_file+grep（定位）——' +
@@ -252,12 +266,9 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     // 被模型当作 localStorage 的正当理由。硬条款锁死后端持久化，堵住合理化路径。
     // Phase 3 B2：开关 on 时本内联条款让位给 rules-registry R-DATA-01（防双源）；off 保留原文。
     // C1b（2026-09-11 拍板）：game 豁免开启时轻留存允许 localStorage（重数据仍后端）。
-    (rulesRegistryEnabled()
-      ? ''
-      : templateType === 'game' && gameDeriveExemptEnabled()
-        ? '数据留存按量级分流：街机游戏轻留存（最高分/最佳成绩等单值数据）可用 localStorage；重业务数据（用户内容/多记录管理）仍须后端持久化 server/routes/ 路由 + ctx.readData/writeData 落 data/ 目录；'
-        : '数据留存类需求（保存/历史/记录/收藏/刷新或重开后仍在）一律用后端持久化：server/routes/ 路由 + ctx.readData/writeData 落 data/ 目录，' +
-          '禁止 localStorage/sessionStorage 存业务数据——PRD 说「刷新后仍在」不构成 localStorage 例外的理由，后端持久化同样满足且必须用后者；') +
+    // P1-08：数据策略由能力档案生成（与 prd-backplane 留存豁免判定同一真相源——
+    // 旧口径 game 特例与品类判定源不一致，personal_tool 等本地优先品类被误要求后端）。
+    (rulesRegistryEnabled() ? '' : renderDataPolicyClause(capabilityProfile)) +
     'out_of_scope 内的功能一律不做；编辑校验失败的错误信息要读完再改。',
     '',
     // W1（Phase 10，2026-09-16，同步 Proma Browser工具族）：预览视觉检查契约。
@@ -283,13 +294,7 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     '',
     // 产物形态（PR-2 条件化）：工程骨架（带构建门禁）→ 模块化解禁（import 可选，
     // 构建期打包校验）；无骨架 → 维持 PR-1 前现状（单文件静态产物，不用 ESM）
-    skeletonMap
-      ? '【产物形态】入口 index.html，交互逻辑入口 src/app.js，样式 src/styles.css；' +
-        '模块化优先：按技术合同的目标文件拆分为 src/ 下多个 .js 文件用 import 组织（loop 结束后构建门禁' +
-        '会打包校验模块图，import 路径错误会在构建期暴露）；仅当功能极简单、单文件已足够时才可合并，且须在旁白说明合并原因。' +
-        '预览沙箱直接加载源码，前端禁止直连外网。'
-      : '【产物形态】入口 index.html，纯前端静态产物（平台用静态服务器托管，无构建步骤）；' +
-        '交互逻辑放 src/app.js，样式放 src/styles.css；不使用 import/ESM 模块语法。',
+    renderProductShapeSection(capabilityProfile),
     // 完整程序渠道（2026-09-06 随记灵案：AI 功能被写成前端模拟，用户要的是真的）——
     // 平台在沙箱注入 BLOMA_APP_LLM_*，产物经同源 /api/llm 代理调用真实模型
     '【AI 能力接入】产品需要 AI/模型能力时必须走真实调用，禁止在前端写死模拟回复冒充 AI：' +

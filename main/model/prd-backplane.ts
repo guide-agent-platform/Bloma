@@ -434,8 +434,10 @@ const STRONG_BACKEND_SIGNAL_RE = /多端|多设备|同步|云端|云同步|共�
 const LOCAL_FIRST_TYPES: ReadonlySet<string> = new Set(['personal_tool', 'desktop_tool', 'game', 'ai_app'])
 
 /** 本地优先判定（deriveInterfaceSpec / requirementImpliesBackend 共用单点）：
- * 本地优先品类 ∧ 无强后端信号 → 留存腿豁免。 */
-function localFirstPersistenceExempt(texts: string[], templateType?: string): boolean {
+ * 本地优先品类 ∧ 无强后端信号 → 留存腿豁免。
+ * 2026-09-26 审计 P1-08：导出为公开判定源——能力档案（capability-profile）的数据策略
+ * 与提示词段落消费同一结果，杜绝「提示词与判定分别手写」的漂移。 */
+export function localFirstPersistenceExempt(texts: string[], templateType?: string): boolean {
   if (!templateType || !LOCAL_FIRST_TYPES.has(templateType)) return false
   return !texts.some((t) => STRONG_BACKEND_SIGNAL_RE.test(t))
 }
