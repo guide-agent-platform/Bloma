@@ -266,7 +266,9 @@ export function readTestReport(projectId: string): GwtTestResult | null {
   return readLastTestCompletedEvent(project.workspace_slug, projectId)
 }
 
-/** 从 analytics JSONL 取项目最近一条 test_completed 事件，还原最小测试报告。 */
+/** 从 analytics JSONL 取项目最近一条 test_completed 事件，还原测试报告。
+ *  2026-09-26 审计 P1-03：kind/probe_degraded/unverified 随事件持久化（写入侧
+ *  trackTestCompleted），此处同字段还原——回滚后分类与降级标记不丢失。 */
 function readLastTestCompletedEvent(workspaceSlug: string, projectId: string): GwtTestResult | null {
   const analyticsPath = getAnalyticsPath(workspaceSlug)
   if (!existsSync(analyticsPath)) return null
@@ -277,7 +279,8 @@ function readLastTestCompletedEvent(workspaceSlug: string, projectId: string): G
       if (!line) continue
       let parsed: { event_type?: string; project_id?: string; payload?: {
         total_count?: number; passed_count?: number; failed_count?: number
-        failures?: Array<{ scenario?: unknown; reason?: unknown }>
+        failures?: Array<{ scenario?: unknown; reason?: unknown; kind?: unknown }>
+        probe_degraded?: boolean; unverified?: string[]
       } }
       try {
         parsed = JSON.parse(line)
@@ -287,13 +290,21 @@ function readLastTestCompletedEvent(workspaceSlug: string, projectId: string): G
       if (parsed.event_type !== 'test_completed' || parsed.project_id !== projectId) continue
       const payload = parsed.payload ?? {}
       const failed = typeof payload.failed_count === 'number' ? payload.failed_count : 0
+      const failureKinds = new Set(['product', 'precondition', 'selector', 'mapping'])
+      const unverifiedRestored = Array.isArray(payload.unverified) ? payload.unverified.filter((u): u is string => typeof u === 'string') : []
       return {
         total_count: typeof payload.total_count === 'number' ? payload.total_count : 0,
         passed_count: typeof payload.passed_count === 'number' ? payload.passed_count : 0,
         failed_count: failed,
         failure_summary: (Array.isArray(payload.failures) ? payload.failures : [])
-          .filter((f): f is { scenario: string; reason: string } => typeof f?.scenario === 'string' && typeof f?.reason === 'string')
-          .map((f) => ({ scenario: f.scenario, reason: f.reason })),
+          .filter((f): f is { scenario: string; reason: string; kind?: string } => typeof f?.scenario === 'string' && typeof f?.reason === 'string')
+          .map((f) => ({
+            scenario: f.scenario,
+            reason: f.reason,
+            ...(typeof f.kind === 'string' && failureKinds.has(f.kind) ? { kind: f.kind as GwtFailureSummary['kind'] } : {}),
+          })),
+        ...(payload.probe_degraded === true ? { probe_degraded: true } : {}),
+        ...(unverifiedRestored.length > 0 ? { unverified: unverifiedRestored } : {}),
       }
     }
   } catch {

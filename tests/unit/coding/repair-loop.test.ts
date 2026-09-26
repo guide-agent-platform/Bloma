@@ -279,11 +279,13 @@ describe('环境豁免（探针降级不烧预算）', () => {
     // 端到端置位由 repair.ts 入口消费测试覆盖（见下）
   })
 
-  it('repairAndRetest：probe_degraded 且有失败 → 不起修复轮直接返回（预算不动）', async () => {
+  it('repairAndRetest：probe_degraded 且失败全为 GWT 场景 → 不起修复轮直接返回（预算不动）', async () => {
     const { repairAndRetest } = await import('../../../main/coding/stages/repair')
     const degraded = {
       total_count: 2, passed_count: 0, failed_count: 2,
-      failure_summary: [{ scenario: 's1', reason: '静态兜底假红' } as never],
+      // 2026-09-26 审计 P1-03 收紧后：豁免只覆盖 GWT 场景来源（F 前缀）；
+      // 合成面（API/UI-GATE）失败照修——场景名需用真实 GWT 形态才走豁免路径
+      failure_summary: [{ scenario: 'F-001 点击清空键→输入归零', reason: '静态兜底假红' } as never],
       probe_degraded: true,
     }
     const input = {

@@ -247,7 +247,8 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
 
     const result = await runAgentLoopPostTesting(baseInput())
 
-    expect(mocks.runAgentLoop).toHaveBeenCalledTimes(1)
+    // 2026-09-26 审计 P1-02：预算内循环——quick 预算 2 在同一次终验内用满才熔断
+    expect(mocks.runAgentLoop).toHaveBeenCalledTimes(2)
     // 陷阱 37 回归锁：熔断入参与现状完全一致（reason 文案 / 三元组 / publish 通道）
     expect(mocks.circuitBreakRollback).toHaveBeenCalledTimes(1)
     const args = mocks.circuitBreakRollback.mock.calls[0][0] as Record<string, unknown>
@@ -270,8 +271,12 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     expect(cbArgs.failureNote).toContain('【影响】')
     expect(cbArgs.failureNote).toContain('【替代】')
     expect(cbArgs.failureNote).toContain('F-005')
-    // 修复轮消耗计数：1（未收敛不清零）
-    expect(findProject(projectId).test_repair_count).toBe(1)
+    // 修复轮消耗计数：2（预算用满；未收敛不清零）
+    expect(findProject(projectId).test_repair_count).toBe(2)
+    // 跨 epoch 累计尝试数（审计 P1-02：回滚不擦除历史）
+    expect(findProject(projectId).repair_total_attempts).toBe(2)
+    const ledger = findProject(projectId).repair_ledger ?? []
+    expect(ledger.filter((e) => e.kind === 'attempt')).toHaveLength(2)
   })
 
   it('修复后仍失败且熔断回滚成功 → throw CircuitBreakSettledError（现状口径另一半）', async () => {
@@ -542,18 +547,19 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     }
   }
 
-  it('B2 零编辑×off：字节级现状——照常全量重验、计轮不回退、无 repair_noop_skipped', async () => {
+  it('B2 零编辑×off：零编辑轮照常计轮重验（2026-09-26 预算循环语义：用满预算才熔断）', async () => {
     delete process.env.BLOMA_REPAIR_NOOP_GUARD
     mocks.runGwtScenarios.mockResolvedValue(gwtFailed()) // 首验与重验都失败
     mocks.runAgentLoop.mockResolvedValue(loopCompletedReadOnly())
 
     const result = await runAgentLoopPostTesting(baseInput())
 
-    // 现状路径：修复轮跑完照常重验（GWT 两次）+ 预算消耗 + 熔断口径不变
-    expect(mocks.runAgentLoop).toHaveBeenCalledTimes(1)
-    expect(mocks.runGwtScenarios).toHaveBeenCalledTimes(2)
+    // 零编辑守卫 off：每轮照常重验计轮（quick 预算 2 → 两轮用满才熔断；
+    // 旧行为单轮即熔断已被审计 P1-02 预算循环取代）
+    expect(mocks.runAgentLoop).toHaveBeenCalledTimes(2)
+    expect(mocks.runGwtScenarios).toHaveBeenCalledTimes(3)
     expect(mocks.circuitBreakRollback).toHaveBeenCalledTimes(1)
-    expect(findProject(projectId).test_repair_count).toBe(1)
+    expect(findProject(projectId).test_repair_count).toBe(2)
     expect(result.verdict).toBe('blocked')
     expect(decisionLines()).not.toContain('repair_noop_skipped')
   })
@@ -602,6 +608,70 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     expect(result.verdict).toBe('ready')
     expect(findProject(projectId).test_repair_count).toBe(0)
   })
+  it('两轮修复后收敛（审计 P1-02：预算内循环——首败→修一轮仍败→修二轮全过→ready）', async () => {
+    mocks.runGwtScenarios
+      .mockResolvedValueOnce(gwtFailed())  // 首验
+      .mockResolvedValueOnce({ ...gwtFailed() }) // 一轮修复后仍败（新对象——真实链路每次新报告）
+      .mockResolvedValueOnce(gwtPassed())  // 二轮修复后全过
+    mocks.runAgentLoop.mockResolvedValue(loopCompleted())
+
+    const result = await runAgentLoopPostTesting(baseInput())
+
+    expect(mocks.runAgentLoop).toHaveBeenCalledTimes(2)
+    expect(mocks.runGwtScenarios).toHaveBeenCalledTimes(3)
+    expect(result.verdict).toBe('ready')
+    // 收敛清零（epoch 内）；累计尝试数保留 2（审计：历史不擦除）
+    expect(findProject(projectId).test_repair_count).toBe(0)
+    expect(findProject(projectId).repair_total_attempts).toBe(2)
+    const ledger = findProject(projectId).repair_ledger ?? []
+    expect(ledger.filter((e) => e.kind === 'attempt')).toHaveLength(2)
+    expect(ledger.find((e) => e.kind === 'converged_reset')).toBeDefined()
+  })
+
+  it('探针降级+混合失败（审计 P1-03）：只修 API/UI-GATE 合成面，GWT 静态失败豁免', async () => {
+    const degradedMixed: GwtTestResult = {
+      total_count: 3,
+      passed_count: 1,
+      failed_count: 2,
+      probe_degraded: true,
+      failure_summary: [
+        { scenario: 'F-005 当在搜索框输入关键词时，历史列表应显示匹配的想法', reason: '页面缺少功能入口' },
+        { scenario: 'API 契约端点：GET /api/history', reason: '端点存活检查失败' },
+      ],
+    }
+    mocks.runGwtScenarios
+      .mockResolvedValueOnce(degradedMixed)
+      .mockResolvedValueOnce(gwtPassed())
+    mocks.runAgentLoop.mockResolvedValue(loopCompleted())
+
+    const result = await runAgentLoopPostTesting(baseInput())
+
+    // 修复轮照起（只修合成面），但任务不含 GWT 静态失败
+    expect(mocks.runAgentLoop).toHaveBeenCalledTimes(1)
+    const loopInput = mocks.runAgentLoop.mock.calls[0][0] as { task: string }
+    expect(loopInput.task).toContain('API 契约端点')
+    expect(loopInput.task).not.toContain('F-005')
+    expect(result.verdict).toBe('ready')
+  })
+
+  it('探针降级且全部失败为 GWT 静态口径（审计 P1-03）：整份豁免不起修复轮', async () => {
+    const degradedGwtOnly: GwtTestResult = {
+      ...gwtFailed(),
+      probe_degraded: true,
+    }
+    mocks.runGwtScenarios.mockResolvedValue(degradedGwtOnly)
+    mocks.runAgentLoop.mockResolvedValue(loopCompleted())
+
+    const result = await runAgentLoopPostTesting(baseInput())
+
+    expect(mocks.runAgentLoop).not.toHaveBeenCalled()
+    expect(result.verdict).toBe('blocked')
+    const log = decisionLines()
+    expect(log).toContain('环境类失败不入修复预算')
+    const ledger = findProject(projectId).repair_ledger ?? []
+    expect(ledger.find((e) => e.kind === 'exempt' && e.via === 'final_verify_probe_degraded')).toBeDefined()
+  })
+
 })
 describe('PR-C：build-gate 接入 + blocked 卡先修再验（入口 B）', () => {
   const originalPromaHome = process.env.PROMA_HOME
@@ -746,6 +816,63 @@ describe('PR-C：build-gate 接入 + blocked 卡先修再验（入口 B）', () 
     expect(log).toContain('repair_round_started')
     expect(log).toContain('blocked_resume')
     expect(findProject(projectId).current_stage).toBe('ready')
+  })
+
+  it('入口 B 对齐（审计 P1-03）：precondition/mapping-only 快照不起修复轮，不烧预算', async () => {
+    writeTestReport({
+      request_id: 'req-repair-c', session_id: sessionId, project_id: projectId,
+      result: {
+        total_count: 2, passed_count: 0, failed_count: 2,
+        failure_summary: [
+          { scenario: 'F-002 点击清空键→当前输入与结果归零', reason: '前置步骤失败：无可见可输入域', kind: 'precondition' },
+          { scenario: 'F-003 点击删除按钮→目标记录消失', reason: '映射编译失败：删除类断言需 LLM 编译器', kind: 'mapping' },
+        ],
+      },
+    })
+    mocks.runGwtScenarios.mockResolvedValue(gwtPassed())
+
+    await resumeBlockedFlow(
+      {
+        request_id: 'req-repair-c', session_id: sessionId, project_id: projectId,
+        mode: 'quick', decision: 'continue', content: '',
+        query: junkQuery(),
+        channel_id: channelId,
+      },
+      () => undefined,
+    )
+
+    expect(mocks.runAgentLoop).not.toHaveBeenCalled()
+    expect(decisionLines()).toContain('前置缺失/映射阻断')
+    const ledger = findProject(projectId).repair_ledger ?? []
+    expect(ledger.find((e) => e.kind === 'exempt' && e.via === 'blocked_resume_non_actionable')).toBeDefined()
+  })
+
+  it('用户继续修=新预算纪元（审计 P1-02）：epoch 开启留痕，历史累计不擦除', async () => {
+    // 预铺：上一 epoch 已烧 2 轮 + 累计 2 次
+    updateProject(projectId, { repair_epoch: 1, test_repair_count: 2, repair_total_attempts: 2 })
+    writeTestReport({ request_id: 'req-repair-c', session_id: sessionId, project_id: projectId, result: gwtFailed() })
+    mocks.runAgentLoop.mockResolvedValue(loopCompleted())
+    mocks.runGwtScenarios.mockResolvedValue(gwtPassed())
+
+    await resumeBlockedFlow(
+      {
+        request_id: 'req-repair-c', session_id: sessionId, project_id: projectId,
+        mode: 'quick', decision: 'continue', content: '',
+        query: junkQuery(),
+        channel_id: channelId,
+      },
+      () => undefined,
+    )
+
+    const after = findProject(projectId)
+    // 新纪元：epoch+1、轮计数清零（合法重置）
+    expect(after.repair_epoch).toBe(2)
+    expect(after.test_repair_count).toBeLessThanOrEqual(1) // 入口 B 起一轮后为 1；收敛后终验内不再消耗
+    // 跨 epoch 累计保留且继续增长（历史不擦除）
+    expect(after.repair_total_attempts).toBeGreaterThanOrEqual(3)
+    const ledger = after.repair_ledger ?? []
+    expect(ledger.find((e) => e.kind === 'epoch_opened' && e.via === 'user_resume_test_repair')).toBeDefined()
+    expect(ledger.filter((e) => e.kind === 'attempt')).toHaveLength(after.repair_total_attempts! - 2)
   })
 
   it('blocked 卡「继续修」：无失败快照（test-report 缺失）→ 行为=现状直接终验，不起修复轮', async () => {

@@ -78,6 +78,7 @@ import { MvpTaskInput, MvpTaskResult } from './sketch-task'
 import { runMvpTask, runMvpViaAgentLoop, tryResolveAgentLoop } from './generate'
 import { syncPrdCheckpoints } from './loop-prompt'
 import { runAgentLoopPostTesting } from './final-verify'
+import { openRepairEpoch } from '../repair-ledger'
 import { runBlockedTestRepair } from './repair'
 
 export interface IterationTaskInput {
@@ -171,6 +172,8 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
         `收到「${truncateCopy(input.prompt, 20)}」——我把这理解成「把没做完的做完」：这一版还有 ${lastReport.failed_count} 项行为断言未通过，我先定向修复（不改需求清单），修完重新终验。`,
       )
       const previewUrl = await ensureResumePreview(input)
+      // 2026-09-26 审计 P1-02：用户授权修完=新预算纪元留痕；P1-04：signal 贯穿终验
+      openRepairEpoch(input.project_id, 'iteration_finish_unfinished')
       await runBlockedTestRepair({ ...input, preview_url: previewUrl })
       const project = findProject(input.project_id)
       // 终验门禁收口：loop 元数据按 resume 口径重建（judge 只消费 status 判异常终止态）
@@ -180,6 +183,7 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
         project_id: input.project_id,
         mode: input.mode,
         preview_url: previewUrl,
+        ...(input.signal ? { signal: input.signal } : {}),
         ...(project.via_agent_loop
           ? { loop: { status: project.agent_loop_status ?? 'turn_limit', turns: 0, finalText: '', toolCalls: [] } }
           : {}),
@@ -223,12 +227,15 @@ export async function runIterationTask(input: IterationTaskInput): Promise<MvpTa
       'iteration',
     )
     // Agent Loop 唯一运行时：迭代产物一律走独立门禁（只终验不重修）
+    // 2026-09-26 审计 P1-02：新迭代候选=新预算纪元；P1-04：signal 贯穿终验
+    openRepairEpoch(input.project_id, 'iteration_new_candidate')
     await runAgentLoopPostTesting({
       request_id: input.request_id,
       session_id: input.session_id,
       project_id: input.project_id,
       mode: input.mode,
       preview_url: mvp.preview_url,
+      ...(input.signal ? { signal: input.signal } : {}),
       loop: mvp.loop_result,
       query: input.query,
       channel_id: input.channel_id,

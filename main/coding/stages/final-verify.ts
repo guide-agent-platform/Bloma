@@ -76,7 +76,7 @@ import { publish, throwIfAborted } from './stage-runtime'
 import { buildBlockedQuestions, publishBlockedDecision } from './blocked-flow'
 import { buildRepairCheckpointContext, commitProjectLifecycle, runMvpViaAgentLoop } from './generate'
 import { GwtTestingResult, runJudgeReview } from './judge-review'
-import { repairAndRetest } from './repair'
+import { repairAndRetest, repairAndRetestWithinBudget } from './repair'
 
 export interface AgentLoopPostTestingInput {
   request_id: string
@@ -343,8 +343,14 @@ export function trackTestCompleted(
             scenario: f.scenario,
             reason: String(f.reason ?? '').slice(0, 200),
             ...(source ? { source } : {}),
+            // 2026-09-26 审计 P1-03：失败分类（product/precondition/selector/mapping）
+            // 持久化进事件——回滚后从 analytics 恢复报告时分类不丢失。
+            ...(f.kind ? { kind: f.kind } : {}),
           }
         }),
+        // 2026-09-26 审计 P1-03：探针降级/待评估清单随事件落盘（恢复侧同字段还原）
+        ...(result.probe_degraded === true ? { probe_degraded: true } : {}),
+        ...((result.unverified ?? []).length > 0 ? { unverified: (result.unverified ?? []).slice(0, 20) } : {}),
         // W2-F4：修复比较（resolved/persistent/new_failures；baseline=loop 上次自测或上轮终验）
         ...(comparison ? { comparison } : {}),
       },
@@ -457,7 +463,9 @@ export async function runAgentLoopPostTesting(input: AgentLoopPostTestingInput):
   // 重验（D2：不做失败子集，防改坏已过场景）；预算耗尽 / 修复后仍失败 → 现状熔断
   // 口径一字不改（陷阱 37）。修复收敛则继续走安全扫描 → judge 正常链。
   if (testResult.failed_count > 0) {
-    testResult = await repairAndRetest(input, testResult)
+    // 2026-09-26 审计 P1-02：预算内循环修复（plan→repair→retest 到收敛/耗尽），
+    // 而非单轮修复即熔断；无进展/耗尽由循环内部早退并留痕。
+    testResult = await repairAndRetestWithinBudget(input, testResult)
     throwIfAborted(input.signal)
     if (testResult.failed_count > 0) {
       // T-1 错误卡写点④（灰度 S1 实弹补位，2026-09-07）：修复轮跑完仍败的**首轮熔断**

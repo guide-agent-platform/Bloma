@@ -983,6 +983,18 @@ export interface ProjectCreateInput extends RequestEnvelope {
   initial_message?: string
 }
 
+/** 修复账本条目（2026-09-26 运行审计 P1-02；实现见 main/coding/repair-ledger.ts）。 */
+export interface RepairLedgerEntry {
+  at: string
+  kind: 'epoch_opened' | 'attempt' | 'noop' | 'exempt' | 'exhausted' | 'converged_reset'
+  epoch: number
+  via: string
+  round?: number
+  outcome?: string
+  failed_before?: number
+  failed_after?: number
+}
+
 export interface Project {
   project_id: string
   workspace_slug: string
@@ -1002,6 +1014,13 @@ export interface Project {
   judge_return_count?: number
   /** 安全问题独立计数（PRD §10.5）：上限 3 次强制修复，不计入普通退回次数 */
   security_repair_count?: number
+  /** 修复预算纪元（2026-09-26 运行审计 P1-02）：用户续修/重新生成/迭代/回滚时 +1，
+   *  epoch 内 test_repair_count 归零重计预算，每次授权在 repair_ledger 留痕。 */
+  repair_epoch?: number
+  /** 跨 epoch 累计修复尝试数：任何路径不清零（回滚不擦除历史）。 */
+  repair_total_attempts?: number
+  /** 修复账本（append-only，容量 50）：epoch 开启/尝试/零编辑/豁免/耗尽/收敛事件流。 */
+  repair_ledger?: RepairLedgerEntry[]
   /** 被阻塞的编程操作（A2 resume 闭环）：非阻塞态为 undefined */
   blocked_action?: 'mvp_repair' | 'test_repair' | 'judge_return' | 'security_repair'
   /** 需求确认后已自动命名过（autoNameProject）：此后不再覆盖，保住用户手动改名 */

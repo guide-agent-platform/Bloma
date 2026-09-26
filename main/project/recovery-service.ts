@@ -10,6 +10,7 @@ import { listSnapshots, restoreSnapshotFiles, rollbackSnapshot } from '../delive
 import { findProject, listProjects, updateProject } from '../project/project-service'
 import { isHtmlDocument } from '../coding/sketch-engine-llm'
 import { commitProjectState } from '../coding/project-git'
+import { openRepairEpoch } from '../coding/repair-ledger'
 
 /**
  * 恢复服务（长期型改造 T1 + T5）——崩溃对账与熔断回滚共用的状态收敛逻辑。
@@ -320,10 +321,12 @@ export async function circuitBreakRollback(input: CircuitBreakInput): Promise<Ci
   }
 
   const stage = convergeStageFromEvidence(evaluateDiskArtifact(project.root_path))
+  // 2026-09-26 审计 P1-02：回滚=新预算纪元（epoch+1 留痕）；跨 epoch 累计尝试与账本
+  // 不清零（回滚不擦除历史）。runtime/security/judge 计数保持原语义一并归零。
+  openRepairEpoch(input.project_id, 'circuit_rollback')
   updateProject(input.project_id, {
     current_stage: stage,
     runtime_repair_count: 0,
-    test_repair_count: 0,
     security_repair_count: 0,
     judge_return_count: 0,
     blocked_action: undefined,

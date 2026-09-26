@@ -78,6 +78,7 @@ import { ensureResumePreview } from './blocked-flow'
 import { appendRepairAttemptRecord, buildRepairCheckpointContext, commitProjectLifecycle, deriveAuthorizedWritePaths, prepareSkeletonBeforeLoop, resolveLoopThinkingLevel } from './generate'
 import { buildLoopSystemWithOverride } from './loop-prompt'
 import { AgentLoopPostTestingInput, runGwtWithApiContract, trackTestCompleted } from './final-verify'
+import { recordRepairAttempt, recordRepairLedgerEvent } from '../repair-ledger'
 
 /**
  * GWT 首败后的定向修复轮 + 全量重验（P2 失败回流入口 A，实施稿 §4.4）。
@@ -89,31 +90,46 @@ import { AgentLoopPostTestingInput, runGwtWithApiContract, trackTestCompleted } 
  * 是增强不是依赖，绝不阻断交付链。
  */
 export async function repairAndRetest(input: AgentLoopPostTestingInput, testResult: GwtTestResult): Promise<GwtTestResult> {
-  // 2026-09-25 对齐批·环境豁免（Proma-Easy「环境类不入修复循环」铁律直译）：
-  // 浏览器探针不可用（probe_degraded）时的失败是静态兜底口径——不可归因产物缺陷，
-  // 修复轮修不了「探针缺席」，不烧预算不计数；如实留痕转既有终验口径。
+  // 2026-09-25 对齐批·环境豁免（Proma-Easy「环境类不入修复循环」铁律直译）+
+  // 2026-09-26 审计 P1-03 收紧：探针降级时 GWT 场景失败是静态兜底口径（不可归因
+  // 产物），但终验合并报告可能混入 API 契约/UI-GATE/迁移等真实失败——仅当全部
+  // 失败都是 GWT 场景来源时才整份豁免；存在合成面失败则只修合成面。
   if (testResult.probe_degraded === true && testResult.failed_count > 0) {
-    recordDecision({
-      project_id: input.project_id,
-      session_id: input.session_id,
-      entry: {
-        type: 'repair_round_skipped',
-        title: '环境类失败不入修复预算（探针降级）',
-        why: `浏览器探针不可用，GWT 走静态兜底判定（失败 ${testResult.failed_count} 项不可归因产物缺陷）——不起修复轮、不烧预算；恢复探针后重验即恢复全预算`,
-        detail: { probe_degraded: true, failed_count: testResult.failed_count },
-      },
-    })
-    appendSessionMessage(input.session_id, {
-      role: 'assistant',
-      content: [{ type: 'text', text: '本轮验证的浏览器探针不可用（走静态兜底判定），失败项无法归因到产物缺陷——不消耗修复预算。恢复预览/浏览器环境后重新验证即可。' }],
-      timestamp: Date.now(),
-    })
-    return testResult
+    const syntheticFailures = testResult.failure_summary.filter((f) => featureIdFromScenario(f.scenario) === undefined)
+    if (syntheticFailures.length === 0) {
+      recordRepairLedgerEvent(input.project_id, 'exempt', 'final_verify_probe_degraded', {
+        outcome: `探针降级，${testResult.failed_count} 项失败全为 GWT 静态口径`,
+        failedBefore: testResult.failed_count,
+      })
+      recordDecision({
+        project_id: input.project_id,
+        session_id: input.session_id,
+        entry: {
+          type: 'repair_round_skipped',
+          title: '环境类失败不入修复预算（探针降级）',
+          why: `浏览器探针不可用，GWT 走静态兜底判定（失败 ${testResult.failed_count} 项不可归因产物缺陷）——不起修复轮、不烧预算；恢复探针后重验即恢复全预算`,
+          detail: { probe_degraded: true, failed_count: testResult.failed_count },
+        },
+      })
+      appendSessionMessage(input.session_id, {
+        role: 'assistant',
+        content: [{ type: 'text', text: '本轮验证的浏览器探针不可用（走静态兜底判定），失败项无法归因到产物缺陷——不消耗修复预算。恢复预览/浏览器环境后重新验证即可。' }],
+        timestamp: Date.now(),
+      })
+      return testResult
+    }
+    // 混合失败：只修合成面（GWT 静态失败留待探针恢复后重验）
+    testResult = { ...testResult, failure_summary: syntheticFailures, failed_count: syntheticFailures.length }
   }
   const project = findProject(input.project_id)
   const used = project.test_repair_count ?? 0
   const budget = resolveRepairBudget(input.mode)
   if (used >= budget) {
+    recordRepairLedgerEvent(input.project_id, 'exhausted', 'final_verify', {
+      round: used,
+      outcome: `预算 ${used}/${budget} 已耗尽`,
+      failedBefore: testResult.failed_count,
+    })
     recordDecision({
       project_id: input.project_id,
       session_id: input.session_id,
@@ -144,6 +160,10 @@ export async function repairAndRetest(input: AgentLoopPostTestingInput, testResu
   // 审计修复批：mapping（编译器无法构造可靠步骤）与 precondition 同属测试侧能力缺口——不进修复轮不烧预算
   const actionable = (testResult.failure_summary ?? []).filter((f) => f.kind !== 'precondition' && f.kind !== 'mapping')
   if (actionable.length === 0 && (testResult.failure_summary ?? []).length > 0) {
+    recordRepairLedgerEvent(input.project_id, 'exempt', 'final_verify_non_actionable', {
+      outcome: `${testResult.failure_summary?.length ?? 0} 项失败均为前置缺失/映射阻断类`,
+      failedBefore: testResult.failed_count,
+    })
     recordDecision({
       project_id: input.project_id,
       session_id: input.session_id,
@@ -162,6 +182,7 @@ export async function repairAndRetest(input: AgentLoopPostTestingInput, testResu
 
   const round = used + 1
   updateProject(input.project_id, { test_repair_count: round })
+  recordRepairAttempt(input.project_id, 'final_verify', round, testResult.failed_count)
   // Phase 10 W1-1：修复轮前提交（修复前状态入库）
   commitProjectLifecycle(input.project_id, input.session_id, 'repair_begin', `定向修复轮（第 ${round}/${budget} 轮，${tasks.length} 项）开始`)
   recordDecision({
@@ -229,6 +250,11 @@ export async function repairAndRetest(input: AgentLoopPostTestingInput, testResu
   // off=字节级现状（照常重验照常计轮）。
   if (repairNoopGuardEnabled() && !hasWriteEditToolCall(result.loopResult?.toolCalls ?? [])) {
     updateProject(input.project_id, { test_repair_count: used })
+    recordRepairLedgerEvent(input.project_id, 'noop', 'final_verify', {
+      round,
+      outcome: `零编辑轮不计预算（计数回退到 ${used}/${budget}）`,
+      failedBefore: testResult.failed_count,
+    })
     if (loopCheckpointEnabled()) {
       const prevFailures = testResult.failure_summary.map((f) => f.scenario)
       appendRepairAttemptRecord(input.project_id, {
@@ -300,7 +326,15 @@ export async function repairAndRetest(input: AgentLoopPostTestingInput, testResu
   }
 
   const converged = retested.failed_count === 0
-  if (converged) updateProject(input.project_id, { test_repair_count: 0 })
+  if (converged) {
+    updateProject(input.project_id, { test_repair_count: 0 })
+    recordRepairLedgerEvent(input.project_id, 'converged_reset', 'final_verify', {
+      round,
+      outcome: `第 ${round} 轮收敛（epoch 内计数清零，累计尝试保留）`,
+      failedBefore: testResult.failed_count,
+      failedAfter: retested.failed_count,
+    })
+  }
   // 构建任务在修复卡里（PR-C）：修复轮结束后重跑构建门禁验证（决策日志自动落
   // build_gate_* 新行）；结果只留痕不影响 GWT 收敛判定（passed/skipped 同理）
   let buildGateAfter: BuildGateResult | undefined
@@ -356,6 +390,35 @@ export async function repairAndRetest(input: AgentLoopPostTestingInput, testResu
 }
 
 /**
+ * 终验内预算循环（2026-09-26 运行审计 P1-02：预算 2-3 轮应在同一次终验内用满，
+ * 而非修一轮即熔断）。plan→repair→retest 循环到收敛/预算耗尽/无进展早退
+ * （耗尽/豁免/零编辑/异常路径返回原引用=无进展信号，内部已留痕）。
+ */
+export async function repairAndRetestWithinBudget(input: AgentLoopPostTestingInput, testResult: GwtTestResult): Promise<GwtTestResult> {
+  let current = testResult
+  let firstIteration = true
+  for (;;) {
+    // 首轮无条件进入 repairAndRetest（预算耗尽/豁免/无 query 等早退分支的决策日志、
+    // 错误卡与账本留痕都在其内部）；后续轮先检查预算与收敛再进。
+    if (!firstIteration) {
+      if (current.failed_count === 0) return current
+      const usedNow = findProject(input.project_id).test_repair_count ?? 0
+      if (usedNow >= resolveRepairBudget(input.mode)) return current
+    }
+    throwIfAborted(input.signal)
+    const usedBefore = findProject(input.project_id).test_repair_count ?? 0
+    const next = await repairAndRetest(input, current)
+    // 无进展退出（显式双信号）：原引用返回（耗尽/豁免/异常早退），或轮计数未推进
+    // （零编辑守卫回退）——两种都意味着继续循环只会原地空转。
+    const usedAfter = findProject(input.project_id).test_repair_count ?? 0
+    const progressed = next !== current || usedAfter > usedBefore
+    if (!progressed) return next
+    current = next
+    firstIteration = false
+  }
+}
+
+/**
  * 入口 B（blocked 卡「继续修」，P2 失败回流 PR-C）：上次让渡时的失败快照（test-report.json）
  * 直接组装修复任务，先跑一轮定向修复再交回终验门禁——从「产物未变的空转重验」升级为
  * 「先修再验」。与入口 A 的差异：入口 A 在终验现场拿新鲜失败证据；入口 B 消费上次落盘
@@ -377,10 +440,42 @@ export async function runBlockedTestRepair(input: {
 }): Promise<void> {
   const lastReport = readTestReport(input.project_id)
   if (!lastReport || lastReport.failed_count === 0) return
+  // 2026-09-26 审计 P1-03：入口 B 与入口 A 同口径——探针降级整份豁免；
+  // precondition/mapping（测试侧能力缺口）不烧预算不起轮。
+  if (lastReport.probe_degraded === true) {
+    recordRepairLedgerEvent(input.project_id, 'exempt', 'blocked_resume_probe_degraded', {
+      outcome: `探针降级，${lastReport.failed_count} 项失败为静态口径`,
+      failedBefore: lastReport.failed_count,
+    })
+    return
+  }
+  const actionableResume = (lastReport.failure_summary ?? []).filter((f) => f.kind !== 'precondition' && f.kind !== 'mapping')
+  if (actionableResume.length === 0 && (lastReport.failure_summary ?? []).length > 0) {
+    recordRepairLedgerEvent(input.project_id, 'exempt', 'blocked_resume_non_actionable', {
+      outcome: `${lastReport.failure_summary?.length ?? 0} 项失败均为前置缺失/映射阻断类`,
+      failedBefore: lastReport.failed_count,
+    })
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'repair_round_skipped',
+        title: '继续修：全部失败为前置缺失/映射阻断类，不入修复预算',
+        why: `上次终验的 ${lastReport.failure_summary?.length ?? 0} 项失败均属测试侧能力缺口（无可输入域/编译器无法映射）——不可自动验证，修复轮无从下手；如实登记待人工核验`,
+        detail: { via: 'blocked_resume', non_actionable: lastReport.failure_summary?.length ?? 0 },
+      },
+    })
+    return
+  }
   const project = findProject(input.project_id)
   const used = project.test_repair_count ?? 0
   const budget = resolveRepairBudget(input.mode)
   if (used >= budget) {
+    recordRepairLedgerEvent(input.project_id, 'exhausted', 'blocked_resume', {
+      round: used,
+      outcome: `预算 ${used}/${budget} 已耗尽`,
+      failedBefore: lastReport.failed_count,
+    })
     recordDecision({
       project_id: input.project_id,
       session_id: input.session_id,
@@ -401,12 +496,13 @@ export async function runBlockedTestRepair(input: {
   // 无 query（存量 resume 场景）无法起修复轮：不起不报错，行为=现状重验
   if (!input.query) return
 
-  const tasks = buildRepairTasks({ testResult: lastReport })
+  const tasks = buildRepairTasks({ testResult: { ...lastReport, failure_summary: actionableResume } })
   if (tasks.length === 0) return
   throwIfAborted(input.signal)
 
   const round = used + 1
   updateProject(input.project_id, { test_repair_count: round })
+  recordRepairAttempt(input.project_id, 'blocked_resume', round, lastReport.failed_count)
   // Phase 10 W1-1：入口 B（继续修）修复轮前提交
   commitProjectLifecycle(input.project_id, input.session_id, 'repair_begin', `继续修定向修复轮（第 ${round}/${budget} 轮，${tasks.length} 项）开始`)
   recordDecision({

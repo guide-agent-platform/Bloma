@@ -78,6 +78,7 @@ import { runMvpTask } from './generate'
 import { runJudgeReview } from './judge-review'
 import { runAgentLoopPostTesting } from './final-verify'
 import { runBlockedTestRepair } from './repair'
+import { openRepairEpoch } from '../repair-ledger'
 import { runIterationTask } from './iterate'
 
 /** 被阻塞的编程操作类型（A2 resume 闭环，落盘到 Project.blocked_action） */
@@ -396,6 +397,8 @@ export async function resumeBlockedFlow(
 
   // decision === 'continue'：重置相关计数后恢复被阻塞的操作
   if (action === 'mvp_repair') {
+    // 2026-09-26 审计 P1-02：重新生成=新预算授权，epoch+1 留痕（历史计数在 repair_ledger/repair_total_attempts 保留）
+    openRepairEpoch(input.project_id, 'user_resume_mvp_repair')
     updateProject(input.project_id, { runtime_repair_count: 0 })
     const mvp = await runMvpTask({
       request_id: input.request_id,
@@ -422,7 +425,8 @@ export async function resumeBlockedFlow(
   }
 
   if (action === 'test_repair') {
-    updateProject(input.project_id, { test_repair_count: 0 })
+    // 2026-09-26 审计 P1-02：用户继续修=合法新预算授权，epoch+1 留痕——清零动作可审计
+    openRepairEpoch(input.project_id, 'user_resume_test_repair')
     const previewUrl = await ensureResumePreview(input)
     // P2 失败回流（入口 B，PR-C）：从「空转重验」升级为「先修再验」——上次让渡时的
     // 失败快照（test-report.json）直接组装修复任务，先跑一轮定向修复再走终验门禁，
