@@ -347,6 +347,10 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     publish,
     // 首跑深修：子会话专用执行通道（环境探测）；仅注入本父会话产生的委派子会话
     childExtraTools: [buildDesktopEnvProbeTool()],
+    // 工具面随父上下文隔离（P1-12，2026-10-02）：桌面子会话写面（realFullstackVariant）
+    // 不再依赖全局单例——与 review 线并发时后注册者的全局覆盖不再串面。全局注册保留
+    // 作缺省（单线场景/旧测试兼容）。
+    childToolsBuilder: buildDesktopChildTools,
   })
   setChildToolsBuilder(buildDesktopChildTools)
 

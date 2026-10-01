@@ -103,16 +103,15 @@ export function buildPrdBackplane(
   }
 }
 
-/**
- * 构建侧归一化（§10 兼容）：把薄形态（仅 id+description）物化为厚形态。
- * 缺省值与读取侧 helper（requirementStory 等）一致，落盘后下游无需再判空。
- */
+/** 构建侧归一化（§10 兼容）：薄形态物化为厚形态，缺省值与读取侧 helper 一致。
+ * priority 不物化缺省（P1-11，2026-10-02）：物化会挡住 enricher 升档（merge「缺才补」）
+ * ——渠道抖动首写全员 P2 后 P0/P1 永补不进；与断言 stripDefaultAssertions 通道对称。 */
 function normalizeRequirement(item: SketchRequirement): SketchRequirement {
   return {
     ...item,
     story: requirementStory(item),
     behavior_assertions: requirementAssertions(item),
-    priority: requirementPriority(item),
+    ...(item.priority ? { priority: item.priority } : {}),
   }
 }
 

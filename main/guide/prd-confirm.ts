@@ -47,6 +47,10 @@ interface PendingPrdConfirm {
   /** 市调提炼想法（2026-08-29 灵感参考）：确认时勾选采纳并入 PRD */
   ideas: ResearchIdea[]
   query: SDKQuery
+  /** 发卡时点的渠道 env（全链路审查 P1-10，2026-10-02）：adjust 回传的归一化/PRD 管线
+   *  复用同一 env——旧版 env 断链致 normalizer 无 env 走词表 fallback，调整文本被当
+   *  append 原样追加污染 PRD（与审查卡同款 bug，审查卡已修，此处对齐）。 */
+  env?: Record<string, string>
   publish: (event: AgentEvent) => void
   /** 停止信号：确认后开草图同样可被停止（不传则不可取消） */
   signal?: AbortSignal
@@ -77,6 +81,8 @@ export function publishPrdConfirmCard(opts: {
   publish: (event: AgentEvent) => void
   /** 市调提炼想法（2026-08-29 灵感参考）：卡面可勾选采纳 */
   ideas?: ResearchIdea[]
+  /** 渠道 env（全链路审查 P1-10）：随卡挂起，adjust 回传复用 */
+  env?: Record<string, string>
   /** R2（2026-09-12）：想法来源模式——agent=纯模型灵感建议 / scrape=市调提炼；
  *  渲染端据此把想法区头如实标注，不冒充市调 */
   ideasMode?: 'agent' | 'scrape'
@@ -97,6 +103,7 @@ export function publishPrdConfirmCard(opts: {
     requirements: opts.requirements,
     ideas,
     query: opts.query,
+    env: opts.env,
     publish: opts.publish,
     signal: opts.signal,
   })

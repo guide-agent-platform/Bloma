@@ -7,6 +7,25 @@
 
 **v1.1 修订说明**：同步 §5 已知待同步项状态（4 项全部已同步），新增 §5.1 目录结构重组记录。按 `workflow.md §2.4` 走修订流程，待评审后回到已确认。
 
+## 全链路审查修复批三：清账（PRD 确认卡 env / sticky P2 / 委派工具面隔离）（2026-10-02）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | fix（审查挂账第三批：PRD 链 P1×2 + 委派跨线 P1×1） |
+| 模块 | `main/guide/prd-confirm.ts`、`main/guide/stages/prd-pipeline.ts`、`main/guide/stages/guide-pipeline.ts`、`main/project/prd-store.ts`、`main/agent/delegation/agent-collaboration.ts`、`main/desktop/dispatcher-loop.ts`、`main/review/review-delegation.ts` |
+
+### 变更内容
+
+- **PRD 确认卡 env 断链（P1-10）**：PendingPrdConfirm 补 env 字段随卡挂起；adjust 回传的归一化与 PRD 管线复用同一 env（旧版 env 断链致 normalizer 走词表 fallback，调整文本被当 append 原样追加污染 PRD）；追问定向 revise 同源修复（挂起表本就携带 env，旧版硬编码 undefined 致 LLM 判定从不执行）。与审查卡已修的同款 bug 对齐。
+- **模板直写 sticky P2（P1-11）**：构建侧 normalizeRequirement 不再物化 priority 缺省（F-001=P0/其余=P2 兑底移回读取侧 requirementPriority——行为同值）；物化写盘会挡住 enricher 升档（merge「priority 缺才补」），渠道抖动首写全员 P2 后 P0/P1 永补不进。与断言 stripDefaultAssertions 迁移通道对称。
+- **委派子工具面跨线隔离（P1-12）**：DelegationParentContext 新增 childToolsBuilder 随父上下文按 sessionId 隔离，优先于全局单例——桌面线（realFullstackVariant 写面）与 review 线（web 组合面）并发时后注册者的全局覆盖不再串面（旧竞态：桌面子会话丢写面拒写 *.py 卡死，或 review 子会话拿到桌面写面）。全局单例保留作缺省（未改造注册方与测试兼容）。
+
+### 影响评估
+
+- 单测 199 文件/1950 例全绿（新增锁定×2：sticky P2 升档恢复、priority 落盘无字段+读取侧兑底；语义更新×1：document-engine 厚形态断言）；typecheck 0 错；prd-store 保持 ≤800 行（R7 只减不增红线未破）。
+- 行为变化：①确认卡「有要调整的」文本进入 LLM 归一化（不再原样追加）；②追问答案能真正修到目标项；③渠道恢复重跑后 P0/P1 判定可升档；④双线并发委派不再串工具面。
+- 至此全链路审查挂账（除 P0-1 完整版）全部清偿。P0-1 完整版（语义审查对齐 driver 场景）待桌面狗粮 7bc4eeff 收口后按实际卡点设计。
+
 ## 全链路审查修复批二：收口双门 + 守卫无条件化 + pending 失效 + worktree 装配（2026-10-02）
 
 | 属性 | 值 |

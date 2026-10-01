@@ -154,6 +154,10 @@ export interface DelegationParentContext {
   /** 背板锚定 system prompt（buildAgentLoopSystemPrompt 产物），子 loop 在它之上加委派规则。 */
   system: string
   editFormat: 'diff' | 'whole'
+  /** 父级子工具构建器（全链路审查 P1-12，2026-10-02）：随父上下文按 sessionId 隔离，
+   *  优先于全局单例——桌面线（realFullstackVariant 写面）与 review 线（web 组合面）
+   *  并发时后注册者的全局覆盖不再串面。未传时回退全局单例（兼容未改造注册方与测试）。 */
+  childToolsBuilder?: ChildToolsBuilder
   /** omit 推广（2026-08-27）：子 loop 透传父渠道 providerType，Token Plan 类渠道免 400 往返 */
   providerType?: string
   publish: (type: AgentEvent['type'], payload: Record<string, unknown>) => void
@@ -378,7 +382,7 @@ async function runChildLoop(opts: {
     system: `${buildChildSystemPrompt(parentCtx.system, role)}${isolationNote}`,
     task: prompt,
     historyTurns: opts.replayTurns,
-    tools: [...childToolsBuilder(parent.projectId, role, parentCtx.editFormat), ...(parentCtx.childExtraTools ?? [])],
+    tools: [...(parentCtx.childToolsBuilder ?? childToolsBuilder)(parent.projectId, role, parentCtx.editFormat), ...(parentCtx.childExtraTools ?? [])],
     query: parentCtx.query,
     // C1：渠道覆盖从 record 取（query 复用，env/providerType/maxTokens 换子渠道值；continue 同源）
     env: record.channelOverride?.env ?? parentCtx.env,

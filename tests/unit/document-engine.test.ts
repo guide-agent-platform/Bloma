@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { appendPrdRequirements, isPrdUserConfirmed, listDocuments, markPrdUserConfirmed, readDocument, syncDocuments } from '../../main/project/document-engine'
+import { requirementPriority } from '../../main/model/prd-backplane'
 import { createProject, recordSketchGenerated, updateProject } from '../../main/project/project-service'
 import { getDocumentsDir } from '../../storage/config-paths'
 
@@ -190,7 +191,9 @@ describe('DocumentEngine (A2-05)', () => {
 
     const dir = getDocumentsDir(project.workspace_slug, project.project_id)
     const backplane = JSON.parse(readFileSync(join(dir, 'prd.json'), 'utf8'))
-    // 薄项（F-002）构建侧归一化：story 回退 description、默认断言、P2（不触发 P0 门禁）
+    // 薄项（F-002）构建侧归一化：story 回退 description、默认断言；priority 不物化缺省
+    // （P1-11，2026-10-02）：落盘无字段，读取侧 requirementPriority 兜底 P2（行为不变），
+    // 渠道恢复重跑时 enricher 的 P0/P1 判定可生效（不再被物化 P2 挡住）。
     expect(backplane.requirements[0]).toMatchObject({
       id: 'F-001',
       story: '作为玩家，我想驾驶赛车，以便获得竞速体验',
@@ -201,8 +204,9 @@ describe('DocumentEngine (A2-05)', () => {
       id: 'F-002',
       story: '历史记录',
       behavior_assertions: ['该功能项在产物中可见且可交互'],
-      priority: 'P2',
     })
+    expect(backplane.requirements[1].priority).toBeUndefined()
+    expect(requirementPriority(backplane.requirements[1])).toBe('P2')
     // normalizer 判定的范围声明并入 out_of_scope
     expect(backplane.out_of_scope).toEqual(['不做排行榜', '不做登录'])
     // 用户可读渲染：故事 + 断言 + 优先级 + 范围排除

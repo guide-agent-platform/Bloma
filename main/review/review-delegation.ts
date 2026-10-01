@@ -21,11 +21,11 @@ import type { AgentEvent } from '../../shared/types'
 import {
   disposeParentDelegationState,
   registerParentLoopContext,
-  setChildToolsBuilder,
   startDelegation,
   stopDelegations,
   unregisterParentLoopContext,
   waitForDelegations,
+  type ChildToolsBuilder,
   type DelegationSummary,
 } from '../agent/delegation/agent-collaboration'
 import { buildAgentTools } from '../agent/tools/agent-tools'
@@ -77,8 +77,11 @@ export async function runDelegatedReview(opts: {
   channelId?: string
   modelId?: string
 }): Promise<DelegatedReviewOutcome> {
-  // 子 agent 工具构建器防御性注册（与 runMvpViaAgentLoop 同款；重复注册幂等）
-  setChildToolsBuilder((projectId, role, editFormat) => [...buildAgentTools({ projectId, role, editFormat }), ...buildDomainTools({ projectId, role, editFormat })])
+  // 子 agent 工具构建器（P1-12，2026-10-02）：随合成父上下文按 key 隔离，不再写全局
+  // 单例——与桌面线并发时后注册者的全局覆盖不再串面（review 子会话拿不到桌面写面，
+  // 桌面子会话也不会退回 web 组合面拒写 *.py）。
+  const reviewChildToolsBuilder: ChildToolsBuilder = (projectId, role, editFormat) =>
+    [...buildAgentTools({ projectId, role, editFormat }), ...buildDomainTools({ projectId, role, editFormat })]
 
   // 合成父键：与真实 loop 的父上下文注册完全隔离，事件归属靠闭包里的真实 id
   const parentKey = `review-${randomUUID()}`
@@ -104,6 +107,7 @@ export async function runDelegatedReview(opts: {
       system: opts.system,
       editFormat: 'diff',
       childExtraTools: opts.extraTools,
+      childToolsBuilder: reviewChildToolsBuilder,
       // T-5：审查委派是合成父（无真实 agent 代答）——子代理提问立即回固定答复，
       // 不挂起干等到 120/150s 超时
       autoAnswer: '（本审查任务没有人工或主 agent 代答：请基于任务描述与项目产物自行判定，不要再次提问。）',

@@ -343,7 +343,9 @@ export async function handleGuideMessage(
             modification: refineModificationDescription(directedAnswer),
             constraints: readProjectConstraints(input.project_id),
             query: pendingClarification.query,
-            env: undefined,
+            // P1-10（2026-10-02）：追问挂起表本就携带 env（与审查卡同构），定向 revise
+            // 必须复用——旧版硬编码 undefined 致 LLM 判定从不执行，修不掉目标项缺口复发。
+            env: pendingClarification.env,
           })
           if (
             normalization.action === 'revise' &&
@@ -413,7 +415,8 @@ export async function handleGuideMessage(
       persistAssistant?.(ack)
       publish(makeGuideEvent(input, 'message_delta', { text: ack }))
       publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
-      // 归一化并入（env 缺省走词表 fallback；语义消化归后续 PRD 引擎重整）：
+      // 归一化并入（env 复用发卡时点渠道（P1-10，2026-10-02）：旧版 env 断链走词表
+      // fallback，调整文本被当 append 原样追加污染 PRD；语义消化归后续 PRD 引擎重整）：
       // 「加个有趣的功能」类口语在原清单基础上 append/revise，而不是推倒重来
       const existing = pendingAdjust.requirements as SketchRequirement[]
       const normalization = await normalizeRequirementUpdate({
@@ -422,7 +425,7 @@ export async function handleGuideMessage(
         modification: refineModificationDescription(adjustment),
         constraints: readProjectConstraints(input.project_id),
         query: pendingAdjust.query,
-        env: undefined,
+        env: pendingAdjust.env,
       })
       const merged = applyNormalization(existing, normalization, nextRequirementId(existing), 'correction')
       await runPrdPipeline({
@@ -433,7 +436,7 @@ export async function handleGuideMessage(
         channel_id: input.channel_id,
         requirements: merged,
         query: pendingAdjust.query,
-        env: undefined,
+        env: pendingAdjust.env,
         publish,
         signal: model?.signal,
       })

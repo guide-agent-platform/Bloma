@@ -715,3 +715,41 @@ describe('enrichRequirementsLlm — clarification_requests 追问通路（② 20
     expect(called).toBe(false)
   })
 })
+
+describe('模板直写不物化 priority（全链路审查 P1-11，2026-10-02）', () => {
+  it('无 priority 的落盘形态：buildPrdBackplane 不写缺省 P2 字段（读取侧 requirementPriority 兜底同值）', async () => {
+    const { mkdtempSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-sticky-p2-'))
+    const { createProject, findProject } = await import('../../main/project/project-service')
+    const { buildPrdBackplane } = await import('../../main/project/prd-store')
+    const { requirementPriority } = await import('../../main/model/prd-backplane')
+    const project = createProject({ request_id: 'req-sticky', mode: 'quick' })
+    // 薄冻结清单（模板直写场景：渠道抖动，enricher 未参与）
+    const thin = [
+      { id: 'F-001', description: '主题功能' },
+      { id: 'F-002', description: '次功能' },
+    ]
+    const backplane = buildPrdBackplane(findProject(project.project_id), thin, 'sketch_confirmed')
+    // 落盘形态：无 priority 字段（不物化缺省）
+    expect(backplane.requirements[0].priority).toBeUndefined()
+    expect(backplane.requirements[1].priority).toBeUndefined()
+    // 读取侧兜底语义不变（F-001=P0、其余 P2）
+    expect(requirementPriority(backplane.requirements[0])).toBe('P0')
+    expect(requirementPriority(backplane.requirements[1])).toBe('P2')
+
+    // 渠道恢复重跑：enricher 判 F-002 为 P1 → merge 后生效（旧物化形态下 existing P2 挡住升档）
+    const enriched = [
+      { id: 'F-002', story: '加厚故事', behavior_assertions: [{ assertion: '点击导出→文件生成', source: '对话' }], priority: 'P1' as const },
+    ]
+    const { requirements } = mergeEnrichment(
+      [...thin.map((item) => ({ ...backplane.requirements.find((r) => r.id === item.id)! }))],
+      enriched,
+      backplane.requirements,
+      ['要能导出'],
+    )
+    const f2 = requirements.find((item) => item.id === 'F-002')
+    expect(f2?.priority).toBe('P1')
+  })
+})

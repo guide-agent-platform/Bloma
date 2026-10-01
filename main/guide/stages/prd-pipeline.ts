@@ -301,6 +301,7 @@ export async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ sta
           backplane: backplaneForReview,
           requirements,
           query: pending.query ?? NO_QUERY_FALLBACK,
+          env: pending.env,
           publish,
           // 狗粮 a602709f 实证：盲过目确认漏掉用户亲答的「要，关掉还在」。答案已定向并入
           // 需求清单（resolveRoutedRequirementId），但残余未解问题数如实告知，提醒重点过目。
