@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { anthropicMessagesQuery } from '../../main/orchestration/orchestrator'
+import { anthropicMessagesQueryViaProviders } from '../../main/platform/upstream/providers/loop-query'
 import { createProject, recordSketchGenerated } from '../../main/project/project-service'
 import { runMvpTask, runAgentLoopPostTesting, setProgrammingEventPublisher } from '../../main/coding/programming-orchestrator'
 import { setSafeStorageAdapter } from '../../main/platform/storage/safe-storage'
@@ -100,7 +100,7 @@ function readSamples(): GsSample[] {
 /** 真 LLM 单轮补全（归因 seam 驱动）：收集 assistant 消息 text 块。 */
 async function llmOnce(prompt: string): Promise<string> {
   let out = ''
-  const stream = anthropicMessagesQuery(prompt, {
+  const stream = anthropicMessagesQueryViaProviders(prompt, {
     env: { ANTHROPIC_BASE_URL: BASE_URL, ANTHROPIC_API_KEY: realKey, ANTHROPIC_MODEL: MODEL },
     signal: new AbortController().signal,
     sessionId: `gs-attr-${Date.now().toString(36)}`,
@@ -151,7 +151,7 @@ describe('灰度全样例（headless 真链）', () => {
           session_id: `s-${rid}`,
           project_id: projectId,
           mode: 'quick',
-          query: anthropicMessagesQuery,
+          query: anthropicMessagesQueryViaProviders,
           channel_id: 'gs-ali',
         })
         log('MVP 完成:', mvp.preview_url.slice(0, 30), 'via_loop=' + mvp.via_agent_loop, 'loop=' + mvp.loop_result?.status, 'build=' + mvp.build_gate?.status)
@@ -166,7 +166,7 @@ describe('灰度全样例（headless 真链）', () => {
             ...(mvp.loop_result
               ? { loop: { status: mvp.loop_result.status, turns: mvp.loop_result.turns, finalText: mvp.loop_result.finalText, toolCalls: mvp.loop_result.toolCalls } }
               : {}),
-            query: anthropicMessagesQuery,
+            query: anthropicMessagesQueryViaProviders,
             channel_id: 'gs-ali',
           })
           verdict = post.verdict

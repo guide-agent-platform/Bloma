@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { decideBlocks } from '../support/guide-decide-stream'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
 
 vi.mock('../../main/coding/programming-orchestrator', () => ({
@@ -60,7 +61,7 @@ function makeModel(json: string, history: ConversationTurn[]): GuideModelOptions
     _prompt: string,
     _options: SDKQueryOptions,
   ): AsyncGenerator<SDKMessage> {
-    yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: json }] } }
+    yield { type: 'assistant', message: { role: 'assistant', content: decideBlocks(json) } }
     yield { type: 'result', subtype: 'success' }
   }
   return {
@@ -131,7 +132,6 @@ describe('让渡话术表 isAutoDelegationText', () => {
 describe('引导对话 · 自由文本让渡分流', () => {
   beforeEach(() => {
     // 2026-09-16: BLOMA_GUIDE_LOOP default-on; pin legacy path for this file
-    process.env.BLOMA_GUIDE_LOOP = '0'
     vi.mocked(runSketchTask).mockClear()
     vi.mocked(recordDecision).mockClear()
   })

@@ -25,12 +25,7 @@ import { ANTHROPIC_SSE_ADAPTER, buildAnthropicHeaders, resolveMessagesUrl } from
 import { normalizeAnthropicBaseUrl, resolveAnthropicMessagesUrl } from './url-utils'
 import { streamSSE, HTTPError } from './sse-reader'
 
-/** 逃生口：BLOMA_PROVIDER_ADAPTER 缺省 on（providers 传输路径）；=0/false/off 回旧路径字节级。 */
-export function providerAdapterEnabled(): boolean {
-  const raw = (process.env.BLOMA_PROVIDER_ADAPTER ?? '').trim().toLowerCase()
-  return raw !== '0' && raw !== 'false' && raw !== 'off'
-}
-
+/** 开关已删除（2026-10-01 开关面收敛批）：providers 传输路径为唯一实现。 */
 /**
  * Bloma 语义的 Messages URL：env 的 base 是协议根（SDK 根语义，channel-manager 已
  * 规范化）。上游 resolveAnthropicMessagesUrl 对 anthropic-compatible「原样使用」是
@@ -181,7 +176,21 @@ export async function* anthropicMessagesQueryViaProviders(prompt: string, option
           console.warn(`[providers-query] 渠道拒绝 thinking 参数（${detail}），移除该参数后重试一次`)
           delete body.thinking
           delete body.output_config
-          result = await runOnce()
+          try {
+            result = await runOnce()
+          } catch (retryError) {
+            // S4-AGENT-101（r74）：thinking 降级重试后的二次 400 同样要走 image 包装（两阶段组合）
+            const retryDetail = extractErrorMessage((retryError as Error).message)
+            const retryImageRejected = JSON.stringify(body.messages ?? []).includes('"type":"image"')
+              && /image|multimodal|vision|多模态/i.test(retryDetail)
+            if (retryImageRejected) {
+              throw Object.assign(
+                new Error('当前模型不支持图片输入——请用文字描述内容，或在设置中更换支持视觉的模型后重试。'),
+                { statusCode: 400 },
+              )
+            }
+            throw retryError
+          }
         } else if (imageRejected) {
           throw Object.assign(
             new Error('当前模型不支持图片输入——请用文字描述内容，或在设置中更换支持视觉的模型后重试。'),

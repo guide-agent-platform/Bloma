@@ -74,12 +74,12 @@ import { recordSessionActivity } from '../../platform/sessions/session-service'
 import { appendExperienceEvent } from '../../experience/event-log'
 import { isThinkingLogEnabled, logThinking } from '../../agent/loop/thinking-log'
 import { extractErrorMessage } from '../../platform/llm/channel-test-error'
-import { anthropicMessagesQueryViaProviders, providerAdapterEnabled } from '../../platform/upstream/providers/loop-query'
+import { anthropicMessagesQueryViaProviders } from '../../platform/upstream/providers/loop-query'
 
 import { ConversationTurn, GuideModelOptions } from './orchestration-contracts'
 import { ActiveRun, activeSessions, registerForegroundRun, releaseProjectRun, sessionMessageQueue } from './run-registry'
 import { runWithRetry, sdkQuery, streamPublisher } from './sdk-glue'
-import { buildReadyChatFacts, buildReadyChatSystem, readyChatEnabled, runReadyStageChat } from './ready-chat'
+import { buildReadyChatFacts, buildReadyChatSystem, runReadyStageChat } from './ready-chat'
 import { cancelAgent } from './lifecycle'
 import { appendAgentMessage, convertSDKMessage, detectCodeDelivery, extractAssistantText, isUserCancelled, makeEvent, persistAssistantMessages, persistTerminalMessage, publishRunEvent } from './persistence'
 import { HISTORY_WINDOW_TURNS, buildProgrammingSystemTurn, loadConversationHistory, publishRebuildConfirmCard, shouldUseGuideAgent, truncateForCopy } from './dispatch-support'
@@ -668,7 +668,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       //（=原规则直答，反幻觉底线不降级）；直答成功则用户得到针对这句话的自然回答。
       const fallbackCopy = `${READY_COMPLETION_COPY}\n\n想调整哪里直接告诉我，比如“加一个历史记录”。`
       let guidance = fallbackCopy
-      if (env && readyChatEnabled()) {
+      if (env) {
         const chat = await runReadyStageChat({
           query: sdkQuery,
           env,

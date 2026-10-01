@@ -35,6 +35,10 @@ const mocks = vi.hoisted(() => ({
   runBuildGate: vi.fn(),
 }))
 
+vi.mock('../../../main/review/review-delegation', () => ({
+  runDelegatedReview: vi.fn().mockResolvedValue({ ok: false, failure: 'failed' }),
+}))
+
 vi.mock('../../../main/agent/loop/agent-loop', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../main/agent/loop/agent-loop')>()
   return { ...actual, runAgentLoop: mocks.runAgentLoop }
@@ -113,7 +117,6 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'proma-repair-'))
     delete process.env.BLOMA_REPAIR_BUDGET
     delete process.env.BLOMA_LOOP_CHECKPOINT
-    process.env.BLOMA_DELEGATED_REVIEW = '0'
     events = []
     mocks.runAgentLoop.mockReset()
     mocks.runGwtScenarios.mockReset()
@@ -156,7 +159,6 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     if (originalBudget === undefined) delete process.env.BLOMA_REPAIR_BUDGET
     else process.env.BLOMA_REPAIR_BUDGET = originalBudget
     delete process.env.BLOMA_LOOP_CHECKPOINT
-    delete process.env.BLOMA_REPAIR_NOOP_GUARD
     setProgrammingEventPublisher(() => undefined)
     clearSandboxRuntimeForTests()
   })
@@ -547,25 +549,8 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
     }
   }
 
-  it('B2 零编辑×off：零编辑轮照常计轮重验（2026-09-26 预算循环语义：用满预算才熔断）', async () => {
-    process.env.BLOMA_REPAIR_NOOP_GUARD = '0' // 2026-09-26 P1-05：守卫缺省翻 on——off 需显式
-    mocks.runGwtScenarios.mockResolvedValue(gwtFailed()) // 首验与重验都失败
-    mocks.runAgentLoop.mockResolvedValue(loopCompletedReadOnly())
-
-    const result = await runAgentLoopPostTesting(baseInput())
-
-    // 零编辑守卫 off：每轮照常重验计轮（quick 预算 2 → 两轮用满才熔断；
-    // 旧行为单轮即熔断已被审计 P1-02 预算循环取代）
-    expect(mocks.runAgentLoop).toHaveBeenCalledTimes(2)
-    expect(mocks.runGwtScenarios).toHaveBeenCalledTimes(3)
-    expect(mocks.circuitBreakRollback).toHaveBeenCalledTimes(1)
-    expect(findProject(projectId).test_repair_count).toBe(2)
-    expect(result.verdict).toBe('blocked')
-    expect(decisionLines()).not.toContain('repair_noop_skipped')
-  })
 
   it('B2 零编辑×on：不计轮不重验——计数回退、旁白如实、账本零编辑入档、照常熔断收口', async () => {
-    process.env.BLOMA_REPAIR_NOOP_GUARD = '1'
     process.env.BLOMA_LOOP_CHECKPOINT = '1'
     mocks.runGwtScenarios.mockResolvedValue(gwtFailed())
     mocks.runAgentLoop.mockResolvedValue(loopCompletedReadOnly())
@@ -594,7 +579,6 @@ describe('runAgentLoopPostTesting × 修复轮（P2 失败回流入口 A）', ()
   })
 
   it('B2 有编辑×on：正常重验不计零编辑（守卫不误伤）', async () => {
-    process.env.BLOMA_REPAIR_NOOP_GUARD = '1'
     mocks.runGwtScenarios
       .mockResolvedValueOnce(gwtFailed())
       .mockResolvedValueOnce(gwtPassed())
@@ -683,7 +667,6 @@ describe('PR-C：build-gate 接入 + blocked 卡先修再验（入口 B）', () 
 
   beforeEach(() => {
     process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'proma-repair-c-'))
-    process.env.BLOMA_DELEGATED_REVIEW = '0'
     events = []
     mocks.runAgentLoop.mockReset()
     mocks.runGwtScenarios.mockReset()

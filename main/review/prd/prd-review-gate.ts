@@ -26,11 +26,10 @@ import { recordDecision } from '../../project/decision-log'
 import { publishPrdConfirmCard } from '../../guide/prd-confirm'
 import type { PrdBackplane } from '../../coding/sketch-engine'
 import { defaultConstraintLevel } from '../../coding/sketch-engine'
-import { isInjectionEnabled } from '../../agent/prompting/template-injection'
 import { checkSectionCompleteness } from '../../guide/prd-sections'
 import { parseEarsAssertion, renderForbiddenTermsForPrompt } from '../../guide/ears-vocabulary'
 import type { SDKQuery } from '../../orchestration/orchestrator'
-import { delegatedReviewEnabled, runDelegatedReview } from '../review-delegation'
+import { runDelegatedReview } from '../review-delegation'
 import { buildConversationExcerpt, buildReadConversationHistoryTool } from '../../agent/loop/conversation-excerpt'
 import {
   DEFENDER_SYSTEM_PROMPT,
@@ -237,7 +236,7 @@ export async function runAttackerRound(opts: {
     : buildPrdReviewTask(opts.backplane, opts.confirmedRequirements, opts.conversationExcerpt, opts.mode)
 
   // ① 委派（默认）：research 只读面 + read_conversation_history
-  if (delegatedReviewEnabled() && opts.env && opts.projectId && opts.requestId && opts.publish) {
+  if (opts.env && opts.projectId && opts.requestId && opts.publish) {
     const delegated = await runDelegatedReview({
       goal: `${goalPrefix}：${opts.backplane.name ?? '未命名项目'}`,
       task,
@@ -372,7 +371,7 @@ export async function runDefenderRound(opts: {
   const goal = `内审·修订 PRD：${opts.backplane.name ?? '未命名项目'}`
 
   // ① 委派（默认）：research 只读面 + read_conversation_history + write_prd_draft
-  if (delegatedReviewEnabled() && opts.projectId && opts.requestId && opts.publish) {
+  if (opts.projectId && opts.requestId && opts.publish) {
     const delegated = await runDelegatedReview({
       goal,
       task,

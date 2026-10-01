@@ -8,7 +8,6 @@ import {
   buildPrdFewShotInjection,
   buildSketchInjection,
   gwtRequiredCategories,
-  isInjectionEnabled,
 } from '../../main/agent/prompting/template-injection'
 import { externalResourceViolation } from '../../main/agent/tools/agent-tools'
 import { buildAgentLoopSystemPrompt } from '../../main/coding/programming-orchestrator'
@@ -49,35 +48,6 @@ describe('template-injection（P5：注入点开关与切片）', () => {
     process.env = { ...originalEnv }
   })
 
-  describe('开关语义（§九验收 6：关闭后行为=现状）', () => {
-    it('缺省全开', () => {
-      expect(isInjectionEnabled('clarify')).toBe(true)
-      expect(isInjectionEnabled('prd')).toBe(true)
-      expect(isInjectionEnabled('loop')).toBe(true)
-      expect(isInjectionEnabled('gwt')).toBe(true)
-    })
-
-    it.each([
-      ['BLOMA_INJECT_CLARIFY', 'clarify'],
-      ['BLOMA_INJECT_PRD', 'prd'],
-      ['BLOMA_INJECT_SKETCH', 'sketch'],
-      ['BLOMA_INJECT_LOOP', 'loop'],
-      ['BLOMA_INJECT_GWT', 'gwt'],
-    ])('%s=0 关闭 %s 且不影响其他点', (envKey, point) => {
-      process.env[envKey] = '0'
-      expect(isInjectionEnabled(point as 'clarify')).toBe(false)
-      const others = (['clarify', 'prd', 'sketch', 'loop', 'gwt'] as const).filter((p) => p !== point)
-      for (const other of others) expect(isInjectionEnabled(other)).toBe(true)
-    })
-
-    it('off/false 同义关闭', () => {
-      process.env.BLOMA_INJECT_PRD = 'off'
-      expect(isInjectionEnabled('prd')).toBe(false)
-      process.env.BLOMA_INJECT_PRD = 'FALSE'
-      expect(isInjectionEnabled('prd')).toBe(false)
-    })
-  })
-
   describe('② clarify 切片', () => {
     it('quick：五必填 + ≤3 问纪律', () => {
       const section = buildClarifyInjection('personal_tool', 'quick')
@@ -92,10 +62,6 @@ describe('template-injection（P5：注入点开关与切片）', () => {
       expect(section).toContain('长期模式')
     })
 
-    it('开关关闭 → null（现状）', () => {
-      process.env.BLOMA_INJECT_CLARIFY = '0'
-      expect(buildClarifyInjection('personal_tool', 'quick')).toBeNull()
-    })
   })
 
   describe('③ prd few-shot 切片', () => {
@@ -105,10 +71,6 @@ describe('template-injection（P5：注入点开关与切片）', () => {
       expect(section!.length).toBeLessThan(900)
     })
 
-    it('开关关闭 → null', () => {
-      process.env.BLOMA_INJECT_PRD = '0'
-      expect(buildPrdFewShotInjection('personal_tool')).toBeNull()
-    })
   })
 
   describe('⑤ sketch 切片', () => {
@@ -125,10 +87,6 @@ describe('template-injection（P5：注入点开关与切片）', () => {
       expect(section).toContain('布局惯例')
     })
 
-    it('开关关闭 → null', () => {
-      process.env.BLOMA_INJECT_SKETCH = '0'
-      expect(buildSketchInjection('personal_tool', 'quick', makeBackplane())).toBeNull()
-    })
   })
 
   describe('⑥ loop 切片 + 工具层拦截', () => {
@@ -149,12 +107,6 @@ describe('template-injection（P5：注入点开关与切片）', () => {
       expect(workIdx).toBeGreaterThan(templateIdx)
     })
 
-    it('开关关闭 → system 无模板段（现状）', () => {
-      process.env.BLOMA_INJECT_LOOP = '0'
-      const system = buildAgentLoopSystemPrompt(makeBackplane(), 'whole')
-      expect(system).not.toContain('【工程模板')
-      expect(system).toContain('【项目锚') // 锚定段不受影响
-    })
 
     it('PR-2 产物形态条件化：无骨架 → 维持「不使用 import/ESM」现状话术', () => {
       const system = buildAgentLoopSystemPrompt(makeBackplane(), 'whole')
@@ -193,10 +145,6 @@ describe('template-injection（P5：注入点开关与切片）', () => {
       expect(externalResourceViolation('<script src="./src/app.js"></script>')).toBeNull() // 本地相对路径放行
     })
 
-    it('开关关闭 → 不拦截（现状）', () => {
-      process.env.BLOMA_INJECT_LOOP = '0'
-      expect(externalResourceViolation('<script src="https://cdn.example.com/lib.js"></script>')).toBeNull()
-    })
   })
 
   describe('⑦ GWT 必测类别与句式标注', () => {
@@ -223,13 +171,6 @@ describe('template-injection（P5：注入点开关与切片）', () => {
       expect(content).toContain('核心路径可运行[主路径]（WHEN 点击开始按钮 → 拥有掌控感')
     })
 
-    it('无 mode 参数（现状调用）→ 无头注；开关关闭 → 无类别', () => {
-      const plain = renderGwtSkeleton(makeBackplane())
-      expect(plain[0].content).not.toContain('必测类别')
-      process.env.BLOMA_INJECT_GWT = '0'
-      const off = renderGwtSkeleton(makeBackplane(), 'longterm')
-      expect(off[0].content).not.toContain('必测类别')
-    })
 
     it('场景名保持 itemId+断言对账兼容（judge 前缀对账不受类别标注破坏——标注在 Scenario 标题，gwt-runner 场景名独立生成）', () => {
       const features = renderGwtSkeleton(makeBackplane(), 'quick')

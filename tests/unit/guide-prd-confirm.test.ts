@@ -2,7 +2,13 @@ import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { decideBlocks } from '../support/guide-decide-stream'
+import { runDelegatedReview } from '../../main/review/review-delegation'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
+
+vi.mock('../../main/review/review-delegation', () => ({
+  runDelegatedReview: vi.fn().mockResolvedValue({ ok: false, failure: 'failed' }),
+}))
 
 vi.mock('../../main/coding/programming-orchestrator', () => ({
   runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
@@ -98,11 +104,11 @@ function scriptedQuery(): SDKQuery {
   return async function* (prompt: string): AsyncGenerator<SDKMessage> {
     if (!confirmServed && !prompt.includes('六维')) {
       confirmServed = true
-      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: confirmJson }] } }
+      yield { type: 'assistant', message: { role: 'assistant', content: decideBlocks(confirmJson) } }
       yield { type: 'result', subtype: 'success' }
       return
     }
-    yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: reviewPassJson }] } }
+    yield { type: 'assistant', message: { role: 'assistant', content: decideBlocks(reviewPassJson) } }
     yield { type: 'result', subtype: 'success' }
   }
 }
@@ -142,10 +148,9 @@ describe('PRD 用户确认门（改造 3）', () => {
   let events: AgentEvent[]
 
   beforeEach(() => {
+    vi.mocked(runDelegatedReview).mockResolvedValue({ ok: false, failure: 'failed' })
     // 2026-09-16: BLOMA_GUIDE_LOOP default-on; pin legacy path for this file
-    process.env.BLOMA_GUIDE_LOOP = '0'
     // 委派审查固定关：单测走直连（委派链路由 review-delegation 专属测试覆盖）
-    process.env.BLOMA_DELEGATED_REVIEW = '0'
     // R2（2026-09-12）：市调想法来源相关用例（想法提炼/回退原始条目）钉到 scrape 模式
     process.env.BLOMA_RESEARCH_MODE = 'scrape'
     const home = mkdtempSync(join(tmpdir(), 'proma-prd-confirm-'))
@@ -159,7 +164,6 @@ describe('PRD 用户确认门（改造 3）', () => {
   })
 
   afterEach(() => {
-    delete process.env.BLOMA_DELEGATED_REVIEW
     delete process.env.BLOMA_RESEARCH_MODE
     process.env.PROMA_HOME = originalPromaHome
     vi.restoreAllMocks()

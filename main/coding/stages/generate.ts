@@ -13,19 +13,19 @@ import type { ThinkingLevel } from '../../../shared/reasoning-profile'
 import { getAgentSessionPath, getDocumentsDir } from '../../../storage/config-paths'
 import { appendSessionMessage } from '../../platform/sessions/session-tree'
 import { emitAgentEvent } from '../../platform/events/agent-event-bus'
-import { appendLoopLogDocument, loopLogEnabled, readLoopCheckpointDocument, readPrdBackplane, readUxContractSketch, renamePrdProject, syncDocuments, updateRequirementStatus, writeLoopCheckpointDocument, writeSecurityScanDocument, type LoopLogEntry, type LoopRepairAttemptRecord, writePlanDocument } from '../../project/document-engine'
+import { appendLoopLogDocument, readLoopCheckpointDocument, readPrdBackplane, readUxContractSketch, renamePrdProject, syncDocuments, updateRequirementStatus, writeLoopCheckpointDocument, writeSecurityScanDocument, type LoopLogEntry, type LoopRepairAttemptRecord, writePlanDocument } from '../../project/document-engine'
 import { appendProjectLearning } from '../../project/learnings-log'
 import { runSandbox } from '../../delivery/sandbox'
 import { createSnapshot } from '../../delivery/snapshots'
 import { trackAnalytics } from '../../delivery/track-analytics'
-import { renderPackageJson, renderStaticServer, renderSkeletonToProject, scaffoldEnabled } from '../project-scaffold'
+import { renderPackageJson, renderStaticServer, renderSkeletonToProject } from '../project-scaffold'
 import { runBuildGate, type BuildGateResult } from '../build-gate'
 import { rebuildRealFullstackDist } from '../dist-rebuild'
-import { runArtifactUiGate, uiGateEnabled, uiProbeNotes, type ArtifactUiGateResult } from '../artifact-ui-gate'
+import { runArtifactUiGate, uiProbeNotes, type ArtifactUiGateResult } from '../artifact-ui-gate'
 import { getCachedStaticEvidence, setCachedStaticEvidence } from '../../verification/evidence-cache'
 import { runVisionAuditGate } from '../vision-audit-gate'
-import { buildRepairTasks, resolveRepairBudget, runRepairLoop, repairScopeEnabled, repairNoopGuardEnabled, hasWriteEditToolCall, type RepairCheckpointContext, type RepairTask } from '../repair-loop'
-import { buildIterationTask, ITERATION_MODE_SECTION, iterationBriefEnabled, resolveAgentLoopMaxTurnsLocal } from '../iteration-brief'
+import { buildRepairTasks, resolveRepairBudget, runRepairLoop, repairScopeEnabled, hasWriteEditToolCall, type RepairCheckpointContext, type RepairTask } from '../repair-loop'
+import { buildIterationTask, ITERATION_MODE_SECTION, resolveAgentLoopMaxTurnsLocal } from '../iteration-brief'
 import { appendContextPack, buildContextPack } from '../context-pack'
 import { buildChangeContractBlock, changeContractEnabled, deriveChangeContract, roundAnchorFromChangeContract } from '../change-contract'
 import { buildRuleInjectionMap, deriveCapabilitiesFromBackplane, recordRuleActionObserved } from '../../experience/rule-injection'
@@ -38,7 +38,7 @@ import { resolveChannelEnv } from '../../platform/llm/runtime-fallback'
 import { loadRealScaffoldTemplate, loadSkeletonTemplate, realScaffoldEnabled, REAL_SCAFFOLD_TYPES, type ProjectSkeleton } from '../../project/project-templates'
 import { readRealScaffoldVariant, writeRealScaffoldMarker } from '../preview-runtime'
 import { buildLoopInjection, buildSkeletonMapInjection } from '../../agent/prompting/template-injection'
-import { buildModuleMapInjection, loadOfficialModules, modulesEnabled, renderOfficialModulesToProject } from '../module-library'
+import { buildModuleMapInjection, loadOfficialModules, renderOfficialModulesToProject } from '../module-library'
 import { listRefPatternModules, refLibraryEnabled } from '../../experience/ref-source'
 import { backplaneInterfaceSpec, buildIterationRoundAnchor, buildRepairRoundAnchor, focusAnchorEnabled, gameDeriveExemptEnabled, renderBackplaneAnchor, renderRoundAnchorBlock, roundAnchorEnabled } from '../../model/prd-backplane'
 import { gwtGameProbeEnabled } from '../../verification/gwt-runner'
@@ -58,7 +58,7 @@ import { recordDecision } from '../../project/decision-log'
 import { commitProjectState } from '../project-git'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from '../../project/recovery-service'
 import { readPrimaryIntent, recordSessionActivity } from '../../platform/sessions/session-service'
-import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, preflightEnabled, narrationEventsEnabled, loopProgressNudgeEnabled, taskWorkflowEnabled, compactToolEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../../agent/loop/agent-loop'
+import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, preflightEnabled, narrationEventsEnabled, loopProgressNudgeEnabled, compactToolEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../../agent/loop/agent-loop'
 import { browserToolsEnabled } from '../preview-browser'
 import { deliveryStatusEnabled, recordDeliveryStatus, buildDeliveryPresentation, renderCircuitFailureNote, renderDeliveryBody, featureIdFromScenario } from '../delivery-status'
 import { isDegenerateText } from '../output-integrity'
@@ -200,10 +200,7 @@ export async function finalizeMvpDelivery(
 // Agent Loop 接线（PR3，方案 §4.4）——与旧管道并存，flag + 渠道能力位双条件
 // =========================================================================
 
-/** Agent Loop 总开关（D5）：缺省开启；`=0` 紧急关闭；`=1` 兼容无害（显式开，与缺省同义）。 */
-export function agentLoopEnabled(): boolean {
-  return process.env.BLOMA_AGENT_LOOP !== '0'
-}
+/** 开关已删除（2026-10-01 开关面收敛批）：Agent Loop 为唯一运行时。 */
 
 /** maxTurns（方案 §8 待拍板默认：quick=24 / longterm=40，首跑后按埋点标定）。 */
 /** maxTurns 缺省（缺省=现状，零行为变化）；可 env 覆盖（闭环 PR8）。 */
@@ -230,13 +227,13 @@ export function resolveAgentLoopMaxTurns(mode: ProjectMode): number {
  * 对齐「过程按比例」原则：一行修复不应占用全量 40 轮预算，小预算快速熔断损失可控。
  */
 export function resolveLoopMaxTurnsForInput(input: { mode: ProjectMode; localOnly?: boolean; rebuild?: boolean }): number {
-  if (iterationBriefEnabled() && input.localOnly && !input.rebuild) return resolveAgentLoopMaxTurnsLocal()
+  if (input.localOnly && !input.rebuild) return resolveAgentLoopMaxTurnsLocal()
   return resolveAgentLoopMaxTurns(input.mode)
 }
 
 /** Phase 8 W1：局部修改轮聚焦任务书是否生效（开关开 + localOnly + 非 rebuild）。 */
 export function iterationBriefActive(input: { localOnly?: boolean; rebuild?: boolean }): boolean {
-  return iterationBriefEnabled() && input.localOnly === true && input.rebuild !== true
+  return input.localOnly === true && input.rebuild !== true
 }
 
 /** 子 agent 独立轮次上限（比主 loop 小，控制委派 token 成本；按埋点标定）。 */
@@ -279,7 +276,7 @@ export interface AgentLoopChannelContext {
  * 与失败原因均落决策日志，绝不静默降级（2026-08-15 赛车案例教训）。
  */
 export async function tryResolveAgentLoop(input: MvpTaskInput): Promise<AgentLoopChannelContext> {
-  if (!agentLoopEnabled() || !input.query) throw agentLoopChannelError(input, 'AGENT_LOOP_UNAVAILABLE', 'Agent Loop 已关闭或缺少模型调用句柄，无法生成 MVP。')
+  if (!input.query) throw agentLoopChannelError(input, 'AGENT_LOOP_UNAVAILABLE', '缺少模型调用句柄，无法生成 MVP。')
   const resolution = resolveChannelEnv({
     channelId: input.channel_id,
     category: 'mvp',
@@ -429,73 +426,71 @@ export function prepareSkeletonBeforeLoop(
   let map: string | null = null
   let skeleton: ProjectSkeleton | null = null
   let rendered: { written: string[]; skipped: string[] } | undefined
-  if (scaffoldEnabled()) {
+  try {
+    // W1 真实脚手架（BLOMA_REAL_SCAFFOLD）：web 形态类型的新项目按 interface_spec 两态判定
+    // （非空→ real-fullstack Express 真实工程；空→ real-static 纯静态一等公民）；
+    // 判定依据是 PRD 契约本身（背板），与旧路径「模板类型猜测」解耦。
+    const useRealScaffold = realScaffoldEnabled() && REAL_SCAFFOLD_TYPES.has(templateType)
+    skeleton = useRealScaffold
+      ? loadRealScaffoldTemplate(backplaneInterfaceSpec(backplane).length > 0, {
+          project_id: input.project_id,
+          session_id: input.session_id,
+        })
+      : loadSkeletonTemplate(templateType, { project_id: input.project_id, session_id: input.session_id })
+  } catch {
+    skeleton = null
+  }
+  if (skeleton) {
     try {
-      // W1 真实脚手架（BLOMA_REAL_SCAFFOLD）：web 形态类型的新项目按 interface_spec 两态判定
-      // （非空→ real-fullstack Express 真实工程；空→ real-static 纯静态一等公民）；
-      // 判定依据是 PRD 契约本身（背板），与旧路径「模板类型猜测」解耦。
-      const useRealScaffold = realScaffoldEnabled() && REAL_SCAFFOLD_TYPES.has(templateType)
-      skeleton = useRealScaffold
-        ? loadRealScaffoldTemplate(backplaneInterfaceSpec(backplane).length > 0, {
-            project_id: input.project_id,
-            session_id: input.session_id,
-          })
-        : loadSkeletonTemplate(templateType, { project_id: input.project_id, session_id: input.session_id })
-    } catch {
-      skeleton = null
-    }
-    if (skeleton) {
-      try {
-        rendered = renderSkeletonToProject(skeleton, project.root_path)
-        // W3：真实脚手架标记落盘（预览/交付链/工具面的权威判定源；随快照归档恢复）
-        if (skeleton.variant) {
-          try {
-            writeRealScaffoldMarker(project.root_path, skeleton.variant)
-          } catch {
-            // 标记写失败不影响骨架生效（运行时回旧路径行为，fail-open）
-          }
-        }
+      rendered = renderSkeletonToProject(skeleton, project.root_path)
+      // W3：真实脚手架标记落盘（预览/交付链/工具面的权威判定源；随快照归档恢复）
+      if (skeleton.variant) {
         try {
-          recordDecision({
-            project_id: input.project_id,
-            session_id: input.session_id,
-            entry: {
-              type: 'skeleton_rendered',
-              title: '工程骨架先行渲染',
-              why: `loop 前按 ${templateType} 模板 v${skeleton.version} 渲染骨架（源=${skeleton.source}${skeleton.variant ? `，真实脚手架变体=${skeleton.variant}` : ''}），编程 Agent 在骨架上填充实现；已存在文件跳过不覆盖`,
-              detail: {
-                template_type: templateType,
-                variant: skeleton.variant,
-                version: skeleton.version,
-                source: skeleton.source,
-                written: rendered.written,
-                skipped: rendered.skipped,
-              },
-            },
-          })
+          writeRealScaffoldMarker(project.root_path, skeleton.variant)
         } catch {
-          // 决策日志失败不影响骨架生效
+          // 标记写失败不影响骨架生效（运行时回旧路径行为，fail-open）
         }
-        map = buildSkeletonMapInjection(skeleton, rendered)
-      } catch (err) {
-        try {
-          recordDecision({
-            project_id: input.project_id,
-            session_id: input.session_id,
-            entry: {
-              type: 'skeleton_render_failed',
-              title: '骨架渲染失败，回退从零写',
-              why: '骨架渲染抛出异常（fs 故障等）——回退无骨架现状，不阻断 MVP 生成',
-              detail: { template_type: templateType, error: err instanceof Error ? err.message : String(err) },
-            },
-          })
-        } catch {
-          // 决策日志失败静默
-        }
-        skeleton = null
-        rendered = undefined
-        map = null
       }
+      try {
+        recordDecision({
+          project_id: input.project_id,
+          session_id: input.session_id,
+          entry: {
+            type: 'skeleton_rendered',
+            title: '工程骨架先行渲染',
+            why: `loop 前按 ${templateType} 模板 v${skeleton.version} 渲染骨架（源=${skeleton.source}${skeleton.variant ? `，真实脚手架变体=${skeleton.variant}` : ''}），编程 Agent 在骨架上填充实现；已存在文件跳过不覆盖`,
+            detail: {
+              template_type: templateType,
+              variant: skeleton.variant,
+              version: skeleton.version,
+              source: skeleton.source,
+              written: rendered.written,
+              skipped: rendered.skipped,
+            },
+          },
+        })
+      } catch {
+        // 决策日志失败不影响骨架生效
+      }
+      map = buildSkeletonMapInjection(skeleton, rendered)
+    } catch (err) {
+      try {
+        recordDecision({
+          project_id: input.project_id,
+          session_id: input.session_id,
+          entry: {
+            type: 'skeleton_render_failed',
+            title: '骨架渲染失败，回退从零写',
+            why: '骨架渲染抛出异常（fs 故障等）——回退无骨架现状，不阻断 MVP 生成',
+            detail: { template_type: templateType, error: err instanceof Error ? err.message : String(err) },
+          },
+        })
+      } catch {
+        // 决策日志失败静默
+      }
+      skeleton = null
+      rendered = undefined
+      map = null
     }
   }
 
@@ -513,9 +508,8 @@ export function prepareSkeletonBeforeLoop(
 export function prepareModuleLibrary(input: MvpTaskInput, templateType: TemplateType, project: Project): string | null {
   // G4 双内容源：官方预置（BLOMA_MODULES）+ 经验库 ref（BLOMA_REF_LIBRARY 缺省 off）；
   // 两开关正交，均 off = 现状字节级 null；ref 经同一渲染/地图管道消费（C-1）。
-  if (!modulesEnabled() && !refLibraryEnabled()) return null
   try {
-    const { modules: official, rejected } = modulesEnabled() ? loadOfficialModules(templateType) : { modules: [], rejected: [] }
+    const { modules: official, rejected } = loadOfficialModules(templateType)
     const refs = refLibraryEnabled() ? listRefPatternModules(templateType) : []
     const modules = [...official, ...refs]
     for (const item of rejected) {
@@ -596,7 +590,6 @@ export function resolveFocusAnchor(input: MvpTaskInput): string[] | undefined {
 
 /** loop-log 追加（BLOMA_LOOP_LOG 开关 + 失败静默：诊断增强不是依赖，绝不阻断主链路）。 */
 export function appendLoopLogSafely(projectId: string, entry: LoopLogEntry): void {
-  if (!loopLogEnabled()) return
   try {
     appendLoopLogDocument(projectId, entry)
   } catch {
@@ -823,7 +816,7 @@ export async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopCha
         : '')
     // W5-1（Phase 8.5）：实施清单（checklist 化 plan）——生成路径且开关开时注入，
     // 提供逐项推进工作结构；局部修改轮不叠加（聚焦任务书已含工作法）
-    const checklistBlock = !briefActive && taskWorkflowEnabled() && loopPlan ? `\n\n${renderTaskChecklist(loopPlan)}` : ''
+    const checklistBlock = !briefActive && loopPlan ? `\n\n${renderTaskChecklist(loopPlan)}` : ''
     return planInjection
       ? `${base}${roundAnchorBlock}${iterationModeBlock}${changeContractBlock}\n\n${planInjection}${checklistBlock}`
       : `${base}${roundAnchorBlock}${iterationModeBlock}${changeContractBlock}${checklistBlock}`

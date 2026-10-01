@@ -5,7 +5,6 @@ import { getDocumentsDir } from '../../storage/config-paths'
 import type { GwtTestResult } from '../verification/gwt-service'
 import { findProject } from '../project/project-service'
 import { TEMPLATE_META_VERSION } from '../coding/sketch-engine'
-import { isInjectionEnabled } from '../agent/prompting/template-injection'
 import { readPrdBackplane, readUxContractSketch } from '../project/document-engine'
 import { escapeHtml, requirementAssertions, requirementPriority, backplaneAiCapabilities, type SketchRequirement } from '../coding/sketch-engine'
 import { hasInteractiveEntry } from '../verification/gwt-service'
@@ -144,7 +143,7 @@ export function runJudge(input: JudgeInput): JudgeVerdict {
   // 注入点⑧（周计划 §6）：章节同步校验——轻量版本一致性（背板 template_meta.version
   // 落后当前模板包版本时提示重建，**不扩任务完成度判定**防双口径）；开关关闭=现状。
   // 仅 soft 提示且 passed=true，不影响 pass/suggest 走向（提示性对齐建议）。
-  if (isInjectionEnabled('judge') && backplane.template_meta && backplane.template_meta.version < TEMPLATE_META_VERSION) {
+  if (backplane.template_meta && backplane.template_meta.version < TEMPLATE_META_VERSION) {
     softConstraints.push({
       name: '模板版本一致性',
       passed: true,

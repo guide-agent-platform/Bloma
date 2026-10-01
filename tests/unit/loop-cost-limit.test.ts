@@ -131,17 +131,14 @@ describe('P2-02 usage 可信度（input_tokens=0 视为盲 → 估算兜底）',
   beforeEach(() => {
     process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'proma-blind-'))
     delete process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
-    delete process.env.BLOMA_COMPACT_EST_FALLBACK
   })
   afterEach(() => {
     restorePromaHome(originalPromaHome)
     delete process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS
-    delete process.env.BLOMA_COMPACT_EST_FALLBACK
   })
 
   it('渠道恒返 input_tokens=0：估算兜底仍触发压缩（旧口径仅 undefined 算盲，触发器失明）', async () => {
     process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '300' // 阈值降到历史估算可达
-    process.env.BLOMA_COMPACT_EST_FALLBACK = '1'
     const echo = tool('echo', () => ({ output: 'x'.repeat(1200) })) // 工具结果撑大历史估算
     const compactions: number[] = []
     const query = scriptedQuery(

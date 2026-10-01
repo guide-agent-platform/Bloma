@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { runAgentLoop, taskWorkflowEnabled, type AgentLoopInput, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../../../main/agent/loop/agent-loop'
+import { runAgentLoop, type AgentLoopInput, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../../../main/agent/loop/agent-loop'
 import { renderTaskChecklist, type LoopPlan } from '../../../main/agent/loop/loop-planner'
 import type { SDKMessage } from '../../../shared/types'
 import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../../main/orchestration/orchestrator'
@@ -111,99 +111,12 @@ describe('renderTaskChecklist — plan 合同 checklist 化', () => {
   })
 })
 
-describe('W5 批间注入（进度投影 / 守卫4 重复写 / 早验证）', () => {
-  const originalHome = process.env.PROMA_HOME
-  const originalW5 = process.env.BLOMA_TASK_WORKFLOW
-  const PLAN_FILES = ['index.html', 'src/game/state.js', 'src/game/entities.js', 'src/app.js']
-
-  beforeEach(() => {
-    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-w5-'))
-    delete process.env.BLOMA_TASK_WORKFLOW
-  })
-  afterEach(() => {
-    process.env.PROMA_HOME = originalHome
-    if (originalW5 === undefined) delete process.env.BLOMA_TASK_WORKFLOW
-    else process.env.BLOMA_TASK_WORKFLOW = originalW5
-  })
-
-  it('守卫4：同文件第二次全量 write_file → 注入「改用 edit_file 勿整文件重写」', async () => {
-    const writeTool = tool('write_file', (input) => ({ output: `已写入 ${String(input.path)}` }))
-    const { query, receivedMessages } = scriptedQuery([
-      [toolUseMessage('t1', 'write_file', { path: 'src/game/state.js', content: 'v1' })],
-      [toolUseMessage('t2', 'write_file', { path: 'src/game/state.js', content: 'v2 重写' })],
-      [textMessage('完成总结')], // 收口
-    ])
-    await runAgentLoop(baseInput({ query, tools: [writeTool], planFiles: PLAN_FILES }))
-    const injections = userTexts(receivedMessages[2]).filter((t) => t.includes('任务清单工作流'))
-    expect(injections.some((t) => t.includes('src/game/state.js') && t.includes('edit_file') && t.includes('不要整文件重写'))).toBe(true)
-  })
-
-  it('edit_file 微调不触发守卫4（正确姿势不打扰）', async () => {
-    const writeTool = tool('write_file', () => ({ output: '已写入' }))
-    const editTool = tool('edit_file', () => ({ output: '已编辑' }))
-    const { query, receivedMessages } = scriptedQuery([
-      [toolUseMessage('t1', 'write_file', { path: 'src/game/state.js', content: 'v1' })],
-      [toolUseMessage('t2', 'edit_file', { path: 'src/game/state.js', oldText: 'a', newText: 'b' })],
-      [textMessage('完成总结')],
-    ])
-    await runAgentLoop(baseInput({ query, tools: [writeTool, editTool], planFiles: PLAN_FILES }))
-    const injections = userTexts(receivedMessages[2]).filter((t) => t.includes('任务清单工作流'))
-    expect(injections.some((t) => t.includes('不要整文件重写'))).toBe(false)
-  })
-
-  it('进度投影：新文件完成后注入清单 N/M 与「读过的内容不要重读」（≥2 轮间隔防刷屏）', async () => {
-    const writeTool = tool('write_file', () => ({ output: '已写入' }))
-    const { query, receivedMessages } = scriptedQuery([
-      [toolUseMessage('t1', 'write_file', { path: 'index.html', content: 'x' })],
-      [toolUseMessage('t2', 'write_file', { path: 'src/game/state.js', content: 'x' })],
-      [toolUseMessage('t3', 'write_file', { path: 'src/game/entities.js', content: 'x' })],
-      [textMessage('完成总结')],
-    ])
-    await runAgentLoop(baseInput({ query, tools: [writeTool], planFiles: PLAN_FILES }))
-    // 轮 1 投影 1/4；轮 2 被间隔抑制；轮 3 投影 3/4（同一注入会出现在后续轮的
-    // messages 快照里，断言用去重后的全文集合）
-    const distinct = new Set(receivedMessages.flatMap(userTexts))
-    const projections = [...distinct].filter((t) => t.includes('清单进度'))
-    expect(projections.some((t) => t.includes('1/4'))).toBe(true)
-    expect(projections.some((t) => t.includes('3/4'))).toBe(true)
-    expect(projections.some((t) => t.includes('读过的内容不要重读'))).toBe(true)
-  })
-
-  it('早验证：≥3 文件零验证且过 1/3 轮次 → 一次性提醒（去重后恰一条）', async () => {
-    const writeTool = tool('write_file', () => ({ output: '已写入' }))
-    const fillers = Array.from({ length: 5 }, (_, i) => [toolUseMessage(`t${i}`, 'write_file', { path: `src/game/m${i}.js`, content: 'x' })] as SDKMessage[])
-    const { query, receivedMessages } = scriptedQuery([...fillers, [textMessage('完成总结')]] as SDKMessage[][])
-    await runAgentLoop(baseInput({ query, tools: [writeTool], planFiles: [...PLAN_FILES, 'src/game/m0.js', 'src/game/m1.js'], maxTurns: 12 }))
-    const distinct = new Set(receivedMessages.flatMap(userTexts))
-    const early = [...distinct].filter((t) => t.includes('尚未运行任何自测：现在就 run_preview'))
-    expect(early).toHaveLength(1)
-    expect(early[0]).toContain('尽早暴露问题')
-  })
-
-  it('开关 off：全部零注入（字节级现状）', async () => {
-    process.env.BLOMA_TASK_WORKFLOW = '0'
-    expect(taskWorkflowEnabled()).toBe(false)
-    const writeTool = tool('write_file', () => ({ output: '已写入' }))
-    const { query, receivedMessages } = scriptedQuery([
-      [toolUseMessage('t1', 'write_file', { path: 'src/game/state.js', content: 'v1' })],
-      [toolUseMessage('t2', 'write_file', { path: 'src/game/state.js', content: 'v2' })],
-      [textMessage('完成总结')],
-    ])
-    await runAgentLoop(baseInput({ query, tools: [writeTool], planFiles: PLAN_FILES }))
-    const allUsers = receivedMessages.flatMap(userTexts).join('\n')
-    expect(allUsers).not.toContain('任务清单工作流')
-    expect(allUsers).not.toContain('清单进度')
-  })
-})
-
 describe('W5+（狗粮 52f19ab4 增强）：清单完成后零验证的重复强提醒 + grace 退化补口', () => {
   const originalHome = process.env.PROMA_HOME
   const PLAN_FILES = ['index.html', 'src/app.js']
 
   beforeEach(() => {
     process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-w5p-'))
-    delete process.env.BLOMA_TASK_WORKFLOW
-    delete process.env.BLOMA_DSML_RECOVERY
   })
   afterEach(() => {
     process.env.PROMA_HOME = originalHome

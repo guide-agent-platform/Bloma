@@ -26,11 +26,10 @@ import { recordDecision } from '../../project/decision-log'
 import { publishPrdConfirmCard } from '../../guide/prd-confirm'
 import type { PrdBackplane } from '../../coding/sketch-engine'
 import { defaultConstraintLevel } from '../../coding/sketch-engine'
-import { isInjectionEnabled } from '../../agent/prompting/template-injection'
 import { checkSectionCompleteness } from '../../guide/prd-sections'
 import { parseEarsAssertion, renderForbiddenTermsForPrompt } from '../../guide/ears-vocabulary'
 import type { SDKQuery } from '../../orchestration/orchestrator'
-import { delegatedReviewEnabled, runDelegatedReview } from '../review-delegation'
+import { runDelegatedReview } from '../review-delegation'
 import { buildConversationExcerpt, buildReadConversationHistoryTool } from '../../agent/loop/conversation-excerpt'
 import {
   DEFENDER_SYSTEM_PROMPT,
@@ -157,7 +156,7 @@ export function buildPrdReviewTask(
 
 /** 注入点④切片（周计划 §6）：章节完备性（checkSectionCompleteness 同源判定）+ longterm EARS 可测性。 */
 export function buildAuditInjection(backplane: PrdBackplane, mode?: 'quick' | 'longterm'): string | null {
-  if (!isInjectionEnabled('audit')) return null
+
   try {
     const type = backplane.template_meta?.type ?? 'personal_tool'
     const level = backplane.template_meta?.level ?? defaultConstraintLevel(type)

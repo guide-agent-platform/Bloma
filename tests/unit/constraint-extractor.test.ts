@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // 2026-09-16 FILE-LEVEL 钉：BLOMA_GUIDE_LOOP 缺省翻转 on，本文件锁旧路径读取侧口径
 // （loop 模式下约束系统行经 historyTurns→messages 送达，捕获参数不同；行为等价）
-process.env.BLOMA_GUIDE_LOOP = '0'
 import { captureConstraints, extractConstraints, scanSessionConstraints } from '../../main/guide/constraint-extractor'
 import { buildPrdBackplane } from '../../main/project/document-engine'
 import { buildAgentLoopSystemPrompt } from '../../main/coding/programming-orchestrator'
@@ -246,7 +245,8 @@ describe('T4-L2 runAgent 读取侧：全量扫描回灌引导上下文', () => {
 
     const capturedHistories: Array<Array<{ role: string; content: string | import('../../shared/types').MessageContentBlock[] }>> = []
     setSDKQueryForTests(async function* (_prompt: string, options) {
-      capturedHistories.push(options.history ?? [])
+      // loop 路径（2026-10-01）：多轮历史经 options.messages 传递（system+history+task）
+      capturedHistories.push((options.messages ?? []) as Array<{ role: string; content: string | import('../../shared/types').MessageContentBlock[] }>)
       yield {
         type: 'assistant',
         message: {
@@ -278,9 +278,9 @@ describe('T4-L2 runAgent 读取侧：全量扫描回灌引导上下文', () => {
       .flat()
       .filter((t) => t.role === 'system' && typeof t.content === 'string' && t.content.includes('不含登录'))
     expect(constraintTurns.length).toBeGreaterThan(0)
-    // 历史窗口收敛为近 10 轮原文（不含约束系统行时 user/assistant 轮数 ≤ 10）
+    // 历史窗口收敛：近 10 轮原文（+本轮 task user 轮——loop 的 messages 含当前任务）
     const dialogueTurns = (capturedHistories[0] ?? []).filter((t) => t.role !== 'system')
-    expect(dialogueTurns.length).toBeLessThanOrEqual(HISTORY_WINDOW_TURNS)
+    expect(dialogueTurns.length).toBeLessThanOrEqual(HISTORY_WINDOW_TURNS + 1)
     // 漏网约束回填 L1 存储：从此随背板常驻，不依赖下一次扫描
     expect(findProject(project.project_id).constraints).toContain('不含登录')
   })

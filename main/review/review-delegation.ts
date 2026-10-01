@@ -33,10 +33,7 @@ import { buildDomainTools, domainToolOptionsDefaults } from '../coding/tool-hand
 import { createToolState, type AgentLoopTool, type ToolContext } from '../agent/loop/agent-loop'
 import type { SDKQuery } from '../orchestration/orchestrator'
 
-/** 委派审查运行开关（缺省开启；测试与紧急回退用 '0' 关闭）。 */
-export function delegatedReviewEnabled(): boolean {
-  return process.env.BLOMA_DELEGATED_REVIEW !== '0'
-}
+/** 开关已删除（2026-10-01 开关面收敛批）：委派审查无条件启用。 */
 
 export interface DelegatedReviewOutcome {
   ok: boolean
@@ -80,8 +77,6 @@ export async function runDelegatedReview(opts: {
   channelId?: string
   modelId?: string
 }): Promise<DelegatedReviewOutcome> {
-  if (!delegatedReviewEnabled()) return { ok: false, failure: 'disabled' }
-
   // 子 agent 工具构建器防御性注册（与 runMvpViaAgentLoop 同款；重复注册幂等）
   setChildToolsBuilder((projectId, role, editFormat) => [...buildAgentTools({ projectId, role, editFormat }), ...buildDomainTools({ projectId, role, editFormat })])
 

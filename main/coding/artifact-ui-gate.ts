@@ -53,10 +53,7 @@ export const ASSERTION_LEAK_PATTERNS: { id: string; re: RegExp }[] = [
 ]
 const PLACEHOLDER_PERSONA_RE = /J\.\s*Doe|John Doe|lorem ipsum|example\.com/i
 
-/** 紧急逃生门（对齐 BLOMA_AGENT_LOOP 口径：仅显式 '0' 关闭，缺省硬执行）。 */
-export function uiGateEnabled(): boolean {
-  return process.env.BLOMA_UI_GATE !== '0'
-}
+/** 开关已删除（2026-10-01 开关面收敛批）：L0 产物 UI 门禁无条件执行（紧急停用历史口径见 git）。 */
 
 /** C3（P1，2026-09-11 审计⑩/K）：死按钮判活开关——按钮类采样点击死亡占比 ≥80% 且
  *  realControls ≥3 → failed（7 个无 JS 死按钮照样 passed 的假绿根治位）。
@@ -177,7 +174,6 @@ export async function runArtifactUiGate(input: {
   timeoutMs?: number
   clickSampleLimit?: number
 }): Promise<ArtifactUiGateResult> {
-  if (!uiGateEnabled()) return { status: 'skipped', failures: [] }
   const timeoutMs = input.timeoutMs ?? 25_000
   const clickLimit = input.clickSampleLimit ?? 6
 

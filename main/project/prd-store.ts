@@ -19,7 +19,7 @@ import { nextRequirementId } from '../coding/programming-orchestrator'
 import type { PrdBackplane, RequirementStatus, SketchRequirement } from '../coding/sketch-engine'
 import { buildPrdDocumentFallback, deriveInterfaceSpec, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, backplaneTemplateMeta } from '../coding/sketch-engine'
 import { parseEarsAssertion } from '../guide/ears-vocabulary'
-import { gwtRequiredCategories, isInjectionEnabled } from '../agent/prompting/template-injection'
+import { gwtRequiredCategories } from '../agent/prompting/template-injection'
 import { describeEffect, describeTrigger, parseBehaviorAssertion } from '../verification/behavior-assertions'
 import { syncReplayFeatureFiles } from '../experience/replay-compiler'
 import { readRequirements, assertInsideDocumentsDir } from './document-sync'
@@ -604,7 +604,7 @@ export function renderGwtSkeleton(
 ): Array<{ fileName: string; content: string }> {
   const templateType = backplane.template_meta?.type
   const requiredCategories =
-    mode && isInjectionEnabled('gwt')
+    mode
       ? gwtRequiredCategories(mode, backplane.template_meta?.level === 'loose' ? 'loose' : 'standard', templateType)
       : []
   return readRequirements(backplane.requirements).map((item) => {

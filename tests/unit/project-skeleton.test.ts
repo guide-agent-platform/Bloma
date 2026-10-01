@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getSkeletonDirPath } from '../../storage/config-paths'
 import { loadSkeletonTemplate } from '../../main/project/project-templates'
-import { renderSkeletonToProject, scaffoldEnabled } from '../../main/coding/project-scaffold'
+import { renderSkeletonToProject } from '../../main/coding/project-scaffold'
 import { buildLoopInjection, buildSkeletonMapInjection } from '../../main/agent/prompting/template-injection'
 
 /**
@@ -150,20 +150,6 @@ describe('project-skeleton（PR-1：骨架包 + 渲染 + 注入⑥骨架地图�
       expect(second.written).toEqual([])
       expect(second.skipped.sort()).toEqual(skeleton.files.map((entry) => entry.path).sort())
       expect(readFileSync(join(target, 'index.html'), 'utf8')).toContain('filled by agent')
-    })
-  })
-
-  describe('开关（BLOMA_SCAFFOLD）', () => {
-    it.each(['0', 'off', 'false'])('BLOMA_SCAFFOLD=%s → 关闭（现状从零写）', (value) => {
-      process.env.BLOMA_SCAFFOLD = value
-      expect(scaffoldEnabled()).toBe(false)
-    })
-
-    it('缺省/显式开 → 启用', () => {
-      delete process.env.BLOMA_SCAFFOLD
-      expect(scaffoldEnabled()).toBe(true)
-      process.env.BLOMA_SCAFFOLD = '1'
-      expect(scaffoldEnabled()).toBe(true)
     })
   })
 

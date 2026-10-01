@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import type { SDKQuery } from '../orchestration/orchestrator'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import { loadPromptOverride } from '../agent/prompting/prompt-config'
-import { buildPrdFewShotInjection, isInjectionEnabled } from '../agent/prompting/template-injection'
+import { buildPrdFewShotInjection } from '../agent/prompting/template-injection'
 import { callLlmForJson } from '../kernel/llm-call'
 import type { AgentMessage, MessageContentBlock } from '../../shared/types'
 import type { AiCapability, GameDesignDoc, InterfaceEndpoint, KeyTask, PrdBackplane, SketchRequirement } from '../model/prd-backplane'
@@ -194,7 +194,7 @@ export async function generatePrdLlm(input: GeneratePrdLlmInput): Promise<PrdBac
   try {
     // 注入点③（周计划 §6）：同类型脱敏样例 few-shot（≤500 token 硬截断）+ 解析失败
     // 带反馈重试一次（陷阱 7：代码型 JSON 不正则修补，只走带反馈重试）；开关关闭=现状单试
-    const fewShot = isInjectionEnabled('prd') ? buildPrdFewShotInjection(input.template_type ?? 'personal_tool') : null
+    const fewShot = buildPrdFewShotInjection(input.template_type ?? 'personal_tool')
     const prompt = [buildPrompt(items, conversation, input.template_type), fewShot].filter(Boolean).join('\n\n')
     // 2026-09-03 R2：调用循环收敛至 kernel/llm-call 标准件（stream/parse/带反馈重试/abort/超时一处实现）
     const parsed = await callLlmForJson({

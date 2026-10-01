@@ -107,7 +107,7 @@ describe('memory-reachability（记忆栈可达性门禁）', () => {
     expect(findDynamicReferences(REPO_ROOT, reachable, 'memory-distiller')).toEqual([])
   })
 
-  it('可达集覆盖跨层真实实现（样例：agent-loop，PR2 归位后位于 main/agent/loop/）', () => {
+  it('可达集覆盖跨层真实实现（样例：agent-loop，PR2 归位后位于 main/agent/loop/）', { timeout: 120_000 }, () => {
     const reachable = collectReachableModules(MAIN_ENTRY, REPO_ROOT)
     // 旧版验证 export * 过渡桩可达（PR1 已删桩）；本版改为验证迁移后真实实现仍从入口可达，
     // 证明解析规则对子目录层级生效

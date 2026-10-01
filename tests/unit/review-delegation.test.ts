@@ -26,7 +26,6 @@ vi.mock('../../main/agent/delegation/agent-collaboration', () => ({
 }))
 
 import {
-  delegatedReviewEnabled,
   runDelegatedReview,
 } from '../../main/review/review-delegation'
 import {
@@ -85,9 +84,7 @@ describe('review-delegation 审查委派运行时', () => {
     vi.restoreAllMocks()
   })
 
-  it('默认开启；委派完成 → 剥头行取正文；注册/清理成对出现', async () => {
-    expect(delegatedReviewEnabled()).toBe(true)
-
+  it('委派完成 → 剥头行取正文；注册/清理成对出现', async () => {
     const result = await runDelegatedReview(baseOpts())
 
     expect(result).toMatchObject({ ok: true, delegationId: 'del-1', finalText: '{"issues":[]}' })
@@ -114,13 +111,6 @@ describe('review-delegation 审查委派运行时', () => {
     expect(disposeParentDelegationState).toHaveBeenCalledWith(parentKey)
   })
 
-  it("BLOMA_DELEGATED_REVIEW='0' → disabled，不触碰委派基建", async () => {
-    process.env.BLOMA_DELEGATED_REVIEW = '0'
-    expect(delegatedReviewEnabled()).toBe(false)
-    const result = await runDelegatedReview(baseOpts())
-    expect(result).toMatchObject({ ok: false, failure: 'disabled' })
-    expect(startDelegation).not.toHaveBeenCalled()
-  })
 
   it('等待超时（status 仍 running）→ failure:timeout，仍执行清理', async () => {
     vi.mocked(waitForDelegations).mockResolvedValueOnce([

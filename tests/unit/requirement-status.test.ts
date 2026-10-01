@@ -161,7 +161,6 @@ describe('runJudgeReview wiring：判定回写活背板', () => {
   let prdPath: string
 
   beforeEach(() => {
-    process.env.BLOMA_DELEGATED_REVIEW = '0'
     home = mkdtempSync(join(tmpdir(), 'proma-req-status-judge-'))
     process.env.PROMA_HOME = home
     project = createProject({ request_id: 'req-project', mode: 'quick' })
@@ -175,7 +174,6 @@ describe('runJudgeReview wiring：判定回写活背板', () => {
   })
 
   afterEach(() => {
-    delete process.env.BLOMA_DELEGATED_REVIEW
     process.env.PROMA_HOME = originalPromaHome
     setProgrammingEventPublisher(() => undefined)
     vi.restoreAllMocks()

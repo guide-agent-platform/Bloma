@@ -14,7 +14,13 @@ import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { decideBlocks } from '../support/guide-decide-stream'
+import { runDelegatedReview } from '../../main/review/review-delegation'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
+
+vi.mock('../../main/review/review-delegation', () => ({
+  runDelegatedReview: vi.fn().mockResolvedValue({ ok: false, failure: 'failed' }),
+}))
 
 vi.mock('../../main/coding/programming-orchestrator', () => ({
   runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
@@ -93,11 +99,11 @@ function scriptedQuery(): SDKQuery {
   return async function* (prompt: string): AsyncGenerator<SDKMessage> {
     if (!confirmServed && !prompt.includes('六维')) {
       confirmServed = true
-      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: confirmJson }] } }
+      yield { type: 'assistant', message: { role: 'assistant', content: decideBlocks(confirmJson) } }
       yield { type: 'result', subtype: 'success' }
       return
     }
-    yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: reviewPassJson }] } }
+    yield { type: 'assistant', message: { role: 'assistant', content: decideBlocks(reviewPassJson) } }
     yield { type: 'result', subtype: 'success' }
   }
 }
@@ -138,9 +144,8 @@ describe('② 追问通路闭环（挂起 → 回答 → 重跑）', () => {
   let home: string | undefined
 
   beforeEach(() => {
+    vi.mocked(runDelegatedReview).mockResolvedValue({ ok: false, failure: 'failed' })
     // 2026-09-16: BLOMA_GUIDE_LOOP default-on; pin legacy path for this file
-    process.env.BLOMA_GUIDE_LOOP = '0'
-    process.env.BLOMA_DELEGATED_REVIEW = '0'
     home = mkdtempSync(join(tmpdir(), 'proma-clar-loop-'))
     process.env.PROMA_HOME = home
     mkdirSync(join(home, 'agent-sessions'), { recursive: true })
@@ -150,7 +155,6 @@ describe('② 追问通路闭环（挂起 → 回答 → 重跑）', () => {
   })
 
   afterEach(() => {
-    delete process.env.BLOMA_DELEGATED_REVIEW
     process.env.PROMA_HOME = originalPromaHome
     vi.restoreAllMocks()
     if (home) {

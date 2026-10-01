@@ -24,7 +24,7 @@ import type { PrdBackplane, SketchRequirement } from '../coding/sketch-engine'
 import { backplaneAiCapabilities, capContractEnabled, renderCapSection, requirementPriority } from '../coding/sketch-engine'
 import type { SDKQuery } from '../orchestration/orchestrator'
 import type { JudgeConstraint } from './judge-engine'
-import { delegatedReviewEnabled, runDelegatedReview } from './review-delegation'
+import { runDelegatedReview } from './review-delegation'
 import { adversarialReviewEnabled, runAdversarialSemanticReview } from './adversarial-review'
 import { buildJudgeErrorPatternsSection } from '../experience/judge-checklist'
 import { ANTIDEGRADE_JUDGE_RULES, antidegradeEnabled } from './judge-antidegrade'
@@ -129,7 +129,7 @@ export async function runSemanticJudgeReview(opts: {
     : ''
   // ① 委派审查（默认，协作过程 DelegationFeed 可视化）：子 agent 用只读工具自行查证
   //    产物，不再受 24k 内联截断限制
-  if (delegatedReviewEnabled() && opts.projectId && opts.requestId && opts.publish) {
+  if (opts.projectId && opts.requestId && opts.publish) {
     // ①' C3 攻防轮次（BLOMA_ADVERSARIAL_REVIEW on 且攻/防渠道就绪）：异族攻击者→防御者
     //    →争议复核（攻击者合计 ≤2 轮）；任何不就绪/失败均诚实降级单委派（下方 ①）。
     if (adversarialReviewEnabled()) {

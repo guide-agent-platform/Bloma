@@ -22,7 +22,7 @@ import {
 } from '../agent/loop/agent-loop'
 import { browserToolsEnabled } from './preview-browser'
 import { deliveryStatusEnabled } from './delivery-status'
-import { repairNoopGuardEnabled, repairScopeEnabled } from './repair-loop'
+import { repairScopeEnabled } from './repair-loop'
 import { isDesktopDispatchEnabled } from '../desktop/dispatcher-switch'
 import { delegationWatchEnabled } from '../agent/delegation/delegation-watch'
 import { recordDecision } from '../project/decision-log'
@@ -48,7 +48,6 @@ export function captureCapabilityManifest(sessionId: string, runtimeNotes: strin
       narration_events: narrationEventsEnabled(),
       // 修复侧
       repair_scope: repairScopeEnabled(),
-      repair_noop_guard: repairNoopGuardEnabled(),
       // 交付/工具面
       delivery_status: deliveryStatusEnabled(),
       browser_tools: browserToolsEnabled(),

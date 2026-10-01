@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   appendLoopLogDocument,
   listDocuments,
-  loopLogEnabled,
   syncDocuments,
 } from '../../../main/project/document-engine'
 import { createProject, recordSketchGenerated } from '../../../main/project/project-service'
@@ -123,25 +122,6 @@ describe('appendLoopLogDocument — append-only 过程日志', () => {
     expect(entry?.status).toBe('synced')
     // append-only：同步不触碰过程日志内容
     expect(readLog()).toBe(before)
-  })
-})
-
-describe('loopLogEnabled — 开关', () => {
-  const original = process.env.BLOMA_LOOP_LOG
-  afterEach(() => {
-    if (original === undefined) delete process.env.BLOMA_LOOP_LOG
-    else process.env.BLOMA_LOOP_LOG = original
-  })
-
-  it('缺省开；0/off/false 关（诊断噪声逃生门）', () => {
-    delete process.env.BLOMA_LOOP_LOG
-    expect(loopLogEnabled()).toBe(true)
-    for (const off of ['0', 'off', 'false', 'OFF']) {
-      process.env.BLOMA_LOOP_LOG = off
-      expect(loopLogEnabled()).toBe(false)
-    }
-    process.env.BLOMA_LOOP_LOG = '1'
-    expect(loopLogEnabled()).toBe(true)
   })
 })
 

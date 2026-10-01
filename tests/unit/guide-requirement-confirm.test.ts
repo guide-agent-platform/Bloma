@@ -2,6 +2,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { decideBlocks } from '../support/guide-decide-stream'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
 
 vi.mock('../../main/coding/programming-orchestrator', () => ({
@@ -75,7 +76,7 @@ const confirmJson = JSON.stringify({
 
 function makeModel(): GuideModelOptions {
   const query: SDKQuery = async function* (): AsyncGenerator<SDKMessage> {
-    yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: confirmJson }] } }
+    yield { type: 'assistant', message: { role: 'assistant', content: decideBlocks(confirmJson) } }
     yield { type: 'result', subtype: 'success' }
   }
   const history: ConversationTurn[] = [
@@ -114,9 +115,7 @@ describe('需求确认弹窗（confirm_requirements）', () => {
 
   beforeEach(() => {
     // 2026-09-16: BLOMA_GUIDE_LOOP default-on; pin legacy path for this file
-    process.env.BLOMA_GUIDE_LOOP = '0'
     // 委派审查默认开启：单测固定走直连路径（委派链路由 review-delegation 专属测试覆盖）
-    process.env.BLOMA_DELEGATED_REVIEW = '0'
     // R2（2026-09-12）：本文件多数用例验证 scrape 市调链路（搜索/想法提炼），
     // 钉到 scrape；agent 模式专属用例内自行改回
     process.env.BLOMA_RESEARCH_MODE = 'scrape'
@@ -139,7 +138,6 @@ describe('需求确认弹窗（confirm_requirements）', () => {
   })
 
   afterEach(() => {
-    delete process.env.BLOMA_DELEGATED_REVIEW
     delete process.env.BLOMA_RESEARCH_MODE
     process.env.PROMA_HOME = originalPromaHome
     vi.restoreAllMocks()
@@ -150,9 +148,13 @@ describe('需求确认弹窗（confirm_requirements）', () => {
     let call = 0
     const query: SDKQuery = async function* () {
       call += 1
-      // 首调：向导判定需求成型；次调：agent 灵感建议 JSON
-      const text = call === 1 ? confirmJson : JSON.stringify({ ideas: [{ label: '账单日历视图', note: '按日历看收支分布，超支日标红' }] })
-      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }
+      // 首调：向导决策（guide_decide 工具化）；次调：agent 灵感建议 JSON
+      if (call === 1) {
+        yield { type: 'assistant', message: { role: 'assistant', content: decideBlocks(confirmJson) } }
+      } else {
+        const text = JSON.stringify({ ideas: [{ label: '账单日历视图', note: '按日历看收支分布，超支日标红' }] })
+        yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }
+      }
       yield { type: 'result', subtype: 'success' }
     }
     const model: GuideModelOptions = { ...makeModel(), query }

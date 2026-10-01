@@ -5,10 +5,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { decideBlocks } from '../support/guide-decide-stream'
 
 // 2026-09-16 FILE-LEVEL 钉：BLOMA_GUIDE_LOOP 缺省翻转 on，本文件全部用例锁旧单次 JSON 路径
-process.env.BLOMA_GUIDE_LOOP = '0'
 import { runAgent, setAgentStreamPublisher, setSDKQueryForTests } from '../../main/orchestration/orchestrator'
+
+vi.mock('../../main/review/review-delegation', () => ({
+  runDelegatedReview: vi.fn().mockResolvedValue({ ok: false, failure: 'failed' }),
+}))
 
 vi.mock('../../main/platform/llm/channel-manager', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../main/platform/llm/channel-manager')>()
@@ -70,37 +74,7 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     expect(findProject(project.project_id).current_stage).toBe('blocked_for_user_decision')
   })
 
-  it('generates a sketch and emits sketch_ready when the requirement is clear', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'proma-guide-'))
-    process.env.PROMA_HOME = home
-    const project = createProject({ request_id: 'req-project', mode: 'quick' })
-    const events: AgentEvent[] = []
-    setAgentStreamPublisher((event) => events.push(event))
-    setSandboxRuntimeForTests({
-      portAllocator: async () => 3100,
-      healthCheck: async () => true,
-      processFactory: () => makeChildProcess(),
-    })
-    setSnapshotCaptureProviderForTests(async () => ({
-      extension: 'png',
-      buffer: Buffer.from('fake-png'),
-    }))
-
-    await runAgent({
-      request_id: 'req-guide',
-      session_id: 'session-guide',
-      project_id: project.project_id,
-      content: '做一个家庭记账工具，记录收入支出并展示月度结余',
-      mode: 'quick',
-      current_stage: 'clarifying',
-      channel_id: 'test-channel',
-    })
-
-    const ready = events.find((event) => event.type === 'sketch_ready')
-    expect(ready?.payload.preview_url).toBe('http://localhost:3100')
-    expect(ready?.payload.snapshot_id).toBeTruthy()
-    expect(findProject(project.project_id).current_stage).toBe('sketch_ready')
-  })
+  // 「generates a sketch and emits sketch_ready」用例已删（2026-10-01）：直接开草图行为已被 2026-08-27 PRD 确认门拍板废止，现行语义由下方 A2-14a 用例覆盖
 
   it('A2-14a: 已过澄清轮后模型返回 generate_sketch JSON 时经 PRD 确认门进入草图生成（不过目不开工，2026-08-27）', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-guide-'))
@@ -124,10 +98,7 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
         type: 'assistant',
         message: {
           role: 'assistant',
-          content: [{
-            type: 'text',
-            text: '{"action":"generate_sketch","reply":"好的，马上开始","requirements":[{"id":"F-001","description":"记录收入支出"}]}',
-          }],
+          content: decideBlocks('{"action":"generate_sketch","reply":"好的，马上开始","requirements":[{"id":"F-001","description":"记录收入支出"}]}',),
         },
       }
       yield { type: 'result', subtype: 'success' }
@@ -157,6 +128,7 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     const confirmCard = events.find(
       (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
     )
+    writeFileSync('C:/Users/17359/AppData/Local/Temp/dbg-events.json', JSON.stringify(events.map(e => ({ t: e.type, p: e.payload })), null, 1))
     expect(confirmCard).toBeTruthy()
     expect(events.find((event) => event.type === 'sketch_ready')).toBeUndefined()
     await runAgent({
@@ -186,7 +158,8 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     // 会话 JSONL 落盘的也是 reply 而非原始 JSON
     const jsonl = readFileSync(join(home, 'agent-sessions', 'session-guide.jsonl'), 'utf8')
     expect(jsonl).toContain('好的，马上开始')
-    expect(jsonl).not.toContain('"action":"generate_sketch"')
+    // tool_use input 属设计落盘，泄露防护对象是 text 通道
+    expect(jsonl).not.toContain('"text":"{')
   })
 
   it('A2-14a: 模型返回 ask_clarification JSON 时用模型 questions 发澄清卡片', async () => {
@@ -200,10 +173,7 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
         type: 'assistant',
         message: {
           role: 'assistant',
-          content: [{
-            type: 'text',
-            text: '{"action":"ask_clarification","reply":"想确认一下范围","questions":[{"id":"daily","label":"日常工具","description":"记账提醒清单"}]}',
-          }],
+          content: decideBlocks('{"action":"ask_clarification","reply":"想确认一下范围","questions":[{"id":"daily","label":"日常工具","description":"记账提醒清单"}]}',),
         },
       }
       yield { type: 'result', subtype: 'success' }
@@ -236,7 +206,9 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     expect(deltaTexts).not.toContain('{"action"')
     const jsonl = readFileSync(join(home, 'agent-sessions', 'session-guide.jsonl'), 'utf8')
     expect(jsonl).toContain('想确认一下范围')
-    expect(jsonl).not.toContain('"action":"ask_clarification"')
+    // loop 语义（guide_decide 工具化后）：决策经 tool_use 原生入参落盘属设计行为；
+    // 泄露防护对象是 text 通道——文本块不得携带 JSON 原文
+    expect(jsonl).not.toContain('"text":"{')
   })
 
   it('A2-14a: 模型 questions 为空（纯文本澄清）时只显示 reply，不弹卡片、不泄露 JSON', async () => {
@@ -251,10 +223,7 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
         type: 'assistant',
         message: {
           role: 'assistant',
-          content: [{
-            type: 'text',
-            text: '{"action":"ask_clarification","reply":"你好！想做什么样的应用呢？简单描述一下你的想法，我来帮你梳理～","questions":[]}',
-          }],
+          content: decideBlocks('{"action":"ask_clarification","reply":"你好！想做什么样的应用呢？简单描述一下你的想法，我来帮你梳理～","questions":[]}',),
         },
       }
       yield { type: 'result', subtype: 'success' }
@@ -286,7 +255,8 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     // 会话 JSONL 同样只落 reply
     const jsonl = readFileSync(join(home, 'agent-sessions', 'session-guide.jsonl'), 'utf8')
     expect(jsonl).toContain('简单描述一下你的想法')
-    expect(jsonl).not.toContain('"action":"ask_clarification"')
+    // 同上：tool_use input 属设计落盘，text 通道不得携带 JSON 原文
+    expect(jsonl).not.toContain('"text":"{')
   })
 
   it('澄清选项纠偏：占位/问句式 label 过滤、重复去重、上限 3+兜底，且选项落盘可追溯', async () => {
@@ -301,14 +271,7 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
         type: 'assistant',
         message: {
           role: 'assistant',
-          content: [{
-            type: 'text',
-            text: '{"action":"ask_clarification","reply":"想做哪种工具呢？","questions":[' +
-              '{"id":"a","label":"范围选项","description":"占位"},' +
-              '{"id":"b","label":"做什么类型？"},' +
-              '{"id":"c","label":"记账本","description":"记收入支出"},{"id":"d","label":"记账本"},' +
-              '{"id":"e","label":"待办清单"},{"id":"f","label":"纪念日提醒"}]}',
-          }],
+          content: decideBlocks('{"action":"ask_clarification","reply":"想做哪种工具呢？","questions":[' + '{"id":"a","label":"范围选项","description":"占位"},' + '{"id":"b","label":"做什么类型？"},' + '{"id":"c","label":"记账本","description":"记收入支出"},{"id":"d","label":"记账本"},' + '{"id":"e","label":"待办清单"},{"id":"f","label":"纪念日提醒"}]}',),
         },
       }
       yield { type: 'result', subtype: 'success' }
@@ -345,11 +308,7 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
         type: 'assistant',
         message: {
           role: 'assistant',
-          content: [{
-            type: 'text',
-            text: '{"action":"ask_clarification","reply":"想做什么样的应用呢？","questions":[' +
-              '{"id":"a","label":"选项一"},{"id":"b","label":"范围选项"},{"id":"c","label":"哪种类型？"}]}',
-          }],
+          content: decideBlocks('{"action":"ask_clarification","reply":"想做什么样的应用呢？","questions":[' + '{"id":"a","label":"选项一"},{"id":"b","label":"范围选项"},{"id":"c","label":"哪种类型？"}]}',),
         },
       }
       yield { type: 'result', subtype: 'success' }
@@ -426,13 +385,13 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     expect(events.find((event) => event.type === 'sketch_ready')).toBeUndefined()
   })
 
-  it('A2-14a: 模型输出非 JSON 时回退规则路由', async () => {
+  it('A2-14a: 模型纯文本回复（无决策）→ free_chat 收口：不弹卡、阶段不动、旁白如实上屏', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-guide-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
     const events: AgentEvent[] = []
     setAgentStreamPublisher((event) => events.push(event))
-    // 模型只会说人话，不给 JSON
+    // 模型只会说人话，不给决策（旧「非 JSON 回退规则路由」语义已被 loop 的 free_chat 取代）
     setSDKQueryForTests(async function* () {
       yield {
         type: 'assistant',
@@ -451,10 +410,12 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
       channel_id: 'test-channel',
     })
 
-    // 回退到规则：仍发出固定 3 个澄清问题
+    // free_chat：只收口不弹卡不改阶段（等下一条用户消息）
     const decision = events.find((event) => event.type === 'user_decision_required')
-    expect(decision?.payload.questions).toHaveLength(3)
-    expect(findProject(project.project_id).current_stage).toBe('blocked_for_user_decision')
+    expect(decision).toBeUndefined()
+    const completed = events.find((event) => event.type === 'message_completed')
+    expect(completed).toBeTruthy()
+    expect(findProject(project.project_id).current_stage).toBe('clarifying')
   })
 
   it('A2-14a: 未配置渠道时引导对话回退规则、不抛 CHANNEL_NOT_FOUND', async () => {
@@ -561,10 +522,7 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
         type: 'assistant',
         message: {
           role: 'assistant',
-          content: [{
-            type: 'text',
-            text: '{"action":"ask_clarification","reply":"你说的音乐合成器想要哪种类型呢？","questions":[]}',
-          }],
+          content: decideBlocks('{"action":"ask_clarification","reply":"你说的音乐合成器想要哪种类型呢？","questions":[]}',),
         },
       }
       yield { type: 'result', subtype: 'success' }
@@ -580,15 +538,18 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     })
 
     // 第二轮：澄清答案「网页端」→ 模型 generate_sketch 却把主题丢了，只返回「网页端」
-    setSDKQueryForTests(async function* () {
+    // （审查腿按 system 分流返回通过 JSON，避免规则门降级拦截，保证走到草图断言）
+    setSDKQueryForTests(async function* (_p: string) {
+      if (_p.includes('文档攻击者')) {
+        yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '{"issues":[]}' }] } }
+        yield { type: 'result', subtype: 'success' }
+        return
+      }
       yield {
         type: 'assistant',
         message: {
           role: 'assistant',
-          content: [{
-            type: 'text',
-            text: '{"action":"generate_sketch","reply":"好的，开始生成","requirements":[{"id":"F-001","description":"网页端"}]}',
-          }],
+          content: decideBlocks('{"action":"generate_sketch","reply":"好的，开始生成","requirements":[{"id":"F-001","description":"网页端"}]}',),
         },
       }
       yield { type: 'result', subtype: 'success' }
@@ -608,6 +569,7 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     const confirmCard = events.find(
       (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
     )
+    writeFileSync('C:/Users/17359/AppData/Local/Temp/dbg2.json', JSON.stringify(events.map(e => ({ t: e.type, p: e.payload })), null, 1))
     expect(confirmCard).toBeTruthy()
     await runAgent({
       request_id: 'req-theme-2c',

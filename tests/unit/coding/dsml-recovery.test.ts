@@ -7,7 +7,6 @@ import {
   DSML_RECOVERABLE_TOOLS,
   buildTargetedDegenerateFeedback,
   classifyDsmlRecovery,
-  dsmlRecoveryEnabled,
   parseDsmlInvokes,
 } from '../../../main/agent/loop/dsml-recovery'
 import type { SDKMessage } from '../../../shared/types'
@@ -163,89 +162,5 @@ describe('buildTargetedDegenerateFeedback — 定向反馈', () => {
     const generic = buildTargetedDegenerateFeedback(null)
     expect(generic).toContain('【传输事故反馈】')
     expect(generic).not.toContain('read_file(')
-  })
-})
-
-describe('runAgentLoop 集成 — 退化轮恢复', () => {
-  const originalHome = process.env.PROMA_HOME
-  const originalRecovery = process.env.BLOMA_DSML_RECOVERY
-  let executed: Array<{ name: string; input: Record<string, unknown> }>
-
-  beforeEach(() => {
-    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-dsml-'))
-    delete process.env.BLOMA_DSML_RECOVERY
-    executed = []
-  })
-  afterEach(() => {
-    process.env.PROMA_HOME = originalHome
-    if (originalRecovery === undefined) delete process.env.BLOMA_DSML_RECOVERY
-    else process.env.BLOMA_DSML_RECOVERY = originalRecovery
-  })
-
-  it('退化 read_file 轮被救回：工具真实执行、下一轮拿到 tool_result 上下文、loop 完成、恢复计数入账', async () => {
-    const readTool = tool('read_file', (input) => {
-      executed.push({ name: 'read_file', input })
-      return { output: '（src/app.js 共 585 行，显示第 420~480 行）' }
-    })
-    const { query, receivedMessages } = scriptedQuery([
-      [textMessage(DSML_READ_WITH_PROSE)], // 轮 1：DSML 泄漏（含合法旁白）
-      [textMessage('修复完成，三处 innerHTML 已改为 textContent。')], // 轮 2：干净收尾
-    ])
-    const result = await runAgentLoop(baseInput({ query, tools: [readTool] }))
-    expect(result.status).toBe('completed')
-    expect(result.transport_recoveries).toBe(1)
-    expect(executed).toHaveLength(1)
-    expect(executed[0].input.path).toBe('src/app.js')
-    // 模型侧轮 2 收到的历史：assistant 含合成 tool_use + user 含 tool_result（含旁白保留）
-    const turn2 = receivedMessages[1]
-    const assistant = turn2.find((m) => m.role === 'assistant' && Array.isArray(m.content) && m.content.some((b) => b.type === 'tool_use'))
-    expect(assistant).toBeTruthy()
-    const toolUseBlock = (assistant!.content as Array<{ type: string; name?: string }>).find((b) => b.type === 'tool_use')
-    expect(toolUseBlock?.name).toBe('read_file')
-    const proseBlock = (assistant!.content as Array<{ type: string; text?: string }>).find((b) => b.type === 'text')
-    expect(proseBlock?.text).toContain('三处 innerHTML')
-    const userResult = turn2.filter((m) => m.role === 'user').at(-1)
-    expect(JSON.stringify(userResult?.content)).toContain('585 行')
-  })
-
-  it('退化 write_file 轮不盲执行：零 write 调用、反馈具体到意图、再退化才 turn_limit', async () => {
-    const writeTool = tool('write_file', (input) => {
-      executed.push({ name: 'write_file', input })
-      return { output: '已写入' }
-    })
-    const { query, receivedMessages } = scriptedQuery([
-      [textMessage(DSML_WRITE)], // 轮 1：写类 DSML
-      [textMessage(DSML_WRITE)], // 轮 2：重试仍退化
-    ])
-    const result = await runAgentLoop(baseInput({ query, tools: [writeTool] }))
-    expect(result.status).toBe('turn_limit')
-    // R1-loop（狗粮 7601e5ae #496）：写类意图不再无声丢弃，随出口留痕供终验/修复消费
-    expect(result.termination_detail).toEqual({ reason: 'degenerate_output', retries: 1, dropped_tool_intents: ['write_file:src/game/entities.js'] })
-    expect(executed).toHaveLength(0)
-    // 定向反馈（非泛化）：列出 write_file 意图
-    const feedback = receivedMessages[1].filter((m) => m.role === 'user').at(-1)
-    const feedbackText = JSON.stringify(feedback?.content)
-    expect(feedbackText).toContain('write_file')
-    expect(feedbackText).toContain('标准工具调用')
-    expect(feedbackText).not.toContain('没有携带任何工具调用')
-  })
-
-  it('开关 off：不恢复不定向（泛化反馈），退化两次 → turn_limit（现状字节级）', async () => {
-    process.env.BLOMA_DSML_RECOVERY = '0'
-    expect(dsmlRecoveryEnabled()).toBe(false)
-    const readTool = tool('read_file', (input) => {
-      executed.push({ name: 'read_file', input })
-      return { output: 'ok' }
-    })
-    const { query, receivedMessages } = scriptedQuery([
-      [textMessage(DSML_READ_WITH_PROSE)],
-      [textMessage(DSML_READ_WITH_PROSE)],
-    ])
-    const result = await runAgentLoop(baseInput({ query, tools: [readTool] }))
-    expect(result.status).toBe('turn_limit')
-    expect(executed).toHaveLength(0)
-    expect(result.transport_recoveries).toBeUndefined()
-    const feedback = receivedMessages[1].filter((m) => m.role === 'user').at(-1)
-    expect(JSON.stringify(feedback?.content)).toContain('没有携带任何工具调用')
   })
 })

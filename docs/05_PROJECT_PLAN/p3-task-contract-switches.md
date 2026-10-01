@@ -1,5 +1,13 @@
 # P3 任务级三文档契约 · 开关矩阵与实验变量
 
+> **⚠️ 2026-10-01 开关面收敛批（第一刀）**：27 个缺省 on 开关已删除（连旧版入口实现一并删除，只保留新版路径）——
+> AGENT_LOOP / GUIDE_LOOP / TASK_WORKFLOW / ITER_BRIEF / DSML_RECOVERY / COMPACT_EST_FALLBACK / LOOP_WINDOW_OFF /
+> LOOP_LOG / READY_CHAT / REPAIR_NOOP_GUARD / PROVIDER_ADAPTER / SCAFFOLD / MODULES / DELEGATED_REVIEW / UI_GATE /
+> VISION_AUDIT / INJECT_* 八点。本文档中涉及上述开关的条目均为历史记录（retired）；旧 anthropicMessagesQuery
+> 传输层、向导单次 JSON 澄清层、滑窗 windowMessages 消费已随批删除。生命周期规则：**转正即删开关，
+> off 字节锁测试随删；新批次无额度验证计划不建开关（走常开+埋点）**。存活开关盘点见
+> 《Bloma-开关面盘点台账-20261001》。
+
 > 文档 ID：DOC-5.x | 日期：2026-09-04 | 状态：已实施（PR-A~D），线上待验清单见桌面实施稿 §8
 > 依据：《Bloma-P3任务级契约实施稿-20260904.md》（设计定稿，D1–D7 已拍板）
 > 代码：`main/coding/loop-planner.ts`（plan 腿）/ `main/document-engine.ts`（loop-log）/ `main/model/prd-backplane.ts`（分级锚定）

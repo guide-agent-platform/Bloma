@@ -26,11 +26,10 @@ import { recordDecision } from '../../project/decision-log'
 import { publishPrdConfirmCard } from '../../guide/prd-confirm'
 import type { PrdBackplane } from '../../coding/sketch-engine'
 import { defaultConstraintLevel } from '../../coding/sketch-engine'
-import { isInjectionEnabled } from '../../agent/prompting/template-injection'
 import { checkSectionCompleteness } from '../../guide/prd-sections'
 import { parseEarsAssertion, renderForbiddenTermsForPrompt } from '../../guide/ears-vocabulary'
 import type { SDKQuery } from '../../orchestration/orchestrator'
-import { delegatedReviewEnabled, runDelegatedReview } from '../review-delegation'
+import { runDelegatedReview } from '../review-delegation'
 import { buildConversationExcerpt, buildReadConversationHistoryTool } from '../../agent/loop/conversation-excerpt'
 import {
   DEFENDER_SYSTEM_PROMPT,
@@ -120,7 +119,7 @@ export function ruleGateReview(backplane: PrdBackplane, mode?: 'quick' | 'longte
   const issues: PrdReviewIssue[] = []
   // 注入点④规则门确定性检查（LLM 不可用降级同享模板体系；开关关闭=现状）：
   // 必填章节缺失 → major；longterm 断言禁词直查 → major（禁词表三处同源）
-  if (isInjectionEnabled('audit') && backplane.template_meta) {
+  if (backplane.template_meta) {
     try {
       // 模板体系检查只在模板已接入的背板上运行：template_meta 存在 = P2 之后管线
       // 产物（buildPrdBackplane/resolvePrdBackplane 均写入）；裸对象/旧背板 = 模板

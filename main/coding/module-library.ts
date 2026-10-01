@@ -72,13 +72,7 @@ export interface ModuleRenderResult {
   skipped: string[]
 }
 
-/** 模块库总开关：缺省开启；BLOMA_MODULES=0/off/false 关闭（关闭后行为=现状）。 */
-export function modulesEnabled(): boolean {
-  const raw = process.env.BLOMA_MODULES
-  if (!raw) return true
-  const value = raw.trim().toLowerCase()
-  return value !== '0' && value !== 'off' && value !== 'false'
-}
+/** 开关已删除（2026-10-01 开关面收敛批）：官方模块库无条件启用。 */
 
 function extnameOf(path: string): string {
   const idx = path.lastIndexOf('.')

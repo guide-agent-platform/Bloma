@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { anthropicMessagesQuery, type SDKQueryOptions } from '../../main/orchestration/orchestrator'
+import { anthropicMessagesQueryViaProviders } from '../../main/platform/upstream/providers/loop-query'
+import type { SDKQueryOptions } from '../../main/orchestration/orchestrator'
 import type { MessageContentBlock, SDKMessage } from '../../shared/types'
 
 /**
@@ -67,7 +68,7 @@ const TOOLS = [
   { name: 'read_file', description: '读文件', input_schema: { type: 'object', properties: { path: { type: 'string' } } } },
 ]
 
-describe('anthropicMessagesQuery tool use 解析（PR1）', () => {
+describe('anthropicMessagesQueryViaProviders tool use 解析（PR1）', () => {
   beforeEach(() => {
     vi.unstubAllGlobals()
   })
@@ -86,7 +87,7 @@ describe('anthropicMessagesQuery tool use 解析（PR1）', () => {
       { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 45 } },
     ]))
 
-    const messages = await collect(anthropicMessagesQuery('查一下', baseOptions({ tools: TOOLS })))
+    const messages = await collect(anthropicMessagesQueryViaProviders('查一下', baseOptions({ tools: TOOLS })))
 
     const toolUseMessage = messages.find((message) => message.type === 'assistant' && message.message?.content.some((block) => block.type === 'tool_use'))
     expect(toolUseMessage).toBeDefined()
@@ -108,7 +109,7 @@ describe('anthropicMessagesQuery tool use 解析（PR1）', () => {
       { type: 'message_delta', delta: { stop_reason: 'tool_use' } },
     ], 24))
 
-    const messages = await collect(anthropicMessagesQuery('列文件', baseOptions({ tools: TOOLS })))
+    const messages = await collect(anthropicMessagesQueryViaProviders('列文件', baseOptions({ tools: TOOLS })))
     const block = messages.find((message) => message.type === 'assistant')!.message!.content[0]
     expect(block).toMatchObject({ type: 'tool_use', id: 'toolu_02', input: { path: 'src' } })
   })
@@ -124,7 +125,7 @@ describe('anthropicMessagesQuery tool use 解析（PR1）', () => {
       { type: 'message_delta', delta: { stop_reason: 'tool_use' } },
     ]))
 
-    const messages = await collect(anthropicMessagesQuery('开始', baseOptions({ tools: TOOLS })))
+    const messages = await collect(anthropicMessagesQueryViaProviders('开始', baseOptions({ tools: TOOLS })))
     const assistantBlocks = messages.filter((message) => message.type === 'assistant').flatMap((message) => message.message!.content)
     expect(assistantBlocks[0]).toMatchObject({ type: 'text', text: '我先看看文件。' })
     expect(assistantBlocks[1]).toMatchObject({ type: 'tool_use', id: 'toolu_03', input: { path: 'a.js' } })
@@ -136,7 +137,7 @@ describe('anthropicMessagesQuery tool use 解析（PR1）', () => {
       { type: 'content_block_stop', index: 0 },
       { type: 'message_delta', delta: { stop_reason: 'tool_use' } },
     ]))
-    const messages = await collect(anthropicMessagesQuery('列文件', baseOptions({ tools: TOOLS })))
+    const messages = await collect(anthropicMessagesQueryViaProviders('列文件', baseOptions({ tools: TOOLS })))
     expect(messages.find((message) => message.type === 'assistant')!.message!.content[0]).toMatchObject({
       type: 'tool_use',
       id: 'toolu_04',
@@ -151,7 +152,7 @@ describe('anthropicMessagesQuery tool use 解析（PR1）', () => {
       { type: 'content_block_stop', index: 0 },
       { type: 'message_delta', delta: { stop_reason: 'tool_use' } },
     ]))
-    const messages = await collect(anthropicMessagesQuery('读', baseOptions({ tools: TOOLS })))
+    const messages = await collect(anthropicMessagesQueryViaProviders('读', baseOptions({ tools: TOOLS })))
     expect(messages.find((message) => message.type === 'assistant')!.message!.content[0]).toMatchObject({
       type: 'tool_use',
       input: {},
@@ -163,7 +164,7 @@ describe('anthropicMessagesQuery tool use 解析（PR1）', () => {
       { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '你好' } },
       { type: 'message_delta', delta: { stop_reason: 'end_turn' } },
     ]))
-    const messages = await collect(anthropicMessagesQuery('在吗', baseOptions()))
+    const messages = await collect(anthropicMessagesQueryViaProviders('在吗', baseOptions()))
     const body = lastRequestBody()
     expect('tools' in body).toBe(false)
     expect(body.messages.at(-1)).toEqual({ role: 'user', content: '在吗' })
@@ -173,7 +174,7 @@ describe('anthropicMessagesQuery tool use 解析（PR1）', () => {
 
   it('传 tools：请求体携带 tools 字段', async () => {
     stubFetchWithResponse(sseResponse([{ type: 'message_delta', delta: { stop_reason: 'end_turn' } }]))
-    await collect(anthropicMessagesQuery('开始', baseOptions({ tools: TOOLS })))
+    await collect(anthropicMessagesQueryViaProviders('开始', baseOptions({ tools: TOOLS })))
     expect(lastRequestBody().tools).toEqual(TOOLS)
   })
 
@@ -182,7 +183,7 @@ describe('anthropicMessagesQuery tool use 解析（PR1）', () => {
     const toolResultBlocks: MessageContentBlock[] = [
       { type: 'tool_result', tool_use_id: 'toolu_01', content: '文件内容…', is_error: false },
     ]
-    await collect(anthropicMessagesQuery('占位', baseOptions({
+    await collect(anthropicMessagesQueryViaProviders('占位', baseOptions({
       messages: [
         { role: 'system', content: '系统提示' },
         { role: 'user', content: '开始干活' },
@@ -204,7 +205,7 @@ describe('anthropicMessagesQuery tool use 解析（PR1）', () => {
 describe('anthropicMessagesQuery 推理档位（reasoning-profile 2026-08-27）', () => {
   it('[S4-REASON-019] thinkingLevel=max + deepseek-v4-flash → thinking:enabled + output_config.effort=max', async () => {
     stubFetchWithResponse(sseResponse([{ type: 'message_stop' }]))
-    await collect(anthropicMessagesQuery('判定', baseOptions({
+    await collect(anthropicMessagesQueryViaProviders('判定', baseOptions({
       env: {
         PATH: process.env.PATH ?? 'C:\\',
         ANTHROPIC_AUTH_TOKEN: 'test-key',
@@ -222,7 +223,7 @@ describe('anthropicMessagesQuery 推理档位（reasoning-profile 2026-08-27）'
 
   it('[S4-REASON-020] omit 渠道（qwen-token-plan）+ thinkingLevel=max → 请求体无 thinking 字段（免 400 往返）', async () => {
     stubFetchWithResponse(sseResponse([{ type: 'message_stop' }]))
-    await collect(anthropicMessagesQuery('判定', baseOptions({
+    await collect(anthropicMessagesQueryViaProviders('判定', baseOptions({
       env: {
         PATH: process.env.PATH ?? 'C:\\',
         ANTHROPIC_AUTH_TOKEN: 'test-key',
@@ -240,7 +241,7 @@ describe('anthropicMessagesQuery 推理档位（reasoning-profile 2026-08-27）'
 
   it('[S4-REASON-021] 缺省（不传 thinkingLevel）→ thinking:disabled（零回归契约，与现状逐字节一致）', async () => {
     stubFetchWithResponse(sseResponse([{ type: 'message_stop' }]))
-    await collect(anthropicMessagesQuery('判定', baseOptions()))
+    await collect(anthropicMessagesQueryViaProviders('判定', baseOptions()))
 
     const body = lastRequestBody()
     expect(body.thinking).toEqual({ type: 'disabled' })

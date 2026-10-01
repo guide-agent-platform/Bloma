@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ANTHROPIC_SSE_ADAPTER } from '../../../main/platform/upstream/providers/anthropic-sse-adapter'
 import { streamSSE } from '../../../main/platform/upstream/providers/sse-reader'
-import { anthropicMessagesQueryViaProviders, providerAdapterEnabled } from '../../../main/platform/upstream/providers/loop-query'
+import { anthropicMessagesQueryViaProviders } from '../../../main/platform/upstream/providers/loop-query'
 import type { ProviderRequest, StreamEvent } from '../../../main/platform/upstream/providers/types'
 
 /**
@@ -206,21 +206,6 @@ describe('R1-providers anthropicMessagesQueryViaProviders（SDKMessage 契约）
       expect(text).toContain('降级后成功')
     } finally {
       globalThis.fetch = originalFetch
-    }
-  })
-
-  it('逃生口：BLOMA_PROVIDER_ADAPTER=0 → off，缺省 on', () => {
-    const prev = process.env.BLOMA_PROVIDER_ADAPTER
-    try {
-      delete process.env.BLOMA_PROVIDER_ADAPTER
-      expect(providerAdapterEnabled()).toBe(true)
-      process.env.BLOMA_PROVIDER_ADAPTER = '0'
-      expect(providerAdapterEnabled()).toBe(false)
-      process.env.BLOMA_PROVIDER_ADAPTER = 'false'
-      expect(providerAdapterEnabled()).toBe(false)
-    } finally {
-      if (prev === undefined) delete process.env.BLOMA_PROVIDER_ADAPTER
-      else process.env.BLOMA_PROVIDER_ADAPTER = prev
     }
   })
 })

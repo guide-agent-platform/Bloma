@@ -73,18 +73,12 @@ import { recordSessionActivity } from '../../platform/sessions/session-service'
 import { appendExperienceEvent } from '../../experience/event-log'
 import { isThinkingLogEnabled, logThinking } from '../../agent/loop/thinking-log'
 import { extractErrorMessage } from '../../platform/llm/channel-test-error'
-import { anthropicMessagesQueryViaProviders, providerAdapterEnabled } from '../../platform/upstream/providers/loop-query'
+import { anthropicMessagesQueryViaProviders } from '../../platform/upstream/providers/loop-query'
 
 import { ConversationTurn, SDKQuery } from './orchestration-contracts'
 import { READY_REPLY_MAX_CHARS } from './run-registry'
 
-/** ready 直答开关（缺省 on）：BLOMA_READY_CHAT=0/off/false 回退纯模板现状（灰度/回滚杠杆）。 */
-export function readyChatEnabled(): boolean {
-  const raw = process.env.BLOMA_READY_CHAT
-  if (raw === undefined || raw.trim() === '') return true
-  const normalized = raw.trim().toLowerCase()
-  return normalized !== '0' && normalized !== 'off' && normalized !== 'false'
-}
+/** 开关已删除（2026-10-01 开关面收敛批）：ready 直答无条件启用。 */
 
 /** ready 直答事实性禁词：命中即判无效（「还没好」惯性幻觉是规则直答的立规原因）。 */
 export const READY_REPLY_BANNED =

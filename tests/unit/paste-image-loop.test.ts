@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runAgentLoop, estimateBlocksText, type AgentLoopInput } from '../../main/agent/loop/agent-loop'
-import { anthropicMessagesQuery } from '../../main/orchestration/orchestrator'
+import { anthropicMessagesQueryViaProviders } from '../../main/platform/upstream/providers/loop-query'
 import type { MessageContentBlock, SDKMessage } from '../../shared/types'
 import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 import { getAgentSessionPath } from '../../storage/config-paths'
@@ -178,7 +178,7 @@ describe('anthropicMessagesQuery 入口水合（API 边界统一）', () => {
     const turns: ConversationTurn[] = [
       { role: 'user', content: [{ type: 'text', text: '看图' }, { type: 'image', imageId: saved.imageId, media_type: 'image/png' }] },
     ]
-    await collect(anthropicMessagesQuery('主任务', {
+    await collect(anthropicMessagesQueryViaProviders('主任务', {
       env: { PATH: 'x', ANTHROPIC_AUTH_TOKEN: 'k', ANTHROPIC_BASE_URL: 'https://mock.example', ANTHROPIC_MODEL: 'm' },
       signal: new AbortController().signal,
       sessionId: 'session-api',
@@ -220,7 +220,7 @@ describe('vision 降级文案（clipboard-paste P2 兑现，r74）', () => {
     const turns: ConversationTurn[] = [
       { role: 'user', content: [{ type: 'text', text: '看图' }, { type: 'image', imageId: saved.imageId, media_type: 'image/png' }] },
     ]
-    const err = await anthropicMessagesQuery('主任务', {
+    const err = await anthropicMessagesQueryViaProviders('主任务', {
       env: { PATH: 'x', ANTHROPIC_AUTH_TOKEN: 'k', ANTHROPIC_BASE_URL: 'https://mock.example', ANTHROPIC_MODEL: 'text-only-model' },
       signal: new AbortController().signal,
       sessionId: 'session-vd',
@@ -239,7 +239,7 @@ describe('vision 降级文案（clipboard-paste P2 兑现，r74）', () => {
       'fetch',
       vi.fn(async () => new Response(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'messages: image content blocks are not supported' } }), { status: 400 })),
     )
-    const err = await anthropicMessagesQuery('纯文本任务', {
+    const err = await anthropicMessagesQueryViaProviders('纯文本任务', {
       env: { PATH: 'x', ANTHROPIC_AUTH_TOKEN: 'k', ANTHROPIC_BASE_URL: 'https://mock.example', ANTHROPIC_MODEL: 'm' },
       signal: new AbortController().signal,
       sessionId: 'session-vd2',
@@ -282,7 +282,7 @@ describe('审查补充（R1 deepseek P2：thinking×image 组合场景，r74）'
     const turns: ConversationTurn[] = [
       { role: 'user', content: [{ type: 'text', text: '看图' }, { type: 'image', imageId: saved.imageId, media_type: 'image/png' }] },
     ]
-    const err = await anthropicMessagesQuery('主任务', {
+    const err = await anthropicMessagesQueryViaProviders('主任务', {
       env: { PATH: 'x', ANTHROPIC_AUTH_TOKEN: 'k', ANTHROPIC_BASE_URL: 'https://mock.example', ANTHROPIC_MODEL: 'm' },
       signal: new AbortController().signal,
       sessionId: 'session-combo',

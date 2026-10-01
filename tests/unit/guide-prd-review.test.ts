@@ -2,7 +2,13 @@ import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { decideBlocks } from '../support/guide-decide-stream'
+import { runDelegatedReview } from '../../main/review/review-delegation'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
+
+vi.mock('../../main/review/review-delegation', () => {
+  return { runDelegatedReview: vi.fn().mockResolvedValue({ ok: false, failure: 'failed' }) }
+})
 
 vi.mock('../../main/coding/programming-orchestrator', () => ({
   runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
@@ -104,7 +110,7 @@ function scriptedQuery(reviewResponses: string[]): { query: SDKQuery; reviewCall
   const query: SDKQuery = async function* (prompt: string): AsyncGenerator<SDKMessage> {
     if (!confirmServed && !prompt.includes('六维')) {
       confirmServed = true
-      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: confirmJson }] } }
+      yield { type: 'assistant', message: { role: 'assistant', content: decideBlocks(confirmJson) } }
       yield { type: 'result', subtype: 'success' }
       return
     }
@@ -112,7 +118,7 @@ function scriptedQuery(reviewResponses: string[]): { query: SDKQuery; reviewCall
       reviewCalls.push(prompt)
       const response = reviewResponses[Math.min(reviewIndex, reviewResponses.length - 1)] ?? ''
       reviewIndex += 1
-      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: response }] } }
+      yield { type: 'assistant', message: { role: 'assistant', content: decideBlocks(response) } }
       yield { type: 'result', subtype: 'success' }
       return
     }
@@ -188,10 +194,9 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
   let events: AgentEvent[]
 
   beforeEach(() => {
+    vi.mocked(runDelegatedReview).mockResolvedValue({ ok: false, failure: 'failed' })
     // 2026-09-16: BLOMA_GUIDE_LOOP default-on; pin legacy path for this file
-    process.env.BLOMA_GUIDE_LOOP = '0'
     // 委派审查默认开启：单测固定走直连路径（委派链路由 review-delegation 专属测试覆盖）
-    process.env.BLOMA_DELEGATED_REVIEW = '0'
     const home = mkdtempSync(join(tmpdir(), 'proma-prd-review-'))
     process.env.PROMA_HOME = home
     mkdirSync(join(home, 'agent-sessions'), { recursive: true })
@@ -202,7 +207,6 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
   })
 
   afterEach(() => {
-    delete process.env.BLOMA_DELEGATED_REVIEW
     process.env.PROMA_HOME = originalPromaHome
     vi.restoreAllMocks()
   })

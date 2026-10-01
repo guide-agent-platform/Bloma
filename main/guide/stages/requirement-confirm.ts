@@ -38,7 +38,7 @@ import { getChannelByIdRaw } from '../../platform/llm/channel-manager'
 import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../orchestration/orchestrator'
 import { trackAnalytics } from '../../delivery/track-analytics'
 import { runAgentLoop } from '../../agent/loop/agent-loop'
-import { buildGuideTools, guideLoopEnabled, type GuideDecision } from '../guide-tools'
+import { buildGuideTools, type GuideDecision } from '../guide-tools'
 import {
   detectOrphanEnrichmentClarification,
   hasPendingEnrichmentClarification,

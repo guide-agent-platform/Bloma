@@ -153,7 +153,7 @@ describeExperiment('PRD 三形态同环境对比实验（决议 6）', { timeout
 
   it('三形态 × 同渠道同模型 → generatePrdLlm 产物度量', async () => {
     const { generatePrdLlm } = await import('../../main/guide/prd-engine-llm')
-    const { anthropicMessagesQuery } = await import('../../main/orchestration/orchestrator')
+    const { anthropicMessagesQueryViaProviders } = await import('../../main/platform/upstream/providers/loop-query')
 
     const spec = resolveChannelSpec()
     const keys = readDecryptedKeys()
@@ -190,7 +190,7 @@ describeExperiment('PRD 三形态同环境对比实验（决议 6）', { timeout
           session_id: sessionId,
           requirements: form.requirements as never,
           template_type: 'personal_tool',
-          query: anthropicMessagesQuery,
+          query: anthropicMessagesQueryViaProviders,
           env,
         })
         const ms = Date.now() - started

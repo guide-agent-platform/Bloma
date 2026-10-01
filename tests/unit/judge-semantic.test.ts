@@ -109,7 +109,6 @@ describe('judge-semantic 执行与 runJudgeReview 合成', () => {
 
   beforeEach(() => {
     // 委派审查默认开启：单测固定走直连路径（委派链路由 review-delegation 专属测试覆盖）
-    process.env.BLOMA_DELEGATED_REVIEW = '0'
     home = mkdtempSync(join(tmpdir(), 'proma-judge-sem-'))
     process.env.PROMA_HOME = home
     project = createProject({ request_id: 'req-project', mode: 'quick' })
@@ -129,7 +128,6 @@ describe('judge-semantic 执行与 runJudgeReview 合成', () => {
   })
 
   afterEach(() => {
-    delete process.env.BLOMA_DELEGATED_REVIEW
     process.env.PROMA_HOME = originalPromaHome
     setProgrammingEventPublisher(() => undefined)
     vi.restoreAllMocks()

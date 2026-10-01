@@ -11,7 +11,7 @@ import { renderLearningsSection } from '../../project/learnings-log'
 import { estimateTokenCount } from './usage-guard'
 import { windowMessagesWithDigest } from './compacting-window'
 import { isDegenerateText } from '../../coding/output-integrity'
-import { buildTargetedDegenerateFeedback, classifyDsmlRecovery, dsmlRecoveryEnabled, parseDsmlInvokes } from './dsml-recovery'
+import { buildTargetedDegenerateFeedback, classifyDsmlRecovery, parseDsmlInvokes } from './dsml-recovery'
 import { createDsmlDisplayFilter } from './dsml-display-filter'
 import { closePreviewBrowserSession } from '../../coding/preview-browser'
 import { drainSteerQueue, markLoopActive, markLoopInactive, markSteerMerged, pendingSteerCount, settleSteerEntry, steerConfirmEnabled, wrapSteerContent } from './steer-queue'
@@ -500,7 +500,7 @@ async function requestHandoff(input: AgentLoopInput, messages: ConversationTurn[
         { role: 'system', content: LOOP_HANDOFF_SYSTEM },
         // 钉轮一并携带（PR2）；2026-09-16 上下文同步 Proma：全量模式下交接输入也用全量
         // （滑窗模式下维持有界窗口）——否则交接文档只覆盖最近 8 轮，早期进展金丢。
-        ...(loopWindowOffEnabled() ? messages : windowMessages(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn)),
+        ...messages,
       ],
     })) {
       if (sdk.type === 'assistant' && sdk.message) {
@@ -739,25 +739,6 @@ export function narrationEventsEnabled(): boolean {
   return process.env.BLOMA_NARRATION_EVENTS === '1' || process.env.BLOMA_NARRATION_EVENTS === 'true'
 }
 
-/** W6-E4（咨询 D3 §三 C/D）：压缩触发的 est 兜底——渠道 usage 盲（本轮无 usage 回报，
- *  如 glm input_tokens 恒 0/缺失）时用全量历史估算作触发判据，防触发器失明（W1 以撒案实锤）。缺省 off=字节级现状。 */
-export function compactEstFallbackEnabled(): boolean {
-  // 2026-09-16 缺省翻转 on（用户拍板「上下文向 Proma 同步」）：全量+压缩模式下 est 兼底是
-  // 唯一安全带（盲渠道否则无界膨胀到 400）；逃生口 =0/'false' 回旧现状。
-  const raw = process.env.BLOMA_COMPACT_EST_FALLBACK
-  return raw !== '0' && raw !== 'false'
-}
-
-/** W6-E5（咨询 D3 §四 C 组）：滑窗/摘要旁路——全量历史透传（仅配对重放诊断对照用，
- *  长任务必爆上下文，勿生产开启）。缺省 off=字节级现状。 */
-export function loopWindowOffEnabled(): boolean {
-  // 2026-09-16 缺省翻转 on（用户拍板「上下文向 Proma 同步」）：全量历史+竹节压缩为缺省
-  // 上下文模型（对齐 Proma）；滑窗 8 轮+digest 退为逃生口（=0/'false' 回滑窗现状，
-  // digest 空提取病灶随之退位）。原「长任务必爆上下文勿生产开启」前提失效：
-  // 现与 compactEstFallbackEnabled 新缺省强制配套，触发有保底。
-  const raw = process.env.BLOMA_LOOP_WINDOW_OFF
-  return raw !== '0' && raw !== 'false'
-}
 
 /** B3（P0-B，2026-09-11 审计案 35c1a633）：loop 进度对账三守卫——只读失速 / 清单对账 /
  *  自测提醒，批间 user 消息注入（复用 DEGENERATE_RETRY_FEEDBACK 模式，与 steer 同点位）。
@@ -766,14 +747,6 @@ export function loopProgressNudgeEnabled(): boolean {
   return process.env.BLOMA_LOOP_PROGRESS_NUDGE === '1' || process.env.BLOMA_LOOP_PROGRESS_NUDGE === 'true'
 }
 
-/** W5（Phase 8.5，2026-09-12 狗粮 dd6ba98d 复盘「工作流同步 2.0」）：任务清单工作流
- *  ——进度投影 / 重复写守卫 / 早验证，批间注入与 B3 同点位。缺省 on（纯 prompt/
- *  宿主注入层，无验证语义变化）；'0'/'off'/'false'=字节级现状逃生口。 */
-export function taskWorkflowEnabled(): boolean {
-  const raw = (process.env.BLOMA_TASK_WORKFLOW ?? '').trim().toLowerCase()
-  if (raw === '0' || raw === 'off' || raw === 'false') return false
-  return true
-}
 
 /** B3 守卫1 阈值：连续 N 轮无 write/edit 判只读失速（审计案实测 20 连续只读，6 轮早介入）。 */
 const PROGRESS_READ_ONLY_TURNS = 6
@@ -1075,7 +1048,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
         ...(input.providerType !== undefined ? { providerType: input.providerType } : {}),
         ...(input.thinkingLevel !== undefined ? { thinkingLevel: input.thinkingLevel } : {}),
-        messages: [{ role: 'system', content: wrapUp ? `${systemForTurn(input.system, turn)}${WRAP_UP_SUFFIX}` : systemForTurn(input.system, turn) }, ...(loopWindowOffEnabled() ? messages : windowMessagesWithDigest(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn))],
+        messages: [{ role: 'system', content: wrapUp ? `${systemForTurn(input.system, turn)}${WRAP_UP_SUFFIX}` : systemForTurn(input.system, turn) }, ...messages],
         tools: wrapUp ? [] : definitions,
       })) {
         if (sdk.type === 'assistant' && sdk.message) {
@@ -1136,7 +1109,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     // 耗尽收口时随 termination_detail 留痕（狗粮实锤被丢弃的 write_file 重建 dist
     // 意图正是唯一正确修复动作，信息价值已验证）
     let dsmlDroppedIntents: string[] | undefined
-    if (turnToolUses.length === 0 && isDegenerateText(finalText) && dsmlRecoveryEnabled()) {
+    if (turnToolUses.length === 0 && isDegenerateText(finalText)) {
       const parsed = parseDsmlInvokes(finalText)
       if (parsed && classifyDsmlRecovery(parsed, new Set(toolByName.keys())) === 'execute') {
         const recoveredUses = parsed.invokes.map((invoke, index) => ({ id: `dsml-${turn}-${index}`, name: invoke.name, input: invoke.input }))
@@ -1316,7 +1289,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     // ---- W5（Phase 8.5，2026-09-12 狗粮 dd6ba98d）：任务清单工作流批间注入 ----
     // 与 B3 同点位同模式；开关独立（BLOMA_TASK_WORKFLOW 缺省 on）。只挂主 loop
     // （修复/迭代轮任务窄）；wrapUp 后不打扰；无 planFiles 时不启用（清单不存在）。
-    if (isMainLoop && !wrapUp && taskWorkflowEnabled() && input.planFiles && input.planFiles.length > 0) {
+    if (isMainLoop && !wrapUp && input.planFiles && input.planFiles.length > 0) {
       const w5Nudges: string[] = []
       // 守卫4 重复写：本轮出现同文件第二次及以上的全量 write_file → 改用 edit_file
       //（对症当晚「state/loop/input/collision 等 6 文件完整重写第二遍」病灶）
@@ -1401,7 +1374,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     // provider 恒返 0 时估算兜底不启用 → 自动压缩触发器失明）
     const usageBlind = usage === undefined || (usage.input_tokens ?? 0) <= 0
     const estFallbackMet =
-      compactEstFallbackEnabled() && usageBlind && estTokensOfMessages(messages) >= compactThreshold
+      usageBlind && estTokensOfMessages(messages) >= compactThreshold
     const compactThresholdMet =
       compactThreshold > 0 && ((usage?.input_tokens ?? 0) >= compactThreshold || estFallbackMet)
     // W2（Phase 10）：显式压缩——compact_context 工具置位后在本安全点（本轮工具对已落盘）
@@ -1540,7 +1513,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
   // D2 补口（狗粮 52f19ab4，2026-09-12）：宽限交卷轮退化但解析出工具意图 → 明确告知
   // 工具已停用，再给一次交卷机会（当晚 40 轮耗尽后模型在无 tools 交卷调用里仍想
   // read_file → DSML 原文死；主循环的 D2 恢复不覆盖 grace 路径）
-  if (grace.kind === 'text' && isDegenerateText(grace.text) && dsmlRecoveryEnabled()) {
+  if (grace.kind === 'text' && isDegenerateText(grace.text)) {
     const parsedGrace = parseDsmlInvokes(grace.text)
     if (parsedGrace) {
       const graceFeedback = [
@@ -1608,7 +1581,7 @@ async function runGraceWrapUpTurn(
       messages: [
         { role: 'system', content: `${input.system}${GRACE_TURN_SUFFIX}` },
         // 2026-09-16 上下文同步 Proma：与主路径同口径（全量模式传全量；滑窗逃生口维持窗口）
-        ...(loopWindowOffEnabled() ? messages : windowMessagesWithDigest(messages, TEXT_WINDOW_TURNS, TOOL_WINDOW_ROUNDS, pinnedTestTurn)),
+        ...messages,
       ],
       // 空数组而非缺省：与「无 tools 的交接调用」在调用方可区分（tools === undefined）
       tools: [],

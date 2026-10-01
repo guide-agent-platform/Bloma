@@ -79,14 +79,17 @@ describe('W2 预览引擎 preview-runtime', () => {
     expect(resolveRealScaffoldSpawn(oldLoopRoot, 0)).toBeNull()
   })
 
-  it('产物标记分流：real-fullstack 标记→spawn；旧路径 static-server.js 在→null；real-static 标记→file server', async () => {
+  it('产物标记分流：real-fullstack 标记→spawn；旧路径 static-server.js 在→null；real-static 标记→file server', { timeout: 60_000 }, async () => {
     const fullstackRoot = mkdtempSync(join(tmpdir(), 'w2-full-'))
     writeFileSync(join(fullstackRoot, 'server.js'), 'console.log("no-listen")', 'utf8')
     writeRealScaffoldMarker(fullstackRoot, 'real-fullstack')
     const full = resolveRealScaffoldSpawn(fullstackRoot, 0)
     expect(full).not.toBeNull()
     children.push(full!)
-    await new Promise((r) => setTimeout(r, 300))
+    // 轮询等退出（全量并行负载下固定 300ms 不够；no-listen 脚本自然退出，spawn 姿势正确即可）
+    for (let i = 0; i < 100 && full!.exitCode === null; i++) {
+      await new Promise((r) => setTimeout(r, 100))
+    }
     expect(full!.exitCode).not.toBe(null) // no-listen 脚本自然退出；spawn 姿势正确即可
 
     const oldRoot = mkdtempSync(join(tmpdir(), 'w2-old-'))

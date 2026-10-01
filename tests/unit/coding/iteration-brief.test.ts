@@ -5,7 +5,6 @@ import { join } from 'path'
 import {
   ITERATION_MODE_SECTION,
   buildIterationTask,
-  iterationBriefEnabled,
   resolveAgentLoopMaxTurnsLocal,
 } from '../../../main/coding/iteration-brief'
 import { iterationBriefActive, resolveLoopMaxTurnsForInput } from '../../../main/coding/programming-orchestrator'
@@ -36,18 +35,6 @@ function withEnv(key: string, value: string | undefined, fn: () => void): void {
     else process.env[key] = original
   }
 }
-
-describe('iterationBriefEnabled — 开关矩阵（缺省 on，0 逃生口）', () => {
-  it('未设=on；1/on/true=on；0/off/false=off', () => {
-    withEnv('BLOMA_ITER_BRIEF', undefined, () => expect(iterationBriefEnabled()).toBe(true))
-    withEnv('BLOMA_ITER_BRIEF', '1', () => expect(iterationBriefEnabled()).toBe(true))
-    withEnv('BLOMA_ITER_BRIEF', 'on', () => expect(iterationBriefEnabled()).toBe(true))
-    withEnv('BLOMA_ITER_BRIEF', 'true', () => expect(iterationBriefEnabled()).toBe(true))
-    withEnv('BLOMA_ITER_BRIEF', '0', () => expect(iterationBriefEnabled()).toBe(false))
-    withEnv('BLOMA_ITER_BRIEF', 'off', () => expect(iterationBriefEnabled()).toBe(false))
-    withEnv('BLOMA_ITER_BRIEF', 'false', () => expect(iterationBriefEnabled()).toBe(false))
-  })
-})
 
 describe('resolveAgentLoopMaxTurnsLocal — local 档轮次预算', () => {
   it('未设=12；合法 env 覆盖；非法值回退缺省（对齐 resolveAgentLoopMaxTurns 口径）', () => {
@@ -109,12 +96,6 @@ describe('resolveLoopMaxTurnsForInput / iterationBriefActive — 路由（off=�
     })
   })
 
-  it('开关关 → 一律现状档（localOnly 也回全量，字节级=现状）', () => {
-    withEnv('BLOMA_ITER_BRIEF', '0', () => {
-      expect(resolveLoopMaxTurnsForInput({ mode: 'longterm', localOnly: true })).toBe(40)
-      expect(iterationBriefActive({ localOnly: true })).toBe(false)
-    })
-  })
 
   it('非 localOnly / 未传 → 现状档与 inactive', () => {
     withEnv('BLOMA_ITER_BRIEF', undefined, () => {
@@ -213,16 +194,7 @@ describe('generateLoopPlan localOnly — 定位合同（W2-3）', () => {
   })
 })
 
-describe('局部修改轮聚焦任务书 — 开关缺省 on 声明（Phase 8 拍板）', () => {
-  it('与修复轮/骨架渲染开关（缺省 off）不同：本开关是纯任务书表达层，缺省 on，逃生口 BLOMA_ITER_BRIEF=0', () => {
-    withEnv('BLOMA_ITER_BRIEF', undefined, () => {
-      expect(iterationBriefEnabled()).toBe(true)
-    })
-  })
-})
-
 afterEach(() => {
   // 环境变量恢复由 withEnv 就地保证；此处兜底清理防泄漏
-  delete process.env.BLOMA_ITER_BRIEF
   delete process.env.BLOMA_LOOP_MAX_TURNS_LOCAL
 })

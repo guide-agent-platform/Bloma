@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { restorePromaHome } from '../support/proma-home-guard'
 import { loadConversationHistory } from '../../main/platform/sessions/session-service'
-import { hasWriteEditToolCall, repairNoopGuardEnabled } from '../../main/coding/repair-loop'
+import { hasWriteEditToolCall } from '../../main/coding/repair-loop'
 import { getAgentSessionPath } from '../../storage/config-paths'
 
 /**
@@ -19,22 +19,6 @@ describe('hasWriteEditToolCall（P1-05：有效写入判定）', () => {
     expect(hasWriteEditToolCall([{ name: 'write_file', status: 'ok' }])).toBe(true)
     expect(hasWriteEditToolCall([{ name: 'edit_file' }])).toBe(true) // 存量记录无 status：不回溯降级
     expect(hasWriteEditToolCall([{ name: 'read_file', status: 'ok' }])).toBe(false)
-  })
-})
-
-describe('repairNoopGuardEnabled（P1-05：缺省翻 on，与提示词承诺对齐）', () => {
-  afterEach(() => {
-    vi.unstubAllEnvs()
-  })
-  it('缺省 on；显式 0/off/false 关闭', () => {
-    delete process.env.BLOMA_REPAIR_NOOP_GUARD
-    expect(repairNoopGuardEnabled()).toBe(true)
-    for (const value of ['0', 'off', 'false', 'OFF']) {
-      vi.stubEnv('BLOMA_REPAIR_NOOP_GUARD', value)
-      expect(repairNoopGuardEnabled(), value).toBe(false)
-    }
-    vi.stubEnv('BLOMA_REPAIR_NOOP_GUARD', '1')
-    expect(repairNoopGuardEnabled()).toBe(true)
   })
 })
 

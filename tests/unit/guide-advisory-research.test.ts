@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { decideBlocks } from '../support/guide-decide-stream'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
 
 vi.mock('../../main/coding/programming-orchestrator', () => ({
@@ -66,13 +67,20 @@ function makeInput(): AgentSendMessageInput {
   }
 }
 
-/** 按调用次序返回剧本的 query mock（0=向导判定 1=查询构造 2+=想法提炼）；calls 记录每次 prompt。 */
+/** 按调用形态分流的 query mock（2026-10-01 开关面收敛批改造）：
+ * - 市调子流程（prompt 含【用户需求】/【调研结果】）按剧本次序返回 scripts；
+ * - guide 决策调用返回 confirmJson（tool_use 化）——loop 路径下决策与子流程的调用次序不再稳定，
+ *   按调用内容分流取代旧「按调用次序」剧本；calls 记录每次 prompt。 */
 function makeModel(scripts: string[]): { model: GuideModelOptions; calls: string[] } {
   const calls: string[] = []
+  let subCall = 0
   const query: SDKQuery = async function* (prompt: string): AsyncGenerator<SDKMessage> {
     calls.push(prompt)
-    const response = scripts[Math.min(calls.length - 1, scripts.length - 1)] ?? '{}'
-    yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: response }] } }
+    const isGuideDecision = !prompt.includes('【用户需求】') && !prompt.includes('【调研结果】')
+    const response = isGuideDecision
+      ? scripts[0]
+      : scripts[1 + Math.min(subCall++, scripts.length - 2)] ?? '{}'
+    yield { type: 'assistant', message: { role: 'assistant', content: decideBlocks(response) } }
     yield { type: 'result', subtype: 'success' }
   }
   const history: ConversationTurn[] = [
@@ -102,13 +110,11 @@ beforeEach(() => {
   // 钉到 scrape 模式（缺省已改 agent——纯模型灵感不发网络）
   process.env.BLOMA_RESEARCH_MODE = 'scrape'
   // 2026-09-16：BLOMA_GUIDE_LOOP 缺省翻转 on，本文件锁旧单次 JSON 行为
-  process.env.BLOMA_GUIDE_LOOP = '0'
   vi.clearAllMocks()
 })
 afterEach(() => {
   process.env.PROMA_HOME = originalPromaHome
   delete process.env.BLOMA_RESEARCH_MODE
-  delete process.env.BLOMA_GUIDE_LOOP
   vi.restoreAllMocks()
 })
 
@@ -147,11 +153,11 @@ describe('顾问式市调（2026-08-30）', () => {
     const events: AgentEvent[] = []
     await handleGuideMessage(makeInput(), (event) => events.push(event), model)
 
-    // 调用序：0=向导判定 1=查询构造 2=想法提炼
-    expect(calls.length).toBeGreaterThanOrEqual(3)
+    // 调用序（按内容分流后）：calls 中含【用户需求】的子流程调用应覆盖查询构造与提炼
+    const demandCalls = calls.filter((c) => c.includes('【用户需求】'))
+    expect(demandCalls.length).toBeGreaterThanOrEqual(2)
     // 提炼输入锚定需求：带【用户需求】且含需求描述中的关键名词
-    expect(calls[2]).toContain('【用户需求】')
-    expect(calls[2]).toContain('复音电子琴')
+    expect(demandCalls[1]).toContain('复音电子琴')
     // 提炼结果进弹窗想法区
     const confirm = events.find((e) => e.type === 'user_decision_required')
     const ideas = (confirm?.payload as { ideas?: Array<{ label: string }> }).ideas ?? []

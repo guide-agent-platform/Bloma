@@ -94,9 +94,7 @@ export interface VisionGateResult {
   note?: string
 }
 
-export function visionAuditEnabled(): boolean {
-  return process.env.BLOMA_VISION_AUDIT !== '0'
-}
+/** 开关已删除（2026-10-01 开关面收敛批）：视觉审计门无条件执行。 */
 
 /** 渠道 base_url → OpenAI chat 根：/anthropic 系取 origin；compatible-mode/v1 原样。 */
 export function deriveChatBaseUrl(baseUrl: string): string {
@@ -471,9 +469,6 @@ export async function runVisionAuditGate(input: {
   projectId: string
   timeoutMs?: number
 }): Promise<VisionGateResult> {
-  if (!visionAuditEnabled()) {
-    return { status: 'skipped', digest: '视觉审计未执行（BLOMA_VISION_AUDIT=0 紧急停用）', note: 'env kill switch' }
-  }
   const timeoutMs = input.timeoutMs ?? 180_000
   let roles: ReturnType<typeof resolveVisionRoles>
   try {

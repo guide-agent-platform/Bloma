@@ -38,7 +38,7 @@ import { getChannelByIdRaw } from '../../platform/llm/channel-manager'
 import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../orchestration/orchestrator'
 import { trackAnalytics } from '../../delivery/track-analytics'
 import { runAgentLoop } from '../../agent/loop/agent-loop'
-import { buildGuideTools, guideLoopEnabled, type GuideDecision } from '../guide-tools'
+import { buildGuideTools, type GuideDecision } from '../guide-tools'
 import {
   detectOrphanEnrichmentClarification,
   hasPendingEnrichmentClarification,
@@ -66,7 +66,7 @@ import { isRecord } from '../../../shared/validators'
 
 type GuideEventPublisher = (event: AgentEvent) => void
 
-import { CLARIFICATION_ROUND_LIMIT, DEFAULT_GUIDE_SYSTEM_PROMPT, FIRST_TURN_RULE, GUIDE_LOOP_ADDENDUM, GuideParsed, extractText, parseGuideJson } from './guide-runtime'
+import { CLARIFICATION_ROUND_LIMIT, DEFAULT_GUIDE_SYSTEM_PROMPT, FIRST_TURN_RULE, GUIDE_LOOP_ADDENDUM, GuideParsed } from './guide-runtime'
 import { GuideLoopOutcome, bumpFreeChatStreak, clarifyTwoLayerEnabled, collectClarificationAnswers, countSameOptionCards, countTrailingClarificationRounds, ensurePrimaryIntent, freeChatStreakOf, hasRecentReliefCard, normalizeClarificationOptions, normalizeGuideDecisionToParsed, publishClarificationCard, publishClarificationReliefCard, resetFreeChatStreak, resolveAutoDelegation, resolveCardAnswer, resolveClarificationReliefAnswer, trackClarificationResponded } from './clarify-flow'
 import { startRequirementConfirmFlow } from './requirement-confirm'
 import { runPrdPipeline } from './prd-pipeline'
@@ -685,57 +685,32 @@ export async function tryModelDrivenGuide(
   }
   const history: ConversationTurn[] = [systemTurn, ...model.history]
 
-  // —— 模型调用层两态（Phase 10 向导 loop 化，2026-09-16）——
-  // on：runAgentLoop + 向导工具面（自由对话 + 只读事实 + guide_decide 决策工具）；
-  //     决策经工具原生入参提交（根治 parseGuideJson 的 PARSE_FAILED/截断旧病），
-  //     下游路由/熔断/确认门零改动。
-  // off：单次流式 JSON + parseGuideJson（字节级现状）。
+  // —— 模型调用层（Phase 10 向导 loop 化，2026-09-16；旧单次 JSON 路径已删 2026-10-01）——
+  // runAgentLoop + 向导工具面（自由对话 + 只读事实 + guide_decide 决策工具）；
+  // 决策经工具原生入参提交（根治 parseGuideJson 的 PARSE_FAILED/截断旧病），
+  // 下游路由/熔断/确认门零改动。
   let parsed: GuideParsed | null = null
-  if (guideLoopEnabled()) {
-    const loop = await runGuideLoopTurn(input, publish, model, baseSystem)
-    if (loop.kind === 'decision') {
-      parsed = loop.decision
-      resetFreeChatStreak(input.session_id)
-    } else if (loop.kind === 'free_chat') {
-      // 纯聊天：旁白已由 loop 上屏+落 JSONL，这里只收口事件；阶段不动，等下一条用户消息
-      bumpFreeChatStreak(input.session_id)
-      try {
-        recordDecision({
-          project_id: input.project_id,
-          session_id: input.session_id,
-          entry: { type: 'guide_loop', title: '向导自由对话轮（未决策）', why: `free_chat 连续 ${freeChatStreakOf(input.session_id)} 轮`, detail: { via: 'loop', outcome: 'free_chat' } },
-        })
-      } catch {
-        /* 决策日志失败不影响对话 */
-      }
-      publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
-      return true
-    } else {
-      // 失败/取消：回退规则路由（与旧路径同款兜底）
-      return false
-    }
-  } else {
-    // 只做内部累积：模型流式吐的是原始 JSON，不发布 message_delta，避免结构泄露
-    let accumulated = ''
+  const loop = await runGuideLoopTurn(input, publish, model, baseSystem)
+  if (loop.kind === 'decision') {
+    parsed = loop.decision
+    resetFreeChatStreak(input.session_id)
+  } else if (loop.kind === 'free_chat') {
+    // 纯聊天：旁白已由 loop 上屏+落 JSONL，这里只收口事件；阶段不动，等下一条用户消息
+    bumpFreeChatStreak(input.session_id)
     try {
-      const stream = model.query(input.content, {
-        env: model.env,
-        signal: model.signal,
-        sessionId: model.sessionId,
-        history,
-        maxTokens: model.maxTokens,
-        temperature: model.temperature,
+      recordDecision({
+        project_id: input.project_id,
+        session_id: input.session_id,
+        entry: { type: 'guide_loop', title: '向导自由对话轮（未决策）', why: `free_chat 连续 ${freeChatStreakOf(input.session_id)} 轮`, detail: { via: 'loop', outcome: 'free_chat' } },
       })
-      for await (const sdkMessage of stream) {
-        if (sdkMessage.type !== 'assistant' || !sdkMessage.message) continue
-        const text = extractText(sdkMessage.message.content)
-        if (text) accumulated += text
-      }
     } catch {
-      // 模型不可用/网络错误：回退规则路由（不打断澄清流程）
-      return false
+      /* 决策日志失败不影响对话 */
     }
-    parsed = parseGuideJson(accumulated) ?? null
+    publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+    return true
+  } else {
+    // 失败/取消：回退规则路由（与旧路径同款兜底）
+    return false
   }
   if (!parsed) return false
 

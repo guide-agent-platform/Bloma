@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import {
-  visionAuditEnabled, deriveChatBaseUrl, resolveVisionRoles, resolveVisionPair, pickVisionEndpoint,
+  deriveChatBaseUrl, resolveVisionRoles, resolveVisionPair, pickVisionEndpoint,
   BLIND_DESCRIBE_PROMPT, buildComparePrompt, extractJson, parseCompareOutput, digestVisionReport,
   parseMaxTokensCap, productProblems, normalizeTarget, defaultTargetForKind,
   buildVisionRequest, VISION_TEMPERATURE, VISION_FRAMES, VISION_FRAME_INTERVAL_MS, VISION_VIEWPORT, VISION_WINDOW_MS,
@@ -28,20 +28,6 @@ const QWEN: ChannelLike = {
   api_key: 'hex-qw', models: [{ id: 'qwen3-vl-flash', enabled: true }, { id: 'qwen3-vl-plus', enabled: true }], enabled: true,
 }
 const decrypt = (hex: string) => `plain(${hex})`
-
-describe('visionAuditEnabled（紧急逃生门，缺省开）', () => {
-  const saved = process.env.BLOMA_VISION_AUDIT
-  afterEach(() => {
-    if (saved === undefined) delete process.env.BLOMA_VISION_AUDIT
-    else process.env.BLOMA_VISION_AUDIT = saved
-  })
-  it("未设置 → 启用；'0' → 停用", () => {
-    delete process.env.BLOMA_VISION_AUDIT
-    expect(visionAuditEnabled()).toBe(true)
-    process.env.BLOMA_VISION_AUDIT = '0'
-    expect(visionAuditEnabled()).toBe(false)
-  })
-})
 
 describe('deriveChatBaseUrl', () => {
   it('anthropic 根 / compatible-mode / 尾斜杠三种形态', () => {

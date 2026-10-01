@@ -18,28 +18,9 @@ import { backplanePages, type PrdBackplane } from '../../coding/sketch-engine'
 /** 注入点标识（①④⑧由 P2/P6 消费，此处统一登记开关语义）。 */
 export type InjectionPoint = 'template_select' | 'clarify' | 'prd' | 'sketch' | 'loop' | 'gwt' | 'audit' | 'judge'
 
-const INJECTION_ENV_KEYS: Record<InjectionPoint, string> = {
-  template_select: 'BLOMA_INJECT_TEMPLATE_SELECT',
-  clarify: 'BLOMA_INJECT_CLARIFY',
-  prd: 'BLOMA_INJECT_PRD',
-  sketch: 'BLOMA_INJECT_SKETCH',
-  loop: 'BLOMA_INJECT_LOOP',
-  gwt: 'BLOMA_INJECT_GWT',
-  audit: 'BLOMA_INJECT_AUDIT',
-  judge: 'BLOMA_INJECT_JUDGE',
-}
-
-/** 注入点开关：缺省开；环境变量 0/off/false 关闭（实验变量=单点独立关闭）。 */
-export function isInjectionEnabled(point: InjectionPoint): boolean {
-  const raw = process.env[INJECTION_ENV_KEYS[point]]
-  if (!raw) return true
-  const value = raw.trim().toLowerCase()
-  return value !== '0' && value !== 'off' && value !== 'false'
-}
 
 /** 模板加载薄封装：开关关闭直接 null（调用方零分支）。 */
 function templateIfEnabled(point: InjectionPoint, type: TemplateType, logContext?: { project_id?: string; session_id?: string }): ProjectTemplate | null {
-  if (!isInjectionEnabled(point)) return null
   return loadProjectTemplate(type, logContext)
 }
 
@@ -169,7 +150,6 @@ export function buildSkeletonMapInjection(
  * 换成状态机/碰撞/胜负边界（玩法才是游戏的验证面）。
  */
 export function gwtRequiredCategories(mode: ProjectMode, level: 'loose' | 'standard', type?: TemplateType): string[] {
-  if (!isInjectionEnabled('gwt')) return []
   if (type === 'game') {
     const game = ['主路径(P0)', '状态机', '碰撞', '胜负边界']
     return mode === 'longterm' ? [...game, '空态'] : game

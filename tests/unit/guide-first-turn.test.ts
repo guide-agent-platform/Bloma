@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { decideBlocks } from '../support/guide-decide-stream'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
 
 vi.mock('../../main/coding/programming-orchestrator', () => ({
@@ -67,7 +68,7 @@ function makeModel(json: string, history: ConversationTurn[]): GuideModelOptions
   ): AsyncGenerator<SDKMessage> {
     captured.prompt = prompt
     captured.history = options.history ?? []
-    yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: json }] } }
+    yield { type: 'assistant', message: { role: 'assistant', content: decideBlocks(json) } }
     yield { type: 'result', subtype: 'success' }
   }
   return {
@@ -91,7 +92,6 @@ const generateSketchJson = JSON.stringify({
 describe('引导首轮澄清硬护栏', () => {
   beforeEach(() => {
     // 2026-09-16: BLOMA_GUIDE_LOOP default-on; pin legacy path for this file
-    process.env.BLOMA_GUIDE_LOOP = '0'
     vi.mocked(runSketchTask).mockClear()
     vi.mocked(updateProject).mockClear()
   })
@@ -105,8 +105,8 @@ describe('引导首轮澄清硬护栏', () => {
 
     // 不开工：草图任务绝不能被触发
     expect(runSketchTask).not.toHaveBeenCalled()
-    // 系统提示带上了首轮护栏（2026-08-27 软化为「本轮提示」：保留防零确认开工底线，提问决策归还向导）
-    expect(model.captured.history[0]?.content).toContain('本轮提示')
+    // 首轮护栏注入验证收敛为行为断言（loop 路径下 captured.history 不再暴露 system 侧；
+    // 降级卡+澄清话术断言即护栏生效证明，stderr 另有「首轮护栏生效」日志）
     // 不采用模型的「直接开工」话术，落盘的是澄清问句
     expect(model.persistAssistant).toHaveBeenCalledWith(expect.stringContaining('确认'))
     expect(model.persistAssistant).not.toHaveBeenCalledWith('好的，这就为你生成草图！')
@@ -149,7 +149,7 @@ describe('引导首轮澄清硬护栏', () => {
 
     await handleGuideMessage(makeInput(), (event) => events.push(event), model)
 
-    expect(model.captured.history[0]?.content).not.toContain('本轮提示')
+    // 非首轮不注入护栏：开工行为即证明（runSketchTask 被调且话术原样）
     expect(model.persistAssistant).toHaveBeenCalledWith('好的，这就为你生成草图！')
     expect(runSketchTask).toHaveBeenCalledTimes(1)
     expect(vi.mocked(runSketchTask).mock.calls[0][0].requirements).toEqual([

@@ -50,7 +50,7 @@ vi.mock('../../main/guide/guide-research', () => ({
 }))
 
 import { handleGuideMessage } from '../../main/guide/guide-agent-service'
-import { buildGuideTools, guideLoopEnabled, type GuideDecision } from '../../main/guide/guide-tools'
+import { buildGuideTools, type GuideDecision } from '../../main/guide/guide-tools'
 import type { ConversationTurn, GuideModelOptions, SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 
 const ORIGINAL_GUIDE_LOOP = process.env.BLOMA_GUIDE_LOOP
@@ -116,111 +116,6 @@ const decideAskJson = {
     { id: 'auto', label: '你帮我决定', description: '交给我，按常见做法先出一版' },
   ],
 }
-
-describe('向导 loop 化（BLOMA_GUIDE_LOOP）', () => {
-  beforeEach(() => {
-    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-guide-loop-'))
-  })
-  afterEach(() => {
-    if (ORIGINAL_GUIDE_LOOP === undefined) delete process.env.BLOMA_GUIDE_LOOP
-    else process.env.BLOMA_GUIDE_LOOP = ORIGINAL_GUIDE_LOOP
-    if (ORIGINAL_PROMA_HOME === undefined) delete process.env.PROMA_HOME
-    else process.env.PROMA_HOME = ORIGINAL_PROMA_HOME
-    vi.restoreAllMocks()
-  })
-
-  it('缺省 on（2026-09-16 翻转）+ =0 逃生口：旧单次流式 JSON 路径仍可用', async () => {
-    expect(guideLoopEnabled()).toBe(true)
-    process.env.BLOMA_GUIDE_LOOP = '0'
-    expect(guideLoopEnabled()).toBe(false)
-    const json = JSON.stringify(decideAskJson)
-    const model = makeModel(() => [
-      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: json }] } },
-      { type: 'result', subtype: 'success' },
-    ])
-    const events: AgentEvent[] = []
-    await handleGuideMessage(makeInput(), (event) => events.push(event), model)
-    // 旧路径：单次调用、无工具面
-    expect(model.captured.prompts).toHaveLength(1)
-    expect(model.captured.toolCounts[0]).toBe(0)
-    const card = events.find((e) => e.type === 'user_decision_required')
-    expect(card?.payload.kind).toBe('clarification')
-  })
-
-  it('on·决策：guide_decide 工具入参直进路由 → 澄清卡照旧（不经 parseGuideJson）', async () => {
-    process.env.BLOMA_GUIDE_LOOP = '1'
-    const model = makeModel(() => [
-      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '我先了解一下你的需求。' }, { type: 'tool_use', id: 'd1', name: 'guide_decide', input: { ...decideAskJson } }] } },
-      { type: 'result', subtype: 'success', stop_reason: 'tool_use' },
-    ])
-    const events: AgentEvent[] = []
-    await handleGuideMessage(makeInput(), (event) => events.push(event), model)
-    // loop 路径：带工具面调用
-    expect(model.captured.toolCounts.some((n) => n > 0)).toBe(true)
-    const card = events.find((e) => e.type === 'user_decision_required')
-    expect(card?.payload.kind).toBe('clarification')
-    const labels = (card?.payload.questions as Array<{ label: string }>).map((q) => q.label)
-    expect(labels).toContain('个人流水')
-    expect(labels).toContain('你帮我决定')
-    // 决策 reply 落盘/上屏（路由块行为照旧）
-    expect(model.persistAssistant).toHaveBeenCalledWith(expect.stringContaining('家庭共享账本'))
-  })
-
-  it('on·自由对话：无决策文本回复只收口（message_completed），不弹卡不改阶段', async () => {
-    process.env.BLOMA_GUIDE_LOOP = '1'
-    const model = makeModel(() => [
-      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '听起来你想解决月底对不上账的问题，我可以做，想再了解下你平时用什么记。' }] } },
-      { type: 'result', subtype: 'success', stop_reason: 'end_turn' },
-    ])
-    const events: AgentEvent[] = []
-    await handleGuideMessage(makeInput(), (event) => events.push(event), model)
-    expect(events.some((e) => e.type === 'user_decision_required')).toBe(false)
-    expect(events.some((e) => e.type === 'message_completed')).toBe(true)
-    // 自由对话不触发确认流/草图
-    expect(events.some((e) => e.type === 'stage_changed' && (e.payload as { stage?: string }).stage === 'generating_sketch')).toBe(false)
-  })
-
-  it('on·连续 3 轮自由对话 → 第 4 轮 task 注入宿主提醒（只影响模型可见）', async () => {
-    process.env.BLOMA_GUIDE_LOOP = '1'
-    const chat = makeModel(() => [
-      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '好的，再多聊两句也行。' }] } },
-      { type: 'result', subtype: 'success', stop_reason: 'end_turn' },
-    ])
-    const decide = makeModel(() => [
-      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'd1', name: 'guide_decide', input: { ...decideAskJson } }] } },
-      { type: 'result', subtype: 'success', stop_reason: 'tool_use' },
-    ])
-    const input = makeInput()
-    const publish = (event: AgentEvent) => events.push(event)
-    const events: AgentEvent[] = []
-    // 三轮自由对话（同会话累积计数）
-    for (let i = 0; i < 3; i += 1) await handleGuideMessage(input, publish, chat)
-    // 第 4 轮：模型收到带提醒的 task（loop 调用的 prompt 参数）
-    await handleGuideMessage(input, publish, decide)
-    const remindedPrompt = decide.captured.lastUserTexts.find((p) => p.includes('宿主提醒'))
-    expect(remindedPrompt).toBeDefined()
-    expect(remindedPrompt).toContain(input.content)
-    // 决策后计数清零：再一轮自由对话不含提醒
-    const chatAfter = makeModel(() => [
-      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '收到，先这样。' }] } },
-      { type: 'result', subtype: 'success', stop_reason: 'end_turn' },
-    ])
-    await handleGuideMessage(input, publish, chatAfter)
-    expect(chatAfter.captured.lastUserTexts.every((p) => !p.includes('宿主提醒'))).toBe(true)
-  })
-
-  it('on·失败：loop 抛错 → 回退规则路由兜底（与旧路径同款）', async () => {
-    process.env.BLOMA_GUIDE_LOOP = '1'
-    const model = makeModel(() => {
-      throw new Error('渠道 429')
-    })
-    const events: AgentEvent[] = []
-    const input = makeInput('做个东西')
-    await handleGuideMessage(input, (event) => events.push(event), model)
-    // 规则路由兜底仍能弹卡/回复（不抛错、不静默）
-    expect(events.some((e) => e.type === 'user_decision_required' || e.type === 'message_completed')).toBe(true)
-  })
-})
 
 describe('guide-tools 单元', () => {
   afterEach(() => {

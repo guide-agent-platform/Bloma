@@ -40,7 +40,7 @@ import {
 import { categoryForStage, categoryTemperature } from '../../platform/llm/model-resolution'
 import { handleGuideMessage } from '../../guide/guide-agent-service'
 import type { SDKQueryOptions } from './orchestration-contracts'
-import { anthropicMessagesQuery } from './dispatch-support'
+
 import {
   READY_COMPLETION_COPY,
   clearPendingReviewAction,
@@ -75,7 +75,7 @@ import { recordSessionActivity } from '../../platform/sessions/session-service'
 import { appendExperienceEvent } from '../../experience/event-log'
 import { isThinkingLogEnabled, logThinking } from '../../agent/loop/thinking-log'
 import { extractErrorMessage } from '../../platform/llm/channel-test-error'
-import { anthropicMessagesQueryViaProviders, providerAdapterEnabled } from '../../platform/upstream/providers/loop-query'
+import { anthropicMessagesQueryViaProviders } from '../../platform/upstream/providers/loop-query'
 
 import { SDKQuery, StreamPublisher } from './orchestration-contracts'
 import { MAX_RETRIES, MAX_RETRY_DURATION_MS, SILENT_RETRY_THRESHOLD } from './run-registry'
@@ -171,10 +171,10 @@ export function sleep(ms: number): Promise<void> {
  * 与 [channel-switch] 系统行，绝不静默。
  */
 async function* queryWithRuntimeFallback(prompt: string, options: SDKQueryOptions): AsyncGenerator<SDKMessage> {
-  // R1-providers（2026-09-19「照抄 Proma」）：传输层换上游 providers 口径（首字节超时/
-  // 首事件前重试/多工具并行装配/双认证头），BLOMA_PROVIDER_ADAPTER=0 字节级回旧路径。
-  // T9 被动渠道回退包裹层不变：两路径均经同一回退语义。
-  const baseQuery = providerAdapterEnabled() ? anthropicMessagesQueryViaProviders : anthropicMessagesQuery
+  // R1-providers（2026-09-19「照抄 Proma」）：传输层用上游 providers 口径（首字节超时/
+  // 首事件前重试/多工具并行装配/双认证头）；旧 anthropicMessagesQuery 已删（2026-10-01）。
+  // T9 被动渠道回退包裹层不变。
+  const baseQuery = anthropicMessagesQueryViaProviders
   const context = readFallbackContext(options.env)
   let emitted = false
   const iterator = baseQuery(prompt, options)[Symbol.asyncIterator]()

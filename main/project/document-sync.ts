@@ -20,7 +20,7 @@ import { nextRequirementId } from '../coding/programming-orchestrator'
 import type { PrdBackplane, RequirementStatus, SketchRequirement } from '../coding/sketch-engine'
 import { buildPrdDocumentFallback, deriveInterfaceSpec, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, backplaneTemplateMeta } from '../coding/sketch-engine'
 import { parseEarsAssertion } from '../guide/ears-vocabulary'
-import { gwtRequiredCategories, isInjectionEnabled } from '../agent/prompting/template-injection'
+import { gwtRequiredCategories } from '../agent/prompting/template-injection'
 import { describeEffect, describeTrigger, parseBehaviorAssertion } from '../verification/behavior-assertions'
 import { syncReplayFeatureFiles } from '../experience/replay-compiler'
 
@@ -299,13 +299,7 @@ export function writePlanDocument(projectId: string, markdown: string): Document
 // P3 loop-log（2026-09-04）：append-only 过程日志
 // =========================================================================
 
-/** loop-log 总开关：缺省开；BLOMA_LOOP_LOG=0/off/false 关闭（诊断噪声场景逃生门）。 */
-export function loopLogEnabled(): boolean {
-  const raw = process.env.BLOMA_LOOP_LOG
-  if (!raw) return true
-  const value = raw.trim().toLowerCase()
-  return value !== '0' && value !== 'off' && value !== 'false'
-}
+/** 开关已删除（2026-10-01 开关面收敛批）：loop-log 无条件落盘（append-only 取证通道）。 */
 
 /** loop-log 条目：会话头（每次 runAgentLoop 一个）/ 轮次行（onTurn 实时）/ 终态节。 */
 export type LoopLogEntry =

@@ -19,14 +19,6 @@
  * 回退出口保留）。rebuild（整版重做）不消费本模块（全量锚定语义不变）。
  */
 
-/** 开关解析（与 focusAnchorEnabled 同风格，每次调用读取）。 */
-export function iterationBriefEnabled(): boolean {
-  const raw = (process.env.BLOMA_ITER_BRIEF ?? '').trim().toLowerCase()
-  if (raw === '0' || raw === 'off' || raw === 'false') return false
-  if (raw === '1' || raw === 'on' || raw === 'true') return true
-  return true
-}
-
 /** localOnly 轮次预算：BLOMA_LOOP_MAX_TURNS_LOCAL 可覆盖；非法值回退缺省 12。 */
 const ITERATION_LOCAL_MAX_TURNS_DEFAULT = 12
 

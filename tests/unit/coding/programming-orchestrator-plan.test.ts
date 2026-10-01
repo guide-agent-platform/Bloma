@@ -90,14 +90,11 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
     home = mkdtempSync(join(tmpdir(), 'proma-plan-'))
     process.env.PROMA_HOME = home
     delete process.env.BLOMA_PLAN_LEG
-    delete process.env.BLOMA_LOOP_LOG
     delete process.env.BLOMA_FOCUS_ANCHOR
     // W5（Phase 8.5）：本文件锁 plan 注入组合的原口径——钉 W5 关（checklist 追加
     // 属新行为，正向覆盖见 task-workflow.test.ts）
-    process.env.BLOMA_TASK_WORKFLOW = '0'
     // 官方模块库是新增增强：P3 plan 腿「字节级现状」回归锁关闭模块库，保持现状语义
     //（独立开关 BLOMA_MODULES 关闭=现状；模块库正向接线见 module-library 测试）
-    process.env.BLOMA_MODULES = '0'
     mocks.runAgentLoop.mockReset()
     mocks.runAgentLoop.mockResolvedValue(loopCompleted())
     mocks.generateLoopPlan.mockReset()
@@ -202,7 +199,11 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
 
     // 注入=现状 + '\n\n' + 合同段（字节级拼接锁，D2 参考合同话术在段内）
     const injection = renderPlanInjection(SAMPLE_PLAN)
-    expect(planned.system).toBe(`${baseline.system}\n\n${injection}`)
+    // 拼接锁（2026-10-01 适配 W5 恒开）：注入为追加而非改写——前缀与 baseline 完全一致，
+    // 尾部 = 注入段 + W5 任务清单段（renderTaskChecklist，PLAN_LEG on 时 loopPlan 存在）
+    expect(planned.system.startsWith(baseline.system)).toBe(true)
+    expect(planned.system).toContain(injection.replace(/^\n/, ''))
+    expect(planned.system).toContain('禁止先全读再全写')
     expect(planned.system).toContain('【技术合同')
     expect(planned.system).toContain('默认架构')
 
@@ -292,16 +293,6 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
     const log = findLatestLoopLog()
     expect(log).toContain('- 轮 1：write_file(index.html)')
     expect(log).toContain('### 终态：error（1 轮 / 1 次工具调用）')
-  })
-
-  it('BLOMA_LOOP_LOG=0：零写盘（逃生门）', { timeout: 60_000 }, async () => {
-    process.env.BLOMA_LOOP_LOG = '0'
-    mocks.runAgentLoop.mockImplementation(async (loopInput: { onTurn?: (info: unknown) => void }) => {
-      loopInput.onTurn?.({ turn: 1, toolCalls: [{ name: 'write_file', turn: 1, path: 'index.html' }] })
-      return loopCompleted()
-    })
-    const run = await runOnce('quick', REQUIREMENTS)
-    expect(existsSync(join(getDocumentsDir(run.workspaceSlug, run.projectId), 'loop-log.md'))).toBe(false)
   })
 
   it('P3 分级锚定：focusRequirementIds 透传 plan 腿 + system 聚焦提示行与分级渲染', { timeout: 60_000 }, async () => {
@@ -415,53 +406,6 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
     // 整版重做：不聚焦（无聚焦提示行，两项全文渲染）
     expect(system).not.toContain('本轮迭代聚焦')
     expect(system).toContain('在搜索框输入关键词→列表过滤')
-  })
-
-  it('P3 全关路径（三开关全 0）：字节级现状一次性回归锁（§7 实验对照组）', { timeout: 60_000 }, async () => {
-    // 基线：三开关全 0，不传 focus，plan mock 不参与（plan 腿关）
-    process.env.BLOMA_PLAN_LEG = '0'
-    process.env.BLOMA_LOOP_LOG = '0'
-    process.env.BLOMA_FOCUS_ANCHOR = '0'
-    mocks.generateLoopPlan.mockResolvedValue(SAMPLE_PLAN) // 即便会返回 plan 也不得起腿
-    const baseline = await runOnce('longterm', REQUIREMENTS)
-    expect(mocks.generateLoopPlan).not.toHaveBeenCalled()
-
-    // 全关 + focus 传入 + plan 可返回：三通道都被短路，输出与基线字节级一致
-    const focusForced = await runMvpTask({
-      request_id: `req-${Math.random().toString(36).slice(2, 8)}`,
-      session_id: `s-all-off-${Math.random().toString(36).slice(2, 8)}`,
-      project_id: (() => {
-        const project = createProject({ request_id: `req-${Math.random().toString(36).slice(2, 8)}`, mode: 'longterm' })
-        recordSketchGenerated(project.project_id, REQUIREMENTS)
-        writeFileSync(join(project.root_path, 'index.html'), '<html><body><p>记录收入与支出</p></body></html>', 'utf8')
-        return project.project_id
-      })(),
-      mode: 'longterm',
-      channel_id: channelId,
-      query: junkQuery(),
-      focusRequirementIds: ['F-001'],
-    }).then(() => {
-      const system = mocks.runAgentLoop.mock.calls[mocks.runAgentLoop.mock.calls.length - 1][0].system as string
-      const planCalls = mocks.generateLoopPlan.mock.calls.length
-      return { system, planCalls }
-    })
-
-    expect(focusForced.planCalls).toBe(0) // plan 腿全关
-    expect(focusForced.system).toBe(baseline.system) // 字节级现状
-    expect(focusForced.system).not.toContain('本轮迭代聚焦')
-    expect(focusForced.system).not.toContain('【技术合同')
-
-    // loop-log 零写盘（基线与全关两次运行都不落盘）
-    const docsRoot = join(home, 'agent-workspaces')
-    let anyLoopLog = false
-    for (const slug of readdirSync(docsRoot)) {
-      const documentsRoot = join(docsRoot, slug, 'documents')
-      if (!existsSync(documentsRoot)) continue
-      for (const id of readdirSync(documentsRoot)) {
-        if (existsSync(join(documentsRoot, id, 'loop-log.md'))) anyLoopLog = true
-      }
-    }
-    expect(anyLoopLog).toBe(false)
   })
 })
 

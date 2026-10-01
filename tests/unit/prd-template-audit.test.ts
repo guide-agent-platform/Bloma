@@ -36,8 +36,6 @@ describe('注入点④内审变体（章节完备性 + EARS 可测性）', () =>
     process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'proma-p6-'))
   })
   afterEach(() => {
-    delete process.env.BLOMA_INJECT_AUDIT
-    delete process.env.BLOMA_INJECT_JUDGE
     process.env.PROMA_HOME = originalPromaHome
   })
 
@@ -88,14 +86,6 @@ describe('注入点④内审变体（章节完备性 + EARS 可测性）', () =>
       expect(outcome.issues.some((issue) => issue.claim.includes('不可测措辞'))).toBe(false)
     })
 
-    it('开关关闭 → 规则门行为=现状（无模板 issue）', () => {
-      process.env.BLOMA_INJECT_AUDIT = '0'
-      const outcome = ruleGateReview(makeBackplane({ positioning: '' }), 'quick')
-      expect(outcome.issues.some((issue) => issue.location === 'positioning' && issue.dimension === 'G' && issue.claim.includes('必填章节'))).toBe(false)
-      // 既有 F 维空定位检查不受影响（现状语义）
-      expect(outcome.issues.some((issue) => issue.dimension === 'F' && issue.location === 'positioning')).toBe(true)
-    })
-
     it('章节齐全时规则门不追加模板 issue（宁松勿严，不强行找茬）', () => {
       const full = makeBackplane({
         requirements: [{ id: 'F-001', description: '番茄钟', priority: 'P0', behavior_assertions: ['点击开始按钮 → 计时启动'] }],
@@ -111,7 +101,6 @@ describe('注入点⑧judge 版本一致性（轻量，不扩完成度判定）'
 
   afterEach(() => {
     process.env.PROMA_HOME = originalPromaHome
-    delete process.env.BLOMA_INJECT_JUDGE
   })
 
   function setupJudgeProject(backplaneOverride?: (bp: PrdBackplane) => PrdBackplane) {
@@ -141,13 +130,6 @@ describe('注入点⑧judge 版本一致性（轻量，不扩完成度判定）'
 
   it('版本一致 → 无该软约束', () => {
     const project = setupJudgeProject()
-    const verdict = runJudge({ project_id: project.project_id, mode: 'quick' })
-    expect(verdict.soft_constraints.find((item) => item.name === '模板版本一致性')).toBeUndefined()
-  })
-
-  it('开关关闭 → 版本落后也不提示（现状）', () => {
-    process.env.BLOMA_INJECT_JUDGE = '0'
-    const project = setupJudgeProject((bp) => ({ ...bp, template_meta: { type: 'personal_tool', level: 'loose', version: 0 } }))
     const verdict = runJudge({ project_id: project.project_id, mode: 'quick' })
     expect(verdict.soft_constraints.find((item) => item.name === '模板版本一致性')).toBeUndefined()
   })

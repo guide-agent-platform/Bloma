@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   buildModuleMapInjection,
   loadOfficialModules,
-  modulesEnabled,
   renderOfficialModulesToProject,
   type OfficialModule,
 } from '../../main/coding/module-library'
@@ -215,20 +214,6 @@ describe('module-library（P1 模块侧）', () => {
 
     it('空模块列表返回 null', () => {
       expect(buildModuleMapInjection([], { written: [], skipped: [] })).toBeNull()
-    })
-  })
-
-  describe('modulesEnabled：开关', () => {
-    it('缺省开；0/off/false 关闭', () => {
-      delete process.env.BLOMA_MODULES
-      expect(modulesEnabled()).toBe(true)
-      process.env.BLOMA_MODULES = '0'
-      expect(modulesEnabled()).toBe(false)
-      process.env.BLOMA_MODULES = 'off'
-      expect(modulesEnabled()).toBe(false)
-      process.env.BLOMA_MODULES = 'false'
-      expect(modulesEnabled()).toBe(false)
-      delete process.env.BLOMA_MODULES
     })
   })
 })

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { analyzeUiProbe, uiGateEnabled, uiProbeNotes, type UiProbeData } from '../../../main/coding/artifact-ui-gate'
+import { analyzeUiProbe, uiProbeNotes, type UiProbeData } from '../../../main/coding/artifact-ui-gate'
 
 /**
  * L0 产物 UI 完整性门禁——纯判定函数单测（Playwright 采集层是薄壳，判定逻辑全在这里）。
@@ -101,24 +101,6 @@ describe('analyzeUiProbe（L0 硬判定）', () => {
   })
 })
 
-describe('uiGateEnabled（紧急逃生门，缺省开）', () => {
-  const saved = process.env.BLOMA_UI_GATE
-  afterEach(() => {
-    if (saved === undefined) delete process.env.BLOMA_UI_GATE
-    else process.env.BLOMA_UI_GATE = saved
-  })
-  it('未设置 → 启用（硬门禁默认执行）', () => {
-    delete process.env.BLOMA_UI_GATE
-    expect(uiGateEnabled()).toBe(true)
-  })
-  it("仅 '0' → 停用（对齐 BLOMA_AGENT_LOOP 口径）", () => {
-    process.env.BLOMA_UI_GATE = '0'
-    expect(uiGateEnabled()).toBe(false)
-    process.env.BLOMA_UI_GATE = '1'
-    expect(uiGateEnabled()).toBe(true)
-  })
-})
-
 describe('C3 死按钮判活（BLOMA_UI_GATE_LIVENESS，2026-09-11 审计案 35c1a633：7 个无 JS 死按钮照样 passed）', () => {
   const previousEnv = process.env.BLOMA_UI_GATE_LIVENESS
 
@@ -144,7 +126,6 @@ describe('C3 死按钮判活（BLOMA_UI_GATE_LIVENESS，2026-09-11 审计案 35c
   }
 
   it('开关 off=字节级现状：7 死按钮零新增失败（假绿保留，回归锁）', () => {
-    delete process.env.BLOMA_UI_GATE_LIVENESS
     expect(analyzeUiProbe(deadButtonProbe())).toEqual([])
   })
 
@@ -158,7 +139,6 @@ describe('C3 死按钮判活（BLOMA_UI_GATE_LIVENESS，2026-09-11 审计案 35c
   })
 
   it('防误杀①：锚点/外链死点击不进分母（仅按钮类统计）', () => {
-    process.env.BLOMA_UI_GATE_LIVENESS = '1'
     // 2 个死按钮 + 3 个死锚点：按钮占比 100% 但样本 <3 → 不判；锚点从不进分母
     const failures = analyzeUiProbe(deadButtonProbe({
       deadClicks: [
@@ -173,7 +153,6 @@ describe('C3 死按钮判活（BLOMA_UI_GATE_LIVENESS，2026-09-11 审计案 35c
   })
 
   it('防误杀②：多数按钮有活性（≥1/5 命中 → 占比 80% 不到）或样本不足 → 不判', () => {
-    process.env.BLOMA_UI_GATE_LIVENESS = '1'
     // 5 个中 1 个有反应（80% 边界内不触发：dead 4/5=80% 恰好触发？——4/5=0.8>=0.8 触发；用 2 个活性）
     const alive = analyzeUiProbe(deadButtonProbe({
       deadClicks: [

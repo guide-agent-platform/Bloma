@@ -3,9 +3,9 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { decideBlocks } from '../support/guide-decide-stream'
 
 // 2026-09-16 FILE-LEVEL 钉：BLOMA_GUIDE_LOOP 缺省翻转 on，本文件全部用例锁旧单次 JSON 路径
-process.env.BLOMA_GUIDE_LOOP = '0'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
 
 vi.mock('../../main/coding/programming-orchestrator', () => ({
@@ -76,7 +76,6 @@ describe('countTrailingClarificationRounds 尾随澄清轮计数', () => {
 
   beforeEach(() => {
     // 2026-09-16: BLOMA_GUIDE_LOOP default-on; pin legacy path for this file
-    process.env.BLOMA_GUIDE_LOOP = '0'
     home = mkdtempSync(join(tmpdir(), 'proma-round-'))
     process.env.PROMA_HOME = home
     mkdirSync(join(home, 'agent-sessions'), { recursive: true })
@@ -206,7 +205,7 @@ describe('引导对话 · 连续澄清熔断', () => {
 
   function makeModel(json: string): GuideModelOptions {
     const query: SDKQuery = async function* (): AsyncGenerator<SDKMessage> {
-      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: json }] } }
+      yield { type: 'assistant', message: { role: 'assistant', content: decideBlocks(json) } }
       yield { type: 'result', subtype: 'success' }
     }
     const history: ConversationTurn[] = [
@@ -560,7 +559,7 @@ describe('Phase 7 U4 · J2-② 第三张连续卡减负卡（BLOMA_CLARIFY_TWO_L
       questions: [{ id: 'answer-a', label: '记账本' }],
     })
     const query: SDKQuery = async function* (): AsyncGenerator<SDKMessage> {
-      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: askJson }] } }
+      yield { type: 'assistant', message: { role: 'assistant', content: decideBlocks(askJson) } }
       yield { type: 'result', subtype: 'success' }
     }
     return {
@@ -671,7 +670,7 @@ describe('疑问句主题不入清单（2026-09-16「你是谁」案 efbd347a）
     })
     const persistAssistant = vi.fn()
     const query: SDKQuery = async function* (): AsyncGenerator<SDKMessage> {
-      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: json }] } }
+      yield { type: 'assistant', message: { role: 'assistant', content: decideBlocks(json) } }
       yield { type: 'result', subtype: 'success' }
     }
     const events: AgentEvent[] = []

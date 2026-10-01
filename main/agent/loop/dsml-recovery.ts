@@ -106,9 +106,4 @@ export function buildTargetedDegenerateFeedback(parsed: DsmlParseResult | null):
   ].join('\n')
 }
 
-/** 开关（'0'=关；'1'/未设=开——缺省 on 拍板项，逃生口保留）。 */
-export function dsmlRecoveryEnabled(): boolean {
-  const raw = (process.env.BLOMA_DSML_RECOVERY ?? '').trim().toLowerCase()
-  if (raw === '0' || raw === 'off' || raw === 'false') return false
-  return true
-}
+/** 开关已删除（2026-10-01 开关面收敛批）：DSML 分级恢复为无条件行为。 */

@@ -23,7 +23,6 @@ describe('能力开关 manifest（P2-03）', () => {
   it('captureCapabilityManifest：真实反映开关值（缺省与显式 on 两态）', () => {
     const defaults = captureCapabilityManifest('s-1')
     expect(defaults.session_id).toBe('s-1')
-    expect(defaults.switches.repair_noop_guard).toBe(true) // P1-05 已翻默认 on
     expect(defaults.switches.write_guard).toBe(false) // 仍缺省 off（事实如实，不美化）
     expect(defaults.switches.browser_tools).toBe(false)
 

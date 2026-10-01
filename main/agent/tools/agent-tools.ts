@@ -5,7 +5,6 @@ import { rmSyncWithRetry } from '../../platform/storage/fs-retry'
 import { tmpdir } from 'node:os'
 import { extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { findProject, readLastSketchRequirements } from '../../project/project-service'
-import { isInjectionEnabled } from '../prompting/template-injection'
 import { decideWrite, estimateTokenCount } from '../loop/usage-guard'
 import { withAbort, loopApiToolEnabled, toolEvidenceEnabled, writeGuardEnabled, preflightEnabled, compactToolEnabled, MAX_EXPLICIT_COMPACTIONS, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../loop/agent-loop'
 import { commitFileWrite, fileRevisionOf, fileRevisionsOf } from './write-lease'
@@ -216,7 +215,6 @@ function notWritableError(rel: string, realVariant = false): string {
  * 资源）；注入点关闭时返回 null 不拦截（行为=现状）。仅拦可执行/样式外链，img/字体
  * 等资源外链不拦（模板允许图片占位）。 */
 export function externalResourceViolation(htmlContent: string): string | null {
-  if (!isInjectionEnabled('loop')) return null
   const scriptMatch = /<script[^>]+src\s*=\s*["']https?:\/\/[^"']+["']/i.exec(htmlContent)
   if (scriptMatch) return `检测到外部脚本引用（${scriptMatch[0].slice(0, 80)}…）`
   const linkMatch = /<link[^>]+href\s*=\s*["']https?:\/\/[^"']+["']/i.exec(htmlContent)

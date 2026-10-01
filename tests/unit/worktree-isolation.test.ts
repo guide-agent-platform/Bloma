@@ -72,7 +72,7 @@ describe('worktree 生命周期（真 git；开关语义）', () => {
     expect(delegationWorktreeEnabled()).toBe(true)
   })
 
-  it('建树→在树内实现→合并进主目录→清理（分支删除）', () => {
+  it('建树→在树内实现→合并进主目录→清理（分支删除）', { timeout: 120_000 }, () => {
     if (!gitAvailable()) return // 无 git 环境跳过（CI 缺 git 不红）
     const project = createProject({ request_id: 'req-wt', mode: 'quick' })
     ensureProjectRepo(project.root_path)

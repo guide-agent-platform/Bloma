@@ -250,13 +250,7 @@ server.listen(port, '127.0.0.1', () => {
 // PR-1 骨架先行（2026-09-03）：loop 前确定性渲染骨架包
 // =========================================================================
 
-/** 骨架先行总开关：缺省开启；BLOMA_SCAFFOLD=0/off/false 关闭（关闭后行为=现状从零写）。 */
-export function scaffoldEnabled(): boolean {
-  const raw = process.env.BLOMA_SCAFFOLD
-  if (!raw) return true
-  const value = raw.trim().toLowerCase()
-  return value !== '0' && value !== 'off' && value !== 'false'
-}
+/** 开关已删除（2026-10-01 开关面收敛批）：骨架先行无条件执行。 */
 
 /** 骨架渲染结果：written = 本次新写入；skipped = 目标已存在跳过（幂等，不覆盖既有产物）。 */
 export interface SkeletonRenderResult {
