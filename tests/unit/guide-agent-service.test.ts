@@ -128,7 +128,6 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     const confirmCard = events.find(
       (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
     )
-    writeFileSync('C:/Users/17359/AppData/Local/Temp/dbg-events.json', JSON.stringify(events.map(e => ({ t: e.type, p: e.payload })), null, 1))
     expect(confirmCard).toBeTruthy()
     expect(events.find((event) => event.type === 'sketch_ready')).toBeUndefined()
     await runAgent({
@@ -142,23 +141,22 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
       metadata: { source: 'card_option', selected_option_id: PRD_CONFIRM_OPTION_CONFIRM },
     })
 
-    const ready = events.find((event) => event.type === 'sketch_ready')
-    expect(ready).toBeTruthy()
-    expect(findProject(project.project_id).current_stage).toBe('sketch_ready')
+    // web 线拆除刀1（2026-10-01）：确认后不再开草图（项目非 desktop_tool），改发形态引导卡
+    expect(events.find((event) => event.type === 'sketch_ready')).toBeUndefined()
+    expect(findProject(project.project_id).current_stage).not.toBe('sketch_ready')
+    const shapeCard = events.find(
+      (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'web_line_retired',
+    )
+    expect(shapeCard).toBeTruthy()
     // 只把用户可见的 reply 上屏，原始 JSON 契约不得泄露
     const deltaTexts = events
       .filter((event) => event.type === 'message_delta')
       .map((event) => String(event.payload.text ?? ''))
       .join('')
     expect(deltaTexts).toContain('好的，马上开始')
-    // 本 mock 的草图 LLM 输出非 HTML → 模板回退必须如实告知（草图说明，2026-08-15 静默回退案例）
-    expect(deltaTexts).toContain('草图说明')
-    // PRD 管线收口后，中间链路（PRD 引擎流式旁白）在 mock 下会转发 scripted 原文，
-    // 原始 JSON 契约的防泄露断言收敛到会话 JSONL 落盘层（persistAssistant 只落 reply）
     // 会话 JSONL 落盘的也是 reply 而非原始 JSON
     const jsonl = readFileSync(join(home, 'agent-sessions', 'session-guide.jsonl'), 'utf8')
     expect(jsonl).toContain('好的，马上开始')
-    // tool_use input 属设计落盘，泄露防护对象是 text 通道
     expect(jsonl).not.toContain('"text":"{')
   })
 
@@ -569,7 +567,6 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     const confirmCard = events.find(
       (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
     )
-    writeFileSync('C:/Users/17359/AppData/Local/Temp/dbg2.json', JSON.stringify(events.map(e => ({ t: e.type, p: e.payload })), null, 1))
     expect(confirmCard).toBeTruthy()
     await runAgent({
       request_id: 'req-theme-2c',
@@ -581,9 +578,12 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
       channel_id: 'test-channel',
       metadata: { source: 'card_option', selected_option_id: PRD_CONFIRM_OPTION_CONFIRM },
     })
-    const descriptions = readLastSketchRequirements(project.project_id).map((r) => r.description)
-    expect(descriptions[0]).toBe('帮我做一个音乐合成器')
-    expect(descriptions).toContain('网页端')
+    // web 线拆除刀1（2026-10-01）：草图链路已下线，确认后发形态引导卡；
+    // 主题锚定断言（澄清答案不覆盖主题）随草图链路退役，需求锚定语义由 PRD 背板承载
+    const shapeCard = events.find(
+      (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'web_line_retired',
+    )
+    expect(shapeCard).toBeTruthy()
   })
 })
 

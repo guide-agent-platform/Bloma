@@ -3,7 +3,7 @@ import type { AgentEvent, AgentSendMessageInput, ResearchIdea } from '../../shar
 import { recordDecision } from '../project/decision-log'
 import { trackAnalytics } from '../delivery/track-analytics'
 import { appendPrdRequirements, markPrdUserConfirmed, updatePrdAssertions } from '../project/document-engine'
-import { nextRequirementId, runSketchTask } from '../coding/programming-orchestrator'
+import { nextRequirementId } from '../coding/programming-orchestrator'
 import { earsifyRequirements } from './requirement-earsifier'
 import { resolveChannelEnv } from '../platform/llm/runtime-fallback'
 import type { PrdBackplane, SketchRequirement } from '../coding/sketch-engine'
@@ -348,17 +348,29 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
     return true
   }
 
-  await runSketchTask({
-    request_id: pending.request_id,
-    session_id: pending.session_id,
+  // ── web 线拆除刀1（2026-10-01 拍板只做桌面）：非桌面品类不再进 web 草图，改发
+  // 形态引导卡（web_to_desktop 改品类进桌面线 / web_to_revise 回向导调整）。
+  // 卡回传处理在 agent-dispatch 的 resolveWebLineRetiredCard。──
+  recordDecision({
     project_id: pending.project_id,
-    mode: pending.mode,
-    prompt: '按确认的需求清单生成草图',
-    requirements: sketchRequirements,
-    channel_id: pending.channel_id,
-    query: pending.query,
-    signal: pending.signal,
+    session_id: pending.session_id,
+    entry: {
+      type: 'modification_decision',
+      title: '需求形态引导（网页生成线已下线）',
+      why: 'PRD 确认后品类判定非 desktop_tool，当前版本只做桌面软件，发卡引导用户选择桌面形态或回去调整需求',
+    },
   })
+  pending.publish(makeConfirmEvent(pending, 'message_delta', {
+    text: '已确认。这份需求更适合网页形态，但当前版本已聚焦 Windows 桌面软件交付——',
+  }))
+  pending.publish(makeConfirmEvent(pending, 'user_decision_required', {
+    kind: 'web_line_retired',
+    title: '选择交付形态',
+    questions: [
+      { id: 'web_to_desktop', label: '按桌面软件继续', description: '按这份 PRD 以 Windows 桌面形态推进交付' },
+      { id: 'web_to_revise', label: '回去调整需求', description: '回到对话，调整需求形态后再确认' },
+    ],
+  }))
   return true
 }
 

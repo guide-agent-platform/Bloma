@@ -264,7 +264,7 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     }))
   })
 
-  it('delegate_all / 全部「这条没问题」→ 转 PRD 确认门过目（不过目不开工），确认后才开草图', async () => {
+  it('delegate_all / 全部「这条没问题」→ 转 PRD 确认门过目（不过目不开工），确认后发形态引导卡（web 线已下线）', async () => {
     const { query } = scriptedQuery([reviewFailJson])
     await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(query))
     await resolveRequirementConfirm({ request_id: 'req-pr2', session_id: SESSION_ID, project_id: 'proj-1', decision: 'confirm' })
@@ -302,11 +302,12 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
       (event) => events.push(event),
       makeModel(scriptedQuery([reviewPassJson]).query),
     )
-    expect(runSketchTask).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(runSketchTask).mock.calls[0][0].requirements).toEqual([
-      { id: 'F-001', description: '记账本，记录日常收支' },
-      { id: 'F-002', description: '按月汇总统计' },
-    ])
+    // web 线拆除刀1（2026-10-01）：确认后不再开草图，改发形态引导卡
+    expect(runSketchTask).not.toHaveBeenCalled()
+    const shapeCard = events.find(
+      (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'web_line_retired',
+    )
+    expect(shapeCard).toBeTruthy()
 
     // 再造一次 needs_revision，测「全部这道没问题」→ 等价忽略转确认门
     const again = scriptedQuery([reviewFailJson])

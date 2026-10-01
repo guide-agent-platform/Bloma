@@ -39,7 +39,8 @@ import {
 } from '../../platform/llm/runtime-fallback'
 import { categoryForStage, categoryTemperature } from '../../platform/llm/model-resolution'
 import { handleGuideMessage } from '../../guide/guide-agent-service'
-import { handleDesktopDispatchMessage, isDesktopLineActive } from '../../desktop/desktop-route'
+import { enterDesktopLine, handleDesktopDispatchMessage, isDesktopLineActive } from '../../desktop/desktop-route'
+import type { SDKQuery } from './orchestration-contracts'
 import {
   READY_COMPLETION_COPY,
   clearPendingReviewAction,
@@ -257,504 +258,45 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       return { accepted: true, session_id: input.session_id, stream_started: true }
     }
 
-    // 阻塞态决策回传（A2/A3）：blocked_action 存在时优先恢复被阻塞的编程操作
-    const blockedDecision = resolveBlockedDecision(input)
-    if (blockedDecision !== undefined) {
-      // F-A 修复（2026-09-11 审计）：用户转点阻塞卡说明已离开「局部优化/整版重做」
-      // 补充流，残留标记会让下一句普通诉求被误当局部修改，先清
-      clearPendingReviewAction(input.project_id)
-      if (blockedDecision === 'explain') {
-        // 补充说明：清阻塞 + 回澄清，内容交给引导路径重新理解
-        await resumeBlockedFlow(
-          { request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, mode: input.mode, decision: 'explain', content: input.content, query: sdkQuery, channel_id: input.channel_id, signal: abortController.signal },
-          streamPublisher,
-        )
-        await handleGuideMessage(input, streamPublisher, guideOptions, persistAssistant, persistSystem)
-      } else {
-        await resumeBlockedFlow(
-          { request_id: input.request_id, session_id: input.session_id, project_id: input.project_id, mode: input.mode, decision: blockedDecision, content: input.content, query: sdkQuery, channel_id: input.channel_id, signal: abortController.signal },
-          streamPublisher,
-        )
-      }
+    // ── web 生成线已下线守卫（2026-10-01 拆除刀1）：新项目已在 prd-confirm 断流
+    //（非 desktop_tool 品类发形态引导卡，不再进 web 草图）；存量项目阶段停在 web
+    // 专属枚举且桌面线未激活（上方未分流）→ 如实告知，不进任何 web 生成路径。
+    // choosing_mode/clarinating 放行；blocked_for_user_decision 被向导澄清卡复用
+    //（guide-pipeline ask_clarification 分支），同样放行。──
+    if (WEB_LINE_RETIRED_STAGES.has(authoritativeStage)) {
+      const notice = WEB_LINE_RETIRED_COPY
+      persistAssistant(notice)
+      streamPublisher(makeEvent(input, 'message_delta', { text: notice }))
       persistTerminalMessage(input.session_id, 'completed')
       streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
       return { accepted: true, session_id: input.session_id, stream_started: true }
     }
 
-    // 修改确认卡回传（keep/refine/regenerate，2026-09-11 三按钮改版）：必须在引导路径
-    // 之前拦截——此刻权威阶段是 blocked_for_user_decision，若落入 handleGuideMessage
-    // 会被 resolveCardAnswer 当成澄清卡答案误入草图生成。
-    if (input.metadata?.source === 'card_option' && isIterationDecisionId(input.metadata.selected_option_id)) {
-      await resolveIterationDecisionFlow(input, streamPublisher, sdkQuery, abortController.signal)
+    // web 线拆除刀1：非桌面品类 PRD 确认后的形态引导卡回传（web_to_desktop /
+    // web_to_revise，卡由 prd-confirm 发放）。须在向导路径之前拦截，防止选项 id
+    // 落入 resolveCardAnswer 澄清答案空间。
+    if (input.metadata?.source === 'card_option'
+      && (input.metadata.selected_option_id === 'web_to_desktop' || input.metadata.selected_option_id === 'web_to_revise')) {
+      await resolveWebLineRetiredCard(input, streamPublisher, makeEvent, sdkQuery, env ?? {})
       persistTerminalMessage(input.session_id, 'completed')
       streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
       return { accepted: true, session_id: input.session_id, stream_started: true }
     }
 
-    // P7-9b 后续批（2026-09-11）：decision_selected 其余卡接线③——就绪引导卡
-    //（next_backend 进迭代通道；export_handoff 走特调导出 IPC 不进本链零记录）。
-    // 窄判定零误记：只认 ready_next_steps 的专属选项 id，不碰澄清卡答案空间。
-    if (input.metadata?.source === 'card_option' && input.metadata.selected_option_id === 'next_backend') {
-      // F-A 修复：同上——用户转点引导卡，清残留补充态
-      clearPendingReviewAction(input.project_id)
-      try {
-        trackAnalytics({
-          request_id: input.request_id,
-          event: {
-            event_type: 'decision_selected',
-            project_id: input.project_id,
-            session_id: input.session_id,
-            payload: { stage: 'ready_next_steps', action: 'next_backend' },
-            privacy_level: 'research_safe',
-          },
-        })
-      } catch {
-        // 埋点失败不影响迭代链
-      }
-      // P2-01（2026-09-26 运行审计）：类型化迭代命令——「升级为真实后端完整程序」
-      // 不是普通消息，直接映射为迭代任务（携带需求变化=补后端持久化/契约，能力要求
-      // =前后端分离），不再落通用消息分流等模型猜（旧口径只清态+埋点）。
-      const backendDirective =
-        '把当前版本升级为前后端分离的真实完整程序：数据留存走后端持久化（server/routes/ 路由 + ctx.readData/writeData 落 data/ 目录），' +
-        '接口按技术合同实现并按契约验证；不改需求清单，保留现有前端交互与行为断言。'
-      recordDecision({
-        project_id: input.project_id,
-        session_id: input.session_id,
-        entry: {
-          type: 'modification_decision',
-          title: '用户选择「走向完整程序（后端）」',
-          why: '就绪引导卡 next_backend 选项 → 类型化迭代命令（补后端持久化与接口契约，保留现有前端行为）',
-          detail: { directive: backendDirective.slice(0, 120) },
-        },
-      })
-      setProgrammingEventPublisher(streamPublisher)
-      await runIterationTask({
-        request_id: input.request_id,
-        session_id: input.session_id,
-        project_id: input.project_id,
-        mode: input.mode,
-        prompt: backendDirective,
-        channel_id: input.channel_id,
-        query: sdkQuery,
-        signal: abortController.signal,
-      })
-      persistTerminalMessage(input.session_id, 'completed')
-      streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
-      return { accepted: true, session_id: input.session_id, stream_started: true }
-    }
-
-    // U12：失败重试卡回传（selected_option_id === 'retry'）——取出上次失败诉求原样重跑，
-    // 在引导路径/ready 护栏之前拦截（与修改确认卡同理），实现「一键重试」而非重新打字。
-    if (input.metadata?.source === 'card_option' && input.metadata.selected_option_id === 'retry') {
-      const failedPrompt = takeFailedIteration(input.project_id)
-      // P7-9b 后续批（2026-09-11）：decision_selected 其余卡接线②——失败重试卡
-      //（埋点在消费性 take 之后，用局部变量——先埋会拿走 failedPrompt）
-      try {
-        trackAnalytics({
-          request_id: input.request_id,
-          event: {
-            event_type: 'decision_selected',
-            project_id: input.project_id,
-            session_id: input.session_id,
-            payload: { stage: 'iteration_retry', action: 'retry', has_failed_prompt: failedPrompt !== undefined },
-            privacy_level: 'research_safe',
-          },
-        })
-      } catch {
-        // 埋点失败不影响重试链
-      }
-      if (failedPrompt) {
-        setProgrammingEventPublisher(streamPublisher)
-        await runIterationTask({
-          request_id: input.request_id,
-          session_id: input.session_id,
-          project_id: input.project_id,
-          mode: input.mode,
-          prompt: failedPrompt,
-          channel_id: input.channel_id,
-          query: sdkQuery,
-          signal: abortController.signal,
-        })
-      } else {
-        // 重试诉求已失效（如重启后点旧卡）：如实说明，收敛回 ready
-        const copy = '这次重试的诉求已经失效，想调整的话请再描述一次。'
-        updateProject(input.project_id, { current_stage: 'ready' })
-        streamPublisher(makeEvent(input, 'stage_changed', { stage: 'ready' }))
-        appendAgentMessage(input.session_id, {
-          role: 'assistant',
-          content: [{ type: 'text', text: copy }],
-          timestamp: Date.now(),
-        })
-        streamPublisher(makeEvent(input, 'message_delta', { text: copy }))
-      }
-      persistTerminalMessage(input.session_id, 'completed')
-      streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
-      return { accepted: true, session_id: input.session_id, stream_started: true }
-    }
-
-    // F-B 修复（2026-09-11 审计）：二次确认态（blocked）下用户打字 = 补充/修改重做方向，
-    // 更新方向并重发确认卡——绝不落入引导路径（否则确认卡悬挂、用户被引去澄清对话、
-    // 补充的话被当无关输入）。取消词清态回 ready；进度/寒暄放回标记交回常规。
-    if (authoritativeStage === 'blocked_for_user_decision' && input.metadata?.source !== 'card_option') {
-      const pendingReview = takePendingReviewAction(input.project_id)
-      if (pendingReview?.kind === 'rebuild_confirm') {
-        const trimmed = input.content.trim()
-        if (REFINE_CANCEL_RE.test(trimmed)) {
-          const copy = '好，先保持现在的版本。想改的时候再说。'
-          // P2-01：状态迁移与按钮取消共用（旧口径只发话术不迁阶段，项目悬在 blocked）
-          migrateToReadyAfterCancel(input, streamPublisher, makeEvent)
-          persistAssistant(copy)
-          streamPublisher(makeEvent(input, 'message_delta', { text: copy }))
-          persistTerminalMessage(input.session_id, 'completed')
-          streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
-          return { accepted: true, session_id: input.session_id, stream_started: true }
-        }
-        if (!PROGRESS_QUERY_RE.test(trimmed) && !TRIVIAL_ACK_RE.test(trimmed)) {
-          const direction = refineModificationDescription(trimmed) || trimmed
-          setPendingReviewAction(input.project_id, { kind: 'rebuild_confirm', direction })
-          recordDecision({
-            project_id: input.project_id,
-            session_id: input.session_id,
-            entry: {
-              type: 'modification_decision',
-              title: '整版重做方向已更新，重新确认',
-              why: `二次确认态下用户补充方向：「${direction}」；更新方向并重发确认卡（不打断确认流）`,
-            },
-          })
-          publishRebuildConfirmCard(input, streamPublisher, direction, persistAssistant, persistSystem)
-          persistTerminalMessage(input.session_id, 'completed')
-          streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
-          return { accepted: true, session_id: input.session_id, stream_started: true }
-        }
-        // 进度/寒暄：放回标记，交回常规（后续走 blocked 引导应答）
-        setPendingReviewAction(input.project_id, pendingReview)
-      } else if (pendingReview) {
-        setPendingReviewAction(input.project_id, pendingReview)
-      }
-    }
-
-    if (shouldUseGuideAgent(authoritativeStage)) {
+        if (shouldUseGuideAgent(authoritativeStage)) {
       await handleGuideMessage(input, streamPublisher, guideOptions, persistAssistant, persistSystem)
       persistTerminalMessage(input.session_id, 'completed')
       streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
       return { accepted: true, session_id: input.session_id, stream_started: true }
     }
 
-    // 转移阶段护栏（问题 A / P1）：sketch_ready 阶段的消息不得落入无工具的编程路径。
-    // 后端已产出草图，模型拿不到工具上下文只会「假装交付」/把 HTML 贴进聊天。
-    // 意图分流（2026-08-16 用户反馈「无法对草图提修改意见」）：此前该阶段所有输入
-    // 一律回固定文案，文案却承诺「直接告诉我哪里要改」——修改意见实际无处理路径，
-    // 用户唯一出路是点「生成完整功能」直接进 MVP。现在与 ready 护栏同理做意图
-    // 分流：识别到修改诉求 → 清洗后并入需求清单，重新生成草图（落回 sketch_ready）。
-    // 草图重生成是低成本方向确认，与 ready 阶段的修改确认门不同——不过门直接改，
-    // 改错了也能低成本再改。其余输入（确认/进度/闲聊）维持固定引导走按钮。
-    // 判断用权威阶段：项目已推进到 ready 时（渲染端阶段可能滞后）不得误入此护栏，
-    // 否则会把「项目已好」错报成「还在草图阶段」。
-    if (authoritativeStage === 'sketch_ready') {
-      const intent = await resolveModificationIntent({
-        content: input.content,
-        project_id: input.project_id,
-        session_id: input.session_id,
-        query: sdkQuery,
-        env,
-        signal: abortController.signal,
-        maxTokens,
-        providerType: channel?.provider_type,
-      })
-      if (intent === 'modify') {
-        const description = refineModificationDescription(input.content)
-        // 约束走门（T4-L1 修改门）：修改意见里的约束语句入库（「不含登录」类），
-        // 归一化判定 out_of_scope 是语义层的；这里是关键词层的确定性兜底
-        captureConstraints({
-          project_id: input.project_id,
-          session_id: input.session_id,
-          constraints: extractConstraints(description),
-          source: 'sketch_ready_modification',
-        })
-        const existing = readLastSketchRequirements(input.project_id)
-        // 修改诉求归一化后并入需求清单：口语碎片原样入库会污染 PRD 背板（线上案例
-        // 「重新生成」被 acceptance 解释成功能、产品里长出重置按钮；「车的运行方向不对」
-        // 只能生成最小满足版）。归一化失败/无渠道回退改动前现状（原样追加），不阻断草图重生成。
-        const normalization = await normalizeRequirementUpdate({
-          session_id: input.session_id,
-          existing,
-          modification: description,
-          constraints: readProjectConstraints(input.project_id),
-          query: sdkQuery,
-          env,
-          signal: abortController.signal,
-          // omit 推广（reasoning-profile 2026-08-27）：Token Plan 类渠道即使 off 档也
-          // 发 disabled 会 400——透传 providerType 激活 omit，免 400+重试往返
-          providerType: channel?.provider_type,
-        })
-        const requirements = applyNormalization(existing, normalization, nextRequirementId(existing), 'correction')
-        if (normalization.action === 'out_of_scope' && normalization.outOfScope) {
-          addScopeExclusion(input.project_id, normalization.outOfScope)
-        }
-        if (normalization.via === 'llm') {
-          recordRequirementNormalization(input, 'sketch_ready', description, normalization)
-        }
-        recordSketchGenerated(input.project_id, requirements)
-        recordDecision({
-          project_id: input.project_id,
-          session_id: input.session_id,
-          entry: {
-            type: 'modification_gate',
-            title: '草图阶段修改意见',
-            why: `用户对草图提出「${input.content}」，清洗为「${description}」并入需求清单（${normalization.action}${normalization.reviseId ? ` ${normalization.reviseId}` : ''}），重新生成草图`,
-            detail: {
-              stage: 'sketch_ready',
-              normalization: { action: normalization.action, revise_id: normalization.reviseId, description: normalization.description },
-              requirements,
-            },
-          },
-        })
-        // ack 如实（2026-08-29 线上案例：点选纠错圈选标题说「换个名字」，归一化判 skip
-        // 但旧 ack 仍说「按…调整草图」，用户体感「我说改名它说改了结果没改」）。
-        // skip 意味着诉求未入需求，必须告知而非假装采纳（与 runIterationTask 口径一致）。
-        const ack =
-          normalization.action === 'skip'
-            ? `收到「${truncateForCopy(input.content, 40)}」——这句我没当作需求改动（判为操作指令），按原样重新生成了一版。想改哪里请直接说，比如「把页面标题的文字改一下」。`
-            : `好的，按「${truncateForCopy(description, 40)}」调整草图，重新生成一版。`
-        persistAssistant(ack)
-        streamPublisher(makeEvent(input, 'message_delta', { text: ack }))
-        setProgrammingEventPublisher(streamPublisher)
-        await runSketchTask({
-          request_id: input.request_id,
-          session_id: input.session_id,
-          project_id: input.project_id,
-          mode: input.mode,
-          prompt: description,
-          requirements,
-          channel_id: input.channel_id,
-          query: sdkQuery,
-          signal: abortController.signal,
-        })
-        persistTerminalMessage(input.session_id, 'completed')
-        streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
-        return { accepted: true, session_id: input.session_id, stream_started: true }
-      }
-      const guidance =
-        '草图已经生成好了。你可以点预览区上方的「生成完整功能」确认并继续；' +
-        '想调整的话，点预览区「纠错」按钮标记不满意的位置，或直接告诉我哪里要改。'
-      persistAssistant(guidance)
-      streamPublisher(makeEvent(input, 'message_delta', { text: guidance }))
-      persistTerminalMessage(input.session_id, 'completed')
-      streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
-      return { accepted: true, session_id: input.session_id, stream_started: true }
-    }
-
-    // 完成阶段护栏（P0）：ready/completed 阶段跳过 LLM、走规则直答。
-    // 此前依赖「注入权威阶段 + 硬 prompt」让模型如实汇报，但实测模型仍会延续历史里
-    // 的「还没好/后台还在跑」惯性持续幻觉。这里与 sketch_ready 护栏同理：直接规则
-    // 回答「已经生成好了」，彻底不依赖模型服从，杜绝「还没好」编造。
-    // 但必须做意图分流：识别到修改/调整/纠错类输入时，进入迭代重新生成流程，
-    // 而不是一律返回固定文案——否则「已生成后继续改」会被挡成「修改黑洞」。
-    if (authoritativeStage === 'ready' || authoritativeStage === 'completed') {
-      // 「局部优化 / 整版重做」补充态（2026-09-11 卡位改版）：用户在就绪三按钮卡上点了
-      // 局部优化/整版重做后，这一句就是他要说的话——
-      //  - optimize          → 直接走局部修改（localOnly，不弹卡）；
-      //  - rebuild_direction → 收集方向后转二次确认卡（不直接重做）；
-      //  - rebuild_confirm   → 等用户点二次确认卡，文不消费；
-      //  - 取消词            → 清标记回 ready。
-      const pendingReview = takePendingReviewAction(input.project_id)
-      if (pendingReview && pendingReview.kind === 'rebuild_confirm') {
-        // rebuild_confirm 态的主处理在 blocked 阶段拦截（见 guide 路由前）——
-        // publishRebuildConfirmCard 会把阶段置为 blocked_for_user_decision，用户打字
-        // 到不了这里；此处仅兼容异常残留（阶段被外部改回 ready），放回交回常规处理
-        setPendingReviewAction(input.project_id, pendingReview)
-      } else if (pendingReview) {
-        const trimmed = input.content.trim()
-        if (REFINE_CANCEL_RE.test(trimmed)) {
-          const copy = '好，先保持现在的版本。想改的时候再说。'
-          // P2-01：状态迁移与按钮取消共用（旧口径只发话术不迁阶段，项目悬在 blocked）
-          migrateToReadyAfterCancel(input, streamPublisher, makeEvent)
-          persistAssistant(copy)
-          streamPublisher(makeEvent(input, 'message_delta', { text: copy }))
-          persistTerminalMessage(input.session_id, 'completed')
-          streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
-          return { accepted: true, session_id: input.session_id, stream_started: true }
-        }
-        // 纯进度追问/寒暄不是具体诉求：不误起迭代，交回下方常规处理
-        if (!PROGRESS_QUERY_RE.test(trimmed) && !TRIVIAL_ACK_RE.test(trimmed)) {
-          if (pendingReview.kind === 'optimize') {
-            const localPrompt = refineModificationDescription(trimmed) || trimmed
-            recordDecision({
-              project_id: input.project_id,
-              session_id: input.session_id,
-              entry: {
-                type: 'modification_decision',
-                title: '局部优化（用户补充诉求）',
-                why: `就绪卡「局部优化」后补充的诉求：「${localPrompt}」；按局部修改处理（其余功能项保持现状）`,
-              },
-            })
-            setProgrammingEventPublisher(streamPublisher)
-            await runIterationTask({
-              request_id: input.request_id,
-              session_id: input.session_id,
-              project_id: input.project_id,
-              mode: input.mode,
-              prompt: localPrompt,
-              channel_id: input.channel_id,
-              query: sdkQuery,
-              signal: abortController.signal,
-              localOnly: true,
-            })
-            persistTerminalMessage(input.session_id, 'completed')
-            streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
-            return { accepted: true, session_id: input.session_id, stream_started: true }
-          }
-          // rebuild_direction：收集重做方向 → 二次确认卡（防误触），先不重做
-          const direction = refineModificationDescription(trimmed) || trimmed
-          setPendingReviewAction(input.project_id, { kind: 'rebuild_confirm', direction })
-          recordDecision({
-            project_id: input.project_id,
-            session_id: input.session_id,
-            entry: {
-              type: 'modification_decision',
-              title: '整版重做方向已收集，等待二次确认',
-              why: `就绪卡「整版重做」后补充的方向：「${direction}」；已转二次确认卡，确认后才重做`,
-            },
-          })
-          publishRebuildConfirmCard(input, streamPublisher, direction, persistAssistant, persistSystem)
-          persistTerminalMessage(input.session_id, 'completed')
-          streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
-          return { accepted: true, session_id: input.session_id, stream_started: true }
-        }
-      }
-
-      const intent = await resolveModificationIntent({
-        content: input.content,
-        project_id: input.project_id,
-        session_id: input.session_id,
-        query: sdkQuery,
-        env,
-        signal: abortController.signal,
-        maxTokens,
-        providerType: channel?.provider_type,
-      })
-      if (intent === 'modify') {
-        // 用户直接打字提修改（未走就绪卡）：一律按「局部优化」处理（轻量局部修改），
-        // 不再弹确认卡——是轻量还是整版重做只由用户在就绪卡上的选项决定
-        //（2026-09-11 定案：分流只看用户选项，不看用户在输入框里说的话）。
-        const localPrompt = refineModificationDescription(input.content) || input.content.trim()
-        recordDecision({
-          project_id: input.project_id,
-          session_id: input.session_id,
-          entry: {
-            type: 'modification_decision',
-            title: '用户提修改（默认局部优化）',
-            why: `ready 阶段直接打字提修改「${input.content}」；按局部优化处理（其余功能项保持现状）`,
-          },
-        })
-        setProgrammingEventPublisher(streamPublisher)
-        await runIterationTask({
-          request_id: input.request_id,
-          session_id: input.session_id,
-          project_id: input.project_id,
-          mode: input.mode,
-          prompt: localPrompt,
-          channel_id: input.channel_id,
-          query: sdkQuery,
-          signal: abortController.signal,
-          localOnly: true,
-        })
-        persistTerminalMessage(input.session_id, 'completed')
-        streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
-        return { accepted: true, session_id: input.session_id, stream_started: true }
-      }
-      // other（进度追问/闲聊）：模型直答 + 事实校验，模板兜底（P1 自由度归还，2026-09-06）。
-      // 渠道不可用/校验不过（重试一次后仍败）回退 READY_COMPLETION_COPY + 修改出口引导
-      //（=原规则直答，反幻觉底线不降级）；直答成功则用户得到针对这句话的自然回答。
-      const fallbackCopy = `${READY_COMPLETION_COPY}\n\n想调整哪里直接告诉我，比如“加一个历史记录”。`
-      let guidance = fallbackCopy
-      if (env) {
-        const chat = await runReadyStageChat({
-          query: sdkQuery,
-          env,
-          signal: abortController.signal,
-          sessionId: input.session_id,
-          history,
-          maxTokens,
-          ...(channel?.provider_type !== undefined ? { providerType: channel.provider_type } : {}),
-          system: buildReadyChatSystem(
-            buildReadyChatFacts(
-              input.project_id,
-              authoritativeStage,
-              Boolean(env?.ANTHROPIC_BASE_URL && env?.ANTHROPIC_AUTH_TOKEN && env?.ANTHROPIC_MODEL),
-            ),
-          ),
-          userContent: input.content,
-        })
-        if (chat.ok) guidance = chat.text
-      }
-      persistAssistant(guidance)
-      streamPublisher(makeEvent(input, 'message_delta', { text: guidance }))
-      persistTerminalMessage(input.session_id, 'completed')
-      streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
-      return { accepted: true, session_id: input.session_id, stream_started: true }
-    }
-
-    // 编程路径：必须真实模型，无渠道 / 密钥不可解密 / 无启用模型（且无备用渠道可切）
-    // 直接抛明确错误（不留测试占位 key）
-    if (!channel || !env) {
-      throw new Error(
-        resolution.unusableReason === 'decrypt_failed'
-          ? 'API_KEY_DECRYPT_FAILED: 已配置渠道但 api_key 无法解密，请在设置中重新保存该渠道'
-          : resolution.unusableReason === 'model_not_found'
-            ? 'CHANNEL_MODEL_NOT_FOUND: 渠道没有启用的模型，请在设置中启用至少一个模型'
-            : 'CHANNEL_NOT_FOUND: configure a model channel before using the SDK',
-      )
-    }
-
-    // 编程路径模型上下文（问题 A / P1 纵深防御）：模型没有写文件/跑沙箱的工具，
-    // 若只给聊天历史，它既不知道项目当前阶段，也误以为可以把 HTML 贴进聊天当交付物——
-    // 于是「好了吗」会被编成「还没好」，追问多了就整段贴代码。注入真实项目阶段 +
-    // 「无工具」约束，把模型从「假装交付」引导回「如实汇报 + 引导确认」。
-    // authoritativeStage 已在函数顶部以 findProject 为准解析（渲染端上报仅作回退）。
-    const programmingHistory: ConversationTurn[] = [buildProgrammingSystemTurn(authoritativeStage), ...history]
-
-    await runWithRetry(input, async () => {
-      // clipboard-paste P1（2026-08-29）：澄清对话带图——模型在草图澄清期即可看见用户贴的截图
-      const stream = sdkQuery(input.content, { env, signal: abortController.signal, sessionId: input.session_id, history: programmingHistory, images: input.images, maxTokens })
-      run.iterator = stream[Symbol.asyncIterator]()
-
-      for (;;) {
-        const next = await run.iterator.next()
-        if (next.done) break
-
-        const sdkMessage = next.value
-        received.push(sdkMessage)
-        const event = convertSDKMessage(input, sdkMessage)
-        if (event) streamPublisher(event)
-
-        if (sdkMessage.type === 'result') {
-          break
-        }
-      }
-
-      await run.iterator.return?.()
-      run.iterator = undefined
-    })
-
-    persistAssistantMessages(input.session_id, received)
-
-    // 编程路径无工具：若模型输出里出现完整 HTML / 代码块（贴代码式「交付」），
-    // 追加一条显式提示。注意：无工具路径下模型贴出的代码从未落盘到项目文件，
-    // 绝不能声称「代码已生成到项目文件里」——那会误导用户去预览找不存在的代码
-    // （实测「右侧没有啊」正是被这条假提示带偏）。如实说明并引导到确认/预览。
-    const assistantText = extractAssistantText(received)
-    if (detectCodeDelivery(assistantText)) {
-      const hint =
-        '（你在对话里贴出的代码不会自动保存进项目文件。要生成真正可运行、可保存的版本，' +
-        '请点预览区上方的「生成完整功能」确认生成；已生成的版本请直接看右侧预览。）'
-      persistAssistant(hint)
-      streamPublisher(makeEvent(input, 'message_delta', { text: hint }))
-    }
-
+    // 理论不可达：13 阶段已被上方守卫与向导判定全覆盖（桌面分流 / web 下线守卫 /
+    // 向导三态）。防御兜底：不沉默吞消息。
+    const unreachable = '这个请求我暂时无法处理（未识别的项目阶段）。可以新建项目重新开始。'
+    persistAssistant(unreachable)
+    streamPublisher(makeEvent(input, 'message_delta', { text: unreachable }))
     persistTerminalMessage(input.session_id, 'completed')
     streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
-
     return { accepted: true, session_id: input.session_id, stream_started: true }
   } catch (error) {
     // 如果 cancelAgent 已按 runId 发过终态，旧任务只负责收尾，不能再覆盖 UI/日志。
@@ -796,3 +338,80 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
   }
 }
 
+
+// ── web 线拆除刀1（2026-10-01）：存量 web 项目阶段集与下线话术 ──
+const WEB_LINE_RETIRED_STAGES = new Set<WorkflowStage>([
+  'generating_sketch',
+  'sketch_ready',
+  'generating_mvp',
+  'testing',
+  'judge_review',
+  'repairing',
+  'upgrading',
+  'iterating',
+  'ready',
+  'completed',
+])
+const WEB_LINE_RETIRED_COPY =
+  '这个项目由旧版网页生成线创建，该能力已在本版本下线。项目数据与产物完整保留，可继续查看或导出。如需以桌面软件形态实现类似需求，请新建项目。'
+
+/** web 线拆除刀1：非桌面品类形态引导卡回传处理（卡由 prd-confirm 发放）。 */
+async function resolveWebLineRetiredCard(
+  input: AgentSendMessageInput,
+  streamPublisher: (event: AgentEvent) => void,
+  makeEvent: (input: AgentSendMessageInput, type: AgentEvent['type'], payload: Record<string, unknown>) => AgentEvent,
+  sdkQuery: SDKQuery | undefined,
+  env: Record<string, string>,
+): Promise<void> {
+  const decision = input.metadata?.selected_option_id
+  if (decision === 'web_to_desktop') {
+    if (!sdkQuery) {
+      // 渠道不可用：如实告知，不进入桌面线（桌面调度员必需真实模型）
+      const copy = '当前没有可用的模型渠道，无法按桌面形态起跑。请在设置中配置渠道后，再点一次「按桌面软件继续」。'
+      appendAgentMessage(input.session_id, { role: 'assistant', content: [{ type: 'text', text: copy }], timestamp: Date.now() })
+      streamPublisher(makeEvent(input, 'message_delta', { text: copy }))
+      return
+    }
+    recordDecision({
+      project_id: input.project_id,
+      session_id: input.session_id,
+      entry: {
+        type: 'modification_decision',
+        title: '用户选择按桌面形态继续',
+        why: '非桌面品类 PRD 确认后的形态引导卡：改 category=desktop_tool 并进入桌面调度员线',
+      },
+    })
+    updateProject(input.project_id, { template_type: 'desktop_tool' })
+    const resolution = resolveChannelEnv({
+      channelId: input.channel_id,
+      category: 'guide',
+      projectId: input.project_id,
+      sessionId: input.session_id,
+    })
+    await enterDesktopLine(
+      { projectId: input.project_id, sessionId: input.session_id, requestId: input.request_id, content: '按桌面软件形态继续交付' },
+      sdkQuery,
+      resolution.env ?? env,
+      {
+        publish: (_target, type, payload) => streamPublisher(makeEvent(input, type, payload)),
+        persistAssistant: () => undefined,
+        persistSystem: (sessionId, text) => appendSessionMessage(sessionId, { role: 'system', content: [{ type: 'text', text }], timestamp: Date.now() }),
+        complete: () => undefined,
+      },
+    )
+    return
+  }
+  // web_to_revise：回向导调整需求
+  recordDecision({
+    project_id: input.project_id,
+    session_id: input.session_id,
+    entry: {
+      type: 'modification_decision',
+      title: '用户选择回去调整需求',
+      why: '非桌面品类 PRD 确认后的形态引导卡：回到对话调整需求形态',
+    },
+  })
+  const copy = '好的，请直接描述想调整的地方（比如「做成桌面软件，支持离线使用」），我会按新的形态重新梳理需求。'
+  appendAgentMessage(input.session_id, { role: 'assistant', content: [{ type: 'text', text: copy }], timestamp: Date.now() })
+  streamPublisher(makeEvent(input, 'message_delta', { text: copy }))
+}
