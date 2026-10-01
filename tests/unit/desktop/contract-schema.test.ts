@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
+  MINIMAL_CONTRACT_EXAMPLE,
   parseProjectContract,
   validateProjectContract,
   violatesCommandBlacklist,
@@ -184,5 +185,23 @@ describe('parseProjectContract（fail-closed）', () => {
 
   it('校验不过抛 CONTRACT_INVALID（错误清单入消息）', () => {
     expect(() => parseProjectContract('{"schema_version": 9}')).toThrow(/CONTRACT_INVALID/)
+  })
+
+  it('MINIMAL_CONTRACT_EXAMPLE 自洽锁：任务书内嵌样例必须 parse 通过（狗粮 7bc4eeff 契约方言事故根治——样例自身失合规会直接教模型犯错）', () => {
+    expect(() => parseProjectContract(MINIMAL_CONTRACT_EXAMPLE)).not.toThrow()
+  })
+})
+
+describe('狗粮 7bc4eeff 契约方言回归（2026-10-01）', () => {
+  it('模型版方言三错（schema_version "1.0"/entrypoints/路径字符串 driver）全部 CONTRACT_INVALID', () => {
+    const dialect = JSON.stringify({
+      schema_version: '1.0',
+      stage: 'desktop-verify',
+      entrypoints: ['app/main.py'],
+      verify_stage: { driver: '00_SCAFFOLD/driver.py', executed: false, exit_code: null },
+    })
+    expect(() => parseProjectContract(dialect)).toThrow(/schema_version 必须为 1/)
+    expect(() => parseProjectContract(dialect)).toThrow(/entry/)
+    expect(() => parseProjectContract(dialect)).toThrow(/driver 必须为对象/)
   })
 })

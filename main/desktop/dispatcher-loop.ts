@@ -411,10 +411,10 @@ async function runVerifyFinalize(
     return {
       advance: {
         decision: 'reject',
-        reason: 'artifacts-missing',
+        reason: 'contract-invalid',
         missingArtifacts: [{ gateId: 'driver-report', artifacts: [CONTRACT_PATH] }],
         discardedObservations: [],
-        education: `工程契约不合法：${error instanceof Error ? error.message : String(error)}\n驱动执行 fail-closed。请委派修复契约后重试。`,
+        education: `工程契约不合法：${error instanceof Error ? error.message : String(error)}\n驱动执行 fail-closed。请对照任务书内的最小合规样例修正字段名与类型后重试。`,
       },
     }
   }
@@ -499,7 +499,12 @@ function recordDispatchRunTelemetry(
           advance: result.advance
             ? result.advance.decision === 'advance'
               ? { decision: 'advance', target: result.advance.target }
-              : { decision: 'reject', reason: result.advance.reason }
+              : {
+                  decision: 'reject',
+                  reason: result.advance.reason,
+                  ...(result.advance.missingArtifacts ? { missing_artifacts: result.advance.missingArtifacts } : {}),
+                  ...(result.advance.education ? { education: result.advance.education.slice(0, 400) } : {}),
+                }
             : undefined,
           driver: result.driverReport,
           duration_ms: Date.now() - startedAt,

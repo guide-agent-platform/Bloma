@@ -245,9 +245,10 @@ describe('驱动挂载腿（desktop-verify 收口）', () => {
       confirmedPhases: new Set(['desktop-verify']),
       readContract: () => '{"schema_version": 99}',
     }))
-    expect(result.advance).toMatchObject({ decision: 'reject' })
+    expect(result.advance).toMatchObject({ decision: 'reject', reason: 'contract-invalid' })
     if (result.advance?.decision === 'reject') {
       expect(result.advance.education).toContain('契约不合法')
+      expect(result.advance.education).toContain('最小合规样例')
     }
   })
 })

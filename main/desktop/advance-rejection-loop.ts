@@ -59,6 +59,7 @@ export function classifyRejection(decision: AdvanceDecision & { decision: 'rejec
     case 'no-marks':
       return 'target-deny'
     case 'artifacts-missing':
+    case 'contract-invalid':
       return 'gate-deny'
     case 'confirmation-required':
       return 'confirmation-required'
