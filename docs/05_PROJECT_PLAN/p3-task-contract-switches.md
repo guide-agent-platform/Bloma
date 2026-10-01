@@ -1,10 +1,11 @@
 # P3 任务级三文档契约 · 开关矩阵与实验变量
 
-> **⚠️ 2026-10-01 开关面收敛批（第一刀）**：27 个缺省 on 开关已删除（连旧版入口实现一并删除，只保留新版路径）——
-> AGENT_LOOP / GUIDE_LOOP / TASK_WORKFLOW / ITER_BRIEF / DSML_RECOVERY / COMPACT_EST_FALLBACK / LOOP_WINDOW_OFF /
-> LOOP_LOG / READY_CHAT / REPAIR_NOOP_GUARD / PROVIDER_ADAPTER / SCAFFOLD / MODULES / DELEGATED_REVIEW / UI_GATE /
-> VISION_AUDIT / INJECT_* 八点。本文档中涉及上述开关的条目均为历史记录（retired）；旧 anthropicMessagesQuery
-> 传输层、向导单次 JSON 澄清层、滑窗 windowMessages 消费已随批删除。生命周期规则：**转正即删开关，
+> **⚠️ 2026-10-01 开关面收敛批（第一刀 5626899 + 第二刀 abe400d）**：37 个开关已删除（连旧版入口实现一并删除）——
+> 第一刀 27 个缺省 on（含 INJECT_* 八点 + 旧 anthropicMessagesQuery / 向导单次 JSON 层 / 滑窗消费）；
+> 第二刀 10 个 HKCU 已点亮（EXPERIENCE / API_TOOL / ROUTE_ERROR_FEEDBACK / LOOP_PROGRESS_NUDGE / BUILD_GATE_WIRING /
+> UI_GATE_LIVENESS / GAME_DERIVE_EXEMPT / GWT_GAME_PROBE / REAL_SCAFFOLD + REPAIR_NOOP_GUARD 冗余项）；本机 setx 面已清零，
+> 仅余 DESKTOP_DISPATCH 待桌面狗粮收口后处置。REAL_SCAFFOLD 恒开=真实脚手架唯一主线；GAME_DERIVE_EXEMPT 删除即对齐
+> 09-25 LOCAL_FIRST_TYPES 拍板。本文档涉及上述开关的条目均为历史记录（retired）。生命周期规则：**转正即删开关，
 > off 字节锁测试随删；新批次无额度验证计划不建开关（走常开+埋点）**。存活开关盘点见
 > 《Bloma-开关面盘点台账-20261001》。
 
