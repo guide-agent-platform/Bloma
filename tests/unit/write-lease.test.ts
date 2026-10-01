@@ -30,12 +30,15 @@ const byName = (tools: AgentLoopTool[], name: string): AgentLoopTool => {
   return tool
 }
 
-const ctxFor = (projectId: string, toolCallId?: string): ToolContext => ({
+const ctxFor = (projectId: string, toolCallId?: string, state?: ReturnType<typeof createToolState>): ToolContext => ({
   projectId,
   sessionId: 'session-lease',
   requestId: 'req-lease',
   signal: new AbortController().signal,
-  state: createToolState(),
+  // state 可注入：真实 loop 是一会话一个 ToolState 跨工具共享（file_revisions 版本登记
+  // 在会话级）；缺省新建仅适配单次调用的用例。连续写用例必须传共享 state，否则会被
+  // write 守卫（缺省 on，2026-10-02）误判为盲覆盖。
+  state: state ?? createToolState(),
   ...(toolCallId ? { toolCallId } : {}),
 })
 
@@ -91,12 +94,13 @@ describe('写租约（P1-06a：宿主级写隔离）', () => {
     expect(readFileSync(join(project.root_path, 'src', 'app.js'), 'utf8')).toContain('const a = 1')
   })
 
-  it('工具层：同会话连续写（不同 toolCallId）不误伤——写完即释放', async () => {
+  it('工具层：同会话连续写（不同 toolCallId）不误伤——写完即释放（共享 ToolState，对齐真实 loop 语义）', async () => {
     const project = createProject({ request_id: 'req-wl2', mode: 'quick' })
     const tools = toolsFor(project.project_id)
-    const first = await byName(tools, 'write_file').execute({ path: 'src/a.js', content: 'const a = 1\n' }, ctxFor(project.project_id, 'c1'))
-    const second = await byName(tools, 'write_file').execute({ path: 'src/a.js', content: 'const a = 2\n' }, ctxFor(project.project_id, 'c2'))
-    const third = await byName(tools, 'write_file').execute({ path: 'src/b.js', content: 'const b = 1\n' }, ctxFor(project.project_id, 'c3'))
+    const sharedState = createToolState()
+    const first = await byName(tools, 'write_file').execute({ path: 'src/a.js', content: 'const a = 1\n' }, ctxFor(project.project_id, 'c1', sharedState))
+    const second = await byName(tools, 'write_file').execute({ path: 'src/a.js', content: 'const a = 2\n' }, ctxFor(project.project_id, 'c2', sharedState))
+    const third = await byName(tools, 'write_file').execute({ path: 'src/b.js', content: 'const b = 1\n' }, ctxFor(project.project_id, 'c3', sharedState))
     expect(first.isError).toBeFalsy()
     expect(second.isError).toBeFalsy()
     expect(third.isError).toBeFalsy()

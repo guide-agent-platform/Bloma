@@ -68,7 +68,7 @@ type GuideEventPublisher = (event: AgentEvent) => void
 
 import { CLARIFICATION_ROUND_LIMIT, DEFAULT_GUIDE_SYSTEM_PROMPT, FIRST_TURN_RULE, GUIDE_LOOP_ADDENDUM, GuideParsed } from './guide-runtime'
 import { GuideLoopOutcome, bumpFreeChatStreak, clarifyTwoLayerEnabled, collectClarificationAnswers, countSameOptionCards, countTrailingClarificationRounds, ensurePrimaryIntent, freeChatStreakOf, hasRecentReliefCard, normalizeClarificationOptions, normalizeGuideDecisionToParsed, publishClarificationCard, publishClarificationReliefCard, resetFreeChatStreak, resolveAutoDelegation, resolveCardAnswer, resolveClarificationReliefAnswer, trackClarificationResponded } from './clarify-flow'
-import { startRequirementConfirmFlow } from './requirement-confirm'
+import { invalidatePendingRequirementConfirm, startRequirementConfirmFlow } from './requirement-confirm'
 import { buildWebLineRetiredCardPayload } from '../web-line-retired'
 import { runPrdPipeline } from './prd-pipeline'
 
@@ -82,6 +82,10 @@ export async function handleGuideMessage(
   persistSystem?: (text: string) => void,
 ): Promise<void> {
   const project = findProject(input.project_id)
+  // 挂起弹窗失效（全链路审查 P1-8，2026-10-02）：新用户消息进入即作废旧需求确认弹窗——
+  // 弹窗携带的是弹出时点的需求快照，用户继续聊意味着需求已演化，旧快照确认会静默丢弃
+  // 期间的新需求（stale 覆盖）；失效后旧弹窗点击返回 started:false，新对话会收敛出新弹窗。
+  invalidatePendingRequirementConfirm(input.project_id)
   // 注入点①澄清轮修正（对用户透明，PRD 12.2）：后续话语带显式形态信号（网页/桌面）时
   // 更新类型推断；weak 信号不动已有判断。失败静默——推断是增强不是依赖，不阻断澄清链。
   try {

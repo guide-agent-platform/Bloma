@@ -20,10 +20,11 @@ describe('能力开关 manifest（P2-03）', () => {
     vi.unstubAllEnvs()
   })
 
-  it('captureCapabilityManifest：真实反映开关值（缺省与显式 on 两态）', () => {
+  it('captureCapabilityManifest：真实反映开关值（write_guard 缺省 on 后的两态）', () => {
     const defaults = captureCapabilityManifest('s-1')
     expect(defaults.session_id).toBe('s-1')
-    expect(defaults.switches.write_guard).toBe(false) // 仍缺省 off（事实如实，不美化）
+    // 2026-10-02 全链路审查 P1-4：write_guard 无条件化，缺省 on（事实如实，不美化）
+    expect(defaults.switches.write_guard).toBe(true)
     expect(defaults.switches.browser_tools).toBe(false)
 
     vi.stubEnv('BLOMA_WRITE_GUARD', '1')
@@ -31,6 +32,9 @@ describe('能力开关 manifest（P2-03）', () => {
     const turnedOn = captureCapabilityManifest('s-1')
     expect(turnedOn.switches.write_guard).toBe(true)
     expect(turnedOn.switches.browser_tools).toBe(true)
+    vi.stubEnv('BLOMA_WRITE_GUARD', '0')
+    const escaped = captureCapabilityManifest('s-1')
+    expect(escaped.switches.write_guard).toBe(false)
   })
 
   it('recordCapabilityManifest：落项目字段 + 决策日志如实列出未启用能力', () => {

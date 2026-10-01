@@ -4,6 +4,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { registerIpcHandlers } from './ipc'
 import { setSnapshotCaptureProvider } from './delivery/snapshots'
+import { setChildRunContextProvider } from './agent/delegation/child-run-context'
+import { buildDelegationWorktreeProvider } from './coding/worktree-isolation'
 import { reconcileInterruptedProjects } from './project/recovery-service'
 import { reconcileAllRunningDelegations } from './agent/delegation/delegation-persistence'
 import { migrateLegacySessionsIndexOnce } from './platform/sessions/session-service'
@@ -23,6 +25,13 @@ import { recordDecision } from './project/decision-log'
 import { findProject, listProjects, updateProject } from './project/project-service'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+
+// 委派 worktree 隔离装配（全链路审查 P1-9，2026-10-02）：web 线拆除时把旧 generate.ts
+// 的装配点一并拆掉，BLOMA_DELEGATION_WORKTREE 开关变成静默 no-op（开关 on 用户以为
+// 隔离实际未隔离）。在应用启动入口重新装配（依赖倒置：coding 层构造、agent 层注入、
+// 编排层接线；开关 off 时 provider 返回 undefined，行为零变化）。测试环境不加载本入口，
+// 单测装配面保持现状（worktree 单测直调 provider 工厂）。
+setChildRunContextProvider(buildDelegationWorktreeProvider())
 
 let mainWindow: BrowserWindow | undefined
 

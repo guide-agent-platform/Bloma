@@ -46,6 +46,36 @@ import { isDesktopDispatchEnabled } from './dispatcher-switch'
 import { execFileProbeSpawn, isDesktopEnvReady, probeDesktopEnv, type ProbeSpawn } from './check-env'
 import { parseProjectContract } from './contract-schema'
 import { runContractDriver, execFileDriverSpawn, type DriverExecutionReport } from './process-driver'
+import { runSecurityScan } from '../verification/security-scan'
+import { findProject } from '../project/project-service'
+
+/** 宿主强制安全扫描门（P0-1 缓解，2026-10-02）：返回 null = 无项目上下文/扫描器异常，
+ *  跳过（行为等同旧世界）；返回扫描结果由调用方 fail-closed 裁决。 */
+function runHostSecurityGate(input: { projectId: string; sandboxRoot?: string }):
+  | { passed: boolean; blocking: number; scanned: number; listing: string }
+  | null {
+  let rootPath = input.sandboxRoot
+  if (!rootPath) {
+    try {
+      rootPath = findProject(input.projectId).root_path
+    } catch {
+      return null // 无项目上下文（测试桩/纯会话）：不阻断，留痕
+    }
+  }
+  try {
+    const result = runSecurityScan({ project_id: input.projectId, root_path: rootPath })
+    const blocking = result.issues.filter((issue) => issue.severity === 'high' || issue.severity === 'critical')
+    return {
+      passed: result.passed,
+      blocking: blocking.length,
+      scanned: result.scanned_files,
+      listing: blocking.slice(0, 10).map((issue) => `- ${issue.file}:${issue.line} ${issue.user_visible_summary}`).join('\n'),
+    }
+  } catch (error) {
+    console.error('[desktop-verify] 宿主安全扫描执行失败（跳过本次门禁，留痕）：', error)
+    return null
+  }
+}
 
 // =========================================================================
 // 运行输入/输出
@@ -446,6 +476,44 @@ async function runVerifyFinalize(
         education:
           `驱动执行未通过（${report.routing}）：${report.routingReason}\n` +
           '验证结论只看驱动执行回读——请按失败场景修复后重新收口（fail 路由进修复轮；blocked 属环境类需先解决装配）。',
+      },
+      driverReport: report,
+    }
+  }
+
+  // 最低验证证据门（全链路审查 P1-5，2026-10-02）：零场景锚点 + 零 SUMMARY 自报的
+  // 「空驱动」（exit 0 直通）不得作为验证凭据——生成方=验收方同源，零断言的 driver
+  // 等于没验。要求场景锚点或 SUMMARY 行至少其一；两者皆无 → 按验证产物不足拒收。
+  if (report.scenarios.length === 0 && report.summaryLine === null) {
+    return {
+      advance: {
+        decision: 'reject',
+        reason: 'artifacts-missing',
+        missingArtifacts: [{ gateId: 'driver-report', artifacts: [DRIVER_REPORT_PATH] }],
+        discardedObservations: [],
+        education:
+          '驱动报告没有任何验证证据（零场景锚点、零 SUMMARY 自报）——退出码 0 不能替代断言。' +
+          '请让 driver 至少回读 1 个场景锚点（PASS/FAIL/BLOCKED 行）或输出 SUMMARY 行，再重新收口。',
+      },
+      driverReport: report,
+    }
+  }
+
+  // 宿主强制安全扫描门（全链路审查 P0-1 缓解，2026-10-02）：driver pass ≠ 安全——
+  // 扫描不再依赖子会话自愿调用，收口时宿主对产物根强制扫一遍（扫描器已含 .py 硬红线），
+  // 高危/严重命中 → 拒收推进（fail-closed）。无项目上下文（测试桩/纯会话场景）时跳过，
+  // 行为等同旧世界（不比旧世界差）；扫描器自身异常同样跳过并留痕（安全门不做可用性单点）。
+  const securityGate = runHostSecurityGate(input)
+  if (securityGate && !securityGate.passed) {
+    return {
+      advance: {
+        decision: 'reject',
+        reason: 'artifacts-missing',
+        missingArtifacts: [{ gateId: 'driver-report', artifacts: [DRIVER_REPORT_PATH] }],
+        discardedObservations: [],
+        education:
+          `宿主安全扫描未通过（${securityGate.blocking} 个高危/严重问题，扫描 ${securityGate.scanned} 个文件）：\n` +
+          `${securityGate.listing}\n请修复后重新收口；扫描门是硬门（fail-closed），driver 通过不能豁免。`,
       },
       driverReport: report,
     }

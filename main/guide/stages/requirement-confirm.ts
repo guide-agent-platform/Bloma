@@ -77,6 +77,20 @@ export function takePendingRequirementConfirm(projectId: string): PendingRequire
   return pending
 }
 
+/** 挂起弹窗失效（全链路审查 P1-8，2026-10-02）：用户新消息进入 guide 对话即失效旧弹窗——
+ *  防止「弹窗挂起期间继续聊改需求，之后回头点旧弹窗确认」把旧快照落盘、丢弃期间新需求
+ *  （stale 覆盖）。失效后点旧弹窗返回 started:false（渲染端已有处理）；新对话收敛出新弹窗。 */
+export function invalidatePendingRequirementConfirm(projectId: string, reason = 'new_user_message'): boolean {
+  const had = pendingRequirementConfirms.delete(projectId)
+  if (had) console.debug(`[requirement-confirm] 挂起弹窗失效（${reason}）：需求已继续演化，旧快照不再可确认`)
+  return had
+}
+
+/** 挂起中查询（观察点，不消费——测试与诊断用）。 */
+export function hasPendingRequirementConfirm(projectId: string): boolean {
+  return pendingRequirementConfirms.has(projectId)
+}
+
 /** 需求确认弹窗主流程：市调（增强不阻断）→ 落盘留痕 → pending 状态 → 弹窗事件。 */
 export async function startRequirementConfirmFlow(
   input: AgentSendMessageInput,

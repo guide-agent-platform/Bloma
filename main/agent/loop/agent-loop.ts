@@ -718,9 +718,12 @@ export function toolEvidenceEnabled(): boolean {
   return process.env.BLOMA_TOOL_EVIDENCE === '1' || process.env.BLOMA_TOOL_EVIDENCE === 'true'
 }
 
-/** D4 开关：write_file 覆盖未读既有文件拦截。缺省 off=现状；off 时零变化。 */
+/** D4：write_file 覆盖未读既有文件拦截。缺省 on（2026-10-02 全链路审查 P1-4 无条件化：
+ *  盲覆盖是并行子会话静默覆盖彼此成果的主通道，「依赖提示词自律」不成立——运行审计
+ *  P1-06 同结论）。新建文件不受影响；BLOMA_WRITE_GUARD=0/false 为显式逃生口。 */
 export function writeGuardEnabled(): boolean {
-  return process.env.BLOMA_WRITE_GUARD === '1' || process.env.BLOMA_WRITE_GUARD === 'true'
+  const raw = process.env.BLOMA_WRITE_GUARD
+  return raw !== '0' && raw !== 'false'
 }
 
 /** W3-D1/D2 开关（咨询 D2《验证分层与收口预检》）：run_preflight 工具注册 + 收口判定升级为

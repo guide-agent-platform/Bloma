@@ -479,3 +479,95 @@ describe('委派通道接线腿（2026-09-26 首跑修复）', () => {
     expect(String(missing.output)).toContain('就绪判定（三项全 ok）：否')
   })
 })
+
+describe('desktop-verify 收口双门（全链路审查 P1-5/P0-1 缓解，2026-10-02）', () => {
+  const validContract = JSON.stringify({
+    schema_version: 1,
+    entry: 'app.py',
+    driver: {
+      command: ['python', 'driver-skeleton.py'],
+      timeout_ms: 60000,
+      exit_code_semantics: { '0': 'pass', '1': 'fail', '2': 'blocked' },
+      assert_readback: 'stdout 锚点',
+    },
+    env_whitelist: [],
+    components: [],
+  })
+
+  it('空驱动（exit 0 + 零锚点 + 零 SUMMARY）→ 拒收：退出码不能替代断言', async () => {
+    const { query } = scriptedQuery([[textMessage('PHASE_ADVANCE: delivered')]])
+    const result = await runDesktopDispatcherLoop(baseInput({
+      query,
+      currentPhase: 'desktop-verify',
+      artifactExists: allExist,
+      confirmedPhases: new Set(['desktop-verify']),
+      readContract: () => validContract,
+      driverSpawn: async () => ({ code: 0, stdout: '', stderr: '' }),
+      writeReport: () => undefined,
+    }))
+    expect(result.advance).toMatchObject({ decision: 'reject', reason: 'artifacts-missing' })
+    if (result.advance?.decision === 'reject') {
+      expect(result.advance.education).toContain('没有任何验证证据')
+    }
+    // driver 自身路由仍是 pass（纯函数语义不变），拦截发生在收口证据门
+    expect(result.driverReport?.routing).toBe('pass')
+  })
+
+  it('宿主安全扫描命中高危 → 拒收（fail-closed 硬门）；driver pass 不能豁免', async () => {
+    const { mkdtempSync, writeFileSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    // 真实项目根 + 高危产物（.py 硬红线：os.system）
+    const home = mkdtempSync(join(tmpdir(), 'bloma-verify-sec-'))
+    process.env.PROMA_HOME = home
+    const { createProject } = await import('../../../main/project/project-service')
+    const project = createProject({ request_id: 'req-sec-gate', mode: 'quick' })
+    const { findProject } = await import('../../../main/project/project-service')
+    const root = findProject(project.project_id).root_path
+    writeFileSync(join(root, 'driver-skeleton.py'), 'import os\nos.system(cmd)\n', 'utf8')
+
+    const { query } = scriptedQuery([[textMessage('验证完成。\nPHASE_ADVANCE: delivered')]])
+    const result = await runDesktopDispatcherLoop(baseInput({
+      query,
+      currentPhase: 'desktop-verify',
+      artifactExists: allExist,
+      confirmedPhases: new Set(['desktop-verify']),
+      readContract: () => validContract,
+      driverSpawn: async () => ({ code: 0, stdout: 'PASS a\nSUMMARY pass=1', stderr: '' }),
+      writeReport: () => undefined,
+      sandboxRoot: root,
+    }))
+    expect(result.advance).toMatchObject({ decision: 'reject', reason: 'artifacts-missing' })
+    if (result.advance?.decision === 'reject') {
+      expect(result.advance.education).toContain('宿主安全扫描未通过')
+      expect(result.advance.education).toContain('driver-skeleton.py')
+    }
+    delete process.env.PROMA_HOME
+  })
+
+  it('干净产物 + driver pass（有锚点/摘要）→ 正常推进（安全门不误杀）', async () => {
+    const { mkdtempSync, writeFileSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const home = mkdtempSync(join(tmpdir(), 'bloma-verify-clean-'))
+    process.env.PROMA_HOME = home
+    const { createProject, findProject } = await import('../../../main/project/project-service')
+    const project = createProject({ request_id: 'req-clean-gate', mode: 'quick' })
+    const root = findProject(project.project_id).root_path
+    writeFileSync(join(root, 'app.py'), 'print("hello")\n', 'utf8')
+
+    const { query } = scriptedQuery([[textMessage('验证完成。\nPHASE_ADVANCE: delivered')]])
+    const result = await runDesktopDispatcherLoop(baseInput({
+      query,
+      currentPhase: 'desktop-verify',
+      artifactExists: allExist,
+      confirmedPhases: new Set(['desktop-verify']),
+      readContract: () => validContract,
+      driverSpawn: async () => ({ code: 0, stdout: 'PASS a\nSUMMARY pass=1', stderr: '' }),
+      writeReport: () => undefined,
+      sandboxRoot: root,
+    }))
+    expect(result.advance).toMatchObject({ decision: 'advance', target: 'delivered' })
+    delete process.env.PROMA_HOME
+  })
+})

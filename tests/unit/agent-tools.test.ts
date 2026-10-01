@@ -205,16 +205,20 @@ describe('agent-tools（PR2 L2）', () => {
     it('[W3] 真实脚手架变体写边界：package.json/server.js/任意后缀皆产物可写；node_modules/.git/data-backups/标记拒绝', async () => {
       const project = createProject({ request_id: 'req-w3-real', mode: 'quick' })
       writeRealScaffoldMarker(project.root_path, 'real-fullstack')
-      const tools = composeTools({ projectId: project.project_id })
+      // 先落真实工程件骨架（模拟脚手架已交付），再验证 agent 写边界
+      writeFileSync(join(project.root_path, 'package.json'), '{"name":"skeleton"}', 'utf8')
+      const tools = composeTools({ projectId: project.project_id, realFullstackVariant: true })
       const ctx = ctxFor(project.project_id)
-      // package.json 是真实工程件（可改）；server/ 下路由模块可建；任意后缀（README.md）可写
+      // 已存在的 package.json 是真实工程件（可改）——write 守卫（缺省 on）要求先读
+      // 再改（盲覆盖拦截）；read 后改写即为真实工作流
+      await byName(tools, 'read_file').execute({ path: 'package.json' }, ctx)
       const pkg = await byName(tools, 'write_file').execute({ path: 'package.json', content: '{"name":"app"}' }, ctx)
       expect(pkg.isError).toBeFalsy()
       const route = await byName(tools, 'write_file').execute({ path: 'server/routes/notes.js', content: 'module.exports = {}' }, ctx)
       expect(route.isError).toBeFalsy()
       const md = await byName(tools, 'write_file').execute({ path: 'README.md', content: '# app' }, ctx)
       expect(md.isError).toBeFalsy()
-      // 基础设施目录与变体标记拒绝
+      // 基础设施目录与变体标记拒绝（边界拒绝先于读守卫——本来就禁止写的路径直接给边界文案）
       for (const path of ['node_modules/evil.js', '.git/config', 'data-backups/x.json']) {
         const outcome = await byName(tools, 'write_file').execute({ path, content: 'x' }, ctx)
         expect(outcome.isError, path).toBe(true)
@@ -647,45 +651,46 @@ describe('agent-tools D 系列（咨询 D：验证协议，2026-09-09）', () =>
     expect(readFileSync(abs, 'utf8')).toContain('const a = 3')
   })
 
-  it('D4a：write 守卫 off=现状零变化；on=盲覆盖既有文件被拒，read 后放行，新文件不受影响', async () => {
+  it('D4a：write 守卫缺省 on（2026-10-02 无条件化）；显式 0=逃生口；盲覆盖被拒，read 后放行，新文件不受影响', async () => {
     const project = createProject({ request_id: 'req-d-guard', mode: 'quick' })
     const abs = join(project.root_path, 'index.html')
     writeFileSync(abs, '<html><body><p>旧内容</p></body></html>', 'utf8')
 
-    // off：直接覆盖（现状）
+    // 缺省（未设开关）：盲覆盖被拒（无条件化后的新缺省）
+    const toolsDefault = composeTools({ projectId: project.project_id })
+    const blocked = await byName(toolsDefault, 'write_file').execute(
+      { path: 'index.html', content: '<html><body><p>再覆盖</p></body></html>' },
+      ctxFor(project.project_id),
+    )
+    expect(blocked.isError).toBe(true)
+    expect(blocked.output).toContain('本轮未读取过')
+
+    // read 后放行
+    const ctx = ctxFor(project.project_id)
+    await byName(toolsDefault, 'read_file').execute({ path: 'index.html' }, ctx)
+    const allowed = await byName(toolsDefault, 'write_file').execute(
+      { path: 'index.html', content: '<html><body><p>读后覆盖</p></body></html>' },
+      ctx,
+    )
+    expect(allowed.isError).toBeFalsy()
+
+    // 新文件不受影响
+    const fresh = await byName(toolsDefault, 'write_file').execute(
+      { path: 'src/new.js', content: 'const b = 1\n' },
+      ctxFor(project.project_id),
+    )
+    expect(fresh.isError).toBeFalsy()
+
+    // 显式逃生口：BLOMA_WRITE_GUARD=0 → 盲覆盖放行（旧缺省行为）
+    process.env.BLOMA_WRITE_GUARD = '0'
+    writeFileSync(abs, '<html><body><p>旧内容</p></body></html>', 'utf8')
     const toolsOff = composeTools({ projectId: project.project_id })
     const off = await byName(toolsOff, 'write_file').execute(
       { path: 'index.html', content: '<html><body><p>新内容</p></body></html>' },
       ctxFor(project.project_id),
     )
     expect(off.isError).toBeFalsy()
-
-    // on：重建文件后盲覆盖被拒
-    process.env.BLOMA_WRITE_GUARD = '1'
-    writeFileSync(abs, '<html><body><p>旧内容</p></body></html>', 'utf8')
-    const toolsOn = composeTools({ projectId: project.project_id })
-    const ctx = ctxFor(project.project_id)
-    const blocked = await byName(toolsOn, 'write_file').execute(
-      { path: 'index.html', content: '<html><body><p>再覆盖</p></body></html>' },
-      ctx,
-    )
-    expect(blocked.isError).toBe(true)
-    expect(blocked.output).toContain('本轮未读取过')
-
-    // read 后放行
-    await byName(toolsOn, 'read_file').execute({ path: 'index.html' }, ctx)
-    const allowed = await byName(toolsOn, 'write_file').execute(
-      { path: 'index.html', content: '<html><body><p>读后覆盖</p></body></html>' },
-      ctx,
-    )
-    expect(allowed.isError).toBeFalsy()
-
-    // 新文件不受守卫影响
-    const fresh = await byName(toolsOn, 'write_file').execute(
-      { path: 'src/new.js', content: 'const b = 1\n' },
-      ctx,
-    )
-    expect(fresh.isError).toBeFalsy()
+    delete process.env.BLOMA_WRITE_GUARD
   })
 })
 

@@ -192,6 +192,40 @@ describe('需求确认弹窗（confirm_requirements）', () => {
     expect(takePendingRequirementConfirm('proj-1')).toBeUndefined()
   })
 
+  it('挂起弹窗在新用户消息进入时失效（全链路审查 P1-8，2026-10-02）：旧快照不可再确认，防 stale 覆盖', async () => {
+    // 第一轮：模型判定需求成型 → 弹确认窗（pending 建立）
+    await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(), undefined, persistSystem)
+    expect(events.some((event) => event.type === 'user_decision_required')).toBe(true)
+    const pendingAfterFirst = await import('../../main/guide/stages/requirement-confirm').then((m) => {
+      // 不能用 take（会消费）——直接看内部表确认 pending 已建立
+      return m.hasPendingRequirementConfirm?.('proj-1') ?? true
+    })
+    expect(pendingAfterFirst).toBe(true)
+
+    // 第二轮：用户继续发消息（需求演化）→ handleGuideMessage 入口失效旧弹窗 pending；
+    // 若第二轮管线再次判定成型弹出新窗，新 pending 必是新时点快照（request_id=req-c2），
+    // 旧快照（req-c1）永久不可达——这正是防 stale 覆盖的语义。
+    events = []
+    await handleGuideMessage({ ...makeInput(), request_id: 'req-c2', content: '还想加个导出功能' }, (event) => events.push(event), makeModel(), undefined, persistSystem)
+    const requirementConfirmModule = await import('../../main/guide/stages/requirement-confirm')
+    const pendingAfterSecond = requirementConfirmModule.takePendingRequirementConfirm('proj-1')
+    if (pendingAfterSecond) {
+      expect(pendingAfterSecond.request_id).toBe('req-c2')
+    }
+    // 无论第二轮是否弹新窗：旧快照已不可再取（再取为空）
+    expect(requirementConfirmModule.takePendingRequirementConfirm('proj-1')).toBeUndefined()
+
+    // 点旧弹窗确认 → started:false（不再有 stale 快照可落盘）
+    const result = await resolveRequirementConfirm({
+      request_id: 'req-c-stale',
+      session_id: SESSION_ID,
+      project_id: 'proj-1',
+      decision: 'confirm',
+      requirement_ids: ['F-001'],
+    })
+    expect(result).toMatchObject({ started: false, prd_written: false })
+  })
+
   it('用户勾选子集 confirm → PRD 前移落盘（requirement_confirmed）+ 审查后发 PRD 确认卡挂起（改造 3）', async () => {
     await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(), undefined, persistSystem)
 

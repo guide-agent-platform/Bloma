@@ -579,9 +579,11 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
       // W4-F2：授权边界门（仅修复轮传入 writeScope 时生效；主 loop 无 holder 零变化）
       const writeScopeBlocked = guardWriteScope(resolved.rel)
       if (writeScopeBlocked) return writeScopeBlocked
-      // D4a：write 守卫——覆盖「本轮未读过的既有文件」拦截（R-FILE-01 工具化：
-      // 盲覆盖正式 BLOMA_WRITE_GUARD=on 才拦；off 零变化。新建文件不受影响）。
-      if (existsSync(resolved.abs) && !fileRevisionsOf(ctx).has(resolved.rel)) {
+      // D4a：write 守卫——覆盖「本轮未读过的既有文件」拦截（R-FILE-01 工具化；
+      // 2026-10-02 全链路审查 P1-4 无条件化：缺省 on，BLOMA_WRITE_GUARD=0/false 逃生口）。
+      // 新建文件不受影响；**本来就禁止写的路径跳过守卫**直接走边界拒绝——对只读/
+      // 系统路径提示「先读再写」是错误指引（边界优先，2026-10-02）。
+      if (isWritablePath(resolved.rel, realVariant) && existsSync(resolved.abs) && !fileRevisionsOf(ctx).has(resolved.rel)) {
         if (writeGuardEnabled()) {
           return {
             output: `目标文件已存在且本轮未读取过：${resolved.rel}。先 read_file 获取当前内容（R-FILE-01），再决定 edit_file 精确修改或基于读取结果重写；禁止盲覆盖。`,

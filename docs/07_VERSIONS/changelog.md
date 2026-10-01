@@ -7,6 +7,27 @@
 
 **v1.1 修订说明**：同步 §5 已知待同步项状态（4 项全部已同步），新增 §5.1 目录结构重组记录。按 `workflow.md §2.4` 走修订流程，待评审后回到已确认。
 
+## 全链路审查修复批二：收口双门 + 守卫无条件化 + pending 失效 + worktree 装配（2026-10-02）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | fix（审查挂账清单第二批：P0-1 缓解×2 + P1×3） |
+| 模块 | `main/desktop/dispatcher-loop.ts`、`main/agent/loop/agent-loop.ts`（writeGuardEnabled）、`main/agent/tools/agent-tools.ts`、`main/guide/stages/requirement-confirm.ts`、`main/guide/stages/guide-pipeline.ts`、`main/index.ts` |
+
+### 变更内容
+
+- **desktop-verify 收口双门（P0-1 缓解 + P1-5）**：①宿主强制安全扫描门——driver pass 后宿主对产物根强制执行 run_security_scan（含 .py 硬红线），高危/严重命中 → 拒收推进（fail-closed），不再依赖子会话自愿调用；无项目上下文/扫描器异常时跳过留痕（不做可用性单点）。②最低验证证据门——零场景锚点 + 零 SUMMARY 自报的「空驱动」（exit 0 直通）不再作为验证凭据，要求锚点或 SUMMARY 至少其一。driver 纯函数路由语义不变（拦截在收口层）。
+- **write 守卫无条件化（P1-4）**：BLOMA_WRITE_GUARD 缺省翻转 off→on（盲覆盖「本轮未读过的既有文件」默认拦截；新建文件不受影响；=0/false 显式逃生口）。同步修边界优先序：只读/系统路径跳过读守卫直接给边界拒绝文案（对只读路径提示「先读再写」是错误指引）。测试同步：同会话连续写用例改共享 ToolState（对齐真实 loop 语义）。
+- **需求确认弹窗失效（P1-8）**：handleGuideMessage 入口失效挂起弹窗 pending——弹窗携带弹出时点需求快照，用户继续聊即演化，旧快照确认会 stale 覆盖新需求；失效后旧弹窗点击返回 started:false，新对话收敛出新弹窗（新时点快照）。
+- **worktree provider 生产装配（P1-9）**：应用启动入口（main/index.ts）重新装配 setChildRunContextProvider(buildDelegationWorktreeProvider())——web 线拆除时旧 generate.ts 装配点被一并拆掉，BLOMA_DELEGATION_WORKTREE 开关静默 no-op；现在开关 on 真实生效（依赖倒置：coding 构造、agent 注入、编排接线）。
+
+### 影响评估
+
+- 单测 199 文件/1949 例全绿（新增锁定×4：空驱动拒收/安全门拒收/干净产物不误杀/弹窗失效；语义更新×4：D4a 两态、manifest 两态、W3 先读后写、连续写共享 state）；typecheck 0 错。
+- 行为变化：①桌面线收口多两道硬门（空 driver 与高危产物不再直通 delivered）；②盲覆盖默认拦截（模型多一轮 read，防静默覆盖）；③挂起弹窗在用户继续对话后不可再确认；④worktree 开关 on 时子会话真实隔离（不再静默直写主根）。
+- 存量 flaky 留痕：worktree-isolation 全量并发下单例偶现 71s 超时（git spawnSync 负载敏感；单独重跑稳定全过），与未批无关，归 flaky-detector 观察面。
+- 挂账（后续批）：裁判/语义审查/对抗审查/交付分级的桌面线重接（P0-1 完整版，需产品决策：桌面线 GWT 等价物/裁判退回三选 UI）；setChildToolsBuilder 跨线单例参数化；PRD 确认卡（prd-confirm）env 断链与 sticky P2。
+
 ## 全链路审查修复批：P0-2 安全盲区 + 收口如实化 + 会话/PRD/快照链路 P1（2026-10-01）
 
 | 属性 | 值 |
