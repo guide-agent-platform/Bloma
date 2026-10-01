@@ -12,9 +12,6 @@ import { validationStateLine, SANDBOX_LOG_TAIL_LIMIT } from '../agent/tools/agen
 import { findProject, readLastSketchRequirements } from '../project/project-service'
 import { readPrdBackplane } from '../project/document-engine'
 import { runSandbox, getSandboxLogs } from '../delivery/sandbox'
-import { rebuildRealFullstackDist } from './dist-rebuild'
-import { checkApiContract } from './api-contract'
-import { runArtifactUiGate } from './artifact-ui-gate'
 import { isPlaceholderAssertion } from './sketch-engine'
 import { runSecurityScan } from '../verification/security-scan'
 import { browserToolsEnabled, buildPreviewBrowserTools } from './preview-browser'
@@ -62,51 +59,6 @@ export function buildDomainTools(options: BuildAgentToolsOptions): AgentLoopTool
 
   // D1（咨询 D，2026-09-09）：API 契约验证进 loop——复用终验同款 checkApiContract，
   // 不新建判断标准；外部终验仍独立执行（共享实现 ≠ 共享判定权）。仅 BLOMA_API_TOOL=on 注册。
-  const run_api_contract_tests: AgentLoopTool = {
-    name: 'run_api_contract_tests',
-    parallelSafe: true,
-    description:
-      '验证 PRD 接口契约（interface_spec）声明的后端 API 端点是否存活并应答（无参 GET 端点逐一探测；无参 POST 端点发空 JSON 体探挂载——404=未挂载计失活，400/422=校验拒绝不算失败；GET 5xx/超时=契约失活）。用途：收口前证明前后端契约真实生效；不验证业务逻辑正确性（那属于行为断言）。前置：需先 run_preview。无接口契约的项目返回豁免说明。',
-    input_schema: { type: 'object', properties: {} },
-    execute: async (_toolInput, ctx) => {
-      if (!ctx.state.preview_url) {
-        return { output: '还没有可用的预览地址。请先调用 run_preview 启动预览，再验证 API 契约。', isError: true }
-      }
-      const endpoints = readPrdBackplane(projectId)?.interface_spec ?? []
-      // W2-F4：执行计数（有契约才计；豁免分支不算「验过」）
-      if (endpoints.length > 0) ctx.state.api_contract_runs = (ctx.state.api_contract_runs ?? 0) + 1
-      if (endpoints.length === 0) {
-        ctx.state.api_all_passed = true
-        return {
-          output: '本项目无接口契约（interface_spec 为空，纯静态产物），API 契约验证豁免通过。',
-          detail: { exempt: true, endpoints: 0 },
-        }
-      }
-      const failures = await checkApiContract(ctx.state.preview_url, endpoints)
-      ctx.state.api_all_passed = failures.length === 0
-      if (failures.length === 0) {
-        const listing = endpoints.map((ep) => `- ${ep.method ?? 'GET'} ${ep.endpoint}`).join('\n')
-        const evidence = validationStateLine(ctx.state)
-        return {
-          output: `API 契约验证通过：${endpoints.length} 个声明端点全部应答正常。\n${listing}${evidence}`,
-          detail: { passed: true, endpoints: endpoints.length },
-        }
-      }
-      const listing = failures.map((f) => `- API 契约端点：${f.scenario} — ${f.reason}`).join('\n')
-      const evidence = validationStateLine(ctx.state)
-      // W3：失败输出附预览地址与服务日志尾部（真实服务器下运行期堆栈是一手证据；
-      // 修复指引按变体分流——Express 项目指 server.js，旧路径指 server/routes/）
-      const fixGuide = realVariant
-        ? '请对照 server.js / server/ 下的路由实现修复后重验（Express：app.get/post 注册）。'
-        : '请对照 server/routes/ 的路由实现修复后重验。'
-      const logTail = getSandboxLogs(projectId).trim().slice(-SANDBOX_LOG_TAIL_LIMIT)
-      const logSection = logTail ? `\n服务日志尾部：\n${logTail}` : ''
-      return {
-        output: `API 契约验证未通过（${failures.length}/${endpoints.length} 个端点失败；预览 ${ctx.state.preview_url}）：\n${listing}\n${fixGuide}${logSection}${evidence}`,
-        detail: { passed: false, failed: failures.length, endpoints: endpoints.length, preview_url: ctx.state.preview_url },
-      }
-    },
-  }
 
   const repair_control: AgentLoopTool = {
     name: 'repair_control',
@@ -171,27 +123,26 @@ export function buildDomainTools(options: BuildAgentToolsOptions): AgentLoopTool
   }
 
   // D1：API 契约验证工具按开关注册（off=工具面与现状字节级一致）
-  const apiTools = [run_api_contract_tests]
   // W4-F3：修复控制窄入口——仅修复轮传入 writeScope 时注册（主 loop 无此工具）
   const repairControlTools = options.writeScope ? [repair_control] : []
   // W1（Phase 10，预览浏览器工具族）：仅主 loop 注册（BLOMA_BROWSER_TOOLS 缺省 off）
   const browserTools = browserToolsEnabled() ? buildPreviewBrowserTools(projectId) : []
 
   if (role === 'explore' || role === 'research') {
-    // 只读角色：领域验证/预览工具不注入（探索/调研只读+ask）
+    // 只读角色：领域验证工具不注入（探索/调研只读+ask）
     return []
   }
   if (role === 'review') {
-    // 审查角色：可跑预览/测试/扫描验证怀疑点，但不改产物（apiTools 供契约核查；无 preflight/repairControl）
-    return [run_security_scan, ...apiTools]
+    // 审查角色：可跑扫描验证怀疑点，但不改产物（无 repairControl）
+    return [run_security_scan]
   }
   if (role !== 'parent') {
-    // 子 agent（implement/custom）：领域验证面 + 收口预检；无 repairControl（无 writeScope）
-    return [run_security_scan, ...apiTools]
+    // 子 agent（implement/custom）：领域验证面；无 repairControl（无 writeScope）
+    return [run_security_scan]
   }
-  // parent：全领域面 + 修复控制窄入口 + 预览浏览器工具族
-  return [run_security_scan, ...apiTools, ...repairControlTools, ...browserTools]
+  return [run_security_scan, ...repairControlTools, ...browserTools]
 }
+
 
 /** 调用方便利（PR4c 行为保持）：补全变体判定与产物落盘地图刷新——等价于拆分前 buildAgentTools 内部的直连行为。 */
 export function domainToolOptionsDefaults(projectId: string): Pick<BuildAgentToolsOptions, 'realFullstackVariant' | 'onProjectFilesChanged'> {

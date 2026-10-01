@@ -35,8 +35,6 @@ export const IPC_CHANNELS = {
   PERMISSION_SET_MODE: 'permission:set-mode',
   PROJECT_CREATE: 'project:create',
   PROJECT_LIST: 'project:list',
-  PROJECT_CONFIRM_SKETCH: 'project:confirm-sketch',
-  PROJECT_SUBMIT_CORRECTION: 'project:submit-correction',
   PROJECT_ARCHIVE: 'project:archive',
   PROJECT_UNARCHIVE: 'project:unarchive',
   PROJECT_DELETE: 'project:delete',
@@ -62,8 +60,6 @@ export const IPC_CHANNELS = {
   DOCUMENT_SYNC: 'document:sync',
   DOCUMENT_LIST: 'document:list',
   DOCUMENT_READ: 'document:read',
-  DOM_COLLECT_CONTEXT: 'dom:collect-context',
-  DOM_SCROLL_PREVIEW: 'dom:scroll-preview',
   ANALYTICS_TRACK: 'analytics:track',
   CHANNEL_LIST: 'channel:list',
   CHANNEL_CREATE: 'channel:create',
@@ -1093,13 +1089,6 @@ export interface CorrectionContext {
   fallback_mode: boolean
 }
 
-export interface PointCorrectionInput extends RequestEnvelope {
-  project_id: string
-  session_id: string
-  context: CorrectionContext
-  user_note?: string
-  mode: 'user_note' | 'guess'
-}
 
 export interface RevisionAccepted {
   accepted: true
@@ -1118,21 +1107,6 @@ export interface RevisionAccepted {
  * subframe.executeJavaScript(document.elementFromPoint) 收集。
  * 对齐 api-spec §12.8 `collect_dom_context`。
  */
-export interface DomCollectContextInput extends RequestEnvelope {
-  project_id: string
-  session_id: string
-  /** 点击坐标，相对预览 iframe 左上角（CSS 像素） */
-  click: { x: number; y: number }
-}
-
-export interface DomCollectContextResult {
-  element_selector?: string
-  text_content?: string
-  bounding_rect: { x: number; y: number; width: number; height: number }
-  /** true 表示未能定位到具体元素（回退为纯坐标模式） */
-  fallback_mode: boolean
-}
-
 /**
  * 点选纠错模式下把滚轮/中键拖拽滚动转发到跨域预览 iframe。
  * 渲染端捕获层盖在 iframe 上方拦截点击，顺带挡住了滚动；主进程经
@@ -1145,14 +1119,6 @@ export interface DomScrollPreviewInput extends RequestEnvelope {
   delta_y: number
 }
 
-export interface DomScrollPreviewResult {
-  /** 是否找到预览子帧并执行了滚动（找不到子帧时 false，前端静默忽略） */
-  scrolled: boolean
-  /** 执行滚动后预览 iframe 的实际水平滚动位置（window.scrollX，CSS 像素） */
-  scroll_x: number
-  /** 执行滚动后预览 iframe 的实际垂直滚动位置（window.scrollY，CSS 像素） */
-  scroll_y: number
-}
 
 export interface ProjectUpgradeInput extends RequestEnvelope {
   project_id: string
@@ -1536,8 +1502,6 @@ export type ElectronAPI = {
     rename(input: ProjectRenameInput): Promise<ApiResult<Project>>
     abandon(input: ProjectAbandonInput): Promise<ApiResult<Project>>
     reopen(input: ProjectReopenInput): Promise<ApiResult<Project>>
-    confirmSketch(input: ConfirmSketchInput): Promise<ApiResult<Project>>
-    submitCorrection(input: PointCorrectionInput): Promise<ApiResult<RevisionAccepted>>
     upgrade(input: ProjectUpgradeInput): Promise<ApiResult<Project>>
     finalize(input: ProjectFinalizeInput): Promise<ApiResult<Project>>
   }
@@ -1560,9 +1524,7 @@ export type ElectronAPI = {
     read(input: DocumentReadInput): Promise<ApiResult<DocumentReadResult>>
   }
   dom: {
-    collectContext(input: DomCollectContextInput): Promise<ApiResult<DomCollectContextResult>>
     /** 点选纠错模式下转发滚轮/中键拖拽滚动到跨域预览 iframe */
-    scrollPreview(input: DomScrollPreviewInput): Promise<ApiResult<DomScrollPreviewResult>>
   }
   analytics: {
     track(input: AnalyticsTrackInput): Promise<ApiResult<AnalyticsTrackResult>>

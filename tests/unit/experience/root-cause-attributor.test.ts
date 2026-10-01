@@ -192,13 +192,13 @@ describe('T-4 updateCardAttribution 幂等写回', () => {
   it('集成（W2.1 语义）：recordFailureCards 只落事件行不产卡（归因腿无新卡可精化）', async () => {
     recordFailureCards(
       { projectId: 'proj-attr', sessionId: 's' },
-      { buildGate: { status: 'failed', detail: 'Could not resolve "./missing"', durationMs: 2 } },
+      { testResult: { total_count: 3, passed_count: 2, failed_count: 1, failure_summary: [{ scenario: 'F-001 存按钮', reason: '未命中' }] } },
     )
     await new Promise((r) => setImmediate(r))
     await new Promise((r) => setImmediate(r))
     expect(readAllCards()).toHaveLength(0)
     const { readExperienceEvents } = await import('../../../main/experience/event-log')
     const events = readExperienceEvents()
-    expect(events.some((e) => e.event_type === 'build_gate_failure')).toBe(true)
+    expect(events.some((e) => e.event_type === 'gwt_failure')).toBe(true)
   })
 })

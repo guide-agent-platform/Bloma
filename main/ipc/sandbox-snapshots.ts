@@ -24,16 +24,12 @@ import type {
   ChannelTestDirectEnvelope,
   ChannelUpdateEnvelope,
   FetchModelsEnvelope,
-  ConfirmSketchInput,
   DocumentListInput,
   DocumentReadInput,
   DocumentSyncInput,
-  DomCollectContextInput,
-  DomScrollPreviewInput,
   PermissionResponseInput,
   PastedImageSaveInput,
   PermissionSetModeInput,
-  PointCorrectionInput,
   ProjectFileReadInput,
   PromptReadInput,
   PromptResetInput,
@@ -81,7 +77,6 @@ import {
   listProjects,
   renameProject,
   reopenProject,
-  submitCorrection,
   unarchiveProject,
   updateProject,
   upgradeProject,
@@ -109,7 +104,7 @@ import { hasRequestId, isRecord, requireValue } from '../../shared/validators'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import { appendJsonLine } from '../../storage/json-store'
 import { appendSessionMessage } from '../platform/sessions/session-tree'
-import { safeInvoke, errorCodeFrom, extractRequestId, requireFields, resolvePermissionSession, validateAgentSend, validateCancel, validateConfirmRequirements, validatePermissionResponse, validateProjectCreate, extractCorrectionPrompt, truncateForCorrection, MAX_CORRECTION_TARGET_LEN } from './shared'
+import { safeInvoke, errorCodeFrom, extractRequestId, requireFields, resolvePermissionSession, validateAgentSend, validateCancel, validateConfirmRequirements, validatePermissionResponse, validateProjectCreate } from './shared'
 
 export function registerSandboxSnapshotsIpc(ipcMain: IpcMain, mainWindow: BrowserWindow): void {
   void mainWindow

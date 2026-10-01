@@ -2,7 +2,6 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { recordFailureCards, KNOWN_NEGATIVE_SEEDS, buildKnownNegativeSeedCards } from '../../../main/experience/error-card'
 import type { GwtTestResult } from '../../../main/verification/test-legacy'
 import type { JudgeVerdict } from '../../../main/review/judge-engine'
-import type { BuildGateResult } from '../../../main/coding/build-gate'
 
 /**
  * F 系列 W2.1（2026-09-16 Phase 10 承接）：采集层改为 v2 事件行——observations 只记
@@ -66,25 +65,6 @@ describe('error-card：事件行采集（W2.1）', () => {
     expect(eventTypes()).toEqual([])
   })
 
-  it('buildGate 失败 → build_gate_failure；judge 退回 → judge_return；abnormal → abnormal_outcome；antidegrade → 每条一行', () => {
-    const gate = { status: 'failed', detail: 'esbuild: TS2345 类型不匹配' } as unknown as BuildGateResult
-    const verdict = {
-      verdict: 'return',
-      hard_constraints: [{ name: '背板存在', passed: false, detail: 'prd.json 缺失' }],
-      soft_constraints: [],
-    } as unknown as JudgeVerdict
-    recordFailureCards(ctx, {
-      buildGate: gate,
-      judgeVerdict: verdict,
-      abnormal: { outcomeType: 'unexpected_exit', description: '修复预算耗尽（1/1）终验仍未通过' },
-      antidegrade: [{ code: 'ai-mock-frontend', detail: '产物无 /api/llm 调用' }],
-    })
-    expect(eventTypes()).toEqual(['build_gate_failure', 'judge_return', 'abnormal_outcome', 'antidegrade_finding'])
-    expect(observationsOf('build_gate_failure')[0]).toContain('TS2345')
-    expect(observationsOf('judge_return')[0]).toContain('背板存在')
-    expect(observationsOf('abnormal_outcome')[0]).toContain('unexpected_exit')
-    expect(observationsOf('antidegrade_finding')[0]).toContain('ai-mock-frontend')
-  })
 
   it('脏输入绝不抛错（采集是增强不是依赖）', () => {
     expect(() =>

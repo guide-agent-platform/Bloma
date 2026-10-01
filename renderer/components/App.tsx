@@ -1,3 +1,4 @@
+import type { AgentSendMessageResult, ApiResult } from '../../shared/types'
 import React, { useState, useCallback } from 'react'
 import { useSetAtom, useAtomValue } from 'jotai'
 import { ModeSelectionPage } from './ModeSelectionPage'
@@ -36,8 +37,6 @@ import {
 } from './atoms'
 import { refreshChannelsList, channelsListAtom, channelsLoadingAtom, hasUsableChannelsAtom, chatInputDraftAtom, requestChatInputFocus } from './atoms-sprint2'
 import type { ProjectMode, WorkflowStage } from './atoms'
-import type { AgentSendMessageResult, ApiResult, DomCollectContextResult } from '../../shared/types'
-
 /**
  * 这些阶段后端已产出可渲染文件（草图 / MVP）。回访恢复或重启后，旧沙箱进程已死，
  * 需要重跑 sandbox 回填 previewUrlsAtom（P0-2）。
@@ -51,11 +50,9 @@ const PREVIEW_READY_STAGES = new Set<WorkflowStage>([
   'iterating',
   'completed',
 ])
-
 /* =========================================================================
    Aurora 背景
    ========================================================================= */
-
 const Aurora: React.FC = () => (
   <div aria-hidden style={{ position: 'fixed', inset: 0, zIndex: 0, overflow: 'hidden', pointerEvents: 'none' }}>
     <span style={{ position: 'absolute', borderRadius: '50%', filter: 'blur(80px)', opacity: 0.9, width: '46vw', height: '46vw', top: '-12%', left: '-8%', background: 'var(--aurora-violet)', animation: 'aurora-drift 18s ease-in-out infinite' }} />
@@ -63,11 +60,9 @@ const Aurora: React.FC = () => (
     <span style={{ position: 'absolute', borderRadius: '50%', filter: 'blur(80px)', opacity: 0.9, width: '38vw', height: '38vw', top: '30%', right: '18%', background: 'var(--aurora-cyan)', animation: 'aurora-drift 26s ease-in-out infinite' }} />
   </div>
 )
-
 /* =========================================================================
    App 根组件
    ========================================================================= */
-
 const App: React.FC = () => {
   return (
     <>
@@ -81,14 +76,11 @@ const App: React.FC = () => {
     </>
   )
 }
-
 /* =========================================================================
    AppRoutes — 路由 + 业务逻辑
    通过 Jotai hooks 直接操作 store，不依赖全局变量
    ========================================================================= */
-
 type AppRoute = 'mode-selection' | 'workspace' | 'project-history' | 'settings'
-
 const AppRoutes: React.FC = () => {
   const [route, setRoute] = useState<AppRoute>('mode-selection')
   const [mode, setMode] = useState<ProjectMode | null>(null)
@@ -98,13 +90,10 @@ const AppRoutes: React.FC = () => {
   const [confirmingSketch, setConfirmingSketch] = useState(false)
   // U1：升级为长期模式的确认弹窗开关
   const [upgradeConfirmOpen, setUpgradeConfirmOpen] = useState(false)
-
   // 本地项目列表（真实 IPC 返回的项目索引）
   const [projectList, setProjectList] = useState<Project[]>([])
-
   // 回访恢复：加载历史消息期间的骨架占位开关
   const [historyLoading, setHistoryLoading] = useState(false)
-
   // ✅ 使用 Jotai hooks 直接读写
   const setProjectMode = useSetAtom(projectModeAtom)
   const setModeSelected = useSetAtom(modeSelectedAtom)
@@ -123,12 +112,10 @@ const AppRoutes: React.FC = () => {
   const hasChannels = useAtomValue(hasUsableChannelsAtom)
   // WC-P2 审查加固（2026-08-29）：草稿随会话切换重置（跨项目不串台）；设置页往返不经过此处，草稿保留语义不变
   const resetChatInputDraft = useSetAtom(chatInputDraftAtom)
-
   // QW#1：启动即加载渠道列表（Header 三态徽标需要，不只 Settings 页）；Settings 页复用幂等加载
   React.useEffect(() => {
     void refreshChannelsList(setChannels, setChannelsLoading)
   }, [setChannels, setChannelsLoading])
-
   // QW#2（ux-first-run-0basics I2）：进入工作区且零渠道（已决 false）→ 追加一次
   // 引导提示（纯文本，指向右上角 ⚙️ 设置入口）；有渠道/未决（null）不打扰。
   const zeroChannelHintShownRef = React.useRef(false)
@@ -150,7 +137,6 @@ const AppRoutes: React.FC = () => {
       timestamp: Date.now(),
     })
   }, [route, hasChannels, sessionId, sessionMessages])
-
   // QW#2 二期 P2-④（2026-08-28）：引导已出且渠道从无到有 → 追加连接成功正反馈，
   // 对称闭环衔接用户下一步动作（不再让用户试探性发消息确认自己搞对了）
   const channelSuccessShownRef = React.useRef(false)
@@ -169,9 +155,7 @@ const AppRoutes: React.FC = () => {
       timestamp: Date.now(),
     })
   }, [route, hasChannels, sessionId, sessionMessages])
-
   const restoreAttemptedRef = React.useRef(false)
-
   // Sprint 2: 从 AgentEvent 提取 user_decision_required → CardOptions
   const decisionCards = useUserDecisionCards()
   const setGlobalError = useSetAtom(globalUserErrorAtom)
@@ -180,7 +164,6 @@ const AppRoutes: React.FC = () => {
   const hasActiveStream = useAtomValue(hasActiveStreamAtom)
   const previewUrls = useAtomValue(previewUrlsAtom)
   const currentSnapshotId = useAtomValue(currentSnapshotIdAtom)
-
   // 当前项目预览地址（按 project_id 隔离）：从 previewUrlsAtom 取本项目沙箱地址；
   // updatedAt 拼进 query 作 cache-buster——沙箱同端口重 serve 新产物时强制 webview 重载
   const previewEntry = currentProject?.project_id
@@ -189,7 +172,6 @@ const AppRoutes: React.FC = () => {
   const streamPreviewUrl = previewEntry
     ? `${previewEntry.url}${previewEntry.url.includes('?') ? '&' : '?'}_r=${previewEntry.updatedAt}`
     : null
-
   // 写 / 清空指定项目的预览地址（多项目各自独立预览）
   const setProjectPreview = useCallback((projectId: string, url: string | null) => {
     setPreviewUrls((prev) => {
@@ -199,7 +181,6 @@ const AppRoutes: React.FC = () => {
       return next
     })
   }, [setPreviewUrls])
-
   // 回访恢复预览（P0-2）：项目已产出草图/MVP 文件时，重跑沙箱并回填 previewUrlsAtom。
   // 旧沙箱进程已随主进程退出而亡，旧端口必死，直接重跑拿新 preview_url。
   // 失败不再静默吞掉：显式进入 error 态（带「重新连接沙箱」重试），避免停在空态。
@@ -225,12 +206,10 @@ const AppRoutes: React.FC = () => {
         setPreviewStatus('error')
       })
   }, [setProjectPreview])
-
   // 离开 sketch_ready 后复位「生成中」态（由 stage_changed 事件驱动）
   React.useEffect(() => {
     if (currentStage !== 'sketch_ready') setConfirmingSketch(false)
   }, [currentStage])
-
   // 启动恢复：若本地存在活动项目，直接进入工作区而不是显示两道门
   React.useEffect(() => {
     if (restoreAttemptedRef.current) return
@@ -270,21 +249,15 @@ const AppRoutes: React.FC = () => {
       setRoute('workspace')
     })
   }, [sessionId, restorePreview])
-
   // ==================== 选择模式 → 创建工作区 ====================
-
   const handleModeSelected = useCallback((selectedMode: 'quick' | 'longterm') => {
     setMode(selectedMode)
-
     // 复用 ModeSelectionPage 经 api.project.create 建好的真实项目（读 store 拿最新值，避开闭包过期）
     const newProject = window.__jotai_store__?.get(currentProjectAtom) ?? null
     if (!newProject) return // 无主进程 / 项目创建失败：不进入工作区
-
     // 真实会话 id：后端首次 sendMessage 时经 recordSessionActivity 落会话索引并回填 last_session_id
     const newSessionId = crypto.randomUUID()
-
     setProjectList((prev: Project[]) => [newProject, ...prev])
-
     setProjectMode(selectedMode)
     setModeSelected(true)
     setWorkflowStage(newProject.current_stage)
@@ -294,28 +267,22 @@ const AppRoutes: React.FC = () => {
     setActiveSessionId(newSessionId)
     setCurrentProject(newProject)
     resetChatInputDraft('')
-
     // D3 修复：进入工作区后 Agent 发送首条问候消息（写入新会话 family，避开闭包过期）
     appendMessageToSession(newSessionId, {
       role: 'assistant',
       content: [{ type: 'text', text: '你好！告诉我你想做什么软件，我会一步步帮你做出来。' }],
       timestamp: Date.now(),
     })
-
     // 新项目开始：清掉上一项目的预览地址与时间轴，避免串台
     setProjectPreview(newProject.project_id, null)
     setSnapshotsList([])
-
     setRoute('workspace')
   }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, setProjectPreview, setSnapshotsList, resetChatInputDraft])
-
   // ==================== 从历史列表恢复项目 ====================
-
   const handleResumeProject = useCallback((project: Project) => {
     setMode(project.mode)
     // 回访恢复：沿用项目最后活跃会话，不新建会话 id（sitemap §2.6）
     const resumeSessionId = project.last_session_id ?? crypto.randomUUID()
-
     setProjectMode(project.mode)
     setModeSelected(true)
     setWorkflowStage(project.current_stage)
@@ -325,7 +292,6 @@ const AppRoutes: React.FC = () => {
     setActiveSessionId(resumeSessionId)
     setCurrentProject(project)
     resetChatInputDraft('')
-
     setProjectList((prev: Project[]) =>
       prev.map((p) =>
         p.project_id === project.project_id
@@ -333,10 +299,8 @@ const AppRoutes: React.FC = () => {
           : p,
       ),
     )
-
     // 时间轴数据源：从历史列表恢复项目时回填磁盘快照列表
     void loadSnapshots(project.project_id)
-
     if (project.last_session_id) {
       setHistoryLoading(true)
       void Promise.all([
@@ -344,17 +308,13 @@ const AppRoutes: React.FC = () => {
         loadSessionHistory(project.last_session_id),
       ]).finally(() => setHistoryLoading(false))
     }
-
     // 已产出预览的项目：重跑沙箱回填预览
     if (PREVIEW_READY_STAGES.has(project.current_stage)) {
       restorePreview(project.project_id)
     }
-
     setRoute('workspace')
   }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, restorePreview, resetChatInputDraft])
-
   // ==================== 发送消息 ====================
-
   // 发送/回退结果的下游处理（与 2026-08-27 起 send-message 语义一致）：
   // queued → 「已排队」提示；BUSY → 引导等待或停止；其余失败静默（原状）
   const handleSendOutcome = useCallback((targetSessionId: string, result: ApiResult<AgentSendMessageResult>) => {
@@ -379,11 +339,9 @@ const AppRoutes: React.FC = () => {
       })
     }
   }, [])
-
   const handleSendMessage = useCallback((content: string, images?: PastedImageRef[]) => {
     const api = window.electronAPI
     if (!api?.agent?.sendMessage) return
-
     // 真实链路：交给主进程 runAgent，流式事件由 setupGlobalAgentListeners 驱动 UI
     // clipboard-paste P1（2026-08-29）：带图消息本地气泡即块数组（imageId 短引用，无 base64）
     appendMessageToSession(sessionId, {
@@ -406,7 +364,6 @@ const AppRoutes: React.FC = () => {
       current_stage: currentStage,
       metadata: { source: 'chat' } as const,
     }
-
     const settle = async (): Promise<void> => {
       // P0-1 steer（运行中转向，2026-09-08）：会话有前台/后台生成的流式事件（hasActiveStream）
       // 且为纯文本消息时，输入框消息改道 agent:steer-message——主进程有活跃主 loop 则入
@@ -437,9 +394,7 @@ const AppRoutes: React.FC = () => {
     }
     void settle()
   }, [sessionId, currentProject, projectList, mode, currentStage, hasActiveStream, handleSendOutcome])
-
   // ==================== 停止生成（U4 / T3：agent:stop） ====================
-
   /**
    * 用户点击停止键：调 agent:stop（后端 cancelAgent 以 AGENT_CANCELLED 标记中止
    * 查询并清除运行登记，随后发 AGENT_CANCELLED 终态事件）。带 project_id 停止同项目
@@ -448,7 +403,6 @@ const AppRoutes: React.FC = () => {
   const handleStopGeneration = useCallback(async () => {
     const api = window.electronAPI
     if (!api?.agent?.cancel) return
-
     const result = await api.agent.cancel({
       request_id: crypto.randomUUID(),
       session_id: sessionId,
@@ -477,13 +431,10 @@ const AppRoutes: React.FC = () => {
       })
     }
   }, [sessionId, currentProject])
-
   // ==================== 卡片选项回传（Sprint 2：澄清卡片） ====================
-
   const handleCardOptionSelect = useCallback((option: CardOption) => {
     const api = window.electronAPI
     if (!api?.agent?.sendMessage) return
-
     // 就绪引导卡「导出部署」（2026-09-06）：不走聊天管道，直接调导出 IPC（与
     // MvpStatusBanner 导出按钮同一 API/错误口径），卡片消费但不追加用户气泡
     if (option.id === 'export_handoff') {
@@ -497,7 +448,6 @@ const AppRoutes: React.FC = () => {
         .catch(() => setGlobalError('导出失败，请重试。'))
       return
     }
-
     // 点击即有反馈：先本地追加用户气泡（与 handleSendMessage 一致），再回传后端
     appendMessageToSession(sessionId, {
       role: 'user',
@@ -522,105 +472,9 @@ const AppRoutes: React.FC = () => {
       metadata: toCardSelectionMeta(option.id),
     })
   }, [sessionId, currentProject, projectList, mode, currentStage])
-
   // ==================== 点选纠错 ====================
-
   /** U8/R-CORR-01：点击预览元素时向主进程收集该元素的 DOM 上下文（用于高亮被选区域） */
-  const handleCollectDomContext = useCallback(async (click: { x: number; y: number }) => {
-    const api = window.electronAPI
-    const projectId = currentProject?.project_id ?? projectList[0]?.project_id ?? ''
-    try {
-      const dom = await api?.dom?.collectContext?.({
-        request_id: crypto.randomUUID(),
-        project_id: projectId,
-        session_id: sessionId,
-        click,
-      })
-      if (dom?.ok && dom.data) return dom.data
-    } catch {
-      // 收集异常返回 undefined，UI 回退红点标记
-    }
-    return undefined
-  }, [sessionId, currentProject, projectList])
-
-  const handleCorrectionSubmit = useCallback(async (payload: {
-    position: { x: number; y: number }
-    userNote: string
-    fallbackMode: boolean
-    domContext?: DomCollectContextResult
-  }) => {
-    const api = window.electronAPI
-    if (!api?.project?.submitCorrection) return
-
-    // M-14：生成中（或流式运行中）不再承诺「我来帮你调整」——主路径会被项目锁
-    // 拒绝（AGENT_PROJECT_BUSY），两条「我会调整」承诺全落空且 error 零呈现。
-    // 如实告知等生成完成，切断可达性。
-    const generating =
-      hasActiveStream ||
-      currentStage === 'generating_sketch' ||
-      currentStage === 'generating_mvp' ||
-      currentStage === 'testing' ||
-      currentStage === 'judge_review' ||
-      currentStage === 'repairing' ||
-      currentStage === 'iterating' ||
-      currentStage === 'upgrading'
-    if (generating) {
-      appendMessageToSession(sessionId, {
-        role: 'system',
-        content: [{ type: 'text', text: '正在生成中，这处意见我先记在心里；等这版完成后你再指给我，我马上按意见调整。' }],
-        timestamp: Date.now(),
-      })
-      return
-    }
-
-    const projectId = currentProject?.project_id ?? projectList[0]?.project_id ?? ''
-
-    // U8：优先使用点击时已收集的 DOM 上下文（PreviewPanel 点击即收集用于高亮）；缺失时提交前兜底收集一次。
-    // 渲染进程读不到跨域预览 iframe 的 DOM，改由主进程通过 subframe.executeJavaScript 收集；
-    // 收集失败则回退纯坐标模式（bounding_rect width/height 0、fallback_mode true）。
-    let domContext: DomCollectContextResult | undefined = payload.domContext
-    if (!domContext) {
-      try {
-        const dom = await api?.dom?.collectContext?.({
-          request_id: crypto.randomUUID(),
-          project_id: projectId,
-          session_id: sessionId,
-          click: { x: payload.position.x, y: payload.position.y },
-        })
-        if (dom?.ok && dom.data && !dom.data.fallback_mode) domContext = dom.data
-      } catch {
-        // 收集异常不阻断纠错提交，回退纯坐标
-      }
-    }
-
-    // 真实链路：记录点选纠错（后端 appendProjectEvent + analytics point_correction）
-    appendMessageToSession(sessionId, {
-      role: 'system',
-      content: [{ type: 'text', text: `已收到你的修改意见${payload.userNote ? `：「${payload.userNote}」` : '（你猜模式）'}，我来帮你调整。` }],
-      timestamp: Date.now(),
-    })
-    void api.project.submitCorrection({
-      request_id: crypto.randomUUID(),
-      project_id: projectId,
-      session_id: sessionId,
-      context: domContext
-        ? {
-            element_selector: domContext.element_selector,
-            text_content: domContext.text_content,
-            bounding_rect: domContext.bounding_rect,
-            fallback_mode: false,
-          }
-        : {
-            bounding_rect: { x: payload.position.x, y: payload.position.y, width: 0, height: 0 },
-            fallback_mode: true,
-          },
-      user_note: payload.userNote || undefined,
-      mode: payload.userNote ? 'user_note' : 'guess',
-    })
-  }, [sessionId, currentProject, projectList, hasActiveStream, currentStage])
-
   // ==================== 快照回滚 ====================
-
   /**
    * 真回滚（P0 修复，原为假实现：只插系统消息不调 IPC）。
    * 走 IPC snapshot:rollback——主进程先拍 rollback_guard 保护快照，再停沙箱、
@@ -679,9 +533,7 @@ const AppRoutes: React.FC = () => {
         notify('回滚出错了，当前版本没有被改动。可以稍后再试一次。')
       })
   }, [currentProject, projectList, setCurrentSnapshotId, setMessages, setProjectPreview])
-
   // ==================== 超时操作（超过 120 秒） ====================
-
   // 新一轮生成开始时，清掉上一轮「继续等待」遗留的计时起点：waitStart 只在
   // handleContinueWaiting 里被赋值且从不清理，若不在此复位，下一轮生成会取到这个
   // 陈旧时间戳、一开始就弹出超时卡片（effectiveWaitStart 优先用 waitStartTime）。
@@ -691,7 +543,6 @@ const AppRoutes: React.FC = () => {
     prevHasStreamRef.current = hasActiveStream
     if (risingEdge) setWaitStart(undefined)
   }, [hasActiveStream])
-
   const handleContinueWaiting = useCallback(() => {
     // 继续等待：先给用户明确反馈，再重置等待起点重新计时
     appendMessageToSession(sessionId, {
@@ -701,40 +552,12 @@ const AppRoutes: React.FC = () => {
     })
     setWaitStart(Date.now())
   }, [sessionId])
-
   // ==================== 确认草图 → 生成完整功能（问题 A / P0-1） ====================
-
-  const handleConfirmSketch = useCallback(() => {
-    const api = window.electronAPI
-    if (!api?.project?.confirmSketch) return
-    const projectId = currentProject?.project_id ?? projectList[0]?.project_id
-    const snapshotId = currentSnapshotId ?? currentProject?.current_snapshot_id
-    if (!projectId || !snapshotId) return
-
-    setConfirmingSketch(true)
-    appendMessageToSession(sessionId, {
-      role: 'system',
-      content: [{ type: 'text', text: '好的，我按你确认的草图开始生成完整功能，稍等一下。' }],
-      timestamp: Date.now(),
-    })
-    setPreviewStatus('loading')
-
-    void api.project.confirmSketch({
-      request_id: crypto.randomUUID(),
-      project_id: projectId,
-      session_id: sessionId,
-      snapshot_id: snapshotId,
-      decision: 'accepted',
-    }).finally(() => setConfirmingSketch(false))
-  }, [sessionId, currentProject, projectList, currentSnapshotId])
-
   // ==================== 标记为完成（U6） ====================
-
   const handleMarkComplete = useCallback(() => {
     const api = window.electronAPI
     const projectId = currentProject?.project_id ?? projectList[0]?.project_id
     if (!api?.project?.finalize || !projectId) return
-
     void api.project.finalize({
       request_id: crypto.randomUUID(),
       project_id: projectId,
@@ -753,20 +576,16 @@ const AppRoutes: React.FC = () => {
       })
     })
   }, [currentProject, projectList, sessionId, setCurrentProject, setWorkflowStage, setStageLabel])
-
   // ==================== 升级为长期模式（U1） ====================
-
   // 点击「升级为长期模式」按钮 → 先弹确认（PRD §4.4），确认后再走 IPC
   const handleUpgrade = useCallback(() => {
     setUpgradeConfirmOpen(true)
   }, [])
-
   const handleConfirmUpgrade = useCallback(() => {
     const api = window.electronAPI
     const projectId = currentProject?.project_id ?? projectList[0]?.project_id
     setUpgradeConfirmOpen(false)
     if (!api?.project?.upgrade || !projectId) return
-
     void api.project.upgrade({
       request_id: crypto.randomUUID(),
       project_id: projectId,
@@ -785,14 +604,11 @@ const AppRoutes: React.FC = () => {
       })
     })
   }, [currentProject, projectList, sessionId, setCurrentProject, setProjectMode, setWorkflowStage, setStageLabel])
-
   // ==================== 预览刷新 / 重新连接沙箱（P2） ====================
-
   const handleRefreshPreview = useCallback(() => {
     const api = window.electronAPI
     const projectId = currentProject?.project_id ?? projectList[0]?.project_id
     if (!api?.sandbox?.restore || !projectId) return
-
     setPreviewStatus('loading')
     void api.sandbox.restore({ request_id: crypto.randomUUID(), project_id: projectId })
       .then((result) => {
@@ -809,9 +625,7 @@ const AppRoutes: React.FC = () => {
         setPreviewStatus('error')
       })
   }, [currentProject, projectList, setProjectPreview])
-
   // ==================== 预览失效兜底（P0） ====================
-
   // iframe 加载失败（沙箱端口失效/进程已死）时：清掉失效的预览地址并进入 error 态，
   // 让用户看到「重新连接沙箱」重试按钮，而不是停在空态或死 iframe。
   const handlePreviewError = useCallback(() => {
@@ -819,15 +633,11 @@ const AppRoutes: React.FC = () => {
     if (projectId) setProjectPreview(projectId, null)
     setPreviewStatus('error')
   }, [currentProject, projectList, setProjectPreview])
-
   // ==================== 设置页入口 ====================
-
   const handleOpenSettings = useCallback(() => {
     setRoute('settings')
   }, [])
-
   // ==================== 历史列表操作同步（Sprint 3：归档/删除/恢复） ====================
-
   // 历史项目页对项目做归档/删除/恢复后，回传最新活动列表：
   // 1) 同步 App 的 projectList（启动恢复与 handleSendMessage 兜底都依赖它）；
   // 2) 若当前项目已被删除（不在活动列表），清 currentProject 并回两道门。
@@ -843,13 +653,10 @@ const AppRoutes: React.FC = () => {
     },
     [currentProject, setProjectList, setCurrentProject, setProjectMode, setModeSelected],
   )
-
   // 预览地址：由 sketch_ready / mvp_ready 事件回填的沙箱地址（streamPreviewUrl）
   const effectivePreviewUrl = streamPreviewUrl ?? undefined
   const effectivePreviewStatus: PreviewStatus = streamPreviewUrl ? 'running' : previewStatus
-
   // ==================== P0-2 fork：从这里重新来（2026-09-08） ====================
-
   /**
    * user 气泡「从这里重新来」：把当前会话从该 user 消息处 fork（主进程复制此前对话到
    * 新会话，原会话保留），渲染端续接到新 sessionId 并加载其历史。锚点优先带 v2 行 id，
@@ -882,9 +689,7 @@ const AppRoutes: React.FC = () => {
         void loadSessionHistory(newId)
       })
   }, [sessionId, currentProject, projectList, setSessionId, setActiveSessionId, resetChatInputDraft])
-
   // ==================== 路由渲染 ====================
-
   if (route === 'mode-selection') {
     return (
       <ModeSelectionPage
@@ -893,7 +698,6 @@ const AppRoutes: React.FC = () => {
       />
     )
   }
-
   if (route === 'project-history') {
     return (
       <ProjectHistoryPage
@@ -905,11 +709,9 @@ const AppRoutes: React.FC = () => {
       />
     )
   }
-
   if (route === 'settings') {
     return <SettingsPage onBack={() => setRoute('workspace')} />
   }
-
   // route === 'workspace'
   return (
     <>
@@ -927,11 +729,8 @@ const AppRoutes: React.FC = () => {
         previewUrl={effectivePreviewUrl}
         onRefreshPreview={handleRefreshPreview}
         onPreviewError={handlePreviewError}
-        onConfirmSketch={window.electronAPI?.project?.confirmSketch ? handleConfirmSketch : undefined}
         confirming={confirmingSketch}
         onMarkComplete={window.electronAPI?.project?.finalize ? handleMarkComplete : undefined}
-        onCorrectionSubmit={handleCorrectionSubmit}
-        onCollectDomContext={handleCollectDomContext}
         onRollback={handleRollback}
         onContinueWaiting={handleContinueWaiting}
         onStopGeneration={handleStopGeneration}
@@ -950,11 +749,9 @@ const AppRoutes: React.FC = () => {
     </>
   )
 }
-
 /* =========================================================================
    UpgradeConfirmDialog — 升级为长期模式的确认弹窗（U1 / PRD §4.4）
    ========================================================================= */
-
 const UpgradeConfirmDialog: React.FC<{
   onCancel: () => void
   onConfirm: () => void
@@ -1055,5 +852,4 @@ const UpgradeConfirmDialog: React.FC<{
     </div>
   </div>
 )
-
 export default App

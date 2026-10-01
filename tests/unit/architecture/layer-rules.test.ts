@@ -118,7 +118,6 @@ const WHITELIST = new Set<string>([
   'R1|main/agent/loop -> main/project/project-service',
   // ── 主题三：agent/prompting 表达层引用 PRD/需求领域件（表达适配层的固有耦合，PR4 评估上提或下沉）
   'R1|main/agent/prompting -> main/coding/sketch-engine',
-  'R1|main/agent/prompting -> main/coding/sketch-engine-llm',
   'R1|main/agent/prompting -> main/guide/guide-agent-service',
   'R1|main/agent/prompting -> main/guide/prd-engine-llm',
   'R1|main/agent/prompting -> main/guide/requirement-enricher',

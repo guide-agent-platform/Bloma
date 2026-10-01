@@ -8,7 +8,6 @@ import {
 } from './types'
 import { appendExperienceEvent } from './event-log'
 import type { GwtTestResult } from '../verification/test-legacy'
-import type { BuildGateResult } from '../coding/build-gate'
 import type { JudgeVerdict } from '../review/judge-engine'
 
 /**
@@ -67,7 +66,6 @@ export function recordFailureCards(
   ctx: ObserveCtx,
   signals: {
     testResult?: GwtTestResult
-    buildGate?: BuildGateResult
     judgeVerdict?: JudgeVerdict
     abnormal?: { outcomeType: 'timeout' | 'interrupt' | 'unexpected_exit'; description: string }
     /** C3（2026-09-09）：裁判反退化 findings → 事实观察行 */
@@ -90,15 +88,6 @@ export function recordFailureCards(
           ...t.failure_summary.map((f) => `${f.scenario}：${f.reason}`),
         ].slice(0, cap + 1),
         evidenceRefs: ['documents/test-report.json'],
-      })
-    }
-    if (signals.buildGate && signals.buildGate.status === 'failed') {
-      appendExperienceEvent({
-        projectId: ctx.projectId,
-        runId,
-        eventType: 'build_gate_failure',
-        stage: 'build_gate',
-        observations: [`build gate failed：${signals.buildGate.detail ?? ''}`].slice(0, cap),
       })
     }
     if (signals.judgeVerdict && signals.judgeVerdict.verdict === 'return') {

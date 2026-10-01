@@ -1,3 +1,5 @@
+/** web 线拆除刀3：点选纠错通道退役，类型本地最小化（UI 降级红点模式） */
+type DomCollectContextResult = { fallback_mode: boolean; element_selector?: string; text_content?: string; bounding_rect?: { x: number; y: number; width: number; height: number } }
 import React from 'react'
 import { WorkspaceHeader } from './WorkspaceHeader'
 import { ChatPanel } from './ChatPanel'
@@ -10,7 +12,6 @@ import { CollaborationPanel } from './CollaborationPanel'
 import type { CardOption } from './CardOptions'
 import type { PreviewStatus } from './PreviewPanel'
 import type { Snapshot, PastedImageRef } from './atoms'
-import type { DomCollectContextResult } from '../../shared/types'
 
 export interface WorkspaceShellProps {
   /* === ChatPanel props === */

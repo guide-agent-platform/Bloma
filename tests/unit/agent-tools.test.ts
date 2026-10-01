@@ -565,7 +565,7 @@ describe('web_research 工具面（闭环 PR5）', () => {
     expect(parentNames).toContain('web_research')
     // 基线 19（2026-10-01：find 无条件 +18、run_api_contract_tests 无条件 +1）；浏览器/压缩开关必须显式钉 off
     // （并发测试文件共享 process.env，见 scrape 管道同款先例）
-    expect(parentNames).toHaveLength(17)
+    expect(parentNames).toHaveLength(16)
 
     for (const role of ['research', 'explore', 'implement', 'review', 'custom'] as const) {
       const names = composeTools({ projectId: 'p', role }).map((tool) => tool.name)
@@ -601,77 +601,9 @@ describe('agent-tools D 系列（咨询 D：验证协议，2026-09-09）', () =>
     else process.env.BLOMA_WRITE_GUARD = originalWriteGuard
   })
 
-  it('D1：run_api_contract_tests 无条件注册（开关已删 2026-10-01，parent 含 find 共 17 个）', () => {
-    const project = createProject({ request_id: 'req-d-reg', mode: 'quick' })
-    const on = composeTools({ projectId: project.project_id }).map((t) => t.name)
-    expect(on).toContain('run_api_contract_tests')
-    expect(on).toHaveLength(17)
-    // review 角色同样可用（只读验证面）
-    const review = composeTools({ projectId: project.project_id, role: 'review' }).map((t) => t.name)
-    expect(review).toContain('run_api_contract_tests')
-  })
 
-  it('D1：API 工具无预览先引导 run_preview（与 run_gwt_tests 同口径）', async () => {
-    process.env.BLOMA_API_TOOL = '1'
-    const project = createProject({ request_id: 'req-d-nopv', mode: 'quick' })
-    const tools = composeTools({ projectId: project.project_id })
-    const outcome = await byName(tools, 'run_api_contract_tests').execute({}, ctxFor(project.project_id))
-    expect(outcome.isError).toBe(true)
-    expect(outcome.output).toContain('run_preview')
-  })
 
-  it('D1：无 interface_spec → 豁免通过并置位 api_all_passed（纯静态产物不强制跑）', async () => {
-    process.env.BLOMA_API_TOOL = '1'
-    const project = createProject({ request_id: 'req-d-exempt', mode: 'quick' })
-    const tools = composeTools({ projectId: project.project_id })
-    const ctx = ctxFor(project.project_id)
-    ctx.state.api_all_passed = false // 模拟「有契约预置」，验证豁免也能翻正
-    ctx.state.preview_url = 'http://127.0.0.1:1'
-    const outcome = await byName(tools, 'run_api_contract_tests').execute({}, ctx)
-    expect(outcome.output).toContain('豁免')
-    expect(ctx.state.api_all_passed).toBe(true)
-  })
 
-  it('D1：有契约全过 → 通过并置位；有失败 → 明细含「API 契约端点」且不置位（location 口径对齐终验/修复轮）', async () => {
-    process.env.BLOMA_API_TOOL = '1'
-    const project = createProject({ request_id: 'req-d-contract', mode: 'quick' })
-    // 写最小合法背板（requirements 数组即可被 readPrdBackplane 接受）
-    const docsDir = getDocumentsDir(project.workspace_slug, project.project_id)
-    writeFileSync(
-      join(docsDir, 'prd.json'),
-      JSON.stringify({ requirements: [], interface_spec: [{ endpoint: '/api/notes', method: 'GET' }] }),
-      'utf8',
-    )
-    const tools = composeTools({ projectId: project.project_id })
-    const ctx = ctxFor(project.project_id)
-
-    // 全过：本地 server 应答 /api/notes
-    const okServer = createServer((_req, res) => {
-      res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end('{"notes":[]}')
-    })
-    await new Promise<void>((resolve) => okServer.listen(0, '127.0.0.1', resolve))
-    const okPort = (okServer.address() as AddressInfo).port
-    ctx.state.preview_url = `http://127.0.0.1:${okPort}`
-    const passed = await byName(tools, 'run_api_contract_tests').execute({}, ctx)
-    expect(passed.output).toContain('全部应答正常')
-    expect(ctx.state.api_all_passed).toBe(true)
-    okServer.close()
-
-    // 失败：404 server
-    const badServer = createServer((_req, res) => {
-      res.writeHead(404)
-      res.end('not found')
-    })
-    await new Promise<void>((resolve) => badServer.listen(0, '127.0.0.1', resolve))
-    const badPort = (badServer.address() as AddressInfo).port
-    ctx.state.preview_url = `http://127.0.0.1:${badPort}`
-    const failed = await byName(tools, 'run_api_contract_tests').execute({}, ctx)
-    expect(failed.output).toContain('API 契约端点')
-    expect(failed.output).toContain('/api/notes')
-    expect(ctx.state.api_all_passed).toBe(false)
-    badServer.close()
-  })
 
 
 

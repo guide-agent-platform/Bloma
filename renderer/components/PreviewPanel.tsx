@@ -1,8 +1,9 @@
+/** web 线拆除刀3：点选纠错通道退役，类型本地最小化（UI 降级红点模式） */
+type DomCollectContextResult = { fallback_mode: boolean; element_selector?: string; text_content?: string; bounding_rect?: { x: number; y: number; width: number; height: number } }
 import React from 'react'
 import { useAtomValue } from 'jotai'
 import { RotateCw, Maximize2, Minimize2, Camera, LayoutTemplate, AlertTriangle } from './icons'
 import { hasActiveStreamAtom, workflowStageAtom, globalUserErrorAtom } from './atoms'
-import type { DomCollectContextResult } from '../../shared/types'
 
 export type PreviewStatus = 'empty' | 'loading' | 'running' | 'error'
 
@@ -78,7 +79,6 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
   const middleDragRef = React.useRef({ active: false, lastX: 0, lastY: 0 })
   // 点选时 iframe 的滚动位置（锚点）：弹窗/标记按「当前滚动 - 锚点」反向偏移，跟随内容滚动、相对元素位置不变
   const anchorScrollRef = React.useRef({ x: 0, y: 0 })
-  // 最近一次从 scrollPreview 返回的 iframe 实际滚动位置（用于点击瞬间兑底锚点）
   const iframeScrollRef = React.useRef({ x: 0, y: 0 })
   // 滚动请求序号：只应用最新一次结果，避免并发 IPC 乱序返回导致 scrollOffset 回跳
   const scrollSeqRef = React.useRef(0)
@@ -89,27 +89,13 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
     const { x, y } = scrollPendingRef.current
     scrollPendingRef.current = { x: 0, y: 0 }
     if (x === 0 && y === 0) return
+    // web 线拆除刀3：滚动捕获转发通道退役（旧项目预览随线下线）
     const seq = ++scrollSeqRef.current
-    const result = await window.electronAPI?.dom?.scrollPreview?.({
-      request_id: crypto.randomUUID(),
-      delta_x: x,
-      delta_y: y,
-    })
-    if (seq !== scrollSeqRef.current) return
-    // 用主进程返回的实际滚动位置计算偏移（而非滚轮 delta 猜测），
-    // 到边界时 scrollBy 不再滚动，scrollOffset 也不再漂移。
-    if (result?.ok && result.data?.scrolled) {
-      iframeScrollRef.current = { x: result.data.scroll_x, y: result.data.scroll_y }
-      setScrollOffset({
-        x: result.data.scroll_x - anchorScrollRef.current.x,
-        y: result.data.scroll_y - anchorScrollRef.current.y,
-      })
-    }
+    void seq
   }, [])
 
   const queuePreviewScroll = React.useCallback(
     (dx: number, dy: number) => {
-      if (!window.electronAPI?.dom?.scrollPreview) return
       scrollPendingRef.current.x += dx
       scrollPendingRef.current.y += dy
       if (scrollRafRef.current == null) {
@@ -357,17 +343,6 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
                   // （覆盖「进入纠错模式前已用原生滚动滚过 iframe」的情况）
                   anchorScrollRef.current = iframeScrollRef.current
                   setScrollOffset({ x: 0, y: 0 })
-                  void window.electronAPI?.dom?.scrollPreview?.({
-                    request_id: crypto.randomUUID(),
-                    delta_x: 0,
-                    delta_y: 0,
-                  }).then((r) => {
-                    if (r?.ok && r.data) {
-                      anchorScrollRef.current = { x: r.data.scroll_x, y: r.data.scroll_y }
-                      iframeScrollRef.current = anchorScrollRef.current
-                      setScrollOffset({ x: 0, y: 0 })
-                    }
-                  })
                   // R-CORR-01：点击即收集 DOM 上下文用于高亮被选区域；异步回填，失败保持红点回退
                   if (onCollectDomContext) {
                     void onCollectDomContext(pos).then((ctx) => {
@@ -520,7 +495,7 @@ const CorrectionOverlay: React.FC<{
 
   // R-CORR-01：命中真实元素（bounding_rect 有效）则高亮该区域；否则回退红点标记
   const region = domContext && !domContext.fallback_mode
-    && domContext.bounding_rect.width > 0 && domContext.bounding_rect.height > 0
+    && domContext.bounding_rect && domContext.bounding_rect.width > 0 && domContext.bounding_rect.height > 0
     ? domContext.bounding_rect
     : undefined
 

@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // （loop 模式下约束系统行经 historyTurns→messages 送达，捕获参数不同；行为等价）
 import { captureConstraints, extractConstraints, scanSessionConstraints } from '../../main/guide/constraint-extractor'
 import { buildPrdBackplane } from '../../main/project/document-engine'
-import { generateSketchLlm } from '../../main/coding/sketch-engine-llm'
 import { HISTORY_WINDOW_TURNS, runAgent, setAgentStreamPublisher, setSDKQueryForTests } from '../../main/orchestration/orchestrator'
 import { createChannel } from '../../main/platform/llm/channel-manager'
 import { setSafeStorageAdapter } from '../../main/platform/storage/safe-storage'
@@ -135,37 +134,5 @@ describe('T4-L1 约束走门：捕获入库与决策留痕', () => {
     const requirements: SketchRequirement[] = [{ id: 'F-001', description: '记账本' }]
     const backplane = buildPrdBackplane(findProject(project.project_id), requirements, 'sketch_confirmed')
     expect(backplane.constraints).toEqual(['不含登录', '必须离线可用'])
-  })
-})
-describe('T4-L1 约束注入生成提示词（背板常驻）', () => {
-  beforeEach(() => {
-    useTempHome()
-  })
-  afterEach(() => {
-    restorePromaHome(originalPromaHome)
-    vi.restoreAllMocks()
-  })
-  it('草图提示词包含用户约束段', async () => {
-    const project = createProject({ request_id: 'req-sk', mode: 'quick', initial_message: '记账本' })
-    captureConstraints({ project_id: project.project_id, session_id: 'session-sk', constraints: ['不含登录'], source: 'guide_gate' })
-    const prompts: string[] = []
-    const query = async function* (prompt: string): AsyncGenerator<SDKMessage> {
-      prompts.push(prompt)
-      yield {
-        type: 'assistant',
-        message: { role: 'assistant', content: [{ type: 'text', text: '<!doctype html><html><head><style>a{}</style></head><body><button>存</button><script>1</script></body></html>' }] },
-      }
-      yield { type: 'result', subtype: 'success' }
-    }
-    await generateSketchLlm({
-      project_id: project.project_id,
-      requirements: [{ id: 'F-001', description: '记账本' }],
-      constraints: findProject(project.project_id).constraints,
-      query,
-      env: {},
-      sessionId: 'session-sk',
-    })
-    expect(prompts[0]).toContain('不含登录')
-    expect(prompts[0]).toContain('用户约束')
   })
 })

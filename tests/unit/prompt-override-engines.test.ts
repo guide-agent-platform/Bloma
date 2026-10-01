@@ -5,9 +5,6 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { loadPromptOverride } from '../../main/agent/prompting/prompt-config'
 import {
-  DEFAULT_SYSTEM_PROMPT as SKETCH_DEFAULT,
-} from '../../main/coding/sketch-engine-llm'
-import {
   DEFAULT_SYSTEM_PROMPT as ENRICHER_DEFAULT,
 } from '../../main/guide/requirement-enricher'
 import {
@@ -28,7 +25,6 @@ import { DEFAULT_GUIDE_SYSTEM_PROMPT as GUIDE_DEFAULT } from '../../main/guide/g
  */
 
 const SLOTS = [
-  { slot: 'sketch-system', builtin: SKETCH_DEFAULT, marker: '草图生成器' },
   { slot: 'guide-system', builtin: GUIDE_DEFAULT, marker: '向导 Agent' },
   { slot: 'enricher-system', builtin: ENRICHER_DEFAULT, marker: '需求加厚腿' },
   { slot: 'normalizer-system', builtin: NORMALIZER_DEFAULT, marker: '需求归一化腿' },

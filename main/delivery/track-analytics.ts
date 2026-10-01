@@ -24,7 +24,6 @@ import { appendJsonLine, readJsonFile, writeJsonFile } from '../../storage/json-
 import { readDocumentsManifest } from '../project/document-engine'
 import { findProject, updateProject } from '../project/project-service'
 import { PRODUCT_CSP } from '../coding/product-csp'
-import { realFullstackServerFingerprint, resolveRealScaffoldSpawn } from '../coding/preview-runtime'
 
 export function trackAnalytics(input: AnalyticsTrackInput): AnalyticsTrackResult {
   const workspaceSlug = resolveAnalyticsWorkspace(input.event.project_id)

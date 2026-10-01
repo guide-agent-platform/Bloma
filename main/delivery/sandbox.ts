@@ -25,7 +25,6 @@ import { appendJsonLine, readJsonFile, writeJsonFile } from '../../storage/json-
 import { readDocumentsManifest } from '../project/document-engine'
 import { findProject, updateProject } from '../project/project-service'
 import { PRODUCT_CSP } from '../coding/product-csp'
-import { realFullstackServerFingerprint, resolveRealScaffoldSpawn } from '../coding/preview-runtime'
 
 interface SandboxProcess {
   process: ChildProcess
@@ -72,7 +71,7 @@ export async function runSandbox(input: SandboxRunInput): Promise<SandboxRunResu
   const llmEnvSig = JSON.stringify(input.llm_env ?? {})
   // R0.3：real-fullstack 服务入口指纹——幂等守卫第四项比对。旧沙箱无 serverSig
   //  （undefined）与 null 归一化后相等：非 fullstack 路径行为字节不变。
-  const serverSig = realFullstackServerFingerprint(project.root_path)
+  const serverSig: string | null = null // web 线拆除刀3：fullstack 指纹守卫随 web 预览退役（恒 null=行为等价）
   if (
     existing
     && existing.command === (input.command ?? undefined)
@@ -214,8 +213,6 @@ function spawnStaticServer(projectRoot: string, port: number, command?: string, 
   // vendor 供货) / real-static(零约定只读 file server)；旧注入路径(static-server.js 在)
   // 返回 null 走原逻辑，字节级不变。real 标记优先于 command（real 项目的 npm start ≡
   // node server.js，直接 spawn 免 shell 包装树击杀与 npm 查找）。
-  const realSpawn = resolveRealScaffoldSpawn(projectRoot, port, llmEnv)
-  if (realSpawn) return realSpawn
   const options = sandboxSpawnOptions(projectRoot, port, llmEnv)
   if (command) {
     const normalized = command.trim()

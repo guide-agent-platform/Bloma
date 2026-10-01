@@ -8,7 +8,6 @@ import { recordDecision } from '../project/decision-log'
 import { hasInteractiveEntry } from '../verification/test-legacy'
 import { listSnapshots, restoreSnapshotFiles, rollbackSnapshot } from '../delivery/snapshots'
 import { findProject, listProjects, updateProject } from '../project/project-service'
-import { isHtmlDocument } from '../coding/sketch-engine-llm'
 import { commitProjectState } from '../coding/project-git'
 import { openRepairEpoch } from '../coding/repair-ledger'
 
@@ -20,6 +19,15 @@ import { openRepairEpoch } from '../coding/repair-ledger'
  *   且 gwt-service.hasInteractiveEntry 判定有交互入口（MVP 级产物，非纯外观草图）；
  * - 完整 → ready；仅草图级（合法 HTML 但无交互入口）→ sketch_ready；全无 → clarifying。
  */
+
+/** 磁盘证据判定：完整 HTML 文档（含 <style>、html/body 开标签且 </html> 结尾；原 sketch-engine-llm 判据，web 线拆除刀3 迁入）。 */
+function isHtmlDocument(html: string): boolean {
+  return (
+    /<style[\s>]/i.test(html) &&
+    /<html[\s>]|<body[\s>]/i.test(html) &&
+    /<\/html>\s*$/i.test(html)
+  )
+}
 
 export type DiskArtifactEvidence = 'complete' | 'sketch_only' | 'none'
 

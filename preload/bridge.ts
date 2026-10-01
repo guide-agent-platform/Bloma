@@ -39,16 +39,12 @@ import type {
   ChannelTestDirectEnvelope,
   ChannelUpdateEnvelope,
   FetchModelsEnvelope,
-  ConfirmSketchInput,
   DocumentListInput,
   DocumentReadInput,
   DocumentSyncInput,
-  DomCollectContextInput,
-  DomScrollPreviewInput,
   ElectronAPI,
   PermissionResponseInput,
   PermissionSetModeInput,
-  PointCorrectionInput,
   PromptReadInput,
   PromptResetInput,
   PromptSaveInput,
@@ -142,10 +138,6 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_ABANDON, input),
     reopen: (input: ProjectReopenInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_REOPEN, input),
-    confirmSketch: (input: ConfirmSketchInput) =>
-      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_CONFIRM_SKETCH, input),
-    submitCorrection: (input: PointCorrectionInput) =>
-      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_SUBMIT_CORRECTION, input),
     upgrade: (input: ProjectUpgradeInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_UPGRADE, input),
     finalize: (input: ProjectFinalizeInput) =>
@@ -182,10 +174,6 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.DOCUMENT_READ, input),
   },
   dom: {
-    collectContext: (input: DomCollectContextInput) =>
-      ipcRenderer.invoke(IPC_CHANNELS.DOM_COLLECT_CONTEXT, input),
-    scrollPreview: (input: DomScrollPreviewInput) =>
-      ipcRenderer.invoke(IPC_CHANNELS.DOM_SCROLL_PREVIEW, input),
   },
   analytics: {
     track: (input: AnalyticsTrackInput) =>

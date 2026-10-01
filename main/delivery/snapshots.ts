@@ -25,7 +25,6 @@ import { appendJsonLine, readJsonFile, writeJsonFile } from '../../storage/json-
 import { readDocumentsManifest } from '../project/document-engine'
 import { findProject, updateProject } from '../project/project-service'
 import { PRODUCT_CSP } from '../coding/product-csp'
-import { realFullstackServerFingerprint, resolveRealScaffoldSpawn } from '../coding/preview-runtime'
 
 type SnapshotCaptureProvider = () => Promise<{ buffer: Buffer; extension: 'png' | 'jpg' | 'svg' } | undefined>
 /** 快照容量策略（A2-16，闭环 ATK3-G-001，architecture §14）：单项目活跃快照上限。 */

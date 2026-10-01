@@ -247,7 +247,7 @@ describe('委派协作 M1', () => {
     expect(surface('research')).toEqual(readOnly)
 
     const genericFull = ['read_file', 'list_files', 'find', 'grep', 'web_fetch', 'write_file', 'edit_file']
-    const domainVerify = ['run_security_scan', 'run_api_contract_tests'] // API 契约工具恒注册（2026-10-01 开关删除）
+    const domainVerify = ['run_security_scan'] // API 契约工具恒注册（2026-10-01 开关删除）
     expect(surface('implement')).toEqual([...genericFull, 'ask_delegation_question', ...domainVerify])
     // review：可验证（预览/测试/扫描）但不可写（无 write_file/edit_file）
     expect(surface('review')).toEqual(['read_file', 'list_files', 'find', 'grep', 'web_fetch', 'ask_delegation_question', ...domainVerify])
@@ -397,7 +397,7 @@ describe('M2 委派工具（agent-tools 接线，委派协作嫁接方案 §4.2�
     const surface = (role?: 'implement') =>
       [...buildAgentTools({ projectId: 'p', ...(role ? { role } : {}) }), ...buildDomainTools({ projectId: 'p', ...(role ? { role } : {}) })].map((tool) => tool.name)
     const genericFull = ['read_file', 'list_files', 'find', 'grep', 'web_fetch', 'write_file', 'edit_file']
-    const domainVerify = ['run_security_scan', 'run_api_contract_tests'] // API 契约工具恒注册（2026-10-01 开关删除）
+    const domainVerify = ['run_security_scan'] // API 契约工具恒注册（2026-10-01 开关删除）
     const delegationTools = [
       'delegate_agent',
       'wait_for_delegations',

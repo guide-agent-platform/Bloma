@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ingestResearchIdeasAsCandidates, registerUiModeCard } from '../../../main/experience/ref-ui-source'
-import { listRefPatternModules } from '../../../main/experience/ref-source'
 import { resetExperienceIndexForTests } from '../../../main/experience/experience-service'
 
 /**
@@ -91,7 +90,6 @@ describe('ref-ui-source：市调 UI 做法入册', () => {
       projectId: 'p1',
     })
     process.env.BLOMA_REF_LIBRARY = '1'
-    expect(listRefPatternModules('personal_tool', home)).toEqual([])
   })
 })
 

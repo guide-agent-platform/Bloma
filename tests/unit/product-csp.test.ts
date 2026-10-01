@@ -5,7 +5,6 @@
  * 产物 CSP（沙箱内嵌脚本 + static-server 模板）都没有 media-src，回落
  * default-src 'self' 把 blob: 全灭。本测试锁三件事：
  *   1. PRODUCT_CSP 字段齐全（media-src 'self' blob: 在位、同源边界未放松）；
- *   2. renderStaticServer() 产物模板输出的是 CSP 字符串字面量（插值正确，
  *      不是未定义标识符 PRODUCT_CSP——模板字符串裸标识符不会被外层求值）；
  *   3. 沙箱内嵌 STATIC_SERVER_SCRIPT 同样引用真相源（源码文本含插值表达式），
  *      防止任何一侧退回硬编码造成双源漂移。
@@ -15,7 +14,6 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { PRODUCT_CSP } from '../../main/coding/product-csp'
-import { renderStaticServer } from '../../main/coding/project-scaffold'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../..')
 
@@ -28,12 +26,6 @@ describe('PRODUCT_CSP 单一真相源', () => {
     // 外链媒体仍被拦（default-src 回落），外部流必须走服务端同源代理
     expect(PRODUCT_CSP).not.toContain('media-src https:')
     expect(PRODUCT_CSP).not.toContain('unsafe-eval')
-  })
-
-  it('renderStaticServer 输出内嵌 CSP 字符串字面量而非未定义标识符', () => {
-    const out = renderStaticServer()
-    expect(out).toContain(`'Content-Security-Policy': ${JSON.stringify(PRODUCT_CSP)}`)
-    expect(out).not.toMatch(/'Content-Security-Policy': PRODUCT_CSP/)
   })
 
   it('沙箱内嵌脚本同样引用真相源（源码文本含插值表达式）', () => {

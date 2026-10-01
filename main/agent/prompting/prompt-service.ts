@@ -4,7 +4,6 @@ import type { PromptSlotDetail, PromptSlotId, PromptSlotInfo } from '../../../sh
 import { getPromptOverridePath, ensureDir } from '../../../storage/config-paths'
 import { loadPromptOverride } from './prompt-config'
 import { DEFAULT_SYSTEM_PROMPT as PRD_DEFAULT } from '../../guide/prd-engine-llm'
-import { DEFAULT_SYSTEM_PROMPT as SKETCH_DEFAULT } from '../../coding/sketch-engine-llm'
 import { DEFAULT_GUIDE_SYSTEM_PROMPT as GUIDE_DEFAULT } from '../../guide/guide-agent-service'
 import { DEFAULT_SYSTEM_PROMPT as ENRICHER_DEFAULT } from '../../guide/requirement-enricher'
 import { DEFAULT_SYSTEM_PROMPT as NORMALIZER_DEFAULT } from '../../guide/requirement-normalizer'
@@ -36,13 +35,6 @@ const PROMPT_SLOTS: PromptSlotDef[] = [
     description: '从对话历史提炼产品定位、功能验收要点、范围外与假设。质量直接决定 PRD 与 GWT 派生。',
     enabled: true,
     getDefault: () => PRD_DEFAULT,
-  },
-  {
-    id: 'sketch-system',
-    label: '草图生成提示词',
-    description: '驱动验证草图生成（纯外观 HTML 草图，供用户确认软件长什么样）。',
-    enabled: true,
-    getDefault: () => SKETCH_DEFAULT,
   },
   {
     id: 'guide-system',

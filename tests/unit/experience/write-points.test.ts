@@ -25,7 +25,6 @@ const mocks = vi.hoisted(() => ({
   runAgentLoop: vi.fn(),
   runGwtScenarios: vi.fn(),
   circuitBreakRollback: vi.fn(),
-  runBuildGate: vi.fn(),
 }))
 
 vi.mock('../../../main/agent/loop/agent-loop', async (importOriginal) => {
@@ -39,10 +38,6 @@ vi.mock('../../../main/verification/test-legacy', async (importOriginal) => {
 vi.mock('../../../main/project/recovery-service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../main/project/recovery-service')>()
   return { ...actual, circuitBreakRollback: mocks.circuitBreakRollback }
-})
-vi.mock('../../../main/coding/build-gate', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../main/coding/build-gate')>()
-  return { ...actual, runBuildGate: mocks.runBuildGate }
 })
 vi.mock('../../../main/experience/event-log', () => ({
   appendExperienceEvent: vi.fn(() => null),
@@ -93,8 +88,6 @@ describe('T-1 写点集成（账本门面 spy 断言）', () => {
     mocks.runGwtScenarios.mockReset()
     mocks.circuitBreakRollback.mockReset()
     mocks.circuitBreakRollback.mockResolvedValue({ rolled_back: false, outcome: 'delegated' })
-    mocks.runBuildGate.mockReset()
-    mocks.runBuildGate.mockResolvedValue({ status: 'skipped', durationMs: 1 })
     setProgrammingEventPublisher(() => undefined)
     setSafeStorageAdapter({
       isEncryptionAvailable: () => true,
