@@ -13,7 +13,6 @@
  * 本表是操作不变量（行为契约），两者不相交；新增规则时先查术语段避免重复表述。
  */
 
-import { gameDeriveExemptEnabled } from '../../model/prd-backplane'
 
 /** 条款等级（写法纪律：区分不变量/完成标准/偏好，不全叫最高优先级）。 */
 export type RuleKind = 'invariant' | 'completion' | 'preference'
@@ -83,7 +82,8 @@ export function rulesRegistryEnabled(): boolean {
  *  localStorage（重业务数据仍后端）；仅替换 R-DATA-01 一条，其余规则不动。
  *  非 game / 豁免 off → 原表（字节级现状）。 */
 export function rulesForTemplateType(templateType?: import('../../../shared/types').TemplateType): readonly OperationRule[] {
-  if (templateType !== 'game' || !gameDeriveExemptEnabled()) return RULES_REGISTRY
+  // game 恒用变体（开关已删 2026-10-01；留存豁免由 LOCAL_FIRST_TYPES 品类语义承载，措辞按量级分流）
+  if (templateType !== 'game') return RULES_REGISTRY
   return RULES_REGISTRY.map((rule) =>
     rule.id === 'R-DATA-01'
       ? {

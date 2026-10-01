@@ -36,12 +36,8 @@ export function setBrowserGwtDisabledForTests(disabled: boolean): void {
   disabledForTests = disabled
 }
 
-/** C4（2026-09-11 拍板，审计⑩/L）：游戏侧探针开关——位移类断言优先走 window.__g
- *  游戏状态通道（canvas 游戏 DOM 位移结构性不可过的根治位）+ game 生成时 prompt 注入
- *  【游戏探针通道】契约。缺省 off=字节级现状（照走 DOM 位移判定）。 */
-export function gwtGameProbeEnabled(): boolean {
-  return process.env.BLOMA_GWT_GAME_PROBE === '1' || process.env.BLOMA_GWT_GAME_PROBE === 'true'
-}
+/** C4（2026-09-11 拍板，审计⑩/L）：游戏侧探针——位移类断言优先走 window.__g
+ *  游戏状态通道（开关已删 2026-10-01，无条件启用）。 */
 
 /** C4：位移类效果判定（move-*）——游戏侧探针只接管这类断言。 */
 export function isMoveEffect(effect: AssertionPlan['effect']): boolean {
@@ -359,7 +355,7 @@ async function runScenario(page: Page, scenario: ScenarioPlan): Promise<Scenario
 
   // C4（2026-09-11 拍板）：游戏侧探针——位移类断言且产物暴露了 window.__g 通道时，
   // 读游戏状态判定（canvas 无 DOM 位移可探）；无通道 → 现状 DOM 判定（字节级）。
-  if (gwtGameProbeEnabled() && scenario.plan.trigger.kind === 'key' && isMoveEffect(scenario.plan.effect)) {
+  if (scenario.plan.trigger.kind === 'key' && isMoveEffect(scenario.plan.effect)) {
     const game = await runGameProbeScenario(page, scenario)
     if (game.handled) return game.reason
   }

@@ -296,18 +296,6 @@ export const EXPERIENCE_GOVERNANCE = {
 const DAY_MS = 86_400_000
 
 // =========================================================================
-// 开关（口径对齐 BLOMA_MODULES / P3 三开关家族：缺省 off 灰度）
-// =========================================================================
-
-/** 经验库总开关：`BLOMA_EXPERIENCE=1|on|true` 启用；缺省 off = 现状字节级。 */
-export function experienceEnabled(): boolean {
-  const raw = process.env.BLOMA_EXPERIENCE
-  if (!raw) return false
-  const v = raw.trim().toLowerCase()
-  return v === '1' || v === 'on' || v === 'true'
-}
-
-// =========================================================================
 // 脱敏（写盘前必经；单字段失败降级为截断，绝不整卡抛错）
 // =========================================================================
 

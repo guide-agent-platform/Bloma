@@ -15,13 +15,6 @@ import type { InterfaceEndpoint } from '../model/prd-backplane'
 /** 单端点探测超时：契约端点应答应当是本地毫秒级（基础设施超时口径，陷阱 16）。 */
 const API_PROBE_TIMEOUT_MS = 2_000
 
-/** B1（P0-B，2026-09-11 审计案 35c1a633）：挂载错误回流开关——契约端点失活时先取
- *  /_bloma/routes 健康端点，把真实 require 报错写进失败 reason（进修复任务 payload）。
- * 缺省 off=字节级现状（reason 维持猜测式措辞）；不改变判定语义（404/5xx 仍判失败）。 */
-export function routeErrorFeedbackEnabled(): boolean {
-  return process.env.BLOMA_ROUTE_ERROR_FEEDBACK === '1' || process.env.BLOMA_ROUTE_ERROR_FEEDBACK === 'true'
-}
-
 interface RouteMountError {
   file: string
   message: string
@@ -108,9 +101,7 @@ export async function checkApiContract(previewUrl: string, endpoints: InterfaceE
       if (response.status === 404 || response.status >= 500) {
         failures.push({
           scenario: `API 契约端点：${endpoint.method ?? 'GET'} ${endpoint.endpoint}`,
-          reason: routeErrorFeedbackEnabled()
-            ? await routeFailureReason(previewUrl, endpoint.endpoint, response.status)
-            : `契约端点失活（HTTP ${response.status}，路由未实现或挂载失败）`,
+          reason: await routeFailureReason(previewUrl, endpoint.endpoint, response.status)
         })
       }
     } catch (error) {
@@ -133,9 +124,7 @@ export async function checkApiContract(previewUrl: string, endpoints: InterfaceE
       if (response.status === 404) {
         failures.push({
           scenario: `API 契约端点：POST ${endpoint.endpoint}`,
-          reason: routeErrorFeedbackEnabled()
-            ? await routeFailureReason(previewUrl, endpoint.endpoint, response.status)
-            : `写类端点未挂载（HTTP 404；空体 400/422 属校验拒绝不算失败）`,
+          reason: await routeFailureReason(previewUrl, endpoint.endpoint, response.status)
         })
       }
     } catch (error) {

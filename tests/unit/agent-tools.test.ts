@@ -720,9 +720,9 @@ describe('web_research 工具面（闭环 PR5）', () => {
     delete process.env.BLOMA_API_TOOL
     const parentNames = composeTools({ projectId: 'p' }).map((tool) => tool.name)
     expect(parentNames).toContain('web_research')
-    // W3（Phase 10）：find 只读工具无条件注册，基线 17→18；浏览器/压缩开关必须显式钉 off
+    // 基线 19（2026-10-01：find 无条件 +18、run_api_contract_tests 无条件 +1）；浏览器/压缩开关必须显式钉 off
     // （并发测试文件共享 process.env，见 scrape 管道同款先例）
-    expect(parentNames).toHaveLength(18)
+    expect(parentNames).toHaveLength(19)
 
     for (const role of ['research', 'explore', 'implement', 'review', 'custom'] as const) {
       const names = composeTools({ projectId: 'p', role }).map((tool) => tool.name)
@@ -760,12 +760,8 @@ describe('agent-tools D 系列（咨询 D：验证协议，2026-09-09）', () =>
     else process.env.BLOMA_WRITE_GUARD = originalWriteGuard
   })
 
-  it('D1：开关 off 工具面=现状（无 run_api_contract_tests，parent 含 find 共 18 个）；on 注册且变 19', () => {
+  it('D1：run_api_contract_tests 无条件注册（开关已删 2026-10-01，parent 含 find 共 19 个）', () => {
     const project = createProject({ request_id: 'req-d-reg', mode: 'quick' })
-    const off = composeTools({ projectId: project.project_id }).map((t) => t.name)
-    expect(off).not.toContain('run_api_contract_tests')
-    expect(off).toHaveLength(18)
-    process.env.BLOMA_API_TOOL = '1'
     const on = composeTools({ projectId: project.project_id }).map((t) => t.name)
     expect(on).toContain('run_api_contract_tests')
     expect(on).toHaveLength(19)

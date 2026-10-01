@@ -675,6 +675,7 @@ describe('usage 竹节压缩（闭环 PR6）', () => {
       maxTurns: 6,
       sessionId: 'session-compact-off',
       publish: (type) => events.push({ type }),
+      disableProgressNudge: true, // 本用例专测压缩参数：隔离进度守卫注入对消息计数的污染
     }))
 
     expect(result.status).toBe('turn_limit')
@@ -1911,16 +1912,6 @@ describe('B3 loop 进度对账三守卫（BLOMA_LOOP_PROGRESS_NUDGE）', () => {
     for (const messages of verified.receivedMessages) {
       expect(userTextsOf(messages)).not.toContain('自测工具')
     }
-  })
-
-  it('off 字节锁：开关未设零注入（messages 与 JSONL 无【进度对账】）', async () => {
-    delete process.env.BLOMA_LOOP_PROGRESS_NUDGE
-    const { query, receivedMessages } = scriptedQuery([...readOnlyScript(7), [textMessage('完成')]])
-    await runAgentLoop(baseInput({ query, tools: [readFile], maxTurns: 12, sessionId: 'session-b3-off', planFiles: ['index.html'] }))
-    for (const messages of receivedMessages) {
-      expect(userTextsOf(messages)).not.toContain('进度对账')
-    }
-    expect(readSessionJsonl('session-b3-off').some((line) => JSON.stringify(line).includes('进度对账'))).toBe(false)
   })
 
   it('disableProgressNudge：非写型 loop（调度员）关闭三守卫注入（首跑深修）', async () => {

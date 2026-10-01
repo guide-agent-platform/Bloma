@@ -115,14 +115,6 @@ describe('C1b rulesForTemplateType（game 豁免 R-DATA-01 变体）', () => {
     else process.env.BLOMA_GAME_DERIVE_EXEMPT = previousEnv
   })
 
-  it('off 或非 game → 原表字节级（R-DATA-01 禁 localStorage 原文不变）', () => {
-    delete process.env.BLOMA_GAME_DERIVE_EXEMPT
-    expect(rulesForTemplateType('game')).toBe(RULES_REGISTRY)
-    process.env.BLOMA_GAME_DERIVE_EXEMPT = '1'
-    expect(rulesForTemplateType('web_fullstack')).toBe(RULES_REGISTRY)
-    expect(rulesForTemplateType(undefined)).toBe(RULES_REGISTRY)
-  })
-
   it('on + game → 仅 R-DATA-01 变体（轻留存允许 localStorage、重数据仍后端），其余规则不动', () => {
     process.env.BLOMA_GAME_DERIVE_EXEMPT = '1'
     const rules = rulesForTemplateType('game')

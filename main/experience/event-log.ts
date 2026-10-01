@@ -9,7 +9,7 @@
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { experienceEnabled, hashProjectRef } from './types'
+import { hashProjectRef } from './types'
 import { getExperienceIndexPath } from '../../storage/config-paths'
 
 export type ExperienceEventType =
@@ -65,7 +65,6 @@ export interface AppendEventInput {
 
 /** 追加事件行（开关 off=零副作用；失败 warn 不抛——采集是增强不是依赖）。 */
 export function appendExperienceEvent(input: AppendEventInput): string | null {
-  if (!experienceEnabled()) return null
   try {
     const line: ExperienceEventLine = {
       record_type: 'event',

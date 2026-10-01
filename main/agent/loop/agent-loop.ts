@@ -693,11 +693,6 @@ export function createToolState(delegationDepth = 0): AgentLoopToolState {
   }
 }
 
-/** D1 开关：loop 内 API 契约验证（工具注册 + 收口判定 + prompt 新文案）。缺省 off=字节级现状。 */
-export function loopApiToolEnabled(): boolean {
-  return process.env.BLOMA_API_TOOL === '1' || process.env.BLOMA_API_TOOL === 'true'
-}
-
 /** W2（Phase 10，2026-09-16，同步 Proma CompactContext）：显式压缩工具 compact_context 开关。
  * 缺省 off=字节级现状（工具不注册、loop 无显式触发路径）。对位 W1-E6 发现的「压缩失明」：
  * glm 渠道 input_tokens 恒 0 时自动触发器失效，模型可在完成大阶段后主动交接口收缩窗口。 */
@@ -737,14 +732,6 @@ export function preflightEnabled(): boolean {
 /** W5-G1（咨询 D5）：旁白事件驱动五类事件版（G2 的 A/B 对照即本开关——on 无同构开头限制）。缺省 off=字节级现状。 */
 export function narrationEventsEnabled(): boolean {
   return process.env.BLOMA_NARRATION_EVENTS === '1' || process.env.BLOMA_NARRATION_EVENTS === 'true'
-}
-
-
-/** B3（P0-B，2026-09-11 审计案 35c1a633）：loop 进度对账三守卫——只读失速 / 清单对账 /
- *  自测提醒，批间 user 消息注入（复用 DEGENERATE_RETRY_FEEDBACK 模式，与 steer 同点位）。
- * 缺省 off=字节级现状（零注入，messages/JSONL 字节不变）。 */
-export function loopProgressNudgeEnabled(): boolean {
-  return process.env.BLOMA_LOOP_PROGRESS_NUDGE === '1' || process.env.BLOMA_LOOP_PROGRESS_NUDGE === 'true'
 }
 
 
@@ -852,18 +839,11 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
   }
   // D1（咨询 D）：背板感知的 api_all_passed 预置——声明了 interface_spec 的项目
   // 收口前必须跑过 run_api_contract_tests（全过才 true）；无契约项目豁免 true。
-  // 读背板失败时保守 false（fail-closed：宁可多跑一次验证，不静默故行）。仅开关 on 生效；
-  // off 时保持 true 不影响既有收口判定（字节级现状）。
-  if (loopApiToolEnabled()) {
-    try {
-      const { readPrdBackplane } = await import('../../project/document-engine')
-      const spec = readPrdBackplane(input.projectId)?.interface_spec
-      ctx.state.api_all_passed = !spec || spec.length === 0
-    } catch {
-      ctx.state.api_all_passed = false
-    }
-  }
+  // PROJECT_NOT_FOUND = 无项目上下文（纯会话 loop/测试场景）无契约概念——豁免；
+  // 其他读盘失败保守 false（fail-closed）。惰性执行：首次 GWT+安全双绿时才读背板
+  // （未达绿灯的 loop 零背板读盘与模块加载开销；2026-10-01 开关删除时由起步预置改此）。
 
+  let apiChecked = false // API 收口位惰性预置标记（2026-10-01）
   let turns = 0
   let finalText = ''
   let consecutiveBudgetStallTurns = 0
@@ -1253,7 +1233,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     // 与 steer 同点位（resultBlocks 落盘后、下一轮模型调用前）；注入计入滑窗/压缩管道，
     // 不破坏「整批 tool_result 单条 user 消息」不变式。开关 off=零注入字节级现状；
     // 只挂主 loop（修复轮任务窄且无 plan 上下文）；wrapUp 激活后不再打扰（模型在交卷）。
-    if (isMainLoop && !wrapUp && loopProgressNudgeEnabled() && !input.disableProgressNudge) {
+    if (isMainLoop && !wrapUp && !input.disableProgressNudge) {
       const nudges: string[] = []
       // 守卫1 只读失速：连续 N 轮无 write/edit → 提醒落盘（注入后重置，再失速两计数再提）
       if (readOnlyStreak >= PROGRESS_READ_ONLY_TURNS) {
@@ -1345,7 +1325,18 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
 
     // 收口判定（2026-08-29 线上案例 eb900c57）：GWT 全过 + 安全扫描通过 = 活已干完，
     // 下一轮起停用全部工具 + system 追加收口指令，逼模型交卷而非继续冗余验证。
-    wrapUp = ctx.state.gwt_all_passed && ctx.state.security_all_passed && (!loopApiToolEnabled() || ctx.state.api_all_passed) && (!preflightEnabled() || ctx.state.preflight_passed === true)
+    // API 位惰性预置：首次双绿时读一次背板（无契约豁免 true；无项目上下文豁免；读失败 fail-closed）。
+    if (!apiChecked && ctx.state.gwt_all_passed && ctx.state.security_all_passed) {
+      apiChecked = true
+      try {
+        const { readPrdBackplane } = await import('../../project/document-engine')
+        const spec = readPrdBackplane(input.projectId)?.interface_spec
+        ctx.state.api_all_passed = !spec || spec.length === 0
+      } catch (error) {
+        ctx.state.api_all_passed = String((error as Error).message).includes('PROJECT_NOT_FOUND')
+      }
+    }
+    wrapUp = ctx.state.gwt_all_passed && ctx.state.security_all_passed && ctx.state.api_all_passed && (!preflightEnabled() || ctx.state.preflight_passed === true)
 
     consecutiveBudgetStallTurns = budgetStallThisTurn ? consecutiveBudgetStallTurns + 1 : 0
     // ---- P2-02：成本硬上限（每轮末检查；opt-in 缺省 0=不限，行为零变化）----

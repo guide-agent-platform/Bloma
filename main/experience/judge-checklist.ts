@@ -1,5 +1,5 @@
 import { selectForInjection } from './experience-service'
-import { experienceEnabled, EXPERIENCE_GOVERNANCE, type ExperienceCard } from './types'
+import { EXPERIENCE_GOVERNANCE, type ExperienceCard } from './types'
 import { sanitizeForInjection } from '../agent/loop/memory-sanitize'
 
 /**
@@ -51,7 +51,6 @@ export async function buildJudgeErrorPatternsSection(
   opts: JudgeSectionOptions = {},
 ): Promise<string> {
   void projectId // v1 账本全局（经验跨项目共享是特性）；参数为按项目过滤留缝
-  if (!experienceEnabled()) return ''
   try {
     const cards = await selectForInjection({
       kind: 'rule',

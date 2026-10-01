@@ -91,13 +91,6 @@ export function capContractEnabled(): boolean {
   return raw === '1' || raw === 'on' || raw === 'true'
 }
 
-/** W1 真实脚手架开关（本地镜像 project-templates.realScaffoldEnabled——model 层不
- *  import 引擎模块，依赖倒置口径；两处同步义务由 real-skeleton 测试锁定）。 */
-export function realScaffoldEnabled(): boolean {
-  const raw = (process.env.BLOMA_REAL_SCAFFOLD ?? '').trim().toLowerCase()
-  return raw === '1' || raw === 'on' || raw === 'true'
-}
-
 // ---------------------------------------------------------------------------
 // Phase 7 U1（2026-09-10，E1 咨询 H2 / P7 实施稿 §2）：key_tasks 关键任务块。
 // 用户语言的交付标尺——「这一版做完什么才算交付」。PRD 确认卡展示；
@@ -472,7 +465,6 @@ const EXTERNAL_SERVICE_ENDPOINT: InterfaceEndpoint = {
  * LLM 明确报告的 interface_spec 不受影响（重数据后端仍是「完整程序」终点口径）。
  */
 export function deriveInterfaceSpec(requirements: SketchRequirement[], templateType?: TemplateType): InterfaceEndpoint[] | undefined {
-  if (templateType === 'game' && gameDeriveExemptEnabled()) return undefined
   const texts = requirements.map((item) => `${item.description} ${item.story ?? ''}`)
   const endpoints: InterfaceEndpoint[] = []
   // 留存腿：records 双端点（2026-09-25 收紧——本地优先品类无强后端信号时豁免，
@@ -496,7 +488,6 @@ export function deriveInterfaceSpec(requirements: SketchRequirement[], templateT
  *  不再静默升级前后端分离。纯信息显影，不改变任何行为。 */
 export function requirementImpliesBackend(item: SketchRequirement, templateType?: TemplateType): boolean {
   // C1b 联动：game 豁免开启时轻留存不再催生后端，徽标同步不亮
-  if (templateType === 'game' && gameDeriveExemptEnabled()) return false
   const text = `${item.description} ${item.story ?? ''}`
   // 2026-09-25 本地优先豁免：留存词不催生后端（品类语义，与 deriveInterfaceSpec 单点同源）。
   // 判定序：外部服务信号独立蕴含后端（CSP 同源代理必经）——先于留存豁免检查；
@@ -504,11 +495,6 @@ export function requirementImpliesBackend(item: SketchRequirement, templateType?
   if (EXTERNAL_SERVICE_SIGNAL_RE.test(text)) return true
   if (PERSISTENCE_SIGNAL_RE.test(text) && localFirstPersistenceExempt([text], templateType)) return false
   return PERSISTENCE_SIGNAL_RE.test(text)
-}
-
-/** C1b 开关：game 类豁免留存信号兑底派生（含 C1a 徽标与 R-DATA-01 措辞联动）。缺省 off=字节级现状。 */
-export function gameDeriveExemptEnabled(): boolean {
-  return process.env.BLOMA_GAME_DERIVE_EXEMPT === '1' || process.env.BLOMA_GAME_DERIVE_EXEMPT === 'true'
 }
 
 export function renderBackplaneAnchor(backplane: PrdBackplane, focus?: string[]): string {
@@ -534,9 +520,7 @@ export function renderBackplaneAnchor(backplane: PrdBackplane, focus?: string[])
   // /api/records/api/records 全端点 404。改为正反例显式锁死相对路径语义。
   // W1 真实脚手架（BLOMA_REAL_SCAFFOLD on）：real-fullstack 产物是 Express 真实工程，
   // 条款换业界标准口径（app.get 注册 + PORT/db/llm 约定），不再讲旧注入式挂载规则。
-  const moduleFormatClause = realScaffoldEnabled()
-    ? '路由实现（Express 业界标准）：后端路由写在 server.js 或 server/ 下模块，用 app.get(\'/api/xxx\', handler) 等标准写法注册；数据经 server/db.js 的 readData/writeData 落 data/；服务从 process.env.PORT 读端口（平台拉起时注入）。/api/llm 代理已在 server/llm-proxy.js 预置（读 BLOMA_APP_LLM_* 环境变量，禁把密钥写进代码）。'
-    : '路由文件模块格式（static-server 以 CommonJS require 加载，禁用 ESM import/export）：每个 server/routes/<资源>.js 写 `module.exports = { \'METHOD /path\': async (req, res, ctx) => {...} }`。键里的路径写【文件名前缀之后的相对路径】——文件名已决定 /api/ 前缀：records.js 里 \'GET /\' 即 GET /api/records，\'PUT /:id\' 即 PUT /api/records/:id。禁止写全路径：\'GET /api/records\' 会被拼成 /api/records/api/records 导致全部端点 404。样例见骨架 server/routes/_example.js；数据用 ctx.readData/ctx.writeData 落 data/。'
+  const moduleFormatClause = '路由实现（Express 业界标准）：后端路由写在 server.js 或 server/ 下模块，用 app.get(\'/api/xxx\', handler) 等标准写法注册；数据经 server/db.js 的 readData/writeData 落 data/；服务从 process.env.PORT 读端口（平台拉起时注入）。/api/llm 代理已在 server/llm-proxy.js 预置（读 BLOMA_APP_LLM_* 环境变量，禁把密钥写进代码）。'
   return withCapSection(
     `${requirementsPart}\n\n【后端 API 契约（interface_spec，前后端真相源）】按此实现 server/routes/ 下的路由并保持一致：\n${contract}\n${moduleFormatClause}`,
     backplane,

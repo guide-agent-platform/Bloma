@@ -6,7 +6,7 @@
  */
 import type { AgentLoopTool } from '../agent/loop/agent-loop'
 import { hasProjectRootOverride } from '../../shared/project-root-override'
-import { loopApiToolEnabled, preflightEnabled, toolEvidenceEnabled } from '../agent/loop/agent-loop'
+import { preflightEnabled, toolEvidenceEnabled } from '../agent/loop/agent-loop'
 import type { BuildAgentToolsOptions } from '../agent/tools/agent-tools'
 import { validationStateLine, SANDBOX_LOG_TAIL_LIMIT } from '../agent/tools/agent-tools'
 import { findProject, readLastSketchRequirements } from '../project/project-service'
@@ -396,7 +396,7 @@ export function buildDomainTools(options: BuildAgentToolsOptions): AgentLoopTool
   }
 
   // D1：API 契约验证工具按开关注册（off=工具面与现状字节级一致）
-  const apiTools = loopApiToolEnabled() ? [run_api_contract_tests] : []
+  const apiTools = [run_api_contract_tests]
   // W3-D1：收口预检按开关注册（主/实现角色；审查角色不收口不注入）
   const preflightTools = preflightEnabled() ? [run_preflight] : []
   // W4-F3：修复控制窄入口——仅修复轮传入 writeScope 时注册（主 loop 无此工具）

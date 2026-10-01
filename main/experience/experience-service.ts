@@ -10,7 +10,6 @@ import {
   cardGovernance,
   EXPERIENCE_GOVERNANCE,
   computeFingerprint,
-  experienceEnabled,
   isConsumable,
   isRetireEligibleCandidate,
   isStale,
@@ -145,7 +144,6 @@ function findSameFingerprint(fingerprint: string, kind: CardKind): ExperienceCar
  * 同指纹窗口内折叠（不加行不计数）；窗口外 recurrence+1（追加新快照行）。
  */
 export async function tryRegisterCard(input: RegisterInput): Promise<ExperienceCard | null> {
-  if (!experienceEnabled()) return null
   try {
     const now = Date.now()
     const created = {
@@ -170,7 +168,6 @@ export async function tryRegisterCard(input: RegisterInput): Promise<ExperienceC
 
 /** 采集层门面入口（T-1）：接受组装器产出的完整候选卡，走同一去重/入册规则。 */
 export async function registerCandidateCard(card: ExperienceCard): Promise<ExperienceCard | null> {
-  if (!experienceEnabled()) return null
   try {
     return await registerCore(sanitizeCard(card))
   } catch (error) {
@@ -220,7 +217,6 @@ export async function updateCardAttribution(
   id: string,
   rootCause: AntiPatternBody['root_cause'],
 ): Promise<ExperienceCard | null> {
-  if (!experienceEnabled()) return null
   const card = ensureIndex().get(id)
   if (!card || card.status === 'retired' || card.kind !== 'anti_pattern') return null
   const old = card.body.root_cause
@@ -267,7 +263,6 @@ export async function reportReplayOutcomes(
   outcomes: Array<{ id: string; passed: boolean }>,
   projectId?: string,
 ): Promise<void> {
-  if (!experienceEnabled()) return
   const artifact = projectId ? projectArtifactText(projectId) : null
   for (const o of outcomes) {
     const card = [...ensureIndex().values()]
@@ -468,7 +463,6 @@ function matchesFilters(card: ExperienceCard, query: InjectionQuery): boolean {
 
 /** 消费注入查询：可过滤 kind/tag 前缀/阶段/能力；预算按整条卡截断（不腰斩）。 */
 export async function selectForInjection(query: InjectionQuery): Promise<ExperienceCard[]> {
-  if (!experienceEnabled()) return []
   try {
     const now = Date.now()
     const limit = query.limit ?? EXPERIENCE_GOVERNANCE.DEFAULT_INJECT_LIMIT

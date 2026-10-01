@@ -77,25 +77,6 @@ describe('replay-compiler：断言编译', () => {
     expect(replayAssertionText({ kind: 'anti_pattern', body: body('异常结局（timeout）：Loop 结束') } as ExperienceCard)).toBeNull()
   })
 
-  it('replayRequirements：非 retired 可编译卡全入 advisory（candidate 靠重放拿晋升证据）、上限 3、verified 优先；开关 off → []', async () => {
-    const v1 = await seedCard('coding/gwt/a1', 'GWT 场景「F-001 当提交时，应保存记录」未通过：x1')
-    await promoteToVerified(v1!.id, 'replay_green')
-    for (let i = 2; i <= 5; i++) {
-      await seedCard(`coding/gwt/a${i}`, `GWT 场景「F-00${i} 当删除第${i}项时，应即时刷新」未通过：x${i}`) // candidate r=1 排除
-    }
-    const lowCand = await seedCard('coding/gwt/low', 'GWT 场景「F-010 当刷新时，应保留状态」未通过：x')
-    // 手动把 low 抬到 verified 以便排序断言
-    await promoteToVerified(lowCand!.id, 'human_review')
-    const reqs = replayRequirements('proj-x')
-    expect(reqs.every((r) => r.id.startsWith('R-') && r.priority === 'P2' && r.behavior_assertions!.length === 1)).toBe(true)
-    expect(reqs.length).toBeLessThanOrEqual(3)
-    process.env.BLOMA_EXPERIENCE = 'off'
-    expect(replayRequirements('proj-x')).toEqual([])
-    process.env.BLOMA_EXPERIENCE = '1'
-    void readAllCards
-    void v1
-  })
-
   it('fp8 稳定前缀', () => {
     expect(fp8('abcdef1234567890')).toBe('abcdef12')
   })

@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import {
   EXPERIENCE_GOVERNANCE,
-  experienceEnabled,
   computeFingerprint,
   type AntiPatternBody,
   type CardEnvelope,
@@ -76,7 +75,6 @@ export function recordFailureCards(
   },
 ): void {
   // 开关 off = 零副作用（拍板 2.3：BLOMA_EXPERIENCE 只管新事件采集）
-  if (!experienceEnabled()) return
   try {
     const cap = ctx.maxCards ?? 5
     const runId = ctx.sessionId ?? ctx.projectId

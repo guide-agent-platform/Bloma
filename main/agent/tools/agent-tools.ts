@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { findProject, readLastSketchRequirements } from '../../project/project-service'
 import { decideWrite, estimateTokenCount } from '../loop/usage-guard'
-import { withAbort, loopApiToolEnabled, toolEvidenceEnabled, writeGuardEnabled, preflightEnabled, compactToolEnabled, MAX_EXPLICIT_COMPACTIONS, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../loop/agent-loop'
+import { withAbort, toolEvidenceEnabled, writeGuardEnabled, preflightEnabled, compactToolEnabled, MAX_EXPLICIT_COMPACTIONS, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../loop/agent-loop'
 import { commitFileWrite, fileRevisionOf, fileRevisionsOf } from './write-lease'
 import { resolveProjectRoot } from '../../../shared/project-root-override'
 import { buildDelegationTools } from '../delegation/delegation-tools'
@@ -281,7 +281,7 @@ export function validationStateLine(state: { gwt_all_passed: boolean; security_a
   // W3-D2：预检开启时收口面增加 run_preflight（未跑/未过都在「尚缺」）
   if (preflightEnabled()) (state.preflight_passed ? done : missing).push('收口预检 run_preflight')
   if (missing.length === 0) return '\n验证状态：行为断言/ API 契约/安全扫描均已通过——全部验证面通过，可输出完成总结。'
-  return `\n验证状态：已通过=${done.length ? done.join('、') : '（无）'}；尚缺=${missing.join('、')}${loopApiToolEnabled() && !state.api_all_passed ? '（数据留存/接口类项目收口前必须 run_api_contract_tests 通过）' : ''}${preflightEnabled() && !state.preflight_passed ? '（收口前必须 run_preflight 全部通过）' : ''}。`
+  return `\n验证状态：已通过=${done.length ? done.join('、') : '（无）'}；尚缺=${missing.join('、')}${!state.api_all_passed ? '（数据留存/接口类项目收口前必须 run_api_contract_tests 通过）' : ''}${preflightEnabled() && !state.preflight_passed ? '（收口前必须 run_preflight 全部通过）' : ''}。`
 }
 
 // =========================================================================

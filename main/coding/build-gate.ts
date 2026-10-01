@@ -22,13 +22,6 @@ import type { ProjectSkeleton } from '../project/project-templates'
 
 export type BuildGateStatus = 'passed' | 'failed' | 'skipped'
 
-/** C2（P1，2026-09-11 审计⑩/J）：构建门禁接线校验开关——bundle 成功后解析 index.html，
- *  入口页零 <script src> 或未引用构建产物路径 → failed。缺省 off=字节级现状
- *  （440B 空壳 stub 照样 passed 的假绿保留）。与 A1 配合后正常产物必过。 */
-export function buildGateWiringEnabled(): boolean {
-  return process.env.BLOMA_BUILD_GATE_WIRING === '1' || process.env.BLOMA_BUILD_GATE_WIRING === 'true'
-}
-
 /** 入口页接线校验（纯函数）：index.html 缺失 → ok（上游 AGENT_LOOP_INCOMPLETE 已拦，
  *  门禁只管 bundle）；零 script src / 未引用构建产物 → 拒。 */
 export function checkEntryWiring(rootPath: string, outfile: string): { ok: boolean; reason?: string } {
@@ -172,7 +165,7 @@ export async function runBuildGate(opts: {
   if (code === 0 && existsSync(outfileAbs)) {
     // C2（P1）：接线校验——bundle 成功但入口页不加载构建产物 → failed（审计案 440B 空壳
     // 假绿的根治位；开关 off=字节级现状直接 passed）
-    if (buildGateWiringEnabled()) {
+    {
       const wiring = checkEntryWiring(opts.rootPath, spec.outfile)
       if (!wiring.ok) {
         tryLogDecision(opts.projectId, opts.sessionId, 'build_gate_failed', '构建门禁失败（入口页面未加载构建产物）', {

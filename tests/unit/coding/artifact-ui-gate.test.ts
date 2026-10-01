@@ -125,10 +125,6 @@ describe('C3 死按钮判活（BLOMA_UI_GATE_LIVENESS，2026-09-11 审计案 35c
     })
   }
 
-  it('开关 off=字节级现状：7 死按钮零新增失败（假绿保留，回归锁）', () => {
-    expect(analyzeUiProbe(deadButtonProbe())).toEqual([])
-  })
-
   it('开关 on：真按钮类死亡占比 ≥80% 且 realControls ≥3 → failed 附死按钮清单', () => {
     process.env.BLOMA_UI_GATE_LIVENESS = '1'
     const failures = analyzeUiProbe(deadButtonProbe())

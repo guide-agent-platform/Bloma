@@ -13,7 +13,7 @@
  */
 import { trackAnalytics } from '../delivery/track-analytics'
 import { selectForInjection, tryRegisterCard, promoteToVerified, readAllCards } from './experience-service'
-import { experienceEnabled, type ExperienceCard, type RuleCardBody } from './types'
+import { type ExperienceCard, type RuleCardBody } from './types'
 
 /** 开关解析（与 BLOMA_EXPERIENCE 家族同风格）。 */
 export function ruleInjectEnabled(): boolean {
@@ -50,7 +50,6 @@ export const EXP_API_001_TAG = 'rule/api/frontend-backend-parity'
 
 /** 幂等登记种子（人工成文=human_review verified；账本存在性即幂等，跨 PROMA_HOME 安全）。 */
 export async function registerSeedRules(): Promise<void> {
-  if (!experienceEnabled()) return
   try {
     const exists = readAllCards().some((c) => c.tag === EXP_API_001_TAG)
     if (exists) return
@@ -102,7 +101,6 @@ function ruleMatches(card: ExperienceCard, input: RuleMatchInput): boolean {
 
 /** 受控词表匹配（确定性硬过滤，无向量）：注入面候选里挑 ≤3 张适用规则。 */
 export async function matchRules(input: RuleMatchInput): Promise<ExperienceCard[]> {
-  if (!experienceEnabled()) return []
   try {
     const pool = await selectForInjection({ kind: 'rule', surface: 'loop_rule_injection', limit: 10, budget_chars: 8000 })
     const seen = new Set<string>()

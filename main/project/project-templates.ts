@@ -336,14 +336,8 @@ export function loadSkeletonTemplate(
 // W1 真实脚手架（2026-09-18 改造，BLOMA_REAL_SCAFFOLD 缺省 off = 字节级现状）
 // =========================================================================
 
-/** 真实脚手架总开关：缺省 off（旧注入式 static-server 路径字节级不变）。
- *  on 时 web 形态类型的新项目改用 real-static / real-fullstack 骨架包：
- *  产物同步业界标准（Express / npm start），平台不再注入 static-server；
- *  「沙箱」退化为预览呈现（零约定只读 file server / 后台 spawn node server.js）。 */
-export function realScaffoldEnabled(): boolean {
-  const raw = (process.env.BLOMA_REAL_SCAFFOLD ?? '').trim().toLowerCase()
-  return raw === '1' || raw === 'on' || raw === 'true'
-}
+/** 开关已删（2026-10-01 第二刀）：真实脚手架为唯一主线（real-static / real-fullstack 两态）。
+ *  旧项目兼容由磁盘标记 .bloma-real-variant 兜底（无标记 → 旧预览路径，数据兼容逻辑非开关分支）。 */
 
 /** 参与真实脚手架的 web 形态类型；desktop_tool / ai_app 维持旧路径（v0 不扩）。 */
 export const REAL_SCAFFOLD_TYPES: ReadonlySet<string> = new Set(['web_fullstack', 'personal_tool', 'game'])

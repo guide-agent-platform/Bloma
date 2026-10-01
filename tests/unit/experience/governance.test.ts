@@ -139,12 +139,6 @@ describe('C5：曝光日志（experience_exposure）', () => {
     expect(payload.injected[0].status).toBe('verified')
     expect(payload.injected[0].id).toBeTruthy()
   })
-
-  it('开关 off 零注入零日志（字节级现状）', async () => {
-    process.env.BLOMA_EXPERIENCE = '0'
-    expect(await selectForInjection({ kind: 'anti_pattern' })).toEqual([])
-    expect(readExposureEvents().filter((e) => e.event_type === 'experience_exposure')).toHaveLength(0)
-  })
 })
 
 describe('C3：负经验类别与采集点', () => {

@@ -87,19 +87,19 @@ describe('renderBackplaneAnchor 接口契约注入', () => {
     expect(anchor).toContain('server/routes/')
   })
 
-  it('A2 路由模块契约显影：契约段末尾追加 CJS 模块格式条款（快照）', () => {
+  it('A2 路由模块契约显影：契约段末尾追加 Express 业界标准条款（快照，2026-10-01 唯一口径）', () => {
     const anchor = renderBackplaneAnchor({
       ...base,
       interface_spec: [{ endpoint: '/api/records', method: 'GET', response: '{records:[…]}' }],
     })
-    // 锚点渲染快照：契约段头部 → 端点行 → CJS 条款（顺序与全文逐字锁定，防漂移）
+    // 锚点渲染快照：契约段头部 → 端点行 → Express 条款（顺序与全文逐字锁定，防漂移）
     const contractIndex = anchor.indexOf('【后端 API 契约（interface_spec，前后端真相源）】')
     expect(contractIndex).toBeGreaterThan(0)
     expect(anchor.slice(contractIndex)).toBe(
       [
         '【后端 API 契约（interface_spec，前后端真相源）】按此实现 server/routes/ 下的路由并保持一致：',
         '- GET /api/records → 响应：{records:[…]}',
-        '路由文件模块格式（static-server 以 CommonJS require 加载，禁用 ESM import/export）：每个 server/routes/<资源>.js 写 `module.exports = { \'METHOD /path\': async (req, res, ctx) => {...} }`。键里的路径写【文件名前缀之后的相对路径】——文件名已决定 /api/ 前缀：records.js 里 \'GET /\' 即 GET /api/records，\'PUT /:id\' 即 PUT /api/records/:id。禁止写全路径：\'GET /api/records\' 会被拼成 /api/records/api/records 导致全部端点 404。样例见骨架 server/routes/_example.js；数据用 ctx.readData/ctx.writeData 落 data/。',
+        "路由实现（Express 业界标准）：后端路由写在 server.js 或 server/ 下模块，用 app.get('/api/xxx', handler) 等标准写法注册；数据经 server/db.js 的 readData/writeData 落 data/；服务从 process.env.PORT 读端口（平台拉起时注入）。/api/llm 代理已在 server/llm-proxy.js 预置（读 BLOMA_APP_LLM_* 环境变量，禁把密钥写进代码）。",
       ].join('\n'),
     )
     expect(anchor).not.toContain('localStorage')

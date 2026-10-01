@@ -13,7 +13,6 @@
 
 import {
   compactToolEnabled,
-  loopApiToolEnabled,
   loopCheckpointEnabled,
   narrationEventsEnabled,
   preflightEnabled,
@@ -42,7 +41,6 @@ export function captureCapabilityManifest(sessionId: string, runtimeNotes: strin
       write_guard: writeGuardEnabled(),
       tool_evidence: toolEvidenceEnabled(),
       preflight: preflightEnabled(),
-      api_tool: loopApiToolEnabled(),
       loop_checkpoint: loopCheckpointEnabled(),
       compact_tool: compactToolEnabled(),
       narration_events: narrationEventsEnabled(),

@@ -78,15 +78,6 @@ async function registerRuleOnce(text?: string, tag = 'rule/build/types') {
 }
 
 describe('experience-service：注册与去重', () => {
-  it('首次注册 → candidate recurrence=1 落盘；开关 off 时 no-op 返回 null', async () => {
-    const card = await registerOnce()
-    expect(card.status).toBe('candidate')
-    expect(card.recurrence).toBe(1)
-    const lines = readFileSync(join(home, 'bloma-experience.jsonl'), 'utf8').trim().split('\n')
-    expect(lines).toHaveLength(1)
-    process.env.BLOMA_EXPERIENCE = 'off'
-    expect(await tryRegisterCard({ kind: 'anti_pattern', tag: 'x/y/z', body: antiBody('别的'), source: src() })).toBeNull()
-  })
 
   it('10 分钟窗口内同指纹重复注册 → 折叠不计数不加行', async () => {
     const first = await registerOnce()

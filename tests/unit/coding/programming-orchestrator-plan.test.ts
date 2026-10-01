@@ -220,9 +220,9 @@ describe('runMvpViaAgentLoop × plan 腿（P3 PR-A 接线）', () => {
     // plan 腿与主 loop 同渠道同 env（D6）：generateLoopPlan 收到 loop.env（含解密后模型名）
     const legArgs = mocks.generateLoopPlan.mock.calls[0][0] as { env: Record<string, string>; skeletonMap: string | null }
     expect(legArgs.env.ANTHROPIC_MODEL).toBe('test-model')
-    // P0-1（2026-09-18 本月流水账案止血）：personal_tool 复用 web_fullstack 骨架，
-    // 骨架图非空且含路由样例条目（旧断言 toBeNull() 钉的是「无骨架现状」，已随止血批废弃）
-    expect(legArgs.skeletonMap).toContain('server/routes/_example.js')
+    // 2026-10-01（REAL_SCAFFOLD 恒开）：骨架图恒为真实工程包，按 interface_spec 两态判定——
+    // 本用例无后端契约 → real-static 纯静态（特征：dist/app.js 承接位；非旧注入式 _example.js）
+    expect(legArgs.skeletonMap).toContain('dist/app.js')
   })
 
   it('BLOMA_PLAN_LEG=1 强制开：quick 也起腿', { timeout: 60_000 }, async () => {

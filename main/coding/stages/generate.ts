@@ -35,13 +35,12 @@ import { generateLoopPlan, planLegEnabled, renderPlanInjection, renderPlanMarkdo
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../../project/project-service'
 import { appendProjectMapToSystem, loadProjectMapBlock } from '../../project/project-map'
 import { resolveChannelEnv } from '../../platform/llm/runtime-fallback'
-import { loadRealScaffoldTemplate, loadSkeletonTemplate, realScaffoldEnabled, REAL_SCAFFOLD_TYPES, type ProjectSkeleton } from '../../project/project-templates'
+import { loadRealScaffoldTemplate, loadSkeletonTemplate, REAL_SCAFFOLD_TYPES, type ProjectSkeleton } from '../../project/project-templates'
 import { readRealScaffoldVariant, writeRealScaffoldMarker } from '../preview-runtime'
 import { buildLoopInjection, buildSkeletonMapInjection } from '../../agent/prompting/template-injection'
 import { buildModuleMapInjection, loadOfficialModules, renderOfficialModulesToProject } from '../module-library'
 import { listRefPatternModules, refLibraryEnabled } from '../../experience/ref-source'
-import { backplaneInterfaceSpec, buildIterationRoundAnchor, buildRepairRoundAnchor, focusAnchorEnabled, gameDeriveExemptEnabled, renderBackplaneAnchor, renderRoundAnchorBlock, roundAnchorEnabled } from '../../model/prd-backplane'
-import { gwtGameProbeEnabled } from '../../verification/gwt-runner'
+import { backplaneInterfaceSpec, buildIterationRoundAnchor, buildRepairRoundAnchor, focusAnchorEnabled, renderBackplaneAnchor, renderRoundAnchorBlock, roundAnchorEnabled } from '../../model/prd-backplane'
 import { renderRulesSection, rulesForTemplateType, rulesRegistryEnabled } from '../../agent/prompting/rules-registry'
 import { renderExpressionSection } from '../../agent/prompting/prompt-expression'
 import { captureConstraints, extractConstraints, readProjectConstraints, sanitizeConstraints } from '../../guide/constraint-extractor'
@@ -58,7 +57,7 @@ import { recordDecision } from '../../project/decision-log'
 import { commitProjectState } from '../project-git'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from '../../project/recovery-service'
 import { readPrimaryIntent, recordSessionActivity } from '../../platform/sessions/session-service'
-import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, preflightEnabled, narrationEventsEnabled, loopProgressNudgeEnabled, compactToolEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../../agent/loop/agent-loop'
+import { runAgentLoop, loopCheckpointEnabled, preflightEnabled, narrationEventsEnabled, compactToolEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../../agent/loop/agent-loop'
 import { browserToolsEnabled } from '../preview-browser'
 import { deliveryStatusEnabled, recordDeliveryStatus, buildDeliveryPresentation, renderCircuitFailureNote, renderDeliveryBody, featureIdFromScenario } from '../delivery-status'
 import { isDegenerateText } from '../output-integrity'
@@ -430,7 +429,7 @@ export function prepareSkeletonBeforeLoop(
     // W1 真实脚手架（BLOMA_REAL_SCAFFOLD）：web 形态类型的新项目按 interface_spec 两态判定
     // （非空→ real-fullstack Express 真实工程；空→ real-static 纯静态一等公民）；
     // 判定依据是 PRD 契约本身（背板），与旧路径「模板类型猜测」解耦。
-    const useRealScaffold = realScaffoldEnabled() && REAL_SCAFFOLD_TYPES.has(templateType)
+    const useRealScaffold = REAL_SCAFFOLD_TYPES.has(templateType)
     skeleton = useRealScaffold
       ? loadRealScaffoldTemplate(backplaneInterfaceSpec(backplane).length > 0, {
           project_id: input.project_id,
@@ -933,7 +932,7 @@ export async function runMvpViaAgentLoop(input: MvpTaskInput, loop: AgentLoopCha
       : buildAgentLoopTask(backplane, input.mode, input),
     // B3（P0-B，2026-09-11）：技术合同清单透传进度对账守卫（BLOMA_LOOP_PROGRESS_NUDGE
     // off 时不读不注入字节级现状；无 plan 自然无守卫2，守卫1/3 照常）
-    ...(loopProgressNudgeEnabled() && loopPlan ? { planFiles: loopPlan.filesToTouch.map((file) => file.path) } : {}),
+    ...(loopPlan ? { planFiles: loopPlan.filesToTouch.map((file) => file.path) } : {}),
     // toolBudget 首个生产接线（闭环 PR5）：web_research 每次都 fork 调研子代理，
     // 限 4 次防长 loop 无节制外呼；超限走既有 budgetExhausted 软着陆
     toolBudget: { web_research: WEB_RESEARCH_BUDGET },

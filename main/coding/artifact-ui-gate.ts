@@ -53,16 +53,6 @@ export const ASSERTION_LEAK_PATTERNS: { id: string; re: RegExp }[] = [
 ]
 const PLACEHOLDER_PERSONA_RE = /J\.\s*Doe|John Doe|lorem ipsum|example\.com/i
 
-/** 开关已删除（2026-10-01 开关面收敛批）：L0 产物 UI 门禁无条件执行（紧急停用历史口径见 git）。 */
-
-/** C3（P1，2026-09-11 审计⑩/K）：死按钮判活开关——按钮类采样点击死亡占比 ≥80% 且
- *  realControls ≥3 → failed（7 个无 JS 死按钮照样 passed 的假绿根治位）。
- * 防误杀：仅统计真按钮类（button/[role=button]），锚点/外链/伪装控件不进分母。
- * 缺省 off=字节级现状。 */
-export function uiGateLivenessEnabled(): boolean {
-  return process.env.BLOMA_UI_GATE_LIVENESS === '1' || process.env.BLOMA_UI_GATE_LIVENESS === 'true'
-}
-
 /** 纯判定：探针数据 → 合成失败清单（scenario 统一 `UI-GATE ` 前缀，claim 供修复卡）。 */
 export function analyzeUiProbe(probe: UiProbeData): GwtFailureSummary[] {
   const failures: GwtFailureSummary[] = []
@@ -98,7 +88,7 @@ export function analyzeUiProbe(probe: UiProbeData): GwtFailureSummary[] {
   // C3（P1，2026-09-11 审计⑩/K）：死按钮判活——真按钮类（button/[role=button]）采样
   // 死亡占比 ≥80% 且真控件充足 → failed；锚点/外链/伪装控件不进分母（防误杀：外链
   // 点击不换页可能是 target=_blank 被拦，纯锚点无义务改 DOM）。开关 off=字节级现状。
-  if (uiGateLivenessEnabled()) {
+  {
     const buttonSamples = probe.deadClicks.filter((d) => d.tag === 'button' || d.tag === 'role-button')
     if (buttonSamples.length >= 3 && probe.realControls >= 3) {
       const dead = buttonSamples.filter((d) => !d.domChanged)

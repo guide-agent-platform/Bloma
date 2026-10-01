@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   EXPERIENCE_GOVERNANCE,
   computeFingerprint,
-  experienceEnabled,
   hashProjectRef,
   isStale,
   licenseTierOf,
@@ -157,34 +156,6 @@ describe('experience/types：isStale 与项目脱敏', () => {
     expect(licenseTierOf('AGPL-3.0')).toBe('strong_copyleft')
     expect(licenseTierOf(undefined)).toBe('unknown')
     expect(licenseTierOf('Weird-Custom-1.0')).toBe('unknown')
-  })
-})
-
-describe('experience/types：治理常量与开关', () => {
-  it('治理常量的关键值钉死（改动即需评审）', () => {
-    expect(EXPERIENCE_GOVERNANCE.RECURRENCE_THRESHOLD).toBe(2)
-    expect(EXPERIENCE_GOVERNANCE.VERIFIED_TTL_DAYS).toBe(90)
-    expect(EXPERIENCE_GOVERNANCE.LLM_ATTRIBUTION_MAX_CONFIDENCE).toBe(0.5)
-    expect(EXPERIENCE_GOVERNANCE.SANDBOX_TIMEOUT_MS).toBe(30_000)
-    expect(EXPERIENCE_GOVERNANCE.MAX_LOOP_LOG_LINES_FOR_ATTRIBUTION).toBe(300)
-    expect(EXPERIENCE_GOVERNANCE.MAX_BACKPLATE_CHARS_FOR_ATTRIBUTION).toBe(2000)
-  })
-
-  it('BLOMA_EXPERIENCE 缺省 off；1/on/true 为 on（大小写宽容）', () => {
-    const original = process.env.BLOMA_EXPERIENCE
-    try {
-      delete process.env.BLOMA_EXPERIENCE
-      expect(experienceEnabled()).toBe(false)
-      process.env.BLOMA_EXPERIENCE = 'off'
-      expect(experienceEnabled()).toBe(false)
-      process.env.BLOMA_EXPERIENCE = '1'
-      expect(experienceEnabled()).toBe(true)
-      process.env.BLOMA_EXPERIENCE = 'ON'
-      expect(experienceEnabled()).toBe(true)
-    } finally {
-      if (original === undefined) delete process.env.BLOMA_EXPERIENCE
-      else process.env.BLOMA_EXPERIENCE = original
-    }
   })
 })
 

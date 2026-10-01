@@ -48,11 +48,6 @@ function observationsOf(type: string): string[] {
 }
 
 describe('error-card：事件行采集（W2.1）', () => {
-  it('开关 off = 零副作用（不写任何事件行）', () => {
-    delete process.env.BLOMA_EXPERIENCE
-    recordFailureCards(ctx, { testResult: gwt(1), abnormal: { outcomeType: 'timeout', description: 'x' } })
-    expect(vi.mocked(appendExperienceEvent)).not.toHaveBeenCalled()
-  })
 
   it('GWT 失败 → gwt_failure 事件：计数行+场景事实行；evidence 含 test-report', () => {
     recordFailureCards(ctx, { testResult: gwt(2) })

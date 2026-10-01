@@ -4,12 +4,10 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   loadRealScaffoldTemplate,
-  realScaffoldEnabled,
   REAL_SCAFFOLD_TYPES,
 } from '../../main/project/project-templates'
 import { PRODUCT_CSP } from '../../main/coding/product-csp'
 import {
-  realScaffoldEnabled as anchorRealScaffoldEnabled,
   renderBackplaneAnchor,
   type PrdBackplane,
 } from '../../main/model/prd-backplane'
@@ -36,11 +34,6 @@ describe('W1 真实脚手架骨架包（BLOMA_REAL_SCAFFOLD）', () => {
     else process.env.BLOMA_REAL_SCAFFOLD = previousEnv
   })
 
-  it('开关缺省 off：两处读取（project-templates / prd-backplane 镜像）均为 false', () => {
-    delete process.env.BLOMA_REAL_SCAFFOLD
-    expect(realScaffoldEnabled()).toBe(false)
-    expect(anchorRealScaffoldEnabled()).toBe(false)
-  })
 
   it('两态判定：有后端契约 → real-fullstack（Express 工程件齐全）；无契约 → real-static（纯静态，无 server 件）', () => {
     const fullstack = loadRealScaffoldTemplate(true)
@@ -76,7 +69,7 @@ describe('W1 真实脚手架骨架包（BLOMA_REAL_SCAFFOLD）', () => {
     expect(db).toContain('renameSync')
   })
 
-  it('背板锚条款分支：开关 on → Express 业界标准口径；off → 旧注入式相对路径正反例（两侧互斥锁）', () => {
+  it('背板锚条款：Express 业界标准口径（开关已删 2026-10-01，唯一形态）', () => {
     const base: PrdBackplane = {
       project_id: 'p1',
       name: '记账',
@@ -87,16 +80,10 @@ describe('W1 真实脚手架骨架包（BLOMA_REAL_SCAFFOLD）', () => {
       assumptions: [],
       interface_spec: [{ endpoint: '/api/records', method: 'GET', response: '{records:[]}' }],
     }
-    delete process.env.BLOMA_REAL_SCAFFOLD
-    const oldAnchor = renderBackplaneAnchor({ ...base })
-    expect(oldAnchor).toContain('文件名前缀之后的相对路径')
-    expect(oldAnchor).not.toContain('Express 业界标准')
-
-    process.env.BLOMA_REAL_SCAFFOLD = '1'
-    const newAnchor = renderBackplaneAnchor({ ...base })
-    expect(newAnchor).toContain("app.get('/api/xxx'")
-    expect(newAnchor).toContain('process.env.PORT')
-    expect(newAnchor).not.toContain('文件名前缀之后的相对路径')
+    const anchor = renderBackplaneAnchor({ ...base })
+    expect(anchor).toContain("app.get('/api/xxx'")
+    expect(anchor).toContain('process.env.PORT')
+    expect(anchor).not.toContain('文件名前缀之后的相对路径')
   })
 
   it('REAL_SCAFFOLD_TYPES：web 形态三类型参与；desktop_tool/ai_app 不参与（v0 不扩）', () => {

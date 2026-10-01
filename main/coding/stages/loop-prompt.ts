@@ -32,13 +32,12 @@ import { generateLoopPlan, planLegEnabled, renderPlanInjection, renderPlanMarkdo
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../../project/project-service'
 import { appendProjectMapToSystem, loadProjectMapBlock } from '../../project/project-map'
 import { resolveChannelEnv } from '../../platform/llm/runtime-fallback'
-import { loadRealScaffoldTemplate, loadSkeletonTemplate, realScaffoldEnabled, REAL_SCAFFOLD_TYPES, type ProjectSkeleton } from '../../project/project-templates'
+import { loadRealScaffoldTemplate, loadSkeletonTemplate, REAL_SCAFFOLD_TYPES, type ProjectSkeleton } from '../../project/project-templates'
 import { readRealScaffoldVariant, writeRealScaffoldMarker } from '../preview-runtime'
 import { buildLoopInjection, buildSkeletonMapInjection } from '../../agent/prompting/template-injection'
 import { buildModuleMapInjection, loadOfficialModules, renderOfficialModulesToProject } from '../module-library'
 import { listRefPatternModules, refLibraryEnabled } from '../../experience/ref-source'
-import { backplaneInterfaceSpec, buildIterationRoundAnchor, buildRepairRoundAnchor, focusAnchorEnabled, gameDeriveExemptEnabled, renderBackplaneAnchor, renderRoundAnchorBlock, roundAnchorEnabled } from '../../model/prd-backplane'
-import { gwtGameProbeEnabled } from '../../verification/gwt-runner'
+import { backplaneInterfaceSpec, buildIterationRoundAnchor, buildRepairRoundAnchor, focusAnchorEnabled, renderBackplaneAnchor, renderRoundAnchorBlock, roundAnchorEnabled } from '../../model/prd-backplane'
 import { renderRulesSection, rulesForTemplateType, rulesRegistryEnabled } from '../../agent/prompting/rules-registry'
 import { renderExpressionSection } from '../../agent/prompting/prompt-expression'
 import { captureConstraints, extractConstraints, readProjectConstraints, sanitizeConstraints } from '../../guide/constraint-extractor'
@@ -55,7 +54,7 @@ import { recordDecision } from '../../project/decision-log'
 import { commitProjectState } from '../project-git'
 import { CircuitBreakSettledError, circuitBreakRollback, isCircuitBreakSettled } from '../../project/recovery-service'
 import { readPrimaryIntent, recordSessionActivity } from '../../platform/sessions/session-service'
-import { runAgentLoop, loopApiToolEnabled, loopCheckpointEnabled, preflightEnabled, narrationEventsEnabled, loopProgressNudgeEnabled, compactToolEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../../agent/loop/agent-loop'
+import { runAgentLoop, loopCheckpointEnabled, preflightEnabled, narrationEventsEnabled, compactToolEnabled, type AgentLoopResult, type LoopCheckpointSnapshot } from '../../agent/loop/agent-loop'
 import { browserToolsEnabled } from '../preview-browser'
 import { deliveryStatusEnabled, recordDeliveryStatus, buildDeliveryPresentation, renderCircuitFailureNote, renderDeliveryBody, featureIdFromScenario } from '../delivery-status'
 import { isDegenerateText } from '../output-integrity'
@@ -144,7 +143,7 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
       : []),
     // C4（2026-09-11 拍板）：游戏探针通道契约——位移类断言经 window.__g 读游戏状态判定
     //（canvas 无 DOM 位移可探）；不实现通道则位移断言无法判定。开关 off 零注入。
-    ...(gwtGameProbeEnabled() && backplane.gdd
+    ...(backplane.gdd
       ? [
           '【游戏探针通道】（终验位移断言依赖，必须实现）：在游戏入口挂 window.__g 只读通道：' +
             '__g.mode 返回当前游戏阶段字符串（\'menu\'|\'playing\'|\'paused\'|\'gameover\' 等小写）；' +
@@ -198,9 +197,7 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     // W3-D1/D2：BLOMA_PREFLIGHT on 时验证链收口为 run_preflight 一次跑全部验证面；off 保留原文（字节级现状）。
     (preflightEnabled()
       ? 'run_preflight 收口预检（一次跑全部验证面：GWT 全量/API 契约/产物审计/安全）。'
-      : loopApiToolEnabled()
-        ? 'run_api_contract_tests 验证接口契约（声明了 interface_spec 的项目）→ run_security_scan 确认无高危。'
-        : 'run_security_scan 确认无高危。'),
+      : 'run_api_contract_tests 验证接口契约（声明了 interface_spec 的项目）→ run_security_scan 确认无高危。'),
     // P5 先读再改纪律（2026-09-04）：防凭记忆/凭 plan 推断文件现状（文件可能已被
     // 修复轮或上一迭代修改）；MVP 首跑无副作用（新文件不触发）；与 P3 plan 合同
     // 不冲突（plan 是参考，read 是事实）。
@@ -230,9 +227,7 @@ export function buildAgentLoopSystemPrompt(backplane: PrdBackplane, editFormat: 
     // W3-D2：BLOMA_PREFLIGHT on 时收口条件=预检通过（GWT/API/产物审计/安全一次过）。
     (preflightEnabled()
       ? '【终止条件】run_preflight 收口预检全部通过（GWT 全量 + API 契约（声明了 interface_spec 的项目）+ 产物审计 + 安全扫描），才输出完成总结（含做了什么、'
-      : loopApiToolEnabled()
-        ? '【终止条件】全部 P0 断言通过 + API 契约验证通过（声明了 interface_spec 的项目必须 run_api_contract_tests 全过；未声明则豁免）+ 安全扫描无高危，才输出完成总结（含做了什么、'
-        : '【终止条件】全部 P0 断言通过 + 安全扫描无高危，才输出完成总结（含做了什么、'),
+      : '【终止条件】全部 P0 断言通过 + API 契约验证通过（声明了 interface_spec 的项目必须 run_api_contract_tests 全过；未声明则豁免）+ 安全扫描无高危，才输出完成总结（含做了什么、'),
     '未解决的低优先级项）。若技术合同规划了多文件，收口前确认目标文件已覆盖（未写的文件须在旁白说明偏离原因）。' +
     '测试未全绿不得声称完成。',
     '',

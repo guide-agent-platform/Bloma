@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { experienceEnabled, type ExperienceCard } from './types'
+import { type ExperienceCard } from './types'
 import { readAllCards } from './experience-service'
 import type { SketchRequirement } from '../model/prd-backplane'
 
@@ -42,7 +42,6 @@ export function replayAssertionText(card: ExperienceCard): string | null {
  */
 function replayableCards(projectId: string): ExperienceCard[] {
   void projectId // v1：账本全局（跨项目复用经验是特性）；保留参数为未来按项目过滤留缝
-  if (!experienceEnabled()) return []
   try {
     return readAllCards()
       .filter((c) => c.kind === 'anti_pattern' && c.status !== 'retired')
@@ -134,7 +133,6 @@ export function renderReplayFeature(card: ExperienceCard, assertion: string): st
  */
 export function syncReplayFeatureFiles(projectId: string, docsDir: string): void {
   try {
-    if (!experienceEnabled()) return
     for (const card of replayableCards(projectId)) {
       const assertion = replayAssertionText(card)
       if (!assertion) continue
