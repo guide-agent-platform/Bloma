@@ -11,9 +11,8 @@ export interface ExperimentSwitchMeta {
   note: string
 }
 
-/** 已知实验开关白名单（新增开关时同步登记——与开关矩阵文档对应）。 */
+/** 已知实验开关白名单（新增开关时同步登记——与开关矩阵文档对应；转正/删除开关时同步移除，2026-10-01 开关收敛后已清死条目）。 */
 export const KNOWN_EXPERIMENT_SWITCHES: ExperimentSwitchMeta[] = [
-  { id: 'BLOMA_EXPERIENCE', label: '经验库', note: '事件采集与规则消费总开关' },
   { id: 'BLOMA_EXP_RULE_INJECT', label: '行动规则注入', note: 'EXP-API-001 等规则进 loop（需经验库开）' },
   { id: 'BLOMA_FEEDBACK_CARD', label: '一键反馈卡', note: '保持现状后先问反馈' },
   { id: 'BLOMA_PROJECT_GIT', label: '产物 git 化', note: '项目工作区纳入 git 版本管理' },
@@ -22,8 +21,6 @@ export const KNOWN_EXPERIMENT_SWITCHES: ExperimentSwitchMeta[] = [
   { id: 'BLOMA_CHANGE_CONTRACT', label: '变更契约', note: '三向验收（正向/负向/兼容）+基线绑定' },
   { id: 'BLOMA_DATA_MIGRATE', label: '数据迁移守卫', note: 'schema 版本+_migrate 约定+终验演练' },
   { id: 'BLOMA_EXPORT_V2', label: '导出清单 v2', note: 'export-manifest+git 基线+升级链' },
-  { id: 'BLOMA_GUIDE_LOOP', label: '向导 loop 化', note: '向导澄清腿走 agent loop（09-16 已缺省 on）' },
-  { id: 'BLOMA_API_RECONCILE', label: '终验静态对账', note: '前端⇄路由⇄契约三方对账（Phase 9 W1）' },
 ]
 
 /** 读当前实况（'1'/'on'/'true'=开；未设与其余=关）。 */

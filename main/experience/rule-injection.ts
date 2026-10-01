@@ -15,7 +15,7 @@ import { trackAnalytics } from '../delivery/track-analytics'
 import { selectForInjection, tryRegisterCard, promoteToVerified, readAllCards } from './experience-service'
 import { type ExperienceCard, type RuleCardBody } from './types'
 
-/** 开关解析（与 BLOMA_EXPERIENCE 家族同风格）。 */
+/** 开关解析（'1'/'on'/'true' 三值形态）。 */
 export function ruleInjectEnabled(): boolean {
   const raw = (process.env.BLOMA_EXP_RULE_INJECT ?? '').trim().toLowerCase()
   return raw === '1' || raw === 'on' || raw === 'true'

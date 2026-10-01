@@ -74,14 +74,12 @@ function spyEventTypes(): string[] {
 
 describe('T-1 写点集成（账本门面 spy 断言）', () => {
   const originalHome = process.env.PROMA_HOME
-  const originalExp = process.env.BLOMA_EXPERIENCE
   let projectId = ''
   let sessionId = ''
   let channelId = ''
 
   beforeEach(() => {
     process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'proma-wp-'))
-    process.env.BLOMA_EXPERIENCE = '1' // 门面 gate 需要开关开；service 已 mock 不写真账本
     vi.mocked(appendExperienceEvent).mockClear()
     mocks.runAgentLoop.mockReset()
     mocks.runAgentLoop.mockResolvedValue(loopCompleted())
@@ -123,8 +121,6 @@ describe('T-1 写点集成（账本门面 spy 断言）', () => {
 
   afterEach(() => {
     process.env.PROMA_HOME = originalHome
-    if (originalExp === undefined) delete process.env.BLOMA_EXPERIENCE
-    else process.env.BLOMA_EXPERIENCE = originalExp
     clearSandboxRuntimeForTests()
   })
 

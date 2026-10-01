@@ -28,21 +28,14 @@ function body(failure: string, actions: string[]): RuleCardBody {
 const originalHome = process.env.PROMA_HOME
 beforeEach(() => {
   process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'proma-jcl-'))
-  process.env.BLOMA_EXPERIENCE = '1'
   resetExperienceIndexForTests()
 })
 afterEach(() => {
   process.env.PROMA_HOME = originalHome
-  delete process.env.BLOMA_EXPERIENCE
   resetExperienceIndexForTests()
 })
 
 describe('judge-checklist：审查指导注入段', () => {
-  it('开关 off → 空串（现状字节级）', async () => {
-    process.env.BLOMA_EXPERIENCE = 'off'
-    expect(await buildJudgeErrorPatternsSection('p1')).toBe('')
-  })
-
   it('空账本 → 空串（回归锁：无 verified 卡不产段）', async () => {
     expect(await buildJudgeErrorPatternsSection('p1')).toBe('')
   })

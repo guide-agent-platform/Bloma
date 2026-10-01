@@ -9,25 +9,21 @@ import { resetExperienceIndexForTests } from '../../../main/experience/experienc
  * G3a 市调 UI 做法入册（UI 模式卡通道，用户 2026-09-07 裁定）：
  * - 恒 candidate + pattern/ui/{slug}_{hash4} 命名空间（与 G2 批跑互斥防撞）
  * - 同 key 窗口折叠不重复建行；跨项目同想法才 merged 计数
- * - off → 0 计数零文件副作用；G4 消费端天然排除本通道（build_pass=false）
+ * - 恒入册（EXPERIENCE 开关 2026-10-01 转正删除）；G4 消费端天然排除本通道（build_pass=false）
  */
 
 const originalHome = process.env.PROMA_HOME
-const originalExp = process.env.BLOMA_EXPERIENCE
 const originalRef = process.env.BLOMA_REF_LIBRARY
 let home: string
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'ui-ingest-'))
   process.env.PROMA_HOME = home
-  process.env.BLOMA_EXPERIENCE = '1'
   delete process.env.BLOMA_REF_LIBRARY
   resetExperienceIndexForTests()
 })
 afterEach(() => {
   process.env.PROMA_HOME = originalHome
-  if (originalExp === undefined) delete process.env.BLOMA_EXPERIENCE
-  else process.env.BLOMA_EXPERIENCE = originalExp
   if (originalRef === undefined) delete process.env.BLOMA_REF_LIBRARY
   else process.env.BLOMA_REF_LIBRARY = originalRef
   resetExperienceIndexForTests()
@@ -72,15 +68,15 @@ describe('ref-ui-source：市调 UI 做法入册', () => {
     expect(ledgerText().trim().split('\n')).toHaveLength(1)
   })
 
-  it('开关 off → 计数 0 且账本文件不创建', async () => {
-    process.env.BLOMA_EXPERIENCE = 'off'
+  it('恒入册（EXPERIENCE 开关 2026-10-01 转正删除，env 未设也入册）', async () => {
+    delete process.env.BLOMA_EXPERIENCE
     const n = await ingestResearchIdeasAsCandidates({
       ideas: [{ label: '任意想法', note: 'x', source: 'y' }],
       demand: 'd',
       projectId: 'p1',
     })
-    expect(n).toBe(0)
-    expect(existsSync(join(home, 'bloma-experience.jsonl'))).toBe(false)
+    expect(n).toBe(1)
+    expect(existsSync(join(home, 'bloma-experience.jsonl'))).toBe(true)
   })
 
   it('G4 隔离：UI 卡永不进 ref 物化（build_pass=false 被消费端排除）', async () => {

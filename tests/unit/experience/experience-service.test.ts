@@ -46,11 +46,9 @@ let home: string
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'proma-exp-'))
   process.env.PROMA_HOME = home
-  process.env.BLOMA_EXPERIENCE = '1'
   resetExperienceIndexForTests()
 })
 afterEach(() => {
-  delete process.env.BLOMA_EXPERIENCE
   resetExperienceIndexForTests()
 })
 

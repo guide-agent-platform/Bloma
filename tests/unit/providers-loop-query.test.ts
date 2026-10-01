@@ -1,0 +1,166 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+/**
+ * providers 传输路径请求体拼装直测（2026-10-01 补齐——web 线刀1 退役 orchestrator
+ * 流式组后，anthropicMessagesQueryViaProviders 的「options → 请求体」拼装语义与
+ * SSE 事件桥映射一度无直测；sse-reader 自身稳健性由上游构件口径保证）。
+ * mock 边界：streamSSE（SSE 层）；请求体拼装/事件桥/结果装配全部走真实现。
+ */
+
+const h = vi.hoisted(() => ({ streamSSE: vi.fn() }))
+
+vi.mock('../../main/platform/upstream/providers/sse-reader', () => ({
+  streamSSE: h.streamSSE,
+  HTTPError: class HTTPError extends Error {
+    constructor(
+      public status: number,
+      message: string,
+    ) {
+      super(message)
+    }
+  },
+}))
+
+import { anthropicMessagesQueryViaProviders } from '../../main/platform/upstream/providers/loop-query'
+import type { SDKQueryOptions } from '../../main/orchestration/stages/orchestration-contracts'
+
+interface CapturedRequest {
+  url: string
+  headers: Record<string, string>
+  body: string
+}
+
+function opts(overrides: Partial<SDKQueryOptions> = {}): SDKQueryOptions {
+  return {
+    env: {
+      PATH: process.env.PATH ?? 'C:\\',
+      ANTHROPIC_AUTH_TOKEN: 'test-key',
+      ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
+      ANTHROPIC_MODEL: 'test-model',
+    },
+    signal: new AbortController().signal,
+    sessionId: 'session-pq-1',
+    ...overrides,
+  }
+}
+
+let captured: CapturedRequest | undefined
+
+/** 默认 mock：推两段正文 + usage，无工具调用，end_turn 收尾。 */
+function mockStreamOk() {
+  h.streamSSE.mockImplementation(async (options: { request: CapturedRequest; onEvent: (event: unknown) => void }) => {
+    captured = options.request
+    options.onEvent({ type: 'chunk', delta: '你好' })
+    options.onEvent({ type: 'chunk', delta: '，世界' })
+    options.onEvent({ type: 'usage', inputTokens: 10, outputTokens: 5 })
+    return { toolCalls: [], stopReason: 'end_turn' }
+  })
+}
+
+function parsedBody(): Record<string, unknown> {
+  return JSON.parse(captured!.body)
+}
+
+beforeEach(() => {
+  h.streamSSE.mockReset()
+  captured = undefined
+})
+
+describe('请求体拼装：历史窗口与 system 提取', () => {
+  it('history 路径：system 提取到顶层；history+prompt 追加为末轮 user；maxTokens 缺省 640000；temperature/tools 透传', async () => {
+    mockStreamOk()
+    const tool = { name: 'read_file', description: '读文件', input_schema: { type: 'object' as const, properties: {} } }
+    const out: string[] = []
+    for await (const msg of anthropicMessagesQueryViaProviders('新问题', opts({
+      history: [
+        { role: 'system', content: '你是系统' },
+        { role: 'user', content: '第一问' },
+        { role: 'assistant', content: '旧答' },
+      ],
+      temperature: 0.3,
+      tools: [tool] as SDKQueryOptions['tools'],
+    }))) {
+      out.push(msg.type)
+    }
+    const body = parsedBody()
+    expect(body.system).toBe('你是系统')
+    expect(body.messages).toEqual([
+      { role: 'user', content: '第一问' },
+      { role: 'assistant', content: '旧答' },
+      { role: 'user', content: '新问题' },
+    ])
+    expect(body.max_tokens).toBe(640000)
+    expect(body.stream).toBe(true)
+    expect(body.model).toBe('test-model')
+    expect(body.temperature).toBe(0.3)
+    expect(body.tools).toEqual([tool])
+    // 双认证头（上游 providers 口径）
+    expect(captured!.headers['x-api-key']).toBe('test-key')
+    expect(captured!.url).toContain('api.anthropic.com')
+  })
+
+  it('messages 原样路径：完整数组去 system 后原样作为请求 messages，prompt 被忽略', async () => {
+    mockStreamOk()
+    for await (const _ of anthropicMessagesQueryViaProviders('这个 prompt 应被忽略', opts({
+      messages: [
+        { role: 'system', content: '系统指令' },
+        { role: 'user', content: [{ type: 'text', text: '块轮' }] },
+      ],
+    }))) {
+      void _
+    }
+    const body = parsedBody()
+    expect(body.system).toBe('系统指令')
+    expect(body.messages).toEqual([{ role: 'user', content: [{ type: 'text', text: '块轮' }] }])
+  })
+
+  it('thinking 缺省 off：未识别模型显式携带 thinking:disabled（思考型渠道零正文防线，陷阱 10）', async () => {
+    mockStreamOk()
+    for await (const _ of anthropicMessagesQueryViaProviders('问', opts())) void _
+    expect(parsedBody().thinking).toEqual({ type: 'disabled' })
+  })
+})
+
+describe('SSE 事件桥：事件 → SDKMessage 流序与结果装配', () => {
+  it('chunk 逐段实时 yield；toolCalls 流末装配 tool_use 块；usage 聚合与 stop_reason 进 result', async () => {
+    h.streamSSE.mockImplementation(async (options: { request: CapturedRequest; onEvent: (event: unknown) => void }) => {
+      captured = options.request
+      options.onEvent({ type: 'chunk', delta: '先说明' })
+      options.onEvent({ type: 'usage', inputTokens: 7 })
+      options.onEvent({ type: 'chunk', delta: '再调用工具' })
+      options.onEvent({ type: 'usage', outputTokens: 9 })
+      return {
+        toolCalls: [{ id: 'toolu_1', name: 'read_file', arguments: { path: 'a.ts' } }],
+        stopReason: 'tool_use',
+      }
+    })
+    const msgs = []
+    for await (const msg of anthropicMessagesQueryViaProviders('修一下', opts())) msgs.push(msg)
+
+    expect(msgs.map((m) => m.type)).toEqual(['assistant', 'assistant', 'assistant', 'result'])
+    // 正文增量逐段（UI 流式依赖）
+    expect(msgs[0].message?.content).toEqual([{ type: 'text', text: '先说明' }])
+    expect(msgs[1].message?.content).toEqual([{ type: 'text', text: '再调用工具' }])
+    // 工具调用在正文之后（协议块序：thinking→text→tool_use）
+    expect(msgs[2].message?.content).toEqual([{ type: 'tool_use', id: 'toolu_1', name: 'read_file', input: { path: 'a.ts' } }])
+    // result 收尾：usage 聚合 + stop_reason 透传（Agent Loop 续轮判定依据）
+    expect(msgs[3]).toMatchObject({ type: 'result', subtype: 'success', stop_reason: 'tool_use', usage: { input_tokens: 7, output_tokens: 9 } })
+  })
+
+  it('env 前置校验：缺 PATH / 缺 AUTH_TOKEN / 缺 ANTHROPIC_MODEL 各自 fail-fast', async () => {
+    const noPath = opts()
+    delete noPath.env.PATH
+    await expect(async () => { for await (const _ of anthropicMessagesQueryViaProviders('x', noPath)) void _ })
+      .rejects.toThrow('SDK env missing PATH')
+
+    const noKey = opts()
+    delete noKey.env.ANTHROPIC_AUTH_TOKEN
+    await expect(async () => { for await (const _ of anthropicMessagesQueryViaProviders('x', noKey)) void _ })
+      .rejects.toThrow('CHANNEL_NOT_FOUND')
+
+    const noModel = opts()
+    delete noModel.env.ANTHROPIC_MODEL
+    await expect(async () => { for await (const _ of anthropicMessagesQueryViaProviders('x', noModel)) void _ })
+      .rejects.toThrow('SDK_MODEL_NOT_CONFIGURED')
+  })
+})

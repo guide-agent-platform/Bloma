@@ -17,7 +17,7 @@ describe('experiment-switches 注册表', () => {
   })
 
   it('注册表非空且 id 唯一、标签非空（新增开关登记完整性）', () => {
-    expect(KNOWN_EXPERIMENT_SWITCHES.length).toBeGreaterThanOrEqual(10)
+    expect(KNOWN_EXPERIMENT_SWITCHES.length).toBeGreaterThanOrEqual(5)
     const ids = KNOWN_EXPERIMENT_SWITCHES.map((m) => m.id)
     expect(new Set(ids).size).toBe(ids.length)
     for (const meta of KNOWN_EXPERIMENT_SWITCHES) {

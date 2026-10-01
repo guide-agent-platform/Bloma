@@ -16,7 +16,7 @@ import { registerCandidateCard } from './experience-service'
  *   verified+build_pass，故本通道卡入册后不污染物化，纯账本积累）；
  * - 与 G2 的 web_reference 区分：source.type='user_feedback'（用户渠道语义），
  *   不冒充批跑出证；
- * - 开关同族：BLOMA_EXPERIENCE=1 才写（off 零副作用，C-2 纪律）；fire-and-forget。
+ * - 恒写入（2026-10-01 开关收敛第二刀 EXPERIENCE 转正删除）；fire-and-forget。
  */
 
 export interface UIModeIdea {
@@ -146,7 +146,7 @@ export async function registerUiModeCard(input: {
 
 /**
  * 需求确认弹窗发 idea 的同时把全部想法投喂入册（candidate，不阻塞 UI）。
- * 返回入册条数（决策日志用）。开关 off → 0 且零副作用。
+ * 返回入册条数（决策日志用）。
  */
 export async function ingestResearchIdeasAsCandidates(input: {
   ideas: UIModeIdea[]
@@ -155,7 +155,6 @@ export async function ingestResearchIdeasAsCandidates(input: {
   sessionId?: string
 }): Promise<number> {
   try {
-    if (!process.env.BLOMA_EXPERIENCE || !['1', 'on', 'true'].includes(process.env.BLOMA_EXPERIENCE.trim().toLowerCase())) return 0
     let count = 0
     for (const idea of input.ideas.slice(0, 5)) {
       // P2b：入册前过滤（与 registerUiModeCard 双保险——批量入口也能统计到干净条数）

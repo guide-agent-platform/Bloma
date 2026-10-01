@@ -5,7 +5,7 @@
  *   治理行（迁移/生命周期）：card_quarantined/reclassified/superseded/retired/migration_completed。
  * 采集入口 recordFailureCards（error-card.ts）改写为事件行；本模块是唯一读写面。
  * 依赖：types（账本路径/开关）+ node:fs。fire-and-forget 纪律：写入失败 warn 不抛。
- * 开关：写入随 BLOMA_EXPERIENCE（拍板 2.3：只管新事件采集）；读取不过开关（迁移/审计用）。
+ * 恒写入（EXPERIENCE 开关 2026-10-01 转正删除）；读取面不变（迁移/审计用）。
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'

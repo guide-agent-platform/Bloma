@@ -156,11 +156,9 @@ describe('T-4 updateCardAttribution 幂等写回', () => {
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'proma-attr-'))
     process.env.PROMA_HOME = home
-    process.env.BLOMA_EXPERIENCE = '1'
     resetExperienceIndexForTests()
   })
   afterEach(() => {
-    delete process.env.BLOMA_EXPERIENCE
     resetExperienceIndexForTests()
     process.env.PROMA_HOME = originalHome
   })

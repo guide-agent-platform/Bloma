@@ -40,7 +40,7 @@ import {
  *   相关性排序（tag/阶段/关键词重叠 + verified 加成 + 时效）→ **整条取舍**预算截断。
  *
  * 静默失败纪律（judge-semantic 同款）：账本 IO/解析异常一律 warn + 降级，绝不
- * 阻断生成主链路；开关 BLOMA_EXPERIENCE off 时注册 no-op、查询恒空 = 现状字节级。
+ * 阻断生成主链路（EXPERIENCE 开关 2026-10-01 转正删除，恒注册）。
  */
 
 const LOG = '[experience]'

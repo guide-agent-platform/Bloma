@@ -72,7 +72,7 @@ export function recordFailureCards(
     antidegrade?: Array<{ code: string; detail: string }>
   },
 ): void {
-  // 开关 off = 零副作用（拍板 2.3：BLOMA_EXPERIENCE 只管新事件采集）
+  // 恒采集（EXPERIENCE 开关 2026-10-01 转正删除）
   try {
     const cap = ctx.maxCards ?? 5
     const runId = ctx.sessionId ?? ctx.projectId

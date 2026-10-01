@@ -112,29 +112,20 @@ describe('renderBackplaneAnchor 接口契约注入', () => {
   })
 })
 
-describe('C1b game 豁免留存派生（BLOMA_GAME_DERIVE_EXEMPT，2026-09-11 拍板）', () => {
-  const previousEnv = process.env.BLOMA_GAME_DERIVE_EXEMPT
+describe('C1b game 豁免留存派生（品类语义版；原 BLOMA_GAME_DERIVE_EXEMPT 开关已删 2026-10-01，game 豁免由 LOCAL_FIRST_TYPES 承载）', () => {
   const shmup = [{ id: 'F-008', description: '显示并本地留存历史最高分' }]
 
-  afterEach(() => {
-    if (previousEnv === undefined) delete process.env.BLOMA_GAME_DERIVE_EXEMPT
-    else process.env.BLOMA_GAME_DERIVE_EXEMPT = previousEnv
-  })
-
-  it('开关 off：game 类留存腿豁免（2026-09-25 拍板「本地工具不上后端」——game 属本地优先品类，C1b 开关被品类语义覆盖）', () => {
-    delete process.env.BLOMA_GAME_DERIVE_EXEMPT
+  it('game 类留存腿豁免（2026-09-25 拍板「本地工具不上后端」——game 属本地优先品类）', () => {
     expect(deriveInterfaceSpec(shmup, 'game')).toBeUndefined()
     expect(requirementImpliesBackend(shmup[0], 'game')).toBe(false)
   })
 
-  it('开关 on：game 类轻留存豁免——不派生契约、徽标不亮；LLM 明确报告不受影响（调用方 LLM 优先逻辑）', () => {
-    process.env.BLOMA_GAME_DERIVE_EXEMPT = '1'
+  it('轻留存豁免不派生契约、徽标不亮；LLM 明确报告不受影响（调用方 LLM 优先逻辑）', () => {
     expect(deriveInterfaceSpec(shmup, 'game')).toBeUndefined()
     expect(requirementImpliesBackend(shmup[0], 'game')).toBe(false)
   })
 
-  it('开关 on 但非 game：照派照亮（豁免只限 game；重数据工具类项目完整程序口径不变）', () => {
-    process.env.BLOMA_GAME_DERIVE_EXEMPT = '1'
+  it('非 game 照派照亮（重数据工具类项目完整程序口径不变）', () => {
     expect(deriveInterfaceSpec(shmup, 'web_fullstack')).toBeDefined()
     // 2026-09-25 拍板：personal_tool 同属本地优先——留存徽标不再亮（localStorage 合法）
     expect(requirementImpliesBackend(shmup[0], 'personal_tool')).toBe(false)

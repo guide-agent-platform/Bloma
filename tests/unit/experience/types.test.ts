@@ -24,7 +24,6 @@ import { getExperienceIndexPath } from '../../../storage/config-paths'
  * - isStale：仅 verified 且有 last_verified_at 且超 TTL 才 stale
  * - hashProjectRef：脱敏项目标识（12 hex）
  * - getExperienceIndexPath：PROMA_HOME/bloma-experience.jsonl（纯路径不建目录）
- * - experienceEnabled：BLOMA_EXPERIENCE 缺省 off（P3 开关口径）
  */
 
 function baseEnvelope(overrides: Partial<CardEnvelope> = {}): CardEnvelope {

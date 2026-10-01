@@ -28,14 +28,8 @@ function gwt(n = 1): GwtTestResult {
   }
 }
 
-const originalExp = process.env.BLOMA_EXPERIENCE
 beforeEach(() => {
-  process.env.BLOMA_EXPERIENCE = '1'
   vi.mocked(appendExperienceEvent).mockClear()
-})
-afterEach(() => {
-  if (originalExp === undefined) delete process.env.BLOMA_EXPERIENCE
-  else process.env.BLOMA_EXPERIENCE = originalExp
 })
 
 function eventTypes(): string[] {

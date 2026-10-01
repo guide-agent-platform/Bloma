@@ -53,12 +53,10 @@ const originalHome = process.env.PROMA_HOME
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'proma-replay-'))
   process.env.PROMA_HOME = home
-  process.env.BLOMA_EXPERIENCE = '1'
   resetExperienceIndexForTests()
 })
 afterEach(() => {
   process.env.PROMA_HOME = originalHome
-  delete process.env.BLOMA_EXPERIENCE
   resetExperienceIndexForTests()
 })
 

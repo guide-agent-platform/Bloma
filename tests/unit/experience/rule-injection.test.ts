@@ -22,19 +22,15 @@ import {
  */
 
 const originalHome = process.env.PROMA_HOME
-const originalExp = process.env.BLOMA_EXPERIENCE
 const originalInject = process.env.BLOMA_EXP_RULE_INJECT
 
 beforeEach(() => {
   process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'proma-ri-'))
-  process.env.BLOMA_EXPERIENCE = '1'
   resetExperienceIndexForTests()
 })
 afterEach(() => {
   if (originalHome === undefined) delete process.env.PROMA_HOME
   else process.env.PROMA_HOME = originalHome
-  if (originalExp === undefined) delete process.env.BLOMA_EXPERIENCE
-  else process.env.BLOMA_EXPERIENCE = originalExp
   if (originalInject === undefined) delete process.env.BLOMA_EXP_RULE_INJECT
   else process.env.BLOMA_EXP_RULE_INJECT = originalInject
   resetExperienceIndexForTests()

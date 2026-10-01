@@ -461,8 +461,9 @@ const EXTERNAL_SERVICE_ENDPOINT: InterfaceEndpoint = {
  *
  * C1b（2026-09-11 拍板，审计稿 §3 C1 方案 b）：game 类豁免留存信号兑底派生——「最高分」
  * 类轻留存允许 localStorage 满足，街机游戏不再被静默升级为前后端分离。
- * BLOMA_GAME_DERIVE_EXEMPT 缺省 off=字节级现状（game 照派）；豁免只作用于兑底派生层，
- * LLM 明确报告的 interface_spec 不受影响（重数据后端仍是「完整程序」终点口径）。
+ * （原 BLOMA_GAME_DERIVE_EXEMPT 开关已删——2026-10-01 开关收敛第二刀：game 留存豁免由
+ * LOCAL_FIRST_TYPES 品类语义承载，见 localFirstPersistenceExempt）；LLM 明确报告的
+ * interface_spec 不受豁免影响（重数据后端仍是「完整程序」终点口径）。
  */
 export function deriveInterfaceSpec(requirements: SketchRequirement[], templateType?: TemplateType): InterfaceEndpoint[] | undefined {
   const texts = requirements.map((item) => `${item.description} ${item.story ?? ''}`)

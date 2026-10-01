@@ -131,7 +131,7 @@ export async function startRequirementConfirmFlow(
   })
 
   // G3a 市调 UI 做法投喂入册（恒 candidate，用户 2026-09-07 裁定「做产品=做 UI」定向收割）：
-  // fire-and-forget，BLOMA_EXPERIENCE off 时零副作用，失败不阻断确认弹窗。
+  // fire-and-forget，失败不阻断确认弹窗。
   void ingestResearchIdeasAsCandidates({
     ideas,
     demand: demandText,
