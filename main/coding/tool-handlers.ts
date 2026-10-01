@@ -104,7 +104,7 @@ export function buildDomainTools(options: BuildAgentToolsOptions): AgentLoopTool
         return {
           output:
             `已批准：${normalized.join('、')} 加入本轮修改授权（issue=${issueId}）。` +
-            '继续前先 read_file 核对现状与文件版本；修复完成后必须完整重验（run_gwt_tests 或 run_preflight），不得凭旧证据交差。',
+            '继续前先 read_file 核对现状与文件版本；修复完成后必须用当前工具面可用的验证工具完整重验，不得凭旧证据交差。',
         }
       }
       if (toolInput.action === 'report_blocker') {

@@ -246,7 +246,7 @@ export function renderPlanInjection(plan: LoopPlan): string {
     reuseLines,
     '验证口径（对齐 P0 断言）：',
     ...(verificationLines.length > 0 ? verificationLines : ['- 按 system 锚定段全部 P0 断言自测']),
-    '改完按验证口径自测（run_gwt_tests 对照行为断言）后再声明完成。',
+    '改完按验证口径自测（用当前工具面可用的验证工具对照行为断言）后再声明完成。',
   ].join('\n')
 }
 

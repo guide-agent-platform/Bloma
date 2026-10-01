@@ -61,25 +61,37 @@ export async function createSnapshot(input: SnapshotCreateInput): Promise<Snapsh
   const filesArchivePath = `${snapshotRoot}/files`
   const documentsArchivePath = input.include_documents ? `${snapshotRoot}/documents` : undefined
 
-  mkdirSync(snapshotRoot, { recursive: true })
-  cpSync(project.root_path, filesArchivePath, {
-    recursive: true,
-    force: true,
-    // Phase 10 W1-1：归档排除受保护顶层目录（.git 版本史 / data-backups 备份）——
-    // 回滚不回退它们（见 restoreSnapshotFiles 的挪出/挪回）；不存在时零影响。
-    filter: (src: string) => !isPreservedToplevel(project.root_path, src),
-  })
-  // 文档冻结（T7）：documents 目录整份归档（prd.json/decisions.md/sketch.html 都在其中；
-  // T2 落盘即导出保证 decisions.md 不是过期聚合）。目录尚不存在（如草图阶段的早期快照）
-  // 时归档路径置 undefined——metadata 不谎报有归档，回看/回滚据此如实提示。
+  // 半成品防护（全链路审查 P1-6，2026-10-01）：cpSync 中途失败（杀毒锁/磁盘错）不得留下
+  // 无 metadata 的孤儿目录——它会被当成合法快照目录参与未来回滚（恢复出残缺产物，
+  // 静默数据损坏）。失败即清理半成品目录，抛结构化错误码。
   let effectiveDocumentsArchivePath = documentsArchivePath
-  if (documentsArchivePath) {
-    const documentsDir = getDocumentsDir(project.workspace_slug, project.project_id)
-    if (existsSync(documentsDir)) {
-      cpSync(documentsDir, documentsArchivePath, { recursive: true, force: true })
-    } else {
-      effectiveDocumentsArchivePath = undefined
+  try {
+    mkdirSync(snapshotRoot, { recursive: true })
+    cpSync(project.root_path, filesArchivePath, {
+      recursive: true,
+      force: true,
+      // Phase 10 W1-1：归档排除受保护顶层目录（.git 版本史 / data-backups 备份）——
+      // 回滚不回退它们（见 restoreSnapshotFiles 的挪出/挪回）；不存在时零影响。
+      filter: (src: string) => !isPreservedToplevel(project.root_path, src),
+    })
+    // 文档冻结（T7）：documents 目录整份归档（prd.json/decisions.md/sketch.html 都在其中；
+    // T2 落盘即导出保证 decisions.md 不是过期聚合）。目录尚不存在（如草图阶段的早期快照）
+    // 时归档路径置 undefined——metadata 不谎报有归档，回看/回滚据此如实提示。
+    if (documentsArchivePath) {
+      const documentsDir = getDocumentsDir(project.workspace_slug, project.project_id)
+      if (existsSync(documentsDir)) {
+        cpSync(documentsDir, documentsArchivePath, { recursive: true, force: true })
+      } else {
+        effectiveDocumentsArchivePath = undefined
+      }
     }
+  } catch (error) {
+    try {
+      if (existsSync(snapshotRoot)) rmSync(snapshotRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    } catch (cleanupError) {
+      console.error('[snapshot] 半成品目录清理失败（下次容量治理可回收）：', cleanupError)
+    }
+    throw new Error(`SNAPSHOT_CREATE_FAILED: ${error instanceof Error ? error.message : String(error)}`)
   }
 
   const capture = await snapshotCaptureProvider()
@@ -316,12 +328,28 @@ function listActiveSnapshots(snapshotDir: string): ActiveSnapshotMeta[] {
   return result
 }
 
+/** 归档回滚支持（全链路审查 P1-14，2026-10-01）：容量治理把超限快照 rename 进
+ *  archive/ 后，回滚/恢复入口只查活跃索引会报 SNAPSHOT_NOT_FOUND——数据物理保留但
+ *  产品内永久不可达（「归档不删除」对用户等价于丢失）。本 helper 在活跃索引未命中时
+ *  查 archive/，命中则把目录与索引原子搬回活跃集再继续（搬回后重新受容量治理管理）。 */
+function ensureSnapshotActive(snapshotDir: string, snapshotId: string): void {
+  const activeIndex = `${snapshotDir}/${snapshotId}.json`
+  if (existsSync(activeIndex)) return
+  const archiveIndex = join(snapshotDir, 'archive', `${snapshotId}.json`)
+  if (!existsSync(archiveIndex)) throw new Error('SNAPSHOT_NOT_FOUND')
+  const archiveDir = join(snapshotDir, 'archive', snapshotId)
+  if (!existsSync(archiveDir)) throw new Error('SNAPSHOT_NOT_FOUND')
+  console.warn(`[snapshot] 目标快照 ${snapshotId.slice(0, 8)} 已被容量治理归档，从 archive 搬回活跃集后回滚`)
+  renameSync(archiveDir, join(snapshotDir, snapshotId))
+  renameSync(archiveIndex, activeIndex)
+}
+
 export async function rollbackSnapshot(input: SnapshotRollbackInput): Promise<RollbackResult> {
   const project = findProject(input.project_id)
 
-  // 1. 校验目标快照存在（含元数据读取，详见 restoreSnapshotFiles）
+  // 1. 校验目标快照存在（含元数据读取，详见 restoreSnapshotFiles）；归档快照自动搬回
   const snapshotDir = getSnapshotsDir(project.workspace_slug, project.project_id)
-  if (!existsSync(`${snapshotDir}/${input.snapshot_id}.json`)) throw new Error('SNAPSHOT_NOT_FOUND')
+  ensureSnapshotActive(snapshotDir, input.snapshot_id)
 
   // 2. 回滚前拍 guard 快照（保留回滚前状态）
   const guard = await createSnapshot({
@@ -428,6 +456,8 @@ export async function restoreSnapshotFiles(input: {
   const project = findProject(input.project_id)
   const snapshotDir = getSnapshotsDir(project.workspace_slug, project.project_id)
 
+  // 归档快照支持：与 rollbackSnapshot 同源（全链路审查 P1-14）
+  ensureSnapshotActive(snapshotDir, input.snapshot_id)
   const targetPath = `${snapshotDir}/${input.snapshot_id}.json`
   if (!existsSync(targetPath)) throw new Error('SNAPSHOT_NOT_FOUND')
   const target = readJsonFile<Snapshot>(targetPath, null as never)
@@ -468,9 +498,33 @@ export async function restoreSnapshotFiles(input: {
     preserved.push({ temp, dest })
   }
   try {
-    rmSync(project.root_path, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
-    mkdirSync(project.root_path, { recursive: true })
-    cpSync(target.files_archive_path, project.root_path, { recursive: true, force: true })
+    // 原子切换（全链路审查 P1-7/P1-6，2026-10-01）：旧实现「rm 项目根 → mkdir → cpSync」
+    // 在 cpSync 失败（归档损坏/杀毒锁/磁盘错）时项目根已被清空且无备份层——快照之后的
+    // agent 进度永久丢失。改为「先完整复制到同级临时目录，成功后才切换」：任何一步
+    // 失败都保持旧根原样（无损）；切换用同盘 rename（原子），旧根延迟删除。
+    const restoreTmp = `${project.root_path}.__restore_${Date.now()}`
+    const rootOld = `${project.root_path}.__old_${Date.now()}`
+    try {
+      mkdirSync(restoreTmp, { recursive: true })
+      cpSync(target.files_archive_path, restoreTmp, { recursive: true, force: true })
+      renameSync(project.root_path, rootOld)
+      try {
+        renameSync(restoreTmp, project.root_path)
+      } catch (swapError) {
+        // 切换失败：把旧根换回来（恢复到操作前状态），再向上抛
+        renameSync(rootOld, project.root_path)
+        throw swapError
+      }
+      rmSync(rootOld, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+    } catch (restoreError) {
+      // 复制阶段失败：清理临时目录，项目根未动（无损）
+      try {
+        if (existsSync(restoreTmp)) rmSync(restoreTmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+      } catch {
+        /* 清理失败随目录回收 */
+      }
+      throw restoreError
+    }
   } finally {
     for (const p of preserved) {
       if (existsSync(p.dest)) rmSync(p.dest, { recursive: true, force: true })

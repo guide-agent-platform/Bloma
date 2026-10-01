@@ -7,6 +7,30 @@
 
 **v1.1 修订说明**：同步 §5 已知待同步项状态（4 项全部已同步），新增 §5.1 目录结构重组记录。按 `workflow.md §2.4` 走修订流程，待评审后回到已确认。
 
+## 全链路审查修复批：P0-2 安全盲区 + 收口如实化 + 会话/PRD/快照链路 P1（2026-10-01）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | fix（全链路审查：四方向并行只读审查 + 主会话交叉验证；P0×1 + P1×6 批） |
+| 模块 | `main/verification/security-scan.ts`、`main/desktop/dispatcher-loop.ts`、`main/agent/loop/agent-loop.ts`、`main/agent/loop/loop-planner.ts`、`main/coding/tool-handlers.ts`、`main/orchestration/stages/agent-dispatch.ts`、`main/ipc/shared.ts`、`main/ipc/projects.ts`、`main/ipc/sandbox-snapshots.ts`、`main/platform/sessions/session-service.ts`、`storage/json-store.ts`、`main/guide/requirement-enricher.ts`、`main/delivery/snapshots.ts`、`renderer/components/App.tsx` |
+
+### 变更内容
+
+- **P0-2（安全扫描 Python 盲区）**：SCAN_EXTENSIONS 补 `.py`；新增 Python 危险调用硬红线（`os.system`/`os.popen`/`subprocess shell=True`→critical，`eval`/`exec`→high；`pyOnly` 过滤防 JS 同形词误杀）；桌面子会话工具面（buildDesktopChildTools）拼接 buildDomainTools 获得 `run_security_scan`——桌面线在本机 spawn 执行的 Python（driver/scaffold）不再零扫描裸奔，生成方自扫自修。
+- **收口如实化（审查 P1）**：loop 收口判定中 web 线拆除后无置位路径的 gwt/api 位改为工具面豁免预置（未装配=豁免 true，与 D1 无契约豁免同构；security 位不豁免——装配扫描工具的会话必须扫过才收口）；apiChecked 背板预置同源豁免；B3 守卫3 / W5 清单 / loop-planner / repair_control 四处提示文案只引用当前工具面真实存在的验证工具，不再指点幽灵工具（run_gwt_tests/run_preview/run_preflight 已退役）。
+- **P1-1（PROJECT_BUSY 静默丢消息）**：runAgent 排队判定升级为项目级（同项目另一会话/后台审查占锁也入队）；safeInvoke 补 AGENT_PROJECT_BUSY 映射；渲染端 handleSendOutcome 补对应分支引导。
+- **P1-2（删项目不停 run）**：PROJECT_DELETE handler 先按 project_id 批停全部活跃运行（cancelAgent，异常不阻断删除）。
+- **P1-3（会话索引单点）**：writeJsonFile 改 tmp+rename 原子写（rename 失败回退直接写，不比旧世界差）；readSessions 损坏自愈（改名 .corrupt-<ts> 留证 + 重建空索引，会话 JSONL 正文直读不受影响）。
+- **P1-5（PRD 修订回滚）**：mergeExistingFields 方向修正——冻结清单已带的修订厚字段（用户亲答 story/断言/priority）优先，盘上旧 prd.json 只补缺省，不再落盘即回滚用户修订。
+- **P1-13/14/6/7（快照链路）**：SNAPSHOT_CREATE/ROLLBACK 入口加项目运行锁互斥（防撕裂快照与回滚/生成写交错）；归档快照回滚可达（ensureSnapshotActive 活跃索引 miss 时从 archive/ 搬回）；createSnapshot 半成品目录失败即清理（抛 SNAPSHOT_CREATE_FAILED）；restoreSnapshotFiles 改「先复制到同级临时目录成功后再原子切换」，复制失败不再清空项目根。
+
+### 影响评估
+
+- 单测 199 文件/1945 例全绿（含新增锁定：Python 扫描规则×3、归档回滚×1、修订不回滚×1；语义更新×3：PROJECT_BUSY 入队、收口豁免预置、无验证工具时的如实提醒文案）；typecheck 0 错。
+- 行为变化（均为审查认定的修复目标）：①同项目并发消息从「静默丢弃」变「排队」；②删项目即停运行；③装配扫描工具的会话收口需扫描过（硬门）；④无验证工具的会话提醒文案不再点名已退役工具。
+- 存量失败如实登记：tests/regression/sprint1 S1-SKETCH-002 草图预览回归在本批之前即红（web 生成线拆除后 previewUrl 无来源，stash 对照验证），与本批无关，待桌面线草图等价物补齐后处置。
+- 挂账（后续批）：裁判/语义审查/对抗审查/交付分级的桌面线重接（P0-1 完整版）；setChildToolsBuilder 跨线单例参数化；write_file 盲覆盖 CAS 缺省化；确认卡 pending 失效机制；空 driver 最低断言校验；worktree provider 生产装配或显式退役。
+
 ## 扩展 A 期：AgentEvent 事件总线订阅面（P2-A）（2026-09-08）
 
 | 属性 | 值 |

@@ -331,10 +331,20 @@ const AppRoutes: React.FC = () => {
       return
     }
     // U5 兜底：后端仍拒绝（旧后端/边缘 BUSY）→ 引导用户等待或停止，而不是消息石沉大海。
-    if (result.error?.code === 'AGENT_SESSION_BUSY') {
+    // 全链路审查 P1-1（2026-10-01）：补 PROJECT_BUSY 分支——同项目另一会话/后台审查占锁时
+    // 主进程已改为入队，此分支仅防御边缘路径（如旧会话残留锁）。
+    if (result.error?.code === 'AGENT_SESSION_BUSY' || result.error?.code === 'AGENT_PROJECT_BUSY') {
       appendMessageToSession(targetSessionId, {
         role: 'system',
-        content: [{ type: 'text', text: '我正在生成中，暂时没法同时处理新消息。你可以点输入框右侧的停止按钮中断当前生成，或等它完成后再发。' }],
+        content: [
+          {
+            type: 'text',
+            text:
+              result.error?.code === 'AGENT_PROJECT_BUSY'
+                ? '这个项目正在处理另一个任务（可能是一次生成或检查），新消息暂时送不进去。你可以等它完成、切换到其他项目，或回到正在运行的任务里点停止。'
+                : '我正在生成中，暂时没法同时处理新消息。你可以点输入框右侧的停止按钮中断当前生成，或等它完成后再发。',
+          },
+        ],
         timestamp: Date.now(),
       })
     }

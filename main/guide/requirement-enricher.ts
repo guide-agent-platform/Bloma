@@ -362,14 +362,17 @@ export function mergeEnrichment(
   }
 }
 
-/** 合并底：冻结项 + 上轮 prd.json 既有字段（行为断言剔除默认存在性断言后判定「已有」）。 */
+/** 合并底：冻结项 + 上轮 prd.json 既有字段（行为断言剔除默认存在性断言后判定「已有」）。
+ *  方向修正（全链路审查 P1-5，2026-10-01）：冻结清单已带的厚字段优先，existing 只补
+ *  缺失——旧方向 existing 无条件覆盖，会把用户刚在审查卡/追问/确认卡里亲答的修订
+ *  （story/断言/priority，经 applyNormalization 写入冻结清单）落盘即回滚成盘上旧值。 */
 function mergeExistingFields(item: SketchRequirement, existing: SketchRequirement | undefined): SketchRequirement {
   if (!existing) return { ...item }
   const base: SketchRequirement = { ...item }
-  if (existing.story?.trim()) base.story = existing.story
+  if (!base.story?.trim() && existing.story?.trim()) base.story = existing.story
   const existingAssertions = stripDefaultAssertions(existing.behavior_assertions)
-  if (existingAssertions.length > 0) base.behavior_assertions = existingAssertions
-  if (isValidPriority(existing.priority)) base.priority = existing.priority
+  if ((base.behavior_assertions ?? []).length === 0 && existingAssertions.length > 0) base.behavior_assertions = existingAssertions
+  if (!isValidPriority(base.priority) && isValidPriority(existing.priority)) base.priority = existing.priority
   return base
 }
 

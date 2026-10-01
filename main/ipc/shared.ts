@@ -129,6 +129,9 @@ export async function safeInvoke<T>(requestId: string, fn: () => T | Promise<T>)
     // 兜底前先把真实错误打到主进程终端，避免被 VALIDATION_ERROR 掩盖而无法排查
     console.error('[ipc] handler error:', message, error)
     if (message.includes('AGENT_SESSION_BUSY')) return fail<T>(requestId, 'AGENT_SESSION_BUSY', message, true)
+    // 全链路审查 P1-1（2026-10-01）：项目锁冲突不得落 VALIDATION_ERROR 静默——与 SESSION_BUSY
+    // 同级映射（retryable），渲染端可引导等待/停止而非石沉大海。
+    if (message.includes('AGENT_PROJECT_BUSY')) return fail<T>(requestId, 'AGENT_PROJECT_BUSY', message, true)
     if (message.includes('CHANNEL_NOT_FOUND')) return fail<T>(requestId, 'CHANNEL_NOT_FOUND', message)
     if (message.includes('SESSION_NOT_FOUND')) return fail<T>(requestId, 'SESSION_NOT_FOUND', message)
     if (message.includes('SESSION_FORK_ENTRY_NOT_FOUND')) {

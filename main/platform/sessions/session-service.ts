@@ -13,7 +13,7 @@
  * 对齐：shared/types.ts §6.5、DOC-3.4 data-model.md §5 Session / §6 Message
  */
 
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync, statSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { rmSyncWithRetry } from '../storage/fs-retry'
@@ -458,7 +458,27 @@ export function writeSessionsForTest(index: SessionsIndex): void {
 }
 
 function readSessions(): SessionsIndex {
-  return readJsonFile<SessionsIndex>(getAgentSessionsIndexPath(), { version: 1, sessions: [] })
+  const indexPath = getAgentSessionsIndexPath()
+  if (!existsSync(indexPath)) return { version: 1, sessions: [] }
+  try {
+    const parsed = JSON.parse(readFileSync(indexPath, 'utf8')) as SessionsIndex
+    if (!parsed || !Array.isArray(parsed.sessions)) throw new Error('SESSIONS_INDEX_MALFORMED')
+    return parsed
+  } catch (error) {
+    // 损坏自愈（全链路审查 P1-3 修复，2026-10-01）：半截 JSON（写盘瞬间崩溃等）会让
+    // readSessions 每次抛 SyntaxError → listSessions/loadMessages/recordSessionActivity
+    // （进而每个 runAgent）全链瘫痪且无自愈。策略：损坏文件改名留证（.corrupt-<ts>，
+    // 不删除——可人工找回），返回空索引重建。会话正文 JSONL 按session_id 直读不受影响；
+    // 历史会话会从列表退场（可从备份人工恢复索引），活会话随 recordSessionActivity 重新登记。
+    const stamp = Date.now()
+    console.error('[sessions] 会话索引损坏，已隔离为 .corrupt 备份并重建空索引：', indexPath, error)
+    try {
+      renameSync(indexPath, `${indexPath}.corrupt-${stamp}`)
+    } catch (renameError) {
+      console.error('[sessions] 损坏索引改名失败（可能被占用，下次读取仍将重试自愈）：', renameError)
+    }
+    return { version: 1, sessions: [] }
+  }
 }
 
 /**

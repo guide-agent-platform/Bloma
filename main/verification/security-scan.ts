@@ -4,8 +4,10 @@ import { join, relative } from 'node:path'
 /**
  * A3 OWASP 安全扫描器（api-spec §12.9 `run_security_scan`）。
  *
- * 对生成的产物（HTML / JS / CSS）做确定性的 OWASP Top 10 基础静态扫描，检测：
- * - 动态代码执行（eval / new Function / document.write）—— XSS 高危向量；
+ * 对生成的产物（HTML / JS / CSS / Python）做确定性的 OWASP Top 10 基础静态扫描，检测：
+ * - 动态代码执行（eval / new Function / document.write / Python eval・exec）—— XSS 高危向量；
+ * - Python 进程生成硬红线（os.system / os.popen / subprocess shell=True）—— 桌面线 driver
+ *   与骨架在本机真实 spawn 执行，注入向量必须静态拦截（全链路审查 P0-2，2026-10-01）；
  * - 硬编码敏感信息（api key / password / secret / token）—— 敏感数据暴露；
  * - 不安全的 DOM 写入（innerHTML 赋变量）—— XSS 注入点；
  * - 内联事件处理器（onclick/onerror/onload=）—— 脚本注入面；
@@ -56,6 +58,8 @@ interface ScanRule {
    *  前端 fetch('/api/...') 合法，不能按全局行规则误杀；真实工程后端权力变大，
    *  扫描面同步扩到进程生成/出网两类硬红线。 */
   serverOnly?: boolean
+  /** 仅 .py 文件生效（P0-2，2026-10-01）：Python 语法与 JS 同形词不互扰（如 JS regex.exec/execSync 不命中 Python exec 规则）。 */
+  pyOnly?: boolean
 }
 
 /** 扫描规则：按严重度从高到低排列，同一行命中首个规则即止（避免重复上报）。 */
@@ -65,6 +69,21 @@ const SCAN_RULES: ScanRule[] = [
     severity: 'critical',
     pattern: /\beval\s*\(|new\s+Function\s*\(|document\.write(?:ln)?\s*\(/,
     summary: '检测到一段可被外部内容改变行为的脚本，建议改写成更安全的实现方式',
+  },
+  // ---- Python 危险调用（桌面线 driver/scaffold 在本机真实执行，全链路审查 P0-2） ----
+  {
+    category: 'dangerous_execution',
+    severity: 'critical',
+    pyOnly: true,
+    pattern: /\bos\.system\s*\(|\bos\.popen\s*\(|\bsubprocess\.[A-Za-z_]+\s*\([^)]*shell\s*=\s*True/,
+    summary: 'Python 代码里存在直接执行系统命令的写法，存在被拼接恶意命令的风险，请改用参数列表形式或移除',
+  },
+  {
+    category: 'dangerous_execution',
+    severity: 'high',
+    pyOnly: true,
+    pattern: /(?:^|[^.\w])\b(?:eval|exec)\s*\(/,
+    summary: 'Python 代码里存在动态执行字符串的写法，建议改写成固定的显式逻辑',
   },
   {
     category: 'sensitive_data',
@@ -120,8 +139,8 @@ const SCAN_RULES: ScanRule[] = [
   },
 ]
 
-/** 参与扫描的产物扩展名（生成 MVP 的静态前端产物）。 */
-const SCAN_EXTENSIONS = new Set(['.html', '.htm', '.js', '.mjs', '.cjs', '.ts', '.jsx', '.tsx', '.css'])
+/** 参与扫描的产物扩展名（静态前端产物 + 桌面线 Python：driver/scaffold 在本机真实执行，P0-2）。 */
+const SCAN_EXTENSIONS = new Set(['.html', '.htm', '.js', '.mjs', '.cjs', '.ts', '.jsx', '.tsx', '.css', '.py'])
 
 /** 递归收集目录下的可扫描文件（跳过 node_modules / .git / dist 等非产物目录）。 */
 function collectFiles(dir: string, out: string[]): void {
@@ -158,10 +177,12 @@ export function runSecurityScan(input: SecurityScanInput): SecurityScanResult {
     // W5：serverOnly 规则只在产物服务器代码上生效（server.js 与 server/ 子树）
     const rel = relative(input.root_path, file).replace(/\\/g, '/')
     const isServerFile = rel === 'server.js' || rel.startsWith('server/')
+    const isPyFile = rel.endsWith('.py')
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index]
       for (const rule of SCAN_RULES) {
         if (rule.serverOnly && !isServerFile) continue
+        if (rule.pyOnly && !isPyFile) continue
         if (rule.pattern.test(line)) {
           issues.push({
             severity: rule.severity,

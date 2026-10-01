@@ -52,6 +52,38 @@ describe('runSecurityScan — A3 OWASP 基础静态扫描', () => {
     expect(result.issues.every((i) => i.severity === 'critical')).toBe(true)
   })
 
+  it('Python os.system / shell=True → critical，阻断（P0-2：桌面线在本机 spawn 执行）', () => {
+    const root = makeTree({
+      'driver.py': 'import os\nos.system("echo " + user_input)\n',
+      'scripts/run.py': 'import subprocess\nsubprocess.run(cmd, shell=True)\n',
+    })
+    const result = runSecurityScan({ project_id: 'p1', root_path: root })
+    expect(result.passed).toBe(false)
+    expect(result.issues.every((i) => i.severity === 'critical')).toBe(true)
+    expect(result.issues.every((i) => i.file.endsWith('.py'))).toBe(true)
+  })
+
+  it('Python eval/exec → high，阻断；subprocess 列表参数形式不误杀', () => {
+    const root = makeTree({
+      'scaffold.py': 'exec(payload)\n',
+      'driver_ok.py': 'import subprocess\nsubprocess.run([sys.executable, "app.py"], check=True)\n',
+    })
+    const result = runSecurityScan({ project_id: 'p1', root_path: root })
+    expect(result.passed).toBe(false)
+    expect(result.issues.some((i) => i.severity === 'high' && i.file === 'scaffold.py')).toBe(true)
+    // 合法 driver：列表参数 subprocess 不在阻断清单
+    expect(result.issues.some((i) => i.file === 'driver_ok.py')).toBe(false)
+  })
+
+  it('Python 规则不误杀 JS 同形词（regex.exec / execSync），JS 规则不扫 .py 语义', () => {
+    const root = makeTree({
+      'app.js': 'const m = re.exec(str);\n',
+    })
+    const result = runSecurityScan({ project_id: 'p1', root_path: root })
+    expect(result.passed).toBe(true)
+    expect(result.issues).toEqual([])
+  })
+
   it('硬编码敏感信息（api key / password）→ high，阻断', () => {
     const root = makeTree({
       'config.js': 'const apiKey = "sk-1234567890";\nconst password = "hunter2";\n',

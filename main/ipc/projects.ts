@@ -159,6 +159,18 @@ export function registerProjectsIpc(ipcMain: IpcMain, mainWindow: BrowserWindow)
   ipcMain.handle(IPC_CHANNELS.PROJECT_DELETE, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<ProjectDeleteInput>(payload, ['project_id'])
+      // 先批停该项目全部活跃运行（全链路审查 P1-2 修复，2026-10-01）：删除≠停止——旧逻辑
+      // 不停 run，活跃 loop 会对着已删目录继续烧渠道额度，且后续 appendSessionMessage 会把
+      // 被删的 JSONL 与索引条目重新写回（幽灵会话复活，需手动 SESSION_CLEAN_ORPHANS 才清）。
+      // cancelAgent 按 project_id 扫 activeSessions + backgroundRuns，abort 后各 run 的
+      // finally 自行收尾；不 await 具体收尾（取消是异步竞速，删除目录时容忍残余写入已无落点）。
+      // 不 await 具体收尾细节（取消是异步竞速，删除目录时容忍残余写入已无落点），
+      // 但吞掉取消链自身异常，避免 unhandled rejection。
+      try {
+        await cancelAgent({ request_id: input.request_id, session_id: input.project_id, project_id: input.project_id, reason: 'shutdown' })
+      } catch (error) {
+        console.warn('[project:delete] 批停活跃运行失败（继续删除）：', error)
+      }
       // 先停该项目沙箱，避免 Windows 文件句柄占用导致 rmSync EPERM（复用回滚的"先停后删"模式）
       stopSandbox({ request_id: input.request_id, project_id: input.project_id })
       return deleteProject(input)

@@ -59,7 +59,7 @@ import type {
 } from '../../shared/types'
 import { IPC_CHANNELS } from '../../shared/types'
 import { fail, ok } from '../../shared/api-result'
-import { cancelAgent, getSdkQuery, hasForegroundRun, isSessionActive, persistSteerDeferredNotice, publishSteerStatusEvent, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from '../orchestration/orchestrator'
+import { cancelAgent, getSdkQuery, hasForegroundRun, isProjectActive, isSessionActive, persistSteerDeferredNotice, publishSteerStatusEvent, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from '../orchestration/orchestrator'
 import { enqueueSteer, getSteerStatuses, pendingSteerCount, registerSteer, resolveSteer, setSteerStatusListener, steerConfirmEnabled } from '../agent/loop/steer-queue'
 import { savePastedImage } from '../platform/shell/pasted-images'
 import { clearPendingReviewAction, setForegroundRunChecker, setProgrammingEventPublisher } from '../coding/programming-orchestrator'
@@ -143,6 +143,12 @@ export function registerSandboxSnapshotsIpc(ipcMain: IpcMain, mainWindow: Browse
   ipcMain.handle(IPC_CHANNELS.SNAPSHOT_CREATE, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<SnapshotCreateInput>(payload, ['project_id', 'kind', 'summary', 'health_status'])
+      // 运行锁互斥（全链路审查 P1-13，2026-10-01）：生成运行中 cpSync 项目根会拍出撕裂
+      // 快照（有合法 metadata、内容半截——未来回滚到它=恢复残缺产物，静默数据损坏）。
+      // 生成期间的版本记录由 loop 收口/迭代链路自拍，用户入口在运行期一律拒绝。
+      if (isProjectActive(input.project_id)) {
+        throw new Error(`AGENT_PROJECT_BUSY: project ${input.project_id} has an active run; snapshot during generation would capture a torn state`)
+      }
       await assertToolAllowed(
         'create_snapshot',
         { project_id: input.project_id, kind: input.kind },
@@ -157,6 +163,12 @@ export function registerSandboxSnapshotsIpc(ipcMain: IpcMain, mainWindow: Browse
   ipcMain.handle(IPC_CHANNELS.SNAPSHOT_ROLLBACK, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<SnapshotRollbackInput>(payload, ['project_id', 'snapshot_id', 'reason'])
+      // 运行锁互斥（全链路审查 P1-13，2026-10-01）：回滚的「清根→复制」与运行中 agent
+      // 的写入交错会产出新旧混合的工作区（指针指向旧快照而文件部分为新内容，后续快照
+      // 指纹全部失真）。运行期一律拒绝（UI 层应同步禁用；此处是主进程硬边界）。
+      if (isProjectActive(input.project_id)) {
+        throw new Error(`AGENT_PROJECT_BUSY: project ${input.project_id} has an active run; rollback during generation would interleave with agent writes`)
+      }
       // 危险操作（手动回滚）走当前权限模式（默认 ask，可在设置中切换）
       await assertToolAllowed(
         'rollback_snapshot',

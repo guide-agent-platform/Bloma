@@ -122,7 +122,7 @@ describe('W5+（狗粮 52f19ab4 增强）：清单完成后零验证的重复强
     process.env.PROMA_HOME = originalHome
   })
 
-  it('清单全部完成后零验证 → 每 2 轮重复「不要再通读，立即 run_gwt_tests」（JSONL 实次 ≥2）', async () => {
+  it('清单全部完成后零验证 → 每 2 轮重复「不要再通读，自查后交卷」（JSONL 实次 ≥2）', async () => {
     const readTool = tool('read_file', () => ({ output: '内容' }))
     const writes: SDKMessage[][] = [
       [toolUseMessage('w1', 'write_file', { path: 'index.html', content: 'x' })],
@@ -132,11 +132,13 @@ describe('W5+（狗粮 52f19ab4 增强）：清单完成后零验证的重复强
     const reads: SDKMessage[][] = Array.from({ length: 6 }, (_, i) => [toolUseMessage(`r${i}`, 'read_file', { path: 'src/game/m.js', offset: i * 100 })])
     const { query } = scriptedQuery([...writes, ...reads, [textMessage('总结')]] as SDKMessage[][])
     await runAgentLoop(baseInput({ query, tools: [readTool], planFiles: PLAN_FILES, maxTurns: 12 }))
-    // 从会话 JSONL 数注入实次（每次注入追加一行 user；消息快照会重复，不能作计数源）
+    // 从会话 JSONL 数注入实次（每次注入追加一行 user；消息快照会重复，不能作计数源）。
+    // 语义更新（2026-10-01 全链路审查 P1）：本工具面未装配任何验证工具——提醒不再点名
+    // 已退役的幽灵工具（run_gwt_tests），改为「读不能代替测试 + 对照清单自查」的如实指引。
     const { readFileSync } = await import('node:fs')
     const { getAgentSessionPath } = await import('../../../storage/config-paths')
     const jsonl = readFileSync(getAgentSessionPath('session-w5'), 'utf8')
-    const strongCount = jsonl.split('\n').filter((line) => line.includes('不要再通读自己写的文件') && line.includes('立即运行 run_gwt_tests')).length
+    const strongCount = jsonl.split('\n').filter((line) => line.includes('不要再通读自己写的文件') && line.includes('读不能代替测试')).length
     expect(strongCount).toBeGreaterThanOrEqual(2)
   })
 

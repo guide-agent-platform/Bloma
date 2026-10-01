@@ -148,6 +148,44 @@ describe('mergeEnrichment — 只填缺省字段、权威 id 集、合并底', (
     expect(stats).toEqual({ formatDropped: 0, groundingDropped: 0, prioritySuppressed: 0 })
   })
 
+  it('修订不被盘上旧值回滚（全链路审查 P1-5，2026-10-01）：冻结清单已带用户亲答的修订厚字段，旧 prd.json 同 id 字段不得覆盖', () => {
+    // 场景：用户在审查卡/追问/确认卡里 revise 过 F-003（applyNormalization 写入冻结清单），
+    // 盘上 prd.json 还是上一轮旧值——旧方向 existing 无条件覆盖，用户修订落盘即回滚。
+    const frozen: SketchRequirement[] = [
+      {
+        id: 'F-003',
+        description: '关掉后还在',
+        story: '用户确认后的新故事',
+        behavior_assertions: ['关闭窗口→数据仍在'],
+        priority: 'P0',
+      },
+    ]
+    const existing: SketchRequirement[] = [
+      {
+        id: 'F-003',
+        description: '临时保存',
+        story: '旧故事',
+        behavior_assertions: ['点击保存→提示成功'],
+        priority: 'P2',
+      },
+    ]
+    // LLM 失败路径（enriched=null）与空加厚路径都必须保住冻结清单的修订
+    const fallback = mergeEnrichment(frozen, null, existing)
+    expect(fallback.requirements[0].story).toBe('用户确认后的新故事')
+    expect(fallback.requirements[0].behavior_assertions).toEqual(['关闭窗口→数据仍在'])
+    expect(fallback.requirements[0].priority).toBe('P0')
+    const enrichedEmpty = mergeEnrichment(frozen, [], existing)
+    expect(enrichedEmpty.requirements[0].story).toBe('用户确认后的新故事')
+    expect(enrichedEmpty.requirements[0].priority).toBe('P0')
+    // 冻结清单薄字段（F-004 无 story）仍由盘上旧值补齐（方向反转不破坏补缺省语义）
+    const thin = mergeEnrichment(
+      [...frozen, { id: 'F-004', description: '新功能项' }],
+      null,
+      [...existing, { id: 'F-004', description: '新功能项', story: '盘上旧故事' }],
+    )
+    expect(thin.requirements[1].story).toBe('盘上旧故事')
+  })
+
   it('既有字段保留：已有 story/断言/priority 不被 LLM 改写（只填缺省）', () => {
     const frozen = [{ id: 'F-002', description: '展示本月结余' }]
     const existing: SketchRequirement[] = [

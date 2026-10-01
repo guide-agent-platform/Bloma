@@ -68,14 +68,18 @@ import { extractErrorMessage } from '../../platform/llm/channel-test-error'
 import { anthropicMessagesQueryViaProviders } from '../../platform/upstream/providers/loop-query'
 
 import { ConversationTurn, GuideModelOptions } from './orchestration-contracts'
-import { ActiveRun, activeSessions, registerForegroundRun, releaseProjectRun, sessionMessageQueue } from './run-registry'
+import { ActiveRun, activeSessions, hasRunForProject, registerForegroundRun, releaseProjectRun, sessionMessageQueue } from './run-registry'
 import { runWithRetry, sdkQuery, streamPublisher } from './sdk-glue'
 import { cancelAgent } from './lifecycle'
 import { appendAgentMessage, convertSDKMessage, detectCodeDelivery, extractAssistantText, isUserCancelled, makeEvent, persistAssistantMessages, persistTerminalMessage, publishRunEvent } from './persistence'
 import { HISTORY_WINDOW_TURNS, loadConversationHistory, shouldUseGuideAgent } from './dispatch-support'
 
 export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendMessageResult> {
-  if (activeSessions.has(input.session_id)) {
+  // 排队判定（全链路审查 P1-1 修复，2026-10-01）：升级为项目级——同会话活跃或同项目
+  // 另一会话/后台审查（backgroundRuns）占锁时都入队，不再静默丢弃（旧逻辑只查 session，
+  // PROJECT_BUSY 在 registerForegroundRun 抛出后不排队不落盘，渲染端乐观气泡刷新即丢）。
+  // 派发重试安全网：若派发时项目仍忙，MAX_REQUEUES 耗尽后 onDropped 红泡告知（可重发，非静默）。
+  if (activeSessions.has(input.session_id) || hasRunForProject(input.project_id)) {
     // message-queue（message-queue-port.md P1，2026-08-27）：生成期间消息排队不丢——
     // 排队中仅 UI 投影（queued 态），run 完成后自动派发；用户可撤回。
     sessionMessageQueue.enqueue(input.session_id, {

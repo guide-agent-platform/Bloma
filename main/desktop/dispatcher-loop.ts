@@ -32,6 +32,7 @@ import type { AgentEvent } from '../../shared/types'
 import type { AgentLoopInput, AgentLoopResult, AgentLoopTool, ToolOutcome } from '../agent/loop/agent-loop'
 import { runAgentLoop } from '../agent/loop/agent-loop'
 import { buildAgentTools } from '../agent/tools/agent-tools'
+import { buildDomainTools } from '../coding/tool-handlers'
 import { buildWebResearch } from '../agent/tools/web-tools'
 import { buildDelegationTools } from '../agent/delegation/delegation-tools'
 import { disposeParentDelegationState, registerParentLoopContext, setChildToolsBuilder } from '../agent/delegation/agent-collaboration'
@@ -125,9 +126,17 @@ export function buildDispatcherTools(projectId: string): AgentLoopTool[] {
  * .html/.js/.css），会拒绝 00_ARCH/*.md|.json、.py 等桌面交付物（首跑实证：门禁
  * 产物写不进去，架构子会话只能写探测文件）。realFullstackVariant 语义即「真实工程件」，
  * 命名沿用既有选项，后续统一。
+ *
+ * 安全门禁装配（全链路审查 P0-2，2026-10-01）：桌面线产物含在本机真实 spawn 执行的
+ * Python（driver/scaffold）——implement/custom 子会话拼接 buildDomainTools 获得
+ * run_security_scan（扫描器已扩 .py 与 Python 危险调用硬红线），生成方必须自扫自修；
+ * worktree 隔离模式下 buildDomainTools 返回空（验证归父会话，防假验证，语义不变）。
  */
 export function buildDesktopChildTools(projectId: string, role: DelegationRunRole, editFormat: 'diff' | 'whole'): AgentLoopTool[] {
-  return buildAgentTools({ projectId, role, editFormat, realFullstackVariant: true })
+  return [
+    ...buildAgentTools({ projectId, role, editFormat, realFullstackVariant: true }),
+    ...buildDomainTools({ projectId, role, editFormat, realFullstackVariant: true }),
+  ]
 }
 
 /**

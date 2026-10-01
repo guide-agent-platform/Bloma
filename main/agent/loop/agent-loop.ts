@@ -739,6 +739,13 @@ export function narrationEventsEnabled(): boolean {
 const PROGRESS_READ_ONLY_TURNS = 6
 /** B3 验证类工具集（守卫3：全程零命中且进入后 1/3 轮次→提醒自测）。 */
 const PROGRESS_VERIFICATION_TOOLS = new Set(['run_preview', 'run_gwt_tests', 'run_security_scan', 'run_api_contract_tests', 'run_preflight'])
+
+/** 当前工具面里实际注册的验证工具名单（按 PROGRESS_VERIFICATION_TOOLS 过滤，保序）。
+ *  web 线拆除（2026-10-01）后多数验证工具已退役，但 agent-loop 是品类无关机制层：
+ *  提醒文案与收口门都必须只引用本次 loop 真实装配的工具，不指向幽灵工具（全链路审查 P1）。 */
+function registeredVerifyTools(tools: ReadonlyArray<{ name: string }>): string[] {
+  return tools.map((tool) => tool.name).filter((name) => PROGRESS_VERIFICATION_TOOLS.has(name))
+}
 /** B3 路径归一化：plan 清单与工具入参 path 的统一形态（正斜杠、去 ./ 前缀）。 */
 function normalizeProgressPath(path: string): string {
   return path.replace(/\\/g, '/').replace(/^\.\//, '')
@@ -837,6 +844,12 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     signal: input.signal,
     state: createToolState(input.delegationDepth ?? 0),
   }
+  // 如实化预置（全链路审查 P1，2026-10-01）：工具面未装配的验证位豁免——与 D1 的
+  // 「无契约豁免 true」同构。web 线拆除后 run_gwt_tests/run_api_contract_tests 已退役：
+  // 未装配而要求置位会把收口判定变死条件（永不收口，只能靠 maxTurns 耗尽）。
+  // 豁免后装配了对应工具的会话语义不变（必须跑过才置位）；security 位不豁免——
+  // 它是当前唯一在产验证工具（桌面子会话已装配），保持「扫描过才收口」硬门。
+  if (!input.tools.some((tool) => tool.name === 'run_gwt_tests')) ctx.state.gwt_all_passed = true
   // D1（咨询 D）：背板感知的 api_all_passed 预置——声明了 interface_spec 的项目
   // 收口前必须跑过 run_api_contract_tests（全过才 true）；无契约项目豁免 true。
   // PROJECT_NOT_FOUND = 无项目上下文（纯会话 loop/测试场景）无契约概念——豁免；
@@ -983,6 +996,8 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
   let verificationSeen = false
   let planNudgeDone = false
   let verifyNudgeDone = false
+  // 本次 loop 真实装配的验证工具名单（提醒文案只引用现存工具，不指向幽灵工具）
+  const availableVerifyTools = registeredVerifyTools(input.tools)
   // W5（Phase 8.5，2026-09-12）：任务清单工作流状态（BLOMA_TASK_WORKFLOW off=零注入）
   const fileWriteCounts = new Map<string, number>()
   let checklistProjectedFiles = 0
@@ -1252,10 +1267,16 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
           planNudgeDone = true
         }
       }
-      // 守卫3 自测提醒：进入后 1/3 轮次仍零验证工具调用
+      // 守卫3 自测提醒：进入后 1/3 轮次仍零验证工具调用。文案只引用当前工具面
+      // 真实存在的验证工具（全链路审查 P1，2026-10-01：不再点名已退役的幽灵工具）；
+      // 无验证工具时仍提醒（防只读空转），但指引如实——自查后交卷或说明受阻。
       if (!verifyNudgeDone && !verificationSeen && turn >= Math.ceil((input.maxTurns * 2) / 3)) {
+        const verifyHint =
+          availableVerifyTools.length > 0
+            ? `（${availableVerifyTools.join(' / ')}）`
+            : '（当前会话未装配验证工具）'
         nudges.push(
-          `已进行 ${turn}/${input.maxTurns} 轮，尚未运行过任何自测工具（run_preview / run_gwt_tests 等）。请尽快自测一次，尽早暴露问题，不要把验证全部留到收尾。`,
+          `已进行 ${turn}/${input.maxTurns} 轮，尚未运行过任何自测工具${verifyHint}。请尽快自测一次，尽早暴露问题，不要把验证全部留到收尾。`,
         )
         verifyNudgeDone = true
       }
@@ -1300,12 +1321,20 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
       //   当晚清单 10/10 后模型仍花 12 轮通读自己的文件而不跑测试，一次性劝告被无视
       if (!earlyVerifyNudged && !verificationSeen && writtenFiles.size >= 3 && turn >= Math.ceil(input.maxTurns / 3)) {
         earlyVerifyNudged = true
-        w5Nudges.push('已写入 3 个以上文件但尚未运行任何自测：现在就 run_preview 拉起预览（或跑一次 run_gwt_tests），尽早暴露问题，不要把验证全部留到收尾。')
+        w5Nudges.push(
+          availableVerifyTools.length > 0
+            ? `已写入 3 个以上文件但尚未运行任何自测：现在就跑一次 ${availableVerifyTools[0]}，尽早暴露问题，不要把验证全部留到收尾。`
+            : '已写入 3 个以上文件但尚未自测：当前会话未装配验证工具，请逐文件核对关键路径与入口引用，不要把检查全部留到收尾。',
+        )
       }
       if (!verificationSeen && doneInPlan.length >= input.planFiles.length && turn - lastVerifyRepeatTurn >= 2) {
         lastVerifyRepeatTurn = turn
+        const verifyCmd =
+          availableVerifyTools.length > 0
+            ? `立即运行 ${availableVerifyTools.join(' / ')}，按结果决定收口或修复。`
+            : '当前会话未装配验证工具：请对照清单逐项自查关键路径与入口引用，自查无误即输出完成总结。'
         w5Nudges.push(
-          `实施清单已全部完成（${doneInPlan.length}/${input.planFiles.length}）——不要再通读自己写的文件，读不能代替测试：立即运行 run_gwt_tests（必要时先 run_preview），按结果决定收口或修复。`,
+          `实施清单已全部完成（${doneInPlan.length}/${input.planFiles.length}）——不要再通读自己写的文件，读不能代替测试：${verifyCmd}`,
         )
       }
       if (w5Nudges.length > 0) {
@@ -1323,17 +1352,23 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
       pinnedRepairRound = ctx.state.repair_round
     }
 
-    // 收口判定（2026-08-29 线上案例 eb900c57）：GWT 全过 + 安全扫描通过 = 活已干完，
-    // 下一轮起停用全部工具 + system 追加收口指令，逼模型交卷而非继续冗余验证。
-    // API 位惰性预置：首次双绿时读一次背板（无契约豁免 true；无项目上下文豁免；读失败 fail-closed）。
+    // 收口判定（2026-08-29 线上案例 eb900c57）：验证全绿 = 活已干完，下一轮起停用全部
+    // 工具 + system 追加收口指令，逼模型交卷而非继续冗余验证。判定保持纯状态位语义
+    // （谁装配谁置位；未装配的验证位在初始化处豁免，见 runAgentLoop 入口 gwt/api 预置）。
     if (!apiChecked && ctx.state.gwt_all_passed && ctx.state.security_all_passed) {
       apiChecked = true
-      try {
-        const { readPrdBackplane } = await import('../../project/document-engine')
-        const spec = readPrdBackplane(input.projectId)?.interface_spec
-        ctx.state.api_all_passed = !spec || spec.length === 0
-      } catch (error) {
-        ctx.state.api_all_passed = String((error as Error).message).includes('PROJECT_NOT_FOUND')
+      if (!availableVerifyTools.includes('run_api_contract_tests')) {
+        // 如实化（全链路审查 P1，2026-10-01）：工具未装配=豁免。web 线拆除后
+        // run_api_contract_tests 已退役，背板有契约而无工具的会话不得死锁收口。
+        ctx.state.api_all_passed = true
+      } else {
+        try {
+          const { readPrdBackplane } = await import('../../project/document-engine')
+          const spec = readPrdBackplane(input.projectId)?.interface_spec
+          ctx.state.api_all_passed = !spec || spec.length === 0
+        } catch (error) {
+          ctx.state.api_all_passed = String((error as Error).message).includes('PROJECT_NOT_FOUND')
+        }
       }
     }
     wrapUp = ctx.state.gwt_all_passed && ctx.state.security_all_passed && ctx.state.api_all_passed && (!preflightEnabled() || ctx.state.preflight_passed === true)

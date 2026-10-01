@@ -151,7 +151,8 @@ describe('renderPlanMarkdown / renderPlanInjection — 双格式渲染', () => {
     expect(injection).toContain('- index.html：入口与布局')
     expect(injection).toContain('复用点：')
     expect(injection).toContain('验证口径（对齐 P0 断言）：')
-    expect(injection).toContain('改完按验证口径自测（run_gwt_tests 对照行为断言）后再声明完成。')
+    // 语义更新（2026-10-01 全链路审查 P1）：不再点名已退役的 run_gwt_tests，改用工具面无关的如实表述
+    expect(injection).toContain('改完按验证口径自测（用当前工具面可用的验证工具对照行为断言）后再声明完成。')
     expect(injection).not.toContain('焦点管理')
   })
 

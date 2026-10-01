@@ -115,21 +115,24 @@ describe('AgentOrchestrator · 项目级运行隔离与停止终态（2026-08-29
     setSDKQueryForTests(defaultTestQuery)
   })
 
-  it('同一项目已有后台运行，另一会话启动前台 runAgent 应抛 AGENT_PROJECT_BUSY', async () => {
+  it('同一项目已有后台运行，另一会话发消息入队排队而非静默丢失（全链路审查 P1-1 修复，2026-10-01）', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-test-'))
     process.env.PROMA_HOME = home
     const runId = registerBackgroundRun('session-bg', new AbortController(), 'project-x')
-    await expect(
-      runAgent({
-        request_id: 'req-fg',
-        session_id: 'session-fg',
-        project_id: 'project-x',
-        content: '做一个工具',
-        mode: 'quick',
-        current_stage: 'clarifying',
-        channel_id: 'test-channel',
-      }),
-    ).rejects.toThrow('AGENT_PROJECT_BUSY')
+    // 旧行为：PROJECT_BUSY 在排队判定之外抛出 → 不入队不落盘，渲染端静默丢消息。
+    // 新行为：项目锁占用期间消息入队（queued: true），run 完成后自动派发；
+    // 项目锁本身仍由 registerForegroundRun 硬保证（不并发双跑）。
+    const outcome = await runAgent({
+      request_id: 'req-fg',
+      session_id: 'session-fg',
+      project_id: 'project-x',
+      content: '做一个工具',
+      mode: 'quick',
+      current_stage: 'clarifying',
+      channel_id: 'test-channel',
+    })
+    expect(outcome.queued).toBe(true)
+    expect(outcome.stream_started).toBe(false)
     unregisterBackgroundRun('session-bg', runId)
     expect(isProjectActive('project-x')).toBe(false)
   })

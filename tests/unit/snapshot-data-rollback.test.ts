@@ -70,3 +70,65 @@ describe('snapshot/rollback data/ 语义', () => {
     expect(existsSync(join(root, 'data', 'extra.json'))).toBe(false)
   })
 })
+
+describe('归档快照回滚可达（全链路审查 P1-14 修复，2026-10-01）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+
+  afterEach(() => {
+    restorePromaHome(originalPromaHome)
+    clearSandboxRuntimeForTests()
+    delete process.env.BLOMA_SNAPSHOT_CAP
+  })
+
+  const injectFakeSandboxRuntime = (): void => {
+    setSandboxRuntimeForTests({
+      processFactory: () =>
+        ({
+          stdout: { on: () => undefined },
+          stderr: { on: () => undefined },
+          once: () => undefined,
+          kill: () => true,
+        }) as unknown as ChildProcess,
+      portAllocator: async () => 3212,
+      healthCheck: async () => true,
+    })
+  }
+
+  it('容量治理归档后的快照仍可恢复：ensureSnapshotActive 自动搬回活跃集再回滚', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'proma-archive-rollback-'))
+    process.env.PROMA_HOME = home
+    injectFakeSandboxRuntime()
+    const project = createProject({ request_id: 'req-create', mode: 'quick' })
+    recordSessionActivity('session-archive', project.project_id)
+    const root = findProject(project.project_id).root_path
+    writeFileSync(join(root, 'index.html'), '<html><body>v1</body></html>', 'utf8')
+
+    const snapshot = await createSnapshot({
+      request_id: 'req-snap',
+      project_id: project.project_id,
+      kind: 'mvp',
+      summary: '待归档的旧快照',
+      include_documents: false,
+      health_status: 'healthy',
+    })
+
+    // 手工把该快照搬进 archive/ 模拟容量治理结果（与 enforceSnapshotCapacity 同构）
+    const { getSnapshotsDir } = await import('../../storage/config-paths')
+    const proj = findProject(project.project_id)
+    const dir = getSnapshotsDir(proj.workspace_slug, proj.project_id)
+    const { renameSync, mkdirSync: mkdir, existsSync: exists } = await import('node:fs')
+    const { join: joinPath } = await import('node:path')
+    mkdir(joinPath(dir, 'archive'), { recursive: true })
+    renameSync(joinPath(dir, snapshot.snapshot_id), joinPath(dir, 'archive', snapshot.snapshot_id))
+    renameSync(joinPath(dir, `${snapshot.snapshot_id}.json`), joinPath(dir, 'archive', `${snapshot.snapshot_id}.json`))
+
+    // 快照之后写入新内容（回滚应还原 v1）
+    writeFileSync(join(root, 'index.html'), '<html><body>v2-new</body></html>', 'utf8')
+
+    // 归档快照直接恢复：不再 SNAPSHOT_NOT_FOUND，而是搬回后正常恢复
+    await restoreSnapshotFiles({ request_id: 'req-restore', project_id: project.project_id, snapshot_id: snapshot.snapshot_id })
+    expect(readFileSync(join(root, 'index.html'), 'utf8')).toBe('<html><body>v1</body></html>')
+    // 搬回后活跃索引恢复存在
+    expect(exists(joinPath(dir, `${snapshot.snapshot_id}.json`))).toBe(true)
+  })
+})
