@@ -58,6 +58,7 @@ import { isDegenerateText } from '../../coding/output-integrity'
 import { createWhitespaceArtifactCleaner } from '../../agent/loop/agent-loop'
 import { recordDecision } from '../../project/decision-log'
 import { captureConstraints, extractConstraints, readProjectConstraints, scanSessionConstraints } from '../../guide/constraint-extractor'
+import { WEB_TO_DESKTOP_OPTION_ID, isWebLineRetiredOption } from '../../guide/web-line-retired'
 import { isCircuitBreakSettled } from '../../project/recovery-service'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../../project/project-service'
 import { recordSessionActivity } from '../../platform/sessions/session-service'
@@ -263,7 +264,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     // web_to_revise，卡由 prd-confirm 发放）。须在向导路径之前拦截，防止选项 id
     // 落入 resolveCardAnswer 澄清答案空间。
     if (input.metadata?.source === 'card_option'
-      && (input.metadata.selected_option_id === 'web_to_desktop' || input.metadata.selected_option_id === 'web_to_revise')) {
+      && isWebLineRetiredOption(input.metadata.selected_option_id)) {
       await resolveWebLineRetiredCard(input, streamPublisher, makeEvent, sdkQuery, env ?? {})
       persistTerminalMessage(input.session_id, 'completed')
       streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
@@ -351,7 +352,7 @@ async function resolveWebLineRetiredCard(
   env: Record<string, string>,
 ): Promise<void> {
   const decision = input.metadata?.selected_option_id
-  if (decision === 'web_to_desktop') {
+  if (decision === WEB_TO_DESKTOP_OPTION_ID) {
     if (!sdkQuery) {
       // 渠道不可用：如实告知，不进入桌面线（桌面调度员必需真实模型）
       const copy = '当前没有可用的模型渠道，无法按桌面形态起跑。请在设置中配置渠道后，再点一次「按桌面软件继续」。'

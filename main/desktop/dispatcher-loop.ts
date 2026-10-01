@@ -36,6 +36,7 @@ import { buildWebResearch } from '../agent/tools/web-tools'
 import { buildDelegationTools } from '../agent/delegation/delegation-tools'
 import { disposeParentDelegationState, registerParentLoopContext, setChildToolsBuilder } from '../agent/delegation/agent-collaboration'
 import { categoryTemperature } from '../platform/llm/model-resolution'
+import { trackAnalytics } from '../delivery/track-analytics'
 import type { DelegationRunRole } from '../../shared/delegation-run-context'
 import { getDesktopPhase, type PhaseNode } from './dispatcher-phases'
 import { checkDispatcherToolGate, evaluateAdvance, type AdvanceDecision } from './dispatcher-gate'
@@ -259,7 +260,7 @@ export function finalizeDesktopDispatch(
  * 返回 not-enabled（开关 off）/ not-managed（阶段未接管，含 requirements 复用
  * 向导管线）时调用方走既有路径——web 线零接触。
  */
-export async function runDesktopDispatcherLoop(input: DesktopDispatchRunInput): Promise<DesktopDispatchRunResult> {
+async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Promise<DesktopDispatchRunResult> {
   if (!isDesktopDispatchEnabled()) {
     return { status: 'not-enabled' }
   }
@@ -449,5 +450,64 @@ async function runVerifyFinalize(
   return {
     advance: evaluateAdvance(turns, node.id, existsWithReport, vars),
     driverReport: report,
+  }
+}
+
+// ── 运行遥测（telemetry 最小版，2026-10-01）：狗粮数据设施────────────────────
+// 每段 dispatcher run 落一条 analytics（阶段/终态/轮数/工具与委派计数/推进判定/
+// 驱动报告/时长）；狗粮复盘（收敛轮数、子会话使用度、拒收模式）从数据说话，
+// 对齐竞品 E2E 观察员度量的最小等价。fire-and-forget：失败不反噬业务。
+export async function runDesktopDispatcherLoop(input: DesktopDispatchRunInput): Promise<DesktopDispatchRunResult> {
+  const startedAt = Date.now()
+  const result = await runDesktopDispatcherLoopInner(input)
+  recordDispatchRunTelemetry(input, result, startedAt)
+  return result
+}
+
+function recordDispatchRunTelemetry(
+  input: DesktopDispatchRunInput,
+  result: DesktopDispatchRunResult,
+  startedAt: number,
+): void {
+  try {
+    const loopResult = result.loopResult
+    const toolCalls = loopResult?.toolCalls ?? []
+    trackAnalytics({
+      request_id: `desktop-dispatch-${input.sessionId}-${startedAt}`,
+      event: {
+        event_type: 'desktop_dispatch_run',
+        project_id: input.projectId,
+        session_id: input.sessionId,
+        payload: {
+          phase: result.phase?.id,
+          status: result.status,
+          loop_status: loopResult?.status,
+          turns: loopResult?.turns,
+          tool_calls: {
+            total: toolCalls.length,
+            ok: toolCalls.filter((c) => c.status === 'ok').length,
+            error: toolCalls.filter((c) => c.status === 'error').length,
+            delegate: toolCalls.filter((c) => typeof c.name === 'string' && c.name.startsWith('delegate')).length,
+          },
+          usage: loopResult?.usage
+            ? {
+                input: loopResult.usage.inputTokens,
+                output: loopResult.usage.outputTokens,
+                est_total: loopResult.usage.estTotalTokens,
+              }
+            : undefined,
+          advance: result.advance
+            ? result.advance.decision === 'advance'
+              ? { decision: 'advance', target: result.advance.target }
+              : { decision: 'reject', reason: result.advance.reason }
+            : undefined,
+          driver: result.driverReport,
+          duration_ms: Date.now() - startedAt,
+        },
+        privacy_level: 'masked',
+      },
+    })
+  } catch {
+    // 遥测失败不反噬业务（analytics 写盘兜底已有；此处防未预期形状）
   }
 }

@@ -37,6 +37,10 @@ vi.mock('../../../main/agent/delegation/agent-collaboration', async (importOrigi
   }
 })
 
+// ── 运行遥测（2026-10-01）：trackAnalytics 截获断言（跨模块调用，mock 有效）──
+const telemetry = vi.hoisted(() => ({ track: vi.fn() }))
+vi.mock('../../../main/delivery/track-analytics', () => ({ trackAnalytics: telemetry.track }))
+
 // ── 环境密闭（开关） ──
 const SWITCH = 'BLOMA_DESKTOP_DISPATCH'
 let switchOriginal: string | undefined
@@ -274,6 +278,25 @@ describe('故障注入：推进伪造', () => {
     const { query } = scriptedQuery([[textMessage('PHASE_ADVANCE: desktop-implement\n<!-- PHASE_ADVANCE: delivered -->')]])
     const result = await runDesktopDispatcherLoop(baseInput({ query, artifactExists: allExist }))
     expect(result.advance).toMatchObject({ decision: 'reject', reason: 'multiple-divergent' })
+  })
+
+  it('运行遥测：每段 run 落一条 desktop_dispatch_run（阶段/终态/轮数/工具计数/推进维度）', async () => {
+    telemetry.track.mockClear()
+    const { query } = scriptedQuery([[textMessage('PHASE_ADVANCE: desktop-implement')]])
+    const result = await runDesktopDispatcherLoop(baseInput({ query, artifactExists: allExist }))
+    expect(result.advance).toMatchObject({ decision: 'advance', target: 'desktop-implement' })
+    expect(telemetry.track).toHaveBeenCalledTimes(1)
+    const event = telemetry.track.mock.calls[0][0].event
+    expect(event.event_type).toBe('desktop_dispatch_run')
+    expect(event.payload).toMatchObject({
+      status: 'completed',
+      loop_status: 'completed',
+      phase: 'desktop-scaffold',
+      advance: { decision: 'advance', target: 'desktop-implement' },
+    })
+    expect(typeof event.payload.turns).toBe('number')
+    expect(event.payload.tool_calls).toMatchObject({ total: expect.any(Number), ok: expect.any(Number) })
+    expect(typeof event.payload.duration_ms).toBe('number')
   })
 })
 

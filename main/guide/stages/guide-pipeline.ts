@@ -69,6 +69,7 @@ type GuideEventPublisher = (event: AgentEvent) => void
 import { CLARIFICATION_ROUND_LIMIT, DEFAULT_GUIDE_SYSTEM_PROMPT, FIRST_TURN_RULE, GUIDE_LOOP_ADDENDUM, GuideParsed } from './guide-runtime'
 import { GuideLoopOutcome, bumpFreeChatStreak, clarifyTwoLayerEnabled, collectClarificationAnswers, countSameOptionCards, countTrailingClarificationRounds, ensurePrimaryIntent, freeChatStreakOf, hasRecentReliefCard, normalizeClarificationOptions, normalizeGuideDecisionToParsed, publishClarificationCard, publishClarificationReliefCard, resetFreeChatStreak, resolveAutoDelegation, resolveCardAnswer, resolveClarificationReliefAnswer, trackClarificationResponded } from './clarify-flow'
 import { startRequirementConfirmFlow } from './requirement-confirm'
+import { buildWebLineRetiredCardPayload } from '../web-line-retired'
 import { runPrdPipeline } from './prd-pipeline'
 
 export async function handleGuideMessage(
@@ -572,14 +573,7 @@ export async function handleGuideMessage(
   publish(makeGuideEvent(input, 'message_delta', {
     text: '这份需求更适合网页形态，但当前版本已聚焦 Windows 桌面软件交付——',
   }))
-  publish(makeGuideEvent(input, 'user_decision_required', {
-    kind: 'web_line_retired',
-    title: '选择交付形态',
-    questions: [
-      { id: 'web_to_desktop', label: '按桌面软件继续', description: '以 Windows 桌面形态推进交付' },
-      { id: 'web_to_revise', label: '回去调整需求', description: '回到对话，调整需求形态后再确认' },
-    ],
-  }))
+  publish(makeGuideEvent(input, 'user_decision_required', buildWebLineRetiredCardPayload()))
 }
 
 /**

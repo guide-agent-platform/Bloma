@@ -10,6 +10,7 @@ import type { PrdBackplane, SketchRequirement } from '../coding/sketch-engine'
 import { backplaneAiCapabilities, backplaneKeyTasks, backplaneTemplateMeta, requirementAssertions, requirementImpliesBackend, requirementPriority, requirementStory } from '../coding/sketch-engine'
 import type { SDKQuery } from '../orchestration/orchestrator'
 import { enterDesktopLine, shouldEnterDesktopLine } from '../desktop/desktop-route'
+import { buildWebLineRetiredCardPayload } from './web-line-retired'
 import { findProject } from '../project/project-service'
 import { appendSessionMessage } from '../platform/sessions/session-tree'
 
@@ -363,14 +364,7 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
   pending.publish(makeConfirmEvent(pending, 'message_delta', {
     text: '已确认。这份需求更适合网页形态，但当前版本已聚焦 Windows 桌面软件交付——',
   }))
-  pending.publish(makeConfirmEvent(pending, 'user_decision_required', {
-    kind: 'web_line_retired',
-    title: '选择交付形态',
-    questions: [
-      { id: 'web_to_desktop', label: '按桌面软件继续', description: '按这份 PRD 以 Windows 桌面形态推进交付' },
-      { id: 'web_to_revise', label: '回去调整需求', description: '回到对话，调整需求形态后再确认' },
-    ],
-  }))
+  pending.publish(makeConfirmEvent(pending, 'user_decision_required', buildWebLineRetiredCardPayload()))
   return true
 }
 

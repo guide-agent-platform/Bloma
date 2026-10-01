@@ -69,6 +69,7 @@ type GuideEventPublisher = (event: AgentEvent) => void
 import { channelHostOf } from './guide-runtime'
 import { PRD_REVIEW_ROUND_LIMIT, countTrailingPrdReviewRounds } from './clarify-flow'
 import { makeGuideEvent } from './guide-pipeline'
+import { buildWebLineRetiredCardPayload } from '../web-line-retired'
 import { takePendingRequirementConfirm } from './requirement-confirm'
 import { NO_QUERY_FALLBACK, PrdPipelineContext, buildResearchQueries, distillResearchIdeas, generateAgentIdeas, researchModeResolver } from './research-flow'
 
@@ -412,14 +413,7 @@ export async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ sta
   if (aborted()) return { started: true, prd_written: prdWritten }
   // web 线拆除刀1/2（2026-10-01）：降级腿不再直接画草图（web 生成线已退役），
   // 改发形态引导卡（回传处理在 agent-dispatch 的 resolveWebLineRetiredCard）。
-  publish(makeGuideEvent(eventInput, 'user_decision_required', {
-    kind: 'web_line_retired',
-    title: '选择交付形态',
-    questions: [
-      { id: 'web_to_desktop', label: '按桌面软件继续', description: '以 Windows 桌面形态推进交付' },
-      { id: 'web_to_revise', label: '回去调整需求', description: '回到对话，调整需求形态后再确认' },
-    ],
-  }))
+  publish(makeGuideEvent(eventInput, 'user_decision_required', buildWebLineRetiredCardPayload()))
   return { started: true, prd_written: prdWritten }
 }
 

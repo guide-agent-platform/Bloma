@@ -1441,6 +1441,8 @@ export interface AnalyticsTrackInput extends RequestEnvelope {
       | 'decision_selected'
       /** Phase 10 W4（F 系列 4.2 转正，2026-09-16）：报障行为信号——源=一键反馈卡（非意图识别） */
       | 'issue_reported'
+      /** 桌面线运行遥测（telemetry 最小版，2026-10-01）：每段 dispatcher run 一条——狗粮复盘数据设施 */
+      | 'desktop_dispatch_run'
     project_id?: string
     session_id?: string
     payload: Record<string, unknown>
