@@ -78,7 +78,7 @@ describe('test_completed 事件 kind/probe_degraded/unverified roundtrip（审�
 
   it('回滚清 test-report 后从 analytics 恢复：kind/probe_degraded/unverified 完整还原', async () => {
     process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'proma-restore-'))
-    const { readTestReport, writeTestReport } = await import('../../../main/verification/gwt-service')
+    const { readTestReport, writeTestReport } = await import('../../../main/verification/test-legacy')
     const { trackAnalytics } = await import('../../../main/delivery/track-analytics')
     const { getDocumentsDir, getAnalyticsPath } = await import('../../../storage/config-paths')
     const { createProject, findProject } = await import('../../../main/project/project-service')

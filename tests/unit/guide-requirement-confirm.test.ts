@@ -6,7 +6,6 @@ import { decideBlocks } from '../support/guide-decide-stream'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
 
 vi.mock('../../main/coding/programming-orchestrator', () => ({
-  runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
   resolvePrdBackplane: vi.fn(async (_input: unknown, requirements: unknown) => ({
     name: '未命名项目',
     positioning: '个人记账工具',
@@ -49,7 +48,7 @@ import {
   takePendingRequirementConfirm,
 } from '../../main/guide/guide-agent-service'
 import { recordDecision } from '../../main/project/decision-log'
-import { resolvePrdBackplane, runSketchTask } from '../../main/coding/programming-orchestrator'
+import { resolvePrdBackplane } from '../../main/coding/programming-orchestrator'
 import { syncDocuments } from '../../main/project/document-engine'
 import { researchMarketSimilar } from '../../main/guide/guide-research'
 import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../main/orchestration/orchestrator'
@@ -130,7 +129,6 @@ describe('需求确认弹窗（confirm_requirements）', () => {
         JSON.stringify({ role: 'system', content: [{ type: 'text', text }], timestamp: Date.now() }) + '\n',
       )
     })
-    vi.mocked(runSketchTask).mockClear()
     vi.mocked(resolvePrdBackplane).mockClear()
     vi.mocked(syncDocuments).mockClear()
     vi.mocked(recordDecision).mockClear()
@@ -171,7 +169,6 @@ describe('需求确认弹窗（confirm_requirements）', () => {
   it('模型判定需求成型 → 执行市调并弹确认窗，不直接开工', async () => {
     await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(), undefined, persistSystem)
 
-    expect(runSketchTask).not.toHaveBeenCalled()
     // 市调按模型的 research_queries 执行（增强注入弹窗）；查询构造失败时候选词优先进入市调
     expect(researchMarketSimilar).toHaveBeenCalledWith(expect.arrayContaining(['记账 应用 推荐']))
     const confirmEvent = events.find((event) => event.type === 'user_decision_required')
@@ -219,7 +216,6 @@ describe('需求确认弹窗（confirm_requirements）', () => {
     )
     // 改造 3：审查（本例 mock 无审查响应→规则门降级过）后不直接开草图，
     // 先发四段式 PRD 确认卡挂起，等用户确认卡回传才开工
-    expect(runSketchTask).not.toHaveBeenCalled()
     const prdCard = events.find(
       (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
     )
@@ -245,7 +241,6 @@ describe('需求确认弹窗（confirm_requirements）', () => {
     })
 
     // 改造 3：delegate 同样进确认门（全量清单投影），不直接开工
-    expect(runSketchTask).not.toHaveBeenCalled()
     const prdCard = events.find(
       (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
     )
@@ -268,14 +263,12 @@ describe('需求确认弹窗（confirm_requirements）', () => {
       requirement_ids: ['F-001'],
     })
     expect(result).toMatchObject({ started: false, prd_written: false })
-    expect(runSketchTask).not.toHaveBeenCalled()
   })
 
   it('确认后用户停止（AGENT_STOP signal 预 abort）→ 管线零推进：不前移 PRD、不审查、不开草图（abb1a19f 断链修复）', async () => {
     await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(), undefined, persistSystem)
     vi.mocked(resolvePrdBackplane).mockClear()
     vi.mocked(syncDocuments).mockClear()
-    vi.mocked(runSketchTask).mockClear()
 
     const controller = new AbortController()
     controller.abort()
@@ -291,7 +284,6 @@ describe('需求确认弹窗（confirm_requirements）', () => {
     expect(result).toMatchObject({ started: false, prd_written: false })
     expect(resolvePrdBackplane).not.toHaveBeenCalled()
     expect(syncDocuments).not.toHaveBeenCalled()
-    expect(runSketchTask).not.toHaveBeenCalled()
   })
 
   it('确认后在 PRD 前移完成后停止（审查前 abort）→ 不跑审查、不发卡、不开草图', async () => {
@@ -314,7 +306,6 @@ describe('需求确认弹窗（confirm_requirements）', () => {
     prdBackplaneOnce.mockRestore()
     expect(result).toMatchObject({ started: true, prd_written: true })
     expect(syncDocuments).toHaveBeenCalledTimes(1) // 前移本身已落盘
-    expect(runSketchTask).not.toHaveBeenCalled()
     // 不发确认卡/审查卡（无 user_decision_required、无 PRD 确认旁白）
     const after = events.filter((event) => event.type === 'user_decision_required')
     expect(after.filter((event) => event.payload?.kind === 'prd_confirm' || event.payload?.kind === 'prd_review')).toHaveLength(0)
@@ -332,7 +323,6 @@ describe('需求确认弹窗（confirm_requirements）', () => {
     })
 
     expect(result).toMatchObject({ started: true, prd_written: false })
-    expect(runSketchTask).toHaveBeenCalledTimes(1)
     const deltas = events.filter((event) => event.type === 'message_delta').map((event) => String(event.payload.text))
     expect(deltas.some((text) => text.includes('没能生成'))).toBe(true)
     expect(deltas.some((text) => text.includes('直接画草图'))).toBe(true)

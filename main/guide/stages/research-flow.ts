@@ -52,7 +52,7 @@ import {
   takePendingEnrichmentClarification,
   type EnrichmentClarificationRequest,
 } from '../clarification'
-import { resolvePrdBackplane, runSketchTask, setProgrammingEventPublisher, nextRequirementId, refineModificationDescription } from '../../coding/programming-orchestrator'
+import { resolvePrdBackplane, setProgrammingEventPublisher, nextRequirementId, refineModificationDescription } from '../../coding/programming-orchestrator'
 import { normalizeRequirementUpdate, applyNormalization, resolveRoutedRequirementId } from '../requirement-normalizer'
 import { buildReferenceSection } from '../web-reference-extractor'
 import { findProject, updateProject, readLastSketchRequirements, recordSketchGenerated } from '../../project/project-service'

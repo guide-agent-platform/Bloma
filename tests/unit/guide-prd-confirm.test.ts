@@ -11,7 +11,6 @@ vi.mock('../../main/review/review-delegation', () => ({
 }))
 
 vi.mock('../../main/coding/programming-orchestrator', () => ({
-  runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
   resolvePrdBackplane: vi.fn(async (_input: unknown, requirements: unknown) => ({
     name: '未命名项目',
     positioning: '个人记账工具',
@@ -64,7 +63,7 @@ import { recordDecision } from '../../main/project/decision-log'
 import { researchMarketSimilar } from '../../main/guide/guide-research'
 import { trackAnalytics } from '../../main/delivery/track-analytics'
 import { markPrdUserConfirmed } from '../../main/project/document-engine'
-import { resolvePrdBackplane, runSketchTask } from '../../main/coding/programming-orchestrator'
+import { resolvePrdBackplane } from '../../main/coding/programming-orchestrator'
 import {
   PRD_CONFIRM_OPTION_ADJUST,
   PRD_CONFIRM_OPTION_CONFIRM,
@@ -157,7 +156,6 @@ describe('PRD 用户确认门（改造 3）', () => {
     process.env.PROMA_HOME = home
     mkdirSync(join(home, 'agent-sessions'), { recursive: true })
     events = []
-    vi.mocked(runSketchTask).mockClear()
     vi.mocked(resolvePrdBackplane).mockClear()
     vi.mocked(recordDecision).mockClear()
     vi.mocked(markPrdUserConfirmed).mockClear()
@@ -282,14 +280,12 @@ describe('PRD 用户确认门（改造 3）', () => {
     expect(reqs.find((r) => r.id === 'F-002')?.implies_backend).toBeUndefined()
     expect(payload.expanded).toBe(false)
     // 挂起：不直接开草图，话术引导用户过目
-    expect(runSketchTask).not.toHaveBeenCalled()
     const texts = events.filter((event) => event.type === 'message_delta').map((event) => (event.payload as { text?: string }).text ?? '')
     expect(texts.join('\n')).toContain('请你过目')
   })
 
   it('confirm 回传（非桌面品类，web 线已下线）→ user_confirmed_at 落盘 + 形态引导卡 + 决策留痕', async () => {
     await startConfirmFlow()
-    vi.mocked(runSketchTask).mockClear()
     vi.mocked(trackAnalytics).mockClear()
 
     await handleGuideMessage(
@@ -300,7 +296,6 @@ describe('PRD 用户确认门（改造 3）', () => {
 
     expect(markPrdUserConfirmed).toHaveBeenCalledWith('proj-1')
     // web 线拆除刀1（2026-10-01）：不再进草图，改发形态引导卡
-    expect(runSketchTask).not.toHaveBeenCalled()
     const card = events.find(
       (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'web_line_retired',
     )
@@ -327,7 +322,6 @@ describe('PRD 用户确认门（改造 3）', () => {
       makeModel(scriptedQuery()),
     )
 
-    expect(runSketchTask).not.toHaveBeenCalled()
     expect(markPrdUserConfirmed).not.toHaveBeenCalled()
     const texts = events
       .filter((event) => event.type === 'message_delta')
@@ -357,7 +351,6 @@ describe('PRD 用户确认门（改造 3）', () => {
       makeModel(scriptedQuery()),
     )
 
-    expect(runSketchTask).not.toHaveBeenCalled()
     expect(markPrdUserConfirmed).not.toHaveBeenCalled()
     expect(events.some((event) => event.type === 'user_decision_required')).toBe(false)
     const texts = events

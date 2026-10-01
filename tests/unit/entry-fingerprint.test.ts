@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { computeEntryFingerprint } from '../../main/verification/gwt-service'
+import { computeEntryFingerprint } from '../../main/verification/test-legacy'
 
 /**
  * 入口指纹覆盖面（2026-09-26 运行审计 P1-07）：原口径只覆盖 index.html + src/** +
@@ -72,7 +72,7 @@ describe('后端变更 → 历史验证结论失效（P2-04 故障注入基准�
   it('checkEntryFingerprintFresh：改后端 server/ 文件 → 历史全绿结论失效（旧口径漏面）', async () => {
     process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'proma-fp-fresh-'))
     const { createProject } = await import('../../main/project/project-service')
-    const { writeTestReport, checkEntryFingerprintFresh } = await import('../../main/verification/gwt-service')
+    const { writeTestReport, checkEntryFingerprintFresh } = await import('../../main/verification/test-legacy')
     const project = createProject({ request_id: 'req-fresh', mode: 'quick' })
     writeFileSync(join(project.root_path, 'index.html'), '<html><body><button>go</button></body></html>', 'utf8')
     mkdirSync(join(project.root_path, 'src'), { recursive: true })

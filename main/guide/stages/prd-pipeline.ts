@@ -52,7 +52,7 @@ import {
   takePendingEnrichmentClarification,
   type EnrichmentClarificationRequest,
 } from '../clarification'
-import { resolvePrdBackplane, runSketchTask, setProgrammingEventPublisher, nextRequirementId, refineModificationDescription } from '../../coding/programming-orchestrator'
+import { resolvePrdBackplane, setProgrammingEventPublisher, nextRequirementId, refineModificationDescription } from '../../coding/programming-orchestrator'
 import { normalizeRequirementUpdate, applyNormalization, resolveRoutedRequirementId } from '../requirement-normalizer'
 import { buildReferenceSection } from '../web-reference-extractor'
 import { findProject, updateProject, readLastSketchRequirements, recordSketchGenerated } from '../../project/project-service'
@@ -410,20 +410,16 @@ export async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ sta
 
   // 用户停止：不再启动草图任务（草图全程 20~60s，停不掉会继续偷跑）
   if (aborted()) return { started: true, prd_written: prdWritten }
-  // 设计参考接线（web-reference-extractor，2026-08-28）：仅 http(s)，3s 预算，
-  // 任何失败降级空串不阻断确认（对齐 autoName/distill 降级纪律）
-  const referenceSection = await buildReferenceSection(pending.reference_url)
-  await runSketchTask({
-    request_id: pending.request_id,
-    session_id: pending.session_id,
-    project_id: pending.project_id,
-    mode: pending.mode,
-    prompt: `按确认的需求清单生成草图${referenceSection}`,
-    requirements,
-    channel_id: pending.channel_id,
-    query: pending.query,
-    signal,
-  })
+  // web 线拆除刀1/2（2026-10-01）：降级腿不再直接画草图（web 生成线已退役），
+  // 改发形态引导卡（回传处理在 agent-dispatch 的 resolveWebLineRetiredCard）。
+  publish(makeGuideEvent(eventInput, 'user_decision_required', {
+    kind: 'web_line_retired',
+    title: '选择交付形态',
+    questions: [
+      { id: 'web_to_desktop', label: '按桌面软件继续', description: '以 Windows 桌面形态推进交付' },
+      { id: 'web_to_revise', label: '回去调整需求', description: '回到对话，调整需求形态后再确认' },
+    ],
+  }))
   return { started: true, prd_written: prdWritten }
 }
 

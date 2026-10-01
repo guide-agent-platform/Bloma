@@ -21,7 +21,7 @@
  * 开关 BLOMA_DELIVERY_STATUS 缺省 off=字节级现状（project 无此键、零计算）。
  */
 import type { DeliveryStatus } from '../../shared/types'
-import type { GwtTestResult } from '../verification/gwt-service'
+import type { GwtTestResult } from '../verification/test-legacy'
 import type { KeyTask } from '../model/prd-backplane'
 import { updateProject } from '../project/project-service'
 

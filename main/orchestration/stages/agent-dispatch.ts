@@ -42,21 +42,10 @@ import { handleGuideMessage } from '../../guide/guide-agent-service'
 import { enterDesktopLine, handleDesktopDispatchMessage, isDesktopLineActive } from '../../desktop/desktop-route'
 import type { SDKQuery } from './orchestration-contracts'
 import {
-  READY_COMPLETION_COPY,
   clearPendingReviewAction,
-  feedbackCardEnabled,
   isIterationDecisionId,
   nextRequirementId,
-  publishDeliveryFeedbackCard,
-  publishReadyNextStepsCard,
   refineModificationDescription,
-  resolveBlockedDecision,
-  resumeBlockedFlow,
-  runBlockedTestRepair,
-  ensureResumePreview,
-  runAgentLoopPostTesting,
-  runIterationTask,
-  runSketchTask,
   setPendingReviewAction,
   setProgrammingEventPublisher,
   takeFailedIteration,
@@ -80,11 +69,9 @@ import { anthropicMessagesQueryViaProviders } from '../../platform/upstream/prov
 import { ConversationTurn, GuideModelOptions } from './orchestration-contracts'
 import { ActiveRun, activeSessions, registerForegroundRun, releaseProjectRun, sessionMessageQueue } from './run-registry'
 import { runWithRetry, sdkQuery, streamPublisher } from './sdk-glue'
-import { buildReadyChatFacts, buildReadyChatSystem, runReadyStageChat } from './ready-chat'
 import { cancelAgent } from './lifecycle'
 import { appendAgentMessage, convertSDKMessage, detectCodeDelivery, extractAssistantText, isUserCancelled, makeEvent, persistAssistantMessages, persistTerminalMessage, publishRunEvent } from './persistence'
-import { HISTORY_WINDOW_TURNS, buildProgrammingSystemTurn, loadConversationHistory, publishRebuildConfirmCard, shouldUseGuideAgent, truncateForCopy } from './dispatch-support'
-import { PROGRESS_QUERY_RE, REFINE_CANCEL_RE, TRIVIAL_ACK_RE, migrateToReadyAfterCancel, resolveIterationDecisionFlow, resolveModificationIntent } from './intent-routing'
+import { HISTORY_WINDOW_TURNS, loadConversationHistory, shouldUseGuideAgent } from './dispatch-support'
 
 export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendMessageResult> {
   if (activeSessions.has(input.session_id)) {

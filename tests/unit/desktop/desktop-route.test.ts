@@ -256,7 +256,7 @@ describe('handleDesktopDispatchMessage 消息路由', () => {
     ;(record as Record<string, unknown>).desktop_confirm_nonce = 'n-current'
     // 发卡时指纹记录为「改动前」；随后产物被改
     writeFileSync(join(sandboxRoot, 'index.html'), '<html><body>v1</body></html>', 'utf8')
-    const { computeEntryFingerprint } = await import('../../../main/verification/gwt-service')
+    const { computeEntryFingerprint } = await import('../../../main/verification/test-legacy')
     ;(record as Record<string, unknown>).desktop_confirm_fingerprint = computeEntryFingerprint(sandboxRoot)!.sha256
     writeFileSync(join(sandboxRoot, 'index.html'), '<html><body>v2</body></html>', 'utf8')
     const { deps, events } = collectorDeps()

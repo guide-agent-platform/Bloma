@@ -6,7 +6,6 @@ import { appendProjectLearning, readCuratedLearnings, readRecentLearnings, rende
 import { createProject } from '../../main/project/project-service'
 import { REVOCATION_FILE, revokeMemoryText } from '../../main/agent/loop/memory-revocation'
 import { flushMemoryUsage, getLastUsedAt, resetMemoryUsageForTests } from '../../main/agent/loop/memory-usage'
-import { buildLoopSystemWithOverride } from '../../main/coding/programming-orchestrator'
 import { getDocumentsDir, getPromaHome } from '../../storage/config-paths'
 
 /**
@@ -301,21 +300,6 @@ describe('learnings 治理（闭环 PR3：入队去重 + kind 权重 + 时效沉
     expect(renderLearningsSection(projectId)).toBe('')
   })
 
-  it('§5 回放断言：历史经验不再进 system prompt（已迁任务头任务块）', () => {
-    const { projectId } = setup()
-    appendProjectLearning(projectId, { kind: 'loop_outcome', text: '上轮踩过的坑：预算耗尽' })
-    const backplane = {
-      project_id: projectId,
-      positioning: '测试项目',
-      requirements: [],
-      out_of_scope: [],
-    } as never
-    const system = buildLoopSystemWithOverride(backplane, 'whole', projectId)
-    expect(system).not.toContain('【历史经验】')
-    expect(system).not.toContain('上轮踩过的坑')
-    // 能力仍在：任务头注入面照常产出（能力未回退，只换位置）
-    expect(renderLearningsSection(projectId)).toContain('上轮踩过的坑')
-  })
 
   it('§S-2 使用埋点：注入渲染时记录 last_used_at（只存指纹；未注入的不记）', () => {
     const { projectId } = setup()

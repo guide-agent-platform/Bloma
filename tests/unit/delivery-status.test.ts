@@ -23,7 +23,7 @@ import {
   type DeliveryStatusComputationInput,
 } from '../../main/coding/delivery-status'
 import { updateProject } from '../../main/project/project-service'
-import type { GwtFailureSummary, GwtTestResult } from '../../main/verification/gwt-service'
+import type { GwtFailureSummary, GwtTestResult } from '../../main/verification/test-legacy'
 
 afterEach(() => {
   vi.unstubAllEnvs()

@@ -52,7 +52,7 @@ import {
   takePendingEnrichmentClarification,
   type EnrichmentClarificationRequest,
 } from '../clarification'
-import { resolvePrdBackplane, runSketchTask, setProgrammingEventPublisher, nextRequirementId, refineModificationDescription } from '../../coding/programming-orchestrator'
+import { resolvePrdBackplane, setProgrammingEventPublisher, nextRequirementId, refineModificationDescription } from '../../coding/programming-orchestrator'
 import { normalizeRequirementUpdate, applyNormalization, resolveRoutedRequirementId } from '../requirement-normalizer'
 import { buildReferenceSection } from '../web-reference-extractor'
 import { findProject, updateProject, readLastSketchRequirements, recordSketchGenerated } from '../../project/project-service'
@@ -567,17 +567,19 @@ export async function handleGuideMessage(
     return
   }
 
-  await runSketchTask({
-    request_id: input.request_id,
-    session_id: input.session_id,
-    project_id: input.project_id,
-    mode: input.mode,
-    prompt: input.content,
-    requirements: ensurePrimaryIntent(route.requirements, primaryIntent),
-    channel_id: input.channel_id,
-    query: model?.query,
-    signal: model?.signal,
-  })
+  // web 线拆除刀1/2（2026-10-01）：规则路由的 generate 兜底不再进草图（web 生成线已
+  // 退役），改发形态引导卡（回传处理在 agent-dispatch 的 resolveWebLineRetiredCard）。
+  publish(makeGuideEvent(input, 'message_delta', {
+    text: '这份需求更适合网页形态，但当前版本已聚焦 Windows 桌面软件交付——',
+  }))
+  publish(makeGuideEvent(input, 'user_decision_required', {
+    kind: 'web_line_retired',
+    title: '选择交付形态',
+    questions: [
+      { id: 'web_to_desktop', label: '按桌面软件继续', description: '以 Windows 桌面形态推进交付' },
+      { id: 'web_to_revise', label: '回去调整需求', description: '回到对话，调整需求形态后再确认' },
+    ],
+  }))
 }
 
 /**

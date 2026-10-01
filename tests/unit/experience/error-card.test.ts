@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { recordFailureCards, KNOWN_NEGATIVE_SEEDS, buildKnownNegativeSeedCards } from '../../../main/experience/error-card'
-import type { GwtTestResult } from '../../../main/verification/gwt-service'
+import type { GwtTestResult } from '../../../main/verification/test-legacy'
 import type { JudgeVerdict } from '../../../main/review/judge-engine'
 import type { BuildGateResult } from '../../../main/coding/build-gate'
 

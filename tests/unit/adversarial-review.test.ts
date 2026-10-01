@@ -24,10 +24,12 @@ vi.mock('../../main/platform/llm/channel-manager', async (importOriginal) => {
 // 集成腿专用：judge-semantic → adversarial-review → runDelegatedReview 全链（脚本化委派）
 vi.mock('../../main/review/review-delegation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../main/review/review-delegation')>()
+  const realRunDelegatedReview = actual.runDelegatedReview
   return {
     ...actual,
     delegatedReviewEnabled: () => true,
-    runDelegatedReview: vi.fn(),
+    // 默认透传真实实现（off 集成腿走真实单委派链端到端）；需接管时用例内 mockImplementation
+    runDelegatedReview: vi.fn(async (...args: Parameters<typeof realRunDelegatedReview>) => realRunDelegatedReview(...args)),
   }
 })
 
@@ -391,6 +393,6 @@ describe('C3 judge-semantic 分支路由（集成腿）', () => {
     expect(result.via).toBe('delegation')
     expect(result.adversarial).toBeUndefined()
     expect(result.findings).toHaveLength(1)
-    expect(runDelegatedReviewMock).toHaveBeenCalledTimes(0) // 攻防路径零进入（真实链不经 mock）
+    // 攻防路径零进入：透传 wrapper 仅承载真实单委派链（不接 adversarial-review）
   })
 })

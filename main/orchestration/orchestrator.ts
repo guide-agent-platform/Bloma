@@ -6,7 +6,6 @@
 export * from './stages/orchestration-contracts'
 export * from './stages/run-registry'
 export * from './stages/sdk-glue'
-export * from './stages/ready-chat'
 export * from './stages/agent-dispatch'
 export * from './stages/lifecycle'
 export * from './stages/persistence'

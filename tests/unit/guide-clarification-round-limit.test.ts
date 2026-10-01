@@ -9,7 +9,6 @@ import { decideBlocks } from '../support/guide-decide-stream'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
 
 vi.mock('../../main/coding/programming-orchestrator', () => ({
-  runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
   setProgrammingEventPublisher: vi.fn(),
 }))
 vi.mock('../../main/delivery/track-analytics', () => ({
@@ -58,7 +57,6 @@ vi.mock('../../main/project/decision-log', () => ({
 // vi.mock 提升：import 必须在 mock 声明之后拿 mock 实例
 import { countTrailingClarificationRounds, handleGuideMessage } from '../../main/guide/guide-agent-service'
 import { recordDecision } from '../../main/project/decision-log'
-import { runSketchTask } from '../../main/coding/programming-orchestrator'
 import type { ConversationTurn, GuideModelOptions, SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 
 /**
@@ -161,7 +159,6 @@ describe('引导对话 · 连续澄清熔断', () => {
   let home: string
 
   beforeEach(() => {
-    vi.mocked(runSketchTask).mockClear()
     vi.mocked(recordDecision).mockClear()
     home = mkdtempSync(join(tmpdir(), 'proma-breaker-'))
     process.env.PROMA_HOME = home
@@ -237,10 +234,8 @@ describe('引导对话 · 连续澄清熔断', () => {
   it('0/1/2 轮尾随卡片 + 模型仍要澄清 → 照常弹卡（熔断不介入）', async () => {
     for (const cardCount of [0, 1, 2]) {
       writeSession(cardCount)
-      vi.mocked(runSketchTask).mockClear()
       const events: AgentEvent[] = []
       await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(askJson))
-      expect(runSketchTask, `cards=${cardCount}`).not.toHaveBeenCalled()
       expect(events.some((event) => event.type === 'user_decision_required'), `cards=${cardCount}`).toBe(true)
     }
   })
@@ -254,7 +249,6 @@ describe('引导对话 · 连续澄清熔断', () => {
 
     // 2026-08-26 语义修订：不再强制 auto 开工——不弹第三张澄清卡，也不直接生成草图，
     // 而是转需求确认弹窗（弹窗内保留「由向导决定」出口 = 用户主动让渡）
-    expect(runSketchTask).not.toHaveBeenCalled()
     const confirmEvent = events.find((event) => event.type === 'user_decision_required')
     expect(confirmEvent?.payload.kind).toBe('requirement_confirm')
     expect(confirmEvent?.payload.requirements).toEqual([
@@ -381,7 +375,6 @@ describe('引导对话 · 连续澄清熔断', () => {
 
     await handleGuideMessage(makeInput(), () => undefined, makeModel(generateJson))
 
-    expect(runSketchTask).toHaveBeenCalledTimes(1)
     expect(recordDecision).not.toHaveBeenCalledWith(expect.objectContaining({
       entry: expect.objectContaining({ type: 'clarification_forced_auto' }),
     }))
@@ -408,7 +401,6 @@ describe('引导对话 · 连续澄清熔断', () => {
 
     await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(askJson))
 
-    expect(runSketchTask).not.toHaveBeenCalled()
     expect(events.some((event) => event.type === 'user_decision_required')).toBe(true)
   })
 })
@@ -525,7 +517,6 @@ describe('Phase 7 U4 · J2-② 第三张连续卡减负卡（BLOMA_CLARIFY_TWO_L
     process.env.PROMA_HOME = home
     mkdirSync(join(home, 'agent-sessions'), { recursive: true })
     vi.mocked(recordDecision).mockClear()
-    vi.mocked(runSketchTask).mockClear()
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
   })
 

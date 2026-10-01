@@ -17,7 +17,7 @@
  * - 采集失败（导航超时等）→ `unavailable`：不判败但必须显式可见（绝不静默放行），
  *   由调用方落 unverified 供裁判与用户看见（F9a 不静默纪律）。
  */
-import type { GwtFailureSummary } from '../verification/gwt-service'
+import type { GwtFailureSummary } from '../verification/test-legacy'
 import { chromium } from 'playwright'
 
 export interface UiProbeData {

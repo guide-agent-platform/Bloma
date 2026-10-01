@@ -16,7 +16,7 @@
  * PR-B 补 runRepairLoop 运行时（依赖注入 system 组装器，防与编程编排器循环 import）。
  */
 
-import type { GwtTestResult } from '../verification/gwt-service'
+import type { GwtTestResult } from '../verification/test-legacy'
 import type { RoundAnchorSpec } from '../model/prd-backplane'
 import { renderRoundAnchorBlock, roundAnchorEnabled } from '../model/prd-backplane'
 import type { BuildGateResult } from './build-gate'
@@ -31,7 +31,7 @@ import { resolveChannelEnv } from '../platform/llm/runtime-fallback'
 import { trackAnalytics } from '../delivery/track-analytics'
 import { appendProjectLearning } from '../project/learnings-log'
 import { readLoopCheckpointDocument, writeLoopCheckpointDocument, type LoopRepairAttemptRecord, readPrdBackplane } from '../project/document-engine'
-import { readTestReport } from '../verification/gwt-service'
+import { readTestReport } from '../verification/test-legacy'
 import { browserToolsEnabled } from './preview-browser'
 import { buildChangeContractBlock, changeContractEnabled, deriveChangeContract } from './change-contract'
 import { createWriteScope } from '../agent/tools/agent-tools'

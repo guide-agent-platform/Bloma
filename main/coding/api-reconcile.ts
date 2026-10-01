@@ -21,7 +21,7 @@
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { GwtFailureSummary } from '../verification/gwt-service'
+import type { GwtFailureSummary } from '../verification/test-legacy'
 
 /** 平台内置端点前缀：产物服务器原生挂载，不要求 server/routes/ 文件。 */
 const BUILTIN_PREFIXES = new Set(['llm'])

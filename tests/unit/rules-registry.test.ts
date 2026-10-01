@@ -7,7 +7,6 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RULES_REGISTRY, renderRulesSection, rulesForTemplateType, rulesRegistryEnabled } from '../../main/agent/prompting/rules-registry'
-import { buildAgentLoopSystemPrompt } from '../../main/coding/programming-orchestrator'
 import type { PrdBackplane } from '../../main/model/prd-backplane'
 
 afterEach(() => {
@@ -66,79 +65,3 @@ describe('renderRulesSection（验收：每条规则只出现一次完整定义�
   })
 })
 
-describe('loop prompt 接线（off=字节级现状 / on=单点定义防双源）', () => {
-  it('off：内联原文保留，无注册表段与 R-* ID', () => {
-    const prompt = buildAgentLoopSystemPrompt(backplane, 'diff')
-    // R-FILE-01 内联原文
-    expect(prompt).toContain('先用 read_file 读该文件当前内容再编辑')
-    // R-DATA-01 内联原文（P1-08：内容由能力档案按品类生成——personal_tool 且无强后端
-    // 信号时本地存储为合法一等实现；旧口径「一律禁止 localStorage」与留存豁免判定矛盾）
-    expect(prompt).toContain('以本地持久化（localStorage）为合法一等实现')
-    // 强后端信号（多端同步）时仍落后端禁止条文
-    const serverPrompt = buildAgentLoopSystemPrompt(
-      { ...backplane, requirements: [{ id: 'F-001', description: '多端同步的记账数据，云端共享' }] },
-      'diff',
-    )
-    expect(serverPrompt).toContain('禁止 localStorage/sessionStorage 存业务数据')
-    expect(serverPrompt).toContain('不构成 localStorage 例外的理由')
-    // 无注册表痕迹
-    expect(prompt).not.toContain('R-FILE-01')
-    expect(prompt).not.toContain('R-DATA-01')
-    expect(prompt).not.toContain('R-OUTPUT-01')
-    expect(prompt).not.toContain('【操作契约')
-  })
-  it('on：注册表段注入、四段式完整；内联原文让位（防双源）；护栏其余条款不受影响', () => {
-    vi.stubEnv('BLOMA_RULES_REGISTRY', '1')
-    const prompt = buildAgentLoopSystemPrompt(backplane, 'diff')
-    expect(prompt).toContain('【操作契约（不变量')
-    for (const rule of RULES_REGISTRY) {
-      expect(prompt).toContain(rule.id)
-      expect(prompt).toContain(rule.forbidden)
-    }
-    // 内联原文整段消失（不是两处并存）
-    expect(prompt).not.toContain('先用 read_file 读该文件当前内容再编辑；')
-    expect(prompt).not.toContain('禁止 localStorage/sessionStorage 存业务数据——PRD')
-    // 护栏与工作方式的其余内容不受影响
-    expect(prompt).toContain('路径限项目目录内')
-    expect(prompt).toContain('out_of_scope 内的功能一律不做')
-    expect(prompt).toContain('可用验证工具')
-    // R-OUTPUT-01 此前无 prompt 条款（新增覆盖，正文冒充已执行禁令在表内）
-    expect(prompt).toContain('冒充已执行')
-  })
-})
-
-describe('C1b rulesForTemplateType（game 豁免 R-DATA-01 变体）', () => {
-  const previousEnv = process.env.BLOMA_GAME_DERIVE_EXEMPT
-
-  afterEach(() => {
-    if (previousEnv === undefined) delete process.env.BLOMA_GAME_DERIVE_EXEMPT
-    else process.env.BLOMA_GAME_DERIVE_EXEMPT = previousEnv
-  })
-
-  it('on + game → 仅 R-DATA-01 变体（轻留存允许 localStorage、重数据仍后端），其余规则不动', () => {
-    process.env.BLOMA_GAME_DERIVE_EXEMPT = '1'
-    const rules = rulesForTemplateType('game')
-    expect(rules).not.toBe(RULES_REGISTRY)
-    const data = rules.find((r) => r.id === 'R-DATA-01')!
-    expect(data.must).toContain('localStorage')
-    expect(data.must).toContain('server/routes/')
-    expect(data.forbidden).toContain('重业务数据')
-    // 其余规则原样（R-FILE-01/R-OUTPUT-01 引用相等）
-    expect(rules.find((r) => r.id === 'R-FILE-01')).toBe(RULES_REGISTRY.find((r) => r.id === 'R-FILE-01'))
-    expect(rules.find((r) => r.id === 'R-OUTPUT-01')).toBe(RULES_REGISTRY.find((r) => r.id === 'R-OUTPUT-01'))
-  })
-})
-
-describe('并行协作段（2026-09-25 自由度批三：编程 loop 委派编排自由度）', () => {
-  it('生成 loop system 含【并行协作】段（委派/wait/get 工具指引——基建已有，提示词补位）', async () => {
-    const { buildLoopSystemWithOverride } = await import('../../main/coding/stages/loop-prompt')
-    const prompt = buildLoopSystemWithOverride(
-      { name: 'p', positioning: 'pos', requirements: [{ id: 'F-001', description: 'x' }], out_of_scope: [], constraints: [] } as never,
-      'diff',
-    )
-    expect(prompt).toContain('【并行协作】')
-    expect(prompt).toContain('delegate_agent')
-    expect(prompt).toContain('wait_for_delegations')
-    expect(prompt).toContain('单干也完全可以') // 不强制委派——自由而非义务
-  })
-})

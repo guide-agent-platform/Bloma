@@ -9,7 +9,7 @@
  * 由 GWT 场景与裁判覆盖）。失败以 GwtFailureSummary 形态返回，调用方并入测试结果，
  * 修复回流/熔断/让渡口径完全复用（修复轮按 location「API 契约端点：…」定向修路由）。
  */
-import type { GwtFailureSummary } from '../verification/gwt-service'
+import type { GwtFailureSummary } from '../verification/test-legacy'
 import type { InterfaceEndpoint } from '../model/prd-backplane'
 
 /** 单端点探测超时：契约端点应答应当是本地毫秒级（基础设施超时口径，陷阱 16）。 */

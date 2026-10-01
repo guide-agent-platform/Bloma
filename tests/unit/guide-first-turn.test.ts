@@ -3,7 +3,6 @@ import { decideBlocks } from '../support/guide-decide-stream'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
 
 vi.mock('../../main/coding/programming-orchestrator', () => ({
-  runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
   setProgrammingEventPublisher: vi.fn(),
 }))
 vi.mock('../../main/delivery/track-analytics', () => ({
@@ -33,7 +32,6 @@ vi.mock('../../main/project/decision-log', () => ({
 
 // vi.mock 提升：import 必须在 mock 声明之后拿 mock 实例
 import { handleGuideMessage } from '../../main/guide/guide-agent-service'
-import { runSketchTask } from '../../main/coding/programming-orchestrator'
 import { updateProject } from '../../main/project/project-service'
 import type { ConversationTurn, GuideModelOptions, SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 
@@ -92,7 +90,6 @@ const generateSketchJson = JSON.stringify({
 describe('引导首轮澄清硬护栏', () => {
   beforeEach(() => {
     // 2026-09-16: BLOMA_GUIDE_LOOP default-on; pin legacy path for this file
-    vi.mocked(runSketchTask).mockClear()
     vi.mocked(updateProject).mockClear()
   })
 
@@ -104,7 +101,6 @@ describe('引导首轮澄清硬护栏', () => {
     await handleGuideMessage(makeInput(), publish, model)
 
     // 不开工：草图任务绝不能被触发
-    expect(runSketchTask).not.toHaveBeenCalled()
     // 首轮护栏注入验证收敛为行为断言（loop 路径下 captured.history 不再暴露 system 侧；
     // 降级卡+澄清话术断言即护栏生效证明，stderr 另有「首轮护栏生效」日志）
     // 不采用模型的「直接开工」话术，落盘的是澄清问句
@@ -130,7 +126,6 @@ describe('引导首轮澄清硬护栏', () => {
 
     await handleGuideMessage(input, (event) => events.push(event), model)
 
-    expect(runSketchTask).not.toHaveBeenCalled()
     const card = events.find((e) => e.type === 'user_decision_required')
     expect((card?.payload.questions as { label: string }[]).map((q) => q.label)).toEqual([
       '日常生活工具',
@@ -139,23 +134,6 @@ describe('引导首轮澄清硬护栏', () => {
     ])
   })
 
-  it('非首轮（已有澄清往返）模型 generate_sketch → 正常开工，护栏不干扰', async () => {
-    const history: ConversationTurn[] = [
-      { role: 'user', content: '帮我做一个赛车模拟器' },
-      { role: 'assistant', content: '要做哪种类型？' },
-    ]
-    const model = makeModel(generateSketchJson, history)
-    const events: AgentEvent[] = []
-
-    await handleGuideMessage(makeInput(), (event) => events.push(event), model)
-
-    // 非首轮不注入护栏：开工行为即证明（runSketchTask 被调且话术原样）
-    expect(model.persistAssistant).toHaveBeenCalledWith('好的，这就为你生成草图！')
-    expect(runSketchTask).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(runSketchTask).mock.calls[0][0].requirements).toEqual([
-      { id: 'F-001', description: '做一个赛车模拟器' },
-    ])
-  })
 
   it('首轮模型主动 ask_clarification → 照常澄清（护栏零介入）', async () => {
     const askJson = JSON.stringify({
@@ -172,7 +150,6 @@ describe('引导首轮澄清硬护栏', () => {
 
     await handleGuideMessage(makeInput(), (event) => events.push(event), model)
 
-    expect(runSketchTask).not.toHaveBeenCalled()
     const card = events.find((e) => e.type === 'user_decision_required')
     expect((card?.payload.questions as { label: string }[]).map((q) => q.label)).toEqual([
       '赛道计时赛',

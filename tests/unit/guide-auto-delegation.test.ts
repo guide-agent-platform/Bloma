@@ -3,7 +3,6 @@ import { decideBlocks } from '../support/guide-decide-stream'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
 
 vi.mock('../../main/coding/programming-orchestrator', () => ({
-  runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
   setProgrammingEventPublisher: vi.fn(),
 }))
 vi.mock('../../main/delivery/track-analytics', () => ({
@@ -34,7 +33,6 @@ vi.mock('../../main/project/decision-log', () => ({
 // vi.mock 提升：import 必须在 mock 声明之后拿 mock 实例
 import { handleGuideMessage } from '../../main/guide/guide-agent-service'
 import { recordDecision } from '../../main/project/decision-log'
-import { runSketchTask } from '../../main/coding/programming-orchestrator'
 import { isAutoDelegationText } from '../../main/platform/sessions/session-service'
 import type { ConversationTurn, GuideModelOptions, SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 
@@ -129,75 +127,3 @@ describe('让渡话术表 isAutoDelegationText', () => {
   })
 })
 
-describe('引导对话 · 自由文本让渡分流', () => {
-  beforeEach(() => {
-    // 2026-09-16: BLOMA_GUIDE_LOOP default-on; pin legacy path for this file
-    vi.mocked(runSketchTask).mockClear()
-    vi.mocked(recordDecision).mockClear()
-  })
-
-  it('「我还没想法」→ 复用 auto 路径直接生成草图，不弹澄清卡、不再追问', async () => {
-    const model = makeModel(askClarificationJson, [
-      { role: 'user', content: '你好' },
-      { role: 'assistant', content: '你想做一个什么类型的工具？' },
-    ])
-    const events: AgentEvent[] = []
-
-    await handleGuideMessage(makeInput('我还没想法'), (event) => events.push(event), model)
-
-    // 让渡优先于模型路径：模型 mock 明明返回 ask_clarification，也不得弹卡/追问
-    expect(runSketchTask).toHaveBeenCalledTimes(1)
-    expect(events.find((event) => event.type === 'user_decision_required')).toBeUndefined()
-    const deltas = events
-      .filter((event) => event.type === 'message_delta')
-      .map((event) => String(event.payload.text ?? ''))
-      .join('')
-    expect(deltas).not.toContain('什么类型的工具')
-    // 需求走 CARD_ANSWER_REQUIREMENTS.auto 同款扩写
-    expect(vi.mocked(runSketchTask).mock.calls[0][0].requirements).toEqual([
-      { id: 'F-001', description: '通用实用软件工具，由向导按常见做法生成第一版' },
-    ])
-  })
-
-  it('「随便」「你帮我决定」（自由文本）同走让渡路径', async () => {
-    for (const content of ['随便', '你帮我决定']) {
-      vi.mocked(runSketchTask).mockClear()
-      const model = makeModel(askClarificationJson, [
-        { role: 'user', content: '你好' },
-        { role: 'assistant', content: '你想做一个什么类型的工具？' },
-      ])
-      await handleGuideMessage(makeInput(content), () => undefined, model)
-      expect(runSketchTask, content).toHaveBeenCalledTimes(1)
-    }
-  })
-
-  it('让渡决策留痕：clarification_answer + detail.source=free_text_auto（与点选区分）', async () => {
-    const model = makeModel(askClarificationJson, [
-      { role: 'user', content: '你好' },
-      { role: 'assistant', content: '你想做一个什么类型的工具？' },
-    ])
-
-    await handleGuideMessage(makeInput('我还没想法'), () => undefined, model)
-
-    expect(recordDecision).toHaveBeenCalledWith(expect.objectContaining({
-      entry: expect.objectContaining({
-        type: 'clarification_answer',
-        detail: expect.objectContaining({ source: 'free_text_auto' }),
-      }),
-    }))
-  })
-
-  it('含实际内容的话不触发让渡：照常走模型路径澄清', async () => {
-    const model = makeModel(askClarificationJson, [
-      { role: 'user', content: '你好' },
-      { role: 'assistant', content: '你想做一个什么类型的工具？' },
-    ])
-    const events: AgentEvent[] = []
-
-    await handleGuideMessage(makeInput('随便做个游戏'), (event) => events.push(event), model)
-
-    expect(runSketchTask).not.toHaveBeenCalled()
-    const card = events.find((event) => event.type === 'user_decision_required')
-    expect(card?.payload.kind).toBe('clarification')
-  })
-})

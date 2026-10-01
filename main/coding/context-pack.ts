@@ -17,7 +17,7 @@ import type { ContextPack, ContextPackDataFile, ContextPackRoute } from '../../s
 import { findProject } from '../project/project-service'
 import { readPrdBackplane } from '../project/document-engine'
 import { recordDecision } from '../project/decision-log'
-import { readTestReport } from '../verification/gwt-service'
+import { readTestReport } from '../verification/test-legacy'
 import type { InterfaceEndpoint, PrdBackplane } from '../model/prd-backplane'
 
 /** 开关解析（与 iterationBriefEnabled 同风格，每次调用读取）。 */

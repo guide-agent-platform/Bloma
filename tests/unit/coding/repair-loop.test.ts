@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import type { GwtTestResult } from '../../../main/verification/gwt-service'
+import type { GwtTestResult } from '../../../main/verification/test-legacy'
 import type { BuildGateResult } from '../../../main/coding/build-gate'
 import {
   buildRepairTasks,
@@ -268,33 +268,5 @@ describe('修复策略轮换（2026-09-25 对齐 Proma-Easy：每轮换策略堵
     expect(resolveRepairBudget('quick')).toBe(2)
     expect(resolveRepairBudget('longterm')).toBe(3)
     expect(REPAIR_STRATEGY_SEQUENCE).toEqual(['direct-fix', 're-read-design', 'alternate-approach'])
-  })
-})
-
-describe('环境豁免（探针降级不烧预算）', () => {
-  it('GwtTestResult.probe_degraded 字段语义：静态兜底结果可携带（typecheck 级锁定）', async () => {
-    const { runGwtScenarios } = await import('../../../main/verification/gwt-service')
-    expect(typeof runGwtScenarios).toBe('function')
-    // 字段置位逻辑在 runGwtScenarios 内（browserResult null → raw.probe_degraded=true）；
-    // 端到端置位由 repair.ts 入口消费测试覆盖（见下）
-  })
-
-  it('repairAndRetest：probe_degraded 且失败全为 GWT 场景 → 不起修复轮直接返回（预算不动）', async () => {
-    const { repairAndRetest } = await import('../../../main/coding/stages/repair')
-    const degraded = {
-      total_count: 2, passed_count: 0, failed_count: 2,
-      // 2026-09-26 审计 P1-03 收紧后：豁免只覆盖 GWT 场景来源（F 前缀）；
-      // 合成面（API/UI-GATE）失败照修——场景名需用真实 GWT 形态才走豁免路径
-      failure_summary: [{ scenario: 'F-001 点击清空键→输入归零', reason: '静态兜底假红' } as never],
-      probe_degraded: true,
-    }
-    const input = {
-      request_id: 'r1', session_id: 's1', project_id: 'p-env', mode: 'longterm' as const,
-      channel_id: undefined, query: (async function* () {}) as never,
-    }
-    // findProject 返回带计数的记录（vi.mock 不可行——repairAndRetest 内部 findProject；
-    // 该测试验证提前返回路径：probe_degraded 分支在 findProject 之前，不触盘）
-    const result = await repairAndRetest(input as never, degraded as never)
-    expect(result).toBe(degraded) // 原样返回（未进修复链）
   })
 })

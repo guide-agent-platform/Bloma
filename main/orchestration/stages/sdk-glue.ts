@@ -42,21 +42,10 @@ import { handleGuideMessage } from '../../guide/guide-agent-service'
 import type { SDKQueryOptions } from './orchestration-contracts'
 
 import {
-  READY_COMPLETION_COPY,
   clearPendingReviewAction,
-  feedbackCardEnabled,
   isIterationDecisionId,
   nextRequirementId,
-  publishDeliveryFeedbackCard,
-  publishReadyNextStepsCard,
   refineModificationDescription,
-  resolveBlockedDecision,
-  resumeBlockedFlow,
-  runBlockedTestRepair,
-  ensureResumePreview,
-  runAgentLoopPostTesting,
-  runIterationTask,
-  runSketchTask,
   setPendingReviewAction,
   setProgrammingEventPublisher,
   takeFailedIteration,

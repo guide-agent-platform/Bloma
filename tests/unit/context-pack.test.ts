@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createProject, findProject } from '../../main/project/project-service'
 import { recordSessionActivity } from '../../main/platform/sessions/session-service'
-import { writeTestReport } from '../../main/verification/gwt-service'
+import { writeTestReport } from '../../main/verification/test-legacy'
 import type { PrdBackplane } from '../../main/model/prd-backplane'
 import { recordDecision } from '../../main/project/decision-log'
 import {

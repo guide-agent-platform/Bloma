@@ -11,7 +11,6 @@ vi.mock('../../main/review/review-delegation', () => {
 })
 
 vi.mock('../../main/coding/programming-orchestrator', () => ({
-  runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
   resolvePrdBackplane: vi.fn(async (_input: unknown, requirements: unknown) => ({
     name: '未命名项目',
     positioning: '个人记账工具',
@@ -69,7 +68,7 @@ import {
 } from '../../main/guide/guide-agent-service'
 import { resolveChannelEnv } from '../../main/platform/llm/runtime-fallback'
 import { recordDecision } from '../../main/project/decision-log'
-import { resolvePrdBackplane, runSketchTask } from '../../main/coding/programming-orchestrator'
+import { resolvePrdBackplane } from '../../main/coding/programming-orchestrator'
 import {
   PRD_REVIEW_OPTION_DELEGATE_ALL,
   buildReviewQuestions,
@@ -201,7 +200,6 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     process.env.PROMA_HOME = home
     mkdirSync(join(home, 'agent-sessions'), { recursive: true })
     events = []
-    vi.mocked(runSketchTask).mockClear()
     vi.mocked(resolvePrdBackplane).mockClear()
     vi.mocked(recordDecision).mockClear()
   })
@@ -226,7 +224,6 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
       expect.objectContaining({ category: 'prd', fallbackScope: 'routed-only' }),
     )
     // 2026-08-26 改造 3：审查通过后不直接开草图，先发四段式 PRD 确认卡（人语义关接力）
-    expect(runSketchTask).not.toHaveBeenCalled()
     const card = events.find(
       (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
     )
@@ -241,7 +238,6 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     events.length = 0
     await resolveRequirementConfirm({ request_id: 'req-pr2', session_id: SESSION_ID, project_id: 'proj-1', decision: 'confirm' })
 
-    expect(runSketchTask).not.toHaveBeenCalled()
     const card = events.find((event) => event.type === 'user_decision_required')
     expect(card?.payload.kind).toBe('prd_review')
     const reviewQuestions = card?.payload.review_questions as Array<{ id: string; question: string; options: Array<{ id: string; label: string }> }>
@@ -271,7 +267,6 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
 
     // 全局让渡回传（全部交给向导决定）
     events.length = 0
-    vi.mocked(runSketchTask).mockClear()
     await handleGuideMessage(
       {
         ...makeInput('全部交给向导决定'),
@@ -281,7 +276,6 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
       makeModel(scriptedQuery([reviewPassJson]).query),
     )
     // 不过目不开工：让渡 ≠ 确认过 PRD——不再直达草图，改发 PRD 确认卡挂起
-    expect(runSketchTask).not.toHaveBeenCalled()
     const confirmCard = events.find(
       (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
     )
@@ -293,7 +287,6 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
 
     // 确认卡「确认无误」→ 过目完成才开草图，需求清单保持一致
     events.length = 0
-    vi.mocked(runSketchTask).mockClear()
     await handleGuideMessage(
       {
         ...makeInput('确认无误'),
@@ -303,7 +296,6 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
       makeModel(scriptedQuery([reviewPassJson]).query),
     )
     // web 线拆除刀1（2026-10-01）：确认后不再开草图，改发形态引导卡
-    expect(runSketchTask).not.toHaveBeenCalled()
     const shapeCard = events.find(
       (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'web_line_retired',
     )
@@ -314,7 +306,6 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(again.query))
     await resolveRequirementConfirm({ request_id: 'req-pr3', session_id: SESSION_ID, project_id: 'proj-1', decision: 'confirm' })
     events.length = 0
-    vi.mocked(runSketchTask).mockClear()
     await handleGuideMessage(
       {
         ...makeInput('我选好了'),
@@ -329,7 +320,6 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
       (event) => events.push(event),
       makeModel(scriptedQuery([reviewPassJson]).query),
     )
-    expect(runSketchTask).not.toHaveBeenCalled()
     expect(
       events.some(
         (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
@@ -351,7 +341,6 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
 
     // 1) 逐题作答回传：q0 选实质方向、q1 选「这条没问题」→ 归一化并入 + 重走管线
     events.length = 0
-    vi.mocked(runSketchTask).mockClear()
     await handleGuideMessage(
       {
         ...inputFor('我选好了，按我的选择修订需求。'),
@@ -366,7 +355,6 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
       (event) => events.push(event),
       makeModel(scriptedQuery([reviewPassJson]).query),
     )
-    expect(runSketchTask).not.toHaveBeenCalled()
     expect(vi.mocked(normalizeRequirementUpdate)).toHaveBeenCalled()
     expect(vi.mocked(applyNormalization)).toHaveBeenCalled()
     const deltas = events.filter((event) => event.type === 'message_delta').map((event) => String(event.payload.text))
@@ -438,7 +426,6 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     await resolveRequirementConfirm({ request_id: 'req-pr2', session_id: SESSION_ID, project_id: 'proj-1', decision: 'confirm' })
 
     // 规则门检查 mock 背板（定位非空、需求正常）→ pass → 发 PRD 确认卡（不直接草图）
-    expect(runSketchTask).not.toHaveBeenCalled()
     expect(
       events.some(
         (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',

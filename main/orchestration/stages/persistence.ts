@@ -40,21 +40,10 @@ import {
 import { categoryForStage, categoryTemperature } from '../../platform/llm/model-resolution'
 import { handleGuideMessage } from '../../guide/guide-agent-service'
 import {
-  READY_COMPLETION_COPY,
   clearPendingReviewAction,
-  feedbackCardEnabled,
   isIterationDecisionId,
   nextRequirementId,
-  publishDeliveryFeedbackCard,
-  publishReadyNextStepsCard,
   refineModificationDescription,
-  resolveBlockedDecision,
-  resumeBlockedFlow,
-  runBlockedTestRepair,
-  ensureResumePreview,
-  runAgentLoopPostTesting,
-  runIterationTask,
-  runSketchTask,
   setPendingReviewAction,
   setProgrammingEventPublisher,
   takeFailedIteration,

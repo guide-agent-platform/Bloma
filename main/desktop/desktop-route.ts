@@ -29,7 +29,7 @@ import { getDesktopPhase, getNextDesktopPhase } from './dispatcher-phases'
 import { isDesktopDispatchEnabled } from './dispatcher-switch'
 import { runDesktopDispatcherLoop, type DesktopDispatchRunInput, type DesktopDispatchRunResult } from './dispatcher-loop'
 import { clearRejectionOnAdvance, createRejectionLedger, decideRejectionLoop, registerRejection, type RejectionLedger } from './advance-rejection-loop'
-import { computeEntryFingerprint } from '../verification/gwt-service'
+import { computeEntryFingerprint } from '../verification/test-legacy'
 import { readDesktopRequirementsDigest } from './requirement-digest'
 
 // =========================================================================
