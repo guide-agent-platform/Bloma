@@ -60,7 +60,6 @@ import { refineTemplateType } from '../template-inference'
 import { buildClarifyInjection } from '../../agent/prompting/template-injection'
 import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
 import { isAutoDelegationText, readPrimaryIntent } from '../../platform/sessions/session-service'
-import { ingestResearchIdeasAsCandidates } from '../../experience/ref-ui-source'
 import type { PrdBackplane, SketchRequirement } from '../../coding/sketch-engine'
 import { isRecord } from '../../../shared/validators'
 
@@ -144,14 +143,6 @@ export async function startRequirementConfirmFlow(
     },
   })
 
-  // G3a 市调 UI 做法投喂入册（恒 candidate，用户 2026-09-07 裁定「做产品=做 UI」定向收割）：
-  // fire-and-forget，失败不阻断确认弹窗。
-  void ingestResearchIdeasAsCandidates({
-    ideas,
-    demand: demandText,
-    projectId: input.project_id,
-    sessionId: input.session_id,
-  })
 
   pendingRequirementConfirms.set(input.project_id, {
     request_id: input.request_id,

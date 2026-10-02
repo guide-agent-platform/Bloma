@@ -4,8 +4,6 @@ import { createHash } from 'node:crypto'
 import { getAnalyticsPath, getDocumentsDir } from '../../storage/config-paths'
 import { findProject } from '../project/project-service'
 
-import { replayRequirements, splitAdvisoryResults } from '../experience/replay-compiler'
-import { reportReplayOutcomes } from '../experience/experience-service'
 
 /**
  * 已退役 web 线的 GWT 测试报告兼容读取层（web 线拆除刀2，2026-10-01）：

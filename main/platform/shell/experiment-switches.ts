@@ -13,7 +13,7 @@ export interface ExperimentSwitchMeta {
 
 /** 已知实验开关白名单（新增开关时同步登记——与开关矩阵文档对应；转正/删除开关时同步移除，2026-10-01 开关收敛后已清死条目）。 */
 export const KNOWN_EXPERIMENT_SWITCHES: ExperimentSwitchMeta[] = [
-  { id: 'BLOMA_EXP_RULE_INJECT', label: '行动规则注入', note: 'EXP-API-001 等规则进 loop（需经验库开）' },
+
   { id: 'BLOMA_PROJECT_GIT', label: '产物 git 化', note: '项目工作区纳入 git 版本管理' },
   { id: 'BLOMA_ROLLBACK_CODE_ONLY', label: '回滚代码/数据分离', note: '回滚只回代码，数据先备份再保留' },
   { id: 'BLOMA_CONTEXT_PACK', label: '项目侦察包', note: '变更轮 task 头注入确定性事实速览' },

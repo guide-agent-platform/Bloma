@@ -53,13 +53,13 @@ describe('experiment-switches 注册表', () => {
   it('实况读取：未设=关；1/on/true=开；其余值=关（只读白名单，不透传全量 env）', () => {
     for (const meta of KNOWN_EXPERIMENT_SWITCHES) originals.set(meta.id, process.env[meta.id])
     delete process.env.BLOMA_PROJECT_GIT
-    process.env.BLOMA_EXP_RULE_INJECT = '1'
+    process.env.BLOMA_CHANGE_CONTRACT = '1'
     process.env.BLOMA_ROLLBACK_CODE_ONLY = 'on'
     process.env.BLOMA_EXPORT_V2 = 'true'
     process.env.BLOMA_CONTEXT_PACK = '0'
     const switches = readExperimentSwitches()
     expect(switches.BLOMA_PROJECT_GIT).toBe(false)
-    expect(switches.BLOMA_EXP_RULE_INJECT).toBe(true)
+    expect(switches.BLOMA_CHANGE_CONTRACT).toBe(true)
     expect(switches.BLOMA_ROLLBACK_CODE_ONLY).toBe(true)
     expect(switches.BLOMA_EXPORT_V2).toBe(true)
     expect(switches.BLOMA_CONTEXT_PACK).toBe(false)

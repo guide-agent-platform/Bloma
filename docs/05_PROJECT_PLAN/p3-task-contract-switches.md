@@ -410,7 +410,7 @@
 
 | 开关 | 控制面 | 缺省 | off/未设 | '1'/'true' | 落点 |
 |---|---|---|---|---|---|
-| `BLOMA_EXP_RULE_INJECT` | 行动规则注入（loop 启动前，与 plan/W5 清单同位） | **off** | mergeAssetMap 第三参=null（注入段字节级缺失） | `buildRuleInjectionMap`：种子登记（EXP-API-001 人工成文→human_review verified，幂等）→ 受控词表硬过滤匹配（stage×template_types×capabilities，≤3 张同 revision 去重）→ 「条件—动作—证据」渲染（适用头/风险/现在执行 n 步/完成证据+假阳性提示/不适用行）并入 plan 腿资产地图；**action_observed**：交付点回看 loop 工具调用序列（run_api_contract_tests 被调→exposure 六档之 action_observed 行，一次性） | `main/experience/rule-injection.ts`（新）+ mergeAssetMap 三参接线（programming-orchestrator）+ finalizeMvpDelivery 动作观测 |
+| `BLOMA_EXP_RULE_INJECT` | ~~行动规则注入~~ **retired 2026-10-02**（经验库整体退役，rule-injection 随删） | **off** | mergeAssetMap 第三参=null（注入段字节级缺失） | `buildRuleInjectionMap`：种子登记（EXP-API-001 人工成文→human_review verified，幂等）→ 受控词表硬过滤匹配（stage×template_types×capabilities，≤3 张同 revision 去重）→ 「条件—动作—证据」渲染（适用头/风险/现在执行 n 步/完成证据+假阳性提示/不适用行）并入 plan 腿资产地图；**action_observed**：交付点回看 loop 工具调用序列（run_api_contract_tests 被调→exposure 六档之 action_observed 行，一次性） | `main/experience/rule-injection.ts`（新）+ mergeAssetMap 三参接线（programming-orchestrator）+ finalizeMvpDelivery 动作观测 |
 
 - **EXP-API-001 种子**（咨询 F Q1.4 样板，causal_status=hypothesis，证据=B 站 214397c3+shmup 476847e5）：「涉及服务端外部能力时必须核对前端调用/契约/挂载路由/真实探测，不得只交付前端外壳」——行动步骤引用 run_api_contract_tests 与 api-reconcile 语义；verified 后裁判【常见错法】面自然可见（D2 语义内，非降门槛）。
 - **曝光六档**：exposure 事件 payload 增 levels 三档计数（eligible/retrieved/injected）；action_observed 本批落地；check_passed/delivery_observed 挂终验/交付事件（登记待接）。

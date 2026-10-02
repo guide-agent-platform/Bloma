@@ -4,7 +4,7 @@
  * 层秩（数字越大越底层，依赖只准向下）：
  *   0 entry          main 根级（仅 index/ipc/csp）
  *   1 orchestration  main/orchestration/**
- *   2 domain         main/{guide,coding,review,experience,project,verification,delivery,model,kernel,iteration}/**
+ *   2 domain         main/{guide,coding,review,project,verification,delivery,model,kernel,iteration}/**
  *   3 agent          main/agent/**（Agent 运行时，零领域知识目标）
  *   4 platform       main/platform/**（基础设施 + upstream 上游贴面）
  *   5 shared         shared/**
@@ -30,7 +30,7 @@ const REPO = fileURLToPath(new URL('../../../', import.meta.url))
 const REPORT = fileURLToPath(new URL('./layer-violations-report.txt', import.meta.url))
 
 const DOMAIN_GROUPS = [
-  'guide', 'coding', 'review', 'experience', 'project', 'verification',
+  'guide', 'coding', 'review', 'project', 'verification',
   'delivery', 'model', 'kernel', 'iteration', 'desktop',
 ] as const
 const TOP_RANK: Record<string, number> = {

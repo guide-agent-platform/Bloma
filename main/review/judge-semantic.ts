@@ -26,7 +26,6 @@ import type { SDKQuery } from '../orchestration/orchestrator'
 import type { JudgeConstraint } from './judge-engine'
 import { runDelegatedReview } from './review-delegation'
 import { adversarialReviewEnabled, runAdversarialSemanticReview } from './adversarial-review'
-import { buildJudgeErrorPatternsSection } from '../experience/judge-checklist'
 import { ANTIDEGRADE_JUDGE_RULES, antidegradeEnabled } from './judge-antidegrade'
 import type { AgentEvent } from '../../shared/types'
 
@@ -119,14 +118,9 @@ export async function runSemanticJudgeReview(opts: {
   if (!env) {
     return { constraint: null, findings: [], skipped: true, skipReason: 'no_channel' }
   }
-  // T-6 审查指导注入：经验库 verified 错法→【常见错法】段；空串=与现状字节级等价
-  // （两路组装均以空段过滤）。算在 no_channel 早退之后：无渠道时绝不碰账本
-  // （selectForInjection 惰性 load 会建索引，开关 off/空库必须零副作用零日志）。
-  const errorSection = opts.projectId
-    ? await buildJudgeErrorPatternsSection(opts.projectId, {
-        context_hint: `${backplane.name ?? ''} ${backplane.requirements?.map((r) => r.description).join(' ') ?? ''}`,
-      })
-    : ''
+  // T-6：经验库已于 2026-10-02 整体退役（账本零 verified 卡，注入恒空串）。
+  // errorSection 保留空串占位，两路组装均以空段过滤，行为字节级不变。
+  const errorSection = ''
   // ① 委派审查（默认，协作过程 DelegationFeed 可视化）：子 agent 用只读工具自行查证
   //    产物，不再受 24k 内联截断限制
   if (opts.projectId && opts.requestId && opts.publish) {

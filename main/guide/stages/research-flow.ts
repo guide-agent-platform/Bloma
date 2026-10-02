@@ -60,7 +60,6 @@ import { refineTemplateType } from '../template-inference'
 import { buildClarifyInjection } from '../../agent/prompting/template-injection'
 import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
 import { isAutoDelegationText, readPrimaryIntent } from '../../platform/sessions/session-service'
-import { ingestResearchIdeasAsCandidates } from '../../experience/ref-ui-source'
 import type { PrdBackplane, SketchRequirement } from '../../coding/sketch-engine'
 import { isRecord } from '../../../shared/validators'
 

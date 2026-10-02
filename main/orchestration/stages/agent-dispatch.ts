@@ -62,7 +62,6 @@ import { WEB_TO_DESKTOP_OPTION_ID, isWebLineRetiredOption } from '../../guide/we
 import { isCircuitBreakSettled } from '../../project/recovery-service'
 import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../../project/project-service'
 import { recordSessionActivity } from '../../platform/sessions/session-service'
-import { appendExperienceEvent } from '../../experience/event-log'
 import { isThinkingLogEnabled, logThinking } from '../../agent/loop/thinking-log'
 import { extractErrorMessage } from '../../platform/llm/channel-test-error'
 import { anthropicMessagesQueryViaProviders } from '../../platform/upstream/providers/loop-query'

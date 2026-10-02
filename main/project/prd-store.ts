@@ -21,7 +21,6 @@ import { buildPrdDocumentFallback, deriveInterfaceSpec, requirementAssertions, r
 import { parseEarsAssertion } from '../guide/ears-vocabulary'
 import { gwtRequiredCategories } from '../agent/prompting/template-injection'
 import { describeEffect, describeTrigger, parseBehaviorAssertion } from '../verification/behavior-assertions'
-import { syncReplayFeatureFiles } from '../experience/replay-compiler'
 import { readRequirements, assertInsideDocumentsDir } from './document-sync'
 
 /**
