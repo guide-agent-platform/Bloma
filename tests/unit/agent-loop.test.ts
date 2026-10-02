@@ -1932,3 +1932,39 @@ describe('B3 loop 进度对账三守卫（BLOMA_LOOP_PROGRESS_NUDGE）', () => {
     }
   })
 })
+
+describe('轮级 usage 采集（指标果集，2026-10-02：段首重建成本/回炉 token 比的数据面）', () => {
+  const originalPromaHome = process.env.PROMA_HOME
+  const echo = tool('echo', () => ({ output: 'ok' }))
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-turns-usage-'))
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome
+  })
+
+  it('每轮模型调用的渠道 usage 按轮登记进 result.turnsUsage；无 usage 渠道不登记', async () => {
+    let calls = 0
+    const query: SDKQuery = async function* () {
+      const index = calls
+      calls += 1
+      if (index < 2) {
+        yield toolUseMessage(`t${index}`, 'echo')
+        yield { type: 'result', subtype: 'success', stop_reason: 'tool_use', usage: { input_tokens: 1000 * (index + 1), output_tokens: 50 * (index + 1) } }
+      } else {
+        // 第三轮渠道不返回 usage → 不登记
+        yield textMessage('完成')
+        yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+      }
+    }
+    const result = await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 4, sessionId: 'session-turns-usage' }))
+    expect(result.status).toBe('completed')
+    expect(result.turnsUsage).toEqual([
+      { turn: 1, inputTokens: 1000, outputTokens: 50 },
+      { turn: 2, inputTokens: 2000, outputTokens: 100 },
+    ])
+    // 汇总口径不变（turnsWithUsage=2）
+    expect(result.usage?.turnsWithUsage).toBe(2)
+  })
+})

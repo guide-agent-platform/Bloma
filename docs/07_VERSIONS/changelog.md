@@ -7,6 +7,23 @@
 
 **v1.1 修订说明**：同步 §5 已知待同步项状态（4 项全部已同步），新增 §5.1 目录结构重组记录。按 `workflow.md §2.4` 走修订流程，待评审后回到已确认。
 
+## 指标采集补齐：轮级 usage + 拒因修复分类（2026-10-02）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | feat（竞品对照指标体系的两个采集缺口：#2 段首重建成本 / #4 回炉 token 比 / #9 回炉分类分布） |
+| 模块 | `main/agent/loop/agent-loop.ts`（turnsUsage）、`main/desktop/dispatcher-loop.ts`（遥测消费 + deriveRepairClass） |
+
+### 变更内容
+
+- **轮级 usage**：AgentLoopResult 增可选 `turnsUsage`（每次模型调用的渠道返回 usage 按轮登记，与 usageTotals 同源累积）；dispatch 遥测 payload 增 `turns_usage.head3_input_ratio`（前 3 轮 input / 段总 input——段式编排 vs 竞品连续会话的结构性差异度量，连续会话形态应→0）与 `per_turn` 明细。纯增量可选字段，非采集方零感知。
+- **拒因修复分类**：`deriveRepairClass` 纯函数把拒收映射到竞品 PE 回炉口径——behavior（driver fail/安全缺陷→回炉 coding）/ mapping（contract-invalid 协议方言错配，不烧 coding 预算）/ coverage（空驱动/场景覆盖不足→补场景）+ structure / environment / confirm（非回炉）/ discipline（推进纪律）；锚定拒收教育稳定前缀（改文案须同步）。进遥测 `repair_class` 字段。
+
+### 影响评估
+
+- 单测 199 文件/1957 例全绿（新增锁定×2：turnsUsage 按轮登记+无 usage 渠道不登记、repair_class 映射与遥测 payload）；typecheck 0 错。
+- 指标体系自此可采：#1/#3 段级 usage 已有，#2/#4/#9 本批补齐——下一轮狗粮即可产出「段首重建成本」「回炉 token 比」「回炉分类分布」三张对比表，作为方案 1-4（先跑后聊/同会话续接/确认收敛/driver 任务书）落地优先级的验收基线。
+
 ## 狗粮 f277dbf1 复盘修复批：stderr 证据直达 + 竖线锚点方言 + 入口路径口径（2026-10-02）
 
 | 属性 | 值 |

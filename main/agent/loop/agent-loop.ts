@@ -215,6 +215,10 @@ export interface AgentLoopResult {
   turns: number
   finalText: string
   toolCalls: AgentLoopToolCallRecord[]
+  /** 轮级 usage（指标果集，2026-10-02）：每次模型调用的渠道返回 usage 按轮登记。
+   *  支撑「段首上下文重建成本」（前 N 轮 input/总 input）与「回炉 token 比」度量——
+   *  段式编排 vs 连续会话的结构性差异以此为尺。纯增量可选字段，非采集方零感知。 */
+  turnsUsage?: Array<{ turn: number; inputTokens: number; outputTokens: number }>
   /** 会话级 usage 聚合（费用守卫 Hook 1，2026-08-28 队友）：逐轮累计渠道返回 usage + 全块口径估算 */
   usage?: {
     inputTokens: number
@@ -904,6 +908,8 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     loopCheckpointEnabled() ? `${base}\n\n${renderCheckpointProjection(checkpointSnapshotOf('projection', turn))}` : base
   // 费用守卫 Hook 1（2026-08-28 队友）：逐轮累计渠道返回 usage（渠道不返回即全盲 → estContextTokens 兜底）
   const usageTotals = { inputTokens: 0, outputTokens: 0, turnsWithUsage: 0 }
+  // 轮级 usage 登记（指标果集，2026-10-02）：与 usageTotals 同源累积，按轮追加
+  const turnsUsage: Array<{ turn: number; inputTokens: number; outputTokens: number }> = []
   // P2-02：辅助模型调用成本（交接/宽限）——审计「主轮次数不计交接和宽限总结」，
   // 统一累计供成本上限判定与 usage_summary 如实呈现
   const auxCost = { handoffCalls: 0, graceCalls: 0, auxEstTokens: 0 }
@@ -957,6 +963,8 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
       ...r,
       ...(blocked ? { blocked_report: blocked } : {}),
       ...(transportRecoveries > 0 ? { transport_recoveries: transportRecoveries } : {}),
+      // 轮级 usage（纯增量：采集方消费，非采集方零感知）
+      ...(turnsUsage.length > 0 ? { turnsUsage } : {}),
       usage: {
         inputTokens: usageTotals.inputTokens,
         outputTokens: usageTotals.outputTokens,
@@ -1091,6 +1099,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
       usageTotals.inputTokens += usage.input_tokens ?? 0
       usageTotals.outputTokens += usage.output_tokens ?? 0
       usageTotals.turnsWithUsage += 1
+      turnsUsage.push({ turn, inputTokens: usage.input_tokens ?? 0, outputTokens: usage.output_tokens ?? 0 })
     }
     turns = turn
     finalText = textOfBlocks(assistantBlocks)
