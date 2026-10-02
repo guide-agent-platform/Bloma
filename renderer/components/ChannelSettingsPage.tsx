@@ -1440,16 +1440,43 @@ export const ChannelSettingsPage: React.FC = () => {
                 {/* 渠道信息 */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 4 }}>
-                    <span
-                      style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: '50%',
-                        background: channel.enabled ? 'var(--color-success)' : 'var(--gray-400)',
-                        display: 'inline-block',
-                        flexShrink: 0,
-                      }}
-                    />
+                    {(() => {
+                      // 刀5（2026-10-02）：渠道状态三态点——测试中（黄）/最近测试通过（绿）/
+                      // 最近测试失败（红）/启用未测（绿描边）/禁用（灰）；复用现有 15s 探活
+                      // 收口（channelTestResultAtom），不另造探测。title 提示当前态与操作出口。
+                      const testing = testingId === channel.id
+                      const tested = testResult?.channelId === channel.id ? testResult : undefined
+                      const dotColor = testing
+                        ? 'var(--color-warning)'
+                        : tested && !tested.ok
+                          ? 'var(--color-danger)'
+                          : channel.enabled
+                            ? 'var(--color-success)'
+                            : 'var(--gray-400)'
+                      const dotTitle = testing
+                        ? '测试中（最多 15 秒）…'
+                        : tested && !tested.ok
+                          ? `最近测试失败：${tested.message}——点右侧「测试」重试，或编辑渠道更新配置`
+                          : channel.enabled
+                            ? tested?.ok
+                              ? `最近测试通过（${tested.message}）`
+                              : '已启用（本页未测试）——点「测试」探活'
+                            : '已禁用'
+                      return (
+                        <span
+                          data-ai-id={`channel-status-dot-${channel.id}`}
+                          title={dotTitle}
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: '50%',
+                            background: dotColor,
+                            display: 'inline-block',
+                            flexShrink: 0,
+                          }}
+                        />
+                      )
+                    })()}
                     <span style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--color-text)' }}>
                       {channel.name}
                     </span>

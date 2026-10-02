@@ -31,6 +31,7 @@ import { clearRejectionOnAdvance, createRejectionLedger, decideRejectionLoop, re
 import { buildBlockedNoticeCard, buildDeliveredNoticeCard, digestDeliveryDoc } from './notice-cards'
 import { classifyUserDesktopIntent } from './user-intent-lexicon'
 import { buildCheckpointConclusion } from './phase-checkpoint'
+import { createChannelFailureTracker, observeChannelFailure, type ChannelFailureTracker } from './channel-failure-watch'
 import { readDesktopRequirementsDigest } from './requirement-digest'
 
 // =========================================================================
@@ -84,6 +85,18 @@ export interface DesktopRouteDeps {
 
 const ledgers = new Map<string, RejectionLedger>()
 
+/** 刀5：项目级渠道故障侦测器（与拒收账本同生命周期——进程内状态）。 */
+const channelTrackers = new Map<string, ChannelFailureTracker>()
+
+function channelTrackerOf(projectId: string): ChannelFailureTracker {
+  let tracker = channelTrackers.get(projectId)
+  if (!tracker) {
+    tracker = createChannelFailureTracker()
+    channelTrackers.set(projectId, tracker)
+  }
+  return tracker
+}
+
 function ledgerOf(projectId: string): RejectionLedger {
   let ledger = ledgers.get(projectId)
   if (!ledger) {
@@ -96,6 +109,7 @@ function ledgerOf(projectId: string): RejectionLedger {
 /** 测试隔离：清空账本。 */
 export function resetDesktopRouteLedgersForTests(): void {
   ledgers.clear()
+  channelTrackers.clear()
 }
 
 // =========================================================================
@@ -249,6 +263,20 @@ async function runDesktopStage(
       // 调度员 loop 的过程事件按原类型直通渲染端（首跑修复：此前误折叠为 message_delta，
       // tool_call/delegation 等事件类型丢失——工具行与协作胶囊的实时显示都依赖真实类型）。
       deps.publish(input, type, payload)
+      // 刀5（2026-10-02）：委派失败归因侦测——同签名连续 2 次 → 渠道故障人话卡
+      // （去抖一次；修复后用户回复「继续」走刀1 放行协议）。
+      if (type === 'delegation_failed') {
+        const failure = payload as { error?: string; channel?: string }
+        if (typeof failure.error === 'string' && failure.error.length > 0) {
+          const observation = observeChannelFailure(channelTrackerOf(input.projectId), {
+            error: failure.error,
+            channel: typeof failure.channel === 'string' ? failure.channel : undefined,
+          })
+          if (observation.notify && observation.card) {
+            deps.publish(input, 'message_delta', { text: observation.card })
+          }
+        }
+      }
     },
     projectName,
     requirementsDigest,

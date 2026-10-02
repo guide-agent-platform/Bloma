@@ -444,11 +444,8 @@ export function listDelegations(parentSessionId: string): DelegationRecord[] {
   return [...delegations.values()].filter((record) => record.parentSessionId === parentSessionId)
 }
 
-/**
- * 委派生命周期事件发布（M4-C，渲染端协作视图的数据源）：
- * 父 loop 上下文在册时经 publish 通道发事件（payload: delegation_id / child_session_id /
- * role / goal / status）；父 loop 已结束（unregister）时静默跳过——事件流断供不阻塞 registry。
- */
+/** 委派生命周期事件发布（M4-C）：父上下文在册时经 publish 发事件；已结束静默跳过。
+ *  失败事件附归因数据（刀5，2026-10-02）：error 摘要 + 覆盖渠道名（人话卡侦测源）。 */
 function publishDelegationEvent(
   parentSessionId: string,
   type: 'delegation_started' | 'delegation_completed' | 'delegation_failed' | 'delegation_cancelled',
@@ -460,6 +457,7 @@ function publishDelegationEvent(
     role: record.role,
     goal: record.goal,
     status: record.status,
+    ...(type === 'delegation_failed' && record.error ? { error: record.error.slice(0, 200), channel: record.channelOverride?.channelName } : {}),
   })
 }
 
