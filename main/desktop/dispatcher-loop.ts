@@ -49,6 +49,7 @@ import { runContractDriver, execFileDriverSpawn, type DriverExecutionReport } fr
 import { runSecurityScan } from '../verification/security-scan'
 import { findProject } from '../project/project-service'
 import { buildProjectDriverRunnerTool } from './driver-runner-tool'
+import { recordPhaseCheckpoint } from './phase-checkpoint'
 import { readPrdBackplane } from '../project/document-engine'
 import { requirementPriority } from '../model/prd-backplane'
 
@@ -168,6 +169,8 @@ export interface DesktopDispatchRunInput {
   projectName: string
   /** 需求摘要（首跑修复：PRD 背板 → 调度员系统提示词与子会话基底；编排层装配，缺省不注入） */
   requirementsDigest?: string
+  /** 上一轮已验证结论（刀2 checkpoint 消费：同阶段重跑注入，勿重验直接收口）。 */
+  verifiedConclusion?: string
   /** 项目沙箱根（产物验证/契约读取/驱动 cwd 的解析根）。 */
   sandboxRoot?: string
   /** 报告落盘注入（生产 join(sandboxRoot, rel)+writeFile；测试桩收集）。 */
@@ -194,6 +197,9 @@ export interface DesktopDispatchRunResult {
   /** P0-1c 软对账（2026-10-02）：P0 断言关键词未命中任何 driver 场景名的清单——
    *  只观测不阻断，进遥测供狗粮标定误杀率后再议升硬门。 */
   judgeCoverageGaps?: string[]
+  /** 刀2 checkpoint（2026-10-02）：advance 分支写入的阶段存证（null/缺省=未写入或
+   *  容错失败；遥测 payload.checkpoint 的数据源）。 */
+  checkpoint?: { stage: string }
   /** 阶段节点（解析成功才有）。 */
   phase?: PhaseNode
 }
@@ -325,6 +331,8 @@ export interface DesktopFinalizeOutcome {
   driverReport?: DriverExecutionReport
   /** P0-1c 软对账：裁判门附带的 P0 断言覆盖缺口（观测不阻断）。 */
   judgeCoverageGaps?: string[]
+  /** 刀2 checkpoint：advance 分支写入的阶段存证。 */
+  checkpoint?: { stage: string }
 }
 
 /**
@@ -382,6 +390,7 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     completedPhases: [],
     workspaceHint: '产物按相对路径写入（项目目录即工作根；如 00_ARCH/、00_SCAFFOLD/、00_VERIFY/）。',
     ...(input.requirementsDigest ? { requirementsDigest: input.requirementsDigest } : {}),
+    ...(input.verifiedConclusion ? { verifiedConclusion: input.verifiedConclusion } : {}),
   })
 
   // ── 委派协作接线（2026-09-26 首跑修复）──
@@ -428,10 +437,30 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
   // desktop-verify：异步驱动前置（完整版）
   if (node.id === 'desktop-verify') {
     const driven = await runVerifyFinalize(node, input, collector)
-    return { status: 'completed', loopResult, advance: driven.advance, driverReport: driven.driverReport, ...(driven.judgeCoverageGaps ? { judgeCoverageGaps: driven.judgeCoverageGaps } : {}), phase: node }
+    return {
+      status: 'completed',
+      loopResult,
+      advance: driven.advance,
+      driverReport: driven.driverReport,
+      ...(driven.judgeCoverageGaps ? { judgeCoverageGaps: driven.judgeCoverageGaps } : {}),
+      ...(driven.checkpoint ? { checkpoint: driven.checkpoint } : {}),
+      phase: node,
+    }
   }
 
   const outcome = finalizeDesktopDispatch(node, input, collector)
+  // 刀2 checkpoint：门禁全绿待推进时落阶段存证（快照+结论）——同阶段重跑注入防重验。
+  if (outcome.advance.decision === 'advance') {
+    const checkpoint = await recordPhaseCheckpoint({
+      projectId: input.projectId,
+      requestId: input.requestId,
+      stage: node.id,
+      gates: node.gates.filter((g) => g.kind === 'artifact' || g.kind === 'driver').map((g) => `${g.id}: 产物核验通过`),
+      summary: `desktop 阶段「${node.id}」门禁全绿待推进`,
+      verification: 'recoverable',
+    })
+    return { status: 'completed', loopResult, advance: outcome.advance, ...(checkpoint ? { checkpoint } : {}), phase: node }
+  }
   return { status: 'completed', loopResult, advance: outcome.advance, phase: node }
 }
 
@@ -610,30 +639,33 @@ async function runVerifyFinalize(
 
   const outcome = evaluateAdvance(turns, node.id, existsWithReport, vars)
 
-  // P0-1b（2026-10-02）：全绿收口（driver pass + 证据门 + 安全门 + 裁判门 + 阶段判定
-  // 推进）拍 verified 快照——恢复消费端（latestVerifiedSnapshot 熔断回滚优先恢复）
-  // 自此有生产写入方；快照失败不阻断推进（仅留痕，下次收口可补）。
+  // P0-1b + 刀2（2026-10-02）：全绿收口（driver pass + 证据门 + 安全门 + 裁判门 + 阶段判定
+  // 推进）落 verified 阶段存证（checkpoint 泛化 P0-1b 快照：验证结论进 desktop_checkpoint，
+  // 同阶段重跑注入勿重验）；快照失败不阻断推进（仅留痕，下次收口可补）。恢复消费端
+  // （latestVerifiedSnapshot 熔断回滚优先恢复）自此有生产写入方。
+  let checkpoint: { stage: string } | undefined
   if (outcome.decision === 'advance' && judgeGate?.passed) {
-    try {
-      const { createSnapshot } = await import('../delivery/snapshots')
-      await createSnapshot({
-        request_id: input.requestId,
-        project_id: input.projectId,
-        kind: 'mvp',
-        summary: `desktop-verify 全绿（driver ${report.scenarios.filter((s) => s.outcome === 'pass').length}/${report.scenarios.length} 场景 + 安全扫描 + 裁判硬约束）`,
-        include_documents: true,
-        health_status: 'healthy',
-        verification: 'verified',
-      })
-    } catch (error) {
-      console.error('[desktop-verify] verified 快照创建失败（不阻断推进，下次收口可补）：', error)
-    }
+    const recorded = await recordPhaseCheckpoint({
+      projectId: input.projectId,
+      requestId: input.requestId,
+      stage: node.id,
+      gates: [
+        `driver-report: ${report.scenarios.filter((s) => s.outcome === 'pass').length}/${report.scenarios.length} 场景 PASS（${report.routing}）`,
+        ...(securityGate ? [`security-scan: 通过（${securityGate.scanned} 文件扫描，0 高危）`] : []),
+        `judge-gate: 硬约束通过${judgeGate.coverageGaps.length > 0 ? `（软对账缺口 ${judgeGate.coverageGaps.length} 项，观测不阻断）` : ''}`,
+        `advance-marks: 推进标记合法（→ ${outcome.target}）`,
+      ],
+      summary: `desktop-verify 全绿（driver ${report.scenarios.filter((s) => s.outcome === 'pass').length}/${report.scenarios.length} 场景 + 安全扫描 + 裁判硬约束）`,
+      verification: 'verified',
+    })
+    checkpoint = recorded ?? undefined
   }
 
   return {
     advance: outcome,
     driverReport: report,
     ...(judgeGate && judgeGate.coverageGaps.length > 0 ? { judgeCoverageGaps: judgeGate.coverageGaps } : {}),
+    ...(checkpoint ? { checkpoint } : {}),
   }
 }
 
@@ -737,6 +769,12 @@ function recordDispatchRunTelemetry(
           // P0-1c 软对账观测（2026-10-02）：P0 断言未命中场景名清单 + 计数——狗粮标定
           // 误杀率的数据面（命中≠验证充分，未命中也不阻断——只暴露对账缺口供复盘）。
           judge_coverage_gaps: result.judgeCoverageGaps ?? [],
+          // 刀2 checkpoint（2026-10-02）：写入/消费各一维度——重验率 = 同阶段多段中
+          // driver 重复执行占比（写入=本段落了存证；consumed=本段注入了勿重验结论）。
+          checkpoint: {
+            ...(result.checkpoint ? { recorded: result.checkpoint.stage } : { recorded: null }),
+            consumed: Boolean(input.verifiedConclusion),
+          },
           duration_ms: Date.now() - startedAt,
         },
         privacy_level: 'masked',

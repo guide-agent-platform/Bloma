@@ -351,6 +351,45 @@ describe('事件直通与需求注入（2026-09-26 首跑修复）', () => {
     expect(events.some((event) => event.type === 'tool_call_completed')).toBe(true)
   })
 
+  it('刀2 checkpoint 消费：同阶段重跑时任务书头部注入「上一轮已验证结论」（勿重验），跨阶段不注入', async () => {
+    // 同阶段（desktop-scaffold 与 checkpoint 一致）：system 轮含已验证结论与勿重验指示
+    ;(record as Record<string, unknown>).desktop_checkpoint = {
+      stage: 'desktop-scaffold',
+      at: '2026-10-02T15:00:00.000Z',
+      verified_gates: ['scaffold-contract: 产物核验通过'],
+    }
+    let capturedSystem = ''
+    const query: SDKQuery = async function* (_prompt: string, options: SDKQueryOptions) {
+      const first = (options.messages ?? [])[0]
+      // 仅首次调用捕获（推进链后续阶段的 system 不覆盖本断言目标）
+      if (!capturedSystem && first && first.role === 'system') capturedSystem = String((first as { content?: unknown }).content ?? '')
+      yield textMessage('PHASE_ADVANCE: desktop-implement')
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+    await handleDesktopDispatchMessage(routeInput({ query }), collectorDeps().deps)
+    expect(capturedSystem).toContain('【上一轮已验证结论】')
+    expect(capturedSystem).toContain('勿重验')
+    expect(capturedSystem).toContain('PHASE_ADVANCE: desktop-implement')
+    expect(capturedSystem.indexOf('【上一轮已验证结论】')).toBeLessThan(capturedSystem.indexOf('【本阶段任务书】'))
+
+    // 跨阶段（checkpoint 属 desktop-arch，当前已是下一阶段）：不注入旧结论
+    let capturedSystem2 = ''
+    const query2: SDKQuery = async function* (_prompt: string, options: SDKQueryOptions) {
+      const first = (options.messages ?? [])[0]
+      if (!capturedSystem2 && first && first.role === 'system') capturedSystem2 = String((first as { content?: unknown }).content ?? '')
+      yield textMessage('PHASE_ADVANCE: desktop-verify')
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+    record.desktop_phase = 'desktop-implement'
+    ;(record as Record<string, unknown>).desktop_checkpoint = {
+      stage: 'desktop-arch',
+      at: '2026-10-02T15:00:00.000Z',
+      verified_gates: ['arch-decision: 产物核验通过'],
+    }
+    await handleDesktopDispatchMessage(routeInput({ query: query2 }), collectorDeps().deps)
+    expect(capturedSystem2).not.toContain('【上一轮已验证结论】')
+  })
+
   it('需求摘要注入：deps.requirementsDigest 按项目 id 装配（进调度员上下文链路）', async () => {
     const digest = vi.fn(() => 'F-001 [P0] 托盘倒计时工具')
     const { deps } = collectorDeps({ requirementsDigest: digest })

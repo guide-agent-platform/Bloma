@@ -145,6 +145,18 @@ describe('输出纪律段（刀4，2026-10-02 确认协议与呈现层战役）'
     expect(prompt.indexOf('【工具纪律】')).toBeLessThan(prompt.indexOf('【输出纪律】'))
   })
 
+  it('verifiedConclusion 渲染【上一轮已验证结论】段（刀2 checkpoint 消费面）；缺省不出；任务书之前', () => {
+    const withConclusion = buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-scaffold'], {
+      projectName: 'p',
+      verifiedConclusion: '上一轮（2026-10-02T15:00:00.000Z）本阶段门禁已全部验证通过，结论如下（勿重验）：\n- scaffold-contract: 产物核验通过\n直接续接收口：输出推进标记。',
+    })
+    expect(withConclusion).toContain('【上一轮已验证结论】')
+    expect(withConclusion).toContain('勿重验')
+    expect(withConclusion.indexOf('【上一轮已验证结论】')).toBeLessThan(withConclusion.indexOf('【本阶段任务书】'))
+    const without = buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-scaffold'], { projectName: 'p' })
+    expect(without).not.toContain('【上一轮已验证结论】')
+  })
+
   it('子会话基底含汇报纪律（防英文报告回流摘要）', () => {
     const base = buildDesktopChildBaseSystem(DESKTOP_PHASES['desktop-implement'], { projectName: 'p' })
     expect(base).toContain('【汇报纪律】')

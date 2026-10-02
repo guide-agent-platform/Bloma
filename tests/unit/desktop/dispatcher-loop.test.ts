@@ -628,6 +628,11 @@ describe('desktop-verify 收口双门（全链路审查 P1-5/P0-1 缓解，2026-
     const verified = latestVerifiedSnapshot(project.project_id)
     expect(verified?.verification).toBe('verified')
     expect(verified?.summary).toContain('desktop-verify 全绿')
+    // 刀2 checkpoint：验证结论落库（同阶段重跑防重验的凭据）+ 遥测口径
+    expect(result.checkpoint).toMatchObject({ stage: 'desktop-verify' })
+    const afterCheckpoint = findProject(project.project_id) as unknown as { desktop_checkpoint?: { stage: string; verified_gates: string[] } }
+    expect(afterCheckpoint.desktop_checkpoint?.stage).toBe('desktop-verify')
+    expect((afterCheckpoint.desktop_checkpoint?.verified_gates ?? []).some((g) => g.startsWith('driver-report:'))).toBe(true)
     expect(existsSync(join(docsDir, 'prd.json'))).toBe(true) // 快照文档冻结不破坏源
     void readFileSync
     delete process.env.PROMA_HOME

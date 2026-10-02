@@ -43,6 +43,8 @@ export interface DispatcherPromptContext {
   completedPhases?: string[]
   /** 需求摘要（首跑修复：PRD 背板 → 调度员与子会话的唯一需求注入路径；缺省不出需求段）。 */
   requirementsDigest?: string
+  /** 上一轮已验证结论（刀2 checkpoint 消费：同阶段重跑时注入——勿重验，直接收口）。 */
+  verifiedConclusion?: string
 }
 
 /**
@@ -75,6 +77,11 @@ export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherProm
   // 1b. 项目需求（首跑修复：此前调度员与子会话均无需求注入路径——PRD 背板摘要由此进入上下文）
   if (ctx.requirementsDigest) {
     sections.push(`【项目需求（唯一真相源，不得改写）】\n${ctx.requirementsDigest}`)
+  }
+
+  // 1c. 上一轮已验证结论（刀2 checkpoint：同阶段重跑防重验——任务书之前注入，结论优先于任务）
+  if (ctx.verifiedConclusion) {
+    sections.push(`【上一轮已验证结论】\n${ctx.verifiedConclusion}`)
   }
 
   // 2. 任务书

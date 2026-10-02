@@ -30,6 +30,7 @@ import { runDesktopDispatcherLoop, type DesktopDispatchRunInput, type DesktopDis
 import { clearRejectionOnAdvance, createRejectionLedger, decideRejectionLoop, registerRejection, type RejectionLedger } from './advance-rejection-loop'
 import { buildBlockedNoticeCard, buildDeliveredNoticeCard, digestDeliveryDoc } from './notice-cards'
 import { classifyUserDesktopIntent } from './user-intent-lexicon'
+import { buildCheckpointConclusion } from './phase-checkpoint'
 import { readDesktopRequirementsDigest } from './requirement-digest'
 
 // =========================================================================
@@ -227,6 +228,12 @@ async function runDesktopStage(
   const requirementsDigest = deps.requirementsDigest
     ? deps.requirementsDigest(input.projectId)
     : readDesktopRequirementsDigest(input.projectId)
+  // 刀2 checkpoint 消费：当前阶段与存证一致（同阶段重跑——拒收续接/turn 耗尽/预算
+  // 断链后的重入）时注入勿重验结论；跨阶段不注入（旧结论不作数）。
+  const checkpoint = project?.desktop_checkpoint
+  const verifiedConclusion = checkpoint && checkpoint.stage === phaseId && checkpoint.verified_gates.length > 0
+    ? buildCheckpointConclusion(checkpoint, getNextDesktopPhase(phaseId))
+    : undefined
 
   const loopInput: DesktopDispatchRunInput = {
     projectId: input.projectId,
@@ -245,6 +252,7 @@ async function runDesktopStage(
     },
     projectName,
     requirementsDigest,
+    ...(verifiedConclusion ? { verifiedConclusion } : {}),
     sandboxRoot,
     driverSpawn: deps.driverSpawn,
     readContract: () => {

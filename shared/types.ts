@@ -1055,6 +1055,9 @@ export interface Project {
   /** 桌面线人工暂停态（刀1，2026-10-02）：停止词命中或门禁修复轮耗尽时置位；
    *  继续词/普通用户消息出现即清除（人工出场即放行）。note 存原始停止语或拒因。 */
   desktop_blocked?: { reason: 'user-stop' | 'gate-exhausted'; note?: string; at: string }
+  /** 桌面线阶段推进 checkpoint（刀2，2026-10-02）：门禁全绿待推进时写入（含阶段快照
+   *  存证）；同阶段重跑时由续跑注入消费（勿重验已验门禁）——重验率遥测的数据面。 */
+  desktop_checkpoint?: DesktopCheckpoint
   /** U16：最近进展摘要（取自最近一次 sketch_generated 需求，列表卡片纯展示用，不经落盘） */
   progress_summary?: string
   /** 最近一次 MVP 生成是否走 Agent Loop（M4-A：resume 时据此选「只终验不重修」路径） */
@@ -1074,6 +1077,18 @@ export interface Project {
 
 /** 交付状态三态（Phase 7 U1 H1，规则见 main/coding/delivery-status.ts）。 */
 export type DeliveryStatus = 'verified' | 'partial' | 'unavailable'
+
+/** 桌面线阶段推进 checkpoint（刀2，2026-10-02）：门禁全绿的存证与续跑凭据。 */
+export interface DesktopCheckpoint {
+  /** 已验证阶段 id（与当前阶段一致时才消费——防跨阶段误注入）。 */
+  stage: string
+  /** 写入时间（ISO）。 */
+  at: string
+  /** 阶段快照 id（createSnapshot 产物；失败容错时可缺省——结论仍有效）。 */
+  snapshot_id?: string
+  /** 已验门禁结论摘要（人读行，续跑任务书注入）。 */
+  verified_gates: string[]
+}
 
 export interface ConfirmSketchInput extends RequestEnvelope {
   project_id: string
