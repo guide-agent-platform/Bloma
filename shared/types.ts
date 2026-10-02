@@ -1046,12 +1046,15 @@ export interface Project {
   /** 桌面调度员线（批次 D/E 接线）：当前桌面阶段 id（desktop-arch 等；缺省未进入桌面线）。
    *  current_stage 保持 web 语义不变——桌面线进度独立于此字段，避免扩 WORKFLOW_STAGES 破坏 web 线校验。 */
   desktop_phase?: string
-  /** 桌面调度员线：用户已确认收口的阶段 id 集（manual 门禁凭据；确认卡回传登记） */
+  /** 桌面调度员线：用户已确认收口的阶段 id 集（刀1 前旧协议遗留数据；新协议不再写入） */
   desktop_confirmed_phases?: string[]
-  /** 待确认卡的 nonce（P2-01：确认回传须匹配——旧卡/伪造卡失效，不重放旧阶段）。 */
+  /** 待确认卡的 nonce（旧协议字段；刀1 撤 manual 门后不再写入，保留旧数据兼容） */
   desktop_confirm_nonce?: string
-  /** 发卡时的产物指纹（P2-01：确认前产物被改 → 卡失效，需按当前产物重新确认）。 */
+  /** 发卡时的产物指纹（旧协议字段；同上保留兼容）。 */
   desktop_confirm_fingerprint?: string
+  /** 桌面线人工暂停态（刀1，2026-10-02）：停止词命中或门禁修复轮耗尽时置位；
+   *  继续词/普通用户消息出现即清除（人工出场即放行）。note 存原始停止语或拒因。 */
+  desktop_blocked?: { reason: 'user-stop' | 'gate-exhausted'; note?: string; at: string }
   /** U16：最近进展摘要（取自最近一次 sketch_generated 需求，列表卡片纯展示用，不经落盘） */
   progress_summary?: string
   /** 最近一次 MVP 生成是否走 Agent Loop（M4-A：resume 时据此选「只终验不重修」路径） */

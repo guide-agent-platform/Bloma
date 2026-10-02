@@ -156,23 +156,17 @@ describe('正常推进腿（端到端）', () => {
   })
 })
 
-describe('manual 确认凭据腿', () => {
-  it('desktop-arch 无凭据 → reject(confirmation-required)', async () => {
+describe('刀1 撤 manual 门：零凭据自动推进（2026-10-02 确认协议重设计）', () => {
+  it('desktop-arch 无任何凭据概念：门禁（artifact）全过即 advance——不再出现 confirmation-required', async () => {
     const { query } = scriptedQuery([[textMessage('选型完成。\nPHASE_ADVANCE: desktop-scaffold')]])
     const result = await runDesktopDispatcherLoop(baseInput({ query, currentPhase: 'desktop-arch', artifactExists: allExist }))
-    expect(result.advance).toMatchObject({ decision: 'reject', reason: 'confirmation-required' })
-    if (result.advance?.decision === 'reject') {
-      expect(result.advance.education).toContain('用户确认')
-    }
+    expect(result.advance).toMatchObject({ decision: 'advance', target: 'desktop-scaffold' })
   })
 
-  it('凭据登记后同输入 → advance', async () => {
-    const { query } = scriptedQuery([[textMessage('选型完成。\nPHASE_ADVANCE: desktop-scaffold')]])
-    const result = await runDesktopDispatcherLoop(baseInput({
-      query, currentPhase: 'desktop-arch', artifactExists: allExist,
-      confirmedPhases: new Set(['desktop-arch']),
-    }))
-    expect(result.advance).toMatchObject({ decision: 'advance', target: 'desktop-scaffold' })
+  it('desktop-implement 同输入亦直过（requiresUserConfirmation 收缩后无确认腿）', async () => {
+    const { query } = scriptedQuery([[textMessage('实现完成。\n<!-- PHASE_ADVANCE: desktop-verify -->')]])
+    const result = await runDesktopDispatcherLoop(baseInput({ query, currentPhase: 'desktop-implement', artifactExists: allExist }))
+    expect(result.advance).toMatchObject({ decision: 'advance', target: 'desktop-verify' })
   })
 })
 
@@ -197,7 +191,6 @@ describe('驱动挂载腿（desktop-verify 收口）', () => {
       query,
       currentPhase: 'desktop-verify',
       artifactExists: allExist,
-      confirmedPhases: new Set(['desktop-verify']),
       readContract: () => validContract,
       driverSpawn: async () => ({ code: 0, stdout: 'PASS a\nPASS b\nSUMMARY pass=2', stderr: '' }),
       writeReport: (path, content) => { written.push({ path, content }) },
@@ -215,7 +208,6 @@ describe('驱动挂载腿（desktop-verify 收口）', () => {
       query,
       currentPhase: 'desktop-verify',
       artifactExists: allExist,
-      confirmedPhases: new Set(['desktop-verify']),
       readContract: () => validContract,
       driverSpawn: async () => ({ code: 1, stdout: 'PASS a\nFAIL b: 断言失败', stderr: '' }),
       writeReport: () => undefined,
@@ -234,7 +226,6 @@ describe('驱动挂载腿（desktop-verify 收口）', () => {
       query,
       currentPhase: 'desktop-verify',
       artifactExists: allExist,
-      confirmedPhases: new Set(['desktop-verify']),
       readContract: () => validContract,
       driverSpawn: async () => ({
         code: 1,
@@ -260,7 +251,6 @@ describe('驱动挂载腿（desktop-verify 收口）', () => {
     const { query } = scriptedQuery([[textMessage('PHASE_ADVANCE: delivered')]])
     const result = await runDesktopDispatcherLoop(baseInput({
       query, currentPhase: 'desktop-verify', artifactExists: allExist,
-      confirmedPhases: new Set(['desktop-verify']),
       readContract: () => undefined,
     }))
     expect(result.advance).toMatchObject({ decision: 'reject', reason: 'artifacts-missing' })
@@ -270,7 +260,6 @@ describe('驱动挂载腿（desktop-verify 收口）', () => {
     const { query } = scriptedQuery([[textMessage('PHASE_ADVANCE: delivered')]])
     const result = await runDesktopDispatcherLoop(baseInput({
       query, currentPhase: 'desktop-verify', artifactExists: allExist,
-      confirmedPhases: new Set(['desktop-verify']),
       readContract: () => '{"schema_version": 99}',
     }))
     expect(result.advance).toMatchObject({ decision: 'reject', reason: 'contract-invalid' })
@@ -336,7 +325,6 @@ describe('故障注入：推进伪造', () => {
       query,
       currentPhase: 'desktop-verify',
       artifactExists: allExist,
-      confirmedPhases: new Set(['desktop-verify']),
       readContract: () => JSON.stringify({
         schema_version: 1, entry: 'app.py',
         driver: { command: ['python', 'driver.py'], timeout_ms: 60000, exit_code_semantics: { '0': 'pass', '1': 'fail', '2': 'blocked' }, assert_readback: 'stdout 锚点' },
@@ -350,9 +338,10 @@ describe('故障注入：推进伪造', () => {
     expect(event.payload.repair_class).toBe('behavior')
     // 确认卡拒收 → confirm；schema 拒收 → mapping（纯函数口径，逐类校验关键代表）
     telemetry.track.mockClear()
-    const { query: q2 } = scriptedQuery([[textMessage('PHASE_ADVANCE: desktop-implement')]])
-    await runDesktopDispatcherLoop(baseInput({ query: q2, currentPhase: 'desktop-implement', confirmedPhases: new Set() }))
-    expect(telemetry.track.mock.calls[0][0].event.payload.repair_class).toBe('confirm')
+    const { query: q2 } = scriptedQuery([[textMessage('PHASE_ADVANCE: desktop-verify')]])
+    await runDesktopDispatcherLoop(baseInput({ query: q2, currentPhase: 'desktop-implement', artifactExists: noneExist }))
+    // 刀1 后 confirmation-required 不再产生；产物缺失拒收 → structure 分类（回归锁）
+    expect(telemetry.track.mock.calls[0][0].event.payload.repair_class).toBe('structure')
   })
 })
 
@@ -555,7 +544,6 @@ describe('desktop-verify 收口双门（全链路审查 P1-5/P0-1 缓解，2026-
       query,
       currentPhase: 'desktop-verify',
       artifactExists: allExist,
-      confirmedPhases: new Set(['desktop-verify']),
       readContract: () => validContract,
       driverSpawn: async () => ({ code: 0, stdout: '', stderr: '' }),
       writeReport: () => undefined,
@@ -586,7 +574,6 @@ describe('desktop-verify 收口双门（全链路审查 P1-5/P0-1 缓解，2026-
       query,
       currentPhase: 'desktop-verify',
       artifactExists: allExist,
-      confirmedPhases: new Set(['desktop-verify']),
       readContract: () => validContract,
       driverSpawn: async () => ({ code: 0, stdout: 'PASS a\nSUMMARY pass=1', stderr: '' }),
       writeReport: () => undefined,
@@ -628,7 +615,6 @@ describe('desktop-verify 收口双门（全链路审查 P1-5/P0-1 缓解，2026-
       projectId: project.project_id,
       currentPhase: 'desktop-verify',
       artifactExists: allExist,
-      confirmedPhases: new Set(['desktop-verify']),
       readContract: () => validContract,
       driverSpawn: async () => ({ code: 0, stdout: 'PASS 添加待办场景\nSUMMARY pass=1', stderr: '' }),
       writeReport: () => undefined,
@@ -663,7 +649,6 @@ describe('desktop-verify 收口双门（全链路审查 P1-5/P0-1 缓解，2026-
       projectId: project.project_id,
       currentPhase: 'desktop-verify',
       artifactExists: allExist,
-      confirmedPhases: new Set(['desktop-verify']),
       readContract: () => validContract,
       driverSpawn: async () => ({ code: 0, stdout: 'PASS a\nSUMMARY pass=1', stderr: '' }),
       writeReport: () => undefined,
@@ -704,7 +689,6 @@ describe('desktop-verify 收口双门（全链路审查 P1-5/P0-1 缓解，2026-
       projectId: project.project_id,
       currentPhase: 'desktop-verify',
       artifactExists: allExist,
-      confirmedPhases: new Set(['desktop-verify']),
       readContract: () => validContract,
       driverSpawn: async () => ({ code: 0, stdout: 'PASS 待办场景\nSUMMARY pass=1', stderr: '' }),
       writeReport: () => undefined,

@@ -117,7 +117,7 @@ function collectorDeps(overrides: Partial<DesktopRouteDeps> = {}) {
   }
 }
 
-function routeInput(overrides: Partial<{ cardOptionId: string; query: SDKQuery; signal: AbortSignal }> = {}) {
+function routeInput(overrides: Partial<{ cardOptionId: string; content: string; query: SDKQuery; signal: AbortSignal }> = {}) {
   return {
     projectId: 'p1',
     sessionId: 's1',
@@ -202,68 +202,88 @@ describe('handleDesktopDispatchMessage 消息路由', () => {
     expect(events.some((e) => e.type === 'stage_changed' && e.payload.stage === 'delivered')).toBe(true)
   })
 
-  it('confirmation-required：发确认卡（选项 id 前缀协议）且不推进', async () => {
+  it('刀1 撤 manual 门：desktop-arch 门禁过即推进（零 confirmation-required、零确认卡）', async () => {
     record.desktop_phase = 'desktop-arch'
     const { deps, events } = collectorDeps()
     await handleDesktopDispatchMessage(routeInput({
       query: scriptedQuery([[textMessage('选型完成。\nPHASE_ADVANCE: desktop-scaffold')]]),
     }), deps)
-    const card = events.find((e) => e.type === 'user_decision_required')
-    expect(card).toBeTruthy()
-    expect(card?.payload.kind).toBe('desktop_phase_confirm')
-    const questions = (card?.payload.questions as Array<{ id: string }>) ?? []
-    // P2-01：选项 id 现在是 desktop_confirm:<phase>:<nonce>（卡绑定一次性凭据）
-    expect(questions.some((q) => q.id.startsWith(`${DESKTOP_CONFIRM_OPTION_PREFIX}desktop-arch:`))).toBe(true)
-    expect((record as unknown as { desktop_confirm_nonce?: string }).desktop_confirm_nonce).toBeTruthy()
-    expect(record.desktop_phase).toBe('desktop-arch') // 未推进
+    expect(events.some((e) => e.type === 'user_decision_required')).toBe(false) // 不发确认卡
+    expect(record.desktop_phase).not.toBe('desktop-arch') // 门禁（artifact 全预置）过即推进
   })
 
-  it('卡回传：凭据登记 + 重跑该阶段并推进（状态化链路；带匹配 nonce）', async () => {
+  it('刀1 旧确认卡回传：如实告知协议升级 + 照常跑当前阶段（推进链不再依赖卡）', async () => {
     record.desktop_phase = 'desktop-arch'
-    ;(record as Record<string, unknown>).desktop_confirm_nonce = 'n-current'
-    const { deps } = collectorDeps()
+    const { deps, events } = collectorDeps()
     await handleDesktopDispatchMessage(routeInput({
       cardOptionId: `${DESKTOP_CONFIRM_OPTION_PREFIX}desktop-arch:n-current`,
-      query: scriptedQuery([[textMessage('确认后推进。\n<!-- PHASE_ADVANCE: desktop-scaffold -->')]]),
+      query: scriptedQuery([[textMessage('收到。\n<!-- PHASE_ADVANCE: desktop-scaffold -->')]]),
     }), deps)
-    expect(record.desktop_confirmed_phases).toContain('desktop-arch')
+    const tell = events.find((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('确认协议已升级'))
+    expect(tell).toBeTruthy()
     expect(['desktop-scaffold', 'desktop-implement', 'desktop-verify', 'delivered']).toContain(record.desktop_phase)
   })
 
-  it('P2-01 旧卡/伪造卡（nonce 不匹配）：不登记凭据、不推进、如实告知已失效', async () => {
-    record.desktop_phase = 'desktop-arch'
-    ;(record as Record<string, unknown>).desktop_confirm_nonce = 'n-current'
+  it('刀1 文本意图：停止词 → desktop_blocked 落库 + 人话卡 + 不跑调度员（阶段不动）', async () => {
+    record.desktop_phase = 'desktop-scaffold'
     const { deps, events } = collectorDeps()
-    await handleDesktopDispatchMessage(routeInput({ cardOptionId: 'desktop_confirm:desktop-arch:n-stale' }), deps)
-    const tell = events.find((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('确认未生效'))
-    expect(tell).toBeTruthy()
-    expect((record.desktop_confirmed_phases as string[]).length).toBe(0) // 未登记凭据
-    expect(record.desktop_phase).toBe('desktop-arch') // 未推进
+    await handleDesktopDispatchMessage(routeInput({
+      content: '先停一下，我改主意了',
+      query: scriptedQuery([[textMessage('不应被跑到')]]),
+    }), deps)
+    const blocked = (record as unknown as { desktop_blocked?: { reason: string } }).desktop_blocked
+    expect(blocked).toMatchObject({ reason: 'user-stop' })
+    const notice = events.find((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('【已暂停，需要你拿主意】'))
+    expect(notice).toBeTruthy()
+    expect(record.desktop_phase).toBe('desktop-scaffold') // 阶段不动
   })
 
-  it('P2-01 阶段已推进的旧卡（nonce 匹配但 phase 过期）：不重放旧阶段', async () => {
-    record.desktop_phase = 'desktop-implement' // 当前阶段已推进
-    ;(record as Record<string, unknown>).desktop_confirm_nonce = 'n-current'
+  it('刀1 文本意图：反义词优先——「不通过」不触发放行（含子串「通过」的实证防御）', async () => {
+    record.desktop_phase = 'desktop-scaffold'
+    ;(record as Record<string, unknown>).desktop_blocked = { reason: 'gate-exhausted', note: 'x', at: new Date().toISOString() }
     const { deps, events } = collectorDeps()
-    await handleDesktopDispatchMessage(routeInput({ cardOptionId: 'desktop_confirm:desktop-arch:n-current' }), deps)
-    const tell = events.find((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('已过期'))
-    expect(tell).toBeTruthy()
-    expect(record.desktop_phase).toBe('desktop-implement')
+    await handleDesktopDispatchMessage(routeInput({
+      content: '不通过，需要调整',
+      query: scriptedQuery([[textMessage('不应被跑到')]]),
+    }), deps)
+    // stop 优先：仍处 blocked，且人话卡再次出现（不误放行）
+    expect((record as unknown as { desktop_blocked?: unknown }).desktop_blocked).toMatchObject({ reason: 'user-stop' })
+    expect(events.some((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('【已暂停，需要你拿主意】'))).toBe(true)
+    expect(record.desktop_phase).toBe('desktop-scaffold')
   })
 
-  it('P2-01 产物在确认前被改（指纹不一致）：卡失效，不登记', async () => {
-    record.desktop_phase = 'desktop-arch'
-    ;(record as Record<string, unknown>).desktop_confirm_nonce = 'n-current'
-    // 发卡时指纹记录为「改动前」；随后产物被改
-    writeFileSync(join(sandboxRoot, 'index.html'), '<html><body>v1</body></html>', 'utf8')
-    const { computeEntryFingerprint } = await import('../../../main/verification/test-legacy')
-    ;(record as Record<string, unknown>).desktop_confirm_fingerprint = computeEntryFingerprint(sandboxRoot)!.sha256
-    writeFileSync(join(sandboxRoot, 'index.html'), '<html><body>v2</body></html>', 'utf8')
+  it('刀1 blocked 态继续词 → 放行清 blocked + 全链推进到 delivered（implement→verify→delivered 零人工确认端到端）', async () => {
+    writeValidContract()
+    record.desktop_phase = 'desktop-implement'
+    ;(record as Record<string, unknown>).desktop_blocked = { reason: 'gate-exhausted', note: 'artifacts-missing', at: new Date().toISOString() }
     const { deps, events } = collectorDeps()
-    await handleDesktopDispatchMessage(routeInput({ cardOptionId: 'desktop_confirm:desktop-arch:n-current' }), deps)
-    const tell = events.find((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('已被修改'))
-    expect(tell).toBeTruthy()
-    expect((record.desktop_confirmed_phases as string[]).length).toBe(0)
+    await handleDesktopDispatchMessage(routeInput({
+      content: '继续',
+      query: scriptedQuery([
+        [textMessage('实现完成。\n<!-- PHASE_ADVANCE: desktop-verify -->')],
+        [textMessage('验证全绿。\nPHASE_ADVANCE: delivered')],
+      ]),
+    }), deps)
+    expect((record as unknown as { desktop_blocked?: unknown }).desktop_blocked).toBeUndefined()
+    expect(events.some((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('已放行'))).toBe(true)
+    expect(record.desktop_phase).toBe('delivered')
+    // 端到端验收锁：全程零 confirmation-required、零确认卡、delivered 通知卡已发
+    expect(events.some((e) => e.type === 'user_decision_required')).toBe(false)
+    const notice = events.find((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('【交付完成】'))
+    expect(notice).toBeTruthy()
+    expect((notice?.payload.text as string)).toContain('DELIVERY.md')
+    expect((notice?.payload.text as string)).toContain('不用从头再来')
+  })
+
+  it('刀1 正常态继续词：无特殊处理（普通消息进调度员，不凭文本推进）', async () => {
+    record.desktop_phase = 'desktop-scaffold'
+    const { deps, events } = collectorDeps()
+    await handleDesktopDispatchMessage(routeInput({
+      content: '继续',
+      query: scriptedQuery([[textMessage('没有输出标记')]]), // 调度员没推进 → 拒收续接闭环兜底
+    }), deps)
+    // 无「已放行」话术（非 blocked 态继续词不构成任何授权）
+    expect(events.some((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('已放行'))).toBe(false)
   })
 
   it('拒收（no-marks）：教育播报 + 续接驱动同阶段重跑（第二次带标记推进）', async () => {

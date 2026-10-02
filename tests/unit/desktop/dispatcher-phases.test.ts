@@ -61,11 +61,15 @@ describe('dispatcher-phases 阶段表 schema', () => {
     }
   })
 
-  it('requiresUserConfirmation 与 manual 门禁一致（声明确认的阶段必有 manual 门禁）', () => {
+  it('刀1 撤 manual 门：接管阶段零 manual 门禁且 requiresUserConfirmation 恒 false（人工只保留 Intent 层）', () => {
     for (const node of listDispatcherManagedPhases()) {
-      const hasManual = node.gates.some((g) => g.kind === 'manual')
-      expect(hasManual, `${node.id}`).toBe(node.requiresUserConfirmation)
+      expect(node.gates.some((g) => g.kind === 'manual'), `${node.id} 不应残留 manual 门`).toBe(false)
+      expect(node.requiresUserConfirmation, `${node.id} 接管阶段应为 false`).toBe(false)
+      // 防空门禁直通：非终态接管节点仍至少一条 artifact/driver 门
+      if (node.next !== null) expect(node.gates.length).toBeGreaterThan(0)
     }
+    // Intent 层（requirements 复用向导管线）仍声明确认
+    expect(DESKTOP_PHASES.requirements.requiresUserConfirmation).toBe(true)
   })
 })
 

@@ -42,6 +42,11 @@ export type DesktopPhaseId =
 export interface PhaseGate {
   /** 门禁标识（kebab-case；进拒收教育文案与事件流 detail）。 */
   id: string
+  /**
+   * 门禁 kind。刀1（2026-10-02 确认协议重设计）后：manual 门已从内置阶段表全部
+   * 撤除（中间阶段零人工确认，门禁全绿自动推进）——kind 保留 'manual' 枚举仅供
+   * 未来不可逆动作类门禁复用（schema 开放；表校验/提示词渲染路径均已兼容）。
+   */
   kind: 'artifact' | 'driver' | 'manual'
   /** 门禁描述（进提示词与拒收教育文案）。 */
   description: string
@@ -74,7 +79,9 @@ export interface PhaseNode {
   outputPath: string
   /** 阶段约束（注入系统提示词；批次 C 起同步注入委派任务书软约束）。 */
   constraints: string[]
-  /** 收口是否需要用户确认（true=裁决边界决策卡收口后才可推进）。 */
+  /** 收口是否需要用户确认。刀1（2026-10-02）语义收缩：仅保留 Intent 层确认
+   *  （requirements 节点=PRD 确认，走向导管线不在调度员 loop 内）——桌面接管
+   *  阶段一律 false：门禁全绿自动推进，人工只保留异常处理与不可逆动作。 */
   requiresUserConfirmation: boolean
   /** 阶段内委派失败重试上限（超限转 blocked，由观察哨/接线层执行）。 */
   retryLimit: number
@@ -132,7 +139,9 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '环境清单中每一项都要标注证据等级：[实证]（本机实测）/ [推断]（文档或社区结论）/ 待 Spike',
       'Spike 子会话时间盒 ≤30 分钟，超时中止并如实记录未完成',
     ],
-    requiresUserConfirmation: true,
+    // 刀1（2026-10-02）：requiresUserConfirmation 收缩为 false + 撤 arch-confirm
+    // manual 门——中间阶段零人工确认，门禁全绿自动推进（人工只保留 Intent 层与异常处理）。
+    requiresUserConfirmation: false,
     retryLimit: 2,
     next: 'desktop-scaffold',
     gates: [
@@ -147,11 +156,6 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
         kind: 'artifact',
         description: '组件环境清单存在且为合法 JSON（00_ARCH/env-checklist.json）',
         artifacts: ['00_ARCH/env-checklist.json'],
-      },
-      {
-        id: 'arch-confirm',
-        kind: 'manual',
-        description: '选型结论经用户决策卡确认后方可推进',
       },
     ],
     extraTools: [],
@@ -206,7 +210,8 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '每实现一个功能必须先有对应驱动断言（禁止无断言的实现）',
       '实现与骨架同一委派线续接（上下文不换人）',
     ],
-    requiresUserConfirmation: true,
+    // 刀1（2026-10-02）：撤 implement-confirm manual 门（同上语义收缩）。
+    requiresUserConfirmation: false,
     retryLimit: 2,
     next: 'desktop-verify',
     gates: [
@@ -215,11 +220,6 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
         kind: 'artifact',
         description: '交付说明存在（DELIVERY.md）',
         artifacts: ['DELIVERY.md'],
-      },
-      {
-        id: 'implement-confirm',
-        kind: 'manual',
-        description: '实现产物经用户预览确认后方可推进验证',
       },
     ],
     extraTools: ['run_project_driver'],
@@ -241,7 +241,9 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '测试工程师与实现者必须异渠道（C1 跨渠道委派）',
       '验证结论只看驱动执行回读，不采信模型自述',
     ],
-    requiresUserConfirmation: true,
+    // 刀1（2026-10-02）：撤 deliver-confirm manual 门——verify 四门全绿自动落
+    // delivered + 发交付通知卡（通知≠确认，不阻塞不等待；用户回复修改意见走迭代）。
+    requiresUserConfirmation: false,
     retryLimit: 2,
     next: 'delivered',
     gates: [
@@ -250,11 +252,6 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
         kind: 'driver',
         description: '工程契约驱动执行报告存在（00_VERIFY/driver-report.json，批次 C 兑现执行）',
         artifacts: ['00_VERIFY/driver-report.json'],
-      },
-      {
-        id: 'deliver-confirm',
-        kind: 'manual',
-        description: '交付确认经用户决策卡收口',
       },
     ],
     extraTools: [],

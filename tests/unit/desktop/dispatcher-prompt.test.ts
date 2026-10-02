@@ -64,14 +64,23 @@ describe('buildDispatcherSystemPrompt 组装序', () => {
     expect(prompt).toContain('2. 新约束乙')
   })
 
-  it('requiresUserConfirmation 阶段渲染确认纪律段（平台发卡；无 guide_decide 不可行动指令）；无需确认阶段不渲染', () => {
-    const withConfirm = buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-implement'], ctx)
+  it('确认纪律段仅 requiresUserConfirmation 节点渲染（刀1 后内置表无此节点；构造节点验证渲染路径保留）', () => {
+    // 刀1（2026-10-02）：撤 manual 门后内置接管阶段均 false；渲染路径保留供
+    // Intent 层/未来不可逆动作类节点复用——用构造节点锁定渲染形态不回退。
+    const withConfirm = buildDispatcherSystemPrompt(
+      { ...DESKTOP_PHASES['desktop-implement'], requiresUserConfirmation: true },
+      ctx,
+    )
     expect(withConfirm).toContain('【确认纪律】')
     expect(withConfirm).toContain('推进标记')
     expect(withConfirm).toContain('平台裁决边界会自动向用户发起确认卡')
     expect(withConfirm).not.toContain('guide_decide')
-    const withoutConfirm = buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-scaffold'], ctx)
-    expect(withoutConfirm).not.toContain('【确认纪律】')
+    // 内置表全部接管阶段：无确认纪律段（零中间人工确认）
+    for (const node of Object.values(DESKTOP_PHASES)) {
+      if (!node.dispatcherManaged) continue
+      const prompt = buildDispatcherSystemPrompt(node, ctx)
+      expect(prompt).not.toContain('【确认纪律】')
+    }
   })
 
   it('workspaceHint 渲染进环境段', () => {
@@ -85,13 +94,17 @@ describe('buildDispatcherSystemPrompt 组装序', () => {
 })
 
 describe('buildAdvanceProtocolSection', () => {
-  it('非终态：两种锚定形态示例 + 唯一合法目标 + 门禁清单', () => {
+  it('非终态：两种锚定形态示例 + 唯一合法目标 + 门禁清单（刀1 后内置阶段无「用户确认门」）', () => {
     const section = buildAdvanceProtocolSection(DESKTOP_PHASES['desktop-arch'])
     expect(section).toContain('<!-- PHASE_ADVANCE: desktop-scaffold -->')
     expect(section).toContain('PHASE_ADVANCE: desktop-scaffold')
     expect(section).toContain('句中复述无效')
     expect(section).toContain('[artifact] 选型结论文档存在且可读')
-    expect(section).toContain('用户确认门')
+    // 刀1：撤 manual 门——内置阶段不再渲染用户确认门行
+    expect(section).not.toContain('用户确认门')
+    for (const node of Object.values(DESKTOP_PHASES)) {
+      expect(buildAdvanceProtocolSection(node)).not.toContain('用户确认门')
+    }
   })
 
   it('终态：收尾语义、不出现在标记示例', () => {

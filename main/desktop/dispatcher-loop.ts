@@ -170,8 +170,6 @@ export interface DesktopDispatchRunInput {
   requirementsDigest?: string
   /** 项目沙箱根（产物验证/契约读取/驱动 cwd 的解析根）。 */
   sandboxRoot?: string
-  /** 用户已确认的阶段 id 集（manual 门禁凭据——确认链由编排层/批次 E 维护） */
-  confirmedPhases?: ReadonlySet<string>
   /** 报告落盘注入（生产 join(sandboxRoot, rel)+writeFile；测试桩收集）。 */
   writeReport?: (relativePath: string, content: string) => void
   /** 契约读取注入（生产读 sandboxRoot/00_SCAFFOLD/contract.json；测试桩）。 */
@@ -332,9 +330,9 @@ export interface DesktopFinalizeOutcome {
 /**
  * 收口判定（非 verify 阶段——纯装配，I/O 全注入；desktop-verify 走 runVerifyFinalize
  * 异步完整版：驱动 spawn 是异步的）。
- * 1. manual 门禁：node.requiresUserConfirmation 且凭据集不含本阶段 → 拒绝
- *    （confirmation-required——确认链由编排层/批次 E 闭环，本层只认凭据）；
- * 2. evaluateAdvance 三关。
+ * 刀1（2026-10-02）：manual 确认凭据检查已随阶段表撤 manual 门而删除——中间阶段
+ * 门禁全绿即 advance，人工确认退出推进链（异常出口在编排层：拒收闭环降级转
+ * blocked + 人话卡）。
  */
 export function finalizeDesktopDispatch(
   node: PhaseNode,
@@ -344,20 +342,6 @@ export function finalizeDesktopDispatch(
   const turns = collector.flush()
   const vars = { project_name: input.projectName }
   const exists = input.artifactExists ?? ((rel: string) => Boolean(input.sandboxRoot) && existsSync(join(input.sandboxRoot!, rel)))
-
-  // manual 确认凭据
-  if (node.requiresUserConfirmation && !(input.confirmedPhases?.has(node.id) ?? false)) {
-    return {
-      advance: {
-        decision: 'reject',
-        reason: 'confirmation-required',
-        discardedObservations: [],
-        education:
-          `阶段「${node.id}」需要用户确认后才能推进（manual 门禁：${node.gates.filter((g) => g.kind === 'manual').map((g) => g.description).join('；')}）。\n` +
-          '请先向用户发起确认（说明产出与验收结论），取得同意后由平台登记确认凭据，再输出推进标记。',
-      },
-    }
-  }
 
   return { advance: evaluateAdvance(turns, node.id, exists, vars) }
 }
@@ -495,19 +479,8 @@ async function runVerifyFinalize(
   const turns = collector.flush()
   const vars = { project_name: input.projectName }
 
-  if (node.requiresUserConfirmation && !(input.confirmedPhases?.has(node.id) ?? false)) {
-    return {
-      advance: {
-        decision: 'reject',
-        reason: 'confirmation-required',
-        discardedObservations: [],
-        education:
-          `阶段「${node.id}」需要用户确认后才能推进。\n` +
-          '请先向用户发起交付确认，取得同意后由平台登记确认凭据，再输出推进标记。',
-      },
-    }
-  }
-
+  // 刀1（2026-10-02）：确认凭据检查已删（阶段表撤 manual 门）——verify 四门
+  //（证据门→安全门→裁判门→三关）全绿即 advance，终态推进链由 desktop-route 收口。
   const contractText = input.readContract?.()
   if (contractText === undefined) {
     return {

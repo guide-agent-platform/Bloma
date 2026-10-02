@@ -110,7 +110,7 @@ export function decideRejectionLoop(
       education:
         education +
         `\n\n【已降级转人工】本阶段拒收教育闭环已达上限（${REJECTION_LOOP_LIMIT} 次），系统不再自动续接。` +
-        '请人工介入：查看上述拒收原因（目标合法性/门禁/确认凭据），与用户确认处理方式后，由平台重置阶段计数再继续。',
+        '已转为人工介入态（blocked）：用户回复「继续」可再试一轮，或直接给出修改意见。',
       count: nextCount,
       family,
     }
