@@ -54,7 +54,8 @@ export interface DispatcherPromptContext {
  *   3. 阶段约束（constraints 逐条）；
  *   4. 推进协议段（标记形态+唯一合法目标+门禁清单）；
  *   5. 工具纪律段（不写文件+委派路径+本阶段扩展工具）；
- *   6. 确认纪律段（requiresUserConfirmation 时：先决策卡后标记）。
+ *   6. 输出纪律段（中文/要点化/结尾形态——d34d189f 狗粮案 40 轮英文叙述直灌聊天流的根治）；
+ *   7. 确认纪律段（requiresUserConfirmation 时：先决策卡后标记）。
  */
 export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherPromptContext): string {
   const rendered = renderTaskTemplate(node.taskTemplate, {
@@ -90,7 +91,11 @@ export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherProm
   // 5. 工具纪律段
   sections.push(buildToolDisciplineSection(node))
 
-  // 6. 确认纪律段
+  // 6. 输出纪律段（刀4，2026-10-02 d34d189f 狗粮案：调度员英文过程叙述 40 轮/段
+  // 原样直灌聊天流——纪律段进基座，所有阶段固定生效）
+  sections.push(buildOutputDisciplineSection())
+
+  // 7. 确认纪律段
   if (node.requiresUserConfirmation) {
     sections.push(
       '【确认纪律】\n' +
@@ -118,6 +123,9 @@ export function buildDesktopChildBaseSystem(
 ): string {
   const parts: string[] = [
     `你正在为「${ctx.projectName}」项目工作：Windows 桌面品类交付流水线，当前阶段「${node.title}」（${node.id}）。`,
+    // 刀4（2026-10-02）：子会话产出经委派摘要回流调度员→聊天流，英文长报告会原样
+    // 灌进用户视野——汇报语言纪律在基底 system 收口（防英文报告回流摘要）。
+    '【汇报纪律】完成摘要与一切面向用户的文本一律使用中文，简明扼要（要点式，先结论后细节索引）；分析细节写入产物文件，不在摘要里展开。',
     node.outputPath
       ? `本阶段产物目录：${node.outputPath}/（相对项目根目录）。`
       : '本阶段产物写入项目根目录（相对路径）。',
@@ -167,6 +175,22 @@ export function buildAdvanceProtocolSection(node: PhaseNode): string {
     }
   }
   return lines.join('\n')
+}
+
+/**
+ * 输出纪律段（刀4，2026-10-02 确认协议与呈现层战役）：面向用户的呈现质量契约——
+ * 调度员是用户唯一可见的过程人格，聊天流不是工程日志。三条纪律对应三类事故：
+ * 英文长段（渠道默认英文输出）→ ①一律中文；过程叙述淹没结论 → ②要点化≤2 句，
+ * 长分析落产物文件；结尾形态漂移（开放式提问/冗长总结） → ③结尾只允许下一步一句话
+ * 或推进标记。子会话侧的对应纪律在 buildDesktopChildBaseSystem（防英文报告回流摘要）。
+ */
+export function buildOutputDisciplineSection(): string {
+  return [
+    '【输出纪律】',
+    '1. 面向用户的一切文本（阶段叙述、汇报、拒收教育、交付通知）一律使用中文；专有名词与代码标识符可保留英文原词，不写英文句段。',
+    '2. 过程叙述收敛为不超过 2 句的要点；更长的分析与方案对比写入委派任务书或产物文件（报告/清单），不进聊天流。',
+    '3. 每轮回复的结尾只允许两种形态：一句话说明下一步，或输出推进标记——不写开放式提问、不写冗长总结。',
+  ].join('\n')
 }
 
 /**

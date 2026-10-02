@@ -121,6 +121,24 @@ describe('buildToolDisciplineSection', () => {
   })
 })
 
+describe('输出纪律段（刀4，2026-10-02 确认协议与呈现层战役）', () => {
+  it('系统提示词固定含【输出纪律】段：中文/≤2 句要点/结尾两形态', () => {
+    const prompt = buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-scaffold'], { projectName: 'p' })
+    expect(prompt).toContain('【输出纪律】')
+    expect(prompt).toContain('一律使用中文')
+    expect(prompt).toContain('不超过 2 句')
+    expect(prompt).toContain('一句话说明下一步，或输出推进标记')
+    // 组装序：输出纪律在工具纪律之后
+    expect(prompt.indexOf('【工具纪律】')).toBeLessThan(prompt.indexOf('【输出纪律】'))
+  })
+
+  it('子会话基底含汇报纪律（防英文报告回流摘要）', () => {
+    const base = buildDesktopChildBaseSystem(DESKTOP_PHASES['desktop-implement'], { projectName: 'p' })
+    expect(base).toContain('【汇报纪律】')
+    expect(base).toContain('中文')
+  })
+})
+
 describe('需求摘要与子会话基底（2026-09-26 首跑修复）', () => {
   it('requirementsDigest 渲染【项目需求】段；缺省不出', () => {
     const withDigest = buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-arch'], {
