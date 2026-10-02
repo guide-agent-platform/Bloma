@@ -7,6 +7,25 @@
 
 **v1.1 修订说明**：同步 §5 已知待同步项状态（4 项全部已同步），新增 §5.1 目录结构重组记录。按 `workflow.md §2.4` 走修订流程，待评审后回到已确认。
 
+## 狗粮 f277dbf1 复盘修复批：stderr 证据直达 + 竖线锚点方言 + 入口路径口径（2026-10-02）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | fix（狗粮第二轮实测复盘：遥测 18 段，desktop-verify 三连 reject 的根因链修复） |
+| 模块 | `main/desktop/dispatcher-loop.ts`、`main/desktop/process-driver.ts` |
+
+### 变更内容
+
+- **driver fail 拒收教育附执行证据**：教育文案只给路由原因不给证据时，修复轮要自己 read 报告重新定位（狗粮三轮 40 轮烧在同一 RecursionError 上）——stderr 尾部摘要（末次异常行 + 首个栈帧，各 160 字符）随教育直达，修复轮零轮次定位。
+- **锚点解析兼容竖线方言**：`SCENARIO|<id>|<outcome>|<detail>` 与 `SUMMARY|total=..|pass=..` 行可解析（官方骨架教 PASS/SUMMARY 空格方言，生成物自创竖线方言——不兼容时锚点静默丢失，撞空驱动门）。两方言并存互不干扰，锚点优先裁决语义不变。
+- **裁判门③入口路径口径修正**：entry 是应用入口的产物形态声明，桌面骨架标准布局实现文件在 00_IMPLEMENT/ 下（骨架样例 entry:"app.py" 对应 00_IMPLEMENT/app.py）——项目根直下或 00_IMPLEMENT/ 下存在都算，不写死根目录（狗粮实证：app.py 在 00_IMPLEMENT/ 下，写死根会误拒）。
+- **狗粮侧直接修复（非本仓库文件）**：项目根 driver.py 薄转发的自导入死循环（`import driver as _impl` 解析回自身，RecursionError ×996）改为 importlib 按路径加载 00_IMPLEMENT/driver.py——修后本地实跑 **7/7 场景全 PASS、exit 0**，四门推演全绿（安全预扫无高危；PRD P0 2 项 ≤ 7 场景；入口 00_IMPLEMENT/app.py 可达）。
+
+### 影响评估
+
+- 单测 199 文件/1955 例全绿（新增锁定×2：stderr 证据直达、竖线方言解析+混用+锚点优先裁决）；typecheck 0 错。
+- 遥测 18 段复盘：arch(29+确认)→scaffold(12)→implement(29/40-no-marks/16 三段收敛)→verify 四段——四批修复的机制全部按设计运转（确认凭据链/拒收教育/驱动真实执行/fail-closed）；卡点为生成物两层缺陷（薄转发自递归 + 方言偏离），平台侧证据直达与方言兼容已补。
+
 ## 全链路审查修复批四：P0-1 完整版——桌面线裁判门三件套 + 中文锚点实证修复（2026-10-02）
 
 | 属性 | 值 |

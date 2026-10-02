@@ -244,3 +244,34 @@ describe('生产 spawn 实现导出面', () => {
     expect(typeof execFileDriverSpawn).toBe('function')
   })
 })
+
+describe('parseDriverStdout 竖线方言兼容（狗粮 f277dbf1 实证，2026-10-02）', () => {
+  it('SCENARIO|id|outcome|detail 行与 SUMMARY|total=.. 行可解析（生成物偏离官方 PASS 方言时锚点不丢失）', () => {
+    const stdout = [
+      'ENV|backend|fake',
+      'SCENARIO|F-001|pass|悬浮球常驻桌面 size 96x96',
+      'SCENARIO|F-002|pass|同窗口双视图切换',
+      'SCENARIO|F-007|fail|飘字文本与输入不一致',
+      'SCENARIO|F-008|blocked|PySide6 不可用',
+      'SUMMARY|total=4|pass=2|fail=1|blocked=1|exit_code=1',
+    ].join('\n')
+    const { scenarios, summaryLine } = parseDriverStdout(stdout)
+    expect(scenarios).toEqual([
+      { name: 'F-001', outcome: 'pass' },
+      { name: 'F-002', outcome: 'pass' },
+      { name: 'F-007', outcome: 'fail' },
+      { name: 'F-008', outcome: 'blocked' },
+    ])
+    expect(summaryLine).toBe('SUMMARY|total=4|pass=2|fail=1|blocked=1|exit_code=1')
+  })
+
+  it('竖线方言与官方空格方言混用互不干扰；routeDriverOutcome 对竖线方言按锚点优先裁决', () => {
+    const { scenarios } = parseDriverStdout('PASS official-name\nSCENARIO|F-001|pass|desc')
+    expect(scenarios).toEqual([
+      { name: 'official-name', outcome: 'pass' },
+      { name: 'F-001', outcome: 'pass' },
+    ])
+    const routed = routeDriverOutcome(0, [{ name: 'F-007', outcome: 'fail' }])
+    expect(routed.routing).toBe('fail')
+  })
+})

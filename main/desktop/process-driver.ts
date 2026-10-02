@@ -144,9 +144,18 @@ export function parseDriverStdout(stdout: string): { scenarios: DriverScenarioOu
   let summaryLine: string | null = null
   for (const rawLine of stdout.split(/\r?\n/)) {
     const line = rawLine.trim()
-    // SUMMARY 行（取最后一条——驱动多次打印时以终值为准）
+    // SUMMARY 行（取最后一条——驱动多次打印时以终值为准）；兼容竖线方言
+    // `SUMMARY|total=..|pass=..|..`（狗粮 f277dbf1 实证，2026-10-02：生成物自创
+    // SCENARIO|/SUMMARY| 竖线形态，官方骨架教的是 PASS/SUMMARY 空格形态——两 dialect
+    // 都认，防生成物偏离官方骨架方言时锚点静默丢失撞空驱动门）
     if (/^SUMMARY\b/.test(line)) {
       summaryLine = line
+      continue
+    }
+    // 竖线方言：SCENARIO|<id>|<pass|fail|blocked|skip>|<detail...>
+    const piped = /^SCENARIO\|([^|]+)\|(pass|fail|blocked|skip)\b/i.exec(line)
+    if (piped) {
+      scenarios.push({ name: piped[1].trim(), outcome: piped[2].toLowerCase() as DriverScenarioOutcome['outcome'] })
       continue
     }
     // 场景行：PASS|FAIL|BLOCKED|SKIP <name>（主名=首段非空白非冒号；支持中文——P0-1a 实证，

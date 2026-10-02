@@ -82,10 +82,16 @@ function runDesktopJudgeGate(input: {
       `驱动场景覆盖不足：PRD 有 ${p0Items.length} 个核心（P0）功能项（${p0Items.map((i) => i.id).join('、')}），driver 只回读了 ${coveredScenarios.length} 个非 skipped 场景——每个核心功能项至少要有一个场景验证`,
     )
   }
-  // ③ 入口存在（judge ③ 契约制等价物；driver 真实执行已由收口前置步骤保证）
+  // ③ 入口存在（judge ③ 契约制等价物；driver 真实执行已由收口前置步骤保证）。
+  // 路径口径（狗粮 f277dbf1 实证修正，2026-10-02）：entry 是应用入口的产物形态声明，
+  // 桌面骨架标准布局里实现文件在 00_IMPLEMENT/ 下（骨架样例 entry:"app.py" 对应
+  // 00_IMPLEMENT/app.py）——项目根直下或 00_IMPLEMENT/ 下存在都算，不写死根目录。
   const rootPath = input.sandboxRoot
-  if (rootPath && !existsSync(join(rootPath, input.entryFile))) {
-    hardFailures.push(`工程契约声明的入口文件（${input.entryFile}）在产物中不存在——没有可运行的入口，不能交付`)
+  if (rootPath) {
+    const entryCandidates = [join(rootPath, input.entryFile), join(rootPath, '00_IMPLEMENT', input.entryFile)]
+    if (!entryCandidates.some((candidate) => existsSync(candidate))) {
+      hardFailures.push(`工程契约声明的入口文件（${input.entryFile}）在产物中不存在（项目根与 00_IMPLEMENT/ 均未找到）——没有可运行的入口，不能交付`)
+    }
   }
   // 软对账（P0-1c）：P0 断言关键词在场景名中的命中率——观测不阻断。中文断言多是无
   // 分隔长句，逐词 split 会误报（实证：'添加待办后列表新增一条' vs 场景'添加待办场景'
@@ -532,6 +538,13 @@ async function runVerifyFinalize(
   input.writeReport?.(DRIVER_REPORT_PATH, JSON.stringify(report, null, 2))
 
   if (report.routing !== 'pass') {
+    // 狗粮实证（f277dbf1，2026-10-02）：教育文案只给路由原因不给执行证据时，修复轮
+    // 要自己 read 报告重新定位（三轮 40 轮烧在同一 RecursionError 上）——stderr 尾部
+    // 摘要（末次异常行 + 关键栈行）直接随教育送达，修复轮零轮次定位。
+    const stderrTail = (report.stderrExcerpt ?? '').trim().split(/\r?\n/).filter(Boolean)
+    const lastError = stderrTail.length > 0 ? stderrTail[stderrTail.length - 1] : ''
+    const stackHint = stderrTail.find((line) => /\sFile\s"/.test(line)) ?? ''
+    const evidence = lastError ? `\n执行证据：${lastError.slice(0, 160)}${stackHint ? `（首个栈帧：${stackHint.trim().slice(0, 160)}）` : ''}` : ''
     return {
       advance: {
         decision: 'reject',
@@ -539,7 +552,7 @@ async function runVerifyFinalize(
         missingArtifacts: [{ gateId: 'driver-report', artifacts: [DRIVER_REPORT_PATH] }],
         discardedObservations: [],
         education:
-          `驱动执行未通过（${report.routing}）：${report.routingReason}\n` +
+          `驱动执行未通过（${report.routing}）：${report.routingReason}${evidence}\n` +
           '验证结论只看驱动执行回读——请按失败场景修复后重新收口（fail 路由进修复轮；blocked 属环境类需先解决装配）。',
       },
       driverReport: report,

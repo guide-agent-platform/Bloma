@@ -228,6 +228,34 @@ describe('驱动挂载腿（desktop-verify 收口）', () => {
     expect(result.driverReport?.routing).toBe('fail')
   })
 
+  it('driver fail 拒收教育附 stderr 执行证据（狗粮 f277dbf1 实证，2026-10-02）：末次异常行 + 首个栈帧随教育直达，修复轮零轮次定位', async () => {
+    const { query } = scriptedQuery([[textMessage('PHASE_ADVANCE: delivered')]])
+    const result = await runDesktopDispatcherLoop(baseInput({
+      query,
+      currentPhase: 'desktop-verify',
+      artifactExists: allExist,
+      confirmedPhases: new Set(['desktop-verify']),
+      readContract: () => validContract,
+      driverSpawn: async () => ({
+        code: 1,
+        stdout: '',
+        stderr: [
+          'Traceback (most recent call last):',
+          '  File "C:\\x\\driver.py", line 57, in main',
+          '    return _impl.main(...)',
+          'RecursionError: maximum recursion depth exceeded',
+        ].join('\n'),
+      }),
+      writeReport: () => undefined,
+    }))
+    expect(result.advance).toMatchObject({ decision: 'reject' })
+    if (result.advance?.decision === 'reject') {
+      expect(result.advance.education).toContain('RecursionError: maximum recursion depth exceeded')
+      expect(result.advance.education).toContain('执行证据')
+      expect(result.advance.education).toContain('driver.py')
+    }
+  })
+
   it('契约缺失 → reject（fail-closed）', async () => {
     const { query } = scriptedQuery([[textMessage('PHASE_ADVANCE: delivered')]])
     const result = await runDesktopDispatcherLoop(baseInput({
