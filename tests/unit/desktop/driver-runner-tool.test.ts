@@ -17,7 +17,7 @@ const CONTRACT = {
   schema_version: 1,
   entry: 'app.py',
   driver: {
-    command: ['python', 'driver.py'],
+    command: ['python', '00_SCAFFOLD/driver.py'],
     timeout_ms: 60000,
     exit_code_semantics: { '0': 'pass', '1': 'fail-route-repair', '2': 'blocked-no-repair' },
     assert_readback: 'stdout 行级锚点（PASS/FAIL/BLOCKED/SUMMARY）',
@@ -61,7 +61,7 @@ describe('run_project_driver 工具', () => {
     expect(out.isError).toBeUndefined()
     expect(out.output).toContain('PASS')
     expect(out.output).toContain('2/2 PASS')
-    expect(out.output).toContain('python driver.py')
+    expect(out.output).toContain('python 00_SCAFFOLD/driver.py')
   })
 
   it('合法契约 + 断言失败 → fail 渲染（红绿清单可喂回修复线）', async () => {

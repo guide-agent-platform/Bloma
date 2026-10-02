@@ -200,7 +200,7 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '续接骨架委派实现真实桌面程序：\n' +
       '1. 按 PRD 背板功能清单实现，驱动断言与实现静态自洽（断言先行、真实调用被测代码、禁止平凡通过）；\n' +
       '2. 真实红绿反馈：收口前用 run_project_driver（平台收口 spawn，本阶段唯一执行通道——子会话无 shell 是设计而非故障）跑一次驱动，失败清单交同一委派线修复后复跑；不要因「无法执行驱动」阻塞、编造或向用户索要本机运行；\n' +
-      '3. 产出 DELIVERY.md——运行方式 / 依赖安装 / 已知限制 / 驱动执行入口。',
+      '3. 产出 DELIVERY.md 到项目根（不是 00_SCAFFOLD/ 内——门禁按项目根检查）——运行方式 / 依赖安装 / 已知限制 / 驱动执行入口；契约 driver.command 相对项目根解析，指向 00_SCAFFOLD/ 内文件须带目录前缀（如 00_SCAFFOLD/driver.py）。',
     outputPath: '',
     constraints: [
       '每实现一个功能必须先有对应驱动断言（禁止无断言的实现）',

@@ -87,9 +87,12 @@ function runDesktopJudgeGate(input: {
   // 路径口径（狗粮 f277dbf1 实证修正，2026-10-02）：entry 是应用入口的产物形态声明，
   // 桌面骨架标准布局里实现文件在 00_IMPLEMENT/ 下（骨架样例 entry:"app.py" 对应
   // 00_IMPLEMENT/app.py）——项目根直下或 00_IMPLEMENT/ 下存在都算，不写死根目录。
+  // ada13257 脑测批（2026-10-02）：+00_SCAFFOLD/ 候选——scaffold 产物全部生成在
+  // 00_SCAFFOLD/，任务书未规定最终布局时模型原地续接是合法理解；三候选防
+  // 「布局假设未成 spec → 门禁随机撞墙」（f277dbf1 模型自己搬文件、ada13257 原地续接）。
   const rootPath = input.sandboxRoot
   if (rootPath) {
-    const entryCandidates = [join(rootPath, input.entryFile), join(rootPath, '00_IMPLEMENT', input.entryFile)]
+    const entryCandidates = [join(rootPath, input.entryFile), join(rootPath, '00_IMPLEMENT', input.entryFile), join(rootPath, '00_SCAFFOLD', input.entryFile)]
     if (!entryCandidates.some((candidate) => existsSync(candidate))) {
       hardFailures.push(`工程契约声明的入口文件（${input.entryFile}）在产物中不存在（项目根与 00_IMPLEMENT/ 均未找到）——没有可运行的入口，不能交付`)
     }

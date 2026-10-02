@@ -97,11 +97,13 @@ const CURRENT_SCHEMA_VERSION = 1
 /** 最小合规契约样例（狗粮 7bc4eeff 实证：模型凭空写契约会发明方言——schema_version
  * "1.0"/entrypoints/路径字符串 driver 三错全犯；scaffold 与 verify 任务书内嵌本样例，
  * 模型照写即过校验。本样例自身必须 parse 通过（contract-schema 测试自洽锁）。 */
+// ada13257 脑测批（2026-10-02）：command 相对项目根解析——scaffold 产物在
+// 00_SCAFFOLD/ 下，命令必须带目录前缀；样例即教学法，防下一个项目再撞 not-found。
 export const MINIMAL_CONTRACT_EXAMPLE = `{
   "schema_version": 1,
   "entry": "app.py",
   "driver": {
-    "command": ["python", "driver.py"],
+    "command": ["python", "00_SCAFFOLD/driver.py"],
     "timeout_ms": 60000,
     "exit_code_semantics": { "0": "全部断言通过", "1": "存在断言失败", "2": "环境阻塞" },
     "assert_readback": "逐场景断言结果从 stdout 读回"
