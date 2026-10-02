@@ -64,6 +64,24 @@ describe('run_project_driver 工具', () => {
     expect(out.output).toContain('python 00_SCAFFOLD/driver.py')
   })
 
+  it('刀3：截图目录存在 → 报告列截图清单；目录缺失 → 无截图行', async () => {
+    const { mkdirSync, writeFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const root = await makeRoot(true)
+    mkdirSync(join(root, '00_VERIFY', 'screenshots'), { recursive: true })
+    writeFileSync(join(root, '00_VERIFY', 'screenshots', 'S1.png'), 'png')
+    writeFileSync(join(root, '00_VERIFY', 'screenshots', 'S2.png'), 'png')
+    const tool = toolFor(root, async () => ({ code: 0, stdout: 'PASS 加法\nSUMMARY pass=1', stderr: '' }))
+    const out = await tool.execute!({} as never, {} as never)
+    expect(out.output).toContain('程序截图（2 张）')
+    expect(out.output).toContain('00_VERIFY/screenshots/S1.png')
+
+    const bareRoot = await makeRoot(true)
+    const bareTool = toolFor(bareRoot, async () => ({ code: 0, stdout: 'PASS 加法\nSUMMARY pass=1', stderr: '' }))
+    const bareOut = await bareTool.execute!({} as never, {} as never)
+    expect(bareOut.output).not.toContain('程序截图')
+  })
+
   it('合法契约 + 断言失败 → fail 渲染（红绿清单可喂回修复线）', async () => {
     const root = await makeRoot(true)
     const tool = toolFor(root, async () => ({ code: 1, stdout: 'PASS 加法\nFAIL 除零\nSUMMARY pass=1 fail=1', stderr: 'ZeroDivisionError' }))
@@ -122,5 +140,12 @@ describe('run_project_driver 阶段白名单', () => {
     expect(template).toContain('run_project_driver')
     expect(template).toContain('静态自洽')
     expect(template).not.toContain('驱动断言逐条变绿')
+  })
+
+  it('刀3 截图约定：scaffold/verify 任务书含窗口截图要求（fail-open 不阻塞断言）', () => {
+    expect(DESKTOP_PHASES['desktop-scaffold'].taskTemplate).toContain('ImageGrab.grab')
+    expect(DESKTOP_PHASES['desktop-scaffold'].taskTemplate).toContain('00_VERIFY/screenshots/S<场景号>.png')
+    expect(DESKTOP_PHASES['desktop-scaffold'].taskTemplate).toContain('不阻塞断言')
+    expect(DESKTOP_PHASES['desktop-verify'].taskTemplate).toContain('00_VERIFY/screenshots/')
   })
 })

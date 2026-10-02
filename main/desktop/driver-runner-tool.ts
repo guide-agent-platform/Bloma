@@ -20,7 +20,7 @@
  * spawn 注入式：单测零真实子进程；生产 execFileDriverSpawn。
  */
 
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AgentLoopTool, ToolOutcome } from '../agent/loop/agent-loop'
 import { findProject } from '../project/project-service'
@@ -37,8 +37,11 @@ export interface ProjectDriverRunnerDeps {
   resolveRoot?: (projectId: string) => string | undefined
 }
 
-/** 报告 → 工具输出文本（人读 + 模型可据以路由修复）。 */
-export function renderDriverReport(report: DriverExecutionReport): string {
+/** 截图目录（对齐阶段表截图约定：00_VERIFY/screenshots/S<场景号>.png）。 */
+export const SCREENSHOTS_RELATIVE_PATH = '00_VERIFY/screenshots'
+
+/** 报告 → 工具输出文本（人读 + 模型可据以路由修复）；screenshots=截图清单（调用方扫描，纯函数保持零 I/O）。 */
+export function renderDriverReport(report: DriverExecutionReport, screenshots: readonly string[] = []): string {
   const lines: string[] = [
     `驱动执行结果（平台真实 spawn，非推断）：${report.routing.toUpperCase()}`,
     `- 命令：${report.command}`,
@@ -53,6 +56,10 @@ export function renderDriverReport(report: DriverExecutionReport): string {
     }
   }
   if (report.summaryLine) lines.push(`- ${report.summaryLine}`)
+  // 刀3（2026-10-02 呈现层）：截图清单入报告——调度员/通知卡的证据索引
+  if (screenshots.length > 0) {
+    lines.push(`- 程序截图（${screenshots.length} 张）：${screenshots.join('、')}`)
+  }
   if (report.stdoutExcerpt) lines.push(`- stdout 摘录（≤8KB）：\n${report.stdoutExcerpt}`)
   if (report.stderrExcerpt) lines.push(`- stderr 摘录：\n${report.stderrExcerpt}`)
   lines.push('三分类语义：pass=可推进；fail=失败清单交同一委派线修复后复跑；blocked=环境类（装配/人工），不进修复轮。')
@@ -122,7 +129,17 @@ export function buildProjectDriverRunnerTool(projectId: string, deps: ProjectDri
         spawn: deps.spawn ?? execFileDriverSpawn,
         parentEnv: process.env,
       })
-      return { output: renderDriverReport(report), detail: { report } }
+      // 刀3：截图清单（目录缺失/不可读 → 空清单，不阻塞报告）
+      let screenshots: string[] = []
+      try {
+        screenshots = (await readdir(join(root, SCREENSHOTS_RELATIVE_PATH), { withFileTypes: true }))
+          .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.png'))
+          .map((entry) => `${SCREENSHOTS_RELATIVE_PATH}/${entry.name}`)
+          .sort()
+      } catch {
+        // 目录不存在：正常路径（未到截图阶段/非 UI 项目）
+      }
+      return { output: renderDriverReport(report, screenshots), detail: { report } }
     },
   }
 }

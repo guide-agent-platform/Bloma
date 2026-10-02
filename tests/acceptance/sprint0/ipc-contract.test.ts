@@ -70,6 +70,9 @@ const expectedChannels = {
   PROMPT_READ: 'prompt:read',
   PROMPT_SAVE: 'prompt:save',
   PROMPT_RESET: 'prompt:reset',
+  DESKTOP_ARTIFACT_SUBSCRIBE: 'desktop:artifact-subscribe',
+  DESKTOP_ARTIFACT_IMAGE: 'desktop:artifact-image',
+  DESKTOP_ARTIFACT_EVENT: 'desktop:artifact-event',
 } as const
 
 describe('Sprint 0 IPC contract acceptance', () => {

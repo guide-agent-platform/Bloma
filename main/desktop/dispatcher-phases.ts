@@ -168,7 +168,10 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
     taskTemplate:
       '按选型结论搭建最小骨架（不实现业务功能）：\n' +
       '1. Python 最小骨架（托盘/全局快捷键/录音等组件按环境清单结论接入，未确认组件不引入）；\n' +
-      '2. driver-skeleton.py——驱动断言骨架（每个 GWT 场景一个可执行断言，先写断言后写实现）；\n' +
+      '2. driver-skeleton.py——驱动断言骨架（每个 GWT 场景一个可执行断言，先写断言后写实现）；' +
+      'UI 场景断言处保存窗口截图（tkinter：root.update() 后用 root.winfo_rootx/y/width/height() 取窗框，' +
+      'PIL.ImageGrab.grab(bbox) 存 00_VERIFY/screenshots/S<场景号>.png；Pillow 缺失时降级跳过并如实标注，' +
+      '不阻塞断言——截图是呈现层证据不是验收门）；\n' +
       '3. 工程契约 contract.json——**必须严格采用以下形态（平台 schema fail-closed 校验，字段名/类型一字不差；schema_version 是数字 1 不是 "1.0"，入口字段名是 entry 不是 entrypoints，driver 是对象不是路径字符串）：**\n' + MINIMAL_CONTRACT_EXAMPLE + '\n' +
       '（components 按实际使用的 GUI/系统能力填；其余字段可自行扩展但上述必填面不得改名。）',
     outputPath: '00_SCAFFOLD',
@@ -234,7 +237,7 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '1. GWT 场景补全（driver.py 每场景一个可执行断言，断言先行）；\n' +
       '2. **驱动执行由平台收口时执行**（spawn python 跑 contract.json 的 driver.command，退出码/stdout 回读）——你不需要也无法自行执行驱动，不要花轮次尝试执行或写「无执行通道」的替代报告；\n' +
       '3. 你的验收职责 = contract.json 合法（必填形态一字不差：schema_version 数字 1 / entry / driver 对象含 command、timeout_ms、exit_code_semantics 三键、assert_readback / env_whitelist / components——形态见下）+ driver.py 断言齐备：\n' + MINIMAL_CONTRACT_EXAMPLE + '\n' +
-      '4. 产出驱动执行报告（通过/失败/阻塞三分类，失败路由进修复轮）；\n' +
+      '4. 产出驱动执行报告（通过/失败/阻塞三分类，失败路由进修复轮）；UI 场景截图落 00_VERIFY/screenshots/（截图约定同 driver-skeleton，fail-open 不阻塞断言）；\n' +
       '5. 裁决边界：裁判+攻防审查（C3）对交付物做最终判定。',
     outputPath: '00_VERIFY',
     constraints: [

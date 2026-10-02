@@ -19,7 +19,7 @@
  * 零行为变化。
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { AgentEvent } from '../../shared/types'
 import type { SDKQuery } from '../orchestration/orchestrator' // 类型导入豁免（R1）
@@ -402,11 +402,26 @@ function assembleDeliveredNotice(
   const driverSummary = report && report.scenarios.length > 0
     ? { passed: report.scenarios.filter((s) => s.outcome === 'pass').length, total: report.scenarios.length }
     : undefined
+  // 刀3：最新截图清单入通知卡（存在性读取 fail-open；最多取 4 张防刷屏）
+  let screenshotPaths: string[] | undefined
+  if (root) {
+    try {
+      screenshotPaths = readdirSync(join(root, '00_VERIFY', 'screenshots'), { withFileTypes: true })
+        .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.png'))
+        .map((entry) => `00_VERIFY/screenshots/${entry.name}`)
+        .sort()
+        .slice(0, 4)
+      if (screenshotPaths.length === 0) screenshotPaths = undefined
+    } catch {
+      // 目录不存在：通知卡省略截图行
+    }
+  }
   return {
     projectName,
     fromPhaseTitle: getDesktopPhase(fromPhase)?.title ?? fromPhase,
     ...(entryFile ? { entryFile } : {}),
     ...(deliveryDigest ? { deliveryDigest } : {}),
     ...(driverSummary ? { driverSummary } : {}),
+    ...(screenshotPaths ? { screenshotPaths } : {}),
   }
 }

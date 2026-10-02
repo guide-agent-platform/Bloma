@@ -189,6 +189,9 @@ describe('handleDesktopDispatchMessage 消息路由', () => {
 
   it('delivered 终态：desktop_phase/status/current_stage 收口 + stage_changed', async () => {
     writeValidContract()
+    // 刀3：预置程序截图（通知卡内嵌清单的数据源）
+    mkdirSync(join(sandboxRoot, '00_VERIFY', 'screenshots'), { recursive: true })
+    writeFileSync(join(sandboxRoot, '00_VERIFY', 'screenshots', 'S1.png'), 'png')
     record.desktop_phase = 'desktop-verify'
     record.desktop_confirmed_phases = ['desktop-verify']
     const { deps, events } = collectorDeps()
@@ -200,6 +203,8 @@ describe('handleDesktopDispatchMessage 消息路由', () => {
     expect((record as unknown as { current_stage?: string }).current_stage).toBe('completed')
     // 终态也发 stage_changed（渲染端阶段条跳到「交付」）
     expect(events.some((e) => e.type === 'stage_changed' && e.payload.stage === 'delivered')).toBe(true)
+    // 刀3：预置截图 png → 通知卡内嵌截图清单
+    expect(events.some((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('程序截图'))).toBe(true)
   })
 
   it('刀1 撤 manual 门：desktop-arch 门禁过即推进（零 confirmation-required、零确认卡）', async () => {

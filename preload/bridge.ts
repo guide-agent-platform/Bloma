@@ -38,6 +38,9 @@ import type {
   ChannelTestEnvelope,
   ChannelTestDirectEnvelope,
   ChannelUpdateEnvelope,
+  DesktopArtifactEventPayload,
+  DesktopArtifactImageInput,
+  DesktopArtifactSubscribeInput,
   FetchModelsEnvelope,
   DocumentListInput,
   DocumentReadInput,
@@ -174,6 +177,17 @@ const electronAPI: ElectronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.DOCUMENT_READ, input),
   },
   dom: {
+  },
+  desktopArtifacts: {
+    subscribe: (input: DesktopArtifactSubscribeInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.DESKTOP_ARTIFACT_SUBSCRIBE, input),
+    image: (input: DesktopArtifactImageInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.DESKTOP_ARTIFACT_IMAGE, input),
+    onArtifactEvent: (listener: (payload: DesktopArtifactEventPayload) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: DesktopArtifactEventPayload) => listener(data)
+      ipcRenderer.on(IPC_CHANNELS.DESKTOP_ARTIFACT_EVENT, handler)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.DESKTOP_ARTIFACT_EVENT, handler)
+    },
   },
   analytics: {
     track: (input: AnalyticsTrackInput) =>

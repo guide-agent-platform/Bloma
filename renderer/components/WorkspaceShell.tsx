@@ -3,6 +3,7 @@ type DomCollectContextResult = { fallback_mode: boolean; element_selector?: stri
 import React from 'react'
 import { WorkspaceHeader } from './WorkspaceHeader'
 import { ChatPanel } from './ChatPanel'
+import { DesktopArtifactStrip } from './DesktopArtifactStrip'
 import type { AgentMessage } from './atoms'
 import { PreviewPanel } from './PreviewPanel'
 import { TimelinePanel } from './TimelinePanel'
@@ -96,6 +97,9 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
         onOpenSettings={props.onOpenSettings}
         onUpgrade={props.onUpgrade}
       />
+
+      {/* 桌面线产物预览条（刀3 呈现层最小版）：桌面线激活且有产物时显示（阶段条下方窄带） */}
+      <DesktopArtifactStrip />
 
       {/* MVP 状态横幅（Sprint 2） */}
       <MvpStatusBanner />

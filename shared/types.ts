@@ -76,6 +76,10 @@ export const IPC_CHANNELS = {
   PROMPT_READ: 'prompt:read',
   PROMPT_SAVE: 'prompt:save',
   PROMPT_RESET: 'prompt:reset',
+  /** 刀3 呈现层（2026-10-02）：桌面线产物预览——订阅（启动 watcher+快照清单）/图片读取/变更推送 */
+  DESKTOP_ARTIFACT_SUBSCRIBE: 'desktop:artifact-subscribe',
+  DESKTOP_ARTIFACT_IMAGE: 'desktop:artifact-image',
+  DESKTOP_ARTIFACT_EVENT: 'desktop:artifact-event',
 } as const
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
@@ -373,6 +377,43 @@ export interface PromptSaveResult {
 export interface PromptResetResult {
   reset: true
   prompt_id: PromptSlotId
+}
+
+// =========================================================================
+// 3.7 桌面线产物预览（刀3 呈现层最小版，2026-10-02）
+// =========================================================================
+
+export interface DesktopArtifactSubscribeInput extends RequestEnvelope {
+  project_id: string
+}
+
+/** 产物清单条目（渲染端直显/点击读取；三类白名单：png/md/json）。 */
+export interface DesktopArtifactItemDto {
+  path: string
+  kind: 'image' | 'doc'
+  bytes: number
+  mtime: number
+}
+
+export interface DesktopArtifactSubscribeResult {
+  /** 当前清单快照（订阅即返回；后续变更经 onArtifactEvent 重拉）。 */
+  items: DesktopArtifactItemDto[]
+}
+
+export interface DesktopArtifactImageInput extends RequestEnvelope {
+  project_id: string
+  /** 00_VERIFY/screenshots/ 下的相对路径（白名单外拒读）。 */
+  path: string
+}
+
+export interface DesktopArtifactImageResult {
+  data_url: string
+  bytes: number
+}
+
+/** 变更推送 payload（去抖信号：渲染端收到后重新 SUBSCRIBE 拉清单）。 */
+export interface DesktopArtifactEventPayload {
+  project_id: string
 }
 
 // =========================================================================
@@ -1546,6 +1587,14 @@ export type ElectronAPI = {
   }
   dom: {
     /** 点选纠错模式下转发滚轮/中键拖拽滚动到跨域预览 iframe */
+  }
+  desktopArtifacts: {
+    /** 刀3 呈现层：订阅桌面线产物变更（单订阅模型——新订阅自动停旧；返回清单快照） */
+    subscribe(input: DesktopArtifactSubscribeInput): Promise<ApiResult<DesktopArtifactSubscribeResult>>
+    /** png 截图读取（仅 00_VERIFY/screenshots/ 白名单；base64 data URL） */
+    image(input: DesktopArtifactImageInput): Promise<ApiResult<DesktopArtifactImageResult>>
+    /** 产物变更信号（去抖推送；渲染端重拉清单） */
+    onArtifactEvent(listener: (payload: DesktopArtifactEventPayload) => void): () => void
   }
   analytics: {
     track(input: AnalyticsTrackInput): Promise<ApiResult<AnalyticsTrackResult>>

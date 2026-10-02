@@ -381,7 +381,19 @@ export function setupGlobalAgentListeners(): () => void {
   const store = window.__jotai_store__
   if (!api || !store) return () => undefined
 
-  return api.onStreamEvent((event) => {
+  // 刀3 呈现层（2026-10-02）：产物变更去抖信号——当前订阅项目命中时 version+1，
+  // DesktopArtifactStrip 的 effect 依赖 version 重拉清单（信号不携带清单，防乱序）。
+  const artifactsApi = window.electronAPI?.desktopArtifacts
+  const unsubscribeArtifacts = artifactsApi
+    ? artifactsApi.onArtifactEvent((payload) => {
+        const current = store.get(desktopArtifactsAtom)
+        if (current.projectId === payload.project_id) {
+          store.set(desktopArtifactsAtom, { ...current, version: current.version + 1 })
+        }
+      })
+    : undefined
+
+  const unsubscribeStream = api.onStreamEvent((event) => {
     // queued_started（message-queue 2026-08-27）：排队消息开始派发——追加「正在处理」
     // 提示，视觉上翻转「⏳ 已排队」（旧提示保留为历史记录）
     // usage_summary（usage-guard 渲染层 2026-08-28）：同会话累加渠道/估算用量
@@ -842,6 +854,11 @@ export function setupGlobalAgentListeners(): () => void {
       }
     })
   })
+
+  return () => {
+    unsubscribeArtifacts?.()
+    unsubscribeStream()
+  }
 }
 
 // =========================================================================
@@ -939,6 +956,15 @@ export const workflowStageAtom = atom<WorkflowStage>('choosing_mode')
  *  分流写入（桌面 id 不进 workflowStageAtom）；项目恢复/切换时从
  *  Project.desktop_phase 回填（App.tsx 三处恢复点），resetProjectState 清空。 */
 export const desktopPhaseAtom = atom<string | null>(null)
+
+/** 桌面线产物预览（刀3 呈现层最小版，2026-10-02）：清单快照 + 变更信号版本号。
+ *  DesktopArtifactStrip 订阅（SUBSCRIBE invoke）写入 items；onArtifactEvent 去
+ *  抖信号触发 version+1，组件 effect 依赖 version 重拉清单。模块级常量（陷阱 42）。 */
+export const desktopArtifactsAtom = atom<{
+  projectId: string | null
+  items: import('../shared/types').DesktopArtifactItemDto[]
+  version: number
+}>({ projectId: null, items: [], version: 0 })
 
 /** 模式选择是否已完成 */
 export const modeSelectedAtom = atom<boolean>(false)
@@ -1140,6 +1166,7 @@ export function resetProjectState(): void {
   store.set(selectedSnapshotAtom, null)
   store.set(stageIndicatorLabelAtom, '选择模式')
   store.set(desktopPhaseAtom, null)
+  store.set(desktopArtifactsAtom, { projectId: null, items: [], version: 0 })
 }
 
 // =========================================================================
