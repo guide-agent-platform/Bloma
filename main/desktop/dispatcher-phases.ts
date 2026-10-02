@@ -198,8 +198,9 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
     title: '实现与交付说明',
     taskTemplate:
       '续接骨架委派实现真实桌面程序：\n' +
-      '1. 按 PRD 背板功能清单实现（驱动断言逐条变绿）；\n' +
-      '2. 产出 DELIVERY.md——运行方式 / 依赖安装 / 已知限制 / 驱动执行入口。',
+      '1. 按 PRD 背板功能清单实现，驱动断言与实现静态自洽（断言先行、真实调用被测代码、禁止平凡通过）；\n' +
+      '2. 真实红绿反馈：收口前用 run_project_driver（平台收口 spawn，本阶段唯一执行通道——子会话无 shell 是设计而非故障）跑一次驱动，失败清单交同一委派线修复后复跑；不要因「无法执行驱动」阻塞、编造或向用户索要本机运行；\n' +
+      '3. 产出 DELIVERY.md——运行方式 / 依赖安装 / 已知限制 / 驱动执行入口。',
     outputPath: '',
     constraints: [
       '每实现一个功能必须先有对应驱动断言（禁止无断言的实现）',
@@ -221,7 +222,7 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
         description: '实现产物经用户预览确认后方可推进验证',
       },
     ],
-    extraTools: [],
+    extraTools: ['run_project_driver'],
     dispatcherManaged: true,
   },
   'desktop-verify': {

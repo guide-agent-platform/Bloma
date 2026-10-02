@@ -48,6 +48,7 @@ import { parseProjectContract } from './contract-schema'
 import { runContractDriver, execFileDriverSpawn, type DriverExecutionReport } from './process-driver'
 import { runSecurityScan } from '../verification/security-scan'
 import { findProject } from '../project/project-service'
+import { buildProjectDriverRunnerTool } from './driver-runner-tool'
 import { readPrdBackplane } from '../project/document-engine'
 import { requirementPriority } from '../model/prd-backplane'
 
@@ -212,7 +213,9 @@ const DESKTOP_DELEGATION_MAX_TURNS = 12
  */
 export function buildDispatcherTools(projectId: string): AgentLoopTool[] {
   const readonly = buildAgentTools({ projectId, role: 'research' }).filter((t) => READONLY_TOOL_NAMES.has(t.name))
-  return [...readonly, ...buildDelegationTools('parent'), buildWebResearch(projectId)]
+  // run_project_driver：常驻装配、阶段白名单放行（ada13257 根治——implement 真实红绿通道；
+  // 其余阶段被 checkDispatcherToolGate 拦截教育）。工具本体在 driver-runner-tool.ts。
+  return [...readonly, ...buildDelegationTools('parent'), buildWebResearch(projectId), buildProjectDriverRunnerTool(projectId)]
 }
 
 /**
