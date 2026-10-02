@@ -24,8 +24,8 @@ describe('classifyUserDesktopIntent 词表三态', () => {
     }
   })
 
-  it('普通文本 → none（不误触发）', () => {
-    for (const text of ['把按钮改成红色', '这个程序是干什么的', '帮我看看日志', '']) {
+  it('普通文本 → none（不误触发）；高误伤日常词已删（脑测修复 4：长句含「先别/等等/不急」不再误停）', () => {
+    for (const text of ['把按钮改成红色', '这个程序是干什么的', '帮我看看日志', '弹窗先别太多', '等等我看看再说', '不急你慢慢来', '']) {
       expect(classifyUserDesktopIntent(text)).toBe('none')
     }
   })

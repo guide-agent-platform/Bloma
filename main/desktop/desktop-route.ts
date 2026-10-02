@@ -174,12 +174,35 @@ export async function handleDesktopDispatchMessage(
   const projectName = project?.name ?? input.projectId
   const phaseId = project?.desktop_phase ?? 'desktop-arch'
 
-  // ── 旧确认卡回传（刀1 兼容）：确认卡已不再发出，点击旧卡如实告知并照常推进 ──
+  // ── 旧确认卡回传（刀1 兼容）：确认卡已不再发出，点击旧卡如实告知并照常推进
+  //（脑测修复 5，2026-10-03：旧卡也是人工出场——同步清 blocked 残留）──
   if (input.cardOptionId && input.cardOptionId.startsWith(DESKTOP_CONFIRM_OPTION_PREFIX)) {
+    if (project?.desktop_blocked) updateProject(input.projectId, { desktop_blocked: undefined })
     deps.publish(input, 'message_delta', {
       text: '确认协议已升级：中间阶段不再需要人工确认，门禁全绿自动推进。已按当前阶段继续处理你的消息。',
     })
     await runDesktopStage({ projectId: input.projectId, sessionId: input.sessionId, requestId: input.requestId, content: input.content, signal: input.signal }, input.query, input.env, phaseId, deps, projectName, 0)
+    return
+  }
+
+  // ── delivered 交付后反馈（刀1 通知卡承诺兑现，脑测发现修复 2026-10-03）：
+  // 通知卡引导「不满意？直接回复要改的地方」——任何消息按迭代意见回炉 implement
+  // 段（复用完整门禁与红绿链），改完重走 verify 再交付。放在意图分流之前：交付后
+  // 的「不满意/需要调整」等词是反馈不是叫停。
+  if (phaseId === 'delivered') {
+    updateProject(input.projectId, { desktop_phase: 'desktop-implement', status: 'active', current_stage: 'iterating' })
+    deps.publish(input, 'stage_changed', { stage: 'desktop-implement' })
+    deps.publish(input, 'message_delta', { text: '收到你的反馈，进入迭代：从「实现与交付说明」阶段按你的意见修改，改完会重新走驱动验收再交付。' })
+    await runDesktopStage(
+      {
+        projectId: input.projectId,
+        sessionId: input.sessionId,
+        requestId: input.requestId,
+        content: `【交付后迭代】用户对已交付产物的反馈，按此修改实现（其余功能与已验证行为保持不变）：${input.content}`,
+        signal: input.signal,
+      },
+      input.query, input.env, 'desktop-implement', deps, projectName, 0,
+    )
     return
   }
 
@@ -218,8 +241,12 @@ export async function handleDesktopDispatchMessage(
 // 单阶段执行 + 收口处理
 // =========================================================================
 
-/** 一次 run 内自动续跑的阶段数上限（推进链防失控；确认门/拒收会自然断链）。 */
-export const MAX_AUTO_ADVANCE_CHAIN = 3
+/** 一次 run 内自动续跑的阶段数上限（推进链防失控；确认门/拒收会自然断链）。
+ *  脑测修复 2（2026-10-03）：3→4——链序 arch(0)→scaffold(1)→implement(2)→verify(3)，
+ *  旧值 3 使 implement 推进后必停一次（「发送任意消息继续」），全程人工交互变成
+ *  3 次破「PRD 确认 + delivered 验收 ≤2 次」口径；4 允许 verify 段自动起跑，
+ *  其推进走终态分支不耗续跑预算，防失控语义不变（拒收/降级仍断链）。 */
+export const MAX_AUTO_ADVANCE_CHAIN = 4
 
 async function runDesktopStage(
   input: { projectId: string; sessionId: string; requestId: string; content: string; signal?: AbortSignal },

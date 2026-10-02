@@ -180,11 +180,73 @@ describe('handleDesktopDispatchMessage 消息路由', () => {
     expect(stageEvents.some((e) => String(e.payload.stage).startsWith('desktop-'))).toBe(true)
   })
 
-  it('推进链达预算上限后停（提示用户继续）', async () => {
-    const { events } = collectorDeps()
-    await handleDesktopDispatchMessage(routeInput(), events ? collectorDeps().deps : collectorDeps().deps)
-    // scaffold(0)→implement(1)→verify(2)→delivered 前停：预算提示至多一条
-    expect(MAX_AUTO_ADVANCE_CHAIN).toBe(3)
+  it('链预算 4：PRD 后零 kick 走到 delivered（arch→scaffold→implement→verify 自动连跑；脑测修复 2）', async () => {
+    writeValidContract()
+    record.desktop_phase = 'desktop-arch'
+    const { deps, events } = collectorDeps()
+    await handleDesktopDispatchMessage(routeInput({
+      query: scriptedQuery([
+        [textMessage('选型完成。\n<!-- PHASE_ADVANCE: desktop-scaffold -->')],
+        [textMessage('骨架完成。\n<!-- PHASE_ADVANCE: desktop-implement -->')],
+        [textMessage('实现完成。\n<!-- PHASE_ADVANCE: desktop-verify -->')],
+        [textMessage('验证全绿。\nPHASE_ADVANCE: delivered')],
+      ]),
+    }), deps)
+    expect(MAX_AUTO_ADVANCE_CHAIN).toBe(4)
+    expect(record.desktop_phase).toBe('delivered') // 零中间 kick
+    expect(events.some((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('预算已用完'))).toBe(false)
+  })
+
+  it('delivered 交付后反馈：回炉 implement 迭代段（通知卡承诺兑现；脑测修复 1）', async () => {
+    writeValidContract()
+    record.desktop_phase = 'delivered'
+    ;(record as unknown as { status?: string }).status = 'completed'
+    ;(record as unknown as { current_stage?: string }).current_stage = 'completed'
+    const receivedAll: string[] = []
+    const query: SDKQuery = async function* (_prompt: string, options: SDKQueryOptions) {
+      receivedAll.push(JSON.stringify(options.messages ?? []))
+      const responses = [
+        [textMessage('迭代完成。\n<!-- PHASE_ADVANCE: desktop-verify -->')],
+        [textMessage('验证全绿。\nPHASE_ADVANCE: delivered')],
+      ]
+      const idx = receivedAll.length - 1
+      const script = responses[Math.min(idx, responses.length - 1)]
+      for (const message of script) yield message
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+    const { deps, events } = collectorDeps()
+    await handleDesktopDispatchMessage(routeInput({
+      content: '把倒计时改成进度条',
+      query,
+    }), deps)
+    // 回炉后走完再交付（delivered+completed）或中途（implement/verify+iterating）——
+    // 两者皆合法，关键是离开 delivered 进迭代语义且状态自洽
+    expect(['desktop-implement', 'desktop-verify', 'delivered']).toContain(record.desktop_phase)
+    if (record.desktop_phase !== 'delivered') {
+      expect((record as unknown as { current_stage?: string }).current_stage).toBe('iterating')
+      expect((record as unknown as { status?: string }).status).toBe('active')
+    }
+    expect(events.some((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('进入迭代'))).toBe(true)
+    const allText = receivedAll.join('')
+    expect(allText).toContain('【交付后迭代】')
+    expect(allText).toContain('把倒计时改成进度条')
+  })
+
+  it('旧确认卡回传：同步清 blocked 残留（脑测修复 5；链走通不重置 blocked）', async () => {
+    writeValidContract()
+    record.desktop_phase = 'desktop-scaffold'
+    ;(record as Record<string, unknown>).desktop_blocked = { reason: 'user-stop', note: 'x', at: new Date().toISOString() }
+    const { deps } = collectorDeps()
+    await handleDesktopDispatchMessage(routeInput({
+      cardOptionId: 'desktop_confirm:desktop-scaffold:n-old',
+      query: scriptedQuery([
+        [textMessage('收到。\n<!-- PHASE_ADVANCE: desktop-implement -->')],
+        [textMessage('继续。\n<!-- PHASE_ADVANCE: desktop-verify -->')],
+        [textMessage('验证全绿。\nPHASE_ADVANCE: delivered')],
+      ]),
+    }), deps)
+    expect((record as unknown as { desktop_blocked?: unknown }).desktop_blocked).toBeUndefined()
+    expect(record.desktop_phase).toBe('delivered') // 全链通（blocked 未复发）
   })
 
   it('delivered 终态：desktop_phase/status/current_stage 收口 + stage_changed', async () => {
