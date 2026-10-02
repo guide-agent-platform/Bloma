@@ -579,7 +579,9 @@ async function runVerifyFinalize(
         discardedObservations: [],
         education:
           '驱动报告没有任何验证证据（零场景锚点、零 SUMMARY 自报）——退出码 0 不能替代断言。' +
-          '请让 driver 至少回读 1 个场景锚点（PASS/FAIL/BLOCKED 行）或输出 SUMMARY 行，再重新收口。',
+          '合法锚点形态任选其一（每场景一行）：`PASS <场景名>`、`S<编号> PASS <一句话结论>`、' +
+          '`SCENARIO|<编号>|pass|<描述>`；或终行 `SUMMARY pass=<n> fail=<m>`。' +
+          '请让 driver 按其中一种形态回读全部场景后重新收口。',
       },
       driverReport: report,
     }

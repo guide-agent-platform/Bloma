@@ -165,5 +165,8 @@ export function buildContinuationDirective(
     ? `\n缺失产物：${detail.missingArtifacts.flatMap((m) => m.artifacts).join('、')}`
     : ''
   const actual = detail && 'actual' in detail && detail.actual ? `\n本次声明目标：「${detail.actual}」` : ''
-  return `${head}${actual}${missing}\n${familyAction[family]}`
+  // 刀4 强化（狗粮 c21e10b1 实证，2026-10-03）：implement 段全英文叙述——续接指令是每轮
+  // 最强提醒位，语言纪律随拒收教育重选（英文工具输出占比高时模型语言漂移）。
+  const disciplineReminder = '\n输出纪律提醒：面向用户文本一律中文、≤2 句要点，结尾只给下一步一句话或推进标记。'
+  return `${head}${actual}${missing}\n${familyAction[family]}${disciplineReminder}`
 }

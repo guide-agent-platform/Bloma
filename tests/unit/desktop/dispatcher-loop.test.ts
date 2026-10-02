@@ -551,6 +551,10 @@ describe('desktop-verify 收口双门（全链路审查 P1-5/P0-1 缓解，2026-
     expect(result.advance).toMatchObject({ decision: 'reject', reason: 'artifacts-missing' })
     if (result.advance?.decision === 'reject') {
       expect(result.advance.education).toContain('没有任何验证证据')
+      // 刀5 补丁（c21e10b1 实证）：空驱动教育必须给确切合法格式样例——不给样例时
+      // 模型不知道改哪种方言，只能盲改
+      expect(result.advance.education).toContain('S<编号> PASS')
+      expect(result.advance.education).toContain('SUMMARY pass=<n>')
     }
     // driver 自身路由仍是 pass（纯函数语义不变），拦截发生在收口证据门
     expect(result.driverReport?.routing).toBe('pass')

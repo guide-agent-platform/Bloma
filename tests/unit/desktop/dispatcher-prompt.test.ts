@@ -135,12 +135,13 @@ describe('buildToolDisciplineSection', () => {
 })
 
 describe('输出纪律段（刀4，2026-10-02 确认协议与呈现层战役）', () => {
-  it('系统提示词固定含【输出纪律】段：中文/≤2 句要点/结尾两形态', () => {
+  it('系统提示词固定含【输出纪律】段：中文/≤2 句要点/结尾两形态 + 英文漂移自检（刀4 强化）', () => {
     const prompt = buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-scaffold'], { projectName: 'p' })
     expect(prompt).toContain('【输出纪律】')
     expect(prompt).toContain('一律使用中文')
     expect(prompt).toContain('不超过 2 句')
     expect(prompt).toContain('一句话说明下一步，或输出推进标记')
+    expect(prompt).toContain('立即停止并改用中文重述')
     // 组装序：输出纪律在工具纪律之后
     expect(prompt.indexOf('【工具纪律】')).toBeLessThan(prompt.indexOf('【输出纪律】'))
   })

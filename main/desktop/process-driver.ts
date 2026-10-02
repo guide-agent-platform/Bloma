@@ -131,6 +131,11 @@ export function buildDriverEnv(contract: ProjectContract, parentEnv: NodeJS.Proc
   }
   // PATH：契约声明 BLOMA_* 之外的 PATH 一律重建为最小集（驱动解释器解析靠绝对路径
   // venv python，不依赖 PATH 搜索；保留 PATH 会扩大子进程可达面）
+  // 输出编码归一（狗粮 c21e10b1 实证，2026-10-02）：Windows Python 子进程缺省按
+  // console 代码页（GBK）写 stdout，execFile 按 utf8 解码成乱码——场景名乱码会让
+  // 裁判门软对账 bigram 匹配失效且证据不可读。PYTHONIOENCODING 是基础设施编码
+  // 声明（与 SystemRoot 同层，非业务 env 透传）；父环境已显式设置时不覆盖。
+  env.PYTHONIOENCODING = parentEnv.PYTHONIOENCODING ?? 'utf-8'
   return env
 }
 
@@ -165,6 +170,17 @@ export function parseDriverStdout(stdout: string): { scenarios: DriverScenarioOu
     if (match) {
       const outcomeMap = { PASS: 'pass', FAIL: 'fail', BLOCKED: 'blocked', SKIP: 'skipped' } as const
       scenarios.push({ name: match[2], outcome: outcomeMap[match[1] as keyof typeof outcomeMap] })
+      continue
+    }
+    // 场景号前置方言（狗粮 c21e10b1 实证，2026-10-03）：生成物输出 `S1 PASS <描述>`
+    // （场景号在结果词前）——12/12 全绿被判零锚点撞空驱动门三连拒降级人工。
+    // token 形态收敛防英文叙述误报：`S?\d+`（S1/01）或含分隔符标识（test_add/case-1）；
+    // 裸英文单词（the/tests）不命中——叙述行「the PASS gate」不误判；后缀词边界防
+    // `PASSed` 粘连。非结果词行（如 `S12 INFO …`）不受影响。
+    const prefixed = /^(S?\d+|[A-Za-z][A-Za-z0-9]*[_\-.][A-Za-z0-9_\-.]*)\s+(PASS|FAIL|BLOCKED|SKIP)\b/.exec(line)
+    if (prefixed) {
+      const outcomeMap = { PASS: 'pass', FAIL: 'fail', BLOCKED: 'blocked', SKIP: 'skipped' } as const
+      scenarios.push({ name: prefixed[1], outcome: outcomeMap[prefixed[2] as keyof typeof outcomeMap] })
     }
   }
   return { scenarios, summaryLine }

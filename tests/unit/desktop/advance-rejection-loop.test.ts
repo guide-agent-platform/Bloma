@@ -106,6 +106,9 @@ describe('推进成功清零', () => {
 describe('续接指令要素', () => {
   it('target-deny：含唯一合法目标与锚定形态指引', () => {
     const text = buildContinuationDirective('desktop-arch', 'target-deny', 'desktop-scaffold')
+    // 刀4 强化（c21e10b1 实证）：续接指令携带语言纪律提醒（英文工具输出占比高时防漂移）
+    expect(text).toContain('输出纪律提醒')
+    expect(text).toContain('中文')
     expect(text).toContain('desktop-scaffold')
     expect(text).toContain('PHASE_ADVANCE')
     expect(text).toContain('句中复述')

@@ -99,6 +99,35 @@ describe('parseDriverStdout 行级锚点解析', () => {
     const { scenarios } = parseDriverStdout('说明：FAIL 场景应修复\nPASS real-scenario')
     expect(scenarios).toEqual([{ name: 'real-scenario', outcome: 'pass' }])
   })
+
+  it('场景号前置方言（狗粮 c21e10b1 实证，2026-10-03）：`S<n> PASS <描述>` 全量解析；INFO 等非结果词行忽略', () => {
+    const stdout = [
+      '== 驱动执行 ==',
+      'S1 PASS 无窗口纯引擎路径：初始显示=0',
+      'S2 PASS 连按 7、75 追加正确：command: key_7+key_5',
+      'S7 FAIL 除零提示不正确',
+      'S12 INFO screenshot saved: 00_VERIFY\\screenshots\\S12.png',
+      'S12 PASS 真实窗口按钮链路 7+5=12',
+      '结果: 11/12 通过',
+      '退出码: 1',
+    ].join('\n')
+    const { scenarios, summaryLine } = parseDriverStdout(stdout)
+    expect(scenarios).toEqual([
+      { name: 'S1', outcome: 'pass' },
+      { name: 'S2', outcome: 'pass' },
+      { name: 'S7', outcome: 'fail' },
+      { name: 'S12', outcome: 'pass' },
+    ])
+    expect(summaryLine).toBeNull()
+  })
+
+  it('前置方言误报防线：PASSed/裸英文叙述行不命中；含分隔符标识合法', () => {
+    const { scenarios } = parseDriverStdout(['tests PASSed as expected', 'the PASS gate is fine', 'test_add PASS 数学正确', 'case-2 FAIL 边界错误'].join('\n'))
+    expect(scenarios).toEqual([
+      { name: 'test_add', outcome: 'pass' },
+      { name: 'case-2', outcome: 'fail' },
+    ])
+  })
 })
 
 describe('buildDriverEnv 白名单', () => {
@@ -125,6 +154,13 @@ describe('buildDriverEnv 白名单', () => {
   it('白名单变量父环境缺失时不造键', () => {
     const env = buildDriverEnv(baseContract(), { SystemRoot: 'C:\\Windows' })
     expect('BLOMA_APP_LLM_KEY' in env).toBe(false)
+  })
+
+  it('PYTHONIOENCODING=utf-8 注入（GBK 乱码根治，c21e10b1 实证）；父环境已设时不覆盖', () => {
+    const env = buildDriverEnv(baseContract(), { SystemRoot: 'C:\\Windows' })
+    expect(env.PYTHONIOENCODING).toBe('utf-8')
+    const overridden = buildDriverEnv(baseContract(), { SystemRoot: 'C:\\Windows', PYTHONIOENCODING: 'gbk' })
+    expect(overridden.PYTHONIOENCODING).toBe('gbk')
   })
 })
 
@@ -235,7 +271,8 @@ describe('runContractDriver 执行路径', () => {
     expect(report.routing).toBe('pass')
     expect(seenEnv?.SystemRoot).toBe('C:\\Win')
     expect(seenEnv?.BLOMA_APP_LLM_KEY).toBe('k')
-    expect(Object.keys(seenEnv ?? {}).length).toBe(2)
+    expect(seenEnv?.PYTHONIOENCODING).toBe('utf-8') // GBK 乱码根治（c21e10b1）
+    expect(Object.keys(seenEnv ?? {}).length).toBe(3)
   })
 })
 
