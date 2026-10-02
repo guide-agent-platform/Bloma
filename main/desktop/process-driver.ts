@@ -149,8 +149,10 @@ export function parseDriverStdout(stdout: string): { scenarios: DriverScenarioOu
       summaryLine = line
       continue
     }
-    // 场景行：PASS|FAIL|BLOCKED|SKIP <name>...
-    const match = /^(PASS|FAIL|BLOCKED|SKIP)\s+(\S+)\b/.exec(line)
+    // 场景行：PASS|FAIL|BLOCKED|SKIP <name>（主名=首段非空白非冒号；支持中文——P0-1a 实证，
+    // 2026-10-02：旧 `(\S+)\b` 的 \b 在中文字符间不存在词边界，中文名场景静默解析失败，
+    // 裁判门把「全 PASS 中文场景」误判零覆盖；ASCII 名不受影响）
+    const match = /^(PASS|FAIL|BLOCKED|SKIP)\s+([^\s:]+)/.exec(line)
     if (match) {
       const outcomeMap = { PASS: 'pass', FAIL: 'fail', BLOCKED: 'blocked', SKIP: 'skipped' } as const
       scenarios.push({ name: match[2], outcome: outcomeMap[match[1] as keyof typeof outcomeMap] })

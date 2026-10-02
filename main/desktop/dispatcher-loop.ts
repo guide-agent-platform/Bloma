@@ -48,6 +48,62 @@ import { parseProjectContract } from './contract-schema'
 import { runContractDriver, execFileDriverSpawn, type DriverExecutionReport } from './process-driver'
 import { runSecurityScan } from '../verification/security-scan'
 import { findProject } from '../project/project-service'
+import { readPrdBackplane } from '../project/document-engine'
+import { requirementPriority } from '../model/prd-backplane'
+
+/** P0-1 完整版（2026-10-02）：桌面线裁判门——judge-engine 确定性硬约束的桌面化子集。
+ *  对齐 09-26 拍板「验收走驱动执行」：不复活 GWT/LLM 语义腿，只做零渠道依赖的
+ *  fail-closed 规则门——① PRD 背板存在且功能项非空（judge ① 原语义）；② 驱动场景
+ *  覆盖（judge ② 桌面化：P0 功能项数 ≤ driver 非 skipped 场景数，场景源=driver 回读
+ *  锚点，非生成方自述）；③ 入口真实存在（judge ③ 存在性基线的契约制等价物：
+ *  contract.entry 指向的文件在产物根存在）。附软对账（P0-1c）：P0 断言关键词 ↔
+ *  driver 场景名命中率，只观测进遥测不阻断（防误杀，狗粮跑一轮看误杀率再议升硬门）。 */
+function runDesktopJudgeGate(input: {
+  projectId: string
+  sandboxRoot?: string
+  driverReport: DriverExecutionReport
+  entryFile: string
+}): { passed: boolean; hardFailures: string[]; coverageGaps: string[] } | null {
+  let backplane: ReturnType<typeof readPrdBackplane>
+  try {
+    backplane = readPrdBackplane(input.projectId)
+  } catch {
+    return null // 无项目上下文（测试桩）：不阻断，留痕
+  }
+  const hardFailures: string[] = []
+  const requirements = backplane.requirements ?? []
+  // ① PRD 存在性（judge ①）
+  if (requirements.length === 0) hardFailures.push('PRD 核心功能项为空——没有可验收的需求清单，不能交付')
+  // ② 驱动场景覆盖（judge ② 桌面化）
+  const p0Items = requirements.filter((item) => requirementPriority(item) === 'P0')
+  const coveredScenarios = input.driverReport.scenarios.filter((scenario) => scenario.outcome !== 'skipped')
+  if (coveredScenarios.length < p0Items.length) {
+    hardFailures.push(
+      `驱动场景覆盖不足：PRD 有 ${p0Items.length} 个核心（P0）功能项（${p0Items.map((i) => i.id).join('、')}），driver 只回读了 ${coveredScenarios.length} 个非 skipped 场景——每个核心功能项至少要有一个场景验证`,
+    )
+  }
+  // ③ 入口存在（judge ③ 契约制等价物；driver 真实执行已由收口前置步骤保证）
+  const rootPath = input.sandboxRoot
+  if (rootPath && !existsSync(join(rootPath, input.entryFile))) {
+    hardFailures.push(`工程契约声明的入口文件（${input.entryFile}）在产物中不存在——没有可运行的入口，不能交付`)
+  }
+  // 软对账（P0-1c）：P0 断言关键词在场景名中的命中率——观测不阻断。中文断言多是无
+  // 分隔长句，逐词 split 会误报（实证：'添加待办后列表新增一条' vs 场景'添加待办场景'
+  // 无一命中）——改 2-gram 滑窗从宽命中（漏报少；软观测只暴露完全没对上的缺口，
+  // 精确口径待狗粮数据标定后再收）。
+  const scenarioText = coveredScenarios.map((scenario) => scenario.name).join('\n')
+  const coverageGaps: string[] = []
+  for (const item of p0Items) {
+    for (const assertion of item.behavior_assertions ?? []) {
+      const cleaned = assertion.replace(/[→→，。;；\s]/g, '')
+      const bigrams: string[] = []
+      for (let index = 0; index + 2 <= cleaned.length; index += 1) bigrams.push(cleaned.slice(index, index + 2))
+      const hit = bigrams.length === 0 || bigrams.some((bigram) => scenarioText.includes(bigram))
+      if (!hit) coverageGaps.push(`${item.id}: ${assertion}`)
+    }
+  }
+  return { passed: hardFailures.length === 0, hardFailures, coverageGaps }
+}
 
 /** 宿主强制安全扫描门（P0-1 缓解，2026-10-02）：返回 null = 无项目上下文/扫描器异常，
  *  跳过（行为等同旧世界）；返回扫描结果由调用方 fail-closed 裁决。 */
@@ -127,6 +183,9 @@ export interface DesktopDispatchRunResult {
   advance?: AdvanceDecision
   /** desktop-verify 阶段的驱动执行报告（该阶段才有）。 */
   driverReport?: DriverExecutionReport
+  /** P0-1c 软对账（2026-10-02）：P0 断言关键词未命中任何 driver 场景名的清单——
+   *  只观测不阻断，进遥测供狗粮标定误杀率后再议升硬门。 */
+  judgeCoverageGaps?: string[]
   /** 阶段节点（解析成功才有）。 */
   phase?: PhaseNode
 }
@@ -254,6 +313,8 @@ export const CONTRACT_PATH = '00_SCAFFOLD/contract.json'
 export interface DesktopFinalizeOutcome {
   advance: AdvanceDecision
   driverReport?: DriverExecutionReport
+  /** P0-1c 软对账：裁判门附带的 P0 断言覆盖缺口（观测不阻断）。 */
+  judgeCoverageGaps?: string[]
 }
 
 /**
@@ -371,7 +432,7 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
   // desktop-verify：异步驱动前置（完整版）
   if (node.id === 'desktop-verify') {
     const driven = await runVerifyFinalize(node, input, collector)
-    return { status: 'completed', loopResult, advance: driven.advance, driverReport: driven.driverReport, phase: node }
+    return { status: 'completed', loopResult, advance: driven.advance, driverReport: driven.driverReport, ...(driven.judgeCoverageGaps ? { judgeCoverageGaps: driven.judgeCoverageGaps } : {}), phase: node }
   }
 
   const outcome = finalizeDesktopDispatch(node, input, collector)
@@ -528,9 +589,59 @@ async function runVerifyFinalize(
   // 报告已落盘在 writeReport 注入位；存在性验证用「报告已产出」事实短路（谓词看不到
   // 注入桩写的路径时以 driverReport 存在为准）
   const existsWithReport = (rel: string) => (rel === DRIVER_REPORT_PATH ? true : exists(rel))
-  return {
-    advance: evaluateAdvance(turns, node.id, existsWithReport, vars),
+
+  // 裁判门（P0-1a/1c，2026-10-02）：judge-engine 确定性硬约束的桌面化（PRD 存在/驱动
+  // 场景覆盖 P0/入口真实存在）——零渠道依赖 fail-closed；软对账（P0 断言关键词 ↔ 场景
+  // 名命中）不阻断，进遥测供狗粮标定。无项目上下文（测试桩）跳过不阻断。
+  const judgeGate = runDesktopJudgeGate({
+    projectId: input.projectId,
+    sandboxRoot: input.sandboxRoot,
     driverReport: report,
+    entryFile: contract.entry,
+  })
+
+  if (judgeGate && !judgeGate.passed) {
+    return {
+      advance: {
+        decision: 'reject',
+        reason: 'artifacts-missing',
+        missingArtifacts: [{ gateId: 'driver-report', artifacts: [DRIVER_REPORT_PATH] }],
+        discardedObservations: [],
+        education:
+          `裁判门未过（硬约束 ${judgeGate.hardFailures.length} 项）：\n${judgeGate.hardFailures.map((f) => `- ${f}`).join('\n')}\n` +
+          '请补齐后重新收口；硬约束是交付底线，driver 通过不能豁免。',
+      },
+      driverReport: report,
+      ...(judgeGate.coverageGaps.length > 0 ? { judgeCoverageGaps: judgeGate.coverageGaps } : {}),
+    }
+  }
+
+  const outcome = evaluateAdvance(turns, node.id, existsWithReport, vars)
+
+  // P0-1b（2026-10-02）：全绿收口（driver pass + 证据门 + 安全门 + 裁判门 + 阶段判定
+  // 推进）拍 verified 快照——恢复消费端（latestVerifiedSnapshot 熔断回滚优先恢复）
+  // 自此有生产写入方；快照失败不阻断推进（仅留痕，下次收口可补）。
+  if (outcome.decision === 'advance' && judgeGate?.passed) {
+    try {
+      const { createSnapshot } = await import('../delivery/snapshots')
+      await createSnapshot({
+        request_id: input.requestId,
+        project_id: input.projectId,
+        kind: 'mvp',
+        summary: `desktop-verify 全绿（driver ${report.scenarios.filter((s) => s.outcome === 'pass').length}/${report.scenarios.length} 场景 + 安全扫描 + 裁判硬约束）`,
+        include_documents: true,
+        health_status: 'healthy',
+        verification: 'verified',
+      })
+    } catch (error) {
+      console.error('[desktop-verify] verified 快照创建失败（不阻断推进，下次收口可补）：', error)
+    }
+  }
+
+  return {
+    advance: outcome,
+    driverReport: report,
+    ...(judgeGate && judgeGate.coverageGaps.length > 0 ? { judgeCoverageGaps: judgeGate.coverageGaps } : {}),
   }
 }
 
@@ -588,6 +699,9 @@ function recordDispatchRunTelemetry(
                 }
             : undefined,
           driver: result.driverReport,
+          // P0-1c 软对账观测（2026-10-02）：P0 断言未命中场景名清单 + 计数——狗粮标定
+          // 误杀率的数据面（命中≠验证充分，未命中也不阻断——只暴露对账缺口供复盘）。
+          judge_coverage_gaps: result.judgeCoverageGaps ?? [],
           duration_ms: Date.now() - startedAt,
         },
         privacy_level: 'masked',

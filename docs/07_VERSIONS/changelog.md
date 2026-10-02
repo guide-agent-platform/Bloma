@@ -7,6 +7,27 @@
 
 **v1.1 修订说明**：同步 §5 已知待同步项状态（4 项全部已同步），新增 §5.1 目录结构重组记录。按 `workflow.md §2.4` 走修订流程，待评审后回到已确认。
 
+## 全链路审查修复批四：P0-1 完整版——桌面线裁判门三件套 + 中文锚点实证修复（2026-10-02）
+
+| 属性 | 值 |
+| --- | --- |
+| 类型 | feat+fix（P0-1 完整版：裁判确定性硬约束桌面化 + verified 快照分级恢复 + 软对账遥测；中文场景锚点解析实证 bug 修复） |
+| 模块 | `main/desktop/dispatcher-loop.ts`、`main/desktop/process-driver.ts`、`scripts/probe-glm-stream.cjs` |
+
+### 变更内容
+
+- **裁判门（P0-1a）**：desktop-verify 收口第四道门——judge-engine 确定性硬约束的桌面化子集（对齐 09-26 拍板「验收走驱动执行」，不复活 GWT/LLM 语义腿）：①PRD 背板存在且功能项非空；②驱动场景覆盖（P0 功能项数 ≤ driver 非 skipped 场景数，场景源=回读锚点非自述）；③入口真实存在（contract.entry 文件在产物根）。零渠道依赖 fail-closed；无项目上下文（测试桩）跳过不阻断。
+- **verified 快照分级恢复（P0-1b）**：全绿收口（driver pass + 证据门 + 安全门 + 裁判门 + 阶段推进）拍 verification:'verified' 快照——latestVerifiedSnapshot（熔断回滚优先恢复）自此有生产写入方；快照失败不阻断推进（留痕下次可补）。
+- **软对账遥测（P0-1c）**：P0 断言与 driver 场景名的 2-gram 滑窗命中对账，只观测不阻断，缺口进 desktop_dispatch_run 遥测（judge_coverage_gaps）——狗粮标定误杀率后再议升硬门。
+- **中文场景锚点解析修复（裁判门实证发现）**：parseDriverStdout 锚点正则 `(\S+)\b` 的 \b 在中文字符间不存在词边界——中文名场景静默解析为零场景（既有测试全 ASCII 名从未暴露；狗粮 driver 场景名是中文，裁判门会把全 PASS 中文场景误判零覆盖拒收）。改为 `[^	s:]+`（首段非空白非冒号，主名语义不变）。
+- **glm probe 退行采样（记忆挂账清偿）**：probe-glm-stream 补退行检测（与 output-integrity.isDegenerateText 同源判据：工具协议原文混入 + 连续重复 ≥8 单元且覆盖 ≥25%；触发打印单元/次数/占比供参数对比）。HKCU REPAIR_NOOP_GUARD 已确认不存在（开关清理批已清，无需处理）。
+
+### 影响评估
+
+- 单测 199 文件/1952 例全绿（新增锁定×3：干净产物全绿推进+verified 快照、空 PRD 拒收、P0 覆盖不足拒收；既有双门用例补 projectId 修正（实证：旧用例未传 projectId 致 findProject PROJECT_NOT_FOUND、门静默跳过——生产行为一直正确，测试构造缺口））；typecheck 0 错。
+- 行为变化：①desktop-verify 收口从「driver pass 即推进」升为四门全绿（空 PRD/覆盖不足/入口缺失拒收，拒收教育闭环引导补齐）；②全绿交付自动落 verified 快照，熔断回滚自此优先恢复已验证版本；③中文场景名 driver 报告可正确解析。
+- 挂账（后续批）：取消/工具收尾四件（quiescence 锁释放时序/工具 kill 句柄/web_fetch signal 并联/wait_for_delegations 消费门）；export \* 桩清理；main 集成债；修复循环对齐 Proma-Easy 参照项。
+
 ## 全链路审查修复批三：清账（PRD 确认卡 env / sticky P2 / 委派工具面隔离）（2026-10-02）
 
 | 属性 | 值 |

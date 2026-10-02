@@ -7,6 +7,9 @@
  *   - text_delta / thinking_delta / 其他 delta 的数量与长度分布
  *   - 单一符号增量（len<=2 且非文字）计数——「大量单一符号」现象取证
  *   - 纯空白增量计数（cleaner 已知形态）
+ *   - 退行采样检测（2026-10-02 补挂账：判据与 main/coding/output-integrity.ts
+ *     的 isDegenerateText 同源——工具协议原文混入 + 连续重复 ≥8 单元 ≤8 字且
+ *     覆盖 ≥25% 正文；退行复现时打印触发单元与次数，供采样参数对比）
  * key 从 channel-key-reader 产物读取（不打印明文）。
  */
 const { readFileSync } = require('node:fs')
@@ -84,6 +87,38 @@ async function runStream(label, body) {
   console.log(`  其他delta=${stats.other}  解析失败=${stats.raw.length}`)
   const fullText = stats.text.join('')
   console.log(`  text 全文(${fullText.length}): ${JSON.stringify(fullText.slice(0, 120))}`)
+  // 退行采样检测（挂账清偿，2026-10-02）：判据与 output-integrity.isDegenerateText 同源；
+  // 触发时打印单元/次数/占比，方便对比不同 thinking/effort 参数组合的退行复现率。
+  const degen = detectDegenerate(fullText)
+  if (degen) {
+    console.log(`  ⚠ 退行命中: ${degen.kind}${degen.detail ? `（${degen.detail}）` : ''}`)
+  } else {
+    console.log('  退行检测: 未命中（工具协议原文无混入；无 ≥25% 占比的连续重复运行）')
+  }
+}
+
+/** 与 main/coding/output-integrity.ts isDegenerateText 同源的 cjs 版（双侧阈值改动须同步）。 */
+function detectDegenerate(text) {
+  if (!text) return null
+  const TOOL_MARKUP_PATTERNS = [/<｜｜DSML｜｜/, /<\/?tool_calls?[^a-z]/, /<\/?invoke\b/i, /<\/?parameter\b/i]
+  for (const pattern of TOOL_MARKUP_PATTERNS) {
+    if (pattern.test(text)) return { kind: '工具协议原文混入', detail: String(pattern) }
+  }
+  const MIN_REPEAT = 8, MAX_UNIT = 8, MIN_RUN_RATIO = 0.25
+  const n = text.length
+  if (n < 32) return null
+  for (let start = 0; start < n; start += 1) {
+    for (let unitLen = 1; unitLen <= MAX_UNIT; unitLen += 1) {
+      if (start + unitLen * MIN_REPEAT > n) break
+      const unit = text.slice(start, start + unitLen)
+      let count = 1
+      while (start + (count + 1) * unitLen <= n && text.startsWith(unit, start + count * unitLen)) count += 1
+      if (count >= MIN_REPEAT && count * unitLen >= n * MIN_RUN_RATIO) {
+        return { kind: '连续重复运行', detail: `单元=${JSON.stringify(unit)} ×${count}，占比 ${Math.round((count * unitLen * 100) / n)}%` }
+      }
+    }
+  }
+  return null
 }
 
 const baseMsgs = [{ role: 'user', content: [{ type: 'text', text: '用一句话中文说明你要开始写文件，然后调用 write_file 写入 hello.txt，内容为"hi"。' }] }]

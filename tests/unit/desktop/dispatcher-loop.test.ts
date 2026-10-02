@@ -545,20 +545,67 @@ describe('desktop-verify 收口双门（全链路审查 P1-5/P0-1 缓解，2026-
     delete process.env.PROMA_HOME
   })
 
-  it('干净产物 + driver pass（有锚点/摘要）→ 正常推进（安全门不误杀）', async () => {
-    const { mkdtempSync, writeFileSync } = await import('node:fs')
+  it('干净产物 + PRD 齐备 + driver pass → 正常推进且落 verified 快照（裁判门/安全门不误杀；P0-1b）', async () => {
+    const { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync } = await import('node:fs')
     const { tmpdir } = await import('node:os')
     const { join } = await import('node:path')
     const home = mkdtempSync(join(tmpdir(), 'bloma-verify-clean-'))
     process.env.PROMA_HOME = home
     const { createProject, findProject } = await import('../../../main/project/project-service')
     const project = createProject({ request_id: 'req-clean-gate', mode: 'quick' })
-    const root = findProject(project.project_id).root_path
+    const proj = findProject(project.project_id)
+    const root = proj.root_path
     writeFileSync(join(root, 'app.py'), 'print("hello")\n', 'utf8')
+    // PRD 齐备（真实场景进桌面线前必已确认）：1 个 P0 项（F-001 兑底），断言关键词会被场景名命中（软对账无缺口）
+    const { getDocumentsDir } = await import('../../../storage/config-paths')
+    const docsDir = getDocumentsDir(proj.workspace_slug, proj.project_id)
+    mkdirSync(docsDir, { recursive: true })
+    writeFileSync(join(docsDir, 'prd.json'), JSON.stringify({
+      project_id: proj.project_id,
+      requirements: [
+        { id: 'F-001', description: '桌面待办应用', behavior_assertions: ['添加待办后列表新增一条'] },
+      ],
+    }), 'utf8')
 
     const { query } = scriptedQuery([[textMessage('验证完成。\nPHASE_ADVANCE: delivered')]])
     const result = await runDesktopDispatcherLoop(baseInput({
       query,
+      projectId: project.project_id,
+      currentPhase: 'desktop-verify',
+      artifactExists: allExist,
+      confirmedPhases: new Set(['desktop-verify']),
+      readContract: () => validContract,
+      driverSpawn: async () => ({ code: 0, stdout: 'PASS 添加待办场景\nSUMMARY pass=1', stderr: '' }),
+      writeReport: () => undefined,
+      sandboxRoot: root,
+    }))
+    expect(result.advance).toMatchObject({ decision: 'advance', target: 'delivered' })
+    // P0-1c：场景名命中断言关键词（添加/待办）→ 软对账无缺口
+    expect(result.judgeCoverageGaps ?? []).toEqual([])
+    // P0-1b：全绿收口落 verified 快照，latestVerifiedSnapshot 可见
+    const { latestVerifiedSnapshot } = await import('../../../main/project/recovery-service')
+    const verified = latestVerifiedSnapshot(project.project_id)
+    expect(verified?.verification).toBe('verified')
+    expect(verified?.summary).toContain('desktop-verify 全绿')
+    expect(existsSync(join(docsDir, 'prd.json'))).toBe(true) // 快照文档冻结不破坏源
+    void readFileSync
+    delete process.env.PROMA_HOME
+  })
+
+  it('裁判门：PRD 空项目 → 拒收（硬约束①：无可验收的需求清单）（P0-1a）', async () => {
+    const { mkdtempSync, writeFileSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const home = mkdtempSync(join(tmpdir(), 'bloma-verify-emptyprd-'))
+    process.env.PROMA_HOME = home
+    const { createProject, findProject } = await import('../../../main/project/project-service')
+    const project = createProject({ request_id: 'req-empty-prd', mode: 'quick' })
+    const root = findProject(project.project_id).root_path
+    writeFileSync(join(root, 'app.py'), 'print("hello")\n', 'utf8')
+    const { query } = scriptedQuery([[textMessage('验证完成。\nPHASE_ADVANCE: delivered')]])
+    const result = await runDesktopDispatcherLoop(baseInput({
+      query,
+      projectId: project.project_id,
       currentPhase: 'desktop-verify',
       artifactExists: allExist,
       confirmedPhases: new Set(['desktop-verify']),
@@ -567,7 +614,52 @@ describe('desktop-verify 收口双门（全链路审查 P1-5/P0-1 缓解，2026-
       writeReport: () => undefined,
       sandboxRoot: root,
     }))
-    expect(result.advance).toMatchObject({ decision: 'advance', target: 'delivered' })
+    expect(result.advance).toMatchObject({ decision: 'reject', reason: 'artifacts-missing' })
+    if (result.advance?.decision === 'reject') {
+      expect(result.advance.education).toContain('PRD 核心功能项为空')
+    }
+    delete process.env.PROMA_HOME
+  })
+
+  it('裁判门：P0 项多于 driver 场景 → 拒收（硬约束②：核心功能须逐项有场景）；软对账缺口进遥测（P0-1a/1c）', async () => {
+    const { mkdtempSync, writeFileSync, mkdirSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const home = mkdtempSync(join(tmpdir(), 'bloma-verify-coverage-'))
+    process.env.PROMA_HOME = home
+    const { createProject, findProject } = await import('../../../main/project/project-service')
+    const project = createProject({ request_id: 'req-coverage', mode: 'quick' })
+    const proj = findProject(project.project_id)
+    const root = proj.root_path
+    writeFileSync(join(root, 'app.py'), 'print("hello")\n', 'utf8')
+    // 两个 P0 项（显式 priority），driver 只有 1 个场景 → 覆盖不足拒收
+    const { getDocumentsDir } = await import('../../../storage/config-paths')
+    const docsDir = getDocumentsDir(proj.workspace_slug, proj.project_id)
+    mkdirSync(docsDir, { recursive: true })
+    writeFileSync(join(docsDir, 'prd.json'), JSON.stringify({
+      project_id: proj.project_id,
+      requirements: [
+        { id: 'F-001', description: '待办管理', priority: 'P0', behavior_assertions: ['添加待办后列表新增一条'] },
+        { id: 'F-002', description: '数据导出', priority: 'P0', behavior_assertions: ['点击导出→文件生成'] },
+      ],
+    }), 'utf8')
+    const { query } = scriptedQuery([[textMessage('验证完成。\nPHASE_ADVANCE: delivered')]])
+    const result = await runDesktopDispatcherLoop(baseInput({
+      query,
+      projectId: project.project_id,
+      currentPhase: 'desktop-verify',
+      artifactExists: allExist,
+      confirmedPhases: new Set(['desktop-verify']),
+      readContract: () => validContract,
+      driverSpawn: async () => ({ code: 0, stdout: 'PASS 待办场景\nSUMMARY pass=1', stderr: '' }),
+      writeReport: () => undefined,
+      sandboxRoot: root,
+    }))
+    expect(result.advance).toMatchObject({ decision: 'reject', reason: 'artifacts-missing' })
+    if (result.advance?.decision === 'reject') {
+      expect(result.advance.education).toContain('驱动场景覆盖不足')
+      expect(result.advance.education).toContain('F-002')
+    }
     delete process.env.PROMA_HOME
   })
 })
