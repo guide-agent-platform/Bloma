@@ -26,15 +26,21 @@ describe('template-inference（P2 注入点①：PRD 12.2 关键词→类型）'
       ['效率工具网站', 'web_fullstack'],
       ['在线效率工具', 'web_fullstack'],
       ['网页版效率工具', 'web_fullstack'],
-      // 「帮我处理数据/批量操作」→ 个人小工具（12.2 CLI 行并入）
-      ['帮我处理一批数据的格式', 'personal_tool'],
-      ['批量操作：把 500 张图片压缩', 'personal_tool'],
-      ['写个脚本自动化报表', 'personal_tool'],
-      // 个人小工具词族
-      ['做个番茄钟', 'personal_tool'],
-      ['我想要一个记账的小账本', 'personal_tool'],
-      ['做个待办清单', 'personal_tool'],
-      ['一个简单的计算器', 'personal_tool'],
+      // 「帮我处理数据/批量操作/脚本」→ 桌面线（桌面唯一品类对齐，2026-10-03：
+      // 本地小工具词原归 personal_tool，10-01 web 线退役后直进唯一生成线）
+      ['帮我处理一批数据的格式', 'desktop_tool'],
+      ['批量操作：把 500 张图片压缩', 'desktop_tool'],
+      ['写个脚本自动化报表', 'desktop_tool'],
+      // 个人小工具词族（fc3f6fab 实证：裸「做一个计算器」曾误判 personal_tool
+      // 走 web 文案——现直进桌面线）
+      ['做个番茄钟', 'desktop_tool'],
+      ['我想要一个记账的小账本', 'desktop_tool'],
+      ['做个待办清单', 'desktop_tool'],
+      ['一个简单的计算器', 'desktop_tool'],
+      ['做一个计算器', 'desktop_tool'],
+      // 载体词优先级不变：显式网页载体仍是 web（PRD 后形态卡引导桌面）
+      ['网页版计算器', 'web_fullstack'],
+      ['在线记账小工具', 'web_fullstack'],
       // AI 关键词暂归个人小工具（模板包二期）
       ['调用 AI 做一个自动回复', 'personal_tool'],
       ['做一个智能问答助手', 'personal_tool'],
@@ -53,9 +59,10 @@ describe('template-inference（P2 注入点①：PRD 12.2 关键词→类型）'
       })
     }
 
-    it('无命中 → personal_tool 兜底（宽松级误判代价最小）', () => {
+    it('无命中 → desktop_tool 兜底（桌面唯一品类对齐，2026-10-03：唯一生成线直进）', () => {
       expect(inferTemplateType('帮我做个东西')).toBe(DEFAULT_TEMPLATE_TYPE)
-      expect(inferTemplateType('')).toBe(DEFAULT_TEMPLATE_TYPE)
+      expect(DEFAULT_TEMPLATE_TYPE).toBe('desktop_tool')
+      expect(inferTemplateType('')).toBe('desktop_tool')
     })
 
     it('桌面优先于网页（载体信号更稀有）', () => {

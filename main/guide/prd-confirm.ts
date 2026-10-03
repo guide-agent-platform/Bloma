@@ -322,13 +322,20 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
       },
     },
   })
-  // m-1：确认→停止窗口——EARS 化 await 期间用户点停止时，不再补发「已确认开始画草图」
-  // ack 与 message_completed（对齐「停止后不推进」：话术与行为不再矛盾）。
+  // m-1：确认→停止窗口——EARS 化 await 期间用户点停止时，不再补发确认 ack
+  //（对齐「停止后不推进」：话术与行为不再矛盾）。
   if (pending.signal?.aborted) return true
+  // 文案品类感知（fc3f6fab 实证，2026-10-03）：桌面项目确认即切桌面调度员线
+  //（下方改道分支），「开始画草图」是 web 线残留话术——桌面品类永不画草图。
+  const isDesktopLine = shouldEnterDesktopLine(findProject(pending.project_id))
   const ack =
     adopted.length > 0
-      ? `已确认，按这份 PRD（含采纳的 ${adopted.length} 条市调想法）开始画草图。`
-      : '已确认，按这份 PRD 开始画草图。'
+      ? isDesktopLine
+        ? `已确认，按这份 PRD（含采纳的 ${adopted.length} 条市调想法）进入桌面交付线。`
+        : `已确认，按这份 PRD（含采纳的 ${adopted.length} 条市调想法）继续。`
+      : isDesktopLine
+        ? '已确认，按这份 PRD 进入桌面交付线。'
+        : '已确认，按这份 PRD 继续。'
   pending.publish(makeConfirmEvent(pending, 'message_delta', { text: ack }))
   pending.publish(makeConfirmEvent(pending, 'message_completed', { subtype: 'success' }))
 

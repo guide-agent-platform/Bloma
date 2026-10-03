@@ -496,11 +496,15 @@ export async function handleGuideMessage(
       if (handledByModel) return
     }
 
-    const ack = '好的，按你选的方向整理成产品需求文档，请你过目确认后再画草图。'
+    // 文案品类感知（fc3f6fab 实证，2026-10-03）：web 线已退役，「画草图」永不发生——
+    // 桌面品类确认后进桌面交付线，非桌面品类 PRD 确认后发形态引导卡。
+    const ack = project?.template_type === 'desktop_tool'
+      ? '好的，按你选的方向整理成产品需求文档，确认后进入桌面交付线。'
+      : '好的，按你选的方向整理成产品需求文档，请你过目确认。'
     persistAssistant?.(ack)
     publish(makeGuideEvent(input, 'message_delta', { text: ack }))
     // 收敛链（让渡点选/无渠道降级/模型未处理）：统一进入 PRD 后置链
-    // （PRD→六维审查→确认卡→草图）
+    //（PRD→六维审查→确认卡→桌面线/形态卡）
     await runPrdPipeline({
       request_id: input.request_id,
       session_id: input.session_id,
@@ -537,7 +541,9 @@ export async function handleGuideMessage(
     })
     // Phase 7 U5 J5：clarification_responded 埋点（回答方式=委托；E3「委托是有效授权」度量基线）
     trackClarificationResponded(input, 'delegate')
-    const ack = '好的，我来定方向，先整理成产品需求文档，请你过目确认后再画草图。'
+    const ack = project?.template_type === 'desktop_tool'
+      ? '好的，我来定方向，先整理成产品需求文档，确认后进入桌面交付线。'
+      : '好的，我来定方向，先整理成产品需求文档，请你过目确认。'
     persistAssistant?.(ack)
     publish(makeGuideEvent(input, 'message_delta', { text: ack }))
     // 让渡与点选/模型判定同一后置链（排查报告 🔴2）：让渡场景「系统替你做的决定」最多，

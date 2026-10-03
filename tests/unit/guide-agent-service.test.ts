@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { decideBlocks } from '../support/guide-decide-stream'
 
 // 2026-09-16 FILE-LEVEL 钉：BLOMA_GUIDE_LOOP 缺省翻转 on，本文件全部用例锁旧单次 JSON 路径
@@ -31,7 +31,7 @@ vi.mock('../../main/platform/llm/channel-manager', async (importOriginal) => {
     getFirstEnabledChannel: () => undefined,
   }
 })
-import { createProject, findProject, readLastSketchRequirements } from '../../main/project/project-service'
+import { createProject, findProject, readLastSketchRequirements, updateProject } from '../../main/project/project-service'
 import { PRD_CONFIRM_OPTION_CONFIRM } from '../../main/guide/prd-confirm'
 import { clearSandboxRuntimeForTests, setSandboxRuntimeForTests } from '../../main/delivery/sandbox'
 import { setSnapshotCaptureProviderForTests } from '../../main/delivery/snapshots'
@@ -42,6 +42,14 @@ import type { AgentEvent, SDKMessage } from '../../shared/types'
 //（2026-08-28 flaky 实测：首轮 10 失败含 5005ms 超时，重跑全绿）。放宽到 30s 只影响真 hang 的捕捉时机。
 describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () => {
   const originalPromaHome = process.env.PROMA_HOME
+
+  // 网络密闭（2026-10-03 实证）：首个用例跑在 afterEach 设置 mock 之前——真实
+  // SDKQuery 发 api.anthropic.com 请求，网络 fail-fast 时侥幸绿（走规则硬护栏），
+  // 网络挂起（TLS/DNS 阻塞 8s×重试）即 30s 超时红。beforeEach 先行设置与 afterEach
+  // 对称，自设 mock 的用例在其后覆盖。
+  beforeEach(() => {
+    setSDKQueryForTests(defaultTestQuery)
+  })
 
   afterEach(() => {
     restorePromaHome(originalPromaHome)
@@ -55,8 +63,16 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     const home = mkdtempSync(join(tmpdir(), 'proma-guide-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    // 判型对齐（2026-10-03）：兜底已改 desktop_tool——本组用例测非桌面豁免管线，钉 personal_tool
+    updateProject(project.project_id, { template_type: 'personal_tool' })
     const events: AgentEvent[] = []
     setAgentStreamPublisher((event) => events.push(event))
+    // 网络密闭（2026-10-03）：本用例验证「模型不可用→规则硬护栏强制澄清发卡」——
+    // 原依赖真实 api.anthropic.com 请求失败触发改路径（网络 fail-fast 侥幸绿、
+    // 挂起则 30s 超时）；改为显式 query 异常 mock，同一 fail-soft 语义，零网络。
+    setSDKQueryForTests(async function* () {
+      throw new Error('MOCK_QUERY_DOWN: 规则硬护栏腿（密闭）')
+    })
 
     await runAgent({
       request_id: 'req-guide',
@@ -80,6 +96,8 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     const home = mkdtempSync(join(tmpdir(), 'proma-guide-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    // 判型对齐（2026-10-03）：兜底已改 desktop_tool——本组用例测非桌面豁免管线，钉 personal_tool
+    updateProject(project.project_id, { template_type: 'personal_tool' })
     // 预置一轮已完成的澄清往返：首轮必须澄清（2026-08-16 硬护栏），
     // 非首轮的 generate_sketch 才允许直接开工
     mkdirSync(join(home, 'agent-sessions'), { recursive: true })
@@ -164,6 +182,8 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     const home = mkdtempSync(join(tmpdir(), 'proma-guide-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    // 判型对齐（2026-10-03）：兜底已改 desktop_tool——本组用例测非桌面豁免管线，钉 personal_tool
+    updateProject(project.project_id, { template_type: 'personal_tool' })
     const events: AgentEvent[] = []
     setAgentStreamPublisher((event) => events.push(event))
     setSDKQueryForTests(async function* () {
@@ -213,6 +233,8 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     const home = mkdtempSync(join(tmpdir(), 'proma-guide-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    // 判型对齐（2026-10-03）：兜底已改 desktop_tool——本组用例测非桌面豁免管线，钉 personal_tool
+    updateProject(project.project_id, { template_type: 'personal_tool' })
     const events: AgentEvent[] = []
     setAgentStreamPublisher((event) => events.push(event))
     // 复现用户报障：模型返回 ask_clarification 且 questions:[]（在 reply 里直接追问）
@@ -261,6 +283,8 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     const home = mkdtempSync(join(tmpdir(), 'proma-guide-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    // 判型对齐（2026-10-03）：兜底已改 desktop_tool——本组用例测非桌面豁免管线，钉 personal_tool
+    updateProject(project.project_id, { template_type: 'personal_tool' })
     const events: AgentEvent[] = []
     setAgentStreamPublisher((event) => events.push(event))
     // 模型把占位文案、新问题、重复项全混进 questions（历史报障形态）
@@ -299,6 +323,8 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     const home = mkdtempSync(join(tmpdir(), 'proma-guide-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    // 判型对齐（2026-10-03）：兜底已改 desktop_tool——本组用例测非桌面豁免管线，钉 personal_tool
+    updateProject(project.project_id, { template_type: 'personal_tool' })
     const events: AgentEvent[] = []
     setAgentStreamPublisher((event) => events.push(event))
     setSDKQueryForTests(async function* () {
@@ -334,6 +360,8 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     const home = mkdtempSync(join(tmpdir(), 'proma-guide-card-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    // 判型对齐（2026-10-03）：兜底已改 desktop_tool——本组用例测非桌面豁免管线，钉 personal_tool
+    updateProject(project.project_id, { template_type: 'personal_tool' })
     const events: AgentEvent[] = []
     setAgentStreamPublisher((event) => events.push(event))
     setSandboxRuntimeForTests({
@@ -387,6 +415,8 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     const home = mkdtempSync(join(tmpdir(), 'proma-guide-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    // 判型对齐（2026-10-03）：兜底已改 desktop_tool——本组用例测非桌面豁免管线，钉 personal_tool
+    updateProject(project.project_id, { template_type: 'personal_tool' })
     const events: AgentEvent[] = []
     setAgentStreamPublisher((event) => events.push(event))
     // 模型只会说人话，不给决策（旧「非 JSON 回退规则路由」语义已被 loop 的 free_chat 取代）
@@ -420,6 +450,8 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     const home = mkdtempSync(join(tmpdir(), 'proma-guide-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    // 判型对齐（2026-10-03）：兜底已改 desktop_tool——本组用例测非桌面豁免管线，钉 personal_tool
+    updateProject(project.project_id, { template_type: 'personal_tool' })
     const events: AgentEvent[] = []
     setAgentStreamPublisher((event) => events.push(event))
 
@@ -442,6 +474,8 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     const home = mkdtempSync(join(tmpdir(), 'proma-guide-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    // 判型对齐（2026-10-03）：兜底已改 desktop_tool——本组用例测非桌面豁免管线，钉 personal_tool
+    updateProject(project.project_id, { template_type: 'personal_tool' })
     const events: AgentEvent[] = []
     setAgentStreamPublisher((event) => events.push(event))
     setSandboxRuntimeForTests({
@@ -502,6 +536,8 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     const home = mkdtempSync(join(tmpdir(), 'proma-guide-theme-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
+    // 判型对齐（2026-10-03）：兜底已改 desktop_tool——本组用例测非桌面豁免管线，钉 personal_tool
+    updateProject(project.project_id, { template_type: 'personal_tool' })
     const events: AgentEvent[] = []
     setAgentStreamPublisher((event) => events.push(event))
     setSandboxRuntimeForTests({

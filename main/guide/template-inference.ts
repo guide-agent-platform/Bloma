@@ -68,14 +68,20 @@ const TYPE_RULES: TypeRule[] = [
     pattern: /调用\s*(?:ai|gpt|大模型|openai)|(?:接入|使用)\s*(?:ai|llm)|做智能|智能(?:助手|推荐|问答)|大模型|chatgpt|ai\s*(?:助手|应用|工具)/i,
   },
   {
-    type: 'personal_tool',
+    // 桌面唯一品类对齐（fc3f6fab 狗粮实证，2026-10-03）：本地小工具词原归
+    // personal_tool（多品类时代语义）——10-01 web 线退役后 desktop_tool 是唯一
+    // 生成线且为主攻品类（09-26 拍板），裸「计算器/番茄钟/记账…」应直进桌面线
+    // 而非判 personal_tool 后靠形态引导卡多一步。保持 weak：显式载体词（网站/网页/
+    // 桌面…strong 规则在前优先）与澄清轮改判语义不变（「网页里加个计算器」仍是 web）。
+    type: 'desktop_tool',
     strength: 'weak',
     pattern: /(?:处理|清洗|整理|转换)(?:数据|表格|文件|批量)|(?:批量|脚本|命令行|cli)|计算器|生成器|转换器|计时器|番茄钟|倒计时|待办|清单|笔记|记账|账本|习惯打卡|密码(?:器|生成)|单页|小工具/i,
   },
 ]
 
-/** 兜底类型（12.2 无归类时优先个人小工具：宽松级误判代价最小）。 */
-export const DEFAULT_TEMPLATE_TYPE: TemplateType = 'personal_tool'
+/** 兜底类型（桌面唯一品类对齐，2026-10-03）：无信号输入直接进桌面生成线
+ *  （唯一生成线；web/game/ai_app 显式词仍走原判型→PRD 后形态引导卡）。 */
+export const DEFAULT_TEMPLATE_TYPE: TemplateType = 'desktop_tool'
 
 /**
  * 关键词→类型推断（PRD 12.2）：首条消息/澄清消息共用。
@@ -99,10 +105,11 @@ function inferStrength(text: string): { type: TemplateType; strength: InferenceS
 
 /**
  * 澄清轮类型修正（对用户透明）：用户后续话语带**显式形态信号**（strong）时更新
- * 推断；weak 信号不动已有判断（「说到计算器」不代表要把已判定的 web 项目改成小工具
- * ——可能只是网页里的一个功能）。weak 让位分支不可达（m-3 实锤）：weak 信号仅 AI
- * 词族且已归 personal_tool，命中时 hit.type 恒等于兜底 personal_tool，在上方同类型
- * 短路返回；行为=「weak 永不改判」，测试锁定，注释不再宣称兜底让位。
+ * 推断；weak 信号不动已有判断（「说到计算器」不代表要把已判定的 web 项目改成
+ * 小工具——可能只是网页里的一个功能）。
+ * 桌面唯一品类对齐（2026-10-03）：兜底与小工具词均已归 desktop_tool——weak
+ * 命中 desktop 时与兜底同类型短路，AI 词族 weak 命中 personal_tool 但 weak 恒不
+ * 改判，行为不变；测试锁定。
  *
  * 返回 undefined = 维持现状（调用方不写盘）。
  */
