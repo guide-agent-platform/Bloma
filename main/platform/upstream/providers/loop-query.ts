@@ -92,9 +92,7 @@ export async function* anthropicMessagesQueryViaProviders(prompt: string, option
   }
   const body: Record<string, unknown> = {
     model,
-    // 服务端硬上限夹紧（2026-10-03 zhipu 实测 131072，超限 400 code 1210）：唯一夹紧点，
-    // 覆盖全部调用面（桌面线/loop-planner/记忆蒸馏等硬编码 640000 也在出口收口）
-    max_tokens: capMaxTokensForProvider(options.maxTokens ?? 640000, providerType),
+    max_tokens: options.maxTokens ?? 640000,
     stream: true,
     messages,
   }
@@ -119,11 +117,19 @@ export async function* anthropicMessagesQueryViaProviders(prompt: string, option
   }
 
   const url = resolveLoopMessagesUrl(baseUrl, providerType)
-  const makeRequest = (): { url: string; headers: Record<string, string>; body: string } => ({
-    url,
-    headers: buildAnthropicHeaders(apiKey, providerType),
-    body: JSON.stringify(body),
-  })
+  // 服务端硬上限夹紧（2026-10-03 zhipu 实测 131072，超限 400 code 1210）：唯一夹紧点在
+  // 出口，覆盖全部调用面。provider 信号（2026-10-04 二次事故修正）：主路调用方均不传
+  // options.providerType，以 env 随带的 ANTHROPIC_PROVIDER_TYPE 兑底（buildSdkEnv 单一
+  // 工厂下发）。仅用于夹紧，不改动 URL/头部派生（既有形状已验证可用）。
+  const capProviderType = providerType !== 'anthropic' ? providerType : (options.env.ANTHROPIC_PROVIDER_TYPE ?? providerType)
+  const makeRequest = (): { url: string; headers: Record<string, string>; body: string } => {
+    body.max_tokens = capMaxTokensForProvider(options.maxTokens ?? 640000, capProviderType)
+    return {
+      url,
+      headers: buildAnthropicHeaders(apiKey, providerType),
+      body: JSON.stringify(body),
+    }
+  }
 
   // ---- 事件桥：streamSSE 回调 → AsyncGenerator 实时增量（UI 流式依赖逐段 yield） ----
   const queue: SDKMessage[] = []

@@ -95,6 +95,10 @@ export function buildSdkEnv(
   env.ANTHROPIC_AUTH_TOKEN = apiKey
   env.ANTHROPIC_BASE_URL = effectiveBaseUrl
   env.ANTHROPIC_MODEL = model
+  // provider 类型随 env 下发（2026-10-04）：主路调用方均不传 options.providerType，
+  // 传输层拿不到就无法按渠道夹紧 max_tokens（zhipu 131072 硬校验，e99e6319 二次事故
+  // 实锤：夹紧锁在不存在的信号上）。仅作传输层派生用途，不进请求头/子进程白名单。
+  if (providerType) env.ANTHROPIC_PROVIDER_TYPE = providerType
   return env
 }
 

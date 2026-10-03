@@ -184,3 +184,42 @@ describe('max_tokens 服务端上限夹紧（2026-10-03 zhipu 事故）', () => 
     expect(parsedBody().max_tokens).toBe(640000)
   })
 })
+
+describe('max_tokens 夹紧的 provider 信号兜底（2026-10-04 二次事故）', () => {
+  it('options.providerType 缺省（主路现状）但 env 携带 ANTHROPIC_PROVIDER_TYPE=zhipu-coding → 仍夹紧 131072', async () => {
+    mockStreamOk()
+    for await (const _ of anthropicMessagesQueryViaProviders('问', opts({
+      env: {
+        PATH: process.env.PATH ?? 'C:/',
+        ANTHROPIC_AUTH_TOKEN: 'test-key',
+        ANTHROPIC_BASE_URL: 'https://open.bigmodel.cn/api/anthropic',
+        ANTHROPIC_MODEL: 'glm-5.3',
+        ANTHROPIC_PROVIDER_TYPE: 'zhipu-coding',
+      },
+      maxTokens: 640000,
+    }))) void _
+    expect(parsedBody().max_tokens).toBe(131072)
+  })
+
+  it('options.providerType 与 env 均无 provider 信号 → 不夹紧（未登记渠道语义不变）', async () => {
+    mockStreamOk()
+    for await (const _ of anthropicMessagesQueryViaProviders('问', opts({ maxTokens: 640000 }))) void _
+    expect(parsedBody().max_tokens).toBe(640000)
+  })
+
+  it('显式 options.providerType 优先于 env 兜底', async () => {
+    mockStreamOk()
+    for await (const _ of anthropicMessagesQueryViaProviders('问', opts({
+      env: {
+        PATH: process.env.PATH ?? 'C:/',
+        ANTHROPIC_AUTH_TOKEN: 'test-key',
+        ANTHROPIC_BASE_URL: 'https://open.bigmodel.cn/api/anthropic',
+        ANTHROPIC_MODEL: 'glm-5.3',
+        ANTHROPIC_PROVIDER_TYPE: 'zhipu-coding',
+      },
+      providerType: 'deepseek',
+      maxTokens: 640000,
+    }))) void _
+    expect(parsedBody().max_tokens).toBe(640000)
+  })
+})
