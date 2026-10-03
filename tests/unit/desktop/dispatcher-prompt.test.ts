@@ -75,12 +75,8 @@ describe('buildDispatcherSystemPrompt 组装序', () => {
     expect(withConfirm).toContain('推进标记')
     expect(withConfirm).toContain('平台裁决边界会自动向用户发起确认卡')
     expect(withConfirm).not.toContain('guide_decide')
-    // 内置表全部接管阶段：无确认纪律段（零中间人工确认）
-    for (const node of Object.values(DESKTOP_PHASES)) {
-      if (!node.dispatcherManaged) continue
-      const prompt = buildDispatcherSystemPrompt(node, ctx)
-      expect(prompt).not.toContain('【确认纪律】')
-    }
+    // 内置表零确认段的防回归已由 dispatcher-phases.test 的刀 1 数据锁承担（2026-10-03
+    // 删留执行：此处删去重复的全表 for 断言，保留构造节点渲染路径验证）
   })
 
   it('workspaceHint 渲染进环境段', () => {
@@ -100,11 +96,9 @@ describe('buildAdvanceProtocolSection', () => {
     expect(section).toContain('PHASE_ADVANCE: desktop-scaffold')
     expect(section).toContain('句中复述无效')
     expect(section).toContain('[artifact] 选型结论文档存在且可读')
-    // 刀1：撤 manual 门——内置阶段不再渲染用户确认门行
+    // 刀1：撤 manual 门——内置阶段不再渲染用户确认门行（全表防回归由
+    // dispatcher-phases.test 数据锁承担，2026-10-03 删留执行去重）
     expect(section).not.toContain('用户确认门')
-    for (const node of Object.values(DESKTOP_PHASES)) {
-      expect(buildAdvanceProtocolSection(node)).not.toContain('用户确认门')
-    }
   })
 
   it('终态：收尾语义、不出现在标记示例', () => {
@@ -188,5 +182,39 @@ describe('需求摘要与子会话基底（2026-09-26 首跑修复）', () => {
     expect(base).toContain('【阶段约束】')
     expect(base).toContain('【项目需求')
     expect(base).not.toContain('你不直接写文件')
+  })
+})
+
+describe('快速模式任务书（2026-10-03 拍板：quick 快速做出可用应用）', () => {
+  const ctx = { projectName: 'clip-tool' }
+
+  it('quickMode 时 implement 用快速版任务书与约束：从零实现可用应用，不教续接骨架/契约先行', () => {
+    const prompt = buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-implement'], { ...ctx, quickMode: true })
+    expect(prompt).toContain('快速做一个能用的应用')
+    expect(prompt).toContain('从零实现一个完整可用的 Windows 桌面程序')
+    expect(prompt).toContain('不要求 contract.json、驱动断言与截图')
+    expect(prompt).toContain('快速模式不做工程契约与驱动断言')
+    // 长期模式任务书的关键前提不得混入（防双任务书叠加混淆调度员）
+    expect(prompt).not.toContain('续接骨架委派实现真实桌面程序')
+    expect(prompt).not.toContain('每实现一个功能必须先有对应驱动断言')
+  })
+
+  it('非 quickMode 的 implement 保持长期模式任务书（字节不变，既有用例语义）', () => {
+    const prompt = buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-implement'], ctx)
+    expect(prompt).toContain('续接骨架委派实现真实桌面程序')
+    expect(prompt).not.toContain('快速做一个能用的应用')
+  })
+
+  it('无快速版任务书的阶段（arch/scaffold/verify）：quickMode 也用原任务书与约束', () => {
+    const prompt = buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-scaffold'], { ...ctx, quickMode: true })
+    expect(prompt).toContain('按选型结论搭建最小骨架')
+  })
+
+  it('buildDesktopChildBaseSystem quickMode：子会话基底同步用快速版约束（不注入断言先行纪律）', () => {
+    const base = buildDesktopChildBaseSystem(DESKTOP_PHASES['desktop-implement'], { ...ctx, quickMode: true })
+    expect(base).toContain('快速模式不做工程契约与驱动断言')
+    expect(base).not.toContain('每实现一个功能必须先有对应驱动断言')
+    const baseLong = buildDesktopChildBaseSystem(DESKTOP_PHASES['desktop-implement'], ctx)
+    expect(baseLong).toContain('每实现一个功能必须先有对应驱动断言')
   })
 })

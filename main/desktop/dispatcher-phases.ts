@@ -75,6 +75,12 @@ export interface PhaseNode {
   title: string
   /** 任务书模板（{{project_name}} 等占位符由 dispatcher-prompt 渲染）。 */
   taskTemplate: string
+  /** 快速模式任务书（2026-10-03 拍板：quick 快速做出可用应用）：quick 项目跳到本
+   *  阶段时替代 taskTemplate（前提不同的阶段才提供——目前仅 desktop-implement：
+   *  quick 无既有骨架/契约，任务书不能教「续接骨架」）；缺省 = quick 也用 taskTemplate。 */
+  quickTaskTemplate?: string
+  /** 快速模式阶段约束（同上替代 constraints；缺省 = quick 也用 constraints）。 */
+  quickConstraints?: string[]
   /** 本阶段产物目录（相对项目沙箱根；空串=无独立目录，产物以 gates 声明为准）。 */
   outputPath: string
   /** 阶段约束（注入系统提示词；批次 C 起同步注入委派任务书软约束）。 */
@@ -228,6 +234,19 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       },
     ],
     extraTools: ['run_project_driver'],
+    // 快速模式任务书（2026-10-03 拍板：quick 跳过 arch/scaffold，无既有骨架/契约——
+    // 不教「续接骨架/驱动断言/契约先行」，直接从零做出完整可用的桌面应用；
+    // 工程化设施（契约/断言/驱动验收）是长期模式 verify 链的专属）。路由层 quick
+    // 直通道在 implement 收口后过宿主安全门直达 delivered（见 desktop-route）。 
+    quickTaskTemplate:
+      '快速做一个能用的应用（快速模式：无既有骨架，也不搭工程契约）：\n' +
+      '1. 按 PRD 背板功能清单，从零实现一个完整可用的 Windows 桌面程序——全部业务功能真实可用，程序能跑起来；\n' +
+      '2. 一次性委派 implement 子会话完成实现（依赖与解释器路径如实装配，不编造运行结果）；\n' +
+      '3. 产出 DELIVERY.md 到项目根（不是子目录内——门禁按项目根检查）：运行方式 / 依赖安装 / 已知限制。不要求 contract.json、驱动断言与截图。',
+    quickConstraints: [
+      '快速模式不做工程契约与驱动断言（那是长期模式的工程化验收设施，本次跳过）',
+      '能运行且功能齐全优先于代码结构完美；做不完的如实写进 DELIVERY.md 的已知限制',
+    ],
     dispatcherManaged: true,
   },
   'desktop-verify': {

@@ -5,6 +5,11 @@
  * 推进，人工只保留 Intent 层（PRD 确认）与异常处理（停止词/blocked 放行/门禁耗尽
  * 人话卡）。旧确认卡回传按协议升级告知兼容处理，不再发新卡。
  *
+ * 快速型直通道（2026-10-03 拍板：quick 的目的是快速做出可用应用）：quick 项目
+ * 跳过 arch/scaffold（无骨架/契约前提，implement 用阶段表快速版任务书从零实现），
+ * implement 门禁全绿后不走 verify 工程验收（契约/驱动断言/裁判门是长期模式的
+ * 工程化设施），过一道宿主安全门（fail-closed 底线）直达 delivered 交付。
+ *
  * 承接批次 D 的 runDesktopDispatcherLoop 与批次 E 的拒收闭环：
  *   分流（agent-dispatch 调用）：BLOMA_DESKTOP_DISPATCH on 且项目 template_type=
  *   desktop_tool 且 desktop_phase 在桌面表内 → 本路由接管全部消息（含卡回传）；
@@ -33,6 +38,7 @@ import { classifyUserDesktopIntent } from './user-intent-lexicon'
 import { buildCheckpointConclusion } from './phase-checkpoint'
 import { createChannelFailureTracker, observeChannelFailure, type ChannelFailureTracker } from './channel-failure-watch'
 import { readDesktopRequirementsDigest } from './requirement-digest'
+import { runSecurityScan } from '../verification/security-scan'
 
 // =========================================================================
 // 桌面线判定
@@ -77,6 +83,9 @@ export interface DesktopRouteDeps {
   driverSpawn?: DesktopDispatchRunInput['driverSpawn']
   /** 需求摘要注入（首跑修复：PRD 背板 → 调度员系统提示词与子会话基底；编排层装配，缺省不注入）。 */
   requirementsDigest?: (projectId: string) => string | undefined
+  /** 快速通道安全门注入（2026-10-03）：quick 直落 delivered 前的宿主安全扫描；
+   *  缺省生产实现见 defaultQuickSecurityGate（无项目上下文返回 null 跳过留痕）。 */
+  securityScan?: (projectId: string) => QuickSecurityGateResult | null
 }
 
 // =========================================================================
@@ -112,6 +121,39 @@ export function resetDesktopRouteLedgersForTests(): void {
   channelTrackers.clear()
 }
 
+/** 快速通道安全门结果（与 dispatcher-loop 宿主安全门同构：pass/blocking/scanned/listing）。 */
+export interface QuickSecurityGateResult {
+  passed: boolean
+  blocking: number
+  scanned: number
+  listing: string
+}
+
+/** 快速通道安全门生产实现：对产物根跑静态扫描（高危/严重 fail-closed）；
+ *  扫描器异常或无项目上下文返回 null（跳过留痕——安全门不做可用性单点，与
+ *  dispatcher-loop runHostSecurityGate 同哲学）。 */
+function defaultQuickSecurityGate(projectId: string): QuickSecurityGateResult | null {
+  let rootPath: string | undefined
+  try {
+    rootPath = findProject(projectId).root_path
+  } catch {
+    return null
+  }
+  try {
+    const result = runSecurityScan({ project_id: projectId, root_path: rootPath })
+    const blocking = result.issues.filter((issue) => issue.severity === 'high' || issue.severity === 'critical')
+    return {
+      passed: result.passed,
+      blocking: blocking.length,
+      scanned: result.scanned_files,
+      listing: blocking.slice(0, 10).map((issue) => `- ${issue.file}:${issue.line} ${issue.user_visible_summary}`).join('\n'),
+    }
+  } catch (error) {
+    console.error('[desktop-quick] 快速通道安全扫描执行失败（跳过本次门禁，留痕）：', error)
+    return null
+  }
+}
+
 // =========================================================================
 // PRD 确认改道
 // =========================================================================
@@ -129,10 +171,16 @@ export async function enterDesktopLine(
   const project = findProject(input.projectId)
   if (!shouldEnterDesktopLine(project)) return false
   const projectName = project?.name ?? input.projectId
-  updateProject(input.projectId, { desktop_phase: 'desktop-arch' })
-  deps.publish(input, 'stage_changed', { stage: 'desktop-arch' })
-  deps.publish(input, 'message_delta', { text: `PRD 已确认。本项目为桌面品类，切换到桌面调度员线：从「桌面选型与架构」阶段开始（web 草图流程跳过）。` })
-  await runDesktopStage(input, query, env, 'desktop-arch', deps, projectName, 0)
+  // 快速型直通道（2026-10-03）：quick 跳过 arch/scaffold，直接从 implement 快速版
+  // 任务书起跑（从零做出可用应用）；长期型从 desktop-arch 完整工程链开始。
+  const isQuick = project?.mode === 'quick'
+  const startPhase = isQuick ? 'desktop-implement' : 'desktop-arch'
+  updateProject(input.projectId, { desktop_phase: startPhase })
+  deps.publish(input, 'stage_changed', { stage: startPhase })
+  deps.publish(input, 'message_delta', { text: isQuick
+    ? 'PRD 已确认。本项目为桌面品类（快速模式）：跳过选型与工程骨架，直接进入快速实现——从零做出一个可运行的桌面应用。'
+    : `PRD 已确认。本项目为桌面品类，切换到桌面调度员线：从「桌面选型与架构」阶段开始（web 草图流程跳过）。` })
+  await runDesktopStage(input, query, env, startPhase, deps, projectName, 0)
   return true
 }
 
@@ -308,6 +356,7 @@ async function runDesktopStage(
     projectName,
     requirementsDigest,
     ...(verifiedConclusion ? { verifiedConclusion } : {}),
+    ...(project?.mode === 'quick' ? { quickMode: true } : {}),
     sandboxRoot,
     driverSpawn: deps.driverSpawn,
     readContract: () => {
@@ -368,6 +417,36 @@ async function settleDesktopStage(
       deps.persistSystem(input.sessionId, `[decision] desktop-advance ${phaseId} → ${finalPhase}（终态，交付通知卡已发）`)
       deps.complete(input.sessionId, input.projectId)
       return
+    }
+    // ── 快速型直通道（2026-10-03 拍板：quick 的目的是快速做出可用应用）：implement
+    // 门禁全绿后不走 verify 工程验收（契约/驱动断言/裁判门是长期模式的工程化设施），
+    // 过一道宿主安全门（fail-closed 底线，与 verify 收口同款扫描器）直达 delivered。
+    // 安全不过 → 停在 implement 出人话卡（修复后重新收口会自动重扫）。 ──
+    if (next === 'desktop-verify') {
+      const project = findProject(input.projectId)
+      if (project?.mode === 'quick') {
+        const securityGate = deps.securityScan
+          ? deps.securityScan(input.projectId)
+          : defaultQuickSecurityGate(input.projectId)
+        if (securityGate && !securityGate.passed) {
+          deps.publish(input, 'message_delta', {
+            text: buildBlockedNoticeCard({
+              phaseTitle: getDesktopPhase(phaseId)?.title ?? phaseId,
+              whatHappened: `快速交付前的安全扫描未通过（${securityGate.blocking} 个高危/严重问题，扫描 ${securityGate.scanned} 个文件），暂不交付。`,
+              evidence: securityGate.listing,
+            }),
+          })
+          deps.persistSystem(input.sessionId, `[decision] desktop-quick-security-gate ${phaseId}（${securityGate.blocking} 高危，停在 implement 待修复）`)
+          deps.complete(input.sessionId, input.projectId, 'incomplete')
+          return
+        }
+        updateProject(input.projectId, { desktop_phase: 'delivered', status: 'completed', current_stage: 'completed' })
+        deps.publish(input, 'stage_changed', { stage: 'delivered' })
+        deps.publish(input, 'message_delta', { text: buildDeliveredNoticeCard(assembleDeliveredNotice(input.projectId, projectName, phaseId, result)) })
+        deps.persistSystem(input.sessionId, `[decision] desktop-quick-delivered ${phaseId} → delivered（快速直通道：安全门${securityGate ? '通过' : '无项目上下文跳过'}，跳过 verify 工程验收）`)
+        deps.complete(input.sessionId, input.projectId)
+        return
+      }
     }
     updateProject(input.projectId, { desktop_phase: next })
     deps.publish(input, 'stage_changed', { stage: next })

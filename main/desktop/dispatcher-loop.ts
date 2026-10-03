@@ -169,6 +169,9 @@ export interface DesktopDispatchRunInput {
   projectName: string
   /** 需求摘要（首跑修复：PRD 背板 → 调度员系统提示词与子会话基底；编排层装配，缺省不注入） */
   requirementsDigest?: string
+  /** 快速模式（2026-10-03 拍板）：quick 项目跳过 arch/scaffold，本阶段用阶段表的
+   *  快速版任务书/约束（无骨架前提的从零实现）；收口直通道见 desktop-route。 */
+  quickMode?: boolean
   /** 上一轮已验证结论（刀2 checkpoint 消费：同阶段重跑注入，勿重验直接收口）。 */
   verifiedConclusion?: string
   /** 项目沙箱根（产物验证/契约读取/驱动 cwd 的解析根）。 */
@@ -391,6 +394,7 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     workspaceHint: '产物按相对路径写入（项目目录即工作根；如 00_ARCH/、00_SCAFFOLD/、00_VERIFY/）。',
     ...(input.requirementsDigest ? { requirementsDigest: input.requirementsDigest } : {}),
     ...(input.verifiedConclusion ? { verifiedConclusion: input.verifiedConclusion } : {}),
+    ...(input.quickMode ? { quickMode: true } : {}),
   })
 
   // ── 委派协作接线（2026-09-26 首跑修复）──
@@ -408,6 +412,7 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     system: buildDesktopChildBaseSystem(node, {
       projectName: input.projectName,
       ...(input.requirementsDigest ? { requirementsDigest: input.requirementsDigest } : {}),
+      ...(input.quickMode ? { quickMode: true } : {}),
     }),
     editFormat: 'diff',
     publish,
@@ -689,7 +694,6 @@ export async function runDesktopDispatcherLoop(input: DesktopDispatchRunInput): 
 function deriveRepairClass(result: DesktopDispatchRunResult): string | undefined {
   const advance = result.advance
   if (!advance || advance.decision !== 'reject') return undefined
-  if (advance.reason === 'confirmation-required') return 'confirm'
   if (advance.reason === 'contract-invalid') return 'mapping'
   const education = advance.education ?? ''
   if (education.includes('裁判门未过')) {

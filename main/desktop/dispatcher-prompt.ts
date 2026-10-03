@@ -45,6 +45,9 @@ export interface DispatcherPromptContext {
   requirementsDigest?: string
   /** 上一轮已验证结论（刀2 checkpoint 消费：同阶段重跑时注入——勿重验，直接收口）。 */
   verifiedConclusion?: string
+  /** 快速模式（2026-10-03 拍板：quick 快速做出可用应用）：true 时阶段提供快速版
+   *  任务书/约束则用快速版（目前仅 desktop-implement——无骨架前提的从零实现）。 */
+  quickMode?: boolean
 }
 
 /**
@@ -60,7 +63,12 @@ export interface DispatcherPromptContext {
  *   7. 确认纪律段（requiresUserConfirmation 时：先决策卡后标记）。
  */
 export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherPromptContext): string {
-  const rendered = renderTaskTemplate(node.taskTemplate, {
+  // 快速模式任务书/约束（2026-10-03）：quick 跳到本阶段时用阶段表提供的快速版（无
+  // 骨架前提的从零实现）；未提供则与长期模式同书（约束性阶段语义不随模式变）。 
+  const useQuickBook = Boolean(ctx.quickMode && node.quickTaskTemplate)
+  const taskTemplate = useQuickBook ? (node.quickTaskTemplate as string) : node.taskTemplate
+  const constraints = useQuickBook ? (node.quickConstraints ?? node.constraints) : node.constraints
+  const rendered = renderTaskTemplate(taskTemplate, {
     project_name: ctx.projectName,
   })
   const sections: string[] = []
@@ -88,8 +96,8 @@ export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherProm
   sections.push(`【本阶段任务书】\n${rendered.text}`)
 
   // 3. 阶段约束
-  if (node.constraints.length > 0) {
-    sections.push(`【阶段约束】\n${node.constraints.map((c, i) => `${i + 1}. ${c}`).join('\n')}`)
+  if (constraints.length > 0) {
+    sections.push(`【阶段约束】\n${constraints.map((c, i) => `${i + 1}. ${c}`).join('\n')}`)
   }
 
   // 4. 推进协议段
@@ -126,8 +134,10 @@ export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherProm
  */
 export function buildDesktopChildBaseSystem(
   node: PhaseNode,
-  ctx: { projectName: string; requirementsDigest?: string },
+  ctx: { projectName: string; requirementsDigest?: string; quickMode?: boolean },
 ): string {
+  const useQuickBook = Boolean(ctx.quickMode && node.quickTaskTemplate)
+  const constraints = useQuickBook ? (node.quickConstraints ?? node.constraints) : node.constraints
   const parts: string[] = [
     `你正在为「${ctx.projectName}」项目工作：Windows 桌面品类交付流水线，当前阶段「${node.title}」（${node.id}）。`,
     // 刀4（2026-10-02）：子会话产出经委派摘要回流调度员→聊天流，英文长报告会原样
@@ -137,8 +147,8 @@ export function buildDesktopChildBaseSystem(
       ? `本阶段产物目录：${node.outputPath}/（相对项目根目录）。`
       : '本阶段产物写入项目根目录（相对路径）。',
   ]
-  if (node.constraints.length > 0) {
-    parts.push(`【阶段约束】\n${node.constraints.map((constraint, index) => `${index + 1}. ${constraint}`).join('\n')}`)
+  if (constraints.length > 0) {
+    parts.push(`【阶段约束】\n${constraints.map((constraint, index) => `${index + 1}. ${constraint}`).join('\n')}`)
   }
   if (ctx.requirementsDigest) {
     parts.push(`【项目需求（唯一真相源，不得改写；清单外新功能一律不做）】\n${ctx.requirementsDigest}`)

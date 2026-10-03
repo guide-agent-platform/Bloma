@@ -23,6 +23,7 @@ import { findProject, updateProject } from '../../../main/project/project-servic
 import {
   DESKTOP_CONFIRM_OPTION_PREFIX,
   MAX_AUTO_ADVANCE_CHAIN,
+  enterDesktopLine,
   handleDesktopDispatchMessage,
   isDesktopLineActive,
   resetDesktopRouteLedgersForTests,
@@ -72,6 +73,8 @@ function baseRecord() {
     template_type: 'desktop_tool',
     desktop_phase: 'desktop-scaffold',
     desktop_confirmed_phases: [] as string[],
+    /** 项目模式（quick 直通道判定用；缺省不设——非 quick 走原全链，兼容既有用例）。 */
+    mode: undefined as string | undefined,
     root_path: sandboxRoot,
   }
 }
@@ -112,6 +115,7 @@ function collectorDeps(overrides: Partial<DesktopRouteDeps> = {}) {
       persistSystem: (_s: string, text: string) => { systemLogs.push(text) },
       complete: () => undefined,
       driverSpawn: async () => ({ code: 0, stdout: 'PASS a\nSUMMARY pass=1', stderr: '' }),
+      securityScan: () => ({ passed: true, blocking: 0, scanned: 3, listing: '' }),
       ...overrides,
     } as DesktopRouteDeps,
   }
@@ -402,6 +406,105 @@ describe('handleDesktopDispatchMessage 消息路由', () => {
     const tell = events.find((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('未收口'))
     expect(tell).toBeTruthy()
     expect(record.desktop_phase).toBe('desktop-scaffold')
+  })
+})
+
+describe('快速型直通道（2026-10-03 拍板：quick 快速做出可用应用，跳过工程化验收）', () => {
+  it('quick 项目 implement 门禁全绿 → 安全门过 → 直达 delivered：跳过 verify、发交付通知卡、零 verify 轮次', async () => {
+    record.mode = 'quick'
+    record.desktop_phase = 'desktop-implement'
+    let queryCalls = 0
+    const query: SDKQuery = async function* (_prompt: string, _options: SDKQueryOptions) {
+      queryCalls += 1
+      yield textMessage('实现完成。\n<!-- PHASE_ADVANCE: desktop-verify -->')
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+    const { deps, events } = collectorDeps()
+    await handleDesktopDispatchMessage(routeInput({ query }), deps)
+    expect(record.desktop_phase).toBe('delivered')
+    expect((record as unknown as { status?: string }).status).toBe('completed')
+    expect((record as unknown as { current_stage?: string }).current_stage).toBe('completed')
+    expect(queryCalls).toBe(1) // 不跑 verify（工程验收是长期模式设施）
+    expect(events.some((e) => e.type === 'stage_changed' && e.payload.stage === 'delivered')).toBe(true)
+    expect(events.some((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('【交付完成】'))).toBe(true)
+  })
+
+  it('安全门未过 → 停在 implement 出人话卡（高危清单直达）+ incomplete；阶段不动待修复重扫', async () => {
+    record.mode = 'quick'
+    record.desktop_phase = 'desktop-implement'
+    const completions: Array<{ sessionId: string; projectId: string; outcome?: 'success' | 'incomplete' }> = []
+    const query: SDKQuery = async function* (_prompt: string, _options: SDKQueryOptions) {
+      yield textMessage('实现完成。\n<!-- PHASE_ADVANCE: desktop-verify -->')
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+    const { deps, events } = collectorDeps({
+      securityScan: () => ({ passed: false, blocking: 2, scanned: 5, listing: '- app.py:3 eval 动态执行' }),
+      complete: (sessionId, projectId, outcome) => completions.push({ sessionId, projectId, outcome }),
+    })
+    await handleDesktopDispatchMessage(routeInput({ query }), deps)
+    expect(record.desktop_phase).toBe('desktop-implement') // 不交付，停在实现阶段
+    expect(events.some((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('安全扫描未通过'))).toBe(true)
+    expect(events.some((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('eval 动态执行'))).toBe(true)
+    // 2026-10-03 删留执行补齐：标题承诺的 incomplete 终态如实断言（失败交付不走 success）
+    expect(completions.some((c) => c.outcome === 'incomplete')).toBe(true)
+    expect(completions.some((c) => c.outcome === 'success' || c.outcome === undefined)).toBe(false)
+  })
+
+  it('longterm 项目 implement 推进 → 照旧走 verify 工程验收（直通道不误伤长期链）', async () => {
+    record.mode = 'longterm'
+    record.desktop_phase = 'desktop-implement'
+    writeValidContract()
+    let queryCalls = 0
+    const query: SDKQuery = async function* (_prompt: string, _options: SDKQueryOptions) {
+      queryCalls += 1
+      const script = queryCalls === 1
+        ? [textMessage('实现完成。\n<!-- PHASE_ADVANCE: desktop-verify -->')]
+        : [textMessage('验证全绿。\nPHASE_ADVANCE: delivered')]
+      for (const message of script) yield message
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+    const { deps } = collectorDeps()
+    await handleDesktopDispatchMessage(routeInput({ query }), deps)
+    expect(record.desktop_phase).toBe('delivered')
+    expect(queryCalls).toBe(2) // verify 照常执行
+  })
+
+  it('enterDesktopLine 起跑分叉：quick 直入 implement 快速实现，longterm 从 desktop-arch 完整链开始', async () => {
+    const query: SDKQuery = async function* (_prompt: string, _options: SDKQueryOptions) {
+      yield textMessage('完成。\n<!-- PHASE_ADVANCE: desktop-verify -->')
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+    const { deps: quickDeps, events: quickEvents } = collectorDeps()
+    record.mode = 'quick'
+    await enterDesktopLine(
+      { projectId: 'p1', sessionId: 's1', requestId: 'r1', content: '开始' },
+      query, {}, quickDeps,
+    )
+    expect((record as unknown as { desktop_phase?: string }).desktop_phase !== 'desktop-arch').toBe(true)
+    expect(record.desktop_phase).toBe('delivered') // 从 implement 起跑 → 直通道交付
+    expect(quickEvents.some((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('快速模式'))).toBe(true)
+
+    // longterm：从 desktop-arch 起跑（按当前阶段动态推进，验证起跑点在完整链头部）
+    const { deps: ltDeps } = collectorDeps()
+    record.mode = 'longterm'
+    record.desktop_phase = 'desktop-arch'
+    const nextMark = () => {
+      const marks: Record<string, string> = {
+        'desktop-arch': 'desktop-scaffold',
+        'desktop-scaffold': 'desktop-implement',
+        'desktop-implement': 'desktop-verify',
+      }
+      return marks[record.desktop_phase as string] ?? 'delivered'
+    }
+    const ltQuery: SDKQuery = async function* (_prompt: string, _options: SDKQueryOptions) {
+      yield textMessage(`完成。\nPHASE_ADVANCE: ${nextMark()}`)
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+    await enterDesktopLine(
+      { projectId: 'p1', sessionId: 's2', requestId: 'r2', content: '开始' },
+      ltQuery, {}, ltDeps,
+    )
+    expect(['desktop-scaffold', 'desktop-implement', 'desktop-verify', 'delivered']).toContain(record.desktop_phase)
   })
 })
 
