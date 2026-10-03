@@ -159,6 +159,11 @@ export async function* anthropicMessagesQueryViaProviders(prompt: string, option
           if (event.type === 'chunk') {
             textDeltaCount += 1
             queue.push({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: event.delta }] } })
+            // 入队即唤醒消费者（2026-10-04）：旧实现只在流结束的 then 里 wake——生成器
+            // 会等到整流结束才一次性倾泻全部增量，UI 呈现「整段瞬间出现」的假流式
+            // （0d399bd 照抄上游引入，契约而「逐段增量」从未被实测过；唤醒无等待者时是
+            // no-op，消费侧先清队再挂 notify 的次序保证无丢失唤醒）
+            wake()
           } else if (event.type === 'reasoning') {
             thinkingDeltaCount += 1
             if (showThinking) logThinking(options.sessionId, event.delta)

@@ -267,3 +267,27 @@ describe('provider 信号驱动的 URL/头部派生（2026-10-04 双事故修正
     expect(captured!.headers['x-api-key']).toBe('test-key')
   })
 })
+
+describe('流式增量即时投递（2026-10-04 假流式修复）', () => {
+  it('chunk 入队即唤醒：消费者在流结束前收到增量（旧实现会死锁到超时）', async () => {
+    let releaseSecond!: () => void
+    const secondArrived = new Promise<void>((resolve) => { releaseSecond = resolve })
+    h.streamSSE.mockImplementation(async (options: { onEvent: (event: unknown) => void }) => {
+      options.onEvent({ type: 'chunk', delta: '第一段' })
+      await secondArrived // 等测试方确认已提前收到第一段，才放行第二段与流结束
+      options.onEvent({ type: 'chunk', delta: '第二段' })
+      return { toolCalls: [], stopReason: 'end_turn' }
+    })
+    const gen = anthropicMessagesQueryViaProviders('问', opts())
+    // 若为假流式：next() 要等 streamSSE 结束，而它等 secondArrived——死锁到测试超时红
+    const first = await gen.next()
+    expect(first.done).toBe(false)
+    expect(JSON.stringify(first.value)).toContain('第一段')
+    releaseSecond()
+    let sawSecond = false
+    for await (const msg of gen) {
+      if (msg.type === 'assistant' && JSON.stringify(msg).includes('第二段')) sawSecond = true
+    }
+    expect(sawSecond).toBe(true)
+  })
+})
