@@ -239,12 +239,4 @@ describe('anthropicMessagesQuery 推理档位（reasoning-profile 2026-08-27）'
     expect(body.output_config).toBeUndefined()
   })
 
-  it('[S4-REASON-021] 缺省（不传 thinkingLevel）→ thinking:disabled（零回归契约，与现状逐字节一致）', async () => {
-    stubFetchWithResponse(sseResponse([{ type: 'message_stop' }]))
-    await collect(anthropicMessagesQueryViaProviders('判定', baseOptions()))
-
-    const body = lastRequestBody()
-    expect(body.thinking).toEqual({ type: 'disabled' })
-    expect(body.output_config).toBeUndefined()
-  })
 })

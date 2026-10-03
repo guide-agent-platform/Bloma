@@ -7,6 +7,7 @@ import { archiveProject, createProject, findProject, listProjects, updateProject
 import {
   cleanOrphanSessions,
   listSessions,
+  loadConversationHistory,
   loadMessages,
   readPrimaryIntent,
   readSessionsForTest,
@@ -311,6 +312,47 @@ describe('SessionService readPrimaryIntent 主题锚点（D4 无实质内容豁�
     useTemporaryHome('session-intent-empty-')
     try {
       expect(readPrimaryIntent('no-such-session')).toBeUndefined()
+    } finally {
+      restorePromaHome(originalHome)
+    }
+  })
+})
+
+describe('loadConversationHistory 缺省不含工具轨迹（P1-05 旧行为回归）', () => {
+  // 自 completion-claims.test.ts 迁入（2026-10-03 删留执行）：该文件另两例锁的
+  // hasWriteEditToolCall 与 includeToolTrace=true 均为生产不可达路径（反证见删留清单），
+  // 仅本例（缺省 false 的旧行为零变化）是活路径。
+  it('缺省 includeToolTrace=false：纯 tool_result 轮跳过，assistant 无工具行（零变化回归）', () => {
+    const originalHome = process.env.PROMA_HOME
+    const home = useTemporaryHome('session-trace-')
+    try {
+      const path = getAgentSessionPath('s-trace-2')
+      mkdirSync(dirname(path), { recursive: true })
+      writeFileSync(path, [
+        JSON.stringify({ role: 'user', content: '帮我把清空功能修好' }),
+        JSON.stringify({
+          role: 'assistant',
+          content: [
+            { type: 'text', text: '我先修改清空逻辑。' },
+            { type: 'tool_use', id: 't1', name: 'edit_file', input: { path: 'src/app.js' } },
+            { type: 'tool_use', id: 't2', name: 'run_gwt_tests', input: {} },
+          ],
+        }),
+        JSON.stringify({
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 't1', content: '已写入' },
+            { type: 'tool_result', tool_use_id: 't2', content: '失败 1 项', is_error: true },
+          ],
+        }),
+        JSON.stringify({ role: 'assistant', content: [{ type: 'text', text: '还差一点。' }] }),
+      ].join('\n') + '\n', 'utf8')
+
+      const turns = loadConversationHistory('s-trace-2', 10)
+      expect(turns.some((t) => t.content.includes('[本轮工具]'))).toBe(false)
+      expect(turns.some((t) => t.content.includes('[工具结果回执]'))).toBe(false)
+      // 纯 tool_result 的 user 轮（text 空）照旧被跳过
+      expect(turns.filter((t) => t.role === 'user')).toEqual([{ role: 'user', content: '帮我把清空功能修好' }])
     } finally {
       restorePromaHome(originalHome)
     }

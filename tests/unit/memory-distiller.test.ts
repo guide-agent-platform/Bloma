@@ -77,6 +77,10 @@ const VALID_DISTILLED = JSON.stringify({
   non_functional_notes: ['数据不上传云端'],
 })
 
+// 【挂账 2026-10-03 删留执行】distillProjectMemory/Safely 生产零调用（冻结模块）。
+// 本文件=解冻验收规格+「默认关闭」防误触发锁，与 memory-reachability.test 的
+// 冻结门禁联动：模块若退役，门禁用例与本文件一并删除。
+
 describe('T4-L3 蒸馏层 · 开关与成功路径', () => {
   beforeEach(() => {
     useTempHome()

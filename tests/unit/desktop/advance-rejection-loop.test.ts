@@ -28,9 +28,11 @@ describe('三态拒因归类', () => {
     }
   })
 
-  it('gate-deny：artifacts-missing；confirmation-required：确认凭据', () => {
+  // 2026-10-03 删留执行：confirmation-required 拒因无产生点（刀1 撤 manual 门后
+  // dispatcher-gate 无赋值、desktop-route:390 注明分支已删），其分类/续接用例移除；
+  // 生产死分支（dispatcher-loop.ts / advance-rejection-loop.ts 的 case）建议同步清理。
+  it('gate-deny：artifacts-missing', () => {
     expect(classifyRejection(reject('artifacts-missing'))).toBe('gate-deny')
-    expect(classifyRejection(reject('confirmation-required'))).toBe('confirmation-required')
   })
 })
 
@@ -121,12 +123,6 @@ describe('续接指令要素', () => {
     })
     expect(text).toContain('DELIVERY.md')
     expect(text).toContain('委派补齐')
-  })
-
-  it('confirmation-required：含用户确认动作指引', () => {
-    const text = buildContinuationDirective('desktop-verify', 'confirmation-required', undefined)
-    expect(text).toContain('用户确认')
-    expect(text).toContain('凭据')
   })
 
   it('实际声明目标入文（诊断可读）', () => {

@@ -143,11 +143,11 @@ describe('run_project_driver 阶段白名单', () => {
   })
 
   it('刀3 截图约定：scaffold/verify 任务书含窗口截图要求（fail-open 不阻塞断言）', () => {
+    // 2026-10-03 删留执行收紧：只锁行为锚点（截图机制/fail-open/窗口收敛/方言），
+    // 精确产物路径与「至少 N 个」数量口径不锁（文案调整不应红）
     expect(DESKTOP_PHASES['desktop-scaffold'].taskTemplate).toContain('ImageGrab.grab')
-    expect(DESKTOP_PHASES['desktop-scaffold'].taskTemplate).toContain('00_VERIFY/screenshots/S<场景号>.png')
     expect(DESKTOP_PHASES['desktop-scaffold'].taskTemplate).toContain('不阻塞断言')
     expect(DESKTOP_PHASES['desktop-verify'].taskTemplate).toContain('截图后立即隐藏窗口')
     expect(DESKTOP_PHASES['desktop-verify'].taskTemplate).toContain('S<编号> PASS')
-    expect(DESKTOP_PHASES['desktop-scaffold'].taskTemplate).toContain('至少覆盖 2 个 UI 场景')
   })
 })

@@ -9,7 +9,6 @@ import { findProject } from '../../project/project-service' // 白名单既有�
 import { prepareRecallBlock } from './session-recall'
 import { renderLearningsSection } from '../../project/learnings-log'
 import { estimateTokenCount } from './usage-guard'
-import { windowMessagesWithDigest } from './compacting-window'
 import { isDegenerateText } from '../../coding/output-integrity'
 import { buildTargetedDegenerateFeedback, classifyDsmlRecovery, parseDsmlInvokes } from './dsml-recovery'
 import { createDsmlDisplayFilter } from './dsml-display-filter'
@@ -456,7 +455,7 @@ function pinnedFailureExcerpt(messages: ConversationTurn[], pinnedTurn: number |
 /**
  * tail（messages[1:]）中第 ordinal 个完整工具对（assistant tool_use + 紧邻 user
  * tool_result，从 1 计，扫描时跳过文本轮）。找不到（序号越界/对不完整）返回 undefined。
- * partitionWindow 的钉轮定位是位置算术 2*(t-1)——纯工具对 tail 下与本函数等值；
+ * （原 partitionWindow 钉轮定位为位置算术 2*(t-1)，窗口化路径 2026-10-03 已删，本函数改自口语义）
  * 文本注入轮（退行反馈/steer）混排时位置算术会错位，本函数按真实配对计数兜底。
  */
 function toolPairAtOrdinal(messages: ConversationTurn[], ordinal: number): [ConversationTurn, ConversationTurn] | undefined {
@@ -519,10 +518,6 @@ async function requestHandoff(input: AgentLoopInput, messages: ConversationTurn[
   return text.trim()
 }
 
-/** 传给模型的纯文本轮窗口（上下文限界；loop 中纯文本轮罕见，见 windowMessages 注释）。 */
-export const TEXT_WINDOW_TURNS = 8
-/** 传给模型的工具轮对窗口（assistant tool_use + user tool_result 成对保留，绝不拆对）。 */
-export const TOOL_WINDOW_ROUNDS = 8
 
 /**
  * 判断是否为工具轮：content 为块数组且含 tool_use / tool_result。
@@ -531,78 +526,6 @@ export const TOOL_WINDOW_ROUNDS = 8
  */
 function isToolTurn(turn: ConversationTurn): boolean {
   return Array.isArray(turn.content) && turn.content.some((block) => block.type === 'tool_use' || block.type === 'tool_result')
-}
-
-/**
- * Agent Loop 上下文窗口化（F4）：首轮 task 恒保留，后向扫描——
- * tool 轮按 toolRounds*2 条预算保留（相邻成对 → 最近完整 N 轮，不拆 tool_use→tool_result 配对），
- * 纯文本轮按 textWindowTurns 保留；保持原顺序。JSONL 落盘不走此路径（全量审计）。
- *
- * 钉轮（闭环治理 PR2，对抗审查 M2 取舍落地）：pinnedTurn 指向首个 test_failed 轮（1-based），
- * 该轮的 assistant+user 对在窗口预算之外恒保留——长循环下第 1 次 run_gwt_tests 失败的
- * 断言细节不会随 8 轮硬窗口出窗，模型修复不再重复踩已修过的坑。只钉完整对
- * （角色成对且都是工具轮）；对不完整（cancelled 残局）不钉，退化为固定窗口。
- */
-/**
- * 窗口分区（compacting-window 移植的重构基础，2026-08-28 队友）：同一后向扫描算法，
- * 同时返回保留集与驱逐集。windowMessages 基于它保持原行为；windowMessagesWithDigest
- * 基于驱逐集生成摘要。pinnedTurn 支持本地钉轮（首个测试失败轮恒保留，不占窗口预算）。
- */
-export function partitionWindow(
-  messages: ConversationTurn[],
-  textWindowTurns: number,
-  toolRounds: number,
-  pinnedTurn?: number,
-): { head: ConversationTurn | null; kept: ConversationTurn[]; evicted: ConversationTurn[] } {
-  if (messages.length === 0) return { head: null, kept: [], evicted: [] }
-  const head = messages[0]
-  const tail = messages.slice(1)
-  // pinnedTurn t 的对 = tail[2(t-1)]（assistant tool_use）+ tail[2(t-1)+1]（user tool_result）
-  const pinned = new Set<number>()
-  if (pinnedTurn !== undefined) {
-    const a = 2 * (pinnedTurn - 1)
-    const b = a + 1
-    const assistant = tail[a]
-    const result = tail[b]
-    if (
-      assistant && result &&
-      assistant.role === 'assistant' && isToolTurn(assistant) &&
-      result.role === 'user' && isToolTurn(result)
-    ) {
-      pinned.add(a)
-      pinned.add(b)
-    }
-  }
-  let toolBudget = toolRounds * 2
-  let textBudget = textWindowTurns
-  const keptIdx = new Set<number>()
-  for (const idx of pinned) keptIdx.add(idx) // 钉住的对恒保留（不占预算）
-  for (let i = tail.length - 1; i >= 0; i -= 1) {
-    if (pinned.has(i)) continue
-    if (isToolTurn(tail[i])) {
-      if (toolBudget > 0) {
-        keptIdx.add(i)
-        toolBudget -= 1
-      }
-    } else if (textBudget > 0) {
-      keptIdx.add(i)
-      textBudget -= 1
-    }
-  }
-  const kept = [...keptIdx].sort((a, b) => a - b).map((i) => tail[i])
-  const evicted = tail.filter((_, i) => !keptIdx.has(i))
-  return { head, kept, evicted }
-}
-
-export function windowMessages(
-  messages: ConversationTurn[],
-  textWindowTurns: number,
-  toolRounds: number,
-  pinnedTurn?: number,
-): ConversationTurn[] {
-  const { head, kept } = partitionWindow(messages, textWindowTurns, toolRounds, pinnedTurn)
-  if (!head) return []
-  return [head, ...kept]
 }
 
 /** 占用估算文本：text 正文 + tool_result 内容 + tool_use input 序列化 + image 占位（全块口径，r55 队友）。 */
@@ -637,7 +560,7 @@ function turnEstTokens(turn: ConversationTurn): number {
  * 语义（方案 §3.2）：
  * - 预算从尾向头累加（estimateTokenCount 既有估算器），保留集恒为 messages 的**连续后缀**
  *  （首个装不下的单元即停，不留「中空」历史）；
- * - tool_use/tool_result 成对保留（切点永不在 tool_result，对齐 partitionWindow 按对计数的
+ * - tool_use/tool_result 成对保留（切点永不在 tool_result，按对计数（原窗口化路径同名语义，2026-10-03 已随其删除改述）
  *   配对保护先例）；纯文本轮（退行反馈/steer 注入等）独立成单元，不拆对；
  * - 装不下的整对丢弃（其内容由交接文档兜底）；首条 task（head）不进保留段——新首消息
  *   已含 task+交接；

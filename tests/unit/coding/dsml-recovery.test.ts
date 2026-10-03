@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { runAgentLoop, type AgentLoopInput, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../../../main/agent/loop/agent-loop'
+import type { AgentLoopInput, AgentLoopTool, ToolContext, ToolOutcome } from '../../../main/agent/loop/agent-loop'
 import {
   DSML_RECOVERABLE_TOOLS,
   buildTargetedDegenerateFeedback,
@@ -17,7 +17,9 @@ import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../../main/
  * 序列化进正文）。锁定：
  * - 解析：当晚实测两种形态（纯协议块 / 旁白+协议块，string true/false 参数）；
  * - 分级：只读工具直执行、写类/未知工具走定向反馈；
- * - 集成：退化 read_file 轮被救回（工具真实执行、loop 存活、恢复计数入账）；
+ * - 集成：退化 read_file 轮被救回（工具真实执行、loop 存活、恢复计数入账）——
+ *   2026-10-03 删留执行注：本文件实际只锁解析/分级纯函数面，runAgentLoop 集成面
+ *   由 coding/task-workflow.test.ts 间接覆盖（头注原文与实情不符已修正）；
  *   退化 write_file 轮不盲执行（零 write 调用）且反馈具体到调用意图；
  * - 开关 off = 现状（泛化反馈，无恢复）。
  */

@@ -1,48 +1,21 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { SDKMessage } from '../../shared/types'
-
-// 规则引擎固定 pass（本文件只测语义腿的合成与降级）；readArtifactText 保真实实现
-vi.mock('../../main/review/judge-engine', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../main/review/judge-engine')>()
-  return {
-    ...actual,
-    runJudge: vi.fn((): import('../../main/review/judge-engine').JudgeVerdict => ({
-      verdict: 'pass',
-      hard_constraints: [],
-      soft_constraints: [],
-      user_visible_summary: '规则全绿',
-      repairable: false,
-    })),
-  }
-})
-vi.mock('../../main/platform/llm/runtime-fallback', () => ({
-  // 类别路由固定给出可用 env（语义腿必跑）；skip 分支用独立用例直测 runSemanticJudgeReview
-  resolveChannelEnv: vi.fn(() => ({ env: { ANTHROPIC_AUTH_TOKEN: 'k', ANTHROPIC_BASE_URL: 'https://example.com' }, channel: { id: 'ch-1' } })),
-}))
-
-import { resolveChannelEnv } from '../../main/platform/llm/runtime-fallback'
-import { runJudge } from '../../main/review/judge-engine'
-import { syncDocuments } from '../../main/project/document-engine'
-import { createProject, findProject } from '../../main/project/project-service'
-import { recordSessionActivity } from '../../main/platform/sessions/session-service'
+import { describe, expect, it } from 'vitest'
 import {
   deriveConstraint,
   parseSemanticFindings,
-  runSemanticJudgeReview,
   type SemanticFinding,
 } from '../../main/review/judge-semantic'
-import type { ConversationTurn, SDKQuery } from '../../main/orchestration/orchestrator'
 import type { SketchRequirement } from '../../main/coding/sketch-engine'
 
 /**
- * MVP 语义审查腿（judge-semantic，2026-08-26，裁判域 LLM，非 AC）：
+ * MVP 语义审查腿纯函数面（judge-semantic，2026-08-26，裁判域 LLM，非 AC）：
  * - 解析白名单：未知功能项 id / 非法状态丢弃；围栏容忍
  * - 严重度推导：P0 missing/deviated→blocking；P0 partial / P1 missing/deviated→major；
  *   P2 / unverified 仅备注不构成失败
- * - 降级：无 env / LLM 失败 → skipped 留痕，裁决不受影响（保持 ready）
+ *
+ * 2026-10-03 删留执行：原头注承诺的 runSemanticJudgeReview 集成与 skip 分支用例
+ * （judge-semantic.ts 的 no_channel / llm_failed skip）已不存在——顶部两个 vi.mock
+ * （runJudge 固定 pass / resolveChannelEnv）与成套 fixture 均为死脚手架，已删；
+ * skip 分支当前全仓无覆盖，补测时再建档。
  */
 
 const requirements: SketchRequirement[] = [
@@ -99,4 +72,3 @@ describe('judge-semantic 纯函数', () => {
     expect(tolerated?.detail).toContain('待人工确认')
   })
 })
-

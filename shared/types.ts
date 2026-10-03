@@ -1023,14 +1023,6 @@ export interface ProjectCreateInput extends RequestEnvelope {
   initial_message?: string
 }
 
-/** 单次 run 的能力开关事实（2026-09-26 运行审计 P2-03；实现见 main/coding/capability-manifest.ts）。 */
-export interface CapabilityManifest {
-  at: string
-  session_id: string
-  switches: Record<string, boolean>
-  notes: string[]
-}
-
 /** 修复账本条目（2026-09-26 运行审计 P1-02；实现见 main/coding/repair-ledger.ts）。 */
 export interface RepairLedgerEntry {
   at: string
@@ -1069,9 +1061,6 @@ export interface Project {
   repair_total_attempts?: number
   /** 修复账本（append-only，容量 50）：epoch 开启/尝试/零编辑/豁免/耗尽/收敛事件流。 */
   repair_ledger?: RepairLedgerEntry[]
-  /** 最近一次 run 的能力开关事实（P2-03：每 run 落盘真实开关值——「函数存在」
-   *  不等于「现网生效」，裁判/审计/下一次 run 据实判断）。 */
-  capability_manifest?: import('../main/coding/capability-manifest').CapabilityManifest
   /** 被阻塞的编程操作（A2 resume 闭环）：非阻塞态为 undefined */
   blocked_action?: 'mvp_repair' | 'test_repair' | 'judge_return' | 'security_repair'
   /** 需求确认后已自动命名过（autoNameProject）：此后不再覆盖，保住用户手动改名 */

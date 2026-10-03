@@ -13,12 +13,6 @@ export function repairScopeEnabled(): boolean {
   return process.env.BLOMA_REPAIR_SCOPE === '1'
 }
 
-/** B2 判定：工具调用记录里是否存在有效写类调用（write_file/edit_file）。
- *  开关已删除（2026-10-01 开关面收敛批）：零编辑不计预算已是无条件承诺。 */
-export function hasWriteEditToolCall(toolCalls: Array<{ name: string; path?: string; status?: 'ok' | 'error' }>): boolean {
-  return toolCalls.some((call) => (call.name === 'write_file' || call.name === 'edit_file') && call.status !== 'error')
-}
-
 /** 受保护路径缺省（权威契约/宿主产物；拒绝任何扩大申请） */
 const PROTECTED_WRITE_PATHS = ['prd.json', 'test-report.json', 'documents/loop-checkpoint.json', 'documents/decisions.md']
 

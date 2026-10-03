@@ -21,7 +21,7 @@ import {
  *    空 → real-static（纯静态一等公民，无 server 件）；
  * 3. 骨架内容质量：PORT 约定、Express 标准注册、CSP 与真相源同步、
  *    密钥只读环境变量、db 原子写；
- * 4. 背板锚条款分支：on → Express 口径；off → 旧相对路径正反例（两侧字节级锁）。
+ * 4. 背板锚条款：Express 口径锁已收敛至 prd-interface-spec A2 逐字快照（更强，2026-10-03 删留执行）。
  */
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../..')
@@ -69,22 +69,6 @@ describe('W1 真实脚手架骨架包（BLOMA_REAL_SCAFFOLD）', () => {
     expect(db).toContain('renameSync')
   })
 
-  it('背板锚条款：Express 业界标准口径（开关已删 2026-10-01，唯一形态）', () => {
-    const base: PrdBackplane = {
-      project_id: 'p1',
-      name: '记账',
-      positioning: '记录',
-      requirements: [{ id: 'F-001', description: '记录收支' }],
-      acceptance: {},
-      out_of_scope: [],
-      assumptions: [],
-      interface_spec: [{ endpoint: '/api/records', method: 'GET', response: '{records:[]}' }],
-    }
-    const anchor = renderBackplaneAnchor({ ...base })
-    expect(anchor).toContain("app.get('/api/xxx'")
-    expect(anchor).toContain('process.env.PORT')
-    expect(anchor).not.toContain('文件名前缀之后的相对路径')
-  })
 
   it('REAL_SCAFFOLD_TYPES：web 形态三类型参与；desktop_tool/ai_app 不参与（v0 不扩）', () => {
     for (const t of ['web_fullstack', 'personal_tool', 'game']) {

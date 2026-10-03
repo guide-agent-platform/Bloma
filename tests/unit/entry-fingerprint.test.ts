@@ -9,6 +9,10 @@ import { computeEntryFingerprint } from '../../main/verification/test-legacy'
  * dist/app.js——后端 server/** 与依赖清单改动不使指纹失效，会放行「验证后被改」。
  */
 
+// 【挂账 2026-10-03 删留执行】GWT 退役后兼容层半休眠：checkEntryFingerprintFresh
+// 零调用、writeTestReport 仅测试调用。指纹计算面为兼容层资产，接入消费侧或
+// 明确退役前保留。
+
 describe('computeEntryFingerprint 覆盖面（P1-07）', () => {
   function setupProject(): string {
     const root = mkdtempSync(join(tmpdir(), 'proma-fp-'))

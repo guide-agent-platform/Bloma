@@ -23,6 +23,16 @@ describe('dispatcher-phases 阶段表 schema', () => {
     expect(result.violations).toEqual([])
   })
 
+  it('快速模式字段数据锁（2026-10-03 quick 通道）：quickTaskTemplate/quickConstraints 仅 desktop-implement 提供且非空，其余阶段不提供（quickMode 回退原任务书）', () => {
+    const implement = DESKTOP_PHASES['desktop-implement']
+    expect(implement.quickTaskTemplate).toBeTruthy()
+    expect((implement.quickConstraints ?? []).length).toBeGreaterThan(0)
+    for (const node of Object.values(DESKTOP_PHASES)) {
+      if (node.id === 'desktop-implement') continue
+      expect(node.quickTaskTemplate ?? null, `${node.id} 不应提供快速版任务书`).toBeNull()
+    }
+  })
+
   it('表数组与记录键集一致且保持声明序', () => {
     expect(DESKTOP_PHASE_TABLE).toEqual([
       'requirements',

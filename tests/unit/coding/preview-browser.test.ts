@@ -254,8 +254,10 @@ describe('真浏览器集成（无 chromium 整组跳过）', () => {
     }
   }
 
-  it('navigate→observe→fill→click(wait_for)→extract 全链路 + 外域拒绝', async () => {
-    if (!(await playwrightAvailable())) return
+  it('navigate→observe→fill→click(wait_for)→extract 全链路 + 外域拒绝', async (t) => {
+    // 2026-10-03 删留执行：playwright 缺失时显式 skip（原静默 return 会假绿，
+    // 有 chromium 的环境才其正验这条路）
+    if (!(await playwrightAvailable())) return t.skip()
     const project = createProject({ request_id: 'req-pb-e2e', mode: 'quick' })
     recordSketchGenerated(project.project_id, [])
     const ctx = ctxFor(project.project_id, 'session-pb-e2e', serverUrl)

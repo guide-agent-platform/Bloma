@@ -16,13 +16,12 @@ import { getDocumentsDir } from '../../../storage/config-paths'
  * 关键锁定（实施稿 §6 PR-B 测试清单）：
  * - 会话分节追加（迭代重跑新分节不覆盖历史）+ 轮次行/终态节格式；
  * - stale 豁免：type 'loop_log' 条目在多次 checkpoint 同步后仍 synced、文件内容不被触碰（硬约束 7）；
- * - BLOMA_LOOP_LOG 开关矩阵；
+ * - （2026-10-03 删留执行注：头注原称的 BLOMA_LOOP_LOG 开关矩阵用例从未存在，死脚手架已清）
  * - 清单登记幂等（按 path 去重）。
  */
 
 describe('appendLoopLogDocument — append-only 过程日志', () => {
   const originalPromaHome = process.env.PROMA_HOME
-  const originalLoopLog = process.env.BLOMA_LOOP_LOG
   let projectId = ''
   let dir = ''
 
@@ -37,8 +36,6 @@ describe('appendLoopLogDocument — append-only 过程日志', () => {
 
   afterEach(() => {
     restorePromaHome(originalPromaHome)
-    if (originalLoopLog === undefined) delete process.env.BLOMA_LOOP_LOG
-    else process.env.BLOMA_LOOP_LOG = originalLoopLog
   })
 
   function readLog(): string {

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSy
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 /**
  * 记忆栈可达性门禁（2026-09-12 记忆栈审计裁定 §1，D0）。
@@ -96,19 +96,25 @@ export function findDynamicReferences(repoRoot: string, reachable: Set<string>, 
 
 describe('memory-reachability（记忆栈可达性门禁）', () => {
   const fixtures: string[] = []
+  // 2026-10-03 删留执行：前两例共享一次全量 BFS（原各自扫 main/ 两遍、第二例带
+  // 120s timeout——满载机器上双倍扫描纯浪费；扫描结果确定性，一次求得两例共用）
+  let reachableMain: Set<string>
+  beforeAll(() => {
+    reachableMain = collectReachableModules(MAIN_ENTRY, REPO_ROOT)
+  })
   afterAll(() => {
     for (const dir of fixtures) rmSync(dir, { recursive: true, force: true })
   })
 
   it('生产入口 main/index.ts 的可达集不含 memory-distiller（冻结不回接）', () => {
-    const reachable = collectReachableModules(MAIN_ENTRY, REPO_ROOT)
+    const reachable = reachableMain
     // 模块被删层时视为通过：文件不存在 → 断言自然成立，不报错
     expect([...reachable].some((rel) => rel.startsWith(TARGET_MODULE))).toBe(false)
     expect(findDynamicReferences(REPO_ROOT, reachable, 'memory-distiller')).toEqual([])
   })
 
-  it('可达集覆盖跨层真实实现（样例：agent-loop，PR2 归位后位于 main/agent/loop/）', { timeout: 120_000 }, () => {
-    const reachable = collectReachableModules(MAIN_ENTRY, REPO_ROOT)
+  it('可达集覆盖跨层真实实现（样例：agent-loop，PR2 归位后位于 main/agent/loop/）', () => {
+    const reachable = reachableMain
     // 旧版验证 export * 过渡桩可达（PR1 已删桩）；本版改为验证迁移后真实实现仍从入口可达，
     // 证明解析规则对子目录层级生效
     expect([...reachable].some((rel) => rel === 'main/agent/loop/agent-loop.ts')).toBe(true)

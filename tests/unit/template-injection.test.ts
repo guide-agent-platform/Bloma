@@ -4,14 +4,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   buildClarifyInjection,
-  buildLoopInjection,
   buildPrdFewShotInjection,
-  buildSketchInjection,
-  gwtRequiredCategories,
 } from '../../main/agent/prompting/template-injection'
-import { externalResourceViolation } from '../../main/agent/tools/agent-tools'
-import { renderGwtSkeleton } from '../../main/project/document-engine'
 import type { PrdBackplane, SketchRequirement } from '../../main/coding/sketch-engine'
+// 2026-10-03 删留执行：buildLoopInjection/buildSketchInjection/gwtRequiredCategories/
+// externalResourceViolation/renderGwtSkeleton 为历史删除用例遗留死 import，已清。
 
 /** 注入点②-⑦接线（P5）：每点独立开关（=现状语义）+ 切片内容。 */
 

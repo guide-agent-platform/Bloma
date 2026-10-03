@@ -27,6 +27,9 @@ afterEach(async () => {
   }
 })
 
+// 【挂账 2026-10-03 删留执行】McpServerManager 生产零调用（与 mcp-client 同批休眠）。
+// 进程监督语义只能真进程验证；接入或裁撤裁决前保留休眠。
+
 describe('validateMcpCommand（Proma 式 validator）', () => {
   it('[S4-MCP-012] 脚本存在性：node 脚本（.mjs/.js/.cjs）存在 OK；不存在/非脚本扩展/相对路径拒绝', () => {
     expect(validateMcpCommand({ serverId: 'a', command: FAKE_SERVER, args: [] }).ok).toBe(true)

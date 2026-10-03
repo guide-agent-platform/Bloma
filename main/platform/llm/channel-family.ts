@@ -49,37 +49,5 @@ export function channelFamilyOf(channel: ChannelFamilyInput | undefined): string
   return PROVIDER_FAMILY[provider] ?? provider
 }
 
-/** 家族多样性断言输入：author 缺省表示无作者对照（单审查场景），此时不拦。 */
-export interface ReviewFamilyDiversityInput {
-  authorChannel?: ChannelFamilyInput
-  reviewerChannel: ChannelFamilyInput
-  /** 断言用途说明（写入拒绝文案，帮助定位配置问题）。 */
-  context?: string
-}
-
-/**
- * 审查独立性断言：reviewer 家族 ≠ author 家族，违反抛错。
- *
- * 用途：异构审查（C3 攻防轮次）构建期拦截错误配置——同族审查在结构上无效，
- * 应在配置期炸掉而不是运行期产出不可信结论。author 为 undefined 时不拦
- * （单审查/无对照场景由调用方定义语义）。
- */
-export function assertReviewFamilyDiversity(input: ReviewFamilyDiversityInput): void {
-  if (!input.authorChannel) return
-  const authorFamily = channelFamilyOf(input.authorChannel)
-  const reviewerFamily = channelFamilyOf(input.reviewerChannel)
-  if (authorFamily === reviewerFamily) {
-    const where = input.context ? `（${input.context}）` : ''
-    throw new Error(
-      `审查独立性断言失败${where}：审查渠道与作者渠道属于同一家族（${reviewerFamily}），`
-      + `同源模型互审存在同款幻觉互相确认的盲区。`
-      + `请为审查方配置异族渠道（作者=${describeChannel(input.authorChannel)}，`
-      + `审查=${describeChannel(input.reviewerChannel)}）。`,
-    )
-  }
-}
-
-function describeChannel(channel: ChannelFamilyInput): string {
-  const provider = channel.provider_type?.trim() || '未知 provider'
-  return `${channel.id}[${provider}]`
-}
+// （assertReviewFamilyDiversity/describeChannel 随死路径清尸删除，2026-10-03 删留执行：
+//  生产零调用——adversarial-review.ts:67 用 channelFamilyOf 自行比较返回 same_family。）

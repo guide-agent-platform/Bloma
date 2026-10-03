@@ -178,7 +178,7 @@ export type AdvanceDecision =
   | { decision: 'advance'; target: string; discardedObservations: AdvanceMarkCollection['discarded'] }
   | {
       decision: 'reject'
-      reason: 'no-marks' | 'multiple-divergent' | 'unknown-current' | 'unknown-target' | 'not-next' | 'terminal' | 'artifacts-missing' | 'contract-invalid' | 'confirmation-required'
+      reason: 'no-marks' | 'multiple-divergent' | 'unknown-current' | 'unknown-target' | 'not-next' | 'terminal' | 'artifacts-missing' | 'contract-invalid'
       expected?: string | null
       actual?: string
       missingArtifacts?: ArtifactVerification['missing']

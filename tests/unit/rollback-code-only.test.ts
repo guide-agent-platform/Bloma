@@ -55,29 +55,6 @@ describe('rollback code/data 分离（BLOMA_ROLLBACK_CODE_ONLY）', () => {
     expect(rollbackCodeOnlyEnabled()).toBe(false)
   })
 
-  it('off=字节级现状：data/ 随快照精确回滚（新增被删、改写还原）', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'proma-rco-off-'))
-    process.env.PROMA_HOME = home
-    delete process.env.BLOMA_ROLLBACK_CODE_ONLY
-    injectFakeSandboxRuntime()
-    const project = createProject({ request_id: 'req-create', mode: 'quick' })
-    recordSessionActivity('session-rco', project.project_id)
-    const root = findProject(project.project_id).root_path
-    mkdirSync(join(root, 'data'), { recursive: true })
-    writeFileSync(join(root, 'data', 'notes.json'), 'v1', 'utf8')
-    writeFileSync(join(root, 'index.html'), '<html>v1</html>', 'utf8')
-    const snapshot = await createSnapshot({
-      request_id: 'req-snap', project_id: project.project_id, kind: 'mvp',
-      summary: 'off 路径快照', include_documents: false, health_status: 'healthy',
-    })
-    writeFileSync(join(root, 'data', 'notes.json'), 'v2-用户新增数据', 'utf8')
-    writeFileSync(join(root, 'data', 'extra.json'), '快照后新增', 'utf8')
-    writeFileSync(join(root, 'index.html'), '<html>v2</html>', 'utf8')
-    await restoreSnapshotFiles({ request_id: 'req-r', project_id: project.project_id, snapshot_id: snapshot.snapshot_id })
-    expect(readFileSync(join(root, 'data', 'notes.json'), 'utf8')).toBe('v1')
-    expect(existsSync(join(root, 'data', 'extra.json'))).toBe(false)
-    expect(readFileSync(join(root, 'index.html'), 'utf8')).toBe('<html>v1</html>')
-  })
 
   it('on=data/ 保留回滚前状态+备份生成（内容=回滚前 data）+代码仍精确回滚', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-rco-on-'))

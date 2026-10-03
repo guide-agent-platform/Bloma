@@ -48,8 +48,13 @@ describe('ux-channel-list-walkthrough r112：渠道列表区（0 基础「管理
     mount()
     expect(screen.getByText('我的 DeepSeek')).toBeTruthy()
     expect(screen.getByText('备用智谱')).toBeTruthy()
-    const dots = document.querySelectorAll('span[style*="border-radius: 50%"]')
+    // 2026-10-03 删留执行：改用语义 testid 前缀选择器（原 border-radius 样式选择器
+    // 属实现细节税），并锁状态点携带 title 语义（可及性状态出口）
+    const dots = document.querySelectorAll('[data-ai-id^="channel-status-dot-"]')
     expect(dots.length).toBeGreaterThanOrEqual(2)
+    for (const dot of Array.from(dots)) {
+      expect((dot as HTMLElement).title.length).toBeGreaterThan(0)
+    }
   })
 
   it('[L2·删除流] title=删除渠道 → 确认/取消出现 → 确认 → IPC 带 channel_id → 列表移除', async () => {

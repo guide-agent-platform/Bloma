@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  assertReviewFamilyDiversity,
-  channelFamilyOf,
-} from '../../main/platform/llm/channel-family'
+import { channelFamilyOf } from '../../main/platform/llm/channel-family'
 
 /**
  * C2 渠道家族判定与审查独立性断言单测（协作机制改造清单，2026-09-24）。
@@ -11,7 +8,6 @@ import {
  * - 同厂商多接入归一（zhipu/zhipu-coding/zhipu-coding-team → zhipu；kimi 两形态 → moonshot）
  * - 中转聚合类保守独立（anthropic-compatible ≠ anthropic）
  * - 未知/缺失 provider 以渠道 ID 成独立族
- * - 断言：同族抛错（文案含双方渠道与改法指引）/ 异族通过 / 无作者对照不拦
  */
 
 describe('channelFamilyOf', () => {
@@ -39,55 +35,5 @@ describe('channelFamilyOf', () => {
   })
 })
 
-describe('assertReviewFamilyDiversity', () => {
-  const deepseekChannel = { id: 'ds-main', provider_type: 'deepseek' as const }
-  const glmCodingChannel = { id: 'glm-coding', provider_type: 'zhipu-coding' as const }
-  const glmDirectChannel = { id: 'glm-direct', provider_type: 'zhipu' as const }
-
-  it('同族（含同厂商不同接入形态）抛错，文案含双方渠道与改法指引', () => {
-    expect(() =>
-      assertReviewFamilyDiversity({ authorChannel: glmDirectChannel, reviewerChannel: glmCodingChannel }),
-    ).toThrow(/同一家族/)
-    expect(() =>
-      assertReviewFamilyDiversity({ authorChannel: glmDirectChannel, reviewerChannel: glmCodingChannel }),
-    ).toThrow(/glm-direct\[zhipu\]/)
-    expect(() =>
-      assertReviewFamilyDiversity({ authorChannel: glmDirectChannel, reviewerChannel: glmCodingChannel }),
-    ).toThrow(/glm-coding\[zhipu-coding\]/)
-  })
-
-  it('异族通过；context 说明写入文案', () => {
-    expect(() =>
-      assertReviewFamilyDiversity({
-        authorChannel: deepseekChannel,
-        reviewerChannel: glmCodingChannel,
-        context: '语义审查',
-      }),
-    ).not.toThrow()
-    try {
-      assertReviewFamilyDiversity({
-        authorChannel: deepseekChannel,
-        reviewerChannel: { id: 'ds-2', provider_type: 'deepseek' },
-        context: '攻防审查',
-      })
-      expect.unreachable('同族应抛错')
-    } catch (error) {
-      expect((error as Error).message).toContain('攻防审查')
-    }
-  })
-
-  it('作者缺省（无对照的单审查场景）不拦', () => {
-    expect(() =>
-      assertReviewFamilyDiversity({ reviewerChannel: glmDirectChannel }),
-    ).not.toThrow()
-  })
-
-  it('未知 provider 渠道视为独立家族，与字面家族互异', () => {
-    expect(() =>
-      assertReviewFamilyDiversity({
-        authorChannel: { id: 'uuid-x', provider_type: undefined },
-        reviewerChannel: deepseekChannel,
-      }),
-    ).not.toThrow()
-  })
-})
+// （assertReviewFamilyDiversity 4 例随生产清尸删除，2026-10-03 删留执行：
+//  该断言生产零调用——adversarial-review.ts:67 用 channelFamilyOf 自行比较。）

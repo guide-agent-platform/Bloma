@@ -15,6 +15,9 @@ import { getDocumentsDir, getPromaHome } from '../../storage/config-paths'
  * - 静默失败：项目缺失/文件 IO 异常不抛错（增强腿）
  */
 
+// 【挂账 2026-10-03 删留执行】写入侧 appendProjectLearning 生产零调用（生产只消费
+// renderLearningsSection 注入面）：写入侧约 10 例为接线规格，接线或裁撤裁决前保留。
+
 describe('learnings-log（执行经验沉淀）', () => {
   const originalPromaHome = process.env.PROMA_HOME
 

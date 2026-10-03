@@ -98,16 +98,23 @@ describe('executeTurnToolCalls 分组并行（P1-2）', () => {
     process.env.PROMA_HOME = originalPromaHome
   })
 
-  it('连续 parallelSafe 段并发执行：3×80ms 的 wall-time 显著小于串行和（约 240ms 而非 240+ms）', async () => {
+  it('连续 parallelSafe 段并发执行：三工具执行区间重叠（begin×3 先于任一 end，2026-10-03 删留执行改重叠序断言——原墙钟 wall<200ms 满载必脆）', async () => {
+    const order: string[] = []
     const slow = makeTool('read_file', { parallelSafe: true, delayMs: 80 })
-    const h = directHarness([slow, slow, slow])
-    const startedAt = Date.now()
+    slow.execute = async (_input, ctx) => {
+      order.push(`begin:${ctx.toolCallId}`)
+      await new Promise((resolve) => setTimeout(resolve, 80))
+      order.push(`end:${ctx.toolCallId}`)
+      return { output: 'result-read_file' }
+    }
+    const h = directHarness([slow])
     const result = await runTurn(h, [use('r1', 'read_file'), use('r2', 'read_file'), use('r3', 'read_file')])
-    const wall = Date.now() - startedAt
     expect(result.cancelled).toBe(false)
     if (!result.cancelled) {
-      // 并发 3×80ms 应接近 80-160ms，串行和 240ms——断言远小于串行和
-      expect(wall).toBeLessThan(200)
+      // 并发的时序证据：三个 begin 全部先于任一 end（若串行则 begin:end 交错）；
+      // 不再断言墙钟上界（满载机器下 flaky，见删留清单 D6）
+      expect(order.slice(0, 3).every((entry) => entry.startsWith('begin:'))).toBe(true)
+      expect(order).toHaveLength(6)
       expect(result.resultBlocks).toHaveLength(3)
     }
   })
@@ -142,8 +149,9 @@ describe('executeTurnToolCalls 分组并行（P1-2）', () => {
       expect(result.resultBlocks[0]!.content).toContain('read_file')
       expect(result.resultBlocks[1]!.content).toContain('write_file')
     }
-    // write 的 execute 恒在 read 的 execute 之后（组 join 完成才进入串行位）
-    expect(order.indexOf('write_file:begin')).toBeGreaterThanOrEqual(0)
+    // write 的 execute 恒在 read 的 execute 之后（组 join 完成才进入串行位；
+    // 2026-10-03 删留执行：原 indexOf≥0 恒真，改为真实先后比较）
+    expect(order.indexOf('write_file:begin')).toBeGreaterThan(order.indexOf('read_file:started@r1'))
   })
 
   it('预算工具退串行：parallelSafe 但有 toolBudget → 两调用不重叠（顺序执行）', async () => {

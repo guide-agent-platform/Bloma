@@ -458,6 +458,7 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
               <div
                 key={i}
                 className="tile"
+                data-ai-id="history-skeleton-row"
                 style={{
                   display: 'flex', alignItems: 'center', gap: 'var(--space-4)',
                   padding: 'var(--space-4) var(--space-5)',

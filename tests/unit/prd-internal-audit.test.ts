@@ -19,7 +19,6 @@ import type { PrdBackplane } from '../../main/coding/sketch-engine'
 import {
   internalAuditBudget,
   internalAuditMajorGateEnabled,
-  parseReviewIssues,
   PRD_REVIEW_RECHECK_SYSTEM_PROMPT,
   runPrdReviewGate,
 } from '../../main/review/prd-review'
@@ -496,9 +495,4 @@ describe('内审任务体构造', () => {
     expect(PRD_REVIEW_RECHECK_SYSTEM_PROMPT).toContain('（修订引入）')
   })
 
-  it('parseReviewIssues：证据白名单与围栏容忍（既有行为保持）', () => {
-    const issues = parseReviewIssues('```json\n{"issues":[{"dimension":"F","severity":"blocking","location":"F-001","claim":"缺项","evidence":["用户原话"]}]}\n```')
-    expect(issues).toHaveLength(1)
-    expect(issues[0]!.evidence).toEqual(['用户原话'])
-  })
 })

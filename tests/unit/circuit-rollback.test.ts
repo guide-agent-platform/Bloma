@@ -15,6 +15,12 @@ import { getAgentSessionPath, getDocumentsDir, getSnapshotsDir } from '../../sto
  * 熔断回滚事务（长期型改造 T5）：修复循环耗尽后回滚健康快照 + 阶段收敛，
  * 回滚失败如实告知不留半事务态。沙箱运行时注入假进程，不启真实子进程。
  */
+// 【挂账 2026-10-03 删留执行】circuitBreakRollback 生产零调用（全仓 grep 反证）：
+// isCircuitBreakSettled 哨兵被 14 个文件 import 等待一个永不触发的信号——熔断
+// 触发链在 orchestration 重构中断裂。本文件 T5 事务语义（计数清零/verified 优先/
+// 失败如实）是重接时的行为规格，保留待裁决：A) 重接熔断触发；B) 移除哨兵协议后
+// 本文件随 circuitBreakRollback 一并退役。裁决前不新增依赖此路径的用例。
+
 describe('circuit break rollback (T5)', () => {
   const originalPromaHome = process.env.PROMA_HOME
 

@@ -75,7 +75,8 @@ describe('ux-channel-probe-walkthrough r108：测试连接/拉取模型双探针
     fireEvent.click(screen.getByRole('button', { name: /测试连接/ }))
     const st = await screen.findByRole('status')
     expect(st.textContent).toContain('密钥无效（401）')
-    expect(st.style.color).toBe('rgb(153, 27, 27)')
+    // 2026-10-03 删留执行降级：不锁具体色值（实现细节税），锁 F1 翻转位——失败态不得沿用成功色
+    expect(st.style.color).not.toBe('rgb(6, 95, 70)')
   })
 
   it('[C5·拉取失败·F1 已修] fetch 失败 → 文案含「拉取失败」且框为红（F1 翻转完成，r73）', async () => {
@@ -88,7 +89,7 @@ describe('ux-channel-probe-walkthrough r108：测试连接/拉取模型双探针
     fireEvent.click(screen.getByRole('button', { name: /拉取模型/ }))
     const st = await screen.findByRole('status')
     expect(st.textContent).toContain('拉取失败：网络不通')
-    expect(st.style.color).toBe('rgb(153, 27, 27)') // F1 修复：失败红框（原缺陷：失败也绿）
+    expect(st.style.color).not.toBe('rgb(6, 95, 70)') // F1 修复：失败不得沿用成功绿（原缺陷：失败也绿）；具体色值不锁
   })
 
   it('[C6·拉取成功去重] 已有 a,b 拉回 a,c → 勾选列表合并为 a,b,c（模型点选列表改造后语义）', async () => {

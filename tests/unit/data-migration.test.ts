@@ -15,6 +15,11 @@ import {
  * ②discipline 四态纯信息；③演练 pass/fail/skip 三态——版本到位/行数不减/标识不丢/
  * 无异常；④演练绝不改动真实 data/。
  */
+// 【挂账 2026-10-03 删留执行】drill 系四入口（dataMigrateEnabled/checkDataMigration-
+// Discipline/runMigrationDrill/dataMigrateContractSection）的唯一调用随 212e004
+// 清尸刀2 删除而休眠；executeMigration 仍经 export-manifest 接线且失败路径为本文件
+// 唯一覆盖。休眠入口随接线或裁撤裁决处置。
+
 describe('data-migration 开关与纪律段', () => {
   const originalSwitch = process.env.BLOMA_DATA_MIGRATE
 

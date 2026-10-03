@@ -237,55 +237,8 @@ export function hasForbiddenResponse(response: string): boolean {
   return RESPONSE_FORBIDDEN_TERMS.some((term) => response.includes(term))
 }
 
-/** trigger 段命中词表的动作类别（GWT 派生 When 形态路由；未命中返回 undefined）。 */
-export function matchTriggerAction(trigger: string): TriggerVocabEntry | undefined {
-  return TRIGGER_VOCABULARY.find((entry) => entry.pattern.test(trigger))
-}
-
-/** response 段命中词表的可断言终态类别（GWT 派生 Then 形态路由）。 */
-export function matchResponseAssertion(response: string): ResponseVocabEntry | undefined {
-  return RESPONSE_VOCABULARY.find((entry) => entry.pattern.test(response))
-}
-
-// ---------------------------------------------------------------------------
-// GWT 派生映射（句式 → Given/When/Then 骨架文本；场景执行由 gwt-runner 承担）
-// ---------------------------------------------------------------------------
-
-/** GWT 骨架（§7 实验「GWT 可派生率」的判定单位）。 */
-export interface GwtSkeleton {
-  given: string
-  when: string
-  then: string
-  /** 句式（WHILE → given 承载状态；IF 标记异常类别） */
-  kind: EarsPatternKind
-}
-
-/**
- * EARS 断言 → GWT 骨架（纯句式转换，§九验收 2）：
- * - WHEN：Given 默认入口，When = trigger，Then = response；
- * - WHILE：Given = trigger（状态即前置），When = 造一个探针动作（进入该状态所在界面），
- *   Then = response（空态/加载态断言）；
- * - IF：Given 默认入口，When = trigger（非期望输入），Then = response，标记异常类别。
- * 非良构断言（无中轴/缺侧）返回 null——由调用方走 presenceFallback，不硬造场景。
- */
-export function deriveGwtSkeleton(assertion: string): GwtSkeleton | null {
-  const parsed = parseEarsAssertion(assertion)
-  if (!parsed.wellFormed || !parsed.trigger || !parsed.response) return null
-  switch (parsed.kind) {
-    case 'while':
-      return {
-        given: parsed.trigger,
-        when: '用户进入该界面（触发上述状态的加载/呈现）',
-        then: parsed.response,
-        kind: 'while',
-      }
-    case 'if':
-      return { given: '用户位于该功能界面', when: parsed.trigger, then: parsed.response, kind: 'if' }
-    case 'when':
-    default:
-      return { given: '用户位于该功能界面', when: parsed.trigger, then: parsed.response, kind: 'when' }
-  }
-}
+// （GWT 派生映射段随死路径清尸删除，2026-10-03 删留执行：生产 GWT 派生走
+//  prd-store.renderGwtSkeleton + parseBehaviorAssertion，本段三导出零调用。）
 
 // ---------------------------------------------------------------------------
 // prompt 用词表渲染（EARS 化 prompt 与校验器共用同一份常量的文本形态）

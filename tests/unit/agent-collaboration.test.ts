@@ -392,28 +392,6 @@ describe('M2 委派工具（agent-tools 接线，委派协作嫁接方案 §4.2�
     expect(findDelegation(parentSessionId, b.delegation_id)!.status).toBe('cancelled')
   })
 
-  it('role 裁剪：parent 含全部委派工具；implement 子 agent 只含 ask 不含委派/代答/续跑', () => {
-    // PR4c/d 口径：两拼装配（通用件+领域面）；W3 后含 find
-    const surface = (role?: 'implement') =>
-      [...buildAgentTools({ projectId: 'p', ...(role ? { role } : {}) }), ...buildDomainTools({ projectId: 'p', ...(role ? { role } : {}) })].map((tool) => tool.name)
-    const genericFull = ['read_file', 'list_files', 'find', 'grep', 'web_fetch', 'write_file', 'edit_file']
-    const domainVerify = ['run_security_scan'] // API 契约工具恒注册（2026-10-01 开关删除）
-    const delegationTools = [
-      'delegate_agent',
-      'wait_for_delegations',
-      'get_delegation_results',
-      'stop_delegation',
-      'stop_delegations',
-      'answer_delegation_question',
-      'continue_delegation',
-    ]
-    expect(surface()).toEqual([...genericFull, ...delegationTools, 'web_research', ...domainVerify])
-
-    const implementNames = surface('implement')
-    expect(implementNames).toEqual([...genericFull, 'ask_delegation_question', ...domainVerify])
-    for (const name of [...delegationTools, 'web_research']) expect(implementNames).not.toContain(name)
-    expect(implementNames).toContain('ask_delegation_question')
-  })
 })
 
 describe('M3 提问冒泡 / 续跑（委派协作嫁接方案 §6）', () => {
@@ -643,7 +621,9 @@ describe('M4-C 委派生命周期事件（delegation_started/completed/failed/ca
     })
   })
 
-  it('stop_delegation → delegation_cancelled；子循环失败 → delegation_failed', async () => {
+  // 2026-10-03 删留执行：原标题承诺 delegation_failed 但体内无对应断言——该事件的
+  // 真实断言已并入 delegation-fault-injection.test.ts ②（断流→failed 路径），此处只锁取消。
+  it('stop_delegation → delegation_cancelled', async () => {
     setChildToolsBuilder(() => [hang])
     const events = registerParentCapturing(toolUseQuery('hang'))
     const created = startDelegation(parentContext(), { task: '慢任务' })

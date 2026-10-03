@@ -2,7 +2,7 @@ import { restorePromaHome } from '../support/proma-home-guard'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildAgentTools, setJsSyntaxCheckerForTests } from '../../main/agent/tools/agent-tools'
 import { createToolState, type AgentLoopTool, type ToolContext } from '../../main/agent/loop/agent-loop'
 import { createProject } from '../../main/project/project-service'
@@ -55,7 +55,7 @@ describe('写租约（P1-06a：宿主级写隔离）', () => {
     clearWriteLeasesForTests()
   })
 
-  it('租约语义：同 holder 重入成功；他人持有拒绝；释放后可获取；TTL 过期回收', () => {
+  it('租约语义：同 holder 重入成功；他人持有拒绝；释放后可获取；批量释放', () => {
     expect(acquireWriteLease('p1', 'src/app.js', 'holder-a').ok).toBe(true)
     expect(acquireWriteLease('p1', 'src/app.js', 'holder-a').ok).toBe(true) // 重入
     const conflict = acquireWriteLease('p1', 'src/app.js', 'holder-b')
@@ -69,6 +69,20 @@ describe('写租约（P1-06a：宿主级写隔离）', () => {
     // holder 批量释放
     releaseLeasesForHolder('holder-b')
     expect(acquireWriteLease('p1', 'src/app.js', 'holder-c').ok).toBe(true)
+  })
+
+  it('TTL 过期回收：异常未释放的租约 30s 后自动过期，新写者可获取（LEASE_TTL_MS 兑底；2026-10-03 删留执行补真断言——原标题虚标但零覆盖）', () => {
+    vi.useFakeTimers()
+    try {
+      expect(acquireWriteLease('p-ttl', 'src/app.js', 'holder-crashed').ok).toBe(true)
+      // 未到期：他人仍被拒
+      expect(acquireWriteLease('p-ttl', 'src/app.js', 'holder-new').ok).toBe(false)
+      vi.setSystemTime(Date.now() + 31_000)
+      // 到期：pruneExpired 在下一次 acquire 时清理 → 新写者可获取，不永久卡死写路径
+      expect(acquireWriteLease('p-ttl', 'src/app.js', 'holder-new').ok).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('工具层：并行写者冲突 → 后到者 WRITE_LEASE_CONFLICT，先到者照常写入', async () => {
@@ -107,7 +121,10 @@ describe('写租约（P1-06a：宿主级写隔离）', () => {
   })
 })
 
-describe('提交点 CAS（P1-06b：版本一致性）', () => {
+// 提交点 CAS（P1-06b）：基础 CAS（no-rev STALE_READ/重读刷新/新建放行）已由
+// agent-tools.test.ts D4a 两例更强覆盖（含传 rev 变体与 =0 逃生口），2026-10-03
+// 删留执行收敛；本 describe 保留独占的语法校验 await 窗口收窄语义。
+describe('提交点 CAS（P1-06b：TOCTOU 窗口）', () => {
   const originalPromaHome = process.env.PROMA_HOME
 
   beforeEach(() => {
@@ -120,34 +137,6 @@ describe('提交点 CAS（P1-06b：版本一致性）', () => {
     clearWriteLeasesForTests()
   })
 
-  it('读后被外部修改 → edit_file（不传 expected_revision）提交点拒绝；重读后放行', async () => {
-    const project = createProject({ request_id: 'req-cas', mode: 'quick' })
-    const abs = join(project.root_path, 'src', 'app.js')
-    mkdirSync(join(abs, '..'), { recursive: true })
-    writeFileSync(abs, 'const a = 1\n', 'utf8')
-    const tools = toolsFor(project.project_id)
-    const ctx = ctxFor(project.project_id, 'call-cas')
-
-    await byName(tools, 'read_file').execute({ path: 'src/app.js' }, ctx)
-    // 外部写者修改（并行子会话/用户手改）
-    writeFileSync(abs, 'const a = 2\n', 'utf8')
-
-    const stale = await byName(tools, 'edit_file').execute(
-      { path: 'src/app.js', old_string: 'const a = 2', new_string: 'const a = 3' },
-      ctx,
-    )
-    expect(stale.isError).toBe(true)
-    expect(stale.output).toContain('STALE_READ')
-
-    // 重新读取 → 基准刷新 → 成功
-    await byName(tools, 'read_file').execute({ path: 'src/app.js' }, ctx)
-    const ok = await byName(tools, 'edit_file').execute(
-      { path: 'src/app.js', old_string: 'const a = 2', new_string: 'const a = 3' },
-      ctx,
-    )
-    expect(ok.isError).toBeFalsy()
-    expect(readFileSync(abs, 'utf8')).toContain('const a = 3')
-  })
 
   it('语法校验 await 窗口内被外部修改 → 写盘前拦下（TOCTOU 收窄）', async () => {
     const project = createProject({ request_id: 'req-toctou', mode: 'quick' })
@@ -174,17 +163,4 @@ describe('提交点 CAS（P1-06b：版本一致性）', () => {
     setJsSyntaxCheckerForTests(async () => ({ ok: true as const }))
   })
 
-  it('本轮未读过的新建文件不受 CAS 影响；读过且未变的文件正常写', async () => {
-    const project = createProject({ request_id: 'req-cas2', mode: 'quick' })
-    const tools = toolsFor(project.project_id)
-    const ctx = ctxFor(project.project_id, 'call-cas2')
-    // 新建
-    const created = await byName(tools, 'write_file').execute({ path: 'src/new.js', content: 'const n = 1\n' }, ctx)
-    expect(created.isError).toBeFalsy()
-    // 读 → 未外部修改 → 覆盖成功
-    await byName(tools, 'read_file').execute({ path: 'src/new.js' }, ctx)
-    const overwrite = await byName(tools, 'write_file').execute({ path: 'src/new.js', content: 'const n = 2\n' }, ctx)
-    expect(overwrite.isError).toBeFalsy()
-    expect(readFileSync(join(project.root_path, 'src', 'new.js'), 'utf8')).toContain('const n = 2')
-  })
 })

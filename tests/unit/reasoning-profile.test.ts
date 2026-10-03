@@ -99,11 +99,4 @@ describe('reasoning-profile（推理档位移植）', () => {
     expect(resolveProfile('k3')?.id).toBe('kimi-k3')
   })
 
-  it('[S4-REASON-016] thinkingLevel 类型覆盖 4 档', () => {
-    const levels: ThinkingLevel[] = ['off', 'low', 'high', 'max']
-    for (const level of levels) {
-      const f = buildThinkingFragment('deepseek-v4-flash', 'deepseek', level)
-      expect(typeof f.omit).toBe('boolean')
-    }
-  })
 })

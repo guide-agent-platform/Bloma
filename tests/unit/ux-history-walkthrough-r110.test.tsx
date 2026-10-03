@@ -45,7 +45,9 @@ describe('ux-history-walkthrough r110：历史项目列表页（0 基础首屏�
     setList(vi.fn().mockImplementation(() => new Promise((r) => { resolveIt = r })))
     const { container } = mount()
     expect(document.body.textContent ?? '').not.toContain('还没有项目')
-    expect(container.querySelectorAll('span[style*="shimmer"], div[style*="shimmer"]').length).toBeGreaterThanOrEqual(1)
+    // 2026-10-03 删留执行：改用语义 testid（原 shimmer 样式选择器属实现细节税，
+    // 组件已补 data-ai-id="history-skeleton-row"）
+    expect(container.querySelectorAll('[data-ai-id="history-skeleton-row"]').length).toBeGreaterThanOrEqual(1)
     resolveIt({ ok: true, data: [] })
   })
 

@@ -11,7 +11,6 @@ import {
   recordMemoryUsage,
   resetMemoryUsageForTests,
 } from '../../main/agent/loop/memory-usage'
-import { REVOCATION_FILE, getRevocationIndexPath } from '../../main/agent/loop/memory-revocation'
 import { restorePromaHome } from '../support/proma-home-guard'
 
 /**
@@ -97,8 +96,4 @@ describe('memory-usage（S-2 使用埋点 sidecar）', () => {
     expect(getLastUsedAt('重建后的条目', path)).toBeTypeOf('number')
   })
 
-  it('与撤销名单分文件（路径不同，互不覆盖）', () => {
-    expect(USAGE_FILE).not.toBe(REVOCATION_FILE)
-    expect(getRevocationIndexPath()).not.toBe(join(home, USAGE_FILE))
-  })
 })

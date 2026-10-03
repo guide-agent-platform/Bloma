@@ -50,6 +50,10 @@ function mapPath(slug: string, pid: string): string {
   return join(process.env.PROMA_HOME!, 'agent-workspaces', slug, 'documents', pid, 'project-map.md')
 }
 
+// 【挂账 2026-10-03 删留执行】[S4-PMAP-003/003b] 两例锁的 appendProjectMapToSystem/
+// loadProjectMapBlock 注入半链生产零调用（生成链活于 tool-handlers）；接线或裁撤
+// 裁决前保留，其余 9 例为活链独占。
+
 describe('generateProjectMap 生成器（S4-PMAP-001/002）', () => {
   it('[S4-PMAP-001] 跳过依赖目录 + 预算 ≤1200 字符（注入纪律，超出丢最小模块）', () => {
     writeFile('src/big-service.ts', `// 主服务\nexport function mainService() {}\n${'const pad = 1\n'.repeat(200)}`)

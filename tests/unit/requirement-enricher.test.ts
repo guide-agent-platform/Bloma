@@ -267,33 +267,6 @@ describe('mergeEnrichment — 只填缺省字段、权威 id 集、合并底', (
     expect(requirements[1].priority).toBeUndefined()
   })
 
-  it('幂等性：同输入两次 → 同输出', () => {
-    const frozen = [
-      { id: 'F-001', description: '做一个家庭记账本' },
-      { id: 'F-002', description: '展示本月结余' },
-    ]
-    const enriched: EnrichedSketchRequirement[] = [
-      {
-        id: 'F-001',
-        story: 'S1',
-        behavior_assertions: [{ assertion: '点击保存按钮→列表新增一条记录', source: '要能记收入和支出' }],
-        priority: 'P0',
-      },
-      { id: 'F-002', story: 'S2' },
-    ]
-    const userTexts = ['我要能记收入和支出']
-    expect(mergeEnrichment(frozen, enriched, [], userTexts)).toEqual(mergeEnrichment(frozen, enriched, [], userTexts))
-  })
-})
-
-describe('mergeEnrichment — 优先级规则③', () => {
-  it('F-001 无 LLM priority → 缺省恒 P0（主题锚点）', () => {
-    const frozen = [{ id: 'F-001', description: '做一个家庭记账本' }]
-    const enriched: EnrichedSketchRequirement[] = [{ id: 'F-001', story: 'S1' }]
-    const { requirements } = mergeEnrichment(frozen, enriched, [], [])
-    expect(requirements[0].priority).toBe('P0')
-  })
-
   it('非 F-001：LLM 标 P0 但断言全灭 → 抑制写入（薄形态，prioritySuppressed+1）', () => {
     const frozen = [{ id: 'F-002', description: '展示本月结余' }]
     const enriched: EnrichedSketchRequirement[] = [

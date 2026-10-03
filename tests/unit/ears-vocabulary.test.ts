@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  deriveGwtSkeleton,
   hasForbiddenResponse,
   isCompoundTrigger,
-  matchResponseAssertion,
-  matchTriggerAction,
   parseEarsAssertion,
   renderForbiddenTermsForPrompt,
   renderResponseVocabularyForPrompt,
@@ -13,6 +10,9 @@ import {
 } from '../../main/guide/ears-vocabulary'
 import { parseBehaviorAssertion } from '../../main/verification/behavior-assertions'
 
+// 2026-10-03 删留执行：删去 deriveGwtSkeleton（4 例）与 matchTriggerAction/
+// matchResponseAssertion（2 例）用例——三个导出全仓零生产调用（生产 GWT 派生走
+// prd-store.renderGwtSkeleton + parseBehaviorAssertion），属死路径锁。
 describe('ears-vocabulary（P1：词表单点模块）', () => {
   describe('parseEarsAssertion：句式解析', () => {
     it('WHEN 前缀 + 中轴 → when 句式，两侧内容提取', () => {
@@ -102,50 +102,6 @@ describe('ears-vocabulary（P1：词表单点模块）', () => {
     })
   })
 
-  describe('词表匹配（GWT 派生路由）', () => {
-    it('trigger 词表命中 Playwright 动作', () => {
-      expect(matchTriggerAction('点击保存按钮')?.playwrightAction).toBe('click')
-      expect(matchTriggerAction('输入书名')?.playwrightAction).toBe('fill')
-      expect(matchTriggerAction('上传头像')?.playwrightAction).toBe('setInputFiles')
-      expect(matchTriggerAction('按右方向键')?.playwrightAction).toBe('press')
-    })
-
-    it('response 词表命中可断言终态', () => {
-      expect(matchResponseAssertion('显示空状态提示')?.assertionKind).toBe('visible')
-      expect(matchResponseAssertion('列表新增一条记录')?.assertionKind).toBe('item-added')
-      expect(matchResponseAssertion('按钮置灰不可点')?.assertionKind).toBe('disabled')
-    })
-  })
-
-  describe('GWT 骨架派生（§九验收 2：纯句式转换）', () => {
-    it('WHEN → Given 默认入口 + When=trigger + Then=response', () => {
-      const gwt = deriveGwtSkeleton('WHEN 点击保存按钮 → 列表新增一条记录')
-      expect(gwt).not.toBeNull()
-      expect(gwt!.kind).toBe('when')
-      expect(gwt!.when).toBe('点击保存按钮')
-      expect(gwt!.then).toBe('列表新增一条记录')
-      expect(gwt!.given).toBeTruthy()
-    })
-
-    it('WHILE → Given 承载状态（空态/加载态映射 GWT Given）', () => {
-      const gwt = deriveGwtSkeleton('WHILE 列表为空 → 显示「暂无记录」')
-      expect(gwt!.kind).toBe('while')
-      expect(gwt!.given).toBe('列表为空')
-      expect(gwt!.when).toContain('进入')
-      expect(gwt!.then).toBe('显示「暂无记录」')
-    })
-
-    it('IF → 异常类别标记（Given 默认 + When=条件）', () => {
-      const gwt = deriveGwtSkeleton('IF 金额输入为负 → 提示金额无效且不保存')
-      expect(gwt!.kind).toBe('if')
-      expect(gwt!.when).toBe('金额输入为负')
-    })
-
-    it('非良构断言 → null（不硬造场景，调用方走 presenceFallback）', () => {
-      expect(deriveGwtSkeleton('该功能项在产物中可见且可交互')).toBeNull()
-    })
-  })
-
   describe('与 behavior-assertions 解析链兼容（第四处口径：词表不降探针率）', () => {
     it('EARS 化产物（前缀+中轴）仍被 parseBehaviorAssertion 解析为行为探针', () => {
       const plan = parseBehaviorAssertion('WHEN 点击保存按钮 → 列表新增一条记录')
@@ -160,12 +116,9 @@ describe('ears-vocabulary（P1：词表单点模块）', () => {
       expect(plan.trigger?.kind).toBe('key')
     })
 
-    it('WHILE 状态段经既有探针链 → presenceFallback（状态是 Given 不是 When；While 映射由 deriveGwtSkeleton 承担）', () => {
+    it('WHILE 状态段经既有探针链 → presenceFallback（状态是 Given 不是 When，无动作词走存在性兑底）', () => {
       const plan = parseBehaviorAssertion('WHILE 列表为空 → 显示空状态提示')
       expect(plan.presenceFallback).toBe(true) // 无动作词 → 存在性检查兑底，与现状同构
-      const gwt = deriveGwtSkeleton('WHILE 列表为空 → 显示空状态提示')
-      expect(gwt!.kind).toBe('while')
-      expect(gwt!.given).toBe('列表为空')
     })
   })
 

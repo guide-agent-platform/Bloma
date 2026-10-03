@@ -31,6 +31,9 @@ afterEach(async () => {
   }
 })
 
+// 【挂账 2026-10-03 删留执行】MiniMcpClient 自 2026-08-29 r70 转正评审后零生产接线
+// （skill-loader 未接入）。协议面质量高，接入或裁撤裁决前保留休眠。
+
 describe('MiniMcpClient 真实子进程生命周期（S4-MCP-001~008）', () => {
   it('[S4-MCP-001] initialize 真实握手 + 垃圾行跳过（陷阱②：server ready 横幅不污染协议流）', async () => {
     const client = makeClient()

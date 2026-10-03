@@ -153,39 +153,8 @@ export interface RequirementStatusUpdate {
   evidence?: string
 }
 
-/**
- * 活背板（2026-08-26）：把裁判语义审查的逐功能项判定回写进 prd.json（ralph 式 passes）。
- *
- * - 只改 requirements[].status / status_note，其余字段（含 frozen_at）原样保留；
- * - 需求内容仍以冻结清单为准——回写是执行侧状态，不触碰需求语义；
- * - prd.json 缺失 / 损坏 / 写失败：静默返回 null（增强腿，绝不阻断裁决流）；
- * - 迭代全量重生成时 syncPrdCheckpoints 重写 prd.json，status 自然清除（新产物未判定）。
- */
-export function updateRequirementStatus(
-  projectId: string,
-  updates: RequirementStatusUpdate[],
-): PrdBackplane | null {
-  if (updates.length === 0) return null
-  try {
-    const project = findProject(projectId)
-    const dir = getDocumentsDir(project.workspace_slug, project.project_id)
-    const path = join(dir, 'prd.json')
-    if (!existsSync(path)) return null
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as PrdBackplane
-    if (!parsed || !Array.isArray(parsed.requirements)) return null
-    const byId = new Map(updates.map((update) => [update.requirement_id, update]))
-    parsed.requirements = parsed.requirements.map((item) => {
-      const update = byId.get(item.id)
-      if (!update) return item
-      const note = update.evidence?.trim().slice(0, 160)
-      return { ...item, status: update.status, ...(note ? { status_note: note } : {}) }
-    })
-    writeFileSync(path, renderPrdJson(parsed), 'utf8')
-    return parsed
-  } catch {
-    return null
-  }
-}
+// （updateRequirementStatus/RequirementStatusUpdate 随死路径清尸删除，2026-10-03 删留执行：
+//  生产零调用——头注宣称的 evaluateOnce wiring 不存在，语义审查回写链未接线。）
 
 /**
  * PRD 用户确认落盘（2026-08-26，改造 3）：确认卡「确认无误」时写入 user_confirmed_at。

@@ -153,77 +153,12 @@ export function finalizeKeyTasks(parsed: KeyTask[], requirements: SketchRequirem
 }
 
 // ---------------------------------------------------------------------------
-// Phase 3 B3（2026-09-09，P1 稿 §3 M3）：round_anchor 三字段。
-// 修复轮/迭代轮的本轮范围锚——只限定本轮，不改全局契约；防止「最近错误/修复建议/
-// 自己先前的计划」被当成需求变更。开关 BLOMA_ROUND_ANCHOR 缺省 off=字节级现状
-// （P1 稿原定不设开关，因当前落地顺序为代码先行、A/B 后置，为保 p1 A/B 单因子
-// 纯净性改设开关——偏差已登记开关矩阵 §5）。
+// （Phase 3 B3 round_anchor 族——RoundAnchorSpec/roundAnchorEnabled/
+//  renderRoundAnchorBlock/buildRepairRoundAnchor/buildIterationRoundAnchor——
+//  随 Phase 10 未接线清尸删除，2026-10-03 删留执行：全仓零生产调用，
+//  BLOMA_ROUND_ANCHOR 开关无人读取，round-anchor.test.ts 同批已删。）
 // ---------------------------------------------------------------------------
 
-/** 本轮锚三字段（P1 稿 M3 schema）。 */
-export interface RoundAnchorSpec {
-  /** 本轮不得破坏的能力 */
-  must_preserve: string[]
-  /** 本轮不许做（不顺手的重构/换库/改需求） */
-  out_of_scope: string[]
-  /** 怎么算修好/做完（行为级） */
-  completion_evidence: string[]
-}
-
-/** BLOMA_ROUND_ANCHOR 开关：缺省 off（修复/迭代轮 prompt 与现状字节一致）。 */
-export function roundAnchorEnabled(): boolean {
-  const raw = (process.env.BLOMA_ROUND_ANCHOR ?? '').trim().toLowerCase()
-  return raw === '1' || raw === 'on' || raw === 'true'
-}
-
-/** 渲染本轮锚段；空 spec 返回空串（零注入）。 */
-export function renderRoundAnchorBlock(spec: RoundAnchorSpec): string {
-  const list = (title: string, entries: string[]): string =>
-    entries.filter(Boolean).length > 0 ? `  ${title}：${entries.filter(Boolean).join('；')}` : ''
-  const lines = [
-    '【本轮锚（round_anchor）】只限定本轮范围，不改全局契约；最近错误、修复建议或你先前的计划不自动构成需求变更：',
-    list('必须保留（本轮不得破坏）', spec.must_preserve),
-    list('本轮不许做', spec.out_of_scope),
-    list('完成证据（怎么算修好，行为级）', spec.completion_evidence),
-  ].filter(Boolean)
-  return lines.length > 1 ? lines.join('\n') : ''
-}
-
-const p0Items = (backplane: PrdBackplane): SketchRequirement[] =>
-  backplane.requirements.filter((item) => requirementPriority(item) === 'P0')
-
-/** 修复轮本轮锚（确定性派生）：必须保留=P0 能力；完成证据=失败断言原文+全量重验。 */
-export function buildRepairRoundAnchor(backplane: PrdBackplane, failedAssertions: string[]): RoundAnchorSpec {
-  return {
-    must_preserve: p0Items(backplane).map((item) => `${item.id} ${requirementStory(item)}`),
-    out_of_scope: [
-      '不在失败清单内的功能不做改动',
-      '不顺手重构、换库、调目录结构或改需求语义',
-      ...backplane.out_of_scope.slice(0, 3),
-    ],
-    completion_evidence: [...failedAssertions.filter(Boolean).slice(0, 6), '全部 P0 断言重验通过（run_gwt_tests 全量）'],
-  }
-}
-
-/** 迭代轮本轮锚（确定性派生）：聚焦项之外保持现状；完成证据=聚焦项断言+其余不回退。 */
-export function buildIterationRoundAnchor(backplane: PrdBackplane, focus: string[]): RoundAnchorSpec {
-  const focusSet = new Set(focus)
-  const p0 = p0Items(backplane)
-  const others = p0.filter((item) => !focusSet.has(item.id))
-  const focused = p0.filter((item) => focusSet.has(item.id))
-  return {
-    must_preserve: others.length > 0 ? others.map((item) => `${item.id} ${requirementStory(item)}`) : ['全部 P0 功能项断言保持通过'],
-    out_of_scope: [
-      '聚焦项之外的功能不做改动（保持现状勿重做）',
-      '不顺手重构、换库或扩大改动面',
-      ...backplane.out_of_scope.slice(0, 3),
-    ],
-    completion_evidence: [
-      ...focused.flatMap((item) => requirementAssertions(item).slice(0, 2)),
-      '其余 P0 断言不回退（run_gwt_tests 全量）',
-    ],
-  }
-}
 
 /** 背板能力条款读取：过滤缺 task 的残条款；缺省 []。 */
 export function backplaneAiCapabilities(backplane: PrdBackplane): AiCapability[] {

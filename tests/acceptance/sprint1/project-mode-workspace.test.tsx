@@ -336,6 +336,18 @@ describe('WorkspaceHeader 徽标 null 态（QW#1 审查 P1-①）', () => {
     expect(screen.queryByText('AI 就绪')).toBeNull()
     expect(screen.queryByText('未配置 AI')).toBeNull()
   })
+
+  it('[S1-UI-018b] channelsLoadingAtom=loading（拉取中）同样不渲染徽标——防「AI 就绪」闪变误导（吸收 ux-r102 H1，2026-10-03 删留执行）', () => {
+    const store = createStore()
+    store.set(currentProjectAtom, project('quick'))
+    store.set(projectModeAtom, 'quick')
+    store.set(channelsLoadingAtom, 'loading')
+
+    render(<Provider store={store}><WorkspaceHeader /></Provider>)
+    expect(screen.queryByText('AI 就绪')).toBeNull()
+    expect(screen.queryByText('未配置 AI')).toBeNull()
+    expect(screen.queryByText('已连接')).toBeNull()
+  })
 })
 
 describe('消息排队提示（message-queue S4-QUEUE-009）', () => {
@@ -628,5 +640,72 @@ describe('模式卡 a11y（mode-card-a11y，r63 方向 B）', () => {
     fireEvent.click(start)
     fireEvent.click(quick)
     expect(onSelect).not.toHaveBeenCalled()
+  })
+})
+
+describe('模式选择页异常路径（吸收 ux-r105 M4-M6，2026-10-03 删留执行：M1-M3 已由 S1-PROJECT-006/S1-UI-008/S1-UI-012/S1-UI-024 覆盖）', () => {
+  // 自密闭：前序 describe（模式卡 a11y S1-UI-025）会泄漏 window.electronAPI，M4 的「无
+  // electronAPI」前置必须自己归零，不依赖上游清理纪律。
+  beforeEach(() => {
+    delete window.electronAPI
+    delete window.__jotai_store__
+  })
+  afterEach(() => {
+    cleanup()
+    delete window.electronAPI
+    delete window.__jotai_store__
+    vi.restoreAllMocks()
+  })
+
+  function mount(onModeSelected: ReturnType<typeof vi.fn>) {
+    const store = createStore()
+    window.__jotai_store__ = store
+    return {
+      store,
+      ...render(
+        <Provider store={store}>
+          <ModeSelectionPage onModeSelected={onModeSelected} onBackToHistory={vi.fn()} />
+        </Provider>,
+      ),
+    }
+  }
+
+  function cardButton(aiId: string): HTMLButtonElement {
+    return document.querySelector(`[data-ai-id="${aiId}"] button`) as HTMLButtonElement
+  }
+
+  const setElectron = (createImpl?: unknown) => {
+    window.electronAPI = { project: { create: createImpl } } as unknown as ElectronAPI
+  }
+
+  it('[S1-UI-035] 无 electronAPI → 环境错误文案不裸崩、不导航（原 ux-r105 M4）', async () => {
+    const onModeSelected = vi.fn()
+    mount(onModeSelected)
+    fireEvent.click(cardButton('mode-card-quick'))
+    await waitFor(() => expect(screen.getByText(/当前环境无法创建项目/)).toBeTruthy())
+    expect(onModeSelected).not.toHaveBeenCalled()
+  })
+
+  it('[S1-UI-036] 创建挂起中双卡禁用（防双击重复创建），成功后恢复并导航（原 ux-r105 M5）', async () => {
+    const onModeSelected = vi.fn()
+    let resolveCreate: (v: { ok: true; data: unknown }) => void = () => undefined
+    setElectron(vi.fn().mockImplementation(() => new Promise((r) => { resolveCreate = r })))
+    mount(onModeSelected)
+    fireEvent.click(cardButton('mode-card-quick'))
+    await waitFor(() => {
+      expect((cardButton('mode-card-quick') as HTMLButtonElement).disabled).toBe(true)
+      expect((cardButton('mode-card-longterm') as HTMLButtonElement).disabled).toBe(true)
+    })
+    resolveCreate({ ok: true, data: { project_id: 'p1' } })
+    await waitFor(() => expect(onModeSelected).toHaveBeenCalled())
+  })
+
+  it('[S1-UI-037] create 抛错 → 通用文案+卡片恢复可用可重试（原 ux-r105 M6）', async () => {
+    const onModeSelected = vi.fn()
+    setElectron(vi.fn().mockRejectedValue(new Error('IPC boom')))
+    mount(onModeSelected)
+    fireEvent.click(cardButton('mode-card-quick'))
+    await waitFor(() => expect(screen.getByText(/项目创建失败，请重试/)).toBeTruthy())
+    expect((cardButton('mode-card-quick') as HTMLButtonElement).disabled).toBe(false)
   })
 })

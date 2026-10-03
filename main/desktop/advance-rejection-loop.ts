@@ -10,7 +10,7 @@
  *   ④ 降级：转人工提示（不再注入续接——防「拒收→注入→续接→再拒收」死循环烧 token）。
  *
  * 三态拒因登记（供诊断与遥测）：target-deny（目标校验拒）/ gate-deny（门禁拒：
- * 产物/驱动/契约）/ confirmation-required（确认凭据缺失）。
+ * 产物/驱动/契约）。（confirmation-required 随刀1 撤 manual 门删除，2026-10-03 删留执行）
  *
  * 推进成功：计数清零 + 待纠正拒因清除（新阶段重新计数）。
  *
@@ -34,7 +34,7 @@ export interface RejectionLedger {
 }
 
 /** 三态拒因家族。 */
-export type RejectionFamily = 'target-deny' | 'gate-deny' | 'confirmation-required'
+export type RejectionFamily = 'target-deny' | 'gate-deny'
 
 /** 新账本。 */
 export function createRejectionLedger(): RejectionLedger {
@@ -61,8 +61,6 @@ export function classifyRejection(decision: AdvanceDecision & { decision: 'rejec
     case 'artifacts-missing':
     case 'contract-invalid':
       return 'gate-deny'
-    case 'confirmation-required':
-      return 'confirmation-required'
   }
 }
 
@@ -159,7 +157,6 @@ export function buildContinuationDirective(
       ? `本阶段唯一合法推进目标是「${expected}」。请先完成当前阶段门禁，再以注释或行首形态单独一行输出 PHASE_ADVANCE: ${expected}；句中复述协议字面串不构成推进。`
       : '请检查推进目标：只能推进到当前阶段的唯一合法下一阶段（见系统提示词推进协议段）；句中复述不构成推进。',
     'gate-deny': '门禁未过：请核对缺失产物清单，委派补齐（产物必须真实存在且内容有效），然后重新声明推进。',
-    'confirmation-required': '本阶段需要用户确认：请先向用户说明产出与验收结论并请求确认；确认由平台登记凭据后，再输出推进标记。',
   }
   const missing = detail && 'missingArtifacts' in detail && detail.missingArtifacts?.length
     ? `\n缺失产物：${detail.missingArtifacts.flatMap((m) => m.artifacts).join('、')}`

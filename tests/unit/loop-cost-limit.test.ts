@@ -105,7 +105,6 @@ describe('P2-02 成本硬上限（BLOMA_LOOP_COST_LIMIT_TOKENS）', () => {
   })
 
   it('宽限交卷调用计入统一成本口径（graceCalls 可见；不计 turns 但计成本）', async () => {
-    const query = scriptedQuery([[toolUseMessage('t1', 'echo')]], { input_tokens: 10, output_tokens: 5 })
     const echo = tool('echo', () => ({ output: 'ok' }))
     // maxTurns=1：工作轮用尽 → 宽限交卷调用（无 tools，纯文本）
     // agent-loop 的 query 第一参数恒为 ''（system/messages 走 options）——用 tools 空否判别宽限轮
@@ -118,7 +117,6 @@ describe('P2-02 成本硬上限（BLOMA_LOOP_COST_LIMIT_TOKENS）', () => {
       yield toolUseMessage('t1', 'echo')
       yield { type: 'result', subtype: 'success', stop_reason: 'tool_use', usage: { input_tokens: 10, output_tokens: 5 } }
     }
-    void query
     const result = await runAgentLoop(baseInput({ query: graceQuery, tools: [echo], maxTurns: 1 }))
     expect(result.usage?.graceCalls).toBeGreaterThanOrEqual(1)
     expect(result.usage?.estTotalTokens).toBeGreaterThan(0)

@@ -9,6 +9,7 @@
  *
  * 密闭性：BLOMA_DESKTOP_DISPATCH 显式设/还原（陷阱 53）。
  */
+import { rmSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SDKMessage } from '../../../shared/types'
 import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../../main/orchestration/orchestrator'
@@ -41,18 +42,32 @@ vi.mock('../../../main/agent/delegation/agent-collaboration', async (importOrigi
 const telemetry = vi.hoisted(() => ({ track: vi.fn() }))
 vi.mock('../../../main/delivery/track-analytics', () => ({ trackAnalytics: telemetry.track }))
 
-// ── 环境密闭（开关） ──
+// ── 环境密闭（开关 + 双门用例临时 PROMA_HOME 回收）──
+// 2026-10-03 删留执行补清理：原四个双门用例 mkdtemp 后不 rmSync 也不恢复环境，
+// 泄漏目录曾累积到 1891 个、全靠 globalSetup 的 tmp-home-sweep 兑底回收（每次运行付费）。
 const SWITCH = 'BLOMA_DESKTOP_DISPATCH'
 let switchOriginal: string | undefined
+let promaHomeOriginal: string | undefined
 
 beforeEach(() => {
   switchOriginal = process.env[SWITCH]
   process.env[SWITCH] = '1'
+  promaHomeOriginal = process.env.PROMA_HOME
 })
 
 afterEach(() => {
   if (switchOriginal === undefined) delete process.env[SWITCH]
   else process.env[SWITCH] = switchOriginal
+  const home = process.env.PROMA_HOME
+  if (home && home !== promaHomeOriginal && home.includes('bloma-verify-')) {
+    try {
+      rmSync(home, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
+    } catch {
+      // Windows 句柄占用时留给 tmp-home-sweep 兑底
+    }
+  }
+  if (promaHomeOriginal === undefined) delete process.env.PROMA_HOME
+  else process.env.PROMA_HOME = promaHomeOriginal
 })
 
 // ── query/消息构造（对齐 agent-loop.test.ts 既有形态） ──

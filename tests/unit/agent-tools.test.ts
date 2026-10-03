@@ -1,10 +1,7 @@
 import { restorePromaHome } from '../support/proma-home-guard'
-import { EventEmitter } from 'node:events'
-import type { ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -34,18 +31,6 @@ const composeTools = (o: Parameters<typeof buildAgentTools>[0]) => {
  * 结构护栏前置）、空反馈显式化、修复预算（edit-after-test-failure ≤3）。
  * 沙箱用既有 setSandboxRuntimeForTests 注入；GWT 固定走静态兜底（陷阱 32）。
  */
-
-function fakeChild(): ChildProcess {
-  const child = new EventEmitter() as unknown as ChildProcess
-  child.stdout = new EventEmitter() as never
-  child.stderr = new EventEmitter() as never
-  // kill 同步发 exit：terminateProcessTree 等 exit 事件，不发会每次等满 2s 兜底
-  child.kill = () => {
-    child.emit('exit', 0)
-    return true
-  }
-  return child
-}
 
 function ctxFor(projectId: string): ToolContext {
   return {
@@ -567,7 +552,8 @@ describe('web_research 工具面（闭环 PR5）', () => {
     delete process.env.BLOMA_API_TOOL
     const parentNames = composeTools({ projectId: 'p' }).map((tool) => tool.name)
     expect(parentNames).toContain('web_research')
-    // 基线 19（2026-10-01：find 无条件 +18、run_api_contract_tests 无条件 +1）；浏览器/压缩开关必须显式钉 off
+    // 工具计数锁：parent 视图当前 16（2026-10-03 删留执行核对；历史口径曾为 19，随
+    // 工具面调整递减——改工具面时同步改此数并注明缘由）；浏览器/压缩开关必须显式钉 off
     // （并发测试文件共享 process.env，见 scrape 管道同款先例）
     expect(parentNames).toHaveLength(16)
 

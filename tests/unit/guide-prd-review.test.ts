@@ -450,6 +450,9 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
   })
 
   it('规则门单测：空定位/零功能项 blocking；描述过短/完全重复 major', () => {
+    // 分层（2026-10-03 删留执行标注）：定位缺失场景与 prd-template-audit 的 G 维 major 例
+    // 相邻但不同（此处锁 blocking 严重度与零基础话术/选项存在性）；本文件的
+    // parseReviewIssues 例为全仓最强版，prd-internal-audit 侧重叠例已删。
     const broken = ruleGateReview({ name: 'x', positioning: '', requirements: [] } as never)
     expect(broken.verdict).toBe('needs_revision')
     expect(broken.issues.map((issue) => issue.severity)).toEqual(['blocking', 'blocking'])

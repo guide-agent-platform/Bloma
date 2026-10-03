@@ -29,6 +29,11 @@ afterEach(() => {
   restorePromaHome(originalHome)
 })
 
+// 【挂账 2026-10-03 删留执行】restoreDelegationRecord 生产零调用（reconcile 走内联
+// 自扫）：前 7 例锁「待接线的重启找回 API」规格（含跨父误恢复/孤儿/双记录安全
+// 检查），后 2 例 reconcile 为真实接线（main/index.ts 启动）。若裁定不接线，
+// restoreDelegationRecord 导出与本文件前 7 例一并退役。
+
 describe('delegation 恢复（阶段 1 meta 归属 + 阶段 2 registry 恢复）', () => {
   it('running 态恢复：归属字段写入索引后，重启视角能按 delegationId 找回子会话', () => {
     useTemporaryHome('deleg-restore-')

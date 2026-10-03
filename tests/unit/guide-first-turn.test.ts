@@ -89,7 +89,8 @@ const generateSketchJson = JSON.stringify({
 
 describe('引导首轮澄清硬护栏', () => {
   beforeEach(() => {
-    // 2026-09-16: BLOMA_GUIDE_LOOP default-on; pin legacy path for this file
+    // 2026-10-03 删留执行：删去「pin legacy path」失实注释——旧单次 JSON 路径已删，
+    // decideBlocks 已转 tool_use，本文件测的是现行 guide_decide 路径。
     vi.mocked(updateProject).mockClear()
   })
 

@@ -123,6 +123,10 @@ describe('channel auto-fallback decrypt guard', () => {
  * - 路由主渠道 build 失败 → 先按 fallback_channel_ids 顺序切 → 再任意渠道；
  * - 无路由配置与现状一致（回归）；
  * - 决策日志 category_route：命中路由落一条、30s 节流、缺 projectId/sessionId 跳过。
+ *
+ * 2026-10-03 删留执行：吸收 summary-channel-fallback.test.ts（三例与本 describe 的 sketch
+ * 版逐一同构——runtime-fallback 对 summary 零特判，仅换 category 字符串），悬空/主渠道
+ * 失败/无配置三场景参数化 sketch+summary 各跑一遍，防止「默认关」被误读成不参与路由。
  */
 describe('category routing × resolveChannelEnv（M5）', () => {
   const originalPromaHome = process.env.PROMA_HOME
@@ -191,40 +195,40 @@ describe('category routing × resolveChannelEnv（M5）', () => {
     expectChannel('summary', ds.id)
   })
 
-  it('路由悬空（渠道已删除）→ 回退全局默认渠道，不崩溃', () => {
+  it.each(['sketch', 'summary'] as const)('路由悬空（渠道已删除）→ 回退全局默认渠道，不崩溃 [%s]', (category) => {
     const ds = seed('ds', 'deepseek')
     vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    saveCategoryRouting({ sketch: { channel_id: 'deleted-id' } })
+    saveCategoryRouting({ [category]: { channel_id: 'deleted-id' } } as Parameters<typeof saveCategoryRouting>[0])
 
-    const resolution = resolveChannelEnv({ category: 'sketch' })
+    const resolution = resolveChannelEnv({ category })
     expect(resolution.channel?.id).toBe(ds.id)
     expect(resolution.env).toBeDefined()
   })
 
-  it('路由主渠道 build 失败 → 先按 fallback_channel_ids 顺序切备用', () => {
+  it.each(['sketch', 'summary'] as const)('路由主渠道 build 失败 → 先按 fallback_channel_ids 顺序切备用 [%s]', (category) => {
     const kimi = seed('kimi', 'kimi-api')
     const glm = seed('glm', 'zhipu-coding')
     seed('ds', 'deepseek')
     // kimi 渠道清空模型 → 主渠道 model_not_found
     updateChannel(kimi.id, { models: [] })
     saveCategoryRouting({
-      sketch: { channel_id: kimi.id, fallback_channel_ids: [glm.id] },
-    })
+      [category]: { channel_id: kimi.id, fallback_channel_ids: [glm.id] },
+    } as Parameters<typeof saveCategoryRouting>[0])
 
-    const resolution = resolveChannelEnv({ category: 'sketch', projectId: 'p-m5', sessionId: 's-m5' })
+    const resolution = resolveChannelEnv({ category, projectId: `p-m5-${category}`, sessionId: `s-m5-${category}` })
     // 备用顺序优先：先 glm（配置的 fallback）而非配置序在前的其他渠道
     expect(resolution.channel?.id).toBe(glm.id)
     expect(resolution.env?.ANTHROPIC_BASE_URL).toBe('https://glm.example')
     // 切换留痕（T9 决策日志，非静默）
-    const decisions = readDecisionLines('s-m5')
+    const decisions = readDecisionLines(`s-m5-${category}`)
     expect(decisions.some((line) => line.includes('runtime_channel_switch') && line.includes('glm'))).toBe(true)
   })
 
-  it('无路由配置时与现状行为一致（回归）：全局第一个启用渠道', () => {
+  it.each(['sketch', 'summary'] as const)('无路由配置时与现状行为一致（回归）：全局第一个启用渠道 [%s]', (category) => {
     const first = seed('first', 'deepseek')
     seed('second', 'kimi-api')
 
-    const resolution = resolveChannelEnv({ category: 'sketch' })
+    const resolution = resolveChannelEnv({ category })
     expect(resolution.channel?.id).toBe(first.id)
   })
 

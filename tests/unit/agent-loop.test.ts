@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { runAgentLoop, TOOL_WINDOW_ROUNDS, windowMessages, keepRecentTurns, estimateBlocksText, renderCheckpointRecoveryHeader, type AgentLoopInput, type AgentLoopTool, type AgentLoopTurnInfo, type AgentLoopCompactionInfo, type LoopCheckpointSnapshot, type ToolContext, type ToolOutcome } from '../../main/agent/loop/agent-loop'
+import { runAgentLoop, keepRecentTurns, estimateBlocksText, renderCheckpointRecoveryHeader, type AgentLoopInput, type AgentLoopTool, type AgentLoopTurnInfo, type AgentLoopCompactionInfo, type LoopCheckpointSnapshot, type ToolContext, type ToolOutcome } from '../../main/agent/loop/agent-loop'
 import { estimateTokenCount } from '../../main/agent/loop/usage-guard'
 import { drainSteerQueue, enqueueSteer, getSteerStatuses, pendingSteerCount, registerSteer, resetSteerQueuesForTests, STEER_WRAP_PREFIX, wrapSteerContent } from '../../main/agent/loop/steer-queue'
 import type { AgentEvent } from '../../shared/types'
@@ -469,70 +469,6 @@ describe('M4-C tool_call_completed detail 白名单透传', () => {
   })
 })
 
-/** 构造一轮完整工具对（assistant tool_use + user tool_result）。 */
-function pairOf(id: string): [ConversationTurn, ConversationTurn] {
-  return [
-    { role: 'assistant', content: [{ type: 'tool_use', id, name: 'echo', input: {} }] },
-    { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: `result-${id}` }] },
-  ]
-}
-
-/** head（task）+ N 轮完整工具对。 */
-function buildLoopMessages(turns: number): ConversationTurn[] {
-  const messages: ConversationTurn[] = [{ role: 'user', content: 'task' }]
-  for (let index = 0; index < turns; index += 1) messages.push(...pairOf(`t${index}`))
-  return messages
-}
-
-describe('F4 窗口钉住首个 test_failed 轮（闭环治理 PR2）', () => {
-  const originalPromaHome = process.env.PROMA_HOME
-
-  beforeEach(() => {
-    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-pin-'))
-  })
-  afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
-  })
-
-  it('钉住后窗口外的首个失败轮对仍在：40 轮、失败轮第 2 轮、窗口 8 对', () => {
-    const messages = buildLoopMessages(40)
-    const windowed = windowMessages(messages, 8, 8, 2)
-
-    // head + 钉住的第 2 轮对（t1）+ 最近 8 轮对（t32..t39），保持原顺序
-    const expected: ConversationTurn[] = [
-      messages[0],
-      ...pairOf('t1'),
-      ...Array.from({ length: 8 }, (_, i) => pairOf(`t${32 + i}`)).flat(),
-    ]
-    expect(windowed).toEqual(expected)
-    expect(windowed).toHaveLength(1 + 2 + 16)
-  })
-
-  it('无钉轮时行为与现状逐字节一致（回归锁）', () => {
-    const messages = buildLoopMessages(40)
-    const expected: ConversationTurn[] = [
-      messages[0],
-      ...Array.from({ length: 8 }, (_, i) => pairOf(`t${32 + i}`)).flat(),
-    ]
-    // 不传第 4 参与显式传 undefined 均为固定窗口语义，输出完全一致
-    expect(windowMessages(messages, 8, 8)).toEqual(expected)
-    expect(windowMessages(messages, 8, 8, undefined)).toEqual(expected)
-  })
-
-  it('失败对不完整（cancelled 残局）不钉：角色不成对即放弃', () => {
-    // 40 轮里第 2 轮只剩 assistant（user tool_result 缺席），索引错位下不得误钉
-    const messages = buildLoopMessages(40)
-    messages.splice(3, 1) // 删掉 t1 对的 user tool_result，后续整体前移
-    const windowed = windowMessages(messages, 8, 8, 2)
-
-    // 未钉住：结果与固定窗口一致（t1 只剩 assistant 一条，也不在最近 8 轮内）
-    const ids = windowed
-      .filter((turn) => turn.role === 'assistant' && Array.isArray(turn.content))
-      .map((turn) => (turn.content as Array<{ type?: string; id?: string }>).find((b) => b.type === 'tool_use')?.id)
-    expect(ids).not.toContain('t1')
-    expect(windowed).toHaveLength(1 + 16)
-  })
-})
 
 interface CompactQueryOptions {
   inputTokens: number

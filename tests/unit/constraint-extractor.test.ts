@@ -2,18 +2,19 @@ import { restorePromaHome } from '../support/proma-home-guard'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 // 2026-09-16 FILE-LEVEL 钉：BLOMA_GUIDE_LOOP 缺省翻转 on，本文件锁旧路径读取侧口径
 // （loop 模式下约束系统行经 historyTurns→messages 送达，捕获参数不同；行为等价）
 import { captureConstraints, extractConstraints, scanSessionConstraints } from '../../main/guide/constraint-extractor'
 import { buildPrdBackplane } from '../../main/project/document-engine'
-import { HISTORY_WINDOW_TURNS, runAgent, setAgentStreamPublisher, setSDKQueryForTests } from '../../main/orchestration/orchestrator'
-import { createChannel } from '../../main/platform/llm/channel-manager'
+import { HISTORY_WINDOW_TURNS } from '../../main/orchestration/orchestrator'
 import { setSafeStorageAdapter } from '../../main/platform/storage/safe-storage'
 import { createProject, findProject } from '../../main/project/project-service'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import type { PrdBackplane, SketchRequirement } from '../../main/coding/sketch-engine'
-import type { AgentMessage, SDKMessage } from '../../shared/types'
+import type { AgentMessage } from '../../shared/types'
+// 2026-10-03 删留执行：runAgent/setSDKQueryForTests/setAgentStreamPublisher/createChannel/
+// SDKMessage/vi 为头注所述「端到端回灌」用例（已不存在）的死 import，已清。
 /**
  * T4-L1/L2 确定性记忆主路（2026-08-18 修订版设计）：
  * 约束走门进背板（写入侧）+ 窗口改造与全量扫描（读取侧）。
