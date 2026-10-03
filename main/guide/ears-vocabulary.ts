@@ -3,8 +3,8 @@
  *
  * 三处消费方一律 import 本模块（陷阱 22「行为断言三处口径」教训前置规避）：
  * - EARS 化改写 prompt（requirement-earsifier，P3）——trigger/response 词表进提示词；
- * - GWT 派生（gwt-runner/gwt-service，P5 注入点⑦）——句式 → Given/When/Then 映射；
- * - judge 静态校验（judge-engine，P6）——禁词表直查 + 单 trigger 纪律检查。
+ * - behavior-assertions 行为断言解析共用（句式前缀/中轴单点）。
+ * （GWT 派生与 judge 静态校验消费面已随 web 验证线与 judge 域退役，2026-10-03）
  *
  * 句式集（方案 §4.1 拍板，只取 3；Mavin 2009 五句式砍 WHERE/ubiquitous——
  * 沙箱单页应用无 feature-flag 场景，无条件恒真句式不可探针）：

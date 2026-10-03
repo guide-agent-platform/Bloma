@@ -164,55 +164,46 @@ describe('Sprint 3 analytics completeness audit (T8)', () => {
     expect(events).toContain('user_undo')
   })
 
-  it('[T8-004] 埋点事件完整性审计：所有已定义事件类型均有真实断言或明确阻塞项', () => {
+  it('[T8-004] 埋点事件完整性审计：联合成员源码活读取 + 覆盖双向对账', () => {
     // 本测试为静态审计，确保当新增/删除事件类型时有人维护触发路径与测试覆盖。
-    // 事件类型真源来自 shared/types.ts AnalyticsTrackInput.event.event_type 联合类型。
-    //
-    // 审计真实化（对抗审查 M3 修复）：覆盖表从「表内有条目即过」升级为「引用实存校验」——
-    // 每个事件的断言文件必须真实存在于仓库，且其源码中 grep 得到该事件字面量的
-    // 落盘断言（readAnalytics/expect(...event_type)），杜绝「引用一个不存在的覆盖」。
-    const allDefinedEventTypes = [
-      'project_created',
-      'conversation_submitted',
-      'guide_role_switched',
-      'sketch_generated',
-      'sketch_fallback',
-      'mvp_delivered',
-      'user_undo',
-      'mode_upgraded',
-      'programming_execution',
-      'self_repair_triggered',
-      'judge_verdict',
-      'satisfaction_marked',
-      'project_finalized',
-    ] as const
+    // 真源活读取（2026-10-03 重构，对齐开关对账测试模式）：联合成员直接从
+    // shared/types.ts 源码提取——手抄清单会随整线退役漂移成幽灵（web 线拆除后
+    // 14 个零写入方成员与 3 个死覆盖文件即教训），活读取让漂移即红。
+    const typesSource = readFileSync(join(__dirname, '..', '..', '..', 'shared', 'types.ts'), 'utf8')
+    const typeLines = typesSource.split(/\r?\n/)
+    const unionStart = typeLines.findIndex((l) => l.trim() === 'event_type:')
+    expect(unionStart, 'AnalyticsTrackInput.event_type 联合定位失败（shared/types.ts 结构变更？）').toBeGreaterThan(-1)
+    const allDefinedEventTypes: string[] = []
+    for (let i = unionStart + 1; i < typeLines.length; i++) {
+      const line = typeLines[i]
+      const member = /^\s*\| '([a-z_]+)'/.exec(line)
+      if (member) {
+        allDefinedEventTypes.push(member[1])
+        continue
+      }
+      // 联合内的文档注释与空行跳过；其余行（project_id 等字段）= 联合结束
+      if (line.trim() === '' || line.trim().startsWith('/**') || line.trim().startsWith('*')) continue
+      break
+    }
+    expect(new Set(allDefinedEventTypes).size, '联合成员不得重复').toBe(allDefinedEventTypes.length)
+    expect(allDefinedEventTypes.length, '活读取结果异常（空联合）').toBeGreaterThan(0)
 
     // 事件 → 断言所在测试文件（相对仓库根）；文件必须存在且源码含该事件字面量。
     const coveredByExistingTests: Record<string, string[]> = {
-      project_created: [
-        'tests/acceptance/sprint3/analytics-completeness.test.ts', // T8-001
-        'tests/acceptance/sprint1/sketch-delivery.test.ts', // S1-ANALYTICS-001
-      ],
-      conversation_submitted: ['tests/acceptance/sprint1/sketch-delivery.test.ts'],
-      sketch_generated: ['tests/acceptance/sprint1/sketch-delivery.test.ts'], // 含 FIRT duration_ms
-      sketch_fallback: ['tests/unit/sketch-fallback-observability.test.ts'],
-      mvp_delivered: [
-        'tests/acceptance/sprint3/analytics-completeness.test.ts', // 事件枚举审计
-        'tests/e2e/sprint2/mvp-workflow.e2e.ts', // E2E 轮询 mvp_delivered 落盘
-      ],
-      user_undo: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-003
       mode_upgraded: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-001
-      self_repair_triggered: ['tests/acceptance/sprint3/agent-loop-pipeline.test.ts'], // loop onRepairRound 落盘（废旧管道改造后来源换为 agent loop）
-      judge_verdict: ['tests/acceptance/sprint3/agent-loop-pipeline.test.ts'], // 终验 judge 判定落盘
       satisfaction_marked: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-001
       project_finalized: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-001
+      user_undo: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-003
+      scope_confirmed: ['tests/unit/guide-prd-confirm.test.ts'], // 确认动作留存断言
+      desktop_dispatch_run: ['tests/unit/desktop/dispatcher-loop.test.ts'], // 桌面线运行遥测
+      conversation_submitted: ['tests/e2e/sprint1/sketch-workflow.e2e.ts'], // E2E 事件流
     }
 
     const todoBlocked: Record<string, string> = {
-      guide_role_switched:
-        'Phase 1 当前实现无 DialogueRouter 显式角色切换；guide-agent-service 以单一路由处理用户输入，未按 PRD §6.2 切需求分析师/UI/UX 顾问/架构设计师/工程经理角色。待 DialogueRouter 落地后补写入点。',
-      programming_execution:
-        '该事件原由废旧管道 repair-engine（applyRepairPatchWithLlm）落盘；Agent Loop 转正后修复已内化进 loop（onRepairRound 落 self_repair_triggered + agent_loop_turn 记录轮次），不再有独立编程执行埋点。事件类型保留（向后兼容历史 JSONL），无新产生点。',
+      project_created: '写入方活跃（project-service createProject）；断言文件随 web 线拆除退役，待补。',
+      clarification_responded: '写入方活跃（guide 线 U5 J5）；待补断言。',
+      decision_selected: '写入方活跃（guide 线 P7-9b）；待补断言。',
+      test_completed: '兼容读侧保留：test-legacy 从旧 analytics JSONL 还原报告在用；执行器已随 web 线退役，无新写入方。',
     }
 
     // 引用实存校验：断言文件必须存在，且源码中真实出现该事件字面量（否则覆盖声称失实）

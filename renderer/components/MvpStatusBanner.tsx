@@ -5,7 +5,6 @@
  *
  * 消费 A 侧通过 setupGlobalAgentListeners 推送的 AgentEvent：
  *   - mvp_ready       → MVP 生成成功，显示预览入口
- *   - judge_result    → 裁判判定结果（通过/建议/退回）
  *   - repairing       → 自动修复中
  *
  * 数据来源：agentStreamStateFamily(sessionId).events 中的最近事件
@@ -88,7 +87,7 @@ const IconAlertTriangle: React.FC<{ size?: number }> = ({ size = 24 }) => (
 
 interface BannerState {
   visible: boolean
-  variant: 'generating' | 'ready' | 'testing' | 'judging' | 'judge_pass' | 'judge_suggest' | 'judge_return' | 'repairing' | 'blocked' | 'none'
+  variant: 'generating' | 'ready' | 'testing' | 'judging' | 'repairing' | 'blocked' | 'none'
   title: string
   detail?: string
   stage: WorkflowStage
@@ -101,13 +100,12 @@ function deriveBannerState(
   // 从事件流中提取最近的关键事件
   const latestByType = new Map<string, AgentEvent>()
   for (const e of events) {
-    if (['mvp_ready', 'judge_result', 'repairing', 'stage_changed'].includes(e.type)) {
+    if (['mvp_ready', 'repairing', 'stage_changed'].includes(e.type)) {
       latestByType.set(e.type, e)
     }
   }
 
   const mvpReady = latestByType.get('mvp_ready')
-  const judgeResult = latestByType.get('judge_result')
   const repairing = latestByType.get('repairing')
 
   // 正在修复中
@@ -122,41 +120,6 @@ function deriveBannerState(
       variant: 'repairing',
       title: '正在尝试自动修复',
       detail: (repairing.payload.user_visible_summary as string) || '运行时检测到错误，正在自动修复…',
-      stage,
-    }
-  }
-
-  // 裁判结果
-  if (judgeResult && mvpReady) {
-    const verdict = judgeResult.payload.verdict as string | undefined
-    const summary = judgeResult.payload.user_visible_summary as string | undefined
-
-    if (verdict === 'return') {
-      return {
-        visible: true,
-        variant: 'judge_return',
-        title: '功能还需要完善',
-        detail: summary || '裁判审查发现功能未达到要求，需要修改',
-        stage,
-      }
-    }
-
-    if (verdict === 'suggest') {
-      return {
-        visible: true,
-        variant: 'judge_suggest',
-        title: '基本可用，建议优化',
-        detail: summary || '裁判建议改进部分功能',
-        stage,
-      }
-    }
-
-    // verdict === 'pass'
-    return {
-      visible: true,
-      variant: 'judge_pass',
-      title: '功能验收通过',
-      detail: summary || 'MVP 已生成并通过检查',
       stage,
     }
   }
@@ -202,9 +165,6 @@ const VARIANT_STYLE: Record<BannerState['variant'], { bg: string; border: string
   ready:        { bg: '#ECFDF5', border: '#A7F3D0', color: '#065F46', icon: IconCheck, animated: false },
   testing:      { bg: '#FFFBEB', border: '#FDE68A', color: '#92400E', icon: null, animated: true },
   judging:      { bg: '#F5F3FF', border: '#DDD6FE', color: '#6D28D9', icon: null, animated: true },
-  judge_pass:   { bg: '#ECFDF5', border: '#A7F3D0', color: '#065F46', icon: IconCheck, animated: false },
-  judge_suggest:{ bg: '#FFFBEB', border: '#FDE68A', color: '#92400E', icon: IconAlertTriangle, animated: false },
-  judge_return: { bg: '#FEF2F2', border: '#FECACA', color: '#991B1B', icon: IconX, animated: false },
   repairing:    { bg: '#EFF6FF', border: '#BFDBFE', color: '#1E40AF', icon: IconRotateCw, animated: true },
   blocked:      { bg: '#FFFBEB', border: '#FDE68A', color: '#92400E', icon: IconAlertTriangle, animated: false },
   none:         { bg: 'transparent', border: 'transparent', color: 'transparent', icon: null, animated: false },
@@ -389,8 +349,8 @@ export const MvpStatusBanner: React.FC = () => {
         )}
       </div>
 
-      {/* 右侧：导出项目按钮（PR-3，仅成果就绪态显示：ready / judge_pass） */}
-      {(banner.variant === 'ready' || banner.variant === 'judge_pass') &&
+      {/* 右侧：导出项目按钮（PR-3，仅成果就绪态显示） */}
+      {banner.variant === 'ready' &&
         (exportedPath ? (
           <span
             data-ai-id="export-project-done"
@@ -432,7 +392,7 @@ export const MvpStatusBanner: React.FC = () => {
         ))}
 
       {/* Phase 10 落地旅程：升级导出（导出后出现——旧导出包→新版本，数据先备份再迁移） */}
-      {(banner.variant === 'ready' || banner.variant === 'judge_pass') && exportedPath && (
+      {(banner.variant === 'ready') && exportedPath && (
         <button
           type="button"
           data-ai-id="upgrade-export-btn"

@@ -980,7 +980,6 @@ export interface AgentEvent {
     | 'mvp_ready'
     | 'repairing'
     | 'rollback_done'
-    | 'judge_result'
     | 'user_decision_required'
     | 'retrying'
     | 'error'
@@ -1463,33 +1462,16 @@ export interface AnalyticsTrackInput extends RequestEnvelope {
     event_type:
       | 'project_created'
       | 'conversation_submitted'
-      | 'guide_role_switched'
-      | 'sketch_generated'
-      | 'sketch_fallback'
-      | 'mvp_delivered'
       | 'user_undo'
-      | 'point_correction'
       | 'mode_upgraded'
-      | 'programming_execution'
-      | 'self_repair_triggered'
-      | 'repair_round_completed'
-      | 'agent_loop_turn'
-      | 'agent_loop_completed'
-      | 'agent_loop_compact'
       | 'test_completed'
-
-
-      | 'judge_verdict'
       | 'satisfaction_marked'
       | 'project_finalized'
       /** Phase 7 U5 J5（2026-09-10）：北极星地基事件 */
       | 'scope_confirmed'
-      | 'delivery_presented'
       /** Phase 7 U5 J5（P7-9b，2026-09-10）：漏斗中层与决策转化事件 */
       | 'clarification_responded'
       | 'decision_selected'
-      /** Phase 10 W4（F 系列 4.2 转正，2026-09-16）：报障行为信号——源=一键反馈卡（非意图识别） */
-      | 'issue_reported'
       /** 桌面线运行遥测（telemetry 最小版，2026-10-01）：每段 dispatcher run 一条——狗粮复盘数据设施 */
       | 'desktop_dispatch_run'
     project_id?: string

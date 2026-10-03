@@ -352,7 +352,6 @@ const NEW_RUN_SIGNALS = new Set([
   'sketch_ready',
   'mvp_ready',
   'repairing',
-  'judge_result',
   'retrying',
   'loop_compaction',
   'delegation_started',

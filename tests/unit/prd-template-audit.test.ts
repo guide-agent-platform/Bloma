@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ruleGateReview } from '../../main/review/prd-review'
-import { runJudge } from '../../main/review/judge-engine'
 import { syncDocuments } from '../../main/project/document-engine'
 import { createProject, recordSketchGenerated } from '../../main/project/project-service'
 import type { PrdBackplane, SketchRequirement } from '../../main/coding/sketch-engine'
@@ -93,44 +92,5 @@ describe('注入点④内审变体（章节完备性 + EARS 可测性）', () =>
       const outcome = ruleGateReview(full, 'quick')
       expect(outcome.issues.filter((issue) => issue.claim.includes('必填章节'))).toHaveLength(0)
     })
-  })
-})
-
-describe('注入点⑧judge 版本一致性（轻量，不扩完成度判定）', () => {
-  const originalPromaHome = process.env.PROMA_HOME
-
-  afterEach(() => {
-    process.env.PROMA_HOME = originalPromaHome
-  })
-
-  function setupJudgeProject(backplaneOverride?: (bp: PrdBackplane) => PrdBackplane) {
-    const home = mkdtempSync(join(tmpdir(), 'proma-judge-tpl-'))
-    process.env.PROMA_HOME = home
-    const project = createProject({ request_id: 'req-tpl', mode: 'quick' })
-    const items: SketchRequirement[] = [{ id: 'F-001', description: '记录收入与支出' }]
-    recordSketchGenerated(project.project_id, items)
-    const base = makeBackplane({ project_id: project.project_id, requirements: items })
-    const backplane = backplaneOverride ? backplaneOverride(base) : base
-    // sketch_confirmed 先落 prd.json（template_meta 随盘）；mvp_before_generation 再产 features 骨架
-    syncDocuments({ request_id: 'req-sync', session_id: 's', project_id: project.project_id, checkpoint: 'sketch_confirmed' }, backplane)
-    syncDocuments({ request_id: 'req-sync2', session_id: 's', project_id: project.project_id, checkpoint: 'mvp_before_generation' })
-    writeFileSync(join(project.root_path, 'index.html'), '<p>记录收入与支出</p>', 'utf8')
-    return project
-  }
-
-  it('背板模板版本落后 → soft 提示 passed=true，不影响 pass verdict（§六：不扩完成度判定）', () => {
-    const project = setupJudgeProject((bp) => ({ ...bp, template_meta: { type: 'personal_tool', level: 'loose', version: 0 } }))
-    const verdict = runJudge({ project_id: project.project_id, mode: 'quick' })
-    const versionHint = verdict.soft_constraints.find((item) => item.name === '模板版本一致性')
-    expect(versionHint).toBeDefined()
-    expect(versionHint?.passed).toBe(true) // 仅提示，不影响判定
-    expect(versionHint?.detail).toContain('旧版模板')
-    expect(verdict.verdict).toBe('pass') // 版本落后不改变交付判定
-  })
-
-  it('版本一致 → 无该软约束', () => {
-    const project = setupJudgeProject()
-    const verdict = runJudge({ project_id: project.project_id, mode: 'quick' })
-    expect(verdict.soft_constraints.find((item) => item.name === '模板版本一致性')).toBeUndefined()
   })
 })

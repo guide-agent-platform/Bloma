@@ -146,7 +146,7 @@ export function readPrdBackplane(projectId: string): PrdBackplane {
   }
 }
 
-/** 语义审查判定回写的入参（与 judge-semantic.SemanticFinding 结构兼容，避免模块循环依赖）。 */
+/** 语义审查判定回写的入参（历史口径曾对齐 judge-semantic.SemanticFinding；judge 域退役后由 prd-confirm EARS 写回链消费，结构保持稳定）。 */
 export interface RequirementStatusUpdate {
   requirement_id: string
   status: RequirementStatus

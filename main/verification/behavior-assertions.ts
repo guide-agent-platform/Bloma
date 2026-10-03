@@ -2,9 +2,9 @@
  * 行为断言解析（§7.4/§8.1，M3 行为门禁的共享底座）。
  *
  * 把「按右方向键→车辆 x 坐标增加」这类行为断言解析为**可执行的触发器 + 效果**：
- * - gwt-runner 用它做浏览器内行为探针（模拟触发→断言状态变化）；
- * - gwt-service 静态兜底用它做关键词存在性检查（§8.1 有界静态启发式）；
- * - judge-engine 用它读运行证据 + 静态确认。
+ * - requirement-enricher 格式守卫（10-01 后主消费方：解析不出触发/效果 → 丢弃）；
+ * - prd-store/document-sync 文档渲染（describeTrigger/describeEffect 人读动词）。
+ * （gwt-runner/gwt-service/judge-engine 消费面已随 web 验证线与 judge 域退役，2026-10-03）
  *
  * 领域无关：只认动作词表（移动/隐藏/新增…），不认领域实体（车/记账/合成器）。
  * 解析不出触发器或效果的断言 → presenceFallback（存在性检查兜底，与改造前的

@@ -1,6 +1,9 @@
 /**
- * 领域工具面 composition（PR4c 注入反转）：run_preview / run_gwt_tests / run_security_scan /
- * run_api_contract_tests / run_preflight / repair_control 与预览浏览器工具族。
+ * 领域工具面 composition（PR4c 注入反转）。web 线拆除（2026-10-01）后实际装配面：
+ * run_security_scan（常驻）+ repair_control（仅修复轮传 writeScope 时）+ 预览浏览器
+ * 工具族（BLOMA_BROWSER_TOOLS 缺省 off）；run_preview / run_gwt_tests /
+ * run_api_contract_tests / run_preflight 已随 web 验证线退役（桌面线验收走
+ * run_project_driver 契约驱动，见 desktop/driver-runner-tool）。
  * 工具 schema 与实现自 agent/tools 迁出——agent 运行时零领域知识，领域能力在本层（orchestration→domain 合法向）装配。
  * 调用方拼接：[...buildAgentTools(o), ...buildDomainTools(o)]（角色裁剪两边各自持半）。
  */
