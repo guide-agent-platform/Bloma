@@ -164,3 +164,23 @@ describe('SSE 事件桥：事件 → SDKMessage 流序与结果装配', () => {
       .rejects.toThrow('SDK_MODEL_NOT_CONFIGURED')
   })
 })
+
+describe('max_tokens 服务端上限夹紧（2026-10-03 zhipu 事故）', () => {
+  it('zhipu-coding：maxTokens 640000 → 请求体夹紧 131072（超限即 400 code 1210）', async () => {
+    mockStreamOk()
+    for await (const _ of anthropicMessagesQueryViaProviders('问', opts({ providerType: 'zhipu-coding', maxTokens: 640000 }))) void _
+    expect(parsedBody().max_tokens).toBe(131072)
+  })
+
+  it('zhipu-coding-team：同样夹紧；低于上限的值原样透传', async () => {
+    mockStreamOk()
+    for await (const _ of anthropicMessagesQueryViaProviders('问', opts({ providerType: 'zhipu-coding-team', maxTokens: 8192 }))) void _
+    expect(parsedBody().max_tokens).toBe(8192)
+  })
+
+  it('未登记上限的 provider（anthropic 缺省）：640000 统一值语义不变', async () => {
+    mockStreamOk()
+    for await (const _ of anthropicMessagesQueryViaProviders('问', opts({ maxTokens: 640000 }))) void _
+    expect(parsedBody().max_tokens).toBe(640000)
+  })
+})

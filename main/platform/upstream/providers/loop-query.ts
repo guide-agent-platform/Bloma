@@ -24,6 +24,7 @@ import type { MessageContentBlock, ProviderType, SDKMessage } from '../../../../
 import { ANTHROPIC_SSE_ADAPTER, buildAnthropicHeaders, resolveMessagesUrl } from './anthropic-sse-adapter'
 import { normalizeAnthropicBaseUrl, resolveAnthropicMessagesUrl } from './url-utils'
 import { streamSSE, HTTPError } from './sse-reader'
+import { capMaxTokensForProvider } from '../../llm/model-resolution'
 
 /** 开关已删除（2026-10-01 开关面收敛批）：providers 传输路径为唯一实现。 */
 /**
@@ -91,7 +92,9 @@ export async function* anthropicMessagesQueryViaProviders(prompt: string, option
   }
   const body: Record<string, unknown> = {
     model,
-    max_tokens: options.maxTokens ?? 640000,
+    // 服务端硬上限夹紧（2026-10-03 zhipu 实测 131072，超限 400 code 1210）：唯一夹紧点，
+    // 覆盖全部调用面（桌面线/loop-planner/记忆蒸馏等硬编码 640000 也在出口收口）
+    max_tokens: capMaxTokensForProvider(options.maxTokens ?? 640000, providerType),
     stream: true,
     messages,
   }
@@ -250,6 +253,13 @@ export async function* anthropicMessagesQueryViaProviders(prompt: string, option
         `[providers-query] 零正文输出：model=${model} max_tokens=${String(body.max_tokens)} `
           + `text_delta=${textDeltaCount} thinking_delta=${thinkingDeltaCount}`
           + '——思考型模型疑似把 max_tokens 预算耗在思考上，正文为零',
+      )
+    } else if (textDeltaCount === 0 && toolUseCount === 0 && thinkingDeltaCount === 0) {
+      // 纯空流（2026-10-03 e99e6319 事故形态：网关 200 但零内容事件）——旧告警只覆盖
+      // 「有 thinking 无正文」，纯空流零日志导致事故归因绕了整晚
+      console.error(
+        `[providers-query] 空流：model=${model} max_tokens=${String(body.max_tokens)} 无任何内容事件`
+          + '（text/thinking/tool_use 均零）——网关/渠道异常形态，非模型行为',
       )
     }
   }

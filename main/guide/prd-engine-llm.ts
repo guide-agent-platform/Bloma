@@ -3,7 +3,7 @@ import type { SDKQuery } from '../orchestration/orchestrator'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import { loadPromptOverride } from '../agent/prompting/prompt-config'
 import { buildPrdFewShotInjection } from '../agent/prompting/template-injection'
-import { callLlmForJson } from '../kernel/llm-call'
+import { callLlmForJson, type LlmAttemptFailure } from '../kernel/llm-call'
 import type { AgentMessage, MessageContentBlock } from '../../shared/types'
 import type { AiCapability, GameDesignDoc, InterfaceEndpoint, KeyTask, PrdBackplane, SketchRequirement } from '../model/prd-backplane'
 import {
@@ -52,6 +52,8 @@ export interface GeneratePrdLlmInput {
   maxTokens?: number
   signal?: AbortSignal
   timeoutMs?: number
+  /** 尝试失败观测（2026-10-03）：管线侧据此把真实原因写进 prd_backplane_fallback 决策日志。 */
+  onAttemptFailure?: (failure: LlmAttemptFailure) => void
 }
 
 /** 默认不设生成超时（2026-08-16 用户决策「取消时间限制」，与 sketch/mvp 引擎同步）；timeoutMs>0 才设 timer，供测试注入。 */
@@ -210,6 +212,7 @@ export async function generatePrdLlm(input: GeneratePrdLlmInput): Promise<PrdBac
       retryFeedback: PRD_RETRY_FEEDBACK,
       signal: input.signal,
       timeoutMs: input.timeoutMs,
+      onAttemptFailure: input.onAttemptFailure,
       parse: parsePrdJson,
     })
     return parsed ? buildBackplaneFromParsed(parsed, items, input.project_id, input.template_type) : null

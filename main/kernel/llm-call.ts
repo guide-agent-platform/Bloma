@@ -20,6 +20,14 @@ import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../orchestrati
 import type { MessageContentBlock, SDKMessage } from '../../shared/types'
 import type { ThinkingLevel } from '../../shared/reasoning-profile'
 
+/** 单轮尝试失败观测（2026-10-03 e99e6319 事故）：调用方可据此把真实原因写进决策日志。 */
+export interface LlmAttemptFailure {
+  attempt: number
+  /** error=query 抛错（带原始 message）；empty=模型零输出；unparseable=有输出但解析失败。 */
+  kind: 'error' | 'empty' | 'unparseable'
+  detail: string
+}
+
 export interface LlmJsonCallOptions<T> {
   /** system 提示词（含角色/输出契约/守卫口径） */
   systemPrompt: string
@@ -47,6 +55,8 @@ export interface LlmJsonCallOptions<T> {
   signal?: AbortSignal
   /** >0 才设 timer；缺省 0 = 无超时（供测试注入） */
   timeoutMs?: number
+  /** 尝试失败观测（可选，不影响返回契约；2026-10-03：fail-closed 吞错零观测的事故补丁）。 */
+  onAttemptFailure?: (failure: LlmAttemptFailure) => void
   /** 解析 + 校验：undefined = 本轮失败（进入重试） */
   parse: (text: string) => T | undefined
 }
@@ -74,12 +84,33 @@ export async function callLlmForJson<T>(options: LlmJsonCallOptions<T>): Promise
               { role: 'assistant', content: accumulated },
             ]
       const prompt = attempt === 0 || truncated ? options.prompt : (options.retryFeedback ?? options.prompt)
-      const round = await runSingleTurn(options, maxTokens, history, prompt, signal)
+      let round: string
+      try {
+        round = await runSingleTurn(options, maxTokens, history, prompt, signal)
+      } catch (error) {
+        // 流抛错（网络/HTTP/abort）——这是唯一能看到服务端拒绝原因的地方，必须转交观测
+        options.onAttemptFailure?.({
+          attempt,
+          kind: 'error',
+          detail: (error instanceof Error ? error.message : String(error)).slice(0, 200),
+        })
+        throw error
+      }
       accumulated = round
       // 检查合并信号（外部 abort 或内部超时任一触发即停，比只查内部 timer 更严谨）
       if (signal.aborted) return null
+      if (round === '') {
+        options.onAttemptFailure?.({ attempt, kind: 'empty', detail: '模型零输出（空流/零正文）' })
+      }
       const parsedNow = safeParse(options.parse, accumulated)
       if (parsedNow !== undefined) return parsedNow
+      if (round !== '') {
+        options.onAttemptFailure?.({
+          attempt,
+          kind: 'unparseable',
+          detail: `输出无法解析（${round.length} 字符）：${round.slice(0, 80)}`,
+        })
+      }
       // 截断升预算（enricher 模式）：解析失败且输出呈截断态 → 下一轮升预算全新重生成。
       // parse 成功不看截断（截断判断发生在解析失败之后，与 enricher 既有语义一致）。
       const truncationRetry = options.truncationRetry
@@ -93,7 +124,12 @@ export async function callLlmForJson<T>(options: LlmJsonCallOptions<T>): Promise
       }
     }
     return null
-  } catch {
+  } catch (error) {
+    // fail-closed 保持契约不变，但不再零观测（2026-10-03：空流/4xx 被双层吞掉导致整晚归因绕路）
+    console.error(
+      '[llm-call] 调用异常（fail-closed → null）:',
+      error instanceof Error ? error.message : String(error),
+    )
     return null
   } finally {
     clearTimeout(timer)

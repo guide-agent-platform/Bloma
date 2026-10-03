@@ -193,6 +193,8 @@ export interface DesktopDispatchRunResult {
   status: 'completed' | 'cancelled' | 'error' | 'not-enabled' | 'not-managed'
   /** loop 原始结果（not-enabled/not-managed 无）。 */
   loopResult?: AgentLoopResult
+  /** error 状态的异常摘要（2026-10-03：断流/空流等 query 异常原文，供渠道故障归因与人话卡）。 */
+  error_message?: string
   /** 收口推进判定（completed 才有；cancelled/error 阶段未收口）。 */
   advance?: AdvanceDecision
   /** desktop-verify 阶段的驱动执行报告（该阶段才有）。 */
@@ -431,7 +433,7 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
   )
 
   if ('safeError' in loopResult) {
-    return { status: 'error', phase: node }
+    return { status: 'error', phase: node, error_message: loopResult.message }
   }
   if (loopResult.status !== 'completed') {
     // turn_limit/budget_exhausted 等终态统一归 error（阶段未收口，编排层决定重跑或转 blocked）

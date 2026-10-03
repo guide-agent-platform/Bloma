@@ -644,7 +644,23 @@ export async function runGuideLoopTurn(
         if (type === 'message_delta') publish(makeGuideEvent(input, 'message_delta', payload))
       },
     })
-  } catch {
+  } catch (error) {
+    // 2026-10-03 e99e6319 事故：向导 loop 抛错（含 EMPTY_MODEL_STREAM 空流/渠道 4xx）
+    // 此前静默回落确定性路由，渠道故障伪装成「模型问了个怪问题」；留痕真实原因
+    try {
+      recordDecision({
+        project_id: input.project_id,
+        session_id: input.session_id,
+        entry: {
+          type: 'guide_loop',
+          title: '向导 loop 异常终止',
+          why: '模型调用抛错（含渠道故障），回落确定性路由',
+          detail: { via: 'loop', outcome: 'error', error: (error instanceof Error ? error.message : String(error)).slice(0, 200) },
+        },
+      })
+    } catch {
+      /* 日志失败不影响回退 */
+    }
     return { kind: 'failed' }
   }
   if (!result) return { kind: 'failed' }

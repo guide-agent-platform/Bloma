@@ -1018,6 +1018,16 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
       }
       throw error
     }
+    // 空流守卫（2026-10-03 e99e6319 事故）：流「正常结束」但零内容块且无正输出 usage——
+    // 渠道网关异常形态（当晚 zhipu 对超限 max_tokens 回 200 零内容流），绝不能当正常
+    // 完成往下走（后续 no-marks 拒收/模板兜底会把渠道故障伪装成行为问题误导归因）。
+    // 思考耗尽型零正文不在此列：usage.output_tokens > 0（思考计费）走既有零正文告警。
+    if (assistantBlocks.length === 0 && !(usage && (usage.output_tokens ?? 0) > 0)) {
+      throw new Error(
+        `EMPTY_MODEL_STREAM: 渠道返回零内容零用量流（turn ${turn}，model=${input.env.ANTHROPIC_MODEL ?? '?'}）`
+          + '——疑似网关/渠道故障，非模型行为问题',
+      )
+    }
     if (usage) {
       usageTotals.inputTokens += usage.input_tokens ?? 0
       usageTotals.outputTokens += usage.output_tokens ?? 0

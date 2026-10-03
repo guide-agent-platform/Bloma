@@ -166,3 +166,50 @@ describe('looksJsonTruncated — 截断检测（自 enricher 迁入，行为锁�
     expect(looksJsonTruncated('no json at all')).toBe(false)
   })
 })
+
+describe('尝试失败观测 onAttemptFailure（2026-10-03 e99e6319 事故）', () => {
+  it('模型零输出 → kind=empty；有输出但解析失败 → kind=unparseable（两轮各报一次）', async () => {
+    const { query } = scriptedQuery(['not-json', ''])
+    const failures: Array<{ kind: string; detail: string }> = []
+    const result = await callLlmForJson({
+      ...BASE,
+      query,
+      attempts: 2,
+      parse: parseJson,
+      onAttemptFailure: (f) => failures.push({ kind: f.kind, detail: f.detail }),
+    })
+    expect(result).toBeNull()
+    expect(failures.map((f) => f.kind)).toEqual(['unparseable', 'empty'])
+  })
+
+  it('query 抛错 → kind=error 带原始 message，整体仍 fail-closed 返回 null', async () => {
+    const query: SDKQuery = () => {
+      throw new Error('provider API 错误 (400): [1210][max_tokens参数非法]')
+    }
+    const failures: Array<{ kind: string; detail: string }> = []
+    const result = await callLlmForJson({
+      ...BASE,
+      query,
+      attempts: 1,
+      parse: parseJson,
+      onAttemptFailure: (f) => failures.push({ kind: f.kind, detail: f.detail }),
+    })
+    expect(result).toBeNull()
+    expect(failures).toHaveLength(1)
+    expect(failures[0]!.kind).toBe('error')
+    expect(failures[0]!.detail).toContain('max_tokens')
+  })
+
+  it('成功路径零失败回调', async () => {
+    const { query } = scriptedQuery(['{"ok":1}'])
+    const failures: Array<{ kind: string; detail?: string }> = []
+    const result = await callLlmForJson({
+      ...BASE,
+      query,
+      parse: parseJson,
+      onAttemptFailure: (f) => failures.push({ kind: f.kind, detail: f.detail }),
+    })
+    expect(result).toEqual({ ok: 1 })
+    expect(failures).toHaveLength(0)
+  })
+})

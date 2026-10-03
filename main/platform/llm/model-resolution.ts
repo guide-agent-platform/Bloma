@@ -158,6 +158,30 @@ export function categoryTemperature(category: DocumentCategory): number {
 export const GENERATION_MAX_TOKENS = 640000
 
 /**
+ * Provider 服务端 max_tokens 硬上限（传输层夹紧用，2026-10-03 e99e6319 事故后登记）。
+ *
+ * 事故：zhipu glm-5.3 anthropic 端点新增超限校验——640000 直接 400 code 1210
+ * （「max_tokens参数非法：限制数值范围[1,131072]」）；灰度首夜部分网关实例表现为
+ * 200 零内容流（被 loop 当正常完成 → no-marks 拒收/模板兜底，渠道故障伪装成行为问题）。
+ * 上限只升不降：新渠道服务端限制须经探针实测后再登记，勿臆写。
+ */
+const PROVIDER_MAX_TOKENS_CAP: Record<string, number> = {
+  'zhipu-coding': 131072,
+  'zhipu-coding-team': 131072,
+}
+
+/**
+ * 按渠道夹紧 max_tokens：无登记上限的 provider 原样返回（640000 统一值语义不变）。
+ * 唯一夹紧点在传输层（loop-query 请求体构建），覆盖桌面线/loop-planner/记忆蒸馏
+ * 等全部调用面——调用方仍可声明 640000 意图，超限渠道在出口统一收口。
+ */
+export function capMaxTokensForProvider(maxTokens: number, providerType?: string): number {
+  if (!providerType) return maxTokens
+  const cap = PROVIDER_MAX_TOKENS_CAP[providerType]
+  return cap !== undefined ? Math.min(maxTokens, cap) : maxTokens
+}
+
+/**
  * 生成/修复类调用的 max_tokens 解析：渠道显式配置优先，缺省统一 640000（全渠道）。
  */
 export function resolveGenerationMaxTokens(channel: { max_tokens?: number }): number {

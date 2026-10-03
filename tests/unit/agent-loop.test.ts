@@ -1904,3 +1904,40 @@ describe('轮级 usage 采集（指标果集，2026-10-02：段首重建成本/�
     expect(result.usage?.turnsWithUsage).toBe(2)
   })
 })
+
+describe('空流守卫（2026-10-03 e99e6319 事故）', () => {
+  const originalPromaHome2 = process.env.PROMA_HOME
+
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-empty-'))
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome2
+  })
+
+  it('流正常结束但零内容块零 usage → 抛 EMPTY_MODEL_STREAM（渠道故障，不当正常完成）', async () => {
+    const query: SDKQuery = async function* () {
+      yield { type: 'result', subtype: 'success' }
+    }
+    await expect(runAgentLoop(baseInput({ query, sessionId: 'session-empty-stream' }))).rejects.toThrow('EMPTY_MODEL_STREAM')
+  })
+
+  it('思考耗尽型零正文（无内容块但 usage.output_tokens > 0）→ 不抛，维持既有零正文告警语义', async () => {
+    const query: SDKQuery = async function* () {
+      yield { type: 'result', subtype: 'success', stop_reason: 'max_tokens', usage: { input_tokens: 24, output_tokens: 64 } }
+    }
+    const result = await runAgentLoop(baseInput({ query, sessionId: 'session-thinking-only' }))
+    expect(result.status).toBe('completed')
+    expect(result.finalText).toBe('')
+  })
+
+  it('正常文本流不受影响', async () => {
+    const query: SDKQuery = async function* () {
+      yield textMessage('正常回复')
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 5 } }
+    }
+    const result = await runAgentLoop(baseInput({ query, sessionId: 'session-normal-stream' }))
+    expect(result.status).toBe('completed')
+    expect(result.finalText).toBe('正常回复')
+  })
+})

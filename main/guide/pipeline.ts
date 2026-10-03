@@ -75,7 +75,7 @@ export async function resolvePrdBackplane(
           type: 'prd_backplane_fallback',
           title: 'PRD 背板模板回退重建',
           why: 'PRD 渠道不可用/提取失败，背板按确定性模板重建；盘上既有 EARS 断言/story/priority 若与冻结清单不一致将被替换（降级设计，观测留痕）',
-          detail: { reason },
+          detail: { reason, ...(reason === 'llm_failed' && lastPrdFailure ? { last_failure: `${lastPrdFailure.kind}: ${lastPrdFailure.detail}` } : {}) },
         },
       })
     } catch {
@@ -102,6 +102,13 @@ export async function resolvePrdBackplane(
   const channel = resolution.channel
   const env = resolution.env
 
+  // 尝试失败观测（2026-10-03 e99e6319 事故）：llm_failed 此前不带任何原因（双层
+  // catch 吞干净），事故归因只能靠外部探针；现在把最后一次失败的真实原因带进决策日志
+  let lastPrdFailure: { kind: string; detail: string } | undefined
+  const onAttemptFailure = (failure: { kind: string; detail: string }): void => {
+    lastPrdFailure = { kind: failure.kind, detail: failure.detail }
+  }
+
   const project = findProject(input.project_id)
   // 上轮已写盘的 prd.json（如有）：重跑时其对应项既有字段并入合并底（§3.2）；首轮无 prd.json 按最后草图需求忠实重建（不含默认项）
   const existing = readPrdBackplane(input.project_id)
@@ -120,6 +127,7 @@ export async function resolvePrdBackplane(
       env,
       maxTokens,
       signal: input.signal,
+      onAttemptFailure,
     }).catch(() => null), // 防御性兜底：契约返回 null，但 abort/网络极端情形仍可能 throw，一并降级避免 Promise.all 整体 reject
     enrichRequirementsLlm({
       session_id: input.session_id,

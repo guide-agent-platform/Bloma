@@ -394,7 +394,20 @@ async function settleDesktopStage(
   // ── loop 未完成（取消/断流）：话术收尾，阶段不动 ──
   if (result.status !== 'completed' || !result.advance) {
     const why = result.status === 'cancelled' ? '已停止' : '运行异常中断'
-    deps.publish(input, 'message_delta', { text: `桌面阶段「${phaseId}」本轮未收口（${why}）。阶段进度未变化，可重新发起。` })
+    let line = `桌面阶段「${phaseId}」本轮未收口（${why}）。阶段进度未变化，可重新发起。`
+    // 刀5 扩展（2026-10-03 e99e6319 事故）：主 loop 的 query 异常（含 EMPTY_MODEL_STREAM
+    // 空流）与委派失败共用同签名计数——连续 2 次出渠道故障人话卡；未达阈值的异常也
+    // 附错误摘要，渠道故障不再伪装成「没反应」。
+    const errorMessage = result.error_message
+    if (typeof errorMessage === 'string' && errorMessage.length > 0) {
+      const observation = observeChannelFailure(channelTrackerOf(input.projectId), { error: errorMessage })
+      if (observation.notify && observation.card) {
+        line = observation.card
+      } else {
+        line += `\n错误摘要：${errorMessage.slice(0, 160)}`
+      }
+    }
+    deps.publish(input, 'message_delta', { text: line })
     deps.complete(input.sessionId, input.projectId, 'incomplete')
     return
   }
