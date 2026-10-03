@@ -258,8 +258,8 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '1. GWT 场景补全（driver.py 每场景一个可执行断言，断言先行）；\n' +
       '2. **驱动执行由平台收口时执行**（spawn python 跑 contract.json 的 driver.command，退出码/stdout 回读）——你不需要也无法自行执行驱动，不要花轮次尝试执行或写「无执行通道」的替代报告；\n' +
       '3. 你的验收职责 = contract.json 合法（必填形态一字不差：schema_version 数字 1 / entry / driver 对象含 command、timeout_ms、exit_code_semantics 三键、assert_readback / env_whitelist / components——形态见下）+ driver.py 断言齐备：\n' + MINIMAL_CONTRACT_EXAMPLE + '\n' +
-      '4. 产出驱动执行报告（通过/失败/阻塞三分类，失败路由进修复轮）；驱动 stdout 锚点与窗口截图约定同 driver-skeleton（每场景一行 `S<编号> PASS <结论>`，截图后立即隐藏窗口，UI 场景至少 2 张）；\n' +
-      '5. 裁决边界：裁判+攻防审查（C3）对交付物做最终判定。',
+      '4. 驱动执行报告（通过/失败/阻塞三分类，失败路由进修复轮）由平台在收口时执行驱动后生成——你无需也无法自行产出，不要编写替代报告；驱动 stdout 锚点与窗口截图约定同 driver-skeleton（每场景一行 `S<编号> PASS <结论>`，截图后立即隐藏窗口，UI 场景至少 2 张）；\n' +
+      '5. 裁决边界：平台收口三重门判定交付（驱动回读+宿主安全扫描+裁判硬约束：PRD 覆盖/场景覆盖/入口存在），不采信模型自述。',
     outputPath: '00_VERIFY',
     constraints: [
       '测试工程师与实现者必须异渠道（C1 跨渠道委派）',

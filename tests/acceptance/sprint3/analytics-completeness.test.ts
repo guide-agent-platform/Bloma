@@ -91,40 +91,8 @@ describe('Sprint 3 analytics completeness audit (T8)', () => {
     expect(modeUpgraded?.payload).toMatchObject({ from_mode: 'quick', to_mode: 'longterm' })
   })
 
-  it('[T8-002] 点选纠错事件：point_correction（含 repeat_count / fallback_mode）', async () => {
-    const { harness, readAnalytics } = setup('bloma-t8-correction-')
-
-    const created = (await harness.invoke('project:create', {
-      request_id: 't8-corr-create',
-      mode: 'quick',
-    })) as ApiResult<Project>
-    expect(created.ok).toBe(true)
-    if (!created.ok) return
-    const projectId = created.data.project_id
-
-    const result = (await harness.invoke('project:submit-correction', {
-      request_id: 't8-corr-1',
-      project_id: projectId,
-      session_id: 't8-corr-session',
-      mode: 'guess',
-      context: {
-        element_selector: '.todo-list .item',
-        bounding_rect: { x: 10, y: 20, width: 100, height: 30 },
-        fallback_mode: false,
-      },
-    })) as ApiResult<{ accepted: boolean; repeat_count: number }>
-    expect(result.ok).toBe(true)
-
-    const events = readAnalytics().map((e) => e.event_type as string)
-    expect(events).toContain('point_correction')
-
-    const correction = readAnalytics().find((e) => e.event_type === 'point_correction')
-    expect(correction?.payload).toMatchObject({
-      target_type: 'element',
-      fallback_mode: false,
-      repeat_count: 1,
-    })
-  })
+  // [T8-002] 点选纠错事件（point_correction）：随 web 线点选纠错链退役（通道
+  // project:submit-correction 已删、main 零写入方）——用例与 T8-004 审计条目一并移除。
 
   it('[T8-003] 用户主动回滚事件：user_undo', async () => {
     const { harness, readAnalytics } = setup('bloma-t8-undo-')
@@ -211,7 +179,6 @@ describe('Sprint 3 analytics completeness audit (T8)', () => {
       'sketch_fallback',
       'mvp_delivered',
       'user_undo',
-      'point_correction',
       'mode_upgraded',
       'programming_execution',
       'self_repair_triggered',
@@ -234,7 +201,6 @@ describe('Sprint 3 analytics completeness audit (T8)', () => {
         'tests/e2e/sprint2/mvp-workflow.e2e.ts', // E2E 轮询 mvp_delivered 落盘
       ],
       user_undo: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-003
-      point_correction: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-002
       mode_upgraded: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-001
       self_repair_triggered: ['tests/acceptance/sprint3/agent-loop-pipeline.test.ts'], // loop onRepairRound 落盘（废旧管道改造后来源换为 agent loop）
       judge_verdict: ['tests/acceptance/sprint3/agent-loop-pipeline.test.ts'], // 终验 judge 判定落盘

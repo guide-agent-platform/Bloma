@@ -1,110 +1,16 @@
 /**
  * IPC 注册入口（PR4d 拆解后）：本文件只保留跨族接线（发布器/活跃检查/steer 监听）
  * 与各族注册调用；通道实现拆入 main/ipc/（shared + 五族）。registerIpcHandlers 契约不变。
+ * 死 import 尸块已清（2026-10-03 审查卫生批——拆分残留的 145 个未用符号）。
  */
-import { randomUUID } from 'node:crypto'
-import { readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
-import { dialog } from 'electron'
 import type { BrowserWindow, IpcMain } from 'electron'
-import type {
-  AgentCancelInput,
-  AgentConfirmRequirementsInput,
-  AgentForkSessionInput,
-  AgentListSessionsInput,
-  AgentLoadMessagesInput,
-  AgentSendMessageInput,
-  AgentSteerQueryInput,
-  AgentSteerResolveInput,
-  AnalyticsTrackInput,
-  CategoryRoutingUpdateEnvelope,
-  CategoryRoutingRoleUpdateEnvelope,
-  ChannelCreateEnvelope,
-  ChannelDeleteEnvelope,
-  ChannelTestEnvelope,
-  ChannelTestDirectEnvelope,
-  ChannelUpdateEnvelope,
-  FetchModelsEnvelope,
-  DocumentListInput,
-  DocumentReadInput,
-  DocumentSyncInput,
-  PermissionResponseInput,
-  PastedImageSaveInput,
-  PermissionSetModeInput,
-  ProjectFileReadInput,
-  PromptReadInput,
-  PromptResetInput,
-  PromptSaveInput,
-  ProjectAbandonInput,
-  ProjectArchiveInput,
-  ProjectCreateInput,
-  ProjectDeleteInput,
-  ProjectExportInput,
-  ProjectUpgradeExportInput,
-  AppSwitchStateResult,
-  ProjectFinalizeInput,
-  ProjectListInput,
-  ProjectReopenInput,
-  ProjectRenameInput,
-  ProjectUnarchiveInput,
-  ProjectUpgradeInput,
-  RequestEnvelope,
-  SandboxRunInput,
-  SandboxStopInput,
-  SnapshotCreateInput,
-  SnapshotDocumentListInput,
-  SnapshotDocumentReadInput,
-  SnapshotListInput,
-  SnapshotRollbackInput,
-  SnapshotScreenshotInput,
-} from '../shared/types'
 import { IPC_CHANNELS } from '../shared/types'
-import { fail, ok } from '../shared/api-result'
-import { cancelAgent, getSdkQuery, hasForegroundRun, isSessionActive, persistSteerDeferredNotice, publishSteerStatusEvent, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from './orchestration/orchestrator'
-import { enqueueSteer, getSteerStatuses, pendingSteerCount, registerSteer, resolveSteer, setSteerStatusListener, steerConfirmEnabled } from './agent/loop/steer-queue'
-import { savePastedImage } from './platform/shell/pasted-images'
-import { clearPendingReviewAction, setForegroundRunChecker, setProgrammingEventPublisher } from './coding/programming-orchestrator'
+import { hasForegroundRun, isSessionActive, persistSteerDeferredNotice, publishSteerStatusEvent, setAgentStreamPublisher } from './orchestration/orchestrator'
+import { setSteerStatusListener } from './agent/loop/steer-queue'
+import { setForegroundRunChecker, setProgrammingEventPublisher } from './coding/programming-orchestrator'
 import { handleAgentStreamEvent } from './platform/shell/notifications'
-import { assertToolAllowed, getPermissionMode, resolvePermission, setPermissionMode, setPermissionRequestPublisher } from './agent/permissions/permission-service'
-import {
-  abandonProject,
-  archiveProject,
-  confirmSketch,
-  createProject,
-  deleteProject,
-  finalizeProject,
-  findProject,
-  getProjectProgressSummary,
-  listProjects,
-  renameProject,
-  reopenProject,
-  unarchiveProject,
-  updateProject,
-  upgradeProject,
-} from './project/project-service'
-import { cleanOrphanSessions, forkFrom, listSessions, loadMessages, setSessionActiveChecker } from './platform/sessions/session-service'
-import { exportProjectHandoff } from './delivery/project-export'
-import { upgradeExport } from './coding/export-manifest'
-import { readExperimentSwitches } from './platform/shell/experiment-switches'
-import { dirname } from 'node:path'
-import { resolveRequirementConfirm } from './guide/guide-agent-service'
-import { createChannel, deleteChannel, fetchModels, listChannels, testChannel, testChannelDirect, updateChannel } from './platform/llm/channel-manager'
-import {
-  buildCategoryRoutingRoleViews,
-  buildCategoryRoutingViews,
-  updateCategoryRouting,
-  updateCategoryRoutingRoles,
-} from './platform/llm/category-routing'
-import { listPromptSlots, readPromptSlot, resetPromptSlot, savePromptSlot } from './agent/prompting/prompt-service'
-import { listDocuments, readDocument, syncDocuments, isPrdUserConfirmed } from './project/document-engine'
-import { isCircuitBreakSettled, convergeStageFromEvidence, evaluateDiskArtifact } from './project/recovery-service'
-import { runSandbox, stopSandbox } from './delivery/sandbox'
-import { createSnapshot, listSnapshotDocuments, listSnapshots, loadSnapshotScreenshot, readSnapshotDocument, rollbackSnapshot } from './delivery/snapshots'
-import { trackAnalytics } from './delivery/track-analytics'
-import { hasRequestId, isRecord, requireValue } from '../shared/validators'
-import { getAgentSessionPath } from '../storage/config-paths'
-import { appendJsonLine } from '../storage/json-store'
-import { appendSessionMessage } from './platform/sessions/session-tree'
+import { setPermissionRequestPublisher } from './agent/permissions/permission-service'
+import { setSessionActiveChecker } from './platform/sessions/session-service'
 import { registerAgentSessionsIpc } from './ipc/agent-sessions'
 import { registerProjectsIpc } from './ipc/projects'
 import { registerSandboxSnapshotsIpc } from './ipc/sandbox-snapshots'

@@ -61,7 +61,6 @@ import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketc
 import { recordSessionActivity } from '../../platform/sessions/session-service'
 import { isThinkingLogEnabled, logThinking } from '../../agent/loop/thinking-log'
 import { extractErrorMessage } from '../../platform/llm/channel-test-error'
-import { anthropicMessagesQueryViaProviders } from '../../platform/upstream/providers/loop-query'
 
 import { ConversationTurn, SDKQueryOptions } from './orchestration-contracts'
 import { streamPublisher } from './sdk-glue'

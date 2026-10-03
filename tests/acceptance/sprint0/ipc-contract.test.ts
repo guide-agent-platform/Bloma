@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
@@ -7,8 +7,9 @@ import { IPC_CHANNELS, type ApiResult } from '../../../shared/types'
 import { createIpcHarness } from '../support/ipc-harness'
 
 const root = fileURLToPath(new URL('../../..', import.meta.url))
-// 与 shared/types.ts 的 IPC_CHANNELS 逐项一致（2026-08-16 补齐：后续 sprint 加通道时
-// 漏更新本清单，S0-IPC-005/006 存量失败——新增通道必须同步此处，见项目约定）。
+// 与 shared/types.ts 的 IPC_CHANNELS 逐项一致。通道新增/删除（含整线退役）必须同步
+// 本清单与 S0-IPC-006 扫描面（main/ipc.ts + main/ipc/ 全目录）——web 线拆除
+// （2026-10-01）曾因漏同步致 S0-IPC-005/006 长期存量红、契约保护空转（教训勿重犯）。
 const expectedChannels = {
   AGENT_SEND_MESSAGE: 'agent:send-message',
   AGENT_STEER_MESSAGE: 'agent:steer-message',
@@ -26,8 +27,6 @@ const expectedChannels = {
   PERMISSION_SET_MODE: 'permission:set-mode',
   PROJECT_CREATE: 'project:create',
   PROJECT_LIST: 'project:list',
-  PROJECT_CONFIRM_SKETCH: 'project:confirm-sketch',
-  PROJECT_SUBMIT_CORRECTION: 'project:submit-correction',
   PROJECT_ARCHIVE: 'project:archive',
   PROJECT_UNARCHIVE: 'project:unarchive',
   PROJECT_DELETE: 'project:delete',
@@ -52,8 +51,6 @@ const expectedChannels = {
   DOCUMENT_SYNC: 'document:sync',
   DOCUMENT_LIST: 'document:list',
   DOCUMENT_READ: 'document:read',
-  DOM_COLLECT_CONTEXT: 'dom:collect-context',
-  DOM_SCROLL_PREVIEW: 'dom:scroll-preview',
   ANALYTICS_TRACK: 'analytics:track',
   CHANNEL_LIST: 'channel:list',
   CHANNEL_CREATE: 'channel:create',
@@ -81,7 +78,15 @@ describe('Sprint 0 IPC contract acceptance', () => {
   })
 
   it('[S0-IPC-006] 每个 channel 应由 main 注册并由 preload 通过常量调用', () => {
+    // PR4d 拆解后注册分居 main/ipc.ts（跨族接线）+ main/ipc/ 六族——扫描面聚合全目录
     const mainReferences = collectIpcChannelReferences(join(root, 'main', 'ipc.ts'))
+    for (const file of readdirSync(join(root, 'main', 'ipc'))) {
+      if (file.endsWith('.ts')) {
+        for (const ref of collectIpcChannelReferences(join(root, 'main', 'ipc', file))) {
+          mainReferences.add(ref)
+        }
+      }
+    }
     const preloadReferences = collectIpcChannelReferences(join(root, 'preload', 'bridge.ts'))
     const expectedNames = Object.keys(expectedChannels).sort()
 
