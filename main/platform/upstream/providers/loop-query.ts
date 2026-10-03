@@ -58,8 +58,14 @@ export async function* anthropicMessagesQueryViaProviders(prompt: string, option
     throw new Error('CHANNEL_NOT_FOUND: configure a model channel before using the SDK')
   }
   const baseUrl = (options.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/+$/, '')
-  // SDKQueryOptions.providerType 是 string（历史形态）；渠道值实际是 ProviderType 联合成员
-  const providerType = (options.providerType as ProviderType | undefined) ?? 'anthropic'
+  // provider 信号（2026-10-04 双事故修正）：主路调用方均不传 options.providerType，缺省
+  // 'anthropic' 会让带路径 base（如 open.bigmodel.cn/api/anthropic）漏拼 /v1 ——命中
+  // zhipu 网关「200 包 404」空响应（60~150ms 零事件，e99e6319/48a48b1d 两晚事故真因）。
+  // 改以 env 携带的 ANTHROPIC_PROVIDER_TYPE 兑底（buildSdkEnv 单一工厂下发）：URL/头部/
+  // thinking/max_tokens 夹紧四项全部拿到真实渠道类型。三渠道均已探针实测。
+  const providerType = (options.providerType as ProviderType | undefined)
+    ?? (options.env.ANTHROPIC_PROVIDER_TYPE as ProviderType | undefined)
+    ?? 'anthropic'
 
   // ---- 请求体构建（旧路径镜像：system 提取 / 图片水合 / thinking fragment） ----
   const history = options.messages ?? options.history ?? []
@@ -117,13 +123,9 @@ export async function* anthropicMessagesQueryViaProviders(prompt: string, option
   }
 
   const url = resolveLoopMessagesUrl(baseUrl, providerType)
-  // 服务端硬上限夹紧（2026-10-03 zhipu 实测 131072，超限 400 code 1210）：唯一夹紧点在
-  // 出口，覆盖全部调用面。provider 信号（2026-10-04 二次事故修正）：主路调用方均不传
-  // options.providerType，以 env 随带的 ANTHROPIC_PROVIDER_TYPE 兑底（buildSdkEnv 单一
-  // 工厂下发）。仅用于夹紧，不改动 URL/头部派生（既有形状已验证可用）。
-  const capProviderType = providerType !== 'anthropic' ? providerType : (options.env.ANTHROPIC_PROVIDER_TYPE ?? providerType)
   const makeRequest = (): { url: string; headers: Record<string, string>; body: string } => {
-    body.max_tokens = capMaxTokensForProvider(options.maxTokens ?? 640000, capProviderType)
+    // 服务端硬上限夹紧（2026-10-03 zhipu 实测 131072，超限 400 code 1210）：唯一夹紧点在出口
+    body.max_tokens = capMaxTokensForProvider(options.maxTokens ?? 640000, providerType)
     return {
       url,
       headers: buildAnthropicHeaders(apiKey, providerType),

@@ -223,3 +223,47 @@ describe('max_tokens 夹紧的 provider 信号兜底（2026-10-04 二次事故�
     expect(parsedBody().max_tokens).toBe(640000)
   })
 })
+
+describe('provider 信号驱动的 URL/头部派生（2026-10-04 双事故修正）', () => {
+  it('env 携带 zhipu-coding（options 缺省）：URL 补 /v1/messages（防 200 包 404 空流）+ Bearer 头 + 夹紧', async () => {
+    mockStreamOk()
+    for await (const _ of anthropicMessagesQueryViaProviders('问', opts({
+      env: {
+        PATH: process.env.PATH ?? 'C:/',
+        ANTHROPIC_AUTH_TOKEN: 'test-key',
+        ANTHROPIC_BASE_URL: 'https://open.bigmodel.cn/api/anthropic',
+        ANTHROPIC_MODEL: 'glm-5.3',
+        ANTHROPIC_PROVIDER_TYPE: 'zhipu-coding',
+      },
+      maxTokens: 640000,
+    }))) void _
+    expect(captured!.url).toBe('https://open.bigmodel.cn/api/anthropic/v1/messages')
+    expect(captured!.headers['Authorization']).toBe('Bearer test-key')
+    expect(captured!.headers['x-api-key']).toBeUndefined()
+    expect(parsedBody().max_tokens).toBe(131072)
+  })
+
+  it('env 携带 deepseek：URL 补 /v1/messages；双认证头维持', async () => {
+    mockStreamOk()
+    for await (const _ of anthropicMessagesQueryViaProviders('问', opts({
+      env: {
+        PATH: process.env.PATH ?? 'C:/',
+        ANTHROPIC_AUTH_TOKEN: 'test-key',
+        ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic',
+        ANTHROPIC_MODEL: 'deepseek-flash',
+        ANTHROPIC_PROVIDER_TYPE: 'deepseek',
+      },
+      maxTokens: 640000,
+    }))) void _
+    expect(captured!.url).toBe('https://api.deepseek.com/anthropic/v1/messages')
+    expect(captured!.headers['x-api-key']).toBe('test-key')
+    expect(parsedBody().max_tokens).toBe(640000)
+  })
+
+  it('无任何 provider 信号：缺省 anthropic 语义不变（根域 base 补 /v1）', async () => {
+    mockStreamOk()
+    for await (const _ of anthropicMessagesQueryViaProviders('问', opts())) void _
+    expect(captured!.url).toBe('https://api.anthropic.com/v1/messages')
+    expect(captured!.headers['x-api-key']).toBe('test-key')
+  })
+})
