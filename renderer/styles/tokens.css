@@ -200,6 +200,10 @@
   from { opacity: 0; transform: translateY(10px) scale(0.985); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
+@keyframes thinking-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
 @keyframes aurora-drift {
   0%   { transform: translate(0, 0) scale(1); }
   33%  { transform: translate(4%, -3%) scale(1.08); }

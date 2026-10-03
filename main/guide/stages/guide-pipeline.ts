@@ -642,6 +642,8 @@ export async function runGuideLoopTurn(
       ...(model.temperature !== undefined ? { temperature: model.temperature } : {}),
       publish: (type, payload) => {
         if (type === 'message_delta') publish(makeGuideEvent(input, 'message_delta', payload))
+        // 思考增量透传（2026-10-04）：向导也要「思考中·Xs」呈现，不能在这里被吞掉
+        else if (type === 'thinking_delta') publish(makeGuideEvent(input, 'thinking_delta', payload))
       },
     })
   } catch (error) {

@@ -1941,3 +1941,37 @@ describe('空流守卫（2026-10-03 e99e6319 事故）', () => {
     expect(result.finalText).toBe('正常回复')
   })
 })
+
+describe('思考增量上屏（2026-10-04）', () => {
+  const originalPromaHome3 = process.env.PROMA_HOME
+  beforeEach(() => {
+    process.env.PROMA_HOME = mkdtempSync(join(tmpdir(), 'bloma-loop-think-'))
+  })
+  afterEach(() => {
+    process.env.PROMA_HOME = originalPromaHome3
+  })
+
+  it('thinking SDKMessage → 发布 thinking_delta；不进 finalText/assistant 块', async () => {
+    const events: Array<{ type: string; payload: Record<string, unknown> }> = []
+    const query: SDKQuery = async function* () {
+      yield { type: 'thinking', thinking: '分析用户意图' }
+      yield textMessage('我的回复')
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 5 } }
+    }
+    const result = await runAgentLoop(baseInput({
+      query,
+      sessionId: 'session-thinking-delta',
+      publish: (type, payload) => events.push({ type, payload: payload as Record<string, unknown> }),
+    }))
+    expect(result.status).toBe('completed')
+    expect(result.finalText).toBe('我的回复')
+    const thinkingEvents = events.filter((e) => e.type === 'thinking_delta')
+    expect(thinkingEvents).toHaveLength(1)
+    expect(thinkingEvents[0]!.payload.text).toBe('分析用户意图')
+    // 协议历史零污染：落盘 assistant 行只有正文块
+    const rows = readSessionJsonl('session-thinking-delta')
+    const assistantRows = rows.filter((r) => r.role === 'assistant')
+    expect(assistantRows).toHaveLength(1)
+    expect(JSON.stringify(assistantRows[0])).not.toContain('分析用户意图')
+  })
+})

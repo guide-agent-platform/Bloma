@@ -167,6 +167,10 @@ export async function* anthropicMessagesQueryViaProviders(prompt: string, option
           } else if (event.type === 'reasoning') {
             thinkingDeltaCount += 1
             if (showThinking) logThinking(options.sessionId, event.delta)
+            // 思考增量透出（2026-10-04 窄栏思考呈现）：不再只写开发日志——渲染端需要
+            // 「思考中·Xs」实时行与可展开原文；不进 assistant 消息（协议历史零污染）
+            queue.push({ type: 'thinking', thinking: event.delta })
+            wake()
           } else if (event.type === 'usage') {
             usageInfo = { ...usageInfo, ...(event.inputTokens !== undefined ? { input_tokens: event.inputTokens } : {}), ...(event.outputTokens !== undefined ? { output_tokens: event.outputTokens } : {}) }
           }

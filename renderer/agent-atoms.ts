@@ -346,6 +346,7 @@ export const sessionUsageFamily = atomFamily((sessionId: string) => atom<Session
 /** 新一轮生成的开始信号：上一轮已终结后，这些事件到达即视为新一轮（清空历史 events，折叠组只显示最近一轮）。 */
 const NEW_RUN_SIGNALS = new Set([
   'message_delta',
+  'thinking_delta',
   'stage_changed',
   'tool_call_started',
   'user_decision_required',
@@ -829,7 +830,9 @@ export function setupGlobalAgentListeners(): () => void {
         }
       }
 
-      const text = typeof event.payload.text === 'string' ? event.payload.text : ''
+      // 正文累积只认 message_delta（2026-10-04）：thinking_delta 也携带 payload.text，
+      // 不转判会直接把思考原文拼进回复气泡
+      const text = event.type === 'message_delta' && typeof event.payload.text === 'string' ? event.payload.text : ''
       const isTerminal = event.type === 'completed' || event.type === 'error'
       // 新一轮开始（上一轮已终结，且当前是生成类事件）→ 清空历史 events/content，
       // 折叠组只显示最近一轮工具调用，不累积多轮历史

@@ -291,3 +291,22 @@ describe('流式增量即时投递（2026-10-04 假流式修复）', () => {
     expect(sawSecond).toBe(true)
   })
 })
+
+describe('思考增量透出（2026-10-04）', () => {
+  it('reasoning 事件 → thinking SDKMessage 逐段产出（入队即 wake）', async () => {
+    h.streamSSE.mockImplementation(async (options: { onEvent: (event: unknown) => void }) => {
+      options.onEvent({ type: 'reasoning', delta: '先想第一步' })
+      options.onEvent({ type: 'reasoning', delta: '，再想第二步' })
+      options.onEvent({ type: 'chunk', delta: '正文' })
+      return { toolCalls: [], stopReason: 'end_turn' }
+    })
+    const thinkingTexts: string[] = []
+    let sawText = false
+    for await (const msg of anthropicMessagesQueryViaProviders('问', opts())) {
+      if (msg.type === 'thinking') thinkingTexts.push(msg.thinking ?? '')
+      if (msg.type === 'assistant' && JSON.stringify(msg).includes('正文')) sawText = true
+    }
+    expect(thinkingTexts).toEqual(['先想第一步', '，再想第二步'])
+    expect(sawText).toBe(true)
+  })
+})

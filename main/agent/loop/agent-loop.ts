@@ -990,6 +990,10 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
               assistantBlocks.push(block)
             }
           }
+        } else if (sdk.type === 'thinking' && typeof sdk.thinking === 'string' && sdk.thinking) {
+          // 思考增量（2026-10-04）：只上屏呈现（渲染端「思考中·Xs」/可展开原文），
+          // 不进 assistantBlocks/协议历史——重放、DSML、零编辑守卫均零感知
+          input.publish('thinking_delta', { text: sdk.thinking })
         } else if (sdk.type === 'result') {
           stopReason = sdk.stop_reason
           usage = sdk.usage

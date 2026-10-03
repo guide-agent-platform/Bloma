@@ -8,6 +8,7 @@ import { DelegationRow } from './DelegationFeed'
 import { ProgressCard, buildProgressLines, countDoneSteps, mapStageToRunSteps } from './ProgressCard'
 import type { DelegationView } from '../agent-atoms'
 import { ProcessBlockGroup, type ProcessItem } from './ProcessBlockGroup'
+import { ThinkingIndicator, type ThinkingPhase } from './ThinkingIndicator'
 import { Markdown } from './Markdown'
 import { ArrowUp, MessageSquare, IconAlertTriangle, IconStop } from './icons'
 import {
@@ -158,6 +159,28 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   }, [chatFocusSignal])
 
   const streamingContent = hasActiveStream && streamState ? streamState.content : ''
+
+  // 思考呈现（2026-10-04 窄栏适配）：从事件流派生三态——waiting（发消息后首个事件
+  // 前的占位，消掉沉默期）/ live（思考增量到达中）/ done（正文或工具开始后冻结，
+  // 可展开原文）。思考原文只进展开态，不进正文气泡。
+  const thinkingView = React.useMemo<{ phase: ThinkingPhase; startedAt?: number; endedAt?: number; text?: string }>(() => {
+    const events = streamState?.events ?? []
+    const thinkingIndexes = events.map((e, i) => (e.type === 'thinking_delta' ? i : -1)).filter((i) => i >= 0)
+    if (thinkingIndexes.length === 0) {
+      // 批 A 占位：busy 且还没任何事件与正文——首个 thinking/message_delta 到达前显示
+      if (busy && !streamingContent && events.length === 0) return { phase: 'waiting' }
+      return { phase: 'done' }
+    }
+    const lastThinking = thinkingIndexes[thinkingIndexes.length - 1]!
+    const startedAt = Date.parse(events[thinkingIndexes[0]!]!.created_at)
+    const followUp = events.findIndex(
+      (e, i) => i > lastThinking && (e.type === 'message_delta' || e.type === 'tool_call_started'),
+    )
+    const endedAt = followUp >= 0 ? Date.parse(events[followUp]!.created_at) : undefined
+    const text = events.filter((e) => e.type === 'thinking_delta').map((e) => String(e.payload.text ?? '')).join('')
+    if (endedAt === undefined && hasActiveStream) return { phase: 'live', startedAt, text }
+    return { phase: 'done', startedAt, endedAt, text }
+  }, [streamState, busy, streamingContent, hasActiveStream])
 
   // 历史回放关联表：tool_use_id → 工具名（loop 落盘的 user 轮 tool_result 只有 id，回放时回填名字）
   const toolNamesById = React.useMemo(() => {
@@ -424,6 +447,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                 </span>
               </div>
             ))}
+
+            {/* 思考指示（窄栏：默认单行；live 实时走字 / done 可展开） */}
+            {(thinkingView.phase === 'waiting' || (thinkingView.phase !== 'done' && hasActiveStream) || (thinkingView.phase === 'done' && thinkingView.startedAt !== undefined)) && (
+              <ThinkingIndicator phase={thinkingView.phase} startedAt={thinkingView.startedAt} endedAt={thinkingView.endedAt} text={thinkingView.text} />
+            )}
 
             {/* Agent Loop 执行过程折叠组（工具调用 + 委派，流式展开/结束自动收起） */}
             {streamState && activeSessionId && (
