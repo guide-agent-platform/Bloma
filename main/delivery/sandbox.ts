@@ -274,7 +274,10 @@ function isPortAvailable(port: number): Promise<boolean> {
 async function defaultHealthCheck(url: string): Promise<boolean> {
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(1_000) })
-    return response.ok
+    // 404 也算活：服务器已 listening 并正常处理请求——桌面项目根无 index.html，/ 恒 404
+    //（确认门批 2026-10-04：UX 草图沙箱首次真机即踩，30s 探活全 404 误判 startup_timeout）。
+    // 仅拒 5xx/网络错误：那才是服务没起来或已崩溃。
+    return response.ok || response.status === 404
   } catch {
     return false
   }

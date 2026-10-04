@@ -89,6 +89,7 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
 
   let sketchUrl: string | null = null
   let sketchSource = 'llm'
+  let sandboxFailure: string | undefined
   try {
     const sketch = await generateUxSketch({
       project_id: pending.project_id,
@@ -107,6 +108,7 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
     sketchUrl = staged.preview_url
   } catch (error) {
     console.error('[ux-confirm] 草图生成/沙箱失败（降级文字版方案确认）:', error)
+    sandboxFailure = error instanceof Error ? error.message : String(error)
   }
 
   const round = pending.round
@@ -124,6 +126,7 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
         sketch_source: sketchSource,
         preview_url: sketchUrl ?? undefined,
         sandbox_ok: sketchUrl !== null,
+        ...(sandboxFailure ? { sandbox_failure: sandboxFailure.slice(0, 200) } : {}),
       },
     },
   })
