@@ -2,58 +2,67 @@ import React from 'react'
 import { useAtomValue } from 'jotai'
 import { RotateCw } from './icons'
 import { Markdown } from './Markdown'
-import { currentProjectAtom } from '../agent-atoms'
+import { currentProjectAtom, desktopArtifactsAtom, desktopPhaseAtom } from '../agent-atoms'
+import type { ProjectDeliverablesResult } from '../../shared/types'
 
 /**
- * DeliveryPanel — 桌面项目交付面板（2026-10-04 呈现层收口）。
+ * DeliveryPanel — 桌面项目交付面板（2026-10-04 呈现层收口；同日审计修复 A-02/A-08）。
  *
  * 替代 web 线遗产的空预览沙箱（桌面项目没有 web 产物，旧面板永远空白）：
  * - 项目文件清单（≤200，跳过归档/依赖/构建目录）；
  * - DELIVERY.md 渲染（运行方式/依赖/已知限制）；
  * - 「启动程序」按钮：仅 completed 项目（安全门+启动冒烟已过）+ LAUNCH.json 合法时可点，
  *   detached 启动——产品进程独立于 Bloma 存活；
- * - 数据经 PROJECT_DELIVERABLES / PROJECT_LAUNCH_APP IPC（四层链路）。
+ * - 数据经 PROJECT_DELIVERABLES / PROJECT_LAUNCH_APP IPC（四层链路；A-02 修复：改经
+ *   window.electronAPI——原 window.bloma 从未被 preload 暴露，面板整体死链）；
+ * - A-08 修复：桌面阶段推进/产物变更信号自动重拉 + 空态文案，不再只依赖手动刷新。
  */
 const MarkdownLazy: React.FC<{ text: string }> = Markdown
 
 export const DeliveryPanel: React.FC = () => {
   const project = useAtomValue(currentProjectAtom)
   const projectId = project?.project_id
-  const [data, setData] = React.useState<Awaited<ReturnType<typeof fetchDeliverables>> | undefined>()
+  // 自动刷新信号：桌面阶段推进（stage_changed 回填后变化）或产物变更（version+1）
+  const desktopPhase = useAtomValue(desktopPhaseAtom)
+  const artifactsVersion = useAtomValue(desktopArtifactsAtom).version
+  const [data, setData] = React.useState<ProjectDeliverablesResult | undefined>()
   const [loading, setLoading] = React.useState(false)
   const [launchState, setLaunchState] = React.useState<string | null>(null)
 
-  const fetchDeliverables = React.useCallback(async (id: string) => {
-    const api = (window as unknown as { bloma?: { projectDeliverables?: { get: (input: { request_id?: string; project_id: string }) => Promise<{ ok: boolean; data?: unknown; error?: { message?: string } }> } } }).bloma
-    const result = await api?.projectDeliverables?.get({ project_id: id })
-    if (result?.ok && result.data) return result.data as { files: string[]; delivery_md?: string; launch: { declared: boolean; parse_ok: boolean; parse_error?: string; command?: string[] }; can_launch: boolean }
-    return undefined
-  }, [])
-
   const refresh = React.useCallback(async () => {
     if (!projectId) return
+    const api = window.electronAPI?.projectDeliverables
+    if (!api) return
     setLoading(true)
     try {
-      setData(await fetchDeliverables(projectId))
+      const result = await api.get({ request_id: crypto.randomUUID(), project_id: projectId })
+      setData(result.ok ? result.data : undefined)
+    } catch {
+      setData(undefined)
     } finally {
       setLoading(false)
     }
-  }, [projectId, fetchDeliverables])
+  }, [projectId])
 
   React.useEffect(() => {
     void refresh()
     setLaunchState(null)
-  }, [refresh])
+    // 依赖含 desktopPhase/artifactsVersion：阶段推进与产物变更信号触发重拉（A-08）
+  }, [refresh, desktopPhase, artifactsVersion])
 
   const onLaunch = async (): Promise<void> => {
     if (!projectId) return
     setLaunchState('启动中…')
-    const api = (window as unknown as { bloma?: { projectDeliverables?: { launch: (input: { request_id?: string; project_id: string }) => Promise<{ ok: boolean; data?: { started: boolean; pid?: number }; error?: { message?: string } }> } } }).bloma
-    const result = await api?.projectDeliverables?.launch({ project_id: projectId })
-    if (result?.ok && result.data?.started) {
+    const api = window.electronAPI?.projectDeliverables
+    if (!api) {
+      setLaunchState('启动失败：当前环境不支持启动通道')
+      return
+    }
+    const result = await api.launch({ request_id: crypto.randomUUID(), project_id: projectId })
+    if (result.ok && result.data.started) {
       setLaunchState(`已启动（进程 ${result.data.pid ?? '?'}）`)
     } else {
-      setLaunchState(`启动失败：${result?.error?.message ?? '未知错误'}`)
+      setLaunchState(`启动失败：${result.ok ? '进程未能存活' : result.error?.user_visible_message || result.error?.message || '未知错误'}`)
     }
   }
 
@@ -113,6 +122,14 @@ export const DeliveryPanel: React.FC = () => {
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '10px 14px', minHeight: 0 }}>
         {loading && <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}><RotateCw size={12} /> 读取产物…</div>}
+        {!loading && !data && (
+          <div data-ai-id="delivery-empty" style={{ padding: 'var(--space-6) var(--space-2)', textAlign: 'center' }}>
+            <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text)', fontWeight: 600, margin: '0 0 4px' }}>项目还没有可展示的交付内容</p>
+            <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', margin: 0, lineHeight: 1.6 }}>
+              桌面线推进后，这里会出现文件清单、运行方式说明和「启动程序」入口。
+            </p>
+          </div>
+        )}
         {data && (
           <>
             <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginBottom: 6 }}>

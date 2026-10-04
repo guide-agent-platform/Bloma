@@ -5,6 +5,7 @@ import {
   currentProjectAtom,
   STAGE_LABEL_MAP,
 } from './atoms'
+import { desktopPhaseFullLabel } from '../lib/desktop-stages'
 import type { Project, ProjectMode, WorkflowStage } from './atoms'
 
 export interface ProjectHistoryPageProps {
@@ -762,7 +763,11 @@ const ProjectRow: React.FC<{
   onRenameSubmit,
   onRenameCancel,
 }) => {
-  const stageLabel = STAGE_LABEL_MAP[project.current_stage] ?? project.current_stage
+  // 审计 B-07（2026-10-04）：桌面项目进行中 current_stage 长期停在 clarifying，一律显示
+  //「等待你确认几个问题」无法区分选型/实现/验收——桌面项目改显 desktop_phase 全名。
+  const stageLabel = project.template_type === 'desktop_tool' && project.desktop_phase
+    ? desktopPhaseFullLabel(project.desktop_phase)
+    : STAGE_LABEL_MAP[project.current_stage] ?? project.current_stage
   const modeLabel = modeLabelMap[project.mode] ?? project.mode
   const modeColor = modeColorMap[project.mode] ?? 'var(--color-text-muted)'
   const modeBg = modeBgMap[project.mode] ?? 'var(--glass-bg-soft)'

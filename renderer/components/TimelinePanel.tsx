@@ -2,7 +2,7 @@ import React from 'react'
 import { useExperimentSwitches } from '../hooks/use-experiment-switches'
 import { useAtom, useAtomValue } from 'jotai'
 import { ChevronUp } from './icons'
-import { timelineExpandedAtom, snapshotsListAtom, selectedSnapshotAtom } from './atoms'
+import { hasActiveStreamAtom, timelineExpandedAtom, snapshotsListAtom, selectedSnapshotAtom } from './atoms'
 import type { Snapshot, SnapshotDocumentEntry } from './atoms'
 
 export interface TimelinePanelProps {
@@ -23,6 +23,9 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({ onRollback }) => {
   const [expanded, setExpanded] = useAtom(timelineExpandedAtom)
   const snapshots = useAtomValue(snapshotsListAtom)
   const selectedSnapshot = useAtomValue(selectedSnapshotAtom)
+  // A-05（2026-10-04）：生成运行期回滚一律禁用——主进程有 isProjectActive 硬边界
+  //（其注释明说「UI 层应同步禁用」），运行中点击只会得到误导性的失败提示。
+  const hasActiveStream = useAtomValue(hasActiveStreamAtom)
 
   // 回滚确认弹窗状态
   const [confirmSnapshot, setConfirmSnapshot] = React.useState<Snapshot | null>(null)
@@ -100,7 +103,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({ onRollback }) => {
       >
         {snapshots.length === 0 ? (
           <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-            还没有版本记录。生成草图后，时间轴会自动记录每一个重要版本。
+            还没有版本记录。制作过程中每个重要阶段会自动保存版本，供你随时回看或切换。
           </span>
         ) : (
           snapshots.map((snap) => {
@@ -111,7 +114,8 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({ onRollback }) => {
                 snapshot={snap}
                 isCurrent={isCurrent}
                 showThumbnail={expanded}
-                onClick={() => !isCurrent && handleRollbackClick(snap)}
+                disabled={hasActiveStream}
+                onClick={() => !isCurrent && !hasActiveStream && handleRollbackClick(snap)}
                 onViewDocuments={() => setDocumentsSnapshot(snap)}
               />
             )
@@ -250,10 +254,13 @@ const SnapChip: React.FC<{
   snapshot: Snapshot
   isCurrent: boolean
   showThumbnail: boolean
+  /** A-05：生成运行期禁用回滚（主进程硬边界的 UI 同步） */
+  disabled?: boolean
   onClick: () => void
   /** T7：回看该版本冻结的文档（「当时的想法」），与回滚互不冲突 */
   onViewDocuments: () => void
-}> = ({ snapshot, isCurrent, showThumbnail, onClick, onViewDocuments }) => {
+}> = ({ snapshot, isCurrent, showThumbnail, disabled = false, onClick, onViewDocuments }) => {
+  const clickable = !isCurrent && !disabled
   return (
     <span
       style={{
@@ -264,8 +271,9 @@ const SnapChip: React.FC<{
       }}
     >
     <button
-      title={isCurrent ? '当前版本' : `回到「${snapshot.name}」`}
+      title={isCurrent ? '当前版本' : disabled ? '生成中不能回滚——先停止本轮制作或等它完成' : `回到「${snapshot.name}」`}
       onClick={onClick}
+      disabled={disabled}
       style={{
         display: 'flex',
         flexDirection: showThumbnail ? 'row' : 'column',
@@ -278,21 +286,22 @@ const SnapChip: React.FC<{
           ? 'linear-gradient(135deg, var(--violet-600), var(--violet-500))'
           : 'var(--glass-bg-soft)',
         border: `1px solid ${isCurrent ? 'transparent' : 'var(--glass-border-subtle)'}`,
-        color: isCurrent ? 'var(--white)' : 'var(--color-text)',
+        color: isCurrent ? 'var(--white)' : disabled ? 'var(--color-text-muted)' : 'var(--color-text)',
         minWidth: 96,
         flexShrink: 0,
         transition: 'all var(--transition-fast)',
-        cursor: isCurrent ? 'default' : 'pointer',
+        cursor: clickable ? 'pointer' : 'not-allowed',
+        opacity: disabled ? 0.55 : 1,
         textAlign: 'left',
       }}
       onMouseEnter={(e) => {
-        if (!isCurrent) {
+        if (clickable) {
           e.currentTarget.style.background = 'var(--glass-bg-strong)'
           e.currentTarget.style.transform = 'translateY(-1px)'
         }
       }}
       onMouseLeave={(e) => {
-        if (!isCurrent) {
+        if (clickable) {
           e.currentTarget.style.background = 'var(--glass-bg-soft)'
           e.currentTarget.style.transform = 'none'
         }

@@ -279,6 +279,10 @@ export async function handleDesktopDispatchMessage(
     updateProject(input.projectId, {
       desktop_blocked: { reason: 'user-stop', note: input.content.slice(0, 200), at: new Date().toISOString() },
     })
+    // 审计 A-07（2026-10-04）：blocked 置位后发一次 stage_changed（paused 标记）——
+    // 渲染端据此回填 currentProjectAtom，阶段条/头部能立即呈现「已暂停」态，
+    // 不依赖用户翻聊天记录里的人话卡。
+    deps.publish(input, 'stage_changed', { stage: phaseId, paused: true })
     deps.publish(input, 'message_delta', {
       text: buildBlockedNoticeCard({
         phaseTitle: node?.title ?? phaseId,
@@ -293,6 +297,8 @@ export async function handleDesktopDispatchMessage(
   // ── blocked 态放行：继续词=放行授权；普通消息=人工出场即放行（带意见干活）──
   if (project?.desktop_blocked) {
     updateProject(input.projectId, { desktop_blocked: undefined })
+    // 审计 A-07（2026-10-04）：放行同步发 stage_changed——渲染端回填后「已暂停」态立即解除。
+    deps.publish(input, 'stage_changed', { stage: phaseId })
     const node = getDesktopPhase(phaseId)
     if (intent === 'continue') {
       deps.publish(input, 'message_delta', { text: `已放行，从「${node?.title ?? phaseId}」阶段继续。` })
@@ -533,6 +539,8 @@ async function settleDesktopStage(
   updateProject(input.projectId, {
     desktop_blocked: { reason: 'gate-exhausted', note: decision.reason, at: new Date().toISOString() },
   })
+  // 审计 A-07（同上）：blocked 置位同步发 stage_changed，渲染端回填后呈现暂停态。
+  deps.publish(input, 'stage_changed', { stage: phaseId, paused: true })
   const evidenceHint = extractEvidenceHint(decision)
   deps.publish(input, 'message_delta', {
     text: buildBlockedNoticeCard({

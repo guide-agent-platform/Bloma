@@ -15,6 +15,7 @@ import {
   activeAgentSessionIdAtom,
   agentMessagesFamily,
   agentStreamStateFamily,
+  desktopPhaseAtom,
   hasActiveStreamAtom,
   globalUserErrorAtom,
   projectModeAtom,
@@ -27,6 +28,8 @@ import type { AgentEvent, AgentMessage, AgentStreamState, PastedImageRef, Projec
 import { collapseRepetitiveText } from '../stream-collapse'
 import { hasUsableChannelsAtom, chatInputDraftAtom, chatInputFocusSignalAtom, chatInputHintAtom } from './atoms-sprint2'
 import { extractPastedImages, extFromMime, toBase64DataUrl } from '../lib/paste-extract'
+import { DESKTOP_PHASE_ACTION_LABELS } from '../lib/desktop-stages'
+import { mapDesktopPhaseToSteps } from './ProgressCard'
 
 export interface ChatPanelProps {
   /** 向导 Agent 发出的卡片选项（由上层从 AgentEvent 中解析） */
@@ -67,7 +70,10 @@ const nullStreamFallback = atom<AgentStreamState>({
 })
 const nullDelegationsFallback = atom<DelegationView[]>([])
 
-/** 生成类阶段 → WaitingFeedback 的「正在做什么」话术（按权威阶段展示，不再一刀切「生成可运行版本」）。 */
+/** 生成类阶段 → WaitingFeedback 的「正在做什么」话术（按权威阶段展示，不再一刀切「生成可运行版本」）。
+ *  审计 B-11（2026-10-04）：桌面线运行期间 workflowStage 停在 clarifying，这些条目
+ *  均不命中——优先取桌面阶段话术（DESKTOP_PHASE_ACTION_LABELS），web 条目仅服务
+ *  存量项目回访。 */
 const STAGE_ACTION_LABELS: Record<string, string> = {
   generating_sketch: '生成草图',
   generating_mvp: '生成可运行版本',
@@ -111,6 +117,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const hasActiveStream = useAtomValue(hasActiveStreamAtom)
   const globalError = useAtomValue(globalUserErrorAtom)
   const workflowStage = useAtomValue(workflowStageAtom)
+  const desktopPhase = useAtomValue(desktopPhaseAtom)
 
   /** 忙碌 = 外部等待或本地流式运行中。输入框保持可编辑（草稿），只禁发，不再整体锁死。 */
   const busy = isWaiting || hasActiveStream
@@ -218,7 +225,31 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     return () => clearInterval(timer)
   }, [busy, effectiveWaitStart])
 
-  const busyActionLabel = STAGE_ACTION_LABELS[workflowStage] ?? waitActionLabel
+  // B-11：桌面阶段话术优先（桌面线运行期间 workflowStage 停在 clarifying，web 条目不命中）；
+  // 非桌面线沿web 阶段→回退外部传入的 waitActionLabel
+  const busyActionLabel = desktopPhase
+    ? DESKTOP_PHASE_ACTION_LABELS[desktopPhase] ?? waitActionLabel
+    : STAGE_ACTION_LABELS[workflowStage] ?? waitActionLabel
+
+  // A-06（2026-10-04）：retrying 事件呈现——runWithRetry 静默重试阈值后发事件，原先
+  // 渲染端零消费，用户只见输出长时间停滞。从尾部扫描：最后一个 retrying 且其后
+  // 没有任何输出/工具事件 = 仍在重试中；一旦有新输出立即消失（不常驻陈旧状态）。
+  const activeRetry = React.useMemo<{ attempt: number; maxRetries: number } | null>(() => {
+    const events = streamState?.events ?? []
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const item = events[i]
+      if (item.type === 'retrying') {
+        return {
+          attempt: typeof item.payload.attempt === 'number' ? item.payload.attempt : 0,
+          maxRetries: typeof item.payload.max_retries === 'number' ? item.payload.max_retries : 0,
+        }
+      }
+      if (item.type === 'message_delta' || item.type === 'message_completed' || item.type === 'tool_call_started') {
+        return null
+      }
+    }
+    return null
+  }, [streamState?.events])
 
   // message-queue UI 收尾（ux-chatpanel-review P1-①，2026-08-28）：busy 时提交的消息由后端
   // 排队兜底，但派发前不在 messages 流里——本地回显灰化「排队中」气泡，确认消息没丢。
@@ -453,6 +484,25 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               <ThinkingIndicator phase={thinkingView.phase} startedAt={thinkingView.startedAt} endedAt={thinkingView.endedAt} text={thinkingView.text} />
             )}
 
+            {/* A-06：网络波动自动重试提示——有新输出即消失（见 activeRetry 扫描逻辑） */}
+            {hasActiveStream && activeRetry && (
+              <div
+                data-ai-id="retrying-notice"
+                role="status"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 'var(--font-size-xs)',
+                  color: 'var(--color-warning)',
+                  padding: '2px 0',
+                }}
+              >
+                <span aria-hidden style={{ fontSize: 11 }}>↻</span>
+                {`网络不稳，正在自动重试（第 ${activeRetry.attempt} 次${activeRetry.maxRetries > 0 ? `／最多 ${activeRetry.maxRetries} 次` : ''}）…你的消息不会丢`}
+              </div>
+            )}
+
             {/* Agent Loop 执行过程折叠组（工具调用 + 委派，流式展开/结束自动收起） */}
             {streamState && activeSessionId && (
               <LiveProcessGroup events={streamState.events} sessionId={activeSessionId} isStreaming={hasActiveStream} />
@@ -484,7 +534,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             {viewingProgress && busy && streamState && activeSessionId && (
               <ProgressCard
                 stageLabel={busyActionLabel}
-                steps={mapStageToRunSteps(workflowStage) ?? []}
+                steps={(desktopPhase ? mapDesktopPhaseToSteps(desktopPhase, mode) : null) ?? mapStageToRunSteps(workflowStage) ?? []}
                 lines={buildProgressLines(streamState.events, delegations)}
                 doneSteps={countDoneSteps(streamState.events, delegations)}
                 onClose={() => setViewingProgress(false)}

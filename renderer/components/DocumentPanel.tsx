@@ -22,8 +22,11 @@ function basename(path: string): string {
 }
 
 /** W6（用户拍板 2026-09-18）：产物文件只读查看融入文档面板（右侧 dock 已撤）。
- *  快捷入口覆盖常见关键件；手输路径兑底任意产物文件；基础设施目录由主进程拒绝。 */
-const QUICK_PRODUCT_FILES = ['index.html', 'server.js', 'package.json', 'src/app.js']
+ *  快捷入口覆盖常见关键件；手输路径兑底任意产物文件；基础设施目录由主进程拒绝。
+ *  审计 B-04（2026-10-04）：按品类切换——web 四件套对桌面项目全部打不开（项目里没有这些
+ *  文件），桌面项目改列真实关键件（交付说明/启动声明/架构结论/工程契约）。 */
+const WEB_QUICK_PRODUCT_FILES = ['index.html', 'server.js', 'package.json', 'src/app.js']
+const DESKTOP_QUICK_PRODUCT_FILES = ['DELIVERY.md', 'LAUNCH.json', '00_ARCH/architecture.md', '00_SCAFFOLD/contract.json']
 
 type SelectedView =
   | { kind: 'document'; document: DocumentRef; content: string }
@@ -156,7 +159,7 @@ export const DocumentPanel: React.FC = () => {
           </p>
         ) : documents.length === 0 ? (
           <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', padding: 'var(--space-4) var(--space-2)', lineHeight: 1.6 }}>
-            还没有文档。确认草图、生成 MVP 或进入测试后，这里会自动沉淀 PRD、GWT 场景与测试报告。
+            还没有文档。需求确认后这里会沉淀 PRD；随制作推进会补充交付与验收文档。
           </p>
         ) : (
           documents.map((doc) => {
@@ -201,7 +204,7 @@ export const DocumentPanel: React.FC = () => {
         }}
       >
         <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginRight: 'var(--space-1)' }}>产物文件：</span>
-        {QUICK_PRODUCT_FILES.map((path) => (
+        {(project?.template_type === 'desktop_tool' ? DESKTOP_QUICK_PRODUCT_FILES : WEB_QUICK_PRODUCT_FILES).map((path) => (
           <button
             key={path}
             type="button"

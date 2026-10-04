@@ -310,7 +310,10 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       return { accepted: true, session_id: input.session_id, stream_started: true }
     }
     const code = String(error).includes('AGENT_SESSION_BUSY') ? 'AGENT_SESSION_BUSY' : 'AGENT_SDK_ERROR'
-    streamPublisher(makeEvent(input, 'error', { code }))
+    // 审计 B-05（2026-10-04）：事件带上原始 message（截 200 字）——渲染端 globalUserError
+    // 的优先级是 message > code，原先只有 code 时用户直接看到英文码 AGENT_SDK_ERROR。
+    const errorMessageText = (error instanceof Error ? error.message : String(error)).slice(0, 200)
+    streamPublisher(makeEvent(input, 'error', { code, message: errorMessageText }))
     persistTerminalMessage(input.session_id, 'error', {
       code,
       message: error instanceof Error ? error.message : String(error),

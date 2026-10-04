@@ -9,7 +9,7 @@
 
 import { createStore } from 'jotai'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { agentMessagesFamily, setupGlobalAgentListeners, steerStatusFamily } from '../../renderer/agent-atoms'
+import { agentMessagesFamily, previewUrlsAtom, setupGlobalAgentListeners, steerStatusFamily } from '../../renderer/agent-atoms'
 import type { AgentEvent, ElectronAPI, SteerStatus } from '../../shared/types'
 
 let eventSequence = 0
@@ -106,20 +106,19 @@ describe('I3 steer 状态条归约（steer_status / steer_injected / mvp_ready�
     cleanup()
   })
 
-  it('mvp_ready 交付时存在 deferred → 聊天流追加待办提醒（交付后再确认）', () => {
+  it('mvp_ready 已是死事件（web 线退役，无发射方）：到达时零副作用（审计 B-02 回归锁）', () => {
     const { store, push, cleanup } = setup()
     push(event('s4', 'steer_status', { steer_id: 'st-d1', content: '再加一个搜索功能', impact: 'medium', status: 'deferred_next_run', at: 1 }))
     push(event('s4', 'mvp_ready', { preview_url: 'http://localhost' }))
+    // 死事件消费已删（原 deferred-steer 提醒/预览回填/自动命名回填三处）——历史回放或
+    // 防御场景下到达也不得复活死逻辑：不追加待办提醒、不回填预览地址。
     const messages = store.get(agentMessagesFamily('s4'))
     const reminder = messages.find((message) =>
       message.role === 'system'
       && message.content.some((block) => block.type === 'text' && (block.text ?? '').includes('留待下一轮的修改')),
     )
-    expect(reminder).toBeDefined()
-    expect(JSON.stringify(reminder)).toContain('再加一个搜索功能')
-    // 无 deferred 时不追加提醒
-    push(event('s4b', 'mvp_ready', {}))
-    expect(store.get(agentMessagesFamily('s4b'))).toEqual([])
+    expect(reminder).toBeUndefined()
+    expect(store.get(previewUrlsAtom)['project-i3']).toBeUndefined()
     cleanup()
   })
 })

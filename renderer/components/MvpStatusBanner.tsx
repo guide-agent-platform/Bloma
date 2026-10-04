@@ -15,9 +15,8 @@
  */
 
 import React, { useMemo, useState } from 'react'
-import { useExperimentSwitches } from '../hooks/use-experiment-switches'
 import { atom, useAtomValue, useSetAtom } from 'jotai'
-import type { AgentEvent, WorkflowStage } from '../../shared/types'
+import type { WorkflowStage } from '../../shared/types'
 import type { AgentStreamState } from '../agent-atoms'
 import {
   activeAgentSessionIdAtom,
@@ -87,30 +86,63 @@ const IconAlertTriangle: React.FC<{ size?: number }> = ({ size = 24 }) => (
 
 interface BannerState {
   visible: boolean
-  variant: 'generating' | 'ready' | 'testing' | 'judging' | 'repairing' | 'blocked' | 'none'
+  variant: 'generating' | 'ready' | 'testing' | 'judging' | 'repairing' | 'blocked' | 'retired' | 'none'
   title: string
   detail?: string
   stage: WorkflowStage
 }
 
+/** web 线退役前的「进行中」阶段（agent-dispatch WEB_LINE_RETIRED_STAGES 的呈现子集）：
+ *  无活跃流时停在任何一个部意味着上一次运行中断在半途，而非仍在生成。 */
+const RETIRED_ACTIVE_STAGES = new Set<WorkflowStage>([
+  'generating_mvp',
+  'testing',
+  'judge_review',
+  'repairing',
+  'iterating',
+  'upgrading',
+])
+
 function deriveBannerState(
-  events: AgentEvent[],
   stage: WorkflowStage,
+  running: boolean,
 ): BannerState {
   // 2026-10-04 web 线残留清理：mvp_ready/repairing 事件已无发射方（web 生成链 10-01
   // 退役），事件腿删除——横幅现在完全由权威阶段驱动（桌面线 stage_changed 同步）。
-  void events
+  //
+  // 审计 B-01/B-03 修复（2026-10-04）：退役前的「进行中」阶段在无活跃流时降级为
+  // 静态说明卡——原先会常驻旋转动画与「请稍候…」，让用户误以为仍在生成；
+  // sketch_ready 同理改为「旧版线」口径（确认入口已随 web 线下线，不再引导「确认后生成」）。
 
   // 基于阶段的 fallback
   switch (stage) {
     case 'sketch_ready':
-      return { visible: true, variant: 'ready', title: STAGE_LABEL_MAP[stage], detail: '草图已生成，确认后即可生成完整功能，或继续对话调整方向', stage }
+      return running
+        ? { visible: true, variant: 'ready', title: STAGE_LABEL_MAP[stage], detail: '草图已生成，确认后即可生成完整功能，或继续对话调整方向', stage }
+        : { visible: true, variant: 'retired', title: '网页草图项目（旧版线）', detail: '草图与项目数据完整保留，可导出查看。旧版网页生成线已下线，如需继续开发建议新建桌面软件项目。', stage }
     // 2026-10-04 web 线残留清理：mvp_ready 死事件腿删除后，导出/升级入口改由权威阶段
     // 驱动——ready（旧线终态）与 completed（桌面线 delivered）都应能导出项目。
     case 'ready':
       return { visible: true, variant: 'ready', title: STAGE_LABEL_MAP[stage], detail: '完整功能已生成，可导出项目或继续迭代', stage }
     case 'completed':
       return { visible: true, variant: 'ready', title: '项目已交付', detail: '完整功能已交付，可导出项目或继续迭代', stage }
+    case 'blocked_for_user_decision':
+      return { visible: true, variant: 'blocked', title: STAGE_LABEL_MAP[stage], detail: '需要你做出决定后才能继续', stage }
+    default:
+      break
+  }
+
+  // 退役前「进行中」阶段：有活跃流 → 原进行时呈现；无活跃流 → 静态降级卡（B-01）
+  if (RETIRED_ACTIVE_STAGES.has(stage) && !running) {
+    return {
+      visible: true,
+      variant: 'retired',
+      title: '网页生成线已下线',
+      detail: '这个项目停在上次的制作状态。旧版网页生成能力已在本版本下线，数据与产物完整保留——可导出项目，或参考原需求新建桌面软件项目。',
+      stage,
+    }
+  }
+  switch (stage) {
     case 'generating_mvp':
       return { visible: true, variant: 'generating', title: STAGE_LABEL_MAP[stage], detail: '正在生成完整项目，请稍候…', stage }
     case 'iterating':
@@ -121,8 +153,6 @@ function deriveBannerState(
       return { visible: true, variant: 'judging', title: STAGE_LABEL_MAP[stage], detail: '裁判正在审查功能完整性…', stage }
     case 'repairing':
       return { visible: true, variant: 'repairing', title: STAGE_LABEL_MAP[stage], detail: '正在修复检测到的问题…', stage }
-    case 'blocked_for_user_decision':
-      return { visible: true, variant: 'blocked', title: STAGE_LABEL_MAP[stage], detail: '需要你做出决定后才能继续', stage }
     default:
       return { visible: false, variant: 'none', title: '', stage }
   }
@@ -139,6 +169,8 @@ const VARIANT_STYLE: Record<BannerState['variant'], { bg: string; border: string
   judging:      { bg: '#F5F3FF', border: '#DDD6FE', color: '#6D28D9', icon: null, animated: true },
   repairing:    { bg: '#EFF6FF', border: '#BFDBFE', color: '#1E40AF', icon: IconRotateCw, animated: true },
   blocked:      { bg: '#FFFBEB', border: '#FDE68A', color: '#92400E', icon: IconAlertTriangle, animated: false },
+  // B-01：旧线项目静态说明卡——灰色调、无动画，明确「不是正在进行」
+  retired:      { bg: '#F4F4F5', border: '#E4E4E7', color: '#3F3F46', icon: IconAlertTriangle, animated: false },
   none:         { bg: 'transparent', border: 'transparent', color: 'transparent', icon: null, animated: false },
 }
 
@@ -157,7 +189,6 @@ export const MvpStatusBanner: React.FC = () => {
   // Phase 10 落地旅程（2026-09-16）：升级导出——旧导出包→新代码+旧数据+迁移+报告
   const [upgrading, setUpgrading] = useState(false)
   const [upgradeNote, setUpgradeNote] = useState<string | null>(null)
-  const experimentSwitches = useExperimentSwitches()
 
   const handleUpgradeExport = async () => {
     if (!project || upgrading) return
@@ -232,9 +263,9 @@ export const MvpStatusBanner: React.FC = () => {
     if (!sessionId) {
       return { visible: false, variant: 'none', title: '', stage }
     }
-    const events = streamState?.events ?? []
-    return deriveBannerState(events, stage)
-  }, [sessionId, streamState?.events, stage])
+    // B-01：会话级运行态参与判定——无活跃流时，退役前「进行中」阶段降级为静态卡
+    return deriveBannerState(stage, streamState?.running ?? false)
+  }, [sessionId, streamState?.running, stage])
 
   if (!banner.visible) return null
 
@@ -321,8 +352,8 @@ export const MvpStatusBanner: React.FC = () => {
         )}
       </div>
 
-      {/* 右侧：导出项目按钮（PR-3，仅成果就绪态显示） */}
-      {banner.variant === 'ready' &&
+      {/* 右侧：导出项目按钮（PR-3，成果就绪态与旧线静态卡均可导出——数据保留是核心出路） */}
+      {(banner.variant === 'ready' || banner.variant === 'retired') &&
         (exportedPath ? (
           <span
             data-ai-id="export-project-done"
@@ -364,7 +395,7 @@ export const MvpStatusBanner: React.FC = () => {
         ))}
 
       {/* Phase 10 落地旅程：升级导出（导出后出现——旧导出包→新版本，数据先备份再迁移） */}
-      {(banner.variant === 'ready') && exportedPath && (
+      {(banner.variant === 'ready' || banner.variant === 'retired') && exportedPath && (
         <button
           type="button"
           data-ai-id="upgrade-export-btn"

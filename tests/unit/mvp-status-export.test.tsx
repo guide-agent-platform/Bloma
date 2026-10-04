@@ -126,22 +126,34 @@ describe('MvpStatusBanner 导出项目按钮（PR-3）', () => {
     expect(screen.queryByTestId('export-project-done')).toBeNull()
   })
 
-  it('无 currentProject（项目未建立）→ 按钮禁用；generating 状态不渲染按钮', () => {
+  it('无 currentProject（项目未建立）→ 按钮禁用；generating 运行中不渲染按钮；无运行时降级为旧线静态卡（B-01）', () => {
     store.set(currentProjectAtom, null)
     renderBanner()
     expect((screen.getByTestId('export-project-btn') as HTMLButtonElement).disabled).toBe(true)
 
+    // 运行中的 generating：动画卡，无导出按钮（进行中不能导出——原语义保留）
     cleanup()
     store.set(currentProjectAtom, { project_id: 'project-exp' } as never)
     store.set(workflowStageAtom, 'generating_mvp')
+    store.set(agentStreamStateFamily('session-exp'), {
+      running: true,
+      events: [],
+      content: '',
+    } as never)
+    renderBanner()
+    expect(screen.queryByTestId('export-project-btn')).toBeNull()
+
+    // 无运行的 generating（旧线项目停在上次中断处）：降级为静态说明卡（B-01），
+    // 不再显示进行时动画；数据保留可导出是核心出路 → 保留导出按钮
+    cleanup()
     store.set(agentStreamStateFamily('session-exp'), {
       running: false,
       events: [],
       content: '',
     } as never)
     renderBanner()
-    // 无 mvp_ready 事件且阶段非就绪 → 横幅走 generating 变体或不可见，均不应出现导出按钮
-    expect(screen.queryByTestId('export-project-btn')).toBeNull()
+    expect(screen.getByTestId('mvp-status-banner').textContent).toContain('网页生成线已下线')
+    expect(screen.getByTestId('export-project-btn')).toBeTruthy()
   })
 })
 

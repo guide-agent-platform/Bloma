@@ -52,6 +52,21 @@ const SKETCH_STEPS: Array<{ id: string; label: string }> = [
   { id: 'preview', label: '准备预览' },
 ]
 
+/** 桌面长期链 4 步模板（审计 B-11，2026-10-04）：arch+scaffold 合并为「定方案搭骨架」
+ *（两步都无用户可感产物差异，拆开反而拖长进度条），实现→验收→交付。 */
+const DESKTOP_LONGTERM_STEPS: Array<{ id: string; label: string }> = [
+  { id: 'arch', label: '定方案搭骨架' },
+  { id: 'build', label: '制作程序' },
+  { id: 'verify', label: '验收程序' },
+  { id: 'deliver', label: '交付' },
+]
+
+/** 桌面快速链 2 步模板：quick 直通道从实现起跑（内部过安全门+启动冒烟），无选型/骨架/验收。 */
+const DESKTOP_QUICK_STEPS: Array<{ id: string; label: string }> = [
+  { id: 'build', label: '制作程序' },
+  { id: 'deliver', label: '交付' },
+]
+
 function withStatus(
   template: Array<{ id: string; label: string }>,
   currentIndex: number,
@@ -93,6 +108,25 @@ export function mapStageToRunSteps(stage: string): RunStep[] | null {
     default:
       return null
   }
+}
+
+/**
+ * 桌面阶段 → 步骤列表（审计 B-11，2026-10-04）：桌面线运行期间进度卡的模板数据源。
+ * 按模式选模板（quick 跳过选型/骨架/验收），按当前阶段定位 in_progress；
+ * delivered 全部完成。未知阶段 id 返回 null（回退活体行模式，与 web 路径同口径）。
+ */
+export function mapDesktopPhaseToSteps(phase: string, mode: 'quick' | 'longterm' | null | undefined): RunStep[] | null {
+  const template = mode === 'quick' ? DESKTOP_QUICK_STEPS : DESKTOP_LONGTERM_STEPS
+  const stepIndexOf: Record<string, number> = {
+    'desktop-arch': 1,
+    'desktop-scaffold': 1, // 骨架并入「定方案搭骨架」步（longterm 模板）
+    'desktop-implement': template === DESKTOP_QUICK_STEPS ? 1 : 2,
+    'desktop-verify': 3,
+    delivered: template.length,
+  }
+  const index = stepIndexOf[phase]
+  if (index === undefined) return null
+  return withStatus(template, index, phase === 'delivered')
 }
 
 export interface RunStepProgress {

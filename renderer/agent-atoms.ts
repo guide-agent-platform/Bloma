@@ -343,16 +343,14 @@ export interface SessionUsage {
 
 export const sessionUsageFamily = atomFamily((sessionId: string) => atom<SessionUsage | undefined>(undefined))
 
-/** 新一轮生成的开始信号：上一轮已终结后，这些事件到达即视为新一轮（清空历史 events，折叠组只显示最近一轮）。 */
+/** 新一轮生成的开始信号：上一轮已终结后，这些事件到达即视为新一轮（清空历史 events，折叠组只显示最近一轮）。
+ *  2026-10-04 审计 B-02：sketch_ready/mvp_ready/repairing 已无发射方（web 生成线退役），从信号集移除。 */
 const NEW_RUN_SIGNALS = new Set([
   'message_delta',
   'thinking_delta',
   'stage_changed',
   'tool_call_started',
   'user_decision_required',
-  'sketch_ready',
-  'mvp_ready',
-  'repairing',
   'retrying',
   'loop_compaction',
   'delegation_started',
@@ -474,31 +472,6 @@ export function setupGlobalAgentListeners(): () => void {
       }
     }
 
-    // I3：mvp_ready（本轮交付）时若存在留待下一轮的 steer——聊天流内追加待办提醒
-    //（交付后再确认：用户看到后可直接发消息开始下一轮修改，无需翻状态条）。
-    if (event.type === 'mvp_ready') {
-      const deferred = (store.get(steerStatusFamily(event.session_id)) ?? []).filter(
-        (chip) => chip.status === 'deferred_next_run',
-      )
-      if (deferred.length > 0) {
-        store.set(agentMessagesFamily(event.session_id), (previous) => [
-          ...previous,
-          {
-            role: 'system',
-            content: [{
-              type: 'text',
-              text: [
-                '本轮制作已交付。你之前留待下一轮的修改：',
-                ...deferred.map((chip) => `· ${chip.content}`),
-                '需要现在处理时，直接把这条修改再发一遍即可开始下一轮。',
-              ].join('\n'),
-            }],
-            timestamp: Date.now(),
-          },
-        ])
-      }
-    }
-
     // 会话追踪：新出现的 session_id 追加到 agentSessionsAtom（已有索引的会话保持不变）
     store.set(agentSessionsAtom, (previous) => {
       if (previous.some((item) => item.session_id === event.session_id)) return previous
@@ -521,33 +494,16 @@ export function setupGlobalAgentListeners(): () => void {
       return current.project_id === event.project_id
     }
 
-    // 预览地址：sketch_ready / mvp_ready / rollback_done 带回沙箱 preview_url，按项目隔离存储（多项目各自独立预览）
-    if (event.type === 'sketch_ready' || event.type === 'mvp_ready' || event.type === 'rollback_done') {
+    // 预览地址：rollback_done（重启 reconcile 回滚收敛）带回沙箱 preview_url，按项目隔离存储。
+    // 2026-10-04 审计 B-02：sketch_ready/mvp_ready 已无发射方（web 生成线退役），消费腿删除。
+    if (event.type === 'rollback_done') {
       const url = typeof event.payload.preview_url === 'string' ? event.payload.preview_url : null
       if (event.project_id && url) {
         store.set(previewUrlsAtom, (prev) => ({ ...prev, [event.project_id!]: { url, updatedAt: Date.now() } }))
       }
       const snapshotId = typeof event.payload.snapshot_id === 'string' ? event.payload.snapshot_id : null
-      // 快照指针按当前项目隔离：后台项目迟到的 sketch_ready 不得改写当前项目 UI
       if (snapshotId && isEventForCurrentProject()) store.set(currentSnapshotIdAtom, snapshotId)
-      // 时间轴数据源：后端每次落新快照即重新拉取快照列表，避免胶片条永远空
       if (event.project_id && isEventForCurrentProject()) void loadSnapshots(event.project_id)
-    }
-
-    // 自动命名：MVP 就绪时后端可能已按需求给项目改名（autoNameProject 落盘），
-    // 重新拉项目列表回填 currentProjectAtom，让工作区头部立即显示新名字
-    if (event.type === 'mvp_ready') {
-      const projectApi = window.electronAPI?.project
-      if (projectApi?.list) {
-        void projectApi.list({ request_id: crypto.randomUUID() }).then((result) => {
-          if (!result?.ok) return
-          const current = store.get(currentProjectAtom)
-          const updated = result.data.find((item) => item.project_id === current?.project_id)
-          if (current && updated && updated.name !== current.name) {
-            store.set(currentProjectAtom, updated)
-          }
-        })
-      }
     }
 
     // 终态事件：将本次运行累积的流式回复沉淀为一条助手消息，
@@ -792,10 +748,15 @@ export function setupGlobalAgentListeners(): () => void {
       // 桌面调度员线分流（渲染端适配批，2026-09-24）：stage 值属于桌面阶段 id
       //（desktop-* 前缀 ∪ delivered）时写入 desktopPhaseAtom，不碰 workflowStageAtom
       //——web 阶段状态机（澄清卡/MvpStatusBanner/草图确认弹窗等消费面）零接触。
+      // 2026-10-04 审计 A-01/A-04：桌面阶段事件同时触发权威回填——DesktopStageBar/
+      // DesktopArtifactStrip/DeliveryPanel 的门控与 canUpgrade/横幅都读 currentProjectAtom，
+      // 而该 atom 原刷新点（mvp_ready→project.list）已随 web 线退役死亡；不回填则
+      // 阶段条/交付面板/升级按钮在本会话内永不出现（重启才恢复）。
       if (event.type === 'stage_changed' && event.payload.stage && isEventForCurrentProject()) {
         const stageValue = String(event.payload.stage)
         if (isDesktopPhaseId(stageValue)) {
           store.set(desktopPhaseAtom, stageValue)
+          if (event.project_id) void refreshCurrentProjectFromStore(store, event.project_id)
         } else {
           store.set(workflowStageAtom, stageValue as WorkflowStage)
           store.set(stageIndicatorLabelAtom, STAGE_LABEL_MAP[stageValue as WorkflowStage] ?? '处理中')
@@ -1136,6 +1097,44 @@ export async function loadSnapshots(projectId: string): Promise<void> {
   // 防串台：切项目后旧项目的异步回包不得覆盖当前项目时间轴
   if (store.get(currentProjectAtom)?.project_id !== projectId) return
   store.set(snapshotsListAtom, result.data.snapshots)
+}
+
+/**
+ * 权威项目快照回填（审计 A-01/A-04 修复，2026-10-04）：桌面线阶段事件到达时，
+ * 重拉项目列表把 projects.json 的权威状态（desktop_phase/template_type/status/
+ * current_stage/desktop_blocked/改名）同步进渲染端三 atom，并重拉快照列表。
+ *
+ * 动机：DesktopStageBar/DesktopArtifactStrip/DeliveryPanel 门控与 canUpgrade/
+ * MvpStatusBanner 都读 currentProjectAtom；该 atom 原运行期刷新点（mvp_ready 事件
+ * → project.list 回填）已随 web 线退役成为死代码，导致桌面阶段推进在会话内
+ * 零呈现（阶段条/交付面板/升级按钮/交付横幅都要等重启）。本函数把回填迁到
+ * 桌面 stage_changed 事件链上（阶段推进低频，全量 list 开销可接受）。
+ *
+ * 同步口径与 App 恢复点一致：workflowStageAtom ← project.current_stage、
+ * stageIndicatorLabelAtom ← STAGE_LABEL_MAP。桌面阶段 id 不进 workflowStageAtom
+ * 的分流规则不变——这里同步的是 main 维护的 current_stage（completed/iterating 等
+ * 合法枚举值），不是桌面阶段 id。
+ */
+async function refreshCurrentProjectFromStore(
+  store: NonNullable<Window['__jotai_store__']>,
+  projectId: string,
+): Promise<void> {
+  const projectApi = window.electronAPI?.project
+  if (!projectApi?.list) return
+  try {
+    const result = await projectApi.list({ request_id: crypto.randomUUID() })
+    if (!result?.ok) return
+    const updated = result.data.find((item) => item.project_id === projectId)
+    // 防串台：回包时用户已切项目则丢弃（与 loadSnapshots 同口径）
+    if (!updated) return
+    if (store.get(currentProjectAtom)?.project_id !== projectId) return
+    store.set(currentProjectAtom, updated)
+    store.set(workflowStageAtom, updated.current_stage)
+    store.set(stageIndicatorLabelAtom, STAGE_LABEL_MAP[updated.current_stage] ?? '处理中')
+    void loadSnapshots(projectId)
+  } catch {
+    // 回填是呈现层增强：失败静默（下一阶段事件再试）
+  }
 }
 
 /** 清除指定权限请求 */

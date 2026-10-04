@@ -48,3 +48,14 @@ export function desktopPhaseLabel(id: string): string {
 export function desktopPhaseFullLabel(id: string): string {
   return DESKTOP_PHASE_FULL_LABELS[id] ?? id
 }
+
+/** 桌面阶段 → 等待话术（审计 B-11，2026-10-04）：WaitingFeedback 的「我正在帮你××」与
+ *  ProgressCard 的阶段标题用——桌面线运行期间 workflowStage 停在 clarifying，
+ *  STAGE_ACTION_LABELS 无桌面条目时回退到 web 话术「生成可运行版本」会错位。 */
+export const DESKTOP_PHASE_ACTION_LABELS: Record<string, string> = {
+  'desktop-arch': '设计桌面方案',
+  'desktop-scaffold': '搭建程序骨架',
+  'desktop-implement': '制作桌面程序',
+  'desktop-verify': '验收桌面程序',
+  delivered: '整理交付',
+}

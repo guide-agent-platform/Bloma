@@ -50,6 +50,11 @@ const PREVIEW_READY_STAGES = new Set<WorkflowStage>([
   'iterating',
   'completed',
 ])
+
+/** 审计 A-09（2026-10-04）：沙箱预览恢复只服务存量 web 项目——桌面项目（deliveryPanel
+ *  承接右栏）没有 web 产物，restore 必失败，白跑一次 IPC 还进入无消费者的 error 态。 */
+const shouldRestorePreview = (project: Project): boolean =>
+  project.template_type !== 'desktop_tool' && PREVIEW_READY_STAGES.has(project.current_stage)
 /* =========================================================================
    Aurora 背景
    ========================================================================= */
@@ -243,7 +248,7 @@ const AppRoutes: React.FC = () => {
         ]).finally(() => setHistoryLoading(false))
       }
       // 已产出预览的项目：重跑沙箱回填预览（旧端口必死，无需校验）
-      if (PREVIEW_READY_STAGES.has(restored.current_stage)) {
+      if (shouldRestorePreview(restored)) {
         restorePreview(restored.project_id)
       }
       setRoute('workspace')
@@ -309,7 +314,7 @@ const AppRoutes: React.FC = () => {
       ]).finally(() => setHistoryLoading(false))
     }
     // 已产出预览的项目：重跑沙箱回填预览
-    if (PREVIEW_READY_STAGES.has(project.current_stage)) {
+    if (shouldRestorePreview(project)) {
       restorePreview(project.project_id)
     }
     setRoute('workspace')
@@ -535,7 +540,15 @@ const AppRoutes: React.FC = () => {
           )
         } else {
           setPreviewStatus('error')
-          notify('回滚没有成功（快照可能已失效或被拒绝），当前版本没有被改动。')
+          // A-05（2026-10-04）：失败原因如实区分——运行锁拒绝（AGENT_PROJECT_BUSY）不是
+          //「快照失效」，误导归因会让用户去翻快照而不是停止生成。
+          const failure = result && !result.ok ? result.error : undefined
+          const errorMessage = failure?.user_visible_message || failure?.message || ''
+          notify(
+            errorMessage.toUpperCase().includes('PROJECT_BUSY')
+              ? '现在正在生成，不能回滚——可以先点停止中断本轮制作，或等它完成后再回到这个版本。'
+              : '回滚没有成功（快照可能已失效或被拒绝），当前版本没有被改动。',
+          )
         }
       })
       .catch(() => {
@@ -733,7 +746,7 @@ const AppRoutes: React.FC = () => {
         onSendMessage={handleSendMessage}
         onForkFromMessage={handleForkFromMessage}
         waitStartTime={waitStart}
-        waitActionLabel="生成可运行版本"
+        waitActionLabel="处理你的请求"
         isHistoryLoading={historyLoading}
         deliveryPanel={currentProject?.template_type === 'desktop_tool'}
         previewStatus={effectivePreviewStatus}

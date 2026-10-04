@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 
 /**
- * DeliveryPanel 交付面板（2026-10-04 呈现层收口）：
+ * DeliveryPanel 交付面板（2026-10-04 呈现层收口；同日审计 A-02 修复后）：
  * - 快照渲染：文件清单 + DELIVERY.md；
  * - 启动按钮状态机：can_launch=true 可点并回报 pid；false 时按钮禁用 + 缺口提示；
- * - 数据经 window.bloma.projectDeliverables（mock）。
+ * - 空态：无数据且非加载时给出引导文案（A-8 空态修复）；
+ * - 数据经 window.electronAPI.projectDeliverables（mock）——与 preload 暴露名一致
+ *   （原先 mock window.bloma 掩盖了生产死链）。
  */
 import React from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -29,7 +31,7 @@ interface PanelState {
 function mockBloma(state: PanelState): void {
   const get = vi.fn(async () => ({ ok: true, data: state.deliverables }))
   const launch = vi.fn(async () => state.launchResult ?? { ok: true, data: { started: true, pid: 777 } })
-  ;(window as unknown as { bloma: unknown }).bloma = { projectDeliverables: { get, launch } }
+  ;(window as unknown as { electronAPI: unknown }).electronAPI = { projectDeliverables: { get, launch } }
 }
 
 function renderPanel(stage: string): void {
@@ -44,7 +46,7 @@ function renderPanel(stage: string): void {
 
 describe('DeliveryPanel', () => {
   beforeEach(() => {
-    ;(window as unknown as { bloma: unknown }).bloma = undefined
+    ;(window as unknown as { electronAPI: unknown }).electronAPI = undefined
   })
   afterEach(() => cleanup())
 
@@ -89,5 +91,10 @@ describe('DeliveryPanel', () => {
     })
     renderPanel('generating_mvp')
     await waitFor(() => expect(screen.getByTestId('delivery-launch-hint').textContent).toContain('项目完成后可启动'))
+  })
+
+  it('无数据且非加载 → 空态引导文案（A-8）', async () => {
+    renderPanel('clarifying')
+    await waitFor(() => expect(screen.getByTestId('delivery-empty').textContent).toContain('还没有可展示的交付内容'))
   })
 })

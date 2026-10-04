@@ -71,3 +71,51 @@ describe('节点状态', () => {
     expect(screen.getByTestId('desktop-stage-node-delivered')).toBeTruthy() // 五节点仍在
   })
 })
+
+describe('审计 A-03/A-07（2026-10-04）', () => {
+  it('quick 模式：被跳过的 arch/scaffold 不带 ✓，显示「跳过」角标（不伪装已完成）', () => {
+    renderBar({ project_id: 'p1', template_type: 'desktop_tool', mode: 'quick', desktop_phase: 'desktop-implement' }, null)
+    const arch = screen.getByTestId('desktop-stage-node-desktop-arch')
+    expect(arch.textContent).not.toContain('✓') // 从未执行 → 不打勾
+    expect(arch.textContent).toContain('跳过')
+    expect(arch.style.border).toContain('dashed') // 虚线区别于正常未到节点
+    const scaffold = screen.getByTestId('desktop-stage-node-desktop-scaffold')
+    expect(scaffold.textContent).toContain('跳过')
+    // 当前节点（implement）正常高亮，不带跳过标记
+    const current = screen.getByTestId('desktop-stage-node-desktop-implement')
+    expect(current.style.background).toContain('warning')
+    expect(current.textContent).not.toContain('跳过')
+  })
+
+  it('quick 直落 delivered：verify 也标跳过（未走过工程验收）', () => {
+    renderBar({ project_id: 'p1', template_type: 'desktop_tool', mode: 'quick', desktop_phase: 'delivered' }, null)
+    const verify = screen.getByTestId('desktop-stage-node-desktop-verify')
+    expect(verify.textContent).toContain('跳过')
+    expect(verify.textContent).not.toContain('✓')
+    // implement 是真实完成的 → 正常勾选
+    expect(screen.getByTestId('desktop-stage-node-desktop-implement').textContent).toContain('✓')
+  })
+
+  it('longterm 模式：无跳过标记，正常勾选推进', () => {
+    renderBar({ project_id: 'p1', template_type: 'desktop_tool', mode: 'longterm', desktop_phase: 'desktop-verify' }, null)
+    expect(screen.getByTestId('desktop-stage-node-desktop-arch').textContent).toContain('✓')
+    expect(screen.getByTestId('desktop-stage-node-desktop-implement').textContent).not.toContain('跳过')
+  })
+
+  it('desktop_blocked 置位 → 「已暂停」徽标 + 当前节点停止高亮（A-07）', () => {
+    renderBar({
+      project_id: 'p1',
+      template_type: 'desktop_tool',
+      desktop_phase: 'desktop-implement',
+      desktop_blocked: { reason: 'gate-exhausted', at: new Date().toISOString() },
+    }, null)
+    expect(screen.getByTestId('desktop-stage-paused').textContent).toContain('已暂停')
+    // 暂停≠进行中：当前节点不再 warning 高亮
+    expect(screen.getByTestId('desktop-stage-node-desktop-implement').style.background).toBe('transparent')
+  })
+
+  it('无 blocked → 无暂停徽标', () => {
+    renderBar({ project_id: 'p1', template_type: 'desktop_tool', desktop_phase: 'desktop-implement' }, null)
+    expect(screen.queryByTestId('desktop-stage-paused')).toBeNull()
+  })
+})
