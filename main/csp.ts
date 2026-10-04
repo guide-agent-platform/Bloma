@@ -17,7 +17,7 @@ export const MAIN_FRAME_CSP = [
   "img-src 'self' data: blob:",
   "font-src 'self'",
   "connect-src 'self' http://localhost:* https://api.anthropic.com",
-  "frame-src 'self' http://localhost:* http://127.0.0.1:*",
+  "frame-src 'self' http://localhost:* http://127.0.0.1:* bloma-file:",
 ].join('; ')
 
 /**

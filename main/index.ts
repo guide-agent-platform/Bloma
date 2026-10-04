@@ -17,6 +17,7 @@ import {
 } from './platform/shell/notifications'
 import { MAIN_FRAME_CSP, shouldInjectMainFrameCsp } from './csp'
 import { createCrashGuard } from './platform/shell/renderer-crash-guard'
+import { installPreviewProtocolHandler, registerPreviewSchemePrivileges } from './delivery/preview-scheme'
 // PR4 后续：平台件决策 sink 接线（runtime-fallback 不再反向依赖 domain 决策日志）
 import { setDecisionSink } from './platform/llm/runtime-fallback'
 import { setProjectTouchHandler } from './platform/sessions/session-service'
@@ -143,6 +144,9 @@ async function reconcileInterruptedProjectsAtStartup(): Promise<void> {
 
 app.whenReady().then(async () => {
   configureMediaPermissions()
+  // bloma-file:// 预览协议（2026-10-05 方案 A）：特权注册须在 ready 前（见模块底部顶层调用），
+  // 会话 handler 在 ready 后、窗口创建前安装
+  installPreviewProtocolHandler()
   // 渠道切换/类别路由决策落档 sink 接线（entry 层 composition；未接线时静默）
   setDecisionSink((input) => {
     try {
@@ -243,17 +247,23 @@ const ALLOWED_OUTBOUND_HOSTS = new Set([
 ])
 
 function configureOutboundAllowlist(): void {
-  session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
-    // dev 模式下跳过拦截（Vite HMR websocket 等）
-    if (!app.isPackaged) return callback({ cancel: false })
-    try {
-      const { hostname } = new URL(details.url)
-      callback({ cancel: !ALLOWED_OUTBOUND_HOSTS.has(hostname) })
-    } catch {
-      // 无法解析的 URL 放行（可能是 file:// 或自定义协议）
-      callback({ cancel: false })
-    }
-  })
+  // 2026-10-05 方案 A（借 Proma installDefaultSessionNetworkGuard）：按 URL 模式只拦
+  // http/https/ws/wss——bloma-file:// 等自定义协议请求不进拦截器（否则 host 位是
+  // project_id 会被当主机名误杀）；无法解析的 URL 放行同理。
+  session.defaultSession.webRequest.onBeforeRequest(
+    { urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] },
+    (details, callback) => {
+      // dev 模式下跳过拦截（Vite HMR websocket 等）
+      if (!app.isPackaged) return callback({ cancel: false })
+      try {
+        const { hostname } = new URL(details.url)
+        callback({ cancel: !ALLOWED_OUTBOUND_HOSTS.has(hostname) })
+      } catch {
+        // 无法解析的 URL 放行（可能是 file:// 或自定义协议）
+        callback({ cancel: false })
+      }
+    },
+  )
 }
 
 function configureWebContents(contents: WebContents): void {

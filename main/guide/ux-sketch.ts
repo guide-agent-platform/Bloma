@@ -8,8 +8,8 @@
  *
  * 生成走 callLlmForJson 标准件（parse 契约承载 HTML：剥代码围栏 + 形态校验，失败
  * 带反馈重试）；失败/超时回退确定性模板（窗口框 + 需求块列表），门不挂死。
- * 产物落盘 `<项目根>/00_UX/ux-sketch.html`（交付清单 SKIP_DIRS 已排除），沙箱
- * runSandbox 按项目根起静态服务，预览 URL 指向 `/00_UX/ux-sketch.html`。
+ * 产物落盘 `<项目根>/00_UX/ux-sketch.html`（交付清单 SKIP_DIRS 已排除），预览走
+ * bloma-file:// 协议直读文件（preview-scheme，方案 A）——不再起沙箱服务器。
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -18,7 +18,7 @@ import { callLlmForJson } from '../kernel/llm-call'
 import { categoryTemperature } from '../platform/llm/model-resolution'
 import { loadPromptOverride } from '../agent/prompting/prompt-config'
 import { findProject } from '../project/project-service'
-import { runSandbox } from '../delivery/sandbox'
+import { mintProjectPreviewUrl } from '../delivery/preview-scheme'
 import type { SketchRequirement } from '../coding/sketch-engine'
 
 const UX_SKETCH_DIR = '00_UX'
@@ -176,7 +176,8 @@ export async function generateUxSketch(options: {
   }
 }
 
-/** 草图落盘 + 起沙箱，返回预览 URL；落盘失败抛错（调用方如实告知）。 */
+/** 草图落盘 + 铸 bloma-file:// 预览 URL（2026-10-05 方案 A：不再起沙箱服务器——
+ *  子进程/端口/探活/node 解析四个故障域整个移除，URL 即文件）；落盘/铸造失败抛错（调用方如实降级）。 */
 export async function stageUxSketch(options: {
   project_id: string
   html: string
@@ -187,9 +188,6 @@ export async function stageUxSketch(options: {
   mkdirSync(dir, { recursive: true })
   const sketchPath = join(dir, UX_SKETCH_FILENAME)
   writeFileSync(sketchPath, options.html, 'utf8')
-  const sandbox = await runSandbox({ request_id: `ux-sketch-${Date.now()}`, project_id: options.project_id })
-  if (sandbox.status !== 'running' || !sandbox.preview_url) {
-    throw new Error(`UX_SKETCH_SANDBOX_FAILED: 草图沙箱启动失败（${sandbox.error_summary ?? '未知原因'}）`)
-  }
-  return { preview_url: `${sandbox.preview_url}/${UX_SKETCH_DIR}/${UX_SKETCH_FILENAME}`, sketch_path: sketchPath }
+  const previewUrl = mintProjectPreviewUrl(options.project_id, `${UX_SKETCH_DIR}/${UX_SKETCH_FILENAME}`)
+  return { preview_url: previewUrl, sketch_path: sketchPath }
 }

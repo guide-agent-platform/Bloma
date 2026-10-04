@@ -13,8 +13,8 @@ vi.mock('../../../main/kernel/llm-call', () => ({
   callLlmForJson: vi.fn(),
 }))
 
-vi.mock('../../../main/delivery/sandbox', () => ({
-  runSandbox: vi.fn(),
+vi.mock('../../../main/delivery/preview-scheme', () => ({
+  mintProjectPreviewUrl: vi.fn(),
 }))
 
 vi.mock('../../../main/project/project-service', () => ({
@@ -22,12 +22,12 @@ vi.mock('../../../main/project/project-service', () => ({
 }))
 
 import { callLlmForJson } from '../../../main/kernel/llm-call'
-import { runSandbox } from '../../../main/delivery/sandbox'
+import { mintProjectPreviewUrl } from '../../../main/delivery/preview-scheme'
 import { findProject } from '../../../main/project/project-service'
 import { generateUxSketch, parseSketchHtml, stageUxSketch } from '../../../main/guide/ux-sketch'
 
 const mockCall = vi.mocked(callLlmForJson)
-const mockSandbox = vi.mocked(runSandbox)
+const mockMint = vi.mocked(mintProjectPreviewUrl)
 const mockFindProject = vi.mocked(findProject)
 
 let sandboxRoot: string
@@ -84,6 +84,7 @@ describe('generateUxSketch', () => {
 
   it('LLM 失败：确定性模板兜底（含页脚声明与需求块），source=template', async () => {
     mockCall.mockResolvedValue(null as never)
+    mockMint.mockImplementation(() => 'bloma-file://p1/00_UX/ux-sketch.html')
     const result = await generateUxSketch(baseInput)
     expect(result.source).toBe('template')
     expect(result.html).toContain('外观草图 · 仅供确认方向')
@@ -100,17 +101,17 @@ describe('generateUxSketch', () => {
   })
 })
 
-describe('stageUxSketch', () => {
-  it('落盘 00_UX/ux-sketch.html 并返回子路径预览 URL', async () => {
-    mockSandbox.mockResolvedValue({ status: 'running', preview_url: 'http://localhost:41000', port: 41000 } as never)
+describe('stageUxSketch（方案 A：bloma-file 直读，无沙箱）', () => {
+  it('落盘 00_UX/ux-sketch.html 并返回 bloma-file:// 预览 URL', async () => {
     const staged = await stageUxSketch({ project_id: 'p1', html: '<!DOCTYPE html><html></html>' })
-    expect(staged.preview_url).toBe('http://localhost:41000/00_UX/ux-sketch.html')
+    expect(staged.preview_url).toBe('bloma-file://p1/00_UX/ux-sketch.html')
+    expect(mockMint).toHaveBeenCalledWith('p1', '00_UX/ux-sketch.html')
     const written = readFileSync(join(sandboxRoot, '00_UX', 'ux-sketch.html'), 'utf8')
     expect(written).toContain('<html>')
   })
 
-  it('沙箱失败：抛错（调用方降级文字版卡，门不挂死）', async () => {
-    mockSandbox.mockResolvedValue({ status: 'failed', error_summary: 'port' } as never)
-    await expect(stageUxSketch({ project_id: 'p1', html: '<!DOCTYPE html><html></html>' })).rejects.toThrow('UX_SKETCH_SANDBOX_FAILED')
+  it('URL 铸造失败：抛错（调用方降级文字版卡，门不挂死）', async () => {
+    mockMint.mockImplementation(() => { throw new Error('PREVIEW_NOT_HTML') })
+    await expect(stageUxSketch({ project_id: 'p1', html: '<!DOCTYPE html><html></html>' })).rejects.toThrow('PREVIEW_NOT_HTML')
   })
 })
