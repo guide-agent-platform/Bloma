@@ -102,7 +102,9 @@ export async function createSnapshot(input: SnapshotCreateInput): Promise<Snapsh
     snapshot_id: snapshotId,
     project_id: project.project_id,
     kind: input.kind,
-    name: `${input.kind}-${snapshotId.slice(0, 8)}`,
+    name: input.display_name
+      ? `${input.display_name}·${snapshotId.slice(0, 4)}`
+      : `${input.kind}-${snapshotId.slice(0, 8)}`,
     summary: input.summary,
     screenshot_path: screenshotPath,
     files_archive_path: filesArchivePath,

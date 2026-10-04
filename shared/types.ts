@@ -1340,6 +1340,9 @@ export interface SnapshotCreateInput extends RequestEnvelope {
  *  通过后落的快照；recoverable=仅可预览（终验前/未过）。缺省按 recoverable 理解
  *  （存量快照无字段同）。回滚优先选 verified，话术如实区分恢复依据。 */
   verification?: 'verified' | 'recoverable'
+  /** 时间轴显示名（2026-10-05：缺省 kind-短id 是 web 时代机读风格，桌面线传人话
+   *  阶段标题；缺省回退 kind-短id，存量快照零变化）。 */
+  display_name?: string
 }
 
 export interface Snapshot {

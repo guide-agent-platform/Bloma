@@ -107,10 +107,13 @@ function defaultSpawn(command: string[], cwd: string): ChildProcess {
 async function defaultCaptureWindow(titleHint: string | undefined): Promise<Buffer | null> {
   // 懒加载 electron（陷阱 35：被单测 import 的模块勿静态依赖 electron）；局部 require 遮蔽
   // + createRequire（同 safe-storage 先例）——esbuild 不重写局部 require，运行期原生解析
+  // thumbnailSize 是「适配盒」不是目标尺寸：给大盒子（3840×2400）拿窗口物理原分辨率，
+  // 小窗口不会被放大；旧值 1280×800 在高分屏（本机 2560×1600 物理 @150%）上把截图
+  // 下采样到一半分辨率——「截图发糊」的根因，与 Python/tkinter 无关。
   try {
     const require = createRequire(import.meta.url)
     const { desktopCapturer } = require('electron') as typeof import('electron')
-    const sources = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 1280, height: 800 } })
+    const sources = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 3840, height: 2400 } })
     if (titleHint) {
       const hit = sources.find((source) => source.name.includes(titleHint))
       if (hit) return hit.thumbnail.toPNG()

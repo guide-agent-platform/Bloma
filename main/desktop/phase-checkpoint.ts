@@ -18,6 +18,12 @@
 
 import type { DesktopCheckpoint } from '../../shared/types'
 import { updateProject } from '../project/project-service'
+import { getDesktopPhase } from './dispatcher-phases'
+
+/** 阶段显示名：中文阶段标题（未知阶段回退原始 id，不炸）。 */
+function checkpointPhaseTitle(stage: string): string {
+  return getDesktopPhase(stage)?.title ?? stage
+}
 
 /** checkpoint 写入输入（gates 摘要由调用方按阶段门禁形态拼装）。 */
 export interface PhaseCheckpointInput {
@@ -49,6 +55,8 @@ export async function recordPhaseCheckpoint(input: PhaseCheckpointInput): Promis
       include_documents: true,
       health_status: 'healthy',
       verification: input.verification,
+      // 时间轴显示名（2026-10-05）：中文阶段标题，不再暴露 web 时代 kind 机器码
+      display_name: checkpointPhaseTitle(input.stage),
     })
     snapshotId = snapshot.snapshot_id
   } catch (error) {
