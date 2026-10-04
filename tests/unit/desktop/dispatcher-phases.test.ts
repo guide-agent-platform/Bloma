@@ -23,9 +23,11 @@ describe('dispatcher-phases 阶段表 schema', () => {
     expect(result.violations).toEqual([])
   })
 
-  it('快速模式字段数据锁（2026-10-03 quick 通道）：quickTaskTemplate/quickConstraints 仅 desktop-implement 提供且非空，其余阶段不提供（quickMode 回退原任务书）', () => {
+  it('快速模式字段数据锁（2026-10-03 quick 通道）：quickTaskTemplate/quickConstraints 仅 desktop-implement 提供且非空，其余阶段不提供（quickMode 回退原任务书）；DPI 感知纪律已在任务书（2026-10-05 坑库回填）', () => {
     const implement = DESKTOP_PHASES['desktop-implement']
     expect(implement.quickTaskTemplate).toBeTruthy()
+    expect(implement.quickTaskTemplate).toContain('SetProcessDpiAwareness')
+    expect(implement.taskTemplate ?? '').toContain('enable_hidpi')
     expect((implement.quickConstraints ?? []).length).toBeGreaterThan(0)
     for (const node of Object.values(DESKTOP_PHASES)) {
       if (node.id === 'desktop-implement') continue

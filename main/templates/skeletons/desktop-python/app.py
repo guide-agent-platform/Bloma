@@ -14,6 +14,23 @@ from __future__ import annotations
 
 import sys
 
+
+def enable_hidpi() -> float:
+    """声明 Windows DPI 感知（骨架纪律，2026-10-05 坑库 [实证]）。
+
+    python.exe 不声明 DPI 感知：高分屏（如 150% 缩放）下系统对整个窗口做位图拉伸
+    兼容，文字与控件发虚（「程序分辨率低」的根因，与 tkinter 无关）。在任何 Tk()
+    创建之前调用本函数；返回缩放系数供 tk scaling 补偿（1.0=无缩放/非 Windows）。
+    """
+    try:
+        from ctypes import windll
+
+        windll.shcore.SetProcessDpiAwareness(2)  # PER_MONITOR_DPI_AWARE
+        return float(windll.shcore.GetScaleFactorForDevice(0)) / 100.0
+    except Exception:
+        return 1.0
+
+
 APP_NAME = "{{project_name}}"
 APP_VERSION = "0.1.0-skeleton"
 
@@ -61,6 +78,14 @@ def main() -> int:
     # ── 主程序结构（desktop-implement 阶段实现；以下为线程模型范式）──
     # 范式（pystray 实测结论）：icon.run() 阻塞主线程，业务线程 daemon 化，
     # stop() 从其他线程调用。托盘自停探活示例见 00_SPIKES 记录。
+    #
+    # GUI 入口纪律（坑库 [实证]）：任何窗口创建前先 enable_hidpi()，并据返回值
+    # 补偿 tk scaling（并按需缩放自绘尺寸），否则高分屏发虚或控件偏小：
+    #
+    # import tkinter as tk
+    # scale = enable_hidpi()
+    # root = tk.Tk()
+    # root.tk.call("tk", "scaling", scale * 96.0 / 72.0)
     #
     # import threading
     # import pystray
