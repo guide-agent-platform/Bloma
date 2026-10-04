@@ -20,6 +20,7 @@ vi.mock('../../../main/project/project-service', () => ({
 }))
 
 import { findProject, updateProject } from '../../../main/project/project-service'
+import { isMvpConfirmPending, resetMvpConfirmForTests } from '../../../main/desktop/mvp-confirm'
 import {
   DESKTOP_CONFIRM_OPTION_PREFIX,
   MAX_AUTO_ADVANCE_CHAIN,
@@ -43,6 +44,7 @@ beforeEach(() => {
   switchOriginal = process.env[SWITCH]
   process.env[SWITCH] = '1'
   resetDesktopRouteLedgersForTests()
+  resetMvpConfirmForTests()
   vi.clearAllMocks()
   // 临时沙箱先行（record.root_path 引用本轮目录）：全阶段产物预置（关3 产物验证走真实 existsSync）
   sandboxRoot = mkdtempSync(join(tmpdir(), 'bloma-desktop-route-'))
@@ -274,6 +276,57 @@ describe('handleDesktopDispatchMessage 消息路由', () => {
     expect(events.some((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('程序截图'))).toBe(true)
   })
 
+  it('MVP 确认门（确认门新规 2026-10-04）：longterm verify 全绿不直接交付——挂 MVP 卡，确认后才 delivered（viaMvpConfirm 话术）', async () => {
+    writeValidContract()
+    record.desktop_phase = 'desktop-verify'
+    record.mode = 'longterm'
+    const { deps, events } = collectorDeps()
+    await handleDesktopDispatchMessage(routeInput({
+      query: scriptedQuery([[textMessage('验证全绿。\nPHASE_ADVANCE: delivered')]]),
+    }), deps)
+    // 门挂起：不置 delivered，发 MVP 确认卡
+    expect(record.desktop_phase).toBe('desktop-verify')
+    const card = events.find((e) => e.type === 'user_decision_required')
+    expect(card?.payload.kind).toBe('mvp_confirm')
+    // 确认回传 → 交付收口 + 「已按你的确认正式交付」话术
+    const confirmDeps = collectorDeps()
+    await handleDesktopDispatchMessage(routeInput({ cardOptionId: 'mvp_confirm_go' }), confirmDeps.deps)
+    expect(record.desktop_phase).toBe('delivered')
+    expect((record as unknown as { status?: string }).status).toBe('completed')
+    expect(confirmDeps.events.some((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('已按你的确认正式交付'))).toBe(true)
+  })
+
+  it('MVP 确认门：挂起期间普通消息＝修改意见回炉 implement（【交付前迭代】）；quick 不设门', async () => {
+    writeValidContract()
+    record.desktop_phase = 'desktop-verify'
+    record.mode = 'longterm'
+    const { deps } = collectorDeps()
+    await handleDesktopDispatchMessage(routeInput({
+      query: scriptedQuery([[textMessage('验证全绿。\nPHASE_ADVANCE: delivered')]]),
+    }), deps)
+    expect(record.desktop_phase).toBe('desktop-verify')
+    // 普通消息＝反馈 → 回炉 implement（脚本给出下一轮实现推进）
+    const rework = collectorDeps()
+    await handleDesktopDispatchMessage(routeInput({
+      content: '把结果显示改成大字号',
+      query: scriptedQuery([[textMessage('已改。\n<!-- PHASE_ADVANCE: desktop-verify -->')]]),
+    }), rework.deps)
+    // 回炉语义：先改再交 ack + 离开交付收口（迭代中；阶段在 implement/verify 链上）
+    expect(rework.events.some((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('先改再交'))).toBe(true)
+    expect(rework.events.some((e) => e.type === 'stage_changed' && e.payload.stage === 'desktop-implement')).toBe(true)
+    expect(isMvpConfirmPending('p1')).toBe(false)
+    // quick 模式同一收口点不设门（直接 delivered，快速直通道不变）
+    const quickRecord = record
+    quickRecord.mode = 'quick'
+    quickRecord.desktop_phase = 'desktop-verify'
+    const quickDeps = collectorDeps()
+    await handleDesktopDispatchMessage(routeInput({
+      query: scriptedQuery([[textMessage('验证全绿。\nPHASE_ADVANCE: delivered')]]),
+    }), quickDeps.deps)
+    // quick 从 verify 推进 delivered 不走 MVP 门（快速直通道的门在 implement 收口处，也不设 MVP）
+    expect(quickDeps.events.some((e) => e.type === 'user_decision_required' && e.payload.kind === 'mvp_confirm')).toBe(false)
+  })
+
   it('刀1 撤 manual 门：desktop-arch 门禁过即推进（零 confirmation-required、零确认卡）', async () => {
     record.desktop_phase = 'desktop-arch'
     const { deps, events } = collectorDeps()
@@ -451,7 +504,7 @@ describe('快速型直通道（2026-10-03 拍板：quick 快速做出可用应�
     expect(completions.some((c) => c.outcome === 'success' || c.outcome === undefined)).toBe(false)
   })
 
-  it('longterm 项目 implement 推进 → 照旧走 verify 工程验收（直通道不误伤长期链）', async () => {
+  it('longterm 项目 implement 推进 → 照旧走 verify 工程验收；verify→delivered 被 MVP 确认门拦下（确认门新规 2026-10-04）', async () => {
     record.mode = 'longterm'
     record.desktop_phase = 'desktop-implement'
     writeValidContract()
@@ -464,10 +517,16 @@ describe('快速型直通道（2026-10-03 拍板：quick 快速做出可用应�
       for (const message of script) yield message
       yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
     }
-    const { deps } = collectorDeps()
+    const { deps, events } = collectorDeps()
     await handleDesktopDispatchMessage(routeInput({ query }), deps)
-    expect(record.desktop_phase).toBe('delivered')
     expect(queryCalls).toBe(2) // verify 照常执行
+    // MVP 门：longterm 交付前挂起，不置 delivered，发确认卡
+    expect(record.desktop_phase).toBe('desktop-verify')
+    expect(events.some((e) => e.type === 'user_decision_required' && e.payload.kind === 'mvp_confirm')).toBe(true)
+    // 确认后才交付
+    const confirmDeps = collectorDeps()
+    await handleDesktopDispatchMessage(routeInput({ cardOptionId: 'mvp_confirm_go' }), confirmDeps.deps)
+    expect(record.desktop_phase).toBe('delivered')
   })
 
   it('enterDesktopLine 起跑分叉：quick 直入 implement 快速实现，longterm 从 desktop-arch 完整链开始', async () => {

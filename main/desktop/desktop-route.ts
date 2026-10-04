@@ -50,6 +50,14 @@ async function defaultLaunchSmokeGate(projectId: string): Promise<LaunchSmokeRes
   }
 }
 import { classifyUserDesktopIntent } from './user-intent-lexicon'
+import {
+  confirmMvpDelivered,
+  consumeMvpPendingForRework,
+  holdForMvpConfirm,
+  isMvpConfirmPending,
+  isMvpFeedbackMessage,
+  resolveMvpConfirmAnswer,
+} from './mvp-confirm'
 import { buildCheckpointConclusion } from './phase-checkpoint'
 import { createChannelFailureTracker, observeChannelFailure, type ChannelFailureTracker } from './channel-failure-watch'
 import { readDesktopRequirementsDigest } from './requirement-digest'
@@ -251,6 +259,40 @@ export async function handleDesktopDispatchMessage(
     return
   }
 
+  // ── MVP 确认门回传/反馈（2026-10-04 确认门新规）：longterm 交付前过目的最后一道门。
+  // 确认 → 交付收口；「有要修改的」→ 提示具体意见（pending 保留，下一条普通消息回炉）；
+  // 挂起期间任意普通非停止消息＝修改意见直接回炉 implement（【交付前迭代】，与
+  // delivered 反馈同机制，改完重走 verify 再过本门）。──
+  const mvpAnswer = resolveMvpConfirmAnswer(input)
+  if (mvpAnswer === 'confirm') {
+    confirmMvpDelivered({ input, deps })
+    return
+  }
+  if (mvpAnswer === 'adjust') {
+    deps.publish(input, 'message_delta', {
+      text: '好的，要改哪里？直接说（例如「把倒计时改成进度条」），我改完重新验收，再请你确认交付。',
+    })
+    deps.complete(input.sessionId, input.projectId)
+    return
+  }
+  if (isMvpFeedbackMessage(input, classifyUserDesktopIntent(input.content) === 'stop')) {
+    consumeMvpPendingForRework(input)
+    updateProject(input.projectId, { desktop_phase: 'desktop-implement', status: 'active', current_stage: 'iterating' })
+    deps.publish(input, 'stage_changed', { stage: 'desktop-implement' })
+    deps.publish(input, 'message_delta', { text: '收到你的意见，先改再交：从「实现与交付说明」阶段按你的意见修改，改完重新走验收，再请你确认交付。' })
+    await runDesktopStage(
+      {
+        projectId: input.projectId,
+        sessionId: input.sessionId,
+        requestId: input.requestId,
+        content: `【交付前迭代】用户对验收通过产物的修改意见，按此修改实现（其余功能与已验证行为保持不变）：${input.content}`,
+        signal: input.signal,
+      },
+      input.query, input.env, 'desktop-implement', deps, projectName, 0,
+    )
+    return
+  }
+
   // ── delivered 交付后反馈（刀1 通知卡承诺兑现，脑测发现修复 2026-10-03）：
   // 通知卡引导「不满意？直接回复要改的地方」——任何消息按迭代意见回炉 implement
   // 段（复用完整门禁与红绿链），改完重走 verify 再交付。放在意图分流之前：交付后
@@ -448,6 +490,20 @@ async function settleDesktopStage(
       // 终态（delivered）：终态字段收口 + 交付通知卡（刀1：通知≠确认——不阻塞不等待，
       // 用户回复修改意见走迭代）；不续跑（delivered 是哨兵节点，无任务可跑）
       const finalPhase = next ?? 'delivered'
+      // ── MVP 确认门（2026-10-04 确认门新规，修订 10-02 刀1）：longterm 交付前交用户
+      // 过目成品（quick 不设，快速直通道不变）；挂起不发通知不置 delivered，确认后收口。──
+      if (finalPhase === 'delivered') {
+        const gateProject = findProject(input.projectId)
+        if (gateProject?.mode === 'longterm' && !isMvpConfirmPending(input.projectId)) {
+          holdForMvpConfirm({
+            input,
+            deps,
+            fromPhase: phaseId,
+            notice: assembleDeliveredNotice(input.projectId, projectName, phaseId, result),
+          })
+          return
+        }
+      }
       updateProject(input.projectId, { desktop_phase: finalPhase, status: 'completed', current_stage: 'completed' })
       deps.publish(input, 'stage_changed', { stage: finalPhase })
       deps.publish(input, 'message_delta', { text: buildDeliveredNoticeCard(assembleDeliveredNotice(input.projectId, projectName, phaseId, result)) })

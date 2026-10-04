@@ -748,7 +748,9 @@ const AppRoutes: React.FC = () => {
         waitStartTime={waitStart}
         waitActionLabel="处理你的请求"
         isHistoryLoading={historyLoading}
-        deliveryPanel={currentProject?.template_type === 'desktop_tool'}
+        // 右栏门控（确认门新规 2026-10-04）：桌面项目默认 DeliveryPanel；UX 草图预览期间
+        //（ux_sketch_ready → ux_sketch_closed）顶替为 PreviewPanel 供过目草图。
+        deliveryPanel={currentProject?.template_type === 'desktop_tool' && !previewEntry}
         previewStatus={effectivePreviewStatus}
         previewUrl={effectivePreviewUrl}
         onRefreshPreview={handleRefreshPreview}

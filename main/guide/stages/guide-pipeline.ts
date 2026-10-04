@@ -68,6 +68,17 @@ type GuideEventPublisher = (event: AgentEvent) => void
 import { CLARIFICATION_ROUND_LIMIT, DEFAULT_GUIDE_SYSTEM_PROMPT, FIRST_TURN_RULE, GUIDE_LOOP_ADDENDUM, GuideParsed } from './guide-runtime'
 import { GuideLoopOutcome, bumpFreeChatStreak, clarifyTwoLayerEnabled, collectClarificationAnswers, countSameOptionCards, countTrailingClarificationRounds, ensurePrimaryIntent, freeChatStreakOf, hasRecentReliefCard, normalizeClarificationOptions, normalizeGuideDecisionToParsed, publishClarificationCard, publishClarificationReliefCard, resetFreeChatStreak, resolveAutoDelegation, resolveCardAnswer, resolveClarificationReliefAnswer, trackClarificationResponded } from './clarify-flow'
 import { invalidatePendingRequirementConfirm, startRequirementConfirmFlow } from './requirement-confirm'
+import {
+  consumeUxConfirmDismiss,
+  republishUxCardFromArchive,
+  resolveUxConfirmCardAnswer,
+  resumeUxConfirmConfirmed,
+  runUxAdjustRound,
+  startUxAdjustAwait,
+  takeUxAdjustFeedback,
+  tryResumeUxAdjustAsConfirm,
+} from '../ux-confirm'
+import { classifyUserDesktopIntent } from '../../desktop/user-intent-lexicon'
 import { buildWebLineRetiredCardPayload } from '../web-line-retired'
 import { runPrdPipeline } from './prd-pipeline'
 
@@ -453,6 +464,40 @@ export async function handleGuideMessage(
     persistAssistant?.(hint)
     publish(makeGuideEvent(input, 'message_delta', { text: hint }))
     publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+    return
+  }
+
+  // ── UX 草图确认卡（2026-10-04 确认门新规）：桌面项目 PRD 确认后的第二道门。
+  // 回传拦截与 PRD 卡同模式（专属选项 id + pending 存活）；另覆盖两个中间态：
+  // ①点了「有要调整的」后的反馈文本（非停止词即重画，继续词＝按当前版开工）；
+  // ②「稍后再说」后的回门（继续词 + PRD 已确认 + 未进桌面线 → 归档草图重发卡）。──
+  const uxConfirmDecision = resolveUxConfirmCardAnswer(input)
+  if (uxConfirmDecision === 'confirm') {
+    await resumeUxConfirmConfirmed(input)
+    return
+  }
+  if (uxConfirmDecision === 'adjust') {
+    startUxAdjustAwait(input)
+    return
+  }
+  if (uxConfirmDecision === 'dismiss') {
+    consumeUxConfirmDismiss(input)
+    return
+  }
+  // 等反馈态：继续词＝按当前版开工（先于反馈消费判定，防「继续」被当修订意见重画）
+  if (await tryResumeUxAdjustAsConfirm(input, classifyUserDesktopIntent(input.content) === 'continue')) {
+    return
+  }
+  const uxAdjustFeedback = takeUxAdjustFeedback(input)
+  if (uxAdjustFeedback) {
+    await runUxAdjustRound(input, uxAdjustFeedback)
+    return
+  }
+  if (
+    model?.query
+    && classifyUserDesktopIntent(input.content) === 'continue'
+    && await republishUxCardFromArchive(input, publish, { query: model.query, env: model.env ?? {} })
+  ) {
     return
   }
 

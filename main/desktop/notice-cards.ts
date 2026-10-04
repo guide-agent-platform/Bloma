@@ -22,12 +22,19 @@ export interface DeliveredNoticeInput {
   driverSummary?: { passed: number; total: number }
   /** 程序截图路径清单（刀3 呈现层产物；缺省不出该行）。 */
   screenshotPaths?: string[]
+  /** MVP 确认门通过后的交付（2026-10-04 确认门新规）：首行话术改为「已按你的确认交付」，
+   *  不再自称「无需人工确认」（longterm 交付前过目是拍板的确认门）。 */
+  viaMvpConfirm?: boolean
 }
 
 /** delivered 交付通知卡：验收结论 + 运行方式 + 修改出口（不阻塞不等待）。 */
 export function buildDeliveredNoticeCard(input: DeliveredNoticeInput): string {
   const lines: string[] = []
-  lines.push(`【交付完成】「${input.projectName}」已通过全部验收门禁（来源阶段：${input.fromPhaseTitle}），无需人工确认，现已交付。`)
+  lines.push(
+    input.viaMvpConfirm
+      ? `【交付完成】「${input.projectName}」已按你的确认正式交付（来源阶段：${input.fromPhaseTitle}）。`
+      : `【交付完成】「${input.projectName}」已通过全部验收门禁（来源阶段：${input.fromPhaseTitle}），无需人工确认，现已交付。`,
+  )
   if (input.driverSummary) {
     lines.push(`验收结论：驱动场景 ${input.driverSummary.passed}/${input.driverSummary.total} PASS（平台真实执行回读）+ 安全扫描 + 裁判审查全绿。`)
   }

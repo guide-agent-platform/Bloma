@@ -9,10 +9,10 @@ import { resolveChannelEnv } from '../platform/llm/runtime-fallback'
 import type { PrdBackplane, SketchRequirement } from '../coding/sketch-engine'
 import { backplaneAiCapabilities, backplaneKeyTasks, backplaneTemplateMeta, requirementAssertions, requirementImpliesBackend, requirementPriority, requirementStory } from '../coding/sketch-engine'
 import type { SDKQuery } from '../orchestration/orchestrator'
-import { enterDesktopLine, shouldEnterDesktopLine } from '../desktop/desktop-route'
+import { shouldEnterDesktopLine } from '../desktop/desktop-route'
 import { buildWebLineRetiredCardPayload } from './web-line-retired'
 import { findProject } from '../project/project-service'
-import { appendSessionMessage } from '../platform/sessions/session-tree'
+import { runUxConfirmGate } from './ux-confirm'
 
 /**
  * PRD 用户确认门（2026-08-26，改造 3）：六维审查**通过**后、草图前，
@@ -339,27 +339,30 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
   pending.publish(makeConfirmEvent(pending, 'message_delta', { text: ack }))
   pending.publish(makeConfirmEvent(pending, 'message_completed', { subtype: 'success' }))
 
-  // ── 桌面品类改道（BLOMA_DESKTOP_DISPATCH 字节锁，2026-09-24 接线批）：桌面项目
-  // PRD 确认后不进 web 线草图，切换桌面调度员线（desktop_phase=desktop-arch 起跑）。
-  // off 时 shouldEnterDesktopLine 恒 false，零行为变化（原路径字节级现状）。 ──
+  // ── 桌面品类改道→UX 草图确认门（2026-10-04 确认门新规，修订 10-02 刀1）：桌面项目
+  // PRD 确认后不再直入桌面线，先过 UX 门——生成沙箱外观草图交用户过目（确认门矩阵：
+  // quick＝PRD+UX；longterm＝PRD+UX+MVP）。确认后由 ux-confirm 进桌面线。──
   if (shouldEnterDesktopLine(findProject(pending.project_id))) {
     const resolution = resolveChannelEnv({
       channelId: pending.channel_id,
-      category: 'guide',
+      category: 'prd',
       projectId: pending.project_id,
       sessionId: pending.session_id,
     })
-    await enterDesktopLine(
-      { projectId: pending.project_id, sessionId: pending.session_id, requestId: pending.request_id, content: '开始桌面交付流程' },
-      pending.query,
-      resolution.env ?? {},
-      {
-        publish: (_target, type, payload) => pending.publish(makeConfirmEvent(pending, type, payload)),
-        persistAssistant: () => undefined,
-        persistSystem: (sessionId, text) => appendSessionMessage(sessionId, { role: 'system', content: [{ type: 'text', text }], timestamp: Date.now() }),
-        complete: () => undefined,
-      },
-    )
+    await runUxConfirmGate({
+      request_id: pending.request_id,
+      session_id: pending.session_id,
+      project_id: pending.project_id,
+      mode: pending.mode,
+      channel_id: pending.channel_id,
+      query: pending.query,
+      env: resolution.env ?? {},
+      publish: (event) => pending.publish(event),
+      signal: pending.signal,
+      round: 1,
+      positioning: confirmed?.positioning ?? '',
+      requirements: sketchRequirements,
+    })
     return true
   }
 

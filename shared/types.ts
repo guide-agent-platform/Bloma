@@ -1019,6 +1019,8 @@ export interface AgentEvent {
     | 'mvp_ready'
     | 'repairing'
     | 'rollback_done'
+    | 'ux_sketch_ready'
+    | 'ux_sketch_closed'
     | 'user_decision_required'
     | 'retrying'
     | 'error'
@@ -1515,6 +1517,7 @@ export interface AnalyticsTrackInput extends RequestEnvelope {
       | 'decision_selected'
       /** 桌面线运行遥测（telemetry 最小版，2026-10-01）：每段 dispatcher run 一条——狗粮复盘数据设施 */
       | 'desktop_dispatch_run'
+      | 'desktop_dispatch_run_started'
     project_id?: string
     session_id?: string
     payload: Record<string, unknown>

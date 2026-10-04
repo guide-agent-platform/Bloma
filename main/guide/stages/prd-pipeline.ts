@@ -96,6 +96,14 @@ export async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ sta
   let backplaneForReview: PrdBackplane | undefined
   if (aborted()) return { started: false, prd_written: false }
 
+  // 呈现层修复（2026-10-04 确认门批）：确认点击后 PRD 生成腿不再是零反馈黑盒——
+  // 即时旁白 + 阶段脱离 blocked_for_user_decision（实测 glm 双调用 3 分钟+，期间
+  // 界面停在「等待用户决策」且一字不发，用户视感「点确认没反应」）。
+  gatedPublish(makeGuideEvent(eventInput, 'stage_changed', { stage: 'clarifying' }))
+  gatedPublish(makeGuideEvent(eventInput, 'message_delta', {
+    text: '已收到确认，正在整理需求文档（PRD）并交内审，全程约需一到三分钟，期间可以随时停止。',
+  }))
+
   // ② 加厚追问通路（2026-09-03，挂起判定在 PRD 落盘前：answered 后整轮重跑会
   // 重新生成并落盘，挂起期间不写 prd.json）。K-1 仅主路：辅路（MVP 生成中途）
   // 不传 onClarification，信号自然丢弃。

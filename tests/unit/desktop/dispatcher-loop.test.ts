@@ -318,8 +318,10 @@ describe('故障注入：推进伪造', () => {
     const { query } = scriptedQuery([[textMessage('PHASE_ADVANCE: desktop-implement')]])
     const result = await runDesktopDispatcherLoop(baseInput({ query, artifactExists: allExist }))
     expect(result.advance).toMatchObject({ decision: 'advance', target: 'desktop-implement' })
-    expect(telemetry.track).toHaveBeenCalledTimes(1)
-    const event = telemetry.track.mock.calls[0][0].event
+    // 起跑+收口各一条（确认门批 2026-10-04 补起跑留痕）
+    expect(telemetry.track).toHaveBeenCalledTimes(2)
+    expect(telemetry.track.mock.calls[0][0].event.event_type).toBe('desktop_dispatch_run_started')
+    const event = telemetry.track.mock.calls[1][0].event
     expect(event.event_type).toBe('desktop_dispatch_run')
     expect(event.payload).toMatchObject({
       status: 'completed',
@@ -348,15 +350,15 @@ describe('故障注入：推进伪造', () => {
       driverSpawn: async () => ({ code: 1, stdout: '', stderr: 'Traceback...\nRecursionError: maximum recursion depth exceeded' }),
       writeReport: () => undefined,
     }))
-    expect(telemetry.track).toHaveBeenCalledTimes(1)
-    const event = telemetry.track.mock.calls[0][0].event
+    expect(telemetry.track).toHaveBeenCalledTimes(2)
+    const event = telemetry.track.mock.calls[1][0].event
     expect(event.payload.repair_class).toBe('behavior')
     // 确认卡拒收 → confirm；schema 拒收 → mapping（纯函数口径，逐类校验关键代表）
     telemetry.track.mockClear()
     const { query: q2 } = scriptedQuery([[textMessage('PHASE_ADVANCE: desktop-verify')]])
     await runDesktopDispatcherLoop(baseInput({ query: q2, currentPhase: 'desktop-implement', artifactExists: noneExist }))
     // 刀1 后 confirmation-required 不再产生；产物缺失拒收 → structure 分类（回归锁）
-    expect(telemetry.track.mock.calls[0][0].event.payload.repair_class).toBe('structure')
+    expect(telemetry.track.mock.calls[1][0].event.payload.repair_class).toBe('structure')
   })
 })
 

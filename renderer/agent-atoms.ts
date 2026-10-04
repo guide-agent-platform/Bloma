@@ -351,6 +351,7 @@ const NEW_RUN_SIGNALS = new Set([
   'stage_changed',
   'tool_call_started',
   'user_decision_required',
+  'ux_sketch_ready',
   'retrying',
   'loop_compaction',
   'delegation_started',
@@ -494,9 +495,10 @@ export function setupGlobalAgentListeners(): () => void {
       return current.project_id === event.project_id
     }
 
-    // 预览地址：rollback_done（重启 reconcile 回滚收敛）带回沙箱 preview_url，按项目隔离存储。
+    // 预览地址：rollback_done（重启 reconcile 回滚收敛）与 ux_sketch_ready（确认门新规
+    // 2026-10-04：UX 外观草图挂沙箱）带回沙箱 preview_url，按项目隔离存储。
     // 2026-10-04 审计 B-02：sketch_ready/mvp_ready 已无发射方（web 生成线退役），消费腿删除。
-    if (event.type === 'rollback_done') {
+    if (event.type === 'rollback_done' || event.type === 'ux_sketch_ready') {
       const url = typeof event.payload.preview_url === 'string' ? event.payload.preview_url : null
       if (event.project_id && url) {
         store.set(previewUrlsAtom, (prev) => ({ ...prev, [event.project_id!]: { url, updatedAt: Date.now() } }))
@@ -504,6 +506,16 @@ export function setupGlobalAgentListeners(): () => void {
       const snapshotId = typeof event.payload.snapshot_id === 'string' ? event.payload.snapshot_id : null
       if (snapshotId && isEventForCurrentProject()) store.set(currentSnapshotIdAtom, snapshotId)
       if (event.project_id && isEventForCurrentProject()) void loadSnapshots(event.project_id)
+    }
+
+    // UX 草图门收口（确认/稍后再说）：清本项目预览地址，右栏回列 DeliveryPanel（桌面项目）。
+    if (event.type === 'ux_sketch_closed' && event.project_id) {
+      store.set(previewUrlsAtom, (prev) => {
+        if (!prev[event.project_id!]) return prev
+        const next = { ...prev }
+        delete next[event.project_id!]
+        return next
+      })
     }
 
     // 终态事件：将本次运行累积的流式回复沉淀为一条助手消息，

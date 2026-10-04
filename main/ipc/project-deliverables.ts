@@ -42,6 +42,8 @@ function listFiles(rootPath: string): string[] {
         // 审计 B-10（2026-10-04）：SKIP_DIRS 按目录名匹配，'00_VERIFY/screenshots' 是
         // 复合路径永远不命中——改按相对路径拦截，截图不再泄入文件清单（占 200 上限）。
         if (childRel === '00_VERIFY/screenshots') continue
+        // 确认门新规（2026-10-04）：00_UX 外观草图存档不是交付物，不进文件清单。
+        if (childRel === '00_UX') continue
         visit(join(dir, entry.name), childRel, depth + 1)
       } else {
         files.push(childRel)

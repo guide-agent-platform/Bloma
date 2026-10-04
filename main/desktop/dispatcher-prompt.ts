@@ -228,6 +228,10 @@ export function buildToolDisciplineSection(node: PhaseNode): string {
       '子会话挂起提问（摘要里的 pending_question）时尽快用 answer_delegation_question 代答，' +
       '否则它会一直挂起、且 wait_for_delegations 会反复提前返回。',
   )
+  lines.push(
+    '委派后向用户如实预告等待成本：实现类子会话从领任务到收敛通常要几分钟（首响就可能' +
+      ' 1~3 分钟），预告后不要频繁刷屏；等待期间用户可随时停止——这是预期行为不是卡死。',
+  )
   if (node.extraTools.length > 0) {
     lines.push(`本阶段附加工具：${node.extraTools.join('、')}。`)
   }
