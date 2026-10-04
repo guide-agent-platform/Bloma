@@ -47,6 +47,7 @@ import { isDesktopDispatchEnabled } from './dispatcher-switch'
 import { execFileProbeSpawn, isDesktopEnvReady, probeDesktopEnv, type ProbeSpawn } from './check-env'
 import { parseProjectContract } from './contract-schema'
 import { runContractDriver, execFileDriverSpawn, type DriverExecutionReport } from './process-driver'
+import { buildChildScriptRunnerTool } from './child-exec-tool'
 import { runSecurityScan } from '../verification/security-scan'
 import { findProject } from '../project/project-service'
 import { buildProjectDriverRunnerTool } from './driver-runner-tool'
@@ -247,6 +248,9 @@ export function buildDesktopChildTools(projectId: string, role: DelegationRunRol
   return [
     ...buildAgentTools({ projectId, role, editFormat, realFullstackVariant: true }),
     ...buildDomainTools({ projectId, role, editFormat, realFullstackVariant: true }),
+    // 方案 B（2026-10-05）：implement 子会话受控执行刀——quick 无契约时真实红绿
+    // 自测的唯一通道（eba1cb83 实证：4 个自测脚本写了没门跑）；仅 implement 角色装配。
+    ...(role === 'implement' ? [buildChildScriptRunnerTool(projectId)] : []),
   ]
 }
 

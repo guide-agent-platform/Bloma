@@ -214,7 +214,7 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
     taskTemplate:
       '续接骨架委派实现真实桌面程序：\n' +
       '1. 按 PRD 背板功能清单实现，驱动断言与实现静态自洽（断言先行、真实调用被测代码、禁止平凡通过）；\n' +
-      '2. 真实红绿反馈：收口前用 run_project_driver（平台收口 spawn，本阶段唯一执行通道——子会话无 shell 是设计而非故障）跑一次驱动，失败清单交同一委派线修复后复跑；不要因「无法执行驱动」阻塞、编造或向用户索要本机运行；\n' +
+      '2. 真实红绿反馈：子会话可用 run_project_script 当场运行项目根内 .py 自测脚本（每次≤90s、至多 12 次，任务书里直接要求它写无头自测并附真实红绿结果）；收口前用 run_project_driver 跑一次契约驱动，失败清单交同一委派线修复后复跑；不要因「无法执行」阻塞、编造或向用户索要本机运行；\n' +
       '3. 产出 DELIVERY.md 到项目根（不是 00_SCAFFOLD/ 内——门禁按项目根检查）——运行方式 / 依赖安装 / 已知限制 / 驱动执行入口；契约 driver.command 相对项目根解析，指向 00_SCAFFOLD/ 内文件须带目录前缀（如 00_SCAFFOLD/driver.py）；\n' +
       '4. 产出 LAUNCH.json 到项目根（机器可读启动声明，宿主启动冒烟与交付面板都用它）：{"schema_version":1,"command":["python","主程序.py"],"window_title":"窗口标题"}——command 相对项目根；GUI 程序必写 window_title（宿主截窗口图用），无窗口程序可省略。',
     outputPath: '',
@@ -248,11 +248,11 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
     quickTaskTemplate:
       '快速做一个能用的应用（快速模式：无既有骨架，也不搭工程契约）：\n' +
       '1. 按 PRD 背板功能清单，从零实现一个完整可用的 Windows 桌面程序——全部业务功能真实可用，程序能跑起来；\n' +
-      '2. 一次性委派 implement 子会话完成实现（依赖与解释器路径如实装配，不编造运行结果）；\n' +
-      '3. 产出 DELIVERY.md 到项目根（不是子目录内——门禁按项目根检查）：运行方式 / 依赖安装 / 已知限制。不要求 contract.json 与驱动断言；\n' +
+      '2. 一次性委派 implement 子会话完成实现（依赖与解释器路径如实装配，不编造运行结果）；子会话有 run_project_script（真实运行项目根内 .py，每次≤90s、至多 12 次）——任务书里要求它写无头自测脚本并当场跑到绿、附真实红绿结果，不要只写不跑；\n' +
+      '3. 产出 DELIVERY.md 到项目根（不是子目录内——门禁按项目根检查）：运行方式 / 依赖安装 / 已知限制（自测结果如实引用，未验证项明说）。不要求 contract.json 与驱动断言；\n' +
       '4. 产出 LAUNCH.json 到项目根（机器可读启动声明——平台交付前会真实启动一次验证，这是快速模式的验收门）：{"schema_version":1,"command":["python","主程序.py"],"window_title":"窗口标题"}——command 相对项目根；GUI 程序必写 window_title（平台截窗口图呈现给你看），无窗口程序可省略。',
     quickConstraints: [
-      '快速模式不做工程契约与驱动断言（那是长期模式的工程化验收设施，本次跳过）',
+      '快速模式不做工程契约与驱动断言（那是长期模式的工程化验收设施，本次跳过）；功能自测走子会话 run_project_script 真实红绿',
       '能运行且功能齐全优先于代码结构完美；做不完的如实写进 DELIVERY.md 的已知限制',
     ],
     dispatcherManaged: true,
