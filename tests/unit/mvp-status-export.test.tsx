@@ -10,6 +10,7 @@ import {
   agentStreamStateFamily,
   currentProjectAtom,
   globalUserErrorAtom,
+  workflowStageAtom,
 } from '../../renderer/agent-atoms'
 import type { AgentEvent, ElectronAPI } from '../../shared/types'
 
@@ -63,9 +64,10 @@ describe('MvpStatusBanner 导出项目按钮（PR-3）', () => {
     } as unknown as ElectronAPI
     store.set(agentStreamStateFamily('session-exp'), {
       running: false,
-      events: [mvpReadyEvent()],
+      events: [],
       content: '',
     } as never)
+    store.set(workflowStageAtom, 'completed')
   })
 
   afterEach(() => {
@@ -131,6 +133,7 @@ describe('MvpStatusBanner 导出项目按钮（PR-3）', () => {
 
     cleanup()
     store.set(currentProjectAtom, { project_id: 'project-exp' } as never)
+    store.set(workflowStageAtom, 'generating_mvp')
     store.set(agentStreamStateFamily('session-exp'), {
       running: false,
       events: [],
@@ -170,9 +173,10 @@ describe('MvpStatusBanner 升级导出（Phase 10 落地旅程）', () => {
       project: { export: exportMock, upgradeExport: upgradeMock },
       app: { switchState: switchStateMock },
     } as unknown as ElectronAPI
+    store.set(workflowStageAtom, 'completed')
     store.set(agentStreamStateFamily('session-exp'), {
       running: false,
-      events: [mvpReadyEvent()],
+      events: [],
       content: '',
     } as never)
   })

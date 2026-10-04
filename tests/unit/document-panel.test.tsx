@@ -96,3 +96,46 @@ describe('DocumentPanel 产物文件渲染（W6）', () => {
     })
   })
 })
+
+describe('全局内容渲染（2026-10-04：DocumentContent 分流）', () => {
+  beforeEach(() => {
+    window.electronAPI = api as unknown as ElectronAPI
+    vi.clearAllMocks()
+  })
+
+  it('md 文件 → Markdown 渲染（标题成块而非裸 #）', async () => {
+    api.project.fileRead.mockImplementation(async () => ({ ok: true, request_id: 'r2', data: { path: 'docs/readme.md', content: '# 标题\n\n- 要点一\n- 要点二', truncated: false, bytes: 10 } }))
+    renderPanel()
+    const input = document.querySelector<HTMLInputElement>('[data-ai-id="document-panel-file-input"]')!
+    fireEvent.change(input, { target: { value: 'docs/readme.md' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => {
+      const md = document.querySelector('[data-ai-id="document-markdown"]')
+      expect(md).not.toBeNull()
+      expect(md!.querySelector('h1')?.textContent).toContain('标题')
+      expect(md!.querySelectorAll('li').length).toBe(2)
+    })
+  })
+
+  it('json 文件 → 美化缩进展示', async () => {
+    api.project.fileRead.mockImplementation(async () => ({ ok: true, request_id: 'r2', data: { path: 'contract.json', content: '{"a":1}', truncated: false, bytes: 7 } }))
+    renderPanel()
+    const input = document.querySelector<HTMLInputElement>('[data-ai-id="document-panel-file-input"]')!
+    fireEvent.change(input, { target: { value: 'contract.json' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => {
+      expect(document.querySelector('[data-ai-id="document-json"]')?.textContent).toContain('"a": 1')
+    })
+  })
+
+  it('代码文件 → 等宽原文（旧观感不变）', async () => {
+    api.project.fileRead.mockImplementation(async () => ({ ok: true, request_id: 'r2', data: { path: 'app.py', content: 'print("hi")', truncated: false, bytes: 11 } }))
+    renderPanel()
+    const input = document.querySelector<HTMLInputElement>('[data-ai-id="document-panel-file-input"]')!
+    fireEvent.change(input, { target: { value: 'app.py' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => {
+      expect(document.querySelector('[data-ai-id="document-plain"]')?.textContent).toContain('print')
+    })
+  })
+})

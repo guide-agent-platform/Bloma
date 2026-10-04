@@ -488,7 +488,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         const managed = topDir === 'node_modules'
           ? 'node_modules 由平台托管（vendor 供货已保证 express 等依赖可用），不在产物清单中，也不允许直接修改'
           : `${topDir}/ 是平台基础设施目录，不在产物清单中`
-        return { output: `${managed}。不要据此判断依赖缺失：判断后端可运行性请 run_preview，判断依赖声明请读 package.json。` }
+        return { output: `${managed}。不要据此判断依赖缺失：判断依赖声明请读 package.json（如存在）。` }
       }
       if (files.length === 0) return { output: `目录为空（${subDir || '项目根目录'}）。` }
       const shown = files.slice(0, LIST_ENTRY_LIMIT)

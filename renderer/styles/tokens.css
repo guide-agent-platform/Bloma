@@ -312,3 +312,15 @@ html, body {
 .bloma-md a { color: var(--color-quick); text-decoration: none; }
 .bloma-md a:hover { text-decoration: underline; }
 .bloma-md img { max-width: 100%; border-radius: var(--radius-sm); }
+
+/* ============================================================
+   Docs Markdown — 文档/交付面板阅读态（DocumentContent docs 变体）
+   面板空间充裕：真实标题层级、宽松间距（聊天紧凑态见上方 .bloma-md）
+   ============================================================ */
+.bloma-md-docs { font-size: var(--font-size-sm); line-height: 1.75; color: var(--color-text); }
+.bloma-md-docs h1 { font-size: 1.5em; }
+.bloma-md-docs h2 { font-size: 1.3em; }
+.bloma-md-docs h3, .bloma-md-docs h4 { font-size: 1.12em; }
+.bloma-md-docs h1, .bloma-md-docs h2, .bloma-md-docs h3, .bloma-md-docs h4, .bloma-md-docs h5, .bloma-md-docs h6 { margin: var(--space-4) 0 var(--space-2); }
+.bloma-md-docs p { margin: 0 0 var(--space-3); }
+.bloma-md-docs table { white-space: normal; }

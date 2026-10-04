@@ -88,15 +88,6 @@ describe('T6 后台执行通知（完成/失败/需决策 + 待决策持续提�
       expect(firstShown().title).toContain('已完成')
     })
 
-    it('sketch_ready / mvp_ready 直接发完成通知', () => {
-      handleAgentStreamEvent(event(project.project_id, 'sketch_ready', { preview_url: 'http://localhost:1' }))
-      expect(firstShown().title).toContain('已完成')
-      expect(firstShown().body).toContain('草图')
-
-      handleAgentStreamEvent(event(project.project_id, 'mvp_ready', { preview_url: 'http://localhost:1' }))
-      expect(shown).toHaveLength(2)
-      expect(shown[1].notification.body).toContain('MVP')
-    })
   })
 
   describe('失败通知', () => {

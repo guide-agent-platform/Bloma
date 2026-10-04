@@ -1,4 +1,5 @@
 import React from 'react'
+import { DocumentContent } from './DocumentContent'
 import { useAtom, useAtomValue } from 'jotai'
 import { currentProjectAtom, documentPanelExpandedAtom } from './atoms'
 import type { DocumentRef } from '../../shared/types'
@@ -261,28 +262,14 @@ export const DocumentPanel: React.FC = () => {
               {selected.path}
               {selected.truncated ? '（超过 256KB，已截断）' : ''} · 只读
             </p>
-            <pre
-              data-ai-id="document-file-content"
-              style={{
-                margin: 0, fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-                fontSize: 'var(--font-size-xs)', lineHeight: 1.7, color: 'var(--color-text)',
-                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-              }}
-            >
-              {selected.content}
-            </pre>
+            <div data-ai-id="document-file-content">
+              <DocumentContent source={selected.path} content={selected.content} variant="docs" />
+            </div>
           </div>
         ) : selected?.kind === 'document' ? (
-          <pre
-            data-ai-id="document-content"
-            style={{
-              margin: 0, fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-              fontSize: 'var(--font-size-xs)', lineHeight: 1.7, color: 'var(--color-text)',
-              whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-            }}
-          >
-            {selected.content}
-          </pre>
+          <div data-ai-id="document-content">
+            <DocumentContent source={selected.document.path || selected.document.type} content={selected.content} variant="docs" />
+          </div>
         ) : (
           <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
             从上方选择文档或产物文件查看内容。

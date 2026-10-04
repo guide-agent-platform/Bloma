@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { currentProjectAtom, desktopArtifactsAtom } from '../agent-atoms'
+import { DocumentContent } from './DocumentContent'
 import type { DesktopArtifactItemDto } from '../../shared/types'
 
 /**
@@ -189,7 +190,7 @@ const ArtifactDocChip: React.FC<{ item: DesktopArtifactItemDto; projectId: strin
         📄 {item.path.split('/').pop()}
       </button>
       {expanded && (
-        <pre
+        <div
           style={{
             position: 'absolute',
             maxWidth: 420,
@@ -202,12 +203,11 @@ const ArtifactDocChip: React.FC<{ item: DesktopArtifactItemDto; projectId: strin
             border: '1px solid var(--color-border)',
             borderRadius: 'var(--radius-sm)',
             boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
-            whiteSpace: 'pre-wrap',
             zIndex: 20,
           }}
         >
-          {failed ? '（读取失败——文件可能已变化）' : content ?? '读取中…'}
-        </pre>
+          {failed ? '（读取失败——文件可能已变化）' : content === null ? '读取中…' : <DocumentContent source={item.path} content={content} variant="compact" />}
+        </div>
       )}
     </span>
   )

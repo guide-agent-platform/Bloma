@@ -97,48 +97,20 @@ function deriveBannerState(
   events: AgentEvent[],
   stage: WorkflowStage,
 ): BannerState {
-  // 从事件流中提取最近的关键事件
-  const latestByType = new Map<string, AgentEvent>()
-  for (const e of events) {
-    if (['mvp_ready', 'repairing', 'stage_changed'].includes(e.type)) {
-      latestByType.set(e.type, e)
-    }
-  }
-
-  const mvpReady = latestByType.get('mvp_ready')
-  const repairing = latestByType.get('repairing')
-
-  // 正在修复中
-  if (
-    repairing &&
-    latestByType.get('mvp_ready') &&
-    new Date(repairing.created_at).getTime() >
-      new Date(latestByType.get('mvp_ready')!.created_at).getTime()
-  ) {
-    return {
-      visible: true,
-      variant: 'repairing',
-      title: '正在尝试自动修复',
-      detail: (repairing.payload.user_visible_summary as string) || '运行时检测到错误，正在自动修复…',
-      stage,
-    }
-  }
-
-  // MVP 已就绪
-  if (mvpReady) {
-    return {
-      visible: true,
-      variant: 'ready',
-      title: 'MVP 已生成，可以预览',
-      detail: (mvpReady.payload.summary as string) || '完整功能已生成，右侧预览区可查看效果',
-      stage,
-    }
-  }
+  // 2026-10-04 web 线残留清理：mvp_ready/repairing 事件已无发射方（web 生成链 10-01
+  // 退役），事件腿删除——横幅现在完全由权威阶段驱动（桌面线 stage_changed 同步）。
+  void events
 
   // 基于阶段的 fallback
   switch (stage) {
     case 'sketch_ready':
       return { visible: true, variant: 'ready', title: STAGE_LABEL_MAP[stage], detail: '草图已生成，确认后即可生成完整功能，或继续对话调整方向', stage }
+    // 2026-10-04 web 线残留清理：mvp_ready 死事件腿删除后，导出/升级入口改由权威阶段
+    // 驱动——ready（旧线终态）与 completed（桌面线 delivered）都应能导出项目。
+    case 'ready':
+      return { visible: true, variant: 'ready', title: STAGE_LABEL_MAP[stage], detail: '完整功能已生成，可导出项目或继续迭代', stage }
+    case 'completed':
+      return { visible: true, variant: 'ready', title: '项目已交付', detail: '完整功能已交付，可导出项目或继续迭代', stage }
     case 'generating_mvp':
       return { visible: true, variant: 'generating', title: STAGE_LABEL_MAP[stage], detail: '正在生成完整项目，请稍候…', stage }
     case 'iterating':
