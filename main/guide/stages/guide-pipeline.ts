@@ -70,6 +70,7 @@ import { GuideLoopOutcome, bumpFreeChatStreak, clarifyTwoLayerEnabled, collectCl
 import { invalidatePendingRequirementConfirm, startRequirementConfirmFlow } from './requirement-confirm'
 import {
   consumeUxConfirmDismiss,
+  isUxResumeIntent,
   republishUxCardFromArchive,
   resolveUxConfirmCardAnswer,
   resumeUxConfirmConfirmed,
@@ -484,8 +485,8 @@ export async function handleGuideMessage(
     consumeUxConfirmDismiss(input)
     return
   }
-  // 等反馈态：继续词＝按当前版开工（先于反馈消费判定，防「继续」被当修订意见重画）
-  if (await tryResumeUxAdjustAsConfirm(input, classifyUserDesktopIntent(input.content) === 'continue')) {
+  // 等反馈态：继续词或回门词＝按当前版开工（先于反馈消费判定，防「继续」被当修订意见重画）
+  if (await tryResumeUxAdjustAsConfirm(input, classifyUserDesktopIntent(input.content) === 'continue' || isUxResumeIntent(input.content))) {
     return
   }
   const uxAdjustFeedback = takeUxAdjustFeedback(input)
@@ -495,7 +496,7 @@ export async function handleGuideMessage(
   }
   if (
     model?.query
-    && classifyUserDesktopIntent(input.content) === 'continue'
+    && (isUxResumeIntent(input.content) || classifyUserDesktopIntent(input.content) === 'continue')
     && await republishUxCardFromArchive(input, publish, { query: model.query, env: model.env ?? {} })
   ) {
     return

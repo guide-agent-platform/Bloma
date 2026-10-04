@@ -34,6 +34,7 @@ import { findProject } from '../../../main/project/project-service'
 import { readPrdBackplane } from '../../../main/project/prd-store'
 import { recordDecision } from '../../../main/project/decision-log'
 import {
+  isUxResumeIntent,
   resetUxConfirmForTests,
   UX_CONFIRM_OPTION_ADJUST,
   UX_CONFIRM_OPTION_CONFIRM,
@@ -194,6 +195,14 @@ describe('确认/让渡/调整回传', () => {
     mockFindProject.mockImplementation(() => ({ project_id: 'p1', template_type: 'desktop_tool', mode: 'quick', desktop_phase: 'desktop-implement' }) as never)
     const { publish } = makePublish()
     expect(await republishUxCardFromArchive(plainInput('按草图开工') as never, publish, { query: {} as never, env: {} })).toBe(false)
+  })
+
+  it('回门词表：isUxResumeIntent 覆盖「按草图开工」等提示语原文（真机踩坑回归锁）', () => {
+    expect(isUxResumeIntent('按草图开工')).toBe(true)
+    expect(isUxResumeIntent('开工')).toBe(true)
+    expect(isUxResumeIntent('开始桌面交付')).toBe(true)
+    expect(isUxResumeIntent('我想加一个历史记录功能')).toBe(false)
+    expect(isUxResumeIntent('')).toBe(false)
   })
 })
 

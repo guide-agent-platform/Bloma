@@ -19,6 +19,19 @@ import { findProject } from '../project/project-service'
 import { generateUxSketch, stageUxSketch } from './ux-sketch'
 import { USER_STOP_KEYWORDS } from '../desktop/user-intent-lexicon'
 
+/** UX 门回门意图词（2026-10-04 真机踩坑修复：「按草图开工」是 dismiss 提示语的原文，
+ *  但回门只认 USER_CONTINUE_KEYWORDS（继续/确认……）不含「开工」——用户照提示操作
+ *  却落回向导 generate_sketch 旧路重跑整套 PRD。中文 includes / ASCII 词边界间或命中即可。） */
+export const UX_RESUME_KEYWORDS: readonly string[] = [
+  '按草图开工', '按草图', '草图开工', '草图继续', '开工', '开始桌面', '开始交付', '进入桌面', '交付流程',
+]
+
+export function isUxResumeIntent(text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed) return false
+  return UX_RESUME_KEYWORDS.some((kw) => trimmed.includes(kw))
+}
+
 type GuideEventPublisher = (event: AgentEvent) => void
 
 export const UX_SKETCH_ADJUST_LIMIT = 3
