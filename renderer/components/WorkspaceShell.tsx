@@ -4,6 +4,7 @@ import React from 'react'
 import { WorkspaceHeader } from './WorkspaceHeader'
 import { ChatPanel } from './ChatPanel'
 import { DesktopArtifactStrip } from './DesktopArtifactStrip'
+import { DeliveryPanel } from './DeliveryPanel'
 import type { AgentMessage } from './atoms'
 import { PreviewPanel } from './PreviewPanel'
 import { TimelinePanel } from './TimelinePanel'
@@ -33,6 +34,8 @@ export interface WorkspaceShellProps {
   /** P0-2 fork（2026-09-08）：user 消息「从这里重新来」回调 */
   onForkFromMessage?: (message: AgentMessage) => void
 
+  /** 桌面项目交付面板（2026-10-04 呈现层收口）：true 时右栏渲染 DeliveryPanel 替代空沙箱 */
+  deliveryPanel?: boolean
   /* === PreviewPanel props === */
   previewStatus?: PreviewStatus
   previewUrl?: string
@@ -128,7 +131,9 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
           onOpenSettings={props.onOpenSettings}
           onForkFromMessage={props.onForkFromMessage}
         />
-        <PreviewPanel
+        {props.deliveryPanel
+          ? <DeliveryPanel />
+          : <PreviewPanel
           status={props.previewStatus}
           previewUrl={props.previewUrl}
           errorLabel={props.previewErrorLabel}
@@ -141,7 +146,8 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
           confirming={props.confirming}
           onPreviewError={props.onPreviewError}
           onMarkComplete={props.onMarkComplete}
-        />
+          />
+        }
       </div>
 
       {/* 底部时间轴胶片条 */}

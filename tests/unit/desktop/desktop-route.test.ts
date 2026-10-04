@@ -46,10 +46,10 @@ beforeEach(() => {
   vi.clearAllMocks()
   // 临时沙箱先行（record.root_path 引用本轮目录）：全阶段产物预置（关3 产物验证走真实 existsSync）
   sandboxRoot = mkdtempSync(join(tmpdir(), 'bloma-desktop-route-'))
-  for (const rel of ['00_ARCH/architecture.md', '00_ARCH/env-checklist.json', '00_SCAFFOLD/contract.json', '00_SCAFFOLD/driver-skeleton.py', 'DELIVERY.md', '00_VERIFY/driver-report.json']) {
+  for (const rel of ['00_ARCH/architecture.md', '00_ARCH/env-checklist.json', '00_SCAFFOLD/contract.json', '00_SCAFFOLD/driver-skeleton.py', 'DELIVERY.md', 'LAUNCH.json', '00_VERIFY/driver-report.json']) {
     const path = join(sandboxRoot, rel)
     mkdirSync(join(path, '..'), { recursive: true })
-    writeFileSync(path, rel.endsWith('.json') ? '{}' : '# placeholder', 'utf8')
+    writeFileSync(path, rel === 'LAUNCH.json' ? '{"schema_version":1,"command":["python","app.py"]}' : rel.endsWith('.json') ? '{}' : '# placeholder', 'utf8')
   }
   // 状态化项目记录：updateProject 写回记录，findProject 读记录（链路状态可见）
   record = baseRecord()
@@ -116,6 +116,7 @@ function collectorDeps(overrides: Partial<DesktopRouteDeps> = {}) {
       complete: () => undefined,
       driverSpawn: async () => ({ code: 0, stdout: 'PASS a\nSUMMARY pass=1', stderr: '' }),
       securityScan: () => ({ passed: true, blocking: 0, scanned: 3, listing: '' }),
+      launchSmoke: async () => ({ passed: true, detail: '启动冒烟通过（测试注入）' }),
       ...overrides,
     } as DesktopRouteDeps,
   }
@@ -565,5 +566,36 @@ describe('事件直通与需求注入（2026-09-26 首跑修复）', () => {
     const { deps } = collectorDeps({ requirementsDigest: digest })
     await handleDesktopDispatchMessage(routeInput(), deps)
     expect(digest).toHaveBeenCalledWith('p1')
+  })
+})
+
+describe('启动冒烟门（2026-10-04 呈现层收口：程序能跑起来才算交付）', () => {
+  it('冒烟未过（启动即崩）→ 停在 implement 出人话卡（stderr 尾部直达）+ incomplete；阶段不动', async () => {
+    record.mode = 'quick'
+    record.desktop_phase = 'desktop-implement'
+    const query: SDKQuery = async function* (_prompt: string, _options: SDKQueryOptions) {
+      yield textMessage('实现完成。\n<!-- PHASE_ADVANCE: desktop-verify -->')
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+    const { deps, events } = collectorDeps({
+      launchSmoke: async () => ({ passed: false, detail: '异常退出（退出码 1）', outputExcerpt: 'TclError: bad screen distance "10 2"' }),
+    })
+    await handleDesktopDispatchMessage(routeInput({ query }), deps)
+    expect(record.desktop_phase).toBe('desktop-implement')
+    expect((record as unknown as { status?: string }).status).not.toBe('completed')
+    expect(events.some((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('启动验证未通过'))).toBe(true)
+    expect(events.some((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('TclError'))).toBe(true)
+  })
+
+  it('冒烟通过 → delivered 通知卡 + 阶段落 delivered（截图由冒烟落盘，此处只验门序）', async () => {
+    record.mode = 'quick'
+    record.desktop_phase = 'desktop-implement'
+    const query: SDKQuery = async function* (_prompt: string, _options: SDKQueryOptions) {
+      yield textMessage('实现完成。\n<!-- PHASE_ADVANCE: desktop-verify -->')
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+    const { deps } = collectorDeps()
+    await handleDesktopDispatchMessage(routeInput({ query }), deps)
+    expect(record.desktop_phase).toBe('delivered')
   })
 })

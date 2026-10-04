@@ -215,7 +215,8 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '续接骨架委派实现真实桌面程序：\n' +
       '1. 按 PRD 背板功能清单实现，驱动断言与实现静态自洽（断言先行、真实调用被测代码、禁止平凡通过）；\n' +
       '2. 真实红绿反馈：收口前用 run_project_driver（平台收口 spawn，本阶段唯一执行通道——子会话无 shell 是设计而非故障）跑一次驱动，失败清单交同一委派线修复后复跑；不要因「无法执行驱动」阻塞、编造或向用户索要本机运行；\n' +
-      '3. 产出 DELIVERY.md 到项目根（不是 00_SCAFFOLD/ 内——门禁按项目根检查）——运行方式 / 依赖安装 / 已知限制 / 驱动执行入口；契约 driver.command 相对项目根解析，指向 00_SCAFFOLD/ 内文件须带目录前缀（如 00_SCAFFOLD/driver.py）。',
+      '3. 产出 DELIVERY.md 到项目根（不是 00_SCAFFOLD/ 内——门禁按项目根检查）——运行方式 / 依赖安装 / 已知限制 / 驱动执行入口；契约 driver.command 相对项目根解析，指向 00_SCAFFOLD/ 内文件须带目录前缀（如 00_SCAFFOLD/driver.py）；\n' +
+      '4. 产出 LAUNCH.json 到项目根（机器可读启动声明，宿主启动冒烟与交付面板都用它）：{"schema_version":1,"command":["python","主程序.py"],"window_title":"窗口标题"}——command 相对项目根；GUI 程序必写 window_title（宿主截窗口图用），无窗口程序可省略。',
     outputPath: '',
     constraints: [
       '每实现一个功能必须先有对应驱动断言（禁止无断言的实现）',
@@ -232,6 +233,12 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
         description: '交付说明存在（DELIVERY.md）',
         artifacts: ['DELIVERY.md'],
       },
+      {
+        id: 'launch-decl',
+        kind: 'artifact',
+        description: '启动声明存在（LAUNCH.json，机器可读入口——宿主启动冒烟与交付面板「启动程序」都用它）',
+        artifacts: ['LAUNCH.json'],
+      },
     ],
     extraTools: ['run_project_driver'],
     // 快速模式任务书（2026-10-03 拍板：quick 跳过 arch/scaffold，无既有骨架/契约——
@@ -242,7 +249,8 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '快速做一个能用的应用（快速模式：无既有骨架，也不搭工程契约）：\n' +
       '1. 按 PRD 背板功能清单，从零实现一个完整可用的 Windows 桌面程序——全部业务功能真实可用，程序能跑起来；\n' +
       '2. 一次性委派 implement 子会话完成实现（依赖与解释器路径如实装配，不编造运行结果）；\n' +
-      '3. 产出 DELIVERY.md 到项目根（不是子目录内——门禁按项目根检查）：运行方式 / 依赖安装 / 已知限制。不要求 contract.json、驱动断言与截图。',
+      '3. 产出 DELIVERY.md 到项目根（不是子目录内——门禁按项目根检查）：运行方式 / 依赖安装 / 已知限制。不要求 contract.json 与驱动断言；\n' +
+      '4. 产出 LAUNCH.json 到项目根（机器可读启动声明——平台交付前会真实启动一次验证，这是快速模式的验收门）：{"schema_version":1,"command":["python","主程序.py"],"window_title":"窗口标题"}——command 相对项目根；GUI 程序必写 window_title（平台截窗口图呈现给你看），无窗口程序可省略。',
     quickConstraints: [
       '快速模式不做工程契约与驱动断言（那是长期模式的工程化验收设施，本次跳过）',
       '能运行且功能齐全优先于代码结构完美；做不完的如实写进 DELIVERY.md 的已知限制',

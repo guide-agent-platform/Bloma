@@ -143,7 +143,7 @@ describe('关3：产物存在性验证', () => {
   })
 
   it('driver/manual 门禁不参与存在性核验；无 artifact 门禁恒通过', () => {
-    expect(verifyPhaseArtifacts(DESKTOP_PHASES['desktop-implement'], () => false, {}).checked).toEqual(['DELIVERY.md'])
+    expect(verifyPhaseArtifacts(DESKTOP_PHASES['desktop-implement'], () => false, {}).checked).toEqual(['DELIVERY.md', 'LAUNCH.json'])
     expect(verifyPhaseArtifacts(DESKTOP_PHASES.requirements, () => false).passed).toBe(true)
   })
 })

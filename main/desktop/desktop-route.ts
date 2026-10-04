@@ -34,6 +34,21 @@ import { isDesktopDispatchEnabled } from './dispatcher-switch'
 import { runDesktopDispatcherLoop, type DesktopDispatchRunInput, type DesktopDispatchRunResult } from './dispatcher-loop'
 import { clearRejectionOnAdvance, createRejectionLedger, decideRejectionLoop, registerRejection, type RejectionLedger } from './advance-rejection-loop'
 import { buildBlockedNoticeCard, buildDeliveredNoticeCard, digestDeliveryDoc } from './notice-cards'
+import { runLaunchSmoke, type LaunchSmokeResult } from './launch-smoke'
+
+/** 启动冒烟门缺省实现（2026-10-04）：读项目根真实 spawn 一次——宽限期内退出（含启动即崩）
+ *  即不通过，stdout/stderr 尾部随卡回传修复轮；存活则截窗口图落 00_VERIFY/screenshots
+ *  （delivered 卡自动嵌图）。项目根缺失/异常返回 null 跳过留痕（冒烟门不做可用性单点）。 */
+async function defaultLaunchSmokeGate(projectId: string): Promise<LaunchSmokeResult | null> {
+  try {
+    const project = findProject(projectId)
+    if (!project?.root_path) return null
+    return await runLaunchSmoke(project.root_path)
+  } catch (error) {
+    console.error('[desktop-quick] 启动冒烟执行失败（跳过本次门禁，留痕）：', error)
+    return null
+  }
+}
 import { classifyUserDesktopIntent } from './user-intent-lexicon'
 import { buildCheckpointConclusion } from './phase-checkpoint'
 import { createChannelFailureTracker, observeChannelFailure, type ChannelFailureTracker } from './channel-failure-watch'
@@ -86,6 +101,9 @@ export interface DesktopRouteDeps {
   /** 快速通道安全门注入（2026-10-03）：quick 直落 delivered 前的宿主安全扫描；
    *  缺省生产实现见 defaultQuickSecurityGate（无项目上下文返回 null 跳过留痕）。 */
   securityScan?: (projectId: string) => QuickSecurityGateResult | null
+  /** 启动冒烟门注入（2026-10-04 呈现层收口）：quick 直落 delivered 前真实启动一次；
+   *  缺省生产实现见 defaultLaunchSmokeGate（无项目上下文返回 null 跳过留痕）。 */
+  launchSmoke?: (projectId: string) => Promise<LaunchSmokeResult | null>
 }
 
 // =========================================================================
@@ -453,10 +471,26 @@ async function settleDesktopStage(
           deps.complete(input.sessionId, input.projectId, 'incomplete')
           return
         }
+        // 启动冒烟门（2026-10-04 呈现层收口）：安全门过了还要真实启动一次——
+        // 「程序能跑起来」是 quick 的验收标准；起不来留在 implement 出人话卡（stderr 尾部
+        // 即修复靶子），过了才 delivered（截图已落 00_VERIFY/screenshots，通知卡自动嵌图）
+        const smoke = await (deps.launchSmoke ? deps.launchSmoke(input.projectId) : defaultLaunchSmokeGate(input.projectId))
+        if (smoke && !smoke.passed) {
+          deps.publish(input, 'message_delta', {
+            text: buildBlockedNoticeCard({
+              phaseTitle: getDesktopPhase(phaseId)?.title ?? phaseId,
+              whatHappened: '交付前启动验证未通过——' + smoke.detail + '。程序必须能真实启动并保持运行才算交付。',
+              evidence: smoke.outputExcerpt ?? '（无输出捕获）',
+            }),
+          })
+          deps.persistSystem(input.sessionId, '[decision] desktop-quick-launch-smoke ' + phaseId + '（未通过，停在 implement 待修复）：' + smoke.detail)
+          deps.complete(input.sessionId, input.projectId, 'incomplete')
+          return
+        }
         updateProject(input.projectId, { desktop_phase: 'delivered', status: 'completed', current_stage: 'completed' })
         deps.publish(input, 'stage_changed', { stage: 'delivered' })
         deps.publish(input, 'message_delta', { text: buildDeliveredNoticeCard(assembleDeliveredNotice(input.projectId, projectName, phaseId, result)) })
-        deps.persistSystem(input.sessionId, `[decision] desktop-quick-delivered ${phaseId} → delivered（快速直通道：安全门${securityGate ? '通过' : '无项目上下文跳过'}，跳过 verify 工程验收）`)
+        deps.persistSystem(input.sessionId, `[decision] desktop-quick-delivered ${phaseId} → delivered（快速直通道：安全门${securityGate ? '通过' : '无项目上下文跳过'}；启动冒烟${smoke ? smoke.detail : '无项目上下文跳过'}，跳过 verify 工程验收）`)
         deps.complete(input.sessionId, input.projectId)
         return
       }

@@ -80,6 +80,9 @@ export const IPC_CHANNELS = {
   DESKTOP_ARTIFACT_SUBSCRIBE: 'desktop:artifact-subscribe',
   DESKTOP_ARTIFACT_IMAGE: 'desktop:artifact-image',
   DESKTOP_ARTIFACT_EVENT: 'desktop:artifact-event',
+  /** 交付面板（2026-10-04 呈现层收口）：桌面项目文件清单+DELIVERY.md+启动声明；启动程序 */
+  PROJECT_DELIVERABLES: 'project:deliverables',
+  PROJECT_LAUNCH_APP: 'project:launch-app',
 } as const
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
@@ -398,6 +401,40 @@ export interface DesktopArtifactItemDto {
 export interface DesktopArtifactSubscribeResult {
   /** 当前清单快照（订阅即返回；后续变更经 onArtifactEvent 重拉）。 */
   items: DesktopArtifactItemDto[]
+}
+
+/** 交付面板输入（2026-10-04 呈现层收口）。 */
+export interface ProjectDeliverablesInput extends RequestEnvelope {
+  project_id: string
+}
+
+/** 交付面板快照：文件清单 + 交付说明 + 启动声明。 */
+export interface ProjectDeliverablesResult {
+  /** 项目产物文件（相对路径，≤200；跳过归档/依赖/构建产物目录） */
+  files: string[]
+  /** DELIVERY.md 全文（≤64KB；缺失为 undefined） */
+  delivery_md?: string
+  /** 启动声明状态（面板「启动程序」按钮依据） */
+  launch: {
+    declared: boolean
+    parse_ok: boolean
+    parse_error?: string
+    command?: string[]
+  }
+  /** 仅 completed 项目可启动（安全门/冒烟已过） */
+  can_launch: boolean
+}
+
+/** 启动程序输入。 */
+export interface ProjectLaunchAppInput extends RequestEnvelope {
+  project_id: string
+}
+
+/** 启动程序结果。 */
+export interface ProjectLaunchAppResult {
+  started: boolean
+  pid?: number
+  command?: string
 }
 
 export interface DesktopArtifactImageInput extends RequestEnvelope {
@@ -1570,6 +1607,12 @@ export type ElectronAPI = {
     image(input: DesktopArtifactImageInput): Promise<ApiResult<DesktopArtifactImageResult>>
     /** 产物变更信号（去抖推送；渲染端重拉清单） */
     onArtifactEvent(listener: (payload: DesktopArtifactEventPayload) => void): () => void
+  }
+  projectDeliverables: {
+    /** 交付面板（2026-10-04）：项目文件清单 + DELIVERY.md + 启动声明快照 */
+    get(input: ProjectDeliverablesInput): Promise<ApiResult<ProjectDeliverablesResult>>
+    /** 启动程序（仅 completed 项目 + 合法 LAUNCH.json；detached spawn） */
+    launch(input: ProjectLaunchAppInput): Promise<ApiResult<ProjectLaunchAppResult>>
   }
   analytics: {
     track(input: AnalyticsTrackInput): Promise<ApiResult<AnalyticsTrackResult>>

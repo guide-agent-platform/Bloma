@@ -192,7 +192,8 @@ describe('快速模式任务书（2026-10-03 拍板：quick 快速做出可用�
     const prompt = buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-implement'], { ...ctx, quickMode: true })
     expect(prompt).toContain('快速做一个能用的应用')
     expect(prompt).toContain('从零实现一个完整可用的 Windows 桌面程序')
-    expect(prompt).toContain('不要求 contract.json、驱动断言与截图')
+    expect(prompt).toContain('不要求 contract.json 与驱动断言')
+    expect(prompt).toContain('LAUNCH.json')
     expect(prompt).toContain('快速模式不做工程契约与驱动断言')
     // 长期模式任务书的关键前提不得混入（防双任务书叠加混淆调度员）
     expect(prompt).not.toContain('续接骨架委派实现真实桌面程序')

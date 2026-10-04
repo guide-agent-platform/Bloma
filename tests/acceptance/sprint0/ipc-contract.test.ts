@@ -70,6 +70,8 @@ const expectedChannels = {
   DESKTOP_ARTIFACT_SUBSCRIBE: 'desktop:artifact-subscribe',
   DESKTOP_ARTIFACT_IMAGE: 'desktop:artifact-image',
   DESKTOP_ARTIFACT_EVENT: 'desktop:artifact-event',
+  PROJECT_DELIVERABLES: 'project:deliverables',
+  PROJECT_LAUNCH_APP: 'project:launch-app',
 } as const
 
 describe('Sprint 0 IPC contract acceptance', () => {

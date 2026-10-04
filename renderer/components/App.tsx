@@ -735,6 +735,7 @@ const AppRoutes: React.FC = () => {
         waitStartTime={waitStart}
         waitActionLabel="生成可运行版本"
         isHistoryLoading={historyLoading}
+        deliveryPanel={currentProject?.template_type === 'desktop_tool'}
         previewStatus={effectivePreviewStatus}
         previewUrl={effectivePreviewUrl}
         onRefreshPreview={handleRefreshPreview}

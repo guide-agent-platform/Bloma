@@ -178,6 +178,12 @@ const electronAPI: ElectronAPI = {
   },
   dom: {
   },
+  projectDeliverables: {
+    get: (input: import('../shared/types').ProjectDeliverablesInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_DELIVERABLES, input),
+    launch: (input: import('../shared/types').ProjectLaunchAppInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.PROJECT_LAUNCH_APP, input),
+  },
   desktopArtifacts: {
     subscribe: (input: DesktopArtifactSubscribeInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.DESKTOP_ARTIFACT_SUBSCRIBE, input),
