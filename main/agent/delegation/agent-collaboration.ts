@@ -22,6 +22,7 @@ import type { SDKQuery } from '../../orchestration/orchestrator'
 import type { ConversationTurn } from '../../orchestration/orchestrator'
 import { resolveDelegationChannelOverride, type DelegationChannelOverride } from './delegation-channel'
 import { ensureDelegationWatchStarted, setDelegationScanSource } from './delegation-watch'
+import { ensureDelegationHeartbeatStarted, setDelegationHeartbeatSource } from './delegation-heartbeat'
 import {
   runAgentLoop,
   type AgentLoopResult,
@@ -795,3 +796,6 @@ function errorMessage(error: unknown): string {
 }
 
 setDelegationScanSource({ forEachRunningDelegation, stopDelegation })
+// 体验批 C（2026-10-06）：委派进度心跳共用同一 running 集合；纯信息事件默认开。
+setDelegationHeartbeatSource({ forEachRunningDelegation })
+ensureDelegationHeartbeatStarted()

@@ -1079,6 +1079,10 @@ export interface AgentEvent {
     | 'delegation_completed'
     | 'delegation_failed'
     | 'delegation_cancelled'
+    /** 委派进度心跳（2026-10-06 体验批 C，默认开）：15s 扫 running 委派子会话 JSONL，
+     * payload 含 delegation_id / child_session_id / role / last_tool / last_activity_ms / file_bytes；
+     * 纯信息事件零副作用，迟到心跳不复活已终结状态（渲染端归约防护）。 */
+    | 'delegation_heartbeat'
     /** usage 竹节压缩（闭环 PR6）：payload 含 at_turn / input_tokens / compactions；messages 已重置为 task+交接文档 */
     | 'loop_compaction'
     /** 排队消息开始派发（message-queue 2026-08-27）：payload.queue_message_id；渲染端把「已排队」气泡翻转 */

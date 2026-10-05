@@ -105,6 +105,8 @@ export interface DelegationView {
   status: DelegationViewStatus
   /** 子 agent 挂起提问的问题（父 loop 待 answer；显示 pending 提示） */
   pending_question?: string
+  /** 进度心跳（体验批 C，仅 running 态有意义）：最近工具/最后活动/累计字节 */
+  heartbeat?: { last_tool?: string; last_activity_ms?: number; file_bytes: number }
 }
 
 /** 委派生命周期聚合（仿 agentStreamStateFamily reducer）：从事件流归约出活跃/历史子会话列表。 */
@@ -742,7 +744,10 @@ export function setupGlobalAgentListeners(): () => void {
 
     // M4-C 委派协作视图：生命周期事件（delegation_started/completed/failed/cancelled）+
     // delegate_agent 工具调用的 detail 派生，归约进 delegationsFamily（仿 stream reducer）。
+    // 体验批 C：delegation_heartbeat 只走本归约——不进 streamState.events（15s 周期事件
+    // 会无限积累），也不触发新一轮判定。
     store.set(delegationsFamily(event.session_id), (previous) => reduceDelegationEvent(previous, event))
+    if (event.type === 'delegation_heartbeat') return
 
     const streamAtom = agentStreamStateFamily(event.session_id)
     store.set(streamAtom, (previous: AgentStreamState) => {
@@ -899,6 +904,20 @@ function reduceDelegationEvent(previous: DelegationView[], event: AgentEvent): D
         ...base,
         pending_question: typeof event.payload.question === 'string' ? event.payload.question : undefined,
       })
+    case 'delegation_heartbeat': {
+      // 体验批 C：进度心跳——只给 running 态刷新（迟到心跳不复活已终结状态）
+      if (existing && existing.status !== 'running') return previous
+      return upsert({
+        ...base,
+        status: 'running',
+        pending_question: undefined,
+        heartbeat: {
+          last_tool: typeof event.payload.last_tool === 'string' ? event.payload.last_tool : undefined,
+          last_activity_ms: typeof event.payload.last_activity_ms === 'number' ? event.payload.last_activity_ms : undefined,
+          file_bytes: typeof event.payload.file_bytes === 'number' ? event.payload.file_bytes : 0,
+        },
+      })
+    }
     case 'tool_call_completed': {
       // delegate_agent 工具调用的 detail（无 lifecycle 事件时的派生来源）；已有记录不覆盖
       // （tool_call 先于子循环收敛，避免把已 completed 的委派降回 running）。

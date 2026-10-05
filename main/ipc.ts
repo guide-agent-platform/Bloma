@@ -7,6 +7,7 @@ import type { BrowserWindow, IpcMain } from 'electron'
 import { IPC_CHANNELS } from '../shared/types'
 import { hasForegroundRun, isSessionActive, persistSteerDeferredNotice, publishSteerStatusEvent, setAgentStreamPublisher } from './orchestration/orchestrator'
 import { setSteerStatusListener } from './agent/loop/steer-queue'
+import { setDelegationHeartbeatPublisher } from './agent/delegation/delegation-heartbeat'
 import { setForegroundRunChecker, setProgrammingEventPublisher } from './coding/programming-orchestrator'
 import { handleAgentStreamEvent } from './platform/shell/notifications'
 import { setPermissionRequestPublisher } from './agent/permissions/permission-service'
@@ -35,6 +36,10 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
     mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, event)
     // T6 后台执行通知：completed/error/user_decision_required → 系统通知（无后端注入时内部 no-op）
     handleAgentStreamEvent(event)
+  })
+  // 体验批 C（2026-10-06）：委派进度心跳走同一推送通道（agent 层注入式，R1 不上引）
+  setDelegationHeartbeatPublisher((event) => {
+    mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, event)
   })
   setProgrammingEventPublisher((event) => {
     mainWindow.webContents.send(IPC_CHANNELS.AGENT_STREAM_EVENT, event)

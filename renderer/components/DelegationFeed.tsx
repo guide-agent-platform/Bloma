@@ -38,6 +38,11 @@ export const DelegationFeed: React.FC<{ sessionId: string }> = ({ sessionId }) =
 export const DelegationRow: React.FC<{ item: DelegationView }> = ({ item }) => {
   const [expanded, setExpanded] = React.useState(false)
   const hasPending = Boolean(item.pending_question)
+  const formatActivity = (activityMs: number): string => {
+    const seconds = Math.max(0, Math.round((Date.now() - activityMs) / 1000))
+    if (seconds < 60) return `${seconds} 秒`
+    return `${Math.round(seconds / 60)} 分钟`
+  }
   return (
     <div
       data-ai-id="delegation-row"
@@ -75,6 +80,16 @@ export const DelegationRow: React.FC<{ item: DelegationView }> = ({ item }) => {
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
           {truncateText(item.goal, 40)}
         </span>
+        {item.status === 'running' && item.heartbeat && (
+          <span
+            data-ai-id="delegation-heartbeat"
+            style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: 'var(--color-text-muted)' }}
+          >
+            <span style={{ color: 'var(--color-quick)' }}>●</span>
+            {item.heartbeat.last_tool ? `最近 ${item.heartbeat.last_tool}` : '进行中'}
+            {typeof item.heartbeat.last_activity_ms === 'number' && ` · ${formatActivity(item.heartbeat.last_activity_ms)}前活跃`}
+          </span>
+        )}
         {hasPending && (
           <span style={{ flexShrink: 0, color: 'var(--color-warning)', fontWeight: 600 }}>待回答</span>
         )}
