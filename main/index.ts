@@ -24,6 +24,7 @@ import { setProjectTouchHandler } from './platform/sessions/session-service'
 import { setNotificationProjectHooks } from './platform/shell/notifications'
 import { recordDecision } from './project/decision-log'
 import { findProject, listProjects, updateProject } from './project/project-service'
+import { installTrayAndShortcut, isTrayQuitting, notifyHiddenToTray, teardownTrayAndShortcut } from './tray'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -55,6 +56,14 @@ async function createMainWindow(): Promise<void> {
   configureContentSecurity(mainWindow)
   configureOutboundAllowlist()
   configureWebContents(mainWindow.webContents)
+  // 体验批 B（2026-10-06）：主窗 close → 隐藏到托盘（真退出走托盘菜单，before-quit 置
+  // quitting 标记放行）；首次隐藏气泡提示。挂在窗口创建处防重建丢失。
+  mainWindow.on('close', (event) => {
+    if (isTrayQuitting()) return
+    event.preventDefault()
+    mainWindow?.hide()
+    notifyHiddenToTray()
+  })
   mainWindow.webContents.on('will-navigate', (event, url) => {
     const current = mainWindow?.webContents.getURL()
     if (current && new URL(url).origin !== new URL(current).origin) event.preventDefault()
@@ -196,6 +205,7 @@ app.whenReady().then(async () => {
     console.error('[delegation] 启动对账失败（不阻断启动）:', error)
   }
   await createMainWindow()
+  installTrayAndShortcut(() => mainWindow)
 })
 
 app.on('web-contents-created', (_event, contents) => {
@@ -203,7 +213,12 @@ app.on('web-contents-created', (_event, contents) => {
 })
 
 app.on('window-all-closed', () => {
+  // 体验批 B：close 已被拦为隐藏，此处只在真退出链路（托盘退出/quitting）到达
   if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('will-quit', () => {
+  teardownTrayAndShortcut()
 })
 
 app.on('activate', () => {
