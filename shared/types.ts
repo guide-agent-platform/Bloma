@@ -1523,6 +1523,11 @@ export interface AnalyticsTrackInput extends RequestEnvelope {
       /** 桌面线运行遥测（telemetry 最小版，2026-10-01）：每段 dispatcher run 一条——狗粮复盘数据设施 */
       | 'desktop_dispatch_run'
       | 'desktop_dispatch_run_started'
+      /** 探索驱动测试批（2026-10-05）：会话/步级/findings/收口四事件——运行时证据链与探索遵从率观测 */
+      | 'desktop_drive_session_started'
+      | 'desktop_drive_step'
+      | 'desktop_drive_findings'
+      | 'desktop_drive_session_closed'
     project_id?: string
     session_id?: string
     payload: Record<string, unknown>

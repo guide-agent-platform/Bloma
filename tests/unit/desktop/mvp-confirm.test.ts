@@ -20,7 +20,7 @@ vi.mock('../../../main/project/decision-log', () => ({
 }))
 
 import { findProject, updateProject } from '../../../main/project/project-service'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { recordDecision } from '../../../main/project/decision-log'
@@ -93,6 +93,24 @@ describe('holdForMvpConfirm（挂起）', () => {
     expect(mockDecision).toHaveBeenCalledWith(expect.objectContaining({
       entry: expect.objectContaining({ type: 'mvp_confirm', title: expect.stringContaining('挂起') }),
     }))
+  })
+
+  it('探索发现段（2026-10-05 探索驱动测试批）：drive-findings.json 存在时注入过目页，含严重级/标题/actual', () => {
+    const { deps } = makeDeps()
+    mkdirSync(join(projectRoot, '00_VERIFY'), { recursive: true })
+    writeFileSync(
+      join(projectRoot, '00_VERIFY', 'drive-findings.json'),
+      JSON.stringify({
+        project_id: 'p1',
+        findings: [{ id: 'F1', severity: 'P0', title: '保存后数据丢失', expected: '保存后重启可读回', actual: '重启后为空' }],
+      }),
+      'utf8',
+    )
+    holdForMvpConfirm({ input, deps, fromPhase: 'desktop-verify', notice: { projectName: 'x', fromPhaseTitle: 'y' } })
+    const html = readFileSync(join(projectRoot, '00_VERIFY', 'mvp-review.html'), 'utf8')
+    expect(html).toContain('探索发现（1 项')
+    expect(html).toContain('[P0] 保存后数据丢失')
+    expect(html).toContain('重启后为空')
   })
 })
 

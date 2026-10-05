@@ -13,12 +13,13 @@
 import type { DesktopDispatchRunResult } from './dispatcher-loop'
 import type { DesktopRouteDeps } from './desktop-route'
 import type { DeliveredNoticeInput } from './notice-cards'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { recordDecision } from '../project/decision-log'
 import { buildDeliveredNoticeCard } from './notice-cards'
 import { updateProject, findProject } from '../project/project-service'
 import { mintProjectPreviewUrl } from '../delivery/preview-scheme'
+import { DRIVE_FINDINGS_REL, type DriveFinding } from './drive-app-tool'
 
 export const MVP_OPTION_CONFIRM = 'mvp_confirm_go'
 export const MVP_OPTION_ADJUST = 'mvp_adjust'
@@ -30,8 +31,9 @@ function escapeHtml(text: string): string {
 }
 
 /** 成品过目页（2026-10-05：MVP 门「像 UX 门一样右栏呈现」）：截图画廊 + 驱动验收结论
- *  + DELIVERY 摘要；落盘 00_VERIFY/ 供 bloma-file:// 直读（截图相对路径同目录引用）。 */
-function buildMvpReviewHtml(notice: DeliveredNoticeInput): string {
+ *  + DELIVERY 摘要；落盘 00_VERIFY/ 供 bloma-file:// 直读（截图相对路径同目录引用）。探索
+ *  发现段（2026-10-05 探索驱动测试批）从 drive-findings.json 注入——参考证据不阻塞交付。 */
+function buildMvpReviewHtml(notice: DeliveredNoticeInput, driveFindings?: DriveFinding[]): string {
   const shots = (notice.screenshotPaths ?? [])
     .map((rel) => rel.replace(/^00_VERIFY\//, ''))
     .map((rel) => `<figure><img src="${escapeHtml(rel)}" alt="程序截图"/><figcaption>${escapeHtml(rel)}</figcaption></figure>`)
@@ -39,6 +41,15 @@ function buildMvpReviewHtml(notice: DeliveredNoticeInput): string {
   const driverLine = notice.driverSummary
     ? `<li>驱动验收：${notice.driverSummary.passed}/${notice.driverSummary.total} 场景 PASS（平台真实执行回读）</li>`
     : ''
+  const findingsSection =
+    driveFindings && driveFindings.length > 0
+      ? `<h2 style="font-size:15px;margin:20px 0 8px;">探索发现（${driveFindings.length} 项 · 参考证据，不阻塞交付）</h2>\n<ul>${driveFindings
+          .map(
+            (item) =>
+              `<li><b>[${escapeHtml(item.severity)}] ${escapeHtml(item.title)}</b><br/>应发生：${escapeHtml(item.expected)}<br/>实际：${escapeHtml(item.actual)}</li>`,
+          )
+          .join('')}</ul>`
+      : ''
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -60,6 +71,7 @@ function buildMvpReviewHtml(notice: DeliveredNoticeInput): string {
 <h1>成品过目：${escapeHtml(notice.projectName)}</h1>
 <div class="sub">来源阶段：${escapeHtml(notice.fromPhaseTitle)} · 验收全绿，等你确认后正式交付</div>
 <ul>${driverLine}<li>程序文件与运行方式：右侧交付面板 / 项目根 DELIVERY.md</li></ul>
+${findingsSection}
 ${notice.deliveryDigest ? `<pre>${escapeHtml(notice.deliveryDigest)}</pre>` : ''}
 ${shots || '<p style="color:#999">（无截图——无窗口程序或截图未产出）</p>'}
 <div class="foot">确认后在聊天中的「确认，交付」生效；有要改的直接回复</div>
@@ -115,7 +127,17 @@ export function holdForMvpConfirm(options: {
     if (root) {
       const reviewAbs = join(root, MVP_REVIEW_RELATIVE_PATH)
       mkdirSync(join(reviewAbs, '..'), { recursive: true })
-      writeFileSync(reviewAbs, buildMvpReviewHtml(options.notice), 'utf8')
+      // 探索发现（2026-10-05 探索驱动测试批）：verify 编排器委派的探索者在 loop 内把
+      // findings 写入 00_VERIFY/drive-findings.json（委派被等待，settle 时已就绪）；
+      // 文件缺失/零发现=未探索或无发现，如实降级不渲染。
+      let driveFindings: DriveFinding[] | undefined
+      try {
+        const parsed = JSON.parse(readFileSync(join(root, DRIVE_FINDINGS_REL), 'utf8')) as { findings?: DriveFinding[] }
+        if (Array.isArray(parsed.findings) && parsed.findings.length > 0) driveFindings = parsed.findings
+      } catch {
+        // 无探索发现文件：如实降级
+      }
+      writeFileSync(reviewAbs, buildMvpReviewHtml(options.notice, driveFindings), 'utf8')
       reviewUrl = mintProjectPreviewUrl(input.projectId, MVP_REVIEW_RELATIVE_PATH)
     }
   } catch (error) {

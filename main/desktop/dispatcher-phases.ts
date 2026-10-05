@@ -217,7 +217,7 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '1. 按 PRD 背板功能清单实现，驱动断言与实现静态自洽（断言先行、真实调用被测代码、禁止平凡通过）；\n' +
       '2. 真实红绿反馈：子会话可用 run_project_script 当场运行项目根内 .py 自测脚本（每次≤90s、至多 12 次，任务书里直接要求它写无头自测并附真实红绿结果）；收口前用 run_project_driver 跑一次契约驱动，失败清单交同一委派线修复后复跑；不要因「无法执行」阻塞、编造或向用户索要本机运行；\n' +
       '3. 产出 DELIVERY.md 到项目根（不是 00_SCAFFOLD/ 内——门禁按项目根检查）——运行方式 / 依赖安装 / 已知限制 / 驱动执行入口；契约 driver.command 相对项目根解析，指向 00_SCAFFOLD/ 内文件须带目录前缀（如 00_SCAFFOLD/driver.py）；\n' +
-      '4. 产出 LAUNCH.json 到项目根（机器可读启动声明，宿主启动冒烟与交付面板都用它）：{"schema_version":1,"command":["python","主程序.py"],"window_title":"窗口标题"}——command 相对项目根；GUI 程序必写 window_title（宿主截窗口图用），无窗口程序可省略；\n' +
+      '4. 产出 LAUNCH.json 到项目根（机器可读启动声明，宿主启动冒烟与交付面板都用它）：{"schema_version":1,"command":["python","主程序.py"],"window_title":"窗口标题"}——command 相对项目根；GUI 程序必写 window_title（宿主截窗口图用），无窗口程序可省略；主程序入口纪律：模块级创建窗口、mainloop 放 `if __name__ == "__main__":` 守卫内（平台探索驱动需 import 不自启）；\n' +
       '5. 高分屏清晰度硬性纪律（坑库 [实证]）：主程序入口、任何窗口创建前先声明 Windows DPI 感知并补偿 tk scaling（骨架 app.py 已内置 enable_hidpi()，续接骨架时直接调用；从零写则照抄该函数）——不声明的程序在 150% 缩放屏整窗发虚；\n' +
       `6. 第三方组件：子会话用 install_packages 声明制安装（项目内 .venv，requirements.txt 声明→装→import 回读；装后 LAUNCH command 用 .venv\\Scripts\\python.exe）。可用组件速查：\n${componentQuickReference().split('\n').slice(1).join('\n')}`,
     outputPath: '',
@@ -263,7 +263,7 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '3. 一次性委派 implement 子会话完成实现（依赖与解释器路径如实装配，不编造运行结果）；子会话有 run_project_script（真实运行项目根内 .py，每次≤90s、至多 12 次）——任务书里要求它写无头自测脚本并当场跑到绿、附真实红绿结果，不要只写不跑；子会话还有 install_packages（声明制 .venv 安装，需要第三方组件时：requirements 声明→安装→import 回读；装后 LAUNCH command 用 .venv\\Scripts\\python.exe；venv 统一用 .venv 这一个名字，不要自建 .venv-probe 之类异名 venv——快照/安全扫描/交付清单靠标记识别，异名会漏）；\n' +
       `4. 可用组件速查（声明安装，坑与降级详卡见 install_packages 工具）：\n${componentQuickReference().split('\n').slice(1).join('\n')}\n` +
       '5. 产出 DELIVERY.md 到项目根（不是子目录内——门禁按项目根检查）：运行方式 / 依赖安装 / 已知限制（自测结果如实引用，未验证项明说）。不要求 contract.json 与驱动断言；\n' +
-      '6. 产出 LAUNCH.json 到项目根（机器可读启动声明——平台交付前会真实启动一次验证，这是快速模式的验收门）：{"schema_version":1,"command":["python","主程序.py"],"window_title":"窗口标题"}——command 相对项目根（装了 .venv 的项目用 ".venv\\\\Scripts\\\\python.exe"）；GUI 程序必写 window_title（平台截窗口图呈现给你看），无窗口程序可省略。',
+      '6. 产出 LAUNCH.json 到项目根（机器可读启动声明——平台交付前会真实启动一次验证，这是快速模式的验收门）：{"schema_version":1,"command":["python","主程序.py"],"window_title":"窗口标题"}——command 相对项目根（装了 .venv 的项目用 ".venv\\\\Scripts\\\\python.exe"）；GUI 程序必写 window_title（平台截窗口图呈现给你看），无窗口程序可省略；主程序入口纪律：模块级创建窗口、mainloop 放 `if __name__ == "__main__":` 守卫内（平台探索驱动需 import 不自启）。',
     quickConstraints: [
       '快速模式不做工程契约与驱动断言（那是长期模式的工程化验收设施，本次跳过）；功能自测走子会话 run_project_script 真实红绿',
       '能运行且功能齐全优先于代码结构完美；做不完的如实写进 DELIVERY.md 的已知限制',
@@ -280,7 +280,8 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '2. **驱动执行由平台收口时执行**（spawn python 跑 contract.json 的 driver.command，退出码/stdout 回读）——你不需要也无法自行执行驱动，不要花轮次尝试执行或写「无执行通道」的替代报告；\n' +
       '3. 你的验收职责 = contract.json 合法（必填形态一字不差：schema_version 数字 1 / entry / driver 对象含 command、timeout_ms、exit_code_semantics 三键、assert_readback / env_whitelist / components——形态见下）+ driver.py 断言齐备：\n' + MINIMAL_CONTRACT_EXAMPLE + '\n' +
       '4. 驱动执行报告（通过/失败/阻塞三分类，失败路由进修复轮）由平台在收口时执行驱动后生成——你无需也无法自行产出，不要编写替代报告；驱动 stdout 锚点与窗口截图约定同 driver-skeleton（每场景一行 `S<编号> PASS <结论>`，截图后立即隐藏窗口，UI 场景至少 2 张）；\n' +
-      '5. 裁决边界：平台收口三重门判定交付（驱动回读+宿主安全扫描+裁判硬约束：PRD 覆盖/场景覆盖/入口存在），不采信模型自述。',
+      '5. 裁决边界：平台收口三重门判定交付（驱动回读+宿主安全扫描+裁判硬约束：PRD 覆盖/场景覆盖/入口存在），不采信模型自述；\n' +
+      '6. 探索委派（2026-10-05 探索驱动测试批，收口前必做）：委派一名 research 角色探索子会话——它有 drive_project_app（真实操控本项目 GUI：open→act→read→report→close，窗口隐藏不打扰用户）；任务书里给它 PRD 验收点清单（读 PRD 逐条列出 EARS 条目），要求按正常/空输入/边界/重复/乱序点击逐项探索并 report findings（P0/P1/P2 + expected/actual + repro_steps），探索完 close。你不自己调 drive_project_app（你的职责是委派与裁决）；findings 进 MVP 过目页供用户参考，不阻塞交付。若委派不可用则如实说明，不要假装已探索。',
     outputPath: '00_VERIFY',
     constraints: [
       '测试工程师与实现者必须异渠道（C1 跨渠道委派）',

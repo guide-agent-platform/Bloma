@@ -48,6 +48,7 @@ import { execFileProbeSpawn, isDesktopEnvReady, probeDesktopEnv, type ProbeSpawn
 import { parseProjectContract } from './contract-schema'
 import { runContractDriver, execFileDriverSpawn, type DriverExecutionReport } from './process-driver'
 import { buildChildScriptRunnerTool } from './child-exec-tool'
+import { buildDriveAppTool, disposeDriveSessions } from './drive-app-tool'
 import { buildInstallPackagesTool } from './install-packages-tool'
 import { runSecurityScan } from '../verification/security-scan'
 import { findProject } from '../project/project-service'
@@ -255,6 +256,10 @@ export function buildDesktopChildTools(projectId: string, role: DelegationRunRol
     ...(role === 'implement'
       ? [buildChildScriptRunnerTool(projectId), buildInstallPackagesTool(projectId)]
       : []),
+    // 探索驱动测试 A 档（2026-10-05，实施稿预审修订版）：research 子会话装配驱动桥。
+    // 探索者与 implement 结构性分离（反自证）：只读面 + 驱动面，无任何写工具；
+    // 不进调度员常驻面（探索由 verify 编排器委派，见 dispatcher-phases verify 任务书）。
+    ...(role === 'research' ? [buildDriveAppTool(projectId)] : []),
   ]
 }
 
@@ -437,8 +442,8 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
   setChildToolsBuilder(buildDesktopChildTools)
 
   const loopResult = await runAgentLoopSafe(input, node, tools, system, publish, collector).finally(() =>
-    // 收尾（含异常路径）：stop 未收敛子委派 + 清幂等缓存 + 注销父上下文
-    disposeParentDelegationState(input.sessionId),
+    // 收尾（含异常路径）：stop 未收敛子委派 + 清幂等缓存 + 注销父上下文 + 探索会话兜底清理
+    void Promise.resolve(disposeParentDelegationState(input.sessionId)).finally(() => disposeDriveSessions(input.projectId)),
   )
 
   if ('safeError' in loopResult) {

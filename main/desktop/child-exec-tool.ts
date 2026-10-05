@@ -41,7 +41,7 @@ export interface ChildScriptRunnerDeps {
 
 /** 解析 python 绝对路径（where python 首个命中；进程内缓存）。 */
 let cachedPython: string | undefined
-async function defaultResolvePython(): Promise<string> {
+export async function defaultResolvePython(): Promise<string> {
   if (cachedPython) return cachedPython
   return await new Promise<string>((resolvePromise, reject) => {
     execFile('where', ['python'], { windowsHide: true, encoding: 'utf8' }, (error, stdout) => {
@@ -60,7 +60,7 @@ async function defaultResolvePython(): Promise<string> {
   })
 }
 
-function buildChildExecEnv(parentEnv: NodeJS.ProcessEnv): Record<string, string> {
+export function buildChildExecEnv(parentEnv: NodeJS.ProcessEnv): Record<string, string> {
   const env: Record<string, string> = {}
   for (const key of CHILD_EXEC_ENV_KEYS) {
     const value = parentEnv[key]
