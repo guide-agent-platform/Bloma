@@ -7,6 +7,8 @@ import { ToolCallRow, deriveToolCallRecords, safeJsonPreview } from './ToolCallB
 import { DelegationRow } from './DelegationFeed'
 import { ProgressCard, buildProgressLines, countDoneSteps, mapStageToRunSteps } from './ProgressCard'
 import { VoiceInput } from './speech/VoiceInput'
+import { VoiceRecordingBar } from './speech/VoiceRecordingBar'
+import { useVoiceRecorder } from './speech/useVoiceRecorder'
 import type { DelegationView } from '../agent-atoms'
 import { ProcessBlockGroup, type ProcessItem } from './ProcessBlockGroup'
 import { ThinkingIndicator, type ThinkingPhase } from './ThinkingIndicator'
@@ -151,6 +153,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   // WC-P2（2026-08-29）：草稿 atom 化——零渠道提交被拦截直达设置页后，返回工作区输入仍在
   const [inputValue, setInputValue] = useAtom(chatInputDraftAtom)
+  // 语音输入（2026-10-06 波形批）：录音生命周期 hook——录音态整行变形为 VoiceRecordingBar
+  const voice = useVoiceRecorder((text) => setInputValue((prev) => (prev ? `${prev} ${text}` : text)))
+  // 录音结束（转写回填后）自动聚焦回输入框，免再点一次
+  const voicePhaseRef = React.useRef(voice.phase)
+  React.useEffect(() => {
+    const previous = voicePhaseRef.current
+    voicePhaseRef.current = voice.phase
+    if (previous === 'transcribing' && voice.phase === 'idle') inputRef.current?.focus()
+  }, [voice.phase])
   const hasChannels = useAtomValue(hasUsableChannelsAtom)
   // clipboard-paste P1（2026-08-29）：待发送粘贴图（短引用 + 内存 dataURL 预览）与降级错误
   const [pendingImages, setPendingImages] = React.useState<Array<PastedImageRef & { dataUrl: string }>>([])
@@ -683,12 +694,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             transition: 'border-color var(--transition-fast), box-shadow var(--transition-fast)',
           }}
         >
-          <textarea
-            ref={inputRef}
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
+          {voice.phase === 'recording' ? (
+            <VoiceRecordingBar voice={voice} maxSeconds={110} />
+          ) : (
+            <textarea
+              ref={inputRef}
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
             placeholder={
               chatInputHint ??
               (busy
@@ -713,10 +727,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               maxHeight: 120,
             }}
           />
-          <VoiceInput
-            onInsertText={(text) => setInputValue((prev) => (prev ? `${prev} ${text}` : text))}
-          />
-          {hasActiveStream ? (
+          )}
+          <VoiceInput voice={voice} />
+          {voice.phase === 'recording' ? null : hasActiveStream ? (
             <button
               onClick={onStopGeneration}
               aria-label="停止本轮制作"

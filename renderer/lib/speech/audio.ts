@@ -107,10 +107,10 @@ export class Recording {
     }
   }
 
-  /** 当前实测音量 RMS（0~1；波形条高度）。 */
-  level(): number {
+  /** 当前实测音量 RMS（0~1；float 时域，比 byte 域精度高——波形/包络用）。 */
+  amplitude(): number {
     if (!this.analyser) return 0
-    this.analyser.getByteTimeDomainData(this.samples as unknown as Uint8Array<ArrayBuffer>)
+    this.analyser.getFloatTimeDomainData(this.samples as unknown as Float32Array<ArrayBuffer>)
     let sum = 0
     for (const sample of this.samples) sum += sample * sample
     return Math.sqrt(sum / this.samples.length)
