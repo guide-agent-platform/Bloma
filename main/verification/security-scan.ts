@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
 /**
@@ -142,6 +142,19 @@ const SCAN_RULES: ScanRule[] = [
 /** 参与扫描的产物扩展名（静态前端产物 + 桌面线 Python：driver/scaffold 在本机真实执行，P0-2）。 */
 const SCAN_EXTENSIONS = new Set(['.html', '.htm', '.js', '.mjs', '.cjs', '.ts', '.jsx', '.tsx', '.css', '.py'])
 
+/** venv 标志文件（2026-10-05 安全门误报根治）：目录含此文件即 venv，整棵剪枝——
+ *  不管叫 .venv / .venv-probe / venv / env（狗粮 256001d0 实证：子会话自发建
+ *  .venv-probe，名字法穿透，pip 自带源码的 eval/exec/shell=True 命中红线 14 处，
+ *  verify 安全门误拒收且拒因笼统，模型按错误线索空转三轮）。标记法优于竞品
+ *  Proma-Easy 的纯名字排除（他们同样挡不住异名 venv）。 */
+export function isVenvDirectory(dir: string): boolean {
+  try {
+    return existsSync(join(dir, 'pyvenv.cfg'))
+  } catch {
+    return false
+  }
+}
+
 /** 递归收集目录下的可扫描文件（跳过 node_modules / .git / dist 等非产物目录）。 */
 function collectFiles(dir: string, out: string[]): void {
   let entries
@@ -153,10 +166,13 @@ function collectFiles(dir: string, out: string[]): void {
   for (const entry of entries) {
     if (entry.isDirectory()) {
       if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist' || entry.name === 'dist-main') continue
-      // venv（2026-10-05 迁移批）：第三方依赖代码不进产物扫描（性能+误报面）；
-      // 供应链扫描深化挂账，当前口径=只扫自产源码
-      if (entry.name === '.venv' || entry.name === '__pycache__') continue
-      collectFiles(join(dir, entry.name), out)
+      // venv/缓存目录（2026-10-05 迁移批+误报根治）：名字集吸收 Proma-Easy（venv/env/
+      // .tox/.mypy_cache/.pytest_cache/.gradle）+ pyvenv.cfg 标记法兑底异名 venv；
+      // 第三方依赖代码不进产物扫描（性能+误报面），供应链扫描深化挂账，当前口径=只扫自产源码
+      if (['.venv', 'venv', 'env', '__pycache__', '.mypy_cache', '.pytest_cache', '.tox', '.gradle'].includes(entry.name)) continue
+      const childDir = join(dir, entry.name)
+      if (isVenvDirectory(childDir)) continue
+      collectFiles(childDir, out)
     } else if (entry.isFile()) {
       const dot = entry.name.lastIndexOf('.')
       if (dot >= 0 && SCAN_EXTENSIONS.has(entry.name.slice(dot).toLowerCase())) out.push(join(dir, entry.name))

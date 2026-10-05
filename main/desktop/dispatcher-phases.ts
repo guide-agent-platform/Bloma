@@ -260,7 +260,7 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '       except Exception:\n' +
       '           return 1.0\n' +
       '   scale = enable_hidpi()  # Tk() 创建前；窗口建好后：root.tk.call("tk", "scaling", scale * 96.0 / 72.0)\n' +
-      '3. 一次性委派 implement 子会话完成实现（依赖与解释器路径如实装配，不编造运行结果）；子会话有 run_project_script（真实运行项目根内 .py，每次≤90s、至多 12 次）——任务书里要求它写无头自测脚本并当场跑到绿、附真实红绿结果，不要只写不跑；子会话还有 install_packages（声明制 .venv 安装，需要第三方组件时：requirements 声明→安装→import 回读；装后 LAUNCH command 用 .venv\\Scripts\\python.exe）；\n' +
+      '3. 一次性委派 implement 子会话完成实现（依赖与解释器路径如实装配，不编造运行结果）；子会话有 run_project_script（真实运行项目根内 .py，每次≤90s、至多 12 次）——任务书里要求它写无头自测脚本并当场跑到绿、附真实红绿结果，不要只写不跑；子会话还有 install_packages（声明制 .venv 安装，需要第三方组件时：requirements 声明→安装→import 回读；装后 LAUNCH command 用 .venv\\Scripts\\python.exe；venv 统一用 .venv 这一个名字，不要自建 .venv-probe 之类异名 venv——快照/安全扫描/交付清单靠标记识别，异名会漏）；\n' +
       `4. 可用组件速查（声明安装，坑与降级详卡见 install_packages 工具）：\n${componentQuickReference().split('\n').slice(1).join('\n')}\n` +
       '5. 产出 DELIVERY.md 到项目根（不是子目录内——门禁按项目根检查）：运行方式 / 依赖安装 / 已知限制（自测结果如实引用，未验证项明说）。不要求 contract.json 与驱动断言；\n' +
       '6. 产出 LAUNCH.json 到项目根（机器可读启动声明——平台交付前会真实启动一次验证，这是快速模式的验收门）：{"schema_version":1,"command":["python","主程序.py"],"window_title":"窗口标题"}——command 相对项目根（装了 .venv 的项目用 ".venv\\\\Scripts\\\\python.exe"）；GUI 程序必写 window_title（平台截窗口图呈现给你看），无窗口程序可省略。',

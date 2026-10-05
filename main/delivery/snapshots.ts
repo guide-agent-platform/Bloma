@@ -72,7 +72,11 @@ export async function createSnapshot(input: SnapshotCreateInput): Promise<Snapsh
       force: true,
       // Phase 10 W1-1：归档排除受保护顶层目录（.git 版本史 / data-backups 备份）——
       // 回滚不回退它们（见 restoreSnapshotFiles 的挪出/挪回）；不存在时零影响。
-      filter: (src: string) => !isPreservedToplevel(project.root_path, src),
+      // venv 排除（2026-10-05 误报根治同族）：名字集 + pyvenv.cfg 标记（异名 venv 兑底）——
+      // 否则每次 checkpoint 把 539+ 个 pip/setuptools 文件拷进快照（膨胀+拖慢）。
+      filter: (src: string) =>
+        !isPreservedToplevel(project.root_path, src)
+        && !isExcludedEnvironmentDir(src),
     })
     // 文档冻结（T7）：documents 目录整份归档（prd.json/decisions.md/sketch.html 都在其中；
     // T2 落盘即导出保证 decisions.md 不是过期聚合）。目录尚不存在（如草图阶段的早期快照）
@@ -435,6 +439,19 @@ export function rollbackCodeOnlyEnabled(): boolean {
  *  W2（2026-09-18）：增 node_modules——vendor 钉版供货确定性可重建（回滚后预览引擎幂等补拷），
  *  归档含它只会膨胀快照（Express 依赖树 MB 级）。旧项目无此目录零影响。 */
 export const SNAPSHOT_PRESERVED_TOPLEVEL = ['.git', 'data-backups', 'node_modules'] as const
+
+/** venv/缓存目录排除（快照归档不携带环境产物；标记法同 security-scan 根治口径）。 */
+const SNAPSHOT_EXCLUDED_DIR_NAMES = new Set(['.venv', 'venv', 'env', '__pycache__', '.mypy_cache', '.pytest_cache', '.tox', '.gradle'])
+
+function isExcludedEnvironmentDir(src: string): boolean {
+  const name = basename(src)
+  if (SNAPSHOT_EXCLUDED_DIR_NAMES.has(name)) return true
+  try {
+    return existsSync(join(src, 'pyvenv.cfg'))
+  } catch {
+    return false
+  }
+}
 
 function isPreservedToplevel(rootPath: string, src: string): boolean {
   const rel = relative(rootPath, src)

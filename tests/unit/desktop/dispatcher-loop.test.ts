@@ -600,7 +600,7 @@ describe('desktop-verify 收口双门（全链路审查 P1-5/P0-1 缓解，2026-
       writeReport: () => undefined,
       sandboxRoot: root,
     }))
-    expect(result.advance).toMatchObject({ decision: 'reject', reason: 'artifacts-missing' })
+    expect(result.advance).toMatchObject({ decision: 'reject', reason: 'security-fail' })
     if (result.advance?.decision === 'reject') {
       expect(result.advance.education).toContain('宿主安全扫描未通过')
       expect(result.advance.education).toContain('driver-skeleton.py')

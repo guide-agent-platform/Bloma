@@ -612,7 +612,10 @@ async function runVerifyFinalize(
     return {
       advance: {
         decision: 'reject',
-        reason: 'artifacts-missing',
+        // 语义化拒因（2026-10-05 256001d0 事故）：安全门误报时 reason 笼统写成
+        // artifacts-missing，模型按「产物缺失」的错误线索空转三轮——拒因与教育
+        // 文案对齐，归因不再绕路。
+        reason: 'security-fail',
         missingArtifacts: [{ gateId: 'driver-report', artifacts: [DRIVER_REPORT_PATH] }],
         discardedObservations: [],
         education:

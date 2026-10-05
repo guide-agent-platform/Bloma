@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -182,5 +182,26 @@ describe('renderSecurityScanMarkdown — 报告不含技术术语', () => {
     })
     expect(markdown).toContain('未通过')
     expect(markdown).not.toMatch(/XSS|SQL\s*注入|OWASP/i)
+  })
+})
+
+
+// ── 2026-10-05 误报根治回归锁：异名 venv（.venv-probe 等）按 pyvenv.cfg 标记剪枝 ──
+describe('venv 标记剪枝（256001d0 事故回归锁）', () => {
+  it('含 pyvenv.cfg 的异名 venv 目录整棵跳过——pip 自带源码不再命中红线', () => {
+    const home = mkdtempSync(join(tmpdir(), 'bloma-scan-venv-'))
+    try {
+      const probeVenv = join(home, '.venv-probe', 'Lib', 'site-packages', 'pip')
+      mkdirSync(probeVenv, { recursive: true })
+      writeFileSync(join(home, '.venv-probe', 'pyvenv.cfg'), 'home = x', 'utf8')
+      writeFileSync(join(probeVenv, 'evil.py'), 'eval("1")' + String.fromCharCode(10), 'utf8')
+      writeFileSync(join(home, 'app.py'), 'print("clean")', 'utf8')
+      const result = runSecurityScan({ project_id: 'p-venv-marker', root_path: home })
+      expect(result.passed).toBe(true)
+      expect(result.issues.some((issue) => issue.file.includes('.venv-probe'))).toBe(false)
+      expect(result.scanned_files).toBe(1)
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
   })
 })

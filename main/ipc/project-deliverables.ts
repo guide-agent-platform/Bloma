@@ -14,6 +14,7 @@ import { spawn } from 'node:child_process'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { IPC_CHANNELS } from '../../shared/types'
+import { isVenvDirectory } from '../verification/security-scan'
 import { extractRequestId, requireFields, safeInvoke } from './shared'
 import type { ProjectDeliverablesInput, ProjectDeliverablesResult, ProjectLaunchAppInput, ProjectLaunchAppResult } from '../../shared/types'
 import { findProject } from '../project/project-service'
@@ -44,8 +45,10 @@ function listFiles(rootPath: string): string[] {
         if (childRel === '00_VERIFY/screenshots') continue
         // 确认门新规（2026-10-04）：00_UX 外观草图存档不是交付物，不进文件清单。
         if (childRel === '00_UX') continue
-        // 迁移批（2026-10-05）：.venv/__pycache__ 是环境产物不是交付物
-        if (childRel === '.venv' || childRel === '__pycache__') continue
+        // 迁移批（2026-10-05）：venv/缓存目录是环境产物不是交付物；名字集之外用
+        // pyvenv.cfg 标记兑底异名 venv（同 security-scan 根治口径）
+        if (['.venv', 'venv', 'env', '__pycache__', '.mypy_cache', '.pytest_cache', '.tox', '.gradle'].includes(entry.name)) continue
+        if (isVenvDirectory(join(dir, entry.name))) continue
         visit(join(dir, entry.name), childRel, depth + 1)
       } else {
         files.push(childRel)

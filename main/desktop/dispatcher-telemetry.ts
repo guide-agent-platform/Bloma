@@ -36,6 +36,7 @@ export function deriveRepairClass(result: DesktopDispatchRunResult): string | un
   const advance = result.advance
   if (!advance || advance.decision !== 'reject') return undefined
   if (advance.reason === 'contract-invalid') return 'mapping'
+  if (advance.reason === 'security-fail') return 'behavior' // 安全缺陷属行为面回炉（显式映射，不再靠教育文案关键词）
   const education = advance.education ?? ''
   if (education.includes('裁判门未过')) {
     if (education.includes('场景覆盖不足')) return 'coverage'

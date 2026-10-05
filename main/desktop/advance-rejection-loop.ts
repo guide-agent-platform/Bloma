@@ -60,6 +60,7 @@ export function classifyRejection(decision: AdvanceDecision & { decision: 'rejec
       return 'target-deny'
     case 'artifacts-missing':
     case 'contract-invalid':
+    case 'security-fail':
       return 'gate-deny'
   }
 }
