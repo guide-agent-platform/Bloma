@@ -14,6 +14,85 @@ from __future__ import annotations
 
 import sys
 
+
+# ── 窗口自截助手（平台内置，2026-10-05：driver 场景截图一律用它，不要自己写 ImageGrab）──
+# 句柄级 PrintWindow 捕获：被遮挡也截得到自己（ImageGrab 抓屏幕区域，被覆盖就
+# 截到覆盖物）；DPI 感知输出物理分辨率。失败链：PrintWindow → ImageGrab 兼底 → False
+# （调用方按约定降级 SKIP，如实标注，不阻塞断言）。
+def capture_window(tk_root, out_path: str) -> bool:
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:
+            pass
+        user32 = ctypes.windll.user32
+        gdi32 = ctypes.windll.gdi32
+        hwnd = user32.GetAncestor(int(tk_root.winfo_id()), 3)  # GA_ROOT=3 顶层句柄
+        if not hwnd:
+            return _capture_window_grab_fallback(tk_root, out_path)
+        rect = wintypes.RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return _capture_window_grab_fallback(tk_root, out_path)
+        w, h = rect.right - rect.left, rect.bottom - rect.top
+        if w <= 0 or h <= 0 or w > 8192 or h > 8192:
+            return _capture_window_grab_fallback(tk_root, out_path)
+        hdc = user32.GetWindowDC(hwnd)
+        memdc = gdi32.CreateCompatibleDC(hdc)
+        bmp = gdi32.CreateCompatibleBitmap(hdc, w, h)
+        gdi32.SelectObject(memdc, bmp)
+        ok = user32.PrintWindow(hwnd, memdc, 2) or user32.PrintWindow(hwnd, memdc, 0)
+        if not ok:
+            gdi32.DeleteObject(bmp)
+            gdi32.DeleteDC(memdc)
+            user32.ReleaseDC(hwnd, hdc)
+            return _capture_window_grab_fallback(tk_root, out_path)
+
+        class _BMIH(ctypes.Structure):
+            _fields_ = [
+                ("biSize", wintypes.DWORD), ("biWidth", wintypes.LONG), ("biHeight", wintypes.LONG),
+                ("biPlanes", wintypes.WORD), ("biBitCount", wintypes.WORD), ("biCompression", wintypes.DWORD),
+                ("biSizeImage", wintypes.DWORD), ("biXPelsPerMeter", wintypes.LONG), ("biYPelsPerMeter", wintypes.LONG),
+                ("biClrUsed", wintypes.DWORD), ("biClrImportant", wintypes.DWORD),
+            ]
+
+        bmi = _BMIH()
+        bmi.biSize = ctypes.sizeof(_BMIH)
+        bmi.biWidth, bmi.biHeight = w, -h  # top-down
+        bmi.biPlanes, bmi.biBitCount, bmi.biCompression = 1, 32, 0
+        buf = ctypes.create_string_buffer(w * h * 4)
+        if not gdi32.GetDIBits(memdc, bmp, 0, h, buf, ctypes.byref(bmi), 0):
+            gdi32.DeleteObject(bmp)
+            gdi32.DeleteDC(memdc)
+            user32.ReleaseDC(hwnd, hdc)
+            return _capture_window_grab_fallback(tk_root, out_path)
+        from PIL import Image
+
+        img = Image.frombuffer("RGBA", (w, h), buf, "raw", "BGRA", 0, 1)
+        img.convert("RGB").save(out_path, "PNG")
+        gdi32.DeleteObject(bmp)
+        gdi32.DeleteDC(memdc)
+        user32.ReleaseDC(hwnd, hdc)
+        return True
+    except Exception:
+        return _capture_window_grab_fallback(tk_root, out_path)
+
+
+def _capture_window_grab_fallback(tk_root, out_path: str) -> bool:
+    """兼容兜底（非 Windows / 句柄路径失败）：旧 ImageGrab 屏幕区域抓拍（可能截到遮挡物）。"""
+    try:
+        from PIL import ImageGrab
+
+        x, y = tk_root.winfo_rootx(), tk_root.winfo_rooty()
+        w, h = tk_root.winfo_width(), tk_root.winfo_height()
+        ImageGrab.grab(bbox=(x, y, x + w, y + h)).save(out_path, "PNG")
+        return True
+    except Exception:
+        return False
+
+
 # ── 场景登记表（scaffold 阶段填场景名，implement 阶段接断言函数）──
 # 形态：assert 函数注册进 SCENARIOS 后自动被 main 调度。
 SCENARIOS: list[dict] = [

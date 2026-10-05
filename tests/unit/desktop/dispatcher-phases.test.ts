@@ -23,6 +23,18 @@ describe('dispatcher-phases 阶段表 schema', () => {
     expect(result.violations).toEqual([])
   })
 
+  it('driver 截图约定（2026-10-05 根治回归锁）：scaffold 任务书教骨架内置 capture_window，不再教 ImageGrab 截屏；骨架模板含 PrintWindow 实现', async () => {
+    const { readFileSync } = await import('node:fs')
+    const scaffold = getDesktopPhase('desktop-scaffold')
+    const template = scaffold?.taskTemplate ?? ''
+    expect(template).toContain('capture_window')
+    expect(template).not.toContain('PIL.ImageGrab.grab')  // 旧截屏教法绝迹；负向提及（不要自己写）允许
+    const skeleton = readFileSync('main/templates/skeletons/desktop-python/driver-skeleton.py', 'utf8')
+    expect(skeleton).toContain('def capture_window')
+    expect(skeleton).toContain('PrintWindow')
+    expect(skeleton).toContain('_capture_window_grab_fallback')
+  })
+
   it('快速模式字段数据锁（2026-10-03 quick 通道）：quickTaskTemplate/quickConstraints 仅 desktop-implement 提供且非空，其余阶段不提供（quickMode 回退原任务书）；DPI 感知纪律已在任务书（2026-10-05 坑库回填）', () => {
     const implement = DESKTOP_PHASES['desktop-implement']
     expect(implement.quickTaskTemplate).toBeTruthy()

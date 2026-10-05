@@ -177,8 +177,8 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '1. Python 最小骨架（托盘/全局快捷键/录音等组件按环境清单结论接入，未确认组件不引入）；\n' +
       '2. driver-skeleton.py——驱动断言骨架（每个 GWT 场景一个可执行断言，先写断言后写实现）；' +
       'stdout 每场景回读一行锚点（形态：`S<编号> PASS <一句话结论>`），终行 `SUMMARY pass=<n> fail=<m>`；' +
-      'UI 场景断言处保存窗口截图（tkinter：root.update() 后用 root.winfo_rootx/y/width/height() 取窗框，' +
-      'PIL.ImageGrab.grab(bbox) 存 00_VERIFY/screenshots/S<场景号>.png——至少覆盖 2 个 UI 场景；' +
+      'UI 场景断言处保存窗口截图——一律用骨架内置的 capture_window(root, "00_VERIFY/screenshots/S<场景号>.png")' +
+      '（句柄级 PrintWindow 自截：被遮挡也截得到自己；不要自己写 ImageGrab 截屏）——至少覆盖 2 个 UI 场景；' +
       '**截完立即 root.withdraw() 或销毁窗口，非截图场景优先无窗口引擎路径，避免窗口反复弹出打扰用户**；' +
       'Pillow 缺失时降级跳过并如实标注，不阻塞断言——截图是呈现层证据不是验收门）；\n' +
       '3. 工程契约 contract.json——**必须严格采用以下形态（平台 schema fail-closed 校验，字段名/类型一字不差；schema_version 是数字 1 不是 "1.0"，入口字段名是 entry 不是 entrypoints，driver 是对象不是路径字符串）：**\n' + MINIMAL_CONTRACT_EXAMPLE + '\n' +
