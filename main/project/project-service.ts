@@ -46,6 +46,42 @@ interface ProjectsIndex {
 
 const WORKSPACE_SLUG = 'default-software-builder'
 
+/**
+ * 从用户首条消息派生项目显示名（2026-10-05 命名修复）：剥引导语（帮我/请/做一个/
+ * 我想要…），在首个句读处截断，最长 16 字。纯函数。
+ */
+export function deriveProjectDisplayName(message: string | undefined | null): string | undefined {
+  if (!message) return undefined
+  let text = message.trim()
+  if (text.length < 4) return undefined
+  text = text.replace(/^(帮我|请你?|我想要?|我需要|给我|麻烦你?)+/g, '')
+  text = text.replace(/^(做|写|开发|生成|制作|建|弄)?(一个|一款|款|个|套)?/, '')
+  const cut = text.search(/[。，,.！!？?；;：:]/)
+  if (cut > 0) text = text.slice(0, cut)
+  text = text.replace(/\s+/g, ' ').trim()
+  if (text.length < 2) return undefined
+  return text.slice(0, 16)
+}
+
+/**
+ * 未命名项目改名（2026-10-05 用户反馈修复）：「模式选择→建项目」路径创建时无
+ * initial_message，全部落「未命名项目」——首条用户消息到达时补名。返回是否改名。
+ */
+export function maybeRenameUnnamedProject(projectId: string, message: string | undefined | null): boolean {
+  try {
+    const project = findProject(projectId)
+    if (!project) return false
+    if (project.name && project.name !== '未命名项目') return false
+    const derived = deriveProjectDisplayName(message)
+    if (!derived) return false
+    updateProject(projectId, { name: derived })
+    return true
+  } catch {
+    // 改名失败不阻断消息链路（陷阱 46：runAgent 分流处防御）
+    return false
+  }
+}
+
 export function createProject(input: ProjectCreateInput): Project {
   const now = new Date().toISOString()
   const projectId = randomUUID()
@@ -56,7 +92,7 @@ export function createProject(input: ProjectCreateInput): Project {
   const project: Project = {
     project_id: projectId,
     workspace_slug: WORKSPACE_SLUG,
-    name: input.initial_message?.slice(0, 32) || '未命名项目',
+    name: deriveProjectDisplayName(input.initial_message) ?? input.initial_message?.slice(0, 32) ?? '未命名项目',
     mode: input.mode,
     // 注入点①（周计划 §6 / PRD 12.2）：关键词自动推断，对用户透明；无命中兜底个人小工具（宽松级误判代价最小）
     template_type: inferTemplateType(input.initial_message ?? ''),

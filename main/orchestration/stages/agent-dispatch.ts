@@ -71,8 +71,12 @@ import { runWithRetry, sdkQuery, streamPublisher } from './sdk-glue'
 import { cancelAgent } from './lifecycle'
 import { appendAgentMessage, convertSDKMessage, detectCodeDelivery, extractAssistantText, isUserCancelled, makeEvent, persistAssistantMessages, persistTerminalMessage, publishRunEvent } from './persistence'
 import { HISTORY_WINDOW_TURNS, loadConversationHistory, shouldUseGuideAgent } from './dispatch-support'
+import { maybeRenameUnnamedProject } from '../../project/project-service'
 
 export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendMessageResult> {
+  // 项目自动命名（2026-10-05 用户反馈修复）：「模式选择→建项目」路径无 initial_message
+  // → 全部「未命名项目」；首条用户消息到达时补名（内部自防御，失败不阻断消息链路）。
+  maybeRenameUnnamedProject(input.project_id, input.content)
   // 排队判定（全链路审查 P1-1 修复，2026-10-01）：升级为项目级——同会话活跃或同项目
   // 另一会话/后台审查（backgroundRuns）占锁时都入队，不再静默丢弃（旧逻辑只查 session，
   // PROJECT_BUSY 在 registerForegroundRun 抛出后不排队不落盘，渲染端乐观气泡刷新即丢）。
