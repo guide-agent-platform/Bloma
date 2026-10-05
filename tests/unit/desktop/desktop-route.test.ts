@@ -160,6 +160,7 @@ describe('判定矩阵（开关字节锁）', () => {
     expect(isDesktopLineActive(record as never)).toBe(false)
     process.env[SWITCH] = '1'
     expect(isDesktopLineActive({ ...record, template_type: 'web_fullstack' } as never)).toBe(false)
+    expect(isDesktopLineActive({ ...record, template_type: 'game' } as never)).toBe(true) // 2026-10-05：game 直进桌面线（GDD 保留）
     expect(isDesktopLineActive({ ...record, desktop_phase: undefined } as never)).toBe(false)
     expect(isDesktopLineActive({ ...record, desktop_phase: 'not-a-phase' } as never)).toBe(false)
     expect(isDesktopLineActive(undefined)).toBe(false)
@@ -167,7 +168,8 @@ describe('判定矩阵（开关字节锁）', () => {
 
   it('shouldEnterDesktopLine：开关+品类（PRD 改道判据，不要求已进入）', () => {
     expect(shouldEnterDesktopLine({ ...record, desktop_phase: undefined } as never)).toBe(true)
-    expect(shouldEnterDesktopLine({ ...record, template_type: 'game' } as never)).toBe(false)
+    expect(shouldEnterDesktopLine({ ...record, template_type: 'game' } as never)).toBe(true) // 2026-10-05 拍板：游戏直进桌面线，不再发形态引导卡
+    expect(shouldEnterDesktopLine({ ...record, template_type: 'web_fullstack' } as never)).toBe(false) // 真 web 品类仍发形态卡
     process.env[SWITCH] = ''
     expect(shouldEnterDesktopLine(record as never)).toBe(false)
   })

@@ -14,7 +14,7 @@ import type { SDKQuery } from '../orchestration/orchestrator'
 import { recordDecision } from '../project/decision-log'
 import { readPrdBackplane } from '../project/prd-store'
 import { appendSessionMessage } from '../platform/sessions/session-tree'
-import { enterDesktopLine } from '../desktop/desktop-route'
+import { enterDesktopLine, DESKTOP_LINE_TEMPLATE_TYPES } from '../desktop/desktop-route'
 import { findProject } from '../project/project-service'
 import { generateUxSketch, stageUxSketch } from './ux-sketch'
 import { USER_STOP_KEYWORDS } from '../desktop/user-intent-lexicon'
@@ -313,7 +313,7 @@ export async function republishUxCardFromArchive(
   context: { query: SDKQuery; env: Record<string, string> },
 ): Promise<boolean> {
   const project = findProject(input.project_id)
-  if (!project || project.template_type !== 'desktop_tool') return false
+  if (!project || !DESKTOP_LINE_TEMPLATE_TYPES.has(project.template_type)) return false
   if (project.desktop_phase) return false
   const backplane = readPrdBackplane(input.project_id)
   if (!backplane?.user_confirmed_at) return false

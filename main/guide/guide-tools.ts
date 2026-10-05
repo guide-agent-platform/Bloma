@@ -92,9 +92,8 @@ function detectDesktopFormMismatch(decision: GuideDecision, projectId: string): 
   if (templateType === 'desktop_tool') return null
   return (
     `【品类形态提示】需求清单中有 ${hits.length} 条桌面形态诉求（如「${hits[0]!.slice(0, 30)}」），` +
-    '但本项目按 ' + (templateType || '其他') + ' 品类构建（网页/工具形态，无法真实以桌面程序交付）。' +
-    '请在给用户的回复中如实说明：若确需桌面程序，建议新开项目并在首条描述写明「桌面程序」（如「做一个桌面程序：计算器」），' +
-    '平台将走桌面交付线（真实桌面程序+打包）；若网页版可接受则继续。'
+    '但本项目按 ' + (templateType || '其他') + ' 品类判定——当前版本唯一交付形态是 Windows 桌面软件，确认后平台会引导按桌面形态推进。' +
+    '请在给用户的回复中如实说明这一点；若用户明确要桌面程序，建议直接在需求描述中写明（如「做一个桌面程序：计算器」）。'
   )
 }
 

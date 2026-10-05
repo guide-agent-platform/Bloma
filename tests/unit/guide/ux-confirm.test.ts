@@ -14,6 +14,8 @@ vi.mock('../../../main/guide/ux-sketch', () => ({
 
 vi.mock('../../../main/desktop/desktop-route', () => ({
   enterDesktopLine: vi.fn(),
+  // 2026-10-05：ux-confirm 改用品类集合判定（game 直进桌面线）——mock 同步补导出（陷阱 36）
+  DESKTOP_LINE_TEMPLATE_TYPES: new Set(['desktop_tool', 'game']),
 }))
 
 vi.mock('../../../main/project/project-service', () => ({

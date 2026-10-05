@@ -12,7 +12,7 @@
  *
  * 承接批次 D 的 runDesktopDispatcherLoop 与批次 E 的拒收闭环：
  *   分流（agent-dispatch 调用）：BLOMA_DESKTOP_DISPATCH on 且项目 template_type=
- *   desktop_tool 且 desktop_phase 在桌面表内 → 本路由接管全部消息（含卡回传）；
+ *   desktop_tool/game 且 desktop_phase 在桌面表内 → 本路由接管全部消息（含卡回传）；
  *   PRD 改道（prd-confirm 调用）：桌面项目 PRD 确认后不进 web 线草图，置
  *   desktop_phase='desktop-arch' 进入桌面线并跑首个阶段。
  *
@@ -73,17 +73,23 @@ export interface DesktopLineProjectLike {
   desktop_phase?: string
 }
 
+/** 桌面线接纳的品类（2026-10-05 拍板：game 直进桌面线）：desktop_tool 主力品类 +
+ *  game（游戏词族判型保留——prd-engine 的 GDD 注入依赖 game 类型；游戏天然是
+ *  Windows 桌面产物，不再发「网页生成线已下线」形态卡绕一跳。形态卡只留给
+ *  web_fullstack/ai_app 这类真 web 品类）。 */
+export const DESKTOP_LINE_TEMPLATE_TYPES: ReadonlySet<string> = new Set(['desktop_tool', 'game'])
+
 /** 桌面线是否接管该项目的消息路由（开关 + 品类 + 已进入桌面阶段）。 */
 export function isDesktopLineActive(project: DesktopLineProjectLike | undefined): boolean {
   if (!isDesktopDispatchEnabled()) return false
-  if (!project || project.template_type !== 'desktop_tool') return false
+  if (!project || !DESKTOP_LINE_TEMPLATE_TYPES.has(project.template_type)) return false
   const phase = project.desktop_phase
   return typeof phase === 'string' && getDesktopPhase(phase) !== undefined
 }
 
 /** 改道判定（PRD 确认点用）：开关 + 品类即改道（desktop_phase 未设也进——正在进入）。 */
 export function shouldEnterDesktopLine(project: DesktopLineProjectLike | undefined): boolean {
-  return isDesktopDispatchEnabled() && project?.template_type === 'desktop_tool'
+  return isDesktopDispatchEnabled() && DESKTOP_LINE_TEMPLATE_TYPES.has(project?.template_type ?? '')
 }
 
 // =========================================================================
