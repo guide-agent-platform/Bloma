@@ -105,14 +105,25 @@ function defaultSpawn(command: string[], cwd: string): ChildProcess {
 }
 
 async function defaultCaptureWindow(titleHint: string | undefined): Promise<Buffer | null> {
-  // 懒加载 electron（陷阱 35：被单测 import 的模块勿静态依赖 electron）；局部 require 遮蔽
-  // + createRequire（同 safe-storage 先例）——esbuild 不重写局部 require，运行期原生解析
-  // thumbnailSize 是「适配盒」不是目标尺寸：给大盒子（3840×2400）拿窗口物理原分辨率，
-  // 小窗口不会被放大；旧值 1280×800 在高分屏（本机 2560×1600 物理 @150%）上把截图
-  // 下采样到一半分辨率——「截图发糊」的根因，与 Python/tkinter 无关。
+  if (titleHint) {
+    // 首选 PrintWindow 句柄捕获（2026-10-05 根治：按窗口句柄拷贝内容，被遮挡也能截到
+    // 自己的画面——desktopCapturer 缩略图在窗口被覆盖/最小化时会截到遮挡物或黑帧，
+    // 「上面覆盖的程序被截进来」的狗粮实证）。助手脚本临时落盘，系统 python + PIL 执行；
+    // 失败回退 desktopCapturer。
+    try {
+      const png = await printWindowCapture(titleHint)
+      if (png && png.length > 0) return png
+    } catch {
+      // 回退链继续
+    }
+  }
+  // 回退：desktopCapturer 按标题匹配（旧行为；thumbnailSize 大盒拿物理分辨率）
   try {
     const require = createRequire(import.meta.url)
     const { desktopCapturer } = require('electron') as typeof import('electron')
+    // thumbnailSize 是「适配盒」不是目标尺寸：给大盒子（3840×2400）拿窗口物理原分辨率，
+    // 小窗口不会被放大；旧值 1280×800 在高分屏（本机 2560×1600 物理 @150%）上把截图
+    // 下采样到一半分辨率——「截图发糊」的根因，与 Python/tkinter 无关。
     const sources = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 3840, height: 2400 } })
     if (titleHint) {
       const hit = sources.find((source) => source.name.includes(titleHint))
@@ -122,6 +133,97 @@ async function defaultCaptureWindow(titleHint: string | undefined): Promise<Buff
   } catch {
     return null
   }
+}
+
+/** PrintWindow 助手脚本：句柄级窗口捕获（DPI 感知 + PW_RENDERFULLCONTENT + GetDIBits→PIL）。 */
+const PRINT_WINDOW_HELPER = `import ctypes, sys
+from ctypes import wintypes
+
+def main() -> int:
+    title, out_path = sys.argv[1], sys.argv[2]
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        pass
+    user32 = ctypes.windll.user32
+    gdi32 = ctypes.windll.gdi32
+    hwnd = user32.FindWindowW(None, title)
+    if not hwnd:
+        return 3
+    rect = wintypes.RECT()
+    if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        return 4
+    w, h = rect.right - rect.left, rect.bottom - rect.top
+    if w <= 0 or h <= 0 or w > 8192 or h > 8192:
+        return 5
+    hdc = user32.GetWindowDC(hwnd)
+    memdc = gdi32.CreateCompatibleDC(hdc)
+    bmp = gdi32.CreateCompatibleBitmap(hdc, w, h)
+    gdi32.SelectObject(memdc, bmp)
+    ok = user32.PrintWindow(hwnd, memdc, 2) or user32.PrintWindow(hwnd, memdc, 0)
+    if not ok:
+        gdi32.DeleteObject(bmp); gdi32.DeleteDC(memdc); user32.ReleaseDC(hwnd, hdc)
+        return 6
+    class BMIH(ctypes.Structure):
+        _fields_ = [('biSize', wintypes.DWORD), ('biWidth', wintypes.LONG), ('biHeight', wintypes.LONG),
+                    ('biPlanes', wintypes.WORD), ('biBitCount', wintypes.WORD), ('biCompression', wintypes.DWORD),
+                    ('biSizeImage', wintypes.DWORD), ('biXPelsPerMeter', wintypes.LONG), ('biYPelsPerMeter', wintypes.LONG),
+                    ('biClrUsed', wintypes.DWORD), ('biClrImportant', wintypes.DWORD)]
+    bmi = BMIH()
+    bmi.biSize = ctypes.sizeof(BMIH); bmi.biWidth = w; bmi.biHeight = -h
+    bmi.biPlanes = 1; bmi.biBitCount = 32; bmi.biCompression = 0
+    buf = ctypes.create_string_buffer(w * h * 4)
+    if not gdi32.GetDIBits(memdc, bmp, 0, h, buf, ctypes.byref(bmi), 0):
+        return 7
+    from PIL import Image
+    img = Image.frombuffer('RGBA', (w, h), buf, 'raw', 'BGRA', 0, 1)
+    img.convert('RGB').save(out_path, 'PNG')
+    gdi32.DeleteObject(bmp); gdi32.DeleteDC(memdc); user32.ReleaseDC(hwnd, hdc)
+    return 0
+
+sys.exit(main())
+`
+
+let helperPathWritten: string | undefined
+async function printWindowCapture(title: string): Promise<Buffer | null> {
+  const { tmpdir } = await import('node:os')
+  const { randomUUID } = await import('node:crypto')
+  const { existsSync, readFileSync, rmSync, unlinkSync } = await import('node:fs')
+  if (!helperPathWritten) {
+    helperPathWritten = join(tmpdir(), 'bloma-printwindow-capture.py')
+    writeFileSync(helperPathWritten, PRINT_WINDOW_HELPER, 'utf8')
+  }
+  const outPng = join(tmpdir(), `bloma-launch-${randomUUID()}.png`)
+  const result = await new Promise<{ code: number | null }>((resolve) => {
+    const child: import('node:child_process').ChildProcess = nodeSpawn('python', [helperPathWritten as string, title, outPng], { windowsHide: true, stdio: 'ignore' })
+    const timer = setTimeout(() => {
+      child.kill()
+      resolve({ code: null })
+    }, 15_000)
+    child.once('exit', (code) => {
+      clearTimeout(timer)
+      resolve({ code: code ?? null })
+    })
+    child.once('error', () => {
+      clearTimeout(timer)
+      resolve({ code: null })
+    })
+  })
+  if (result.code === 0 && existsSync(outPng)) {
+    const buffer = readFileSync(outPng)
+    try {
+      unlinkSync(outPng)
+    } catch {
+      // 临时文件清理失败无害
+    }
+    return buffer
+  }
+  try {
+    if (existsSync(outPng)) rmSync(outPng)
+  } catch {
+    // 同上
+  }
+  return null
 }
 
 function spawnCollecting(spawnImpl: (command: string[], cwd: string) => ChildProcess, command: string[], cwd: string): SpawnedChild {

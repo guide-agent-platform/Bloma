@@ -3,7 +3,7 @@
  *
  * mock 面：project-service 状态化桩；decision-log spy。
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentEvent } from '../../../shared/types'
 
 vi.mock('../../../main/project/project-service', () => ({
@@ -11,11 +11,18 @@ vi.mock('../../../main/project/project-service', () => ({
   updateProject: vi.fn(),
 }))
 
+vi.mock('../../../main/delivery/preview-scheme', () => ({
+  mintProjectPreviewUrl: vi.fn(() => 'bloma-file://p1/00_VERIFY/mvp-review.html'),
+}))
+
 vi.mock('../../../main/project/decision-log', () => ({
   recordDecision: vi.fn(),
 }))
 
-import { updateProject } from '../../../main/project/project-service'
+import { findProject, updateProject } from '../../../main/project/project-service'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { recordDecision } from '../../../main/project/decision-log'
 import {
   resetMvpConfirmForTests,
@@ -49,9 +56,17 @@ function makeDeps() {
 
 const input = { sessionId: 's1', projectId: 'p1', content: '', requestId: 'r1' }
 
+let projectRoot: string
+
 beforeEach(() => {
   vi.clearAllMocks()
   resetMvpConfirmForTests()
+  projectRoot = mkdtempSync(join(tmpdir(), 'bloma-mvp-confirm-'))
+  vi.mocked(findProject).mockImplementation(() => ({ project_id: 'p1', root_path: projectRoot }) as never)
+})
+
+afterEach(() => {
+  rmSync(projectRoot, { recursive: true, force: true })
 })
 
 describe('holdForMvpConfirm（挂起）', () => {
@@ -61,11 +76,18 @@ describe('holdForMvpConfirm（挂起）', () => {
       input,
       deps,
       fromPhase: 'desktop-verify',
-      notice: { projectName: '计算器', fromPhaseTitle: '验收', screenshotPaths: ['00_VERIFY/screenshots/a.png'] },
+      notice: { projectName: '计算器', fromPhaseTitle: '验收', screenshotPaths: ['00_VERIFY/screenshots/S1.png'], driverSummary: { passed: 7, total: 9 }, deliveryDigest: '运行：python app.py' },
     })
     expect(isMvpConfirmPending('p1')).toBe(true)
     const card = events.find((e) => e.type === 'user_decision_required')
     expect(card?.payload.kind).toBe('mvp_confirm')
+    // 成品过目页（像 UX 门一样右栏呈现）：落盘 + mvp_review_ready 事件 + paused 阶段
+    expect(events.some((e) => e.type === 'mvp_review_ready' && String(e.payload.preview_url).includes('mvp-review.html'))).toBe(true)
+    expect(events.some((e) => e.type === 'stage_changed' && e.payload.paused === true)).toBe(true)
+    expect(existsSync(join(projectRoot, '00_VERIFY', 'mvp-review.html'))).toBe(true)
+    const html = readFileSync(join(projectRoot, '00_VERIFY', 'mvp-review.html'), 'utf8')
+    expect(html).toContain('screenshots/S1.png')
+    expect(html).toContain('7/9 场景 PASS')
     expect((card?.payload.questions as Array<{ id: string }>).map((q) => q.id)).toEqual([MVP_OPTION_CONFIRM, MVP_OPTION_ADJUST])
     expect(mockUpdate).not.toHaveBeenCalledWith('p1', expect.objectContaining({ desktop_phase: 'delivered' }))
     expect(mockDecision).toHaveBeenCalledWith(expect.objectContaining({

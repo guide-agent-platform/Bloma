@@ -278,6 +278,7 @@ export async function handleDesktopDispatchMessage(
   if (isMvpFeedbackMessage(input, classifyUserDesktopIntent(input.content) === 'stop')) {
     consumeMvpPendingForRework(input)
     updateProject(input.projectId, { desktop_phase: 'desktop-implement', status: 'active', current_stage: 'iterating' })
+    deps.publish(input, 'mvp_review_closed', {})
     deps.publish(input, 'stage_changed', { stage: 'desktop-implement' })
     deps.publish(input, 'message_delta', { text: '收到你的意见，先改再交：从「实现与交付说明」阶段按你的意见修改，改完重新走验收，再请你确认交付。' })
     await runDesktopStage(

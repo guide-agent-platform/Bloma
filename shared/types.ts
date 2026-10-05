@@ -1021,6 +1021,8 @@ export interface AgentEvent {
     | 'rollback_done'
     | 'ux_sketch_ready'
     | 'ux_sketch_closed'
+    | 'mvp_review_ready'
+    | 'mvp_review_closed'
     | 'user_decision_required'
     | 'retrying'
     | 'error'

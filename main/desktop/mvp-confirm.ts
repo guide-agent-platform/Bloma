@@ -13,12 +13,59 @@
 import type { DesktopDispatchRunResult } from './dispatcher-loop'
 import type { DesktopRouteDeps } from './desktop-route'
 import type { DeliveredNoticeInput } from './notice-cards'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { recordDecision } from '../project/decision-log'
 import { buildDeliveredNoticeCard } from './notice-cards'
-import { updateProject } from '../project/project-service'
+import { updateProject, findProject } from '../project/project-service'
+import { mintProjectPreviewUrl } from '../delivery/preview-scheme'
 
 export const MVP_OPTION_CONFIRM = 'mvp_confirm_go'
 export const MVP_OPTION_ADJUST = 'mvp_adjust'
+
+const MVP_REVIEW_RELATIVE_PATH = '00_VERIFY/mvp-review.html'
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+/** 成品过目页（2026-10-05：MVP 门「像 UX 门一样右栏呈现」）：截图画廊 + 驱动验收结论
+ *  + DELIVERY 摘要；落盘 00_VERIFY/ 供 bloma-file:// 直读（截图相对路径同目录引用）。 */
+function buildMvpReviewHtml(notice: DeliveredNoticeInput): string {
+  const shots = (notice.screenshotPaths ?? [])
+    .map((rel) => rel.replace(/^00_VERIFY\//, ''))
+    .map((rel) => `<figure><img src="${escapeHtml(rel)}" alt="程序截图"/><figcaption>${escapeHtml(rel)}</figcaption></figure>`)
+    .join('\n')
+  const driverLine = notice.driverSummary
+    ? `<li>驱动验收：${notice.driverSummary.passed}/${notice.driverSummary.total} 场景 PASS（平台真实执行回读）</li>`
+    : ''
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>成品过目 · ${escapeHtml(notice.projectName)}</title>
+<style>
+  body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; margin: 0; padding: 24px; background: #f7f8fa; color: #333; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #888; font-size: 13px; margin-bottom: 16px; }
+  ul { font-size: 14px; line-height: 1.9; margin: 0 0 20px; padding-left: 20px; }
+  figure { margin: 0 0 16px; }
+  img { max-width: 100%; border: 1px solid #ddd; border-radius: 8px; background: #fff; }
+  figcaption { font-size: 12px; color: #999; margin-top: 4px; }
+  pre { background: #fff; border: 1px solid #e3e6ea; border-radius: 8px; padding: 12px 16px; font-size: 13px; white-space: pre-wrap; }
+  .foot { text-align: center; color: #aaa; font-size: 12px; margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>成品过目：${escapeHtml(notice.projectName)}</h1>
+<div class="sub">来源阶段：${escapeHtml(notice.fromPhaseTitle)} · 验收全绿，等你确认后正式交付</div>
+<ul>${driverLine}<li>程序文件与运行方式：右侧交付面板 / 项目根 DELIVERY.md</li></ul>
+${notice.deliveryDigest ? `<pre>${escapeHtml(notice.deliveryDigest)}</pre>` : ''}
+${shots || '<p style="color:#999">（无截图——无窗口程序或截图未产出）</p>'}
+<div class="foot">确认后在聊天中的「确认，交付」生效；有要改的直接回复</div>
+</body>
+</html>`
+}
 
 interface PendingMvpConfirm {
   session_id: string
@@ -61,11 +108,30 @@ export function holdForMvpConfirm(options: {
       },
     },
   })
+  // 成品过目页（像 UX 门一样右栏呈现，2026-10-05）：过目页失败不阻断门（卡照发）
+  let reviewUrl: string | undefined
+  try {
+    const root = findProject(input.projectId)?.root_path
+    if (root) {
+      const reviewAbs = join(root, MVP_REVIEW_RELATIVE_PATH)
+      mkdirSync(join(reviewAbs, '..'), { recursive: true })
+      writeFileSync(reviewAbs, buildMvpReviewHtml(options.notice), 'utf8')
+      reviewUrl = mintProjectPreviewUrl(input.projectId, MVP_REVIEW_RELATIVE_PATH)
+    }
+  } catch (error) {
+    console.error('[mvp-confirm] 成品过目页生成失败（不阻断门）:', error)
+  }
+  if (reviewUrl) {
+    deps.publish(input, 'mvp_review_ready', { preview_url: reviewUrl })
+  }
+  // 等待用户态可见（A-07 同款）：阶段条呈现「已暂停等待确认」而不是停在运行态
+  deps.publish(input, 'stage_changed', { stage: options.fromPhase, paused: true })
   deps.publish(input, 'message_delta', {
     text: [
-      '验收全部通过，成品已就绪：程序文件与交付说明（DELIVERY.md）在右侧交付面板，运行截图在通知与产物条里。',
+      '验收全部通过，成品已就绪：右侧已切换为「成品过目」视图（程序截图 + 验收结论 + 交付说明），',
+      reviewUrl ? '' : '程序文件与交付说明在右侧交付面板，运行截图在通知与产物条里。',
       '请你过目确认——确认后正式交付；有要改的直接说，我改完重新验收再交。',
-    ].join('\n'),
+    ].filter(Boolean).join(''),
   })
   deps.publish(input, 'user_decision_required', {
     kind: 'mvp_confirm',
@@ -114,6 +180,7 @@ export function confirmMvpDelivered(options: {
     },
   })
   updateProject(input.projectId, { desktop_phase: 'delivered', status: 'completed', current_stage: 'completed' })
+  deps.publish(input, 'mvp_review_closed', {})
   deps.publish(input, 'stage_changed', { stage: 'delivered' })
   deps.publish(input, 'message_delta', {
     text: buildDeliveredNoticeCard({ ...(pending?.notice ?? { projectName: input.projectId, fromPhaseTitle: pending?.from_phase ?? 'desktop-verify' }), viaMvpConfirm: true }),
