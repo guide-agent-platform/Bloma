@@ -6,6 +6,7 @@ import { WaitingFeedback } from './WaitingFeedback'
 import { ToolCallRow, deriveToolCallRecords, safeJsonPreview } from './ToolCallBlock'
 import { DelegationRow } from './DelegationFeed'
 import { ProgressCard, buildProgressLines, countDoneSteps, mapStageToRunSteps } from './ProgressCard'
+import { VoiceInput } from './speech/VoiceInput'
 import type { DelegationView } from '../agent-atoms'
 import { ProcessBlockGroup, type ProcessItem } from './ProcessBlockGroup'
 import { ThinkingIndicator, type ThinkingPhase } from './ThinkingIndicator'
@@ -711,6 +712,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
               lineHeight: 1.5,
               maxHeight: 120,
             }}
+          />
+          <VoiceInput
+            onInsertText={(text) => setInputValue((prev) => (prev ? `${prev} ${text}` : text))}
           />
           {hasActiveStream ? (
             <button

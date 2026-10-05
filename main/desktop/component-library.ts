@@ -83,6 +83,15 @@ export const WINDOWS_COMPONENT_CARDS: readonly ComponentCard[] = [
     fallback: 'plyer（跨平台但依赖更重）',
     evidence: '文证',
   },
+  {
+    package: 'sherpa-onnx',
+    importName: 'sherpa_onnx',
+    purpose: '本地离线语音识别（SenseVoice，中/英/粤/日/韩；录音用 sounddevice）',
+    probe: 'python -c "import sherpa_onnx; print(sherpa_onnx.__version__)"',
+    pitfall: '非流式：整段录音后一次性转写（VAD 自动分段）；模型 239MB 首次自动下载到 ~/.proma/speech-models/（装包时项目根自动生成 speech_locator.py，import 它调 ensure_models() 拿模型路径，勿手写下载逻辑）；模型准备期 UI 需提示，勿卡死主线程',
+    fallback: '无本地降级（文本输入兑底）',
+    evidence: '文证',
+  },
 ]
 
 /** 任务书组件速查表（每组件一行，拼进 implement 约束段）。 */

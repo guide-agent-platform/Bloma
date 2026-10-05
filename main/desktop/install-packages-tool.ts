@@ -55,7 +55,7 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
       '在项目内 .venv 安装声明的第三方包（声明制，无任意命令）：入参给包列表（如 ["pystray","Pillow>=10"]）' +
       '或 requirements=true 读项目根 requirements.txt。首次自动建 venv；装完逐包 import 探测回读；' +
       '装好后 run_project_script 与 LAUNCH 命令自动/应改用 .venv\\Scripts\\python.exe。' +
-      '可用组件速查：pynput=全局热键注入｜pystray+Pillow=托盘｜sounddevice=录音播放｜pyperclip=剪贴板｜winotify=Toast 通知。' +
+      '可用组件速查：pynput=全局热键注入｜pystray+Pillow=托盘｜sounddevice=录音播放｜pyperclip=剪贴板｜winotify=Toast 通知｜sherpa-onnx=本地离线语音识别（SenseVoice，装后项目根自动生成 speech_locator.py 模型定位器，配 sounddevice 录音）。' +
       `全程至多 ${maxCalls} 次安装调用。`,
     input_schema: {
       type: 'object',
@@ -169,6 +169,22 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
           probeResults.push(code === 0 ? `${spec} → import ${moduleName} ✓` : `${spec} → import ${moduleName} ✗（装上但导入失败，看依赖项）`)
         } catch {
           probeResults.push(`${spec} → import ${moduleName} ✗（探测超时/异常）`)
+        }
+      }
+
+      // ④ 语音识别平台资产：装 sherpa-onnx 时自动落 speech_locator.py 进项目根
+      //（模型定位器：~/.proma/speech-models/ 与平台语音输入共用，miss 自动从 hf-mirror 下载；
+      //  2026-10-05 语音批 C 线——平台供资产惯例，子会话零寻路成本，产物自带源码可独立分发）
+      if (specs.some((spec) => spec.trim().toLowerCase().startsWith('sherpa-onnx'))) {
+        const locatorTarget = join(root, 'speech_locator.py')
+        if (!existsSync(locatorTarget)) {
+          const { cpSync } = await import('node:fs')
+          const { mainRootDir } = await import('../platform/paths')
+          const source = join(mainRootDir(), 'templates', 'tools', 'speech_locator.py')
+          if (existsSync(source)) {
+            cpSync(source, locatorTarget)
+            steps.push('已生成 speech_locator.py（语音模型定位器：import 它调 ensure_models() 拿模型路径，勿手写下载逻辑）')
+          }
         }
       }
 

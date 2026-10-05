@@ -5,7 +5,7 @@
  * import 回读映射（Pillow→PIL）、安装预算、角色装配面、venv 解释器一致性
  * （run_project_script 在 .venv 存在时优先 venv python）。
  */
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -131,5 +131,22 @@ describe('install_packages（声明制 venv 安装刀）', () => {
     const research = buildDesktopChildTools(projectId, 'research', 'diff').map((tool) => tool.name)
     expect(research).not.toContain('run_project_script')
     expect(research).not.toContain('install_packages')
+  })
+
+  it('语音资产：装 sherpa-onnx 时项目根自动落 speech_locator.py（幂等，其他包不落）', async () => {
+    const spawn = makeSpawn([{ match: (cmd) => cmd.includes('pip'), code: 0 }])
+    const tool = buildInstallPackagesTool(projectId, { spawn })
+    const outcome = await tool.execute({ packages: ['sherpa-onnx'] }, ctxFor(projectId))
+    expect(outcome.isError).toBeFalsy()
+    const locator = join(projectRoot, 'speech_locator.py')
+    expect(existsSync(locator)).toBe(true)
+    expect(readFileSync(locator, 'utf8')).toContain('def ensure_models()')
+    expect(outcome.output).toContain('speech_locator.py')
+    // 幂等：第二次安装不再重复提示
+    const again = await tool.execute({ packages: ['sherpa-onnx'] }, ctxFor(projectId))
+    expect(again.output).not.toContain('已生成 speech_locator.py')
+    // 其他包不触发落盘
+    const otherRoot = createProject({ request_id: 'req-install-other', mode: 'quick' }).root_path
+    expect(existsSync(join(otherRoot, 'speech_locator.py'))).toBe(false)
   })
 })

@@ -299,18 +299,21 @@ function configureWebContents(contents: WebContents): void {
 }
 
 /**
- * 授予产物沙箱 iframe 的麦克风（media/audio 采集）权限——「语顺精灵球」等录音产物需要 getUserMedia。
+ * 授予麦克风（media/audio 采集）权限。
  *
- * Electron 对未处理的权限请求默认拒绝；产物预览跑在 localhost 沙箱 iframe 里，必须显式放行。
- * 判断用 requestingUrl / requestingOrigin（发起请求的 iframe 来源），不能用 webContents.getURL()——
- * 后者返回顶层主窗 URL（file:// 或 dev server），拿不到实际发起权限请求的 iframe 来源。
- * 仅对 http://localhost / http://127.0.0.1 授予 media 权限，避免把麦克风权限扩大到整个应用面。
+ * Electron 对未处理的权限请求默认拒绝，两类场景需显式放行：
+ * ① 产物沙箱 iframe（「语顺精灵球」等录音产物）——判断用 requestingUrl /
+ * requestingOrigin（不能用 webContents.getURL()，拿不到 iframe 来源），仅限 localhost；
+ * ② 主窗自身语音输入（2026-10-05 语音批）——生产态 loadFile 为 file:// 协义，
+ * dev 态 VITE_DEV_SERVER_URL 已是 localhost 由①覆盖；file:// 只能是本地应用资源，
+ * 无远程内容伪造面，按协议前缀收窄放行。
  */
 function configureMediaPermissions(): void {
   const isLocalPreview = (url: string): boolean => {
     try {
       const u = new URL(url)
-      return u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1')
+      return (u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1'))
+        || u.protocol === 'file:'
     } catch {
       return false
     }

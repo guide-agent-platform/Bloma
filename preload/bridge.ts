@@ -67,6 +67,7 @@ import type {
   ProjectUpgradeInput,
   RequestEnvelope,
   PastedImageSaveInput,
+  SpeechTranscribeInput,
   SandboxRunInput,
   SandboxStopInput,
   SnapshotCreateInput,
@@ -84,6 +85,12 @@ const electronAPI: ElectronAPI = {
   },
   pastedImage: {
     save: (input: PastedImageSaveInput) => ipcRenderer.invoke(IPC_CHANNELS.PASTED_IMAGE_SAVE, input),
+  },
+  speech: {
+    catalog: (input: RequestEnvelope) => ipcRenderer.invoke(IPC_CHANNELS.SPEECH_CATALOG, input),
+    prepare: (input: RequestEnvelope) => ipcRenderer.invoke(IPC_CHANNELS.SPEECH_PREPARE, input),
+    cancelPreparation: (input: RequestEnvelope) => ipcRenderer.invoke(IPC_CHANNELS.SPEECH_CANCEL_PREPARATION, input),
+    transcribe: (input: SpeechTranscribeInput) => ipcRenderer.invoke(IPC_CHANNELS.SPEECH_TRANSCRIBE, input),
   },
   agent: {
     sendMessage: (input: AgentSendMessageInput) =>

@@ -18,6 +18,7 @@ import { registerChannelsRoutingIpc } from './ipc/channels-routing'
 import { registerPromptsIpc } from './ipc/prompts'
 import { registerDesktopArtifactsIpc } from './ipc/desktop-artifacts'
 import { registerProjectDeliverablesIpc } from './ipc/project-deliverables'
+import { registerSpeechIpc } from './ipc/speech'
 
 export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow): void {
   // P0-2 fork：活跃会话检查注入（session-service 不反向 import orchestrator——防循环依赖）
@@ -61,4 +62,5 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
   registerPromptsIpc(ipcMain, mainWindow)
   registerDesktopArtifactsIpc(ipcMain, mainWindow)
   registerProjectDeliverablesIpc(ipcMain, mainWindow)
+  registerSpeechIpc(ipcMain, mainWindow)
 }

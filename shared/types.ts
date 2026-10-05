@@ -83,6 +83,11 @@ export const IPC_CHANNELS = {
   /** 交付面板（2026-10-04 呈现层收口）：桌面项目文件清单+DELIVERY.md+启动声明；启动程序 */
   PROJECT_DELIVERABLES: 'project:deliverables',
   PROJECT_LAUNCH_APP: 'project:launch-app',
+  /** 语音输入（2026-10-05 语音批 A 线）：就绪快照轮询 / 准备（下载模型）/ 取消准备 / 转写 */
+  SPEECH_CATALOG: 'speech:catalog',
+  SPEECH_PREPARE: 'speech:prepare',
+  SPEECH_CANCEL_PREPARATION: 'speech:cancel-preparation',
+  SPEECH_TRANSCRIBE: 'speech:transcribe',
 } as const
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
@@ -676,6 +681,44 @@ export interface PastedImageSaveInput extends RequestEnvelope {
 export interface PastedImageSaveResult {
   imageId: string
   media_type: string
+}
+
+// =========================================================================
+// 语音输入类型（2026-10-05 语音批 A 线；内核 main/platform/speech/）
+// =========================================================================
+
+/** 准备进度快照（轮询制；下载中携带字节进度，失败携带分类供 UI 重试） */
+export interface SpeechPreparationState {
+  running: boolean
+  current_file: string | null
+  received_bytes: number
+  total_bytes: number
+  failure: { file: string; source: string; reason: string } | null
+}
+
+export interface SpeechCatalogResult {
+  ready: boolean
+  preparation: SpeechPreparationState
+}
+
+export interface SpeechPrepareResult {
+  started: boolean
+}
+
+export interface SpeechCancelPreparationResult {
+  cancelled: boolean
+}
+
+/** 转写输入：规范 PCM16 单声道 16kHz WAV 的 base64（无 dataURL 前缀）+ 语言提示 */
+export interface SpeechTranscribeInput extends RequestEnvelope {
+  wav_base64: string
+  language: string
+}
+
+export interface SpeechTranscribeResult {
+  text: string
+  audio_seconds: number
+  inference_seconds: number
 }
 
 export interface AgentMessage {
@@ -1552,6 +1595,16 @@ export type ElectronAPI = {
   pastedImage: {
     /** 剪贴板粘贴图存盘（clipboard-paste P1）：base64→{PROMA_HOME}/pasted-images/<sessionId>/，返回短引用 */
     save(input: PastedImageSaveInput): Promise<ApiResult<PastedImageSaveResult>>
+  }
+  speech: {
+    /** 就绪快照（轮询制；准备进度/失败分类随轮询回传） */
+    catalog(input: RequestEnvelope): Promise<ApiResult<SpeechCatalogResult>>
+    /** 启动/加入模型准备（幂等 join；首次下载 239MB INT8） */
+    prepare(input: RequestEnvelope): Promise<ApiResult<SpeechPrepareResult>>
+    /** 取消进行中的准备（已校验文件保留复用） */
+    cancelPreparation(input: RequestEnvelope): Promise<ApiResult<SpeechCancelPreparationResult>>
+    /** 转写一段完整 WAV（就绪前置；不隐式下载） */
+    transcribe(input: SpeechTranscribeInput): Promise<ApiResult<SpeechTranscribeResult>>
   }
   agent: {
     sendMessage(input: AgentSendMessageInput): Promise<ApiResult<AgentSendMessageResult>>
