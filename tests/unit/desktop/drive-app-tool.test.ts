@@ -276,11 +276,15 @@ describe('drive_project_app（探索驱动测试 A 档）', () => {
 describe('drive-harness 资产源码锁（spike 三假设的实现形态）', () => {
   it('含 offline-mainloop / 异常 hook / deiconify 兜底 / fd 级 ensure_ascii / 边界检查 / PrintWindow', () => {
     const source = readFileSync(join('main', 'templates', 'tools', 'drive-harness.py'), 'utf8')
-    expect(source).toContain('Tk.mainloop') // offline-mainloop monkeypatch
+    expect(source).toContain('Tk.mainloop') // offline-mainloop monkeypatch（import 阶段）
+    expect(source).toContain('_boot_mainloop') // v2 根因批：boot 模式接管真实入口
     expect(source).toContain('report_callback_exception') // invoke() 异常不外抛的捕获 hook（spike A1）
     expect(source).toContain('deiconify') // withdrawn 不投递 event_generate 的兜底（spike B1/B2）
     expect(source).toContain('ensure_ascii') // 协议行纯 ASCII（GBK 控制台家族坑）
     expect(source).toContain('app_exceptions') // 响应携带应用异常增量
+    expect(source).toContain('module_state') // v2：模块级状态树（游戏引擎坐标/分数可观测）
+    expect(source).toContain('__slots__') // 游戏实体无 __dict__，按槽名展开
+    expect(source).toContain('hold_ms') // 键盘按住（移动类按键差分验证）
     expect(source).toContain('realpath') // read_file/screenshot 项目根边界
     expect(source).toContain('PrintWindow') // 句柄级截图（同源 driver-skeleton）
   })

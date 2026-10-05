@@ -278,12 +278,13 @@ export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): A
   return {
     name: 'drive_project_app',
     description:
-      '探索者专属：真实操控本项目的桌面 GUI 程序做探索性测试（进程内驱动桥，窗口默认隐藏不打扰用户）。' +
-      '流程：open（entry 缺省自动取 LAUNCH.json 入口）→ act 批量动词（click/set_text/select/keys，≤8 步/次；' +
-      'target 用 read/describe 返回的控件 id，形如 .!entry/.!button）→ read/read_file/list_files 读状态与文件副作用 → ' +
-      'report 逐条上报发现（severity P0/P1/P2 + title/expected/actual + repro_steps 可重放步骤）→ close 收尾。' +
-      '程序异常随 app_exceptions 返回且会话存活（native 崩溃才会话终止）；每动词 ≤10s、每会话 60 op/5 分钟、' +
-      '每项目至多 2 会话。你不是实现者：按 PRD 验收点逐条探索（正常/空输入/边界/重复/乱序点击），发现即 report，不要修代码。',
+      '探索者专属：真实操控本项目的桌面 GUI 程序做探索性测试（进程内驱动桥 v2：boot 模式接管真实入口，' +
+      '主循环/绑定/收尾全真实；窗口默认隐藏不打扰用户）。流程：open（entry 缺省自动取 LAUNCH.json 入口，' +
+      '自动 boot 接管 run()/main()）→ read 拿控件树 + module_state（游戏引擎坐标/分数等状态可读）→ ' +
+      'act 批量动词（click/set_text/select/keys，≤8 步/次；移动/长按类按键配 hold_ms 300~700 按住后读差分）→ ' +
+      'read/read_file/list_files 验证状态与文件副作用 → report 逐条上报发现（P0/P1/P2 + title/expected/actual + repro_steps）→ close 收尾。' +
+      '程序异常随 app_exceptions 返回且会话存活（native 崩溃才会话终止）；每动词 ≤10s（hold 计入）、每会话 60 op/5 分钟、' +
+      '每项目至多 2 会话。你不是实现者：按 PRD 验收点逐条探索（正常/空输入/边界/重复/乱序/键盘响应），发现即 report，不要修代码。',
     input_schema: {
       type: 'object',
       properties: {
@@ -298,8 +299,9 @@ export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): A
             type: 'object',
             properties: {
               op: { type: 'string', enum: ['click', 'set_text', 'select', 'keys'] },
-              target: { type: 'string', description: '控件 id（read 返回的 path 形态）' },
-              value: { type: 'string', description: 'set_text/select 的值 / keys 的空格分隔键名（如 Return a b）' },
+              target: { type: 'string', description: '控件 id（read 返回的 path 形态；keys 可省略=发到焦点/root）' },
+              value: { type: 'string', description: 'set_text/select 的值 / keys 的空格分隔键名（如 Left a space）' },
+              hold_ms: { type: 'number', description: 'keys 专用：按住毫秒数（0~2000；移动/长按类按键用 300~700，期间主循环真实运行）' },
             },
             required: ['op', 'target'],
           },
@@ -414,6 +416,24 @@ export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): A
         traceLine(session, 'evt', { event: 'ready', ready })
         if (ready.ready !== true) {
           const err = (ready.error ?? {}) as { class?: string; message?: string }
+          // 根因批（5cb5e941 实证）：启动失败由工具侧自动落 P2 finding——探索者
+          // 「如实上报」不可依赖（狗粮五次 no_root 零上报，零 findings 落盘）。
+          if (err.class === 'no_root' || err.class === 'boot_failed') {
+            session.findings.push({
+              id: `F${readFindingsFile(session.root).length + session.findings.length + 1}`,
+              severity: 'P2',
+              title: `平台驱动桥无法接管入口（${err.class}）`,
+              expected: '产物可被平台真实驱动（模块级窗口或 run()/main() 无参入口）',
+              actual: err.message ?? '无详情',
+            })
+            persistFindings(session)
+            emitDriveTelemetry('desktop_drive_findings', projectId, {
+              harness_session_id: sessionId,
+              severity: 'P2',
+              title: 'platform-drive-unbootable',
+              agent_session_id: agentSessionId,
+            })
+          }
           killSession(session, 'open-failed')
           return {
             output: `驱动桥启动失败（${err.class ?? 'unknown'}）：${err.message ?? '无详情'}。` +
@@ -460,22 +480,27 @@ export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): A
           return { output: `steps 须为 1~${MAX_ACT_STEPS} 个动词对象。`, isError: true }
         }
         for (const step of steps) {
-          if (!step || typeof step !== 'object' || typeof step.op !== 'string' || !ACT_OPS.has(step.op) || typeof step.target !== 'string') {
-            return { output: 'steps 每项须为 {op: click|set_text|select|keys, target: 控件id, value?: 值}。', isError: true }
+          if (!step || typeof step !== 'object' || typeof step.op !== 'string' || !ACT_OPS.has(step.op) || (step.op !== 'keys' && typeof step.target !== 'string')) {
+            return { output: 'steps 每项须为 {op: click|set_text|select|keys, target: 控件id, value?: 值, hold_ms?: 按住毫秒}（keys 可省 target）。', isError: true }
+          }
+          if (step.hold_ms !== undefined && (typeof step.hold_ms !== 'number' || step.hold_ms < 0 || step.hold_ms > 2_000)) {
+            return { output: 'hold_ms 须为 0~2000 的毫秒数（keys 专用）。', isError: true }
           }
         }
         const results: Array<Record<string, unknown>> = []
         let failedAt = -1
         let budgetStop = false
         for (let index = 0; index < steps.length; index += 1) {
-          const step = steps[index] as { op: string; target: string; value?: unknown }
+          const step = steps[index] as { op: string; target?: string; value?: unknown; hold_ms?: unknown }
           if (session.ops >= MAX_OPS_PER_SESSION) {
             budgetStop = true
             break
           }
           session.ops += 1
-          const payload: Record<string, unknown> = { op: step.op, target: step.target }
+          const payload: Record<string, unknown> = { op: step.op }
+          if (typeof step.target === 'string') payload.target = step.target
           if (step.value !== undefined) payload.value = String(step.value)
+          if (typeof step.hold_ms === 'number') payload.hold_ms = Math.round(step.hold_ms)
           const startedAt = Date.now()
           let response: Record<string, unknown>
           try {

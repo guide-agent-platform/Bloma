@@ -217,12 +217,13 @@ describe('架构验证点（实施稿验收 3 演示项）：插阶段只改数�
 })
 
 describe('dispatcher-phases 探索驱动测试接线锁（2026-10-05）', () => {
-  it('verify 任务书含探索委派与 drive_project_app；双模式入口纪律含 main 守卫', () => {
+  it('verify 任务书含探索委派与 drive_project_app；双模式入口纪律含主循环无条件调度（根因批）', () => {
     const verify = getDesktopPhase('desktop-verify')
     expect(verify?.taskTemplate).toContain('探索委派')
     expect(verify?.taskTemplate).toContain('drive_project_app')
+    expect(verify?.taskTemplate).toContain('module_state')
     const implement = getDesktopPhase('desktop-implement')
-    expect(implement?.taskTemplate).toContain('__main__')
-    expect(implement?.quickTaskTemplate ?? '').toContain('__main__')
+    expect(implement?.taskTemplate).toContain('主循环调度无条件')
+    expect(implement?.quickTaskTemplate ?? '').toContain('主循环首次调度必须无条件')
   })
 })
