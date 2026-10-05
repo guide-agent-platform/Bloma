@@ -153,6 +153,9 @@ function collectFiles(dir: string, out: string[]): void {
   for (const entry of entries) {
     if (entry.isDirectory()) {
       if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist' || entry.name === 'dist-main') continue
+      // venv（2026-10-05 迁移批）：第三方依赖代码不进产物扫描（性能+误报面）；
+      // 供应链扫描深化挂账，当前口径=只扫自产源码
+      if (entry.name === '.venv' || entry.name === '__pycache__') continue
       collectFiles(join(dir, entry.name), out)
     } else if (entry.isFile()) {
       const dot = entry.name.lastIndexOf('.')

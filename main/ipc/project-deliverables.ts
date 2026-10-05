@@ -44,6 +44,8 @@ function listFiles(rootPath: string): string[] {
         if (childRel === '00_VERIFY/screenshots') continue
         // 确认门新规（2026-10-04）：00_UX 外观草图存档不是交付物，不进文件清单。
         if (childRel === '00_UX') continue
+        // 迁移批（2026-10-05）：.venv/__pycache__ 是环境产物不是交付物
+        if (childRel === '.venv' || childRel === '__pycache__') continue
         visit(join(dir, entry.name), childRel, depth + 1)
       } else {
         files.push(childRel)

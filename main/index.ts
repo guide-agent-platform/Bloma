@@ -244,6 +244,9 @@ const ALLOWED_OUTBOUND_HOSTS = new Set([
   'localhost',
   '127.0.0.1',
   'api.anthropic.com',
+  // 依赖安装通道（2026-10-05 迁移批）：install_packages 的 venv pip 只走官方 PyPI
+  'pypi.org',
+  'files.pythonhosted.org',
 ])
 
 function configureOutboundAllowlist(): void {

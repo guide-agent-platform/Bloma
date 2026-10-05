@@ -15,7 +15,7 @@
  * - spawn/解释器解析可注入（测试零真实子进程）；执行器复用 execFileDriverSpawn
  *   （超时强杀/ENOENT/退出码语义与契约驱动同源）。
  */
-import { realpathSync, statSync } from 'node:fs'
+import { existsSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 import { execFile } from 'node:child_process'
 import type { AgentLoopTool } from '../agent/loop/agent-loop'
@@ -146,10 +146,17 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
       const timeoutMs = Math.min(Math.max(Math.round(requested) || defaultTimeoutMs, MIN_TIMEOUT_MS), MAX_TIMEOUT_MS)
 
       let python: string
-      try {
-        python = await resolvePython()
-      } catch (error) {
-        return { output: error instanceof Error ? error.message : String(error), isError: true }
+      if (existsSync(join(rootReal, '.venv', 'Scripts', 'python.exe'))) {
+        // venv 一致性（2026-10-05 迁移批）：install_packages 建过 .venv 后，自测自动改用
+        // venv 解释器——第三方依赖（pystray/sounddevice 等）只在 venv 里，系统 python
+        // import 不到会造成「装了还红」的假故障。
+        python = join(rootReal, '.venv', 'Scripts', 'python.exe')
+      } else {
+        try {
+          python = await resolvePython()
+        } catch (error) {
+          return { output: error instanceof Error ? error.message : String(error), isError: true }
+        }
       }
 
       const startedAt = Date.now()
