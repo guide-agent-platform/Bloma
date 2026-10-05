@@ -53,6 +53,12 @@ export function setDelegationHeartbeatSource(next: DelegationHeartbeatSource | n
   source = next ?? undefined
 }
 
+/** 一步安装（agent-collaboration 尾部单行调用，R7 行数纪律）：注入源并启动周期扫描。 */
+export function installDelegationHeartbeat(next: DelegationHeartbeatSource): void {
+  setDelegationHeartbeatSource(next)
+  ensureDelegationHeartbeatStarted()
+}
+
 export function setDelegationHeartbeatPublisher(next: ((event: AgentEvent) => void) | null): void {
   publisher = next ?? undefined
 }

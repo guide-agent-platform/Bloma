@@ -13,13 +13,19 @@
 import { app, BrowserWindow, globalShortcut, Menu, nativeImage, Tray } from 'electron'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
-import { listProjects } from './project/project-service'
 
 let tray: Tray | null = null
 let tooltipTimer: NodeJS.Timeout | undefined
 let balloonShown = false
 /** 真退出标记（before-quest 置真；close 处理器据此放行）。 */
 let quitting = false
+/** 项目阶段数据源（注入式——platform 件不反向依赖 domain 项目服务，notifications 同款；
+ * entry 层接线真源，未接线时 tooltip 只显示「Bloma」）。 */
+let projectSource: { listActiveProjects: () => Array<{ name?: string; current_stage: string }> } | undefined
+
+export function setTrayProjectSource(source: { listActiveProjects: () => Array<{ name?: string; current_stage: string }> } | null): void {
+  projectSource = source ?? undefined
+}
 
 function trayIconPath(): string {
   // dev: 仓库根 resources/；esbuild bundle 后 main 根 = dist-main/main/（build:main cpSync 不含 resources），
@@ -32,10 +38,10 @@ function trayIconPath(): string {
   return candidates.find((path) => existsSync(path)) ?? candidates[0]!
 }
 
-/** 活跃项目阶段摘要（tooltip 用；存储异常静默）。 */
+/** 活跃项目阶段摘要（tooltip 用；数据源未接线/异常静默）。 */
 function activeStageSummary(): string | null {
   try {
-    const active = listProjects('active').filter((project) => project.current_stage !== 'completed')
+    const active = (projectSource?.listActiveProjects() ?? []).filter((project) => project.current_stage !== 'completed')
     const busy = active.find((project) =>
       ['generating_sketch', 'sketch_ready', 'generating_mvp', 'testing', 'judge_review', 'repairing', 'upgrading'].includes(project.current_stage),
     )

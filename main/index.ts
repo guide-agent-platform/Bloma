@@ -24,7 +24,7 @@ import { setProjectTouchHandler } from './platform/sessions/session-service'
 import { setNotificationProjectHooks } from './platform/shell/notifications'
 import { recordDecision } from './project/decision-log'
 import { findProject, listProjects, updateProject } from './project/project-service'
-import { installTrayAndShortcut, isTrayQuitting, notifyHiddenToTray, teardownTrayAndShortcut } from './tray'
+import { installTrayAndShortcut, isTrayQuitting, notifyHiddenToTray, setTrayProjectSource, teardownTrayAndShortcut } from './platform/shell/tray'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -206,6 +206,8 @@ app.whenReady().then(async () => {
   }
   await createMainWindow()
   installTrayAndShortcut(() => mainWindow)
+  // 托盘 tooltip 项目阶段数据源（注入式——platform 不引 domain，entry 接线）
+  setTrayProjectSource({ listActiveProjects: () => listProjects('active') })
 })
 
 app.on('web-contents-created', (_event, contents) => {
