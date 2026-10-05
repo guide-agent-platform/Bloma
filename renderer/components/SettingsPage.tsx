@@ -4,6 +4,7 @@
  * 统一管理设置入口的返回按钮、页面标题与 Tab 栏：
  *   - 「模型渠道」Tab：ChannelSettingsPage（渠道管理）
  *   - 「提示词配置」Tab：PromptSettingsPage（引擎提示词外置覆盖配置）
+ *   - 「通知与声音」Tab：NotificationSoundSettingsPage（2026-10-06 体验批 A）
  *
  * 进入方式：App.tsx 的 settings 路由。返回按钮回到工作区。
  */
@@ -11,6 +12,7 @@
 import React, { useState } from 'react'
 import { ChannelSettingsPage } from './ChannelSettingsPage'
 import { PromptSettingsPage } from './PromptSettingsPage'
+import { NotificationSoundSettingsPage } from './NotificationSoundSettingsPage'
 
 const IconArrowLeft: React.FC<{ size?: number }> = ({ size = 24 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
@@ -29,11 +31,12 @@ const IconSettings: React.FC<{ size?: number }> = ({ size = 24 }) => (
   </svg>
 )
 
-type SettingsTab = 'channels' | 'prompts'
+type SettingsTab = 'channels' | 'prompts' | 'sound'
 
 const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: 'channels', label: '模型渠道' },
   { id: 'prompts', label: '提示词配置' },
+  { id: 'sound', label: '通知与声音' },
 ]
 
 export interface SettingsPageProps {
@@ -141,7 +144,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
       </div>
 
       {/* ── Tab 内容 ── */}
-      {activeTab === 'channels' ? <ChannelSettingsPage /> : <PromptSettingsPage />}
+      {activeTab === 'channels' ? <ChannelSettingsPage /> : activeTab === 'sound' ? <NotificationSoundSettingsPage /> : <PromptSettingsPage />}
     </div>
   )
 }
