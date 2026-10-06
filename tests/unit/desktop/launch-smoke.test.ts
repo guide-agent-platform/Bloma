@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { parseLaunchDeclaration, runLaunchSmoke, LAUNCH_RELATIVE_PATH } from '../../../main/desktop/launch-smoke'
+import { parseLaunchDeclaration, parseProbeJson, runLaunchSmoke, LAUNCH_RELATIVE_PATH, type LaunchProbeCriteria, type ProbeRunInput } from '../../../main/desktop/launch-smoke'
 import type { ChildProcess } from 'node:child_process'
 
 class FakeChild extends EventEmitter {
@@ -88,20 +88,26 @@ describe('runLaunchSmoke（注入编排）', () => {
     expect(result.detail).toContain('ENOENT')
   })
 
-  it('存活 → 截图落 00_VERIFY/screenshots/LAUNCH.png → kill → 通过', async () => {
-    const root = makeRoot('{"schema_version":1,"command":["python","app.py"],"window_title":"计算器"}')
+  it('存活 → 截图落 00_VERIFY/screenshots/LAUNCH.png → kill → 通过（纯存活档：无 window_title 不走探针）', async () => {
+    const root = makeRoot('{"schema_version":1,"command":["python","app.py"]}')
     const child = new FakeChild()
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    let probeCalled = false
     const result = await runLaunchSmoke(root, {
       spawnImpl: () => child as unknown as ChildProcess,
       captureWindow: async (titleHint) => {
-        expect(titleHint).toBe('计算器')
+        expect(titleHint).toBeUndefined()
         return png
+      },
+      probeImpl: async () => {
+        probeCalled = true
+        return { json: goodCriteria() }
       },
       graceMs: 50,
     })
     expect(result.passed).toBe(true)
     expect(result.screenshotRel).toBe('00_VERIFY/screenshots/LAUNCH.png')
+    expect(probeCalled).toBe(false)
     expect(child.killed).toBe(true)
     expect(readFileSync(join(root, '00_VERIFY', 'screenshots', 'LAUNCH.png'))).toEqual(png)
   })
@@ -117,5 +123,139 @@ describe('runLaunchSmoke（注入编排）', () => {
     expect(result.passed).toBe(true)
     expect(result.screenshotRel).toBeUndefined()
     expect(child.killed).toBe(true)
+  })
+})
+
+/** 全绿判据（探针成功档）。 */
+function goodCriteria(overrides: Partial<LaunchProbeCriteria> = {}): LaunchProbeCriteria {
+  return { window_found: true, responsive: true, stable: true, closed_gracefully: true, crash_dialog: [], screenshot: false, ...overrides }
+}
+
+describe('runLaunchSmoke 联合判定档（批1 2026-10-06：LAUNCH 带 window_title）', () => {
+  const jointRoot = (): string => makeRoot('{"schema_version":1,"command":["python","app.py"],"window_title":"计算器"}')
+
+  it('探针全绿 + 截图落 00_VERIFY/screenshots/LAUNCH.png → 通过，携带判据', async () => {
+    const root = jointRoot()
+    const child = new FakeChild()
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    const result = await runLaunchSmoke(root, {
+      spawnImpl: () => child as unknown as ChildProcess,
+      probeImpl: async (input: ProbeRunInput) => {
+        expect(input.title).toBe('计算器')
+        expect(input.pid).toBe(4321)
+        writeFileSync(input.outPng, png)
+        return { json: goodCriteria({ screenshot: true }) }
+      },
+      graceMs: 50,
+    })
+    expect(result.passed).toBe(true)
+    expect(result.screenshotRel).toBe('00_VERIFY/screenshots/LAUNCH.png')
+    expect(result.criteria).toMatchObject({ window_found: true, responsive: true, closed_gracefully: true })
+    expect(result.detail).toContain('联合判定')
+    expect(readFileSync(join(root, '00_VERIFY', 'screenshots', 'LAUNCH.png'))).toEqual(png)
+  })
+
+  it('探针判据 no_window（宽限期内无可见主窗口）→ 不通过 + 判据回传', async () => {
+    const child = new FakeChild()
+    const result = await runLaunchSmoke(jointRoot(), {
+      spawnImpl: () => child as unknown as ChildProcess,
+      probeImpl: async () => ({ json: goodCriteria({ window_found: false, fail_code: 'no_window', detail: '11000ms 内未找到属于进程 4321 的可见主窗口' }) }),
+      graceMs: 50,
+    })
+    expect(result.passed).toBe(false)
+    expect(result.detail).toContain('可见主窗口')
+    expect(result.criteria?.fail_code).toBe('no_window')
+    expect(result.outputExcerpt).toContain('未找到')
+    expect(child.killed).toBe(true)
+  })
+
+  it('探针判据 unresponsive（消息循环无响应——弹幕单冻结 bug 形态）→ 不通过', async () => {
+    const child = new FakeChild()
+    const result = await runLaunchSmoke(jointRoot(), {
+      spawnImpl: () => child as unknown as ChildProcess,
+      probeImpl: async () => ({ json: goodCriteria({ responsive: false, fail_code: 'unresponsive', detail: '主窗口消息循环无响应' }) }),
+      graceMs: 50,
+    })
+    expect(result.passed).toBe(false)
+    expect(result.detail).toContain('消息循环无响应')
+    expect(result.criteria?.fail_code).toBe('unresponsive')
+  })
+
+  it('探针判据 crash_dialog（启动期错误弹窗）→ 不通过且标题在详情里', async () => {
+    const child = new FakeChild()
+    const result = await runLaunchSmoke(jointRoot(), {
+      spawnImpl: () => child as unknown as ChildProcess,
+      probeImpl: async () => ({ json: goodCriteria({ fail_code: 'crash_dialog', crash_dialog: ['错误: 数据库初始化失败'], detail: '启动过程弹出错误对话框' }) }),
+      graceMs: 50,
+    })
+    expect(result.passed).toBe(false)
+    expect(result.detail).toContain('错误对话框')
+    expect(result.detail).toContain('数据库初始化失败')
+  })
+
+  it('探针判据 wont_close（无法优雅关闭）→ 不通过', async () => {
+    const child = new FakeChild()
+    const result = await runLaunchSmoke(jointRoot(), {
+      spawnImpl: () => child as unknown as ChildProcess,
+      probeImpl: async () => ({ json: goodCriteria({ closed_gracefully: false, fail_code: 'wont_close', detail: 'WM_CLOSE 后 5000ms 进程仍未退出' }) }),
+      graceMs: 50,
+    })
+    expect(result.passed).toBe(false)
+    expect(result.detail).toContain('优雅关闭')
+    expect(child.killed).toBe(true)
+  })
+
+  it('判据不全绿且探针未给 fail_code（防御）→ 不通过且按缺失面定位', async () => {
+    const child = new FakeChild()
+    const result = await runLaunchSmoke(jointRoot(), {
+      spawnImpl: () => child as unknown as ChildProcess,
+      probeImpl: async () => ({ json: goodCriteria({ stable: false }) }),
+      graceMs: 50,
+    })
+    expect(result.passed).toBe(false)
+    expect(result.criteria?.fail_code).toBe('stable')
+  })
+
+  it('探针不可用（python 缺失/超时）→ 降级纯存活档通过，如实标注「未验证」', async () => {
+    const child = new FakeChild()
+    const result = await runLaunchSmoke(jointRoot(), {
+      spawnImpl: () => child as unknown as ChildProcess,
+      probeImpl: async () => ({ json: null, error: '探针超时（27000ms 看门狗）' }),
+      captureWindow: async () => null,
+      graceMs: 50,
+    })
+    expect(result.passed).toBe(true)
+    expect(result.detail).toContain('降级判定')
+    expect(result.detail).toContain('仅验证进程存活')
+    expect(result.criteria?.degraded).toBe(true)
+    expect(child.killed).toBe(true)
+  })
+
+  it('探针观察期内进程退出（宽限期后崩溃）→ 不通过，输出尾部即修复靶子', async () => {
+    const child = new FakeChild()
+    const result = await runLaunchSmoke(jointRoot(), {
+      spawnImpl: () => {
+        setTimeout(() => {
+          child.stderr.emit('data', Buffer.from('Traceback (most recent call last): TclError'))
+          child.exitCode = 1
+          child.emit('exit', 1)
+        }, 60)
+        return child as unknown as ChildProcess
+      },
+      probeImpl: () => new Promise(() => { /* 永不 resolve——退出先赢 */ }),
+      graceMs: 50,
+    })
+    expect(result.passed).toBe(false)
+    expect(result.detail).toContain('观察期内退出')
+    expect(result.outputExcerpt).toContain('TclError')
+  })
+})
+
+describe('parseProbeJson（探针输出解析）', () => {
+  it('末行 JSON 判据解析；形状不全返回 null（降级档入口）', () => {
+    expect(parseProbeJson('噪音行\n{"window_found":true,"responsive":true,"stable":true,"closed_gracefully":true,"crash_dialog":[],"screenshot":true}')).toMatchObject({ window_found: true, screenshot: true })
+    expect(parseProbeJson('{"window_found":true}')).toBeNull()
+    expect(parseProbeJson('')).toBeNull()
+    expect(parseProbeJson('not json at all')).toBeNull()
   })
 })

@@ -36,9 +36,11 @@ import { clearRejectionOnAdvance, createRejectionLedger, decideRejectionLoop, re
 import { buildBlockedNoticeCard, buildDeliveredNoticeCard, digestDeliveryDoc } from './notice-cards'
 import { runLaunchSmoke, type LaunchSmokeResult } from './launch-smoke'
 
-/** 启动冒烟门缺省实现（2026-10-04）：读项目根真实 spawn 一次——宽限期内退出（含启动即崩）
- *  即不通过，stdout/stderr 尾部随卡回传修复轮；存活则截窗口图落 00_VERIFY/screenshots
- *  （delivered 卡自动嵌图）。项目根缺失/异常返回 null 跳过留痕（冒烟门不做可用性单点）。 */
+/** 启动冒烟门缺省实现（2026-10-04；批1 2026-10-06 起服务 quick/longterm 双路）：读项目根
+ *  真实 spawn 一次——宽限期内退出（含启动即崩）即不通过，stdout/stderr 尾部随卡回传修复轮；
+ *  有 window_title 时走联合判定档（探针：窗口可见/消息循环响应/稳定期/优雅关闭/错误框），
+ *  截图落 00_VERIFY/screenshots（delivered 卡自动嵌图）。项目根缺失/异常返回 null 跳过
+ *  留痕（冒烟门不做可用性单点）。 */
 async function defaultLaunchSmokeGate(projectId: string): Promise<LaunchSmokeResult | null> {
   try {
     const project = findProject(projectId)
@@ -502,6 +504,25 @@ async function settleDesktopStage(
       if (finalPhase === 'delivered') {
         const gateProject = findProject(input.projectId)
         if (gateProject?.mode === 'longterm' && !isMvpConfirmPending(input.projectId)) {
+          // 交付门堵口（2026-10-06 批1，根因⑥「声明-消费不对称」）：implement 门禁要求
+          // 产出 LAUNCH.json，但 longterm 交付链（verify→MVP 门→delivered）此前从不消费它
+          // ——正常入口 python app.py 的平台级真实启动验证缺位，只依赖 driver 场景自觉
+          // （S15 自写自检≠用户路径，弹幕单冻结 bug 的另一面）。MVP 门挂起前跑同款启动
+          // 冒烟（联合判定档），失败停在 verify 出人话卡（判据/stderr 即修复靶子），
+          // 与 quick 冒烟语义对齐：两单型交付前都真实启动一次。
+          const smoke = await (deps.launchSmoke ? deps.launchSmoke(input.projectId) : defaultLaunchSmokeGate(input.projectId))
+          if (smoke && !smoke.passed) {
+            deps.publish(input, 'message_delta', {
+              text: buildBlockedNoticeCard({
+                phaseTitle: getDesktopPhase(phaseId)?.title ?? phaseId,
+                whatHappened: '交付前启动验证未通过——' + smoke.detail + '。程序必须在真实桌面会话中启动、出现可交互窗口并保持运行才算交付。',
+                evidence: smoke.outputExcerpt ?? '（无输出捕获）',
+              }),
+            })
+            deps.persistSystem(input.sessionId, '[decision] desktop-longterm-launch-smoke ' + phaseId + '（未通过，停在 verify 待修复）：' + smoke.detail)
+            deps.complete(input.sessionId, input.projectId, 'incomplete')
+            return
+          }
           holdForMvpConfirm({
             input,
             deps,

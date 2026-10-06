@@ -298,6 +298,44 @@ describe('handleDesktopDispatchMessage 消息路由', () => {
     expect(confirmDeps.events.some((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('已按你的确认正式交付'))).toBe(true)
   })
 
+  it('longterm 交付门冒烟（批1/根因⑥）：MVP 门挂起前跑启动冒烟，失败停在 verify 不挂卡、stderr 即修复靶子', async () => {
+    writeValidContract()
+    record.desktop_phase = 'desktop-verify'
+    record.mode = 'longterm'
+    const { deps, events, systemLogs } = collectorDeps({
+      launchSmoke: async () => ({ passed: false, detail: '启动冒烟未通过：主窗口消息循环无响应（窗口挂起/疑似启动路径卡死）', outputExcerpt: 'File "app.py", line 88' }),
+    })
+    await handleDesktopDispatchMessage(routeInput({
+      query: scriptedQuery([[textMessage('验证全绿。\nPHASE_ADVANCE: delivered')]]),
+    }), deps)
+    // 冒烟失败：不挂 MVP 卡、不置 delivered，停在 verify 出人话卡
+    expect(record.desktop_phase).toBe('desktop-verify')
+    expect((record as unknown as { status?: string }).status).not.toBe('completed')
+    expect(events.some((e) => e.type === 'user_decision_required' && e.payload.kind === 'mvp_confirm')).toBe(false)
+    expect(events.some((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('启动验证未通过'))).toBe(true)
+    expect(events.some((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('消息循环无响应'))).toBe(true)
+    expect(systemLogs.some((line) => line.includes('desktop-longterm-launch-smoke'))).toBe(true)
+  })
+
+  it('longterm 交付门冒烟：冒烟通过才挂 MVP 卡（声明-消费对称）', async () => {
+    writeValidContract()
+    record.desktop_phase = 'desktop-verify'
+    record.mode = 'longterm'
+    let smokeCalls = 0
+    const { deps, events } = collectorDeps({
+      launchSmoke: async () => {
+        smokeCalls += 1
+        return { passed: true, detail: '启动冒烟通过（联合判定）' }
+      },
+    })
+    await handleDesktopDispatchMessage(routeInput({
+      query: scriptedQuery([[textMessage('验证全绿。\nPHASE_ADVANCE: delivered')]]),
+    }), deps)
+    expect(smokeCalls).toBe(1)
+    expect(events.some((e) => e.type === 'user_decision_required' && e.payload.kind === 'mvp_confirm')).toBe(true)
+    expect(record.desktop_phase).toBe('desktop-verify') // 挂起未交付，确认后才 delivered
+  })
+
   it('MVP 确认门：挂起期间普通消息＝修改意见回炉 implement（【交付前迭代】）；quick 不设门', async () => {
     writeValidContract()
     record.desktop_phase = 'desktop-verify'
