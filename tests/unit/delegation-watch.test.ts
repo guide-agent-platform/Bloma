@@ -224,4 +224,25 @@ describe('C4 委派观察哨（真实定时器集成）', () => {
     await new Promise((resolve) => setTimeout(resolve, 400))
     expect(record.status).toBe('cancelled')
   })
+
+  it('活动感知（2026-10-06 狗粮挂死实锤后回归锁）：子会话 JSONL 还在增长 → 不强停；停止增长 → 硬超时强停', async () => {
+    const { appendFileSync, mkdirSync, writeFileSync } = await import('node:fs')
+    const { getAgentSessionPath } = await import('../../storage/config-paths')
+    const created = startDelegation(parentContext(), { task: '长任务活动感知', role: 'research' })
+    const record = findDelegation(parentSessionId, created.delegation_id)!
+    const childPath = getAgentSessionPath(created.child_session_id)
+    mkdirSync(require('node:path').dirname(childPath), { recursive: true })
+    writeFileSync(childPath, '', 'utf8')
+
+    // 持续写入子会话（模拟正常工作）：跨过软硬阈值也不应强停
+    for (let tick = 0; tick < 8; tick += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 110))
+      appendFileSync(childPath, `{"role":"assistant","content":[{"type":"text","text":"tick ${tick}"}]}\n`, 'utf8')
+    }
+    expect(record.status).toBe('running') // ~0.9s 活跃期 > hardMs 400ms，仍在跑
+
+    // 停止写入（模拟渠道挂死）：硬超时后强停（最后一次活动起算 400ms + 扫描间隔）
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    expect(record.status).toBe('cancelled')
+  })
 })

@@ -11,10 +11,14 @@
  * - 依赖纪律：扫描数据源由 agent-collaboration 模块尾部注入（setDelegationScanSource，
  *   单向静态依赖零环）；硬超时落点是注入式观察者（编排器将来接 decision-log；agent
  *   层不向上引 domain——R1 只向下）。
- * - 开关 BLOMA_DELEGATION_WATCH 缺省 off（零定时器零扫描，字节级现状）。
+ * - 开关：2026-10-06 转正缺省 on（当日狗粮实锤：glm 委派子会话 LLM 调用挂死 14+ 分钟、
+ *   父会话 wait 死等至全局超时——两级超时正是此场景的兑底）；BLOMA_DELEGATION_WATCH=
+ *   0/off/false 显式关停逃生。
  */
 
 import { enqueueSteer } from '../loop/steer-queue'
+import { statSync } from 'node:fs'
+import { getAgentSessionPath } from '../../../storage/config-paths'
 
 /** 扫描数据源（agent-collaboration 模块尾部注入，规避静态环）。 */
 export interface DelegationScanSource {
@@ -26,6 +30,8 @@ export interface DelegationScanSource {
 export interface DelegationWatchRecord {
   delegationId: string
   parentSessionId: string
+  /** 子会话 id：活动感知数据源（JSONL mtime/size 增长=子会话还在干活）。 */
+  childSessionId: string
   role: string
   goal: string
   startedAt: number
@@ -40,10 +46,12 @@ export function setDelegationScanSource(source: DelegationScanSource | null): vo
   scanSource = source ?? undefined
 }
 
-/** 观察哨开关（缺省 off：不启动定时器，startDelegation 侧零行为变化）。 */
+/** 观察哨开关（2026-10-06 转正缺省 on：当日狗粮实锤——glm 委派子会话 LLM 调用挂死
+ *  14+ 分钟、父会话 wait 死等至全局超时，两级超时治理正是此场景的兜底；
+ *  逃生口：BLOMA_DELEGATION_WATCH=0/off 显式关停恢复旧行为）。 */
 export function delegationWatchEnabled(): boolean {
   const raw = (process.env.BLOMA_DELEGATION_WATCH ?? '').trim().toLowerCase()
-  return raw === '1' || raw === 'true' || raw === 'on'
+  return raw !== '0' && raw !== 'off' && raw !== 'false'
 }
 
 /** 阈值（集中可调；测试用 setDelegationWatchThresholdsForTests 缩短）。 */
@@ -88,10 +96,14 @@ export function setDelegationHardTimeoutObserver(observer: HardTimeoutObserver |
   hardTimeoutObserver = observer ?? undefined
 }
 
-/** 每委派观察状态：有效计时基准 + 软催办是否已发（软超时只催一次）。 */
+/** 每委派观察状态：有效计时基准 + 软催办是否已发（软超时只催一次）+
+ *  子会话 JSONL 活动 fingerprint（mtime/size 增长 → 重置时钟：正当的长任务不被误杀，
+ *  真死（渠道挂死/无限等待）才计费到硬超时。2026-10-06 狗粮实锤后加）。 */
 interface WatchState {
   baseAt: number
   softFired: boolean
+  childMtimeMs?: number
+  childSize?: number
 }
 
 const watchStates = new Map<string, WatchState>()
@@ -143,6 +155,23 @@ export function scanDelegationsForWatch(now: number): void {
     if (!state) {
       state = { baseAt: record.startedAt, softFired: false }
       watchStates.set(record.delegationId, state)
+    }
+    // 活动感知（2026-10-06）：子会话 JSONL 有增长 → 重置计时（正当长任务不误杀）。
+    // 文件不存在/读取失败视为无活动（保持计时，不误重置）。
+    try {
+      const childPath = getAgentSessionPath(record.childSessionId)
+      const st = statSync(childPath)
+      if (st.mtimeMs !== state.childMtimeMs || st.size !== state.childSize) {
+        if (state.childMtimeMs !== undefined) {
+          // 非首次观测到变化：真实增长，重置计时（首次只记录基准不重置）
+          state.baseAt = now
+          state.softFired = false
+        }
+        state.childMtimeMs = st.mtimeMs
+        state.childSize = st.size
+      }
+    } catch {
+      // 子会话文件尚未创建等：保持现有计时
     }
     const elapsed = now - state.baseAt
     if (elapsed >= thresholds.hardMs) {
