@@ -31,7 +31,18 @@ const opt = (name, fallback) => {
 }
 
 const REPO = resolve(opt('repo', '.'))
-const REQUEST = opt('request', '')
+// --request-file（2026-10-06 事故根治）：需求走文件不走命令行——PowerShell 5.1 的
+// Start-Process -ArgumentList 会按空格拆参数，「做一个 Windows 桌面…」传到 argv 只剩
+//「做一个」（当日四次狗粮三次截断的真因；bash 引号启动则完整）。后台存活启动必经
+// Start-Process，故需求一律落临时文件传入。
+const REQUEST_FILE = opt('request-file', '')
+const REQUEST = REQUEST_FILE
+  ? readFileSync(REQUEST_FILE, 'utf8').trim()
+  : opt('request', '')
+if (!PROBE_ONLY && REQUEST) {
+  // 启印回读（此类事故的一线警报：首尾不对劲立即停）
+  console.log(`[dogfood] REQUEST ${REQUEST.length} 字 · 首12「${REQUEST.slice(0, 12)}」 · 尾12「${REQUEST.slice(-12)}」`)
+}
 const TIMEOUT_MIN = Number(opt('timeout-min', '25'))
 const MODE = opt('mode', 'quick')
 if (!['quick', 'longterm'].includes(MODE)) {
@@ -42,7 +53,7 @@ const PROBE_ONLY = flag('probe-only')
 const KEEP_OPEN = flag('keep-open')
 
 if (!PROBE_ONLY && !REQUEST) {
-  console.error('用法：node scripts/dogfood-run.mjs --request "需求文本" | --probe-only')
+  console.error('用法：node scripts/dogfood-run.mjs --request "需求文本" | --request-file <path> | --probe-only')
   process.exit(2)
 }
 
