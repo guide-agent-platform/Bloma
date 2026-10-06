@@ -150,6 +150,7 @@ function writeValidContract() {
     },
     env_whitelist: [],
     components: [],
+    scenarios: [{ name: 'a', covers: ['F-001'] }],
   }), 'utf8')
 }
 

@@ -197,6 +197,7 @@ describe('驱动挂载腿（desktop-verify 收口）', () => {
     },
     env_whitelist: [],
     components: [],
+    scenarios: [{ name: '添加待办场景', covers: ['F-001'] }],
   })
 
   it('驱动 pass + 交付标记 + 凭据 → advance + 报告落盘', async () => {
@@ -346,6 +347,7 @@ describe('故障注入：推进伪造', () => {
         schema_version: 1, entry: 'app.py',
         driver: { command: ['python', 'driver.py'], timeout_ms: 60000, exit_code_semantics: { '0': 'pass', '1': 'fail', '2': 'blocked' }, assert_readback: 'stdout 锚点' },
         env_whitelist: [], components: [],
+        scenarios: [{ name: 'a', covers: ['F-001'] }],
       }),
       driverSpawn: async () => ({ code: 1, stdout: '', stderr: 'Traceback...\nRecursionError: maximum recursion depth exceeded' }),
       writeReport: () => undefined,
@@ -553,6 +555,7 @@ describe('desktop-verify 收口双门（全链路审查 P1-5/P0-1 缓解，2026-
     },
     env_whitelist: [],
     components: [],
+    scenarios: [{ name: '添加待办场景', covers: ['F-001'] }],
   })
 
   it('空驱动（exit 0 + 零锚点 + 零 SUMMARY）→ 拒收：退出码不能替代断言', async () => {
@@ -659,6 +662,52 @@ describe('desktop-verify 收口双门（全链路审查 P1-5/P0-1 缓解，2026-
     delete process.env.PROMA_HOME
   })
 
+  it('裁判门映射完整性（批4 验收语义冻结）：P0 无场景覆盖/covers 悬空 → 拒收', async () => {
+    const { mkdtempSync, writeFileSync, mkdirSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const home = mkdtempSync(join(tmpdir(), 'bloma-verify-map-'))
+    process.env.PROMA_HOME = home
+    const { createProject, findProject } = await import('../../../main/project/project-service')
+    const project = createProject({ request_id: 'req-map-gate', mode: 'quick' })
+    const proj = findProject(project.project_id)
+    const root = proj.root_path
+    writeFileSync(join(root, 'app.py'), 'print("hello")\n', 'utf8')
+    const { getDocumentsDir } = await import('../../../storage/config-paths')
+    const docsDir = getDocumentsDir(proj.workspace_slug, proj.project_id)
+    mkdirSync(docsDir, { recursive: true })
+    writeFileSync(join(docsDir, 'prd.json'), JSON.stringify({
+      project_id: proj.project_id,
+      requirements: [
+        { id: 'F-001', description: '桌面待办应用', behavior_assertions: ['添加待办后列表新增一条'] },
+      ],
+    }), 'utf8')
+
+    // 契约场景只覆盖不存在的 F-999：covers 悬空 + F-001 无覆盖双硬失败
+    const danglingObj = JSON.parse(validContract) as { scenarios: Array<{ name: string; covers: string[] }> }
+    danglingObj.scenarios = [{ name: 'S1', covers: ['F-999'] }]
+    const danglingContract = JSON.stringify(danglingObj)
+    const { query } = scriptedQuery([[textMessage('验证完成。\nPHASE_ADVANCE: delivered')]])
+    const result = await runDesktopDispatcherLoop(baseInput({
+      query,
+      projectId: project.project_id,
+      currentPhase: 'desktop-verify',
+      artifactExists: allExist,
+      readContract: () => danglingContract,
+      driverSpawn: async () => ({ code: 0, stdout: 'PASS S1\nSUMMARY pass=1', stderr: '' }),
+      writeReport: () => undefined,
+      sandboxRoot: root,
+    }))
+    expect(result.advance).toMatchObject({ decision: 'reject' })
+    if (result.advance?.decision === 'reject') {
+      expect(result.advance.education).toContain('映射悬空')
+      expect(result.advance.education).toContain('F-001 没有任何驱动场景覆盖')
+    }
+    // 覆盖聚合随报告落盘口径一致（F-999 声明未过——S1 是 pass 但 F-001 不在映射里）
+    expect(result.driverReport?.acceptance_coverage).toEqual([{ fid: 'F-999', scenarios: ['S1'], passed: true }])
+    delete process.env.PROMA_HOME
+  })
+
   it('裁判门：PRD 空项目 → 拒收（硬约束①：无可验收的需求清单）（P0-1a）', async () => {
     const { mkdtempSync, writeFileSync } = await import('node:fs')
     const { tmpdir } = await import('node:os')
@@ -687,7 +736,7 @@ describe('desktop-verify 收口双门（全链路审查 P1-5/P0-1 缓解，2026-
     delete process.env.PROMA_HOME
   })
 
-  it('裁判门：P0 项多于 driver 场景 → 拒收（硬约束②：核心功能须逐项有场景）；软对账缺口进遥测（P0-1a/1c）', async () => {
+  it('裁判门：P0 验收点无场景覆盖 → 拒收（硬约束②批4 映射制：covers 未含即验收语义悬空）；软对账缺口进遥测（P0-1a/1c）', async () => {
     const { mkdtempSync, writeFileSync, mkdirSync } = await import('node:fs')
     const { tmpdir } = await import('node:os')
     const { join } = await import('node:path')
@@ -716,14 +765,14 @@ describe('desktop-verify 收口双门（全链路审查 P1-5/P0-1 缓解，2026-
       currentPhase: 'desktop-verify',
       artifactExists: allExist,
       readContract: () => validContract,
-      driverSpawn: async () => ({ code: 0, stdout: 'PASS 待办场景\nSUMMARY pass=1', stderr: '' }),
+      driverSpawn: async () => ({ code: 0, stdout: 'PASS 添加待办场景\nSUMMARY pass=1', stderr: '' }),
       writeReport: () => undefined,
       sandboxRoot: root,
     }))
     expect(result.advance).toMatchObject({ decision: 'reject', reason: 'artifacts-missing' })
     if (result.advance?.decision === 'reject') {
-      expect(result.advance.education).toContain('驱动场景覆盖不足')
-      expect(result.advance.education).toContain('F-002')
+      expect(result.advance.education).toContain('F-002 没有任何驱动场景覆盖')
+      expect(result.advance.education).not.toContain('F-001 没有任何驱动场景覆盖') // F-001 已被映射且全绿
     }
     delete process.env.PROMA_HOME
   })

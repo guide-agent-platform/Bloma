@@ -45,7 +45,7 @@ import { checkDispatcherToolGate, evaluateAdvance, type AdvanceDecision } from '
 import { buildDesktopChildBaseSystem, buildDispatcherSystemPrompt } from './dispatcher-prompt'
 import { isDesktopDispatchEnabled } from './dispatcher-switch'
 import { execFileProbeSpawn, isDesktopEnvReady, probeDesktopEnv, type ProbeSpawn } from './check-env'
-import { parseProjectContract } from './contract-schema'
+import { parseProjectContract, aggregateAcceptanceCoverage, type ProjectContract } from './contract-schema'
 import { runContractDriver, execFileDriverSpawn, type DriverExecutionReport } from './process-driver'
 import { buildChildScriptRunnerTool } from './child-exec-tool'
 import { buildDriveAppTool, disposeDriveSessions } from './drive-app-tool'
@@ -69,6 +69,7 @@ function runDesktopJudgeGate(input: {
   sandboxRoot?: string
   driverReport: DriverExecutionReport
   entryFile: string
+  contract?: ProjectContract
 }): { passed: boolean; hardFailures: string[]; coverageGaps: string[] } | null {
   let backplane: ReturnType<typeof readPrdBackplane>
   try {
@@ -77,13 +78,38 @@ function runDesktopJudgeGate(input: {
     return null // 无项目上下文（测试桩）：不阻断，留痕
   }
   const hardFailures: string[] = []
+  const coverageGaps: string[] = []
   const requirements = backplane.requirements ?? []
   // ① PRD 存在性（judge ①）
   if (requirements.length === 0) hardFailures.push('PRD 核心功能项为空——没有可验收的需求清单，不能交付')
-  // ② 驱动场景覆盖（judge ② 桌面化）
+  // ② 驱动场景覆盖（judge ② 桌面化；批4 2026-10-06 升级为验收点映射完整性）
   const p0Items = requirements.filter((item) => requirementPriority(item) === 'P0')
   const coveredScenarios = input.driverReport.scenarios.filter((scenario) => scenario.outcome !== 'skipped')
-  if (coveredScenarios.length < p0Items.length) {
+  if (input.contract && Array.isArray(input.contract.scenarios) && input.contract.scenarios.length > 0) {
+    // 映射制（新基线）：covers 悬空硬拦；每个 P0 F-id 至少一个全绿覆盖；P1 缺口软观测
+    const coverage = input.driverReport.acceptance_coverage ?? aggregateAcceptanceCoverage(input.contract, input.driverReport.scenarios)
+    const fidSet = new Set(requirements.map((item) => item.id))
+    for (const entry of coverage) {
+      if (!fidSet.has(entry.fid)) {
+        hardFailures.push(`场景映射 covers 引用了 PRD 里不存在的验收点 ${entry.fid}——映射悬空，请对齐 F-id（场景：${entry.scenarios.join('、')}）`)
+      }
+    }
+    for (const item of p0Items) {
+      const entry = coverage.find((e) => e.fid === item.id)
+      if (!entry) {
+        hardFailures.push(`验收点 ${item.id} 没有任何驱动场景覆盖（contract.json scenarios.covers 未含它）——每个 P0 功能项至少一个场景，否则验收语义悬空`)
+      } else if (!entry.passed) {
+        hardFailures.push(`验收点 ${item.id} 的覆盖场景未全绿（${entry.scenarios.join('、')}）——P0 验收点必须全部通过`)
+      }
+    }
+    // P1 映射缺口：软观测（狗粮标定一轮后再议升硬门——与 P0-1c 同节奏）
+    const p1Items = requirements.filter((item) => requirementPriority(item) === 'P1')
+    for (const item of p1Items) {
+      const entry = coverage.find((e) => e.fid === item.id)
+      if (!entry) coverageGaps.push(`${item.id}: 无场景覆盖（P1 映射缺口）`)
+    }
+  } else if (coveredScenarios.length < p0Items.length) {
+    // 无映射存量契约（收紧前旧项目防御路径）：沿用计数粗检
     hardFailures.push(
       `驱动场景覆盖不足：PRD 有 ${p0Items.length} 个核心（P0）功能项（${p0Items.map((i) => i.id).join('、')}），driver 只回读了 ${coveredScenarios.length} 个非 skipped 场景——每个核心功能项至少要有一个场景验证`,
     )
@@ -107,7 +133,6 @@ function runDesktopJudgeGate(input: {
   // 无一命中）——改 2-gram 滑窗从宽命中（漏报少；软观测只暴露完全没对上的缺口，
   // 精确口径待狗粮数据标定后再收）。
   const scenarioText = coveredScenarios.map((scenario) => scenario.name).join('\n')
-  const coverageGaps: string[] = []
   for (const item of p0Items) {
     for (const assertion of item.behavior_assertions ?? []) {
       const cleaned = assertion.replace(/[→→，。;；\s]/g, '')
@@ -564,6 +589,9 @@ async function runVerifyFinalize(
     spawn: input.driverSpawn ?? execFileDriverSpawn,
     parentEnv: process.env,
   })
+  // 验收点覆盖聚合（批4 2026-10-06）：F-id → 覆盖场景与全绿判定，随报告落盘
+  // （driver-report.json 佐证面）+ judge 门硬校验 + 遥测三处同一口径。
+  report.acceptance_coverage = aggregateAcceptanceCoverage(contract, report.scenarios)
   input.writeReport?.(DRIVER_REPORT_PATH, JSON.stringify(report, null, 2))
 
   if (report.routing !== 'pass') {
@@ -645,6 +673,7 @@ async function runVerifyFinalize(
     sandboxRoot: input.sandboxRoot,
     driverReport: report,
     entryFile: contract.entry,
+    contract,
   })
 
   if (judgeGate && !judgeGate.passed) {

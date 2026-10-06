@@ -182,7 +182,7 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '**截完立即 root.withdraw() 或销毁窗口，非截图场景优先无窗口引擎路径，避免窗口反复弹出打扰用户**；' +
       'Pillow 缺失时降级跳过并如实标注，不阻塞断言——截图是呈现层证据不是验收门）；\n' +
       '3. 工程契约 contract.json——**必须严格采用以下形态（平台 schema fail-closed 校验，字段名/类型一字不差；schema_version 是数字 1 不是 "1.0"，入口字段名是 entry 不是 entrypoints，driver 是对象不是路径字符串）：**\n' + MINIMAL_CONTRACT_EXAMPLE + '\n' +
-      '（components 按实际使用的 GUI/系统能力填；其余字段可自行扩展但上述必填面不得改名。）',
+      '（components 按实际使用的 GUI/系统能力填；其余字段可自行扩展但上述必填面不得改名。）scenarios 是驱动场景↔PRD 验收点的映射（批4 2026-10-06 验收语义冻结）：name 与 driver.py 的 stdout 锚点场景名一致，covers 填该场景验证的 F-id——**PRD 每个 P0 功能项至少被一个场景覆盖，否则收口拒收**；一个场景可覆盖多个 F-id（如空输入场景同时验 F-001 校验与 F-002 空态）。',
     outputPath: '00_SCAFFOLD',
     constraints: [
       '骨架只做结构不做业务：任何业务逻辑实现都属于 desktop-implement 阶段',
@@ -214,7 +214,7 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
     title: '实现与交付说明',
     taskTemplate:
       '续接骨架委派实现真实桌面程序：\n' +
-      '1. 按 PRD 背板功能清单实现，驱动断言与实现静态自洽（断言先行、真实调用被测代码、禁止平凡通过）；\n' +
+      '1. 按 PRD 背板功能清单实现，驱动断言与实现静态自洽（断言先行、真实调用被测代码、禁止平凡通过）——验收语义在 PRD 确认时已冻结（背板 acceptance/F-id），实现与测试只能引用不得重定义「什么算对」；\n' +
       '2. 真实红绿反馈：子会话可用 run_project_script 当场运行项目根内 .py 自测脚本（每次≤90s、至多 12 次，任务书里直接要求它写无头自测并附真实红绿结果）；收口前用 run_project_driver 跑一次契约驱动，失败清单交同一委派线修复后复跑；不要因「无法执行」阻塞、编造或向用户索要本机运行；\n' +
       '3. 产出 DELIVERY.md 到项目根（不是 00_SCAFFOLD/ 内——门禁按项目根检查）——运行方式 / 依赖安装 / 已知限制 / 驱动执行入口；契约 driver.command 相对项目根解析，指向 00_SCAFFOLD/ 内文件须带目录前缀（如 00_SCAFFOLD/driver.py）；\n' +
       '4. 产出 LAUNCH.json 到项目根（机器可读启动声明，宿主启动冒烟与交付面板都用它）：{"schema_version":1,"command":["python","主程序.py"],"window_title":"窗口标题"}——command 相对项目根；GUI 程序必写 window_title（宿主截窗口图用），无窗口程序可省略；主程序入口纪律：①窗口模块级创建或提供 run() 无参入口（平台探索驱动 boot 接管，两形态皆可）；②**主循环调度无条件**——`root.after(FRAME_MS, tick)` 首次调度必须写在公共路径，`--frames`/`--hide-after-ms` 等测试参数只允许控制提前退出、绝不允许控制是否启动循环（狗粮 5cb5e941 事故：调度被 `if frames is not None` 包住，无头驱动 13 场景全绿而用户启动冻结键盘无反应）；\n' +
@@ -280,7 +280,8 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '委派测试工程师（异渠道）执行驱动验收：\n' +
       '1. GWT 场景补全（driver.py 每场景一个可执行断言，断言先行）；核心交互流程必须含状态触达场景——至少 空态/初始、成功、失败（或边界）各一个 S 场景（PRD 体验要求/背板 ux.states 为据，缺省按通用七态理解；探索与裁判都会对照它）；\n' +
       '2. **驱动执行由平台收口时执行**（spawn python 跑 contract.json 的 driver.command，退出码/stdout 回读）——你不需要也无法自行执行驱动，不要花轮次尝试执行或写「无执行通道」的替代报告；\n' +
-      '3. 你的验收职责 = contract.json 合法（必填形态一字不差：schema_version 数字 1 / entry / driver 对象含 command、timeout_ms、exit_code_semantics 三键、assert_readback / env_whitelist / components——形态见下）+ driver.py 断言齐备：\n' + MINIMAL_CONTRACT_EXAMPLE + '\n' +
+      '3. 你的验收职责 = contract.json 合法（必填形态一字不差：schema_version 数字 1 / entry / driver 对象含 command、timeout_ms、exit_code_semantics 三键、assert_readback / env_whitelist / components / scenarios 场景映射——形态见下）+ driver.py 断言齐备：\n' + MINIMAL_CONTRACT_EXAMPLE + '\n' +
+      'scenarios 硬约束（批4 验收语义冻结）：name 与 driver stdout 锚点场景名一致、covers 声明覆盖的 F-id；covers 引用 PRD 不存在的 F-id 或任一 P0 功能项无场景覆盖都会被裁判门拒收——验收语义在 PRD 确认时已冻结，你只能引用 F-id 不得重定义验收标准；\n' +
       '4. 驱动执行报告（通过/失败/阻塞三分类，失败路由进修复轮）由平台在收口时执行驱动后生成——你无需也无法自行产出，不要编写替代报告；驱动 stdout 锚点与窗口截图约定同 driver-skeleton（每场景一行 `S<编号> PASS <结论>`，截图后立即隐藏窗口，UI 场景至少 2 张）；\n' +
       '5. 裁决边界：平台收口三重门判定交付（驱动回读+宿主安全扫描+裁判硬约束：PRD 覆盖/场景覆盖/入口存在），不采信模型自述；\n' +
       '6. 探索委派（2026-10-05 探索驱动测试批，收口前必做）：委派一名 research 角色探索子会话——它有 drive_project_app（真实操控本项目 GUI：open→act→read→report→close，窗口隐藏不打扰用户）；任务书里给它 PRD 验收点清单（读 PRD 逐条列出 EARS 条目），要求按正常/空输入/边界/重复/乱序/键盘响应逐项探索并 report findings（P0/P1/P2 + expected/actual + repro_steps；键盘/移动类用 keys+hold_ms 按住后对比 read 返回 module_state 的差分——引擎坐标/分数变化即响应证据；游戏/引擎类产物必测「按键后状态真实变化」）；另核对体验面（PRD 体验要求/背板 ux，缺省按通用七态）：每个核心操作的成功/失败/进行中反馈是否可见（messagebox 弹窗算缺陷）、空态是否有引导、长任务期间窗口是否可响应（read 差分）、重复点击是否防抖——体验缺陷按 P1 记 findings，探索完 close。你不自己调 drive_project_app（你的职责是委派与裁决）；findings 进 MVP 过目页供用户参考，不阻塞交付。若委派不可用则如实说明，不要假装已探索。',

@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   MINIMAL_CONTRACT_EXAMPLE,
+  aggregateAcceptanceCoverage,
   parseProjectContract,
   validateProjectContract,
   violatesCommandBlacklist,
@@ -33,6 +34,7 @@ function baseContract(): ProjectContract {
     self_check: { command: ['python', 'app.py', '--self-check'], expect_exit: 0, expect_stdout_contains: 'SELF-CHECK-OK' },
     env_whitelist: [],
     components: [],
+    scenarios: [{ name: 'S1 主流程', covers: ['F-001'] }],
     packaging: {
       tool: 'pyinstaller',
       args: ['--onefile', '--windowed'],
@@ -105,6 +107,42 @@ describe('结构与语义违规', () => {
     const c = baseContract()
     ;(c as unknown as Record<string, unknown>).env_whitelist = 'PATH'
     expect(validateProjectContract(c).errors.some((e) => e.includes('env_whitelist'))).toBe(true)
+  })
+
+  it('scenarios 缺失/空数组 → 不合法（批4 验收语义冻结：缺映射=验收语义悬空）', () => {
+    const missing = baseContract()
+    delete (missing as Partial<typeof missing>).scenarios
+    expect(validateProjectContract(missing).errors.some((e) => e.includes('scenarios'))).toBe(true)
+    const empty = baseContract()
+    empty.scenarios = []
+    expect(validateProjectContract(empty).errors.some((e) => e.includes('scenarios'))).toBe(true)
+  })
+
+  it('scenarios covers 空/非字符串/名称重复 → 不合法', () => {
+    const noCovers = baseContract()
+    noCovers.scenarios = [{ name: 'S1', covers: [] }]
+    expect(validateProjectContract(noCovers).errors.some((e) => e.includes('covers'))).toBe(true)
+    const dup = baseContract()
+    dup.scenarios = [
+      { name: 'S1 主流程', covers: ['F-001'] },
+      { name: 'S1 主流程', covers: ['F-002'] },
+    ]
+    expect(validateProjectContract(dup).errors.some((e) => e.includes('重复'))).toBe(true)
+  })
+
+  it('aggregateAcceptanceCoverage：一 F 多场景全 pass 才过；声明未跑=未过', () => {
+    const contract = { scenarios: [
+      { name: 'S1 主流程', covers: ['F-001'] },
+      { name: 'S2 空输入', covers: ['F-001', 'F-002'] },
+      { name: 'S3 未执行', covers: ['F-002'] },
+    ] }
+    const coverage = aggregateAcceptanceCoverage(contract, [
+      { name: 'S1 主流程', outcome: 'pass' },
+      { name: 'S2 空输入', outcome: 'pass' },
+    ])
+    expect(coverage.find((e) => e.fid === 'F-001')?.passed).toBe(true)
+    expect(coverage.find((e) => e.fid === 'F-001')?.scenarios).toEqual(['S1 主流程', 'S2 空输入'])
+    expect(coverage.find((e) => e.fid === 'F-002')?.passed).toBe(false) // S3 声明未跑=未过
   })
 
   it('self_check 形态违规（可选面存在即校验）', () => {

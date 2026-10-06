@@ -21,7 +21,7 @@
  */
 
 import { execFile } from 'node:child_process'
-import { violatesCommandBlacklist, type ProjectContract } from './contract-schema'
+import { violatesCommandBlacklist, type AcceptanceCoverageEntry, type ProjectContract } from './contract-schema'
 
 // =========================================================================
 // 执行面类型
@@ -81,6 +81,9 @@ export interface DriverExecutionReport {
   /** 路由原因（人读，进报告与事件流）。 */
   routingReason: string
   startedAt: string
+  /** 验收点覆盖聚合（批4 2026-10-06）：F-id → 覆盖场景与全绿判定（由收口侧从契约场景映射
+ *  与回读结果聚合后附写；quick 直通道无契约时不携带）。 */
+  acceptance_coverage?: AcceptanceCoverageEntry[]
 }
 
 /** 三分类路由判定（纯函数：退出码 + 读回锚点合成）。 */

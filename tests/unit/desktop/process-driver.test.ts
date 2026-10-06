@@ -30,6 +30,7 @@ function baseContract(): ProjectContract {
     self_check: { command: ['python', 'app.py', '--self-check'], expect_exit: 0, expect_stdout_contains: 'SELF-CHECK-OK' },
     env_whitelist: ['BLOMA_APP_LLM_KEY'],
     components: [],
+    scenarios: [{ name: 'S1 主流程', covers: ['F-001'] }],
   }
 }
 

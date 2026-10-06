@@ -44,8 +44,17 @@ export interface ProjectContract {
   self_check?: ContractSelfCheck
   env_whitelist: string[]
   components: string[]
+  /** 场景映射（批4 2026-10-06 验收语义冻结）：driver 场景名 → 覆盖的 PRD 验收点 F-id——
+ *  验收点映射完整性的数据源（每个 P0 F-id 至少一个 pass 场景，否则收口拒收）。 */
+  scenarios: ContractScenario[]
   packaging?: ContractPackaging
   notes?: string[]
+}
+
+/** 场景映射条目：name 与 driver stdout 锚点场景名一致；covers = 覆盖的 F-id 列表。 */
+export interface ContractScenario {
+  name: string
+  covers: string[]
 }
 
 /** 校验结果。 */
@@ -109,7 +118,11 @@ export const MINIMAL_CONTRACT_EXAMPLE = `{
     "assert_readback": "逐场景断言结果从 stdout 读回"
   },
   "env_whitelist": [],
-  "components": ["tkinter"]
+  "components": ["tkinter"],
+  "scenarios": [
+    { "name": "S1 新增记录成功", "covers": ["F-001"] },
+    { "name": "S2 空输入拦截", "covers": ["F-001", "F-002"] }
+  ]
 }`
 
 /**
@@ -169,6 +182,27 @@ export function validateProjectContract(input: unknown): ContractValidation {
     }
   }
 
+  // ── 场景映射（批4 2026-10-06 验收语义冻结：验收点映射完整性，必填收紧不留兼容）──
+  if (!Array.isArray(c.scenarios) || c.scenarios.length === 0) {
+    errors.push('scenarios 必须为非空数组（每场景一项 {name, covers:[F-id]}——驱动场景与 PRD 验收点的映射；缺映射=验收语义悬空，收口会拒收）')
+  } else {
+    const seenNames = new Set<string>()
+    for (const scenario of c.scenarios as unknown[]) {
+      const s = (typeof scenario === 'object' && scenario !== null ? scenario : {}) as Record<string, unknown>
+      const name = typeof s.name === 'string' ? s.name : ''
+      if (name.length === 0) {
+        errors.push('scenarios[].name 必须为非空字符串（与 driver stdout 锚点场景名一致）')
+      } else if (seenNames.has(name)) {
+        errors.push(`scenarios[].name 重复：「${name}」`) 
+      } else {
+        seenNames.add(name)
+      }
+      if (!Array.isArray(s.covers) || s.covers.length === 0 || (s.covers as unknown[]).some((v) => typeof v !== 'string' || v.length === 0)) {
+        errors.push(`scenarios[].covers 必须为非空字符串数组（场景「${name || '?'}」未声明覆盖的 PRD 验收点 F-id）`)
+      }
+    }
+  }
+
   // ── 自检（可选面）──
   if (c.self_check !== undefined) {
     const sc = c.self_check as Record<string, unknown>
@@ -216,6 +250,33 @@ export function validateProjectContract(input: unknown): ContractValidation {
   }
 
   return { valid: errors.length === 0, errors }
+}
+
+/**
+ * 验收点覆盖聚合（批4 2026-10-06）：F-id → 覆盖它的场景名与全绿判定（一 F 多场景，
+ * 全 pass 才算该验收点过；场景名不在回读结果里按非 pass 处理——映射声明了但没跑=没过）。
+ * 纯函数：judge 门硬校验、driver-report 佐证、遥测三处共用同一口径。
+ */
+export interface AcceptanceCoverageEntry {
+  fid: string
+  scenarios: string[]
+  passed: boolean
+}
+export function aggregateAcceptanceCoverage(
+  contract: Pick<ProjectContract, 'scenarios'>,
+  outcomes: ReadonlyArray<{ name: string; outcome: string }>,
+): AcceptanceCoverageEntry[] {
+  const outcomeByName = new Map(outcomes.map((o) => [o.name, o.outcome] as const))
+  const byFid = new Map<string, { scenarios: string[]; passed: boolean }>()
+  for (const scenario of contract.scenarios ?? []) {
+    for (const fid of scenario.covers) {
+      const entry = byFid.get(fid) ?? { scenarios: [], passed: true }
+      entry.scenarios.push(scenario.name)
+      if (outcomeByName.get(scenario.name) !== 'pass') entry.passed = false
+      byFid.set(fid, entry)
+    }
+  }
+  return Array.from(byFid.entries(), ([fid, value]) => ({ fid, ...value }))
 }
 
 /**

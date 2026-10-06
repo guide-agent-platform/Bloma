@@ -25,6 +25,7 @@ const CONTRACT = {
   self_check: { command: ['python', 'app.py', '--self-check'], expect_exit: 0, expect_stdout_contains: 'SELF-CHECK-OK' },
   env_whitelist: [],
   components: [],
+  scenarios: [{ name: 'S1 主流程', covers: ['F-001'] }],
 }
 
 const dirs: string[] = []
