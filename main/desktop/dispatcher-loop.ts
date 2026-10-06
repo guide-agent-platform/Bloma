@@ -50,6 +50,7 @@ import { runContractDriver, execFileDriverSpawn, type DriverExecutionReport } fr
 import { buildChildScriptRunnerTool } from './child-exec-tool'
 import { buildDriveAppTool, disposeDriveSessions } from './drive-app-tool'
 import { buildInstallPackagesTool } from './install-packages-tool'
+import { provisionDesktopSkeletonV2 } from './skeleton-provision'
 import { runSecurityScan } from '../verification/security-scan'
 import { findProject } from '../project/project-service'
 import { buildProjectDriverRunnerTool } from './driver-runner-tool'
@@ -420,6 +421,25 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
   const node = getDesktopPhase(input.currentPhase)
   if (!node || !node.dispatcherManaged) {
     return { status: 'not-managed' }
+  }
+
+  // 骨架 v2 物化（批8 下半）：scaffold/implement 阶段入口把平台骨架复制进项目根
+  // （幂等 skip-existing，不覆盖子会话成果）——任务书引用 ui/PATTERNS.md 的前提。
+  // quick 模式不物化 00_SCAFFOLD 契约件（无工程化验收）。fail-open：资产异常只留痕。
+  if (node.id === 'desktop-scaffold' || node.id === 'desktop-implement') {
+    try {
+      const rootForProvision = input.sandboxRoot ?? findProject(input.projectId).root_path
+      if (rootForProvision) {
+        const provisioned = provisionDesktopSkeletonV2(rootForProvision, input.projectName, {
+          includeScaffold: node.id === 'desktop-scaffold',
+        })
+        if (provisioned.failed.length > 0 || provisioned.missing.length > 0) {
+          console.warn('[skeleton-provision] 部分资产未物化：', JSON.stringify(provisioned))
+        }
+      }
+    } catch (error) {
+      console.warn('[skeleton-provision] 物化跳过（项目根不可解析）：', error instanceof Error ? error.message : String(error))
+    }
   }
 
   const collector = new AssistantTurnCollector()

@@ -22,13 +22,28 @@ window.App = (function () {
   }
 
   /** 状态反馈条（UX 契约状态机的唯一呈现位）。
-   *  show("running", "正在保存…") / show("failed", "保存失败", "下一步：…") / hide() */
+   *  show("running", "正在保存…") / show("failed", "保存失败", "下一步：…") / hide()
+   *  注：DOM 全量 createElement/textContent 构造（不用 innerHTML 拼接——平台交付安全门
+   *  对动态 innerHTML 赋值判高危；textContent 天生免注入）。 */
   function show(state, text, next) {
     var b = document.querySelector(".w-banner");
     if (!b) return;
     b.setAttribute("data-state", state);
-    b.innerHTML = (state === "running" ? '<span class="w-spin"></span>' : "") +
-      "<span>" + text + (next ? '<span class="w-next">' + next + "</span>" : "") + "</span>";
+    while (b.firstChild) b.removeChild(b.firstChild);
+    if (state === "running") {
+      var spin = document.createElement("span");
+      spin.className = "w-spin";
+      b.appendChild(spin);
+    }
+    var line = document.createElement("span");
+    line.textContent = text;
+    if (next) {
+      var hint = document.createElement("span");
+      hint.className = "w-next";
+      hint.textContent = next;
+      line.appendChild(hint);
+    }
+    b.appendChild(line);
     b.style.display = "flex";
   }
   function hide() {
@@ -50,22 +65,49 @@ window.App = (function () {
   function renderList(el, items, opt) {
     opt = opt || {};
     if (!el) return;
+    while (el.firstChild) el.removeChild(el.firstChild);
     if (!items || !items.length) {
-      el.innerHTML = '<div class="w-empty"><div class="w-empty-icon">' + (opt.icon || "◎") +
-        '</div><div class="w-empty-title">' + esc(opt.emptyTitle || "还没有内容") +
-        '</div><div class="w-empty-hint">' + esc(opt.emptyHint || "点击上方按钮创建第一个") + "</div></div>";
+      var empty = document.createElement("div");
+      empty.className = "w-empty";
+      var icon = document.createElement("div");
+      icon.className = "w-empty-icon";
+      icon.textContent = opt.icon || "◎";
+      var title = document.createElement("div");
+      title.className = "w-empty-title";
+      title.textContent = opt.emptyTitle || "还没有内容";
+      var hint = document.createElement("div");
+      hint.className = "w-empty-hint";
+      hint.textContent = opt.emptyHint || "点击上方按钮创建第一个";
+      empty.appendChild(icon); empty.appendChild(title); empty.appendChild(hint);
+      el.appendChild(empty);
       return;
     }
-    el.innerHTML = items.map(function (it, i) {
+    items.forEach(function (it, i) {
       var tone = AVA_TONES[(opt.toneOf ? opt.toneOf(it) : i) % AVA_TONES.length];
-      return '<div class="w-row" data-id="' + esc(it[opt.idKey || "id"]) + '">' +
-        (opt.ava === false ? "" :
-          '<div class="w-ava" style="background:linear-gradient(135deg,' + tone[0] + "," + tone[1] + ')">' +
-          esc((it[opt.name] || "?").slice(0, 1)) + "</div>") +
-        '<div><div class="w-row-name">' + esc(it[opt.name || "name"]) + "</div>" +
-        (it[opt.sub] ? '<div class="w-row-sub">' + esc(it[opt.sub]) + "</div>" : "") +
-        "</div></div>";
-    }).join("");
+      var row = document.createElement("div");
+      row.className = "w-row";
+      row.dataset.id = String(it[opt.idKey || "id"]);
+      if (opt.ava !== false) {
+        var ava = document.createElement("div");
+        ava.className = "w-ava";
+        ava.style.background = "linear-gradient(135deg," + tone[0] + "," + tone[1] + ")";
+        ava.textContent = String(it[opt.name] || "?").slice(0, 1);
+        row.appendChild(ava);
+      }
+      var body = document.createElement("div");
+      var name = document.createElement("div");
+      name.className = "w-row-name";
+      name.textContent = String(it[opt.name || "name"] ?? "");
+      body.appendChild(name);
+      if (it[opt.sub]) {
+        var sub = document.createElement("div");
+        sub.className = "w-row-sub";
+        sub.textContent = String(it[opt.sub]);
+        body.appendChild(sub);
+      }
+      row.appendChild(body);
+      el.appendChild(row);
+    });
   }
 
   /** 气泡追加：App.appendBubble(listEl, {side:"ai", text, meta}) */

@@ -188,27 +188,29 @@ describe('需求摘要与子会话基底（2026-09-26 首跑修复）', () => {
 describe('快速模式任务书（2026-10-03 拍板：quick 快速做出可用应用）', () => {
   const ctx = { projectName: 'clip-tool' }
 
-  it('quickMode 时 implement 用快速版任务书与约束：从零实现可用应用，不教续接骨架/契约先行', () => {
+  it('quickMode 时 implement 用快速版任务书与约束：骨架 v2 物化前提 + 无契约先行，不教长期断言纪律', () => {
     const prompt = buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-implement'], { ...ctx, quickMode: true })
     expect(prompt).toContain('快速做一个能用的应用')
-    expect(prompt).toContain('从零实现一个完整可用的 Windows 桌面程序')
+    expect(prompt).toContain('实现完整可用的 Windows 桌面程序')
+    expect(prompt).toContain('平台已物化骨架 v2')
+    expect(prompt).toContain('ui/PATTERNS.md')
     expect(prompt).toContain('不要求 contract.json 与驱动断言')
     expect(prompt).toContain('LAUNCH.json')
     expect(prompt).toContain('快速模式不做工程契约与驱动断言')
     // 长期模式任务书的关键前提不得混入（防双任务书叠加混淆调度员）
-    expect(prompt).not.toContain('续接骨架委派实现真实桌面程序')
+    expect(prompt).not.toContain('续接骨架实现真实桌面程序')
     expect(prompt).not.toContain('每实现一个功能必须先有对应驱动断言')
   })
 
-  it('非 quickMode 的 implement 保持长期模式任务书（字节不变，既有用例语义）', () => {
+  it('非 quickMode 的 implement 保持长期模式任务书（续接骨架前提，既有用例语义 v2 化）', () => {
     const prompt = buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-implement'], ctx)
-    expect(prompt).toContain('续接骨架委派实现真实桌面程序')
+    expect(prompt).toContain('续接骨架实现真实桌面程序')
     expect(prompt).not.toContain('快速做一个能用的应用')
   })
 
   it('无快速版任务书的阶段（arch/scaffold/verify）：quickMode 也用原任务书与约束', () => {
     const prompt = buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-scaffold'], { ...ctx, quickMode: true })
-    expect(prompt).toContain('按选型结论搭建最小骨架')
+    expect(prompt).toContain('骨架 v2 已由平台物化')
   })
 
   it('buildDesktopChildBaseSystem quickMode：子会话基底同步用快速版约束（不注入断言先行纪律）', () => {

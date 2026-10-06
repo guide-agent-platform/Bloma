@@ -1,63 +1,67 @@
 /**
  * drive_project_app — 探索驱动测试 A 档工具端（2026-10-05，实施稿
- * BLOMA《Bloma-探索驱动测试实施稿-20261005》，已含 §14 预审修订）。
+ * BLOMA《Bloma-探索驱动测试实施稿-20261005》，批8 下半双腿化）。
  *
  * 拍板（10-05）：Agent 可获受控通路真实操控被测程序；两轨原则——操控给 Agent、
  * 裁决保持确定性（findings 只入过目页/修复账本，不进门禁）；探索者与 implement
  * 结构性分离（本工具仅装配进 research 角色子会话，不进 implement 面）。
  *
- * 机制：spawn 平台资产 drive-harness.py（进程内驱动桥：import 被测入口 +
- * JSON-lines 动词协议，窗口默认 withdraw 静默）；本工具管理会话生命周期、
- * 四项预算（op ≤60/会话、会话 ≤2/项目、动词 ≤10s、墙钟 300s）、每步 trace 落盘
- * 00_VERIFY/drive-trace/、findings 汇总落 00_VERIFY/drive-findings.json
- * （MVP 过目页 holdForMvpConfirm 读取呈现）。
- *
- * spike 实证背书：monkeypatch/异常 hook/deiconify 投递三假设已验
- * （BLOMA/spike-drive-harness-20261005，十项全绿 + 协议冒烟一次过）。
+ * 机制：spawn 被测程序（tk 腿=平台资产 drive-harness.py 进程内桥；webview 腿=骨架
+ * v2 app.py --drive-port 控制服务器），管理会话生命周期与四项预算、每步 trace 落盘
+ * 00_VERIFY/drive-trace/、findings 汇总落 00_VERIFY/drive-findings.json（MVP 过目页
+ * 呈现）。会话机制层在 drive-app-session.ts（R7 拆分）；webview 协议件在
+ * drive-app-webview.ts。
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { spawn as nodeSpawn } from 'node:child_process'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 import type { AgentLoopTool } from '../agent/loop/agent-loop'
 import { findProject } from '../project/project-service'
 import { mainRootDir } from '../platform/paths'
-import { trackAnalytics } from '../delivery/track-analytics'
 import { readLaunchDeclaration } from './launch-smoke'
 import { buildChildExecEnv, defaultResolvePython } from './child-exec-tool'
+import { matchDriveServerLine, reserveDrivePort, webviewListFiles, webviewPost, webviewReadFile, WEBVIEW_DOM_SNAPSHOT_JS } from './drive-app-webview'
+import {
+  CLOSE_TIMEOUT_MS,
+  DEFAULT_SESSION_WALL_MS,
+  DRIVE_FINDINGS_REL,
+  MAX_ACT_STEPS,
+  MAX_OPS_PER_SESSION,
+  MAX_REPRO_STEPS,
+  MAX_SESSIONS_PER_PROJECT,
+  OP_TIMEOUT_MS,
+  OPEN_TIMEOUT_MS,
+  TRACE_DIR_REL,
+  attachProcessListeners,
+  defaultSpawn,
+  detectDriveLeg,
+  dispatchWebviewAct,
+  emitDriveTelemetry,
+  killSession,
+  lookupSession,
+  persistFindings,
+  probeDriveServer,
+  readFindingsFile,
+  requestOp,
+  sessionExpired,
+  sessions,
+  traceLine,
+  truncate,
+  waitForMatch,
+  waitLine,
+} from './drive-app-session'
+import type { DriveFinding, DriveHarnessProcess, DriveSession } from './drive-app-session'
 
-const TRACE_DIR_REL = '00_VERIFY/drive-trace'
-export const DRIVE_FINDINGS_REL = '00_VERIFY/drive-findings.json'
+export { DRIVE_FINDINGS_REL, disposeDriveSessions } from './drive-app-session'
+export type { DriveHarnessProcess, DriveFinding } from './drive-app-session'
 
-const OPEN_TIMEOUT_MS = 30_000
-const CLOSE_TIMEOUT_MS = 5_000
-const OP_TIMEOUT_MS = 10_000
-const DEFAULT_SESSION_WALL_MS = 300_000
-const MAX_OPS_PER_SESSION = 60
-const MAX_SESSIONS_PER_PROJECT = 2
-const MAX_ACT_STEPS = 8
-const MAX_REPRO_STEPS = 16
-
-const ACT_OPS: ReadonlySet<string> = new Set(['click', 'set_text', 'select', 'keys'])
+const ACT_OPS: ReadonlySet<string> = new Set(['click', 'set_text', 'select', 'keys', 'js', 'call'])
 const READ_OPS: ReadonlySet<string> = new Set(['read', 'read_file', 'list_files'])
 const SEVERITIES: ReadonlySet<string> = new Set(['P0', 'P1', 'P2'])
+const WEBVIEW_ACT_OPS: ReadonlySet<string> = new Set(['click', 'set_text', 'js', 'call'])
+const TK_ACT_OPS: ReadonlySet<string> = new Set(['click', 'set_text', 'select', 'keys'])
 
 /** harness 进程抽象（spawn 可注入——单测零真实子进程，陷阱 35）。 */
-export interface DriveHarnessProcess {
-  stdin: { write(chunk: string): void }
-  stdout: { on(event: 'data', listener: (chunk: Buffer | string) => void): void }
-  kill(): void
-  once(event: 'exit', listener: (code: number | null) => void): void
-}
-
-export interface DriveFinding {
-  id: string
-  severity: 'P0' | 'P1' | 'P2'
-  title: string
-  expected: string
-  actual: string
-  repro_steps?: Array<Record<string, unknown>>
-}
 
 export interface DriveAppDeps {
   spawnImpl?: (command: string[], cwd: string, env: Record<string, string>) => DriveHarnessProcess
@@ -67,234 +71,6 @@ export interface DriveAppDeps {
   opTimeoutMs?: number
   openTimeoutMs?: number
   closeTimeoutMs?: number
-}
-
-interface DriveSession {
-  id: string
-  projectId: string
-  root: string
-  proc: DriveHarnessProcess
-  startedAt: number
-  ops: number
-  findings: DriveFinding[]
-  lineBuffer: string
-  queuedLines: string[]
-  waiting: { resolve: (value: Record<string, unknown>) => void; reject: (error: Error) => void } | null
-  exited: boolean
-  exitCode: number | null
-}
-
-const sessions = new Map<string, DriveSession>()
-
-class DriveOpTimeoutError extends Error {
-  constructor(op: string) {
-    super(`动词超时（${op}，上限 10s）：被测回调可能死循环，会话已终止。如实记录为发现后继续收尾。`)
-  }
-}
-
-class DriveSessionDiedError extends Error {
-  constructor(code: number | null) {
-    super(`harness 进程已退出（code=${code}）——被测程序可能发生 native 崩溃。`)
-  }
-}
-
-function defaultSpawn(command: string[], cwd: string, env: Record<string, string>): DriveHarnessProcess {
-  return nodeSpawn(command[0]!, command.slice(1), { cwd, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }) as unknown as DriveHarnessProcess
-}
-
-type DriveEventType = 'desktop_drive_session_started' | 'desktop_drive_step' | 'desktop_drive_findings' | 'desktop_drive_session_closed'
-
-function emitDriveTelemetry(eventType: DriveEventType, projectId: string, payload: Record<string, unknown>): void {
-  try {
-    trackAnalytics({
-      request_id: `drive-app-${Date.now()}-${randomUUID().slice(0, 8)}`,
-      event: {
-        event_type: eventType,
-        project_id: projectId,
-        session_id: typeof payload.agent_session_id === 'string' ? payload.agent_session_id : undefined,
-        payload,
-        privacy_level: 'research_safe',
-      },
-    })
-  } catch {
-    // 遥测失败不阻断探索
-  }
-}
-
-function traceLine(session: DriveSession, direction: 'req' | 'res' | 'evt', payload: Record<string, unknown>): void {
-  try {
-    appendFileSync(join(session.root, TRACE_DIR_REL, `${session.id}.jsonl`), `${JSON.stringify({ t: new Date().toISOString(), dir: direction, ...payload })}\n`, 'utf8')
-  } catch {
-    // 证据落盘失败不阻断探索（mvp-review 有降级显示）
-  }
-}
-
-function pumpWaiting(session: DriveSession): void {
-  if (session.waiting && session.queuedLines.length > 0) {
-    const line = session.queuedLines.shift()!
-    let parsed: Record<string, unknown>
-    try {
-      parsed = JSON.parse(line) as Record<string, unknown>
-    } catch {
-      // B2（2026-10-06）：坏行原文进 trace——只报「协议行损坏」丢原文会加大定位成本
-      try {
-        appendFileSync(join(session.root, TRACE_DIR_REL, `${session.id}.jsonl`), `${JSON.stringify({ t: new Date().toISOString(), dir: 'res', corrupt_line: line.slice(0, 400) })}\n`, 'utf8')
-      } catch {
-        // trace 失败不阻断
-      }
-      parsed = { ok: false, err: { class: 'io', message: '协议行损坏（非 JSON）' } }
-    }
-    const waiter = session.waiting
-    session.waiting = null
-    waiter.resolve(parsed)
-  }
-}
-
-function attachProcessListeners(session: DriveSession): void {
-  session.proc.stdout.on('data', (chunk: Buffer | string) => {
-    session.lineBuffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
-    let newline = session.lineBuffer.indexOf('\n')
-    while (newline >= 0) {
-      const line = session.lineBuffer.slice(0, newline).trim()
-      session.lineBuffer = session.lineBuffer.slice(newline + 1)
-      if (line) session.queuedLines.push(line)
-      newline = session.lineBuffer.indexOf('\n')
-    }
-    pumpWaiting(session)
-  })
-  session.proc.once('exit', (code: number | null) => {
-    session.exited = true
-    session.exitCode = code
-    if (session.waiting) {
-      const waiter = session.waiting
-      session.waiting = null
-      waiter.reject(new DriveSessionDiedError(code))
-    }
-  })
-}
-
-function waitLine(session: DriveSession, timeoutMs: number): Promise<Record<string, unknown>> {
-  return new Promise((resolvePromise, rejectPromise) => {
-    if (session.exited) {
-      rejectPromise(new DriveSessionDiedError(session.exitCode))
-      return
-    }
-    const timer = setTimeout(() => {
-      session.waiting = null
-      try {
-        session.proc.kill()
-      } catch {
-        // 进程可能已退出
-      }
-      rejectPromise(new DriveOpTimeoutError('等待响应'))
-    }, timeoutMs)
-    session.waiting = {
-      resolve: (value) => {
-        clearTimeout(timer)
-        session.waiting = null
-        resolvePromise(value)
-      },
-      reject: (error) => {
-        clearTimeout(timer)
-        session.waiting = null
-        rejectPromise(error)
-      },
-    }
-    pumpWaiting(session)
-  })
-}
-
-async function requestOp(session: DriveSession, payload: Record<string, unknown>, timeoutMs = OP_TIMEOUT_MS): Promise<Record<string, unknown>> {
-  if (session.exited) throw new DriveSessionDiedError(session.exitCode)
-  const pending = waitLine(session, timeoutMs)
-  try {
-    session.proc.stdin.write(`${JSON.stringify(payload)}\n`)
-  } catch (error) {
-    // 写入失败：等待方由 exit/timeout 收尾；此处只兜未注册等待的极小窗口
-    if (!session.waiting) throw new Error(`stdin 写入失败：${error instanceof Error ? error.message : String(error)}`)
-  }
-  return pending
-}
-
-function killSession(session: DriveSession, exitKind: string): void {
-  try {
-    session.proc.kill()
-  } catch {
-    // 已退出
-  }
-  sessions.delete(session.id)
-  // 会话状态落盘（2026-10-06 发现④/B3）：探索会话整体成败写入 00_VERIFY/drive-sessions.json
-  // ——MVP 门呈现「探索不可用」的真相源（探索失败≠零发现，两者对用户可区分）。
-  try {
-    const sessionsPath = join(session.root, '00_VERIFY/drive-sessions.json')
-    let log: unknown[] = []
-    try {
-      log = JSON.parse(readFileSync(sessionsPath, 'utf8')) as unknown[]
-      if (!Array.isArray(log)) log = []
-    } catch {
-      // 首次落盘
-    }
-    log.push({
-      session_id: session.id,
-      started_at: new Date(session.startedAt).toISOString(),
-      ended_at: new Date().toISOString(),
-      outcome: exitKind,
-      ops: session.ops,
-      findings: session.findings.length,
-    })
-    mkdirSync(join(session.root, '00_VERIFY'), { recursive: true })
-    writeFileSync(sessionsPath, JSON.stringify(log, null, 2), 'utf8')
-  } catch {
-    // 状态落盘失败不阻断清理
-  }
-  emitDriveTelemetry('desktop_drive_session_closed', session.projectId, {
-    harness_session_id: session.id,
-    exit: exitKind,
-    steps: session.ops,
-    wall_ms: Date.now() - session.startedAt,
-    findings: session.findings.length,
-  })
-}
-
-/** 会话清理（dispatcher-loop 收尾兜底 + 测试隔离）：kill 残留进程并清注册表。 */
-export function disposeDriveSessions(projectId?: string): void {
-  for (const session of [...sessions.values()]) {
-    if (projectId === undefined || session.projectId === projectId) {
-      traceLine(session, 'evt', { event: 'disposed', by: projectId === undefined ? 'all' : 'dispatcher-teardown' })
-      killSession(session, 'disposed')
-    }
-  }
-}
-
-function lookupSession(sessionId: unknown): DriveSession | undefined {
-  return typeof sessionId === 'string' ? sessions.get(sessionId) : undefined
-}
-
-function sessionExpired(session: DriveSession, wallMs: number): boolean {
-  return Date.now() - session.startedAt > wallMs
-}
-
-function readFindingsFile(root: string): DriveFinding[] {
-  try {
-    const parsed = JSON.parse(readFileSync(join(root, DRIVE_FINDINGS_REL), 'utf8')) as { findings?: DriveFinding[] }
-    return Array.isArray(parsed.findings) ? parsed.findings : []
-  } catch {
-    return []
-  }
-}
-
-function persistFindings(session: DriveSession): void {
-  const existing = readFindingsFile(session.root)
-  const merged = [...existing, ...session.findings]
-  writeFileSync(
-    join(session.root, DRIVE_FINDINGS_REL),
-    JSON.stringify({ project_id: session.projectId, generated_at: new Date().toISOString(), findings: merged }, null, 2),
-    'utf8',
-  )
-}
-
-function truncate(text: string, maxChars: number): string {
-  return text.length > maxChars ? `${text.slice(0, maxChars)}…（截断）` : text
 }
 
 export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): AgentLoopTool {
@@ -308,13 +84,16 @@ export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): A
   return {
     name: 'drive_project_app',
     description:
-      '探索者专属：真实操控本项目的桌面 GUI 程序做探索性测试（进程内驱动桥 v2：boot 模式接管真实入口，' +
-      '主循环/绑定/收尾全真实；窗口默认隐藏不打扰用户）。流程：open（entry 缺省自动取 LAUNCH.json 入口，' +
-      '自动 boot 接管 run()/main()）→ read 拿控件树 + module_state（游戏引擎坐标/分数等状态可读）→ ' +
-      'act 批量动词（click/set_text/select/keys，≤8 步/次；移动/长按类按键配 hold_ms 300~700 按住后读差分）→ ' +
+      '探索者专属：真实操控本项目的桌面 GUI 程序做探索性测试（窗口隐藏不打扰用户，双腿自动路由：' +
+      'pywebview 骨架 v2 产物走 webview 腿——/eval 同步 DOM JS + /call 直调 Api 桥；tkinter 存量产物走进程内驱动桥 v2——' +
+      'boot 模式接管真实入口，主循环/绑定/收尾全真实）。流程：open（entry 缺省自动取 LAUNCH.json 入口）→ ' +
+      'read（webview 腿=DOM 快照：状态条/输入/按钮/列表行/气泡；tk 腿=控件树 + module_state 游戏引擎坐标/分数可读）→ ' +
+      'act 批量动词 ≤8 步/次（webview 腿：click/set_text 按元素 id、js 同步表达式、call 直调 Api 方法如 list_items；' +
+      'tk 腿：click/set_text/select/keys，移动/长按类按键配 hold_ms 300~700 按住后读差分）→ ' +
       'read/read_file/list_files 验证状态与文件副作用 → report 逐条上报发现（P0/P1/P2 + title/expected/actual + repro_steps）→ close 收尾。' +
-      '程序异常随 app_exceptions 返回且会话存活（native 崩溃才会话终止）；每动词 ≤10s（hold 计入）、每会话 60 op/5 分钟、' +
-      '每项目至多 2 会话。你不是实现者：按 PRD 验收点逐条探索（正常/空输入/边界/重复/乱序/键盘响应），发现即 report，不要修代码。',
+      '程序异常随响应返回且会话存活（UI 线程被模态/死循环阻塞则动词超时杀会话——现象本身就是高价值发现）；' +
+      '每动词 ≤10s（hold 计入）、每会话 60 op/5 分钟、每项目至多 2 会话。' +
+      '你不是实现者：按 PRD 验收点逐条探索（正常/空输入/边界/重复/乱序/键盘响应），发现即 report，不要修代码。',
     input_schema: {
       type: 'object',
       properties: {
@@ -328,17 +107,21 @@ export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): A
           items: {
             type: 'object',
             properties: {
-              op: { type: 'string', enum: ['click', 'set_text', 'select', 'keys'] },
-              target: { type: 'string', description: '控件 id（read 返回的 path 形态；keys 可省略=发到焦点/root）' },
+              op: { type: 'string', enum: ['click', 'set_text', 'select', 'keys', 'js', 'call'], description: 'click/set_text 双腿通用（target=控件id或元素id）；select/keys 仅 tkinter 腿；js/call 仅 webview 腿（js=同步 JS 表达式；call=直调 Api 桥方法）' },
+              target: { type: 'string', description: '控件 id（tkinter 腿 read 返回的 path 形态 / webview 腿元素 id；keys 可省略=发到焦点/root）' },
               value: { type: 'string', description: 'set_text/select 的值 / keys 的空格分隔键名（如 Left a space）' },
+              js: { type: 'string', description: 'webview 腿 js 动词：同步 JS 表达式（/eval 通道；不 await Promise，异步请走 call）' },
+              api: { type: 'string', description: 'webview 腿 call 动词：Api 桥方法名（如 list_items）' },
+              args: { type: 'array', description: 'webview 腿 call 动词的参数数组' },
               hold_ms: { type: 'number', description: 'keys 专用：按住毫秒数（0~2000；移动/长按类按键用 300~700，期间主循环真实运行）' },
             },
             required: ['op', 'target'],
           },
         },
-        op: { type: 'string', enum: ['read', 'read_file', 'list_files'], description: 'read 命令的读动词（缺省 read 全量快照）' },
-        target: { type: 'string', description: 'read：单控件 id' },
+        op: { type: 'string', enum: ['read', 'read_file', 'list_files'], description: 'read 命令的读动词（缺省 read 全量快照：tk 腿=控件树+module_state；webview 腿=DOM 快照）' },
+        target: { type: 'string', description: 'read：单控件 id（tk 腿）' },
         path: { type: 'string', description: 'read_file：项目根内相对路径' },
+        js: { type: 'string', description: 'read（webview 腿）：自定义同步 JS 表达式代替缺省 DOM 快照' },
         finding: {
           type: 'object',
           description: 'report：一条探索发现；对照实验推翻/修正早前发现时，带 supersedes 指向被修正的 finding id（其 severity 将被本条覆盖）',
@@ -407,16 +190,31 @@ export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): A
             return { output: error instanceof Error ? error.message : String(error), isError: true }
           }
         }
-        const harnessPath = join(mainRootDir(), 'templates', 'tools', 'drive-harness.py')
-        if (!existsSync(harnessPath)) {
-          return { output: '平台资产缺失：main/templates/tools/drive-harness.py 不存在（安装异常，勿自行绕行）。', isError: true }
+        // 腿路由（批8 下半）：骨架 v2 产物（requirements 含 pywebview 或 LAUNCH ui 声明）走 webview 腿
+        const leg = detectDriveLeg(root)
+        let drivePort = 0
+        let harnessPath = ''
+        if (leg === 'webview') {
+          try {
+            drivePort = await reserveDrivePort()
+          } catch (error) {
+            return { output: `无法预留控制端口：${error instanceof Error ? error.message : String(error)}`, isError: true }
+          }
+        } else {
+          harnessPath = join(mainRootDir(), 'templates', 'tools', 'drive-harness.py')
+          if (!existsSync(harnessPath)) {
+            return { output: '平台资产缺失：main/templates/tools/drive-harness.py 不存在（安装异常，勿自行绕行）。', isError: true }
+          }
         }
         mkdirSync(join(root, TRACE_DIR_REL), { recursive: true })
 
         const sessionId = `drive-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`
         let proc: DriveHarnessProcess
         try {
-          proc = spawnImpl([python, harnessPath, '--entry', entry], root, buildChildExecEnv(process.env))
+          proc =
+            leg === 'webview'
+              ? spawnImpl([python, entry, '--drive-port', String(drivePort)], root, buildChildExecEnv(process.env))
+              : spawnImpl([python, harnessPath, '--entry', entry], root, buildChildExecEnv(process.env))
         } catch (error) {
           return { output: `harness spawn 失败：${error instanceof Error ? error.message : String(error)}`, isError: true }
         }
@@ -424,6 +222,9 @@ export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): A
           id: sessionId,
           projectId,
           root,
+          leg,
+          ...(leg === 'webview' ? { httpPort: drivePort } : {}),
+          webviewLog: '',
           proc,
           startedAt: Date.now(),
           ops: 0,
@@ -436,6 +237,46 @@ export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): A
         }
         sessions.set(sessionId, session)
         attachProcessListeners(session)
+
+        // webview 腿就绪：等 DRIVE_SERVER 行 + 探针；不走 tk 的 ready 行协议
+        if (leg === 'webview') {
+          let port = drivePort
+          try {
+            const matched = await waitForMatch(session, openTimeoutMs, (line) => {
+              const hit = matchDriveServerLine(line)
+              return hit ? { drive_server: true, port: hit.port } : null
+            })
+            port = Number(matched.port)
+            session.httpPort = port
+            await probeDriveServer(port, Math.min(opTimeoutMs, 8_000))
+          } catch (error) {
+            traceLine(session, 'evt', { event: 'open-failed', error: String(error), stdout_tail: session.webviewLog.slice(-400) })
+            killSession(session, 'open-failed')
+            return {
+              output:
+                `${error instanceof Error ? error.message : String(error)}（webview 驱动腿未就绪——主程序启动抛异常/依赖未装/窗口未达都会如此，` +
+                `会话已清理；stdout 尾部：${truncate(session.webviewLog || '（无输出）', 300)}）`,
+              isError: true,
+            }
+          }
+          traceLine(session, 'evt', { event: 'ready', leg: 'webview', port })
+          emitDriveTelemetry('desktop_drive_session_started', projectId, {
+            harness_session_id: sessionId,
+            agent_session_id: agentSessionId,
+            entry,
+            actor: 'explorer',
+            harness: 'webview',
+            port,
+          })
+          return {
+            output: [
+              `驱动会话已建立（webview 腿）：${sessionId}`,
+              `入口 ${entry} · 控制服务器 127.0.0.1:${port}（/call 逻辑层 + /eval DOM JS）· 窗口隐藏不打扰用户`,
+              '下一步：read 拿 DOM 快照（状态条/输入/按钮/列表行/气泡）→ act（click/set_text 按元素 id；js=同步表达式直执行；call=直调 Api 方法如 list_items 观察逻辑层状态）→ report 逐条上报 → close。',
+            ].join('\n'),
+            detail: { session_id: sessionId, entry, leg: 'webview', port },
+          }
+        }
 
         let ready: Record<string, unknown>
         try {
@@ -511,8 +352,24 @@ export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): A
           return { output: `steps 须为 1~${MAX_ACT_STEPS} 个动词对象。`, isError: true }
         }
         for (const step of steps) {
-          if (!step || typeof step !== 'object' || typeof step.op !== 'string' || !ACT_OPS.has(step.op) || (step.op !== 'keys' && typeof step.target !== 'string')) {
-            return { output: 'steps 每项须为 {op: click|set_text|select|keys, target: 控件id, value?: 值, hold_ms?: 按住毫秒}（keys 可省 target）。', isError: true }
+          if (!step || typeof step !== 'object' || typeof step.op !== 'string' || !ACT_OPS.has(step.op)) {
+            return { output: 'steps 每项须为合法动词对象（op+target/value 等）。', isError: true }
+          }
+          // 腿专属动词分流（批8 下半）：tk 腿 select/keys；webview 腿 js/call
+          if (session.leg === 'webview' && !WEBVIEW_ACT_OPS.has(step.op)) {
+            return { output: `动词 ${step.op} 不适用 webview 腿（可用：click/set_text/js/call）——键盘/选择类用 js 动词（new KeyboardEvent(...) 后 dispatchEvent）。`, isError: true }
+          }
+          if (session.leg === 'tk' && !TK_ACT_OPS.has(step.op)) {
+            return { output: `动词 ${step.op} 不适用 tkinter 腿（可用：click/set_text/select/keys）。`, isError: true }
+          }
+          if (step.op !== 'keys' && step.op !== 'js' && step.op !== 'call' && typeof step.target !== 'string') {
+            return { output: 'click/set_text/select 需要 target（控件 id 或元素 id）。', isError: true }
+          }
+          if (step.op === 'js' && (typeof step.js !== 'string' || !step.js.trim())) {
+            return { output: 'js 动词需要 js 参数（同步 JS 表达式；不 await Promise）。', isError: true }
+          }
+          if (step.op === 'call' && typeof step.api !== 'string') {
+            return { output: 'call 动词需要 api 参数（Api 桥方法名，如 list_items）。', isError: true }
           }
           if (step.hold_ms !== undefined && (typeof step.hold_ms !== 'number' || step.hold_ms < 0 || step.hold_ms > 2_000)) {
             return { output: 'hold_ms 须为 0~2000 的毫秒数（keys 专用）。', isError: true }
@@ -522,7 +379,7 @@ export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): A
         let failedAt = -1
         let budgetStop = false
         for (let index = 0; index < steps.length; index += 1) {
-          const step = steps[index] as { op: string; target?: string; value?: unknown; hold_ms?: unknown }
+          const step = steps[index] as { op: string; target?: string; value?: unknown; hold_ms?: unknown; js?: unknown; api?: unknown; args?: unknown }
           if (session.ops >= MAX_OPS_PER_SESSION) {
             budgetStop = true
             break
@@ -535,7 +392,21 @@ export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): A
           const startedAt = Date.now()
           let response: Record<string, unknown>
           try {
-            response = await requestOp(session, payload, opTimeoutMs)
+            response =
+              session.leg === 'webview'
+                ? await dispatchWebviewAct(
+                    session,
+                    {
+                      op: step.op,
+                      target: typeof step.target === 'string' ? step.target : undefined,
+                      value: step.value === undefined ? undefined : String(step.value),
+                      js: typeof step.js === 'string' ? step.js : undefined,
+                      api: typeof step.api === 'string' ? step.api : undefined,
+                      args: Array.isArray(step.args) ? step.args : undefined,
+                    },
+                    opTimeoutMs,
+                  )
+                : await requestOp(session, payload, opTimeoutMs)
           } catch (error) {
             traceLine(session, 'req', { ...payload, error: String(error) })
             emitDriveTelemetry('desktop_drive_step', projectId, {
@@ -590,13 +461,52 @@ export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): A
         return { output: lines.join('\n'), isError: failedAt >= 0, detail: { results } }
       }
 
-      // ── read：读动词直通 ──
+      // ── read：读动词直通（双腿） ──
       if (command === 'read') {
         const op = typeof input.op === 'string' && READ_OPS.has(input.op) ? input.op : 'read'
         if (session.ops >= MAX_OPS_PER_SESSION) {
           return { output: `op 预算用尽（${MAX_OPS_PER_SESSION}）：基于已读状态收尾。`, isError: true }
         }
         session.ops += 1
+        if (session.leg === 'webview') {
+          // read_file/list_files：工具侧直读项目根（webview 腿无进程内 harness，同界同限额）
+          if (op === 'read_file') {
+            const relPath = typeof input.path === 'string' ? input.path : ''
+            const result = webviewReadFile(session.root, relPath)
+            if ('error' in result) return { output: `读取失败（${result.error}）`, isError: true }
+            traceLine(session, 'req', { op, path: relPath })
+            traceLine(session, 'res', { path: result.path, truncated: result.truncated, bytes: result.content.length })
+            return {
+              output: truncate(`路径 ${result.path}${result.truncated ? '（截断）' : ''}\n${result.content}`, 8_000),
+              detail: { op, data: result },
+            }
+          }
+          if (op === 'list_files') {
+            const result = webviewListFiles(session.root)
+            traceLine(session, 'req', { op })
+            traceLine(session, 'res', { files: result.files.length, truncated: result.truncated })
+            return { output: truncate(JSON.stringify(result, null, 1), 8_000), detail: { op, data: result } }
+          }
+          // read：缺省 DOM 快照；自定义同步 js 可代
+          const customJs = typeof input.js === 'string' && input.js.trim() ? input.js.trim() : ''
+          let response: Record<string, unknown>
+          try {
+            response = await webviewPost(session.httpPort ?? 0, '/eval', { js: customJs || WEBVIEW_DOM_SNAPSHOT_JS }, opTimeoutMs)
+          } catch (error) {
+            killSession(session, 'killed')
+            return { output: `${error instanceof Error ? error.message : String(error)}（会话已终止）`, isError: true }
+          }
+          traceLine(session, 'req', { op: 'read', js: customJs ? customJs.slice(0, 400) : '(dom-snapshot)' })
+          traceLine(session, 'res', response)
+          if (response.ok !== true) {
+            return { output: `读取失败（webview: ${String(response.error ?? '')}）`, isError: true }
+          }
+          const data = {
+            ...(typeof response.result === 'object' && response.result !== null ? (response.result as Record<string, unknown>) : { value: response.result }),
+            stdout_tail: session.webviewLog.slice(-400),
+          }
+          return { output: truncate(JSON.stringify(data, null, 1), 8_000), detail: { op, data } }
+        }
         const payload: Record<string, unknown> = { op }
         if (typeof input.target === 'string') payload.target = input.target
         if (typeof input.path === 'string') payload.path = input.path
@@ -680,6 +590,20 @@ export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): A
       // ── close：优雅收尾 ──
       if (command === 'close') {
         let closeInfo = ''
+        if (session.leg === 'webview') {
+          // webview 腿：无 stdin close 动词——taskkill 进程树（含 WebView2 子进程）
+          killSession(session, 'closed')
+          const summary = {
+            steps: session.ops,
+            wall_ms: Date.now() - session.startedAt,
+            findings: session.findings.length,
+          }
+          traceLine(session, 'evt', { event: 'closed', reason: typeof input.reason === 'string' ? input.reason : '', ...summary })
+          return {
+            output: `会话已收口（webview 腿进程树终止）：动词 ${summary.steps} 次 · 墙钟 ${Math.round(summary.wall_ms / 1000)}s · 本次上报发现 ${summary.findings} 条。${input.reason ? `收尾原因：${String(input.reason)}` : ''}`,
+            detail: summary,
+          }
+        }
         try {
           const response = await requestOp(session, { op: 'close' }, closeTimeoutMs)
           closeInfo = response.ok === true ? 'harness 优雅退出' : `close 响应异常（${JSON.stringify(response.err ?? {})}），已强杀`

@@ -13,6 +13,15 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+
+# 项目根定位（平台物化后本文件位于 00_SCAFFOLD/；手工放置在项目根时 parent 即根）。
+# `import app` 断言需要项目根在 sys.path——spawn 工作目录是项目根，但 Python 会把
+# **脚本所在目录**放进 sys.path[0]，故此处显式补根。
+_HERE = Path(__file__).resolve().parent
+_PROJECT_ROOT = _HERE if (_HERE / "app.py").exists() else _HERE.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 
 # ── 窗口自截助手（平台内置，2026-10-05：driver 场景截图一律用它，不要自己写 ImageGrab）──

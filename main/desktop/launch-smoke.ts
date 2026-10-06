@@ -36,6 +36,8 @@ export interface LaunchDeclaration {
   command: string[]
   /** GUI 窗口标题提示（联合判定档触发条件 + 截图窗口匹配；缺省走纯存活档） */
   window_title?: string
+  /** UI 技术栈声明（批8 下半）："webview" = pywebview 骨架 v2 产物（探索桥路由用；缺省由 requirements 探测） */
+  ui?: 'webview'
 }
 
 export type LaunchDeclarationParse =
@@ -65,7 +67,18 @@ export function parseLaunchDeclaration(raw: string): LaunchDeclarationParse {
   if (windowTitle !== undefined && typeof windowTitle !== 'string') {
     return { ok: false, error: 'LAUNCH.json window_title 须为字符串（窗口标题提示，可省略）' }
   }
-  return { ok: true, launch: { command, ...(windowTitle !== undefined ? { window_title: windowTitle } : {}) } }
+  // 批8 下半：ui 声明只认 'webview'（探索桥路由）；其他值按非法拒绝（fail-closed 同风格）
+  if (obj.ui !== undefined && obj.ui !== 'webview') {
+    return { ok: false, error: `LAUNCH.json ui 目前只支持 "webview"（收到 ${JSON.stringify(obj.ui)}，可省略）` }
+  }
+  return {
+    ok: true,
+    launch: {
+      command,
+      ...(windowTitle !== undefined ? { window_title: windowTitle } : {}),
+      ...(obj.ui !== undefined ? { ui: obj.ui as 'webview' } : {}),
+    },
+  }
 }
 
 /** 读项目根的入口声明（文件缺失/不可读返回 null——调用方决定语义）。 */

@@ -38,8 +38,12 @@ describe('dispatcher-phases 阶段表 schema', () => {
   it('快速模式字段数据锁（2026-10-03 quick 通道）：quickTaskTemplate/quickConstraints 仅 desktop-implement 提供且非空，其余阶段不提供（quickMode 回退原任务书）；DPI 感知纪律已在任务书（2026-10-05 坑库回填）', () => {
     const implement = DESKTOP_PHASES['desktop-implement']
     expect(implement.quickTaskTemplate).toBeTruthy()
-    expect(implement.quickTaskTemplate).toContain('SetProcessDpiAwareness')
-    expect(implement.taskTemplate ?? '').toContain('enable_hidpi')
+    expect(implement.quickTaskTemplate).toContain('ui/PATTERNS.md')
+    expect(implement.quickTaskTemplate).toContain('App.show')
+    expect(implement.quickTaskTemplate).toContain('window_title')
+    expect(implement.taskTemplate ?? '').toContain('ui/PATTERNS.md')
+    expect(implement.taskTemplate ?? '').toContain('Logic')
+    expect(implement.taskTemplate ?? '').toContain('App.show')
     expect((implement.quickConstraints ?? []).length).toBeGreaterThan(0)
     for (const node of Object.values(DESKTOP_PHASES)) {
       if (node.id === 'desktop-implement') continue
@@ -216,14 +220,40 @@ describe('架构验证点（实施稿验收 3 演示项）：插阶段只改数�
   })
 })
 
-describe('dispatcher-phases 探索驱动测试接线锁（2026-10-05）', () => {
-  it('verify 任务书含探索委派与 drive_project_app；双模式入口纪律含主循环无条件调度（根因批）', () => {
+describe('dispatcher-phases 探索驱动测试接线锁（2026-10-05；批8 下半 v2 化）', () => {
+  it('verify 任务书含探索委派与 drive_project_app（双腿说明）与 module_state；implement 双书含 --drive-port 平台依赖纪律（tk 主循环纪律随 v2 退役）', () => {
     const verify = getDesktopPhase('desktop-verify')
     expect(verify?.taskTemplate).toContain('探索委派')
     expect(verify?.taskTemplate).toContain('drive_project_app')
     expect(verify?.taskTemplate).toContain('module_state')
     const implement = getDesktopPhase('desktop-implement')
-    expect(implement?.taskTemplate).toContain('主循环调度无条件')
-    expect(implement?.quickTaskTemplate ?? '').toContain('主循环首次调度必须无条件')
+    expect(implement?.taskTemplate).toContain('--drive-port')
+    expect(implement?.quickTaskTemplate ?? '').toContain('--drive-port')
+  })
+})
+
+describe('骨架 v2 任务书纪律锁（批8 下半 2026-10-06）', () => {
+  it('implement 双书：三层纪律/禁外链/evaluate_js 推送/LAUNCH window_title 与 create_window 一致；scaffold 书含物化说明与 --drive-port 保留纪律；PATTERNS 样例真实存在', async () => {
+    const { readFileSync } = await import('node:fs')
+    const implement = getDesktopPhase('desktop-implement')
+    for (const book of [implement?.taskTemplate ?? '', implement?.quickTaskTemplate ?? '']) {
+      expect(book).toContain('不 import UI')
+      expect(book).toContain('禁 npm/CDN/外链字体')
+      expect(book).toContain('evaluate_js')
+      expect(book).toContain('webview.create_window 第一参数')
+    }
+    const scaffoldText = getDesktopPhase('desktop-scaffold')?.taskTemplate ?? ''
+    expect(scaffoldText).toContain('平台物化')
+    expect(scaffoldText).toContain('PATTERNS.md')
+    expect(scaffoldText).toContain('--drive-port')
+    expect(scaffoldText).toContain('不得删除或改名')
+    // 样例出处硬约束（交接拍板）：任务书引用的组件样例必须能在骨架资产里找到
+    const patterns = readFileSync('main/templates/skeletons/desktop-python/ui/PATTERNS.md', 'utf8')
+    for (const sample of ['App.show("running"', 'App.renderList', 'App.appendBubble']) {
+      expect(patterns, `PATTERNS.md 须含样例 ${sample}`).toContain(sample)
+    }
+    const appPy = readFileSync('main/templates/skeletons/desktop-python/app.py', 'utf8')
+    expect(appPy).toContain('push_update')
+    expect(appPy).toContain('evaluate_js')
   })
 })

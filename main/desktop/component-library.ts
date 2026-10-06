@@ -30,6 +30,15 @@ export interface ComponentCard {
 
 export const WINDOWS_COMPONENT_CARDS: readonly ComponentCard[] = [
   {
+    package: 'pywebview',
+    importName: 'webview',
+    purpose: '桌面 GUI 渲染壳（HTML 渲染层，骨架 v2 标配：pywebview+系统 WebView2，Win10+ 自带零安装）',
+    probe: 'python -c "import webview; print(webview.platform)"',
+    pitfall: 'import 名是 webview 不是 pywebview（探测/断言勿写错）；api 桥调用到达非主线程——Python 端不得直接摸 UI，一律 evaluate_js 推送（骨架 push_update 样例）；evaluate_js 不 await Promise，异步桥调用走骨架 --drive-port 的 /call 通道 [实证]',
+    fallback: '无（骨架 v2 标配渲染壳；缺它 ui/ 无法呈现）',
+    evidence: '实证',
+  },
+  {
     package: 'pynput',
     importName: 'pynput',
     purpose: '全局热键监听与键鼠注入',
