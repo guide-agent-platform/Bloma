@@ -36,7 +36,10 @@ def _name_origin(node: ast.expr, aliases: dict[str, str]) -> str | None:
 
 def audit_function(func: ast.FunctionDef | ast.AsyncFunctionDef, path: str) -> list[dict]:
     findings: list[dict] = []
-    is_test = func.name.startswith(("test_", "assert_", "check_", "verify_")) or "selftest" in path.lower() or "driver" in path.lower()
+    # 无断言检查只对名字像测试的函数生效（2026-10-06 误报实锤：driver.py 的 main 是
+    # 编排函数——断言在它调用的 assert_* 场景函数里，把全文件函数都当测试查会误拒
+    # 正当结构；场景函数按骨架约定命名 test_/assert_/check_/verify_，仍全覆盖）
+    is_test = func.name.startswith(("test_", "assert_", "check_", "verify_"))
 
     has_assert = False
     aliases: dict[str, str] = {}
