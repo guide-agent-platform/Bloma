@@ -18,6 +18,7 @@ import {
 import { renderDocumentSectionSpec } from './prd-sections'
 import { categoryTemperature } from '../platform/llm/model-resolution'
 import { updateProject } from '../project/project-service'
+import { recordDecision } from '../project/decision-log'
 
 /**
  * PrdEngineLlm — 向导群·需求工程腿（2026-09-03 架构调整：需求工程链归向导）。
@@ -223,6 +224,16 @@ export async function generatePrdLlm(input: GeneratePrdLlmInput): Promise<PrdBac
       } catch {
         // 项目已删除等场景：品类回写失败不阻断背板产出
       }
+      recordDecision({
+        project_id: input.project_id,
+        session_id: input.session_id,
+        entry: {
+          type: 'modification_decision',
+          title: `PRD 引擎自判交付形态：${parsed.form}`,
+          why: `判型 LLM 化（正则词表已退役）：引擎带完整对话上下文自判 form=${parsed.form}，回写品类 ${formType}`,
+          detail: { form: parsed.form, from: input.template_type ?? null, to: formType },
+        },
+      })
     }
     return buildBackplaneFromParsed(parsed, items, input.project_id, formType ?? input.template_type)
   } catch {
