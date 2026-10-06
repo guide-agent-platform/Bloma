@@ -22,8 +22,8 @@ import type { PrdBackplane, PrdSectionId } from '../coding/sketch-engine'
 import { requirementPriority } from '../coding/sketch-engine'
 import type { ConstraintLevel, ProjectMode } from '../../shared/types'
 
-/** 章节 schema 版本（结构变更时 +1；§6 注入点⑧ judge 轻量版本一致性校验消费）。 */
-export const PRD_SECTIONS_SCHEMA_VERSION = 1
+/** 章节 schema 版本（结构变更时 +1；§6 注入点⑧ judge 轻量版本一致性校验消费）。2026-10-06 +ux（体验契约章节）→ v2。 */
+export const PRD_SECTIONS_SCHEMA_VERSION = 2
 
 /** 章节数据源类别（方案 §5.1：背板字段 | LLM | 用户输入 | 派生）。 */
 export type PrdSectionSource = 'backplane' | 'llm' | 'user_input' | 'derived'
@@ -89,6 +89,17 @@ export const PRD_SECTIONS: PrdSectionDef[] = [
     source: 'backplane',
     dataFrom: 'pages[]（quick ≤3；缺省从 requirements 前 3 项派生）',
     consumers: ['草图引擎（升格 max_pages）', '注入点⑤ sketch prompt'],
+  },
+  {
+    id: 'ux',
+    label: '体验要求（状态与反馈）',
+    // UX 契约线（2026-10-06）：可选章节不进必填矩阵——解析失败/未产出降级为任务书通用
+    // 七态兑底纪律，不 fail PRD（llm-call 单轮 JSON 标准件的解析风险面控制）。
+    quickRequired: false,
+    longtermRequired: false,
+    source: 'llm',
+    dataFrom: 'ux.states[]/feedback_rules[]（PRD 确认时与 acceptance 同步冻结；通用七态白名单）',
+    consumers: ['PRD 过目卡（经 document 体验要求节）', 'implement 任务书（需求摘要 ux 段）', '驱动场景状态触达', '探索任务书体验核对'],
   },
   {
     id: 'assertions',
@@ -203,6 +214,7 @@ export const DOCUMENT_SECTION_INSTRUCTIONS: Record<PrdSectionId, string> = {
   prd_document: '', // 全文本身，不参与章节渲染
   requirements: '逐功能项一段「作为<角色>，我想<功能>，以便<价值>」，并逐项给编号、优先级（P0/P1/P2）、验收要点（与 acceptance 逐字同源）',
   pages: '对话能推出的界面形态与交互方式；推不出就写「待草图阶段确定」，不要编',
+  ux: '体验要求：逐状态一句可观察表现（用户在该状态看到什么——空态/输入中/执行中/成功/部分成功/失败等，与 ux.states 同源）+ 反馈规则（与 ux.feedback_rules 同源）；本产品不适用的状态如实略，为空时写「无特殊体验要求」',
   assertions: '逐功能项列出行为断言（EARS 形态，可执行可断言）',
   gwt: '从行为断言派生的验收场景；无行为断言则写「由 P0 行为断言派生」',
   out_of_scope: '与 out_of_scope 逐字同源；为空时写「本轮无明确排除项」',

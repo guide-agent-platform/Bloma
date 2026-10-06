@@ -33,10 +33,19 @@ function makeBackplane(overrides: Partial<PrdBackplane> = {}): PrdBackplane {
 }
 
 describe('prd-sections（P1：章节 schema + 必填矩阵）', () => {
-  it('章节 schema 带版本字段且 id 唯一', () => {
-    expect(PRD_SECTIONS_SCHEMA_VERSION).toBe(1)
+  it('章节 schema 带版本字段且 id 唯一（2026-10-06 +ux 体验契约章节 → v2）', () => {
+    expect(PRD_SECTIONS_SCHEMA_VERSION).toBe(2)
     const ids = PRD_SECTIONS.map((s) => s.id)
     expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('ux 体验契约章节存在且不进必填矩阵（解析失败降级，不 fail PRD）', () => {
+    const uxSection = PRD_SECTIONS.find((s) => s.id === 'ux')
+    expect(uxSection).toBeDefined()
+    expect(uxSection?.quickRequired).toBe(false)
+    expect(uxSection?.longtermRequired).toBe(false)
+    expect(requiredSections('quick', 'loose').map((s) => s.id)).not.toContain('ux')
+    expect(requiredSections('longterm', 'strict').map((s) => s.id)).not.toContain('ux')
   })
 
   it('quick×loose = 五必填（定位/功能/页面/断言/GWT/范围外，方案 §二）', () => {

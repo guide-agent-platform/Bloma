@@ -16,6 +16,7 @@ export type PrdSectionId =
   | 'prd_document'
   | 'requirements'
   | 'pages'
+  | 'ux'
   | 'assertions'
   | 'gwt'
   | 'out_of_scope'
@@ -34,6 +35,26 @@ export type SectionProvenance = 'user_quote' | 'clarified' | 'guide_inferred' | 
 export interface PrdPage {
   name: string
   purpose?: string
+}
+
+/** 体验状态 id 白名单（UX 契约线，2026-10-06：通用七态——覆盖空/输入/校验/执行/成功/部分/失败）。 */
+export type UxStateId = 'empty' | 'ready_input' | 'validating' | 'running' | 'success' | 'partial' | 'failed'
+
+/** 体验契约单态：用户在该状态下看到什么（一句可观察表现，实现与验收对齐用）。 */
+export interface UxStateSpec {
+  id: UxStateId
+  observable: string
+}
+
+/**
+ * 体验契约（UX 契约线，2026-10-06 会话 f35363f6 讨论 turn15 落地）：PRD 确认时与
+ * acceptance 同步冻结——状态机完整性（不只是「正常路径」）+ 反馈规则（及时/具体/
+ * 失败给下一步）。与旧版 ux_contract（web 草图指针，读侧兼容层）是两回事。
+ * 缺省 undefined（LLM 未产出/解析失败降级——任务书按通用七态兑底纪律注入，不 fail PRD）。
+ */
+export interface UxExperienceSpec {
+  states: UxStateSpec[]
+  feedback_rules: string[]
 }
 
 /** 术语表条目（longterm；LLM 提取 + 纠错回流，全 prompt 注入点统一术语）。 */
@@ -490,6 +511,12 @@ export interface PrdBackplane {
 
   /** 页面清单（两模式全量；quick 限 ≤3）。缺省时读取侧从 requirements 前 3 项派生（兼容旧背板）。 */
   pages?: PrdPage[]
+  /**
+   * 体验契约（UX 契约线，2026-10-06）：状态机（通用七态白名单）+ 反馈规则，PRD 确认时
+   * 冻结；implement 任务书/驱动场景/探索任务书三处消费。缺省 undefined（解析失败降级，
+   * 任务书按通用七态兑底纪律注入）。与旧版 ux_contract（web 草图指针）语义无关。
+   */
+  ux?: UxExperienceSpec
   /** 术语表（longterm）。缺省 []。 */
   glossary?: GlossaryEntry[]
   /** 目标用户（longterm；12.4 标准级「目标用户」行）。缺省 []。 */

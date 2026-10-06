@@ -9,7 +9,7 @@
  */
 
 import { readPrdBackplane } from '../project/document-engine'
-import { requirementPriority } from '../model/prd-backplane'
+import { requirementPriority, type UxExperienceSpec } from '../model/prd-backplane'
 
 export interface RequirementDigestItem {
   id: string
@@ -45,9 +45,42 @@ export function renderRequirementsDigest(input: RequirementDigestInput): string 
   return lines.join('\n')
 }
 
+/** 七态中文标签（digest 渲染用；与 prd-backplane UxStateId 同源）。 */
+const UX_STATE_LABELS: Record<UxExperienceSpec['states'][number]['id'], string> = {
+  empty: '空态',
+  ready_input: '待输入',
+  validating: '校验中',
+  running: '执行中',
+  success: '成功',
+  partial: '部分成功',
+  failed: '失败',
+}
+
+/**
+ * 渲染体验契约段（UX 契约线，2026-10-06）：背板 ux 存在时渲染紧凑文本注入子会话上下文；
+ * 缺省返回 undefined（任务书通用七态兑底纪律兜底，不注入）。纯函数供单测。
+ */
+export function renderUxDigest(ux: UxExperienceSpec | undefined): string | undefined {
+  if (!ux || ux.states.length === 0) return undefined
+  const lines = ['【体验契约（PRD 确认时冻结——实现按此交付，不得自行改定义）】']
+  lines.push('状态（用户在该状态看到什么）：')
+  for (const state of ux.states) {
+    lines.push(`- ${UX_STATE_LABELS[state.id]}（${state.id}）：${state.observable}`)
+  }
+  if (ux.feedback_rules.length > 0) {
+    lines.push('反馈规则：')
+    for (const rule of ux.feedback_rules) {
+      lines.push(`- ${rule}`)
+    }
+  }
+  return lines.join('\n')
+}
+
 /**
  * 读取项目 PRD 背板并渲染需求摘要（桌面线上下文装配便捷函数）。
  * fail-open：背板缺失/读取失败返回 undefined——不阻断主链（如实无注入）。
+ * UX 契约线（2026-10-06）：背板 ux 存在时在需求清单后追加体验契约段（同一注入点，
+ * quick/longterm 子会话同享）。
  */
 export function readDesktopRequirementsDigest(projectId: string): string | undefined {
   try {
@@ -59,7 +92,8 @@ export function readDesktopRequirementsDigest(projectId: string): string | undef
         priority: requirementPriority(item),
       })),
     })
-    return digest.trim() ? digest : undefined
+    const parts = [digest.trim() ? digest : '', renderUxDigest(backplane.ux) ?? ''].filter(Boolean)
+    return parts.length > 0 ? parts.join('\n\n') : undefined
   } catch {
     return undefined
   }

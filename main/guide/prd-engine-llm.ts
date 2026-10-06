@@ -5,7 +5,7 @@ import { loadPromptOverride } from '../agent/prompting/prompt-config'
 import { buildPrdFewShotInjection } from '../agent/prompting/template-injection'
 import { callLlmForJson, type LlmAttemptFailure } from '../kernel/llm-call'
 import type { AgentMessage, MessageContentBlock, TemplateType } from '../../shared/types'
-import type { AiCapability, GameDesignDoc, InterfaceEndpoint, KeyTask, PrdBackplane, SketchRequirement } from '../model/prd-backplane'
+import type { AiCapability, GameDesignDoc, InterfaceEndpoint, KeyTask, PrdBackplane, SketchRequirement, UxExperienceSpec, UxStateId } from '../model/prd-backplane'
 import {
   buildPrdDocumentFallback,
   capContractEnabled,
@@ -77,9 +77,10 @@ export const DEFAULT_SYSTEM_PROMPT = `你是「Bloma 向导 · 需求工程腿�
  "positioning":"产品定位（≤120 字：目标用户 + 核心场景 + 核心价值）",
  "form":"交付形态自判：desktop | game | web。规则：游戏/复刻类（玩法为核心）=game；用户明确要求网站/网页/浏览器/小程序/在线平台形态=web；其余（含一切 Windows 桌面/单机/本地工具）一律 desktop",
  "acceptance":{"F-001":"该功能项的验收要点 2~4 条，分号分隔（正常路径 + 边界/异常各至少 1 条）"},
+ "ux":{"states":[{"id":"empty","observable":"空态时用户看到什么"},{"id":"success","observable":"成功时用户看到什么"}],"feedback_rules":["操作即时反馈；失败给原因与下一步"]},
  "out_of_scope":["本轮明确不做的事"],
  "assumptions":["后台做出的假设"],
- "gdd":{"core_fantasy":"核心幻想","pillars":["支柱 1"],"core_loop":["阶段 1"],"numbers":["数值基准"]}}  // 仅 form=game 时输出，非游戏省略此字段
+ "gdd":{"core_fantasy":"核心幻想","pillars":["支柱 1"],"core_loop":["阶段 1"],"numbers":["数值基准"]}}  // ux 为体验契约（桌面交互类输出，见四）；gdd 仅 form=game 时输出，非游戏省略
 
 一、document（长文本 PRD 全文——用户过目与下游约束的正式形态）
 章节骨架（按序，markdown 标题组织，中文；章节由 schema 驱动，空章节写「无/待确定」不编内容）：
@@ -105,22 +106,28 @@ ${renderDocumentSectionSpec()}
 - **冲突裁决（重要）**：当对话中用户最新、更具体的表述与某功能项 description（冻结的旧措辞）不一致时，以用户最新表述为准撰写该功能项验收要点，并在 document 功能清单节的对应验收要点末尾加“（依据用户原话修订）”，不得为迁就 description 旧措辞而写出与用户意图相反的验收。positioning、acceptance、document 三处对同一件事的语义必须一致，不得出现“定位说前一天、验收写当日”的分裂。用户最新表述中的实现机制词（如存储方式）按【持久化措辞纪律】转写为行为表述，不原样固化进 description/验收。
 - 语义重复或指向同一行为的功能项，验收要点不得互相矛盾，同一行为只描述一次。
 
-四、out_of_scope（范围外）
+四、ux（体验契约，2026-10-06 UX 契约线；桌面交互类产出，纯展示无交互的小工具可省略）
+- states：从七态白名单选本产品适用子集（empty 空态 / ready_input 待输入 / validating 校验中 / running 执行中 / success 成功 / partial 部分成功 / failed 失败），每态一句可观察表现（用户在该状态看到什么，不含实现细节）。
+- 适用判定：有数据列表/表单/处理流程的工具至少覆盖 empty/success/failed 三态；批量/多文件处理类加 partial；异步/耗时操作加 running。
+- feedback_rules：2~4 条（及时性：操作即时有响应；具体性：成功给数量与位置、失败给原因与下一步；长操作有进度或可取消；防重复提交）。
+- 与 document「体验要求」章节同源一致；不适用的状态如实略。
+
+五、out_of_scope（范围外）
 - 用户明确拒绝、排除或表示"本轮不做"的；以及"你帮我决定"时按常见做法主动收敛掉的部分（如多用户/云同步）。
 - 防止下游模型擅自扩功能，宁缺毋滥：无明确依据时给空数组，不要编。
 
-五、assumptions（后台假设）
+六、assumptions（后台假设）
 - 后台必须替用户做的技术/产品决策：数据单位、存储口径（如：数据保留在本机、不做云同步）、界面语言、排序/汇总规则、默认值等。
 - 每条一句话说清"假设了什么"，供后续 decisions 回溯。
 
-六、gdd（游戏设计文档，仅 form=game 输出；非游戏省略此字段）
+七、gdd（游戏设计文档，仅 form=game 输出；非游戏省略此字段）
 - core_fantasy：核心幻想——玩家扮演什么、体验什么（一句话）。
 - pillars：设计支柱 2~3 条——支撑核心幻想的可玩性原则。
 - core_loop：核心循环——主玩法循环的阶段序列（如 探索→战斗→收集→升级）。
 - numbers：数值基准——关键数值/范围（生命值/得分/关卡数/道具池范围等）。
 - 从对话提炼；对话没说细的机制按同类游戏常见合理预期补齐并克制标注「（建议）」；document 的功能清单/行为断言从 gdd 核心循环切片，不发明 gdd 之外的机制。
 
-七、数据留存（桌面品类口径，2026-10-05 web 线退役后改定）
+八、数据留存（桌面品类口径，2026-10-05 web 线退役后改定）
 - 当前版本只交付 Windows 桌面软件：数据留存一律本地实现（编程 Agent 自选本地文件等机制），**不设计后端/API**——不要输出 interface_spec 字段（旧版字段，当前版本不消费）。
 - 需求出现跨端/服务端语义（多端同步、云端、共享给他人、账号、多人协作）时：如实写入 out_of_scope 并在 assumptions 注明「当前版本不支持，需后续版本」——不要编造 API 契约迁就需求。
 - 市调灵感（「参考市面做法」类）只在本地产物能力内采纳（如纸带式记录 → 本地留存展示）。
@@ -131,6 +138,12 @@ ${renderDocumentSectionSpec()}
  "acceptance":{
    "F-001":"正常：新增一笔收入或支出（金额+类型+备注）后列表立即可见并持久保存；边界：金额为空、为负或非数字时提示错误且不保存；边界：刷新或重开后已记录的账目仍在",
    "F-002":"正常：按自然月汇总收入与支出并显示结余金额；边界：本月无任何记录时结余显示 0 而非报错或空白"},
+ "ux":{
+   "states":[
+     {"id":"empty","observable":"无任何记录时首页显示空态引导（如「记第一笔」）而非空白"},
+     {"id":"success","observable":"新增后列表立即可见该笔记录，顶部结余同步更新"},
+     {"id":"failed","observable":"金额非法时表单旁行内提示错误原因，不弹窗、不保存、不清空已填内容"}],
+   "feedback_rules":["保存类操作即时反馈：列表立即可见或行内提示","失败提示说明原因与下一步，不打断整个界面"]},
  "out_of_scope":["多用户协作","银行账户自动对接"],
  "assumptions":["金额单位统一为人民币元","数据仅保存在本地，不提供云同步","结余=本月收入合计-本月支出合计"]}
 
@@ -280,6 +293,9 @@ export function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequire
     assumptions: parsed.assumptions,
     // P1-7：game 类型 GDD（玩法真相源）随背板冻结；非 game 缺省 undefined。
     ...(parsed.gdd ? { gdd: parsed.gdd } : {}),
+    // UX 契约线（2026-10-06）：体验契约随背板冻结（PRD 确认时刻）；未产出/解析失败
+    // 缺省 undefined——下游任务书按通用七态兑底纪律注入，不 fail PRD。
+    ...(parsed.ux ? { ux: parsed.ux } : {}),
     // 后端契约派生腿已退役（2026-10-06 web 残留清理）：prompt 已明说不输出 interface_spec，
     // 此处仅兼容透传 LLM 异常输出（正常恒缺省），不再有确定性派生。
     ...(parsed.interface_spec && parsed.interface_spec.length > 0 ? { interface_spec: parsed.interface_spec } : {}),
@@ -305,6 +321,8 @@ interface ParsedPrd {
   /** 判型 LLM 化（2026-10-06）：引擎自判交付形态；desktop 缺省（解析容错：非法值→undefined）。 */
   form?: 'desktop' | 'game' | 'web'
   acceptance: Record<string, string>
+  /** UX 契约线（2026-10-06）：体验契约（七态白名单 + 反馈规则；解析容错缺省 undefined=降级）。 */
+  ux?: UxExperienceSpec
   out_of_scope: string[]
   assumptions: string[]
   gdd?: GameDesignDoc
@@ -313,6 +331,38 @@ interface ParsedPrd {
   ai_capabilities?: AiCapability[]
   /** Phase 7 U1 H2：关键任务块（开关 on 时 prompt 要求产出；形状级清洗，定稿在 finalizeKeyTasks）。 */
   key_tasks?: KeyTask[]
+}
+
+/** 七态白名单（与 prd-backplane UxStateId 同源；此处运行时判定用）。 */
+const UX_STATE_IDS: ReadonlySet<string> = new Set(['empty', 'ready_input', 'validating', 'running', 'success', 'partial', 'failed'])
+
+/**
+ * 解析 ux 体验契约（UX 契约线，2026-10-06）：states 按 id 白名单过滤（observable 必填非空），
+ * 上限 7 态；feedback_rules 字符串数组上限 6 条；清洗后 states 为空 → undefined（降级）。
+ * export：供单测直测（同 parseInterfaceSpec/parseAiCapabilities 口径）。
+ */
+export function parseUxExperience(raw: unknown): UxExperienceSpec | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const obj = raw as Record<string, unknown>
+  const states: UxExperienceSpec['states'] = []
+  const seen = new Set<string>()
+  if (Array.isArray(obj.states)) {
+    for (const entry of obj.states) {
+      if (typeof entry !== 'object' || entry === null) continue
+      const item = entry as Record<string, unknown>
+      const id = typeof item.id === 'string' ? item.id : ''
+      const observable = typeof item.observable === 'string' ? item.observable.trim() : ''
+      if (!UX_STATE_IDS.has(id) || observable.length === 0 || seen.has(id)) continue
+      seen.add(id)
+      states.push({ id: id as UxStateId, observable })
+      if (states.length >= 7) break
+    }
+  }
+  if (states.length === 0) return undefined
+  const feedbackRules = Array.isArray(obj.feedback_rules)
+    ? obj.feedback_rules.filter((v): v is string => typeof v === 'string' && v.trim().length > 0).slice(0, 6)
+    : []
+  return { states, feedback_rules: feedbackRules }
 }
 
 function parsePrdJson(text: string): ParsedPrd | undefined {
@@ -339,6 +389,8 @@ function parsePrdJson(text: string): ParsedPrd | undefined {
 
   // P1-7：gdd 解析（game 类型；四要素齐备才采纳，缺任一视为无 GDD 降级）。
   const gdd = parseGdd(parsed.gdd)
+  // UX 契约线（2026-10-06）：ux 解析（七态白名单；空 states 视为未产出降级）。
+  const ux = parseUxExperience(parsed.ux)
   // 判型 LLM 化：form 白名单解析（非法/缺省 → undefined = 维持 desktop_tool 缺省）。
   const rawForm = typeof parsed.form === 'string' ? parsed.form : ''
   const form: ParsedPrd['form'] = rawForm === 'desktop' || rawForm === 'game' || rawForm === 'web' ? rawForm : undefined
@@ -354,6 +406,7 @@ function parsePrdJson(text: string): ParsedPrd | undefined {
     document: typeof parsed.document === 'string' ? parsed.document : '',
     ...(form ? { form } : {}),
     acceptance,
+    ...(ux ? { ux } : {}),
     out_of_scope: stringArray(parsed.out_of_scope),
     assumptions: stringArray(parsed.assumptions),
     ...(gdd ? { gdd } : {}),
