@@ -154,19 +154,29 @@ export function buildContinuationDirective(
   expected: string | undefined,
   detail?: AdvanceDecision & { decision: 'reject' },
 ): string {
-  const head = `[system·拒收续接] 阶段「${phaseId}」的推进声明被裁决边界拒绝（${family}），请立即按以下指引继续工作：`
+  const head = `[system·拒收续接] 阶段「${phaseId}」的推进声明被裁决边界拒绝（${family}${detail ? `，拒因=${detail.reason}` : ''}），请立即按以下指引继续工作：`
   const familyAction: Record<RejectionFamily, string> = {
     'target-deny': expected
       ? `本阶段唯一合法推进目标是「${expected}」。请先完成当前阶段门禁，再以注释或行首形态单独一行输出 PHASE_ADVANCE: ${expected}；句中复述协议字面串不构成推进。`
       : '请检查推进目标：只能推进到当前阶段的唯一合法下一阶段（见系统提示词推进协议段）；句中复述不构成推进。',
-    'gate-deny': '门禁未过：请核对缺失产物清单，委派补齐（产物必须真实存在且内容有效），然后重新声明推进。',
+    // 批8 下半（2026-10-07）：按拒因分流——artifacts-missing 讲补齐；security-fail/
+    // test-invalid/fault-survived 讲按拒因详情修（狗粮第三跑：security 教育不进模型
+    // 上下文，模型被 missingArtifacts 占位带偏三轮）。
+    'gate-deny': detail?.reason === 'artifacts-missing'
+      ? '门禁未过：请核对上方缺失产物清单，委派补齐（产物必须真实存在且内容有效），然后重新声明推进。'
+      : '门禁未过：请按下方「门禁拒因详情」修复（security-fail=扫描发现的具体文件与问题；test-invalid/fault-survived=断言质量），修复后重新声明推进。',
   }
-  const missing = detail && 'missingArtifacts' in detail && detail.missingArtifacts?.length
+  // 门禁拒因详情进续接（批8 下半狗粮第三跑实锤，2026-10-07）：security-fail 的教育
+  // （扫描发现文件清单）只随 message_delta 发 UI，不进模型上下文；而 missingArtifacts
+  // 占位（driver-report）被续接渲染成「缺失产物」——模型被带偏去补报告，三轮都没碰
+  // 真正的 eval 红线。拒因与教育关键段必须随续接指令进入模型下一轮输入。
+  const educationDetail = detail?.education ? `\n门禁拒因详情：\n${detail.education}` : ''
+  const missing = detail && 'missingArtifacts' in detail && detail.missingArtifacts?.length && detail.reason === 'artifacts-missing'
     ? `\n缺失产物：${detail.missingArtifacts.flatMap((m) => m.artifacts).join('、')}`
     : ''
   const actual = detail && 'actual' in detail && detail.actual ? `\n本次声明目标：「${detail.actual}」` : ''
   // 刀4 强化（狗粮 c21e10b1 实证，2026-10-03）：implement 段全英文叙述——续接指令是每轮
   // 最强提醒位，语言纪律随拒收教育重选（英文工具输出占比高时模型语言漂移）。
   const disciplineReminder = '\n输出纪律提醒：面向用户文本一律中文、≤2 句要点，结尾只给下一步一句话或推进标记。'
-  return `${head}${actual}${missing}\n${familyAction[family]}${disciplineReminder}`
+  return `${head}${actual}${missing}\n${familyAction[family]}${educationDetail}${disciplineReminder}`
 }

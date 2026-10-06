@@ -116,13 +116,14 @@ describe('续接指令要素', () => {
     expect(text).toContain('句中复述')
   })
 
-  it('gate-deny：含产物清单与补齐动作', () => {
+  it('gate-deny：含产物清单与补齐动作（artifacts-missing 家族；批8 下半后 security-fail 家族改携带拒因详情，见专项用例）', () => {
     const text = buildContinuationDirective('desktop-implement', 'gate-deny', undefined, {
       ...reject('artifacts-missing'),
       missingArtifacts: [{ gateId: 'delivery-doc', artifacts: ['DELIVERY.md'] }],
     })
     expect(text).toContain('DELIVERY.md')
-    expect(text).toContain('委派补齐')
+    expect(text).toContain('补齐')
+    expect(text).toContain('拒因=artifacts-missing')
   })
 
   it('实际声明目标入文（诊断可读）', () => {

@@ -251,6 +251,23 @@ export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): A
             await probeDriveServer(port, Math.min(opTimeoutMs, 8_000))
           } catch (error) {
             traceLine(session, 'evt', { event: 'open-failed', error: String(error), stdout_tail: session.webviewLog.slice(-400) })
+            // webview 腿 open 失败自动落 P2 finding（批8 下半狗粮第三跑实锤：与 tk 腿
+            // no_root/boot_failed 同语义——探索失败≠零发现，启动期 UI 阻塞/依赖缺失
+            // 本身是高价值真相，不上报会丢「探索不可用」证据）
+            session.findings.push({
+              id: `F1-${session.id.slice(-6)}`,
+              severity: 'P2',
+              title: '平台驱动 webview 腿无法接管（open-failed）',
+              expected: '主程序 --drive-port 模式可在超时内就绪并响应 /eval 探针',
+              actual: `${error instanceof Error ? error.message : String(error)}${session.webviewLog ? `；stdout 尾部：${session.webviewLog.slice(-200)}` : '（无输出）'}`,
+            })
+            persistFindings(session)
+            emitDriveTelemetry('desktop_drive_findings', projectId, {
+              harness_session_id: sessionId,
+              severity: 'P2',
+              title: 'platform-drive-webview-unbootable',
+              agent_session_id: agentSessionId,
+            })
             killSession(session, 'open-failed')
             return {
               output:

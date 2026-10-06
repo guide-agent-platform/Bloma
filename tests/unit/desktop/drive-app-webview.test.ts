@@ -298,7 +298,7 @@ describe('drive_project_app webview 腿（批8 下半）', () => {
     expect(fake.kill).toHaveBeenCalled()
   })
 
-  it('DRIVE_SERVER 未出现（入口崩溃）→ open 失败如实报错并清理会话', async () => {
+  it('DRIVE_SERVER 未出现（入口崩溃）→ open 失败如实报错并清理会话，且自动落 P2 finding（探索失败≠零发现，与 tk 腿 no_root 同语义）', async () => {
     const stdout = new EventEmitter()
     const kill = vi.fn()
     const proc: DriveHarnessProcess = {
@@ -323,6 +323,38 @@ describe('drive_project_app webview 腿（批8 下半）', () => {
     expect(outcome.isError).toBe(true)
     expect(outcome.output).toContain('webview 驱动腿未就绪')
     expect(outcome.output).toContain('ImportError')
+    // 自动落 P2 finding：drive-findings.json 有 platform-drive-webview-unbootable 真相
+    const { readFileSync } = await import('node:fs')
+    const findings = JSON.parse(readFileSync(join(projectRoot, '00_VERIFY', 'drive-findings.json'), 'utf8')) as { findings: Array<{ severity: string; title: string; actual: string }> }
+    expect(findings.findings.some((f) => f.severity === 'P2' && f.title.includes('webview 腿无法接管') && f.actual.includes('ImportError'))).toBe(true)
+  })
+})
+
+describe('拒收续接指令携带门禁拒因（批8 下半狗粮第三跑实锤）', () => {
+  it('security-fail 续接：拒因+教育详情（扫描发现清单）进模型输入；missingArtifacts 占位不再渲染成「缺失产物」', async () => {
+    const { buildContinuationDirective } = await import('../../../main/desktop/advance-rejection-loop')
+    const directive = buildContinuationDirective('desktop-verify', 'gate-deny', undefined, {
+      decision: 'reject',
+      reason: 'security-fail',
+      missingArtifacts: [{ gateId: 'driver-report', artifacts: ['00_VERIFY/driver-report.json'] }],
+      discardedObservations: [],
+      education: '宿主安全扫描未通过（2 个高危/严重问题）：\n- ui_behavior_check.py:235 Python eval 红线\n请修复后重新收口。',
+    })
+    expect(directive).toContain('拒因=security-fail')
+    expect(directive).toContain('门禁拒因详情')
+    expect(directive).toContain('ui_behavior_check.py:235')
+    expect(directive).not.toContain('缺失产物') // 占位不再误导
+  })
+
+  it('artifacts-missing 续接：缺失产物清单照常渲染（语义不变）', async () => {
+    const { buildContinuationDirective } = await import('../../../main/desktop/advance-rejection-loop')
+    const directive = buildContinuationDirective('desktop-implement', 'gate-deny', undefined, {
+      decision: 'reject',
+      reason: 'artifacts-missing',
+      missingArtifacts: [{ gateId: 'delivery-doc', artifacts: ['DELIVERY.md'] }],
+      discardedObservations: [],
+    })
+    expect(directive).toContain('缺失产物：DELIVERY.md')
   })
 })
 
