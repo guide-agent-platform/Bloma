@@ -1575,6 +1575,8 @@ export interface AnalyticsTrackInput extends RequestEnvelope {
       | 'desktop_drive_step'
       | 'desktop_drive_findings'
       | 'desktop_drive_session_closed'
+      /** 质量指标地基（批5 2026-10-06）：交付汇总事件——delivered 时一条（模式/路径/驱动结果/验收覆盖/探索状态/冒烟证据） */
+      | 'desktop_delivery_outcome'
     project_id?: string
     session_id?: string
     payload: Record<string, unknown>

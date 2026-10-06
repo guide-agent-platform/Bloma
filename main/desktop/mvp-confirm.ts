@@ -19,6 +19,7 @@ import { recordDecision } from '../project/decision-log'
 import { buildDeliveredNoticeCard } from './notice-cards'
 import { updateProject, findProject } from '../project/project-service'
 import { mintProjectPreviewUrl } from '../delivery/preview-scheme'
+import { recordDeliveryOutcomeTelemetry } from './dispatcher-telemetry'
 import { DRIVE_FINDINGS_REL, type DriveFinding } from './drive-app-tool'
 
 export const MVP_OPTION_CONFIRM = 'mvp_confirm_go'
@@ -222,6 +223,7 @@ export function confirmMvpDelivered(options: {
     },
   })
   updateProject(input.projectId, { desktop_phase: 'delivered', status: 'completed', current_stage: 'completed' })
+  recordDeliveryOutcomeTelemetry(input.projectId, input.sessionId, 'mvp-confirm')
   deps.publish(input, 'mvp_review_closed', {})
   deps.publish(input, 'stage_changed', { stage: 'delivered' })
   deps.publish(input, 'message_delta', {

@@ -35,6 +35,7 @@ import { runDesktopDispatcherLoop, type DesktopDispatchRunInput, type DesktopDis
 import { clearRejectionOnAdvance, createRejectionLedger, decideRejectionLoop, registerRejection, type RejectionLedger } from './advance-rejection-loop'
 import { buildBlockedNoticeCard, buildDeliveredNoticeCard, digestDeliveryDoc } from './notice-cards'
 import { runLaunchSmoke, type LaunchSmokeResult } from './launch-smoke'
+import { recordDeliveryOutcomeTelemetry } from './dispatcher-telemetry'
 
 /** 启动冒烟门缺省实现（2026-10-04；批1 2026-10-06 起服务 quick/longterm 双路）：读项目根
  *  真实 spawn 一次——宽限期内退出（含启动即崩）即不通过，stdout/stderr 尾部随卡回传修复轮；
@@ -533,6 +534,7 @@ async function settleDesktopStage(
         }
       }
       updateProject(input.projectId, { desktop_phase: finalPhase, status: 'completed', current_stage: 'completed' })
+      recordDeliveryOutcomeTelemetry(input.projectId, input.sessionId, 'terminal')
       deps.publish(input, 'stage_changed', { stage: finalPhase })
       deps.publish(input, 'message_delta', { text: buildDeliveredNoticeCard(assembleDeliveredNotice(input.projectId, projectName, phaseId, result)) })
       deps.persistSystem(input.sessionId, `[decision] desktop-advance ${phaseId} → ${finalPhase}（终态，交付通知卡已发）`)
@@ -578,6 +580,7 @@ async function settleDesktopStage(
           return
         }
         updateProject(input.projectId, { desktop_phase: 'delivered', status: 'completed', current_stage: 'completed' })
+        recordDeliveryOutcomeTelemetry(input.projectId, input.sessionId, 'quick-direct')
         deps.publish(input, 'stage_changed', { stage: 'delivered' })
         deps.publish(input, 'message_delta', { text: buildDeliveredNoticeCard(assembleDeliveredNotice(input.projectId, projectName, phaseId, result)) })
         deps.persistSystem(input.sessionId, `[decision] desktop-quick-delivered ${phaseId} → delivered（快速直通道：安全门${securityGate ? '通过' : '无项目上下文跳过'}；启动冒烟${smoke ? smoke.detail : '无项目上下文跳过'}，跳过 verify 工程验收）`)

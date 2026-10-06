@@ -5,9 +5,17 @@
  * 终态/轮数/工具计数/usage/轮级摘要/拒因修复分类/推进维度）。起跑事件是 10-04 晚
  * implement 卡 7 分半零观测痕迹的补丁——收口事件只在 loop 结束发，中途停止/挂起的
  * 运行此前无任何记录，卡点归因只能盘外推断。
+ *
+ * 批5（2026-10-06 质量指标地基）：①attempt_index/final_outcome 进收口事件
+ * （过程层指标口径：同阶段段序号 + 结构化终态枚举）；②desktop_delivery_outcome
+ * 交付汇总事件（delivered 时一条：模式/路径/驱动结果/验收覆盖/探索状态/冒烟证据，
+ * 从磁盘真相源读——scripts/quality-report.mjs 直接消费）。
  */
 import type { DesktopDispatchRunInput, DesktopDispatchRunResult } from './dispatcher-loop'
 import { trackAnalytics } from '../delivery/track-analytics'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { findProject } from '../project/project-service'
 
 
 /** 起跑留痕（每段 run 一条；失败静默不阻断主链路）。 */
@@ -68,24 +76,18 @@ export function recordDispatchRunTelemetry(
     const turnsInputTotal = turnsUsage.reduce((sum, t) => sum + t.inputTokens, 0)
     const head3Input = turnsUsage.filter((t) => t.turn <= 3).reduce((sum, t) => sum + t.inputTokens, 0)
     const repairClass = deriveRepairClass(result)
-    trackAnalytics({
-      request_id: `desktop-dispatch-${input.sessionId}-${startedAt}`,
-      event: {
-        event_type: 'desktop_dispatch_run',
-        project_id: input.projectId,
-        session_id: input.sessionId,
-        payload: {
-          phase: result.phase?.id,
-          status: result.status,
-          loop_status: loopResult?.status,
-          turns: loopResult?.turns,
-          tool_calls: {
-            total: toolCalls.length,
-            ok: toolCalls.filter((c) => c.status === 'ok').length,
-            error: toolCalls.filter((c) => c.status === 'error').length,
-            delegate: toolCalls.filter((c) => typeof c.name === 'string' && c.name.startsWith('delegate')).length,
-          },
-          usage: loopResult?.usage
+    const payload: Record<string, unknown> = {
+      phase: result.phase?.id,
+      status: result.status,
+      loop_status: loopResult?.status,
+      turns: loopResult?.turns,
+      tool_calls: {
+        total: toolCalls.length,
+        ok: toolCalls.filter((c) => c.status === 'ok').length,
+        error: toolCalls.filter((c) => c.status === 'error').length,
+        delegate: toolCalls.filter((c) => typeof c.name === 'string' && c.name.startsWith('delegate')).length,
+      },
+      usage: loopResult?.usage
             ? {
                 input: loopResult.usage.inputTokens,
                 output: loopResult.usage.outputTokens,
@@ -124,11 +126,128 @@ export function recordDispatchRunTelemetry(
             consumed: Boolean(input.verifiedConclusion),
           },
           duration_ms: Date.now() - startedAt,
-        },
+    }
+    recordAttemptAndOutcome(input, result, payload)
+    trackAnalytics({
+      request_id: `desktop-dispatch-${input.sessionId}-${startedAt}`,
+      event: {
+        event_type: 'desktop_dispatch_run',
+        project_id: input.projectId,
+        session_id: input.sessionId,
+        payload,
         privacy_level: 'masked',
       },
     })
   } catch {
     // 遥测失败不反噬业务（analytics 写盘兜底已有；此处防未预期形状）
+  }
+}
+
+// =========================================================================
+// 批5（2026-10-06 质量指标地基）：attempt_index / final_outcome / 交付汇总事件
+// =========================================================================
+
+/** 同项目同阶段的段计数（attempt_index 口径：一次交付尝试 = 同阶段段 run 序号）。
+ *  进程内存态，重启归零——指标 v1 口径，够大矩阵测试用（讨论 turn9 的统计分母）。 */
+const phaseRunCounts = new Map<string, number>()
+
+/** 测试隔离用（beforeEach 重置；生产无需）。 */
+export function resetDispatchTelemetryForTests(): void {
+  phaseRunCounts.clear()
+}
+
+/**
+ * 结构化终态（讨论 turn9 口径）：pass / product_fail / test_fail / security_fail /
+ * infra_error / budget_exceeded / cancelled / inconclusive。从 advance + driver 路由 +
+ * 修复分类收敛——「重试后绿」不抹掉本段终态（每段如实记录，首次通过率由报告侧聚合）。
+ */
+export function deriveFinalOutcome(result: DesktopDispatchRunResult): string {
+  const advance = result.advance
+  if (!advance) {
+    const loopStatus = result.loopResult?.status
+    if (loopStatus === 'cancelled') return 'cancelled'
+    if (result.status === 'error') return 'infra_error'
+    if (loopStatus && loopStatus !== 'completed') return 'budget_exceeded'
+    return 'inconclusive'
+  }
+  if (advance.decision === 'advance') return 'pass'
+  if (advance.reason === 'security-fail') return 'security_fail'
+  const routing = result.driverReport?.routing
+  if (routing === 'blocked') return 'infra_error'
+  if (routing === 'fail') return 'product_fail'
+  const repairClass = deriveRepairClass(result)
+  if (repairClass === 'environment') return 'infra_error'
+  if (repairClass === 'mapping' || repairClass === 'coverage') return 'test_fail'
+  if (repairClass === 'behavior' || repairClass === 'structure') return 'product_fail'
+  if (result.loopResult?.status !== 'completed') return 'budget_exceeded'
+  return 'inconclusive'
+}
+
+/** 收口事件附加 attempt_index/final_outcome（批5）。 */
+function recordAttemptAndOutcome(input: DesktopDispatchRunInput, result: DesktopDispatchRunResult, payload: Record<string, unknown>): void {
+  const phaseId = result.phase?.id ?? input.currentPhase
+  const key = `${input.projectId}::${phaseId}`
+  const attemptIndex = (phaseRunCounts.get(key) ?? 0) + 1
+  phaseRunCounts.set(key, attemptIndex)
+  payload.attempt_index = attemptIndex
+  payload.final_outcome = deriveFinalOutcome(result)
+}
+
+/**
+ * 交付汇总事件（批5）：delivered 时一条——三处收口点（terminal/quick-direct/mvp-confirm）
+ * 调用；从磁盘真相源读驱动结果/验收覆盖/探索状态/冒烟证据（与 MVP 过目页同一数据面），
+ * scripts/quality-report.mjs 直接消费出三层指标。失败静默不阻断交付链。
+ */
+export function recordDeliveryOutcomeTelemetry(projectId: string, sessionId: string, via: 'terminal' | 'quick-direct' | 'mvp-confirm'): void {
+  try {
+    const project = findProject(projectId)
+    const root = project?.root_path
+    const payload: Record<string, unknown> = {
+      via,
+      mode: project?.mode ?? null,
+      template_type: project?.template_type ?? null,
+    }
+    if (root) {
+      try {
+        const reportPath = join(root, '00_VERIFY', 'driver-report.json')
+        if (existsSync(reportPath)) {
+          const report = JSON.parse(readFileSync(reportPath, 'utf8')) as {
+            routing?: string
+            scenarios?: Array<{ outcome?: string }>
+            acceptance_coverage?: Array<{ fid: string; passed: boolean }>
+          }
+          payload.driver = {
+            routing: report.routing ?? null,
+            scenarios_total: report.scenarios?.length ?? 0,
+            scenarios_pass: report.scenarios?.filter((s) => s.outcome === 'pass').length ?? 0,
+            acceptance_mapped: report.acceptance_coverage?.length ?? 0,
+            acceptance_passed: report.acceptance_coverage?.filter((e) => e.passed).length ?? 0,
+          }
+        }
+        const sessionsPath = join(root, '00_VERIFY', 'drive-sessions.json')
+        if (existsSync(sessionsPath)) {
+          const sessions = JSON.parse(readFileSync(sessionsPath, 'utf8')) as Array<{ outcome?: string }>
+          payload.exploration = {
+            sessions: sessions.length,
+            degraded: sessions.filter((s) => s?.outcome !== 'closed').length,
+          }
+        }
+        payload.smoke_screenshot = existsSync(join(root, '00_VERIFY', 'screenshots', 'LAUNCH.png'))
+      } catch {
+        // 磁盘佐证缺失如实省略（事件仍记录基础面）
+      }
+    }
+    trackAnalytics({
+      request_id: `desktop-delivery-${sessionId}-${Date.now()}`,
+      event: {
+        event_type: 'desktop_delivery_outcome',
+        project_id: projectId,
+        session_id: sessionId,
+        payload,
+        privacy_level: 'research_safe',
+      },
+    })
+  } catch {
+    // 遥测失败不阻断交付
   }
 }
