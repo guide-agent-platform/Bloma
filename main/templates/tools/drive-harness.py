@@ -55,6 +55,53 @@ SKIP_DIRS = {".venv", "__pycache__", ".git", "node_modules", "archive", "00_VERI
 _buf_out = io.StringIO()
 _buf_err = io.StringIO()
 _pending_exceptions: list[dict] = []
+_modal_suppressed: list[dict] = []  # 驱动态吞掉的 messagebox 弹窗（发现⑦；按响应增量上报）
+
+# messagebox 家族默认返回值（探索视角＝「用户点了确定性选项推进流程」；
+# retrycancel 默认不重试避免死循环）
+_MESSAGEBOX_DEFAULTS: dict = {
+    "showinfo": "ok",
+    "showwarning": "ok",
+    "showerror": "ok",
+    "askyesno": True,
+    "askokcancel": True,
+    "askretrycancel": False,
+    "askquestion": "yes",
+}
+
+
+def _install_messagebox_shield() -> None:
+    """驱动态模态拦截（2026-10-06 发现⑦根治，狗粮 1c953320/07e20970 双实证）：
+    messagebox 家族是模态（grab + wait_window）——root 被 withdraw 时弹框不可见
+    不可交互，回调阻塞泵主线程 → click 响应不写、后续动词全无响应（会话死锁）。
+    在产物 import **之前** patch 模块函数（from tkinter.messagebox import showinfo
+    拿到的就是拦截版）；吞弹窗按默认值返回并记录，read 响应 modal_suppressions
+    增量上报。自建 Toplevel 模态不在本护罩内（挂账 D2：grab_current 监护）。"""
+    try:
+        import tkinter.messagebox as mb
+    except Exception:
+        return
+    for name, default in _MESSAGEBOX_DEFAULTS.items():
+        if getattr(mb, name, None) is None:
+            continue
+
+        def make_shield(fn_name: str, dft):
+            def shield(title=None, message=None, **kwargs):  # noqa: ARG001
+                _modal_suppressed.append({
+                    "fn": fn_name,
+                    "title": str(title or "")[:80],
+                    "message": str(message or "")[:200],
+                })
+                return dft
+            return shield
+
+        setattr(mb, name, make_shield(name, default))
+
+
+def _drain_modal_suppressions() -> list[dict]:
+    drained = _modal_suppressed[:]
+    _modal_suppressed.clear()
+    return drained
 _step = 0
 _root = None  # 活动 tk.Tk
 _module = None
@@ -98,17 +145,21 @@ def _import_entry(entry: str):
     tk.Tk.mainloop = lambda self, *args, **kwargs: None
 
     sys.path.insert(0, root_dir)
+    # stdout 竞态根治（2026-10-06 发现③，狗粮 07e20970 实锤）：import 完不再恢复
+    # sys.stdout——boot 泵运行期产物 after 回调（tick 等）的 print+flush 会直写协议
+    # fd 1 与 JSON 响应交错（「协议行损坏」）。驱动态全程保持缓冲：协议响应走
+    # _write_line 的 os.write 直写不受影响，产物运行期 print 反而经 read 的
+    # stdout_tail 可观测。
     sys.stdout = _buf_out
     sys.stderr = _buf_err
+    _install_messagebox_shield()
     spec = importlib.util.spec_from_file_location("__bloma_target__", candidate)
     module = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(module)
     except Exception:
-        sys.stdout = sys.__stdout__
         _fail_open("import_failed", f"入口模块执行抛异常：{entry}", traceback.format_exc())
         return None
-    sys.stdout = sys.__stdout__
     return module
 
 
@@ -394,6 +445,39 @@ def _op_describe() -> dict:
     return {"widgets": [_describe_widget(w) for w in _walk_widgets()]}
 
 
+def _schedule_modal_guard(delay_ms: int = 2500) -> None:
+    """D2 自建 Toplevel 模态守护（2026-10-06 发现⑦补齐）：invoke() 同步执行产物
+    command，回调弹自建模态（Toplevel+grab+wait_window）时主线程卡在模态局部
+    事件循环——但该局部循环仍会处理 after 定时器（Tk 语义），故提前排一个守护：
+    触发时若 grab_current 非空 → destroy 模态窗（wait_window 返回、回调继续、
+    泵复活）并记录 _modal_suppressed。messagebox 家族已由 D1 护罩拦截，本守护
+    兕底自建模态。产物回调后续若访问已销毁控件抛 TclError，由异常 hook 如实上报。"""
+    def _guard() -> None:
+        try:
+            grabbed = _root.grab_current() if _root is not None else None
+            if grabbed is not None:
+                title = ""
+                try:
+                    title = str(grabbed.title())[:80] if hasattr(grabbed, "title") else str(grabbed)[:80]
+                except Exception:
+                    pass
+                _modal_suppressed.append({
+                    "fn": "toplevel_grab_destroyed",
+                    "title": title,
+                    "message": "自建模态对话框在驱动态被守护销毁（D2）；若需交互清验证弹窗路径请在无弹窗流程内完成",
+                })
+                try:
+                    grabbed.destroy()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    try:
+        _root.after(delay_ms, _guard)
+    except Exception:
+        pass
+
+
 def _op_click(target: str) -> dict:
     widget = _find_widget(target)
     if widget is None:
@@ -405,6 +489,7 @@ def _op_click(target: str) -> dict:
         except Exception:
             has_command = False
     if has_command:
+        _schedule_modal_guard()
         widget.invoke()
         _pump()
     else:
@@ -633,6 +718,7 @@ def _respond(op: str, data: dict | None, error: dict | None = None) -> None:
         "step": _step,
         "op": op,
         "app_exceptions": _drain_exceptions(),
+        "modal_suppressions": _drain_modal_suppressions(),
     }
     if error is not None:
         payload["err"] = error

@@ -246,6 +246,38 @@ describe('drive_project_app（探索驱动测试 A 档）', () => {
     expect(persisted.findings[0]!.repro_steps?.[0]?.op).toBe('click')
   })
 
+  it('report supersedes：对照实验修正旧发现 severity（P0→P2）+ superseded_by 溯源；会话状态落盘', async () => {
+    const harness = fakeHarness({ autoReady: READY_OK, respond: () => ({ ok: true, step: 1, op: 'ping', app_exceptions: [], data: {} }) })
+    const tool = buildDriveAppTool(projectId, { spawnImpl: () => harness.proc, resolvePython: okPython, ...FAST_TIMEOUTS })
+    const opened = await tool.execute({ command: 'open' }, ctxFor(projectId))
+    const sessionId = (opened.detail as { session_id: string }).session_id
+    await tool.execute(
+      { command: 'report', session: sessionId, finding: { severity: 'P0', title: '空输入点新增回调阻塞', expected: '提示错误不保存', actual: '驱动会话被终止' } },
+      ctxFor(projectId),
+    )
+    const first = JSON.parse(readFileSync(join(projectRoot, '00_VERIFY', 'drive-findings.json'), 'utf8')) as { findings: Array<{ id: string; severity: string; superseded_by?: string }> }
+    const firstId = first.findings[0]!.id
+    const amend = await tool.execute(
+      {
+        command: 'report',
+        session: sessionId,
+        finding: { severity: 'P2', title: '对照实验：上条系 harness 模态交互所致非产品问题', expected: '归因平台侧', actual: '同会话 trace 时间戳为证', supersedes: firstId },
+      },
+      ctxFor(projectId),
+    )
+    expect(amend.isError).toBeFalsy()
+    expect(amend.output).toContain(`${firstId}：P0→P2`)
+    const after = JSON.parse(readFileSync(join(projectRoot, '00_VERIFY', 'drive-findings.json'), 'utf8')) as { findings: Array<{ id: string; severity: string; superseded_by?: string }> }
+    const old = after.findings.find((item) => item.id === firstId)
+    expect(old?.severity).toBe('P2')
+    expect(old?.superseded_by).toBeTruthy()
+    // B3：close 后会话状态落盘 drive-sessions.json（outcome=closed）
+    await tool.execute({ command: 'close', session: sessionId }, ctxFor(projectId))
+    const sessionsLog = JSON.parse(readFileSync(join(projectRoot, '00_VERIFY', 'drive-sessions.json'), 'utf8')) as Array<{ session_id: string; outcome: string }>
+    expect(sessionsLog).toHaveLength(1)
+    expect(sessionsLog[0]!.outcome).toBe('closed')
+  })
+
   it('close：发送 close 动词 + kill 收尾；重复 close 报无会话', async () => {
     const harness = fakeHarness({ autoReady: READY_OK, respond: () => ({ ok: true, step: 1, op: 'close', app_exceptions: [], data: { closed: true } }) })
     const tool = buildDriveAppTool(projectId, { spawnImpl: () => harness.proc, resolvePython: okPython, ...FAST_TIMEOUTS })

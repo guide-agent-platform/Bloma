@@ -112,6 +112,29 @@ describe('holdForMvpConfirm（挂起）', () => {
     expect(html).toContain('[P0] 保存后数据丢失')
     expect(html).toContain('重启后为空')
   })
+
+  it('探索状态真相段（B4，2026-10-06）：会话全非正常收尾时如实呈现「未含探索证据」；正常收尾不渲染', () => {
+    const { deps } = makeDeps()
+    mkdirSync(join(projectRoot, '00_VERIFY'), { recursive: true })
+    writeFileSync(
+      join(projectRoot, '00_VERIFY', 'drive-sessions.json'),
+      JSON.stringify([{ session_id: 'drive-muwcxxx-abc123', outcome: 'open-timeout', ops: 3 }]),
+      'utf8',
+    )
+    holdForMvpConfirm({ input, deps, fromPhase: 'desktop-verify', notice: { projectName: 'x', fromPhaseTitle: 'y' } })
+    let html = readFileSync(join(projectRoot, '00_VERIFY', 'mvp-review.html'), 'utf8')
+    expect(html).toContain('探索会话未正常完成')
+    expect(html).toContain('open-timeout')
+    // 正常收尾：不渲染警告段
+    writeFileSync(
+      join(projectRoot, '00_VERIFY', 'drive-sessions.json'),
+      JSON.stringify([{ session_id: 'drive-muwcxxx-abc123', outcome: 'closed', ops: 12 }]),
+      'utf8',
+    )
+    holdForMvpConfirm({ input, deps, fromPhase: 'desktop-verify', notice: { projectName: 'x', fromPhaseTitle: 'y' } })
+    html = readFileSync(join(projectRoot, '00_VERIFY', 'mvp-review.html'), 'utf8')
+    expect(html).not.toContain('探索会话未正常完成')
+  })
 })
 
 describe('回传拦截', () => {

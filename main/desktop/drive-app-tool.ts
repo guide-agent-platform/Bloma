@@ -136,6 +136,12 @@ function pumpWaiting(session: DriveSession): void {
     try {
       parsed = JSON.parse(line) as Record<string, unknown>
     } catch {
+      // B2（2026-10-06）：坏行原文进 trace——只报「协议行损坏」丢原文会加大定位成本
+      try {
+        appendFileSync(join(session.root, TRACE_DIR_REL, `${session.id}.jsonl`), `${JSON.stringify({ t: new Date().toISOString(), dir: 'res', corrupt_line: line.slice(0, 400) })}\n`, 'utf8')
+      } catch {
+        // trace 失败不阻断
+      }
       parsed = { ok: false, err: { class: 'io', message: '协议行损坏（非 JSON）' } }
     }
     const waiter = session.waiting
@@ -217,6 +223,30 @@ function killSession(session: DriveSession, exitKind: string): void {
     // 已退出
   }
   sessions.delete(session.id)
+  // 会话状态落盘（2026-10-06 发现④/B3）：探索会话整体成败写入 00_VERIFY/drive-sessions.json
+  // ——MVP 门呈现「探索不可用」的真相源（探索失败≠零发现，两者对用户可区分）。
+  try {
+    const sessionsPath = join(session.root, '00_VERIFY/drive-sessions.json')
+    let log: unknown[] = []
+    try {
+      log = JSON.parse(readFileSync(sessionsPath, 'utf8')) as unknown[]
+      if (!Array.isArray(log)) log = []
+    } catch {
+      // 首次落盘
+    }
+    log.push({
+      session_id: session.id,
+      started_at: new Date(session.startedAt).toISOString(),
+      ended_at: new Date().toISOString(),
+      outcome: exitKind,
+      ops: session.ops,
+      findings: session.findings.length,
+    })
+    mkdirSync(join(session.root, '00_VERIFY'), { recursive: true })
+    writeFileSync(sessionsPath, JSON.stringify(log, null, 2), 'utf8')
+  } catch {
+    // 状态落盘失败不阻断清理
+  }
   emitDriveTelemetry('desktop_drive_session_closed', session.projectId, {
     harness_session_id: session.id,
     exit: exitKind,
@@ -311,13 +341,14 @@ export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): A
         path: { type: 'string', description: 'read_file：项目根内相对路径' },
         finding: {
           type: 'object',
-          description: 'report：一条探索发现',
+          description: 'report：一条探索发现；对照实验推翻/修正早前发现时，带 supersedes 指向被修正的 finding id（其 severity 将被本条覆盖）',
           properties: {
             severity: { type: 'string', enum: ['P0', 'P1', 'P2'] },
             title: { type: 'string' },
             expected: { type: 'string', description: '按 PRD/常识应发生什么' },
-            actual: { type: 'string', description: '实际观察到什么' },
+            actual: { type: 'string', description: '实际观察到什么（对照实验结论也写这里，附 trace 时间戳证据）' },
             repro_steps: { type: 'array', items: { type: 'object' }, description: '可重放动词步骤（同 act steps 形态）' },
+            supersedes: { type: 'string', description: '被本发现修正/取代的旧 finding id（如 F1-x7f3a2）——旧条 severity 将被本条覆盖，避免已推翻的 P0 继续触发回炉' },
           },
           required: ['severity', 'title', 'expected', 'actual'],
         },
@@ -420,7 +451,7 @@ export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): A
           // 「如实上报」不可依赖（狗粮五次 no_root 零上报，零 findings 落盘）。
           if (err.class === 'no_root' || err.class === 'boot_failed') {
             session.findings.push({
-              id: `F${readFindingsFile(session.root).length + session.findings.length + 1}`,
+              id: `F1-${session.id.slice(-6)}`,
               severity: 'P2',
               title: `平台驱动桥无法接管入口（${err.class}）`,
               expected: '产物可被平台真实驱动（模块级窗口或 run()/main() 无参入口）',
@@ -553,6 +584,8 @@ export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): A
           failedAt >= 0 ? `第 ${failedAt + 1} 步失败：${String(results[failedAt]?.err ?? '')}（后续步未执行；target 可能失效，read 重新拿快照）` : '',
           budgetStop ? 'op 预算用尽：本批后续步未执行。' : '',
           results.some((item) => Array.isArray(item.app_exceptions)) ? '注意：部分步触发应用异常（app_exceptions），逐条判断是否 report。' : '',
+          results.some((item) => Array.isArray(item.modal_suppressions) && item.modal_suppressions.length > 0)
+            ? '注意：部分操作触发模态弹窗被驱动桥拦截/销毁（modal_suppressions，含 messagebox 与自建对话框）——弹窗路径在无头驱动下不可交互，如弹窗内有业务逻辑请据实记录。' : '',
         ].filter(Boolean)
         return { output: lines.join('\n'), isError: failedAt >= 0, detail: { results } }
       }
@@ -600,7 +633,34 @@ export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): A
         const reproSteps = Array.isArray(rawFinding.repro_steps)
           ? (rawFinding.repro_steps as Array<Record<string, unknown>>).filter((item) => item && typeof item === 'object').slice(0, MAX_REPRO_STEPS)
           : undefined
-        const record: DriveFinding = { id: `F${readFindingsFile(session.root).length + session.findings.length + 1}`, severity, title, expected, actual, ...(reproSteps && reproSteps.length > 0 ? { repro_steps: reproSteps } : {}) }
+        // id 竞态修复（2026-10-06 发现⑨）：多会话并发时 `F{文件长度+会话内序号}` 两个会话
+        // 各自算出同号（狗粮 1c953320 双 F1 实锤）——id 追加会话短标识保证唯一。
+        const sessionShort = session.id.slice(-6)
+        const idSeed = readFindingsFile(session.root).length + session.findings.length + 1
+        const record: DriveFinding = { id: `F${idSeed}-${sessionShort}`, severity, title, expected, actual, ...(reproSteps && reproSteps.length > 0 ? { repro_steps: reproSteps } : {}) }
+        // supersedes 降级通道（2026-10-06 发现⑧）：对照实验推翻早前判断时，旧条 severity
+        // 结构化覆盖（新条仍独立入文件保留证据链；旧条加 superseded_by 溯源）。
+        let supersedeNote = ''
+        const supersedesId = typeof rawFinding.supersedes === 'string' ? rawFinding.supersedes.trim() : ''
+        if (supersedesId) {
+          const existing = readFindingsFile(session.root)
+          const old = existing.find((item) => item.id === supersedesId)
+          if (old && old.severity !== severity) {
+            const from = old.severity
+            old.severity = severity
+            ;(old as unknown as Record<string, unknown>).superseded_by = record.id
+            writeFileSync(
+              join(session.root, DRIVE_FINDINGS_REL),
+              JSON.stringify({ project_id: session.projectId, generated_at: new Date().toISOString(), findings: existing }, null, 2),
+              'utf8',
+            )
+            supersedeNote = `；已修正 ${supersedesId}：${from}→${severity}（${record.id}）`
+          } else if (old) {
+            supersedeNote = `；${supersedesId} severity 已是 ${severity}，无需修正`
+          } else {
+            supersedeNote = `；未找到 ${supersedesId}（supersedes 未生效，本条照常入文件）`
+          }
+        }
         session.findings.push(record)
         persistFindings(session)
         emitDriveTelemetry('desktop_drive_findings', projectId, {
@@ -612,7 +672,7 @@ export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): A
         const counts = { P0: 0, P1: 0, P2: 0 }
         for (const item of [...readFindingsFile(session.root)]) counts[item.severity] = (counts[item.severity] ?? 0) + 1
         return {
-          output: `已记录 ${record.id}（${severity}）：${title}\n项目累计发现：P0×${counts.P0} P1×${counts.P1} P2×${counts.P2}（已写入 ${DRIVE_FINDINGS_REL}，MVP 过目页会呈现）。`,
+          output: `已记录 ${record.id}（${severity}）：${title}\n项目累计发现：P0×${counts.P0} P1×${counts.P1} P2×${counts.P2}（已写入 ${DRIVE_FINDINGS_REL}，MVP 过目页会呈现）${supersedeNote}。`,
           detail: { finding_id: record.id },
         }
       }

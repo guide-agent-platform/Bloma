@@ -221,7 +221,15 @@ function readP0Findings(projectDir) {
   try {
     const parsed = JSON.parse(readFileSync(join(projectDir, '00_VERIFY', 'drive-findings.json'), 'utf8'))
     const findings = Array.isArray(parsed.findings) ? parsed.findings : []
-    return findings.filter((f) => f.severity === 'P0').map((f) => String(f.title ?? '').slice(0, 80))
+    // 同 title 去重（2026-10-06 发现⑨：多会话并发各报一条同题 P0，计数虚高回炉理由失真）；
+    // superseded 修正由产品侧覆盖 severity 后自然生效（不再是 P0）
+    const seen = new Set()
+    const titles = []
+    for (const f of findings.filter((x) => x.severity === 'P0')) {
+      const t = String(f.title ?? '').slice(0, 80)
+      if (!seen.has(t)) { seen.add(t); titles.push(t) }
+    }
+    return titles
   } catch {
     return []
   }
@@ -376,13 +384,14 @@ try {
 
   // 主循环：应答卡 + 等交付
   const deadline = Date.now() + TIMEOUT_MIN * 60_000
+  let deadlineExtendMs = 0
   const cooldown = new Map()
   let mvpRound = 0
   let lastTail = ''
   let quietTicks = 0
   let blockedLastLog = 0
 
-  while (Date.now() < deadline) {
+  while (Date.now() < deadline + deadlineExtendMs) {
     await sleep(3000)
     state = JSON.parse((await cdp.eval(PAGE_STATE)) ?? '{}')
     if (state.tail !== lastTail) {
@@ -446,6 +455,10 @@ try {
       } else if (mvpRound === 0) {
         mvpRound += 1
         report.p0_titles = p0
+        // 回炉轮加时（2026-10-06 狗粮 1c953320 实证：探索+回炉双轮 45min 不够，
+        // 回炉被超时截停）——deadline 是 const，用 mutable 延长点顺延 20 分钟
+        deadlineExtendMs += 20 * 60_000
+        log(`回炉轮顺延超时 +20min（原 ${TIMEOUT_MIN}min）`)
         action = { id: 'mvp_adjust', why: `MVP 回炉（P0×${p0.length}：${p0[0]}）`, feedback: `修复探索发现的 P0 问题：${p0.join('；')}。修完重新走验收。` }
       } else {
         log(`二轮仍有 P0（${p0.length} 项）——停住出报告，等你拍板`)
