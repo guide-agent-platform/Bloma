@@ -267,12 +267,29 @@ export function aggregateAcceptanceCoverage(
   outcomes: ReadonlyArray<{ name: string; outcome: string }>,
 ): AcceptanceCoverageEntry[] {
   const outcomeByName = new Map(outcomes.map((o) => [o.name, o.outcome] as const))
+  // 场景名口径兼容（2026-10-06 两单实锤）：contract 按批4 教学声明全名（「S1 新增
+  // 记录成功」），driver stdout 锚点按任务书约定写裸 S<n>（「S1 PASS 结论」→ 解析名
+  // 「S1」）——精确匹配全落空会把全绿场景误判成「声明未跑=未过」。精确失败时按
+  // S 编号前缀双向匹配（词边界防 S1 串 S10）；仍无匹配保持 fail-closed。
+  const outcomeFor = (declared: string): string | undefined => {
+    const exact = outcomeByName.get(declared)
+    if (exact !== undefined) return exact
+    for (const [name, outcome] of outcomeByName) {
+      if (name.length === 0 || declared.length === 0) continue
+      const longer = declared.length >= name.length ? declared : name
+      const shorter = longer === declared ? name : declared
+      if (!longer.startsWith(shorter)) continue
+      const rest = longer.slice(shorter.length)
+      if (rest.length === 0 || /^[\s（(，,：:·-]/.test(rest)) return outcome
+    }
+    return undefined
+  }
   const byFid = new Map<string, { scenarios: string[]; passed: boolean }>()
   for (const scenario of contract.scenarios ?? []) {
     for (const fid of scenario.covers) {
       const entry = byFid.get(fid) ?? { scenarios: [], passed: true }
       entry.scenarios.push(scenario.name)
-      if (outcomeByName.get(scenario.name) !== 'pass') entry.passed = false
+      if (outcomeFor(scenario.name) !== 'pass') entry.passed = false
       byFid.set(fid, entry)
     }
   }

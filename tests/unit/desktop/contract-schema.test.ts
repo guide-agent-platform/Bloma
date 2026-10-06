@@ -130,7 +130,7 @@ describe('结构与语义违规', () => {
     expect(validateProjectContract(dup).errors.some((e) => e.includes('重复'))).toBe(true)
   })
 
-  it('aggregateAcceptanceCoverage：一 F 多场景全 pass 才过；声明未跑=未过', () => {
+  it('aggregateAcceptanceCoverage：一 F 多场景全 pass 才过；声明未跑=未过；场景名口径兼容（裸 S<n> 前缀匹配全名，词边界防 S1 串 S10）', () => {
     const contract = { scenarios: [
       { name: 'S1 主流程', covers: ['F-001'] },
       { name: 'S2 空输入', covers: ['F-001', 'F-002'] },
@@ -143,6 +143,20 @@ describe('结构与语义违规', () => {
     expect(coverage.find((e) => e.fid === 'F-001')?.passed).toBe(true)
     expect(coverage.find((e) => e.fid === 'F-001')?.scenarios).toEqual(['S1 主流程', 'S2 空输入'])
     expect(coverage.find((e) => e.fid === 'F-002')?.passed).toBe(false) // S3 声明未跑=未过
+    // 口径兼容（2026-10-06 两单实锤）：driver 锚点裸 S<n> vs contract 全名
+    const bareCoverage = aggregateAcceptanceCoverage(contract, [
+      { name: 'S1', outcome: 'pass' },
+      { name: 'S2', outcome: 'pass' },
+      { name: 'S3', outcome: 'pass' },
+    ])
+    expect(bareCoverage.find((e) => e.fid === 'F-001')?.passed).toBe(true)
+    expect(bareCoverage.find((e) => e.fid === 'F-002')?.passed).toBe(true)
+    // 词边界：S1 不得串到 S10
+    const poisoned = aggregateAcceptanceCoverage(
+      { scenarios: [{ name: 'S10 边界', covers: ['F-009'] }] },
+      [{ name: 'S1', outcome: 'pass' }],
+    )
+    expect(poisoned.find((e) => e.fid === 'F-009')?.passed).toBe(false)
   })
 
   it('self_check 形态违规（可选面存在即校验）', () => {
