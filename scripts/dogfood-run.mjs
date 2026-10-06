@@ -39,7 +39,7 @@ const REQUEST_FILE = opt('request-file', '')
 const REQUEST = REQUEST_FILE
   ? readFileSync(REQUEST_FILE, 'utf8').trim()
   : opt('request', '')
-if (!PROBE_ONLY && REQUEST) {
+if (REQUEST) {
   // 启印回读（此类事故的一线警报：首尾不对劲立即停）
   console.log(`[dogfood] REQUEST ${REQUEST.length} 字 · 首12「${REQUEST.slice(0, 12)}」 · 尾12「${REQUEST.slice(-12)}」`)
 }
