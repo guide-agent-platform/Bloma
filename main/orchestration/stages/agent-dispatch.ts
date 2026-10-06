@@ -53,7 +53,7 @@ import {
 } from '../../coding/programming-orchestrator'
 import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from '../../guide/requirement-normalizer'
 import { readPrdBackplane } from '../../project/document-engine'
-import { backplaneInterfaceSpec } from '../../model/prd-backplane'
+import { runUxConfirmGate } from '../../guide/ux-confirm'
 import { isDegenerateText } from '../../coding/output-integrity'
 import { createWhitespaceArtifactCleaner } from '../../agent/loop/agent-loop'
 import { recordDecision } from '../../project/decision-log'
@@ -379,23 +379,29 @@ async function resolveWebLineRetiredCard(
       },
     })
     updateProject(input.project_id, { template_type: 'desktop_tool' })
+    // UX 门对齐（2026-10-06，根因报告发现②修复）：形态卡改品类后与正常桌面品类同门——
+    // PRD 确认后一律过 UX 草图门（确认门矩阵 quick=PRD+UX / longterm=PRD+UX+MVP），
+    // 不再直调 enterDesktopLine（确认后由 ux-confirm 进桌面线），门矩阵不再有缝隙。
     const resolution = resolveChannelEnv({
       channelId: input.channel_id,
-      category: 'guide',
+      category: 'prd',
       projectId: input.project_id,
       sessionId: input.session_id,
     })
-    await enterDesktopLine(
-      { projectId: input.project_id, sessionId: input.session_id, requestId: input.request_id, content: '按桌面软件形态继续交付' },
-      sdkQuery,
-      resolution.env ?? env,
-      {
-        publish: (_target, type, payload) => streamPublisher(makeEvent(input, type, payload)),
-        persistAssistant: () => undefined,
-        persistSystem: (sessionId, text) => appendSessionMessage(sessionId, { role: 'system', content: [{ type: 'text', text }], timestamp: Date.now() }),
-        complete: () => undefined,
-      },
-    )
+    const backplane = readPrdBackplane(input.project_id)
+    await runUxConfirmGate({
+      request_id: input.request_id,
+      session_id: input.session_id,
+      project_id: input.project_id,
+      mode: findProject(input.project_id)?.mode ?? 'longterm',
+      channel_id: input.channel_id,
+      query: sdkQuery,
+      env: resolution.env ?? env,
+      publish: (event) => streamPublisher(event),
+      round: 1,
+      positioning: backplane?.positioning ?? '',
+      requirements: backplane?.requirements ?? [],
+    })
     return
   }
   // web_to_revise：回向导调整需求

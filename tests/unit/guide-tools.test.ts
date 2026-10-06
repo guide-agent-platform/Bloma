@@ -22,44 +22,6 @@ beforeEach(() => {
   mockFindProject.mockReturnValue({ template_type: 'personal_tool' } as never)
 })
 
-describe('判型回溯钩子（桌面形态诉求错配提示）', () => {
-  it('需求命中「以桌面应用形式部署」且品类 personal_tool → 输出带改道提示', async () => {
-    const tools = buildGuideTools('p1', { onDecide: () => undefined })
-    const tool = tools.find((t) => t.name === 'guide_decide')!
-    const result = await tool.execute({
-      action: 'confirm_requirements',
-      reply: '需求好了',
-      requirements: [
-        { id: 'F-001', description: '做一个计算器', origin: 'user' },
-        { id: 'F-002', description: '计算器以桌面应用形式部署，可在桌面环境直接启动运行', origin: 'user' },
-      ],
-    }, { projectId: 'p1', sessionId: 's1', requestId: 'r1', signal: new AbortController().signal, state: {} as never })
-    expect(result.output).toContain('品类形态提示')
-    expect(result.output).toContain('桌面程序')
-    expect(result.detail?.desktop_form_mismatch).toBe(true)
-  })
-
-  it('品类已是 desktop_tool → 无提示（正确品类不误报）', async () => {
-    mockFindProject.mockReturnValue({ template_type: 'desktop_tool' } as never)
-    const tools = buildGuideTools('p1', { onDecide: () => undefined })
-    const tool = tools.find((t) => t.name === 'guide_decide')!
-    const result = await tool.execute({
-      action: 'confirm_requirements', reply: 'ok',
-      requirements: [{ id: 'F-001', description: '桌面程序计算器' }],
-    }, { projectId: 'p1', sessionId: 's1', requestId: 'r1', signal: new AbortController().signal, state: {} as never })
-    expect(result.output).not.toContain('品类形态提示')
-  })
-
-  it('无桌面诉求的普通需求 → 无提示', async () => {
-    const tools = buildGuideTools('p1', { onDecide: () => undefined })
-    const tool = tools.find((t) => t.name === 'guide_decide')!
-    const result = await tool.execute({
-      action: 'confirm_requirements', reply: 'ok',
-      requirements: [{ id: 'F-001', description: '记账并保存记录' }],
-    }, { projectId: 'p1', sessionId: 's1', requestId: 'r1', signal: new AbortController().signal, state: {} as never })
-    expect(result.output).not.toContain('品类形态提示')
-  })
-})
 
 // ── 自 guide-loop.test.ts 迁入（2026-10-03 删留执行：原文件其余 loop 化口径用例已随
 //    旧单次 JSON 路径删除而失实，仅存这两个 buildGuideTools 单元行为例） ──

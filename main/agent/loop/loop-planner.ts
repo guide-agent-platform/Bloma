@@ -26,7 +26,6 @@ import { loadPromptOverride } from '../prompting/prompt-config'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import {
-  backplaneInterfaceSpec,
   requirementAssertions,
   requirementPriority,
   requirementStory,
@@ -344,16 +343,8 @@ function buildPlanPrompt(input: GenerateLoopPlanInput, maxFiles: number): string
     ? input.backplane.out_of_scope.map((entry) => `- ${entry}`).join('\n')
     : '- 无'
   const templateType = input.backplane.template_meta?.type ?? 'personal_tool'
-  // 完整程序阶段 2.5：契约进 plan 任务输入——plan 腿不知道接口契约就不会规划后端文件
-  const endpoints = backplaneInterfaceSpec(input.backplane)
   return [
     `产品定位：${input.backplane.positioning}`,
-    ...(endpoints.length > 0
-      ? [
-          '后端 API 契约（interface_spec，前后端真相源）——filesToTouch 必须包含对应的 server/routes 实现文件：',
-          ...endpoints.map((ep) => `- ${ep.method ?? 'GET'} ${ep.endpoint} → ${ep.response ?? 'JSON'}`),
-        ]
-      : []),
     ...(focusSet
       ? [`本轮迭代聚焦修改：${input.focusRequirementIds!.join('、')}——只规划聚焦项的改动，其余功能项保持现状不重做。`
         + '聚焦功能项清单（id/优先级/描述/行为断言，未聚焦项为一行摘要）：']

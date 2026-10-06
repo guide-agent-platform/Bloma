@@ -7,7 +7,7 @@ import { nextRequirementId } from '../coding/programming-orchestrator'
 import { earsifyRequirements } from './requirement-earsifier'
 import { resolveChannelEnv } from '../platform/llm/runtime-fallback'
 import type { PrdBackplane, SketchRequirement } from '../coding/sketch-engine'
-import { backplaneAiCapabilities, backplaneKeyTasks, backplaneTemplateMeta, requirementAssertions, requirementImpliesBackend, requirementPriority, requirementStory } from '../coding/sketch-engine'
+import { backplaneAiCapabilities, backplaneKeyTasks, backplaneTemplateMeta, requirementAssertions, requirementPriority, requirementStory } from '../coding/sketch-engine'
 import type { SDKQuery } from '../orchestration/orchestrator'
 import { shouldEnterDesktopLine } from '../desktop/desktop-route'
 import { buildWebLineRetiredCardPayload } from './web-line-retired'
@@ -142,10 +142,6 @@ export function publishPrdConfirmCard(opts: {
         assertions: requirementAssertions(item),
         // Phase 7 U4 J4：来源随卡透出（你已经决定的 vs 向导补充的）
         ...(item.origin ? { origin: item.origin } : {}),
-        // C1a（P1，2026-09-11 审计⑧）：后端架构后果显影——留存信号词命中项标注，
-        // 确认时用户看得到「这条会让产品需要后端与数据持久化」，不再静默升级前后端分离；
-        // C1b 联动：game 豁免开启时轻留存不催生后端，徽标不亮
-        ...(requirementImpliesBackend(item, backplaneTemplateMeta(backplane, 'personal_tool').type) ? { implies_backend: true } : {}),
       })),
       out_of_scope: backplane.out_of_scope,
       assumptions: backplane.assumptions ?? [],

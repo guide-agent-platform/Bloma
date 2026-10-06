@@ -56,7 +56,6 @@ import { resolvePrdBackplane, setProgrammingEventPublisher, nextRequirementId, r
 import { normalizeRequirementUpdate, applyNormalization, resolveRoutedRequirementId } from '../requirement-normalizer'
 import { buildReferenceSection } from '../web-reference-extractor'
 import { findProject, updateProject, readLastSketchRequirements, recordSketchGenerated } from '../../project/project-service'
-import { refineTemplateType } from '../template-inference'
 import { buildClarifyInjection } from '../../agent/prompting/template-injection'
 import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
 import { isAutoDelegationText, readPrimaryIntent } from '../../platform/sessions/session-service'

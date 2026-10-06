@@ -51,7 +51,6 @@ import {
 } from '../../coding/programming-orchestrator'
 import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from '../../guide/requirement-normalizer'
 import { readPrdBackplane } from '../../project/document-engine'
-import { backplaneInterfaceSpec } from '../../model/prd-backplane'
 import { isDegenerateText } from '../../coding/output-integrity'
 import { createWhitespaceArtifactCleaner } from '../../agent/loop/agent-loop'
 import { recordDecision } from '../../project/decision-log'

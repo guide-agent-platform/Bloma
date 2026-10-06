@@ -56,7 +56,6 @@ import { resolvePrdBackplane, setProgrammingEventPublisher, nextRequirementId, r
 import { normalizeRequirementUpdate, applyNormalization, resolveRoutedRequirementId } from '../requirement-normalizer'
 import { buildReferenceSection } from '../web-reference-extractor'
 import { findProject, updateProject, readLastSketchRequirements, recordSketchGenerated } from '../../project/project-service'
-import { refineTemplateType } from '../template-inference'
 import { buildClarifyInjection } from '../../agent/prompting/template-injection'
 import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
 import { isAutoDelegationText, readPrimaryIntent } from '../../platform/sessions/session-service'
@@ -80,7 +79,6 @@ import {
   tryResumeUxAdjustAsConfirm,
 } from '../ux-confirm'
 import { classifyUserDesktopIntent } from '../../desktop/user-intent-lexicon'
-import { buildWebLineRetiredCardPayload } from '../web-line-retired'
 import { runPrdPipeline } from './prd-pipeline'
 
 export async function handleGuideMessage(
@@ -97,26 +95,8 @@ export async function handleGuideMessage(
   // 弹窗携带的是弹出时点的需求快照，用户继续聊意味着需求已演化，旧快照确认会静默丢弃
   // 期间的新需求（stale 覆盖）；失效后旧弹窗点击返回 started:false，新对话会收敛出新弹窗。
   invalidatePendingRequirementConfirm(input.project_id)
-  // 注入点①澄清轮修正（对用户透明，PRD 12.2）：后续话语带显式形态信号（网页/桌面）时
-  // 更新类型推断；weak 信号不动已有判断。失败静默——推断是增强不是依赖，不阻断澄清链。
-  try {
-    const refined = refineTemplateType(project.template_type, input.content)
-    if (refined) {
-      updateProject(input.project_id, { template_type: refined })
-      recordDecision({
-        project_id: input.project_id,
-        session_id: input.session_id,
-        entry: {
-          type: 'template_type_refined',
-          title: '项目类型推断修正',
-          why: '用户后续话语携带显式载体形态信号，自动修正模板类型推断（对用户透明）',
-          detail: { from: project.template_type, to: refined, signal: input.content.slice(0, 80) },
-        },
-      })
-    }
-  } catch {
-    // 推断修正失败不影响澄清链
-  }
+  // 判型 LLM 化（2026-10-06）：正则澄清修正退役——品类语义由 PRD 引擎自判 form 回写；
+  // 澄清轮的形态意图自然留在对话上下文里，引擎生成时一并吸收。
   setProgrammingEventPublisher(publish)
   trackAnalytics({
     request_id: input.request_id,
@@ -626,12 +606,12 @@ export async function handleGuideMessage(
     return
   }
 
-  // web 线拆除刀1/2（2026-10-01）：规则路由的 generate 兜底不再进草图（web 生成线已
-  // 退役），改发形态引导卡（回传处理在 agent-dispatch 的 resolveWebLineRetiredCard）。
+  // 渠道故障兜底腿对齐（2026-10-06 web 残留清理）：此处可达条件是「模型不可用/解析
+  // 失败 → 规则路由」，与需求形态无关——原「网页形态」话术+形态卡是错配，改为如实通道不可用话术。
   publish(makeGuideEvent(input, 'message_delta', {
-    text: '这份需求更适合网页形态，但当前版本已聚焦 Windows 桌面软件交付——',
+    text: '模型通道暂时不可用，我没能理解这条需求。请稍后重试，或检查设置里的模型渠道配置。',
   }))
-  publish(makeGuideEvent(input, 'user_decision_required', buildWebLineRetiredCardPayload()))
+  publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
 }
 
 /**

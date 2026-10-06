@@ -4,13 +4,12 @@ import { getAgentSessionPath } from '../../storage/config-paths'
 import { loadPromptOverride } from '../agent/prompting/prompt-config'
 import { buildPrdFewShotInjection } from '../agent/prompting/template-injection'
 import { callLlmForJson, type LlmAttemptFailure } from '../kernel/llm-call'
-import type { AgentMessage, MessageContentBlock } from '../../shared/types'
+import type { AgentMessage, MessageContentBlock, TemplateType } from '../../shared/types'
 import type { AiCapability, GameDesignDoc, InterfaceEndpoint, KeyTask, PrdBackplane, SketchRequirement } from '../model/prd-backplane'
 import {
   buildPrdDocumentFallback,
   capContractEnabled,
   deriveAiCapabilities,
-  deriveInterfaceSpec,
   finalizeKeyTasks,
   keyTasksEnabled,
   normalizePrdDocumentNewlines,
@@ -18,6 +17,7 @@ import {
 } from '../model/prd-backplane'
 import { renderDocumentSectionSpec } from './prd-sections'
 import { categoryTemperature } from '../platform/llm/model-resolution'
+import { updateProject } from '../project/project-service'
 
 /**
  * PrdEngineLlm — 向导群·需求工程腿（2026-09-03 架构调整：需求工程链归向导）。
@@ -74,10 +74,11 @@ export const DEFAULT_SYSTEM_PROMPT = `你是「Bloma 向导 · 需求工程腿�
 输出结构：
 {"document":"完整长文本 PRD（章节骨架见下；字符串内换行必须转义为 \\n、引号转义为 \\"，输出前自查括号引号完整闭合）",
  "positioning":"产品定位（≤120 字：目标用户 + 核心场景 + 核心价值）",
+ "form":"交付形态自判：desktop | game | web。规则：游戏/复刻类（玩法为核心）=game；用户明确要求网站/网页/浏览器/小程序/在线平台形态=web；其余（含一切 Windows 桌面/单机/本地工具）一律 desktop",
  "acceptance":{"F-001":"该功能项的验收要点 2~4 条，分号分隔（正常路径 + 边界/异常各至少 1 条）"},
  "out_of_scope":["本轮明确不做的事"],
  "assumptions":["后台做出的假设"],
- "gdd":{"core_fantasy":"核心幻想","pillars":["支柱 1"],"core_loop":["阶段 1"],"numbers":["数值基准"]}}  // 仅 game 类型输出，非 game 省略此字段
+ "gdd":{"core_fantasy":"核心幻想","pillars":["支柱 1"],"core_loop":["阶段 1"],"numbers":["数值基准"]}}  // 仅 form=game 时输出，非游戏省略此字段
 
 一、document（长文本 PRD 全文——用户过目与下游约束的正式形态）
 章节骨架（按序，markdown 标题组织，中文；章节由 schema 驱动，空章节写「无/待确定」不编内容）：
@@ -111,7 +112,7 @@ ${renderDocumentSectionSpec()}
 - 后台必须替用户做的技术/产品决策：数据单位、存储口径（如：数据保留在本机、不做云同步）、界面语言、排序/汇总规则、默认值等。
 - 每条一句话说清"假设了什么"，供后续 decisions 回溯。
 
-六、gdd（游戏设计文档，仅 game 类型输出；非 game 省略此字段）
+六、gdd（游戏设计文档，仅 form=game 输出；非游戏省略此字段）
 - core_fantasy：核心幻想——玩家扮演什么、体验什么（一句话）。
 - pillars：设计支柱 2~3 条——支撑核心幻想的可玩性原则。
 - core_loop：核心循环——主玩法循环的阶段序列（如 探索→战斗→收集→升级）。
@@ -210,7 +211,20 @@ export async function generatePrdLlm(input: GeneratePrdLlmInput): Promise<PrdBac
       onAttemptFailure: input.onAttemptFailure,
       parse: parsePrdJson,
     })
-    return parsed ? buildBackplaneFromParsed(parsed, items, input.project_id, input.template_type) : null
+    if (!parsed) return null
+    // 判型 LLM 化（2026-10-06 拍板）：引擎自判 form 回写项目品类——game（GDD 链）/
+    // web_fullstack（PRD 确认后形态卡引导转桌面）。desktop 缺省不写（建项目即 desktop_tool）。
+    // 回写失败不阻断 PRD 产出（品类仅下游路由参考，桌面线是唯一生成线）。
+    const formType: TemplateType | undefined =
+      parsed.form === 'game' ? 'game' : parsed.form === 'web' ? 'web_fullstack' : undefined
+    if (formType && formType !== input.template_type) {
+      try {
+        updateProject(input.project_id, { template_type: formType })
+      } catch {
+        // 项目已删除等场景：品类回写失败不阻断背板产出
+      }
+    }
+    return buildBackplaneFromParsed(parsed, items, input.project_id, formType ?? input.template_type)
   } catch {
     return null
   }
@@ -255,15 +269,9 @@ export function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequire
     assumptions: parsed.assumptions,
     // P1-7：game 类型 GDD（玩法真相源）随背板冻结；非 game 缺省 undefined。
     ...(parsed.gdd ? { gdd: parsed.gdd } : {}),
-    // 完整程序阶段 2：后端 API 契约随背板冻结；无后端需求缺省 undefined。
-    // 阶段 2.5 兜底：LLM 漏报（计算器案）但功能项命中数据留存信号 → 确定性派生最小契约；
-    // C1b（2026-09-11 拍板）：game 豁免开启时轻留存不派生（LLM 明确报告的契约仍优先）
-    ...(parsed.interface_spec && parsed.interface_spec.length > 0
-      ? { interface_spec: parsed.interface_spec }
-      : ((): { interface_spec: InterfaceEndpoint[] } | undefined => {
-          const derived = deriveInterfaceSpec(items, templateType)
-          return derived ? { interface_spec: derived } : undefined
-        })()),
+    // 后端契约派生腿已退役（2026-10-06 web 残留清理）：prompt 已明说不输出 interface_spec，
+    // 此处仅兼容透传 LLM 异常输出（正常恒缺省），不再有确定性派生。
+    ...(parsed.interface_spec && parsed.interface_spec.length > 0 ? { interface_spec: parsed.interface_spec } : {}),
     // Phase 2 M1：能力契约块随背板冻结——LLM 产出优先；漏报且命中 AI 信号 →
     // deriveAiCapabilities 确定性派生；开关 off 整段不挂（字节级现状）。
     ...(capContractEnabled()
@@ -283,6 +291,8 @@ export function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequire
 interface ParsedPrd {
   document: string
   positioning: string
+  /** 判型 LLM 化（2026-10-06）：引擎自判交付形态；desktop 缺省（解析容错：非法值→undefined）。 */
+  form?: 'desktop' | 'game' | 'web'
   acceptance: Record<string, string>
   out_of_scope: string[]
   assumptions: string[]
@@ -318,6 +328,9 @@ function parsePrdJson(text: string): ParsedPrd | undefined {
 
   // P1-7：gdd 解析（game 类型；四要素齐备才采纳，缺任一视为无 GDD 降级）。
   const gdd = parseGdd(parsed.gdd)
+  // 判型 LLM 化：form 白名单解析（非法/缺省 → undefined = 维持 desktop_tool 缺省）。
+  const rawForm = typeof parsed.form === 'string' ? parsed.form : ''
+  const form: ParsedPrd['form'] = rawForm === 'desktop' || rawForm === 'game' || rawForm === 'web' ? rawForm : undefined
   // 完整程序阶段 2：interface_spec 解析（前后端契约真相源；缺省/非法 → 空数组零注入）。
   const interfaceSpec = parseInterfaceSpec(parsed.interface_spec)
   // Phase 2 M1：ai_capabilities 解析（能力契约块；缺省/非法 → 空数组走派生兜底）。
@@ -328,6 +341,7 @@ function parsePrdJson(text: string): ParsedPrd | undefined {
   return {
     positioning: typeof parsed.positioning === 'string' ? parsed.positioning : '',
     document: typeof parsed.document === 'string' ? parsed.document : '',
+    ...(form ? { form } : {}),
     acceptance,
     out_of_scope: stringArray(parsed.out_of_scope),
     assumptions: stringArray(parsed.assumptions),
@@ -453,7 +467,9 @@ function parseGdd(value: unknown): GameDesignDoc | undefined {
 
 function buildPrompt(items: SketchRequirement[], conversation: string, templateType?: import('../../shared/types').TemplateType): string {
   const list = items.map((r) => `- ${r.id}: ${r.description}`).join('\n')
-  // P1-7（2026-09-04）：game 类型额外注入 GDD 要求——玩法真相源，PRD 从 GDD 切片；非 game 零注入。
+  // 判型 LLM 化（2026-10-06 拍板，替代 template-inference 正则）：GDD 要求不再依赖
+  // 预判型——引擎带着完整对话上下文自判 form；form=game 时输出 gdd。历史品类仅作
+  // 存量项目兼容提示（game 存量补拍时仍可用），新单一律自判。
   const gddInstruction =
     templateType === 'game'
       ? [
@@ -463,7 +479,10 @@ function buildPrompt(items: SketchRequirement[], conversation: string, templateT
           '- 对话没说细的机制按同类游戏常见合理预期补齐并克制标注「（建议）」；不要凭空发明对话之外的大机制。',
           '- document 的功能清单/行为断言从 gdd 核心循环切片，不发明 gdd 之外的机制。',
         ].join('\n')
-      : ''
+      : [
+          '',
+          '【gdd 自判规则】如果你判断本项目是游戏/复刻类（玩法为核心，如贪吃蛇/扫雷/射击/平台跳跃等），请额外输出 gdd 字段（结构见六）；非游戏一律省略 gdd，同时 form 填 "game"。',
+        ].join('\n')
   return [
     `请从下面的对话历史中产出双形态同源 PRD：长文本全文（document）+ 结构化字段。`,
     ``,
