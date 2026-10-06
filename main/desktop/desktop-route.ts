@@ -470,6 +470,15 @@ async function settleDesktopStage(
   // ── loop 未完成（取消/断流）：话术收尾，阶段不动 ──
   if (result.status !== 'completed' || !result.advance) {
     const why = result.status === 'cancelled' ? '已停止' : '运行异常中断'
+    // 断点落痕（批8 下半狗粮实证）：error 收口只发 UI 人话不落 JSONL，断点归因只能
+    // 靠黑盒拼揍（16:53 断点排查 40 分钟）——loop 终态/终止原因/轮数进 [decision] 行，
+    // JSONL 可独立还原（turn_limit 的 degenerate_output 尤其关键：渠道 DSML 退化
+    // 与真崩溃在人话里无法区分）。
+    const termination = (result.loopResult as { termination_detail?: { reason?: string; retries?: number } } | undefined)?.termination_detail
+    deps.persistSystem(
+      input.sessionId,
+      `[decision] desktop-loop-end ${phaseId}（status=${result.status}${termination?.reason ? `, 终止原因=${termination.reason}${termination.retries !== undefined ? `(重试${termination.retries})` : ''}` : ''}）——${why}，阶段未收口`,
+    )
     let line = `桌面阶段「${phaseId}」本轮未收口（${why}）。阶段进度未变化，可重新发起。`
     // 刀5 扩展（2026-10-03 e99e6319 事故）：主 loop 的 query 异常（含 EMPTY_MODEL_STREAM
     // 空流）与委派失败共用同签名计数——连续 2 次出渠道故障人话卡；未达阈值的异常也
