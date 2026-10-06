@@ -1,107 +1,175 @@
-"""桌面程序主程序骨架（Bloma 桌面品类 P1·Python 快速验证）。
+"""{{project_name}} — 桌面程序骨架 v2（批8 HTML 渲染层，pywebview + WebView2）。
 
-骨架纪律（desktop-scaffold 阶段任务书）：
-- 只做结构不做业务：业务逻辑在 desktop-implement 阶段按 PRD 背板补齐；
-- 组件按 00_ARCH/env-checklist.json 的结论接入——确认启用的组件取消对应注释块，
-  未确认组件保持注释态（禁止提前引入）；
-- 所有用户可见文案走 UTF-8（GBK 控制台乱码是显示噪音，不影响字节流）。
+结构纪律（三层，实现阶段不得打破）：
+1. 逻辑层（本文件 Logic 类，纯 Python）——业务/持久化全在这里，**不 import UI**；
+   契约驱动（driver.py）与故障种子直接测这一层。
+2. 桥（Api 类）——UI 的每个动作一个方法，转调 Logic，返回 JSON 字符串；
+   耗时操作内部用线程，完成后 evaluate_js 推送（业务代码不得直接摸 UI）。
+3. UI（ui/ 目录静态资产）——只渲染与收集输入，经 window.App.call 调桥；
+   组件用法见 ui/PATTERNS.md（不写新 CSS 优先拼现成组件）。
 
-自检模式：python app.py --self-check
-  打包冒烟与驱动探活共用（退出码 0=骨架完整；打印 ASCII 锚点 SELF-CHECK-OK）。
+运行：python app.py            正常启动（WebView2 窗口）
+      python app.py --self-check          骨架自检（退出码 0=完整）
+      python app.py --drive-port N        探索驱动模式（隐藏窗口 + 127.0.0.1 控制服务器，
+                                          POST /eval {"js":...} → evaluate_js；平台探索桥用）
+
+依赖：pywebview（pip）+ 系统 WebView2（Win10+ 自带）。禁 npm/CDN/外链字体——ui/ 全本地。
 """
 
 from __future__ import annotations
 
+import json
 import sys
-
-
-def enable_hidpi() -> float:
-    """声明 Windows DPI 感知（骨架纪律，2026-10-05 坑库 [实证]）。
-
-    python.exe 不声明 DPI 感知：高分屏（如 150% 缩放）下系统对整个窗口做位图拉伸
-    兼容，文字与控件发虚（「程序分辨率低」的根因，与 tkinter 无关）。在任何 Tk()
-    创建之前调用本函数；返回缩放系数供 tk scaling 补偿（1.0=无缩放/非 Windows）。
-    """
-    try:
-        from ctypes import windll
-
-        windll.shcore.SetProcessDpiAwareness(2)  # PER_MONITOR_DPI_AWARE
-        return float(windll.shcore.GetScaleFactorForDevice(0)) / 100.0
-    except Exception:
-        return 1.0
-
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 
 APP_NAME = "{{project_name}}"
 APP_VERSION = "0.1.0-skeleton"
+UI_DIR = Path(__file__).parent / "ui"
 
+
+# ══════════════════════════ 1. 逻辑层（driver.py 测这里） ══════════════════════════
+
+class Logic:
+    """业务逻辑与持久化。骨架期：条目增删查；实现阶段按 PRD 扩展（sqlite/json 自选）。"""
+
+    def __init__(self) -> None:
+        self.items: list[dict] = []  # 骨架占位；正式实现换真实持久化
+
+    def list_items(self) -> list[dict]:
+        return self.items
+
+    def add_item(self, name: str, sub: str = "") -> dict:
+        item = {"id": str(len(self.items) + 1), "name": name, "sub": sub}
+        self.items.append(item)
+        return item
+
+    def handle_send(self, text: str) -> dict:
+        """输入行主通道（骨架占位实现；按产品语义替换）。"""
+        if not text.strip():
+            raise ValueError("输入为空")
+        return {"message": f"已处理：{text.strip()}"}
+
+
+# ══════════════════════════ 2. 桥（UI ↔ Logic） ══════════════════════════
+
+class Api:
+    """js_api 桥：JS 侧 window.App.call("方法名", 参数...) 到达这里。
+    返回值一律 JSON 字符串（bridge.js 会解析）。"""
+
+    def __init__(self, logic: Logic) -> None:
+        self._logic = logic
+
+    # —— 列表/条目 ——
+    def list_items(self) -> str:
+        return json.dumps(self._logic.list_items(), ensure_ascii=False)
+
+    def handle_send(self, text: str) -> str:
+        try:
+            return json.dumps(self._logic.handle_send(text), ensure_ascii=False)
+        except Exception as error:  # 失败如实回 UI（失败态横幅呈现，不吞）
+            return json.dumps({"error": str(error)}, ensure_ascii=False)
+
+    # —— Python → UI 推送样例（业务扩展时照抄本模式）——
+    # def push_update(self, payload: dict) -> None:
+    #     import webview
+    #     webview.windows[0].evaluate_js(f"window.on_update({json.dumps(payload, ensure_ascii=False)})")
+
+
+# ══════════════════════════ 3. 启动 / 自检 / 驱动模式 ══════════════════════════
 
 def self_check() -> int:
-    """骨架自检：组件导入面按需扩展（启用一个组件加一条 import 探测）。"""
+    """骨架自检：逻辑层可导入可调用 + ui 资产齐备（打印 ASCII 锚点 SELF-CHECK-OK）。"""
     checks: list[tuple[str, bool]] = []
+    logic = Logic()
+    logic.add_item("探针", "self-check")
+    checks.append(("logic", logic.list_items()[0]["name"] == "探针"))
+    checks.append(("ui-html", (UI_DIR / "index.html").exists()))
+    checks.append(("ui-css", (UI_DIR / "kit.css").exists()))
+    checks.append(("ui-bridge", (UI_DIR / "bridge.js").exists()))
+    try:
+        import webview  # noqa: F401
+        checks.append(("pywebview", True))
+    except ImportError:
+        checks.append(("pywebview", False))
+    ok = all(done for _, done in checks)
+    print("SELF-CHECK " + ("OK" if ok else "FAIL") + " " + " ".join(f"{n}={'ok' if d else 'FAIL'}" for n, d in checks))
+    return 0 if ok else 1
 
-    # ── 组件接入位（按 env-checklist 结论取消注释；探测失败属「阻塞」分类）──
-    # try:
-    #     import pystray  # noqa: F401
-    #     checks.append(("pystray", True))
-    # except ImportError:
-    #     checks.append(("pystray", False))
-    # try:
-    #     import pynput  # noqa: F401
-    #     checks.append(("pynput", True))
-    # except ImportError:
-    #     checks.append(("pynput", False))
-    # try:
-    #     import sounddevice  # noqa: F401
-    #     checks.append(("sounddevice", True))
-    # except ImportError:
-    #     checks.append(("sounddevice", False))
-    # try:
-    #     import winotify  # noqa: F401
-    #     checks.append(("winotify", True))
-    # except ImportError:
-    #     checks.append(("winotify", False))
 
-    failed = [name for name, ok in checks if not ok]
-    for name, ok in checks:
-        print(f"component {name}: {'ok' if ok else 'MISSING'}")
-    if failed:
-        print(f"SELF-CHECK-FAIL missing={','.join(failed)}")
-        return 2  # 阻塞分类（环境缺失）
-    print("SELF-CHECK-OK")
-    return 0
+def make_drive_handler(window, api: Api) -> type[BaseHTTPRequestHandler]:
+    """探索驱动协议：POST /eval {"js": "<表达式>"} → {"ok":true,"result":...}。
+    只绑 127.0.0.1；窗口隐藏不打扰用户（平台探索桥的 act/read 全走这里）。"""
+
+    class Handler(BaseHTTPRequestHandler):
+        def _respond(self, obj) -> None:
+            body = json.dumps(obj, ensure_ascii=False).encode("utf8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self) -> None:  # noqa: N802
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length) or b"{}"
+            try:
+                payload = json.loads(raw.decode("utf-8"))
+            except UnicodeDecodeError:
+                # 客户端编码容错（GBK 控制台 curl 实测会踩）：utf-8 失败回退 gbk
+                payload = json.loads(raw.decode("gbk", errors="replace"))
+            try:
+                if self.path == "/eval":
+                    # 同步 DOM JS（evaluate_js 不 await Promise——异步桥调用走 /call）
+                    result = window.evaluate_js(payload.get("js", "null"))
+                    self._respond({"ok": True, "result": result})
+                elif self.path == "/call":
+                    # 直调 Python 桥方法：{"op": "list_items", "args": [...]} → 逻辑层
+                    op = payload.get("op", "")
+                    fn = getattr(api, op, None)
+                    if not callable(fn):
+                        self._respond({"ok": False, "error": f"no api: {op}"})
+                        return
+                    ret = fn(*payload.get("args", []))
+                    parsed = json.loads(ret) if isinstance(ret, str) else ret
+                    self._respond({"ok": True, "result": parsed})
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+            except Exception as error:
+                self._respond({"ok": False, "error": str(error)})
+
+        def log_message(self, *_args: object) -> None:
+            pass
+
+    return Handler
 
 
 def main() -> int:
-    if "--self-check" in sys.argv[1:]:
+    if "--self-check" in sys.argv:
         return self_check()
 
-    # ── 主程序结构（desktop-implement 阶段实现；以下为线程模型范式）──
-    # 范式（pystray 实测结论）：icon.run() 阻塞主线程，业务线程 daemon 化，
-    # stop() 从其他线程调用。托盘自停探活示例见 00_SPIKES 记录。
-    #
-    # GUI 入口纪律（坑库 [实证]）：任何窗口创建前先 enable_hidpi()，并据返回值
-    # 补偿 tk scaling（并按需缩放自绘尺寸），否则高分屏发虚或控件偏小：
-    #
-    # import tkinter as tk
-    # scale = enable_hidpi()
-    # root = tk.Tk()
-    # root.tk.call("tk", "scaling", scale * 96.0 / 72.0)
-    #
-    # import threading
-    # import pystray
-    # from PIL import Image
-    #
-    # def business_loop() -> None:
-    #     ...  # 业务逻辑（implement 阶段填充）
-    #
-    # icon = pystray.Icon(
-    #     APP_NAME,
-    #     Image.new("RGB", (16, 16), color=(66, 133, 244)),
-    #     title=APP_NAME,
-    # )
-    # threading.Thread(target=business_loop, daemon=True).start()
-    # icon.run()  # 阻塞直至 icon.stop()
-    print(f"{APP_NAME} v{APP_VERSION} skeleton — implement me (desktop-implement stage)")
+    import webview
+
+    drive_port = 0
+    if "--drive-port" in sys.argv:
+        drive_port = int(sys.argv[sys.argv.index("--drive-port") + 1])
+
+    logic = Logic()
+    api = Api(logic)
+    window = webview.create_window(
+        APP_NAME,
+        url=str(UI_DIR / "index.html"),  # 文件加载：ui/ 相对资产（kit.css/bridge.js）可引用
+        js_api=api,
+        width=960,
+        height=640,
+        hidden=drive_port > 0,
+    )
+    if drive_port:
+        server = HTTPServer(("127.0.0.1", drive_port), make_drive_handler(window, api))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        print(f"DRIVE_SERVER 127.0.0.1:{drive_port}", flush=True)
+    webview.start()
     return 0
 
 

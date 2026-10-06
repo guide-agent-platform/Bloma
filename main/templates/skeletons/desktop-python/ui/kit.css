@@ -1,0 +1,148 @@
+/* webui kit — 组件样式（批8 HTML 渲染层；用法样例见 ui/PATTERNS.md）
+   约定：组件类名前缀 w-；状态用 [data-state] 挂在容器上驱动反馈条。 */
+@import url("tokens.css");
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  font-family: var(--font); font-size: var(--fs-body); color: var(--text);
+  background: var(--bg); -webkit-font-smoothing: antialiased;
+  user-select: none; cursor: default;
+}
+input, textarea { user-select: text; }
+
+/* ── 布局骨架：侧栏 + 主区 ─────────────────────────── */
+.w-app { display: flex; height: 100vh; }
+.w-side {
+  width: 216px; flex-shrink: 0; background: var(--surface);
+  border-right: 1px solid var(--line); display: flex; flex-direction: column;
+  padding: var(--s5) var(--s3);
+}
+.w-side-title { font-size: var(--fs-sub); color: var(--text-sub); font-weight: 600; padding: 0 var(--s3) var(--s3); }
+.w-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.w-content { flex: 1; overflow-y: auto; padding: var(--s6); min-height: 0; }
+
+/* ── 卡片 ─────────────────────────────────────────── */
+.w-card {
+  background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--shadow-1);
+  padding: var(--s5);
+}
+.w-card + .w-card { margin-top: var(--s4); }
+.w-card-title { font-size: var(--fs-h); font-weight: 700; margin-bottom: var(--s2); }
+
+/* ── 列表行（可点选） ─────────────────────────────── */
+.w-row {
+  display: flex; align-items: center; gap: var(--s3); padding: var(--s3);
+  border-radius: var(--r-md); cursor: pointer;
+}
+.w-row:hover { background: var(--surface-2); }
+.w-row[aria-current="true"] { background: var(--primary-soft); }
+.w-row-name { font-size: var(--fs-body); font-weight: 600; }
+.w-row-sub { font-size: var(--fs-mini); color: var(--text-sub); }
+
+/* ── 头像（渐变圆 + 首字） ────────────────────────── */
+.w-ava {
+  width: 34px; height: 34px; border-radius: var(--r-full); flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 13px; font-weight: 700;
+}
+
+/* ── 徽章 / 状态点 ────────────────────────────────── */
+.w-chip {
+  display: inline-block; padding: 2px 10px; border-radius: var(--r-full);
+  font-size: var(--fs-mini); font-weight: 600;
+}
+.w-chip[data-tone="primary"] { background: var(--primary-soft); color: var(--primary); }
+.w-chip[data-tone="ok"] { background: var(--ok-soft); color: var(--ok); }
+.w-chip[data-tone="warn"] { background: var(--warn-soft); color: var(--warn); }
+.w-chip[data-tone="danger"] { background: var(--danger-soft); color: var(--danger); }
+
+/* ── 聊天气泡 ─────────────────────────────────────── */
+.w-msgs { display: flex; flex-direction: column; gap: var(--s3); }
+.w-bubble {
+  max-width: 72%; padding: 10px 14px; border-radius: var(--r-lg);
+  font-size: var(--fs-body); line-height: 1.6; white-space: pre-wrap;
+}
+.w-bubble[data-side="user"] {
+  align-self: flex-end; background: var(--primary); color: #fff;
+  border-bottom-right-radius: var(--r-sm);
+}
+.w-bubble[data-side="ai"] {
+  align-self: flex-start; background: var(--surface); border: 1px solid var(--line);
+  border-bottom-left-radius: var(--r-sm); box-shadow: var(--shadow-1);
+}
+.w-bubble-meta { font-size: var(--fs-mini); color: var(--text-faint); margin-top: var(--s1); }
+.w-bubble[data-side="user"] .w-bubble-meta { text-align: right; }
+
+/* ── 状态反馈条（UX 契约状态机的呈现位） ───────────── */
+.w-banner {
+  display: none; align-items: center; gap: var(--s2);
+  margin: 0 var(--s6); padding: 10px var(--s4); border-radius: var(--r-md);
+  font-size: var(--fs-sub);
+}
+.w-banner[data-state="running"] { display: flex; background: var(--primary-soft); color: var(--primary); }
+.w-banner[data-state="success"] { display: flex; background: var(--ok-soft); color: var(--ok); }
+.w-banner[data-state="partial"] { display: flex; background: var(--warn-soft); color: var(--warn); }
+.w-banner[data-state="failed"]  { display: flex; background: var(--danger-soft); color: var(--danger); }
+.w-banner .w-next { display: block; font-size: var(--fs-mini); opacity: .85; }
+.w-spin {
+  width: 12px; height: 12px; border: 2px solid currentColor; border-top-color: transparent;
+  border-radius: 50%; animation: w-rotate .8s linear infinite; flex-shrink: 0;
+}
+@keyframes w-rotate { to { transform: rotate(360deg); } }
+
+/* ── 空态 ─────────────────────────────────────────── */
+.w-empty {
+  text-align: center; padding: var(--s8) var(--s6); color: var(--text-sub);
+}
+.w-empty-icon { font-size: 28px; margin-bottom: var(--s3); opacity: .5; }
+.w-empty-title { font-size: var(--fs-h); font-weight: 600; color: var(--text); margin-bottom: var(--s1); }
+.w-empty-hint { font-size: var(--fs-sub); }
+
+/* ── 按钮 ─────────────────────────────────────────── */
+.w-btn {
+  display: inline-flex; align-items: center; gap: var(--s2);
+  border: 0; border-radius: var(--r-md); padding: 9px 18px;
+  font-family: var(--font); font-size: var(--fs-body); font-weight: 600;
+  cursor: pointer; transition: background .12s, opacity .12s;
+}
+.w-btn--primary { background: var(--primary); color: #fff; }
+.w-btn--primary:hover { background: var(--primary-hover); }
+.w-btn--ghost { background: var(--surface); color: var(--primary); border: 1px solid var(--line-strong); }
+.w-btn--ghost:hover { background: var(--primary-soft); }
+.w-btn--danger { background: var(--danger); color: #fff; }
+.w-btn:disabled { opacity: .45; cursor: default; }
+
+/* ── 输入组（输入框 + 主按钮） ─────────────────────── */
+.w-input-row { display: flex; gap: var(--s3); align-items: center; padding: var(--s4) var(--s6); border-top: 1px solid var(--line); background: var(--surface); }
+.w-input {
+  flex: 1; border: 1.5px solid var(--line-strong); border-radius: var(--r-md);
+  padding: 10px 14px; font-family: var(--font); font-size: var(--fs-body);
+  outline: none; transition: border-color .12s, box-shadow .12s;
+}
+.w-input:focus { border-color: var(--primary-hover); box-shadow: 0 0 0 3px rgba(99,102,241,.15); }
+
+/* ── 表单字段（标签 + 控件 + 行内错误） ─────────────── */
+.w-field { margin-bottom: var(--s4); }
+.w-field-label { display: block; font-size: var(--fs-sub); font-weight: 600; margin-bottom: var(--s1); }
+.w-field-error { display: none; font-size: var(--fs-mini); color: var(--danger); margin-top: var(--s1); }
+.w-field[data-invalid="true"] .w-input { border-color: var(--danger); }
+.w-field[data-invalid="true"] .w-field-error { display: block; }
+
+/* ── 结果摘要 ─────────────────────────────────────── */
+.w-summary {
+  display: flex; gap: var(--s6); padding: var(--s4) var(--s5);
+  background: var(--surface); border-radius: var(--r-md); box-shadow: var(--shadow-1);
+}
+.w-summary-item { display: flex; flex-direction: column; }
+.w-summary-num { font-size: 20px; font-weight: 800; }
+.w-summary-label { font-size: var(--fs-mini); color: var(--text-sub); }
+
+/* ── 顶栏 ─────────────────────────────────────────── */
+.w-topbar {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s4) var(--s6); border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.w-topbar-title { font-size: var(--fs-title); font-weight: 700; }
+.w-topbar-sub { font-size: var(--fs-mini); color: var(--text-faint); }

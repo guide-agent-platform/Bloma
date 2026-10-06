@@ -1,37 +1,53 @@
 {
   "type": "desktop_tool",
-  "variant": "python-p1-skeleton",
-  "version": 1,
-  "description": "桌面品类 Python 骨架（批次 B，2026-09-24）：P1 快速验证路径的最小骨架——app.py 主程序骨架（组件按环境清单结论接入）+ driver-skeleton.py 驱动断言骨架（先断言后实现）+ contract.json 工程契约样例（批次 C 驱动执行消费）。由桌面调度员线在 desktop-scaffold 阶段复制进沙箱后改造，不走 web 线真实脚手架注册表。",
+  "variant": "python-webview-v2",
+  "version": 2,
+  "description": "桌面品类 Python 骨架 v2（批8 HTML 渲染层，2026-10-06）：pywebview+WebView2 壳——app.py 三层结构（Logic 逻辑层/Api 桥/启动）+ ui/ 静态组件库（tokens/kit/bridge/PATTERNS）+ --drive-port 探索驱动模式（隐藏窗口+127.0.0.1 eval 服务器）。竞品对照：Prome-Easy P2 Tauri 路线的 pywebview 等价（保全部 Python 验证设施）。",
   "runtime": {
     "interpreter": "python",
     "isolation": "venv",
-    "notes": "Windows 侧禁用 python3（MS Store 空壳）；venv 内解释器为 Scripts/python.exe"
+    "notes": "Windows 侧禁用 python3（MS Store 空壳）；venv 内解释器 Scripts/python.exe；WebView2 Win10+ 系统自带零安装"
   },
   "files": [
     {
       "path": "app.py",
-      "role": "主程序骨架：组件接入位（托盘/热键/录音/通知按 env-checklist 结论启用，未确认组件保持注释态）；--self-check 自检模式供打包冒烟与驱动探活"
+      "role": "主程序骨架 v2：三层结构（Logic 纯逻辑层——driver.py/故障种子的测试对象；Api js_api 桥——UI 动作唯一入口；main 启动）+ --self-check 自检 + --drive-port 探索驱动模式"
+    },
+    {
+      "path": "ui/index.html",
+      "role": "应用外壳：侧栏+顶栏+状态反馈条+内容区+输入行，桥已接线（pywebviewready→refresh）"
+    },
+    {
+      "path": "ui/tokens.css",
+      "role": "设计 token：颜色/间距/字阶/圆角阴影单一来源（var(--*)）"
+    },
+    {
+      "path": "ui/kit.css",
+      "role": "组件样式：卡片/列表行/头像/徽章/聊天气泡/状态条/空态/按钮/输入组/表单字段/结果摘要（w- 前缀）"
+    },
+    {
+      "path": "ui/bridge.js",
+      "role": "桥接粘合层：App.call 调 Python / App.show 状态条 / App.renderList 列表（空态自动）/ App.appendBubble 气泡——页面 JS 只经此对象"
+    },
+    {
+      "path": "ui/PATTERNS.md",
+      "role": "组件用法真相源：每组件可复制 HTML/JS 样例 + 桥接纪律（禁 npm/CDN/外链字体）"
     },
     {
       "path": "driver-skeleton.py",
-      "role": "驱动断言骨架：每个 GWT 场景一个 assert_* 函数（先写断言后写实现）；退出码 0=全过 / 1=有失败 / 2=阻塞（环境缺失）——失败三分类路由的判定源"
+      "role": "驱动断言骨架：场景 assert_* 先行（测 Logic 层）；capture_window 按窗口标题句柄截图（tkinter/webview 通用）"
     },
     {
       "path": "contract.json",
-      "role": "工程契约样例（批次 C schema 消费）：声明驱动命令、入口、环境变量白名单、组件依赖；scaffold 阶段按实际选型改造后必须保持可解析"
-    },
-    {
-      "path": "ui_kit.py",
-      "role": "设计 token 与体验组件（UX 契约线，2026-10-06）：颜色/间距/字号 token + 状态条/空态/结果摘要/错误面板；implement 阶段统一样式与反馈方式的单一来源（禁 messagebox 当正常流反馈）"
+      "role": "工程契约样例（批4 场景映射 covers）：驱动命令/入口/白名单；scaffold 阶段按实际改造后保持可解析"
     },
     {
       "path": "requirements.txt",
-      "role": "依赖清单：只列环境清单确认过的组件（[实证]/[推断] 级），待 Spike 组件不入内"
+      "role": "依赖清单：pywebview + Pillow（骨架态即需要——渲染壳与截图）"
     },
     {
       "path": "README.md",
-      "role": "骨架说明：运行/调试/打包三条入口命令 + 组件启用检查单"
+      "role": "骨架说明：运行/自检/驱动模式三条入口"
     }
   ]
 }

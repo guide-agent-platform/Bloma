@@ -1,0 +1,39 @@
+/* webui tokens — 设计决策单一来源（批8 HTML 渲染层）
+   用法：所有颜色/间距/字号只引用 var(--*)，组件与页面禁止裸值。
+   字体：系统栈（禁 CDN/外链字体——产物必须完全离线可用）。 */
+:root {
+  /* 颜色角色（克制三色 + 中性面） */
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #fafafa;
+  --line: #e4e4e7;
+  --line-strong: #d4d4d8;
+  --primary: #4f46e5;
+  --primary-hover: #6366f1;
+  --primary-soft: #eef2ff;
+  --text: #18181b;
+  --text-sub: #71717a;
+  --text-faint: #a1a1aa;
+  --ok: #059669;
+  --ok-soft: #ecfdf5;
+  --warn: #d97706;
+  --warn-soft: #fffbeb;
+  --danger: #dc2626;
+  --danger-soft: #fef2f2;
+
+  /* 间距（4 的倍数） */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 24px; --s8: 32px;
+
+  /* 字阶 */
+  --font: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  --fs-title: 17px;
+  --fs-h: 14px;
+  --fs-body: 13px;
+  --fs-sub: 12px;
+  --fs-mini: 11px;
+
+  /* 圆角与阴影 */
+  --r-sm: 8px; --r-md: 10px; --r-lg: 14px; --r-full: 999px;
+  --shadow-1: 0 1px 3px rgba(0,0,0,.06);
+  --shadow-2: 0 4px 16px rgba(0,0,0,.08);
+}

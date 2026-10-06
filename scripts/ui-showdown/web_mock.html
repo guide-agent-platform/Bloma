@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>pywebview 路线模拟</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:"Segoe UI Variable","Segoe UI","Microsoft YaHei UI",sans-serif; background:#f6f7f9; height:560px; display:flex; padding:16px; gap:14px; }
+  .side { width:210px; background:#fff; border-radius:14px; padding:14px 10px; box-shadow:0 1px 3px rgba(0,0,0,.06); display:flex; flex-direction:column; }
+  .side h2 { font-size:13px; color:#52525b; padding:0 8px 10px; font-weight:600; }
+  .p { display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:10px; cursor:pointer; }
+  .p.on { background:#eef2ff; }
+  .ava { width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:13px; font-weight:700; flex-shrink:0; }
+  .nm { font-size:13px; font-weight:600; color:#18181b; }
+  .tg { font-size:11px; color:#71717a; }
+  .new { margin-top:auto; text-align:center; padding:9px; border:1.5px dashed #d4d4d8; border-radius:10px; color:#7c3aed; font-size:12px; font-weight:600; }
+  .chat { flex:1; background:#fff; border-radius:14px; box-shadow:0 1px 3px rgba(0,0,0,.06); display:flex; flex-direction:column; overflow:hidden; }
+  .top { padding:14px 18px; border-bottom:1px solid #f4f4f5; display:flex; align-items:center; gap:10px; }
+  .dot { width:8px; height:8px; border-radius:50%; background:#10b981; }
+  .top b { font-size:14px; }
+  .top span { font-size:11px; color:#a1a1aa; margin-left:auto; }
+  .msgs { flex:1; padding:16px 18px; display:flex; flex-direction:column; gap:12px; background:#fafafa; }
+  .m { max-width:70%; padding:10px 14px; font-size:13px; line-height:1.55; border-radius:14px; }
+  .u { align-self:flex-end; background:#4f46e5; color:#fff; border-bottom-right-radius:4px; }
+  .a { align-self:flex-start; background:#fff; border:1px solid #ececf0; color:#27272a; border-bottom-left-radius:4px; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+  .meta { font-size:10px; color:#a1a1aa; margin-top:4px; }
+  .inp { padding:12px 14px; border-top:1px solid #f4f4f5; display:flex; gap:10px; align-items:center; background:#fff; }
+  .inp input { flex:1; border:1.5px solid #e4e4e7; border-radius:10px; padding:10px 14px; font-size:13px; outline:none; }
+  .inp input:focus { border-color:#818cf8; box-shadow:0 0 0 3px rgba(99,102,241,.15); }
+  .inp button { background:linear-gradient(135deg,#6366f1,#8b5cf6); color:#fff; border:0; border-radius:10px; padding:10px 18px; font-size:13px; font-weight:600; cursor:pointer; }
+</style></head>
+<body>
+  <div class="side">
+    <h2>我的形象 · 3</h2>
+    <div class="p on"><div class="ava" style="background:linear-gradient(135deg,#f59e0b,#ef4444)">周</div><div><div class="nm">周杰伦</div><div class="tg">幽默风趣 · 32 条对话</div></div></div>
+    <div class="p"><div class="ava" style="background:linear-gradient(135deg,#0ea5e9,#6366f1)">刘</div><div><div class="nm">刘德华</div><div class="tg">沉稳儒雅 · 12 条对话</div></div></div>
+    <div class="p"><div class="ava" style="background:linear-gradient(135deg,#f97316,#eab308)">雷</div><div><div class="nm">雷军</div><div class="tg">热情接地气 · 8 条对话</div></div></div>
+    <div class="new">＋ 创建新形象</div>
+  </div>
+  <div class="chat">
+    <div class="top"><div class="dot"></div><b>周杰伦</b><span>性格：幽默风趣 · 语速快 · 爱用比喻</span></div>
+    <div class="msgs">
+      <div class="m u">用一句话介绍你自己<div class="meta" style="text-align:right">今天 22:40</div></div>
+      <div class="m a">哎哟不错哦～我就是那个唱《七里香》的男人。想聊音乐、电影还是奶茶？我都接得住。<div class="meta">刚刚</div></div>
+    </div>
+    <div class="inp"><input placeholder="给周杰伦发消息…（Enter 发送）" /><button>发送</button></div>
+  </div>
+</body></html>

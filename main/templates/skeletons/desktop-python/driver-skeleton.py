@@ -19,7 +19,8 @@ import sys
 # 句柄级 PrintWindow 捕获：被遮挡也截得到自己（ImageGrab 抓屏幕区域，被覆盖就
 # 截到覆盖物）；DPI 感知输出物理分辨率。失败链：PrintWindow → ImageGrab 兼底 → False
 # （调用方按约定降级 SKIP，如实标注，不阻塞断言）。
-def capture_window(tk_root, out_path: str) -> bool:
+def capture_window(window_title: str, out_path: str) -> bool:
+    """按窗口标题句柄捕获（批8：webview 宿主窗口同样适用——FindWindowW 靠标题找顶层窗口）。"""
     try:
         import ctypes
         from ctypes import wintypes
@@ -30,15 +31,15 @@ def capture_window(tk_root, out_path: str) -> bool:
             pass
         user32 = ctypes.windll.user32
         gdi32 = ctypes.windll.gdi32
-        hwnd = user32.GetAncestor(int(tk_root.winfo_id()), 3)  # GA_ROOT=3 顶层句柄
+        hwnd = user32.FindWindowW(None, window_title)  # 批8：标题找顶层窗口（tkinter/webview 通用）
         if not hwnd:
-            return _capture_window_grab_fallback(tk_root, out_path)
+            return _capture_window_grab_fallback(window_title, out_path)
         rect = wintypes.RECT()
         if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-            return _capture_window_grab_fallback(tk_root, out_path)
+            return _capture_window_grab_fallback(window_title, out_path)
         w, h = rect.right - rect.left, rect.bottom - rect.top
         if w <= 0 or h <= 0 or w > 8192 or h > 8192:
-            return _capture_window_grab_fallback(tk_root, out_path)
+            return _capture_window_grab_fallback(window_title, out_path)
         hdc = user32.GetWindowDC(hwnd)
         memdc = gdi32.CreateCompatibleDC(hdc)
         bmp = gdi32.CreateCompatibleBitmap(hdc, w, h)
@@ -48,7 +49,7 @@ def capture_window(tk_root, out_path: str) -> bool:
             gdi32.DeleteObject(bmp)
             gdi32.DeleteDC(memdc)
             user32.ReleaseDC(hwnd, hdc)
-            return _capture_window_grab_fallback(tk_root, out_path)
+            return _capture_window_grab_fallback(window_title, out_path)
 
         class _BMIH(ctypes.Structure):
             _fields_ = [
@@ -67,7 +68,7 @@ def capture_window(tk_root, out_path: str) -> bool:
             gdi32.DeleteObject(bmp)
             gdi32.DeleteDC(memdc)
             user32.ReleaseDC(hwnd, hdc)
-            return _capture_window_grab_fallback(tk_root, out_path)
+            return _capture_window_grab_fallback(window_title, out_path)
         from PIL import Image
 
         img = Image.frombuffer("RGBA", (w, h), buf, "raw", "BGRA", 0, 1)
@@ -77,16 +78,23 @@ def capture_window(tk_root, out_path: str) -> bool:
         user32.ReleaseDC(hwnd, hdc)
         return True
     except Exception:
-        return _capture_window_grab_fallback(tk_root, out_path)
+        return _capture_window_grab_fallback(window_title, out_path)
 
 
-def _capture_window_grab_fallback(tk_root, out_path: str) -> bool:
-    """兼容兜底（非 Windows / 句柄路径失败）：旧 ImageGrab 屏幕区域抓拍（可能截到遮挡物）。"""
+def _capture_window_grab_fallback(window_title: str, out_path: str) -> bool:
+    """兼容兜底（非 Windows / 句柄路径失败）：按标题定位窗口矩形后 ImageGrab 抓拍。"""
     try:
+        import ctypes
+        from ctypes import wintypes
         from PIL import ImageGrab
 
-        x, y = tk_root.winfo_rootx(), tk_root.winfo_rooty()
-        w, h = tk_root.winfo_width(), tk_root.winfo_height()
+        user32 = ctypes.windll.user32
+        hwnd = user32.FindWindowW(None, window_title)
+        if not hwnd:
+            return False
+        rect = wintypes.RECT()
+        user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        x, y, w, h = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
         ImageGrab.grab(bbox=(x, y, x + w, y + h)).save(out_path, "PNG")
         return True
     except Exception:

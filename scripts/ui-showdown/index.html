@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>UI 三方案对比</title>
+<style>
+  body { font-family:"Segoe UI","Microsoft YaHei UI",sans-serif; background:#18181b; color:#e4e4e7; padding:28px; margin:0; }
+  h1 { font-size:18px; margin:0 0 6px; }
+  .sub { color:#a1a1aa; font-size:13px; margin-bottom:24px; }
+  .row { display:flex; gap:18px; align-items:flex-start; }
+  .col { flex:1; }
+  .col h3 { font-size:14px; margin:0 0 4px; }
+  .col .tag { font-size:11px; margin-bottom:10px; display:inline-block; padding:2px 8px; border-radius:99px; }
+  img { width:100%; border-radius:10px; box-shadow:0 4px 24px rgba(0,0,0,.5); }
+  iframe { width:100%; height:420px; border:0; border-radius:10px; box-shadow:0 4px 24px rgba(0,0,0,.5); background:#fff; }
+  .note { font-size:12px; color:#a1a1aa; margin-top:8px; line-height:1.6; }
+</style></head>
+<body>
+<h1>生成 UI 三方案对比（同一功能：明星形象平台）</h1>
+<div class="sub">今天产物实际样子 vs 一天工作量能到 vs 换 HTML 渲染层能到 · 2026-10-06</div>
+<div class="row">
+  <div class="col"><h3>A · 现状：裸 tkinter</h3><span class="tag" style="background:#7f1d1d;color:#fecaca">今天产物的真实水平</span><img src="raw_demo.png"><div class="note">模型无视 ui_kit 教学后的本能输出：默认字体、默认控件皮肤、无视觉层级。你说的"古早"就是它。</div></div>
+  <div class="col"><h3>B · ui_kit v2（批7，~1 天）</h3><span class="tag" style="background:#78350f;color:#fde68a">tkinter 上限内的克制专业</span><img src="kit_demo.png"><div class="note">一个主色+卡片+字阶+clam 全套定制。没有圆角阴影（tkinter 做不了），但干净、有秩序。前提：骨架预接线让模型绕不过去（今天证明"教"没用）。</div></div>
+  <div class="col"><h3>C · pywebview 渲染层（大批）</h3><span class="tag" style="background:#312e81;color#c7d2fe" style="color:#c7d2fe">HTML/CSS，视觉进 2020s</span><iframe src="web_mock.html"></iframe><div class="note">逻辑层仍是 Python（契约/驱动/种子/探索桥全保留），UI 换 HTML：圆角、阴影、渐变、动效都有。代价：探索桥要加 HTML 驱动通道，约一批工程量。</div></div>
+</div>
+</body></html>
