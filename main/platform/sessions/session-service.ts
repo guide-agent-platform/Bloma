@@ -98,6 +98,21 @@ export function recordSessionActivity(
 }
 
 /** 列出会话记录；可按项目过滤，按最近活跃时间倒序 */
+
+/**
+ * 委派子会话终态回写（2026-10-06）：settle 行落盘时同步索引 status='completed'——
+ * 历史/恢复视图不再把已完结的委派子会话显示为永远 active（当日狗粮实锤：索引里
+ * 全部停在 active/updated_at==created_at，而 JSONL settle 行是健全的）。仅委派子会话
+ * 调用；记录不存在/已 completed 时幂等跳过。
+ */
+export function settleSessionRecord(sessionId: string): void {
+  const index = readSessions()
+  const existing = index.sessions.find((item) => item.session_id === sessionId)
+  if (!existing || existing.status === 'completed') return
+  existing.status = 'completed'
+  existing.updated_at = new Date().toISOString()
+  writeSessions(index)
+}
 /**
  * 会话多轮历史读取（2026-09-25 自由度批上提自 orchestration/dispatch-support——修复轮
  * 续接消费；真身唯一，dispatch-support re-export 保旧消费者零改动）。

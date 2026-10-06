@@ -62,7 +62,7 @@ describe('delegation 恢复（阶段 1 meta 归属 + 阶段 2 registry 恢复）
     expect(restored!.finished).toBe(false)
   })
 
-  it('completed 态恢复：settle 行落 JSONL 后 status/summary 从盘上推断', () => {
+  it('completed 态恢复：settle 行落 JSONL 后 status/summary 从盘上推断；索引同步回写（2026-10-06：不再永远 active）', () => {
     useTemporaryHome('deleg-done-')
     const project = createProject({ request_id: 'req-b', mode: 'quick' })
     recordSessionActivity('child-222', project.project_id, {
@@ -77,6 +77,11 @@ describe('delegation 恢复（阶段 1 meta 归属 + 阶段 2 registry 恢复）
     expect(restored!.status).toBe('completed')
     expect(restored!.finished).toBe(true)
     expect(restored!.resultSummary).toBe('调研完成：3 个要点')
+    // 索引回写：settle 后 session 记录不再永远 active（当日狗粮实锤的呈现层 bug）
+    const indexPathAfter = join(process.env.PROMA_HOME!, 'bloma-agent-sessions.json')
+    const indexAfter = readSessionsIndexRaw(indexPathAfter)
+    const record = indexAfter.sessions.find((s) => s.session_id === 'child-222')
+    expect(record?.status).toBe('completed')
   })
 
   it('跨父误恢复被拒绝（parent 不匹配且非空 → undefined）', () => {

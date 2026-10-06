@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { appendJsonLine } from '../../../storage/json-store'
 import { appendSessionMessage } from '../../platform/sessions/session-tree'
+import { settleSessionRecord } from '../../platform/sessions/session-service'
 import { getAgentSessionPath, getAgentSessionsIndexPath } from '../../../storage/config-paths'
 import type { AgentSessionRecord, MessageContentBlock } from '../../../shared/types'
 import type { ConversationTurn } from '../../orchestration/orchestrator'
@@ -34,7 +35,9 @@ export interface RestoredDelegationRecord {
 /** appendDelegationSettle 写入的终态标记行字段名（loadMessages 会过滤该行，不进对话流） */
 const SETTLE_FIELD = 'delegation_settle'
 
-/** 终态落盘：子 loop settle 时在子会话 JSONL 末尾追加一行终态标记（重启推断依据） */
+/** 终态落盘：子 loop settle 时在子会话 JSONL 末尾追加一行终态标记（重启推断依据）。
+ *  2026-10-06 补：同步回写索引 status（settleSessionRecord）——历史/恢复视图不再把
+ *  已完结委派显示为永远 active（当日狗粮实锤索引全部 active 而 JSONL 健全）。 */
 export function appendDelegationSettle(
   childSessionId: string,
   status: Exclude<RestoredDelegationStatus, 'running'>,
@@ -46,6 +49,11 @@ export function appendDelegationSettle(
     ...(payload?.error ? { error: payload.error } : {}),
     timestamp: Date.now(),
   })
+  try {
+    settleSessionRecord(childSessionId)
+  } catch {
+    // 索引回写失败不阻断 settle 主链（JSONL 终态行才是权威）
+  }
 }
 
 /** 唯一性安全检查（Proma :441-447 同构）：parent 精确匹配优先；否则仅接受全局唯一命中且该命中「无父记录」 */

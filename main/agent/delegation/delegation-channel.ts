@@ -45,14 +45,18 @@ export function resolveDelegationChannelOverride(args: {
   const requestedChannel = args.channelId?.trim()
   if (!requestedChannel) return null
 
+  // 2026-10-06：短名解析对称化——modelId 一直 name/id 双认，channelId 此前只认 UUID，
+  // 编排器写「glm/kimi」短名被拒后靠错误教育里的 name(id) 清单自我纠正（当晚狗粮实锤
+  // 空转两轮）。现在短名精确匹配已启用渠道（重名取首个已启用；找不到仍拒必教育）。
   const channel = getChannelByIdRaw(requestedChannel)
+    ?? listChannels().find((item) => item.enabled && item.name === requestedChannel)
   if (!channel || !channel.enabled) {
     const available = listChannels()
       .filter((item) => item.enabled)
       .map((item) => `${item.name}(${item.id})`)
       .join('、')
     throw new DelegationChannelError(
-      `委派渠道不可用：${requestedChannel}（不存在或未启用）。`
+      `委派渠道不可用：${requestedChannel}（不存在或未启用；channelId 接受完整 id 或渠道名）。`
       + `可用渠道：${available || '（无已启用渠道）'}。`
       + `请修正 channelId 后重试，或去掉 channelId 继承当前会话渠道。`,
     )

@@ -122,6 +122,24 @@ describe('C1 委派渠道覆盖解析', () => {
     expect(override!.providerType).toBe('zhipu')
   })
 
+  it('短名解析（2026-10-06 对称化）：id 查不到时按渠道名精确匹配已启用渠道——编排器写 glm/kimi 短名不再空转', () => {
+    vi.mocked(getChannelByIdRaw).mockReturnValue(undefined)
+    vi.mocked(listChannels).mockReturnValue([makeChannel()])
+
+    const override = resolveDelegationChannelOverride({ channelId: '智谱', modelId: 'GLM-5.3' })
+    expect(override).not.toBeNull()
+    expect(override!.channelName).toBe('智谱')
+    expect(override!.env.ANTHROPIC_MODEL).toBe('GLM-5.3')
+  })
+
+  it('短名解析：未启用/不存在仍拒必教育（列出 name(id) 清单）', () => {
+    vi.mocked(getChannelByIdRaw).mockReturnValue(undefined)
+    vi.mocked(listChannels).mockReturnValue([makeChannel({ enabled: false })])
+
+    expect(() => resolveDelegationChannelOverride({ channelId: '智谱' })).toThrow(DelegationChannelError)
+    expect(() => resolveDelegationChannelOverride({ channelId: '智谱' })).toThrow(/接受完整 id 或渠道名/)
+  })
+
   it('跨渠道未传 modelId → 自动选首个支持工具的已启用模型（跳过禁用与不支持工具项）', () => {
     const channel = makeChannel({
       models: [
