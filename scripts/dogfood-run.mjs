@@ -153,9 +153,18 @@ const TYPE_AND_SEND = `(async (text) => {
   const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
   setter.call(ta, text)
   ta.dispatchEvent(new Event('input', { bubbles: true }))
-  await new Promise((r) => setTimeout(r, 150))
+  await new Promise((r) => setTimeout(r, 300))
+  // 发送前回读验证（2026-10-06 截断事故实锤：受控输入只同步到前几个字就提交，
+  // 「做一个」被当成全部需求，向导自造产品一路绿灯——只验按钮点击不验内容是盲点）
+  if (ta.value !== text) {
+    return { ok: false, err: 'value-mismatch', got_len: ta.value.length, expect_len: text.length, residue: ta.value.slice(0, 40) }
+  }
   const btn = document.querySelector('button[aria-label="发送消息"]')
-  if (btn && !btn.disabled) { btn.click(); return { ok: true, via: 'button' } }
+  if (btn && !btn.disabled) {
+    btn.click()
+    await new Promise((r) => setTimeout(r, 600))
+    return { ok: true, via: 'button', residue: ta.value.slice(0, 40) }
+  }
   ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }))
   await new Promise((r) => setTimeout(r, 300))
   return { ok: ta.value === '', via: 'enter', residue: ta.value.slice(0, 40) }
@@ -393,6 +402,19 @@ try {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     sendResult = await cdp.eval(`(${TYPE_AND_SEND})(${JSON.stringify(REQUEST)})`)
     log(`发送需求（第 ${attempt} 次）：${JSON.stringify(sendResult)}`)
+    if (sendResult?.ok) {
+      // 发送后第二道验证：完整需求须出现在聊天区（截断/丢字在此拦截，不再盲信按钮）
+      await sleep(1500)
+      const verify = await cdp.eval(`(() => {
+        const t = (document.body.innerText || '')
+        const tail = ${JSON.stringify(REQUEST.slice(-16))}
+        return { in_transcript: t.includes(tail) }
+      })()`)
+      log(`发送回读验证：${JSON.stringify(verify)}`)
+      if (verify?.in_transcript) break
+      sendResult = { ok: false, err: 'transcript-missing' }
+      log('聊天区未见完整需求尾句——判发送失败，重试')
+    }
     if (sendResult?.ok) break
     await sleep(2000)
   }
