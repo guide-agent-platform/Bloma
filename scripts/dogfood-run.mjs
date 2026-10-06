@@ -235,6 +235,22 @@ function readP0Findings(projectDir) {
   }
 }
 
+function readExplorationStatus(projectDir) {
+  // B4 driver 侧（2026-10-06 批2）：探索会话状态真相——outcome 非 closed = 探索降级，
+  // P0=0 不再自动等同「无问题」（发现④「无数据≠无问题」在驾驶侧的对应防线）。
+  // 门禁策略不变（两轨原则：探索不阻塞交付），只如实标记进报告。
+  try {
+    const parsed = JSON.parse(readFileSync(join(projectDir, '00_VERIFY', 'drive-sessions.json'), 'utf8'))
+    const sessions = Array.isArray(parsed) ? parsed : []
+    const bad = sessions
+      .filter((s) => s && typeof s === 'object' && s.outcome !== 'closed')
+      .map((s) => `${String(s.session_id ?? '?').slice(-6)}:${s.outcome}`)
+    return { total: sessions.length, bad }
+  } catch {
+    return { total: 0, bad: [] }
+  }
+}
+
 
 function readProjectRecord(projectId) {
   try {
@@ -451,7 +467,14 @@ try {
     } else if (pick('mvp_confirm_go') || pick('mvp_adjust')) {
       const p0 = project ? readP0Findings(project.dir) : []
       if (p0.length === 0) {
-        action = { id: 'mvp_confirm_go', why: 'MVP 确认（findings P0=0）' }
+        const exploration = project ? readExplorationStatus(project.dir) : { total: 0, bad: [] }
+        let why = 'MVP 确认（findings P0=0）'
+        if (exploration.bad.length > 0) {
+          report.exploration_degraded = exploration.bad
+          log(`探索会话降级（${exploration.bad.join('、')}）——P0=0 但探索证据不完整，仍确认交付并如实标记（两轨原则：探索不阻塞）`)
+          why = `MVP 确认（findings P0=0；探索降级已标记 ${exploration.bad.length} 项）`
+        }
+        action = { id: 'mvp_confirm_go', why }
       } else if (mvpRound === 0) {
         mvpRound += 1
         report.p0_titles = p0
