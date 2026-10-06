@@ -231,6 +231,9 @@ export interface DesktopDispatchRunResult {
   /** P0-1c 软对账（2026-10-02）：P0 断言关键词未命中任何 driver 场景名的清单——
    *  只观测不阻断，进遥测供狗粮标定误杀率后再议升硬门。 */
   judgeCoverageGaps?: string[]
+  /** 批6 测试有效性反证（2026-10-06）：AST 反空 + P0 故障种子击杀结果（verify 收口
+   *  且工具可用时才有；遥测 payload.fault_kill 的数据源）。 */
+  testEffectiveness?: import('./test-effectiveness').TestEffectivenessOutcome
   /** 刀2 checkpoint（2026-10-02）：advance 分支写入的阶段存证（null/缺省=未写入或
    *  容错失败；遥测 payload.checkpoint 的数据源）。 */
   checkpoint?: { stage: string }
@@ -365,6 +368,8 @@ export class AssistantTurnCollector {
 
 /** 驱动报告落盘相对路径（对齐阶段表 desktop-verify gate 产物）。 */
 export const DRIVER_REPORT_PATH = '00_VERIFY/driver-report.json'
+/** 故障种子击杀报告（批6 2026-10-06）：AST 反空 + 击杀明细，MVP 过目页注入段消费。 */
+export const FAULT_KILL_REPORT_PATH = '00_VERIFY/fault-kill-report.json'
 
 /** 契约默认路径（对齐批次 B 骨架）。 */
 export const CONTRACT_PATH = '00_SCAFFOLD/contract.json'
@@ -692,6 +697,31 @@ async function runVerifyFinalize(
     }
   }
 
+  // ── 批6 测试有效性反证（2026-10-06）：「测试绿了但什么也没证明」的防线 ──
+  // 6a AST 反空（永真断言/吞异常/无断言 → test-invalid）+ 6b P0 故障种子击杀
+  //（survived → fault-survived）；工具不可用降级跳过如实标注（不误杀不伪装）；
+  // not_applicable/not_run 呈现不阻塞（首版拍板）。实现在 test-effectiveness.ts（R7）。
+  let testEffectiveness: import('./test-effectiveness').TestEffectivenessOutcome | undefined
+  {
+    const { runVerifyEffectivenessPhase, buildTestInvalidReject, buildFaultSurvivedReject } = await import('./test-effectiveness')
+    testEffectiveness = await runVerifyEffectivenessPhase({
+      projectId: input.projectId,
+      sandboxRoot: input.sandboxRoot,
+      contract,
+      driverSpawn: input.driverSpawn,
+    })
+    if (testEffectiveness) {
+      input.writeReport?.(FAULT_KILL_REPORT_PATH, JSON.stringify({ audit: testEffectiveness.audit, faultKill: testEffectiveness.faultKill }, null, 2))
+      const rejectedFindings = testEffectiveness.audit.findings.filter((f) => f.state === 'reject')
+      if (!testEffectiveness.audit.passed && testEffectiveness.audit.error === undefined && rejectedFindings.length > 0) {
+        return { advance: buildTestInvalidReject(testEffectiveness, report, DRIVER_REPORT_PATH), driverReport: report }
+      }
+      if (testEffectiveness.faultKill.survived > 0) {
+        return { advance: buildFaultSurvivedReject(testEffectiveness, FAULT_KILL_REPORT_PATH), driverReport: report }
+      }
+    }
+  }
+
   const outcome = evaluateAdvance(turns, node.id, existsWithReport, vars)
 
   // P0-1b + 刀2（2026-10-02）：全绿收口（driver pass + 证据门 + 安全门 + 裁判门 + 阶段判定
@@ -708,6 +738,9 @@ async function runVerifyFinalize(
         `driver-report: ${report.scenarios.filter((s) => s.outcome === 'pass').length}/${report.scenarios.length} 场景 PASS（${report.routing}）`,
         ...(securityGate ? [`security-scan: 通过（${securityGate.scanned} 文件扫描，0 高危）`] : []),
         `judge-gate: 硬约束通过${judgeGate.coverageGaps.length > 0 ? `（软对账缺口 ${judgeGate.coverageGaps.length} 项，观测不阻断）` : ''}`,
+        ...(testEffectiveness
+          ? [`test-effectiveness: 反空检查通过；故障种子击杀 ${testEffectiveness.faultKill.killed}/${testEffectiveness.faultKill.executed}${testEffectiveness.faultKill.notApplicable + testEffectiveness.faultKill.notRun > 0 ? `（not-applicable ${testEffectiveness.faultKill.notApplicable}/not-run ${testEffectiveness.faultKill.notRun}，如实呈现不阻塞）` : ''}`]
+          : []),
         `advance-marks: 推进标记合法（→ ${outcome.target}）`,
       ],
       summary: `desktop-verify 全绿（driver ${report.scenarios.filter((s) => s.outcome === 'pass').length}/${report.scenarios.length} 场景 + 安全扫描 + 裁判硬约束）`,
@@ -720,6 +753,7 @@ async function runVerifyFinalize(
     advance: outcome,
     driverReport: report,
     ...(judgeGate && judgeGate.coverageGaps.length > 0 ? { judgeCoverageGaps: judgeGate.coverageGaps } : {}),
+    ...(testEffectiveness ? { testEffectiveness } : {}),
     ...(checkpoint ? { checkpoint } : {}),
   }
 }

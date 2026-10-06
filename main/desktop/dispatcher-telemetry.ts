@@ -45,6 +45,7 @@ export function deriveRepairClass(result: DesktopDispatchRunResult): string | un
   if (!advance || advance.decision !== 'reject') return undefined
   if (advance.reason === 'contract-invalid') return 'mapping'
   if (advance.reason === 'security-fail') return 'behavior' // 安全缺陷属行为面回炉（显式映射，不再靠教育文案关键词）
+  if (advance.reason === 'test-invalid' || advance.reason === 'fault-survived') return 'coverage' // 批6：测试有效性回炉（断言/覆盖补齐）
   const education = advance.education ?? ''
   if (education.includes('裁判门未过')) {
     if (education.includes('场景覆盖不足')) return 'coverage'
@@ -116,6 +117,21 @@ export function recordDispatchRunTelemetry(
                 }
             : undefined,
           driver: result.driverReport,
+          // 批6（2026-10-06）：测试有效性反证摘要（击杀率进遥测，大矩阵指标面）。
+          ...(result.testEffectiveness
+            ? {
+                fault_kill: {
+                  audit_reject: result.testEffectiveness.audit.findings.filter((f) => f.state === 'reject').length,
+                  audit_inconclusive: result.testEffectiveness.audit.findings.filter((f) => f.state === 'inconclusive').length,
+                  ...(result.testEffectiveness.audit.error ? { audit_error: result.testEffectiveness.audit.error } : {}),
+                  killed: result.testEffectiveness.faultKill.killed,
+                  executed: result.testEffectiveness.faultKill.executed,
+                  survived: result.testEffectiveness.faultKill.survived,
+                  not_applicable: result.testEffectiveness.faultKill.notApplicable,
+                  not_run: result.testEffectiveness.faultKill.notRun,
+                },
+              }
+            : {}),
           // P0-1c 软对账观测（2026-10-02）：P0 断言未命中场景名清单 + 计数——狗粮标定
           // 误杀率的数据面（命中≠验证充分，未命中也不阻断——只暴露对账缺口供复盘）。
           judge_coverage_gaps: result.judgeCoverageGaps ?? [],

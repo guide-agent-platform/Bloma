@@ -34,7 +34,7 @@ function escapeHtml(text: string): string {
 /** 成品过目页（2026-10-05：MVP 门「像 UX 门一样右栏呈现」）：截图画廊 + 驱动验收结论
  *  + DELIVERY 摘要；落盘 00_VERIFY/ 供 bloma-file:// 直读（截图相对路径同目录引用）。探索
  *  发现段（2026-10-05 探索驱动测试批）从 drive-findings.json 注入——参考证据不阻塞交付。 */
-function buildMvpReviewHtml(notice: DeliveredNoticeInput, driveFindings?: DriveFinding[], driveSessions?: Array<{ session_id: string; outcome: string; ops?: number }>): string {
+function buildMvpReviewHtml(notice: DeliveredNoticeInput, driveFindings?: DriveFinding[], driveSessions?: Array<{ session_id: string; outcome: string; ops?: number }>, faultKill?: { audit?: { findings?: Array<{ state?: string }>; error?: string }; faultKill?: { entries?: Array<{ fid: string; seed: string; result: string; detail?: string }>; killed: number; executed: number; survived: number; notApplicable: number; notRun: number } }): string {
   const shots = (notice.screenshotPaths ?? [])
     .map((rel) => rel.replace(/^00_VERIFY\//, ''))
     .map((rel) => `<figure><img src="${escapeHtml(rel)}" alt="程序截图"/><figcaption>${escapeHtml(rel)}</figcaption></figure>`)
@@ -57,6 +57,16 @@ function buildMvpReviewHtml(notice: DeliveredNoticeInput, driveFindings?: DriveF
   const explorationStatusSection =
     driveSessions && driveSessions.length > 0 && badSessions.length === driveSessions.length
       ? `<h2 style="font-size:15px;margin:20px 0 8px;color:#b45309;">⚠ 探索会话未正常完成（${badSessions.map((item) => `${item.session_id.slice(-6)}:${escapeHtml(item.outcome)}`).join('、')}）</h2>\n<p style="font-size:13px;color:#92400e;">真实 GUI 探索未能完成，本轮验收未包含探索证据——以上驱动验收全绿不等于探索通过。可确认交付（风险自担），或回炉修复后重验。</p>`
+      : ''
+  // 故障种子击杀段（批6 2026-10-06）：测试有效性证据——survived 在收口已硬拒收，
+  // 这里呈现的是通过面（killed/executed）与 not-applicable 如实面（不阻塞）。
+  const faultKillSection =
+    faultKill && faultKill.faultKill && faultKill.faultKill.executed + faultKill.faultKill.notApplicable + faultKill.faultKill.notRun > 0
+      ? `<h2 style="font-size:15px;margin:20px 0 8px;">故障种子击杀（${faultKill.faultKill.killed}/${faultKill.faultKill.executed} 注入已知缺陷被测试判红${faultKill.faultKill.notApplicable + faultKill.faultKill.notRun > 0 ? `；未定位/未跑 ${faultKill.faultKill.notApplicable + faultKill.faultKill.notRun} 项如实呈现` : ''}）</h2>` +
+        `<ul>${(faultKill.faultKill.entries ?? [])
+          .map((entry: { fid: string; seed: string; result: string; detail?: string }) =>
+            `<li>[${escapeHtml(entry.result)}] ${escapeHtml(entry.fid)} · ${escapeHtml(entry.seed)}${entry.detail ? `：${escapeHtml(entry.detail)}` : ''}</li>`)
+          .join('')}</ul>`
       : ''
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -81,6 +91,7 @@ function buildMvpReviewHtml(notice: DeliveredNoticeInput, driveFindings?: DriveF
 <ul>${driverLine}<li>程序文件与运行方式：右侧交付面板 / 项目根 DELIVERY.md</li></ul>
 ${explorationStatusSection}
 ${findingsSection}
+${faultKillSection}
 ${notice.deliveryDigest ? `<pre>${escapeHtml(notice.deliveryDigest)}</pre>` : ''}
 ${shots || '<p style="color:#999">（无截图——无窗口程序或截图未产出）</p>'}
 <div class="foot">确认后在聊天中的「确认，交付」生效；有要改的直接回复</div>
@@ -158,7 +169,15 @@ export function holdForMvpConfirm(options: {
       } catch {
         // 无会话状态文件：如实降级（未探索或旧版）
       }
-      writeFileSync(reviewAbs, buildMvpReviewHtml(options.notice, driveFindings, driveSessions), 'utf8')
+      // 故障种子击杀报告（批6 2026-10-06）：测试有效性证据面——文件缺失=收口未跑
+      //（quick 单/工具降级），如实降级不渲染。
+      let faultKill: Parameters<typeof buildMvpReviewHtml>[3] | undefined
+      try {
+        faultKill = JSON.parse(readFileSync(join(root, '00_VERIFY/fault-kill-report.json'), 'utf8')) as Parameters<typeof buildMvpReviewHtml>[3]
+      } catch {
+        // 无击杀报告：如实降级
+      }
+      writeFileSync(reviewAbs, buildMvpReviewHtml(options.notice, driveFindings, driveSessions, faultKill), 'utf8')
       reviewUrl = mintProjectPreviewUrl(input.projectId, MVP_REVIEW_RELATIVE_PATH)
     }
   } catch (error) {
