@@ -271,7 +271,11 @@ export function aggregateAcceptanceCoverage(
   // 记录成功」），driver stdout 锚点按任务书约定写裸 S<n>（「S1 PASS 结论」→ 解析名
   // 「S1」）——精确匹配全落空会把全绿场景误判成「声明未跑=未过」。精确失败时按
   // S 编号前缀双向匹配（词边界防 S1 串 S10）；仍无匹配保持 fail-closed。
-  const outcomeFor = (declared: string): string | undefined => {
+  // 序号对位兑底（批8 下半狗粮实锤，2026-10-07）：contract 声明语义名
+  // （create.persona-success）而 driver 锚点打裸 S<n> 时前缀也落空——裸 S<n> 按
+  // 序号对位 contract 第 n 个场景（S1→第 1 个，driver 按 SCENARIOS 声明序逐行输出，
+  // 契约场景也同源同序）；仅在前缀也失败时启用，越界/非 S 形态保持 fail-closed。
+  const outcomeFor = (declared: string, declaredIndex: number): string | undefined => {
     const exact = outcomeByName.get(declared)
     if (exact !== undefined) return exact
     for (const [name, outcome] of outcomeByName) {
@@ -282,14 +286,24 @@ export function aggregateAcceptanceCoverage(
       const rest = longer.slice(shorter.length)
       if (rest.length === 0 || /^[\s（(，,：:·-]/.test(rest)) return outcome
     }
+    // 序号对位兑底：声明的场景无精确/前缀命中，而 driver 锚点是裸 S<n> 时，
+    // S<n> 的 n 对位 contract 声明序（S1→第 1 个；driver 按 SCENARIOS 声明序逐行输出，
+    // 契约场景同源同序）。仅当声明名不是 S<数字> 前缀形态时启用——契约自己用 S 编号
+    // 命名空间时（'S10 边界'）序号对位会引入串位，那个空间归前缀匹配管。
+    if (declaredIndex >= 0 && !/^S\d/.test(declared)) {
+      const ordinalOutcome = outcomeByName.get(`S${declaredIndex + 1}`)
+      if (ordinalOutcome !== undefined) return ordinalOutcome
+    }
     return undefined
   }
   const byFid = new Map<string, { scenarios: string[]; passed: boolean }>()
+  let scenarioIndex = -1
   for (const scenario of contract.scenarios ?? []) {
+    scenarioIndex += 1
     for (const fid of scenario.covers) {
       const entry = byFid.get(fid) ?? { scenarios: [], passed: true }
       entry.scenarios.push(scenario.name)
-      if (outcomeFor(scenario.name) !== 'pass') entry.passed = false
+      if (outcomeFor(scenario.name, scenarioIndex) !== 'pass') entry.passed = false
       byFid.set(fid, entry)
     }
   }

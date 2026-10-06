@@ -90,7 +90,7 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
     description:
       '真实运行项目根内的 Python 脚本（implement 子会话自测专用）：先 write_file 写好脚本再跑，' +
       '当场看退出码/stdout/stderr 做红绿自测，绿了再交付。仅允许项目根内已存在的 .py；每次最长 90 秒；' +
-      '全程至多 12 次。推荐输出用 `S<编号> PASS/FAIL <结论>` 行锚点（平台复跑可对账）。' +
+      '全程至多 12 次。推荐输出用 `PASS/FAIL <场景名>` 行锚点（场景名与契约声明一致，平台复跑可对账）。' +
       'GUI 程序请写无头自测（构造逻辑对象断言，不要真开主循环）。',
     input_schema: {
       type: 'object',

@@ -16,7 +16,7 @@
   "env_whitelist": [],
   "components": [],
   "scenarios": [
-    { "name": "S1 骨架自检", "covers": ["F-001"] }
+    { "name": "skeleton.self-check", "covers": ["F-001"] }
   ],
   "packaging": {
     "tool": "pyinstaller",

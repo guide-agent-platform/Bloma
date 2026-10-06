@@ -149,6 +149,6 @@ describe('run_project_driver 阶段白名单', () => {
     expect(DESKTOP_PHASES['desktop-scaffold'].taskTemplate).toContain('capture_window')  // 骨架内置 PrintWindow 自截，旧 ImageGrab 教法绝迹
     expect(DESKTOP_PHASES['desktop-scaffold'].taskTemplate).toContain('不阻塞断言')
     expect(DESKTOP_PHASES['desktop-verify'].taskTemplate).toContain('截完立即终止进程')
-    expect(DESKTOP_PHASES['desktop-verify'].taskTemplate).toContain('S<编号> PASS')
+    expect(DESKTOP_PHASES['desktop-verify'].taskTemplate).toContain('PASS <场景名>')
   })
 })

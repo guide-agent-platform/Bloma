@@ -159,6 +159,42 @@ describe('结构与语义违规', () => {
     expect(poisoned.find((e) => e.fid === 'F-009')?.passed).toBe(false)
   })
 
+  it('aggregateAcceptanceCoverage 序号对位兑底（批8 下半狗粮实锤 2026-10-07）：contract 语义名 + driver 裸 S<n>，精确/前缀全落空时按声明序对位（S1→第 1 个）；越界/错位保持 fail-closed', () => {
+    const contract = { scenarios: [
+      { name: 'skeleton.self-check', covers: ['F-002'] },
+      { name: 'create.persona-success', covers: ['F-001'] },
+      { name: 'chat.reply-appended', covers: ['F-001'] },
+    ] }
+    const aligned = aggregateAcceptanceCoverage(contract, [
+      { name: 'S1', outcome: 'pass' },
+      { name: 'S2', outcome: 'pass' },
+      { name: 'S3', outcome: 'pass' },
+    ])
+    expect(aligned.find((e) => e.fid === 'F-002')?.passed).toBe(true)
+    expect(aligned.find((e) => e.fid === 'F-001')?.passed).toBe(true)
+    // 对位后仍 fail：S3 断言失败 → F-001 未全绿
+    const failedThird = aggregateAcceptanceCoverage(contract, [
+      { name: 'S1', outcome: 'pass' },
+      { name: 'S2', outcome: 'pass' },
+      { name: 'S3', outcome: 'fail' },
+    ])
+    expect(failedThird.find((e) => e.fid === 'F-001')?.passed).toBe(false)
+    // 缺行（S3 未回读）→ 对位不到 → fail-closed
+    const missingThird = aggregateAcceptanceCoverage(contract, [
+      { name: 'S1', outcome: 'pass' },
+      { name: 'S2', outcome: 'pass' },
+    ])
+    expect(missingThird.find((e) => e.fid === 'F-001')?.passed).toBe(false)
+    // 精确命中优先于对位：driver 用真名时不受序号影响
+    const exact = aggregateAcceptanceCoverage(contract, [
+      { name: 'skeleton.self-check', outcome: 'pass' },
+      { name: 'create.persona-success', outcome: 'fail' },
+      { name: 'S3', outcome: 'pass' },
+    ])
+    expect(exact.find((e) => e.fid === 'F-002')?.passed).toBe(true)
+    expect(exact.find((e) => e.fid === 'F-001')?.passed).toBe(false) // create.persona-success 精确命中 fail
+  })
+
   it('self_check 形态违规（可选面存在即校验）', () => {
     const c = baseContract()
     ;(c.self_check as unknown as Record<string, unknown>).expect_exit = '0'
