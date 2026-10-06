@@ -395,25 +395,41 @@ try {
     await sleep(1_000)
   }
   if (!state?.hasTextarea) throw new Error(`新会话未就绪：${JSON.stringify(state).slice(0, 200)}`)
+  // 新项目挂载稳定等待（2026-10-06 三次事故链：模式选定后聊天视图/会话绑定未就绪时
+  // 提交，消息气泡乐观渲染全文（DOM 验证被骗）但会话只落到「做一个」——空格前首段）
+  await sleep(3000)
+  const settled = await cdp.eval(`(() => ({ hasTextarea: !!document.querySelector('textarea'), taEmpty: (document.querySelector('textarea')?.value ?? '?') === '' }))()`)
+  log(`聊天视图稳定等待：${JSON.stringify(settled)}`)
 
-  // 发送需求
+  // 发送需求（权威验证：会话 JSONL 落盘才算成功——DOM 气泡可能是乐观渲染的假象）
   const sentAt = Date.now()
   let sendResult = null
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     sendResult = await cdp.eval(`(${TYPE_AND_SEND})(${JSON.stringify(REQUEST)})`)
     log(`发送需求（第 ${attempt} 次）：${JSON.stringify(sendResult)}`)
     if (sendResult?.ok) {
-      // 发送后第二道验证：完整需求须出现在聊天区（截断/丢字在此拦截，不再盲信按钮）
-      await sleep(1500)
-      const verify = await cdp.eval(`(() => {
-        const t = (document.body.innerText || '')
-        const tail = ${JSON.stringify(REQUEST.slice(-16))}
-        return { in_transcript: t.includes(tail) }
-      })()`)
-      log(`发送回读验证：${JSON.stringify(verify)}`)
-      if (verify?.in_transcript) break
-      sendResult = { ok: false, err: 'transcript-missing' }
-      log('聊天区未见完整需求尾句——判发送失败，重试')
+      // 权威验证：扫描 agent-sessions，发送时间之后新建/更新的会话必须含需求尾句
+      // （DOM 回读会被乐观渲染骗过——run3 实锤：气泡全文、会话只有「做一个」）
+      const tail = REQUEST.slice(-16)
+      let landed = null
+      for (let probe = 0; probe < 10; probe += 1) {
+        await sleep(1200)
+        try {
+          const { readdirSync, readFileSync, statSync } = await import('node:fs')
+          const { join: pathJoin } = await import('node:path')
+          const dir = pathJoin(homedir(), '.proma', 'agent-sessions')
+          for (const name of readdirSync(dir).filter((n) => n.endsWith('.jsonl'))) {
+            const full = pathJoin(dir, name)
+            if (statSync(full).mtimeMs < sentAt) continue
+            if (readFileSync(full, 'utf8').includes(tail)) { landed = name; break }
+          }
+        } catch { /* 扫描失败重试 */ }
+        if (landed) break
+      }
+      log(`会话落盘验证：${landed ? `OK（${landed}）` : 'FAIL（无新建会话含需求尾句）'}`)
+      if (landed) break
+      sendResult = { ok: false, err: 'session-not-persisted' }
+      log('需求未落到会话——主进程丢消息，重试')
     }
     if (sendResult?.ok) break
     await sleep(2000)
