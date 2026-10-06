@@ -12,7 +12,7 @@
  * mvp_adjust 并发送修复指令），二轮仍有 P0 停住出报告。
  *
  * 用法：
- *   node scripts/dogfood-run.mjs --request "做一个简单的倒计时器" [--timeout-min 25]
+ *   node scripts/dogfood-run.mjs --request "做一个简单的倒计时器" [--timeout-min 25] [--mode quick|longterm]
  *   node scripts/dogfood-run.mjs --probe-only        # 只拉起+dump 驾驶面状态即退
  *   node scripts/dogfood-run.mjs --keep-open          # 结束后不关 app（人工接管看现场）
  * 输出：stdout 时间线 + <repo>/dogfood-run-report.json
@@ -33,6 +33,11 @@ const opt = (name, fallback) => {
 const REPO = resolve(opt('repo', '.'))
 const REQUEST = opt('request', '')
 const TIMEOUT_MIN = Number(opt('timeout-min', '25'))
+const MODE = opt('mode', 'quick')
+if (!['quick', 'longterm'].includes(MODE)) {
+  console.error(`--mode 仅支持 quick|longterm，收到：${MODE}`)
+  process.exit(2)
+}
 const PROBE_ONLY = flag('probe-only')
 const KEEP_OPEN = flag('keep-open')
 
@@ -337,13 +342,14 @@ try {
   }
   if (!freshOk) log('「新建项目」未找到（可能已在新会话，继续）')
   await sleep(2_000)
-  // 两道门：模式卡是 div[data-ai-id=mode-card-quick]（非 button）
+  // 两道门：模式卡是 div[data-ai-id=mode-card-quick|mode-card-longterm]（非 button）
+  const MODE_LABEL = MODE === 'longterm' ? '深度项目' : '快速尝鲜'
   let modeClicked = false
   for (let i = 0; i < 8; i += 1) {
-    const r = await cdp.eval(`(() => { const el = document.querySelector('[data-ai-id="mode-card-quick"]'); if (!el) return { ok: false, err: 'not-found' }; el.click(); return { ok: true } })()`)
+    const r = await cdp.eval(`(() => { const el = document.querySelector('[data-ai-id="mode-card-${MODE}"]'); if (!el) return { ok: false, err: 'not-found' }; el.click(); return { ok: true } })()`)
     if (r?.ok) {
       modeClicked = true
-      log('已选「快速尝鲜」模式')
+      log(`已选「${MODE_LABEL}」模式（--mode ${MODE}）`)
       break
     }
     await sleep(1_000)
