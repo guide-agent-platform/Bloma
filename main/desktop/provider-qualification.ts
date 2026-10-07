@@ -56,12 +56,14 @@ export const LLM_PROVIDER_DECL_REL = 'llm-provider.json'
 /** 结果落盘相对路径（00_VERIFY/）。 */
 export const LLM_QUALIFICATION_REL = '00_VERIFY/llm-qualification.json'
 
-/** 解析产物声明（容错：非对象/缺 messages 视为 schema 不合法）。 */
+/** 解析产物声明（容错：非对象/缺 messages 视为 schema 不合法）。
+ * 批9.5 狗粮 b14861db 实证：产物合理变体把 request_sample 嵌在 request 对象内
+ * （request.request_sample.messages）——兼容顶层与嵌套两路径（messages 数组结构为准）。 */
 export function parseLlmDeclaration(raw: string | undefined): { declaration?: LlmProviderDeclaration; schemaValid: boolean } {
   if (!raw) return { schemaValid: false }
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>
-    const sample = parsed?.request_sample as { messages?: unknown } | undefined
+    const sample = (parsed?.request_sample ?? (parsed?.request as { request_sample?: unknown } | undefined)?.request_sample) as { messages?: unknown } | undefined
     const messages = sample?.messages
     const schemaValid =
       Array.isArray(messages) &&
@@ -80,6 +82,17 @@ export function parseLlmDeclaration(raw: string | undefined): { declaration?: Ll
   } catch {
     return { schemaValid: false }
   }
+}
+
+
+/** declared_provider 宽容提取（批9.5 狗粮实证：产物可能给 {type,...} 对象而非字符串）。 */
+function declaredProviderOf(declaration: LlmProviderDeclaration | undefined): string | undefined {
+  const provider = declaration?.provider as unknown
+  if (typeof provider === 'string') return provider
+  if (provider && typeof provider === 'object' && typeof (provider as { type?: unknown }).type === 'string') {
+    return (provider as { type: string }).type
+  }
+  return undefined
 }
 
 /** 从 base_url 提取 host（报告呈现不泄露完整 URL 与 key）。 */
@@ -171,7 +184,7 @@ export async function runProviderQualification(options: {
       executed: true,
       qualified: false,
       calls: 0,
-      declared_provider: declaration?.provider,
+      declared_provider: declaredProviderOf(declaration),
       request_schema_valid: false,
       findings: [
         '产物未按任务书声明 LLM 调用形态（llm-provider.json 缺失或 request_sample.messages 结构不合法）——真实可用性无法代验，本地集成验证不代表真实 Provider 验证',
@@ -197,7 +210,7 @@ export async function runProviderQualification(options: {
       executed: false,
       qualified: false,
       calls: 0,
-      declared_provider: declaration.provider,
+      declared_provider: declaredProviderOf(declaration),
       request_schema_valid: true,
       findings: ['平台渠道不可用——本轮未做真实 Provider 验证（本地集成验证 ≠ 真实可用）'],
       skipped_reason: `渠道不可用（${resolution.unusableReason ?? 'unknown'}）`,
@@ -275,7 +288,7 @@ export async function runProviderQualification(options: {
             calls,
             channel_model: model,
             channel_base_host: hostOf(baseUrl),
-            declared_provider: declaration.provider,
+            declared_provider: declaredProviderOf(declaration),
             request_schema_valid: true,
             findings: [],
             checked_at: now(),
@@ -286,7 +299,7 @@ export async function runProviderQualification(options: {
             calls,
             channel_model: model,
             channel_base_host: hostOf(baseUrl),
-            declared_provider: declaration.provider,
+            declared_provider: declaredProviderOf(declaration),
             request_schema_valid: true,
             findings: [`端点返回 2xx 但响应结构不含内容块（${text.slice(0, 160)}）——产物请求 schema 与真实端点可能不匹配`],
             checked_at: now(),
@@ -310,7 +323,7 @@ export async function runProviderQualification(options: {
     calls,
     channel_model: model,
     channel_base_host: hostOf(baseUrl),
-    declared_provider: declaration.provider,
+    declared_provider: declaredProviderOf(declaration),
     request_schema_valid: true,
     findings: [`平台渠道真实调用未通过（${lastError}）——这验证的是「该请求 schema 在真实端点上的行为」，产物按同 schema 配置真实 key 后的可用性需用户自验`],
     checked_at: now(),

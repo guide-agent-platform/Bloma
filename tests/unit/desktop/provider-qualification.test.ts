@@ -75,6 +75,20 @@ describe('parseLlmDeclaration', () => {
       parseLlmDeclaration('{"request_sample":{"messages":[{"role":"user","content":""}]}}').schemaValid,
     ).toBe(false)
   })
+
+  it('嵌套 request.request_sample 变体兼容（批9.5 狗粮 b14861db 实证形态）', () => {
+    const nested = JSON.stringify({
+      schema_version: 1,
+      provider: { type: 'openai-compatible', description: '用户自配' },
+      request: {
+        method: 'POST',
+        path: '/chat/completions',
+        request_sample: { messages: [{ role: 'user', content: '你好' }] },
+      },
+    })
+    const parsed = parseLlmDeclaration(nested)
+    expect(parsed.schemaValid).toBe(true)
+  })
 })
 
 describe('runProviderQualification', () => {
