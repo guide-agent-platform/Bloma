@@ -95,6 +95,26 @@ describe('holdForMvpConfirm（挂起）', () => {
     }))
   })
 
+  it('信任报告三段（批10 2026-10-07 外部意见吸收）：已确认能做/目前限制/给你的建议全部呈现，限制为空时如实兑底', () => {
+    const { deps } = makeDeps()
+    holdForMvpConfirm({
+      input,
+      deps,
+      fromPhase: 'desktop-verify',
+      notice: { projectName: '记账本', fromPhaseTitle: '验收', screenshotPaths: ['00_VERIFY/screenshots/S1.png'], driverSummary: { passed: 7, total: 9 }, deliveryDigest: '运行：python app.py' },
+    })
+    const html = readFileSync(join(projectRoot, '00_VERIFY', 'mvp-review.html'), 'utf8')
+    expect(html).toContain('本版本已确认能做（附验证方式）')
+    expect(html).toContain('7/9 场景 PASS——平台实际启动了程序')
+    expect(html).toContain('程序能正常启动并显示界面')
+    expect(html).toContain('目前限制')
+    expect(html).toContain('平台检查没有发现已知限制')
+    expect(html).toContain('给你的建议')
+    expect(html).toContain('怎么运行、数据存在哪里、怎么备份')
+    expect(html).toContain('交付说明原文')
+    expect(html).not.toContain('探索会话未正常完成')
+  })
+
   it('探索发现段（2026-10-05 探索驱动测试批）：drive-findings.json 存在时注入过目页，含严重级/标题/actual', () => {
     const { deps } = makeDeps()
     mkdirSync(join(projectRoot, '00_VERIFY'), { recursive: true })

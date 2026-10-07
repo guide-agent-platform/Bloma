@@ -170,12 +170,13 @@ export const SHAPE_TEMPLATES: Record<ShapeHostTemplate, ShapeTemplate> = {
   },
 }
 
-/** 模板标题速查（标签渲染用；与 requirement-digest SHAPE_HOST_LABELS 语义一致但更短）。 */
+/** 模板标题速查（标签渲染用；面向用户的纯业务语言——挂起卡/报告段/任务书标题共用；
+ *  工程术语（record_manager 等）只留在 agent 面与结构字段，不给用户看）。 */
 export const SHAPE_TEMPLATE_LABELS: Record<ShapeHostTemplate, string> = {
-  instant_utility: '即时工具型',
-  record_manager: '记录管理型',
-  file_pipeline: '文件批处理型',
-  job_runner: '长任务执行型',
+  instant_utility: '输入内容马上出结果的工具',
+  record_manager: '每天记录和查看的工具',
+  file_pipeline: '一次处理一批文件的工具',
+  job_runner: '发起后等它慢慢跑完的工具',
 }
 
 // =========================================================================

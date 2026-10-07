@@ -45,28 +45,35 @@ export interface ShapeReportSection {
   llmQualification?: LlmQualificationOutcome
 }
 
+/** close_policy 已知值人话映射（自由字符串，未知值原样呈现兑底；批10 去工程语）。 */
+function closePolicyUserText(policy: string): string {
+  if (policy === 'wait_or_confirm') return '没跑完就关窗口时，会等它跑完或先问你'
+  if (policy === 'abort') return '没跑完就关窗口时，任务直接终止'
+  if (policy === 'background') return '关掉窗口后，任务在后台继续跑'
+  return `关闭窗口时的处理：${policy}`
+}
+
+/** llm_role 人话（报告段用；none 不渲染；批10 去工程语——枚举值不给用户看）。 */
+const LLM_ROLE_USER_TEXT: Record<string, string> = {
+  core: 'AI 是这个软件的核心（不配好 AI 就用不了主要功能）',
+  optional: 'AI 是加分项（AI 不可用时其他功能照常能用）',
+  preview: 'AI 效果仅预览示意，不代表最终效果',
+  user_config: 'AI 功能要你自己配好密钥才能用',
+}
+
 function buildShapeReportSection(section: ShapeReportSection | undefined): string {
   if (!section) return ''
   const lines: string[] = []
-  lines.push(`<h2 style="font-size:15px;margin:20px 0 8px;">产品形状（${escapeHtml(section.hostLabel)}）</h2>`)
+  lines.push(`<h2 style="font-size:15px;margin:20px 0 8px;">这是一个${escapeHtml(section.hostLabel)}</h2>`)
   lines.push(`<ul>`)
-  lines.push(`<li>主工作循环：${escapeHtml(section.primaryLoop)}</li>`)
-  lines.push(`<li>任务策略：${escapeHtml(section.jobPolicy)}</li>`)
+  lines.push(`<li>主要用法：${escapeHtml(section.primaryLoop)}</li>`)
+  lines.push(`<li>${escapeHtml(section.jobPolicy)}</li>`)
   if (section.llmRole !== 'none') {
-    lines.push(`<li>AI 角色：${escapeHtml(section.llmRole)}（本地集成验证与真实 Provider 验证是两个独立轴，下方 LLM 验证轴单独呈现）</li>`)
+    lines.push(`<li>AI 部分：${escapeHtml(LLM_ROLE_USER_TEXT[section.llmRole] ?? section.llmRole)}</li>`)
   }
   lines.push(`</ul>`)
-  if (section.llmQualification) {
-    const q = section.llmQualification
-    const axisText = q.executed
-      ? q.qualified
-        ? `<b style="color:#15803d">真实 Provider 验证通过</b>（${q.calls} 次真实调用，渠道 ${escapeHtml(q.channel_model ?? '?')} @ ${escapeHtml(q.channel_base_host ?? '?')}；key 不出平台）`
-        : `<b style="color:#b91c1c">真实 Provider 验证未通过</b>（${q.calls} 次调用${q.findings.length > 0 ? `：${q.findings.map(escapeHtml).join('；')}` : ''}）`
-      : `<b style="color:#b45309">未做真实 Provider 验证</b>（${escapeHtml(q.skipped_reason ?? '原因未记录')}）`
-    lines.push(`<p style="font-size:13px;">LLM 双轴——驱动验收绿=${q.executed ? '本地集成轴（mock 回放）' : ''}${q.executed ? '；' : ''}${axisText}。${section.llmRole === 'core' ? '<b>core 角色：真实验证未通过不得宣称完整交付。</b>' : ''}</p>`)
-  }
   if (section.defaultRules.length > 0) {
-    lines.push(`<p style="font-size:13px;color:#666;">形状缺省做法（未采用须在 DELIVERY.md 注明依据）：${section.defaultRules.map(escapeHtml).join('；')}</p>`)
+    lines.push(`<p style="font-size:13px;color:#666;">同类的通用好做法（本次没采用的，会在交付说明里写明原因）：${section.defaultRules.map(escapeHtml).join('；')}</p>`)
   }
   return lines.join('\n')
 }
@@ -79,35 +86,83 @@ function buildMvpReviewHtml(notice: DeliveredNoticeInput, driveFindings?: DriveF
     .map((rel) => rel.replace(/^00_VERIFY\//, ''))
     .map((rel) => `<figure><img src="${escapeHtml(rel)}" alt="程序截图"/><figcaption>${escapeHtml(rel)}</figcaption></figure>`)
     .join('\n')
-  const driverLine = notice.driverSummary
-    ? `<li>驱动验收：${notice.driverSummary.passed}/${notice.driverSummary.total} 场景 PASS（平台真实执行回读）</li>`
-    : ''
+  // ===== 批10 信任报告三段（2026-10-07 外部 LLM 意见吸收）：本版本已确认能做（附验证
+  // 方式）/ 目前限制 / 给你的建议——全部由平台结构化证据（驱动/截图/击杀/PQ/探索会话）
+  // 确定性拼装，零 LLM 参与；工程明细（击杀条目/trace）留在 00_VERIFY 文件里。 =====
+  const confirmedLines: string[] = []
+  if (notice.driverSummary) {
+    confirmedLines.push(
+      `<li>核心功能真实运行检查：${notice.driverSummary.passed}/${notice.driverSummary.total} 场景 PASS——平台实际启动了程序，按验收清单逐条执行并核对结果</li>`,
+    )
+  }
+  const shotCount = (notice.screenshotPaths ?? []).length
+  if (shotCount > 0) {
+    confirmedLines.push(`<li>程序能正常启动并显示界面——下方 ${shotCount} 张截图是平台真实运行时拍下的</li>`)
+  }
+  const fk = faultKill?.faultKill
+  if (fk && fk.executed > 0) {
+    confirmedLines.push(
+      fk.killed === fk.executed
+        ? `<li>测试有效性抽查：故意植入 ${fk.executed} 个已知缺陷，全部被测试抓住（说明测试真的在检查，不是走形式）</li>`
+        : `<li>测试有效性抽查：植入的 ${fk.executed} 个已知缺陷中 ${fk.killed} 个被测试抓住</li>`,
+    )
+  }
+  const qualification = shapeSection?.llmQualification
+  if (qualification?.executed && qualification.qualified) {
+    confirmedLines.push(
+      `<li>真实 AI 服务验证通过（平台用自己的渠道实际调用了 ${qualification.calls} 次；密钥不经过这个软件）</li>`,
+    )
+  }
+  if (confirmedLines.length === 0) {
+    confirmedLines.push('<li>本页未取到结构化验证数据（如实呈现）——结论以验收清单与交付说明为准</li>')
+  }
+  const confirmedSection = `<h2 style="font-size:15px;margin:20px 0 8px;">本版本已确认能做（附验证方式）</h2>\n<ul>${confirmedLines.join('')}</ul>`
   const findingsSection =
     driveFindings && driveFindings.length > 0
-      ? `<h2 style="font-size:15px;margin:20px 0 8px;">探索发现（${driveFindings.length} 项 · 参考证据，不阻塞交付）</h2>\n<ul>${driveFindings
+      ? `<h2 style="font-size:15px;margin:20px 0 8px;">探索发现（${driveFindings.length} 项 · P0 是重要问题、P1 是次要建议；不拦着交付，但你该知道）</h2>\n<ul>${driveFindings
           .map(
             (item) =>
               `<li><b>[${escapeHtml(item.severity)}] ${escapeHtml(item.title)}</b>${(item as unknown as { superseded_by?: string }).superseded_by ? `（已被 ${escapeHtml((item as unknown as { superseded_by: string }).superseded_by)} 修正）` : ''}<br/>应发生：${escapeHtml(item.expected)}<br/>实际：${escapeHtml(item.actual)}</li>`,
           )
           .join('')}</ul>`
       : ''
-  // 探索状态真相段（2026-10-06 发现④/B4）：探索失败≠零发现——会话状态非正常时如实
-  // 告知「本轮未含真实 GUI 探索证据」（呈现真相，不阻塞交付，两轨原则不变）。
+  // 探索会话状态（2026-10-06 发现④/B4 → 批10 并入「目前限制」段）：探索失败≠零发现
+  // ——全部会话非正常时如实告知（呈现真相，不阻塞交付，两轨原则不变）。
   const badSessions = (driveSessions ?? []).filter((item) => item.outcome !== 'closed')
-  const explorationStatusSection =
-    driveSessions && driveSessions.length > 0 && badSessions.length === driveSessions.length
-      ? `<h2 style="font-size:15px;margin:20px 0 8px;color:#b45309;">⚠ 探索会话未正常完成（${badSessions.map((item) => `${item.session_id.slice(-6)}:${escapeHtml(item.outcome)}`).join('、')}）</h2>\n<p style="font-size:13px;color:#92400e;">真实 GUI 探索未能完成，本轮验收未包含探索证据——以上驱动验收全绿不等于探索通过。可确认交付（风险自担），或回炉修复后重验。</p>`
-      : ''
-  // 故障种子击杀段（批6 2026-10-06）：测试有效性证据——survived 在收口已硬拒收，
-  // 这里呈现的是通过面（killed/executed）与 not-applicable 如实面（不阻塞）。
-  const faultKillSection =
-    faultKill && faultKill.faultKill && faultKill.faultKill.executed + faultKill.faultKill.notApplicable + faultKill.faultKill.notRun > 0
-      ? `<h2 style="font-size:15px;margin:20px 0 8px;">故障种子击杀（${faultKill.faultKill.killed}/${faultKill.faultKill.executed} 注入已知缺陷被测试判红${faultKill.faultKill.notApplicable + faultKill.faultKill.notRun > 0 ? `；未定位/未跑 ${faultKill.faultKill.notApplicable + faultKill.faultKill.notRun} 项如实呈现` : ''}）</h2>` +
-        `<ul>${(faultKill.faultKill.entries ?? [])
-          .map((entry: { fid: string; seed: string; result: string; detail?: string }) =>
-            `<li>[${escapeHtml(entry.result)}] ${escapeHtml(entry.fid)} · ${escapeHtml(entry.seed)}${entry.detail ? `：${escapeHtml(entry.detail)}` : ''}</li>`)
-          .join('')}</ul>`
-      : ''
+  const limitLines: string[] = []
+  if (qualification) {
+    if (qualification.executed && !qualification.qualified) {
+      limitLines.push(
+        `<li>真实 AI 服务验证<b>未通过</b>（${qualification.calls} 次调用${qualification.findings.length > 0 ? `：${qualification.findings.map(escapeHtml).join('；')}` : ''}）——AI 相关功能没拿到真实验证${shapeSection?.llmRole === 'core' ? '，按约定这个版本不能算完整交付' : '，可以先用，但 AI 部分请自行留心'}</li>`,
+      )
+    } else if (!qualification.executed) {
+      limitLines.push(
+        `<li>没有做过真实 AI 服务验证（${escapeHtml(qualification.skipped_reason ?? '原因未记录')}）——AI 功能只在本地模拟环境测过，没有连过真实 AI 服务</li>`,
+      )
+    }
+  }
+  if (driveSessions && driveSessions.length > 0 && badSessions.length === driveSessions.length) {
+    limitLines.push(
+      `<li>探索会话未正常完成（${badSessions.map((item) => `${item.session_id.slice(-6)}:${escapeHtml(item.outcome)}`).join('、')}）——上面的检查都按既定清单执行过，但没有人用「随便点点」的自由方式试用过这个程序，可能有清单外的小问题没被发现</li>`,
+    )
+  }
+  if (fk && fk.notApplicable + fk.notRun > 0) {
+    limitLines.push(`<li>测试有效性抽查有 ${fk.notApplicable + fk.notRun} 项没能执行（不适用或未定位到注入点，如实告知）</li>`)
+  }
+  const limitsSection =
+    `<h2 style="font-size:15px;margin:20px 0 8px;">目前限制</h2>\n` +
+    (limitLines.length > 0
+      ? `<ul>${limitLines.join('')}</ul>`
+      : `<p style="font-size:13px;color:#666;">平台检查没有发现已知限制；实现方在交付说明里写明的限制，以下方交付说明原文为准。</p>`)
+  const adviceLines: string[] = [
+    '<li>先小规模试用：拿一两个真实数据试试核心功能，符合预期再放心日常使用</li>',
+    '<li>怎么运行、数据存在哪里、怎么备份：看下方交付说明（或右侧交付面板里的 DELIVERY.md）</li>',
+  ]
+  if (shapeSection?.llmRole === 'user_config') {
+    adviceLines.push('<li>用 AI 功能前，先在程序的设置里填你自己的 AI 密钥（步骤见交付说明）</li>')
+  }
+  adviceLines.push('<li>发现不对劲或想改，直接在聊天里说——我改完会重新检查再交给你</li>')
+  const adviceSection = `<h2 style="font-size:15px;margin:20px 0 8px;">给你的建议</h2>\n<ul>${adviceLines.join('')}</ul>`
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -127,13 +182,13 @@ function buildMvpReviewHtml(notice: DeliveredNoticeInput, driveFindings?: DriveF
 </head>
 <body>
 <h1>成品过目：${escapeHtml(notice.projectName)}</h1>
-<div class="sub">来源阶段：${escapeHtml(notice.fromPhaseTitle)} · 验收全绿，等你确认后正式交付</div>
-<ul>${driverLine}<li>程序文件与运行方式：右侧交付面板 / 项目根 DELIVERY.md</li></ul>
-${explorationStatusSection}
+<div class="sub">自动检查已全部通过——请你过目，确认后正式交付</div>
+${confirmedSection}
+${limitsSection}
+${adviceSection}
 ${buildShapeReportSection(shapeSection)}
 ${findingsSection}
-${faultKillSection}
-${notice.deliveryDigest ? `<pre>${escapeHtml(notice.deliveryDigest)}</pre>` : ''}
+${notice.deliveryDigest ? `<h2 style="font-size:15px;margin:20px 0 8px;">交付说明原文（怎么运行 · 你的数据存在哪 · 限制明细）</h2>\n<pre>${escapeHtml(notice.deliveryDigest)}</pre>` : ''}
 ${shots || '<p style="color:#999">（无截图——无窗口程序或截图未产出）</p>'}
 <div class="foot">确认后在聊天中的「确认，交付」生效；有要改的直接回复</div>
 </body>
@@ -228,7 +283,11 @@ export function holdForMvpConfirm(options: {
           shapeSection = {
             hostLabel: SHAPE_TEMPLATE_LABELS[shape.host_template],
             primaryLoop: shape.primary_loop,
-            jobPolicy: `可取消=${shape.job_policy.cancellable ? '是' : '否（用户口径）'}；进度反馈=${shape.job_policy.progress ? '是' : '否'}；关闭时=${shape.job_policy.close_policy}`,
+            jobPolicy: [
+              shape.job_policy.cancellable ? '任务可以中途取消' : '任务不支持中途取消（按你的要求）',
+              shape.job_policy.progress ? '执行中能看到进度' : '执行中没有单独的进度显示',
+              closePolicyUserText(shape.job_policy.close_policy),
+            ].join('；'),
             defaultRules: listShapeDefaults(shape.host_template).map((rule) => rule.requirement),
             llmRole: shape.llm_role,
             ...(shape.llm_role !== 'none' ? { llmQualification: readLlmQualification(root) } : {}),

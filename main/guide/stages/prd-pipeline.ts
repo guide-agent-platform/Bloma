@@ -182,11 +182,13 @@ export async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ sta
     // 不改写 F-00N 冻结描述。
     const shapeGate = evaluateShapeGate(backplane.shape)
     if (!shapeGate.pass && shouldSuspendForEnrichmentClarification(pending.session_id)) {
+      // 面向用户的纯业务语言（批10 去工程语：不出现「型/管线/执行器」等工程词，
+      // 选项直接描述使用方式；工程判定词只在 agent 面与结构字段）
       const SHAPE_TEMPLATE_LABELS: Record<string, string> = {
-        instant_utility: '即时工具型（输入→出结果→复制）',
-        record_manager: '记录管理型（录入+列表+留存）',
-        file_pipeline: '文件批处理型（选一批→逐个处理）',
-        job_runner: '长任务执行型（发起→监控→完成）',
+        instant_utility: '输入内容马上出结果（不保存记录）',
+        record_manager: '每天记录、随时查看（关掉再开数据还在）',
+        file_pipeline: '一次处理一批文件（逐个处理、逐个出结果）',
+        job_runner: '发起任务后等它跑完（比如下载、批量转换）',
       }
       const candidateOptions = (backplane.shape?.candidates ?? [])
         .filter((candidate, index, all) => all.findIndex((c) => c.template === candidate.template) === index)
