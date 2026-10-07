@@ -141,9 +141,10 @@ function buildMvpReviewHtml(notice: DeliveredNoticeInput, driveFindings?: DriveF
       )
     }
   }
-  if (driveSessions && driveSessions.length > 0 && badSessions.length === driveSessions.length) {
+  if (driveSessions && driveSessions.length > 0 && badSessions.length > 0) {
+    const allBad = badSessions.length === driveSessions.length
     limitLines.push(
-      `<li>探索会话未正常完成（${badSessions.map((item) => `${item.session_id.slice(-6)}:${escapeHtml(item.outcome)}`).join('、')}）——上面的检查都按既定清单执行过，但没有人用「随便点点」的自由方式试用过这个程序，可能有清单外的小问题没被发现</li>`,
+      `<li>探索会话未正常完成（${badSessions.map((item) => `${item.session_id.slice(-6)}:${escapeHtml(item.outcome)}`).join('、')}）——${allBad ? '上面的检查都按既定清单执行过，但没有人用「随便点点」的自由方式试用过这个程序，可能有清单外的小问题没被发现' : `${driveSessions.length} 个探索会话中 ${badSessions.length} 个未正常收尾（未 report+close），它们的结论没有进入结构化发现清单`}</li>`,
     )
   }
   if (fk && fk.notApplicable + fk.notRun > 0) {

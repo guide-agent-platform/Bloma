@@ -155,6 +155,33 @@ describe('holdForMvpConfirm（挂起）', () => {
     html = readFileSync(join(projectRoot, '00_VERIFY', 'mvp-review.html'), 'utf8')
     expect(html).not.toContain('探索会话未正常完成')
   })
+
+  it('部分会话未收尾（批10 旧账①）：任一非 closed 即进限制段并说明未 report 语义；全 closed 不渲染', () => {
+    const { deps } = makeDeps()
+    mkdirSync(join(projectRoot, '00_VERIFY'), { recursive: true })
+    writeFileSync(
+      join(projectRoot, '00_VERIFY', 'drive-sessions.json'),
+      JSON.stringify([
+        { session_id: 'drive-muwcxxx-abc123', outcome: 'closed', ops: 12 },
+        { session_id: 'drive-muwcxxx-def456', outcome: 'disposed', ops: 8 },
+      ]),
+      'utf8',
+    )
+    holdForMvpConfirm({ input, deps, fromPhase: 'desktop-verify', notice: { projectName: 'x', fromPhaseTitle: 'y' } })
+    const html = readFileSync(join(projectRoot, '00_VERIFY', 'mvp-review.html'), 'utf8')
+    expect(html).toContain('探索会话未正常完成')
+    expect(html).toContain('def456:disposed')
+    expect(html).toContain('2 个探索会话中 1 个未正常收尾')
+    // 全 closed 不渲染
+    writeFileSync(
+      join(projectRoot, '00_VERIFY', 'drive-sessions.json'),
+      JSON.stringify([{ session_id: 'drive-muwcxxx-abc123', outcome: 'closed', ops: 12 }]),
+      'utf8',
+    )
+    holdForMvpConfirm({ input, deps, fromPhase: 'desktop-verify', notice: { projectName: 'x', fromPhaseTitle: 'y' } })
+    const html2 = readFileSync(join(projectRoot, '00_VERIFY', 'mvp-review.html'), 'utf8')
+    expect(html2).not.toContain('探索会话未正常完成')
+  })
 })
 
 describe('回传拦截', () => {

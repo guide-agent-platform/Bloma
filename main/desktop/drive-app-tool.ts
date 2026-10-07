@@ -91,6 +91,8 @@ export function buildDriveAppTool(projectId: string, deps: DriveAppDeps = {}): A
       'act 批量动词 ≤8 步/次（webview 腿：click/set_text 按元素 id、js 同步表达式、call 直调 Api 方法如 list_items；' +
       'tk 腿：click/set_text/select/keys，移动/长按类按键配 hold_ms 300~700 按住后读差分）→ ' +
       'read/read_file/list_files 验证状态与文件副作用 → report 逐条上报发现（P0/P1/P2 + title/expected/actual + repro_steps）→ close 收尾。' +
+      '**会话结束纪律（硬性）：无论发现多少——零发现也要 report 空清单——结束前必须先 report 后 close；' +
+      '不 report 的发现会全部丢失且按探索未完成计（disposed 会话的结论不进结构化 findings，MVP 门拿不到你的发现）。**' +
       '程序异常随响应返回且会话存活（UI 线程被模态/死循环阻塞则动词超时杀会话——现象本身就是高价值发现）；' +
       '每动词 ≤10s（hold 计入）、每会话 60 op/5 分钟、每项目至多 2 会话。' +
       '你不是实现者：按 PRD 验收点逐条探索（正常/空输入/边界/重复/乱序/键盘响应），发现即 report，不要修代码。',
