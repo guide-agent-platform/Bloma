@@ -87,6 +87,8 @@ window.App = (function () {
       var row = document.createElement("div");
       row.className = "w-row";
       row.dataset.id = String(it[opt.idKey || "id"]);
+      /* 组件身份（批11 点选纠错）：列表行携带稳定 id，修改预览点选可定位 */
+      row.dataset.blomaId = "list.row." + String(it[opt.idKey || "id"]);
       if (opt.ava !== false) {
         var ava = document.createElement("div");
         ava.className = "w-ava";
@@ -111,11 +113,15 @@ window.App = (function () {
   }
 
   /** 气泡追加：App.appendBubble(listEl, {side:"ai", text, meta}) */
+  var bubbleSeq = 0;
   function appendBubble(el, msg) {
     if (!el) return;
+    bubbleSeq += 1;
     var div = document.createElement("div");
     div.className = "w-bubble";
     div.setAttribute("data-side", msg.side === "user" ? "user" : "ai");
+    /* 组件身份（批11 点选纠错）：气泡携带序号稳定 id */
+    div.setAttribute("data-bloma-id", "chat.bubble." + bubbleSeq);
     div.textContent = msg.text || "";
     if (msg.meta) {
       var m = document.createElement("div");

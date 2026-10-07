@@ -25,6 +25,7 @@ import { setNotificationProjectHooks } from './platform/shell/notifications'
 import { recordDecision } from './project/decision-log'
 import { findProject, listProjects, updateProject } from './project/project-service'
 import { installTrayAndShortcut, isTrayQuitting, notifyHiddenToTray, setTrayProjectSource, teardownTrayAndShortcut } from './platform/shell/tray'
+import { disposeAllCorrectionSessions } from './desktop/correction-session'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -221,6 +222,9 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   teardownTrayAndShortcut()
+  // 点选纠错（批11 MVP-E，2026-10-08）：修改预览实例是平台拉起的可见窗口，
+  // 应用退出时统一 kill 进程树（防孤儿预览窗口残留）。
+  disposeAllCorrectionSessions()
 })
 
 app.on('activate', () => {

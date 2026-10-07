@@ -144,3 +144,8 @@ async function onSend() {
 - Python → UI：Python 端 `evaluate_js("window.on_xxx(...)")` 推送，页面定义 `window.on_xxx` 接收
 - UI 不持有真相：所有数据从 `App.call("list_...")` 拿；改完调 `refresh()`
 - 线程规则：pywebview 的 api 调用到达非主线程——Python 端业务代码不得直接摸 UI，一律 evaluate_js
+
+## 组件身份（批11 点选纠错，2026-10-08）
+
+- 骨架自带元素与 `App.renderList` / `App.appendBubble` 生成的元素已自动携带 `data-bloma-id`（稳定组件身份：`action.send` / `list.row.<id>` / `chat.bubble.<n>` 等）
+- **自建组件一律照抄**：外层容器加 `data-bloma-id="<区域>.<语义名>"`（如 `form.customer-name` / `card.summary`）——修改预览点选纠错靠它定位；缺省时点选层按「角色+可见文本」生成临时身份（可用但重渲染后可能漂移）

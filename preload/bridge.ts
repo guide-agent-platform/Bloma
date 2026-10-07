@@ -191,6 +191,14 @@ const electronAPI: ElectronAPI = {
     launch: (input: import('../shared/types').ProjectLaunchAppInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.PROJECT_LAUNCH_APP, input),
   },
+  correction: {
+    start: (input: import('../shared/types').CorrectionStartInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CORRECTION_START, input),
+    picks: (input: import('../shared/types').CorrectionPicksInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CORRECTION_PICKS, input),
+    finish: (input: import('../shared/types').CorrectionFinishInput) =>
+      ipcRenderer.invoke(IPC_CHANNELS.CORRECTION_FINISH, input),
+  },
   desktopArtifacts: {
     subscribe: (input: DesktopArtifactSubscribeInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.DESKTOP_ARTIFACT_SUBSCRIBE, input),

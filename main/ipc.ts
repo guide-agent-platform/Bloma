@@ -19,6 +19,7 @@ import { registerChannelsRoutingIpc } from './ipc/channels-routing'
 import { registerPromptsIpc } from './ipc/prompts'
 import { registerDesktopArtifactsIpc } from './ipc/desktop-artifacts'
 import { registerProjectDeliverablesIpc } from './ipc/project-deliverables'
+import { registerCorrectionIpc } from './ipc/correction'
 import { registerSpeechIpc } from './ipc/speech'
 
 export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow): void {
@@ -67,5 +68,6 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
   registerPromptsIpc(ipcMain, mainWindow)
   registerDesktopArtifactsIpc(ipcMain, mainWindow)
   registerProjectDeliverablesIpc(ipcMain, mainWindow)
+  registerCorrectionIpc(ipcMain)
   registerSpeechIpc(ipcMain, mainWindow)
 }

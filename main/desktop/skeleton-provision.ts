@@ -29,6 +29,7 @@ const ROOT_FILES: readonly string[] = [
   'ui/tokens.css',
   'ui/kit.css',
   'ui/bridge.js',
+  'ui/correction.js',
   'ui/PATTERNS.md',
 ]
 

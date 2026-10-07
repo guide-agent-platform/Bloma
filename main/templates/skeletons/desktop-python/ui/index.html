@@ -15,15 +15,15 @@
     <!-- 列表区：App.renderList 填充（空态自动呈现引导） -->
     <div id="side-list"></div>
     <div style="margin-top:auto; padding: var(--s3);">
-      <button class="w-btn w-btn--ghost" id="btn-new" style="width:100%">＋ 新建</button>
+      <button class="w-btn w-btn--ghost" id="btn-new" data-bloma-id="side.new" style="width:100%">＋ 新建</button>
     </div>
   </aside>
 
   <main class="w-main">
     <div class="w-topbar">
       <div>
-        <div class="w-topbar-title" id="topbar-title">…</div>
-        <div class="w-topbar-sub" id="topbar-sub"></div>
+        <div class="w-topbar-title" id="topbar-title" data-bloma-id="topbar.title">…</div>
+        <div class="w-topbar-sub" id="topbar-sub" data-bloma-id="topbar.sub"></div>
       </div>
     </div>
 
@@ -41,13 +41,14 @@
 
     <!-- 输入区（按需启用；非输入型应用可整块删除） -->
     <div class="w-input-row" id="input-row">
-      <input class="w-input" id="main-input" placeholder="输入…（Enter 发送）">
-      <button class="w-btn w-btn--primary" id="btn-send">发送</button>
+      <input class="w-input" id="main-input" data-bloma-id="input.main" placeholder="输入…（Enter 发送）">
+      <button class="w-btn w-btn--primary" id="btn-send" data-bloma-id="action.send">发送</button>
     </div>
   </main>
 
 </div>
 <script src="bridge.js"></script>
+<script src="correction.js"></script>
 <script>
   // ── 桥就绪后的首屏装载（数据从 Python 逻辑层来；UI 不自持真相） ──
   async function refresh() {

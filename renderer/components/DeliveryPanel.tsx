@@ -2,7 +2,8 @@ import React from 'react'
 import { useAtomValue } from 'jotai'
 import { RotateCw } from './icons'
 import { Markdown } from './Markdown'
-import { currentProjectAtom, desktopArtifactsAtom, desktopPhaseAtom } from '../agent-atoms'
+import { CorrectionPanel } from './CorrectionPanel'
+import { correctionSessionAtom, currentProjectAtom, desktopArtifactsAtom, desktopPhaseAtom } from '../agent-atoms'
 import type { ProjectDeliverablesResult } from '../../shared/types'
 
 /**
@@ -21,6 +22,7 @@ const MarkdownLazy: React.FC<{ text: string }> = Markdown
 
 export const DeliveryPanel: React.FC = () => {
   const project = useAtomValue(currentProjectAtom)
+  const correctionSession = useAtomValue(correctionSessionAtom)
   const projectId = project?.project_id
   // 自动刷新信号：桌面阶段推进（stage_changed 回填后变化）或产物变更（version+1）
   const desktopPhase = useAtomValue(desktopPhaseAtom)
@@ -121,6 +123,13 @@ export const DeliveryPanel: React.FC = () => {
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '10px 14px', minHeight: 0 }}>
+        {/* 点选纠错（批11 MVP-E，2026-10-08）：入口/会话视图内嵌交付面板；completed 项目
+            可用（主进程校验，旧骨架产物返回 unsupported 如实置灰提示） */}
+        {project?.current_stage === 'completed' && (
+          <div style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--color-border)' }}>
+            <CorrectionPanel />
+          </div>
+        )}
         {loading && <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}><RotateCw size={12} /> 读取产物…</div>}
         {!loading && !data && (
           <div data-ai-id="delivery-empty" style={{ padding: 'var(--space-6) var(--space-2)', textAlign: 'center' }}>

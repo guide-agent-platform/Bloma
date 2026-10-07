@@ -19,6 +19,7 @@ const ROOT_FILE_SET = [
   'ui/tokens.css',
   'ui/kit.css',
   'ui/bridge.js',
+  'ui/correction.js',
   'ui/PATTERNS.md',
 ] as const
 

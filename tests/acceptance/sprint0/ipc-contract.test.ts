@@ -72,6 +72,13 @@ const expectedChannels = {
   DESKTOP_ARTIFACT_EVENT: 'desktop:artifact-event',
   PROJECT_DELIVERABLES: 'project:deliverables',
   PROJECT_LAUNCH_APP: 'project:launch-app',
+  CORRECTION_START: 'correction:start',
+  CORRECTION_PICKS: 'correction:picks',
+  CORRECTION_FINISH: 'correction:finish',
+  SPEECH_CATALOG: 'speech:catalog',
+  SPEECH_PREPARE: 'speech:prepare',
+  SPEECH_CANCEL_PREPARATION: 'speech:cancel-preparation',
+  SPEECH_TRANSCRIBE: 'speech:transcribe',
 } as const
 
 describe('Sprint 0 IPC contract acceptance', () => {

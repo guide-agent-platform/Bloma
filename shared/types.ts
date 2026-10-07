@@ -83,6 +83,10 @@ export const IPC_CHANNELS = {
   /** 交付面板（2026-10-04 呈现层收口）：桌面项目文件清单+DELIVERY.md+启动声明；启动程序 */
   PROJECT_DELIVERABLES: 'project:deliverables',
   PROJECT_LAUNCH_APP: 'project:launch-app',
+  /** 点选纠错会话（批11 MVP-E，2026-10-08）：修改预览实例拉起/选区轮询/收口 */
+  CORRECTION_START: 'correction:start',
+  CORRECTION_PICKS: 'correction:picks',
+  CORRECTION_FINISH: 'correction:finish',
   /** 语音输入（2026-10-05 语音批 A 线）：就绪快照轮询 / 准备（下载模型）/ 取消准备 / 转写 */
   SPEECH_CATALOG: 'speech:catalog',
   SPEECH_PREPARE: 'speech:prepare',
@@ -440,6 +444,66 @@ export interface ProjectLaunchAppResult {
   started: boolean
   pid?: number
   command?: string
+}
+
+/** 点选纠错：启动修改预览（批11 MVP-E）。 */
+export interface CorrectionStartInput extends RequestEnvelope {
+  project_id: string
+}
+
+/** 点选纠错会话信息（渲染端呈现/轮询用）。 */
+export interface CorrectionSessionInfoResult {
+  sessionKey: string
+  sessionDir: string
+  drivePort: number
+  dataSnapshotted: boolean
+  startedAt: string
+  pid?: number
+}
+
+/** 点选纠错启动结果（失败带 reason 供入口置灰/提示分支）。 */
+export interface CorrectionStartResultDto {
+  ok: boolean
+  session?: CorrectionSessionInfoResult
+  reason?: 'not-delivered' | 'launch-invalid' | 'unsupported' | 'already-running' | 'spawn-failed'
+  error?: string
+}
+
+/** 点选纠错：选区轮询。 */
+export interface CorrectionPicksInput extends RequestEnvelope {
+  project_id: string
+}
+
+/** 点选纠错选区快照（渲染端卡片流呈现）。 */
+export interface CorrectionPicksResult {
+  ok: boolean
+  picks: Array<{
+    seq?: number
+    componentId?: string
+    role?: string
+    roleLabel?: string
+    displayName?: string
+    text?: string
+    kind?: string
+    note?: string
+    preview?: { applied?: string; detail?: string }
+    received_at?: string
+  }>
+  done: boolean
+  error?: string
+}
+
+/** 点选纠错：收口（kill 实例）。 */
+export interface CorrectionFinishInput extends RequestEnvelope {
+  project_id: string
+}
+
+/** 点选纠错收口结果：主进程组装的回炉反馈文本（单一来源，渲染端代发）。 */
+export interface CorrectionFinishResult {
+  ok: boolean
+  pickCount: number
+  feedback?: string
+  error?: string
 }
 
 export interface DesktopArtifactImageInput extends RequestEnvelope {
@@ -1685,6 +1749,14 @@ export type ElectronAPI = {
     get(input: ProjectDeliverablesInput): Promise<ApiResult<ProjectDeliverablesResult>>
     /** 启动程序（仅 completed 项目 + 合法 LAUNCH.json；detached spawn） */
     launch(input: ProjectLaunchAppInput): Promise<ApiResult<ProjectLaunchAppResult>>
+  }
+  correction: {
+    /** 点选纠错（批11）：启动修改预览实例（数据快照隔离；旧骨架产物返回 unsupported） */
+    start(input: CorrectionStartInput): Promise<ApiResult<CorrectionStartResultDto>>
+    /** 选区轮询（picks.jsonl 文件交接；done=true 时呈现收口确认） */
+    picks(input: CorrectionPicksInput): Promise<ApiResult<CorrectionPicksResult>>
+    /** 收口：结束会话并 kill 实例进程树（反馈文本由主进程组装，渲染端代发回炉） */
+    finish(input: CorrectionFinishInput): Promise<ApiResult<CorrectionFinishResult>>
   }
   analytics: {
     track(input: AnalyticsTrackInput): Promise<ApiResult<AnalyticsTrackResult>>

@@ -14,6 +14,12 @@
                                           零闪现零抢焦点，PrintWindow 截图不受影响）
       python app.py --drive-port N        探索驱动模式（隐藏窗口 + 127.0.0.1 控制服务器，
                                           POST /eval {"js":...} → evaluate_js；平台探索桥用）
+      python app.py --correction-session <dir> --drive-port N   修改预览模式（平台点选纠错拉起：
+                                          可见窗口 + 页内点选层，选区写入 <dir>/picks.jsonl；
+                                          数据目录经 APP_DATA_DIR 环境变量指向只读快照）
+
+数据目录约定（持久化一律遵守）：Path(os.environ.get("APP_DATA_DIR", Path(__file__).parent / "data"))
+——正常启动缺省项目内 data/；修改预览模式下平台注入快照目录（原数据零接触）。
 
 依赖：pywebview（pip）+ 系统 WebView2（Win10+ 自带）。禁 npm/CDN/外链字体——ui/ 全本地。
 """
@@ -21,8 +27,10 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -60,8 +68,24 @@ class Api:
     """js_api 桥：JS 侧 window.App.call("方法名", 参数...) 到达这里。
     返回值一律 JSON 字符串（bridge.js 会解析）。"""
 
-    def __init__(self, logic: Logic) -> None:
+    def __init__(self, logic: Logic, correction_dir: Path | None = None) -> None:
         self._logic = logic
+        self._correction_dir = correction_dir
+
+    # —— 点选纠错选区落盘（correction.js 专用；文件交接：平台轮询读 picks.jsonl）——
+    def correction_pick(self, payload_json: str) -> str:
+        """追加一行选区到 <correction_dir>/picks.jsonl（原子追加，业务无关）。"""
+        if not self._correction_dir:
+            return json.dumps({"ok": False, "error": "not-in-correction-mode"}, ensure_ascii=False)
+        try:
+            line = json.loads(payload_json)
+            line["received_at"] = datetime.now().isoformat(timespec="seconds")
+            self._correction_dir.mkdir(parents=True, exist_ok=True)
+            with open(self._correction_dir / "picks.jsonl", "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(line, ensure_ascii=False) + "\n")
+            return json.dumps({"ok": True, "seq": line.get("seq")}, ensure_ascii=False)
+        except Exception as error:
+            return json.dumps({"ok": False, "error": str(error)}, ensure_ascii=False)
 
     # —— 列表/条目 ——
     def list_items(self) -> str:
@@ -161,17 +185,28 @@ def main() -> int:
     # （系统认为可见），PrintWindow 句柄级截图不受坐标影响（64KB 完整帧实测）；
     # 用于 UI 截图场景：零闪现零抢焦点，自动验证不打扰用户。与 --drive-port 可叠加
     # （叠加时 hidden 优先——驱动/探索模式不需要可见渲染帧）。
-    offscreen = "--offscreen" in sys.argv
+    # 修改预览模式（点选纠错，平台拉起，2026-10-08 批11）：可见窗口 + 页内点选层 +
+    # 选区落盘；数据目录经 APP_DATA_DIR 指向平台准备的快照（原数据零接触）。
+    correction_dir: Path | None = None
+    if "--correction-session" in sys.argv:
+        correction_dir = Path(sys.argv[sys.argv.index("--correction-session") + 1])
+        os.environ.setdefault("APP_DATA_DIR", str(correction_dir / "data"))
+
+    offscreen = "--offscreen" in sys.argv and not correction_dir
 
     logic = Logic()
-    api = Api(logic)
+    api = Api(logic, correction_dir)
+    launch_url = str(UI_DIR / "index.html")
+    if correction_dir:
+        # 页面点选层凭 ?correction=1 启用；dport 供窄实时预览候选注入（/eval）
+        launch_url += f"?correction=1&dport={drive_port}"
     window = webview.create_window(
-        APP_NAME,
-        url=str(UI_DIR / "index.html"),  # 文件加载：ui/ 相对资产（kit.css/bridge.js）可引用
+        (f"修改预览 · {APP_NAME}" if correction_dir else APP_NAME),
+        url=launch_url,  # 文件加载：ui/ 相对资产（kit.css/bridge.js）可引用
         js_api=api,
         width=960,
         height=640,
-        hidden=drive_port > 0,
+        hidden=drive_port > 0 and not correction_dir,
         **({"x": -3000, "y": -3000} if offscreen and not drive_port else {}),
     )
     if drive_port:

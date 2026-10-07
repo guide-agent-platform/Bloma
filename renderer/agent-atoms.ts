@@ -1023,6 +1023,36 @@ export const correctionContextAtom = atom<{
   fallbackMode: boolean
 } | null>(null)
 
+/**
+ * 修改预览会话态（批11 MVP-E，2026-10-08）：方案 D 协作式纠错——平台拉起隔离
+ * 纠错实例（可见窗口+页内点选层），选区经 picks.jsonl 文件交接轮询；收口时
+ * 主进程组装反馈文本，渲染端代发为普通用户消息（delivered 反馈回炉链消化）。
+ */
+export type CorrectionPanelState =
+  | { status: 'idle' }
+  | { status: 'starting' }
+  | { status: 'active'; sessionKey: string; startedAt: string }
+  | { status: 'error'; message: string }
+
+export const correctionSessionAtom = atom<CorrectionPanelState>({ status: 'idle' })
+
+/** 选区快照（轮询拉平；组件渲染卡片流） */
+export const correctionPicksAtom = atom<Array<{
+  seq?: number
+  componentId?: string
+  role?: string
+  roleLabel?: string
+  displayName?: string
+  text?: string
+  kind?: string
+  note?: string
+  preview?: { applied?: string; detail?: string }
+  received_at?: string
+}>>([])
+
+/** 产物侧「完成点选」标记（点选层 done 行） */
+export const correctionDoneAtom = atom<boolean>(false)
+
 // =========================================================================
 // 9. 平台扩展 — 快照列表
 // =========================================================================
