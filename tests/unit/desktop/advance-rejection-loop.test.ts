@@ -53,15 +53,15 @@ describe('闭环决策（四要素）', () => {
     expect(second.continuation).toBeTruthy()
   })
 
-  it('第 3 次起（超过上限）：降级转人工——教育仍注入但无续接', () => {
+  it('超上限（第 LIMIT+1 次，批9.5 后为第 4 次）：降级转人工——教育仍注入但无续接', () => {
     const ledger = createRejectionLedger()
     ledger.counts['desktop-arch'] = REJECTION_LOOP_LIMIT
-    const third = decideRejectionLoop(ledger, 'desktop-arch', reject('artifacts-missing'))
-    expect(third.degrade).toBe(true)
-    expect(third.count).toBe(3)
-    expect(third.continuation).toBeUndefined()
-    expect(third.education).toContain('降级转人工')
-    expect(third.education).toContain(String(REJECTION_LOOP_LIMIT))
+    const overflow = decideRejectionLoop(ledger, 'desktop-arch', reject('artifacts-missing'))
+    expect(overflow.degrade).toBe(true)
+    expect(overflow.count).toBe(REJECTION_LOOP_LIMIT + 1)
+    expect(overflow.continuation).toBeUndefined()
+    expect(overflow.education).toContain('降级转人工')
+    expect(overflow.education).toContain(String(REJECTION_LOOP_LIMIT))
   })
 
   it('决策不改账本（读写分离——落账显式）', () => {

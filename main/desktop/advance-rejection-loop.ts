@@ -41,8 +41,12 @@ export function createRejectionLedger(): RejectionLedger {
   return { counts: {}, pendingReasons: {} }
 }
 
-/** 防环上限：同阶段拒收教育闭环最多 2 次，第 3 次起降级人工。 */
-export const REJECTION_LOOP_LIMIT = 2
+/** 防环上限：同阶段拒收教育闭环最多 3 次，第 4 次起降级人工。
+ * 批9.5（2026-10-07）拍板 2→3：批6 测试有效性双门（反空+种子击杀）后新单预热消耗
+ * 实测 1-2 轮（两单狗粮实锤：test-invalid→fault-survived 各烧一轮后真缺陷零修复预算，
+ * 均死在第 3 次拒收、差一步收敛）；防线层数多于竞品（单门 2 轮）等效需求更高。防环
+ * 语义不变：4 次拒收仍降级人工，观察哨/停止词/狗粮 timeout 三重兑底防坏单空转。 */
+export const REJECTION_LOOP_LIMIT = 3
 
 // =========================================================================
 // 拒因归类
