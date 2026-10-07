@@ -52,6 +52,7 @@ import {
   takePendingEnrichmentClarification,
   type EnrichmentClarificationRequest,
 } from '../clarification'
+import { evaluateShapeGate } from '../prd-engine-llm'
 import { resolvePrdBackplane, setProgrammingEventPublisher, nextRequirementId, refineModificationDescription } from '../../coding/programming-orchestrator'
 import { normalizeRequirementUpdate, applyNormalization, resolveRoutedRequirementId } from '../requirement-normalizer'
 import { buildReferenceSection } from '../web-reference-extractor'
@@ -170,6 +171,89 @@ export async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ sta
       // 有缺口但轮次守卫不过（上限/超时后）→ 状态机图④：静默降级留痕，按现状继续
       try {
         recordEnrichmentClarificationExhausted(pending)
+      } catch {
+        // 日志失败不影响主线
+      }
+    }
+    // 批9 形状门（2026-10-07 工件1）：PRD 确认前确定性拦截——shape.architecture_open_questions
+    // 非空或结构缺口 → 澄清回流（不阻塞 fail）；轮次守卫与 enrichment 挂起共用（2 轮
+    // 上限/超时熔断/孤儿恢复天然继承，防死循环）。for='shape' 非功能项 id——定向 revise
+    // 的 targets 永不命中，答案仅落会话成接地证据（PRD 引擎重跑时 readConversation 看到），
+    // 不改写 F-00N 冻结描述。
+    const shapeGate = evaluateShapeGate(backplane.shape)
+    if (!shapeGate.pass && shouldSuspendForEnrichmentClarification(pending.session_id)) {
+      const SHAPE_TEMPLATE_LABELS: Record<string, string> = {
+        instant_utility: '即时工具型（输入→出结果→复制）',
+        record_manager: '记录管理型（录入+列表+留存）',
+        file_pipeline: '文件批处理型（选一批→逐个处理）',
+        job_runner: '长任务执行型（发起→监控→完成）',
+      }
+      const candidateOptions = (backplane.shape?.candidates ?? [])
+        .filter((candidate, index, all) => all.findIndex((c) => c.template === candidate.template) === index)
+        .slice(0, 3)
+        .map((candidate) => ({
+          id: candidate.template,
+          label: SHAPE_TEMPLATE_LABELS[candidate.template] ?? candidate.template,
+        }))
+      const shapeRequests: EnrichmentClarificationRequest[] = shapeGate.questions
+        .slice(0, 2)
+        .map((question, index) => ({
+          for: 'shape',
+          question: question.slice(0, 100),
+          ...(index === 0 && candidateOptions.length > 0 ? { options: candidateOptions } : {}),
+        }))
+      gatedPublish(makeGuideEvent(eventInput, 'message_delta', {
+        text: '整理 PRD 时发现几处会直接影响成品形态的问题（比如它更像哪种工作形态、数据要不要留存），先问你一下，回答后我马上出完整 PRD。',
+      }))
+      suspendForEnrichmentClarification(
+        {
+          request_id: pending.request_id,
+          session_id: pending.session_id,
+          project_id: pending.project_id,
+          mode: pending.mode,
+          channel_id: pending.channel_id,
+          requirements: requirements as SketchRequirement[],
+          query: pending.query,
+          env: pending.env,
+          publish,
+          signal,
+        },
+        shapeRequests,
+        (timeoutPending) => {
+          try {
+            recordEnrichmentClarificationTimeout(timeoutPending)
+          } catch {
+            // 日志失败不阻断回退
+          }
+          void runPrdPipeline({
+            request_id: timeoutPending.request_id,
+            session_id: timeoutPending.session_id,
+            project_id: timeoutPending.project_id,
+            mode: timeoutPending.mode,
+            channel_id: timeoutPending.channel_id,
+            requirements: timeoutPending.requirements as SketchRequirement[],
+            query: timeoutPending.query,
+            env: timeoutPending.env,
+            publish: timeoutPending.publish,
+            signal: timeoutPending.signal,
+          }).catch(() => undefined)
+        },
+      )
+      return { started: false, prd_written: false }
+    }
+    if (!shapeGate.pass) {
+      // 轮次守卫不过（追问上限/超时后）→ 降级放行留痕：open questions 随 PRD 确认卡交给用户过目
+      try {
+        recordDecision({
+          project_id: pending.project_id,
+          session_id: pending.session_id,
+          entry: {
+            type: 'shape_gate_degraded',
+            title: '形状门降级放行（追问上限已到）',
+            why: 'shape 架构级未决问题存在但追问轮次守卫不过，按现状出 PRD 确认卡，未决问题请用户过目时定夺',
+            detail: { questions: shapeGate.questions },
+          },
+        })
       } catch {
         // 日志失败不影响主线
       }

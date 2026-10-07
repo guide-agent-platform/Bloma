@@ -21,6 +21,9 @@ import { updateProject, findProject } from '../project/project-service'
 import { mintProjectPreviewUrl } from '../delivery/preview-scheme'
 import { recordDeliveryOutcomeTelemetry } from './dispatcher-telemetry'
 import { DRIVE_FINDINGS_REL, type DriveFinding } from './drive-app-tool'
+import { readPrdBackplane } from '../project/document-engine'
+import { SHAPE_TEMPLATE_LABELS, listShapeDefaults } from './shape-templates'
+import { readLlmQualification, type LlmQualificationOutcome } from './provider-qualification'
 
 export const MVP_OPTION_CONFIRM = 'mvp_confirm_go'
 export const MVP_OPTION_ADJUST = 'mvp_adjust'
@@ -31,10 +34,47 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
+/** 形状段数据（批9 工件4：报告呈现）：模板/job_policy 采用面 + default 规则（未采用项+依据
+ * 首期不做自动检测——如实呈现模板要求，交付声明在 DELIVERY.md）+ LLM 双轴呈现。 */
+export interface ShapeReportSection {
+  hostLabel: string
+  primaryLoop: string
+  jobPolicy: string
+  defaultRules: string[]
+  llmRole: string
+  llmQualification?: LlmQualificationOutcome
+}
+
+function buildShapeReportSection(section: ShapeReportSection | undefined): string {
+  if (!section) return ''
+  const lines: string[] = []
+  lines.push(`<h2 style="font-size:15px;margin:20px 0 8px;">产品形状（${escapeHtml(section.hostLabel)}）</h2>`)
+  lines.push(`<ul>`)
+  lines.push(`<li>主工作循环：${escapeHtml(section.primaryLoop)}</li>`)
+  lines.push(`<li>任务策略：${escapeHtml(section.jobPolicy)}</li>`)
+  if (section.llmRole !== 'none') {
+    lines.push(`<li>AI 角色：${escapeHtml(section.llmRole)}（本地集成验证与真实 Provider 验证是两个独立轴，下方 LLM 验证轴单独呈现）</li>`)
+  }
+  lines.push(`</ul>`)
+  if (section.llmQualification) {
+    const q = section.llmQualification
+    const axisText = q.executed
+      ? q.qualified
+        ? `<b style="color:#15803d">真实 Provider 验证通过</b>（${q.calls} 次真实调用，渠道 ${escapeHtml(q.channel_model ?? '?')} @ ${escapeHtml(q.channel_base_host ?? '?')}；key 不出平台）`
+        : `<b style="color:#b91c1c">真实 Provider 验证未通过</b>（${q.calls} 次调用${q.findings.length > 0 ? `：${q.findings.map(escapeHtml).join('；')}` : ''}）`
+      : `<b style="color:#b45309">未做真实 Provider 验证</b>（${escapeHtml(q.skipped_reason ?? '原因未记录')}）`
+    lines.push(`<p style="font-size:13px;">LLM 双轴——驱动验收绿=${q.executed ? '本地集成轴（mock 回放）' : ''}${q.executed ? '；' : ''}${axisText}。${section.llmRole === 'core' ? '<b>core 角色：真实验证未通过不得宣称完整交付。</b>' : ''}</p>`)
+  }
+  if (section.defaultRules.length > 0) {
+    lines.push(`<p style="font-size:13px;color:#666;">形状缺省做法（未采用须在 DELIVERY.md 注明依据）：${section.defaultRules.map(escapeHtml).join('；')}</p>`)
+  }
+  return lines.join('\n')
+}
+
 /** 成品过目页（2026-10-05：MVP 门「像 UX 门一样右栏呈现」）：截图画廊 + 驱动验收结论
  *  + DELIVERY 摘要；落盘 00_VERIFY/ 供 bloma-file:// 直读（截图相对路径同目录引用）。探索
  *  发现段（2026-10-05 探索驱动测试批）从 drive-findings.json 注入——参考证据不阻塞交付。 */
-function buildMvpReviewHtml(notice: DeliveredNoticeInput, driveFindings?: DriveFinding[], driveSessions?: Array<{ session_id: string; outcome: string; ops?: number }>, faultKill?: { audit?: { findings?: Array<{ state?: string }>; error?: string }; faultKill?: { entries?: Array<{ fid: string; seed: string; result: string; detail?: string }>; killed: number; executed: number; survived: number; notApplicable: number; notRun: number } }): string {
+function buildMvpReviewHtml(notice: DeliveredNoticeInput, driveFindings?: DriveFinding[], driveSessions?: Array<{ session_id: string; outcome: string; ops?: number }>, faultKill?: { audit?: { findings?: Array<{ state?: string }>; error?: string }; faultKill?: { entries?: Array<{ fid: string; seed: string; result: string; detail?: string }>; killed: number; executed: number; survived: number; notApplicable: number; notRun: number } }, shapeSection?: ShapeReportSection): string {
   const shots = (notice.screenshotPaths ?? [])
     .map((rel) => rel.replace(/^00_VERIFY\//, ''))
     .map((rel) => `<figure><img src="${escapeHtml(rel)}" alt="程序截图"/><figcaption>${escapeHtml(rel)}</figcaption></figure>`)
@@ -90,6 +130,7 @@ function buildMvpReviewHtml(notice: DeliveredNoticeInput, driveFindings?: DriveF
 <div class="sub">来源阶段：${escapeHtml(notice.fromPhaseTitle)} · 验收全绿，等你确认后正式交付</div>
 <ul>${driverLine}<li>程序文件与运行方式：右侧交付面板 / 项目根 DELIVERY.md</li></ul>
 ${explorationStatusSection}
+${buildShapeReportSection(shapeSection)}
 ${findingsSection}
 ${faultKillSection}
 ${notice.deliveryDigest ? `<pre>${escapeHtml(notice.deliveryDigest)}</pre>` : ''}
@@ -177,7 +218,26 @@ export function holdForMvpConfirm(options: {
       } catch {
         // 无击杀报告：如实降级
       }
-      writeFileSync(reviewAbs, buildMvpReviewHtml(options.notice, driveFindings, driveSessions, faultKill), 'utf8')
+      // 形状段（批9 工件4 2026-10-07）：背板 shape 存在时呈现模板/策略/缺省做法与 LLM 双轴；
+      // llm-qualification.json 由 verify 收口的 Provider Qualification 写入（llm_role≠none）。
+      let shapeSection: ShapeReportSection | undefined
+      try {
+        const backplane = readPrdBackplane(input.projectId)
+        if (backplane.shape) {
+          const shape = backplane.shape
+          shapeSection = {
+            hostLabel: SHAPE_TEMPLATE_LABELS[shape.host_template],
+            primaryLoop: shape.primary_loop,
+            jobPolicy: `可取消=${shape.job_policy.cancellable ? '是' : '否（用户口径）'}；进度反馈=${shape.job_policy.progress ? '是' : '否'}；关闭时=${shape.job_policy.close_policy}`,
+            defaultRules: listShapeDefaults(shape.host_template).map((rule) => rule.requirement),
+            llmRole: shape.llm_role,
+            ...(shape.llm_role !== 'none' ? { llmQualification: readLlmQualification(root) } : {}),
+          }
+        }
+      } catch {
+        // 背板/形状读取失败：如实降级不渲染
+      }
+      writeFileSync(reviewAbs, buildMvpReviewHtml(options.notice, driveFindings, driveSessions, faultKill, shapeSection), 'utf8')
       reviewUrl = mintProjectPreviewUrl(input.projectId, MVP_REVIEW_RELATIVE_PATH)
     }
   } catch (error) {

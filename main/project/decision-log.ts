@@ -57,6 +57,8 @@ export type DecisionType =
   | 'constraint_captured'
   | 'memory_distilled'
   | 'enrichment_stats'
+  /** 批9 形状体系（2026-10-07）：shape 拦截追问轮次守卫不过时的降级放行留痕 */
+  | 'shape_gate_degraded'
   | 'agent_loop'
   | 'template_type_refined'
   | 'requirement_earsified'

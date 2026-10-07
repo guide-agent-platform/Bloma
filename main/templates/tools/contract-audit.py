@@ -27,6 +27,18 @@ def _is_truthy_constant(node: ast.expr) -> bool:
     return False
 
 
+def _is_generative_metric_assert(test: ast.expr) -> bool:
+    """生成层指标断言白名单（批9 2026-10-07 LLM 分层断言口径）。
+
+    LLM 生成层断言的是质量指标而非精确文本：长度范围/关键词覆盖/结构 schema/包含判断。
+    这类断言重复调用生成函数（两侧 dump 相同）是正常模式，不判 oracle-from-target
+    （防误杀——分层断言口径见 verify 任务书）；同时供 summary 正向计数观测。
+    """
+    src = ast.unparse(test) if hasattr(ast, "unparse") else ""
+    indicators = ("len(", " in ", "re.search", "re.match", "any(", "all(", "isinstance(")
+    return any(ind in src for ind in indicators)
+
+
 def _name_origin(node: ast.expr, aliases: dict[str, str]) -> str | None:
     """把表达式归约到「赋值来源名」（expected = actual 的别名链追踪，一层即可）。"""
     if isinstance(node, ast.Name):
@@ -42,28 +54,33 @@ def audit_function(func: ast.FunctionDef | ast.AsyncFunctionDef, path: str) -> l
     is_test = func.name.startswith(("test_", "assert_", "check_", "verify_"))
 
     has_assert = False
+    generative_metric_asserts = 0
     aliases: dict[str, str] = {}
     for stmt in ast.walk(func):
         # 1) assert 常量 / 自比较 / 别名比较
         if isinstance(stmt, ast.Assert):
             has_assert = True
             test = stmt.test
+            if _is_generative_metric_assert(test):
+                generative_metric_asserts += 1
             if _is_truthy_constant(test):
                 findings.append({"file": path, "line": stmt.lineno, "kind": "assert-constant", "state": "reject",
                                  "detail": "assert 常量真值（永真断言）"})
             elif isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.ops[0], (ast.Eq, ast.Is)):
-                left, right = test.comparators[0], test.left
-                if isinstance(left, ast.Name) and isinstance(right, ast.Name) and left.id == right.id:
-                    findings.append({"file": path, "line": stmt.lineno, "kind": "self-compare", "state": "reject",
-                                     "detail": f"assert {left.id} 与自身比较（永真）"})
-                else:
-                    lo, ro = _name_origin(left, aliases), _name_origin(right, aliases)
-                    if lo is not None and ro is not None and lo == ro:
-                        findings.append({"file": path, "line": stmt.lineno, "kind": "alias-compare", "state": "reject",
-                                         "detail": f"期望值与实际值同源（{lo} 的别名互比，永真）"})
-                    elif ast.dump(left) == ast.dump(right):
-                        findings.append({"file": path, "line": stmt.lineno, "kind": "oracle-from-target", "state": "inconclusive",
-                                         "detail": "断言两侧表达式完全相同——期望值疑似取自被测对象自身"})
+                # 生成层指标断言白名单（批9）：指标形态不进 oracle 判定（防误杀分层断言）
+                if not _is_generative_metric_assert(test):
+                    left, right = test.comparators[0], test.left
+                    if isinstance(left, ast.Name) and isinstance(right, ast.Name) and left.id == right.id:
+                        findings.append({"file": path, "line": stmt.lineno, "kind": "self-compare", "state": "reject",
+                                         "detail": f"assert {left.id} 与自身比较（永真）"})
+                    else:
+                        lo, ro = _name_origin(left, aliases), _name_origin(right, aliases)
+                        if lo is not None and ro is not None and lo == ro:
+                            findings.append({"file": path, "line": stmt.lineno, "kind": "alias-compare", "state": "reject",
+                                             "detail": f"期望值与实际值同源（{lo} 的别名互比，永真）"})
+                        elif ast.dump(left) == ast.dump(right):
+                            findings.append({"file": path, "line": stmt.lineno, "kind": "oracle-from-target", "state": "inconclusive",
+                                             "detail": "断言两侧表达式完全相同——期望值疑似取自被测对象自身"})
         # 2) 吞异常
         if isinstance(stmt, ast.ExceptHandler):
             body_pass = len(stmt.body) == 1 and isinstance(stmt.body[0], ast.Pass)
@@ -105,6 +122,9 @@ def audit_function(func: ast.FunctionDef | ast.AsyncFunctionDef, path: str) -> l
         if not has_raise:
             findings.append({"file": path, "line": func.lineno, "kind": "no-assert", "state": "reject",
                              "detail": f"测试函数 {func.name} 内没有任何断言——跑过≠验证"})
+    if generative_metric_asserts > 0:
+        findings.append({"file": path, "line": func.lineno, "kind": "generative-metric-assert", "state": "whitelisted",
+                         "detail": f"生成层指标断言 {generative_metric_asserts} 处（长度/关键词/结构形态——分层断言白名单，不计永真）"})
     return findings
 
 

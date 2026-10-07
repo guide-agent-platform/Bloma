@@ -5,7 +5,7 @@ import { loadPromptOverride } from '../agent/prompting/prompt-config'
 import { buildPrdFewShotInjection } from '../agent/prompting/template-injection'
 import { callLlmForJson, type LlmAttemptFailure } from '../kernel/llm-call'
 import type { AgentMessage, MessageContentBlock, TemplateType } from '../../shared/types'
-import type { AiCapability, GameDesignDoc, InterfaceEndpoint, KeyTask, PrdBackplane, SketchRequirement, UxExperienceSpec, UxStateId } from '../model/prd-backplane'
+import type { AiCapability, GameDesignDoc, InterfaceEndpoint, KeyTask, PrdBackplane, ProductShape, ShapeCandidate, ShapeHostTemplate, SketchRequirement, UxExperienceSpec, UxStateId } from '../model/prd-backplane'
 import {
   buildPrdDocumentFallback,
   capContractEnabled,
@@ -78,6 +78,7 @@ export const DEFAULT_SYSTEM_PROMPT = `你是「Bloma 向导 · 需求工程腿�
  "form":"交付形态自判：desktop | game | web。规则：游戏/复刻类（玩法为核心）=game；用户明确要求网站/网页/浏览器/小程序/在线平台形态=web；其余（含一切 Windows 桌面/单机/本地工具）一律 desktop",
  "acceptance":{"F-001":"该功能项的验收要点 2~4 条，分号分隔（正常路径 + 边界/异常各至少 1 条）"},
  "ux":{"states":[{"id":"empty","observable":"空态时用户看到什么"},{"id":"success","observable":"成功时用户看到什么"}],"feedback_rules":["操作即时反馈；失败给原因与下一步"]},
+ "shape":{"host_template":"record_manager","modules":[],"primary_loop":"用户打开后主工作循环一句话","fact_source":"业务事实来源对象","needs_resident":false,"needs_network":false,"task_duration":"instant|short|long_running","destructive_ops":[],"llm_role":"none","job_policy":{"cancellable":true,"progress":true,"close_policy":"wait_or_confirm"},"candidates":[{"template":"record_manager","reasons":["支撑理由"]}],"architecture_open_questions":[]},
  "out_of_scope":["本轮明确不做的事"],
  "assumptions":["后台做出的假设"],
  "gdd":{"core_fantasy":"核心幻想","pillars":["支柱 1"],"core_loop":["阶段 1"],"numbers":["数值基准"]}}  // ux 为体验契约（桌面交互类输出，见四）；gdd 仅 form=game 时输出，非游戏省略
@@ -107,8 +108,8 @@ ${renderDocumentSectionSpec()}
 - 语义重复或指向同一行为的功能项，验收要点不得互相矛盾，同一行为只描述一次。
 
 四、ux（体验契约，2026-10-06 UX 契约线；桌面交互类产出，纯展示无交互的小工具可省略）
-- states：从七态白名单选本产品适用子集（empty 空态 / ready_input 待输入 / validating 校验中 / running 执行中 / success 成功 / partial 部分成功 / failed 失败），每态一句可观察表现（用户在该状态看到什么，不含实现细节）。
-- 适用判定：有数据列表/表单/处理流程的工具至少覆盖 empty/success/failed 三态；批量/多文件处理类加 partial；异步/耗时操作加 running。
+- states：从九态白名单选本产品适用子集（empty 空态 / ready_input 待输入 / validating 校验中 / running 执行中 / success 成功 / partial 部分成功 / failed 失败 / cancelled 取消 / unconfigured 待配置），每态一句可观察表现（用户在该状态看到什么，不含实现细节）。
+- 适用判定：有数据列表/表单/处理流程的工具至少覆盖 empty/success/failed 三态；批量/多文件处理类加 partial；异步/耗时操作加 running；shape.job_policy.cancellable=true 时加 cancelled（取消态）；shape.llm_role=user_config 时加 unconfigured（无 key 引导界面：有说明文案与设置入口）。
 - feedback_rules：2~4 条（及时性：操作即时有响应；具体性：成功给数量与位置、失败给原因与下一步；长操作有进度或可取消；防重复提交）。
 - 与 document「体验要求」章节同源一致；不适用的状态如实略。
 
@@ -127,10 +128,25 @@ ${renderDocumentSectionSpec()}
 - numbers：数值基准——关键数值/范围（生命值/得分/关卡数/道具池范围等）。
 - 从对话提炼；对话没说细的机制按同类游戏常见合理预期补齐并克制标注「（建议）」；document 的功能清单/行为断言从 gdd 核心循环切片，不发明 gdd 之外的机制。
 
-八、数据留存（桌面品类口径，2026-10-05 web 线退役后改定）
-- 当前版本只交付 Windows 桌面软件：数据留存一律本地实现（编程 Agent 自选本地文件等机制），**不设计后端/API**——不要输出 interface_spec 字段（旧版字段，当前版本不消费）。
+八、数据留存与外部服务（桌面品类口径，2026-10-05 web 线退役后改定；批9 2026-10-07 LLM 口径修订）
+- 当前版本只交付 Windows 桌面软件：数据留存一律本地实现（编程 Agent 自选本地文件等机制），**不设计自建后端/API**——不要输出 interface_spec 字段（旧版字段，当前版本不消费）。
 - 需求出现跨端/服务端语义（多端同步、云端、共享给他人、账号、多人协作）时：如实写入 out_of_scope 并在 assumptions 注明「当前版本不支持，需后续版本」——不要编造 API 契约迁就需求。
+- **外部 LLM 不再一刀切排除**（批9 拍板）：涉及 AI 对话/生成/总结类真实模型调用时，按 shape.llm_role 判定如实进需求与验收（见九），不再写入 out_of_scope；仍禁的是自建后端/账号体系/云同步。
 - 市调灵感（「参考市面做法」类）只在本地产物能力内采纳（如纸带式记录 → 本地留存展示）。
+
+九、shape（产品形状，批9 2026-10-07；桌面交互类一律输出）
+形状是「运行形态轴」的结构化描述——同一品类（desktop_tool）下倒计时器/通讯录/批量改名器/挂机下载器的必备状态集、必备测试、禁实现完全不同，shape 让下游按形状给工程纪律。
+- host_template 四选一：instant_utility（即时工具：输入→计算/转换→看结果→复制/重置，无数据留存主循环）/ record_manager（记录管理：表单录入+列表查看+持久化+编辑删除）/ file_pipeline（文件管线：选一批文件→批量处理→逐个产出，含部分成功）/ job_runner（任务执行器：发起长任务→监控进度→完成/失败管理，如挂机下载/批量渲染）。判定铁律：按主工作循环与事实来源判，不按功能数量判。
+- 混合形状裁决：产品同时含两形状特征时，用「哪个对象是业务事实来源、哪个状态机拥有应用生命周期」定宿主（如「记录管理+导出报告」事实来源是记录→record_manager；「文件夹监听+记录处理日志」生命周期属于监听状态机→file_pipeline）；确实无法裁决时把关键区别写成 architecture_open_questions 交给用户。
+- primary_loop：用户打开应用后的主工作循环一句话（业务语言，如「打开→选联系人→改→保存」）。
+- fact_source：业务事实来源对象（记录/文件/输入值——不是界面控件）。
+- task_duration：单个核心任务的时长档（instant 秒回 / short 秒级 / long_running 分钟级——后两者须进度反馈）。
+- destructive_ops：会覆盖/删除原始数据的操作清单（无则空数组）。
+- llm_role 判据（逐级判定）：移除 LLM 调用后产品不成立（AI 对话助手/生成器核心）→ core；用户明确要真 AI 且要求自带 key 或不内置 → user_config；AI 是增强功能、可降级交付（智能分类/摘要按钮）→ optional；生成内容仅预览示意 → preview；无 LLM → none。llm_role≠none 时：如实进 acceptance（分层断言——请求合法性/错误处理可严格断言，生成内容断言质量指标而非精确文本），assumptions 注明渠道与 key 来源。
+- job_policy：cancellable 用户明确说「不要取消/不能中断」→ false（但 close_policy 与执行中反馈仍必须定义）；progress 按 task_duration；close_policy 写关闭窗口时正在执行任务的行为（wait_or_confirm 等）。
+- candidates：≥1 个候选（含最终选择）；混合形状或拿不准时列 2 个+各自理由。
+- architecture_open_questions：决定架构走向的未决问题（业务语言，如「数据只在本次会话还是要关掉不丢」）；**对话里用户已回答的问题不得再列**；**用户让渡（你帮我决定/随便）后必须清空——按合理默认收敛并把所做选择写入 assumptions**；无则空数组。此字段非空时平台会拦截追问——不是置信度标记，是硬门槛。
+- 与 document 同源：功能清单不得与 shape 矛盾（如 host_template=instant_utility 就不能有「记录列表管理」主功能）。
 
 示例（家庭记账本，功能项 F-001 记录收入与支出 / F-002 展示本月结余；document 节选关键章节）：
 {"document":"# PRD：家庭记账本\\n## 一、产品定位 —— 面向个人与家庭的记账工具：日常收支发生时快速记录，月底直观看到结余。\\n## 二、功能清单 —— 作为家庭成员，我想记录每笔收入与支出，以便月底清楚钱花在了哪里。\\n### [F-001]（P0）记录收入与支出\\n验收要点：正常：新增一笔收入或支出后列表立即可见并持久保存；边界：金额为空或非数字时提示错误且不保存\\n### [F-002]（P0）展示本月结余\\n验收要点：正常：按自然月汇总并显示结余；边界：本月无任何记录时结余显示 0\\n## 三、页面清单 —— 首页为记账列表+快速记一笔入口，顶部显示本月结余。\\n## 六、范围外 —— 多用户协作；银行账户自动对接\\n## 八、后台假设 —— 金额单位统一为人民币元；数据仅保存在本地，不提供云同步",
@@ -144,6 +160,7 @@ ${renderDocumentSectionSpec()}
      {"id":"success","observable":"新增后列表立即可见该笔记录，顶部结余同步更新"},
      {"id":"failed","observable":"金额非法时表单旁行内提示错误原因，不弹窗、不保存、不清空已填内容"}],
    "feedback_rules":["保存类操作即时反馈：列表立即可见或行内提示","失败提示说明原因与下一步，不打断整个界面"]},
+ "shape":{"host_template":"record_manager","modules":[],"primary_loop":"打开→在表单记一笔→列表立即可见→月底看结余","fact_source":"每笔收支记录","needs_resident":false,"needs_network":false,"task_duration":"instant","destructive_ops":[],"llm_role":"none","job_policy":{"cancellable":false,"progress":false,"close_policy":"wait_or_confirm"},"candidates":[{"template":"record_manager","reasons":["事实来源是逐笔记录，主循环是录入→查看→留存"]}],"architecture_open_questions":[]},
  "out_of_scope":["多用户协作","银行账户自动对接"],
  "assumptions":["金额单位统一为人民币元","数据仅保存在本地，不提供云同步","结余=本月收入合计-本月支出合计"]}
 
@@ -294,8 +311,11 @@ export function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequire
     // P1-7：game 类型 GDD（玩法真相源）随背板冻结；非 game 缺省 undefined。
     ...(parsed.gdd ? { gdd: parsed.gdd } : {}),
     // UX 契约线（2026-10-06）：体验契约随背板冻结（PRD 确认时刻）；未产出/解析失败
-    // 缺省 undefined——下游任务书按通用七态兑底纪律注入，不 fail PRD。
+    // 缺省 undefined——下游任务书按通用九态兑底纪律注入，不 fail PRD。
     ...(parsed.ux ? { ux: parsed.ux } : {}),
+    // 批9 形状体系（2026-10-07）：shape 随背板冻结（PRD 确认时刻）；未产出/解析失败
+    // 缺省 undefined——无形状增强，行为等同批8，不 fail PRD。
+    ...(parsed.shape ? { shape: parsed.shape } : {}),
     // 后端契约派生腿已退役（2026-10-06 web 残留清理）：prompt 已明说不输出 interface_spec，
     // 此处仅兼容透传 LLM 异常输出（正常恒缺省），不再有确定性派生。
     ...(parsed.interface_spec && parsed.interface_spec.length > 0 ? { interface_spec: parsed.interface_spec } : {}),
@@ -323,6 +343,8 @@ interface ParsedPrd {
   acceptance: Record<string, string>
   /** UX 契约线（2026-10-06）：体验契约（七态白名单 + 反馈规则；解析容错缺省 undefined=降级）。 */
   ux?: UxExperienceSpec
+  /** 批9 形状体系（2026-10-07）：产品形状轴（四模板白名单；解析容错缺省 undefined=降级）。 */
+  shape?: ProductShape
   out_of_scope: string[]
   assumptions: string[]
   gdd?: GameDesignDoc
@@ -333,8 +355,99 @@ interface ParsedPrd {
   key_tasks?: KeyTask[]
 }
 
-/** 七态白名单（与 prd-backplane UxStateId 同源；此处运行时判定用）。 */
-const UX_STATE_IDS: ReadonlySet<string> = new Set(['empty', 'ready_input', 'validating', 'running', 'success', 'partial', 'failed'])
+/** 九态白名单（批9 2026-10-07 扩：+cancelled/+unconfigured；与 prd-backplane UxStateId 同源）。 */
+const UX_STATE_IDS: ReadonlySet<string> = new Set(['empty', 'ready_input', 'validating', 'running', 'success', 'partial', 'failed', 'cancelled', 'unconfigured'])
+
+/** 形状模板宿主白名单（首批四模板；与 shape-templates.ts 同源）。 */
+const SHAPE_HOST_TEMPLATES: ReadonlySet<string> = new Set(['instant_utility', 'record_manager', 'file_pipeline', 'job_runner'])
+
+/** LLM 角色白名单（llm_role；判定教学见 prd-system 提示词九）。 */
+const LLM_ROLES: ReadonlySet<string> = new Set(['none', 'core', 'optional', 'preview', 'user_config'])
+
+/** 解析 shape 产品形状（批9 工件1）：host_template/llm_role/task_duration 白名单校验，
+ * 结构字段齐备才采纳（齐备性门在 evaluateShapeGate——parse 阶段只做形态过滤）；
+ * 任一白名单字段非法或宿主字段缺失 → undefined（降级=无形状增强，不 fail）。
+ * export：供单测直测（同 parseUxExperience 口径）。 */
+export function parseProductShape(raw: unknown): ProductShape | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const obj = raw as Record<string, unknown>
+  const hostTemplate = typeof obj.host_template === 'string' ? obj.host_template : ''
+  const llmRole = typeof obj.llm_role === 'string' ? obj.llm_role : ''
+  const taskDuration = typeof obj.task_duration === 'string' ? obj.task_duration : ''
+  if (!SHAPE_HOST_TEMPLATES.has(hostTemplate)) return undefined
+  if (!LLM_ROLES.has(llmRole)) return undefined
+  if (taskDuration !== 'instant' && taskDuration !== 'short' && taskDuration !== 'long_running') return undefined
+  const primaryLoop = typeof obj.primary_loop === 'string' ? obj.primary_loop.trim() : ''
+  const factSource = typeof obj.fact_source === 'string' ? obj.fact_source.trim() : ''
+  if (!primaryLoop || !factSource) return undefined
+  const stringArray = (value: unknown, cap: number): string[] =>
+    Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string' && v.trim().length > 0).map((v) => v.trim().slice(0, 120)).slice(0, cap) : []
+  const candidates: ShapeCandidate[] = []
+  if (Array.isArray(obj.candidates)) {
+    for (const entry of obj.candidates) {
+      if (typeof entry !== 'object' || entry === null) continue
+      const item = entry as Record<string, unknown>
+      const template = typeof item.template === 'string' ? item.template.trim() : ''
+      if (!template) continue
+      candidates.push({ template, reasons: stringArray(item.reasons, 3) })
+      if (candidates.length >= 3) break
+    }
+  }
+  const policyRaw = typeof obj.job_policy === 'object' && obj.job_policy !== null ? (obj.job_policy as Record<string, unknown>) : {}
+  const jobPolicy = {
+    cancellable: policyRaw.cancellable !== false,
+    progress: policyRaw.progress !== false,
+    close_policy: typeof policyRaw.close_policy === 'string' && policyRaw.close_policy.trim() ? policyRaw.close_policy.trim().slice(0, 60) : 'wait_or_confirm',
+  }
+  return {
+    host_template: hostTemplate as ShapeHostTemplate,
+    modules: stringArray(obj.modules, 4),
+    primary_loop: primaryLoop.slice(0, 160),
+    fact_source: factSource.slice(0, 120),
+    needs_resident: obj.needs_resident === true,
+    needs_network: obj.needs_network === true,
+    task_duration: taskDuration as ProductShape['task_duration'],
+    destructive_ops: stringArray(obj.destructive_ops, 6),
+    llm_role: llmRole as ProductShape['llm_role'],
+    job_policy: jobPolicy,
+    candidates,
+    architecture_open_questions: stringArray(obj.architecture_open_questions, 4),
+  }
+}
+
+/** 形状门判定结果：pass=false 时 questions 非空（澄清回流问题清单，业务语言）。 */
+export interface ShapeGateResult {
+  pass: boolean
+  /** 未决的架构级问题（含 open questions 与结构缺口推导；pass 时为空）。 */
+  questions: string[]
+}
+
+/** 形状确定性拦截规则（批9 工件1，替代 LLM 自报 confidence）：
+ * - architecture_open_questions 非空 → 拦截（铁律，高置信也不豁免）；
+ * - task_duration/needs_resident/needs_network/llm_role 任一缺失 → 拦截
+ *   （parse 已自齐备白名单字段，此处兑底防御未经过 parse 的存量/修订背板）；
+ * - candidates 为空（无法想象任何形状）→ 拦截。
+ * 消费点：runPrdPipeline（PRD 确认前）——pass=false 时发澄清回流卡，不阻塞 fail。
+ * export：供单测直测。 */
+export function evaluateShapeGate(shape: ProductShape | undefined): ShapeGateResult {
+  if (!shape) return { pass: true, questions: [] }
+  const questions: string[] = []
+  for (const open of shape.architecture_open_questions) {
+    if (open.trim()) questions.push(open.trim())
+  }
+  const missing: string[] = []
+  if (!shape.task_duration) missing.push('任务时长档')
+  if (shape.llm_role === undefined || shape.llm_role === null) missing.push('AI 角色判定')
+  if (typeof shape.needs_resident !== 'boolean') missing.push('是否常驻')
+  if (typeof shape.needs_network !== 'boolean') missing.push('是否联网')
+  if (missing.length > 0) {
+    questions.push(`还有几处影响成品形态的信息未定：${missing.join('、')}`)
+  }
+  if (shape.candidates.length === 0 && questions.length === 0) {
+    questions.push('这个产品更像哪种工作形态还没想清楚，需要补充信息')
+  }
+  return { pass: questions.length === 0, questions }
+}
 
 /**
  * 解析 ux 体验契约（UX 契约线，2026-10-06）：states 按 id 白名单过滤（observable 必填非空），
@@ -355,7 +468,7 @@ export function parseUxExperience(raw: unknown): UxExperienceSpec | undefined {
       if (!UX_STATE_IDS.has(id) || observable.length === 0 || seen.has(id)) continue
       seen.add(id)
       states.push({ id: id as UxStateId, observable })
-      if (states.length >= 7) break
+      if (states.length >= 9) break
     }
   }
   if (states.length === 0) return undefined
@@ -391,6 +504,8 @@ function parsePrdJson(text: string): ParsedPrd | undefined {
   const gdd = parseGdd(parsed.gdd)
   // UX 契约线（2026-10-06）：ux 解析（七态白名单；空 states 视为未产出降级）。
   const ux = parseUxExperience(parsed.ux)
+  // 批9 形状体系（2026-10-07）：shape 解析（白名单+齐备性；非法视为未产出降级）。
+  const shape = parseProductShape(parsed.shape)
   // 判型 LLM 化：form 白名单解析（非法/缺省 → undefined = 维持 desktop_tool 缺省）。
   const rawForm = typeof parsed.form === 'string' ? parsed.form : ''
   const form: ParsedPrd['form'] = rawForm === 'desktop' || rawForm === 'game' || rawForm === 'web' ? rawForm : undefined
@@ -407,6 +522,7 @@ function parsePrdJson(text: string): ParsedPrd | undefined {
     ...(form ? { form } : {}),
     acceptance,
     ...(ux ? { ux } : {}),
+    ...(shape ? { shape } : {}),
     out_of_scope: stringArray(parsed.out_of_scope),
     assumptions: stringArray(parsed.assumptions),
     ...(gdd ? { gdd } : {}),

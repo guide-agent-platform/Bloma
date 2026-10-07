@@ -30,6 +30,15 @@ export interface ComponentCard {
 
 export const WINDOWS_COMPONENT_CARDS: readonly ComponentCard[] = [
   {
+    package: 'openai',
+    importName: 'openai',
+    purpose: 'LLM API 调用（OpenAI 兼容端点——AI 对话/生成/总结类产品核心；任何 openai 兼容服务均可配）',
+    probe: 'python -c "import openai; print(openai.__version__)"',
+    pitfall: '错误四态必须各自处理并给用户可读反馈：401 key 无效/404 模型不存在/429 限流/超时——不允许任何错误静默或崩溃；key 从本地配置文件读（禁硬编码进代码/文档）；端点与模型名做成设置界面可配；长响应放后台线程防阻塞 UI；内置 mock 模式（环境变量 LLM_PROVIDER=mock 切固定响应——自测与驱动验证用，断言分层：请求合法性/错误处理严格断言，生成内容断言质量指标）',
+    fallback: 'LLM_PROVIDER=mock 内置 mock provider（固定响应，本地测试与驱动验证）',
+    evidence: '实证',
+  },
+  {
     package: 'pywebview',
     importName: 'webview',
     purpose: '桌面 GUI 渲染壳（HTML 渲染层，骨架 v2 标配：pywebview+系统 WebView2，Win10+ 自带零安装）',

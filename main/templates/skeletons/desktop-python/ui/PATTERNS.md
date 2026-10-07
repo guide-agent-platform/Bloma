@@ -93,6 +93,32 @@ if (bad) return App.show("failed", "名称不能为空", "补全后重试");
 <button class="w-btn w-btn--danger">删除</button>
 ```
 
+## 取消执行（长任务可取消时——job_runner 形状）
+
+```html
+<button class="w-btn w-btn--ghost" id="btn-cancel">取消任务</button>
+```
+```js
+// 取消必须真实生效：点击后 Python 侧停止任务并推终态，状态条转「已取消」——
+// 禁假取消（按钮存在但任务照跑/状态永不变化）
+var r = await App.call("cancel_task");
+App.show("failed", "已取消：任务未完成", "已处理部分保留，可重新发起");
+// 状态条语义用 failed 文案带「已取消」说明，或自定义 App.show("success", ...) 视任务语义
+```
+
+## 待配置态（无 key 引导——LLM 类产品用户自配 key 时）
+
+```html
+<div class="w-empty">
+  <div class="w-empty-icon">⚙️</div>
+  <div class="w-empty-title">还没配置 AI 服务</div>
+  <div class="w-empty-hint">配置后即可使用对话功能；配置只保存在本机</div>
+  <button class="w-btn w-btn--primary" id="btn-settings" style="margin-top: 12px">打开设置</button>
+</div>
+```
+- 无 key 时主功能区显示此引导（不是空白/报错）；设置入口真实可用，保存后引导消失进入正常界面。
+- 密钥只存本地（如本地配置文件），**严禁写进产物代码、README 或示例中**。
+
 ## 输入行（外壳已带；收集→调桥→反馈）
 
 ```js

@@ -24,7 +24,8 @@ export interface AuditFinding {
   file: string
   line: number
   kind: string
-  state: 'reject' | 'inconclusive'
+  /** whitelisted（批9）：生成层指标断言正向观测——不计求值、不阻断（分层断言白名单）。 */
+  state: 'reject' | 'inconclusive' | 'whitelisted'
   detail: string
 }
 

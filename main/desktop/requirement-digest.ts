@@ -9,7 +9,8 @@
  */
 
 import { readPrdBackplane } from '../project/document-engine'
-import { requirementPriority, type UxExperienceSpec } from '../model/prd-backplane'
+import { requirementPriority, type ProductShape, type UxExperienceSpec } from '../model/prd-backplane'
+import { renderShapeBrief, renderShapeVerifyBrief } from './shape-templates'
 
 export interface RequirementDigestItem {
   id: string
@@ -45,7 +46,7 @@ export function renderRequirementsDigest(input: RequirementDigestInput): string 
   return lines.join('\n')
 }
 
-/** 七态中文标签（digest 渲染用；与 prd-backplane UxStateId 同源）。 */
+/** 九态中文标签（digest 渲染用；与 prd-backplane UxStateId 同源，批9 2026-10-07 扩两态）。 */
 const UX_STATE_LABELS: Record<UxExperienceSpec['states'][number]['id'], string> = {
   empty: '空态',
   ready_input: '待输入',
@@ -54,6 +55,8 @@ const UX_STATE_LABELS: Record<UxExperienceSpec['states'][number]['id'], string> 
   success: '成功',
   partial: '部分成功',
   failed: '失败',
+  cancelled: '已取消',
+  unconfigured: '待配置',
 }
 
 /**
@@ -76,11 +79,67 @@ export function renderUxDigest(ux: UxExperienceSpec | undefined): string | undef
   return lines.join('\n')
 }
 
+/** 形状摘要标签渲染（批9 工件1：shape 随 PRD 冻结后注入调度员/子会话上下文）。 */
+const SHAPE_HOST_LABELS: Record<ProductShape['host_template'], string> = {
+  instant_utility: '即时工具（输入→结果→复制）',
+  record_manager: '记录管理（表单+列表+留存）',
+  file_pipeline: '文件管线（批量处理→逐个产出）',
+  job_runner: '任务执行器（长任务监控）',
+}
+
+/**
+ * 渲染形状摘要段（批9 工件1）：背板 shape 存在时渲染紧凑文本——宿主模板/主循环/
+ * 事实来源/时长档/破坏性操作/LLM 角色/job_policy；缺省返回 undefined（无形状增强，
+ * 任务书不注入）。纯函数供单测。llm_role≠none 时附 LLM 交付语义一句（分层断言
+ * 口径见 verify 任务书）。
+ */
+export function renderShapeDigest(shape: ProductShape | undefined): string | undefined {
+  if (!shape) return undefined
+  const lines = [`【产品形状（PRD 冻结——已选定：${SHAPE_HOST_LABELS[shape.host_template]}）】`]
+  lines.push(`- 主工作循环：${shape.primary_loop}`)
+  lines.push(`- 事实来源：${shape.fact_source}｜任务时长：${shape.task_duration}${shape.needs_resident ? '｜需常驻' : ''}${shape.needs_network ? '｜需联网' : ''}`)
+  if (shape.destructive_ops.length > 0) lines.push(`- 破坏性操作：${shape.destructive_ops.join('；')}（必须确认或备份后再执行）`)
+  if (shape.modules.length > 0) lines.push(`- 次级形状：${shape.modules.join('；')}`)
+  if (shape.llm_role !== 'none') {
+    const roleText: Record<ProductShape['llm_role'], string> = {
+      core: 'core——移除 LLM 产品不成立：真实验证不过不得宣称完整交付（Provider Qualification 平台侧收口）',
+      optional: 'optional——AI 是增强功能：可降级交付，如实标注降级项',
+      preview: 'preview——生成内容仅预览示意：交付时如实标注',
+      user_config: 'user_config——交付时用户自配 key：必须实现无 key 引导界面（unconfigured 态：说明文案+设置入口）',
+      none: '',
+    }
+    lines.push(`- AI 角色：${shape.llm_role}，${roleText[shape.llm_role]}`)
+  }
+  lines.push(`- 任务策略：可取消=${shape.job_policy.cancellable ? '是' : '否（用户口径）'}；进度反馈=${shape.job_policy.progress ? '是' : '否'}；关闭时=${shape.job_policy.close_policy}`)
+  return lines.join('\n')
+}
+
+/**
+ * 读取项目 PRD 背板的形状任务书注入段（批9 工件2）：implement 双书用 shapeBrief、
+ * verify 用 shapeVerifyBrief；背板无 shape（旧项目/降级）返回空对象（任务书占位符
+ * 渲染为空串）。fail-open：背板缺失/读取失败不阻断。
+ */
+export function readDesktopShapeBriefs(projectId: string): { shapeBrief?: string; shapeVerifyBrief?: string } {
+  try {
+    const backplane = readPrdBackplane(projectId)
+    const shape: ProductShape | undefined = backplane.shape
+    const shapeBrief = renderShapeBrief(shape)
+    const shapeVerifyBrief = renderShapeVerifyBrief(shape)
+    return {
+      ...(shapeBrief ? { shapeBrief } : {}),
+      ...(shapeVerifyBrief ? { shapeVerifyBrief } : {}),
+    }
+  } catch {
+    return {}
+  }
+}
+
 /**
  * 读取项目 PRD 背板并渲染需求摘要（桌面线上下文装配便捷函数）。
  * fail-open：背板缺失/读取失败返回 undefined——不阻断主链（如实无注入）。
  * UX 契约线（2026-10-06）：背板 ux 存在时在需求清单后追加体验契约段（同一注入点，
  * quick/longterm 子会话同享）。
+ * 批9（2026-10-07）：背板 shape 存在时再追加形状摘要段（同注入点）。
  */
 export function readDesktopRequirementsDigest(projectId: string): string | undefined {
   try {
@@ -92,7 +151,7 @@ export function readDesktopRequirementsDigest(projectId: string): string | undef
         priority: requirementPriority(item),
       })),
     })
-    const parts = [digest.trim() ? digest : '', renderUxDigest(backplane.ux) ?? ''].filter(Boolean)
+    const parts = [digest.trim() ? digest : '', renderUxDigest(backplane.ux) ?? '', renderShapeDigest(backplane.shape) ?? ''].filter(Boolean)
     return parts.length > 0 ? parts.join('\n\n') : undefined
   } catch {
     return undefined

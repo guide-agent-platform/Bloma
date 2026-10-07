@@ -37,8 +37,84 @@ export interface PrdPage {
   purpose?: string
 }
 
-/** 体验状态 id 白名单（UX 契约线，2026-10-06：通用七态——覆盖空/输入/校验/执行/成功/部分/失败）。 */
-export type UxStateId = 'empty' | 'ready_input' | 'validating' | 'running' | 'success' | 'partial' | 'failed'
+/** 体验状态 id 白名单（UX 契约线 2026-10-06 通用七态 → 批9 2026-10-07 扩九态：+cancelled
+ * 取消态（job_runner cancellable 时必备）/ +unconfigured 待配置态（llm_role=user_config
+ * 时必备：无 key 引导界面）——形状体系按形状扩展必备状态集）。 */
+export type UxStateId =
+  | 'empty'
+  | 'ready_input'
+  | 'validating'
+  | 'running'
+  | 'success'
+  | 'partial'
+  | 'failed'
+  | 'cancelled'
+  | 'unconfigured'
+
+// ---------------------------------------------------------------------------
+// 批9 形状体系（2026-10-07）：ProductShape——PRD 的结构化形状轴字段。
+// 设计拍板（计划 bloma-batch9）：形状不是新品类（template_type 主轴不动），是 PRD
+// 引擎产出的结构化字段；形状模板（shape-templates.ts）是纯数据注入任务书，不是骨架。
+// 缺省 undefined（LLM 未产出/解析失败降级=无形状增强，行为等同批8，不 fail PRD）。
+// ---------------------------------------------------------------------------
+
+/** 宿主形状模板 id（首批四模板；后续模板挂账批10+——candidates 候选集允许未来 id）。 */
+export type ShapeHostTemplate = 'instant_utility' | 'record_manager' | 'file_pipeline' | 'job_runner'
+
+/** LLM 在产品中的角色四级 + none（判据见 prd-system 提示词）：
+ * - core：移除 LLM 调用后产品不成立（阻塞正式交付——须过 Provider Qualification）；
+ * - optional：AI 是增强功能（可降级+标注交付）；
+ * - preview：预览版交付（生成内容仅示意）；
+ * - user_config：交付时用户自配 key（待配置版本交付，须过「无 key 引导体验」）；
+ * - none：无 LLM。 */
+export type LlmRole = 'none' | 'core' | 'optional' | 'preview' | 'user_config'
+
+/** 任务生命周期策略（job_runner 形状的条件规则数据源；用户口径优先——如「不要取消」）。 */
+export interface ShapeJobPolicy {
+  /** 用户明确说不要取消 → false（但 close_policy/执行中反馈仍必须定义）。 */
+  cancellable: boolean
+  /** 是否需要进度反馈。 */
+  progress: boolean
+  /** 关闭策略（行为语言，如 wait_or_confirm）。 */
+  close_policy: string
+}
+
+/** 形状候选（PRD 草案期裁决用：候选集+理由，用户点选或答案落会话后收敛）。 */
+export interface ShapeCandidate {
+  /** 候选模板 id（开放 string——含挂账模板 document_report 等）。 */
+  template: string
+  /** 该候选的支撑理由（业务语言）。 */
+  reasons: string[]
+}
+
+/** 产品形状（批9 工件1）：「运行形态轴」的结构化真相源——随 PRD 确认冻结进背板，
+ * 任务书/verify/报告按 host_template 注入形状模板规则。 */
+export interface ProductShape {
+  /** 宿主形状模板（四模板白名单）。 */
+  host_template: ShapeHostTemplate
+  /** 次级形状/组合说明（如 document_export）。 */
+  modules: string[]
+  /** 用户打开应用后的主工作循环一句话（业务语言）。 */
+  primary_loop: string
+  /** 业务事实来源对象（记录/文件/输入值）。 */
+  fact_source: string
+  /** 是否需要常驻（后台监听等）。 */
+  needs_resident: boolean
+  /** 是否需要网络。 */
+  needs_network: boolean
+  /** 任务时长档（expected_duration>1s 的操作须进度反馈）。 */
+  task_duration: 'instant' | 'short' | 'long_running'
+  /** 破坏性操作清单（覆盖原文件等；无则空数组）。 */
+  destructive_ops: string[]
+  /** LLM 角色（判据见 prd-system；user_config 时 unconfigured 态必备）。 */
+  llm_role: LlmRole
+  /** 任务生命周期策略。 */
+  job_policy: ShapeJobPolicy
+  /** 候选集（混合形状时裁决依据；单一形状可只列一个）。 */
+  candidates: ShapeCandidate[]
+  /** 决定架构走向的未决问题（非空=PRD 确认前必须追问——平台确定性拦截，铁律）。 */
+  architecture_open_questions: string[]
+}
 
 /** 体验契约单态：用户在该状态下看到什么（一句可观察表现，实现与验收对齐用）。 */
 export interface UxStateSpec {
@@ -517,6 +593,13 @@ export interface PrdBackplane {
    * 任务书按通用七态兑底纪律注入）。与旧版 ux_contract（web 草图指针）语义无关。
    */
   ux?: UxExperienceSpec
+  /**
+   * 产品形状（批9 2026-10-07）：运行形态轴的结构化字段（host_template/主循环/事实来源/
+   * task_duration/llm_role/job_policy/候选集/架构级未决问题），PRD 确认时随 acceptance/
+   * ux 一起冻结；任务书按 host_template 注入形状模板（shape-templates.ts 纯数据）。
+   * 缺省 undefined（未产出/解析失败降级=无形状增强，行为等同批8）。
+   */
+  shape?: ProductShape
   /** 术语表（longterm）。缺省 []。 */
   glossary?: GlossaryEntry[]
   /** 目标用户（longterm；12.4 标准级「目标用户」行）。缺省 []。 */

@@ -55,6 +55,7 @@ import { runSecurityScan } from '../verification/security-scan'
 import { findProject } from '../project/project-service'
 import { buildProjectDriverRunnerTool } from './driver-runner-tool'
 import { recordPhaseCheckpoint } from './phase-checkpoint'
+import { runProviderQualificationIfLlm } from './provider-qualification'
 import { readPrdBackplane } from '../project/document-engine'
 import { requirementPriority } from '../model/prd-backplane'
 
@@ -199,6 +200,9 @@ export interface DesktopDispatchRunInput {
   projectName: string
   /** 需求摘要（首跑修复：PRD 背板 → 调度员系统提示词与子会话基底；编排层装配，缺省不注入） */
   requirementsDigest?: string
+  /** 形状段（批9 工件2）：{{shape_brief}}/{{shape_verify_brief}} 任务书注入；缺省空串=无形状增强。 */
+  shapeBrief?: string
+  shapeVerifyBrief?: string
   /** 快速模式（2026-10-03 拍板）：quick 项目跳过 arch/scaffold，本阶段用阶段表的
    *  快速版任务书/约束（无骨架前提的从零实现）；收口直通道见 desktop-route。 */
   quickMode?: boolean
@@ -461,6 +465,7 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     ...(input.requirementsDigest ? { requirementsDigest: input.requirementsDigest } : {}),
     ...(input.verifiedConclusion ? { verifiedConclusion: input.verifiedConclusion } : {}),
     ...(input.quickMode ? { quickMode: true } : {}),
+    ...(input.shapeBrief || input.shapeVerifyBrief ? { shapeBrief: input.shapeBrief, shapeVerifyBrief: input.shapeVerifyBrief } : {}),
   })
 
   // ── 委派协作接线（2026-09-26 首跑修复）──
@@ -743,6 +748,9 @@ async function runVerifyFinalize(
   }
 
   const outcome = evaluateAdvance(turns, node.id, existsWithReport, vars)
+
+  // 批9 工件6.3：Provider Qualification（llm_role≠none 真实验证，预算/幂等/fail-open 口径见模块侧）。
+  if (input.sandboxRoot) await runProviderQualificationIfLlm({ projectId: input.projectId, sessionId: input.sessionId, sandboxRoot: input.sandboxRoot })
 
   // P0-1b + 刀2（2026-10-02）：全绿收口（driver pass + 证据门 + 安全门 + 裁判门 + 阶段判定
   // 推进）落 verified 阶段存证（checkpoint 泛化 P0-1b 快照：验证结论进 desktop_checkpoint，

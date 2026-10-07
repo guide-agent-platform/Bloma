@@ -220,7 +220,7 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '6. 真实红绿反馈：子会话可用 run_project_script 当场运行项目根内 .py 自测脚本（每次≤90s、至多 12 次，任务书里直接要求它写无头自测——import app 测 Logic 层——并附真实红绿结果）；收口前用 run_project_driver 跑一次契约驱动，失败清单交同一委派线修复后复跑；不要因「无法执行」阻塞、编造或向用户索要本机运行；驱动断言与实现静态自洽（断言先行、真实调用被测代码、禁止平凡通过）——验收语义在 PRD 确认时已冻结（背板 acceptance/F-id），实现与测试只能引用不得重定义「什么算对」；\n' +
       '7. 产出 DELIVERY.md 到项目根（不是 00_SCAFFOLD/ 内——门禁按项目根检查）：运行方式/依赖安装/已知限制/驱动执行入口；契约 driver.command 相对项目根解析；\n' +
       '8. 产出 LAUNCH.json 到项目根（机器可读启动声明，宿主启动冒烟与交付面板都用它）：{"schema_version":1,"command":["python","app.py"],"window_title":"<与 webview.create_window 第一参数完全一致的窗口标题>"}——装了 .venv 的项目 command 用 [".venv\\Scripts\\python.exe","app.py"]；GUI 程序 window_title 必填（平台联合判定冒烟门按标题找窗截图——webview 宿主窗口实测兼容）；主程序入口纪律：保留 python app.py 正常启动形态，--self-check 与 --drive-port 模式不得删除或改名（平台冒烟/探索桥依赖），测试参数只允许控制自身行为不得改变正常启动路径；\n' +
-      `9. 第三方组件：子会话用 install_packages 声明制安装（项目内 .venv，requirements.txt 声明→装→import 回读；装后 LAUNCH command 用 .venv\\Scripts\\python.exe）。可用组件速查：\n${componentQuickReference().split('\n').slice(1).join('\n')}\n10. 体验纪律（UX 契约线，2026-10-06）：PRD「体验要求」（背板 ux，无则按通用七态：空态/待输入/校验中/执行中/成功/部分成功/失败）是已冻结的交付契约——①空态给引导不是空白（App.renderList 的 emptyTitle/emptyHint）；②反馈全走 App.show 状态条与行内提示，禁 alert()/confirm()/prompt() 弹窗当正常流反馈（模态弹窗阻塞 DOM 线程，会卡死驱动与用户流）；③统一样式用 ui/ 组件库与 tokens（不自造配色）。`,
+      `9. 第三方组件：子会话用 install_packages 声明制安装（项目内 .venv，requirements.txt 声明→装→import 回读；装后 LAUNCH command 用 .venv\\Scripts\\python.exe）。可用组件速查：\n${componentQuickReference().split('\n').slice(1).join('\n')}\n10. 体验纪律（UX 契约线，2026-10-06）：PRD「体验要求」（背板 ux，无则按通用九态：空态/待输入/校验中/执行中/成功/部分成功/失败/已取消/待配置）是已冻结的交付契约——①空态给引导不是空白（App.renderList 的 emptyTitle/emptyHint）；②反馈全走 App.show 状态条与行内提示，禁 alert()/confirm()/prompt() 弹窗当正常流反馈（模态弹窗阻塞 DOM 线程，会卡死驱动与用户流）；③统一样式用 ui/ 组件库与 tokens（不自造配色）。\n11. 形状纪律（批9 2026-10-07）：产品形状已随 PRD 冻结——若实现中发现形状不成立（必备状态集/主循环与实际需求矛盾），停下输出显式变更声明（当前形状/拟切换/原因/影响四要素）等待确认，禁止静默切换模板或骨架方向。\n{{shape_brief}}`,
     outputPath: '',
     constraints: [
       '每实现一个功能必须先有对应驱动断言（禁止无断言的实现）',
@@ -228,6 +228,7 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '三层纪律不可打破：Logic 不 import UI；Api 桥是 UI 动作唯一入口；ui/ 不含业务逻辑',
       'ui/ 禁外部资源（CDN/外链字体/npm/构建步骤），产物完全离线可用',
       '体验契约与验收要点同权重：三分支反馈/长任务不阻塞 UI/失败不丢输入是交付门的一部分',
+      '形状锁定（批9 2026-10-07）：产品形状已随 PRD 冻结——发现形状不成立时必须停下输出显式变更声明（当前形状/拟切换/原因/影响）等待用户确认，禁止静默切换模板或骨架方向',
     ],
     // 刀1（2026-10-02）：撤 implement-confirm manual 门（同上语义收缩）。
     requiresUserConfirmation: false,
@@ -262,7 +263,7 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       `6. 可用组件速查（声明安装，坑与降级详卡见 install_packages 工具）：\n${componentQuickReference().split('\n').slice(1).join('\n')}\n` +
       '7. 产出 DELIVERY.md 到项目根（不是子目录内——门禁按项目根检查）：运行方式/依赖安装/已知限制（自测结果如实引用，未验证项明说）。不要求 contract.json 与驱动断言；\n' +
       '8. 产出 LAUNCH.json 到项目根（平台交付前会真实启动一次验证，这是快速模式的验收门）：{"schema_version":1,"command":["python","app.py"],"window_title":"<与 webview.create_window 第一参数完全一致的窗口标题>"}——command 相对项目根；GUI 程序 window_title 必填（平台联合判定与截窗都靠标题找窗）；--self-check 与 --drive-port 模式不得删除或改名（平台依赖）；\n' +
-      '9. 体验纪律（UX 契约线，2026-10-06）：PRD「体验要求」（无则按通用七态）是交付契约——①核心操作成功/失败反馈可见（App.show），空态给引导不是空白；②禁 alert()/confirm()/prompt() 弹窗当正常流反馈（模态弹窗会卡死驱动与用户流）；③长任务不阻塞 UI（Python 线程+evaluate_js 推送）；④配色克制统一：ui/ 组件库与 tokens，不自造配色。',
+      '9. 体验纪律（UX 契约线，2026-10-06）：PRD「体验要求」（无则按通用九态）是交付契约——①核心操作成功/失败反馈可见（App.show），空态给引导不是空白；②禁 alert()/confirm()/prompt() 弹窗当正常流反馈（模态弹窗会卡死驱动与用户流）；③长任务不阻塞 UI（Python 线程+evaluate_js 推送）；④配色克制统一：ui/ 组件库与 tokens，不自造配色。\n10. 形状纪律（批9 2026-10-07）：产品形状已随 PRD 冻结——若实现中发现形状不成立，停下输出显式变更声明（当前形状/拟切换/原因/影响四要素）等待确认，禁止静默切换。\n{{shape_brief}}',
     quickConstraints: [
       '快速模式不做工程契约与驱动断言（那是长期模式的工程化验收设施，本次跳过）；功能自测走子会话 run_project_script 真实红绿（import app 测 Logic 层）',
       '能运行且功能齐全优先于代码结构完美；做不完的如实写进 DELIVERY.md 的已知限制',
@@ -282,7 +283,8 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       'scenarios 硬约束（批4 验收语义冻结）：name 与 driver stdout 锚点场景名一致、covers 声明覆盖的 F-id；covers 引用 PRD 不存在的 F-id 或任一 P0 功能项无场景覆盖都会被裁判门拒收——验收语义在 PRD 确认时已冻结，你只能引用 F-id 不得重定义验收标准；断言有效性会被平台反证（批6）：永真断言/吞异常静态拒收 + 注入已知缺陷复跑驱动（survived=断言没证明任何东西，拒收；种子打 Logic 函数，断言真调逻辑层才能被击杀）——期望值必须独立写死、断言读取真实产物状态，不取自被测代码自身；\n' +
       '4. 驱动执行报告（通过/失败/阻塞三分类，失败路由进修复轮）由平台在收口时执行驱动后生成——你无需也无法自行产出，不要编写替代报告；驱动 stdout 锚点约定同 driver-skeleton（每场景一行 `PASS <场景名>`，场景名与 SCENARIOS.name/contract scenarios[].name 一字不差——名字断链会被裁判门拒收）；UI 场景截图用骨架内置 capture_window(窗口标题, 路径)——UI 截图场景由驱动 spawn 主程序短暂可见、截完立即终止进程树，勿让窗口长时间驻留；Pillow 缺失降级 SKIP 如实标注；UI 场景至少 2 张；\n' +
       '5. 裁决边界：平台收口三重门判定交付（驱动回读+宿主安全扫描+裁判硬约束：PRD 覆盖/场景覆盖/入口存在），不采信模型自述；\n' +
-      '6. 探索委派（2026-10-05 探索驱动测试批，收口前必做）：委派一名 research 角色探索子会话——它有 drive_project_app（真实操控本项目 GUI：open→act→read→report→close，窗口隐藏不打扰用户）；骨架 v2 产物（requirements 含 pywebview）自动走 webview 腿：act 支持 click/set_text（按元素 id）与原生 js（同步表达式，经 /eval 通道），逻辑层状态可用 call 直调 Api 方法观察（经 /call 通道，如 call list_items 看数据真变）；tkinter 存量产物走旧腿：read 拿控件树+module_state（键盘/移动类用 keys+hold_ms 按住后对比 module_state 差分——引擎坐标/分数变化即响应证据）。任务书里给它 PRD 验收点清单（读 PRD 逐条列出 EARS 条目），要求按正常/空输入/边界/重复/乱序/键盘响应逐项探索并 report findings（P0/P1/P2 + expected/actual + repro_steps）；另核对体验面（PRD 体验要求/背板 ux，缺省按通用七态）：每个核心操作的成功/失败/进行中反馈是否可见（弹窗当正常反馈——tkinter messagebox 弹窗或 JS alert/confirm/prompt——均算缺陷）、空态是否有引导、长任务期间 UI 是否可响应、重复点击是否防抖——体验缺陷按 P1 记 findings，探索完 close。你不自己调 drive_project_app（你的职责是委派与裁决）；findings 进 MVP 过目页供用户参考，不阻塞交付。若委派不可用则如实说明，不要假装已探索。',
+      '6. 探索委派（2026-10-05 探索驱动测试批，收口前必做）：委派一名 research 角色探索子会话——它有 drive_project_app（真实操控本项目 GUI：open→act→read→report→close，窗口隐藏不打扰用户）；骨架 v2 产物（requirements 含 pywebview）自动走 webview 腿：act 支持 click/set_text（按元素 id）与原生 js（同步表达式，经 /eval 通道），逻辑层状态可用 call 直调 Api 方法观察（经 /call 通道，如 call list_items 看数据真变）；tkinter 存量产物走旧腿：read 拿控件树+module_state（键盘/移动类用 keys+hold_ms 按住后对比 module_state 差分——引擎坐标/分数变化即响应证据）。任务书里给它 PRD 验收点清单（读 PRD 逐条列出 EARS 条目），要求按正常/空输入/边界/重复/乱序/键盘响应逐项探索并 report findings（P0/P1/P2 + expected/actual + repro_steps）；另核对体验面（PRD 体验要求/背板 ux，缺省按通用九态）：每个核心操作的成功/失败/进行中反馈是否可见（弹窗当正常反馈——tkinter messagebox 弹窗或 JS alert/confirm/prompt——均算缺陷）、空态是否有引导、长任务期间 UI 是否可响应、重复点击是否防抖——体验缺陷按 P1 记 findings，探索完 close。你不自己调 drive_project_app（你的职责是委派与裁决）；findings 进 MVP 过目页供用户参考，不阻塞交付。若委派不可用则如实说明，不要假装已探索。\n' +
+      '{{shape_verify_brief}}',
     outputPath: '00_VERIFY',
     constraints: [
       '测试工程师与实现者必须异渠道（C1 跨渠道委派）',

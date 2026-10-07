@@ -43,6 +43,10 @@ export interface DispatcherPromptContext {
   completedPhases?: string[]
   /** 需求摘要（首跑修复：PRD 背板 → 调度员与子会话的唯一需求注入路径；缺省不出需求段）。 */
   requirementsDigest?: string
+  /** 形状纪律段（批9 工件2：任务书 {{shape_brief}} 占位符注入；缺省空串——无形状增强）。 */
+  shapeBrief?: string
+  /** 形状验收教学段（批9 工件2：verify 任务书 {{shape_verify_brief}} 占位符；缺省空串）。 */
+  shapeVerifyBrief?: string
   /** 上一轮已验证结论（刀2 checkpoint 消费：同阶段重跑时注入——勿重验，直接收口）。 */
   verifiedConclusion?: string
   /** 快速模式（2026-10-03 拍板：quick 快速做出可用应用）：true 时阶段提供快速版
@@ -70,6 +74,9 @@ export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherProm
   const constraints = useQuickBook ? (node.quickConstraints ?? node.constraints) : node.constraints
   const rendered = renderTaskTemplate(taskTemplate, {
     project_name: ctx.projectName,
+    // 批9 工件2：形状段占位符恒提供（无 shape 时空串——避免 {{...}} 原样残留任务书）
+    shape_brief: ctx.shapeBrief ?? '',
+    shape_verify_brief: ctx.shapeVerifyBrief ?? '',
   })
   const sections: string[] = []
 

@@ -63,7 +63,7 @@ import {
 } from './mvp-confirm'
 import { buildCheckpointConclusion } from './phase-checkpoint'
 import { createChannelFailureTracker, observeChannelFailure, type ChannelFailureTracker } from './channel-failure-watch'
-import { readDesktopRequirementsDigest } from './requirement-digest'
+import { readDesktopRequirementsDigest, readDesktopShapeBriefs } from './requirement-digest'
 import { runSecurityScan } from '../verification/security-scan'
 
 // =========================================================================
@@ -393,6 +393,8 @@ async function runDesktopStage(
   const requirementsDigest = deps.requirementsDigest
     ? deps.requirementsDigest(input.projectId)
     : readDesktopRequirementsDigest(input.projectId)
+  // 批9 工件2：形状任务书段（implement/verify 占位符注入；背板无 shape 时为空——任务书渲染空串）
+  const shapeBriefs = readDesktopShapeBriefs(input.projectId)
   // 刀2 checkpoint 消费：当前阶段与存证一致（同阶段重跑——拒收续接/turn 耗尽/预算
   // 断链后的重入）时注入勿重验结论；跨阶段不注入（旧结论不作数）。
   const checkpoint = project?.desktop_checkpoint
@@ -431,6 +433,8 @@ async function runDesktopStage(
     },
     projectName,
     requirementsDigest,
+    ...(shapeBriefs.shapeBrief ? { shapeBrief: shapeBriefs.shapeBrief } : {}),
+    ...(shapeBriefs.shapeVerifyBrief ? { shapeVerifyBrief: shapeBriefs.shapeVerifyBrief } : {}),
     ...(verifiedConclusion ? { verifiedConclusion } : {}),
     ...(project?.mode === 'quick' ? { quickMode: true } : {}),
     sandboxRoot,

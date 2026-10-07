@@ -155,7 +155,7 @@ const PAGE_STATE = `JSON.stringify({
     const kind = raw.startsWith('clarification-') ? 'clarify' : raw.startsWith('review-') ? 'review' : 'card'
     return { id: raw.replace(/^(card-option-|clarification-option-|review-choice-)/, ''), kind, raw, label: (b.textContent || '').trim().slice(0, 48), disabled: b.disabled }
   }),
-  tail: (document.body.innerText || '').slice(-450),
+  tail: ((document.body && document.body.innerText) || '').slice(-450),
 })`
 
 const TYPE_AND_SEND = `(async (text) => {
@@ -280,6 +280,49 @@ function readProjectRecord(projectId) {
   } catch {
     return null
   }
+}
+
+/** 批9 形状段（2026-10-07）：交付后读背板 shape + LLM 双轴结果——狗粮报告验证
+ *  形状冻结回读/Provider Qualification/待配置交付语义是否真实发生。 */
+function readShapeSection(project) {
+  const section = {}
+  try {
+    const prdPath = join(
+      homedir(), '.proma', 'agent-workspaces', project.workspace_slug ?? 'default',
+      'documents', project.id, 'prd.json',
+    )
+    const prd = JSON.parse(readFileSync(prdPath, 'utf8'))
+    if (prd && prd.shape) {
+      section.shape = {
+        host_template: prd.shape.host_template,
+        llm_role: prd.shape.llm_role,
+        task_duration: prd.shape.task_duration,
+        job_policy: prd.shape.job_policy,
+        primary_loop: prd.shape.primary_loop,
+        open_questions_at_freeze: (prd.shape.architecture_open_questions ?? []).length,
+      }
+    } else {
+      section.shape = null // 背板无 shape（PRD 引擎降级或旧链路）——如实记录
+    }
+  } catch {
+    section.shape_read_error = true
+  }
+  try {
+    const q = JSON.parse(readFileSync(join(project.dir, '00_VERIFY', 'llm-qualification.json'), 'utf8'))
+    section.llm_qualification = {
+      executed: q.executed, qualified: q.qualified, calls: q.calls,
+      skipped_reason: q.skipped_reason, findings: q.findings,
+    }
+  } catch {
+    section.llm_qualification = null // llm_role=none 或未执行——如实
+  }
+  try {
+    const decl = JSON.parse(readFileSync(join(project.dir, 'llm-provider.json'), 'utf8'))
+    section.llm_declared_provider = decl.provider ?? null
+  } catch {
+    section.llm_declared_provider = null
+  }
+  return section
 }
 
 // ── 主流程 ──
@@ -481,6 +524,12 @@ try {
       if (rec && rec.status === 'completed' && rec.current_stage === 'completed') {
         log(`交付检测命中（权威存储终态）：项目 ${project.id}`)
         report.outcome = 'delivered'
+        // 批9 形状段（交付后读取；workspace_slug 从权威记录取）
+        report.shape_section = readShapeSection({ ...project, workspace_slug: rec?.workspace_slug })
+        if (report.shape_section?.shape) {
+          const s = report.shape_section.shape
+          log(`形状段：host=${s.host_template} llm_role=${s.llm_role} duration=${s.task_duration}（冻结时未决问题 ${s.open_questions_at_freeze} 项）`)
+        }
         break
       }
       if (rec && rec.status === 'blocked_for_user_decision' && Date.now() - (blockedLastLog ?? 0) > 30_000) {
