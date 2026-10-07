@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 // 2026-09-16 FILE-LEVEL 钉：BLOMA_GUIDE_LOOP 缺省翻转 on，本文件锁旧路径读取侧口径
 // （loop 模式下约束系统行经 historyTurns→messages 送达，捕获参数不同；行为等价）
-import { captureConstraints, extractConstraints, scanSessionConstraints } from '../../main/guide/constraint-extractor'
+import { captureConstraints, extractConstraints, sanitizeConstraints, scanSessionConstraints } from '../../main/guide/constraint-extractor'
 import { buildPrdBackplane } from '../../main/project/document-engine'
 import { HISTORY_WINDOW_TURNS } from '../../main/orchestration/orchestrator'
 import { setSafeStorageAdapter } from '../../main/platform/storage/safe-storage'
@@ -90,6 +90,23 @@ describe('T4-L2 全量扫描：首轮约束历轮可回', () => {
     ])
     const constraints = scanSessionConstraints('session-synthetic')
     expect(constraints).toEqual(['不要排行榜'])
+  })
+  it('拒收续接指令轮（[system·拒收续接]）不进约束流——批10 旧账②：拒因话术「不要去补报告文件」曾入库', () => {
+    writeSession('session-continuation', [
+      turn('user', '帮我做个工具，不含登录', 1),
+      turn('assistant', '好的。', 2),
+      turn(
+        'user',
+        '[system·拒收续接] 阶段「desktop-verify」的推进声明被裁决边界拒绝（gate-deny，拒因=driver-blocked），请立即按以下指引继续工作：\n门禁未过：驱动执行未达验收结论（driver-blocked=环境阻塞如超时/装配，不是产物缺失，不要去补报告文件；driver-fail=断言未过）——请按下方「门禁拒因详情」修复后重新声明推进。\n输出纪律提醒：面向用户文本一律中文、≤2 句要点。',
+        3,
+      ),
+    ])
+    const constraints = scanSessionConstraints('session-continuation')
+    expect(constraints).toEqual(['不含登录'])
+    expect(constraints.some((c) => c.includes('补报告'))).toBe(false)
+  })
+  it('存量污染兑底：入库的拒因话术「不要去补报告文件」被读取侧清洗（批10 旧账②）', () => {
+    expect(sanitizeConstraints(['不含登录', '不要去补报告文件'])).toEqual(['不含登录'])
   })
   it('历史窗口是显式常量（默认 10 轮，不再静默写死 20）', () => {
     expect(HISTORY_WINDOW_TURNS).toBe(10)

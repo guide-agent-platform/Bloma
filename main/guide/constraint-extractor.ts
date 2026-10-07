@@ -91,6 +91,10 @@ const SYNTHETIC_USER_TURN_PREFIXES = [
   // 原话——其中的选项描述碎片（「做的人只能自己猜」「要不要拦」）被提取成约束入库
   '我选好了，',
   '补充说明：',
+  // 批10 旧账②（2026-10-07 批9 狗粮实锤）：拒收续接指令（advance-rejection-loop 的
+  // buildContinuationDirective）作为 systemInitiated user 轮落盘，拒因文案「不要去补
+  // 报告文件」被提取入库——[system·*] 前缀是平台系统轮统一信号，整轮丢弃。
+  '[system·',
 ]
 const HOST_INJECTION_MARKER = '（宿主注入）'
 
@@ -109,6 +113,12 @@ const HOST_CONSTRAINT_FINGERPRINTS = [
   '不要动其他任何文件',
   '不要改动其他任何文件',
   '完成总结：逐项说明已完成的实施清单项',
+  // 批10 旧账②：拒收续接拒因话术（driver-blocked/target-deny/artifacts-missing 教育文案）
+  // ——用户不会这样说，存量项目已入库的由读取侧 sanitize 兑底清除（实测 256001d0/
+  // 5cb5e941/ba6a313c 等多项目残留三类续接变体）。
+  '不要去补报告文件',
+  '请检查推进目标：只能推进到当前阶段',
+  '委派补齐（产物必须真实存在且内容有效）',
 ]
 
 /** 约束列表防御性清洗：剔除命中毒词指纹的宿主注入残留（写入侧已根治，此处兑底
