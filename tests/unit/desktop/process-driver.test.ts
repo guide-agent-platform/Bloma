@@ -208,6 +208,31 @@ describe('runContractDriver 执行路径', () => {
     expect(report.exitCode).toBeNull()
   })
 
+  it('超时预算自适应兜底（批9 2026-10-07）：场景多时抬高下限，声明更大值仍受尊重', async () => {
+    // 狗粮 4ad53aa7 实锤：16 场景完整跑 61s，60s 缺省被强杀→空报告→artifacts-missing 拒收
+    // →闭环预算耗尽降级人工。兜底=max(声明值, 20s + 场景数×6s)，上限 240s。
+    const seen: number[] = []
+    const spawn = async (request: { timeoutMs: number }) => {
+      seen.push(request.timeoutMs)
+      return { code: 0, stdout: 'PASS S1\nSUMMARY pass=1', stderr: '' }
+    }
+    // 16 场景 + 声明 60000 → 兑底 116000（20s + 16×6s）
+    const many = { ...baseContract(), scenarios: Array.from({ length: 16 }, (_, i) => ({ name: `S${i + 1}`, covers: ['F-001'] })) }
+    await runContractDriver({ contract: many, cwd: '/proj', spawn })
+    expect(seen[seen.length - 1]).toBe(116_000)
+    // 声明 200000 > 兑底 116000 → 尊重声明值
+    const declared = { ...many, driver: { ...many.driver, timeout_ms: 200_000 } }
+    await runContractDriver({ contract: declared, cwd: '/proj', spawn })
+    expect(seen[seen.length - 1]).toBe(200_000)
+    // 场景极大时上限 240s 封顶
+    const huge = { ...baseContract(), scenarios: Array.from({ length: 60 }, (_, i) => ({ name: `S${i + 1}`, covers: ['F-001'] })) }
+    await runContractDriver({ contract: huge, cwd: '/proj', spawn })
+    expect(seen[seen.length - 1]).toBe(240_000)
+    // 场景少时维持声明值（1 场景 → 兑底 26s < 声明 60s → 60s 不变）
+    await runContractDriver({ contract: baseContract(), cwd: '/proj', spawn })
+    expect(seen[seen.length - 1]).toBe(60_000)
+  })
+
   it('spawn ENOENT → blocked（not-found——venv 未装配归因）', async () => {
     const spawn = async () => {
       throw new DriverExecutionError('not-found', '命令不存在：python（venv 未装配或解释器路径错）')

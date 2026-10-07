@@ -290,7 +290,17 @@ export async function runContractDriver(input: RunDriverInput): Promise<DriverEx
     }
   }
 
-  const timeoutMs = which === 'driver' ? contract.driver.timeout_ms : 30_000
+  // 超时预算（批9 修复 2026-10-07：驱动超时按场景数自适应兜底）：timeout_ms 仍是
+  // 契约声明值，但场景数增长（形状模板 required_tests 把必备场景撟到 13-16 个，含
+  // UI 截图场景 spawn 主程序）后 60s 缺省不够用——狗粮 4ad53aa7 实锤：16 场景完整
+  // 跑 61s，超 1s 被强杀→零场景回读→空报告→artifacts-missing 拒收→闭环预算耗尽
+  // 降级人工。兜底公式：max(声明值, 20s 基线 + 场景数×6s)，上限 240s 防失控；
+  // 声明更大值仍受尊重（取 max 不缩短）。
+  const adaptiveFloorMs = 20_000 + contract.scenarios.length * 6_000
+  const timeoutMs =
+    which === 'driver'
+      ? Math.min(240_000, Math.max(contract.driver.timeout_ms, adaptiveFloorMs))
+      : 30_000
   const env = buildDriverEnv(contract, input.parentEnv ?? process.env)
   // 驱动解释器 venv 解析（批8 下半 2026-10-07 实现兑现）：契约 schema notes 一直承诺
   // 「command 里的 python 在执行器侧解析为 venv 内解释器」但从未实现——裸 python 跑在
