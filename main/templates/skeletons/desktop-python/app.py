@@ -10,6 +10,8 @@
 
 运行：python app.py            正常启动（WebView2 窗口）
       python app.py --self-check          骨架自检（退出码 0=完整）
+      python app.py --offscreen           离屏模式（窗口在屏幕外渲染照常——UI 截图场景用，
+                                          零闪现零抢焦点，PrintWindow 截图不受影响）
       python app.py --drive-port N        探索驱动模式（隐藏窗口 + 127.0.0.1 控制服务器，
                                           POST /eval {"js":...} → evaluate_js；平台探索桥用）
 
@@ -155,6 +157,12 @@ def main() -> int:
     if "--drive-port" in sys.argv:
         drive_port = int(sys.argv[sys.argv.index("--drive-port") + 1])
 
+    # 离屏模式（批9.5 2026-10-07）：窗口初始就在屏幕外（x/y=-3000）——渲染照常
+    # （系统认为可见），PrintWindow 句柄级截图不受坐标影响（64KB 完整帧实测）；
+    # 用于 UI 截图场景：零闪现零抢焦点，自动验证不打扰用户。与 --drive-port 可叠加
+    # （叠加时 hidden 优先——驱动/探索模式不需要可见渲染帧）。
+    offscreen = "--offscreen" in sys.argv
+
     logic = Logic()
     api = Api(logic)
     window = webview.create_window(
@@ -164,6 +172,7 @@ def main() -> int:
         width=960,
         height=640,
         hidden=drive_port > 0,
+        **({"x": -3000, "y": -3000} if offscreen and not drive_port else {}),
     )
     if drive_port:
         server = HTTPServer(("127.0.0.1", drive_port), make_drive_handler(window, api))
