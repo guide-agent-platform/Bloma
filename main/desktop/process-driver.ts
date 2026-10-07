@@ -21,7 +21,8 @@
  */
 
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { violatesCommandBlacklist, type AcceptanceCoverageEntry, type ProjectContract } from './contract-schema'
 
@@ -244,6 +245,30 @@ export interface RunDriverInput {
 const OUTPUT_EXCERPT_LIMIT = 8 * 1024
 
 /**
+ * 驱动语义源 digest（批9.5 搬竞品 evidence 对账）：验收语义的定义者——被测入口
+ * （contract.entry）与驱动脚本（driver.command 内 .py 参数）的内容指纹。驱动执行
+ * 期间这两者被改（测试热修被测代码/驱动脚本自改）＝本轮验证语义已漂移，结果作废。
+ * 运行时输出（data/、00_VERIFY/、__pycache__ 等）不在对账面——被测程序写业务数据是
+ * 预期行为（S7 持久化场景即验证它）。纯函数供单测。
+ */
+export function computeDriverSemanticsDigest(cwd: string, contract: ProjectContract): string {
+  const targets = [contract.entry]
+  for (const part of contract.driver.command.slice(1)) {
+    if (typeof part === 'string' && part.endsWith('.py')) targets.push(part)
+  }
+  const hash = createHash('sha256')
+  for (const rel of [...new Set(targets)]) {
+    const abs = join(cwd, rel)
+    if (!existsSync(abs) || !statSync(abs).isFile()) {
+      hash.update(`${rel}:missing\n`)
+      continue
+    }
+    hash.update(`${rel}:${createHash('sha256').update(readFileSync(abs)).digest('hex')}\n`)
+  }
+  return hash.digest('hex')
+}
+
+/**
  * 执行契约声明的驱动命令并生成三分类报告。
  *
  * 前置（fail-closed）：契约命令再次过黑名单（schema 校验后二道防线——防契约
@@ -310,8 +335,26 @@ export async function runContractDriver(input: RunDriverInput): Promise<DriverEx
   // 委派致 DSML 退化断点、第三跑 diag 脚本泛滥+self_check 语义扭曲）。
   const resolvedCommand = resolveDriverVenvCommand(commandSpec.command, cwd)
 
+  // 语义源对账（批9.5）：驱动执行前 fingerprint 入口+驱动脚本；执行后再算一次，
+  // 不一致 → 本轮结果作废（blocked 环境类——验证语义已漂移，回读不再可信）。
+  const semanticsBefore = which === 'driver' ? computeDriverSemanticsDigest(cwd, contract) : null
+
   try {
     const { code, stdout, stderr } = await spawn({ command: resolvedCommand, timeoutMs, env, cwd })
+    if (semanticsBefore !== null && computeDriverSemanticsDigest(cwd, contract) !== semanticsBefore) {
+      return {
+        routing: 'blocked',
+        exitCode: null,
+        scenarios: [],
+        summaryLine: null,
+        stdoutExcerpt: stdout.slice(0, OUTPUT_EXCERPT_LIMIT),
+        stderrExcerpt: stderr.slice(0, OUTPUT_EXCERPT_LIMIT),
+        command: commandSpec.command.join(' '),
+        durationMs: Date.now() - start,
+        routingReason: '驱动执行期间验收语义源被修改（被测入口或驱动脚本变化）——本轮回读作废，请排查驱动是否热改被测代码后重新收口',
+        startedAt,
+      }
+    }
     const { scenarios, summaryLine } = parseDriverStdout(stdout)
     // self_check 面：退出码 + 可选 stdout 锚点（不走场景路由——契约 expect 语义）
     if (which === 'self_check') {

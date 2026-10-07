@@ -484,7 +484,7 @@ describe('handleDesktopDispatchMessage 消息路由', () => {
     expect(record.desktop_phase).not.toBe('delivered')
     const edu = events.filter((e) => typeof e.payload.text === 'string').map((e) => e.payload.text as string).join('\n')
     // 拒收闭环：驱动 fail 教育 + 续接重跑后再拒（防环计数 2 次内）
-    expect(edu).toContain('驱动执行未通过')
+    expect(edu).toContain('驱动断言未通过')
   })
 
   it('loop 未收口（cancelled/error）：阶段不动 + 可重试话术（loop 取消收尾已在批次 D dispatcher-loop 测试覆盖，此处验路由分支经非 completed 结果触发）', async () => {

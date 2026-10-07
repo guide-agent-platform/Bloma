@@ -228,12 +228,34 @@ describe('驱动挂载腿（desktop-verify 收口）', () => {
       driverSpawn: async () => ({ code: 1, stdout: 'PASS a\nFAIL b: 断言失败', stderr: '' }),
       writeReport: () => undefined,
     }))
-    expect(result.advance).toMatchObject({ decision: 'reject' })
+    expect(result.advance).toMatchObject({ decision: 'reject', reason: 'driver-fail' })
     if (result.advance?.decision === 'reject') {
-      expect(result.advance.education).toContain('驱动执行未通过')
+      expect(result.advance.education).toContain('驱动断言未通过（fail）')
       expect(result.advance.education).toContain('b')
+      // 批9.5 拒因语义保真：fail 不再伪装产物缺失（不渲染缺失产物清单误导补报告）
+      expect(result.advance.missingArtifacts ?? []).toEqual([])
     }
     expect(result.driverReport?.routing).toBe('fail')
+  })
+
+  it('驱动 blocked（超时/环境类）→ 拒因 driver-blocked：不伪装产物缺失，教育点明环境类与「不要去补报告」（批9.5：狗粮 4ad53aa7 超时被 artifacts-missing 误导三轮闭环的根治）', async () => {
+    const { query } = scriptedQuery([[textMessage('PHASE_ADVANCE: delivered')]])
+    const result = await runDesktopDispatcherLoop(baseInput({
+      query,
+      currentPhase: 'desktop-verify',
+      artifactExists: allExist,
+      readContract: () => validContract,
+      driverSpawn: async () => {
+        throw new (await import('../../../main/desktop/process-driver')).DriverExecutionError('timeout', '驱动超时（>116000ms）强杀')
+      },
+      writeReport: () => undefined,
+    }))
+    expect(result.advance).toMatchObject({ decision: 'reject', reason: 'driver-blocked' })
+    if (result.advance?.decision === 'reject') {
+      expect(result.advance.education).toContain('驱动执行被环境阻塞')
+      expect(result.advance.education).toContain('不是产物缺失，不要去补报告文件')
+      expect(result.advance.education).toContain('驱动超时')
+    }
   })
 
   it('driver fail 拒收教育附 stderr 执行证据（狗粮 f277dbf1 实证，2026-10-02）：末次异常行 + 首个栈帧随教育直达，修复轮零轮次定位', async () => {

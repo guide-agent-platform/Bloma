@@ -625,22 +625,22 @@ async function runVerifyFinalize(
   input.writeReport?.(DRIVER_REPORT_PATH, JSON.stringify(report, null, 2))
 
   if (report.routing !== 'pass') {
-    // 狗粮实证（f277dbf1，2026-10-02）：教育文案只给路由原因不给执行证据时，修复轮
-    // 要自己 read 报告重新定位（三轮 40 轮烧在同一 RecursionError 上）——stderr 尾部
-    // 摘要（末次异常行 + 关键栈行）直接随教育送达，修复轮零轮次定位。
+    // 狗粮实证（f277dbf1）：教育带执行证据直达修复轮；批9.5 拒因语义保真（竞品 v131
+    // R1 同族；本仓 4ad53aa7：超时被 artifacts-missing 伪装产物缺失误导归因）——blocked
+    // 与 fail 各自独立枚举，续接不再渲染「缺失产物清单」误导补报告。
     const stderrTail = (report.stderrExcerpt ?? '').trim().split(/\r?\n/).filter(Boolean)
     const lastError = stderrTail.length > 0 ? stderrTail[stderrTail.length - 1] : ''
     const stackHint = stderrTail.find((line) => /\sFile\s"/.test(line)) ?? ''
     const evidence = lastError ? `\n执行证据：${lastError.slice(0, 160)}${stackHint ? `（首个栈帧：${stackHint.trim().slice(0, 160)}）` : ''}` : ''
+    const blocked = report.routing === 'blocked'
     return {
       advance: {
         decision: 'reject',
-        reason: 'artifacts-missing',
-        missingArtifacts: [{ gateId: 'driver-report', artifacts: [DRIVER_REPORT_PATH] }],
+        reason: blocked ? 'driver-blocked' : 'driver-fail',
         discardedObservations: [],
-        education:
-          `驱动执行未通过（${report.routing}）：${report.routingReason}${evidence}\n` +
-          '验证结论只看驱动执行回读——请按失败场景修复后重新收口（fail 路由进修复轮；blocked 属环境类需先解决装配）。',
+        education: blocked
+          ? `驱动执行被环境阻塞（超时/取消/装配/语义源漂移——不是产物缺失，不要去补报告文件）：${report.routingReason}${evidence}\n请先解决驱动环境（预算/装配）后重新收口。`
+          : `驱动断言未通过（fail）：${report.routingReason}${evidence}\n验证结论只看驱动执行回读——请按失败场景修复后重新收口。`,
       },
       driverReport: report,
     }

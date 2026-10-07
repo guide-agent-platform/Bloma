@@ -208,6 +208,41 @@ describe('runContractDriver 执行路径', () => {
     expect(report.exitCode).toBeNull()
   })
 
+  it('语义源对账（批9.5 搬竞品 evidence 对账）：驱动执行期间被测入口/驱动脚本被改 → 结果作废 blocked；未变 → 正常路由', async () => {
+    const { mkdtempSync, writeFileSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = mkdtempSync(join(tmpdir(), 'bloma-semantics-'))
+    writeFileSync(join(dir, 'driver-skeleton.py'), 'print(1)', 'utf8')
+    writeFileSync(join(dir, 'app.py'), 'print(2)', 'utf8')
+    // 不变：正常路由 pass
+    const stable = await runContractDriver({
+      contract: baseContract(),
+      cwd: dir,
+      spawn: async () => ({ code: 0, stdout: 'PASS S1\nSUMMARY pass=1', stderr: '' }),
+    })
+    expect(stable.routing).toBe('pass')
+    // 驱动执行中被测入口被改（测试热修被测代码）→ 作废 blocked
+    const tampered = await runContractDriver({
+      contract: baseContract(),
+      cwd: dir,
+      spawn: async () => {
+        writeFileSync(join(dir, 'app.py'), 'print("hot-fixed")', 'utf8') // 模拟驱动在执行期间热改被测代码
+        return { code: 0, stdout: 'PASS S1\nSUMMARY pass=1', stderr: '' }
+      },
+    })
+    expect(tampered.routing).toBe('blocked')
+    expect(tampered.routingReason).toContain('验收语义源被修改')
+    // 运行时输出不在对账面：新增无关文件不影响
+    writeFileSync(join(dir, 'data.json'), '{}', 'utf8')
+    const untouched = await runContractDriver({
+      contract: baseContract(),
+      cwd: dir,
+      spawn: async () => ({ code: 0, stdout: 'PASS S1\nSUMMARY pass=1', stderr: '' }),
+    })
+    expect(untouched.routing).toBe('pass')
+  })
+
   it('超时预算自适应兜底（批9 2026-10-07）：场景多时抬高下限，声明更大值仍受尊重', async () => {
     // 狗粮 4ad53aa7 实锤：16 场景完整跑 61s，60s 缺省被强杀→空报告→artifacts-missing 拒收
     // →闭环预算耗尽降级人工。兜底=max(声明值, 20s + 场景数×6s)，上限 240s。

@@ -63,6 +63,8 @@ export function classifyRejection(decision: AdvanceDecision & { decision: 'rejec
     case 'security-fail':
     case 'test-invalid':
     case 'fault-survived':
+    case 'driver-blocked':
+    case 'driver-fail':
       return 'gate-deny'
   }
 }
@@ -161,10 +163,13 @@ export function buildContinuationDirective(
       : '请检查推进目标：只能推进到当前阶段的唯一合法下一阶段（见系统提示词推进协议段）；句中复述不构成推进。',
     // 批8 下半（2026-10-07）：按拒因分流——artifacts-missing 讲补齐；security-fail/
     // test-invalid/fault-survived 讲按拒因详情修（狗粮第三跑：security 教育不进模型
-    // 上下文，模型被 missingArtifacts 占位带偏三轮）。
+    // 上下文，模型被 missingArtifacts 占位带偏三轮）；批9.5 driver-blocked/driver-fail
+    // 同族（4ad53aa7：超时被伪装产物缺失误导归因）。
     'gate-deny': detail?.reason === 'artifacts-missing'
       ? '门禁未过：请核对上方缺失产物清单，委派补齐（产物必须真实存在且内容有效），然后重新声明推进。'
-      : '门禁未过：请按下方「门禁拒因详情」修复（security-fail=扫描发现的具体文件与问题；test-invalid/fault-survived=断言质量），修复后重新声明推进。',
+      : detail?.reason === 'driver-blocked' || detail?.reason === 'driver-fail'
+        ? '门禁未过：驱动执行未达验收结论（driver-blocked=环境阻塞如超时/装配，不是产物缺失，不要去补报告文件；driver-fail=断言未过）——请按下方「门禁拒因详情」修复后重新声明推进。'
+        : '门禁未过：请按下方「门禁拒因详情」修复（security-fail=扫描发现的具体文件与问题；test-invalid/fault-survived=断言质量），修复后重新声明推进。',
   }
   // 门禁拒因详情进续接（批8 下半狗粮第三跑实锤，2026-10-07）：security-fail 的教育
   // （扫描发现文件清单）只随 message_delta 发 UI，不进模型上下文；而 missingArtifacts

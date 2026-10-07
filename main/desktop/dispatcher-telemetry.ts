@@ -46,6 +46,8 @@ export function deriveRepairClass(result: DesktopDispatchRunResult): string | un
   if (advance.reason === 'contract-invalid') return 'mapping'
   if (advance.reason === 'security-fail') return 'behavior' // 安全缺陷属行为面回炉（显式映射，不再靠教育文案关键词）
   if (advance.reason === 'test-invalid' || advance.reason === 'fault-survived') return 'coverage' // 批6：测试有效性回炉（断言/覆盖补齐）
+  if (advance.reason === 'driver-blocked') return 'environment' // 批9.5：环境阻塞显式映射（不再依赖教育关键词顺序）
+  if (advance.reason === 'driver-fail') return 'behavior' // 批9.5：断言红回行为面
   const education = advance.education ?? ''
   if (education.includes('裁判门未过')) {
     if (education.includes('场景覆盖不足')) return 'coverage'
