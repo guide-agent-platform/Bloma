@@ -56,6 +56,15 @@ export const LLM_PROVIDER_DECL_REL = 'llm-provider.json'
 /** 结果落盘相对路径（00_VERIFY/）。 */
 export const LLM_QUALIFICATION_REL = '00_VERIFY/llm-qualification.json'
 
+/** 顶层或 request.request_sample 嵌套两路径提取 messages（parse 校验与请求构造共用；
+ *  批10 2026-10-07 修复：批9.5 只修了校验侧嵌套兼容，构造侧仍只读顶层——嵌套声明
+ *  校验合法但请求 messages 恒空，glm 报 1214「输入不能为空」真机实锤）。 */
+function extractSampleMessages(parsed: Record<string, unknown> | undefined): Array<{ role?: unknown; content?: unknown }> {
+  if (!parsed) return []
+  const sample = (parsed.request_sample ?? (parsed.request as { request_sample?: unknown } | undefined)?.request_sample) as { messages?: unknown } | undefined
+  return Array.isArray(sample?.messages) ? (sample.messages as Array<{ role?: unknown; content?: unknown }>) : []
+}
+
 /** 解析产物声明（容错：非对象/缺 messages 视为 schema 不合法）。
  * 批9.5 狗粮 b14861db 实证：产物合理变体把 request_sample 嵌在 request 对象内
  * （request.request_sample.messages）——兼容顶层与嵌套两路径（messages 数组结构为准）。 */
@@ -63,10 +72,8 @@ export function parseLlmDeclaration(raw: string | undefined): { declaration?: Ll
   if (!raw) return { schemaValid: false }
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>
-    const sample = (parsed?.request_sample ?? (parsed?.request as { request_sample?: unknown } | undefined)?.request_sample) as { messages?: unknown } | undefined
-    const messages = sample?.messages
+    const messages = extractSampleMessages(parsed)
     const schemaValid =
-      Array.isArray(messages) &&
       messages.length > 0 &&
       messages.every(
         (m) =>
@@ -230,7 +237,7 @@ export async function runProviderQualification(options: {
   const providerType = resolution.env.ANTHROPIC_PROVIDER_TYPE ?? 'anthropic'
   const isOpenAi = providerType === 'openai'
   const url = isOpenAi ? openaiChatUrl(baseUrl) : anthropicMessagesUrl(baseUrl)
-  const sampleMessages = (declaration.request_sample?.messages ?? []).map((m) => ({
+  const sampleMessages = extractSampleMessages(declaration as unknown as Record<string, unknown>).map((m) => ({
     role: String((m as Record<string, unknown>).role),
     content: String((m as Record<string, unknown>).content),
   }))

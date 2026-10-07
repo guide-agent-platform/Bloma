@@ -139,6 +139,34 @@ describe('runProviderQualification', () => {
     expect(body.model).toBe('glm-test')
   })
 
+  it('嵌套 request.request_sample 声明：请求体 messages 非空（批10 回归锁——校验兼容但构造发空致 glm 1214「输入不能为空」）', async () => {
+    mockedResolve.mockReturnValue(channelEnv() as never)
+    const nestedDecl = JSON.stringify({
+      schema_version: 1,
+      provider: { type: 'openai-compatible' },
+      auth: 'user_config',
+      request: {
+        method: 'POST',
+        path: '/chat/completions',
+        request_sample: { messages: [{ role: 'user', content: '你好' }] },
+      },
+    })
+    const opts = makeOpts({ readDeclaration: vi.fn(() => nestedDecl) })
+    opts.fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ choices: [{ message: { content: '你好！' } }] }),
+    })
+    const outcome = await runProviderQualification(opts)
+    expect(outcome.request_schema_valid).toBe(true)
+    expect(outcome.qualified).toBe(true)
+    const call = (opts.fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0]
+    const body = JSON.parse(call[1].body)
+    expect(Array.isArray(body.messages)).toBe(true)
+    expect(body.messages.length).toBeGreaterThan(0)
+    expect(body.messages[0].content).toBe('你好')
+  })
+
   it('anthropic 形态：base 无 /v1 时正确拼 /v1/messages（陷阱 12 回归锁）', async () => {
     mockedResolve.mockReturnValue(
       channelEnv({
