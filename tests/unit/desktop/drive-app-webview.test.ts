@@ -353,6 +353,7 @@ describe('拒收续接指令携带门禁拒因（批8 下半狗粮第三跑实�
       reason: 'artifacts-missing',
       missingArtifacts: [{ gateId: 'delivery-doc', artifacts: ['DELIVERY.md'] }],
       discardedObservations: [],
+      education: '产物存在性检查未过：DELIVERY.md 不存在。',
     })
     expect(directive).toContain('缺失产物：DELIVERY.md')
   })

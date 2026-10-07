@@ -127,3 +127,42 @@ describe('让渡话术表 isAutoDelegationText', () => {
   })
 })
 
+
+describe('让渡文案不进需求清单（F-002 污染根治，2026-10-07）', () => {
+  it('resolveAutoDelegation：有主题时清单只含主题，让渡文案不再是 F-002', async () => {
+    const { resolveAutoDelegation } = await import('../../main/guide/stages/clarify-flow')
+    const input = {
+      sessionId: 's-f002',
+      requestId: 'r-f002',
+      projectId: 'p-f002',
+      content: '你帮我决定吧',
+      metadata: {},
+    } as unknown as AgentSendMessageInput
+    const route = resolveAutoDelegation(input, '做一个明星人物 AI 形象创作平台')
+    expect(route?.requirements).toEqual([
+      { id: 'F-001', description: '做一个明星人物 AI 形象创作平台' },
+    ])
+    expect(JSON.stringify(route?.requirements)).not.toContain('通用实用软件工具')
+  })
+
+  it('resolveAutoDelegation：无主题时占位为标记形态（声明非功能需求），不再是名词实体', async () => {
+    const { resolveAutoDelegation } = await import('../../main/guide/stages/clarify-flow')
+    const input = {
+      sessionId: 's-f002b',
+      requestId: 'r-f002b',
+      projectId: 'p-f002b',
+      content: '你帮我决定吧',
+      metadata: {},
+    } as unknown as AgentSendMessageInput
+    const route = resolveAutoDelegation(input, undefined)
+    expect(route?.requirements.length).toBe(1)
+    expect(route?.requirements[0]?.description).toContain('本条不是功能需求')
+  })
+
+  it('isDelegationPlaceholder：旧文案（存量会话）与新标记形态都剔除，不进澄清收集清单', async () => {
+    const { isDelegationPlaceholder } = await import('../../main/guide/stages/clarify-flow')
+    expect(isDelegationPlaceholder('通用实用软件工具，由向导按常见做法生成第一版')).toBe(true)
+    expect(isDelegationPlaceholder('（用户让渡决定权：本条不是功能需求，勿写入功能清单）由向导结合用户想法给出第一版功能清单')).toBe(true)
+    expect(isDelegationPlaceholder('做一个记账工具')).toBe(false)
+  })
+})

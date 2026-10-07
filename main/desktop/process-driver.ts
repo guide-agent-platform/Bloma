@@ -21,6 +21,8 @@
  */
 
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { violatesCommandBlacklist, type AcceptanceCoverageEntry, type ProjectContract } from './contract-schema'
 
 // =========================================================================
@@ -120,6 +122,41 @@ export function routeDriverOutcome(exitCode: number, scenarios: DriverScenarioOu
  * 系统 DLL；这些不构成「环境透传」，是进程能活着的平台事实）。
  */
 const MINIMUM_SURVIVAL_ENV: readonly string[] = ['SystemRoot', 'SystemDrive', 'ComSpec', 'PATHEXT', 'windir']
+
+// =========================================================================
+// 驱动解释器 venv 解析（批8 下半 2026-10-07）
+// =========================================================================
+
+/** 裸 python 命令名集合（Windows 下 py 启动器不认——产物契约不会用它，保持保守）。 */
+const BARE_PYTHON_COMMANDS = new Set(['python', 'python3', 'python.exe', 'python3.exe'])
+
+/** 项目 venv 解释器候选（win: Scripts/python.exe；posix: bin/python）。 */
+function venvPythonCandidates(cwd: string): string[] {
+  return process.platform === 'win32'
+    ? [join(cwd, '.venv', 'Scripts', 'python.exe')]
+    : [join(cwd, '.venv', 'bin', 'python'), join(cwd, '.venv', 'bin', 'python3')]
+}
+
+/**
+ * 契约驱动命令首段为裸 python 且项目存在 .venv 解释器时，替换为 venv 绝对路径。
+ * 契约 schema notes 的「python 在执行器侧解析为 venv 内解释器」承诺在此兑现——
+ * venv 不存在时原样返回（系统 python 兑底，与旧行为兼容）。纯函数零副作用
+ * （existsSync 只读探测）。
+ */
+export function resolveDriverVenvCommand(command: readonly string[], cwd: string): string[] {
+  const resolved = [...command]
+  if (resolved.length === 0) return resolved
+  const head = resolved[0]!.replace(/\\/g, '/').toLowerCase()
+  const headBase = head.split('/').pop() ?? head
+  if (!BARE_PYTHON_COMMANDS.has(headBase)) return resolved
+  for (const candidate of venvPythonCandidates(cwd)) {
+    if (existsSync(candidate)) {
+      resolved[0] = candidate
+      return resolved
+    }
+  }
+  return resolved
+}
 
 /** 按契约白名单过滤环境：生存集 + 白名单交集（其余一律不透传）。 */
 export function buildDriverEnv(contract: ProjectContract, parentEnv: NodeJS.ProcessEnv): Record<string, string> {
@@ -255,9 +292,16 @@ export async function runContractDriver(input: RunDriverInput): Promise<DriverEx
 
   const timeoutMs = which === 'driver' ? contract.driver.timeout_ms : 30_000
   const env = buildDriverEnv(contract, input.parentEnv ?? process.env)
+  // 驱动解释器 venv 解析（批8 下半 2026-10-07 实现兑现）：契约 schema notes 一直承诺
+  // 「command 里的 python 在执行器侧解析为 venv 内解释器」但从未实现——裸 python 跑在
+  // 系统解释器上，骨架 v2 产物依赖（pywebview 等）装在项目 .venv，系统 python 没有
+  // → self_check 的 pywebview 项恒 FAIL + UI 截图子进程崩溃（code=1）——输出永远带
+  // 红字噪音，误导调度员/子会话去「修」不存在的产品缺陷（狗粮三跑实证：第一跑补韧性
+  // 委派致 DSML 退化断点、第三跑 diag 脚本泛滥+self_check 语义扭曲）。
+  const resolvedCommand = resolveDriverVenvCommand(commandSpec.command, cwd)
 
   try {
-    const { code, stdout, stderr } = await spawn({ command: commandSpec.command, timeoutMs, env, cwd })
+    const { code, stdout, stderr } = await spawn({ command: resolvedCommand, timeoutMs, env, cwd })
     const { scenarios, summaryLine } = parseDriverStdout(stdout)
     // self_check 面：退出码 + 可选 stdout 锚点（不走场景路由——契约 expect 语义）
     if (which === 'self_check') {

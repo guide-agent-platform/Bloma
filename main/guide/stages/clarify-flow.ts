@@ -428,10 +428,19 @@ export function collectClarificationAnswers(sessionId: string): string[] {
       if (!description || collected.includes(description)) continue
       // 疑问句/身份类短句不是需求（「你是谁」案）：不进熔断兑底清单
       if (isQuestionLikeTheme(description)) continue
+      // 让渡占位文案不是需求（F-002 污染根治，2026-10-07）：旧文案（存量会话已落盘）
+      // 与新标记形态（本批起）都剔除——让渡是流程语义，永远不进功能清单
+      if (isDelegationPlaceholder(description)) continue
       collected.push(description)
     }
   }
   return collected
+}
+
+/** 让渡占位文案判定（F-002 污染根治）：旧预置文案原文 + 新标记形态前缀。 */
+const DELEGATION_PLACEHOLDER_LEGACY = '通用实用软件工具，由向导按常见做法生成第一版'
+export function isDelegationPlaceholder(description: string): boolean {
+  return description === DELEGATION_PLACEHOLDER_LEGACY || description.startsWith('（用户让渡决定权')
 }
 
 /**
@@ -488,13 +497,20 @@ export function resolveCardAnswer(input: AgentSendMessageInput, primaryIntent?: 
  * 相同，但不带 card_option 元数据——不识别就会落回模型路径被原样重问（2026-08-22
  * 线上案例）。确定性判定（零模型依赖），出口完全复用卡片 auto 路径；让渡话术由
  * session-service 单点维护（readPrimaryIntent 的锚点豁免共用同一张表）。
+ *
+ * 让渡文案不进需求清单（F-002 污染根治，批8 下半 2026-10-07）：此前让渡路径把
+ * CARD_ANSWER_REQUIREMENTS.auto（「通用实用软件工具，由向导按常见做法生成第一版」）
+ * 作为 F-001 传入 ensurePrimaryIntent——有主题时被 shift 成 F-002，作为功能项混进
+ * PRD 清单（狗粮三跑每单实锤：F-002 恒为该文案，contract 还得为它编 covers）。
+ * 让渡是流程语义不是需求：有主题时清单只含主题；无主题（纯「你帮我决定」）才用
+ * 标记形态占位，由 PRD 引擎自拟首版。
  */
 export function resolveAutoDelegation(input: AgentSendMessageInput, primaryIntent?: string): CardAnswerRoute | undefined {
   if (!isAutoDelegationText(input.content)) return undefined
   return {
     prompt: input.content,
     requirements: ensurePrimaryIntent(
-      [{ id: 'F-001', description: CARD_ANSWER_REQUIREMENTS.auto }],
+      primaryIntent ? [] : [{ id: 'F-001', description: CARD_ANSWER_REQUIREMENTS.auto }],
       primaryIntent,
     ),
   }
