@@ -144,6 +144,35 @@ describe('runProviderQualification', () => {
     expect(String(url)).toBe('https://open.bigmodel.cn/api/anthropic/v1/messages')
   })
 
+  it('anthropic 形态：openai 惯例 system 首条剥为顶层 system 字段（批9.5 审核修正）', async () => {
+    mockedResolve.mockReturnValue(
+      channelEnv({ ANTHROPIC_PROVIDER_TYPE: 'anthropic' }) as never,
+    )
+    const opts = makeOpts()
+    opts.readDeclaration = vi.fn(() =>
+      JSON.stringify({
+        schema_version: 1,
+        provider: 'openai_compatible',
+        request_sample: {
+          messages: [
+            { role: 'system', content: '你是一个助手' },
+            { role: 'user', content: '你好' },
+          ],
+        },
+      }),
+    )
+    opts.fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ content: [{ type: 'text', text: '你好！' }] }),
+    })
+    const outcome = await runProviderQualification(opts)
+    expect(outcome.qualified).toBe(true)
+    const body = JSON.parse((opts.fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0][1].body)
+    expect(body.system).toBe('你是一个助手')
+    expect(body.messages.map((m: { role: string }) => m.role)).toEqual(['user'])
+  })
+
   it('HTTP 401 不重试（4xx 无意义重试）；预算=1 次调用', async () => {
     mockedResolve.mockReturnValue(channelEnv() as never)
     const opts = makeOpts()

@@ -221,9 +221,18 @@ export async function runProviderQualification(options: {
     role: String((m as Record<string, unknown>).role),
     content: String((m as Record<string, unknown>).content),
   }))
+  // 批9.5 审核修正：openai 惯例的 system 首条在 anthropic 端点会被拒（messages 不许
+  // role=system）——anthropic 型渠道剥出为顶层 system 字段（协议语义等价）。
+  const systemMessages = sampleMessages.filter((m) => m.role === 'system')
+  const chatMessages = sampleMessages.filter((m) => m.role !== 'system')
   const body = isOpenAi
     ? JSON.stringify({ model, messages: sampleMessages, max_tokens: 256 })
-    : JSON.stringify({ model, max_tokens: 256, messages: sampleMessages })
+    : JSON.stringify({
+        model,
+        max_tokens: 256,
+        ...(systemMessages.length > 0 ? { system: systemMessages.map((m) => m.content).join('\n') } : {}),
+        messages: chatMessages.length > 0 ? chatMessages : sampleMessages,
+      })
   const headers: Record<string, string> = isOpenAi
     ? { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` }
     : {

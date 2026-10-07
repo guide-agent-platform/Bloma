@@ -263,6 +263,10 @@ describe('runContractDriver 执行路径', () => {
     const huge = { ...baseContract(), scenarios: Array.from({ length: 60 }, (_, i) => ({ name: `S${i + 1}`, covers: ['F-001'] })) }
     await runContractDriver({ contract: huge, cwd: '/proj', spawn })
     expect(seen[seen.length - 1]).toBe(240_000)
+    // 批9.5 审核修正回归锁：显式声明 600s（schema 上限）不被 240s 封顶砍掉
+    const declaredHuge = { ...huge, driver: { ...huge.driver, timeout_ms: 600_000 } }
+    await runContractDriver({ contract: declaredHuge, cwd: '/proj', spawn })
+    expect(seen[seen.length - 1]).toBe(600_000)
     // 场景少时维持声明值（1 场景 → 兑底 26s < 声明 60s → 60s 不变）
     await runContractDriver({ contract: baseContract(), cwd: '/proj', spawn })
     expect(seen[seen.length - 1]).toBe(60_000)

@@ -749,15 +749,15 @@ async function runVerifyFinalize(
 
   const outcome = evaluateAdvance(turns, node.id, existsWithReport, vars)
 
-  // 批9 工件6.3：Provider Qualification（llm_role≠none 真实验证，预算/幂等/fail-open 口径见模块侧）。
-  if (input.sandboxRoot) await runProviderQualificationIfLlm({ projectId: input.projectId, sessionId: input.sessionId, sandboxRoot: input.sandboxRoot })
-
   // P0-1b + 刀2（2026-10-02）：全绿收口（driver pass + 证据门 + 安全门 + 裁判门 + 阶段判定
   // 推进）落 verified 阶段存证（checkpoint 泛化 P0-1b 快照：验证结论进 desktop_checkpoint，
   // 同阶段重跑注入勿重验）；快照失败不阻断推进（仅留痕，下次收口可补）。恢复消费端
   // （latestVerifiedSnapshot 熔断回滚优先恢复）自此有生产写入方。
   let checkpoint: { stage: string } | undefined
   if (outcome.decision === 'advance' && judgeGate?.passed) {
+    // 批9 工件6.3：Provider Qualification 只在全绿收口时跑（拒收/回炉轮不烧真实调用预算
+    // ——幂等短路只挡 qualified=true 重跑；fail 每轮拒收都会再调 ≤2 次）。
+    if (input.sandboxRoot) await runProviderQualificationIfLlm({ projectId: input.projectId, sessionId: input.sessionId, sandboxRoot: input.sandboxRoot })
     const recorded = await recordPhaseCheckpoint({
       projectId: input.projectId,
       requestId: input.requestId,

@@ -322,9 +322,10 @@ export async function runContractDriver(input: RunDriverInput): Promise<DriverEx
   // 降级人工。兜底公式：max(声明值, 20s 基线 + 场景数×6s)，上限 240s 防失控；
   // 声明更大值仍受尊重（取 max 不缩短）。
   const adaptiveFloorMs = 20_000 + contract.scenarios.length * 6_000
+  // 批9.5 审核修正：封顶只限自适应抬升部分（min 嵌在内层）——初版 min/max 嵌套反了会把声明 600s 砍到 240s；显式声明至 schema 上限仍受尊重。
   const timeoutMs =
     which === 'driver'
-      ? Math.min(240_000, Math.max(contract.driver.timeout_ms, adaptiveFloorMs))
+      ? Math.max(contract.driver.timeout_ms, Math.min(240_000, adaptiveFloorMs))
       : 30_000
   const env = buildDriverEnv(contract, input.parentEnv ?? process.env)
   // 驱动解释器 venv 解析（批8 下半 2026-10-07 实现兑现）：契约 schema notes 一直承诺
