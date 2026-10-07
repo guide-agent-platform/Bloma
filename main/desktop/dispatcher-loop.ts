@@ -26,6 +26,7 @@
  * （竞品 W17 教训：只扫末条会漏）。
  */
 
+import { existsSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AgentEvent } from '../../shared/types'
 import type { AgentLoopInput, AgentLoopResult, AgentLoopTool, ToolOutcome } from '../agent/loop/agent-loop'
@@ -40,16 +41,15 @@ import { trackAnalytics } from '../delivery/track-analytics'
 import { recordDispatchRunTelemetry, recordDispatchStartTelemetry } from './dispatcher-telemetry'
 import type { DelegationRunRole } from '../../shared/delegation-run-context'
 import { getDesktopPhase, type PhaseNode } from './dispatcher-phases'
-import { checkDispatcherToolGate, evaluateAdvance, type AdvanceDecision } from './dispatcher-gate'
+import { checkDispatcherToolGate, type AdvanceDecision } from './dispatcher-gate'
 import { buildDesktopChildBaseSystem, buildDispatcherSystemPrompt } from './dispatcher-prompt'
 import { isDesktopDispatchEnabled } from './dispatcher-switch'
 import { execFileProbeSpawn, isDesktopEnvReady, probeDesktopEnv, type ProbeSpawn } from './check-env'
-import { runContractDriver, type DriverExecutionReport } from './process-driver'
+import type { runContractDriver, DriverExecutionReport } from './process-driver'
 import { buildChildScriptRunnerTool } from './child-exec-tool'
 import { buildDriveAppTool, disposeDriveSessions } from './drive-app-tool'
 import { buildInstallPackagesTool } from './install-packages-tool'
 import { provisionDesktopSkeletonV2 } from './skeleton-provision'
-import { runSecurityScan } from '../verification/security-scan'
 import { findProject } from '../project/project-service'
 import { buildProjectDriverRunnerTool } from './driver-runner-tool'
 import { recordPhaseCheckpoint } from './phase-checkpoint'
@@ -355,6 +355,19 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
 
   // desktop-verify：异步驱动前置（完整版）
   if (node.id === 'desktop-verify') {
+    // 探索会话记录轮转（批10.5 审查B P1-2，2026-10-08）：drive-sessions.json 是追加式
+    // 存储，旧判定下历史 disposed 永久计入——每轮 verify 开始时轮转为 .prev（保留一份
+    // 历史），本轮 MVP 门只看本轮探索真相（回炉重验后旧降级不再永久呈现）。
+    if (input.sandboxRoot) {
+      try {
+        const sessionsPath = join(input.sandboxRoot, '00_VERIFY', 'drive-sessions.json')
+        if (existsSync(sessionsPath)) {
+          renameSync(sessionsPath, join(input.sandboxRoot, '00_VERIFY', 'drive-sessions.prev.json'))
+        }
+      } catch {
+        // 轮转失败不阻断收口（呈现侧退化为旧行为）
+      }
+    }
     const driven = await runVerifyFinalize(node, input, collector)
     return {
       status: 'completed',

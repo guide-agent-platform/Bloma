@@ -130,6 +130,14 @@ export function sanitizeConstraints(constraints: string[] | undefined | null): s
   )
 }
 
+/** 平台壳前缀剥离（批10.5 审查B P1-1，2026-10-08）：【交付前迭代】【交付后迭代】
+ *  【用户中途补充】三壳把用户真话拼在壳后落盘 user 轮——「：」「】」不是子句切分符，
+ *  壳文本与用户话合并成一个子句整体入库（实测「按此修改实现（其余功能与已验证行为
+ *  保持不变）：不要加登录页」整句进约束）。剥壳保留用户原话（不能整轮拦——里面是
+ *  真约束），只去平台模板部分。 */
+const KNOWN_SHELL_PREFIX_RE =
+  /^【交付前迭代】用户对验收通过产物的修改意见，按此修改实现（其余功能与已验证行为保持不变）：|^【交付后迭代】用户对已交付产物的反馈，按此修改实现（其余功能与已验证行为保持不变）：|^【用户中途补充】/
+
 export function scanSessionConstraints(sessionId: string): string[] {
   const path = getAgentSessionPath(sessionId)
   if (!existsSync(path)) return []
@@ -149,7 +157,8 @@ export function scanSessionConstraints(sessionId: string): string[] {
       .join('')
     if (SYNTHETIC_USER_TURN_PREFIXES.some((prefix) => text.trimStart().startsWith(prefix))) continue
     if (text.includes(HOST_INJECTION_MARKER)) continue
-    for (const constraint of extractConstraints(text)) {
+    const shellStripped = text.trimStart().replace(KNOWN_SHELL_PREFIX_RE, '')
+    for (const constraint of extractConstraints(shellStripped)) {
       if (!constraints.includes(constraint)) constraints.push(constraint)
     }
   }

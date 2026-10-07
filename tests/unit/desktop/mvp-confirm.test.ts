@@ -182,6 +182,43 @@ describe('holdForMvpConfirm（挂起）', () => {
     const html2 = readFileSync(join(projectRoot, '00_VERIFY', 'mvp-review.html'), 'utf8')
     expect(html2).not.toContain('探索会话未正常完成')
   })
+
+  it('副标题条件化+转义锁（批10.5 审查C）：存在限制项不宣称全部通过；deliveryDigest 转义后渲染', () => {
+    const { deps } = makeDeps()
+    mkdirSync(join(projectRoot, '00_VERIFY'), { recursive: true })
+    writeFileSync(
+      join(projectRoot, '00_VERIFY', 'drive-sessions.json'),
+      JSON.stringify([{ session_id: 'drive-muwcxxx-abc123', outcome: 'disposed', ops: 8, findings: 0 }]),
+      'utf8',
+    )
+    holdForMvpConfirm({
+      input,
+      deps,
+      fromPhase: 'desktop-verify',
+      notice: { projectName: '记账本', fromPhaseTitle: '验收', driverSummary: { passed: 9, total: 9 }, deliveryDigest: '运行说明<script>alert(1)</script>与<img src=x onerror=1>' },
+    })
+    const html = readFileSync(join(projectRoot, '00_VERIFY', 'mvp-review.html'), 'utf8')
+    // 副标题：限制项存在 → 不再宣称全部通过
+    expect(html).toContain('存在下面这些限制')
+    expect(html).not.toContain('自动检查已全部通过')
+    // 转义锁：恶意 deliveryDigest 不得以原始标签进入页面
+    expect(html).not.toContain('<script>')
+    expect(html).toContain('&lt;script&gt;')
+    expect(html).not.toContain('<img')
+  })
+
+  it('击杀汇总行（批10.5 审查C 锚补）：fault-kill 报告存在时「测试有效性抽查」进已确认能做段', () => {
+    const { deps } = makeDeps()
+    mkdirSync(join(projectRoot, '00_VERIFY'), { recursive: true })
+    writeFileSync(
+      join(projectRoot, '00_VERIFY', 'fault-kill-report.json'),
+      JSON.stringify({ faultKill: { entries: [{ fid: 'F-001', seed: 'FS-VALIDATION-REMOVE', result: 'killed' }], killed: 1, executed: 1, survived: 0, notApplicable: 0, notRun: 0 } }),
+      'utf8',
+    )
+    holdForMvpConfirm({ input, deps, fromPhase: 'desktop-verify', notice: { projectName: 'x', fromPhaseTitle: 'y', driverSummary: { passed: 9, total: 9 } } })
+    const html = readFileSync(join(projectRoot, '00_VERIFY', 'mvp-review.html'), 'utf8')
+    expect(html).toContain('测试有效性抽查：故意植入 1 个已知缺陷，全部被测试抓住')
+  })
 })
 
 describe('回传拦截', () => {

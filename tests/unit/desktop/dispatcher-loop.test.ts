@@ -648,6 +648,9 @@ describe('desktop-verify 收口双门（全链路审查 P1-5/P0-1 缓解，2026-
     const { getDocumentsDir } = await import('../../../storage/config-paths')
     const docsDir = getDocumentsDir(proj.workspace_slug, proj.project_id)
     mkdirSync(docsDir, { recursive: true })
+    // 轮转回归锁预置（批10.5 审查B P1-2）：旧轮 drive-sessions.json，verify 开始时应轮转为 .prev
+    mkdirSync(join(root, '00_VERIFY'), { recursive: true })
+    writeFileSync(join(root, '00_VERIFY', 'drive-sessions.json'), JSON.stringify([{ session_id: 'drive-old-aaaaaa', outcome: 'disposed', ops: 3 }]), 'utf8')
     writeFileSync(join(docsDir, 'prd.json'), JSON.stringify({
       project_id: proj.project_id,
       requirements: [
@@ -680,6 +683,9 @@ describe('desktop-verify 收口双门（全链路审查 P1-5/P0-1 缓解，2026-
     expect(afterCheckpoint.desktop_checkpoint?.stage).toBe('desktop-verify')
     expect((afterCheckpoint.desktop_checkpoint?.verified_gates ?? []).some((g) => g.startsWith('driver-report:'))).toBe(true)
     expect(existsSync(join(docsDir, 'prd.json'))).toBe(true) // 快照文档冻结不破坏源
+    // 轮转回归锁（批10.5 审查B P1-2）：旧轮 drive-sessions.json 被 verify 开始时轮转为 .prev（回炉重验不永久呈现旧降级）
+    expect(existsSync(join(root, '00_VERIFY', 'drive-sessions.prev.json'))).toBe(true)
+    expect(existsSync(join(root, '00_VERIFY', 'drive-sessions.json'))).toBe(false)
     void readFileSync
     delete process.env.PROMA_HOME
   })

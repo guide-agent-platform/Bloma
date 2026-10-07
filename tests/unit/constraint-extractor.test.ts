@@ -105,6 +105,19 @@ describe('T4-L2 全量扫描：首轮约束历轮可回', () => {
     expect(constraints).toEqual(['不含登录'])
     expect(constraints.some((c) => c.includes('补报告'))).toBe(false)
   })
+  it('平台壳前缀剥离（批10.5 审查B P1-1）：迭代/steer 壳只剥模板部分，用户真话约束照常提取', () => {
+    writeSession('session-shell-strip', [
+      turn('user', '【交付前迭代】用户对验收通过产物的修改意见，按此修改实现（其余功能与已验证行为保持不变）：不要加登录页', 1),
+      turn('user', '【交付后迭代】用户对已交付产物的反馈，按此修改实现（其余功能与已验证行为保持不变）：不要用外部 API', 2),
+      turn('user', '【用户中途补充】列表必须是卡片式', 3),
+    ])
+    const constraints = scanSessionConstraints('session-shell-strip')
+    expect(constraints).toContain('不要加登录页')
+    expect(constraints).toContain('不要用外部 API')
+    expect(constraints).toContain('列表必须是卡片式')
+    // 壳文本本身不得混入任何一条约束
+    expect(constraints.some((c) => c.includes('按此修改实现') || c.includes('保持不变') || c.includes('【'))).toBe(false)
+  })
   it('存量污染兑底：入库的拒因话术「不要去补报告文件」被读取侧清洗（批10 旧账②）', () => {
     expect(sanitizeConstraints(['不含登录', '不要去补报告文件'])).toEqual(['不含登录'])
   })

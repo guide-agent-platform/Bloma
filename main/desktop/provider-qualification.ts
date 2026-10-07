@@ -348,7 +348,21 @@ export function readLlmQualification(sandboxRoot: string): LlmQualificationOutco
   try {
     const path = join(sandboxRoot, LLM_QUALIFICATION_REL)
     if (!existsSync(path)) return undefined
-    return JSON.parse(readFileSync(path, 'utf8')) as LlmQualificationOutcome
+    // 类型清洗（批10.5 审查C P2-1）：磁盘 JSON 无运行时校验，布尔/数字字段归一后
+    // 供报告插值——防篡改的 llm-qualification.json 把任意字符串插进 mvp-review.html。
+    const raw = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>
+    return {
+      executed: raw.executed === true,
+      qualified: raw.qualified === true,
+      calls: Number.isFinite(Number(raw.calls)) ? Number(raw.calls) : 0,
+      findings: Array.isArray(raw.findings) ? raw.findings.filter((f): f is string => typeof f === 'string') : [],
+      ...(typeof raw.channel_model === 'string' ? { channel_model: raw.channel_model } : {}),
+      ...(typeof raw.channel_base_host === 'string' ? { channel_base_host: raw.channel_base_host } : {}),
+      ...(typeof raw.declared_provider === 'string' ? { declared_provider: raw.declared_provider } : {}),
+      ...(raw.request_schema_valid === true ? { request_schema_valid: true } : {}),
+      ...(typeof raw.skipped_reason === 'string' ? { skipped_reason: raw.skipped_reason } : {}),
+      ...(typeof raw.checked_at === 'string' ? { checked_at: raw.checked_at } : { checked_at: new Date().toISOString() }),
+    }
   } catch {
     return undefined
   }

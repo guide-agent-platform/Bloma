@@ -276,7 +276,7 @@ try {
   for (let i = 0; i < 10 && !opened; i += 1) {
     await cdp.eval(`(${CLICK_BUTTON_BY_TEXT})(${JSON.stringify('所有项目')})`)
     await sleep(1500)
-    const nameFragment = projectName.length >= 4 ? projectName : projectName.slice(0, 8)
+    const nameFragment = projectName
     const r = await cdp.eval(`(${CLICK_PROJECT_CARD})(${JSON.stringify(nameFragment)})`)
     if (r?.ok) {
       opened = true
@@ -335,8 +335,13 @@ try {
   const deadline = Date.now() + TIMEOUT_MIN * 60_000
   const cooldown = new Map()
   let mvpRound = 0
-  let lastTail = ''
   let blockedLastLog = 0
+  // 假阳性防护（批10.5 审查C P1-2）：目标项目续跑前可能已是 completed（既降级单回炉后
+  // 重验场景）——发消息到链路真正接管（状态离开 completed）之间的窗口里，首轮轮询
+  // 会命中旧终态假报 delivered。仅当「初始非 completed」或「本轮见过非 completed」
+  // 后的 completed 才算真交付（状态跃迁制）。
+  const wasInitiallyCompleted = rec0.status === 'completed' && rec0.current_stage === 'completed'
+  let seenActive = false
 
   while (Date.now() < deadline) {
     await sleep(3000)
@@ -349,7 +354,8 @@ try {
     }
 
     const rec = readProjectRecord(PROJECT_ID)
-    if (rec && rec.status === 'completed' && rec.current_stage === 'completed') {
+    if (rec && rec.status !== 'completed') seenActive = true
+    if (rec && rec.status === 'completed' && rec.current_stage === 'completed' && (!wasInitiallyCompleted || seenActive)) {
       log(`交付检测命中（权威存储终态）：${PROJECT_ID}`)
       report.outcome = 'delivered'
       // PQ 双轴 + mvp-review 读取
@@ -438,7 +444,7 @@ try {
     report.outcome = 'timeout'
     log(`超时（${TIMEOUT_MIN}min）`)
   }
-  report.log_tail = lastTail || (state?.tail ?? '')
+  report.log_tail = state?.tail ?? ''
   report.finished_at = new Date().toISOString()
   writeFileSync(join(REPO, 'dogfood-resume-report.json'), JSON.stringify(report, null, 2), 'utf8')
   log(`报告已写 ${join(REPO, 'dogfood-resume-report.json')}（outcome=${report.outcome}）`)

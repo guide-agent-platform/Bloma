@@ -81,7 +81,7 @@ function buildShapeReportSection(section: ShapeReportSection | undefined): strin
 /** 成品过目页（2026-10-05：MVP 门「像 UX 门一样右栏呈现」）：截图画廊 + 驱动验收结论
  *  + DELIVERY 摘要；落盘 00_VERIFY/ 供 bloma-file:// 直读（截图相对路径同目录引用）。探索
  *  发现段（2026-10-05 探索驱动测试批）从 drive-findings.json 注入——参考证据不阻塞交付。 */
-function buildMvpReviewHtml(notice: DeliveredNoticeInput, driveFindings?: DriveFinding[], driveSessions?: Array<{ session_id: string; outcome: string; ops?: number }>, faultKill?: { audit?: { findings?: Array<{ state?: string }>; error?: string }; faultKill?: { entries?: Array<{ fid: string; seed: string; result: string; detail?: string }>; killed: number; executed: number; survived: number; notApplicable: number; notRun: number } }, shapeSection?: ShapeReportSection): string {
+function buildMvpReviewHtml(notice: DeliveredNoticeInput, driveFindings?: DriveFinding[], driveSessions?: Array<{ session_id: string; outcome: string; ops?: number; findings?: number }>, faultKill?: { audit?: { findings?: Array<{ state?: string }>; error?: string }; faultKill?: { entries?: Array<{ fid: string; seed: string; result: string; detail?: string }>; killed: number; executed: number; survived: number; notApplicable: number; notRun: number } }, shapeSection?: ShapeReportSection): string {
   const shots = (notice.screenshotPaths ?? [])
     .map((rel) => rel.replace(/^00_VERIFY\//, ''))
     .map((rel) => `<figure><img src="${escapeHtml(rel)}" alt="程序截图"/><figcaption>${escapeHtml(rel)}</figcaption></figure>`)
@@ -144,7 +144,7 @@ function buildMvpReviewHtml(notice: DeliveredNoticeInput, driveFindings?: DriveF
   if (driveSessions && driveSessions.length > 0 && badSessions.length > 0) {
     const allBad = badSessions.length === driveSessions.length
     limitLines.push(
-      `<li>探索会话未正常完成（${badSessions.map((item) => `${item.session_id.slice(-6)}:${escapeHtml(item.outcome)}`).join('、')}）——${allBad ? '上面的检查都按既定清单执行过，但没有人用「随便点点」的自由方式试用过这个程序，可能有清单外的小问题没被发现' : `${driveSessions.length} 个探索会话中 ${badSessions.length} 个未正常收尾（未 report+close），它们的结论没有进入结构化发现清单`}</li>`,
+      `<li>探索会话未正常完成（${badSessions.map((item) => `${item.session_id.slice(-6)}:${escapeHtml(item.outcome)}`).join('、')}）——${allBad ? '上面的检查都按既定清单执行过，但没有人用「随便点点」的自由方式试用过这个程序，可能有清单外的小问题没被发现' : `${driveSessions.length} 个探索会话中 ${badSessions.length} 个未正常收尾${badSessions.some((item) => (item.findings ?? 0) > 0) ? '（其中部分已上报发现，见上方探索发现段；未收尾会话的探索覆盖可能不完整）' : '（未 report+close），它们的结论没有进入结构化发现清单'}`}</li>`,
     )
   }
   if (fk && fk.notApplicable + fk.notRun > 0) {
@@ -164,6 +164,11 @@ function buildMvpReviewHtml(notice: DeliveredNoticeInput, driveFindings?: DriveF
   }
   adviceLines.push('<li>发现不对劲或想改，直接在聊天里说——我改完会重新检查再交给你</li>')
   const adviceSection = `<h2 style="font-size:15px;margin:20px 0 8px;">给你的建议</h2>\n<ul>${adviceLines.join('')}</ul>`
+  // 副标题条件化（批10.5 审查C P1-1，2026-10-08）：存在限制项时不再宣称「全部通过」
+  //（core+PQ 未通过等场景下与限制段同屏矛盾，零基础用户会被副标题误导）。
+  const subLine = limitLines.length === 0
+    ? '自动检查已全部通过——请你过目，确认后正式交付'
+    : '自动检查已完成，存在下面这些限制——请过目后确认'
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -183,7 +188,7 @@ function buildMvpReviewHtml(notice: DeliveredNoticeInput, driveFindings?: DriveF
 </head>
 <body>
 <h1>成品过目：${escapeHtml(notice.projectName)}</h1>
-<div class="sub">自动检查已全部通过——请你过目，确认后正式交付</div>
+<div class="sub">${subLine}</div>
 ${confirmedSection}
 ${limitsSection}
 ${adviceSection}
@@ -255,13 +260,13 @@ export function holdForMvpConfirm(options: {
         // 无探索发现文件：如实降级
       }
       // 探索会话状态（B3/B4）：探索失败≠零发现——读 drive-sessions.json 呈现真相
-      let driveSessions: Array<{ session_id: string; outcome: string; ops?: number }> | undefined
+      let driveSessions: Array<{ session_id: string; outcome: string; ops?: number; findings?: number }> | undefined
       try {
-        const parsedSessions = JSON.parse(readFileSync(join(root, '00_VERIFY/drive-sessions.json'), 'utf8')) as Array<{ session_id?: string; outcome?: string; ops?: number }>
+        const parsedSessions = JSON.parse(readFileSync(join(root, '00_VERIFY/drive-sessions.json'), 'utf8')) as Array<{ session_id?: string; outcome?: string; ops?: number; findings?: number }>
         if (Array.isArray(parsedSessions) && parsedSessions.length > 0) {
           driveSessions = parsedSessions
             .filter((item) => typeof item.session_id === 'string' && typeof item.outcome === 'string')
-            .map((item) => ({ session_id: item.session_id as string, outcome: item.outcome as string, ops: item.ops }))
+            .map((item) => ({ session_id: item.session_id as string, outcome: item.outcome as string, ops: item.ops, findings: typeof item.findings === 'number' ? item.findings : 0 }))
         }
       } catch {
         // 无会话状态文件：如实降级（未探索或旧版）
