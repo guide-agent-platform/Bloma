@@ -68,6 +68,58 @@ describe('R1-providers ANTHROPIC_SSE_ADAPTER.parseSSELine', () => {
 })
 
 describe('R1-providers streamSSE（上游装配容错）', () => {
+  it('流空闲超时自愈（批11.8 锚）：僵死流（0 字节不断开）→ abort → 未发事件安全重试成功', async () => {
+    const good = sseLines([
+      JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: '活过来了' } }),
+      JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'end_turn' } }),
+    ])
+    let calls = 0
+    const result = await streamSSE({
+      request: { url: 'https://x.test/m', headers: {}, body: '{}' },
+      adapter: ANTHROPIC_SSE_ADAPTER,
+      onEvent: () => {},
+      streamIdleTimeoutMs: 60,
+      fetchFn: (async () => {
+        calls += 1
+        if (calls === 1) {
+          // 僵死流：响应 200 但永不 enqueue 不断开（实证 2026-10-08 挂死轮形态）
+          const body = new ReadableStream<Uint8Array>({ start() { /* 永远不出字节 */ } })
+          return new Response(body, { status: 200 })
+        }
+        return sseResponse(good)
+      }) as typeof fetch,
+    })
+    expect(calls).toBe(2) // 第一次僵死被空闲超时中断，第二次重发成功
+    expect(result.content).toBe('活过来了')
+    expect(result.stopReason).toBe('end_turn')
+  }, 20_000)
+
+  it('流空闲超时：已发过事件不再重试（防内容重复），错误上抛 llm-call 带反馈重试', async () => {
+    let calls = 0
+    const partial = sseLines([JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: '半截' } })])
+    await expect(
+      streamSSE({
+        request: { url: 'https://x.test/m', headers: {}, body: '{}' },
+        adapter: ANTHROPIC_SSE_ADAPTER,
+        onEvent: () => {},
+        streamIdleTimeoutMs: 60,
+        fetchFn: (async () => {
+          calls += 1
+          // 半截流：吐一段后僵死——hasEmitted 守卫必须拦住重试
+          const encoder = new TextEncoder()
+          const body = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode(partial))
+              /* 之后永不出字节不断开 */
+            },
+          })
+          return new Response(body, { status: 200 })
+        }) as typeof fetch,
+      }),
+    ).rejects.toThrow(/空闲超时|Idle/i)
+    expect(calls).toBe(1) // 已发事件 → 不重试（重试会内容重复）
+  }, 20_000)
+
   it('并行多工具调用全部装配（旧路径单 activeToolUse 会丢）', async () => {
     const stream = sseLines([
       JSON.stringify({ type: 'content_block_start', content_block: { type: 'tool_use', id: 'a', name: 'read_file' } }),

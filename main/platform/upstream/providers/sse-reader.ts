@@ -28,6 +28,11 @@ export interface StreamSSEOptions {
   signal?: AbortSignal
   /** 首字节超时（毫秒），默认 30s。超时触发 AbortError，可被重试逻辑捕获并自动重试 */
   timeoutMs?: number
+  /** 流空闲超时（毫秒），默认 120s。响应头后连续无字节（连接僵死：无事件无错误不断开）
+   *  时主动中断：未发过事件走重试链安全重发；已发过事件上抛由 llm-call 带反馈重试。
+   *  实证 2026-10-08：番茄钟单 740s 挂死轮，向导 8min 无回传只能 stop_delegation
+   *  杀整个子会话续跑——空闲超时把自愈粒度降到单请求 2 分钟。 */
+  streamIdleTimeoutMs?: number
   /** 自定义 fetch 函数（代理等场景下由调用方注入） */
   fetchFn?: typeof globalThis.fetch
 }
@@ -175,7 +180,7 @@ function normalizeToolCallOutputIndex(value: unknown): string | undefined {
 
 /** 单次 SSE 流式尝试（不含重试逻辑；上游原样） */
 async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSEResult> {
-  const { request, adapter, onEvent, signal, fetchFn = fetch, timeoutMs = 30_000 } = options
+  const { request, adapter, onEvent, signal, fetchFn = fetch, timeoutMs = 30_000, streamIdleTimeoutMs = 120_000 } = options
 
   // 真正的"首字节超时"：仅在等待 HTTP 响应期间计时，收到响应后立即清除。
   const timeoutController = new AbortController()
@@ -223,8 +228,32 @@ async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSERes
   let currentThinking: ThinkingBlock | null = null
 
   try {
+    // 流空闲超时（批11.8，2026-10-08）：连接僵死自洁——无字节的 read() 到期后
+    // cancel 流解阻塞，携专用错误上抛（isRetriableError 对其放行 → 外层安全重试）
+    let idleTimer: ReturnType<typeof setTimeout> | undefined
+    let idleTimedOut = false
+    const armIdleTimer = (): void => {
+      if (idleTimer) clearTimeout(idleTimer)
+      idleTimer = setTimeout(() => {
+        idleTimedOut = true
+        console.warn(`[streamSSE] 流空闲超时（${Math.round(streamIdleTimeoutMs / 1000)}s 无字节）——连接疑似僵死，主动中断重试`)
+        void reader.cancel().catch(() => {})
+      }, streamIdleTimeoutMs)
+    }
     while (true) {
-      const { done, value } = await reader.read()
+      armIdleTimer()
+      let readResult: ReadableStreamReadResult<Uint8Array>
+      try {
+        readResult = await reader.read()
+      } finally {
+        if (idleTimer) clearTimeout(idleTimer)
+      }
+      if (idleTimedOut) {
+        const err = new Error(`SSE 流空闲超时：${Math.round(streamIdleTimeoutMs / 1000)}s 无任何字节（连接僵死）`)
+        err.name = 'StreamIdleTimeoutError'
+        throw err
+      }
+      const { done, value } = readResult
       if (done) break
 
       buffer += decoder.decode(value, { stream: true })

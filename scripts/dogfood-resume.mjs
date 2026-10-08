@@ -4,7 +4,7 @@
 // 从项目历史打开目标项目；交付检测只认目标 project_id 的存储终态。
 // 用法：node scripts/dogfood-resume.mjs --project-id <id> --message-file <path> [--timeout-min 45]
 import { execSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -208,6 +208,83 @@ function readP0Findings(projectDir) {
   }
 }
 
+/** 最新纠错会话元信息（correction-session 落盘 meta.json，批11.7）。 */
+function readCorrectionMeta(projectDir) {
+  try {
+    const base = join(projectDir, '00_CORRECTION')
+    if (!existsSync(base)) return null
+    const dirs = readdirSync(base)
+      .map((n) => join(base, n))
+      .filter((d) => { try { return statSync(d).isDirectory() } catch { return false } })
+      .sort()
+    for (const d of [...dirs].reverse()) {
+      const metaPath = join(d, 'meta.json')
+      if (existsSync(metaPath)) {
+        try { return { ...JSON.parse(readFileSync(metaPath, 'utf8')), sessionDir: d } } catch { /* 试更早的 */ }
+      }
+    }
+  } catch {
+    // 无会话目录
+  }
+  return null
+}
+
+/** drive-port /eval（独立纠错实例操控通道，批11.7 修复后可靠）。 */
+async function driveEval(port, js, timeoutMs = 8000) {
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    const resp = await fetch(`http://127.0.0.1:${port}/eval`, { method: 'POST', body: JSON.stringify({ js }), signal: ctrl.signal })
+    return await resp.json()
+  } finally {
+    clearTimeout(t)
+  }
+}
+
+/** MVP 点点看后置流程（批11.7 移植）：等实例就绪→程序化点选×2+done→picks 落盘校验。 */
+async function runPickFlow(projectDir) {
+  const startedAt = Date.now()
+  let meta = null
+  while (Date.now() - startedAt < 45_000) {
+    const m = readCorrectionMeta(projectDir)
+    if (m && Date.now() - new Date(m.startedAt).getTime() < 10 * 60_000) { meta = m; break }
+    await sleep(1500)
+  }
+  if (!meta) return { ok: false, error: 'correction-meta-not-found（修改预览实例未在 45s 内就绪）' }
+  let simOk = false
+  for (let i = 0; i < 20 && !simOk; i++) {
+    const r = await driveEval(meta.drivePort, 'window.CorrectionSimulate ? 1 : 0').catch(() => null)
+    if (r && r.ok && r.result === 1) simOk = true
+    else await sleep(1500)
+  }
+  if (!simOk) return { ok: false, error: 'CorrectionSimulate-not-ready', drivePort: meta.drivePort }
+  const pickDefs = [
+    { kind: 'visual', note: '自动验收：这里不够醒目' },
+    { kind: 'function', note: '自动验收：操作反馈不够明显' },
+  ]
+  const selectors = ['.w-row', 'button', '.w-banner', '.w-card', 'input', '.w-chip']
+  const picks = []
+  for (const def of pickDefs) {
+    for (const sel of selectors) {
+      const r = await driveEval(meta.drivePort, `JSON.stringify(window.CorrectionSimulate ? CorrectionSimulate.pick(document.querySelector(${JSON.stringify(sel)}), {kind:${JSON.stringify(def.kind)}, note:${JSON.stringify(def.note)}}) : {ok:false})`).catch(() => null)
+      let parsed = null
+      try { parsed = r && r.ok ? JSON.parse(r.result) : null } catch { parsed = null }
+      if (parsed && parsed.ok) { picks.push({ selector: sel, ...parsed }); break }
+    }
+  }
+  await driveEval(meta.drivePort, 'CorrectionSimulate.done(); "done"').catch(() => null)
+  await sleep(1500)
+  let persisted = null
+  try {
+    const raw = readFileSync(join(meta.sessionDir, 'picks.jsonl'), 'utf8')
+    const lines = raw.trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
+    persisted = { picks: lines.filter((l) => l.type === 'pick').length, done: lines.some((l) => l.type === 'done') }
+  } catch {
+    // 未落盘
+  }
+  return { ok: picks.length >= 1 && Boolean(persisted && persisted.done), picks, persisted, drivePort: meta.drivePort, sessionDir: meta.sessionDir }
+}
+
 const report = {
   run_id: randomUUID().slice(0, 8),
   project_id: PROJECT_ID,
@@ -254,9 +331,11 @@ try {
 
   const port = 9600 + Math.floor(Math.random() * 190)
   log(`启动 Bloma（CDP port=${port}）`)
+  // 主进程 stdio 落盘（批11.8）：传输层警告留痕（同 dogfood-run）
+  const mainLog = openSync(join(REPORT_DIR, 'bloma-main.log'), 'a')
   electronChild = spawn(ELECTRON, ['.', '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${port}`], {
     cwd: REPO,
-    stdio: 'ignore',
+    stdio: ['ignore', mainLog, mainLog],
     detached: false,
   })
   cdp = await Cdp.connect(port, 40_000)
@@ -338,6 +417,8 @@ try {
   const deadline = Date.now() + TIMEOUT_MIN * 60_000
   const cooldown = new Map()
   let mvpRound = 0
+  /* MVP 点点看轮（批11.7 移植自 dogfood-run）：只走一轮 */
+  let pickRoundDone = false
   let blockedLastLog = 0
   // 假阳性防护（批10.5 审查C P1-2）：目标项目续跑前可能已是 completed（既降级单回炉后
   // 重验场景）——发消息到链路真正接管（状态离开 completed）之间的窗口里，首轮轮询
@@ -404,6 +485,11 @@ try {
       action = { id: 'ux_confirm_go', why: 'UX 草图确认（自动）' }
     } else if (pick('ux_delegate')) {
       action = { id: 'ux_delegate', why: 'UX 委托开工（自动）' }
+    } else if (pick('mvp_pick') && !pickRoundDone) {
+      pickRoundDone = true
+      mvpRound += 1
+      log(`MVP 点点看轮（程序化点选链验证）`)
+      action = { id: 'mvp_pick', why: 'MVP 点点看（点选纠错链验证轮）', pickFlow: true }
     } else if (pick('mvp_confirm_go') || pick('mvp_adjust')) {
       const p0 = readP0Findings(projectDir)
       if (p0.length === 0) {
@@ -434,6 +520,22 @@ try {
         cooldown.set(cooldownKey, Date.now())
         report.cards_answered.push({ t: new Date().toISOString(), ...action })
         log(`卡应答：${cooldownKey}（${action.why}）`)
+        if (action.pickFlow) {
+          const flow = await runPickFlow(projectDir)
+          report.pick_flow = flow
+          if (flow.ok) {
+            log(`程序化点选完成：${flow.picks.length} 处，picks.jsonl=${JSON.stringify(flow.persisted)}（drivePort=${flow.drivePort}）`)
+            await sleep(4000)
+            const fb = await cdp.eval(`(${TYPE_AND_SEND})(${JSON.stringify('点选之外再补一句：标题字号调大一点，整体更清爽。')})`)
+            log(`点选后补充反馈发送：${JSON.stringify(fb)}`)
+            report.pick_flow.feedback_sent = fb?.ok === true
+          } else {
+            log(`点选链未就绪（${flow.error}）——退化为纯文字反馈回炉`)
+            await sleep(4000)
+            await cdp.eval(`(${TYPE_AND_SEND})(${JSON.stringify('把标题字号调大一点，整体更清爽一些。')})`)
+          }
+          continue
+        }
         if (action.feedback) {
           await sleep(4000)
           const fb = await cdp.eval(`(${TYPE_AND_SEND})(${JSON.stringify(action.feedback)})`)

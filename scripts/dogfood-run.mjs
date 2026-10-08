@@ -18,7 +18,7 @@
  * 输出：stdout 时间线 + <repo>/run-artifacts/dogfood-run-report.json（运行产物统一收纳，gitignore 已覆盖）
  */
 import { spawn, execSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -455,11 +455,16 @@ let cdp = null
 
 try {
   log(`启动 Bloma（CDP port=${report.port}，真实 home）`)
+  // 主进程 stdio 落盘（批11.8，2026-10-08）：[streamSSE]/[providers-query] 等传输层
+  // 警告此前被 ignore 丢弃——740s 挂死轮排查全程无日志可查，只能逆向 JSONL 破案
+  const mainLogPath = join(REPORT_DIR, 'bloma-main.log')
+  const mainLog = openSync(mainLogPath, 'a')
   electronChild = spawn(ELECTRON, ['.', '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${report.port}`], {
     cwd: REPO,
-    stdio: 'ignore',
+    stdio: ['ignore', mainLog, mainLog],
     detached: false,
   })
+  log(`主进程日志：${mainLogPath}`)
   cdp = await Cdp.connect(report.port, 40_000)
   log('CDP 已连接渲染页')
 
@@ -652,7 +657,7 @@ try {
       log(`草图点选轮（标记回炉重画）——顺延超时 +12min`)
       const pm = await cdp.eval(`window.postMessage(${JSON.stringify({ label: 'bloma-sketch-pick', pick: { seq: 1, kind: 'layout', kindLabel: '布局问题', target: '区域（记录列表）', text: '', note: '列表区太挤，留白多一点', rect: { x: 8, y: 120, w: 400, h: 300 } } })}, '*'); 'pm-sent'`)
       await sleep(1500)
-      const sent = await cdp.eval(`(${CLICK_OPTION})(${JSON.stringify('sketch-picks-send')})`)
+      const sent = await cdp.eval(`(${CLICK_RAW_ANCHOR})(${JSON.stringify('sketch-picks-send')})`)
       log(`草图标记发送：pm=${JSON.stringify(pm)} send=${JSON.stringify(sent)}`)
       report.cards_answered.push({ t: new Date().toISOString(), id: 'sketch_correction', why: '草图点选标记（回炉重画一轮）', sent: sent?.ok === true })
       report.sketch_pick_flow = { postMessage: pm?.result ?? pm, send: sent }
