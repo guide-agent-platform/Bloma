@@ -20,6 +20,7 @@ import { loadPromptOverride } from '../agent/prompting/prompt-config'
 import { findProject } from '../project/project-service'
 import { mintProjectPreviewUrl } from '../delivery/preview-scheme'
 import type { SketchRequirement } from '../coding/sketch-engine'
+import { injectSketchCorrector } from './sketch-corrector'
 
 const UX_SKETCH_DIR = '00_UX'
 const UX_SKETCH_FILENAME = 'ux-sketch.html'
@@ -187,7 +188,9 @@ export async function stageUxSketch(options: {
   const dir = join(project.root_path, UX_SKETCH_DIR)
   mkdirSync(dir, { recursive: true })
   const sketchPath = join(dir, UX_SKETCH_FILENAME)
-  writeFileSync(sketchPath, options.html, 'utf8')
+  // 点选层注入（批11 ①，2026-10-08）：草图落盘时内联注入——右栏渲染即获得点选标记
+  //（元素级语义，无需纠错实例；平台注入的确定性脚本，非 LLM 产出，不违草图禁脚本纪律）。
+  writeFileSync(sketchPath, injectSketchCorrector(options.html), 'utf8')
   const previewUrl = mintProjectPreviewUrl(options.project_id, `${UX_SKETCH_DIR}/${UX_SKETCH_FILENAME}`)
   return { preview_url: previewUrl, sketch_path: sketchPath }
 }

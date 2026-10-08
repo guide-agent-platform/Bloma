@@ -86,7 +86,7 @@ describe('runTestEffectivenessGates（批6 编排）', () => {
 
   it('预算耗尽 → 剩余点 not_run 如实记录（不伪装成通过）', async () => {
     const { root, contract } = makeRoot()
-    const deps = stubDeps({ budgetMs: 0 })
+    const deps = stubDeps({ budgetMs: -1 }) // -1=已耗尽（0 在快机器同毫秒不触发 >0 判定，时钟竞态实锤 2026-10-08）
     const outcome = await runTestEffectivenessGates({ rootPath: root, contract, p0Fids: ['F-001'], entryFile: 'app.py', deps })
     expect(outcome.faultKill.entries[0]).toMatchObject({ result: 'not_run' })
     expect(outcome.faultKill.passed).toBe(true) // not_run 不阻塞（首版口径），但如实计数

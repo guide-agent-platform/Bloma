@@ -27,6 +27,8 @@ import { readLlmQualification, type LlmQualificationOutcome } from './provider-q
 
 export const MVP_OPTION_CONFIRM = 'mvp_confirm_go'
 export const MVP_OPTION_ADJUST = 'mvp_adjust'
+/** 批11 ②（2026-10-08）：先在程序里点点看——打开修改预览实例点选标记问题再决定。 */
+export const MVP_OPTION_PICK = 'mvp_pick'
 
 const MVP_REVIEW_RELATIVE_PATH = '00_VERIFY/mvp-review.html'
 
@@ -326,6 +328,7 @@ export function holdForMvpConfirm(options: {
     questions: [
       { id: MVP_OPTION_CONFIRM, label: '确认，交付', description: '验收已全绿，正式交付' },
       { id: MVP_OPTION_ADJUST, label: '有要修改的', description: '直接说要改哪里，改完重新验收' },
+      { id: MVP_OPTION_PICK, label: '先在程序里点点看', description: '打开修改预览，点选标记不满意的地方再决定' },
     ],
   })
   deps.complete(input.sessionId, input.projectId)
@@ -337,10 +340,11 @@ export function resetMvpConfirmForTests(): void {
 }
 
 /** MVP 卡回传识别（desktop-route 消息入口调用；返回 undefined 则不拦截）。 */
-export function resolveMvpConfirmAnswer(input: { projectId: string; cardOptionId?: string }): 'confirm' | 'adjust' | undefined {
+export function resolveMvpConfirmAnswer(input: { projectId: string; cardOptionId?: string }): 'confirm' | 'adjust' | 'pick' | undefined {
   if (!isMvpConfirmPending(input.projectId)) return undefined
   if (input.cardOptionId === MVP_OPTION_CONFIRM) return 'confirm'
   if (input.cardOptionId === MVP_OPTION_ADJUST) return 'adjust'
+  if (input.cardOptionId === MVP_OPTION_PICK) return 'pick'
   return undefined
 }
 

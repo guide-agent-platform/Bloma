@@ -16,6 +16,7 @@ import { join } from 'node:path'
 import { findProject } from '../project/project-service'
 import { parseLaunchDeclaration } from './launch-smoke'
 import { violatesCommandBlacklist } from './contract-schema'
+import { isMvpConfirmPending } from './mvp-confirm'
 
 /** 会话目录相对项目根（00_ 前缀对齐工程目录惯例；picks/data/outputs 平铺其内）。 */
 export const CORRECTION_DIR_REL = '00_CORRECTION'
@@ -86,7 +87,8 @@ function randomPort(): number {
  */
 export async function startCorrectionSession(input: { projectId: string }): Promise<CorrectionStartResult> {
   const project = findProject(input.projectId)
-  if (project.current_stage !== 'completed') {
+  // 批11 ②：MVP 门挂起态也允许拉起（「先在程序里点点看」选项）——未交付且无挂起门才拦
+  if (project.current_stage !== 'completed' && !isMvpConfirmPending(input.projectId)) {
     return { ok: false, reason: 'not-delivered', error: 'CORRECTION_NOT_DELIVERED: 项目尚未完成交付，不能进入修改预览' }
   }
   if (activeSessions.has(input.projectId)) {
@@ -272,6 +274,30 @@ export function pruneCorrectionSessions(projectId: string, keep = 3): void {
   } catch {
     // 清理失败不阻断
   }
+}
+
+/** 活跃纠错会话判定（MVP 门 pick 选项/渲染端入口提示用）。 */
+export function hasActiveCorrectionSession(projectId: string): boolean {
+  return activeSessions.has(projectId)
+}
+
+/**
+ * 点选标记自动并入用户反馈（批11 ②，2026-10-08）：MVP 门挂起期用户打字反馈时，
+ * 若存在活跃纠错会话且有选区——finish（kill 实例）+主进程组装反馈与用户文本拼接；
+ * 无会话或零选区返回 undefined（用户纯文字意见照旧）。
+ */
+export function attachActiveCorrectionFeedback(projectId: string, userText: string): string | undefined {
+  if (!activeSessions.has(projectId)) return undefined
+  const snapshot = readCorrectionPicks({ projectId })
+  if (snapshot.picks.length === 0) {
+    finishCorrectionSession({ projectId })
+    return undefined
+  }
+  const project = findProject(projectId)
+  const correctionText = finishCorrectionSession({ projectId }).feedback
+  if (!correctionText) return undefined
+  const userPart = userText.trim()
+  return userPart ? `${correctionText}\n（用户补充：${userPart}）` : correctionText
 }
 
 /** 组装回炉反馈文本（人话；组件定位信息内嵌供 implement 定位；走 delivered 反馈回炉链）。 */

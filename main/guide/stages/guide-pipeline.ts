@@ -76,6 +76,7 @@ import {
   runUxAdjustRound,
   startUxAdjustAwait,
   takeUxAdjustFeedback,
+  takeUxSketchCorrection,
   tryResumeUxAdjustAsConfirm,
 } from '../ux-confirm'
 import { classifyUserDesktopIntent } from '../../desktop/user-intent-lexicon'
@@ -467,6 +468,13 @@ export async function handleGuideMessage(
   }
   // 等反馈态：继续词或回门词＝按当前版开工（先于反馈消费判定，防「继续」被当修订意见重画）
   if (await tryResumeUxAdjustAsConfirm(input, classifyUserDesktopIntent(input.content) === 'continue' || isUxResumeIntent(input.content))) {
+    return
+  }
+  // 草图点选标记（批11 ①）：UX 挂起态的 source=sketch_correction 消息一步消化
+  //（等价「点了有要调整的 + 给了意见」——标记优先于普通反馈判定）
+  const uxSketchCorrection = takeUxSketchCorrection(input)
+  if (uxSketchCorrection) {
+    await runUxAdjustRound(input, uxSketchCorrection)
     return
   }
   const uxAdjustFeedback = takeUxAdjustFeedback(input)

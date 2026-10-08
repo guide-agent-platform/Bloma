@@ -853,7 +853,7 @@ export interface AgentSendMessageInput extends RequestEnvelope {
   /** 剪贴板粘贴图片引用（clipboard-paste P1，2026-08-29）：随消息一同进模型与 JSONL */
   images?: PastedImageRef[]
   metadata?: {
-    source: 'chat' | 'card_option' | 'system_resume'
+    source: 'chat' | 'card_option' | 'system_resume' | 'sketch_correction'
     selected_option_id?: string
     /** PRD 确认卡 confirm 时勾选采纳的市调想法（2026-08-29 灵感参考，四段式卡同样可采纳） */
     adopted_ideas?: string[]

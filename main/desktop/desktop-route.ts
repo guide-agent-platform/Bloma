@@ -61,6 +61,7 @@ import {
   isMvpFeedbackMessage,
   resolveMvpConfirmAnswer,
 } from './mvp-confirm'
+import { attachActiveCorrectionFeedback, startCorrectionSession } from './correction-session'
 import { buildCheckpointConclusion } from './phase-checkpoint'
 import { createChannelFailureTracker, observeChannelFailure, type ChannelFailureTracker } from './channel-failure-watch'
 import { readDesktopRequirementsDigest, readDesktopShapeBriefs } from './requirement-digest'
@@ -284,8 +285,30 @@ export async function handleDesktopDispatchMessage(
     deps.complete(input.sessionId, input.projectId)
     return
   }
+  // 批11 ②（2026-10-08）：先在程序里点点看——拉起修改预览实例（数据只读快照+页内
+  // 点选层）；点选标记落盘 picks.jsonl，用户后续文字反馈/确认时自动并入（下分支）。
+  if (mvpAnswer === 'pick') {
+    const correctionStart = startCorrectionSession({ projectId: input.projectId })
+    void Promise.resolve(correctionStart).then((started) => {
+      if (started.ok) {
+        deps.publish(input, 'message_delta', {
+          text: '修改预览已打开（数据只读，不会动你的真实数据）：在预览窗口里直接点选不满意的地方；点完后回来把要改的直接告诉我，或点上面的「确认，交付」/「有要修改的」做决定。',
+        })
+      } else {
+        deps.publish(input, 'message_delta', {
+          text: `修改预览没能打开（${started.error ?? '未知原因'}）——你可以直接打字告诉我要改哪里，或点「确认，交付」。`,
+        })
+      }
+      deps.complete(input.sessionId, input.projectId)
+    })
+    return
+  }
   if (isMvpFeedbackMessage(input, classifyUserDesktopIntent(input.content) === 'stop')) {
     consumeMvpPendingForRework(input)
+    // 批11 ②：活跃纠错会话的点选标记自动并入意见（finish=kill 实例+组装反馈单一来源）
+    let feedbackContent = input.content
+    const correctionAttached = attachActiveCorrectionFeedback(input.projectId, input.content)
+    if (correctionAttached) feedbackContent = correctionAttached
     updateProject(input.projectId, { desktop_phase: 'desktop-implement', status: 'active', current_stage: 'iterating' })
     deps.publish(input, 'mvp_review_closed', {})
     deps.publish(input, 'stage_changed', { stage: 'desktop-implement' })
@@ -295,7 +318,7 @@ export async function handleDesktopDispatchMessage(
         projectId: input.projectId,
         sessionId: input.sessionId,
         requestId: input.requestId,
-        content: `【交付前迭代】用户对验收通过产物的修改意见，按此修改实现（其余功能与已验证行为保持不变）：${input.content}`,
+        content: `【交付前迭代】用户对验收通过产物的修改意见，按此修改实现（其余功能与已验证行为保持不变）：${feedbackContent}`,
         signal: input.signal,
       },
       input.query, input.env, 'desktop-implement', deps, projectName, 0,

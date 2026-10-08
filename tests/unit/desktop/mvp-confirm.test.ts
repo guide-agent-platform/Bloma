@@ -88,7 +88,7 @@ describe('holdForMvpConfirm（挂起）', () => {
     const html = readFileSync(join(projectRoot, '00_VERIFY', 'mvp-review.html'), 'utf8')
     expect(html).toContain('screenshots/S1.png')
     expect(html).toContain('7/9 场景 PASS')
-    expect((card?.payload.questions as Array<{ id: string }>).map((q) => q.id)).toEqual([MVP_OPTION_CONFIRM, MVP_OPTION_ADJUST])
+    expect((card?.payload.questions as Array<{ id: string }>).map((q) => q.id)).toEqual([MVP_OPTION_CONFIRM, MVP_OPTION_ADJUST, 'mvp_pick'])
     expect(mockUpdate).not.toHaveBeenCalledWith('p1', expect.objectContaining({ desktop_phase: 'delivered' }))
     expect(mockDecision).toHaveBeenCalledWith(expect.objectContaining({
       entry: expect.objectContaining({ type: 'mvp_confirm', title: expect.stringContaining('挂起') }),

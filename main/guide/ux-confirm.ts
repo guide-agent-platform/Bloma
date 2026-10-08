@@ -173,6 +173,33 @@ export function resetUxConfirmForTests(): void {
   pendingUxAdjusts.clear()
 }
 
+/** 测试隔离种子（生产无用；批11 ①测试）：直接置挂起态/等反馈态。 */
+export function seedUxConfirmForTests(pending: { project_id: string; session_id: string; round: number }): void {
+  pendingUxConfirms.set(pending.project_id, {
+    request_id: 'r-seed',
+    session_id: pending.session_id,
+    project_id: pending.project_id,
+    mode: 'quick',
+    query: {} as never,
+    env: {},
+    publish: () => undefined,
+    signal: undefined,
+    round: pending.round,
+    positioning: 'seed',
+    requirements: [],
+  })
+}
+
+/** 测试隔离种子（等反馈态）。 */
+export function seedUxAdjustWaitForTests(pending: { project_id: string; session_id: string; round: number }): void {
+  seedUxConfirmForTests(pending)
+  const taken = pendingUxConfirms.get(pending.project_id)
+  if (taken) {
+    pendingUxConfirms.delete(pending.project_id)
+    pendingUxAdjusts.set(pending.project_id, taken)
+  }
+}
+
 /** 确认卡回传识别：card_option 且选项 id 专属、pending 仍存活时才拦截。 */
 export function resolveUxConfirmCardAnswer(input: AgentSendMessageInput): 'confirm' | 'adjust' | 'dismiss' | undefined {
   if (input.metadata?.source !== 'card_option') return undefined
@@ -266,6 +293,24 @@ export function takeUxAdjustFeedback(input: AgentSendMessageInput): { pending: P
     return undefined
   }
   pendingUxAdjusts.delete(input.project_id)
+  return { pending, feedback: text }
+}
+
+/**
+ * 草图点选标记（批11 ①，2026-10-08）：UX 门挂起态收到 source=sketch_correction 的
+ * 消息＝「点了有要调整的 + 给了意见」一步消化（右栏草图点选层组装的标记清单经
+ * AGENT_SEND_MESSAGE 代发）——无需先点卡再打字；等反馈态同样适用（标记优先）。
+ * 返回结构同 takeUxAdjustFeedback（复用 runUxAdjustRound 的有界回炉与轮次语义）。
+ */
+export function takeUxSketchCorrection(input: AgentSendMessageInput): { pending: PendingUxConfirm; feedback: string } | undefined {
+  if (input.metadata?.source !== 'sketch_correction') return undefined
+  const inAdjustWait = pendingUxAdjusts.has(input.project_id)
+  const pending = (inAdjustWait ? pendingUxAdjusts : pendingUxConfirms).get(input.project_id)
+  if (!pending) return undefined
+  const text = input.content.trim()
+  if (!text) return undefined
+  if (inAdjustWait) pendingUxAdjusts.delete(input.project_id)
+  else pendingUxConfirms.delete(input.project_id)
   return { pending, feedback: text }
 }
 

@@ -13,6 +13,7 @@ vi.mock('../../../main/project/project-service', () => ({
 
 import { findProject } from '../../../main/project/project-service'
 import {
+  attachActiveCorrectionFeedback,
   buildCorrectionFeedback,
   startCorrectionSession,
   type CorrectionPick,
@@ -85,6 +86,12 @@ describe('startCorrectionSession（失败分支——如实拒绝不静默）', 
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
+  })
+})
+
+describe('attachActiveCorrectionFeedback（批11 ②：点选标记自动并入反馈）', () => {
+  it('无活跃会话 → undefined（用户纯文字照旧）', () => {
+    expect(attachActiveCorrectionFeedback('p-none', '改个颜色')).toBeUndefined()
   })
 })
 

@@ -3,7 +3,7 @@ type DomCollectContextResult = { fallback_mode: boolean; element_selector?: stri
 import React from 'react'
 import { useAtomValue } from 'jotai'
 import { RotateCw, Maximize2, Minimize2, Camera, LayoutTemplate, AlertTriangle } from './icons'
-import { hasActiveStreamAtom, workflowStageAtom, globalUserErrorAtom } from './atoms'
+import { hasActiveStreamAtom, workflowStageAtom, globalUserErrorAtom, activeAgentSessionIdAtom, currentProjectAtom } from './atoms'
 
 export type PreviewStatus = 'empty' | 'loading' | 'running' | 'error'
 
@@ -64,12 +64,50 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
   const hasStream = useAtomValue(hasActiveStreamAtom)
   const stage = useAtomValue(workflowStageAtom)
   const globalError = useAtomValue(globalUserErrorAtom)
+
+  /* 草图点选标记监听（仅草图场景：onConfirmSketch 存在）：注入层 postMessage → 收集 */
+  React.useEffect(() => {
+    if (!onConfirmSketch) return
+    const onMessage = (event: MessageEvent): void => {
+      const data = event.data as { label?: string; pick?: { seq: number; kindLabel: string; target: string; text: string; note: string } } | undefined
+      if (data?.label !== 'bloma-sketch-pick' || !data.pick) return
+      setSketchPicks((prev) => [...prev, data.pick!])
+      setSketchSent(false)
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [onConfirmSketch])
+
+  const onSketchSend = async (): Promise<void> => {
+    if (sketchPicks.length === 0 || !project) return
+    const api = window.electronAPI?.agent
+    if (!api?.sendMessage || !sessionId) return
+    const lines = sketchPicks.map((pick, index) => `${index + 1}. ${pick.target}——${pick.kindLabel}${pick.note ? `：「${pick.note}」` : ''}`)
+    const content = `我在草图上标记了 ${sketchPicks.length} 处不满意的地方：\n${lines.join('\n')}\n请按这些标记调整草图后再给我看。`
+    await api.sendMessage({
+      request_id: crypto.randomUUID(),
+      session_id: sessionId,
+      project_id: project.project_id,
+      content,
+      mode: project.mode ?? 'quick',
+      current_stage: project.current_stage ?? 'clarifying',
+      metadata: { source: 'sketch_correction' },
+    })
+    setSketchPicks([])
+    setSketchSent(true)
+  }
   const [showControls, setShowControls] = React.useState(false)
   const [correctionActive, setCorrectionActive] = React.useState(false)
   const [correctionMode, setCorrectionMode] = React.useState(false)
   const [correctionPos, setCorrectionPos] = React.useState({ x: 0, y: 0 })
   const [correctionNote, setCorrectionNote] = React.useState('')
   const [correctionDomContext, setCorrectionDomContext] = React.useState<DomCollectContextResult | null>(null)
+  /* 草图点选标记（批11 ①，2026-10-08）：草图内注入层 postMessage 回传 → 收集 →
+     发送 source=sketch_correction 消息（主进程 ux-confirm 一步消化=有要调整的+意见） */
+  const [sketchPicks, setSketchPicks] = React.useState<Array<{ seq: number; kindLabel: string; target: string; text: string; note: string }>>([])
+  const [sketchSent, setSketchSent] = React.useState(false)
+  const sessionId = useAtomValue(activeAgentSessionIdAtom)
+  const project = useAtomValue(currentProjectAtom)
   const iframeRef = React.useRef<HTMLIFrameElement>(null)
 
   // 纠错模式下转发滚轮/中键拖拽滚动到跨域预览 iframe：捕获层盖在 iframe 上方会挡住滚动，
@@ -353,6 +391,52 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
               />
             )}
           </>
+        )}
+        {/* 草图点选标记浮条（批11 ①，2026-10-08）：草图内注入层标记收集后发送调整意见 */}
+        {onConfirmSketch && (sketchPicks.length > 0 || sketchSent) && (
+          <div
+            data-ai-id="sketch-picks-bar"
+            style={{
+              position: 'absolute', top: 10, right: 10, zIndex: 20,
+              display: 'flex', alignItems: 'center', gap: 8,
+              background: 'rgba(255,255,255,.96)', border: '1px solid var(--color-border)',
+              borderRadius: 10, padding: '6px 10px', boxShadow: '0 4px 16px rgba(0,0,0,.1)',
+              fontSize: 'var(--font-size-xs)',
+            }}
+          >
+            {sketchPicks.length > 0 ? (
+              <>
+                <span style={{ fontWeight: 700, color: '#4f46e5' }}>✎ 已标记 {sketchPicks.length} 处</span>
+                <span style={{ color: 'var(--color-text-muted)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {sketchPicks[sketchPicks.length - 1]!.target}
+                </span>
+                <button
+                  data-ai-id="sketch-picks-send"
+                  onClick={() => void onSketchSend()}
+                  style={{
+                    border: 'none', borderRadius: 8, padding: '4px 12px', cursor: 'pointer',
+                    background: 'linear-gradient(90deg,#4f46e5,#6366f1)', color: '#fff',
+                    fontSize: 'var(--font-size-xs)', fontWeight: 700, fontFamily: 'inherit',
+                  }}
+                >
+                  发送调整意见
+                </button>
+                <button
+                  data-ai-id="sketch-picks-clear"
+                  onClick={() => setSketchPicks([])}
+                  style={{
+                    border: '1px solid var(--color-border)', borderRadius: 8, padding: '4px 10px',
+                    background: 'var(--white)', color: 'var(--color-text-muted)',
+                    fontSize: 'var(--font-size-xs)', cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
+                  清空
+                </button>
+              </>
+            ) : (
+              <span style={{ color: '#047857', fontWeight: 600 }}>✓ 已提交——草图会按标记重画，稍等片刻</span>
+            )}
+          </div>
         )}
         {displayStatus === 'error' && <ErrorState label={errorLabel ?? globalError ?? undefined} onRetry={onRefresh} />}
 

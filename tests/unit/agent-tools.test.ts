@@ -1,5 +1,5 @@
 import { restorePromaHome } from '../support/proma-home-guard'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
@@ -610,8 +610,11 @@ describe('agent-tools D 系列（咨询 D：验证协议，2026-09-09）', () =>
     const rev = (read.output.match(/文件版本 ([0-9a-f-]+)/) ?? [])[1]
     expect(rev).toBeTruthy()
 
-    // 读后被外部修改 → 传旧 rev 被 STALE_READ 拒绝
+    // 读后被外部修改 → 传旧 rev 被 STALE_READ 拒绝（utimesSync 显式推 mtime：快机器上
+    // 同毫秒重写同尺寸内容会使 mtimeMs+size 版本指纹不变，时钟竞态实锤 2026-10-08）
     writeFileSync(abs, 'const a = 2\n', 'utf8')
+    const bumpedTime = new Date(Date.now() + 2000)
+    utimesSync(abs, bumpedTime, bumpedTime)
     const stale = await byName(tools, 'edit_file').execute(
       { path: 'src/app.js', old_string: 'const a = 2', new_string: 'const a = 3', expected_revision: rev },
       ctx,
