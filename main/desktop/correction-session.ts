@@ -11,7 +11,7 @@
  * 提示），不静默假装。
  */
 import { spawn, type ChildProcess } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { findProject } from '../project/project-service'
 import { parseLaunchDeclaration } from './launch-smoke'
@@ -232,6 +232,16 @@ export async function startCorrectionSession(input: { projectId: string }): Prom
         clearTimeout(timer)
         child.stdout?.removeAllListeners('data')
         if (!session.finished) {
+          // 会话元信息落盘（批11.7，2026-10-08）：狗粮/运维需要发现端口与进程——
+          // 狗粮点选纠错链经 drive-port 程序化点选 CorrectionSimulate；排查也有据可查
+          try {
+            writeFileSync(join(sessionDir, 'meta.json'), JSON.stringify({
+              sessionKey, drivePort, pid: child.pid ?? null, startedAt: session.startedAt,
+              dataSnapshotted, projectId: input.projectId,
+            }, null, 2), 'utf8')
+          } catch {
+            // 元信息落盘失败不阻断会话（点选主链不依赖）
+          }
           resolve({
             ok: true,
             session: {

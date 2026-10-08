@@ -258,6 +258,85 @@ function readP0Findings(projectDir) {
   }
 }
 
+/** 读项目最新纠错会话元信息（meta.json——correction-session 落盘，狗粮/运维发现端口用）。 */
+function readCorrectionMeta(projectDir) {
+  try {
+    const base = join(projectDir, '00_CORRECTION')
+    if (!existsSync(base)) return null
+    const dirs = readdirSync(base)
+      .map((n) => join(base, n))
+      .filter((d) => { try { return statSync(d).isDirectory() } catch { return false } })
+      .sort()
+    for (const d of [...dirs].reverse()) {
+      const metaPath = join(d, 'meta.json')
+      if (existsSync(metaPath)) {
+        try { return { ...JSON.parse(readFileSync(metaPath, 'utf8')), sessionDir: d } } catch { /* 试更早的 */ }
+      }
+    }
+  } catch {
+    // 无会话目录
+  }
+  return null
+}
+
+/** drive-port /eval（独立纠错实例的操控通道，批11.7 修复后可靠）。 */
+async function driveEval(port, js, timeoutMs = 8000) {
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    const resp = await fetch(`http://127.0.0.1:${port}/eval`, { method: 'POST', body: JSON.stringify({ js }), signal: ctrl.signal })
+    return await resp.json()
+  } finally {
+    clearTimeout(t)
+  }
+}
+
+/** MVP 点点看后置流程（批11.7）：等实例就绪（meta.json→CorrectionSimulate 探活）→
+ *  程序化点选×2（双入口与真人同路径）→done→picks.jsonl 落盘校验。 */
+async function runPickFlow(project) {
+  if (!project) return { ok: false, error: 'no-project' }
+  const startedAt = Date.now()
+  let meta = null
+  while (Date.now() - startedAt < 45_000) {
+    const m = readCorrectionMeta(project.dir)
+    if (m && Date.now() - new Date(m.startedAt).getTime() < 10 * 60_000) { meta = m; break }
+    await sleep(1500)
+  }
+  if (!meta) return { ok: false, error: 'correction-meta-not-found（修改预览实例未在 45s 内就绪）' }
+  let simOk = false
+  for (let i = 0; i < 20 && !simOk; i++) {
+    const r = await driveEval(meta.drivePort, 'window.CorrectionSimulate ? 1 : 0').catch(() => null)
+    if (r && r.ok && r.result === 1) simOk = true
+    else await sleep(1500)
+  }
+  if (!simOk) return { ok: false, error: 'CorrectionSimulate-not-ready', drivePort: meta.drivePort }
+  const pickDefs = [
+    { kind: 'visual', note: '自动验收：这里不够醒目' },
+    { kind: 'function', note: '自动验收：操作反馈不够明显' },
+  ]
+  const selectors = ['.w-row', 'button', '.w-banner', '.w-card', 'input', '.w-chip']
+  const picks = []
+  for (const def of pickDefs) {
+    for (const sel of selectors) {
+      const r = await driveEval(meta.drivePort, `JSON.stringify(window.CorrectionSimulate ? CorrectionSimulate.pick(document.querySelector(${JSON.stringify(sel)}), {kind:${JSON.stringify(def.kind)}, note:${JSON.stringify(def.note)}}) : {ok:false})`).catch(() => null)
+      let parsed = null
+      try { parsed = r && r.ok ? JSON.parse(r.result) : null } catch { parsed = null }
+      if (parsed && parsed.ok) { picks.push({ selector: sel, ...parsed }); break }
+    }
+  }
+  await driveEval(meta.drivePort, 'CorrectionSimulate.done(); "done"').catch(() => null)
+  await sleep(1500)
+  let persisted = null
+  try {
+    const raw = readFileSync(join(meta.sessionDir, 'picks.jsonl'), 'utf8')
+    const lines = raw.trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
+    persisted = { picks: lines.filter((l) => l.type === 'pick').length, done: lines.some((l) => l.type === 'done') }
+  } catch {
+    // 未落盘
+  }
+  return { ok: picks.length >= 1 && Boolean(persisted && persisted.done), picks, persisted, drivePort: meta.drivePort, sessionDir: meta.sessionDir }
+}
+
 function readExplorationStatus(projectDir) {
   // B4 driver 侧（2026-10-06 批2）：探索会话状态真相——outcome 非 closed = 探索降级，
   // P0=0 不再自动等同「无问题」（发现④「无数据≠无问题」在驾驶侧的对应防线）。
@@ -498,6 +577,10 @@ try {
   let deadlineExtendMs = 0
   const cooldown = new Map()
   let mvpRound = 0
+  /* 点选纠错链验证轮（批11.7，2026-10-08）：各只走一轮——草图门 postMessage 模拟标记回炉；
+     MVP 门「先在程序里点点看」拉实例→CorrectionSimulate 程序化点选→打字反馈 attach 并入回炉。 */
+  let sketchRoundDone = false
+  let pickRoundDone = false
   let lastTail = ''
   let quietTicks = 0
   let blockedLastLog = 0
@@ -561,10 +644,34 @@ try {
       action = { id: '__requirement_submit', raw: 'requirement-confirm-submit', why: '需求清单确认（自动）' }
     } else if (overlays.clarification) {
       action = { id: '__clarify_auto', raw: 'clarification-option-auto', why: `澄清委托（${clarifyAuto?.label ?? '你帮我决定'}）` }
+    } else if (pick('ux_confirm_go') && !sketchRoundDone) {
+      // 草图点选轮（批11.7）：模拟注入层 postMessage 回传标记→浮条「发送调整意见」→
+      // takeUxSketchCorrection 一步消化（有界回炉重画一轮）——二轮 UX 卡再确认
+      sketchRoundDone = true
+      deadlineExtendMs += 12 * 60_000
+      log(`草图点选轮（标记回炉重画）——顺延超时 +12min`)
+      const pm = await cdp.eval(`window.postMessage(${JSON.stringify({ label: 'bloma-sketch-pick', pick: { seq: 1, kind: 'layout', kindLabel: '布局问题', target: '区域（记录列表）', text: '', note: '列表区太挤，留白多一点', rect: { x: 8, y: 120, w: 400, h: 300 } } })}, '*'); 'pm-sent'`)
+      await sleep(1500)
+      const sent = await cdp.eval(`(${CLICK_OPTION})(${JSON.stringify('sketch-picks-send')})`)
+      log(`草图标记发送：pm=${JSON.stringify(pm)} send=${JSON.stringify(sent)}`)
+      report.cards_answered.push({ t: new Date().toISOString(), id: 'sketch_correction', why: '草图点选标记（回炉重画一轮）', sent: sent?.ok === true })
+      report.sketch_pick_flow = { postMessage: pm?.result ?? pm, send: sent }
+      await sleep(2000)
+      continue
     } else if (pick('ux_confirm_go')) {
       action = { id: 'ux_confirm_go', why: 'UX 草图确认（自动）' }
     } else if (pick('ux_delegate')) {
       action = { id: 'ux_delegate', why: 'UX 委托开工（自动）' }
+    } else if (pick('mvp_pick') && !pickRoundDone) {
+      // MVP 点点看轮（批11.7）：点「先在程序里点点看」→平台拉起修改预览实例（可见窗口+
+      // 页内点选层）→经 meta.json 发现 drivePort→CorrectionSimulate 程序化点选×2+done→
+      // 聊天打字补充反馈（attachActiveCorrectionFeedback 自动并入 picks 回炉）→
+      // 二轮 MVP 卡按 findings 策略收口
+      pickRoundDone = true
+      mvpRound += 1
+      deadlineExtendMs += 20 * 60_000
+      log(`MVP 点点看轮（程序化点选链验证）——回炉轮顺延超时 +20min`)
+      action = { id: 'mvp_pick', why: 'MVP 点点看（点选纠错链验证轮）', pickFlow: true }
     } else if (pick('mvp_confirm_go') || pick('mvp_adjust')) {
       const p0 = project ? readP0Findings(project.dir) : []
       if (p0.length === 0) {
@@ -608,6 +715,24 @@ try {
         cooldown.set(cooldownKey, Date.now())
         report.cards_answered.push({ t: new Date().toISOString(), ...action, label: clicked.label })
         log(`卡应答：${cooldownKey}（${action.why}）`)
+        if (action.pickFlow) {
+          // 点点看后置（批11.7）：实例就绪→程序化点选×2+done→落盘校验→打字补充反馈
+          // （attachActiveCorrectionFeedback 自动并入 picks 回炉）；失败退化纯文字保主链
+          const flow = await runPickFlow(project)
+          report.pick_flow = flow
+          if (flow.ok) {
+            log(`程序化点选完成：${flow.picks.length} 处，picks.jsonl=${JSON.stringify(flow.persisted)}（drivePort=${flow.drivePort}）`)
+            await sleep(4000)
+            const fb = await cdp.eval(`(${TYPE_AND_SEND})(${JSON.stringify('点选之外再补一句：标题字号调大一点，整体更清爽。')})`)
+            log(`点选后补充反馈发送：${JSON.stringify(fb)}`)
+            report.pick_flow.feedback_sent = fb?.ok === true
+          } else {
+            log(`点选链未就绪（${flow.error}）——退化为纯文字反馈回炉，主链不断`)
+            await sleep(4000)
+            await cdp.eval(`(${TYPE_AND_SEND})(${JSON.stringify('把标题字号调大一点，整体更清爽一些。')})`)
+          }
+          continue
+        }
         if (action.feedback) {
           await sleep(4000)
           const fb = await cdp.eval(`(${TYPE_AND_SEND})(${JSON.stringify(action.feedback)})`)
