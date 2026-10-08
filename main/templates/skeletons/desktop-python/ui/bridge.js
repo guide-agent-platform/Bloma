@@ -4,10 +4,32 @@
 window.App = (function () {
   "use strict";
 
+  /** 驱动/纠错模式识别（URL 带 dport）：Api 调用走 HTTP /call 直达 Python。
+   *  为什么：pywebview js_api 的回推（Python→JS 注入）与平台 /eval 的 evaluate_js
+   *  并发会死锁（真机实证 2026-10-08：click 后页面 await 永不 resolve、/eval 挂死、
+   *  与窗口可见性无关）；HTTP 通道不占 UI 线程，彻底避开。正常启动无 dport 仍走
+   *  pywebview.api（零 HTTP 依赖）。 */
+  function driveDport() {
+    var m = /[?&]dport=(\d+)/.exec(window.location.search);
+    return m ? m[1] : "";
+  }
+
   /** 调 Python api 方法：await App.call("op_name", arg1, ...) → Python 返回值。
    *  失败如实抛出（UI 层 catch 后走失败态横幅，不吞异常）。 */
   async function call(op) {
     var args = Array.prototype.slice.call(arguments, 1);
+    var port = driveDport();
+    if (port) {
+      // drive/纠错模式：HTTP /call（body 默认 text/plain——simple request 免预检；
+      // 服务端 ACAO:* 已配）
+      var resp = await fetch("http://127.0.0.1:" + port + "/call", {
+        method: "POST",
+        body: JSON.stringify({ op: op, args: args }),
+      });
+      var body = await resp.json();
+      if (!body.ok) throw new Error(body.error || "call failed: " + op);
+      return body.result;
+    }
     if (window.pywebview && pywebview.api && pywebview.api[op]) {
       var raw = await pywebview.api[op].apply(null, args);
       try { return JSON.parse(raw); } catch (e) { return raw; }

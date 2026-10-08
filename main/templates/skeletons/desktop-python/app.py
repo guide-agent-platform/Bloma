@@ -12,8 +12,10 @@
       python app.py --self-check          骨架自检（退出码 0=完整）
       python app.py --offscreen           离屏模式（窗口在屏幕外渲染照常——UI 截图场景用，
                                           零闪现零抢焦点，PrintWindow 截图不受影响）
-      python app.py --drive-port N        探索驱动模式（隐藏窗口 + 127.0.0.1 控制服务器，
-                                          POST /eval {"js":...} → evaluate_js；平台探索桥用）
+      python app.py --drive-port N        探索驱动模式（屏幕外窗口 + 127.0.0.1 控制服务器，
+                                          POST /eval {"js":...} → evaluate_js；平台探索桥用。2026-10-08 回归修复：
+                                          原为隐藏窗口——WebView2 hidden 渲染循环暂停，click 后 js 回程挂起，
+                                          改屏幕外坐标（渲染照常，回程可靠，零闪现零抢焦点不变））
       python app.py --correction-session <dir> --drive-port N   修改预览模式（平台点选纠错拉起：
                                           可见窗口 + 页内点选层，选区写入 <dir>/picks.jsonl；
                                           数据目录经 APP_DATA_DIR 环境变量指向只读快照）
@@ -133,17 +135,33 @@ def make_drive_handler(window, api: Api) -> type[BaseHTTPRequestHandler]:
             body = json.dumps(obj, ensure_ascii=False).encode("utf8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
+            # CORS：页面（file://源）在 drive/纠错模式下经 fetch 直调 /call（绕开
+            # pywebview js_api 回推——与 evaluate_js 并发死锁根治，2026-10-08）
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(body)
+
+        def do_OPTIONS(self) -> None:  # noqa: N802
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.end_headers()
 
         def do_POST(self) -> None:  # noqa: N802
             length = int(self.headers.get("Content-Length", 0))
             raw = self.rfile.read(length) or b"{}"
             try:
-                payload = json.loads(raw.decode("utf-8"))
-            except UnicodeDecodeError:
-                # 客户端编码容错（GBK 控制台 curl 实测会踩）：utf-8 失败回退 gbk
-                payload = json.loads(raw.decode("gbk", errors="replace"))
+                try:
+                    payload = json.loads(raw.decode("utf-8"))
+                except UnicodeDecodeError:
+                    # 客户端编码容错（GBK 控制台 curl 实测会踩）：utf-8 失败回退 gbk
+                    payload = json.loads(raw.decode("gbk", errors="replace"))
+            except json.JSONDecodeError:
+                # 脏请求容错（2026-10-08 实证：非法 JSON 曾打崩 handler 断连，空回复
+                # 被误读为挂死）：如实回包不断连——驱动面不被单条脏请求 DoS
+                self._respond({"ok": False, "error": "bad-json: body 不是合法 JSON"})
+                return
             try:
                 if self.path == "/eval":
                     # 同步 DOM JS（evaluate_js 不 await Promise——异步桥调用走 /call）
@@ -183,10 +201,14 @@ def main() -> int:
 
     # 离屏模式（批9.5 2026-10-07）：窗口初始就在屏幕外（x/y=-3000）——渲染照常
     # （系统认为可见），PrintWindow 句柄级截图不受坐标影响（64KB 完整帧实测）；
-    # 用于 UI 截图场景：零闪现零抢焦点，自动验证不打扰用户。与 --drive-port 可叠加
-    # （叠加时 hidden 优先——驱动/探索模式不需要可见渲染帧）。
+    # 用于 UI 截图场景：零闪现零抢焦点，自动验证不打扰用户。
     # 修改预览模式（点选纠错，平台拉起，2026-10-08 批11）：可见窗口 + 页内点选层 +
     # 选区落盘；数据目录经 APP_DATA_DIR 指向平台准备的快照（原数据零接触）。
+    # 驱动/探索模式回归修复（2026-10-08）：--drive-port 曾配 hidden=True——WebView2
+    # hidden 下渲染循环暂停，js_api 回程（经 evaluate_js）在 click 类操作后挂起：
+    # Python 侧已执行落库但 JS 侧 await 永不 resolve、后续 /eval 空回复（真机实证：
+    # total_ml 落库而 /eval 挂死）。改屏幕外坐标（同 offscreen 路：渲染循环持续、
+    # 回程可靠；零闪现零抢焦点不变）。
     correction_dir: Path | None = None
     if "--correction-session" in sys.argv:
         correction_dir = Path(sys.argv[sys.argv.index("--correction-session") + 1])
@@ -200,14 +222,19 @@ def main() -> int:
     if correction_dir:
         # 页面点选层凭 ?correction=1 启用；dport 供窄实时预览候选注入（/eval）
         launch_url += f"?correction=1&dport={drive_port}"
+    elif drive_port:
+        # drive 模式注入 dport：页面 Api 调用走 HTTP /call（绕开 pywebview js_api 回推
+        # ——其回推与平台 /eval 的 evaluate_js 并发死锁，2026-10-08 真机实证）
+        launch_url += f"?dport={drive_port}"
     window = webview.create_window(
         (f"修改预览 · {APP_NAME}" if correction_dir else APP_NAME),
         url=launch_url,  # 文件加载：ui/ 相对资产（kit.css/bridge.js）可引用
         js_api=api,
         width=960,
         height=640,
-        hidden=drive_port > 0 and not correction_dir,
-        **({"x": -3000, "y": -3000} if offscreen and not drive_port else {}),
+        # drive-port（非 correction）与 --offscreen 统一屏幕外坐标（2026-10-08 回归修复，
+        # 勿改回 hidden：WebView2 hidden 渲染循环暂停，js 回程挂起）
+        **({"x": -3000, "y": -3000} if (drive_port > 0 or offscreen) and not correction_dir else {}),
     )
     if drive_port:
         server = HTTPServer(("127.0.0.1", drive_port), make_drive_handler(window, api))
