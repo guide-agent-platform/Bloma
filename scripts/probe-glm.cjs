@@ -61,6 +61,10 @@ async function probe(key, label, extra) {
   }
 }
 
+// safeStorage 密文与 userData 作用域绑定（陷阱 15）：狗粮跑的 Bloma 主进程
+// userData 是 %APPDATA%\bloma（package.json name 生效），探针脚本文件模式默认
+// Roaming\Electron 会解密失败——跑之前先对齐 Bloma 的真实 userData。
+app.setPath('userData', join(homedir(), 'AppData', 'Roaming', 'bloma'))
 app.whenReady().then(async () => {
   const key = safeStorage.decryptString(Buffer.from(ch.api_key, 'hex'))
   if (!key) { console.error('api_key 解密失败（safeStorage）'); app.exit(1) }

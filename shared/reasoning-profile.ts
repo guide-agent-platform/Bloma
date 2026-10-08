@@ -136,12 +136,20 @@ export function resolveProfile(modelId: string | undefined): ReasoningProfile | 
  * Bloma 侧等价判断：providerType ∈ 集合时直接 omit（消灭 400+重试往返）。
  */
 export const THINKING_OMIT_PROVIDERS = new Set([
-  'kimi-api', 'kimi-coding', 'zhipu-coding', 'zhipu-coding-team',
+  'kimi-api', 'kimi-coding', 'zhipu-coding-team',
   'ark-coding-plan', 'qwen-token-plan', 'xiaomi-token-plan',
 ])
 // 注：Proma 蓝本含 'minimax'，但 Bloma 2026-08-16 事故证据（MiniMax-M3 思考烧光
 // max_tokens 致零正文）证明 Bloma 的 MiniMax 渠道**接受** thinking:disabled 且必须
 // 显式禁思考——omit 会让它恢复默认思考、正文为空，因此从黑名单移除（审查 P1）。
+// 2026-10-09 'zhipu-coding' 移除：两晚狗粮零正文实锤（max_tokens=800 思考 791 正文 0；
+// 131072 思考 3383 后断流）后，probe-glm.cjs / probe-glm-stream.cjs 在
+// open.bigmodel.cn/api/anthropic 实测：thinking disabled / enabled+output_config.effort /
+// tools 组合全形态 HTTP 200，disabled 下思考块真实消失（非流式 blocks=[text]，流式
+// thinking_delta=0）且正文正常。智谱官方文档「GLM-5.3 传 disabled 报错」仅适用
+// 原生 /api/paas/v4 端点，anthropic 端点不受此限。omit 才是零正文根因：默认思考
+// 吃光小预算（需求清单 maxTokens=800 场景）。zhipu-coding-team 同域名端点未实测，
+// 暂留黑名单，实测后同样移除。
 
 /**
  * 主入口：给 anthropicMessagesQuery 消费。
