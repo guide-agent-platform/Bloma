@@ -133,7 +133,7 @@
         id: "placeholder",
         label: "占位提示更清楚",
         apply: function (el) {
-          if (el.placeholder) el.placeholder = el.placeholder + "（在这里输入）";
+          if (el.placeholder && el.placeholder.indexOf("（在这里输入）") < 0) el.placeholder = el.placeholder + "（在这里输入）";
           return "补强占位提示";
         },
       });
@@ -224,7 +224,11 @@
     okBtn.type = "button";
     okBtn.className = "w-btn w-btn--primary w-corr-ok";
     okBtn.textContent = "记下这一处";
-    okBtn.addEventListener("click", function () { recordPick(hit, { kind: kindValue, note: note.value.trim(), preview: previewApplied }); closePanel(); });
+    okBtn.addEventListener("click", function () {
+      recordPick(hit, { kind: kindValue, note: note.value.trim(), preview: previewApplied }, function (ok) {
+        if (ok) closePanel();
+      });
+    });
     var skipBtn = document.createElement("button");
     skipBtn.type = "button";
     skipBtn.className = "w-btn w-btn--ghost";
@@ -265,15 +269,15 @@
   }, true);
 
   /* ── 落盘 ─────────────────────────────────────────────────────── */
-  function recordPick(hit, opt) {
-    seq += 1;
-    picked += 1;
-    updateCount();
+  /* 落盘失败不静默（批11 审查修复，2026-10-08）：App.call 失败（桥未就绪/异常/服务端
+     返回 ok:false）时标识条如实提示，且不关面板不计数——用户重点「记下这一处」，
+     防「看起来记下了实际没落盘」（下游 Bloma 侧会因零选区禁用提交，选区全部丢失）。 */
+  function recordPick(hit, opt, onDone) {
     var el = hit.el;
     var rect = el.getBoundingClientRect();
     var payload = {
       type: "pick",
-      seq: seq,
+      seq: seq + 1,
       ts: new Date().toISOString(),
       componentId: componentIdOf(el, hit.role),
       role: hit.role,
@@ -287,9 +291,34 @@
       source: "user",
       ...(opt.preview ? { preview: opt.preview } : {}),
     };
+    var settled = false;
+    function succeed() {
+      if (settled) return;
+      settled = true;
+      seq += 1;
+      picked += 1;
+      updateCount();
+      if (onDone) onDone(true);
+    }
+    function failPick() {
+      if (settled) return;
+      settled = true;
+      barText.textContent = "⚠ 刚才那一处没记上（保存失败）——请再点一次「记下这一处」";
+      setTimeout(function () { barText.textContent = "修改预览 · 数据只读 · 直接点选你想改的地方"; }, 4000);
+      if (onDone) onDone(false);
+    }
     try {
-      App.call("correction_pick", JSON.stringify(payload)).catch(function () {});
-    } catch (e) { /* 桥未就绪等：面板照常关闭，下一处重试 */ }
+      App.call("correction_pick", JSON.stringify(payload)).then(
+        function (resp) {
+          var ok = true;
+          try { ok = !resp || JSON.parse(resp).ok !== false; } catch (e) { /* 非 JSON 回包按成功 */ }
+          if (ok) succeed(); else failPick();
+        },
+        failPick
+      ).catch(failPick);
+    } catch (e) {
+      failPick();
+    }
   }
 
   barDone.addEventListener("click", function () {
@@ -303,14 +332,17 @@
 
   /* ── 程序化入口（狗粮/Agent 自动化）：与真人点击同一收集与落盘路径 ── */
   window.CorrectionSimulate = {
-    /** pick("[data-bloma-id='x']" 或元素, {kind:"visual", note:"..."}) → 静默落盘 */
+    /** pick("[data-bloma-id='x']" 或元素, {kind:"visual", note:"..."}) → 落盘；落盘失败异步置 ok=false（返回引用同步快照） */
     pick: function (target, opt) {
       var el = typeof target === "string" ? document.querySelector(target) : target;
       if (!el) return { ok: false, error: "target-not-found" };
       var hit = pickableOf(el);
       if (!hit) return { ok: false, error: "not-pickable" };
-      recordPick(hit, opt || { kind: "guess", note: "" });
-      return { ok: true, seq: seq };
+      var result = { ok: true, seq: seq + 1 };
+      recordPick(hit, opt || { kind: "guess", note: "" }, function (ok) {
+        if (!ok) result.ok = false;
+      });
+      return result;
     },
     /** 完成标记（狗粮收口用） */
     done: function () { barDone.click(); },

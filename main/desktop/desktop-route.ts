@@ -61,7 +61,7 @@ import {
   isMvpFeedbackMessage,
   resolveMvpConfirmAnswer,
 } from './mvp-confirm'
-import { attachActiveCorrectionFeedback, startCorrectionSession } from './correction-session'
+import { attachActiveCorrectionFeedback, startCorrectionSession, finishCorrectionSession, hasActiveCorrectionSession } from './correction-session'
 import { buildCheckpointConclusion } from './phase-checkpoint'
 import { createChannelFailureTracker, observeChannelFailure, type ChannelFailureTracker } from './channel-failure-watch'
 import { readDesktopRequirementsDigest, readDesktopShapeBriefs } from './requirement-digest'
@@ -275,6 +275,16 @@ export async function handleDesktopDispatchMessage(
   // delivered 反馈同机制，改完重走 verify 再过本门）。──
   const mvpAnswer = resolveMvpConfirmAnswer(input)
   if (mvpAnswer === 'confirm') {
+    // 收口矩阵补齐（批11 审查修复，2026-10-08）：确认交付时若仍有活跃纠错会话——kill 实例；
+    // 有未发送选区则如实告知已丢弃（不静默吞掉用户的点选，也不拦住交付决策）。
+    if (hasActiveCorrectionSession(input.projectId)) {
+      const finished = finishCorrectionSession({ projectId: input.projectId })
+      if (finished.pickCount > 0) {
+        deps.publish(input, 'message_delta', {
+          text: `注意：修改预览里点选的 ${finished.pickCount} 处标记没有发送，本次未按它们修改，已按当前版本交付。`,
+        })
+      }
+    }
     confirmMvpDelivered({ input, deps })
     return
   }

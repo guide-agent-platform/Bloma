@@ -38,9 +38,10 @@ export const CorrectionPanel: React.FC = () => {
   const sessionId = useAtomValue(activeAgentSessionIdAtom)
   const [session, setSession] = useAtom(correctionSessionAtom)
   const [picks, setPicks] = useAtom(correctionPicksAtom)
-  const done = useAtomValue(correctionDoneAtom)
+  const [done, setDone] = useAtom(correctionDoneAtom)
   const [sending, setSending] = React.useState(false)
   const [sent, setSent] = React.useState(false)
+  const [applyError, setApplyError] = React.useState<string | undefined>(undefined)
 
   const active = session.status === 'active'
 
@@ -72,7 +73,10 @@ export const CorrectionPanel: React.FC = () => {
       if (!api || stopped) return
       const result = await api.picks({ request_id: crypto.randomUUID(), project_id: projectId })
       if (stopped) return
-      if (result?.ok && result.data?.ok) setPicks(result.data.picks)
+      if (result?.ok && result.data?.ok) {
+        setPicks(result.data.picks)
+        setDone(Boolean(result.data.done))
+      }
     }
     void poll()
     const timer = setInterval(() => void poll(), 2000)
@@ -82,22 +86,29 @@ export const CorrectionPanel: React.FC = () => {
     }
   }, [active, projectId, setPicks])
 
-  /** 收口：finish（主进程组装反馈文本单一来源）→ 代发用户消息 → 回炉链 */
+  /** 收口：finish（主进程组装反馈文本单一来源）→ 代发用户消息 → 回炉链。
+   *  假成功防护（批11 审查修复，2026-10-08）：无活跃会话/finish 失败/发送异常均如实呈现
+   *  错误且不发假「已提交」提示；无 sessionId 时不 finish（选区与会话保留可重试）。 */
   const onApply = async (): Promise<void> => {
     if (!projectId || !project || sending || sent) return
+    if (!sessionId) {
+      setApplyError('当前没有进行中的对话——请先在左侧对话里发一条消息，再回来点提交（点选已保留，不会丢）')
+      return
+    }
     setSending(true)
-    const api = window.electronAPI?.correction
-    const agentApi = window.electronAPI?.agent
-    if (!api || !agentApi?.sendMessage) {
-      setSending(false)
-      return
-    }
-    const result = await api.finish({ request_id: crypto.randomUUID(), project_id: projectId })
-    if (!result.ok || !result.data.ok || !result.data.feedback) {
-      setSending(false)
-      return
-    }
-    if (sessionId) {
+    setApplyError(undefined)
+    try {
+      const api = window.electronAPI?.correction
+      const agentApi = window.electronAPI?.agent
+      if (!api || !agentApi?.sendMessage) {
+        setApplyError('当前环境不支持修改预览通道，点选已保留')
+        return
+      }
+      const result = await api.finish({ request_id: crypto.randomUUID(), project_id: projectId })
+      if (!result.ok || !result.data.ok || !result.data.feedback) {
+        setApplyError('提交没有成功（预览可能已关闭或没有可提交的点选）——请重试，或直接在左侧对话里说要改哪里')
+        return
+      }
       await agentApi.sendMessage({
         request_id: crypto.randomUUID(),
         session_id: sessionId,
@@ -106,11 +117,15 @@ export const CorrectionPanel: React.FC = () => {
         mode: project.mode ?? 'longterm',
         current_stage: project.current_stage ?? 'completed',
       })
+      setSent(true)
+      setSession({ status: 'idle' })
+      setPicks([])
+      setDone(false)
+    } catch {
+      setApplyError('提交中断——请直接在左侧对话里告诉我要改哪里（重试可能会重复提交）')
+    } finally {
+      setSending(false)
     }
-    setSending(false)
-    setSent(true)
-    setSession({ status: 'idle' })
-    setPicks([])
   }
 
   /** 取消/结束预览（丢弃选区，不发反馈） */
@@ -120,6 +135,8 @@ export const CorrectionPanel: React.FC = () => {
     if (api) await api.finish({ request_id: crypto.randomUUID(), project_id: projectId })
     setSession({ status: 'idle' })
     setPicks([])
+    setDone(false)
+    setApplyError(undefined)
   }
 
   /* ── 入口态（未启动） ─────────────────────────────────────── */
@@ -285,6 +302,11 @@ export const CorrectionPanel: React.FC = () => {
           结束预览
         </button>
       </div>
+      {applyError && (
+        <p data-ai-id="correction-apply-error" style={{ fontSize: 'var(--font-size-xs)', color: '#b91c1c', margin: 0, lineHeight: 1.6 }}>
+          {applyError}
+        </p>
+      )}
     </div>
   )
 }

@@ -19,8 +19,20 @@ vi.mock('../../../main/project/project-service', () => ({
   updateProject: vi.fn(),
 }))
 
+/* 收口矩阵锁（批11 审查修复锚，2026-10-08）：confirm 分支对活跃纠错会话的收口只 mock
+   会话面（has/finish），其余真实——不影响无活跃会话用例（真实实现无会话时均短路面直行为）。 */
+vi.mock('../../../main/desktop/correction-session', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/desktop/correction-session')>()
+  return {
+    ...actual,
+    hasActiveCorrectionSession: vi.fn(() => false),
+    finishCorrectionSession: vi.fn(() => ({ ok: false, pickCount: 0, error: 'CORRECTION_NOT_RUNNING' })),
+  }
+})
+
 import { findProject, updateProject } from '../../../main/project/project-service'
 import { isMvpConfirmPending, resetMvpConfirmForTests } from '../../../main/desktop/mvp-confirm'
+import { finishCorrectionSession, hasActiveCorrectionSession } from '../../../main/desktop/correction-session'
 import {
   DESKTOP_CONFIRM_OPTION_PREFIX,
   MAX_AUTO_ADVANCE_CHAIN,
@@ -297,6 +309,30 @@ describe('handleDesktopDispatchMessage 消息路由', () => {
     expect(record.desktop_phase).toBe('delivered')
     expect((record as unknown as { status?: string }).status).toBe('completed')
     expect(confirmDeps.events.some((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('已按你的确认正式交付'))).toBe(true)
+  })
+
+  it('确认交付收口矩阵（批11 审查修复锚）：确认时活跃纠错会话 kill + 未发送选区如实告知，不静默丢弃也不拦交付', async () => {
+    const mockedHasActive = vi.mocked(hasActiveCorrectionSession)
+    const mockedFinish = vi.mocked(finishCorrectionSession)
+    mockedHasActive.mockReturnValue(true)
+    mockedFinish.mockReturnValue({ ok: true, pickCount: 2 } as never)
+    writeValidContract()
+    record.desktop_phase = 'desktop-verify'
+    record.mode = 'longterm'
+    const { deps, events } = collectorDeps()
+    await handleDesktopDispatchMessage(routeInput({
+      query: scriptedQuery([[textMessage('验证全绿。\nPHASE_ADVANCE: delivered')]]),
+    }), deps)
+    expect(events.some((e) => e.type === 'user_decision_required' && e.payload.kind === 'mvp_confirm')).toBe(true)
+    const confirmDeps = collectorDeps()
+    await handleDesktopDispatchMessage(routeInput({ cardOptionId: 'mvp_confirm_go' }), confirmDeps.deps)
+    expect(mockedFinish).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p1' }))
+    expect(confirmDeps.events.some((e) => typeof e.payload.text === 'string' && (e.payload.text as string).includes('2 处标记没有发送'))).toBe(true)
+    expect(record.desktop_phase).toBe('delivered')
+    expect((record as unknown as { status?: string }).status).toBe('completed')
+    /* 恢复默认（无活跃会话面直行为）——防 mock 状态泄漏到后续用例 */
+    mockedHasActive.mockReturnValue(false)
+    mockedFinish.mockReturnValue({ ok: false, pickCount: 0, error: 'CORRECTION_NOT_RUNNING' })
   })
 
   it('longterm 交付门冒烟（批1/根因⑥）：MVP 门挂起前跑启动冒烟，失败停在 verify 不挂卡、stderr 即修复靶子', async () => {

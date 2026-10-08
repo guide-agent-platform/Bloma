@@ -649,8 +649,10 @@ describe('desktop-verify 收口双门（全链路审查 P1-5/P0-1 缓解，2026-
     const docsDir = getDocumentsDir(proj.workspace_slug, proj.project_id)
     mkdirSync(docsDir, { recursive: true })
     // 轮转回归锁预置（批10.5 审查B P1-2）：旧轮 drive-sessions.json，verify 开始时应轮转为 .prev
+    // findings 同点轮转预置（批11 审查修复，2026-10-08）：旧轮探索发现（含旧 P0）同轮清退
     mkdirSync(join(root, '00_VERIFY'), { recursive: true })
     writeFileSync(join(root, '00_VERIFY', 'drive-sessions.json'), JSON.stringify([{ session_id: 'drive-old-aaaaaa', outcome: 'disposed', ops: 3 }]), 'utf8')
+    writeFileSync(join(root, '00_VERIFY', 'drive-findings.json'), JSON.stringify({ findings: [{ id: 'F1', severity: 'P0', title: '旧轮问题' }] }), 'utf8')
     writeFileSync(join(docsDir, 'prd.json'), JSON.stringify({
       project_id: proj.project_id,
       requirements: [
@@ -686,6 +688,9 @@ describe('desktop-verify 收口双门（全链路审查 P1-5/P0-1 缓解，2026-
     // 轮转回归锁（批10.5 审查B P1-2）：旧轮 drive-sessions.json 被 verify 开始时轮转为 .prev（回炉重验不永久呈现旧降级）
     expect(existsSync(join(root, '00_VERIFY', 'drive-sessions.prev.json'))).toBe(true)
     expect(existsSync(join(root, '00_VERIFY', 'drive-sessions.json'))).toBe(false)
+    // findings 同点轮转锁（批11 审查修复，2026-10-08）：旧 P0 不永久呈现于 mvp-review 发现段（狗粮门策略防重复回炉）
+    expect(existsSync(join(root, '00_VERIFY', 'drive-findings.prev.json'))).toBe(true)
+    expect(existsSync(join(root, '00_VERIFY', 'drive-findings.json'))).toBe(false)
     void readFileSync
     delete process.env.PROMA_HOME
   })

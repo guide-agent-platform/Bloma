@@ -15,6 +15,7 @@ import { Provider, createStore } from 'jotai'
 import { CorrectionPanel } from '../../renderer/components/CorrectionPanel'
 import {
   activeAgentSessionIdAtom,
+  correctionDoneAtom,
   correctionSessionAtom,
   currentProjectAtom,
 } from '../../renderer/agent-atoms'
@@ -109,5 +110,51 @@ describe('CorrectionPanel', () => {
       expect(store.get(correctionSessionAtom).status).toBe('idle')
     })
     expect(screen.getByTestId('correction-sent-hint').textContent).toContain('修改意见已提交')
+  })
+
+  it('done 信号链（批11 审查修复锚）：轮询回传 done=true 置位 done atom → 出现「已提交」确认条', async () => {
+    ;(window as unknown as { electronAPI: unknown }).electronAPI = {
+      correction: {
+        start: vi.fn(),
+        picks: vi.fn(async () => ({
+          ok: true,
+          data: { ok: true, done: true, picks: [{ seq: 1, displayName: '按钮「发送」', kind: 'visual', componentId: 'action.send' }] },
+        })),
+        finish: vi.fn(),
+      },
+    }
+    const { store } = renderPanel()
+    store.set(correctionSessionAtom, { status: 'active', sessionKey: 's1', startedAt: 't' })
+    await waitFor(() => {
+      expect(store.get(correctionDoneAtom)).toBe(true)
+    })
+    expect(screen.getByTestId('correction-panel').textContent).toContain('预览窗口里已提交 1 处点选')
+  })
+
+  it('假成功防护（批11 审查修复锚）：无活跃会话时提交 → 不 finish 不假报已提交，如实提示选区已保留', async () => {
+    const finish = vi.fn(async () => ({ ok: true, data: { ok: true, pickCount: 2, feedback: 'x' } }))
+    const sendMessage = vi.fn(async () => ({ ok: true }))
+    ;(window as unknown as { electronAPI: unknown }).electronAPI = {
+      correction: {
+        start: vi.fn(),
+        picks: vi.fn(async () => ({ ok: true, data: { ok: true, done: false, picks: [{ seq: 1, displayName: '按钮「发送」', kind: 'visual', componentId: 'action.send' }] } })),
+        finish,
+      },
+      agent: { sendMessage },
+    }
+    const { store } = renderPanel()
+    store.set(activeAgentSessionIdAtom, null)
+    store.set(correctionSessionAtom, { status: 'active', sessionKey: 's1', startedAt: 't' })
+    await waitFor(() => {
+      expect(screen.getByTestId('correction-apply-button').textContent).toContain('开始修改（1 处）')
+    })
+    fireEvent.click(screen.getByTestId('correction-apply-button'))
+    await waitFor(() => {
+      expect(screen.getByTestId('correction-apply-error').textContent).toContain('没有进行中的对话')
+    })
+    expect(finish).not.toHaveBeenCalled()
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(store.get(correctionSessionAtom).status).toBe('active')
+    expect(screen.queryByTestId('correction-sent-hint')).toBeNull()
   })
 })

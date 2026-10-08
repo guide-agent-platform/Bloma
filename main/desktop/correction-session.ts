@@ -81,6 +81,64 @@ function randomPort(): number {
   return 21000 + Math.floor(Math.random() * 18000)
 }
 
+/** 选区文本字段清洗上限（字符串字段截断；防磁盘 JSON 任意长文本灌进回炉任务书）。 */
+function sanitizeText(value: unknown, limit: number): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim().slice(0, limit) : undefined
+}
+
+function sanitizeNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+/** 选区结构清洗（批11 审查修复，2026-10-08）：picks.jsonl 由产物侧写入——页面任意 JS
+ *  可经 App.call("correction_pick") 落任意结构，属不可信磁盘输入（与批10.6
+ *  readLlmQualification 清洗同族纪律）：字符串字段强制类型+截断、kind 白名单归一、
+ *  rect/dpr 数值校验，再进 buildCorrectionFeedback → 回炉任务书（LLM 输入面）。 */
+function sanitizePick(raw: unknown): CorrectionPick | { type: 'done' } | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  if (r.type === 'done') return { type: 'done' }
+  const rect =
+    r.rect && typeof r.rect === 'object'
+      ? (() => {
+          const q = r.rect as Record<string, unknown>
+          const x = sanitizeNumber(q.x)
+          const y = sanitizeNumber(q.y)
+          const w = sanitizeNumber(q.w)
+          const h = sanitizeNumber(q.h)
+          return x !== undefined || y !== undefined || w !== undefined || h !== undefined ? { ...(x !== undefined ? { x } : {}), ...(y !== undefined ? { y } : {}), ...(w !== undefined ? { w } : {}), ...(h !== undefined ? { h } : {}) } : undefined
+        })()
+      : undefined
+  const previewDetail = sanitizeText((r.preview as Record<string, unknown> | undefined)?.detail, 120)
+  const seq = sanitizeNumber(r.seq)
+  const componentId = sanitizeText(r.componentId, 120)
+  const role = sanitizeText(r.role, 20)
+  const roleLabel = sanitizeText(r.roleLabel, 20)
+  const displayName = sanitizeText(r.displayName, 60)
+  const text = sanitizeText(r.text, 80)
+  const note = sanitizeText(r.note, 200)
+  const dpr = sanitizeNumber(r.dpr)
+  const pick: CorrectionPick = {
+    ...(seq !== undefined ? { seq } : {}),
+    ...(typeof r.ts === 'string' ? { ts: r.ts } : {}),
+    ...(componentId ? { componentId } : {}),
+    ...(role ? { role } : {}),
+    ...(roleLabel ? { roleLabel } : {}),
+    ...(displayName ? { displayName } : {}),
+    ...(text ? { text } : {}),
+    kind: r.kind === 'visual' || r.kind === 'function' ? r.kind : 'guess',
+    ...(note !== undefined ? { note } : {}),
+    ...(rect ? { rect } : {}),
+    ...(dpr !== undefined ? { dpr } : {}),
+    ...(r.source === 'user' || r.source === 'agent' ? { source: r.source } : {}),
+    ...(previewDetail ? { preview: { detail: previewDetail } } : {}),
+  }
+  /* 定位与描述全缺的空壳行（无 displayName/componentId/role/note）不进选区——避免
+     「某处界面【组件定位 ?】」噪音条目进回炉反馈。 */
+  if (!pick.displayName && !pick.componentId && !pick.role && pick.note === undefined) return null
+  return pick
+}
+
 /**
  * 启动纠错会话（异步）：数据快照 → 可见纠错实例（--correction-session + --drive-port）→
  * 等 DRIVE_SERVER 就绪行（最长 15s，超时按启动失败处理并清理）。
@@ -172,6 +230,7 @@ export async function startCorrectionSession(input: { projectId: string }): Prom
       out += chunk.toString('utf8')
       if (out.includes(`DRIVE_SERVER 127.0.0.1:${drivePort}`)) {
         clearTimeout(timer)
+        child.stdout?.removeAllListeners('data')
         if (!session.finished) {
           resolve({
             ok: true,
@@ -195,6 +254,16 @@ export async function startCorrectionSession(input: { projectId: string }): Prom
         resolve({ ok: false, reason: 'spawn-failed', error: 'CORRECTION_EXITED_EARLY: 修改预览进程提前退出（入口启动失败）' })
       }
     })
+    // spawn 失败（命令不存在——项目目录移动/venv 失效等）走 error 事件而非 exit：无监听
+    // 会升级为 uncaught exception 崩主进程（批11 审查修复，2026-10-08）。
+    child.on('error', (err) => {
+      clearTimeout(timer)
+      if (!session.finished) {
+        session.finished = true
+        activeSessions.delete(input.projectId)
+        resolve({ ok: false, reason: 'spawn-failed', error: `CORRECTION_SPAWN_FAILED: 修改预览进程启动失败（${err.message}）` })
+      }
+    })
   })
 }
 
@@ -209,9 +278,9 @@ export function readCorrectionPicks(input: { projectId: string }): { ok: boolean
     for (const line of raw.split('\n')) {
       if (!line.trim()) continue
       try {
-        const pick = JSON.parse(line) as CorrectionPick
-        if (pick.type === 'done') done = true
-        else picks.push(pick)
+        const pick = sanitizePick(JSON.parse(line))
+        if (pick && pick.type === 'done') done = true
+        else if (pick) picks.push(pick as CorrectionPick)
       } catch {
         // 半行/脏行跳过（追加式写入的瞬时态）
       }
@@ -293,7 +362,6 @@ export function attachActiveCorrectionFeedback(projectId: string, userText: stri
     finishCorrectionSession({ projectId })
     return undefined
   }
-  const project = findProject(projectId)
   const correctionText = finishCorrectionSession({ projectId }).feedback
   if (!correctionText) return undefined
   const userPart = userText.trim()

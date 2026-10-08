@@ -358,11 +358,16 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     // 探索会话记录轮转（批10.5 审查B P1-2，2026-10-08）：drive-sessions.json 是追加式
     // 存储，旧判定下历史 disposed 永久计入——每轮 verify 开始时轮转为 .prev（保留一份
     // 历史），本轮 MVP 门只看本轮探索真相（回炉重验后旧降级不再永久呈现）。
+    // findings 同点轮转（批11 审查修复，2026-10-08）：旧轮探索发现（含旧 P0）若不随轮
+    // 转清退，回炉重验后仍永久呈现于 mvp-review 发现段——狗粮门策略读发现段会被旧 P0
+    // 驱动重复回炉；产品门不受影响（findings 不阻塞），旧问题修复由本轮 driver/击杀
+    // 全绿背书。
     if (input.sandboxRoot) {
       try {
-        const sessionsPath = join(input.sandboxRoot, '00_VERIFY', 'drive-sessions.json')
-        if (existsSync(sessionsPath)) {
-          renameSync(sessionsPath, join(input.sandboxRoot, '00_VERIFY', 'drive-sessions.prev.json'))
+        const verifyDir = join(input.sandboxRoot, '00_VERIFY')
+        for (const rel of ['drive-sessions.json', 'drive-findings.json']) {
+          const p = join(verifyDir, rel)
+          if (existsSync(p)) renameSync(p, join(verifyDir, rel.replace(/\.json$/, '.prev.json')))
         }
       } catch {
         // 轮转失败不阻断收口（呈现侧退化为旧行为）
