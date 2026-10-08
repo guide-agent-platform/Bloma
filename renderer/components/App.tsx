@@ -487,6 +487,15 @@ const AppRoutes: React.FC = () => {
       metadata: toCardSelectionMeta(option.id),
     })
   }, [sessionId, currentProject, projectList, mode, currentStage])
+  /** 草图预览面板的「确认草图」入口：与聊天卡 ux_confirm_go 同一动作——复用
+   *  handleCardOptionSelect 的气泡/消费卡/card_option metadata 全链，主进程按
+   *  selected_option_id=ux_confirm_go 分流。2026-10-09 修复：此前 App 未给
+   *  WorkspaceShell 传 onConfirmSketch，PreviewPanel 的草图点选标记监听
+   *  （bloma-sketch-pick postMessage）与「发送调整意见」浮条整体不接线，
+   *  草图点选纠错入口（入口 A）必然 not-found。 */
+  const handleConfirmSketch = useCallback(() => {
+    handleCardOptionSelect({ id: 'ux_confirm_go', label: '确认草图，开工' })
+  }, [handleCardOptionSelect])
   // ==================== 点选纠错 ====================
   /** U8/R-CORR-01：点击预览元素时向主进程收集该元素的 DOM 上下文（用于高亮被选区域） */
   // ==================== 快照回滚 ====================
@@ -756,6 +765,7 @@ const AppRoutes: React.FC = () => {
         onRefreshPreview={handleRefreshPreview}
         onPreviewError={handlePreviewError}
         confirming={confirmingSketch}
+        onConfirmSketch={handleConfirmSketch}
         onMarkComplete={window.electronAPI?.project?.finalize ? handleMarkComplete : undefined}
         onRollback={handleRollback}
         onContinueWaiting={handleContinueWaiting}
