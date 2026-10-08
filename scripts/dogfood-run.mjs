@@ -15,7 +15,7 @@
  *   node scripts/dogfood-run.mjs --request "做一个简单的倒计时器" [--timeout-min 25] [--mode quick|longterm]
  *   node scripts/dogfood-run.mjs --probe-only        # 只拉起+dump 驾驶面状态即退
  *   node scripts/dogfood-run.mjs --keep-open          # 结束后不关 app（人工接管看现场）
- * 输出：stdout 时间线 + <repo>/dogfood-run-report.json
+ * 输出：stdout 时间线 + <repo>/run-artifacts/dogfood-run-report.json（运行产物统一收纳，gitignore 已覆盖）
  */
 import { spawn, execSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
@@ -31,6 +31,9 @@ const opt = (name, fallback) => {
 }
 
 const REPO = resolve(opt('repo', '.'))
+/** 运行产物统一目录（2026-10-08 治理：报告不再散落仓库根） */
+const REPORT_DIR = join(REPO, 'run-artifacts')
+mkdirSync(REPORT_DIR, { recursive: true })
 // --request-file（2026-10-06 事故根治）：需求走文件不走命令行——PowerShell 5.1 的
 // Start-Process -ArgumentList 会按空格拆参数，「做一个 Windows 桌面…」传到 argv 只剩
 //「做一个」（当日四次狗粮三次截断的真因；bash 引号启动则完整）。后台存活启动必经
@@ -620,8 +623,8 @@ try {
   }
   report.log_tail = lastTail
   report.finished_at = new Date().toISOString()
-  writeFileSync(join(REPO, 'dogfood-run-report.json'), JSON.stringify(report, null, 2), 'utf8')
-  log(`报告已写 ${join(REPO, 'dogfood-run-report.json')}（outcome=${report.outcome}）`)
+  writeFileSync(join(REPORT_DIR, 'dogfood-run-report.json'), JSON.stringify(report, null, 2), 'utf8')
+  log(`报告已写 ${join(REPORT_DIR, 'dogfood-run-report.json')}（outcome=${report.outcome}）`)
   await cleanup()
   process.exit(report.outcome === 'delivered' ? 0 : 1)
 } catch (error) {
@@ -630,7 +633,7 @@ try {
   report.error = String(error instanceof Error ? error.message : error)
   report.finished_at = new Date().toISOString()
   try {
-    writeFileSync(join(REPO, 'dogfood-run-report.json'), JSON.stringify(report, null, 2), 'utf8')
+    writeFileSync(join(REPORT_DIR, 'dogfood-run-report.json'), JSON.stringify(report, null, 2), 'utf8')
   } catch {
     // ignore
   }

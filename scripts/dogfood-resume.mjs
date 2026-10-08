@@ -4,7 +4,7 @@
 // 从项目历史打开目标项目；交付检测只认目标 project_id 的存储终态。
 // 用法：node scripts/dogfood-resume.mjs --project-id <id> --message-file <path> [--timeout-min 45]
 import { execSync, spawn } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -18,6 +18,9 @@ const PROJECT_ID = opt('project-id')
 const MESSAGE_FILE = opt('message-file')
 const TIMEOUT_MIN = Number(opt('timeout-min', '45'))
 const REPO = process.cwd()
+/** 运行产物统一目录（2026-10-08 治理：报告不再散落仓库根） */
+const REPORT_DIR = join(REPO, 'run-artifacts')
+mkdirSync(REPORT_DIR, { recursive: true })
 
 if (!PROJECT_ID || !MESSAGE_FILE) {
   console.error('用法：node scripts/dogfood-resume.mjs --project-id <id> --message-file <path> [--timeout-min 45]')
@@ -446,8 +449,8 @@ try {
   }
   report.log_tail = state?.tail ?? ''
   report.finished_at = new Date().toISOString()
-  writeFileSync(join(REPO, 'dogfood-resume-report.json'), JSON.stringify(report, null, 2), 'utf8')
-  log(`报告已写 ${join(REPO, 'dogfood-resume-report.json')}（outcome=${report.outcome}）`)
+  writeFileSync(join(REPORT_DIR, 'dogfood-resume-report.json'), JSON.stringify(report, null, 2), 'utf8')
+  log(`报告已写 ${join(REPORT_DIR, 'dogfood-resume-report.json')}（outcome=${report.outcome}）`)
   await cleanup()
   process.exit(report.outcome === 'delivered' ? 0 : 1)
 } catch (error) {
@@ -456,7 +459,7 @@ try {
   report.error = String(error instanceof Error ? error.message : error)
   report.finished_at = new Date().toISOString()
   try {
-    writeFileSync(join(REPO, 'dogfood-resume-report.json'), JSON.stringify(report, null, 2), 'utf8')
+    writeFileSync(join(REPORT_DIR, 'dogfood-resume-report.json'), JSON.stringify(report, null, 2), 'utf8')
   } catch {
     // ignore
   }
