@@ -21,7 +21,7 @@ import { DEFAULT_GUIDE_SYSTEM_PROMPT as GUIDE_DEFAULT } from '../../main/guide/g
  *
  * 槽位：guide-system / enricher-system / normalizer-system（三槽位；sketch-system
  * 已随草图引擎改造移出，mvp-system 随废旧管道删除——2026-10-03 删留执行修正口径）
- * （`loop-system` 为追加模式、无内置默认，由 Agent Loop 侧 buildLoopSystemWithOverride 单独接入，
+ * （`loop-system` 为追加模式、无内置默认，由 runAgentLoop 入口 appendLoopPromptOverride 接入，
  *   本套「全量替换」契约不适用于它。）
  */
 

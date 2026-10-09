@@ -58,6 +58,7 @@ describe('renderRequirementsDigest', () => {
         positioning: '个人记账', requirements,
         acceptance: { 'F-001': '新增两条相同内容的记录都能保存' },
         constraints: ['必须离线可用'], out_of_scope: ['不做云同步'], assumptions: ['默认按时间降序'],
+        prd_document: '# 已确认需求\n游戏规则与数值基准：每完成一轮计数加一',
       }), 'utf8')
       const digest = readDesktopRequirementsDigest(project.project_id)!
       for (const prompt of [
@@ -72,6 +73,7 @@ describe('renderRequirementsDigest', () => {
         expect(prompt).toContain('默认按时间降序')
         expect(prompt).toContain('F-030')
         expect(prompt).toContain('不能丢失的末尾条件')
+        expect(prompt).toContain('游戏规则与数值基准：每完成一轮计数加一')
         expect(prompt).not.toContain('其余 6 项')
       }
       expect(digest.match(/行为断言：非法金额不保存/g)).toHaveLength(1)

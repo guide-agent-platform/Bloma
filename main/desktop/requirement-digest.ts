@@ -29,6 +29,7 @@ export interface RequirementDigestInput {
   constraints?: string[]
   out_of_scope?: string[]
   assumptions?: string[]
+  prd_document?: string
   /** 单项描述截断上限（默认 140 字符） */
   maxDescriptionChars?: number
   /** 最多输出条数（默认 24；超出以省略行注明） */
@@ -66,6 +67,9 @@ export function renderRequirementsDigest(input: RequirementDigestInput): string 
   ] as const) {
     const values = entries?.map((text) => text.trim()).filter(Boolean) ?? []
     if (values.length) lines.push(`\n【${heading}】`, ...values.map((text) => `- ${text}`))
+  }
+  if (input.prd_document?.trim()) {
+    lines.push('\n【已确认 PRD 全文（补充上下文；与上列契约矛盾时报告，不自行扩大范围）】', input.prd_document.trim())
   }
   return lines.join('\n')
 }
@@ -173,6 +177,7 @@ export function readDesktopRequirementsDigest(projectId: string): string | undef
       constraints: backplane.constraints,
       out_of_scope: backplane.out_of_scope,
       assumptions: backplane.assumptions,
+      prd_document: backplane.prd_document,
       // 运行契约不得用展示窗口裁剪：全部功能、长描述与验收条件都传给实现者。
       maxItems: backplane.requirements.length,
       maxDescriptionChars: Number.MAX_SAFE_INTEGER,

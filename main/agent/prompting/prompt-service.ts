@@ -16,8 +16,8 @@ import { DEFAULT_SYSTEM_PROMPT as NORMALIZER_DEFAULT } from '../../guide/require
  * **全量替换**内置默认、改完即时生效、无需重启。本服务为设置页「提示词配置」提供
  * 槽位清单、当前生效内容读取、覆盖写入与恢复默认（删除覆盖文件）能力。
  *
- * 槽位注册表：六槽位全部接线 loadPromptOverride（enabled=true，可编辑）——
- * prd / sketch / mvp / guide / enricher（功能项加厚）/ normalizer（修改诉求归一化）。
+ * 六槽位：prd / sketch（静态 UX 草图）/ guide / enricher / normalizer / loop（追加）。
+ * 前五槽位替换内置默认；loop 由 runAgentLoop 入口追加，不替换项目/阶段锚。
  */
 
 interface PromptSlotDef {
@@ -33,7 +33,7 @@ const PROMPT_SLOTS: PromptSlotDef[] = [
   {
     id: 'prd-system',
     label: 'PRD 需求提炼提示词',
-    description: '从对话历史提炼产品定位、功能验收要点、范围外与假设。质量直接决定 PRD 与 GWT 派生。',
+    description: '从对话历史提炼产品定位、功能验收要点、范围外与假设，供桌面实现和验收使用。',
     enabled: true,
     getDefault: () => PRD_DEFAULT,
   },

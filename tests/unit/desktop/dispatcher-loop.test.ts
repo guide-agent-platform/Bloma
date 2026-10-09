@@ -505,6 +505,7 @@ describe('委派通道接线腿（2026-09-26 首跑修复）', () => {
     const result = await runDesktopDispatcherLoop(baseInput({
       query,
       requirementsDigest: 'F-001 [P0] 托盘倒计时工具',
+      shapeBrief: '【本项目形状纪律】无 key 时必须有配置入口，不能用固定模板冒充 AI',
       artifactExists: allExist,
     }))
     expect(result.status).toBe('completed')
@@ -519,6 +520,8 @@ describe('委派通道接线腿（2026-09-26 首跑修复）', () => {
     // 子会话基底带需求摘要（worker 能看到 PRD 需求）
     expect(context.system).toContain('【项目需求')
     expect(context.system).toContain('F-001')
+    expect(context.system).toContain('无 key 时必须有配置入口')
+    expect(context.system).toContain('不能用固定模板冒充 AI')
     // 子会话面（首跑深修）：环境探测工具随父上下文注入子会话
     expect(context.childExtraTools?.some((tool) => tool.name === 'probe_desktop_env')).toBe(true)
 

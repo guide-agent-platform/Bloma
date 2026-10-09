@@ -213,7 +213,7 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
     taskTemplate:
       '续接骨架实现真实桌面程序（骨架 v2 已由平台物化：app.py 三层 + ui/ 组件库，不抄写只扩展）：\n' +
       '1. 三层纪律（app.py 顶部 docstring 即此纪律，扩展不得打破）：业务/持久化全在 app.py 的 Logic 类（**不 import UI**——契约驱动与故障种子直接测它）；Api 桥是 UI 动作唯一入口（每个动作一个方法，转调 Logic，返回 JSON 字符串）；ui/ 只渲染与收集输入，经 window.App.call("方法名", 参数...) 调桥——业务代码不得直接摸 UI；\n' +
-      '2. UI 组装照抄组件手册：先 read ui/PATTERNS.md（每组件可复制样例+桥接纪律）——列表 App.renderList（空态自动）/气泡 App.appendBubble/卡片/表单字段（行内校验）/结果摘要（给数字）/徽章按钮/输入行；不写新 CSS 就不写（缺组件在 kit.css 末尾加 .w- 前缀类）；颜色/间距/字号一律 var(--*)（tokens.css）；**禁 npm/CDN/外链字体/构建步骤——ui/ 全本地资产，产物完全离线**；\n' +
+      '2. UI 组装照抄组件手册：先 read ui/PATTERNS.md（每组件可复制样例+桥接纪律）——列表 App.renderList（空态自动）/气泡 App.appendBubble/卡片/表单字段（行内校验）/结果摘要（给数字）/徽章按钮/输入行；不写新 CSS 就不写（缺组件在 kit.css 末尾加 .w- 前缀类）；颜色/间距/字号一律 var(--*)（tokens.css）；**禁 npm/CDN/外链字体/构建步骤——ui/ 全本地资产，界面资产离线可用；已确认的联网业务按 PRD/产品形状实现**；\n' +
       '3. 状态反馈唯一呈现位 App.show（UX 契约状态机）：执行中 App.show("running","正在保存…") → 终态：成功给数量 App.show("success","已保存 3 条记录")；部分成功分别计数 App.show("partial","导入完成：成功 24，跳过 2")；失败带下一步 App.show("failed","保存失败：文件被占用","已关闭占用程序？点重试；原数据未修改")；每个耗时操作必须 running→终态；\n' +
       '4. 耗时>1s 的操作不阻塞 UI：Python 侧线程完成后 evaluate_js 推送（照抄 app.py 内 push_update 注释样例的模式：`webview.windows[0].evaluate_js(f"window.on_update({json.dumps(payload, ensure_ascii=False)})")`，页面定义 window.on_update 接收）——禁止在 Api 桥方法里同步长计算；\n' +
       '5. 防重复提交与失败不丢输入：执行中禁用触发按钮；输入行失败恢复原值（index.html onSend 即标准形态：失败分支 input.value = text）；\n' +
@@ -226,7 +226,7 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '每实现一个功能必须先有对应驱动断言（禁止无断言的实现）',
       '实现与骨架同一委派线续接（上下文不换人）',
       '三层纪律不可打破：Logic 不 import UI；Api 桥是 UI 动作唯一入口；ui/ 不含业务逻辑',
-      'ui/ 禁外部资源（CDN/外链字体/npm/构建步骤），产物完全离线可用',
+      'ui/ 禁外部资源（CDN/外链字体/npm/构建步骤），界面资产离线可用；已确认的联网业务按 PRD/产品形状实现',
       '体验契约与验收要点同权重：三分支反馈/长任务不阻塞 UI/失败不丢输入是交付门的一部分',
       '形状锁定（批9 2026-10-07）：产品形状已随 PRD 冻结——发现形状不成立时必须停下输出显式变更声明（当前形状/拟切换/原因/影响）等待用户确认，禁止静默切换模板或骨架方向',
     ],
@@ -257,7 +257,7 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '快速做一个能用的应用（快速模式：平台已物化骨架 v2 到项目根——app.py 三层 + ui/ 组件库 + requirements.txt；无工程契约/驱动断言要求）：\n' +
       '1. 按 PRD 背板功能清单实现完整可用的 Windows 桌面程序——全部业务功能真实可用，程序能跑起来；\n' +
       '2. 三层纪律（app.py 顶部 docstring 即此纪律）：业务/持久化全在 Logic 类（不 import UI）；Api 桥是 UI 动作唯一入口（每个动作一个方法，转调 Logic，返回 JSON 字符串）；ui/ 只渲染与收集输入，经 window.App.call("方法名", 参数...) 调桥——业务代码不得直接摸 UI；\n' +
-      '3. UI 组装先 read ui/PATTERNS.md 照抄组件（列表 App.renderList 空态自动/气泡 App.appendBubble/表单行内校验/结果摘要给数字）；不写新 CSS 就不写；颜色/间距/字号一律 var(--*)；**禁 npm/CDN/外链字体/构建步骤——产物完全离线**；\n' +
+      '3. UI 组装先 read ui/PATTERNS.md 照抄组件（列表 App.renderList 空态自动/气泡 App.appendBubble/表单行内校验/结果摘要给数字）；不写新 CSS 就不写；颜色/间距/字号一律 var(--*)；**禁 npm/CDN/外链字体/构建步骤——界面资产离线可用；已确认的联网业务按 PRD/产品形状实现**；\n' +
       '4. 状态反馈唯一呈现位 App.show（running→成功给数量/部分成功分别计数/失败带下一步）；耗时>1s 操作 Python 侧线程+evaluate_js 推送（照抄 app.py push_update 注释样例），禁止 Api 桥里同步长计算；执行中禁用触发按钮防重复提交；输入失败恢复原值（index.html onSend 即标准形态：失败分支 input.value = text）；\n' +
       '5. 一次性委派 implement 子会话完成实现（依赖与解释器路径如实装配，不编造运行结果）：子会话有 run_project_script（真实运行项目根内 .py，每次≤90s、至多 12 次）——任务书里要求它写无头自测脚本（import app 测 Logic 层）并当场跑到绿、附真实红绿结果，不要只写不跑；子会话还有 install_packages（声明制 .venv 安装：requirements 声明→安装→import 回读；装后 LAUNCH command 用 .venv\\Scripts\\python.exe；venv 统一用 .venv 这一个名字，不要自建 .venv-probe 之类异名 venv——快照/安全扫描/交付清单靠标记识别，异名会漏）；\n' +
       `6. 可用组件速查（声明安装，坑与降级详卡见 install_packages 工具）：\n${componentQuickReference().split('\n').slice(1).join('\n')}\n` +
@@ -277,7 +277,7 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
     title: '驱动验收',
     taskTemplate:
       '委派测试工程师（异渠道）执行驱动验收：\n' +
-      '1. GWT 场景补全（driver-skeleton.py 每场景一个可执行断言，断言先行）；**断言对象=Logic 逻辑层（import 即测，无 GUI 依赖）**——`import app` 后直接调 Logic 类/函数验证业务结果（骨架预置场景 assert_self_check_smoke 即此形态：import app 调用其函数断言退出码）；核心交互流程必须含状态触达场景——至少 空态/初始、成功、失败（或边界）各一个 S 场景（PRD 体验要求/背板 ux.states 为据，缺省按通用七态理解；探索与裁判都会对照它）；\n' +
+      '1. GWT 场景补全（driver-skeleton.py 每场景一个可执行断言，断言先行）；**断言对象=Logic 逻辑层（import 即测，无 GUI 依赖）**——`import app` 后直接调 Logic 类/函数验证业务结果（骨架预置场景 assert_self_check_smoke 即此形态：import app 调用其函数断言退出码）；核心交互流程必须含状态触达场景——至少 空态/初始、成功、失败（或边界）各一个 S 场景（PRD 体验要求/背板 ux.states 为据，无专门契约时从通用九态选择本产品适用项；探索与裁判都会对照它）；\n' +
       '2. **驱动执行由平台收口时执行**（spawn python 跑 contract.json 的 driver.command，退出码/stdout 回读）——你不需要也无法自行执行驱动，不要花轮次尝试执行或写「无执行通道」的替代报告；\n' +
       '3. 你的验收职责 = contract.json 合法（必填形态一字不差：schema_version 数字 1 / entry / driver 对象含 command、timeout_ms、exit_code_semantics 三键、assert_readback / env_whitelist / components / scenarios 场景映射——形态见下）+ driver-skeleton.py 断言齐备：\n' + MINIMAL_CONTRACT_EXAMPLE + '\n' +
       'scenarios 硬约束（批4 验收语义冻结）：name 与 driver stdout 锚点场景名一致、covers 声明覆盖的 F-id；covers 引用 PRD 不存在的 F-id 或任一 P0 功能项无场景覆盖都会被裁判门拒收——验收语义在 PRD 确认时已冻结，你只能引用 F-id 不得重定义验收标准；断言有效性会被平台反证（批6）：永真断言/吞异常静态拒收 + 注入已知缺陷复跑驱动（survived=断言没证明任何东西，拒收；种子打 Logic 函数，断言真调逻辑层才能被击杀）——期望值必须独立写死、断言读取真实产物状态，不取自被测代码自身；\n' +

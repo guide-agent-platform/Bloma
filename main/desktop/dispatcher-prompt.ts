@@ -143,7 +143,7 @@ export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherProm
  */
 export function buildDesktopChildBaseSystem(
   node: PhaseNode,
-  ctx: { projectName: string; requirementsDigest?: string; quickMode?: boolean; uxSketchPath?: string },
+  ctx: { projectName: string; requirementsDigest?: string; quickMode?: boolean; uxSketchPath?: string; shapeBrief?: string; shapeVerifyBrief?: string },
 ): string {
   const useQuickBook = Boolean(ctx.quickMode && node.quickTaskTemplate)
   const constraints = useQuickBook ? (node.quickConstraints ?? node.constraints) : node.constraints
@@ -164,6 +164,8 @@ export function buildDesktopChildBaseSystem(
     parts.push(`【项目需求（唯一真相源，不得改写；清单外新功能一律不做）】\n${ctx.requirementsDigest}`)
   }
   if (ctx.uxSketchPath) parts.push(confirmedSketchInstruction(ctx.uxSketchPath))
+  if ((node.id === 'desktop-scaffold' || node.id === 'desktop-implement') && ctx.shapeBrief) parts.push(ctx.shapeBrief)
+  if (node.id === 'desktop-verify' && ctx.shapeVerifyBrief) parts.push(ctx.shapeVerifyBrief)
   return parts.join('\n\n')
 }
 

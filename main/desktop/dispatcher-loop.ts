@@ -335,6 +335,8 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
       ...(input.requirementsDigest ? { requirementsDigest: input.requirementsDigest } : {}),
       ...(input.uxSketchPath ? { uxSketchPath: input.uxSketchPath } : {}),
       ...(input.quickMode ? { quickMode: true } : {}),
+      ...(input.shapeBrief ? { shapeBrief: input.shapeBrief } : {}),
+      ...(input.shapeVerifyBrief ? { shapeVerifyBrief: input.shapeVerifyBrief } : {}),
     }),
     editFormat: 'diff',
     publish,
