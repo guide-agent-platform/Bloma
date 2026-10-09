@@ -16,6 +16,7 @@ import { trackAnalytics } from '../delivery/track-analytics'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { findProject } from '../project/project-service'
+import { getAnalyticsPath } from '../../storage/config-paths'
 
 
 /** 起跑留痕（每段 run 一条；失败静默不阻断主链路）。 */
@@ -80,7 +81,7 @@ export function recordDispatchRunTelemetry(
     const head3Input = turnsUsage.filter((t) => t.turn <= 3).reduce((sum, t) => sum + t.inputTokens, 0)
     const repairClass = deriveRepairClass(result)
     const payload: Record<string, unknown> = {
-      phase: result.phase?.id,
+      phase: result.phase?.id ?? input.currentPhase,
       status: result.status,
       loop_status: loopResult?.status,
       turns: loopResult?.turns,
@@ -165,8 +166,7 @@ export function recordDispatchRunTelemetry(
 // 批5（2026-10-06 质量指标地基）：attempt_index / final_outcome / 交付汇总事件
 // =========================================================================
 
-/** 同项目同阶段的段计数（attempt_index 口径：一次交付尝试 = 同阶段段 run 序号）。
- *  进程内存态，重启归零——指标 v1 口径，够大矩阵测试用（讨论 turn9 的统计分母）。 */
+/** 同项目同阶段的段计数；首次使用从 analytics.jsonl 恢复，按日志路径隔离不同 home/工作区。 */
 const phaseRunCounts = new Map<string, number>()
 
 /** 测试隔离用（beforeEach 重置；生产无需）。 */
@@ -201,14 +201,63 @@ export function deriveFinalOutcome(result: DesktopDispatchRunResult): string {
   return 'inconclusive'
 }
 
-/** 收口事件附加 attempt_index/final_outcome（批5）。 */
+/**
+ * 参考本地 Proma bf3e98c 的 agent-session-usage.ts：逐行解析 JSONL，跳过坏行，
+ * 读取失败不反噬业务。此处需扫描所有匹配段，用计数与最大序号兼容旧日志重启后重复的 1。
+ * 只在当前进程首次遇到该项目/阶段时读取；不改写历史事件，也不引入另一份持久化计数器。
+ */
+function readPersistedRunCount(path: string, projectId: string, phaseId: string): number | undefined {
+  let lines: string[]
+  try {
+    lines = readFileSync(path, 'utf8').split('\n')
+  } catch (error) {
+    // 日志不存在是首次运行；不可读则未知，不能冒充首次尝试。
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 0 : undefined
+  }
+  let count = 0
+  let maxIndex = 0
+  for (const line of lines) {
+    if (!line.trim()) continue
+    try {
+      const parsed: unknown = JSON.parse(line)
+      if (!isRecord(parsed)) continue
+      const event = isRecord(parsed.event) ? parsed.event : parsed
+      if (event.event_type !== 'desktop_dispatch_run' || event.project_id !== projectId) continue
+      const payload = event.payload
+      if (!isRecord(payload) || payload.phase !== phaseId) continue
+      count += 1
+      const index = payload.attempt_index
+      if (typeof index === 'number' && Number.isSafeInteger(index) && index > 0) {
+        maxIndex = Math.max(maxIndex, index)
+      }
+    } catch {
+      // 截断/损坏的行不能遮蔽其余完整运行记录。
+    }
+  }
+  return Math.max(count, maxIndex)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+/** 收口事件附加 attempt_index/final_outcome；历史不可读时省略序号，保留其他遥测。 */
 function recordAttemptAndOutcome(input: DesktopDispatchRunInput, result: DesktopDispatchRunResult, payload: Record<string, unknown>): void {
+  payload.final_outcome = deriveFinalOutcome(result)
   const phaseId = result.phase?.id ?? input.currentPhase
-  const key = `${input.projectId}::${phaseId}`
-  const attemptIndex = (phaseRunCounts.get(key) ?? 0) + 1
+  let workspaceSlug = 'default-software-builder'
+  try {
+    workspaceSlug = findProject(input.projectId).workspace_slug
+  } catch {
+    // 与 trackAnalytics 的缺失项目回退路径一致。
+  }
+  const path = getAnalyticsPath(workspaceSlug)
+  const key = JSON.stringify([path, input.projectId, phaseId])
+  const previous = phaseRunCounts.get(key) ?? readPersistedRunCount(path, input.projectId, phaseId)
+  if (previous === undefined || previous >= Number.MAX_SAFE_INTEGER) return
+  const attemptIndex = previous + 1
   phaseRunCounts.set(key, attemptIndex)
   payload.attempt_index = attemptIndex
-  payload.final_outcome = deriveFinalOutcome(result)
 }
 
 /**
