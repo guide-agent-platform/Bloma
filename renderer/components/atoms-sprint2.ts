@@ -59,7 +59,7 @@ export const channelsLoadingAtom = atom<'idle' | 'loading' | 'loaded' | 'error'>
  * 聊天输入草稿（WC-P2，2026-08-29）：提升到 atom 使零渠道提交被拦截直达设置页后，
  * 返回工作区时输入仍在——连接成功即可直接发送，不重打一遍。
  */
-export const chatInputDraftAtom = atom('')
+export { chatInputDraftAtom } from '../composer-state'
 
 /**
  * 聊天输入框聚焦信号（计数器，2026-09-11 三按钮改版）：修改确认卡点「提出意见」时

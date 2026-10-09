@@ -2,6 +2,8 @@ import type { AgentEvent, AgentLoopStatus, LoopTerminationDetail, LoopValidation
 import { getAgentSessionPath } from '../../../storage/config-paths'
 import { appendJsonLine } from '../../../storage/json-store'
 import { appendSessionMessage } from '../../platform/sessions/session-tree'
+import { buildAttachmentTools } from '../tools/attachment-tools'
+import { materialImageRefs, renderMaterialContext } from '../../platform/attachments/material-context'
 import { canUseTool } from '../permissions/permission-service'
 import type { ConversationTurn, SDKQuery, ToolDefinition } from '../../orchestration/orchestrator'
 import { prepareTaskWithSkills } from '../../platform/mcp/skill-loader'
@@ -158,10 +160,13 @@ export interface AgentLoopTurnInfo {
 }
 
 export interface AgentLoopInput {
+  materials?: import('../../../shared/attachment-types').MaterialContext
   /** 背板锚定系统提示词（PR3 由 prd.json 注入，每轮有效防漂移） */
   system: string
   /** 初始 user 消息（任务指令） */
   task: string
+  /** Chat reception already persisted the user's message with a stable identity. */
+  initialMessagePersisted?: boolean
   tools: AgentLoopTool[]
   query: SDKQuery
   env: Record<string, string>
@@ -357,6 +362,9 @@ const BUDGET_STALL_TURNS = 2
  * 结果决定，不再被垃圾收工轮骗到）。
  */
 const DEGENERATE_RETRY_LIMIT = 1
+
+/** A tool-free completion summary must not inherit the full coding output budget. */
+export const WRAP_UP_MAX_TOKENS = 4096
 
 /** 终轮退行重试时的反馈 user 轮（模型可见；同时落 JSONL 审计）。 */
 const DEGENERATE_RETRY_FEEDBACK =
@@ -682,6 +690,11 @@ function normalizeProgressPath(path: string): string {
 }
 
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
+  if (input.materials?.attachments.length) {
+    const materials = renderMaterialContext(input.materials, input.sessionId)
+    const images = new Map([...(input.images ?? []), ...materialImageRefs(input.materials)].map(image => [image.imageId, image]))
+    input = { ...input, task: `${input.task}\n\n${materials}`, images: [...images.values()].slice(-4), tools: [...input.tools, ...buildAttachmentTools(input.materials).filter(tool => !input.tools.some(existing => existing.name === tool.name))] }
+  }
   // P0-1 steer（运行中转向，2026-09-08）：只主 loop（depth 0）开放。进入即 mark——
   // IPC steer 通道据此判定可注入；finally 里先 drain 残余（未及批间注入的，落 JSONL 保真；
   // abort 后的残余丢弃——取消语义优先，cancelAgent 已清队列，这里兜竞态窗口）再 unmark。
@@ -766,7 +779,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     taskBlocks ? { role: 'user' as const, content: taskBlocks } : { role: 'user' as const, content: task },
   ]
   // 初始 task 落盘（审计完整性：JSONL 是子会话全量审计，缺首条 user 会让 continue 重放丢任务原文）
-  appendLoopMessage(input.sessionId, 'user', taskBlocks ?? [{ type: 'text', text: task }])
+  if (!input.initialMessagePersisted) appendLoopMessage(input.sessionId, 'user', taskBlocks ?? [{ type: 'text', text: task }])
   const ctx: ToolContext = {
     projectId: input.projectId,
     sessionId: input.sessionId,
@@ -973,7 +986,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         env: input.env,
         signal: input.signal,
         sessionId: input.sessionId,
-        maxTokens: input.maxTokens,
+        maxTokens: wrapUp ? Math.min(input.maxTokens, WRAP_UP_MAX_TOKENS) : input.maxTokens,
         ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
         ...(input.providerType !== undefined ? { providerType: input.providerType } : {}),
         ...(input.thinkingLevel !== undefined ? { thinkingLevel: input.thinkingLevel } : {}),
@@ -1550,7 +1563,7 @@ async function runGraceWrapUpTurn(
       env: input.env,
       signal: input.signal,
       sessionId: input.sessionId,
-      maxTokens: input.maxTokens,
+      maxTokens: Math.min(input.maxTokens, WRAP_UP_MAX_TOKENS),
       ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
       ...(input.thinkingLevel !== undefined ? { thinkingLevel: input.thinkingLevel } : {}),
       messages: [

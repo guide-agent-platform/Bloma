@@ -15,6 +15,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync,
 import { join } from 'node:path'
 import { findProject } from '../project/project-service'
 import { parseLaunchDeclaration } from './launch-smoke'
+import { resolveDriverVenvCommand } from './process-driver'
 import { violatesCommandBlacklist } from './contract-schema'
 import { isMvpConfirmPending } from './mvp-confirm'
 
@@ -196,9 +197,10 @@ export async function startCorrectionSession(input: { projectId: string }): Prom
   }
 
   const drivePort = randomPort()
+  const command = resolveDriverVenvCommand(parsed.launch.command, project.root_path)
   const child = spawn(
-    parsed.launch.command[0]!,
-    [...parsed.launch.command.slice(1), '--correction-session', sessionDir, '--drive-port', String(drivePort)],
+    command[0]!,
+    [...command.slice(1), '--correction-session', sessionDir, '--drive-port', String(drivePort)],
     {
       cwd: project.root_path,
       detached: false,

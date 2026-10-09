@@ -25,6 +25,10 @@ describe('isDegenerateText', () => {
     expect(isDegenerateText(wall)).toBe(true)
   })
 
+  it('detects the dogfood long-phrase loop beyond eight characters', () => {
+    expect(isDegenerateText('完成前仍需核对。' + '停止空转。真正执行。'.repeat(80))).toBe(true)
+  })
+
   it('正常完成总结 → 不判退行', () => {
     const summary =
       '已完成「地牢清怪录」可运行 MVP：房间式地牢循环、WASD 移动、自动瞄准射击、' +
@@ -33,7 +37,7 @@ describe('isDegenerateText', () => {
   })
 
   it('正常文本里短促省略号不误伤（运行占比低于门槛）', () => {
-    const withEllipsis = '这是一段自然的完成总结句子，描述了功能与测试结果。'.repeat(12) + '…'.repeat(8)
+    const withEllipsis = Array.from({ length: 12 }, (_, i) => `第${i}项已核对，功能与测试结果如下。`).join('') + '…'.repeat(8)
     expect(isDegenerateText(withEllipsis)).toBe(false)
   })
 

@@ -123,7 +123,7 @@ describe('ChatPanel 粘贴图片（clipboard-paste 组件级）', () => {
     expect(preventSpy).not.toHaveBeenCalled()
   })
 
-  it('[S1-UI-047] 存图失败降级：IPC 返回错误 → chip 不出现、发送仍按纯文本路径（不阻塞用户）', async () => {
+  it('[S1-UI-047] 存图失败保留草稿：明确移除失败项后才可发送纯文本', async () => {
     saveMock.mockResolvedValue({ ok: false, request_id: 'r', error: { code: 'WRITE_FAILED', message: 'disk full' } })
     const onSend = vi.fn()
     const input = mountPanel(onSend)
@@ -136,8 +136,10 @@ describe('ChatPanel 粘贴图片（clipboard-paste 组件级）', () => {
     expect(screen.queryByTestId('paste-image-chip')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
-    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))
-    // 降级=纯文本路径：单参调用形态（无 undefined 占位第二参）
-    expect(onSend).toHaveBeenCalledWith('图发不出也没关系')
+    expect(onSend).not.toHaveBeenCalled()
+    expect(input.value).toBe('图发不出也没关系')
+    fireEvent.click(screen.getByRole('button', { name: '移除失败项，保留已有内容' }))
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith('图发不出也没关系'))
   })
 })

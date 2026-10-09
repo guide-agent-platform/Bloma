@@ -23,6 +23,7 @@ import { mainRootDir } from '../platform/paths'
 /** 物化清单：骨架源相对路径 → 项目内相对路径。 */
 const ROOT_FILES: readonly string[] = [
   'app.py',
+  'record_store.py',
   'requirements.txt',
   'README.md',
   'ui/index.html',

@@ -1,0 +1,61 @@
+.message-composer {
+  padding: 8px 12px;
+  flex-shrink: 0;
+  border-top: 1px solid var(--color-border);
+  background: transparent;
+}
+.composer-input-frame {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid rgba(124, 58, 237, 0.12);
+  border-radius: 16px;
+  background: rgba(124, 58, 237, 0.025);
+  transition: border-color 160ms ease;
+}
+.composer-input-frame:focus-within { border-color: rgba(124, 58, 237, 0.3); }
+.composer-add-button {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 20px;
+  cursor: pointer;
+}
+.composer-add-button:hover { background: rgba(124, 58, 237, 0.06); color: var(--color-quick); }
+.composer-attachment-row, .message-materials { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.composer-attachment-row { margin-bottom: 6px; }
+.attachment-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 4px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  background: rgba(124, 58, 237, 0.035);
+  font-size: 12px;
+  color: var(--color-text-secondary, var(--color-text));
+}
+.attachment-pill button, button.attachment-pill {
+  appearance: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.attachment-pill button { border: 0; padding: 0; background: transparent; }
+.attachment-label { max-width: 205px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-remove { opacity: .55; padding: 0 2px !important; }
+.attachment-remove:hover { opacity: 1; }
+.message-materials { margin-top: 7px; }
+.message-materials .attachment-pill { color: inherit; border-color: currentColor; background: rgba(255,255,255,.1); }
+.message-materials .attachment-pill:hover { background: rgba(255,255,255,.18); }
+.composer-hint { font-size: 11px; color: var(--color-text-muted); text-align: center; margin: 5px 0 0; }

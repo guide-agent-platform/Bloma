@@ -98,6 +98,7 @@ export type DelegationViewStatus = 'running' | 'completed' | 'failed' | 'cancell
 
 /** 委派子会话的渲染端视图（id/role/status 实时；pending_question 提示待回答）。 */
 export interface DelegationView {
+  loop_status?: string
   delegation_id: string
   child_session_id: string
   role: string
@@ -882,6 +883,7 @@ function reduceDelegationEvent(previous: DelegationView[], event: AgentEvent): D
     role: existing?.role ?? (typeof event.payload.role === 'string' ? event.payload.role : 'custom'),
     goal: existing?.goal ?? (typeof event.payload.goal === 'string' ? event.payload.goal : ''),
     status: existing?.status ?? 'running',
+    loop_status: typeof event.payload.loop_status === 'string' ? event.payload.loop_status : existing?.loop_status,
   }
   const upsert = (next: DelegationView): DelegationView[] => {
     if (index < 0) return [...previous, next]
@@ -892,7 +894,7 @@ function reduceDelegationEvent(previous: DelegationView[], event: AgentEvent): D
 
   switch (event.type) {
     case 'delegation_started':
-      return upsert({ ...base, status: 'running', pending_question: undefined })
+      return upsert({ ...base, status: 'running', loop_status: undefined, pending_question: undefined })
     case 'delegation_completed':
       return upsert({ ...base, status: 'completed', pending_question: undefined })
     case 'delegation_failed':
@@ -1094,7 +1096,7 @@ export function appendMessageToSession(
   const store = window.__jotai_store__
   if (!store) return
   const messagesAtom = agentMessagesFamily(sessionId)
-  store.set(messagesAtom, (prev) => [...prev, message])
+  store.set(messagesAtom, (prev) => message.client_message_id && prev.some(item => item.client_message_id === message.client_message_id) ? prev : [...prev, message])
 }
 
 /** 标记当前会话的决策卡片已被消费（用户已点选），立即隐藏卡片。 */

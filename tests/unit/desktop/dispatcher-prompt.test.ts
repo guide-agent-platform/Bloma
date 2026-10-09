@@ -160,6 +160,13 @@ describe('输出纪律段（刀4，2026-10-02 确认协议与呈现层战役）'
 })
 
 describe('需求摘要与子会话基底（2026-09-26 首跑修复）', () => {
+  it('passes the confirmed sketch to both the dispatcher and its child', () => {
+    const ctx = { projectName: 'p', quickMode: true, uxSketchPath: '00_UX/confirmed.html' }
+    for (const prompt of [buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-implement'], ctx), buildDesktopChildBaseSystem(DESKTOP_PHASES['desktop-implement'], ctx)]) {
+      expect(prompt).toContain('先 read_file 00_UX/confirmed.html')
+      expect(prompt).toContain('不要仅看组件库重新设计')
+    }
+  })
   it('requirementsDigest 渲染【项目需求】段；缺省不出', () => {
     const withDigest = buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-arch'], {
       projectName: 'p',

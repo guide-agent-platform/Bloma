@@ -331,6 +331,17 @@ describe('agent-tools（PR2 L2）', () => {
       expect(readFileSync(join(project.root_path, 'src', 'app.js'), 'utf8')).toContain('"new"')
     })
 
+    it('edit_file accepts LF model edits against a CRLF file through the write guards', async () => {
+      const project = createProject({ request_id: 'req-e-crlf', mode: 'quick' })
+      mkdirSync(join(project.root_path, 'src'), { recursive: true })
+      const path = join(project.root_path, 'src', 'app.js')
+      writeFileSync(path, 'const a = 1;\r\nconst b = 2;\r\n', 'utf8')
+      const tools = composeTools({ projectId: project.project_id })
+      const result = await byName(tools, 'edit_file').execute({ path: 'src/app.js', old_string: 'const a = 1;\nconst b = 2;', new_string: 'const a = 3;\nconst b = 4;' }, ctxFor(project.project_id))
+      expect(result.isError).toBeUndefined()
+      expect(readFileSync(path, 'utf8')).toBe('const a = 3;\r\nconst b = 4;\r\n')
+    })
+
     it('edit_file diff 模式：new_string 缺省 → 参数错误，不执行删除', async () => {
       const project = createProject({ request_id: 'req-e3', mode: 'quick' })
       mkdirSync(join(project.root_path, 'src'), { recursive: true })

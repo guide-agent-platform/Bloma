@@ -8,6 +8,7 @@ import { findProject, readLastSketchRequirements } from '../../project/project-s
 import { decideWrite, estimateTokenCount } from '../loop/usage-guard'
 import { withAbort, toolEvidenceEnabled, writeGuardEnabled, preflightEnabled, compactToolEnabled, MAX_EXPLICIT_COMPACTIONS, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../loop/agent-loop'
 import { commitFileWrite, fileRevisionOf, fileRevisionsOf } from './write-lease'
+import { replaceUniqueText } from './text-edit'
 import { resolveProjectRoot } from '../../../shared/project-root-override'
 import { buildDelegationTools } from '../delegation/delegation-tools'
 import { buildWebFetch, buildWebResearch } from './web-tools'
@@ -666,14 +667,13 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
         return { output: `文件不存在：${resolved.rel}。先用 write_file 创建，或 list_files 确认路径。`, isError: true }
       }
       const current = readFileSync(resolved.abs, 'utf8')
-      const count = current.split(toolInput.old_string).length - 1
-      if (count === 0) {
-        return { output: `old_string 在 ${resolved.rel} 中未命中。请先 read_file 定点（注意空白与引号须逐字一致）。`, isError: true }
+      const replacement = replaceUniqueText(current, toolInput.old_string, toolInput.new_string)
+      if (!replacement.ok) {
+        return { output: replacement.matches === 0
+          ? `old_string 在 ${resolved.rel} 中未命中。请先 read_file 定点（注意空白与引号须逐字一致）。`
+          : `old_string 在 ${resolved.rel} 中命中 ${replacement.matches} 处，不唯一。请扩大上下文使片段唯一。`, isError: true }
       }
-      if (count > 1) {
-        return { output: `old_string 在 ${resolved.rel} 中命中 ${count} 处，不唯一。请扩大上下文使片段唯一。`, isError: true }
-      }
-      const next = current.replace(toolInput.old_string, toolInput.new_string)
+      const next = replacement.content
       // P1-06：模型显式 expected_revision 优先；未传时用本会话读到的版本作提交点校验基准
       const revisionBasis = typeof toolInput.expected_revision === 'string' ? toolInput.expected_revision : undefined
       return validateAndWrite(projectRoot(), resolved.rel, next, ctx, revisionBasis)

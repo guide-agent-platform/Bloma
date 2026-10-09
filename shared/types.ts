@@ -16,6 +16,17 @@
 
 export const IPC_CHANNELS = {
   AGENT_SEND_MESSAGE: 'agent:send-message',
+  CHAT_SUBMIT: 'chat:submit',
+  COMPOSER_LOAD: 'composer:load',
+  COMPOSER_SAVE: 'composer:save',
+  ATTACHMENT_IMPORT: 'attachment:import',
+  ATTACHMENT_PREVIEW: 'attachment:preview',
+  ATTACHMENT_READ: 'attachment:read',
+  CHAT_RECEIPT: 'chat:receipt',
+  CHAT_RECEIPTS: 'chat:receipts',
+  CHAT_RECOVER: 'chat:recover',
+  ATTACHMENT_HISTORY: 'attachment:history',
+  ATTACHMENT_REUSE: 'attachment:reuse',
   /** 运行中转向（P0-1 steer，2026-09-08）：活跃主 loop 期间输入框改道本通道，批间注入 */
   AGENT_STEER_MESSAGE: 'agent:steer-message',
   /** I3 转向生效确认链（P7-7，2026-09-11）：中/高档影响卡三选回执 */
@@ -786,6 +797,8 @@ export interface SpeechTranscribeResult {
 }
 
 export interface AgentMessage {
+  attachments?: import('./attachment-types').AttachmentInfo[]
+  client_message_id?: string
   role: 'user' | 'assistant' | 'system'
   content: MessageContentBlock[]
   timestamp: number
@@ -844,6 +857,10 @@ export interface AgentConfirmRequirementsResult {
 }
 
 export interface AgentSendMessageInput extends RequestEnvelope {
+  run_generation?: number
+  attachment_refs?: import('./attachment-types').AttachmentRef[]
+  draft_id?: string
+  client_message_id?: string
   session_id: string
   project_id: string
   content: string
@@ -1657,7 +1674,22 @@ export interface AnalyticsTrackResult {
 // 14. Renderer Bridge API 契约（ElectronAPI）
 // =========================================================================
 
+export type { AttachmentRef, AttachmentInfo, ComposerDraft, DraftScope, SendReceipt, ChatSubmitInput } from './attachment-types'
+
 export type ElectronAPI = {
+  composer: {
+    load(input: import('./attachment-types').DraftLoadInput): Promise<ApiResult<import('./attachment-types').ComposerDraft>>
+    save(input: import('./attachment-types').DraftSaveInput): Promise<ApiResult<import('./attachment-types').ComposerDraft>>
+    importImage(input: import('./attachment-types').AttachmentImportInput): Promise<ApiResult<import('./attachment-types').AttachmentInfo>>
+    preview(input: import('./attachment-types').AttachmentPreviewInput): Promise<ApiResult<import('./attachment-types').AttachmentPreview>>
+    read(input: import('./attachment-types').AttachmentReadInput): Promise<ApiResult<import('./attachment-types').AttachmentPage>>
+    submit(input: import('./attachment-types').ChatSubmitInput): Promise<ApiResult<import('./attachment-types').SendReceipt>>
+    receipt(input: RequestEnvelope & { client_message_id: string; session_id: string }): Promise<ApiResult<import('./attachment-types').SendReceipt | undefined>>
+    receipts(input: RequestEnvelope & { session_id: string }): Promise<ApiResult<Array<{ receipt: import('./attachment-types').SendReceipt; input: import('./attachment-types').ChatSubmitInput }>>>
+    recover(input: import('./attachment-types').MessageRecoveryInput): Promise<ApiResult<import('./attachment-types').SendReceipt>>
+    history(input: RequestEnvelope & { project_id: string; session_id: string }): Promise<ApiResult<import('./attachment-types').AttachmentInfo[]>>
+    reuse(input: import('./attachment-types').AttachmentReuseInput): Promise<ApiResult<import('./attachment-types').ComposerDraft>>
+  }
   app: {
     /** 实验开关只读状态（Phase 10 落地旅程：I5 两口径文案等渲染端消费） */
     switchState(input: AppSwitchStateInput): Promise<ApiResult<AppSwitchStateResult>>

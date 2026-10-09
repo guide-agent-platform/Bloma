@@ -36,6 +36,7 @@ import { sanitizeClarificationRequests, type EnrichmentClarificationRequest } fr
  */
 
 export interface EnrichRequirementsInput {
+  material_text?: string
   session_id: string
   /** 已冻结功能项（薄/厚混合）：只对无 behavior_assertions 的项加厚（净效果——LLM 侧仍全量一一对应输出以保形状稳定，由合并层按「只填缺省」实现此契约） */
   requirements: SketchRequirement[]
@@ -139,7 +140,7 @@ export async function enrichRequirementsLlm(
   input: EnrichRequirementsInput,
   onClarification?: (requests: EnrichmentClarificationRequest[]) => void,
 ): Promise<EnrichedSketchRequirement[] | null> {
-  const conversation = readConversation(input.session_id)
+  const conversation = [readConversation(input.session_id), input.material_text].filter(Boolean).join('\n\n')
   if (!conversation.trim()) return null
   if (!input.query || !input.env) return null
 

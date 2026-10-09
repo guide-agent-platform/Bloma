@@ -11,7 +11,7 @@
  * 产物落盘 `<项目根>/00_UX/ux-sketch.html`（交付清单 SKIP_DIRS 已排除），预览走
  * bloma-file:// 协议直读文件（preview-scheme，方案 A）——不再起沙箱服务器。
  */
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { SDKQuery } from '../orchestration/orchestrator'
 import { callLlmForJson } from '../kernel/llm-call'
@@ -42,7 +42,8 @@ const UX_SKETCH_SYSTEM_PROMPT = `你是桌面软件的界面草图工程师。�
 const UX_SKETCH_RETRY_FEEDBACK = '上一次输出不是可用的 HTML 文档（可能带了解释文字或代码围栏）。请只输出完整 HTML 文档本身：<!DOCTYPE html> 开头，单文件内联样式，无脚本，无解释，无代码围栏。'
 
 function getSystemPrompt(): string {
-  return loadPromptOverride('ux-sketch.md') ?? UX_SKETCH_SYSTEM_PROMPT
+  return (loadPromptOverride('ux-sketch.md') ?? UX_SKETCH_SYSTEM_PROMPT) +
+    '\n示例数据必须自洽：列表数量、筛选范围、合计与示例行对应；不能确定真实数据路径时写「程序的数据目录」，不得编造用户绝对路径。'
 }
 
 export interface UxSketchResult {
@@ -188,9 +189,26 @@ export async function stageUxSketch(options: {
   const dir = join(project.root_path, UX_SKETCH_DIR)
   mkdirSync(dir, { recursive: true })
   const sketchPath = join(dir, UX_SKETCH_FILENAME)
+  const historyDir = join(dir, 'history')
+  mkdirSync(historyDir, { recursive: true })
+  let lastVersion = readdirSync(historyDir).reduce((max, name) => Math.max(max, Number(/^version-(\d+)\.html$/.exec(name)?.[1] ?? 0)), 0)
+  if (lastVersion === 0 && existsSync(sketchPath)) {
+    writeFileSync(join(historyDir, 'version-0001.html'), readFileSync(sketchPath), { flag: 'wx' })
+    lastVersion = 1
+  }
+  const html = injectSketchCorrector(options.html)
+  writeFileSync(join(historyDir, `version-${String(lastVersion + 1).padStart(4, '0')}.html`), html, { encoding: 'utf8', flag: 'wx' })
   // 点选层注入（批11 ①，2026-10-08）：草图落盘时内联注入——右栏渲染即获得点选标记
   //（元素级语义，无需纠错实例；平台注入的确定性脚本，非 LLM 产出，不违草图禁脚本纪律）。
-  writeFileSync(sketchPath, injectSketchCorrector(options.html), 'utf8')
+  writeFileSync(sketchPath, html, 'utf8')
   const previewUrl = mintProjectPreviewUrl(options.project_id, `${UX_SKETCH_DIR}/${UX_SKETCH_FILENAME}`)
   return { preview_url: previewUrl, sketch_path: sketchPath }
+}
+
+/** Preserve the exact layout the user confirmed for downstream implementation. */
+export function freezeConfirmedUxSketch(projectId: string): void {
+  const root = findProject(projectId)?.root_path
+  if (!root) return
+  const path = join(root, UX_SKETCH_DIR, UX_SKETCH_FILENAME)
+  if (existsSync(path)) writeFileSync(join(root, UX_SKETCH_DIR, 'confirmed.html'), readFileSync(path), { flag: 'w' })
 }

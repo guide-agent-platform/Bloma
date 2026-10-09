@@ -15,6 +15,7 @@
  */
 
 import { randomBytes } from 'node:crypto'
+import { existsSync, readFileSync } from 'node:fs'
 import { getAgentSessionPath } from '../../../storage/config-paths'
 import { appendJsonLine } from '../../../storage/json-store'
 
@@ -51,12 +52,20 @@ export function appendSessionMessage<T extends object>(sessionId: string, messag
   const role = (message as { role?: unknown }).role
   const timestamp = (message as { timestamp?: unknown }).timestamp
   const content = (message as { content?: unknown }).content
+  const attachments = (message as { attachments?: Array<{ attachment_id: string; sha256: string }> }).attachments
+  const clientId = (message as { client_message_id?: string }).client_message_id
+  if (role === 'user' && clientId) {
+    const path = getAgentSessionPath(sessionId)
+    if (existsSync(path) && readFileSync(path, 'utf8').split('\n').some(line => {
+      try { return JSON.parse(line).client_message_id === clientId } catch { return false }
+    })) return
+  }
   // tool_result 批（loop 侧）不适用：同批重复的合法工具结果（如连续 run_preview 同
   // 文案）会被误吞——护栏只针对用户输入文本的双写形态。
   const carriesToolResult = Array.isArray(content)
     && content.some((block) => block && typeof block === 'object' && (block as { type?: unknown }).type === 'tool_result')
-  if (role === 'user' && !carriesToolResult && typeof timestamp === 'number') {
-    const signature = JSON.stringify(content ?? null)
+  if (role === 'user' && !clientId && !carriesToolResult && typeof timestamp === 'number') {
+    const signature = JSON.stringify(attachments?.length ? { content, attachments: attachments.map(info => ({ id: info.attachment_id, sha256: info.sha256 })) } : content ?? null)
     const prev = lastAppendedUser.get(sessionId)
     if (prev && prev.signature === signature && Math.abs(timestamp - prev.at) <= USER_DUPLICATE_WINDOW_MS) {
       return

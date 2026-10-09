@@ -24,7 +24,7 @@ export interface QueueEntry {
 
 export interface QueueCoordinatorOptions {
   /** 会话是否有活跃 run（对应 orchestrator.activeSessions.has） */
-  isActive: (sessionId: string) => boolean
+  isActive: (sessionId: string, entry?: QueueEntry) => boolean
   /** 派发即启动 run（对应 runAgent 成功路径） */
   startRun: (sessionId: string, entry: QueueEntry) => Promise<void>
   /** 通知渲染端某条排队消息已开始（经既有 AGENT_STREAM_EVENT 广播 queued_started） */
@@ -72,6 +72,8 @@ export class SessionMessageQueue {
 
   /** 入队（queueMessageId 去重，对齐 Proma enqueue；防双击决策卡） */
   enqueue(sessionId: string, entry: QueueEntry): void {
+    // Proma bf3e98c: a replay of the currently dispatched identity is already started.
+    if (this.dispatching.get(sessionId) === entry.queueMessageId) return
     this.stopped.delete(sessionId) // 用户显式发新消息 = 意图恢复，解除停止抑制（019）
     const queue = this.queues.get(sessionId) ?? []
     if (queue.some((e) => e.queueMessageId === entry.queueMessageId)) return
@@ -121,8 +123,20 @@ export class SessionMessageQueue {
     return (this.queues.get(sessionId)?.length ?? 0) + (this.dispatching.has(sessionId) ? 1 : 0)
   }
 
+  wakePending(): void {
+    for (const sessionId of this.queues.keys()) this.tryDispatch(sessionId)
+  }
+
+  cancelWhere(matches: (sessionId: string, entry: QueueEntry) => boolean): void {
+    for (const [sessionId, queue] of this.queues) {
+      const kept = queue.filter(entry => !matches(sessionId, entry))
+      if (kept.length === 0) { this.queues.delete(sessionId); this.stopped.add(sessionId) }
+      else this.queues.set(sessionId, kept)
+    }
+  }
+
   private tryDispatch(sessionId: string): void {
-    if (this.dispatching.has(sessionId) || this.options.isActive(sessionId)) return
+    if (this.dispatching.has(sessionId) || this.options.isActive(sessionId, this.queues.get(sessionId)?.[0])) return
     if (this.stopped.has(sessionId)) return // 停止抑制：自动派发一律不执行（018）
     const queue = this.queues.get(sessionId)
     const entry = queue?.shift()

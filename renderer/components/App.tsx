@@ -1,4 +1,6 @@
 import type { AgentSendMessageResult, ApiResult } from '../../shared/types'
+import type { ComposerSubmission } from '../hooks/use-composer'
+import type { SendReceipt } from '../../shared/attachment-types'
 import React, { useState, useCallback } from 'react'
 import { useSetAtom, useAtomValue } from 'jotai'
 import { ModeSelectionPage } from './ModeSelectionPage'
@@ -35,7 +37,7 @@ import {
   loadSessionHistory,
   loadSnapshots,
 } from './atoms'
-import { refreshChannelsList, channelsListAtom, channelsLoadingAtom, hasUsableChannelsAtom, chatInputDraftAtom, requestChatInputFocus } from './atoms-sprint2'
+import { refreshChannelsList, channelsListAtom, channelsLoadingAtom, hasUsableChannelsAtom, requestChatInputFocus } from './atoms-sprint2'
 import type { ProjectMode, WorkflowStage } from './atoms'
 /**
  * 这些阶段后端已产出可渲染文件（草图 / MVP）。回访恢复或重启后，旧沙箱进程已死，
@@ -115,8 +117,6 @@ const AppRoutes: React.FC = () => {
   const setChannels = useSetAtom(channelsListAtom)
   const setChannelsLoading = useSetAtom(channelsLoadingAtom)
   const hasChannels = useAtomValue(hasUsableChannelsAtom)
-  // WC-P2 审查加固（2026-08-29）：草稿随会话切换重置（跨项目不串台）；设置页往返不经过此处，草稿保留语义不变
-  const resetChatInputDraft = useSetAtom(chatInputDraftAtom)
   // QW#1：启动即加载渠道列表（Header 三态徽标需要，不只 Settings 页）；Settings 页复用幂等加载
   React.useEffect(() => {
     void refreshChannelsList(setChannels, setChannelsLoading)
@@ -271,7 +271,7 @@ const AppRoutes: React.FC = () => {
     setSessionId(newSessionId)
     setActiveSessionId(newSessionId)
     setCurrentProject(newProject)
-    resetChatInputDraft('')
+
     // D3 修复：进入工作区后 Agent 发送首条问候消息（写入新会话 family，避开闭包过期）
     appendMessageToSession(newSessionId, {
       role: 'assistant',
@@ -282,7 +282,7 @@ const AppRoutes: React.FC = () => {
     setProjectPreview(newProject.project_id, null)
     setSnapshotsList([])
     setRoute('workspace')
-  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, setProjectPreview, setSnapshotsList, resetChatInputDraft])
+  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, setProjectPreview, setSnapshotsList])
   // ==================== 从历史列表恢复项目 ====================
   const handleResumeProject = useCallback((project: Project) => {
     setMode(project.mode)
@@ -295,9 +295,7 @@ const AppRoutes: React.FC = () => {
     setDesktopPhase(project.desktop_phase ?? null)
     setSessionId(resumeSessionId)
     setActiveSessionId(resumeSessionId)
-    setCurrentProject(project)
-    resetChatInputDraft('')
-    setProjectList((prev: Project[]) =>
+    setCurrentProject(project)    setProjectList((prev: Project[]) =>
       prev.map((p) =>
         p.project_id === project.project_id
           ? { ...p, updated_at: new Date().toISOString() }
@@ -318,7 +316,7 @@ const AppRoutes: React.FC = () => {
       restorePreview(project.project_id)
     }
     setRoute('workspace')
-  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, restorePreview, resetChatInputDraft])
+  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, restorePreview])
   // ==================== 发送消息 ====================
   // 发送/回退结果的下游处理（与 2026-08-27 起 send-message 语义一致）：
   // queued → 「已排队」提示；BUSY → 引导等待或停止；其余失败静默（原状）
@@ -354,7 +352,7 @@ const AppRoutes: React.FC = () => {
       })
     }
   }, [])
-  const handleSendMessage = useCallback((content: string, images?: PastedImageRef[]) => {
+  const handleLegacySendMessage = useCallback((content: string, images?: PastedImageRef[]) => {
     const api = window.electronAPI
     if (!api?.agent?.sendMessage) return
     // 真实链路：交给主进程 runAgent，流式事件由 setupGlobalAgentListeners 驱动 UI
@@ -409,6 +407,34 @@ const AppRoutes: React.FC = () => {
     }
     void settle()
   }, [sessionId, currentProject, projectList, mode, currentStage, hasActiveStream, handleSendOutcome])
+  const handleSendMessage = useCallback((content: string, images?: PastedImageRef[], submission?: ComposerSubmission): void | Promise<SendReceipt> => {
+    if (!submission) return handleLegacySendMessage(content, images)
+    return (async () => {
+      const api = window.electronAPI?.composer
+      if (!api) throw new Error('消息接收接口不可用，草稿已保留')
+      const target = submission.draft
+      const result = await api.submit({
+        request_id: crypto.randomUUID(), client_message_id: submission.client_message_id,
+        project_id: target.project_id, session_id: target.session_id, draft_id: target.draft_id,
+        content, attachment_refs: target.attachment_refs, mode: mode ?? 'quick', current_stage: currentStage,
+        metadata: { source: 'chat' },
+      })
+      if (!result.ok) throw new Error(result.error.message)
+      const receipt = result.data
+      if (receipt.status !== 'needs_recovery') {
+        appendMessageToSession(target.session_id, {
+          role: 'user', client_message_id: submission.client_message_id,
+          attachments: receipt.attachments,
+          content: [{ type: 'text', text: content }, ...(receipt.images ?? []).map(image => ({ type: 'image' as const, ...image }))], timestamp: Date.now(),
+        })
+        if (receipt.status === 'queued') appendMessageToSession(target.session_id, {
+          role: 'system', client_message_id: 'receipt-' + submission.client_message_id,
+          content: [{ type: 'text', text: '⏳ 已排队：当前生成完成后会自动处理这条消息。' }], timestamp: Date.now(),
+        })
+      }
+      return receipt
+    })()
+  }, [handleLegacySendMessage, mode, currentStage])
   // ==================== 停止生成（U4 / T3：agent:stop） ====================
   /**
    * 用户点击停止键：调 agent:stop（后端 cancelAgent 以 AGENT_CANCELLED 标记中止
@@ -711,16 +737,14 @@ const AppRoutes: React.FC = () => {
         if (!result.ok) return
         const newId = result.data.new_session_id
         setSessionId(newId)
-        setActiveSessionId(newId)
-        resetChatInputDraft('')
-        appendMessageToSession(newId, {
+        setActiveSessionId(newId)        appendMessageToSession(newId, {
           role: 'system',
           content: [{ type: 'text', text: '已从这里重新开始——原对话保留到这条消息，后续生成将基于它继续。' }],
           timestamp: Date.now(),
         })
         void loadSessionHistory(newId)
       })
-  }, [sessionId, currentProject, projectList, setSessionId, setActiveSessionId, resetChatInputDraft])
+  }, [sessionId, currentProject, projectList, setSessionId, setActiveSessionId])
   // ==================== 路由渲染 ====================
   if (route === 'mode-selection') {
     return (

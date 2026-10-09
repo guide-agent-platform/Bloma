@@ -94,7 +94,7 @@ export const DelegationRow: React.FC<{ item: DelegationView }> = ({ item }) => {
           <span style={{ flexShrink: 0, color: 'var(--color-warning)', fontWeight: 600 }}>待回答</span>
         )}
         <span style={{ marginLeft: 'auto', flexShrink: 0 }}>
-          {DELEGATION_STATUS_LABELS[item.status]}
+          {item.loop_status === 'turn_limit' ? '轮次耗尽，待续跑' : item.loop_status === 'budget_exhausted' ? '预算耗尽，待处理' : DELEGATION_STATUS_LABELS[item.status]}
         </span>
       </div>
       {expanded && (

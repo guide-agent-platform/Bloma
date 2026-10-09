@@ -1,3 +1,4 @@
+import { sessionMaterials, renderMaterialContext, providedPages } from '../platform/attachments/material-context'
 /**
  * guide/pipeline — 向导群·PRD 收敛管线（2026-09-03 模块化 R3）。
  *
@@ -60,6 +61,8 @@ export async function resolvePrdBackplane(
   requirements: SketchRequirement[],
   onClarification?: (requests: EnrichmentClarificationRequest[]) => void,
 ): Promise<PrdBackplane> {
+  const materials = sessionMaterials(input.project_id, input.session_id)
+  const materialText = renderMaterialContext(materials, input.session_id, true)
   const template = (): PrdBackplane =>
     buildPrdBackplane(findProject(input.project_id), requirements, 'sketch_confirmed')
 
@@ -118,6 +121,7 @@ export async function resolvePrdBackplane(
   // 并行：PRD 元数据提取 + 功能项加厚互不依赖，共用同一渠道/env/对话
   const [llm, enriched] = await Promise.all([
     generatePrdLlm({
+      material_text: materialText,
       project_id: input.project_id,
       session_id: input.session_id,
       requirements,
@@ -130,6 +134,7 @@ export async function resolvePrdBackplane(
       onAttemptFailure,
     }).catch(() => null), // 防御性兜底：契约返回 null，但 abort/网络极端情形仍可能 throw，一并降级避免 Promise.all 整体 reject
     enrichRequirementsLlm({
+      material_text: materialText,
       session_id: input.session_id,
       requirements,
       query: input.query,
@@ -145,7 +150,7 @@ export async function resolvePrdBackplane(
   // 不一致——template() 会把默认存在性断言/story 物化，以原始冻结清单为准保证加厚不丢）
   const frozen = llm ? base.requirements : requirements
   // 接地守卫②的用户原话（user 轮次；assistant 轮次不参与子串匹配，防模型自述被引为支撑）
-  const userTexts = extractUserTexts(readConversation(input.session_id))
+  const userTexts = [...extractUserTexts(readConversation(input.session_id)), ...providedPages(materials).map(page => page.text)]
   // 冻结项为 id 骨架，上轮 prd.json 对应项既有字段并入合并底；stats 为断言丢弃与优先级抑制分类（纯返回值，无日志副作用）
   let enrichedRequirements: SketchRequirement[]
   let stats = { formatDropped: 0, groundingDropped: 0, prioritySuppressed: 0 }

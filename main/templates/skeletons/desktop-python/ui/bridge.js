@@ -14,6 +14,15 @@ window.App = (function () {
     return m ? m[1] : "";
   }
 
+  // Preserve envelope consumers (result.data) and expose object data to flat readers.
+  // Older generated UIs and raw-list APIs keep their existing contract.
+  function apiResult(result) {
+    if (result && result.ok === true && result.data && typeof result.data === "object" && !Array.isArray(result.data)) {
+      return { ...result.data, ...result };
+    }
+    return result;
+  }
+
   /** 调 Python api 方法：await App.call("op_name", arg1, ...) → Python 返回值。
    *  失败如实抛出（UI 层 catch 后走失败态横幅，不吞异常）。 */
   async function call(op) {
@@ -28,17 +37,17 @@ window.App = (function () {
       });
       var body = await resp.json();
       if (!body.ok) throw new Error(body.error || "call failed: " + op);
-      return body.result;
+      return apiResult(body.result);
     }
     if (window.pywebview && pywebview.api && pywebview.api[op]) {
       var raw = await pywebview.api[op].apply(null, args);
-      try { return JSON.parse(raw); } catch (e) { return raw; }
+      try { return apiResult(JSON.parse(raw)); } catch (e) { return raw; }
     }
     // 桥未就绪（页面先于 pywebview 注入加载）——排队重试一次
     await new Promise(function (r) { setTimeout(r, 120); });
     if (window.pywebview && pywebview.api && pywebview.api[op]) {
       var raw2 = await pywebview.api[op].apply(null, args);
-      try { return JSON.parse(raw2); } catch (e) { return raw2; }
+      try { return apiResult(JSON.parse(raw2)); } catch (e) { return raw2; }
     }
     throw new Error("桥未就绪：pywebview.api." + op);
   }

@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import type { SDKQuery } from '../orchestration/orchestrator'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import { loadPromptOverride } from '../agent/prompting/prompt-config'
+import { sessionMaterials, renderMaterialContext, validateMaterialSources } from '../platform/attachments/material-context'
 import { buildPrdFewShotInjection } from '../agent/prompting/template-injection'
 import { callLlmForJson, type LlmAttemptFailure } from '../kernel/llm-call'
 import type { AgentMessage, MessageContentBlock, TemplateType } from '../../shared/types'
@@ -42,6 +43,7 @@ import { recordDecision } from '../project/decision-log'
  */
 
 export interface GeneratePrdLlmInput {
+  material_text?: string
   project_id: string
   session_id: string
   /** 已冻结的功能项（F-001 主题锚点 + 澄清/纠错追加项），PRD 只做语义补全、不改写。 */
@@ -224,7 +226,10 @@ export async function generatePrdLlm(input: GeneratePrdLlmInput): Promise<PrdBac
     // 注入点③（周计划 §6）：同类型脱敏样例 few-shot（≤500 token 硬截断）+ 解析失败
     // 带反馈重试一次（陷阱 7：代码型 JSON 不正则修补，只走带反馈重试）；开关关闭=现状单试
     const fewShot = buildPrdFewShotInjection(input.template_type ?? 'personal_tool')
-    const prompt = [buildPrompt(items, conversation, input.template_type), fewShot].filter(Boolean).join('\n\n')
+    const materials = sessionMaterials(input.project_id, input.session_id)
+    const materialText = input.material_text ?? renderMaterialContext(materials, input.session_id, true)
+    const sourceInstruction = materials.attachments.length ? '材料来源输出新增 source_refs：{"F-001":[{"attachment_id":"清单中的 id","sha256":"清单中的哈希","start_line":1,"end_line":3}]}。仅把对应需求实际依赖的已读文本范围作为来源；未读范围不引用，不编造来源。' : ''
+    const prompt = [buildPrompt(items, conversation, input.template_type), fewShot, materialText, sourceInstruction].filter(Boolean).join('\n\n')
     // 2026-09-03 R2：调用循环收敛至 kernel/llm-call 标准件（stream/parse/带反馈重试/abort/超时一处实现）
     const parsed = await callLlmForJson({
       systemPrompt: getSystemPrompt(),
@@ -265,7 +270,15 @@ export async function generatePrdLlm(input: GeneratePrdLlmInput): Promise<PrdBac
         },
       })
     }
-    return buildBackplaneFromParsed(parsed, items, input.project_id, formType ?? input.template_type)
+    const result = buildBackplaneFromParsed(parsed, items, input.project_id, formType ?? input.template_type)
+    if (materials.attachments.length) {
+      result.requirements = result.requirements.map(item => {
+        const refs = validateMaterialSources(parsed.source_refs?.[item.id], materials)
+        return refs.length ? { ...item, source_refs: refs } : item
+      })
+      result.prd_document += '\n\n## 材料来源与覆盖\n' + result.requirements.filter(item => item.source_refs?.length).map(item => `- ${item.id}：${item.source_refs!.map(ref => `${ref.attachment_id}（${ref.sha256.slice(0, 12)}），第 ${ref.start_line}–${ref.end_line} 行`).join('；')}`).join('\n') + '\n只引用上述已读取范围；未引用或未读取的材料不代表已全面理解。'
+    }
+    return result
   } catch {
     return null
   }
@@ -336,6 +349,7 @@ export function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequire
 }
 
 interface ParsedPrd {
+  source_refs?: Record<string, unknown>
   document: string
   positioning: string
   /** 判型 LLM 化（2026-10-06）：引擎自判交付形态；desktop 缺省（解析容错：非法值→undefined）。 */
@@ -518,6 +532,7 @@ function parsePrdJson(text: string): ParsedPrd | undefined {
 
   return {
     positioning: typeof parsed.positioning === 'string' ? parsed.positioning : '',
+    ...(isRecord(parsed.source_refs) ? { source_refs: parsed.source_refs } : {}),
     document: typeof parsed.document === 'string' ? parsed.document : '',
     ...(form ? { form } : {}),
     acceptance,

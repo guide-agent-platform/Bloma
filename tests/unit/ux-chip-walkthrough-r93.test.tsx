@@ -77,11 +77,11 @@ describe('ux-chip-walkthrough r93：ChatPanel 四状态 DOM 走查（0 基础用
     expect(screen.queryByTestId('paste-image-chip')).toBeNull()
   })
 
-  it('[W3·贴图态] chip 出现但**纯图无文发送仍禁用**（P1-1 渲染级证据：canSend 无 pendingImages 项）', async () => {
+  it('[W3·贴图态] 纯图片可发送，移除后恢复空态', async () => {
     const input = mountPanel()
     fireEvent(input, makePasteEvent([{ type: 'image/png', bytes: pngBytes() }]))
     await waitFor(() => expect(screen.getByTestId('paste-image-chip')).toBeTruthy())
-    expect(sendButton().disabled).toBe(true)
+    expect(sendButton().disabled).toBe(false)
     fireEvent.change(input, { target: { value: '看' } })
     expect(sendButton().disabled).toBe(false)
   })
@@ -95,16 +95,15 @@ describe('ux-chip-walkthrough r93：ChatPanel 四状态 DOM 走查（0 基础用
     })
   })
 
-  it('[W5a·等待态·走查发现 F5] isWaiting 无流：发送仍渲染（禁用）且**停止按钮不存在**——排队等待期零操作入口（:536 替换条件仅 hasActiveStream，:226 注释与实现不符）', () => {
+  it('[W5a·等待态] 等待阶段保留停止入口', () => {
     render(
       <Provider store={store}>
         <ChatPanel onSendMessage={vi.fn()} isWaiting={true} />
       </Provider>,
     )
     const send = screen.queryByRole('button', { name: '发送消息' })
-    expect(send).not.toBeNull()          // F5：未替换（注释说替换，实际仅流态替换）
-    expect((send as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.queryByRole('button', { name: '停止本轮制作' })).toBeNull()  // F5：无停止可取消
+    expect(send).toBeNull()
+    expect(screen.queryByRole('button', { name: '停止本轮制作' })).not.toBeNull()  // F5：无停止可取消
   })
 
   it('[W5b·流态] hasActiveStream：停止按钮出现、发送消失（替换语义仅在流态成立）', () => {

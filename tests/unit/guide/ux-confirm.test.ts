@@ -10,6 +10,7 @@ import type { AgentEvent } from '../../../shared/types'
 vi.mock('../../../main/guide/ux-sketch', () => ({
   generateUxSketch: vi.fn(),
   stageUxSketch: vi.fn(),
+  freezeConfirmedUxSketch: vi.fn(),
 }))
 
 vi.mock('../../../main/desktop/desktop-route', () => ({
@@ -30,7 +31,7 @@ vi.mock('../../../main/project/decision-log', () => ({
   recordDecision: vi.fn(),
 }))
 
-import { generateUxSketch, stageUxSketch } from '../../../main/guide/ux-sketch'
+import { freezeConfirmedUxSketch, generateUxSketch, stageUxSketch } from '../../../main/guide/ux-sketch'
 import { enterDesktopLine } from '../../../main/desktop/desktop-route'
 import { findProject } from '../../../main/project/project-service'
 import { readPrdBackplane } from '../../../main/project/prd-store'
@@ -146,6 +147,17 @@ describe('runUxConfirmGate（发门）', () => {
 })
 
 describe('确认/让渡/调整回传', () => {
+  it('a failed confirmed-sketch write preserves pending and allows retry', async () => {
+    const { events, publish } = makePublish()
+    await runUxConfirmGate({ ...basePending({ publish }) })
+    vi.mocked(freezeConfirmedUxSketch).mockImplementationOnce(() => { throw new Error('disk failure') })
+    await resumeUxConfirmConfirmed(cardInput(UX_CONFIRM_OPTION_CONFIRM) as never)
+    expect(mockEnter).not.toHaveBeenCalled()
+    expect(events.some(event => String(event.payload.text).includes('保存已确认草图失败'))).toBe(true)
+    expect(resolveUxConfirmCardAnswer(cardInput(UX_CONFIRM_OPTION_CONFIRM) as never)).toBe('confirm')
+    await resumeUxConfirmConfirmed(cardInput(UX_CONFIRM_OPTION_CONFIRM) as never)
+    expect(mockEnter).toHaveBeenCalledTimes(1)
+  })
   it('confirm：ack + ux_sketch_closed + 进桌面线', async () => {
     const { events, publish } = makePublish()
     await runUxConfirmGate({ ...basePending({ publish }) })

@@ -25,6 +25,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { violatesCommandBlacklist } from './contract-schema'
+import { resolveDriverVenvCommand } from './process-driver'
 
 /** 入口声明文件（项目根相对）。 */
 export const LAUNCH_RELATIVE_PATH = 'LAUNCH.json'
@@ -578,7 +579,7 @@ export async function runLaunchSmoke(rootPath: string, deps: LaunchSmokeDeps = {
 
   let spawned: SpawnedChild
   try {
-    spawned = spawnCollecting(spawnImpl, declaration.launch.command, rootPath)
+    spawned = spawnCollecting(spawnImpl, resolveDriverVenvCommand(declaration.launch.command, rootPath), rootPath)
   } catch (error) {
     return { passed: false, detail: `启动冒烟 spawn 失败：${error instanceof Error ? error.message : String(error)}` }
   }

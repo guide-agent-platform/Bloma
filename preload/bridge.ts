@@ -83,6 +83,19 @@ const electronAPI: ElectronAPI = {
     switchState: (input: AppSwitchStateInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.APP_SWITCH_STATE, input),
   },
+  composer: {
+    load: (input) => ipcRenderer.invoke(IPC_CHANNELS.COMPOSER_LOAD, input),
+    save: (input) => ipcRenderer.invoke(IPC_CHANNELS.COMPOSER_SAVE, input),
+    importImage: (input) => ipcRenderer.invoke(IPC_CHANNELS.ATTACHMENT_IMPORT, input),
+    preview: (input) => ipcRenderer.invoke(IPC_CHANNELS.ATTACHMENT_PREVIEW, input),
+    read: (input) => ipcRenderer.invoke(IPC_CHANNELS.ATTACHMENT_READ, input),
+    submit: (input) => ipcRenderer.invoke(IPC_CHANNELS.CHAT_SUBMIT, input),
+    receipt: (input) => ipcRenderer.invoke(IPC_CHANNELS.CHAT_RECEIPT, input),
+    receipts: (input) => ipcRenderer.invoke(IPC_CHANNELS.CHAT_RECEIPTS, input),
+    recover: (input) => ipcRenderer.invoke(IPC_CHANNELS.CHAT_RECOVER, input),
+    history: (input) => ipcRenderer.invoke(IPC_CHANNELS.ATTACHMENT_HISTORY, input),
+    reuse: (input) => ipcRenderer.invoke(IPC_CHANNELS.ATTACHMENT_REUSE, input),
+  },
   pastedImage: {
     save: (input: PastedImageSaveInput) => ipcRenderer.invoke(IPC_CHANNELS.PASTED_IMAGE_SAVE, input),
   },

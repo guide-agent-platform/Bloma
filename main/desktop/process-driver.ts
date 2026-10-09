@@ -148,8 +148,7 @@ export function resolveDriverVenvCommand(command: readonly string[], cwd: string
   const resolved = [...command]
   if (resolved.length === 0) return resolved
   const head = resolved[0]!.replace(/\\/g, '/').toLowerCase()
-  const headBase = head.split('/').pop() ?? head
-  if (!BARE_PYTHON_COMMANDS.has(headBase)) return resolved
+  if (!BARE_PYTHON_COMMANDS.has(head)) return resolved
   for (const candidate of venvPythonCandidates(cwd)) {
     if (existsSync(candidate)) {
       resolved[0] = candidate

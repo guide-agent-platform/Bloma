@@ -32,6 +32,7 @@ import type { AgentEvent } from '../../shared/types'
 import type { AgentLoopInput, AgentLoopResult, AgentLoopTool, ToolOutcome } from '../agent/loop/agent-loop'
 import { runAgentLoop } from '../agent/loop/agent-loop'
 import { buildAgentTools } from '../agent/tools/agent-tools'
+import { sessionMaterials } from '../platform/attachments/material-context'
 import { buildDomainTools } from '../coding/tool-handlers'
 import { buildWebResearch } from '../agent/tools/web-tools'
 import { buildDelegationTools } from '../agent/delegation/delegation-tools'
@@ -65,6 +66,8 @@ export { DRIVER_REPORT_PATH, FAULT_KILL_REPORT_PATH, CONTRACT_PATH, finalizeDesk
 
 /** 桌面调度员运行输入（编排层组装；沙箱/落盘谓词可注入）。 */
 export interface DesktopDispatchRunInput {
+  images?: AgentLoopInput['images']
+  initialMessagePersisted?: boolean
   projectId: string
   sessionId: string
   requestId: string
@@ -84,6 +87,7 @@ export interface DesktopDispatchRunInput {
   projectName: string
   /** 需求摘要（首跑修复：PRD 背板 → 调度员系统提示词与子会话基底；编排层装配，缺省不注入） */
   requirementsDigest?: string
+  uxSketchPath?: string
   /** 形状段（批9 工件2）：{{shape_brief}}/{{shape_verify_brief}} 任务书注入；缺省空串=无形状增强。 */
   shapeBrief?: string
   shapeVerifyBrief?: string
@@ -306,6 +310,7 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     completedPhases: [],
     workspaceHint: '产物按相对路径写入（项目目录即工作根；如 00_ARCH/、00_SCAFFOLD/、00_VERIFY/）。',
     ...(input.requirementsDigest ? { requirementsDigest: input.requirementsDigest } : {}),
+    ...(input.uxSketchPath ? { uxSketchPath: input.uxSketchPath } : {}),
     ...(input.verifiedConclusion ? { verifiedConclusion: input.verifiedConclusion } : {}),
     ...(input.quickMode ? { quickMode: true } : {}),
     ...(input.shapeBrief || input.shapeVerifyBrief ? { shapeBrief: input.shapeBrief, shapeVerifyBrief: input.shapeVerifyBrief } : {}),
@@ -316,16 +321,19 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
   // 「未找到父循环上下文」。对齐 coding generate.ts 的注册契约：父上下文（query/env/
   // 预算/权限/发布）+ 子工具集构建器（worker 需要文件写工具落盘产物）。
   registerParentLoopContext(input.sessionId, {
+    materials: sessionMaterials(input.projectId, input.sessionId),
     query: input.query,
     env: input.env,
     maxTokens: input.maxTokens,
     maxTurns: input.maxTurns ?? 40,
     delegationMaxTurns: DESKTOP_DELEGATION_MAX_TURNS,
+    delegationTurnLimits: { implement: 24, custom: 24 },
     permissionMode: 'allow-all',
     temperature: categoryTemperature('mvp'),
     system: buildDesktopChildBaseSystem(node, {
       projectName: input.projectName,
       ...(input.requirementsDigest ? { requirementsDigest: input.requirementsDigest } : {}),
+      ...(input.uxSketchPath ? { uxSketchPath: input.uxSketchPath } : {}),
       ...(input.quickMode ? { quickMode: true } : {}),
     }),
     editFormat: 'diff',
@@ -414,6 +422,9 @@ async function runAgentLoopSafe(
     return await runAgentLoop({
       system,
       task: input.task,
+      images: input.images,
+      materials: sessionMaterials(input.projectId, input.sessionId),
+      initialMessagePersisted: input.initialMessagePersisted,
       tools,
       query: input.query,
       env: input.env,

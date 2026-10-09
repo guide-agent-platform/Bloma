@@ -66,6 +66,7 @@ import { StreamPublisher } from './orchestration-contracts'
 import { streamPublisher } from './sdk-glue'
 import { runAgent } from './agent-dispatch'
 import { makeEvent } from './persistence'
+import { updateReceipt } from '../../platform/attachments/send-inbox'
 
 export interface ActiveRun {
   abortController: AbortController
@@ -115,7 +116,10 @@ export function acquireProjectRun(projectId: string, runId: string): void {
 }
 
 export function releaseProjectRun(projectId: string, runId: string): void {
-  if (activeProjects.get(projectId) === runId) activeProjects.delete(projectId)
+  if (activeProjects.get(projectId) === runId) {
+    activeProjects.delete(projectId)
+    queueMicrotask(() => sessionMessageQueue.wakePending())
+  }
 }
 
 export function hasRunForProject(projectId: string): boolean {
@@ -130,7 +134,8 @@ export function hasRunForProject(projectId: string): boolean {
 export const sessionMessageQueue = new SessionMessageQueue({
   // 后台生成（runMvpTask/runIterationTask fire-and-forget）也计入「忙」：MVP/迭代是最长
   // 生成阶段，期间发消息同样排队而非直接开跑（审查 P2-⑤）
-  isActive: (sessionId) => activeSessions.has(sessionId) || backgroundRuns.has(sessionId),
+  isActive: (sessionId, entry) => activeSessions.has(sessionId) || backgroundRuns.has(sessionId)
+    || Boolean((entry?.input as AgentSendMessageInput | undefined)?.project_id && hasRunForProject((entry!.input as AgentSendMessageInput).project_id)),
   // 派发失败安全网放弃钩子（queue-dispatch-requeue r68）：v1 先 console 留痕（观测），
   // 渲染端「发送失败可重试」气泡后续档接入
   onDropped: (sessionId, entry, reason) => {
@@ -138,6 +143,7 @@ export const sessionMessageQueue = new SessionMessageQueue({
     // queue_dropped 渲染端红泡（onDropped 气泡，r79）：安全网放弃派发 → 渲染端告知用户（非静默）
     const input = entry.input as AgentSendMessageInput | undefined
     if (input) {
+      updateReceipt(input.client_message_id, 'failed', `排队消息派发失败：${reason}`, input.run_generation)
       streamPublisher(makeEvent(input, 'queue_dropped', { queue_message_id: entry.queueMessageId, reason }))
     }
   },

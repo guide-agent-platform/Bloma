@@ -62,6 +62,7 @@ import { fail, ok } from '../../shared/api-result'
 import { cancelAgent, getSdkQuery, hasForegroundRun, isSessionActive, persistSteerDeferredNotice, publishSteerStatusEvent, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from '../orchestration/orchestrator'
 import { enqueueSteer, getSteerStatuses, pendingSteerCount, registerSteer, resolveSteer, setSteerStatusListener, steerConfirmEnabled } from '../agent/loop/steer-queue'
 import { savePastedImage } from '../platform/shell/pasted-images'
+import { registerComposerIpc } from './composer'
 import { clearPendingReviewAction, setForegroundRunChecker, setProgrammingEventPublisher } from '../coding/programming-orchestrator'
 import { handleAgentStreamEvent } from '../platform/shell/notifications'
 import { assertToolAllowed, getPermissionMode, resolvePermission, setPermissionMode, setPermissionRequestPublisher } from '../agent/permissions/permission-service'
@@ -107,6 +108,7 @@ import { appendSessionMessage } from '../platform/sessions/session-tree'
 import { safeInvoke, errorCodeFrom, extractRequestId, requireFields, resolvePermissionSession, validateAgentSend, validateCancel, validateConfirmRequirements, validatePermissionResponse, validateProjectCreate } from './shared'
 
 export function registerAgentSessionsIpc(ipcMain: IpcMain, mainWindow: BrowserWindow): void {
+  registerComposerIpc(ipcMain)
   void mainWindow
   ipcMain.handle(IPC_CHANNELS.AGENT_SEND_MESSAGE, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {

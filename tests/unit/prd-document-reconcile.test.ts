@@ -15,6 +15,8 @@ import {
   requirementPriority,
 } from '../../main/model/prd-backplane'
 import type { SketchRequirement } from '../../main/model/prd-backplane'
+import { renderPrdJson } from '../../main/project/prd-store'
+import type { PrdBackplane } from '../../main/model/prd-backplane'
 
 const items: SketchRequirement[] = [
   { id: 'F-001', description: '核心玩法', priority: 'P0' },
@@ -93,6 +95,14 @@ describe('isPlaceholderAssertion（P1-6 占位断言识别）', () => {
 })
 
 describe('requirementPriority 缺省口径（P1-5 结构化真相源）', () => {
+  it('reconciles late enrichment at the persistence boundary without changing confirmed facts', () => {
+    const backplane: PrdBackplane = { project_id: 'p', name: 'ledger', positioning: 'local', requirements: items, acceptance: {}, assumptions: [], out_of_scope: [], user_confirmed_at: '2026-10-09', prd_document: '### [F-002]（P2）暂停菜单\\n下一节' }
+    const stored = JSON.parse(renderPrdJson(backplane))
+    expect(stored.prd_document).toBe('### [F-002]（P1）暂停菜单\n下一节')
+    expect(stored.requirements).toEqual(items)
+    expect(stored.user_confirmed_at).toBe('2026-10-09')
+    expect(backplane.prd_document).toContain('（P2）')
+  })
   it('缺省 F-001=P0、其余 P2', () => {
     expect(requirementPriority({ id: 'F-001', description: 'x' })).toBe('P0')
     expect(requirementPriority({ id: 'F-002', description: 'x' })).toBe('P2')

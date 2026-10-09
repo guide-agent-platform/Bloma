@@ -43,7 +43,7 @@ export const ThinkingIndicator: React.FC<ThinkingIndicatorProps> = ({ phase, sta
     return (
       <div
         data-ai-id="thinking-indicator"
-        style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', padding: '2px 0', animation: 'thinking-pulse 1.6s ease-in-out infinite' }}
+        style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', padding: '2px 0', animation: 'thinking-pulse 3.2s ease-in-out infinite' }}
       >
         ◌ 正在思考…
       </div>
@@ -65,7 +65,7 @@ export const ThinkingIndicator: React.FC<ThinkingIndicatorProps> = ({ phase, sta
           color: 'var(--color-text-muted)',
           cursor: expandable ? 'pointer' : 'default',
           userSelect: 'none',
-          ...(phase === 'live' ? { animation: 'thinking-pulse 1.6s ease-in-out infinite' } : {}),
+          ...(phase === 'live' ? { animation: 'thinking-pulse 3.2s ease-in-out infinite' } : {}),
         }}
       >
         {label}

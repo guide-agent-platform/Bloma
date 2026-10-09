@@ -334,6 +334,7 @@ export const TEMPLATE_META_VERSION = 1
  * 取值（缺省回退），旧数据（只有 id+description）无需迁移即可参与新管线。
  */
 export interface SketchRequirement {
+  source_refs?: import('../../shared/attachment-types').MaterialSourceRef[]
   id: string
   description: string
   /** 故事化描述：作为<角色>，我想<功能>，以便<价值>；缺省回退 description */

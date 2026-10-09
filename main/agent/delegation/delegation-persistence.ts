@@ -41,11 +41,12 @@ const SETTLE_FIELD = 'delegation_settle'
 export function appendDelegationSettle(
   childSessionId: string,
   status: Exclude<RestoredDelegationStatus, 'running'>,
-  payload?: { resultSummary?: string; error?: string },
+  payload?: { resultSummary?: string; error?: string; loopStatus?: string },
 ): void {
   appendSessionMessage(childSessionId, {
     [SETTLE_FIELD]: status,
     ...(payload?.resultSummary ? { result_summary: payload.resultSummary } : {}),
+    ...(payload?.loopStatus ? { loop_status: payload.loopStatus } : {}),
     ...(payload?.error ? { error: payload.error } : {}),
     timestamp: Date.now(),
   })

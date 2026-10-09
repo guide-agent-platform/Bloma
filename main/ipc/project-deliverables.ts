@@ -14,6 +14,7 @@ import { spawn } from 'node:child_process'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { IPC_CHANNELS } from '../../shared/types'
+import { resolveDriverVenvCommand } from '../desktop/process-driver'
 import { isVenvDirectory } from '../verification/security-scan'
 import { extractRequestId, requireFields, safeInvoke } from './shared'
 import type { ProjectDeliverablesInput, ProjectDeliverablesResult, ProjectLaunchAppInput, ProjectLaunchAppResult } from '../../shared/types'
@@ -105,7 +106,8 @@ export function registerProjectDeliverablesIpc(ipcMain: IpcMain, _mainWindow: Br
       if (blacklistHit) {
         throw new Error(`LAUNCH_BLOCKED: ${blacklistHit}`)
       }
-      const child = spawn(parsed.launch.command[0]!, parsed.launch.command.slice(1), {
+      const command = resolveDriverVenvCommand(parsed.launch.command, project.root_path)
+      const child = spawn(command[0]!, command.slice(1), {
         cwd: project.root_path,
         detached: true,
         stdio: 'ignore',
@@ -120,7 +122,7 @@ export function registerProjectDeliverablesIpc(ipcMain: IpcMain, _mainWindow: Br
       } catch {
         pid = child.pid
       }
-      return { started: pid !== undefined, ...(pid !== undefined ? { pid } : {}), command: parsed.launch.command.join(' ') } satisfies ProjectLaunchAppResult
+      return { started: pid !== undefined, ...(pid !== undefined ? { pid } : {}), command: command.join(' ') } satisfies ProjectLaunchAppResult
     })
   })
 }

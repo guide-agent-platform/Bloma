@@ -1,7 +1,7 @@
 /**
  * launch-smoke 单测（2026-10-04 呈现层收口）：声明解析 + 冒烟编排（spawn/capture 注入）。
  */
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
@@ -41,6 +41,15 @@ describe('parseLaunchDeclaration', () => {
 })
 
 describe('runLaunchSmoke（注入编排）', () => {
+  it('uses the project virtual environment for a bare Python declaration, preserving the declared arguments', async () => {
+    const root = makeRoot('{"schema_version":1,"command":["python","app.py"]}')
+    const python = process.platform === 'win32' ? join(root, '.venv', 'Scripts', 'python.exe') : join(root, '.venv', 'bin', 'python')
+    mkdirSync(join(root, '.venv', process.platform === 'win32' ? 'Scripts' : 'bin'), { recursive: true }); writeFileSync(python, '')
+    let used: string[] = []
+    const result = await runLaunchSmoke(root, { graceMs: 5, spawnImpl: command => { used = command; return new FakeChild() as unknown as ChildProcess } })
+    expect(result.passed).toBe(true)
+    expect(used).toEqual([python, 'app.py'])
+  })
   it('缺少 LAUNCH.json → 不通过且指明缺口', async () => {
     const root = makeRoot()
     const result = await runLaunchSmoke(root, { spawnImpl: () => { throw new Error('不应 spawn') } })

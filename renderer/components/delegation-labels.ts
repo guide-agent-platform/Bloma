@@ -16,7 +16,7 @@ export const DELEGATION_ROLE_LABELS: Record<string, string> = {
 
 export const DELEGATION_STATUS_LABELS: Record<DelegationViewStatus, string> = {
   running: '协作中',
-  completed: '已完成',
+  completed: '已结束',
   failed: '失败',
   cancelled: '已停止',
 }

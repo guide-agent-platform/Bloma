@@ -49,6 +49,7 @@ export function setProjectTouchHandler(handler: ProjectTouchHandler | null): voi
   projectTouchHandler = handler
 }
 import { cleanupPastedImages } from '../shell/pasted-images'
+import { bindForkAttachments } from '../attachments/attachment-history'
 
 interface SessionsIndex {
   version: number
@@ -155,6 +156,8 @@ function summarizeToolResults(blocks: Array<{ type: string; is_error?: boolean }
 }
 
 export interface LoadConversationHistoryOptions {
+  /** 当前消息由本轮 task 承载；恢复时按稳定身份排除历史中的同一条，保留其它同文消息。 */
+  excludeClientMessageId?: string
   /** 附工具轨迹摘要（修复续接用；缺省 false 旧消费者零变化）。 */
   includeToolTrace?: boolean
 }
@@ -166,15 +169,16 @@ export function loadConversationHistory(
 ): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
   const path = getAgentSessionPath(sessionId)
   if (!existsSync(path)) return []
-  const turns: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = []
+  const turns: Array<{ role: 'system' | 'user' | 'assistant'; content: string; client_message_id?: string }> = []
   for (const line of readFileSync(path, 'utf8').split('\n')) {
     if (!line.trim()) continue
-    let message: { role?: string; content?: unknown }
+    let message: { role?: string; content?: unknown; client_message_id?: string }
     try {
-      message = JSON.parse(line) as { role?: string; content?: unknown }
+      message = JSON.parse(line) as typeof message
     } catch {
       continue
     }
+    if (message.role === 'user' && options.excludeClientMessageId && message.client_message_id === options.excludeClientMessageId) continue
     const blocks = Array.isArray(message.content)
       ? (message.content as Array<{ type: string; text?: string; name?: string; input?: { path?: unknown }; is_error?: boolean }>)
       : []
@@ -202,14 +206,15 @@ export function loadConversationHistory(
       }
     }
     if (!text || text.startsWith('[terminal]')) continue
-    turns.push({ role: message.role, content: text })
+    turns.push({ role: message.role, content: text, ...(message.client_message_id ? { client_message_id: message.client_message_id } : {}) })
   }
   const filtered = turns.filter((turn) => {
     if (turn.role === 'assistant' && isStallReply(turn.content)) return false
     return true
   }).filter((turn, i, arr) => {
     const previous = arr[i - 1]
-    return !(previous && previous.role === turn.role && previous.content === turn.content)
+    const sameIdentity = (!previous?.client_message_id && !turn.client_message_id) || previous?.client_message_id === turn.client_message_id
+    return !(previous && previous.role === turn.role && previous.content === turn.content && sameIdentity)
   })
   let start = 0
   let keptTurns = 0
@@ -221,7 +226,7 @@ export function loadConversationHistory(
       break
     }
   }
-  return filtered.slice(start)
+  return filtered.slice(start).map(({ client_message_id: _id, ...turn }) => turn)
 }
 
 export function listSessions(input: AgentListSessionsInput): AgentListSessionsResult {
@@ -264,7 +269,11 @@ export function cleanOrphanSessions(validProjectIds?: Set<string>): SessionClean
  */
 export function loadMessages(input: AgentLoadMessagesInput): AgentLoadMessagesResult {
   const path = getAgentSessionPath(input.session_id)
-  if (!existsSync(path)) throw new Error('SESSION_NOT_FOUND')
+  if (!existsSync(path)) {
+    const draftSession = readSessions().sessions.find(session => session.session_id === input.session_id)
+    if (draftSession) return { session: draftSession, messages: [], total: 0, truncated: false }
+    throw new Error('SESSION_NOT_FOUND')
+  }
 
   const record = resolveSessionRecord(input.session_id, path)
 
@@ -322,9 +331,11 @@ function parseSessionLines(path: string): Array<Record<string, unknown>> {
 /** 目标锚点是否为可 fork 的 user 消息（非空文本/含 text 块）。 */
 function isForkableUserMessage(line: Record<string, unknown>): boolean {
   if (line.role !== 'user') return false
+  if (Array.isArray(line.attachments) && line.attachments.length > 0) return true
   const content = line.content
   if (typeof content === 'string') return content.trim().length > 0
   if (Array.isArray(content)) {
+    if (content.some(block => block && typeof block === 'object' && (block as { type?: string; imageId?: string }).type === 'image' && (block as { imageId?: string }).imageId)) return true
     return content.some(
       (block) =>
         block && typeof block === 'object' && (block as { type?: unknown; text?: unknown }).type === 'text'
@@ -372,7 +383,8 @@ export function forkFrom(
   if (!isForkableUserMessage(anchor)) throw new Error('SESSION_FORK_ENTRY_NOT_FOUND: fork 锚点必须是 user 文本消息')
 
   const newSessionId = opts.new_session_id ?? randomUUID()
-  const prefix = lines.slice(0, anchorIndex + 1)
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(newSessionId) || existsSync(getAgentSessionPath(newSessionId)) || readSessions().sessions.some(session => session.session_id === newSessionId)) throw new Error('SESSION_FORK_TARGET_EXISTS')
+  const prefix = bindForkAttachments(opts.project_id, sessionId, newSessionId, lines.slice(0, anchorIndex + 1))
   for (const line of prefix) appendSessionMessage(newSessionId, line)
 
   recordSessionActivity(newSessionId, opts.project_id, { parentSessionId: sessionId, sourceDelegationId: undefined })

@@ -43,6 +43,7 @@ export interface DispatcherPromptContext {
   completedPhases?: string[]
   /** 需求摘要（首跑修复：PRD 背板 → 调度员与子会话的唯一需求注入路径；缺省不出需求段）。 */
   requirementsDigest?: string
+  uxSketchPath?: string
   /** 形状纪律段（批9 工件2：任务书 {{shape_brief}} 占位符注入；缺省空串——无形状增强）。 */
   shapeBrief?: string
   /** 形状验收教学段（批9 工件2：verify 任务书 {{shape_verify_brief}} 占位符；缺省空串）。 */
@@ -93,6 +94,7 @@ export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherProm
   if (ctx.requirementsDigest) {
     sections.push(`【项目需求（唯一真相源，不得改写）】\n${ctx.requirementsDigest}`)
   }
+  if (ctx.uxSketchPath) sections.push(confirmedSketchInstruction(ctx.uxSketchPath))
 
   // 1c. 上一轮已验证结论（刀2 checkpoint：同阶段重跑防重验——任务书之前注入，结论优先于任务）
   if (ctx.verifiedConclusion) {
@@ -141,7 +143,7 @@ export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherProm
  */
 export function buildDesktopChildBaseSystem(
   node: PhaseNode,
-  ctx: { projectName: string; requirementsDigest?: string; quickMode?: boolean },
+  ctx: { projectName: string; requirementsDigest?: string; quickMode?: boolean; uxSketchPath?: string },
 ): string {
   const useQuickBook = Boolean(ctx.quickMode && node.quickTaskTemplate)
   const constraints = useQuickBook ? (node.quickConstraints ?? node.constraints) : node.constraints
@@ -150,6 +152,7 @@ export function buildDesktopChildBaseSystem(
     // 刀4（2026-10-02）：子会话产出经委派摘要回流调度员→聊天流，英文长报告会原样
     // 灌进用户视野——汇报语言纪律在基底 system 收口（防英文报告回流摘要）。
     '【汇报纪律】完成摘要与一切面向用户的文本一律使用中文，简明扼要（要点式，先结论后细节索引）；分析细节写入产物文件，不在摘要里展开。',
+    '【实现与验收纪律】Api 返回值与界面读取路径必须一致：若返回 {ok,data}，先检查 ok 并读取 data；不得把缺失 records/summary 默认为空而隐藏协议错误。防重复提交不等于禁止用户保存两条内容相同的记录，未在 PRD 确认的业务限制不得添加。本地记录若用 JSON，复用 record_store.py 的 JsonRecordStore：update 在副本上修改，落盘成功才提交内存；损坏或无法读取的文件必须报告并禁止覆盖，不能静默当空表。使用 required_keys/validator 校验业务字段；若 PRD 选用 SQLite，则采用事务实现同样的失败原子性，不改技术选型。自测走独立数据目录；逻辑通过不能写成按钮流程通过，GUI 验收至少覆盖一次实际输入→点击→界面与持久化差分（可写隔离 test_ui.py，用 run_project_script 启动 --drive-port 后真实操作 /eval、/call），未跑则在 DELIVERY 明确业务交互未验。',
     node.outputPath
       ? `本阶段产物目录：${node.outputPath}/（相对项目根目录）。`
       : '本阶段产物写入项目根目录（相对路径）。',
@@ -160,7 +163,12 @@ export function buildDesktopChildBaseSystem(
   if (ctx.requirementsDigest) {
     parts.push(`【项目需求（唯一真相源，不得改写；清单外新功能一律不做）】\n${ctx.requirementsDigest}`)
   }
+  if (ctx.uxSketchPath) parts.push(confirmedSketchInstruction(ctx.uxSketchPath))
   return parts.join('\n\n')
+}
+
+function confirmedSketchInstruction(path: string): string {
+  return `【已确认界面】先 read_file ${path}，按其布局与交互方向实现并把此要求传给实现子会话；不要仅看组件库重新设计。草图示意数据与平台点选注入脚本不得复制为业务实现。`
 }
 
 /**

@@ -13,6 +13,7 @@ import { requirementPriority, type ProductShape, type UxExperienceSpec } from '.
 import { renderShapeBrief, renderShapeVerifyBrief } from './shape-templates'
 
 export interface RequirementDigestItem {
+  source_refs?: import('../../shared/attachment-types').MaterialSourceRef[]
   id: string
   description: string
   /** 优先级（P0/P1/P2；缺省不渲染标签） */
@@ -38,7 +39,8 @@ export function renderRequirementsDigest(input: RequirementDigestInput): string 
   const lines = shown.map((item) => {
     const description =
       item.description.length > maxChars ? `${item.description.slice(0, maxChars)}…` : item.description
-    return `- ${item.id}${item.priority ? ` [${item.priority}]` : ''} ${description}`
+    const sources = item.source_refs?.map(ref => `${ref.attachment_id}@${ref.sha256.slice(0, 12)}:${ref.start_line ?? ''}-${ref.end_line ?? ''}`).join('；')
+    return `- ${item.id}${item.priority ? ` [${item.priority}]` : ''} ${description}${sources ? `（材料来源：${sources}）` : ''}`
   })
   if (input.items.length > shown.length) {
     lines.push(`- …其余 ${input.items.length - shown.length} 项（略）`)
@@ -149,6 +151,7 @@ export function readDesktopRequirementsDigest(projectId: string): string | undef
         id: item.id,
         description: item.description,
         priority: requirementPriority(item),
+        source_refs: item.source_refs,
       })),
     })
     const parts = [digest.trim() ? digest : '', renderUxDigest(backplane.ux) ?? '', renderShapeDigest(backplane.shape) ?? ''].filter(Boolean)

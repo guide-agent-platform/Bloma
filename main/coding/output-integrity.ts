@@ -11,7 +11,7 @@
  * （agent-loop）、宽限交卷轮、learnings 落库过滤（programming-orchestrator）与
  * ready 直答校验（orchestrator）共用。
  *
- * 阈值与 renderer/stream-collapse.ts（显示层折叠）对齐：连续重复 ≥8、单元 ≤8
+ * 阈值与 renderer/stream-collapse.ts（显示层折叠）对齐：连续重复 ≥8、单元 ≤32
  * 字符。两侧用途不同（折叠上屏 vs 判定输出无效），改动阈值须双侧同步。
  */
 
@@ -25,7 +25,7 @@ const TOOL_MARKUP_PATTERNS: RegExp[] = [
 
 /** 连续重复判定阈值：与 renderer/stream-collapse.ts 的 MIN_REPEAT / MAX_UNIT 对齐。 */
 const MIN_REPEAT = 8
-const MAX_UNIT = 8
+const MAX_UNIT = 32
 /** 退行运行需覆盖的正文最低占比（正常文本里的修辞性省略号/分隔符不误伤）。 */
 const MIN_RUN_RATIO = 0.25
 /** 短于该长度不做重复扫描（工具标记检测不受此限）。 */
@@ -34,7 +34,7 @@ const MIN_REPEAT_SCAN_LENGTH = 32
 /**
  * 判定一段助手文本是否为传输事故产物：
  * - 正文混入工具调用协议原文（任意位置命中即判，协议原文不该以文本形态存在）；
- * - 退行性重复：存在 1-8 字符单元连续重复 ≥8 次的运行，且该运行覆盖 ≥25% 正文
+ * - 退行性重复：存在 1-32 字符单元连续重复 ≥8 次的运行，且该运行覆盖 ≥25% 正文
  *   （比例门槛防正常总结里的长省略号误伤——8 次 × 2 字符 = 16 字符，在 500 字
  *   总结里仅 3%，不会触发；「查。×385」这类墙则占比 90%+ 必命中）。
  */

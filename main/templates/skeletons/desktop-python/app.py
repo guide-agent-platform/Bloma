@@ -32,9 +32,12 @@ import json
 import os
 import sys
 import threading
+import tempfile
+from uuid import uuid4
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from record_store import JsonRecordStore
 
 APP_NAME = "{{project_name}}"
 APP_VERSION = "0.1.0-skeleton"
@@ -44,17 +47,18 @@ UI_DIR = Path(__file__).parent / "ui"
 # ══════════════════════════ 1. 逻辑层（driver.py 测这里） ══════════════════════════
 
 class Logic:
-    """业务逻辑与持久化。骨架期：条目增删查；实现阶段按 PRD 扩展（sqlite/json 自选）。"""
+    """业务逻辑与持久化。按 PRD 扩展字段，JSON 更新经 store.update 原子提交。"""
 
-    def __init__(self) -> None:
-        self.items: list[dict] = []  # 骨架占位；正式实现换真实持久化
+    def __init__(self, data_dir: Path | None = None) -> None:
+        directory = data_dir if data_dir is not None else Path(os.environ.get("APP_DATA_DIR", Path(__file__).parent / "data"))
+        self.store = JsonRecordStore(directory / "records.json", required_keys=("id", "name", "sub"))
 
     def list_items(self) -> list[dict]:
-        return self.items
+        return self.store.read()
 
     def add_item(self, name: str, sub: str = "") -> dict:
-        item = {"id": str(len(self.items) + 1), "name": name, "sub": sub}
-        self.items.append(item)
+        item = {"id": uuid4().hex, "name": name, "sub": sub}
+        self.store.update(lambda items: items.append(item))
         return item
 
     def handle_send(self, text: str) -> dict:
@@ -110,9 +114,10 @@ class Api:
 def self_check() -> int:
     """骨架自检：逻辑层可导入可调用 + ui 资产齐备（打印 ASCII 锚点 SELF-CHECK-OK）。"""
     checks: list[tuple[str, bool]] = []
-    logic = Logic()
-    logic.add_item("探针", "self-check")
-    checks.append(("logic", logic.list_items()[0]["name"] == "探针"))
+    with tempfile.TemporaryDirectory(prefix="bloma-self-check-") as directory:
+        logic = Logic(Path(directory))
+        logic.add_item("探针", "self-check")
+        checks.append(("logic", logic.list_items()[0]["name"] == "探针"))
     checks.append(("ui-html", (UI_DIR / "index.html").exists()))
     checks.append(("ui-css", (UI_DIR / "kit.css").exists()))
     checks.append(("ui-bridge", (UI_DIR / "bridge.js").exists()))

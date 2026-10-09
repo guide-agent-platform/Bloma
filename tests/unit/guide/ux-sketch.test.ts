@@ -4,7 +4,7 @@
  * mock 面：kernel/llm-call（可控输出/失败）；delivery/sandbox（runSandbox 桩）；
  * project-service（模板兜底与落盘路径）。
  */
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -24,7 +24,7 @@ vi.mock('../../../main/project/project-service', () => ({
 import { callLlmForJson } from '../../../main/kernel/llm-call'
 import { mintProjectPreviewUrl } from '../../../main/delivery/preview-scheme'
 import { findProject } from '../../../main/project/project-service'
-import { generateUxSketch, parseSketchHtml, stageUxSketch } from '../../../main/guide/ux-sketch'
+import { freezeConfirmedUxSketch, generateUxSketch, parseSketchHtml, stageUxSketch } from '../../../main/guide/ux-sketch'
 
 const mockCall = vi.mocked(callLlmForJson)
 const mockMint = vi.mocked(mintProjectPreviewUrl)
@@ -102,6 +102,22 @@ describe('generateUxSketch', () => {
 })
 
 describe('stageUxSketch（方案 A：bloma-file 直读，无沙箱）', () => {
+  it('archives a pre-upgrade draft before the first overwrite', async () => {
+    mkdirSync(join(sandboxRoot, '00_UX'))
+    writeFileSync(join(sandboxRoot, '00_UX/ux-sketch.html'), 'legacy version')
+    await stageUxSketch({ project_id: 'p1', html: '<!DOCTYPE html><html>new version</html>' })
+    expect(readFileSync(join(sandboxRoot, '00_UX/history/version-0001.html'), 'utf8')).toBe('legacy version')
+    expect(readFileSync(join(sandboxRoot, '00_UX/history/version-0002.html'), 'utf8')).toContain('new version')
+  })
+  it('keeps both versions and preserves the confirmed layout when a new draft is staged', async () => {
+    await stageUxSketch({ project_id: 'p1', html: '<!DOCTYPE html><html><body>first</body></html>' })
+    freezeConfirmedUxSketch('p1')
+    await stageUxSketch({ project_id: 'p1', html: '<!DOCTYPE html><html><body>second</body></html>' })
+    expect(readFileSync(join(sandboxRoot, '00_UX/history/version-0001.html'), 'utf8')).toContain('first')
+    expect(readFileSync(join(sandboxRoot, '00_UX/history/version-0002.html'), 'utf8')).toContain('second')
+    expect(readFileSync(join(sandboxRoot, '00_UX/confirmed.html'), 'utf8')).toContain('first')
+    expect(readFileSync(join(sandboxRoot, '00_UX/ux-sketch.html'), 'utf8')).toContain('second')
+  })
   it('落盘 00_UX/ux-sketch.html 并返回 bloma-file:// 预览 URL', async () => {
     const staged = await stageUxSketch({ project_id: 'p1', html: '<!DOCTYPE html><html></html>' })
     expect(staged.preview_url).toBe('bloma-file://p1/00_UX/ux-sketch.html')

@@ -9,6 +9,7 @@ import { buildDelegationWorktreeProvider } from './coding/worktree-isolation'
 import { reconcileInterruptedProjects } from './project/recovery-service'
 import { reconcileAllRunningDelegations } from './agent/delegation/delegation-persistence'
 import { migrateLegacySessionsIndexOnce } from './platform/sessions/session-service'
+import { collectUnusedAttachments } from './platform/attachments/attachment-cleanup'
 import {
   setFocusWindowAction,
   setNotificationBackend,
@@ -196,6 +197,8 @@ app.whenReady().then(async () => {
   // 开窗前完成对账（恢复是纯本地文件 IO，通常毫秒级；阶段收敛先于渲染端读取，
   // 避免渲染端拿到中间态阶段又滞后于磁盘）
   await reconcileInterruptedProjectsAtStartup()
+  try { collectUnusedAttachments(new Set(listProjects('all').map(project => project.project_id))) }
+  catch (error) { console.warn('[attachments] 引用状态无法完整核对，跳过本次素材回收', error) }
   // 2026-09-26 运行审计 P1-09：委派账本启动对账——重启时仍在跑的子委派统一标记
   // 「应用重启中断」并落 settle 行（此前只有定义无生产接线，running 账本悬置）；
   // fail-open 不阻断启动。

@@ -1,19 +1,20 @@
 import React from 'react'
-import { atom, useAtom, useAtomValue, useSetAtom } from 'jotai'
+import { atom, useAtomValue } from 'jotai'
 import { CardOptions } from './CardOptions'
 import type { CardOption } from './CardOptions'
 import { WaitingFeedback } from './WaitingFeedback'
 import { ToolCallRow, deriveToolCallRecords, safeJsonPreview } from './ToolCallBlock'
 import { DelegationRow } from './DelegationFeed'
 import { ProgressCard, buildProgressLines, countDoneSteps, mapStageToRunSteps } from './ProgressCard'
-import { VoiceInput } from './speech/VoiceInput'
-import { VoiceRecordingBar } from './speech/VoiceRecordingBar'
-import { useVoiceRecorder } from './speech/useVoiceRecorder'
+import { MessageComposer } from './MessageComposer'
+import { MessageReceipts } from './MessageReceipts'
+import { MessageAttachments } from './AttachmentPreview'
+import type { ComposerSend } from '../hooks/use-composer'
 import type { DelegationView } from '../agent-atoms'
 import { ProcessBlockGroup, type ProcessItem } from './ProcessBlockGroup'
 import { ThinkingIndicator, type ThinkingPhase } from './ThinkingIndicator'
 import { Markdown } from './Markdown'
-import { ArrowUp, MessageSquare, IconAlertTriangle, IconStop } from './icons'
+import { MessageSquare, IconAlertTriangle } from './icons'
 import {
   activeAgentSessionIdAtom,
   agentMessagesFamily,
@@ -27,10 +28,9 @@ import {
   delegationsFamily,
   steerStatusFamily,
 } from './atoms'
-import type { AgentEvent, AgentMessage, AgentStreamState, PastedImageRef, ProjectMode, SteerStatusChip } from './atoms'
+import type { AgentEvent, AgentMessage, AgentStreamState, ProjectMode, SteerStatusChip } from './atoms'
 import { collapseRepetitiveText } from '../stream-collapse'
-import { hasUsableChannelsAtom, chatInputDraftAtom, chatInputFocusSignalAtom, chatInputHintAtom } from './atoms-sprint2'
-import { extractPastedImages, extFromMime, toBase64DataUrl } from '../lib/paste-extract'
+import { requestChatInputFocus } from './atoms-sprint2'
 import { DESKTOP_PHASE_ACTION_LABELS } from '../lib/desktop-stages'
 import { mapDesktopPhaseToSteps } from './ProgressCard'
 
@@ -44,7 +44,7 @@ export interface ChatPanelProps {
   /** 用户选择卡片选项 */
   onCardOptionSelect?: (option: CardOption) => void
   /** 用户提交文本消息；粘贴图片时附带短引用数组（clipboard-paste P1，2026-08-29） */
-  onSendMessage?: (content: string, images?: PastedImageRef[]) => void
+  onSendMessage?: ComposerSend
   /** 是否正在等待 Agent 响应 */
   isWaiting?: boolean
   /** 等待开始时间（用于计算已等待秒数） */
@@ -141,7 +141,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const handleSuggestIdea = React.useCallback(() => {
     setViewingProgress(false)
     setIdeaHint(true)
-    inputRef.current?.focus()
+    requestChatInputFocus()
   }, [])
 
   const messages = useAtomValue(
@@ -151,32 +151,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     activeSessionId ? agentStreamStateFamily(activeSessionId) : nullStreamFallback,
   )
 
-  // WC-P2（2026-08-29）：草稿 atom 化——零渠道提交被拦截直达设置页后，返回工作区输入仍在
-  const [inputValue, setInputValue] = useAtom(chatInputDraftAtom)
-  // 语音输入（2026-10-06 波形批）：录音生命周期 hook——录音态整行变形为 VoiceRecordingBar
-  const voice = useVoiceRecorder((text) => setInputValue((prev) => (prev ? `${prev} ${text}` : text)))
-  // 录音结束（转写回填后）自动聚焦回输入框，免再点一次
-  const voicePhaseRef = React.useRef(voice.phase)
-  React.useEffect(() => {
-    const previous = voicePhaseRef.current
-    voicePhaseRef.current = voice.phase
-    if (previous === 'transcribing' && voice.phase === 'idle') inputRef.current?.focus()
-  }, [voice.phase])
-  const hasChannels = useAtomValue(hasUsableChannelsAtom)
-  // clipboard-paste P1（2026-08-29）：待发送粘贴图（短引用 + 内存 dataURL 预览）与降级错误
-  const [pendingImages, setPendingImages] = React.useState<Array<PastedImageRef & { dataUrl: string }>>([])
-  const [pasteError, setPasteError] = React.useState<string | null>(null)
   const messagesEndRef = React.useRef<HTMLDivElement>(null)
-  const inputRef = React.useRef<HTMLTextAreaElement>(null)
-  // 输入框聚焦信号 + 提示（2026-09-11 三按钮改版）：修改确认卡点「提出意见」后递增，
-  // 这里监听并聚焦输入框（「链接到输入框，让用户输入修改需求」）。
-  const chatFocusSignal = useAtomValue(chatInputFocusSignalAtom)
-  const chatInputHint = useAtomValue(chatInputHintAtom)
-  const setChatInputHint = useSetAtom(chatInputHintAtom)
-  React.useEffect(() => {
-    if (chatFocusSignal > 0) inputRef.current?.focus()
-  }, [chatFocusSignal])
-
   const streamingContent = hasActiveStream && streamState ? streamState.content : ''
 
   // 思考呈现（2026-10-04 窄栏适配）：从事件流派生三态——waiting（发消息后首个事件
@@ -263,95 +238,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     return null
   }, [streamState?.events])
 
-  // message-queue UI 收尾（ux-chatpanel-review P1-①，2026-08-28）：busy 时提交的消息由后端
-  // 排队兜底，但派发前不在 messages 流里——本地回显灰化「排队中」气泡，确认消息没丢。
-  // 出列以「消息真实进流」为派发完成信号；不用 busy→false 兜底清空——run 间隙抖动会
-  // 误清尚未派发的气泡（多厂商审查 aliyun fail 点，2026-08-28 加固）。
-  const [pendingQueue, setPendingQueue] = React.useState<string[]>([])
-  const dispatchedTexts = React.useMemo(() => {
-    const set = new Set<string>()
-    for (const message of messages) {
-      if (message.role !== 'user') continue
-      const text = message.content
-        .filter((block) => block.type === 'text')
-        .map((block) => block.text)
-        .join('\n')
-      if (text) set.add(text)
-    }
-    return set
-  }, [messages])
-  React.useEffect(() => {
-    if (dispatchedTexts.size === 0) return
-    setPendingQueue((queue) => queue.filter((t) => !dispatchedTexts.has(t)))
-  }, [dispatchedTexts])
-
-  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    // clipboard-paste P1（2026-08-29）：粘贴图提取→IPC 存盘→chip；纯文本零干扰（不 preventDefault）
-    const result = await extractPastedImages(e.clipboardData?.items ?? null)
-    if (!result.shouldPrevent) return
-    e.preventDefault()
-    if (result.rejected.length > 0) {
-      setPasteError(result.rejected[0].reason)
-    }
-    const api = window.electronAPI
-    for (const image of result.images) {
-      try {
-        const res = await api?.pastedImage?.save({
-          request_id: crypto.randomUUID(),
-          session_id: activeSessionId ?? 'unattached',
-          base64: image.base64,
-          ext: extFromMime(image.media_type),
-        })
-        if (res?.ok && res.data) {
-          setPendingImages((prev) => [
-            ...prev,
-            { imageId: res.data.imageId, media_type: res.data.media_type, dataUrl: toBase64DataUrl(image.base64, image.media_type) },
-          ])
-        } else {
-          setPasteError(res && !res.ok ? '图片保存失败，已改用纯文本发送' : '图片保存失败，已改用纯文本发送')
-        }
-      } catch {
-        setPasteError('图片保存失败，已改用纯文本发送')
-      }
-    }
-  }
-
-  const handleSubmit = () => {
-    const trimmed = inputValue.trim()
-    if (!trimmed) return
-    // WC-P2（2026-08-29）：零渠道提交不裸报错——拦截发送（无渠道 run 必失败），
-    // 直达设置页；草稿保留（atom 化），连接成功返回工作区后输入仍在。
-    if (hasChannels === false) {
-      onOpenSettings?.()
-      return
-    }
-    // message-queue（2026-08-27）：生成期间也允许提交——后端排队兜底（queued:true），
-    // 消息不丢、run 完成后自动派发。busy 时发送按钮区被停止按钮替换，靠 Enter 提交。
-    if (busy) setPendingQueue((q) => [...q, trimmed])
-    // clipboard-paste P1：带图时第二参传短引用数组；无图保持单参调用形态（不传 undefined 占位，
-    // 旧 mock/子类对签名兼容性零感知）。发送后清 chip（纯文本路径零变化）。
-    const imageRefs: PastedImageRef[] | undefined = pendingImages.length
-      ? pendingImages.map(({ imageId, media_type }) => ({ imageId, media_type }))
-      : undefined
-    if (imageRefs) onSendMessage?.(trimmed, imageRefs)
-    else onSendMessage?.(trimmed)
-    setPendingImages([])
-    setPasteError(null)
-    setInputValue('')
-    setIdeaHint(false)
-    // 「提出意见」提示语用后即清（发送即消费）
-    setChatInputHint(null)
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSubmit()
-    }
-  }
-
-  const canSend = !busy && inputValue.trim().length > 0
-
   const handleForkFromMessage = React.useCallback(
     (message: AgentMessage) => {
       onForkFromMessage?.(message)
@@ -367,7 +253,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: 'var(--space-4) var(--space-5)',
+          padding: '12px 14px',
           flexShrink: 0,
           borderBottom: '1px solid var(--color-border)',
         }}
@@ -384,10 +270,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         style={{
           flex: 1,
           overflowY: 'auto',
-          padding: 'var(--space-4) var(--space-5)',
+          padding: '12px 14px',
           display: 'flex',
           flexDirection: 'column',
-          gap: 'var(--space-4)',
+          gap: 10,
           minHeight: 0,
         }}
       >
@@ -450,46 +336,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             <HistoryMessages messages={messages} mode={mode} toolNamesById={toolNamesById} onOpenSettings={onOpenSettings} onForkFromMessage={handleForkFromMessage} />
 
             {/* message-queue UI 收尾（P1-①）：排队中的消息灰化回显，确认不丢 */}
-            {pendingQueue.map((text, i) => (
-              <div
-                key={`queued-${i}-${text}`}
-                data-ai-id="queued-message"
-                style={{
-                  display: 'flex',
-                  justifyContent: 'flex-end',
-                  alignItems: 'center',
-                  gap: 'var(--space-2)',
-                  opacity: 0.55,
-                  padding: '0 var(--space-2)',
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 'var(--font-size-xs)',
-                    color: 'var(--color-text-muted)',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: '999px',
-                    padding: '0 var(--space-2)',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  排队中
-                </span>
-                <span
-                  style={{
-                    maxWidth: '70%',
-                    background: 'var(--color-surface-muted, rgba(127,127,127,0.12))',
-                    borderRadius: 'var(--radius-md, 10px)',
-                    padding: 'var(--space-2) var(--space-3)',
-                    fontSize: 'var(--font-size-sm)',
-                    color: 'var(--color-text)',
-                    wordBreak: 'break-word',
-                  }}
-                >
-                  {text}
-                </span>
-              </div>
-            ))}
 
             {/* 思考指示（窄栏：默认单行；live 实时走字 / done 可展开） */}
             {(thinkingView.phase === 'waiting' || (thinkingView.phase !== 'done' && hasActiveStream) || (thinkingView.phase === 'done' && thinkingView.startedAt !== undefined)) && (
@@ -630,165 +476,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         )}
 
         {activeSessionId && <SteerStatusBar sessionId={activeSessionId} onStopGeneration={onStopGeneration} />}
+        {activeSessionId && <MessageReceipts key={activeSessionId} sessionId={activeSessionId} />}
 
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 输入区（胶囊） */}
-      <div style={{ padding: 'var(--space-3) var(--space-4)', flexShrink: 0, borderTop: '1px solid var(--color-border)' }}>
-        {/* clipboard-paste P1（2026-08-29）：待发送图片 chip 行——缩略预览（内存 dataURL）+ 移除；存图失败降级提示 */}
-        {(pendingImages.length > 0 || pasteError) && (
-          <div
-            style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', alignItems: 'center', marginBottom: 'var(--space-2)' }}
-          >
-            {pendingImages.map((img, i) => (
-              <span
-                key={img.imageId}
-                data-ai-id="paste-image-chip"
-                title={`图片 ${i + 1}（${img.media_type}）`}
-                style={{
-                  position: 'relative',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 'var(--space-1)',
-                  padding: 'var(--space-1) var(--space-2) var(--space-1) var(--space-1)',
-                  borderRadius: 'var(--radius-full)',
-                  border: '1px solid var(--color-border)',
-                  background: 'var(--glass-bg-soft)',
-                  fontSize: 'var(--font-size-xs)',
-                  color: 'var(--color-text-muted)',
-                }}
-              >
-                <img
-                  data-ai-id="paste-image-thumb"
-                  src={img.dataUrl}
-                  alt={`粘贴图片 ${i + 1}`}
-                  style={{ width: 24, height: 24, borderRadius: 'var(--radius-full)', objectFit: 'cover' }}
-                />
-                图片{i + 1}
-                <button
-                  onClick={() => setPendingImages((prev) => prev.filter((p) => p.imageId !== img.imageId))}
-                  aria-label={`移除图片 ${i + 1}`}
-                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', padding: '0 2px' }}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-            {pasteError && (
-              <span data-ai-id="paste-image-error" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-danger)' }}>
-                {pasteError}
-              </span>
-            )}
-          </div>
-        )}
-        <div
-          style={{
-            display: 'flex',
-            gap: 'var(--space-2)',
-            alignItems: 'flex-end',
-            background: 'var(--glass-bg-soft)',
-            border: '1px solid var(--color-border)',
-            borderRadius: 'var(--radius-full)',
-            padding: 'var(--space-1) var(--space-1) var(--space-1) var(--space-4)',
-            transition: 'border-color var(--transition-fast), box-shadow var(--transition-fast)',
-          }}
-        >
-          {voice.phase === 'recording' ? (
-            <VoiceRecordingBar voice={voice} maxSeconds={110} />
-          ) : (
-            <textarea
-              ref={inputRef}
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              onPaste={handlePaste}
-            placeholder={
-              chatInputHint ??
-              (busy
-                ? '生成中…可以继续输入，会自动排队处理'
-                : hasChannels === false
-                  ? '还没有连接 AI 模型——发送任意内容，直达设置页完成连接'
-                  : '描述你的想法…')
-            }
-            rows={1}
-            style={{
-              flex: 1,
-              height: 36,
-              padding: 'var(--space-2) 0',
-              fontSize: 'var(--font-size-sm)',
-              fontFamily: 'inherit',
-              color: 'var(--color-text)',
-              background: 'transparent',
-              border: 'none',
-              outline: 'none',
-              resize: 'none',
-              lineHeight: 1.5,
-              maxHeight: 120,
-            }}
-          />
-          )}
-          <VoiceInput voice={voice} />
-          {voice.phase === 'recording' ? null : hasActiveStream ? (
-            <button
-              onClick={onStopGeneration}
-              aria-label="停止本轮制作"
-              title="停止本轮制作（已确认的需求与已交付版本会保留）"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 36,
-                height: 36,
-                borderRadius: 'var(--radius-full)',
-                flexShrink: 0,
-                background: 'var(--color-danger)',
-                color: 'var(--white)',
-                boxShadow: '0 4px 12px -2px rgba(220,38,38,0.45)',
-                transition: 'all var(--transition-fast)',
-                cursor: 'pointer',
-              }}
-            >
-              <IconStop size={16} />
-            </button>
-          ) : (
-            <button
-              onClick={handleSubmit}
-              disabled={!canSend}
-              aria-label="发送消息"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 36,
-                height: 36,
-                borderRadius: 'var(--radius-full)',
-                flexShrink: 0,
-                background: canSend
-                  ? 'linear-gradient(135deg, var(--color-quick), var(--color-quick-bright))'
-                  : 'var(--gray-200)',
-                color: canSend ? 'var(--white)' : 'var(--gray-400)',
-                boxShadow: canSend ? '0 4px 12px -2px rgba(124,58,237,0.45)' : 'none',
-                transition: 'all var(--transition-fast)',
-                cursor: canSend ? 'pointer' : 'not-allowed',
-              }}
-            >
-              <ArrowUp size={17} />
-            </button>
-          )}
-        </div>
-        <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-2)', textAlign: 'center' }}>
-          按 Enter 发送，按 Shift + Enter 换行
-        </p>
-        {sessionUsage && (
-          <p
-            data-ai-id="session-usage-hint"
-            style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', textAlign: 'center', margin: '0 auto' }}
-          >
-            {`本会话已用 ≈${(sessionUsage.inputTokens + sessionUsage.outputTokens).toLocaleString()} tokens${sessionUsage.turnsWithUsage === 0 ? '（估算）' : ''}`}
-          </p>
-        )}
-      </div>
+      <MessageComposer onSendMessage={onSendMessage} busy={busy} onStopGeneration={onStopGeneration} onOpenSettings={onOpenSettings}
+        usage={sessionUsage ? `本会话已用 ≈${(sessionUsage.inputTokens + sessionUsage.outputTokens).toLocaleString()} tokens${sessionUsage.turnsWithUsage === 0 ? '（估算）' : ''}` : undefined} />
+
     </div>
   )
 }
@@ -1154,8 +849,9 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
   const hasToolBlocks = message.content.some((block) => block.type === 'tool_use' || block.type === 'tool_result')
   // clipboard-paste P1（2026-08-29）：粘贴图片块——气泡内 chip 标注（缩略图回放 P2）
   const imageBlocks = message.content.filter((block) => block.type === 'image')
+  const textAttachments = message.attachments
 
-  if (!text && !hasToolBlocks && imageBlocks.length === 0 && !isStreaming) return null
+  if (!text && !hasToolBlocks && imageBlocks.length === 0 && !message.attachments?.length && !isStreaming) return null
 
   // 含工具块的消息（assistant 的 tool_use / user 的 tool_result + 旁白）：
   // 折叠进「执行过程」组，不占正文气泡（陷阱 26 家族：不污染纯文本流）
@@ -1232,7 +928,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
             borderRadius: 'var(--radius-md)',
             fontSize: 'var(--font-size-sm)',
             color: 'var(--color-text)',
-            animation: 'tile-enter 0.3s ease both',
+            animation: 'none',
           }}
         >
           <div>{hint}</div>
@@ -1275,7 +971,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
           color: 'var(--color-text-muted)',
           maxWidth: '90%',
           textAlign: 'center',
-          animation: 'tile-enter 0.3s ease both',
+          animation: 'none',
         }}
       >
         {display}
@@ -1291,20 +987,20 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
         alignItems: isUser ? 'flex-end' : 'flex-start',
         maxWidth: '84%',
         alignSelf: isUser ? 'flex-end' : 'flex-start',
-        animation: 'tile-enter 0.3s ease both',
+        animation: 'none',
       }}
     >
       <div
         style={{
           maxWidth: '100%',
-          padding: 'var(--space-3) var(--space-4)',
-          borderRadius: 'var(--radius-md)',
+          padding: '10px 12px',
+          borderRadius: 12,
           fontSize: 'var(--font-size-sm)',
-          lineHeight: 'var(--line-height-base)',
+          lineHeight: 1.5,
           color: isUser ? 'var(--white)' : 'var(--color-text)',
-          background: isUser ? userBubbleBg(mode) : 'var(--white)',
+          background: isUser ? userBubbleBg(mode) : 'rgba(124,58,237,0.035)',
           border: isUser ? 'none' : '1px solid var(--color-border)',
-          boxShadow: isUser ? userBubbleShadow(mode) : 'var(--shadow-sm)',
+          boxShadow: 'none',
           borderBottomRightRadius: isUser ? 'var(--radius-sm)' : undefined,
           borderBottomLeftRadius: !isUser ? 'var(--radius-sm)' : undefined,
           // user 气泡纯文本保换行；assistant 气泡走 Markdown 渲染（块级元素，pre-wrap 会叠加间距）
@@ -1314,6 +1010,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
       >
         {/* assistant 旁白/完成总结渲染 Markdown（模型输出天然带 md）；user 输入保持纯文本语义 */}
         {isUser || !text ? text || (isStreaming ? '…' : '') : <Markdown text={text} />}
+        {textAttachments?.length ? <MessageAttachments attachments={textAttachments} /> : null}
         {imageBlocks.length > 0 && (
           <span
             data-ai-id="message-image-chip"
@@ -1357,7 +1054,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
       </div>
       {/* P0-2 fork（2026-09-08）：user 气泡的「从这里重新来」入口——走错方向时从这条
           user 消息重开（复制此前对话到新会话，原会话保留）；走历史回放也可见 */}
-      {isUser && text && onForkFromMessage && (
+      {isUser && (text || message.attachments?.length || imageBlocks.length) && onForkFromMessage && (
         <button
           type="button"
           onClick={() => onForkFromMessage(message)}

@@ -72,6 +72,8 @@ import { cancelAgent } from './lifecycle'
 import { appendAgentMessage, convertSDKMessage, detectCodeDelivery, extractAssistantText, isUserCancelled, makeEvent, persistAssistantMessages, persistTerminalMessage, publishRunEvent } from './persistence'
 import { HISTORY_WINDOW_TURNS, loadConversationHistory, shouldUseGuideAgent } from './dispatch-support'
 import { maybeRenameUnnamedProject } from '../../project/project-service'
+import { isCurrentReceiptGeneration, updateReceipt } from '../../platform/attachments/send-inbox'
+import { sessionMaterials } from '../../platform/attachments/material-context'
 
 export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendMessageResult> {
   // 项目自动命名（2026-10-05 用户反馈修复）：「模式选择→建项目」路径无 initial_message
@@ -82,6 +84,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
   // PROJECT_BUSY 在 registerForegroundRun 抛出后不排队不落盘，渲染端乐观气泡刷新即丢）。
   // 派发重试安全网：若派发时项目仍忙，MAX_REQUEUES 耗尽后 onDropped 红泡告知（可重发，非静默）。
   if (activeSessions.has(input.session_id) || hasRunForProject(input.project_id)) {
+    updateReceipt(input.client_message_id, 'queued', undefined, input.run_generation)
     // message-queue（message-queue-port.md P1，2026-08-27）：生成期间消息排队不丢——
     // 排队中仅 UI 投影（queued 态），run 完成后自动派发；用户可撤回。
     sessionMessageQueue.enqueue(input.session_id, {
@@ -92,20 +95,26 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     return { accepted: true, session_id: input.session_id, stream_started: false, queued: true }
   }
   const runId = randomUUID()
+  const publishForRun = (event: AgentEvent): void => {
+    if (input.client_message_id && !isCurrentReceiptGeneration(input.client_message_id, input.run_generation ?? 1)) return
+    streamPublisher(input.client_message_id ? { ...event, payload: { ...event.payload, client_message_id: input.client_message_id, run_generation: input.run_generation ?? 1 } } : event)
+  }
   const abortController = new AbortController()
   const run: ActiveRun = {
     abortController,
     projectId: input.project_id,
     runId,
-    publisher: streamPublisher,
+    publisher: publishForRun,
   }
   registerForegroundRun(input, run)
 
   const received: SDKMessage[] = []
   // message-queue：run 终态收口判断用户是否主动停止（isUserCancelled 分支置 true）
   let stoppedByUser = false
+  let receiptOutcome: 'completed' | 'failed' | 'cancelled' = 'completed'
 
   try {
+    updateReceipt(input.client_message_id, 'running', undefined, input.run_generation)
     // 权威项目阶段（工作项 1）：以项目存储为准，渲染端上报阶段仅为回退。
     // 前移到渠道解析之前——类别路由（§6.4）需要按阶段选文档类别。
     let authoritativeStage: WorkflowStage = input.current_stage
@@ -143,7 +152,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     // 多轮历史（T4-L2 窗口改造）：近 N 轮原文（显式常量，默认 10——不再静默写死 20；
     // 窗口只管「最近在聊什么」）+ 全量约束扫描回灌（约束是长期不变量，来自全量 JSONL，
     // 第 1 轮说的约束在 30 轮后依然注入）。漏网的约束在此回填 project.constraints。
-    const recentHistory = loadConversationHistory(input.session_id, HISTORY_WINDOW_TURNS)
+    const recentHistory = loadConversationHistory(input.session_id, HISTORY_WINDOW_TURNS, { excludeClientMessageId: input.client_message_id })
     const sessionConstraints = scanSessionConstraints(input.session_id)
     if (sessionConstraints.length > 0) {
       captureConstraints({
@@ -168,6 +177,8 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
 
     appendAgentMessage(input.session_id, {
       role: 'user',
+      ...(input.client_message_id ? { client_message_id: input.client_message_id } : {}),
+      ...(input.attachment_refs?.length ? { attachments: sessionMaterials(input.project_id, input.session_id).attachments.filter(info => input.attachment_refs!.some(ref => ref.attachment_id === info.attachment_id)) } : {}),
       // clipboard-paste P1（2026-08-29）：带图消息落 [text, ...image 短引用] 块数组（JSONL 无 base64）
       content: input.images?.length
         ? [
@@ -201,10 +212,20 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
         timestamp: Date.now(),
       })
 
+    if (input.client_message_id && !input.content.trim() && (input.images?.length || input.attachment_refs?.length)) {
+      const notice = '材料已保存。你希望我把它用作界面参考、解释材料内容，还是补充已有需求？请说明用途后继续。'
+      persistAssistant(notice)
+      publishForRun(makeEvent(input, 'message_delta', { text: notice }))
+      persistTerminalMessage(input.session_id, 'completed')
+      publishForRun(makeEvent(input, 'completed', { subtype: 'success' }))
+      return { accepted: true, session_id: input.session_id, stream_started: true }
+    }
+
     // 引导路径的模型选项：渠道可用则切真实模型（不可用/解析失败回退规则），无渠道直接走规则，不阻塞澄清
     const guideOptions: GuideModelOptions | undefined = env
       ? {
           query: sdkQuery,
+          materials: sessionMaterials(input.project_id, input.session_id),
           env,
           signal: abortController.signal,
           sessionId: input.session_id,
@@ -232,6 +253,8 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
           sessionId: input.session_id,
           requestId: input.request_id,
           content: input.content,
+          images: input.images,
+          initialMessagePersisted: Boolean(input.client_message_id),
           cardOptionId: input.metadata?.source === 'card_option' ? input.metadata.selected_option_id : undefined,
           query: sdkQuery,
           env: env ?? {},
@@ -239,13 +262,14 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
           signal: abortController.signal,
         },
         {
-          publish: (_target, type, payload) => streamPublisher(makeEvent(input, type, payload)),
+          publish: (_target, type, payload) => publishForRun(makeEvent(input, type, payload)),
           persistAssistant,
           persistSystem,
           complete: (sessionId, _projectId, outcome) => {
+            if (outcome === 'incomplete') receiptOutcome = 'failed'
             persistTerminalMessage(sessionId, 'completed')
             // P2-01：未收口/取消不再冒充成功终态（subtype 供渲染端与下游区分）
-            streamPublisher(makeEvent(input, 'completed', { subtype: outcome === 'incomplete' ? 'incomplete' : 'success' }))
+            publishForRun(makeEvent(input, 'completed', { subtype: outcome === 'incomplete' ? 'incomplete' : 'success' }))
           },
         },
       )
@@ -260,9 +284,9 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     if (WEB_LINE_RETIRED_STAGES.has(authoritativeStage)) {
       const notice = WEB_LINE_RETIRED_COPY
       persistAssistant(notice)
-      streamPublisher(makeEvent(input, 'message_delta', { text: notice }))
+      publishForRun(makeEvent(input, 'message_delta', { text: notice }))
       persistTerminalMessage(input.session_id, 'completed')
-      streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
+      publishForRun(makeEvent(input, 'completed', { subtype: 'success' }))
       return { accepted: true, session_id: input.session_id, stream_started: true }
     }
 
@@ -271,16 +295,16 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     // 落入 resolveCardAnswer 澄清答案空间。
     if (input.metadata?.source === 'card_option'
       && isWebLineRetiredOption(input.metadata.selected_option_id)) {
-      await resolveWebLineRetiredCard(input, streamPublisher, makeEvent, sdkQuery, env ?? {})
+      await resolveWebLineRetiredCard(input, publishForRun, makeEvent, sdkQuery, env ?? {})
       persistTerminalMessage(input.session_id, 'completed')
-      streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
+      publishForRun(makeEvent(input, 'completed', { subtype: 'success' }))
       return { accepted: true, session_id: input.session_id, stream_started: true }
     }
 
         if (shouldUseGuideAgent(authoritativeStage)) {
-      await handleGuideMessage(input, streamPublisher, guideOptions, persistAssistant, persistSystem)
+      await handleGuideMessage(input, publishForRun, guideOptions, persistAssistant, persistSystem)
       persistTerminalMessage(input.session_id, 'completed')
-      streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
+      publishForRun(makeEvent(input, 'completed', { subtype: 'success' }))
       return { accepted: true, session_id: input.session_id, stream_started: true }
     }
 
@@ -288,11 +312,12 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     // 向导三态）。防御兜底：不沉默吞消息。
     const unreachable = '这个请求我暂时无法处理（未识别的项目阶段）。可以新建项目重新开始。'
     persistAssistant(unreachable)
-    streamPublisher(makeEvent(input, 'message_delta', { text: unreachable }))
+    publishForRun(makeEvent(input, 'message_delta', { text: unreachable }))
     persistTerminalMessage(input.session_id, 'completed')
-    streamPublisher(makeEvent(input, 'completed', { subtype: 'success' }))
+    publishForRun(makeEvent(input, 'completed', { subtype: 'success' }))
     return { accepted: true, session_id: input.session_id, stream_started: true }
   } catch (error) {
+    receiptOutcome = isUserCancelled(error) ? 'cancelled' : 'failed'
     // 如果 cancelAgent 已按 runId 发过终态，旧任务只负责收尾，不能再覆盖 UI/日志。
     const stillOwnsRun = activeSessions.get(input.session_id)?.runId === runId
     if (!stillOwnsRun && isUserCancelled(error)) {
@@ -317,7 +342,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
     // 审计 B-05（2026-10-04）：事件带上原始 message（截 200 字）——渲染端 globalUserError
     // 的优先级是 message > code，原先只有 code 时用户直接看到英文码 AGENT_SDK_ERROR。
     const errorMessageText = (error instanceof Error ? error.message : String(error)).slice(0, 200)
-    streamPublisher(makeEvent(input, 'error', { code, message: errorMessageText }))
+    publishForRun(makeEvent(input, 'error', { code, message: errorMessageText }))
     persistTerminalMessage(input.session_id, 'error', {
       code,
       message: error instanceof Error ? error.message : String(error),
@@ -332,6 +357,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       // message-queue：run 收口——自然完成自动派发排队消息；用户停止不派发（违背停止意图）
       sessionMessageQueue.onRunComplete(input.session_id, input.request_id, stoppedByUser)
     }
+    try { updateReceipt(input.client_message_id, receiptOutcome, undefined, input.run_generation) } catch (error) { console.error('[chat-receipt] 运行状态保存失败', error) }
   }
 }
 

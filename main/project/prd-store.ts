@@ -22,6 +22,7 @@ import { parseEarsAssertion } from '../guide/ears-vocabulary'
 import { gwtRequiredCategories } from '../agent/prompting/template-injection'
 import { describeEffect, describeTrigger, parseBehaviorAssertion } from '../verification/behavior-assertions'
 import { readRequirements, assertInsideDocumentsDir } from './document-sync'
+import { normalizePrdDocumentNewlines, reconcilePrdDocumentPriorities } from '../model/prd-backplane'
 
 /**
  * DocumentEngine — 文档同步（对齐 api-spec §10.1 / architecture §7.3）。
@@ -123,7 +124,7 @@ export function readPrdBackplane(projectId: string): PrdBackplane {
   if (existsSync(path)) {
     try {
       const parsed = JSON.parse(readFileSync(path, 'utf8')) as PrdBackplane
-      if (parsed && Array.isArray(parsed.requirements)) return parsed
+      if (parsed && Array.isArray(parsed.requirements)) return reconcilePrdBackplane(parsed)
     } catch {
       // 损坏则回退到按当前需求重建
     }
@@ -244,7 +245,16 @@ export function appendPrdRequirements(
 }
 
 export function renderPrdJson(backplane: PrdBackplane): string {
-  return `${JSON.stringify(backplane, null, 2)}\n`
+  return `${JSON.stringify(reconcilePrdBackplane(backplane), null, 2)}\n`
+}
+
+/** Enrichment and review can change priorities after initial document creation. */
+export function reconcilePrdBackplane(backplane: PrdBackplane): PrdBackplane {
+  if (typeof backplane.prd_document !== 'string') return backplane
+  return {
+    ...backplane,
+    prd_document: reconcilePrdDocumentPriorities(normalizePrdDocumentNewlines(backplane.prd_document), backplane.requirements),
+  }
 }
 
 /** 向盘上 prd.json 按 id 更新功能项行为断言（2026-09-02 周计划 §5 P3：EARS 化回写）。

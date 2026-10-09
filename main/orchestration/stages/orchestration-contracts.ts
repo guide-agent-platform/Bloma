@@ -116,6 +116,7 @@ export type SDKQuery = (prompt: string, options: SDKQueryOptions) => AsyncIterab
 
 /** 引导对话的模型驱动选项（由 runAgent 注入，避免 guide-agent-service 反向依赖 orchestrator 运行时）。 */
 export interface GuideModelOptions {
+  materials?: import('../../../shared/attachment-types').MaterialContext
   query: SDKQuery
   env: Record<string, string>
   signal: AbortSignal

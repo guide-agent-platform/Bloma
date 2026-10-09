@@ -199,7 +199,7 @@ function defaultQuickSecurityGate(projectId: string): QuickSecurityGateResult | 
  * 返回 true=已改道（调用方不再走 runSketchTask）；false=不该改道（调用方走原路径）。
  */
 export async function enterDesktopLine(
-  input: { projectId: string; sessionId: string; requestId: string; content: string; signal?: AbortSignal },
+  input: { projectId: string; sessionId: string; requestId: string; content: string; signal?: AbortSignal; images?: import('../../shared/types').PastedImageRef[]; initialMessagePersisted?: boolean },
   query: SDKQuery,
   env: Record<string, string>,
   deps: DesktopRouteDeps,
@@ -226,6 +226,8 @@ export async function enterDesktopLine(
 
 /** 路由输入面（orchestration 层从 AgentSendMessageInput 抽取）。 */
 export interface DesktopRouteInput {
+  images?: import('../../shared/types').PastedImageRef[]
+  initialMessagePersisted?: boolean
   projectId: string
   sessionId: string
   requestId: string
@@ -265,7 +267,7 @@ export async function handleDesktopDispatchMessage(
     deps.publish(input, 'message_delta', {
       text: '确认协议已升级：中间阶段不再需要人工确认，门禁全绿自动推进。已按当前阶段继续处理你的消息。',
     })
-    await runDesktopStage({ projectId: input.projectId, sessionId: input.sessionId, requestId: input.requestId, content: input.content, signal: input.signal }, input.query, input.env, phaseId, deps, projectName, 0)
+    await runDesktopStage({ projectId: input.projectId, sessionId: input.sessionId, requestId: input.requestId, content: input.content, signal: input.signal, images: input.images, initialMessagePersisted: input.initialMessagePersisted }, input.query, input.env, phaseId, deps, projectName, 0)
     return
   }
 
@@ -330,6 +332,8 @@ export async function handleDesktopDispatchMessage(
         requestId: input.requestId,
         content: `【交付前迭代】用户对验收通过产物的修改意见，按此修改实现（其余功能与已验证行为保持不变）：${feedbackContent}`,
         signal: input.signal,
+        images: input.images,
+        initialMessagePersisted: input.initialMessagePersisted,
       },
       input.query, input.env, 'desktop-implement', deps, projectName, 0,
     )
@@ -351,6 +355,8 @@ export async function handleDesktopDispatchMessage(
         requestId: input.requestId,
         content: `【交付后迭代】用户对已交付产物的反馈，按此修改实现（其余功能与已验证行为保持不变）：${input.content}`,
         signal: input.signal,
+        images: input.images,
+        initialMessagePersisted: input.initialMessagePersisted,
       },
       input.query, input.env, 'desktop-implement', deps, projectName, 0,
     )
@@ -391,7 +397,7 @@ export async function handleDesktopDispatchMessage(
     deps.persistSystem(input.sessionId, `[decision] desktop-unblock ${phaseId}（${intent === 'continue' ? '继续词放行' : '人工出场放行'}）`)
   }
 
-  await runDesktopStage({ projectId: input.projectId, sessionId: input.sessionId, requestId: input.requestId, content: input.content, signal: input.signal }, input.query, input.env, phaseId, deps, projectName, 0)
+  await runDesktopStage({ projectId: input.projectId, sessionId: input.sessionId, requestId: input.requestId, content: input.content, signal: input.signal, images: input.images, initialMessagePersisted: input.initialMessagePersisted }, input.query, input.env, phaseId, deps, projectName, 0)
 }
 
 // =========================================================================
@@ -406,7 +412,7 @@ export async function handleDesktopDispatchMessage(
 export const MAX_AUTO_ADVANCE_CHAIN = 4
 
 async function runDesktopStage(
-  input: { projectId: string; sessionId: string; requestId: string; content: string; signal?: AbortSignal },
+  input: { projectId: string; sessionId: string; requestId: string; content: string; signal?: AbortSignal; images?: import('../../shared/types').PastedImageRef[]; initialMessagePersisted?: boolean },
   query: SDKQuery,
   env: Record<string, string>,
   phaseId: string,
@@ -441,6 +447,8 @@ async function runDesktopStage(
     requestId: input.requestId,
     currentPhase: phaseId,
     task: input.content,
+    images: input.images,
+    initialMessagePersisted: input.initialMessagePersisted,
     query,
     env,
     maxTokens: 640000,
@@ -466,6 +474,7 @@ async function runDesktopStage(
     },
     projectName,
     requirementsDigest,
+    ...(sandboxRoot && existsSync(join(sandboxRoot, '00_UX', 'confirmed.html')) ? { uxSketchPath: '00_UX/confirmed.html' } : {}),
     ...(shapeBriefs.shapeBrief ? { shapeBrief: shapeBriefs.shapeBrief } : {}),
     ...(shapeBriefs.shapeVerifyBrief ? { shapeVerifyBrief: shapeBriefs.shapeVerifyBrief } : {}),
     ...(verifiedConclusion ? { verifiedConclusion } : {}),
@@ -495,7 +504,7 @@ async function runDesktopStage(
  * （人工是异常处理器不是流水线工位）。
  */
 async function settleDesktopStage(
-  input: { projectId: string; sessionId: string; requestId: string; content: string; signal?: AbortSignal },
+  input: { projectId: string; sessionId: string; requestId: string; content: string; signal?: AbortSignal; images?: import('../../shared/types').PastedImageRef[]; initialMessagePersisted?: boolean },
   query: SDKQuery,
   env: Record<string, string>,
   result: DesktopDispatchRunResult,

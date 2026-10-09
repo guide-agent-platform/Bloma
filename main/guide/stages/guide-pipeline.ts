@@ -661,6 +661,9 @@ export async function runGuideLoopTurn(
     result = await runAgentLoop({
       system: `${baseSystem}${GUIDE_LOOP_ADDENDUM}`,
       task: `${input.content}${reminder}`,
+      images: input.images,
+      materials: model.materials,
+      initialMessagePersisted: Boolean(input.client_message_id),
       historyTurns: model.history,
       tools,
       query: model.query,
@@ -681,6 +684,7 @@ export async function runGuideLoopTurn(
       },
     })
   } catch (error) {
+    if (input.images?.length || model.materials?.attachments.length) throw error
     // 2026-10-03 e99e6319 事故：向导 loop 抛错（含 EMPTY_MODEL_STREAM 空流/渠道 4xx）
     // 此前静默回落确定性路由，渠道故障伪装成「模型问了个怪问题」；留痕真实原因
     try {

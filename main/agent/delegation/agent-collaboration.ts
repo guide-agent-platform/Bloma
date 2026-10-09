@@ -98,6 +98,7 @@ export interface DelegationSummary {
   role: DelegationRole
   status: DelegationStatus
   goal: string
+  loop_status?: AgentLoopResult['status']
   result_summary?: string
   error?: string
   started_at: number
@@ -121,6 +122,7 @@ export interface DelegationRecord {
   role: DelegationRole
   goal: string
   status: DelegationStatus
+  loopStatus?: AgentLoopResult['status']
   resultSummary?: string
   error?: string
   startedAt: number
@@ -141,38 +143,8 @@ export interface DelegationRecord {
   channelOverride?: DelegationChannelOverride
 }
 
-/** 父 loop 运行上下文（构建子 AgentLoopInput 所需；runMvpViaAgentLoop 注册）。 */
-export interface DelegationParentContext {
-  query: SDKQuery
-  env: Record<string, string>
-  maxTokens: number
-  /** 父 loop 轮次上限（子 loop 取 min(父上限, delegationMaxTurns)）。 */
-  maxTurns: number
-  /** 子 agent 独立轮次上限（比主 loop 小，控制 token 成本）。 */
-  delegationMaxTurns: number
-  permissionMode: PromaPermissionMode
-  temperature: number
-  /** 背板锚定 system prompt（buildAgentLoopSystemPrompt 产物），子 loop 在它之上加委派规则。 */
-  system: string
-  editFormat: 'diff' | 'whole'
-  /** 父级子工具构建器（全链路审查 P1-12，2026-10-02）：随父上下文按 sessionId 隔离，
-   *  优先于全局单例——桌面线（realFullstackVariant 写面）与 review 线（web 组合面）
-   *  并发时后注册者的全局覆盖不再串面。未传时回退全局单例（兼容未改造注册方与测试）。 */
-  childToolsBuilder?: ChildToolsBuilder
-  /** omit 推广（2026-08-27）：子 loop 透传父渠道 providerType，Token Plan 类渠道免 400 往返 */
-  providerType?: string
-  publish: (type: AgentEvent['type'], payload: Record<string, unknown>) => void
-  /** 无代答者的合成父（如审查委派 review-{uuid}）——子代理提问时立即以该固定答复回传
-   *  而不挂起干等（T-5：此前无人代答，提问会挂到 120/150s 超时）。 */
-  autoAnswer?: string
-  /** 子 loop 每轮埋点（programming-orchestrator 注入，session_id=子 sessionId）。 */
-  onChildTurn?: (info: AgentLoopTurnInfo, child: { sessionId: string; requestId: string; role: DelegationRole }) => void
-  /** W1-E1：子 loop 压缩观测埋点（agent_loop_compact via=delegation；同 onChildTurn 模式）。 */
-  onChildCompaction?: (info: AgentLoopCompactionInfo, child: { sessionId: string; requestId: string; role: DelegationRole }) => void
-  /** 追加到子 agent 工具面的定向工具（2026-09 内审闭环）：如 read_conversation_history /
-   *  write_prd_draft——闭包携带调用方上下文，仅注入需要它的委派（最小攻击面）。 */
-  childExtraTools?: AgentLoopTool[]
-}
+import { resolveDelegationTurns, type DelegationParentContext } from './delegation-context'
+export type { DelegationParentContext } from './delegation-context'
 
 /** 子 agent 工具集构建器（按 role 裁剪；programming-orchestrator 注入 buildAgentTools）。 */
 export type ChildToolsBuilder = (projectId: string, role: DelegationRole, editFormat: 'diff' | 'whole') => AgentLoopTool[]
@@ -317,11 +289,12 @@ export function startDelegation(parent: ToolContext, args: DelegateAgentArgs): S
 /** 子 loop 正常结束：落 result summary 并置 completed（非 running 状态不覆盖，如已被 stop）。 */
 function settleChildLoop(record: DelegationRecord, result: AgentLoopResult): void {
   if (record.status !== 'running') return
+  record.loopStatus = result.status
   record.resultSummary = summarizeChildResult(result, DELEGATION_RESULT_CHAR_LIMIT) + formatWorktreeNote(record.worktreeMeta)
   record.status = 'completed'
   // persistence：终态落盘（重启后 JSONL 末行推断依据）
   try {
-    appendDelegationSettle(record.childSessionId, 'completed', { resultSummary: record.resultSummary })
+    appendDelegationSettle(record.childSessionId, 'completed', { resultSummary: record.resultSummary, loopStatus: record.loopStatus })
   } catch (error) {
     console.warn('[delegation-persistence] settle 落盘失败:', error)
   }
@@ -373,7 +346,7 @@ async function runChildLoop(opts: {
 }): Promise<AgentLoopResult> {
   const { parent, parentCtx, record, prompt, role } = opts
   const childRequestId = randomUUID()
-  const maxTurns = Math.max(1, Math.min(parentCtx.delegationMaxTurns, parentCtx.maxTurns))
+  const maxTurns = resolveDelegationTurns(parentCtx, role)
   // P1-06 收尾：子运行上下文（worktree 隔离）；provider 未注册/开关 off → 零变化
   const runContext = acquireChildRunContext({ projectId: parent.projectId, delegationId: record.delegationId, childSessionId: record.childSessionId, role })
   const isolationNote = runContext?.rootOverride
@@ -381,8 +354,9 @@ async function runChildLoop(opts: {
     : ''
   const invoke = (): Promise<AgentLoopResult> => runAgentLoop({
     system: `${buildChildSystemPrompt(parentCtx.system, role)}${isolationNote}`,
-    task: prompt,
+    task: parentCtx.delegationTurnLimits?.[role] ? prompt + '\n\n【执行预算】本轮上限 ' + maxTurns + ' 轮，每轮为一次模型请求。沿用历史中的已读事实，避免重复通读；保留最后约 1/4 轮数用于真实验证与交付收口。未完成时明确列出未落盘/未验证项，不得声称工作已完成。' : prompt,
     historyTurns: opts.replayTurns,
+    materials: parentCtx.materials,
     tools: [...(parentCtx.childToolsBuilder ?? childToolsBuilder)(parent.projectId, role, parentCtx.editFormat), ...(parentCtx.childExtraTools ?? [])],
     query: parentCtx.query,
     // C1：渠道覆盖从 record 取（query 复用，env/providerType/maxTokens 换子渠道值；continue 同源）
@@ -424,6 +398,7 @@ export function getDelegationSummary(record: DelegationRecord): DelegationSummar
     status: record.status,
     goal: record.goal,
     result_summary: record.resultSummary,
+    ...(record.loopStatus ? { loop_status: record.loopStatus } : {}),
     error: record.error,
     started_at: record.startedAt,
     pending_question: record.pendingQuestion,
@@ -458,6 +433,7 @@ function publishDelegationEvent(
     role: record.role,
     goal: record.goal,
     status: record.status,
+    ...(record.loopStatus ? { loop_status: record.loopStatus } : {}),
     ...(type === 'delegation_failed' && record.error ? { error: record.error.slice(0, 200), channel: record.channelOverride?.channelName } : {}),
   })
 }
@@ -655,6 +631,7 @@ export function continueDelegation(parent: ToolContext, delegationId: string, ta
   }
 
   record.status = 'running'
+  record.loopStatus = undefined
   record.resultSummary = undefined
   record.error = undefined
   record.pendingQuestion = undefined

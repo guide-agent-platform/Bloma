@@ -16,7 +16,7 @@ import { readPrdBackplane } from '../project/prd-store'
 import { appendSessionMessage } from '../platform/sessions/session-tree'
 import { enterDesktopLine, DESKTOP_LINE_TEMPLATE_TYPES } from '../desktop/desktop-route'
 import { findProject } from '../project/project-service'
-import { generateUxSketch, stageUxSketch } from './ux-sketch'
+import { freezeConfirmedUxSketch, generateUxSketch, stageUxSketch } from './ux-sketch'
 import { USER_STOP_KEYWORDS } from '../desktop/user-intent-lexicon'
 
 /** UX 门回门意图词（2026-10-04 真机踩坑修复：「按草图开工」是 dismiss 提示语的原文，
@@ -236,6 +236,13 @@ export async function resumeUxConfirmConfirmed(input: AgentSendMessageInput): Pr
   pending.publish(makeUxEvent(pending, 'message_delta', { text: '好，按这个界面方向开工，进入桌面交付流程。' }))
   pending.publish(makeUxEvent(pending, 'message_completed', { subtype: 'success' }))
   if (pending.signal?.aborted) return true
+  try {
+    freezeConfirmedUxSketch(pending.project_id)
+  } catch (error) {
+    pendingUxConfirms.set(pending.project_id, pending)
+    pending.publish(makeUxEvent(pending, 'message_delta', { text: `保存已确认草图失败，尚未开工，请重试确认：${error instanceof Error ? error.message : String(error)}` }))
+    return true
+  }
   await enterDesktopLineFromPending(pending)
   return true
 }

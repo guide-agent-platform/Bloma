@@ -1002,6 +1002,19 @@ describe('keep-recent 三段式压缩（P1-1，2026-09-08 pi 差距方案）', (
 })
 
 describe('绿灯收口与宽限轮（2026-08-29 turn_limit 线上案例 eb900c57）', () => {
+  it('caps only tool-free wrap-up output while keeping the coding budget intact', async () => {
+    const budgets: number[] = []
+    const echo = tool('echo', () => ({ output: 'ok' }))
+    const query: SDKQuery = async function* (_prompt, options) {
+      budgets.push(options.maxTokens!)
+      if (budgets.length === 1) yield toolUseMessage('one', 'echo')
+      else yield textMessage('已完成。')
+      yield { type: 'result', subtype: 'success' }
+    }
+    const result = await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 1, maxTokens: 131072 }))
+    expect(budgets).toEqual([131072, 4096])
+    expect(result.status).toBe('completed')
+  })
   const originalPromaHome = process.env.PROMA_HOME
 
   beforeEach(() => {

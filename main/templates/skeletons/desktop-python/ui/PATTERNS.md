@@ -1,10 +1,24 @@
-# webui 组件用法（PAT TERNS——实现阶段的唯一视觉真相源）
+# webui 组件用法（按已确认草图布局组装）
 
 > 约定：**不写新 CSS 就不写**——先用下面的组件拼；确实缺组件再在 `kit.css` 末尾加 `.w-` 前缀类。
 > 颜色/间距/字号一律 `var(--*)`（见 `tokens.css`），禁止裸值与行内样式（渐变头像除外）。
 > 全部资产本地引用（`kit.css`/`bridge.js`），**禁 CDN、禁外链字体、禁 npm/构建步骤**。
 
-## 状态反馈（UX 契约状态机的唯一呈现位）
+## 桥返回值与数据
+
+Api 可返回原始数组/对象，也可返回 `{ok, data}`；`App.call` 保留包裹，并将对象 data 的字段兼容映射到顶层。业务代码应明确读取并校验返回结构，禁止用空数组或零合计掩盖协议错误：
+
+```js
+const response = await App.call("list_records");
+if (!response.ok) throw new Error(response.error || "加载失败");
+const payload = response.data;
+if (!payload || !Array.isArray(payload.records) || !payload.summary) throw new Error("返回数据格式不正确");
+App.renderList(document.getElementById("side-list"), payload.records, {name:"name"});
+```
+
+记录持久化使用项目根 `record_store.py` 的 `JsonRecordStore`。在 `update` 的副本上新增/修改/删除；落盘失败不会改变内存，损坏文件会拒绝读写而保留原文件。按业务声明 `required_keys` 与 `validator`，不要另写“读取失败就空表”的逻辑。相同内容可以是两笔真实记录；防重复点击不应擅自变成禁止重复业务内容。
+
+## 状态反馈示例
 
 ```js
 App.show("running", "正在保存…");                       // 执行中（转圈）

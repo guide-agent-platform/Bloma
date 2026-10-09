@@ -66,8 +66,13 @@ import { activeSessions, backgroundRuns, releaseProjectRun, sessionMessageQueue 
 import { streamPublisher } from './sdk-glue'
 import { runAgent } from './agent-dispatch'
 import { makeEvent, persistTerminalMessage } from './persistence'
+import { cancelPendingReceipts } from '../../platform/attachments/send-inbox'
 
 export async function cancelAgent(input: AgentCancelInput): Promise<AgentCancelResult> {
+  cancelPendingReceipts(input.project_id, input.session_id)
+  sessionMessageQueue.cancelWhere((sessionId, entry) => input.project_id
+    ? (entry.input as AgentSendMessageInput | undefined)?.project_id === input.project_id
+    : sessionId === input.session_id)
   const targets: Array<{ sessionId: string; controller: AbortController; projectId: string; runId: string; publisher: StreamPublisher }> = []
 
   const foreground = activeSessions.get(input.session_id)
