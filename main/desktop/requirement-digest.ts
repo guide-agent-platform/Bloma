@@ -18,10 +18,17 @@ export interface RequirementDigestItem {
   description: string
   /** 优先级（P0/P1/P2；缺省不渲染标签） */
   priority?: string
+  acceptance?: string
+  behavior_assertions?: string[]
+  scope_notes?: string
 }
 
 export interface RequirementDigestInput {
   items: RequirementDigestItem[]
+  positioning?: string
+  constraints?: string[]
+  out_of_scope?: string[]
+  assumptions?: string[]
   /** 单项描述截断上限（默认 140 字符） */
   maxDescriptionChars?: number
   /** 最多输出条数（默认 24；超出以省略行注明） */
@@ -36,14 +43,29 @@ export function renderRequirementsDigest(input: RequirementDigestInput): string 
   const maxItems = input.maxItems ?? 24
   const maxChars = input.maxDescriptionChars ?? 140
   const shown = input.items.slice(0, maxItems)
-  const lines = shown.map((item) => {
+  const lines = shown.flatMap((item) => {
     const description =
       item.description.length > maxChars ? `${item.description.slice(0, maxChars)}…` : item.description
     const sources = item.source_refs?.map(ref => `${ref.attachment_id}@${ref.sha256.slice(0, 12)}:${ref.start_line ?? ''}-${ref.end_line ?? ''}`).join('；')
-    return `- ${item.id}${item.priority ? ` [${item.priority}]` : ''} ${description}${sources ? `（材料来源：${sources}）` : ''}`
+    const assertions = [...new Set((item.behavior_assertions ?? []).map((text) => text.trim()).filter(Boolean))]
+    return [
+      `- ${item.id}${item.priority ? ` [${item.priority}]` : ''} ${description}${sources ? `（材料来源：${sources}）` : ''}`,
+      ...(item.acceptance?.trim() ? [`  验收要点：${item.acceptance.trim()}`] : []),
+      ...assertions.map((assertion) => `  行为断言：${assertion}`),
+      ...(item.scope_notes?.trim() ? [`  本项范围排除：${item.scope_notes.trim()}`] : []),
+    ]
   })
   if (input.items.length > shown.length) {
     lines.push(`- …其余 ${input.items.length - shown.length} 项（略）`)
+  }
+  if (input.positioning?.trim()) lines.unshift(`产品定位：${input.positioning.trim()}`)
+  for (const [heading, entries] of [
+    ['用户约束（必须遵守）', input.constraints],
+    ['范围排除（不得实现）', input.out_of_scope],
+    ['已记录假设（不得冒充用户原话）', input.assumptions],
+  ] as const) {
+    const values = entries?.map((text) => text.trim()).filter(Boolean) ?? []
+    if (values.length) lines.push(`\n【${heading}】`, ...values.map((text) => `- ${text}`))
   }
   return lines.join('\n')
 }
@@ -147,11 +169,21 @@ export function readDesktopRequirementsDigest(projectId: string): string | undef
   try {
     const backplane = readPrdBackplane(projectId)
     const digest = renderRequirementsDigest({
+      positioning: backplane.positioning,
+      constraints: backplane.constraints,
+      out_of_scope: backplane.out_of_scope,
+      assumptions: backplane.assumptions,
+      // 运行契约不得用展示窗口裁剪：全部功能、长描述与验收条件都传给实现者。
+      maxItems: backplane.requirements.length,
+      maxDescriptionChars: Number.MAX_SAFE_INTEGER,
       items: backplane.requirements.map((item) => ({
         id: item.id,
         description: item.description,
         priority: requirementPriority(item),
         source_refs: item.source_refs,
+        acceptance: backplane.acceptance?.[item.id],
+        behavior_assertions: item.behavior_assertions,
+        scope_notes: item.scope_notes,
       })),
     })
     const parts = [digest.trim() ? digest : '', renderUxDigest(backplane.ux) ?? '', renderShapeDigest(backplane.shape) ?? ''].filter(Boolean)

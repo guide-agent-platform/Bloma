@@ -7,6 +7,7 @@ import { materialImageRefs, renderMaterialContext } from '../../platform/attachm
 import { canUseTool } from '../permissions/permission-service'
 import type { ConversationTurn, SDKQuery, ToolDefinition } from '../../orchestration/orchestrator'
 import { prepareTaskWithSkills } from '../../platform/mcp/skill-loader'
+import { appendLoopPromptOverride } from '../prompting/prompt-config'
 import { findProject } from '../../project/project-service' // 白名单既有项（agent/loop→project-service，目录级）；skill 根解析上提至此
 import { prepareRecallBlock } from './session-recall'
 import { renderLearningsSection } from '../../project/learnings-log'
@@ -318,10 +319,10 @@ export function renderCheckpointRecoveryHeader(task: string, snapshot: LoopCheck
     val.last_gwt_failures.length > 0
       ? `- 未闭环失败：${val.last_gwt_failures.slice(0, 5).join('、')}${val.last_gwt_failures.length > 5 ? ' 等' : ''}`
       : '- 未闭环失败：无（上轮 GWT 全过或未测）',
-    `- 验证状态：GWT ${val.gwt_all_passed ? '全过' : val.gwt_runs > 0 ? '有失败' : '未测'}｜API 契约 ${
+    `- 验证状态：GWT ${val.gwt_runs > 0 ? (val.gwt_all_passed ? '全过' : '有失败') : '未测/豁免'}｜API 契约 ${
         val.api_all_passed ? '过/豁免' : val.api_contract_runs > 0 ? '失败' : '未测'
       }｜安全 ${val.security_all_passed ? '过' : '未测'}`,
-    '- 定位有疑问先 read_file/grep 确认现状再编辑；修复验证照常 run_gwt_tests，勿凭旧印象断言已修。',
+    '- 定位有疑问先 read_file/grep 确认现状再编辑；修复后使用当前已装配的验证工具重验，勿凭旧印象断言已修。',
   ]
   return lines.join('\n')
 }
@@ -339,7 +340,7 @@ export function renderCheckpointProjection(snapshot: LoopCheckpointSnapshot): st
     val.last_gwt_failures.length > 0
       ? `- 未闭环失败：${val.last_gwt_failures.slice(0, 5).join('、')}${val.last_gwt_failures.length > 5 ? ' 等' : ''}`
       : '- 未闭环失败：无',
-    `- 验证状态：GWT ${val.gwt_all_passed ? '全过' : val.gwt_runs > 0 ? '有失败' : '未测'}｜API 契约 ${
+    `- 验证状态：GWT ${val.gwt_runs > 0 ? (val.gwt_all_passed ? '全过' : '有失败') : '未测/豁免'}｜API 契约 ${
       val.api_all_passed ? '过/豁免' : val.api_contract_runs > 0 ? '失败' : '未测'
     }｜安全 ${val.security_all_passed ? '过' : '未测'}`,
   ]
@@ -377,8 +378,8 @@ const DEGENERATE_RETRY_FEEDBACK =
  * 该案例第 20 轮测试/扫描已全过，最后 4 轮却继续冗余验证，把「交卷」挤出了 24 轮预算。
  */
 const WRAP_UP_SUFFIX =
-  '\n\n【收口】run_gwt_tests 与 run_security_scan 都已全部通过，任务已经完成。' +
-  '不要再调用任何工具、不要再做任何检查，立即输出最终完成总结。'
+  '\n\n【收口】本轮已装配的功能验证与安全检查通过，工具已停用。' +
+  '请基于实际工具结果输出完成摘要，分别说明已实现、已验证、未验证或受阻项；测试通过不等于全部 GUI 流程或用户需求已验收，不得扩大成功范围。'
 
 /**
  * 宽限收口轮指令：轮次预算耗尽时的最后一口气——工具已全部停用，只给模型一次纯文本
@@ -676,7 +677,7 @@ export function narrationEventsEnabled(): boolean {
 /** B3 守卫1 阈值：连续 N 轮无 write/edit 判只读失速（审计案实测 20 连续只读，6 轮早介入）。 */
 const PROGRESS_READ_ONLY_TURNS = 6
 /** B3 验证类工具集（守卫3：全程零命中且进入后 1/3 轮次→提醒自测）。 */
-const PROGRESS_VERIFICATION_TOOLS = new Set(['run_preview', 'run_gwt_tests', 'run_security_scan', 'run_api_contract_tests', 'run_preflight'])
+const PROGRESS_VERIFICATION_TOOLS = new Set(['run_preview', 'run_gwt_tests', 'run_security_scan', 'run_api_contract_tests', 'run_preflight', 'run_project_script', 'run_project_driver', 'drive_project_app'])
 
 /** 当前工具面里实际注册的验证工具名单（按 PROGRESS_VERIFICATION_TOOLS 过滤，保序）。
  *  web 线拆除（2026-10-01）后多数验证工具已退役，但 agent-loop 是品类无关机制层：
@@ -690,6 +691,7 @@ function normalizeProgressPath(path: string): string {
 }
 
 export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResult> {
+  input = { ...input, system: appendLoopPromptOverride(input.system) }
   if (input.materials?.attachments.length) {
     const materials = renderMaterialContext(input.materials, input.sessionId)
     const images = new Map([...(input.images ?? []), ...materialImageRefs(input.materials)].map(image => [image.imageId, image]))
@@ -862,7 +864,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         unresolved_failures: [...snapshot.validation.last_gwt_failures],
         active_decisions: snapshot.decisions.filter((d) => !d.superseded_by).map((d) => d.text.slice(0, 120)),
         verification: {
-          gwt: snapshot.validation.gwt_all_passed ? '全过' : snapshot.validation.gwt_runs > 0 ? '有失败' : '未测',
+          gwt: snapshot.validation.gwt_runs > 0 ? (snapshot.validation.gwt_all_passed ? '全过' : '有失败') : '未测/豁免',
           api: snapshot.validation.api_all_passed ? '过/豁免' : snapshot.validation.api_contract_runs > 0 ? '失败' : '未测',
           security: snapshot.validation.security_all_passed ? '过' : '未测',
         },
@@ -1333,7 +1335,9 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         }
       }
     }
-    wrapUp = ctx.state.gwt_all_passed && ctx.state.security_all_passed && ctx.state.api_all_passed && (!preflightEnabled() || ctx.state.preflight_passed === true)
+    // GWT 工具缺席时的豁免位不能冒充真实功能验证。桌面会话由阶段宿主验收，
+    // 仅扫描通过不得提前撤走实现/自测/GUI 工具；旧功能验证面保留全绿后收口语义。
+    wrapUp = input.tools.some((tool) => tool.name === 'run_gwt_tests') && ctx.state.gwt_all_passed && ctx.state.security_all_passed && ctx.state.api_all_passed && (!preflightEnabled() || ctx.state.preflight_passed === true)
 
     consecutiveBudgetStallTurns = budgetStallThisTurn ? consecutiveBudgetStallTurns + 1 : 0
     // ---- P2-02：成本硬上限（每轮末检查；opt-in 缺省 0=不限，行为零变化）----

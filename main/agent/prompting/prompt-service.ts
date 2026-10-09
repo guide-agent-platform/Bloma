@@ -2,7 +2,8 @@ import { existsSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { PromptSlotDetail, PromptSlotId, PromptSlotInfo } from '../../../shared/types'
 import { getPromptOverridePath, ensureDir } from '../../../storage/config-paths'
-import { loadPromptOverride } from './prompt-config'
+import { loadPromptOverride, promptOverrideNames } from './prompt-config'
+import { UX_SKETCH_SYSTEM_PROMPT } from './ux-sketch-prompt'
 import { DEFAULT_SYSTEM_PROMPT as PRD_DEFAULT } from '../../guide/prd-engine-llm'
 import { DEFAULT_GUIDE_SYSTEM_PROMPT as GUIDE_DEFAULT } from '../../guide/guide-agent-service'
 import { DEFAULT_SYSTEM_PROMPT as ENRICHER_DEFAULT } from '../../guide/requirement-enricher'
@@ -35,6 +36,13 @@ const PROMPT_SLOTS: PromptSlotDef[] = [
     description: '从对话历史提炼产品定位、功能验收要点、范围外与假设。质量直接决定 PRD 与 GWT 派生。',
     enabled: true,
     getDefault: () => PRD_DEFAULT,
+  },
+  {
+    id: 'sketch-system',
+    label: 'UX 外观草图提示词',
+    description: '根据已确认需求生成 Windows 桌面外观草图（静态 HTML），用于确认界面方向。',
+    enabled: true,
+    getDefault: () => UX_SKETCH_SYSTEM_PROMPT,
   },
   {
     id: 'guide-system',
@@ -73,7 +81,7 @@ function findSlot(promptId: string): PromptSlotDef {
 }
 
 function hasOverride(promptId: string): boolean {
-  return existsSync(getPromptOverridePath(promptId))
+  return loadPromptOverride(promptId) !== null
 }
 
 export function listPromptSlots(): PromptSlotInfo[] {
@@ -115,7 +123,9 @@ export function savePromptSlot(promptId: PromptSlotId, content: string): { saved
 
 export function resetPromptSlot(promptId: PromptSlotId): { reset: true; prompt_id: PromptSlotId } {
   findSlot(promptId)
-  const path = getPromptOverridePath(promptId)
-  if (existsSync(path)) unlinkSync(path)
+  for (const name of promptOverrideNames(promptId)) {
+    const path = getPromptOverridePath(name)
+    if (existsSync(path)) unlinkSync(path)
+  }
   return { reset: true, prompt_id: promptId }
 }

@@ -17,13 +17,28 @@ import { getPromptOverridePath } from '../../../storage/config-paths'
  * mvp-system 迁移改名，默认空、追加于动态 system 之后，背板锚定段不可覆盖）。
 
  */
+/** UX 草图统一使用设置页 sketch-system；兼容过去的手工文件名（最后一项曾被重复加 .md）。 */
+export function promptOverrideNames(name: string): readonly string[] {
+  return name === 'sketch-system' ? ['sketch-system', 'ux-sketch', 'ux-sketch.md'] : [name]
+}
+
 export function loadPromptOverride(name: string): string | null {
-  try {
-    const path = getPromptOverridePath(name)
-    if (!existsSync(path)) return null
-    const content = readFileSync(path, 'utf8').trim()
-    return content.length > 0 ? content : null
-  } catch {
-    return null
+  for (const candidate of promptOverrideNames(name)) {
+    try {
+      const path = getPromptOverridePath(candidate)
+      if (!existsSync(path)) continue
+      const content = readFileSync(path, 'utf8').replace(/^\uFEFF/, '').trim()
+      if (content.length > 0) return content
+    } catch {
+      // 当前候选不可读时继续兼容候选，全部失败再回退内置默认。
+    }
   }
+  return null
+}
+
+/** 通用 loop 每次启动读取一次；追加规则保留项目锚与本阶段通信格式。 */
+export function appendLoopPromptOverride(system: string): string {
+  const override = loadPromptOverride('loop-system')
+  if (!override) return system
+  return `${system}\n\n【自定义追加规则】\n以下是追加偏好；平台权限、已确认需求与本阶段通信格式仍按上文执行。\n${override}`
 }

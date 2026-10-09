@@ -17,6 +17,7 @@ import type { SDKQuery } from '../orchestration/orchestrator'
 import { callLlmForJson } from '../kernel/llm-call'
 import { categoryTemperature } from '../platform/llm/model-resolution'
 import { loadPromptOverride } from '../agent/prompting/prompt-config'
+import { UX_SKETCH_SYSTEM_PROMPT } from '../agent/prompting/ux-sketch-prompt'
 import { findProject } from '../project/project-service'
 import { mintProjectPreviewUrl } from '../delivery/preview-scheme'
 import type { SketchRequirement } from '../coding/sketch-engine'
@@ -28,21 +29,10 @@ const UX_SKETCH_FILENAME = 'ux-sketch.html'
 const UX_SKETCH_TIMEOUT_MS = 240_000
 const UX_SKETCH_ATTEMPTS = 2
 
-const UX_SKETCH_SYSTEM_PROMPT = `你是桌面软件的界面草图工程师。任务：根据需求清单画一张「外观草图」——低保真、纯外观、不可交互的静态 HTML 页面，供用户在开发前确认界面方向。
-
-硬性规则：
-1. 输出一个完整 HTML 文档（<!DOCTYPE html> 开头），单文件、内联 <style>、<meta charset="utf-8">、禁止任何 <script>。
-2. 草图必须模拟 Windows 桌面应用窗口形态：顶部标题栏（左侧应用名、右侧最小化/最大化/关闭按钮示意），下方是主界面布局。
-3. 低保真风格：灰阶为主 + 少量主题色点缀；用线框、占位块、示意文字表达布局，不追求视觉精细。
-4. 每条需求在界面上要有对应区块/控件示意（按钮、输入区、列表等），关键交互用静态示意（如「点击后 → 结果区显示 ×××」的文字标注）。
-5. 页脚固定一行：「外观草图 · 仅供确认方向，最终以实际桌面程序为准」。
-6. 只输出 HTML 本身，不要任何解释文字，不要 Markdown 代码围栏。
-修订模式（给了上一版要点与用户反馈时）：保留未提及的部分，只改用户指出的问题，仍输出完整 HTML 文档。`
-
 const UX_SKETCH_RETRY_FEEDBACK = '上一次输出不是可用的 HTML 文档（可能带了解释文字或代码围栏）。请只输出完整 HTML 文档本身：<!DOCTYPE html> 开头，单文件内联样式，无脚本，无解释，无代码围栏。'
 
 function getSystemPrompt(): string {
-  return (loadPromptOverride('ux-sketch.md') ?? UX_SKETCH_SYSTEM_PROMPT) +
+  return (loadPromptOverride('sketch-system') ?? UX_SKETCH_SYSTEM_PROMPT) +
     '\n示例数据必须自洽：列表数量、筛选范围、合计与示例行对应；不能确定真实数据路径时写「程序的数据目录」，不得编造用户绝对路径。'
 }
 

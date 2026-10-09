@@ -1601,7 +1601,7 @@ describe('W3-D2：收口条件升级为预检通过（BLOMA_PREFLIGHT）', () =>
   it('预检开启：全验证面（含 preflight_passed）置位后才收口停工具；预检未过不收口', async () => {
     // finish 工具把 gwt/security 置 true 但不动 preflight —— 预检开关 on 时不得收口
     const finish = (extraPreflight = false): AgentLoopTool => ({
-      name: 'finish',
+      name: 'run_gwt_tests',
       description: '测试工具 finish',
       input_schema: { type: 'object', properties: {} },
       execute: async (_input, ctx) => {
@@ -1615,7 +1615,7 @@ describe('W3-D2：收口条件升级为预检通过（BLOMA_PREFLIGHT）', () =>
     const calls: Array<{ tools: unknown; system: string }> = []
     const query: SDKQuery = async function* (_prompt, queryOptions) {
       calls.push({ tools: queryOptions.tools, system: String((queryOptions.messages ?? [])[0]?.content ?? '') })
-      yield toolUseMessage(`t${calls.length}`, 'finish')
+      yield toolUseMessage(`t${calls.length}`, 'run_gwt_tests')
       yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
     }
     // on：preflight 未过 → 第二轮仍带工具（不收口）
@@ -1709,8 +1709,8 @@ describe('W6（咨询 D3/D4）：预算层四件', () => {
     expect(result.blocked_report!.candidate_fingerprint).toMatch(/^fp-/)
     expect(result.blocked_report!.unresolved_failures).toEqual([])
     // 如实化预置（2026-10-01 全链路审查 P1）：工具面未装配 run_gwt_tests → gwt 位豁置位置位，
-    // 受阻报告如实显示「全过」（豁免语义）；未装配 security 工具仍显示「未测」（不豁免）。
-    expect(result.blocked_report!.verification).toMatchObject({ gwt: '全过', api: '过/豁免', security: '未测' })
+    // 豁免不是已验证；未跑 GWT 如实显示未测/豁免，安全仍为未测。
+    expect(result.blocked_report!.verification).toMatchObject({ gwt: '未测/豁免', api: '过/豁免', security: '未测' })
     expect(result.blocked_report!.suggested_next).toBeTruthy()
     const jsonl = readSessionJsonl('session-w6-blocked') as Array<{ role: string; content: Array<{ type: string; text?: string }> }>
     const reportLine = jsonl.find((m) => m.role === 'system' && m.content.some((b) => b.text?.includes('[loop-blocked-report]')))
