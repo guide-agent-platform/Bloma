@@ -297,6 +297,7 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
               style={{
                 fontSize: 'var(--font-size-sm)', color: 'var(--color-text-muted)',
                 padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-sm)',
+                border: 'none', background: 'transparent', cursor: 'pointer',
                 transition: 'color var(--transition-fast)',
               }}
             >
@@ -327,6 +328,7 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
             padding: '10px var(--space-5)',
             borderRadius: 'var(--radius-full)',
             background: 'linear-gradient(135deg, var(--color-quick), var(--color-quick-bright))',
+            border: 'none',
             boxShadow: '0 4px 12px -2px rgba(124,58,237,0.4)',
             transition: 'all var(--transition-fast)',
           }}

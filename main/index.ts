@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Notification, screen, session, type MessageBoxOptions, type WebContents } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, screen, session, type MessageBoxOptions, type WebContents } from 'electron'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -154,6 +154,7 @@ async function reconcileInterruptedProjectsAtStartup(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  nativeTheme.themeSource = 'light'
   configureMediaPermissions()
   // bloma-file:// 预览协议（2026-10-05 方案 A）：特权注册须在 ready 前（见模块底部顶层调用），
   // 会话 handler 在 ready 后、窗口创建前安装
