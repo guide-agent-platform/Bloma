@@ -103,6 +103,7 @@ export const IPC_CHANNELS = {
   SPEECH_PREPARE: 'speech:prepare',
   SPEECH_CANCEL_PREPARATION: 'speech:cancel-preparation',
   SPEECH_TRANSCRIBE: 'speech:transcribe',
+  NOTIFICATION_SPEAK: 'notification:speak',
 } as const
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
@@ -115,6 +116,8 @@ export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
 export interface RequestEnvelope {
   request_id: string
 }
+
+export interface NotificationSpeakInput extends RequestEnvelope { text: string; volume: number }
 
 export type ApiResult<T> =
   | { ok: true; request_id: string; data: T }
@@ -1701,6 +1704,7 @@ export type ElectronAPI = {
     save(input: PastedImageSaveInput): Promise<ApiResult<PastedImageSaveResult>>
   }
   speech: {
+    speakNotification(input: NotificationSpeakInput): Promise<ApiResult<{ spoken: boolean }>>
     /** 就绪快照（轮询制；准备进度/失败分类随轮询回传） */
     catalog(input: RequestEnvelope): Promise<ApiResult<SpeechCatalogResult>>
     /** 启动/加入模型准备（幂等 join；首次下载 239MB INT8） */

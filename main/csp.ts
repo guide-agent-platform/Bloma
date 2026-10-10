@@ -15,6 +15,7 @@ export const MAIN_FRAME_CSP = [
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
+  "media-src 'self' data:",
   "font-src 'self'",
   "connect-src 'self' http://localhost:* https://api.anthropic.com",
   "frame-src 'self' http://localhost:* http://127.0.0.1:* bloma-file:",

@@ -6,6 +6,9 @@ import { MAIN_FRAME_CSP, shouldInjectMainFrameCsp } from '../../main/csp'
  * 抽出 main/csp.ts 后，无需启动 Electron 即可断言收窄规则。
  */
 describe('main CSP 收窄（问题 B-2）', () => {
+  it('提示音允许本地文件与 Vite 内联音频，不允许外部音频源', () => {
+    expect(MAIN_FRAME_CSP.match(/media-src[^;]*/)?.[0]).toBe("media-src 'self' data:")
+  })
   it('仅对 mainFrame 注入主窗 CSP，子帧 / 脚本 / 样式 / XHR 一律放过', () => {
     expect(shouldInjectMainFrameCsp('mainFrame')).toBe(true)
     expect(shouldInjectMainFrameCsp('subFrame')).toBe(false)

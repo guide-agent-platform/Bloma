@@ -42,6 +42,15 @@ beforeEach(() => {
 })
 
 describe('语音 IPC 契约', () => {
+  it('NOTIFICATION_SPEAK：非法入参经真实注册入口拒绝，并保留 request_id', async () => {
+    const speak = captureHandlers().get(IPC_CHANNELS.NOTIFICATION_SPEAK)!
+    const result = await speak({}, { request_id: 'req-speak', text: '你好', volume: 9 })
+    expect(result.ok).toBe(false)
+    expect(result.request_id).toBe('req-speak')
+    expect(result.error?.code).toBe('VALIDATION_ERROR')
+    expect(result.error?.message).toContain('音量')
+    expect((await speak({}, { text: '你好', volume: 0.5 })).error?.message).toContain('request_id')
+  })
   it('SPEECH_CATALOG：快照字段映射 snake_case（就绪 + 准备进度 + 失败分类）', async () => {
     serviceMock.catalog.mockReturnValue({
       ready: true,

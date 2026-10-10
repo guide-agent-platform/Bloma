@@ -47,6 +47,7 @@ async function createMainWindow(): Promise<void> {
     autoHideMenuBar: true,
     title: 'Bloma',
     webPreferences: {
+      autoplayPolicy: 'no-user-gesture-required',
       preload: resolvePreloadPath(),
       contextIsolation: true,
       nodeIntegration: false,

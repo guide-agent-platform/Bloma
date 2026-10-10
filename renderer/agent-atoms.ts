@@ -400,7 +400,8 @@ export function setupGlobalAgentListeners(): () => void {
   const unsubscribeStream = api.onStreamEvent((event) => {
     // 通知声音路由（2026-10-06 体验批 A）：确认门提示音 + 真完成播报——先于各分支
     // 消费，只读事件不改状态；设置与播报开关见 lib/notification-sound.ts。
-    routeEventForSound(event, store.get(currentProjectAtom)?.name)
+    const soundProject = store.get(currentProjectAtom)
+    routeEventForSound(event, soundProject?.project_id === event.project_id ? soundProject?.name : undefined)
     // queued_started（message-queue 2026-08-27）：排队消息开始派发——追加「正在处理」
     // 提示，视觉上翻转「⏳ 已排队」（旧提示保留为历史记录）
     // usage_summary（usage-guard 渲染层 2026-08-28）：同会话累加渠道/估算用量

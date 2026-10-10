@@ -68,6 +68,7 @@ import type {
   RequestEnvelope,
   PastedImageSaveInput,
   SpeechTranscribeInput,
+  NotificationSpeakInput,
   SandboxRunInput,
   SandboxStopInput,
   SnapshotCreateInput,
@@ -100,6 +101,7 @@ const electronAPI: ElectronAPI = {
     save: (input: PastedImageSaveInput) => ipcRenderer.invoke(IPC_CHANNELS.PASTED_IMAGE_SAVE, input),
   },
   speech: {
+    speakNotification: (input: NotificationSpeakInput) => ipcRenderer.invoke(IPC_CHANNELS.NOTIFICATION_SPEAK, input),
     catalog: (input: RequestEnvelope) => ipcRenderer.invoke(IPC_CHANNELS.SPEECH_CATALOG, input),
     prepare: (input: RequestEnvelope) => ipcRenderer.invoke(IPC_CHANNELS.SPEECH_PREPARE, input),
     cancelPreparation: (input: RequestEnvelope) => ipcRenderer.invoke(IPC_CHANNELS.SPEECH_CANCEL_PREPARATION, input),

@@ -53,6 +53,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
       <div
         style={{
           maxWidth: 720,
+          width: '100%', boxSizing: 'border-box',
           margin: '0 auto',
           padding: 'var(--space-6) var(--space-5) var(--space-4)',
         }}
