@@ -1211,6 +1211,8 @@ export interface Project {
   project_id: string
   workspace_slug: string
   name: string
+  /** 缺省表示存量项目、来源未知；消息派生名可被 PRD 模型完善，模型/手动名称保持稳定。 */
+  name_source?: 'message' | 'model' | 'user'
   mode: ProjectMode
   template_type: TemplateType
   status: 'active' | 'completed' | 'abandoned' | 'archived'
@@ -1235,7 +1237,7 @@ export interface Project {
   repair_ledger?: RepairLedgerEntry[]
   /** 被阻塞的编程操作（A2 resume 闭环）：非阻塞态为 undefined */
   blocked_action?: 'mvp_repair' | 'test_repair' | 'judge_return' | 'security_repair'
-  /** 需求确认后已自动命名过（autoNameProject）：此后不再覆盖，保住用户手动改名 */
+  /** 名称已定（模型自动命名或用户手动改名）；后续 PRD 重跑不得自动覆盖。 */
   auto_named?: boolean
   /** 最近一次草图的生成来源（§4.2 质量门：仅 'llm' 草图可升格 UX 契约） */
   sketch_source?: 'llm' | 'template'

@@ -18,7 +18,7 @@ import {
 } from '../model/prd-backplane'
 import { renderDocumentSectionSpec } from './prd-sections'
 import { categoryTemperature } from '../platform/llm/model-resolution'
-import { updateProject } from '../project/project-service'
+import { sanitizeGeneratedProjectName, updateProject } from '../project/project-service'
 import { recordDecision } from '../project/decision-log'
 
 /**
@@ -43,6 +43,8 @@ import { recordDecision } from '../project/decision-log'
  */
 
 export interface GeneratePrdLlmInput {
+  /** 已定名称（用户手动命名或已完成自动命名），PRD 重跑沿用它。 */
+  preferred_name?: string
   material_text?: string
   project_id: string
   session_id: string
@@ -176,7 +178,8 @@ function getSystemPrompt(): string {
   // Phase 2 M1：开关 off → base 原样返回（字节级现状）；on → 追加 CAP 产出指令
   // （附在末尾不侵入既有结构，与外置覆盖叠加友好）。
   // Phase 7 U1 H2：同模式追加 key_tasks 产出指令（两开关独立，互不干扰字节级现状）。
-  let prompt = base
+  // 独立追加，外置旧覆盖也获得命名契约，不要求用户手动更新覆盖文件。
+  let prompt = `${base}\n\n【产品命名】在同一个 JSON 对象中增加 name 字段：根据主任务给产品一个简短、自然的名称（建议 2~12 字，不是截取用户原话，不带“帮我做一个”、宣传语、解释或文件扩展名）。用户明确给出的名字优先；任务输入指定“已定名称”时原样沿用。document 的一级标题使用同一名称。命名不新增产品功能。`
   if (capContractEnabled()) prompt = `${prompt}\n\n${CAP_PROMPT_ADDENDUM}`
   if (keyTasksEnabled()) prompt = `${prompt}\n\n${KEY_TASKS_PROMPT_ADDENDUM}`
   return prompt
@@ -229,7 +232,9 @@ export async function generatePrdLlm(input: GeneratePrdLlmInput): Promise<PrdBac
     const materials = sessionMaterials(input.project_id, input.session_id)
     const materialText = input.material_text ?? renderMaterialContext(materials, input.session_id, true)
     const sourceInstruction = materials.attachments.length ? '材料来源输出新增 source_refs：{"F-001":[{"attachment_id":"清单中的 id","sha256":"清单中的哈希","start_line":1,"end_line":3}]}。仅把对应需求实际依赖的已读文本范围作为来源；未读范围不引用，不编造来源。' : ''
-    const prompt = [buildPrompt(items, conversation, input.template_type), fewShot, materialText, sourceInstruction].filter(Boolean).join('\n\n')
+    const prompt = [buildPrompt(items, conversation, input.template_type), fewShot, materialText, sourceInstruction,
+      input.preferred_name ? `【已定名称】${JSON.stringify(input.preferred_name)}；name 字段与 document 一级标题沿用此名称。` : '',
+    ].filter(Boolean).join('\n\n')
     // 2026-09-03 R2：调用循环收敛至 kernel/llm-call 标准件（stream/parse/带反馈重试/abort/超时一处实现）
     const parsed = await callLlmForJson({
       systemPrompt: getSystemPrompt(),
@@ -314,7 +319,7 @@ export function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequire
       })
   return {
     project_id: projectId,
-    name: '', // name 由调用方回填（findProject），此处占位
+    name: parsed.name ?? '', // 候选名；pipeline 按项目命名来源与最新存储状态裁决。
     positioning,
     prd_document: prdDocument,
     requirements: items,
@@ -349,6 +354,7 @@ export function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequire
 }
 
 interface ParsedPrd {
+  name?: string
   source_refs?: Record<string, unknown>
   document: string
   positioning: string
@@ -532,6 +538,7 @@ function parsePrdJson(text: string): ParsedPrd | undefined {
 
   return {
     positioning: typeof parsed.positioning === 'string' ? parsed.positioning : '',
+    name: sanitizeGeneratedProjectName(parsed.name),
     ...(isRecord(parsed.source_refs) ? { source_refs: parsed.source_refs } : {}),
     document: typeof parsed.document === 'string' ? parsed.document : '',
     ...(form ? { form } : {}),

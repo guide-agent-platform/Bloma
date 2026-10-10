@@ -69,10 +69,11 @@ export function maybeRenameUnnamedProject(projectId: string, message: string | u
   try {
     const project = findProject(projectId)
     if (!project) return false
+    if (project.auto_named || project.name_source === 'user') return false
     if (project.name && project.name !== '未命名项目') return false
     const derived = deriveProjectDisplayName(message)
     if (!derived) return false
-    updateProject(projectId, { name: derived })
+    updateProject(projectId, { name: derived, name_source: 'message' })
     return true
   } catch {
     // 改名失败不阻断消息链路（陷阱 46：runAgent 分流处防御）
@@ -91,6 +92,7 @@ export function createProject(input: ProjectCreateInput): Project {
     project_id: projectId,
     workspace_slug: WORKSPACE_SLUG,
     name: deriveProjectDisplayName(input.initial_message) ?? input.initial_message?.slice(0, 32) ?? '未命名项目',
+    name_source: 'message',
     mode: input.mode,
     // 注入点①（周计划 §6 / PRD 12.2）：关键词自动推断，对用户透明；无命中兜底个人小工具（宽松级误判代价最小）
     template_type: 'desktop_tool',
@@ -168,9 +170,39 @@ export function unarchiveProject(input: ProjectUnarchiveInput): Project {
 export function renameProject(input: ProjectRenameInput): Project {
   const name = (input.name ?? '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '').trim().slice(0, 32)
   if (name.length === 0) throw new Error('VALIDATION_ERROR: name must not be empty')
-  const project = updateProject(input.project_id, { name })
+  const project = updateProject(input.project_id, { name, name_source: 'user', auto_named: true })
   appendProjectEvent(project, 'project_renamed', input)
   return project
+}
+
+/**
+ * 模型名称清洗参考本地 Proma bf3e98c title-generation.ts 的引号/长度归一。
+ * Bloma 使用 PRD 同轮 JSON 的 name 字段，拒绝多行说明，不另发标题请求。
+ */
+export function sanitizeGeneratedProjectName(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const text = value.trim()
+  if (/[\r\n]/.test(text)) return undefined
+  const name = text.replace(/^["'“”‘’「《]+|["'“”‘’」》]+$/g, '')
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '').trim()
+  // 过长通常是说明段落，不能靠截断把它冒充产品名。
+  return name.length >= 2 && Array.from(name).length <= 32 && name !== '未命名项目' ? name : undefined
+}
+
+/** 只完善新项目的消息派生名；提交时重读，保护手动改名、取消/已生成项目与旧来源未知名称。 */
+export function applyGeneratedProjectName(projectId: string, expectedName: string, candidate: unknown): boolean {
+  const name = sanitizeGeneratedProjectName(candidate)
+  if (!name) return false
+  try {
+    const project = findProject(projectId)
+    if (project.name !== expectedName || project.auto_named || project.name_source === 'user') return false
+    if (project.name_source !== 'message' && project.name !== '未命名项目') return false
+    if (project.status !== 'active' || (project.desktop_phase && project.desktop_phase !== 'requirements') || existsSync(join(project.root_path, 'LAUNCH.json'))) return false
+    updateProject(projectId, { name, name_source: 'model', auto_named: true })
+    return true
+  } catch {
+    return false // 命名失败不阻断需求/生成主链。
+  }
 }
 
 /**

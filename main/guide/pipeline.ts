@@ -17,7 +17,7 @@ import { sessionMaterials, renderMaterialContext, providedPages } from '../platf
  */
 
 import { buildPrdBackplane, readPrdBackplane } from '../project/document-engine'
-import { findProject } from '../project/project-service'
+import { applyGeneratedProjectName, findProject } from '../project/project-service'
 import { resolveChannelEnv } from '../platform/llm/runtime-fallback'
 import { backplaneTemplateMeta, type PrdBackplane, type SketchRequirement } from '../coding/sketch-engine'
 import { generatePrdLlm, readConversation } from './prd-engine-llm'
@@ -121,6 +121,8 @@ export async function resolvePrdBackplane(
   // 并行：PRD 元数据提取 + 功能项加厚互不依赖，共用同一渠道/env/对话
   const [llm, enriched] = await Promise.all([
     generatePrdLlm({
+      ...(project.auto_named || project.name_source === 'user' || (project.name_source === undefined && project.name !== '未命名项目')
+        ? { preferred_name: project.name } : {}),
       material_text: materialText,
       project_id: input.project_id,
       session_id: input.session_id,
@@ -145,6 +147,7 @@ export async function resolvePrdBackplane(
   ])
 
   const base = llm ?? template()
+  if (llm?.name && !input.signal?.aborted) applyGeneratedProjectName(input.project_id, project.name, llm.name)
   if (!llm) noteFallback('llm_failed')
   // 权威 id 集：冻结清单（llm 失败回退 template() 时其 requirements 可能与冻结清单
   // 不一致——template() 会把默认存在性断言/story 物化，以原始冻结清单为准保证加厚不丢）
@@ -185,9 +188,12 @@ export async function resolvePrdBackplane(
   // 防止确定性门捕获的约束/范围声明在 prd.json 里丢失。
   // template_meta（注入点①）：LLM 背板不带模板元信息，按项目 template_type 兜底写入；
   // 若 base 已携带（重跑/迭代路径保留旧值）则原样保留。
+  const currentName = findProject(input.project_id).name
   return {
     ...base,
-    name: project.name,
+    name: currentName,
+    // 请求期间用户可能手动改名；仅同步正式标题，不改正文需求或历史产物。
+    ...(base.prd_document ? { prd_document: base.prd_document.replace(/^#\s+PRD\s*[:：][^\r\n]*/m, () => `# PRD：${currentName}`) } : {}),
     requirements: enrichedRequirements,
     out_of_scope: [...new Set([...(llm?.out_of_scope ?? []), ...(project.scope_exclusions ?? [])])],
     ...(project.constraints?.length ? { constraints: [...new Set([...(llm?.constraints ?? []), ...project.constraints])] } : {}),
