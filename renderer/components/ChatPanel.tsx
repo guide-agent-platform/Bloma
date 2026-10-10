@@ -14,7 +14,8 @@ import type { DelegationView } from '../agent-atoms'
 import { ProcessBlockGroup, type ProcessItem } from './ProcessBlockGroup'
 import { ThinkingIndicator, type ThinkingPhase } from './ThinkingIndicator'
 import { Markdown } from './Markdown'
-import { MessageSquare, IconAlertTriangle } from './icons'
+import { CompactReply } from './CompactReply'
+import { MessageSquare, IconAlertTriangle, IconSettings, Image, Copy, Conversation, Sparkles } from './icons'
 import {
   activeAgentSessionIdAtom,
   agentMessagesFamily,
@@ -35,6 +36,7 @@ import { DESKTOP_PHASE_ACTION_LABELS } from '../lib/desktop-stages'
 import { mapDesktopPhaseToSteps } from './ProgressCard'
 
 export interface ChatPanelProps {
+  presentation?: 'full' | 'theatre'
   /** 向导 Agent 发出的卡片选项（由上层从 AgentEvent 中解析） */
   cardOptions?: CardOption[]
   /** 决策卡标题（U7：让渡偏差描述 / 澄清方向等） */
@@ -100,6 +102,7 @@ const glassTile: React.CSSProperties = {
 }
 
 export const ChatPanel: React.FC<ChatPanelProps> = ({
+  presentation = 'full',
   cardOptions,
   decisionTitle,
   decisionBody,
@@ -115,6 +118,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   onForkFromMessage,
 }) => {
   const activeSessionId = useAtomValue(activeAgentSessionIdAtom)
+  const [historyExpanded, setHistoryExpanded] = React.useState(false)
+  React.useEffect(() => setHistoryExpanded(false), [activeSessionId])
+  const compact = presentation === 'theatre' && !historyExpanded
   const sessionUsage = useAtomValue(sessionUsageFamily(activeSessionId ?? ''))
   const mode = useAtomValue(projectModeAtom)
   const hasActiveStream = useAtomValue(hasActiveStreamAtom)
@@ -150,6 +156,18 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const streamState = useAtomValue(
     activeSessionId ? agentStreamStateFamily(activeSessionId) : nullStreamFallback,
   )
+  const visibleMessages = React.useMemo(() => {
+    if (!compact) return messages
+    let lastUser = -1
+    let lastAssistant = -1
+    let lastWelcome = -1
+    messages.forEach((message, index) => {
+      if (message.role === 'user' && message.content.some(block => block.type === 'text' && block.text?.trim())) lastUser = index
+      if (message.role === 'assistant' && !message.content.some(block => block.type === 'tool_use')) lastAssistant = index
+      if (message.role === 'system' && message.content.some(block => block.type === 'text' && block.text?.startsWith('[welcome-hint]'))) lastWelcome = index
+    })
+    return messages.filter((message, index) => index >= lastUser && (message.role !== 'assistant' || (index === lastAssistant && !(lastUser < 0 && lastWelcome > lastAssistant)) || message.content.some(block => block.type === 'tool_use')))
+  }, [messages, compact])
 
   const messagesEndRef = React.useRef<HTMLDivElement>(null)
   const streamingContent = hasActiveStream && streamState ? streamState.content : ''
@@ -188,8 +206,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   }, [messages])
 
   React.useEffect(() => {
+    if (compact) { if (messagesEndRef.current?.parentElement) messagesEndRef.current.parentElement.scrollTop = 0; return }
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, streamingContent, cardOptions])
+  }, [messages, streamingContent, cardOptions, compact])
 
   // 本地流计时兜底：App 未传 waitStartTime 时以流启动时刻起算，保证 WaitingFeedback
   // 三级递进在纯流式等待下也生效（此前挂在恒 false 的 isWaiting 上，组件从未显示过）。
@@ -246,27 +265,27 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   )
 
   return (
-    <div data-ai-id="chat-panel" style={glassTile}>
+    <div data-ai-id="chat-panel" className={presentation === 'theatre' ? 'theatre-chat' : undefined} data-history-expanded={historyExpanded} style={presentation === 'theatre' ? undefined : glassTile}>
       {/* 磁贴头 */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '12px 14px',
+          padding: presentation === 'theatre' ? '8px 12px' : '12px 14px',
           flexShrink: 0,
-          borderBottom: '1px solid var(--color-border)',
+          borderBottom: presentation === 'theatre' ? 'none' : '1px solid var(--color-border)',
         }}
       >
-        <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--color-text)' }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--color-quick)', display: 'inline-block' }} />
-          对话
+        <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: presentation === 'theatre' ? 12 : 'var(--font-size-sm)', fontWeight: 500, color: 'var(--color-text)' }}>
+          {presentation === 'theatre' ? <span className="theatre-assistant-mark"><Sparkles size={14} /></span> : <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--theatre-accent, var(--color-quick))', display: 'inline-block' }} />}
+          {presentation === 'theatre' ? 'Bloma' : '对话'}
         </span>
-        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>Enter 发送</span>
+        {presentation === 'theatre' ? <button type="button" className="theatre-tool" data-ai-id="conversation-toggle" aria-expanded={historyExpanded} onClick={() => setHistoryExpanded(previous => !previous)}><Conversation size={14} />{historyExpanded ? '收起完整对话' : `完整对话${messages.length ? ` · ${messages.length}` : ''}`}</button> : <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>Enter 发送</span>}
       </div>
 
       {/* 消息列表 */}
-      <div
+      <div className={presentation === 'theatre' ? 'theatre-messages' : undefined}
         style={{
           flex: 1,
           overflowY: 'auto',
@@ -333,7 +352,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             )}
 
             {/* 历史回放：相邻的工具轮消息合并成同一个「执行过程」折叠组（对齐 Proma turn 分组） */}
-            <HistoryMessages messages={messages} mode={mode} toolNamesById={toolNamesById} onOpenSettings={onOpenSettings} onForkFromMessage={handleForkFromMessage} />
+            <HistoryMessages messages={visibleMessages} mode={mode} compact={compact} toolNamesById={toolNamesById} onOpenSettings={onOpenSettings} onForkFromMessage={handleForkFromMessage} />
 
             {/* message-queue UI 收尾（P1-①）：排队中的消息灰化回显，确认不丢 */}
 
@@ -371,6 +390,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                 message={{ role: 'assistant', content: [{ type: 'text', text: streamingContent }], timestamp: Date.now() }}
                 mode={mode}
                 isStreaming
+                compact={compact}
               />
             )}
 
@@ -478,11 +498,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         {activeSessionId && <SteerStatusBar sessionId={activeSessionId} onStopGeneration={onStopGeneration} />}
         {activeSessionId && <MessageReceipts key={activeSessionId} sessionId={activeSessionId} />}
 
-        <div ref={messagesEndRef} />
+        <div ref={messagesEndRef} style={compact ? { display: 'none' } : undefined} />
       </div>
 
       <MessageComposer onSendMessage={onSendMessage} busy={busy} onStopGeneration={onStopGeneration} onOpenSettings={onOpenSettings}
-        usage={sessionUsage ? `本会话已用 ≈${(sessionUsage.inputTokens + sessionUsage.outputTokens).toLocaleString()} tokens${sessionUsage.turnsWithUsage === 0 ? '（估算）' : ''}` : undefined} />
+        placeholder={compact ? '告诉我，还想改些什么…' : undefined}
+        usage={!compact && sessionUsage ? `本会话已用 ≈${(sessionUsage.inputTokens + sessionUsage.outputTokens).toLocaleString()} tokens${sessionUsage.turnsWithUsage === 0 ? '（估算）' : ''}` : undefined} />
 
     </div>
   )
@@ -617,7 +638,8 @@ const HistoryMessages: React.FC<{
   toolNamesById: Record<string, string>
   onOpenSettings?: () => void
   onForkFromMessage?: (message: AgentMessage) => void
-}> = ({ messages, mode, toolNamesById, onOpenSettings, onForkFromMessage }) => {
+  compact?: boolean
+}> = ({ messages, mode, toolNamesById, onOpenSettings, onForkFromMessage, compact }) => {
   const nodes: React.ReactNode[] = []
   let buffer: AgentMessage[] = []
   const flush = (): void => {
@@ -653,7 +675,7 @@ const HistoryMessages: React.FC<{
     }
     flush()
     nodes.push(
-      <MessageBubble key={index} message={message} mode={mode} toolNamesById={toolNamesById} onOpenSettings={onOpenSettings} onForkFromMessage={onForkFromMessage} />,
+      <MessageBubble key={index} message={message} mode={mode} compact={compact} toolNamesById={toolNamesById} onOpenSettings={onOpenSettings} onForkFromMessage={onForkFromMessage} />,
     )
   })
   flush()
@@ -812,6 +834,7 @@ const SteerStatusBar: React.FC<SteerStatusBarProps> = ({ sessionId, onStopGenera
    ========================================================================= */
 
 interface MessageBubbleProps {
+  compact?: boolean
   message: AgentMessage
   mode: ProjectMode | null
   isStreaming?: boolean
@@ -833,7 +856,7 @@ const userBubbleShadow = (mode: ProjectMode | null): string =>
     ? '0 4px 12px -3px rgba(14,116,144,0.35)'
     : '0 4px 12px -3px rgba(124,58,237,0.35)'
 
-const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreaming = false, toolNamesById, onOpenSettings, onForkFromMessage }) => {
+const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreaming = false, toolNamesById, onOpenSettings, onForkFromMessage, compact = false }) => {
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
 
@@ -918,27 +941,29 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
       const hint = text.replace(/^\[welcome-hint(?::done)?\]\s*/, '')
       return (
         <div
+          data-ai-id="welcome-hint"
           style={{
-            alignSelf: 'center',
-            maxWidth: '92%',
-            width: 'fit-content',
-            padding: 'var(--space-4)',
-            background: 'var(--glass-bg-soft)',
-            borderLeft: welcomeDone ? '3px solid #10b981' : '3px solid var(--color-quick, #7c3aed)',
+            alignSelf: compact ? 'stretch' : 'center',
+            maxWidth: compact ? '100%' : '92%',
+            width: compact ? '100%' : 'fit-content',
+            padding: compact ? '2px 0' : 'var(--space-4)',
+            background: compact ? 'transparent' : 'var(--glass-bg-soft)',
+            borderLeft: compact ? 'none' : welcomeDone ? '3px solid #10b981' : '3px solid var(--color-quick, #7c3aed)',
             borderRadius: 'var(--radius-md)',
             fontSize: 'var(--font-size-sm)',
             color: 'var(--color-text)',
             animation: 'none',
           }}
         >
-          <div>{hint}</div>
+          <div>{compact ? hint.split('。')[0] + '。' : hint}</div>
+          {compact && <details><summary style={{fontSize:12,cursor:'pointer',marginTop:4}}>连接说明</summary><div>{hint.split('。').slice(1).join('。')}</div></details>}
           {onOpenSettings && !welcomeDone && (
             <button
               type="button"
               onClick={onOpenSettings}
               style={{
                 marginTop: 'var(--space-3)',
-                padding: 'var(--space-2) var(--space-4)',
+                padding: compact ? '6px 12px' : 'var(--space-2) var(--space-4)',
                 background: 'linear-gradient(135deg, var(--color-quick, #7c3aed), var(--color-quick-bright, #9f67ff))',
                 color: 'var(--white, #fff)',
                 border: 'none',
@@ -948,12 +973,12 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
                 cursor: 'pointer',
               }}
             >
-              ⚙️ 去连接 AI 模型
+              <IconSettings size={14} /> 去连接 AI 模型
             </button>
           )}
-          <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-2)' }}>
+          {!compact && <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: 'var(--space-2)' }}>
             也可以随时点右上角 ⚙️
-          </p>
+          </p>}
         </div>
       )
     }
@@ -962,15 +987,16 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
     return (
       <div
         style={{
-          alignSelf: 'center',
-          padding: 'var(--space-2) var(--space-4)',
-          background: 'var(--glass-bg-soft)',
-          border: '1px dashed var(--color-border)',
-          borderRadius: 'var(--radius-full)',
+          alignSelf: compact ? 'stretch' : 'center',
+          padding: compact ? '2px 0' : 'var(--space-2) var(--space-4)',
+          background: compact ? 'transparent' : 'var(--glass-bg-soft)',
+          border: compact ? 'none' : '1px dashed var(--color-border)',
+          borderRadius: compact ? 0 : 'var(--radius-full)',
           fontSize: 'var(--font-size-xs)',
           color: 'var(--color-text-muted)',
-          maxWidth: '90%',
-          textAlign: 'center',
+          maxWidth: compact ? '100%' : '90%',
+          width: compact ? '100%' : undefined,
+          textAlign: compact ? 'left' : 'center',
           animation: 'none',
         }}
       >
@@ -981,11 +1007,14 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
 
   return (
     <div
+      data-ai-id="message-bubble"
+      data-role={message.role}
       style={{
         display: 'flex',
         flexDirection: 'column',
         alignItems: isUser ? 'flex-end' : 'flex-start',
-        maxWidth: '84%',
+        maxWidth: compact ? '100%' : '84%',
+        width: compact && !isUser ? '100%' : undefined,
         alignSelf: isUser ? 'flex-end' : 'flex-start',
         animation: 'none',
       }}
@@ -993,13 +1022,13 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
       <div
         style={{
           maxWidth: '100%',
-          padding: '10px 12px',
+          padding: compact && !isUser ? '2px 0' : '10px 12px',
           borderRadius: 12,
           fontSize: 'var(--font-size-sm)',
           lineHeight: 1.5,
-          color: isUser ? 'var(--white)' : 'var(--color-text)',
-          background: isUser ? userBubbleBg(mode) : 'rgba(124,58,237,0.035)',
-          border: isUser ? 'none' : '1px solid var(--color-border)',
+          color: isUser ? 'var(--theatre-on-accent, var(--white))' : 'var(--color-text)',
+          background: isUser ? userBubbleBg(mode) : compact ? 'transparent' : 'var(--glass-bg-soft)',
+          border: isUser || compact ? 'none' : '1px solid var(--color-border)',
           boxShadow: 'none',
           borderBottomRightRadius: isUser ? 'var(--radius-sm)' : undefined,
           borderBottomLeftRadius: !isUser ? 'var(--radius-sm)' : undefined,
@@ -1009,7 +1038,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
         }}
       >
         {/* assistant 旁白/完成总结渲染 Markdown（模型输出天然带 md）；user 输入保持纯文本语义 */}
-        {isUser || !text ? text || (isStreaming ? '…' : '') : <Markdown text={text} />}
+        {isUser || !text ? text || (isStreaming ? '…' : '') : compact ? <CompactReply text={text} /> : <Markdown text={text} />}
         {textAttachments?.length ? <MessageAttachments attachments={textAttachments} /> : null}
         {imageBlocks.length > 0 && (
           <span
@@ -1025,7 +1054,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
               fontSize: 'var(--font-size-xs)',
             }}
           >
-            🖼️ 图片 ×{imageBlocks.length}
+            <Image size={13} /> 图片 ×{imageBlocks.length}
           </span>
         )}
         {/* F4（r82）：复制入口——0 基础对照 Claude/GPT 基线；clipboard 可选链防御（非安全上下文降级） */}
@@ -1037,7 +1066,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
             aria-label="复制"
             title="复制"
             style={{
-              marginTop: 'var(--space-2)',
+              marginTop: compact ? 2 : 'var(--space-2)',
               alignSelf: 'flex-end',
               background: 'transparent',
               border: 'none',
@@ -1048,7 +1077,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
               borderRadius: 'var(--radius-sm)',
             }}
           >
-            复制
+            {compact ? <Copy size={13} /> : '复制'}
           </button>
         )}
       </div>
@@ -1077,6 +1106,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
         </button>
       )}
       <span
+        hidden={compact}
         style={{
           fontSize: 'var(--font-size-xs)',
           color: 'var(--color-text-muted)',

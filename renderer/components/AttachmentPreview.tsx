@@ -1,4 +1,5 @@
 import React from 'react'
+import { FileText, Image } from './icons'
 import type { AttachmentInfo, AttachmentPreview } from '../../shared/attachment-types'
 import { useAttachmentReuse } from '../hooks/use-attachment-reuse'
 
@@ -46,7 +47,7 @@ export const AttachmentPreviewDialog: React.FC<{ info: AttachmentInfo; onClose: 
 export const MessageAttachments: React.FC<{ attachments?: AttachmentInfo[] }> = ({ attachments }) => {
   const [selected, setSelected] = React.useState<AttachmentInfo>()
   return <>
-    <div className="message-materials">{attachments?.map(info => <button className="attachment-pill" title={`${info.name} · ${info.sha256.slice(0, 12)}`} key={info.attachment_id} onClick={() => setSelected(info)}>{info.kind === 'text' ? '📄' : '🖼️'} {info.name} · {(info.bytes / 1024).toFixed(1)} KiB</button>)}</div>
+    <div className="message-materials">{attachments?.map(info => <button className="attachment-pill" title={`${info.name} · ${info.sha256.slice(0, 12)}`} key={info.attachment_id} onClick={() => setSelected(info)}>{info.kind === 'text' ? <FileText size={14} /> : <Image size={14} />} {info.name} · {(info.bytes / 1024).toFixed(1)} KiB</button>)}</div>
     {selected && <AttachmentPreviewDialog info={selected} onClose={() => setSelected(undefined)} />}
   </>
 }

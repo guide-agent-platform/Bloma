@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Notification, session, type MessageBoxOptions, type WebContents } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Notification, screen, session, type MessageBoxOptions, type WebContents } from 'electron'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -27,6 +27,7 @@ import { recordDecision } from './project/decision-log'
 import { findProject, listProjects, updateProject } from './project/project-service'
 import { installTrayAndShortcut, isTrayQuitting, notifyHiddenToTray, setTrayProjectSource, teardownTrayAndShortcut } from './platform/shell/tray'
 import { disposeAllCorrectionSessions } from './desktop/correction-session'
+import { initialWindowBounds } from './platform/shell/window-bounds'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -40,11 +41,10 @@ setChildRunContextProvider(buildDelegationWorktreeProvider())
 let mainWindow: BrowserWindow | undefined
 
 async function createMainWindow(): Promise<void> {
+  const available = screen.getPrimaryDisplay().workAreaSize
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 820,
-    minWidth: 1080,
-    minHeight: 720,
+    ...initialWindowBounds(available),
+    autoHideMenuBar: true,
     title: 'Bloma',
     webPreferences: {
       preload: resolvePreloadPath(),

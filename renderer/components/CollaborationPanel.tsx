@@ -1,4 +1,5 @@
 import React from 'react'
+import { X } from './icons'
 import { useAtom, useAtomValue } from 'jotai'
 import {
   activeAgentSessionIdAtom,
@@ -23,7 +24,7 @@ function shortId(id: string): string {
   return id.length > 12 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id
 }
 
-export const CollaborationPanel: React.FC = () => {
+export const CollaborationPanel: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const [expanded, setExpanded] = useAtom(collaborationPanelExpandedAtom)
   const project = useAtomValue(currentProjectAtom)
   const activeSessionId = useAtomValue(activeAgentSessionIdAtom)
@@ -39,12 +40,12 @@ export const CollaborationPanel: React.FC = () => {
       role="complementary"
       aria-label="委派协作"
       style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 900,
-        width: 'min(420px, 92vw)',
+        position: embedded ? 'relative' : 'fixed', top: 0, right: 0, bottom: 0, zIndex: embedded ? undefined : 900,
+        width: embedded ? '100%' : 'min(420px, 92vw)', minHeight: 0, height: embedded ? '100%' : undefined,
         display: 'flex', flexDirection: 'column',
         background: 'var(--color-surface)',
         borderLeft: '1px solid var(--color-border)',
-        boxShadow: 'var(--shadow-lg)',
+        boxShadow: embedded ? 'none' : 'var(--shadow-lg)',
         animation: 'tile-enter 0.2s ease both',
       }}
     >
@@ -75,7 +76,7 @@ export const CollaborationPanel: React.FC = () => {
             border: 'none', fontFamily: 'inherit',
           }}
         >
-          ×
+          <X size={16} />
         </button>
       </div>
 

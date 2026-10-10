@@ -18,6 +18,7 @@ export interface CorrectionPayload {
 }
 
 export interface PreviewPanelProps {
+  embedded?: boolean
   status?: PreviewStatus
   previewUrl?: string
   loadingLabel?: string
@@ -46,6 +47,7 @@ export interface PreviewPanelProps {
  * 状态：空 / 加载 / 运行 / 错误 / 超时
  */
 export const PreviewPanel: React.FC<PreviewPanelProps> = ({
+  embedded = false,
   status = 'empty',
   previewUrl,
   loadingLabel,
@@ -177,7 +179,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
         padding: 'var(--space-3)',
         background: 'var(--color-surface)',
       }
-    : {
+    : embedded ? {display:'flex',flexDirection:'column',height:'100%',overflow:'hidden',background:'var(--color-surface)'} : {
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
@@ -206,6 +208,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
         style={{
           display: 'flex',
           justifyContent: 'space-between',
+          flexWrap: 'wrap', gap: 8,
           alignItems: 'center',
           padding: 'var(--space-1) var(--space-2) var(--space-3)',
           flexShrink: 0,
@@ -310,7 +313,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
           position: 'relative',
           borderRadius: 'var(--radius-md)',
           overflow: 'hidden',
-          background: 'var(--white)',
+          background: 'var(--color-surface)',
           boxShadow: 'inset 0 0 0 1px var(--color-border)',
           minHeight: 0,
         }}
@@ -325,7 +328,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
               title="软件预览"
               sandbox="allow-scripts allow-forms allow-same-origin"
               onError={onPreviewError}
-              style={{ width: '100%', height: '100%', border: 'none', background: 'var(--white)', pointerEvents: correctionActive ? 'none' : 'auto' }}
+              style={{ width: '100%', height: '100%', border: 'none', background: 'var(--color-surface)', pointerEvents: correctionActive ? 'none' : 'auto' }}
             />
             {/* 点选纠错透明捕获层：仅在纠错模式开启时盖在 iframe 上方拦截点击 */}
             {correctionMode && onCorrectionSubmit && (
@@ -511,7 +514,7 @@ const stateWrap: React.CSSProperties = {
   justifyContent: 'center',
   textAlign: 'center',
   padding: 'var(--space-8)',
-  background: 'linear-gradient(135deg, var(--gray-50), var(--violet-50))',
+  background: 'var(--color-surface-muted)',
 }
 
 const EmptyState: React.FC = () => (

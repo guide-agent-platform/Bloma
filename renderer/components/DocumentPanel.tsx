@@ -1,4 +1,5 @@
 import React from 'react'
+import { X } from './icons'
 import { DocumentContent } from './DocumentContent'
 import { useAtom, useAtomValue } from 'jotai'
 import { currentProjectAtom, documentPanelExpandedAtom } from './atoms'
@@ -39,7 +40,7 @@ type SelectedView =
  * 展开态由 `documentPanelExpandedAtom` 控制（WorkspaceHeader 切换），
  * 未展开时渲染 null，可直接挂在 WorkspaceShell 中自门控。
  */
-export const DocumentPanel: React.FC = () => {
+export const DocumentPanel: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const [expanded, setExpanded] = useAtom(documentPanelExpandedAtom)
   const project = useAtomValue(currentProjectAtom)
   const [documents, setDocuments] = React.useState<DocumentRef[]>([])
@@ -111,12 +112,12 @@ export const DocumentPanel: React.FC = () => {
       role="complementary"
       aria-label="项目文档"
       style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 900,
-        width: 'min(420px, 92vw)',
+        position: embedded ? 'relative' : 'fixed', top: 0, right: 0, bottom: 0, zIndex: embedded ? undefined : 900,
+        width: embedded ? '100%' : 'min(420px, 92vw)', minHeight: 0, height: embedded ? '100%' : undefined,
         display: 'flex', flexDirection: 'column',
         background: 'var(--color-surface)',
         borderLeft: '1px solid var(--color-border)',
-        boxShadow: 'var(--shadow-lg)',
+        boxShadow: embedded ? 'none' : 'var(--shadow-lg)',
         animation: 'tile-enter 0.2s ease both',
       }}
     >
@@ -147,7 +148,7 @@ export const DocumentPanel: React.FC = () => {
             border: 'none', fontFamily: 'inherit',
           }}
         >
-          ×
+          <X size={16} />
         </button>
       </div>
 

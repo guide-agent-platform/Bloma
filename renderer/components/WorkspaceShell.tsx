@@ -1,7 +1,8 @@
 /** web 线拆除刀3：点选纠错通道退役，类型本地最小化（UI 降级红点模式） */
 type DomCollectContextResult = { fallback_mode: boolean; element_selector?: string; text_content?: string; bounding_rect?: { x: number; y: number; width: number; height: number } }
 import React from 'react'
-import { WorkspaceHeader } from './WorkspaceHeader'
+import { useAtom, useAtomValue } from 'jotai'
+import { WorkspaceHeader, WorkspaceConnection } from './WorkspaceHeader'
 import { ChatPanel } from './ChatPanel'
 import { DesktopArtifactStrip } from './DesktopArtifactStrip'
 import { DeliveryPanel } from './DeliveryPanel'
@@ -11,6 +12,13 @@ import { TimelinePanel } from './TimelinePanel'
 import { MvpStatusBanner } from './MvpStatusBanner'
 import { DocumentPanel } from './DocumentPanel'
 import { CollaborationPanel } from './CollaborationPanel'
+import { HistoryAttachments } from './HistoryAttachments'
+import { DesktopStageBar } from './DesktopStageBar'
+import { currentProjectAtom, desktopPhaseAtom, workflowStageAtom, documentPanelExpandedAtom, collaborationPanelExpandedAtom, timelineExpandedAtom } from './atoms'
+import { desktopArtifactsAtom } from '../agent-atoms'
+import { workspaceScene } from '../lib/workspace-scene'
+import '../styles/theatre.css'
+import { FileText, Layers, History, Users } from './icons'
 import type { CardOption } from './CardOptions'
 import type { PreviewStatus } from './PreviewPanel'
 import type { Snapshot, PastedImageRef } from './atoms'
@@ -80,44 +88,68 @@ export interface WorkspaceShellProps {
  * 全部浮在 aurora 渐变网格背景上。
  */
 export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
+  const project = useAtomValue(currentProjectAtom)
+  const stage = useAtomValue(workflowStageAtom)
+  const phase = useAtomValue(desktopPhaseAtom)
+  const artifacts = useAtomValue(desktopArtifactsAtom)
+  const [documents, setDocuments] = useAtom(documentPanelExpandedAtom)
+  const [collaboration, setCollaboration] = useAtom(collaborationPanelExpandedAtom)
+  const [, setTimelineExpanded] = useAtom(timelineExpandedAtom)
+  const [localPanel, setLocalPanel] = React.useState<'versions' | 'materials' | null>(null)
+  React.useEffect(() => { setDocuments(false); setCollaboration(false); setLocalPanel(null) }, [project?.project_id])
+  const scene = workspaceScene(project, stage, phase ?? project?.desktop_phase ?? null, Boolean(props.previewUrl && props.onConfirmSketch && !props.deliveryPanel))
+  const openTool = (name: 'documents' | 'collaboration' | 'versions' | 'materials') => {
+    setDocuments(name === 'documents' ? !documents : false)
+    setCollaboration(name === 'collaboration' ? !collaboration : false)
+    setLocalPanel(name === 'versions' || name === 'materials' ? localPanel === name ? null : name : null)
+    if (name === 'versions') setTimelineExpanded(true)
+  }
   return (
-    <div
-      style={{
-        position: 'relative',
-        zIndex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100vh',
-        padding: 'var(--tile-gap)',
-        gap: 'var(--tile-gap)',
-        background: 'transparent',
-        overflow: 'hidden',
-      }}
-    >
+    <div className="workspace-theatre" data-ai-id="workspace-theatre" data-mode={project?.mode ?? 'quick'}>
       {/* 顶栏 */}
       <WorkspaceHeader
+        showConnection={false}
         onAllProjects={props.onAllProjects}
         onOpenSettings={props.onOpenSettings}
         onUpgrade={props.onUpgrade}
       />
 
       {/* 桌面线产物预览条（刀3 呈现层最小版）：桌面线激活且有产物时显示（阶段条下方窄带） */}
-      <DesktopArtifactStrip />
-
-      {/* MVP 状态横幅（Sprint 2） */}
-      <MvpStatusBanner />
-
-      {/* 主区：对话（左 1fr ≈ 35%）+ 预览（右 2fr ≈ 65%），等高 */}
-      <div
-        style={{
-          flex: 1,
-          display: 'grid',
-          gridTemplateColumns: '1fr 2fr',
-          gap: 'var(--tile-gap)',
-          minHeight: 0,
-        }}
-      >
-        <ChatPanel
+      <nav className="theatre-journey" aria-label="软件制作进度">
+        {['想法', '需求', '界面', '制作', '试用与交付'].map((label, index) => <span key={label} aria-current={scene.chapter === index ? 'step' : undefined} data-current={scene.chapter === index}><span className="theatre-step-number">{index + 1}</span>{label}</span>)}
+      </nav>
+      <main className="theatre-stage">
+        <div className="theatre-stage-heading"><div><p className="theatre-eyebrow">你的一句话，正在成形</p><h2>{scene.title}</h2><p>{scene.description}</p></div>{(phase || project?.desktop_phase) && <details className="theatre-phase-details"><summary>制作详情</summary><DesktopStageBar /></details>}</div>
+        <div className="theatre-main" data-panel-open={documents || collaboration || Boolean(localPanel)}>
+          <section className="theatre-product" aria-label="软件与当前结果">
+        {props.deliveryPanel
+          ? <DeliveryPanel embedded />
+          : <PreviewPanel embedded
+          status={props.previewStatus}
+          previewUrl={props.previewUrl}
+          errorLabel={props.previewErrorLabel}
+          onRefresh={props.onRefreshPreview}
+          onToggleFullscreen={props.onToggleFullscreen}
+          onScreenshot={props.onScreenshot}
+          onCorrectionSubmit={props.onCorrectionSubmit}
+          onCollectDomContext={props.onCollectDomContext}
+          onConfirmSketch={props.onConfirmSketch}
+          confirming={props.confirming}
+          onPreviewError={props.onPreviewError}
+          onMarkComplete={props.onMarkComplete}
+          />}
+          </section>
+          {(documents || collaboration || localPanel) && <aside className="theatre-sidepanel">
+            <DocumentPanel embedded />
+            <CollaborationPanel embedded />
+            {localPanel && <><div className="theatre-panel-heading"><h3>{localPanel === 'versions' ? '一路变成现在' : '参考材料'}</h3><button type="button" className="theatre-tool" aria-label="关闭项目工具" onClick={() => setLocalPanel(null)}>关闭</button></div>{localPanel === 'versions' ? <TimelinePanel onRollback={props.onRollback} /> : <HistoryAttachments onClose={() => setLocalPanel(null)} />}</>}
+          </aside>}
+        </div>
+        {artifacts.projectId === project?.project_id && artifacts.items.length > 0 && <details className="theatre-artifact-details"><summary>制作记录与截图 · {artifacts.items.length}</summary><DesktopArtifactStrip /></details>}
+        <MvpStatusBanner />
+      </main>
+      <section className="theatre-conversation" aria-label="向导与下一步">
+        <ChatPanel presentation="theatre"
           cardOptions={props.cardOptions}
           decisionTitle={props.decisionTitle}
           decisionBody={props.decisionBody}
@@ -131,33 +163,8 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
           onOpenSettings={props.onOpenSettings}
           onForkFromMessage={props.onForkFromMessage}
         />
-        {props.deliveryPanel
-          ? <DeliveryPanel />
-          : <PreviewPanel
-          status={props.previewStatus}
-          previewUrl={props.previewUrl}
-          errorLabel={props.previewErrorLabel}
-          onRefresh={props.onRefreshPreview}
-          onToggleFullscreen={props.onToggleFullscreen}
-          onScreenshot={props.onScreenshot}
-          onCorrectionSubmit={props.onCorrectionSubmit}
-          onCollectDomContext={props.onCollectDomContext}
-          onConfirmSketch={props.onConfirmSketch}
-          confirming={props.confirming}
-          onPreviewError={props.onPreviewError}
-          onMarkComplete={props.onMarkComplete}
-          />
-        }
-      </div>
-
-      {/* 底部时间轴胶片条 */}
-      <TimelinePanel onRollback={props.onRollback} />
-
-      {/* 文档面板抽屉（U2）：由 documentPanelExpandedAtom 门控，展开时覆盖在右侧 */}
-      <DocumentPanel />
-
-      {/* 委派协作抽屉（M4-C）：由 collaborationPanelExpandedAtom 门控，展开时覆盖在右侧 */}
-      <CollaborationPanel />
+        <nav className="theatre-tools" aria-label="项目资料"><button type="button" className="theatre-tool" data-ai-id="docs-button" aria-pressed={documents} onClick={() => openTool('documents')}><FileText />文档</button><button type="button" className="theatre-tool" data-ai-id="materials-button" aria-pressed={localPanel === 'materials'} onClick={() => openTool('materials')}><Layers />材料</button><button type="button" className="theatre-tool" data-ai-id="versions-button" aria-pressed={localPanel === 'versions'} onClick={() => openTool('versions')}><History />版本</button><button type="button" className="theatre-tool" data-ai-id="collaboration-button" aria-pressed={collaboration} onClick={() => openTool('collaboration')}><Users />协作</button><WorkspaceConnection /></nav>
+      </section>
     </div>
   )
 }

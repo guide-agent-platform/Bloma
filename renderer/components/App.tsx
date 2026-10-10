@@ -2,7 +2,8 @@ import type { AgentSendMessageResult, ApiResult } from '../../shared/types'
 import type { ComposerSubmission } from '../hooks/use-composer'
 import type { SendReceipt } from '../../shared/attachment-types'
 import React, { useState, useCallback } from 'react'
-import { useSetAtom, useAtomValue } from 'jotai'
+import { useSetAtom, useAtomValue, useStore } from 'jotai'
+import { submitInitialProjectIdea } from '../lib/initial-project-idea'
 import { ModeSelectionPage } from './ModeSelectionPage'
 import { WorkspaceShell } from './WorkspaceShell'
 import { ProjectHistoryPage } from './ProjectHistoryPage'
@@ -58,22 +59,11 @@ const PREVIEW_READY_STAGES = new Set<WorkflowStage>([
 const shouldRestorePreview = (project: Project): boolean =>
   project.template_type !== 'desktop_tool' && PREVIEW_READY_STAGES.has(project.current_stage)
 /* =========================================================================
-   Aurora 背景
-   ========================================================================= */
-const Aurora: React.FC = () => (
-  <div aria-hidden style={{ position: 'fixed', inset: 0, zIndex: 0, overflow: 'hidden', pointerEvents: 'none' }}>
-    <span style={{ position: 'absolute', borderRadius: '50%', filter: 'blur(80px)', opacity: 0.9, width: '46vw', height: '46vw', top: '-12%', left: '-8%', background: 'var(--aurora-violet)', animation: 'aurora-drift 18s ease-in-out infinite' }} />
-    <span style={{ position: 'absolute', borderRadius: '50%', filter: 'blur(80px)', opacity: 0.9, width: '42vw', height: '42vw', bottom: '-14%', right: '-6%', background: 'var(--aurora-pink)', animation: 'aurora-drift 22s ease-in-out infinite reverse' }} />
-    <span style={{ position: 'absolute', borderRadius: '50%', filter: 'blur(80px)', opacity: 0.9, width: '38vw', height: '38vw', top: '30%', right: '18%', background: 'var(--aurora-cyan)', animation: 'aurora-drift 26s ease-in-out infinite' }} />
-  </div>
-)
-/* =========================================================================
    App 根组件
    ========================================================================= */
 const App: React.FC = () => {
   return (
     <>
-      <Aurora />
       <AppRoutes />
       <PermissionDialog />
       <RequirementConfirmDialog />
@@ -89,6 +79,7 @@ const App: React.FC = () => {
    ========================================================================= */
 type AppRoute = 'mode-selection' | 'workspace' | 'project-history' | 'settings'
 const AppRoutes: React.FC = () => {
+  const store = useStore()
   const [route, setRoute] = useState<AppRoute>('mode-selection')
   const [mode, setMode] = useState<ProjectMode | null>(null)
   const [waitStart, setWaitStart] = useState<number | undefined>()
@@ -255,7 +246,7 @@ const AppRoutes: React.FC = () => {
     })
   }, [sessionId, restorePreview])
   // ==================== 选择模式 → 创建工作区 ====================
-  const handleModeSelected = useCallback((selectedMode: 'quick' | 'longterm') => {
+  const handleModeSelected = useCallback(async (selectedMode: 'quick' | 'longterm', idea?: string) => {
     setMode(selectedMode)
     // 复用 ModeSelectionPage 经 api.project.create 建好的真实项目（读 store 拿最新值，避开闭包过期）
     const newProject = window.__jotai_store__?.get(currentProjectAtom) ?? null
@@ -273,7 +264,7 @@ const AppRoutes: React.FC = () => {
     setCurrentProject(newProject)
 
     // D3 修复：进入工作区后 Agent 发送首条问候消息（写入新会话 family，避开闭包过期）
-    appendMessageToSession(newSessionId, {
+    if (!idea) appendMessageToSession(newSessionId, {
       role: 'assistant',
       content: [{ type: 'text', text: '你好！告诉我你想做什么软件，我会一步步帮你做出来。' }],
       timestamp: Date.now(),
@@ -282,7 +273,14 @@ const AppRoutes: React.FC = () => {
     setProjectPreview(newProject.project_id, null)
     setSnapshotsList([])
     setRoute('workspace')
-  }, [setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, setProjectPreview, setSnapshotsList])
+    if (idea) {
+      try {
+        await submitInitialProjectIdea(newProject, newSessionId, idea, store, receipt => {
+          appendMessageToSession(newSessionId, {role:'user',client_message_id:receipt.client_message_id,content:[{type:'text',text:idea}],timestamp:Date.now()})
+        })
+      } catch (error) { setGlobalError(error instanceof Error ? error.message : '首条消息发送失败，想法已保留。') }
+    }
+  }, [store, setGlobalError, setProjectMode, setModeSelected, setWorkflowStage, setStageLabel, setActiveSessionId, setCurrentProject, setProjectPreview, setSnapshotsList])
   // ==================== 从历史列表恢复项目 ====================
   const handleResumeProject = useCallback((project: Project) => {
     setMode(project.mode)

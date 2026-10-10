@@ -53,9 +53,9 @@ describe('Sprint 1 project mode and workspace acceptance', () => {
 
     await waitFor(() => expect(screen.getByRole('textbox')).toBeTruthy())
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ mode: 'quick' }))
-    expect(screen.getByText('快速尝鲜')).toBeTruthy()
-    expect(screen.getByText('对话')).toBeTruthy()
-    expect(screen.getByText('时间轴')).toBeTruthy()
+    expect(screen.getByText('快速型')).toBeTruthy()
+    expect(screen.getByTestId('chat-panel')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '版本' })).toBeTruthy()
     expect(screen.getByText('这里将展示你的软件预览')).toBeTruthy()
   })
 
@@ -76,7 +76,7 @@ describe('Sprint 1 project mode and workspace acceptance', () => {
     fireEvent.click(screen.getByTestId('mode-card-longterm'))
 
     await waitFor(() => expect(screen.getByRole('button', { name: '文档' })).toBeTruthy())
-    expect(screen.getByText('精细打磨')).toBeTruthy()
+    expect(screen.getByText('长期型')).toBeTruthy()
   })
 
   it('[S1-PROJECT-008] 进入工作区后不得返回两道门且应提供所有项目入口', async () => {
@@ -111,7 +111,7 @@ describe('Sprint 1 project mode and workspace acceptance', () => {
     render(<Provider store={store}><WorkspaceHeader /></Provider>)
 
     expect(screen.queryByRole('button', { name: /降级|快消/ })).toBeNull()
-    expect(screen.getByText('精细打磨')).toBeTruthy()
+    expect(screen.getByText('长期型')).toBeTruthy()
   })
 
   it('[S1-UI-007] 两道门应使用生活化文案且不要求技术栈配置', () => {
@@ -377,9 +377,9 @@ describe('消息排队提示（message-queue S4-QUEUE-009）', () => {
 
     render(<Provider store={store}><App /></Provider>)
     fireEvent.click(screen.getByTestId('mode-card-quick'))
-    await waitFor(() => expect(screen.getByPlaceholderText('描述你的想法…')).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '消息输入' })).toBeTruthy())
 
-    const input = screen.getByPlaceholderText('描述你的想法…')
+    const input = screen.getByRole('textbox', { name: '消息输入' })
     fireEvent.change(input, { target: { value: '把按钮改成蓝色' } })
     fireEvent.keyDown(input, { key: 'Enter' })
 
@@ -489,7 +489,7 @@ describe('零渠道欢迎引导（QW#2 ux-r2 I2）', () => {
     render(<Provider store={store}><App /></Provider>)
     fireEvent.click(screen.getByTestId('mode-card-quick'))
 
-    await waitFor(() => expect(screen.getByPlaceholderText(/描述你的想法/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '消息输入' })).toBeTruthy())
     expect(screen.queryByText(/还没连接 AI 模型/)).toBeNull()
   })
 

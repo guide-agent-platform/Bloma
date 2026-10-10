@@ -1,8 +1,9 @@
 import React from 'react'
 import { useAtomValue } from 'jotai'
-import { RotateCw } from './icons'
+import { RotateCw, LayoutTemplate, Play } from './icons'
 import { Markdown } from './Markdown'
 import { CorrectionPanel } from './CorrectionPanel'
+import { ProgramScreenshot } from './ProgramScreenshot'
 import { correctionSessionAtom, currentProjectAtom, desktopArtifactsAtom, desktopPhaseAtom } from '../agent-atoms'
 import type { ProjectDeliverablesResult } from '../../shared/types'
 
@@ -20,7 +21,7 @@ import type { ProjectDeliverablesResult } from '../../shared/types'
  */
 const MarkdownLazy: React.FC<{ text: string }> = Markdown
 
-export const DeliveryPanel: React.FC = () => {
+export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const project = useAtomValue(currentProjectAtom)
   const correctionSession = useAtomValue(correctionSessionAtom)
   const projectId = project?.project_id
@@ -30,6 +31,10 @@ export const DeliveryPanel: React.FC = () => {
   const [data, setData] = React.useState<ProjectDeliverablesResult | undefined>()
   const [loading, setLoading] = React.useState(false)
   const [launchState, setLaunchState] = React.useState<string | null>(null)
+  const [showCorrection, setShowCorrection] = React.useState(false)
+  const currentProjectId = React.useRef(projectId)
+  currentProjectId.current = projectId
+  React.useEffect(() => { setData(undefined); setLaunchState(null) }, [projectId])
 
   const refresh = React.useCallback(async () => {
     if (!projectId) return
@@ -38,11 +43,11 @@ export const DeliveryPanel: React.FC = () => {
     setLoading(true)
     try {
       const result = await api.get({ request_id: crypto.randomUUID(), project_id: projectId })
-      setData(result.ok ? result.data : undefined)
+      if (currentProjectId.current === projectId) setData(result.ok ? result.data : undefined)
     } catch {
-      setData(undefined)
+      if (currentProjectId.current === projectId) setData(undefined)
     } finally {
-      setLoading(false)
+      if (currentProjectId.current === projectId) setLoading(false)
     }
   }, [projectId])
 
@@ -60,7 +65,10 @@ export const DeliveryPanel: React.FC = () => {
       setLaunchState('启动失败：当前环境不支持启动通道')
       return
     }
-    const result = await api.launch({ request_id: crypto.randomUUID(), project_id: projectId })
+    let result
+    try { result = await api.launch({ request_id: crypto.randomUUID(), project_id: projectId }) }
+    catch { if (currentProjectId.current === projectId) setLaunchState('启动失败：请重试，或告诉向导你遇到的问题'); return }
+    if (currentProjectId.current !== projectId) return
     if (result.ok && result.data.started) {
       setLaunchState(`已启动（进程 ${result.data.pid ?? '?'}）`)
     } else {
@@ -71,48 +79,51 @@ export const DeliveryPanel: React.FC = () => {
   return (
     <div
       data-ai-id="delivery-panel"
+      className={embedded ? 'theatre-delivery-window' : undefined}
       style={{
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
-        background: 'var(--white)',
-        borderRadius: 'var(--radius-lg)',
-        border: '1px solid var(--color-border)',
+        background: 'var(--color-surface)',
+        borderRadius: embedded ? 0 : 'var(--radius-lg)',
+        border: embedded ? 'none' : '1px solid var(--color-border)',
         overflow: 'hidden',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderBottom: '1px solid var(--color-border)' }}>
-        <span style={{ fontSize: 'var(--font-size-sm)', fontWeight: 600 }}>交付面板</span>
-        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>桌面项目产物</span>
+      <div className="theatre-program-bar" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderBottom: '1px solid var(--color-border)' }}>
+        {embedded && <LayoutTemplate size={14} />}
+        <span style={{ fontSize: 'var(--font-size-sm)', fontWeight: 500 }}>{project?.name ?? '你的软件'}</span>
+        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>{project?.current_stage === 'completed' ? '桌面程序' : desktopPhase ? '正在制作' : '等待想法成形'}</span>
         <div style={{ flex: 1 }} />
         <button
           data-ai-id="delivery-refresh"
+          aria-label="刷新产物"
           onClick={() => void refresh()}
           style={{ background: 'none', border: '1px solid var(--color-border)', borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontSize: 'var(--font-size-xs)' }}
         >
-          刷新
+          <RotateCw size={13} />
         </button>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderBottom: '1px solid var(--color-border)' }}>
+      {(!embedded || data?.can_launch || data?.launch.declared || project?.current_stage === 'completed') && <div className="theatre-launch-row" style={{ display: 'flex', flexWrap:'wrap', alignItems: 'center', gap: 8, padding: '8px 14px', borderBottom: '1px solid var(--color-border)' }}>
         <button
           data-ai-id="delivery-launch-button"
           onClick={() => void onLaunch()}
           disabled={!data?.can_launch}
           style={{
             display: 'flex', alignItems: 'center', gap: 6,
-            background: data?.can_launch ? 'var(--color-quick)' : 'var(--gray-200)',
-            color: data?.can_launch ? 'var(--white)' : 'var(--gray-500)',
+            background: data?.can_launch ? 'var(--theatre-accent, var(--color-quick))' : 'var(--color-surface-muted)',
+            color: data?.can_launch ? 'var(--theatre-on-accent, var(--white))' : 'var(--color-text-muted)',
             border: 'none', borderRadius: 8, padding: '6px 14px',
             fontSize: 'var(--font-size-sm)', fontWeight: 600,
             cursor: data?.can_launch ? 'pointer' : 'not-allowed',
           }}
         >
-          ▶ 启动程序
+          <Play />启动程序
         </button>
         {data && !data.can_launch && (
           <span data-ai-id="delivery-launch-hint" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-            {data.launch.declared && !data.launch.parse_ok
+            {project?.current_stage !== 'completed' ? '项目完成后可启动' : data.launch.declared && !data.launch.parse_ok
               ? `LAUNCH.json 不合法：${data.launch.parse_error ?? ''}`
               : !data.launch.declared
                 ? '项目根缺少 LAUNCH.json 启动声明'
@@ -120,28 +131,31 @@ export const DeliveryPanel: React.FC = () => {
           </span>
         )}
         {launchState && <span data-ai-id="delivery-launch-state" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>{launchState}</span>}
-      </div>
+      </div>}
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '10px 14px', minHeight: 0 }}>
+      <div className="theatre-delivery-body" style={{ flex: 1, overflowY: 'auto', padding: '10px 14px', minHeight: 0 }}>
+        <ProgramScreenshot />
+        {!loading && (data || embedded) && <div className="theatre-delivery-hero"><span className="theatre-idea-emblem"><LayoutTemplate size={25} /></span><h3>{project?.current_stage === 'completed' ? '这是你的软件了。' : project?.desktop_blocked ? '已有的工作，都保留了。' : desktopPhase ? '正在接通完整功能。' : '这里，会是你的软件。'}</h3><p>{project?.current_stage === 'completed' ? '启动后在独立窗口使用，随时可以继续改进。' : desktopPhase ? '从确认过的界面，继续成为真实程序。' : '先说你想解决什么，我们一起把它做出来。'}</p></div>}
         {/* 点选纠错（批11 MVP-E，2026-10-08）：入口/会话视图内嵌交付面板；completed 项目
             可用（主进程校验，旧骨架产物返回 unsupported 如实置灰提示） */}
         {project?.current_stage === 'completed' && (
-          <div style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--color-border)' }}>
-            <CorrectionPanel />
+          <div style={{ marginBottom: 8 }}>
+            {embedded && <button type="button" className="theatre-tool" aria-expanded={showCorrection} onClick={() => setShowCorrection(previous => !previous)}>反馈改进与点选修改</button>}
+            {(!embedded || showCorrection) && <CorrectionPanel />}
           </div>
         )}
         {loading && <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}><RotateCw size={12} /> 读取产物…</div>}
-        {!loading && !data && (
+        {!loading && !data && !embedded && (
           <div data-ai-id="delivery-empty" style={{ padding: 'var(--space-6) var(--space-2)', textAlign: 'center' }}>
             <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text)', fontWeight: 600, margin: '0 0 4px' }}>项目还没有可展示的交付内容</p>
             <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', margin: 0, lineHeight: 1.6 }}>
-              桌面线推进后，这里会出现文件清单、运行方式说明和「启动程序」入口。
+              制作完成后，可以在这里启动程序、查看文件与使用说明。
             </p>
           </div>
         )}
         {data && (
           <>
-            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginBottom: 6 }}>
+            {data.files.length > 0 && <details className="theatre-delivery-details"><summary>程序文件 · {data.files.length}</summary><div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginBottom: 6 }}>
               ▤ 项目文件（{data.files.length}）
             </div>
             <div data-ai-id="delivery-file-list" style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 'var(--font-size-xs)', lineHeight: 1.7, color: 'var(--color-text)', marginBottom: 12 }}>
@@ -149,8 +163,9 @@ export const DeliveryPanel: React.FC = () => {
                 <div key={file} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{file}</div>
               ))}
             </div>
+            </details>}
             {data.delivery_md && (
-              <>
+              <details className="theatre-delivery-details"><summary>使用与交付说明</summary>
                 <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginBottom: 6 }}>
                   ▤ 交付说明
                 </div>
@@ -159,7 +174,7 @@ export const DeliveryPanel: React.FC = () => {
                     <MarkdownLazy text={data.delivery_md} />
                   </div>
                 </React.Suspense>
-              </>
+              </details>
             )}
           </>
         )}

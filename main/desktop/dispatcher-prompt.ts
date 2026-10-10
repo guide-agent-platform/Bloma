@@ -10,6 +10,7 @@
 
 import type { PhaseNode } from './dispatcher-phases'
 import { PHASE_ADVANCE_KEYWORD } from './dispatcher-gate'
+import { userFacingOutputContract } from '../agent/prompting/user-facing-output'
 
 /** 任务书模板渲染结果：unresolved 收集未匹配占位符（诊断/测试断言用）。 */
 export interface RenderedTemplate {
@@ -225,6 +226,7 @@ export function buildOutputDisciplineSection(): string {
     '2. 过程叙述收敛为不超过 2 句的要点；更长的分析与方案对比写入委派任务书或产物文件（报告/清单），不进聊天流。',
     '3. 每轮回复的结尾只允许两种形态：一句话说明下一步，或输出推进标记——不写开放式提问、不写冗长总结。',
     '4. 自检纠偏：若发现本轮开头已用英文叙述，立即停止并改用中文重述后再继续——上下文里英文工具输出多时尤其容易漂移，每轮并发上自检。',
+    userFacingOutputContract('dispatcher'),
   ].join('\n')
 }
 

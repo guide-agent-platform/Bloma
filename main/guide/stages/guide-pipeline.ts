@@ -10,6 +10,7 @@ import { appendJsonLine } from '../../../storage/json-store'
 import { appendSessionMessage } from '../../platform/sessions/session-tree'
 import { routeDialogue, type ClarificationOption } from '../dialogue-router'
 import { loadPromptOverride } from '../../agent/prompting/prompt-config'
+import { userFacingOutputContract } from '../../agent/prompting/user-facing-output'
 import { parseDecisionText, recordDecision } from '../../project/decision-log'
 import { syncDocuments } from '../../project/document-engine'
 import { researchMarketSimilar, normalizeResearchQuery, type MarketResearch } from '../guide-research'
@@ -659,7 +660,7 @@ export async function runGuideLoopTurn(
   let result: Awaited<ReturnType<typeof runAgentLoop>> | undefined
   try {
     result = await runAgentLoop({
-      system: `${baseSystem}${GUIDE_LOOP_ADDENDUM}`,
+      system: `${baseSystem}${GUIDE_LOOP_ADDENDUM}\n\n${userFacingOutputContract('guide')}`,
       task: `${input.content}${reminder}`,
       images: input.images,
       materials: model.materials,
