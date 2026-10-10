@@ -278,10 +278,10 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
     taskTemplate:
       '委派测试工程师（异渠道）执行驱动验收：\n' +
       '1. GWT 场景补全（driver-skeleton.py 每场景一个可执行断言，断言先行）；**断言对象=Logic 逻辑层（import 即测，无 GUI 依赖）**——`import app` 后直接调 Logic 类/函数验证业务结果（骨架预置场景 assert_self_check_smoke 即此形态：import app 调用其函数断言退出码）；核心交互流程必须含状态触达场景——至少 空态/初始、成功、失败（或边界）各一个 S 场景（PRD 体验要求/背板 ux.states 为据，无专门契约时从通用九态选择本产品适用项；探索与裁判都会对照它）；\n' +
-      '2. **驱动执行由平台收口时执行**（spawn python 跑 contract.json 的 driver.command，退出码/stdout 回读）——你不需要也无法自行执行驱动，不要花轮次尝试执行或写「无执行通道」的替代报告；\n' +
+      '2. 驱动可通过 run_project_driver 当场执行并读取失败证据；平台收口时仍会独立复跑并生成正式报告。不要编造或手写替代报告；\n' +
       '3. 你的验收职责 = contract.json 合法（必填形态一字不差：schema_version 数字 1 / entry / driver 对象含 command、timeout_ms、exit_code_semantics 三键、assert_readback / env_whitelist / components / scenarios 场景映射——形态见下）+ driver-skeleton.py 断言齐备：\n' + MINIMAL_CONTRACT_EXAMPLE + '\n' +
-      'scenarios 硬约束（批4 验收语义冻结）：name 与 driver stdout 锚点场景名一致、covers 声明覆盖的 F-id；covers 引用 PRD 不存在的 F-id 或任一 P0 功能项无场景覆盖都会被裁判门拒收——验收语义在 PRD 确认时已冻结，你只能引用 F-id 不得重定义验收标准；断言有效性会被平台反证（批6）：永真断言/吞异常静态拒收 + 注入已知缺陷复跑驱动（survived=断言没证明任何东西，拒收；种子打 Logic 函数，断言真调逻辑层才能被击杀）——期望值必须独立写死、断言读取真实产物状态，不取自被测代码自身；\n' +
-      '4. 驱动执行报告（通过/失败/阻塞三分类，失败路由进修复轮）由平台在收口时执行驱动后生成——你无需也无法自行产出，不要编写替代报告；驱动 stdout 锚点约定同 driver-skeleton（每场景一行 `PASS <场景名>`，场景名与 SCENARIOS.name/contract scenarios[].name 一字不差——名字断链会被裁判门拒收）；UI 场景截图用骨架内置 capture_window(窗口标题, 路径)——UI 截图场景由驱动 spawn 主程序时加 `--offscreen`（屏幕外渲染照常零闪现，不打扰用户），截完立即终止进程树；Pillow 缺失降级 SKIP 如实标注；UI 场景至少 2 张；\n' +
+      'scenarios 覆盖：name 对齐 stdout，covers 引用真实 F-id；P0 业务必须有实际通过证据。业务要求已冻结，不能降低；测试等待、定位和环境实现允许修正并说明理由。标准验收中静态反空仅作诊断，故障注入不自动运行；严格模式另行执行。操作前后两次状态读取可用于验证状态保持，不能仅因调用写法相同认定永真；种子存活应先检查实际注入目标与业务的相关性。\n' +
+      '4. 正式报告由宿主独立执行后生成。业务断言失败、环境阻塞、未验证分别呈现；环境错误不证明业务失败。stdout 每场景一行 PASS/FAIL/BLOCKED <场景名> 并保持契约映射。GUI 必须隔离数据且收尾终止进程，截图只在能说明关键问题时采集，无截图不等于业务失败。\n' +
       '5. 裁决边界：平台收口三重门判定交付（驱动回读+宿主安全扫描+裁判硬约束：PRD 覆盖/场景覆盖/入口存在），不采信模型自述；\n' +
       '6. 探索委派（2026-10-05 探索驱动测试批，收口前必做）：委派一名 research 角色探索子会话——它有 drive_project_app（真实操控本项目 GUI：open→act→read→report→close，窗口隐藏不打扰用户）；骨架 v2 产物（requirements 含 pywebview）自动走 webview 腿：act 支持 click/set_text（按元素 id）与原生 js（同步表达式，经 /eval 通道），逻辑层状态可用 call 直调 Api 方法观察（经 /call 通道，如 call list_items 看数据真变）；tkinter 存量产物走旧腿：read 拿控件树+module_state（键盘/移动类用 keys+hold_ms 按住后对比 module_state 差分——引擎坐标/分数变化即响应证据）。任务书里给它 PRD 验收点清单（读 PRD 逐条列出 EARS 条目），要求按正常/空输入/边界/重复/乱序/键盘响应逐项探索并 report findings（P0/P1/P2 + expected/actual + repro_steps）；另核对体验面（PRD 体验要求/背板 ux，缺省按通用九态）：每个核心操作的成功/失败/进行中反馈是否可见（弹窗当正常反馈——tkinter messagebox 弹窗或 JS alert/confirm/prompt——均算缺陷）、空态是否有引导、长任务期间 UI 是否可响应、重复点击是否防抖——体验缺陷按 P1 记 findings，探索完 close。你不自己调 drive_project_app（你的职责是委派与裁决）；findings 进 MVP 过目页供用户参考，不阻塞交付。若委派不可用则如实说明，不要假装已探索。\n' +
       '{{shape_verify_brief}}',
@@ -303,7 +303,7 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
         artifacts: ['00_VERIFY/driver-report.json'],
       },
     ],
-    extraTools: [],
+    extraTools: ['run_project_driver'],
     dispatcherManaged: true,
   },
   delivered: {

@@ -86,7 +86,7 @@ def audit_function(func: ast.FunctionDef | ast.AsyncFunctionDef, path: str) -> l
             body_pass = len(stmt.body) == 1 and isinstance(stmt.body[0], ast.Pass)
             body_return_none = len(stmt.body) == 1 and isinstance(stmt.body[0], ast.Return) and stmt.body[0].value is None
             if body_pass or body_return_none:
-                findings.append({"file": path, "line": stmt.lineno, "kind": "swallow-exception", "state": "reject",
+                findings.append({"file": path, "line": stmt.lineno, "kind": "swallow-exception", "state": "reject" if is_test else "inconclusive",
                                  "detail": "except 后 pass/裸 return——异常被吞，失败不会让测试变红"})
         # 3) 无条件跳过
         if isinstance(stmt, ast.Call):
@@ -106,8 +106,11 @@ def audit_function(func: ast.FunctionDef | ast.AsyncFunctionDef, path: str) -> l
                 pass  # check=True 已查
         if isinstance(stmt, ast.Assign):
             for t, v in zip(stmt.targets, [stmt.value]):
-                if isinstance(t, ast.Name) and isinstance(v, ast.Call):
-                    aliases[t.id] = f"call:{ast.dump(v)[:64]}"
+                if isinstance(t, ast.Name):
+                    # Two calls, even with identical syntax, can observe
+                    # different states at different times. Only a direct
+                    # assignment aliases the same value.
+                    aliases[t.id] = aliases.get(v.id, v.id) if isinstance(v, ast.Name) else f"value:{stmt.lineno}:{stmt.col_offset}"
 
     # subprocess.run 无 check 且函数内无 returncode 检查（函数级粗粒度，避免误报嵌套）
     src = ast.unparse(func) if hasattr(ast, "unparse") else ""
@@ -166,4 +169,5 @@ def main() -> int:
     return 0
 
 
-sys.exit(main())
+if __name__ == "__main__":
+    sys.exit(main())

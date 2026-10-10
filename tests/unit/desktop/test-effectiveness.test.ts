@@ -37,6 +37,34 @@ function stubDeps(overrides: Partial<TestEffectivenessDeps> = {}): TestEffective
 }
 
 describe('runTestEffectivenessGates（批6 编排）', () => {
+  it('标准模式保留静态疑点，不注入源码或复跑驱动', async () => {
+    const { root, contract } = makeRoot()
+    const deps = stubDeps({ runAudit: async () => ({ findings: [{ file: 'driver.py', line: 1, kind: 'alias-compare', state: 'reject', detail: '疑点' }] }) })
+    deps.applySeed = async () => { throw new Error('must not mutate') }
+    deps.runDriver = async () => { throw new Error('must not rerun') }
+    const result = await runTestEffectivenessGates({ rootPath: root, contract, p0Fids: ['F-001'], entryFile: 'app.py', deps, includeMutation: false })
+    expect(result.mode).toBe('standard')
+    expect(result.audit.passed).toBe(false)
+    expect(result.faultKill).toMatchObject({ executed: 0, killed: 0, notRun: 1 })
+  })
+
+  it('严格模式的环境阻塞不记为种子击杀，仍恢复文件', async () => {
+    const { root, contract } = makeRoot()
+    let restored = false
+    const deps = stubDeps({ runDriver: async () => ({ routing: 'blocked', routingReason: '解释器不可用' }), restoreFile: async () => { restored = true; return true } })
+    const result = await runTestEffectivenessGates({ rootPath: root, contract, p0Fids: ['F-001'], entryFile: 'app.py', deps })
+    expect(result.faultKill).toMatchObject({ executed: 0, killed: 0, notRun: 1 })
+    expect(result.faultKill.entries[0].detail).toContain('解释器不可用')
+    expect(restored).toBe(true)
+  })
+
+  it('入口恢复失败必须停止，并报告基础设施错误', async () => {
+    const { root, contract } = makeRoot()
+    const result = await runTestEffectivenessGates({ rootPath: root, contract, p0Fids: ['F-001', 'F-002'], entryFile: 'app.py', deps: stubDeps({ restoreFile: async () => false }) })
+    expect(result.faultKill.passed).toBe(false)
+    expect(result.faultKill.error).toContain('恢复失败')
+    expect(result.faultKill.entries).toHaveLength(1)
+  })
   it('全击杀 + 审计干净 → 双门通过；注入→复跑→恢复顺序完整', async () => {
     const { root, contract } = makeRoot()
     const deps = stubDeps()
@@ -57,7 +85,7 @@ describe('runTestEffectivenessGates（批6 编排）', () => {
     const outcome = await runTestEffectivenessGates({ rootPath: root, contract, p0Fids: ['F-001'], entryFile: 'app.py', deps })
     expect(outcome.faultKill.passed).toBe(false)
     expect(outcome.faultKill.entries[0]).toMatchObject({ fid: 'F-001', result: 'survived' })
-    expect(outcome.faultKill.entries[0]?.detail).toContain('没有证明任何东西')
+    expect(outcome.faultKill.entries[0]?.detail).toContain('相关性')
   })
 
   it('三个种子都定位不到（not_applicable）→ 呈现不阻塞（首版拍板口径）', async () => {

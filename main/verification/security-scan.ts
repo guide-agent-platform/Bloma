@@ -60,6 +60,7 @@ interface ScanRule {
   serverOnly?: boolean
   /** 仅 .py 文件生效（P0-2，2026-10-01）：Python 语法与 JS 同形词不互扰（如 JS regex.exec/execSync 不命中 Python exec 规则）。 */
   pyOnly?: boolean
+  nonPyOnly?: boolean
 }
 
 /** 扫描规则：按严重度从高到低排列，同一行命中首个规则即止（避免重复上报）。 */
@@ -68,6 +69,7 @@ const SCAN_RULES: ScanRule[] = [
     category: 'dangerous_execution',
     severity: 'critical',
     pattern: /\beval\s*\(|new\s+Function\s*\(|document\.write(?:ln)?\s*\(/,
+    nonPyOnly: true,
     summary: '检测到一段可被外部内容改变行为的脚本，建议改写成更安全的实现方式',
   },
   // ---- Python 危险调用（桌面线 driver/scaffold 在本机真实执行，全链路审查 P0-2） ----
@@ -197,12 +199,18 @@ export function runSecurityScan(input: SecurityScanInput): SecurityScanResult {
     const rel = relative(input.root_path, file).replace(/\\/g, '/')
     const isServerFile = rel === 'server.js' || rel.startsWith('server/')
     const isPyFile = rel.endsWith('.py')
+    const pythonCode = isPyFile ? maskPythonStringsAndComments(content).split('\n') : []
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index]
       for (const rule of SCAN_RULES) {
         if (rule.serverOnly && !isServerFile) continue
         if (rule.pyOnly && !isPyFile) continue
-        if (rule.pattern.test(line)) {
+        if (rule.nonPyOnly && isPyFile) continue
+        // Execution rules inspect Python code, not docstrings/comments or
+        // quoted examples. Sensitive literal values retain their own rules.
+        const candidate = isPyFile && rule.category === 'dangerous_execution'
+          ? pythonCode[index].replace(/\bdef\s+(?:eval|exec)(?=\s*\()/g, 'def callable') : line
+        if (rule.pattern.test(candidate)) {
           issues.push({
             severity: rule.severity,
             category: rule.category,
@@ -219,6 +227,13 @@ export function runSecurityScan(input: SecurityScanInput): SecurityScanResult {
   // 只有 high / critical 才阻断（PRD §8.1「OWASP 无高危漏洞」）；low/medium 只记录不改阻断。
   const passed = !issues.some((issue) => issue.severity === 'high' || issue.severity === 'critical')
   return { passed, issues, scanned_files: files.length }
+}
+
+/** Preserve newlines for evidence locations; this is lexical masking, not a
+ * claim of full Python security analysis. */
+function maskPythonStringsAndComments(source: string): string {
+  return source.replace(/(?:'''[\s\S]*?'''|"""[\s\S]*?"""|'(?:\\[\s\S]|[^'\\\n])*'|"(?:\\[\s\S]|[^"\\\n])*"|#[^\n]*)/g,
+    (token) => token.replace(/[^\n]/g, ' '))
 }
 
 const SEVERITY_LABEL: Record<SecuritySeverity, string> = {

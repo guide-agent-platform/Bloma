@@ -51,6 +51,19 @@ describe('run_project_script（方案 B：implement 子会话受控执行）', (
 
   const okPython = async () => 'C:/Python313/python.exe'
 
+  it('短代码直接以参数执行，无临时文件；坏请求不消耗执行预算', async () => {
+    const spawn = fakeSpawn({ code: 0, stdout: 'PASS clean\n' })
+    const tool = buildChildScriptRunnerTool(projectId, { spawn, resolvePython: okPython, maxRuns: 1 })
+    const ctx = ctxFor(projectId)
+    expect((await tool.execute({ script: '自测.py', code: 'print(1)' }, ctx)).isError).toBe(true)
+    expect((await tool.execute({ code: 'x'.repeat(16001) }, ctx)).isError).toBe(true)
+    const outcome = await tool.execute({ code: 'print("PASS clean")' }, ctx)
+    expect(outcome.isError).toBeFalsy()
+    expect(spawn.mock.calls[0][0].command).toEqual(['C:/Python313/python.exe', '-c', 'print("PASS clean")'])
+    expect(spawn.mock.calls[0][0].cwd).toBe(projectRoot)
+    expect(spawn.mock.calls[0][0].env).not.toHaveProperty('BLOMA_SECRET_CHANNEL_KEY')
+  })
+
   it('happy path：真实输出 + 绿判定 + env 白名单（无 BLOMA_*，带 PYTHONIOENCODING）', async () => {
     process.env.BLOMA_SECRET_CHANNEL_KEY = 'should-not-leak'
     const spawn = fakeSpawn({ code: 0, stdout: 'S1 PASS 加法\n' })
@@ -120,5 +133,6 @@ describe('run_project_script（方案 B：implement 子会话受控执行）', (
     expect(implTools.some((tool) => tool.name === 'run_project_script')).toBe(true)
     const researchTools = buildDesktopChildTools(projectId, 'research', 'diff')
     expect(researchTools.some((tool) => tool.name === 'run_project_script')).toBe(false)
+    expect(buildDesktopChildTools(projectId, 'custom', 'diff').some((tool) => tool.name === 'run_project_script')).toBe(true)
   })
 })

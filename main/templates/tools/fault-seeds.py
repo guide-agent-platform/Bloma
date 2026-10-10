@@ -48,8 +48,14 @@ def _is_validation_if(stmt: ast.If) -> bool:
     """if not X / if X in (None,'',..) / if not X: 且 body 是 return/raise。"""
     test = stmt.test
     is_not = isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not)
+    # Membership/equals tests are validation only when comparing to empty
+    # values. CLI dispatch such as '--self-check' in sys.argv is not validation.
+    empty = lambda n: isinstance(n, ast.Constant) and n.value in (None, "")
     is_falsy_cmp = isinstance(test, ast.Compare) and any(
-        isinstance(op, (ast.In, ast.Eq)) for op in test.ops
+        (isinstance(op, ast.Eq) and empty(value)) or
+        (isinstance(op, ast.In) and isinstance(value, (ast.Tuple, ast.List, ast.Set))
+         and bool(value.elts) and all(empty(item) for item in value.elts))
+        for op, value in zip(test.ops, test.comparators)
     )
     if not (is_not or is_falsy_cmp):
         return False
@@ -91,7 +97,9 @@ def apply_seed(source: str, seed: str) -> tuple[str | None, dict]:
     tree = ast.parse(source)
 
     def first_function(predicate) -> ast.FunctionDef | None:
-        for node in tree.body:
+        # Include methods and nested functions; the reported target is the
+        # exact node transformed below, never a separately selected function.
+        for node in sorted((n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)), key=lambda n: n.lineno):
             if isinstance(node, ast.FunctionDef) and predicate(node):
                 return node
         return None
@@ -109,7 +117,9 @@ def apply_seed(source: str, seed: str) -> tuple[str | None, dict]:
                     marker["line"] = node.bloma_marker
                 return result
 
-        new_tree = Stripper().visit(tree)
+        transformer = Stripper()
+        transformer.visit_FunctionDef(target)
+        new_tree = tree
         if not marker["line"]:
             return None, {"applied": False, "reason": "not-applicable：校验分支定位失败"}
         return ast.unparse(new_tree), {"applied": True, "function": target.name, "line": marker["line"]}
@@ -118,9 +128,7 @@ def apply_seed(source: str, seed: str) -> tuple[str | None, dict]:
         target = first_function(_body_writes_files)
         if target is None:
             return None, {"applied": False, "reason": "not-applicable：未找到写文件函数"}
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == target.name:
-                node.body = [ast.Pass()]
+        target.body = [ast.Pass()]
         return ast.unparse(tree), {"applied": True, "function": target.name, "line": target.lineno}
 
     if seed == "FS-BUTTON-NOP":
@@ -130,9 +138,7 @@ def apply_seed(source: str, seed: str) -> tuple[str | None, dict]:
         )
         if target is None:
             return None, {"applied": False, "reason": "not-applicable：未找到 command= 回调函数"}
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == target.name:
-                node.body = [ast.Pass()]
+        target.body = [ast.Pass()]
         return ast.unparse(tree), {"applied": True, "function": target.name, "line": target.lineno}
 
     if seed == "FS-STATE-INVERT":
@@ -161,7 +167,8 @@ def apply_seed(source: str, seed: str) -> tuple[str | None, dict]:
                 return node
 
         inv = Inverter(target.name)
-        new_tree = inv.visit(tree)
+        inv.visit(target)
+        new_tree = tree
         if not inv.line:
             return None, {"applied": False, "reason": "not-applicable：布尔返回定位失败"}
         return ast.unparse(new_tree), {"applied": True, "function": target.name, "line": inv.line}
@@ -222,4 +229,5 @@ def main() -> int:
     return 0
 
 
-sys.exit(main())
+if __name__ == "__main__":
+    sys.exit(main())

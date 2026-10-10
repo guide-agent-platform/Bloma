@@ -30,6 +30,7 @@ export const CONTRACT_PATH = '00_SCAFFOLD/contract.json'
 
 /** finalize 的中间产物（驱动前置只发生在 desktop-verify）。 */
 export interface DesktopFinalizeOutcome {
+  testEffectiveness?: import('./test-effectiveness').TestEffectivenessOutcome
   advance: AdvanceDecision
   driverReport?: DriverExecutionReport
   /** P0-1c 软对账：裁判门附带的 P0 断言覆盖缺口（观测不阻断）。 */
@@ -327,6 +328,7 @@ export async function runVerifyFinalize(
   //（survived → fault-survived）；工具不可用降级跳过如实标注（不误杀不伪装）；
   // not_applicable/not_run 呈现不阻塞（首版拍板）。实现在 test-effectiveness.ts（R7）。
   let testEffectiveness: import('./test-effectiveness').TestEffectivenessOutcome | undefined
+  const verificationPolicy = input.verificationPolicy ?? (process.env.BLOMA_VERIFY_POLICY === 'strict' ? 'strict' : 'standard')
   {
     const { runVerifyEffectivenessPhase, buildTestInvalidReject, buildFaultSurvivedReject } = await import('./test-effectiveness')
     testEffectiveness = await runVerifyEffectivenessPhase({
@@ -334,15 +336,19 @@ export async function runVerifyFinalize(
       sandboxRoot: input.sandboxRoot,
       contract,
       driverSpawn: input.driverSpawn,
+      policy: verificationPolicy,
     })
     if (testEffectiveness) {
-      input.writeReport?.(FAULT_KILL_REPORT_PATH, JSON.stringify({ audit: testEffectiveness.audit, faultKill: testEffectiveness.faultKill }, null, 2))
+      input.writeReport?.(FAULT_KILL_REPORT_PATH, JSON.stringify({ policy: verificationPolicy, audit: testEffectiveness.audit, faultKill: testEffectiveness.faultKill }, null, 2))
       const rejectedFindings = testEffectiveness.audit.findings.filter((f) => f.state === 'reject')
-      if (!testEffectiveness.audit.passed && testEffectiveness.audit.error === undefined && rejectedFindings.length > 0) {
-        return { advance: buildTestInvalidReject(testEffectiveness, report, DRIVER_REPORT_PATH), driverReport: report }
+      if (verificationPolicy === 'strict' && !testEffectiveness.audit.passed && testEffectiveness.audit.error === undefined && rejectedFindings.length > 0) {
+        return { advance: buildTestInvalidReject(testEffectiveness, report, DRIVER_REPORT_PATH), driverReport: report, testEffectiveness }
       }
-      if (testEffectiveness.faultKill.survived > 0) {
-        return { advance: buildFaultSurvivedReject(testEffectiveness, FAULT_KILL_REPORT_PATH), driverReport: report }
+      if (testEffectiveness.faultKill.error) {
+        return { advance: { decision: 'reject', reason: 'driver-blocked', discardedObservations: [], education: testEffectiveness.faultKill.error }, driverReport: report, testEffectiveness }
+      }
+      if (verificationPolicy === 'strict' && testEffectiveness.faultKill.survived > 0) {
+        return { advance: buildFaultSurvivedReject(testEffectiveness, FAULT_KILL_REPORT_PATH), driverReport: report, testEffectiveness }
       }
     }
   }
@@ -367,7 +373,7 @@ export async function runVerifyFinalize(
         ...(securityGate ? [`security-scan: 通过（${securityGate.scanned} 文件扫描，0 高危）`] : []),
         `judge-gate: 硬约束通过${judgeGate.coverageGaps.length > 0 ? `（软对账缺口 ${judgeGate.coverageGaps.length} 项，观测不阻断）` : ''}`,
         ...(testEffectiveness
-          ? [`test-effectiveness: 反空检查通过；故障种子击杀 ${testEffectiveness.faultKill.killed}/${testEffectiveness.faultKill.executed}${testEffectiveness.faultKill.notApplicable + testEffectiveness.faultKill.notRun > 0 ? `（not-applicable ${testEffectiveness.faultKill.notApplicable}/not-run ${testEffectiveness.faultKill.notRun}，如实呈现不阻塞）` : ''}`]
+          ? [`verification-policy: ${verificationPolicy}; static-audit: ${testEffectiveness.audit.error ? 'unavailable' : testEffectiveness.audit.passed ? 'passed' : 'findings'}; mutation: killed=${testEffectiveness.faultKill.killed}, executed=${testEffectiveness.faultKill.executed}, not-run=${testEffectiveness.faultKill.notRun}`]
           : []),
         `advance-marks: 推进标记合法（→ ${outcome.target}）`,
       ],

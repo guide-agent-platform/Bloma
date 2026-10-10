@@ -31,6 +31,15 @@ afterEach(() => {
 })
 
 describe('runSecurityScan — A3 OWASP 基础静态扫描', () => {
+  it('Python DOM eval 方法、注释和字符串不冒充内置动态执行；真实 eval 仍阻断', () => {
+    const root = makeTree({
+      'driver.py': '# eval(payload)\n"""driver.eval(x)\neval(example)\n"""\nclass Session:\n    def eval(self, js):\n        return self.post(js)\nsession.eval(JS_PROBES["plan"])\n',
+      'bad.py': 'result = eval(payload) # real builtin\n',
+    })
+    const result = runSecurityScan({ project_id: 'p1', root_path: root })
+    expect(result.issues.map((issue) => [issue.file, issue.line, issue.severity])).toEqual([['bad.py', 1, 'high']])
+    expect(result.passed).toBe(false)
+  })
   it('无危险模式 → passed=true，无 issue', () => {
     const root = makeTree({
       'index.html': '<div>hello</div>\n<script src="app.js"></script>',

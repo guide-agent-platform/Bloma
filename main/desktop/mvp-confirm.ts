@@ -83,7 +83,7 @@ function buildShapeReportSection(section: ShapeReportSection | undefined): strin
 /** 成品过目页（2026-10-05：MVP 门「像 UX 门一样右栏呈现」）：截图画廊 + 驱动验收结论
  *  + DELIVERY 摘要；落盘 00_VERIFY/ 供 bloma-file:// 直读（截图相对路径同目录引用）。探索
  *  发现段（2026-10-05 探索驱动测试批）从 drive-findings.json 注入——参考证据不阻塞交付。 */
-function buildMvpReviewHtml(notice: DeliveredNoticeInput, driveFindings?: DriveFinding[], driveSessions?: Array<{ session_id: string; outcome: string; ops?: number; findings?: number }>, faultKill?: { audit?: { findings?: Array<{ state?: string }>; error?: string }; faultKill?: { entries?: Array<{ fid: string; seed: string; result: string; detail?: string }>; killed: number; executed: number; survived: number; notApplicable: number; notRun: number } }, shapeSection?: ShapeReportSection): string {
+function buildMvpReviewHtml(notice: DeliveredNoticeInput, driveFindings?: DriveFinding[], driveSessions?: Array<{ session_id: string; outcome: string; ops?: number; findings?: number }>, faultKill?: { policy?: string; audit?: { findings?: Array<{ state?: string }>; error?: string }; faultKill?: { entries?: Array<{ fid: string; seed: string; result: string; detail?: string }>; killed: number; executed: number; survived: number; notApplicable: number; notRun: number } }, shapeSection?: ShapeReportSection): string {
   const shots = (notice.screenshotPaths ?? [])
     .map((rel) => rel.replace(/^00_VERIFY\//, ''))
     .map((rel) => `<figure><img src="${escapeHtml(rel)}" alt="程序截图"/><figcaption>${escapeHtml(rel)}</figcaption></figure>`)
@@ -94,7 +94,7 @@ function buildMvpReviewHtml(notice: DeliveredNoticeInput, driveFindings?: DriveF
   const confirmedLines: string[] = []
   if (notice.driverSummary) {
     confirmedLines.push(
-      `<li>核心功能真实运行检查：${notice.driverSummary.passed}/${notice.driverSummary.total} 场景 PASS——平台实际启动了程序，按验收清单逐条执行并核对结果</li>`,
+      `<li>核心功能真实运行检查：${notice.driverSummary.passed}/${notice.driverSummary.total} 场景 PASS——平台执行了工程驱动并核对结果；界面操作的验证范围以下方探索记录为准</li>`,
     )
   }
   const shotCount = (notice.screenshotPaths ?? []).length
@@ -132,6 +132,9 @@ function buildMvpReviewHtml(notice: DeliveredNoticeInput, driveFindings?: DriveF
   // ——全部会话非正常时如实告知（呈现真相，不阻塞交付，两轨原则不变）。
   const badSessions = (driveSessions ?? []).filter((item) => item.outcome !== 'closed')
   const limitLines: string[] = []
+  const auditFindings = faultKill?.audit?.findings?.filter((item) => item.state === 'reject' || item.state === 'inconclusive').length ?? 0
+  if (auditFindings > 0) limitLines.push(`<li>测试诊断有 ${auditFindings} 项待复核，供参考，不直接等同于业务失败</li>`)
+  if (faultKill?.audit?.error) limitLines.push('<li>静态测试诊断未能完成，不能视为已验证通过</li>')
   if (qualification) {
     if (qualification.executed && !qualification.qualified) {
       limitLines.push(
@@ -150,7 +153,9 @@ function buildMvpReviewHtml(notice: DeliveredNoticeInput, driveFindings?: DriveF
     )
   }
   if (fk && fk.notApplicable + fk.notRun > 0) {
-    limitLines.push(`<li>测试有效性抽查有 ${fk.notApplicable + fk.notRun} 项没能执行（不适用或未定位到注入点，如实告知）</li>`)
+    limitLines.push(faultKill?.policy === 'standard'
+      ? '<li>本次为标准验收，未运行故障注入；业务验证结果与未验证项分别列出</li>'
+      : `<li>测试有效性抽查有 ${fk.notApplicable + fk.notRun} 项未取得结论（不适用、未执行或环境阻塞）</li>`)
   }
   const limitsSection =
     `<h2 style="font-size:15px;margin:20px 0 8px;">目前限制</h2>\n` +

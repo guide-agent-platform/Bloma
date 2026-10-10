@@ -81,6 +81,7 @@ export function recordDispatchRunTelemetry(
     const head3Input = turnsUsage.filter((t) => t.turn <= 3).reduce((sum, t) => sum + t.inputTokens, 0)
     const repairClass = deriveRepairClass(result)
     const payload: Record<string, unknown> = {
+      verification_policy: result.testEffectiveness?.mode ?? input.verificationPolicy ?? (process.env.BLOMA_VERIFY_POLICY === 'strict' ? 'strict' : 'standard'),
       phase: result.phase?.id ?? input.currentPhase,
       status: result.status,
       loop_status: loopResult?.status,

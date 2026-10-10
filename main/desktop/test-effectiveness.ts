@@ -1,11 +1,10 @@
 /**
  * 测试有效性反证（批6 2026-10-06，会话 f35363f6 讨论 turn11 第 5 点）：
  * - 6a AST 反空：平台资产 contract-audit.py 三态检查（reject/inconclusive/pass_static）
- *   ——reject（永真断言/吞异常/无断言/无条件跳过）硬拒收，inconclusive 呈现不阻断；
+ *   ——标准模式仅诊断；严格模式 reject 阻断，inconclusive 呈现不阻断。
  * - 6b 故障种子击杀：平台资产 fault-seeds.py 语义种子（非随机变异，等价变异率低）
- *   对每个 P0 验收点注入一个「已知坏」并复跑驱动——survived（测试仍绿）= 测试没证明
- *   任何东西，硬拒收；not_applicable/not_run 如实呈现不阻塞（首版拍板口径，观测一轮
- *   狗粮后再议收紧）。
+ *   仅严格模式执行。存活提示核对注入相关性和覆盖；环境阻塞不记击杀，恢复失败停止。
+ *   标准模式不改写产物，不用未执行的变异检查证明业务已通过。
  *
  * 挂点：verify 收口 driver 全绿 + 裁判门之后（longterm 专属路径；quick 直通道不经过）。
  * 产物：00_VERIFY/fault-kill-report.json（MVP 过目页注入段消费）。
@@ -39,6 +38,8 @@ export interface FaultKillEntry {
 }
 
 export interface TestEffectivenessOutcome {
+  /** standard: static diagnostics only; strict: includes mutation execution. */
+  mode?: 'standard' | 'strict'
   audit: {
     passed: boolean
     findings: AuditFinding[]
@@ -170,6 +171,7 @@ export async function runTestEffectivenessGates(input: {
   p0Fids: string[]
   entryFile: string
   deps: TestEffectivenessDeps
+  includeMutation?: boolean
 }): Promise<TestEffectivenessOutcome> {
   const deps = input.deps
 
@@ -186,6 +188,15 @@ export async function runTestEffectivenessGates(input: {
 
   // ── 6b 故障种子击杀 ──
   const entries: FaultKillEntry[] = []
+  if (input.includeMutation === false) {
+    return {
+      mode: 'standard', audit,
+      faultKill: {
+        entries: input.p0Fids.map((fid) => ({ fid, seed: '-', result: 'not_run', detail: '标准验收不自动运行故障注入；静态检查仅作诊断' })),
+        executed: 0, killed: 0, survived: 0, notApplicable: 0, notRun: input.p0Fids.length, passed: true,
+      },
+    }
+  }
   const startedAt = Date.now()
   const budgetMs = deps.budgetMs ?? 60_000
   const applySeed = deps.applySeed ?? defaultApplySeed
@@ -226,17 +237,21 @@ export async function runTestEffectivenessGates(input: {
     const seedInfo = appliedInfo
     try {
       const rerun = await deps.runDriver()
-      const result: FaultKillResult = rerun.routing === 'pass' ? 'survived' : 'killed'
+      const result: FaultKillResult = rerun.routing === 'blocked' ? 'not_run' : rerun.routing === 'pass' ? 'survived' : 'killed'
       entries.push({
         fid,
         seed: appliedSeed,
         result,
         detail: result === 'survived'
-          ? `注入 ${appliedSeed}（${seedInfo.function ?? '?'}@L${seedInfo.line ?? '?'}）后驱动仍全绿——该验收点的测试没有证明任何东西`
+          ? `注入 ${appliedSeed}（${seedInfo.function ?? '?'}@L${seedInfo.line ?? '?'}）后驱动仍全绿；需核对注入目标与验收点的相关性及断言覆盖`
+          : result === 'not_run' ? `注入后复跑被环境阻塞：${rerun.routingReason ?? '原因未知'}；未取得击杀结论`
           : `注入 ${appliedSeed}（${seedInfo.function ?? '?'}@L${seedInfo.line ?? '?'}）被测试判红`,
       })
     } finally {
-      await restoreFile(entry)
+      if (!await restoreFile(entry)) {
+        return { mode: 'strict', audit, faultKill: { entries, executed: 0, killed: 0, survived: 0,
+          notApplicable: 0, notRun: input.p0Fids.length, passed: false, error: '故障注入后入口恢复失败，停止验证；必须恢复原文件后再交付' } }
+      }
     }
   }
 
@@ -246,6 +261,7 @@ export async function runTestEffectivenessGates(input: {
   const notApplicable = entries.filter((e) => e.result === 'not_applicable').length
   const notRun = entries.filter((e) => e.result === 'not_run').length
   return {
+    mode: 'strict',
     audit,
     faultKill: {
       entries,
@@ -271,6 +287,7 @@ export async function runVerifyEffectivenessPhase(input: {
   sandboxRoot: string | undefined
   contract: ProjectContract
   driverSpawn?: Parameters<typeof runContractDriver>[0]['spawn']
+  policy?: 'standard' | 'strict'
 }): Promise<TestEffectivenessOutcome | undefined> {
   let p0Fids: string[] | null = null
   try {
@@ -285,6 +302,7 @@ export async function runVerifyEffectivenessPhase(input: {
     contract: input.contract,
     p0Fids,
     entryFile: input.contract.entry,
+    includeMutation: input.policy === 'strict',
     deps: {
       runDriver: () => runContractDriver({
         contract: input.contract,
@@ -307,7 +325,7 @@ export function buildTestInvalidReject(outcome: TestEffectivenessOutcome, driver
     education:
       `测试脚本反空检查未过（永真断言/吞异常/无断言 ${findings.length} 处）：\n` +
       `${findings.slice(0, 10).map((f) => `- ${f.file} L${f.line}：${f.detail}`).join('\n')}\n` +
-      '这些测试永远不会变红——跑过不等于验证。请改写为真实断言（期望值独立于被测代码、异常让测试失败、每个场景至少一条可判定的 assert）后重新收口。',
+      '严格检查发现以上测试疑点。请核对具体分支与期望来源，修正测试基础设施或业务断言后重新收口；不要降低已确认的业务要求。',
   }
 }
 
@@ -322,6 +340,6 @@ export function buildFaultSurvivedReject(outcome: TestEffectivenessOutcome, repo
     education:
       `故障种子击杀未过（${survivedEntries.length} 个 P0 验收点的测试在注入已知缺陷后仍然全绿）：\n` +
       `${survivedEntries.map((e) => `- ${e.fid}：${e.detail ?? e.seed}`).join('\n')}\n` +
-      'survived 的测试没有证明任何东西——请为这些验收点补上真正会变红的断言（预期值独立写死、断言读取真实产物/状态）后重新收口。明细见 00_VERIFY/fault-kill-report.json。',
+      '请先核对种子实际修改的方法是否对应本验收点，再判断是否需要补充断言；种子存活不能单独证明所有测试无效。明细见 00_VERIFY/fault-kill-report.json。',
   }
 }

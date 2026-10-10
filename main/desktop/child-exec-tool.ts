@@ -88,29 +88,32 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
   return {
     name: 'run_project_script',
     description:
-      '真实运行项目根内的 Python 脚本（implement 子会话自测专用）：先 write_file 写好脚本再跑，' +
-      '当场看退出码/stdout/stderr 做红绿自测，绿了再交付。仅允许项目根内已存在的 .py；每次最长 90 秒；' +
+      '在项目目录真实执行 Python 自测：script 指向已有 .py，或 code 提供短代码（两者只能选一个，无需创建临时脚本）。' +
+      '当场看退出码/stdout/stderr 做红绿自测，绿了再交付。脚本须在项目根内；短代码在同一工作目录执行；缺省90秒、上限180秒；' +
       '全程至多 12 次。推荐输出用 `PASS/FAIL <场景名>` 行锚点（场景名与契约声明一致，平台复跑可对账）。' +
       'GUI 程序请写无头自测（构造逻辑对象断言，不要真开主循环）。',
     input_schema: {
       type: 'object',
       properties: {
         script: { type: 'string', description: '项目根内相对路径（如 自测.py），必须 .py 且已存在' },
+        code: { type: 'string', description: '单次 Python 短代码，最多 16000 字符；与 script 互斥，在项目目录执行，沿用相同解释器和环境隔离' },
         args: { type: 'array', items: { type: 'string' }, description: '传给脚本的参数（至多 8 个）' },
         timeout_ms: { type: 'number', description: `超时毫秒（${MIN_TIMEOUT_MS / 1000}s~${MAX_TIMEOUT_MS / 1000}s，缺省 90s）` },
       },
-      required: ['script'],
     },
     execute: async (input) => {
-      runs += 1
-      if (runs > maxRuns) {
+      if (runs >= maxRuns) {
         return {
           output: `执行预算用尽（${maxRuns} 次）：剩余工作请基于已有红绿结果收尾，如实把未验证项写进 DELIVERY.md，不要反复尝试。`,
           isError: true,
         }
       }
       const script = typeof input.script === 'string' ? input.script.trim() : ''
-      if (!script || isAbsolute(script)) {
+      const inlineCode = typeof input.code === 'string' ? input.code : ''
+      if (Boolean(script) === Boolean(inlineCode.trim()) || inlineCode.length > 16_000) {
+        return { output: '提供 script 或 code 中的一项；code 最多 16000 字符。', isError: true }
+      }
+      if (script && isAbsolute(script)) {
         return { output: 'script 必须是项目根内相对路径（如 自测.py），不接受绝对路径。', isError: true }
       }
       const project = findProject(projectId)
@@ -122,18 +125,18 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
       let target: string
       try {
         rootReal = realpathSync(root)
-        target = realpathSync(resolve(rootReal, script))
+        target = script ? realpathSync(resolve(rootReal, script)) : rootReal
       } catch {
         return { output: `脚本不存在：${script}（先 write_file 写入项目根再运行）`, isError: true }
       }
-      if (!target.startsWith(rootReal + sep)) {
+      if (script && !target.startsWith(rootReal + sep)) {
         return { output: `脚本越界：${script} 不在项目根内。`, isError: true }
       }
-      if (!target.toLowerCase().endsWith('.py')) {
+      if (script && !target.toLowerCase().endsWith('.py')) {
         return { output: `只允许运行 .py 脚本（当前：${script}）。`, isError: true }
       }
       try {
-        if (!statSync(target).isFile()) {
+        if (script && !statSync(target).isFile()) {
           return { output: `目标不是文件：${script}`, isError: true }
         }
       } catch {
@@ -160,9 +163,11 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
       }
 
       const startedAt = Date.now()
+      runs += 1
+      const label = script || '单次短代码'
       try {
         const { code, stdout, stderr } = await spawn({
-          command: [python, target, ...args],
+          command: [python, ...(script ? [target] : ['-c', inlineCode]), ...args],
           timeoutMs,
           env: buildChildExecEnv(process.env),
           cwd: rootReal,
@@ -171,7 +176,7 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
         const verdict = code === 0 ? '✅ 退出码 0（绿）' : `❌ 退出码 ${code}（红——按 stderr/失败断言修复后复跑）`
         return {
           output: [
-            `运行 ${script}${args.length > 0 ? ` ${args.join(' ')}` : ''}（真实执行，${durationMs}ms）`,
+            `运行 ${label}${args.length > 0 ? ` ${args.join(' ')}` : ''}（真实执行，${durationMs}ms）`,
             verdict,
             `--- stdout ---`,
             truncate(stdout, 8_000) || '（空）',
@@ -179,7 +184,7 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
             truncate(stderr, 2_000) || '（空）',
             `（剩余执行预算 ${maxRuns - runs}/${maxRuns} 次）`,
           ].join('\n'),
-          detail: { script, code, durationMs, run_index: runs },
+          detail: { script: label, code, durationMs, run_index: runs },
         }
       } catch (error) {
         if (error instanceof DriverExecutionError) {

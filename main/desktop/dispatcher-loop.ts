@@ -80,6 +80,7 @@ export interface DesktopDispatchRunInput {
   env: Record<string, string>
   maxTokens: number
   maxTurns?: number
+  verificationPolicy?: 'standard' | 'strict'
   signal: AbortSignal
   /** 事件流发布（接线层转发给渲染端/事件总线） */
   publish: (type: AgentEvent['type'], payload: Record<string, unknown>) => void
@@ -174,7 +175,7 @@ export function buildDesktopChildTools(projectId: string, role: DelegationRunRol
     // 方案 B（2026-10-05）：implement 子会话受控执行刀——quick 无契约时真实红绿
     // 自测的唯一通道（eba1cb83 实证：4 个自测脚本写了没门跑）；仅 implement 角色装配。
     // 迁移批同族加 install_packages（声明制 venv 安装，P1 依赖自由度）。
-    ...(role === 'implement'
+    ...(role === 'implement' || role === 'custom'
       ? [buildChildScriptRunnerTool(projectId), buildInstallPackagesTool(projectId)]
       : []),
     // 探索驱动测试 A 档（2026-10-05，实施稿预审修订版）：research 子会话装配驱动桥。
@@ -301,7 +302,7 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
   }
 
   const tools = wrapWithDispatcherGate(
-    [...buildDispatcherTools(input.projectId), ...(input.toolsOverride ?? [])],
+    [...buildDispatcherTools(input.projectId).filter((tool) => checkDispatcherToolGate(node, tool.name) === null), ...(input.toolsOverride ?? [])],
     node,
   )
 
@@ -327,7 +328,7 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     maxTokens: input.maxTokens,
     maxTurns: input.maxTurns ?? 40,
     delegationMaxTurns: DESKTOP_DELEGATION_MAX_TURNS,
-    delegationTurnLimits: { implement: 24, custom: 24 },
+    delegationTurnLimits: { implement: 32, custom: 32, research: node.id === 'desktop-verify' ? 24 : 12 },
     permissionMode: 'allow-all',
     temperature: categoryTemperature('mvp'),
     system: buildDesktopChildBaseSystem(node, {

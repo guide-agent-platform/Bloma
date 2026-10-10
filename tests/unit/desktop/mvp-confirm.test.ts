@@ -105,7 +105,7 @@ describe('holdForMvpConfirm（挂起）', () => {
     })
     const html = readFileSync(join(projectRoot, '00_VERIFY', 'mvp-review.html'), 'utf8')
     expect(html).toContain('本版本已确认能做（附验证方式）')
-    expect(html).toContain('7/9 场景 PASS——平台实际启动了程序')
+    expect(html).toContain('7/9 场景 PASS——平台执行了工程驱动')
     expect(html).toContain('程序能正常启动并显示界面')
     expect(html).toContain('目前限制')
     expect(html).toContain('平台检查没有发现已知限制')
@@ -205,6 +205,18 @@ describe('holdForMvpConfirm（挂起）', () => {
     expect(html).not.toContain('<script>')
     expect(html).toContain('&lt;script&gt;')
     expect(html).not.toContain('<img')
+  })
+
+  it('标准模式诊断疑点与未运行变异检查明确列为限制，不宣称全部检查通过', () => {
+    const { deps } = makeDeps()
+    mkdirSync(join(projectRoot, '00_VERIFY'), { recursive: true })
+    writeFileSync(join(projectRoot, '00_VERIFY', 'fault-kill-report.json'), JSON.stringify({ policy: 'standard', audit: { findings: [{ state: 'reject' }] }, faultKill: { entries: [], executed: 0, killed: 0, survived: 0, notApplicable: 0, notRun: 1 } }))
+    holdForMvpConfirm({ input, deps, fromPhase: 'desktop-verify', notice: { projectName: 'x', fromPhaseTitle: 'y', driverSummary: { passed: 9, total: 9 } } })
+    const html = readFileSync(join(projectRoot, '00_VERIFY', 'mvp-review.html'), 'utf8')
+    expect(html).toContain('测试诊断有 1 项待复核')
+    expect(html).toContain('未运行故障注入')
+    expect(html).not.toContain('自动检查已全部通过')
+    expect(html).not.toContain('全部被测试抓住')
   })
 
   it('击杀汇总行（批10.5 审查C 锚补）：fault-kill 报告存在时「测试有效性抽查」进已确认能做段', () => {

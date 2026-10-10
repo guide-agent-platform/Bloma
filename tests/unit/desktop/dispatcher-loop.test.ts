@@ -489,6 +489,24 @@ describe('装配面与累积器单元', () => {
       [{ type: 'text', text: '第二轮后半' }],
     ])
   })
+
+  it('模型只看到阶段可用工具；verify 可当场执行驱动，研究预算24/实现32', async () => {
+    const { registerParentLoopContext } = await import('../../../main/agent/delegation/agent-collaboration')
+    let offered: string[] = []
+    const input = baseInput({
+      query: async function* (_prompt, options) {
+        offered = (options.tools ?? []).map((tool: any) => tool.name)
+        yield textMessage('完成')
+      },
+    })
+    await runDesktopDispatcherLoop(input)
+    expect(offered).not.toContain('run_project_driver')
+    expect(DESKTOP_PHASES['desktop-verify'].extraTools).toContain('run_project_driver')
+    await runDesktopDispatcherLoop({ ...input, currentPhase: 'desktop-verify' })
+    expect(offered).toContain('run_project_driver')
+    expect(vi.mocked(registerParentLoopContext).mock.calls.at(-1)?.[1].delegationTurnLimits)
+      .toMatchObject({ research: 24, implement: 32, custom: 32 })
+  })
 })
 
 describe('委派通道接线腿（2026-09-26 首跑修复）', () => {
