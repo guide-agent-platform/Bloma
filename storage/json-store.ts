@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 
@@ -43,4 +43,30 @@ function basenameOf(path: string): string {
 export function appendJsonLine(path: string, value: unknown): void {
   mkdirSync(dirname(path), { recursive: true })
   appendFileSync(path, `${JSON.stringify(value)}\n`, 'utf8')
+}
+
+/**
+ * 文本原子写：参考本地 Proma bf3e98c safe-file.ts，独占随机临时文件后 rename。
+ * 替换失败时保留原文件并上抛，不回退直接覆盖（设置不能半写后假报保存成功）。
+ */
+export function writeTextFileAtomic(path: string, content: string): void {
+  mkdirSync(dirname(path), { recursive: true })
+  const tmpPath = join(dirname(path), `.${basenameOf(path)}.tmp-${randomBytes(12).toString('hex')}`)
+  let descriptor: number | undefined
+  let created = false
+  try {
+    descriptor = openSync(tmpPath, 'wx', 0o600)
+    created = true
+    writeFileSync(descriptor, content, 'utf8')
+    closeSync(descriptor)
+    descriptor = undefined
+    renameSync(tmpPath, path)
+  } finally {
+    if (descriptor !== undefined) {
+      try { closeSync(descriptor) } catch { /* 不掩盖原写入错误 */ }
+    }
+    if (created) {
+      try { unlinkSync(tmpPath) } catch { /* 已 rename 或清理失败，不影响原始结果 */ }
+    }
+  }
 }

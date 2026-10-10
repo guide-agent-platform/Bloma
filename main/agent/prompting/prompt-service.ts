@@ -1,7 +1,8 @@
-import { existsSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, unlinkSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { PromptSlotDetail, PromptSlotId, PromptSlotInfo } from '../../../shared/types'
 import { getPromptOverridePath, ensureDir } from '../../../storage/config-paths'
+import { writeTextFileAtomic } from '../../../storage/json-store'
 import { loadPromptOverride, promptOverrideNames } from './prompt-config'
 import { UX_SKETCH_SYSTEM_PROMPT } from './ux-sketch-prompt'
 import { DEFAULT_SYSTEM_PROMPT as PRD_DEFAULT } from '../../guide/prd-engine-llm'
@@ -113,11 +114,12 @@ export function readPromptSlot(promptId: PromptSlotId): PromptSlotDetail {
 export function savePromptSlot(promptId: PromptSlotId, content: string): { saved: true; prompt_id: PromptSlotId } {
   const slot = findSlot(promptId)
   if (!slot.enabled) throw new Error('VALIDATION_ERROR: prompt slot not enabled')
+  if (typeof content !== 'string') throw new Error('VALIDATION_ERROR: prompt content must be text')
   const trimmed = content.trim()
   if (!trimmed) throw new Error('VALIDATION_ERROR: prompt content must not be blank')
   const path = getPromptOverridePath(promptId)
   ensureDir(dirname(path))
-  writeFileSync(path, trimmed, 'utf8')
+  writeTextFileAtomic(path, trimmed)
   return { saved: true, prompt_id: promptId }
 }
 

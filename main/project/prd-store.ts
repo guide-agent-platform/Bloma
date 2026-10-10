@@ -14,6 +14,7 @@ import type {
   TemplateType,
 } from '../../shared/types'
 import { getDocumentsDir } from '../../storage/config-paths'
+import { writeTextFileAtomic } from '../../storage/json-store'
 import { findProject, readLastSketchRequirements } from './project-service'
 import { nextRequirementId } from '../coding/programming-orchestrator'
 import type { PrdBackplane, RequirementStatus, SketchRequirement } from '../coding/sketch-engine'
@@ -195,7 +196,12 @@ export function renamePrdProject(projectId: string, name: string): boolean {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as PrdBackplane
     if (!parsed || !Array.isArray(parsed.requirements)) return false
     if (typeof name !== 'string' || !name.trim()) return false
-    writeFileSync(path, renderPrdJson({ ...parsed, name: name.trim() }), 'utf8')
+    const updated = {
+      ...parsed,
+      name: name.trim(),
+      ...(parsed.prd_document ? { prd_document: parsed.prd_document.replace(/^#\s+PRD\s*[:：][^\r\n]*/m, () => `# PRD：${name.trim()}`) } : {}),
+    }
+    writeTextFileAtomic(path, renderPrdJson(updated))
     return true
   } catch {
     return false

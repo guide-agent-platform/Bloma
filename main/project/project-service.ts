@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import { rmSyncWithRetry } from '../platform/storage/fs-retry'
 import { cleanupPastedImages } from '../platform/shell/pasted-images'
+import { assertExportPathNotLink, resolveProjectExportTarget } from './export-target'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import type {
   ConfirmSketchInput,
@@ -168,6 +169,7 @@ export function unarchiveProject(input: ProjectUnarchiveInput): Project {
  * 与 createProject 的 initial_message 截断契约保持一致。
  */
 export function renameProject(input: ProjectRenameInput): Project {
+  if (typeof input.name !== 'string') throw new Error('VALIDATION_ERROR: name must be text')
   const name = (input.name ?? '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '').trim().slice(0, 32)
   if (name.length === 0) throw new Error('VALIDATION_ERROR: name must not be empty')
   const project = updateProject(input.project_id, { name, name_source: 'user', auto_named: true })
@@ -242,7 +244,7 @@ export function deleteProject(input: ProjectDeleteInput): { deleted: true } {
  */
 export function exportProject(input: ProjectExportInput, destination: string): ProjectExportResult {
   const project = findProject(input.project_id)
-  const target = join(destination, sanitizeFolderName(project.name))
+  const target = resolveProjectExportTarget(destination, project.name)
   copyDirRecursive(project.root_path, target)
   return { canceled: false, destination: target, file_count: countFiles(target) }
 }
@@ -252,20 +254,18 @@ export function exportProject(input: ProjectExportInput, destination: string): P
  * （不抛错、也不复制），改用 mkdirSync + copyFileSync 手动复制，中文项目名也安全。
  */
 function copyDirRecursive(src: string, dest: string): void {
+  assertExportPathNotLink(dest)
   mkdirSync(dest, { recursive: true })
   if (!existsSync(src)) return
   for (const entry of readdirSync(src, { withFileTypes: true })) {
     const srcPath = join(src, entry.name)
     const destPath = join(dest, entry.name)
     if (entry.isDirectory()) copyDirRecursive(srcPath, destPath)
-    else if (entry.isFile()) copyFileSync(srcPath, destPath)
+    else if (entry.isFile()) {
+      assertExportPathNotLink(destPath)
+      copyFileSync(srcPath, destPath)
+    }
   }
-}
-
-/** 把项目名清洗成可用的文件夹名：剔除 Windows/跨平台非法字符，空则回退占位名。 */
-function sanitizeFolderName(name: string): string {
-  const cleaned = name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '').trim()
-  return cleaned.length > 0 ? cleaned : '未命名项目'
 }
 
 /** 递归统计目录下文件数（只计普通文件，跳过子目录自身，防符号链接循环）。 */

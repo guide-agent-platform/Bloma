@@ -95,7 +95,7 @@ import {
   updateCategoryRoutingRoles,
 } from '../platform/llm/category-routing'
 import { listPromptSlots, readPromptSlot, resetPromptSlot, savePromptSlot } from '../agent/prompting/prompt-service'
-import { listDocuments, readDocument, syncDocuments, isPrdUserConfirmed } from '../project/document-engine'
+import { listDocuments, readDocument, syncDocuments, isPrdUserConfirmed, renamePrdProject } from '../project/document-engine'
 import { isCircuitBreakSettled, convergeStageFromEvidence, evaluateDiskArtifact } from '../project/recovery-service'
 import { runSandbox, stopSandbox } from '../delivery/sandbox'
 import { createSnapshot, listSnapshotDocuments, listSnapshots, loadSnapshotScreenshot, readSnapshotDocument, rollbackSnapshot } from '../delivery/snapshots'
@@ -246,7 +246,9 @@ export function registerProjectsIpc(ipcMain: IpcMain, mainWindow: BrowserWindow)
   ipcMain.handle(IPC_CHANNELS.PROJECT_RENAME, async (_event, payload: unknown) => {
     return safeInvoke(extractRequestId(payload), async () => {
       const input = requireFields<ProjectRenameInput>(payload, ['project_id', 'name'])
-      return renameProject(input)
+      const project = renameProject(input)
+      renamePrdProject(project.project_id, project.name)
+      return project
     })
   })
 

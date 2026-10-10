@@ -1,5 +1,5 @@
 import { resolve } from 'node:path'
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 
 export default defineConfig({
   root: resolve(__dirname, 'renderer'),
@@ -15,6 +15,8 @@ export default defineConfig({
   },
   test: {
     root: __dirname,
+    // 运行证据可能保留旧 *.test.ts 快照，不能被路径过滤误当成当前测试执行。
+    exclude: [...configDefaults.exclude, '**/run-artifacts/**'],
     // 并发上限（2026-10-03）：32 逻辑核下 vitest 默认开 ~30 个 worker，全量时 CPU/磁盘双满载、
     // 前台应用几乎不可用，且真实 IO 用例在争抢下单文件耗时膨胀 3~6 倍（实测：worktree
     // 9s→50s、project-git 4.3s→36s）。限 4 个 worker：机器可用性与总墙钟反而更好。

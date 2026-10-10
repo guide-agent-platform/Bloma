@@ -15,6 +15,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFi
 import { join } from 'node:path'
 import { getDocumentsDir } from '../../storage/config-paths'
 import { findProject } from '../project/project-service'
+import { assertExportPathNotLink, resolveProjectExportTarget } from '../project/export-target'
 import { buildExportManifest, exportManifestEnabled, MANIFEST_FILE, readProjectGitCommit, writeExportManifest } from '../coding/export-manifest'
 import type { ProjectExportInput, ProjectExportResult, Project } from '../../shared/types'
 
@@ -43,6 +44,7 @@ function readBackplaneForReadme(project: Project): ReadmeBackplane | null {
 
 /** 带排除的递归复制（mkdir+copyFile 手动实现——cpSync 对 Windows 非 ASCII 目标会静默失败，同 project-service 口径）。 */
 function copyProjectTree(src: string, dest: string): void {
+  assertExportPathNotLink(dest)
   mkdirSync(dest, { recursive: true })
   if (!existsSync(src)) return
   for (const entry of readdirSync(src, { withFileTypes: true })) {
@@ -50,6 +52,7 @@ function copyProjectTree(src: string, dest: string): void {
       if (EXPORT_EXCLUDE_DIRS.has(entry.name)) continue
       copyProjectTree(join(src, entry.name), join(dest, entry.name))
     } else if (entry.isFile()) {
+      assertExportPathNotLink(join(dest, entry.name))
       copyFileSync(join(src, entry.name), join(dest, entry.name))
     }
   }
@@ -160,18 +163,13 @@ function countFiles(dir: string): number {
   return count
 }
 
-function sanitizeFolderName(name: string): string {
-  const cleaned = name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '').trim()
-  return cleaned.length > 0 ? cleaned : '未命名项目'
-}
-
 /**
  * 导出项目（移交增强版）：复制到 destination/项目名/ 并生成 README.md 与 .gitignore。
  * 幂等：README/.gitignore 仅在目标不存在时写入；已有文件一律以项目内容为准。
  */
 export function exportProjectHandoff(input: ProjectExportInput, destination: string): ProjectExportResult {
   const project = findProject(input.project_id)
-  const target = join(destination, sanitizeFolderName(project.name))
+  const target = resolveProjectExportTarget(destination, project.name)
   copyProjectTree(project.root_path, target)
 
   const backplane = readBackplaneForReadme(project)
