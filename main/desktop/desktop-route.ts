@@ -291,7 +291,7 @@ export async function handleDesktopDispatchMessage(
       await runDesktopStage(input, input.query, input.env, 'desktop-verify', deps, projectName, 0)
       return
     }
-    if (!await ensureCoreDelivery(input, deps, feedback => runDesktopStage({ ...input, content: feedback, initialMessagePersisted: false }, input.query, input.env, 'desktop-implement', deps, projectName, 0))) return
+    if (!await ensureCoreDelivery(input, deps, feedback => runDesktopStage({ ...input, content: feedback, initialMessagePersisted: false }, input.query, input.env, 'desktop-implement', deps, projectName, 0, true))) return
     // 收口矩阵补齐（批11 审查修复，2026-10-08）：确认交付时若仍有活跃纠错会话——kill 实例；
     // 有未发送选区则如实告知已丢弃（不静默吞掉用户的点选，也不拦住交付决策）。
     if (hasActiveCorrectionSession(input.projectId)) {
@@ -434,6 +434,7 @@ async function runDesktopStage(
   deps: DesktopRouteDeps,
   projectName: string,
   chainDepth: number,
+  coreRepair = false,
 ): Promise<void> {
   const node = getDesktopPhase(phaseId)
   if (!node) {
@@ -453,7 +454,7 @@ async function runDesktopStage(
   // 断链后的重入）时注入勿重验结论；跨阶段不注入（旧结论不作数）。
   const checkpoint = project?.desktop_checkpoint
   const currentFingerprint = checkpoint ? verificationFingerprint(sandboxRoot, { stage: phaseId, requirements: requirementsDigest ?? '' }) : undefined
-  const verifiedConclusion = checkpoint && currentFingerprint && checkpoint.fingerprint === currentFingerprint && checkpoint.stage === phaseId && checkpoint.verified_gates.length > 0
+  const verifiedConclusion = !coreRepair && checkpoint && currentFingerprint && checkpoint.fingerprint === currentFingerprint && checkpoint.stage === phaseId && checkpoint.verified_gates.length > 0
     ? buildCheckpointConclusion(checkpoint, getNextDesktopPhase(phaseId), currentFingerprint)
     : undefined
 
@@ -576,7 +577,7 @@ async function settleDesktopStage(
       if (finalPhase === 'delivered') {
         if (!await ensureCoreDelivery(input, deps, async feedback => {
           updateProject(input.projectId, { desktop_phase: 'desktop-implement' })
-          await runDesktopStage({ ...input, content: feedback, initialMessagePersisted: false }, query, env, 'desktop-implement', deps, projectName, chainDepth)
+          await runDesktopStage({ ...input, content: feedback, initialMessagePersisted: false }, query, env, 'desktop-implement', deps, projectName, chainDepth, true)
         })) return
         const gateProject = findProject(input.projectId)
         if (gateProject?.mode === 'longterm' && !isMvpConfirmPending(input.projectId)) {
@@ -623,7 +624,7 @@ async function settleDesktopStage(
     if (next === 'desktop-verify') {
       const project = findProject(input.projectId)
       if (project?.mode === 'quick') {
-        if (!await ensureCoreDelivery(input, deps, feedback => runDesktopStage({ ...input, content: feedback, initialMessagePersisted: false }, query, env, 'desktop-implement', deps, projectName, chainDepth))) return
+        if (!await ensureCoreDelivery(input, deps, feedback => runDesktopStage({ ...input, content: feedback, initialMessagePersisted: false }, query, env, 'desktop-implement', deps, projectName, chainDepth, true))) return
         const securityGate = deps.securityScan
           ? deps.securityScan(input.projectId)
           : defaultQuickSecurityGate(input.projectId)

@@ -1,0 +1,19 @@
+{
+  "case_id":"voice-quick",
+  "ready":"document.readyState === 'complete' && !!document.querySelector('#btn-start')",
+  "steps":[
+    {"kind":"write_file","name":"制造一次输入准备失败","file":"init-failure.once","text":"one controlled test failure"},
+    {"kind":"js","name":"真实点击开始触发失败","expression":"document.querySelector('#btn-start').click(); true"},
+    {"kind":"expect","name":"失败原因上屏且允许重试","timeout_seconds":30,"expression":"document.querySelector('#status-text').textContent.includes('失败') && !document.querySelector('#btn-retry').hidden && document.body.innerText.includes('固定测试')"},
+    {"kind":"js","name":"真实点击重试","expression":"document.querySelector('#btn-retry').click(); true"},
+    {"kind":"expect","name":"重试进入录音态","timeout_seconds":30,"expression":"!document.querySelector('#btn-stop').disabled && document.querySelector('#status-text').textContent.includes('录音')"},
+    {"kind":"expect","name":"固定音频经真实模型完整上屏","timeout_seconds":30,"expression":"document.querySelector('#text-area').textContent.replace(/[^0-9A-Za-z\\u4e00-\\u9fff]/g,'')==='我们下周四下午3点开会'"},
+    {"kind":"js","name":"真实点击停止","expression":"document.querySelector('#btn-stop').click(); true"},
+    {"kind":"expect","name":"停止状态与完整文字保留","expression":"document.querySelector('#status-text').textContent.includes('已停止') && document.querySelector('#btn-stop').disabled && !document.querySelector('#btn-start').disabled && document.querySelector('#text-area').textContent.replace(/[^0-9A-Za-z\\u4e00-\\u9fff]/g,'')==='我们下周四下午3点开会'"},
+    {"kind":"js","name":"同一进程再次点击开始","expression":"document.querySelector('#btn-start').click(); true"},
+    {"kind":"expect","name":"新一轮清掉旧完整文字并恢复录音","expression":"!document.querySelector('#btn-stop').disabled && document.querySelector('#text-area').textContent.replace(/[^0-9A-Za-z\\u4e00-\\u9fff]/g,'')!=='我们下周四下午3点开会'"},
+    {"kind":"expect","name":"第二轮真实识别再次完整上屏","timeout_seconds":30,"expression":"document.querySelector('#text-area').textContent.replace(/[^0-9A-Za-z\\u4e00-\\u9fff]/g,'')==='我们下周四下午3点开会'"},
+    {"kind":"js","name":"结束第二轮测试采集","expression":"document.querySelector('#btn-stop').click(); true"},
+    {"kind":"expect","name":"第二轮停止保持最终文字","expression":"document.querySelector('#status-text').textContent.includes('已停止') && document.querySelector('#text-area').textContent.replace(/[^0-9A-Za-z\\u4e00-\\u9fff]/g,'')==='我们下周四下午3点开会'"}
+  ]
+}

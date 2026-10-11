@@ -1,0 +1,32 @@
+{
+  "case_id": "ledger-quick",
+  "ready": "document.readyState === 'complete' && !!document.querySelector('#btn-save')",
+  "steps": [
+    {"kind":"js","name":"录入固定金额12.5","expression":"document.querySelector('#inp-date').value='2026-10-01'; document.querySelector('#inp-amount').value='12.5'; document.querySelector('#inp-note').value='固定-12.5'; document.querySelector('#btn-save').click(); true"},
+    {"kind":"expect","name":"第一条真实上屏","expression":"document.querySelectorAll('#rows tr').length===1 && document.querySelector('#sum-total').textContent==='12.50'"},
+    {"kind":"js","name":"录入固定金额20","expression":"document.querySelector('#inp-date').value='2026-10-02'; document.querySelector('#inp-amount').value='20'; document.querySelector('#inp-note').value='固定-20'; document.querySelector('#btn-save').click(); true"},
+    {"kind":"expect","name":"界面两条合计32.5","expression":"document.querySelectorAll('#rows tr').length===2 && document.querySelector('#sum-total').textContent==='32.50' && document.querySelector('#rows').textContent.includes('固定-12.5') && document.querySelector('#rows').textContent.includes('固定-20')"},
+    {"kind":"disk_records","name":"磁盘金额与固定期望一致","file":"records.json","amounts":[12.5,20]},
+    {"kind":"snapshot","name":"保存非法输入前的磁盘字节","file":"records.json"},
+    {"kind":"js","name":"通过界面提交非法金额","expression":"document.querySelector('#inp-amount').value='abc'; document.querySelector('#inp-note').value='保留备注'; document.querySelector('#btn-save').click(); true"},
+    {"kind":"expect","name":"拒绝非法输入并保留填写内容","expression":"document.querySelectorAll('#rows tr').length===2 && document.querySelector('#err-amount').textContent.length>0 && document.querySelector('#inp-note').value==='保留备注' && !document.querySelector('#btn-save').disabled"},
+    {"kind":"unchanged","name":"非法输入未改变存储","file":"records.json"},
+    {"kind":"restart","name":"关闭旧进程并用相同数据启动新进程"},
+    {"kind":"expect","name":"新进程恢复两条与32.5合计","expression":"document.querySelectorAll('#rows tr').length===2 && document.querySelector('#sum-total').textContent==='32.50'"},
+    {"kind":"lock","name":"独占测试存储文件制造真实写入失败","file":"records.json"},
+    {"kind":"js","name":"写入失败时仍通过保存按钮提交","expression":"document.querySelector('#inp-amount').value='8.5'; document.querySelector('#inp-note').value='失败后重试'; document.querySelector('#btn-save').click(); true"},
+    {"kind":"expect","name":"写入失败明确提示且没有伪新增","expression":"document.body.innerText.includes('保存失败') && document.querySelectorAll('#rows tr').length===2 && document.querySelector('#sum-total').textContent==='32.50' && document.querySelector('#inp-note').value==='失败后重试' && !document.querySelector('#btn-save').disabled"},
+    {"kind":"unlock","name":"解除测试文件独占锁","file":"records.json"},
+    {"kind":"unchanged","name":"失败后原磁盘字节仍一致","file":"records.json"},
+    {"kind":"js","name":"环境恢复后重试同一保存操作","expression":"document.querySelector('#btn-save').click(); true"},
+    {"kind":"expect","name":"重试成功合计41","expression":"document.querySelectorAll('#rows tr').length===3 && document.querySelector('#sum-total').textContent==='41.00'"},
+    {"kind":"disk_records","name":"重试成功后实际落盘","file":"records.json","amounts":[12.5,20,8.5]},
+    {"kind":"js","name":"选择固定12.5的记录删除","expression":"Array.from(document.querySelectorAll('#rows tr')).find(r=>r.textContent.includes('固定-12.5')).querySelector('[data-bloma-id=\"action.delete\"]').click(); true"},
+    {"kind":"expect","name":"显示删除确认","expression":"!!document.querySelector('[data-bloma-id=\"action.confirm-delete\"]')"},
+    {"kind":"js","name":"确认删除指定记录","expression":"document.querySelector('[data-bloma-id=\"action.confirm-delete\"]').click(); true"},
+    {"kind":"expect","name":"只删除指定记录并重算28.5","expression":"document.querySelectorAll('#rows tr').length===2 && document.querySelector('#sum-total').textContent==='28.50' && !document.querySelector('#rows').textContent.includes('固定-12.5')"},
+    {"kind":"disk_records","name":"删除后的磁盘记录准确","file":"records.json","amounts":[20,8.5]},
+    {"kind":"restart","name":"恢复与删除后再启新进程"},
+    {"kind":"expect","name":"第二次重启保持最终28.5状态","expression":"document.querySelectorAll('#rows tr').length===2 && document.querySelector('#sum-total').textContent==='28.50'"}
+  ]
+}

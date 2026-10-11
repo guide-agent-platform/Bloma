@@ -32,7 +32,10 @@ const opt = (name, fallback) => {
 
 const REPO = resolve(opt('repo', '.'))
 /** 运行产物统一目录（2026-10-08 治理：报告不再散落仓库根） */
-const REPORT_DIR = join(REPO, 'run-artifacts')
+const REPORT_DIR = resolve(opt('report-dir', join(REPO, 'run-artifacts')))
+const HOME = resolve(opt('home', process.env.PROMA_HOME || join(homedir(), '.proma')))
+const ISOLATED_HOME = HOME !== resolve(join(homedir(), '.proma'))
+const USER_DATA = join(HOME, 'electron-user-data')
 mkdirSync(REPORT_DIR, { recursive: true })
 // --request-file（2026-10-06 事故根治）：需求走文件不走命令行——PowerShell 5.1 的
 // Start-Process -ArgumentList 会按空格拆参数，「做一个 Windows 桌面…」传到 argv 只剩
@@ -54,6 +57,8 @@ if (!['quick', 'longterm'].includes(MODE)) {
 }
 const PROBE_ONLY = flag('probe-only')
 const KEEP_OPEN = flag('keep-open')
+// Frozen robustness cases must not receive synthetic UI feedback or extra time.
+const FIXED_CASE = flag('fixed-case')
 
 if (!PROBE_ONLY && !REQUEST) {
   console.error('用法：node scripts/dogfood-run.mjs --request "需求文本" | --request-file <path> | --probe-only')
@@ -77,7 +82,7 @@ function findRunningInstance() {
   }
 }
 const runningPid = findRunningInstance()
-if (runningPid) {
+if (runningPid && !ISOLATED_HOME) {
   console.error(`[dogfood] 检测到 Bloma 已在运行（pid=${runningPid}）——双实例共享 ~/.proma 有竞态风险。请先关闭它再跑自动驾驶。`)
   process.exit(3)
 }
@@ -91,13 +96,21 @@ class Cdp {
     ws.addEventListener('message', (event) => {
       const msg = JSON.parse(String(event.data))
       if (msg.id && this.pending.has(msg.id)) {
-        const { resolve, reject } = this.pending.get(msg.id)
+        const { resolve, reject, timer } = this.pending.get(msg.id)
+        clearTimeout(timer)
         this.pending.delete(msg.id)
         if (msg.error) reject(new Error(`${msg.error.message} ${msg.error.data ?? ''}`))
         else resolve(msg.result)
       }
     })
-    this.closed = new Promise((resolveClose) => ws.addEventListener('close', resolveClose))
+    this.closed = new Promise((resolveClose) => ws.addEventListener('close', () => {
+      for (const { reject, timer } of this.pending.values()) {
+        clearTimeout(timer)
+        reject(new Error('Test browser connection closed'))
+      }
+      this.pending.clear()
+      resolveClose()
+    }))
   }
 
   static async connect(port, deadlineMs) {
@@ -124,9 +137,14 @@ class Cdp {
   }
 
   send(method, params = {}) {
+    if (this.ws.readyState !== 1) return Promise.reject(new Error('Test browser is not connected'))
     const id = ++this.seq
     return new Promise((resolvePromise, rejectPromise) => {
-      this.pending.set(id, { resolve: resolvePromise, reject: rejectPromise })
+      const timer = setTimeout(() => {
+        this.pending.delete(id)
+        rejectPromise(new Error(`CDP command timed out: ${method}`))
+      }, 15000)
+      this.pending.set(id, { resolve: resolvePromise, reject: rejectPromise, timer })
       this.ws.send(JSON.stringify({ id, method, params }))
     })
   }
@@ -212,7 +230,7 @@ const CLICK_BUTTON_BY_TEXT = `(text) => {
 
 // ── 项目发现（交付检测 / findings 读取）──
 function findWorkspaceProjectsRoots() {
-  const base = join(homedir(), '.proma', 'agent-workspaces')
+  const base = join(HOME, 'agent-workspaces')
   try {
     return readdirSync(base)
       .filter((name) => existsSync(join(base, name, 'generated-projects')))
@@ -356,7 +374,7 @@ function readExplorationStatus(projectDir) {
 
 function readProjectRecord(projectId) {
   try {
-    const parsed = JSON.parse(readFileSync(join(homedir(), '.proma', 'projects.json'), 'utf8'))
+    const parsed = JSON.parse(readFileSync(join(HOME, 'projects.json'), 'utf8'))
     const items = Array.isArray(parsed) ? parsed : (parsed.projects ?? [])
     return items.find((p) => p.project_id === projectId) ?? null
   } catch {
@@ -370,7 +388,7 @@ function readShapeSection(project) {
   const section = {}
   try {
     const prdPath = join(
-      homedir(), '.proma', 'agent-workspaces', project.workspace_slug ?? 'default',
+      HOME, 'agent-workspaces', project.workspace_slug ?? 'default',
       'documents', project.id, 'prd.json',
     )
     const prd = JSON.parse(readFileSync(prdPath, 'utf8'))
@@ -409,6 +427,9 @@ function readShapeSection(project) {
 
 // ── 主流程 ──
 const report = {
+  home: HOME,
+  isolated_home: ISOLATED_HOME,
+  fixed_case: FIXED_CASE,
   run_id: randomUUID().slice(0, 8),
   started_at: new Date().toISOString(),
   request: REQUEST,
@@ -454,18 +475,32 @@ async function cleanup() {
 let cdp = null
 
 try {
-  log(`启动 Bloma（CDP port=${report.port}，真实 home）`)
+  log(`启动 Bloma（CDP port=${report.port}，${ISOLATED_HOME ? '隔离 home' : '真实 home'}）`)
   // 主进程 stdio 落盘（批11.8，2026-10-08）：[streamSSE]/[providers-query] 等传输层
   // 警告此前被 ignore 丢弃——740s 挂死轮排查全程无日志可查，只能逆向 JSONL 破案
   const mainLogPath = join(REPORT_DIR, 'bloma-main.log')
   const mainLog = openSync(mainLogPath, 'a')
-  electronChild = spawn(ELECTRON, ['.', '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${report.port}`], {
+  electronChild = spawn(ELECTRON, ['.', '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${report.port}`, ...(ISOLATED_HOME ? [`--user-data-dir=${USER_DATA}`, `--bloma-home=${HOME}`] : [])], {
     cwd: REPO,
+    env: { ...process.env, PROMA_HOME: HOME },
+    windowsHide: true,
     stdio: ['ignore', mainLog, mainLog],
     detached: false,
   })
   log(`主进程日志：${mainLogPath}`)
   cdp = await Cdp.connect(report.port, 40_000)
+  if (ISOLATED_HOME) {
+    await cdp.eval(`(() => {
+      const banner = document.createElement('div');
+      banner.dataset.aiId = 'bloma-test-run-banner';
+      banner.textContent = '自动测试进行中 · 请保留此窗口，结束后会通知你';
+      banner.style.cssText = 'position:fixed;top:38px;left:50%;transform:translateX(-50%);z-index:2147483647;padding:8px 16px;border:1px solid rgba(110,130,150,.18);border-radius:14px;background:rgba(255,255,255,.92);backdrop-filter:blur(18px);color:#394354;font:13px system-ui;pointer-events:none;box-shadow:0 4px 20px rgba(25,40,60,.07)';
+      document.body.appendChild(banner);
+      document.title = 'Bloma · 自动测试进行中';
+      return true;
+    })()`)
+    log('测试窗口提示已显示：测试结束前请保留窗口，关闭会中断当前任务')
+  }
   log('CDP 已连接渲染页')
 
   // 等驾驶面就绪
@@ -558,7 +593,7 @@ try {
         try {
           const { readdirSync, readFileSync, statSync } = await import('node:fs')
           const { join: pathJoin } = await import('node:path')
-          const dir = pathJoin(homedir(), '.proma', 'agent-sessions')
+          const dir = pathJoin(HOME, 'agent-sessions')
           for (const name of readdirSync(dir).filter((n) => n.endsWith('.jsonl'))) {
             const full = pathJoin(dir, name)
             if (statSync(full).mtimeMs < sentAt) continue
@@ -569,8 +604,10 @@ try {
       }
       log(`会话落盘验证：${landed ? `OK（${landed}）` : 'FAIL（无新建会话含需求尾句）'}`)
       if (landed) break
+      const mainLog = readFileSync(join(REPORT_DIR, 'bloma-main.log'), 'utf8')
+      if (mainLog.includes('NO_USABLE_CHANNEL')) throw new Error('环境阻塞：测试实例没有可用渠道；停止重复提交需求')
       sendResult = { ok: false, err: 'session-not-persisted' }
-      log('需求未落到会话——主进程丢消息，重试')
+      log('需求未落到会话——原因未确定，有限重试')
     }
     if (sendResult?.ok) break
     await sleep(2000)
@@ -627,6 +664,23 @@ try {
         blockedLastLog = Date.now()
         log(`项目 blocked_for_user_decision（${rec.desktop_phase ?? ''}）——页面尾迹：${(state.tail ?? '').slice(-160).split(String.fromCharCode(10)).join(' ')}`)
       }
+      if (FIXED_CASE && rec?.current_stage === 'blocked_for_user_decision' && quietTicks >= 10 && rec.last_session_id) {
+        try {
+          const rows = readFileSync(join(HOME, 'agent-sessions', `${rec.last_session_id}.jsonl`), 'utf8').trim().split(/\r?\n/)
+          const terminal = JSON.parse(rows.at(-1))
+          const text = (terminal.content ?? []).filter(c => c.type === 'text').map(c => c.text).join('\n')
+          const sessions = JSON.parse(readFileSync(join(HOME, 'bloma-agent-sessions.json'), 'utf8')).sessions ?? []
+          const runningChild = sessions.some(s => s.project_id === project.id && s.source_delegation_id && s.status === 'active')
+          if (/^\[terminal\] status=/.test(text) && terminal.timestamp >= Date.parse(rec.updated_at) && !runningChild) {
+            report.outcome = 'generation-stopped'
+            report.terminal_status = text
+            const corePath = join(project.dir, '00_VERIFY/core-verification.json')
+            if (existsSync(corePath)) report.core_report = JSON.parse(readFileSync(corePath, 'utf8'))
+            log(`生成循环已结束，项目未交付；保存 ${report.core_report?.status ?? '未形成核心结果'} 证据，停止空等`)
+            break
+          }
+        } catch { /* incomplete state read: retain the fixed deadline */ }
+      }
     }
 
     // 卡应答（优先级：PRD 确认 > UX 确认 > MVP 策略 > 委托/澄清）
@@ -649,7 +703,7 @@ try {
       action = { id: '__requirement_submit', raw: 'requirement-confirm-submit', why: '需求清单确认（自动）' }
     } else if (overlays.clarification) {
       action = { id: '__clarify_auto', raw: 'clarification-option-auto', why: `澄清委托（${clarifyAuto?.label ?? '你帮我决定'}）` }
-    } else if (pick('ux_confirm_go') && !sketchRoundDone) {
+    } else if (pick('ux_confirm_go') && !sketchRoundDone && !FIXED_CASE) {
       // 草图点选轮（批11.7）：模拟注入层 postMessage 回传标记→浮条「发送调整意见」→
       // takeUxSketchCorrection 一步消化（有界回炉重画一轮）——二轮 UX 卡再确认
       sketchRoundDone = true
@@ -667,7 +721,7 @@ try {
       action = { id: 'ux_confirm_go', why: 'UX 草图确认（自动）' }
     } else if (pick('ux_delegate')) {
       action = { id: 'ux_delegate', why: 'UX 委托开工（自动）' }
-    } else if (pick('mvp_pick') && !pickRoundDone) {
+    } else if (pick('mvp_pick') && !pickRoundDone && !FIXED_CASE) {
       // MVP 点点看轮（批11.7）：点「先在程序里点点看」→平台拉起修改预览实例（可见窗口+
       // 页内点选层）→经 meta.json 发现 drivePort→CorrectionSimulate 程序化点选×2+done→
       // 聊天打字补充反馈（attachActiveCorrectionFeedback 自动并入 picks 回炉）→
@@ -693,8 +747,10 @@ try {
         report.p0_titles = p0
         // 回炉轮加时（2026-10-06 狗粮 1c953320 实证：探索+回炉双轮 45min 不够，
         // 回炉被超时截停）——deadline 是 const，用 mutable 延长点顺延 20 分钟
-        deadlineExtendMs += 20 * 60_000
-        log(`回炉轮顺延超时 +20min（原 ${TIMEOUT_MIN}min）`)
+        if (!FIXED_CASE) {
+          deadlineExtendMs += 20 * 60_000
+          log(`回炉轮顺延超时 +20min（原 ${TIMEOUT_MIN}min）`)
+        } else log('固定案例：修复仍计入初始时限')
         action = { id: 'mvp_adjust', why: `MVP 回炉（P0×${p0.length}：${p0[0]}）`, feedback: `修复探索发现的 P0 问题：${p0.join('；')}。修完重新走验收。` }
       } else {
         log(`二轮仍有 P0（${p0.length} 项）——停住出报告，等你拍板`)

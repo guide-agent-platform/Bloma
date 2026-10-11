@@ -153,4 +153,14 @@ describe('install_packages（声明制 venv 安装刀）', () => {
     const otherRoot = createProject({ request_id: 'req-install-other', mode: 'quick' }).root_path
     expect(existsSync(join(otherRoot, 'speech_locator.py'))).toBe(false)
   })
+  it('materializes the prefix-plan guard without overwriting an existing product helper', async () => {
+    const tool = buildInstallPackagesTool(projectId, { spawn: makeSpawn([{ match: cmd => cmd.includes('pip'), code: 0 }]) })
+    const first = await tool.execute({ packages: ['pywebview'] }, ctxFor(projectId))
+    const path = join(projectRoot, 'file_plan_guard.py')
+    expect(first.isError).toBeFalsy()
+    expect(readFileSync(path, 'utf8')).toContain('def validate_prefix_plan(')
+    writeFileSync(path, '# existing product helper')
+    await tool.execute({ packages: ['pywebview'] }, ctxFor(projectId))
+    expect(readFileSync(path, 'utf8')).toBe('# existing product helper')
+  })
 })

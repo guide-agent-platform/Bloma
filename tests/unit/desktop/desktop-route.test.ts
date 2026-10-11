@@ -119,6 +119,28 @@ describe('required delivery evidence', () => {
     await handleDesktopDispatchMessage(routeInput({ query }), collectorDeps().deps)
     expect(system).not.toContain('【上一轮已验证结论】')
   })
+  it('core repair does not inherit a matching completed-phase checkpoint', async () => {
+    record.mode = 'quick'
+    record.desktop_phase = 'desktop-implement'
+    ;(record as Record<string, unknown>).desktop_checkpoint = { stage: 'desktop-implement', at: '',
+      verified_gates: ['delivery-doc: 产物核验通过'],
+      fingerprint: verificationFingerprint(sandboxRoot, { stage: 'desktop-implement', requirements: '' }) }
+    let coreChecks = 0, initialSystem = '', repairSystem = ''
+    const query: SDKQuery = async function* (_prompt, options) {
+      const system = String(options.messages?.[0]?.content ?? '')
+      if (!coreChecks) initialSystem ||= system
+      else repairSystem ||= system
+      yield textMessage('PHASE_ADVANCE: desktop-verify')
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+    await handleDesktopDispatchMessage(routeInput({ query }), collectorDeps({ coreVerification: async () => ({
+      status: ++coreChecks === 1 ? 'unverified' : 'passed', summary: '检查结果', checked_at: '',
+      missing: coreChecks === 1 ? ['缺少核心验证入口'] : [], evidence: [],
+    }) }).deps)
+    expect(coreChecks).toBe(2)
+    expect(initialSystem).toContain('【上一轮已验证结论】')
+    expect(repairSystem).not.toContain('【上一轮已验证结论】')
+  })
 })
 
 // ── 构造面 ──

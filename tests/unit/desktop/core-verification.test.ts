@@ -3,8 +3,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../../../main/project/document-engine', () => ({ readPrdBackplane: vi.fn() }))
+vi.mock('../../../main/desktop/file-verification', () => ({ runHostPrefixRenameProbe: vi.fn() }))
 import { readPrdBackplane } from '../../../main/project/document-engine'
 import { runCoreVerification, CORE_REPORT_REL } from '../../../main/desktop/core-verification'
+import { runHostPrefixRenameProbe } from '../../../main/desktop/file-verification'
 
 let root: string
 beforeEach(() => {
@@ -21,6 +23,16 @@ const run = (code = 0, stdout = 'PASS actual input') => runCoreVerification({ pr
   spawn: async () => ({ code, stdout, stderr: '' }) })
 
 describe('shared core delivery', () => {
+  it('host filesystem counterexamples override product-authored passing assertions', async () => {
+    vi.mocked(readPrdBackplane).mockReturnValue({ requirements: [{ id: 'F-001', description: '文件前缀改名', priority: 'P0' }] } as never)
+    manifest()
+    vi.mocked(runHostPrefixRenameProbe).mockResolvedValue({ probe_version: 1, status: 'failed', tests: [{ name: 'escaped_target', passed: false }] })
+    expect((await run()).status).toBe('failed')
+    vi.mocked(runHostPrefixRenameProbe).mockResolvedValue({ probe_version: 1, status: 'environment_blocked', error: 'unsupported interface' })
+    expect((await run()).status).toBe('environment_blocked')
+    vi.mocked(runHostPrefixRenameProbe).mockResolvedValue({ probe_version: 1, status: 'passed' })
+    expect((await run()).status).toBe('passed')
+  })
   it('missing execution evidence is unverified, never green', async () => {
     expect((await run()).status).toBe('unverified')
     expect(JSON.parse(readFileSync(join(root, CORE_REPORT_REL), 'utf8')).status).toBe('unverified')
@@ -39,7 +51,10 @@ describe('shared core delivery', () => {
     vi.mocked(readPrdBackplane).mockReturnValue({ requirements: [{ id: 'F-001', description: '语音录入', priority: 'P0' }] } as never)
     for (const input of ['gui', 'audio', 'microphone', 'mock']) {
       manifest(input)
-      expect((await run()).status).toBe('unverified')
+      const result = await run()
+      expect(result.status).toBe('unverified')
+      expect(result.missing.some(m => m.includes('ASR 入口登记'))).toBe(true)
+      expect(result.missing.some(m => m.includes('采集链路待授权'))).toBe(false)
     }
   })
   it('rejects undeclared feature ids and scripts outside the project', async () => {
@@ -48,5 +63,49 @@ describe('shared core delivery', () => {
     data.command[1] = '../outside.py'
     writeFileSync(join(root, 'CORE_CHECK.json'), JSON.stringify(data))
     expect((await run()).status).toBe('unverified')
+  })
+  it('reuses separately registered GUI tests without borrowing their evidence from logic output', async () => {
+    writeFileSync(join(root, 'test_ui.py'), '# existing GUI test')
+    const data = { schema_version: 1, command: ['python', 'core_check.py'], gui_command: ['python', 'test_ui.py'],
+      scenarios: [{ name: 'logic case', covers: ['F-001'], input: 'logic' }, { name: 'GUI case', covers: ['F-001'], input: 'gui' }] }
+    writeFileSync(join(root, 'CORE_CHECK.json'), JSON.stringify(data))
+    const calls: Array<readonly string[]> = []
+    let guiOutput = 'PASS GUI case'
+    const execute = () => runCoreVerification({ projectId: 'p', sandboxRoot: root, spawn: async ({ command }) => {
+      calls.push(command)
+      return { code: 0, stdout: command.includes('test_ui.py') ? guiOutput : 'PASS logic case\nPASS GUI case', stderr: '' }
+    } })
+    expect((await execute()).status).toBe('passed')
+    expect(calls).toHaveLength(2)
+    guiOutput = 'PASS unrelated case'
+    const missing = await execute()
+    expect(missing.status).toBe('unverified')
+    expect(missing.evidence.find(e => e.input === 'gui')?.outcome).toBe('unverified')
+    guiOutput = 'FAIL GUI case'
+    expect((await execute()).status).toBe('failed')
+    data.gui_command[1] = '../test_ui.py'
+    writeFileSync(join(root, 'CORE_CHECK.json'), JSON.stringify(data))
+    expect((await execute()).status).toBe('unverified')
+  })
+  it('does not discard an unverified registered scenario just because another covers the same feature', async () => {
+    writeFileSync(join(root, 'CORE_CHECK.json'), JSON.stringify({ schema_version: 1, command: ['python', 'core_check.py'],
+      scenarios: [{ name: 'positive GUI', covers: ['F-001'], input: 'gui' }, { name: 'write failure recovery', covers: ['F-001'], input: 'logic' }] }))
+    const result = await run(0, 'PASS positive GUI')
+    expect(result.status).toBe('unverified')
+    expect(result.missing.some(m => m.includes('write failure recovery'))).toBe(true)
+  })
+  it('records an explicitly registered GUI execution without requiring duplicate feature mapping', async () => {
+    writeFileSync(join(root, 'gui_check.py'), '# existing GUI test')
+    writeFileSync(join(root, 'CORE_CHECK.json'), JSON.stringify({ schema_version: 1, command: ['python', 'core_check.py'],
+      gui_command: ['python', 'gui_check.py'], scenarios: [{ name: 'core feature', covers: ['F-001'], input: 'logic' }] }))
+    const execute = (output: string) => runCoreVerification({ projectId: 'p', sandboxRoot: root, spawn: async ({ command }) => ({
+      code: 0, stdout: command.includes('gui_check.py') ? output : 'PASS core feature', stderr: '',
+    }) })
+    const result = await execute('PASS actual GUI interaction')
+    expect(result.status).toBe('passed')
+    expect(result.gui_execution?.scenarios[0]?.outcome).toBe('pass')
+    expect(result.evidence.every(e => e.input === 'logic')).toBe(true)
+    expect((await execute('FAIL actual GUI interaction')).status).toBe('failed')
+    expect((await execute('')).status).toBe('unverified')
   })
 })

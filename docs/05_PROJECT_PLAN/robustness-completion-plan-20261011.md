@@ -158,7 +158,7 @@
 | 2 回忆治理 | 已实现并验证索引迁移/来源/作用域 | `robustness-execution-20261011.md`；`run-artifacts/robustness-recall-migration.json` |
 | 3 语音/环境 | 已实现；固定音频/隔离反例/生命周期已验；真实组件采集人工接受 | `robustness-execution-20261011.md`；`run-artifacts/robustness-speech-probe.json` |
 | 4 成本/规则 | 已实现并验证请求对账/自主修复/规则来源；真实案例成本待批 5 | `robustness-execution-20261011.md`；`run-artifacts/robustness-batch4-tests.log` |
-| 5 固定验收 | 待执行 | — |
+| 5 固定验收 | 部分完成：六次生成、五份产物业务检查及文件反例闭环；两项用户中断，自动交付未完成 | `robustness-case-results-20261011.md`；`run-artifacts/robustness-six-case-audit.json` |
 
 每批必须满足自己的完成条件才能标已验证；必要条件不满足则保留“已实现/待验证/阻塞”，写清下一步。失败先区分产物、测试、环境、预算，避免为错误类别反复让实现 agent 重做软件。
 

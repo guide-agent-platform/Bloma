@@ -197,6 +197,18 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
         }
       }
 
+      if (specs.some(spec => spec.trim().toLowerCase().startsWith('pywebview'))) {
+        const target = join(root, 'file_plan_guard.py')
+        if (!existsSync(target)) {
+          const { cpSync } = await import('node:fs')
+          const { mainRootDir } = await import('../platform/paths')
+          const source = join(mainRootDir(), 'templates', 'tools', 'file_plan_guard.py')
+          if (existsSync(source)) {
+            cpSync(source, target)
+            steps.push('已生成 file_plan_guard.py：前缀改名执行前校验当前目录/前缀与预览绑定、纯文件名和路径边界；UI 输入或扫描变化立即停用旧预览。')
+          }
+        }
+      }
       // ④ 语音识别平台资产：装 sherpa-onnx 时自动落 speech_locator.py 进项目根
       //（模型定位器：~/.proma/speech-models/ 与平台语音输入共用，miss 自动从 hf-mirror 下载；
       //  2026-10-05 语音批 C 线——平台供资产惯例，子会话零寻路成本，产物自带源码可独立分发）

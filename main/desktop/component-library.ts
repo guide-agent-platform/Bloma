@@ -117,5 +117,7 @@ export function componentQuickReference(): string {
   const lines = WINDOWS_COMPONENT_CARDS.map(
     (card) => `- ${card.package}（import ${card.importName}）：${card.purpose}｜坑：${card.pitfall}｜降级：${card.fallback}｜[${card.evidence}]`,
   )
-  return ['可用组件速查（pip 声明安装，详卡见 install_packages 工具）：', ...lines].join('\n')
+  return ['可用组件速查（pip 声明安装，详卡见 install_packages 工具）：', ...lines,
+    '- 内置 file_plan_guard.py（随 pywebview 物化，不另装 pip）：前缀改名前用 validate_prefix_plan(folder,prefix,plan) 校验当前输入与快照、文件名和目录边界；输入/扫描变化立即失效旧预览，异步旧响应不能重新启用执行。固定反例与隔离 GUI 回放有证据，不保证操作期间的原子隔离。',
+  ].join('\n')
 }
