@@ -88,7 +88,7 @@ export function buildProjectDriverRunnerTool(projectId: string, deps: ProjectDri
       'desktop-implement 阶段获得真实红绿反馈的唯一通道：收口前运行一次，失败清单交同一委派线修复后复跑，' +
       '全部场景 PASS 才可申请推进确认。blocked 为环境类问题，不要反复重试。',
     input_schema: { type: 'object', properties: {} },
-    execute: async (): Promise<ToolOutcome> => {
+    execute: async (_input, ctx): Promise<ToolOutcome> => {
       let root: string | undefined
       try {
         root = resolveRoot(projectId)
@@ -128,6 +128,7 @@ export function buildProjectDriverRunnerTool(projectId: string, deps: ProjectDri
         cwd: root,
         spawn: deps.spawn ?? execFileDriverSpawn,
         parentEnv: process.env,
+        signal: ctx.signal,
       })
       // 刀3：截图清单（目录缺失/不可读 → 空清单，不阻塞报告）
       let screenshots: string[] = []

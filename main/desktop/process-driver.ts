@@ -37,13 +37,14 @@ export interface DriverCommandRequest {
   /** 白名单过滤后的子进程环境（执行器拼最小生存集，spawn 实现不再自加）。 */
   env: Record<string, string>
   cwd: string
+  signal?: AbortSignal
 }
 
 /** 可注入的子进程执行面。 */
 export type DriverSpawn = (request: DriverCommandRequest) => Promise<{ code: number; stdout: string; stderr: string }>
 
 /** 驱动失败形态（DriverExecutionError.code 区分路由）。 */
-export type DriverFailureKind = 'not-found' | 'timeout' | 'spawn-failed'
+export type DriverFailureKind = 'not-found' | 'timeout' | 'spawn-failed' | 'cancelled'
 
 /** 驱动执行错误（spawn 层异常翻译；非「驱动断言失败」——断言失败是合法结果）。 */
 export class DriverExecutionError extends Error {
@@ -232,6 +233,7 @@ export function parseDriverStdout(stdout: string): { scenarios: DriverScenarioOu
 
 /** 驱动执行输入。 */
 export interface RunDriverInput {
+  signal?: AbortSignal
   contract: ProjectContract
   /** 工作目录（沙箱内项目根——契约相对命令的解析根）。 */
   cwd: string
@@ -340,7 +342,7 @@ export async function runContractDriver(input: RunDriverInput): Promise<DriverEx
   const semanticsBefore = which === 'driver' ? computeDriverSemanticsDigest(cwd, contract) : null
 
   try {
-    const { code, stdout, stderr } = await spawn({ command: resolvedCommand, timeoutMs, env, cwd })
+    const { code, stdout, stderr } = await spawn({ command: resolvedCommand, timeoutMs, env, cwd, signal: input.signal })
     if (semanticsBefore !== null && computeDriverSemanticsDigest(cwd, contract) !== semanticsBefore) {
       return {
         routing: 'blocked',
@@ -415,11 +417,18 @@ export function execFileDriverSpawn(request: DriverCommandRequest): Promise<{ co
   // 首跑深修（2026-09-26）：原惰性 require 在 esbuild ESM 产物里抛 Dynamic require 错误——改静态 import
   const [command, ...args] = request.command
   return new Promise((resolve, reject) => {
-    execFile(
+    if (request.signal?.aborted) { reject(new DriverExecutionError('cancelled', '执行已取消，未启动进程')); return }
+    let forced: 'timeout' | 'cancelled' | undefined
+    let timer: ReturnType<typeof setTimeout>
+    const abort = () => terminate('cancelled')
+    const cleanup = () => { clearTimeout(timer); request.signal?.removeEventListener('abort', abort) }
+    const child = execFile(
       command,
       args,
-      { timeout: request.timeoutMs, cwd: request.cwd, env: request.env, windowsHide: true, maxBuffer: 1024 * 512, encoding: 'utf8' },
+      { cwd: request.cwd, env: request.env, windowsHide: true, maxBuffer: 1024 * 512, encoding: 'utf8' },
       (error, stdout, stderr) => {
+        cleanup()
+        if (forced) { reject(new DriverExecutionError(forced, `执行${forced === 'timeout' ? '超时' : '已取消'}，已终止受控进程树`)); return }
         if (error) {
           const err = error as NodeJS.ErrnoException & { killed?: boolean; signal?: string }
           if (err.code === 'ENOENT') {
@@ -440,5 +449,16 @@ export function execFileDriverSpawn(request: DriverCommandRequest): Promise<{ co
         resolve({ code: 0, stdout: stdout ?? '', stderr: stderr ?? '' })
       },
     )
+    function terminate(reason: 'timeout' | 'cancelled') {
+      if (forced) return
+      forced = reason
+      // Only the PID returned by this invocation is eligible; no process enumeration.
+      if (process.platform === 'win32' && child.pid) {
+        execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, timeout: 5000 }, () => { if (!child.killed) child.kill() })
+      } else child.kill()
+    }
+    timer = setTimeout(() => terminate('timeout'), request.timeoutMs)
+    request.signal?.addEventListener('abort', abort, { once: true })
+    if (request.signal?.aborted) abort()
   })
 }

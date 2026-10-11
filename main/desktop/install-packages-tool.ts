@@ -19,6 +19,7 @@ import type { AgentLoopTool } from '../agent/loop/agent-loop'
 import { execFileDriverSpawn, DriverExecutionError, type DriverSpawn } from './process-driver'
 import { findProject } from '../project/project-service'
 import { WINDOWS_COMPONENT_CARDS } from './component-library'
+import { consumeProjectAttempt } from '../platform/execution/project-attempts'
 
 const PIP_TIMEOUT_MS = 300_000
 const VENV_TIMEOUT_MS = 120_000
@@ -68,15 +69,7 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
         requirements: { type: 'boolean', description: 'true=安装项目根 requirements.txt 声明的全部包' },
       },
     },
-    execute: async (input) => {
-      calls += 1
-      if (calls > maxCalls) {
-        return {
-          output: `安装调用预算用尽（${maxCalls} 次）：依赖问题请如实写进 DELIVERY.md 已知限制，不要反复装卸。`,
-          isError: true,
-          budgetExhausted: true,
-        }
-      }
+    execute: async (input, ctx) => {
       const project = findProject(projectId)
       const root = project?.root_path
       if (!root) return { output: `项目不存在（projectId=${projectId}）。`, isError: true }
@@ -119,13 +112,18 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
       }
 
       const env = { ...process.env, PYTHONIOENCODING: process.env.PYTHONIOENCODING ?? 'utf-8' }
+      try {
+        const attempt = consumeProjectAttempt(projectId, `install:${ctx.sessionId}`, maxCalls)
+        if (!attempt.allowed) return { output: `安装调用预算用尽（${maxCalls} 次），续接不会清零，请保存未完成项。`, isError: true, budgetExhausted: true }
+        calls = attempt.used
+      } catch { return { output: '安装计数不可保存，未执行安装。请恢复执行记录后重试。', isError: true } }
       const venvPython = join(root, venvPythonRelativePath())
       const steps: string[] = []
 
       // ① venv（幂等：已存在跳过）
       if (!existsSync(venvPython)) {
         try {
-          await spawn({ command: ['python', '-m', 'venv', '.venv'], timeoutMs: VENV_TIMEOUT_MS, env, cwd: root })
+          await spawn({ command: ['python', '-m', 'venv', '.venv'], timeoutMs: VENV_TIMEOUT_MS, env, cwd: root, signal: ctx.signal })
           steps.push('已创建项目内 .venv（系统解释器零污染）')
         } catch (error) {
           return {
@@ -146,6 +144,7 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
           timeoutMs: PIP_TIMEOUT_MS,
           env,
           cwd: root,
+          signal: ctx.signal,
         })
         const durationMs = Date.now() - startedAt
         if (code !== 0) {
@@ -192,6 +191,7 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
             timeoutMs: 30_000,
             env,
             cwd: root,
+            signal: ctx.signal,
           })
           probeResults.push(code === 0 ? `${spec} → import ${moduleName} ✓` : `${spec} → import ${moduleName} ✗（装上但导入失败，看依赖项）`)
           if (code !== 0) probeFailures.push(`${spec}: ${stderr.slice(-1000) || `import 退出码 ${code}`}`)

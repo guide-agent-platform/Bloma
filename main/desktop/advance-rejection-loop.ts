@@ -108,7 +108,8 @@ export function decideRejectionLoop(
 ): RejectionLoopAction {
   const family = classifyRejection(decision)
   const nextCount = (ledger.counts[phaseId] ?? 0) + 1
-  const degrade = nextCount > REJECTION_LOOP_LIMIT
+  const environmentBlocked = decision.reason === 'driver-blocked'
+  const degrade = nextCount > REJECTION_LOOP_LIMIT || environmentBlocked
   const education = decision.education || buildGateRejectionEdu('no-marks', { current: phaseId })
 
   if (degrade) {
@@ -116,7 +117,7 @@ export function decideRejectionLoop(
       degrade: true,
       education:
         education +
-        `\n\n【已降级转人工】本阶段拒收教育闭环已达上限（${REJECTION_LOOP_LIMIT} 次），系统不再自动续接。` +
+        (environmentBlocked ? '\n\n验证环境未就绪，停止自动业务修复；先恢复环境后补验。' : `\n\n【已降级转人工】本阶段拒收教育闭环已达上限（${REJECTION_LOOP_LIMIT} 次），系统不再自动续接。`) +
         '已转为人工介入态（blocked）：用户回复「继续」可再试一轮，或直接给出修改意见。',
       count: nextCount,
       family,

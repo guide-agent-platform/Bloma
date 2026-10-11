@@ -21,6 +21,7 @@ import { execFile } from 'node:child_process'
 import type { AgentLoopTool } from '../agent/loop/agent-loop'
 import { execFileDriverSpawn, DriverExecutionError, parseDriverStdout, routeDriverOutcome, type DriverSpawn } from './process-driver'
 import { findProject } from '../project/project-service'
+import { consumeProjectAttempt } from '../platform/execution/project-attempts'
 
 const DEFAULT_TIMEOUT_MS = 90_000
 const MAX_TIMEOUT_MS = 180_000
@@ -101,7 +102,7 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
         timeout_ms: { type: 'number', description: `超时毫秒（${MIN_TIMEOUT_MS / 1000}s~${MAX_TIMEOUT_MS / 1000}s，缺省 90s）` },
       },
     },
-    execute: async (input) => {
+    execute: async (input, ctx) => {
       if (runs >= maxRuns) {
         return {
           output: `执行预算用尽（${maxRuns} 次）：剩余工作请基于已有红绿结果收尾，如实把未验证项写进 DELIVERY.md，不要反复尝试。`,
@@ -164,7 +165,11 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
       }
 
       const startedAt = Date.now()
-      runs += 1
+      try {
+        const attempt = consumeProjectAttempt(projectId, `script:${ctx.sessionId}`, maxRuns)
+        if (!attempt.allowed) return { output: '本任务累计执行额度已用尽，续接不会清零。保存未完成项后停止。', isError: true, budgetExhausted: true }
+        runs = attempt.used
+      } catch { return { output: '执行计数不可保存，未启动脚本。请恢复执行记录后重试。', isError: true, feedback: { schema_version: 1, execution: 'not_run', verification: 'unverified', category: 'environment', recovery: 'prepare_environment' } } }
       const label = script || '单次短代码'
       try {
         const { code, stdout, stderr } = await spawn({
@@ -172,6 +177,7 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
           timeoutMs,
           env: buildChildExecEnv(process.env),
           cwd: rootReal,
+          signal: ctx.signal,
         })
         const durationMs = Date.now() - startedAt
         const parsed = parseDriverStdout(stdout)

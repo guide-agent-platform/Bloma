@@ -66,6 +66,7 @@ import { attachActiveCorrectionFeedback, startCorrectionSession, finishCorrectio
 import { buildCheckpointConclusion } from './phase-checkpoint'
 import { verificationFingerprint } from './verification-fingerprint'
 import { ensureCoreDelivery, resetCoreDeliveryState, clearCoreDeliveryRetries } from './core-delivery'
+import { readProjectAttempts, consumeProjectAttempt, resetProjectAttemptScope } from '../platform/execution/project-attempts'
 import type { CoreVerificationResult } from './core-verification'
 import { createChannelFailureTracker, observeChannelFailure, type ChannelFailureTracker } from './channel-failure-watch'
 import { readDesktopRequirementsDigest, readDesktopShapeBriefs } from './requirement-digest'
@@ -151,6 +152,8 @@ function ledgerOf(projectId: string): RejectionLedger {
   let ledger = ledgers.get(projectId)
   if (!ledger) {
     ledger = createRejectionLedger()
+    const counts = readProjectAttempts(projectId).active
+    for (const [scope, count] of Object.entries(counts)) if (scope.startsWith('stage:')) ledger.counts[scope.slice(6)] = count
     ledgers.set(projectId, ledger)
   }
   return ledger
@@ -158,6 +161,7 @@ function ledgerOf(projectId: string): RejectionLedger {
 
 /** 测试隔离：清空账本。 */
 export function resetDesktopRouteLedgersForTests(): void {
+  for (const [id, ledger] of ledgers) for (const phase of Object.keys(ledger.counts)) resetProjectAttemptScope(id, `stage:${phase}`)
   resetCoreDeliveryState()
   ledgers.clear()
   channelTrackers.clear()
@@ -262,7 +266,7 @@ export async function handleDesktopDispatchMessage(
   input: DesktopRouteInput,
   deps: DesktopRouteDeps,
 ): Promise<void> {
-  clearCoreDeliveryRetries(input.projectId)
+  if (!input.cardOptionId) clearCoreDeliveryRetries(input.projectId)
   const project = findProject(input.projectId)
   const projectName = project?.name ?? input.projectId
   const phaseId = project?.desktop_phase ?? 'desktop-arch'
@@ -402,6 +406,8 @@ export async function handleDesktopDispatchMessage(
 
   // ── blocked 态放行：继续词=放行授权；普通消息=人工出场即放行（带意见干活）──
   if (project?.desktop_blocked) {
+    resetProjectAttemptScope(input.projectId, `stage:${phaseId}`)
+    delete ledgerOf(input.projectId).counts[phaseId]
     updateProject(input.projectId, { desktop_blocked: undefined })
     // 审计 A-07（2026-10-04）：放行同步发 stage_changed——渲染端回填后「已暂停」态立即解除。
     deps.publish(input, 'stage_changed', { stage: phaseId })
@@ -566,6 +572,7 @@ async function settleDesktopStage(
   if (decision.decision === 'advance') {
     const ledger = ledgerOf(input.projectId)
     clearRejectionOnAdvance(ledger, phaseId)
+    resetProjectAttemptScope(input.projectId, `stage:${phaseId}`)
     const next = getNextDesktopPhase(phaseId)
     const nextNode = next !== null ? getDesktopPhase(next) : undefined
     if (next === null || nextNode?.dispatcherManaged === false) {
@@ -682,6 +689,7 @@ async function settleDesktopStage(
   const ledger = ledgerOf(input.projectId)
   const action = decideRejectionLoop(ledger, phaseId, decision)
   registerRejection(ledger, phaseId, action.family, action.count)
+  consumeProjectAttempt(input.projectId, `stage:${phaseId}`)
 
   // 刀1（2026-10-02）：confirmation-required 分支已随阶段表撤 manual 门删除——
   // 中间阶段门禁全绿即推进，确认卡不再发出；拒收只剩教育续接与降级两态。
@@ -709,7 +717,7 @@ async function settleDesktopStage(
   deps.publish(input, 'message_delta', {
     text: buildBlockedNoticeCard({
       phaseTitle: node?.title ?? phaseId,
-      whatHappened: `「${node?.title ?? phaseId}」阶段连续 ${action.count} 次未通过门禁（${decision.reason}），自动修复已到上限，流水线暂停。`,
+      whatHappened: decision.reason === 'driver-blocked' ? '验证环境未就绪，程序已保留；请先恢复环境后补验。' : `「${node?.title ?? phaseId}」阶段连续 ${action.count} 次未通过门禁（${decision.reason}），自动修复已到上限，流水线暂停。`,
       ...(evidenceHint ? { evidence: evidenceHint } : {}),
     }),
   })
