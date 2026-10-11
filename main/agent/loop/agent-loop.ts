@@ -757,7 +757,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
   }
   const [skillPrep, recallBlock] = await Promise.all([
     prepareTaskWithSkills(input.task, skillProjectRoot),
-    prepareRecallBlock(input.task, input.delegationDepth ?? 0),
+    prepareRecallBlock(input.task, input.delegationDepth ?? 0, `${input.sessionId}.jsonl`, { projectId: input.projectId }),
   ])
   // 历史经验（记忆栈审计裁定 §5，D0）：从 system prompt 迁到**任务头**，与 recall/skill 同层；
   // 用 <untrusted-memory> 标记降级为非指令上下文（记忆是模型输出派生，不享指令面权重，
@@ -783,7 +783,10 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     taskBlocks ? { role: 'user' as const, content: taskBlocks } : { role: 'user' as const, content: task },
   ]
   // 初始 task 落盘（审计完整性：JSONL 是子会话全量审计，缺首条 user 会让 continue 重放丢任务原文）
-  if (!input.initialMessagePersisted) appendLoopMessage(input.sessionId, 'user', taskBlocks ?? [{ type: 'text', text: task }], isHostControlText(task) ? 'system' : 'user')
+  if (!input.initialMessagePersisted) appendLoopMessage(input.sessionId, 'user', [
+    { type: 'text', text: input.task },
+    ...pastedImageRefs.map(r => ({ type: 'image' as const, imageId: r.imageId, media_type: r.media_type })),
+  ], isHostControlText(input.task) ? 'system' : 'user')
   const ctx: ToolContext = {
     projectId: input.projectId,
     sessionId: input.sessionId,

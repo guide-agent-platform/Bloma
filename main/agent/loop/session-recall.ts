@@ -1,7 +1,9 @@
-import { createReadStream, existsSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, createReadStream, existsSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync, unlinkSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { createInterface } from 'node:readline'
 import { join } from 'node:path'
-import { getPromaHome } from '../../../storage/config-paths'
+import { getPromaHome, getAgentSessionsIndexPath } from '../../../storage/config-paths'
+import { isHostControlText } from '../../../shared/message-presentation'
 import { sanitizeForInjection } from './memory-sanitize'
 import { isMemoryTextRevoked, loadRevocationIndex, revocationBlocksLayer } from './memory-revocation'
 
@@ -37,6 +39,7 @@ interface IndexedMsg {
 }
 
 interface IndexedFile {
+  projectId?: string
   name: string
   mtime: number
   size: number
@@ -46,6 +49,7 @@ interface IndexedFile {
 }
 
 export interface SessionIndex {
+  schema_version?: number
   builtAt: number
   files: IndexedFile[]
 }
@@ -82,18 +86,35 @@ function extractTexts(line: string): ExtractedText | null {
   // 双 schema：Proma app {type, message:{content}} / Bloma {role, content, timestamp}
   const role = (j.role ?? j.type) as string | undefined
   if (role !== 'user' && role !== 'assistant') return null
+  if (j.origin === 'system' || j.source === 'session-recall' || j.source === 'host_control') return null
   const content = (j.message as { content?: unknown } | undefined)?.content ?? j.content
   const at = (j._createdAt as number | undefined) ?? (j.timestamp as number | undefined) ?? 0
   if (!Array.isArray(content)) {
     // 字符串形态（r57 low 池采纳）：user 与 assistant 均兼容（assistant 纯文本旧格式此前被漏索引）
-    if (typeof content === 'string' && content.trim()) return { role, text: content.slice(0, 2000), at }
+    if (typeof content === 'string' && content.trim()) {
+      const text = cleanRecallText(content, Boolean(j.client_message_id))
+      return text ? { role, text: text.slice(0, 2000), at } : null
+    }
     return null
   }
   const texts = content
     .filter((b) => (b as { type?: string; text?: unknown })?.type === 'text' && typeof (b as { text?: unknown }).text === 'string' && ((b as { text?: string }).text ?? '').trim())
     .map((b) => (b as { text?: string }).text ?? '')
   if (!texts.length) return null
-  return { role, text: texts.join('\n').slice(0, 3000), at }
+  const text = cleanRecallText(texts.join('\n'), Boolean(j.client_message_id))
+  return text ? { role, text: text.slice(0, 3000), at } : null
+}
+
+function cleanRecallText(text: string, humanReceipt: boolean): string {
+  if (humanReceipt) return text.trim()
+  let clean = text.trim()
+  // Old injected context may precede the actual task. Strip only leading known wrappers.
+  while (/^<(?:session-recall|untrusted-memory)\b/.test(clean)) {
+    const match = /^<(session-recall|untrusted-memory)\b[^>]*>[\s\S]*?<\/\1>\s*/.exec(clean)
+    if (!match) return '' // incomplete injection cannot become historical instructions
+    clean = clean.slice(match[0].length).trimStart()
+  }
+  return isHostControlText(clean) ? '' : clean
 }
 
 // ---------- 索引（mtime+size 增量；字段与 CLI 原型一致保证缓存互操作） ----------
@@ -106,11 +127,18 @@ export async function buildSessionIndex(force = false): Promise<{ index: Session
   if (!force && existsSync(indexPath)) {
     try {
       prev = JSON.parse(readFileSync(indexPath, 'utf8')) as SessionIndex
+      if (prev.schema_version !== 2 || !Array.isArray(prev.files) || prev.files.some(file =>
+        !file || typeof file.name !== 'string' || !Array.isArray(file.msgs) || file.msgs.some(msg => typeof msg.text !== 'string'))) prev = null
     } catch {
       prev = null
     }
   }
   const prevByFile = new Map((prev?.files ?? []).map((f) => [f.name, f]))
+  const projects = new Map<string, string>()
+  try {
+    const metadata = JSON.parse(readFileSync(getAgentSessionsIndexPath(), 'utf8')) as { sessions?: Array<{ session_id: string; project_id: string }> }
+    for (const session of metadata.sessions ?? []) if (session.session_id && session.project_id) projects.set(`${session.session_id}.jsonl`, session.project_id)
+  } catch { /* unknown ownership is excluded from scoped recall */ }
   const indexed: IndexedFile[] = []
   let reused = 0
   for (const name of files) {
@@ -118,7 +146,7 @@ export async function buildSessionIndex(force = false): Promise<{ index: Session
     const st = statSync(full)
     const old = prevByFile.get(name)
     if (old && old.mtime === st.mtimeMs && old.size === st.size) {
-      indexed.push(old)
+      indexed.push({ ...old, projectId: projects.get(name) })
       reused++
       continue
     }
@@ -132,6 +160,7 @@ export async function buildSessionIndex(force = false): Promise<{ index: Session
     const firstUser = msgs.find((m) => m.role === 'user')
     indexed.push({
       name,
+      projectId: projects.get(name),
       mtime: st.mtimeMs,
       size: st.size,
       intent: firstUser ? firstUser.text.slice(0, 120) : '',
@@ -139,14 +168,16 @@ export async function buildSessionIndex(force = false): Promise<{ index: Session
       msgs: msgs.map((m) => ({ role: m.role, text: m.text })),
     })
   }
-  const index: SessionIndex = { builtAt: Date.now(), files: indexed }
+  const index: SessionIndex = { schema_version: 2, builtAt: Date.now(), files: indexed }
+  const tmpPath = `${indexPath}.${process.pid}.${randomUUID()}.tmp`
   try {
     // 原子写（r55 low 池采纳）：先写同目录 tmp 再 rename，并发读者只会看到旧/新完整内容，
     // 不会读到半写 JSON（Windows 同卷 rename 原子）。残留 tmp 由下次构建覆盖清理。
-    const tmpPath = `${indexPath}.${process.pid}.tmp`
+    if (existsSync(indexPath) && !existsSync(`${indexPath}.v1.bak`)) copyFileSync(indexPath, `${indexPath}.v1.bak`)
     writeFileSync(tmpPath, JSON.stringify(index))
     renameSync(tmpPath, indexPath)
   } catch {
+    try { unlinkSync(tmpPath) } catch { /* leave original cache intact */ }
     // 索引写失败不影响本次检索结果（内存中已可用）
   }
   return { index, reused, totalMessages: indexed.reduce((n, f) => n + f.msgs.length, 0) }
@@ -199,7 +230,7 @@ export async function searchSessions(index: SessionIndex, queryText: string, k =
 
 /** 指代词检测（保守集）：跨会话检索只在这些「记得上次」语义出现时触发。 */
 function containsAnaphora(task: string): boolean {
-  return /(上次|上回|之前|先前|继续)/.test(task)
+  return /(上次|上回|之前|先前|跨项目|另一个项目)/.test(task)
 }
 
 /** 取首句做 query（首句是意图所在，避免整段任务稀释 BM25 权重）。 */
@@ -211,7 +242,7 @@ function firstSentence(task: string): string {
  * 指代词任务 → 跨会话 top-3 摘录注入块（仅块本体；与 skill 注入由 agent-loop 统一拼接，避免任务重复）。
  * 无指代词 / 委派子 loop / 零命中 / 任何异常 → null（绝不阻断生成主线）。
  */
-export async function prepareRecallBlock(task: string, delegationDepth = 0, excludeFile?: string): Promise<string | null> {
+export async function prepareRecallBlock(task: string, delegationDepth = 0, excludeFile?: string, scope?: { projectId: string; referencedSessionIds?: string[] }): Promise<string | null> {
   if (delegationDepth > 0) return null
   if (!containsAnaphora(task)) return null
   try {
@@ -223,11 +254,18 @@ export async function prepareRecallBlock(task: string, delegationDepth = 0, excl
     const { index } = await buildSessionIndex()
     // r52 aliyun high 采纳：排除当前会话自身（防同会话历史自我召回混淆边界）
     if (excludeFile) index.files = index.files.filter((f) => f.name !== excludeFile)
-    const hits = await searchSessions(index, firstSentence(task), 3)
+    if (scope && !/(跨项目|另一个项目|其他项目|上次那个)/.test(task)) {
+      const referenced = new Set((scope.referencedSessionIds ?? []).map(id => `${id}.jsonl`))
+      index.files = index.files.filter(file => file.projectId === scope.projectId || referenced.has(file.name))
+    }
+    const query = firstSentence(task).replace(/继续|上次|上回|之前|先前|那个|这个|事情|项目|的事/g, ' ')
+    if (!tokenize(query).some(token => token.length >= 2)) return null
+    const hits = await searchSessions(index, query, 3)
     if (!hits.length) return null
     // 注入面统一净化（2026-09-12 记忆栈审计裁定 ②）：与 learnings / 经验卡共用同一出口
     // （转义边界 + 拦绕过指令）；命中那么条不入段，其余照常。
     const lines: string[] = []
+    const snippets = new Set<string>()
     for (const h of hits) {
       // 撤销命中 → 整条 hit 丢弃：既查命中片段，也查该会话文件内**任何被索引消息**
       // （防同一文本经 intent 或同会话其他片段泄漏）
@@ -238,7 +276,9 @@ export async function prepareRecallBlock(task: string, delegationDepth = 0, excl
       const intent = sanitizeForInjection(h.intent, { limit: 80 })
       const snippet = sanitizeForInjection(h.best.text, { limit: 120 })
       if (intent.blocked || snippet.blocked || !snippet.text) continue
-      lines.push(`${lines.length + 1}. [${date}] 意图：${intent.text}\n   片段：…${snippet.text}…`)
+      if (snippets.has(snippet.text)) continue
+      snippets.add(snippet.text)
+      lines.push(`${lines.length + 1}. [${date}; ${h.file}] 意图：${intent.text}\n   片段：…${snippet.text}…`)
     }
     if (lines.length === 0) return null
     return [
