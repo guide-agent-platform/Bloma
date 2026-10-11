@@ -9,6 +9,7 @@ import type { AgentEvent } from '../../shared/types'
 import type { SDKMessage } from '../../shared/types'
 import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 import { getAgentSessionPath } from '../../storage/config-paths'
+import { readToolFeedback } from '../../shared/tool-feedback'
 
 /**
  * PR2 L1 Agent Loop 执行器单元测试（不接线，纯模块级）。
@@ -90,6 +91,20 @@ function readSessionJsonl(sessionId: string): Array<{ role: string; content: Arr
 }
 
 describe('runAgentLoop（PR2 L1）', () => {
+  it('model, live event and truncated JSONL retain the same execution feedback', async () => {
+    const events: Array<Record<string, unknown>> = []
+    const runner = tool('run_project_script', () => ({ output: 'FAIL 保存\n' + 'x'.repeat(9000), isError: true, detail: { code: 0, verification_status: 'fail', secret: 'not-forwarded' } }))
+    const script = scriptedQuery([[toolUseMessage('execution-1', 'run_project_script')], [textMessage('需要修复')]])
+    await runAgentLoop(baseInput({ tools: [runner], query: script.query, sessionId: 'feedback-loop-test', publish: (type, payload) => { if (type === 'tool_call_completed') events.push(payload) } }))
+    const model = script.receivedMessages[1].at(-1)!.content as Array<{ content: string }>
+    const feedback = readToolFeedback(model[0].content)
+    expect(feedback).toMatchObject({ execution: 'completed', verification: 'failed', category: 'product_assertion', exit_code: 0 })
+    expect(events[0].feedback).toEqual(feedback)
+    expect(events[0].tool_call_id).toBe('execution-1')
+    const saved = readSessionJsonl('feedback-loop-test').flatMap(r => r.content).find(b => b.type === 'tool_result')!
+    expect(readToolFeedback(saved.content!)).toEqual(feedback)
+    expect(JSON.stringify(events)).not.toContain('not-forwarded')
+  })
   it('invalid tool parameters are fed back before execution and do not consume the valid retry budget', async () => {
     const executed: unknown[] = []
     const action = tool('read_file', input => { executed.push(input.path); return { output: 'read ok' } })

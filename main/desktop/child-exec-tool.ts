@@ -196,6 +196,7 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
           return {
             output: `执行失败（${error.kind}）：${error.message}。timeout=环境类不要反复重试；not-found=解释器路径问题，用 probe_desktop_env 诊断。`,
             isError: true,
+            feedback: { schema_version: 1, execution: 'failed', verification: 'unverified', category: 'environment', recovery: 'prepare_environment', reason: error.kind },
           }
         }
         return { output: `执行异常：${error instanceof Error ? error.message : String(error)}`, isError: true }

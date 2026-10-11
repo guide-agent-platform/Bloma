@@ -1,5 +1,6 @@
 import React from 'react'
 import type { AgentEvent, MessageContentBlock } from '../../shared/types'
+import { readToolFeedback, safeToolFeedback, toolFeedbackLabel, type ToolFeedback } from '../../shared/tool-feedback'
 
 /**
  * ToolCallBlock — Agent Loop 工具调用的渲染端呈现（PR4，方案 §4.5）。
@@ -75,9 +76,10 @@ export interface ToolCallRowProps {
   durationMs?: number
   /** 历史回放行不展示耗时动画等实时细节 */
   replay?: boolean
+  feedback?: ToolFeedback
 }
 
-export const ToolCallRow: React.FC<ToolCallRowProps> = ({ tool, inputSummary, outputSummary, status, durationMs, replay = false }) => {
+export const ToolCallRow: React.FC<ToolCallRowProps> = ({ tool, inputSummary, outputSummary, status, durationMs, replay = false, feedback }) => {
   const [expanded, setExpanded] = React.useState(false)
   const summary = outputSummary ?? inputSummary ?? ''
   const hasDetail = summary.length > 0 && status !== 'running'
@@ -129,7 +131,7 @@ export const ToolCallRow: React.FC<ToolCallRowProps> = ({ tool, inputSummary, ou
           </span>
         )}
         <span style={{ marginLeft: 'auto', flexShrink: 0, color: status === 'error' ? 'var(--color-danger)' : 'var(--color-text-muted)' }}>
-          {STATUS_TEXT[status]}
+          {feedback ? toolFeedbackLabel(feedback) : STATUS_TEXT[status]}
           {durationMs !== undefined ? ` · ${formatDuration(durationMs)}` : ''}
         </span>
       </div>
@@ -166,6 +168,7 @@ interface ToolCallRecord {
   status: ToolCallStatus
   durationMs?: number
   outputSummary?: string
+  feedback?: ToolFeedback
 }
 
 /** 从事件流推导工具调用记录：started 建行（running），completed 按 key 回填状态/耗时/输出。 */
@@ -175,7 +178,7 @@ export function deriveToolCallRecords(events: AgentEvent[]): ToolCallRecord[] {
     if (event.type === 'tool_call_started') {
       const tool = String(event.payload.tool ?? '')
       const turn = Number(event.payload.turn ?? 0)
-      const key = `${turn}:${tool}`
+      const key = typeof event.payload.tool_call_id === 'string' ? `${turn}:${event.payload.tool_call_id}` : `${turn}:${tool}`
       // 同轮同名工具多次调用：后者覆盖前行（渲染端只保留最新；审计以 JSONL 为准）
       records.set(key, {
         key,
@@ -188,12 +191,13 @@ export function deriveToolCallRecords(events: AgentEvent[]): ToolCallRecord[] {
     if (event.type === 'tool_call_completed') {
       const tool = String(event.payload.tool ?? '')
       const turn = Number(event.payload.turn ?? 0)
-      const key = `${turn}:${tool}`
+      const key = typeof event.payload.tool_call_id === 'string' ? `${turn}:${event.payload.tool_call_id}` : `${turn}:${tool}`
       const record = records.get(key)
       if (record) {
         record.status = event.payload.status === 'error' ? 'error' : event.payload.status === 'budget' ? 'budget' : 'ok'
         record.durationMs = typeof event.payload.duration_ms === 'number' ? event.payload.duration_ms : undefined
         record.outputSummary = typeof event.payload.output_summary === 'string' ? event.payload.output_summary : undefined
+        record.feedback = safeToolFeedback(event.payload.feedback)
       }
     }
   }
@@ -213,6 +217,7 @@ export const ToolCallFeed: React.FC<{ events: AgentEvent[] }> = ({ events }) => 
           outputSummary={record.outputSummary}
           status={record.status}
           durationMs={record.durationMs}
+          feedback={record.feedback}
         />
       ))}
     </div>
@@ -241,6 +246,7 @@ export const ToolBlocksReplay: React.FC<{ blocks: MessageContentBlock[]; toolNam
         tool: toolNamesById?.[block.tool_use_id ?? ''] ?? 'tool_result',
         summary: typeof block.content === 'string' ? block.content : '',
         status: (block.is_error ? 'error' : 'ok') as ToolCallStatus,
+        feedback: typeof block.content === 'string' ? readToolFeedback(block.content) : undefined,
       }]
     }
     return []
@@ -249,7 +255,7 @@ export const ToolBlocksReplay: React.FC<{ blocks: MessageContentBlock[]; toolNam
   return (
     <div data-ai-id="tool-call-replay" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
       {rows.map((row) => (
-        <ToolCallRow key={row.key} tool={row.tool} inputSummary={row.summary} status={row.status} replay />
+        <ToolCallRow key={row.key} tool={row.tool} inputSummary={row.summary} status={row.status} feedback={'feedback' in row ? safeToolFeedback(row.feedback) : undefined} replay />
       ))}
     </div>
   )

@@ -16,6 +16,8 @@ import { isDegenerateText } from '../../coding/output-integrity'
 import { buildTargetedDegenerateFeedback, classifyDsmlRecovery, parseDsmlInvokes } from './dsml-recovery'
 import { createDsmlDisplayFilter } from './dsml-display-filter'
 import { validateToolInput } from './tool-input-validation'
+import { feedbackForTool } from './tool-feedback'
+import { formatToolFeedback, type ToolFeedback } from '../../../shared/tool-feedback'
 import { userFacingWrapUp } from '../prompting/user-facing-output'
 import { isHostControlText } from '../../../shared/message-presentation'
 import { closePreviewBrowserSession } from '../../coding/preview-browser'
@@ -91,13 +93,14 @@ export interface ToolContext {
   toolCallId?: string
 }
 
-/** 工具产物：output 给模型看（ACI 规范），detail 只进事件流/审计不进模型上下文。 */
+/** output is evidence text; host feedback is shared with model history and events. */
 export interface ToolOutcome {
   output: string
   isError?: boolean
   /** true = 本次调用被预算拦截（软着陆信号，loop 据此计数连续无进展轮） */
   budgetExhausted?: boolean
   detail?: Record<string, unknown>
+  feedback?: ToolFeedback
 }
 
 export interface AgentLoopTool {
@@ -1641,7 +1644,7 @@ async function executeToolCall(
   ctx.toolCallId = use.id
   const toolInput = use.input ?? {}
   const validationError = validateToolInput(use.name, toolInput, tool.input_schema)
-  if (validationError) return { output: validationError, isError: true }
+  if (validationError) return { output: validationError, isError: true, feedback: { schema_version: 1, execution: 'not_run', verification: 'unverified', category: 'invalid_input', recovery: 'correct_input' } }
 
   // 权限门禁：loop 是无人值守自动化，仅支持 allow-all（warning 放行、dangerous 交由
   // canUseTool 判定）；非 allow-all（ask/safe）直接拒绝进 is_error 让模型自纠——
@@ -1729,14 +1732,17 @@ export async function executeTurnToolCalls(
 
   // 单工具全流程：事件 + 执行；返回结果块（push 交给调用方——源序由调用方保证）。
   const runOne = async (use: { name: string; input?: Record<string, unknown>; id?: string }): Promise<MessageContentBlock> => {
-    input.publish('tool_call_started', { tool: use.name, turn, input_summary: summarizeJson(use.input) })
+    input.publish('tool_call_started', { tool: use.name, turn, tool_call_id: use.id, input_summary: summarizeJson(use.input) })
     const startedAt = Date.now()
     const outcome = await executeToolCall(input, toolByName, budgetUsed, use, ctx)
+    const feedback = feedbackForTool(use.name, outcome)
     if (outcome.budgetExhausted) budgetStallThisTurn = true
     input.publish('tool_call_completed', {
       tool: use.name,
+      tool_call_id: use.id,
       turn,
-      status: outcome.isError ? 'error' : outcome.budgetExhausted ? 'budget' : 'ok',
+      status: outcome.budgetExhausted ? 'budget' : outcome.isError ? 'error' : 'ok',
+      ...(feedback ? { feedback } : {}),
       duration_ms: Date.now() - startedAt,
       output_summary: outcome.output.slice(0, EVENT_SUMMARY_CHAR_LIMIT),
       is_error: outcome.isError === true,
@@ -1747,7 +1753,7 @@ export async function executeTurnToolCalls(
     return {
       type: 'tool_result',
       tool_use_id: use.id,
-      content: outcome.output,
+      content: feedback ? formatToolFeedback(feedback, outcome.output) : outcome.output,
       ...(outcome.isError ? { is_error: true } : {}),
     }
   }

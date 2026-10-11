@@ -139,7 +139,7 @@ export function buildProjectDriverRunnerTool(projectId: string, deps: ProjectDri
       } catch {
         // 目录不存在：正常路径（未到截图阶段/非 UI 项目）
       }
-      return { output: renderDriverReport(report, screenshots), detail: { report } }
+      return { output: renderDriverReport(report, screenshots), isError: report.routing !== 'pass', detail: { report } }
     },
   }
 }
