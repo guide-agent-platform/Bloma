@@ -33,6 +33,7 @@ vi.mock('../../../main/desktop/correction-session', async (importOriginal) => {
 import { findProject, updateProject } from '../../../main/project/project-service'
 import { isMvpConfirmPending, resetMvpConfirmForTests } from '../../../main/desktop/mvp-confirm'
 import { finishCorrectionSession, hasActiveCorrectionSession } from '../../../main/desktop/correction-session'
+import { verificationFingerprint } from '../../../main/desktop/verification-fingerprint'
 import {
   DESKTOP_CONFIRM_OPTION_PREFIX,
   MAX_AUTO_ADVANCE_CHAIN,
@@ -94,6 +95,32 @@ function baseRecord() {
 }
 let record: ReturnType<typeof baseRecord>
 
+describe('required delivery evidence', () => {
+  it.each(['security', 'smoke', 'core'])('quick %s missing cannot become delivered', async (which) => {
+    record.mode = 'quick'
+    record.desktop_phase = 'desktop-implement'
+    const overrides: Partial<DesktopRouteDeps> = which === 'security' ? { securityScan: () => null }
+      : which === 'smoke' ? { launchSmoke: async () => null }
+      : { coreVerification: async () => ({ status: 'unverified', summary: '待验证', checked_at: '', missing: ['F-001'], evidence: [] }) }
+    const complete = vi.fn()
+    const { deps } = collectorDeps({ ...overrides, complete })
+    await handleDesktopDispatchMessage(routeInput({ query: scriptedQuery([[textMessage('PHASE_ADVANCE: desktop-verify')]]) }), deps)
+    expect(record.desktop_phase).toBe('desktop-implement')
+    expect(complete).toHaveBeenCalledWith('s1', 'p1', 'incomplete')
+  })
+  it('historical checkpoint without fingerprint does not suppress revalidation', async () => {
+    ;(record as Record<string, unknown>).desktop_checkpoint = { stage: 'desktop-scaffold', at: '', verified_gates: ['PASS'] }
+    let system = ''
+    const query: SDKQuery = async function* (_prompt, options) {
+      if (!system) system = String(options.messages?.[0]?.content ?? '')
+      yield textMessage('PHASE_ADVANCE: desktop-implement')
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+    await handleDesktopDispatchMessage(routeInput({ query }), collectorDeps().deps)
+    expect(system).not.toContain('【上一轮已验证结论】')
+  })
+})
+
 // ── 构造面 ──
 
 function textMessage(text: string): SDKMessage {
@@ -131,6 +158,7 @@ function collectorDeps(overrides: Partial<DesktopRouteDeps> = {}) {
       driverSpawn: async () => ({ code: 0, stdout: 'PASS a\nSUMMARY pass=1', stderr: '' }),
       securityScan: () => ({ passed: true, blocking: 0, scanned: 3, listing: '' }),
       launchSmoke: async () => ({ passed: true, detail: '启动冒烟通过（测试注入）' }),
+      coreVerification: async () => ({ status: 'passed', summary: 'verified test injection', checked_at: new Date().toISOString(), missing: [], evidence: [] }),
       ...overrides,
     } as DesktopRouteDeps,
   }
@@ -664,6 +692,7 @@ describe('事件直通与需求注入（2026-09-26 首跑修复）', () => {
       stage: 'desktop-scaffold',
       at: '2026-10-02T15:00:00.000Z',
       verified_gates: ['scaffold-contract: 产物核验通过'],
+      fingerprint: verificationFingerprint(sandboxRoot, { stage: 'desktop-scaffold', requirements: '' }),
     }
     let capturedSystem = ''
     const query: SDKQuery = async function* (_prompt: string, options: SDKQueryOptions) {

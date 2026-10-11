@@ -21,6 +21,7 @@ import { resolveChannelEnv } from '../platform/llm/runtime-fallback'
 import type { DocumentCategory } from '../platform/llm/model-resolution'
 import type { ProductShape } from '../model/prd-backplane'
 import { readPrdBackplane } from '../project/document-engine'
+import { verificationFingerprint } from './verification-fingerprint'
 
 /** 产物 LLM 声明（解析容错：结构不合法按未声明处理）。 */
 export interface LlmProviderDeclaration {
@@ -49,6 +50,7 @@ export interface LlmQualificationOutcome {
   findings: string[]
   skipped_reason?: string
   checked_at: string
+  fingerprint?: string
 }
 
 /** 声明文件相对路径（项目根）。 */
@@ -173,19 +175,9 @@ export async function runProviderQualification(options: {
     return { executed: false, qualified: false, calls: 0, findings: [], skipped_reason: 'llm_role=none（无 LLM，无需真实验证）', checked_at: now() }
   }
 
-  // 幂等短路：上次已 qualified → 直接返回（重跑 verify 不再消耗调用预算）
-  try {
-    const priorRaw = readPriorResult()
-    if (priorRaw) {
-      const prior = JSON.parse(priorRaw) as LlmQualificationOutcome
-      if (prior?.qualified === true) return prior
-    }
-  } catch {
-    // 上次结果损坏：重新验证
-  }
-
   const findings: string[] = []
-  const { declaration, schemaValid } = parseLlmDeclaration(readDeclaration())
+  const declarationRaw = readDeclaration()
+  const { declaration, schemaValid } = parseLlmDeclaration(declarationRaw)
   if (!declaration || !schemaValid) {
     const outcome: LlmQualificationOutcome = {
       executed: true,
@@ -235,6 +227,14 @@ export async function runProviderQualification(options: {
   const apiKey = resolution.env.ANTHROPIC_AUTH_TOKEN ?? ''
   const model = resolution.env.ANTHROPIC_MODEL ?? ''
   const providerType = resolution.env.ANTHROPIC_PROVIDER_TYPE ?? 'anthropic'
+  // The key participates only in the digest; never persist its plaintext.
+  const fingerprint = verificationFingerprint(options.sandboxRoot, {
+    declaration: declarationRaw, role: options.llmRole, baseUrl, model, providerType, apiKey,
+  })
+  try {
+    const prior = JSON.parse(readPriorResult() ?? 'null') as LlmQualificationOutcome | null
+    if (fingerprint && prior?.qualified === true && prior.fingerprint === fingerprint) return prior
+  } catch { /* corrupt/legacy evidence requires a new verification */ }
   const isOpenAi = providerType === 'openai'
   const url = isOpenAi ? openaiChatUrl(baseUrl) : anthropicMessagesUrl(baseUrl)
   const sampleMessages = extractSampleMessages(declaration as unknown as Record<string, unknown>).map((m) => ({
@@ -271,7 +271,7 @@ export async function runProviderQualification(options: {
         method: 'POST',
         headers,
         body,
-        signal: options.signal ?? AbortSignal.timeout(timeoutMs),
+        signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
       })
       const text = await response.text()
       if (!response.ok) {
@@ -311,6 +311,7 @@ export async function runProviderQualification(options: {
             findings: [`端点返回 2xx 但响应结构不含内容块（${text.slice(0, 160)}）——产物请求 schema 与真实端点可能不匹配`],
             checked_at: now(),
           }
+      outcome.fingerprint = fingerprint
       try {
         writeResult(LLM_QUALIFICATION_REL, JSON.stringify(outcome, null, 2))
       } catch {
@@ -334,6 +335,7 @@ export async function runProviderQualification(options: {
     request_schema_valid: true,
     findings: [`平台渠道真实调用未通过（${lastError}）——这验证的是「该请求 schema 在真实端点上的行为」，产物按同 schema 配置真实 key 后的可用性需用户自验`],
     checked_at: now(),
+    fingerprint,
   }
   try {
     writeResult(LLM_QUALIFICATION_REL, JSON.stringify(outcome, null, 2))
@@ -362,6 +364,7 @@ export function readLlmQualification(sandboxRoot: string): LlmQualificationOutco
       ...(raw.request_schema_valid === true ? { request_schema_valid: true } : {}),
       ...(typeof raw.skipped_reason === 'string' ? { skipped_reason: raw.skipped_reason } : {}),
       ...(typeof raw.checked_at === 'string' ? { checked_at: raw.checked_at } : { checked_at: new Date().toISOString() }),
+      ...(typeof raw.fingerprint === 'string' ? { fingerprint: raw.fingerprint } : {}),
     }
   } catch {
     return undefined

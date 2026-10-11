@@ -400,6 +400,8 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
   // 刀2 checkpoint：门禁全绿待推进时落阶段存证（快照+结论）——同阶段重跑注入防重验。
   if (outcome.advance.decision === 'advance') {
     const checkpoint = await recordPhaseCheckpoint({
+      sandboxRoot: input.sandboxRoot,
+      requirementsDigest: input.requirementsDigest,
       projectId: input.projectId,
       requestId: input.requestId,
       stage: node.id,

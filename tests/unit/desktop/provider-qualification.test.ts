@@ -5,6 +5,9 @@
  * openai/anthropic 两形态真实调用判定（成功/HTTP 4xx/重试预算≤2）；幂等短路。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 vi.mock('../../../main/platform/llm/runtime-fallback', () => ({
   resolveChannelEnv: vi.fn(),
@@ -18,6 +21,7 @@ import {
 import { resolveChannelEnv } from '../../../main/platform/llm/runtime-fallback'
 
 const mockedResolve = vi.mocked(resolveChannelEnv)
+let root: string
 
 function channelEnv(overrides: Record<string, string> = {}) {
   return {
@@ -44,7 +48,7 @@ function makeOpts(overrides: Record<string, unknown> = {}) {
   return {
     projectId: 'proj-1',
     sessionId: 'sess-1',
-    sandboxRoot: 'C:/sandbox',
+    sandboxRoot: root,
     llmRole: 'core' as const,
     fetchImpl: vi.fn(),
     readDeclaration: vi.fn(() => DECL),
@@ -58,10 +62,13 @@ function makeOpts(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), 'pq-inputs-'))
+  writeFileSync(join(root, 'app.py'), 'print("baseline")')
   mockedResolve.mockReset()
 })
 
 afterEach(() => {
+  rmSync(root, { recursive: true, force: true })
   vi.restoreAllMocks()
 })
 
@@ -271,5 +278,20 @@ describe('runProviderQualification', () => {
     const outcome2 = await runProviderQualification(opts)
     expect(outcome2.qualified).toBe(true)
     expect(opts.fetchImpl).toHaveBeenCalledTimes(1) // 短路：无第二次真实调用
+    writeFileSync(join(root, 'app.py'), 'print("changed")')
+    await runProviderQualification(opts)
+    expect(opts.fetchImpl).toHaveBeenCalledTimes(2)
+    opts.readDeclaration = vi.fn(() => DECL.replace('你好', '再见'))
+    await runProviderQualification(opts)
+    expect(opts.fetchImpl).toHaveBeenCalledTimes(3)
+    mockedResolve.mockReturnValue(channelEnv({ ANTHROPIC_MODEL: 'changed-model' }) as never)
+    await runProviderQualification(opts)
+    expect(opts.fetchImpl).toHaveBeenCalledTimes(4)
+    expect(prior).not.toContain('sk-test-key')
+  })
+  it('legacy qualified without a fingerprint cannot hide a missing declaration', async () => {
+    const opts = makeOpts({ readDeclaration: () => undefined, readPriorResult: () => '{"qualified":true}' })
+    expect((await runProviderQualification(opts)).qualified).toBe(false)
+    expect(opts.fetchImpl).not.toHaveBeenCalled()
   })
 })

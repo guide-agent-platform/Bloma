@@ -19,6 +19,8 @@
 import type { DesktopCheckpoint } from '../../shared/types'
 import { updateProject } from '../project/project-service'
 import { getDesktopPhase } from './dispatcher-phases'
+import { findProject } from '../project/project-service'
+import { verificationFingerprint } from './verification-fingerprint'
 
 /** 阶段显示名：中文阶段标题（未知阶段回退原始 id，不炸）。 */
 function checkpointPhaseTitle(stage: string): string {
@@ -27,6 +29,8 @@ function checkpointPhaseTitle(stage: string): string {
 
 /** checkpoint 写入输入（gates 摘要由调用方按阶段门禁形态拼装）。 */
 export interface PhaseCheckpointInput {
+  sandboxRoot?: string
+  requirementsDigest?: string
   projectId: string
   requestId: string
   stage: string
@@ -66,6 +70,9 @@ export async function recordPhaseCheckpoint(input: PhaseCheckpointInput): Promis
     stage: input.stage,
     at: new Date().toISOString(),
     verified_gates: input.gates,
+    fingerprint: verificationFingerprint(input.sandboxRoot ?? (() => {
+      try { return findProject(input.projectId)?.root_path } catch { return undefined }
+    })(), { stage: input.stage, requirements: input.requirementsDigest ?? '' }),
     ...(snapshotId ? { snapshot_id: snapshotId } : {}),
   }
   try {
@@ -82,7 +89,10 @@ export async function recordPhaseCheckpoint(input: PhaseCheckpointInput): Promis
  * 已验结论逐行 + 勿重验指示 + 直接推进目标。nextTarget=null（终态推进）时
  * 只给结论清单（终态无推进标记可输出）。
  */
-export function buildCheckpointConclusion(checkpoint: DesktopCheckpoint, nextTarget: string | null): string {
+export function buildCheckpointConclusion(checkpoint: DesktopCheckpoint, nextTarget: string | null, currentFingerprint?: string): string {
+  if (!currentFingerprint || checkpoint.fingerprint !== currentFingerprint) {
+    return '历史阶段验证记录未绑定当前代码与需求，请重新验证；不能据旧记录直接推进。'
+  }
   const lines: string[] = [
     `上一轮（${checkpoint.at}）本阶段门禁已全部验证通过，结论如下（勿重验）：`,
     ...checkpoint.verified_gates.map((gate) => `- ${gate}`),

@@ -63,6 +63,9 @@ import {
 } from './mvp-confirm'
 import { attachActiveCorrectionFeedback, startCorrectionSession, finishCorrectionSession, hasActiveCorrectionSession } from './correction-session'
 import { buildCheckpointConclusion } from './phase-checkpoint'
+import { verificationFingerprint } from './verification-fingerprint'
+import { ensureCoreDelivery } from './core-delivery'
+import type { CoreVerificationResult } from './core-verification'
 import { createChannelFailureTracker, observeChannelFailure, type ChannelFailureTracker } from './channel-failure-watch'
 import { readDesktopRequirementsDigest, readDesktopShapeBriefs } from './requirement-digest'
 import { runSecurityScan } from '../verification/security-scan'
@@ -102,6 +105,7 @@ export function shouldEnterDesktopLine(project: DesktopLineProjectLike | undefin
 
 /** 路由层外部效应面（测试全桩化；生产由 agent-dispatch 注入）。 */
 export interface DesktopRouteDeps {
+  coreVerification?: (projectId: string) => Promise<CoreVerificationResult>
   /** 事件发布（生产=streamPublisher∘makeEvent；type+payload 直传）。 */
   publish: (input: { sessionId: string; projectId: string }, type: AgentEvent['type'], payload: Record<string, unknown>) => void
   /** 助手消息落盘（生产=appendAgentMessage）。 */
@@ -277,6 +281,7 @@ export async function handleDesktopDispatchMessage(
   // delivered 反馈同机制，改完重走 verify 再过本门）。──
   const mvpAnswer = resolveMvpConfirmAnswer(input)
   if (mvpAnswer === 'confirm') {
+    if (!await ensureCoreDelivery(input, deps)) return
     // 收口矩阵补齐（批11 审查修复，2026-10-08）：确认交付时若仍有活跃纠错会话——kill 实例；
     // 有未发送选区则如实告知已丢弃（不静默吞掉用户的点选，也不拦住交付决策）。
     if (hasActiveCorrectionSession(input.projectId)) {
@@ -437,8 +442,9 @@ async function runDesktopStage(
   // 刀2 checkpoint 消费：当前阶段与存证一致（同阶段重跑——拒收续接/turn 耗尽/预算
   // 断链后的重入）时注入勿重验结论；跨阶段不注入（旧结论不作数）。
   const checkpoint = project?.desktop_checkpoint
-  const verifiedConclusion = checkpoint && checkpoint.stage === phaseId && checkpoint.verified_gates.length > 0
-    ? buildCheckpointConclusion(checkpoint, getNextDesktopPhase(phaseId))
+  const currentFingerprint = checkpoint ? verificationFingerprint(sandboxRoot, { stage: phaseId, requirements: requirementsDigest ?? '' }) : undefined
+  const verifiedConclusion = checkpoint && currentFingerprint && checkpoint.fingerprint === currentFingerprint && checkpoint.stage === phaseId && checkpoint.verified_gates.length > 0
+    ? buildCheckpointConclusion(checkpoint, getNextDesktopPhase(phaseId), currentFingerprint)
     : undefined
 
   const loopInput: DesktopDispatchRunInput = {
@@ -558,6 +564,7 @@ async function settleDesktopStage(
       // ── MVP 确认门（2026-10-04 确认门新规，修订 10-02 刀1）：longterm 交付前交用户
       // 过目成品（quick 不设，快速直通道不变）；挂起不发通知不置 delivered，确认后收口。──
       if (finalPhase === 'delivered') {
+        if (!await ensureCoreDelivery(input, deps)) return
         const gateProject = findProject(input.projectId)
         if (gateProject?.mode === 'longterm' && !isMvpConfirmPending(input.projectId)) {
           // 交付门堵口（2026-10-06 批1，根因⑥「声明-消费不对称」）：implement 门禁要求
@@ -567,15 +574,15 @@ async function settleDesktopStage(
           // 冒烟（联合判定档），失败停在 verify 出人话卡（判据/stderr 即修复靶子），
           // 与 quick 冒烟语义对齐：两单型交付前都真实启动一次。
           const smoke = await (deps.launchSmoke ? deps.launchSmoke(input.projectId) : defaultLaunchSmokeGate(input.projectId))
-          if (smoke && !smoke.passed) {
+          if (!smoke || !smoke.passed) {
             deps.publish(input, 'message_delta', {
               text: buildBlockedNoticeCard({
                 phaseTitle: getDesktopPhase(phaseId)?.title ?? phaseId,
-                whatHappened: '交付前启动验证未通过——' + smoke.detail + '。程序必须在真实桌面会话中启动、出现可交互窗口并保持运行才算交付。',
-                evidence: smoke.outputExcerpt ?? '（无输出捕获）',
+                whatHappened: '交付前启动验证未通过——' + (smoke?.detail ?? '检查未执行完成，请补验') + '。程序必须在真实桌面会话中启动、出现可交互窗口并保持运行才算交付。',
+                evidence: smoke?.outputExcerpt ?? '（无输出捕获）',
               }),
             })
-            deps.persistSystem(input.sessionId, '[decision] desktop-longterm-launch-smoke ' + phaseId + '（未通过，停在 verify 待修复）：' + smoke.detail)
+            deps.persistSystem(input.sessionId, '[decision] desktop-longterm-launch-smoke ' + phaseId + '（未通过，停在 verify 待修复）：' + (smoke?.detail ?? '检查未完成'))
             deps.complete(input.sessionId, input.projectId, 'incomplete')
             return
           }
@@ -603,18 +610,19 @@ async function settleDesktopStage(
     if (next === 'desktop-verify') {
       const project = findProject(input.projectId)
       if (project?.mode === 'quick') {
+        if (!await ensureCoreDelivery(input, deps)) return
         const securityGate = deps.securityScan
           ? deps.securityScan(input.projectId)
           : defaultQuickSecurityGate(input.projectId)
-        if (securityGate && !securityGate.passed) {
+        if (!securityGate || !securityGate.passed) {
           deps.publish(input, 'message_delta', {
             text: buildBlockedNoticeCard({
               phaseTitle: getDesktopPhase(phaseId)?.title ?? phaseId,
-              whatHappened: `快速交付前的安全扫描未通过（${securityGate.blocking} 个高危/严重问题，扫描 ${securityGate.scanned} 个文件），暂不交付。`,
-              evidence: securityGate.listing,
+              whatHappened: securityGate ? `快速交付前的安全扫描未通过（${securityGate.blocking} 个高危/严重问题，扫描 ${securityGate.scanned} 个文件），暂不交付。` : '安全检查未执行完成，程序已保留，请补验。',
+              evidence: securityGate?.listing ?? '检查未完成',
             }),
           })
-          deps.persistSystem(input.sessionId, `[decision] desktop-quick-security-gate ${phaseId}（${securityGate.blocking} 高危，停在 implement 待修复）`)
+          deps.persistSystem(input.sessionId, `[decision] desktop-quick-security-gate ${phaseId}（${securityGate?.blocking ?? '未验证'}，停在 implement）`)
           deps.complete(input.sessionId, input.projectId, 'incomplete')
           return
         }
@@ -622,15 +630,15 @@ async function settleDesktopStage(
         // 「程序能跑起来」是 quick 的验收标准；起不来留在 implement 出人话卡（stderr 尾部
         // 即修复靶子），过了才 delivered（截图已落 00_VERIFY/screenshots，通知卡自动嵌图）
         const smoke = await (deps.launchSmoke ? deps.launchSmoke(input.projectId) : defaultLaunchSmokeGate(input.projectId))
-        if (smoke && !smoke.passed) {
+        if (!smoke || !smoke.passed) {
           deps.publish(input, 'message_delta', {
             text: buildBlockedNoticeCard({
               phaseTitle: getDesktopPhase(phaseId)?.title ?? phaseId,
-              whatHappened: '交付前启动验证未通过——' + smoke.detail + '。程序必须能真实启动并保持运行才算交付。',
-              evidence: smoke.outputExcerpt ?? '（无输出捕获）',
+              whatHappened: '交付前启动验证未通过——' + (smoke?.detail ?? '检查未执行完成，请补验') + '。程序必须能真实启动并保持运行才算交付。',
+              evidence: smoke?.outputExcerpt ?? '（无输出捕获）',
             }),
           })
-          deps.persistSystem(input.sessionId, '[decision] desktop-quick-launch-smoke ' + phaseId + '（未通过，停在 implement 待修复）：' + smoke.detail)
+          deps.persistSystem(input.sessionId, '[decision] desktop-quick-launch-smoke ' + phaseId + '（未通过，停在 implement 待修复）：' + (smoke?.detail ?? '检查未完成'))
           deps.complete(input.sessionId, input.projectId, 'incomplete')
           return
         }

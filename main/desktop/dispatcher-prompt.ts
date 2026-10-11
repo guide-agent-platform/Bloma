@@ -11,6 +11,7 @@
 import type { PhaseNode } from './dispatcher-phases'
 import { PHASE_ADVANCE_KEYWORD } from './dispatcher-gate'
 import { userFacingOutputContract } from '../agent/prompting/user-facing-output'
+import { CORE_VERIFICATION_BRIEF } from './core-verification'
 
 /** 任务书模板渲染结果：unresolved 收集未匹配占位符（诊断/测试断言用）。 */
 export interface RenderedTemplate {
@@ -81,6 +82,7 @@ export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherProm
     shape_verify_brief: ctx.shapeVerifyBrief ?? '',
   })
   const sections: string[] = []
+  if (node.id === 'desktop-implement' || node.id === 'desktop-verify') sections.push(CORE_VERIFICATION_BRIEF)
 
   // 1. 角色与使命头
   sections.push(
@@ -158,6 +160,7 @@ export function buildDesktopChildBaseSystem(
       ? `本阶段产物目录：${node.outputPath}/（相对项目根目录）。`
       : '本阶段产物写入项目根目录（相对路径）。',
   ]
+  if (node.id === 'desktop-implement' || node.id === 'desktop-verify') parts.push(CORE_VERIFICATION_BRIEF)
   if (constraints.length > 0) {
     parts.push(`【阶段约束】\n${constraints.map((constraint, index) => `${index + 1}. ${constraint}`).join('\n')}`)
   }

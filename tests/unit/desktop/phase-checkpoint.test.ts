@@ -37,10 +37,11 @@ describe('buildCheckpointConclusion 续跑注入形态', () => {
     at: '2026-10-02T15:00:00.000Z',
     snapshot_id: 'snap-1',
     verified_gates: ['driver-report: 7/7 场景 PASS（pass）', 'security-scan: 通过（42 文件扫描，0 高危）', 'judge-gate: 硬约束通过'],
+    fingerprint: 'current',
   }
 
   it('完整形态：结论清单 + 快照存证行 + 勿重验指示与推进目标', () => {
-    const text = buildCheckpointConclusion(checkpoint, 'delivered')
+    const text = buildCheckpointConclusion(checkpoint, 'delivered', 'current')
     expect(text).toContain('上一轮（2026-10-02T15:00:00.000Z）本阶段门禁已全部验证通过')
     expect(text).toContain('- driver-report: 7/7 场景 PASS（pass）')
     expect(text).toContain('- security-scan: 通过（42 文件扫描，0 高危）')
@@ -51,13 +52,21 @@ describe('buildCheckpointConclusion 续跑注入形态', () => {
   })
 
   it('无快照 id 时省略存证行（快照失败结论仍有效）', () => {
-    const text = buildCheckpointConclusion({ ...checkpoint, snapshot_id: undefined }, 'delivered')
+    const text = buildCheckpointConclusion({ ...checkpoint, snapshot_id: undefined }, 'delivered', 'current')
     expect(text).not.toContain('阶段快照已存证')
   })
 
   it('终态目标（next=null）：只给结论清单，不出推进标记行', () => {
-    const text = buildCheckpointConclusion(checkpoint, null)
+    const text = buildCheckpointConclusion(checkpoint, null, 'current')
     expect(text).not.toContain('PHASE_ADVANCE')
+  })
+  it('stale and historical conclusions never request direct advance', () => {
+    for (const fingerprint of [undefined, 'changed']) {
+      const text = buildCheckpointConclusion(checkpoint, 'delivered', fingerprint)
+      expect(text).toContain('重新验证')
+      expect(text).not.toContain('PHASE_ADVANCE')
+      expect(text).not.toContain('勿重验')
+    }
   })
 })
 

@@ -272,6 +272,10 @@ export async function runVerifyFinalize(
   // 高危/严重命中 → 拒收推进（fail-closed）。无项目上下文（测试桩/纯会话场景）时跳过，
   // 行为等同旧世界（不比旧世界差）；扫描器自身异常同样跳过并留痕（安全门不做可用性单点）。
   const securityGate = runHostSecurityGate(input)
+  if (!securityGate && input.sandboxRoot) {
+    return { advance: { decision: 'reject', reason: 'driver-blocked', discardedObservations: [],
+      education: '安全检查未执行完成，核心功能尚不能完整交付。请排查检查环境后补验，不要重写业务或伪造通过。' }, driverReport: report }
+  }
   if (securityGate && !securityGate.passed) {
     return {
       advance: {
@@ -365,6 +369,8 @@ export async function runVerifyFinalize(
     // ——幂等短路只挡 qualified=true 重跑；fail 每轮拒收都会再调 ≤2 次）。
     if (input.sandboxRoot) await runProviderQualificationIfLlm({ projectId: input.projectId, sessionId: input.sessionId, sandboxRoot: input.sandboxRoot })
     const recorded = await recordPhaseCheckpoint({
+      sandboxRoot: input.sandboxRoot,
+      requirementsDigest: input.requirementsDigest,
       projectId: input.projectId,
       requestId: input.requestId,
       stage: node.id,

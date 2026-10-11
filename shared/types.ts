@@ -1293,6 +1293,8 @@ export type DeliveryStatus = 'verified' | 'partial' | 'unavailable'
 
 /** 桌面线阶段推进 checkpoint（刀2，2026-10-02）：门禁全绿的存证与续跑凭据。 */
 export interface DesktopCheckpoint {
+  /** Executable inputs + confirmed requirements; missing means historical evidence only. */
+  fingerprint?: string
   /** 已验证阶段 id（与当前阶段一致时才消费——防跨阶段误注入）。 */
   stage: string
   /** 写入时间（ISO）。 */
