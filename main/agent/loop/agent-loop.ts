@@ -47,6 +47,7 @@ import { drainSteerQueue, markLoopActive, markLoopInactive, markSteerMerged, pen
 
 /** 工具执行期共享状态（同一 loop 会话内跨工具可变；agent-tools 维护语义字段）。 */
 export interface AgentLoopToolState {
+  latest_tool_feedback?: Record<string, ToolFeedback>
   /** 最近一次成功 run_preview 的预览地址（run_gwt_tests 浏览器/静态探针依赖） */
   preview_url?: string
   /** loop 内至少一次 GWT 测试失败后置位（修复预算口径的计数开关，PR3 §4.4） */
@@ -224,6 +225,7 @@ export interface AgentLoopInput {
 }
 
 export interface AgentLoopResult {
+  tool_feedback?: ToolFeedback[]
   status: AgentLoopStatus
   turns: number
   finalText: string
@@ -911,6 +913,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     })
     return {
       ...r,
+      ...(ctx.state.latest_tool_feedback ? { tool_feedback: Object.values(ctx.state.latest_tool_feedback).slice(-8) } : {}),
       ...(blocked ? { blocked_report: blocked } : {}),
       ...(transportRecoveries > 0 ? { transport_recoveries: transportRecoveries } : {}),
       // 轮级 usage（纯增量：采集方消费，非采集方零感知）
@@ -1736,6 +1739,7 @@ export async function executeTurnToolCalls(
     const startedAt = Date.now()
     const outcome = await executeToolCall(input, toolByName, budgetUsed, use, ctx)
     const feedback = feedbackForTool(use.name, outcome)
+    if (feedback) (ctx.state.latest_tool_feedback ??= {})[use.name] = feedback
     if (outcome.budgetExhausted) budgetStallThisTurn = true
     input.publish('tool_call_completed', {
       tool: use.name,

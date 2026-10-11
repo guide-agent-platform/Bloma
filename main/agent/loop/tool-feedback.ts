@@ -29,7 +29,8 @@ export function feedbackForTool(name: string, outcome: ToolOutcome): ToolFeedbac
   if (name.includes('delegation') || name === 'delegate_agent') {
     f.scope = 'delegation_lifecycle'; f.verification = 'unverified'; f.task_completion = 'unverified'
     const rows = Array.isArray(d.summaries) ? d.summaries : [d]
-    if (rows.some(r => r && ['turn_limit', 'budget_exhausted', 'cancelled', 'error'].includes(r.loop_status))) { f.task_completion = 'incomplete'; f.recovery = 'resume' }
+    if (rows.some(r => r && (r.task_handoff?.completion === 'incomplete' || ['turn_limit', 'budget_exhausted', 'cancelled', 'error'].includes(r.loop_status)))) { f.task_completion = 'incomplete'; f.recovery = 'resume' }
+    f.pending = rows.flatMap(r => r?.task_handoff?.pending ?? []).filter(p => typeof p === 'string').slice(0, 4)
     if (rows.some(r => r?.status === 'running')) f.execution = 'running'
   }
   return safeToolFeedback(f)

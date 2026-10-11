@@ -16,6 +16,7 @@ export { setChildRunContextProvider } from './child-run-context'
 /** 提示词纯函数 re-export（R7 拆出后保持既有 import 路径）。 */
 export { buildChildSystemPrompt, buildDelegationPrompt } from './child-run-context'
 import { appendDelegationSettle, loadChildSessionSnapshot, replayTurnsFrom } from './delegation-persistence'
+import { buildTaskHandoff, renderTaskHandoff, type TaskHandoff } from './task-handoff'
 import { recordSessionActivity } from '../../platform/sessions/session-service'
 import type { AgentEvent, PromaPermissionMode } from '../../../shared/types'
 import type { SDKQuery } from '../../orchestration/orchestrator'
@@ -94,6 +95,7 @@ export interface StartDelegationResult {
 }
 
 export interface DelegationSummary {
+  task_handoff?: TaskHandoff
   delegation_id: string
   role: DelegationRole
   status: DelegationStatus
@@ -115,6 +117,7 @@ export interface AskSignal {
 }
 
 export interface DelegationRecord {
+  taskHandoff?: TaskHandoff
   delegationId: string
   parentSessionId: string
   childSessionId: string
@@ -290,11 +293,12 @@ export function startDelegation(parent: ToolContext, args: DelegateAgentArgs): S
 function settleChildLoop(record: DelegationRecord, result: AgentLoopResult): void {
   if (record.status !== 'running') return
   record.loopStatus = result.status
+  record.taskHandoff = buildTaskHandoff(result)
   record.resultSummary = summarizeChildResult(result, DELEGATION_RESULT_CHAR_LIMIT) + formatWorktreeNote(record.worktreeMeta)
   record.status = 'completed'
   // persistence：终态落盘（重启后 JSONL 末行推断依据）
   try {
-    appendDelegationSettle(record.childSessionId, 'completed', { resultSummary: record.resultSummary, loopStatus: record.loopStatus })
+    appendDelegationSettle(record.childSessionId, 'completed', { resultSummary: record.resultSummary, loopStatus: record.loopStatus, taskHandoff: record.taskHandoff })
   } catch (error) {
     console.warn('[delegation-persistence] settle 落盘失败:', error)
   }
@@ -395,6 +399,7 @@ async function runChildLoop(opts: {
 
 export function getDelegationSummary(record: DelegationRecord): DelegationSummary {
   return {
+    ...(record.taskHandoff ? { task_handoff: record.taskHandoff } : {}),
     delegation_id: record.delegationId,
     role: record.role,
     status: record.status,
@@ -632,6 +637,8 @@ export function continueDelegation(parent: ToolContext, delegationId: string, ta
     throw new Error(`当前并行的委派子会话已达上限（${MAX_RUNNING_DELEGATIONS_PER_PARENT}）。请先 wait_for_delegations 收集或 stop_delegation 停止。`)
   }
 
+  const previousHandoff = record.taskHandoff
+  record.taskHandoff = undefined
   record.status = 'running'
   record.loopStatus = undefined
   record.resultSummary = undefined
@@ -647,12 +654,14 @@ export function continueDelegation(parent: ToolContext, delegationId: string, ta
   record.goal = truncateText(trimmedTask, DELEGATION_GOAL_CHAR_LIMIT)
   record.startedAt = Date.now()
 
-  const prompt = buildDelegationPrompt({ role: record.role, task: trimmedTask })
+  let prompt = buildDelegationPrompt({ role: record.role, task: trimmedTask })
   // 阶段 3 续跑重放：终态子会话 JSONL 历史读回 + follow-up 末位 user 轮——
   // 模型看到完整旧上下文（资产复用），而非只有新指令的重开；超窗由 compacting-window 兑底
   let replayTurns: ConversationTurn[] | undefined
   try {
     const snap = loadChildSessionSnapshot(record.childSessionId)
+    const handoff = previousHandoff ?? snap.lastSettle?.taskHandoff
+    if (handoff) prompt = `${renderTaskHandoff(handoff)}\n\n${prompt}`
     if (snap.lastSettle && snap.messages.length > 0) {
       replayTurns = replayTurnsFrom(snap.messages)
     }

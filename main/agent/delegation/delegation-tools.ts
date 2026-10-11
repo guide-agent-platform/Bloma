@@ -275,7 +275,7 @@ function formatDelegationSummaries(summaries: DelegationSummary[]): string {
       const result =
         summary.status === 'completed' && summary.result_summary ? `｜${clipDelegationSummary(summary.result_summary)}` : ''
       const error = summary.error ? `｜${summary.error}` : ''
-      return `- ${summary.delegation_id} role=${summary.role} status=${summary.status}${result}${error}`
+      return `- ${summary.delegation_id} role=${summary.role} lifecycle_status=${summary.status} loop=${summary.loop_status ?? 'unknown'} task=${summary.task_handoff?.completion ?? 'unverified'}${summary.task_handoff ? `\n宿主交接：${JSON.stringify(summary.task_handoff)}` : ''}${result}${error}`
     })
     .join('\n')
 }

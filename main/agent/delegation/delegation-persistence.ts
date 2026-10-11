@@ -5,6 +5,7 @@ import { settleSessionRecord } from '../../platform/sessions/session-service'
 import { getAgentSessionPath, getAgentSessionsIndexPath } from '../../../storage/config-paths'
 import type { AgentSessionRecord, MessageContentBlock } from '../../../shared/types'
 import type { ConversationTurn } from '../../orchestration/orchestrator'
+import { readTaskHandoff, type TaskHandoff } from './task-handoff'
 
 /**
  * Delegation 子会话持久化与恢复（delegation-persistence-port.md 阶段 1+2，2026-08-28）：
@@ -41,12 +42,13 @@ const SETTLE_FIELD = 'delegation_settle'
 export function appendDelegationSettle(
   childSessionId: string,
   status: Exclude<RestoredDelegationStatus, 'running'>,
-  payload?: { resultSummary?: string; error?: string; loopStatus?: string },
+  payload?: { resultSummary?: string; error?: string; loopStatus?: string; taskHandoff?: TaskHandoff },
 ): void {
   appendSessionMessage(childSessionId, {
     [SETTLE_FIELD]: status,
     ...(payload?.resultSummary ? { result_summary: payload.resultSummary } : {}),
     ...(payload?.loopStatus ? { loop_status: payload.loopStatus } : {}),
+    ...(payload?.taskHandoff ? { task_handoff: payload.taskHandoff } : {}),
     ...(payload?.error ? { error: payload.error } : {}),
     timestamp: Date.now(),
   })
@@ -133,6 +135,7 @@ export interface ChildSessionMessage {
 }
 
 export interface ChildSessionSettle {
+  taskHandoff?: TaskHandoff
   status: Exclude<RestoredDelegationStatus, 'running'>
   resultSummary?: string
   error?: string
@@ -165,6 +168,7 @@ export function loadChildSessionSnapshot(childSessionId: string): ChildSessionSn
     }
     if (typeof parsed[SETTLE_FIELD] === 'string') {
       lastSettle = {
+        taskHandoff: readTaskHandoff(parsed.task_handoff),
         status: parsed[SETTLE_FIELD] as ChildSessionSettle['status'],
         resultSummary: typeof parsed.result_summary === 'string' ? parsed.result_summary : undefined,
         error: typeof parsed.error === 'string' ? parsed.error : undefined,
