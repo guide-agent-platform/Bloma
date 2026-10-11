@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { getPromptOverridePath } from '../../../storage/config-paths'
+import { createHash } from 'node:crypto'
 
 /**
  * PromptConfig — 引擎 system prompt 外置覆盖（对齐 Proma 工作区配置模式：
@@ -22,18 +23,26 @@ export function promptOverrideNames(name: string): readonly string[] {
   return name === 'sketch-system' ? ['sketch-system', 'ux-sketch', 'ux-sketch.md'] : [name]
 }
 
-export function loadPromptOverride(name: string): string | null {
+function readPromptOverride(name: string): { content: string; path: string; candidate: string } | null {
   for (const candidate of promptOverrideNames(name)) {
     try {
       const path = getPromptOverridePath(candidate)
       if (!existsSync(path)) continue
       const content = readFileSync(path, 'utf8').replace(/^\uFEFF/, '').trim()
-      if (content.length > 0) return content
+      if (content.length > 0) return { content, path, candidate }
     } catch {
       // 当前候选不可读时继续兼容候选，全部失败再回退内置默认。
     }
   }
   return null
+}
+export function loadPromptOverride(name: string): string | null { return readPromptOverride(name)?.content ?? null }
+
+/** Uses the same precedence as runtime; only hashes/paths leave the local prompt store. */
+export function describePromptSource(name: string) {
+  const active = readPromptOverride(name)
+  return { name, mode: name === 'loop-system' ? 'append' : 'replace', source: active ? 'local_override' : 'builtin_default',
+    ...(active ? { path: active.path, candidate: active.candidate, sha256: createHash('sha256').update(active.content).digest('hex') } : {}) }
 }
 
 /** 通用 loop 每次启动读取一次；追加规则保留项目锚与本阶段通信格式。 */

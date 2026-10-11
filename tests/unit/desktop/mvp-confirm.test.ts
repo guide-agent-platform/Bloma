@@ -32,6 +32,7 @@ import {
   consumeMvpPendingForRework,
   holdForMvpConfirm,
   isMvpConfirmPending,
+  isMvpEvidenceCurrent,
   isMvpFeedbackMessage,
   resolveMvpConfirmAnswer,
 } from '../../../main/desktop/mvp-confirm'
@@ -70,6 +71,14 @@ afterEach(() => {
 })
 
 describe('holdForMvpConfirm（挂起）', () => {
+  it('pending review evidence becomes stale when executable code changes', () => {
+    const { deps } = makeDeps()
+    writeFileSync(join(projectRoot, 'app.py'), '# current')
+    holdForMvpConfirm({ input, deps, fromPhase: 'desktop-verify', notice: { projectName: 'p', fromPhaseTitle: '验证' } })
+    expect(isMvpEvidenceCurrent('p1')).toBe(true)
+    writeFileSync(join(projectRoot, 'app.py'), '# changed')
+    expect(isMvpEvidenceCurrent('p1')).toBe(false)
+  })
   it('pending 挂起 + MVP 卡 + 不置 delivered', () => {
     const { events, deps } = makeDeps()
     holdForMvpConfirm({

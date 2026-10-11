@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { restorePromaHome } from '../support/proma-home-guard'
-import { loadPromptOverride } from '../../main/agent/prompting/prompt-config'
+import { loadPromptOverride, describePromptSource } from '../../main/agent/prompting/prompt-config'
 import { listPromptSlots, readPromptSlot, resetPromptSlot, savePromptSlot } from '../../main/agent/prompting/prompt-service'
 import { generateUxSketch } from '../../main/guide/ux-sketch'
 import { callLlmForJson } from '../../main/kernel/llm-call'
@@ -15,6 +15,16 @@ vi.mock('../../main/delivery/preview-scheme', () => ({ mintProjectPreviewUrl: vi
 vi.mock('../../main/kernel/llm-call', () => ({ callLlmForJson: vi.fn() }))
 
 describe('提示词设置到真实模型装配边界', () => {
+  it('reports the runtime source without copying local prompt content', () => {
+    expect(describePromptSource('sketch-system').source).toBe('builtin_default')
+    savePromptSlot('sketch-system', '本地测试偏好')
+    const source = describePromptSource('sketch-system')
+    expect(source.source).toBe('local_override')
+    expect(source.sha256).toMatch(/^[a-f0-9]{64}$/)
+    expect(JSON.stringify(source)).not.toContain('本地测试偏好')
+    resetPromptSlot('sketch-system')
+    expect(describePromptSource('sketch-system').source).toBe('builtin_default')
+  })
   const originalHome = process.env.PROMA_HOME
   let home: string
   beforeEach(() => {

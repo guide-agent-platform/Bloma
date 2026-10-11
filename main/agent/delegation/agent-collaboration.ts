@@ -362,6 +362,8 @@ async function runChildLoop(opts: {
     // C1：渠道覆盖从 record 取（query 复用，env/providerType/maxTokens 换子渠道值；continue 同源）
     env: record.channelOverride?.env ?? parentCtx.env,
     sessionId: record.childSessionId,
+    parentSessionId: parent.sessionId,
+    accountingRole: role,
     projectId: parent.projectId,
     requestId: childRequestId,
     maxTokens: record.channelOverride?.maxTokens ?? parentCtx.maxTokens,

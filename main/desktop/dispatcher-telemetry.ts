@@ -17,6 +17,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { findProject } from '../project/project-service'
 import { getAnalyticsPath } from '../../storage/config-paths'
+import { readProjectUsage } from '../platform/llm/request-ledger'
 
 
 /** 起跑留痕（每段 run 一条；失败静默不阻断主链路）。 */
@@ -81,6 +82,7 @@ export function recordDispatchRunTelemetry(
     const head3Input = turnsUsage.filter((t) => t.turn <= 3).reduce((sum, t) => sum + t.inputTokens, 0)
     const repairClass = deriveRepairClass(result)
     const payload: Record<string, unknown> = {
+      project_usage: readProjectUsage(input.projectId),
       verification_policy: result.testEffectiveness?.mode ?? input.verificationPolicy ?? (process.env.BLOMA_VERIFY_POLICY === 'strict' ? 'strict' : 'standard'),
       phase: result.phase?.id ?? input.currentPhase,
       status: result.status,
@@ -97,6 +99,7 @@ export function recordDispatchRunTelemetry(
                 input: loopResult.usage.inputTokens,
                 output: loopResult.usage.outputTokens,
                 est_total: loopResult.usage.estTotalTokens,
+                scope: 'parent-loop (legacy summary; project_usage includes child and auxiliary requests)',
               }
             : undefined,
           // 轮级 usage（指标果集）：前 3 轮 input 占比（段首重建成本，连续会话形态应→0）

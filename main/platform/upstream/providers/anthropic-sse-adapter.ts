@@ -39,8 +39,8 @@ interface AnthropicSSEEvent {
     stop_reason?: string
   }
   /** Bloma 扩展：message_start 的 message.usage / message_delta 顶层 usage */
-  message?: { usage?: { input_tokens?: number; output_tokens?: number } }
-  usage?: { input_tokens?: number; output_tokens?: number }
+  message?: { usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } }
+  usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }
 }
 
 /**
@@ -135,6 +135,8 @@ export const ANTHROPIC_SSE_ADAPTER: StreamAdapter = {
             type: 'usage',
             ...(typeof inputTokens === 'number' ? { inputTokens } : {}),
             ...(typeof outputTokens === 'number' ? { outputTokens } : {}),
+            ...(typeof event.message.usage.cache_read_input_tokens === 'number' ? { cacheReadInputTokens: event.message.usage.cache_read_input_tokens } : {}),
+            ...(typeof event.message.usage.cache_creation_input_tokens === 'number' ? { cacheCreationInputTokens: event.message.usage.cache_creation_input_tokens } : {}),
           })
         }
       }
@@ -151,6 +153,8 @@ export const ANTHROPIC_SSE_ADAPTER: StreamAdapter = {
             type: 'usage',
             ...(typeof inTokens === 'number' ? { inputTokens: inTokens } : {}),
             ...(typeof outTokens === 'number' ? { outputTokens: outTokens } : {}),
+            ...(typeof event.usage?.cache_read_input_tokens === 'number' ? { cacheReadInputTokens: event.usage.cache_read_input_tokens } : {}),
+            ...(typeof event.usage?.cache_creation_input_tokens === 'number' ? { cacheCreationInputTokens: event.usage.cache_creation_input_tokens } : {}),
           })
         }
       }

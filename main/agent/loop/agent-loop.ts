@@ -163,6 +163,8 @@ export interface AgentLoopTurnInfo {
 }
 
 export interface AgentLoopInput {
+  parentSessionId?: string
+  accountingRole?: string
   materials?: import('../../../shared/attachment-types').MaterialContext
   /** 背板锚定系统提示词（PR3 由 prd.json 注入，每轮有效防漂移） */
   system: string
@@ -510,6 +512,7 @@ async function requestHandoff(input: AgentLoopInput, messages: ConversationTurn[
       signal: input.signal,
       sessionId: input.sessionId,
       maxTokens: LOOP_HANDOFF_MAX_TOKENS,
+      accounting: { projectId: input.projectId, runId: input.requestId, parentSessionId: input.parentSessionId, role: input.accountingRole ?? 'orchestrator', scope: 'handoff' },
       messages: [
         { role: 'system', content: LOOP_HANDOFF_SYSTEM },
         // 钉轮一并携带（PR2）；2026-09-16 上下文同步 Proma：全量模式下交接输入也用全量
@@ -994,6 +997,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
         signal: input.signal,
         sessionId: input.sessionId,
         maxTokens: wrapUp ? Math.min(input.maxTokens, WRAP_UP_MAX_TOKENS) : input.maxTokens,
+        accounting: { projectId: input.projectId, runId: input.requestId, parentSessionId: input.parentSessionId, role: input.accountingRole ?? 'orchestrator', scope: 'loop' },
         ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
         ...(input.providerType !== undefined ? { providerType: input.providerType } : {}),
         ...(input.thinkingLevel !== undefined ? { thinkingLevel: input.thinkingLevel } : {}),
@@ -1016,7 +1020,10 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
           input.publish('thinking_delta', { text: sdk.thinking })
         } else if (sdk.type === 'result') {
           stopReason = sdk.stop_reason
-          usage = sdk.usage
+          usage = sdk.usage?.input_tokens !== undefined ? {
+            input_tokens: sdk.usage.input_tokens + (sdk.usage.cache_read_input_tokens ?? 0) + (sdk.usage.cache_creation_input_tokens ?? 0),
+            output_tokens: sdk.usage.output_tokens,
+          } : sdk.usage
         }
       }
       flushTextRun()
@@ -1573,6 +1580,7 @@ async function runGraceWrapUpTurn(
       signal: input.signal,
       sessionId: input.sessionId,
       maxTokens: Math.min(input.maxTokens, WRAP_UP_MAX_TOKENS),
+      accounting: { projectId: input.projectId, runId: input.requestId, parentSessionId: input.parentSessionId, role: input.accountingRole ?? 'orchestrator', scope: 'grace' },
       ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
       ...(input.thinkingLevel !== undefined ? { thinkingLevel: input.thinkingLevel } : {}),
       messages: [

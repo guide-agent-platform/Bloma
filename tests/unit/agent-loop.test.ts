@@ -90,6 +90,14 @@ function readSessionJsonl(sessionId: string): Array<{ role: string; content: Arr
 }
 
 describe('runAgentLoop（PR2 L1）', () => {
+  it('cached input counts toward the real context and parent usage summary', async () => {
+    const result = await runAgentLoop(baseInput({ query: async function* () {
+      yield textMessage('已完成')
+      yield { type: 'result', subtype: 'success', usage: { input_tokens: 100, output_tokens: 10, cache_read_input_tokens: 200, cache_creation_input_tokens: 50 } }
+    } }))
+    expect(result.usage?.inputTokens).toBe(350)
+    expect(result.usage?.outputTokens).toBe(10)
+  })
   const originalPromaHome = process.env.PROMA_HOME
 
   beforeEach(() => {

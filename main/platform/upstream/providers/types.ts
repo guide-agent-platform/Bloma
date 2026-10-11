@@ -102,6 +102,8 @@ export interface StreamToolCallDeltaEvent {
 
 /** Bloma 扩展（上游无）：usage 增量事件——message_start / message_delta 携带的用量字段 */
 export interface StreamUsageEvent {
+  cacheReadInputTokens?: number
+  cacheCreationInputTokens?: number
   type: 'usage'
   inputTokens?: number
   outputTokens?: number

@@ -22,6 +22,7 @@ import type { DocumentCategory } from '../platform/llm/model-resolution'
 import type { ProductShape } from '../model/prd-backplane'
 import { readPrdBackplane } from '../project/document-engine'
 import { verificationFingerprint } from './verification-fingerprint'
+import { normalizeHttpUsage, startDirectQuery } from '../platform/llm/request-ledger'
 
 /** 产物 LLM 声明（解析容错：结构不合法按未声明处理）。 */
 export interface LlmProviderDeclaration {
@@ -51,6 +52,7 @@ export interface LlmQualificationOutcome {
   skipped_reason?: string
   checked_at: string
   fingerprint?: string
+  reused?: boolean
 }
 
 /** 声明文件相对路径（项目根）。 */
@@ -233,7 +235,8 @@ export async function runProviderQualification(options: {
   })
   try {
     const prior = JSON.parse(readPriorResult() ?? 'null') as LlmQualificationOutcome | null
-    if (fingerprint && prior?.qualified === true && prior.fingerprint === fingerprint) return prior
+    const age = Date.now() - Date.parse(prior?.checked_at ?? '')
+    if (fingerprint && prior?.qualified === true && prior.fingerprint === fingerprint && age >= 0 && age < 24 * 60 * 60 * 1000) return { ...prior, calls: 0, reused: true }
   } catch { /* corrupt/legacy evidence requires a new verification */ }
   const isOpenAi = providerType === 'openai'
   const url = isOpenAi ? openaiChatUrl(baseUrl) : anthropicMessagesUrl(baseUrl)
@@ -264,9 +267,11 @@ export async function runProviderQualification(options: {
 
   let calls = 0
   let lastError = ''
+  const accounting = startDirectQuery({ projectId: options.projectId, sessionId: options.sessionId, role: 'provider_qualification', model, endpointHost: hostOf(baseUrl) })
   for (let attempt = 0; attempt < 2; attempt += 1) {
     calls += 1
     try {
+      accounting.startAttempt()
       const response = await fetchImpl(url, {
         method: 'POST',
         headers,
@@ -275,6 +280,7 @@ export async function runProviderQualification(options: {
       })
       const text = await response.text()
       if (!response.ok) {
+        accounting.failAttempt()
         lastError = `HTTP ${response.status}：${text.slice(0, 200)}`
         // 4xx（认证/参数）重试同结果无意义；5xx/429 可重试一次
         if (response.status < 500 && response.status !== 429) break
@@ -312,6 +318,7 @@ export async function runProviderQualification(options: {
             checked_at: now(),
           }
       outcome.fingerprint = fingerprint
+      accounting.finish(normalizeHttpUsage(parsed.usage, isOpenAi), contentOk ? 'completed' : 'error')
       try {
         writeResult(LLM_QUALIFICATION_REL, JSON.stringify(outcome, null, 2))
       } catch {
@@ -319,6 +326,7 @@ export async function runProviderQualification(options: {
       }
       return outcome
     } catch (error) {
+      accounting.failAttempt()
       lastError = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
       // 网络异常/超时重试一次
       continue
@@ -337,6 +345,7 @@ export async function runProviderQualification(options: {
     checked_at: now(),
     fingerprint,
   }
+  accounting.finish(undefined, options.signal?.aborted ? 'cancelled' : 'error')
   try {
     writeResult(LLM_QUALIFICATION_REL, JSON.stringify(outcome, null, 2))
   } catch {

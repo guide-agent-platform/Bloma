@@ -18,6 +18,7 @@ import type { ProviderRequest, StreamAdapter, StreamEventCallback, ThinkingBlock
 
 /** streamSSE 的输入选项（上游原样） */
 export interface StreamSSEOptions {
+  onAttempt?: (state: 'started' | 'failed' | 'cancelled') => void
   /** 构建好的 HTTP 请求配置 */
   request: ProviderRequest
   /** 供应商适配器（用于解析 SSE 行） */
@@ -139,10 +140,15 @@ export async function streamSSE(options: StreamSSEOptions): Promise<StreamSSERes
   let elapsedRetryDelayMs = 0
 
   for (let attempt = 1; ; attempt++) {
+    let attemptStarted = false
     // 跟踪本次尝试是否已发出事件——一旦发出就不能再重试
     let hasEmitted = false
     const trackedOptions: StreamSSEOptions = {
       ...options,
+      onAttempt: state => {
+        if (state === 'started') attemptStarted = true
+        try { options.onAttempt?.(state) } catch { /* accounting cannot affect delivery */ }
+      },
       onEvent: (event) => {
         hasEmitted = true
         options.onEvent(event)
@@ -152,6 +158,9 @@ export async function streamSSE(options: StreamSSEOptions): Promise<StreamSSERes
     try {
       return await runStreamAttempt(trackedOptions)
     } catch (error) {
+      if (attemptStarted) {
+        try { options.onAttempt?.(signal?.aborted ? 'cancelled' : 'failed') } catch { /* telemetry only */ }
+      }
       // 用户主动取消：不重试
       if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
         throw error
@@ -190,6 +199,8 @@ async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSERes
     : timeoutController.signal
 
   // 1. 发起请求（支持通过 fetchFn 注入代理）
+  effectiveSignal.throwIfAborted()
+  options.onAttempt?.('started')
   const response = await fetchFn(request.url, {
     method: 'POST',
     headers: request.headers,

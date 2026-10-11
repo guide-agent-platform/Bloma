@@ -58,13 +58,14 @@ import {
   consumeMvpPendingForRework,
   holdForMvpConfirm,
   isMvpConfirmPending,
+  isMvpEvidenceCurrent,
   isMvpFeedbackMessage,
   resolveMvpConfirmAnswer,
 } from './mvp-confirm'
 import { attachActiveCorrectionFeedback, startCorrectionSession, finishCorrectionSession, hasActiveCorrectionSession } from './correction-session'
 import { buildCheckpointConclusion } from './phase-checkpoint'
 import { verificationFingerprint } from './verification-fingerprint'
-import { ensureCoreDelivery } from './core-delivery'
+import { ensureCoreDelivery, resetCoreDeliveryState, clearCoreDeliveryRetries } from './core-delivery'
 import type { CoreVerificationResult } from './core-verification'
 import { createChannelFailureTracker, observeChannelFailure, type ChannelFailureTracker } from './channel-failure-watch'
 import { readDesktopRequirementsDigest, readDesktopShapeBriefs } from './requirement-digest'
@@ -157,6 +158,7 @@ function ledgerOf(projectId: string): RejectionLedger {
 
 /** 测试隔离：清空账本。 */
 export function resetDesktopRouteLedgersForTests(): void {
+  resetCoreDeliveryState()
   ledgers.clear()
   channelTrackers.clear()
 }
@@ -260,6 +262,7 @@ export async function handleDesktopDispatchMessage(
   input: DesktopRouteInput,
   deps: DesktopRouteDeps,
 ): Promise<void> {
+  clearCoreDeliveryRetries(input.projectId)
   const project = findProject(input.projectId)
   const projectName = project?.name ?? input.projectId
   const phaseId = project?.desktop_phase ?? 'desktop-arch'
@@ -281,7 +284,14 @@ export async function handleDesktopDispatchMessage(
   // delivered 反馈同机制，改完重走 verify 再过本门）。──
   const mvpAnswer = resolveMvpConfirmAnswer(input)
   if (mvpAnswer === 'confirm') {
-    if (!await ensureCoreDelivery(input, deps)) return
+    if (!isMvpEvidenceCurrent(input.projectId)) {
+      deps.publish(input, 'message_delta', { text: '当前版本需要重新验证，我会先检查再交付。' })
+      consumeMvpPendingForRework(input)
+      updateProject(input.projectId, { desktop_phase: 'desktop-verify' })
+      await runDesktopStage(input, input.query, input.env, 'desktop-verify', deps, projectName, 0)
+      return
+    }
+    if (!await ensureCoreDelivery(input, deps, feedback => runDesktopStage({ ...input, content: feedback, initialMessagePersisted: false }, input.query, input.env, 'desktop-implement', deps, projectName, 0))) return
     // 收口矩阵补齐（批11 审查修复，2026-10-08）：确认交付时若仍有活跃纠错会话——kill 实例；
     // 有未发送选区则如实告知已丢弃（不静默吞掉用户的点选，也不拦住交付决策）。
     if (hasActiveCorrectionSession(input.projectId)) {
@@ -564,7 +574,10 @@ async function settleDesktopStage(
       // ── MVP 确认门（2026-10-04 确认门新规，修订 10-02 刀1）：longterm 交付前交用户
       // 过目成品（quick 不设，快速直通道不变）；挂起不发通知不置 delivered，确认后收口。──
       if (finalPhase === 'delivered') {
-        if (!await ensureCoreDelivery(input, deps)) return
+        if (!await ensureCoreDelivery(input, deps, async feedback => {
+          updateProject(input.projectId, { desktop_phase: 'desktop-implement' })
+          await runDesktopStage({ ...input, content: feedback, initialMessagePersisted: false }, query, env, 'desktop-implement', deps, projectName, chainDepth)
+        })) return
         const gateProject = findProject(input.projectId)
         if (gateProject?.mode === 'longterm' && !isMvpConfirmPending(input.projectId)) {
           // 交付门堵口（2026-10-06 批1，根因⑥「声明-消费不对称」）：implement 门禁要求
@@ -610,7 +623,7 @@ async function settleDesktopStage(
     if (next === 'desktop-verify') {
       const project = findProject(input.projectId)
       if (project?.mode === 'quick') {
-        if (!await ensureCoreDelivery(input, deps)) return
+        if (!await ensureCoreDelivery(input, deps, feedback => runDesktopStage({ ...input, content: feedback, initialMessagePersisted: false }, query, env, 'desktop-implement', deps, projectName, chainDepth))) return
         const securityGate = deps.securityScan
           ? deps.securityScan(input.projectId)
           : defaultQuickSecurityGate(input.projectId)

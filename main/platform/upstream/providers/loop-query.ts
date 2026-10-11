@@ -25,6 +25,7 @@ import { ANTHROPIC_SSE_ADAPTER, buildAnthropicHeaders, resolveMessagesUrl } from
 import { normalizeAnthropicBaseUrl, resolveAnthropicMessagesUrl } from './url-utils'
 import { streamSSE, HTTPError } from './sse-reader'
 import { capMaxTokensForProvider } from '../../llm/model-resolution'
+import { accountSdkQuery } from '../../llm/request-ledger'
 
 /** 开关已删除（2026-10-01 开关面收敛批）：providers 传输路径为唯一实现。 */
 /**
@@ -51,6 +52,9 @@ function extractText(blocks: MessageContentBlock[]): string {
 }
 
 export async function* anthropicMessagesQueryViaProviders(prompt: string, options: SDKQueryOptions): AsyncGenerator<SDKMessage> {
+  yield* accountSdkQuery(anthropicMessagesQueryViaProvidersInner, prompt, options)
+}
+async function* anthropicMessagesQueryViaProvidersInner(prompt: string, options: SDKQueryOptions): AsyncGenerator<SDKMessage> {
   if (!options.env.PATH && !options.env.Path) throw new Error('SDK env missing PATH')
   if (options.signal.aborted) throw new Error('AGENT_CANCELLED')
   const apiKey = options.env.ANTHROPIC_AUTH_TOKEN
@@ -147,7 +151,7 @@ export async function* anthropicMessagesQueryViaProviders(prompt: string, option
   let textDeltaCount = 0
   let thinkingDeltaCount = 0
   let toolUseCount = 0
-  let usageInfo: { input_tokens?: number; output_tokens?: number } | undefined
+  let usageInfo: SDKMessage['usage']
 
   const streamTask = (async (): Promise<void> => {
     const runOnce = () =>
@@ -155,6 +159,7 @@ export async function* anthropicMessagesQueryViaProviders(prompt: string, option
         request: makeRequest(),
         adapter: ANTHROPIC_SSE_ADAPTER,
         signal: options.signal,
+        onAttempt: options.onTransportAttempt,
         onEvent: (event) => {
           if (event.type === 'chunk') {
             textDeltaCount += 1
@@ -172,7 +177,9 @@ export async function* anthropicMessagesQueryViaProviders(prompt: string, option
             queue.push({ type: 'thinking', thinking: event.delta })
             wake()
           } else if (event.type === 'usage') {
-            usageInfo = { ...usageInfo, ...(event.inputTokens !== undefined ? { input_tokens: event.inputTokens } : {}), ...(event.outputTokens !== undefined ? { output_tokens: event.outputTokens } : {}) }
+            usageInfo = { ...usageInfo, ...(event.inputTokens !== undefined ? { input_tokens: event.inputTokens } : {}), ...(event.outputTokens !== undefined ? { output_tokens: event.outputTokens } : {}),
+              ...(event.cacheReadInputTokens !== undefined ? { cache_read_input_tokens: event.cacheReadInputTokens } : {}),
+              ...(event.cacheCreationInputTokens !== undefined ? { cache_creation_input_tokens: event.cacheCreationInputTokens } : {}) }
           }
           // 其余事件（reasoning_signature/block、tool_call_start/delta、done）由
           // sse-reader 装配，流末统一产出；正文先于 tool_use（协议块序），顺序一致

@@ -12,6 +12,7 @@
  */
 import type { DesktopDispatchRunResult } from './dispatcher-loop'
 import type { DesktopRouteDeps } from './desktop-route'
+import { verificationFingerprint } from './verification-fingerprint'
 import type { DeliveredNoticeInput } from './notice-cards'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -209,6 +210,7 @@ ${shots || '<p style="color:#999">（无截图——无窗口程序或截图未�
 }
 
 interface PendingMvpConfirm {
+  fingerprint?: string
   session_id: string
   from_phase: string
   /** 发卡时装配好的交付通知数据（driverReport 等运行期证据此刻才有，确认时复用） */
@@ -219,6 +221,13 @@ const pendingMvpConfirms = new Map<string, PendingMvpConfirm>()
 
 export function isMvpConfirmPending(projectId: string): boolean {
   return pendingMvpConfirms.has(projectId)
+}
+export function isMvpEvidenceCurrent(projectId: string): boolean {
+  try {
+    const pending = pendingMvpConfirms.get(projectId)
+    const current = verificationFingerprint(findProject(projectId)?.root_path)
+    return Boolean(current && pending?.fingerprint === current)
+  } catch { return false }
 }
 
 /** verify→delivered 收口点调用：挂起 MVP 确认卡（不发交付通知、不置 delivered）。 */
@@ -233,6 +242,7 @@ export function holdForMvpConfirm(options: {
     session_id: input.sessionId,
     from_phase: options.fromPhase,
     notice: options.notice,
+    fingerprint: verificationFingerprint(findProject(input.projectId)?.root_path),
   })
   const screenshotCount = options.notice.screenshotPaths?.length ?? 0
   recordDecision({

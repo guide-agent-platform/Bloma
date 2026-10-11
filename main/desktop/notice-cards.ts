@@ -33,10 +33,10 @@ export function buildDeliveredNoticeCard(input: DeliveredNoticeInput): string {
   lines.push(
     input.viaMvpConfirm
       ? `【交付完成】「${input.projectName}」已按你的确认正式交付（来源阶段：${input.fromPhaseTitle}）。`
-      : `【交付完成】「${input.projectName}」已通过全部验收门禁（来源阶段：${input.fromPhaseTitle}），无需人工确认，现已交付。`,
+      : `【交付完成】「${input.projectName}」已通过本次核心功能检查。验证范围和限制见交付记录。`,
   )
   if (input.driverSummary) {
-    lines.push(`验收结论：驱动场景 ${input.driverSummary.passed}/${input.driverSummary.total} PASS（平台真实执行回读）+ 安全扫描 + 裁判审查全绿。`)
+    lines.push(`业务驱动：${input.driverSummary.passed}/${input.driverSummary.total} PASS（平台执行回读，范围以对应场景为准）。`)
   }
   const runParts: string[] = []
   if (input.entryFile) runParts.push(`程序入口：${input.entryFile}`)

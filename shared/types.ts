@@ -820,7 +820,7 @@ export interface SDKMessage {
   /** message_delta 的 stop_reason（'tool_use' = 模型要求继续工具循环；Agent Loop 据此判定续轮） */
   stop_reason?: string
   /** 渠道返回的用量（message_start/message_delta 的 usage 聚合；Agent Loop 逐轮埋点用） */
-  usage?: { input_tokens?: number; output_tokens?: number }
+  usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number }
   /** thinking 增量（type='thinking' 专用，2026-10-04）：仅供渲染端呈现，不进协议历史 */
   thinking?: string
 }
