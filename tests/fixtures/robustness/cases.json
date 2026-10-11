@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "baseline_commit": "0375a2e",
+  "cases": [
+    {
+      "id": "voice",
+      "request": "做一个离线中文语音录入工具。点击开始后接收麦克风声音并显示识别文字，点击停止后结束录音，可以再次开始。准备失败时告诉我原因并允许重试。",
+      "core": ["microphone_capture", "asr", "ui_readback", "restart"],
+      "positive": { "fixture": "voice-golden.wav", "expected_normalized": "我们下周四下午3点开会", "sample_rate": 16000 },
+      "negative": ["column_pcm_without_adapter", "text_simulation_is_not_asr", "silence", "invalid_samples", "initialization_failure"],
+      "recovery": "initialization failure -> retry -> real model text -> stop -> start",
+      "hardware_status": "not_run"
+    },
+    {
+      "id": "ledger",
+      "request": "做一个本地记账工具，可以录入日期、金额和备注，查看记录和合计，删除指定记录。关闭再打开后记录还在，金额不合法时不保存，保存失败时保留原数据并提示原因。",
+      "core": ["ui_readback", "persistence", "restart"],
+      "positive": { "amounts": [12.5, 20], "expected_total": 32.5 },
+      "negative": ["invalid_amount", "write_failure", "corrupt_store"],
+      "recovery": "failed write preserves prior store -> retry -> restart -> same records"
+    },
+    {
+      "id": "files",
+      "request": "做一个批量文件重命名工具，选择一个文件夹后预览给文件名添加前缀的结果，确认后才改名。遇到重名先提示，不覆盖原文件，可以撤销本次改名。",
+      "core": ["ui_readback", "file_operations", "undo"],
+      "positive": { "files": ["a.txt", "b.txt"], "prefix": "done-", "expected": ["done-a.txt", "done-b.txt"] },
+      "negative": ["existing_destination", "outside_root", "write_failure"],
+      "recovery": "reject conflict unchanged -> resolve -> rename -> undo restores bytes"
+    }
+  ],
+  "modes": ["quick", "longterm"],
+  "deterministic_replays": 3,
+  "timeout_minutes": { "quick": 20, "longterm": 60 },
+  "max_targeted_repairs": 2,
+  "comparison": "same isolated artifact and counterexample; historical successes are not a matched generation baseline"
+}
