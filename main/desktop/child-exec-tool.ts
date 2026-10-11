@@ -31,6 +31,7 @@ const MAX_ARGS = 8
 /** 最小生存 env（同 process-driver MINIMUM_SURVIVAL_ENV 家族）+ PATH/TEMP——解释器解析与临时目录刚需。 */
 const CHILD_EXEC_ENV_KEYS: readonly string[] = [
   'SystemRoot', 'SystemDrive', 'ComSpec', 'PATHEXT', 'windir', 'PATH', 'Path', 'TEMP', 'TMP',
+  'PROMA_HOME', 'BLOMA_SPEECH_MODEL_DIR', 'BLOMA_SPEECH_OFFLINE',
 ]
 
 export interface ChildScriptRunnerDeps {

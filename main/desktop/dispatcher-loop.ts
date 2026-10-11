@@ -55,6 +55,7 @@ import { findProject } from '../project/project-service'
 import { buildProjectDriverRunnerTool } from './driver-runner-tool'
 import { recordPhaseCheckpoint } from './phase-checkpoint'
 import { runVerifyFinalize, finalizeDesktopDispatch } from './dispatcher-finalize'
+import { buildResourceDiscoveryTool } from './resource-discovery'
 
 // 拆分 re-export（批10 旧账③ R7，2026-10-07）：收口判定族迁至 dispatcher-finalize.ts，
 // 旧路径消费者与测试零断链（hub 化惯例；与 dispatcher-telemetry 拆分同款）。
@@ -153,7 +154,7 @@ export function buildDispatcherTools(projectId: string): AgentLoopTool[] {
   const readonly = buildAgentTools({ projectId, role: 'research' }).filter((t) => READONLY_TOOL_NAMES.has(t.name))
   // run_project_driver：常驻装配、阶段白名单放行（ada13257 根治——implement 真实红绿通道；
   // 其余阶段被 checkDispatcherToolGate 拦截教育）。工具本体在 driver-runner-tool.ts。
-  return [...readonly, ...buildDelegationTools('parent'), buildWebResearch(projectId), buildProjectDriverRunnerTool(projectId)]
+  return [...readonly, ...buildDelegationTools('parent'), buildWebResearch(projectId), buildProjectDriverRunnerTool(projectId), buildResourceDiscoveryTool(projectId)]
 }
 
 /**
@@ -170,6 +171,7 @@ export function buildDispatcherTools(projectId: string): AgentLoopTool[] {
  */
 export function buildDesktopChildTools(projectId: string, role: DelegationRunRole, editFormat: 'diff' | 'whole'): AgentLoopTool[] {
   return [
+    buildResourceDiscoveryTool(projectId),
     ...buildAgentTools({ projectId, role, editFormat, realFullstackVariant: true }),
     ...buildDomainTools({ projectId, role, editFormat, realFullstackVariant: true }),
     // 方案 B（2026-10-05）：implement 子会话受控执行刀——quick 无契约时真实红绿

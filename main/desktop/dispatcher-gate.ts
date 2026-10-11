@@ -323,6 +323,7 @@ export const DISPATCHER_BASE_TOOLS: ReadonlySet<string> = new Set([
   'find',
   'web_fetch',
   'web_research',
+  'inspect_project_resources',
   'guide_decide',
   'compact_context',
 ])

@@ -181,7 +181,7 @@ function confirmedSketchInstruction(path: string): string {
 }
 
 function architectureComponentFacts(): string {
-  return `【平台已有组件事实】\n${componentQuickReference()}\n先对照已验组件确定知识缺口，再调研替代方案。语音默认评估 speech_runtime.py 的 SpeechEngine/StreamingRecorder；安装 sherpa-onnx 会物化组件。speech_locator.py 先校验 BLOMA_SPEECH_MODEL_DIR 指定缓存，否则查 PROMA_HOME 或 ~/.proma 下 speech-models/sensevoice-int8；已通过组件探针不代表当前产物已通过。确有能力缺口才提出替代引擎，注明缺口及额外下载/验证预算。下载失败保留待验，不反复从头下载。测试输入是固定音频时只证明适配/解码，不证明麦克风采集；真实硬件须单独授权证据。`
+  return `【平台已有组件事实】\n先调用 inspect_project_resources，读取实际解释器、导入、组件与缓存校验结果；它不下载或录音。\n${componentQuickReference()}\n先对照已验组件确定知识缺口，再调研替代方案。语音默认评估 speech_runtime.py 的 SpeechEngine/StreamingRecorder；安装 sherpa-onnx 会物化组件。speech_locator.py 先校验 BLOMA_SPEECH_MODEL_DIR 指定缓存，否则查 PROMA_HOME 或 ~/.proma 下 speech-models/sensevoice-int8；已通过组件探针不代表当前产物已通过。确有能力缺口才提出替代引擎，注明缺口及额外下载/验证预算。下载失败保留待验，不反复从头下载。测试输入是固定音频时只证明适配/解码，不证明麦克风采集；真实硬件须单独授权证据。`
 }
 
 /**
