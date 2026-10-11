@@ -154,9 +154,9 @@
 | 批次 | 当前状态 | 完成证据 |
 | --- | --- | --- |
 | 0 基线/矩阵 | 已验证（基线与接口反例） | `robustness-execution-20261011.md`；`run-artifacts/robustness-baseline.json` |
-| 1 判定/证据 | 已实现并验证收口/失效规则；语音宿主证据待批 3 接入 | `robustness-execution-20261011.md`；`run-artifacts/robustness-batch1-tests.log` |
+| 1 判定/证据 | 已实现并验证收口/失效规则；语音宿主探针已接入 | `robustness-execution-20261011.md`；`run-artifacts/robustness-batch1-tests.log` |
 | 2 回忆治理 | 已实现并验证索引迁移/来源/作用域 | `robustness-execution-20261011.md`；`run-artifacts/robustness-recall-migration.json` |
-| 3 语音/环境 | 待执行 | — |
+| 3 语音/环境 | 已实现；固定音频/隔离反例/生命周期已验；真实组件采集人工接受 | `robustness-execution-20261011.md`；`run-artifacts/robustness-speech-probe.json` |
 | 4 成本/规则 | 待执行 | — |
 | 5 固定验收 | 待执行 | — |
 

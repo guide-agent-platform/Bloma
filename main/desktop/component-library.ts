@@ -106,9 +106,9 @@ export const WINDOWS_COMPONENT_CARDS: readonly ComponentCard[] = [
     importName: 'sherpa_onnx',
     purpose: '本地离线语音识别（SenseVoice，中/英/粤/日/韩；录音用 sounddevice）',
     probe: 'python -c "import sherpa_onnx; print(sherpa_onnx.__version__)"',
-    pitfall: '非流式：整段录音后一次性转写（VAD 自动分段）；模型 239MB 首次自动下载到 ~/.proma/speech-models/（装包时项目根自动生成 speech_locator.py，import 它调 ensure_models() 拿模型路径，勿手写下载逻辑）；模型准备期 UI 需提示，勿卡死主线程',
-    fallback: '无本地降级（文本输入兑底）',
-    evidence: '文证',
+      pitfall: '复用平台 speech_runtime.py：SpeechEngine 适配一维/录音列数组/多声道与采样率，StreamingRecorder 回调仅入队、工作线程识别；on_text 给累计文字，UI 线程更新。模型准备放后台、失败可重试。资源目录可配置，下载有时限/取消/校验。实测 numpy 2.5.4 + sherpa-onnx 1.13.8 + sounddevice 0.5.6 的固定音频及模拟回调；真人采集需单独测试',
+      fallback: '文本输入可作辅助入口，不能当作语音核心能力验收通过',
+      evidence: '实证',
   },
 ]
 

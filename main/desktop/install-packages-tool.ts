@@ -55,7 +55,7 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
       '在项目内 .venv 安装声明的第三方包（声明制，无任意命令）：入参给包列表（如 ["pystray","Pillow>=10"]）' +
       '或 requirements=true 读项目根 requirements.txt。首次自动建 venv；装完逐包 import 探测回读；' +
       '装好后 run_project_script 与 LAUNCH 命令自动/应改用 .venv\\Scripts\\python.exe。' +
-      '可用组件速查：pynput=全局热键注入｜pystray+Pillow=托盘｜sounddevice=录音播放｜pyperclip=剪贴板｜winotify=Toast 通知｜sherpa-onnx=本地离线语音识别（SenseVoice，装后项目根自动生成 speech_locator.py 模型定位器，配 sounddevice 录音）。' +
+      '可用组件速查：pynput=全局热键注入｜pystray+Pillow=托盘｜sounddevice=录音播放｜pyperclip=剪贴板｜winotify=Toast 通知｜sherpa-onnx=本地离线语音识别（安装后提供 speech_locator.py 与 speech_runtime.py；复用 SpeechEngine/StreamingRecorder，勿在音频回调里同步识别）。实测版本 numpy==2.5.4、sherpa-onnx==1.13.8、sounddevice==0.5.6。' +
       `全程至多 ${maxCalls} 次安装调用。`,
     input_schema: {
       type: 'object',
@@ -98,6 +98,16 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
       }
       if (specs.length === 0) {
         return { output: '未声明任何包：给 packages 列表或 requirements=true。', isError: true }
+      }
+      // Bare speech dependencies use the locally validated baseline. Explicit user versions win.
+      const speechBaseline: Record<string, string> = { 'sherpa-onnx': '1.13.8', numpy: '2.5.4', sounddevice: '0.5.6' }
+      const hasSpeech = specs.some(spec => /^sherpa[-_]onnx\b/i.test(spec))
+      if (hasSpeech) {
+        specs = specs.map(spec => {
+          const name = spec.toLowerCase().replace(/_/g, '-')
+          return speechBaseline[name] ? `${name}==${speechBaseline[name]}` : spec
+        })
+        if (!specs.some(spec => /^numpy\b/i.test(spec))) specs.push('numpy==2.5.4')
       }
       if (specs.length > MAX_PACKAGES_PER_CALL) {
         return { output: `单次至多 ${MAX_PACKAGES_PER_CALL} 个包（当前 ${specs.length}），分批安装。`, isError: true }
@@ -148,6 +158,21 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
           }
         }
         steps.push(`pip install 完成（${durationMs}ms）：${specs.join('、')}`)
+        if (hasSpeech) {
+          const { readFileSync, writeFileSync } = await import('node:fs')
+          const reqPath = join(root, 'requirements.txt')
+          const original = existsSync(reqPath) ? readFileSync(reqPath, 'utf8') : ''
+          const lines = original.split(/\r?\n/).map(line => {
+            const name = line.trim().toLowerCase().replace(/_/g, '-')
+            return speechBaseline[name] ? `${name}==${speechBaseline[name]}` : line
+          })
+          for (const spec of specs) {
+            const name = spec.split(/[<>=!~]/)[0]!.toLowerCase().replace(/_/g, '-')
+            if (!lines.some(line => line.trim().split(/[<>=!~]/)[0]?.toLowerCase().replace(/_/g, '-') === name)) lines.push(spec)
+          }
+          writeFileSync(reqPath, lines.filter(Boolean).join('\n') + '\n', 'utf8')
+          steps.push('语音依赖声明已保存；裸包名采用实测版本，显式版本约束保留。')
+        }
       } catch (error) {
         if (error instanceof DriverExecutionError) {
           return { output: `安装失败（${error.kind}）：${error.message}。timeout 类不要反复重试。`, isError: true }
@@ -184,6 +209,16 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
           if (existsSync(source)) {
             cpSync(source, locatorTarget)
             steps.push('已生成 speech_locator.py（语音模型定位器：import 它调 ensure_models() 拿模型路径，勿手写下载逻辑）')
+          }
+        }
+        const runtimeTarget = join(root, 'speech_runtime.py')
+        if (!existsSync(runtimeTarget)) {
+          const { cpSync } = await import('node:fs')
+          const { mainRootDir } = await import('../platform/paths')
+          const source = join(mainRootDir(), 'templates', 'tools', 'speech_runtime.py')
+          if (existsSync(source)) {
+            cpSync(source, runtimeTarget)
+            steps.push('已生成 speech_runtime.py：SpeechEngine.prepare/transcribe(samples,sample_rate)，StreamingRecorder.start(on_text,on_error)/stop；on_text 是累计转写文本，回调转到 UI 线程。模型准备失败可重试，录音回调仅入队。')
           }
         }
       }

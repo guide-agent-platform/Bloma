@@ -140,8 +140,12 @@ describe('install_packages（声明制 venv 安装刀）', () => {
     expect(outcome.isError).toBeFalsy()
     const locator = join(projectRoot, 'speech_locator.py')
     expect(existsSync(locator)).toBe(true)
-    expect(readFileSync(locator, 'utf8')).toContain('def ensure_models()')
+    expect(readFileSync(locator, 'utf8')).toContain('def ensure_models(')
     expect(outcome.output).toContain('speech_locator.py')
+    expect(existsSync(join(projectRoot, 'speech_runtime.py'))).toBe(true)
+    expect(outcome.output).toContain('speech_runtime.py')
+    expect(readFileSync(join(projectRoot, 'requirements.txt'), 'utf8')).toContain('sherpa-onnx==1.13.8')
+    expect(readFileSync(join(projectRoot, 'requirements.txt'), 'utf8')).toContain('numpy==2.5.4')
     // 幂等：第二次安装不再重复提示
     const again = await tool.execute({ packages: ['sherpa-onnx'] }, ctxFor(projectId))
     expect(again.output).not.toContain('已生成 speech_locator.py')

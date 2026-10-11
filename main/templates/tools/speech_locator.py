@@ -34,6 +34,8 @@ import hashlib
 import os
 import sys
 import urllib.request
+import tempfile
+import time
 from pathlib import Path
 
 HF_REPO = "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17"
@@ -55,7 +57,11 @@ MIRRORS = ["https://hf-mirror.com", "https://huggingface.co"]
 
 def cache_dir() -> Path:
     """模型缓存目录（与 Bloma 平台语音输入共用）。"""
-    return Path.home() / ".proma" / "speech-models" / "sensevoice-int8"
+    explicit = os.environ.get("BLOMA_SPEECH_MODEL_DIR")
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    home = Path(os.environ.get("PROMA_HOME") or Path.home() / ".proma")
+    return home / "speech-models" / "sensevoice-int8"
 
 
 def _matches(path: Path, expected_bytes: int, expected_sha256: str) -> bool:
@@ -69,19 +75,42 @@ def _matches(path: Path, expected_bytes: int, expected_sha256: str) -> bool:
     return digest.hexdigest() == expected_sha256
 
 
-def _download(name: str, repo: str, rev: str, expected_bytes: int, sha256: str, root: Path) -> Path:
+def _download(name: str, repo: str, rev: str, expected_bytes: int, sha256: str, root: Path,
+              timeout: float = 15, deadline: float | None = None, cancelled=None) -> Path:
     """下载单件到缓存根（.part → 校验 → 原子发布）；逐源尝试。"""
     destination = root / name
     if _matches(destination, expected_bytes, sha256):
         return destination
+    if os.environ.get("BLOMA_SPEECH_OFFLINE", "").lower() in ("1", "true", "on"):
+        raise RuntimeError(f"离线模型未就绪：{name}，请先准备模型后重试")
     root.mkdir(parents=True, exist_ok=True)
     last_error: Exception | None = None
     for mirror in MIRRORS:
         url = f"{mirror}/{repo}/resolve/{rev}/{name}"
-        partial = root / f"{name}.{os.getpid()}.part"
+        partial = None
         try:
+            if cancelled and cancelled():
+                raise InterruptedError("语音模型准备已取消")
+            remaining = (deadline - time.monotonic()) if deadline is not None else timeout
+            if remaining <= 0:
+                raise TimeoutError("语音模型准备超过总时限")
             print(f"[speech_locator] 下载 {name}（{expected_bytes / 1048576:.1f} MB）← {mirror}", file=sys.stderr)
-            urllib.request.urlretrieve(url, partial)
+            with tempfile.NamedTemporaryFile(prefix=name + ".", suffix=".part", dir=root, delete=False) as output:
+                partial = Path(output.name)
+                with urllib.request.urlopen(url, timeout=min(timeout, remaining)) as response:
+                    received = 0
+                    while True:
+                        if cancelled and cancelled():
+                            raise InterruptedError("语音模型准备已取消")
+                        if deadline is not None and time.monotonic() >= deadline:
+                            raise TimeoutError("语音模型准备超过总时限")
+                        chunk = response.read(1 << 20)
+                        if not chunk:
+                            break
+                        received += len(chunk)
+                        if received > expected_bytes:
+                            raise IOError("download exceeds declared size")
+                        output.write(chunk)
             if partial.stat().st_size != expected_bytes:
                 raise IOError(f"size mismatch: {partial.stat().st_size} != {expected_bytes}")
             digest = hashlib.sha256()
@@ -95,23 +124,31 @@ def _download(name: str, repo: str, rev: str, expected_bytes: int, sha256: str, 
         except Exception as error:  # noqa: BLE001 —— 逐源重试，全部失败才抛
             last_error = error
             try:
-                partial.unlink()
+                if partial is not None:
+                    partial.unlink(missing_ok=True)
             except OSError:
                 pass
+            if isinstance(error, InterruptedError) or (deadline is not None and time.monotonic() >= deadline):
+                raise
             continue
     raise RuntimeError(f"模型下载失败（{name}）：{last_error}")
 
 
-def ensure_models() -> dict[str, str]:
+def ensure_models(timeout: float = 15, total_timeout: float = 600, cancelled=None) -> dict[str, str]:
     """确保三件齐备并返回绝对路径 dict（model/tokens/vad）。
 
     首次调用会下载缺失件（约 239MB，进度打印到 stderr）；建议在程序启动
     或首次使用语音功能时调用，并在 UI 上提示「正在准备语音模型…」避免卡顿观感。
     """
     root = cache_dir()
+    if not (0 < timeout <= 60 and 0 < total_timeout <= 1800):
+        raise ValueError("模型准备时限不合法")
+    deadline = time.monotonic() + total_timeout
     paths: dict[str, str] = {}
     for key, (name, repo, rev, expected_bytes, sha256) in ASSETS.items():
-        paths[key] = str(_download(name, repo, rev, expected_bytes, sha256, root))
+        if cancelled and cancelled():
+            raise InterruptedError("语音模型准备已取消")
+        paths[key] = str(_download(name, repo, rev, expected_bytes, sha256, root, timeout, deadline, cancelled))
     return paths
 
 

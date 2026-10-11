@@ -5,9 +5,11 @@ import { requirementPriority } from '../model/prd-backplane'
 import { parseProjectContract } from './contract-schema'
 import { execFileDriverSpawn, runContractDriver, type DriverSpawn } from './process-driver'
 import { verificationFingerprint } from './verification-fingerprint'
+import { hasCurrentMicrophoneEvidence, runHostSpeechProbe, type SpeechVerificationSpec } from './speech-verification'
 
 export type CoreVerificationStatus = 'passed' | 'failed' | 'unverified' | 'environment_blocked'
 export interface CoreVerificationResult {
+  speech?: import('./speech-verification').SpeechVerificationResult
   status: CoreVerificationStatus
   summary: string
   checked_at: string
@@ -46,6 +48,7 @@ export async function runCoreVerification(options: {
     if (!existsSync(join(root, CORE_MANIFEST_REL))) throw new Error('缺少核心业务验证入口 CORE_CHECK.json')
     const raw = JSON.parse(readFileSync(join(root, CORE_MANIFEST_REL), 'utf8')) as Record<string, unknown>
     const scenarios = raw.scenarios as CoreScenario[]
+    const speech = raw.speech as SpeechVerificationSpec | undefined
     if (raw.schema_version !== 1 || !Array.isArray(scenarios) || !scenarios.length || scenarios.length > 64 || scenarios.some(s =>
       !s || typeof s.name !== 'string' || !s.name || /[\r\n]/.test(s.name) || !Array.isArray(s.covers) || s.covers.some(fid => typeof fid !== 'string') ||
       !['logic', 'gui', 'audio', 'microphone', 'mock'].includes(s.input))) throw new Error('核心验证场景声明不合法')
@@ -69,18 +72,24 @@ export async function runCoreVerification(options: {
       for (const fid of scenario.covers) result.evidence.push({ fid, scenario: scenario.name, input: scenario.input, outcome })
     }
     if (verificationFingerprint(root, required) !== fingerprint) result.missing.push('验证期间源码或声明变化，本次结果作废')
+    const hasSpeechRequirement = required.some(item => /(?:语音(?:输入|录入|识别|转写)|麦克风|录音|ASR)/i.test(item.description))
+    const speechResult = hasSpeechRequirement && speech ? await runHostSpeechProbe({ projectId: options.projectId, root, speech }) : undefined
+    if (speechResult) result.speech = speechResult
     for (const requirement of required) {
       const rows = result.evidence.filter(e => e.fid === requirement.id && e.outcome === 'pass' && e.input !== 'mock')
       if (!rows.length) result.missing.push(requirement.id)
       // A product-owned test label cannot attest microphone capture or real-model execution.
       if (/(?:语音(?:输入|录入|识别|转写)|麦克风|录音|ASR)/i.test(requirement.description)) {
-        result.missing.push(`${requirement.id}: 需要宿主音频探针与实际采集证据；文本模拟或自报 audio 不可替代`)
+        if (speechResult?.status !== 'passed') result.missing.push(`${requirement.id}: 宿主真实音频探针未通过，文本模拟不可替代${speechResult?.error ? `（${speechResult.error}）` : ''}`)
+        if (/(麦克风|录音|语音(?:输入|录入))/.test(requirement.description) && (!speech || !hasCurrentMicrophoneEvidence(options.projectId, root, speech))) {
+          result.missing.push(`${requirement.id}: 真实采集链路待授权实测`)
+        }
       }
     }
     if (!result.evidence.some(e => e.input === 'gui' && e.outcome === 'pass')) result.missing.push('缺少关键界面业务链的驱动回读')
     if (report.routing !== 'pass') result.missing.push(report.routingReason, report.stderrExcerpt.slice(0, 300))
-    if (report.routing === 'blocked') { result.status = 'environment_blocked'; result.summary = '验证环境未就绪，程序已保留。' }
-    else if (report.routing === 'fail') { result.status = 'failed'; result.summary = '核心功能测试失败，需要修复。' }
+    if (report.routing === 'fail' || speechResult?.status === 'failed') { result.status = 'failed'; result.summary = '核心功能测试失败，需要修复。' }
+    else if (report.routing === 'blocked' || speechResult?.status === 'environment_blocked') { result.status = 'environment_blocked'; result.summary = '验证环境未就绪，程序已保留。' }
     else if (result.missing.length || !fingerprint) { result.summary = '已生成，核心功能仍有待验证项。' }
     else { result.status = 'passed'; result.summary = '核心业务驱动已通过，验证范围见报告。' }
   } catch (error) {
@@ -93,4 +102,4 @@ export async function runCoreVerification(options: {
   return result
 }
 
-export const CORE_VERIFICATION_BRIEF = '\n核心业务验证：在项目根写 CORE_CHECK.json，形态 {"schema_version":1,"command":["python","core_check.py"],"scenarios":[{"name":"新增并重启仍保留","covers":["F-001"],"input":"gui"}]}。每个核心 P0 需求至少一条实际业务断言，stdout 为 PASS/FAIL/BLOCKED 加完全一致的场景名。input 如实填 logic/gui/audio/microphone/mock；mock 不覆盖核心真实能力。数据目录从 APP_DATA_DIR 读取。语音的文本模拟不能覆盖录音或 ASR；环境不具备时明确待验证。不要修改已确认需求或测试期望来绕过失败。'
+export const CORE_VERIFICATION_BRIEF = '\n核心业务验证：在项目根写 CORE_CHECK.json，形态 {"schema_version":1,"command":["python","core_check.py"],"scenarios":[{"name":"新增并重启仍保留","covers":["F-001"],"input":"gui"}]}。每个核心 P0 需求至少一条实际业务断言，stdout 为 PASS/FAIL/BLOCKED 加完全一致的场景名。input 如实填 logic/gui/audio/microphone/mock；mock 不覆盖核心真实能力。数据目录从 APP_DATA_DIR 读取。语音复用 speech_runtime.py 的 SpeechEngine/StreamingRecorder，另加 speech:{"module":"speech_runtime","factory":"SpeechEngine","method":"transcribe","rate_argument":true}，须指向产品实际使用的 ASR 实例构造入口，宿主固定 WAV/二维 PCM 探针会执行它。录音只入队，准备/识别在后台，UI 线程显示累计文字；硬件采集需要单独授权证据，文本模拟不能替代。环境不具备时明确待验证，不改需求或期望绕过失败。'
