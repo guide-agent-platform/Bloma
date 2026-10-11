@@ -14,16 +14,17 @@ import { DocumentPanel } from './DocumentPanel'
 import { CollaborationPanel } from './CollaborationPanel'
 import { HistoryAttachments } from './HistoryAttachments'
 import { DesktopStageBar } from './DesktopStageBar'
-import { currentProjectAtom, desktopPhaseAtom, workflowStageAtom, documentPanelExpandedAtom, collaborationPanelExpandedAtom, timelineExpandedAtom } from './atoms'
+import { currentProjectAtom, desktopPhaseAtom, workflowStageAtom, documentPanelExpandedAtom, collaborationPanelExpandedAtom, timelineExpandedAtom, activeAgentSessionIdAtom, agentMessagesFamily, hasActiveStreamAtom } from './atoms'
 import { desktopArtifactsAtom } from '../agent-atoms'
 import { workspaceScene } from '../lib/workspace-scene'
 import '../styles/theatre.css'
-import { FileText, Layers, History, Users } from './icons'
+import { FileText, Layers, History, Users, LayoutTemplate, Check, Hammer, Play, Activity, Maximize2, Minimize2, X } from './icons'
 import type { CardOption } from './CardOptions'
 import type { PreviewStatus } from './PreviewPanel'
 import type { Snapshot, PastedImageRef } from './atoms'
 
 export interface WorkspaceShellProps {
+  notice?: string
   /* === ChatPanel props === */
   cardOptions?: CardOption[]
   /** 决策卡标题（U7：让渡偏差描述 / 澄清方向等） */
@@ -40,7 +41,7 @@ export interface WorkspaceShellProps {
   /** 停止当前生成（U4：Agent 流式生成中点击停止） */
   onStopGeneration?: () => void
   /** P0-2 fork（2026-09-08）：user 消息「从这里重新来」回调 */
-  onForkFromMessage?: (message: AgentMessage) => void
+  onForkFromMessage?: (message: AgentMessage) => void | Promise<void>
 
   /** 桌面项目交付面板（2026-10-04 呈现层收口）：true 时右栏渲染 DeliveryPanel 替代空沙箱 */
   deliveryPanel?: boolean
@@ -74,18 +75,8 @@ export interface WorkspaceShellProps {
 }
 
 /**
- * 工作区 Shell — Bento Glass 架构
- *
- * 布局:
- * ┌──────────────────────────────────────────┐
- * │  WorkspaceHeader (顶栏)                   │
- * ├──────────────────┬───────────────────────┤
- * │  ChatPanel       │  PreviewPanel          │
- * │  (对话, 左 1fr)   │  (预览, 右 2fr)        │
- * ├──────────────────┴───────────────────────┤
- * │  TimelinePanel (底部时间轴)                │
- * └──────────────────────────────────────────┘
- * 全部浮在 aurora 渐变网格背景上。
+ * 通透画室：项目/阶段/资料在窄边栏，独立画布为主，简短交流在下方。
+ * 历史与技术记录按需打开；资料覆盖画布边缘，不把草图再挤成窄栏。
  */
 export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
   const project = useAtomValue(currentProjectAtom)
@@ -95,17 +86,20 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
   const [documents, setDocuments] = useAtom(documentPanelExpandedAtom)
   const [collaboration, setCollaboration] = useAtom(collaborationPanelExpandedAtom)
   const [, setTimelineExpanded] = useAtom(timelineExpandedAtom)
-  const [localPanel, setLocalPanel] = React.useState<'versions' | 'materials' | null>(null)
+  const [localPanel, setLocalPanel] = React.useState<'versions' | 'materials' | 'records' | null>(null)
+  const [focused, setFocused] = React.useState(false)
+  const busy = useAtomValue(hasActiveStreamAtom)
   React.useEffect(() => { setDocuments(false); setCollaboration(false); setLocalPanel(null) }, [project?.project_id])
-  const scene = workspaceScene(project, stage, phase ?? project?.desktop_phase ?? null, Boolean(props.previewUrl && props.onConfirmSketch && !props.deliveryPanel))
-  const openTool = (name: 'documents' | 'collaboration' | 'versions' | 'materials') => {
+  const scene = workspaceScene(project, stage, phase ?? project?.desktop_phase ?? null, Boolean(props.previewUrl && props.onConfirmSketch && !props.deliveryPanel), busy)
+  const openTool = (name: 'documents' | 'collaboration' | 'versions' | 'materials' | 'records') => {
     setDocuments(name === 'documents' ? !documents : false)
     setCollaboration(name === 'collaboration' ? !collaboration : false)
-    setLocalPanel(name === 'versions' || name === 'materials' ? localPanel === name ? null : name : null)
+    setLocalPanel(name === 'versions' || name === 'materials' || name === 'records' ? localPanel === name ? null : name : null)
     if (name === 'versions') setTimelineExpanded(true)
   }
   return (
-    <div className="workspace-theatre" data-ai-id="workspace-theatre" data-mode={project?.mode ?? 'quick'}>
+    <div className="workspace-theatre" data-ai-id="workspace-theatre" data-mode={project?.mode ?? 'quick'} data-focused={focused}>
+      <aside className="studio-sidebar" aria-label="项目导航">
       {/* 顶栏 */}
       <WorkspaceHeader
         showConnection={false}
@@ -113,13 +107,19 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
         onOpenSettings={props.onOpenSettings}
         onUpgrade={props.onUpgrade}
       />
-
-      {/* 桌面线产物预览条（刀3 呈现层最小版）：桌面线激活且有产物时显示（阶段条下方窄带） */}
-      <nav className="theatre-journey" aria-label="软件制作进度">
-        {['想法', '需求', '界面', '制作', '试用与交付'].map((label, index) => <span key={label} aria-current={scene.chapter === index ? 'step' : undefined} data-current={scene.chapter === index}><span className="theatre-step-number">{index + 1}</span>{label}</span>)}
+      <nav className="studio-steps" aria-label="软件制作进度">
+        {['想法', '需求', '界面', '制作', '试用与交付'].map((label, index) => {
+          const Icon = index < scene.chapter ? Check : [FileText, FileText, LayoutTemplate, Hammer, Play][index]
+          return <button key={label} type="button" aria-current={scene.chapter === index ? 'step' : undefined} disabled={index > scene.chapter} title={index <= scene.chapter ? `回看${label}` : `${label}尚未开始`} onClick={() => openTool(index < 2 ? 'documents' : index === 2 ? 'versions' : 'records')}><Icon size={16} />{label}</button>
+        })}
       </nav>
+      <p className="studio-sidebar-label">项目资料</p>
+      <nav className="studio-library" aria-label="项目资料"><button type="button" data-ai-id="docs-button" aria-pressed={documents} onClick={() => openTool('documents')}><FileText />文档</button><button type="button" data-ai-id="materials-button" aria-pressed={localPanel === 'materials'} onClick={() => openTool('materials')}><Layers />材料</button><button type="button" data-ai-id="versions-button" aria-pressed={localPanel === 'versions'} onClick={() => openTool('versions')}><History />版本</button><button type="button" data-ai-id="collaboration-button" aria-pressed={collaboration} onClick={() => openTool('collaboration')}><Users />协作</button></nav>
+      <div className="studio-sidebar-foot"><WorkspaceConnection /></div>
+      </aside>
+      <div className="studio-body">
       <main className="theatre-stage">
-        <div className="theatre-stage-heading"><div><p className="theatre-eyebrow">你的一句话，正在成形</p><h2>{scene.title}</h2><p>{scene.description}</p></div>{(phase || project?.desktop_phase) && <details className="theatre-phase-details"><summary>制作详情</summary><DesktopStageBar /></details>}</div>
+        <div className="theatre-stage-heading"><div><p className="theatre-eyebrow">从想法到软件</p><h2>{scene.title}</h2></div><div className="studio-heading-actions"><span className="studio-scene-description">{scene.description}</span><button type="button" className="theatre-tool studio-control" aria-label={focused ? '退出专注预览' : '专注预览'} aria-pressed={focused} onClick={() => setFocused(value => !value)}>{focused ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button></div></div>
         <div className="theatre-main" data-panel-open={documents || collaboration || Boolean(localPanel)}>
           <section className="theatre-product" aria-label="软件与当前结果">
         {props.deliveryPanel
@@ -139,14 +139,12 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
           onMarkComplete={props.onMarkComplete}
           />}
           </section>
-          {(documents || collaboration || localPanel) && <aside className="theatre-sidepanel">
+          {(documents || collaboration || localPanel) && <aside className="theatre-sidepanel" aria-label="项目资料面板">
             <DocumentPanel embedded />
             <CollaborationPanel embedded />
-            {localPanel && <><div className="theatre-panel-heading"><h3>{localPanel === 'versions' ? '一路变成现在' : '参考材料'}</h3><button type="button" className="theatre-tool" aria-label="关闭项目工具" onClick={() => setLocalPanel(null)}>关闭</button></div>{localPanel === 'versions' ? <TimelinePanel onRollback={props.onRollback} /> : <HistoryAttachments onClose={() => setLocalPanel(null)} />}</>}
+            {localPanel && <><div className="theatre-panel-heading"><h3>{localPanel === 'versions' ? '版本与回看' : localPanel === 'records' ? '工作记录' : '参考材料'}</h3><button type="button" className="theatre-tool" aria-label="关闭项目工具" onClick={() => setLocalPanel(null)}><X /></button></div>{localPanel === 'versions' ? <TimelinePanel onRollback={props.onRollback} /> : localPanel === 'records' ? <><DesktopStageBar /><WorkRecords />{artifacts.projectId === project?.project_id && <DesktopArtifactStrip />}</> : <HistoryAttachments onClose={() => setLocalPanel(null)} />}</>}
           </aside>}
         </div>
-        {artifacts.projectId === project?.project_id && artifacts.items.length > 0 && <details className="theatre-artifact-details"><summary>制作记录与截图 · {artifacts.items.length}</summary><DesktopArtifactStrip /></details>}
-        <MvpStatusBanner />
       </main>
       <section className="theatre-conversation" aria-label="向导与下一步">
         <ChatPanel presentation="theatre"
@@ -163,8 +161,17 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
           onOpenSettings={props.onOpenSettings}
           onForkFromMessage={props.onForkFromMessage}
         />
-        <nav className="theatre-tools" aria-label="项目资料"><button type="button" className="theatre-tool" data-ai-id="docs-button" aria-pressed={documents} onClick={() => openTool('documents')}><FileText />文档</button><button type="button" className="theatre-tool" data-ai-id="materials-button" aria-pressed={localPanel === 'materials'} onClick={() => openTool('materials')}><Layers />材料</button><button type="button" className="theatre-tool" data-ai-id="versions-button" aria-pressed={localPanel === 'versions'} onClick={() => openTool('versions')}><History />版本</button><button type="button" className="theatre-tool" data-ai-id="collaboration-button" aria-pressed={collaboration} onClick={() => openTool('collaboration')}><Users />协作</button><WorkspaceConnection /></nav>
+        {props.notice && <p className="studio-notice" role="status">{props.notice}</p>}
       </section>
+      <footer className="studio-footer"><button type="button" className="theatre-tool" aria-pressed={localPanel === 'records'} onClick={() => openTool('records')}><Activity />工作记录</button><div className="studio-status-slot"><MvpStatusBanner suppressBlocked /></div>{project?.desktop_blocked && <button type="button" className="studio-primary" disabled={busy} onClick={() => props.onSendMessage?.('继续')}>继续制作</button>}</footer>
+      </div>
     </div>
   )
+}
+
+const WorkRecords: React.FC = () => {
+  const session = useAtomValue(activeAgentSessionIdAtom)
+  const fallback = React.useMemo(() => agentMessagesFamily('__studio-records-empty__'), [])
+  const messages = useAtomValue(session ? agentMessagesFamily(session) : fallback)
+  return <div className="studio-work-records"><p>原始交流与执行记录保留在这里，用户正文不展示宿主指令。</p>{messages.slice(-200).map((message, index) => <details key={message.id ?? `${message.timestamp}-${index}`}><summary>{message.origin === 'system' ? '宿主记录' : message.role === 'assistant' ? '模型记录' : message.role === 'system' ? '系统记录' : '用户请求'} · {new Date(message.timestamp).toLocaleTimeString('zh-CN')}</summary><pre>{message.content.map(block => block.type === 'text' ? block.text : block.type === 'image' ? '[图片]' : JSON.stringify(block)).join('\n')}</pre></details>)}</div>
 }

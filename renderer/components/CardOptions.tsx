@@ -33,7 +33,7 @@ export const CardOptions: React.FC<CardOptionsProps> = ({ options, onSelect, dis
             display: 'inline-flex',
             flexDirection: 'column',
             alignItems: 'flex-start',
-            padding: 'var(--space-3) var(--space-4)',
+            padding: '9px 12px',
             background: 'var(--white)',
             border: '1px solid var(--color-border)',
             borderRadius: 'var(--radius-md)',
@@ -42,15 +42,14 @@ export const CardOptions: React.FC<CardOptionsProps> = ({ options, onSelect, dis
             cursor: disabled ? 'not-allowed' : 'pointer',
             opacity: disabled ? 0.5 : 1,
             textAlign: 'left',
-            maxWidth: 240,
+            maxWidth: '100%',
             transition: 'border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast)',
-            animation: 'tile-enter 0.3s ease both',
           }}
           onMouseEnter={(e) => {
             if (!disabled) {
               e.currentTarget.style.borderColor = 'var(--color-quick)'
               e.currentTarget.style.boxShadow = 'var(--shadow-md)'
-              e.currentTarget.style.transform = 'translateY(-2px)'
+              e.currentTarget.style.transform = 'none'
             }
           }}
           onMouseLeave={(e) => {

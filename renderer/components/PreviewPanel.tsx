@@ -1,6 +1,7 @@
 /** web 线拆除刀3：点选纠错通道退役，类型本地最小化（UI 降级红点模式） */
 type DomCollectContextResult = { fallback_mode: boolean; element_selector?: string; text_content?: string; bounding_rect?: { x: number; y: number; width: number; height: number } }
 import React from 'react'
+import { SketchViewport } from './SketchViewport'
 import { useAtomValue } from 'jotai'
 import { RotateCw, Maximize2, Minimize2, Camera, LayoutTemplate, AlertTriangle } from './icons'
 import { hasActiveStreamAtom, workflowStageAtom, globalUserErrorAtom, activeAgentSessionIdAtom, currentProjectAtom } from './atoms'
@@ -237,14 +238,14 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
                 padding: '0 var(--space-4)',
                 marginRight: 'var(--space-2)',
                 fontSize: 'var(--font-size-sm)',
-                fontWeight: 700,
+                fontWeight: 500,
                 color: 'var(--white)',
                 background: confirming
                   ? 'var(--gray-400)'
-                  : 'linear-gradient(135deg, var(--color-quick), var(--color-quick-bright))',
+                  : 'var(--theatre-accent, var(--color-primary))',
                 border: 'none',
                 borderRadius: 'var(--radius-full)',
-                boxShadow: confirming ? 'none' : '0 4px 12px -2px rgba(124,58,237,0.45)',
+                boxShadow: confirming ? 'none' : 'var(--shadow-sm)',
                 cursor: confirming ? 'not-allowed' : 'pointer',
                 whiteSpace: 'nowrap',
               }}
@@ -322,14 +323,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
         {displayStatus === 'loading' && <LoadingState label={loadingLabel} />}
         {displayStatus === 'running' && previewUrl && (
           <>
-            <iframe
-              ref={iframeRef}
-              src={previewUrl}
-              title="软件预览"
-              sandbox="allow-scripts allow-forms allow-same-origin"
-              onError={onPreviewError}
-              style={{ width: '100%', height: '100%', border: 'none', background: 'var(--color-surface)', pointerEvents: correctionActive ? 'none' : 'auto' }}
-            />
+            <SketchViewport iframeRef={iframeRef} src={previewUrl} onError={onPreviewError} natural={correctionMode} />
             {/* 点选纠错透明捕获层：仅在纠错模式开启时盖在 iframe 上方拦截点击 */}
             {correctionMode && onCorrectionSubmit && (
               <div

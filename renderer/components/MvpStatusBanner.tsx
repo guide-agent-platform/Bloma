@@ -178,7 +178,7 @@ const VARIANT_STYLE: Record<BannerState['variant'], { bg: string; border: string
 // 组件
 // =========================================================================
 
-export const MvpStatusBanner: React.FC = () => {
+export const MvpStatusBanner: React.FC<{ suppressBlocked?: boolean }> = ({ suppressBlocked = false }) => {
   const sessionId = useAtomValue(activeAgentSessionIdAtom)
   const stage = useAtomValue(workflowStageAtom)
   const project = useAtomValue(currentProjectAtom)
@@ -267,7 +267,7 @@ export const MvpStatusBanner: React.FC = () => {
     return deriveBannerState(stage, streamState?.running ?? false)
   }, [sessionId, streamState?.running, stage])
 
-  if (!banner.visible) return null
+  if (!banner.visible || suppressBlocked && project?.desktop_blocked) return null
 
   const style = VARIANT_STYLE[banner.variant]
   const Icon = style.icon

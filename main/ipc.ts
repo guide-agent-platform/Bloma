@@ -21,6 +21,7 @@ import { registerDesktopArtifactsIpc } from './ipc/desktop-artifacts'
 import { registerProjectDeliverablesIpc } from './ipc/project-deliverables'
 import { registerCorrectionIpc } from './ipc/correction'
 import { registerSpeechIpc } from './ipc/speech'
+import { registerClipboardIpc } from './ipc/clipboard'
 
 export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow): void {
   // P0-2 fork：活跃会话检查注入（session-service 不反向 import orchestrator——防循环依赖）
@@ -70,4 +71,5 @@ export function registerIpcHandlers(ipcMain: IpcMain, mainWindow: BrowserWindow)
   registerProjectDeliverablesIpc(ipcMain, mainWindow)
   registerCorrectionIpc(ipcMain)
   registerSpeechIpc(ipcMain, mainWindow)
+  registerClipboardIpc(ipcMain)
 }

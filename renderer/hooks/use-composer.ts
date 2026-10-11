@@ -34,7 +34,7 @@ export function useComposer(onSend?: ComposerSend) {
     void api.load({ request_id: crypto.randomUUID(), ...scope }).then(result => {
       if (!result.ok) { if (aliveKey.current === key) setError(result.error.message); return }
       const current = store.get(draftAtom)
-      if (current.revision === before.revision) store.set(draftAtom, result.data)
+      if (current.revision === before.revision && result.data.revision >= current.revision) store.set(draftAtom, result.data)
       else store.set(draftAtom, { ...current, revision: Math.max(current.revision, result.data.revision + 1) })
       store.set(composerLoadedFamily(key), true)
     }).catch(reason => { if (aliveKey.current === key) setError(String(reason)) })

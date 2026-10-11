@@ -80,6 +80,9 @@ import type {
 } from '../shared/types'
 
 const electronAPI: ElectronAPI = {
+  clipboard: {
+    writeText: (input) => ipcRenderer.invoke(IPC_CHANNELS.CLIPBOARD_WRITE_TEXT, input),
+  },
   app: {
     switchState: (input: AppSwitchStateInput) =>
       ipcRenderer.invoke(IPC_CHANNELS.APP_SWITCH_STATE, input),

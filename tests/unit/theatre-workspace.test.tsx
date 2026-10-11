@@ -9,7 +9,7 @@ import { workspaceScene } from '../../renderer/lib/workspace-scene'
 import type { Project } from '../../shared/types'
 afterEach(() => { cleanup(); delete window.electronAPI })
 describe('软件剧场的完整性', () => {
-  it('完整历史切换保留输入；长回复可展开，错误不会进入折叠摘要', () => {
+  it('完整历史切换保留输入；回复不截断折叠，错误直接可见', () => {
     const store=createStore()
     store.set(activeAgentSessionIdAtom,'s'); store.set(currentProjectAtom,{project_id:'p'} as Project)
     store.set(globalUserErrorAtom,'启动失败：尚未验证，请重试')
@@ -25,10 +25,8 @@ describe('软件剧场的完整性', () => {
     fireEvent.change(input,{target:{value:'不能丢失的草稿'}})
     expect(screen.queryByText('最开始的需求')).toBeNull()
     expect(screen.getByRole('alert').textContent).toContain('尚未验证')
-    const details=document.querySelector('[data-ai-id="compact-reply"]') as HTMLDetailsElement
-    expect(details.open).toBe(false)
-    fireEvent.click(details.querySelector('summary')!)
-    expect(details.textContent).toContain('未验证的窗口关闭行为仍需确认')
+    expect(document.querySelector('[data-ai-id="compact-reply"]')).toBeNull()
+    expect(document.body.textContent).toContain('未验证的窗口关闭行为仍需确认')
     fireEvent.click(screen.getByRole('button',{name:/完整对话/}))
     expect(screen.getByText('最开始的需求')).toBeTruthy()
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('不能丢失的草稿')
@@ -36,8 +34,9 @@ describe('软件剧场的完整性', () => {
   })
   it('desktop delivered 但项目未 completed 时不宣称已交付，暂停不伪装继续制作', () => {
     const project={status:'active',current_stage:'clarifying',desktop_phase:'delivered'} as Project
-    expect(workspaceScene(project,'clarifying','delivered',false).title).toBe('先亲自试一试。')
-    expect(workspaceScene({...project,desktop_blocked:{reason:'user-stop',at:'now'}},'clarifying','desktop-implement',false).title).toContain('停一下')
-    expect(workspaceScene({...project,status:'completed'},'completed','delivered',false).title).toContain('属于你')
+    expect(workspaceScene(project,'clarifying','delivered',false).title).toBe('先试一试')
+    expect(workspaceScene({...project,desktop_blocked:{reason:'user-stop',at:'now'}},'clarifying','desktop-implement',false).title).toBe('制作暂时停止')
+    expect(workspaceScene({...project,desktop_blocked:{reason:'user-stop',at:'now'}},'clarifying','desktop-implement',false,true).title).toBe('制作')
+    expect(workspaceScene({...project,status:'completed'},'completed','delivered',false).title).toBe('你的软件')
   })
 })

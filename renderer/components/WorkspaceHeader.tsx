@@ -1,6 +1,6 @@
 import React from 'react'
 import { useAtomValue } from 'jotai'
-import { IconSettings, ChevronDown } from './icons'
+import { IconSettings, ChevronDown, Sprout } from './icons'
 import { canUpgradeAtom, currentProjectAtom, networkOnlineAtom, projectModeAtom } from './atoms'
 import { hasUsableChannelsAtom } from './atoms-sprint2'
 
@@ -18,7 +18,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects,
   const hasChannels = useAtomValue(hasUsableChannelsAtom)
   const canUpgrade = useAtomValue(canUpgradeAtom)
   return <header data-ai-id="workspace-header" className="theatre-header">
-    <span className="theatre-brand"><span className="theatre-brandmark" aria-hidden />Bloma</span>
+    <span className="theatre-brand"><span className="theatre-brandmark" aria-hidden><Sprout /></span>Bloma</span>
     <button type="button" className="theatre-project" data-ai-id="all-projects-button" aria-label="所有项目" onClick={onAllProjects} disabled={!onAllProjects} title="查看所有项目"><h1>{project?.name ?? '未命名项目'}</h1><ChevronDown /></button>
     <span className="theatre-header-spacer" />
     <span className="theatre-mode"><span>{mode === 'longterm' ? '长期型' : '快速型'}</span></span>

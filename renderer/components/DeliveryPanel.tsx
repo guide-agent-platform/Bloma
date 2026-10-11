@@ -4,7 +4,8 @@ import { RotateCw, LayoutTemplate, Play } from './icons'
 import { Markdown } from './Markdown'
 import { CorrectionPanel } from './CorrectionPanel'
 import { ProgramScreenshot } from './ProgramScreenshot'
-import { correctionSessionAtom, currentProjectAtom, desktopArtifactsAtom, desktopPhaseAtom } from '../agent-atoms'
+import { SketchViewport } from './SketchViewport'
+import { correctionSessionAtom, currentProjectAtom, desktopArtifactsAtom, desktopPhaseAtom, hasActiveStreamAtom } from '../agent-atoms'
 import type { ProjectDeliverablesResult } from '../../shared/types'
 
 /**
@@ -23,6 +24,7 @@ const MarkdownLazy: React.FC<{ text: string }> = Markdown
 
 export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const project = useAtomValue(currentProjectAtom)
+  const running = useAtomValue(hasActiveStreamAtom)
   const correctionSession = useAtomValue(correctionSessionAtom)
   const projectId = project?.project_id
   // 自动刷新信号：桌面阶段推进（stage_changed 回填后变化）或产物变更（version+1）
@@ -93,7 +95,7 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
       <div className="theatre-program-bar" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderBottom: '1px solid var(--color-border)' }}>
         {embedded && <LayoutTemplate size={14} />}
         <span style={{ fontSize: 'var(--font-size-sm)', fontWeight: 500 }}>{project?.name ?? '你的软件'}</span>
-        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>{project?.current_stage === 'completed' ? '桌面程序' : desktopPhase ? '正在制作' : '等待想法成形'}</span>
+        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>{project?.current_stage === 'completed' ? '桌面程序' : project?.desktop_blocked && !running ? '制作暂时停止' : desktopPhase ? '正在制作' : '等待想法成形'}</span>
         <div style={{ flex: 1 }} />
         <button
           data-ai-id="delivery-refresh"
@@ -133,7 +135,8 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
         {launchState && <span data-ai-id="delivery-launch-state" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>{launchState}</span>}
       </div>}
 
-      <div className="theatre-delivery-body" style={{ flex: 1, overflowY: 'auto', padding: '10px 14px', minHeight: 0 }}>
+      {embedded && project?.current_stage !== 'completed' && data?.confirmed_sketch_url && <div className="delivery-confirmed-sketch"><SketchViewport src={data.confirmed_sketch_url} readOnly /></div>}
+      <div className="theatre-delivery-body" data-has-sketch={Boolean(embedded && project?.current_stage !== 'completed' && data?.confirmed_sketch_url)} style={{ flex: 1, overflowY: 'auto', padding: '10px 14px', minHeight: 0 }}>
         <ProgramScreenshot />
         {!loading && (data || embedded) && <div className="theatre-delivery-hero"><span className="theatre-idea-emblem"><LayoutTemplate size={25} /></span><h3>{project?.current_stage === 'completed' ? '这是你的软件了。' : project?.desktop_blocked ? '已有的工作，都保留了。' : desktopPhase ? '正在接通完整功能。' : '这里，会是你的软件。'}</h3><p>{project?.current_stage === 'completed' ? '启动后在独立窗口使用，随时可以继续改进。' : desktopPhase ? '从确认过的界面，继续成为真实程序。' : '先说你想解决什么，我们一起把它做出来。'}</p></div>}
         {/* 点选纠错（批11 MVP-E，2026-10-08）：入口/会话视图内嵌交付面板；completed 项目
@@ -167,7 +170,7 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
             {data.delivery_md && (
               <details className="theatre-delivery-details"><summary>使用与交付说明</summary>
                 <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginBottom: 6 }}>
-                  ▤ 交付说明
+                  使用与交付说明
                 </div>
                 <React.Suspense fallback={<div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>渲染中…</div>}>
                   <div data-ai-id="delivery-md" style={{ fontSize: 'var(--font-size-sm)' }}>

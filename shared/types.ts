@@ -35,6 +35,7 @@ export const IPC_CHANNELS = {
   AGENT_STEER_QUERY: 'agent:steer-query',
   /** 会话 fork（P0-2，2026-09-08）：从任意 user 消息重开，复制前缀到新会话 */
   AGENT_FORK_SESSION: 'agent:fork-session',
+  CLIPBOARD_WRITE_TEXT: 'clipboard:write-text',
   PASTED_IMAGE_SAVE: 'pasted-image:save',
   AGENT_STOP: 'agent:stop',
   AGENT_LIST_SESSIONS: 'agent:list-sessions',
@@ -433,6 +434,8 @@ export interface ProjectDeliverablesInput extends RequestEnvelope {
 
 /** 交付面板快照：文件清单 + 交付说明 + 启动声明。 */
 export interface ProjectDeliverablesResult {
+  /** Frozen confirmed UX, returned read-only for continuity during implementation. */
+  confirmed_sketch_url?: string
   /** 项目产物文件（相对路径，≤200；跳过归档/依赖/构建产物目录） */
   files: string[]
   /** DELIVERY.md 全文（≤64KB；缺失为 undefined） */
@@ -800,6 +803,9 @@ export interface SpeechTranscribeResult {
 }
 
 export interface AgentMessage {
+  /** SDK role is independent of the human origin of a persisted message. */
+  origin?: 'user' | 'system' | 'agent'
+  id?: string
   attachments?: import('./attachment-types').AttachmentInfo[]
   client_message_id?: string
   role: 'user' | 'assistant' | 'system'
@@ -1682,6 +1688,9 @@ export interface AnalyticsTrackResult {
 export type { AttachmentRef, AttachmentInfo, ComposerDraft, DraftScope, SendReceipt, ChatSubmitInput } from './attachment-types'
 
 export type ElectronAPI = {
+  clipboard: {
+    writeText(input: RequestEnvelope & { text: string }): Promise<ApiResult<{ copied: true }>>
+  }
   composer: {
     load(input: import('./attachment-types').DraftLoadInput): Promise<ApiResult<import('./attachment-types').ComposerDraft>>
     save(input: import('./attachment-types').DraftSaveInput): Promise<ApiResult<import('./attachment-types').ComposerDraft>>

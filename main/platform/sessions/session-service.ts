@@ -16,6 +16,7 @@
 import { existsSync, readFileSync, renameSync, statSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
+import { isInternalMessage } from '../../../shared/message-presentation'
 import { rmSyncWithRetry } from '../storage/fs-retry'
 import type {
   AgentForkSessionResult,
@@ -330,6 +331,7 @@ function parseSessionLines(path: string): Array<Record<string, unknown>> {
 
 /** 目标锚点是否为可 fork 的 user 消息（非空文本/含 text 块）。 */
 function isForkableUserMessage(line: Record<string, unknown>): boolean {
+  if (isInternalMessage(line as unknown as AgentMessage)) return false
   if (line.role !== 'user') return false
   if (Array.isArray(line.attachments) && line.attachments.length > 0) return true
   const content = line.content

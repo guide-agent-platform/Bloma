@@ -11,8 +11,8 @@
  */
 import type { BrowserWindow, IpcMain } from 'electron'
 import { spawn } from 'node:child_process'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { readdirSync, readFileSync, statSync, realpathSync } from 'node:fs'
+import { join, sep } from 'node:path'
 import { IPC_CHANNELS } from '../../shared/types'
 import { resolveDriverVenvCommand } from '../desktop/process-driver'
 import { isVenvDirectory } from '../verification/security-scan'
@@ -21,6 +21,7 @@ import type { ProjectDeliverablesInput, ProjectDeliverablesResult, ProjectLaunch
 import { findProject } from '../project/project-service'
 import { parseLaunchDeclaration, readLaunchDeclaration } from '../desktop/launch-smoke'
 import { violatesCommandBlacklist } from '../desktop/contract-schema'
+import { mintProjectPreviewUrl } from '../delivery/preview-scheme'
 
 const SKIP_DIRS = new Set(['archive', 'node_modules', 'dist', '.git', '__pycache__', '00_VERIFY/screenshots'])
 const MAX_FILES = 200
@@ -70,6 +71,11 @@ export function registerProjectDeliverablesIpc(ipcMain: IpcMain, _mainWindow: Br
         launch: { declared: false, parse_ok: false },
         can_launch: false,
       }
+      try {
+        const root = realpathSync(project.root_path)
+        const sketch = realpathSync(join(root, '00_UX', 'confirmed.html'))
+        if (sketch.startsWith(root + sep) && statSync(sketch).size <= 1024 * 1024) result.confirmed_sketch_url = mintProjectPreviewUrl(project.project_id, '00_UX/confirmed.html')
+      } catch { /* A missing archived sketch is not an application failure. */ }
       try {
         const md = readFileSync(join(project.root_path, 'DELIVERY.md'), 'utf8')
         if (md.length <= MAX_DELIVERY_MD) result.delivery_md = md

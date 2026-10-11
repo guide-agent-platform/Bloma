@@ -3,6 +3,7 @@ import { useAtom } from 'jotai'
 import { ModeCard } from './ModeCard'
 import { projectModeAtom, modeSelectedAtom, currentProjectAtom } from './atoms'
 import '../styles/theatre.css'
+import { Sprout } from './icons'
 
 export interface ModeSelectionPageProps {
   onBackToHistory?: () => void
@@ -32,7 +33,7 @@ export const ModeSelectionPage: React.FC<ModeSelectionPageProps> = ({ onBackToHi
     finally { lock.current=false; setSelecting(false) }
   }
   return <main className="idea-start" data-ai-id="mode-selection-page">
-    <header><span className="theatre-brand"><span className="theatre-brandmark" aria-hidden />Bloma</span>{onBackToHistory && <button type="button" className="theatre-tool" onClick={onBackToHistory}>返回项目列表</button>}</header>
+    <header><span className="theatre-brand"><span className="theatre-brandmark" aria-hidden><Sprout /></span>Bloma</span>{onBackToHistory && <button type="button" className="theatre-tool" onClick={onBackToHistory}>返回项目列表</button>}</header>
     <section className="idea-start-content">
       <p className="theatre-eyebrow">从一个想法，到你的软件</p>
       <h1>你想做什么样的软件？</h1>

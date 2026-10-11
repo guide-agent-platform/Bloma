@@ -7,13 +7,14 @@ import {
   Zap as ZapIcon, Gem as GemIcon, Send as SendIcon, SlidersHorizontal, Square, Mic,
   Paperclip as PaperclipIcon, History as HistoryIcon, FileText as FileIcon,
   Layers as LayersIcon, UsersRound, Play as PlayIcon, Image as ImageIcon, X as XIcon,
-  Copy as CopyIcon, MessagesSquare,
+  Copy as CopyIcon, MessagesSquare, Sprout as SproutIcon, Check as CheckIcon,
+  GitBranch as BranchIcon, Activity as ActivityIcon, Hammer as HammerIcon, Scan as ScanIcon,
   type LucideIcon, type LucideProps,
 } from 'lucide-react'
 
-/** The same Lucide geometry and 2px strokes as the approved prototype. */
+/** Shared outline geometry and 1.7px strokes for the approved studio. */
 function uiIcon(Icon: LucideIcon, defaultSize = 24): React.FC<LucideProps> {
-  return function UIIcon({ size = defaultSize, strokeWidth = 2, ...props }) {
+  return function UIIcon({ size = defaultSize, strokeWidth = 1.7, ...props }) {
     return <Icon size={size} strokeWidth={strokeWidth} aria-hidden="true" focusable="false" {...props} />
   }
 }
@@ -47,3 +48,9 @@ export const Image = uiIcon(ImageIcon, 16)
 export const X = uiIcon(XIcon, 16)
 export const Copy = uiIcon(CopyIcon, 14)
 export const Conversation = uiIcon(MessagesSquare, 16)
+export const Sprout = uiIcon(SproutIcon, 20)
+export const Check = uiIcon(CheckIcon, 16)
+export const GitBranch = uiIcon(BranchIcon, 16)
+export const Activity = uiIcon(ActivityIcon, 16)
+export const Hammer = uiIcon(HammerIcon, 16)
+export const Scan = uiIcon(ScanIcon, 16)

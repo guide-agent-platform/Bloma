@@ -4,6 +4,8 @@ import type { SendReceipt } from '../../shared/attachment-types'
 import React, { useState, useCallback } from 'react'
 import { useSetAtom, useAtomValue, useStore } from 'jotai'
 import { submitInitialProjectIdea } from '../lib/initial-project-idea'
+import { restartDiscussion } from '../lib/restart-discussion'
+import { composerDraftFamily, composerScopeAtom, draftKey } from '../composer-state'
 import { ModeSelectionPage } from './ModeSelectionPage'
 import { WorkspaceShell } from './WorkspaceShell'
 import { ProjectHistoryPage } from './ProjectHistoryPage'
@@ -92,6 +94,8 @@ const AppRoutes: React.FC = () => {
   const [projectList, setProjectList] = useState<Project[]>([])
   // 回访恢复：加载历史消息期间的骨架占位开关
   const [historyLoading, setHistoryLoading] = useState(false)
+  const [forkNotice, setForkNotice] = useState<string>()
+  const forkLock = React.useRef(false)
   // ✅ 使用 Jotai hooks 直接读写
   const setProjectMode = useSetAtom(projectModeAtom)
   const setModeSelected = useSetAtom(modeSelectedAtom)
@@ -718,31 +722,25 @@ const AppRoutes: React.FC = () => {
    * 新会话，原会话保留），渲染端续接到新 sessionId 并加载其历史。锚点优先带 v2 行 id，
    * 旧文件回退 entry_timestamp。fork 期间会话由主进程侧 BUSY 拒绝（此处不预判）。
    */
-  const handleForkFromMessage = useCallback((message: AgentMessage) => {
-    const api = window.electronAPI
-    const projectId = currentProject?.project_id ?? projectList[0]?.project_id ?? ''
-    if (!api?.agent?.forkSession || !projectId) return
-    const maybeEntryId = (message as { id?: unknown }).id
-    void api.agent
-      .forkSession({
-        request_id: crypto.randomUUID(),
-        session_id: sessionId,
-        project_id: projectId,
-        ...(typeof maybeEntryId === 'string' && maybeEntryId ? { entry_id: maybeEntryId } : {}),
-        ...(typeof message.timestamp === 'number' ? { entry_timestamp: message.timestamp } : {}),
-      })
-      .then((result) => {
-        if (!result.ok) return
-        const newId = result.data.new_session_id
-        setSessionId(newId)
-        setActiveSessionId(newId)        appendMessageToSession(newId, {
-          role: 'system',
-          content: [{ type: 'text', text: '已从这里重新开始——原对话保留到这条消息，后续生成将基于它继续。' }],
-          timestamp: Date.now(),
-        })
-        void loadSessionHistory(newId)
-      })
-  }, [sessionId, currentProject, projectList, setSessionId, setActiveSessionId])
+  const handleForkFromMessage = useCallback(async (message: AgentMessage) => {
+    if (forkLock.current) throw new Error('正在新开讨论，请稍候')
+    forkLock.current = true
+    try {
+      const branch = await restartDiscussion(window.electronAPI?.agent, currentProject?.project_id, sessionId, message)
+      setSessionId(branch.sessionId); setActiveSessionId(branch.sessionId)
+      const scope = store.get(composerScopeAtom)
+      const draftAtom = composerDraftFamily(draftKey(scope))
+      const previous = store.get(draftAtom)
+      const draft = { ...previous, text: branch.text, revision: previous.revision + 1 }
+      store.set(draftAtom, draft)
+      setForkNotice('已新开讨论，当前程序保留。原要求已放入输入框，编辑后发送；恢复文件请使用版本。')
+      await loadSessionHistory(branch.sessionId)
+      requestChatInputFocus('编辑这条要求后发送，继续新的讨论')
+    } catch (error) {
+      store.set(globalUserErrorAtom, error instanceof Error ? error.message : '新开讨论失败，请重试')
+      throw error
+    } finally { forkLock.current = false }
+  }, [sessionId, currentProject?.project_id, setActiveSessionId, store])
   // ==================== 路由渲染 ====================
   if (route === 'mode-selection') {
     return (
@@ -770,6 +768,7 @@ const AppRoutes: React.FC = () => {
   return (
     <>
       <WorkspaceShell
+        notice={forkNotice}
         cardOptions={decisionCards?.options}
         decisionTitle={decisionCards?.title}
         decisionBody={decisionCards?.body}

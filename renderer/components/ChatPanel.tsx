@@ -15,7 +15,9 @@ import { ProcessBlockGroup, type ProcessItem } from './ProcessBlockGroup'
 import { ThinkingIndicator, type ThinkingPhase } from './ThinkingIndicator'
 import { Markdown } from './Markdown'
 import { CompactReply } from './CompactReply'
-import { MessageSquare, IconAlertTriangle, IconSettings, Image, Copy, Conversation, Sparkles } from './icons'
+import { MessageSquare, IconAlertTriangle, IconSettings, Image, Copy, Conversation, Sparkles, Check, GitBranch } from './icons'
+import { copyText } from '../lib/copy-text'
+import { isInternalMessage, assistantDisplayText } from '../../shared/message-presentation'
 import {
   activeAgentSessionIdAtom,
   agentMessagesFamily,
@@ -62,7 +64,7 @@ export interface ChatPanelProps {
   /** 零渠道引导卡直达按钮（QW#2 二期 P1-①②）：切到设置页，宁可给按钮不给说明书 */
   onOpenSettings?: () => void
   /** P0-2 fork（2026-09-08）：user 消息「从这里重新来」回调（消息含 timestamp/可能含 id） */
-  onForkFromMessage?: (message: AgentMessage) => void
+  onForkFromMessage?: (message: AgentMessage) => void | Promise<void>
 }
 
 // 模块级常量：当 activeAgentSessionIdAtom 为 null 时的稳定 fallback atom，
@@ -157,16 +159,22 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     activeSessionId ? agentStreamStateFamily(activeSessionId) : nullStreamFallback,
   )
   const visibleMessages = React.useMemo(() => {
-    if (!compact) return messages
+    const publicMessages = messages.filter(message => !isInternalMessage(message))
+    if (!compact) return publicMessages
     let lastUser = -1
     let lastAssistant = -1
     let lastWelcome = -1
-    messages.forEach((message, index) => {
-      if (message.role === 'user' && message.content.some(block => block.type === 'text' && block.text?.trim())) lastUser = index
+    publicMessages.forEach((message, index) => {
+      if (message.role === 'user' && (message.content.some(block => block.type === 'text' && block.text?.trim() || block.type === 'image') || message.attachments?.length)) lastUser = index
       if (message.role === 'assistant' && !message.content.some(block => block.type === 'tool_use')) lastAssistant = index
       if (message.role === 'system' && message.content.some(block => block.type === 'text' && block.text?.startsWith('[welcome-hint]'))) lastWelcome = index
     })
-    return messages.filter((message, index) => index >= lastUser && (message.role !== 'assistant' || (index === lastAssistant && !(lastUser < 0 && lastWelcome > lastAssistant)) || message.content.some(block => block.type === 'tool_use')))
+    // The dock shows the current result, never an abbreviated long reply.
+    // Earlier human requests/actions remain in independently opened history.
+    return publicMessages.filter((message, index) => message.role === 'user'
+      ? index === lastUser && lastUser > lastAssistant
+      : message.role === 'assistant' ? index === lastAssistant && !(lastUser < 0 && lastWelcome > lastAssistant)
+      : index >= lastUser && !(lastAssistant > lastUser && message.content.some(block => block.type === 'text' && block.text?.startsWith('[welcome-hint]'))))
   }, [messages, compact])
 
   const messagesEndRef = React.useRef<HTMLDivElement>(null)
@@ -259,7 +267,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
   const handleForkFromMessage = React.useCallback(
     (message: AgentMessage) => {
-      onForkFromMessage?.(message)
+      return onForkFromMessage?.(message)
     },
     [onForkFromMessage],
   )
@@ -637,7 +645,7 @@ const HistoryMessages: React.FC<{
   mode: ProjectMode | null
   toolNamesById: Record<string, string>
   onOpenSettings?: () => void
-  onForkFromMessage?: (message: AgentMessage) => void
+  onForkFromMessage?: (message: AgentMessage) => void | Promise<void>
   compact?: boolean
 }> = ({ messages, mode, toolNamesById, onOpenSettings, onForkFromMessage, compact }) => {
   const nodes: React.ReactNode[] = []
@@ -857,6 +865,13 @@ const userBubbleShadow = (mode: ProjectMode | null): string =>
     : '0 4px 12px -3px rgba(124,58,237,0.35)'
 
 const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreaming = false, toolNamesById, onOpenSettings, onForkFromMessage, compact = false }) => {
+  const [copied, setCopied] = React.useState(false)
+  const [copying, setCopying] = React.useState(false)
+  const copyLock = React.useRef(false)
+  const [actionError, setActionError] = React.useState('')
+  const [forking, setForking] = React.useState(false)
+  const copyTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>()
+  React.useEffect(() => () => { if (copyTimer.current) clearTimeout(copyTimer.current) }, [])
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
 
@@ -866,7 +881,8 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
     .join('')
   // 退行重复折叠（2026-09-04「查。」墙案）：显示层折叠，落盘/回放数据保留原始；
   // system 前缀行（[decision]/[queue-dropped] 等按前缀分流）不折叠
-  const text = isSystem ? rawText : collapseRepetitiveText(rawText)
+  const text = isSystem ? rawText : collapseRepetitiveText(message.role === 'assistant' ? assistantDisplayText(rawText) : rawText)
+  if (isInternalMessage(message)) return null
 
   // Agent Loop 落盘的轮次：assistant 轮带 tool_use、user 轮只带 tool_result（无文本）
   const hasToolBlocks = message.content.some((block) => block.type === 'tool_use' || block.type === 'tool_result')
@@ -938,7 +954,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
     const welcomeDone = text.startsWith('[welcome-hint:done]')
     if (text.startsWith('[welcome-hint]') || welcomeDone) {
       // done 变体（P2-④）：绿色左边框、不带直达按钮——反馈语义不再指路
-      const hint = text.replace(/^\[welcome-hint(?::done)?\]\s*/, '')
+      const hint = text.replace(/^\[welcome-hint(?::done)?\]\s*/, '').replace(/^[💡⚠✅✨]\uFE0F?\s*/u, '')
       return (
         <div
           data-ai-id="welcome-hint"
@@ -1060,10 +1076,20 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
         {/* F4（r82）：复制入口——0 基础对照 Claude/GPT 基线；clipboard 可选链防御（非安全上下文降级） */}
         {text && (
           <button
-            onClick={() => {
-              void navigator.clipboard?.writeText(text).catch(() => undefined)
+            type="button"
+            disabled={copying}
+            onClick={async () => {
+              if (copyLock.current) return
+              copyLock.current = true; setCopying(true); setCopied(false); setActionError('')
+              try {
+                await copyText(text)
+                setCopied(true)
+                if (copyTimer.current) clearTimeout(copyTimer.current)
+                copyTimer.current = setTimeout(() => setCopied(false), 1800)
+              } catch (error) { setActionError(error instanceof Error ? error.message : '复制失败，请重试') }
+              finally { copyLock.current = false; setCopying(false) }
             }}
-            aria-label="复制"
+            aria-label={copied ? '已复制' : '复制'}
             title="复制"
             style={{
               marginTop: compact ? 2 : 'var(--space-2)',
@@ -1077,7 +1103,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
               borderRadius: 'var(--radius-sm)',
             }}
           >
-            {compact ? <Copy size={13} /> : '复制'}
+            {copied ? <><Check size={13} />已复制</> : <Copy size={13} />}
           </button>
         )}
       </div>
@@ -1086,9 +1112,16 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
       {isUser && (text || message.attachments?.length || imageBlocks.length) && onForkFromMessage && (
         <button
           type="button"
-          onClick={() => onForkFromMessage(message)}
+          disabled={forking}
+          onClick={async () => {
+            if (forking) return
+            setForking(true); setActionError('')
+            try { await onForkFromMessage(message) }
+            catch (error) { setActionError(error instanceof Error ? error.message : '新开讨论失败，请重试') }
+            finally { setForking(false) }
+          }}
           aria-label="从这里重新来"
-          title="把对话回退到这条消息，从这里继续（原对话保留）"
+          title="从这条要求新开讨论，保留当前程序；文件恢复请使用版本入口"
           style={{
             marginTop: 'var(--space-1)',
             alignSelf: 'flex-end',
@@ -1102,9 +1135,10 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, mode, isStreamin
             borderRadius: 'var(--radius-full)',
           }}
         >
-          ↪ 从这里重新来
+          <GitBranch size={13} />{forking ? '正在新开讨论…' : '从此处新开讨论'}
         </button>
       )}
+      {actionError && <span role="alert" className="message-action-error">{actionError}</span>}
       <span
         hidden={compact}
         style={{

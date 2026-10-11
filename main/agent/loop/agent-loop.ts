@@ -15,6 +15,8 @@ import { estimateTokenCount } from './usage-guard'
 import { isDegenerateText } from '../../coding/output-integrity'
 import { buildTargetedDegenerateFeedback, classifyDsmlRecovery, parseDsmlInvokes } from './dsml-recovery'
 import { createDsmlDisplayFilter } from './dsml-display-filter'
+import { userFacingWrapUp } from '../prompting/user-facing-output'
+import { isHostControlText } from '../../../shared/message-presentation'
 import { closePreviewBrowserSession } from '../../coding/preview-browser'
 import { drainSteerQueue, markLoopActive, markLoopInactive, markSteerMerged, pendingSteerCount, settleSteerEntry, steerConfirmEnabled, wrapSteerContent } from './steer-queue'
 
@@ -781,7 +783,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     taskBlocks ? { role: 'user' as const, content: taskBlocks } : { role: 'user' as const, content: task },
   ]
   // 初始 task 落盘（审计完整性：JSONL 是子会话全量审计，缺首条 user 会让 continue 重放丢任务原文）
-  if (!input.initialMessagePersisted) appendLoopMessage(input.sessionId, 'user', taskBlocks ?? [{ type: 'text', text: task }])
+  if (!input.initialMessagePersisted) appendLoopMessage(input.sessionId, 'user', taskBlocks ?? [{ type: 'text', text: task }], isHostControlText(task) ? 'system' : 'user')
   const ctx: ToolContext = {
     projectId: input.projectId,
     sessionId: input.sessionId,
@@ -1510,7 +1512,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     if (parsedGrace) {
       const graceFeedback = [
         '【收口指令（宿主注入）】工具调用已全部停用（检测到你仍想调用 ' + parsedGrace.invokes.map((invoke) => invoke.name).join('、') + '）。',
-        '无需再读取或修改任何文件——请直接输出完成总结：逐项说明已完成的实施清单项与自测情况；未验证的部分如实说明。',
+        input.system.includes('【工作区短回复约定】') ? '请用2～3句日常中文说明结果、重要限制和下一步，详细证据保留工作记录。' : '无需再读取或修改任何文件——请直接输出完成总结：逐项说明已完成的实施清单项与自测情况；未验证的部分如实说明。',
       ].join('\n')
       appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: graceFeedback }])
       messages.push({ role: 'user', content: [{ type: 'text', text: graceFeedback }] })
@@ -1571,7 +1573,7 @@ async function runGraceWrapUpTurn(
       ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
       ...(input.thinkingLevel !== undefined ? { thinkingLevel: input.thinkingLevel } : {}),
       messages: [
-        { role: 'system', content: `${input.system}${GRACE_TURN_SUFFIX}` },
+        { role: 'system', content: `${input.system}${GRACE_TURN_SUFFIX}${userFacingWrapUp(input.system)}` },
         // 2026-09-16 上下文同步 Proma：与主路径同口径（全量模式传全量；滑窗逃生口维持窗口）
         ...messages,
       ],
@@ -1927,9 +1929,10 @@ function summarizeJson(value: unknown): string {
 }
 
 /** loop 轮次落盘：assistant 轮（含 tool_use）与 user 轮（tool_result）照常 append JSONL。 */
-function appendLoopMessage(sessionId: string, role: 'assistant' | 'user', blocks: MessageContentBlock[]): void {
+function appendLoopMessage(sessionId: string, role: 'assistant' | 'user', blocks: MessageContentBlock[], origin: 'user' | 'system' | 'agent' = role === 'user' ? 'system' : 'agent'): void {
   appendSessionMessage(sessionId, {
     role,
+    origin,
     content: blocks.map((block) =>
       block.type === 'tool_result' && typeof block.content === 'string' && block.content.length > JSONL_TOOL_RESULT_CHAR_LIMIT
         ? { ...block, content: `${block.content.slice(0, JSONL_TOOL_RESULT_CHAR_LIMIT)}…[截断，全文见事件流]` }
