@@ -15,6 +15,7 @@ import { estimateTokenCount } from './usage-guard'
 import { isDegenerateText } from '../../coding/output-integrity'
 import { buildTargetedDegenerateFeedback, classifyDsmlRecovery, parseDsmlInvokes } from './dsml-recovery'
 import { createDsmlDisplayFilter } from './dsml-display-filter'
+import { validateToolInput } from './tool-input-validation'
 import { userFacingWrapUp } from '../prompting/user-facing-output'
 import { isHostControlText } from '../../../shared/message-presentation'
 import { closePreviewBrowserSession } from '../../coding/preview-browser'
@@ -1639,6 +1640,8 @@ async function executeToolCall(
   }
   ctx.toolCallId = use.id
   const toolInput = use.input ?? {}
+  const validationError = validateToolInput(use.name, toolInput, tool.input_schema)
+  if (validationError) return { output: validationError, isError: true }
 
   // 权限门禁：loop 是无人值守自动化，仅支持 allow-all（warning 放行、dangerous 交由
   // canUseTool 判定）；非 allow-all（ask/safe）直接拒绝进 is_error 让模型自纠——
@@ -1653,7 +1656,7 @@ async function executeToolCall(
     // dangerous-under-allow-all），取消也能中断，绝不进程级永久阻塞。
     const permission = await withAbort(canUseTool(use.name, toolInput, input.sessionId, input.permissionMode, input.projectId), input.signal)
     if (permission.behavior === 'deny') {
-      return { output: `权限拒绝：本次运行不允许执行「${use.name}」。请改用其他方式完成，或直接输出当前进展总结。`, isError: true }
+      return { output: `权限拒绝：${permission.message ?? `本次运行不允许执行「${use.name}」`}。请按拒因调整操作，或直接输出当前进展总结。`, isError: true }
     }
   } catch (error) {
     return { output: `权限检查失败：${errorMessage(error)}`, isError: true }

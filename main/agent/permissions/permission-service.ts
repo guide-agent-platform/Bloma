@@ -8,6 +8,7 @@ import type {
 
 export interface PermissionResult {
   behavior: 'allow' | 'deny'
+  message?: string
   updatedInput?: Record<string, unknown>
   updatedPermissionMode?: PromaPermissionMode
 }

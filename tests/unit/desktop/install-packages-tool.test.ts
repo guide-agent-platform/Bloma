@@ -113,6 +113,20 @@ describe('install_packages（声明制 venv 安装刀）', () => {
     expect(second.output).toContain('预算用尽')
   })
 
+  it('pip success with failed import returns isError and the real failure; later correction can recover', async () => {
+    const runner = makeSpawn([{ match: cmd => cmd.includes('import sounddevice'), code: 1, stderr: "ModuleNotFoundError: No module named 'numpy'" }])
+    const installer = buildInstallPackagesTool(projectId, { spawn: runner })
+    const failed = await installer.execute({ packages: ['sounddevice'] }, ctxFor(projectId))
+    expect(failed.isError).toBe(true)
+    expect(failed.detail).toMatchObject({ imports_verified: false })
+    expect(failed.output).toContain("No module named 'numpy'")
+    expect(failed.output).not.toContain('依赖安装完成')
+    runner.mockImplementation(async () => ({ code: 0, stdout: '', stderr: '' }))
+    const recovered = await installer.execute({ packages: ['numpy', 'sounddevice'] }, ctxFor(projectId))
+    expect(recovered.isError).toBe(false)
+    expect(recovered.detail).toMatchObject({ imports_verified: true })
+  })
+
   it('venv 解释器一致性：run_project_script 在 .venv 存在时优先 venv python', async () => {
     mkdirSync(join(projectRoot, '.venv', 'Scripts'), { recursive: true })
     writeFileSync(join(projectRoot, venvPythonRelativePath()), '#stub', 'utf8')

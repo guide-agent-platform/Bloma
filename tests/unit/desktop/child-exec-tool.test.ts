@@ -70,7 +70,8 @@ describe('run_project_script（方案 B：implement 子会话受控执行）', (
     const tool = buildChildScriptRunnerTool(projectId, { spawn, resolvePython: okPython })
     const outcome = await tool.execute({ script: '自测.py' }, ctxFor(projectId))
     expect(outcome.isError).toBeFalsy()
-    expect(outcome.output).toContain('退出码 0（绿）')
+    expect(outcome.output).toContain('进程退出码 0')
+    expect(outcome.detail).toMatchObject({ verification_status: 'pass' })
     expect(outcome.output).toContain('S1 PASS 加法')
     expect(spawn).toHaveBeenCalledTimes(1)
     const request = spawn.mock.calls[0][0] as DriverCommandRequest
@@ -85,8 +86,8 @@ describe('run_project_script（方案 B：implement 子会话受控执行）', (
   it('红判定：非零退出码输出红话术', async () => {
     const tool = buildChildScriptRunnerTool(projectId, { spawn: fakeSpawn({ code: 1, stderr: 'AssertionError' }), resolvePython: okPython })
     const outcome = await tool.execute({ script: '自测.py' }, ctxFor(projectId))
-    expect(outcome.isError).toBeFalsy()
-    expect(outcome.output).toContain('退出码 1（红')
+    expect(outcome.isError).toBe(true)
+    expect(outcome.output).toContain('进程退出码 1')
     expect(outcome.output).toContain('AssertionError')
   })
 
@@ -97,6 +98,16 @@ describe('run_project_script（方案 B：implement 子会话受控执行）', (
     expect((await tool.execute({ script: 'notes.txt' }, ctx)).isError).toBe(true)
     expect((await tool.execute({ script: '不存在的.py' }, ctx)).isError).toBe(true)
     expect((await tool.execute({ script: 'C:/abs/path.py' }, ctx)).isError).toBe(true)
+  })
+
+  it('exit 0 does not override failed or blocked readback; unregistered output is not business evidence', async () => {
+    for (const [stdout, expected] of [['FAIL 保存\n', 'fail'], ['BLOCKED 录音\n', 'blocked'], ['ZIP_FAIL BadZipFile\n', 'not_reported']] as const) {
+      const runner = buildChildScriptRunnerTool(projectId, { spawn: fakeSpawn({ code: 0, stdout }), resolvePython: okPython })
+      const result = await runner.execute({ script: '自测.py' }, ctxFor(projectId))
+      expect(result.detail).toMatchObject({ code: 0, verification_status: expected })
+      expect(Boolean(result.isError)).toBe(expected !== 'not_reported')
+      expect(result.output).not.toContain('（绿）')
+    }
   })
 
   it('执行预算：超上限后拒答并指引如实收尾', async () => {

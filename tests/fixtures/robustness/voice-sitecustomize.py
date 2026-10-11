@@ -87,6 +87,7 @@ def adapt(module):
     module.InputStream, module.RawInputStream, module.rec = FixtureStream, FixtureRawStream, rec
     module.wait = lambda *args, **kwargs: None
     module.bloma_fixture_input = True
+    module.bloma_input_evidence_source = 'fixed_wav_not_physical_microphone'
     # A generated program cannot accidentally invoke another physical input API during this trial.
     deny_other_input = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError('Physical microphone disabled in fixed-audio trial'))
     module.playrec, module.Stream, module.RawStream = deny_other_input, deny_other_input, deny_other_input
@@ -95,6 +96,8 @@ def adapt(module):
 class GuardLoader(importlib.abc.Loader):
     def __init__(self, wrapped): self.wrapped = wrapped
     def create_module(self, spec): return self.wrapped.create_module(spec)
+    def get_code(self, fullname): return self.wrapped.get_code(fullname)
+    def get_filename(self, fullname): return self.wrapped.get_filename(fullname)
     def exec_module(self, module):
         self.wrapped.exec_module(module)
         adapt(module)

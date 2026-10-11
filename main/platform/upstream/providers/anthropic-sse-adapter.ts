@@ -159,6 +159,7 @@ export const ANTHROPIC_SSE_ADAPTER: StreamAdapter = {
         }
       }
 
+      if (event.type === 'message_stop') events.push({ type: 'done', terminal: true })
       return events
     } catch {
       return []

@@ -90,6 +90,18 @@ function readSessionJsonl(sessionId: string): Array<{ role: string; content: Arr
 }
 
 describe('runAgentLoop（PR2 L1）', () => {
+  it('invalid tool parameters are fed back before execution and do not consume the valid retry budget', async () => {
+    const executed: unknown[] = []
+    const action = tool('read_file', input => { executed.push(input.path); return { output: 'read ok' } })
+    action.input_schema = { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] }
+    const script = scriptedQuery([[toolUseMessage('bad', 'read_file', { path: 42 })], [toolUseMessage('ok', 'read_file', { path: 'app.py' })], [textMessage('完成')]])
+    const result = await runAgentLoop(baseInput({ tools: [action], query: script.query, toolBudget: { read_file: 1 } }))
+    expect(result.status).toBe('completed')
+    expect(executed).toEqual(['app.py'])
+    const feedback = script.receivedMessages[1].at(-1)!.content as Array<{ is_error?: boolean; content: string }>
+    expect(feedback[0].is_error).toBe(true)
+    expect(feedback[0].content).toContain('input.path 应为 string')
+  })
   it('cached input counts toward the real context and parent usage summary', async () => {
     const result = await runAgentLoop(baseInput({ query: async function* () {
       yield textMessage('已完成')

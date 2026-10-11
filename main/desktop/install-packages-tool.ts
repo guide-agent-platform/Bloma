@@ -74,6 +74,7 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
         return {
           output: `安装调用预算用尽（${maxCalls} 次）：依赖问题请如实写进 DELIVERY.md 已知限制，不要反复装卸。`,
           isError: true,
+          budgetExhausted: true,
         }
       }
       const project = findProject(projectId)
@@ -182,18 +183,21 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
 
       // ③ 逐包 import 探测回读（卡片库 import_name 映射）
       const probeResults: string[] = []
+      const probeFailures: string[] = []
       for (const spec of specs) {
         const moduleName = importNameOf(spec)
         try {
-          const { code } = await spawn({
+          const { code, stderr } = await spawn({
             command: [venvPython, '-c', `import ${moduleName}`],
             timeoutMs: 30_000,
             env,
             cwd: root,
           })
           probeResults.push(code === 0 ? `${spec} → import ${moduleName} ✓` : `${spec} → import ${moduleName} ✗（装上但导入失败，看依赖项）`)
-        } catch {
+          if (code !== 0) probeFailures.push(`${spec}: ${stderr.slice(-1000) || `import 退出码 ${code}`}`)
+        } catch (error) {
           probeResults.push(`${spec} → import ${moduleName} ✗（探测超时/异常）`)
+          probeFailures.push(`${spec}: ${error instanceof Error ? error.message.slice(0, 1000) : '探测异常'}`)
         }
       }
 
@@ -236,15 +240,17 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
       }
 
       return {
+        isError: probeFailures.length > 0,
         output: [
-          '依赖安装完成（声明制 · 项目内 .venv）：',
+          probeFailures.length ? '包已安装，但依赖导入检查未通过；按下列原因修复后补验，不能宣称环境就绪：' : '依赖安装与导入检查完成（声明制 · 项目内 .venv）：',
           ...steps,
           '--- import 探测回读 ---',
           ...probeResults,
+          ...probeFailures,
           '后续一致性：run_project_script 将自动改用 .venv 解释器；LAUNCH.json 的 command 请改为 [".venv\\\\Scripts\\\\python.exe", "主程序.py"]（相对项目根）。',
           `（剩余安装预算 ${maxCalls - calls}/${maxCalls} 次）`,
         ].join('\n'),
-        detail: { installed: specs, venv_python: venvPythonRelativePath(), call_index: calls },
+        detail: { installed: specs, imports_verified: probeFailures.length === 0, venv_python: venvPythonRelativePath(), call_index: calls },
       }
     },
   }

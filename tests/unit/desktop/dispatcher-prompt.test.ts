@@ -36,6 +36,16 @@ describe('renderTaskTemplate', () => {
 
 describe('buildDispatcherSystemPrompt 组装序', () => {
   const ctx = { projectName: 'clip-tool', completedPhases: ['requirements', 'desktop-arch'] }
+  it('architecture parent and child both receive the available component and evidence scope', () => {
+    const parent = buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-arch'], ctx)
+    const child = buildDesktopChildBaseSystem(DESKTOP_PHASES['desktop-arch'], ctx)
+    for (const prompt of [parent, child]) {
+      expect(prompt).toContain('【平台已有组件事实】')
+      expect(prompt).toContain('speech-models/sensevoice-int8')
+      expect(prompt).toContain('speech_runtime.py')
+      expect(prompt).toContain('不证明麦克风采集')
+    }
+  })
 
   it('段落锚按固定序出现（任务书→约束→推进协议→工具纪律→确认纪律）', () => {
     const prompt = buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-scaffold'], ctx)

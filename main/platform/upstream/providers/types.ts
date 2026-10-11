@@ -74,6 +74,8 @@ export interface StreamErrorEvent {
 /** 流式完成事件 */
 export interface StreamDoneEvent {
   type: 'done'
+  /** Protocol terminal marker; stop_reason alone can precede final usage. */
+  terminal?: boolean
   /** 停止原因：'tool_use' 表示需要执行工具后继续 */
   stopReason?: 'end_turn' | 'tool_use' | string
 }

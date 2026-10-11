@@ -19,7 +19,7 @@ import { existsSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 import { execFile } from 'node:child_process'
 import type { AgentLoopTool } from '../agent/loop/agent-loop'
-import { execFileDriverSpawn, DriverExecutionError, type DriverSpawn } from './process-driver'
+import { execFileDriverSpawn, DriverExecutionError, parseDriverStdout, routeDriverOutcome, type DriverSpawn } from './process-driver'
 import { findProject } from '../project/project-service'
 
 const DEFAULT_TIMEOUT_MS = 90_000
@@ -89,7 +89,7 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
     name: 'run_project_script',
     description:
       '在项目目录真实执行 Python 自测：script 指向已有 .py，或 code 提供短代码（两者只能选一个，无需创建临时脚本）。' +
-      '当场看退出码/stdout/stderr 做红绿自测，绿了再交付。脚本须在项目根内；短代码在同一工作目录执行；缺省90秒、上限180秒；' +
+      '区分进程退出与业务断言：退出码0只说明脚本正常退出；声明的 PASS/FAIL/BLOCKED 场景按回读判断。脚本须在项目根内；短代码在同一工作目录执行；缺省90秒、上限180秒；' +
       '全程至多 12 次。推荐输出用 `PASS/FAIL <场景名>` 行锚点（场景名与契约声明一致，平台复跑可对账）。' +
       'GUI 程序请写无头自测（构造逻辑对象断言，不要真开主循环）。',
     input_schema: {
@@ -106,6 +106,7 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
         return {
           output: `执行预算用尽（${maxRuns} 次）：剩余工作请基于已有红绿结果收尾，如实把未验证项写进 DELIVERY.md，不要反复尝试。`,
           isError: true,
+          budgetExhausted: true,
         }
       }
       const script = typeof input.script === 'string' ? input.script.trim() : ''
@@ -173,8 +174,12 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
           cwd: rootReal,
         })
         const durationMs = Date.now() - startedAt
-        const verdict = code === 0 ? '✅ 退出码 0（绿）' : `❌ 退出码 ${code}（红——按 stderr/失败断言修复后复跑）`
+        const parsed = parseDriverStdout(stdout)
+        const routing = routeDriverOutcome(code, parsed.scenarios)
+        const verificationStatus = routing.routing !== 'pass' ? routing.routing : parsed.scenarios.some(s => s.outcome === 'pass') ? 'pass' : 'not_reported'
+        const verdict = `进程退出码 ${code}；场景回读：${verificationStatus === 'not_reported' ? '未报告，不能据退出码宣称业务通过' : routing.reason}`
         return {
+          isError: routing.routing !== 'pass',
           output: [
             `运行 ${label}${args.length > 0 ? ` ${args.join(' ')}` : ''}（真实执行，${durationMs}ms）`,
             verdict,
@@ -184,7 +189,7 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
             truncate(stderr, 2_000) || '（空）',
             `（剩余执行预算 ${maxRuns - runs}/${maxRuns} 次）`,
           ].join('\n'),
-          detail: { script: label, code, durationMs, run_index: runs },
+          detail: { script: label, code, durationMs, run_index: runs, verification_status: verificationStatus },
         }
       } catch (error) {
         if (error instanceof DriverExecutionError) {

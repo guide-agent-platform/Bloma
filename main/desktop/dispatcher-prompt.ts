@@ -12,6 +12,7 @@ import type { PhaseNode } from './dispatcher-phases'
 import { PHASE_ADVANCE_KEYWORD } from './dispatcher-gate'
 import { userFacingOutputContract } from '../agent/prompting/user-facing-output'
 import { CORE_VERIFICATION_BRIEF } from './core-verification'
+import { componentQuickReference } from './component-library'
 
 /** 任务书模板渲染结果：unresolved 收集未匹配占位符（诊断/测试断言用）。 */
 export interface RenderedTemplate {
@@ -106,6 +107,7 @@ export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherProm
 
   // 2. 任务书
   sections.push(`【本阶段任务书】\n${rendered.text}`)
+  if (node.id === 'desktop-arch') sections.push(architectureComponentFacts())
 
   // 3. 阶段约束
   if (constraints.length > 0) {
@@ -161,6 +163,7 @@ export function buildDesktopChildBaseSystem(
       : '本阶段产物写入项目根目录（相对路径）。',
   ]
   if (node.id === 'desktop-implement' || node.id === 'desktop-verify') parts.push(CORE_VERIFICATION_BRIEF)
+  if (node.id === 'desktop-arch') parts.push(architectureComponentFacts())
   if (constraints.length > 0) {
     parts.push(`【阶段约束】\n${constraints.map((constraint, index) => `${index + 1}. ${constraint}`).join('\n')}`)
   }
@@ -175,6 +178,10 @@ export function buildDesktopChildBaseSystem(
 
 function confirmedSketchInstruction(path: string): string {
   return `【已确认界面】先 read_file ${path}，按其布局与交互方向实现并把此要求传给实现子会话；不要仅看组件库重新设计。草图示意数据与平台点选注入脚本不得复制为业务实现。`
+}
+
+function architectureComponentFacts(): string {
+  return `【平台已有组件事实】\n${componentQuickReference()}\n先对照已验组件确定知识缺口，再调研替代方案。语音默认评估 speech_runtime.py 的 SpeechEngine/StreamingRecorder；安装 sherpa-onnx 会物化组件。speech_locator.py 先校验 BLOMA_SPEECH_MODEL_DIR 指定缓存，否则查 PROMA_HOME 或 ~/.proma 下 speech-models/sensevoice-int8；已通过组件探针不代表当前产物已通过。确有能力缺口才提出替代引擎，注明缺口及额外下载/验证预算。下载失败保留待验，不反复从头下载。测试输入是固定音频时只证明适配/解码，不证明麦克风采集；真实硬件须单独授权证据。`
 }
 
 /**

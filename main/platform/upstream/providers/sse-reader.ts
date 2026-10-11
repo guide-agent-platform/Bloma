@@ -34,6 +34,8 @@ export interface StreamSSEOptions {
    *  实证 2026-10-08：番茄钟单 740s 挂死轮，向导 8min 无回传只能 stop_delegation
    *  杀整个子会话续跑——空闲超时把自愈粒度降到单请求 2 分钟。 */
   streamIdleTimeoutMs?: number
+  /** No semantic progress (text/thinking/tool arguments). Heartbeats do not reset it. */
+  streamProgressTimeoutMs?: number
   /** 自定义 fetch 函数（代理等场景下由调用方注入） */
   fetchFn?: typeof globalThis.fetch
 }
@@ -189,7 +191,7 @@ function normalizeToolCallOutputIndex(value: unknown): string | undefined {
 
 /** 单次 SSE 流式尝试（不含重试逻辑；上游原样） */
 async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSEResult> {
-  const { request, adapter, onEvent, signal, fetchFn = fetch, timeoutMs = 30_000, streamIdleTimeoutMs = 120_000 } = options
+  const { request, adapter, onEvent, signal, fetchFn = fetch, timeoutMs = 30_000, streamIdleTimeoutMs = 120_000, streamProgressTimeoutMs = 120_000 } = options
 
   // 真正的"首字节超时"：仅在等待 HTTP 响应期间计时，收到响应后立即清除。
   const timeoutController = new AbortController()
@@ -201,15 +203,12 @@ async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSERes
   // 1. 发起请求（支持通过 fetchFn 注入代理）
   effectiveSignal.throwIfAborted()
   options.onAttempt?.('started')
-  const response = await fetchFn(request.url, {
-    method: 'POST',
-    headers: request.headers,
-    body: request.body,
-    signal: effectiveSignal,
-  })
-
-  // 已收到 HTTP 响应头，清除首字节超时——后续流式读取不应受时间限制
-  clearTimeout(timer)
+  let response: Response
+  try {
+    response = await fetchFn(request.url, {
+      method: 'POST', headers: request.headers, body: request.body, signal: effectiveSignal,
+    })
+  } finally { clearTimeout(timer) }
 
   // 2. 错误检查
   if (!response.ok) {
@@ -238,10 +237,20 @@ async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSERes
   const thinkingBlocks: ThinkingBlock[] = []
   let currentThinking: ThinkingBlock | null = null
 
+  let idleTimer: ReturnType<typeof setTimeout> | undefined
+  let progressTimer: ReturnType<typeof setTimeout> | undefined
+  let progressTimedOut = false
+  let protocolEnded = false
+  const armProgressTimer = (): void => {
+    if (progressTimer) clearTimeout(progressTimer)
+    progressTimer = setTimeout(() => {
+      progressTimedOut = true
+      void reader.cancel().catch(() => {})
+    }, streamProgressTimeoutMs)
+  }
   try {
     // 流空闲超时（批11.8，2026-10-08）：连接僵死自洁——无字节的 read() 到期后
     // cancel 流解阻塞，携专用错误上抛（isRetriableError 对其放行 → 外层安全重试）
-    let idleTimer: ReturnType<typeof setTimeout> | undefined
     let idleTimedOut = false
     const armIdleTimer = (): void => {
       if (idleTimer) clearTimeout(idleTimer)
@@ -251,13 +260,19 @@ async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSERes
         void reader.cancel().catch(() => {})
       }, streamIdleTimeoutMs)
     }
-    while (true) {
+    armProgressTimer()
+    while (!protocolEnded) {
       armIdleTimer()
       let readResult: ReadableStreamReadResult<Uint8Array>
       try {
         readResult = await reader.read()
       } finally {
         if (idleTimer) clearTimeout(idleTimer)
+      }
+      if (progressTimedOut) {
+        const err = new Error(`SSE 流无有效进展超时：${Math.round(streamProgressTimeoutMs / 1000)}s 无正文、推理或工具参数增量（心跳不计进展）`)
+        err.name = 'StreamProgressTimeoutError'
+        throw err
       }
       if (idleTimedOut) {
         const err = new Error(`SSE 流空闲超时：${Math.round(streamIdleTimeoutMs / 1000)}s 无任何字节（连接僵死）`)
@@ -282,12 +297,15 @@ async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSERes
         } else {
           continue
         }
-        if (data === '[DONE]' || !data) continue
+        if (data === '[DONE]') { protocolEnded = true; break }
+        if (!data) continue
 
         // 4. 委托给 adapter 解析供应商特定 JSON
         const events = adapter.parseSSELine(data)
 
         for (const event of events) {
+          if ((event.type === 'chunk' || event.type === 'reasoning') && event.delta ||
+              event.type === 'tool_call_start' || event.type === 'tool_call_delta' && (event.argumentsDelta || event.finalArguments)) armProgressTimer()
           if (event.type === 'chunk') {
             content += event.delta
           } else if (event.type === 'reasoning') {
@@ -341,10 +359,15 @@ async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSERes
             throw new ProviderStreamError(event.error)
           }
           onEvent(event)
+          if (event.type === 'done' && event.terminal) protocolEnded = true
         }
+        if (protocolEnded) break
       }
     }
   } finally {
+    if (idleTimer) clearTimeout(idleTimer)
+    if (progressTimer) clearTimeout(progressTimer)
+    if (protocolEnded) void reader.cancel().catch(() => {})
     reader.releaseLock()
   }
 

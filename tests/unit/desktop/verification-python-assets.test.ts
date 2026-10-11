@@ -10,6 +10,11 @@ function assetCall(asset: string, expression: string, source: string): any {
 }
 
 describe('actual Python verification assets', () => {
+  it('fixed-audio import wrapper preserves Python CLI loader methods without invoking any hardware', () => {
+    const code = `import runpy,os,json\nos.environ.pop('BLR_FIXED_AUDIO_WAV',None)\nm=runpy.run_path('tests/fixtures/robustness/voice-sitecustomize.py')\nclass Loader:\n def get_code(self,name): return compile('x=42','fixture.py','exec')\n def get_filename(self,name): return 'fixture.py'\ng=m['GuardLoader'](Loader())\nns={}\nexec(g.get_code('fixture'),ns)\nprint(json.dumps({'value':ns['x'],'filename':g.get_filename('fixture')}))`
+    const output = execFileSync('python', ['-c', code], { encoding: 'utf8', timeout: 10000, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONDONTWRITEBYTECODE: '1' } })
+    expect(JSON.parse(output)).toEqual({ value: 42, filename: 'fixture.py' })
+  })
   it('validation mutation changes only the selected class method and reports its real name/line', () => {
     const source = 'class Logic:\n    def handle_send(self, text):\n        if not text:\n            raise ValueError("empty")\n        return text\n\ndef main():\n    if "--self-check" in args:\n        return 0\n    return 1\n'
     const result = assetCall('fault-seeds.py', 'mutated,info=m.apply_seed(s,"FS-VALIDATION-REMOVE")\nprint(json.dumps({"info":info,"source":mutated}))', source)
