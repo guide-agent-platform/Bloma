@@ -28,6 +28,7 @@ import { findProject, listProjects, updateProject } from './project/project-serv
 import { installTrayAndShortcut, isTrayQuitting, notifyHiddenToTray, setTrayProjectSource, teardownTrayAndShortcut } from './platform/shell/tray'
 import { disposeAllCorrectionSessions } from './desktop/correction-session'
 import { initialWindowBounds } from './platform/shell/window-bounds'
+import { appIconPath } from './platform/shell/app-icon'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -46,6 +47,7 @@ async function createMainWindow(): Promise<void> {
     ...initialWindowBounds(available),
     autoHideMenuBar: true,
     title: 'Bloma',
+    icon: appIconPath(),
     webPreferences: {
       autoplayPolicy: 'no-user-gesture-required',
       preload: resolvePreloadPath(),
