@@ -562,6 +562,8 @@ export interface PrdBackplane {
   requirements: SketchRequirement[]
   /** 功能项 id → 验收要点（行为断言迁入 requirements 后逐步废弃；保持兼容） */
   acceptance: Record<string, string>
+  /** Host-created association of acceptance text with a frozen requirement identity. Legacy maps stay readable, but are not evidence. */
+  acceptance_bindings?: Record<string, { requirement: string; acceptance: string }>
   /** 本轮明确不做的事（防模型擅自扩功能；含 normalizer 判定的范围声明） */
   out_of_scope: string[]
   /**

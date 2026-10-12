@@ -24,6 +24,7 @@ import { gwtRequiredCategories } from '../agent/prompting/template-injection'
 import { describeEffect, describeTrigger, parseBehaviorAssertion } from '../verification/behavior-assertions'
 import { readRequirements, assertInsideDocumentsDir } from './document-sync'
 import { normalizePrdDocumentNewlines, reconcilePrdDocumentPriorities } from '../model/prd-backplane'
+import { bindAcceptance, reconcileAcceptanceRevision, trustedAcceptance } from './requirement-contract'
 
 /**
  * DocumentEngine — 文档同步（对齐 api-spec §10.1 / architecture §7.3）。
@@ -71,7 +72,7 @@ export function buildPrdBackplane(
     // 供 GWT 骨架「验收要点」等存量消费方读取，新数据流一律走 requirements
     acceptance[item.id] = `${item.description}：核心路径可交互，边界与异常输入不崩溃。`
   }
-  return {
+  return bindAcceptance({
     project_id: project.project_id,
     name: project.name,
     positioning: items[0]?.description ?? project.name,
@@ -96,7 +97,7 @@ export function buildPrdBackplane(
     // 缺省按项目 template_type 兜底构造（与读取侧 backplaneTemplateMeta 同源）
     template_meta: backplaneTemplateMeta({}, project.template_type),
     ...(checkpoint === 'mvp_before_generation' ? { frozen_at: new Date().toISOString() } : {}),
-  }
+  })
 }
 
 /** 构建侧归一化（§10 兼容）：薄形态物化为厚形态，缺省值与读取侧 helper 一致。
@@ -242,7 +243,7 @@ export function appendPrdRequirements(
       changed = true
     }
     if (!changed) return parsed
-    const updated: PrdBackplane = { ...parsed, requirements: merged }
+    const updated = reconcileAcceptanceRevision(parsed, { ...parsed, requirements: merged })
     writeFileSync(path, renderPrdJson(updated), 'utf8')
     return updated
   } catch {
@@ -587,7 +588,7 @@ export function renderGwtSkeleton(
       : []
   return readRequirements(backplane.requirements).map((item) => {
     const id = safeFileName(item.id)
-    const acceptance = backplane.acceptance[item.id] ?? `${item.description}：核心路径可交互，边界与异常输入不崩溃。`
+    const acceptance = trustedAcceptance(backplane, item) ?? `${item.description}：核心路径可交互，边界与异常输入不崩溃。`
     return {
       fileName: `${id}.feature`,
       content: renderFeatureFile(item, acceptance, requiredCategories, templateType),

@@ -53,13 +53,13 @@ describe('renderRequirementsDigest', () => {
         behavior_assertions: index === 0 ? ['非法金额不保存', '非法金额不保存'] : [],
         scope_notes: index === 0 ? '不改变币种' : undefined,
       }))
-      writeFileSync(join(getDocumentsDir(project.workspace_slug, project.project_id), 'prd.json'), JSON.stringify({
+      writeFileSync(join(getDocumentsDir(project.workspace_slug, project.project_id), 'prd.json'), JSON.stringify(bindAcceptance({
         project_id: project.project_id, name: project.name,
         positioning: '个人记账', requirements,
         acceptance: { 'F-001': '新增两条相同内容的记录都能保存' },
         constraints: ['必须离线可用'], out_of_scope: ['不做云同步'], assumptions: ['默认按时间降序'],
         prd_document: '# 已确认需求\n游戏规则与数值基准：每完成一轮计数加一',
-      }), 'utf8')
+      })), 'utf8')
       const digest = readDesktopRequirementsDigest(project.project_id)!
       for (const prompt of [
         buildDispatcherSystemPrompt(DESKTOP_PHASES['desktop-implement'], { projectName: project.name, requirementsDigest: digest, quickMode: true }),
@@ -83,3 +83,4 @@ describe('renderRequirementsDigest', () => {
     }
   })
 })
+import { bindAcceptance } from '../../../main/project/requirement-contract'

@@ -368,7 +368,7 @@ export function mergeEnrichment(
  *  缺失——旧方向 existing 无条件覆盖，会把用户刚在审查卡/追问/确认卡里亲答的修订
  *  （story/断言/priority，经 applyNormalization 写入冻结清单）落盘即回滚成盘上旧值。 */
 function mergeExistingFields(item: SketchRequirement, existing: SketchRequirement | undefined): SketchRequirement {
-  if (!existing) return { ...item }
+  if (!existing || existing.description !== item.description) return { ...item }
   const base: SketchRequirement = { ...item }
   if (!base.story?.trim() && existing.story?.trim()) base.story = existing.story
   const existingAssertions = stripDefaultAssertions(existing.behavior_assertions)

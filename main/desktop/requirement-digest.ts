@@ -11,6 +11,7 @@
 import { readPrdBackplane } from '../project/document-engine'
 import { requirementPriority, type ProductShape, type UxExperienceSpec } from '../model/prd-backplane'
 import { renderShapeBrief, renderShapeVerifyBrief } from './shape-templates'
+import { acceptanceAssociationIssues, requirementEvidenceHash, trustedAcceptance } from '../project/requirement-contract'
 
 export interface RequirementDigestItem {
   source_refs?: import('../../shared/attachment-types').MaterialSourceRef[]
@@ -21,6 +22,7 @@ export interface RequirementDigestItem {
   acceptance?: string
   behavior_assertions?: string[]
   scope_notes?: string
+  requirement_hash?: string
 }
 
 export interface RequirementDigestInput {
@@ -51,6 +53,7 @@ export function renderRequirementsDigest(input: RequirementDigestInput): string 
     const assertions = [...new Set((item.behavior_assertions ?? []).map((text) => text.trim()).filter(Boolean))]
     return [
       `- ${item.id}${item.priority ? ` [${item.priority}]` : ''} ${description}${sources ? `（材料来源：${sources}）` : ''}`,
+      ...(item.requirement_hash ? [`  验证版本：${item.requirement_hash}`] : []),
       ...(item.acceptance?.trim() ? [`  验收要点：${item.acceptance.trim()}`] : []),
       ...assertions.map((assertion) => `  行为断言：${assertion}`),
       ...(item.scope_notes?.trim() ? [`  本项范围排除：${item.scope_notes.trim()}`] : []),
@@ -172,12 +175,13 @@ export function readDesktopShapeBriefs(projectId: string): { shapeBrief?: string
 export function readDesktopRequirementsDigest(projectId: string): string | undefined {
   try {
     const backplane = readPrdBackplane(projectId)
+    const associationIssues = acceptanceAssociationIssues(backplane)
     const digest = renderRequirementsDigest({
       positioning: backplane.positioning,
       constraints: backplane.constraints,
       out_of_scope: backplane.out_of_scope,
       assumptions: backplane.assumptions,
-      prd_document: backplane.prd_document,
+      prd_document: associationIssues.length ? undefined : backplane.prd_document,
       // 运行契约不得用展示窗口裁剪：全部功能、长描述与验收条件都传给实现者。
       maxItems: backplane.requirements.length,
       maxDescriptionChars: Number.MAX_SAFE_INTEGER,
@@ -186,12 +190,15 @@ export function readDesktopRequirementsDigest(projectId: string): string | undef
         description: item.description,
         priority: requirementPriority(item),
         source_refs: item.source_refs,
-        acceptance: backplane.acceptance?.[item.id],
+        acceptance: trustedAcceptance(backplane, item),
+        requirement_hash: requirementEvidenceHash(backplane, item),
         behavior_assertions: item.behavior_assertions,
         scope_notes: item.scope_notes,
       })),
     })
-    const parts = [digest.trim() ? digest : '', renderUxDigest(backplane.ux) ?? '', renderShapeDigest(backplane.shape) ?? ''].filter(Boolean)
+    const parts = [digest.trim() ? digest : '',
+      '交付范围：全部已确认功能项均须逐项记录实现状态与证据；P0/P1/P2 只决定顺序，漏填优先级不能免除交付。',
+      ...associationIssues, renderUxDigest(backplane.ux) ?? '', renderShapeDigest(backplane.shape) ?? ''].filter(Boolean)
     return parts.length > 0 ? parts.join('\n\n') : undefined
   } catch {
     return undefined

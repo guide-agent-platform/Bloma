@@ -20,6 +20,7 @@ import { renderDocumentSectionSpec } from './prd-sections'
 import { categoryTemperature } from '../platform/llm/model-resolution'
 import { sanitizeGeneratedProjectName, updateProject } from '../project/project-service'
 import { recordDecision } from '../project/decision-log'
+import { bindAcceptance } from '../project/requirement-contract'
 
 /**
  * PrdEngineLlm — 向导群·需求工程腿（2026-09-03 架构调整：需求工程链归向导）。
@@ -317,7 +318,7 @@ export function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequire
         out_of_scope: parsed.out_of_scope,
         assumptions: parsed.assumptions,
       })
-  return {
+  return bindAcceptance({
     project_id: projectId,
     name: parsed.name ?? '', // 候选名；pipeline 按项目命名来源与最新存储状态裁决。
     positioning,
@@ -350,7 +351,7 @@ export function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequire
     // Phase 7 U1 H2：关键任务块随背板冻结——LLM 产出优先，finalizeKeyTasks 做
     // 白名单过滤+P0 补齐+重编号；开关 off 整段不挂（字节级现状）。
     ...(keyTasksEnabled() ? { key_tasks: finalizeKeyTasks(parsed.key_tasks ?? [], items) } : {}),
-  }
+  })
 }
 
 interface ParsedPrd {

@@ -24,6 +24,8 @@
 import type { PrdBackplane, SketchRequirement } from '../coding/sketch-engine'
 import { nextRequirementId } from '../coding/programming-orchestrator'
 import type { PrdReviewIssue } from './prd-review'
+import { reconcileAcceptanceRevision } from '../project/requirement-contract'
+import { buildPrdDocumentFallback } from '../model/prd-backplane'
 
 // =========================================================================
 // Defender system prompt
@@ -164,10 +166,11 @@ const NON_INHERITABLE_FIELDS = ['user_confirmed_at', 'sketch_confirmed_at', 'fro
  * Defender 修订稿白名单构造的依据：未知键一律拒收，受保护字段只继承 original。
  */
 const BACKPLANE_KNOWN_FIELDS = new Set([
-  'project_id', 'name', 'positioning', 'requirements', 'acceptance',
+  'project_id', 'name', 'positioning', 'requirements', 'acceptance', 'acceptance_bindings',
   'out_of_scope', 'constraints', 'assumptions', 'ux_contract', 'generation_guardrails',
   'frozen_at', 'user_confirmed_at', 'sketch_confirmed_at',
   'pages', 'glossary', 'personas', 'data_model', 'interface_spec', 'template_meta', 'section_provenance',
+  'prd_document', 'gdd', 'shape', 'ux', 'ai_capabilities', 'key_tasks',
 ])
 
 export function validateDefenderDraft(original: PrdBackplane, raw: unknown): { ok: true; draft: DefenderDraft } | { ok: false; violations: string[] } {
@@ -268,7 +271,9 @@ export function validateDefenderDraft(original: PrdBackplane, raw: unknown): { o
   }
   delete cleaned.user_confirmed_at
   delete cleaned.frozen_at
-  return { ok: true, draft: { backplane: cleaned, dispositions: [] } }
+  const reconciled = reconcileAcceptanceRevision(original, cleaned)
+  reconciled.prd_document = buildPrdDocumentFallback(reconciled)
+  return { ok: true, draft: { backplane: reconciled, dispositions: [] } }
 }
 
 /** out_of_scope 白名单合并：只允许追加（防「偷偷把不做的事又拿回来做」）。 */
