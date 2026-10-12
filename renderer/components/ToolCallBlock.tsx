@@ -243,6 +243,7 @@ export const ToolBlocksReplay: React.FC<{ blocks: MessageContentBlock[]; toolNam
         tool: block.name ?? '',
         summary: safeJsonPreview(block.input),
         status: 'ok' as ToolCallStatus,
+        feedback: { schema_version: 1, execution: 'not_run', verification: 'unverified', scope: 'call_declared' } as ToolFeedback,
       }]
     }
     if (block.type === 'tool_result') {

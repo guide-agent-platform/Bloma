@@ -1,6 +1,7 @@
 import { existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { getPromaHome } from '../../storage/config-paths'
+import { readProjectAttempts } from '../platform/execution/project-attempts'
 import { matchesAsset } from '../platform/speech/model-downloader'
 import { SPEECH_MODEL_MANIFEST, type SpeechModelManifest } from '../platform/speech/model-manifest'
 import { findProject } from '../project/project-service'
@@ -43,7 +44,9 @@ export function buildResourceDiscoveryTool(projectId: string, deps: { spawn?: Dr
         const modelRoot = deps.modelRoot ?? process.env.BLOMA_SPEECH_MODEL_DIR ?? join(getPromaHome(), 'speech-models/sensevoice-int8')
         const speech = await inspectSpeechResources(modelRoot, SPEECH_MODEL_MANIFEST, input.refresh === true, ctx.signal)
         const components = ['speech_runtime.py', 'speech_locator.py', 'record_store.py', 'file_plan_guard.py'].map(name => ({ name, materialized: existsSync(join(root, name)) }))
-        return { output: JSON.stringify({ schema_version: 1, environment, components, speech, business_verification: 'unverified' }),
+        const attempts = readProjectAttempts(projectId)
+        const cumulative = (prefix: string) => Object.entries(attempts.total).filter(([key]) => key.startsWith(prefix)).reduce((sum, [, value]) => sum + value, 0)
+        return { output: JSON.stringify({ schema_version: 1, environment, components, speech, cumulative_attempts: { core: cumulative('core'), stage: cumulative('stage:'), script: cumulative('script:'), install: cumulative('install:') }, business_verification: 'unverified' }),
           feedback: { schema_version: 1, execution: 'completed', verification: 'unverified', scope: 'resource_inventory', source: environment.audio_source === 'fixed_wav_not_physical_microphone' ? 'fixed_input' : 'host', recovery: speech.ready ? 'none' : 'prepare_environment' } }
       } catch (error) {
         if (ctx.signal.aborted) throw error

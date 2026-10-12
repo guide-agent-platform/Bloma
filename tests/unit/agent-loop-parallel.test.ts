@@ -16,6 +16,7 @@ import type { SDKMessage } from '../../shared/types'
 import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import { readFileSync } from 'node:fs'
+import { readToolFeedback } from '../../shared/tool-feedback'
 
 /**
  * P1-2 只读工具并行执行（2026-09-08 pi 差距方案 §4）。
@@ -187,7 +188,10 @@ describe('executeTurnToolCalls 分组并行（P1-2）', () => {
     expect(execution.cancelled).toBe(true)
     if (execution.cancelled) {
       expect(execution.partialResults ?? []).toHaveLength(1)
-      expect((execution.partialResults ?? [])[0]).toMatchObject({ type: 'tool_result', tool_use_id: 'd1', content: 'result-read_file' })
+      const preserved = (execution.partialResults ?? [])[0]!
+      expect(preserved).toMatchObject({ type: 'tool_result', tool_use_id: 'd1' })
+      expect(String(preserved.content)).toContain('result-read_file')
+      expect(readToolFeedback(String(preserved.content))).toMatchObject({ execution: 'completed' })
     }
   })
 

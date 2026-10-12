@@ -1,5 +1,6 @@
 """Offline boundaries and recorder lifecycle; no hardware or network."""
 import hashlib
+import json
 import io
 import os
 import sys
@@ -102,6 +103,16 @@ class RuntimeTests(unittest.TestCase):
 
 
 class LocatorTests(unittest.TestCase):
+    def test_download_attempt_history_survives_retry_without_new_network(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            speech_locator._record_download_attempt(root, "model", "rev")
+            speech_locator._record_download_attempt(root, "model", "rev")
+            history = root / ".download-attempts.json"
+            self.assertEqual(json.loads(history.read_text())["attempts"]["model@rev"], 2)
+            history.write_text("{broken")
+            with self.assertRaises(Exception):
+                speech_locator._record_download_attempt(root, "model", "rev")
     def test_isolation_and_offline_cold_cache(self):
         with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, {"PROMA_HOME": root, "BLOMA_SPEECH_MODEL_DIR": "", "BLOMA_SPEECH_OFFLINE": "1"}):
             self.assertEqual(speech_locator.cache_dir(), Path(root) / "speech-models/sensevoice-int8")

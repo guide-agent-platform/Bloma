@@ -31,6 +31,7 @@ install_packages 安装 sherpa-onnx 时自动复制到项目根。产物程序 i
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import sys
 import urllib.request
@@ -53,6 +54,33 @@ ASSETS = {
 }
 
 MIRRORS = ["https://hf-mirror.com", "https://huggingface.co"]
+
+
+def _record_download_attempt(root: Path, name: str, revision: str) -> None:
+    """Keep cumulative attempts across process restarts; no implicit quota refill.
+
+    The existing per-call source/deadline limits still govern retry. This log is
+    accounting, not a new global download cap or a reason to block user retry.
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    history = root / ".download-attempts.json"
+    state = json.loads(history.read_text(encoding="utf-8")) if history.exists() else {"schema_version": 1, "attempts": {}}
+    if state.get("schema_version") != 1 or not isinstance(state.get("attempts"), dict):
+        raise RuntimeError("下载尝试记录不可读取，不能将未知历史清零")
+    key = name + "@" + revision
+    prior = state["attempts"].get(key, 0)
+    if type(prior) is not int or prior < 0:
+        raise RuntimeError("下载尝试记录不合法")
+    state["attempts"][key] = prior + 1
+    partial = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix="attempts.", suffix=".tmp", dir=root, delete=False, mode="w", encoding="utf-8") as output:
+            partial = Path(output.name)
+            json.dump(state, output)
+        os.replace(partial, history)
+    finally:
+        if partial is not None:
+            partial.unlink(missing_ok=True)
 
 
 def cache_dir() -> Path:
@@ -94,6 +122,7 @@ def _download(name: str, repo: str, rev: str, expected_bytes: int, sha256: str, 
             remaining = (deadline - time.monotonic()) if deadline is not None else timeout
             if remaining <= 0:
                 raise TimeoutError("语音模型准备超过总时限")
+            _record_download_attempt(root, name, rev)
             print(f"[speech_locator] 下载 {name}（{expected_bytes / 1048576:.1f} MB）← {mirror}", file=sys.stderr)
             with tempfile.NamedTemporaryFile(prefix=name + ".", suffix=".part", dir=root, delete=False) as output:
                 partial = Path(output.name)

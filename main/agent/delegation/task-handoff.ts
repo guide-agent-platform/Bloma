@@ -16,7 +16,7 @@ export function buildTaskHandoff(result: AgentLoopResult): TaskHandoff {
   if (result.status !== 'completed') pending.unshift(`执行停止：${result.status}`)
   if (!pending.length) pending.push('目标完整性尚需宿主验收，执行结束不等于交付通过')
   return { schema_version: 1, completion: unfinished ? 'incomplete' : 'unverified', loop_status: result.status, stop_reason: result.termination_detail?.reason,
-    changed_files: [...new Set(result.toolCalls.filter(c => ['write_file', 'edit_file'].includes(c.name)).map(c => c.path).filter((p): p is string => Boolean(p)))].slice(0, 20), verification, pending }
+    changed_files: (result.files_changed ?? []).slice(0, 20), verification, pending }
 }
 export function readTaskHandoff(raw: unknown): TaskHandoff | undefined {
   if (!raw || typeof raw !== 'object') return undefined

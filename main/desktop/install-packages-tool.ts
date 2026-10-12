@@ -20,6 +20,7 @@ import { execFileDriverSpawn, DriverExecutionError, type DriverSpawn } from './p
 import { findProject } from '../project/project-service'
 import { WINDOWS_COMPONENT_CARDS } from './component-library'
 import { consumeProjectAttempt } from '../platform/execution/project-attempts'
+import { buildChildExecEnv } from './child-exec-tool'
 
 const PIP_TIMEOUT_MS = 300_000
 const VENV_TIMEOUT_MS = 120_000
@@ -111,7 +112,7 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
         return { output: `包声明格式不合法（只允许 名称 或 名称+版本约束）：${bad.join('、')}`, isError: true }
       }
 
-      const env = { ...process.env, PYTHONIOENCODING: process.env.PYTHONIOENCODING ?? 'utf-8' }
+      const env = buildChildExecEnv(process.env)
       try {
         const attempt = consumeProjectAttempt(projectId, `install:${ctx.sessionId}`, maxCalls)
         if (!attempt.allowed) return { output: `安装调用预算用尽（${maxCalls} 次），续接不会清零，请保存未完成项。`, isError: true, budgetExhausted: true }

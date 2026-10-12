@@ -181,7 +181,7 @@ function truncate(value: string, max: number): string {
 export function countDoneSteps(events: AgentEvent[], delegations: DelegationView[]): number {
   let done = 0
   for (const event of events) {
-    if (event.type === 'tool_call_completed' && event.payload.status !== 'error') done += 1
+    if (event.type === 'tool_call_completed' && event.payload.status !== 'error' && event.payload.status !== 'budget') done += 1
   }
   for (const delegation of delegations) {
     if (delegation.status === 'completed') done += 1

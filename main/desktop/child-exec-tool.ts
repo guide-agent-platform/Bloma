@@ -32,6 +32,7 @@ const MAX_ARGS = 8
 const CHILD_EXEC_ENV_KEYS: readonly string[] = [
   'SystemRoot', 'SystemDrive', 'ComSpec', 'PATHEXT', 'windir', 'PATH', 'Path', 'TEMP', 'TMP',
   'PROMA_HOME', 'BLOMA_SPEECH_MODEL_DIR', 'BLOMA_SPEECH_OFFLINE',
+  'USERPROFILE', 'HOME', 'HOMEDRIVE', 'HOMEPATH',
 ]
 
 export interface ChildScriptRunnerDeps {

@@ -48,6 +48,7 @@ import { drainSteerQueue, markLoopActive, markLoopInactive, markSteerMerged, pen
 /** 工具执行期共享状态（同一 loop 会话内跨工具可变；agent-tools 维护语义字段）。 */
 export interface AgentLoopToolState {
   latest_tool_feedback?: Record<string, ToolFeedback>
+  successful_file_changes?: string[]
   /** 最近一次成功 run_preview 的预览地址（run_gwt_tests 浏览器/静态探针依赖） */
   preview_url?: string
   /** loop 内至少一次 GWT 测试失败后置位（修复预算口径的计数开关，PR3 §4.4） */
@@ -225,6 +226,7 @@ export interface AgentLoopInput {
 }
 
 export interface AgentLoopResult {
+  files_changed?: string[]
   tool_feedback?: ToolFeedback[]
   status: AgentLoopStatus
   turns: number
@@ -913,6 +915,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     })
     return {
       ...r,
+      ...(ctx.state.successful_file_changes ? { files_changed: ctx.state.successful_file_changes.slice(0, 20) } : {}),
       ...(ctx.state.latest_tool_feedback ? { tool_feedback: Object.values(ctx.state.latest_tool_feedback).slice(-8) } : {}),
       ...(blocked ? { blocked_report: blocked } : {}),
       ...(transportRecoveries > 0 ? { transport_recoveries: transportRecoveries } : {}),
@@ -1739,6 +1742,9 @@ export async function executeTurnToolCalls(
     const startedAt = Date.now()
     const outcome = await executeToolCall(input, toolByName, budgetUsed, use, ctx)
     const feedback = feedbackForTool(use.name, outcome)
+    if (['write_file', 'edit_file'].includes(use.name) && !outcome.isError && !outcome.budgetExhausted && typeof outcome.detail?.path === 'string') {
+      ctx.state.successful_file_changes = [...new Set([...(ctx.state.successful_file_changes ?? []), outcome.detail.path])]
+    }
     if (feedback) (ctx.state.latest_tool_feedback ??= {})[use.name] = feedback
     if (outcome.budgetExhausted) budgetStallThisTurn = true
     input.publish('tool_call_completed', {

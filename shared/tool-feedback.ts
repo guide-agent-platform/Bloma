@@ -45,6 +45,7 @@ export function readToolFeedback(content: string): ToolFeedback | undefined {
   try { return safeToolFeedback(JSON.parse(match[1]!)) } catch { return undefined }
 }
 export function toolFeedbackLabel(f: ToolFeedback): string {
+  if (f.scope === 'call_declared') return '调用已登记'
   if (f.category === 'budget') return '额度已用尽'
   if (f.execution === 'not_run') return '未执行'
   if (f.execution === 'running') return '进行中'

@@ -25,6 +25,7 @@ export interface DeliveredNoticeInput {
   /** MVP 确认门通过后的交付（2026-10-04 确认门新规）：首行话术改为「已按你的确认交付」，
    *  不再自称「无需人工确认」（longterm 交付前过目是拍板的确认门）。 */
   viaMvpConfirm?: boolean
+  coreScope?: string[]
 }
 
 /** delivered 交付通知卡：验收结论 + 运行方式 + 修改出口（不阻塞不等待）。 */
@@ -38,12 +39,13 @@ export function buildDeliveredNoticeCard(input: DeliveredNoticeInput): string {
   if (input.driverSummary) {
     lines.push(`业务驱动：${input.driverSummary.passed}/${input.driverSummary.total} PASS（平台执行回读，范围以对应场景为准）。`)
   }
+  if (input.coreScope?.length) lines.push(`本次宿主验证范围：${input.coreScope.join('；')}。`)
   const runParts: string[] = []
   if (input.entryFile) runParts.push(`程序入口：${input.entryFile}`)
   runParts.push('运行方式与依赖：项目根 DELIVERY.md')
   lines.push(`怎么运行：${runParts.join('；')}。`)
   if (input.deliveryDigest) {
-    lines.push(`交付说明摘要：\n${input.deliveryDigest}`)
+    lines.push(`实现者交付说明（能力以宿主验证记录为准）：\n${input.deliveryDigest}`)
   }
   if (input.screenshotPaths && input.screenshotPaths.length > 0) {
     lines.push(`程序截图（${input.screenshotPaths.length} 张，见产物预览区）：${input.screenshotPaths.join('、')}`)

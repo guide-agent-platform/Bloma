@@ -760,6 +760,16 @@ function assembleDeliveredNotice(
     }
   }
   const report = result.driverReport
+  let coreScope: string[] | undefined
+  if (root) try {
+    const core = JSON.parse(readFileSync(join(root, '00_VERIFY/core-verification.json'), 'utf8')) as CoreVerificationResult
+    if (core.status === 'passed' && core.fingerprint) coreScope = [
+      '登记场景回读',
+      ...(core.gui_execution ? ['界面驱动入口'] : []),
+      ...(core.speech ? ['固定音频经真实模型解码（物理采集另列证据）'] : []),
+      ...(core.file_operations ? ['文件操作固定反例'] : []),
+    ]
+  } catch { /* historical projects without current core evidence remain unqualified */ }
   const driverSummary = report && report.scenarios.length > 0
     ? { passed: report.scenarios.filter((s) => s.outcome === 'pass').length, total: report.scenarios.length }
     : undefined
@@ -779,6 +789,7 @@ function assembleDeliveredNotice(
   }
   return {
     projectName,
+    ...(coreScope ? { coreScope } : {}),
     fromPhaseTitle: getDesktopPhase(fromPhase)?.title ?? fromPhase,
     ...(entryFile ? { entryFile } : {}),
     ...(deliveryDigest ? { deliveryDigest } : {}),

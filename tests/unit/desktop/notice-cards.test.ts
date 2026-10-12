@@ -8,6 +8,11 @@ import { describe, expect, it } from 'vitest'
 import { buildBlockedNoticeCard, buildDeliveredNoticeCard, digestDeliveryDoc } from '../../../main/desktop/notice-cards'
 
 describe('buildDeliveredNoticeCard 交付通知卡', () => {
+  it('separates host scope from implementation claims', () => {
+    const card = buildDeliveredNoticeCard({ projectName: 'voice', fromPhaseTitle: '验收', coreScope: ['固定音频经真实模型解码'], deliveryDigest: '模型说明' })
+    expect(card).toContain('本次宿主验证范围：固定音频经真实模型解码')
+    expect(card).toContain('实现者交付说明（能力以宿主验证记录为准）')
+  })
   it('完整形态：验收结论 + 运行方式（entry + DELIVERY.md）+ 摘要 + 修改出口', () => {
     const card = buildDeliveredNoticeCard({
       projectName: 'clip-tool',

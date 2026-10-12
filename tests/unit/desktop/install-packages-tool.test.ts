@@ -112,6 +112,15 @@ describe('install_packages（声明制 venv 安装刀）', () => {
     expect(second.isError).toBe(true)
     expect(second.output).toContain('预算用尽')
   })
+  it('pip and import probes receive resource paths without model-channel credentials', async () => {
+    const previous = process.env.ANTHROPIC_AUTH_TOKEN
+    process.env.ANTHROPIC_AUTH_TOKEN = 'test-channel-secret'
+    try {
+      const spawn = makeSpawn([])
+      await buildInstallPackagesTool(projectId, { spawn }).execute({ packages: ['numpy'] }, ctxFor(projectId))
+      expect(spawn.mock.calls.every(([request]) => request.env.ANTHROPIC_AUTH_TOKEN === undefined)).toBe(true)
+    } finally { if (previous === undefined) delete process.env.ANTHROPIC_AUTH_TOKEN; else process.env.ANTHROPIC_AUTH_TOKEN = previous }
+  })
 
   it('pip success with failed import returns isError and the real failure; later correction can recover', async () => {
     const runner = makeSpawn([{ match: cmd => cmd.includes('import sounddevice'), code: 1, stderr: "ModuleNotFoundError: No module named 'numpy'" }])
