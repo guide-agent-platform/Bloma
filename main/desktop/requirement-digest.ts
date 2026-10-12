@@ -11,7 +11,7 @@
 import { readPrdBackplane } from '../project/document-engine'
 import { requirementPriority, type ProductShape, type UxExperienceSpec } from '../model/prd-backplane'
 import { renderShapeBrief, renderShapeVerifyBrief } from './shape-templates'
-import { acceptanceAssociationIssues, requirementEvidenceHash, trustedAcceptance } from '../project/requirement-contract'
+import { acceptanceAssociationIssues, requirementEvidenceHash, trustedAcceptance, prdScopeFingerprint } from '../project/requirement-contract'
 
 export interface RequirementDigestItem {
   source_refs?: import('../../shared/attachment-types').MaterialSourceRef[]
@@ -197,6 +197,7 @@ export function readDesktopRequirementsDigest(projectId: string): string | undef
       })),
     })
     const parts = [digest.trim() ? digest : '',
+      ...(backplane.requirements_model ? [`业务模型版本：1；需求范围版本：${prdScopeFingerprint(backplane)}`] : []),
       '交付范围：全部已确认功能项均须逐项记录实现状态与证据；P0/P1/P2 只决定顺序，漏填优先级不能免除交付。',
       ...associationIssues, renderUxDigest(backplane.ux) ?? '', renderShapeDigest(backplane.shape) ?? ''].filter(Boolean)
     return parts.length > 0 ? parts.join('\n\n') : undefined

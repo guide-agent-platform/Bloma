@@ -6,7 +6,7 @@
  * 走真实 existsSync）；驱动 spawn 注入桩（delivered 腿不真跑 python）。
  * 环境密闭：开关显式设/还原。
  */
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -17,6 +17,14 @@ import type { SDKQuery, SDKQueryOptions } from '../../../main/orchestration/orch
 vi.mock('../../../main/project/project-service', () => ({
   findProject: vi.fn(),
   updateProject: vi.fn(),
+}))
+vi.mock('../../../main/project/prd-store', async importOriginal => ({
+  ...await importOriginal<typeof import('../../../main/project/prd-store')>(),
+  readPrdBackplane: () => ({ project_id: 'p1', name: 'clip-tool', positioning: 'tool', requirements: [{ id: 'F-001', description: '剪贴板工具' }], acceptance: {}, assumptions: [], out_of_scope: [] }),
+}))
+vi.mock('../../../main/desktop/requirement-digest', async importOriginal => ({
+  ...await importOriginal<typeof import('../../../main/desktop/requirement-digest')>(),
+  readDesktopRequirementsDigest: () => undefined,
 }))
 
 /* 收口矩阵锁（批11 审查修复锚，2026-10-08）：confirm 分支对活跃纠错会话的收口只 mock
@@ -61,10 +69,14 @@ beforeEach(() => {
   vi.clearAllMocks()
   // 临时沙箱先行（record.root_path 引用本轮目录）：全阶段产物预置（关3 产物验证走真实 existsSync）
   sandboxRoot = mkdtempSync(join(tmpdir(), 'bloma-desktop-route-'))
+  writeFileSync(join(sandboxRoot, 'app.py'), '# route test entry; execution is independently injected\n')
   for (const rel of ['00_ARCH/architecture.md', '00_ARCH/env-checklist.json', '00_SCAFFOLD/contract.json', '00_SCAFFOLD/driver-skeleton.py', 'DELIVERY.md', 'LAUNCH.json', '00_VERIFY/driver-report.json']) {
     const path = join(sandboxRoot, rel)
     mkdirSync(join(path, '..'), { recursive: true })
-    writeFileSync(path, rel === 'LAUNCH.json' ? '{"schema_version":1,"command":["python","app.py"]}' : rel.endsWith('.json') ? '{}' : '# placeholder', 'utf8')
+    writeFileSync(path, rel === 'LAUNCH.json' ? '{"schema_version":1,"command":["python","app.py"]}'
+      : rel === '00_ARCH/env-checklist.json' ? '{"components":["Python"]}'
+        : rel === '00_SCAFFOLD/contract.json' ? readFileSync('main/templates/skeletons/desktop-python/contract.json', 'utf8')
+          : rel.endsWith('.json') ? '{}' : '# placeholder', 'utf8')
   }
   // 状态化项目记录：updateProject 写回记录，findProject 读记录（链路状态可见）
   record = baseRecord()

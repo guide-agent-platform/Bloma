@@ -29,6 +29,8 @@ import { dirname, join } from 'node:path'
 import type { AgentEvent } from '../../shared/types'
 import type { SDKQuery } from '../orchestration/orchestrator' // 类型导入豁免（R1）
 import { findProject, updateProject } from '../project/project-service'
+import { readConfirmedUxBinding } from '../project/ux-binding'
+import { readPrdBackplane } from '../project/prd-store'
 import { getDesktopPhase, getNextDesktopPhase } from './dispatcher-phases'
 import { isDesktopDispatchEnabled } from './dispatcher-switch'
 import { runDesktopDispatcherLoop, type DesktopDispatchRunInput, type DesktopDispatchRunResult } from './dispatcher-loop'
@@ -217,6 +219,12 @@ export async function enterDesktopLine(
 ): Promise<boolean> {
   const project = findProject(input.projectId)
   if (!shouldEnterDesktopLine(project)) return false
+  if (input.signal?.aborted) return true
+  try { readConfirmedUxBinding(input.projectId, readPrdBackplane(input.projectId)) }
+  catch (error) {
+    deps.publish(input, 'message_delta', { text: `当前设计不能开工：${error instanceof Error ? error.message : String(error)}。请重新确认需求和设计。` })
+    return true
+  }
   const projectName = project?.name ?? input.projectId
   // 快速型直通道（2026-10-03）：quick 跳过 arch/scaffold，直接从 implement 快速版
   // 任务书起跑（从零做出可用应用）；长期型从 desktop-arch 完整工程链开始。
@@ -455,6 +463,14 @@ async function runDesktopStage(
   const requirementsDigest = deps.requirementsDigest
     ? deps.requirementsDigest(input.projectId)
     : readDesktopRequirementsDigest(input.projectId)
+  let uxBinding: ReturnType<typeof readConfirmedUxBinding>
+  try { uxBinding = readConfirmedUxBinding(input.projectId, readPrdBackplane(input.projectId)) }
+  catch (error) {
+    updateProject(input.projectId, { current_stage: 'blocked_for_user_decision' })
+    deps.publish(input, 'message_delta', { text: `需求或界面设计版本已变化，本阶段暂停：${error instanceof Error ? error.message : String(error)}` })
+    deps.complete(input.sessionId, input.projectId)
+    return
+  }
   // 批9 工件2：形状任务书段（implement/verify 占位符注入；背板无 shape 时为空——任务书渲染空串）
   const shapeBriefs = readDesktopShapeBriefs(input.projectId)
   // 刀2 checkpoint 消费：当前阶段与存证一致（同阶段重跑——拒收续接/turn 耗尽/预算
@@ -498,7 +514,8 @@ async function runDesktopStage(
     },
     projectName,
     requirementsDigest,
-    ...(sandboxRoot && existsSync(join(sandboxRoot, '00_UX', 'confirmed.html')) ? { uxSketchPath: '00_UX/confirmed.html' } : {}),
+    ...(uxBinding?.html_path ? { uxSketchPath: uxBinding.html_path } : {}),
+    ...(uxBinding?.design_path ? { uxDesignPath: uxBinding.design_path } : {}),
     ...(shapeBriefs.shapeBrief ? { shapeBrief: shapeBriefs.shapeBrief } : {}),
     ...(shapeBriefs.shapeVerifyBrief ? { shapeVerifyBrief: shapeBriefs.shapeVerifyBrief } : {}),
     ...(verifiedConclusion ? { verifiedConclusion } : {}),

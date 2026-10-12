@@ -6,11 +6,12 @@
  *
  * dispatcher-loop 对外 re-export 本模块公开成员（旧路径零断链，hub 化惯例）。
  */
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { PhaseNode } from './dispatcher-phases'
 import { evaluateAdvance, type AdvanceDecision } from './dispatcher-gate'
 import { parseProjectContract, aggregateAcceptanceCoverage, type ProjectContract } from './contract-schema'
+import { earlyArtifactIssues } from './early-artifacts'
 import { runContractDriver, execFileDriverSpawn, type DriverExecutionReport } from './process-driver'
 import { runSecurityScan } from '../verification/security-scan'
 import { findProject } from '../project/project-service'
@@ -171,7 +172,18 @@ export function finalizeDesktopDispatch(
   const vars = { project_name: input.projectName }
   const exists = input.artifactExists ?? ((rel: string) => Boolean(input.sandboxRoot) && existsSync(join(input.sandboxRoot!, rel)))
 
-  return { advance: evaluateAdvance(turns, node.id, exists, vars) }
+  const advance = evaluateAdvance(turns, node.id, exists, vars)
+  const reader = input.artifactRead ?? (input.sandboxRoot ? (rel: string) => {
+    try { return readFileSync(join(input.sandboxRoot!, rel), 'utf8') } catch { return undefined }
+  } : undefined)
+  if (advance.decision === 'advance' && reader && ['desktop-arch', 'desktop-scaffold'].includes(node.id)) {
+    let prd: ReturnType<typeof readPrdBackplane> | undefined
+    try { prd = readPrdBackplane(input.projectId) } catch { /* pure/injected callers may omit a project */ }
+    const issues = earlyArtifactIssues(node.id, reader, prd)
+    if (issues.length) return { advance: { decision: 'reject', reason: 'contract-invalid', missingArtifacts: [], discardedObservations: advance.discardedObservations,
+      education: `前置产物检查未通过：\n${issues.map(issue => `- ${issue}`).join('\n')}\n修好当前阶段的内容再推进，不进入后续实现。` } }
+  }
+  return { advance }
 }
 
 /** verify 收口（异步完整版）：契约解析 fail-closed → 驱动真实执行+覆盖聚合落盘 →

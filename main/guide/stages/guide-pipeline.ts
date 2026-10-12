@@ -70,6 +70,7 @@ import { GuideLoopOutcome, bumpFreeChatStreak, clarifyTwoLayerEnabled, collectCl
 import { invalidatePendingRequirementConfirm, startRequirementConfirmFlow } from './requirement-confirm'
 import {
   consumeUxConfirmDismiss,
+  consumeUxPauseIntent,
   isUxResumeIntent,
   republishUxCardFromArchive,
   resolveUxConfirmCardAnswer,
@@ -455,6 +456,7 @@ export async function handleGuideMessage(
   // ①点了「有要调整的」后的反馈文本（非停止词即重画，继续词＝按当前版开工）；
   // ②「稍后再说」后的回门（继续词 + PRD 已确认 + 未进桌面线 → 归档草图重发卡）。──
   const uxConfirmDecision = resolveUxConfirmCardAnswer(input)
+  if (consumeUxPauseIntent(input)) return
   if (uxConfirmDecision === 'confirm') {
     await resumeUxConfirmConfirmed(input)
     return
@@ -486,7 +488,7 @@ export async function handleGuideMessage(
   if (
     model?.query
     && (isUxResumeIntent(input.content) || classifyUserDesktopIntent(input.content) === 'continue')
-    && await republishUxCardFromArchive(input, publish, { query: model.query, env: model.env ?? {} })
+    && await republishUxCardFromArchive(input, publish, { query: model.query, env: model.env ?? {}, signal: model.signal })
   ) {
     return
   }

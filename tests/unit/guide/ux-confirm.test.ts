@@ -21,6 +21,7 @@ vi.mock('../../../main/desktop/desktop-route', () => ({
 
 vi.mock('../../../main/project/project-service', () => ({
   findProject: vi.fn(),
+  updateProject: vi.fn(),
 }))
 
 vi.mock('../../../main/project/prd-store', () => ({
@@ -110,9 +111,9 @@ beforeEach(() => {
   vi.clearAllMocks()
   resetUxConfirmForTests()
   mockGenerate.mockResolvedValue({ html: '<!DOCTYPE html><html></html>', source: 'llm' } as never)
-  mockStage.mockResolvedValue({ preview_url: 'http://localhost:41000/00_UX/ux-sketch.html', sketch_path: '/tmp/ux-sketch.html' } as never)
+  mockStage.mockResolvedValue({ preview_url: 'http://localhost:41000/00_UX/ux-sketch.html', sketch_path: '/tmp/ux-sketch.html', html_hash: 'mock-hash' } as never)
   mockFindProject.mockImplementation(() => ({ project_id: 'p1', template_type: 'desktop_tool', mode: 'quick', name: '计算器' }) as never)
-  mockReadPrd.mockImplementation(() => ({ user_confirmed_at: '2026-10-04T00:00:00Z', positioning: 'x', requirements: [] }) as never)
+  mockReadPrd.mockImplementation(() => ({ project_id: 'p1', name: '计算器', user_confirmed_at: '2026-10-04T00:00:00Z', positioning: 'x', requirements: [{ id: 'F-001', description: '做一个计算器' }], acceptance: {}, assumptions: [], out_of_scope: [] }) as never)
 })
 
 afterEach(() => {
@@ -221,7 +222,7 @@ describe('确认/让渡/调整回传', () => {
 })
 
 describe('轮次熔断', () => {
-  it(`调整超过 ${UX_SKETCH_ADJUST_LIMIT} 轮：按当前版本开工（enterDesktopLine 兜底）`, async () => {
+  it(`调整超过 ${UX_SKETCH_ADJUST_LIMIT} 轮：停下重画并重发选择卡，不自动开工`, async () => {
     const { publish } = makePublish()
     await runUxConfirmGate({ ...basePending({ publish }), round: UX_SKETCH_ADJUST_LIMIT })
     startUxAdjustAwait(cardInput(UX_CONFIRM_OPTION_ADJUST) as never)
@@ -233,9 +234,9 @@ describe('轮次熔断', () => {
     await runUxAdjustRound(plainInput('再改一版') as never, taken!)
     // 超限不再重画，直接开工
     expect(mockGenerate).not.toHaveBeenCalled()
-    expect(mockEnter).toHaveBeenCalledTimes(1)
+    expect(mockEnter).not.toHaveBeenCalled()
     expect(mockDecision).toHaveBeenCalledWith(expect.objectContaining({
-      entry: expect.objectContaining({ title: expect.stringContaining('熔断') }),
+      entry: expect.objectContaining({ title: expect.stringContaining('上限') }),
     }))
   })
 })

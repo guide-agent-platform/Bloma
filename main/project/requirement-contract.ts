@@ -41,6 +41,12 @@ export function requirementVerificationContext(backplane: PrdBackplane): unknown
   return backplane.requirements.map(item => [item.id, requirementEvidenceHash(backplane, item)]).sort((a, b) => a[0]!.localeCompare(b[0]!))
 }
 
+/** Business/design scope, independent of confirmation timestamps and implementation status. */
+export function prdScopeFingerprint(backplane: PrdBackplane): string {
+  return digest([backplane.project_id, backplane.positioning, requirementVerificationContext(backplane),
+    backplane.pages ?? [], backplane.personas ?? [], backplane.glossary ?? [], backplane.data_model ?? null, backplane.interface_spec ?? []])
+}
+
 /** Revisions must not inherit acceptance text from a different meaning under the same id. */
 export function reconcileAcceptanceRevision(original: PrdBackplane, revised: PrdBackplane): PrdBackplane {
   const acceptance = Object.fromEntries(revised.requirements.flatMap(item => {

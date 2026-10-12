@@ -90,6 +90,7 @@ export interface DesktopDispatchRunInput {
   /** 需求摘要（首跑修复：PRD 背板 → 调度员系统提示词与子会话基底；编排层装配，缺省不注入） */
   requirementsDigest?: string
   uxSketchPath?: string
+  uxDesignPath?: string
   /** 形状段（批9 工件2）：{{shape_brief}}/{{shape_verify_brief}} 任务书注入；缺省空串=无形状增强。 */
   shapeBrief?: string
   shapeVerifyBrief?: string
@@ -110,6 +111,7 @@ export interface DesktopDispatchRunInput {
   toolsOverride?: AgentLoopTool[]
   /** 产物存在性谓词注入（缺省 sandboxRoot+existsSync）。 */
   artifactExists?: (relativePath: string) => boolean
+  artifactRead?: (relativePath: string) => string | undefined
 }
 
 /** 桌面调度员运行结果。 */
@@ -314,6 +316,7 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     workspaceHint: '产物按相对路径写入（项目目录即工作根；如 00_ARCH/、00_SCAFFOLD/、00_VERIFY/）。',
     ...(input.requirementsDigest ? { requirementsDigest: input.requirementsDigest } : {}),
     ...(input.uxSketchPath ? { uxSketchPath: input.uxSketchPath } : {}),
+    ...(input.uxDesignPath ? { uxDesignPath: input.uxDesignPath } : {}),
     ...(input.verifiedConclusion ? { verifiedConclusion: input.verifiedConclusion } : {}),
     ...(input.quickMode ? { quickMode: true } : {}),
     ...(input.shapeBrief || input.shapeVerifyBrief ? { shapeBrief: input.shapeBrief, shapeVerifyBrief: input.shapeVerifyBrief } : {}),
@@ -337,6 +340,7 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
       projectName: input.projectName,
       ...(input.requirementsDigest ? { requirementsDigest: input.requirementsDigest } : {}),
       ...(input.uxSketchPath ? { uxSketchPath: input.uxSketchPath } : {}),
+      ...(input.uxDesignPath ? { uxDesignPath: input.uxDesignPath } : {}),
       ...(input.quickMode ? { quickMode: true } : {}),
       ...(input.shapeBrief ? { shapeBrief: input.shapeBrief } : {}),
       ...(input.shapeVerifyBrief ? { shapeVerifyBrief: input.shapeVerifyBrief } : {}),

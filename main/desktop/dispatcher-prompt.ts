@@ -47,6 +47,7 @@ export interface DispatcherPromptContext {
   /** 需求摘要（首跑修复：PRD 背板 → 调度员与子会话的唯一需求注入路径；缺省不出需求段）。 */
   requirementsDigest?: string
   uxSketchPath?: string
+  uxDesignPath?: string
   /** 形状纪律段（批9 工件2：任务书 {{shape_brief}} 占位符注入；缺省空串——无形状增强）。 */
   shapeBrief?: string
   /** 形状验收教学段（批9 工件2：verify 任务书 {{shape_verify_brief}} 占位符；缺省空串）。 */
@@ -99,6 +100,7 @@ export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherProm
     sections.push(`【项目需求（唯一真相源，不得改写）】\n${ctx.requirementsDigest}`)
   }
   if (ctx.uxSketchPath) sections.push(confirmedSketchInstruction(ctx.uxSketchPath))
+  if (ctx.uxDesignPath) sections.push(`【已确认交互设计】先 read_file ${ctx.uxDesignPath}，按页面、动作、状态与F/W/AC关联实现；非界面职责也须落实。不得改写确认文件。`)
 
   // 1c. 上一轮已验证结论（刀2 checkpoint：同阶段重跑防重验——任务书之前注入，结论优先于任务）
   if (ctx.verifiedConclusion) {
@@ -108,6 +110,7 @@ export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherProm
   // 2. 任务书
   sections.push(`【本阶段任务书】\n${rendered.text}`)
   if (node.id === 'desktop-arch') sections.push(architectureComponentFacts())
+  if (node.id === 'desktop-scaffold') sections.push('【工程契约前置登记】当需求含业务模型版本1时，在contract.json顶层增加prd_fingerprint，原样使用需求范围版本；scenarios.covers须登记全部已确认F编号（不限P0）。此时可保留驱动骨架待实现的断言，不能自报已通过测试。')
 
   // 3. 阶段约束
   if (constraints.length > 0) {
@@ -148,7 +151,7 @@ export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherProm
  */
 export function buildDesktopChildBaseSystem(
   node: PhaseNode,
-  ctx: { projectName: string; requirementsDigest?: string; quickMode?: boolean; uxSketchPath?: string; shapeBrief?: string; shapeVerifyBrief?: string },
+  ctx: { projectName: string; requirementsDigest?: string; quickMode?: boolean; uxSketchPath?: string; uxDesignPath?: string; shapeBrief?: string; shapeVerifyBrief?: string },
 ): string {
   const useQuickBook = Boolean(ctx.quickMode && node.quickTaskTemplate)
   const constraints = useQuickBook ? (node.quickConstraints ?? node.constraints) : node.constraints
@@ -164,6 +167,7 @@ export function buildDesktopChildBaseSystem(
   ]
   if (node.id === 'desktop-implement' || node.id === 'desktop-verify') parts.push(CORE_VERIFICATION_BRIEF)
   if (node.id === 'desktop-arch') parts.push(architectureComponentFacts())
+  if (node.id === 'desktop-scaffold') parts.push('【工程契约前置登记】当需求含业务模型版本1时，在contract.json顶层增加prd_fingerprint，原样使用需求范围版本；scenarios.covers须登记全部已确认F编号（不限P0）。此时可保留驱动骨架待实现的断言，不能自报已通过测试。')
   if (constraints.length > 0) {
     parts.push(`【阶段约束】\n${constraints.map((constraint, index) => `${index + 1}. ${constraint}`).join('\n')}`)
   }
@@ -171,6 +175,7 @@ export function buildDesktopChildBaseSystem(
     parts.push(`【项目需求（唯一真相源，不得改写；清单外新功能一律不做）】\n${ctx.requirementsDigest}`)
   }
   if (ctx.uxSketchPath) parts.push(confirmedSketchInstruction(ctx.uxSketchPath))
+  if (ctx.uxDesignPath) parts.push(`【已确认交互设计】先 read_file ${ctx.uxDesignPath}，按页面、动作、状态与F/W/AC关联实现；非界面职责也须落实。不得改写确认文件。`)
   if ((node.id === 'desktop-scaffold' || node.id === 'desktop-implement') && ctx.shapeBrief) parts.push(ctx.shapeBrief)
   if (node.id === 'desktop-verify' && ctx.shapeVerifyBrief) parts.push(ctx.shapeVerifyBrief)
   return parts.join('\n\n')
@@ -181,7 +186,12 @@ function confirmedSketchInstruction(path: string): string {
 }
 
 function architectureComponentFacts(): string {
-  return `【平台已有组件事实】\n先调用 inspect_project_resources，读取实际解释器、导入、组件与缓存校验结果；它不下载或录音。\n${componentQuickReference()}\n先对照已验组件确定知识缺口，再调研替代方案。语音默认评估 speech_runtime.py 的 SpeechEngine/StreamingRecorder；安装 sherpa-onnx 会物化组件。speech_locator.py 先校验 BLOMA_SPEECH_MODEL_DIR 指定缓存，否则查 PROMA_HOME 或 ~/.proma 下 speech-models/sensevoice-int8；已通过组件探针不代表当前产物已通过。确有能力缺口才提出替代引擎，注明缺口及额外下载/验证预算。下载失败保留待验，不反复从头下载。测试输入是固定音频时只证明适配/解码，不证明麦克风采集；真实硬件须单独授权证据。`
+  return `【架构产物协议】
+architecture.md 必须有实际职责与数据边界，不能只创建空文件。env-checklist.json 用 {"components":[{"name":"Python","source":"skeleton","evidence":"verified|documented|pending"}]}，每项如实写来源与证据等级，标记不能代替实测。
+当项目需求含“业务模型版本：1”时，另写00_ARCH/architecture.json：
+{"version":1,"prd_fingerprint":"任务书中的需求范围版本原样抄写","modules":[{"path":"core/domain.py","responsibility":"业务职责","feature_ids":["F-001"],"rule_ids":["BR-001"]}],"data_boundaries":[{"entity_id":"O-001","owner":"core/domain.py","persistence":"如何留存","failure_policy":"写入或读取失败的保护策略"}],"validation":[{"scenario_id":"AC-001","module":"core/domain.py","method":"在哪里、以什么输入和断言验证"}]}
+全部F/BR/O/AC都要落实到模块、数据归属或验证位置；空项用空数组，不能伪造编号。模块path相对项目根，职责按实际业务拆分，不以一张目录列表替代数据与规则边界。
+【平台已有组件事实】\n先调用 inspect_project_resources，读取实际解释器、导入、组件与缓存校验结果；它不下载或录音。\n${componentQuickReference()}\n先对照已验组件确定知识缺口，再调研替代方案。语音默认评估 speech_runtime.py 的 SpeechEngine/StreamingRecorder；安装 sherpa-onnx 会物化组件。speech_locator.py 先校验 BLOMA_SPEECH_MODEL_DIR 指定缓存，否则查 PROMA_HOME 或 ~/.proma 下 speech-models/sensevoice-int8；已通过组件探针不代表当前产物已通过。确有能力缺口才提出替代引擎，注明缺口及额外下载/验证预算。下载失败保留待验，不反复从头下载。测试输入是固定音频时只证明适配/解码，不证明麦克风采集；真实硬件须单独授权证据。`
 }
 
 /**

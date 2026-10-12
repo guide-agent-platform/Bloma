@@ -1217,6 +1217,8 @@ export interface RepairLedgerEntry {
 }
 
 export interface Project {
+  /** Host-owned UX confirmation; generated project files cannot grant a new confirmation. */
+  ux_confirmation?: { prd_fingerprint: string; design_hash: string; html_hash: string | null }
   project_id: string
   workspace_slug: string
   name: string
