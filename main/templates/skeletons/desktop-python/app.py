@@ -1,8 +1,9 @@
 """{{project_name}} — 桌面程序骨架 v2（批8 HTML 渲染层，pywebview + WebView2）。
 
 结构纪律（三层，实现阶段不得打破）：
-1. 逻辑层（本文件 Logic 类，纯 Python）——业务/持久化全在这里，**不 import UI**；
-   契约驱动（driver.py）与故障种子直接测这一层。
+1. 逻辑层（纯 Python）——小工具可放本文件 Logic；复杂业务可拆 core/、storage/ 等模块，
+   在 app.py 保留 Logic 导入/门面（from app import Logic 可用）。业务模块不 import UI；
+   契约驱动与故障种子测实际业务层，不为测试另写替身。
 2. 桥（Api 类）——UI 的每个动作一个方法，转调 Logic，返回 JSON 字符串；
    耗时操作内部用线程，完成后 evaluate_js 推送（业务代码不得直接摸 UI）。
 3. UI（ui/ 目录静态资产）——只渲染与收集输入，经 window.App.call 调桥；

@@ -6,7 +6,7 @@ import { runHostPrefixRenameProbe } from '../../../main/desktop/file-verificatio
 let root: string
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'bloma-file-probe-')); writeFileSync(join(root, 'app.py'), '# registered product') })
 afterEach(() => rmSync(root, { recursive: true, force: true }))
-const names = ['rename', 'changed_prefix', 'different_folder', 'escaped_source', 'escaped_target']
+const names = ['rename', 'changed_prefix', 'different_folder', 'escaped_source', 'escaped_target', 'source_changed', 'new_destination']
 const positive = () => ({ probe_version: 1, status: 'passed', mode: 'argument_plan', tests: names.map(name => ({ name, passed: true })) })
 it('requires the complete host counterexample set, not just a green exit', async () => {
   const result = await runHostPrefixRenameProbe(root, async request => {

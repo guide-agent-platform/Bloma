@@ -139,7 +139,7 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '2. 组件环境清单（env-checklist，标注每项组件的来源：骨架已有 / 组件卡 [实证]/[文证] / 待 Spike；可用 probe_desktop_env 实测 python/venv）；\n' +
       '3. Spike 记录——知识缺口（组件卡与坑库均无 [实证]）∧ 影响选型或验收 ∧ 可时间盒（≤30 分钟）' +
       '时必须派 Spike 子会话实测，产物落 00_SPIKES/。\n' +
-      'Windows 优先：本阶段所有结论默认以 Windows 11 为目标环境。',
+      'Windows 优先：本阶段所有结论默认以 Windows 11 为目标环境。架构文档须列模块职责、入口与存储方案：简单工具可单 Logic，多领域/知识引擎/多轮状态按职责拆模块；不能要求把所有业务与持久化塞进 app.py。实现阶段若变更方案，同步 architecture.md 与验证入口。',
     outputPath: '00_ARCH',
     constraints: [
       '底座默认沿用骨架 v2；提出替代技术栈必须附 Spike 实证与放弃项理由，不允许纸面切换',
@@ -212,7 +212,7 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
     title: '实现与交付说明',
     taskTemplate:
       '续接骨架实现真实桌面程序（骨架 v2 已由平台物化：app.py 三层 + ui/ 组件库，不抄写只扩展）：\n' +
-      '1. 三层纪律（app.py 顶部 docstring 即此纪律，扩展不得打破）：业务/持久化全在 app.py 的 Logic 类（**不 import UI**——契约驱动与故障种子直接测它）；Api 桥是 UI 动作唯一入口（每个动作一个方法，转调 Logic，返回 JSON 字符串）；ui/ 只渲染与收集输入，经 window.App.call("方法名", 参数...) 调桥——业务代码不得直接摸 UI；\n' +
+      '1. 三层纪律：小工具可扩展 app.py 的 Logic；复杂业务按领域拆 core/、storage/ 等模块，在 app.py 保留 Logic 导入/门面（from app import Logic 可用），业务模块不 import UI。Api 桥是 UI 动作唯一入口（转调真实业务层，返回 JSON）；ui/ 只渲染与收集输入，经 window.App.call 调桥。架构文档与实际模块/持久化方案一致，改变方案必须同步文档，不为凑行数拆分；\n' +
       '2. UI 组装照抄组件手册：先 read ui/PATTERNS.md（每组件可复制样例+桥接纪律）——列表 App.renderList（空态自动）/气泡 App.appendBubble/卡片/表单字段（行内校验）/结果摘要（给数字）/徽章按钮/输入行；不写新 CSS 就不写（缺组件在 kit.css 末尾加 .w- 前缀类）；颜色/间距/字号一律 var(--*)（tokens.css）；**禁 npm/CDN/外链字体/构建步骤——ui/ 全本地资产，界面资产离线可用；已确认的联网业务按 PRD/产品形状实现**；\n' +
       '3. 状态反馈唯一呈现位 App.show（UX 契约状态机）：执行中 App.show("running","正在保存…") → 终态：成功给数量 App.show("success","已保存 3 条记录")；部分成功分别计数 App.show("partial","导入完成：成功 24，跳过 2")；失败带下一步 App.show("failed","保存失败：文件被占用","已关闭占用程序？点重试；原数据未修改")；每个耗时操作必须 running→终态；\n' +
       '4. 耗时>1s 的操作不阻塞 UI：Python 侧线程完成后 evaluate_js 推送（照抄 app.py 内 push_update 注释样例的模式：`webview.windows[0].evaluate_js(f"window.on_update({json.dumps(payload, ensure_ascii=False)})")`，页面定义 window.on_update 接收）——禁止在 Api 桥方法里同步长计算；\n' +
@@ -256,7 +256,7 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
     quickTaskTemplate:
       '快速做一个能用的应用（快速模式：平台已物化骨架 v2 到项目根——app.py 三层 + ui/ 组件库 + requirements.txt；无工程契约/驱动断言要求）：\n' +
       '1. 按 PRD 背板功能清单实现完整可用的 Windows 桌面程序——全部业务功能真实可用，程序能跑起来；\n' +
-      '2. 三层纪律（app.py 顶部 docstring 即此纪律）：业务/持久化全在 Logic 类（不 import UI）；Api 桥是 UI 动作唯一入口（每个动作一个方法，转调 Logic，返回 JSON 字符串）；ui/ 只渲染与收集输入，经 window.App.call("方法名", 参数...) 调桥——业务代码不得直接摸 UI；\n' +
+      '2. 三层纪律：小工具可扩展 Logic；复杂业务按职责拆 core/、storage/ 等模块，app.py 保留 Logic 导入/门面（from app import Logic 可用）及现有启动/验证模式；业务模块不 import UI。Api 桥转调真实业务层，ui/ 只渲染与收集输入，经 window.App.call 调桥；架构说明与实际模块/持久化方案一致；\n' +
       '3. UI 组装先 read ui/PATTERNS.md 照抄组件（列表 App.renderList 空态自动/气泡 App.appendBubble/表单行内校验/结果摘要给数字）；不写新 CSS 就不写；颜色/间距/字号一律 var(--*)；**禁 npm/CDN/外链字体/构建步骤——界面资产离线可用；已确认的联网业务按 PRD/产品形状实现**；\n' +
       '4. 状态反馈唯一呈现位 App.show（running→成功给数量/部分成功分别计数/失败带下一步）；耗时>1s 操作 Python 侧线程+evaluate_js 推送（照抄 app.py push_update 注释样例），禁止 Api 桥里同步长计算；执行中禁用触发按钮防重复提交；输入失败恢复原值（index.html onSend 即标准形态：失败分支 input.value = text）；\n' +
       '5. 一次性委派 implement 子会话完成实现（依赖与解释器路径如实装配，不编造运行结果）：子会话有 run_project_script（真实运行项目根内 .py，每次≤90s、至多 12 次）——任务书里要求它写无头自测脚本（import app 测 Logic 层）并当场跑到绿、附真实红绿结果，不要只写不跑；子会话还有 install_packages（声明制 .venv 安装：requirements 声明→安装→import 回读；装后 LAUNCH command 用 .venv\\Scripts\\python.exe；venv 统一用 .venv 这一个名字，不要自建 .venv-probe 之类异名 venv——快照/安全扫描/交付清单靠标记识别，异名会漏）；\n' +

@@ -31,7 +31,7 @@ def run(root):
     mode = 'argument_plan' if argument else 'stored_plan'
     if require_undo and not hasattr(factory, 'undo_last' if argument else 'undo_rename'):
         return {'probe_version': 1, 'status': 'environment_blocked', 'error': '已要求撤销，但本探针未找到受支持的撤销入口'}
-    names = ['rename_undo' if require_undo else 'rename'] + (['changed_prefix', 'different_folder', 'escaped_source', 'escaped_target'] if argument else
+    names = ['rename_undo' if require_undo else 'rename'] + (['changed_prefix', 'different_folder', 'escaped_source', 'escaped_target', 'source_changed', 'new_destination'] if argument else
         ['invalid_prefix_after_valid', 'changed_folder', 'source_changed', 'new_destination'])
     results = []
     for name in names:
@@ -78,8 +78,12 @@ def run(root):
                 before = tree(base)
                 rejected = False
                 try:
-                    if argument: logic.execute_rename(str(folder), prefix, plan=plan)
-                    else: logic.execute_rename()
+                    if argument: response = logic.execute_rename(str(folder), prefix, plan=plan)
+                    else: response = logic.execute_rename()
+                    if isinstance(response, str):
+                        try: response = json.loads(response)
+                        except (ValueError, TypeError): pass
+                    rejected = isinstance(response, dict) and response.get('ok') is False
                 except Exception: rejected = True
                 files_unchanged = before == tree(base)
                 unchanged = files_unchanged

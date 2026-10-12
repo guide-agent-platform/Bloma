@@ -15,6 +15,8 @@ const ROOT_FILE_SET = [
   'app.py',
   'record_store.py',
   'llm_client.py',
+  'file_plan_guard.py',
+  'file_transactions.py',
   'requirements.txt',
   'README.md',
   'ui/index.html',
@@ -22,6 +24,7 @@ const ROOT_FILE_SET = [
   'ui/kit.css',
   'ui/bridge.js',
   'ui/correction.js',
+  'ui/preview-state.js',
   'ui/PATTERNS.md',
 ] as const
 

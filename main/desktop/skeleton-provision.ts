@@ -31,6 +31,7 @@ const ROOT_FILES: readonly string[] = [
   'ui/kit.css',
   'ui/bridge.js',
   'ui/correction.js',
+  'ui/preview-state.js',
   'ui/PATTERNS.md',
 ]
 
@@ -108,7 +109,7 @@ export function provisionDesktopSkeletonV2(
     }
   }
   // Platform clients are independent of pip installation and never overwrite products.
-  for (const name of ['llm_client.py']) {
+  for (const name of ['llm_client.py', 'file_plan_guard.py', 'file_transactions.py']) {
     const source = join(mainRootDir(), 'templates', 'tools', name)
     const target = join(projectRoot, name)
     try {

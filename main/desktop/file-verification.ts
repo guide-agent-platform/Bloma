@@ -23,9 +23,9 @@ export async function runHostPrefixRenameProbe(root: string, spawn: DriverSpawn 
     if (parsed.probe_version !== 1 || !['passed', 'failed', 'environment_blocked'].includes(parsed.status)) throw new Error('文件探针未返回有效结果')
     if (parsed.status === 'passed') {
       const positive = options.requireUndo ? 'rename_undo' : 'rename'
-      const expected = parsed.mode === 'argument_plan' ? [positive, 'changed_prefix', 'different_folder', 'escaped_source', 'escaped_target'] :
+      const expected = parsed.mode === 'argument_plan' ? [positive, 'changed_prefix', 'different_folder', 'escaped_source', 'escaped_target', 'source_changed', 'new_destination'] :
         parsed.mode === 'stored_plan' ? [positive, 'invalid_prefix_after_valid', 'changed_folder', 'source_changed', 'new_destination'] : []
-      if (report.code !== 0 || expected.length !== 5 || parsed.tests?.length !== 5 || expected.some(name => !parsed.tests?.some(t => t.name === name && t.passed === true))) throw new Error('文件探针证据不完整')
+      if (report.code !== 0 || !expected.length || parsed.tests?.length !== expected.length || expected.some(name => !parsed.tests?.some(t => t.name === name && t.passed === true))) throw new Error('文件探针证据不完整')
     }
     if (verificationFingerprint(root) !== fingerprint) throw new Error('文件探针期间验证输入发生变化')
     return parsed
