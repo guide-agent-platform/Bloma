@@ -659,6 +659,17 @@ try {
     if (project) {
       report.project = { id: project.id, dir: project.dir }
       const rec = readProjectRecord(project.id)
+      if (STOP_AFTER_PRD && rec?.current_stage === 'blocked_for_user_decision' && rec.last_session_id && !state.overlays?.prdConfirm && !state.overlays?.review && !state.overlays?.requirementConfirm) {
+        const rows = readFileSync(join(HOME, 'agent-sessions', `${rec.last_session_id}.jsonl`), 'utf8').trim().split(/\r?\n/).map(line => JSON.parse(line))
+        const tail = rows.at(-1), terminal = (tail?.content ?? []).some(block => block.type === 'text' && /^\[terminal\] status=/.test(block.text ?? ''))
+        const failure = rows.findLast(row => row.role === 'system' && (row.content ?? []).some(block => block.type === 'text' && block.text?.includes('"type":"prd_structure_blocked"')))
+        if (terminal && failure && failure.timestamp >= sentAt) {
+          report.outcome = 'prd-structure-rejected'
+          report.prd_structure = { issues: failure.content.filter(block => block.type === 'text').map(block => block.text), confirmation_reached: false, engineering_started: false }
+          log('PRD production failed closed; capturing the host validation reason without waiting for delivery')
+          break
+        }
+      }
       if (rec && rec.status === 'completed' && rec.current_stage === 'completed') {
         log(`交付检测命中（权威存储终态）：项目 ${project.id}`)
         report.outcome = 'delivered'

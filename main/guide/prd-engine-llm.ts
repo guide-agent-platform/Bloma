@@ -22,7 +22,7 @@ import { sanitizeGeneratedProjectName, updateProject } from '../project/project-
 import { recordDecision } from '../project/decision-log'
 import { bindAcceptance } from '../project/requirement-contract'
 import { parseOrganizedRequirements, projectRequirementsModel, stableFeatureIdIssues, type RequirementsModel, type RequirementSource } from '../model/requirements-model'
-import { ORGANIZED_PRD_SYSTEM_PROMPT, readRequirementSources } from './requirements-organization'
+import { ORGANIZED_PRD_SYSTEM_PROMPT, readRequirementSources, recordOrganizationAttempt } from './requirements-organization'
 
 /**
  * PrdEngineLlm — 向导群·需求工程腿（2026-09-03 架构调整：需求工程链归向导）。
@@ -275,8 +275,10 @@ export async function generatePrdLlm(input: GeneratePrdLlmInput): Promise<PrdBac
         const parsed = parsePrdJson(text, input.organize_requirements ? sources : undefined, issues => { structuralIssues = issues })
         if (parsed?.organized) {
           structuralIssues = stableFeatureIdIssues(input.existing_model, parsed.organized.requirements)
-          if (structuralIssues.length) return undefined
         }
+        if (input.organize_requirements) recordOrganizationAttempt(input.project_id, input.session_id, text,
+          structuralIssues.length ? structuralIssues : parsed ? [] : ['JSON 或需求结构解析失败'], parsed?.organized?.link_notes ?? [])
+        if (structuralIssues.length) return undefined
         return parsed
       },
     })
@@ -383,7 +385,7 @@ export function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequire
 }
 
 interface ParsedPrd {
-  organized?: { requirements: SketchRequirement[]; model: RequirementsModel }
+  organized?: { requirements: SketchRequirement[]; model: RequirementsModel; link_notes: string[] }
   name?: string
   source_refs?: Record<string, unknown>
   document: string

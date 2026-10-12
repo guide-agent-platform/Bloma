@@ -123,7 +123,7 @@ export function validateRequirementsModel(raw: unknown, features: SketchRequirem
 }
 
 /** Attach host sources before validating model output; matching references is not a claim of semantic coverage. */
-export function parseOrganizedRequirements(raw: unknown, sources: RequirementSource[], onIssues?: (issues: string[]) => void): { requirements: SketchRequirement[]; model: RequirementsModel } | undefined {
+export function parseOrganizedRequirements(raw: unknown, sources: RequirementSource[], onIssues?: (issues: string[]) => void): { requirements: SketchRequirement[]; model: RequirementsModel; link_notes: string[] } | undefined {
   if (!record(raw) || !Array.isArray(raw.requirements) || !record(raw.requirements_model)) { onIssues?.(['必须产出 requirements 和 requirements_model']); return undefined }
   const requirements: SketchRequirement[] = []
   for (const value of raw.requirements) {
@@ -135,14 +135,31 @@ export function parseOrganizedRequirements(raw: unknown, sources: RequirementSou
       ...(texts(value.behavior_assertions) ? { behavior_assertions: value.behavior_assertions } : {}),
       origin: value.origin === 'user' ? 'user' : 'guide', source: 'organized' })
   }
-  const model = { ...raw.requirements_model, sources } as unknown as RequirementsModel
+  const model = { ...structuredClone(raw.requirements_model), sources } as unknown as RequirementsModel
+  const link_notes: string[] = []
+  // A scenario explicitly checking BR-x for F-y already declares that applicability. Form the
+  // union with the rule's explicit applicability instead of asking the model to duplicate links.
+  // Missing tests, nonexistent ids and unknown rules are never manufactured or filtered away.
+  if (Array.isArray(model.rules) && Array.isArray(model.scenarios)) {
+    const knownFeatures = new Set(requirements.map(feature => feature.id))
+    for (const scenario of model.scenarios) {
+      if (!record(scenario) || !knownFeatures.has(scenario.feature_id as string) || !texts(scenario.rule_ids)) continue
+      for (const id of scenario.rule_ids) {
+        const rule = model.rules.find(row => record(row) && row.id === id && texts(row.feature_ids))
+        if (rule && !rule.feature_ids.includes(scenario.feature_id as string)) {
+          rule.feature_ids.push(scenario.feature_id as string)
+          link_notes.push(`${id} → ${scenario.feature_id}：由 ${scenario.id} 已声明的规则引用生成关联`)
+        }
+      }
+    }
+  }
   const issues = validateRequirementsModel(model, requirements)
   if (issues.length) { onIssues?.(issues); return undefined }
   // Acceptance scenarios are authoritative. Free-form acceptance cannot independently promise different behavior.
   for (const feature of requirements) feature.behavior_assertions = model.scenarios
     .filter(row => row.feature_id === feature.id && !row.not_applicable)
     .map(row => `${row.given}；当${row.when}时，${row.then}`)
-  return { requirements, model }
+  return { requirements, model, link_notes }
 }
 
 /** Mechanical document projection: there is no independently generated feature-number set. */

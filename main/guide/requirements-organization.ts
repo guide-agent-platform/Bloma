@@ -1,6 +1,11 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import type { RequirementSource } from '../model/requirements-model'
+import { createHash } from 'node:crypto'
+import { getDocumentsDir } from '../../storage/config-paths'
+import { appendJsonLine } from '../../storage/json-store'
+import { findProject } from '../project/project-service'
+import { join } from 'node:path'
 
 /** Read complete user turns (including multiline requests); assistant assertions are not user evidence. */
 export function readRequirementSources(sessionId: string): RequirementSource[] {
@@ -26,6 +31,18 @@ export function readRequirementSources(sessionId: string): RequirementSource[] {
   return sources
 }
 
+/** Keep actual model attempts in the owning project's diagnostic area, outside the formal PRD. */
+export function recordOrganizationAttempt(projectId: string, sessionId: string, output: string, issues: string[], linkNotes: string[]): void {
+  try {
+    const project = findProject(projectId), limit = 65536
+    appendJsonLine(join(getDocumentsDir(project.workspace_slug, projectId), 'diagnostics', 'prd-organization-attempts.jsonl'), {
+      version: 1, at: new Date().toISOString(), session_id: sessionId, output_sha256: createHash('sha256').update(output).digest('hex'),
+      raw_output: output.slice(0, limit), raw_output_truncated: output.length > limit,
+      validation_issues: issues, normalized_rule_links: linkNotes, accepted_for_review: issues.length === 0,
+    })
+  } catch { /* diagnostic IO does not grant permission to advance after an invalid output */ }
+}
+
 /** Output contract replaces the old frozen-theme protocol even when a local prompt override exists. */
 export const ORGANIZED_PRD_SYSTEM_PROMPT = `你是 Bloma 的需求分析师。把用户的目标整理为一份可实施、可验收的结构化需求模型。只输出一个 JSON 对象。
 原话、目标、功能是不同层次。候选功能尚未冻结，可拆分/合并；不把整段原话或“你帮我决定”变成 F-001。功能数量由独立业务边界决定，没有 3~5 项上限，也不按按钮机械拆分。
@@ -43,6 +60,7 @@ requirements_model:{
 }
 不要输出 sources；平台提供不可篡改的 S 编号来源。coverage 必须逐条处理全部来源；背景可标 context、后续原话明确替代旧要求可标 superseded 并说明依据，不得以背景名义隐藏真实功能/数值/异常要求。材料来源仍用 source_refs 的原契约。
 每个功能至少进入一条流程。每条业务规则列出它约束的所有功能，例如用量守恒同时约束计算、保存、导入；每个关联功能至少有一个非豁免场景检验该规则。用户明说的规则引用 S 来源；合理补充的规则标 assumption，不能冒充用户要求，并在 assumptions 中披露。
+场景的 rule_ids 也声明规则适用于该功能；平台会据这些明确引用补全规则关联，不能代替编写实际检查该规则的场景。未关联的规则不要为了凑覆盖硬塞到场景中。
 每个功能必须有 normal、boundary、exception 三类场景。正常路径不能豁免；其他确实不适用时省略 GWT，改填 not_applicable:"至少20字的具体理由"，rule_ids=[]。不要固定造三个相同场景，不用“正常工作/不崩溃”代替可观察结果。
 对象和独立规则按产品实际需要表达，简单无状态工具可用空 entities/relations/rules，但仍要说清操作流程与验收。复杂任务必须表达对象归属、历史/状态变化、数值不变量及异常副作用。
 不编造用户没说过的硬约束。用户让渡时选择合理默认并公开假设，不重复追问已回答事项；不能用默认省略用户已明确的功能。确实无法可靠决定时保留 open_questions，平台会在确认前处理。

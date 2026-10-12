@@ -65,6 +65,10 @@ describe('实际 PRD 组织与确认边界', () => {
     await expect(resolvePrdBackplane({ project_id: project.project_id, session_id: sessionId, query }, [{ id: 'F-001', description: '整段原话' }])).rejects.toThrow('必须产出 requirements 和 requirements_model')
     expect(prompts).toHaveLength(2)
     expect(prompts[1]).toContain('必须产出 requirements 和 requirements_model')
+    const attempts = readFileSync(join(getDocumentsDir(project.workspace_slug, project.project_id), 'diagnostics/prd-organization-attempts.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line))
+    expect(attempts).toHaveLength(2)
+    expect(attempts[0].raw_output).toBe('{"document":"# PRD","acceptance":{}}')
+    expect(attempts[0].accepted_for_review).toBe(false)
   })
 
   it('正文十二项而结构一项的真实失败形态不能确认', () => {

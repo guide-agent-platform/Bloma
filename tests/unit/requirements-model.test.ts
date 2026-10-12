@@ -41,6 +41,18 @@ describe('业务需求模型与同源正文', () => {
     expect(validateRequirementsModel(prd.requirements_model, prd.requirements)).toContain('BR-001 未在关联功能 F-003 的验收中覆盖')
   })
 
+  it('从已有场景引用生成反向规则关联，不发明场景或吞掉未知编号', () => {
+    const prd = processPrd(), input = { requirements: prd.requirements, requirements_model: structuredClone(prd.requirements_model!) }
+    input.requirements_model.rules[0]!.feature_ids = ['F-001']
+    const parsed = parseOrganizedRequirements(input, input.requirements_model.sources)!
+    expect(parsed.model.rules[0]!.feature_ids).toEqual(['F-001', 'F-002', 'F-003'])
+    expect(parsed.link_notes).toHaveLength(2)
+    expect(parsed.model.scenarios).toEqual(input.requirements_model.scenarios)
+    expect(input.requirements_model.rules[0]!.feature_ids).toEqual(['F-001'])
+    input.requirements_model.scenarios[0]!.rule_ids.push('BR-999')
+    expect(parseOrganizedRequirements(input, input.requirements_model.sources)).toBeUndefined()
+  })
+
   it('拦截遗漏来源、未知编号、缺少异常路径和伪造豁免', () => {
     const prd = processPrd(), model = prd.requirements_model!
     model.coverage = []
