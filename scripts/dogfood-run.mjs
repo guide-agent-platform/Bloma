@@ -23,6 +23,7 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
+import { readPrdProbe } from './prd-probe-inspection.mjs'
 
 const args = process.argv.slice(2)
 const flag = (name) => args.includes(`--${name}`)
@@ -715,10 +716,8 @@ try {
     const clarifyAuto = enabled.find((o) => o.kind === 'clarify' && (o.id === 'auto' || /你帮我|全部交给/.test(o.label)))
     const reviewAuto = enabled.find((o) => o.kind === 'review' && (o.id === 'prd_review_delegate_all' || /全部交给|你帮我/.test(o.label)))
     if (STOP_AFTER_PRD && overlays.prdConfirm) {
-      const record = project ? readProjectRecord(project.id) : null
-      const prdPath = record ? join(HOME, 'agent-workspaces', record.workspace_slug, 'documents', project.id, 'prd.json') : null
-      if (!prdPath || !existsSync(prdPath)) throw new Error('PRD confirmation appeared without a persisted PRD')
-      const prd = JSON.parse(readFileSync(prdPath, 'utf8'))
+      const { project: record, backplane: prd } = readPrdProbe(HOME, project?.id)
+      report.project = { id: record.project_id, dir: record.root_path }
       const issues = prdStructureIssues(prd)
       if (!prd.requirements_model) issues.push('New-model probe did not produce requirements_model')
       writeFileSync(join(REPORT_DIR, 'prd-preconfirm.json'), JSON.stringify(prd, null, 2))

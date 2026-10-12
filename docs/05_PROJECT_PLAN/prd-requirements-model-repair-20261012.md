@@ -43,6 +43,19 @@
 
 同时把真实模型每次输出、校验原因、关联归一说明和输出哈希保存到所属项目 diagnostics/prd-organization-attempts.jsonl，最多保留每次正文前 65536 字符并注明是否截断；不会进入正式 PRD、不会打印渠道密钥。修复 PRD-only 驾驶器识别本轮结构失败的终态，避免为已失败的 PRD 空等交付。
 
-补修类型检查、构建及 **6 文件 / 68 例**针对性测试通过（prd-model-links-*）。包含已有场景反向关联、未发明测试、未知规则继续拒绝、原输入不被修改，以及失败输出独立留档。准备再次运行同一隔离 PRD-only 案例验证，不把首轮拒绝冒充成功。
+补修类型检查、构建及 **6 文件 / 68 例**针对性测试通过（prd-model-links-*）。包含已有场景反向关联、未发明测试、未知规则继续拒绝、原输入不被修改，以及失败输出独立留档。补修后再次全量单测 **255 文件 / 2305 例通过**，日志 prd-model-full-unit-links-verified.log。工程先后固化为 ee72521、db9b78b。
+
+## 第二次真实结果与证据边界
+
+- 运行：`run-artifacts/prd-model-2026-10-12T13-37-48-936Z-acdec3/`；项目 8c2e0a74-a4b8-487b-ba0e-ed87a352e46b；源码 db9b78b。
+- 同一原始请求，不改数值、不减少功能。初次产出仍有流程/场景覆盖缺口，宿主反馈明确位置后，第二次输出通过结构校验。两次原始模型响应（17738、18972 字符）均完整留档，没有截断。
+- 实际攻防修订/复核两轮收敛，修复五项：补模型请求协议的独立验证与登记、交付证据口径、材料库与配方选择关系、可度量界面反馈、导出/失败写入判据。假设与业务模型修订均保留；不是用点击忽略取得通过。
+- 最终正式稿 **12 项需求、21 段原始来源、5 个业务对象、7 条流程、21 条规则、45 个场景**。原话没有塞进单一 F-001，正文/机器清单一致，结构检查 issues=[]；PRD 确认卡确实发布。用户未确认，desktop_phase 未设置，未生成或测试应用。
+- 生成/审查均使用实际配置的 deepseek-flash；vendor_isolated=false，不能声称已经验证跨厂商独立审查。第二单共 14 个 query_started/finished，第一单 5 个；这不是完整软件生成的速度/费用对照。
+- 驾驶器错误依赖带 LAUNCH.json 的产物目录发现项目，此时产品尚未物化，错误报告为“PRD confirmation appeared without a persisted PRD”。真实 PRD 文件已存在。保留 driver 原始 outcome=error，通过目录索引、PRD 文件及 internal_audit/prd_confirm 会话记录独立核实阶段成功；不把原报告改成成功。
+- 已修驾驶器：新 `readPrdProbe` 根据 host projects.json 绑定项目，不依赖程序目录；拒绝多项目歧义、未知项目和 PRD 身份冲突。1 项独立 Node 测试通过，并对第二单真实存储重放该定位逻辑、执行结构检查及审查状态核对，均通过，未新增模型调用。
+- 最终证据：第二单 `prd-preconfirm.json`、`prd-live-summary.json`、`prd-content-inspection.json`、`live-inspection.json`，所属项目 diagnostics/prd-organization-attempts.jsonl；原始 dogfood-run-report.json、driver-exit.json 原样保留。两次测试实例均已结束，未残留本批 Electron 进程。
+
+这些结果证明新需求模型、同源产出、有限反馈重试、实际审查修订及确认边界已接通。不能证明所有业务细则都已充分、每个场景分类都恰当，或之后生成的软件必然正确。特别是小数展示后的差额配平规则、导入派生用量篡改的独立反例仍需要在后续质量测试中加强；本轮没有把过去两个产物缺陷宣称已由实际程序验证修复。
 
 脚本 `scripts/prd-model-dogfood-run.mjs` 和 dogfood-run 的 `--stop-after-prd` 接入结构检查；只有隔离 home 可用。复用加密渠道与原覆盖副本，不打印/解密输出密钥，不复用旧项目，结束回收本测试实例。
