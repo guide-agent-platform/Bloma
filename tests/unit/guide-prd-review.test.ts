@@ -260,8 +260,8 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
     }))
   })
 
-  it('delegate_all / 全部「这条没问题」→ 转 PRD 确认门过目（不过目不开工），确认后发形态引导卡（web 线已下线）', async () => {
-    const { query } = scriptedQuery([reviewFailJson])
+  it('delegate_all 实际复核通过后转确认；明确忽略仍转确认，均不能直接开工', async () => {
+    const { query, reviewCalls } = scriptedQuery([reviewFailJson, reviewPassJson])
     await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(query))
     await resolveRequirementConfirm({ request_id: 'req-pr2', session_id: SESSION_ID, project_id: 'proj-1', decision: 'confirm' })
 
@@ -280,9 +280,9 @@ describe('PRD 裁判审查门（简化版 AC）', () => {
       (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
     )
     expect(confirmCard).toBeTruthy()
-    expect(String(confirmCard?.payload.title)).toContain('已交由向导决定')
+    expect(reviewCalls.length).toBeGreaterThanOrEqual(2)
     expect(recordDecision).toHaveBeenCalledWith(expect.objectContaining({
-      entry: expect.objectContaining({ type: 'prd_review_overridden' }),
+      entry: expect.objectContaining({ type: 'prd_review_delegated' }),
     }))
 
     // 确认卡「确认无误」→ 过目完成才开草图，需求清单保持一致

@@ -33,7 +33,8 @@ export function acceptanceAssociationIssues(backplane: PrdBackplane): string[] {
 export function requirementEvidenceHash(backplane: PrdBackplane, item: SketchRequirement): string {
   return digest([item.id, item.description, item.story ?? '', item.behavior_assertions ?? [],
     item.scope_notes ?? '', trustedAcceptance(backplane, item) ?? '', backplane.constraints ?? [], backplane.out_of_scope ?? [],
-    backplane.ux ?? null, backplane.shape ?? null, backplane.gdd ?? null, backplane.ai_capabilities ?? [], backplane.key_tasks ?? []])
+    backplane.ux ?? null, backplane.shape ?? null, backplane.gdd ?? null, backplane.ai_capabilities ?? [], backplane.key_tasks ?? [],
+    backplane.assumptions ?? [], backplane.requirements_model ?? null])
 }
 
 export function requirementVerificationContext(backplane: PrdBackplane): unknown {

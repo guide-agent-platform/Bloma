@@ -554,11 +554,13 @@ export interface GenerationGuardrails {
  * F-001 固定为"主题锚点"（用户最初想做什么），澄清/纠错/迭代只追加后续项、不覆盖主题。
  */
 export interface PrdBackplane {
+  /** Structured business requirements; old projects without this field remain readable. */
+  requirements_model?: import('./requirements-model').RequirementsModel
   project_id: string
   name: string
-  /** 产品定位一句话（主题锚点，取自 F-001 描述） */
+  /** 产品定位；新模型与功能项分离，旧项目兼容原主题措辞。 */
   positioning: string
-  /** 核心功能项：F-001 为主题，其余为澄清/纠错/迭代追加项 */
+  /** 可独立实施和验收的能力。新模型中 F-001 不再充当项目主题。 */
   requirements: SketchRequirement[]
   /** 功能项 id → 验收要点（行为断言迁入 requirements 后逐步废弃；保持兼容） */
   acceptance: Record<string, string>

@@ -444,29 +444,15 @@ export function isDelegationPlaceholder(description: string): boolean {
 }
 
 /**
- * 保证需求清单始终以"主题"为 F-001 锚点：澄清答案（如"网页端"）只是主题的属性，
- * 绝不能覆盖最初的主题（如"音乐合成器"）。清单已含主题时原样返回；否则把主题
- * 前置为 F-001，其余项顺延为 F-002/F-003…，避免"货不对板"。
+ * Compatibility entry: the original request is now read separately by the PRD organizer.
+ * Never turn the theme into a capability or renumber genuine capabilities by array position.
  */
 export function ensurePrimaryIntent(
   requirements: SketchRequirement[],
   primaryIntent: string | undefined,
 ): SketchRequirement[] {
-  if (!primaryIntent) return requirements
-  const normalized = primaryIntent.replace(/\s+/g, ' ').trim()
-  if (!normalized) return requirements
-  // 疑问句/身份类短句不能当主题锚点（「你是谁」案）：不前置为 F-001
-  if (isQuestionLikeTheme(normalized)) return requirements
-  const hasTheme = requirements.some((item) => {
-    const description = item.description.replace(/\s+/g, ' ').trim()
-    return description.includes(normalized) || normalized.includes(description)
-  })
-  if (hasTheme) return requirements
-  const shifted = requirements.map((item, index) => ({
-    ...item,
-    id: `F-${String(index + 2).padStart(3, '0')}`,
-  }))
-  return [{ id: 'F-001', description: normalized }, ...shifted]
+  void primaryIntent
+  return requirements
 }
 
 /** 卡片选项答案：metadata.source === 'card_option' 且非阻塞决策 id 时，视为已澄清，进入 PRD 后置链。 */
@@ -509,10 +495,7 @@ export function resolveAutoDelegation(input: AgentSendMessageInput, primaryInten
   if (!isAutoDelegationText(input.content)) return undefined
   return {
     prompt: input.content,
-    requirements: ensurePrimaryIntent(
-      primaryIntent ? [] : [{ id: 'F-001', description: CARD_ANSWER_REQUIREMENTS.auto }],
-      primaryIntent,
-    ),
+    requirements: [],
   }
 }
 

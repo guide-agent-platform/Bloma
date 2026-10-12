@@ -129,13 +129,7 @@ export function buildPrdReviewTask(
   const lines = [
     '【PRD 全文（背板 JSON）】',
     JSON.stringify(
-      {
-        name: backplane.name,
-        positioning: backplane.positioning,
-        requirements: backplane.requirements,
-        out_of_scope: backplane.out_of_scope,
-        constraints: backplane.constraints,
-      },
+      backplane,
       null,
       2,
     ),
@@ -197,13 +191,7 @@ export function buildRecheckTask(
   const lines = [
     '【修订后 PRD 全文（背板 JSON）】',
     JSON.stringify(
-      {
-        name: backplane.name,
-        positioning: backplane.positioning,
-        requirements: backplane.requirements,
-        out_of_scope: backplane.out_of_scope,
-        constraints: backplane.constraints,
-      },
+      backplane,
       null,
       2,
     ),

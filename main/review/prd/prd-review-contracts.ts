@@ -119,6 +119,7 @@ export const PRD_REVIEW_CUSTOM_OPTION_ID = 'custom'
 
 /** 审查未过后的待决状态：用户逐题作答（选择题卡）或让渡后回流。 */
 export interface PendingPrdReview {
+  delegationExhausted?: boolean
   request_id: string
   session_id: string
   project_id: string

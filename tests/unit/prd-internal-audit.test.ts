@@ -235,8 +235,9 @@ describe('validateDefenderDraft（Defender 产物代码级校验）', () => {
       expect(result2.draft.backplane).not.toHaveProperty('generation_guardrails')
       expect(result2.draft.backplane).not.toHaveProperty('frozen_at')
       expect(result2.draft.backplane).not.toHaveProperty('ux_contract')
-      // original 的 assumptions 继承（draft 改不了审计假设）
-      expect(result2.draft.backplane.assumptions).toEqual(['用户要求轻量'])
+      // 假设属于合法修订域；受保护的执行护栏仍被明确拒绝。
+      expect(result2.draft.backplane.assumptions).toEqual([])
+      expect(result2.draft.write_report?.rejected_fields).toContain('generation_guardrails')
     }
   })
 })

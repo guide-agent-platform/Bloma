@@ -22,6 +22,7 @@ import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, statSync, w
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { pathToFileURL } from 'node:url'
 
 const args = process.argv.slice(2)
 const flag = (name) => args.includes(`--${name}`)
@@ -59,6 +60,15 @@ const PROBE_ONLY = flag('probe-only')
 const KEEP_OPEN = flag('keep-open')
 // Frozen robustness cases must not receive synthetic UI feedback or extra time.
 const FIXED_CASE = flag('fixed-case')
+const STOP_AFTER_PRD = flag('stop-after-prd')
+if (STOP_AFTER_PRD && !ISOLATED_HOME) throw new Error('PRD-only probes require an isolated home')
+let prdStructureIssues
+if (STOP_AFTER_PRD) {
+  const { build } = await import('esbuild')
+  const modulePath = join(REPORT_DIR, 'requirements-model-gate.mjs')
+  await build({ entryPoints: [join(REPO, 'main/model/requirements-model.ts')], outfile: modulePath, bundle: true, platform: 'node', format: 'esm' })
+  ;({ prdStructureIssues } = await import(pathToFileURL(modulePath).href))
+}
 
 if (!PROBE_ONLY && !REQUEST) {
   console.error('用法：node scripts/dogfood-run.mjs --request "需求文本" | --request-file <path> | --probe-only')
@@ -693,6 +703,26 @@ try {
     const overlays = state.overlays ?? {}
     const clarifyAuto = enabled.find((o) => o.kind === 'clarify' && (o.id === 'auto' || /你帮我|全部交给/.test(o.label)))
     const reviewAuto = enabled.find((o) => o.kind === 'review' && (o.id === 'prd_review_delegate_all' || /全部交给|你帮我/.test(o.label)))
+    if (STOP_AFTER_PRD && overlays.prdConfirm) {
+      const record = project ? readProjectRecord(project.id) : null
+      const prdPath = record ? join(HOME, 'agent-workspaces', record.workspace_slug, 'documents', project.id, 'prd.json') : null
+      if (!prdPath || !existsSync(prdPath)) throw new Error('PRD confirmation appeared without a persisted PRD')
+      const prd = JSON.parse(readFileSync(prdPath, 'utf8'))
+      const issues = prdStructureIssues(prd)
+      if (!prd.requirements_model) issues.push('New-model probe did not produce requirements_model')
+      writeFileSync(join(REPORT_DIR, 'prd-preconfirm.json'), JSON.stringify(prd, null, 2))
+      report.prd_structure = { issues, requirement_count: prd.requirements.length, source_count: prd.requirements_model?.sources.length ?? 0,
+        rule_count: prd.requirements_model?.rules.length ?? 0, scenario_count: prd.requirements_model?.scenarios.length ?? 0,
+        user_confirmed: Boolean(prd.user_confirmed_at), engineering_started: Boolean(record.desktop_phase), structural_check_only: true }
+      report.outcome = issues.length ? 'prd-structure-rejected' : 'prd-ready'
+      log(`PRD-only probe stopped before confirmation: ${report.outcome}, ${prd.requirements.length} capabilities`)
+      break
+    }
+    if (STOP_AFTER_PRD && overlays.review && !reviewAuto) {
+      report.outcome = 'prd-review-unresolved'
+      log('Bounded PRD repair did not converge; preserving unresolved review without automatic waiver')
+      break
+    }
     if (state.upgradeDialog) {
       action = { id: '__upgrade_cancel', raw: 'upgrade-cancel', why: '关升级弹窗' }
     } else if (overlays.review) {
@@ -812,7 +842,7 @@ try {
   writeFileSync(join(REPORT_DIR, 'dogfood-run-report.json'), JSON.stringify(report, null, 2), 'utf8')
   log(`报告已写 ${join(REPORT_DIR, 'dogfood-run-report.json')}（outcome=${report.outcome}）`)
   await cleanup()
-  process.exit(report.outcome === 'delivered' ? 0 : 1)
+  process.exit(report.outcome === 'delivered' || report.outcome === 'prd-ready' ? 0 : 1)
 } catch (error) {
   log(`致命错误：${error instanceof Error ? error.message : String(error)}`)
   report.outcome = 'error'

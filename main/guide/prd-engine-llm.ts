@@ -21,6 +21,8 @@ import { categoryTemperature } from '../platform/llm/model-resolution'
 import { sanitizeGeneratedProjectName, updateProject } from '../project/project-service'
 import { recordDecision } from '../project/decision-log'
 import { bindAcceptance } from '../project/requirement-contract'
+import { parseOrganizedRequirements, projectRequirementsModel, stableFeatureIdIssues, type RequirementsModel, type RequirementSource } from '../model/requirements-model'
+import { ORGANIZED_PRD_SYSTEM_PROMPT, readRequirementSources } from './requirements-organization'
 
 /**
  * PrdEngineLlm — 向导群·需求工程腿（2026-09-03 架构调整：需求工程链归向导）。
@@ -44,6 +46,9 @@ import { bindAcceptance } from '../project/requirement-contract'
  */
 
 export interface GeneratePrdLlmInput {
+  /** Main PRD path: organize the business model before freezing capability ids. */
+  organize_requirements?: boolean
+  existing_model?: PrdBackplane
   /** 已定名称（用户手动命名或已完成自动命名），PRD 重跑沿用它。 */
   preferred_name?: string
   material_text?: string
@@ -174,8 +179,11 @@ ${renderDocumentSectionSpec()}
 - document 是给用户过目的正式 PRD：它将随确认卡全文展示，并全文注入编程 Agent 的项目锚（与结构化字段冲突时以结构化字段为准）。
 - 只输出 JSON，其余一律不要。`
 
-function getSystemPrompt(): string {
-  const base = loadPromptOverride('prd-system') ?? DEFAULT_SYSTEM_PROMPT
+function getSystemPrompt(organize = false): string {
+  const override = loadPromptOverride('prd-system')
+  const base = organize
+    ? `${override ? `【用户风格与业务补充（旧输出协议不适用）】\n${override}\n\n` : ''}${ORGANIZED_PRD_SYSTEM_PROMPT}`
+    : override ?? DEFAULT_SYSTEM_PROMPT
   // Phase 2 M1：开关 off → base 原样返回（字节级现状）；on → 追加 CAP 产出指令
   // （附在末尾不侵入既有结构，与外置覆盖叠加友好）。
   // Phase 7 U1 H2：同模式追加 key_tasks 产出指令（两开关独立，互不干扰字节级现状）。
@@ -233,12 +241,21 @@ export async function generatePrdLlm(input: GeneratePrdLlmInput): Promise<PrdBac
     const materials = sessionMaterials(input.project_id, input.session_id)
     const materialText = input.material_text ?? renderMaterialContext(materials, input.session_id, true)
     const sourceInstruction = materials.attachments.length ? '材料来源输出新增 source_refs：{"F-001":[{"attachment_id":"清单中的 id","sha256":"清单中的哈希","start_line":1,"end_line":3}]}。仅把对应需求实际依赖的已读文本范围作为来源；未读范围不引用，不编造来源。' : ''
-    const prompt = [buildPrompt(items, conversation, input.template_type), fewShot, materialText, sourceInstruction,
+    const sources = readRequirementSources(input.session_id)
+    const task = input.organize_requirements
+      ? ['请从完整对话和来源整理结构化需求模型，候选清单仅作线索，不能把它误认为已冻结范围。',
+        `【不可篡改的用户来源】\n${JSON.stringify(sources)}`,
+        `【候选能力】\n${JSON.stringify(items)}`,
+        ...(input.existing_model?.requirements_model ? [`【已有需求模型与稳定编号】\n${JSON.stringify(input.existing_model)}`] : []),
+        `【完整对话】\n${conversation}`].join('\n\n')
+      : buildPrompt(items, conversation, input.template_type)
+    const prompt = [task, input.organize_requirements ? '' : fewShot, materialText, sourceInstruction,
       input.preferred_name ? `【已定名称】${JSON.stringify(input.preferred_name)}；name 字段与 document 一级标题沿用此名称。` : '',
     ].filter(Boolean).join('\n\n')
     // 2026-09-03 R2：调用循环收敛至 kernel/llm-call 标准件（stream/parse/带反馈重试/abort/超时一处实现）
+    let structuralIssues: string[] = []
     const parsed = await callLlmForJson({
-      systemPrompt: getSystemPrompt(),
+      systemPrompt: getSystemPrompt(input.organize_requirements),
       prompt,
       query: input.query,
       env: input.env,
@@ -247,11 +264,21 @@ export async function generatePrdLlm(input: GeneratePrdLlmInput): Promise<PrdBac
       // §7.7 类别温度：判定/提取要稳、可复现（0.1）
       temperature: categoryTemperature('prd'),
       attempts: PRD_GENERATION_ATTEMPTS,
-      retryFeedback: PRD_RETRY_FEEDBACK,
+      get retryFeedback() { return input.organize_requirements
+        ? `上次未满足结构化需求协议：${structuralIssues.join('；') || 'JSON格式错误'}。请重新输出完整合法 JSON，检查全部来源、引用、三类场景及跨功能规则。原任务：\n${prompt}`
+        : PRD_RETRY_FEEDBACK },
       signal: input.signal,
       timeoutMs: input.timeoutMs,
-      onAttemptFailure: input.onAttemptFailure,
-      parse: parsePrdJson,
+      onAttemptFailure: failure => input.onAttemptFailure?.(failure.kind === 'unparseable' && structuralIssues.length ? { ...failure, detail: structuralIssues.join('；').slice(0, 500) } : failure),
+      parse: text => {
+        structuralIssues = []
+        const parsed = parsePrdJson(text, input.organize_requirements ? sources : undefined, issues => { structuralIssues = issues })
+        if (parsed?.organized) {
+          structuralIssues = stableFeatureIdIssues(input.existing_model, parsed.organized.requirements)
+          if (structuralIssues.length) return undefined
+        }
+        return parsed
+      },
     })
     if (!parsed) return null
     // 判型 LLM 化（2026-10-06 拍板）：引擎自判 form 回写项目品类——game（GDD 链）/
@@ -276,7 +303,7 @@ export async function generatePrdLlm(input: GeneratePrdLlmInput): Promise<PrdBac
         },
       })
     }
-    const result = buildBackplaneFromParsed(parsed, items, input.project_id, formType ?? input.template_type)
+    const result = buildBackplaneFromParsed(parsed, parsed.organized?.requirements ?? items, input.project_id, formType ?? input.template_type)
     if (materials.attachments.length) {
       result.requirements = result.requirements.map(item => {
         const refs = validateMaterialSources(parsed.source_refs?.[item.id], materials)
@@ -284,7 +311,7 @@ export async function generatePrdLlm(input: GeneratePrdLlmInput): Promise<PrdBac
       })
       result.prd_document += '\n\n## 材料来源与覆盖\n' + result.requirements.filter(item => item.source_refs?.length).map(item => `- ${item.id}：${item.source_refs!.map(ref => `${ref.attachment_id}（${ref.sha256.slice(0, 12)}），第 ${ref.start_line}–${ref.end_line} 行`).join('；')}`).join('\n') + '\n只引用上述已读取范围；未引用或未读取的材料不代表已全面理解。'
     }
-    return result
+    return projectRequirementsModel(result)
   } catch {
     return null
   }
@@ -324,6 +351,7 @@ export function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequire
     positioning,
     prd_document: prdDocument,
     requirements: items,
+    ...(parsed.organized ? { requirements_model: parsed.organized.model } : {}),
     acceptance,
     out_of_scope: parsed.out_of_scope,
     assumptions: parsed.assumptions,
@@ -355,6 +383,7 @@ export function buildBackplaneFromParsed(parsed: ParsedPrd, items: SketchRequire
 }
 
 interface ParsedPrd {
+  organized?: { requirements: SketchRequirement[]; model: RequirementsModel }
   name?: string
   source_refs?: Record<string, unknown>
   document: string
@@ -499,7 +528,7 @@ export function parseUxExperience(raw: unknown): UxExperienceSpec | undefined {
   return { states, feedback_rules: feedbackRules }
 }
 
-function parsePrdJson(text: string): ParsedPrd | undefined {
+function parsePrdJson(text: string, sources?: RequirementSource[], onIssues?: (issues: string[]) => void): ParsedPrd | undefined {
   const cleaned = text.replace(/```(?:json)?/gi, '').trim()
   const start = cleaned.indexOf('{')
   const end = cleaned.lastIndexOf('}')
@@ -512,11 +541,17 @@ function parsePrdJson(text: string): ParsedPrd | undefined {
     return undefined
   }
 
+  const organized = sources ? parseOrganizedRequirements(parsed, sources, onIssues) : undefined
+  if (sources && !organized) return undefined
   const acceptance: Record<string, string> = {}
   if (isRecord(parsed.acceptance)) {
     for (const [key, value] of Object.entries(parsed.acceptance)) {
       if (typeof value === 'string') acceptance[key] = value
     }
+  }
+  if (organized) {
+    for (const key of Object.keys(acceptance)) delete acceptance[key]
+    for (const feature of organized.requirements) acceptance[feature.id] = feature.behavior_assertions!.join('；')
   }
   const stringArray = (value: unknown): string[] =>
     Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
@@ -538,6 +573,7 @@ function parsePrdJson(text: string): ParsedPrd | undefined {
   const keyTasks = parseKeyTasks(parsed.key_tasks)
 
   return {
+    ...(organized ? { organized } : {}),
     positioning: typeof parsed.positioning === 'string' ? parsed.positioning : '',
     name: sanitizeGeneratedProjectName(parsed.name),
     ...(isRecord(parsed.source_refs) ? { source_refs: parsed.source_refs } : {}),

@@ -345,7 +345,7 @@ describe('需求确认弹窗（confirm_requirements）', () => {
     expect(after.filter((event) => event.payload?.kind === 'prd_confirm' || event.payload?.kind === 'prd_review')).toHaveLength(0)
   })
 
-  it('PRD 前移失败 → 不阻断草图（话术如实降级），仍开工', async () => {
+  it('PRD 生成失败时暂停，不把未完成的需求当作已确认范围开工', async () => {
     vi.mocked(resolvePrdBackplane).mockRejectedValueOnce(new Error('CHANNEL_DOWN'))
     await handleGuideMessage(makeInput(), (event) => events.push(event), makeModel(), undefined, persistSystem)
 
@@ -356,10 +356,12 @@ describe('需求确认弹窗（confirm_requirements）', () => {
       decision: 'confirm',
     })
 
-    expect(result).toMatchObject({ started: true, prd_written: false })
+    expect(result).toMatchObject({ started: false, prd_written: false })
     const deltas = events.filter((event) => event.type === 'message_delta').map((event) => String(event.payload.text))
-    expect(deltas.some((text) => text.includes('没能生成'))).toBe(true)
-    expect(deltas.some((text) => text.includes('直接画草图'))).toBe(true)
+    expect(deltas.some((text) => text.includes('CHANNEL_DOWN'))).toBe(true)
+    expect(deltas.some((text) => text.includes('未进入确认或实现'))).toBe(true)
+    expect(deltas.some((text) => text.includes('直接画草图'))).toBe(false)
+    expect(events.some(event => event.type === 'user_decision_required' && ['prd_confirm', 'web_line_retired'].includes(String(event.payload.kind)))).toBe(false)
     // 会话 JSONL 落盘了弹窗留痕（回访可追溯）
     const sessionText = readFileSync(join(home, 'agent-sessions', `${SESSION_ID}.jsonl`), 'utf8')
     expect(sessionText).toContain('[decision-card] 需求确认：')

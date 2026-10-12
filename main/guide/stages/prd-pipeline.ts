@@ -62,6 +62,7 @@ import { captureConstraints, extractConstraints, readProjectConstraints } from '
 import { isAutoDelegationText, readPrimaryIntent } from '../../platform/sessions/session-service'
 import type { PrdBackplane, SketchRequirement } from '../../coding/sketch-engine'
 import { isRecord } from '../../../shared/validators'
+import { PrdStructureError, prdStructureIssues } from '../../model/requirements-model'
 
 type GuideEventPublisher = (event: AgentEvent) => void
 
@@ -82,7 +83,8 @@ import { NO_QUERY_FALLBACK, PrdPipelineContext, buildResearchQueries, distillRes
  * 确认仪式——线上首测实测主路径 0 触发确认卡（排查报告 🔴1/🔴2，2026-08-27）。
  */
 export async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ started: boolean; prd_written: boolean }> {
-  const { requirements, publish } = pending
+  let requirements = pending.requirements
+  const { publish } = pending
   const signal = pending.signal
   const aborted = () => signal?.aborted ?? false
   // 委派审查运行期间的事件（delegation_*/tool_call 等）经此门控：停止后不再漏事件；
@@ -122,6 +124,12 @@ export async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ sta
         clarificationRequests = requests
       },
     )
+    // All convergence entrances now use the organized capabilities, including card/default choices.
+    requirements = backplane.requirements
+    pending = { ...pending, requirements }
+    if (backplane.requirements_model?.open_questions.length) {
+      clarificationRequests.push(...backplane.requirements_model.open_questions.map(question => ({ for: 'requirements_model', question })))
+    }
     if (clarificationRequests.length > 0 && shouldSuspendForEnrichmentClarification(pending.session_id)) {
       // 挂起：旁白先行（对齐内审旁白纪律——用户需要知道为什么还没出 PRD）+
       // requested 决策行（detail 存 requests 原文，孤儿恢复用）+ 追问卡 + 超时 timer；
@@ -260,6 +268,8 @@ export async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ sta
         // 日志失败不影响主线
       }
     }
+    const structuralIssues = prdStructureIssues(backplane)
+    if (structuralIssues.length) throw new PrdStructureError(structuralIssues)
     backplaneForReview = backplane
     syncDocuments(
       {
@@ -272,7 +282,17 @@ export async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ sta
     )
     prdWritten = true
   } catch (error) {
-    console.error('[guide] PRD 前移生成失败（不阻断草图）:', error)
+    {
+      const failure = error instanceof PrdStructureError ? error : new PrdStructureError([`需求生成或保存失败：${error instanceof Error ? error.message : String(error)}`])
+      if (!aborted()) {
+        try { updateProject(pending.project_id, { current_stage: 'blocked_for_user_decision' }) } catch { /* project may have been removed */ }
+        gatedPublish(makeGuideEvent(eventInput, 'message_delta', { text: `${failure.message}。本次未进入确认或实现；补充相关信息或恢复渠道后可以重试。` }))
+        gatedPublish(makeGuideEvent(eventInput, 'message_completed', { subtype: 'error' }))
+        gatedPublish(makeGuideEvent(eventInput, 'stage_changed', { stage: 'blocked_for_user_decision' }))
+        try { recordDecision({ project_id: pending.project_id, session_id: pending.session_id, entry: { type: 'prd_structure_blocked', title: 'PRD 结构检查未通过', why: failure.message, detail: { issues: failure.issues } } }) } catch { /* diagnostics cannot restart a failed generation */ }
+      }
+      return { started: false, prd_written: false }
+    }
   }
 
   // PRD 内审门（AC-Lite，2026-09-01）：PRD 落盘后、草图前。攻击→修订→复核闭环，
@@ -328,7 +348,7 @@ export async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ sta
     }
     const review = await runPrdReviewGate({
       backplane: backplaneForReview,
-      confirmedRequirements: requirements,
+      confirmedRequirements: backplaneForReview.requirements,
       query: pending.query ?? NO_QUERY_FALLBACK,
       env: reviewEnv,
       sessionId: pending.session_id,
@@ -346,6 +366,7 @@ export async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ sta
     // user_confirmed_at），后续确认卡/草图任务全部改用修订稿。
     if (review.internalAudit?.converged && review.internalAudit.revisedBackplane) {
       backplaneForReview = review.internalAudit.revisedBackplane
+      requirements = backplaneForReview.requirements
       try {
         syncDocuments(
           {
@@ -489,6 +510,10 @@ export async function runPrdPipeline(pending: PrdPipelineContext): Promise<{ sta
       query: pending.query ?? NO_QUERY_FALLBACK,
       publish,
       ideas: reviewIdeas,
+      onScopeChange: async labels => {
+        appendSessionMessage(pending.session_id, { role: 'user', content: [{ type: 'text', text: `我在 PRD 确认卡采纳这些新需求：${labels.join('；')}` }], timestamp: Date.now(), metadata: { source: 'prd_adopted_ideas' } })
+        await runPrdPipeline({ ...pending, requirements: backplaneForReview!.requirements })
+      },
       // R2：模式随卡透出（agent=纯模型灵感建议）
       ideasMode: researchModeResolver(),
       signal,
@@ -575,6 +600,17 @@ export async function resolveRequirementConfirm(
     })
   }
   const finalRequirements = mergedRequirements
+
+  // Checkbox selections are real user decisions. Persist their meaning so the organizer cannot
+  // restore deliberately excluded capabilities merely because they appeared in the initial request.
+  const omitted = input.decision === 'confirm' && selected.length
+    ? pending.requirements.filter(item => !selected.some(chosen => chosen.id === item.id)) : []
+  const scopeLines = [
+    ...(input.decision === 'confirm' && finalRequirements.length ? [`我在需求确认中采纳：${finalRequirements.map(item => item.description).join('；')}`] : []),
+    ...omitted.map(item => `本轮暂不做：${item.description}`),
+    ...(input.decision === 'delegate' && adopted.length ? [`我采纳的新需求：${adopted.join('；')}`] : []),
+  ]
+  if (scopeLines.length) appendSessionMessage(pending.session_id, { role: 'user', content: [{ type: 'text', text: scopeLines.join('\n') }], timestamp: Date.now(), metadata: { source: 'requirement_selection', request_id: input.request_id } })
 
   recordDecision({
     project_id: input.project_id,

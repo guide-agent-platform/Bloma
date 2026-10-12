@@ -25,6 +25,7 @@ import { enrichRequirementsLlm, extractUserTexts, mergeEnrichment } from './requ
 import { recordDecision } from '../project/decision-log'
 import type { SDKQuery } from '../orchestration/orchestrator'
 import type { EnrichmentClarificationRequest } from './clarification'
+import { PrdStructureError, prdStructureIssues, projectRequirementsModel } from '../model/requirements-model'
 
 /**
  * PRD 收敛管线输入（MvpTaskInput 的结构子集）：resolvePrdBackplane 实际消费的
@@ -32,6 +33,8 @@ import type { EnrichmentClarificationRequest } from './clarification'
  * 与背板来源分流无关，收窄入参即锁定依赖边界）。
  */
 export interface PrdPipelineInput {
+  /** false is reserved for compatibility callers that explicitly preserve an existing frozen list. */
+  organize_requirements?: boolean
   project_id: string
   session_id: string
   channel_id?: string
@@ -63,6 +66,7 @@ export async function resolvePrdBackplane(
 ): Promise<PrdBackplane> {
   const materials = sessionMaterials(input.project_id, input.session_id)
   const materialText = renderMaterialContext(materials, input.session_id, true)
+  const organize = input.organize_requirements !== false
   const template = (): PrdBackplane =>
     buildPrdBackplane(findProject(input.project_id), requirements, 'sketch_confirmed')
 
@@ -88,6 +92,7 @@ export async function resolvePrdBackplane(
 
   if (!input.query) {
     noteFallback('no_query')
+    if (organize) throw new PrdStructureError(['需求提炼渠道不可用，不能将未整理的候选清单作为完整 PRD'])
     return template()
   }
   // 渠道+类别统一收口（runtime-fallback，T9）；prd 类别解析模型，主渠道不可用已尝试
@@ -100,6 +105,7 @@ export async function resolvePrdBackplane(
   })
   if (!resolution.env || !resolution.channel) {
     noteFallback('no_channel')
+    if (organize) throw new PrdStructureError(['需求提炼渠道不可用，请恢复渠道后重试'])
     return template()
   }
   const channel = resolution.channel
@@ -121,6 +127,8 @@ export async function resolvePrdBackplane(
   // 并行：PRD 元数据提取 + 功能项加厚互不依赖，共用同一渠道/env/对话
   const [llm, enriched] = await Promise.all([
     generatePrdLlm({
+      organize_requirements: organize,
+      existing_model: existing,
       ...(project.auto_named || project.name_source === 'user' || (project.name_source === undefined && project.name !== '未命名项目')
         ? { preferred_name: project.name } : {}),
       material_text: materialText,
@@ -135,7 +143,7 @@ export async function resolvePrdBackplane(
       signal: input.signal,
       onAttemptFailure,
     }).catch(() => null), // 防御性兜底：契约返回 null，但 abort/网络极端情形仍可能 throw，一并降级避免 Promise.all 整体 reject
-    enrichRequirementsLlm({
+    organize ? Promise.resolve(null) : enrichRequirementsLlm({
       material_text: materialText,
       session_id: input.session_id,
       requirements,
@@ -145,6 +153,8 @@ export async function resolvePrdBackplane(
       signal: input.signal,
     }, onClarification).catch(() => null), // 异常一律降级 null，绝不因 reject 阻断主链路
   ])
+
+  if (organize && !llm) throw new PrdStructureError([input.signal?.aborted ? '需求提炼已停止' : `结构化需求提炼失败${lastPrdFailure ? `（${lastPrdFailure.kind}：${lastPrdFailure.detail}）` : ''}，未生成可确认的 PRD`])
 
   const base = llm ?? template()
   if (llm?.name && !input.signal?.aborted) applyGeneratedProjectName(input.project_id, project.name, llm.name)
@@ -158,7 +168,7 @@ export async function resolvePrdBackplane(
   let enrichedRequirements: SketchRequirement[]
   let stats = { formatDropped: 0, groundingDropped: 0, prioritySuppressed: 0 }
   try {
-    const merged = mergeEnrichment(frozen, enriched, existing.requirements ?? [], userTexts)
+    const merged = organize ? { requirements: frozen, stats } : mergeEnrichment(frozen, enriched, existing.requirements ?? [], userTexts)
     enrichedRequirements = merged.requirements
     stats = merged.stats
   } catch {
@@ -189,7 +199,7 @@ export async function resolvePrdBackplane(
   // template_meta（注入点①）：LLM 背板不带模板元信息，按项目 template_type 兜底写入；
   // 若 base 已携带（重跑/迭代路径保留旧值）则原样保留。
   const currentName = findProject(input.project_id).name
-  return {
+  const result = projectRequirementsModel({
     ...base,
     name: currentName,
     // 请求期间用户可能手动改名；仅同步正式标题，不改正文需求或历史产物。
@@ -198,5 +208,11 @@ export async function resolvePrdBackplane(
     out_of_scope: [...new Set([...(llm?.out_of_scope ?? []), ...(project.scope_exclusions ?? [])])],
     ...(project.constraints?.length ? { constraints: [...new Set([...(llm?.constraints ?? []), ...project.constraints])] } : {}),
     template_meta: base.template_meta ?? backplaneTemplateMeta(base, project.template_type),
+  })
+  if (organize) {
+    // Open business questions are handled by the main pipeline's bounded clarification path.
+    const structural = prdStructureIssues(result).filter(issue => issue !== '仍有未处理的需求问题')
+    if (structural.length) throw new PrdStructureError(structural)
   }
+  return result
 }

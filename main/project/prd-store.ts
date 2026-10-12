@@ -25,6 +25,7 @@ import { describeEffect, describeTrigger, parseBehaviorAssertion } from '../veri
 import { readRequirements, assertInsideDocumentsDir } from './document-sync'
 import { normalizePrdDocumentNewlines, reconcilePrdDocumentPriorities } from '../model/prd-backplane'
 import { bindAcceptance, reconcileAcceptanceRevision, trustedAcceptance } from './requirement-contract'
+import { prdStructureIssues, projectRequirementsModel, validateRequirementsModel } from '../model/requirements-model'
 
 /**
  * DocumentEngine — 文档同步（对齐 api-spec §10.1 / architecture §7.3）。
@@ -166,6 +167,7 @@ export function markPrdUserConfirmed(projectId: string): PrdBackplane | null {
     if (!existsSync(path)) return null
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as PrdBackplane
     if (!parsed || !Array.isArray(parsed.requirements)) return null
+    if (prdStructureIssues(parsed).length) return null
     const confirmed: PrdBackplane = { ...parsed, user_confirmed_at: new Date().toISOString() }
     writeFileSync(path, renderPrdJson(confirmed), 'utf8')
     return confirmed
@@ -257,6 +259,7 @@ export function renderPrdJson(backplane: PrdBackplane): string {
 
 /** Enrichment and review can change priorities after initial document creation. */
 export function reconcilePrdBackplane(backplane: PrdBackplane): PrdBackplane {
+  if (backplane.requirements_model) return validateRequirementsModel(backplane.requirements_model, backplane.requirements).length ? backplane : projectRequirementsModel(backplane)
   if (typeof backplane.prd_document !== 'string') return backplane
   return {
     ...backplane,

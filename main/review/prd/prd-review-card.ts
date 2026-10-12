@@ -23,6 +23,9 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentEvent, AgentSendMessageInput } from '../../../shared/types'
 import { recordDecision } from '../../project/decision-log'
+import { syncDocuments } from '../../project/document-engine'
+import { prdStructureIssues } from '../../model/requirements-model'
+import { runPrdReviewGate } from './prd-review-gate'
 import { publishPrdConfirmCard } from '../../guide/prd-confirm'
 import type { PrdBackplane } from '../../coding/sketch-engine'
 import { defaultConstraintLevel } from '../../coding/sketch-engine'
@@ -82,6 +85,7 @@ export function buildReviewQuestions(issues: PrdReviewIssue[]): ReviewQuestion[]
 
 /** 审查未过：记录 pending + 决策日志 + 发逐题选择题决策卡（内审元数据如实标注）。 */
 export function publishPrdReviewCard(opts: {
+  delegationExhausted?: boolean
   input: { request_id: string; session_id: string; project_id: string; mode: AgentSendMessageInput['mode']; channel_id?: string }
   requirements: Array<{ id: string; description: string }>
   issues: PrdReviewIssue[]
@@ -99,6 +103,7 @@ export function publishPrdReviewCard(opts: {
   const audit = outcome.internalAudit
 
   pendingPrdReviews.set(input.project_id, {
+    delegationExhausted: opts.delegationExhausted,
     request_id: input.request_id,
     session_id: input.session_id,
     project_id: input.project_id,
@@ -150,7 +155,7 @@ export function publishPrdReviewCard(opts: {
       // 逐题选择题（2026-08-30）：每题问题 + 一组可点选项（含「这条没问题」兑底）
       review_questions: buildReviewQuestions(serious),
       // 全局出口：不想逐题作答时一次性把决定权交给向导
-      global_options: [
+      global_options: opts.delegationExhausted ? [] : [
         { id: PRD_REVIEW_OPTION_DELEGATE_ALL, label: '全部交给向导决定', description: '按常见做法统一改' },
       ],
       // 保留原 issues（内部裁决/降级兼容，前端不回退到旧两按钮时仅作追溯）
@@ -188,6 +193,13 @@ export function resolvePrdReviewCardAnswer(
  * 转发 PRD 确认门把背板四段式摊给用户过目，确认后才开草图；决策日志留痕。
  * @param note 可选：区分「全部忽略」与「全部交给向导决定」的 reviewNote 文案（缺省按忽略处理）。 */
 export async function resumePrdReviewOverride(input: AgentSendMessageInput, note?: { logTitle?: string; logWhy?: string; reviewNote?: string }): Promise<boolean> {
+  if (note) return resumePrdReviewDelegated(input)
+  const candidate = pendingPrdReviews.get(input.project_id)
+  if (candidate && prdStructureIssues(candidate.backplane).length) {
+    candidate.publish(makeReviewEvent(candidate, 'message_delta', { text: '正文与需求模型仍有结构问题，不能通过忽略来确认。请先补充或修订需求。' }))
+    candidate.publish(makeReviewEvent(candidate, 'message_completed', { subtype: 'error' }))
+    return true
+  }
   const pending = takePendingPrdReview(input.project_id)
   if (!pending) return false
   const serious = pending.issues.filter((issue) => issue.severity === 'blocking' || issue.severity === 'major')
@@ -196,16 +208,14 @@ export async function resumePrdReviewOverride(input: AgentSendMessageInput, note
     session_id: pending.session_id,
     entry: {
       type: 'prd_review_overridden',
-      title: note?.logTitle ?? '用户忽略内审残留问题，转入 PRD 过目',
-      why: note?.logWhy ?? '用户在 PRD 审查决策卡选择「忽略问题，继续生成」；忽略审查问题不等于确认过 PRD，转入确认门过目后开工',
+      title: '用户忽略内审残留问题，转入 PRD 过目',
+      why: '用户明确选择忽略残留问题；结构问题不可豁免，仍须过目 PRD 后开工',
       detail: {
         ignored_issues: serious.map((issue) => issue.claim),
       },
     },
   })
-  const ack = note
-    ? '好的，已按你的选择处理内审发现的问题。这是按你的需求整理的 PRD，请你过目，确认无误后我再开始画草图。'
-    : '好的，已按你的选择忽略内审发现的残留问题。这是按你的需求整理的 PRD，请你过目，确认无误后我再开始画草图。'
+  const ack = '好的，已按你的选择忽略内审发现的残留问题。这是按你的需求整理的 PRD，请你过目，确认无误后我再开始画草图。'
   pending.publish(makeReviewEvent(pending, 'message_delta', { text: ack }))
   pending.publish(makeReviewEvent(pending, 'message_completed', { subtype: 'success' }))
   publishPrdConfirmCard({
@@ -221,8 +231,42 @@ export async function resumePrdReviewOverride(input: AgentSendMessageInput, note
     query: pending.query,
     publish: pending.publish,
     signal: pending.signal,
-    reviewNote: note?.reviewNote ?? `已忽略 ${serious.length} 个内审残留问题`,
+    reviewNote: `已忽略 ${serious.length} 个内审残留问题`,
   })
+  return true
+}
+
+/** Delegation means an actual bounded repair/recheck, never silent waiver of unresolved issues. */
+export async function resumePrdReviewDelegated(input: AgentSendMessageInput): Promise<boolean> {
+  const pending = takePendingPrdReview(input.project_id)
+  if (!pending) return false
+  if (pending.delegationExhausted) { pendingPrdReviews.set(input.project_id, pending); return true }
+  pending.publish(makeReviewEvent(pending, 'message_delta', { text: '正在按你的授权修订并复核剩余问题，完成后再展示 PRD。' }))
+  const outcome = await runPrdReviewGate({
+    backplane: pending.backplane, confirmedRequirements: pending.backplane.requirements,
+    query: pending.query, env: pending.env, sessionId: pending.session_id, projectId: pending.project_id,
+    requestId: pending.request_id, publish: pending.publish, signal: pending.signal, mode: pending.mode,
+  })
+  if (pending.signal?.aborted || outcome.aborted) return true
+  const backplane = outcome.internalAudit?.revisedBackplane ?? pending.backplane
+  if (outcome.verdict === 'pass' && outcome.mode === 'llm' && !outcome.degraded && !prdStructureIssues(backplane).length) {
+    try {
+      syncDocuments({ request_id: pending.request_id, session_id: pending.session_id, project_id: pending.project_id, checkpoint: 'requirement_confirmed' }, backplane)
+      recordDecision({ project_id: pending.project_id, session_id: pending.session_id, entry: { type: 'prd_review_delegated', title: '向导修订与复核完成', why: '用户授权处理残留问题；实际复核通过后转 PRD 过目，没有忽略问题', detail: { revised: Boolean(outcome.internalAudit?.revisedBackplane) } } })
+      pending.publish(makeReviewEvent(pending, 'message_delta', { text: '复核已通过，请查看这份 PRD，确认范围与业务规则后再开工。' }))
+      pending.publish(makeReviewEvent(pending, 'message_completed', { subtype: 'success' }))
+      publishPrdConfirmCard({ input: pending, backplane, requirements: backplane.requirements, query: pending.query, env: pending.env, publish: pending.publish, signal: pending.signal })
+      return true
+    } catch {
+      pending.publish(makeReviewEvent(pending, 'message_delta', { text: '修订结果没有保存成功，本次没有进入确认或开工。' }))
+    }
+  }
+  pending.publish(makeReviewEvent(pending, 'message_delta', { text: '本轮修订尚未收敛，剩余问题没有被忽略。请对这些具体问题选择处理方式或补充说明。' }))
+  pending.publish(makeReviewEvent(pending, 'message_completed', { subtype: 'success' }))
+  const issues = outcome.issues.length ? outcome.issues : pending.issues
+  publishPrdReviewCard({ input: pending, requirements: pending.backplane.requirements, backplane: pending.backplane, issues,
+    outcome: { ...outcome, verdict: 'needs_revision', issues }, query: pending.query, env: pending.env,
+    publish: pending.publish, signal: pending.signal, delegationExhausted: true })
   return true
 }
 

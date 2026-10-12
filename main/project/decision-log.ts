@@ -64,6 +64,8 @@ export type DecisionType =
   | 'requirement_earsified'
   | 'template_override_rejected'
   | 'prd_backplane_fallback'
+  | 'prd_structure_blocked'
+  | 'prd_review_delegated'
   | 'enrichment_clarification_requested'
   | 'enrichment_clarification_answered'
   | 'enrichment_clarification_exhausted'

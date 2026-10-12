@@ -75,7 +75,7 @@ export function buildGuideTools(projectId: string, options: GuideToolsOptions): 
   const guide_decide: AgentLoopTool = {
     name: 'guide_decide',
     description:
-      '提交本轮结构化决策（每轮至多一次，是收敛的唯一出口）。action=ask_clarification 时带 questions（2~4 条互斥具体选项，最后一条固定 auto「你帮我决定」）；action=confirm_requirements 时带 requirements（3~5 条主线闭环功能项，origin 标 user/guide）与 research_queries（≤2 条）；action=generate_sketch 仅在需求已成型时使用。reply 是给用户看的最终话术（≤200 字，口语化）。',
+      '提交本轮结构化决策（每轮至多一次，是收敛的唯一出口）。action=ask_clarification 时带 questions（2~4 条互斥具体选项，最后一条固定 auto「你帮我决定」）；action=confirm_requirements 时带 requirements（按业务边界提炼候选能力，不限制为3~5条，不把项目主题或完整原话当成一个功能，origin 标 user/guide）与 research_queries（≤2 条）；action=generate_sketch 仅在需求已成型时使用。reply 是给用户看的最终话术（≤200 字，口语化）。',
     input_schema: {
       type: 'object',
       properties: {

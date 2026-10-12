@@ -26,6 +26,7 @@ import { nextRequirementId } from '../coding/programming-orchestrator'
 import type { PrdReviewIssue } from './prd-review'
 import { reconcileAcceptanceRevision } from '../project/requirement-contract'
 import { buildPrdDocumentFallback } from '../model/prd-backplane'
+import { parseOrganizedRequirements, projectRequirementsModel, validateRequirementsModel } from '../model/requirements-model'
 
 // =========================================================================
 // Defender system prompt
@@ -42,9 +43,10 @@ export const DEFENDER_SYSTEM_PROMPT = [
   '修复轮（非"重试/返工"）。JSON 字段与枚举值不变，只约束文字表述。',
   '',
   '【铁律（违反即整轮作废）】',
-  '- F-001 是主题锚点：id 与 description 一字不改',
+  '- 旧版（无 requirements_model）F-001 是主题锚点，不改 description；新版 F-001 是独立能力，目标在 requirements_model.goal，编号不得换义或按位置重排',
   '- 已有功能项一个都不能删（id 不许消失）；description 只许澄清措辞、不许偷换语义；id 不许重复（重复会使校验歧义，整稿作废）',
-  '- 新增功能项至多一个，id 必须用任务给出的 next_id（补闭环用，如「只有添加没有查看」补查看项）',
+  '- 旧版新增功能至多一个，用 next_id；新版允许补齐用户已经要求的多项能力，从 next_id 连续递增，并同步流程、规则、场景和来源覆盖，不能扩用户范围',
+  '- assumptions 可修订，但新增假设须公开，不得伪装成用户约束。requirements_model 的 sources 原文不可改；acceptance/document 由宿主生成，不另写一套',
   '- 不新增用户没说过的功能、不扩范围（out_of_scope 只许加不许减）',
   '- constraints（用户约束）原样保留：不许删也不许新增——约束只能来自用户原话，修订者无权代用户声明',
   '- 不虚构用户原话：拿不准就保留原文，在处置说明里写 rejected',
@@ -72,6 +74,7 @@ export interface DefenderDisposition {
 export interface DefenderDraft {
   backplane: PrdBackplane
   dispositions: DefenderDisposition[]
+  write_report?: { accepted_fields: string[]; rejected_fields: string[] }
 }
 
 export type DefenderOutcome =
@@ -89,7 +92,7 @@ export type DefenderFailure = Extract<DefenderOutcome, { ok: false }>['failure']
  * 构造 Defender 的唯一写工具。草稿进闭包变量（内存副本），绝不写盘——
  * requirement_confirmed 检查点上的 prd.json 不被触碰，修订稿重走用户过目门。
  */
-export function buildWritePrdDraftTool(onDraft: (draft: DefenderDraft) => void): {
+export function buildWritePrdDraftTool(onDraft: (draft: DefenderDraft) => void, original?: PrdBackplane): {
   tool: import('../agent/loop/agent-loop').AgentLoopTool
   hasDraft: () => boolean
 } {
@@ -131,10 +134,13 @@ export function buildWritePrdDraftTool(onDraft: (draft: DefenderDraft) => void):
         if (!backplane || typeof backplane !== 'object' || !Array.isArray(dispositions)) {
           return { output: '参数不完整：需要 backplane 对象与 dispositions 数组。', isError: true }
         }
+        const validated = original ? validateDefenderDraft(original, backplane) : undefined
+        if (validated && !validated.ok) return { output: `草稿未接收：${validated.violations.join('；')}。请修订后重新提交。`, isError: true }
         submitted = true
-        onDraft({ backplane: backplane as unknown as PrdBackplane, dispositions: parseDispositions(dispositions) })
+        onDraft({ backplane: validated?.ok ? validated.draft.backplane : backplane as unknown as PrdBackplane, dispositions: parseDispositions(dispositions),
+          ...(validated?.ok ? { write_report: validated.draft.write_report } : {}) })
         return {
-          output: '草稿已接收（内存副本，未写盘）。系统将做代码级校验：F-001 锚点不变、原 id 不可删、新 id 限 next_id、确认状态字段会被剥除。请输出逐条处置总结收尾。',
+          output: `草稿已接收（内存副本，未写盘，仍须复核与确认）。${validated?.ok ? `字段处理：${JSON.stringify(validated.draft.write_report)}` : '系统将继续校验结构。'}请输出逐条处置总结收尾。`,
         }
       },
     },
@@ -171,6 +177,7 @@ const BACKPLANE_KNOWN_FIELDS = new Set([
   'frozen_at', 'user_confirmed_at', 'sketch_confirmed_at',
   'pages', 'glossary', 'personas', 'data_model', 'interface_spec', 'template_meta', 'section_provenance',
   'prd_document', 'gdd', 'shape', 'ux', 'ai_capabilities', 'key_tasks',
+  'requirements_model',
 ])
 
 export function validateDefenderDraft(original: PrdBackplane, raw: unknown): { ok: true; draft: DefenderDraft } | { ok: false; violations: string[] } {
@@ -179,6 +186,7 @@ export function validateDefenderDraft(original: PrdBackplane, raw: unknown): { o
     return { ok: false, violations: ['背板必须是 JSON 对象'] }
   }
   const draft = raw as Record<string, unknown>
+  const hasModel = Boolean(original.requirements_model)
 
   // ① schema：必填形状（name/positioning 非空串、requirements 非空数组、每项 id+description）
   if (typeof draft.name !== 'string' || !draft.name.trim()) violations.push('name 缺失或为空')
@@ -204,7 +212,15 @@ export function validateDefenderDraft(original: PrdBackplane, raw: unknown): { o
 
   const originalIds = new Set((original.requirements ?? []).map((item) => item.id))
   const draftItems: SketchRequirement[] = Array.isArray(requirements) ? (requirements as SketchRequirement[]) : []
-  const draftIds = draftItems.map((item) => item.id)
+  const draftIds = draftItems.map((item) => item?.id)
+  for (const field of ['assumptions', 'constraints', 'out_of_scope']) {
+    if (draft[field] !== undefined && (!Array.isArray(draft[field]) || (draft[field] as unknown[]).some(value => typeof value !== 'string'))) violations.push(`${field} 必须是字符串数组`)
+  }
+  if (hasModel) {
+    const model = draft.requirements_model ?? original.requirements_model
+    violations.push(...validateRequirementsModel(model, draftItems))
+    if (JSON.stringify((model as PrdBackplane['requirements_model'])?.sources) !== JSON.stringify(original.requirements_model?.sources)) violations.push('requirements_model.sources 原始来源不可改写')
+  }
 
   // ①′ id 唯一性：重复 id 使锚点/删项/新增三道校验全部歧义（结构性穿透），一律拒收
   const duplicateIds = [...new Set(draftIds.filter((id, index) => draftIds.indexOf(id) !== index))]
@@ -215,9 +231,9 @@ export function validateDefenderDraft(original: PrdBackplane, raw: unknown): { o
   // ② F-001 主题锚点不变（id 存在 + description 逐字一致）
   const anchorOriginal = (original.requirements ?? []).find((item) => item.id === 'F-001')
   const anchorDraft = draftItems.find((item) => item.id === 'F-001')
-  if (!anchorOriginal || !anchorDraft) {
+  if (!hasModel && (!anchorOriginal || !anchorDraft)) {
     violations.push('F-001 主题锚点缺失')
-  } else if (anchorOriginal.description !== anchorDraft.description) {
+  } else if (!hasModel && anchorOriginal && anchorDraft && anchorOriginal.description !== anchorDraft.description) {
     violations.push(`F-001 主题锚点 description 被改动（原：「${anchorOriginal.description.slice(0, 60)}」）`)
   }
 
@@ -246,7 +262,11 @@ export function validateDefenderDraft(original: PrdBackplane, raw: unknown): { o
   // ④ 新增 id ⊆ {nextRequirementId(原)}（max+1 语义、单一新增，不猜号）
   const allowedNewId = nextRequirementId(original.requirements ?? [])
   const newIds = draftIds.filter((id) => !originalIds.has(id))
-  if (newIds.length > 1 || (newIds.length === 1 && newIds[0] !== allowedNewId)) {
+  const nextNumber = Number(allowedNewId.slice(2))
+  const validNewIds = hasModel
+    ? newIds.every((id, index) => id === `F-${String(nextNumber + index).padStart(3, '0')}`)
+    : newIds.length <= 1 && (!newIds.length || newIds[0] === allowedNewId)
+  if (!validNewIds) {
     violations.push(`新增功能项 id 非法（${newIds.join(', ') || '无'}）：仅允许新增 ${allowedNewId} 一个项`)
   }
 
@@ -269,15 +289,29 @@ export function validateDefenderDraft(original: PrdBackplane, raw: unknown): { o
     name: typeof draft.name === 'string' && draft.name.trim() ? draft.name : original.name,
     positioning: typeof draft.positioning === 'string' && draft.positioning.trim() ? draft.positioning : original.positioning,
     requirements: draftItems,
+    assumptions: Array.isArray(draft.assumptions) ? draft.assumptions as string[] : original.assumptions,
+    ...(hasModel ? { requirements_model: (draft.requirements_model ?? original.requirements_model) as PrdBackplane['requirements_model'] } : {}),
     // 修订轮不改这两类声明域的语义：out_of_scope 只许加不许减、约束不许删不许伪造新增
     out_of_scope: mergeOutofScope(original.out_of_scope ?? [], (draft.out_of_scope as string[]) ?? []),
     constraints: mergeConstraints(original.constraints ?? [], (draft.constraints as string[]) ?? []),
   }
   delete cleaned.user_confirmed_at
   delete cleaned.frozen_at
-  const reconciled = reconcileAcceptanceRevision(original, cleaned)
-  reconciled.prd_document = buildPrdDocumentFallback(reconciled)
-  return { ok: true, draft: { backplane: reconciled, dispositions: [] } }
+  if (hasModel) {
+    const organized = parseOrganizedRequirements(cleaned, original.requirements_model!.sources)
+    if (!organized) return { ok: false, violations: ['修订后的需求模型与验收场景无效'] }
+    cleaned.requirements = organized.requirements
+    cleaned.requirements_model = organized.model
+  }
+  let reconciled = reconcileAcceptanceRevision(original, cleaned)
+  if (hasModel) {
+    // A changed business scenario is a changed acceptance contract even when the feature description is stable.
+    reconciled = reconcileAcceptanceRevision({ ...original, acceptance: {}, acceptance_bindings: {} }, cleaned)
+    reconciled = projectRequirementsModel(reconciled)
+  } else reconciled.prd_document = buildPrdDocumentFallback(reconciled)
+  const accepted_fields = ['name', 'positioning', 'requirements', 'assumptions', 'out_of_scope', 'constraints', ...(hasModel ? ['requirements_model'] : [])]
+  const rejected_fields = Object.keys(draft).filter(field => !accepted_fields.includes(field) && JSON.stringify(draft[field]) !== JSON.stringify((original as unknown as Record<string, unknown>)[field]))
+  return { ok: true, draft: { backplane: reconciled, dispositions: [], write_report: { accepted_fields, rejected_fields } } }
 }
 
 /** out_of_scope 白名单合并：只允许追加（防「偷偷把不做的事又拿回来做」）。 */
@@ -333,14 +367,7 @@ export function buildDefenderTask(opts: {
   const lines: string[] = [
     '【原 PRD 背板 JSON（修订底稿）】',
     JSON.stringify(
-      {
-        name: backplane.name,
-        positioning: backplane.positioning,
-        requirements: backplane.requirements,
-        out_of_scope: backplane.out_of_scope,
-        constraints: backplane.constraints,
-        assumptions: backplane.assumptions,
-      },
+      backplane,
       null,
       2,
     ),

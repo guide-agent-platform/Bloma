@@ -129,7 +129,7 @@ describe('让渡话术表 isAutoDelegationText', () => {
 
 
 describe('让渡文案不进需求清单（F-002 污染根治，2026-10-07）', () => {
-  it('resolveAutoDelegation：有主题时清单只含主题，让渡文案不再是 F-002', async () => {
+  it('resolveAutoDelegation：主题与功能分离，让渡入口将能力提炼交给PRD组织器', async () => {
     const { resolveAutoDelegation } = await import('../../main/guide/stages/clarify-flow')
     const input = {
       sessionId: 's-f002',
@@ -139,13 +139,11 @@ describe('让渡文案不进需求清单（F-002 污染根治，2026-10-07）', 
       metadata: {},
     } as unknown as AgentSendMessageInput
     const route = resolveAutoDelegation(input, '做一个明星人物 AI 形象创作平台')
-    expect(route?.requirements).toEqual([
-      { id: 'F-001', description: '做一个明星人物 AI 形象创作平台' },
-    ])
+    expect(route?.requirements).toEqual([])
     expect(JSON.stringify(route?.requirements)).not.toContain('通用实用软件工具')
   })
 
-  it('resolveAutoDelegation：无主题时占位为标记形态（声明非功能需求），不再是名词实体', async () => {
+  it('resolveAutoDelegation：无主题也不制造占位功能', async () => {
     const { resolveAutoDelegation } = await import('../../main/guide/stages/clarify-flow')
     const input = {
       sessionId: 's-f002b',
@@ -155,8 +153,7 @@ describe('让渡文案不进需求清单（F-002 污染根治，2026-10-07）', 
       metadata: {},
     } as unknown as AgentSendMessageInput
     const route = resolveAutoDelegation(input, undefined)
-    expect(route?.requirements.length).toBe(1)
-    expect(route?.requirements[0]?.description).toContain('本条不是功能需求')
+    expect(route?.requirements).toEqual([])
   })
 
   it('isDelegationPlaceholder：旧文案（存量会话）与新标记形态都剔除，不进澄清收集清单', async () => {

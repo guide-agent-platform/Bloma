@@ -6,6 +6,9 @@ import { join } from 'node:path'
 import type { ChildProcess } from 'node:child_process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { decideBlocks } from '../support/guide-decide-stream'
+import { organizedPrd } from '../support/organized-prd'
+import { readRequirementSources } from '../../main/guide/requirements-organization'
+import type { SDKQuery } from '../../main/orchestration/orchestrator'
 
 // 2026-09-16 FILE-LEVEL 钉：BLOMA_GUIDE_LOOP 缺省翻转 on，本文件全部用例锁旧单次 JSON 路径
 import { runAgent, setAgentStreamPublisher, setSDKQueryForTests } from '../../main/orchestration/orchestrator'
@@ -111,7 +114,7 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     )
     const events: AgentEvent[] = []
     setAgentStreamPublisher((event) => events.push(event))
-    setSDKQueryForTests(async function* () {
+    setSDKQueryForTests(withOrganizedModel(async function* () {
       yield {
         type: 'assistant',
         message: {
@@ -120,7 +123,7 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
         },
       }
       yield { type: 'result', subtype: 'success' }
-    })
+    }, '记录收入支出'))
     setSandboxRuntimeForTests({
       portAllocator: async () => 3101,
       healthCheck: async () => true,
@@ -357,6 +360,10 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
   })
 
   it('卡片答案防 id 撞车：模型卡片复用 daily 但 label 含义不同 → 需求用点选原文，不用预置扩写', async () => {
+    setSDKQueryForTests(withOrganizedModel(async function* () {
+      yield { type: 'assistant', message: { role: 'assistant', content: decideBlocks('{"action":"generate_sketch","reply":"整理音乐节排期","requirements":[{"id":"F-001","description":"音乐节排期"}]}') } }
+      yield { type: 'result', subtype: 'success' }
+    }, '音乐节排期'))
     const home = mkdtempSync(join(tmpdir(), 'proma-guide-card-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
@@ -387,6 +394,7 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     // 第二轮：模型弹的卡片 id 恰好是 daily，但用户点的是「音乐节排期」
     await runAgent({
       request_id: 'req-card-2',
+      channel_id: 'test-channel',
       session_id: 'session-card',
       project_id: project.project_id,
       content: '音乐节排期',
@@ -404,8 +412,7 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
       .map((item) => item.story ?? '')
       .join('\n')
     // 需求以主题为锚点、以点选原文为方向，绝不映射到「日常生活工具」预置文案
-    expect(stories).toContain('帮我做个东西')
-    expect(stories).toContain('音乐节排期')
+    expect(JSON.stringify(prdCard!.payload)).toContain('音乐节排期')
     expect(stories).not.toContain('日常生活工具')
     // 挂起不开工：草图等用户确认 PRD 后才生成
     expect(events.find((event) => event.type === 'sketch_ready')).toBeUndefined()
@@ -470,7 +477,7 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     expect(findProject(project.project_id).current_stage).toBe('blocked_for_user_decision')
   })
 
-  it('卡片答案（你帮我决定）统一走让渡流：card_auto 留痕 + PRD 确认卡挂起，不再直接开草图', async () => {
+  it('让渡不绕过提炼：无可用PRD渠道时留痕并暂停，不把占位清单当完整PRD', async () => {
     const home = mkdtempSync(join(tmpdir(), 'proma-guide-'))
     process.env.PROMA_HOME = home
     const project = createProject({ request_id: 'req-project', mode: 'quick' })
@@ -521,7 +528,8 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
     const prdCard = events.find(
       (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
     )
-    expect(prdCard).toBeTruthy()
+    expect(prdCard).toBeUndefined()
+    expect(JSON.stringify(events)).toContain('需求提炼渠道不可用')
     expect(events.find((event) => event.type === 'sketch_ready')).toBeUndefined()
     expect(findProject(project.project_id).current_stage).toBe('blocked_for_user_decision')
 
@@ -573,7 +581,7 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
 
     // 第二轮：澄清答案「网页端」→ 模型 generate_sketch 却把主题丢了，只返回「网页端」
     // （审查腿按 system 分流返回通过 JSON，避免规则门降级拦截，保证走到草图断言）
-    setSDKQueryForTests(async function* (_p: string) {
+    setSDKQueryForTests(withOrganizedModel(async function* (_p: string) {
       if (_p.includes('文档攻击者')) {
         yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '{"issues":[]}' }] } }
         yield { type: 'result', subtype: 'success' }
@@ -587,7 +595,7 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
         },
       }
       yield { type: 'result', subtype: 'success' }
-    })
+    }, '生成与播放合成音乐'))
     await runAgent({
       request_id: 'req-theme-2',
       session_id: 'session-theme',
@@ -604,6 +612,7 @@ describe('GuideAgentService through AgentOrchestrator', { timeout: 30_000 }, () 
       (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'prd_confirm',
     )
     expect(confirmCard).toBeTruthy()
+    expect(JSON.stringify(confirmCard!.payload)).toContain('生成与播放合成音乐')
     await runAgent({
       request_id: 'req-theme-2c',
       session_id: 'session-theme',
@@ -629,6 +638,26 @@ async function* defaultTestQuery(): AsyncGenerator<SDKMessage> {
     message: { role: 'assistant', content: [{ type: 'text', text: 'test' }] },
   }
   yield { type: 'result', subtype: 'success' }
+}
+
+function withOrganizedModel(query: SDKQuery, description: string): SDKQuery {
+  return async function* (prompt, options) {
+    if (JSON.stringify(options.history ?? []).includes('原话、目标、功能是不同层次')) {
+      const sources = readRequirementSources(options.sessionId ?? '')
+      const value = organizedPrd([{ id: 'F-001', description }], sources[0]?.text ?? '用户任务')
+      value.requirements_model.sources = sources
+      value.requirements_model.coverage = sources.map(source => ({ source_id: source.id, feature_ids: ['F-001'], rule_ids: [], disposition: 'included', reason: '用户指定的任务及澄清进入实现范围' }))
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: JSON.stringify({ ...value, positioning: description, assumptions: [], out_of_scope: [] }) }] } }
+      yield { type: 'result', subtype: 'success' }
+      return
+    }
+    if (prompt.includes('六维')) {
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '{"issues":[]}' }] } }
+      yield { type: 'result', subtype: 'success' }
+      return
+    }
+    yield* query(prompt, options)
+  }
 }
 
 function makeChildProcess(): ChildProcess {

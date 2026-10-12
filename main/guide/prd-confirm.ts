@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { prdStructureIssues } from '../model/requirements-model'
 import type { AgentEvent, AgentSendMessageInput, ResearchIdea } from '../../shared/types'
 import { recordDecision } from '../project/decision-log'
 import { trackAnalytics } from '../delivery/track-analytics'
@@ -38,6 +39,8 @@ export const PRD_CONFIRM_OPTION_DISMISS = 'prd_confirm_dismiss'
  *  requirements 用完整 SketchRequirement（含 behavior_assertions）——GWT 行为探针从
  *  sketch_generated 事件快照派生场景，瘦身清单会使探针整体退化为存在性检查（B-1）。 */
 interface PendingPrdConfirm {
+  backplane: PrdBackplane
+  onScopeChange?: (labels: string[]) => Promise<void>
   request_id: string
   session_id: string
   project_id: string
@@ -74,6 +77,7 @@ export function hasPendingPrdConfirm(projectId: string): boolean {
  * P0 断言展开、完整视图 longterm 默认展开 / quick 折叠（渲染端控制）。
  */
 export function publishPrdConfirmCard(opts: {
+  onScopeChange?: (labels: string[]) => Promise<void>
   input: { request_id: string; session_id: string; project_id: string; mode: AgentSendMessageInput['mode']; channel_id?: string }
   backplane: PrdBackplane
   requirements: SketchRequirement[]
@@ -95,12 +99,14 @@ export function publishPrdConfirmCard(opts: {
   const { input, backplane, reviewNote } = opts
   const ideas = opts.ideas ?? []
   pendingPrdConfirms.set(input.project_id, {
+    backplane,
+    onScopeChange: opts.onScopeChange,
     request_id: input.request_id,
     session_id: input.session_id,
     project_id: input.project_id,
     mode: input.mode,
     channel_id: input.channel_id,
-    requirements: opts.requirements,
+    requirements: backplane.requirements,
     ideas,
     query: opts.query,
     env: opts.env,
@@ -181,11 +187,28 @@ export function resolvePrdConfirmCardAnswer(
 /** 用户确认：勾选采纳的市调想法先并入 PRD（盘上+待决清单）→ user_confirmed_at 落盘
  * （失败不阻断）→ 决策留痕 → 开草图（2026-08-29 灵感参考：四段式卡同样可采纳想法）。 */
 export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): Promise<boolean> {
+  const candidate = pendingPrdConfirms.get(input.project_id)
+  if (candidate) {
+    const issues = prdStructureIssues(candidate.backplane)
+    if (issues.length) {
+      candidate.publish(makeConfirmEvent(candidate, 'message_delta', { text: `需求尚不能确认：${issues.join('；')}。请先调整需求，解决后再确认。` }))
+      candidate.publish(makeConfirmEvent(candidate, 'message_completed', { subtype: 'error' }))
+      return true
+    }
+  }
   const pending = takePendingPrdConfirm(input.project_id)
   if (!pending) return false
   // 勾选采纳：只认 pending 里真实存在的 label（防篡改），去重后并入
   const adopted = (input.metadata?.adopted_ideas ?? [])
     .filter((label) => pending.ideas.some((idea) => idea.label === label))
+  if (adopted.length && pending.backplane.requirements_model) {
+    if (pending.onScopeChange) await pending.onScopeChange([...new Set(adopted)])
+    else {
+      pendingPrdConfirms.set(input.project_id, pending)
+      pending.publish(makeConfirmEvent(pending, 'message_delta', { text: '新增能力需要先补齐流程、规则与验收。请通过调整需求采纳这些想法，再确认新版 PRD。' }))
+    }
+    return true
+  }
   let sketchRequirements: SketchRequirement[] = pending.requirements
   if (adopted.length > 0) {
     const additions = adopted.map((label) => ({
@@ -207,7 +230,12 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
     }
   }
   const confirmed = markPrdUserConfirmed(input.project_id)
-  if (!confirmed) console.error('[prd-confirm] user_confirmed_at 落盘失败（prd.json 缺失/损坏），继续开草图')
+  if (!confirmed) {
+    pendingPrdConfirms.set(input.project_id, pending)
+    pending.publish(makeConfirmEvent(pending, 'message_delta', { text: '需求确认未保存成功，或文档结构发生冲突。本次没有开工，请先调整需求或重试确认。' }))
+    pending.publish(makeConfirmEvent(pending, 'message_completed', { subtype: 'error' }))
+    return true
+  }
   // B-1：草图任务清单与 prd.json 同源——盘上权威清单含 enrichment 断言与采纳项，
   // GWT 探针读 sketch_generated 事件快照派生场景，瘦身清单会使主路径行为探针
   // 整体退化为「页面有元素即过」的存在性检查（与 judge 对账断言永久失配）。
@@ -222,7 +250,9 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
   try {
     const backplaneForEarsify = confirmed ?? undefined
     const source = backplaneForEarsify?.requirements ?? (sketchRequirements as SketchRequirement[])
-    if (pending.query) {
+    // New-model scenarios already define given/when/then. Do not create a second post-confirmation
+    // wording authority; legacy projects retain their existing EARS compatibility path.
+    if (pending.query && !confirmed.requirements_model) {
       const resolution = resolveChannelEnv({
         channelId: pending.channel_id,
         category: 'prd',

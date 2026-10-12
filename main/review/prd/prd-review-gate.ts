@@ -40,6 +40,7 @@ import {
   type DefenderDisposition,
   type DefenderFailure,
 } from '../prd-defender'
+import { prdStructureIssues } from '../../model/requirements-model'
 
 // =========================================================================
 // 类型
@@ -56,6 +57,11 @@ import { parseReviewIssues, ruleGateReview } from './prd-review-rules'
  */
 export async function runPrdReviewGate(opts: InternalAuditOptions): Promise<PrdReviewOutcome> {
   const { backplane, confirmedRequirements, query, env, sessionId, signal } = opts
+  const structural = prdStructureIssues(backplane)
+  if (structural.length && !signal?.aborted) return {
+    verdict: 'needs_revision', mode: 'rules',
+    issues: structural.map(claim => ({ dimension: 'I', severity: 'blocking', location: 'requirements_model', claim, evidence: [claim] })),
+  }
   if (!env) {
     // 无可用渠道 env：直接规则门（不算 degraded——渠道不可用的如实降级）
     return ruleGateReview(backplane, opts?.mode)
@@ -360,7 +366,7 @@ export async function runDefenderRound(opts: {
   let submitted: { backplane: unknown; dispositions: DefenderDisposition[] } | undefined
   const writeTool = buildWritePrdDraftTool((draft) => {
     submitted = { backplane: draft.backplane, dispositions: draft.dispositions }
-  })
+  }, opts.backplane)
   const task = buildDefenderTask({
     backplane: opts.backplane,
     issues: opts.issues,
