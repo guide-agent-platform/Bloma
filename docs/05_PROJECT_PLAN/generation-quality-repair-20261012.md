@@ -40,3 +40,14 @@
 - 全量回归发现 desktop-route 达到 801 行、触发现有架构规则。按职责拆出 delivered-notice.ts，保留路由负责阶段推进，通知模块负责证据展示；不增加超长文件白名单。
 
 复查验证：6 个相关测试文件 80 项通过（含路由、架构规则、需求身份、核心验证与通知反例）；类型检查通过。最终全量回归与构建另记录在本文件末尾。
+
+## 最终验证与边界
+
+- 全量单元：253 文件 / 2292 项通过；集成：2 文件 / 8 项通过；Python：25 项通过。首次全量发现的路由长度问题已修复并重新跑过全量，未扩大白名单或跳过规则。
+- 最后校正 optional 角色任务书：允许无配置时降级运行，不允许把已确认但只做 mock 的功能宣布为完整交付；相关五文件 60 项回归通过。
+- 调整 preview-state.js 在业务初始化前加载。隔离骨架副本用已存在的解释器启动真实 WebView2 桌面，连续三轮通过五项 DOM 断言：初始化前可用、有效预览可执行、旧响应被拒、只消费一次、当前目录变化拒绝执行。副本源码 SHA 前后均为 `6139d27f60a0b486de1dd17d08a5426effa76c050d454c49fcfc367bada7a896`。
+- 类型检查、前后端构建和差异空白检查通过。
+- 证据位于 `run-artifacts/generation-quality-unit-final.log`、`generation-quality-integration.log`、`generation-quality-python-all.log`、`generation-quality-final-prompt-tests.log`、`generation-quality-build.log`、`generation-quality-typecheck.log`，以及 `run-artifacts/generation-quality-audit/platform-preview-native.json`。单元的定向回归属于全套的子集，不累加为额外覆盖数量。
+- 原三个审计产物及其历史记录未修改。本轮没有运行付费生成或麦克风采集；真实新生成对照、外部模型内容质量、专业工艺质量评判仍待额度恢复后的独立验证。平台契约更严格、复用组件已测，不等于已经证明后续生成质量显著提升。
+
+工程提交：`9b3cb0e` 需求身份与关联；`38bd4bf` 全范围完成声明与本机模型探针；`6f6e386` 文件事务/预览与模块化约束；`2f8d421` 验证期间变更和通知证据。最后的加载顺序、任务书澄清、原生回放夹具和本记录在收尾提交中保存。均为本地提交，未推送。

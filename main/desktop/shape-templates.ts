@@ -250,7 +250,7 @@ export function renderShapeBrief(shape: ProductShape | undefined): string | unde
   if (shape.llm_role !== 'none') {
     const llmLine: Record<ProductShape['llm_role'], string> = {
       core: 'AI 角色为 core：真模型调用是产品成立条件——实现须真实调用可配置的 LLM 端点（禁模板假实现），平台会用自有渠道对请求 schema 做真实验证（Provider Qualification）；产出项目根 llm-provider.json 声明（{"schema_version":1,"provider":"openai_compatible","base_url":"（用户配置）","model":"（用户配置）","request_sample":{"messages":[{"role":"user","content":"你好"}]},"auth":"user_config"}——request_sample.messages 写你实际请求的 messages 结构）；本地测试走 mock 模式（LLM_PROVIDER=mock 切固定响应），断言分层：请求合法性/错误处理严格断言，生成内容断言质量指标。',
-      optional: 'AI 角色为 optional：AI 功能可降级——无 key 或调用失败时核心功能可用，降级如实标注（不假装 AI 可用）；产出项目根 llm-provider.json 声明（request_sample.messages 写你实际请求的 messages 结构，供平台真实验证）。',
+      optional: 'AI 角色为 optional：AI 功能可降级运行——无 key 或调用失败时核心功能可用，降级如实标注（不假装 AI 可用）；已确认的真实增强入口仍须实现，仅 mock 或占位分支标 partial，不能宣称完整交付。产出项目根 llm-provider.json 声明（request_sample.messages 写你实际请求的 messages 结构，供平台真实验证）。',
       preview: 'AI 角色为 preview：生成内容仅预览示意——界面如实标注「预览」，不冒充完整能力；产出项目根 llm-provider.json 声明（同上）。',
       user_config: 'AI 角色为 user_config：交付时用户自配 key——必须实现待配置态（unconfigured）：无 key 时显示引导界面（说明文案+设置入口，ui/PATTERNS.md「待配置态」样例），配置后功能可用；密钥只存本地不进产物代码/文档；产出项目根 llm-provider.json 声明（request_sample.messages 写你实际请求的 messages 结构，供平台真实验证）。',
       none: '',

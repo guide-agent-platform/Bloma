@@ -134,7 +134,7 @@ export function renderShapeDigest(shape: ProductShape | undefined): string | und
   if (shape.llm_role !== 'none') {
     const roleText: Record<ProductShape['llm_role'], string> = {
       core: 'core——移除 LLM 产品不成立：真实验证不过不得宣称完整交付（Provider Qualification 平台侧收口）',
-      optional: 'optional——AI 是增强功能：可降级交付，如实标注降级项',
+      optional: 'optional——AI 是增强功能：无配置时可降级运行；已确认的真实增强入口仍须实现，未完成项标 partial，不能宣称完整交付',
       preview: 'preview——生成内容仅预览示意：交付时如实标注',
       user_config: 'user_config——交付时用户自配 key：必须实现无 key 引导界面（unconfigured 态：说明文案+设置入口）',
       none: '',

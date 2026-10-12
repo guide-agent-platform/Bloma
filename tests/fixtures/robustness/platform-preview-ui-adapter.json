@@ -1,0 +1,15 @@
+{
+  "case_id": "platform-preview",
+  "ready": "document.readyState==='complete' && typeof window.createPreviewGuard==='function'",
+  "steps": [
+    {"kind":"expect","name":"预览组件在业务初始化前已加载","expression":"window.PreviewReadyAtInit===true"},
+    {"kind":"js","name":"在真实桌面DOM绑定输入与执行按钮","expression":"window.folderInput=document.createElement('input');folderInput.value='C:/owned';window.prefixInput=document.createElement('input');prefixInput.value='done-';window.executeButton=document.createElement('button');document.body.append(folderInput,prefixInput,executeButton);window.previewGuard=createPreviewGuard([folderInput,prefixInput],executeButton);window.previewPlan={rows:[{old:'a.txt',new:'done-a.txt'}]};window.ticket=previewGuard.begin();previewGuard.accept(ticket,previewPlan);true"},
+    {"kind":"expect","name":"有效预览启用执行","expression":"executeButton.disabled===false"},
+    {"kind":"js","name":"有效预览后输入非法前缀","expression":"prefixInput.value='../';prefixInput.dispatchEvent(new Event('input'));window.staleAccepted=previewGuard.accept(ticket,previewPlan);true"},
+    {"kind":"expect","name":"旧响应不能恢复执行旧预览","expression":"staleAccepted===false && executeButton.disabled===true && previewGuard.take()===null"},
+    {"kind":"js","name":"重建有效预览并消费一次","expression":"prefixInput.value='done-';window.latest=previewGuard.begin();previewGuard.accept(latest,previewPlan);window.taken=previewGuard.take();true"},
+    {"kind":"expect","name":"执行只消费一次防重复提交","expression":"taken===previewPlan && previewGuard.take()===null && executeButton.disabled===true"},
+    {"kind":"js","name":"无事件的程序化目录修改也使预览不可执行","expression":"window.latest=previewGuard.begin();previewGuard.accept(latest,previewPlan);folderInput.value='C:/different';true"},
+    {"kind":"expect","name":"当前目录不符拒绝执行","expression":"previewGuard.take()===null && executeButton.disabled===true"}
+  ]
+}
