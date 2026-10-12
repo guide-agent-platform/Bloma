@@ -30,6 +30,16 @@ const run = (code = 0, stdout = 'PASS actual input') => runCoreVerification({ pr
   spawn: async () => ({ code, stdout, stderr: '' }) })
 
 describe('shared core delivery', () => {
+  it('rechecks requirements stored outside the product root after scripts execute', async () => {
+    manifest()
+    const result = await runCoreVerification({ projectId: 'p', sandboxRoot: root, spawn: async () => {
+      vi.mocked(readPrdBackplane).mockReturnValue({ requirements: [{ id: 'F-001', description: '新需求内容' }] } as never)
+      return { code: 0, stdout: 'PASS actual input', stderr: '' }
+    } })
+    expect(result.status).toBe('unverified')
+    expect(result.missing.join(' ')).toContain('需求契约变化')
+    expect(result.requirements?.[0]?.verification).toBe('unverified')
+  })
   it('refuses fixed network_error behind product-authored green model scenarios', async () => {
     vi.mocked(readPrdBackplane).mockReturnValue({ requirements: [{ id: 'F-004', description: '用户 Key 真实模型增强', priority: 'P1' }] } as never)
     const data = { command: ['python', 'core_check.py'], scenarios: [{ name: 'actual input', covers: ['F-004'], input: 'gui' }] }

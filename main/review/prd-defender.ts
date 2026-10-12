@@ -195,6 +195,10 @@ export function validateDefenderDraft(original: PrdBackplane, raw: unknown): { o
       const record = item as Record<string, unknown>
       if (typeof record.id !== 'string' || !/^F-\d+$/.test(record.id)) violations.push(`requirements[${index}].id 非法（须 F-xxx）`)
       if (typeof record.description !== 'string' || !record.description.trim()) violations.push(`requirements[${index}].description 为空`)
+      if (record.behavior_assertions !== undefined && (!Array.isArray(record.behavior_assertions) || record.behavior_assertions.some(value => typeof value !== 'string'))) violations.push(`requirements[${index}].behavior_assertions 必须是字符串数组`)
+      if (record.story !== undefined && typeof record.story !== 'string') violations.push(`requirements[${index}].story 必须是字符串`)
+      if (record.scope_notes !== undefined && typeof record.scope_notes !== 'string') violations.push(`requirements[${index}].scope_notes 必须是字符串`)
+      if (record.priority !== undefined && !['P0', 'P1', 'P2'].includes(record.priority as string)) violations.push(`requirements[${index}].priority 非法`)
     }
   }
 

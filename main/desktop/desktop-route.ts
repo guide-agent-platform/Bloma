@@ -24,7 +24,7 @@
  * 零行为变化。
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { AgentEvent } from '../../shared/types'
 import type { SDKQuery } from '../orchestration/orchestrator' // 类型导入豁免（R1）
@@ -33,7 +33,8 @@ import { getDesktopPhase, getNextDesktopPhase } from './dispatcher-phases'
 import { isDesktopDispatchEnabled } from './dispatcher-switch'
 import { runDesktopDispatcherLoop, type DesktopDispatchRunInput, type DesktopDispatchRunResult } from './dispatcher-loop'
 import { clearRejectionOnAdvance, createRejectionLedger, decideRejectionLoop, registerRejection, type RejectionLedger } from './advance-rejection-loop'
-import { buildBlockedNoticeCard, buildDeliveredNoticeCard, digestDeliveryDoc } from './notice-cards'
+import { buildBlockedNoticeCard, buildDeliveredNoticeCard } from './notice-cards'
+import { assembleDeliveredNotice } from './delivered-notice'
 import { runLaunchSmoke, type LaunchSmokeResult } from './launch-smoke'
 import { recordDeliveryOutcomeTelemetry } from './dispatcher-telemetry'
 
@@ -736,65 +737,3 @@ function extractEvidenceHint(decision: { education?: string }): string | undefin
   return firstLine ? firstLine.slice(0, 200) : undefined
 }
 
-/** delivered 通知卡装配数据（读项目根 DELIVERY.md/契约 entry；展示性数据 fail-open）。 */
-function assembleDeliveredNotice(
-  projectId: string,
-  projectName: string,
-  fromPhase: string,
-  result: DesktopDispatchRunResult,
-) {
-  const root = findProject(projectId)?.root_path
-  let entryFile: string | undefined
-  let deliveryDigest: string | undefined
-  if (root) {
-    try {
-      const parsed = JSON.parse(readFileSync(join(root, '00_SCAFFOLD', 'contract.json'), 'utf8')) as { entry?: unknown }
-      if (typeof parsed.entry === 'string') entryFile = parsed.entry
-    } catch {
-      // 展示性数据 fail-open：契约缺失/不可解析时通知卡省略入口行
-    }
-    try {
-      deliveryDigest = digestDeliveryDoc(readFileSync(join(root, 'DELIVERY.md'), 'utf8'))
-    } catch {
-      // 同上：DELIVERY.md 缺失时只提示位置
-    }
-  }
-  const report = result.driverReport
-  let coreScope: string[] | undefined
-  if (root) try {
-    const core = JSON.parse(readFileSync(join(root, '00_VERIFY/core-verification.json'), 'utf8')) as CoreVerificationResult
-    if (core.status === 'passed' && core.fingerprint) coreScope = [
-      '登记场景回读',
-      ...(core.gui_execution ? ['界面驱动入口'] : []),
-      ...(core.speech ? ['固定音频经真实模型解码（物理采集另列证据）'] : []),
-      ...(core.file_operations ? ['文件操作固定反例'] : []),
-      ...(core.llm ? ['模型入口的本机 HTTP 请求与错误处理（外部内容质量另验）'] : []),
-    ]
-  } catch { /* historical projects without current core evidence remain unqualified */ }
-  const driverSummary = report && report.scenarios.length > 0
-    ? { passed: report.scenarios.filter((s) => s.outcome === 'pass').length, total: report.scenarios.length }
-    : undefined
-  // 刀3：最新截图清单入通知卡（存在性读取 fail-open；最多取 4 张防刷屏）
-  let screenshotPaths: string[] | undefined
-  if (root) {
-    try {
-      screenshotPaths = readdirSync(join(root, '00_VERIFY', 'screenshots'), { withFileTypes: true })
-        .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.png'))
-        .map((entry) => `00_VERIFY/screenshots/${entry.name}`)
-        .sort()
-        .slice(0, 4)
-      if (screenshotPaths.length === 0) screenshotPaths = undefined
-    } catch {
-      // 目录不存在：通知卡省略截图行
-    }
-  }
-  return {
-    projectName,
-    ...(coreScope ? { coreScope } : {}),
-    fromPhaseTitle: getDesktopPhase(fromPhase)?.title ?? fromPhase,
-    ...(entryFile ? { entryFile } : {}),
-    ...(deliveryDigest ? { deliveryDigest } : {}),
-    ...(driverSummary ? { driverSummary } : {}),
-    ...(screenshotPaths ? { screenshotPaths } : {}),
-  }
-}

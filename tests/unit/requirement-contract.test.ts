@@ -10,6 +10,12 @@ function sample(): PrdBackplane {
     acceptance: { 'F-004': '输入非法参数保持原值' }, prd_document: 'F-004 参数编辑通过' })
 }
 describe('requirement evidence identity', () => {
+  it('rejects malformed model assertions as an invalid draft instead of throwing during reconciliation', () => {
+    const original = sample()
+    const malformed = { ...original, requirements: [original.requirements[0], { ...original.requirements[1], behavior_assertions: '不是数组' }] }
+    expect(() => validateDefenderDraft(original, malformed)).not.toThrow()
+    expect(validateDefenderDraft(original, malformed).ok).toBe(false)
+  })
   it('refuses stale acceptance after the audited F-004 meaning changes; historical input is untouched', () => {
     const original = sample()
     const revised = { ...original, requirements: [original.requirements[0]!, { id: 'F-004', description: '真实模型增强' }] }

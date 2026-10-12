@@ -32,7 +32,12 @@ export function acceptanceAssociationIssues(backplane: PrdBackplane): string[] {
 /** Test registrations bind to behavior as well as identity; priority is scheduling only. */
 export function requirementEvidenceHash(backplane: PrdBackplane, item: SketchRequirement): string {
   return digest([item.id, item.description, item.story ?? '', item.behavior_assertions ?? [],
-    item.scope_notes ?? '', trustedAcceptance(backplane, item) ?? '', backplane.constraints ?? [], backplane.out_of_scope ?? []])
+    item.scope_notes ?? '', trustedAcceptance(backplane, item) ?? '', backplane.constraints ?? [], backplane.out_of_scope ?? [],
+    backplane.ux ?? null, backplane.shape ?? null, backplane.gdd ?? null, backplane.ai_capabilities ?? [], backplane.key_tasks ?? []])
+}
+
+export function requirementVerificationContext(backplane: PrdBackplane): unknown {
+  return backplane.requirements.map(item => [item.id, requirementEvidenceHash(backplane, item)]).sort((a, b) => a[0]!.localeCompare(b[0]!))
 }
 
 /** Revisions must not inherit acceptance text from a different meaning under the same id. */

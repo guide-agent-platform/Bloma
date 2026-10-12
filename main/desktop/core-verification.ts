@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve, relative, isAbsolute } from 'node:path'
 import { readPrdBackplane } from '../project/document-engine'
-import { requirementEvidenceHash } from '../project/requirement-contract'
+import { requirementEvidenceHash, requirementVerificationContext } from '../project/requirement-contract'
 import { parseProjectContract } from './contract-schema'
 import { execFileDriverSpawn, runContractDriver, type DriverSpawn } from './process-driver'
 import { verificationFingerprint } from './verification-fingerprint'
@@ -51,7 +51,8 @@ export async function runCoreVerification(options: {
     const required = backplane.requirements
     if (!required.length) throw new Error('没有已确认的核心需求')
     if (new Set(required.map(item => item.id)).size !== required.length) throw new Error('功能项编号重复，不能确定覆盖关系')
-    const fingerprint = verificationFingerprint(root, required)
+    const context = requirementVerificationContext(backplane)
+    const fingerprint = verificationFingerprint(root, context)
     result.fingerprint = fingerprint
     if (!fingerprint) throw new Error('验证输入不可完整读取，不能运行或复用未知版本证据')
     if (!existsSync(join(root, CORE_MANIFEST_REL))) throw new Error('缺少核心业务验证入口 CORE_CHECK.json')
@@ -102,7 +103,7 @@ export async function runCoreVerification(options: {
       for (const fid of scenario.covers) result.evidence.push({ fid, scenario: scenario.name, input: scenario.input, outcome })
       if (outcome !== 'pass') result.missing.push(`场景「${scenario.name}」(${scenario.input}) 未通过：${outcome}`)
     }
-    if (verificationFingerprint(root, required) !== fingerprint) result.missing.push('验证期间源码或声明变化，本次结果作废')
+    if (verificationFingerprint(root, context) !== fingerprint) result.missing.push('验证期间源码或声明变化，本次结果作废')
     const hasSpeechRequirement = required.some(item => /(?:语音(?:输入|录入|识别|转写)|麦克风|录音|ASR)/i.test(item.description))
     if (hasSpeechRequirement && !speech) result.missing.push('缺少 ASR 入口登记 speech，须登记产品实际使用的模型构造和转写方法')
     const speechResult = hasSpeechRequirement && speech ? await runHostSpeechProbe({ projectId: options.projectId, root, speech }) : undefined
@@ -144,9 +145,20 @@ export async function runCoreVerification(options: {
     const guiEntryPassed = guiReport?.routing === 'pass' && guiReport.scenarios.some(s => s.outcome === 'pass')
     if (!result.evidence.some(e => e.input === 'gui' && e.outcome === 'pass') && !guiEntryPassed) result.missing.push('缺少关键界面业务链的驱动回读')
     for (const executed of reports) if (executed.routing !== 'pass') result.missing.push(executed.routingReason, executed.stderrExcerpt.slice(0, 300))
+    // PRD lives outside the generated root. Re-read it after all probes, rather than
+    // hashing the same in-memory requirements captured at the start twice.
+    if (verificationFingerprint(root, requirementVerificationContext(readPrdBackplane(options.projectId))) !== fingerprint) {
+      result.missing.push('验证期间源码或需求契约变化，本次结果作废')
+      for (const item of result.requirements) item.verification = 'unverified'
+    }
     if (reports.some(r => r.routing === 'fail') || speechResult?.status === 'failed' || fileResult?.status === 'failed' || llmResult?.status === 'failed') { result.status = 'failed'; result.summary = '核心功能测试失败，需要修复。' }
     else if (reports.some(r => r.routing === 'blocked') || speechResult?.status === 'environment_blocked' || fileResult?.status === 'environment_blocked' || llmResult?.status === 'environment_blocked') { result.status = 'environment_blocked'; result.summary = '验证环境未就绪，程序已保留。' }
-    else if (result.missing.length || !fingerprint) { result.summary = '已生成，核心功能仍有待验证项。' }
+    else if (result.missing.length || !fingerprint) {
+      result.summary = result.requirements.some(item => item.implementation === 'partial' || item.implementation === 'missing')
+        ? '程序已保留，仍有未完成的已确认功能，尚不能完整交付。'
+        : result.requirements.some(item => item.implementation === 'unverified')
+          ? '程序已保留，功能实现情况尚未确认，不能完整交付。' : '已生成，核心功能仍有待验证项。'
+    }
     else { result.status = 'passed'; result.summary = '核心业务驱动已通过，验证范围见报告。' }
   } catch (error) {
     result.missing.push(error instanceof Error ? error.message : String(error))
