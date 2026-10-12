@@ -14,6 +14,7 @@ import { provisionDesktopSkeletonV2 } from '../../../main/desktop/skeleton-provi
 const ROOT_FILE_SET = [
   'app.py',
   'record_store.py',
+  'llm_client.py',
   'requirements.txt',
   'README.md',
   'ui/index.html',

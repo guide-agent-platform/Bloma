@@ -43,7 +43,7 @@ export function buildResourceDiscoveryTool(projectId: string, deps: { spawn?: Dr
         const environment = JSON.parse(run.stdout.trim().split(/\r?\n/).at(-1) ?? '')
         const modelRoot = deps.modelRoot ?? process.env.BLOMA_SPEECH_MODEL_DIR ?? join(getPromaHome(), 'speech-models/sensevoice-int8')
         const speech = await inspectSpeechResources(modelRoot, SPEECH_MODEL_MANIFEST, input.refresh === true, ctx.signal)
-        const components = ['speech_runtime.py', 'speech_locator.py', 'record_store.py', 'file_plan_guard.py'].map(name => ({ name, materialized: existsSync(join(root, name)) }))
+        const components = ['speech_runtime.py', 'speech_locator.py', 'record_store.py', 'file_plan_guard.py', 'llm_client.py'].map(name => ({ name, materialized: existsSync(join(root, name)) }))
         const attempts = readProjectAttempts(projectId)
         const cumulative = (prefix: string) => Object.entries(attempts.total).filter(([key]) => key.startsWith(prefix)).reduce((sum, [, value]) => sum + value, 0)
         return { output: JSON.stringify({ schema_version: 1, environment, components, speech, cumulative_attempts: { core: cumulative('core'), stage: cumulative('stage:'), script: cumulative('script:'), install: cumulative('install:') }, business_verification: 'unverified' }),

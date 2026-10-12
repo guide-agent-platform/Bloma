@@ -768,6 +768,7 @@ function assembleDeliveredNotice(
       ...(core.gui_execution ? ['界面驱动入口'] : []),
       ...(core.speech ? ['固定音频经真实模型解码（物理采集另列证据）'] : []),
       ...(core.file_operations ? ['文件操作固定反例'] : []),
+      ...(core.llm ? ['模型入口的本机 HTTP 请求与错误处理（外部内容质量另验）'] : []),
     ]
   } catch { /* historical projects without current core evidence remain unqualified */ }
   const driverSummary = report && report.scenarios.length > 0

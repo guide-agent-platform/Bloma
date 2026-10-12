@@ -35,7 +35,7 @@ export const WINDOWS_COMPONENT_CARDS: readonly ComponentCard[] = [
     purpose: 'LLM API 调用（OpenAI 兼容端点——AI 对话/生成/总结类产品核心；任何 openai 兼容服务均可配）',
     probe: 'python -c "import openai; print(openai.__version__)"',
     pitfall: '错误四态必须各自处理并给用户可读反馈：401 key 无效/404 模型不存在/429 限流/超时——不允许任何错误静默或崩溃；key 从本地配置文件读（禁硬编码进代码/文档）；端点与模型名做成设置界面可配；长响应放后台线程防阻塞 UI；内置 mock 模式（环境变量 LLM_PROVIDER=mock 切固定响应——自测与驱动验证用，断言分层：请求合法性/错误处理严格断言，生成内容断言质量指标）',
-    fallback: 'LLM_PROVIDER=mock 内置 mock provider（固定响应，本地测试与驱动验证）',
+    fallback: 'LLM_PROVIDER=mock 仅用于本地测试；不能代替真实模型功能交付。内置 llm_client.py 提供实际 HTTP 客户端。',
     evidence: '实证',
   },
   {
@@ -119,5 +119,6 @@ export function componentQuickReference(): string {
   )
   return ['可用组件速查（pip 声明安装，详卡见 install_packages 工具）：', ...lines,
     '- 内置 file_plan_guard.py（随 pywebview 物化，不另装 pip）：前缀改名前用 validate_prefix_plan(folder,prefix,plan) 校验当前输入与快照、文件名和目录边界；输入/扫描变化立即失效旧预览，异步旧响应不能重新启用执行。固定反例与隔离 GUI 回放有证据，不保证操作期间的原子隔离。',
+    '- 内置 llm_client.py：LlmClient.generate({prompt,config:{endpoint,model,api_key,provider,timeout}}) 执行真实 HTTP 请求，区分未配置、鉴权、模型、限流、超时、网络与响应错误；真实功能不能只实现 mock。宿主本机 HTTP 探针不消耗模型额度。',
   ].join('\n')
 }

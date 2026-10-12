@@ -107,6 +107,15 @@ export function provisionDesktopSkeletonV2(
       result.failed.push(entry.target)
     }
   }
+  // Platform clients are independent of pip installation and never overwrite products.
+  for (const name of ['llm_client.py']) {
+    const source = join(mainRootDir(), 'templates', 'tools', name)
+    const target = join(projectRoot, name)
+    try {
+      if (existsSync(target)) result.skipped.push(name)
+      else { copyFileSync(source, target); result.copied.push(name) }
+    } catch { result.failed.push(name) }
+  }
   // 占位符渲染（copyFileSync 拿不到内容，统一对文本产物二次处理——幂等：仅本轮 copied）
   for (const rel of result.copied) {
     if (!/\.(py|md|html|css|js|txt|json)$/.test(rel)) continue
