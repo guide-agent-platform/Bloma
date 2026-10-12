@@ -12,6 +12,18 @@ import time
 import urllib.request
 
 
+def strip_windows_namespace(value):
+    # GetFinalPathNameByHandle may preserve this prefix during concurrent rename.
+    # Normalize representation only; resolve links before the containment check.
+    if value.startswith('\\\\?\\UNC\\'):
+        return '\\\\' + value[8:]
+    return value[4:] if value.startswith('\\\\?\\') else value
+
+
+def canonical_test_path(path):
+    return Path(strip_windows_namespace(str(path.resolve())))
+
+
 def digest(root):
     h = hashlib.sha256()
     for path in sorted(root.rglob('*')):
@@ -24,8 +36,9 @@ def digest(root):
 
 
 class Replay:
-    def __init__(self, root, data, log, adapter):
+    def __init__(self, root, data, log, adapter, python=None):
         self.root, self.data, self.log, self.adapter = root, data, log, adapter
+        self.python = python or root / '.venv/Scripts/python.exe'
         self.process = None
         self.locks = {}
         self.steps = []
@@ -44,7 +57,7 @@ class Replay:
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', 0)); self.port = sock.getsockname()[1]
         env = dict(os.environ, APP_DATA_DIR=str(self.data), PYTHONDONTWRITEBYTECODE='1')
-        self.process = subprocess.Popen([str(self.root / '.venv/Scripts/python.exe'), '-X', 'utf8', '-B',
+        self.process = subprocess.Popen([str(self.python), '-X', 'utf8', '-B',
             'app.py', '--drive-port', str(self.port)], cwd=self.root, env=env,
             stdout=self.log, stderr=subprocess.STDOUT)
         deadline = time.monotonic() + 40
@@ -70,8 +83,8 @@ class Replay:
         self.process = None
 
     def file(self, relative):
-        path = (self.data / relative).resolve()
-        if not path.is_relative_to(self.data.resolve()):
+        path = canonical_test_path(self.data / relative)
+        if not path.is_relative_to(canonical_test_path(self.data)):
             raise ValueError('Test data path escaped its isolated root')
         return path
 
@@ -134,8 +147,9 @@ class Replay:
                 actual = {}
                 try:
                     for path in directory.rglob('*'):
-                        if not path.resolve().is_relative_to(self.data.resolve()):
-                            raise AssertionError('Test file tree contains an escaped path')
+                        resolved = canonical_test_path(path)
+                        if not resolved.is_relative_to(canonical_test_path(self.data)):
+                            raise AssertionError(f'Test file tree contains an escaped path: {path} -> {resolved}; root={canonical_test_path(self.data)}')
                         if path.is_file():
                             actual[path.relative_to(directory).as_posix()] = path.read_bytes()
                 except OSError:
@@ -167,6 +181,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('root', type=Path); parser.add_argument('adapter', type=Path)
     parser.add_argument('output', type=Path)
+    parser.add_argument('--python', type=Path, help='Existing interpreter for isolated source copies; no venv junction or installation')
     args = parser.parse_args()
     root = args.root.resolve()
     adapter = json.loads(args.adapter.read_text(encoding='utf-8'))
@@ -178,7 +193,7 @@ def main():
         data = Path(tempfile.mkdtemp(prefix='blr-ui-data-')).resolve()
         item = {'iteration': index + 1, 'data_dir': str(data), 'status': 'failed'}
         with args.output.with_suffix(f'.replay-{index + 1}.log').open('w', encoding='utf-8') as log:
-            replay = Replay(root, data, log, adapter)
+            replay = Replay(root, data, log, adapter, args.python)
             try:
                 replay.start()
                 for step in adapter['steps']:

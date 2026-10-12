@@ -1,0 +1,20 @@
+{
+  "case_id": "process-quality",
+  "ready": "document.readyState === 'complete' && !!document.querySelector('#btn-example-one') && !document.querySelector('#btn-example-one').disabled",
+  "steps": [
+    {"kind":"js","name":"从真实按钮创建内置示例","expression":"document.querySelector('#btn-example-one').click(); true"},
+    {"kind":"expect","name":"方案与两处轮次链真实上屏","expression":"document.querySelectorAll('#plan-doc .w-slot').length>0 && document.querySelectorAll('#round-chain .w-round-node').length===1 && document.querySelector('#side-rounds').textContent.includes('第 1 轮')"},
+    {"kind":"js","name":"点改分散参数","expression":"document.querySelector('[data-bloma-id=\"slot.dispersion_rpm\"]').click(); true"},
+    {"kind":"expect","name":"可编辑参数入口出现","expression":"!!document.querySelector('[data-bloma-id=\"slot.input.dispersion_rpm\"]')"},
+    {"kind":"js","name":"提交新参数1200","expression":"var i=document.querySelector('[data-bloma-id=\"slot.input.dispersion_rpm\"]');i.value='1200';i.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));true"},
+    {"kind":"expect","name":"改参进入待生成状态","expression":"document.querySelectorAll('#change-list .w-side-row').length>=1 && !document.querySelector('#btn-next-round').disabled"},
+    {"kind":"js","name":"实际点击生成下一轮","expression":"document.querySelector('#btn-next-round').click();true"},
+    {"kind":"expect","name":"两轮与图纸快照同步","expression":"document.querySelectorAll('#round-chain .w-round-node').length===2 && document.querySelector('#side-rounds').textContent.includes('第 2 轮') && document.querySelector('#drawing-hint').textContent.includes('1200')"},
+    {"kind":"restart","name":"同一隔离数据新进程重启"},
+    {"kind":"expect","name":"重启后方案库仍能找到任务","expression":"document.querySelectorAll('#side-list [data-op=open]').length===1"},
+    {"kind":"js","name":"从方案库真实打开任务","expression":"document.querySelector('#side-list [data-op=open]').click();true"},
+    {"kind":"expect","name":"重新打开仍保留两轮与新参数","expression":"document.querySelectorAll('#round-chain .w-round-node').length===2 && document.querySelector('#drawing-hint').textContent.includes('1200')"},
+    {"kind":"js","name":"回溯第一轮","expression":"document.querySelector('[data-bloma-id=\"round.node.1\"]').click();true"},
+    {"kind":"expect","name":"回溯正文和图纸均恢复800","expression":"document.querySelector('[data-bloma-id=\"slot.dispersion_rpm\"]').textContent==='800' && document.querySelector('#drawing-hint').textContent.includes('800')"}
+  ]
+}
