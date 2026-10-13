@@ -19,7 +19,7 @@ HELPERS = r'''(() => {
  const visible = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
  const button = pattern => [...document.querySelectorAll('button,[role=button]')].find(e => visible(e) && pattern.test(e.textContent.trim()));
  const rows = () => {
-  const titles = [...document.querySelectorAll('span,div,p,label')].filter(e => e.children.length === 0 && e.textContent.trim() === '实验同名任务');
+  const titles = [...document.querySelectorAll('span,div,p,label,s,del,em,strong,b,i,h2,h3,h4')].filter(e => e.children.length === 0 && e.textContent.trim() === '实验同名任务');
   return titles.map(e => {
    let row = e.closest('[data-id],[data-task-id],[data-bloma-id^="task.row."],[data-bloma-id^="list.row."]');
    if (!row) { row=e.parentElement; while(row && !row.querySelector('input[type=checkbox],button')) row=row.parentElement; }
@@ -79,6 +79,7 @@ def main():
             return observed
         try:
             replay.start(); time.sleep(0.8); js(HELPERS)
+            action("window.__externalTodoTest.filter('all')")
             def add_trim():
                 action("window.__externalTodoTest.add('  实验同名任务  ')")
                 observed = assert_rows(1, 0)

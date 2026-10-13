@@ -6,7 +6,8 @@ type Usage = NonNullable<SDKMessage['usage']>
 interface Rate { host: string; model: string; cap_rmb: number; context_tokens: number; input_rmb_per_million: number; output_rmb_per_million: number; cache_rmb_per_million: number }
 interface Policy { version: 1; models: Rate[] }
 interface Entry { id: string; model: string; host: string; at?: string; home?: string; budget_wait_ms?: number; reserved_micro_rmb: number; charged_micro_rmb: number; status: 'reserved' | 'reported' | 'unknown' | 'reconciled_unauthenticated' | 'reconciled_pre_execution'; usage?: Usage }
-interface State { version: 1; policy_hash: string; entries: Entry[] }
+interface BalanceCheckpoint { id: string; host: string; model: string; covered_request_ids: string[]; spent_upper_micro_rmb: number; evidence_path: string; evidence_sha256: string }
+interface State { version: 1; policy_hash: string; entries: Entry[]; balance_checkpoints?: BalanceCheckpoint[] }
 
 export class MonetaryBudgetError extends Error {
   constructor(code: string) { super(code); this.name = 'MonetaryBudgetError' }
@@ -14,6 +15,43 @@ export class MonetaryBudgetError extends Error {
 const fail = (code: string): never => { throw new MonetaryBudgetError(code) }
 const integer = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0
 const micro = (tokens: number, rmbPerMillion: number) => Math.ceil(tokens * rmbPerMillion)
+
+/** A trusted balance statement bounds the aggregate liability of covered calls. Keep
+ * every original per-call record; do not fabricate zero usage for unknown responses. */
+function accountedSpent(state: State, host: string, model: string, settledOnly = false): number {
+  const entries = state.entries.filter(row => row.host === host && row.model === model && (!settledOnly || row.status !== 'reserved'))
+  let total = entries.reduce((sum, row) => sum + row.charged_micro_rmb, 0)
+  const covered = new Set<string>()
+  for (const checkpoint of state.balance_checkpoints ?? []) {
+    if (checkpoint.host !== host || checkpoint.model !== model) continue
+    if (!integer(checkpoint.spent_upper_micro_rmb) || !Array.isArray(checkpoint.covered_request_ids) || !checkpoint.covered_request_ids.length) fail('MONETARY_BALANCE_CHECKPOINT_INVALID')
+    const bytes = readFileSync(checkpoint.evidence_path)
+    if (createHash('sha256').update(bytes).digest('hex') !== checkpoint.evidence_sha256) fail('MONETARY_BALANCE_EVIDENCE_CHANGED')
+    const proof = JSON.parse(bytes.toString('utf8'))
+    const ceiling = Math.ceil((proof.start_balance_rmb - proof.end_balance_lower_bound_rmb) * 1_000_000)
+    if (proof.source !== 'direct_user_confirmation' || proof.external_changes !== false || proof.host !== host || proof.model !== model
+      || JSON.stringify(proof.covered_request_ids) !== JSON.stringify(checkpoint.covered_request_ids) || !integer(ceiling)
+      || checkpoint.spent_upper_micro_rmb !== ceiling) fail('MONETARY_BALANCE_CHECKPOINT_INVALID')
+    let original = 0
+    for (const id of checkpoint.covered_request_ids) {
+      const entry = entries.find(row => row.id === id)
+      if (!entry || entry.status === 'reserved' || covered.has(id)) return fail('MONETARY_BALANCE_CHECKPOINT_INVALID')
+      covered.add(id); original += entry.charged_micro_rmb
+    }
+    total += checkpoint.spent_upper_micro_rmb - original
+  }
+  return total
+}
+
+export function readMonetaryBudget(policyPath: string) {
+  const policy = JSON.parse(readFileSync(policyPath, 'utf8').replace(/^\uFEFF/, '')) as Policy
+  const state = JSON.parse(readFileSync(`${policyPath}.state.json`, 'utf8')) as State
+  if (state.policy_hash !== createHash('sha256').update(readFileSync(policyPath)).digest('hex')) fail('MONETARY_STATE_INVALID')
+  return policy.models.map(rate => ({ model: rate.model, host: rate.host, cap_rmb: rate.cap_rmb,
+    accounted_upper_rmb: accountedSpent(state, rate.host, rate.model) / 1_000_000,
+    remaining_rmb: rate.cap_rmb - accountedSpent(state, rate.host, rate.model) / 1_000_000,
+    reported_peak_rmb: state.entries.filter(e => e.host === rate.host && e.model === rate.model && e.status === 'reported').reduce((sum, e) => sum + e.charged_micro_rmb, 0) / 1_000_000 }))
+}
 
 /** Optional shared, cross-home spending ceiling. No prompts, keys, or request bodies are persisted.
  * Reserve a full context at peak rates before EACH physical request. Missing usage and crashes
@@ -63,7 +101,7 @@ export function reserveModelRequest(url: string, body: string, policyPath = proc
   }
   const id = randomUUID()
   mutate(state => {
-    const spent = state.entries.filter(entry => entry.model === rate.model && entry.host === host).reduce((sum, entry) => sum + entry.charged_micro_rmb, 0)
+    const spent = accountedSpent(state, host, rate.model)
     if (spent + reserved > Math.floor(rate.cap_rmb * 1_000_000)) fail('MONETARY_BUDGET_EXHAUSTED')
     state.entries.push({ id, model: rate.model, host, at: new Date().toISOString(), home: process.env.PROMA_HOME,
       ...(waitedMs > 0 ? { budget_wait_ms: waitedMs } : {}),
@@ -105,7 +143,7 @@ export async function reserveModelRequestWhenAvailable(url: string, body: string
       const rate = policy.models.find(row => row.host === host && row.model === request.model)!
       const state = JSON.parse(readFileSync(`${policyPath}.state.json`, 'utf8')) as State
       const entries = state.entries.filter(row => row.host === host && row.model === request.model)
-      const settled = entries.filter(row => row.status !== 'reserved').reduce((sum, row) => sum + row.charged_micro_rmb, 0)
+      const settled = accountedSpent(state, host, rate.model, true)
       const needed = micro(rate.context_tokens, rate.input_rmb_per_million) + micro(request.max_tokens, rate.output_rmb_per_million)
       if (!entries.some(row => row.status === 'reserved') || settled + needed > Math.floor(rate.cap_rmb * 1_000_000)) throw error
       if (Date.now() - started >= 120_000) throw new MonetaryBudgetError('MONETARY_RESERVATION_WAIT_TIMEOUT')

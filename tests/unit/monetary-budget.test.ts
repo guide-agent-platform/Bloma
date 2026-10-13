@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { fetchWithMonetaryBudget, reserveModelRequest, reserveModelRequestWhenAvailable } from '../../main/platform/llm/monetary-budget'
+import { createHash } from 'node:crypto'
+import { fetchWithMonetaryBudget, reserveModelRequest, reserveModelRequestWhenAvailable, readMonetaryBudget } from '../../main/platform/llm/monetary-budget'
 import { streamSSE } from '../../main/platform/upstream/providers/sse-reader'
 import { ANTHROPIC_SSE_ADAPTER } from '../../main/platform/upstream/providers/anthropic-sse-adapter'
 
@@ -20,6 +21,34 @@ const state = (path: string) => JSON.parse(readFileSync(`${path}.state.json`, 'u
 afterEach(() => { vi.unstubAllEnvs(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 describe('shared monetary ceiling', () => {
+  it('uses a trusted balance ceiling while keeping unknown per-request records unchanged', () => {
+    const path = fixture(); reserveModelRequest(url, body, path)!.settle(undefined, false)
+    const data = state(path), id = data.entries[0].id, evidencePath = `${path}.proof.json`
+    const proof = JSON.stringify({ source: 'direct_user_confirmation', host: 'api.example.com', model: 'M1',
+      start_balance_rmb: 3, end_balance_lower_bound_rmb: 2.1, external_changes: false, covered_request_ids: [id] })
+    writeFileSync(evidencePath, proof)
+    data.balance_checkpoints = [{ id: 'balance-1', host: 'api.example.com', model: 'M1', covered_request_ids: [id],
+      spent_upper_micro_rmb: 900000, evidence_path: evidencePath, evidence_sha256: createHash('sha256').update(proof).digest('hex') }]
+    writeFileSync(`${path}.state.json`, JSON.stringify(data))
+    expect(readMonetaryBudget(path)[0].accounted_upper_rmb).toBe(0.9)
+    reserveModelRequest(url, body, path)
+    expect(state(path).entries[0]).toMatchObject({ status: 'unknown', charged_micro_rmb: 2008000 })
+    expect(readMonetaryBudget(path)[0].accounted_upper_rmb).toBe(2.908)
+    writeFileSync(evidencePath, proof + ' ')
+    expect(() => reserveModelRequest(url, body, path)).toThrow('MONETARY_BALANCE_EVIDENCE_CHANGED')
+  })
+  it('rejects duplicate balance coverage rather than crediting a call twice', () => {
+    const path = fixture(); reserveModelRequest(url, body, path)!.settle(undefined, false)
+    const data = state(path), id = data.entries[0].id, evidencePath = `${path}.proof.json`
+    const proof = JSON.stringify({ source: 'direct_user_confirmation', host: 'api.example.com', model: 'M1',
+      start_balance_rmb: 3, end_balance_lower_bound_rmb: 2.1, external_changes: false, covered_request_ids: [id] })
+    writeFileSync(evidencePath, proof)
+    const checkpoint = { id: 'balance-1', host: 'api.example.com', model: 'M1', covered_request_ids: [id], spent_upper_micro_rmb: 900000,
+      evidence_path: evidencePath, evidence_sha256: createHash('sha256').update(proof).digest('hex') }
+    data.balance_checkpoints = [checkpoint, { ...checkpoint, id: 'balance-2' }]
+    writeFileSync(`${path}.state.json`, JSON.stringify(data))
+    expect(() => reserveModelRequest(url, body, path)).toThrow('MONETARY_BALANCE_CHECKPOINT_INVALID')
+  })
   it('queues temporary contention and records the wait without expanding the cap', async () => {
     const path = fixture()
     const first = reserveModelRequest(url, body, path)!
