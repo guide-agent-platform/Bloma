@@ -79,7 +79,12 @@ async function* anthropicMessagesQueryViaProvidersInner(prompt: string, options:
     .map((turn) => (typeof turn.content === 'string' ? turn.content : extractText(turn.content)))
     .filter(Boolean)
     .join('\n')
-  const nonSystemTurns = history.filter((turn) => turn.role !== 'system')
+  // A thinking-only response can be persisted as assistant content:[] because reasoning
+  // is display-only. Preserve that evidence on disk, but omit its empty protocol turn
+  // when continuing: DeepSeek rejects it before generation (messages.N HTTP 400).
+  // Nonempty tool blocks and user tool_result blocks retain their original pairing.
+  const nonSystemTurns = history.filter((turn) => turn.role !== 'system'
+    && !(turn.role === 'assistant' && turn.content.length === 0))
   const pastedRefs = (options.images ?? []).filter(
     (r) => r && typeof r.imageId === 'string' && /^[A-Za-z0-9_-]+\/[A-Za-z0-9-]+\.(png|jpeg|jpg|gif|webp)$/.test(r.imageId),
   )

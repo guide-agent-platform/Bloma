@@ -119,6 +119,25 @@ describe('请求体拼装：历史窗口与 system 提取', () => {
     for await (const _ of anthropicMessagesQueryViaProviders('问', opts())) void _
     expect(parsedBody().thinking).toEqual({ type: 'disabled' })
   })
+
+  it.each(['messages', 'history'] as const)('%s 续接思考耗尽记录：不发送空 assistant，保留原始历史和工具配对', async (field) => {
+    mockStreamOk()
+    const turns: NonNullable<SDKQueryOptions['messages']> = [
+      { role: 'user', content: '实现任务' },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'read-1', name: 'read_file', input: { path: 'app.py' } }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'read-1', content: '' }] },
+      // G11 实锤：只有计费思考输出的响应被存为 content:[]，续接曾触发 messages.31 HTTP 400。
+      { role: 'assistant', content: [] },
+      { role: 'assistant', content: '' },
+      { role: 'user', content: '继续收尾' },
+    ]
+    const original = JSON.stringify(turns)
+    for await (const _ of anthropicMessagesQueryViaProviders('续接提示', opts({ [field]: turns }))) void _
+    const expected = [turns[0], turns[1], turns[2], turns[5]]
+    if (field === 'history') expected.push({ role: 'user', content: '续接提示' })
+    expect(parsedBody().messages).toEqual(expected)
+    expect(JSON.stringify(turns)).toBe(original)
+  })
 })
 
 describe('SSE 事件桥：事件 → SDKMessage 流序与结果装配', () => {
