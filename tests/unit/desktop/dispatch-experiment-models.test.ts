@@ -248,9 +248,12 @@ describe('pinned roles and experiment conditions', () => {
     source.prepared = { at: '2026-10-13', requirements_digest: 'frozen' }; writeExperiment(source)
     const snapshot = join(temp, 'snapshot'); freezeExperiment(home, 'p', snapshot, [])
     const pairFile = join(temp, 'pair.json'); save(pairFile, JSON.stringify({ m1: bindings.one, m2: bindings.two, verifier: bindings.verifier }))
+    const limitsFile = join(temp, 'limits.json'); save(limitsFile, JSON.stringify({ executor_turns: 64 }))
     const result = spawnSync(process.execPath, ['scripts/dispatch-experiment.mjs', 'matrix', '--home', join(temp, 'matrix'), '--snapshot', snapshot,
-      '--models', pairFile, '--run-prefix', 'cli', '--worker-limit', '2'], { encoding: 'utf8', windowsHide: true })
+      '--models', pairFile, '--run-prefix', 'cli', '--worker-limit', '2', '--limits', limitsFile], { encoding: 'utf8', windowsHide: true })
     expect(result.status, result.stderr).toBe(0); expect(JSON.parse(result.stdout)).toHaveLength(6)
+    for (const entry of JSON.parse(result.stdout)) expect(JSON.parse(readFileSync(join(entry.home, 'dispatch-experiments/p.json'), 'utf8')).limits)
+      .toMatchObject({ executor_turns: 64, max_workers: 2 })
   })
   it('refuses changed frozen requirements before querying a model', () => {
     const source = running(); source.state = 'prepared'; source.policy = undefined; source.models = undefined; source.condition_hash = undefined

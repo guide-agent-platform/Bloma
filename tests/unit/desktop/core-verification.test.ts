@@ -30,6 +30,21 @@ const run = (code = 0, stdout = 'PASS actual input') => runCoreVerification({ pr
   spawn: async () => ({ code, stdout, stderr: '' }) })
 
 describe('shared core delivery', () => {
+  it('diagnoses unsupported GUI scenario fields before running scripts', async () => {
+    writeManifest({ command: ['python', 'core_check.py'], scenarios: [{ name: 'actual input', covers: ['F-001'], input: 'logic' }], gui_scenarios: [] })
+    const spawn = vi.fn()
+    const result = await runCoreVerification({ projectId: 'p', sandboxRoot: root, spawn })
+    expect(result.status).toBe('unverified')
+    expect(result.missing.join(' ')).toContain('将界面场景合并到 scenarios')
+    expect(spawn).not.toHaveBeenCalled()
+  })
+  it('shows mismatched actual names without treating a similarly named test as passed', async () => {
+    writeManifest({ command: ['python', 'core_check.py'], scenarios: [{ name: '空标题["   "]', covers: ['F-001'], input: 'gui' }] })
+    const result = await run(0, "PASS 空标题['   ']")
+    expect(result.status).toBe('unverified')
+    expect(result.missing.join(' ')).toContain('脚本实际输出的场景名')
+    expect(result.evidence[0].outcome).toBe('unverified')
+  })
   it('rechecks requirements stored outside the product root after scripts execute', async () => {
     manifest()
     const result = await runCoreVerification({ projectId: 'p', sandboxRoot: root, spawn: async () => {

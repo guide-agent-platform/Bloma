@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { fetchWithMonetaryBudget, reserveModelRequest } from '../../main/platform/llm/monetary-budget'
+import { fetchWithMonetaryBudget, reserveModelRequest, reserveModelRequestWhenAvailable } from '../../main/platform/llm/monetary-budget'
 import { streamSSE } from '../../main/platform/upstream/providers/sse-reader'
 import { ANTHROPIC_SSE_ADAPTER } from '../../main/platform/upstream/providers/anthropic-sse-adapter'
 
@@ -20,6 +20,31 @@ const state = (path: string) => JSON.parse(readFileSync(`${path}.state.json`, 'u
 afterEach(() => { vi.unstubAllEnvs(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 describe('shared monetary ceiling', () => {
+  it('queues temporary contention and records the wait without expanding the cap', async () => {
+    const path = fixture()
+    const first = reserveModelRequest(url, body, path)!
+    const next = reserveModelRequestWhenAvailable(url, body, undefined, path)
+    expect(state(path).entries).toHaveLength(1)
+    first.settle({ input_tokens: 100, output_tokens: 10 }, true)
+    const second = await next
+    expect(state(path).entries[1].budget_wait_ms).toBeGreaterThan(0)
+    second!.settle({ input_tokens: 100, output_tokens: 10 }, true)
+    expect(state(path).entries.reduce((sum: number, row: { charged_micro_rmb: number }) => sum + row.charged_micro_rmb, 0)).toBe(560)
+  })
+  it('does not wait when unknown spending permanently prevents a new reservation', async () => {
+    const path = fixture()
+    reserveModelRequest(url, body, path)!.settle(undefined, false)
+    await expect(reserveModelRequestWhenAvailable(url, body, undefined, path)).rejects.toThrow('MONETARY_BUDGET_EXHAUSTED')
+    expect(state(path).entries).toHaveLength(1)
+  })
+  it('cancels a queued request before it can make another reservation', async () => {
+    const path = fixture(), controller = new AbortController()
+    reserveModelRequest(url, body, path)
+    const next = reserveModelRequestWhenAvailable(url, body, controller.signal, path)
+    controller.abort(new Error('stop queued sample'))
+    await expect(next).rejects.toThrow('stop queued sample')
+    expect(state(path).entries).toHaveLength(1)
+  })
   it('reserves concurrently across homes/restarts and settles cached usage at peak rates', () => {
     const path = fixture()
     const first = reserveModelRequest(url, body, path)!

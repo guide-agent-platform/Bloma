@@ -58,6 +58,7 @@ export async function runCoreVerification(options: {
     if (!existsSync(join(root, CORE_MANIFEST_REL))) throw new Error('缺少核心业务验证入口 CORE_CHECK.json')
     const raw = JSON.parse(readFileSync(join(root, CORE_MANIFEST_REL), 'utf8')) as Record<string, unknown>
     if (raw.schema_version !== 1 && raw.schema_version !== 2) throw new Error('核心验证声明版本不支持')
+    if (raw.gui_scenarios !== undefined) throw new Error('CORE_CHECK.json 不支持 gui_scenarios。将界面场景合并到 scenarios，input 填 gui；gui_command 仅登记界面测试脚本。')
     const declarations = Array.isArray(raw.requirements) ? raw.requirements as Record<string, unknown>[] : []
     const ids = new Set(required.map(item => item.id))
     if (declarations.some((entry, index) => !entry || !ids.has(entry.id as string) || declarations.findIndex(other => other?.id === entry.id) !== index ||
@@ -101,7 +102,10 @@ export async function runCoreVerification(options: {
       const source = scenario.input === 'gui' && guiReport ? guiReport : report
       const outcome = scenarioOutcome(source.stdoutExcerpt, scenario.name)
       for (const fid of scenario.covers) result.evidence.push({ fid, scenario: scenario.name, input: scenario.input, outcome })
-      if (outcome !== 'pass') result.missing.push(`场景「${scenario.name}」(${scenario.input}) 未通过：${outcome}`)
+      if (outcome !== 'pass') {
+        const observed = outcome === 'unverified' ? source.scenarios.map(row => row.name).slice(0, 64) : []
+        result.missing.push(`场景「${scenario.name}」(${scenario.input}) 未通过：${outcome}${observed.length ? `；脚本实际输出的场景名：${JSON.stringify(observed)}。登记名称必须逐字一致，请核对引号、空格与动态输入。` : ''}`)
+      }
     }
     if (verificationFingerprint(root, context) !== fingerprint) result.missing.push('验证期间源码或声明变化，本次结果作废')
     const hasSpeechRequirement = required.some(item => /(?:语音(?:输入|录入|识别|转写)|麦克风|录音|ASR)/i.test(item.description))
@@ -171,6 +175,7 @@ export async function runCoreVerification(options: {
 }
 
 export const CORE_VERIFICATION_BRIEF = `
+所有逻辑与界面场景都登记在同一个 scenarios 数组，分别标记 input=logic/gui；不要使用 gui_scenarios 字段。用固定场景名，避免把 repr/JSON 格式化的测试输入拼入名称后与声明产生引号差异。
 核心业务验证：复用已写好的测试，在项目根登记 CORE_CHECK.json：
 {"schema_version":2,"requirements":[{"id":"F-001","requirement_hash":"需求清单中的完整验证版本","implementation":"implemented"}],"command":["python","core_check.py"],"scenarios":[{"name":"新增并重启仍保留","covers":["F-001"],"input":"gui"}]}。
 requirements 必须列出全部已确认功能项，P0/P1/P2 仅决定顺序。implementation 如实填 implemented/partial/missing/unverified；仅 mock、占位分支或尚未调用真实端点的功能不能填 implemented。核对每个场景与本项描述和断言后再登记版本，不可只复制旧覆盖编号。实现状态与测试结果独立，旧声明仅作诊断，不认证新交付。

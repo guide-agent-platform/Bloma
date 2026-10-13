@@ -48,7 +48,8 @@ try {
   } else if (command === 'matrix') {
     console.log(JSON.stringify(createModelMatrix(resolve(option('snapshot')), home,
       JSON.parse(readFileSync(option('models'), 'utf8')), option('run-prefix'), Number(optional('worker-limit') ?? '1'),
-      optional('evaluator') ? { evaluator: resolve(option('evaluator')), task_id: option('task'), repeat_id: option('repeat') } : undefined)))
+      optional('evaluator') ? { evaluator: resolve(option('evaluator')), task_id: option('task'), repeat_id: option('repeat') } : undefined,
+      optional('limits') ? JSON.parse(readFileSync(option('limits'), 'utf8')) : undefined)))
   } else if (command === 'evaluate') {
     assertExperimentHome(home)
     console.log(JSON.stringify(evaluateExperiment(option('project'), optional('manual') ? JSON.parse(readFileSync(option('manual'), 'utf8')) : undefined)))

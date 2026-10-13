@@ -13,7 +13,7 @@
  */
 
 import type { ProviderRequest, StreamAdapter, StreamEventCallback, ThinkingBlock, ToolCall } from './types'
-import { MonetaryBudgetError, reserveModelRequest } from '../../llm/monetary-budget'
+import { MonetaryBudgetError, reserveModelRequestWhenAvailable } from '../../llm/monetary-budget'
 import type { SDKMessage, ModelTransportReceipt } from '../../../../shared/types'
 import { createHash } from 'node:crypto'
 
@@ -196,7 +196,7 @@ function normalizeToolCallOutputIndex(value: unknown): string | undefined {
 
 /** 单次 SSE 流式尝试（不含重试逻辑；上游原样） */
 async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSEResult> {
-  const reservation = reserveModelRequest(options.request.url, options.request.body)
+  const reservation = await reserveModelRequestWhenAvailable(options.request.url, options.request.body, options.signal)
   let usage: SDKMessage['usage']
   let completed = false
   try {

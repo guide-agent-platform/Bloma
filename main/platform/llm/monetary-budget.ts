@@ -5,7 +5,7 @@ import type { SDKMessage } from '../../../shared/types'
 type Usage = NonNullable<SDKMessage['usage']>
 interface Rate { host: string; model: string; cap_rmb: number; context_tokens: number; input_rmb_per_million: number; output_rmb_per_million: number; cache_rmb_per_million: number }
 interface Policy { version: 1; models: Rate[] }
-interface Entry { id: string; model: string; host: string; at?: string; home?: string; reserved_micro_rmb: number; charged_micro_rmb: number; status: 'reserved' | 'reported' | 'unknown'; usage?: Usage }
+interface Entry { id: string; model: string; host: string; at?: string; home?: string; budget_wait_ms?: number; reserved_micro_rmb: number; charged_micro_rmb: number; status: 'reserved' | 'reported' | 'unknown' | 'reconciled_unauthenticated' | 'reconciled_pre_execution'; usage?: Usage }
 interface State { version: 1; policy_hash: string; entries: Entry[] }
 
 export class MonetaryBudgetError extends Error {
@@ -19,7 +19,7 @@ const micro = (tokens: number, rmbPerMillion: number) => Math.ceil(tokens * rmbP
  * Reserve a full context at peak rates before EACH physical request. Missing usage and crashes
  * retain the reservation; they never become free calls. State/policy corruption fails closed.
  */
-export function reserveModelRequest(url: string, body: string, policyPath = process.env.BLOMA_MONETARY_POLICY) {
+export function reserveModelRequest(url: string, body: string, policyPath = process.env.BLOMA_MONETARY_POLICY, waitedMs = 0) {
   if (!policyPath) return undefined
   const bytes = readFileSync(policyPath)
   const policy = JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/, '')) as Policy
@@ -66,6 +66,7 @@ export function reserveModelRequest(url: string, body: string, policyPath = proc
     const spent = state.entries.filter(entry => entry.model === rate.model && entry.host === host).reduce((sum, entry) => sum + entry.charged_micro_rmb, 0)
     if (spent + reserved > Math.floor(rate.cap_rmb * 1_000_000)) fail('MONETARY_BUDGET_EXHAUSTED')
     state.entries.push({ id, model: rate.model, host, at: new Date().toISOString(), home: process.env.PROMA_HOME,
+      ...(waitedMs > 0 ? { budget_wait_ms: waitedMs } : {}),
       reserved_micro_rmb: reserved, charged_micro_rmb: reserved, status: 'reserved' })
   })
   return {
@@ -87,9 +88,40 @@ export function reserveModelRequest(url: string, body: string, policyPath = proc
   }
 }
 
+/** Wait only for in-flight reservations that can release capacity. Permanent exhaustion
+ * still fails before HTTP. The caller's shared deadline also bounds this queue. */
+export async function reserveModelRequestWhenAvailable(url: string, body: string, signal?: AbortSignal,
+  policyPath = process.env.BLOMA_MONETARY_POLICY) {
+  const started = Date.now()
+  let queued = false
+  for (;;) {
+    signal?.throwIfAborted()
+    try { return reserveModelRequest(url, body, policyPath, queued ? Date.now() - started : 0) }
+    catch (error) {
+      if (!(error instanceof MonetaryBudgetError) || error.message !== 'MONETARY_BUDGET_EXHAUSTED' || !policyPath) throw error
+      if (!existsSync(`${policyPath}.state.json`)) throw error
+      const policy = JSON.parse(readFileSync(policyPath, 'utf8').replace(/^\uFEFF/, '')) as Policy
+      const request = JSON.parse(body), host = new URL(url).host
+      const rate = policy.models.find(row => row.host === host && row.model === request.model)!
+      const state = JSON.parse(readFileSync(`${policyPath}.state.json`, 'utf8')) as State
+      const entries = state.entries.filter(row => row.host === host && row.model === request.model)
+      const settled = entries.filter(row => row.status !== 'reserved').reduce((sum, row) => sum + row.charged_micro_rmb, 0)
+      const needed = micro(rate.context_tokens, rate.input_rmb_per_million) + micro(request.max_tokens, rate.output_rmb_per_million)
+      if (!entries.some(row => row.status === 'reserved') || settled + needed > Math.floor(rate.cap_rmb * 1_000_000)) throw error
+      if (Date.now() - started >= 120_000) throw new MonetaryBudgetError('MONETARY_RESERVATION_WAIT_TIMEOUT')
+      queued = true
+      await new Promise<void>((resolve, reject) => {
+        const onAbort = () => { clearTimeout(timer); reject(signal?.reason ?? new Error('MONETARY_WAIT_CANCELLED')) }
+        const timer = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve() }, 100)
+        signal?.addEventListener('abort', onAbort, { once: true })
+      })
+    }
+  }
+}
+
 /** Non-streaming probes and provider qualification share the same physical-request ceiling. */
 export async function fetchWithMonetaryBudget(url: string, init: RequestInit, fetchImpl: typeof fetch = fetch): Promise<Response> {
-  const reservation = reserveModelRequest(url, String(init.body))
+  const reservation = await reserveModelRequestWhenAvailable(url, String(init.body), init.signal ?? undefined)
   let usage: Usage | undefined
   let completed = false
   try {

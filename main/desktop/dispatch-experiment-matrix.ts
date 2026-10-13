@@ -1,11 +1,11 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { DEFAULT_EXPERIMENT_LIMITS, type ExperimentModel } from './dispatch-experiment'
+import { DEFAULT_EXPERIMENT_LIMITS, type ExperimentModel, type ExperimentLimits } from './dispatch-experiment'
 import { restoreExperiment } from './dispatch-experiment-snapshot'
 
 export function createModelMatrix(snapshot: string, destination: string,
   pair: { m1: ExperimentModel; m2: ExperimentModel; verifier: ExperimentModel }, prefix: string, workerLimit = 1,
-  collection?: { task_id: string; repeat_id: string; evaluator: string }) {
+  collection?: { task_id: string; repeat_id: string; evaluator: string }, limits?: Partial<ExperimentLimits>) {
   if (existsSync(destination) || ![1, 2, 3, 4].includes(workerLimit)) throw new Error('EXPERIMENT_MATRIX_TARGET_OR_LIMIT_INVALID')
   mkdirSync(destination, { recursive: true })
   const conditions = [
@@ -17,7 +17,7 @@ export function createModelMatrix(snapshot: string, destination: string,
     const home = join(destination, condition.group)
     const config = restoreExperiment(snapshot, home, condition.group.startsWith('S') ? 'standalone' : 'autonomous', `${prefix}-${condition.group}`, {
       models: { dispatcher: condition.dispatcher, executor: condition.executor, verifier: pair.verifier },
-      limits: { ...DEFAULT_EXPERIMENT_LIMITS, max_workers: workerLimit },
+      limits: { ...DEFAULT_EXPERIMENT_LIMITS, ...limits, max_workers: workerLimit },
       ...(collection ? { evaluator: collection.evaluator, sample: { task_id: collection.task_id, repeat_id: collection.repeat_id,
         pair_id: prefix, group: condition.group as 'G11' | 'G12' | 'G21' | 'G22' | 'S1' | 'S2' } } : {}),
     })
