@@ -7,7 +7,7 @@
 | `guide-neutral.webp` | 首页默认成年立绘，放空神情 |
 | `guide-wave.webp` | 单次点击后的轻微歪头、抬手回应 |
 | `guide-blush.webp` | 连续点击后的脸红与举拳头姿态 |
-| `guide-fumo.webp` | 侧栏、聊天头像、空状态的静态布偶；不增加点击动作 |
+| `guide-fumo.webp` | 侧栏可轻戳回弹的布偶；聊天头像与空状态保持静态 |
 
 ## 最终提示词要点
 

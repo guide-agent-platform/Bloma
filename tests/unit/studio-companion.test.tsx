@@ -4,8 +4,19 @@ import { render, cleanup, screen, fireEvent, act } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { StudioCompanion, StudioFumoNote, StudioFumoAvatar } from '../../renderer/components/StudioCompanion'
 
-beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] }))
-afterEach(() => { cleanup(); vi.useRealTimers() })
+const animate = vi.fn(() => ({ cancel: vi.fn() }))
+const originalAnimate = Object.getOwnPropertyDescriptor(Element.prototype, 'animate')
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
+  animate.mockClear()
+  vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false })))
+  Object.defineProperty(Element.prototype, 'animate', { configurable: true, writable: true, value: animate })
+})
+afterEach(() => {
+  cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals()
+  if (originalAnimate) Object.defineProperty(Element.prototype, 'animate', originalAnimate)
+  else Reflect.deleteProperty(Element.prototype, 'animate')
+})
 const pose = () => document.querySelector('[data-ai-id="studio-companion"]')!.getAttribute('data-pose')
 const tick = (duration: number) => act(() => vi.advanceTimersByTime(duration))
 
@@ -34,11 +45,35 @@ describe('adult studio companion reactions', () => {
     fireEvent.click(button); view.unmount()
     expect(vi.getTimerCount()).toBe(0)
   })
-  it('retains the plush as static artwork without clickable actions or reaction timers', () => {
+  it('sidebar plush responds to a poke then recovers, while the chat avatar remains decorative', () => {
     const view = render(<><StudioFumoNote /><StudioFumoAvatar /></>)
     expect(view.container.querySelectorAll('img')).toHaveLength(2)
-    expect(screen.queryByRole('button')).toBeNull()
-    fireEvent.click(view.container.querySelector('img')!)
+    fireEvent.click(screen.getByRole('button', { name: '摸摸布偶' }))
+    expect(screen.getByText('……摸到了。')).toBeTruthy()
+    expect(animate).toHaveBeenCalledTimes(1)
+    expect(view.container.querySelector('.studio-fumo-avatar')?.closest('button')).toBeNull()
+    tick(1800)
+    expect(screen.queryByText('……摸到了。')).toBeNull()
+    view.unmount()
     expect(vi.getTimerCount()).toBe(0)
+  })
+  it('restarts the visual pulse without moving or replacing the clickable target', () => {
+    render(<StudioCompanion />)
+    const button = screen.getByRole('button', { name: '和向导打个招呼' })
+    fireEvent.click(button)
+    const previous = animate.mock.results[0]!.value
+    fireEvent.click(button)
+    expect(previous.cancel).toHaveBeenCalledTimes(1)
+    expect(animate).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('button', { name: '和向导打个招呼' })).toBe(button)
+  })
+  it('reduced motion keeps pose and text feedback without spring movement', () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })))
+    render(<><StudioCompanion /><StudioFumoNote /></>)
+    fireEvent.click(screen.getByRole('button', { name: '和向导打个招呼' }))
+    fireEvent.click(screen.getByRole('button', { name: '摸摸布偶' }))
+    expect(pose()).toBe('wave')
+    expect(screen.getByText('……摸到了。')).toBeTruthy()
+    expect(animate).not.toHaveBeenCalled()
   })
 })
