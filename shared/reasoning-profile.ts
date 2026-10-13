@@ -122,7 +122,7 @@ export function resolveProfile(modelId: string | undefined): ReasoningProfile | 
   const id = modelId?.toLowerCase()
   if (!id) return undefined
   // 正则对齐 Proma resolveReasoningProfile:336-349（容忍 -latest/-exp 等后缀）
-  if (/^deepseek-v4-flash(?:-|$)/.test(id)) return PROFILES[0]
+  if (/^deepseek-(?:v4-flash|flash)(?:-|$)/.test(id)) return PROFILES[0]
   if (/^deepseek-v4-pro(?:-|$)/.test(id)) return PROFILES[1]
   if (/^(?:k3(?:-256k)?|kimi-k3)$/.test(id)) return PROFILES[2]
   if (id === 'glm-5.3') return PROFILES[3]

@@ -12,7 +12,7 @@ import type {
 import { AGENT_ROLE_CATEGORIES, AGENT_ROUTING_ROLES } from '../../../shared/types'
 import { getCategoryRoutingPath } from '../../../storage/config-paths'
 import { readJsonFile, writeJsonFile } from '../../../storage/json-store'
-import { getChannelByIdRaw, getFirstEnabledChannel, isAnthropicProtocolProvider } from './channel-manager'
+import { getChannelByIdRaw, getFirstEnabledChannel, isAgentProtocolProvider } from './channel-manager'
 import { resolveCategoryModel } from './model-resolution'
 
 /**
@@ -95,8 +95,8 @@ export function resolveRoutedChannelId(category: DocumentCategory): string | und
     return undefined
   }
   if (!channel.enabled) return undefined
-  if (!isAnthropicProtocolProvider(channel.provider_type)) {
-    console.warn(`[categoryRouting] ${category} 类别路由指向的渠道「${channel.name}」非 Anthropic 协议（${channel.provider_type}），运行时无法走 /v1/messages，回退全局默认渠道`)
+  if (!isAgentProtocolProvider(channel.provider_type)) {
+    console.warn(`[categoryRouting] ${category} 类别路由指向的渠道「${channel.name}」未支持的 Agent 协议（${channel.provider_type}），运行时无法执行工具调用，回退全局默认渠道`)
     return undefined
   }
   return channel.id
@@ -135,7 +135,7 @@ function resolvedAuditView(
   if (configuredId) {
     const configured = getChannelByIdRaw(configuredId)
     if (!configured) effective = 'dangling'
-    else if (configured.enabled && isAnthropicProtocolProvider(configured.provider_type)) {
+    else if (configured.enabled && isAgentProtocolProvider(configured.provider_type)) {
       effective = 'routed'
       channel = configured
     }
@@ -173,7 +173,7 @@ function resolvedRoleView(role: AgentRoutingRole, routing: CategoryRoutingConfig
   if (configuredId) {
     const configured = getChannelByIdRaw(configuredId)
     if (!configured) effective = 'dangling'
-    else if (configured.enabled && isAnthropicProtocolProvider(configured.provider_type)) {
+    else if (configured.enabled && isAgentProtocolProvider(configured.provider_type)) {
       effective = 'routed'
       channel = configured
     }
@@ -219,7 +219,7 @@ export function buildCategoryRoutingViews(): CategoryRoutingListResult {
     if (configuredId) {
       const configured = getChannelByIdRaw(configuredId)
       if (!configured) effective = 'dangling'
-      else if (configured.enabled && isAnthropicProtocolProvider(configured.provider_type)) {
+      else if (configured.enabled && isAgentProtocolProvider(configured.provider_type)) {
         effective = 'routed'
         channel = configured
       }
@@ -261,8 +261,8 @@ function keepChannelReference(scope: string, field: string, channelId: unknown):
     console.warn(`[categoryRouting] 保存时剥离 ${scope}.${field}：渠道 ${channelId} 不存在或非本项目渠道`)
     return undefined
   }
-  if (!isAnthropicProtocolProvider(channel.provider_type)) {
-    console.warn(`[categoryRouting] 保存时剥离 ${scope}.${field}：渠道「${channel.name}」（${channel.provider_type}）非 Anthropic 协议，运行时固定请求 /v1/messages 会 404`)
+  if (!isAgentProtocolProvider(channel.provider_type)) {
+    console.warn(`[categoryRouting] 保存时剥离 ${scope}.${field}：渠道「${channel.name}」（${channel.provider_type}）未支持的 Agent 协议，运行时固定请求 /v1/messages 会 404`)
     return undefined
   }
   return channelId

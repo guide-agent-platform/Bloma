@@ -13,6 +13,8 @@
  */
 
 import type { ProviderRequest, StreamAdapter, StreamEventCallback, ThinkingBlock, ToolCall } from './types'
+import { MonetaryBudgetError, reserveModelRequest } from '../../llm/monetary-budget'
+import type { SDKMessage } from '../../../../shared/types'
 
 // ===== 流式请求 =====
 
@@ -108,6 +110,7 @@ function getSSERetryDelayMs(attempt: number, elapsedRetryDelayMs: number): numbe
 
 /** 判断错误是否可重试（上游原样） */
 function isRetriableError(error: unknown): boolean {
+  if (error instanceof MonetaryBudgetError) return false
   if (error instanceof ProviderStreamError) return false
   if (error instanceof HTTPError) {
     return error.status === 408 || error.status === 425 || error.status === 429 || error.status >= 500
@@ -191,6 +194,26 @@ function normalizeToolCallOutputIndex(value: unknown): string | undefined {
 
 /** 单次 SSE 流式尝试（不含重试逻辑；上游原样） */
 async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSEResult> {
+  const reservation = reserveModelRequest(options.request.url, options.request.body)
+  let usage: SDKMessage['usage']
+  let completed = false
+  try {
+    const result = await runReservedStreamAttempt({ ...options, onEvent: event => {
+      if (event.type === 'usage') {
+        usage = { ...usage,
+          ...(event.inputTokens !== undefined ? { input_tokens: event.inputTokens } : {}),
+          ...(event.outputTokens !== undefined ? { output_tokens: event.outputTokens } : {}),
+          ...(event.cacheReadInputTokens !== undefined ? { cache_read_input_tokens: event.cacheReadInputTokens } : {}),
+          ...(event.cacheCreationInputTokens !== undefined ? { cache_creation_input_tokens: event.cacheCreationInputTokens } : {}) }
+      }
+      options.onEvent(event)
+    } })
+    completed = true
+    return result
+  } finally { reservation?.settle(usage, completed) }
+}
+
+async function runReservedStreamAttempt(options: StreamSSEOptions): Promise<StreamSSEResult> {
   const { request, adapter, onEvent, signal, fetchFn = fetch, timeoutMs = 30_000, streamIdleTimeoutMs = 120_000, streamProgressTimeoutMs = 120_000 } = options
 
   // 真正的"首字节超时"：仅在等待 HTTP 响应期间计时，收到响应后立即清除。

@@ -181,13 +181,13 @@ describe('category-routing（M5 类别→渠道路由）', () => {
     expect(resolveRoutedChannelId('mvp')).toBe(glm.id)
   })
 
-  it('协议复核：指向 OpenAI 协议渠道（如 zhipu）→ undefined + console.warn（防运行时 404）', () => {
+  it('协议复核：智谱常规 OpenAI API 可以进入原生 Agent 路由', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const zhipuOpenai = seedChannel('zhipu-openai', 'zhipu')
     setCategoryRoutingForTests({ mvp: { channel_id: zhipuOpenai.id } })
 
-    expect(resolveRoutedChannelId('mvp')).toBeUndefined()
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('非 Anthropic 协议'))
+    expect(resolveRoutedChannelId('mvp')).toBe(zhipuOpenai.id)
+    expect(warn).not.toHaveBeenCalled()
   })
 
   it('协议复核覆盖「保存后被 updateChannel 改协议」的场景（§4.3/§9.1）', () => {
@@ -197,9 +197,9 @@ describe('category-routing（M5 类别→渠道路由）', () => {
     expect(resolveRoutedChannelId('mvp')).toBe(glm.id)
 
     // 保存后渠道被改成 OpenAI 协议 → 解析不再判 routed
-    updateChannel(glm.id, { provider_type: 'zhipu' })
+    updateChannel(glm.id, { provider_type: 'openai' })
     expect(resolveRoutedChannelId('mvp')).toBeUndefined()
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('非 Anthropic 协议'))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('未支持的 Agent 协议'))
   })
 
   // ------------------------------------------------------------------
@@ -302,23 +302,23 @@ describe('category-routing（M5 类别→渠道路由）', () => {
 
   it('非 Anthropic 协议引用（启用渠道）→ 剥离 + console.warn', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    const zhipuOpenai = seedChannel('zhipu-openai', 'zhipu')
+    const zhipuOpenai = seedChannel('unsupported-openai', 'openai')
 
     updateCategoryRouting({ mvp: { channel_id: zhipuOpenai.id } })
 
     expect(loadCategoryRouting()).toEqual({})
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('非 Anthropic 协议'))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('未支持的 Agent 协议'))
   })
 
   it('非 Anthropic 协议引用（禁用渠道）→ 同剥离 + console.warn（重启用后仍 404，保留意图无意义）', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    const zhipuOpenai = seedChannel('zhipu-openai', 'zhipu')
+    const zhipuOpenai = seedChannel('unsupported-openai', 'openai')
     updateChannel(zhipuOpenai.id, { enabled: false })
 
     updateCategoryRouting({ mvp: { channel_id: zhipuOpenai.id } })
 
     expect(loadCategoryRouting()).toEqual({})
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('非 Anthropic 协议'))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('未支持的 Agent 协议'))
   })
 
   it('禁用且 Anthropic 协议渠道 → 保留条目（重新启用后自动恢复）', () => {

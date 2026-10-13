@@ -619,6 +619,11 @@ export function isAnthropicProtocolProvider(provider: ProviderType): boolean {
   return ANTHROPIC_PROTOCOL_PROVIDERS.includes(provider)
 }
 
+/** Protocols implemented by the native tool-using agent loop. */
+export function isAgentProtocolProvider(provider: ProviderType): boolean {
+  return isAnthropicProtocolProvider(provider) || provider === 'zhipu'
+}
+
 // =========================================================================
 // 4.2 文档类别与类别路由（M4 类别→模型 / M5 类别→渠道）
 // =========================================================================

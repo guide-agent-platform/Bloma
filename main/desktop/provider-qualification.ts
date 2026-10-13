@@ -23,6 +23,7 @@ import type { ProductShape } from '../model/prd-backplane'
 import { readPrdBackplane } from '../project/document-engine'
 import { verificationFingerprint } from './verification-fingerprint'
 import { normalizeHttpUsage, startDirectQuery } from '../platform/llm/request-ledger'
+import { fetchWithMonetaryBudget, MonetaryBudgetError } from '../platform/llm/monetary-budget'
 
 /** 产物 LLM 声明（解析容错：结构不合法按未声明处理）。 */
 export interface LlmProviderDeclaration {
@@ -238,7 +239,7 @@ export async function runProviderQualification(options: {
     const age = Date.now() - Date.parse(prior?.checked_at ?? '')
     if (fingerprint && prior?.qualified === true && prior.fingerprint === fingerprint && age >= 0 && age < 24 * 60 * 60 * 1000) return { ...prior, calls: 0, reused: true }
   } catch { /* corrupt/legacy evidence requires a new verification */ }
-  const isOpenAi = providerType === 'openai'
+  const isOpenAi = providerType === 'openai' || providerType === 'zhipu'
   const url = isOpenAi ? openaiChatUrl(baseUrl) : anthropicMessagesUrl(baseUrl)
   const sampleMessages = extractSampleMessages(declaration as unknown as Record<string, unknown>).map((m) => ({
     role: String((m as Record<string, unknown>).role),
@@ -272,12 +273,12 @@ export async function runProviderQualification(options: {
     calls += 1
     try {
       accounting.startAttempt()
-      const response = await fetchImpl(url, {
+      const response = await fetchWithMonetaryBudget(url, {
         method: 'POST',
         headers,
         body,
         signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
-      })
+      }, fetchImpl)
       const text = await response.text()
       if (!response.ok) {
         accounting.failAttempt()
@@ -326,6 +327,7 @@ export async function runProviderQualification(options: {
       }
       return outcome
     } catch (error) {
+      if (error instanceof MonetaryBudgetError) throw error
       accounting.failAttempt()
       lastError = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
       // 网络异常/超时重试一次

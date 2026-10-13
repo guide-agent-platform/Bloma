@@ -37,7 +37,7 @@ import type {
 import {
   PROVIDER_DEFAULT_URLS,
   PROVIDER_LABELS,
-  isAnthropicProtocolProvider,
+  isAgentProtocolProvider,
 } from '../../shared/types'
 import {
   categoryRoutingRoleViewsAtom,
@@ -751,7 +751,7 @@ function modelsSummary(channel: Channel | undefined): string {
 }
 
 function routingSelectableChannels(channels: Channel[]): Channel[] {
-  return channels.filter((channel) => isAnthropicProtocolProvider(channel.provider_type))
+  return channels.filter((channel) => isAgentProtocolProvider(channel.provider_type))
 }
 
 /**

@@ -14,6 +14,9 @@ import {
  * 输出与现状逐字节一致（thinking:{type:'disabled'}）。
  */
 describe('reasoning-profile（推理档位移植）', () => {
+  it('deepseek-flash preserves the requested low thinking effort', () => {
+    expect(buildThinkingFragment('deepseek-flash', 'deepseek', 'low')).toEqual(buildThinkingFragment('deepseek-v4-flash', 'deepseek', 'low'))
+  })
   it('[S4-REASON-001] resolve deepseek-v4-flash 含 -latest 后缀', () => {
     expect(resolveProfile('deepseek-v4-flash-latest')?.id).toBe('deepseek-v4-flash')
   })

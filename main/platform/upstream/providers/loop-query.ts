@@ -26,6 +26,7 @@ import { normalizeAnthropicBaseUrl, resolveAnthropicMessagesUrl } from './url-ut
 import { streamSSE, HTTPError } from './sse-reader'
 import { capMaxTokensForProvider } from '../../llm/model-resolution'
 import { accountSdkQuery } from '../../llm/request-ledger'
+import { OPENAI_LOOP_ADAPTER, openAiLoopBody } from './openai-loop-protocol'
 
 /** 开关已删除（2026-10-01 开关面收敛批）：providers 传输路径为唯一实现。 */
 /**
@@ -126,14 +127,15 @@ async function* anthropicMessagesQueryViaProvidersInner(prompt: string, options:
     }
   }
 
-  const url = resolveLoopMessagesUrl(baseUrl, providerType)
+  const openai = providerType === 'zhipu'
+  const url = openai ? `${baseUrl.replace(/\/chat\/completions$/, '')}/chat/completions` : resolveLoopMessagesUrl(baseUrl, providerType)
   const makeRequest = (): { url: string; headers: Record<string, string>; body: string } => {
     // 服务端硬上限夹紧（2026-10-03 zhipu 实测 131072，超限 400 code 1210）：唯一夹紧点在出口
     body.max_tokens = capMaxTokensForProvider(options.maxTokens ?? 640000, providerType)
     return {
       url,
-      headers: buildAnthropicHeaders(apiKey, providerType),
-      body: JSON.stringify(body),
+      headers: openai ? { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' } : buildAnthropicHeaders(apiKey, providerType),
+      body: JSON.stringify(openai ? openAiLoopBody(body) : body),
     }
   }
 
@@ -157,7 +159,7 @@ async function* anthropicMessagesQueryViaProvidersInner(prompt: string, options:
     const runOnce = () =>
       streamSSE({
         request: makeRequest(),
-        adapter: ANTHROPIC_SSE_ADAPTER,
+        adapter: openai ? OPENAI_LOOP_ADAPTER : ANTHROPIC_SSE_ADAPTER,
         signal: options.signal,
         onAttempt: options.onTransportAttempt,
         onEvent: (event) => {

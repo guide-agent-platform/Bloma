@@ -69,6 +69,7 @@ const ANTHROPIC_PROTOCOL_SET = new Set<ProviderType>(ANTHROPIC_PROTOCOL_PROVIDER
 
 // M5：从 shared re-export（保持 §5#10「channel-manager 导出判定」的既有消费口径）
 export { isAnthropicProtocolProvider }
+export { isAgentProtocolProvider } from '../../../shared/types'
 
 /**
  * 由解密后的渠道密钥构建 SDK 子进程环境（ANTHROPIC_AUTH_TOKEN/BASE_URL/MODEL + 白名单宿主环境）。
