@@ -14,8 +14,8 @@ const expectedChannels = [
   'permission:response',
   'project:create',
   'project:list',
-  'project:confirm-sketch',
-  'project:submit-correction',
+  // Legacy sketch/correction IPCs were retired. Current desktop confirmations
+  // travel through agent:send-message and its card payload (desktop-route/ux-confirm).
   'project:archive',
   'project:upgrade',
   'sandbox:run',

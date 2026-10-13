@@ -1,6 +1,6 @@
 # 真实实验预检与执行方案
 
-当前状态：用户已于 2026-10-14 要求暂停，先查清运行问题。只执行了 quick 的 G11/G22/S2，未完成六组；费用、终止与独立 GUI 诊断见 [暂停与故障诊断](dispatch-experiment-diagnosis-20261014.md)。下面的 12/36 样本和三路并发为计划，不是已完成结果。
+当前状态：2026-10-14 quick 串行六条件执行已到终态，原生交付成功 S1/S2，G11/G12/G22 功能评分 6/6 但交付失败，G21 在 HTTP 前被 50 元预算守卫拒绝并保持未评。因此没有完整有效配对，D/R/G 不可计算；longterm 与追加重复未执行。详见 [阶段结果与完整证据](dispatch-experiment-final-results-20261014.md)。早期并行批次保留但排除主要比较，下面的 12/36 样本和三路并发属于初始计划。
 
 用户已补充额度并明确 GLM 使用常规 API。2026-10-13/14 本机预检确认官方目录提供 `deepseek-flash`（DeepSeek-V4.1-Flash）及 `glm-5.3`，DeepSeek 预检余额 63.96 元。两个模型均已完成真实工具调用探针；这些探针不是六组产品实验结果。
 
@@ -33,4 +33,4 @@ DeepSeek 实际模型选择器采用官方目录的 `deepseek-flash`；新的别
 
 ## 目前验证
 
-263 文件/2397 单测及 2 文件/8 集成测试通过，typecheck/build 通过；新增最终小调整后费用及协议定向 2 文件/8 例通过。证据在 `run-artifacts/real-experiment-preflight/{unit,integration,build,typecheck,final-regressions}.log`。实际工具探针与官方页面缓存也在该目录。尚无产品六组的评分与统计结论；原生准备和矩阵执行以各 home 事件及后续报告为准。
+263 文件/2397 单测及 2 文件/8 集成测试通过，typecheck/build 通过；新增最终小调整后费用及协议定向 2 文件/8 例通过。证据在 `run-artifacts/real-experiment-preflight/{unit,integration,build,typecheck,final-regressions}.log`。实际工具探针与官方页面缓存也在该目录。后续真实运行结果见阶段报告：存在五个产物评分，但完整有效六组配对数为零，不能作模型能力统计结论。空 assistant 历史修复 caf682d 的 4 文件/110 例相关测试、typecheck 和构建通过；该新 bundle 未在本轮付费重跑。
