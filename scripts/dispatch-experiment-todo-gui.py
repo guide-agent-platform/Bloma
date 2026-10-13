@@ -32,6 +32,7 @@ HELPERS = r'''(() => {
  };
  window.__externalTodoTest = {
   rows:()=>rows().filter(x=>visible(x.row)).map(x=>({title:x.rawTitle,done:x.done})),
+  rowCount:()=>{const known=rows().find(x=>visible(x.row));if(!known)throw Error('CONTROL_ADAPTER_LIST_MISSING');return [...known.row.parentElement.children].filter(e=>visible(e)&&!!e.querySelector('input[type=checkbox],[role=checkbox],[data-role=toggle],button')).length;},
   add:(text)=>{const input=document.querySelector('#main-input,input[type=text],input:not([type]),textarea');if(!input)throw Error('CONTROL_ADAPTER_INPUT_MISSING');input.value=text;input.dispatchEvent(new Event('input',{bubbles:true}));const b=button(/新增|添加|加入|创建|^发送$|Add/i);if(!b)throw Error('CONTROL_ADAPTER_ADD_MISSING');b.click();},
   toggle:(i)=>{const r=rows().filter(x=>visible(x.row))[i];if(!r?.toggle)throw Error('CONTROL_ADAPTER_TOGGLE_MISSING');r.toggle.click();},
   delete:(i)=>{const r=rows().filter(x=>visible(x.row))[i];if(!r?.del)throw Error('CONTROL_ADAPTER_DELETE_MISSING');r.del.click();},
@@ -84,11 +85,11 @@ def main():
                 assert observed[0]['title'] == '实验同名任务', observed
             check('add-trim', add_trim)
             def empty():
+                before = js('window.__externalTodoTest.rowCount()')
                 action("window.__externalTodoTest.add('   ')")
                 assert_rows(1, 0)
-                # There must be no blank task row, as well as no extra named task.
-                blank = js("[...document.querySelectorAll('[data-id],[data-task-id],[data-bloma-id^=\"task.row.\"],[data-bloma-id^=\"list.row.\"]')].filter(e=>e.querySelector('input[type=checkbox],button')&&!e.textContent.trim()).length")
-                assert blank == 0, 'Blank task was created'
+                after = js('window.__externalTodoTest.rowCount()')
+                assert before == after, f'Blank input changed the task row count: {before} -> {after}'
             check('empty-rejection', empty, ('add-trim',))
             def toggle():
                 action("window.__externalTodoTest.add('实验同名任务')")
