@@ -119,7 +119,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
       </aside>
       <div className="studio-body">
       <main className="theatre-stage">
-        <div className="theatre-stage-heading"><div><p className="theatre-eyebrow">从想法到软件</p><h2>{scene.title}</h2></div><div className="studio-heading-actions"><span className="studio-scene-description">{scene.description}</span><button type="button" className="theatre-tool studio-control" aria-label={focused ? '退出专注预览' : '专注预览'} aria-pressed={focused} onClick={() => setFocused(value => !value)}>{focused ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button></div></div>
+        <div className="theatre-stage-heading"><div key={scene.title} className="studio-scene-heading"><p className="theatre-eyebrow">从想法到软件</p><h2>{scene.title}</h2></div><div className="studio-heading-actions"><span className="studio-scene-description">{scene.description}</span><button type="button" className="theatre-tool studio-control" title={focused ? '退出专注预览' : '专注预览'} aria-label={focused ? '退出专注预览' : '专注预览'} aria-pressed={focused} onClick={() => setFocused(value => !value)}>{focused ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button></div></div>
         <div className="theatre-main" data-panel-open={documents || collaboration || Boolean(localPanel)}>
           <section className="theatre-product" aria-label="软件与当前结果">
         {props.deliveryPanel

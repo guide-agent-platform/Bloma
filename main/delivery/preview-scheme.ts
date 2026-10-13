@@ -19,6 +19,7 @@ import { existsSync, realpathSync, statSync } from 'node:fs'
 import { extname, join, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { findProject } from '../project/project-service'
+import { injectSketchViewport } from '../../shared/sketch-viewport'
 
 export const PREVIEW_SCHEME = 'bloma-file'
 
@@ -90,6 +91,10 @@ async function handlePreviewFileRequest(request: Request): Promise<Response> {
   if (/^\.(html|htm)$/i.test(extname(target))) {
     const headers = new Headers(response.headers)
     headers.set('Content-Type', 'text/html; charset=utf-8')
+    if (url.searchParams.get('bloma-viewport') === '1') {
+      headers.delete('Content-Length')
+      return new Response(injectSketchViewport(await response.text()), { status: response.status, headers })
+    }
     return new Response(response.body, { status: response.status, headers })
   }
   return response

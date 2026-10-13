@@ -69,9 +69,12 @@ describe('studio message actions and origin', () => {
     expect(store.get(atom).text).toBe('需要编辑后再发送的原要求')
   })
 
-  it('short window height does not shrink a whole tall page into unreadable text', () => {
-    expect(sketchFitScale(1280, 200)).toBe(1)
-    expect(sketchFitScale(640, 200)).toBe(.5)
+  it('fits both dimensions, including long pages, while original size remains available', () => {
+    expect(sketchFitScale(1280, 200)).toBe(.25)
+    expect(sketchFitScale(640, 800)).toBe(.5)
+    expect(sketchFitScale(640, 200)).toBe(.25)
+    expect(sketchFitScale(1280, 400, false, { width: 1280, height: 2400 })).toBeCloseTo(1 / 6)
+    expect(sketchFitScale(4000, 3000)).toBe(1)
     expect(sketchFitScale(640, 200, true)).toBe(1)
   })
 })

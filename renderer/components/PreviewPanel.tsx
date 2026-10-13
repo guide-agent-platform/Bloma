@@ -479,6 +479,9 @@ const ControlButton: React.FC<{ label: string; onClick: () => void; children: Re
   label, onClick, children,
 }) => (
   <button
+    type="button"
+    className="theatre-tool preview-control"
+    aria-label={label}
     title={label}
     onClick={onClick}
     style={{
@@ -489,8 +492,6 @@ const ControlButton: React.FC<{ label: string; onClick: () => void; children: Re
       transition: 'all var(--transition-fast)',
       cursor: 'pointer',
     }}
-    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-surface-muted)'; e.currentTarget.style.color = 'var(--color-text)' }}
-    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-muted)' }}
   >
     {children}
   </button>

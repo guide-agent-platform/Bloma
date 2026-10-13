@@ -109,6 +109,19 @@ describe('mintProjectPreviewUrl（入口铸造边界）', () => {
 })
 
 describe('handlePreviewFileRequest（子资源路径）', () => {
+  it('adds the size bridge only to opted-in HTML responses without rewriting the file', async () => {
+    const handler = captureHandler()
+    const plain = await handler(new Request('bloma-file://p1/00_UX/ux-sketch.html'))
+    expect(await plain.text()).not.toContain('data-bloma-viewport')
+    const measured = await handler(new Request('bloma-file://p1/00_UX/ux-sketch.html?bloma-viewport=1'))
+    const html = await measured.text()
+    expect(html.startsWith('<!DOCTYPE html>')).toBe(true)
+    expect(html).toContain('data-bloma-viewport')
+    expect(html).not.toContain('electronAPI')
+    const { readFileSync } = await import('node:fs')
+    expect(readFileSync(join(projectRoot, '00_UX', 'ux-sketch.html'), 'utf8')).toBe('<!DOCTYPE html><html><body>草图</body></html>')
+  })
+
   it('HTML 入口 200 且 Content-Type 带 charset=utf-8（陷阱 40）', async () => {
     const handler = captureHandler()
     const response = await handler(new Request(`bloma-file://p1/00_UX/ux-sketch.html`))

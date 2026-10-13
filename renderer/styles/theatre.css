@@ -48,3 +48,33 @@ h1,h2,h3,h4{font-family:var(--font-sans);font-weight:500!important;}
 .studio-settings{padding:24px;}.studio-settings-header{max-width:1100px;margin:auto;display:flex;align-items:center;gap:24px;padding:0 0 20px;}.studio-settings-header h1{display:flex;align-items:center;gap:9px;font-size:22px;margin:0;}.studio-settings-layout{max-width:1100px;margin:auto;display:grid;grid-template-columns:170px minmax(0,1fr);gap:24px;}.studio-settings-nav{display:flex;flex-direction:column;gap:5px;}.studio-settings-nav button{display:flex;align-items:center;gap:9px;min-height:40px;text-align:left;padding:10px 12px;border-radius:9px;color:var(--color-text-muted);background:transparent;cursor:pointer;}.studio-settings-nav button[aria-selected="true"]{background:#fff;color:var(--color-primary);box-shadow:0 3px 12px #2943340a;}.studio-settings-content{background:#ffffffc9;border:1px solid var(--color-border);border-radius:15px;overflow:hidden;}.studio-settings-content>div{max-width:none!important;}
 :where([data-ai-id="requirement-confirm-dialog"],[data-ai-id="prd-confirm-dialog"],[data-ai-id="review-choices-dialog"]){border:1px solid var(--color-border)!important;border-radius:16px!important;box-shadow:var(--shadow-lg)!important;padding:23px!important;}
 @media(max-width:650px){.studio-settings{padding:16px;}.studio-settings-header{gap:14px;flex-wrap:wrap;}.studio-settings-layout{grid-template-columns:minmax(0,1fr);gap:15px;}.studio-settings-nav{flex-direction:row;flex-wrap:wrap;}.studio-settings-nav button{font-size:12px;}}
+
+/* Studio feedback follows upstream button.tsx (bf3e98c), with lighter motion for the canvas. */
+:where(.theatre-tool,.studio-library button,.studio-steps button,.studio-settings-nav button,.studio-primary,.theatre-project,.idea-mode-card){transition:background-color 160ms ease,color 160ms ease,box-shadow 160ms ease,transform 180ms ease;}
+:where(.workspace-theatre,.studio-settings,.idea-start,[data-ai-id="project-history-page"]) button svg{flex-shrink:0;transition:transform 180ms ease;transform-origin:center;}
+@media(hover:hover){
+  :where(.theatre-tool,.studio-library button,.studio-steps button,.studio-settings-nav button,.theatre-project):not(:disabled):hover{background-color:var(--theatre-tint,var(--color-surface-muted));color:var(--theatre-accent,var(--color-primary));}
+  :where(.workspace-theatre,.studio-settings,.idea-start,[data-ai-id="project-history-page"]) button:not(:disabled):hover>svg{transform:translateY(-1px) scale(1.08);}
+  .studio-control:not(:disabled):hover{transform:translateY(-2px);box-shadow:0 7px 17px #455d4825;}
+  .studio-primary:not(:disabled):hover,.idea-mode-card:hover{transform:translateY(-2px);box-shadow:0 8px 20px -10px #34563e40;}
+  .preview-control:not(:disabled):hover>svg{transform:rotate(-8deg) scale(1.08);}
+}
+:where(.theatre-tool,.studio-library button,.studio-steps button,.studio-settings-nav button,.studio-primary):not(:disabled):active{transform:scale(.97);}
+.theatre-tool:disabled{opacity:.45;cursor:default;}
+.sketch-toolbar{min-width:0;flex-wrap:wrap;}.sketch-toolbar>span{flex:1;min-width:130px;}.sketch-scale{min-width:38px;text-align:center;font-variant-numeric:tabular-nums;}
+.sketch-surface{padding:12px;}.sketch-page{flex-shrink:0;}
+.sketch-viewport[data-fit="true"] .sketch-surface{display:flex;align-items:center;justify-content:center;overflow:hidden;}
+.sketch-viewport[data-fit="true"] .sketch-page{margin:0;}
+@keyframes studio-page-enter{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
+@keyframes studio-panel-enter{from{opacity:0;transform:translateX(12px);}to{opacity:1;transform:none;}}
+@keyframes studio-canvas-focus{from{opacity:.65;}to{opacity:1;}}
+@keyframes studio-canvas-return{from{opacity:.65;}to{opacity:1;}}
+.workspace-theatre,.idea-start,.studio-settings,[data-ai-id="project-history-page"]{animation:studio-page-enter 240ms ease-out;}
+.theatre-sidepanel{animation:studio-panel-enter 220ms ease-out;}
+.studio-settings-content,.studio-scene-heading{animation:studio-page-enter 200ms ease-out;}
+.workspace-theatre[data-focused="true"] .theatre-product{animation:studio-canvas-focus 220ms ease-out;}
+.workspace-theatre[data-focused="false"] .theatre-product{animation:studio-canvas-return 220ms ease-out;}
+@media(prefers-reduced-motion:reduce){
+  .workspace-theatre,.idea-start,.studio-settings,[data-ai-id="project-history-page"],.studio-settings *,[data-ai-id="project-history-page"] *{animation:none!important;transition:none!important;}
+  :where(.workspace-theatre,.studio-settings,.idea-start,[data-ai-id="project-history-page"]) button:hover>svg{transform:none;}
+}

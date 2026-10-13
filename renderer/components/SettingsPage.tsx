@@ -18,7 +18,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
     <header className="studio-settings-header"><button type="button" className="theatre-tool" data-ai-id="settings-back" aria-label="返回工作区" onClick={onBack}><ArrowLeft size={18} />返回工作区</button><h1><IconSettings size={20} />设置</h1></header>
     <div className="studio-settings-layout">
       <nav role="tablist" aria-label="设置分类" className="studio-settings-nav">{tabs.map(({ id, label, Icon }) => <button key={id} id={`settings-tab-${id}`} type="button" role="tab" aria-selected={activeTab === id} aria-controls="settings-content" data-ai-id={`settings-tab-${id}`} onClick={() => setActiveTab(id)}><Icon size={17} />{label}</button>)}</nav>
-      <section id="settings-content" role="tabpanel" aria-labelledby={`settings-tab-${activeTab}`} className="studio-settings-content">{activeTab === 'channels' ? <ChannelSettingsPage /> : activeTab === 'sound' ? <NotificationSoundSettingsPage /> : <PromptSettingsPage />}</section>
+      <section key={activeTab} id="settings-content" role="tabpanel" aria-labelledby={`settings-tab-${activeTab}`} className="studio-settings-content">{activeTab === 'channels' ? <ChannelSettingsPage /> : activeTab === 'sound' ? <NotificationSoundSettingsPage /> : <PromptSettingsPage />}</section>
     </div>
   </main>
 }
