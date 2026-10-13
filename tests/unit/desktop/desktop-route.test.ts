@@ -42,6 +42,7 @@ import { findProject, updateProject } from '../../../main/project/project-servic
 import { isMvpConfirmPending, resetMvpConfirmForTests } from '../../../main/desktop/mvp-confirm'
 import { finishCorrectionSession, hasActiveCorrectionSession } from '../../../main/desktop/correction-session'
 import { verificationFingerprint } from '../../../main/desktop/verification-fingerprint'
+import { writeExperiment, readExperiment, EXPERIMENT_SWITCH } from '../../../main/desktop/dispatch-experiment'
 import {
   DESKTOP_CONFIRM_OPTION_PREFIX,
   MAX_AUTO_ADVANCE_CHAIN,
@@ -106,6 +107,33 @@ function baseRecord() {
   }
 }
 let record: ReturnType<typeof baseRecord>
+
+describe('experimental native preparation pause', () => {
+  it.each(['quick', 'longterm'] as const)('%s reaches Implement pause before any implementation query', async mode => {
+    const previousHome = process.env.PROMA_HOME, previousSwitch = process.env[EXPERIMENT_SWITCH]
+    const home = join(sandboxRoot, 'isolated-home'); mkdirSync(home)
+    writeFileSync(join(home, 'dispatch-experiment-home.json'), '{"version":1}')
+    process.env.PROMA_HOME = home; process.env[EXPERIMENT_SWITCH] = '1'
+    try {
+      record.mode = mode
+      writeExperiment({ version: 1, project_id: 'p1', mode, experiment_id: 'pilot', run_id: 'prepare', state: 'prepare', tasks: [], workers: {} })
+      let queries = 0
+      const query: SDKQuery = async function* () {
+        yield textMessage(++queries === 1 ? 'PHASE_ADVANCE: desktop-scaffold' : 'PHASE_ADVANCE: desktop-implement')
+        yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+      }
+      const { deps, events } = collectorDeps()
+      await enterDesktopLine(routeInput(), query, {}, deps)
+      expect(record.desktop_phase).toBe('desktop-implement')
+      expect(readExperiment('p1')?.state).toBe('prepared')
+      expect(queries).toBe(mode === 'quick' ? 0 : 2)
+      expect(events.some(event => String(event.payload.text ?? '').includes('已停在 Implement 前'))).toBe(true)
+    } finally {
+      if (previousHome === undefined) delete process.env.PROMA_HOME; else process.env.PROMA_HOME = previousHome
+      if (previousSwitch === undefined) delete process.env[EXPERIMENT_SWITCH]; else process.env[EXPERIMENT_SWITCH] = previousSwitch
+    }
+  })
+})
 
 describe('required delivery evidence', () => {
   it.each(['security', 'smoke', 'core'])('quick %s missing cannot become delivered', async (which) => {

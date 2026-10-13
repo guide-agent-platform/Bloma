@@ -16,6 +16,7 @@ export { setChildRunContextProvider } from './child-run-context'
 /** 提示词纯函数 re-export（R7 拆出后保持既有 import 路径）。 */
 export { buildChildSystemPrompt, buildDelegationPrompt } from './child-run-context'
 import { appendDelegationSettle, loadChildSessionSnapshot, replayTurnsFrom } from './delegation-persistence'
+import { buildCompletedDelegation, registerChildWithHost } from './completed-delegation'
 import { buildTaskHandoff, renderTaskHandoff, type TaskHandoff } from './task-handoff'
 import { recordSessionActivity } from '../../platform/sessions/session-service'
 import type { AgentEvent, PromaPermissionMode } from '../../../shared/types'
@@ -252,6 +253,7 @@ export function startDelegation(parent: ToolContext, args: DelegateAgentArgs): S
     // best-effort（同 recordSessionActivity 容错口径）；warn 保证落盘失败运维可见
     console.warn('[delegation-persistence] 子会话归属写入失败:', error)
   }
+  registerChildWithHost(parentCtx, { delegationId, childSessionId }, () => { delegations.delete(delegationId) })
   pruneFinishedDelegations()
   publishDelegationEvent(parent.sessionId, 'delegation_started', record)
 
@@ -416,6 +418,15 @@ export function getDelegationSummary(record: DelegationRecord): DelegationSummar
 export function findDelegation(parentSessionId: string, delegationId: string): DelegationRecord | undefined {
   const record = delegations.get(delegationId)
   if (!record || record.parentSessionId !== parentSessionId) return undefined
+  return record
+}
+
+/** Explicit experimental replay: rehydrate a finished, parent-owned implement handoff only. */
+export function restoreCompletedDelegation(parent: Pick<ToolContext, 'projectId' | 'sessionId'>, delegationId: string): DelegationRecord {
+  const existing = findDelegation(parent.sessionId, delegationId)
+  if (existing) return existing
+  const record = buildCompletedDelegation(parent, delegationId, createDelegationCompletion(), createAskSignal())
+  delegations.set(delegationId, record)
   return record
 }
 

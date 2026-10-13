@@ -36,7 +36,7 @@ import { sessionMaterials } from '../platform/attachments/material-context'
 import { buildDomainTools } from '../coding/tool-handlers'
 import { buildWebResearch } from '../agent/tools/web-tools'
 import { buildDelegationTools } from '../agent/delegation/delegation-tools'
-import { disposeParentDelegationState, registerParentLoopContext, setChildToolsBuilder } from '../agent/delegation/agent-collaboration'
+import { disposeParentDelegationState, registerParentLoopContext, setChildToolsBuilder, restoreCompletedDelegation } from '../agent/delegation/agent-collaboration'
 import { categoryTemperature } from '../platform/llm/model-resolution'
 import { trackAnalytics } from '../delivery/track-analytics'
 import { recordDispatchRunTelemetry, recordDispatchStartTelemetry } from './dispatcher-telemetry'
@@ -56,6 +56,8 @@ import { buildProjectDriverRunnerTool } from './driver-runner-tool'
 import { recordPhaseCheckpoint } from './phase-checkpoint'
 import { runVerifyFinalize, finalizeDesktopDispatch } from './dispatcher-finalize'
 import { buildResourceDiscoveryTool } from './resource-discovery'
+import { readExperiment, recordExperiment } from './dispatch-experiment'
+import { experimentChildCreated, experimentPhase, experimentTasksFinished, wrapExperimentDispatcherTools, wrapExperimentWorkerTools } from './dispatch-experiment-policy'
 
 // 拆分 re-export（批10 旧账③ R7，2026-10-07）：收口判定族迁至 dispatcher-finalize.ts，
 // 旧路径消费者与测试零断链（hub 化惯例；与 dispatcher-telemetry 拆分同款）。
@@ -278,6 +280,12 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
   if (!node || !node.dispatcherManaged) {
     return { status: 'not-managed' }
   }
+  const experiment = node.id === 'desktop-implement' ? readExperiment(input.projectId) : undefined
+  if (experiment && (experiment.state !== 'running' || experiment.mode !== (input.quickMode ? 'quick' : 'longterm')
+    || experiment.parent_session_id !== input.sessionId)) {
+    return { status: 'error', error_message: 'EXPERIMENT_NOT_READY_FOR_IMPLEMENT', phase: node }
+  }
+  const promptNode = experiment ? experimentPhase(node, experiment) : node
 
   // 骨架 v2 物化（批8 下半）：scaffold/implement 阶段入口把平台骨架复制进项目根
   // （幂等 skip-existing，不覆盖子会话成果）——任务书引用 ui/PATTERNS.md 的前提。
@@ -305,12 +313,13 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     basePublish(type, payload)
   }
 
-  const tools = wrapWithDispatcherGate(
+  const gatedTools = wrapWithDispatcherGate(
     [...buildDispatcherTools(input.projectId).filter((tool) => checkDispatcherToolGate(node, tool.name) === null), ...(input.toolsOverride ?? [])],
     node,
   )
+  const tools = experiment ? wrapExperimentDispatcherTools(gatedTools, experiment) : gatedTools
 
-  const system = buildDispatcherSystemPrompt(node, {
+  const system = buildDispatcherSystemPrompt(promptNode, {
     projectName: input.projectName,
     completedPhases: [],
     workspaceHint: '产物按相对路径写入（项目目录即工作根；如 00_ARCH/、00_SCAFFOLD/、00_VERIFY/）。',
@@ -336,7 +345,7 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     delegationTurnLimits: { implement: 32, custom: 32, research: node.id === 'desktop-verify' ? 24 : 12 },
     permissionMode: 'allow-all',
     temperature: categoryTemperature('mvp'),
-    system: buildDesktopChildBaseSystem(node, {
+    system: buildDesktopChildBaseSystem(promptNode, {
       projectName: input.projectName,
       ...(input.requirementsDigest ? { requirementsDigest: input.requirementsDigest } : {}),
       ...(input.uxSketchPath ? { uxSketchPath: input.uxSketchPath } : {}),
@@ -352,14 +361,31 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     // 工具面随父上下文隔离（P1-12，2026-10-02）：桌面子会话写面（realFullstackVariant）
     // 不再依赖全局单例——与 review 线并发时后注册者的全局覆盖不再串面。全局注册保留
     // 作缺省（单线场景/旧测试兼容）。
-    childToolsBuilder: buildDesktopChildTools,
+    childToolsBuilder: experiment
+      ? (projectId, role, format) => wrapExperimentWorkerTools(buildDesktopChildTools(projectId, role, format), experiment, input.sandboxRoot ?? findProject(projectId).root_path)
+      : buildDesktopChildTools,
+    ...(experiment ? { onChildCreated: (child: { delegationId: string; childSessionId: string }) => experimentChildCreated(experiment, child) } : {}),
   })
   setChildToolsBuilder(buildDesktopChildTools)
+  if (experiment) {
+    try {
+      for (const worker of Object.values(experiment.workers)) restoreCompletedDelegation({ projectId: input.projectId, sessionId: input.sessionId }, worker.delegation_id)
+    } catch (error) {
+      disposeParentDelegationState(input.sessionId)
+      return { status: 'error', phase: node, error_message: error instanceof Error ? error.message : String(error) }
+    }
+    recordExperiment(experiment, 'implement_started', { request_id: input.requestId, session_id: input.sessionId })
+  }
 
   const loopResult = await runAgentLoopSafe(input, node, tools, system, publish, collector).finally(() =>
     // 收尾（含异常路径）：stop 未收敛子委派 + 清幂等缓存 + 注销父上下文 + 探索会话兜底清理
     void Promise.resolve(disposeParentDelegationState(input.sessionId)).finally(() => disposeDriveSessions(input.projectId)),
   )
+  if (experiment) recordExperiment(experiment, 'implement_loop_finished', { request_id: input.requestId,
+    status: 'safeError' in loopResult ? 'error' : loopResult.status, workers: Object.values(experiment.workers) })
+  if (experiment && !('safeError' in loopResult) && loopResult.status === 'completed' && !experimentTasksFinished(experiment)) {
+    return { status: 'error', phase: node, loopResult, error_message: 'EXPERIMENT_TASKS_NOT_COMPLETED' }
+  }
 
   if ('safeError' in loopResult) {
     return { status: 'error', phase: node, error_message: loopResult.message }

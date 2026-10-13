@@ -30,6 +30,7 @@ import type { AgentEvent } from '../../shared/types'
 import type { SDKQuery } from '../orchestration/orchestrator' // 类型导入豁免（R1）
 import { findProject, updateProject } from '../project/project-service'
 import { readConfirmedUxBinding } from '../project/ux-binding'
+import { holdExperimentBeforeImplement, readExperiment, recordExperiment, recordExperimentBoundary } from './dispatch-experiment'
 import { readPrdBackplane } from '../project/prd-store'
 import { getDesktopPhase, getNextDesktopPhase } from './dispatcher-phases'
 import { isDesktopDispatchEnabled } from './dispatcher-switch'
@@ -290,7 +291,6 @@ export async function handleDesktopDispatchMessage(
     await runDesktopStage({ projectId: input.projectId, sessionId: input.sessionId, requestId: input.requestId, content: input.content, signal: input.signal, images: input.images, initialMessagePersisted: input.initialMessagePersisted }, input.query, input.env, phaseId, deps, projectName, 0)
     return
   }
-
   // ── MVP 确认门回传/反馈（2026-10-04 确认门新规）：longterm 交付前过目的最后一道门。
   // 确认 → 交付收口；「有要修改的」→ 提示具体意见（pending 保留，下一条普通消息回炉）；
   // 挂起期间任意普通非停止消息＝修改意见直接回炉 implement（【交付前迭代】，与
@@ -316,6 +316,7 @@ export async function handleDesktopDispatchMessage(
       }
     }
     confirmMvpDelivered({ input, deps })
+    recordExperimentBoundary(input.projectId, 'delivered', { via: 'mvp-confirm' })
     return
   }
   if (mvpAnswer === 'adjust') {
@@ -471,6 +472,20 @@ async function runDesktopStage(
     deps.complete(input.sessionId, input.projectId)
     return
   }
+  if (phaseId === 'desktop-implement') {
+    try {
+      if (holdExperimentBeforeImplement(project, input.sessionId, { requirements_digest: requirementsDigest ?? '', ux_html: uxBinding?.html_path, ux_design: uxBinding?.design_path })) {
+        deps.persistSystem(input.sessionId, '[experiment] prepared: Implement 尚未开始，等待冻结及隔离恢复。')
+        deps.publish(input, 'message_delta', { text: '实验前序准备已完成，已停在 Implement 前。请通过内部实验工具冻结输入并恢复 A/B 分支。' })
+        deps.complete(input.sessionId, input.projectId, 'incomplete')
+        return
+      }
+    } catch (error) {
+      deps.publish(input, 'message_delta', { text: `实验配置未通过，尚未启动实现：${error instanceof Error ? error.message : String(error)}` })
+      deps.complete(input.sessionId, input.projectId, 'incomplete')
+      return
+    }
+  }
   // 批9 工件2：形状任务书段（implement/verify 占位符注入；背板无 shape 时为空——任务书渲染空串）
   const shapeBriefs = readDesktopShapeBriefs(input.projectId)
   // 刀2 checkpoint 消费：当前阶段与存证一致（同阶段重跑——拒收续接/turn 耗尽/预算
@@ -497,6 +512,12 @@ async function runDesktopStage(
       // 调度员 loop 的过程事件按原类型直通渲染端（首跑修复：此前误折叠为 message_delta，
       // tool_call/delegation 等事件类型丢失——工具行与协作胶囊的实时显示都依赖真实类型）。
       deps.publish(input, type, payload)
+      if (type.startsWith('delegation_') || type === 'usage_summary') {
+        const experiment = readExperiment(input.projectId)
+        if (experiment?.state === 'running') recordExperiment(experiment, type, { request_id: input.requestId, session_id: input.sessionId,
+          ...(typeof payload.delegation_id === 'string' ? { delegation_id: payload.delegation_id } : {}),
+          ...(typeof payload.child_session_id === 'string' ? { child_session_id: payload.child_session_id } : {}) })
+      }
       // 刀5（2026-10-02）：委派失败归因侦测——同签名连续 2 次 → 渠道故障人话卡
       // （去抖一次；修复后用户回复「继续」走刀1 放行协议）。
       if (type === 'delegation_failed') {
@@ -535,6 +556,7 @@ async function runDesktopStage(
     },
   }
   const result = await runDesktopDispatcherLoop(loopInput)
+  recordExperimentBoundary(input.projectId, 'stage_finished', { phase: phaseId, request_id: input.requestId, status: result.status, advance: result.advance?.decision })
   await settleDesktopStage(input, query, env, result, phaseId, deps, projectName, chainDepth)
 }
 
@@ -631,11 +653,13 @@ async function settleDesktopStage(
             fromPhase: phaseId,
             notice: assembleDeliveredNotice(input.projectId, projectName, phaseId, result),
           })
+          recordExperimentBoundary(input.projectId, 'mvp_ready', { phase: phaseId })
           return
         }
       }
       updateProject(input.projectId, { desktop_phase: finalPhase, status: 'completed', current_stage: 'completed' })
       recordDeliveryOutcomeTelemetry(input.projectId, input.sessionId, 'terminal')
+      recordExperimentBoundary(input.projectId, 'delivered', { via: 'terminal' })
       deps.publish(input, 'stage_changed', { stage: finalPhase })
       deps.publish(input, 'message_delta', { text: buildDeliveredNoticeCard(assembleDeliveredNotice(input.projectId, projectName, phaseId, result)) })
       deps.persistSystem(input.sessionId, `[decision] desktop-advance ${phaseId} → ${finalPhase}（终态，交付通知卡已发）`)
@@ -683,6 +707,7 @@ async function settleDesktopStage(
         }
         updateProject(input.projectId, { desktop_phase: 'delivered', status: 'completed', current_stage: 'completed' })
         recordDeliveryOutcomeTelemetry(input.projectId, input.sessionId, 'quick-direct')
+        recordExperimentBoundary(input.projectId, 'delivered', { via: 'quick-direct' })
         deps.publish(input, 'stage_changed', { stage: 'delivered' })
         deps.publish(input, 'message_delta', { text: buildDeliveredNoticeCard(assembleDeliveredNotice(input.projectId, projectName, phaseId, result)) })
         deps.persistSystem(input.sessionId, `[decision] desktop-quick-delivered ${phaseId} → delivered（快速直通道：安全门${securityGate ? '通过' : '无项目上下文跳过'}；启动冒烟${smoke ? smoke.detail : '无项目上下文跳过'}，跳过 verify 工程验收）`)

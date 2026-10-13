@@ -1,0 +1,14 @@
+[
+  {
+    "id": "search",
+    "instruction": "按已确认需求实现记录搜索模块。沿用冻结的数据接口，读取后再修改，运行自测并如实交接。",
+    "depends_on": [],
+    "writes": ["search.py", "test_search.py"]
+  },
+  {
+    "id": "export",
+    "instruction": "按已确认需求实现JSON导出模块。沿用冻结的数据接口；在协调者要求集成时续接本会话，完成公共接线、启动声明和交付说明。运行自测并如实交接。",
+    "depends_on": [],
+    "writes": ["export.py", "test_export.py", "app.py", "ui/", "LAUNCH.json", "DELIVERY.md"]
+  }
+]
