@@ -818,6 +818,12 @@ export interface AgentMessage {
   timestamp: number
 }
 
+/** Transport diagnostics contain metadata only, never response bodies or credentials. */
+export interface ModelTransportReceipt {
+  status: number; content_type: string; response_bytes?: number; sse_data_lines?: number
+  protocol_ended?: boolean; body_sha256?: string; json_error_code?: string
+}
+
 export interface SDKMessage {
   type: 'user' | 'assistant' | 'system' | 'result' | 'thinking'
   message?: { role: string; content: MessageContentBlock[] }

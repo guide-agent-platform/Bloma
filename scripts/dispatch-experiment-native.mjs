@@ -1,0 +1,127 @@
+// Native Electron driver for the experiment's prepare/run boundaries. It uses real
+// renderer controls and the host CLI, never fabricates model turns or product code.
+import { _electron } from 'playwright'
+import { execFileSync } from 'node:child_process'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
+const [command, ...args] = process.argv.slice(2)
+const option = (name, fallback) => { const i = args.indexOf(`--${name}`); return i < 0 ? fallback : args[i + 1] }
+const home = resolve(option('home', ''))
+const reportDir = resolve(option('report-dir', join(home, 'native-report')))
+const policy = resolve(option('monetary-policy', ''))
+const stopFile = resolve(option('stop-file', join(reportDir, 'STOP')))
+if (!['prepare', 'run', 'seed'].includes(command) || !option('home') || !option('monetary-policy')
+  || home.toLowerCase() === join(homedir(), '.proma').toLowerCase()) throw new Error('EXPERIMENT_DRIVER_ARGUMENTS')
+mkdirSync(reportDir, { recursive: true })
+const credentialsPath = option('credentials', join(process.env.LOCALAPPDATA, 'Bloma', 'dispatch-experiment-20261013', 'credentials.dpapi.json'))
+const electronEnv = { ...process.env, PROMA_HOME: home }
+delete electronEnv.ELECTRON_RUN_AS_NODE
+function seed() {
+  const script = "$ErrorActionPreference='Stop';$s=Get-Content -LiteralPath $env:BEX_CREDENTIAL_STORE -Raw | ConvertFrom-Json;$r=@{};foreach($n in @('deepseek','glm')){$v=ConvertTo-SecureString $s.$n;$r[$n]=[System.Net.NetworkCredential]::new('', $v).Password};$r | ConvertTo-Json -Compress"
+  const keys = JSON.parse(execFileSync('pwsh.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8', windowsHide: true,
+    env: { ...process.env, BEX_CREDENTIAL_STORE: credentialsPath } }).replace(/^\uFEFF/, ''))
+  if (!keys.deepseek || !keys.glm) throw new Error('EXPERIMENT_CREDENTIAL_DECRYPTION_FAILED')
+  execFileSync(join(process.cwd(), 'node_modules/electron/dist/electron.exe'), ['scripts/seed-experiment-channels.cjs'], {
+    windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...electronEnv,
+      BEX_DEEPSEEK_API_KEY: keys.deepseek, BEX_GLM_API_KEY: keys.glm } })
+}
+seed()
+if (command === 'seed') { console.log(JSON.stringify({ home, seeded: true })); process.exit(0) }
+const sleep = ms => new Promise(done => setTimeout(done, ms))
+const cli = (...params) => execFileSync(process.execPath, ['scripts/dispatch-experiment.mjs', ...params], { encoding: 'utf8', windowsHide: true }).trim()
+let application, page
+const report = { command, home, at: new Date().toISOString(), confirmations: [], outcome: 'running' }
+const log = message => console.log(`[native-experiment] ${message}`)
+const project = () => JSON.parse(readFileSync(join(home, 'projects.json'), 'utf8')).projects[0]
+const config = id => JSON.parse(readFileSync(join(home, 'dispatch-experiments', `${id}.json`), 'utf8'))
+try {
+  application = await _electron.launch({ args: ['.', `--user-data-dir=${join(home, 'electron-user-data')}`],
+    env: { ...electronEnv, BLOMA_DESKTOP_DISPATCH: '1',
+      BLOMA_DISPATCH_EXPERIMENT: '1', BLOMA_MONETARY_POLICY: policy }, timeout: 60000 })
+  for (const stream of [application.process().stdout, application.process().stderr]) stream?.on('data', bytes => appendFileSync(join(reportDir, 'main.log'), bytes))
+  page = await application.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  await application.evaluate(({ BrowserWindow }) => { for (const window of BrowserWindow.getAllWindows()) { window.setBounds({ x: -15000, y: -15000, width: 1280, height: 860 }); window.webContents.setBackgroundThrottling(false) } })
+  await page.waitForFunction(() => !!window.electronAPI, { timeout: 30000 })
+  const upgrade = page.locator('[data-ai-id="upgrade-cancel"]')
+  if (await upgrade.isVisible()) await upgrade.click()
+  const history = page.getByRole('button', { name: '所有项目', exact: true })
+  if (await history.isVisible()) await history.click()
+  if (command === 'prepare') {
+    if (existsSync(join(home, 'projects.json')) && JSON.parse(readFileSync(join(home, 'projects.json'), 'utf8')).projects.length) throw new Error('EXPERIMENT_PREPARE_NOT_FRESH')
+    const newProject = page.locator('[data-ai-id="new-project-button"]')
+    if (await newProject.isVisible()) await newProject.click()
+    await page.locator(`[data-ai-id="mode-card-${option('mode', 'quick')}"]`).click()
+    const create = page.locator('[data-ai-id="create-project-button"]')
+    if (await create.isVisible()) await create.click()
+    await page.locator('textarea').waitFor()
+    await sleep(1000)
+    const current = project(); report.project_id = current.project_id
+    log(cli('prepare', '--home', home, '--project', current.project_id, '--experiment', option('experiment', 'real-pilot')))
+    await page.locator('textarea').fill(readFileSync(option('request-file'), 'utf8').trim())
+  } else {
+    const current = project(); report.project_id = current.project_id
+    const original = config(current.project_id)
+    if (original.state !== 'running') throw new Error('EXPERIMENT_RUN_NOT_RESTORED')
+    const projectsNav = page.getByRole('button', { name: '我的项目', exact: true })
+    if (await projectsNav.isVisible()) await projectsNav.click()
+    await page.locator('[data-ai-id="project-list-item"]').click()
+    await page.locator('textarea').waitFor()
+    await page.locator('textarea').fill('请继续完成已经确认的需求。')
+    report.run_id = original.run_id
+  }
+  await page.getByRole('button', { name: '发送消息', exact: true }).click()
+  const deadline = Date.now() + Number(option('timeout-min', command === 'prepare' ? '40' : '32')) * 60000
+  let lastAction = 0, lastStatus = ''
+  while (Date.now() < deadline) {
+    await sleep(2000)
+    const current = project(), experiment = config(current.project_id)
+    if (existsSync(stopFile)) {
+      await page.evaluate(async id => { await window.electronAPI.agent.cancel({ request_id: crypto.randomUUID(), project_id: id }) }, current.project_id)
+      report.outcome = 'user-stopped'; break
+    }
+    const status = `${current.current_stage}/${current.desktop_phase ?? '-'}/${experiment.state}`
+    if (status !== lastStatus) { log(status); lastStatus = status }
+    if (command === 'prepare' && experiment.state === 'prepared') { report.outcome = 'prepared'; break }
+    if (command === 'run') {
+      const eventsPath = join(home, 'dispatch-experiments', 'events', `${experiment.run_id}.jsonl`)
+      const events = existsSync(eventsPath) ? readFileSync(eventsPath, 'utf8').trim().split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line)) : []
+      const terminal = events.find(event => event.event === 'run_finished')
+      if (terminal) { report.outcome = 'machine-finished'; report.run_outcome = terminal.outcome; report.termination_reason = terminal.reason; break }
+    }
+    if (Date.now() - lastAction < 4000) continue
+    let action
+    for (const id of ['requirement-confirm-submit', 'prd-confirm-submit', 'card-option-ux_confirm_go', 'card-option-ux_delegate']) {
+      const target = page.locator(`[data-ai-id="${id}"]`)
+      if (await target.isVisible() && await target.isEnabled()) { await target.click(); action = id; break }
+    }
+    if (!action && command === 'prepare') {
+      const choices = await page.locator('[data-ai-id^="card-option-"]').evaluateAll(nodes => nodes.map(node => ({ id: node.getAttribute('data-ai-id'), text: node.textContent })))
+      const pick = choices.find(choice => /你帮我定|交给你|按推荐|委托|直接生成/.test(choice.text ?? ''))
+      if (pick) { await page.locator(`[data-ai-id="${pick.id}"]`).click(); action = pick.id }
+    }
+    if (action) { lastAction = Date.now(); report.confirmations.push({ at: new Date().toISOString(), action }); log(action) }
+  }
+  if (report.outcome === 'running') report.outcome = 'timeout'
+  report.project = project()
+  report.end_screen_text = (await page.locator('body').innerText()).slice(-16000)
+  await page.screenshot({ path: join(reportDir, 'terminal.png') })
+  if (report.outcome === 'timeout') {
+    await page.evaluate(async id => { const result = await window.electronAPI.agent.listSessions({ request_id: crypto.randomUUID(), project_id: id });
+      for (const session of result.data?.sessions ?? []) await window.electronAPI.agent.cancel({ request_id: crypto.randomUUID(), session_id: session.session_id }) }, report.project_id)
+  }
+} catch (error) {
+  report.outcome = 'driver-error'; report.error = error.message; log(error.message)
+  if (page) {
+    await page.screenshot({ path: join(reportDir, 'driver-error.png') }).catch(() => {})
+    report.driver_state = await page.locator('body').innerText().catch(() => '')
+  }
+}
+finally {
+  if (application) await application.close().catch(() => {})
+  report.finished_at = new Date().toISOString()
+  writeFileSync(join(reportDir, 'report.json'), JSON.stringify(report, null, 2))
+}
+if (!['prepared', 'machine-finished'].includes(report.outcome)) process.exitCode = 1
+log(report.outcome)

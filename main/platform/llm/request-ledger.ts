@@ -3,15 +3,16 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'n
 import { join } from 'node:path'
 import { getAgentSessionsIndexPath, getPromaHome } from '../../../storage/config-paths'
 import type { SDKQuery, SDKQueryOptions } from '../../orchestration/stages/orchestration-contracts'
-import type { SDKMessage } from '../../../shared/types'
+import type { SDKMessage, ModelTransportReceipt } from '../../../shared/types'
 
 export interface QueryAccounting { projectId: string; runId?: string; parentSessionId?: string; role?: string; scope?: string }
 type Usage = NonNullable<SDKMessage['usage']>
 interface LedgerEvent {
-  version: 1; at: string; query_id: string; event: 'query_started' | 'query_finished' | 'transport_started' | 'transport_finished'
+  version: 1; at: string; query_id: string; event: 'query_started' | 'query_finished' | 'transport_started' | 'transport_finished' | 'transport_response'
   project_id: string; session_id: string; run_id?: string; parent_session_id?: string; role: string; scope: string
   model?: string; endpoint_host?: string; transport_index?: number; status?: string; duration_ms?: number; usage?: Usage
   system_sha256?: string
+  response?: ModelTransportReceipt
 }
 let sessionCache: { path: string; mtime: number; sessions: Map<string, { project_id: string; parent_session_id?: string }> } | undefined
 const recordingErrors = new Map<string, number>()
@@ -111,7 +112,10 @@ export async function* accountSdkQuery(query: SDKQuery, prompt: string, options:
     }
   }
   try {
-    for await (const message of query(prompt, { ...options, onTransportAttempt: observe })) {
+    for await (const message of query(prompt, { ...options, onTransportAttempt: observe, onTransportResponse: receipt => {
+      try { options.onTransportResponse?.(receipt) } catch { /* telemetry only */ }
+      append({ ...base, at: new Date().toISOString(), event: 'transport_response', transport_index: transportIndex, response: receipt })
+    } })) {
       if (message.usage) usage = { ...usage, ...cleanUsage(message.usage) }
       if (message.type === 'result') finished = message.subtype === 'success'
       yield message

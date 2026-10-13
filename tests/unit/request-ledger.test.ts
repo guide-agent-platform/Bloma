@@ -19,6 +19,18 @@ const successful: SDKQuery = async function* (_prompt, opts) {
 async function drain(query: SDKQuery, opts = options()) { for await (const _ of accountSdkQuery(query, 'private request', opts)) { /* consume */ } }
 
 describe('project request accounting', () => {
+  it('records bounded response metadata without changing usage totals or exposing response bodies', async () => {
+    const query: SDKQuery = async function* (_prompt, opts) {
+      opts.onTransportAttempt?.('started')
+      opts.onTransportResponse?.({ status: 200, content_type: 'text/event-stream', response_bytes: 14,
+        sse_data_lines: 1, protocol_ended: true, body_sha256: 'a'.repeat(64) })
+      yield { type: 'result', subtype: 'success', usage: { input_tokens: 10, output_tokens: 5 } }
+    }
+    await drain(query)
+    const rows = readFileSync(join(home, 'usage-ledger/p1.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line))
+    expect(rows.find(row => row.event === 'transport_response').response).toMatchObject({ status: 200, response_bytes: 14, protocol_ended: true })
+    expect(readProjectUsage('p1')).toMatchObject({ logical_queries: 1, physical_requests: 1, reported_total: 15, complete: true })
+  })
   it('separates actual endpoint/model usage and filters runs without changing the active home', async () => {
     await drain(successful)
     const other = options(); other.env.ANTHROPIC_MODEL = 'second'; other.accounting!.runId = 'other'

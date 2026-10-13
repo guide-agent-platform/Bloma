@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { ANTHROPIC_SSE_ADAPTER } from '../../../main/platform/upstream/providers/anthropic-sse-adapter'
 import { streamSSE } from '../../../main/platform/upstream/providers/sse-reader'
 import { anthropicMessagesQueryViaProviders } from '../../../main/platform/upstream/providers/loop-query'
@@ -68,6 +68,24 @@ describe('R1-providers ANTHROPIC_SSE_ADAPTER.parseSSELine', () => {
 })
 
 describe('R1-providers streamSSE（上游装配容错）', () => {
+  it('reports HTTP 200 JSON responses as protocol errors without retrying or logging response content', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { code: '1309', message: 'private-response-text' } }), {
+      headers: { 'content-type': 'application/json' },
+    }))
+    const receipts: import('../../../shared/types').ModelTransportReceipt[] = []
+    await expect(streamSSE({ request: { url: 'https://test.example/messages', body: '{}', headers: {} }, adapter: ANTHROPIC_SSE_ADAPTER,
+      fetchFn, onEvent: () => {}, onResponse: receipt => receipts.push(receipt) })).rejects.toThrow('PROVIDER_JSON_RESPONSE: HTTP 200, code 1309')
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    expect(receipts.at(-1)).toMatchObject({ status: 200, content_type: 'application/json', sse_data_lines: 0, json_error_code: '1309' })
+    expect(JSON.stringify(receipts)).not.toContain('private-response-text')
+    expect(receipts.at(-1)?.body_sha256).toMatch(/^[a-f0-9]{64}$/)
+  })
+  it('records terminal markers for empty SSE streams, distinguishing them from empty HTTP bodies', async () => {
+    const receipts: import('../../../shared/types').ModelTransportReceipt[] = []
+    await streamSSE({ request: { url: 'https://test.example/messages', body: '{}', headers: {} }, adapter: ANTHROPIC_SSE_ADAPTER,
+      fetchFn: vi.fn().mockResolvedValue(sseResponse('data: [DONE]\n\n')), onEvent: () => {}, onResponse: receipt => receipts.push(receipt) })
+    expect(receipts.at(-1)).toMatchObject({ status: 200, response_bytes: 14, sse_data_lines: 1, protocol_ended: true })
+  })
   it('流空闲超时自愈（批11.8 锚）：僵死流（0 字节不断开）→ abort → 未发事件安全重试成功', async () => {
     const good = sseLines([
       JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: '活过来了' } }),

@@ -162,6 +162,7 @@ async function* anthropicMessagesQueryViaProvidersInner(prompt: string, options:
         adapter: openai ? OPENAI_LOOP_ADAPTER : ANTHROPIC_SSE_ADAPTER,
         signal: options.signal,
         onAttempt: options.onTransportAttempt,
+        onResponse: options.onTransportResponse,
         onEvent: (event) => {
           if (event.type === 'chunk') {
             textDeltaCount += 1

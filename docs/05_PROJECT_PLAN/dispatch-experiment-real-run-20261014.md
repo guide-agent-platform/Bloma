@@ -1,5 +1,7 @@
 # 真实实验预检与执行方案
 
+当前状态：用户已于 2026-10-14 要求暂停，先查清运行问题。只执行了 quick 的 G11/G22/S2，未完成六组；费用、终止与独立 GUI 诊断见 [暂停与故障诊断](dispatch-experiment-diagnosis-20261014.md)。下面的 12/36 样本和三路并发为计划，不是已完成结果。
+
 用户已补充额度并明确 GLM 使用常规 API。2026-10-13/14 本机预检确认官方目录提供 `deepseek-flash`（DeepSeek-V4.1-Flash）及 `glm-5.3`，DeepSeek 预检余额 63.96 元。两个模型均已完成真实工具调用探针；这些探针不是六组产品实验结果。
 
 GLM 账号的 Anthropic 端点返回 Coding Plan 到期错误，常规 OpenAI 端点 `https://open.bigmodel.cn/api/paas/v4/chat/completions` 成功。实验 GLM 渠道类型为 `zhipu`，不使用 `zhipu-coding`。原生传输新增 OpenAI 消息、工具结果、思考历史、按 index 装配工具增量以及缓存用量转换；参考本地 Proma `bf3e98c` 的 `packages/core/src/providers/openai-adapter.ts`，保留 Bloma 原生循环和账本。

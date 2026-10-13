@@ -78,6 +78,13 @@ function sealed(manual = false) {
 }
 
 describe('research data collection', () => {
+  it.each(['MONETARY_BUDGET_EXHAUSTED', 'EMPTY_MODEL_STREAM', 'PROVIDER_JSON_RESPONSE'])('keeps the exact infrastructure termination code %s', async code => {
+    running()
+    const query: SDKQuery = async function* () { throw new Error(`${code}: diagnostic detail`) }
+    await expect(run(query)).resolves.toMatchObject({ status: 'error' })
+    expect(reportModelExperiment('p')).toMatchObject({ run_outcome: 'failed', termination_reason: code })
+    expect(readExperimentEvents(readExperiment('p')!).events.find(event => event.event === 'experiment_stage_finished')).toMatchObject({ error_code: code })
+  })
   it('records a bounded deadline failure and refuses reuse of the same terminal run', async () => {
     const config = running(); config.started_at = '2000-01-01T00:00:00Z'; writeExperiment(config)
     const query = vi.fn(async function* () { yield text() })

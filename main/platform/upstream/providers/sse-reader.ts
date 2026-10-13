@@ -14,12 +14,14 @@
 
 import type { ProviderRequest, StreamAdapter, StreamEventCallback, ThinkingBlock, ToolCall } from './types'
 import { MonetaryBudgetError, reserveModelRequest } from '../../llm/monetary-budget'
-import type { SDKMessage } from '../../../../shared/types'
+import type { SDKMessage, ModelTransportReceipt } from '../../../../shared/types'
+import { createHash } from 'node:crypto'
 
 // ===== 流式请求 =====
 
 /** streamSSE 的输入选项（上游原样） */
 export interface StreamSSEOptions {
+  onResponse?: (receipt: ModelTransportReceipt) => void
   onAttempt?: (state: 'started' | 'failed' | 'cancelled') => void
   /** 构建好的 HTTP 请求配置 */
   request: ProviderRequest
@@ -233,6 +235,20 @@ async function runReservedStreamAttempt(options: StreamSSEOptions): Promise<Stre
     })
   } finally { clearTimeout(timer) }
 
+  const contentType = response.headers.get('content-type') ?? ''
+  const receipt = (fields: Partial<ModelTransportReceipt> = {}) => {
+    try { options.onResponse?.({ status: response.status, content_type: contentType, ...fields }) } catch { /* telemetry only */ }
+  }
+  receipt()
+  if (response.ok && /application\/json/i.test(contentType)) {
+    const text = await response.text()
+    let code: unknown
+    try { const raw = JSON.parse(text); code = raw.error?.code ?? raw.code } catch { /* invalid JSON is still a protocol failure */ }
+    const safeCode = typeof code === 'number' || typeof code === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(code) ? String(code) : undefined
+    receipt({ response_bytes: Buffer.byteLength(text), sse_data_lines: 0, body_sha256: createHash('sha256').update(text).digest('hex'), json_error_code: safeCode })
+    throw new ProviderStreamError(`PROVIDER_JSON_RESPONSE: HTTP ${response.status}${safeCode ? `, code ${safeCode}` : ''}; expected an SSE stream`)
+  }
+
   // 2. 错误检查
   if (!response.ok) {
     const text = await response.text().catch(() => '')
@@ -264,6 +280,8 @@ async function runReservedStreamAttempt(options: StreamSSEOptions): Promise<Stre
   let progressTimer: ReturnType<typeof setTimeout> | undefined
   let progressTimedOut = false
   let protocolEnded = false
+  let responseBytes = 0, dataLines = 0
+  const responseHash = createHash('sha256')
   const armProgressTimer = (): void => {
     if (progressTimer) clearTimeout(progressTimer)
     progressTimer = setTimeout(() => {
@@ -305,6 +323,9 @@ async function runReservedStreamAttempt(options: StreamSSEOptions): Promise<Stre
       const { done, value } = readResult
       if (done) break
 
+      responseBytes += value.byteLength
+      responseHash.update(value)
+
       buffer += decoder.decode(value, { stream: true })
       const lines = buffer.split('\n')
       // 保留最后一个可能不完整的行
@@ -320,6 +341,7 @@ async function runReservedStreamAttempt(options: StreamSSEOptions): Promise<Stre
         } else {
           continue
         }
+        dataLines++
         if (data === '[DONE]') { protocolEnded = true; break }
         if (!data) continue
 
@@ -388,6 +410,7 @@ async function runReservedStreamAttempt(options: StreamSSEOptions): Promise<Stre
       }
     }
   } finally {
+    receipt({ response_bytes: responseBytes, sse_data_lines: dataLines, protocol_ended: protocolEnded, body_sha256: responseHash.digest('hex') })
     if (idleTimer) clearTimeout(idleTimer)
     if (progressTimer) clearTimeout(progressTimer)
     if (protocolEnded) void reader.cancel().catch(() => {})

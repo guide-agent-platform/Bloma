@@ -89,6 +89,7 @@ export interface ConversationTurn {
 export interface SDKQueryOptions {
   accounting?: import('../../platform/llm/request-ledger').QueryAccounting
   onTransportAttempt?: (state: 'started' | 'failed' | 'cancelled') => void
+  onTransportResponse?: (receipt: import('../../../shared/types').ModelTransportReceipt) => void
   env: Record<string, string>
   signal: AbortSignal
   sessionId: string

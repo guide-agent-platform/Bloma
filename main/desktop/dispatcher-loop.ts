@@ -522,10 +522,11 @@ export async function runDesktopDispatcherLoop(input: DesktopDispatchRunInput): 
   }
   if (tracked) {
     recordExperiment(config, 'experiment_stage_finished', { phase: input.currentPhase, request_id: input.requestId,
-      status: result.status, loop_status: result.loopResult?.status, duration_ms: Date.now() - startedAt })
+      status: result.status, loop_status: result.loopResult?.status, duration_ms: Date.now() - startedAt,
+      error_code: result.error_message?.match(/^[A-Z][A-Z0-9_]{2,}/)?.[0] })
     if (result.status === 'error' || result.status === 'cancelled') {
       const timedOut = Date.now() >= Date.parse(config.started_at!) + experimentLimits(config).wall_ms
-      const code = result.error_message?.match(/^EXPERIMENT_[A-Z_]+/)?.[0] ?? result.loopResult?.status ?? 'runtime_error'
+      const code = result.error_message?.match(/^[A-Z][A-Z0-9_]{2,}/)?.[0] ?? result.loopResult?.status ?? 'runtime_error'
       finishExperiment(config, timedOut ? 'timeout' : result.status === 'cancelled' ? 'cancelled' : 'failed', code)
     }
   }
