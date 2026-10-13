@@ -19,6 +19,17 @@ const successful: SDKQuery = async function* (_prompt, opts) {
 async function drain(query: SDKQuery, opts = options()) { for await (const _ of accountSdkQuery(query, 'private request', opts)) { /* consume */ } }
 
 describe('project request accounting', () => {
+  it('separates actual endpoint/model usage and filters runs without changing the active home', async () => {
+    await drain(successful)
+    const other = options(); other.env.ANTHROPIC_MODEL = 'second'; other.accounting!.runId = 'other'
+    await drain(successful, other)
+    const filtered = readProjectUsage('p1', { home, runId: 'run' })
+    expect(filtered).toMatchObject({ logical_queries: 1, reported_total: 115, complete: true })
+    expect(Object.values(filtered.by_model)).toEqual([{ model: 'model', endpoint_host: 'api.test', queries: 1, input: 110, output: 5,
+      cache_read: 30, cache_creation: 10, missing_usage_queries: 0 }])
+    expect(Object.values(readProjectUsage('p1').by_model)).toHaveLength(2)
+    expect(readProjectUsage('p1', { runId: 'missing' })).toMatchObject({ logical_queries: 0, complete: false })
+  })
   it('counts parent, child and auxiliary usage once, including both cache categories', async () => {
     await drain(successful)
     await drain(successful, options('implement'))

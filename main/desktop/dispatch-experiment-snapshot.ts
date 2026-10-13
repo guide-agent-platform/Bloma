@@ -2,6 +2,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
+import { installExperimentEvaluator } from './dispatch-experiment-evaluator'
 import { assertExperimentHome, assertExperimentId, experimentConditionHash, EXPERIMENT_POLICIES, experimentPath, recordExperiment, validateExperiment, writeExperiment, type DispatchExperiment, type ExperimentLimits, type ExperimentModels, type ExperimentPolicy, type ExperimentSettings, type ExperimentTask } from './dispatch-experiment'
 
 interface FrozenManifest { version: 1; snapshot_id: string; source_home: string; project_id: string; parent_session_id: string;
@@ -71,7 +72,7 @@ export function freezeExperiment(home: string, projectId: string, destination: s
   return manifest
 }
 export function restoreExperiment(snapshot: string, home: string, policy: ExperimentPolicy, runId: string,
-  options: { models?: ExperimentModels; limits?: ExperimentLimits; settings?: ExperimentSettings } = {}): DispatchExperiment {
+  options: { models?: ExperimentModels; limits?: ExperimentLimits; settings?: ExperimentSettings; evaluator?: string; sample?: DispatchExperiment['sample'] } = {}): DispatchExperiment {
   assertExperimentId(runId)
   if (!(EXPERIMENT_POLICIES as readonly string[]).includes(policy) || existsSync(home) || inside(snapshot, home) || inside(home, snapshot)) throw new Error('EXPERIMENT_RESTORE_TARGET_NOT_FRESH')
   const manifest = JSON.parse(readFileSync(join(snapshot, 'manifest.json'), 'utf8')) as FrozenManifest
@@ -87,8 +88,9 @@ export function restoreExperiment(snapshot: string, home: string, policy: Experi
     seed.task_ids = policy === 'autonomous' ? [] : policy === 'single_worker' ? manifest.config.tasks.map(task => task.id) : [manifest.config.tasks[0].id]
     workers[policy === 'autonomous' ? 'worker-1' : policy === 'single_worker' ? 'all' : manifest.config.tasks[0].id] = seed
   }
+  const { evaluator, ...conditions } = options
   const config: DispatchExperiment = { ...manifest.config, workers, state: 'running', policy, run_id: runId,
-    snapshot_id: manifest.snapshot_id, input_hash: manifest.input_hash, ...structuredClone(options) }
+    snapshot_id: manifest.snapshot_id, input_hash: manifest.input_hash, ...structuredClone(conditions) }
   config.protected_inputs = Object.fromEntries(Object.entries(manifest.files).filter(([path]) =>
     path.endsWith(`/documents/${manifest.project_id}/prd.json`) || path.endsWith(`/documents/${manifest.project_id}/prd.md`)
     || path.includes(`/documents/${manifest.project_id}/features/`) || /\/00_UX\/confirmed\.(html|json)$/.test(path)
@@ -118,6 +120,10 @@ export function restoreExperiment(snapshot: string, home: string, policy: Experi
   const sessions = JSON.parse(readFileSync(join(home, 'bloma-agent-sessions.json'), 'utf8'))
   for (const session of sessions.sessions) session.jsonl_path = join(resolve(home), 'agent-sessions', `${session.session_id}.jsonl`)
   writeFileSync(join(home, 'bloma-agent-sessions.json'), JSON.stringify(sessions, null, 2))
+  if (evaluator) {
+    config.evaluator_hash = installExperimentEvaluator(evaluator, home)
+    config.condition_hash = experimentConditionHash(config)
+  }
   writeExperiment(config, home)
   recordExperiment(config, 'restored', { input_hash: config.input_hash, parent_session_id: config.parent_session_id, environment_rebuild_required: true }, home)
   return config

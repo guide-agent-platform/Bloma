@@ -78,7 +78,7 @@ node scripts/dispatch-experiment.mjs report --home <该home> --project <项目ID
 
 report 输出角色请求数/模型、实现者数、重叠执行请求峰值、机器就绪时间、MVP 确认等待、原生终态、请求账本和协议拒绝。代码测试专门验证两个执行 SDK 请求在时间上重叠，超过“只创建了两个会话”的证据。
 
-product_quality 保留 null，直到独立冻结的产品验收提供评分；loop completed、mvp_ready 或 delivered 不直接冒充研究质量 Q。能力差距 D、配对互补挽救率 R、混合协作增益 G 需真实匹配任务和最终评分后计算。无失败样本时 R 为不可估计，不写成 0。
+数据闭环已扩展，详见 [固定验收、失败收尾与配对汇总](dispatch-experiment-data-20261013.md)。product_quality 由运行前封存的外部验收器提供；未评分、人工项未完成、验收器错误或证据失效时仍为 null。loop completed、mvp_ready 或 delivered 不直接冒充研究质量 Q。能力差距 D、配对互补挽救率 R、混合协作增益 G 从完整的匹配六组评分计算；无失败样本时 R 为不可估计。
 
 先完成通路和数据对账，再跑小样本真实模型预检；本批不训练路由器，不提供论文式效果结论。
 

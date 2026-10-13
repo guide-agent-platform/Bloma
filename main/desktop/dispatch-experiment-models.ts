@@ -4,6 +4,9 @@ import { getChannelByIdRaw, listChannels } from '../platform/llm/channel-manager
 import { readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import type { SDKQuery } from '../orchestration/orchestrator'
+import { getPromaHome } from '../../storage/config-paths'
+import { assertExperimentEvaluator } from './dispatch-experiment-evaluator'
+import { readExperimentEvents } from './dispatch-experiment-records'
 import { DEFAULT_EXPERIMENT_SETTINGS, experimentLimits, experimentPath, recordExperiment, validateExperiment, writeExperiment, type DispatchExperiment, type ExperimentModel, type ExperimentModels } from './dispatch-experiment'
 
 export function resolveExperimentModel(binding: ExperimentModel): DelegationChannelOverride {
@@ -51,6 +54,8 @@ export function guardExperimentQuery(query: SDKQuery, config: DispatchExperiment
     options.signal.throwIfAborted()
     const latest = validateExperiment(JSON.parse(readFileSync(experimentPath(config.project_id), 'utf8')))
     if (latest.run_id !== config.run_id || latest.condition_hash !== config.condition_hash) throw new Error('EXPERIMENT_RUN_CHANGED')
+    if (readExperimentEvents(latest).events.some(event => event.event === 'run_finished')) throw new Error('EXPERIMENT_ALREADY_FINISHED_RESTORE_FRESH_RUN')
+    assertExperimentEvaluator(getPromaHome(), latest.evaluator_hash)
     config.request_count = latest.request_count ?? 0; config.started_at = latest.started_at ?? config.started_at
     const expected = lockExperimentModel(config, role)
     if (options.env.ANTHROPIC_MODEL !== expected.modelName || options.env.ANTHROPIC_BASE_URL !== expected.env.ANTHROPIC_BASE_URL) {

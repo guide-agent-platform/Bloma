@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Channel, SDKMessage } from '../../../shared/types'
 import type { SDKQuery } from '../../../main/orchestration/orchestrator'
 import { getChannelByIdRaw, listChannels } from '../../../main/platform/llm/channel-manager'
-import { DEFAULT_EXPERIMENT_LIMITS, EXPERIMENT_SWITCH, experimentConditionHash, experimentPath, readExperiment, writeExperiment, type DispatchExperiment, type ExperimentModels } from '../../../main/desktop/dispatch-experiment'
+import { DEFAULT_EXPERIMENT_LIMITS, EXPERIMENT_SWITCH, experimentConditionHash, experimentPath, readExperiment, recordExperiment, recordExperimentBoundary, writeExperiment, type DispatchExperiment, type ExperimentModels } from '../../../main/desktop/dispatch-experiment'
 import { freezeExperiment } from '../../../main/desktop/dispatch-experiment-snapshot'
 import { createModelMatrix } from '../../../main/desktop/dispatch-experiment-matrix'
 import { guardExperimentQuery, lockExperimentModel, resolveExperimentModel } from '../../../main/desktop/dispatch-experiment-models'
@@ -14,6 +14,9 @@ import { withAbort } from '../../../main/agent/loop/agent-loop'
 import { reportModelExperiment } from '../../../main/desktop/dispatch-experiment-report'
 import { spawnSync } from 'node:child_process'
 import { restorePromaHome } from '../../support/proma-home-guard'
+import { evaluateExperiment, installExperimentEvaluator } from '../../../main/desktop/dispatch-experiment-evaluator'
+import { finishExperiment, readExperimentEvents } from '../../../main/desktop/dispatch-experiment-records'
+import { aggregateModelExperiments } from '../../../main/desktop/dispatch-experiment-aggregate'
 
 vi.mock('../../../main/platform/llm/channel-manager', async original => ({
   ...await original<typeof import('../../../main/platform/llm/channel-manager')>(),
@@ -58,6 +61,131 @@ const toolMessage = (id: string, name: string, input: Record<string, unknown>): 
 const text = (): SDKMessage => ({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '本段结束，验收仍需宿主执行。' }] } })
 const run = (query: SDKQuery, extra: Record<string, unknown> = {}) => runDesktopDispatcherLoop({ projectId: 'p', sessionId: 'parent', requestId: 'req', currentPhase: 'desktop-implement', task: '继续',
   query, env: {}, maxTokens: 2048, maxTurns: 16, signal: new AbortController().signal, publish: () => {}, projectName: 'models', quickMode: true, sandboxRoot: root, ...extra })
+
+function suite(manual = false) {
+  const directory = join(temp, 'suite')
+  save(join(directory, 'suite.json'), JSON.stringify({ version: 1, checks: [
+    { id: 'behavior', description: 'Frozen external behavioral assertion', kind: 'command', command: process.execPath, args: ['{suite}/check.cjs', '{product}'], timeout_ms: 2000 },
+    ...(manual ? [{ id: 'gui', kind: 'manual', description: 'Independent GUI evidence' }] : []),
+  ] }))
+  save(join(directory, 'check.cjs'), "const fs = require('node:fs'); const path = require('node:path'); process.exit(fs.readFileSync(path.join(process.argv[2], 'result.txt'), 'utf8') === 'pass' ? 0 : 1)")
+  return directory
+}
+function sealed(manual = false) {
+  const config = running(); config.started_at = new Date(Date.now() - 2000).toISOString()
+  config.evaluator_hash = installExperimentEvaluator(suite(manual), home); config.condition_hash = experimentConditionHash(config); writeExperiment(config)
+  save(join(root, 'result.txt'), 'pass'); return config
+}
+
+describe('research data collection', () => {
+  it('records a bounded deadline failure and refuses reuse of the same terminal run', async () => {
+    const config = running(); config.started_at = '2000-01-01T00:00:00Z'; writeExperiment(config)
+    const query = vi.fn(async function* () { yield text() })
+    await expect(run(query)).resolves.toMatchObject({ status: 'error' })
+    expect(reportModelExperiment('p')).toMatchObject({ run_outcome: 'timeout', termination_reason: 'EXPERIMENT_WALL_BUDGET_EXHAUSTED' })
+    expect(reportModelExperiment('p').machine_ms).toBeGreaterThan(0)
+    await expect(run(query)).resolves.toMatchObject({ error_message: 'EXPERIMENT_ALREADY_FINISHED_RESTORE_FRESH_RUN' })
+    expect(query).not.toHaveBeenCalled()
+    expect(readExperimentEvents(config).events.filter(event => event.event === 'run_finished')).toHaveLength(1)
+  })
+  it('scores a failed product independently of native delivery, without erasing the failure', () => {
+    const config = sealed(); save(join(root, 'result.txt'), 'fail'); finishExperiment(config, 'failed', 'turn_limit')
+    expect(evaluateExperiment('p')).toMatchObject({ complete: true, score: 0, success: false })
+    expect(reportModelExperiment('p')).toMatchObject({ product_quality: 0, product_success: false, run_outcome: 'failed' })
+    expect(reportModelExperiment('p').machine_ms).toBeGreaterThan(0)
+    expect(() => evaluateExperiment('p')).toThrow('ALREADY_EVALUATED')
+  })
+  it('keeps manual checks pending, binds evidence bytes and forbids result replacement', () => {
+    const config = sealed(true); finishExperiment(config, 'ready', 'mvp_ready')
+    expect(evaluateExperiment('p')).toMatchObject({ complete: false, score: null })
+    expect(reportModelExperiment('p').product_quality).toBeNull()
+    const evidence = join(temp, 'gui.txt'); save(evidence, 'independent GUI result')
+    const completed = evaluateExperiment('p', [{ id: 'gui', passed: true, evidence }])
+    expect(completed).toMatchObject({ complete: true, score: 1, success: true })
+    expect(completed.checks[1].evidence_sha256).toMatch(/^[a-f0-9]{64}$/)
+    expect(() => evaluateExperiment('p', [{ id: 'gui', passed: false, evidence }])).toThrow('ALREADY_EVALUATED')
+  })
+  it('rejects a modified frozen evaluator before invoking the model or scorer', async () => {
+    const config = sealed(); save(join(home, 'dispatch-experiments/evaluator/check.cjs'), 'process.exit(0)')
+    const query = vi.fn(async function* () { yield text() })
+    await expect(run(query)).resolves.toMatchObject({ error_message: 'EXPERIMENT_EVALUATOR_CHANGED' })
+    expect(query).not.toHaveBeenCalled()
+    expect(() => evaluateExperiment('p')).toThrow('EVALUATOR_CHANGED')
+    expect(readExperimentEvents(config).events.some(event => event.event === 'run_finished')).toBe(true)
+  })
+  it('requires finalization and rejects modifying the product between automatic and manual grading', () => {
+    const config = sealed(true)
+    expect(() => evaluateExperiment('p')).toThrow('MUST_BE_FINISHED')
+    finishExperiment(config, 'ready', 'mvp_ready'); evaluateExperiment('p')
+    save(join(root, 'result.txt'), 'modified'); const evidence = join(temp, 'evidence'); save(evidence, 'GUI')
+    expect(() => evaluateExperiment('p', [{ id: 'gui', passed: true, evidence }])).toThrow('PRODUCT_CHANGED_AFTER')
+  })
+  it('invalidates an exported quality score when stored evidence has changed', () => {
+    const config = sealed(); finishExperiment(config, 'ready', 'delivered')
+    const evaluation = evaluateExperiment('p'); expect(reportModelExperiment('p').product_quality).toBe(1)
+    save(evaluation.checks[0].evidence!, 'modified evidence')
+    expect(reportModelExperiment('p')).toMatchObject({ product_quality: null, evaluation_evidence_valid: false })
+  })
+  it('rejects an external grader that modifies the product being scored', () => {
+    const config = sealed()
+    const checker = join(home, 'dispatch-experiments/evaluator/check.cjs')
+    save(checker, "require('node:fs').writeFileSync(require('node:path').join(process.argv[2], 'result.txt'), 'changed')")
+    // Seal the intentionally invalid grader before this simulated run begins.
+    const other = join(temp, 'mutating-suite'); save(join(other, 'suite.json'), readFileSync(join(home, 'dispatch-experiments/evaluator/suite.json'), 'utf8'))
+    save(join(other, 'check.cjs'), readFileSync(checker, 'utf8'))
+    const fresh = join(temp, 'fresh-suite-home'); mkdirSync(fresh)
+    config.evaluator_hash = installExperimentEvaluator(other, fresh)
+    config.condition_hash = experimentConditionHash(config); writeExperiment(config)
+    finishExperiment(config, 'ready', 'delivered')
+    expect(() => evaluateExperiment('p')).toThrow('PRODUCT_CHANGED_DURING_EVALUATION')
+    expect(reportModelExperiment('p').product_quality).toBeNull()
+  })
+  it('keeps harness failures unknown rather than reporting model failure or zero quality', () => {
+    const directory = join(temp, 'bad-suite')
+    save(join(directory, 'suite.json'), JSON.stringify({ version: 1, checks: [{ id: 'bad', kind: 'command', description: 'Missing grader executable',
+      command: join(temp, 'missing-executable'), args: [], timeout_ms: 1000 }] }))
+    const config = running(); config.evaluator_hash = installExperimentEvaluator(directory, home); config.condition_hash = experimentConditionHash(config); writeExperiment(config)
+    finishExperiment(config, 'ready', 'delivered')
+    expect(evaluateExperiment('p')).toMatchObject({ complete: false, score: null, checks: [{ status: 'error' }] })
+  })
+  it('records the native readiness boundary as a terminal receipt, keeping quality separate', () => {
+    const config = sealed(); recordExperimentBoundary('p', 'mvp_ready')
+    expect(reportModelExperiment('p')).toMatchObject({ run_outcome: 'ready', product_quality: null, native_outcome: 'mvp_ready' })
+    recordExperimentBoundary('p', 'delivered')
+    expect(readExperimentEvents(config).events.filter(event => event.event === 'run_finished')).toHaveLength(1)
+  })
+  it('collects six real external grader executions and computes paired D, R and G including failures', () => {
+    const source = running(); source.state = 'prepared'; source.policy = undefined; source.models = undefined; source.condition_hash = undefined
+    source.prepared = { at: '2026-10-13', requirements_digest: 'frozen' }; writeExperiment(source)
+    const snapshot = join(temp, 'snapshot'); freezeExperiment(home, 'p', snapshot, [])
+    const destination = join(temp, 'matrix'), evaluator = suite()
+    const matrix = createModelMatrix(snapshot, destination, { m1: bindings.one, m2: bindings.two, verifier: bindings.verifier }, 'collected', 1,
+      { task_id: 'T1', repeat_id: 'r1', evaluator })
+    expect(new Set(matrix.map(row => row.evaluator_hash)).size).toBe(1)
+    const matrixPath = join(destination, 'matrix.json')
+    expect(aggregateModelExperiments([matrixPath]).pending_pairs).toHaveLength(1)
+    for (const row of matrix) {
+      process.env.PROMA_HOME = row.home; const config = readExperiment('p')!
+      config.started_at = new Date(Date.now() - 1000).toISOString(); writeExperiment(config)
+      const product = JSON.parse(readFileSync(join(row.home, 'projects.json'), 'utf8')).projects[0].root_path
+      const passed = ['G12', 'G21', 'G22', 'S2'].includes(row.group)
+      save(join(product, 'result.txt'), passed ? 'pass' : 'fail')
+      finishExperiment(config, passed ? 'ready' : 'failed', passed ? 'delivered' : 'turn_limit'); evaluateExperiment('p')
+    }
+    const report = aggregateModelExperiments([matrixPath]); expect(report.rows).toHaveLength(6); expect(report.pending_pairs).toEqual([])
+    expect(report.strata[0]).toMatchObject({ matched_pairs: 1, capability_gap_signed: -1, gain_G12_vs_G11: 1,
+      gain_G12_vs_best_homogeneous: 0, rescue_S2_given_S1_failed: { denominator: 1, value: 1 }, rescue_S1_given_S2_failed: { denominator: 0, value: null } })
+    const list = join(temp, 'matrices.json'); save(list, JSON.stringify([matrixPath]))
+    const csv = join(temp, 'rows.csv')
+    const cli = spawnSync(process.execPath, ['scripts/dispatch-experiment.mjs', 'aggregate', '--home', destination, '--matrices', list, '--csv', csv], { encoding: 'utf8', windowsHide: true })
+    expect(cli.status, cli.stderr).toBe(0); expect(JSON.parse(cli.stdout).strata[0].matched_pairs).toBe(1)
+    expect(readFileSync(csv, 'utf8').split('\r\n')).toHaveLength(8)
+    expect(() => aggregateModelExperiments([matrixPath, matrixPath])).toThrow('MATRIX_RECEIPT_MISMATCH')
+    const edited = readExperiment('p')!; edited.limits!.max_workers = 2; edited.condition_hash = experimentConditionHash(edited); writeExperiment(edited)
+    matrix[5].condition_hash = edited.condition_hash; save(matrixPath, JSON.stringify(matrix))
+    expect(() => aggregateModelExperiments([matrixPath])).toThrow('PAIR_CONDITIONS_MISMATCH')
+  })
+})
 
 describe('pinned roles and experiment conditions', () => {
   it('rejects wrong routing before invoking the SDK and never stores credentials', async () => {

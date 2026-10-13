@@ -9,6 +9,8 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { getPromaHome } from '../../storage/config-paths'
+import { assertExperimentEvaluator } from './dispatch-experiment-evaluator'
+import { readExperimentEvents } from './dispatch-experiment-records'
 
 export function experimentInputsIntact(config: DispatchExperiment): boolean {
   return Object.entries(config.protected_inputs ?? {}).every(([relative, hash]) => {
@@ -18,6 +20,8 @@ export function experimentInputsIntact(config: DispatchExperiment): boolean {
 }
 
 export function bindExperimentInput(input: DesktopDispatchRunInput, config: DispatchExperiment, stage: 'implement' | 'verify'): DesktopDispatchRunInput {
+  if (readExperimentEvents(config).events.some(event => event.event === 'run_finished')) throw new Error('EXPERIMENT_ALREADY_FINISHED_RESTORE_FRESH_RUN')
+  assertExperimentEvaluator(getPromaHome(), config.evaluator_hash)
   if (!experimentInputsIntact(config)) throw new Error('EXPERIMENT_FROZEN_INPUT_CHANGED')
   if (config.mode !== (input.quickMode ? 'quick' : 'longterm') || config.parent_session_id !== input.sessionId) throw new Error('EXPERIMENT_CONTEXT_MISMATCH')
   const signal = experimentRunSignal(config, input.signal)

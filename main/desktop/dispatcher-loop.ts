@@ -56,10 +56,11 @@ import { buildProjectDriverRunnerTool } from './driver-runner-tool'
 import { recordPhaseCheckpoint } from './phase-checkpoint'
 import { runVerifyFinalize, finalizeDesktopDispatch } from './dispatcher-finalize'
 import { buildResourceDiscoveryTool } from './resource-discovery'
-import { readExperiment, recordExperiment } from './dispatch-experiment'
+import { readExperiment, recordExperiment, writeExperiment } from './dispatch-experiment'
 import { experimentChildCreated, experimentPhase, experimentTasksFinished, wrapExperimentDispatcherTools, wrapExperimentWorkerTools } from './dispatch-experiment-policy'
 import { bindExperimentInput, experimentInputsIntact, standaloneHistory, standaloneSystem, standaloneTools } from './dispatch-experiment-runtime'
 import { experimentLimits } from './dispatch-experiment'
+import { finishExperiment } from './dispatch-experiment-records'
 
 // 拆分 re-export（批10 旧账③ R7，2026-10-07）：收口判定族迁至 dispatcher-finalize.ts，
 // 旧路径消费者与测试零断链（hub 化惯例；与 dispatcher-telemetry 拆分同款）。
@@ -507,7 +508,27 @@ async function runAgentLoopSafe(
 export async function runDesktopDispatcherLoop(input: DesktopDispatchRunInput): Promise<DesktopDispatchRunResult> {
   const startedAt = Date.now()
   recordDispatchStartTelemetry(input, startedAt)
-  const result = await runDesktopDispatcherLoopInner(input)
+  const config = readExperiment(input.projectId)
+  const tracked = config?.state === 'running' && ['desktop-implement', 'desktop-verify'].includes(input.currentPhase)
+  if (tracked) {
+    if (!config.started_at) { config.started_at = new Date(startedAt).toISOString(); writeExperiment(config) }
+    recordExperiment(config, 'experiment_stage_started', { phase: input.currentPhase, request_id: input.requestId })
+  }
+  let result: DesktopDispatchRunResult
+  try { result = await runDesktopDispatcherLoopInner(input) }
+  catch (error) {
+    if (!tracked) throw error
+    result = { status: 'error', error_message: error instanceof Error ? error.message : String(error) }
+  }
+  if (tracked) {
+    recordExperiment(config, 'experiment_stage_finished', { phase: input.currentPhase, request_id: input.requestId,
+      status: result.status, loop_status: result.loopResult?.status, duration_ms: Date.now() - startedAt })
+    if (result.status === 'error' || result.status === 'cancelled') {
+      const timedOut = Date.now() >= Date.parse(config.started_at!) + experimentLimits(config).wall_ms
+      const code = result.error_message?.match(/^EXPERIMENT_[A-Z_]+/)?.[0] ?? result.loopResult?.status ?? 'runtime_error'
+      finishExperiment(config, timedOut ? 'timeout' : result.status === 'cancelled' ? 'cancelled' : 'failed', code)
+    }
+  }
   recordDispatchRunTelemetry(input, result, startedAt)
   return result
 }

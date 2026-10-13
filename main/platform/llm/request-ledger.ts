@@ -26,9 +26,9 @@ function metadata(sessionId: string) {
     return sessionCache.sessions.get(sessionId)
   } catch { return undefined }
 }
-function ledgerPath(projectId: string): string {
+function ledgerPath(projectId: string, home = getPromaHome()): string {
   const safeId = /^[A-Za-z0-9_-]+$/.test(projectId) ? projectId : 'unassigned'
-  return join(getPromaHome(), 'usage-ledger', `${safeId}.jsonl`)
+  return join(home, 'usage-ledger', `${safeId}.jsonl`)
 }
 function append(event: LedgerEvent): void {
   try {
@@ -124,8 +124,8 @@ export async function* accountSdkQuery(query: SDKQuery, prompt: string, options:
 }
 
 /** Missing/partial usage is explicit; parent summaries and child requests are never added twice. */
-export function readProjectUsage(projectId: string) {
-  const path = ledgerPath(projectId)
+export function readProjectUsage(projectId: string, options: { home?: string; runId?: string } = {}) {
+  const home = options.home ?? getPromaHome(), path = ledgerPath(projectId, home)
   const queries = new Map<string, { start?: LedgerEvent; end?: LedgerEvent; transports: Map<number, LedgerEvent>; failedTransports: Set<number> }>()
   let malformed = 0
   if (existsSync(path)) for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
@@ -133,6 +133,7 @@ export function readProjectUsage(projectId: string) {
     try {
       const event = JSON.parse(line) as LedgerEvent
       if (event.version !== 1 || event.project_id !== projectId || typeof event.query_id !== 'string') { malformed++; continue }
+      if (options.runId && event.run_id !== options.runId) continue
       const query: { start?: LedgerEvent; end?: LedgerEvent; transports: Map<number, LedgerEvent>; failedTransports: Set<number> } = queries.get(event.query_id) ?? { transports: new Map(), failedTransports: new Set() }
       if (event.event === 'query_started') query.start = event
       else if (event.event === 'query_finished') query.end = event
@@ -144,30 +145,35 @@ export function readProjectUsage(projectId: string) {
   let input = 0, output = 0, cacheRead = 0, cacheCreation = 0, missingUsage = 0, active = 0, physical = 0, failedAttempts = 0, partial = 0
   const byRole: Record<string, { queries: number; input: number; output: number }> = Object.create(null)
   const byScope: Record<string, { queries: number; input: number; output: number }> = Object.create(null)
+  const byModel: Record<string, { model: string; endpoint_host: string; queries: number; input: number; output: number; cache_read: number; cache_creation: number; missing_usage_queries: number }> = Object.create(null)
   for (const query of queries.values()) {
     const usage = cleanUsage(query.end?.usage)
     const role = query.end?.role ?? query.start?.role ?? 'unknown'
     const row = byRole[role] ??= { queries: 0, input: 0, output: 0 }
     const scopeRow = byScope[query.end?.scope ?? query.start?.scope ?? 'unknown'] ??= { queries: 0, input: 0, output: 0 }
+    const model = query.end?.model ?? query.start?.model ?? 'unknown', host = query.end?.endpoint_host ?? query.start?.endpoint_host ?? 'unknown'
+    const modelRow = byModel[JSON.stringify([host, model])] ??= { model, endpoint_host: host, queries: 0, input: 0, output: 0, cache_read: 0, cache_creation: 0, missing_usage_queries: 0 }
+    modelRow.queries++
     row.queries++
     scopeRow.queries++
     physical += query.transports.size
     failedAttempts += query.failedTransports.size
     if (!query.end) active++
     if (!query.start) partial++
-    if (usage?.input_tokens === undefined || usage.output_tokens === undefined) missingUsage++
+    if (usage?.input_tokens === undefined || usage.output_tokens === undefined) { missingUsage++; modelRow.missing_usage_queries++ }
     const read = usage?.cache_read_input_tokens ?? 0
     const creation = usage?.cache_creation_input_tokens ?? 0
     const totalInput = (usage?.input_tokens ?? 0) + read + creation
     input += totalInput; output += usage?.output_tokens ?? 0; cacheRead += read; cacheCreation += creation
     row.input += totalInput; row.output += usage?.output_tokens ?? 0
     scopeRow.input += totalInput; scopeRow.output += usage?.output_tokens ?? 0
+    modelRow.input += totalInput; modelRow.output += usage?.output_tokens ?? 0; modelRow.cache_read += read; modelRow.cache_creation += creation
   }
-  const writeErrors = recordingErrors.get(`${getPromaHome()}/${projectId}`) ?? 0
+  const writeErrors = recordingErrors.get(`${home}/${projectId}`) ?? 0
   const warningLimit = Number(process.env.BLOMA_PROJECT_TOKEN_WARNING)
   return { project_id: projectId, logical_queries: queries.size, physical_requests: physical,
     reported_input: input, reported_output: output, reported_total: input + output, cache_read: cacheRead, cache_creation: cacheCreation,
-    missing_usage_queries: missingUsage, unmeasured_failed_attempts: failedAttempts, active_queries: active, malformed_lines: malformed, by_role: byRole, by_scope: byScope,
+    missing_usage_queries: missingUsage, unmeasured_failed_attempts: failedAttempts, active_queries: active, malformed_lines: malformed, by_role: byRole, by_scope: byScope, by_model: byModel,
     partial_records: partial,
     recording_errors: writeErrors,
     ...(Number.isFinite(warningLimit) && warningLimit > 0 ? { warning_limit: warningLimit, budget_warning: input + output >= warningLimit } : {}),

@@ -5,6 +5,7 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { getPromaHome } from '../../storage/config-paths'
 import { appendJsonLine, writeTextFileAtomic } from '../../storage/json-store'
+import { finishExperiment } from './dispatch-experiment-records'
 
 export const EXPERIMENT_SWITCH = 'BLOMA_DISPATCH_EXPERIMENT'
 export const EXPERIMENT_POLICIES = ['single_worker', 'parallel_workers', 'autonomous', 'standalone'] as const
@@ -18,11 +19,13 @@ export interface ExperimentLimits { max_workers: number; max_tasks: number; disp
 export const DEFAULT_EXPERIMENT_LIMITS: ExperimentLimits = { max_workers: 2, max_tasks: 16, dispatcher_turns: 40, executor_turns: 32, max_requests: 128, max_output_tokens: 8192, wall_ms: 1_800_000 }
 export interface ExperimentTask { id: string; instruction: string; depends_on: string[]; writes: string[] }
 export interface ExperimentWorker { delegation_id: string; child_session_id: string; task_ids: string[]; has_executed?: boolean }
+export interface ExperimentSample { task_id: string; repeat_id: string; pair_id: string; group: 'G11' | 'G12' | 'G21' | 'G22' | 'S1' | 'S2' }
 export interface DispatchExperiment {
   version: 1; project_id: string; mode: 'quick' | 'longterm'; experiment_id: string; run_id: string
   state: 'prepare' | 'prepared' | 'running'; policy?: ExperimentPolicy; planning?: 'fixed' | 'autonomous'
   snapshot_id?: string; input_hash?: string; parent_session_id?: string
   runtime_hash?: string
+  sample?: ExperimentSample; evaluator_hash?: string
   models?: ExperimentModels; limits?: ExperimentLimits; condition_hash?: string
   settings?: ExperimentSettings; protected_inputs?: Record<string, string>
   observed_models?: Partial<Record<keyof ExperimentModels, ExperimentModelReceipt>>
@@ -34,7 +37,8 @@ export const experimentLimits = (config: DispatchExperiment) => config.limits ??
 export function experimentConditionHash(config: DispatchExperiment): string {
   return createHash('sha256').update(JSON.stringify({ mode: config.mode, policy: config.policy,
     planning: config.planning ?? 'fixed', models: config.models, limits: config.limits, settings: config.models ? config.settings ?? DEFAULT_EXPERIMENT_SETTINGS : config.settings,
-    protected_inputs: config.protected_inputs, input_hash: config.input_hash, runtime_hash: config.runtime_hash })).digest('hex')
+    protected_inputs: config.protected_inputs, input_hash: config.input_hash, runtime_hash: config.runtime_hash,
+    sample: config.sample, evaluator_hash: config.evaluator_hash })).digest('hex')
 }
 export function validateExperimentTasks(tasks: ExperimentTask[], maximum: number): void {
   if (!Array.isArray(tasks) || tasks.length > maximum) throw new Error('EXPERIMENT_INVALID_TASKS')
@@ -78,6 +82,12 @@ export function validateExperiment(raw: unknown): DispatchExperiment {
     || !['prepare', 'prepared', 'running'].includes(value.state)) throw new Error('EXPERIMENT_INVALID_CONFIG')
   for (const id of [value.project_id, value.experiment_id, value.run_id]) assertExperimentId(id)
   if (value.parent_session_id) assertExperimentId(value.parent_session_id)
+  if (value.sample) {
+    for (const id of [value.sample.task_id, value.sample.repeat_id, value.sample.pair_id]) assertExperimentId(id)
+    if (!['G11', 'G12', 'G21', 'G22', 'S1', 'S2'].includes(value.sample.group)) throw new Error('EXPERIMENT_INVALID_SAMPLE')
+    if ((value.policy === 'standalone') !== value.sample.group.startsWith('S')) throw new Error('EXPERIMENT_SAMPLE_POLICY_MISMATCH')
+  }
+  if (value.evaluator_hash && !/^[a-f0-9]{64}$/.test(value.evaluator_hash)) throw new Error('EXPERIMENT_INVALID_EVALUATOR_HASH')
   if (value.settings && (!Number.isFinite(value.settings.temperature) || value.settings.temperature < 0 || value.settings.temperature > 2
     || !['off', 'low', 'high', 'max'].includes(value.settings.thinking_level))) throw new Error('EXPERIMENT_INVALID_SETTINGS')
   for (const [path, hash] of Object.entries(value.protected_inputs ?? {})) if (path.includes('\\') || path.startsWith('/') || path.includes(':') || path.split('/').includes('..') || !/^[a-f0-9]{64}$/.test(hash)) throw new Error('EXPERIMENT_INVALID_PROTECTED_INPUT')
@@ -132,7 +142,10 @@ export function recordExperiment(config: DispatchExperiment, event: string, payl
 }
 export function recordExperimentBoundary(projectId: string, event: string, payload: Record<string, unknown> = {}): void {
   const config = readExperiment(projectId)
-  if (config?.state === 'running') recordExperiment(config, event, payload)
+  if (config?.state === 'running') {
+    recordExperiment(config, event, payload)
+    if (event === 'mvp_ready' || event === 'delivered') finishExperiment(config, 'ready', event)
+  }
 }
 export function holdExperimentBeforeImplement(project: { project_id: string; mode: string }, sessionId: string,
   context: { requirements_digest: string; ux_html?: string; ux_design?: string }): boolean {

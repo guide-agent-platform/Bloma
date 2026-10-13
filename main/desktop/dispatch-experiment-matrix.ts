@@ -4,7 +4,8 @@ import { DEFAULT_EXPERIMENT_LIMITS, type ExperimentModel } from './dispatch-expe
 import { restoreExperiment } from './dispatch-experiment-snapshot'
 
 export function createModelMatrix(snapshot: string, destination: string,
-  pair: { m1: ExperimentModel; m2: ExperimentModel; verifier: ExperimentModel }, prefix: string, workerLimit = 1) {
+  pair: { m1: ExperimentModel; m2: ExperimentModel; verifier: ExperimentModel }, prefix: string, workerLimit = 1,
+  collection?: { task_id: string; repeat_id: string; evaluator: string }) {
   if (existsSync(destination) || ![1, 2, 3, 4].includes(workerLimit)) throw new Error('EXPERIMENT_MATRIX_TARGET_OR_LIMIT_INVALID')
   mkdirSync(destination, { recursive: true })
   const conditions = [
@@ -17,8 +18,11 @@ export function createModelMatrix(snapshot: string, destination: string,
     const config = restoreExperiment(snapshot, home, condition.group.startsWith('S') ? 'standalone' : 'autonomous', `${prefix}-${condition.group}`, {
       models: { dispatcher: condition.dispatcher, executor: condition.executor, verifier: pair.verifier },
       limits: { ...DEFAULT_EXPERIMENT_LIMITS, max_workers: workerLimit },
+      ...(collection ? { evaluator: collection.evaluator, sample: { task_id: collection.task_id, repeat_id: collection.repeat_id,
+        pair_id: prefix, group: condition.group as 'G11' | 'G12' | 'G21' | 'G22' | 'S1' | 'S2' } } : {}),
     })
     return { group: condition.group, home, run_id: config.run_id, policy: config.policy, mode: config.mode,
+      project_id: config.project_id, sample: config.sample, evaluator_hash: config.evaluator_hash,
       models: config.models, input_hash: config.input_hash, condition_hash: config.condition_hash }
   })
   writeFileSync(join(destination, 'matrix.json'), JSON.stringify(result, null, 2), { flag: 'wx' })
