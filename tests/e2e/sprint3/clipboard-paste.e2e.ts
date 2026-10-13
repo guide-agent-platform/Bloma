@@ -12,6 +12,7 @@ const PNG_1PX_BASE64 =
 
 test('[S3-PASTE-01-e2e] 粘贴截图→chip 渲染→IPC 落盘→发送直达设置页（全链路真实闭环）', async ({ bloma }) => {
   await bloma.page.locator('[data-ai-id="mode-card-quick"]').click()
+  await bloma.page.locator('[data-ai-id="create-project-button"]').click()
   await expect(bloma.page.locator('[data-ai-id="workspace-header"]')).toBeVisible()
 
   // 真实 paste 事件：renderer 上下文构造 DataTransfer + File（Chromium 完整支持）

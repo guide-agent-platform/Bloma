@@ -566,7 +566,7 @@ try {
   const MODE_LABEL = MODE === 'longterm' ? '深度项目' : '快速尝鲜'
   let modeClicked = false
   for (let i = 0; i < 8; i += 1) {
-    const r = await cdp.eval(`(() => { const el = document.querySelector('[data-ai-id="mode-card-${MODE}"]'); if (!el) return { ok: false, err: 'not-found' }; el.click(); return { ok: true } })()`)
+    const r = await cdp.eval(`(() => { const el = document.querySelector('[data-ai-id="mode-card-${MODE}"]'); if (!el) return { ok: false, err: 'not-found' }; el.click(); document.querySelector('[data-ai-id=create-project-button]')?.click(); return { ok: true } })()`)
     if (r?.ok) {
       modeClicked = true
       log(`已选「${MODE_LABEL}」模式（--mode ${MODE}）`)

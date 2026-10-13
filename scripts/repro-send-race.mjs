@@ -174,7 +174,7 @@ try {
   await sleep(2000)
   let modeClicked = false
   for (let i = 0; i < 8; i += 1) {
-    const r = await cdp.eval(`(() => { const el = document.querySelector('[data-ai-id="mode-card-longterm"]'); if (!el) return { ok: false, err: 'not-found' }; el.click(); return { ok: true } })()`)
+    const r = await cdp.eval(`(() => { const el = document.querySelector('[data-ai-id="mode-card-longterm"]'); if (!el) return { ok: false, err: 'not-found' }; el.click(); document.querySelector('[data-ai-id=create-project-button]')?.click(); return { ok: true } })()`)
     if (r?.ok) { modeClicked = true; log('已选「深度项目」'); break }
     await sleep(1000)
   }

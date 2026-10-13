@@ -7,6 +7,8 @@ import {
 } from './atoms'
 import { desktopPhaseFullLabel } from '../lib/desktop-stages'
 import type { Project, ProjectMode, WorkflowStage } from './atoms'
+import { StudioPageFrame } from './StudioPageFrame'
+import { StudioFumoEmpty } from './StudioCompanion'
 
 export interface ProjectHistoryPageProps {
   /** 缓存的本地项目列表（演示/开发模式下为手动维护的列表） */
@@ -19,6 +21,7 @@ export interface ProjectHistoryPageProps {
   onBackToWorkspace?: () => void
   /** 归档/删除/恢复后回传最新活动项目列表（供 App 同步 projectList） */
   onProjectsChanged?: (projects: Project[]) => void
+  onOpenSettings?: () => void
 }
 
 const modeLabelMap: Record<ProjectMode, string> = {
@@ -64,6 +67,7 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
   onNewProject,
   onBackToWorkspace,
   onProjectsChanged,
+  onOpenSettings,
 }) => {
   const currentProject = useAtomValue(currentProjectAtom)
   const [activeTab, setActiveTab] = React.useState<ActiveTab>('active')
@@ -275,8 +279,9 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
   }, [filteredProjects, sortBy])
 
   return (
-    <div
+    <StudioPageFrame active="projects" onHome={onNewProject} onWorkspace={currentProject ? onBackToWorkspace : undefined} onSettings={onOpenSettings}><div
       data-ai-id="project-history-page"
+      className="studio-project-history"
       style={{
         position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column',
         alignItems: 'center', minHeight: '100vh', padding: 'var(--space-8) var(--space-6)',
@@ -546,6 +551,7 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
               padding: 'var(--space-10) var(--space-6)',
             }}
           >
+            <StudioFumoEmpty />
             <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-4)' }}>
               没有匹配「{searchQuery.trim()}」的项目
             </p>
@@ -668,7 +674,7 @@ export const ProjectHistoryPage: React.FC<ProjectHistoryPageProps> = ({
           onConfirm={handleDeleteConfirm}
         />
       )}
-    </div>
+    </div></StudioPageFrame>
   )
 }
 
@@ -811,7 +817,7 @@ const ProjectRow: React.FC<{
   return (
     <div
       data-ai-id="project-list-item"
-      className="tile"
+      className="tile studio-project-row"
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -1060,6 +1066,7 @@ const EmptyState: React.FC<{ onNewProject: () => void; tabLabel: string }> = ({ 
       padding: 'var(--space-12) var(--space-6)',
     }}
   >
+    <StudioFumoEmpty />
     <span
       aria-hidden
       style={{

@@ -4,11 +4,27 @@ import { createStore, Provider } from 'jotai'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ChatPanel } from '../../renderer/components/ChatPanel'
+import { WorkspaceShell } from '../../renderer/components/WorkspaceShell'
+import { workflowStageAtom } from '../../renderer/components/atoms'
 import { activeAgentSessionIdAtom, agentMessagesFamily, currentProjectAtom, globalUserErrorAtom } from '../../renderer/agent-atoms'
 import { workspaceScene } from '../../renderer/lib/workspace-scene'
 import type { Project } from '../../shared/types'
 afterEach(() => { cleanup(); delete window.electronAPI })
 describe('软件剧场的完整性', () => {
+  it('the footer keeps the real sketch confirmation callback and disables it only while confirming', () => {
+    const store = createStore()
+    store.set(currentProjectAtom, { project_id: 'footer-project', name: '测试草图', mode: 'quick' } as Project)
+    store.set(workflowStageAtom, 'sketch_ready')
+    const confirm = vi.fn()
+    const view = render(<Provider store={store}><WorkspaceShell previewUrl="bloma-file://footer-project/00_UX/ux-sketch.html" onConfirmSketch={confirm} /></Provider>)
+    const button = document.querySelector('[data-ai-id="confirm-sketch-button"]') as HTMLButtonElement
+    expect(document.querySelectorAll('[data-ai-id="confirm-sketch-button"]')).toHaveLength(1)
+    expect(button.closest('.studio-footer')).toBeTruthy()
+    fireEvent.click(button)
+    expect(confirm).toHaveBeenCalledTimes(1)
+    view.rerender(<Provider store={store}><WorkspaceShell previewUrl="bloma-file://footer-project/00_UX/ux-sketch.html" onConfirmSketch={confirm} confirming /></Provider>)
+    expect(button.disabled).toBe(true)
+  })
   it('完整历史切换保留输入；回复不截断折叠，错误直接可见', () => {
     const store=createStore()
     store.set(activeAgentSessionIdAtom,'s'); store.set(currentProjectAtom,{project_id:'p'} as Project)

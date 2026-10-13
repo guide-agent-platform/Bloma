@@ -15,6 +15,7 @@ import { PrdConfirmDialog } from './PrdConfirmDialog'
 import { ClarificationCard } from './ClarificationCard'
 import { ReviewChoicesDialog } from './ReviewChoicesDialog'
 import { SettingsPage } from './SettingsPage'
+import '../styles/refined.css'
 import { useUserDecisionCards, toCardSelectionMeta } from './ChatPanel-sprint2'
 import { globalUserErrorAtom } from '../agent-atoms'
 import type { CardOption } from './CardOptions'
@@ -83,6 +84,9 @@ type AppRoute = 'mode-selection' | 'workspace' | 'project-history' | 'settings'
 const AppRoutes: React.FC = () => {
   const store = useStore()
   const [route, setRoute] = useState<AppRoute>('mode-selection')
+  const [settingsReturnRoute, setSettingsReturnRoute] = useState<Exclude<AppRoute, 'settings'>>('workspace')
+  const [homeIdea, setHomeIdea] = useState('')
+  const [homeMode, setHomeMode] = useState<ProjectMode>('quick')
   const [mode, setMode] = useState<ProjectMode | null>(null)
   const [waitStart, setWaitStart] = useState<number | undefined>()
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>('empty')
@@ -695,8 +699,9 @@ const AppRoutes: React.FC = () => {
   }, [currentProject, projectList, setProjectPreview])
   // ==================== 设置页入口 ====================
   const handleOpenSettings = useCallback(() => {
+    if (route !== 'settings') setSettingsReturnRoute(route)
     setRoute('settings')
-  }, [])
+  }, [route])
   // ==================== 历史列表操作同步（Sprint 3：归档/删除/恢复） ====================
   // 历史项目页对项目做归档/删除/恢复后，回传最新活动列表：
   // 1) 同步 App 的 projectList（启动恢复与 handleSendMessage 兜底都依赖它）；
@@ -745,8 +750,14 @@ const AppRoutes: React.FC = () => {
   if (route === 'mode-selection') {
     return (
       <ModeSelectionPage
-        onModeSelected={handleModeSelected}
-        onBackToHistory={projectList.length > 0 ? () => setRoute('project-history') : undefined}
+        onModeSelected={async (selected, idea) => { await handleModeSelected(selected, idea); setHomeIdea('') }}
+        onBackToHistory={() => setRoute('project-history')}
+        onOpenSettings={handleOpenSettings}
+        onBackToWorkspace={currentProject ? () => setRoute('workspace') : undefined}
+        onResumeProject={handleResumeProject}
+        projects={projectList}
+        initialIdea={homeIdea} onIdeaChange={setHomeIdea}
+        initialMode={homeMode} onModeChange={setHomeMode}
       />
     )
   }
@@ -758,16 +769,18 @@ const AppRoutes: React.FC = () => {
         onNewProject={() => setRoute('mode-selection')}
         onBackToWorkspace={() => setRoute('workspace')}
         onProjectsChanged={handleProjectsChanged}
+        onOpenSettings={handleOpenSettings}
       />
     )
   }
   if (route === 'settings') {
-    return <SettingsPage onBack={() => setRoute('workspace')} />
+    return <SettingsPage onBack={() => setRoute(settingsReturnRoute)} backLabel={settingsReturnRoute === 'mode-selection' ? '返回主页面' : settingsReturnRoute === 'project-history' ? '返回项目列表' : '返回工作区'} onHome={() => setRoute('mode-selection')} onProjects={() => setRoute('project-history')} onWorkspace={currentProject ? () => setRoute('workspace') : undefined} />
   }
   // route === 'workspace'
   return (
     <>
       <WorkspaceShell
+        onHome={() => setRoute('mode-selection')}
         notice={forkNotice}
         cardOptions={decisionCards?.options}
         decisionTitle={decisionCards?.title}

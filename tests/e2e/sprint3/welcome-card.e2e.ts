@@ -6,6 +6,7 @@ import { test, expect } from '../support/electron-fixture'
 
 test('[S3-WELCOME-01-e2e] 零渠道工作区引导卡真实渲染：直达按钮与降级文案可见', async ({ bloma }) => {
   await bloma.page.locator('[data-ai-id="mode-card-quick"]').click()
+  await bloma.page.locator('[data-ai-id="create-project-button"]').click()
   await expect(bloma.page.locator('[data-ai-id="workspace-header"]')).toBeVisible()
 
   // r58 P1-② 直达按钮 + P1-① 卡片文案在真实 Electron 中渲染

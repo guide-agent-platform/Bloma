@@ -14,6 +14,7 @@ import { DocumentPanel } from './DocumentPanel'
 import { CollaborationPanel } from './CollaborationPanel'
 import { HistoryAttachments } from './HistoryAttachments'
 import { DesktopStageBar } from './DesktopStageBar'
+import { StudioFumoNote } from './StudioCompanion'
 import { currentProjectAtom, desktopPhaseAtom, workflowStageAtom, documentPanelExpandedAtom, collaborationPanelExpandedAtom, timelineExpandedAtom, activeAgentSessionIdAtom, agentMessagesFamily, hasActiveStreamAtom } from './atoms'
 import { desktopArtifactsAtom } from '../agent-atoms'
 import { workspaceScene } from '../lib/workspace-scene'
@@ -68,6 +69,7 @@ export interface WorkspaceShellProps {
 
   /* === Header props === */
   onAllProjects?: () => void
+  onHome?: () => void
   /** 打开设置页回调 */
   onOpenSettings?: () => void
   /** 点击「升级为长期模式」回调（U1：升级接线） */
@@ -106,6 +108,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
         onAllProjects={props.onAllProjects}
         onOpenSettings={props.onOpenSettings}
         onUpgrade={props.onUpgrade}
+        onHome={props.onHome}
       />
       <nav className="studio-steps" aria-label="软件制作进度">
         {['想法', '需求', '界面', '制作', '试用与交付'].map((label, index) => {
@@ -115,7 +118,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
       </nav>
       <p className="studio-sidebar-label">项目资料</p>
       <nav className="studio-library" aria-label="项目资料"><button type="button" data-ai-id="docs-button" aria-pressed={documents} onClick={() => openTool('documents')}><FileText />文档</button><button type="button" data-ai-id="materials-button" aria-pressed={localPanel === 'materials'} onClick={() => openTool('materials')}><Layers />材料</button><button type="button" data-ai-id="versions-button" aria-pressed={localPanel === 'versions'} onClick={() => openTool('versions')}><History />版本</button><button type="button" data-ai-id="collaboration-button" aria-pressed={collaboration} onClick={() => openTool('collaboration')}><Users />协作</button></nav>
-      <div className="studio-sidebar-foot"><WorkspaceConnection /></div>
+      <div className="studio-sidebar-foot"><StudioFumoNote /><WorkspaceConnection /></div>
       </aside>
       <div className="studio-body">
       <main className="theatre-stage">
@@ -163,7 +166,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
         />
         {props.notice && <p className="studio-notice" role="status">{props.notice}</p>}
       </section>
-      <footer className="studio-footer"><button type="button" className="theatre-tool" aria-pressed={localPanel === 'records'} onClick={() => openTool('records')}><Activity />工作记录</button><div className="studio-status-slot"><MvpStatusBanner suppressBlocked /></div>{project?.desktop_blocked && <button type="button" className="studio-primary" disabled={busy} onClick={() => props.onSendMessage?.('继续')}>继续制作</button>}</footer>
+      <footer className="studio-footer"><button type="button" className="theatre-tool" aria-pressed={localPanel === 'records'} onClick={() => openTool('records')}><Activity />工作记录</button><div className="studio-status-slot"><MvpStatusBanner suppressBlocked /></div>{props.previewUrl && !props.deliveryPanel && stage === 'sketch_ready' && props.onConfirmSketch && <button type="button" data-ai-id="confirm-sketch-button" className="studio-primary" disabled={props.confirming} onClick={props.onConfirmSketch}>{props.confirming ? '正在开始制作…' : '开始制作'}<Play size={13} /></button>}{project?.desktop_blocked && <button type="button" className="studio-primary" disabled={busy} onClick={() => props.onSendMessage?.('继续')}>继续制作</button>}</footer>
       </div>
     </div>
   )

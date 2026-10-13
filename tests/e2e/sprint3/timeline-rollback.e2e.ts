@@ -151,5 +151,6 @@ function listSnapshotFolders(snapDir: string): string[] {
 
 async function enterQuickWorkspace(page: import('@playwright/test').Page): Promise<void> {
   await page.locator('[data-ai-id="mode-card-quick"]').click()
+  await page.locator('[data-ai-id="create-project-button"]').click()
   await expect(page.locator('[data-ai-id="workspace-header"]')).toBeVisible()
 }

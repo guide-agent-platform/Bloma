@@ -1,7 +1,7 @@
 import React from 'react'
 import { useAtomValue } from 'jotai'
 import { IconSettings, ChevronDown } from './icons'
-import brandIcon from '../../resources/branding/icon.png'
+import { StudioBrand, StudioNavigation } from './StudioPageFrame'
 import { canUpgradeAtom, currentProjectAtom, networkOnlineAtom, projectModeAtom } from './atoms'
 import { hasUsableChannelsAtom } from './atoms-sprint2'
 
@@ -10,16 +10,18 @@ export interface WorkspaceHeaderProps {
   onAllProjects?: () => void
   onOpenSettings?: () => void
   onUpgrade?: () => void
+  onHome?: () => void
 }
 
-export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects, onOpenSettings, onUpgrade, showConnection = true }) => {
+export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({ onAllProjects, onOpenSettings, onUpgrade, onHome, showConnection = true }) => {
   const project = useAtomValue(currentProjectAtom)
   const mode = useAtomValue(projectModeAtom)
   const isOnline = useAtomValue(networkOnlineAtom)
   const hasChannels = useAtomValue(hasUsableChannelsAtom)
   const canUpgrade = useAtomValue(canUpgradeAtom)
   return <header data-ai-id="workspace-header" className="theatre-header">
-    <span className="theatre-brand"><span className="theatre-brandmark" aria-hidden><img src={brandIcon} alt="" /></span>Bloma</span>
+    <StudioBrand />
+    <StudioNavigation active="workspace" onHome={onHome} onProjects={onAllProjects} />
     <button type="button" className="theatre-project" data-ai-id="all-projects-button" aria-label="所有项目" onClick={onAllProjects} disabled={!onAllProjects} title="查看所有项目"><h1>{project?.name ?? '未命名项目'}</h1><ChevronDown /></button>
     <span className="theatre-header-spacer" />
     <span className="theatre-mode"><span>{mode === 'longterm' ? '长期型' : '快速型'}</span></span>

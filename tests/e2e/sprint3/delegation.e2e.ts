@@ -17,6 +17,7 @@
 test('[S4-AGENT-E2E] 长期工作区中委派协作抽屉可打开/关闭且空状态正确', async ({ bloma }) => {
   // ① 进入精细打磨（longterm）工作区——协作按钮仅在 longterm 顶栏渲染
   await bloma.page.locator('[data-ai-id="mode-card-longterm"]').click()
+  await bloma.page.locator('[data-ai-id="create-project-button"]').click()
   await expect(bloma.page.locator('[data-ai-id="workspace-header"]')).toBeVisible()
 
   // ② 打开协作抽屉（WorkspaceHeader「协作」按钮门控 collaborationPanelExpandedAtom）

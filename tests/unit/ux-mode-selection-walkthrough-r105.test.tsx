@@ -42,6 +42,10 @@ describe('ux-mode-selection-walkthrough r105：模式选择页（0 基础用户�
     const btn = () => document.querySelector(`[data-ai-id="${aiId}"] button`) as HTMLButtonElement
     return { click: () => fireEvent.click(btn()), btn }
   }
+  function start(aiId: string) {
+    fireEvent.click(card(aiId).btn())
+    fireEvent.click(document.querySelector('[data-ai-id="create-project-button"]')!)
+  }
 
   const setElectron = (createImpl?: unknown) => {
     ;(window as never as { electronAPI: unknown }).electronAPI = {
@@ -60,7 +64,7 @@ describe('ux-mode-selection-walkthrough r105：模式选择页（0 基础用户�
     const create = vi.fn().mockResolvedValue({ ok: true, data: { project_id: 'p1', name: 'N' } })
     setElectron(create)
     mount()
-    fireEvent.click(card('mode-card-quick').btn())
+    start('mode-card-quick')
     await waitFor(() => expect(onModeSelected).toHaveBeenCalledWith('quick'))
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ mode: 'quick' }))
     const st = store
@@ -71,7 +75,7 @@ describe('ux-mode-selection-walkthrough r105：模式选择页（0 基础用户�
   it('[M3·创建失败] ok:false → user_visible_message 展示且不导航（modeSelected 仍 false）', async () => {
     setElectron(vi.fn().mockResolvedValue({ ok: false, error: { user_visible_message: '磁盘已满，无法创建项目' } }))
     mount()
-    fireEvent.click(card('mode-card-longterm').btn())
+    start('mode-card-longterm')
     await waitFor(() => expect(screen.getByText(/磁盘已满/)).toBeTruthy())
     expect(onModeSelected).not.toHaveBeenCalled()
     expect(store.get(modeSelectedAtom)).not.toBe(true)
@@ -79,7 +83,7 @@ describe('ux-mode-selection-walkthrough r105：模式选择页（0 基础用户�
 
   it('[M4·IPC 缺失] 无 electronAPI → 环境错误文案（不裸崩）', async () => {
     mount()
-    fireEvent.click(card('mode-card-quick').btn())
+    start('mode-card-quick')
     await waitFor(() => expect(screen.getByText(/当前环境无法创建项目/)).toBeTruthy())
     expect(onModeSelected).not.toHaveBeenCalled()
   })
@@ -88,7 +92,7 @@ describe('ux-mode-selection-walkthrough r105：模式选择页（0 基础用户�
     let resolveCreate: (v: { ok: true; data: unknown }) => void = () => undefined
     setElectron(vi.fn().mockImplementation(() => new Promise((r) => { resolveCreate = r })))
     mount()
-    fireEvent.click(card('mode-card-quick').btn())
+    start('mode-card-quick')
     await waitFor(() => {
       expect((card('mode-card-quick').btn() as HTMLButtonElement).disabled).toBe(true)
       expect((card('mode-card-longterm').btn() as HTMLButtonElement).disabled).toBe(true)
@@ -100,8 +104,21 @@ describe('ux-mode-selection-walkthrough r105：模式选择页（0 基础用户�
   it('[M6·异常] create 抛错 → 通用文案+可重试（卡片恢复可用）', async () => {
     setElectron(vi.fn().mockRejectedValue(new Error('IPC boom')))
     mount()
-    fireEvent.click(card('mode-card-quick').btn())
+    start('mode-card-quick')
     await waitFor(() => expect(screen.getByText(/项目创建失败，请重试/)).toBeTruthy())
     expect((card('mode-card-quick').btn() as HTMLButtonElement).disabled).toBe(false)
+  })
+  it('mode selection is local and sends the exact initial idea only on explicit creation', async () => {
+    const create = vi.fn().mockResolvedValue({ ok: true, data: { project_id: 'p2', name: '新工具' } })
+    const changed = vi.fn()
+    setElectron(create)
+    render(<Provider store={store}><ModeSelectionPage onModeSelected={onModeSelected} onModeChange={changed} /></Provider>)
+    fireEvent.change(screen.getByRole('textbox', { name: '你的软件想法' }), { target: { value: '  帮我安排每周课程  ' } })
+    fireEvent.click(screen.getByRole('button', { name: '长期型' }))
+    expect(changed).toHaveBeenCalledTimes(1)
+    expect(create).not.toHaveBeenCalled()
+    fireEvent.click(document.querySelector('[data-ai-id="create-project-button"]')!)
+    await waitFor(() => expect(onModeSelected).toHaveBeenCalledWith('longterm', '帮我安排每周课程'))
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ mode: 'longterm', initial_message: '帮我安排每周课程' }))
   })
 })

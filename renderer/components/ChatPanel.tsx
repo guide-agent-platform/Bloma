@@ -15,7 +15,8 @@ import { ProcessBlockGroup, type ProcessItem } from './ProcessBlockGroup'
 import { ThinkingIndicator, type ThinkingPhase } from './ThinkingIndicator'
 import { Markdown } from './Markdown'
 import { CompactReply } from './CompactReply'
-import { MessageSquare, IconAlertTriangle, IconSettings, Image, Copy, Conversation, Sparkles, Check, GitBranch } from './icons'
+import { MessageSquare, IconAlertTriangle, IconSettings, Image, Copy, Conversation, Check, GitBranch } from './icons'
+import { StudioFumoAvatar } from './StudioCompanion'
 import { copyText } from '../lib/copy-text'
 import { isInternalMessage, assistantDisplayText } from '../../shared/message-presentation'
 import {
@@ -286,7 +287,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         }}
       >
         <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: presentation === 'theatre' ? 12 : 'var(--font-size-sm)', fontWeight: 500, color: 'var(--color-text)' }}>
-          {presentation === 'theatre' ? <span className="theatre-assistant-mark"><Sparkles size={14} /></span> : <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--theatre-accent, var(--color-quick))', display: 'inline-block' }} />}
+          {presentation === 'theatre' ? <StudioFumoAvatar /> : <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--theatre-accent, var(--color-quick))', display: 'inline-block' }} />}
           {presentation === 'theatre' ? 'Bloma' : '对话'}
         </span>
         {presentation === 'theatre' ? <button type="button" className="theatre-tool" data-ai-id="conversation-toggle" aria-expanded={historyExpanded} onClick={() => setHistoryExpanded(previous => !previous)}><Conversation size={14} />{historyExpanded ? '收起完整对话' : `完整对话${messages.length ? ` · ${messages.length}` : ''}`}</button> : <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>Enter 发送</span>}

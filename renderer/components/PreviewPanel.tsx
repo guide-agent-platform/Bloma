@@ -225,7 +225,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
           预览 · 安全环境
         </span>
         <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-          {stage === 'sketch_ready' && onConfirmSketch && (
+          {!embedded && stage === 'sketch_ready' && onConfirmSketch && (
             <button
               data-ai-id="confirm-sketch-button"
               onClick={onConfirmSketch}

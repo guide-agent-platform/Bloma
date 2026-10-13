@@ -50,6 +50,7 @@ describe('Sprint 1 project mode and workspace acceptance', () => {
 
     render(<Provider store={store}><App /></Provider>)
     fireEvent.click(screen.getByTestId('mode-card-quick'))
+    fireEvent.click(document.querySelector('[data-ai-id="create-project-button"]')!)
 
     await waitFor(() => expect(screen.getByRole('textbox')).toBeTruthy())
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ mode: 'quick' }))
@@ -74,6 +75,7 @@ describe('Sprint 1 project mode and workspace acceptance', () => {
 
     render(<Provider store={store}><App /></Provider>)
     fireEvent.click(screen.getByTestId('mode-card-longterm'))
+    fireEvent.click(document.querySelector('[data-ai-id="create-project-button"]')!)
 
     await waitFor(() => expect(screen.getByRole('button', { name: '文档' })).toBeTruthy())
     expect(screen.getByText('长期型')).toBeTruthy()
@@ -94,6 +96,7 @@ describe('Sprint 1 project mode and workspace acceptance', () => {
 
     render(<Provider store={store}><App /></Provider>)
     fireEvent.click(screen.getByTestId('mode-card-quick'))
+    fireEvent.click(document.querySelector('[data-ai-id="create-project-button"]')!)
 
     await waitFor(() => expect(screen.getByRole('textbox')).toBeTruthy())
     expect(screen.queryByText('你想做什么样的软件？')).toBeNull()
@@ -117,10 +120,11 @@ describe('Sprint 1 project mode and workspace acceptance', () => {
   it('[S1-UI-007] 两道门应使用生活化文案且不要求技术栈配置', () => {
     render(<Provider><ModeSelectionPage onModeSelected={vi.fn()} /></Provider>)
 
-    expect(screen.getByText('快速做一个试试')).toBeTruthy()
-    expect(screen.getByText('认真打磨一个产品')).toBeTruthy()
-    expect(screen.getByText(/一次性小工具/)).toBeTruthy()
-    expect(screen.getByText(/持续改进/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: '快速型' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '长期型' })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: '你的软件想法' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '长期型' }))
+    expect(screen.getByText(/关键节点一起确认/)).toBeTruthy()
     expect(screen.queryByText(/React|Vue|数据库|技术栈|API/)).toBeNull()
   })
 
@@ -132,9 +136,16 @@ describe('Sprint 1 project mode and workspace acceptance', () => {
     expect(screen.queryByText(/升级为长期维护/)).toBeNull()
   })
 
-  it('[S1-UI-012] 快速尝鲜卡显示「新手推荐」角标（QW#4，ux-r2 I3 默认推荐）', () => {
-    render(<Provider><ModeSelectionPage onModeSelected={vi.fn()} /></Provider>)
-    expect(screen.getByText('新手推荐')).toBeTruthy()
+  it('[S1-UI-012] 默认推荐快速型，选择长期型不会提前创建项目', () => {
+    const create = vi.fn()
+    const onModeSelected = vi.fn()
+    window.electronAPI = { project: { create } } as unknown as ElectronAPI
+    render(<Provider><ModeSelectionPage onModeSelected={onModeSelected} /></Provider>)
+    expect(screen.getByRole('button', { name: '快速型' }).getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(screen.getByRole('button', { name: '长期型' }))
+    expect(screen.getByRole('button', { name: '长期型' }).getAttribute('aria-pressed')).toBe('true')
+    expect(create).not.toHaveBeenCalled()
+    expect(onModeSelected).not.toHaveBeenCalled()
   })
 
   it('[S1-UI-009] 零渠道时头部徽标显示「未配置 AI」而非「已连接」（QW#1，ux-r2 I1）', () => {
@@ -247,6 +258,7 @@ describe('Sprint 1 project mode and workspace acceptance', () => {
 
     render(<Provider><ModeSelectionPage onModeSelected={onModeSelected} /></Provider>)
     fireEvent.click(screen.getByTestId('mode-card-quick'))
+    fireEvent.click(document.querySelector('[data-ai-id="create-project-button"]')!)
 
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toBe('本地保存失败，请检查磁盘空间后再试。')
@@ -377,6 +389,7 @@ describe('消息排队提示（message-queue S4-QUEUE-009）', () => {
 
     render(<Provider store={store}><App /></Provider>)
     fireEvent.click(screen.getByTestId('mode-card-quick'))
+    fireEvent.click(document.querySelector('[data-ai-id="create-project-button"]')!)
     await waitFor(() => expect(screen.getByRole('textbox', { name: '消息输入' })).toBeTruthy())
 
     const input = screen.getByRole('textbox', { name: '消息输入' })
@@ -405,7 +418,7 @@ describe('零渠道欢迎引导（QW#2 ux-r2 I2）', () => {
     resetChannelsFetchFlagForTests()
   })
 
-  it('[S1-UI-020] 进入工作区且零渠道 → 自动追加「还没连接 AI 模型」引导提示', async () => {
+  it('[S1-UI-020] 零渠道时输入提示和连接状态可见，设置入口直达渠道页', async () => {
     const store = createStore()
     window.__jotai_store__ = store
     window.electronAPI = {
@@ -420,24 +433,23 @@ describe('零渠道欢迎引导（QW#2 ux-r2 I2）', () => {
 
     render(<Provider store={store}><App /></Provider>)
     fireEvent.click(screen.getByTestId('mode-card-quick'))
+    fireEvent.click(document.querySelector('[data-ai-id="create-project-button"]')!)
 
     await waitFor(() => {
-      expect(screen.getByText(/还没连接 AI 模型/)).toBeTruthy()
+      expect(screen.getByPlaceholderText(/还没有连接 AI 模型/)).toBeTruthy()
     })
-    // QW#2 二期 P1-②（2026-08-28）：引导卡片内嵌「去连接」直达按钮（宁可给按钮不给说明书）
-    const goBtn = screen.getByRole('button', { name: /去连接 AI 模型/ })
-    // P1-③：文案去黑话——API Key 解释为「门禁卡」+ 首次约 10 分钟（不再承诺 2 分钟）
-    expect(screen.getByText(/门禁卡/)).toBeTruthy()
-    expect(screen.getByText(/首次约 10 分钟/)).toBeTruthy()
+    // Current studio uses the input hint and persistent status instead of replaying internal welcome records.
+    const goBtn = screen.getByRole('button', { name: '设置（模型渠道）' })
+    expect(screen.getByText('未配置 AI')).toBeTruthy()
     expect(screen.queryByText(/2 分钟搞定/)).toBeNull()
     // 点击直达按钮 → 切到设置页（模型渠道 Tab）
     fireEvent.click(goBtn)
     await waitFor(() => {
-      expect(screen.getByText('模型渠道')).toBeTruthy()
+      expect(screen.getByRole('tab', { name: '模型渠道' })).toBeTruthy()
     })
   })
 
-  it('[S1-UI-022] 零渠道引导显示后连接成功 → 追加「✅ 连接成功」正反馈（QW#2 二期 P2-④）', async () => {
+  it('[S1-UI-022] 配置渠道后状态变为 AI 就绪，撤下未连接输入提示', async () => {
     const store = createStore()
     window.__jotai_store__ = store
     window.electronAPI = {
@@ -452,8 +464,9 @@ describe('零渠道欢迎引导（QW#2 ux-r2 I2）', () => {
 
     render(<Provider store={store}><App /></Provider>)
     fireEvent.click(screen.getByTestId('mode-card-quick'))
+    fireEvent.click(document.querySelector('[data-ai-id="create-project-button"]')!)
     await waitFor(() => {
-      expect(screen.getByText(/还没连接 AI 模型/)).toBeTruthy()
+      expect(screen.getByPlaceholderText(/还没有连接 AI 模型/)).toBeTruthy()
     })
     // 用户在设置页连好渠道 → 渠道列表原子更新（false → true 转换）
     act(() => {
@@ -462,11 +475,9 @@ describe('零渠道欢迎引导（QW#2 ux-r2 I2）', () => {
       ])
     })
     await waitFor(() => {
-      expect(screen.getByText(/连接成功/)).toBeTruthy()
+      expect(screen.getByText('AI 就绪')).toBeTruthy()
     })
-    // 成功卡不带直达按钮（反馈语义，不再指路）；引导卡按钮仍在属正常（两条消息并存）
-    const successCard = screen.getByText(/连接成功/).closest('div')
-    expect(successCard?.querySelector('button')).toBeNull()
+    expect(screen.queryByPlaceholderText(/还没有连接 AI 模型/)).toBeNull()
   })
 
   it('[S1-UI-021] 有可用渠道时进入工作区不显示零渠道引导', async () => {
@@ -488,6 +499,7 @@ describe('零渠道欢迎引导（QW#2 ux-r2 I2）', () => {
 
     render(<Provider store={store}><App /></Provider>)
     fireEvent.click(screen.getByTestId('mode-card-quick'))
+    fireEvent.click(document.querySelector('[data-ai-id="create-project-button"]')!)
 
     await waitFor(() => expect(screen.getByRole('textbox', { name: '消息输入' })).toBeTruthy())
     expect(screen.queryByText(/还没连接 AI 模型/)).toBeNull()
@@ -508,6 +520,7 @@ describe('零渠道欢迎引导（QW#2 ux-r2 I2）', () => {
 
     render(<Provider store={store}><App /></Provider>)
     fireEvent.click(screen.getByTestId('mode-card-quick'))
+    fireEvent.click(document.querySelector('[data-ai-id="create-project-button"]')!)
 
     // 零渠道已决后：placeholder 从「描述你的想法…」切换为连接引导语
     await waitFor(() => {
@@ -533,6 +546,7 @@ describe('零渠道欢迎引导（QW#2 ux-r2 I2）', () => {
 
     render(<Provider store={store}><App /></Provider>)
     fireEvent.click(screen.getByTestId('mode-card-quick'))
+    fireEvent.click(document.querySelector('[data-ai-id="create-project-button"]')!)
 
     const input = await waitFor(() => screen.getByPlaceholderText(/还没有连接 AI 模型/))
     fireEvent.change(input, { target: { value: '帮我做一个待办应用' } })
@@ -567,6 +581,7 @@ describe('零渠道欢迎引导（QW#2 ux-r2 I2）', () => {
 
     render(<Provider store={store}><App /></Provider>)
     fireEvent.click(screen.getByTestId('mode-card-quick'))
+    fireEvent.click(document.querySelector('[data-ai-id="create-project-button"]')!)
 
     // 第一个项目里写下草稿（未发送）
     const input = await waitFor(() => screen.getByPlaceholderText(/还没有连接 AI 模型/)) as HTMLTextAreaElement
@@ -577,6 +592,7 @@ describe('零渠道欢迎引导（QW#2 ux-r2 I2）', () => {
     await waitFor(() => expect(screen.getByTestId('new-project-button')).toBeTruthy())
     fireEvent.click(screen.getByTestId('new-project-button'))
     fireEvent.click(await waitFor(() => screen.getByTestId('mode-card-quick')))
+    fireEvent.click(document.querySelector('[data-ai-id="create-project-button"]')!)
 
     // 新项目 workspace：草稿应为空（上一项目未发送草稿不串台）
     const fresh = await waitFor(() => screen.getByPlaceholderText(/还没有连接 AI 模型/)) as HTMLTextAreaElement
@@ -599,11 +615,11 @@ describe('模式卡 a11y（mode-card-a11y，r63 方向 B）', () => {
     const start = screen.getByRole('button', { name: '开始：快速做一个试试' })
     expect(start).toBeTruthy()
     // h2 不再嵌 button（A 档已知边界，B 根治）
-    const heading = quick.querySelector('h2')
-    expect(heading?.querySelector('button')).toBeNull()
+    expect(quick.querySelector('button')?.tagName).toBe('BUTTON')
+    expect(quick.contains(start)).toBe(false)
   })
 
-  it('[S1-UI-025] 点「开始」→ onSelect 恰 1 次（容器不冒泡双触发）；点卡空白区 → 容器仍触发', async () => {
+  it('[S1-UI-025] 只有明确点开始才创建；选择模式不提前创建', async () => {
     const onSelect = vi.fn()
     window.electronAPI = {
       project: { create: vi.fn().mockResolvedValue({ ok: true, request_id: 't', data: { project_id: 'p-b' } }) },
@@ -614,7 +630,9 @@ describe('模式卡 a11y（mode-card-a11y，r63 方向 B）', () => {
     fireEvent.click(start)
     await waitFor(() => expect(onSelect).toHaveBeenCalledTimes(1))
 
-    fireEvent.click(screen.getByText(/一次性小工具/))
+    fireEvent.click(screen.getByRole('button', { name: '长期型' }))
+    expect(onSelect).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: '开始：认真打磨一个产品' }))
     await waitFor(() => expect(onSelect).toHaveBeenCalledTimes(2))
   })
 
@@ -682,6 +700,7 @@ describe('模式选择页异常路径（吸收 ux-r105 M4-M6，2026-10-03 删留
     const onModeSelected = vi.fn()
     mount(onModeSelected)
     fireEvent.click(cardButton('mode-card-quick'))
+    fireEvent.click(document.querySelector('[data-ai-id="create-project-button"]')!)
     await waitFor(() => expect(screen.getByText(/当前环境无法创建项目/)).toBeTruthy())
     expect(onModeSelected).not.toHaveBeenCalled()
   })
@@ -692,6 +711,7 @@ describe('模式选择页异常路径（吸收 ux-r105 M4-M6，2026-10-03 删留
     setElectron(vi.fn().mockImplementation(() => new Promise((r) => { resolveCreate = r })))
     mount(onModeSelected)
     fireEvent.click(cardButton('mode-card-quick'))
+    fireEvent.click(document.querySelector('[data-ai-id="create-project-button"]')!)
     await waitFor(() => {
       expect((cardButton('mode-card-quick') as HTMLButtonElement).disabled).toBe(true)
       expect((cardButton('mode-card-longterm') as HTMLButtonElement).disabled).toBe(true)
@@ -705,6 +725,7 @@ describe('模式选择页异常路径（吸收 ux-r105 M4-M6，2026-10-03 删留
     setElectron(vi.fn().mockRejectedValue(new Error('IPC boom')))
     mount(onModeSelected)
     fireEvent.click(cardButton('mode-card-quick'))
+    fireEvent.click(document.querySelector('[data-ai-id="create-project-button"]')!)
     await waitFor(() => expect(screen.getByText(/项目创建失败，请重试/)).toBeTruthy())
     expect((cardButton('mode-card-quick') as HTMLButtonElement).disabled).toBe(false)
   })
