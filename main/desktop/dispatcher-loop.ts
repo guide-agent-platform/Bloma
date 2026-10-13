@@ -58,6 +58,8 @@ import { runVerifyFinalize, finalizeDesktopDispatch } from './dispatcher-finaliz
 import { buildResourceDiscoveryTool } from './resource-discovery'
 import { readExperiment, recordExperiment } from './dispatch-experiment'
 import { experimentChildCreated, experimentPhase, experimentTasksFinished, wrapExperimentDispatcherTools, wrapExperimentWorkerTools } from './dispatch-experiment-policy'
+import { bindExperimentInput, experimentInputsIntact, standaloneHistory, standaloneSystem, standaloneTools } from './dispatch-experiment-runtime'
+import { experimentLimits } from './dispatch-experiment'
 
 // 拆分 re-export（批10 旧账③ R7，2026-10-07）：收口判定族迁至 dispatcher-finalize.ts，
 // 旧路径消费者与测试零断链（hub 化惯例；与 dispatcher-telemetry 拆分同款）。
@@ -83,6 +85,7 @@ export interface DesktopDispatchRunInput {
   env: Record<string, string>
   maxTokens: number
   maxTurns?: number
+  providerType?: string
   verificationPolicy?: 'standard' | 'strict'
   signal: AbortSignal
   /** 事件流发布（接线层转发给渲染端/事件总线） */
@@ -280,12 +283,18 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
   if (!node || !node.dispatcherManaged) {
     return { status: 'not-managed' }
   }
-  const experiment = node.id === 'desktop-implement' ? readExperiment(input.projectId) : undefined
+  const configuration = readExperiment(input.projectId)
+  const experiment = node.id === 'desktop-implement' ? configuration : undefined
   if (experiment && (experiment.state !== 'running' || experiment.mode !== (input.quickMode ? 'quick' : 'longterm')
     || experiment.parent_session_id !== input.sessionId)) {
     return { status: 'error', error_message: 'EXPERIMENT_NOT_READY_FOR_IMPLEMENT', phase: node }
   }
   const promptNode = experiment ? experimentPhase(node, experiment) : node
+  if (configuration?.state === 'running' && configuration.models && ['desktop-implement', 'desktop-verify'].includes(node.id)) {
+    try { input = bindExperimentInput(input, configuration, node.id === 'desktop-verify' ? 'verify' : 'implement') }
+    catch (error) { return { status: 'error', phase: node, error_message: error instanceof Error ? error.message : String(error) } }
+  }
+  const standalone = experiment?.policy === 'standalone'
 
   // 骨架 v2 物化（批8 下半）：scaffold/implement 阶段入口把平台骨架复制进项目根
   // （幂等 skip-existing，不覆盖子会话成果）——任务书引用 ui/PATTERNS.md 的前提。
@@ -317,9 +326,10 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     [...buildDispatcherTools(input.projectId).filter((tool) => checkDispatcherToolGate(node, tool.name) === null), ...(input.toolsOverride ?? [])],
     node,
   )
-  const tools = experiment ? wrapExperimentDispatcherTools(gatedTools, experiment) : gatedTools
+  const tools = standalone ? standaloneTools([...buildDesktopChildTools(input.projectId, 'implement', 'diff'), buildDesktopEnvProbeTool()])
+    : experiment ? wrapExperimentDispatcherTools(gatedTools, experiment) : gatedTools
 
-  const system = buildDispatcherSystemPrompt(promptNode, {
+  const system = standalone ? standaloneSystem(promptNode, input) : buildDispatcherSystemPrompt(promptNode, {
     projectName: input.projectName,
     completedPhases: [],
     workspaceHint: '产物按相对路径写入（项目目录即工作根；如 00_ARCH/、00_SCAFFOLD/、00_VERIFY/）。',
@@ -342,7 +352,7 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     maxTokens: input.maxTokens,
     maxTurns: input.maxTurns ?? 40,
     delegationMaxTurns: DESKTOP_DELEGATION_MAX_TURNS,
-    delegationTurnLimits: { implement: 32, custom: 32, research: node.id === 'desktop-verify' ? 24 : 12 },
+    delegationTurnLimits: { implement: experiment?.models ? experimentLimits(experiment).executor_turns : 32, custom: 32, research: node.id === 'desktop-verify' ? 24 : 12 },
     permissionMode: 'allow-all',
     temperature: categoryTemperature('mvp'),
     system: buildDesktopChildBaseSystem(promptNode, {
@@ -361,15 +371,16 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     // 工具面随父上下文隔离（P1-12，2026-10-02）：桌面子会话写面（realFullstackVariant）
     // 不再依赖全局单例——与 review 线并发时后注册者的全局覆盖不再串面。全局注册保留
     // 作缺省（单线场景/旧测试兼容）。
-    childToolsBuilder: experiment
+    childToolsBuilder: experiment && !standalone
       ? (projectId, role, format) => wrapExperimentWorkerTools(buildDesktopChildTools(projectId, role, format), experiment, input.sandboxRoot ?? findProject(projectId).root_path)
       : buildDesktopChildTools,
-    ...(experiment ? { onChildCreated: (child: { delegationId: string; childSessionId: string }) => experimentChildCreated(experiment, child) } : {}),
+    ...(experiment && !standalone ? { onChildCreated: (child: { delegationId: string; childSessionId: string }) => experimentChildCreated(experiment, child) } : {}),
+    providerType: input.providerType,
   })
   setChildToolsBuilder(buildDesktopChildTools)
   if (experiment) {
     try {
-      for (const worker of Object.values(experiment.workers)) restoreCompletedDelegation({ projectId: input.projectId, sessionId: input.sessionId }, worker.delegation_id)
+      if (!standalone) for (const worker of Object.values(experiment.workers)) restoreCompletedDelegation({ projectId: input.projectId, sessionId: input.sessionId }, worker.delegation_id)
     } catch (error) {
       disposeParentDelegationState(input.sessionId)
       return { status: 'error', phase: node, error_message: error instanceof Error ? error.message : String(error) }
@@ -383,6 +394,7 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
   )
   if (experiment) recordExperiment(experiment, 'implement_loop_finished', { request_id: input.requestId,
     status: 'safeError' in loopResult ? 'error' : loopResult.status, workers: Object.values(experiment.workers) })
+  if (experiment && !experimentInputsIntact(experiment)) return { status: 'error', phase: node, error_message: 'EXPERIMENT_FROZEN_INPUT_CHANGED' }
   if (experiment && !('safeError' in loopResult) && loopResult.status === 'completed' && !experimentTasksFinished(experiment)) {
     return { status: 'error', phase: node, loopResult, error_message: 'EXPERIMENT_TASKS_NOT_COMPLETED' }
   }
@@ -456,6 +468,7 @@ async function runAgentLoopSafe(
   collector: AssistantTurnCollector,
 ): Promise<AgentLoopResult | { safeError: true; message: string }> {
   try {
+    const standalone = node.id === 'desktop-implement' && readExperiment(input.projectId)?.policy === 'standalone'
     return await runAgentLoop({
       system,
       task: input.task,
@@ -465,6 +478,9 @@ async function runAgentLoopSafe(
       tools,
       query: input.query,
       env: input.env,
+      providerType: input.providerType,
+      ...(standalone
+        ? { accountingRole: 'implement_standalone', historyTurns: standaloneHistory(readExperiment(input.projectId)!) } : {}),
       sessionId: input.sessionId,
       projectId: input.projectId,
       requestId: input.requestId,
@@ -473,7 +489,7 @@ async function runAgentLoopSafe(
       maxTurns: input.maxTurns ?? 40,
       permissionMode: 'allow-all',
       // 首跑深修：调度员不写文件/不带自测工具——web 线进度对账三守卫不适用（首跑被反复误注入）
-      disableProgressNudge: true,
+      disableProgressNudge: !standalone,
       signal: input.signal,
       publish,
       onTurn: () => collector.onTurnBoundary(),

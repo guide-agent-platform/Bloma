@@ -2,6 +2,8 @@
 
 本批将原生 Implement 前暂停、冻结、隔离恢复和单／双实现者约束接入 Bloma。普通项目不加载实验配置；内部通路要求显式开关与独立实验 home。尚未执行真实模型 A/B，也未证明并行收益。
 
+后续扩展见 [不同模型与自主调度实验](dispatch-experiment-models-20261013.md)：新增自主规划、独立实现、D/E/V 模型绑定及六组矩阵。本文的固定任务图继续作为辅助对照；CLI prepare 现在默认自主规划，使用本文旧流程时须显式设置 `--planning fixed`。
+
 ## 接线与模式
 
 `BLOMA_DESKTOP_DISPATCH=1` 开启桌面线，另设 `BLOMA_DISPATCH_EXPERIMENT=1` 才加载 `PROMA_HOME/dispatch-experiments/<project_id>.json`。实验配置位于产物根之外，必须有隔离 home 标记；默认真实 `~/.proma` 拒绝参与。
@@ -31,7 +33,7 @@ longterm 冻结必须显式选择属于同一项目、同一父会话、已 comp
 先在独立 home 启动 Bloma、创建一个项目，在提交初始需求之前登记 prepare 配置。`<...>` 为实际参数，不要原样执行：
 
 ```powershell
-node scripts/dispatch-experiment.mjs prepare --home <准备home> --project <项目ID> --experiment pilot
+node scripts/dispatch-experiment.mjs prepare --home <准备home> --project <项目ID> --experiment pilot --planning fixed
 ```
 
 沿原生确认流程推进，界面出现“已停在 Implement 前”后，创建两个固定任务的 JSON。文件分工必须覆盖原生交付所需的集成、LAUNCH 和 DELIVERY；两组共用。示例 `tests/fixtures/dispatch-experiment/tasks.example.json` 需要根据真实冻结 PRD 调整，不自动替代用户需求。

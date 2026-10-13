@@ -2,7 +2,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
-import { assertExperimentHome, assertExperimentId, experimentPath, recordExperiment, validateExperiment, writeExperiment, type DispatchExperiment, type ExperimentTask } from './dispatch-experiment'
+import { assertExperimentHome, assertExperimentId, experimentConditionHash, EXPERIMENT_POLICIES, experimentPath, recordExperiment, validateExperiment, writeExperiment, type DispatchExperiment, type ExperimentLimits, type ExperimentModels, type ExperimentPolicy, type ExperimentSettings, type ExperimentTask } from './dispatch-experiment'
 
 interface FrozenManifest { version: 1; snapshot_id: string; source_home: string; project_id: string; parent_session_id: string;
   mode: 'quick' | 'longterm'; input_hash: string; files: Record<string, string>; skipped: string[]; config: DispatchExperiment }
@@ -54,7 +54,7 @@ export function freezeExperiment(home: string, projectId: string, destination: s
     config.workers.seed = { delegation_id: seedDelegationId, child_session_id: seed.session_id, task_ids: [] }
   }
   validateExperiment(config)
-  if (tasks.length !== 2) throw new Error('EXPERIMENT_REQUIRES_TWO_TASKS')
+  if (config.planning === 'autonomous' ? tasks.length !== 0 : tasks.length !== 2) throw new Error('EXPERIMENT_FROZEN_PLANNING_MISMATCH')
   const workspace = join('agent-workspaces', String(project.workspace_slug))
   const roots = [join(workspace, 'generated-projects', projectId), join(workspace, 'documents', projectId), 'agent-sessions', 'prompts', 'templates', 'bloma-composer', 'pasted-images']
   const files: Record<string, string> = {}, skipped: string[] = []
@@ -70,14 +70,32 @@ export function freezeExperiment(home: string, projectId: string, destination: s
   recordExperiment(config, 'frozen', { snapshot_id: snapshotId, input_hash: manifest.input_hash, skipped }, home)
   return manifest
 }
-export function restoreExperiment(snapshot: string, home: string, policy: 'single_worker' | 'parallel_workers', runId: string): DispatchExperiment {
+export function restoreExperiment(snapshot: string, home: string, policy: ExperimentPolicy, runId: string,
+  options: { models?: ExperimentModels; limits?: ExperimentLimits; settings?: ExperimentSettings } = {}): DispatchExperiment {
   assertExperimentId(runId)
-  if (!['single_worker', 'parallel_workers'].includes(policy) || existsSync(home) || inside(snapshot, home) || inside(home, snapshot)) throw new Error('EXPERIMENT_RESTORE_TARGET_NOT_FRESH')
+  if (!(EXPERIMENT_POLICIES as readonly string[]).includes(policy) || existsSync(home) || inside(snapshot, home) || inside(home, snapshot)) throw new Error('EXPERIMENT_RESTORE_TARGET_NOT_FRESH')
   const manifest = JSON.parse(readFileSync(join(snapshot, 'manifest.json'), 'utf8')) as FrozenManifest
   if (manifest.version !== 1 || manifest.input_hash !== manifestHash(manifest)) throw new Error('EXPERIMENT_SNAPSHOT_CHANGED')
   validateExperiment(manifest.config)
   assertExperimentId(manifest.snapshot_id)
   if (manifest.project_id !== manifest.config.project_id || manifest.parent_session_id !== manifest.config.parent_session_id || manifest.mode !== manifest.config.mode) throw new Error('EXPERIMENT_MANIFEST_MISMATCH')
+  const modern = policy === 'autonomous' || policy === 'standalone'
+  if (modern !== (manifest.config.planning === 'autonomous')) throw new Error('EXPERIMENT_RESTORE_PLANNING_MISMATCH')
+  const workers = structuredClone(manifest.config.workers)
+  if (workers.seed && policy !== 'standalone') {
+    const seed = workers.seed; delete workers.seed
+    seed.task_ids = policy === 'autonomous' ? [] : policy === 'single_worker' ? manifest.config.tasks.map(task => task.id) : [manifest.config.tasks[0].id]
+    workers[policy === 'autonomous' ? 'worker-1' : policy === 'single_worker' ? 'all' : manifest.config.tasks[0].id] = seed
+  }
+  const config: DispatchExperiment = { ...manifest.config, workers, state: 'running', policy, run_id: runId,
+    snapshot_id: manifest.snapshot_id, input_hash: manifest.input_hash, ...structuredClone(options) }
+  config.protected_inputs = Object.fromEntries(Object.entries(manifest.files).filter(([path]) =>
+    path.endsWith(`/documents/${manifest.project_id}/prd.json`) || path.endsWith(`/documents/${manifest.project_id}/prd.md`)
+    || path.includes(`/documents/${manifest.project_id}/features/`) || /\/00_UX\/confirmed\.(html|json)$/.test(path)
+    || /\/00_ARCH\/architecture\.(md|json)$/.test(path) || path.endsWith('/00_SCAFFOLD/contract.json') || path.startsWith('prompts/')))
+  delete config.started_at; delete config.request_count; delete config.observed_models; delete config.plan_locked
+  config.condition_hash = experimentConditionHash(config)
+  validateExperiment(config)
   for (const [path, hash] of Object.entries(manifest.files)) {
     const parts = path.split(/[\\/]/)
     if (parts.some(part => !part || part === '.' || part === '..') || !inside(join(snapshot, 'home'), join(snapshot, 'home', path))
@@ -100,14 +118,6 @@ export function restoreExperiment(snapshot: string, home: string, policy: 'singl
   const sessions = JSON.parse(readFileSync(join(home, 'bloma-agent-sessions.json'), 'utf8'))
   for (const session of sessions.sessions) session.jsonl_path = join(resolve(home), 'agent-sessions', `${session.session_id}.jsonl`)
   writeFileSync(join(home, 'bloma-agent-sessions.json'), JSON.stringify(sessions, null, 2))
-  const workers = { ...manifest.config.workers }
-  if (workers.seed) {
-    const seed = workers.seed; delete workers.seed
-    seed.task_ids = policy === 'single_worker' ? manifest.config.tasks.map(task => task.id) : [manifest.config.tasks[0].id]
-    workers[policy === 'single_worker' ? 'all' : manifest.config.tasks[0].id] = seed
-  }
-  const config: DispatchExperiment = { ...manifest.config, workers, state: 'running', policy, run_id: runId,
-    snapshot_id: manifest.snapshot_id, input_hash: manifest.input_hash }
   writeExperiment(config, home)
   recordExperiment(config, 'restored', { input_hash: config.input_hash, parent_session_id: config.parent_session_id, environment_rebuild_required: true }, home)
   return config

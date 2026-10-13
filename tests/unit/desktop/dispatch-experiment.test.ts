@@ -78,7 +78,7 @@ describe('frozen source and two independent homes', () => {
   it('runs prepare, freeze and restore through the actual Node CLI', () => {
     rmSync(experimentPath('p'))
     const run = (args: string[]) => spawnSync(process.execPath, ['scripts/dispatch-experiment.mjs', ...args], { encoding: 'utf8', windowsHide: true })
-    expect(run(['prepare', '--home', home, '--project', 'p', '--experiment', 'cli']).status).toBe(0)
+    expect(run(['prepare', '--home', home, '--project', 'p', '--experiment', 'cli', '--planning', 'fixed']).status).toBe(0)
     holdExperimentBeforeImplement({ project_id: 'p', mode: 'quick' }, 'parent', { requirements_digest: 'frozen' })
     const taskFile = join(temp, 'tasks.json'); save(taskFile, JSON.stringify(tasks))
     const snapshot = join(temp, 'cli-snapshot')

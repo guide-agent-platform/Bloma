@@ -1,0 +1,5 @@
+{
+  "m1": { "channel_id": "模型通道一", "model_id": "替换为实际模型一的ID或完整版本名" },
+  "m2": { "channel_id": "模型通道二", "model_id": "替换为实际模型二的ID或完整版本名" },
+  "verifier": { "channel_id": "固定验证通道", "model_id": "替换为固定验证模型的ID或完整版本名" }
+}

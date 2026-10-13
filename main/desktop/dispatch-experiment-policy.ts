@@ -1,20 +1,35 @@
 import { relative, resolve } from 'node:path'
 import type { AgentLoopTool, ToolContext, ToolOutcome } from '../agent/loop/agent-loop'
-import { findDelegation, restoreCompletedDelegation, stopDelegation } from '../agent/delegation/agent-collaboration'
+import { findDelegation, stopDelegation } from '../agent/delegation/agent-collaboration'
 import { recordExperiment, writeExperiment, type DispatchExperiment, type ExperimentTask } from './dispatch-experiment'
 import type { PhaseNode } from './dispatcher-phases'
+import { autonomousTaskBook, wrapAutonomousDispatcherTools } from './dispatch-experiment-autonomous'
+import { bindExperimentWorkers, lockExperimentModel } from './dispatch-experiment-models'
 
-const pendingSlots = new WeakMap<DispatchExperiment, string>()
+const pendingSlots = new WeakMap<DispatchExperiment, { slot: string; task_ids: string[] }>()
+export async function withExperimentSlot(config: DispatchExperiment, slot: string, ids: string[], action: () => Promise<ToolOutcome>): Promise<ToolOutcome> {
+  pendingSlots.set(config, { slot, task_ids: ids })
+  try { return await action() } finally { pendingSlots.delete(config) }
+}
 export function experimentChildCreated(config: DispatchExperiment, child: { delegationId: string; childSessionId: string }): void {
-  const slot = pendingSlots.get(config)
-  if (!slot || config.workers[slot]) throw new Error('EXPERIMENT_WORKER_REGISTRATION_MISSING')
-  config.workers[slot] = { delegation_id: child.delegationId, child_session_id: child.childSessionId,
-    task_ids: slot === 'all' ? config.tasks.map(task => task.id) : [slot], has_executed: true }
-  try { writeExperiment(config) } catch (error) { delete config.workers[slot]; throw error }
+  const pending = pendingSlots.get(config)
+  if (!pending || config.workers[pending.slot]) throw new Error('EXPERIMENT_WORKER_REGISTRATION_MISSING')
+  config.workers[pending.slot] = { delegation_id: child.delegationId, child_session_id: child.childSessionId,
+    task_ids: pending.task_ids, has_executed: true }
+  try {
+    if (config.models) {
+      const record = findDelegation(config.parent_session_id!, child.delegationId)
+      if (!record) throw new Error('EXPERIMENT_WORKER_REGISTRATION_MISSING')
+      record.channelOverride = lockExperimentModel(config, 'executor')
+    }
+    writeExperiment(config)
+  } catch (error) { delete config.workers[pending.slot]; throw error }
 }
 export function experimentPhase(node: PhaseNode, config: DispatchExperiment): PhaseNode {
-  const adapt = (text: string) => text.replaceAll('一次性委派 implement 子会话完成实现', '按冻结实验任务图委派实现子会话完成实现')
-    .replace(/同一委派线(?:续接)?/g, '按实验快照恢复的委派线')
+  const modern = config.policy === 'autonomous' || config.policy === 'standalone'
+  const instruction = config.policy === 'standalone' ? '直接完成实现' : modern ? '按你自行产生的任务分解组织实现' : '按冻结实验任务图委派实现子会话完成实现'
+  const adapt = (text: string) => text.replaceAll('一次性委派 implement 子会话完成实现', instruction)
+    .replace(/同一委派线(?:续接)?/g, '沿实验快照保留的骨架交接继续工作')
   return { ...node, taskTemplate: adapt(node.taskTemplate) + '\n' + experimentTaskBook(config),
     quickTaskTemplate: node.quickTaskTemplate ? adapt(node.quickTaskTemplate) + '\n' + experimentTaskBook(config) : undefined,
     constraints: node.constraints.map(adapt), quickConstraints: node.quickConstraints?.map(adapt) }
@@ -22,18 +37,26 @@ export function experimentPhase(node: PhaseNode, config: DispatchExperiment): Ph
 
 const matches = (path: string, scope: string) => path === scope || (scope.endsWith('/') && path.startsWith(scope))
 function scopesOverlap(a: string[], b: string[]): boolean {
-  return a.some(left => b.some(right => matches(left, right) || matches(right, left)))
+  return a.some(left => b.some(right => matches(left.toLowerCase(), right.toLowerCase()) || matches(right.toLowerCase(), left.toLowerCase())))
 }
 export function experimentTaskBook(config: DispatchExperiment): string {
+  if (config.policy === 'autonomous') return autonomousTaskBook(config)
+  if (config.policy === 'standalone') return '【独立实现实验】你直接完成已确认需求，不创建子 Agent。任务分解由你自己完成。保持原生业务、界面及验收要求，使用实际工具核对证据。'
   return '【内部冻结调度实验】\n' +
     `run_id=${config.run_id}；策略=${config.policy}。业务要求与原生验证保持不变。\n` +
     (config.policy === 'single_worker'
       ? '只使用一名实现者；delegate_agent 的 task_id=all，一次交给它全部冻结任务，按依赖顺序实现。修复续接它。\n'
       : '最多两名实现者；delegate_agent 的 task_id 使用下列任务编号，每名固定负责一个任务。依赖未结束或写入范围重叠时不得同时启动。修复续接对应实现者。\n') +
-    '角色固定 implement，模型继承父上下文，不改渠道。历史证据属于冻结来源，不能当作当前版本已通过；历史绝对路径不能继续使用，当前产物均按相对项目根操作。\n' +
+    `角色固定 implement，${config.models ? '实现模型由宿主独立绑定' : '模型继承父上下文'}，不自行改渠道。历史证据属于冻结来源，不能当作当前版本已通过；历史绝对路径不能继续使用，当前产物均按相对项目根操作。\n` +
     JSON.stringify(config.tasks, null, 2)
 }
 export function wrapExperimentDispatcherTools(tools: AgentLoopTool[], config: DispatchExperiment): AgentLoopTool[] {
+  const modelArgs = () => {
+    const model = config.models && lockExperimentModel(config, 'executor')
+    return model ? { channelId: model.channelId, modelId: config.models!.executor.model_id } : { channelId: undefined, modelId: undefined }
+  }
+  if (config.policy === 'autonomous') return wrapAutonomousDispatcherTools(tools, config,
+    (slot, ids, action) => withExperimentSlot(config, slot, ids, action), modelArgs, () => bindExperimentWorkers(config))
   const cache = new Map<string, ToolOutcome>()
   const taskFor = (id: string): ExperimentTask[] => {
     if (config.policy === 'single_worker' && id === 'all') return config.tasks
@@ -85,7 +108,7 @@ export function wrapExperimentDispatcherTools(tools: AgentLoopTool[], config: Di
             + (existing && typeof input.task === 'string' ? `\n本轮调度补充（不得改变冻结范围）：${input.task}` : '')
           let result: ToolOutcome
           if (existing) {
-            if (!findDelegation(ctx.sessionId, existing.delegation_id)) restoreCompletedDelegation(ctx, existing.delegation_id)
+            bindExperimentWorkers(config)
             if (findDelegation(ctx.sessionId, existing.delegation_id)?.status === 'cancelled') throw new Error('EXPERIMENT_CANCELLED_WORKER_REQUIRES_NEW_RUN')
             const follow = tools.find(item => item.name === 'continue_delegation')!
             const previous = existing.has_executed
@@ -96,9 +119,7 @@ export function wrapExperimentDispatcherTools(tools: AgentLoopTool[], config: Di
             if (tool.name !== 'delegate_agent') throw new Error('EXPERIMENT_WORKER_MISSING')
             const maximum = config.policy === 'single_worker' ? 1 : 2
             if (Object.keys(config.workers).length >= maximum) throw new Error('EXPERIMENT_TOTAL_WORKER_LIMIT')
-            pendingSlots.set(config, slot)
-            try { result = await tool.execute({ ...input, task, role: 'implement', channelId: undefined, modelId: undefined }, ctx) }
-            finally { pendingSlots.delete(config) }
+            result = await withExperimentSlot(config, slot, tasks.map(item => item.id), () => tool.execute({ ...input, task, role: 'implement', ...modelArgs() }, ctx))
             if (!result.isError) {
               const detail = result.detail
               if (typeof detail?.delegation_id !== 'string' || typeof detail.child_session_id !== 'string') throw new Error('EXPERIMENT_DELEGATION_NOT_RECORDED')
@@ -120,6 +141,8 @@ export function wrapExperimentDispatcherTools(tools: AgentLoopTool[], config: Di
   })
 }
 export function experimentTasksFinished(config: DispatchExperiment): boolean {
+  if (config.policy === 'standalone') return true
+  if (!config.tasks.length) return false
   return config.tasks.every(task => Object.values(config.workers).some(worker => {
     const record = findDelegation(config.parent_session_id!, worker.delegation_id)
     return worker.has_executed && worker.task_ids.includes(task.id) && record?.status === 'completed' && record.loopStatus === 'completed'
