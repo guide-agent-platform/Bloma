@@ -279,14 +279,15 @@ async function* anthropicMessagesQueryViaProvidersInner(prompt: string, options:
       })
     }
   } finally {
-    // 零正文可观测性（旧路径口径镜像）：tool-only 轮是正常形态不算零正文
-    if (textDeltaCount === 0 && toolUseCount === 0 && thinkingDeltaCount > 0) {
+    // Only classify a successfully ended response. Pre-HTTP budget refusal, HTTP
+    // errors and consumer cancellation have their own cause; they are not empty streams.
+    if (finished && failure === undefined && textDeltaCount === 0 && toolUseCount === 0 && thinkingDeltaCount > 0) {
       console.error(
         `[providers-query] 零正文输出：model=${model} max_tokens=${String(body.max_tokens)} `
           + `text_delta=${textDeltaCount} thinking_delta=${thinkingDeltaCount}`
           + '——思考型模型疑似把 max_tokens 预算耗在思考上，正文为零',
       )
-    } else if (textDeltaCount === 0 && toolUseCount === 0 && thinkingDeltaCount === 0) {
+    } else if (finished && failure === undefined && textDeltaCount === 0 && toolUseCount === 0 && thinkingDeltaCount === 0) {
       // 纯空流（2026-10-03 e99e6319 事故形态：网关 200 但零内容事件）——旧告警只覆盖
       // 「有 thinking 无正文」，纯空流零日志导致事故归因绕了整晚
       console.error(

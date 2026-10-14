@@ -312,6 +312,22 @@ describe('流式增量即时投递（2026-10-04 假流式修复）', () => {
 })
 
 describe('思考增量透出（2026-10-04）', () => {
+  it('budget or HTTP rejection is not logged as a successful empty model stream', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      h.streamSSE.mockRejectedValue(new Error('MONETARY_BUDGET_EXHAUSTED'))
+      await expect((async () => { for await (const _ of anthropicMessagesQueryViaProviders('问', opts())) void _ })()).rejects.toThrow('MONETARY_BUDGET_EXHAUSTED')
+      expect(log.mock.calls.flat().map(String).join('\n')).not.toContain('空流')
+    } finally { log.mockRestore() }
+  })
+  it('a successfully ended zero-content response still emits the empty-stream diagnostic', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      h.streamSSE.mockResolvedValue({ toolCalls: [], stopReason: 'end_turn' })
+      for await (const _ of anthropicMessagesQueryViaProviders('问', opts())) void _
+      expect(log.mock.calls.flat().map(String).join('\n')).toContain('空流')
+    } finally { log.mockRestore() }
+  })
   it('reasoning 事件 → thinking SDKMessage 逐段产出（入队即 wake）', async () => {
     h.streamSSE.mockImplementation(async (options: { onEvent: (event: unknown) => void }) => {
       options.onEvent({ type: 'reasoning', delta: '先想第一步' })
