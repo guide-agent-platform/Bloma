@@ -7,6 +7,7 @@ import type { SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchest
 import { createToolState, type AgentLoopTool, type ToolContext } from '../../main/agent/loop/agent-loop'
 import { buildAgentTools, setWebResearchTimeoutForTests, WEB_RESEARCH_TIMEOUT_MS } from '../../main/agent/tools/agent-tools'
 import { buildDomainTools } from '../../main/coding/tool-handlers'
+import { buildDelegationTools } from '../../main/agent/delegation/delegation-tools'
 import {
   MAX_RUNNING_DELEGATIONS_PER_PARENT,
   answerDelegationQuestion,
@@ -237,6 +238,18 @@ describe('委派协作 M1', () => {
     findDelegation(parentSessionId,fast.delegation_id)!.abort.abort()
   })
 
+  it('parent abort interrupts a wait without waiting for its timeout or cancelling an unrelated child', async () => {
+    setChildToolsBuilder(() => [{ name: 'hang', description: 'hang', input_schema: { type: 'object', properties: {} }, execute: () => new Promise<never>(() => {}) }])
+    registerParent(toolUseQuery('hang'))
+    const child = startDelegation(parentContext(), { task: '等待中的任务' })
+    const controller = new AbortController()
+    const waiting = waitForDelegations({ ...parentContext(), signal: controller.signal }, { delegationIds: [child.delegation_id], timeout_ms: 1000 })
+    controller.abort(new Error('parent wait cancelled'))
+    await expect(waiting).rejects.toThrow('parent wait cancelled')
+    expect(findDelegation(parentSessionId, child.delegation_id)!.status).toBe('running')
+    stopDelegation(parentSessionId, child.delegation_id)
+  })
+
   it('role 裁剪：explore/research 只读+ask；implement 全量+ask；review 无写工具+ask（m-12：话术「不直接修改」与工具面一致）；parent 含全部委派工具', () => {
     // PR4c/d 口径：生产装配=buildAgentTools（通用件）+buildDomainTools（领域验证面）两拼；
     // W3 后只读五件套含 find；09-16 前旧断言面（无 find、单 builder）已过时。
@@ -456,6 +469,15 @@ describe('M3 提问冒泡 / 续跑（委派协作嫁接方案 §6）', () => {
     })
     expect(waited[0]!.status).toBe('running')
     expect(waited[0]!.pending_question).toBe('是否允许重命名 index.html？')
+
+    // Agent Loop sends output to the model; detail is not the model-visible result.
+    // G22 could not answer because its pending question disappeared at this boundary.
+    const tools = buildDelegationTools('parent')
+    for (const name of ['wait_for_delegations', 'get_delegation_results']) {
+      const visible = await tools.find(tool => tool.name === name)!.execute({ delegation_ids: [created.delegation_id] }, parentContext())
+      expect(visible.output).toContain('是否允许重命名 index.html？')
+      expect(visible.output).toContain('answer_delegation_question')
+    }
 
     // 父代答 → 答案回传子 loop 挂起点，子 agent 继续并完成
     answerDelegationQuestion(parentSessionId, created.delegation_id, '可以，保留旧文件备份')

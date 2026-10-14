@@ -77,7 +77,7 @@ export function buildDelegationTools(role: 'parent' | DelegationRole): AgentLoop
     description:
       '阻塞等待委派子会话收敛（本工具调用会挂起当前轮直到等待完成或超时）。' +
       'strategy=all 等全部完成、any 等任一完成；超时（timeout_ms，缺省 600000ms）返回当前状态不抛错，由父 agent 决定继续等还是停止。' +
-      'delegation_ids 缺省 = 等待当前全部委派。',
+      'delegation_ids 缺省 = 等待当前全部委派。子会话有 pending_question 时立即返回问题，必须先用 answer_delegation_question 回答；重复等待不会推进。',
     input_schema: {
       type: 'object',
       properties: {
@@ -92,9 +92,10 @@ export function buildDelegationTools(role: 'parent' | DelegationRole): AgentLoop
         strategy: toolInput.strategy === 'any' ? 'any' : 'all',
         timeout_ms: optionalNumberOr(toolInput.timeout_ms),
       })
+      const needsAnswer = summaries.some(summary => summary.status === 'running' && summary.pending_question)
       return {
-        output: `委派等待返回（${summaries.length} 个）：\n${formatDelegationSummaries(summaries)}`,
-        detail: { summaries },
+        output: `${needsAnswer ? '等待提前返回：子会话挂起提问，先用 answer_delegation_question 回答；重复等待不会推进。\n' : ''}委派等待返回（${summaries.length} 个）：\n${formatDelegationSummaries(summaries)}`,
+        detail: { summaries, needs_answer: needsAnswer },
       }
     },
   }
@@ -275,7 +276,9 @@ function formatDelegationSummaries(summaries: DelegationSummary[]): string {
       const result =
         summary.status === 'completed' && summary.result_summary ? `｜${clipDelegationSummary(summary.result_summary)}` : ''
       const error = summary.error ? `｜${summary.error}` : ''
-      return `- ${summary.delegation_id} role=${summary.role} lifecycle_status=${summary.status} loop=${summary.loop_status ?? 'unknown'} task=${summary.task_handoff?.completion ?? 'unverified'}${summary.task_handoff ? `\n宿主交接：${JSON.stringify(summary.task_handoff)}` : ''}${result}${error}`
+      const question = summary.status === 'running' && summary.pending_question
+        ? `\npending_question: ${clipDelegationSummary(summary.pending_question)}\n请调用 answer_delegation_question，delegation_id=${summary.delegation_id}；回答必须遵守原任务权限。` : ''
+      return `- ${summary.delegation_id} role=${summary.role} lifecycle_status=${summary.status} loop=${summary.loop_status ?? 'unknown'} task=${summary.task_handoff?.completion ?? 'unverified'}${question}${summary.task_handoff ? `\n宿主交接：${JSON.stringify(summary.task_handoff)}` : ''}${result}${error}`
     })
     .join('\n')
 }

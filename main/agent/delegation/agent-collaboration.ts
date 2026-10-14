@@ -461,6 +461,7 @@ export async function waitForDelegations(
   parent: ToolContext,
   args: WaitForDelegationsArgs,
 ): Promise<DelegationSummary[]> {
+  parent.signal.throwIfAborted()
   const ids = args.delegationIds ?? listDelegations(parent.sessionId).map((record) => record.delegationId)
   const records = ids.map((id) => {
     const record = findDelegation(parent.sessionId, id)
@@ -470,9 +471,15 @@ export async function waitForDelegations(
   if (records.length === 0) return []
 
   const timeoutMs = args.timeout_ms ?? DEFAULT_DELEGATION_WAIT_TIMEOUT_MS
+  let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<'timeout'>((resolve) => {
-    const timer = setTimeout(() => resolve('timeout'), timeoutMs)
+    timer = setTimeout(() => resolve('timeout'), timeoutMs)
     timer.unref?.()
+  })
+  let onAbort!: () => void
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(parent.signal.reason ?? new Error('DELEGATION_WAIT_CANCELLED'))
+    parent.signal.addEventListener('abort', onAbort, { once: true })
   })
 
   // 子 agent 提问信号：仅取**运行中**记录（首跑深修 2026-09-26：已终结/已停止记录的
@@ -483,12 +490,16 @@ export async function waitForDelegations(
     .filter((record) => record.status === 'running')
     .map((record) => record.askSignal.promise)
   const questionRace: Promise<unknown> = questionSignals.length > 0 ? Promise.any(questionSignals) : new Promise(() => {})
-  if (args.strategy === 'any') {
-    await Promise.race([Promise.any(records.map((record) => record.completion)), questionRace, timeout])
-  } else {
-    await Promise.race([Promise.all(records.map((record) => record.completion)), questionRace, timeout])
+  try {
+    const completion = args.strategy === 'any'
+      ? Promise.any(records.map((record) => record.completion))
+      : Promise.all(records.map((record) => record.completion))
+    await Promise.race([completion, questionRace, timeout, aborted])
+    return records.map(getDelegationSummary)
+  } finally {
+    clearTimeout(timer)
+    parent.signal.removeEventListener('abort', onAbort)
   }
-  return records.map(getDelegationSummary)
 }
 
 // =========================================================================
