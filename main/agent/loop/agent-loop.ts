@@ -174,6 +174,8 @@ export interface AgentLoopTurnInfo {
 }
 
 export interface AgentLoopInput {
+  /** Host prerequisite check after a no-tool final response; feedback keeps the loop open. */
+  beforeComplete?: (ctx: ToolContext) => Promise<string | undefined>
   parentSessionId?: string
   accountingRole?: string
   materials?: import('../../../shared/attachment-types').MaterialContext
@@ -1170,6 +1172,17 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
           },
         })
       }
+      let completionFeedback: string | undefined
+      try { completionFeedback = await input.beforeComplete?.(ctx) } catch (error) {
+        if (input.signal.aborted) return attachUsage({ status: 'cancelled', turns, finalText, toolCalls })
+        throw error
+      }
+      if (input.signal.aborted) return attachUsage({ status: 'cancelled', turns, finalText, toolCalls })
+      if (completionFeedback) {
+        appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: completionFeedback }])
+        messages.push({ role: 'user', content: [{ type: 'text', text: completionFeedback }] })
+        continue
+      }
       return attachUsage({ status: 'completed', turns, finalText, toolCalls })
     }
 
@@ -1558,6 +1571,14 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
   // 观测——status 语义不变（外部终验权威、不信自述），但出口可区分「轮内完成」与
   // 「预算耗尽后交卷」，下游不再把两者混计。
   if (grace.kind === 'text' && !isDegenerateText(grace.text)) {
+    try {
+      const pending = await input.beforeComplete?.(ctx)
+      if (input.signal.aborted) return attachUsage({ status: 'cancelled', turns, finalText: grace.text, toolCalls })
+      if (pending) return attachUsage({ status: 'turn_limit', turns, finalText: grace.text, toolCalls })
+    } catch (error) {
+      if (input.signal.aborted) return attachUsage({ status: 'cancelled', turns, finalText: grace.text, toolCalls })
+      throw error
+    }
     return attachUsage({ status: 'completed', turns, finalText: grace.text, toolCalls, termination_detail: { reason: 'grace_wrap_up' as const } })
   }
   if (grace.kind === 'cancelled') return attachUsage(loopCancelled(turns, finalText, toolCalls, 'grace_turn', input.signal))

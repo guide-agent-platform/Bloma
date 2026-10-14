@@ -213,7 +213,8 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
         const durationMs = Date.now() - startedAt
         const parsed = parseDriverStdout(stdout)
         const facts = scriptExecutionFacts(code, parsed.scenarios, budgetFact(runs))
-        if (parsed.scenarios.length) facts.feedback.evidence = receiptEvidence(script || `inline-${ctx.toolCallId ?? 'probe'}`, command, timeoutMs,
+        const entry = script ? [script, ...args.filter(arg => /^--[A-Za-z0-9_-]{1,40}$/.test(arg))].join(' ').slice(0, 160) : `inline-${ctx.toolCallId ?? 'probe'}`
+        if (parsed.scenarios.length) facts.feedback.evidence = receiptEvidence(entry, command, timeoutMs,
           before, captureVerificationVersion(rootReal, python, env, projectId), parsed.scenarios)
         const verificationStatus = facts.verificationStatus
         const verdict = `进程退出码 ${code}；${facts.verdict}`

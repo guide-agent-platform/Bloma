@@ -189,7 +189,8 @@ describe('actual dispatcher + actual child tools, zero model/network', () => {
     }
     const result = await runDesktopDispatcherLoop({ projectId: 'p', sessionId: 'parent', requestId: 'req', currentPhase: 'desktop-implement', task: '', query,
       env: {}, maxTokens: 1024, signal: new AbortController().signal, publish: () => {}, projectName: 'pilot', quickMode: true, sandboxRoot: root })
-    expect(result.error_message).toBe('EXPERIMENT_TASKS_NOT_COMPLETED')
+    expect(result.status).toBe('error')
+    expect(result.loopResult?.status).toBe('turn_limit') // Repeated premature end responses cannot bypass the prerequisite.
   })
   it('longterm replays scaffold history into the same worker rather than creating a replacement', async () => {
     const index = JSON.parse(readFileSync(join(home, 'projects.json'), 'utf8')); index.projects[0].mode = 'longterm'; save(join(home, 'projects.json'), JSON.stringify(index))

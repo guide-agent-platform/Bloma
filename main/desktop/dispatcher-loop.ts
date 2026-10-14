@@ -29,7 +29,7 @@
 import { existsSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AgentEvent } from '../../shared/types'
-import type { AgentLoopInput, AgentLoopResult, AgentLoopTool, ToolOutcome } from '../agent/loop/agent-loop'
+import type { AgentLoopInput, AgentLoopResult, AgentLoopTool, ToolOutcome, ToolContext } from '../agent/loop/agent-loop'
 import { runAgentLoop } from '../agent/loop/agent-loop'
 import { buildAgentTools } from '../agent/tools/agent-tools'
 import { sessionMaterials } from '../platform/attachments/material-context'
@@ -62,6 +62,7 @@ import { bindExperimentInput, experimentInputsIntact, standaloneHistory, standal
 import { experimentLimits } from './dispatch-experiment'
 import { finishExperiment } from './dispatch-experiment-records'
 import { DEFAULT_DESKTOP_EXECUTION_LIMITS, type DesktopExecutionLimits } from './execution-limits'
+import { guardDispatcherCompletion } from './dispatcher-completion'
 
 // 拆分 re-export（批10 旧账③ R7，2026-10-07）：收口判定族迁至 dispatcher-finalize.ts，
 // 旧路径消费者与测试零断链（hub 化惯例；与 dispatcher-telemetry 拆分同款）。
@@ -498,6 +499,14 @@ async function runAgentLoopSafe(
       permissionMode: 'allow-all',
       // 首跑深修：调度员不写文件/不带自测工具——web 线进度对账三守卫不适用（首跑被反复误注入）
       disableProgressNudge: !standalone,
+      ...(!standalone ? { beforeComplete: async (ctx: ToolContext) => {
+        const feedback = await guardDispatcherCompletion(ctx)
+        if (feedback) return feedback
+        const config = node.id === 'desktop-implement' ? readExperiment(input.projectId) : undefined
+        return config?.state === 'running' && !experimentTasksFinished(config)
+          ? '【宿主实验完成条件】已登记的任务尚未全部完成。请读取真实委派状态、失败原因及剩余额度，补未执行或未完成任务；不要将已发起委派当作执行完毕，也不能换执行器隐去失败或清零预算。'
+          : undefined
+      } } : {}),
       signal: input.signal,
       publish,
       onTurn: () => collector.onTurnBoundary(),
