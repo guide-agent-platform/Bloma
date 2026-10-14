@@ -23,3 +23,10 @@ export function preparationTokenCap(command, value) {
   }
   return cap
 }
+
+export function selectClarificationAnswer(question, answers) {
+  const matching = answers.filter(answer => Array.isArray(answer.contains) && answer.contains.length
+    && answer.contains.every(part => typeof part === 'string' && part && question.includes(part))
+    && typeof answer.answer === 'string' && answer.answer.trim())
+  return matching.length === 1 ? matching[0].answer : undefined
+}

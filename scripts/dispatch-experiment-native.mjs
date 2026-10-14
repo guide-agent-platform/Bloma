@@ -6,7 +6,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { cancelExperimentProject } from './dispatch-experiment-native-control.mjs'
-import { assertPreparationResume, preparationTokenCap, selectPreparationChoice } from './dispatch-experiment-native-choices.mjs'
+import { assertPreparationResume, preparationTokenCap, selectClarificationAnswer, selectPreparationChoice } from './dispatch-experiment-native-choices.mjs'
 const [command, ...args] = process.argv.slice(2)
 const option = (name, fallback) => { const i = args.indexOf(`--${name}`); return i < 0 ? fallback : args[i + 1] }
 const home = resolve(option('home', ''))
@@ -16,6 +16,8 @@ const stopFile = resolve(option('stop-file', join(reportDir, 'STOP')))
 const resumePreparation = command === 'prepare' && args.includes('--resume-preparation')
 const resumeAnswer = resumePreparation ? option('resume-answer', '') : ''
 const preparationMaxTokens = preparationTokenCap(command, option('prepare-max-output-tokens'))
+const clarificationAnswers = option('clarification-answers') ? JSON.parse(readFileSync(option('clarification-answers'), 'utf8')) : []
+if (!Array.isArray(clarificationAnswers)) throw new Error('EXPERIMENT_INVALID_CLARIFICATION_ANSWERS')
 if (!['prepare', 'run', 'seed'].includes(command) || !option('home') || !option('monetary-policy')
   || home.toLowerCase() === join(homedir(), '.proma').toLowerCase()) throw new Error('EXPERIMENT_DRIVER_ARGUMENTS')
 mkdirSync(reportDir, { recursive: true })
@@ -117,6 +119,19 @@ try {
           report.confirmations.push({ at: new Date().toISOString(), action: 'exclude-guide-suggestions', excluded })
         }
         await target.click(); action = id; break
+      }
+    }
+    if (!action && command === 'prepare') {
+      const custom = page.locator('[data-ai-id="clarification-custom-input"]')
+      if (await custom.isVisible()) {
+        const question = await page.locator('[data-ai-id="clarification-card-overlay"]').innerText()
+        const answer = selectClarificationAnswer(question, clarificationAnswers)
+        if (answer) {
+          await custom.fill(answer)
+          await page.locator('[data-ai-id="clarification-custom-submit"]').click()
+          report.confirmations.push({ at: new Date().toISOString(), action: 'predefined-clarification-answer', question, answer })
+          action = 'clarification-custom-submit'
+        }
       }
     }
     if (!action && command === 'prepare') {

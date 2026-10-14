@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {selectPreparationChoice,assertPreparationResume,preparationTokenCap} from './dispatch-experiment-native-choices.mjs'
+import {selectPreparationChoice,assertPreparationResume,preparationTokenCap,selectClarificationAnswer} from './dispatch-experiment-native-choices.mjs'
 const choice=(id,text,visible=true,enabled=true)=>({id,text,visible,enabled})
 test('Prefer the fixed desktop shape over delegation and unsupported web choices',()=>{
  assert.equal(selectPreparationChoice([choice('clarification-option-auto','你帮我决定'),choice('clarification-option-web','本地网页应用'),choice('clarification-option-desktop','桌面程序')]),'clarification-option-desktop')
@@ -25,4 +25,11 @@ test('Preparation output caps are bounded and cannot change an execution conditi
  assert.equal(preparationTokenCap('run',undefined),8192)
  for(const value of ['0','-1','Infinity','65537','8192.5']) assert.throws(()=>preparationTokenCap('prepare',value),/INVALID_PREPARATION/)
  assert.throws(()=>preparationTokenCap('run','16384'),/INVALID_PREPARATION/)
+})
+test('Free-text answers require an unambiguous predefined question match',()=>{
+ const answers=[{contains:['备份','格式'],answer:'JSON 文件'}]
+ assert.equal(selectClarificationAnswer('备份文件格式未指定',answers),'JSON 文件')
+ assert.equal(selectClarificationAnswer('是否加入付费联网功能',answers),undefined)
+ assert.equal(selectClarificationAnswer('备份文件格式未指定',[...answers,...answers]),undefined)
+ assert.equal(selectClarificationAnswer('其他',[{contains:[],answer:'盲目委托'}]),undefined)
 })
