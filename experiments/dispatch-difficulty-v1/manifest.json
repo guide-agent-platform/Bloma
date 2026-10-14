@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "status": "design_candidate_not_executed",
+  "status": "design_candidate_method_pilot_started",
   "levels": [
     {
       "id": "L1",
@@ -30,7 +30,9 @@
       "check_count": 14,
       "automated_evaluator_status": "not implemented or calibrated",
       "review_actions": "experiments/dispatch-difficulty-v1/L2/review-actions.md",
-      "review_actions_sha256": "1b0682f145ce36d686e941a715b3406b27b0cdb1661b93498bcc75b14392943f"
+      "review_actions_sha256": "1b0682f145ce36d686e941a715b3406b27b0cdb1661b93498bcc75b14392943f",
+      "clarification_answers": "experiments/dispatch-difficulty-v1/L2/clarification-answers.json",
+      "clarification_answers_sha256": "bd798d20df759048f9c762e246aa65bd06a64c1468b875ef46d924d16d3292db"
     },
     {
       "id": "L3",
@@ -55,6 +57,6 @@
     "delete-isolation",
     "restart-persistence"
   ],
-  "notes": "Structural bands predefined; no empirical difficulty claim. Per-level new PRD/UX and evaluator must be frozen before complete six-group comparison.",
+  "notes": "Structural bands predefined; one L2 S1 method pilot started, not calibrated or a six-group comparison. Per-level PRD/UX and criteria must be frozen before a complete comparison.",
   "revision": "20261014-prepilot-title-edit"
 }
