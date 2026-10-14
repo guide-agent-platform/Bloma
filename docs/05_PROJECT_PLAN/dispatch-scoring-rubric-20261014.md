@@ -9,7 +9,7 @@
 - L1：已有独立 GUI 六项 `add-trim / empty-rejection / toggle-isolation / filters / delete-isolation / restart-persistence`。6/6 只代表这六项；平台声明七项需求、模型自测和 PRD 全部细节另列，不能互相替换。
 - L2：`experiments/dispatch-difficulty-v1/L2/suite.json` 的 14 项。
 - L3：对应 L3 清单的 22 项。
-- L2/L3 当前为冻结前候选验收设计；尚没有完成真实产品操作，也没有校准全自动评分器，不能把设计文件叫成已完成测试。
+- L2 已完成一个 S1 方法试点，真实 GUI 14/14 通过，具体范围见 `dispatch-l2-result-20261014.md`；适配器针对该产品，尚未校准为通用全自动评分器。L3 仍为候选验收设计，未完成真实产品操作。不能从一个试点宣称难度效应或完整模型比较。
 
 ## 每项评审的四步
 

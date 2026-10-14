@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "status": "design_candidate_method_pilot_started",
+  "status": "design_candidate_one_L2_method_pilot_reviewed",
   "levels": [
     {
       "id": "L1",
@@ -57,6 +57,6 @@
     "delete-isolation",
     "restart-persistence"
   ],
-  "notes": "Structural bands predefined; one L2 S1 method pilot started, not calibrated or a six-group comparison. Per-level PRD/UX and criteria must be frozen before a complete comparison.",
+  "notes": "One L2 quick/S1 method pilot completed with 14/14 GUI criteria. No empirical general difficulty claim, calibrated general evaluator, L3 execution or six-group comparison. See docs/05_PROJECT_PLAN/dispatch-l2-result-20261014.md.",
   "revision": "20261014-prepilot-title-edit"
 }
