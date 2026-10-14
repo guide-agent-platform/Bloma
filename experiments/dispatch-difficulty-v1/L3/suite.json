@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "checks": [
+    {"id":"add-trim","kind":"manual","description":"新目录准备合法项目，新增含首尾空格标题的任务；列表及重启后去空格。"},
+    {"id":"empty-rejection","kind":"manual","description":"清除其他筛选并切全部；空串和纯空格新增被拒，任务数和已有内容不变。"},
+    {"id":"toggle-isolation","kind":"manual","description":"对无依赖的两条同名任务，完成和取消其中一条不影响另一条。"},
+    {"id":"filters","kind":"manual","description":"无依赖任务完成与未完成各一条，全部/未完成/已完成分别显示2/1/1条，切视图不改状态。"},
+    {"id":"delete-isolation","kind":"manual","description":"删除没有依赖引用的指定同名任务，只影响目标，重启后删除结果保留。"},
+    {"id":"restart-persistence","kind":"manual","description":"无依赖任务的标题、完成和删除结果在关闭全部进程后重启保留。"},
+    {"id":"project-names","kind":"manual","description":"项目名去空格，空白与重复名称拒绝，原项目和任务不变。"},
+    {"id":"project-assignment-move","kind":"manual","description":"移动无依赖任务跨项目，标题、状态、优先级、日期保留，列表与数量同步，同名另一条不变。"},
+    {"id":"project-delete-guard","kind":"manual","description":"含任务项目不可删除；任务移走后空项目可删，其他对象不变。"},
+    {"id":"priority-calendar","kind":"manual","description":"三个优先级与可选合法日期正常保存和重启保留，不存在的日历日期拒绝且不改变已有值。"},
+    {"id":"overdue-boundaries","kind":"manual","description":"固定今天并创建昨天/今天/明天未完成及昨天已完成任务；仅昨天未完成进入过期结果。"},
+    {"id":"combined-filters","kind":"manual","description":"大小写搜索叠加项目、完成状态、优先级、过期条件，结果为交集、计数正确，移动/修改后同步。"},
+    {"id":"backup-roundtrip","kind":"manual","description":"导出并在空目录恢复基础项目任务字段，同名任务独立数量、归属、日期、优先级、状态均保留。"},
+    {"id":"import-atomic-idempotent","kind":"manual","description":"坏数据或已有内容冲突应整份拒绝且旧数据不变；有效备份重复导入不重复、保留备份外记录，不合并同名任务。"},
+    {"id":"graph-self-cycle","kind":"manual","description":"同项目建立A、B、C，合法链可保存；拒绝自依赖、两节点环和三节点环，拒绝后原合法关系与状态不变。"},
+    {"id":"dependency-completion-cancel","kind":"manual","description":"任务有两个前置时只完成一个不能完成后续；两者完成后允许；存在已完成后续时取消前置应拒绝并列出后续，状态不变。"},
+    {"id":"relation-move-delete-guard","kind":"manual","description":"跨项目依赖拒绝；移动或删除会破坏引用关系的任务应拒绝并解释；解除全部相关依赖后允许，其他关系不变。"},
+    {"id":"batch-atomic-poststate","kind":"manual","description":"按批后状态验证：一起完成合法前后任务可成功；混入一个依赖未选未完成前置的任务时整批拒绝且连合法任务也不改；批量取消或移动导致违规同样整批拒绝并列阻止者。"},
+    {"id":"undo-batch-and-failed-op","kind":"manual","description":"合法批量修改仅为一笔，撤销恢复整批；中间失败操作不新增成功历史或挤掉可撤销项；撤销本身不成为可反复撤销的新修改，无可撤销项时只提示。"},
+    {"id":"history-restart-undo","kind":"manual","description":"建立项目、任务与依赖并成功修改，关闭全部进程后重开；历史、关系和状态保留，最近未撤销的一笔仍可撤销并保持规则一致。"},
+    {"id":"backup-relation-integrity","kind":"manual","description":"有效备份恢复项目、任务、关系和历史，重复导入无重复历史；含悬空引用或循环的备份整份拒绝且当前数据/历史/可撤销项不变。"},
+    {"id":"multiwindow-conflicts","kind":"manual","description":"两个独立窗口读同一数据；改不同任务后双方更新均保留；读同版本任务后先改A再提交旧B，B应提示冲突而不覆盖A，刷新后可重新提交，重启后最终状态一致。"}
+  ]
+}

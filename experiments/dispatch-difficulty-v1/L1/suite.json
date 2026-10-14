@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "checks": [
+    {"id":"add-trim","kind":"manual","description":"在新数据目录通过界面新增标题含首尾空格的任务；列表与重启后的标题必须去掉首尾空格。"},
+    {"id":"empty-rejection","kind":"manual","description":"先有一条合法任务并切到全部；提交空串及纯空格标题，全部列表的记录数不变，原任务内容不变。"},
+    {"id":"toggle-isolation","kind":"manual","description":"建立两条同名任务，只完成其中一条，另一条仍未完成；再取消完成，只恢复被操作任务。"},
+    {"id":"filters","kind":"manual","description":"已完成和未完成各一条；全部显示两条，未完成和已完成各显示对应一条，来回切换不改变任务状态。"},
+    {"id":"delete-isolation","kind":"manual","description":"建立同名任务两条，删除指定一条；另一条及其完成状态不变，重开后被删除条目不复活。"},
+    {"id":"restart-persistence","kind":"manual","description":"创建任务并修改完成状态、删除另一条；关闭全部产品进程，使用同一数据目录重新启动，标题、状态和删除结果都保留。"}
+  ]
+}

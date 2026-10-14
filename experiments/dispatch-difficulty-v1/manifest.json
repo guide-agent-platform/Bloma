@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "status": "design_candidate_not_executed",
+  "levels": [
+    {
+      "id": "L1",
+      "structural_band": [
+        3,
+        4
+      ],
+      "structural_score": 3,
+      "request": "experiments/dispatch-difficulty-v1/L1/request.md",
+      "request_sha256": "3c5d93821644ba3bc04ea405ef84edc3b77f7093bdc60bc2071d27608294465a",
+      "suite": "experiments/dispatch-difficulty-v1/L1/suite.json",
+      "suite_sha256": "08dbe9b458009c4cc22c8f7f8e2136975bcb943c70509c186e0ebe80f8a49fff",
+      "check_count": 6,
+      "automated_evaluator_status": "existing GUI adapter, needs frozen-instance validation"
+    },
+    {
+      "id": "L2",
+      "structural_band": [
+        5,
+        7
+      ],
+      "structural_score": 6,
+      "request": "experiments/dispatch-difficulty-v1/L2/request.md",
+      "request_sha256": "171ca9415828f967ef779c8011d68b1531da1869d54ec67264ce0a357f39c509",
+      "suite": "experiments/dispatch-difficulty-v1/L2/suite.json",
+      "suite_sha256": "0e347ec6aaa5b5090ba9868906e92cc80a7be370c77f2e16ea55e8246934df22",
+      "check_count": 14,
+      "automated_evaluator_status": "not implemented or calibrated"
+    },
+    {
+      "id": "L3",
+      "structural_band": [
+        8,
+        9
+      ],
+      "structural_score": 9,
+      "request": "experiments/dispatch-difficulty-v1/L3/request.md",
+      "request_sha256": "f90b01e5625087bcb94e4646be3e9569f565256a89b5d59c3445149409f011a4",
+      "suite": "experiments/dispatch-difficulty-v1/L3/suite.json",
+      "suite_sha256": "be7dccafa0432f5872cb8a0cde94225108599b0bffe1cdf85ac384e5b469661e",
+      "check_count": 22,
+      "automated_evaluator_status": "not implemented or calibrated"
+    }
+  ],
+  "common_check_ids": [
+    "add-trim",
+    "empty-rejection",
+    "toggle-isolation",
+    "filters",
+    "delete-isolation",
+    "restart-persistence"
+  ],
+  "notes": "Structural bands predefined; no empirical difficulty claim. Per-level new PRD/UX and evaluator must be frozen before complete six-group comparison."
+}
