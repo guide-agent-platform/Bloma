@@ -19,12 +19,16 @@ export function persistentBudgetBlocked(feedback: readonly ToolFeedback[]): bool
 /** Terminal budget facts cannot fall out of a bounded handoff after ordinary reads. */
 export function retainedToolFeedback(facts: readonly ToolFeedback[], limit = 8): ToolFeedback[] {
   const terminal = new Map<string, ToolFeedback>()
+  const evidence = new Map<string, ToolFeedback>()
+  const resources = new Map<string, ToolFeedback>()
   const other: ToolFeedback[] = []
   for (const f of facts) {
     if (f.category === 'budget' && toolRecovery(f) === 'stop') terminal.set(`${f.scope}:${JSON.stringify(f.budget)}`, f)
+    else if (f.evidence) { evidence.delete(f.evidence.key); evidence.set(f.evidence.key, f) }
+    else if (f.scope === 'execution_resources' && f.budget) resources.set(f.budget.resource, f)
     else other.push(f)
   }
-  const kept = [...terminal.values()].slice(-limit)
+  const kept = [...evidence.values(), ...resources.values(), ...terminal.values()].slice(-limit)
   const room = Math.max(0, limit - kept.length)
   return [...(room ? other.slice(-room) : []), ...kept]
 }

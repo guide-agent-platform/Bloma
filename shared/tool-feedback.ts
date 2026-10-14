@@ -23,6 +23,16 @@ export interface ToolFeedback {
   fingerprint?: string
   task_completion?: 'unverified' | 'incomplete'
   pending?: string[]
+  evidence?: {
+    key: string
+    entry: string
+    source_fingerprint: string
+    environment_fingerprint: string
+    freshness: 'current' | 'stale' | 'unknown'
+    passed: number
+    failed: number
+    blocked: number
+  }
 }
 
 const EXECUTION = ['not_run', 'running', 'completed', 'failed', 'cancelled']
@@ -51,6 +61,16 @@ export function safeToolFeedback(raw: unknown): ToolFeedback | undefined {
   if (['unverified', 'incomplete'].includes(String(r.task_completion))) result.task_completion = r.task_completion as ToolFeedback['task_completion']
   if (Array.isArray(r.pending)) result.pending = r.pending.filter((s): s is string => typeof s === 'string').slice(0, 4).map(s => s.slice(0, 120))
   if (Array.isArray(r.reports)) result.reports = r.reports.filter((s): s is string => typeof s === 'string' && !s.includes('..') && !/^([a-z]:|[\\/]|https?:)/i.test(s)).slice(0, 4).map(s => s.slice(0, 160))
+  const e = r.evidence as ToolFeedback['evidence']
+  if (e && typeof e === 'object' && [e.key, e.source_fingerprint, e.environment_fingerprint].every(s => typeof s === 'string' && /^[a-f0-9]{64}$/.test(s))
+    && typeof e.entry === 'string' && e.entry.length <= 160 && !e.entry.includes('..') && !/^([a-z]:|[\\/]|https?:)/i.test(e.entry)
+    && ['current', 'stale', 'unknown'].includes(e.freshness) && [e.passed, e.failed, e.blocked].every(n => Number.isSafeInteger(n) && n >= 0 && n <= 4096)) {
+    result.evidence = { key: e.key, entry: e.entry, source_fingerprint: e.source_fingerprint, environment_fingerprint: e.environment_fingerprint,
+      freshness: e.freshness, passed: e.passed, failed: e.failed, blocked: e.blocked }
+    if (e.freshness !== 'current') result.verification = 'unverified'
+  } else if (r.evidence !== undefined) {
+    result.verification = 'unverified'; result.category = 'verification_harness'; result.recovery = 'inspect'; result.reason = 'VERIFICATION_EVIDENCE_INVALID'
+  }
   const recovery = toolRecovery(result)
   if (recovery !== undefined) result.recovery = recovery
   return result
@@ -65,6 +85,8 @@ export function readToolFeedback(content: string): ToolFeedback | undefined {
   try { return safeToolFeedback(JSON.parse(match[1]!)) } catch { return undefined }
 }
 export function toolFeedbackLabel(f: ToolFeedback): string {
+  if (f.evidence?.freshness === 'stale') return '验证记录已过期'
+  if (f.evidence?.freshness === 'unknown') return '验证版本待核对'
   if (f.scope === 'call_declared') return '调用已登记'
   if (f.category === 'budget') return '额度已用尽'
   if (f.category === 'permission') return f.execution === 'not_run' ? '未执行：权限限制' : '写入范围违规'

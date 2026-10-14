@@ -7,6 +7,7 @@ import {
   answerDelegationQuestion,
   askDelegationQuestion,
   continueDelegation,
+  DelegationBudgetError,
   delegateAgentOnce,
   findDelegation,
   getDelegationSummary,
@@ -230,7 +231,11 @@ export function buildDelegationTools(role: 'parent' | DelegationRole): AgentLoop
       const task = String(toolInput.task ?? '')
       if (!delegationId.trim()) return { output: '缺少 delegation_id 参数。', isError: true }
       if (!task.trim()) return { output: '缺少 task 参数。', isError: true }
-      const result = continueDelegation(ctx, delegationId.trim(), task.trim())
+      let result: StartDelegationResult
+      try { result = continueDelegation(ctx, delegationId.trim(), task.trim()) } catch (error) {
+        if (error instanceof DelegationBudgetError) return { output: error.message, isError: true, budgetExhausted: true, feedback: error.feedback }
+        throw error
+      }
       return {
         output: `已继续委派 ${result.delegation_id}（role=${result.role}，child_session=${result.child_session_id}，status=${result.status}）。用 wait_for_delegations 收集续跑结果。`,
         detail: { ...result },

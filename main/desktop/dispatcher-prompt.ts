@@ -122,6 +122,7 @@ export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherProm
 
   // 5. 工具纪律段
   sections.push(buildToolDisciplineSection(node))
+  if (node.id === 'desktop-implement') sections.push('【验证收口】读取宿主交接中的分入口证据和 resources 剩余额度。freshness=current 的逻辑/GUI 已报告断言可直接引用，启动诊断无断言不覆盖它们。优先静态核对 CORE_CHECK.json 场景、需求版本和 LAUNCH.json；只补真正缺失、失败或版本过期的验证，不要求子会话无变化全量重跑。交付登记不代替平台独立验收。额度用尽时不要续接要求再次执行，也不能换子会话清零。')
 
   // 6. 输出纪律段（刀4，2026-10-02 d34d189f 狗粮案：调度员英文过程叙述 40 轮/段
   // 原样直灌聊天流——纪律段进基座，所有阶段固定生效）

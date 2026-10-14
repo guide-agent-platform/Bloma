@@ -21,12 +21,13 @@ import { execFile } from 'node:child_process'
 import type { AgentLoopTool } from '../agent/loop/agent-loop'
 import { execFileDriverSpawn, DriverExecutionError, parseDriverStdout, type DriverSpawn } from './process-driver'
 import { findProject } from '../project/project-service'
-import { consumeProjectAttempt } from '../platform/execution/project-attempts'
+import { consumeProjectAttempt, readProjectAttempts } from '../platform/execution/project-attempts'
 import { scriptExecutionFacts } from './script-execution-facts'
 import type { ToolBudgetFact } from '../../shared/tool-feedback'
 import { DEFAULT_DESKTOP_EXECUTION_LIMITS } from './execution-limits'
 import { getPromaHome } from '../../storage/config-paths'
 import { pythonEncodingEnv } from './python-process-env'
+import { captureVerificationVersion, collectVerificationReceipts, recordVerificationReceipt, receiptEvidence, receiptPython } from './verification-receipts'
 
 const DEFAULT_TIMEOUT_MS = 90_000
 const MAX_TIMEOUT_MS = 180_000
@@ -90,11 +91,32 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
   const maxRuns = deps.maxRuns ?? DEFAULT_MAX_RUNS
   const defaultTimeoutMs = deps.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS
   let runs = 0
+  let lastPython: string | undefined
   const budgetFact = (used: number): ToolBudgetFact => ({ resource: 'script_runs', scope: 'session', used, limit: maxRuns,
     remaining: Math.max(0, maxRuns - used), resets_on: 'new_run' })
 
   return {
     name: 'run_project_script',
+    recordFeedback: (feedback, ctx) => { if (lastPython) recordVerificationReceipt(projectId, ctx.sessionId, feedback, lastPython) },
+    collectFeedback: ctx => {
+      const root = findProject(projectId)?.root_path
+      if (!root) return []
+      let used: number
+      try { used = readProjectAttempts(projectId).active[`script:${ctx.sessionId}`] ?? 0 } catch {
+        return [{ schema_version: 1, execution: 'not_run', verification: 'unverified', category: 'budget', recovery: 'inspect', reason: 'VERIFICATION_BUDGET_UNREADABLE' }]
+      }
+      const resources = { schema_version: 1 as const, execution: 'completed' as const, verification: 'not_applicable' as const,
+        source: 'host' as const, scope: 'execution_resources', budget: budgetFact(used) }
+      const venv = join(root, '.venv', 'Scripts', 'python.exe')
+      try {
+        const python = existsSync(venv) ? venv : lastPython ?? cachedPython ?? receiptPython(projectId, ctx.sessionId)
+        if (!python) return [...collectVerificationReceipts(projectId, ctx.sessionId), resources]
+        const env = { ...buildChildExecEnv(process.env), APP_DATA_DIR: join(getPromaHome(), 'execution-app-data', projectId, ctx.sessionId) }
+        return [...collectVerificationReceipts(projectId, ctx.sessionId, captureVerificationVersion(root, python, env, projectId)), resources]
+      } catch {
+        return [resources, { schema_version: 1, execution: 'not_run', verification: 'unverified', category: 'verification_harness', recovery: 'inspect', reason: 'EVIDENCE_COLLECTION_FAILED' }]
+      }
+    },
     description:
       '在项目目录真实执行 Python 自测：script 指向已有 .py，或 code 提供短代码（两者只能选一个，无需创建临时脚本）。' +
       '区分进程退出与业务断言：退出码0只说明脚本正常退出；声明的 PASS/FAIL/BLOCKED 场景按回读判断。脚本须在项目根内；短代码在同一工作目录执行；缺省90秒、上限180秒；' +
@@ -176,17 +198,23 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
         runs = attempt.used
       } catch { return { output: '执行计数不可保存，未启动脚本。请恢复执行记录后重试。', isError: true, feedback: { schema_version: 1, execution: 'not_run', verification: 'unverified', category: 'environment', recovery: 'prepare_environment' } } }
       const label = script || '单次短代码'
+      lastPython = python
+      const env = { ...buildChildExecEnv(process.env), APP_DATA_DIR: appData }
+      const command = [python, ...(script ? [target] : ['-c', inlineCode]), ...args]
+      const before = captureVerificationVersion(rootReal, python, env, projectId)
       try {
         const { code, stdout, stderr } = await spawn({
-          command: [python, ...(script ? [target] : ['-c', inlineCode]), ...args],
+          command,
           timeoutMs,
-          env: { ...buildChildExecEnv(process.env), APP_DATA_DIR: appData },
+          env,
           cwd: rootReal,
           signal: ctx.signal,
         })
         const durationMs = Date.now() - startedAt
         const parsed = parseDriverStdout(stdout)
         const facts = scriptExecutionFacts(code, parsed.scenarios, budgetFact(runs))
+        if (parsed.scenarios.length) facts.feedback.evidence = receiptEvidence(script || `inline-${ctx.toolCallId ?? 'probe'}`, command, timeoutMs,
+          before, captureVerificationVersion(rootReal, python, env, projectId), parsed.scenarios)
         const verificationStatus = facts.verificationStatus
         const verdict = `进程退出码 ${code}；${facts.verdict}`
         return {

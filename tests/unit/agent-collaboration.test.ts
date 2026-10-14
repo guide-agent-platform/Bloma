@@ -215,6 +215,35 @@ describe('委派协作 M1', () => {
     expect(record.completion).toBe(previousCompletion)
   })
 
+  it('reports and refuses a zero remaining script balance even before the first execution refusal', async () => {
+    let queries = 0
+    registerParent(async function* () { queries++; yield textMessage('child result'); yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' } })
+    const created = startDelegation(parentContext(), { task: '原任务' }), record = findDelegation(parentSessionId, created.delegation_id)!
+    await record.completion
+    record.taskHandoff = buildTaskHandoff({ status: 'completed', turns: 1, finalText: '', toolCalls: [], tool_feedback: [{ schema_version: 1,
+      execution: 'completed', verification: 'not_applicable', scope: 'execution_resources',
+      budget: { resource: 'script_runs', scope: 'session', used: 12, limit: 12, remaining: 0, resets_on: 'new_run' } }] })
+    expect(record.taskHandoff.completion).toBe('unverified') // Successful final execution can still be delivered.
+    const outcome = await buildDelegationTools('parent').find(t => t.name === 'continue_delegation')!.execute({ delegation_id: created.delegation_id, task: '再次运行' }, parentContext())
+    expect(outcome).toMatchObject({ budgetExhausted: true, feedback: { execution: 'not_run', category: 'budget', recovery: 'stop' } })
+    expect(record.status).toBe('completed'); expect(queries).toBe(1)
+  })
+
+  it('rechecks entry versions when reading an ended child instead of presenting its old pass as current', async () => {
+    let changed = false
+    const evidence = { key: 'a'.repeat(64), entry: 'test_ui.py', source_fingerprint: 'b'.repeat(64), environment_fingerprint: 'c'.repeat(64),
+      passed: 3, failed: 0, blocked: 0 }
+    setChildToolsBuilder(() => [{ name: 'receipt_reader', description: '', input_schema: {}, execute: async () => ({ output: '' }),
+      collectFeedback: () => [{ schema_version: 1, execution: 'completed', verification: changed ? 'unverified' : 'passed',
+        evidence: { ...evidence, freshness: changed ? 'stale' : 'current' } }] }])
+    registerParent(oneShotQuery('done'))
+    const created = startDelegation(parentContext(), { task: '原任务' }), record = findDelegation(parentSessionId, created.delegation_id)!
+    await record.completion
+    expect(getDelegationSummary(record).task_handoff?.verification.find(f => f.evidence)?.evidence?.freshness).toBe('current')
+    changed = true
+    expect(getDelegationSummary(record).task_handoff?.verification.find(f => f.evidence)).toMatchObject({ verification: 'unverified', evidence: { freshness: 'stale' } })
+  })
+
   it('wait_for_delegations：all 策略等全部收敛返回 completed 摘要', async () => {
     registerParent(oneShotQuery('子结果'))
     const a = startDelegation(parentContext(), { task: '任务 A' })

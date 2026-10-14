@@ -1,5 +1,5 @@
 import type { AgentLoopResult } from '../loop/agent-loop'
-import { safeToolFeedback, type ToolFeedback } from '../../../shared/tool-feedback'
+import { safeToolFeedback, type ToolFeedback, type ToolBudgetFact } from '../../../shared/tool-feedback'
 import { persistentBudgetBlocked, retainedToolFeedback } from '../../../shared/tool-feedback-policy'
 export interface TaskHandoff {
   schema_version: 1
@@ -10,6 +10,7 @@ export interface TaskHandoff {
   verification: ToolFeedback[]
   pending: string[]
   recovery?: ToolFeedback['recovery']
+  resources?: ToolBudgetFact[]
 }
 export function handoffRecovery(handoff: Pick<TaskHandoff, 'verification' | 'loop_status'>): ToolFeedback['recovery'] {
   if (persistentBudgetBlocked(handoff.verification)) return 'stop'
@@ -22,11 +23,14 @@ export function handoffRecovery(handoff: Pick<TaskHandoff, 'verification' | 'loo
 export function buildTaskHandoff(result: AgentLoopResult): TaskHandoff {
   const verification = retainedToolFeedback((result.tool_feedback ?? []).map(safeToolFeedback).filter((f): f is ToolFeedback => Boolean(f)))
   const unfinished = result.status !== 'completed' || verification.some(f => f.category === 'budget' || f.execution === 'failed' || f.verification === 'failed')
-  const pending = verification.filter(f => f.category || f.verification === 'failed').map(f => `${f.scope ?? '工具'}: ${f.category ?? f.verification}; ${f.reason ?? f.recovery ?? '读取证据'}`).slice(0, 6)
+  const pending = verification.filter(f => f.category || f.verification === 'failed' || f.evidence?.freshness !== 'current' && f.evidence)
+    .map(f => f.evidence?.freshness !== 'current' && f.evidence ? `${f.evidence.entry}: 验证版本 ${f.evidence.freshness}，核对变更后仅补缺失验证`
+      : `${f.scope ?? '工具'}: ${f.category ?? f.verification}; ${f.reason ?? f.recovery ?? '读取证据'}`).slice(0, 6)
   if (result.status !== 'completed') pending.unshift(`执行停止：${result.status}`)
   if (!pending.length) pending.push('目标完整性尚需宿主验收，执行结束不等于交付通过')
   return { schema_version: 1, completion: unfinished ? 'incomplete' : 'unverified', loop_status: result.status, stop_reason: result.termination_detail?.reason,
-    changed_files: (result.files_changed ?? []).slice(0, 20), verification, pending, recovery: handoffRecovery({ verification, loop_status: result.status }) }
+    changed_files: (result.files_changed ?? []).slice(0, 20), verification, pending, recovery: handoffRecovery({ verification, loop_status: result.status }),
+    resources: verification.filter(f => f.scope === 'execution_resources' && f.budget).map(f => f.budget!) }
 }
 export function readTaskHandoff(raw: unknown): TaskHandoff | undefined {
   if (!raw || typeof raw !== 'object') return undefined
@@ -35,8 +39,9 @@ export function readTaskHandoff(raw: unknown): TaskHandoff | undefined {
   const verification = retainedToolFeedback(r.verification.map(safeToolFeedback).filter((f): f is ToolFeedback => Boolean(f)))
   return { schema_version: 1, completion: r.completion, loop_status: r.loop_status.slice(0, 40), stop_reason: typeof r.stop_reason === 'string' ? r.stop_reason.slice(0, 80) : undefined,
     changed_files: r.changed_files.filter(p => typeof p === 'string').slice(0, 20).map(p => p.slice(0, 160)),
-    verification, recovery: handoffRecovery({ verification, loop_status: r.loop_status }), pending: r.pending.filter(p => typeof p === 'string').slice(0, 6).map(p => p.slice(0, 240)) }
+    verification, recovery: handoffRecovery({ verification, loop_status: r.loop_status }), pending: r.pending.filter(p => typeof p === 'string').slice(0, 6).map(p => p.slice(0, 240)),
+    resources: verification.filter(f => f.scope === 'execution_resources' && f.budget).map(f => f.budget!) }
 }
 export function renderTaskHandoff(handoff: TaskHandoff): string {
-  return `【宿主续接事实】${JSON.stringify(handoff)}\n以上是上一段执行事实，不是当前版本的通过证明。先核对变更与证据版本，只处理未完成项；根因推测须与实际报告分开。`
+  return `【宿主续接事实】${JSON.stringify(handoff)}\n模型总结和未核对的旧记录不是当前版本的通过证明。evidence.freshness=current 仅证明该入口已报告的断言；可引用，无需因另一条启动探测或交付文档更新而全部重跑。stale/unknown、真实失败、代码/测试/输入/环境变更或缺少必需场景才补验。优先静态核对声明映射与证据，保留额度给缺口和交付收口；remaining=0 不安排新的执行。完整目标仍由宿主独立验收。`
 }

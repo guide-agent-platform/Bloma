@@ -119,6 +119,9 @@ export interface AgentLoopTool {
    * 即使声明 true 也退串行**（并行计数会击穿预算上限），见 executeTurnToolCalls。
    */
   parallelSafe?: boolean
+  /** Host evidence hooks run after tool wrappers (including write audits). */
+  recordFeedback?(feedback: ToolFeedback, ctx: ToolContext): void
+  collectFeedback?(ctx: ToolContext): ToolFeedback[]
   execute(input: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutcome>
 }
 
@@ -918,7 +921,11 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     return {
       ...r,
       ...(ctx.state.successful_file_changes ? { files_changed: ctx.state.successful_file_changes.slice(0, 20) } : {}),
-      ...(ctx.state.latest_tool_feedback ? { tool_feedback: retainedToolFeedback([...Object.values(ctx.state.latest_tool_feedback), ...Object.values(ctx.state.terminal_budget_feedback ?? {})]) } : {}),
+      tool_feedback: retainedToolFeedback([...Object.values(ctx.state.latest_tool_feedback ?? {}).map(f => f.evidence
+        ? { ...f, verification: 'unverified' as const, evidence: { ...f.evidence, freshness: 'unknown' as const } } : f), ...input.tools.flatMap(tool => {
+        try { return tool.collectFeedback?.(ctx) ?? [] } catch { return [{ schema_version: 1 as const, execution: 'not_run' as const, verification: 'unverified' as const,
+          category: 'verification_harness' as const, recovery: 'inspect' as const, reason: 'EVIDENCE_COLLECTION_FAILED' }] }
+      }), ...Object.values(ctx.state.terminal_budget_feedback ?? {})]),
       ...(blocked ? { blocked_report: blocked } : {}),
       ...(transportRecoveries > 0 ? { transport_recoveries: transportRecoveries } : {}),
       // 轮级 usage（纯增量：采集方消费，非采集方零感知）
@@ -1750,7 +1757,13 @@ export async function executeTurnToolCalls(
     input.publish('tool_call_started', { tool: use.name, turn, tool_call_id: use.id, input_summary: summarizeJson(use.input) })
     const startedAt = Date.now()
     const outcome = await executeToolCall(input, toolByName, budgetUsed, use, ctx)
-    const feedback = feedbackForTool(use.name, outcome)
+    let feedback = feedbackForTool(use.name, outcome)
+    if (feedback) {
+      try { toolByName.get(use.name)?.recordFeedback?.(feedback, ctx) } catch {
+        feedback = { ...feedback, verification: 'unverified', category: 'verification_harness', recovery: 'inspect', reason: 'EVIDENCE_RECORD_FAILED',
+          ...(feedback.evidence ? { evidence: { ...feedback.evidence, freshness: 'unknown' } } : {}) }
+      }
+    }
     if (['write_file', 'edit_file'].includes(use.name) && !outcome.isError && !outcome.budgetExhausted && typeof outcome.detail?.path === 'string') {
       ctx.state.successful_file_changes = [...new Set([...(ctx.state.successful_file_changes ?? []), outcome.detail.path])]
     }
