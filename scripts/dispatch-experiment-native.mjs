@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+import { cancelExperimentProject } from './dispatch-experiment-native-control.mjs'
 const [command, ...args] = process.argv.slice(2)
 const option = (name, fallback) => { const i = args.indexOf(`--${name}`); return i < 0 ? fallback : args[i + 1] }
 const home = resolve(option('home', ''))
@@ -78,7 +79,7 @@ try {
     await sleep(2000)
     const current = project(), experiment = config(current.project_id)
     if (existsSync(stopFile)) {
-      await page.evaluate(async id => { await window.electronAPI.agent.cancel({ request_id: crypto.randomUUID(), project_id: id }) }, current.project_id)
+      report.cancellation = await page.evaluate(cancelExperimentProject, { projectId: current.project_id, sessionId: experiment.parent_session_id ?? current.last_session_id })
       report.outcome = 'user-stopped'; break
     }
     const status = `${current.current_stage}/${current.desktop_phase ?? '-'}/${experiment.state}`
@@ -108,8 +109,8 @@ try {
   report.end_screen_text = (await page.locator('body').innerText()).slice(-16000)
   await page.screenshot({ path: join(reportDir, 'terminal.png') })
   if (report.outcome === 'timeout') {
-    await page.evaluate(async id => { const result = await window.electronAPI.agent.listSessions({ request_id: crypto.randomUUID(), project_id: id });
-      for (const session of result.data?.sessions ?? []) await window.electronAPI.agent.cancel({ request_id: crypto.randomUUID(), session_id: session.session_id }) }, report.project_id)
+    const current = project(), experiment = config(current.project_id)
+    report.cancellation = await page.evaluate(cancelExperimentProject, { projectId: current.project_id, sessionId: experiment.parent_session_id ?? current.last_session_id })
   }
 } catch (error) {
   report.outcome = 'driver-error'; report.error = error.message; log(error.message)
