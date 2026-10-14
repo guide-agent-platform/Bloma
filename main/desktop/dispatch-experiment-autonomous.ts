@@ -1,6 +1,7 @@
 import type { AgentLoopTool, ToolContext, ToolOutcome } from '../agent/loop/agent-loop'
 import { findDelegation } from '../agent/delegation/agent-collaboration'
 import { experimentLimits, recordExperiment, validateExperimentTasks, writeExperiment, type DispatchExperiment, type ExperimentTask } from './dispatch-experiment'
+import { assertExperimentWorkerRecovery } from './dispatch-experiment-recovery'
 
 export function autonomousTaskBook(config: DispatchExperiment): string {
   const limits = experimentLimits(config)
@@ -51,6 +52,7 @@ export function wrapAutonomousDispatcherTools(tools: AgentLoopTool[], config: Di
           const slot = initial ? Object.keys(config.workers).find(id => !config.workers[id].has_executed)
             : Object.keys(config.workers).find(id => config.workers[id].delegation_id === input.delegation_id)
           const existing = slot ? config.workers[slot] : undefined
+          if (existing) assertExperimentWorkerRecovery(config, findDelegation(ctx.sessionId, existing.delegation_id))
           const ids = input.task_ids === undefined && existing ? existing.task_ids : input.task_ids as string[]
           if (!Array.isArray(ids) || !ids.length || new Set(ids).size !== ids.length || ids.some(id => !config.tasks.some(task => task.id === id))) throw new Error('EXPERIMENT_TASK_NOT_ASSIGNED')
           const selected = config.tasks.filter(task => ids.includes(task.id))
@@ -60,6 +62,7 @@ export function wrapAutonomousDispatcherTools(tools: AgentLoopTool[], config: Di
             if (inside.has(dependency)) continue
             const owner = Object.values(config.workers).find(worker => worker.task_ids.includes(dependency))
             const record = owner && findDelegation(ctx.sessionId, owner.delegation_id)
+            assertExperimentWorkerRecovery(config, record)
             if (!owner?.has_executed || record?.status !== 'completed' || record.loopStatus !== 'completed') throw new Error('EXPERIMENT_DEPENDENCY_WAIT')
           }
           const scopes = selected.flatMap(task => task.writes).map(path => path.toLowerCase())
@@ -76,7 +79,8 @@ export function wrapAutonomousDispatcherTools(tools: AgentLoopTool[], config: Di
           const instruction = selected.map(task => `[${task.id}] ${task.instruction}\n依赖：${task.depends_on.join(',')}\n写入范围：${task.writes.join(',')}`).join('\n\n')
             + (typeof input.task === 'string' ? `\n调度反馈（保持已确认需求）：${input.task}` : '')
           if (existing) {
-            const status = findDelegation(ctx.sessionId, existing.delegation_id)?.status
+            const record = findDelegation(ctx.sessionId, existing.delegation_id)
+            const status = record?.status
             if (status === 'running') throw new Error('EXPERIMENT_WORKER_STILL_RUNNING')
             if (status === 'cancelled') throw new Error('EXPERIMENT_CANCELLED_WORKER_REQUIRES_NEW_RUN')
             const previous = existing.has_executed

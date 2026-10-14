@@ -93,7 +93,7 @@ function readSessionJsonl(sessionId: string): Array<{ role: string; content: Arr
 describe('runAgentLoop（PR2 L1）', () => {
   it('model, live event and truncated JSONL retain the same execution feedback', async () => {
     const events: Array<Record<string, unknown>> = []
-    const runner = tool('run_project_script', () => ({ output: 'FAIL 保存\n' + 'x'.repeat(9000), isError: true, detail: { code: 0, verification_status: 'fail', secret: 'not-forwarded' } }))
+    const runner = tool('run_project_script', () => ({ output: 'FAIL 保存\n' + 'x'.repeat(9000), isError: true, detail: { code: 0, verification_status: 'fail', scenarios: [{ name: '保存', outcome: 'fail' }], secret: 'not-forwarded' } }))
     const script = scriptedQuery([[toolUseMessage('execution-1', 'run_project_script')], [textMessage('需要修复')]])
     await runAgentLoop(baseInput({ tools: [runner], query: script.query, sessionId: 'feedback-loop-test', publish: (type, payload) => { if (type === 'tool_call_completed') events.push(payload) } }))
     const model = script.receivedMessages[1].at(-1)!.content as Array<{ content: string }>
@@ -251,6 +251,18 @@ describe('runAgentLoop（PR2 L1）', () => {
     // 第 2 次调用收到的是第 1 轮成功结果；第 3 次调用收到的才是超预算软着陆提示
     expect(budgetBlocks[0]).toBe('再转一次')
     expect(budgetBlocks[1]).toContain('预算已用尽')
+  })
+  it('stops after the first permanent budget refusal without buying a summary or retry call', async () => {
+    const runner = tool('run_project_script', () => ({ output: '续接不会清零', isError: true, budgetExhausted: true,
+      feedback: { schema_version: 1, execution: 'not_run', verification: 'unverified', category: 'budget',
+        budget: { resource: 'script_runs', scope: 'session', used: 12, limit: 12, remaining: 0, resets_on: 'new_run' } } }))
+    const { query, receivedMessages } = scriptedQuery([[toolUseMessage('stop-budget', 'run_project_script')], [textMessage('should never be requested')]])
+    const result = await runAgentLoop(baseInput({ query, tools: [runner] }))
+    expect(result.status).toBe('budget_exhausted')
+    expect(result.termination_detail?.reason).toBe('persistent_tool_budget')
+    expect(receivedMessages).toHaveLength(1)
+    expect(result.tool_feedback?.[0].recovery).toBe('stop')
+    expect(readFileSync(getAgentSessionPath('session-loop'), 'utf8')).toContain('stop-budget')
   })
 
   it('预算提示后模型收手（下一轮纯文本）→ 不算连续撞预算，completed', async () => {

@@ -5,19 +5,11 @@ import { buildAdvanceProtocolSection, buildDesktopChildBaseSystem, renderTaskTem
 import type { PhaseNode } from './dispatcher-phases'
 import { experimentLimits, recordExperiment, type DispatchExperiment } from './dispatch-experiment'
 import { bindExperimentWorkers, experimentRunSignal, guardExperimentQuery, lockExperimentModel } from './dispatch-experiment-models'
-import { createHash } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { getPromaHome } from '../../storage/config-paths'
 import { assertExperimentEvaluator } from './dispatch-experiment-evaluator'
 import { readExperimentEvents } from './dispatch-experiment-records'
-
-export function experimentInputsIntact(config: DispatchExperiment): boolean {
-  return Object.entries(config.protected_inputs ?? {}).every(([relative, hash]) => {
-    const path = join(getPromaHome(), relative)
-    return existsSync(path) && createHash('sha256').update(readFileSync(path)).digest('hex') === hash
-  })
-}
+import { experimentInputsIntact } from './dispatch-experiment-inputs'
+export { experimentInputsIntact } from './dispatch-experiment-inputs'
 
 export function bindExperimentInput(input: DesktopDispatchRunInput, config: DispatchExperiment, stage: 'implement' | 'verify'): DesktopDispatchRunInput {
   if (readExperimentEvents(config).events.some(event => event.event === 'run_finished')) throw new Error('EXPERIMENT_ALREADY_FINISHED_RESTORE_FRESH_RUN')

@@ -17,7 +17,7 @@ export { setChildRunContextProvider } from './child-run-context'
 export { buildChildSystemPrompt, buildDelegationPrompt } from './child-run-context'
 import { appendDelegationSettle, loadChildSessionSnapshot, replayTurnsFrom } from './delegation-persistence'
 import { buildCompletedDelegation, registerChildWithHost } from './completed-delegation'
-import { buildTaskHandoff, renderTaskHandoff, type TaskHandoff } from './task-handoff'
+import { buildTaskHandoff, handoffRecovery, renderTaskHandoff, type TaskHandoff } from './task-handoff'
 import { awaitDelegationState } from './delegation-wait'
 import { recordSessionActivity } from '../../platform/sessions/session-service'
 import type { AgentEvent, PromaPermissionMode } from '../../../shared/types'
@@ -622,6 +622,11 @@ export function continueDelegation(parent: ToolContext, delegationId: string, ta
   const record = findDelegation(parent.sessionId, delegationId)
   if (!record) throw new Error(`未找到当前会话下的委派: ${delegationId}`)
   if (record.status === 'running') throw new Error(`委派 ${delegationId} 仍在运行中，不能继续（先 wait_for_delegations 或 stop_delegation）。`)
+  const recovery = record.taskHandoff ? handoffRecovery(record.taskHandoff) : 'inspect'
+  if ((record.loopStatus === 'budget_exhausted' || record.taskHandoff?.verification.some(f => f.category === 'budget')) && recovery !== 'resume') {
+    throw new Error(recovery === 'stop' ? 'DELEGATION_BUDGET_REQUIRES_NEW_RUN: 累计额度不会因续接恢复，未启动模型请求。'
+      : 'DELEGATION_BUDGET_RECOVERY_UNKNOWN: 预算重置条件未明确，先检查宿主额度，未启动模型请求。')
+  }
   const parentCtx = parentContexts.get(parent.sessionId)
   if (!parentCtx) {
     throw new Error(`未找到父循环上下文（sessionId=${parent.sessionId}）。委派工具只在主 agent loop 内可用。`)

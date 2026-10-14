@@ -6,6 +6,11 @@ describe('declared tool schema validation', () => {
   it('permits empty file content and leaves extra fields to the tool', () => {
     expect(validateToolInput('write_file', { path: 'a.py', content: '', extra: true }, schema)).toBeUndefined()
   })
+  it('rejects empty and whitespace-only declared file paths while preserving empty file content', () => {
+    const paths = { ...schema, properties: { ...schema.properties, path: { type: 'string', minLength: 1, pattern: '\\S' } } }
+    for (const path of ['', '   ', '\t']) expect(validateToolInput('write_file', { path, content: '' }, paths)).toContain('input.path')
+    expect(validateToolInput('write_file', { path: 'empty.py', content: '' }, paths)).toBeUndefined()
+  })
   it.each([null, [], 'raw'])('rejects non-object tool bodies', value => {
     expect(validateToolInput('write_file', value, schema)).toContain('input 应为 object')
   })

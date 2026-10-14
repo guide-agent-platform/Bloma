@@ -62,4 +62,14 @@ describe('pre-dispatch required artifact permission coverage', () => {
     f.config.required_writes.push('new-mandate.json')
     expect(() => writeExperiment(f.config)).toThrow('EXPERIMENT_CONDITION_CHANGED')
   })
+  it('binds persistent execution limits to the condition fingerprint and rejects invalid capacities', () => {
+    const f = fixture()
+    f.config.execution_limits = { script_runs: 12, install_calls: 4 }
+    f.config.condition_hash = experimentConditionHash(f.config)
+    writeExperiment(f.config)
+    f.config.execution_limits.script_runs = 13
+    expect(() => writeExperiment(f.config)).toThrow('EXPERIMENT_CONDITION_CHANGED')
+    f.config.execution_limits.script_runs = 0
+    expect(() => writeExperiment(f.config)).toThrow('EXPERIMENT_INVALID_EXECUTION_LIMITS')
+  })
 })

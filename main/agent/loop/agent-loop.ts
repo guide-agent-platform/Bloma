@@ -17,6 +17,7 @@ import { buildTargetedDegenerateFeedback, classifyDsmlRecovery, parseDsmlInvokes
 import { createDsmlDisplayFilter } from './dsml-display-filter'
 import { validateToolInput } from './tool-input-validation'
 import { feedbackForTool } from './tool-feedback'
+import { persistentBudgetBlocked, retainedToolFeedback } from '../../../shared/tool-feedback-policy'
 import { formatToolFeedback, type ToolFeedback } from '../../../shared/tool-feedback'
 import { userFacingWrapUp } from '../prompting/user-facing-output'
 import { isHostControlText } from '../../../shared/message-presentation'
@@ -48,6 +49,7 @@ import { drainSteerQueue, markLoopActive, markLoopInactive, markSteerMerged, pen
 /** 工具执行期共享状态（同一 loop 会话内跨工具可变；agent-tools 维护语义字段）。 */
 export interface AgentLoopToolState {
   latest_tool_feedback?: Record<string, ToolFeedback>
+  terminal_budget_feedback?: Record<string, ToolFeedback>
   successful_file_changes?: string[]
   /** 最近一次成功 run_preview 的预览地址（run_gwt_tests 浏览器/静态探针依赖） */
   preview_url?: string
@@ -916,7 +918,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     return {
       ...r,
       ...(ctx.state.successful_file_changes ? { files_changed: ctx.state.successful_file_changes.slice(0, 20) } : {}),
-      ...(ctx.state.latest_tool_feedback ? { tool_feedback: Object.values(ctx.state.latest_tool_feedback).slice(-8) } : {}),
+      ...(ctx.state.latest_tool_feedback ? { tool_feedback: retainedToolFeedback([...Object.values(ctx.state.latest_tool_feedback), ...Object.values(ctx.state.terminal_budget_feedback ?? {})]) } : {}),
       ...(blocked ? { blocked_report: blocked } : {}),
       ...(transportRecoveries > 0 ? { transport_recoveries: transportRecoveries } : {}),
       // 轮级 usage（纯增量：采集方消费，非采集方零感知）
@@ -1183,7 +1185,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
       }
       return attachUsage(loopCancelled(turns, finalText, toolCalls, 'tool_execution', input.signal))
     }
-    const { resultBlocks, budgetStallThisTurn } = execution
+    const { resultBlocks, budgetStallThisTurn, terminalBudgetStop } = execution
     // P1-05（2026-09-26 审计）：本轮工具调用回填执行结果——resultBlocks 与 turnToolUses
     // 按源序对齐，拒绝/失败写入（is_error）不再被下游零编辑守卫计为有效修改。
     resultBlocks.forEach((block, i) => {
@@ -1194,6 +1196,8 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     appendLoopMessage(input.sessionId, 'user', resultBlocks)
     messages.push({ role: 'assistant', content: assistantBlocks })
     messages.push({ role: 'user', content: resultBlocks })
+    if (terminalBudgetStop) return attachUsage({ status: 'budget_exhausted', turns, finalText, toolCalls,
+      termination_detail: { reason: 'persistent_tool_budget' } })
 
     // W2-E3：验证工具执行后事件驱动保存（检查点的验证状态/候选指纹随之更新）
     if (turnCalls.some((call) => call.name === 'run_gwt_tests')) emitCheckpoint('gwt', turn)
@@ -1658,14 +1662,16 @@ async function executeToolCall(
   // 副作用：非 allow-all 下 safe 工具也一并拒绝，生产 loop 恒 allow-all，接受
   //（该行为已由 tests/unit/agent-loop-permission.test.ts 锁定，防未来无意放宽）。
   if (input.permissionMode !== 'allow-all') {
-    return { output: `权限拒绝：本次运行不允许执行「${use.name}」。请改用其他方式完成，或直接输出当前进展总结。`, isError: true }
+    return { output: `权限拒绝：本次运行不允许执行「${use.name}」。请改用其他方式完成，或直接输出当前进展总结。`, isError: true,
+      feedback: { schema_version: 1, execution: 'not_run', verification: 'unverified', source: 'host', category: 'permission', reason: 'PERMISSION_MODE', recovery: 'wait_permission' } }
   }
   try {
     // 与 AbortSignal 竞速（withAbort）：即便 canUseTool 意外落 pending（如未来
     // dangerous-under-allow-all），取消也能中断，绝不进程级永久阻塞。
     const permission = await withAbort(canUseTool(use.name, toolInput, input.sessionId, input.permissionMode, input.projectId), input.signal)
     if (permission.behavior === 'deny') {
-      return { output: `权限拒绝：${permission.message ?? `本次运行不允许执行「${use.name}」`}。请按拒因调整操作，或直接输出当前进展总结。`, isError: true }
+      return { output: `权限拒绝：${permission.message ?? `本次运行不允许执行「${use.name}」`}。请按拒因调整操作，或直接输出当前进展总结。`, isError: true,
+        feedback: { schema_version: 1, execution: 'not_run', verification: 'unverified', source: 'host', category: 'permission', reason: 'PERMISSION_DENIED', recovery: 'wait_permission' } }
     }
   } catch (error) {
     return { output: `权限检查失败：${errorMessage(error)}`, isError: true }
@@ -1707,7 +1713,7 @@ export const PARALLEL_CONCURRENCY_LIMIT = 4
  *  2026-09-26 审计 P1-04：不再整批丢弃——调用方补齐配对 tool_result 后落盘）。 */
 export type TurnToolExecution =
   | { cancelled: true; partialResults?: MessageContentBlock[] }
-  | { cancelled: false; resultBlocks: MessageContentBlock[]; budgetStallThisTurn: boolean }
+  | { cancelled: false; resultBlocks: MessageContentBlock[]; budgetStallThisTurn: boolean; terminalBudgetStop: boolean }
 
 /**
  * 单轮工具执行（P1-2）：保持「整批 tool_result 按源序进同一条 user 消息」不变式，
@@ -1737,6 +1743,7 @@ export async function executeTurnToolCalls(
 ): Promise<TurnToolExecution> {
   const resultBlocks: MessageContentBlock[] = []
   let budgetStallThisTurn = false
+  let terminalBudgetStop = false
 
   // 单工具全流程：事件 + 执行；返回结果块（push 交给调用方——源序由调用方保证）。
   const runOne = async (use: { name: string; input?: Record<string, unknown>; id?: string }): Promise<MessageContentBlock> => {
@@ -1747,7 +1754,12 @@ export async function executeTurnToolCalls(
     if (['write_file', 'edit_file'].includes(use.name) && !outcome.isError && !outcome.budgetExhausted && typeof outcome.detail?.path === 'string') {
       ctx.state.successful_file_changes = [...new Set([...(ctx.state.successful_file_changes ?? []), outcome.detail.path])]
     }
-    if (feedback) (ctx.state.latest_tool_feedback ??= {})[use.name] = feedback
+    if (feedback) {
+      const facts = ctx.state.latest_tool_feedback ??= {}
+      delete facts[use.name]; facts[use.name] = feedback
+      if (persistentBudgetBlocked([feedback])) (ctx.state.terminal_budget_feedback ??= {})[use.name] = feedback
+      if (persistentBudgetBlocked([feedback])) terminalBudgetStop = true
+    }
     if (outcome.budgetExhausted) budgetStallThisTurn = true
     input.publish('tool_call_completed', {
       tool: use.name,
@@ -1818,7 +1830,7 @@ export async function executeTurnToolCalls(
     }
     index = end
   }
-  return { cancelled: false, resultBlocks, budgetStallThisTurn }
+  return { cancelled: false, resultBlocks, budgetStallThisTurn, terminalBudgetStop }
 }
 
 /**

@@ -18,6 +18,20 @@ describe('host task handoff', () => {
     expect(h.pending.join(' ')).toContain('save')
     expect(renderTaskHandoff(h)).toContain('不是当前版本的通过证明')
   })
+  it('preserves a non-resumable budget fact through host handoff serialization', () => {
+    const h = buildTaskHandoff({ ...base, status: 'budget_exhausted', tool_feedback: [{ schema_version: 1, execution: 'not_run', verification: 'unverified', category: 'budget',
+      budget: { resource: 'script_runs', scope: 'session', used: 12, limit: 12, remaining: 0, resets_on: 'new_run' } }] })
+    expect(h.recovery).toBe('stop')
+    expect(readTaskHandoff(JSON.parse(JSON.stringify(h)))).toEqual(h)
+    expect(renderTaskHandoff(h)).toContain('"recovery":"stop"')
+    expect(buildTaskHandoff({ ...base, status: 'turn_limit' }).recovery).toBe('resume')
+    expect(buildTaskHandoff({ ...base, status: 'budget_exhausted' }).recovery).toBe('inspect')
+    const many = [...h.verification, ...Array.from({ length: 12 }, () => ({ schema_version: 1 as const, execution: 'completed' as const, verification: 'not_applicable' as const, scope: 'read' }))]
+    const compact = buildTaskHandoff({ ...base, status: 'completed', tool_feedback: many })
+    expect(compact.verification).toHaveLength(8)
+    expect(compact.recovery).toBe('stop')
+    expect(readTaskHandoff(JSON.parse(JSON.stringify(compact)))?.recovery).toBe('stop')
+  })
   it('persists typed pending work through restart snapshots and rejects malformed metadata', () => {
     const h = buildTaskHandoff({ ...base, status: 'budget_exhausted' })
     appendDelegationSettle('handoff-roundtrip', 'completed', { resultSummary: 'summary', loopStatus: 'budget_exhausted', taskHandoff: h })

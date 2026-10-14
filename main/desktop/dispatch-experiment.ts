@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { getPromaHome } from '../../storage/config-paths'
 import { appendJsonLine, writeTextFileAtomic } from '../../storage/json-store'
 import { finishExperiment } from './dispatch-experiment-records'
+import type { DesktopExecutionLimits } from './execution-limits'
 
 export const EXPERIMENT_SWITCH = 'BLOMA_DISPATCH_EXPERIMENT'
 export const EXPERIMENT_POLICIES = ['single_worker', 'parallel_workers', 'autonomous', 'standalone'] as const
@@ -31,6 +32,7 @@ export interface DispatchExperiment {
   models?: ExperimentModels; limits?: ExperimentLimits; condition_hash?: string
   settings?: ExperimentSettings; protected_inputs?: Record<string, string>
   required_writes?: string[]
+  execution_limits?: DesktopExecutionLimits
   observed_models?: Partial<Record<keyof ExperimentModels, ExperimentModelReceipt>>
   started_at?: string; request_count?: number; plan_locked?: boolean
   tasks: ExperimentTask[]; workers: Record<string, ExperimentWorker>
@@ -40,7 +42,7 @@ export const experimentLimits = (config: DispatchExperiment) => config.limits ??
 export function experimentConditionHash(config: DispatchExperiment): string {
   return createHash('sha256').update(JSON.stringify({ mode: config.mode, policy: config.policy,
     planning: config.planning ?? 'fixed', models: config.models, limits: config.limits, settings: config.models ? config.settings ?? DEFAULT_EXPERIMENT_SETTINGS : config.settings,
-    protected_inputs: config.protected_inputs, required_writes: config.required_writes, input_hash: config.input_hash, runtime_hash: config.runtime_hash,
+    protected_inputs: config.protected_inputs, required_writes: config.required_writes, execution_limits: config.execution_limits, input_hash: config.input_hash, runtime_hash: config.runtime_hash,
     sample: config.sample, evaluator_hash: config.evaluator_hash })).digest('hex')
 }
 export function validateExperimentTasks(tasks: ExperimentTask[], maximum: number): void {
@@ -93,6 +95,9 @@ export function validateExperiment(raw: unknown): DispatchExperiment {
   if (value.evaluator_hash && !/^[a-f0-9]{64}$/.test(value.evaluator_hash)) throw new Error('EXPERIMENT_INVALID_EVALUATOR_HASH')
   if (value.settings && (!Number.isFinite(value.settings.temperature) || value.settings.temperature < 0 || value.settings.temperature > 2
     || !['off', 'low', 'high', 'max'].includes(value.settings.thinking_level))) throw new Error('EXPERIMENT_INVALID_SETTINGS')
+  if (value.execution_limits !== undefined && (!value.execution_limits || typeof value.execution_limits !== 'object' || Array.isArray(value.execution_limits)
+    || Object.entries(value.execution_limits).some(([key, n]) => !['script_runs', 'install_calls'].includes(key) || !Number.isSafeInteger(n) || n < 1 || n > 128)
+    || ['script_runs', 'install_calls'].some(key => !(key in value.execution_limits!)))) throw new Error('EXPERIMENT_INVALID_EXECUTION_LIMITS')
   if (value.required_writes !== undefined && (!Array.isArray(value.required_writes) || value.required_writes.length > 64
     || value.required_writes.some(path => typeof path !== 'string' || !path || path !== path.trim() || path.endsWith('/')
       || path.includes('\\') || path.startsWith('/') || path.includes(':') || path.split('/').some(part => !part || part === '.' || part === '..'))

@@ -15,7 +15,7 @@
  * - spawn/解释器解析可注入（测试零真实子进程）；执行器复用 execFileDriverSpawn
  *   （超时强杀/ENOENT/退出码语义与契约驱动同源）。
  */
-import { existsSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 import { execFile } from 'node:child_process'
 import type { AgentLoopTool } from '../agent/loop/agent-loop'
@@ -24,11 +24,13 @@ import { findProject } from '../project/project-service'
 import { consumeProjectAttempt } from '../platform/execution/project-attempts'
 import { scriptExecutionFacts } from './script-execution-facts'
 import type { ToolBudgetFact } from '../../shared/tool-feedback'
+import { DEFAULT_DESKTOP_EXECUTION_LIMITS } from './execution-limits'
+import { getPromaHome } from '../../storage/config-paths'
 
 const DEFAULT_TIMEOUT_MS = 90_000
 const MAX_TIMEOUT_MS = 180_000
 const MIN_TIMEOUT_MS = 5_000
-const DEFAULT_MAX_RUNS = 12
+const DEFAULT_MAX_RUNS = DEFAULT_DESKTOP_EXECUTION_LIMITS.script_runs
 const MAX_ARGS = 8
 /** 最小生存 env（同 process-driver MINIMUM_SURVIVAL_ENV 家族）+ PATH/TEMP——解释器解析与临时目录刚需。 */
 const CHILD_EXEC_ENV_KEYS: readonly string[] = [
@@ -164,6 +166,10 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
       }
 
       const startedAt = Date.now()
+      if (!/^[A-Za-z0-9_-]+$/.test(ctx.sessionId)) return { output: 'SCRIPT_CONTEXT_INVALID', isError: true,
+        feedback: { schema_version: 1, execution: 'not_run', verification: 'unverified', category: 'environment', recovery: 'inspect' } }
+      const appData = join(getPromaHome(), 'execution-app-data', projectId, ctx.sessionId)
+      mkdirSync(appData, { recursive: true })
       try {
         const attempt = consumeProjectAttempt(projectId, `script:${ctx.sessionId}`, maxRuns)
         if (!attempt.allowed) return { output: `本任务累计执行预算用尽（${attempt.used}/${maxRuns} 次），续接不会清零。保存未完成项后停止。`, isError: true, budgetExhausted: true,
@@ -175,7 +181,7 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
         const { code, stdout, stderr } = await spawn({
           command: [python, ...(script ? [target] : ['-c', inlineCode]), ...args],
           timeoutMs,
-          env: buildChildExecEnv(process.env),
+          env: { ...buildChildExecEnv(process.env), APP_DATA_DIR: appData },
           cwd: rootReal,
           signal: ctx.signal,
         })

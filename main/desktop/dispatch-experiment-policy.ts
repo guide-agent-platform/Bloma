@@ -5,6 +5,11 @@ import { recordExperiment, writeExperiment, type DispatchExperiment, type Experi
 import type { PhaseNode } from './dispatcher-phases'
 import { autonomousTaskBook, wrapAutonomousDispatcherTools } from './dispatch-experiment-autonomous'
 import { bindExperimentWorkers, lockExperimentModel } from './dispatch-experiment-models'
+import { assertExperimentWorkerRecovery } from './dispatch-experiment-recovery'
+import { auditScriptSourceWrites, withProjectWriteLease } from './source-write-audit'
+import { getPromaHome } from '../../storage/config-paths'
+import { join } from 'node:path'
+import { finishExperiment } from './dispatch-experiment-records'
 
 const pendingSlots = new WeakMap<DispatchExperiment, { slot: string; task_ids: string[] }>()
 export async function withExperimentSlot(config: DispatchExperiment, slot: string, ids: string[], action: () => Promise<ToolOutcome>): Promise<ToolOutcome> {
@@ -81,6 +86,7 @@ export function wrapExperimentDispatcherTools(tools: AgentLoopTool[], config: Di
       if (within.has(dependency)) continue // one worker executes its internal graph sequentially
       const worker = Object.values(config.workers).find(item => item.task_ids.includes(dependency))
       const record = worker && findDelegation(ctx.sessionId, worker.delegation_id)
+      assertExperimentWorkerRecovery(config, record)
       if (!worker?.has_executed || record?.status !== 'completed' || record.loopStatus !== 'completed') throw new Error('EXPERIMENT_DEPENDENCY_WAIT')
     }
   }
@@ -103,6 +109,7 @@ export function wrapExperimentDispatcherTools(tools: AgentLoopTool[], config: Di
             : Object.keys(config.workers).find(id => config.workers[id].delegation_id === input.delegation_id)
           if (!slot) throw new Error('EXPERIMENT_WORKER_NOT_ASSIGNED')
           const tasks = taskFor(slot), existing = config.workers[slot]
+          if (existing) assertExperimentWorkerRecovery(config, findDelegation(ctx.sessionId, existing.delegation_id))
           ready(tasks, ctx, slot)
           const task = tasks.map(item => `[${item.id}] ${item.instruction}\n依赖：${item.depends_on.join(',') || '无'}\n写入范围：${item.writes.join(',')}`).join('\n\n')
             + '\n公共集成与原生验证必须如实完成，执行结束不等于验收通过。'
@@ -150,19 +157,31 @@ export function experimentTasksFinished(config: DispatchExperiment): boolean {
   }))
 }
 export function wrapExperimentWorkerTools(tools: AgentLoopTool[], config: DispatchExperiment, root: string): AgentLoopTool[] {
+  const protectedPaths = Object.keys(config.protected_inputs ?? {}).map(p => relative(resolve(root), join(getPromaHome(), p)).replaceAll('\\', '/'))
+    .filter(p => !p.startsWith('../'))
   return tools.map(tool => ({ ...tool, execute: async (input, ctx) => {
     const worker = Object.values(config.workers).find(item => item.child_session_id === ctx.sessionId)
     // A newly started child may ask the model before its registration reaches this wrapper;
     // tool execution happens after the parent has synchronously registered its result.
-    const writes = config.tasks.filter(task => worker?.task_ids.includes(task.id)).flatMap(task => task.writes)
+    const writes = config.policy === 'standalone' ? undefined : config.tasks.filter(task => worker?.task_ids.includes(task.id)).flatMap(task => task.writes)
+    const invoke = async (): Promise<ToolOutcome> => {
     if (['write_file', 'edit_file'].includes(tool.name)) {
       const raw = String(input.path ?? ''), path = relative(resolve(root), resolve(root, raw)).replaceAll('\\', '/')
-      if (!worker || path.startsWith('../') || !writes.some(scope => matches(path.toLowerCase(), scope.toLowerCase()))) {
+      if ((config.policy !== 'standalone' && !worker) || path.startsWith('../') || protectedPaths.some(p => p.toLowerCase() === path.toLowerCase())
+        || writes && !writes.some(scope => matches(path.toLowerCase(), scope.toLowerCase()))) {
         recordExperiment(config, 'write_rejected', { session_id: ctx.sessionId, tool: tool.name, path })
-        return { output: `EXPERIMENT_WRITE_OUTSIDE_ASSIGNMENT: 被拒路径=${path}；当前可写范围=${writes.join(', ') || '无'}。`
-          + '请在已有授权文件或目录中实现及补测；不能靠修改任务说明扩大权限。无法在现有范围内完成时向父会话说明具体阻碍。', isError: true }
+        return { output: `EXPERIMENT_WRITE_OUTSIDE_ASSIGNMENT: 被拒路径=${path}；当前可写范围=${writes?.join(', ') || '业务源文件（冻结输入除外）'}。`
+          + '请在已有授权文件或目录中实现及补测；不能靠修改任务说明扩大权限。无法在现有范围内完成时向父会话说明具体阻碍。', isError: true,
+          feedback: { schema_version: 1, execution: 'not_run', verification: 'unverified', source: 'host', scope: 'assigned_source_files', category: 'permission', reason: 'EXPERIMENT_WRITE_OUTSIDE_ASSIGNMENT', recovery: 'correct_input' } }
       }
     }
+    if (tool.name === 'run_project_script') {
+      try { return await auditScriptSourceWrites(root, writes, protectedPaths, () => tool.execute(input, ctx)) }
+      catch (e) { finishExperiment(config, 'failed', 'EXPERIMENT_SOURCE_AUDIT_FAILED'); throw e }
+    }
     return tool.execute(input, ctx)
+    }
+    return ['write_file', 'edit_file', 'run_project_script', 'install_packages'].includes(tool.name)
+      ? withProjectWriteLease(root, ctx.signal, invoke) : invoke()
   } }))
 }

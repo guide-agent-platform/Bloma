@@ -167,6 +167,7 @@ describe('host tool boundaries', () => {
     expect(refused.output).toContain('two.py')
     expect(refused.output).toContain('one.py')
     expect(refused.output).toContain('已有授权文件')
+    expect(refused.feedback).toMatchObject({ execution: 'not_run', category: 'permission', recovery: 'correct_input' })
     expect((await tool.execute({ path: '../escape.py' }, child)).isError).toBe(true)
     expect(execute).toHaveBeenCalledTimes(1)
   })

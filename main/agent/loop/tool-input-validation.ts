@@ -21,6 +21,14 @@ export function validateToolInput(name: string, input: unknown, schema: Record<s
     }
     if (types.length && !types.some(matches)) { errors.push(`${path} 应为 ${types.join('/')}`); return }
     if (Array.isArray(definition.enum) && !definition.enum.some(option => option === value)) errors.push(`${path} 不在允许值中`)
+    if (typeof value === 'string') {
+      if (Number.isSafeInteger(definition.minLength) && value.length < Number(definition.minLength)) errors.push(`${path} 长度小于 ${definition.minLength}`)
+      if (Number.isSafeInteger(definition.maxLength) && value.length > Number(definition.maxLength)) errors.push(`${path} 长度大于 ${definition.maxLength}`)
+      if (typeof definition.pattern === 'string') {
+        try { if (!new RegExp(definition.pattern).test(value)) errors.push(`${path} 不匹配允许格式`) }
+        catch { errors.push(`${path} 的宿主 schema 正则无效`) }
+      }
+    }
     if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
       const record = value as Record<string, unknown>
       for (const key of Array.isArray(definition.required) ? definition.required : []) {

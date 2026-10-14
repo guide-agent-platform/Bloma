@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -6,8 +6,10 @@ import { createHash } from 'node:crypto'
 import { fetchWithMonetaryBudget, reserveModelRequest, reserveModelRequestWhenAvailable, readMonetaryBudget } from '../../main/platform/llm/monetary-budget'
 import { streamSSE } from '../../main/platform/upstream/providers/sse-reader'
 import { ANTHROPIC_SSE_ADAPTER } from '../../main/platform/upstream/providers/anthropic-sse-adapter'
+import { activateMonetaryPolicy } from '../../main/platform/llm/monetary-epoch'
 
 const roots: string[] = []
+beforeEach(() => { const registry = mkdtempSync(join(tmpdir(), 'bloma-epoch-')); roots.push(registry); vi.stubEnv('BLOMA_MONETARY_EPOCH_DIR', registry) })
 function fixture(cap = 3) {
   const root = mkdtempSync(join(tmpdir(), 'bloma-money-')); roots.push(root)
   const path = join(root, 'policy.json')
@@ -18,9 +20,42 @@ function fixture(cap = 3) {
 const url = 'https://api.example.com/v1/messages'
 const body = JSON.stringify({ model: 'M1', max_tokens: 1000, messages: [] })
 const state = (path: string) => JSON.parse(readFileSync(`${path}.state.json`, 'utf8'))
-afterEach(() => { vi.unstubAllEnvs(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
+afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 describe('shared monetary ceiling', () => {
+  it('rejects a second policy before HTTP and requires explicit carried-liability activation', async () => {
+    const a = fixture(), b = fixture(), fetcher = vi.fn()
+    reserveModelRequest(url, body, a)!.settle(undefined, false)
+    vi.stubEnv('BLOMA_MONETARY_POLICY', b)
+    await expect(fetchWithMonetaryBudget(url, { body }, fetcher)).rejects.toThrow('MONETARY_INACTIVE_EPOCH')
+    expect(fetcher).not.toHaveBeenCalled()
+    const started = Date.now()
+    vi.stubGlobal('fetch', fetcher)
+    await expect(streamSSE({ request: { url, body, headers: {} }, adapter: ANTHROPIC_SSE_ADAPTER,
+      onEvent: vi.fn() })).rejects.toThrow('MONETARY_INACTIVE_EPOCH')
+    expect(Date.now() - started).toBeLessThan(500)
+    expect(fetcher).not.toHaveBeenCalled()
+    expect(() => activateMonetaryPolicy(b)).toThrow('MONETARY_EPOCH_LIABILITIES_NOT_CARRIED')
+    const copied = state(a); copied.policy_hash = createHash('sha256').update(readFileSync(b)).digest('hex'); writeFileSync(`${b}.state.json`, JSON.stringify(copied))
+    activateMonetaryPolicy(b)
+    expect(() => reserveModelRequest(url, body, a)).toThrow('MONETARY_INACTIVE_EPOCH')
+    expect(readMonetaryBudget(b)[0].accounted_upper_rmb).toBe(2.008)
+  })
+  it('refuses switching an in-flight model and preserves the previous active policy', () => {
+    const a = fixture(), b = fixture(), ticket = reserveModelRequest(url, body, a)!
+    expect(() => activateMonetaryPolicy(b, { reset_models: ['M1'] })).toThrow('MONETARY_EPOCH_HAS_ACTIVE_REQUESTS')
+    ticket.settle({ input_tokens: 1, output_tokens: 1 }, true)
+    expect(() => reserveModelRequest(url, body, a)).not.toThrow()
+  })
+  it('allows an explicitly authorized new window and keeps the prior ledger bytes untouched', () => {
+    const a = fixture(), b = fixture()
+    reserveModelRequest(url, body, a)!.settle(undefined, false)
+    const old = readFileSync(`${a}.state.json`, 'utf8')
+    activateMonetaryPolicy(b, { reset_models: ['M1'] })
+    reserveModelRequest(url, body, b)!.settle({ input_tokens: 1, output_tokens: 1 }, true)
+    expect(readFileSync(`${a}.state.json`, 'utf8')).toBe(old)
+    expect(() => reserveModelRequest(url, body, a)).toThrow('MONETARY_INACTIVE_EPOCH')
+  })
   it('uses a trusted balance ceiling while keeping unknown per-request records unchanged', () => {
     const path = fixture(); reserveModelRequest(url, body, path)!.settle(undefined, false)
     const data = state(path), id = data.entries[0].id, evidencePath = `${path}.proof.json`
@@ -94,8 +129,10 @@ describe('shared monetary ceiling', () => {
     expect(() => reserveModelRequest(url, '{}', path)).toThrow('MONETARY_MODEL_NOT_ALLOWED')
     expect(() => reserveModelRequest(url, '{"model":"M1"}', path)).toThrow('MONETARY_OUTPUT_LIMIT_REQUIRED')
     reserveModelRequest(url, body, path)
-    writeFileSync(path, readFileSync(path, 'utf8') + '\n')
-    expect(() => reserveModelRequest(url, body, path)).toThrow('MONETARY_STATE_INVALID')
+    const original = readFileSync(path, 'utf8')
+    writeFileSync(path, original + '\n')
+    expect(() => reserveModelRequest(url, body, path)).toThrow('MONETARY_INACTIVE_EPOCH')
+    writeFileSync(path, original) // Isolate state corruption from the earlier epoch rejection.
     writeFileSync(`${path}.state.json`, '{}')
     expect(() => reserveModelRequest(url, body, path)).toThrow('MONETARY_STATE_INVALID')
   })

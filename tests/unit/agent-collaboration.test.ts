@@ -8,6 +8,7 @@ import { createToolState, type AgentLoopTool, type ToolContext } from '../../mai
 import { buildAgentTools, setWebResearchTimeoutForTests, WEB_RESEARCH_TIMEOUT_MS } from '../../main/agent/tools/agent-tools'
 import { buildDomainTools } from '../../main/coding/tool-handlers'
 import { buildDelegationTools } from '../../main/agent/delegation/delegation-tools'
+import { buildTaskHandoff } from '../../main/agent/delegation/task-handoff'
 import {
   MAX_RUNNING_DELEGATIONS_PER_PARENT,
   answerDelegationQuestion,
@@ -197,6 +198,21 @@ describe('委派协作 M1', () => {
     expect(calls).toBe(2) // t1 幂等、t2 独立
     expect(second).toBe(first)
     expect(other).not.toBe(first)
+  })
+
+  it('refuses persistent-budget continuation before resetting the child or calling its model', async () => {
+    registerParent(oneShotQuery('child result'))
+    const created = startDelegation(parentContext(), { task: '原任务' })
+    const record = findDelegation(parentSessionId, created.delegation_id)!
+    await record.completion
+    record.loopStatus = 'budget_exhausted'
+    record.taskHandoff = buildTaskHandoff({ status: 'budget_exhausted', turns: 1, finalText: '', toolCalls: [], tool_feedback: [{ schema_version: 1, execution: 'not_run', verification: 'unverified', category: 'budget',
+      budget: { resource: 'script_runs', scope: 'session', used: 12, limit: 12, remaining: 0, resets_on: 'new_run' } }] })
+    const previousGoal = record.goal, previousCompletion = record.completion
+    expect(() => continueDelegation(parentContext(), created.delegation_id, '再试一次')).toThrow('DELEGATION_BUDGET_REQUIRES_NEW_RUN')
+    expect(record.status).toBe('completed')
+    expect(record.goal).toBe(previousGoal)
+    expect(record.completion).toBe(previousCompletion)
   })
 
   it('wait_for_delegations：all 策略等全部收敛返回 completed 摘要', async () => {

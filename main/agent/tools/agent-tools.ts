@@ -435,7 +435,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     input_schema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: '项目内相对路径，如 index.html、src/app.js' },
+        path: { type: 'string', minLength: 1, pattern: '\\S', description: '项目内相对路径，如 index.html、src/app.js' },
         offset: { type: 'number', description: '起始行号（1 起）' },
         limit: { type: 'number', description: '读取行数（默认 100）' },
       },
@@ -557,7 +557,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     input_schema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: '项目内相对路径（如 index.html、src/app.js）' },
+        path: { type: 'string', minLength: 1, pattern: '\\S', description: '项目内相对路径（如 index.html、src/app.js）' },
         content: { type: 'string', description: '文件完整内容' },
       },
       required: ['path', 'content'],
@@ -607,7 +607,7 @@ export function buildAgentTools(options: BuildAgentToolsOptions): AgentLoopTool[
     input_schema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: '项目内相对路径' },
+        path: { type: 'string', minLength: 1, pattern: '\\S', description: '项目内相对路径' },
         old_string: { type: 'string', description: '（diff 模式）要替换的唯一原文片段' },
         new_string: { type: 'string', description: '（diff 模式）替换后的内容' },
         content: { type: 'string', description: '（whole 模式）修改后的完整文件内容' },

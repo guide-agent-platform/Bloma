@@ -61,6 +61,7 @@ import { experimentChildCreated, experimentPhase, experimentTasksFinished, wrapE
 import { bindExperimentInput, experimentInputsIntact, standaloneHistory, standaloneSystem, standaloneTools } from './dispatch-experiment-runtime'
 import { experimentLimits } from './dispatch-experiment'
 import { finishExperiment } from './dispatch-experiment-records'
+import { DEFAULT_DESKTOP_EXECUTION_LIMITS, type DesktopExecutionLimits } from './execution-limits'
 
 // 拆分 re-export（批10 旧账③ R7，2026-10-07）：收口判定族迁至 dispatcher-finalize.ts，
 // 旧路径消费者与测试零断链（hub 化惯例；与 dispatcher-telemetry 拆分同款）。
@@ -177,7 +178,7 @@ export function buildDispatcherTools(projectId: string): AgentLoopTool[] {
  * run_security_scan（扫描器已扩 .py 与 Python 危险调用硬红线），生成方必须自扫自修；
  * worktree 隔离模式下 buildDomainTools 返回空（验证归父会话，防假验证，语义不变）。
  */
-export function buildDesktopChildTools(projectId: string, role: DelegationRunRole, editFormat: 'diff' | 'whole'): AgentLoopTool[] {
+export function buildDesktopChildTools(projectId: string, role: DelegationRunRole, editFormat: 'diff' | 'whole', limits: DesktopExecutionLimits = DEFAULT_DESKTOP_EXECUTION_LIMITS): AgentLoopTool[] {
   return [
     buildResourceDiscoveryTool(projectId),
     ...buildAgentTools({ projectId, role, editFormat, realFullstackVariant: true }),
@@ -186,7 +187,7 @@ export function buildDesktopChildTools(projectId: string, role: DelegationRunRol
     // 自测的唯一通道（eba1cb83 实证：4 个自测脚本写了没门跑）；仅 implement 角色装配。
     // 迁移批同族加 install_packages（声明制 venv 安装，P1 依赖自由度）。
     ...(role === 'implement' || role === 'custom'
-      ? [buildChildScriptRunnerTool(projectId), buildInstallPackagesTool(projectId)]
+      ? [buildChildScriptRunnerTool(projectId, { maxRuns: limits.script_runs }), buildInstallPackagesTool(projectId, { maxCalls: limits.install_calls })]
       : []),
     // 探索驱动测试 A 档（2026-10-05，实施稿预审修订版）：research 子会话装配驱动桥。
     // 探索者与 implement 结构性分离（反自证）：只读面 + 驱动面，无任何写工具；
@@ -232,7 +233,8 @@ export function wrapWithDispatcherGate(tools: readonly AgentLoopTool[], phase: P
     if (gate === null) return tool
     return {
       ...tool,
-      execute: async (input, ctx): Promise<ToolOutcome> => ({ output: gate.message, isError: true }),
+      execute: async (input, ctx): Promise<ToolOutcome> => ({ output: gate.message, isError: true,
+        feedback: { schema_version: 1, execution: 'not_run', verification: 'unverified', source: 'host', category: 'permission', reason: 'DISPATCHER_ROLE_DENIED', recovery: 'correct_input' } }),
     }
   })
 }
@@ -296,6 +298,8 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     catch (error) { return { status: 'error', phase: node, error_message: error instanceof Error ? error.message : String(error) } }
   }
   const standalone = experiment?.policy === 'standalone'
+  const executionLimits = configuration?.execution_limits ?? DEFAULT_DESKTOP_EXECUTION_LIMITS
+  const childTools = (projectId: string, role: DelegationRunRole, format: 'diff' | 'whole') => buildDesktopChildTools(projectId, role, format, executionLimits)
 
   // 骨架 v2 物化（批8 下半）：scaffold/implement 阶段入口把平台骨架复制进项目根
   // （幂等 skip-existing，不覆盖子会话成果）——任务书引用 ui/PATTERNS.md 的前提。
@@ -327,7 +331,7 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     [...buildDispatcherTools(input.projectId).filter((tool) => checkDispatcherToolGate(node, tool.name) === null), ...(input.toolsOverride ?? [])],
     node,
   )
-  const tools = standalone ? standaloneTools([...buildDesktopChildTools(input.projectId, 'implement', 'diff'), buildDesktopEnvProbeTool()])
+  const tools = standalone ? wrapExperimentWorkerTools(standaloneTools([...childTools(input.projectId, 'implement', 'diff'), buildDesktopEnvProbeTool()]), experiment!, input.sandboxRoot ?? findProject(input.projectId).root_path)
     : experiment ? wrapExperimentDispatcherTools(gatedTools, experiment) : gatedTools
 
   const system = standalone ? standaloneSystem(promptNode, input) : buildDispatcherSystemPrompt(promptNode, {
@@ -373,8 +377,8 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     // 不再依赖全局单例——与 review 线并发时后注册者的全局覆盖不再串面。全局注册保留
     // 作缺省（单线场景/旧测试兼容）。
     childToolsBuilder: experiment && !standalone
-      ? (projectId, role, format) => wrapExperimentWorkerTools(buildDesktopChildTools(projectId, role, format), experiment, input.sandboxRoot ?? findProject(projectId).root_path)
-      : buildDesktopChildTools,
+      ? (projectId, role, format) => wrapExperimentWorkerTools(childTools(projectId, role, format), experiment, input.sandboxRoot ?? findProject(projectId).root_path)
+      : childTools,
     ...(experiment && !standalone ? { onChildCreated: (child: { delegationId: string; childSessionId: string }) => experimentChildCreated(experiment, child) } : {}),
     providerType: input.providerType,
   })
@@ -386,7 +390,10 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
       disposeParentDelegationState(input.sessionId)
       return { status: 'error', phase: node, error_message: error instanceof Error ? error.message : String(error) }
     }
-    recordExperiment(experiment, 'implement_started', { request_id: input.requestId, session_id: input.sessionId })
+    recordExperiment(experiment, 'implement_started', { request_id: input.requestId, session_id: input.sessionId,
+      resource_limits: { ...executionLimits, parent_turns: input.maxTurns ?? 40,
+        effective_executor_turns: standalone ? input.maxTurns ?? 40 : Math.min(input.maxTurns ?? 40, experimentLimits(experiment).executor_turns),
+        requested_executor_turns: experimentLimits(experiment).executor_turns, script_scope: 'session', script_resets_on: 'new_run' } })
   }
 
   const loopResult = await runAgentLoopSafe(input, node, tools, system, publish, collector).finally(() =>
@@ -521,6 +528,7 @@ export async function runDesktopDispatcherLoop(input: DesktopDispatchRunInput): 
     result = { status: 'error', error_message: error instanceof Error ? error.message : String(error) }
   }
   if (tracked) {
+    if (result.loopResult?.termination_detail?.reason === 'persistent_tool_budget') result.error_message = 'EXPERIMENT_EXECUTION_BUDGET_EXHAUSTED'
     recordExperiment(config, 'experiment_stage_finished', { phase: input.currentPhase, request_id: input.requestId,
       status: result.status, loop_status: result.loopResult?.status, duration_ms: Date.now() - startedAt,
       error_code: result.error_message?.match(/^[A-Z][A-Z0-9_]{2,}/)?.[0] })

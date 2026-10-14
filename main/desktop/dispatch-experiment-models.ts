@@ -7,6 +7,7 @@ import type { SDKQuery } from '../orchestration/orchestrator'
 import { getPromaHome } from '../../storage/config-paths'
 import { assertExperimentEvaluator } from './dispatch-experiment-evaluator'
 import { readExperimentEvents } from './dispatch-experiment-records'
+import { experimentInputsIntact } from './dispatch-experiment-inputs'
 import { DEFAULT_EXPERIMENT_SETTINGS, experimentLimits, experimentPath, recordExperiment, validateExperiment, writeExperiment, type DispatchExperiment, type ExperimentModel, type ExperimentModels } from './dispatch-experiment'
 
 export function resolveExperimentModel(binding: ExperimentModel): DelegationChannelOverride {
@@ -55,6 +56,7 @@ export function guardExperimentQuery(query: SDKQuery, config: DispatchExperiment
     const latest = validateExperiment(JSON.parse(readFileSync(experimentPath(config.project_id), 'utf8')))
     if (latest.run_id !== config.run_id || latest.condition_hash !== config.condition_hash) throw new Error('EXPERIMENT_RUN_CHANGED')
     if (readExperimentEvents(latest).events.some(event => event.event === 'run_finished')) throw new Error('EXPERIMENT_ALREADY_FINISHED_RESTORE_FRESH_RUN')
+    if (!experimentInputsIntact(latest)) throw new Error('EXPERIMENT_FROZEN_INPUT_CHANGED')
     assertExperimentEvaluator(getPromaHome(), latest.evaluator_hash)
     config.request_count = latest.request_count ?? 0; config.started_at = latest.started_at ?? config.started_at
     const expected = lockExperimentModel(config, role)

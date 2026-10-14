@@ -21,10 +21,11 @@ import { findProject } from '../project/project-service'
 import { WINDOWS_COMPONENT_CARDS } from './component-library'
 import { consumeProjectAttempt } from '../platform/execution/project-attempts'
 import { buildChildExecEnv } from './child-exec-tool'
+import { DEFAULT_DESKTOP_EXECUTION_LIMITS } from './execution-limits'
 
 const PIP_TIMEOUT_MS = 300_000
 const VENV_TIMEOUT_MS = 120_000
-const MAX_INSTALL_CALLS = 4
+const MAX_INSTALL_CALLS = DEFAULT_DESKTOP_EXECUTION_LIMITS.install_calls
 /** 包名/版本约束白名单格式：字母数字开头的包名 + 可选 PEP 440 约束段 */
 const PACKAGE_SPEC_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*(\s*(==|>=|<=|~=|!=|>|<)\s*[A-Za-z0-9][A-Za-z0-9.+!*-]*)?$/
 const MAX_PACKAGES_PER_CALL = 12

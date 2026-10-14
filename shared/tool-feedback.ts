@@ -67,6 +67,7 @@ export function readToolFeedback(content: string): ToolFeedback | undefined {
 export function toolFeedbackLabel(f: ToolFeedback): string {
   if (f.scope === 'call_declared') return '调用已登记'
   if (f.category === 'budget') return '额度已用尽'
+  if (f.category === 'permission') return f.execution === 'not_run' ? '未执行：权限限制' : '写入范围违规'
   if (f.execution === 'not_run') return '未执行'
   if (f.execution === 'running') return '进行中'
   if (f.execution === 'cancelled') return '已停止'

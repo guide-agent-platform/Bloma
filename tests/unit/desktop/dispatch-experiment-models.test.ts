@@ -1,5 +1,6 @@
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Channel, SDKMessage } from '../../../shared/types'
@@ -78,6 +79,20 @@ function sealed(manual = false) {
 }
 
 describe('research data collection', () => {
+  it('rechecks protected inputs before the next query, not only at stage entry', async () => {
+    const config = running(), protectedPath = 'agent-workspaces/default-software-builder/documents/p/prd.json'
+    config.protected_inputs = { [protectedPath]: createHash('sha256').update(readFileSync(join(home, protectedPath))).digest('hex') }
+    config.condition_hash = experimentConditionHash(config); writeExperiment(config)
+    let requests = 0
+    const query: SDKQuery = async function* () {
+      requests++
+      save(join(home, protectedPath), '{"changed_mid_loop":true}')
+      yield toolMessage('list-after-input-change', 'list_files', {})
+      yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+    }
+    await expect(run(query)).resolves.toMatchObject({ status: 'error', error_message: expect.stringContaining('EXPERIMENT_FROZEN_INPUT_CHANGED') })
+    expect(requests).toBe(1)
+  })
   it.each(['MONETARY_BUDGET_EXHAUSTED', 'EMPTY_MODEL_STREAM', 'PROVIDER_JSON_RESPONSE'])('keeps the exact infrastructure termination code %s', async code => {
     running()
     const query: SDKQuery = async function* () { throw new Error(`${code}: diagnostic detail`) }

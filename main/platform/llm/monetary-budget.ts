@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { acquireMonetaryEpoch } from './monetary-epoch'
 import { closeSync, existsSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import type { SDKMessage } from '../../../shared/types'
 
@@ -100,13 +101,17 @@ export function reserveModelRequest(url: string, body: string, policyPath = proc
     }
   }
   const id = randomUUID()
-  mutate(state => {
+  const releaseEpoch = (() => {
+    try { return acquireMonetaryEpoch(policyPath, rate, policyHash) }
+    catch (error) { return fail(error instanceof Error && error.message.startsWith('MONETARY_') ? error.message : 'MONETARY_EPOCH_INVALID') }
+  })()
+  try { mutate(state => {
     const spent = accountedSpent(state, host, rate.model)
     if (spent + reserved > Math.floor(rate.cap_rmb * 1_000_000)) fail('MONETARY_BUDGET_EXHAUSTED')
     state.entries.push({ id, model: rate.model, host, at: new Date().toISOString(), home: process.env.PROMA_HOME,
       ...(waitedMs > 0 ? { budget_wait_ms: waitedMs } : {}),
       reserved_micro_rmb: reserved, charged_micro_rmb: reserved, status: 'reserved' })
-  })
+  }) } finally { releaseEpoch() }
   return {
     settle(usage?: Usage, completed = false) {
       mutate(state => {

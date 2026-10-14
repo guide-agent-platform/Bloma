@@ -15,3 +15,16 @@ export function toolRecovery(f: ToolFeedback): ToolFeedback['recovery'] {
 export function persistentBudgetBlocked(feedback: readonly ToolFeedback[]): boolean {
   return feedback.some(f => f.category === 'budget' && toolRecovery(f) === 'stop')
 }
+
+/** Terminal budget facts cannot fall out of a bounded handoff after ordinary reads. */
+export function retainedToolFeedback(facts: readonly ToolFeedback[], limit = 8): ToolFeedback[] {
+  const terminal = new Map<string, ToolFeedback>()
+  const other: ToolFeedback[] = []
+  for (const f of facts) {
+    if (f.category === 'budget' && toolRecovery(f) === 'stop') terminal.set(`${f.scope}:${JSON.stringify(f.budget)}`, f)
+    else other.push(f)
+  }
+  const kept = [...terminal.values()].slice(-limit)
+  const room = Math.max(0, limit - kept.length)
+  return [...(room ? other.slice(-room) : []), ...kept]
+}
