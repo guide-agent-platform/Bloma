@@ -3,6 +3,18 @@ import { OPENAI_LOOP_ADAPTER, openAiLoopBody } from '../../../main/platform/upst
 import { anthropicMessagesQueryViaProviders } from '../../../main/platform/upstream/providers/loop-query'
 
 describe('regular GLM API protocol', () => {
+  it('rejects unsupported GLM-5.3 thinking-off before any physical HTTP request', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      await expect((async () => {
+        for await (const _ of anthropicMessagesQueryViaProviders('probe', { sessionId: 'off-preflight', signal: new AbortController().signal,
+          env: { PATH: 'test', ANTHROPIC_AUTH_TOKEN: 'test', ANTHROPIC_BASE_URL: 'https://open.bigmodel.cn/api/paas/v4', ANTHROPIC_MODEL: 'glm-5.3', ANTHROPIC_PROVIDER_TYPE: 'zhipu' }, maxTokens: 512, thinkingLevel: 'off' })) void _
+      })()).rejects.toThrow('MODEL_THINKING_OFF_UNSUPPORTED')
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(openAiLoopBody({ model: 'other-model', thinking: { type: 'disabled' }, messages: [] }).thinking).toEqual({ type: 'disabled' })
+    } finally { vi.unstubAllGlobals() }
+  })
   it('converts tool continuation and reasoning history, preserving all tool result IDs', () => {
     const body = openAiLoopBody({ model: 'glm-5.3', max_tokens: 8192, system: 'system', thinking: { type: 'adaptive' }, output_config: { effort: 'low' },
       tools: [{ name: 'read_file', input_schema: { type: 'object' } }], messages: [
