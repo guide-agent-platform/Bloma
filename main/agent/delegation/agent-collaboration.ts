@@ -18,6 +18,7 @@ export { buildChildSystemPrompt, buildDelegationPrompt } from './child-run-conte
 import { appendDelegationSettle, loadChildSessionSnapshot, replayTurnsFrom } from './delegation-persistence'
 import { buildCompletedDelegation, registerChildWithHost } from './completed-delegation'
 import { buildTaskHandoff, renderTaskHandoff, type TaskHandoff } from './task-handoff'
+import { awaitDelegationState } from './delegation-wait'
 import { recordSessionActivity } from '../../platform/sessions/session-service'
 import type { AgentEvent, PromaPermissionMode } from '../../../shared/types'
 import type { SDKQuery } from '../../orchestration/orchestrator'
@@ -470,36 +471,8 @@ export async function waitForDelegations(
   })
   if (records.length === 0) return []
 
-  const timeoutMs = args.timeout_ms ?? DEFAULT_DELEGATION_WAIT_TIMEOUT_MS
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const timeout = new Promise<'timeout'>((resolve) => {
-    timer = setTimeout(() => resolve('timeout'), timeoutMs)
-    timer.unref?.()
-  })
-  let onAbort!: () => void
-  const aborted = new Promise<never>((_resolve, reject) => {
-    onAbort = () => reject(parent.signal.reason ?? new Error('DELEGATION_WAIT_CANCELLED'))
-    parent.signal.addEventListener('abort', onAbort, { once: true })
-  })
-
-  // 子 agent 提问信号：仅取**运行中**记录（首跑深修 2026-09-26：已终结/已停止记录的
-  // 遗留已解析信号会让每次等待瞬间返回——wait 变 no-op，父 agent 误判「无进展」并错误
-  // 停掉真在跑的委派）。任一挂起提问即提前返回（父 agent 据此代答）；空集用永不落定
-  // promise 兜底（Promise.any([]) 会立即拒绝）。
-  const questionSignals = records
-    .filter((record) => record.status === 'running')
-    .map((record) => record.askSignal.promise)
-  const questionRace: Promise<unknown> = questionSignals.length > 0 ? Promise.any(questionSignals) : new Promise(() => {})
-  try {
-    const completion = args.strategy === 'any'
-      ? Promise.any(records.map((record) => record.completion))
-      : Promise.all(records.map((record) => record.completion))
-    await Promise.race([completion, questionRace, timeout, aborted])
-    return records.map(getDelegationSummary)
-  } finally {
-    clearTimeout(timer)
-    parent.signal.removeEventListener('abort', onAbort)
-  }
+  await awaitDelegationState(records, parent.signal, args.strategy, args.timeout_ms ?? DEFAULT_DELEGATION_WAIT_TIMEOUT_MS)
+  return records.map(getDelegationSummary)
 }
 
 // =========================================================================
