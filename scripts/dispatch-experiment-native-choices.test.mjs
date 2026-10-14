@@ -16,3 +16,7 @@ test('Resume cannot reset a finished preparation or a different project',()=>{
  assert.throws(()=>assertPreparationResume({project_id:'a'},{project_id:'a',state:'prepared'}),/NOT_RESUMABLE/)
  assert.throws(()=>assertPreparationResume({project_id:'a'},{project_id:'b',state:'prepare'}),/NOT_RESUMABLE/)
 })
+test('Ordinary card labels include descriptions after their titles',()=>{
+ assert.equal(selectPreparationChoice([choice('card-option-auto','你帮我决定交给我，按常见做法先出一版')]),'card-option-auto')
+ assert.equal(selectPreparationChoice([choice('card-option-web','本地网页应用浏览器打开'),choice('card-option-desktop','桌面程序双击打开，数据存本机文件')]),'card-option-desktop')
+})

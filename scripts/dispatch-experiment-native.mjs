@@ -14,6 +14,7 @@ const reportDir = resolve(option('report-dir', join(home, 'native-report')))
 const policy = resolve(option('monetary-policy', ''))
 const stopFile = resolve(option('stop-file', join(reportDir, 'STOP')))
 const resumePreparation = command === 'prepare' && args.includes('--resume-preparation')
+const resumeAnswer = resumePreparation ? option('resume-answer', '') : ''
 if (!['prepare', 'run', 'seed'].includes(command) || !option('home') || !option('monetary-policy')
   || home.toLowerCase() === join(homedir(), '.proma').toLowerCase()) throw new Error('EXPERIMENT_DRIVER_ARGUMENTS')
 mkdirSync(reportDir, { recursive: true })
@@ -73,9 +74,13 @@ try {
     await page.locator('[data-ai-id="project-list-item"]').click()
     await page.locator('textarea').waitFor()
     if (!resumePreparation) await page.locator('textarea').fill('请继续完成已经确认的需求。')
+    else if (resumeAnswer) {
+      await page.locator('textarea').fill(resumeAnswer)
+      report.resume_answer = resumeAnswer
+    }
     report.run_id = original.run_id
   }
-  if (!resumePreparation) await page.getByRole('button', { name: '发送消息', exact: true }).click()
+  if (!resumePreparation || resumeAnswer) await page.getByRole('button', { name: '发送消息', exact: true }).click()
   const deadline = Date.now() + Number(option('timeout-min', command === 'prepare' ? '40' : '32')) * 60000
   let lastAction = 0, lastStatus = ''
   while (Date.now() < deadline) {
