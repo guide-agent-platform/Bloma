@@ -89,6 +89,14 @@ describe('run_project_script（方案 B：implement 子会话受控执行）', (
     expect(outcome.isError).toBe(true)
     expect(outcome.output).toContain('进程退出码 1')
     expect(outcome.output).toContain('AssertionError')
+    expect(outcome.feedback).toMatchObject({ execution: 'failed', verification: 'unverified', category: 'verification_harness', recovery: 'inspect' })
+  })
+  it('keeps real FAIL assertions distinct from a script exception, including exit 0 inconsistencies', async () => {
+    for (const code of [0, 1]) {
+      const runner = buildChildScriptRunnerTool(projectId, { spawn: fakeSpawn({ code, stdout: 'FAIL 保存\n' }), resolvePython: okPython })
+      const result = await runner.execute({ code: 'print("FAIL 保存")' }, ctxFor(projectId))
+      expect(result.feedback).toMatchObject({ verification: 'failed', category: 'product_assertion', recovery: 'repair_product' })
+    }
   })
 
   it('边界拒绝：越界 / 非 .py / 不存在 / 绝对路径', async () => {
@@ -118,6 +126,8 @@ describe('run_project_script（方案 B：implement 子会话受控执行）', (
     const third = await tool.execute({ script: '自测.py' }, ctx)
     expect(third.isError).toBe(true)
     expect(third.output).toContain('预算用尽')
+    expect(third.feedback).toMatchObject({ execution: 'not_run', category: 'budget', recovery: 'stop',
+      budget: { resource: 'script_runs', scope: 'session', used: 2, limit: 2, remaining: 0, resets_on: 'new_run' } })
   })
 
   it('超时/解释器缺失：DriverExecutionError 分类话术', async () => {

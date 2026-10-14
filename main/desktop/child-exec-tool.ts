@@ -19,9 +19,11 @@ import { existsSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 import { execFile } from 'node:child_process'
 import type { AgentLoopTool } from '../agent/loop/agent-loop'
-import { execFileDriverSpawn, DriverExecutionError, parseDriverStdout, routeDriverOutcome, type DriverSpawn } from './process-driver'
+import { execFileDriverSpawn, DriverExecutionError, parseDriverStdout, type DriverSpawn } from './process-driver'
 import { findProject } from '../project/project-service'
 import { consumeProjectAttempt } from '../platform/execution/project-attempts'
+import { scriptExecutionFacts } from './script-execution-facts'
+import type { ToolBudgetFact } from '../../shared/tool-feedback'
 
 const DEFAULT_TIMEOUT_MS = 90_000
 const MAX_TIMEOUT_MS = 180_000
@@ -87,14 +89,16 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
   const maxRuns = deps.maxRuns ?? DEFAULT_MAX_RUNS
   const defaultTimeoutMs = deps.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS
   let runs = 0
+  const budgetFact = (used: number): ToolBudgetFact => ({ resource: 'script_runs', scope: 'session', used, limit: maxRuns,
+    remaining: Math.max(0, maxRuns - used), resets_on: 'new_run' })
 
   return {
     name: 'run_project_script',
     description:
       '在项目目录真实执行 Python 自测：script 指向已有 .py，或 code 提供短代码（两者只能选一个，无需创建临时脚本）。' +
       '区分进程退出与业务断言：退出码0只说明脚本正常退出；声明的 PASS/FAIL/BLOCKED 场景按回读判断。脚本须在项目根内；短代码在同一工作目录执行；缺省90秒、上限180秒；' +
-      '全程至多 12 次。推荐输出用 `PASS/FAIL <场景名>` 行锚点（场景名与契约声明一致，平台复跑可对账）。' +
-      'GUI 程序请写无头自测（构造逻辑对象断言，不要真开主循环）。',
+      `本子会话累计最多 ${maxRuns} 次执行，续接不清零。推荐输出用 \`PASS/FAIL <场景名>\` 行锚点（场景名与声明一致）。` +
+      '逻辑自测和真实 GUI 业务链分别如实验证；GUI 测试需以受控子进程启动产品、自动操作并关闭，不能让主循环永久挂起，也不能用无头逻辑测试替代真实 GUI 验收。',
     input_schema: {
       type: 'object',
       properties: {
@@ -105,13 +109,6 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
       },
     },
     execute: async (input, ctx) => {
-      if (runs >= maxRuns) {
-        return {
-          output: `执行预算用尽（${maxRuns} 次）：剩余工作请基于已有红绿结果收尾，如实把未验证项写进 DELIVERY.md，不要反复尝试。`,
-          isError: true,
-          budgetExhausted: true,
-        }
-      }
       const script = typeof input.script === 'string' ? input.script.trim() : ''
       const inlineCode = typeof input.code === 'string' ? input.code : ''
       if (Boolean(script) === Boolean(inlineCode.trim()) || inlineCode.length > 16_000) {
@@ -169,7 +166,8 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
       const startedAt = Date.now()
       try {
         const attempt = consumeProjectAttempt(projectId, `script:${ctx.sessionId}`, maxRuns)
-        if (!attempt.allowed) return { output: '本任务累计执行额度已用尽，续接不会清零。保存未完成项后停止。', isError: true, budgetExhausted: true }
+        if (!attempt.allowed) return { output: `本任务累计执行预算用尽（${attempt.used}/${maxRuns} 次），续接不会清零。保存未完成项后停止。`, isError: true, budgetExhausted: true,
+          feedback: { schema_version: 1, execution: 'not_run', verification: 'unverified', source: 'host', scope: 'reported_scenarios', category: 'budget', recovery: 'stop', budget: budgetFact(attempt.used) } }
         runs = attempt.used
       } catch { return { output: '执行计数不可保存，未启动脚本。请恢复执行记录后重试。', isError: true, feedback: { schema_version: 1, execution: 'not_run', verification: 'unverified', category: 'environment', recovery: 'prepare_environment' } } }
       const label = script || '单次短代码'
@@ -183,11 +181,12 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
         })
         const durationMs = Date.now() - startedAt
         const parsed = parseDriverStdout(stdout)
-        const routing = routeDriverOutcome(code, parsed.scenarios)
-        const verificationStatus = routing.routing !== 'pass' ? routing.routing : parsed.scenarios.some(s => s.outcome === 'pass') ? 'pass' : 'not_reported'
-        const verdict = `进程退出码 ${code}；场景回读：${verificationStatus === 'not_reported' ? '未报告，不能据退出码宣称业务通过' : routing.reason}`
+        const facts = scriptExecutionFacts(code, parsed.scenarios, budgetFact(runs))
+        const verificationStatus = facts.verificationStatus
+        const verdict = `进程退出码 ${code}；${facts.verdict}`
         return {
-          isError: routing.routing !== 'pass',
+          isError: code !== 0 || verificationStatus === 'fail' || verificationStatus === 'blocked',
+          feedback: facts.feedback,
           output: [
             `运行 ${label}${args.length > 0 ? ` ${args.join(' ')}` : ''}（真实执行，${durationMs}ms）`,
             verdict,

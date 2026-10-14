@@ -115,7 +115,9 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
       const env = buildChildExecEnv(process.env)
       try {
         const attempt = consumeProjectAttempt(projectId, `install:${ctx.sessionId}`, maxCalls)
-        if (!attempt.allowed) return { output: `安装调用预算用尽（${maxCalls} 次），续接不会清零，请保存未完成项。`, isError: true, budgetExhausted: true }
+        if (!attempt.allowed) return { output: `安装调用预算用尽（${maxCalls} 次），续接不会清零，请保存未完成项。`, isError: true, budgetExhausted: true,
+          feedback: { schema_version: 1, execution: 'not_run', verification: 'unverified', source: 'host', scope: 'dependency_imports', category: 'budget', recovery: 'stop',
+            budget: { resource: 'install_calls', scope: 'session', used: attempt.used, limit: maxCalls, remaining: 0, resets_on: 'new_run' } } }
         calls = attempt.used
       } catch { return { output: '安装计数不可保存，未执行安装。请恢复执行记录后重试。', isError: true } }
       const venvPython = join(root, venvPythonRelativePath())

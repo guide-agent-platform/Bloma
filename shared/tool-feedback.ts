@@ -1,4 +1,13 @@
 /** Host-owned tool facts shared by model history, orchestration and presentation. */
+import { toolRecovery } from './tool-feedback-policy'
+export interface ToolBudgetFact {
+  resource: 'tool_calls' | 'script_runs' | 'install_calls' | 'model_requests' | 'money'
+  scope: 'invocation' | 'session' | 'project' | 'experiment' | 'model_account'
+  used: number
+  limit: number
+  remaining: number
+  resets_on: 'new_invocation' | 'new_run' | 'none' | 'unknown'
+}
 export interface ToolFeedback {
   schema_version: 1
   execution: 'not_run' | 'running' | 'completed' | 'failed' | 'cancelled'
@@ -7,7 +16,8 @@ export interface ToolFeedback {
   source?: 'host' | 'fixed_input' | 'physical_device' | 'unknown'
   category?: 'invalid_input' | 'permission' | 'environment' | 'product_assertion' | 'verification_harness' | 'budget' | 'transport' | 'unknown'
   reason?: string
-  recovery?: 'correct_input' | 'prepare_environment' | 'repair_product' | 'repair_verifier' | 'wait_permission' | 'resume' | 'inspect' | 'none'
+  recovery?: 'correct_input' | 'prepare_environment' | 'repair_product' | 'repair_verifier' | 'wait_permission' | 'resume' | 'inspect' | 'none' | 'stop' | 'answer_question'
+  budget?: ToolBudgetFact
   exit_code?: number
   reports?: string[]
   fingerprint?: string
@@ -18,7 +28,7 @@ export interface ToolFeedback {
 const EXECUTION = ['not_run', 'running', 'completed', 'failed', 'cancelled']
 const VERIFICATION = ['passed', 'failed', 'unverified', 'not_applicable']
 const CATEGORY = ['invalid_input', 'permission', 'environment', 'product_assertion', 'verification_harness', 'budget', 'transport', 'unknown']
-const RECOVERY = ['correct_input', 'prepare_environment', 'repair_product', 'repair_verifier', 'wait_permission', 'resume', 'inspect', 'none']
+const RECOVERY = ['correct_input', 'prepare_environment', 'repair_product', 'repair_verifier', 'wait_permission', 'resume', 'inspect', 'none', 'stop', 'answer_question']
 /** Never forward arbitrary detail or credential-bearing nested objects. */
 export function safeToolFeedback(raw: unknown): ToolFeedback | undefined {
   if (!raw || typeof raw !== 'object') return undefined
@@ -28,11 +38,21 @@ export function safeToolFeedback(raw: unknown): ToolFeedback | undefined {
   for (const key of ['scope', 'reason', 'fingerprint'] as const) if (typeof r[key] === 'string') result[key] = r[key].slice(0, key === 'reason' ? 240 : 96)
   if (CATEGORY.includes(String(r.category))) result.category = r.category as ToolFeedback['category']
   if (RECOVERY.includes(String(r.recovery))) result.recovery = r.recovery as ToolFeedback['recovery']
+  const b = r.budget as ToolBudgetFact | undefined
+  if (b && typeof b === 'object' && ['tool_calls', 'script_runs', 'install_calls', 'model_requests', 'money'].includes(b.resource)
+    && ['invocation', 'session', 'project', 'experiment', 'model_account'].includes(b.scope)
+    && ['new_invocation', 'new_run', 'none', 'unknown'].includes(b.resets_on)
+    && [b.used, b.limit, b.remaining].every(n => Number.isSafeInteger(n) && n >= 0)
+    && b.remaining === Math.max(0, b.limit - b.used)) {
+    result.budget = { resource: b.resource, scope: b.scope, used: b.used, limit: b.limit, remaining: b.remaining, resets_on: b.resets_on }
+  }
   if (['host', 'fixed_input', 'physical_device', 'unknown'].includes(String(r.source))) result.source = r.source as ToolFeedback['source']
   if (typeof r.exit_code === 'number' && Number.isSafeInteger(r.exit_code)) result.exit_code = r.exit_code
   if (['unverified', 'incomplete'].includes(String(r.task_completion))) result.task_completion = r.task_completion as ToolFeedback['task_completion']
   if (Array.isArray(r.pending)) result.pending = r.pending.filter((s): s is string => typeof s === 'string').slice(0, 4).map(s => s.slice(0, 120))
   if (Array.isArray(r.reports)) result.reports = r.reports.filter((s): s is string => typeof s === 'string' && !s.includes('..') && !/^([a-z]:|[\\/]|https?:)/i.test(s)).slice(0, 4).map(s => s.slice(0, 160))
+  const recovery = toolRecovery(result)
+  if (recovery !== undefined) result.recovery = recovery
   return result
 }
 
