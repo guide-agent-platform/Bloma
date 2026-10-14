@@ -162,7 +162,11 @@ describe('host tool boundaries', () => {
     const tool = wrapExperimentWorkerTools([{ name: 'write_file', description: '', input_schema: {}, execute }], value, root)[0]
     const child = { ...ctx(), sessionId: 'child' }
     expect((await tool.execute({ path: 'one.py' }, child)).isError).toBeUndefined()
-    expect((await tool.execute({ path: 'two.py' }, child)).isError).toBe(true)
+    const refused = await tool.execute({ path: 'two.py' }, child)
+    expect(refused.isError).toBe(true)
+    expect(refused.output).toContain('two.py')
+    expect(refused.output).toContain('one.py')
+    expect(refused.output).toContain('已有授权文件')
     expect((await tool.execute({ path: '../escape.py' }, child)).isError).toBe(true)
     expect(execute).toHaveBeenCalledTimes(1)
   })

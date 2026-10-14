@@ -159,7 +159,8 @@ export function wrapExperimentWorkerTools(tools: AgentLoopTool[], config: Dispat
       const raw = String(input.path ?? ''), path = relative(resolve(root), resolve(root, raw)).replaceAll('\\', '/')
       if (!worker || path.startsWith('../') || !writes.some(scope => matches(path.toLowerCase(), scope.toLowerCase()))) {
         recordExperiment(config, 'write_rejected', { session_id: ctx.sessionId, tool: tool.name, path })
-        return { output: 'EXPERIMENT_WRITE_OUTSIDE_ASSIGNMENT', isError: true }
+        return { output: `EXPERIMENT_WRITE_OUTSIDE_ASSIGNMENT: 被拒路径=${path}；当前可写范围=${writes.join(', ') || '无'}。`
+          + '请在已有授权文件或目录中实现及补测；不能靠修改任务说明扩大权限。无法在现有范围内完成时向父会话说明具体阻碍。', isError: true }
       }
     }
     return tool.execute(input, ctx)
