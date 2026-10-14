@@ -14,6 +14,8 @@ export interface ExperimentModel { channel_id: string; model_id: string }
 export interface ExperimentModels { dispatcher: ExperimentModel; executor: ExperimentModel; verifier: ExperimentModel }
 export interface ExperimentSettings { temperature: number; thinking_level: 'off' | 'low' | 'high' | 'max' }
 export const DEFAULT_EXPERIMENT_SETTINGS: ExperimentSettings = { temperature: 0.1, thinking_level: 'low' }
+/** Native delivery metadata, not a prescribed business decomposition or test filename. */
+export const EXPERIMENT_REQUIRED_DELIVERABLES = ['CORE_CHECK.json', 'DELIVERY.md', 'LAUNCH.json'] as const
 export interface ExperimentModelReceipt { channel_id: string; model: string; endpoint_host: string; endpoint_fingerprint?: string; provider_type?: string }
 export interface ExperimentLimits { max_workers: number; max_tasks: number; dispatcher_turns: number; executor_turns: number; max_requests: number; max_output_tokens: number; wall_ms: number }
 export const DEFAULT_EXPERIMENT_LIMITS: ExperimentLimits = { max_workers: 2, max_tasks: 16, dispatcher_turns: 40, executor_turns: 32, max_requests: 128, max_output_tokens: 8192, wall_ms: 1_800_000 }
@@ -28,6 +30,7 @@ export interface DispatchExperiment {
   sample?: ExperimentSample; evaluator_hash?: string
   models?: ExperimentModels; limits?: ExperimentLimits; condition_hash?: string
   settings?: ExperimentSettings; protected_inputs?: Record<string, string>
+  required_writes?: string[]
   observed_models?: Partial<Record<keyof ExperimentModels, ExperimentModelReceipt>>
   started_at?: string; request_count?: number; plan_locked?: boolean
   tasks: ExperimentTask[]; workers: Record<string, ExperimentWorker>
@@ -37,7 +40,7 @@ export const experimentLimits = (config: DispatchExperiment) => config.limits ??
 export function experimentConditionHash(config: DispatchExperiment): string {
   return createHash('sha256').update(JSON.stringify({ mode: config.mode, policy: config.policy,
     planning: config.planning ?? 'fixed', models: config.models, limits: config.limits, settings: config.models ? config.settings ?? DEFAULT_EXPERIMENT_SETTINGS : config.settings,
-    protected_inputs: config.protected_inputs, input_hash: config.input_hash, runtime_hash: config.runtime_hash,
+    protected_inputs: config.protected_inputs, required_writes: config.required_writes, input_hash: config.input_hash, runtime_hash: config.runtime_hash,
     sample: config.sample, evaluator_hash: config.evaluator_hash })).digest('hex')
 }
 export function validateExperimentTasks(tasks: ExperimentTask[], maximum: number): void {
@@ -90,6 +93,10 @@ export function validateExperiment(raw: unknown): DispatchExperiment {
   if (value.evaluator_hash && !/^[a-f0-9]{64}$/.test(value.evaluator_hash)) throw new Error('EXPERIMENT_INVALID_EVALUATOR_HASH')
   if (value.settings && (!Number.isFinite(value.settings.temperature) || value.settings.temperature < 0 || value.settings.temperature > 2
     || !['off', 'low', 'high', 'max'].includes(value.settings.thinking_level))) throw new Error('EXPERIMENT_INVALID_SETTINGS')
+  if (value.required_writes !== undefined && (!Array.isArray(value.required_writes) || value.required_writes.length > 64
+    || value.required_writes.some(path => typeof path !== 'string' || !path || path !== path.trim() || path.endsWith('/')
+      || path.includes('\\') || path.startsWith('/') || path.includes(':') || path.split('/').some(part => !part || part === '.' || part === '..'))
+    || new Set(value.required_writes.map(path => path.toLowerCase())).size !== value.required_writes.length)) throw new Error('EXPERIMENT_INVALID_REQUIRED_WRITES')
   for (const [path, hash] of Object.entries(value.protected_inputs ?? {})) if (path.includes('\\') || path.startsWith('/') || path.includes(':') || path.split('/').includes('..') || !/^[a-f0-9]{64}$/.test(hash)) throw new Error('EXPERIMENT_INVALID_PROTECTED_INPUT')
   if (value.planning && !['fixed', 'autonomous'].includes(value.planning)) throw new Error('EXPERIMENT_INVALID_PLANNING')
   if (!value.workers || typeof value.workers !== 'object' || Array.isArray(value.workers)) throw new Error('EXPERIMENT_INVALID_WORKERS')

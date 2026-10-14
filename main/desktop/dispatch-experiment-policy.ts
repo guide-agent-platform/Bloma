@@ -42,6 +42,7 @@ function scopesOverlap(a: string[], b: string[]): boolean {
 export function experimentTaskBook(config: DispatchExperiment): string {
   if (config.policy === 'autonomous') return autonomousTaskBook(config)
   if (config.policy === 'standalone') return '【独立实现实验】你直接完成已确认需求，不创建子 Agent。任务分解由你自己完成。保持原生业务、界面及验收要求，使用实际工具核对证据。'
+    + (config.required_writes?.length ? `宿主必需交付文件（项目根相对路径）：${config.required_writes.join('、')}。测试脚本名称与业务分解由你决定。` : '')
   return '【内部冻结调度实验】\n' +
     `run_id=${config.run_id}；策略=${config.policy}。业务要求与原生验证保持不变。\n` +
     (config.policy === 'single_worker'

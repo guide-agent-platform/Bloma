@@ -35,7 +35,7 @@ export function reportModelExperiment(projectId: string, home = getPromaHome()) 
   }
   const latestStage = events.filter(event => event.event === 'stage_finished').at(-1)
   return { version: 2, run_id: config.run_id, project_id: projectId, mode: config.mode, policy: config.policy,
-    sample: config.sample, evaluator_hash: config.evaluator_hash, limits: config.limits, settings: config.settings, runtime_hash: config.runtime_hash,
+    sample: config.sample, evaluator_hash: config.evaluator_hash, limits: config.limits, settings: config.settings, runtime_hash: config.runtime_hash, required_writes: config.required_writes,
     input_hash: config.input_hash, condition_hash: config.condition_hash, models: config.models, observed_models: config.observed_models,
     declared_tasks: config.tasks, model_requests_by_role: roles, peak_overlapping_executor_requests: peak,
     implemented_worker_sessions: config.policy === 'standalone' ? 0 : Object.values(config.workers).filter(worker => worker.has_executed).length,

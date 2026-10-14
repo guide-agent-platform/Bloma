@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { installExperimentEvaluator } from './dispatch-experiment-evaluator'
+import { EXPERIMENT_REQUIRED_DELIVERABLES } from './dispatch-experiment'
 import { assertExperimentHome, assertExperimentId, experimentConditionHash, EXPERIMENT_POLICIES, experimentPath, recordExperiment, validateExperiment, writeExperiment, type DispatchExperiment, type ExperimentLimits, type ExperimentModels, type ExperimentPolicy, type ExperimentSettings, type ExperimentTask } from './dispatch-experiment'
 
 interface FrozenManifest { version: 1; snapshot_id: string; source_home: string; project_id: string; parent_session_id: string;
@@ -91,6 +92,7 @@ export function restoreExperiment(snapshot: string, home: string, policy: Experi
   const { evaluator, ...conditions } = options
   const config: DispatchExperiment = { ...manifest.config, workers, state: 'running', policy, run_id: runId,
     snapshot_id: manifest.snapshot_id, input_hash: manifest.input_hash, ...structuredClone(conditions) }
+  if (modern && options.models) config.required_writes = [...EXPERIMENT_REQUIRED_DELIVERABLES]
   config.protected_inputs = Object.fromEntries(Object.entries(manifest.files).filter(([path]) =>
     path.endsWith(`/documents/${manifest.project_id}/prd.json`) || path.endsWith(`/documents/${manifest.project_id}/prd.md`)
     || path.includes(`/documents/${manifest.project_id}/features/`) || /\/00_UX\/confirmed\.(html|json)$/.test(path)
