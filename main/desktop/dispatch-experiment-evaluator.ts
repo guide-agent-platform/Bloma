@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process'
 import { getPromaHome } from '../../storage/config-paths'
 import { experimentPath, recordExperiment, validateExperiment } from './dispatch-experiment'
 import { readExperimentEvents } from './dispatch-experiment-records'
+import { pythonEncodingEnv } from './python-process-env'
 
 interface Check { id: string; description: string; kind: 'command' | 'manual'; command?: string; args?: string[]; timeout_ms?: number }
 interface Suite { version: 1; checks: Check[] }
@@ -99,7 +100,7 @@ export function evaluateExperiment(projectId: string, manual?: Array<{ id: strin
     const expand = (arg: string) => arg.replaceAll('{product}', project.root_path).replaceAll('{suite}', suitePath(home))
     const start = Date.now()
     const result = spawnSync(expand(check.command!), check.args!.map(expand), { cwd: project.root_path, shell: false, windowsHide: true,
-      timeout: check.timeout_ms, maxBuffer: 1_048_576, encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', APP_DATA_DIR: join(output, 'app-data') } })
+      timeout: check.timeout_ms, maxBuffer: 1_048_576, encoding: 'utf8', env: { ...process.env, ...pythonEncodingEnv(process.env), PYTHONDONTWRITEBYTECODE: '1', APP_DATA_DIR: join(output, 'app-data') } })
     const log = join(output, `${check.id}.json`)
     const bytes = JSON.stringify({ stdout: result.stdout, stderr: result.stderr, error_code: result.error && (result.error as NodeJS.ErrnoException).code, signal: result.signal, exit_code: result.status })
     writeFileSync(log, bytes, { flag: 'wx' })

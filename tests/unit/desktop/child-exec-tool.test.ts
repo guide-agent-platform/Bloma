@@ -80,6 +80,7 @@ describe('run_project_script（方案 B：implement 子会话受控执行）', (
     expect(request.cwd).toBeTruthy()
     expect(Object.keys(request.env)).not.toContain('BLOMA_SECRET_CHANNEL_KEY')
     expect(request.env.PYTHONIOENCODING).toBe('utf-8')
+    expect(request.env.PYTHONUTF8).toBe('1')
     delete process.env.BLOMA_SECRET_CHANNEL_KEY
   })
 

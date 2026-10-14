@@ -337,7 +337,8 @@ describe('runContractDriver 执行路径', () => {
     expect(seenEnv?.SystemRoot).toBe('C:\\Win')
     expect(seenEnv?.BLOMA_APP_LLM_KEY).toBe('k')
     expect(seenEnv?.PYTHONIOENCODING).toBe('utf-8') // GBK 乱码根治（c21e10b1）
-    expect(Object.keys(seenEnv ?? {}).length).toBe(3)
+    expect(seenEnv?.PYTHONUTF8).toBe('1') // 嵌套 subprocess 文本管道同样使用 UTF-8
+    expect(Object.keys(seenEnv ?? {}).sort()).toEqual(['BLOMA_APP_LLM_KEY', 'PYTHONIOENCODING', 'PYTHONUTF8', 'SystemRoot'])
   })
 })
 

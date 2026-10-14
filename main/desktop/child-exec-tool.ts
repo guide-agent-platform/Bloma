@@ -26,6 +26,7 @@ import { scriptExecutionFacts } from './script-execution-facts'
 import type { ToolBudgetFact } from '../../shared/tool-feedback'
 import { DEFAULT_DESKTOP_EXECUTION_LIMITS } from './execution-limits'
 import { getPromaHome } from '../../storage/config-paths'
+import { pythonEncodingEnv } from './python-process-env'
 
 const DEFAULT_TIMEOUT_MS = 90_000
 const MAX_TIMEOUT_MS = 180_000
@@ -73,9 +74,7 @@ export function buildChildExecEnv(parentEnv: NodeJS.ProcessEnv): Record<string, 
     const value = parentEnv[key]
     if (value !== undefined) env[key] = value
   }
-  // 输出编码归一（同 buildDriverEnv：Windows Python 缺省 GBK console 代码页，utf8 解码会乱）
-  env.PYTHONIOENCODING = parentEnv.PYTHONIOENCODING ?? 'utf-8'
-  return env
+  return { ...env, ...pythonEncodingEnv(parentEnv) }
 }
 
 function truncate(text: string, maxChars: number): string {

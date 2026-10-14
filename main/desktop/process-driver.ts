@@ -25,6 +25,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { violatesCommandBlacklist, type AcceptanceCoverageEntry, type ProjectContract } from './contract-schema'
+import { pythonEncodingEnv } from './python-process-env'
 
 // =========================================================================
 // 执行面类型
@@ -176,8 +177,7 @@ export function buildDriverEnv(contract: ProjectContract, parentEnv: NodeJS.Proc
   // console 代码页（GBK）写 stdout，execFile 按 utf8 解码成乱码——场景名乱码会让
   // 裁判门软对账 bigram 匹配失效且证据不可读。PYTHONIOENCODING 是基础设施编码
   // 声明（与 SystemRoot 同层，非业务 env 透传）；父环境已显式设置时不覆盖。
-  env.PYTHONIOENCODING = parentEnv.PYTHONIOENCODING ?? 'utf-8'
-  return env
+  return { ...env, ...pythonEncodingEnv(parentEnv) }
 }
 
 // =========================================================================
