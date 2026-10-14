@@ -24,11 +24,13 @@
       ],
       "structural_score": 6,
       "request": "experiments/dispatch-difficulty-v1/L2/request.md",
-      "request_sha256": "171ca9415828f967ef779c8011d68b1531da1869d54ec67264ce0a357f39c509",
+      "request_sha256": "5344202c5a2f8b8cbb5a7c6559e39e78585b65097dea2de7015bdf141a9f2cdd",
       "suite": "experiments/dispatch-difficulty-v1/L2/suite.json",
       "suite_sha256": "0e347ec6aaa5b5090ba9868906e92cc80a7be370c77f2e16ea55e8246934df22",
       "check_count": 14,
-      "automated_evaluator_status": "not implemented or calibrated"
+      "automated_evaluator_status": "not implemented or calibrated",
+      "review_actions": "experiments/dispatch-difficulty-v1/L2/review-actions.md",
+      "review_actions_sha256": "1b0682f145ce36d686e941a715b3406b27b0cdb1661b93498bcc75b14392943f"
     },
     {
       "id": "L3",
@@ -38,7 +40,7 @@
       ],
       "structural_score": 9,
       "request": "experiments/dispatch-difficulty-v1/L3/request.md",
-      "request_sha256": "f90b01e5625087bcb94e4646be3e9569f565256a89b5d59c3445149409f011a4",
+      "request_sha256": "92ac0c553d651c949d0f60e89ef53536821643ff0e0427c4b739fc92ce7abf76",
       "suite": "experiments/dispatch-difficulty-v1/L3/suite.json",
       "suite_sha256": "be7dccafa0432f5872cb8a0cde94225108599b0bffe1cdf85ac384e5b469661e",
       "check_count": 22,
@@ -53,5 +55,6 @@
     "delete-isolation",
     "restart-persistence"
   ],
-  "notes": "Structural bands predefined; no empirical difficulty claim. Per-level new PRD/UX and evaluator must be frozen before complete six-group comparison."
+  "notes": "Structural bands predefined; no empirical difficulty claim. Per-level new PRD/UX and evaluator must be frozen before complete six-group comparison.",
+  "revision": "20261014-prepilot-title-edit"
 }
