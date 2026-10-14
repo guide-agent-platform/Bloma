@@ -14,3 +14,12 @@ export function assertPreparationResume(project, config) {
     throw new Error('EXPERIMENT_PREPARATION_NOT_RESUMABLE')
   }
 }
+
+export function preparationTokenCap(command, value) {
+  if (value === undefined) return 8192
+  const cap = Number(value)
+  if (command !== 'prepare' || !Number.isSafeInteger(cap) || cap < 1024 || cap > 65536) {
+    throw new Error('EXPERIMENT_INVALID_PREPARATION_TOKEN_CAP')
+  }
+  return cap
+}

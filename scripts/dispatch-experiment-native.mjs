@@ -6,7 +6,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { cancelExperimentProject } from './dispatch-experiment-native-control.mjs'
-import { assertPreparationResume, selectPreparationChoice } from './dispatch-experiment-native-choices.mjs'
+import { assertPreparationResume, preparationTokenCap, selectPreparationChoice } from './dispatch-experiment-native-choices.mjs'
 const [command, ...args] = process.argv.slice(2)
 const option = (name, fallback) => { const i = args.indexOf(`--${name}`); return i < 0 ? fallback : args[i + 1] }
 const home = resolve(option('home', ''))
@@ -15,6 +15,7 @@ const policy = resolve(option('monetary-policy', ''))
 const stopFile = resolve(option('stop-file', join(reportDir, 'STOP')))
 const resumePreparation = command === 'prepare' && args.includes('--resume-preparation')
 const resumeAnswer = resumePreparation ? option('resume-answer', '') : ''
+const preparationMaxTokens = preparationTokenCap(command, option('prepare-max-output-tokens'))
 if (!['prepare', 'run', 'seed'].includes(command) || !option('home') || !option('monetary-policy')
   || home.toLowerCase() === join(homedir(), '.proma').toLowerCase()) throw new Error('EXPERIMENT_DRIVER_ARGUMENTS')
 mkdirSync(reportDir, { recursive: true })
@@ -28,7 +29,8 @@ function seed() {
   if (!keys.deepseek || !keys.glm) throw new Error('EXPERIMENT_CREDENTIAL_DECRYPTION_FAILED')
   execFileSync(join(process.cwd(), 'node_modules/electron/dist/electron.exe'), ['scripts/seed-experiment-channels.cjs'], {
     windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...electronEnv,
-      BEX_DEEPSEEK_API_KEY: keys.deepseek, BEX_GLM_API_KEY: keys.glm } })
+      BEX_DEEPSEEK_API_KEY: keys.deepseek, BEX_GLM_API_KEY: keys.glm,
+      BEX_PREPARATION_MAX_TOKENS: String(preparationMaxTokens) } })
 }
 seed()
 if (command === 'seed') { console.log(JSON.stringify({ home, seeded: true })); process.exit(0) }
@@ -36,6 +38,7 @@ const sleep = ms => new Promise(done => setTimeout(done, ms))
 const cli = (...params) => execFileSync(process.execPath, ['scripts/dispatch-experiment.mjs', ...params], { encoding: 'utf8', windowsHide: true }).trim()
 let application, page
 const report = { command, home, resume_preparation: resumePreparation, at: new Date().toISOString(), confirmations: [], outcome: 'running' }
+if (command === 'prepare') report.preparation_max_output_tokens = preparationMaxTokens
 const log = message => console.log(`[native-experiment] ${message}`)
 const project = () => JSON.parse(readFileSync(join(home, 'projects.json'), 'utf8')).projects[0]
 const config = id => JSON.parse(readFileSync(join(home, 'dispatch-experiments', `${id}.json`), 'utf8'))
@@ -103,7 +106,18 @@ try {
     let action
     for (const id of ['requirement-confirm-submit', 'prd-confirm-submit', 'card-option-ux_confirm_go', 'card-option-ux_delegate']) {
       const target = page.locator(`[data-ai-id="${id}"]`)
-      if (await target.isVisible() && await target.isEnabled()) { await target.click(); action = id; break }
+      if (await target.isVisible() && await target.isEnabled()) {
+        if (id === 'requirement-confirm-submit') {
+          const suggested = page.locator('[data-ai-id^="requirement-confirm-item-"]').filter({ has: page.locator('[data-ai-id^="requirement-confirm-origin-"]') }).locator('input[type="checkbox"]')
+          const excluded = []
+          for (let i = 0; i < await suggested.count(); i++) {
+            const checkbox = suggested.nth(i)
+            if (await checkbox.isChecked()) { excluded.push(await checkbox.locator('..').innerText()); await checkbox.uncheck() }
+          }
+          report.confirmations.push({ at: new Date().toISOString(), action: 'exclude-guide-suggestions', excluded })
+        }
+        await target.click(); action = id; break
+      }
     }
     if (!action && command === 'prepare') {
       const choices = await page.locator('[data-ai-id^="card-option-"],[data-ai-id^="clarification-option-"]').evaluateAll(nodes => nodes.map(node => ({
