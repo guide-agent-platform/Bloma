@@ -6,12 +6,14 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { cancelExperimentProject } from './dispatch-experiment-native-control.mjs'
+import { assertPreparationResume, selectPreparationChoice } from './dispatch-experiment-native-choices.mjs'
 const [command, ...args] = process.argv.slice(2)
 const option = (name, fallback) => { const i = args.indexOf(`--${name}`); return i < 0 ? fallback : args[i + 1] }
 const home = resolve(option('home', ''))
 const reportDir = resolve(option('report-dir', join(home, 'native-report')))
 const policy = resolve(option('monetary-policy', ''))
 const stopFile = resolve(option('stop-file', join(reportDir, 'STOP')))
+const resumePreparation = command === 'prepare' && args.includes('--resume-preparation')
 if (!['prepare', 'run', 'seed'].includes(command) || !option('home') || !option('monetary-policy')
   || home.toLowerCase() === join(homedir(), '.proma').toLowerCase()) throw new Error('EXPERIMENT_DRIVER_ARGUMENTS')
 mkdirSync(reportDir, { recursive: true })
@@ -32,7 +34,7 @@ if (command === 'seed') { console.log(JSON.stringify({ home, seeded: true })); p
 const sleep = ms => new Promise(done => setTimeout(done, ms))
 const cli = (...params) => execFileSync(process.execPath, ['scripts/dispatch-experiment.mjs', ...params], { encoding: 'utf8', windowsHide: true }).trim()
 let application, page
-const report = { command, home, at: new Date().toISOString(), confirmations: [], outcome: 'running' }
+const report = { command, home, resume_preparation: resumePreparation, at: new Date().toISOString(), confirmations: [], outcome: 'running' }
 const log = message => console.log(`[native-experiment] ${message}`)
 const project = () => JSON.parse(readFileSync(join(home, 'projects.json'), 'utf8')).projects[0]
 const config = id => JSON.parse(readFileSync(join(home, 'dispatch-experiments', `${id}.json`), 'utf8'))
@@ -49,7 +51,7 @@ try {
   if (await upgrade.isVisible()) await upgrade.click()
   const history = page.getByRole('button', { name: '所有项目', exact: true })
   if (await history.isVisible()) await history.click()
-  if (command === 'prepare') {
+  if (command === 'prepare' && !resumePreparation) {
     if (existsSync(join(home, 'projects.json')) && JSON.parse(readFileSync(join(home, 'projects.json'), 'utf8')).projects.length) throw new Error('EXPERIMENT_PREPARE_NOT_FRESH')
     const newProject = page.locator('[data-ai-id="new-project-button"]')
     if (await newProject.isVisible()) await newProject.click()
@@ -64,15 +66,16 @@ try {
   } else {
     const current = project(); report.project_id = current.project_id
     const original = config(current.project_id)
-    if (original.state !== 'running') throw new Error('EXPERIMENT_RUN_NOT_RESTORED')
+    if (resumePreparation) assertPreparationResume(current, original)
+    else if (original.state !== 'running') throw new Error('EXPERIMENT_RUN_NOT_RESTORED')
     const projectsNav = page.getByRole('button', { name: '我的项目', exact: true })
     if (await projectsNav.isVisible()) await projectsNav.click()
     await page.locator('[data-ai-id="project-list-item"]').click()
     await page.locator('textarea').waitFor()
-    await page.locator('textarea').fill('请继续完成已经确认的需求。')
+    if (!resumePreparation) await page.locator('textarea').fill('请继续完成已经确认的需求。')
     report.run_id = original.run_id
   }
-  await page.getByRole('button', { name: '发送消息', exact: true }).click()
+  if (!resumePreparation) await page.getByRole('button', { name: '发送消息', exact: true }).click()
   const deadline = Date.now() + Number(option('timeout-min', command === 'prepare' ? '40' : '32')) * 60000
   let lastAction = 0, lastStatus = ''
   while (Date.now() < deadline) {
@@ -98,9 +101,12 @@ try {
       if (await target.isVisible() && await target.isEnabled()) { await target.click(); action = id; break }
     }
     if (!action && command === 'prepare') {
-      const choices = await page.locator('[data-ai-id^="card-option-"]').evaluateAll(nodes => nodes.map(node => ({ id: node.getAttribute('data-ai-id'), text: node.textContent })))
-      const pick = choices.find(choice => /你帮我定|交给你|按推荐|委托|直接生成/.test(choice.text ?? ''))
-      if (pick) { await page.locator(`[data-ai-id="${pick.id}"]`).click(); action = pick.id }
+      const choices = await page.locator('[data-ai-id^="card-option-"],[data-ai-id^="clarification-option-"]').evaluateAll(nodes => nodes.map(node => ({
+        id: node.getAttribute('data-ai-id'), text: node.textContent,
+        visible: !!(node.offsetWidth || node.offsetHeight || node.getClientRects().length), enabled: !node.disabled,
+      })))
+      const pick = selectPreparationChoice(choices)
+      if (pick) { await page.locator(`[data-ai-id="${pick}"]`).click(); action = pick }
     }
     if (action) { lastAction = Date.now(); report.confirmations.push({ at: new Date().toISOString(), action }); log(action) }
   }
