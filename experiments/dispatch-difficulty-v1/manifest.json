@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "status": "v2_L2_calibrated_L3_method_review_complete_six_groups_deferred",
+  "status": "v2_L2_pair_running_L3_additional_scenarios_calibrated",
   "levels": [
     {
       "id": "L1",
@@ -46,7 +46,7 @@
       "suite": "experiments/dispatch-difficulty-v1/L3/suite.json",
       "suite_sha256": "2697ae24682567785b3727b08cda35b220fdbfd729ce65a3479811e4d6c34068",
       "check_count": 22,
-      "automated_evaluator_status": "Single S1 sample reviewed with sample-specific desktop DOM adapter and Codex evidence audit: 19/22; additional L3 criteria not fully fault-calibrated",
+      "automated_evaluator_status": "Additional 8 fixed scenarios: reference 8/8, nine explicit faults detected; separate from L2 17-case calibration; sample-specific UI adapters, not universal",
       "review_actions": "experiments/dispatch-difficulty-v1/L3/review-actions.md",
       "review_actions_sha256": "c9db87fece8ba45c382ce511f9e91703a53b14527338918caf01394e1338c433",
       "clarification_answers": "experiments/dispatch-difficulty-v1/L3/clarification-answers.json",
@@ -61,6 +61,6 @@
     "delete-isolation",
     "restart-persistence"
   ],
-  "notes": "L2 v2 pilot 13/14; L3 640000-output S1 method sample delivered, independent 19/22. Single samples are not comparative evidence. User kept 50 RMB cumulative caps and deferred six-group cohort. See docs/05_PROJECT_PLAN/dispatch-l3-result-20261015.md.",
+  "notes": "Original L2 method sample 13/14; original L3 sample 19/22 unchanged. New preregistered L2 S1/S2 pair in progress, one each; four scheduler groups deferred under unchanged cumulative 50 RMB caps. L3 calibration details: docs/05_PROJECT_PLAN/dispatch-l3-calibration-20261015.md.",
   "revision": "20261015-v2"
 }
