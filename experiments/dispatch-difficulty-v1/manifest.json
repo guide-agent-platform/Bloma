@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "status": "v2_L2_calibrated_L3_preparation_running",
+  "status": "v2_L2_calibrated_L3_method_review_complete_six_groups_deferred",
   "levels": [
     {
       "id": "L1",
@@ -28,7 +28,7 @@
       "suite": "experiments/dispatch-difficulty-v1/L2/suite.json",
       "suite_sha256": "73748b1643dde48a27265cede4e9daa6ee9c1284989b82758bb084f7503a4081",
       "check_count": 14,
-      "automated_evaluator_status": "not implemented or calibrated",
+      "automated_evaluator_status": "Fixed 14 semantic scenarios calibrated on corrected reference, 15 fault variants and original-product negative; reference-specific UI adapter",
       "review_actions": "experiments/dispatch-difficulty-v1/L2/review-actions.md",
       "review_actions_sha256": "da865c976dd1f5eced8621e5bbee82253582f35f80f12c6e92a4df7e1583641f",
       "clarification_answers": "experiments/dispatch-difficulty-v1/L2/clarification-answers.json",
@@ -46,7 +46,7 @@
       "suite": "experiments/dispatch-difficulty-v1/L3/suite.json",
       "suite_sha256": "2697ae24682567785b3727b08cda35b220fdbfd729ce65a3479811e4d6c34068",
       "check_count": 22,
-      "automated_evaluator_status": "not implemented or calibrated",
+      "automated_evaluator_status": "Single S1 sample reviewed with sample-specific desktop DOM adapter and Codex evidence audit: 19/22; additional L3 criteria not fully fault-calibrated",
       "review_actions": "experiments/dispatch-difficulty-v1/L3/review-actions.md",
       "review_actions_sha256": "c9db87fece8ba45c382ce511f9e91703a53b14527338918caf01394e1338c433",
       "clarification_answers": "experiments/dispatch-difficulty-v1/L3/clarification-answers.json",
@@ -61,6 +61,6 @@
     "delete-isolation",
     "restart-persistence"
   ],
-  "notes": "L2 v1 pilot had a newly reproduced import-date defect. v2 fixed scenarios calibrated on 14 positive checks and 15 fault variants; no six-group cohort yet. Reference UI adapter is not universal.",
+  "notes": "L2 v2 pilot 13/14; L3 640000-output S1 method sample delivered, independent 19/22. Single samples are not comparative evidence. User kept 50 RMB cumulative caps and deferred six-group cohort. See docs/05_PROJECT_PLAN/dispatch-l3-result-20261015.md.",
   "revision": "20261015-v2"
 }
