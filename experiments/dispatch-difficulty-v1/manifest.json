@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "status": "v2_L2_pair_review_complete_L3_additional_scenarios_calibrated",
+  "status": "L2_dispatch_audit_fixed_fresh_six_prepared_awaiting_budget",
   "levels": [
     {
       "id": "L1",
@@ -61,6 +61,6 @@
     "delete-isolation",
     "restart-persistence"
   ],
-  "notes": "Original L2 method sample remains 13/14; original L3 remains 19/22. New preregistered L2 S1/S2 pair each 14/14, one sample per model; four scheduler groups unrun. Cumulative 50 RMB caps unchanged. See docs/05_PROJECT_PLAN/dispatch-l2-pair-result-20261015.md and dispatch-l3-calibration-20261015.md. Sample-specific adapter corrections retained with original records.",
+  "notes": "Old L2 S1/S2 remain 14/14. G11 audit-cancelled after executor-cap and unsupported-scope defects; G12/G21/G22 unstarted. Fix commit 1735759 verified (2474 unit, 8 integration). Fresh same-runtime six groups prepared with zero calls; actual caps still 50 RMB each pending user budget decision. See docs/05_PROJECT_PLAN/dispatch-delegation-audit-20261015.md.",
   "revision": "20261015-v2"
 }
