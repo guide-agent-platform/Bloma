@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "status": "L2_dispatch_audit_fixed_fresh_six_prepared_awaiting_budget",
+  "status": "L2_repaired_fresh_six_running_caps_60_authorized",
   "levels": [
     {
       "id": "L1",
@@ -61,6 +61,6 @@
     "delete-isolation",
     "restart-persistence"
   ],
-  "notes": "Old L2 S1/S2 remain 14/14. G11 audit-cancelled after executor-cap and unsupported-scope defects; G12/G21/G22 unstarted. Fix commit 1735759 verified (2474 unit, 8 integration). Fresh same-runtime six groups prepared with zero calls; actual caps still 50 RMB each pending user budget decision. See docs/05_PROJECT_PLAN/dispatch-delegation-audit-20261015.md.",
+  "notes": "User approved DS/GLM cumulative caps 60 each, all old liabilities carried without reset. New same-runtime six-group L2 rerun in progress. Old S1/S2 14/14 and audit-cancelled G11 remain historical, not pooled. See docs/05_PROJECT_PLAN/dispatch-l2-reliable-preregister-20261015.md.",
   "revision": "20261015-v2"
 }
