@@ -47,7 +47,8 @@ const config = id => JSON.parse(readFileSync(join(home, 'dispatch-experiments', 
 try {
   application = await _electron.launch({ args: ['.', `--user-data-dir=${join(home, 'electron-user-data')}`],
     env: { ...electronEnv, BLOMA_DESKTOP_DISPATCH: '1',
-      BLOMA_DISPATCH_EXPERIMENT: '1', BLOMA_MONETARY_POLICY: policy }, timeout: 60000 })
+      BLOMA_DISPATCH_EXPERIMENT: '1', BLOMA_MONETARY_POLICY: policy,
+      BLOMA_EXPERIMENT_MAX_OUTPUT_TOKENS: String(command === 'prepare' ? preparationMaxTokens : config(project().project_id).limits?.max_output_tokens ?? 8192) }, timeout: 60000 })
   for (const stream of [application.process().stdout, application.process().stderr]) stream?.on('data', bytes => appendFileSync(join(reportDir, 'main.log'), bytes))
   page = await application.firstWindow()
   await page.waitForLoadState('domcontentloaded')

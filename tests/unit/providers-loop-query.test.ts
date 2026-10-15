@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
  * providers 传输路径请求体拼装直测（2026-10-01 补齐——web 线刀1 退役 orchestrator
@@ -13,8 +13,8 @@ vi.mock('../../main/platform/upstream/providers/sse-reader', () => ({
   streamSSE: h.streamSSE,
   HTTPError: class HTTPError extends Error {
     constructor(
-      public status: number,
       message: string,
+      public status: number,
     ) {
       super(message)
     }
@@ -23,6 +23,7 @@ vi.mock('../../main/platform/upstream/providers/sse-reader', () => ({
 
 import { anthropicMessagesQueryViaProviders } from '../../main/platform/upstream/providers/loop-query'
 import type { SDKQueryOptions } from '../../main/orchestration/stages/orchestration-contracts'
+import { HTTPError } from '../../main/platform/upstream/providers/sse-reader'
 
 interface CapturedRequest {
   url: string
@@ -64,6 +65,57 @@ function parsedBody(): Record<string, unknown> {
 beforeEach(() => {
   h.streamSSE.mockReset()
   captured = undefined
+})
+
+describe('experimental output ceiling at the SDK boundary', () => {
+  afterEach(() => vi.unstubAllEnvs())
+  it('caps a legacy auxiliary request without mutating its caller options', async () => {
+    vi.stubEnv('BLOMA_DISPATCH_EXPERIMENT', '1')
+    vi.stubEnv('BLOMA_EXPERIMENT_MAX_OUTPUT_TOKENS', '32768')
+    mockStreamOk()
+    const input = opts({ maxTokens: 640000 })
+    for await (const _ of anthropicMessagesQueryViaProviders('review', input)) void _
+    expect(parsedBody().max_tokens).toBe(32768)
+    expect(input.maxTokens).toBe(640000)
+  })
+  it('defaults to 8192 for experiments and preserves smaller role budgets', async () => {
+    vi.stubEnv('BLOMA_DISPATCH_EXPERIMENT', '1')
+    vi.stubEnv('BLOMA_EXPERIMENT_MAX_OUTPUT_TOKENS', undefined)
+    mockStreamOk()
+    for await (const _ of anthropicMessagesQueryViaProviders('review', opts())) void _
+    expect(parsedBody().max_tokens).toBe(8192)
+    for await (const _ of anthropicMessagesQueryViaProviders('short check', opts({ maxTokens: 1024 }))) void _
+    expect(parsedBody().max_tokens).toBe(1024)
+  })
+  it('also caps regular GLM OpenAI-compatible requests', async () => {
+    vi.stubEnv('BLOMA_DISPATCH_EXPERIMENT', '1')
+    vi.stubEnv('BLOMA_EXPERIMENT_MAX_OUTPUT_TOKENS', '8192')
+    mockStreamOk()
+    for await (const _ of anthropicMessagesQueryViaProviders('implement', opts({ maxTokens: 640000, thinkingLevel: 'low',
+      env: { ...opts().env, ANTHROPIC_MODEL: 'glm-5.3', ANTHROPIC_PROVIDER_TYPE: 'zhipu', ANTHROPIC_BASE_URL: 'https://open.bigmodel.cn/api/paas/v4' },
+    }))) void _
+    expect(captured!.url).toContain('/api/paas/v4/chat/completions')
+    expect(parsedBody().max_tokens).toBe(8192)
+  })
+  it('keeps the ceiling on the thinking-parameter compatibility retry', async () => {
+    vi.stubEnv('BLOMA_DISPATCH_EXPERIMENT', '1')
+    vi.stubEnv('BLOMA_EXPERIMENT_MAX_OUTPUT_TOKENS', '8192')
+    const limits: unknown[] = []
+    h.streamSSE.mockImplementation(async (options) => {
+      limits.push(JSON.parse(options.request.body).max_tokens)
+      if (limits.length === 1) throw new HTTPError('thinking unsupported', 400)
+      options.onEvent({ type: 'chunk', delta: 'completed' })
+      return { toolCalls: [], stopReason: 'end_turn' }
+    })
+    for await (const _ of anthropicMessagesQueryViaProviders('review', opts({ maxTokens: 640000 }))) void _
+    expect(limits).toEqual([8192, 8192])
+  })
+  it.each(['0', '-1', '65537', 'NaN', '8192.5'])('rejects invalid host ceiling %s before transport', async cap => {
+    vi.stubEnv('BLOMA_DISPATCH_EXPERIMENT', '1')
+    vi.stubEnv('BLOMA_EXPERIMENT_MAX_OUTPUT_TOKENS', cap)
+    await expect(async () => { for await (const _ of anthropicMessagesQueryViaProviders('review', opts())) void _ }).rejects.toThrow('EXPERIMENT_INVALID_OUTPUT_CEILING')
+    expect(h.streamSSE).not.toHaveBeenCalled()
+  })
 })
 
 describe('请求体拼装：历史窗口与 system 提取', () => {

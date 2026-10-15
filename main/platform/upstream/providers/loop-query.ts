@@ -27,6 +27,7 @@ import { streamSSE, HTTPError } from './sse-reader'
 import { capMaxTokensForProvider } from '../../llm/model-resolution'
 import { accountSdkQuery } from '../../llm/request-ledger'
 import { OPENAI_LOOP_ADAPTER, openAiLoopBody } from './openai-loop-protocol'
+import { experimentOutputTokens } from '../../llm/experiment-output-limit'
 
 /** 开关已删除（2026-10-01 开关面收敛批）：providers 传输路径为唯一实现。 */
 /**
@@ -53,7 +54,8 @@ function extractText(blocks: MessageContentBlock[]): string {
 }
 
 export async function* anthropicMessagesQueryViaProviders(prompt: string, options: SDKQueryOptions): AsyncGenerator<SDKMessage> {
-  yield* accountSdkQuery(anthropicMessagesQueryViaProvidersInner, prompt, options)
+  yield* accountSdkQuery(anthropicMessagesQueryViaProvidersInner, prompt,
+    { ...options, maxTokens: experimentOutputTokens(options.maxTokens) })
 }
 async function* anthropicMessagesQueryViaProvidersInner(prompt: string, options: SDKQueryOptions): AsyncGenerator<SDKMessage> {
   if (!options.env.PATH && !options.env.Path) throw new Error('SDK env missing PATH')
