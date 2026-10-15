@@ -175,8 +175,11 @@ const PROVIDER_MAX_TOKENS_CAP: Record<string, number> = {
  * 唯一夹紧点在传输层（loop-query 请求体构建），覆盖桌面线/loop-planner/记忆蒸馏
  * 等全部调用面——调用方仍可声明 640000 意图，超限渠道在出口统一收口。
  */
-export function capMaxTokensForProvider(maxTokens: number, providerType?: string): number {
+export function capMaxTokensForProvider(maxTokens: number, providerType?: string, modelId?: string): number {
   if (!providerType) return maxTokens
+  // Regular GLM-5.3 also advertises 128K output. Preserve the configured intent
+  // in the experiment and apply the model's limit only at transport.
+  if (providerType === 'zhipu' && modelId?.toLowerCase() === 'glm-5.3') return Math.min(maxTokens, 131072)
   const cap = PROVIDER_MAX_TOKENS_CAP[providerType]
   return cap !== undefined ? Math.min(maxTokens, cap) : maxTokens
 }

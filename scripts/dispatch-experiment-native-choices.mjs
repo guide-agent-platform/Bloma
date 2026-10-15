@@ -16,9 +16,9 @@ export function assertPreparationResume(project, config) {
 }
 
 export function preparationTokenCap(command, value) {
-  if (value === undefined) return 8192
+  if (value === undefined) return 640000
   const cap = Number(value)
-  if (command !== 'prepare' || !Number.isSafeInteger(cap) || cap < 1024 || cap > 65536) {
+  if (command !== 'prepare' || !Number.isSafeInteger(cap) || cap < 1024 || cap > 640000) {
     throw new Error('EXPERIMENT_INVALID_PREPARATION_TOKEN_CAP')
   }
   return cap

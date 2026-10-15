@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runAgentLoop, keepRecentTurns, estimateBlocksText, renderCheckpointRecoveryHeader, type AgentLoopInput, type AgentLoopTool, type AgentLoopTurnInfo, type AgentLoopCompactionInfo, type LoopCheckpointSnapshot, type ToolContext, type ToolOutcome } from '../../main/agent/loop/agent-loop'
 import { estimateTokenCount } from '../../main/agent/loop/usage-guard'
 import { drainSteerQueue, enqueueSteer, getSteerStatuses, pendingSteerCount, registerSteer, resetSteerQueuesForTests, STEER_WRAP_PREFIX, wrapSteerContent } from '../../main/agent/loop/steer-queue'
@@ -1982,13 +1982,84 @@ describe('空流守卫（2026-10-03 e99e6319 事故）', () => {
     await expect(runAgentLoop(baseInput({ query, sessionId: 'session-empty-stream' }))).rejects.toThrow('EMPTY_MODEL_STREAM')
   })
 
-  it('思考耗尽型零正文（无内容块但 usage.output_tokens > 0）→ 不抛，维持既有零正文告警语义', async () => {
+  it('thinking-only max_tokens output never completes: bounded continuation and accurate usage', async () => {
+    let calls = 0
+    const complete = vi.fn()
     const query: SDKQuery = async function* () {
+      calls++
       yield { type: 'result', subtype: 'success', stop_reason: 'max_tokens', usage: { input_tokens: 24, output_tokens: 64 } }
     }
-    const result = await runAgentLoop(baseInput({ query, sessionId: 'session-thinking-only' }))
-    expect(result.status).toBe('completed')
+    const result = await runAgentLoop(baseInput({ query, beforeComplete: complete, sessionId: 'session-thinking-only' }))
+    expect(result.status).toBe('turn_limit')
+    expect(result.termination_detail).toEqual({ reason: 'output_token_limit', retries: 2 })
+    expect(calls).toBe(3)
+    expect(result.usage?.outputTokens).toBe(192)
+    expect(complete).not.toHaveBeenCalled()
     expect(result.finalText).toBe('')
+  })
+
+  it('can act after thinking cutoff without replaying an empty assistant or extending output budgets', async () => {
+    let calls = 0
+    const executed = vi.fn(() => ({ output: 'written' }))
+    const query: SDKQuery = async function* (_prompt, options) {
+      calls++
+      expect(options.maxTokens).toBe(256)
+      if (calls === 1) yield { type: 'result', subtype: 'success', stop_reason: 'max_tokens', usage: { input_tokens: 24, output_tokens: 64 } }
+      else if (calls === 2) {
+        expect(options.messages?.some(m => m.role === 'assistant' && Array.isArray(m.content) && m.content.length === 0)).toBe(false)
+        expect(JSON.stringify(options.messages)).toContain('宿主输出预算反馈')
+        yield toolUseMessage('recovered-write', 'write_file')
+        yield { type: 'result', subtype: 'success', stop_reason: 'tool_use' }
+      } else {
+        yield textMessage('完成')
+        yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+      }
+    }
+    const result = await runAgentLoop(baseInput({ query, tools: [tool('write_file', executed)], sessionId: 'session-cutoff-recovery' }))
+    expect(result.status).toBe('completed')
+    expect(executed).toHaveBeenCalledTimes(1)
+    expect(calls).toBe(3)
+  })
+
+  it('retains partial text as evidence but never treats a truncated textual tool intent as executable', async () => {
+    let calls = 0
+    const executed = vi.fn(() => ({ output: 'unexpected' }))
+    const partial = '{"name":"write_file","input":'
+    const query: SDKQuery = async function* (_prompt, options) {
+      calls++
+      if (calls === 1) {
+        yield textMessage(partial)
+        yield { type: 'result', subtype: 'success', stop_reason: 'max_tokens', usage: { input_tokens: 24, output_tokens: 64 } }
+      } else {
+        expect(JSON.stringify(options.messages)).toContain('write_file')
+        yield textMessage('需要继续')
+        yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+      }
+    }
+    const result = await runAgentLoop(baseInput({ query, tools: [tool('write_file', executed)], sessionId: 'session-partial-cutoff' }))
+    expect(result.status).toBe('completed')
+    expect(executed).not.toHaveBeenCalled()
+    expect(readSessionJsonl('session-partial-cutoff').some(r => JSON.stringify(r.content).includes('write_file'))).toBe(true)
+  })
+
+  it('does not buy a retry beyond maxTurns or after cancellation', async () => {
+    let calls = 0
+    const abort = new AbortController()
+    const query: SDKQuery = async function* () {
+      calls++
+      yield { type: 'result', subtype: 'success', stop_reason: 'max_tokens', usage: { input_tokens: 24, output_tokens: 64 } }
+    }
+    const limit = await runAgentLoop(baseInput({ query, maxTurns: 1, sessionId: 'session-cutoff-last-turn' }))
+    expect(limit.status).toBe('turn_limit')
+    expect(calls).toBe(1)
+    calls = 0
+    const cancelled = await runAgentLoop(baseInput({ signal: abort.signal, sessionId: 'session-cutoff-cancel', query: async function* () {
+      calls++
+      yield { type: 'result', subtype: 'success', stop_reason: 'max_tokens', usage: { input_tokens: 24, output_tokens: 64 } }
+      abort.abort()
+    } }))
+    expect(cancelled.status).toBe('cancelled')
+    expect(calls).toBe(1)
   })
 
   it('正常文本流不受影响', async () => {

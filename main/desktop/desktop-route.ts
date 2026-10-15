@@ -754,6 +754,7 @@ async function settleDesktopStage(
   updateProject(input.projectId, {
     desktop_blocked: { reason: 'gate-exhausted', note: decision.reason, at: new Date().toISOString() },
   })
+  recordExperimentBoundary(input.projectId, 'gate_exhausted', { phase: phaseId, gate_reason: decision.reason })
   // 审计 A-07（同上）：blocked 置位同步发 stage_changed，渲染端回填后呈现暂停态。
   deps.publish(input, 'stage_changed', { stage: phaseId, paused: true })
   const evidenceHint = extractEvidenceHint(decision)

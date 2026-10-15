@@ -31,6 +31,15 @@ describe('project request accounting', () => {
     expect(rows.find(row => row.event === 'transport_response').response).toMatchObject({ status: 200, response_bytes: 14, protocol_ended: true })
     expect(readProjectUsage('p1')).toMatchObject({ logical_queries: 1, physical_requests: 1, reported_total: 15, complete: true })
   })
+  it('records a cutoff reason separately from successful transport and complete usage', async () => {
+    await drain(async function* (_prompt, opts) {
+      opts.onTransportAttempt?.('started')
+      yield { type: 'result', subtype: 'success', stop_reason: 'max_tokens', usage: { input_tokens: 10, output_tokens: 8192 } }
+    })
+    const rows = readFileSync(join(home, 'usage-ledger/p1.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line))
+    expect(rows.find(row => row.event === 'query_finished')).toMatchObject({ status: 'completed', stop_reason: 'max_tokens' })
+    expect(readProjectUsage('p1')).toMatchObject({ complete: true, reported_output: 8192 })
+  })
   it('separates actual endpoint/model usage and filters runs without changing the active home', async () => {
     await drain(successful)
     const other = options(); other.env.ANTHROPIC_MODEL = 'second'; other.accounting!.runId = 'other'

@@ -78,12 +78,12 @@ describe('experimental output ceiling at the SDK boundary', () => {
     expect(parsedBody().max_tokens).toBe(32768)
     expect(input.maxTokens).toBe(640000)
   })
-  it('defaults to 8192 for experiments and preserves smaller role budgets', async () => {
+  it('defaults to the authorized 640000 for experiments and preserves smaller role budgets', async () => {
     vi.stubEnv('BLOMA_DISPATCH_EXPERIMENT', '1')
     vi.stubEnv('BLOMA_EXPERIMENT_MAX_OUTPUT_TOKENS', undefined)
     mockStreamOk()
     for await (const _ of anthropicMessagesQueryViaProviders('review', opts())) void _
-    expect(parsedBody().max_tokens).toBe(8192)
+    expect(parsedBody().max_tokens).toBe(640000)
     for await (const _ of anthropicMessagesQueryViaProviders('short check', opts({ maxTokens: 1024 }))) void _
     expect(parsedBody().max_tokens).toBe(1024)
   })
@@ -110,7 +110,23 @@ describe('experimental output ceiling at the SDK boundary', () => {
     for await (const _ of anthropicMessagesQueryViaProviders('review', opts({ maxTokens: 640000 }))) void _
     expect(limits).toEqual([8192, 8192])
   })
-  it.each(['0', '-1', '65537', 'NaN', '8192.5'])('rejects invalid host ceiling %s before transport', async cap => {
+  it('honors an explicitly authorized 640000 ceiling without silently keeping the 8192 seed', async () => {
+    vi.stubEnv('BLOMA_DISPATCH_EXPERIMENT', '1')
+    vi.stubEnv('BLOMA_EXPERIMENT_MAX_OUTPUT_TOKENS', '640000')
+    mockStreamOk()
+    for await (const _ of anthropicMessagesQueryViaProviders('implement', opts({ maxTokens: 640000 }))) void _
+    expect(parsedBody().max_tokens).toBe(640000)
+  })
+  it('bounds a 640000 request to regular GLM-5.3 output capacity', async () => {
+    vi.stubEnv('BLOMA_DISPATCH_EXPERIMENT', '1')
+    vi.stubEnv('BLOMA_EXPERIMENT_MAX_OUTPUT_TOKENS', '640000')
+    mockStreamOk()
+    for await (const _ of anthropicMessagesQueryViaProviders('implement', opts({ maxTokens: 640000, thinkingLevel: 'low',
+      env: { ...opts().env, ANTHROPIC_MODEL: 'glm-5.3', ANTHROPIC_PROVIDER_TYPE: 'zhipu', ANTHROPIC_BASE_URL: 'https://open.bigmodel.cn/api/paas/v4' },
+    }))) void _
+    expect(parsedBody().max_tokens).toBe(131072)
+  })
+  it.each(['0', '-1', '640001', 'NaN', '8192.5'])('rejects invalid host ceiling %s before transport', async cap => {
     vi.stubEnv('BLOMA_DISPATCH_EXPERIMENT', '1')
     vi.stubEnv('BLOMA_EXPERIMENT_MAX_OUTPUT_TOKENS', cap)
     await expect(async () => { for await (const _ of anthropicMessagesQueryViaProviders('review', opts())) void _ }).rejects.toThrow('EXPERIMENT_INVALID_OUTPUT_CEILING')

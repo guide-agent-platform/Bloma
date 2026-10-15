@@ -138,7 +138,7 @@ async function* anthropicMessagesQueryViaProvidersInner(prompt: string, options:
   const url = openai ? `${baseUrl.replace(/\/chat\/completions$/, '')}/chat/completions` : resolveLoopMessagesUrl(baseUrl, providerType)
   const makeRequest = (): { url: string; headers: Record<string, string>; body: string } => {
     // 服务端硬上限夹紧（2026-10-03 zhipu 实测 131072，超限 400 code 1210）：唯一夹紧点在出口
-    body.max_tokens = capMaxTokensForProvider(options.maxTokens ?? 640000, providerType)
+    body.max_tokens = capMaxTokensForProvider(options.maxTokens ?? 640000, providerType, model)
     return {
       url,
       headers: openai ? { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' } : buildAnthropicHeaders(apiKey, providerType),

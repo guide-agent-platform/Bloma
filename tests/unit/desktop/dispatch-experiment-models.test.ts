@@ -176,6 +176,14 @@ describe('research data collection', () => {
     recordExperimentBoundary('p', 'delivered')
     expect(readExperimentEvents(config).events.filter(event => event.event === 'run_finished')).toHaveLength(1)
   })
+  it('ends an exhausted native gate without waiting for the operator deadline or inventing quality', () => {
+    const config = sealed()
+    recordExperimentBoundary('p', 'gate_exhausted', { phase: 'desktop-implement', gate_reason: 'no-marks' })
+    expect(reportModelExperiment('p')).toMatchObject({ run_outcome: 'failed', termination_reason: 'EXPERIMENT_GATE_EXHAUSTED', product_quality: null })
+    expect(readExperimentEvents(config).events.find(event => event.event === 'gate_exhausted')).toMatchObject({ gate_reason: 'no-marks' })
+    recordExperimentBoundary('p', 'delivered')
+    expect(readExperimentEvents(config).events.filter(event => event.event === 'run_finished')).toHaveLength(1)
+  })
   it('collects six real external grader executions and computes paired D, R and G including failures', () => {
     const source = running(); source.state = 'prepared'; source.policy = undefined; source.models = undefined; source.condition_hash = undefined
     source.prepared = { at: '2026-10-13', requirements_digest: 'frozen' }; writeExperiment(source)

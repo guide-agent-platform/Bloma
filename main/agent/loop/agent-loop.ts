@@ -966,6 +966,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
   const keepRecentBudget = resolveKeepRecentTokens()
   // 终轮退行已重试次数（P0：传输事故只重试一次，见 DEGENERATE_RETRY_LIMIT）
   let degenerateRetries = 0
+  let outputLimitRetries = 0
   // D2（2026-09-11 狗粮 dd6ba98d）：DSML 传输事故恢复计数（只读调用直接执行的轮数）
   let transportRecoveries = 0
   // B3（P0-B，2026-09-11）：进度对账三守卫状态（BLOMA_LOOP_PROGRESS_NUDGE off=零注入）
@@ -1148,6 +1149,21 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     // 漏进正文，工具调用从未送达）——带反馈重试一轮；重试仍脏则如实 turn_limit
     // 交终验，垃圾文本不得作为完成总结进入交付链。
     if (turnToolUses.length === 0) {
+      // A cutoff (including paid thinking-only output) is not a completion claim.
+      // Keep the actual output on disk, but never replay an empty assistant turn
+      // or execute tool intents from partial text. Retry within the original limits.
+      if (stopReason === 'max_tokens') {
+        if (!wrapUp && turn < input.maxTurns && outputLimitRetries < 2) {
+          outputLimitRetries += 1
+          if (assistantBlocks.length) messages.push({ role: 'assistant', content: assistantBlocks })
+          const feedback = '【宿主输出预算反馈】上一轮达到单次输出上限，响应被截断，不代表任务完成。请利用已读信息继续，把实现或工具调用拆成较小步骤，先落盘必要内容；不要仅重新思考整项任务。原任务、单次输出上限和总轮次预算不变。'
+          appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: feedback }])
+          messages.push({ role: 'user', content: [{ type: 'text', text: feedback }] })
+          continue
+        }
+        return attachUsage({ status: 'turn_limit', turns, finalText, toolCalls,
+          termination_detail: { reason: 'output_token_limit', retries: outputLimitRetries } })
+      }
       if (isDegenerateText(finalText)) {
         if (degenerateRetries < DEGENERATE_RETRY_LIMIT) {
           degenerateRetries += 1

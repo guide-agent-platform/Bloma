@@ -21,6 +21,9 @@ if (!Array.isArray(clarificationAnswers)) throw new Error('EXPERIMENT_INVALID_CL
 if (!['prepare', 'run', 'seed'].includes(command) || !option('home') || !option('monetary-policy')
   || home.toLowerCase() === join(homedir(), '.proma').toLowerCase()) throw new Error('EXPERIMENT_DRIVER_ARGUMENTS')
 mkdirSync(reportDir, { recursive: true })
+const project = () => JSON.parse(readFileSync(join(home, 'projects.json'), 'utf8')).projects[0]
+const config = id => JSON.parse(readFileSync(join(home, 'dispatch-experiments', `${id}.json`), 'utf8'))
+const effectiveOutputLimit = command === 'run' ? config(project().project_id).limits?.max_output_tokens ?? 640000 : preparationMaxTokens
 const credentialsPath = option('credentials', join(process.env.LOCALAPPDATA, 'Bloma', 'dispatch-experiment-20261013', 'credentials.dpapi.json'))
 const electronEnv = { ...process.env, PROMA_HOME: home }
 delete electronEnv.ELECTRON_RUN_AS_NODE
@@ -32,7 +35,7 @@ function seed() {
   execFileSync(join(process.cwd(), 'node_modules/electron/dist/electron.exe'), ['scripts/seed-experiment-channels.cjs'], {
     windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...electronEnv,
       BEX_DEEPSEEK_API_KEY: keys.deepseek, BEX_GLM_API_KEY: keys.glm,
-      BEX_PREPARATION_MAX_TOKENS: String(preparationMaxTokens) } })
+      BEX_PREPARATION_MAX_TOKENS: String(effectiveOutputLimit) } })
 }
 seed()
 if (command === 'seed') { console.log(JSON.stringify({ home, seeded: true })); process.exit(0) }
@@ -40,15 +43,14 @@ const sleep = ms => new Promise(done => setTimeout(done, ms))
 const cli = (...params) => execFileSync(process.execPath, ['scripts/dispatch-experiment.mjs', ...params], { encoding: 'utf8', windowsHide: true }).trim()
 let application, page
 const report = { command, home, resume_preparation: resumePreparation, at: new Date().toISOString(), confirmations: [], outcome: 'running' }
+report.host_output_ceiling = effectiveOutputLimit
 if (command === 'prepare') report.preparation_max_output_tokens = preparationMaxTokens
 const log = message => console.log(`[native-experiment] ${message}`)
-const project = () => JSON.parse(readFileSync(join(home, 'projects.json'), 'utf8')).projects[0]
-const config = id => JSON.parse(readFileSync(join(home, 'dispatch-experiments', `${id}.json`), 'utf8'))
 try {
   application = await _electron.launch({ args: ['.', `--user-data-dir=${join(home, 'electron-user-data')}`],
     env: { ...electronEnv, BLOMA_DESKTOP_DISPATCH: '1',
       BLOMA_DISPATCH_EXPERIMENT: '1', BLOMA_MONETARY_POLICY: policy,
-      BLOMA_EXPERIMENT_MAX_OUTPUT_TOKENS: String(command === 'prepare' ? preparationMaxTokens : config(project().project_id).limits?.max_output_tokens ?? 8192) }, timeout: 60000 })
+      BLOMA_EXPERIMENT_MAX_OUTPUT_TOKENS: String(effectiveOutputLimit) }, timeout: 60000 })
   for (const stream of [application.process().stdout, application.process().stderr]) stream?.on('data', bytes => appendFileSync(join(reportDir, 'main.log'), bytes))
   page = await application.firstWindow()
   await page.waitForLoadState('domcontentloaded')

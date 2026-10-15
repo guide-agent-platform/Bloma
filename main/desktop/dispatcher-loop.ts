@@ -537,6 +537,7 @@ export async function runDesktopDispatcherLoop(input: DesktopDispatchRunInput): 
     result = { status: 'error', error_message: error instanceof Error ? error.message : String(error) }
   }
   if (tracked) {
+    if (result.loopResult?.termination_detail?.reason === 'output_token_limit') result.error_message = 'EXPERIMENT_OUTPUT_BUDGET_EXHAUSTED'
     if (result.loopResult?.termination_detail?.reason === 'persistent_tool_budget') result.error_message = 'EXPERIMENT_EXECUTION_BUDGET_EXHAUSTED'
     recordExperiment(config, 'experiment_stage_finished', { phase: input.currentPhase, request_id: input.requestId,
       status: result.status, loop_status: result.loopResult?.status, duration_ms: Date.now() - startedAt,

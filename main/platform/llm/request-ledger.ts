@@ -12,6 +12,7 @@ interface LedgerEvent {
   project_id: string; session_id: string; run_id?: string; parent_session_id?: string; role: string; scope: string
   model?: string; endpoint_host?: string; transport_index?: number; status?: string; duration_ms?: number; usage?: Usage
   system_sha256?: string
+  stop_reason?: string
   response?: ModelTransportReceipt
 }
 let sessionCache: { path: string; mtime: number; sessions: Map<string, { project_id: string; parent_session_id?: string }> } | undefined
@@ -97,6 +98,7 @@ export async function* accountSdkQuery(query: SDKQuery, prompt: string, options:
   const started = Date.now()
   let usage: Usage | undefined
   let finished = false
+  let stopReason: string | undefined
   let transportIndex = 0
   let activeTransport = false
   append({ ...withPrompt, at: new Date().toISOString(), event: 'query_started' })
@@ -117,13 +119,16 @@ export async function* accountSdkQuery(query: SDKQuery, prompt: string, options:
       append({ ...base, at: new Date().toISOString(), event: 'transport_response', transport_index: transportIndex, response: receipt })
     } })) {
       if (message.usage) usage = { ...usage, ...cleanUsage(message.usage) }
-      if (message.type === 'result') finished = message.subtype === 'success'
+      if (message.type === 'result') {
+        finished = message.subtype === 'success'
+        stopReason = message.stop_reason?.slice(0, 100)
+      }
       yield message
     }
   } finally {
     const status = options.signal.aborted ? 'cancelled' : finished ? 'completed' : 'error'
     if (activeTransport) append({ ...base, at: new Date().toISOString(), event: 'transport_finished', transport_index: transportIndex, status })
-    append({ ...base, at: new Date().toISOString(), event: 'query_finished', status, duration_ms: Date.now() - started, usage: cleanUsage(usage) })
+    append({ ...base, at: new Date().toISOString(), event: 'query_finished', status, duration_ms: Date.now() - started, usage: cleanUsage(usage), stop_reason: stopReason })
   }
 }
 

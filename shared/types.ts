@@ -1107,7 +1107,7 @@ export type AgentLoopStatus = 'completed' | 'turn_limit' | 'budget_exhausted' | 
  *  纯增量字段，旧调用方零感知。 */
 /** P2a（2026-09-11）：loop 异常终止真实出口原因（纯增量观测字段，不改 status 语义）。 */
 export interface LoopTerminationDetail {
-  reason: 'degenerate_output' | 'grace_wrap_up' | 'cost_limit' | 'persistent_tool_budget'
+  reason: 'degenerate_output' | 'grace_wrap_up' | 'cost_limit' | 'persistent_tool_budget' | 'output_token_limit'
   /** 成本硬上限终止时的限额与实测（可解释；仅 reason=cost_limit 携带） */
   limit?: number
   observed?: number

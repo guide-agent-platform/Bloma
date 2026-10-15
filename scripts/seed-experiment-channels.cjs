@@ -5,8 +5,8 @@ const { join, resolve } = require('node:path')
 const { homedir } = require('node:os')
 const { mkdirSync, writeFileSync } = require('node:fs')
 const home = resolve(process.env.PROMA_HOME || '')
-const preparationMaxTokens = Number(process.env.BEX_PREPARATION_MAX_TOKENS || '8192')
-if (!Number.isSafeInteger(preparationMaxTokens) || preparationMaxTokens < 1024 || preparationMaxTokens > 65536) throw new Error('EXPERIMENT_INVALID_PREPARATION_TOKEN_CAP')
+const preparationMaxTokens = Number(process.env.BEX_PREPARATION_MAX_TOKENS || '640000')
+if (!Number.isSafeInteger(preparationMaxTokens) || preparationMaxTokens < 1024 || preparationMaxTokens > 640000) throw new Error('EXPERIMENT_INVALID_PREPARATION_TOKEN_CAP')
 if (!process.env.PROMA_HOME || home.toLowerCase() === join(homedir(), '.proma').toLowerCase()) throw new Error('EXPERIMENT_REQUIRES_ISOLATED_HOME')
 app.setPath('userData', join(home, 'electron-user-data'))
 app.whenReady().then(() => {
@@ -18,7 +18,7 @@ app.whenReady().then(() => {
   const channels = definitions.map(([id, name, provider_type, base_url, model, key]) => {
     if (!key) throw new Error('EXPERIMENT_CREDENTIAL_MISSING')
     return { id, name, provider_type, base_url, api_key: safeStorage.encryptString(key).toString('hex'),
-      models: [{ id: model, name: model, enabled: true, supports_tools: true }], enabled: true, max_tokens: id === 'experiment-ds' ? preparationMaxTokens : 8192 }
+      models: [{ id: model, name: model, enabled: true, supports_tools: true }], enabled: true, max_tokens: id === 'experiment-ds' ? preparationMaxTokens : Math.min(preparationMaxTokens, 131072) }
   })
   mkdirSync(home, { recursive: true })
   writeFileSync(join(home, 'bloma-channels.json'), JSON.stringify({ version: 1, channels }), 'utf8')

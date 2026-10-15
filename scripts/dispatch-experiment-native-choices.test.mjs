@@ -22,8 +22,9 @@ test('Ordinary card labels include descriptions after their titles',()=>{
 })
 test('Preparation output caps are bounded and cannot change an execution condition',()=>{
  assert.equal(preparationTokenCap('prepare','16384'),16384)
- assert.equal(preparationTokenCap('run',undefined),8192)
- for(const value of ['0','-1','Infinity','65537','8192.5']) assert.throws(()=>preparationTokenCap('prepare',value),/INVALID_PREPARATION/)
+ assert.equal(preparationTokenCap('prepare','640000'),640000)
+ assert.equal(preparationTokenCap('run',undefined),640000)
+ for(const value of ['0','-1','Infinity','640001','8192.5']) assert.throws(()=>preparationTokenCap('prepare',value),/INVALID_PREPARATION/)
  assert.throws(()=>preparationTokenCap('run','16384'),/INVALID_PREPARATION/)
 })
 test('Free-text answers require an unambiguous predefined question match',()=>{
