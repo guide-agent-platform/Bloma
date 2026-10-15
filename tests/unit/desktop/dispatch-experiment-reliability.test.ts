@@ -57,6 +57,22 @@ describe('pre-dispatch required artifact permission coverage', () => {
     expect((await f.plan.execute({ tasks: [{ id: 'custom', instruction: '自选实现结构', depends_on: [], writes: ['validation/', 'delivery.md'] }] }, f.ctx)).isError).not.toBe(true)
     expect(f.config.tasks).toHaveLength(1)
   })
+  it('rejects unsupported glob scopes before locking and lets the planner correct its own plan', async () => {
+    const f = fixture([])
+    const task = { id: 'core', instruction: '自选模块', depends_on: [], writes: ['core/**', 'ui/*.js'] }
+    const rejected = await f.plan.execute({ tasks: [task] }, f.ctx)
+    expect(rejected.isError).toBe(true)
+    expect(rejected.output).toContain('EXPERIMENT_PLAN_UNSUPPORTED_WRITE_SCOPE')
+    expect(f.config.tasks).toEqual([])
+    expect(f.config.plan_locked).not.toBe(true)
+    expect(f.created).not.toHaveBeenCalled()
+    const corrected = { ...task, writes: ['core/', 'ui/'] }
+    expect((await f.plan.execute({ tasks: [corrected] }, f.ctx)).isError).not.toBe(true)
+    expect(f.config.tasks).toEqual([corrected])
+    await f.delegate.execute({ task_ids: ['core'] }, f.ctx)
+    expect(f.created).toHaveBeenCalledTimes(1)
+    expect(f.config.plan_locked).toBe(true)
+  })
   it('binds the requirement list to the frozen condition fingerprint', () => {
     const f = fixture()
     f.config.required_writes.push('new-mandate.json')

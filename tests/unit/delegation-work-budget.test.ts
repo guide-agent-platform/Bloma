@@ -29,4 +29,11 @@ describe('delegation work budgets', () => {
     expect((await run(12)).status).toBe('turn_limit')
     expect((await run(24)).status).toBe('completed')
   })
+  it('keeps independently configured implementation E64 separate from dispatcher D40', () => {
+    const context = { maxTurns: 40, delegationMaxTurns: 12, delegationTurnLimits: { implement: 64 }, delegationTurnCaps: { implement: 64 } }
+    expect(resolveDelegationTurns(context, 'implement')).toBe(64)
+    expect(resolveDelegationTurns(context, 'research')).toBe(12)
+    expect(resolveDelegationTurns({ ...context, delegationTurnLimits: { implement: 128 } }, 'implement')).toBe(64)
+    expect(resolveDelegationTurns({ ...context, delegationTurnCaps: undefined }, 'implement')).toBe(40)
+  })
 })

@@ -13,6 +13,8 @@ export interface DelegationParentContext {
   maxTurns: number
   delegationMaxTurns: number
   delegationTurnLimits?: Partial<Record<DelegationRunRole, number>>
+  /** Host-owned independent child ceilings; absent roles retain the legacy parent cap. */
+  delegationTurnCaps?: Partial<Record<DelegationRunRole, number>>
   permissionMode: PromaPermissionMode
   temperature: number
   system: string
@@ -27,7 +29,7 @@ export interface DelegationParentContext {
   /** Optional host registration before the child can execute tools. */
   onChildCreated?: (child: { delegationId: string; childSessionId: string }) => void
 }
-export function resolveDelegationTurns(context: Pick<DelegationParentContext, 'maxTurns' | 'delegationMaxTurns' | 'delegationTurnLimits'>, role: DelegationRunRole): number {
+export function resolveDelegationTurns(context: Pick<DelegationParentContext, 'maxTurns' | 'delegationMaxTurns' | 'delegationTurnLimits' | 'delegationTurnCaps'>, role: DelegationRunRole): number {
   const budget = context.delegationTurnLimits?.[role] ?? context.delegationMaxTurns
-  return Math.max(1, Math.min(budget, context.maxTurns))
+  return Math.max(1, Math.min(budget, context.delegationTurnCaps?.[role] ?? context.maxTurns))
 }

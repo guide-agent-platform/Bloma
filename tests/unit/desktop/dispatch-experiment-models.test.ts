@@ -292,6 +292,33 @@ describe('pinned roles and experiment conditions', () => {
 })
 
 describe('actual loop routing with fake SDK responses', () => {
+  it('executes a 41-step child under E64 while keeping the dispatcher at D40', async () => {
+    const initial = running()
+    initial.limits = { ...DEFAULT_EXPERIMENT_LIMITS, dispatcher_turns: 40, executor_turns: 64 }
+    initial.condition_hash = experimentConditionHash(initial); writeExperiment(initial)
+    let parentCalls = 0, childCalls = 0
+    const query: SDKQuery = async function* (_prompt, options) {
+      if (options.sessionId === 'parent') {
+        parentCalls++
+        if (parentCalls === 1) yield toolMessage('plan', 'experiment_plan', { tasks: [task('long')] })
+        else if (parentCalls === 2) yield toolMessage('delegate', 'delegate_agent', { task_ids: ['long'] })
+        else if (parentCalls === 3) yield toolMessage('wait', 'wait_for_delegations', { timeout_ms: 2000 })
+        else yield text()
+      } else {
+        childCalls++
+        if (childCalls <= 41) yield toolMessage(`step-${childCalls}`, 'write_file', { path: 'long.py', content: `# step ${childCalls}` })
+        else yield text()
+      }
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+    const result = await run(query, { maxTurns: 40 })
+    expect(childCalls).toBeGreaterThanOrEqual(42)
+    expect(parentCalls).toBeLessThan(40)
+    expect(readFileSync(join(root, 'long.py'), 'utf8')).toBe('# step 41')
+    expect(result.status).toBe('completed')
+    expect(readExperimentEvents(readExperiment('p')!).events.find(event => event.event === 'implement_started')?.resource_limits)
+      .toMatchObject({ parent_turns: 40, effective_executor_turns: 64, requested_executor_turns: 64 })
+  })
   it.each([
     ['G11', bindings.one, bindings.one, 'm1', 'm1'], ['G12', bindings.one, bindings.two, 'm1', 'm2'],
     ['G21', bindings.two, bindings.one, 'm2', 'm1'], ['G22', bindings.two, bindings.two, 'm2', 'm2'],

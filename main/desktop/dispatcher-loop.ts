@@ -37,6 +37,7 @@ import { buildDomainTools } from '../coding/tool-handlers'
 import { buildWebResearch } from '../agent/tools/web-tools'
 import { buildDelegationTools } from '../agent/delegation/delegation-tools'
 import { disposeParentDelegationState, registerParentLoopContext, setChildToolsBuilder, restoreCompletedDelegation } from '../agent/delegation/agent-collaboration'
+import { resolveDelegationTurns } from '../agent/delegation/delegation-context'
 import { categoryTemperature } from '../platform/llm/model-resolution'
 import { trackAnalytics } from '../delivery/track-analytics'
 import { recordDispatchRunTelemetry, recordDispatchStartTelemetry } from './dispatcher-telemetry'
@@ -351,14 +352,18 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
   // 首跑实证：工具面带 delegate_agent，但本路径从未注册父 loop 上下文——一调用即抛
   // 「未找到父循环上下文」。对齐 coding generate.ts 的注册契约：父上下文（query/env/
   // 预算/权限/发布）+ 子工具集构建器（worker 需要文件写工具落盘产物）。
+  const delegationBudgets = {
+    maxTurns: input.maxTurns ?? 40,
+    delegationMaxTurns: DESKTOP_DELEGATION_MAX_TURNS,
+    delegationTurnLimits: { implement: experiment?.models ? experimentLimits(experiment).executor_turns : 32, custom: 32, research: node.id === 'desktop-verify' ? 24 : 12 },
+    ...(experiment?.models ? { delegationTurnCaps: { implement: experimentLimits(experiment).executor_turns } } : {}),
+  }
   registerParentLoopContext(input.sessionId, {
     materials: sessionMaterials(input.projectId, input.sessionId),
     query: input.query,
     env: input.env,
     maxTokens: input.maxTokens,
-    maxTurns: input.maxTurns ?? 40,
-    delegationMaxTurns: DESKTOP_DELEGATION_MAX_TURNS,
-    delegationTurnLimits: { implement: experiment?.models ? experimentLimits(experiment).executor_turns : 32, custom: 32, research: node.id === 'desktop-verify' ? 24 : 12 },
+    ...delegationBudgets,
     permissionMode: 'allow-all',
     temperature: categoryTemperature('mvp'),
     system: buildDesktopChildBaseSystem(promptNode, {
@@ -393,7 +398,7 @@ async function runDesktopDispatcherLoopInner(input: DesktopDispatchRunInput): Pr
     }
     recordExperiment(experiment, 'implement_started', { request_id: input.requestId, session_id: input.sessionId,
       resource_limits: { ...executionLimits, parent_turns: input.maxTurns ?? 40,
-        effective_executor_turns: standalone ? input.maxTurns ?? 40 : Math.min(input.maxTurns ?? 40, experimentLimits(experiment).executor_turns),
+        effective_executor_turns: standalone ? input.maxTurns ?? 40 : resolveDelegationTurns(delegationBudgets, 'implement'),
         requested_executor_turns: experimentLimits(experiment).executor_turns, script_scope: 'session', script_resets_on: 'new_run' } })
   }
 

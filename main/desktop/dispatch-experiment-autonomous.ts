@@ -7,6 +7,7 @@ export function autonomousTaskBook(config: DispatchExperiment): string {
   const limits = experimentLimits(config)
   return '【调度实验运行协议】\n' +
     `需求、初始产物和验收已冻结。自行制定任务分解，使用 experiment_plan 登记任务、依赖与写入范围；不规定任务数量或具体拆分答案。\n` +
+    'writes只接受具体文件路径或以 / 结尾的目录前缀，不支持 *、**、? 通配符；不合法范围会在锁定计划前拒绝。\n' +
     (config.required_writes?.length ? `宿主必需交付文件（项目根相对路径）：${config.required_writes.join('、')}。计划写入范围必须覆盖这些文件；首次派遣前缺失会明确拒绝，可重新提交你自己的计划。测试脚本名称与业务分解仍由你决定。\n` : '') +
     `实现者最多 ${limits.max_workers} 名，任务登记最多 ${limits.max_tasks} 项。delegate_agent 用 task_ids 分配任务；continue_delegation 可分配尚未执行的已登记任务或发送修复反馈。\n` +
     '角色、模型由宿主实验配置绑定，不自行修改。规划登记只定义执行协议，不表示任务或产物已验收；是否启动、分配、等待、集成和修复由你决定。历史证据不是当前版本已通过证明。'
@@ -17,7 +18,7 @@ export function wrapAutonomousDispatcherTools(tools: AgentLoopTool[], config: Di
   const cache = new Map<string, ToolOutcome>()
   const plan: AgentLoopTool = { name: 'experiment_plan', description: '登记你自行产生的任务分解。第一次派遣后计划锁定，修复沿已登记任务进行。',
     input_schema: { type: 'object', properties: { tasks: { type: 'array', items: { type: 'object', properties: {
-      id: { type: 'string' }, instruction: { type: 'string' }, depends_on: { type: 'array', items: { type: 'string' } }, writes: { type: 'array', items: { type: 'string' } },
+      id: { type: 'string' }, instruction: { type: 'string' }, depends_on: { type: 'array', items: { type: 'string' } }, writes: { type: 'array', description: '具体文件相对路径或以 / 结尾的目录前缀；不支持 *、**、? 通配符', items: { type: 'string' } },
     }, required: ['id', 'instruction', 'depends_on', 'writes'] } } }, required: ['tasks'] },
     execute: async (input, ctx) => {
       try {
@@ -26,6 +27,9 @@ export function wrapAutonomousDispatcherTools(tools: AgentLoopTool[], config: Di
         const tasks = input.tasks as ExperimentTask[]
         validateExperimentTasks(tasks, experimentLimits(config).max_tasks)
         if (!tasks.length) throw new Error('EXPERIMENT_EMPTY_PLAN')
+        // Validate new plans only: historical configs with unsupported scopes remain readable.
+        const unsupported = tasks.flatMap(task => task.writes).filter(path => /[*?]/.test(path))
+        if (unsupported.length) throw new Error(`EXPERIMENT_PLAN_UNSUPPORTED_WRITE_SCOPE: ${unsupported.join(', ')}。writes使用具体文件路径或以 / 结尾的目录前缀，不支持通配符；尚未派遣，可修正后重新登记。`)
         const scopes = tasks.flatMap(task => task.writes).map(path => path.toLowerCase())
         const missing = (config.required_writes ?? []).filter(path => !scopes.some(scope => path.toLowerCase() === scope
           || (scope.endsWith('/') && path.toLowerCase().startsWith(scope))))
