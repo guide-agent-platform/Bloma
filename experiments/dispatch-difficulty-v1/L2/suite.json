@@ -1,19 +1,76 @@
 {
   "version": 1,
   "checks": [
-    {"id":"add-trim","kind":"manual","description":"在新数据目录准备合法项目，界面新增含首尾空格标题的任务；列表与重启后的标题应已去空格。"},
-    {"id":"empty-rejection","kind":"manual","description":"已有合法任务，切全部且清除其他筛选；提交空串与纯空格标题，完整列表数和已有内容不变。"},
-    {"id":"toggle-isolation","kind":"manual","description":"同一项目两条同名任务，只完成或取消完成其中一条，另一条状态不受影响。"},
-    {"id":"filters","kind":"manual","description":"清除新增筛选条件，完成和未完成各一条；全部/未完成/已完成应分别显示2/1/1条且状态不变。"},
-    {"id":"delete-isolation","kind":"manual","description":"删除两条同名任务中的指定一条，另一条及状态保留；重启后删除结果保留。"},
-    {"id":"restart-persistence","kind":"manual","description":"修改标题与完成状态并删除另一条，关闭全部进程后重开同一数据目录，所有结果保留。"},
-    {"id":"project-names","kind":"manual","description":"项目名称前后空格应去掉；空白名称与去空格后重复名称应拒绝，已有项目和任务不受影响。"},
-    {"id":"project-assignment-move","kind":"manual","description":"两个项目分别建立同名任务；移动其中一条到另一项目，其标题、状态、优先级、日期保留，源/目标列表与数量同步。"},
-    {"id":"project-delete-guard","kind":"manual","description":"含任务的项目应拒绝删除且数据不变；把任务移走后删除空项目成功，其他项目和任务不受影响。"},
-    {"id":"priority-calendar","kind":"manual","description":"保存三种优先级及合法截止日期，重启后保留；没有截止日期可保存；2月30日等不存在日期应拒绝，不能改坏已有日期。"},
-    {"id":"overdue-boundaries","kind":"manual","description":"冻结当前本地日期，创建昨天/今天/明天截止的未完成任务以及昨天截止的已完成任务；过期结果仅含昨天未完成者。"},
-    {"id":"combined-filters","kind":"manual","description":"准备跨项目、不同状态和优先级的混合任务；标题大小写搜索与项目/状态/优先级/过期条件组合应取交集，数量一致；清除条件恢复记录，移动或修改后即时同步。"},
-    {"id":"backup-roundtrip","kind":"manual","description":"导出含两个项目、同名任务、不同状态/优先级/日期的备份，换到空数据目录导入；全部字段、归属及独立任务数量一致。"},
-    {"id":"import-atomic-idempotent","kind":"manual","description":"已有基线及一条备份外记录；导入部分有效部分损坏的备份或内容冲突备份必须整份失败且基线不变；有效备份重复导入应合并且不重复、不合并同名任务、不删除备份外记录。"}
-  ]
+    {
+      "id": "add-trim",
+      "kind": "manual",
+      "description": "在新数据目录准备合法项目，界面新增含首尾空格标题的任务；列表与重启后的标题应已去空格。"
+    },
+    {
+      "id": "empty-rejection",
+      "kind": "manual",
+      "description": "已有合法任务，切全部且清除其他筛选；提交空串与纯空格标题，完整列表数和已有内容不变。"
+    },
+    {
+      "id": "toggle-isolation",
+      "kind": "manual",
+      "description": "同一项目两条同名任务，只完成或取消完成其中一条，另一条状态不受影响。"
+    },
+    {
+      "id": "filters",
+      "kind": "manual",
+      "description": "清除新增筛选条件，完成和未完成各一条；全部/未完成/已完成应分别显示2/1/1条且状态不变。"
+    },
+    {
+      "id": "delete-isolation",
+      "kind": "manual",
+      "description": "删除两条同名任务中的指定一条，另一条及状态保留；重启后删除结果保留。"
+    },
+    {
+      "id": "restart-persistence",
+      "kind": "manual",
+      "description": "修改标题与完成状态并删除另一条，关闭全部进程后重开同一数据目录，所有结果保留。"
+    },
+    {
+      "id": "project-names",
+      "kind": "manual",
+      "description": "项目名称前后空格应去掉；空白名称与去空格后重复名称应拒绝，已有项目和任务不受影响。"
+    },
+    {
+      "id": "project-assignment-move",
+      "kind": "manual",
+      "description": "两个项目分别建立同名任务；移动其中一条到另一项目，其标题、状态、优先级、日期保留，源/目标列表与数量同步。"
+    },
+    {
+      "id": "project-delete-guard",
+      "kind": "manual",
+      "description": "含任务的项目应拒绝删除且数据不变；把任务移走后删除空项目成功，其他项目和任务不受影响。"
+    },
+    {
+      "id": "priority-calendar",
+      "kind": "manual",
+      "description": "保存三种优先级及合法截止日期，重启后保留；没有截止日期可保存；2月30日等不存在日期应拒绝，不能改坏已有日期。"
+    },
+    {
+      "id": "overdue-boundaries",
+      "kind": "manual",
+      "description": "冻结当前本地日期，创建昨天/今天/明天截止的未完成任务以及昨天截止的已完成任务；过期结果仅含昨天未完成者。"
+    },
+    {
+      "id": "combined-filters",
+      "kind": "manual",
+      "description": "准备跨项目、不同状态和优先级的混合任务；标题大小写搜索与项目/状态/优先级/过期条件组合应取交集，数量一致；清除条件恢复记录，移动或修改后即时同步。"
+    },
+    {
+      "id": "backup-roundtrip",
+      "kind": "manual",
+      "description": "导出先逐字段核对已知GUI输入：两项目同名任务分别工作/高/已完成/明天、生活/低/未完成/无日期，稳定ID和数量一致；空目录导入及重启逐字段一致，不只比较产品自身导出。"
+    },
+    {
+      "id": "import-atomic-idempotent",
+      "kind": "manual",
+      "description": "在缺标题、全新ID非法日期、同ID业务冲突三份备份中，将有效新记录放在错误记录之前；应整份拒绝且完整状态不变；有效重复导入合并，不重复、不合并同名任务、不删备份外记录，重启一致。"
+    }
+  ],
+  "revision": "20261015-v2"
 }

@@ -107,7 +107,7 @@ try {
     }
     if (Date.now() - lastAction < 4000) continue
     let action
-    for (const id of ['requirement-confirm-submit', 'prd-confirm-submit', 'card-option-ux_confirm_go', 'card-option-ux_delegate']) {
+    for (const id of ['requirement-confirm-submit', 'prd-confirm-submit', 'card-option-ux_confirm_go', 'card-option-ux_delegate', 'review-choice-global-prd_review_delegate_all']) {
       const target = page.locator(`[data-ai-id="${id}"]`)
       if (await target.isVisible() && await target.isEnabled()) {
         if (id === 'requirement-confirm-submit') {
@@ -126,7 +126,9 @@ try {
       const custom = page.locator('[data-ai-id="clarification-custom-input"]')
       if (await custom.isVisible()) {
         const question = await page.locator('[data-ai-id="clarification-card-overlay"]').innerText()
-        const answer = selectClarificationAnswer(question, clarificationAnswers)
+        const currentAnswers = option('clarification-answers') ? JSON.parse(readFileSync(option('clarification-answers'), 'utf8')) : clarificationAnswers
+        if (!Array.isArray(currentAnswers)) throw new Error('EXPERIMENT_INVALID_CLARIFICATION_ANSWERS')
+        const answer = selectClarificationAnswer(question, currentAnswers)
         if (answer) {
           await custom.fill(answer)
           await page.locator('[data-ai-id="clarification-custom-submit"]').click()

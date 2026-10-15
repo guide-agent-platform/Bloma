@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "status": "design_candidate_one_L2_method_pilot_reviewed",
+  "status": "v2_L2_calibrated_L3_preparation_running",
   "levels": [
     {
       "id": "L1",
@@ -26,11 +26,11 @@
       "request": "experiments/dispatch-difficulty-v1/L2/request.md",
       "request_sha256": "5344202c5a2f8b8cbb5a7c6559e39e78585b65097dea2de7015bdf141a9f2cdd",
       "suite": "experiments/dispatch-difficulty-v1/L2/suite.json",
-      "suite_sha256": "0e347ec6aaa5b5090ba9868906e92cc80a7be370c77f2e16ea55e8246934df22",
+      "suite_sha256": "73748b1643dde48a27265cede4e9daa6ee9c1284989b82758bb084f7503a4081",
       "check_count": 14,
       "automated_evaluator_status": "not implemented or calibrated",
       "review_actions": "experiments/dispatch-difficulty-v1/L2/review-actions.md",
-      "review_actions_sha256": "1b0682f145ce36d686e941a715b3406b27b0cdb1661b93498bcc75b14392943f",
+      "review_actions_sha256": "da865c976dd1f5eced8621e5bbee82253582f35f80f12c6e92a4df7e1583641f",
       "clarification_answers": "experiments/dispatch-difficulty-v1/L2/clarification-answers.json",
       "clarification_answers_sha256": "bd798d20df759048f9c762e246aa65bd06a64c1468b875ef46d924d16d3292db"
     },
@@ -44,9 +44,13 @@
       "request": "experiments/dispatch-difficulty-v1/L3/request.md",
       "request_sha256": "92ac0c553d651c949d0f60e89ef53536821643ff0e0427c4b739fc92ce7abf76",
       "suite": "experiments/dispatch-difficulty-v1/L3/suite.json",
-      "suite_sha256": "be7dccafa0432f5872cb8a0cde94225108599b0bffe1cdf85ac384e5b469661e",
+      "suite_sha256": "2697ae24682567785b3727b08cda35b220fdbfd729ce65a3479811e4d6c34068",
       "check_count": 22,
-      "automated_evaluator_status": "not implemented or calibrated"
+      "automated_evaluator_status": "not implemented or calibrated",
+      "review_actions": "experiments/dispatch-difficulty-v1/L3/review-actions.md",
+      "review_actions_sha256": "c9db87fece8ba45c382ce511f9e91703a53b14527338918caf01394e1338c433",
+      "clarification_answers": "experiments/dispatch-difficulty-v1/L3/clarification-answers.json",
+      "clarification_answers_sha256": "62e2e06cc2aa2d3df72a48fc553b571aac437483368a6b4777604887ab7378d0"
     }
   ],
   "common_check_ids": [
@@ -57,6 +61,6 @@
     "delete-isolation",
     "restart-persistence"
   ],
-  "notes": "One L2 quick/S1 method pilot completed with 14/14 GUI criteria. No empirical general difficulty claim, calibrated general evaluator, L3 execution or six-group comparison. See docs/05_PROJECT_PLAN/dispatch-l2-result-20261014.md.",
-  "revision": "20261014-prepilot-title-edit"
+  "notes": "L2 v1 pilot had a newly reproduced import-date defect. v2 fixed scenarios calibrated on 14 positive checks and 15 fault variants; no six-group cohort yet. Reference UI adapter is not universal.",
+  "revision": "20261015-v2"
 }
