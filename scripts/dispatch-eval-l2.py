@@ -49,7 +49,7 @@ def restart():r.stop();r.start();time.sleep(.4);observed()
 def screenshot(name):
  if not a.capture:return
  try:
-  result=subprocess.run([str(a.python or root/'.venv/Scripts/python.exe'),str(Path('run-artifacts/l2-pilot-20261014/capture-owned-window.py').resolve()),str(r.process.pid),str(out/(name+'.png'))],capture_output=True,text=True,encoding='utf-8',timeout=25)
+  result=subprocess.run([str(a.python or root/'.venv/Scripts/python.exe'),str(Path(__file__).with_name('capture-owned-window.py')),str(r.process.pid),str(out/(name+'.png'))],capture_output=True,text=True,encoding='utf-8',timeout=25)
   report['steps'].append({'scenario':scenario,'screenshot':name,'exit_code':result.returncode,'stdout':result.stdout,'stderr':result.stderr[:600]});save()
  except Exception as e:report['steps'].append({'screenshot_error':str(e)});save()
 def export(name):
