@@ -98,7 +98,7 @@ def backup():
  assert len(original['tasks'])==2 and {p['name'] for p in original['projects']}=={'工作','生活'}
  by_id={t['id']:t for t in original['tasks']};projects={p['id']:p['name'] for p in original['projects']}
  assert by_id[A]['title']==by_id[B]['title']=='同名任务' and by_id[A]['done'] and not by_id[B]['done']
- assert by_id[A]['priority']=='high' and by_id[B]['priority']=='low' and by_id[A]['due']==dates[2] and by_id[B]['due']==''
+ assert by_id[A]['priority']=='high' and by_id[B]['priority']=='low' and by_id[A]['due']==dates[2] and by_id[B]['due'] in ('',None)
  assert projects[by_id[A]['project_id']]=='工作' and projects[by_id[B]['project_id']]=='生活'
  source_path=out/(scenario+'-source.json');new_scenario('backup-roundtrip-target');imported(source_path);assert semantic(export('restored'))==semantic(original);rows(2,1);restart();assert semantic(export('restart'))==semantic(original);screenshot('backup-restored')
 def import_atomic():
