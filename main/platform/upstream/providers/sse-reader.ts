@@ -86,6 +86,8 @@ class HTTPError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly providerCode?: string,
+    readonly nonRetryable = false,
   ) {
     super(message)
     this.name = 'HTTPError'
@@ -115,6 +117,7 @@ function isRetriableError(error: unknown): boolean {
   if (error instanceof MonetaryBudgetError) return false
   if (error instanceof ProviderStreamError) return false
   if (error instanceof HTTPError) {
+    if (error.nonRetryable) return false
     return error.status === 408 || error.status === 425 || error.status === 429 || error.status >= 500
   }
   return true
@@ -252,7 +255,14 @@ async function runReservedStreamAttempt(options: StreamSSEOptions): Promise<Stre
   // 2. 错误检查
   if (!response.ok) {
     const text = await response.text().catch(() => '')
-    throw new HTTPError(`provider API 错误 (${response.status}): ${text.slice(0, 300)}`, response.status)
+    let code: unknown
+    try { const raw = JSON.parse(text); code = raw.error?.code ?? raw.code } catch { /* non-JSON errors keep the ordinary HTTP retry policy */ }
+    const safeCode = typeof code === 'number' || typeof code === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(code) ? String(code) : undefined
+    receipt({ response_bytes: Buffer.byteLength(text), body_sha256: createHash('sha256').update(text).digest('hex'), json_error_code: safeCode })
+    // BigModel documents 1113 as insufficient prepaid credit, despite HTTP 429.
+    // Repeating it is not rate-limit recovery and creates additional unknown holds.
+    const creditExhausted = new URL(request.url).hostname === 'open.bigmodel.cn' && response.status === 429 && safeCode === '1113'
+    throw new HTTPError(`provider API 错误 (${response.status}): ${text.slice(0, 300)}`, response.status, safeCode, creditExhausted)
   }
 
   if (!response.body) {

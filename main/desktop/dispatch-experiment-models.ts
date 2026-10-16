@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto'
 import type { SDKQuery } from '../orchestration/orchestrator'
 import { getPromaHome } from '../../storage/config-paths'
 import { assertExperimentEvaluator } from './dispatch-experiment-evaluator'
-import { readExperimentEvents } from './dispatch-experiment-records'
+import { finishExperiment, readExperimentEvents } from './dispatch-experiment-records'
 import { experimentInputsIntact } from './dispatch-experiment-inputs'
 import { DEFAULT_EXPERIMENT_SETTINGS, experimentLimits, experimentPath, recordExperiment, validateExperiment, writeExperiment, type DispatchExperiment, type ExperimentModel, type ExperimentModels } from './dispatch-experiment'
 
@@ -79,6 +79,12 @@ export function guardExperimentQuery(query: SDKQuery, config: DispatchExperiment
         temperature: settings.temperature, thinkingLevel: settings.thinking_level,
         responseHeaderTimeoutMs: settings.response_header_timeout_ms ?? 30000,
         accounting: options.accounting ? { ...options.accounting, runId: config.run_id, role: `experiment_${role}` } : undefined })
+    } catch (error) {
+      const rejection = error as { status?: number; providerCode?: string; nonRetryable?: boolean }
+      if (rejection?.status === 429 && rejection.providerCode === '1113' && rejection.nonRetryable === true) {
+        finishExperiment(config, 'failed', 'PROVIDER_BALANCE_EXHAUSTED')
+      }
+      throw error
     } finally { recordExperiment(config, 'model_request_finished', { role, session_id: options.sessionId, request_number: number }) }
   }
 }

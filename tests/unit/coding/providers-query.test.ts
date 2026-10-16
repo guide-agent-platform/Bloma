@@ -68,6 +68,23 @@ describe('R1-providers ANTHROPIC_SSE_ADAPTER.parseSSELine', () => {
 })
 
 describe('R1-providers streamSSE（上游装配容错）', () => {
+  it('does not retry BigModel credit rejection, while its rate-limit rejection still retries', async () => {
+    setSseRetryWaitBudgetForTests(1)
+    const request = { url: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', body: '{}', headers: {} }
+    const exhausted = vi.fn().mockResolvedValue(new Response('{"error":{"code":"1113","message":"private-credit-error"}}', { status: 429 }))
+    const receipts: import('../../../shared/types').ModelTransportReceipt[] = []
+    try {
+      await expect(streamSSE({ request, adapter: ANTHROPIC_SSE_ADAPTER, fetchFn: exhausted, onEvent: () => {}, onResponse: r => receipts.push(r) }))
+        .rejects.toMatchObject({ status: 429, providerCode: '1113', nonRetryable: true })
+      expect(exhausted).toHaveBeenCalledOnce()
+      expect(receipts.at(-1)).toMatchObject({ status: 429, json_error_code: '1113' })
+      expect(JSON.stringify(receipts)).not.toContain('private-credit-error')
+      const throttled = vi.fn().mockResolvedValueOnce(new Response('{"error":{"code":"1302"}}', { status: 429 }))
+        .mockResolvedValueOnce(sseResponse('data: [DONE]\n\n'))
+      await streamSSE({ request, adapter: ANTHROPIC_SSE_ADAPTER, fetchFn: throttled, onEvent: () => {} })
+      expect(throttled).toHaveBeenCalledTimes(2)
+    } finally { setSseRetryWaitBudgetForTests() }
+  })
   it('reports HTTP 200 JSON responses as protocol errors without retrying or logging response content', async () => {
     const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { code: '1309', message: 'private-response-text' } }), {
       headers: { 'content-type': 'application/json' },

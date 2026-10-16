@@ -220,6 +220,16 @@ describe('research data collection', () => {
 })
 
 describe('pinned roles and experiment conditions', () => {
+  it('makes a permanent provider credit rejection terminal before another paid query', async () => {
+    const config = running('standalone'); writeExperiment(config)
+    const binding = resolveExperimentModel(config.models!.executor), options = { sessionId: 'parent', signal: new AbortController().signal, env: binding.env }
+    const base = vi.fn(async function* () { throw Object.assign(new Error('provider credit rejection'), { status: 429, providerCode: '1113', nonRetryable: true }); yield text() })
+    const guarded = guardExperimentQuery(base, config, 'implement')
+    await expect(async () => { for await (const _ of guarded('', options)) {} }).rejects.toThrow('provider credit rejection')
+    expect(readExperimentEvents(config).events.find(x => x.event === 'run_finished')).toMatchObject({ outcome: 'failed', reason: 'PROVIDER_BALANCE_EXHAUSTED' })
+    await expect(async () => { for await (const _ of guarded('', options)) {} }).rejects.toThrow('EXPERIMENT_ALREADY_FINISHED')
+    expect(base).toHaveBeenCalledOnce()
+  })
   it('finishes a core-blocked run after two repairs without leaving the native driver waiting', async () => {
     const c = readExperiment('p')!, complete = vi.fn()
     const deps = { coreVerification: async () => ({ status: 'unverified', summary: 'pending', checked_at: '', missing: ['F-016: declaration mismatch'], evidence: [] }),
