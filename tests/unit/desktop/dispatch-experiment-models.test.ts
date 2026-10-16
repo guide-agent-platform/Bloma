@@ -18,6 +18,8 @@ import { restorePromaHome } from '../../support/proma-home-guard'
 import { evaluateExperiment, installExperimentEvaluator } from '../../../main/desktop/dispatch-experiment-evaluator'
 import { finishExperiment, readExperimentEvents } from '../../../main/desktop/dispatch-experiment-records'
 import { aggregateModelExperiments } from '../../../main/desktop/dispatch-experiment-aggregate'
+import { ensureCoreDelivery } from '../../../main/desktop/core-delivery'
+import { bindExperimentInput } from '../../../main/desktop/dispatch-experiment-runtime'
 
 vi.mock('../../../main/platform/llm/channel-manager', async original => ({
   ...await original<typeof import('../../../main/platform/llm/channel-manager')>(),
@@ -218,6 +220,20 @@ describe('research data collection', () => {
 })
 
 describe('pinned roles and experiment conditions', () => {
+  it('finishes a core-blocked run after two repairs without leaving the native driver waiting', async () => {
+    const c = readExperiment('p')!, complete = vi.fn()
+    const deps = { coreVerification: async () => ({ status: 'unverified', summary: 'pending', checked_at: '', missing: ['F-016: declaration mismatch'], evidence: [] }),
+      publish: vi.fn(), persistSystem: vi.fn(), complete } as never
+    const input = { projectId: 'p', sessionId: 'parent', requestId: 'native' }
+    const repair = vi.fn(async () => { await ensureCoreDelivery(input, deps, repair) })
+    await ensureCoreDelivery(input, deps, repair)
+    expect(repair).toHaveBeenCalledTimes(2)
+    expect(complete).toHaveBeenCalledWith('parent', 'p', 'incomplete')
+    const finished = readExperimentEvents(c).events.filter(x => x.event === 'run_finished')
+    expect(finished).toHaveLength(1)
+    expect(finished[0]).toMatchObject({ outcome: 'failed', reason: 'CORE_VERIFICATION_UNVERIFIED' })
+    expect(() => bindExperimentInput({ query: vi.fn() } as never, c, 'implement')).toThrow('EXPERIMENT_ALREADY_FINISHED')
+  })
   it('rejects wrong routing before invoking the SDK and never stores credentials', async () => {
     const config = readExperiment('p')!, query = vi.fn(async function* () { yield text() })
     const guarded = guardExperimentQuery(query, config, 'implement')

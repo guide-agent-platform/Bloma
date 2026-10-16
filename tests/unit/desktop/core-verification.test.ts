@@ -82,11 +82,15 @@ describe('shared core delivery', () => {
   })
   it('refuses stale registration before execution, and old passing manifests stay diagnostic', async () => {
     manifest()
+    const declared = JSON.parse(readFileSync(join(root, 'CORE_CHECK.json'), 'utf8')).requirements[0].requirement_hash
     vi.mocked(readPrdBackplane).mockReturnValue({ requirements: [{ id: 'F-001', description: '已改变的功能' }] } as never)
+    const current = requirementEvidenceHash(readPrdBackplane('p'), readPrdBackplane('p').requirements[0])
     const spawn = vi.fn(async () => ({ code: 0, stdout: 'PASS actual input', stderr: '' }))
     const stale = await runCoreVerification({ projectId: 'p', sandboxRoot: root, spawn })
     expect(stale.status).toBe('unverified')
     expect(stale.missing.join(' ')).toContain('需求版本不一致')
+    expect(stale.missing.join(' ')).toContain(`声明指纹 ${declared}；当前指纹 ${current}`)
+    expect(stale.missing.join(' ')).toContain('只改场景名称不能修正指纹')
     expect(spawn).not.toHaveBeenCalled()
     writeFileSync(join(root, 'CORE_CHECK.json'), JSON.stringify({ schema_version: 1, command: ['python', 'core_check.py'], scenarios: [{ name: 'actual input', covers: ['F-001'], input: 'gui' }] }))
     const legacy = await run()

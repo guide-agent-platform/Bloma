@@ -2,6 +2,7 @@ import { findProject } from '../project/project-service'
 import { runCoreVerification, type CoreVerificationResult } from './core-verification'
 import type { DesktopRouteDeps } from './desktop-route'
 import { consumeProjectAttempt, resetProjectAttemptScope } from '../platform/execution/project-attempts'
+import { recordExperimentBoundary } from './dispatch-experiment'
 const seenProjects = new Set<string>()
 export function resetCoreDeliveryState(): void { for (const id of seenProjects) { try { resetProjectAttemptScope(id, 'core') } catch { /* test cleanup */ } } seenProjects.clear() }
 export function clearCoreDeliveryRetries(projectId: string): void { resetProjectAttemptScope(projectId, 'core') }
@@ -27,6 +28,7 @@ export async function ensureCoreDelivery(input: { projectId: string; sessionId: 
     await repair(`[系统反馈] 核心业务验证 ${result.status}。读取 00_VERIFY/core-verification.json，按当前失败点局部修复并执行核心检查，不改已确认需求或测试期望。原因：${result.missing.join('; ')}。本次修复 ${attempt.used}/2。`)
     return false
   }
+  recordExperimentBoundary(input.projectId, 'core_verification_blocked', { verification_status: result.status, missing: result.missing, repair_attempts: attempt.used })
   deps.complete(input.sessionId, input.projectId, 'incomplete')
   return false
 }

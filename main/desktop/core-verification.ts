@@ -67,7 +67,10 @@ export async function runCoreVerification(options: {
       const declaration = declarations.find(entry => entry.id === item.id)
       const hash = requirementEvidenceHash(backplane, item)
       if (!declaration) result.missing.push(`${item.id}: 缺少逐项实现声明与验证版本，旧场景通过不能证明本项完成`)
-      else if (declaration.requirement_hash !== hash) throw new Error(`${item.id}: 验证声明与当前需求版本不一致，请核对场景语义并重新登记，不可仅复制旧覆盖编号`)
+      else if (declaration.requirement_hash !== hash) {
+        const declared = typeof declaration.requirement_hash === 'string' && /^[a-f0-9]{64}$/i.test(declaration.requirement_hash) ? declaration.requirement_hash : '缺失或无效'
+        throw new Error(`${item.id}: 验证声明与当前需求版本不一致（声明指纹 ${declared}；当前指纹 ${hash}）。请先读取当前需求并核对场景语义，再在 CORE_CHECK.json 的 requirements 中重新登记 requirement_hash；只改场景名称不能修正指纹，也不可仅复制旧覆盖编号`)
+      }
       else if (declaration.implementation !== 'implemented') result.missing.push(`${item.id}: 实现状态为 ${declaration.implementation}，测试通过不能补成已实现`)
       return { id: item.id, requirement_hash: hash, implementation: (declaration?.implementation ?? 'unverified') as 'implemented' | 'partial' | 'missing' | 'unverified', verification: 'unverified' }
     })

@@ -18,7 +18,9 @@ app.whenReady().then(() => {
   const channels = definitions.map(([id, name, provider_type, base_url, model, key]) => {
     if (!key) throw new Error('EXPERIMENT_CREDENTIAL_MISSING')
     return { id, name, provider_type, base_url, api_key: safeStorage.encryptString(key).toString('hex'),
-      models: [{ id: model, name: model, enabled: true, supports_tools: true }], enabled: true, max_tokens: id === 'experiment-ds' ? preparationMaxTokens : Math.min(preparationMaxTokens, 131072) }
+      models: [{ id: model, name: model, enabled: true, supports_tools: true },
+        ...(id === 'experiment-ds' ? [{ id: 'deepseek-v4-pro', name: 'deepseek-v4-pro', enabled: true, supports_tools: true }] : [])],
+      enabled: true, max_tokens: id === 'experiment-ds' ? preparationMaxTokens : Math.min(preparationMaxTokens, 131072) }
   })
   mkdirSync(home, { recursive: true })
   writeFileSync(join(home, 'bloma-channels.json'), JSON.stringify({ version: 1, channels }), 'utf8')
