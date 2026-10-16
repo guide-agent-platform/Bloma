@@ -1,6 +1,6 @@
 # 六组预实验准备
 
-当前进行中（2026-10-16）：用户明确将 M2 从 GLM 改为 DeepSeek V4 Pro，要求完成全部实验。新 Flash/Pro high 的 L2 quick 六组已冻结并启动，原 GLM/修复样本不混入；另已离线准备 L3、L1 quick 和真实骨架交接的 L1 longterm，各六组一轮，按余额依次推进。见 [主登记](dispatch-flash-pro-preregister-20261016.md)、[难度分层](dispatch-flash-pro-difficulty-20261016.md)、[longterm 登记](dispatch-flash-pro-longterm-20261016.md)。当前活动实验与预算以这些新登记及 `run-artifacts/flash-pro-matrix-20261016/registry.json` 为准；下段 18:00 的“0 活动请求”只描述启动本批之前的历史收口。
+当前进行中（2026-10-16 18:55）：用户要求 M2 改为 DeepSeek V4 Pro，并再次明确全部调用的宿主预算为 640000。已修复主流程/交接/收口的隐藏小额度，以及截断或 DSML 交接文本被当有效摘要的问题；173 项单测、8 项集成、类型/构建通过，4 条真实 Flash/Pro 辅助请求资格验证通过。DS 官方硬上限为 393216，只有出口夹紧。新版本 L2 quick 六组已冻结并启动，见 [统一预算登记](dispatch-flash-pro-uniform-preregister-20261016.md)，活动记录 `run-artifacts/flash-pro-uniform-20261016/registry.json`。旧 384000 尝试 G11 脚本预算失败、G12 因操作者纠正预算中断，其余四组及 L1/L3/longterm 旧准备未付费且停用；旧数据不补入新矩阵。活动 policy 改为新批目录中的 policy.json，完整携带所有历史账目与未知预留，不重置钱包。难度分层和 longterm 后续按 640000 重新冻结，尚未执行。
 
 上一批收口（2026-10-16 18:00）：[L2 续试及 Pro high 对照已完成](dispatch-recovery-final-20261016.md)。S1、S2 恢复后交付且独立14/14；G12的GLM恢复交付但13/14，另由Pro high定向修复达到14/14；G22受常规API服务端1113余额不足截断，Q=null。新增Pro high新任务对照交付但仅9/14，保留真实质量失败。共8个执行样本，394次逻辑/395次物理请求，新增已返回用量峰值估算33.687010元；3笔GLM未知预留36.175872元单列，不视为实际扣费。旧账目未改，0活动请求/0实验进程。用户已放开原60元边界，当前活动policy为 `run-artifacts/l2-recovery-fix-20261016/policy.json`（Flash/GLM各100元内部故障保护，Pro80元；DS两模型共享钱包）。响应头等待、指纹反馈、核心受阻终态已修；欠费误重试的最终修复通过80项相关测试、类型检查与构建，仅作离线回归，未再收费验证。恢复及Pro条件不补入原始配对；正式六组完整匹配数仍为0。继续GLM前需恢复可用额度并依真实凭据处理未知预留，不能直接删账。
 
