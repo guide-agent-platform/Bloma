@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "status": "L2_repaired_fresh_six_running_caps_60_authorized",
+  "status": "L2_six_executed_reviewed_infrastructure_censored_no_complete_pair",
   "levels": [
     {
       "id": "L1",
@@ -61,6 +61,6 @@
     "delete-isolation",
     "restart-persistence"
   ],
-  "notes": "User approved DS/GLM cumulative caps 60 each, all old liabilities carried without reset. New same-runtime six-group L2 rerun in progress. Old S1/S2 14/14 and audit-cancelled G11 remain historical, not pooled. See docs/05_PROJECT_PLAN/dispatch-l2-reliable-preregister-20261015.md.",
+  "notes": "New-runtime six groups all executed and reviewed. G11/G21 ready + 14/14; S1 native turn_limit + 14/14; S2 execution budget failure + 13/14. G12/G22 incomplete business GUI after first-response timeouts and reservation blocks, Q=null; matched complete pairs=0. Caps remain 60 RMB each; no active calls. Old samples excluded. See docs/05_PROJECT_PLAN/dispatch-l2-reliable-result-20261016.md.",
   "revision": "20261015-v2"
 }

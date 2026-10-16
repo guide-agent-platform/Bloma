@@ -9,3 +9,5 @@ G12同一逻辑query的两次物理请求分别约30秒未收到HTTP响应头，
 经余额确认后继续同一配置且0模型调用的G21/G22，以及尚未启动的S2。不重跑G12或S1，不挑选较好样本，不修改产品/超时/资源/运行包。实际执行顺序为 **G11→G12→S1→G21→G22→S2**，预算造成的顺序偏移明确保留，不能宣称符合原始固定顺序或随机化。
 
 费用、暂停和恢复记录：`run-artifacts/l2-reliable-20261015/wallet-reconciliation.json`、`glm-wallet-checkpoint.json`、`state-before-wallet-checkpoint.json`、`registry-before-resume.json`、`HOLD-first-response-audit`。不完整GUI的质量保持未知并记录证据；任一组质量未知则完整匹配六组统计不能当作已完成，原始行仍全部呈现。
+
+后续G22又发生两次首响应超时，预算再次阻止尚未启动的S2。用户2026-10-16提供余额31.15并确认自33.84起无其他变动；保守区间33.85→31.14，上界2.710001元，覆盖新30笔GLM记录、保留其中2笔未知状态。核销后只启动此前0调用的S2，没有重跑G22，运行包和累计60元上限不变。六组最终执行及复核结果见 [2026-10-16结果](dispatch-l2-reliable-result-20261016.md)。
