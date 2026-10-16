@@ -578,6 +578,67 @@ describe('usage 竹节压缩（闭环 PR6）', () => {
     else process.env.BLOMA_LOOP_COMPACT_KEEP_RECENT_TOKENS = originalKeepRecent
   })
 
+  it.each([
+    ['partial prose', '尚未完成的交接', 'max_tokens', false],
+    ['protocol text', '<｜｜DSML｜｜tool_calls><｜｜DSML｜｜invoke name="edit_file">', 'end_turn', false],
+    ['structured tool', '接下来调用工具', 'tool_use', true],
+    ['thinking only', '', 'max_tokens', false],
+  ] as const)('rejects invalid compaction output: %s', async (_name, body, stop, toolCall) => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    let workingCalls = 0, fullyConsumed = false
+    const workingInputs: ConversationTurn[][] = []
+    const compactions: AgentLoopCompactionInfo[] = []
+    const query: SDKQuery = async function* (_prompt, options) {
+      if (options.tools === undefined) {
+        if (body) yield textMessage(body)
+        if (toolCall) yield toolUseMessage('unexpected', 'echo')
+        yield { type: 'result', subtype: 'success', stop_reason: stop }
+        fullyConsumed = true
+        return
+      }
+      workingInputs.push(structuredClone(options.messages ?? []))
+      if (++workingCalls === 1) {
+        yield toolUseMessage('first', 'echo')
+        yield { type: 'result', subtype: 'success', stop_reason: 'tool_use', usage: { input_tokens: 5000, output_tokens: 10 } }
+      } else {
+        yield textMessage('已完成本轮，仍需独立验收。')
+        yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+      }
+    }
+    await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 6, onCompaction: info => compactions.push(info) }))
+    expect(fullyConsumed).toBe(true)
+    expect(compactions[0]?.handoff_fallback).toBe(true)
+    const nextTask = textOf(workingInputs[1]?.[1])
+    expect(nextTask).toContain('自动交接')
+    expect(nextTask).toContain('echo×1')
+    expect(nextTask).not.toContain('<｜｜DSML｜｜')
+    expect(nextTask).not.toContain('尚未完成的交接')
+  })
+
+  it.each([[640000, 640000], [2048, 2048]])('uses the same host budget for high-thinking handoff and working requests: %i', async (limit, handoffLimit) => {
+    process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
+    const budgets: number[] = [], compactions: AgentLoopCompactionInfo[] = []
+    let work = 0
+    const query: SDKQuery = async function* (_prompt, options) {
+      budgets.push(options.maxTokens!)
+      if (options.tools === undefined) {
+        expect(options.thinkingLevel).toBe('high')
+        expect(options.accounting?.scope).toBe('handoff')
+        yield textMessage('已完成布局；未解决测试失败；下一步修复按钮。')
+        yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+      } else if (++work === 1) {
+        yield toolUseMessage('first', 'echo')
+        yield { type: 'result', subtype: 'success', stop_reason: 'tool_use', usage: { input_tokens: 5000, output_tokens: 10 } }
+      } else {
+        yield textMessage('本轮结束。')
+        yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+      }
+    }
+    await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 6, maxTokens: limit, thinkingLevel: 'high', onCompaction: info => compactions.push(info) }))
+    expect(budgets.slice(0, 3)).toEqual([limit, handoffLimit, limit])
+    expect(compactions[0]?.handoff_fallback).toBe(false)
+  })
+
   it('超阈值触发：messages 重置为 task+交接（task+2 次交接=3 节），交接调用无 tools 且带交接 system', async () => {
     process.env.BLOMA_LOOP_COMPACT_AT_INPUT_TOKENS = '1000'
     const { query, turnCalls, handoffCalls } = compactQuery({ inputTokens: 5000, handoff: 'text', handoffText: '交接：布局完成，GWT 场景 3 未过，下一步修点击。' })
@@ -1049,7 +1110,7 @@ describe('keep-recent 三段式压缩（P1-1，2026-09-08 pi 差距方案）', (
 })
 
 describe('绿灯收口与宽限轮（2026-08-29 turn_limit 线上案例 eb900c57）', () => {
-  it('caps only tool-free wrap-up output while keeping the coding budget intact', async () => {
+  it('keeps the caller budget for tool-free wrap-up as well as coding', async () => {
     const budgets: number[] = []
     const echo = tool('echo', () => ({ output: 'ok' }))
     const query: SDKQuery = async function* (_prompt, options) {
@@ -1059,7 +1120,7 @@ describe('绿灯收口与宽限轮（2026-08-29 turn_limit 线上案例 eb900c57
       yield { type: 'result', subtype: 'success' }
     }
     const result = await runAgentLoop(baseInput({ query, tools: [echo], maxTurns: 1, maxTokens: 131072 }))
-    expect(budgets).toEqual([131072, 4096])
+    expect(budgets).toEqual([131072, 131072])
     expect(result.status).toBe('completed')
   })
   const originalPromaHome = process.env.PROMA_HOME

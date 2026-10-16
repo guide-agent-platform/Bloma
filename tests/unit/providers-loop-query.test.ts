@@ -78,14 +78,27 @@ describe('experimental output ceiling at the SDK boundary', () => {
     expect(parsedBody().max_tokens).toBe(32768)
     expect(input.maxTokens).toBe(640000)
   })
-  it('defaults to the authorized 640000 for experiments and preserves smaller role budgets', async () => {
+  it('uses authorized 640000 for experiments including legacy smaller auxiliary budgets', async () => {
     vi.stubEnv('BLOMA_DISPATCH_EXPERIMENT', '1')
     vi.stubEnv('BLOMA_EXPERIMENT_MAX_OUTPUT_TOKENS', undefined)
     mockStreamOk()
     for await (const _ of anthropicMessagesQueryViaProviders('review', opts())) void _
     expect(parsedBody().max_tokens).toBe(640000)
     for await (const _ of anthropicMessagesQueryViaProviders('short check', opts({ maxTokens: 1024 }))) void _
-    expect(parsedBody().max_tokens).toBe(1024)
+    expect(parsedBody().max_tokens).toBe(640000)
+  })
+  it.each(['deepseek-flash', 'deepseek-v4-pro'])('applies only the official provider hard limit for %s', async model => {
+    vi.stubEnv('BLOMA_DISPATCH_EXPERIMENT', '1')
+    vi.stubEnv('BLOMA_EXPERIMENT_MAX_OUTPUT_TOKENS', '640000')
+    mockStreamOk()
+    for (const legacy of [1024, 4096, 32768, 640000]) {
+      for await (const _ of anthropicMessagesQueryViaProviders('summary', opts({ maxTokens: legacy, thinkingLevel: 'high',
+        env: { ...opts().env, ANTHROPIC_MODEL: model, ANTHROPIC_PROVIDER_TYPE: 'deepseek', ANTHROPIC_BASE_URL: 'https://api.deepseek.com/anthropic' },
+      }))) void _
+      expect(parsedBody().max_tokens).toBe(393216)
+      expect(parsedBody().thinking).toEqual({ type: 'enabled' })
+      expect(parsedBody().output_config).toEqual({ effort: 'high' })
+    }
   })
   it('also caps regular GLM OpenAI-compatible requests', async () => {
     vi.stubEnv('BLOMA_DISPATCH_EXPERIMENT', '1')
@@ -344,7 +357,7 @@ describe('provider 信号驱动的 URL/头部派生（2026-10-04 双事故修正
     }))) void _
     expect(captured!.url).toBe('https://api.deepseek.com/anthropic/v1/messages')
     expect(captured!.headers['x-api-key']).toBe('test-key')
-    expect(parsedBody().max_tokens).toBe(640000)
+    expect(parsedBody().max_tokens).toBe(393216)
   })
 
   it('无任何 provider 信号：缺省 anthropic 语义不变（根域 base 补 /v1）', async () => {

@@ -281,6 +281,29 @@ describe('pinned roles and experiment conditions', () => {
       accounting: { projectId: 'p', role: 'implement', runId: 'native-request' } })) {}
     const report = reportModelExperiment('p'); expect(report.model_requests_by_role.executor.requests).toBe(1)
   })
+  it('overrides legacy auxiliary limits and records host versus actual provider budgets', async () => {
+    const config = running()
+    config.models!.executor = { channel_id: 'c2', model_id: 'deepseek-v4-pro' }
+    config.settings = { temperature: .1, thinking_level: 'high' }
+    config.limits!.max_output_tokens = 640000
+    config.condition_hash = experimentConditionHash(config); writeExperiment(config)
+    vi.mocked(getChannelByIdRaw).mockImplementation(id => id === 'c2' ? {
+      ...channel('c2', 'deepseek-v4-pro'), provider_type: 'deepseek', base_url: 'https://api.deepseek.com/anthropic', max_tokens: 640000,
+    } : undefined)
+    const binding = resolveExperimentModel(config.models!.executor), seen: number[] = []
+    const guarded = guardExperimentQuery(async function* (_prompt, options) {
+      seen.push(options.maxTokens!); expect(options.thinkingLevel).toBe('high'); yield text()
+    }, config, 'implement')
+    for (const [scope, legacy] of [['handoff', 1024], ['grace', 4096], ['loop', 32768]] as const) {
+      for await (const _ of guarded('', { sessionId: 'child', signal: new AbortController().signal, env: binding.env, maxTokens: legacy,
+        accounting: { projectId: 'p', role: 'implement', scope } })) void _
+    }
+    expect(seen).toEqual([640000, 640000, 640000])
+    const events = readExperimentEvents(config).events.filter(x => x.event === 'model_request')
+    expect(events.map(x => x.host_max_tokens)).toEqual([640000, 640000, 640000])
+    expect(events.map(x => x.max_tokens)).toEqual([393216, 393216, 393216])
+    expect(events.map(x => x.caller_max_tokens)).toEqual([1024, 4096, 32768])
+  })
   it('seals and enforces the response-header timeout, including the historical default', async () => {
     const config = running(), binding = resolveExperimentModel(config.models!.dispatcher)
     const seen: (number | undefined)[] = []

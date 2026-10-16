@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto'
 import type { SDKQuery } from '../orchestration/orchestrator'
 import { getPromaHome } from '../../storage/config-paths'
 import { assertExperimentEvaluator } from './dispatch-experiment-evaluator'
+import { capMaxTokensForProvider } from '../platform/llm/model-resolution'
 import { finishExperiment, readExperimentEvents } from './dispatch-experiment-records'
 import { experimentInputsIntact } from './dispatch-experiment-inputs'
 import { DEFAULT_EXPERIMENT_SETTINGS, experimentLimits, experimentPath, recordExperiment, validateExperiment, writeExperiment, type DispatchExperiment, type ExperimentModel, type ExperimentModels } from './dispatch-experiment'
@@ -70,12 +71,13 @@ export function guardExperimentQuery(query: SDKQuery, config: DispatchExperiment
     const settings = config.settings ?? DEFAULT_EXPERIMENT_SETTINGS
     recordExperiment(config, 'model_request', { role, channel_id: expected.channelId, model: expected.modelName,
       endpoint_host: hostOf(expected.env), session_id: options.sessionId, sdk_request_id: options.accounting?.runId,
-      max_tokens: Math.min(options.maxTokens ?? Infinity, expected.maxTokens!), temperature: settings.temperature,
+      host_max_tokens: expected.maxTokens!, caller_max_tokens: options.maxTokens,
+      max_tokens: capMaxTokensForProvider(expected.maxTokens!, expected.providerType, expected.modelName), temperature: settings.temperature,
       thinking_level: settings.thinking_level, response_header_timeout_ms: settings.response_header_timeout_ms ?? 30000, request_number: config.request_count })
     const number = config.request_count
     try {
       yield* query(prompt, { ...options, signal, env: expected.env,
-        maxTokens: Math.min(options.maxTokens ?? Infinity, expected.maxTokens!), providerType: expected.providerType,
+        maxTokens: expected.maxTokens!, providerType: expected.providerType,
         temperature: settings.temperature, thinkingLevel: settings.thinking_level,
         responseHeaderTimeoutMs: settings.response_header_timeout_ms ?? 30000,
         accounting: options.accounting ? { ...options.accounting, runId: config.run_id, role: `experiment_${role}` } : undefined })

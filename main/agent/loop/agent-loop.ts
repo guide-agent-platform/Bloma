@@ -383,8 +383,8 @@ const BUDGET_STALL_TURNS = 2
  */
 const DEGENERATE_RETRY_LIMIT = 1
 
-/** A tool-free completion summary must not inherit the full coding output budget. */
-export const WRAP_UP_MAX_TOKENS = 4096
+/** User-selected ceiling applies to coding and auxiliary summaries alike. */
+export const WRAP_UP_MAX_TOKENS = 640000
 
 /** 终轮退行重试时的反馈 user 轮（模型可见；同时落 JSONL 审计）。 */
 const DEGENERATE_RETRY_FEEDBACK =
@@ -414,8 +414,8 @@ const GRACE_TURN_SUFFIX =
 const LOOP_COMPACT_INPUT_TOKENS_DEFAULT = 100_000
 /** 每 loop 至多压缩次数：task + 2 次交接 = 3 节（随感 38 竹节≤3 节）。 */
 const LOOP_MAX_COMPACTIONS = 2
-/** 交接调用（无 tools 小请求）的 maxTokens。 */
-const LOOP_HANDOFF_MAX_TOKENS = 1024
+/** Reasoning and summary share the same ceiling; do not impose a smaller hidden cap. */
+const LOOP_HANDOFF_MAX_TOKENS = 640000
 const LOOP_HANDOFF_SYSTEM =
   '你是工程交接助手。把当前进展压缩成交接文档：已完成/未解决（含失败的测试断言原文）/下一步。不超过 600 字，保留文件名、报错原文等关键细节。'
 
@@ -521,13 +521,16 @@ function tailLastPairOrdinal(messages: ConversationTurn[]): number | undefined {
 /** 一次无 tools 的交接小调用（复用 input.query/env 同渠道）；任何失败返回 '' 交由确定性兑底。 */
 async function requestHandoff(input: AgentLoopInput, messages: ConversationTurn[], pinnedTestTurn: number | undefined): Promise<string> {
   let text = ''
+  let complete = false
+  let unexpectedTool = false
   try {
     for await (const sdk of input.query('', {
       env: input.env,
       signal: input.signal,
       sessionId: input.sessionId,
-      maxTokens: LOOP_HANDOFF_MAX_TOKENS,
+      maxTokens: Math.min(input.maxTokens, LOOP_HANDOFF_MAX_TOKENS),
       accounting: { projectId: input.projectId, runId: input.requestId, parentSessionId: input.parentSessionId, role: input.accountingRole ?? 'orchestrator', scope: 'handoff' },
+      ...(input.thinkingLevel !== undefined ? { thinkingLevel: input.thinkingLevel } : {}),
       messages: [
         { role: 'system', content: LOOP_HANDOFF_SYSTEM },
         // 钉轮一并携带（PR2）；2026-09-16 上下文同步 Proma：全量模式下交接输入也用全量
@@ -538,13 +541,17 @@ async function requestHandoff(input: AgentLoopInput, messages: ConversationTurn[
       if (sdk.type === 'assistant' && sdk.message) {
         for (const block of sdk.message.content) {
           if (block.type === 'text' && block.text) text += block.text
+          if (block.type === 'tool_use') unexpectedTool = true
         }
       }
+      if (sdk.type === 'result') complete = sdk.subtype === 'success' && sdk.stop_reason === 'end_turn'
     }
   } catch {
     return ''
   }
-  return text.trim()
+  // Consume the entire stream for accounting, then reject partial/protocol output.
+  // The caller retains recent turns and uses its deterministic handoff fallback.
+  return complete && !unexpectedTool && !isDegenerateText(text) ? text.trim() : ''
 }
 
 

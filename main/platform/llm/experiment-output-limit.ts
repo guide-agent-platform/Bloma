@@ -1,4 +1,4 @@
-/** A host ceiling at the SDK boundary also covers auxiliary callers with legacy defaults. */
+/** The frozen host budget overrides legacy auxiliary budgets for this experiment. */
 export function experimentOutputTokens(requested = 640000): number {
   if (!['1', 'true', 'on'].includes(process.env.BLOMA_DISPATCH_EXPERIMENT ?? '')) return requested
   const cap = Number(process.env.BLOMA_EXPERIMENT_MAX_OUTPUT_TOKENS ?? '640000')
@@ -6,5 +6,5 @@ export function experimentOutputTokens(requested = 640000): number {
     throw new Error('EXPERIMENT_INVALID_OUTPUT_CEILING')
   }
   if (!Number.isSafeInteger(requested) || requested < 1) throw new Error('EXPERIMENT_INVALID_REQUEST_OUTPUT')
-  return Math.min(requested, cap)
+  return cap
 }
