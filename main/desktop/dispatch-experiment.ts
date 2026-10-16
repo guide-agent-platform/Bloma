@@ -13,7 +13,7 @@ export const EXPERIMENT_POLICIES = ['single_worker', 'parallel_workers', 'autono
 export type ExperimentPolicy = typeof EXPERIMENT_POLICIES[number]
 export interface ExperimentModel { channel_id: string; model_id: string }
 export interface ExperimentModels { dispatcher: ExperimentModel; executor: ExperimentModel; verifier: ExperimentModel }
-export interface ExperimentSettings { temperature: number; thinking_level: 'off' | 'low' | 'high' | 'max' }
+export interface ExperimentSettings { temperature: number; thinking_level: 'off' | 'low' | 'high' | 'max'; response_header_timeout_ms?: number }
 export const DEFAULT_EXPERIMENT_SETTINGS: ExperimentSettings = { temperature: 0.1, thinking_level: 'low' }
 /** Native delivery metadata, not a prescribed business decomposition or test filename. */
 export const EXPERIMENT_REQUIRED_DELIVERABLES = ['CORE_CHECK.json', 'DELIVERY.md', 'LAUNCH.json'] as const
@@ -95,6 +95,8 @@ export function validateExperiment(raw: unknown): DispatchExperiment {
   if (value.evaluator_hash && !/^[a-f0-9]{64}$/.test(value.evaluator_hash)) throw new Error('EXPERIMENT_INVALID_EVALUATOR_HASH')
   if (value.settings && (!Number.isFinite(value.settings.temperature) || value.settings.temperature < 0 || value.settings.temperature > 2
     || !['off', 'low', 'high', 'max'].includes(value.settings.thinking_level))) throw new Error('EXPERIMENT_INVALID_SETTINGS')
+  if (value.settings?.response_header_timeout_ms !== undefined && (!Number.isSafeInteger(value.settings.response_header_timeout_ms)
+    || value.settings.response_header_timeout_ms < 1000 || value.settings.response_header_timeout_ms > 300000)) throw new Error('EXPERIMENT_INVALID_HEADER_TIMEOUT')
   if (value.execution_limits !== undefined && (!value.execution_limits || typeof value.execution_limits !== 'object' || Array.isArray(value.execution_limits)
     || Object.entries(value.execution_limits).some(([key, n]) => !['script_runs', 'install_calls'].includes(key) || !Number.isSafeInteger(n) || n < 1 || n > 128)
     || ['script_runs', 'install_calls'].some(key => !(key in value.execution_limits!)))) throw new Error('EXPERIMENT_INVALID_EXECUTION_LIMITS')

@@ -81,7 +81,13 @@ try {
     if (await projectsNav.isVisible()) await projectsNav.click()
     await page.locator('[data-ai-id="project-list-item"]').click()
     await page.locator('textarea').waitFor()
-    if (!resumePreparation) await page.locator('textarea').fill('请继续完成已经确认的需求。')
+    if (!resumePreparation) {
+      const continuation = option('continuation-file')
+      const message = continuation ? readFileSync(continuation, 'utf8').trim() : '请继续完成已经确认的需求。'
+      if (!message) throw new Error('EXPERIMENT_EMPTY_CONTINUATION')
+      await page.locator('textarea').fill(message)
+      if (continuation) report.continuation_file = resolve(continuation)
+    }
     else if (resumeAnswer) {
       await page.locator('textarea').fill(resumeAnswer)
       report.resume_answer = resumeAnswer

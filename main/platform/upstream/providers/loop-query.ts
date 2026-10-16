@@ -168,6 +168,7 @@ async function* anthropicMessagesQueryViaProvidersInner(prompt: string, options:
         request: makeRequest(),
         adapter: openai ? OPENAI_LOOP_ADAPTER : ANTHROPIC_SSE_ADAPTER,
         signal: options.signal,
+        timeoutMs: options.responseHeaderTimeoutMs,
         onAttempt: options.onTransportAttempt,
         onResponse: options.onTransportResponse,
         onEvent: (event) => {

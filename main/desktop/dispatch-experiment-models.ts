@@ -71,12 +71,13 @@ export function guardExperimentQuery(query: SDKQuery, config: DispatchExperiment
     recordExperiment(config, 'model_request', { role, channel_id: expected.channelId, model: expected.modelName,
       endpoint_host: hostOf(expected.env), session_id: options.sessionId, sdk_request_id: options.accounting?.runId,
       max_tokens: Math.min(options.maxTokens ?? Infinity, expected.maxTokens!), temperature: settings.temperature,
-      thinking_level: settings.thinking_level, request_number: config.request_count })
+      thinking_level: settings.thinking_level, response_header_timeout_ms: settings.response_header_timeout_ms ?? 30000, request_number: config.request_count })
     const number = config.request_count
     try {
       yield* query(prompt, { ...options, signal, env: expected.env,
         maxTokens: Math.min(options.maxTokens ?? Infinity, expected.maxTokens!), providerType: expected.providerType,
         temperature: settings.temperature, thinkingLevel: settings.thinking_level,
+        responseHeaderTimeoutMs: settings.response_header_timeout_ms ?? 30000,
         accounting: options.accounting ? { ...options.accounting, runId: config.run_id, role: `experiment_${role}` } : undefined })
     } finally { recordExperiment(config, 'model_request_finished', { role, session_id: options.sessionId, request_number: number }) }
   }

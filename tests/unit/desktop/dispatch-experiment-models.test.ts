@@ -255,6 +255,23 @@ describe('pinned roles and experiment conditions', () => {
       accounting: { projectId: 'p', role: 'implement', runId: 'native-request' } })) {}
     const report = reportModelExperiment('p'); expect(report.model_requests_by_role.executor.requests).toBe(1)
   })
+  it('seals and enforces the response-header timeout, including the historical default', async () => {
+    const config = running(), binding = resolveExperimentModel(config.models!.dispatcher)
+    const seen: (number | undefined)[] = []
+    const query: SDKQuery = async function* (_prompt, options) { seen.push(options.responseHeaderTimeoutMs); yield text() }
+    const options = { sessionId: 'parent', signal: new AbortController().signal, env: binding.env, responseHeaderTimeoutMs: 999999 }
+    writeExperiment(config)
+    for await (const _ of guardExperimentQuery(query, config, 'implement')('', options)) {}
+    config.settings = { temperature: 0.1, thinking_level: 'low', response_header_timeout_ms: 120000 }
+    expect(() => writeExperiment(config)).toThrow('CONDITION_CHANGED')
+    config.condition_hash = experimentConditionHash(config); writeExperiment(config)
+    for await (const _ of guardExperimentQuery(query, config, 'implement')('', options)) {}
+    expect(seen).toEqual([30000, 120000])
+    for (const value of [0, -1, 999, 300001, 1.5, NaN]) {
+      config.settings.response_header_timeout_ms = value
+      expect(() => writeExperiment(config)).toThrow('INVALID_HEADER_TIMEOUT')
+    }
+  })
   it('generates four model combinations and two genuine standalone controls from one input snapshot', () => {
     const source = running(); source.state = 'prepared'; source.policy = undefined; source.models = undefined; source.condition_hash = undefined
     source.prepared = { at: '2026-10-13', requirements_digest: 'frozen' }; writeExperiment(source)

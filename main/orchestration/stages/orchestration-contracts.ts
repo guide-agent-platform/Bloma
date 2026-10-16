@@ -90,6 +90,8 @@ export interface SDKQueryOptions {
   accounting?: import('../../platform/llm/request-ledger').QueryAccounting
   onTransportAttempt?: (state: 'started' | 'failed' | 'cancelled') => void
   onTransportResponse?: (receipt: import('../../../shared/types').ModelTransportReceipt) => void
+  /** Local response-header wait only; never sent to the provider or used as a body timeout. */
+  responseHeaderTimeoutMs?: number
   env: Record<string, string>
   signal: AbortSignal
   sessionId: string

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ANTHROPIC_SSE_ADAPTER } from '../../../main/platform/upstream/providers/anthropic-sse-adapter'
-import { streamSSE } from '../../../main/platform/upstream/providers/sse-reader'
+import { streamSSE, setSseRetryWaitBudgetForTests } from '../../../main/platform/upstream/providers/sse-reader'
 import { anthropicMessagesQueryViaProviders } from '../../../main/platform/upstream/providers/loop-query'
 import type { ProviderRequest, StreamEvent } from '../../../main/platform/upstream/providers/types'
 
@@ -207,6 +207,36 @@ const baseOptions = {
 }
 
 describe('R1-providers anthropicMessagesQueryViaProviders（SDKMessage 契约）', () => {
+  it('allows explicitly longer response-header waits without changing the default or provider payload', async () => {
+    vi.useFakeTimers(); setSseRetryWaitBudgetForTests(0)
+    const originalFetch = globalThis.fetch
+    const bodies: Record<string, unknown>[] = []
+    globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return new Promise<Response>((resolve, reject) => {
+        const timer = setTimeout(() => resolve(sseResponse(sseLines([
+          JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'delayed headers' } }),
+        ]))), 45000)
+        init?.signal?.addEventListener('abort', () => { clearTimeout(timer); reject(init.signal!.reason) }, { once: true })
+      })
+    }) as typeof fetch
+    const collect = async (timeout?: number) => {
+      const messages: unknown[] = []
+      for await (const message of anthropicMessagesQueryViaProviders('test', { ...baseOptions, responseHeaderTimeoutMs: timeout })) messages.push(message)
+      return messages
+    }
+    try {
+      const normal = collect().then(() => 'unexpected success', error => error.message)
+      await vi.advanceTimersByTimeAsync(30000)
+      expect(await normal).toBe('First byte timeout')
+      const extended = collect(120000)
+      await vi.advanceTimersByTimeAsync(45000)
+      expect(JSON.stringify(await extended)).toContain('delayed headers')
+      expect(bodies).toHaveLength(2)
+      expect(bodies[0]).toEqual(bodies[1])
+      expect(JSON.stringify(bodies)).not.toContain('responseHeaderTimeout')
+    } finally { globalThis.fetch = originalFetch; setSseRetryWaitBudgetForTests(); vi.useRealTimers() }
+  })
   it('text 实时增量 → tool_use 末尾 → result 带 usage/stop_reason；ds URL 差异化 + 双认证头', async () => {
     let seenUrl = ''
     let seenAuth = ''
