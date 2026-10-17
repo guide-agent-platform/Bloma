@@ -1,6 +1,12 @@
 {
   "version": 1,
-  "status": "L2_six_executed_reviewed_infrastructure_censored_no_complete_pair",
+  "status": "converged_20261017_uniform_L2_complete_L3_partial_L1_new_unstarted",
+  "cutoff_at": "2026-10-17T03:40:45.894Z",
+  "report": "docs/05_PROJECT_PLAN/dispatch-experiment-report-20261017.md",
+  "data": "outputs/experiment-report-20261017/experiment-data.json",
+  "primary_cohort": "flash-pro-uniform-20261016",
+  "primary_complete_six_group_sets": 1,
+  "historical_status_20261016": "L2_six_executed_reviewed_infrastructure_censored_no_complete_pair",
   "levels": [
     {
       "id": "L1",
@@ -61,6 +67,7 @@
     "delete-isolation",
     "restart-persistence"
   ],
-  "notes": "New-runtime six groups all executed and reviewed. G11/G21 ready + 14/14; S1 native turn_limit + 14/14; S2 execution budget failure + 13/14. G12/G22 incomplete business GUI after first-response timeouts and reservation blocks, Q=null; matched complete pairs=0. Caps remain 60 RMB each; no active calls. Old samples excluded. See docs/05_PROJECT_PLAN/dispatch-l2-reliable-result-20261016.md.",
+  "notes": "User requested convergence on 2026-10-17. No new paid runs. Uniform Flash/Pro L2: six scored, native-ready 5/6, business-full 4/6, joint 3/6, one matched set. Uniform L3: two executed but ungraded, four unstarted; G12 driver closed with an orphan reserved entry retained. New L1 quick/longterm: six prepared each, zero calls. Earlier L1 two six-group cohorts and historical GLM/recovery samples retained separately, not pooled. See current report and data.",
+  "historical_notes_20261016": "New-runtime six groups all executed and reviewed. G11/G21 ready + 14/14; S1 native turn_limit + 14/14; S2 execution budget failure + 13/14. G12/G22 incomplete business GUI after first-response timeouts and reservation blocks, Q=null; matched complete pairs=0. Caps remain 60 RMB each; no active calls. Old samples excluded. See docs/05_PROJECT_PLAN/dispatch-l2-reliable-result-20261016.md.",
   "revision": "20261015-v2"
 }

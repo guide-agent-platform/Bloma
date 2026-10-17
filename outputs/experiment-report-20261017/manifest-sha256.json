@@ -1,0 +1,116 @@
+{
+  "at": "2026-10-17T04:01:33.689Z",
+  "scope": "交付文件哈希，不包含自身或 ZIP；原始证据另见 sources.csv。",
+  "files": [
+    {
+      "file": "cohorts.csv",
+      "bytes": 3822,
+      "sha256": "48b5608f0594ae1c5b9297d31eb6493b5241c905bcb774b8928d6edfad12bceb"
+    },
+    {
+      "file": "experiment-data.json",
+      "bytes": 3016019,
+      "sha256": "faa1913d2932be80d3e74ffc23984911e875a6553ebdf8b61f0c8c0b83e590fd"
+    },
+    {
+      "file": "inventory.csv",
+      "bytes": 3626,
+      "sha256": "1f94204b34da515047e031f9a374a2df9f6b66084cef9f488d10773ccef6a752"
+    },
+    {
+      "file": "monetary-ledger.csv",
+      "bytes": 948136,
+      "sha256": "65ec928380592c1b340454019ddee264acb8205e28a7829dd78196b6a23a7289"
+    },
+    {
+      "file": "monetary-state.json",
+      "bytes": 1815744,
+      "sha256": "ef5f0d6282ef341295cb0337c8ab553270087c4b8f6a8133426930e3eb49ae8e"
+    },
+    {
+      "file": "queries.csv",
+      "bytes": 1308662,
+      "sha256": "b23be0e15707c8a0e0701894e8f089f6ea7225eeb01f2642b55a95db3a25bd3d"
+    },
+    {
+      "file": "runs.csv",
+      "bytes": 44574,
+      "sha256": "eea4e5601ecc8dd9ff08de8885dff04a969d7ab27d66dc76c9644b6e2519a94d"
+    },
+    {
+      "file": "scenarios.csv",
+      "bytes": 117159,
+      "sha256": "c73bd6905a54595591a283bc32120b081771a5bab07d4ac67ac663a7f3dc5265"
+    },
+    {
+      "file": "sources.csv",
+      "bytes": 23180,
+      "sha256": "953b315f43f2fb3c93066c0d8def17deffbdfc993b6428cdba063f099edbb09f"
+    },
+    {
+      "file": "历史报告/dispatch-flash-pro-l2-result-20261016.md",
+      "bytes": 4743,
+      "sha256": "e72df17dc409382a640844708791d51b270727f18cbf490b03ffc247a0666b82"
+    },
+    {
+      "file": "历史报告/dispatch-l2-reliable-result-20261016.md",
+      "bytes": 9224,
+      "sha256": "c5c3e4ee98c24e457e3d7e77651c7f514e03065454fbd660e9959df5f52a9463"
+    },
+    {
+      "file": "历史报告/dispatch-recovery-final-20261016.md",
+      "bytes": 8499,
+      "sha256": "4a391698969cc4cfda95e41fbaa475e3d5b695e8cdf23e975e83ca08b60dbfe0"
+    },
+    {
+      "file": "实验报告.md",
+      "bytes": 24402,
+      "sha256": "2fc5cd6f74c6e712dfe6ef398bc31eb6a791b017b02f7686a6527db919dfbae7"
+    },
+    {
+      "file": "实验指标汇总.xlsx",
+      "bytes": 40793,
+      "sha256": "f769ca6d83c2f480d3a64a2635fda37f3bdc2090700b385da5b43ae4e5f38981"
+    },
+    {
+      "file": "审计/DeepSeek只读余额.json",
+      "bytes": 803,
+      "sha256": "79d006284c53c09c5ec43885abe54243866288e6e15cbc7553057db46cfd4a27"
+    },
+    {
+      "file": "审计/L3-G12封存清单.json",
+      "bytes": 6325,
+      "sha256": "aa5ecac11901f311f6e3db90e7b8db6b0ba71cb6eecbfdba6d8c48c0a5072f38"
+    },
+    {
+      "file": "审计/L3窗口清理风险证据.json",
+      "bytes": 14817,
+      "sha256": "59bad2fc79e33853e59f3f1545689b9201c292dedff881f499f99cc1ea860709"
+    },
+    {
+      "file": "审计/工作簿核对.json",
+      "bytes": 389,
+      "sha256": "380abd6bf098fce0fda56b3b6410176c6d3c38ce9a904c6994d5afbfbc4a16d2"
+    },
+    {
+      "file": "审计/截止状态.json",
+      "bytes": 679,
+      "sha256": "635e827ed829bda646941bfed8f4844073a15dd85e42f540fb4667f526ecee2b"
+    },
+    {
+      "file": "审计/数据核对.json",
+      "bytes": 405,
+      "sha256": "6b58cc00bd4a9105fed27de95175ce6d6bf2fd77b0176db3c5437f6ac0ec2779"
+    },
+    {
+      "file": "数据字典.md",
+      "bytes": 3966,
+      "sha256": "4665458f61b2afefa2be87252d022b88dfdb374d42fca3a36694ee9ae265be1f"
+    },
+    {
+      "file": "阅读说明.md",
+      "bytes": 663,
+      "sha256": "355d1c63c2493d72b79969be5b624e55e049d55196996c68e4caf32b2b13d80b"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "at": "2026-10-17T04:00:30.932Z",
+  "passed": true,
+  "checked_sources": 140,
+  "archive_manifests": 8,
+  "archive_files": 404,
+  "canonical_evidence_hashes_checked": 84,
+  "run_rows": 60,
+  "scenario_rows": 446,
+  "queries": 3035,
+  "monetary_entries": 3521,
+  "raw_accounting_unchanged": true,
+  "L1_legacy_rows": 12,
+  "L1_new_started": 0,
+  "L3_ungraded": 2,
+  "remaining_orphan_reservation": 1
+}

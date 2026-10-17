@@ -1,0 +1,32 @@
+{
+  "at": "2026-10-17T03:49:11.755Z",
+  "kind": "read_only_no_model_inference",
+  "results": [
+    {
+      "endpoint": "/user/balance",
+      "status": 200,
+      "data": {
+        "is_available": true,
+        "balance_infos": [
+          {
+            "currency": "CNY",
+            "total_balance": "37.99",
+            "granted_balance": "0.00",
+            "topped_up_balance": "37.99"
+          }
+        ]
+      }
+    },
+    {
+      "endpoint": "/models",
+      "status": 200,
+      "data": {
+        "models": [
+          "deepseek-flash",
+          "deepseek-v4-pro"
+        ]
+      }
+    }
+  ],
+  "user_authorization": "User explicitly authorizes DeepSeek V4 Pro to replace GLM as M2 and complete the full experiment; existing prepaid balance may be used, original histories remain intact."
+}

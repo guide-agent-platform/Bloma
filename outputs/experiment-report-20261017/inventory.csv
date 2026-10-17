@@ -1,0 +1,20 @@
+﻿"cohort_id","label","analysis_class","difficulty","registry_status","source","summary_source","evidence_files"
+"l2-reliable-20261015","原始 Flash/GLM 六组","historical_glm","L2","finished-reviewed-with-censored-products","run-artifacts/l2-reliable-20261015/registry.json","run-artifacts/l2-reliable-20261015/summary.json",
+"l2-recovery-20261016","继承代码恢复 R1","diagnostic_recovery","L2","finished-reviewed-with-one-unstarted-superseded","run-artifacts/l2-recovery-20261016/registry.json","run-artifacts/l2-recovery-20261016/summary.json",
+"l2-recovery-fix-20261016","继承代码定向恢复 R2","diagnostic_recovery","L2","finished-reviewed-with-censored-product","run-artifacts/l2-recovery-fix-20261016/registry.json","run-artifacts/l2-recovery-fix-20261016/summary.json",
+"l2-pro-high-control-20261016","早期 Pro high 新任务对照","extra_control","L2","finished-reviewed","run-artifacts/l2-pro-high-control-20261016/registry.json","run-artifacts/l2-pro-high-control-20261016/summary.json",
+"l2-pro-repair-g12-20261016","Pro high 诊断修复","diagnostic_repair","L2","finished-reviewed","run-artifacts/l2-pro-repair-g12-20261016/registry.json","run-artifacts/l2-pro-repair-g12-20261016/summary.json",
+"flash-pro-matrix-20261016","384000 已废弃批次","superseded","L2","stopped-for-uniform-budget-correction","run-artifacts/flash-pro-matrix-20261016/registry.json",,
+"flash-pro-uniform-20261016","统一条件 Flash/Pro 六组","matched_primary","L2","finished-reviewed","run-artifacts/flash-pro-uniform-20261016/registry.json","run-artifacts/flash-pro-uniform-20261016/summary.json",
+"flash-pro-uniform-l3-20261016","统一条件 L3 截止批次","partial","L3","held-operator-error","run-artifacts/flash-pro-uniform-l3-20261016/registry.json",,
+"flash-pro-uniform-l1-20261016","L1 quick 仅准备","not_started","L1","prepared","run-artifacts/flash-pro-uniform-l1-20261016/registry.json",,
+"flash-pro-uniform-longterm-20261016","L1 longterm 仅准备","not_started","L1","prepared","run-artifacts/flash-pro-uniform-longterm-20261016/registry.json",,
+"l2-pair-20261015","旧独立基线方法试验","method_validation","L2","finished-reviewed","run-artifacts/l2-pair-20261015/registry.json","run-artifacts/l2-pair-20261015/summary.json",
+"formal-dispatch-20261014","早期 quick 并行失效批次","invalid_legacy","L1-v1","six-runs-finished","run-artifacts/formal-dispatch-20261014/registry.json",,
+"formal-dispatch-20261014-serial","早期 quick 串行失效批次","invalid_legacy","L1-v1","six-runs-finished","run-artifacts/formal-dispatch-20261014-serial/registry.json","run-artifacts/formal-dispatch-20261014-serial/summary.json",
+"legacy-l3-method-r2","旧 L3 S1 方法试验","method_validation","L3",,"run-artifacts/full-experiment-20261015/l3/r2/execution-registry.json",,
+"glm-retry-20261014","早期试验或校准，仅目录索引","inventory_only",,,"run-artifacts/glm-retry-20261014",,"summary.json;tokenizer-probe.json"
+"l2-pilot-20261014","早期试验或校准，仅目录索引","inventory_only",,,"run-artifacts/l2-pilot-20261014",,"final-verification.json;prepare-summary.json"
+"full-experiment-20261015/calibration-r1","早期试验或校准，仅目录索引","inventory_only",,,"run-artifacts/full-experiment-20261015/calibration-r1",,""
+"l3-calibration-20261015","早期试验或校准，仅目录索引","inventory_only",,,"run-artifacts/l3-calibration-20261015",,"final-calibration.json"
+"uniform-640k-20261016","早期试验或校准，仅目录索引","inventory_only",,,"run-artifacts/uniform-640k-20261016",,"probe-progress.json;probe.json"

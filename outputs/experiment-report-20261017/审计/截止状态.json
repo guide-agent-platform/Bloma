@@ -1,0 +1,20 @@
+{
+  "at": "2026-10-17T04:00:27.329Z",
+  "cutoff_at": "2026-10-17T03:40:45.894Z",
+  "owned_experiment_processes": [],
+  "live_processes_detected": false,
+  "active_ledger_reservation_count": 1,
+  "orphan_reservation_ids": [
+    "d238659a-6137-4751-be76-ea8da9eb8b8b"
+  ],
+  "note": "无活进程，但保留最后一笔 reserved 原始状态，未伪造完成或用量核销。",
+  "policy_sha256": "58e2b2cfa9e7487aabf71924db3b886e9e1da49621ee80817b4f1143deac5fd2",
+  "state_sha256": "ef5f0d6282ef341295cb0337c8ab553270087c4b8f6a8133426930e3eb49ae8e",
+  "counts": {
+    "runs": 60,
+    "started": 39,
+    "scenarios": 446,
+    "queries": 3035,
+    "monetary_entries": 3521
+  }
+}
