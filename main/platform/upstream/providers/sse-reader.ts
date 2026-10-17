@@ -21,6 +21,8 @@ import { createHash } from 'node:crypto'
 
 /** streamSSE 的输入选项（上游原样） */
 export interface StreamSSEOptions {
+  requestGuard?: (request: { url: string; body: string }) => void
+  monetaryPolicyPath?: string
   onResponse?: (receipt: ModelTransportReceipt) => void
   onAttempt?: (state: 'started' | 'failed' | 'cancelled') => void
   /** 构建好的 HTTP 请求配置 */
@@ -199,7 +201,9 @@ function normalizeToolCallOutputIndex(value: unknown): string | undefined {
 
 /** 单次 SSE 流式尝试（不含重试逻辑；上游原样） */
 async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSEResult> {
-  const reservation = await reserveModelRequestWhenAvailable(options.request.url, options.request.body, options.signal)
+  options.requestGuard?.(options.request)
+  const reservation = await reserveModelRequestWhenAvailable(options.request.url, options.request.body, options.signal,
+    options.monetaryPolicyPath ?? process.env.BLOMA_MONETARY_POLICY)
   let usage: SDKMessage['usage']
   let completed = false
   try {

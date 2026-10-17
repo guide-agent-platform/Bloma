@@ -100,7 +100,7 @@ export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherProm
     sections.push(`【项目需求（唯一真相源，不得改写）】\n${ctx.requirementsDigest}`)
   }
   if (ctx.uxSketchPath) sections.push(confirmedSketchInstruction(ctx.uxSketchPath))
-  if (ctx.uxDesignPath) sections.push(`【已确认交互设计】先 read_file ${ctx.uxDesignPath}，按页面、动作、状态与F/W/AC关联实现；非界面职责也须落实。不得改写确认文件。`)
+  if (ctx.uxDesignPath) sections.push(`【已确认交互设计】先 read_file ${ctx.uxDesignPath}，按页面、动作、状态与F/W/AC关联实现；非界面职责也须落实。原始功能必须完整，enhancements中明确列出的附加能力可实现并单独验证，不得用新增能力替代原需求。不得改写确认文件。`)
 
   // 1c. 上一轮已验证结论（刀2 checkpoint：同阶段重跑防重验——任务书之前注入，结论优先于任务）
   if (ctx.verifiedConclusion) {
@@ -173,10 +173,10 @@ export function buildDesktopChildBaseSystem(
     parts.push(`【阶段约束】\n${constraints.map((constraint, index) => `${index + 1}. ${constraint}`).join('\n')}`)
   }
   if (ctx.requirementsDigest) {
-    parts.push(`【项目需求（唯一真相源，不得改写；清单外新功能一律不做）】\n${ctx.requirementsDigest}`)
+    parts.push(`【项目需求（原始功能必须全部保留，不得削减或改写）】\n${ctx.requirementsDigest}\n合理附加能力只采用已确认交互设计中明确列出的enhancements；不得用新增能力替代原F/W/AC覆盖，未实现或未验证的增强须如实说明。`)
   }
   if (ctx.uxSketchPath) parts.push(confirmedSketchInstruction(ctx.uxSketchPath))
-  if (ctx.uxDesignPath) parts.push(`【已确认交互设计】先 read_file ${ctx.uxDesignPath}，按页面、动作、状态与F/W/AC关联实现；非界面职责也须落实。不得改写确认文件。`)
+  if (ctx.uxDesignPath) parts.push(`【已确认交互设计】先 read_file ${ctx.uxDesignPath}，按页面、动作、状态与F/W/AC关联实现；非界面职责也须落实。enhancements是本方案明确列出的附加能力，原始功能为交付底线，新增能力需要实现和真实验证，不用静态标注冒充已完成。不得改写确认文件。`)
   if ((node.id === 'desktop-scaffold' || node.id === 'desktop-implement') && ctx.shapeBrief) parts.push(ctx.shapeBrief)
   if (node.id === 'desktop-verify' && ctx.shapeVerifyBrief) parts.push(ctx.shapeVerifyBrief)
   return parts.join('\n\n')

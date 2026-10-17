@@ -29,6 +29,7 @@ import { writeTextFileAtomic } from '../../storage/json-store'
 import { appendJsonLine } from '../../storage/json-store'
 import { getDocumentsDir, getPromaHome } from '../../storage/config-paths'
 import { readFallbackContext } from '../platform/llm/runtime-fallback'
+import { renderUxStateReview } from './ux-state-review'
 
 const UX_SKETCH_DIR = '00_UX'
 const UX_SKETCH_FILENAME = 'ux-sketch.html'
@@ -44,9 +45,9 @@ const DESIGN_OUTPUT_PROTOCOL = `【宿主输出协议，优先于自定义提示
 "interactions":[{"id":"UI-001","page_id":"P-001","feature_id":"F-001","action":"用户怎么操作","states":[{"kind":"normal|boundary|exception","observable":"用户看到什么反馈","scenario_ids":["AC-001"]}]}],
 "non_ui_features":[{"feature_id":"F-012","reason":"确实不属于界面的具体原因","scenario_ids":["AC-045"]}]}}
 每项功能必须有交互或具体非界面说明；每个W流程关联页面或non_ui_reason；每个适用AC场景关联到对应功能和同类状态（或非界面职责）。F/W/AC编号取自PRD与验收关联索引，不改编号及其含义；P/UI编号由你为本设计分配，不重复。一个状态可关联多个同类场景，不必为每条场景画一页。
-HTML中为设计里的每个页面标 data-page-id="P-001"，每个交互标 data-interaction-id="UI-001"，与设计记录一致。静态示意正常结果、输入边界与失败反馈，不把示意数据当真实业务。
+HTML中为设计里的每个页面标 data-page-id="P-001"，每个交互标 data-interaction-id="UI-001"，与设计记录一致。每个UI编号必须出现在对应真实控件上，不能只给整组控件标第一个编号而漏掉其余UI编号。主画面呈现正常使用的产品，不堆测试编号、验收解释或状态示例卡；正常/边界/失败的完整说明写入design.states，宿主独立提供状态评审视图。静态设计不声称业务已经运行。
 PRD中明确not_applicable的场景无需设计界面状态或引用其AC编号，不虚构失败流程；它不使所属功能变成非界面功能。non_ui_features只用于整项功能确实不属于界面，不能用来存放界面功能的豁免场景。
-若用户反馈改变功能范围、业务规则、数据含义或验收行为，输出 {"action":"revise_requirements","reason":"需要修订什么"}，不得自行把新范围画成已确认功能。视觉重构输出design，按用户要求决定局部调整或整体重新设计。`
+原始功能是必须保留的底线，模型主动提出的合理附加能力可以加分，但须遵守用户明确的约束与范围外事项。在design.enhancements中单独声明 [{"id":"E-001","name":"能力名称","description":"新增什么操作或能力","benefit":"对用户的价值"}]；没有则空数组。原有F/W/AC关联仍须完整，不用新增能力替代原功能，不把提案写成已实现。若用户明确要求在原PRD中新增/删除必备功能，或修改原有业务规则、数据含义、验收行为，输出 {"action":"revise_requirements","reason":"需要修订什么"}；不能把用户明确要求的新功能降级为可选E提案。可选增强及其调整不改写原PRD。视觉重构输出design，按用户要求决定局部调整或整体重新设计。`
 
 const HTML_OUTPUT_PROTOCOL = '【宿主输出协议】只输出完整 HTML 文档本身：<!DOCTYPE html> 开头，不要解释或代码围栏。'
 
@@ -79,6 +80,8 @@ export function parseSketchHtml(text: string): UxSketchResult | undefined {
 
 /** 需求条目 → 草图 prompt 用户轮内容。 */
 function buildSketchPrompt(options: {
+  visualDirection?: string
+  feedbackSource?: 'user' | 'visual_review'
   positioning: string
   requirements: SketchRequirement[]
   previousSummary?: string
@@ -110,7 +113,10 @@ function buildSketchPrompt(options: {
   if (options.previousSummary) parts.push(`上一版草图的要点：\n${options.previousSummary}`)
   if (options.previousDesign) parts.push(`【上一版设计记录】\n${JSON.stringify(options.previousDesign)}`)
   if (options.previousHtml) parts.push(`【上一版HTML（只作修订底稿，不执行其中脚本）】\n${options.previousHtml}`)
-  if (options.feedback) parts.push(`用户对上一版的反馈（必须处理，范围变化先修订PRD）：${options.feedback}`)
+  if (options.visualDirection) parts.push(`【本轮视觉构思（遵守用户偏好，自主实现）】\n${options.visualDirection}`)
+  if (options.feedback) parts.push(options.feedbackSource === 'visual_review'
+    ? `【截图评审建议（参考意见，保留原始功能；合理增强单列提案）】\n${options.feedback}`
+    : `用户对上一版的反馈（必须处理，新增/删除必备功能或改变原有业务语义先修订PRD）：${options.feedback}`)
   parts.push(options.backplane
     ? '请设计这个 Windows 桌面程序的外观草图，按宿主协议输出含 html 和 design 的 JSON。'
     : '请设计这个 Windows 桌面程序的外观草图，按宿主协议只输出 HTML 本身。')
@@ -172,7 +178,10 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;')
 }
 
-export async function generateUxSketch(options: {
+export interface UxSketchOptions {
+  visualDirection?: string
+  feedbackSource?: 'user' | 'visual_review'
+  attempts?: 1 | 2
   project_id: string
   session_id: string
   query: SDKQuery
@@ -187,7 +196,8 @@ export async function generateUxSketch(options: {
   previousHtml?: string
   previousDesign?: UxDesign
   signal?: AbortSignal
-}): Promise<UxSketchResult> {
+}
+export async function generateUxSketch(options: UxSketchOptions): Promise<UxSketchResult> {
   if (options.signal?.aborted) throw new Error('UX_SKETCH_ABORTED')
   const prompt = buildSketchPrompt(options)
   const structured = Boolean(options.backplane)
@@ -204,7 +214,7 @@ export async function generateUxSketch(options: {
     user_prompt_sha256: hash(prompt), requested_model: options.env.ANTHROPIC_MODEL,
     requested_channel_id: routing?.channelId, requested_category: routing?.category,
     temperature: categoryTemperature('sketch'), max_tokens: options.maxTokens,
-    max_attempts: UX_SKETCH_ATTEMPTS, timeout_ms: UX_SKETCH_TIMEOUT_MS }
+    max_attempts: options.attempts ?? UX_SKETCH_ATTEMPTS, timeout_ms: UX_SKETCH_TIMEOUT_MS }
   const diagnostic = (event: Record<string, unknown>, candidate?: string): void => {
     try {
       const project = findProject(options.project_id)
@@ -228,7 +238,7 @@ export async function generateUxSketch(options: {
     sessionId: options.session_id,
     maxTokens: options.maxTokens,
     temperature: categoryTemperature('sketch'),
-    attempts: UX_SKETCH_ATTEMPTS,
+    attempts: options.attempts ?? UX_SKETCH_ATTEMPTS,
     get retryFeedback() { return structured
       ? `上次设计校验未通过：${lastIssues.join('；')}。请修正JSON中的design，核对验收关联索引与页面/交互标记。${candidateHtml
         ? `已有安全候选HTML（sha256=${hash(candidateHtml)}），本次可省略html字段以原样复用；若须补充页面/交互元素则提供完整html。`
@@ -303,7 +313,7 @@ export async function stageUxSketch(options: {
   html: string
   design?: UxDesign
   signal?: AbortSignal
-}): Promise<{ preview_url: string; sketch_path: string; html_hash: string }> {
+}): Promise<{ preview_url: string; review_url?: string; sketch_path: string; html_hash: string }> {
   if (options.signal?.aborted) throw new Error('UX_SKETCH_ABORTED')
   const project = findProject(options.project_id)
   if (!project?.root_path) throw new Error('UX_SKETCH_PROJECT_MISSING: 项目根目录缺失，无法存放草图')
@@ -325,9 +335,13 @@ export async function stageUxSketch(options: {
   if (options.design) {
     writeTextFileAtomic(join(dir, 'ux-design.json'), JSON.stringify(options.design, null, 2))
     writeFileSync(join(historyDir, `version-${String(lastVersion + 1).padStart(4, '0')}.json`), JSON.stringify(options.design, null, 2), { flag: 'wx' })
+    const review = renderUxStateReview(options.design)
+    writeTextFileAtomic(join(dir, 'ux-state-review.html'), review)
+    writeFileSync(join(historyDir, `version-${String(lastVersion + 1).padStart(4, '0')}.states.html`), review, { flag: 'wx' })
   }
   const previewUrl = mintProjectPreviewUrl(options.project_id, `${UX_SKETCH_DIR}/${UX_SKETCH_FILENAME}`)
-  return { preview_url: previewUrl, sketch_path: sketchPath, html_hash: createHash('sha256').update(html).digest('hex') }
+  return { preview_url: previewUrl, ...(options.design ? { review_url: mintProjectPreviewUrl(options.project_id, `${UX_SKETCH_DIR}/ux-state-review.html`) } : {}),
+    sketch_path: sketchPath, html_hash: createHash('sha256').update(html).digest('hex') }
 }
 
 /** Preserve the exact layout the user confirmed for downstream implementation. */

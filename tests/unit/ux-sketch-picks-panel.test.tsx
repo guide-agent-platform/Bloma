@@ -56,7 +56,7 @@ describe('ux-sketch-picks-panel：草图点选标记浮条与发送链', () => {
     cleanup()
   })
 
-  const mount = (props: { onConfirmSketch?: () => void } = {}) =>
+  const mount = (props: { onConfirmSketch?: () => void; reviewUrl?: string } = {}) =>
     render(
       <Provider store={store}>
         <PreviewPanel status="running" previewUrl="http://127.0.0.1:1/sketch.html" {...props} />
@@ -65,6 +65,17 @@ describe('ux-sketch-picks-panel：草图点选标记浮条与发送链', () => {
   const bar = () => document.querySelector('[data-ai-id="sketch-picks-bar"]')
   const sendBtn = () => document.querySelector('[data-ai-id="sketch-picks-send"]') as HTMLButtonElement | null
   const postPick = () => window.postMessage({ label: 'bloma-sketch-pick', pick: PICK }, '*')
+
+  it('状态说明独立切换，返回主界面不改变确认对象', () => {
+    const confirm = vi.fn()
+    const view = mount({ onConfirmSketch: confirm, reviewUrl: 'bloma-file://p1/00_UX/ux-state-review.html' })
+    fireEvent.click(view.getByRole('tab', { name: '交互与状态说明' }))
+    expect(document.querySelector('iframe')?.getAttribute('src')).toContain('ux-state-review.html')
+    expect(view.queryByText(/已确认的界面/)).toBeNull()
+    fireEvent.click(view.getByRole('tab', { name: '界面预览' }))
+    expect(document.querySelector('iframe')?.getAttribute('src')).toContain('sketch.html')
+    expect(confirm).not.toHaveBeenCalled()
+  })
 
   it('[P1] 传入 onConfirmSketch：postMessage 标记 → 浮条出现并显示计数与目标', async () => {
     mount({ onConfirmSketch: () => {} })

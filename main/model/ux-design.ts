@@ -15,6 +15,7 @@ export interface UxDesign {
   interactions: Array<{ id: string; page_id: string; feature_id: string; action: string;
     states: Array<{ kind: 'normal' | 'boundary' | 'exception'; observable: string; scenario_ids: string[] }> }>
   non_ui_features: Array<{ feature_id: string; reason: string; scenario_ids: string[] }>
+  enhancements?: Array<{ id: string; name: string; description: string; benefit: string }>
 }
 
 const object = (raw: unknown): raw is Record<string, unknown> => raw !== null && typeof raw === 'object' && !Array.isArray(raw)
@@ -37,6 +38,17 @@ export function uxDesignIssues(design: UxDesign, prd: PrdBackplane): string[] {
   if (!Array.isArray(design.pages) || !Array.isArray(design.flows) || !Array.isArray(design.interactions) || !Array.isArray(design.non_ui_features)) return [...issues, '界面设计的页面、流程或交互列表无效']
   if (!design.pages.length || !design.interactions.length) issues.push('桌面界面设计须至少说明一个页面与交互')
   const features = new Set(prd.requirements.map(row => row.id)), pages = new Set<string>(), interactions = new Set<string>(), covered = new Set<string>(), seenScenarios = new Set<string>()
+  if (design.enhancements !== undefined) {
+    if (!Array.isArray(design.enhancements) || design.enhancements.length > 8) issues.push('附加能力提案无效或过多')
+    else {
+      const ids = new Set<string>()
+      for (const extra of design.enhancements) {
+        if (!object(extra) || !text(extra.id) || !/^E-\d{3,}$/.test(extra.id) || ids.has(extra.id) ||
+          ![extra.name, extra.description, extra.benefit].every(value => text(value) && value.length <= 2000)) issues.push('附加能力须有独立E编号、名称、说明和价值')
+        else ids.add(extra.id)
+      }
+    }
+  }
   const scenarioById = new Map((prd.requirements_model?.scenarios ?? []).map(row => [row.id, row]))
   for (const page of design.pages) {
     if (!object(page) || !text(page.id) || !/^P-\d{3,}$/.test(page.id) || !text(page.name) || !text(page.purpose) || !strings(page.feature_ids)) { issues.push('页面定义无效'); continue }
@@ -103,5 +115,7 @@ export function buildFallbackUxDesign(prd: PrdBackplane): UxDesign {
 
 export function renderUxDesignSummary(design: UxDesign): string {
   return [design.summary, ...design.pages.map(page => `界面「${page.name}」：${page.purpose}`), ...design.interactions.map(item =>
-    `${item.action}：${item.states.map(state => state.observable).join('；')}`), ...design.non_ui_features.map(item => `${item.feature_id}：${item.reason}`)].join('\n')
+    `${item.action}：${item.states.map(state => state.observable).join('；')}`), ...design.non_ui_features.map(item => `${item.feature_id}：${item.reason}`),
+    ...(design.enhancements?.length ? ['附加能力提案（原始功能仍必须完整；当前不代表已实现）：',
+      ...design.enhancements.map(extra => `${extra.name}：${extra.description}；价值：${extra.benefit}`)] : [])].join('\n')
 }

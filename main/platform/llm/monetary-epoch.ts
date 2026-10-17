@@ -31,6 +31,15 @@ function read(path: string, model: Model): Epoch | undefined {
     || !/^[a-f0-9]{64}$/.test(e.policy_hash) || !e.epoch_id) throw new Error('MONETARY_EPOCH_INVALID')
   return e
 }
+
+/** Read the currently activated policy without changing its accounting window. */
+export function activeMonetaryPolicyPath(model: Model): string | undefined {
+  const root = process.env.BLOMA_MONETARY_EPOCH_DIR ?? join(process.env.LOCALAPPDATA ?? join(homedir(), '.local', 'share'), 'Bloma', 'monetary-epochs')
+  const epoch = read(join(root, hash(`${model.host}\n${model.model}`) + '.json'), model)
+  if (!epoch) return undefined
+  if (hash(readFileSync(epoch.policy_path)) !== epoch.policy_hash) throw new Error('MONETARY_EPOCH_POLICY_CHANGED')
+  return epoch.policy_path
+}
 function put(path: string, epoch: Epoch): void {
   const temp = `${path}.${randomUUID()}.tmp`
   try { writeFileSync(temp, JSON.stringify(epoch, null, 2), { flag: 'wx' }); renameSync(temp, path) }

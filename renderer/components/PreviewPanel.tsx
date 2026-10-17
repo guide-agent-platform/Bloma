@@ -22,6 +22,7 @@ export interface PreviewPanelProps {
   embedded?: boolean
   status?: PreviewStatus
   previewUrl?: string
+  reviewUrl?: string
   loadingLabel?: string
   errorLabel?: string
   onRefresh?: () => void
@@ -51,6 +52,7 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
   embedded = false,
   status = 'empty',
   previewUrl,
+  reviewUrl,
   loadingLabel,
   errorLabel,
   onRefresh,
@@ -67,6 +69,8 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
   const hasStream = useAtomValue(hasActiveStreamAtom)
   const stage = useAtomValue(workflowStageAtom)
   const globalError = useAtomValue(globalUserErrorAtom)
+  const [reviewActive, setReviewActive] = React.useState(false)
+  React.useEffect(() => { setReviewActive(false) }, [previewUrl, reviewUrl])
 
   /* 草图点选标记监听（仅草图场景：onConfirmSketch 存在）：注入层 postMessage → 收集 */
   React.useEffect(() => {
@@ -307,6 +311,10 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
         </div>
       </div>
 
+      {displayStatus === 'running' && reviewUrl && <div role="tablist" aria-label="界面与状态说明" style={{ display: 'flex', gap: 8, padding: '0 8px 8px' }}>
+        <button type="button" className="theatre-tool" role="tab" aria-selected={!reviewActive} onClick={() => setReviewActive(false)}>界面预览</button>
+        <button type="button" className="theatre-tool" role="tab" aria-selected={reviewActive} onClick={() => { setReviewActive(true); setCorrectionActive(false); setCorrectionMode(false) }}>交互与状态说明</button>
+      </div>}
       {/* 白色舞台 */}
       <div
         style={{
@@ -323,9 +331,9 @@ export const PreviewPanel: React.FC<PreviewPanelProps> = ({
         {displayStatus === 'loading' && <LoadingState label={loadingLabel} />}
         {displayStatus === 'running' && previewUrl && (
           <>
-            <SketchViewport iframeRef={iframeRef} src={previewUrl} onError={onPreviewError} natural={correctionMode} />
+            <SketchViewport iframeRef={iframeRef} src={reviewActive && reviewUrl ? reviewUrl : previewUrl} onError={reviewActive ? () => setReviewActive(false) : onPreviewError} natural={correctionMode && !reviewActive} />
             {/* 点选纠错透明捕获层：仅在纠错模式开启时盖在 iframe 上方拦截点击 */}
-            {correctionMode && onCorrectionSubmit && (
+            {correctionMode && !reviewActive && onCorrectionSubmit && (
               <div
                 data-ai-id="correction-capture-layer"
                 title="点击标记不满意的地方"

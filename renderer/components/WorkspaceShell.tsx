@@ -49,6 +49,7 @@ export interface WorkspaceShellProps {
   /* === PreviewPanel props === */
   previewStatus?: PreviewStatus
   previewUrl?: string
+  reviewUrl?: string
   previewErrorLabel?: string
   onRefreshPreview?: () => void
   onToggleFullscreen?: () => void
@@ -130,6 +131,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
           : <PreviewPanel embedded
           status={props.previewStatus}
           previewUrl={props.previewUrl}
+          reviewUrl={props.reviewUrl}
           errorLabel={props.previewErrorLabel}
           onRefresh={props.onRefreshPreview}
           onToggleFullscreen={props.onToggleFullscreen}

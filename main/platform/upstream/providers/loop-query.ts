@@ -134,8 +134,12 @@ async function* anthropicMessagesQueryViaProvidersInner(prompt: string, options:
     }
   }
 
-  const openai = providerType === 'zhipu'
-  const url = openai ? `${baseUrl.replace(/\/chat\/completions$/, '')}/chat/completions` : resolveLoopMessagesUrl(baseUrl, providerType)
+  const hasImages = JSON.stringify(body.messages).includes('"type":"image"')
+  // DeepSeek documents image input on its OpenAI endpoint. Keep text requests unchanged.
+  const deepseekVision = providerType === 'deepseek' && hasImages
+  const openai = providerType === 'zhipu' || deepseekVision
+  const openaiBase = deepseekVision ? baseUrl.replace(/\/anthropic(?:\/v1)?$/, '') : baseUrl
+  const url = openai ? `${openaiBase.replace(/\/chat\/completions$/, '')}/chat/completions` : resolveLoopMessagesUrl(baseUrl, providerType)
   const makeRequest = (): { url: string; headers: Record<string, string>; body: string } => {
     // 服务端硬上限夹紧（2026-10-03 zhipu 实测 131072，超限 400 code 1210）：唯一夹紧点在出口
     body.max_tokens = capMaxTokensForProvider(options.maxTokens ?? 640000, providerType, model)
@@ -165,6 +169,8 @@ async function* anthropicMessagesQueryViaProvidersInner(prompt: string, options:
   const streamTask = (async (): Promise<void> => {
     const runOnce = () =>
       streamSSE({
+        requestGuard: options.requestGuard,
+        monetaryPolicyPath: options.monetaryPolicyPath,
         request: makeRequest(),
         adapter: openai ? OPENAI_LOOP_ADAPTER : ANTHROPIC_SSE_ADAPTER,
         signal: options.signal,

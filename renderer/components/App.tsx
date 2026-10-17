@@ -796,6 +796,7 @@ const AppRoutes: React.FC = () => {
         deliveryPanel={currentProject?.template_type === 'desktop_tool' && !previewEntry}
         previewStatus={effectivePreviewStatus}
         previewUrl={effectivePreviewUrl}
+        reviewUrl={previewEntry?.reviewUrl}
         onRefreshPreview={handleRefreshPreview}
         onPreviewError={handlePreviewError}
         confirming={confirmingSketch}

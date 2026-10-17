@@ -87,6 +87,9 @@ export interface ConversationTurn {
 }
 
 export interface SDKQueryOptions {
+  /** Admission control, before every physical request including retries; errors must propagate. */
+  requestGuard?: (request: { url: string; body: string }) => void
+  monetaryPolicyPath?: string
   accounting?: import('../../platform/llm/request-ledger').QueryAccounting
   onTransportAttempt?: (state: 'started' | 'failed' | 'cancelled') => void
   onTransportResponse?: (receipt: import('../../../shared/types').ModelTransportReceipt) => void

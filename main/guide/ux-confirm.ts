@@ -15,7 +15,7 @@ import { readPrdBackplane } from '../project/prd-store'
 import { appendSessionMessage } from '../platform/sessions/session-tree'
 import { enterDesktopLine, DESKTOP_LINE_TEMPLATE_TYPES } from '../desktop/desktop-route'
 import { findProject, updateProject } from '../project/project-service'
-import { freezeConfirmedUxSketch, generateUxSketch, stageUxSketch, type UxSketchGeneration } from './ux-sketch'
+import { freezeConfirmedUxSketch, stageUxSketch, type UxSketchGeneration } from './ux-sketch'
 import { USER_STOP_KEYWORDS } from '../desktop/user-intent-lexicon'
 import type { PrdBackplane } from '../model/prd-backplane'
 import { prdScopeFingerprint } from '../project/requirement-contract'
@@ -24,6 +24,7 @@ import { buildFallbackUxDesign, renderUxDesignSummary, uxDesignFingerprint, type
 import { writeTextFileAtomic } from '../../storage/json-store'
 import { join } from 'node:path'
 import { resolveChannelEnv } from '../platform/llm/runtime-fallback'
+import { generateUxVisualDesign, type UxVisualEvidence } from './ux-visual-pipeline'
 
 /** UX 门回门意图词（2026-10-04 真机踩坑修复：「按草图开工」是 dismiss 提示语的原文，
  *  但回门只认 USER_CONTINUE_KEYWORDS（继续/确认……）不含「开工」——用户照提示操作
@@ -138,11 +139,13 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
   }))
 
   let sketchUrl: string | null = null
+  let reviewUrl: string | undefined
   let sketchSource = 'llm'
   let sandboxFailure: string | undefined
   let generation: UxSketchGeneration | undefined
+  let visual: UxVisualEvidence | undefined
   try {
-    const sketch = await generateUxSketch({
+    const sketch = await generateUxVisualDesign({
       project_id: pending.project_id,
       session_id: pending.session_id,
       query: pending.query,
@@ -156,6 +159,7 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
       previousHtml: pending.sketchHtml,
       feedback,
       signal: pending.signal,
+      progress: text => { if (!pending.signal?.aborted) publish(makeUxEvent(eventInput, 'message_delta', { text: text + '\n' })) },
     })
     if (pending.signal?.aborted) return
     const latest = readPrdBackplane(pending.project_id)
@@ -171,10 +175,15 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
     pending = { ...pending, design, sketchHtml: sketch.html, sketchSummary: renderUxDesignSummary(design), unappliedFeedback: undefined }
     sketchSource = sketch.source
     generation = sketch.generation
+    visual = sketch.visual
+    if (sketch.source === 'llm' && visual?.reasons.length) {
+      publish(makeUxEvent(eventInput, 'message_delta', { text: '已保留当前设计；部分候选或自动视觉评审未完成，你仍可以查看当前稿并提出调整。\n' }))
+    }
     const staged = await stageUxSketch({ project_id: pending.project_id, html: sketch.html, design, signal: pending.signal })
     if (pending.signal?.aborted) return
     pending.sketchHash = staged.html_hash
     sketchUrl = staged.preview_url
+    reviewUrl = staged.review_url
   } catch (error) {
     if (pending.signal?.aborted) return
     console.error('[ux-confirm] 草图生成/沙箱失败（降级文字版方案确认）:', error)
@@ -207,6 +216,7 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
         round,
         sketch_source: sketchSource,
         ...(generation ? { generation } : {}),
+        ...(visual ? { visual } : {}),
         preview_url: sketchUrl ?? undefined,
         sandbox_ok: sketchUrl !== null,
         ...(sandboxFailure ? { sandbox_failure: sandboxFailure.slice(0, 200) } : {}),
@@ -215,7 +225,7 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
   })
 
   if (sketchUrl) {
-    publish(makeUxEvent(eventInput, 'ux_sketch_ready', { preview_url: sketchUrl, round }))
+    publish(makeUxEvent(eventInput, 'ux_sketch_ready', { preview_url: sketchUrl, ...(reviewUrl ? { review_url: reviewUrl } : {}), round }))
     publish(makeUxEvent(eventInput, 'message_delta', {
       text: `草图画好了，已在右侧预览展示（第 ${round} 轮${sketchSource === 'template' ? '；当前使用简易方案' : ''}）。看看界面方向对不对——确认后我就开工。`,
     }))
