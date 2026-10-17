@@ -43,8 +43,9 @@ const DESIGN_OUTPUT_PROTOCOL = `【宿主输出协议，优先于自定义提示
 "flows":[{"workflow_id":"W-001","page_ids":["P-001"]}],
 "interactions":[{"id":"UI-001","page_id":"P-001","feature_id":"F-001","action":"用户怎么操作","states":[{"kind":"normal|boundary|exception","observable":"用户看到什么反馈","scenario_ids":["AC-001"]}]}],
 "non_ui_features":[{"feature_id":"F-012","reason":"确实不属于界面的具体原因","scenario_ids":["AC-045"]}]}}
-每项功能必须有交互或具体非界面说明；每个W流程关联页面或non_ui_reason；每个AC场景关联到对应功能和同类状态（或非界面职责）。F/W/AC编号取自PRD与验收关联索引，不改编号及其含义；P/UI编号由你为本设计分配，不重复。一个状态可关联多个同类场景，不必为每条场景画一页。
+每项功能必须有交互或具体非界面说明；每个W流程关联页面或non_ui_reason；每个适用AC场景关联到对应功能和同类状态（或非界面职责）。F/W/AC编号取自PRD与验收关联索引，不改编号及其含义；P/UI编号由你为本设计分配，不重复。一个状态可关联多个同类场景，不必为每条场景画一页。
 HTML中为设计里的每个页面标 data-page-id="P-001"，每个交互标 data-interaction-id="UI-001"，与设计记录一致。静态示意正常结果、输入边界与失败反馈，不把示意数据当真实业务。
+PRD中明确not_applicable的场景无需设计界面状态或引用其AC编号，不虚构失败流程；它不使所属功能变成非界面功能。non_ui_features只用于整项功能确实不属于界面，不能用来存放界面功能的豁免场景。
 若用户反馈改变功能范围、业务规则、数据含义或验收行为，输出 {"action":"revise_requirements","reason":"需要修订什么"}，不得自行把新范围画成已确认功能。视觉重构输出design，按用户要求决定局部调整或整体重新设计。`
 
 const HTML_OUTPUT_PROTOCOL = '【宿主输出协议】只输出完整 HTML 文档本身：<!DOCTYPE html> 开头，不要解释或代码围栏。'
@@ -101,7 +102,9 @@ function buildSketchPrompt(options: {
     parts.push(`【验收关联索引（仅引用，不改写）】\n${JSON.stringify(options.backplane.requirements.map(feature => ({
       feature_id: feature.id,
       states: Object.fromEntries(['normal', 'boundary', 'exception'].map(kind => [kind,
-        scenarios.filter(row => row.feature_id === feature.id && row.kind === kind).map(row => row.id)])),
+        scenarios.filter(row => row.feature_id === feature.id && row.kind === kind && row.not_applicable === undefined).map(row => row.id)])),
+      not_applicable: scenarios.filter(row => row.feature_id === feature.id && row.not_applicable !== undefined)
+        .map(row => ({ id: row.id, kind: row.kind, reason: row.not_applicable })),
     })))}`)
   }
   if (options.previousSummary) parts.push(`上一版草图的要点：\n${options.previousSummary}`)

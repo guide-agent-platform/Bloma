@@ -83,7 +83,9 @@ export function uxDesignIssues(design: UxDesign, prd: PrdBackplane): string[] {
     }
   }
   for (const id of workflowIds) if (!seenFlows.has(id)) issues.push(`使用流程未进入设计：${id}`)
-  for (const id of scenarioById.keys()) if (!seenScenarios.has(id)) issues.push(`验收场景未说明对应的界面状态或非界面职责：${id}`)
+  // An explicit PRD exemption is not an observable behavior to invent a UI for.
+  // Applicable scenarios still require the same feature/kind association above.
+  for (const [id, scenario] of scenarioById) if (scenario.not_applicable === undefined && !seenScenarios.has(id)) issues.push(`验收场景未说明对应的界面状态或非界面职责：${id}`)
   return [...new Set(issues)]
 }
 

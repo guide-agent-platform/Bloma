@@ -154,6 +154,22 @@ describe('UX 设计、确认与真实存储边界', () => {
     expect(parseUxDesign(design, prd)).toBeUndefined()
   })
 
+  it('PRD明确豁免的场景不要求虚构UI；恢复为适用场景后仍检查遗漏', () => {
+    const { prd, design } = setup()
+    const scenario = prd.requirements_model!.scenarios.find(row => row.id === 'AC-003')!
+    scenario.not_applicable = '本地内存计算不访问网络、文件或外部设备，没有需要本产品展示的外部依赖失败流程。'
+    delete scenario.given; delete scenario.when; delete scenario.then
+    design.prd_fingerprint = prdScopeFingerprint(prd)
+    design.interactions[0]!.states = design.interactions[0]!.states.filter(row => row.kind !== 'exception')
+    expect(uxDesignIssues(design, prd)).toEqual([])
+    delete scenario.not_applicable
+    Object.assign(scenario, { given: '计算失败', when: '执行计算', then: '展示失败原因' })
+    design.prd_fingerprint = prdScopeFingerprint(prd)
+    expect(uxDesignIssues(design, prd)).toContain('验收场景未说明对应的界面状态或非界面职责：AC-003')
+    design.interactions[0]!.states = []
+    expect(uxDesignIssues(design, prd)).not.toEqual([])
+  })
+
   it('仅在注释中声称页面/交互存在不能通过视图关联检查', async () => {
     const { pending, prd, design } = setup()
     const query: SDKQuery = async function* () { yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: JSON.stringify({ action: 'design', design,
