@@ -55,7 +55,7 @@ export interface ShapeTemplate {
   required_tests: string[]
   /** 组合场景清单（降维数据，进 verify 场景教学）。 */
   composition_notes: string[]
-  /** PATTERNS.md 拼装指引（引用现有组件，不新造）。 */
+  /** 交互行为参考；不约束已确认设计的布局与组件外观。 */
   ui_pattern: string
 }
 
@@ -246,7 +246,7 @@ export function renderShapeBrief(shape: ProductShape | undefined): string | unde
       lines.push(`- [${RULE_KIND_LABELS[rule.kind]}] ${rule.requirement}`)
     }
   }
-  lines.push(`UI 拼装：${template.ui_pattern}`)
+  lines.push(`UI 行为参考（布局与外观遵循已确认设计，可定制组件）：${template.ui_pattern}`)
   if (shape.llm_role !== 'none') {
     const llmLine: Record<ProductShape['llm_role'], string> = {
       core: 'AI 角色为 core：真模型调用是产品成立条件——实现须真实调用可配置的 LLM 端点（禁模板假实现），平台会用自有渠道对请求 schema 做真实验证（Provider Qualification）；产出项目根 llm-provider.json 声明（{"schema_version":1,"provider":"openai_compatible","base_url":"（用户配置）","model":"（用户配置）","request_sample":{"messages":[{"role":"user","content":"你好"}]},"auth":"user_config"}——request_sample.messages 写你实际请求的 messages 结构）；本地测试走 mock 模式（LLM_PROVIDER=mock 切固定响应），断言分层：请求合法性/错误处理严格断言，生成内容断言质量指标。',

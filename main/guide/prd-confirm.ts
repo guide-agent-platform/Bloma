@@ -369,12 +369,6 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
   // PRD 确认后不再直入桌面线，先过 UX 门——生成沙箱外观草图交用户过目（确认门矩阵：
   // quick＝PRD+UX；longterm＝PRD+UX+MVP）。确认后由 ux-confirm 进桌面线。──
   if (shouldEnterDesktopLine(findProject(pending.project_id))) {
-    const resolution = resolveChannelEnv({
-      channelId: pending.channel_id,
-      category: 'prd',
-      projectId: pending.project_id,
-      sessionId: pending.session_id,
-    })
     await runUxConfirmGate({
       request_id: pending.request_id,
       session_id: pending.session_id,
@@ -382,7 +376,7 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
       mode: pending.mode,
       channel_id: pending.channel_id,
       query: pending.query,
-      env: resolution.env ?? {},
+      env: pending.env ?? {},
       publish: (event) => pending.publish(event),
       signal: pending.signal,
       round: 1,

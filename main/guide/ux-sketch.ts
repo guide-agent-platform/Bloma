@@ -2,9 +2,8 @@
  * UX 外观草图生成（2026-10-04 确认门新规，实施稿《Bloma-确认门与呈现层-20261004》）。
  *
  * 拍板：UX 确认载体＝沙箱 HTML 外观草图——照搬 web 线老草图形式（f0f6aa3~1 退役前
- * 的 sketch-engine 形态）：低保真、纯外观、不可交互（无 JS）、单文件内联 CSS、
- * 页脚固定「外观草图 · 仅供确认方向」。桌面线服务对象是 Windows 桌面程序，草图
- * 模拟桌面窗口形态（标题栏/主界面布局），页脚如实标注「最终以实际桌面程序为准」。
+ * 的 sketch-engine 形态）：静态 HTML/CSS，无模型脚本。当前默认追求接近成品的视觉，
+ * 需求覆盖、用户确认及冻结绑定独立于视觉风格；失败仍如实降级。
  *
  * 生成走 callLlmForJson 标准件（parse 契约承载 HTML：剥代码围栏 + 形态校验，失败
  * 带反馈重试）；失败/超时回退确定性模板（窗口框 + 需求块列表），门不挂死。
@@ -16,19 +15,20 @@ import { join } from 'node:path'
 import type { SDKQuery } from '../orchestration/orchestrator'
 import { callLlmForJson } from '../kernel/llm-call'
 import { categoryTemperature } from '../platform/llm/model-resolution'
-import { loadPromptOverride } from '../agent/prompting/prompt-config'
+import { loadPromptWithSource } from '../agent/prompting/prompt-config'
 import { UX_SKETCH_SYSTEM_PROMPT } from '../agent/prompting/ux-sketch-prompt'
 import { findProject } from '../project/project-service'
 import { mintProjectPreviewUrl } from '../delivery/preview-scheme'
 import type { SketchRequirement } from '../coding/sketch-engine'
 import { injectSketchCorrector } from './sketch-corrector'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { PrdBackplane } from '../model/prd-backplane'
 import { buildFallbackUxDesign, parseUxDesign, renderUxDesignSummary, type UxDesign } from '../model/ux-design'
 import { prdScopeFingerprint } from '../project/requirement-contract'
 import { writeTextFileAtomic } from '../../storage/json-store'
 import { appendJsonLine } from '../../storage/json-store'
-import { getDocumentsDir } from '../../storage/config-paths'
+import { getDocumentsDir, getPromaHome } from '../../storage/config-paths'
+import { readFallbackContext } from '../platform/llm/runtime-fallback'
 
 const UX_SKETCH_DIR = '00_UX'
 const UX_SKETCH_FILENAME = 'ux-sketch.html'
@@ -38,19 +38,22 @@ const UX_SKETCH_ATTEMPTS = 2
 
 const UX_SKETCH_RETRY_FEEDBACK = '上一次输出不是可用的 HTML 文档（可能带了解释文字或代码围栏）。请只输出完整 HTML 文档本身：<!DOCTYPE html> 开头，单文件内联样式，无脚本，无解释，无代码围栏。'
 
-function getSystemPrompt(): string {
-  return (loadPromptOverride('sketch-system') ?? UX_SKETCH_SYSTEM_PROMPT) +
-    '\n示例数据必须自洽：列表数量、筛选范围、合计与示例行对应；不能确定真实数据路径时写「程序的数据目录」，不得编造用户绝对路径。'
-}
-
-const DESIGN_OUTPUT_PROTOCOL = `【本次输出协议优先于旧版HTML输出要求】只输出JSON：
-{"action":"design","html":"完整静态HTML","design":{"summary":"布局与操作说明", "pages":[{"id":"P-001","name":"界面名","purpose":"作用","feature_ids":["F-001"]}],
+const DESIGN_OUTPUT_PROTOCOL = `【宿主输出协议，优先于自定义提示词中的格式要求】只输出JSON：
+{"action":"design","html":"完整静态HTML","design":{"summary":"视觉主张、布局与操作说明", "pages":[{"id":"P-001","name":"界面名","purpose":"作用","feature_ids":["F-001"]}],
 "flows":[{"workflow_id":"W-001","page_ids":["P-001"]}],
 "interactions":[{"id":"UI-001","page_id":"P-001","feature_id":"F-001","action":"用户怎么操作","states":[{"kind":"normal|boundary|exception","observable":"用户看到什么反馈","scenario_ids":["AC-001"]}]}],
 "non_ui_features":[{"feature_id":"F-012","reason":"确实不属于界面的具体原因","scenario_ids":["AC-045"]}]}}
-每项功能必须有交互或具体非界面说明；每个W流程关联页面或non_ui_reason；每个AC场景关联到对应功能和同类状态（或非界面职责）。页面、流程、场景编号取自PRD，不编造。一个状态可关联多个同类场景，不必为每条场景画一页。
+每项功能必须有交互或具体非界面说明；每个W流程关联页面或non_ui_reason；每个AC场景关联到对应功能和同类状态（或非界面职责）。F/W/AC编号取自PRD与验收关联索引，不改编号及其含义；P/UI编号由你为本设计分配，不重复。一个状态可关联多个同类场景，不必为每条场景画一页。
 HTML中为设计里的每个页面标 data-page-id="P-001"，每个交互标 data-interaction-id="UI-001"，与设计记录一致。静态示意正常结果、输入边界与失败反馈，不把示意数据当真实业务。
-若用户反馈改变功能范围、业务规则、数据含义或验收行为，输出 {"action":"revise_requirements","reason":"需要修订什么"}，不得自行把新范围画成已确认功能。纯布局/字号/已有控件位置调整输出design，保留未修改部分。`
+若用户反馈改变功能范围、业务规则、数据含义或验收行为，输出 {"action":"revise_requirements","reason":"需要修订什么"}，不得自行把新范围画成已确认功能。视觉重构输出design，按用户要求决定局部调整或整体重新设计。`
+
+const HTML_OUTPUT_PROTOCOL = '【宿主输出协议】只输出完整 HTML 文档本身：<!DOCTYPE html> 开头，不要解释或代码围栏。'
+
+export interface UxSketchGeneration {
+  run_id: string
+  source: 'llm' | 'template'
+  failures: Array<{ attempt: number; kind: string }>
+}
 
 export interface UxSketchResult {
   html: string
@@ -58,6 +61,7 @@ export interface UxSketchResult {
   source: 'llm' | 'template'
   design?: UxDesign
   requires_prd_revision?: string
+  generation?: UxSketchGeneration
 }
 
 /** 剥代码围栏（```html ... ```）并做最低形态校验（导出供单测直测解析契约）。 */
@@ -91,12 +95,22 @@ function buildSketchPrompt(options: {
     `产品定位：${options.positioning || '（无）'}`,
     `需求清单：\n${lines.join('\n')}`,
   ]
-  if (options.backplane) parts.push(`【完整已确认PRD】\n${JSON.stringify(options.backplane)}`)
+  if (options.backplane) {
+    parts.push(`【完整已确认PRD】\n${JSON.stringify(options.backplane)}`)
+    const scenarios = options.backplane.requirements_model?.scenarios ?? []
+    parts.push(`【验收关联索引（仅引用，不改写）】\n${JSON.stringify(options.backplane.requirements.map(feature => ({
+      feature_id: feature.id,
+      states: Object.fromEntries(['normal', 'boundary', 'exception'].map(kind => [kind,
+        scenarios.filter(row => row.feature_id === feature.id && row.kind === kind).map(row => row.id)])),
+    })))}`)
+  }
   if (options.previousSummary) parts.push(`上一版草图的要点：\n${options.previousSummary}`)
   if (options.previousDesign) parts.push(`【上一版设计记录】\n${JSON.stringify(options.previousDesign)}`)
   if (options.previousHtml) parts.push(`【上一版HTML（只作修订底稿，不执行其中脚本）】\n${options.previousHtml}`)
   if (options.feedback) parts.push(`用户对上一版的反馈（必须处理，范围变化先修订PRD）：${options.feedback}`)
-  parts.push('请画出这个 Windows 桌面程序的外观草图（完整 HTML 文档，只输出 HTML 本身）。')
+  parts.push(options.backplane
+    ? '请设计这个 Windows 桌面程序的外观草图，按宿主协议输出含 html 和 design 的 JSON。'
+    : '请设计这个 Windows 桌面程序的外观草图，按宿主协议只输出 HTML 本身。')
   return parts.join('\n\n')
 }
 
@@ -174,56 +188,104 @@ export async function generateUxSketch(options: {
   if (options.signal?.aborted) throw new Error('UX_SKETCH_ABORTED')
   const prompt = buildSketchPrompt(options)
   const structured = Boolean(options.backplane)
+  const resolvedPrompt = loadPromptWithSource('sketch-system', UX_SKETCH_SYSTEM_PROMPT)
+  const systemPrompt = resolvedPrompt.content +
+    '\n示例数据必须自洽：列表数量、筛选范围、合计与示例行对应；不能确定真实数据路径时写「程序的数据目录」，不得编造用户绝对路径。' +
+    `\n\n${structured ? DESIGN_OUTPUT_PROTOCOL : HTML_OUTPUT_PROTOCOL}`
+  const generation: UxSketchGeneration = { run_id: randomUUID(), source: 'llm', failures: [] }
+  const hash = (text: string) => createHash('sha256').update(text).digest('hex')
+  const routing = readFallbackContext(options.env)
+  // Requested routing is separate from physical transport receipts in usage-ledger.
+  const provenance = { generator_version: 'ux-creative-v1', run_id: generation.run_id, session_id: options.session_id,
+    proma_home: getPromaHome(), prompt_source: resolvedPrompt.source, system_prompt_sha256: hash(systemPrompt),
+    user_prompt_sha256: hash(prompt), requested_model: options.env.ANTHROPIC_MODEL,
+    requested_channel_id: routing?.channelId, requested_category: routing?.category,
+    temperature: categoryTemperature('sketch'), max_tokens: options.maxTokens,
+    max_attempts: UX_SKETCH_ATTEMPTS, timeout_ms: UX_SKETCH_TIMEOUT_MS }
+  const diagnostic = (event: Record<string, unknown>, candidate?: string): void => {
+    try {
+      const project = findProject(options.project_id)
+      const dir = join(getDocumentsDir(project.workspace_slug, options.project_id), 'diagnostics')
+      const filename = candidate ? `ux-candidate-${generation.run_id}-${parseAttempt}.html` : undefined
+      if (filename) writeTextFileAtomic(join(dir, filename), candidate!)
+      appendJsonLine(join(dir, 'ux-design-attempts.jsonl'), { version: 2, at: new Date().toISOString(), ...provenance,
+        ...(options.backplane ? { prd_fingerprint: prdScopeFingerprint(options.backplane) } : {}),
+        ...event, ...(filename ? { candidate_file: filename, candidate_html_sha256: hash(candidate!) } : {}) })
+    } catch { /* Diagnostics never change validation or confirmation. */ }
+  }
   let lastIssues: string[] = []
+  let candidateHtml: string | undefined
+  let parseAttempt = 0
+  diagnostic({ event: 'generation_started' })
   const llm = await callLlmForJson<UxSketchResult>({
-    systemPrompt: getSystemPrompt() + (structured ? `\n\n${DESIGN_OUTPUT_PROTOCOL}` : ''),
+    systemPrompt,
     prompt,
     query: options.query,
     env: options.env,
     sessionId: options.session_id,
     maxTokens: options.maxTokens,
-    temperature: categoryTemperature('prd'),
+    temperature: categoryTemperature('sketch'),
     attempts: UX_SKETCH_ATTEMPTS,
-    get retryFeedback() { return structured ? `上次设计校验未通过：${lastIssues.join('；')}。请重输出完整JSON，核对页面/交互标记和全部F/W/AC关联。原任务：\n${prompt}` : `${UX_SKETCH_RETRY_FEEDBACK}\n原任务：\n${prompt}` },
+    get retryFeedback() { return structured
+      ? `上次设计校验未通过：${lastIssues.join('；')}。请修正JSON中的design，核对验收关联索引与页面/交互标记。${candidateHtml
+        ? `已有安全候选HTML（sha256=${hash(candidateHtml)}），本次可省略html字段以原样复用；若须补充页面/交互元素则提供完整html。`
+        : '没有可复用的安全HTML，必须同时输出完整html。'}原任务：\n${prompt}`
+      : `${UX_SKETCH_RETRY_FEEDBACK}\n原任务：\n${prompt}` },
     signal: options.signal,
     timeoutMs: UX_SKETCH_TIMEOUT_MS,
+    onAttemptFailure: failure => {
+      const kind = failure.termination ?? failure.kind
+      generation.failures.push({ attempt: failure.attempt, kind })
+      diagnostic({ event: 'attempt_failed', attempt: failure.attempt, failure_kind: kind })
+    },
     parse: raw => {
+      parseAttempt++
       lastIssues = []
-      const parsed = parseUxOutput(raw, options.backplane, issues => { lastIssues = issues })
-      if (options.backplane) {
-        try {
-          const project = findProject(options.project_id)
-          appendJsonLine(join(getDocumentsDir(project.workspace_slug, options.project_id), 'diagnostics/ux-design-attempts.jsonl'), {
-            version: 1, at: new Date().toISOString(), prd_fingerprint: prdScopeFingerprint(options.backplane), raw_output: raw.slice(0, 65536),
-            raw_output_truncated: raw.length > 65536, output_sha256: createHash('sha256').update(raw).digest('hex'), validation_issues: lastIssues,
-            accepted_for_preview: Boolean(parsed && !parsed.requires_prd_revision), requested_prd_revision: Boolean(parsed?.requires_prd_revision),
-          })
-        } catch { /* diagnostics do not change the validation result */ }
-      }
+      let freshCandidate: string | undefined
+      const parsed = parseUxOutput(raw, options.backplane, issues => { lastIssues = issues }, candidateHtml,
+        html => { candidateHtml = html; freshCandidate = html })
+      diagnostic({ event: 'output_checked', attempt: parseAttempt - 1, raw_output: raw.slice(0, 65536),
+        raw_output_truncated: raw.length > 65536, output_sha256: hash(raw), validation_issues: lastIssues,
+        accepted_for_preview: Boolean(parsed && !parsed.requires_prd_revision), requested_prd_revision: Boolean(parsed?.requires_prd_revision),
+        reused_candidate: Boolean(parsed && !parsed.requires_prd_revision && !freshCandidate && candidateHtml) }, freshCandidate)
       return parsed
     },
   })
-  if (options.signal?.aborted) throw new Error('UX_SKETCH_ABORTED')
-  if (llm) return llm
+  if (options.signal?.aborted) {
+    diagnostic({ event: 'generation_finished', source: 'aborted', failures: generation.failures })
+    throw new Error('UX_SKETCH_ABORTED')
+  }
+  if (llm) {
+    diagnostic({ event: 'generation_finished', source: 'llm', requested_prd_revision: Boolean(llm.requires_prd_revision) })
+    return { ...llm, generation }
+  }
+  generation.source = 'template'
+  diagnostic({ event: 'generation_finished', source: structured && options.feedback ? 'previous_version_retained' : 'template', failures: generation.failures })
   if (structured && options.feedback) throw new Error('UX_DESIGN_FAILED: 未能可靠判断或完成调整，保留上一版，不采纳新范围')
   const project = findProject(options.project_id)
   const design = options.backplane ? buildFallbackUxDesign(options.backplane) : undefined
   return {
     html: buildTemplateSketch(project?.name ?? '未命名项目', options.positioning, options.requirements, design),
     source: 'template',
+    generation,
     ...(design ? { design } : {}),
   }
 }
 
-function parseUxOutput(raw: string, backplane: PrdBackplane | undefined, onIssues: (issues: string[]) => void): UxSketchResult | undefined {
+function parseUxOutput(raw: string, backplane: PrdBackplane | undefined, onIssues: (issues: string[]) => void,
+  candidateHtml?: string, onCandidate?: (html: string) => void): UxSketchResult | undefined {
   if (!backplane) return parseSketchHtml(raw)
   let value: Record<string, unknown>
   try { value = JSON.parse(raw.replace(/^```(?:json)?\s*\n?|\n?```$/g, '').trim()) } catch { onIssues(['设计输出不是合法 JSON']); return undefined }
   if (!value || typeof value !== 'object' || Array.isArray(value)) { onIssues(['设计输出须为对象']); return undefined }
   if (value.action === 'revise_requirements' && typeof value.reason === 'string' && value.reason.trim()) return { html: '', source: 'llm', requires_prd_revision: value.reason }
-  if (value.action !== 'design' || typeof value.html !== 'string') { onIssues(['缺少 design 动作或 HTML 视图']); return undefined }
-  const html = parseSketchHtml(value.html), design = parseUxDesign(value.design, backplane, onIssues)
+  if (value.action !== 'design') { onIssues(['缺少 design 动作']); return undefined }
+  const sourceHtml = value.html === undefined ? candidateHtml : value.html
+  if (typeof sourceHtml !== 'string') { onIssues(['缺少 HTML 视图且没有可复用候选']); return undefined }
+  const html = parseSketchHtml(sourceHtml)
   if (!html) { onIssues(['HTML 为空、不完整或含可执行脚本']); return undefined }
+  if (value.html !== undefined) onCandidate?.(html.html)
+  const design = parseUxDesign(value.design, backplane, onIssues)
   if (!design) return undefined
   const mappedHtml = html.html.replace(/<!--[\s\S]*?-->|<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
   for (const page of design.pages) if (!new RegExp(`<[^<>]+\\bdata-page-id\\s*=\\s*["']${page.id}["'][^<>]*>`).test(mappedHtml)) { onIssues([`HTML 未呈现页面 ${page.id}`]); return undefined }

@@ -15,7 +15,7 @@ import { readPrdBackplane } from '../project/prd-store'
 import { appendSessionMessage } from '../platform/sessions/session-tree'
 import { enterDesktopLine, DESKTOP_LINE_TEMPLATE_TYPES } from '../desktop/desktop-route'
 import { findProject, updateProject } from '../project/project-service'
-import { freezeConfirmedUxSketch, generateUxSketch, stageUxSketch } from './ux-sketch'
+import { freezeConfirmedUxSketch, generateUxSketch, stageUxSketch, type UxSketchGeneration } from './ux-sketch'
 import { USER_STOP_KEYWORDS } from '../desktop/user-intent-lexicon'
 import type { PrdBackplane } from '../model/prd-backplane'
 import { prdScopeFingerprint } from '../project/requirement-contract'
@@ -23,6 +23,7 @@ import { prdStructureIssues } from '../model/requirements-model'
 import { buildFallbackUxDesign, renderUxDesignSummary, uxDesignFingerprint, type UxDesign } from '../model/ux-design'
 import { writeTextFileAtomic } from '../../storage/json-store'
 import { join } from 'node:path'
+import { resolveChannelEnv } from '../platform/llm/runtime-fallback'
 
 /** UX 门回门意图词（2026-10-04 真机踩坑修复：「按草图开工」是 dismiss 提示语的原文，
  *  但回门只认 USER_CONTINUE_KEYWORDS（继续/确认……）不含「开工」——用户照提示操作
@@ -122,7 +123,9 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
     pending.publish(makeUxEvent(pending, 'message_delta', { text: '需求已变化，旧草图不能继续确认；请先确认新版 PRD，再生成对应设计。' }))
     return
   }
-  pending = { ...pending, backplane: current, positioning: current.positioning, requirements: current.requirements,
+  const resolution = resolveChannelEnv({ channelId: pending.channel_id, category: 'sketch',
+    projectId: pending.project_id, sessionId: pending.session_id })
+  pending = { ...pending, env: resolution.env ?? pending.env, backplane: current, positioning: current.positioning, requirements: current.requirements,
     prdFingerprint: prdScopeFingerprint(current) }
   const revisionBase = pending
   const publish = pending.publish
@@ -131,12 +134,13 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
   publish(makeUxEvent(eventInput, 'message_delta', {
     text: feedback
       ? `好的，按你的意见「${feedback.slice(0, 60)}」调整草图，画好后再请你过目（约需一到三分钟）。`
-      : 'PRD 已确认。我先把界面外观草图（低保真示意）画出来，在右侧预览给你过目——确认方向后开工（约需一到三分钟）。',
+      : 'PRD 已确认。我先设计界面外观，在右侧展示静态预览，供你确认视觉与布局；实际操作会在桌面程序中实现（约需一到三分钟）。',
   }))
 
   let sketchUrl: string | null = null
   let sketchSource = 'llm'
   let sandboxFailure: string | undefined
+  let generation: UxSketchGeneration | undefined
   try {
     const sketch = await generateUxSketch({
       project_id: pending.project_id,
@@ -166,6 +170,7 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
     const design = sketch.design ?? buildFallbackUxDesign(current)
     pending = { ...pending, design, sketchHtml: sketch.html, sketchSummary: renderUxDesignSummary(design), unappliedFeedback: undefined }
     sketchSource = sketch.source
+    generation = sketch.generation
     const staged = await stageUxSketch({ project_id: pending.project_id, html: sketch.html, design, signal: pending.signal })
     if (pending.signal?.aborted) return
     pending.sketchHash = staged.html_hash
@@ -201,6 +206,7 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
       detail: {
         round,
         sketch_source: sketchSource,
+        ...(generation ? { generation } : {}),
         preview_url: sketchUrl ?? undefined,
         sandbox_ok: sketchUrl !== null,
         ...(sandboxFailure ? { sandbox_failure: sandboxFailure.slice(0, 200) } : {}),

@@ -408,12 +408,6 @@ async function resolveWebLineRetiredCard(
     // UX 门对齐（2026-10-06，根因报告发现②修复）：形态卡改品类后与正常桌面品类同门——
     // PRD 确认后一律过 UX 草图门（确认门矩阵 quick=PRD+UX / longterm=PRD+UX+MVP），
     // 不再直调 enterDesktopLine（确认后由 ux-confirm 进桌面线），门矩阵不再有缝隙。
-    const resolution = resolveChannelEnv({
-      channelId: input.channel_id,
-      category: 'prd',
-      projectId: input.project_id,
-      sessionId: input.session_id,
-    })
     const backplane = readPrdBackplane(input.project_id)
     await runUxConfirmGate({
       request_id: input.request_id,
@@ -422,7 +416,7 @@ async function resolveWebLineRetiredCard(
       mode: findProject(input.project_id)?.mode ?? 'longterm',
       channel_id: input.channel_id,
       query: sdkQuery,
-      env: resolution.env ?? env,
+      env,
       publish: (event) => streamPublisher(event),
       round: 1,
       positioning: backplane?.positioning ?? '',

@@ -7,7 +7,7 @@
  * - attempts 用尽 / parse 抛错 / 外部 abort → 一律 null（fail-closed，不抛错）。
  */
 import { describe, expect, it } from 'vitest'
-import { callLlmForJson, looksJsonTruncated } from '../../main/kernel/llm-call'
+import { callLlmForJson, looksJsonTruncated, type LlmAttemptFailure } from '../../main/kernel/llm-call'
 import type { SDKQuery, SDKQueryOptions } from '../../main/orchestration/orchestrator'
 import type { SDKMessage } from '../../shared/types'
 
@@ -168,6 +168,21 @@ describe('looksJsonTruncated — 截断检测（自 enricher 迁入，行为锁�
 })
 
 describe('尝试失败观测 onAttemptFailure（2026-10-03 e99e6319 事故）', () => {
+  it.each(['timeout', 'aborted'] as const)('终止原因独立于供应商错误文字：%s', async termination => {
+    const controller = new AbortController()
+    const failures: LlmAttemptFailure[] = []
+    const query: SDKQuery = async function* (_prompt, options) {
+      await new Promise<void>(resolve => {
+        options.signal.addEventListener('abort', () => resolve(), { once: true })
+        if (termination === 'aborted') controller.abort()
+      })
+    }
+    const result = await callLlmForJson({ ...BASE, query, parse: parseJson, signal: controller.signal,
+      timeoutMs: termination === 'timeout' ? 5 : 1000, onAttemptFailure: failure => failures.push(failure) })
+    expect(result).toBeNull()
+    expect(failures).toHaveLength(1)
+    expect(failures[0]?.termination).toBe(termination)
+  })
   it('模型零输出 → kind=empty；有输出但解析失败 → kind=unparseable（两轮各报一次）', async () => {
     const { query } = scriptedQuery(['not-json', ''])
     const failures: Array<{ kind: string; detail: string }> = []

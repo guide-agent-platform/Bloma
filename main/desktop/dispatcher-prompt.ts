@@ -183,7 +183,7 @@ export function buildDesktopChildBaseSystem(
 }
 
 function confirmedSketchInstruction(path: string): string {
-  return `【已确认界面】先 read_file ${path}，按其布局与交互方向实现并把此要求传给实现子会话；不要仅看组件库重新设计。草图示意数据与平台点选注入脚本不得复制为业务实现。`
+  return `【已确认界面】先 read_file ${path}，按其布局、字体层级、色彩、间距与交互方向实现并把此要求传给实现子会话。不要仅看组件库重新设计。已确认设计优先于骨架默认视觉：可重排 ui/index.html、定制组件和 CSS，把设计值落实到项目 tokens.css；组件库提供行为示例，不替代设计。保留 App.call 桥、App.show 与 .w-banner 状态反馈、驱动/纠错脚本及稳定定位标记。草图示意数据与平台点选注入脚本不得复制为业务实现；静态草图不能充当已执行的交互证据。`
 }
 
 function architectureComponentFacts(): string {

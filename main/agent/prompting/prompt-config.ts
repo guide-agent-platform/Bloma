@@ -38,6 +38,15 @@ function readPromptOverride(name: string): { content: string; path: string; cand
 }
 export function loadPromptOverride(name: string): string | null { return readPromptOverride(name)?.content ?? null }
 
+/** Resolve content and provenance from one read, so recorded hashes describe the actual request. */
+export function loadPromptWithSource(name: string, builtin: string) {
+  const active = readPromptOverride(name)
+  const content = active?.content ?? builtin
+  return { content, source: { name, source: active ? 'local_override' as const : 'builtin_default' as const,
+    sha256: createHash('sha256').update(content).digest('hex'),
+    ...(active ? { path: active.path, candidate: active.candidate } : {}) } }
+}
+
 /** Uses the same precedence as runtime; only hashes/paths leave the local prompt store. */
 export function describePromptSource(name: string) {
   const active = readPromptOverride(name)

@@ -25,6 +25,8 @@ export interface LlmAttemptFailure {
   attempt: number
   /** error=query 抛错（带原始 message）；empty=模型零输出；unparseable=有输出但解析失败。 */
   kind: 'error' | 'empty' | 'unparseable'
+  /** Distinguish caller cancellation and the call deadline without parsing provider error text. */
+  termination?: 'timeout' | 'aborted'
   detail: string
 }
 
@@ -92,13 +94,17 @@ export async function callLlmForJson<T>(options: LlmJsonCallOptions<T>): Promise
         options.onAttemptFailure?.({
           attempt,
           kind: 'error',
+          ...(signal.aborted ? { termination: options.signal?.aborted ? 'aborted' as const : 'timeout' as const } : {}),
           detail: (error instanceof Error ? error.message : String(error)).slice(0, 200),
         })
         throw error
       }
       accumulated = round
       // 检查合并信号（外部 abort 或内部超时任一触发即停，比只查内部 timer 更严谨）
-      if (signal.aborted) return null
+      if (signal.aborted) {
+        options.onAttemptFailure?.({ attempt, kind: 'error', termination: options.signal?.aborted ? 'aborted' : 'timeout', detail: '调用已停止' })
+        return null
+      }
       if (round === '') {
         options.onAttemptFailure?.({ attempt, kind: 'empty', detail: '模型零输出（空流/零正文）' })
       }

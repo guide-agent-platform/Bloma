@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { organizedPrd } from '../support/organized-prd'
@@ -20,6 +20,8 @@ vi.mock('../../main/guide/stages/prd-pipeline', () => ({ runPrdPipeline: vi.fn(a
 import { enterDesktopLine } from '../../main/desktop/desktop-route'
 import { runPrdPipeline } from '../../main/guide/stages/prd-pipeline'
 import { mintProjectPreviewUrl } from '../../main/delivery/preview-scheme'
+import { createHash } from 'node:crypto'
+import * as routing from '../../main/platform/llm/runtime-fallback'
 
 describe('UX 设计、确认与真实存储边界', () => {
   const originalHome = process.env.PROMA_HOME
@@ -60,6 +62,88 @@ describe('UX 设计、确认与真实存储边界', () => {
     expect(calls[1]).toContain(feedback)
     expect(calls[1]).toContain('data-interaction-id')
     expect(calls[1]).toContain('上一版设计记录')
+  })
+
+  it('关联修订复用安全候选，不丢视觉稿；通过前不写确认文件', async () => {
+    const { pending, prd, design, html, project } = setup()
+    const broken = structuredClone(design)
+    broken.interactions[0]!.states.pop()
+    const prompts: string[] = []
+    let attempt = 0
+    const query: SDKQuery = async function* (prompt) {
+      prompts.push(prompt)
+      expect(existsSync(join(project.root_path!, '00_UX/confirmed.html'))).toBe(false)
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: JSON.stringify(attempt++
+        ? { action: 'design', design } : { action: 'design', design: broken, html }) }] } }
+    }
+    const result = await generateUxSketch({ ...pending, backplane: prd, query, maxTokens: 2000 })
+    expect(result.source).toBe('llm')
+    expect(result.html).toBe(html)
+    expect(result.design).toEqual(design)
+    expect(prompts[1]).toContain('可省略html字段')
+    const dir = join(home, 'agent-workspaces', project.workspace_slug, 'documents', project.project_id, 'diagnostics')
+    const rows = readFileSync(join(dir, 'ux-design-attempts.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line))
+    expect(rows.filter(row => row.event === 'output_checked').map(row => row.accepted_for_preview)).toEqual([false, true])
+    expect(rows.find(row => row.reused_candidate)?.accepted_for_preview).toBe(true)
+    const files = readdirSync(dir).filter(name => name.startsWith('ux-candidate-'))
+    expect(files).toHaveLength(1)
+    expect(readFileSync(join(dir, files[0]!), 'utf8')).toBe(html)
+    expect(existsSync(join(project.root_path!, '00_UX/confirmed.html'))).toBe(false)
+  })
+
+  it.each(['unsafe', 'still-invalid'])('候选复用不能绕过脚本或需求覆盖校验：%s', async mode => {
+    const { pending, prd, design, html } = setup()
+    const broken = structuredClone(design)
+    broken.interactions[0]!.states.pop()
+    let attempt = 0
+    const query: SDKQuery = async function* () {
+      const text = attempt++ ? { action: 'design', design: mode === 'unsafe' ? design : broken }
+        : { action: 'design', design: broken, html: mode === 'unsafe' ? html.replace('</body>', '<script>bad()</script></body>') : html }
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: JSON.stringify(text) }] } }
+    }
+    expect((await generateUxSketch({ ...pending, backplane: prd, query, maxTokens: 2000 })).source).toBe('template')
+  })
+
+  it('结构化调用只有JSON协议，记录同一次读取的覆盖哈希和白名单运行元数据', async () => {
+    const { pending, prd, design, html, project } = setup()
+    mkdirSync(join(home, 'prompts'), { recursive: true })
+    const override = '使用独立杂志的排版风格'
+    writeFileSync(join(home, 'prompts/sketch-system.md'), override)
+    let system = '', user = ''
+    const query: SDKQuery = async function* (prompt, options) {
+      user = prompt
+      system = String(options.history?.[0]?.content)
+      // A settings edit during generation must not change the recorded request source.
+      writeFileSync(join(home, 'prompts/sketch-system.md'), '下次请求的偏好')
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: JSON.stringify({ action: 'design', design, html }) }] } }
+    }
+    await generateUxSketch({ ...pending, backplane: prd, query, maxTokens: 2000,
+      env: { ANTHROPIC_MODEL: 'local-test', ANTHROPIC_API_KEY: 'secret-never-export', EXTRA_SECRET: 'private-value' } })
+    expect(system).toContain('只输出JSON')
+    expect(system + user).not.toContain('只输出 HTML 本身')
+    expect(user).toContain('验收关联索引')
+    const log = readFileSync(join(home, 'agent-workspaces', project.workspace_slug, 'documents', project.project_id, 'diagnostics/ux-design-attempts.jsonl'), 'utf8')
+    expect(log).not.toContain('secret-never-export')
+    expect(log).not.toContain('private-value')
+    const row = JSON.parse(log.split('\n')[0]!)
+    expect(row.prompt_source).toMatchObject({ source: 'local_override', sha256: createHash('sha256').update(override).digest('hex') })
+    expect(row.system_prompt_sha256).toBe(createHash('sha256').update(system).digest('hex'))
+    expect(row.requested_model).toBe('local-test')
+  })
+
+  it('UX门解析sketch路由并把对应环境送入请求', async () => {
+    const { pending } = setup()
+    const spy = vi.spyOn(routing, 'resolveChannelEnv').mockReturnValue({ env: { ANTHROPIC_MODEL: 'design-model' } })
+    let model: string | undefined
+    const query: SDKQuery = async function* (prompt, options) {
+      model = options.env.ANTHROPIC_MODEL
+      yield* pending.query(prompt, options)
+    }
+    try {
+      await runUxConfirmGate({ ...pending, query })
+      expect(spy).toHaveBeenCalledWith(expect.objectContaining({ category: 'sketch', projectId: pending.project_id }))
+      expect(model).toBe('design-model')
+    } finally { spy.mockRestore() }
   })
 
   it('错误编号、遗漏场景和空设计不能作为完整设计', () => {
