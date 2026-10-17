@@ -1,5 +1,5 @@
 {
-  "created_at_utc": "2026-10-17T04:00:27.286Z",
+  "created_at_utc": "2026-10-17T05:03:36.964Z",
   "cutoff": {
     "at": "2026-10-17T03:40:45.894Z",
     "user_request": "现在先收敛实验，整理目前截止实验结果、指标和数据，形成实验报告",
@@ -2480,15 +2480,15 @@
       "native_ready": true,
       "business_full": true,
       "end_to_end_success": true,
-      "machine_ms": null,
+      "machine_ms": 428213,
       "driver_span_ms": null,
       "logical": 71,
       "physical": 71,
       "finished_queries": 71,
       "usage_complete": true,
-      "input_tokens_including_cache": null,
-      "output_tokens": null,
-      "cache_read_tokens": null,
+      "input_tokens_including_cache": 3481506,
+      "output_tokens": 58424,
+      "cache_read_tokens": 3348992,
       "reported_peak_rmb": 0.866414,
       "unknown_count": 0,
       "unknown_original_reservation_rmb": 0,
@@ -2498,16 +2498,16 @@
       "executor_model": "deepseek-flash",
       "verifier_model": "deepseek-flash",
       "thinking": null,
-      "host_output_limit": null,
+      "host_output_limit": 8192,
       "provider_output_cap": null,
-      "runtime_sha256": null,
+      "runtime_sha256": "e78168b5ef03ca8f273b88e1a97cd245ef3f41e3e992bfcbeb28352068703c29",
       "input_hash": "3c8b3e62e9fe9477155244aa0bcb97a71f808c9453986709a75011403317332e",
       "evaluator_hash": "6e1a200b2376c38333c3dbd8b4cbacc0db79b1bae09ffb933ccdf5d24d0ece48",
-      "max_requests": null,
-      "wall_ms": null,
+      "max_requests": 128,
+      "wall_ms": 1800000,
       "script_runs": null,
       "source_run_id": null,
-      "source": "run-artifacts/formal-dispatch-20261014/summary.json",
+      "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G11/report.json",
       "home": "C:\\Users\\17359\\AppData\\Local\\Temp\\bex-fq1\\G11",
       "include_in_primary_comparison": false,
       "censor_note": "该批整体已判定不适合主比较；保留历史有限场景评分，不能跨版本拼接。",
@@ -2533,15 +2533,15 @@
       "native_ready": false,
       "business_full": true,
       "end_to_end_success": false,
-      "machine_ms": null,
+      "machine_ms": 516433,
       "driver_span_ms": null,
       "logical": 76,
       "physical": 76,
       "finished_queries": 76,
       "usage_complete": true,
-      "input_tokens_including_cache": null,
-      "output_tokens": null,
-      "cache_read_tokens": null,
+      "input_tokens_including_cache": 2202839,
+      "output_tokens": 17807,
+      "cache_read_tokens": 2071680,
       "reported_peak_rmb": 0,
       "unknown_count": 0,
       "unknown_original_reservation_rmb": 0,
@@ -2551,16 +2551,16 @@
       "executor_model": "glm-5.3",
       "verifier_model": "deepseek-flash",
       "thinking": null,
-      "host_output_limit": null,
+      "host_output_limit": 8192,
       "provider_output_cap": null,
-      "runtime_sha256": null,
+      "runtime_sha256": "e78168b5ef03ca8f273b88e1a97cd245ef3f41e3e992bfcbeb28352068703c29",
       "input_hash": "3c8b3e62e9fe9477155244aa0bcb97a71f808c9453986709a75011403317332e",
       "evaluator_hash": "6e1a200b2376c38333c3dbd8b4cbacc0db79b1bae09ffb933ccdf5d24d0ece48",
-      "max_requests": null,
-      "wall_ms": null,
+      "max_requests": 128,
+      "wall_ms": 1800000,
       "script_runs": null,
       "source_run_id": null,
-      "source": "run-artifacts/formal-dispatch-20261014/summary.json",
+      "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G22/report.json",
       "home": "C:\\Users\\17359\\AppData\\Local\\Temp\\bex-fq1\\G22",
       "include_in_primary_comparison": false,
       "censor_note": "该批整体已判定不适合主比较；保留历史有限场景评分，不能跨版本拼接。",
@@ -2586,15 +2586,15 @@
       "native_ready": true,
       "business_full": true,
       "end_to_end_success": true,
-      "machine_ms": null,
+      "machine_ms": 261026,
       "driver_span_ms": null,
       "logical": 37,
       "physical": 37,
       "finished_queries": 37,
       "usage_complete": true,
-      "input_tokens_including_cache": null,
-      "output_tokens": null,
-      "cache_read_tokens": null,
+      "input_tokens_including_cache": 2016405,
+      "output_tokens": 37991,
+      "cache_read_tokens": 1952768,
       "reported_peak_rmb": 0.509329,
       "unknown_count": 0,
       "unknown_original_reservation_rmb": 0,
@@ -2604,16 +2604,16 @@
       "executor_model": "deepseek-flash",
       "verifier_model": "deepseek-flash",
       "thinking": null,
-      "host_output_limit": null,
+      "host_output_limit": 8192,
       "provider_output_cap": null,
-      "runtime_sha256": null,
+      "runtime_sha256": "e78168b5ef03ca8f273b88e1a97cd245ef3f41e3e992bfcbeb28352068703c29",
       "input_hash": "3c8b3e62e9fe9477155244aa0bcb97a71f808c9453986709a75011403317332e",
       "evaluator_hash": "6e1a200b2376c38333c3dbd8b4cbacc0db79b1bae09ffb933ccdf5d24d0ece48",
-      "max_requests": null,
-      "wall_ms": null,
+      "max_requests": 128,
+      "wall_ms": 1800000,
       "script_runs": null,
       "source_run_id": null,
-      "source": "run-artifacts/formal-dispatch-20261014/summary.json",
+      "source": "run-artifacts/formal-dispatch-20261014/quick-r1/S1/report.json",
       "home": "C:\\Users\\17359\\AppData\\Local\\Temp\\bex-fq1\\S1",
       "include_in_primary_comparison": false,
       "censor_note": "该批整体已判定不适合主比较；保留历史有限场景评分，不能跨版本拼接。",
@@ -2639,15 +2639,15 @@
       "native_ready": false,
       "business_full": true,
       "end_to_end_success": false,
-      "machine_ms": null,
+      "machine_ms": 838620,
       "driver_span_ms": null,
       "logical": 57,
       "physical": 55,
       "finished_queries": 57,
-      "usage_complete": true,
-      "input_tokens_including_cache": null,
-      "output_tokens": null,
-      "cache_read_tokens": null,
+      "usage_complete": false,
+      "input_tokens_including_cache": 1852218,
+      "output_tokens": 28510,
+      "cache_read_tokens": 1777920,
       "reported_peak_rmb": 0.208339,
       "unknown_count": 0,
       "unknown_original_reservation_rmb": 0,
@@ -2657,16 +2657,16 @@
       "executor_model": "glm-5.3",
       "verifier_model": "deepseek-flash",
       "thinking": null,
-      "host_output_limit": null,
+      "host_output_limit": 8192,
       "provider_output_cap": null,
-      "runtime_sha256": null,
+      "runtime_sha256": "e78168b5ef03ca8f273b88e1a97cd245ef3f41e3e992bfcbeb28352068703c29",
       "input_hash": "3c8b3e62e9fe9477155244aa0bcb97a71f808c9453986709a75011403317332e",
       "evaluator_hash": "6e1a200b2376c38333c3dbd8b4cbacc0db79b1bae09ffb933ccdf5d24d0ece48",
-      "max_requests": null,
-      "wall_ms": null,
+      "max_requests": 128,
+      "wall_ms": 1800000,
       "script_runs": null,
       "source_run_id": null,
-      "source": "run-artifacts/formal-dispatch-20261014/summary.json",
+      "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G12/report.json",
       "home": "C:\\Users\\17359\\AppData\\Local\\Temp\\bex-fq1\\G12",
       "include_in_primary_comparison": false,
       "censor_note": "该批整体已判定不适合主比较；保留历史有限场景评分，不能跨版本拼接。",
@@ -2692,15 +2692,15 @@
       "native_ready": false,
       "business_full": null,
       "end_to_end_success": null,
-      "machine_ms": null,
+      "machine_ms": 791552,
       "driver_span_ms": null,
       "logical": 83,
       "physical": 82,
       "finished_queries": 83,
-      "usage_complete": true,
-      "input_tokens_including_cache": null,
-      "output_tokens": null,
-      "cache_read_tokens": null,
+      "usage_complete": false,
+      "input_tokens_including_cache": 2872578,
+      "output_tokens": 53754,
+      "cache_read_tokens": 2758848,
       "reported_peak_rmb": 0.467507,
       "unknown_count": 0,
       "unknown_original_reservation_rmb": 0,
@@ -2710,16 +2710,16 @@
       "executor_model": "deepseek-flash",
       "verifier_model": "deepseek-flash",
       "thinking": null,
-      "host_output_limit": null,
+      "host_output_limit": 8192,
       "provider_output_cap": null,
-      "runtime_sha256": null,
+      "runtime_sha256": "e78168b5ef03ca8f273b88e1a97cd245ef3f41e3e992bfcbeb28352068703c29",
       "input_hash": "3c8b3e62e9fe9477155244aa0bcb97a71f808c9453986709a75011403317332e",
       "evaluator_hash": "6e1a200b2376c38333c3dbd8b4cbacc0db79b1bae09ffb933ccdf5d24d0ece48",
-      "max_requests": null,
-      "wall_ms": null,
+      "max_requests": 128,
+      "wall_ms": 1800000,
       "script_runs": null,
       "source_run_id": null,
-      "source": "run-artifacts/formal-dispatch-20261014/summary.json",
+      "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G21/report.json",
       "home": "C:\\Users\\17359\\AppData\\Local\\Temp\\bex-fq1\\G21",
       "include_in_primary_comparison": false,
       "censor_note": "该批整体已判定不适合主比较；保留历史有限场景评分，不能跨版本拼接。",
@@ -2745,15 +2745,15 @@
       "native_ready": false,
       "business_full": true,
       "end_to_end_success": false,
-      "machine_ms": null,
+      "machine_ms": 457890,
       "driver_span_ms": null,
       "logical": 20,
       "physical": 19,
       "finished_queries": 20,
-      "usage_complete": true,
-      "input_tokens_including_cache": null,
-      "output_tokens": null,
-      "cache_read_tokens": null,
+      "usage_complete": false,
+      "input_tokens_including_cache": 509542,
+      "output_tokens": 9713,
+      "cache_read_tokens": 462208,
       "reported_peak_rmb": 0,
       "unknown_count": 0,
       "unknown_original_reservation_rmb": 0,
@@ -2763,16 +2763,16 @@
       "executor_model": "glm-5.3",
       "verifier_model": "deepseek-flash",
       "thinking": null,
-      "host_output_limit": null,
+      "host_output_limit": 8192,
       "provider_output_cap": null,
-      "runtime_sha256": null,
+      "runtime_sha256": "e78168b5ef03ca8f273b88e1a97cd245ef3f41e3e992bfcbeb28352068703c29",
       "input_hash": "3c8b3e62e9fe9477155244aa0bcb97a71f808c9453986709a75011403317332e",
       "evaluator_hash": "6e1a200b2376c38333c3dbd8b4cbacc0db79b1bae09ffb933ccdf5d24d0ece48",
-      "max_requests": null,
-      "wall_ms": null,
+      "max_requests": 128,
+      "wall_ms": 1800000,
       "script_runs": null,
       "source_run_id": null,
-      "source": "run-artifacts/formal-dispatch-20261014/summary.json",
+      "source": "run-artifacts/formal-dispatch-20261014/quick-r1/S2/report.json",
       "home": "C:\\Users\\17359\\AppData\\Local\\Temp\\bex-fq1\\S2",
       "include_in_primary_comparison": false,
       "censor_note": "该批整体已判定不适合主比较；保留历史有限场景评分，不能跨版本拼接。",
@@ -2804,9 +2804,9 @@
       "physical": 44,
       "finished_queries": 44,
       "usage_complete": true,
-      "input_tokens_including_cache": null,
-      "output_tokens": null,
-      "cache_read_tokens": null,
+      "input_tokens_including_cache": 2705684,
+      "output_tokens": 56658,
+      "cache_read_tokens": 2656768,
       "reported_peak_rmb": 0.657387,
       "unknown_count": 0,
       "unknown_original_reservation_rmb": 0,
@@ -2816,16 +2816,16 @@
       "executor_model": "deepseek-flash",
       "verifier_model": "deepseek-flash",
       "thinking": null,
-      "host_output_limit": null,
+      "host_output_limit": 8192,
       "provider_output_cap": null,
-      "runtime_sha256": null,
+      "runtime_sha256": "21cb6e704869a03ea402f108459591a2defd8773846fc3280b52a13cad1944bf",
       "input_hash": "b7e18bdfec3a9eeaf0675c48979474c59251608ce0c64dd874e792ce31790687",
       "evaluator_hash": "2f254dccf68f4f3772f80f90fcbe71182bec22198bd259407f2b3f2e59d97c80",
-      "max_requests": null,
-      "wall_ms": null,
+      "max_requests": 128,
+      "wall_ms": 1800000,
       "script_runs": null,
       "source_run_id": null,
-      "source": "run-artifacts/formal-dispatch-20261014-serial/summary.json",
+      "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S1/report.json",
       "home": "C:\\Users\\17359\\AppData\\Local\\Temp\\bex-fq2\\S1",
       "include_in_primary_comparison": false,
       "censor_note": "该批整体已判定不适合主比较；保留历史有限场景评分，不能跨版本拼接。",
@@ -2857,9 +2857,9 @@
       "physical": 32,
       "finished_queries": 32,
       "usage_complete": true,
-      "input_tokens_including_cache": null,
-      "output_tokens": null,
-      "cache_read_tokens": null,
+      "input_tokens_including_cache": 1073803,
+      "output_tokens": 11872,
+      "cache_read_tokens": 1028864,
       "reported_peak_rmb": 2.749656,
       "unknown_count": 0,
       "unknown_original_reservation_rmb": 0,
@@ -2869,16 +2869,16 @@
       "executor_model": "glm-5.3",
       "verifier_model": "deepseek-flash",
       "thinking": null,
-      "host_output_limit": null,
+      "host_output_limit": 8192,
       "provider_output_cap": null,
-      "runtime_sha256": null,
+      "runtime_sha256": "21cb6e704869a03ea402f108459591a2defd8773846fc3280b52a13cad1944bf",
       "input_hash": "b7e18bdfec3a9eeaf0675c48979474c59251608ce0c64dd874e792ce31790687",
       "evaluator_hash": "2f254dccf68f4f3772f80f90fcbe71182bec22198bd259407f2b3f2e59d97c80",
-      "max_requests": null,
-      "wall_ms": null,
+      "max_requests": 128,
+      "wall_ms": 1800000,
       "script_runs": null,
       "source_run_id": null,
-      "source": "run-artifacts/formal-dispatch-20261014-serial/summary.json",
+      "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S2/report.json",
       "home": "C:\\Users\\17359\\AppData\\Local\\Temp\\bex-fq2\\S2",
       "include_in_primary_comparison": false,
       "censor_note": "该批整体已判定不适合主比较；保留历史有限场景评分，不能跨版本拼接。",
@@ -2910,9 +2910,9 @@
       "physical": 64,
       "finished_queries": 64,
       "usage_complete": false,
-      "input_tokens_including_cache": null,
-      "output_tokens": null,
-      "cache_read_tokens": null,
+      "input_tokens_including_cache": 2724430,
+      "output_tokens": 59691,
+      "cache_read_tokens": 2615168,
       "reported_peak_rmb": 0.800687,
       "unknown_count": 6,
       "unknown_original_reservation_rmb": 12.976128,
@@ -2922,16 +2922,16 @@
       "executor_model": "deepseek-flash",
       "verifier_model": "deepseek-flash",
       "thinking": null,
-      "host_output_limit": null,
+      "host_output_limit": 8192,
       "provider_output_cap": null,
-      "runtime_sha256": null,
+      "runtime_sha256": "21cb6e704869a03ea402f108459591a2defd8773846fc3280b52a13cad1944bf",
       "input_hash": "b7e18bdfec3a9eeaf0675c48979474c59251608ce0c64dd874e792ce31790687",
       "evaluator_hash": "2f254dccf68f4f3772f80f90fcbe71182bec22198bd259407f2b3f2e59d97c80",
-      "max_requests": null,
-      "wall_ms": null,
+      "max_requests": 128,
+      "wall_ms": 1800000,
       "script_runs": null,
       "source_run_id": null,
-      "source": "run-artifacts/formal-dispatch-20261014-serial/summary.json",
+      "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G11/report.json",
       "home": "C:\\Users\\17359\\AppData\\Local\\Temp\\bex-fq2\\G11",
       "include_in_primary_comparison": false,
       "censor_note": "该批整体已判定不适合主比较；保留历史有限场景评分，不能跨版本拼接。",
@@ -2963,9 +2963,9 @@
       "physical": 74,
       "finished_queries": 74,
       "usage_complete": true,
-      "input_tokens_including_cache": null,
-      "output_tokens": null,
-      "cache_read_tokens": null,
+      "input_tokens_including_cache": 1684969,
+      "output_tokens": 18222,
+      "cache_read_tokens": 1555456,
       "reported_peak_rmb": 4.657232,
       "unknown_count": 0,
       "unknown_original_reservation_rmb": 0,
@@ -2975,16 +2975,16 @@
       "executor_model": "glm-5.3",
       "verifier_model": "deepseek-flash",
       "thinking": null,
-      "host_output_limit": null,
+      "host_output_limit": 8192,
       "provider_output_cap": null,
-      "runtime_sha256": null,
+      "runtime_sha256": "21cb6e704869a03ea402f108459591a2defd8773846fc3280b52a13cad1944bf",
       "input_hash": "b7e18bdfec3a9eeaf0675c48979474c59251608ce0c64dd874e792ce31790687",
       "evaluator_hash": "2f254dccf68f4f3772f80f90fcbe71182bec22198bd259407f2b3f2e59d97c80",
-      "max_requests": null,
-      "wall_ms": null,
+      "max_requests": 128,
+      "wall_ms": 1800000,
       "script_runs": null,
       "source_run_id": null,
-      "source": "run-artifacts/formal-dispatch-20261014-serial/summary.json",
+      "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G22/report.json",
       "home": "C:\\Users\\17359\\AppData\\Local\\Temp\\bex-fq2\\G22",
       "include_in_primary_comparison": false,
       "censor_note": "该批整体已判定不适合主比较；保留历史有限场景评分，不能跨版本拼接。",
@@ -3015,10 +3015,10 @@
       "logical": 107,
       "physical": 106,
       "finished_queries": 107,
-      "usage_complete": true,
-      "input_tokens_including_cache": null,
-      "output_tokens": null,
-      "cache_read_tokens": null,
+      "usage_complete": false,
+      "input_tokens_including_cache": 5101044,
+      "output_tokens": 58999,
+      "cache_read_tokens": 4973568,
       "reported_peak_rmb": 0.268422,
       "unknown_count": 0,
       "unknown_original_reservation_rmb": 0,
@@ -3028,16 +3028,16 @@
       "executor_model": "glm-5.3",
       "verifier_model": "deepseek-flash",
       "thinking": null,
-      "host_output_limit": null,
+      "host_output_limit": 8192,
       "provider_output_cap": null,
-      "runtime_sha256": null,
+      "runtime_sha256": "21cb6e704869a03ea402f108459591a2defd8773846fc3280b52a13cad1944bf",
       "input_hash": "b7e18bdfec3a9eeaf0675c48979474c59251608ce0c64dd874e792ce31790687",
       "evaluator_hash": "2f254dccf68f4f3772f80f90fcbe71182bec22198bd259407f2b3f2e59d97c80",
-      "max_requests": null,
-      "wall_ms": null,
+      "max_requests": 128,
+      "wall_ms": 1800000,
       "script_runs": null,
       "source_run_id": null,
-      "source": "run-artifacts/formal-dispatch-20261014-serial/summary.json",
+      "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G12/report.json",
       "home": "C:\\Users\\17359\\AppData\\Local\\Temp\\bex-fq2\\G12",
       "include_in_primary_comparison": false,
       "censor_note": "该批整体已判定不适合主比较；保留历史有限场景评分，不能跨版本拼接。",
@@ -3068,10 +3068,10 @@
       "logical": 1,
       "physical": 0,
       "finished_queries": 1,
-      "usage_complete": true,
-      "input_tokens_including_cache": null,
-      "output_tokens": null,
-      "cache_read_tokens": null,
+      "usage_complete": false,
+      "input_tokens_including_cache": 0,
+      "output_tokens": 0,
+      "cache_read_tokens": 0,
       "reported_peak_rmb": 0,
       "unknown_count": 0,
       "unknown_original_reservation_rmb": 0,
@@ -3081,16 +3081,16 @@
       "executor_model": "deepseek-flash",
       "verifier_model": "deepseek-flash",
       "thinking": null,
-      "host_output_limit": null,
+      "host_output_limit": 8192,
       "provider_output_cap": null,
-      "runtime_sha256": null,
+      "runtime_sha256": "21cb6e704869a03ea402f108459591a2defd8773846fc3280b52a13cad1944bf",
       "input_hash": "b7e18bdfec3a9eeaf0675c48979474c59251608ce0c64dd874e792ce31790687",
       "evaluator_hash": "2f254dccf68f4f3772f80f90fcbe71182bec22198bd259407f2b3f2e59d97c80",
-      "max_requests": null,
-      "wall_ms": null,
+      "max_requests": 128,
+      "wall_ms": 1800000,
       "script_runs": null,
       "source_run_id": null,
-      "source": "run-artifacts/formal-dispatch-20261014-serial/summary.json",
+      "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G21/report.json",
       "home": "C:\\Users\\17359\\AppData\\Local\\Temp\\bex-fq2\\G21",
       "include_in_primary_comparison": false,
       "censor_note": "该批整体已判定不适合主比较；保留历史有限场景评分，不能跨版本拼接。",
@@ -6972,7 +6972,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G11/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G11/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -6982,7 +6982,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G11/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G11/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -6992,7 +6992,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G11/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G11/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7002,7 +7002,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G11/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G11/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7012,7 +7012,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G11/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G11/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7022,7 +7022,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G11/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G11/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7032,7 +7032,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G22/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G22/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7042,7 +7042,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G22/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G22/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7052,7 +7052,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G22/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G22/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7062,7 +7062,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G22/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G22/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7072,7 +7072,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G22/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G22/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7082,7 +7082,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G22/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G22/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7092,7 +7092,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/S1/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/S1/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7102,7 +7102,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/S1/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/S1/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7112,7 +7112,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/S1/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/S1/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7122,7 +7122,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/S1/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/S1/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7132,7 +7132,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/S1/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/S1/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7142,7 +7142,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/S1/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/S1/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7152,7 +7152,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G12/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G12/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7162,7 +7162,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G12/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G12/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7172,7 +7172,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G12/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G12/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7182,7 +7182,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G12/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G12/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7192,7 +7192,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G12/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G12/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7202,7 +7202,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G12/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G12/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7212,7 +7212,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G21/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G21/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7222,7 +7222,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G21/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G21/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7232,7 +7232,7 @@
       "status": "failed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G21/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G21/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7241,8 +7241,8 @@
       "scenario_id": "filters",
       "status": "pending",
       "reason": null,
-      "source": "run-artifacts/formal-dispatch-20261014/summary.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G21/report.json",
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G21/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7251,8 +7251,8 @@
       "scenario_id": "delete-isolation",
       "status": "pending",
       "reason": null,
-      "source": "run-artifacts/formal-dispatch-20261014/summary.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G21/report.json",
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G21/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7261,8 +7261,8 @@
       "scenario_id": "restart-persistence",
       "status": "pending",
       "reason": null,
-      "source": "run-artifacts/formal-dispatch-20261014/summary.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G21/report.json",
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/G21/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7272,7 +7272,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/S2/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/S2/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7282,7 +7282,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/S2/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/S2/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7292,7 +7292,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/S2/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/S2/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7302,7 +7302,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/S2/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/S2/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7312,7 +7312,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/S2/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/S2/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014",
@@ -7322,7 +7322,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014/quick-r1/S2/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014/quick-r1/S2/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7332,7 +7332,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S1/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S1/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7342,7 +7342,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S1/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S1/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7352,7 +7352,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S1/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S1/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7362,7 +7362,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S1/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S1/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7372,7 +7372,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S1/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S1/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7382,7 +7382,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S1/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S1/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7392,7 +7392,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S2/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S2/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7402,7 +7402,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S2/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S2/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7412,7 +7412,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S2/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S2/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7422,7 +7422,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S2/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S2/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7432,7 +7432,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S2/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S2/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7442,7 +7442,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S2/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S2/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7452,7 +7452,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G11/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G11/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7462,7 +7462,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G11/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G11/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7472,7 +7472,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G11/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G11/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7482,7 +7482,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G11/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G11/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7492,7 +7492,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G11/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G11/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7502,7 +7502,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G11/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G11/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7512,7 +7512,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G22/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G22/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7522,7 +7522,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G22/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G22/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7532,7 +7532,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G22/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G22/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7542,7 +7542,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G22/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G22/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7552,7 +7552,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G22/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G22/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7562,7 +7562,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G22/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G22/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7572,7 +7572,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G12/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G12/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7582,7 +7582,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G12/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G12/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7592,7 +7592,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G12/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G12/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7602,7 +7602,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G12/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G12/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7612,7 +7612,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G12/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G12/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7622,7 +7622,7 @@
       "status": "passed",
       "reason": null,
       "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G12/gui/gui.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G12/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7631,8 +7631,8 @@
       "scenario_id": "add-trim",
       "status": "pending",
       "reason": null,
-      "source": "run-artifacts/formal-dispatch-20261014-serial/summary.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G21/report.json",
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G21/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7641,8 +7641,8 @@
       "scenario_id": "empty-rejection",
       "status": "pending",
       "reason": null,
-      "source": "run-artifacts/formal-dispatch-20261014-serial/summary.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G21/report.json",
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G21/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7651,8 +7651,8 @@
       "scenario_id": "toggle-isolation",
       "status": "pending",
       "reason": null,
-      "source": "run-artifacts/formal-dispatch-20261014-serial/summary.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G21/report.json",
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G21/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7661,8 +7661,8 @@
       "scenario_id": "filters",
       "status": "pending",
       "reason": null,
-      "source": "run-artifacts/formal-dispatch-20261014-serial/summary.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G21/report.json",
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G21/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7671,8 +7671,8 @@
       "scenario_id": "delete-isolation",
       "status": "pending",
       "reason": null,
-      "source": "run-artifacts/formal-dispatch-20261014-serial/summary.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G21/report.json",
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G21/report.json"
     },
     {
       "cohort_id": "formal-dispatch-20261014-serial",
@@ -7681,8 +7681,8 @@
       "scenario_id": "restart-persistence",
       "status": "pending",
       "reason": null,
-      "source": "run-artifacts/formal-dispatch-20261014-serial/summary.json",
-      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/summary.json"
+      "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G21/report.json",
+      "canonical_source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G21/report.json"
     },
     {
       "cohort_id": "legacy-l3-method-r2",
@@ -75573,10 +75573,22 @@
       "bytes": 4587
     },
     {
+      "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G11/report.json",
+      "kind": "run_report",
+      "sha256": "f3b2dc0d0986abcd59e47db6a8120ac9f85c55deb75792b59eb29a977329615f",
+      "bytes": 10274
+    },
+    {
       "source": "../../../AppData/Local/Temp/bex-fq1/G11/usage-ledger/47d251d3-9a12-46b6-94d4-d2f9147d60a2.jsonl",
       "kind": "query_ledger",
       "sha256": "3a30882b4d8418bbe25be81b21b03ff54eaaaa10639c69fb54530e626d99bad2",
       "bytes": 216721
+    },
+    {
+      "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G22/report.json",
+      "kind": "run_report",
+      "sha256": "d3be1a757d957d1a86184b8ffe64cb99805210470b95feeadfb01381ed23bb84",
+      "bytes": 8468
     },
     {
       "source": "../../../AppData/Local/Temp/bex-fq1/G22/usage-ledger/47d251d3-9a12-46b6-94d4-d2f9147d60a2.jsonl",
@@ -75585,10 +75597,22 @@
       "bytes": 219964
     },
     {
+      "source": "run-artifacts/formal-dispatch-20261014/quick-r1/S1/report.json",
+      "kind": "run_report",
+      "sha256": "ff2a5229fa4c47d86579458ee5fd0d7eda4bb373b903ffa94c7ad6d78c396350",
+      "bytes": 6071
+    },
+    {
       "source": "../../../AppData/Local/Temp/bex-fq1/S1/usage-ledger/47d251d3-9a12-46b6-94d4-d2f9147d60a2.jsonl",
       "kind": "query_ledger",
       "sha256": "9b3ff5dfb96866ae4a4d5e1b50235236a17bbf2cc49c07e6b932cdbe6dc0758e",
       "bytes": 103539
+    },
+    {
+      "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G12/report.json",
+      "kind": "run_report",
+      "sha256": "1e5b3b2e4e3bea8d6dc31d791c45419954649b789af5dc43e6742e7e108ad1a3",
+      "bytes": 11787
     },
     {
       "source": "../../../AppData/Local/Temp/bex-fq1/G12/usage-ledger/47d251d3-9a12-46b6-94d4-d2f9147d60a2.jsonl",
@@ -75597,10 +75621,22 @@
       "bytes": 163382
     },
     {
+      "source": "run-artifacts/formal-dispatch-20261014/quick-r1/G21/report.json",
+      "kind": "run_report",
+      "sha256": "c0718d8e94bae9f581f08fcfe14869d498b2e59d6754c4c55f35c43a52c672ba",
+      "bytes": 9054
+    },
+    {
       "source": "../../../AppData/Local/Temp/bex-fq1/G21/usage-ledger/47d251d3-9a12-46b6-94d4-d2f9147d60a2.jsonl",
       "kind": "query_ledger",
       "sha256": "583be60975bf91227fe7dda79b8c4fe591a93d96ec0c4b01f7766d35adb064ca",
       "bytes": 238749
+    },
+    {
+      "source": "run-artifacts/formal-dispatch-20261014/quick-r1/S2/report.json",
+      "kind": "run_report",
+      "sha256": "aca1b468eb2adb30ac6262817e43a4622c3019924cd84b818a8294d51cd908bd",
+      "bytes": 6036
     },
     {
       "source": "../../../AppData/Local/Temp/bex-fq1/S2/usage-ledger/47d251d3-9a12-46b6-94d4-d2f9147d60a2.jsonl",
@@ -75615,10 +75651,10 @@
       "bytes": 27214
     },
     {
-      "source": "run-artifacts/formal-dispatch-20261014-serial/summary.json",
-      "kind": "cohort_summary",
-      "sha256": "5ff39131802ea56680114e88ce0eff4ea5a0da7a932b11096bb0c5e8cbf25c16",
-      "bytes": 41376
+      "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S1/report.json",
+      "kind": "run_report",
+      "sha256": "953d52edad9949d15e7fb7e066e5b2970e399f08f7d8f7617ea18c3e9adb85b6",
+      "bytes": 6113
     },
     {
       "source": "../../../AppData/Local/Temp/bex-fq2/S1/usage-ledger/47d251d3-9a12-46b6-94d4-d2f9147d60a2.jsonl",
@@ -75627,10 +75663,22 @@
       "bytes": 123135
     },
     {
+      "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/S2/report.json",
+      "kind": "run_report",
+      "sha256": "82ad5c113582ff04a95e1f6ab0215c73a3c84d3471c8630cb18116297d73f23f",
+      "bytes": 6057
+    },
+    {
       "source": "../../../AppData/Local/Temp/bex-fq2/S2/usage-ledger/47d251d3-9a12-46b6-94d4-d2f9147d60a2.jsonl",
       "kind": "query_ledger",
       "sha256": "264770e220fcdc3816864868dbbc2f0d131e9dfbf3dcadb56e3e35a48ffb59da",
       "bytes": 87023
+    },
+    {
+      "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G11/report.json",
+      "kind": "run_report",
+      "sha256": "fb8e344faaa994ce6f39f31c11b02b0190c53198bebb608bde37eb03f98811b9",
+      "bytes": 8824
     },
     {
       "source": "../../../AppData/Local/Temp/bex-fq2/G11/usage-ledger/47d251d3-9a12-46b6-94d4-d2f9147d60a2.jsonl",
@@ -75639,16 +75687,34 @@
       "bytes": 183003
     },
     {
+      "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G22/report.json",
+      "kind": "run_report",
+      "sha256": "14acbc5f1b5f483045eb813f9a70e9db1921aaa616956e2d675a8338902a2ada",
+      "bytes": 8563
+    },
+    {
       "source": "../../../AppData/Local/Temp/bex-fq2/G22/usage-ledger/47d251d3-9a12-46b6-94d4-d2f9147d60a2.jsonl",
       "kind": "query_ledger",
       "sha256": "018b2ba573ac02008fb89de7722f69ed2656d3187b5a9fdd33d466b18f14b15d",
       "bytes": 210700
     },
     {
+      "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G12/report.json",
+      "kind": "run_report",
+      "sha256": "b9b0f67de92c4aeea71f84a4ddbbfe2f17e1a475877c454fdd2e6aab41647b44",
+      "bytes": 9174
+    },
+    {
       "source": "../../../AppData/Local/Temp/bex-fq2/G12/usage-ledger/47d251d3-9a12-46b6-94d4-d2f9147d60a2.jsonl",
       "kind": "query_ledger",
       "sha256": "7ec0458aca7f07d2bba1e0faca95b532ba4ceb79eae92ab9ebb60bb207c2b09b",
       "bytes": 319461
+    },
+    {
+      "source": "run-artifacts/formal-dispatch-20261014-serial/quick-r2/G21/report.json",
+      "kind": "run_report",
+      "sha256": "c41685c03c8310cd0dac3bc76ab30305b08661f1037cd24a966408ffe901be3e",
+      "bytes": 4754
     },
     {
       "source": "../../../AppData/Local/Temp/bex-fq2/G21/usage-ledger/47d251d3-9a12-46b6-94d4-d2f9147d60a2.jsonl",
@@ -75661,6 +75727,12 @@
       "kind": "registry",
       "sha256": "82662f095588afaeacae7ec8bf6afbd2f2deaf9203f5eb337e03ff7a59a3dda3",
       "bytes": 26392
+    },
+    {
+      "source": "run-artifacts/formal-dispatch-20261014-serial/summary.json",
+      "kind": "cohort_summary",
+      "sha256": "5ff39131802ea56680114e88ce0eff4ea5a0da7a932b11096bb0c5e8cbf25c16",
+      "bytes": 41376
     },
     {
       "source": "run-artifacts/convergence-report-20261017/method-l3-layout/S1/report.json",

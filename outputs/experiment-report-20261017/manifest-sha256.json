@@ -1,5 +1,5 @@
 {
-  "at": "2026-10-17T04:39:53.658Z",
+  "at": "2026-10-17T05:07:07.586Z",
   "scope": "交付文件哈希，不包含自身或 ZIP；原始证据另见 sources.csv。",
   "files": [
     {
@@ -9,8 +9,8 @@
     },
     {
       "file": "experiment-data.json",
-      "bytes": 3016019,
-      "sha256": "faa1913d2932be80d3e74ffc23984911e875a6553ebdf8b61f0c8c0b83e590fd"
+      "bytes": 3020733,
+      "sha256": "82522034709c9f3ab87bf6cf9db2af85ba7188de75095bf5ebb5c83e3672af64"
     },
     {
       "file": "inventory.csv",
@@ -34,18 +34,18 @@
     },
     {
       "file": "runs.csv",
-      "bytes": 44574,
-      "sha256": "eea4e5601ecc8dd9ff08de8885dff04a969d7ab27d66dc76c9644b6e2519a94d"
+      "bytes": 46080,
+      "sha256": "d90b80dc5839279c06280b137eeac5c0076da711f21149f50da259aea69dae68"
     },
     {
       "file": "scenarios.csv",
-      "bytes": 117159,
-      "sha256": "c73bd6905a54595591a283bc32120b081771a5bab07d4ac67ac663a7f3dc5265"
+      "bytes": 118107,
+      "sha256": "0ff22ab6a1edd5d483c143281cc62f5632f8fe5b5dadacdfc9b27852321874cb"
     },
     {
       "file": "sources.csv",
-      "bytes": 23180,
-      "sha256": "953b315f43f2fb3c93066c0d8def17deffbdfc993b6428cdba063f099edbb09f"
+      "bytes": 25068,
+      "sha256": "4b782e4310c8e59ee23a31a9cc0358659b21b38f37f25c7f99ff515fdcd45b04"
     },
     {
       "file": "历史报告/dispatch-flash-pro-l2-result-20261016.md",
@@ -64,13 +64,13 @@
     },
     {
       "file": "实验报告.md",
-      "bytes": 26393,
-      "sha256": "487741b7ec19debd38adae8156301a5f691d4aeeb6fcf397c28430fa49303ab4"
+      "bytes": 26735,
+      "sha256": "af3d946269daed2ceb8d71b65e84c302f551106390e04da77067f4122d26699e"
     },
     {
       "file": "实验指标汇总.xlsx",
-      "bytes": 40793,
-      "sha256": "f769ca6d83c2f480d3a64a2635fda37f3bdc2090700b385da5b43ae4e5f38981"
+      "bytes": 41193,
+      "sha256": "72f9faea3da7c0538be56bd0337e18d0444a18127ef8204fb4140c19360ec61c"
     },
     {
       "file": "审计/DeepSeek只读余额.json",
@@ -90,22 +90,22 @@
     {
       "file": "审计/工作簿核对.json",
       "bytes": 389,
-      "sha256": "380abd6bf098fce0fda56b3b6410176c6d3c38ce9a904c6994d5afbfbc4a16d2"
+      "sha256": "069451c1a3e5d36c10bafeced855475aa736415d828746585c17c2ff2ce5348d"
     },
     {
       "file": "审计/截止状态.json",
       "bytes": 679,
-      "sha256": "635e827ed829bda646941bfed8f4844073a15dd85e42f540fb4667f526ecee2b"
+      "sha256": "317754e768cdb82bc7851e0dd6982d216258a47f6a220241a2e48d0eb4c3307b"
     },
     {
       "file": "审计/数据核对.json",
       "bytes": 405,
-      "sha256": "b41259d545fd0cb6575f251d7a030baa46ef008e115bc4e25cb45a54da6aa460"
+      "sha256": "b37715c36761c2b506f514542cac2b24f4944bab9a2f27ad09cf39e2b7beb616"
     },
     {
       "file": "数据字典.md",
-      "bytes": 3966,
-      "sha256": "4665458f61b2afefa2be87252d022b88dfdb374d42fca3a36694ee9ae265be1f"
+      "bytes": 4320,
+      "sha256": "f9fb9507ffaab9a424355bbb51c38577308ab33062aca4ebfb566f2ff65a8b53"
     },
     {
       "file": "阅读说明.md",
