@@ -1,5 +1,5 @@
 {
-  "at": "2026-10-17T04:01:33.689Z",
+  "at": "2026-10-17T04:15:23.187Z",
   "scope": "交付文件哈希，不包含自身或 ZIP；原始证据另见 sources.csv。",
   "files": [
     {
@@ -64,8 +64,8 @@
     },
     {
       "file": "实验报告.md",
-      "bytes": 24402,
-      "sha256": "2fc5cd6f74c6e712dfe6ef398bc31eb6a791b017b02f7686a6527db919dfbae7"
+      "bytes": 25084,
+      "sha256": "4c7b6c32d03e592a9b306fe88ed82994f8c212d69ff4e41ccd09dfc9acfd2520"
     },
     {
       "file": "实验指标汇总.xlsx",
@@ -100,7 +100,7 @@
     {
       "file": "审计/数据核对.json",
       "bytes": 405,
-      "sha256": "6b58cc00bd4a9105fed27de95175ce6d6bf2fd77b0176db3c5437f6ac0ec2779"
+      "sha256": "b41259d545fd0cb6575f251d7a030baa46ef008e115bc4e25cb45a54da6aa460"
     },
     {
       "file": "数据字典.md",
