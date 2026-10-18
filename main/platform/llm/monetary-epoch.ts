@@ -58,15 +58,22 @@ export function acquireMonetaryEpoch(policyPath: string, model: Model, policyHas
 
 /** Host operation only. A new window requires explicit reset_models; otherwise all
  * preceding model liabilities must be carried. No request records are edited. */
-export function activateMonetaryPolicy(policyPath: string, options: { reset_models?: string[] } = {}): Epoch[] {
+export function activateMonetaryPolicy(policyPath: string, options: { reset_models?: string[]; only_models?: string[] } = {}): Epoch[] {
   const bytes = readFileSync(policyPath), policy = JSON.parse(bytes.toString('utf8').replace(/^\uFEFF/, ''))
   const models = policy.models as Model[]
   if (policy.version !== 1 || !Array.isArray(models) || !models.length || models.some(m => typeof m.host !== 'string' || !m.host || typeof m.model !== 'string' || !m.model)
     || new Set(models.map(m => `${m.host}\n${m.model}`)).size !== models.length
-    || options.reset_models?.some(m => !models.some(row => row.model === m))) throw new Error('MONETARY_EPOCH_POLICY_INVALID')
+    || options.reset_models?.some(m => !models.some(row => row.model === m))
+    || (options.only_models !== undefined && (!Array.isArray(options.only_models) || !options.only_models.length
+      || new Set(options.only_models).size !== options.only_models.length || options.only_models.some(m => !models.some(row => row.model === m))
+      || options.reset_models?.some(m => !options.only_models!.includes(m))))) throw new Error('MONETARY_EPOCH_POLICY_INVALID')
   const policyHash = hash(bytes), target = existsSync(policyPath + '.state.json') ? JSON.parse(readFileSync(policyPath + '.state.json', 'utf8')) : { entries: [] }
   if (target.policy_hash !== undefined && target.policy_hash !== policyHash || !Array.isArray(target.entries)) throw new Error('MONETARY_EPOCH_STATE_INVALID')
-  const paths = models.map(m => ({ model: m, path: pathFor(m) })).sort((a, b) => a.path.localeCompare(b.path))
+  // A host may restore one settled model without reactivating an unrelated model
+  // that still has reserved/unknown historical usage. Selected liabilities retain
+  // the same locks, carry checks and in-flight rejection as a full activation.
+  const paths = models.filter(m => !options.only_models || options.only_models.includes(m.model))
+    .map(m => ({ model: m, path: pathFor(m) })).sort((a, b) => a.path.localeCompare(b.path))
   const releases: Array<() => void> = [], originals = new Map<string, Buffer | undefined>(), epochs: Epoch[] = []
   try {
     for (const item of paths) releases.push(lock(item.path))

@@ -80,6 +80,16 @@ describe('shared core delivery', () => {
     expect(result.status).toBe('unverified')
     expect(result.requirements?.[1]).toMatchObject({ implementation: 'partial', verification: 'passed' })
   })
+  it('explains the scenario limit before spawning validation scripts', async () => {
+    writeManifest({ command: ['python', 'core_check.py'], scenarios: Array.from({ length: 66 }, (_, i) => ({
+      name: `case ${i}`, covers: ['F-001'], input: 'logic',
+    })) })
+    const spawn = vi.fn()
+    const result = await runCoreVerification({ projectId: 'p', sandboxRoot: root, spawn })
+    expect(result.status).toBe('unverified')
+    expect(result.missing.join(' ')).toContain('场景数量 66 超过上限 64')
+    expect(spawn).not.toHaveBeenCalled()
+  })
   it('refuses stale registration before execution, and old passing manifests stay diagnostic', async () => {
     manifest()
     const declared = JSON.parse(readFileSync(join(root, 'CORE_CHECK.json'), 'utf8')).requirements[0].requirement_hash

@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto'
 import { fetchWithMonetaryBudget, reserveModelRequest, reserveModelRequestWhenAvailable, readMonetaryBudget } from '../../main/platform/llm/monetary-budget'
 import { streamSSE } from '../../main/platform/upstream/providers/sse-reader'
 import { ANTHROPIC_SSE_ADAPTER } from '../../main/platform/upstream/providers/anthropic-sse-adapter'
-import { activateMonetaryPolicy } from '../../main/platform/llm/monetary-epoch'
+import { activateMonetaryPolicy, activeMonetaryPolicyPath } from '../../main/platform/llm/monetary-epoch'
 
 const roots: string[] = []
 beforeEach(() => { const registry = mkdtempSync(join(tmpdir(), 'bloma-epoch-')); roots.push(registry); vi.stubEnv('BLOMA_MONETARY_EPOCH_DIR', registry) })
@@ -23,6 +23,32 @@ const state = (path: string) => JSON.parse(readFileSync(`${path}.state.json`, 'u
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 describe('shared monetary ceiling', () => {
+  it('restores only a settled model while another policy member remains reserved', () => {
+    const original = fixture(20), temporary = fixture(20)
+    const policy = JSON.parse(readFileSync(original, 'utf8'))
+    policy.models.push({ ...policy.models[0], model: 'M2' })
+    writeFileSync(original, JSON.stringify(policy))
+    reserveModelRequest(url, body, original)!.settle(undefined, false)
+    const pending = reserveModelRequest(url, JSON.stringify({ model: 'M2', max_tokens: 1000 }), original)!
+    const copied = state(original); copied.entries = copied.entries.filter((e: any) => e.model === 'M1')
+    copied.policy_hash = createHash('sha256').update(readFileSync(temporary)).digest('hex')
+    writeFileSync(`${temporary}.state.json`, JSON.stringify(copied))
+    activateMonetaryPolicy(temporary)
+    const originalBytes = readFileSync(`${original}.state.json`, 'utf8')
+    expect(() => activateMonetaryPolicy(original)).toThrow('MONETARY_EPOCH_HAS_ACTIVE_REQUESTS')
+    expect(() => activateMonetaryPolicy(original, { only_models: ['M2'] })).toThrow('MONETARY_EPOCH_HAS_ACTIVE_REQUESTS')
+    activateMonetaryPolicy(original, { only_models: ['M1'] })
+    expect(activeMonetaryPolicyPath({ host: 'api.example.com', model: 'M1' })?.toLowerCase()).toBe(original.toLowerCase())
+    expect(readFileSync(`${original}.state.json`, 'utf8')).toBe(originalBytes)
+    expect(state(original).entries.find((e: any) => e.model === 'M2').status).toBe('reserved')
+    pending.settle(undefined, false)
+  })
+  it('rejects empty, unknown or duplicated activation selections', () => {
+    const path = fixture()
+    for (const only_models of [[], ['missing'], ['M1', 'M1']]) {
+      expect(() => activateMonetaryPolicy(path, { only_models })).toThrow('MONETARY_EPOCH_POLICY_INVALID')
+    }
+  })
   it('rejects a second policy before HTTP and requires explicit carried-liability activation', async () => {
     const a = fixture(), b = fixture(), fetcher = vi.fn()
     reserveModelRequest(url, body, a)!.settle(undefined, false)

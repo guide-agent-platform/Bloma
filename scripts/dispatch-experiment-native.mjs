@@ -11,14 +11,18 @@ const [command, ...args] = process.argv.slice(2)
 const option = (name, fallback) => { const i = args.indexOf(`--${name}`); return i < 0 ? fallback : args[i + 1] }
 const home = resolve(option('home', ''))
 const reportDir = resolve(option('report-dir', join(home, 'native-report')))
-const policy = resolve(option('monetary-policy', ''))
+const noMonetaryLimit = args.includes('--no-monetary-limit')
+const policyOption = option('monetary-policy', '')
+const policy = policyOption ? resolve(policyOption) : ''
 const stopFile = resolve(option('stop-file', join(reportDir, 'STOP')))
 const resumePreparation = command === 'prepare' && args.includes('--resume-preparation')
 const resumeAnswer = resumePreparation ? option('resume-answer', '') : ''
 const preparationMaxTokens = preparationTokenCap(command, option('prepare-max-output-tokens'))
+const glmPlan = option('glm-plan', 'regular')
+if (!['regular', 'coding'].includes(glmPlan)) throw new Error('EXPERIMENT_INVALID_GLM_PLAN')
 const clarificationAnswers = option('clarification-answers') ? JSON.parse(readFileSync(option('clarification-answers'), 'utf8')) : []
 if (!Array.isArray(clarificationAnswers)) throw new Error('EXPERIMENT_INVALID_CLARIFICATION_ANSWERS')
-if (!['prepare', 'run', 'seed'].includes(command) || !option('home') || !option('monetary-policy')
+if (!['prepare', 'run', 'seed'].includes(command) || !option('home') || (noMonetaryLimit === Boolean(policyOption))
   || home.toLowerCase() === join(homedir(), '.proma').toLowerCase()) throw new Error('EXPERIMENT_DRIVER_ARGUMENTS')
 mkdirSync(reportDir, { recursive: true })
 const project = () => JSON.parse(readFileSync(join(home, 'projects.json'), 'utf8')).projects[0]
@@ -35,7 +39,7 @@ function seed() {
   execFileSync(join(process.cwd(), 'node_modules/electron/dist/electron.exe'), ['scripts/seed-experiment-channels.cjs'], {
     windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...electronEnv,
       BEX_DEEPSEEK_API_KEY: keys.deepseek, BEX_GLM_API_KEY: keys.glm,
-      BEX_PREPARATION_MAX_TOKENS: String(effectiveOutputLimit) } })
+      BEX_PREPARATION_MAX_TOKENS: String(effectiveOutputLimit), BEX_GLM_PLAN: glmPlan } })
 }
 seed()
 if (command === 'seed') { console.log(JSON.stringify({ home, seeded: true })); process.exit(0) }
@@ -43,13 +47,15 @@ const sleep = ms => new Promise(done => setTimeout(done, ms))
 const cli = (...params) => execFileSync(process.execPath, ['scripts/dispatch-experiment.mjs', ...params], { encoding: 'utf8', windowsHide: true }).trim()
 let application, page
 const report = { command, home, resume_preparation: resumePreparation, at: new Date().toISOString(), confirmations: [], outcome: 'running' }
+report.glm_plan = glmPlan
+report.monetary_mode = noMonetaryLimit ? 'unlimited-explicit-user-authorization' : 'policy'
 report.host_output_ceiling = effectiveOutputLimit
 if (command === 'prepare') report.preparation_max_output_tokens = preparationMaxTokens
 const log = message => console.log(`[native-experiment] ${message}`)
 try {
   application = await _electron.launch({ args: ['.', `--user-data-dir=${join(home, 'electron-user-data')}`],
     env: { ...electronEnv, BLOMA_DESKTOP_DISPATCH: '1',
-      BLOMA_DISPATCH_EXPERIMENT: '1', BLOMA_MONETARY_POLICY: policy,
+      BLOMA_DISPATCH_EXPERIMENT: '1', BLOMA_MONETARY_POLICY: noMonetaryLimit ? '' : policy,
       BLOMA_EXPERIMENT_MAX_OUTPUT_TOKENS: String(effectiveOutputLimit) }, timeout: 60000 })
   for (const stream of [application.process().stdout, application.process().stderr]) stream?.on('data', bytes => appendFileSync(join(reportDir, 'main.log'), bytes))
   page = await application.firstWindow()

@@ -441,6 +441,8 @@ describe('actual loop routing with fake SDK responses', () => {
     expect(childSeen).toBe(true); expect(Object.keys(readExperiment('p')!.workers)).toEqual(['worker-1'])
   })
   it('really overlaps two executor requests and reports concurrency without claiming product quality', async () => {
+    const initial = running(); initial.limits!.max_workers = 2
+    initial.condition_hash = experimentConditionHash(initial); writeExperiment(initial)
     const tasks = [task('left'), task('right')]; let parentCalls = 0, active = 0, peak = 0
     let release!: () => void; const barrier = new Promise<void>(resolve => { release = resolve })
     const counts = new Map<string, number>()
@@ -453,18 +455,77 @@ describe('actual loop routing with fake SDK responses', () => {
         else if (parentCalls === 4) yield toolMessage('wait', 'wait_for_delegations', { timeout_ms: 2000 })
         else yield text()
       } else if (count === 1) {
+        expect(options.env.ANTHROPIC_MODEL).toBe('m2')
+        expect(options.accounting?.role).toBe('experiment_executor')
         active++; peak = Math.max(peak, active); if (active === 2) release()
-        try { await withAbort(barrier, options.signal); yield text() } finally { active-- }
+        try {
+          await withAbort(barrier, options.signal)
+          const worker = Object.values(readExperiment('p')!.workers).find(item => item.child_session_id === options.sessionId)!
+          const id = worker.task_ids[0]
+          yield toolMessage(`write-${id}`, 'write_file', { path: `${id}.py`, content: `# ${id} implemented` })
+        } finally { active-- }
       } else yield text()
       yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
     }
-    await run(query)
+    const result = await run(query)
     expect(peak).toBe(2)
+    expect(result.status).toBe('completed')
+    expect(active).toBe(0)
+    expect(readFileSync(join(root, 'left.py'), 'utf8')).toBe('# left implemented')
+    expect(readFileSync(join(root, 'right.py'), 'utf8')).toBe('# right implemented')
+    const config = readExperiment('p')!
+    expect(Object.keys(config.workers)).toHaveLength(2)
+    expect(config.request_count).toBe(9)
+    const events = readExperimentEvents(config).events
+    expect(events.filter(event => event.event === 'model_request')).toHaveLength(9)
+    expect(events.filter(event => event.event === 'model_request_finished')).toHaveLength(9)
+    expect(events.find(event => event.event === 'implement_loop_finished')).toMatchObject({ status: 'completed' })
     const report = reportModelExperiment('p')
     expect(report.peak_overlapping_executor_requests).toBe(2)
     expect(report.implemented_worker_sessions).toBe(2)
     expect(report.product_quality).toBeNull()
     expect(report.model_requests_by_role.executor.models).toEqual(['m2'])
+  })
+  it.each([
+    ['overlapping writes', 'EXPERIMENT_WRITE_CONFLICT_WAIT'],
+    ['unfinished dependency', 'EXPERIMENT_DEPENDENCY_WAIT'],
+  ] as const)('rejects autonomous dispatch for %s while a real child loop is in flight', async (kind, reason) => {
+    const tasks = [task('left'), task('right')]
+    if (kind === 'overlapping writes') tasks[1].writes = ['left.py']
+    else tasks[1].depends_on = ['left']
+    let release!: () => void; const barrier = new Promise<void>(resolve => { release = resolve })
+    const counts = new Map<string, number>(); let parentCalls = 0
+    const query: SDKQuery = async function* (_prompt, options) {
+      const count = (counts.get(options.sessionId) ?? 0) + 1; counts.set(options.sessionId, count)
+      if (options.sessionId === 'parent') {
+        parentCalls++
+        if (parentCalls === 1) yield toolMessage('plan', 'experiment_plan', { tasks })
+        else if (parentCalls === 2) yield toolMessage('left', 'delegate_agent', { task_ids: ['left'] })
+        else if (parentCalls === 3) yield toolMessage('refuse-right', 'delegate_agent', { task_ids: ['right'] })
+        else if (parentCalls === 4) {
+          expect(Object.keys(readExperiment('p')!.workers)).toHaveLength(1)
+          expect(readExperimentEvents(readExperiment('p')!).events).toContainEqual(expect.objectContaining({ event: 'dispatch_rejected', reason }))
+          release()
+          yield toolMessage('wait-left', 'wait_for_delegations', { timeout_ms: 2000 })
+        } else if (parentCalls === 5) yield toolMessage('right-after-left', 'delegate_agent', { task_ids: ['right'] })
+        else if (parentCalls === 6) yield toolMessage('wait-right', 'wait_for_delegations', { timeout_ms: 2000 })
+        else yield text()
+      } else if (count === 1) {
+        const worker = Object.values(readExperiment('p')!.workers).find(item => item.child_session_id === options.sessionId)!
+        const assigned = tasks.find(item => item.id === worker.task_ids[0])!
+        if (assigned.id === 'left') await withAbort(barrier, options.signal)
+        if (kind === 'overlapping writes' && assigned.id === 'right') yield toolMessage('read-before-rewrite', 'read_file', { path: assigned.writes[0] })
+        yield toolMessage(`write-${assigned.id}`, 'write_file', { path: assigned.writes[0], content: `# ${assigned.id}` })
+      } else yield text()
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+    const result = await run(query)
+    expect(result.status).toBe('completed')
+    const config = readExperiment('p')!
+    expect(Object.keys(config.workers)).toHaveLength(2)
+    expect(config.request_count).toBe(11)
+    expect(readFileSync(join(root, tasks[1].writes[0]), 'utf8')).toBe('# right')
+    expect(reportModelExperiment('p').implemented_worker_sessions).toBe(2)
   })
   it('runs the standalone executor directly with write tools and zero child creation', async () => {
     writeExperiment(running('standalone')); const seen: string[] = []

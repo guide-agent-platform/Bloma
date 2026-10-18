@@ -76,6 +76,7 @@ export async function runCoreVerification(options: {
     })
     const scenarios = raw.scenarios as CoreScenario[]
     const speech = raw.speech as SpeechVerificationSpec | undefined
+    if (Array.isArray(scenarios) && scenarios.length > 64) throw new Error(`核心验证场景数量 ${scenarios.length} 超过上限 64；请合并重复场景并保留全部需求覆盖，再重新运行验证`)
     if (!Array.isArray(scenarios) || !scenarios.length || scenarios.length > 64 || scenarios.some(s =>
       !s || typeof s.name !== 'string' || !s.name || /[\r\n]/.test(s.name) || !Array.isArray(s.covers) || s.covers.some(fid => typeof fid !== 'string') ||
       !['logic', 'gui', 'audio', 'microphone', 'mock'].includes(s.input)) || new Set(scenarios.map(s => s.name)).size !== scenarios.length) throw new Error('核心验证场景声明不合法或场景名重复')
