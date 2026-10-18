@@ -18,6 +18,7 @@ describe('operation request budget', () => {
       context_tokens: 10000, input_rmb_per_million: 2, output_rmb_per_million: 8, cache_rmb_per_million: .04 }] }))
   })
   afterEach(() => {
+    vi.unstubAllEnvs()
     if (oldPolicy === undefined) delete process.env.BLOMA_MONETARY_POLICY; else process.env.BLOMA_MONETARY_POLICY = oldPolicy
     if (oldEpoch === undefined) delete process.env.BLOMA_MONETARY_EPOCH_DIR; else process.env.BLOMA_MONETARY_EPOCH_DIR = oldEpoch
     setSseRetryWaitBudgetForTests(); rmSync(dir, { recursive: true, force: true })
@@ -25,6 +26,27 @@ describe('operation request budget', () => {
   const options = (): SDKQueryOptions => ({ env: {}, sessionId: 'budget', signal: new AbortController().signal, maxTokens: 100 })
   const drain = async (query: SDKQuery) => { for await (const _ of query('test', options())) {} }
   const request = { url: 'https://test.invalid/messages', headers: {}, body: JSON.stringify({ model: 'test', max_tokens: 100, messages: [] }) }
+
+  it('explicitly uncapped experiments skip shared and operation RMB policies but retain request admission', async () => {
+    vi.stubEnv('BLOMA_DISPATCH_EXPERIMENT', '1')
+    vi.stubEnv('BLOMA_EXPERIMENT_UNLIMITED_MONETARY', '1')
+    const budget = createRequestBudget({ ANTHROPIC_BASE_URL: 'https://test.invalid', ANTHROPIC_MODEL: 'test' }, { requests: 1, outputTokens: 100, rmb: .000001 })
+    const query: SDKQuery = async function* (_prompt, opt) {
+      expect(opt.monetaryPolicyPath).toBe('')
+      opt.requestGuard!(request)
+      yield { type: 'result', subtype: 'success', usage: { input_tokens: 10, output_tokens: 10 } }
+    }
+    await drain(budget.wrap(query))
+    expect(budget.snapshot().monetary_control).toBe('uncapped_experiment')
+    await expect(drain(budget.wrap(query))).rejects.toThrow('REQUEST_BUDGET_EXHAUSTED')
+  })
+  it('the unlimited flag cannot disable an ordinary operation outside experiment mode', async () => {
+    vi.stubEnv('BLOMA_DISPATCH_EXPERIMENT', '0')
+    vi.stubEnv('BLOMA_EXPERIMENT_UNLIMITED_MONETARY', '1')
+    const budget = createRequestBudget({}, { requests: 1, outputTokens: 100, rmb: .000001 })
+    const query: SDKQuery = async function* (_prompt, opt) { opt.requestGuard!(request); yield { type: 'result', subtype: 'success' } }
+    await expect(drain(budget.wrap(query))).rejects.toThrow('MONETARY_OPERATION_EXHAUSTED')
+  })
 
   it('claims every SSE retry before fetch, and does not swallow the admission error', async () => {
     const budget = createRequestBudget({}, { requests: 1, outputTokens: 100, rmb: 5 })

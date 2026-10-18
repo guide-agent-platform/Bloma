@@ -33,7 +33,11 @@
 
 ## 新样本与启动条件
 
-沿用统一 L2 quick 的已确认需求、草图及 14 项独立业务验收，重新按当前运行包冻结。业务文件逐项哈希与旧输入一致；不复用旧产物、旧实现会话或旧评分。
+最初准备的旧快照 cohort 仅作基础设施探针。用户进一步明确要求从提出需求走完整原生前序，并选择 quick：因此已取消旧快照 G11，73 次查询全部收尾，原生 cancelled / Q=null；其余五组未启动。旧 cohort 已标记退役，不纳入本轮产品比较。观察期间只启动一名 worker，依赖等待未释放，不能宣称该试跑实现了双 worker 并行。
+
+现行方案：全新项目 `255dbbdf-6621-43b9-9b96-6de37efc6446`，从 L2 原始自然语言需求开始，经 Bloma 原生需求清单、PRD 内审/修订与确认、UX 生成/选择与确认，到 Implement 前停点。监督者逐项核对落盘内容，通过原生对话和修改池修订语义，不直接覆写业务背板或补业务实现。确认门需本机监督审阅记录，不能由驾驶脚本盲目点击。
+
+本次已通过原生补充补齐稳定 ID 合并、任意冲突整份拒绝、幂等与失败不变，并通过 PRD 原生修改池退回一条无前提依据的固定计数场景。公共平台骨架使用现有 provisionDesktopSkeletonV2 物化；环境使用 buildInstallPackagesTool 安装并核验，未实现业务。冻结新输入后，各组从同一来源恢复，不使用旧草图或旧 PRD 代替本次流程。
 
 | 组 | 调度器 | 实现者 | worker 条件 |
 | --- | --- | --- | --- |
@@ -48,9 +52,11 @@
 
 先逐组检查，不在发现平台异常时自动启动下一组。每组需分别报告：实际 worker 数、实际 HTTP 重叠、计划/写范围拒绝、请求及 token、首次机器终态、原生交付和独立 Q。Q 未完成时保留 null。两名 worker 存在但推理没有重叠，应记录协议未实现并行，不算并行成功。
 
-本机启动材料位于 `C:/Users/17359/AppData/Local/Bloma/parallel-preflight-20261018/pilot-r2/`：registry.json、snapshot、evaluator、models.json、limits.json 及六组独立 home。初次离线准备因角色绑定文件格式错误在模型调用前失败，保留 pilot/ 目录；修正后 pilot-r2 六组准备成功，准备阶段 0 次模型调用。
+退役材料位于 `C:/Users/17359/AppData/Local/Bloma/parallel-preflight-20261018/pilot-r2/`。初次离线准备的角色绑定格式错误保留于 pilot/，均不删除。新原生流程及环境材料位于 `C:/Users/17359/AppData/Local/Bloma/parallel-native-quick-20261018/`；准备调用单列，不算执行样本，也不称为免费前置。
 
-原生启动需显式 `--no-monetary-limit --glm-plan coding --credentials <DPAPI 文件>`；不指定金额模式或同时指定 policy 会拒绝启动。Implement/Verify 主链仍记录用量，其 SSE 金额守卫已关闭。其他独立辅助路径可能有自己的预算；本轮不重新启动 UX 等准备阶段，不将该开关泛化为全应用预算策略。
+原生启动需显式 `--no-monetary-limit --glm-plan coding --credentials <DPAPI 文件>`；不指定金额模式或同时指定 policy 会拒绝启动。新原生准备还开启 `--review-preparation`。费用开关同时覆盖实验中的 UX 辅助操作，防止空 policy 再回退旧金额策略；只在实验模式与显式 unlimited 标记同时存在时生效，普通操作不变。请求数量、输出长度和阶段超时仍保留并记录，不能称这些限制为金额控制。
+
+公共环境先在新 source 装配，保存解释器 SHA256、Python 版本/架构、全部依赖精确版本及离线 wheel。六组各自新建 .venv，使用同一 wheelhouse 和 pins 重建，比较规范化依赖清单哈希；不复制含绝对路径的 venv，不要求包含路径/mtime 的组内 freshness 指纹相等。平台资产和已确认 PRD/UX 的文件内容哈希另行逐项匹配。
 
 ## 验证与证据入口
 

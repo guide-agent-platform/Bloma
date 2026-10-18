@@ -16,7 +16,8 @@ const policyOption = option('monetary-policy', '')
 const policy = policyOption ? resolve(policyOption) : ''
 const stopFile = resolve(option('stop-file', join(reportDir, 'STOP')))
 const resumePreparation = command === 'prepare' && args.includes('--resume-preparation')
-const resumeAnswer = resumePreparation ? option('resume-answer', '') : ''
+const reviewPreparation = command === 'prepare' && args.includes('--review-preparation')
+const resumeAnswer = resumePreparation ? (option('resume-answer-file') ? readFileSync(option('resume-answer-file'), 'utf8').trim() : option('resume-answer', '')) : ''
 const preparationMaxTokens = preparationTokenCap(command, option('prepare-max-output-tokens'))
 const glmPlan = option('glm-plan', 'regular')
 if (!['regular', 'coding'].includes(glmPlan)) throw new Error('EXPERIMENT_INVALID_GLM_PLAN')
@@ -56,6 +57,7 @@ try {
   application = await _electron.launch({ args: ['.', `--user-data-dir=${join(home, 'electron-user-data')}`],
     env: { ...electronEnv, BLOMA_DESKTOP_DISPATCH: '1',
       BLOMA_DISPATCH_EXPERIMENT: '1', BLOMA_MONETARY_POLICY: noMonetaryLimit ? '' : policy,
+      BLOMA_EXPERIMENT_UNLIMITED_MONETARY: noMonetaryLimit ? '1' : '0',
       BLOMA_EXPERIMENT_MAX_OUTPUT_TOKENS: String(effectiveOutputLimit) }, timeout: 60000 })
   for (const stream of [application.process().stdout, application.process().stderr]) stream?.on('data', bytes => appendFileSync(join(reportDir, 'main.log'), bytes))
   page = await application.firstWindow()
@@ -102,7 +104,7 @@ try {
   }
   if (!resumePreparation || resumeAnswer) await page.getByRole('button', { name: '发送消息', exact: true }).click()
   const deadline = Date.now() + Number(option('timeout-min', command === 'prepare' ? '40' : '32')) * 60000
-  let lastAction = 0, lastStatus = ''
+  let lastAction = 0, lastStatus = '', pendingReview, reviewSequence = 0, lastLiveState = 0
   while (Date.now() < deadline) {
     await sleep(2000)
     const current = project(), experiment = config(current.project_id)
@@ -112,6 +114,11 @@ try {
     }
     const status = `${current.current_stage}/${current.desktop_phase ?? '-'}/${experiment.state}`
     if (status !== lastStatus) { log(status); lastStatus = status }
+    if (command === 'prepare' && Date.now() - lastLiveState > 10000) {
+      writeFileSync(join(reportDir, 'live-state.json'), JSON.stringify({ at: new Date().toISOString(), status,
+        project_id: current.project_id, screen_text: (await page.locator('body').innerText()).slice(-32000) }, null, 2))
+      lastLiveState = Date.now()
+    }
     if (command === 'prepare' && experiment.state === 'prepared') { report.outcome = 'prepared'; break }
     if (command === 'run') {
       const eventsPath = join(home, 'dispatch-experiments', 'events', `${experiment.run_id}.jsonl`)
@@ -120,10 +127,26 @@ try {
       if (terminal) { report.outcome = 'machine-finished'; report.run_outcome = terminal.outcome; report.termination_reason = terminal.reason; break }
     }
     if (Date.now() - lastAction < 4000) continue
-    let action
+    let action, awaitingReview = false
     for (const id of ['requirement-confirm-submit', 'prd-confirm-submit', 'card-option-ux_confirm_go', 'card-option-ux_delegate', 'review-choice-global-prd_review_delegate_all']) {
       const target = page.locator(`[data-ai-id="${id}"]`)
       if (await target.isVisible() && await target.isEnabled()) {
+        if (reviewPreparation && ['requirement-confirm-submit', 'prd-confirm-submit', 'card-option-ux_confirm_go'].includes(id)) {
+          if (!pendingReview || pendingReview.id !== id) {
+            const name = `review-${++reviewSequence}-${id}`
+            pendingReview = { id, request: join(reportDir, `${name}.json`), approval: join(reportDir, `${name}.approved.json`) }
+            const screenshot = join(reportDir, `${name}.png`)
+            await page.screenshot({ path: screenshot })
+            writeFileSync(pendingReview.request, JSON.stringify({ at: new Date().toISOString(), id, project_id: current.project_id,
+              screen_text: await page.locator('body').innerText(), screenshot, approval: pendingReview.approval }, null, 2), { flag: 'wx' })
+            log(`preparation-review-required ${pendingReview.request}`)
+          }
+          if (!existsSync(pendingReview.approval)) { awaitingReview = true; break }
+          const approval = JSON.parse(readFileSync(pendingReview.approval, 'utf8'))
+          if (approval.approved !== true || !Array.isArray(approval.checked_artifacts) || !approval.checked_artifacts.length) throw new Error('EXPERIMENT_INVALID_PREPARATION_REVIEW')
+          report.confirmations.push({ at: new Date().toISOString(), action: 'supervisor-reviewed', id, approval: pendingReview.approval, checked_artifacts: approval.checked_artifacts })
+          pendingReview = undefined
+        }
         if (id === 'requirement-confirm-submit') {
           const suggested = page.locator('[data-ai-id^="requirement-confirm-item-"]').filter({ has: page.locator('[data-ai-id^="requirement-confirm-origin-"]') }).locator('input[type="checkbox"]')
           const excluded = []
@@ -136,14 +159,34 @@ try {
         await target.click(); action = id; break
       }
     }
+    if (awaitingReview) continue
+    if (!action && command === 'prepare') {
+      const overlay = page.locator('[data-ai-id="review-choices-overlay"]')
+      if (await overlay.isVisible()) {
+        const question = await overlay.innerText()
+        writeFileSync(join(reportDir, 'pending-review-choices.json'), JSON.stringify({ at: new Date().toISOString(), question }, null, 2))
+        const answers = option('clarification-answers') ? JSON.parse(readFileSync(option('clarification-answers'), 'utf8')) : clarificationAnswers
+        const answer = selectClarificationAnswer(question, answers)
+        if (answer) {
+          const custom = page.locator('[data-ai-id="review-choice-custom-input"]')
+          if (!(await custom.isVisible())) await page.locator('[data-ai-id="review-choice-custom"]').click()
+          await custom.fill(answer)
+          await page.locator('[data-ai-id="review-choice-custom-submit"]').click()
+          report.confirmations.push({ at: new Date().toISOString(), action: 'predefined-review-answer', question, answer })
+          action = 'review-choice-custom-submit'
+        }
+      }
+    }
     if (!action && command === 'prepare') {
       const custom = page.locator('[data-ai-id="clarification-custom-input"]')
-      if (await custom.isVisible()) {
+      const overlay = page.locator('[data-ai-id="clarification-card-overlay"]')
+      if (await overlay.isVisible()) {
         const question = await page.locator('[data-ai-id="clarification-card-overlay"]').innerText()
         const currentAnswers = option('clarification-answers') ? JSON.parse(readFileSync(option('clarification-answers'), 'utf8')) : clarificationAnswers
         if (!Array.isArray(currentAnswers)) throw new Error('EXPERIMENT_INVALID_CLARIFICATION_ANSWERS')
         const answer = selectClarificationAnswer(question, currentAnswers)
         if (answer) {
+          if (!(await custom.isVisible())) await page.locator('[data-ai-id="clarification-option-custom"]').click()
           await custom.fill(answer)
           await page.locator('[data-ai-id="clarification-custom-submit"]').click()
           report.confirmations.push({ at: new Date().toISOString(), action: 'predefined-clarification-answer', question, answer })

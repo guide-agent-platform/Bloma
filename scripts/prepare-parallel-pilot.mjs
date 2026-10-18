@@ -6,6 +6,9 @@ import { join, resolve } from 'node:path'
 const args = process.argv.slice(2)
 const option = name => { const i = args.indexOf(`--${name}`); if (i < 0 || !args[i + 1]) throw Error(`Missing --${name}`); return resolve(args[i + 1]) }
 const source = option('source-snapshot'), evaluator = option('evaluator'), out = option('out')
+const prefixIndex = args.indexOf('--run-prefix')
+const prefix = prefixIndex < 0 ? 'parallel-L2-20261018-r1' : args[prefixIndex + 1]
+if (!/^[A-Za-z0-9_-]{1,70}$/.test(prefix ?? '')) throw Error('INVALID_RUN_PREFIX')
 if (existsSync(out)) throw Error('PRESERVE_EXISTING_PILOT')
 mkdirSync(out, { recursive: true })
 const read = path => JSON.parse(readFileSync(path, 'utf8').replace(/^\uFEFF/, ''))
@@ -19,15 +22,15 @@ const limits = { max_workers: 2, max_tasks: 16, dispatcher_turns: 60, executor_t
 const settings = { temperature: 0.1, thinking_level: 'high', response_header_timeout_ms: 120000 }
 put('models.json', pair); put('limits.json', limits)
 put('stage-models.json', { dispatcher: pair.m1, executor: pair.m1, verifier: pair.verifier })
-cli(['restore', '--home', stage, '--snapshot', source, '--policy', 'autonomous', '--run', 'parallel-pilot-stage-20261018', '--models', join(out, 'stage-models.json'), '--limits', join(out, 'limits.json')])
+cli(['restore', '--home', stage, '--snapshot', source, '--policy', 'autonomous', '--run', `${prefix}-stage`, '--models', join(out, 'stage-models.json'), '--limits', join(out, 'limits.json')])
 const configPath = join(stage, 'dispatch-experiments', `${project}.json`), config = read(configPath)
-Object.assign(config, { state: 'prepared', experiment_id: 'parallel-pilot-20261018', run_id: 'parallel-pilot-prepare-20261018', settings })
+Object.assign(config, { state: 'prepared', experiment_id: prefix, run_id: `${prefix}-prepare`, settings })
 for (const name of ['policy', 'models', 'limits', 'protected_inputs', 'required_writes', 'condition_hash', 'input_hash', 'snapshot_id', 'started_at', 'request_count', 'observed_models', 'sample', 'evaluator_hash']) delete config[name]
 writeFileSync(configPath, JSON.stringify(config, null, 2))
 cpSync(evaluator, join(out, 'evaluator'), { recursive: true, errorOnExist: true, force: false })
 const frozen = cli(['freeze', '--home', stage, '--project', project, '--out', join(out, 'snapshot')])
 const matrix = cli(['matrix', '--home', join(out, 'cohort'), '--snapshot', join(out, 'snapshot'), '--models', join(out, 'models.json'),
-  '--run-prefix', 'parallel-L2-20261018-r1', '--worker-limit', '2', '--limits', join(out, 'limits.json'),
+  '--run-prefix', prefix, '--worker-limit', '2', '--limits', join(out, 'limits.json'),
   '--evaluator', join(out, 'evaluator'), '--task', 'L2-v2-parallel', '--repeat', 'r1'])
 const manifest = read(join(out, 'snapshot', 'manifest.json'))
 const business = Object.entries(prior.files).filter(([path]) => path.includes('/documents/') || path.includes('/generated-projects/'))

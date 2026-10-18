@@ -11,10 +11,11 @@ const valid = (x: unknown): x is number => Number.isSafeInteger(x) && (x as numb
 
 /** A per-operation guard, shared by drafts, visual calls and transport retries. */
 export function createRequestBudget(env: Record<string, string>, limits: Limits) {
-  let policyPath = process.env.BLOMA_MONETARY_POLICY
+  const uncappedExperiment = process.env.BLOMA_DISPATCH_EXPERIMENT === '1' && process.env.BLOMA_EXPERIMENT_UNLIMITED_MONETARY === '1'
+  let policyPath = uncappedExperiment ? '' : process.env.BLOMA_MONETARY_POLICY
   let rates: Rate[] | undefined, setupError: string | undefined
   try {
-    if (!policyPath && env.ANTHROPIC_BASE_URL && env.ANTHROPIC_MODEL) policyPath = activeMonetaryPolicyPath({ host: new URL(env.ANTHROPIC_BASE_URL).host, model: env.ANTHROPIC_MODEL })
+    if (!uncappedExperiment && !policyPath && env.ANTHROPIC_BASE_URL && env.ANTHROPIC_MODEL) policyPath = activeMonetaryPolicyPath({ host: new URL(env.ANTHROPIC_BASE_URL).host, model: env.ANTHROPIC_MODEL })
     if (policyPath) {
       const policy = JSON.parse(readFileSync(policyPath, 'utf8').replace(/^\uFEFF/, ''))
       if (policy.version !== 1 || !Array.isArray(policy.models) || !policy.models.length) throw new Error('invalid policy')
@@ -33,7 +34,7 @@ export function createRequestBudget(env: Record<string, string>, limits: Limits)
     let latest: typeof reservations[number] | undefined, usage: Usage | undefined, completed = false
     try {
       for await (const message of query(prompt, { ...options, maxTokens: Math.min(options.maxTokens ?? limits.outputTokens, limits.outputTokens),
-        monetaryPolicyPath: options.monetaryPolicyPath ?? policyPath,
+        monetaryPolicyPath: uncappedExperiment ? '' : options.monetaryPolicyPath ?? policyPath,
         onTransportAttempt: state => {
           if (state === 'started') physicalStarts++
           try { options.onTransportAttempt?.(state) } catch { /* telemetry is separate from admission */ }
@@ -72,7 +73,7 @@ export function createRequestBudget(env: Record<string, string>, limits: Limits)
     }
   }
   return { wrap, snapshot: () => ({ logical_queries: queries, physical_requests: physicalStarts, admitted_requests: reservations.length,
-    monetary_control: setupError ? 'unavailable' : rates ? 'verified_policy' : 'not_configured',
+    monetary_control: uncappedExperiment ? 'uncapped_experiment' : setupError ? 'unavailable' : rates ? 'verified_policy' : 'not_configured',
     ...(rates ? { upper_rmb: used(), limit_rmb: limits.rmb } : {}), max_requests: limits.requests, max_output_tokens: limits.outputTokens,
     unreported_requests: reservations.filter(row => !row.reported).length }) }
 }
