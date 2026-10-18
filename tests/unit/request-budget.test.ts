@@ -47,6 +47,18 @@ describe('operation request budget', () => {
     const query: SDKQuery = async function* (_prompt, opt) { opt.requestGuard!(request); yield { type: 'result', subtype: 'success' } }
     await expect(drain(budget.wrap(query))).rejects.toThrow('MONETARY_OPERATION_EXHAUSTED')
   })
+  it('admits the actual provider output ceiling of an experiment instead of rejecting a legacy auxiliary cap', async () => {
+    vi.stubEnv('BLOMA_DISPATCH_EXPERIMENT', '1')
+    vi.stubEnv('BLOMA_EXPERIMENT_UNLIMITED_MONETARY', '1')
+    vi.stubEnv('BLOMA_EXPERIMENT_MAX_OUTPUT_TOKENS', '640000')
+    const budget = createRequestBudget({}, { requests: 1, outputTokens: 16384, rmb: 5 })
+    const query: SDKQuery = async function* (_prompt, opt) {
+      opt.requestGuard!({ ...request, body: JSON.stringify({ model: 'test', max_tokens: 393216, messages: [] }) })
+      yield { type: 'result', subtype: 'success' }
+    }
+    await drain(budget.wrap(query))
+    expect(budget.snapshot().max_output_tokens).toBe(640000)
+  })
 
   it('claims every SSE retry before fetch, and does not swallow the admission error', async () => {
     const budget = createRequestBudget({}, { requests: 1, outputTokens: 100, rmb: 5 })

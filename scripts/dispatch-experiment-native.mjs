@@ -109,8 +109,9 @@ try {
     await sleep(2000)
     const current = project(), experiment = config(current.project_id)
     if (existsSync(stopFile)) {
+      report.stop_marker = readFileSync(stopFile, 'utf8').slice(0, 4000)
       report.cancellation = await page.evaluate(cancelExperimentProject, { projectId: current.project_id, sessionId: experiment.parent_session_id ?? current.last_session_id })
-      report.outcome = 'user-stopped'; break
+      report.outcome = 'operator-stopped'; break
     }
     const status = `${current.current_stage}/${current.desktop_phase ?? '-'}/${experiment.state}`
     if (status !== lastStatus) { log(status); lastStatus = status }

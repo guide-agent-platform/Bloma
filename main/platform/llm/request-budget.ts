@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { MonetaryBudgetError } from './monetary-budget'
 import { activeMonetaryPolicyPath } from './monetary-epoch'
+import { experimentOutputTokens } from './experiment-output-limit'
 import type { SDKQuery } from '../../orchestration/stages/orchestration-contracts'
 import type { SDKMessage } from '../../../shared/types'
 
@@ -11,6 +12,7 @@ const valid = (x: unknown): x is number => Number.isSafeInteger(x) && (x as numb
 
 /** A per-operation guard, shared by drafts, visual calls and transport retries. */
 export function createRequestBudget(env: Record<string, string>, limits: Limits) {
+  const outputTokens = experimentOutputTokens(limits.outputTokens)
   const uncappedExperiment = process.env.BLOMA_DISPATCH_EXPERIMENT === '1' && process.env.BLOMA_EXPERIMENT_UNLIMITED_MONETARY === '1'
   let policyPath = uncappedExperiment ? '' : process.env.BLOMA_MONETARY_POLICY
   let rates: Rate[] | undefined, setupError: string | undefined
@@ -33,7 +35,7 @@ export function createRequestBudget(env: Record<string, string>, limits: Limits)
     if (++queries > limits.requests) throw new MonetaryBudgetError('REQUEST_BUDGET_EXHAUSTED')
     let latest: typeof reservations[number] | undefined, usage: Usage | undefined, completed = false
     try {
-      for await (const message of query(prompt, { ...options, maxTokens: Math.min(options.maxTokens ?? limits.outputTokens, limits.outputTokens),
+      for await (const message of query(prompt, { ...options, maxTokens: Math.min(options.maxTokens ?? outputTokens, outputTokens),
         monetaryPolicyPath: uncappedExperiment ? '' : options.monetaryPolicyPath ?? policyPath,
         onTransportAttempt: state => {
           if (state === 'started') physicalStarts++
@@ -43,7 +45,7 @@ export function createRequestBudget(env: Record<string, string>, limits: Limits)
           options.requestGuard?.(request)
           if (reservations.length >= limits.requests) throw new MonetaryBudgetError('REQUEST_BUDGET_EXHAUSTED')
           const body = JSON.parse(request.body), host = new URL(request.url).host
-          if (!valid(body.max_tokens) || !body.max_tokens || body.max_tokens > limits.outputTokens) throw new MonetaryBudgetError('REQUEST_OUTPUT_LIMIT')
+          if (!valid(body.max_tokens) || !body.max_tokens || body.max_tokens > outputTokens) throw new MonetaryBudgetError('REQUEST_OUTPUT_LIMIT')
           const matches = rates?.filter(row => row.host === host && row.model === body.model)
           if (rates && matches?.length !== 1) throw new MonetaryBudgetError('MONETARY_MODEL_NOT_ALLOWED')
           const rate = matches?.[0]
@@ -74,6 +76,6 @@ export function createRequestBudget(env: Record<string, string>, limits: Limits)
   }
   return { wrap, snapshot: () => ({ logical_queries: queries, physical_requests: physicalStarts, admitted_requests: reservations.length,
     monetary_control: uncappedExperiment ? 'uncapped_experiment' : setupError ? 'unavailable' : rates ? 'verified_policy' : 'not_configured',
-    ...(rates ? { upper_rmb: used(), limit_rmb: limits.rmb } : {}), max_requests: limits.requests, max_output_tokens: limits.outputTokens,
+    ...(rates ? { upper_rmb: used(), limit_rmb: limits.rmb } : {}), max_requests: limits.requests, max_output_tokens: outputTokens,
     unreported_requests: reservations.filter(row => !row.reported).length }) }
 }
