@@ -2,7 +2,7 @@
 // Run through esbuild (see the dated readiness report). Credentials remain DPAPI-only.
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { anthropicMessagesQueryViaProviders } from '../main/platform/upstream/providers/loop-query'
 import { activeMonetaryPolicyPath, activateMonetaryPolicy } from '../main/platform/llm/monetary-epoch'
@@ -62,12 +62,25 @@ function codingProbePolicy() {
 function restoreCodingPolicy(path: string, previous: string) {
     const state = JSON.parse(readFileSync(path + '.state.json', 'utf8'))
     if (state.entries.some((e: any) => e.status === 'reserved')) throw new Error('PREFLIGHT_UNSETTLED_GLM_REQUEST')
-    const current = JSON.parse(readFileSync(previous + '.state.json', 'utf8'))
-    const ids = new Set(current.entries.map((e: any) => e.id))
-    const added = state.entries.filter((e: any) => !ids.has(e.id))
-    current.entries.push(...added)
+    const deadline = Date.now() + 2000
+    let lock: number
+    for (;;) {
+      try { lock = openSync(previous + '.lock', 'wx'); break }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || Date.now() >= deadline) throw new Error('PREFLIGHT_LEDGER_LOCKED')
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10)
+      }
+    }
     const temp = previous + '.state.json.preflight.tmp'
-    writeFileSync(temp, JSON.stringify(current, null, 2), { flag: 'wx' }); renameSync(temp, previous + '.state.json')
+    try {
+      const current = JSON.parse(readFileSync(previous + '.state.json', 'utf8'))
+      const ids = new Set(current.entries.map((e: any) => e.id))
+      current.entries.push(...state.entries.filter((e: any) => !ids.has(e.id)))
+      writeFileSync(temp, JSON.stringify(current, null, 2), { flag: 'wx' }); renameSync(temp, previous + '.state.json')
+    } finally {
+      if (existsSync(temp)) unlinkSync(temp)
+      closeSync(lock); unlinkSync(previous + '.lock')
+    }
     activateMonetaryPolicy(previous, { only_models: ['glm-5.3'] })
     report.policies.glm.restored = true
     report.policies.glm.new_reservations = state.entries.filter((e: any) => e.at >= report.at).length
@@ -162,7 +175,7 @@ try {
   if (recover) {
     restoreCodingPolicy(report.policies.glm.probe, report.policies.glm.previous)
     physicalEvidence()
-    report.initial_cleanup_error = report.error
+    report.initial_cleanup_error ??= report.error
     delete report.error
     report.cleanup_recovered_at = new Date().toISOString()
     report.passed = report.probes.length === 4 && report.probes.every((row: any) => row.tool_roundtrip)

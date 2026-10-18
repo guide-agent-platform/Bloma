@@ -50,7 +50,7 @@
 
 本机启动材料位于 `C:/Users/17359/AppData/Local/Bloma/parallel-preflight-20261018/pilot-r2/`：registry.json、snapshot、evaluator、models.json、limits.json 及六组独立 home。初次离线准备因角色绑定文件格式错误在模型调用前失败，保留 pilot/ 目录；修正后 pilot-r2 六组准备成功，准备阶段 0 次模型调用。
 
-原生启动需显式 `--no-monetary-limit --glm-plan coding --credentials <DPAPI 文件>`；不指定金额模式或同时指定 policy 会拒绝启动。新运行仍记录完整用量；取消费用上限后不再将新请求写进旧受限金额账本。
+原生启动需显式 `--no-monetary-limit --glm-plan coding --credentials <DPAPI 文件>`；不指定金额模式或同时指定 policy 会拒绝启动。Implement/Verify 主链仍记录用量，其 SSE 金额守卫已关闭。其他独立辅助路径可能有自己的预算；本轮不重新启动 UX 等准备阶段，不将该开关泛化为全应用预算策略。
 
 ## 验证与证据入口
 
