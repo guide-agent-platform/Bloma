@@ -16,6 +16,7 @@
  */
 
 import React, { useState } from 'react'
+import { CharacterDecisionStage } from './CharacterDecisionStage'
 import { useAtomValue, useSetAtom } from 'jotai'
 import {
   activeAgentSessionIdAtom,
@@ -161,6 +162,7 @@ export const ClarificationCard: React.FC = () => {
       }}
       data-ai-id="clarification-card-overlay"
     >
+      <CharacterDecisionStage kind="clarify" cue={state}>
       <div
         style={{
           width: 'min(560px, calc(100vw - 48px))',
@@ -316,6 +318,7 @@ export const ClarificationCard: React.FC = () => {
           </div>
         )}
       </div>
+      </CharacterDecisionStage>
     </div>
   )
 }

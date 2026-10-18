@@ -14,6 +14,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { CharacterDecisionStage } from './CharacterDecisionStage'
 import { useAtomValue, useSetAtom, useStore } from 'jotai'
 import {
   globalUserErrorAtom,
@@ -233,6 +234,7 @@ export const RequirementConfirmDialog: React.FC = () => {
         padding: 24,
       }}
     >
+      <CharacterDecisionStage kind="requirements" cue={state}>
       <section
         data-ai-id="requirement-confirm-dialog"
         role="dialog"
@@ -486,6 +488,7 @@ export const RequirementConfirmDialog: React.FC = () => {
           </div>
         )}
       </section>
+      </CharacterDecisionStage>
     </div>
   )
 }

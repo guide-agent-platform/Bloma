@@ -20,6 +20,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react'
+import { CharacterDecisionStage } from './CharacterDecisionStage'
 import { useAtomValue, useSetAtom, useStore } from 'jotai'
 import {
   activeAgentSessionIdAtom,
@@ -360,6 +361,7 @@ export const PrdConfirmDialog: React.FC = () => {
         padding: 24,
       }}
     >
+      <CharacterDecisionStage kind="prd" cue={state}>
       <section
         data-ai-id="prd-confirm-dialog"
         role="dialog"
@@ -713,6 +715,7 @@ export const PrdConfirmDialog: React.FC = () => {
           </div>
         )}
       </section>
+      </CharacterDecisionStage>
     </div>
   )
 }

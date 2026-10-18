@@ -15,8 +15,9 @@ import { CollaborationPanel } from './CollaborationPanel'
 import { HistoryAttachments } from './HistoryAttachments'
 import { DesktopStageBar } from './DesktopStageBar'
 import { StudioFumoNote } from './StudioCompanion'
+import { SketchCharacterReminder } from './SketchCharacterReminder'
 import { currentProjectAtom, desktopPhaseAtom, workflowStageAtom, documentPanelExpandedAtom, collaborationPanelExpandedAtom, timelineExpandedAtom, activeAgentSessionIdAtom, agentMessagesFamily, hasActiveStreamAtom } from './atoms'
-import { desktopArtifactsAtom } from '../agent-atoms'
+import { desktopArtifactsAtom, requirementConfirmFamily, nullRequirementConfirmFallback, prdConfirmFamily, nullPrdConfirmFallback, enrichmentClarificationFamily, nullEnrichmentClarificationFallback } from '../agent-atoms'
 import { workspaceScene } from '../lib/workspace-scene'
 import { useConversationWidth } from '../hooks/use-conversation-width'
 import '../styles/theatre.css'
@@ -95,6 +96,12 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
   const [mobileView, setMobileView] = React.useState<'conversation' | 'preview'>('conversation')
   const conversation = useConversationWidth()
   const busy = useAtomValue(hasActiveStreamAtom)
+  const activeSession = useAtomValue(activeAgentSessionIdAtom)
+  const requirementDialog = useAtomValue(activeSession ? requirementConfirmFamily(activeSession) : nullRequirementConfirmFallback)
+  const prdDialog = useAtomValue(activeSession ? prdConfirmFamily(activeSession) : nullPrdConfirmFallback)
+  const clarificationDialog = useAtomValue(activeSession ? enrichmentClarificationFamily(activeSession) : nullEnrichmentClarificationFallback)
+  const canConfirmSketch = Boolean(props.previewUrl && !props.deliveryPanel && props.onConfirmSketch && (stage === 'sketch_ready' || props.cardOptions?.some(option => option.id === 'ux_confirm_go')))
+  const sketchCue = `${project?.project_id ?? ''}:${props.previewUrl ?? ''}`
   React.useEffect(() => { setDocuments(false); setCollaboration(false); setLocalPanel(null) }, [project?.project_id])
   const scene = workspaceScene(project, stage, phase ?? project?.desktop_phase ?? null, Boolean(props.previewUrl && props.onConfirmSketch && !props.deliveryPanel), busy)
   const openTool = (name: 'documents' | 'collaboration' | 'versions' | 'materials' | 'records') => {
@@ -148,6 +155,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
           onMarkComplete={props.onMarkComplete}
           />}
           </section>
+          {canConfirmSketch && !busy && !props.confirming && !requirementDialog && !prdDialog && !clarificationDialog && !documents && !collaboration && !localPanel && <SketchCharacterReminder key={sketchCue} cue={sketchCue} />}
           {(documents || collaboration || localPanel) && <aside className="theatre-sidepanel" aria-label="项目资料面板">
             <DocumentPanel embedded />
             <CollaborationPanel embedded />
@@ -173,7 +181,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
         />
         {props.notice && <p className="studio-notice" role="status">{props.notice}</p>}
       </section>
-      <footer className="studio-footer"><button type="button" className="theatre-tool" aria-pressed={localPanel === 'records'} onClick={() => openTool('records')}><Activity />工作记录</button><div className="studio-status-slot"><MvpStatusBanner suppressBlocked /></div>{props.previewUrl && !props.deliveryPanel && stage === 'sketch_ready' && props.onConfirmSketch && <button type="button" data-ai-id="confirm-sketch-button" className="studio-primary" disabled={props.confirming} onClick={props.onConfirmSketch}>{props.confirming ? '正在开始制作…' : '开始制作'}<Play size={13} /></button>}{project?.desktop_blocked && <button type="button" className="studio-primary" disabled={busy} onClick={() => props.onSendMessage?.('继续')}>继续制作</button>}</footer>
+      <footer className="studio-footer"><button type="button" className="theatre-tool" aria-pressed={localPanel === 'records'} onClick={() => openTool('records')}><Activity />工作记录</button><div className="studio-status-slot"><MvpStatusBanner suppressBlocked /></div>{canConfirmSketch && <button type="button" data-ai-id="confirm-sketch-button" className="studio-primary" disabled={props.confirming} onClick={props.onConfirmSketch}>{props.confirming ? '正在开始制作…' : '开始制作'}<Play size={13} /></button>}{project?.desktop_blocked && <button type="button" className="studio-primary" disabled={busy} onClick={() => props.onSendMessage?.('继续')}>继续制作</button>}</footer>
       </div>
     </div>
   )

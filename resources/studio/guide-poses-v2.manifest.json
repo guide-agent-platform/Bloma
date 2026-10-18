@@ -1,0 +1,38 @@
+{
+  "generated_at": "2026-10-18",
+  "method": "built-in image_gen; three identity-preserving reference variations",
+  "reference_image": "resources/studio/guide-neutral.webp",
+  "transparent_background": true,
+  "dimensions": [
+    1024,
+    1536
+  ],
+  "encoding": "Browser Canvas WebP encoding only; preserved alpha and dimensions, no retouch or crop",
+  "source_directory": "$CODEX_HOME/generated_images/01a14e84-f7fe-7dc3-9736-0cc9e1127456",
+  "assets": [
+    {
+      "pose": "clarify",
+      "path": "resources/studio/guide-clarify-v2.webp",
+      "bytes": 154062,
+      "sha256": "36da5c19df9fe65ccf441754c7eb59e9bef856f62910dd627fa7d4c980352d43",
+      "source_png": "exec-b35bf9c0-731d-43f1-8e82-aa4ddcecd6b2.png",
+      "prompt": "Use case: identity-preserve. Asset type: transparent full-body character pose for a desktop application's interactive guide. Input image 1 is the identity, outfit, and art-style reference; it is not a pose constraint. Preserve exactly the same adult woman and visual identity: shoulder-length silver-lavender bob with soft bangs, muted violet half-lidded eyes, cream beret with sage ribbon and small white flowers, ivory puff-sleeved blouse, sage neck bow, lavender pinafore dress with botanical embroidery and cream ruffled hem, lavender Mary Jane shoes. Keep adult proportions, delicate hand-drawn anime linework and soft watercolor coloring. Modest outfit, calm gentle expression. This character stands on the RIGHT of the UI and presents useful content toward SCREEN LEFT. Entire figure, head, both shoes, hands and props fully visible with safe margins, centered on a portrait composition and transparent alpha background, no environment, no floor shadow, no watermark, no readable text or lettering. Do not simply reuse the old standing pose or raised V-sign. Make anatomically clear expressive hands with the action readable at small UI sizes. NEW POSE: asking a thoughtful clarifying question and offering choices. Turn three-quarter toward screen left, slight inquisitive head tilt. Extend one arm screen-left with palm up, presenting a small fan of three blank pale-lavender rounded option cards above the hand; other hand rests lightly at her chest. The physical cards have only tiny neutral line marks, no words. She looks attentively toward where the user's option panel will appear. Clearly change arm gesture and weight shift from the reference."
+    },
+    {
+      "pose": "prd",
+      "path": "resources/studio/guide-prd-v2.webp",
+      "bytes": 131618,
+      "sha256": "822c1a091acf327c2b143a858dff865e125784238295ff78fd0f44fd8790fca6",
+      "source_png": "exec-3abc4659-26b9-482a-9105-cf6f8fd00b59.png",
+      "prompt": "Use case: identity-preserve. Asset type: transparent full-body character pose for a desktop application's interactive guide. Input image 1 is the identity, outfit, and art-style reference; it is not a pose constraint. Preserve exactly the same adult woman and visual identity: shoulder-length silver-lavender bob with soft bangs, muted violet half-lidded eyes, cream beret with sage ribbon and small white flowers, ivory puff-sleeved blouse, sage neck bow, lavender pinafore dress with botanical embroidery and cream ruffled hem, lavender Mary Jane shoes. Keep adult proportions, delicate hand-drawn anime linework and soft watercolor coloring. Modest outfit, calm gentle expression. This character stands on the RIGHT of the UI and presents useful content toward SCREEN LEFT. Entire figure, head, both shoes, hands and props fully visible with safe margins, centered on a portrait composition and transparent alpha background, no environment, no floor shadow, no watermark, no readable text or lettering. Do not simply reuse the old standing pose or raised V-sign. Make anatomically clear expressive hands with the action readable at small UI sizes. NEW POSE: formally presenting an organized requirements document. Hold a slim open cream-and-lavender folder/booklet with both hands at mid-chest, opened toward screen left as if revealing a specification to the user. A few blank sheets with understated lavender lines emerge from the open folder, no text. Gentle confident small smile, upright attentive posture, a slight courteous forward lean. Clearly readable folder-opening action, natural hands visibly supporting the document. Do not cover her face."
+    },
+    {
+      "pose": "sketch",
+      "path": "resources/studio/guide-sketch-v2.webp",
+      "bytes": 132036,
+      "sha256": "d2e4db6b722a4f19647729c81cd7d837dd5ef7b14151139b1b023574abe076d4",
+      "source_png": "exec-f2697224-dd7f-4d76-889b-51d0cbd7e019.png",
+      "prompt": "Use case: identity-preserve. Asset type: transparent full-body character pose for a desktop application's interactive guide. Input image 1 is the identity, outfit, and art-style reference; it is not a pose constraint. Preserve exactly the same adult woman and visual identity: shoulder-length silver-lavender bob with soft bangs, muted violet half-lidded eyes, cream beret with sage ribbon and small white flowers, ivory puff-sleeved blouse, sage neck bow, lavender pinafore dress with botanical embroidery and cream ruffled hem, lavender Mary Jane shoes. Keep adult proportions, delicate hand-drawn anime linework and soft watercolor coloring. Modest outfit, calm gentle expression. This character stands on the RIGHT of the UI and presents useful content toward SCREEN LEFT. Entire figure, head, both shoes, hands and props fully visible with safe margins, centered on a portrait composition and transparent alpha background, no environment, no floor shadow, no watermark, no readable text or lettering. Do not simply reuse the old standing pose or raised V-sign. Make anatomically clear expressive hands with the action readable at small UI sizes. NEW POSE: inviting the user to inspect and confirm an interface preview located to SCREEN LEFT. Stand three-quarter toward the left with one arm extended and one index finger gently indicating the screen-left mid-height area; the other hand makes a small welcoming open-palm gesture near her chest. Her gaze follows the pointing gesture and her expression is warm and encouraging. No cards, no folder, no added screen, no speech bubble. This gesture should clearly guide attention toward an adjacent preview and its confirmation control, with a new balanced stance."
+    }
+  ]
+}
