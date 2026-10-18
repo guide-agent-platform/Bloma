@@ -18,12 +18,15 @@ process.env.PROMA_HOME = join(out, 'home')
 const live = args.includes('--live')
 const recover = args.includes('--recover')
 const uncapped = args.includes('--no-monetary-limit')
+const concurrencyIndex = args.indexOf('--concurrency')
+const concurrency = concurrencyIndex < 0 ? 2 : Number(args[concurrencyIndex + 1])
+if (![2, 3].includes(concurrency)) throw new Error('PREFLIGHT_CONCURRENCY_INVALID')
 if (recover && uncapped) throw new Error('PREFLIGHT_RECOVERY_MODE_CONFLICT')
 if (!recover && existsSync(join(out, 'preflight.json'))) throw new Error('PREFLIGHT_OUTPUT_EXISTS')
 const report: Record<string, any> = recover ? JSON.parse(readFileSync(join(out, 'preflight.json'), 'utf8'))
   : { at: new Date().toISOString(), kind: 'transport_preflight', live,
     product_quality: null, metadata: {}, probes: [], policies: {}, physical_requests: 0,
-    monetary_mode: uncapped ? 'unlimited-explicit-user-authorization' : 'existing-policy' }
+    monetary_mode: uncapped ? 'unlimited-explicit-user-authorization' : 'existing-policy', concurrency }
 const save = () => writeFileSync(join(out, 'preflight.json'), JSON.stringify(report, null, 2))
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
 const decrypt = "$ErrorActionPreference='Stop';$s=Get-Content -LiteralPath $env:BEX_CREDENTIAL_STORE -Raw|ConvertFrom-Json;$r=@{};foreach($n in @('deepseek','glm')){$v=ConvertTo-SecureString $s.$n;$r[$n]=[System.Net.NetworkCredential]::new('', $v).Password};$r|ConvertTo-Json -Compress"
@@ -115,7 +118,7 @@ async function probe(provider: 'deepseek' | 'zhipu-coding', key: string, policyP
             if (url.protocol !== 'https:' || url.pathname !== (provider === 'deepseek' ? '/anthropic/v1/messages' : '/api/anthropic/v1/messages')
               || url.hostname !== (provider === 'deepseek' ? 'api.deepseek.com' : 'open.bigmodel.cn')) throw new Error('PREFLIGHT_ENDPOINT_CHANGED')
             if (Buffer.byteLength(request.body) > 12000) throw new Error('PREFLIGHT_BODY_LIMIT')
-            if (++counts.admitted > 4) throw new Error('PREFLIGHT_PHYSICAL_REQUEST_LIMIT')
+            if (++counts.admitted > concurrency * 2) throw new Error('PREFLIGHT_PHYSICAL_REQUEST_LIMIT')
             save()
           },
           onTransportAttempt: state => { if (state === 'started') { report.physical_requests++; save() } },
@@ -152,7 +155,7 @@ async function probe(provider: 'deepseek' | 'zhipu-coding', key: string, policyP
         code: /^PREFLIGHT_|^MONETARY_/.test(e.message) ? e.message : 'PROVIDER_PROBE_FAILED' }
     }
   }
-  await Promise.allSettled([worker(1), worker(2)])
+  await Promise.allSettled(Array.from({ length: concurrency }, (_, i) => worker(i + 1)))
   report[`${provider}_concurrency`] = { peak_query_lifetimes: counts.peak, physical_admissions: counts.admitted, windows,
     note: 'Provider-level overlap; real child-loop scheduling is verified separately.' }
 }
@@ -181,8 +184,8 @@ try {
     report.initial_cleanup_error ??= report.error
     delete report.error
     report.cleanup_recovered_at = new Date().toISOString()
-    report.passed = report.probes.length === 4 && report.probes.every((row: any) => row.tool_roundtrip)
-      && report['deepseek-flash_physical_peak'] === 2 && report['glm-5.3_physical_peak'] === 2
+    report.passed = report.probes.length === concurrency * 2 && report.probes.every((row: any) => row.tool_roundtrip)
+      && report['deepseek-flash_physical_peak'] === concurrency && report['glm-5.3_physical_peak'] === concurrency
   } else {
   const metadataRows = await Promise.allSettled([metadata('/models'), metadata('/user/balance')])
   metadataRows.forEach((row, i) => { report.metadata[i === 0 ? 'deepseek_models' : 'deepseek_balance'] = row.status === 'fulfilled' ? row.value : { error: 'METADATA_UNAVAILABLE' } })
@@ -201,8 +204,8 @@ try {
     }
     physicalEvidence()
     if (dsPolicy) report.policies.deepseek.budget_after = readMonetaryBudget(dsPolicy)
-    report.passed = report.probes.length === 4 && report.probes.every((row: any) => row.tool_roundtrip)
-      && report['deepseek-flash_physical_peak'] === 2 && report['glm-5.3_physical_peak'] === 2
+    report.passed = report.probes.length === concurrency * 2 && report.probes.every((row: any) => row.tool_roundtrip)
+      && report['deepseek-flash_physical_peak'] === concurrency && report['glm-5.3_physical_peak'] === concurrency
   }
   }
 } catch (error) {
