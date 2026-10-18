@@ -100,6 +100,7 @@ export function restoreExperiment(snapshot: string, home: string, policy: Experi
   config.protected_inputs = Object.fromEntries(Object.entries(manifest.files).filter(([path]) =>
     path.endsWith(`/documents/${manifest.project_id}/prd.json`) || path.endsWith(`/documents/${manifest.project_id}/prd.md`)
     || path.includes(`/documents/${manifest.project_id}/features/`) || /\/00_UX\/confirmed\.(html|json)$/.test(path)
+    || /\/00_ENV\/(common-environment\.json|requirements\.lock)$/.test(path)
     || /\/00_ARCH\/architecture\.(md|json)$/.test(path) || path.endsWith('/00_SCAFFOLD/contract.json') || path.startsWith('prompts/')))
   delete config.started_at; delete config.request_count; delete config.observed_models; delete config.plan_locked
   config.condition_hash = experimentConditionHash(config)

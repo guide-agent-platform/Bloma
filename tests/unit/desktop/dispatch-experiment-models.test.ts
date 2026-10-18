@@ -7,7 +7,7 @@ import type { Channel, SDKMessage } from '../../../shared/types'
 import type { SDKQuery } from '../../../main/orchestration/orchestrator'
 import { getChannelByIdRaw, listChannels } from '../../../main/platform/llm/channel-manager'
 import { DEFAULT_EXPERIMENT_LIMITS, EXPERIMENT_SWITCH, experimentConditionHash, experimentPath, readExperiment, recordExperiment, recordExperimentBoundary, writeExperiment, type DispatchExperiment, type ExperimentModels } from '../../../main/desktop/dispatch-experiment'
-import { freezeExperiment } from '../../../main/desktop/dispatch-experiment-snapshot'
+import { freezeExperiment, restoreExperiment } from '../../../main/desktop/dispatch-experiment-snapshot'
 import { createModelMatrix } from '../../../main/desktop/dispatch-experiment-matrix'
 import { guardExperimentQuery, lockExperimentModel, resolveExperimentModel } from '../../../main/desktop/dispatch-experiment-models'
 import { runDesktopDispatcherLoop } from '../../../main/desktop/dispatcher-loop'
@@ -81,6 +81,23 @@ function sealed(manual = false) {
 }
 
 describe('research data collection', () => {
+  it('freezes the common environment contract and rejects a changed version before model admission', async () => {
+    const config = running(); config.state = 'prepared'; config.policy = undefined; config.models = undefined; config.condition_hash = undefined
+    config.prepared = { at: '2026-10-18', requirements_digest: 'frozen' }; writeExperiment(config)
+    save(join(root, '00_ENV/common-environment.json'), '{"python":"3.13.7"}')
+    save(join(root, '00_ENV/requirements.lock'), 'pywebview==6.2.1\n')
+    const snapshot = join(temp, 'snapshot'); freezeExperiment(home, 'p', snapshot, [])
+    const destination = join(temp, 'restored')
+    const restored = restoreExperiment(snapshot, destination, 'autonomous', 'environment-run', { models: profiles })
+    const relative = 'agent-workspaces/default-software-builder/generated-projects/p/00_ENV/common-environment.json'
+    expect(restored.protected_inputs?.[relative]).toBe(createHash('sha256').update('{"python":"3.13.7"}').digest('hex'))
+    process.env.PROMA_HOME = destination
+    save(join(destination, relative), '{"python":"changed"}')
+    const query = vi.fn(async function* () { yield text() })
+    const guarded = guardExperimentQuery(query, restored, 'implement')
+    await expect(async () => { for await (const _ of guarded('', { sessionId: 'parent', env: {}, signal: new AbortController().signal })) {} }).rejects.toThrow('EXPERIMENT_FROZEN_INPUT_CHANGED')
+    expect(query).not.toHaveBeenCalled()
+  })
   it('rechecks protected inputs before the next query, not only at stage entry', async () => {
     const config = running(), protectedPath = 'agent-workspaces/default-software-builder/documents/p/prd.json'
     config.protected_inputs = { [protectedPath]: createHash('sha256').update(readFileSync(join(home, protectedPath))).digest('hex') }
