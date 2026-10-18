@@ -79,7 +79,7 @@ describe('Sprint 3 时间轴回滚（P0：真调 IPC）', () => {
       </Provider>,
     )
     // 版本时间轴现在按需出现在“版本与回看”侧栏中。
-    fireEvent.click(await screen.findByRole('button', { name: '版本', exact: true }))
+    fireEvent.click(await screen.findByRole('button', { name: /^版本$/ }))
     return store
   }
 
