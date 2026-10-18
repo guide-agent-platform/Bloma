@@ -121,7 +121,9 @@ export function restoreExperiment(snapshot: string, home: string, policy: Experi
   const index = JSON.parse(readFileSync(join(home, 'projects.json'), 'utf8'))
   const project = index.projects[0]
   project.root_path = join(resolve(home), 'agent-workspaces', project.workspace_slug, 'generated-projects', manifest.project_id)
-  project.status = 'active'; project.current_stage = 'generating_mvp'; project.desktop_phase = 'desktop-implement'
+  // Restored inputs are waiting at the native pre-Implement gate, not a crashed
+  // generation. Enter the running stage only when execution is explicitly bound.
+  project.status = 'active'; project.current_stage = 'blocked_for_user_decision'; project.desktop_phase = 'desktop-implement'
   delete project.desktop_checkpoint; delete project.desktop_blocked; delete project.delivery_status
   writeFileSync(join(home, 'projects.json'), JSON.stringify(index, null, 2))
   const sessions = JSON.parse(readFileSync(join(home, 'bloma-agent-sessions.json'), 'utf8'))

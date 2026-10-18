@@ -11,6 +11,7 @@ import { runDesktopDispatcherLoop } from '../../../main/desktop/dispatcher-loop'
 import type { AgentLoopTool, ToolContext } from '../../../main/agent/loop/agent-loop'
 import type { SDKQuery } from '../../../main/orchestration/orchestrator'
 import { restorePromaHome } from '../../support/proma-home-guard'
+import { reconcileInterruptedProjects } from '../../../main/project/recovery-service'
 
 let temp: string, home: string, root: string, oldSwitch: string | undefined, oldDesktop: string | undefined
 const tasks = [
@@ -75,6 +76,15 @@ describe('pause and isolation', () => {
   })
 })
 describe('frozen source and two independent homes', () => {
+  it('does not mistake a restored pre-execution pause for an interrupted generation at startup', async () => {
+    const snapshot = join(temp, 'startup-snapshot'); freezeExperiment(home, 'p', snapshot, tasks)
+    const destination = join(temp, 'startup-arm'); restoreExperiment(snapshot, destination, 'single_worker', 'startup-arm')
+    const session = join(destination, 'agent-sessions/parent.jsonl'), before = readFileSync(session, 'utf8')
+    process.env.PROMA_HOME = destination
+    expect(await reconcileInterruptedProjects()).toEqual([])
+    expect(JSON.parse(readFileSync(join(destination, 'projects.json'), 'utf8')).projects[0]).toMatchObject({ current_stage: 'blocked_for_user_decision', desktop_phase: 'desktop-implement' })
+    expect(readFileSync(session, 'utf8')).toBe(before)
+  })
   it('runs prepare, freeze and restore through the actual Node CLI', () => {
     rmSync(experimentPath('p'))
     const run = (args: string[]) => spawnSync(process.execPath, ['scripts/dispatch-experiment.mjs', ...args], { encoding: 'utf8', windowsHide: true })

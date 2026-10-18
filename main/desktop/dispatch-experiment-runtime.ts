@@ -9,6 +9,7 @@ import { getPromaHome } from '../../storage/config-paths'
 import { assertExperimentEvaluator } from './dispatch-experiment-evaluator'
 import { readExperimentEvents } from './dispatch-experiment-records'
 import { experimentInputsIntact } from './dispatch-experiment-inputs'
+import { updateProject } from '../project/project-service'
 export { experimentInputsIntact } from './dispatch-experiment-inputs'
 
 export function bindExperimentInput(input: DesktopDispatchRunInput, config: DispatchExperiment, stage: 'implement' | 'verify'): DesktopDispatchRunInput {
@@ -21,6 +22,7 @@ export function bindExperimentInput(input: DesktopDispatchRunInput, config: Disp
   const binding = lockExperimentModel(config, role)
   const limits = experimentLimits(config)
   if (stage === 'implement' && config.policy !== 'standalone') bindExperimentWorkers(config)
+  if (stage === 'implement') updateProject(config.project_id, { current_stage: 'generating_mvp' })
   return { ...input, env: binding.env, query: guardExperimentQuery(input.query, config, stage),
     signal, providerType: binding.providerType,
     maxTokens: Math.min(input.maxTokens, binding.maxTokens ?? input.maxTokens),
