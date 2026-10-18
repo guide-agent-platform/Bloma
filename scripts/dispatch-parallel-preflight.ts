@@ -17,10 +17,13 @@ mkdirSync(out, { recursive: true })
 process.env.PROMA_HOME = join(out, 'home')
 const live = args.includes('--live')
 const recover = args.includes('--recover')
+const uncapped = args.includes('--no-monetary-limit')
+if (recover && uncapped) throw new Error('PREFLIGHT_RECOVERY_MODE_CONFLICT')
 if (!recover && existsSync(join(out, 'preflight.json'))) throw new Error('PREFLIGHT_OUTPUT_EXISTS')
 const report: Record<string, any> = recover ? JSON.parse(readFileSync(join(out, 'preflight.json'), 'utf8'))
   : { at: new Date().toISOString(), kind: 'transport_preflight', live,
-    product_quality: null, metadata: {}, probes: [], policies: {}, physical_requests: 0 }
+    product_quality: null, metadata: {}, probes: [], policies: {}, physical_requests: 0,
+    monetary_mode: uncapped ? 'unlimited-explicit-user-authorization' : 'existing-policy' }
 const save = () => writeFileSync(join(out, 'preflight.json'), JSON.stringify(report, null, 2))
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
 const decrypt = "$ErrorActionPreference='Stop';$s=Get-Content -LiteralPath $env:BEX_CREDENTIAL_STORE -Raw|ConvertFrom-Json;$r=@{};foreach($n in @('deepseek','glm')){$v=ConvertTo-SecureString $s.$n;$r[$n]=[System.Net.NetworkCredential]::new('', $v).Password};$r|ConvertTo-Json -Compress"
@@ -187,12 +190,17 @@ try {
   if (dsPolicy) report.policies.deepseek = { path: dsPolicy, budget_before: readMonetaryBudget(dsPolicy) }
   save()
   if (live) {
-    if (!dsPolicy) throw new Error('PREFLIGHT_EXISTING_DS_BUDGET_REQUIRED')
-    await probe('deepseek', keys.deepseek, dsPolicy)
-    const coding = codingProbePolicy()
-    try { await probe('zhipu-coding', keys.glm, coding.path) } finally { coding.restore() }
+    if (uncapped) {
+      await probe('deepseek', keys.deepseek, '')
+      await probe('zhipu-coding', keys.glm, '')
+    } else {
+      if (!dsPolicy) throw new Error('PREFLIGHT_EXISTING_DS_BUDGET_REQUIRED')
+      await probe('deepseek', keys.deepseek, dsPolicy)
+      const coding = codingProbePolicy()
+      try { await probe('zhipu-coding', keys.glm, coding.path) } finally { coding.restore() }
+    }
     physicalEvidence()
-    report.policies.deepseek.budget_after = readMonetaryBudget(dsPolicy)
+    if (dsPolicy) report.policies.deepseek.budget_after = readMonetaryBudget(dsPolicy)
     report.passed = report.probes.length === 4 && report.probes.every((row: any) => row.tool_roundtrip)
       && report['deepseek-flash_physical_peak'] === 2 && report['glm-5.3_physical_peak'] === 2
   }

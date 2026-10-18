@@ -60,15 +60,20 @@ describe('UX 设计、确认与真实存储边界', () => {
     const { pending, prd, design, html } = setup()
     const expanded = structuredClone(design)
     expanded.interactions.push({ ...structuredClone(expanded.interactions[0]), id: 'UI-002' })
+    expanded.interactions.push({ ...structuredClone(expanded.interactions[0]), id: 'UI-003' })
     const bad = structuredClone(design)
     bad.interactions[0].states[0].scenario_ids = ['AC-002']
     let calls = 0
     const query: SDKQuery = async function* (prompt) {
       calls++
-      if (calls === 3) expect(prompt).toContain('本次必须同时输出完整html')
+      if (calls === 3) {
+        expect(prompt).toContain('本次必须同时输出完整html')
+        expect(prompt).toContain('HTML 未呈现交互 UI-002')
+        expect(prompt).toContain('HTML 未呈现交互 UI-003')
+      }
       const value = calls === 1 ? { action: 'design', html, design: bad }
         : calls === 2 ? { action: 'design', design: expanded }
-        : { action: 'design', design: expanded, html: html.replace('</section>', '<button data-interaction-id="UI-002">查看结果</button></section>') }
+        : { action: 'design', design: expanded, html: html.replace('</section>', '<button data-interaction-id="UI-002">查看结果</button><button data-interaction-id="UI-003">再次查看</button></section>') }
       yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: JSON.stringify(value) }] } }
     }
     const result = await generateUxSketch({ ...pending, backplane: prd, query, attempts: 3, maxTokens: 2000 })

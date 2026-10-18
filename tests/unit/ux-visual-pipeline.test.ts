@@ -51,6 +51,7 @@ describe('production UX visual pipeline', () => {
     const { input, capture, calls, project, prd } = setup()
     const result = await generateUxVisualDesign(input, { available: () => true, capture })
     expect(result.visual?.selected).toBe('refined')
+    expect(result.visual?.budget?.max_requests).toBe(8)
     expect(uxDesignIssues(result.design!, prd)).toEqual([])
     expect(result.design?.enhancements?.[0]?.name).toBe('连续计数')
     expect(calls).toHaveLength(6)
@@ -60,6 +61,19 @@ describe('production UX visual pipeline', () => {
     const summary = JSON.parse(readFileSync(join(project.root_path!, '00_UX/exploration', result.visual!.run_id, 'summary.json'), 'utf8'))
     expect(summary.selected).toBe('refined')
     expect(readdirSync(join(home, 'pasted-images'))).toEqual([])
+  })
+  it('experiment preparation can finish schema and HTML repairs within an explicit shared operation budget', async () => {
+    vi.stubEnv('BLOMA_DISPATCH_EXPERIMENT', '1')
+    vi.stubEnv('BLOMA_EXPERIMENT_MAX_OUTPUT_TOKENS', '640000')
+    const { input, capture } = setup()
+    const attempts: Array<number | undefined> = []
+    try {
+      const result = await generateUxVisualDesign(input, { available: () => true, capture,
+        generate: async options => { attempts.push(options.attempts); return generateUxSketch(options) } })
+      expect(attempts).toEqual([4, 4, 1])
+      expect(result.visual?.budget?.max_requests).toBe(12)
+      expect(result.visual?.budget?.max_output_tokens).toBe(640000)
+    } finally { vi.unstubAllEnvs() }
   })
   it('unparseable comparison keeps selected original, never adopts an unreviewed revision', async () => {
     const { input, capture } = setup(false)

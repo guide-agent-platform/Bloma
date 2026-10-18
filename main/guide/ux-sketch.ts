@@ -181,7 +181,7 @@ function escapeHtml(text: string): string {
 export interface UxSketchOptions {
   visualDirection?: string
   feedbackSource?: 'user' | 'visual_review'
-  attempts?: 1 | 2 | 3
+  attempts?: 1 | 2 | 3 | 4
   project_id: string
   session_id: string
   query: SDKQuery
@@ -303,8 +303,10 @@ function parseUxOutput(raw: string, backplane: PrdBackplane | undefined, onIssue
   const design = parseUxDesign(value.design, backplane, onIssues)
   if (!design) return undefined
   const mappedHtml = html.html.replace(/<!--[\s\S]*?-->|<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
-  for (const page of design.pages) if (!new RegExp(`<[^<>]+\\bdata-page-id\\s*=\\s*["']${page.id}["'][^<>]*>`).test(mappedHtml)) { onIssues([`HTML 未呈现页面 ${page.id}`]); return undefined }
-  for (const item of design.interactions) if (!new RegExp(`<[^<>]+\\bdata-interaction-id\\s*=\\s*["']${item.id}["'][^<>]*>`).test(mappedHtml)) { onIssues([`HTML 未呈现交互 ${item.id}`]); return undefined }
+  const missingMarkers: string[] = []
+  for (const page of design.pages) if (!new RegExp(`<[^<>]+\\bdata-page-id\\s*=\\s*["']${page.id}["'][^<>]*>`).test(mappedHtml)) missingMarkers.push(`HTML 未呈现页面 ${page.id}`)
+  for (const item of design.interactions) if (!new RegExp(`<[^<>]+\\bdata-interaction-id\\s*=\\s*["']${item.id}["'][^<>]*>`).test(mappedHtml)) missingMarkers.push(`HTML 未呈现交互 ${item.id}`)
+  if (missingMarkers.length) { onIssues(missingMarkers); return undefined }
   return { ...html, design }
 }
 

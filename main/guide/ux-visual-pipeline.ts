@@ -35,12 +35,13 @@ const words = (value: unknown): value is string => typeof value === 'string' && 
 export async function generateUxVisualDesign(options: UxSketchOptions & { progress?: (text: string) => void }, overrides: Partial<Dependencies> = {}): Promise<UxVisualResult> {
   const deps = { ...defaults, ...overrides }
   if (!options.backplane || !deps.available() || process.env.BLOMA_UX_VISUAL === '0') return deps.generate(options)
-  const budget = createRequestBudget(options.env, { requests: 8, outputTokens: 16384, rmb: 5 })
+  const experimentPreparation = process.env.BLOMA_DISPATCH_EXPERIMENT === '1'
+  const budget = createRequestBudget(options.env, { requests: experimentPreparation ? 12 : 8, outputTokens: 16384, rmb: 5 })
   const evidence: UxVisualEvidence = { run_id: randomUUID(), selected: 'single', status: 'partial', reasons: [] }
   const relativeDir = `00_UX/exploration/${evidence.run_id}`
   const root = findProject(options.project_id).root_path
   const imageSession = `uxvis-${evidence.run_id}`
-  const deadline = new AbortController(), timer = setTimeout(() => deadline.abort(), 240000)
+  const deadline = new AbortController(), timer = setTimeout(() => deadline.abort(), experimentPreparation ? 600000 : 240000)
   const signal = options.signal ? AbortSignal.any([options.signal, deadline.signal]) : deadline.signal
   const baseQuery = budget.wrap(options.query)
   const query: SDKQuery = (prompt, queryOptions) => baseQuery(prompt, { ...queryOptions,
@@ -58,7 +59,7 @@ export async function generateUxVisualDesign(options: UxSketchOptions & { progre
   let fallback: UxSketchResult | undefined
   const draft = async (id: string, direction?: Direction, previous?: UxSketchResult, feedback?: string): Promise<UxSketchResult> => {
     signal.throwIfAborted()
-    const result = await deps.generate({ ...options, query, signal, attempts: previous ? 1 : 3, maxTokens: Math.min(options.maxTokens, 16384),
+    const result = await deps.generate({ ...options, query, signal, attempts: previous ? 1 : experimentPreparation ? 4 : 3, maxTokens: Math.min(options.maxTokens, 16384),
       ...(direction ? { visualDirection: JSON.stringify(direction) } : {}),
       ...(previous ? { previousHtml: previous.html, previousDesign: previous.design, previousSummary: previous.design?.summary,
         feedback: options.feedback ? `必须保留用户本轮要求：${options.feedback}\n以下截图建议不得违背该要求：${feedback ?? ''}` : feedback,
