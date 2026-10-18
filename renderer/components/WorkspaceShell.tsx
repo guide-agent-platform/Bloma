@@ -18,6 +18,7 @@ import { StudioFumoNote } from './StudioCompanion'
 import { currentProjectAtom, desktopPhaseAtom, workflowStageAtom, documentPanelExpandedAtom, collaborationPanelExpandedAtom, timelineExpandedAtom, activeAgentSessionIdAtom, agentMessagesFamily, hasActiveStreamAtom } from './atoms'
 import { desktopArtifactsAtom } from '../agent-atoms'
 import { workspaceScene } from '../lib/workspace-scene'
+import { useConversationWidth } from '../hooks/use-conversation-width'
 import '../styles/theatre.css'
 import { FileText, Layers, History, Users, LayoutTemplate, Check, Hammer, Play, Activity, Maximize2, Minimize2, X } from './icons'
 import type { CardOption } from './CardOptions'
@@ -92,6 +93,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
   const [localPanel, setLocalPanel] = React.useState<'versions' | 'materials' | 'records' | null>(null)
   const [focused, setFocused] = React.useState(false)
   const [mobileView, setMobileView] = React.useState<'conversation' | 'preview'>('conversation')
+  const conversation = useConversationWidth()
   const busy = useAtomValue(hasActiveStreamAtom)
   React.useEffect(() => { setDocuments(false); setCollaboration(false); setLocalPanel(null) }, [project?.project_id])
   const scene = workspaceScene(project, stage, phase ?? project?.desktop_phase ?? null, Boolean(props.previewUrl && props.onConfirmSketch && !props.deliveryPanel), busy)
@@ -102,7 +104,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
     if (name === 'versions') setTimelineExpanded(true)
   }
   return (
-    <div className="workspace-theatre" data-ai-id="workspace-theatre" data-mode={project?.mode ?? 'quick'} data-focused={focused} data-has-preview={Boolean(props.deliveryPanel || props.previewUrl)} data-view={mobileView}>
+    <div className="workspace-theatre" data-ai-id="workspace-theatre" data-mode={project?.mode ?? 'quick'} data-focused={focused} data-has-preview={Boolean(props.deliveryPanel || props.previewUrl)} data-view={mobileView} data-resizing-conversation={conversation.resizing} style={{ '--studio-conversation-width': `${conversation.width}px` } as React.CSSProperties}>
       <aside className="studio-sidebar" aria-label="项目导航">
       {/* 顶栏 */}
       <WorkspaceHeader
@@ -122,7 +124,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
       <nav className="studio-library" aria-label="项目资料"><button type="button" data-ai-id="docs-button" aria-pressed={documents} onClick={() => openTool('documents')}><FileText />文档</button><button type="button" data-ai-id="materials-button" aria-pressed={localPanel === 'materials'} onClick={() => openTool('materials')}><Layers />材料</button><button type="button" data-ai-id="versions-button" aria-pressed={localPanel === 'versions'} onClick={() => openTool('versions')}><History />版本</button><button type="button" data-ai-id="collaboration-button" aria-pressed={collaboration} onClick={() => openTool('collaboration')}><Users />协作</button></nav>
       <div className="studio-sidebar-foot"><StudioFumoNote /><WorkspaceConnection /></div>
       </aside>
-      <div className="studio-body">
+      <div className="studio-body" ref={conversation.containerRef}>
       <nav className="studio-view-switch" aria-label="工作区视图"><button type="button" aria-pressed={mobileView === 'conversation'} onClick={() => setMobileView('conversation')}>对话</button><button type="button" aria-pressed={mobileView === 'preview'} onClick={() => setMobileView('preview')}>草图与程序</button></nav>
       <main className="theatre-stage">
         <div className="theatre-stage-heading"><div key={scene.title} className="studio-scene-heading"><p className="theatre-eyebrow">从想法到软件</p><h2>{scene.title}</h2></div><div className="studio-heading-actions"><span className="studio-scene-description">{scene.description}</span><button type="button" className="theatre-tool studio-control" title={focused ? '退出专注预览' : '专注预览'} aria-label={focused ? '退出专注预览' : '专注预览'} aria-pressed={focused} onClick={() => setFocused(value => !value)}>{focused ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button></div></div>
@@ -153,6 +155,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
           </aside>}
         </div>
       </main>
+      <button type="button" role="separator" aria-label="调整会话栏宽度" aria-orientation="vertical" className="studio-conversation-resizer" title="拖动调整会话栏；方向键微调，双击恢复默认" {...conversation.separatorProps} />
       <section className="theatre-conversation" aria-label="向导与下一步">
         <ChatPanel presentation="theatre"
           cardOptions={props.cardOptions}
