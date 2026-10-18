@@ -60,7 +60,11 @@ export function uxDesignIssues(design: UxDesign, prd: PrdBackplane): string[] {
     if (!strings(ids)) { issues.push(`${featureId} 场景引用无效`); return }
     for (const id of ids) {
       const scenario = scenarioById.get(id)
-      if (!scenario || scenario.feature_id !== featureId || (kind && scenario.kind !== kind)) issues.push(`场景 ${id} 与功能/状态类型不一致`)
+      if (!scenario || scenario.feature_id !== featureId || (kind && scenario.kind !== kind)) {
+        issues.push(`场景 ${id} 与功能/状态类型不一致`)
+        issues.push(scenario ? `${id} 的PRD绑定为 feature_id=${scenario.feature_id}, kind=${scenario.kind}；当前引用为 feature_id=${featureId}, kind=${kind ?? 'non_ui'}，请按PRD绑定修正，不按视觉表现重分场景类别`
+          : `${id} 不存在于已确认PRD，只能引用验收关联索引中的编号`)
+      }
       else seenScenarios.add(id)
     }
   }
@@ -97,7 +101,10 @@ export function uxDesignIssues(design: UxDesign, prd: PrdBackplane): string[] {
   for (const id of workflowIds) if (!seenFlows.has(id)) issues.push(`使用流程未进入设计：${id}`)
   // An explicit PRD exemption is not an observable behavior to invent a UI for.
   // Applicable scenarios still require the same feature/kind association above.
-  for (const [id, scenario] of scenarioById) if (scenario.not_applicable === undefined && !seenScenarios.has(id)) issues.push(`验收场景未说明对应的界面状态或非界面职责：${id}`)
+  for (const [id, scenario] of scenarioById) if (scenario.not_applicable === undefined && !seenScenarios.has(id)) {
+    issues.push(`验收场景未说明对应的界面状态或非界面职责：${id}`)
+    issues.push(`补齐 ${id} 的 feature_id=${scenario.feature_id}, kind=${scenario.kind}；以对应交互状态关联，或在整项功能确属非界面职责时说明原因并关联该项全部场景`)
+  }
   return [...new Set(issues)]
 }
 

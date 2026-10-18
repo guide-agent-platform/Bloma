@@ -10,6 +10,8 @@ export function autonomousTaskBook(config: DispatchExperiment): string {
     'writes只接受具体文件路径或以 / 结尾的目录前缀，不支持 *、**、? 通配符；不合法范围会在锁定计划前拒绝。\n' +
     (config.required_writes?.length ? `宿主必需交付文件（项目根相对路径）：${config.required_writes.join('、')}。计划写入范围必须覆盖这些文件；首次派遣前缺失会明确拒绝，可重新提交你自己的计划。测试脚本名称与业务分解仍由你决定。\n` : '') +
     `实现者最多 ${limits.max_workers} 名，任务登记最多 ${limits.max_tasks} 项。delegate_agent 用 task_ids 分配任务；continue_delegation 可分配尚未执行的已登记任务或发送修复反馈。\n` +
+    '一次委派或续接分配的一批任务，须等该实现者整轮成功结束后才释放给其他实现者的依赖；运行中不会提前发布其中单个任务已完成的事件。请据此安排你自己的依赖与并行派发。\n' +
+    'CORE_CHECK.json 的 scenarios 最多 64 条，场景名须唯一；合并重复场景时仍须覆盖全部已确认需求。\n' +
     '角色、模型由宿主实验配置绑定，不自行修改。规划登记只定义执行协议，不表示任务或产物已验收；是否启动、分配、等待、集成和修复由你决定。历史证据不是当前版本已通过证明。'
 }
 export function wrapAutonomousDispatcherTools(tools: AgentLoopTool[], config: DispatchExperiment,

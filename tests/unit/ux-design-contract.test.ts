@@ -48,6 +48,14 @@ describe('UX 设计、确认与真实存储边界', () => {
     const pending = { project_id: project.project_id, session_id: 's', request_id: 'r', mode: 'longterm' as const, query, env: {}, signal, publish: (event: any) => events.push(event), round: 1, positioning: prd.positioning, requirements: prd.requirements }
     return { project, prd, design, html, calls, query, events, pending }
   }
+  it('gives the authoritative feature and kind when a model misbinds a scenario', () => {
+    const { prd, design } = setup()
+    design.interactions[0].states[0].scenario_ids = ['AC-002']
+    const issues = uxDesignIssues(design, prd)
+    expect(issues).toContain('场景 AC-002 与功能/状态类型不一致')
+    expect(issues.join('\n')).toContain('AC-002 的PRD绑定为 feature_id=F-001, kind=boundary')
+    expect(issues.join('\n')).toContain('补齐 AC-001 的 feature_id=F-001, kind=normal')
+  })
 
   it('完整PRD进入模型；没有摘要也传反馈，有底稿时传上一版HTML与设计', async () => {
     const { pending, calls } = setup()

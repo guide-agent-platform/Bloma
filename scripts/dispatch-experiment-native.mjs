@@ -132,7 +132,7 @@ try {
     for (const id of ['requirement-confirm-submit', 'prd-confirm-submit', 'card-option-ux_confirm_go', 'card-option-ux_delegate', 'review-choice-global-prd_review_delegate_all']) {
       const target = page.locator(`[data-ai-id="${id}"]`)
       if (await target.isVisible() && await target.isEnabled()) {
-        if (reviewPreparation && ['requirement-confirm-submit', 'prd-confirm-submit', 'card-option-ux_confirm_go'].includes(id)) {
+        if (reviewPreparation && ['requirement-confirm-submit', 'prd-confirm-submit', 'card-option-ux_confirm_go', 'card-option-ux_delegate'].includes(id)) {
           if (!pendingReview || pendingReview.id !== id) {
             const name = `review-${++reviewSequence}-${id}`
             pendingReview = { id, request: join(reportDir, `${name}.json`), approval: join(reportDir, `${name}.approved.json`) }
