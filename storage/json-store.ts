@@ -1,6 +1,7 @@
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
+import { renameWithRetry } from './fs-retry'
 
 export function readJsonFile<T>(path: string, fallback: T): T {
   if (!existsSync(path)) return fallback
@@ -47,7 +48,8 @@ export function appendJsonLine(path: string, value: unknown): void {
 
 /**
  * 文本原子写：参考本地 Proma bf3e98c safe-file.ts，独占随机临时文件后 rename。
- * 替换失败时保留原文件并上抛，不回退直接覆盖（设置不能半写后假报保存成功）。
+ * Windows 短暂句柄竞争沿用平台退避（最多 750ms）；耗尽或真实权限拒绝时
+ * 保留原文件并上抛，不回退直接覆盖（设置不能半写后假报保存成功）。
  */
 export function writeTextFileAtomic(path: string, content: string): void {
   mkdirSync(dirname(path), { recursive: true })
@@ -60,7 +62,7 @@ export function writeTextFileAtomic(path: string, content: string): void {
     writeFileSync(descriptor, content, 'utf8')
     closeSync(descriptor)
     descriptor = undefined
-    renameSync(tmpPath, path)
+    renameWithRetry(tmpPath, path)
   } finally {
     if (descriptor !== undefined) {
       try { closeSync(descriptor) } catch { /* 不掩盖原写入错误 */ }
