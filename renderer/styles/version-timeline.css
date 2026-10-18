@@ -1,0 +1,11 @@
+.version-timeline { min-width: 0; padding: 16px; }
+.version-timeline-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; font-size: 14px; font-weight: 600; color: var(--color-text); }
+.version-timeline-count { margin-left: 5px; padding: 2px 7px; border-radius: 20px; background: var(--color-surface-muted); font-size: 12px; }
+.version-timeline-header button { padding: 5px 8px; border-radius: 6px; color: var(--color-text-muted); font-size: 12px; cursor: pointer; }
+.version-timeline-header button:hover { background: var(--color-surface-muted); color: var(--color-text); }
+.version-timeline-track { position: relative; display: flex; flex-direction: column; gap: 14px; padding-left: 19px; min-width: 0; }
+.version-timeline-track::before { content: ''; position: absolute; left: 4px; top: 22px; bottom: 22px; width: 1px; background: var(--color-border); }
+.version-timeline-entry::before { content: ''; position: absolute; left: -19px; top: 20px; width: 9px; height: 9px; border-radius: 50%; background: var(--color-text-muted); box-shadow: 0 0 0 4px var(--white, #fff); }
+.version-timeline-entry[data-current='true']::before { background: var(--violet-600); }
+.version-timeline-current { padding: 1px 5px; border-radius: 4px; background: #ffffff30; font-size: 10px; font-weight: 500; white-space: nowrap; }
+.version-timeline-empty { margin: 0; color: var(--color-text-muted); font-size: 13px; line-height: 1.8; }

@@ -60,7 +60,7 @@ describe('Sprint 3 时间轴回滚（P0：真调 IPC）', () => {
    * 走「回访恢复」路径挂载工作区（新建项目路径会按设计清空时间轴）：
    * project.list 返回活动项目 → 启动恢复效应进工作区并回填快照列表。
    */
-  function mountApp(rollback: ReturnType<typeof vi.fn>) {
+  async function mountApp(rollback: ReturnType<typeof vi.fn>) {
     const store = createStore()
     window.__jotai_store__ = store
     window.electronAPI = {
@@ -78,6 +78,8 @@ describe('Sprint 3 时间轴回滚（P0：真调 IPC）', () => {
         <App />
       </Provider>,
     )
+    // 版本时间轴现在按需出现在“版本与回看”侧栏中。
+    fireEvent.click(await screen.findByRole('button', { name: '版本', exact: true }))
     return store
   }
 
@@ -93,7 +95,7 @@ describe('Sprint 3 时间轴回滚（P0：真调 IPC）', () => {
         preview_url: 'http://localhost:4173',
       },
     })
-    mountApp(rollback)
+    await mountApp(rollback)
 
     await waitFor(() => expect(screen.getByTitle('回到「sketch-a」')).toBeTruthy())
     fireEvent.click(screen.getByTitle('回到「sketch-a」'))
@@ -118,7 +120,7 @@ describe('Sprint 3 时间轴回滚（P0：真调 IPC）', () => {
       request_id: 'req-roll-fail',
       error: { code: 'PERMISSION_DENIED:rollback_snapshot', message: 'denied' },
     })
-    mountApp(rollback)
+    await mountApp(rollback)
 
     await waitFor(() => expect(screen.getByTitle('回到「sketch-a」')).toBeTruthy())
     fireEvent.click(screen.getByTitle('回到「sketch-a」'))
@@ -130,7 +132,7 @@ describe('Sprint 3 时间轴回滚（P0：真调 IPC）', () => {
 
   it('回滚 IPC 异常 → 如实告知，不播报成功', async () => {
     const rollback = vi.fn().mockRejectedValue(new Error('ipc broken'))
-    mountApp(rollback)
+    await mountApp(rollback)
 
     await waitFor(() => expect(screen.getByTitle('回到「sketch-a」')).toBeTruthy())
     fireEvent.click(screen.getByTitle('回到「sketch-a」'))

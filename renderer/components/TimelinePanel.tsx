@@ -1,7 +1,7 @@
 import React from 'react'
 import { useExperimentSwitches } from '../hooks/use-experiment-switches'
 import { useAtom, useAtomValue } from 'jotai'
-import { ChevronUp } from './icons'
+import '../styles/version-timeline.css'
 import { hasActiveStreamAtom, timelineExpandedAtom, snapshotsListAtom, selectedSnapshotAtom } from './atoms'
 import type { Snapshot, SnapshotDocumentEntry } from './atoms'
 
@@ -10,15 +10,7 @@ export interface TimelinePanelProps {
   onRollback?: (snapshot: Snapshot) => void
 }
 
-/**
- * 时间轴 — 顶部胶片条（Bento 架构）
- *
- * 由原底部窄条迁移到顶部，改为水平胶片：
- * - 标签 + 版本计数
- * - 水平滚动的快照磁贴（snap-chip）
- * - 展开切换
- * 非当前快照点击 → onRollback。
- */
+/** 侧边版本时间轴：纵向浏览，展开时显示各版本预览；回滚保留原确认流程。 */
 export const TimelinePanel: React.FC<TimelinePanelProps> = ({ onRollback }) => {
   const [expanded, setExpanded] = useAtom(timelineExpandedAtom)
   const snapshots = useAtomValue(snapshotsListAtom)
@@ -47,111 +39,22 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({ onRollback }) => {
 
   return (
     <>
-    <div
-      data-ai-id="timeline-expanded-panel"
-      className="tile"
-      style={{
-        flexShrink: 0,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 'var(--space-3)',
-        padding: '0 var(--space-4)',
-        overflow: 'hidden',
-        height: expanded ? 'var(--timeline-height)' : 52,
-        transition: 'height var(--transition-slow)',
-      }}
-    >
-      {/* 标签 + 计数 */}
-      <span
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--space-2)',
-          fontSize: 'var(--font-size-xs)',
-          fontWeight: 600,
-          color: 'var(--color-text-muted)',
-          whiteSpace: 'nowrap',
-          flexShrink: 0,
-          textTransform: 'uppercase',
-          letterSpacing: '0.5px',
-        }}
-      >
-        时间轴
-        <span
-          style={{
-            padding: '1px 7px',
-            borderRadius: 'var(--radius-full)',
-            background: 'var(--color-surface-muted)',
-            color: 'var(--color-text)',
-            fontWeight: 700,
-          }}
-        >
-          {snapshots.length}
-        </span>
-      </span>
-
-      {/* 轨道 */}
-      <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--space-3)',
-          overflowX: 'auto',
-          minWidth: 0,
-        }}
-      >
-        {snapshots.length === 0 ? (
-          <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
-            还没有版本记录。制作过程中每个重要阶段会自动保存版本，供你随时回看或切换。
-          </span>
-        ) : (
-          snapshots.map((snap) => {
+    <section data-ai-id="timeline-expanded-panel" className="version-timeline" aria-label="版本时间轴">
+      <header className="version-timeline-header">
+        <span>时间轴 <span className="version-timeline-count">{snapshots.length}</span></span>
+        <button type="button" aria-label={expanded ? '隐藏版本预览' : '显示版本预览'} aria-pressed={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? '隐藏预览' : '显示预览'}</button>
+      </header>
+      {snapshots.length === 0 ? (
+        <p className="version-timeline-empty">还没有版本记录。制作过程中每个重要阶段会自动保存版本，供你随时回看或切换。</p>
+      ) : (
+        <div className="version-timeline-track" role="list" aria-label="已保存的版本">
+          {snapshots.map((snap) => {
             const isCurrent = snap.snapshot_id === selectedSnapshot?.snapshot_id
-            return (
-              <SnapChip
-                key={snap.snapshot_id}
-                snapshot={snap}
-                isCurrent={isCurrent}
-                showThumbnail={expanded}
-                disabled={hasActiveStream}
-                onClick={() => !isCurrent && !hasActiveStream && handleRollbackClick(snap)}
-                onViewDocuments={() => setDocumentsSnapshot(snap)}
-              />
-            )
-          })
-        )}
-      </div>
-
-      {/* 展开/收起 */}
-      <button
-        onClick={() => setExpanded(!expanded)}
-        aria-label={expanded ? '收起时间轴' : '展开时间轴'}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 28,
-          height: 28,
-          borderRadius: 'var(--radius-sm)',
-          color: 'var(--color-text-muted)',
-          transition: 'all var(--transition-fast)',
-          flexShrink: 0,
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'var(--color-surface-muted)'
-          e.currentTarget.style.color = 'var(--color-text)'
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = 'transparent'
-          e.currentTarget.style.color = 'var(--color-text-muted)'
-        }}
-      >
-        <span style={{ display: 'inline-flex', transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform var(--transition-base)' }}>
-          <ChevronUp size={16} />
-        </span>
-      </button>
-    </div>
+            return <SnapChip key={snap.snapshot_id} snapshot={snap} isCurrent={isCurrent} showThumbnail={expanded} disabled={hasActiveStream} onClick={() => !isCurrent && !hasActiveStream && handleRollbackClick(snap)} onViewDocuments={() => setDocumentsSnapshot(snap)} />
+          })}
+        </div>
+      )}
+    </section>
 
     {/* 回滚确认弹窗 */}
     {confirmSnapshot && (
@@ -247,7 +150,7 @@ const RollbackConfirmModal: React.FC<{
 }
 
 /* =========================================================================
-   SnapChip — 快照磁贴
+   SnapChip — 纵向版本条目
    ========================================================================= */
 
 const SnapChip: React.FC<{
@@ -262,12 +165,12 @@ const SnapChip: React.FC<{
 }> = ({ snapshot, isCurrent, showThumbnail, disabled = false, onClick, onViewDocuments }) => {
   const clickable = !isCurrent && !disabled
   return (
-    <span
+    <div className="version-timeline-entry" role="listitem" data-current={isCurrent}
       style={{
         position: 'relative',
-        display: 'inline-flex',
+        display: 'flex',
+        minWidth: 0,
         borderRadius: 'var(--radius-md)',
-        flexShrink: 0,
       }}
     >
     <button
@@ -276,21 +179,23 @@ const SnapChip: React.FC<{
       disabled={disabled}
       style={{
         display: 'flex',
-        flexDirection: showThumbnail ? 'row' : 'column',
-        justifyContent: 'center',
-        alignItems: showThumbnail ? 'center' : 'stretch',
+        flexDirection: 'row',
+        justifyContent: 'flex-start',
+        alignItems: 'center',
         gap: showThumbnail ? 'var(--space-2)' : 2,
-        padding: showThumbnail ? '4px var(--space-3)' : '6px var(--space-3)',
+        padding: '12px 38px 12px 12px',
+        width: '100%',
+        boxSizing: 'border-box',
         borderRadius: 'var(--radius-md)',
         background: isCurrent
           ? 'linear-gradient(135deg, var(--violet-600), var(--violet-500))'
           : 'var(--glass-bg-soft)',
         border: `1px solid ${isCurrent ? 'transparent' : 'var(--glass-border-subtle)'}`,
         color: isCurrent ? 'var(--white)' : disabled ? 'var(--color-text-muted)' : 'var(--color-text)',
-        minWidth: 96,
+        minWidth: 0,
         flexShrink: 0,
         transition: 'all var(--transition-fast)',
-        cursor: clickable ? 'pointer' : 'not-allowed',
+        cursor: clickable ? 'pointer' : disabled ? 'not-allowed' : 'default',
         opacity: disabled ? 0.55 : 1,
         textAlign: 'left',
       }}
@@ -309,8 +214,9 @@ const SnapChip: React.FC<{
     >
       {showThumbnail && <SnapshotThumb snapshot={snapshot} />}
       <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-        <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+        <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 600, display: 'flex', flexWrap: 'wrap', overflowWrap: 'anywhere', alignItems: 'center', gap: 4 }}>
           {snapshot.name}
+          {isCurrent && <span className="version-timeline-current">当前版本</span>}
           {/* Phase 7 U3 I6：恢复产生的版本带指针链徽标（「从该版恢复」——区分原生新版本与
               恢复点，用户答得清「这版是哪来的」） */}
           {snapshot.derived_from ? (
@@ -331,7 +237,7 @@ const SnapChip: React.FC<{
           ) : null}
         </span>
         <span style={{ fontSize: 10, opacity: 0.7 }}>
-          {new Date(snapshot.created_at).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+          {new Date(snapshot.created_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
         </span>
       </span>
     </button>
@@ -347,8 +253,8 @@ const SnapChip: React.FC<{
       }}
       style={{
         position: 'absolute',
-        top: 3,
-        right: 3,
+        top: 10,
+        right: 10,
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -378,7 +284,7 @@ const SnapChip: React.FC<{
         <polyline points="14 2 14 8 20 8" />
       </svg>
     </button>
-    </span>
+    </div>
   )
 }
 
