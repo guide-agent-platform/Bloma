@@ -278,6 +278,8 @@ export function loadMessages(input: AgentLoadMessagesInput): AgentLoadMessagesRe
 
   const record = resolveSessionRecord(input.session_id, path)
 
+  if (input.include_project_history) return loadProjectConversation(input, record)
+
   const excludeTerminal = input.exclude_terminal ?? true
   const limit = input.limit ?? 200
 
@@ -308,6 +310,56 @@ export function loadMessages(input: AgentLoadMessagesInput): AgentLoadMessagesRe
     total,
     truncated: messages.length < total,
   }
+}
+
+/** Read-only recovery: consecutive main sessions are one user project, not just its latest run. */
+function loadProjectConversation(input: AgentLoadMessagesInput, record: AgentSessionRecord): AgentLoadMessagesResult {
+  const index = readSessions().sessions.filter(item => item.project_id === record.project_id)
+  // A fork already contains its inherited prefix. Do not mingle alternative discussions.
+  const roots = record.parent_session_id ? [record] : index.filter(item =>
+    !item.source_delegation_id && !item.parent_session_id && !item.fork_entry_id)
+  if (!roots.some(item => item.session_id === record.session_id)) roots.push(record)
+  const seen = new Set<string>()
+  const all = roots.flatMap(item => {
+    const result = loadMessages({ request_id: input.request_id, session_id: item.session_id,
+      limit: Number.MAX_SAFE_INTEGER, exclude_terminal: input.exclude_terminal })
+    return result.messages.map(message => ({ ...message, source_session_id: item.session_id }))
+  }).sort((a, b) => a.timestamp - b.timestamp).filter(message => {
+    const key = message.client_message_id ? `client:${message.client_message_id}`
+      : message.id ? `id:${message.id}` : `${message.source_session_id}:${message.timestamp}:${JSON.stringify(message.content)}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+  const parents = new Set(roots.map(item => item.session_id))
+  // Include nested collaboration while keeping other projects and forks out.
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const item of index) if (item.source_delegation_id && item.parent_session_id && parents.has(item.parent_session_id) && !parents.has(item.session_id)) {
+      parents.add(item.session_id); changed = true
+    }
+  }
+  const delegations: NonNullable<AgentLoadMessagesResult['delegations']> = []
+  for (const item of index) {
+    if (!item.source_delegation_id || !parents.has(item.session_id)) continue
+    const childPath = getAgentSessionPath(item.session_id)
+    if (!existsSync(childPath)) continue
+    const rows: Array<Record<string, unknown>> = []
+    for (const line of readFileSync(childPath, 'utf8').split('\n')) {
+      try { rows.push(JSON.parse(line)) } catch { /* historical damaged lines stay untouched */ }
+    }
+    const task = rows.find(row => row.role === 'user') as unknown as AgentMessage | undefined
+    const text = task?.content?.filter(block => block.type === 'text').map(block => block.text).join('\n') ?? ''
+    const settled = [...rows].reverse().find(row => row.delegation_settle)?.delegation_settle
+    delegations.push({ delegation_id: item.source_delegation_id, child_session_id: item.session_id,
+      role: /role=([^）)\s]+)/.exec(text)?.[1] ?? 'custom',
+      goal: text.replace(/^协作子任务[^\n]*\n/, '').trim().slice(0, 240),
+      status: settled === 'cancelled' ? 'cancelled' : settled === 'failed' ? 'failed'
+        : settled === 'completed' || item.status === 'completed' ? 'completed' : 'unknown' })
+  }
+  const messages = all.slice(Math.max(0, all.length - (input.limit ?? 200)))
+  return { session: record, messages, total: all.length, truncated: messages.length < all.length, delegations }
 }
 
 /** 自由文本让渡长度上限：超过即视为含实际内容的话（「随便做个游戏」），不做让渡判定。 */

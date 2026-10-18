@@ -91,6 +91,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
   const [, setTimelineExpanded] = useAtom(timelineExpandedAtom)
   const [localPanel, setLocalPanel] = React.useState<'versions' | 'materials' | 'records' | null>(null)
   const [focused, setFocused] = React.useState(false)
+  const [mobileView, setMobileView] = React.useState<'conversation' | 'preview'>('conversation')
   const busy = useAtomValue(hasActiveStreamAtom)
   React.useEffect(() => { setDocuments(false); setCollaboration(false); setLocalPanel(null) }, [project?.project_id])
   const scene = workspaceScene(project, stage, phase ?? project?.desktop_phase ?? null, Boolean(props.previewUrl && props.onConfirmSketch && !props.deliveryPanel), busy)
@@ -101,7 +102,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
     if (name === 'versions') setTimelineExpanded(true)
   }
   return (
-    <div className="workspace-theatre" data-ai-id="workspace-theatre" data-mode={project?.mode ?? 'quick'} data-focused={focused}>
+    <div className="workspace-theatre" data-ai-id="workspace-theatre" data-mode={project?.mode ?? 'quick'} data-focused={focused} data-has-preview={Boolean(props.deliveryPanel || props.previewUrl)} data-view={mobileView}>
       <aside className="studio-sidebar" aria-label="项目导航">
       {/* 顶栏 */}
       <WorkspaceHeader
@@ -122,6 +123,7 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = (props) => {
       <div className="studio-sidebar-foot"><StudioFumoNote /><WorkspaceConnection /></div>
       </aside>
       <div className="studio-body">
+      <nav className="studio-view-switch" aria-label="工作区视图"><button type="button" aria-pressed={mobileView === 'conversation'} onClick={() => setMobileView('conversation')}>对话</button><button type="button" aria-pressed={mobileView === 'preview'} onClick={() => setMobileView('preview')}>草图与程序</button></nav>
       <main className="theatre-stage">
         <div className="theatre-stage-heading"><div key={scene.title} className="studio-scene-heading"><p className="theatre-eyebrow">从想法到软件</p><h2>{scene.title}</h2></div><div className="studio-heading-actions"><span className="studio-scene-description">{scene.description}</span><button type="button" className="theatre-tool studio-control" title={focused ? '退出专注预览' : '专注预览'} aria-label={focused ? '退出专注预览' : '专注预览'} aria-pressed={focused} onClick={() => setFocused(value => !value)}>{focused ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button></div></div>
         <div className="theatre-main" data-panel-open={documents || collaboration || Boolean(localPanel)}>
@@ -178,5 +180,5 @@ const WorkRecords: React.FC = () => {
   const session = useAtomValue(activeAgentSessionIdAtom)
   const fallback = React.useMemo(() => agentMessagesFamily('__studio-records-empty__'), [])
   const messages = useAtomValue(session ? agentMessagesFamily(session) : fallback)
-  return <div className="studio-work-records"><p>原始交流与执行记录保留在这里，用户正文不展示宿主指令。</p>{messages.slice(-200).map((message, index) => <details key={message.id ?? `${message.timestamp}-${index}`}><summary>{message.origin === 'system' ? '宿主记录' : message.role === 'assistant' ? '模型记录' : message.role === 'system' ? '系统记录' : '用户请求'} · {new Date(message.timestamp).toLocaleTimeString('zh-CN')}</summary><pre>{message.content.map(block => block.type === 'text' ? block.text : block.type === 'image' ? '[图片]' : JSON.stringify(block)).join('\n')}</pre></details>)}</div>
+  return <div className="studio-work-records"><p>原始交流与执行记录保留在这里，用户正文不展示宿主指令。</p>{messages.map((message, index) => <details key={message.id ?? `${message.timestamp}-${index}`}><summary>{message.origin === 'system' ? '宿主记录' : message.role === 'assistant' ? '模型记录' : message.role === 'system' ? '系统记录' : '用户请求'} · {new Date(message.timestamp).toLocaleTimeString('zh-CN')}</summary><pre>{message.content.map(block => block.type === 'text' ? block.text : block.type === 'image' ? '[图片]' : JSON.stringify(block)).join('\n')}</pre></details>)}</div>
 }

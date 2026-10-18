@@ -94,7 +94,7 @@ export const agentStreamStateFamily = atomFamily((sessionId: string) =>
 // 2b. 委派协作视图状态（M4-C，按 sessionId 隔离）
 // =========================================================================
 
-export type DelegationViewStatus = 'running' | 'completed' | 'failed' | 'cancelled'
+export type DelegationViewStatus = 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown'
 
 /** 委派子会话的渲染端视图（id/role/status 实时；pending_question 提示待回答）。 */
 export interface DelegationView {
@@ -1142,13 +1142,30 @@ export async function loadSessionHistory(sessionId: string): Promise<void> {
   const api = window.electronAPI?.agent
   const store = window.__jotai_store__
   if (!api?.loadMessages || !store) return
-  const result = await api.loadMessages({
+  let result = await api.loadMessages({
     request_id: crypto.randomUUID(),
     session_id: sessionId,
     limit: 200,
+    include_project_history: true,
   })
   if (!result.ok) return
-  store.set(agentMessagesFamily(sessionId), result.data.messages)
+  if (result.data.truncated) {
+    result = await api.loadMessages({ request_id: crypto.randomUUID(), session_id: sessionId,
+      include_project_history: true, limit: result.data.total })
+    if (!result.ok) return
+  }
+  // An IPC snapshot must not erase messages received while it was loading (upstream bf3e98c principle).
+  const recovered = result.data.messages
+  const identity = (message: AgentMessage) => message.client_message_id ? `client:${message.client_message_id}`
+    : message.id ? `id:${message.id}` : `${message.role}:${message.timestamp}:${JSON.stringify(message.content)}`
+  const seen = new Set(recovered.map(identity))
+  const live = store.get(agentMessagesFamily(sessionId)).filter(message => !seen.has(identity(message)))
+  store.set(agentMessagesFamily(sessionId), [...recovered, ...live].sort((a, b) => a.timestamp - b.timestamp))
+  if (result.data.delegations) {
+    const current = store.get(delegationsFamily(sessionId))
+    const liveIds = new Set(current.map(item => item.delegation_id))
+    store.set(delegationsFamily(sessionId), [...result.data.delegations.filter(item => !liveIds.has(item.delegation_id)), ...current])
+  }
 }
 
 /**

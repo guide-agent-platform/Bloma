@@ -2,7 +2,7 @@
 import React from 'react'
 import { createStore, Provider } from 'jotai'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatPanel } from '../../renderer/components/ChatPanel'
 import { WorkspaceShell } from '../../renderer/components/WorkspaceShell'
 import { workflowStageAtom } from '../../renderer/components/atoms'
@@ -10,6 +10,7 @@ import { activeAgentSessionIdAtom, agentMessagesFamily, currentProjectAtom, glob
 import { workspaceScene } from '../../renderer/lib/workspace-scene'
 import type { Project } from '../../shared/types'
 afterEach(() => { cleanup(); delete window.electronAPI })
+beforeEach(() => { Element.prototype.scrollIntoView = vi.fn() })
 describe('软件剧场的完整性', () => {
   it('the footer keeps the real sketch confirmation callback and disables it only while confirming', () => {
     const store = createStore()
@@ -39,10 +40,12 @@ describe('软件剧场的完整性', () => {
     render(<Provider store={store}><ChatPanel presentation="theatre" /></Provider>)
     const input=screen.getByRole('textbox')
     fireEvent.change(input,{target:{value:'不能丢失的草稿'}})
-    expect(screen.queryByText('最开始的需求')).toBeNull()
+    expect(screen.getByText('最开始的需求')).toBeTruthy()
     expect(screen.getByRole('alert').textContent).toContain('尚未验证')
     expect(document.querySelector('[data-ai-id="compact-reply"]')).toBeNull()
     expect(document.body.textContent).toContain('未验证的窗口关闭行为仍需确认')
+    fireEvent.click(screen.getByRole('button',{name:/完整对话/}))
+    expect(screen.queryByText('最开始的需求')).toBeNull()
     fireEvent.click(screen.getByRole('button',{name:/完整对话/}))
     expect(screen.getByText('最开始的需求')).toBeTruthy()
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('不能丢失的草稿')

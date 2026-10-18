@@ -121,8 +121,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   onForkFromMessage,
 }) => {
   const activeSessionId = useAtomValue(activeAgentSessionIdAtom)
-  const [historyExpanded, setHistoryExpanded] = React.useState(false)
-  React.useEffect(() => setHistoryExpanded(false), [activeSessionId])
+  const [historyExpanded, setHistoryExpanded] = React.useState(true)
+  React.useEffect(() => setHistoryExpanded(true), [activeSessionId])
   const compact = presentation === 'theatre' && !historyExpanded
   const sessionUsage = useAtomValue(sessionUsageFamily(activeSessionId ?? ''))
   const mode = useAtomValue(projectModeAtom)

@@ -808,6 +808,8 @@ export interface SpeechTranscribeResult {
 }
 
 export interface AgentMessage {
+  /** Display-only provenance when recovering consecutive project conversations. */
+  source_session_id?: string
   /** SDK role is independent of the human origin of a persisted message. */
   origin?: 'user' | 'system' | 'agent'
   id?: string
@@ -1041,6 +1043,8 @@ export interface AgentListSessionsResult {
 
 export interface AgentLoadMessagesInput extends RequestEnvelope {
   session_id: string
+  /** Restore the project's consecutive main conversations and collaboration records. Forks stay isolated. */
+  include_project_history?: boolean
   /** 返回最近 N 条消息（尾部截取），缺省 200 */
   limit?: number
   /** 排除内部终态标记（[terminal] 行），缺省 true */
@@ -1052,6 +1056,13 @@ export interface AgentLoadMessagesResult {
   messages: AgentMessage[]
   total: number
   truncated: boolean
+  delegations?: Array<{
+    delegation_id: string
+    child_session_id: string
+    role: string
+    goal: string
+    status: 'completed' | 'failed' | 'cancelled' | 'unknown'
+  }>
 }
 
 /** U11：清理孤儿会话的结果——被移除的会话数量（无孤儿时 removed=0）。 */

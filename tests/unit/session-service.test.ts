@@ -42,6 +42,34 @@ function writeSessionJsonl(home: string, sessionId: string, lines: unknown[]): v
   writeFileSync(`${path}.jsonl`, lines.map((line) => JSON.stringify(line)).join('\n') + '\n', 'utf8')
 }
 
+describe('project conversation recovery', () => {
+  it('recovers consecutive main sessions, nested collaboration and cancelled settle without including other projects or forks', () => {
+    const oldHome = process.env.PROMA_HOME
+    const home = useTemporaryHome('project-history-')
+    try {
+      recordSessionActivity('early', 'p')
+      recordSessionActivity('latest', 'p')
+      recordSessionActivity('other', 'other-project')
+      recordSessionActivity('child', 'p', { parentSessionId: 'early', sourceDelegationId: 'd' })
+      const index = readSessionsForTest()
+      index.sessions.push({ ...index.sessions[0]!, session_id: 'alternative', parent_session_id: 'early', fork_entry_id: 'first' })
+      writeSessionsForTest(index)
+      const message = (id: string, timestamp: number) => ({ id, timestamp, role: 'user', content: [{ type: 'text', text: id }] })
+      writeSessionJsonl(home, 'early', [message('first', 1)])
+      writeSessionJsonl(home, 'latest', [message('later', 3)])
+      writeSessionJsonl(home, 'other', [message('private-other-project', 2)])
+      writeSessionJsonl(home, 'alternative', [message('alternative-only', 4)])
+      writeSessionJsonl(home, 'child', [{ role: 'user', timestamp: 2, content: [{ type: 'text', text: '协作子任务（role=implement）：\n实现资料导入' }] }, { delegation_settle: 'cancelled' }])
+      const result = loadMessages({ request_id: 'restore', session_id: 'latest', include_project_history: true, limit: 1000 })
+      expect(result.messages.map(m => m.id)).toEqual(['first', 'later'])
+      expect(result.messages[0].source_session_id).toBe('early')
+      expect(result.delegations).toEqual([{ delegation_id: 'd', child_session_id: 'child', role: 'implement', goal: '实现资料导入', status: 'cancelled' }])
+      const fork = loadMessages({ request_id: 'fork-restore', session_id: 'alternative', include_project_history: true })
+      expect(fork.messages.map(m => m.id)).toEqual(['alternative-only'])
+    } finally { restorePromaHome(oldHome) }
+  })
+})
+
 describe('SessionService 会话索引', () => {
   it('recordSessionActivity 首次调用创建索引记录并回填 Project.last_session_id', () => {
     const originalHome = process.env.PROMA_HOME

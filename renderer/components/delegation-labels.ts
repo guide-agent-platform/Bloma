@@ -19,6 +19,7 @@ export const DELEGATION_STATUS_LABELS: Record<DelegationViewStatus, string> = {
   completed: '已结束',
   failed: '失败',
   cancelled: '已停止',
+  unknown: '历史记录 · 状态待确认',
 }
 
 export const DELEGATION_STATUS_COLORS: Record<DelegationViewStatus, string> = {
@@ -26,4 +27,5 @@ export const DELEGATION_STATUS_COLORS: Record<DelegationViewStatus, string> = {
   completed: 'var(--color-quick)',
   failed: 'var(--color-danger)',
   cancelled: 'var(--gray-400)',
+  unknown: 'var(--color-text-muted)',
 }

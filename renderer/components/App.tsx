@@ -731,7 +731,7 @@ const AppRoutes: React.FC = () => {
     if (forkLock.current) throw new Error('正在新开讨论，请稍候')
     forkLock.current = true
     try {
-      const branch = await restartDiscussion(window.electronAPI?.agent, currentProject?.project_id, sessionId, message)
+      const branch = await restartDiscussion(window.electronAPI?.agent, currentProject?.project_id, message.source_session_id ?? sessionId, message)
       setSessionId(branch.sessionId); setActiveSessionId(branch.sessionId)
       const scope = store.get(composerScopeAtom)
       const draftAtom = composerDraftFamily(draftKey(scope))
