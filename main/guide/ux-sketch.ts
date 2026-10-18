@@ -181,7 +181,7 @@ function escapeHtml(text: string): string {
 export interface UxSketchOptions {
   visualDirection?: string
   feedbackSource?: 'user' | 'visual_review'
-  attempts?: 1 | 2
+  attempts?: 1 | 2 | 3
   project_id: string
   session_id: string
   query: SDKQuery
@@ -240,8 +240,10 @@ export async function generateUxSketch(options: UxSketchOptions): Promise<UxSket
     temperature: categoryTemperature('sketch'),
     attempts: options.attempts ?? UX_SKETCH_ATTEMPTS,
     get retryFeedback() { return structured
-      ? `上次设计校验未通过：${lastIssues.join('；')}。请修正JSON中的design，核对验收关联索引与页面/交互标记。${candidateHtml
-        ? `已有安全候选HTML（sha256=${hash(candidateHtml)}），本次可省略html字段以原样复用；若须补充页面/交互元素则提供完整html。`
+      ? `上次设计校验未通过：${lastIssues.join('；')}。请修正JSON中的design及必需的HTML标记，核对验收关联索引与页面/交互标记。${candidateHtml
+        ? lastIssues.some(issue => issue.startsWith('HTML 未呈现'))
+          ? `已有候选HTML缺少页面或交互标记，本次必须同时输出完整html，在对应真实控件或语义容器上补齐缺少的data-page-id/data-interaction-id；不得省略html或只改design。`
+          : `已有安全候选HTML（sha256=${hash(candidateHtml)}），本次可省略html字段以原样复用；若须补充页面/交互元素则提供完整html。`
         : '没有可复用的安全HTML，必须同时输出完整html。'}原任务：\n${prompt}`
       : `${UX_SKETCH_RETRY_FEEDBACK}\n原任务：\n${prompt}` },
     signal: options.signal,

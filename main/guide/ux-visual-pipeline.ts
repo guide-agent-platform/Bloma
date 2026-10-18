@@ -58,7 +58,7 @@ export async function generateUxVisualDesign(options: UxSketchOptions & { progre
   let fallback: UxSketchResult | undefined
   const draft = async (id: string, direction?: Direction, previous?: UxSketchResult, feedback?: string): Promise<UxSketchResult> => {
     signal.throwIfAborted()
-    const result = await deps.generate({ ...options, query, signal, attempts: previous ? 1 : 2, maxTokens: Math.min(options.maxTokens, 16384),
+    const result = await deps.generate({ ...options, query, signal, attempts: previous ? 1 : 3, maxTokens: Math.min(options.maxTokens, 16384),
       ...(direction ? { visualDirection: JSON.stringify(direction) } : {}),
       ...(previous ? { previousHtml: previous.html, previousDesign: previous.design, previousSummary: previous.design?.summary,
         feedback: options.feedback ? `必须保留用户本轮要求：${options.feedback}\n以下截图建议不得违背该要求：${feedback ?? ''}` : feedback,

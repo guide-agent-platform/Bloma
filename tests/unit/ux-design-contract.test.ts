@@ -56,6 +56,26 @@ describe('UX 设计、确认与真实存储边界', () => {
     expect(issues.join('\n')).toContain('AC-002 的PRD绑定为 feature_id=F-001, kind=boundary')
     expect(issues.join('\n')).toContain('补齐 AC-001 的 feature_id=F-001, kind=normal')
   })
+  it('requires full HTML after a metadata repair adds a missing interaction marker', async () => {
+    const { pending, prd, design, html } = setup()
+    const expanded = structuredClone(design)
+    expanded.interactions.push({ ...structuredClone(expanded.interactions[0]), id: 'UI-002' })
+    const bad = structuredClone(design)
+    bad.interactions[0].states[0].scenario_ids = ['AC-002']
+    let calls = 0
+    const query: SDKQuery = async function* (prompt) {
+      calls++
+      if (calls === 3) expect(prompt).toContain('本次必须同时输出完整html')
+      const value = calls === 1 ? { action: 'design', html, design: bad }
+        : calls === 2 ? { action: 'design', design: expanded }
+        : { action: 'design', design: expanded, html: html.replace('</section>', '<button data-interaction-id="UI-002">查看结果</button></section>') }
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: JSON.stringify(value) }] } }
+    }
+    const result = await generateUxSketch({ ...pending, backplane: prd, query, attempts: 3, maxTokens: 2000 })
+    expect(calls).toBe(3)
+    expect(result.source).toBe('llm')
+    expect(result.html).toContain('data-interaction-id="UI-002"')
+  })
 
   it('完整PRD进入模型；没有摘要也传反馈，有底稿时传上一版HTML与设计', async () => {
     const { pending, calls } = setup()
