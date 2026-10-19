@@ -1,0 +1,24 @@
+{
+  "at": "2026-10-19T12:48:31.918Z",
+  "kind": "sealed-before-first-L1-execution",
+  "protocol_revision": "supervised-liveness-v2",
+  "cohort": "C:/Users/17359/bex-l1q19/pilot-r1",
+  "input_sha256": "cb444d027aedfcbd512e393daef2a27be48dfb6b5f5c2344d09e8bd208a559d7",
+  "runtime_commit": "21123d765faad43c9d448dafe53bdb10a5ffe1d8",
+  "runtime_sha256": "1f213594972a8f8bdaf20565f7a2afa85cb55392bc1f6d1ecfe60cf2040f3f2f",
+  "runtime_files": 94,
+  "driver_files": 5,
+  "groups": 6,
+  "execution_calls": 0,
+  "business_inputs_unchanged": true,
+  "readiness_sha256": "5ec1e424201ad8b39000ccb405e1b987f5e18c4730deb953ed8370c8ed3161f8",
+  "previous_release_sha256": "055befa33a8e4dad175ffb133b6f22b3870d923f20153439e8601111b4285031",
+  "liveness_qualification": {
+    "normal_exit": "C:/Users/17359/AppData/Local/Bloma/parallel-L1-quick-20261019/liveness-normal-r2/supervisor/result.json",
+    "forced_driver_loss": "C:/Users/17359/AppData/Local/Bloma/parallel-L1-quick-20261019/liveness-forced/supervisor/result.json",
+    "model_calls": 0
+  },
+  "predecessor_certificate": "C:/Users/17359/AppData/Local/Bloma/parallel-native-quick-20261018/pilot-v4-runs/G11/operator-interruption-certificate-v2.json",
+  "predecessor_orphaned_usage": "One query remains unknown; original SDK ledger unchanged.",
+  "product_quality": null
+}

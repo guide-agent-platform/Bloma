@@ -1,6 +1,6 @@
 # L1 quick 并行预实验准备
 
-用户于2026-10-19选择：先准备 L1，等当前 L2 首组收尾后再启动 L1，避免两个执行组争用同一 Coding Plan 通道。L1 的原生需求、PRD、草图和六组环境准备已完成，当前等待 L2。准备与执行分开计量；封存时 L1 六组执行调用均为0。
+用户于2026-10-19选择：先准备 L1，等当前 L2 首组收尾后再启动 L1，避免两个执行组争用同一 Coding Plan 通道。L1 的原生需求、PRD、草图和六组环境准备已完成。L2 后被确认进程消失，已按 interrupted 收尾；L1 G11 于北京时间20:48:38在外部看门狗下正式启动。准备与执行分开计量；最初封存时六组执行调用均为0，后续运行不能沿用这个0值作为当前状态。
 
 L1 原始需求：
 
@@ -14,7 +14,7 @@ L1 原始需求：
 
 准备中发现向导操作指令污染产品约束：原生修订删掉后，项目历史约束又被平台强制并回，导致内审循环。修复在独立 L1 运行副本完成，过滤明确给向导的输出/工具指令，保留真实产品约束；22项相关检查、完整类型检查通过。不删除历史消息或失败尝试，不在模型产物上手工改 PRD。
 
-L1 运行副本：`C:\Users\17359\.codex\worktrees\l1-preparation-runtime\guide-agent-platform-sprint0`，提交 `13d73e285bf225940a3f0394e810895e78cbb200`。当前 L2 仍固定自己的 `48fcef0` 运行包，主包 SHA256 仍为 `108e342d8158b1e458a352212b9a9b5bf54935aedb876b2f054fa60dee9d0194`，未在运行中混入该修复；不同版本不作跨难度的因果基线。
+L1 运行副本：`C:\Users\17359\.codex\worktrees\l1-preparation-runtime\guide-agent-platform-sprint0`，原准备提交 `13d73e285bf225940a3f0394e810895e78cbb200`；后仅升级实验驱动和外部监督，当前提交 `21123d765faad43c9d448dafe53bdb10a5ffe1d8`，主包保持不变。L2 在运行期间始终固定自己的 `48fcef0` 及主包 `108e342d8158b1e458a352212b9a9b5bf54935aedb876b2f054fa60dee9d0194`，未混入这些修复；不同版本不作跨难度的因果基线。
 
 证据根：`C:\Users\17359\AppData\Local\Bloma\parallel-L1-quick-20261019`；`native-prepare-r1/r2/r3` 保留各次原生准备及监督者暂停原因；`source-ui-actions.jsonl` 记录原生修订与逐题作答；`C:\Users\17359\bex-l1q19\preparation-registry.json` 为初始预登记。
 
@@ -35,6 +35,12 @@ L1 运行副本：`C:\Users\17359\.codex\worktrees\l1-preparation-runtime\guide-
 
 源准备86次逻辑请求与物理传输均已收尾，全部completed，input/output usage完整；guide12、orchestrator6、research57、ux_visual11，均DeepSeek Flash。已报告 input524977、output211960、cache-read1157248；cache-creation 84次显式报告0，另2次未报告该可选字段，不补造。数据来源是 Bloma provider ledger，不是现金账单，也不包含监督者模型用量。事件窗口27分55秒含工程修复、暂停与审阅，不作模型延迟；单请求 duration 合计660.204秒单列，不与墙钟混用。原账本前后 SHA256 相同，详见 `source-preparation-usage-summary.json`。
 
-已建立一次性的当前任务衔接流程，等待指定 L2 run=`glm-pair-parallel-L2-quick-20261019-v4-G11` 同时具备终态事件、原生启动器退出以及全部查询/传输收尾，再重验 L1 封存指纹并启动 G11。不会中止或重试 L2，不自动越过首次 L1 结果去启动其他组。衔接状态位于证据根 `start-after-l2/{intent,waiting,launch-claim,exit}.json`；启动后原生报告位于 `pilot-r1-runs/G11`。L2 若以失败/超时终止也保留原样，不伪造质量结果。
+最初的一次性衔接器因 L2 未写终态而一直等待；发现进程消失后已停止，原始 intent/waiting/STOP 记录保留于 `start-after-l2`。L2 的19次请求中18次完整收尾，第19次无 SDK 终态及用量，保持未知。确认驱动/Electron 均不存在、旧调试端口不监听后，仅通过宿主 CLI 追加 interrupted 终态，不补造 query_finished/transport_finished；原始账本 SHA256 不变。具体是谁终止进程、何时死亡仍不明，不能把长时间无文件更新或HTTP200响应头当成健康推理，也不能将确认延迟计为模型执行耗时。
 
-版本化的起跑摘要与草图预览见 [起跑摘要](../../outputs/experiment-L1-20261019/pre-execution-readiness.json)、[宽窗口草图](../../outputs/experiment-L1-20261019/ux-confirmed-1100.png)、[窄窗口草图](../../outputs/experiment-L1-20261019/ux-confirmed-820.png)。传输容量、文档审阅与独立产品业务 Q 分开，尚无 L1 产品交付或 Q 结果。
+驱动现增加真实 PID 回执、每10秒独立心跳和退出事件，外部看门狗每2秒复核实际进程；不再依赖配置的 running 标记判断存活。正常退出与强制停止驱动的真实桌面验证均在独立诊断 home 中完成，模型调用为0；强制退出时无原生 report，但监督者正确记录进程消失和未知状态，没有伪造完成。第一次正常烟测暴露退出后 Playwright process() 已失效的问题，改用缓存的 ChildProcess 句柄后复测通过，失败记录保留。相关 Node 检查15项通过。
+
+四种 GLM 同账号三路组合在晚间复测中再次全部通过，24次物理请求、每组峰值3；属于传输资格而非产品质量。六组在首次执行前重新核对84份输入、94个运行文件及5个驱动/监督文件，模型、业务输入和主包不变；原 readiness 已归档，最新为 `readiness-release.json` 的 supervised-liveness-v2，SHA256=`5ec1e424201ad8b39000ccb405e1b987f5e18c4730deb953ed8370c8ed3161f8`。
+
+L1 G11 当前由隐藏的独立监督进程启动，初始 supervisor/launcher/driver/Electron PID 为91580/89984/77860/56656，均已实测存活并有持续心跳。这些PID只描述该次启动，不是永久身份。原生数据位于 `pilot-r1-runs/G11`，监督状态位于 `supervised-G11`。SDK/原生缺失终态时，监督者仅在确认本地所属进程全部结束后追加中断，未知用量继续保留；不会自动启动其他组。
+
+版本化摘要见 [初始起跑摘要](../../outputs/experiment-L1-20261019/pre-execution-readiness.json)、[存活监督升级后的起跑摘要](../../outputs/experiment-L1-20261019/pre-execution-readiness-liveness-v2.json)、[宽窗口草图](../../outputs/experiment-L1-20261019/ux-confirmed-1100.png)、[窄窗口草图](../../outputs/experiment-L1-20261019/ux-confirmed-820.png)。传输容量、文档审阅与独立产品业务 Q 分开，尚无 L1 产品交付或 Q 结果。
