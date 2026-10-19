@@ -54,7 +54,7 @@ seed()
 if (command === 'seed') { console.log(JSON.stringify({ home, seeded: true })); process.exit(0) }
 const sleep = ms => new Promise(done => setTimeout(done, ms))
 const cli = (...params) => execFileSync(process.execPath, ['scripts/dispatch-experiment.mjs', ...params], { encoding: 'utf8', windowsHide: true }).trim()
-let application, page, heartbeatTimer
+let application, page, heartbeatTimer, electronProcess
 const report = { command, home, resume_preparation: resumePreparation, at: new Date().toISOString(), confirmations: [], outcome: 'running' }
 report.glm_plan = glmPlan
 report.monetary_mode = noMonetaryLimit ? 'unlimited-explicit-user-authorization' : 'policy'
@@ -70,7 +70,9 @@ function telemetryContext() {
     current_stage: current?.current_stage, desktop_phase: current?.desktop_phase, state: experiment?.state }
 }
 function writeHeartbeat() {
-  const child = application?.process()
+  // Playwright invalidates application.process() after close. The Node handle
+  // remains valid for the real exit callback and final heartbeat.
+  const child = electronProcess
   if (!child) return
   try {
     writeFileSync(join(reportDir, 'heartbeat.json'), JSON.stringify(nativeHeartbeat({
@@ -86,6 +88,7 @@ try {
       BLOMA_EXPERIMENT_UNLIMITED_MONETARY: noMonetaryLimit ? '1' : '0',
       BLOMA_EXPERIMENT_MAX_OUTPUT_TOKENS: String(effectiveOutputLimit) }, timeout: 60000 })
   const child = application.process()
+  electronProcess = child
   writeFileSync(join(reportDir, 'process-receipt.json'), JSON.stringify(nativeProcessReceipt({
     at: new Date().toISOString(), driver_pid: process.pid, driver_ppid: process.ppid,
     electron_pid: child.pid, home, run_id: telemetryContext().run_id,
