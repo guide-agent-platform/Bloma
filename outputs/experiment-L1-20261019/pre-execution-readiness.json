@@ -1,0 +1,72 @@
+{
+  "at": "2026-10-19T08:43:10.475Z",
+  "kind": "sealed-before-first-L1-execution",
+  "task_id": "L1",
+  "mode": "quick",
+  "project_id": "42487b23-f6c0-47e5-b46b-f607b105ae7b",
+  "status": "prepared-waiting-for-L2",
+  "cohort": "C:/Users/17359/bex-l1q19/pilot-r1",
+  "input_sha256": "cb444d027aedfcbd512e393daef2a27be48dfb6b5f5c2344d09e8bd208a559d7",
+  "runtime_commit": "13d73e285bf225940a3f0394e810895e78cbb200",
+  "runtime_sha256": "1f213594972a8f8bdaf20565f7a2afa85cb55392bc1f6d1ecfe60cf2040f3f2f",
+  "frozen_files": 84,
+  "runtime_files": 94,
+  "driver_files": 4,
+  "models": {
+    "m1": {
+      "channel_id": "experiment-glm",
+      "model_id": "glm-5.3-flash"
+    },
+    "m2": {
+      "channel_id": "experiment-glm",
+      "model_id": "glm-5.3"
+    },
+    "verifier": {
+      "channel_id": "experiment-ds",
+      "model_id": "deepseek-flash"
+    }
+  },
+  "settings": {
+    "temperature": 0.1,
+    "thinking_level": "high",
+    "response_header_timeout_ms": 120000
+  },
+  "limits": {
+    "max_workers": 2,
+    "max_tasks": 16,
+    "dispatcher_turns": 60,
+    "executor_turns": 100,
+    "max_requests": 256,
+    "max_output_tokens": 640000,
+    "wall_ms": 3600000
+  },
+  "groups": [
+    "G11",
+    "G12",
+    "G21",
+    "G22",
+    "S1",
+    "S2"
+  ],
+  "execution_calls_at_seal": 0,
+  "independent_check_count": 6,
+  "evaluator_sha256": "08dbe9b458009c4cc22c8f7f8e2136975bcb943c70509c186e0ebe80f8a49fff",
+  "native_features": 6,
+  "native_rules": 10,
+  "native_scenarios": 32,
+  "ux_selected": "B",
+  "ux_design_sha256": "7a16eca6795d40526f00b6e5d8a7e78378a568a9bd78348a1ead8e4caf6e8290",
+  "ux_html_sha256": "cc373caf17baeccc6558ce430023ccc506a56c500a0f79d728d9f11286cce90e",
+  "readiness_sha256": "055befa33a8e4dad175ffb133b6f22b3870d923f20153439e8601111b4285031",
+  "source_usage_report_sha256": "3bdf1845452f7be6a5c28440fd4cfc910607b0e87bff6462ad418e31cfba350e",
+  "sequence_intent": "C:/Users/17359/AppData/Local/Bloma/parallel-L1-quick-20261019/start-after-l2/intent.json",
+  "sequence_intent_sha256": "0eafb4223ec6b86e18fc6592c9e70d2b74f21f3d7c065c49593ff201990511b4",
+  "predecessor_run": "glm-pair-parallel-L2-quick-20261019-v4-G11",
+  "start_conditions": [
+    "L2 terminal event exists",
+    "L2 native launcher exited",
+    "All L2 queries and transports have terminal receipts",
+    "L1 frozen readiness still matches"
+  ],
+  "product_quality": null
+}
