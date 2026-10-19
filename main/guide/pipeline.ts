@@ -26,6 +26,7 @@ import { recordDecision } from '../project/decision-log'
 import type { SDKQuery } from '../orchestration/orchestrator'
 import type { EnrichmentClarificationRequest } from './clarification'
 import { PrdStructureError, prdStructureIssues, projectRequirementsModel } from '../model/requirements-model'
+import { sanitizeConstraints } from './constraint-extractor'
 
 /**
  * PRD 收敛管线输入（MvpTaskInput 的结构子集）：resolvePrdBackplane 实际消费的
@@ -67,8 +68,10 @@ export async function resolvePrdBackplane(
   const materials = sessionMaterials(input.project_id, input.session_id)
   const materialText = renderMaterialContext(materials, input.session_id, true)
   const organize = input.organize_requirements !== false
-  const template = (): PrdBackplane =>
-    buildPrdBackplane(findProject(input.project_id), requirements, 'sketch_confirmed')
+  const template = (): PrdBackplane => {
+    const backplane = buildPrdBackplane(findProject(input.project_id), requirements, 'sketch_confirmed')
+    return { ...backplane, constraints: sanitizeConstraints(backplane.constraints) }
+  }
 
   // m-5：模板回退重建必须留痕（对齐「模板回退必须留痕」纪律）——盘上既有 EARS 断言/
   // story/priority 若与冻结清单不一致将被确定性模板替换，P3 收益在渠道抖动下不可累积，
@@ -206,7 +209,7 @@ export async function resolvePrdBackplane(
     ...(base.prd_document ? { prd_document: base.prd_document.replace(/^#\s+PRD\s*[:：][^\r\n]*/m, () => `# PRD：${currentName}`) } : {}),
     requirements: enrichedRequirements,
     out_of_scope: [...new Set([...(llm?.out_of_scope ?? []), ...(project.scope_exclusions ?? [])])],
-    ...(project.constraints?.length ? { constraints: [...new Set([...(llm?.constraints ?? []), ...project.constraints])] } : {}),
+    constraints: [...new Set(sanitizeConstraints([...(base.constraints ?? []), ...(project.constraints ?? [])]))],
     template_meta: base.template_meta ?? backplaneTemplateMeta(base, project.template_type),
   })
   if (organize) {

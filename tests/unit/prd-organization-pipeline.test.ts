@@ -4,14 +4,15 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { restorePromaHome } from '../support/proma-home-guard'
 import { organizedPrd } from '../support/organized-prd'
-import { createProject } from '../../main/project/project-service'
+import { createProject, findProject, updateProject } from '../../main/project/project-service'
 import { resolvePrdBackplane } from '../../main/guide/pipeline'
 import { readRequirementSources } from '../../main/guide/requirements-organization'
 import { ensurePrimaryIntent, resolveAutoDelegation } from '../../main/guide/stages/clarify-flow'
 import { appendSessionMessage } from '../../main/platform/sessions/session-tree'
 import { getDocumentsDir } from '../../storage/config-paths'
 import { markPrdUserConfirmed, readPrdBackplane, syncDocuments } from '../../main/project/document-engine'
-import { prdStructureIssues, stableFeatureIdIssues } from '../../main/model/requirements-model'
+import { prdStructureIssues, projectRequirementsModel, stableFeatureIdIssues } from '../../main/model/requirements-model'
+import * as prdEngine from '../../main/guide/prd-engine-llm'
 import type { SDKQuery } from '../../main/orchestration/orchestrator'
 import type { AgentSendMessageInput } from '../../shared/types'
 
@@ -69,6 +70,38 @@ describe('实际 PRD 组织与确认边界', () => {
     expect(attempts).toHaveLength(2)
     expect(attempts[0].raw_output).toBe('{"document":"# PRD","acceptance":{}}')
     expect(attempts[0].accepted_for_review).toBe(false)
+  })
+
+  it.each([true, false])('PRD投影清洗模型及历史项目的向导指令（存在历史约束=%s），产品约束仍进入正文', async historical => {
+    const { project, sessionId } = setup()
+    const bad = '不要再次只输出 JSON 文本'
+    const badExplanation = '2. “不要再次只输出 JSON 文本”是对向导的操作提示'
+    if (historical) updateProject(project.project_id, { constraints: [bad, badExplanation, '不要联网'] })
+    const generated = projectRequirementsModel({
+      ...organizedPrd([{ id: 'F-001', description: '管理本地待办' }], '管理本地待办'),
+      project_id: project.project_id, name: project.name, positioning: '离线待办', acceptance: {}, out_of_scope: [], assumptions: [],
+      constraints: [bad, badExplanation, '必须调用 write_file', '不要导出JSON，只支持CSV'],
+    })
+    const generate = vi.spyOn(prdEngine, 'generatePrdLlm').mockResolvedValue(generated)
+    try {
+      const query: SDKQuery = async function* () { throw new Error('No external SDK call is permitted') }
+      const result = await resolvePrdBackplane({ project_id: project.project_id, session_id: sessionId, query }, [])
+      expect(result.constraints).toEqual(historical ? ['不要导出JSON，只支持CSV', '不要联网'] : ['不要导出JSON，只支持CSV'])
+      expect(result.prd_document).not.toContain(bad)
+      expect(result.prd_document).not.toContain('调用 write_file')
+      expect(result.prd_document).toContain('不要导出JSON，只支持CSV')
+      if (historical) {
+        expect(result.prd_document).toContain('不要联网')
+        expect(findProject(project.project_id).constraints).toContain(bad)
+      }
+    } finally { generate.mockRestore() }
+  })
+
+  it('兼容模板投影也不会回灌已有向导操作约束', async () => {
+    const { project, sessionId } = setup()
+    updateProject(project.project_id, { constraints: ['不要再次只输出 JSON 文本', '不要联网', '不要导出JSON，只支持CSV'] })
+    const result = await resolvePrdBackplane({ project_id: project.project_id, session_id: sessionId, organize_requirements: false }, [{ id: 'F-001', description: '本地待办' }])
+    expect(result.constraints).toEqual(['不要联网', '不要导出JSON，只支持CSV'])
   })
 
   it('正文十二项而结构一项的真实失败形态不能确认', () => {

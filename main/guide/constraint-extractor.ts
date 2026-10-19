@@ -55,6 +55,7 @@ export function extractConstraints(text: string): string[] {
     const trimmed = clause.replace(/\s+/g, ' ').trim()
     if (!trimmed || trimmed.length > CONSTRAINT_MAX_LENGTH) continue
     if (!CONSTRAINT_MARKER_RE.test(trimmed)) continue
+    if (sanitizeConstraints([trimmed]).length === 0) continue
     if (!found.includes(trimmed)) found.push(trimmed)
     if (found.length >= CONSTRAINT_MAX_PER_TEXT) break
   }
@@ -121,12 +122,18 @@ const HOST_CONSTRAINT_FINGERPRINTS = [
   '委派补齐（产物必须真实存在且内容有效）',
 ]
 
+// Conversation repair/tool instructions address the guide, not the product.
+// Keep this narrow: product rules such as “不要导出 JSON，只支持 CSV” remain valid.
+const GUIDE_OPERATION_CONSTRAINT_RE =
+  /不要(?:再次?|继续)只(?:输出|回复)\s*JSON(?:\s*文本)?|(?:是|只是)对向导的操作(?:提示|指令)|(?:你|向导)(?:必须|务必|只能|不要|不得|禁止)(?:直接)?调用(?:工具|write_file|edit_file|delegate_agent)|(?:必须|务必|只能|不要|不得|禁止)调用\s*(?:write_file|edit_file|delegate_agent)\b/i
+
 /** 约束列表防御性清洗：剔除命中毒词指纹的宿主注入残留（写入侧已根治，此处兑底
  *  存量污染——读取/注入两侧共用，不带状态、幂等）。 */
 export function sanitizeConstraints(constraints: string[] | undefined | null): string[] {
   if (!constraints || constraints.length === 0) return []
   return constraints.filter(
-    (entry) => typeof entry === 'string' && !HOST_CONSTRAINT_FINGERPRINTS.some((fp) => entry.includes(fp)),
+    (entry) => typeof entry === 'string' && !HOST_CONSTRAINT_FINGERPRINTS.some((fp) => entry.includes(fp))
+      && !GUIDE_OPERATION_CONSTRAINT_RE.test(entry),
   )
 }
 
@@ -180,10 +187,11 @@ export function captureConstraints(opts: {
   /** 入库点标记：guide_gate / sketch_ready_modification / iteration_modification / session_scan */
   source: string
 }): string[] {
-  if (opts.constraints.length === 0) return []
+  const constraints = sanitizeConstraints(opts.constraints)
+  if (constraints.length === 0) return []
   let added: string[]
   try {
-    added = addConstraints(opts.project_id, opts.constraints)
+    added = addConstraints(opts.project_id, constraints)
   } catch {
     // 项目索引缺失等：本轮约束仍可经读取侧注入，不因落库失败卡主流程
     return []

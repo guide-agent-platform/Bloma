@@ -5,11 +5,11 @@ import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 // 2026-09-16 FILE-LEVEL 钉：BLOMA_GUIDE_LOOP 缺省翻转 on，本文件锁旧路径读取侧口径
 // （loop 模式下约束系统行经 historyTurns→messages 送达，捕获参数不同；行为等价）
-import { captureConstraints, extractConstraints, sanitizeConstraints, scanSessionConstraints } from '../../main/guide/constraint-extractor'
+import { captureConstraints, extractConstraints, readProjectConstraints, sanitizeConstraints, scanSessionConstraints } from '../../main/guide/constraint-extractor'
 import { buildPrdBackplane } from '../../main/project/document-engine'
 import { HISTORY_WINDOW_TURNS } from '../../main/orchestration/orchestrator'
 import { setSafeStorageAdapter } from '../../main/platform/storage/safe-storage'
-import { createProject, findProject } from '../../main/project/project-service'
+import { createProject, findProject, updateProject } from '../../main/project/project-service'
 import { getAgentSessionPath } from '../../storage/config-paths'
 import type { PrdBackplane, SketchRequirement } from '../../main/coding/sketch-engine'
 import type { AgentMessage } from '../../shared/types'
@@ -62,6 +62,14 @@ describe('T4-L1 extractConstraints 确定性提取', () => {
     expect(extractConstraints('帮我做一个记账本')).toEqual([])
     expect(extractConstraints('好的，就这样')).toEqual([])
     expect(extractConstraints('')).toEqual([])
+  })
+  it('排除向导输出修复与工具指令，保留真实产品的联网及导出格式约束', () => {
+    expect(extractConstraints('不要再次只输出 JSON 文本，向导必须调用工具保存PRD，必须调用 write_file，不要联网，不要导出JSON，只能导出CSV'))
+      .toEqual(['不要联网', '不要导出JSON', '只能导出CSV'])
+    expect(sanitizeConstraints([
+      '不要再次只输出 JSON 文本', '不要再只回复JSON', '2. “不要再次只输出 JSON 文本”是对向导的操作提示',
+      '不要联网', '不要导出JSON，只支持CSV', '产品必须输出JSON文本', '数据必须通过HTTP API导入',
+    ])).toEqual(['不要联网', '不要导出JSON，只支持CSV', '产品必须输出JSON文本', '数据必须通过HTTP API导入'])
   })
 })
 describe('T4-L2 全量扫描：首轮约束历轮可回', () => {
@@ -121,6 +129,10 @@ describe('T4-L2 全量扫描：首轮约束历轮可回', () => {
   it('存量污染兑底：入库的拒因话术「不要去补报告文件」被读取侧清洗（批10 旧账②）', () => {
     expect(sanitizeConstraints(['不含登录', '不要去补报告文件'])).toEqual(['不含登录'])
   })
+  it('历史用户轮的向导操作提示不被会话扫描重新回灌', () => {
+    writeSession('session-guide-instructions', [turn('user', '不要再次只输出 JSON 文本，不要联网，不要导出JSON，只能导出CSV', 1)])
+    expect(scanSessionConstraints('session-guide-instructions')).toEqual(['不要联网', '不要导出JSON', '只能导出CSV'])
+  })
   it('历史窗口是显式常量（默认 10 轮，不再静默写死 20）', () => {
     expect(HISTORY_WINDOW_TURNS).toBe(10)
   })
@@ -158,6 +170,17 @@ describe('T4-L1 约束走门：捕获入库与决策留痕', () => {
     expect(() =>
       captureConstraints({ project_id: 'literal-id', session_id: 'session-x', constraints: ['不含登录'], source: 'guide_gate' }),
     ).not.toThrow()
+  })
+  it('捕获入口拒绝未经提取清洗的向导指令，读取侧过滤已有污染且不改历史数据', () => {
+    const project = createProject({ request_id: 'req-meta', mode: 'quick', initial_message: '离线待办' })
+    const bad = '不要再次只输出 JSON 文本'
+    updateProject(project.project_id, { constraints: [bad, '不要联网'] })
+    expect(readProjectConstraints(project.project_id)).toEqual(['不要联网'])
+    expect(findProject(project.project_id).constraints).toContain(bad)
+    expect(captureConstraints({ project_id: project.project_id, session_id: 'session-meta', source: 'guide_gate',
+      constraints: ['2. “不要再次只输出 JSON 文本”是对向导的操作提示', '必须调用 write_file', '不要导出JSON，只支持CSV'],
+    })).toEqual(['不要导出JSON，只支持CSV'])
+    expect(findProject(project.project_id).constraints).toEqual([bad, '不要联网', '不要导出JSON，只支持CSV'])
   })
   it('buildPrdBackplane 组装 constraints 常驻注入', () => {
     const project = createProject({ request_id: 'req-bp', mode: 'quick', initial_message: '记账本' })
