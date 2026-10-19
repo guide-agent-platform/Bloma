@@ -23,7 +23,7 @@ app.whenReady().then(() => {
     if (!key) throw new Error('EXPERIMENT_CREDENTIAL_MISSING')
     return { id, name, provider_type, base_url, api_key: safeStorage.encryptString(key).toString('hex'),
       models: [{ id: model, name: model, enabled: true, supports_tools: true },
-        ...(id === 'experiment-glm' ? [{ id: 'glm-5.3-flash', name: 'GLM 5.3 Flash', enabled: true, supports_tools: true }] : []),
+        ...(id === 'experiment-glm' ? [{ id: 'glm-5.3-flash', name: 'glm-5.3-flash', enabled: true, supports_tools: true }] : []),
         ...(id === 'experiment-ds' ? [{ id: 'deepseek-v4-pro', name: 'deepseek-v4-pro', enabled: true, supports_tools: true }] : [])],
       enabled: true, max_tokens: id === 'experiment-ds' ? preparationMaxTokens : Math.min(preparationMaxTokens, 131072) }
   })
