@@ -1,0 +1,546 @@
+{
+  "at": "2026-10-19T13:43:24.064200+00:00",
+  "run_id": "glm-pair-parallel-L1-quick-20261019-r1-G11",
+  "scope": "independent real WebView2 DOM control actions; no direct business calls; isolated data; full owned process tree restart",
+  "suite_sha256": "08dbe9b458009c4cc22c8f7f8e2136975bcb943c70509c186e0ebe80f8a49fff",
+  "root": "C:\\Users\\17359\\bex-l1q19\\pilot-r1\\cohort\\G11\\agent-workspaces\\default-software-builder\\generated-projects\\42487b23-f6c0-47e5-b46b-f607b105ae7b",
+  "data": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\parallel-L1-quick-20261019\\independent-G11-r1\\fresh-data",
+  "checks": [
+    {
+      "id": "add-trim",
+      "status": "passed"
+    },
+    {
+      "id": "empty-rejection",
+      "status": "passed"
+    },
+    {
+      "id": "toggle-isolation",
+      "status": "passed"
+    },
+    {
+      "id": "filters",
+      "status": "passed"
+    },
+    {
+      "id": "delete-isolation",
+      "status": "passed"
+    },
+    {
+      "id": "restart-persistence",
+      "status": "passed"
+    }
+  ],
+  "steps": [
+    {
+      "at": "2026-10-19T13:43:27.043024+00:00",
+      "expression": "(() => {\n const visible = e => !!e && !!e.getClientRects().length;\n const rows = () => [...document.querySelectorAll('#task-list article.task')].filter(visible);\n window.__hostL1 = {\n  rows: () => rows().map(e => ({id:e.dataset.id,title:e.querySelector('.task-title').textContent,done:e.querySelector('[data-action=\"toggle\"]').getAttribute('aria-pressed')==='true',state:e.querySelector('.task-state').textContent})),\n  add: text => {const e=document.querySelector('#task-input');e.value=text;e.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#btn-add').click();},\n  toggle: id => {const e=rows().find(e=>e.dataset.id===id);if(!e)throw Error('host selector missing target row');e.querySelector('[data-action=\"toggle\"]').click();},\n  delete: id => {const e=rows().find(e=>e.dataset.id===id);if(!e)throw Error('host selector missing target row');e.querySelector('[data-action=\"delete\"]').click();},\n  filter: view => document.querySelector('.view-btn[data-view=\"'+view+'\"]').click(),\n  ready: () => !document.querySelector('#btn-add').disabled,\n };\n return true;\n})()",
+      "result": true
+    },
+    {
+      "at": "2026-10-19T13:43:27.058582+00:00",
+      "expression": "window.__hostL1.rows()",
+      "result": []
+    },
+    {
+      "at": "2026-10-19T13:43:27.062444+00:00",
+      "expression": "window.__hostL1.add('  实验同名任务  ')",
+      "result": null
+    },
+    {
+      "at": "2026-10-19T13:43:27.765720+00:00",
+      "expression": "window.__hostL1.ready()",
+      "result": true
+    },
+    {
+      "at": "2026-10-19T13:43:27.767738+00:00",
+      "expression": "window.__hostL1.rows()",
+      "result": [
+        {
+          "id": "57783dee27f14bee8044f447bf48480b",
+          "title": "实验同名任务",
+          "done": false,
+          "state": "未完成"
+        }
+      ]
+    },
+    {
+      "event": "owned_process_tree_stopped",
+      "pid": 12964
+    },
+    {
+      "event": "fresh_product_process",
+      "pid": 82744,
+      "same_data": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\parallel-L1-quick-20261019\\independent-G11-r1\\fresh-data"
+    },
+    {
+      "at": "2026-10-19T13:43:30.740044+00:00",
+      "expression": "(() => {\n const visible = e => !!e && !!e.getClientRects().length;\n const rows = () => [...document.querySelectorAll('#task-list article.task')].filter(visible);\n window.__hostL1 = {\n  rows: () => rows().map(e => ({id:e.dataset.id,title:e.querySelector('.task-title').textContent,done:e.querySelector('[data-action=\"toggle\"]').getAttribute('aria-pressed')==='true',state:e.querySelector('.task-state').textContent})),\n  add: text => {const e=document.querySelector('#task-input');e.value=text;e.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#btn-add').click();},\n  toggle: id => {const e=rows().find(e=>e.dataset.id===id);if(!e)throw Error('host selector missing target row');e.querySelector('[data-action=\"toggle\"]').click();},\n  delete: id => {const e=rows().find(e=>e.dataset.id===id);if(!e)throw Error('host selector missing target row');e.querySelector('[data-action=\"delete\"]').click();},\n  filter: view => document.querySelector('.view-btn[data-view=\"'+view+'\"]').click(),\n  ready: () => !document.querySelector('#btn-add').disabled,\n };\n return true;\n})()",
+      "result": true
+    },
+    {
+      "at": "2026-10-19T13:43:30.755543+00:00",
+      "expression": "window.__hostL1.rows()",
+      "result": [
+        {
+          "id": "57783dee27f14bee8044f447bf48480b",
+          "title": "实验同名任务",
+          "done": false,
+          "state": "未完成"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T13:43:30.771326+00:00",
+      "expression": "window.__hostL1.filter('all')",
+      "result": null
+    },
+    {
+      "at": "2026-10-19T13:43:31.489918+00:00",
+      "expression": "window.__hostL1.ready()",
+      "result": true
+    },
+    {
+      "at": "2026-10-19T13:43:31.492050+00:00",
+      "expression": "window.__hostL1.rows()",
+      "result": [
+        {
+          "id": "57783dee27f14bee8044f447bf48480b",
+          "title": "实验同名任务",
+          "done": false,
+          "state": "未完成"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T13:43:31.494672+00:00",
+      "expression": "window.__hostL1.add(\"\")",
+      "result": null
+    },
+    {
+      "at": "2026-10-19T13:43:32.222981+00:00",
+      "expression": "window.__hostL1.ready()",
+      "result": true
+    },
+    {
+      "at": "2026-10-19T13:43:32.238934+00:00",
+      "expression": "window.__hostL1.rows()",
+      "result": [
+        {
+          "id": "57783dee27f14bee8044f447bf48480b",
+          "title": "实验同名任务",
+          "done": false,
+          "state": "未完成"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T13:43:32.253789+00:00",
+      "expression": "window.__hostL1.add(\"   \")",
+      "result": null
+    },
+    {
+      "at": "2026-10-19T13:43:32.970157+00:00",
+      "expression": "window.__hostL1.ready()",
+      "result": true
+    },
+    {
+      "at": "2026-10-19T13:43:32.972063+00:00",
+      "expression": "window.__hostL1.rows()",
+      "result": [
+        {
+          "id": "57783dee27f14bee8044f447bf48480b",
+          "title": "实验同名任务",
+          "done": false,
+          "state": "未完成"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T13:43:32.975371+00:00",
+      "expression": "window.__hostL1.add('实验同名任务')",
+      "result": null
+    },
+    {
+      "at": "2026-10-19T13:43:33.699531+00:00",
+      "expression": "window.__hostL1.ready()",
+      "result": true
+    },
+    {
+      "at": "2026-10-19T13:43:33.702386+00:00",
+      "expression": "window.__hostL1.rows()",
+      "result": [
+        {
+          "id": "57783dee27f14bee8044f447bf48480b",
+          "title": "实验同名任务",
+          "done": false,
+          "state": "未完成"
+        },
+        {
+          "id": "ec06d8d4779e454fb8b0435b12930772",
+          "title": "实验同名任务",
+          "done": false,
+          "state": "未完成"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T13:43:33.704948+00:00",
+      "expression": "window.__hostL1.toggle(\"57783dee27f14bee8044f447bf48480b\")",
+      "result": null
+    },
+    {
+      "at": "2026-10-19T13:43:34.431838+00:00",
+      "expression": "window.__hostL1.ready()",
+      "result": true
+    },
+    {
+      "at": "2026-10-19T13:43:34.433948+00:00",
+      "expression": "window.__hostL1.rows()",
+      "result": [
+        {
+          "id": "57783dee27f14bee8044f447bf48480b",
+          "title": "实验同名任务",
+          "done": true,
+          "state": "已完成"
+        },
+        {
+          "id": "ec06d8d4779e454fb8b0435b12930772",
+          "title": "实验同名任务",
+          "done": false,
+          "state": "未完成"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T13:43:34.436016+00:00",
+      "expression": "window.__hostL1.toggle(\"57783dee27f14bee8044f447bf48480b\")",
+      "result": null
+    },
+    {
+      "at": "2026-10-19T13:43:35.150807+00:00",
+      "expression": "window.__hostL1.ready()",
+      "result": true
+    },
+    {
+      "at": "2026-10-19T13:43:35.153298+00:00",
+      "expression": "window.__hostL1.rows()",
+      "result": [
+        {
+          "id": "57783dee27f14bee8044f447bf48480b",
+          "title": "实验同名任务",
+          "done": false,
+          "state": "未完成"
+        },
+        {
+          "id": "ec06d8d4779e454fb8b0435b12930772",
+          "title": "实验同名任务",
+          "done": false,
+          "state": "未完成"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T13:43:35.155635+00:00",
+      "expression": "window.__hostL1.toggle(\"57783dee27f14bee8044f447bf48480b\")",
+      "result": null
+    },
+    {
+      "at": "2026-10-19T13:43:35.858506+00:00",
+      "expression": "window.__hostL1.ready()",
+      "result": true
+    },
+    {
+      "at": "2026-10-19T13:43:35.860604+00:00",
+      "expression": "window.__hostL1.rows()",
+      "result": [
+        {
+          "id": "57783dee27f14bee8044f447bf48480b",
+          "title": "实验同名任务",
+          "done": true,
+          "state": "已完成"
+        },
+        {
+          "id": "ec06d8d4779e454fb8b0435b12930772",
+          "title": "实验同名任务",
+          "done": false,
+          "state": "未完成"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T13:43:36.978402+00:00",
+      "expression": "window.__hostL1.filter(\"all\")",
+      "result": null
+    },
+    {
+      "at": "2026-10-19T13:43:37.682004+00:00",
+      "expression": "window.__hostL1.ready()",
+      "result": true
+    },
+    {
+      "at": "2026-10-19T13:43:37.699640+00:00",
+      "expression": "window.__hostL1.rows()",
+      "result": [
+        {
+          "id": "57783dee27f14bee8044f447bf48480b",
+          "title": "实验同名任务",
+          "done": true,
+          "state": "已完成"
+        },
+        {
+          "id": "ec06d8d4779e454fb8b0435b12930772",
+          "title": "实验同名任务",
+          "done": false,
+          "state": "未完成"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T13:43:37.714941+00:00",
+      "expression": "window.__hostL1.filter(\"open\")",
+      "result": null
+    },
+    {
+      "at": "2026-10-19T13:43:38.431304+00:00",
+      "expression": "window.__hostL1.ready()",
+      "result": true
+    },
+    {
+      "at": "2026-10-19T13:43:38.433377+00:00",
+      "expression": "window.__hostL1.rows()",
+      "result": [
+        {
+          "id": "ec06d8d4779e454fb8b0435b12930772",
+          "title": "实验同名任务",
+          "done": false,
+          "state": "未完成"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T13:43:38.435691+00:00",
+      "expression": "window.__hostL1.filter(\"done\")",
+      "result": null
+    },
+    {
+      "at": "2026-10-19T13:43:39.151492+00:00",
+      "expression": "window.__hostL1.ready()",
+      "result": true
+    },
+    {
+      "at": "2026-10-19T13:43:39.166964+00:00",
+      "expression": "window.__hostL1.rows()",
+      "result": [
+        {
+          "id": "57783dee27f14bee8044f447bf48480b",
+          "title": "实验同名任务",
+          "done": true,
+          "state": "已完成"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T13:43:39.169498+00:00",
+      "expression": "window.__hostL1.filter(\"open\")",
+      "result": null
+    },
+    {
+      "at": "2026-10-19T13:43:39.882816+00:00",
+      "expression": "window.__hostL1.ready()",
+      "result": true
+    },
+    {
+      "at": "2026-10-19T13:43:39.897810+00:00",
+      "expression": "window.__hostL1.rows()",
+      "result": [
+        {
+          "id": "ec06d8d4779e454fb8b0435b12930772",
+          "title": "实验同名任务",
+          "done": false,
+          "state": "未完成"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T13:43:39.900219+00:00",
+      "expression": "window.__hostL1.filter(\"all\")",
+      "result": null
+    },
+    {
+      "at": "2026-10-19T13:43:40.613364+00:00",
+      "expression": "window.__hostL1.ready()",
+      "result": true
+    },
+    {
+      "at": "2026-10-19T13:43:40.616064+00:00",
+      "expression": "window.__hostL1.rows()",
+      "result": [
+        {
+          "id": "57783dee27f14bee8044f447bf48480b",
+          "title": "实验同名任务",
+          "done": true,
+          "state": "已完成"
+        },
+        {
+          "id": "ec06d8d4779e454fb8b0435b12930772",
+          "title": "实验同名任务",
+          "done": false,
+          "state": "未完成"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T13:43:40.619673+00:00",
+      "expression": "window.__hostL1.filter('all')",
+      "result": null
+    },
+    {
+      "at": "2026-10-19T13:43:41.334423+00:00",
+      "expression": "window.__hostL1.ready()",
+      "result": true
+    },
+    {
+      "at": "2026-10-19T13:43:41.350475+00:00",
+      "expression": "window.__hostL1.delete(\"ec06d8d4779e454fb8b0435b12930772\")",
+      "result": null
+    },
+    {
+      "at": "2026-10-19T13:43:42.067783+00:00",
+      "expression": "window.__hostL1.ready()",
+      "result": true
+    },
+    {
+      "at": "2026-10-19T13:43:42.070019+00:00",
+      "expression": "window.__hostL1.rows()",
+      "result": [
+        {
+          "id": "57783dee27f14bee8044f447bf48480b",
+          "title": "实验同名任务",
+          "done": true,
+          "state": "已完成"
+        }
+      ]
+    },
+    {
+      "event": "owned_process_tree_stopped",
+      "pid": 82744
+    },
+    {
+      "event": "fresh_product_process",
+      "pid": 90936,
+      "same_data": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\parallel-L1-quick-20261019\\independent-G11-r1\\fresh-data"
+    },
+    {
+      "at": "2026-10-19T13:43:45.031021+00:00",
+      "expression": "(() => {\n const visible = e => !!e && !!e.getClientRects().length;\n const rows = () => [...document.querySelectorAll('#task-list article.task')].filter(visible);\n window.__hostL1 = {\n  rows: () => rows().map(e => ({id:e.dataset.id,title:e.querySelector('.task-title').textContent,done:e.querySelector('[data-action=\"toggle\"]').getAttribute('aria-pressed')==='true',state:e.querySelector('.task-state').textContent})),\n  add: text => {const e=document.querySelector('#task-input');e.value=text;e.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#btn-add').click();},\n  toggle: id => {const e=rows().find(e=>e.dataset.id===id);if(!e)throw Error('host selector missing target row');e.querySelector('[data-action=\"toggle\"]').click();},\n  delete: id => {const e=rows().find(e=>e.dataset.id===id);if(!e)throw Error('host selector missing target row');e.querySelector('[data-action=\"delete\"]').click();},\n  filter: view => document.querySelector('.view-btn[data-view=\"'+view+'\"]').click(),\n  ready: () => !document.querySelector('#btn-add').disabled,\n };\n return true;\n})()",
+      "result": true
+    },
+    {
+      "at": "2026-10-19T13:43:45.046432+00:00",
+      "expression": "window.__hostL1.rows()",
+      "result": [
+        {
+          "id": "57783dee27f14bee8044f447bf48480b",
+          "title": "实验同名任务",
+          "done": true,
+          "state": "已完成"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T13:43:45.049464+00:00",
+      "expression": "window.__hostL1.rows()",
+      "result": [
+        {
+          "id": "57783dee27f14bee8044f447bf48480b",
+          "title": "实验同名任务",
+          "done": true,
+          "state": "已完成"
+        }
+      ]
+    },
+    {
+      "event": "owned_process_tree_stopped",
+      "pid": 90936
+    },
+    {
+      "event": "fresh_product_process",
+      "pid": 40472,
+      "same_data": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\parallel-L1-quick-20261019\\independent-G11-r1\\fresh-data"
+    },
+    {
+      "at": "2026-10-19T13:43:47.957883+00:00",
+      "expression": "(() => {\n const visible = e => !!e && !!e.getClientRects().length;\n const rows = () => [...document.querySelectorAll('#task-list article.task')].filter(visible);\n window.__hostL1 = {\n  rows: () => rows().map(e => ({id:e.dataset.id,title:e.querySelector('.task-title').textContent,done:e.querySelector('[data-action=\"toggle\"]').getAttribute('aria-pressed')==='true',state:e.querySelector('.task-state').textContent})),\n  add: text => {const e=document.querySelector('#task-input');e.value=text;e.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#btn-add').click();},\n  toggle: id => {const e=rows().find(e=>e.dataset.id===id);if(!e)throw Error('host selector missing target row');e.querySelector('[data-action=\"toggle\"]').click();},\n  delete: id => {const e=rows().find(e=>e.dataset.id===id);if(!e)throw Error('host selector missing target row');e.querySelector('[data-action=\"delete\"]').click();},\n  filter: view => document.querySelector('.view-btn[data-view=\"'+view+'\"]').click(),\n  ready: () => !document.querySelector('#btn-add').disabled,\n };\n return true;\n})()",
+      "result": true
+    },
+    {
+      "at": "2026-10-19T13:43:47.960202+00:00",
+      "expression": "window.__hostL1.rows()",
+      "result": [
+        {
+          "id": "57783dee27f14bee8044f447bf48480b",
+          "title": "实验同名任务",
+          "done": true,
+          "state": "已完成"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-19T13:43:48.978018+00:00",
+      "expression": "document.body.innerText",
+      "result": "便签板\n离线待办\n\n视图\n\n全部\n1\n未完成\n0\n已完成\n1\n本地保存 · 无需联网\n\n任务保存在本机，关闭程序后再次打开仍会保留。\n\n全部任务\n1 条 · 0 未完成 / 1 已完成\n＋\n新增\n按新增顺序排列\n1 → 1\n实验同名任务\n已完成"
+    }
+  ],
+  "screenshots": [
+    {
+      "root_pid": 82744,
+      "window_pid": 44968,
+      "owned_pids": [
+        35336,
+        44968,
+        59196,
+        69492,
+        73372,
+        76312,
+        82744,
+        91612
+      ],
+      "screenshot": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\parallel-L1-quick-20261019\\independent-G11-r1\\same-title-isolation.png",
+      "size": [
+        1440,
+        960
+      ]
+    },
+    {
+      "root_pid": 40472,
+      "window_pid": 81912,
+      "owned_pids": [
+        40472,
+        53384,
+        53480,
+        59268,
+        66584,
+        77152,
+        81912,
+        89692
+      ],
+      "screenshot": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\parallel-L1-quick-20261019\\independent-G11-r1\\persisted-final.png",
+      "size": [
+        1440,
+        960
+      ]
+    }
+  ],
+  "source_sha256_before": "3b498cf3c76fe1d4220e557defe1441131a052e5db8a77d62b039d9e1e8af4a2",
+  "final_dom": "便签板\n离线待办\n\n视图\n\n全部\n1\n未完成\n0\n已完成\n1\n本地保存 · 无需联网\n\n任务保存在本机，关闭程序后再次打开仍会保留。\n\n全部任务\n1 条 · 0 未完成 / 1 已完成\n＋\n新增\n按新增顺序排列\n1 → 1\n实验同名任务\n已完成",
+  "disk_evidence": {
+    "records.json": "[\n  {\n    \"id\": \"57783dee27f14bee8044f447bf48480b\",\n    \"title\": \"实验同名任务\",\n    \"done\": true,\n    \"seq\": 1\n  }\n]"
+  },
+  "owned_processes_closed": true,
+  "source_sha256_after": "3b498cf3c76fe1d4220e557defe1441131a052e5db8a77d62b039d9e1e8af4a2",
+  "source_unchanged": true,
+  "complete": true,
+  "Q": 1.0,
+  "finished_at": "2026-10-19T13:43:49.430838+00:00"
+}

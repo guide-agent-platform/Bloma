@@ -1,0 +1,137 @@
+{
+  "run_id": "glm-pair-parallel-L1-quick-20261019-r1-G11",
+  "group": "G11",
+  "experiment_condition": "glm-5.3-flash dispatcher plus two glm-5.3-flash executor sessions",
+  "started_at": "2026-10-19T12:48:38.23Z",
+  "ended_at": "2026-10-19T13:41:26.409Z",
+  "machine_ms": 3168179,
+  "native_outcome": "ready",
+  "product_quality": 1,
+  "product_success": true,
+  "evaluation_evidence_valid": true,
+  "independent_checks": [
+    {
+      "id": "add-trim",
+      "status": "passed"
+    },
+    {
+      "id": "empty-rejection",
+      "status": "passed"
+    },
+    {
+      "id": "toggle-isolation",
+      "status": "passed"
+    },
+    {
+      "id": "filters",
+      "status": "passed"
+    },
+    {
+      "id": "delete-isolation",
+      "status": "passed"
+    },
+    {
+      "id": "restart-persistence",
+      "status": "passed"
+    }
+  ],
+  "source_unchanged": true,
+  "product_hash": "9ae8e38fc00800cdb21232e42d8105ee37d189d939a8700e718e5ef963f26c99",
+  "suite_hash": "14c714554364a7b55136f3e82af63b33f6f201d928d70a9ddf8a78d685e16fd1",
+  "models_observed": {
+    "dispatcher": {
+      "channel_id": "experiment-glm",
+      "model": "glm-5.3-flash",
+      "endpoint_host": "open.bigmodel.cn",
+      "endpoint_fingerprint": "1e90246348f66dd206b4bcbd68e0dff9657bfda32df9ae69b9b2ee7e164251ce",
+      "provider_type": "zhipu-coding"
+    },
+    "executor": {
+      "channel_id": "experiment-glm",
+      "model": "glm-5.3-flash",
+      "endpoint_host": "open.bigmodel.cn",
+      "endpoint_fingerprint": "1e90246348f66dd206b4bcbd68e0dff9657bfda32df9ae69b9b2ee7e164251ce",
+      "provider_type": "zhipu-coding"
+    }
+  },
+  "model_requests_by_role": {
+    "dispatcher": {
+      "requests": 32,
+      "models": [
+        "glm-5.3-flash"
+      ]
+    },
+    "executor": {
+      "requests": 71,
+      "models": [
+        "glm-5.3-flash"
+      ]
+    }
+  },
+  "worker_sessions": 2,
+  "task_count": 5,
+  "peak_overlapping_executor_requests": 2,
+  "physical_peak_evidence": "parallel-start-proof.json",
+  "run_usage": {
+    "project_id": "42487b23-f6c0-47e5-b46b-f607b105ae7b",
+    "logical_queries": 103,
+    "physical_requests": 103,
+    "reported_input": 5168392,
+    "reported_output": 153138,
+    "reported_total": 5321530,
+    "cache_read": 4614272,
+    "cache_creation": 0,
+    "missing_usage_queries": 0,
+    "unmeasured_failed_attempts": 0,
+    "active_queries": 0,
+    "malformed_lines": 0,
+    "by_role": {
+      "experiment_dispatcher": {
+        "queries": 32,
+        "input": 1739861,
+        "output": 37924
+      },
+      "experiment_executor": {
+        "queries": 71,
+        "input": 3428531,
+        "output": 115214
+      }
+    },
+    "by_scope": {
+      "loop": {
+        "queries": 103,
+        "input": 5168392,
+        "output": 153138
+      }
+    },
+    "by_model": {
+      "[\"open.bigmodel.cn\",\"glm-5.3-flash\"]": {
+        "model": "glm-5.3-flash",
+        "endpoint_host": "open.bigmodel.cn",
+        "queries": 103,
+        "input": 5168392,
+        "output": 153138,
+        "cache_read": 4614272,
+        "cache_creation": 0,
+        "missing_usage_queries": 0
+      }
+    },
+    "partial_records": 0,
+    "recording_errors": 0,
+    "complete": true,
+    "scope": "streaming parent/child/auxiliary SDK queries and provider qualification; totals are known reported usage, not a bill; failed attempts without usage remain unknown"
+  },
+  "protocol_rejections": 3,
+  "supervisor_processes_settled": true,
+  "forced_cleanup": false,
+  "independent_scope": "independent real WebView2 DOM control actions; no direct business calls; isolated data; full owned process tree restart",
+  "evidence_original": "C:\\Users\\17359\\AppData\\Local\\Bloma\\parallel-L1-quick-20261019\\independent-G11-r1",
+  "caveats": [
+    "One pilot sample; no model comparison or speedup inference.",
+    "V is configured as deepseek-flash but this group has zero V model requests.",
+    "Native delivery snapshot displays missing LAUNCH.json despite the file existing and independently launched product; platform launch button has not been verified.",
+    "Preparation, qualification and host reviewer usage are separate; provider tokens are not a monetary bill.",
+    "DOM control adapter calibrated after delivery; six expected business criteria and cohort-installed suite were frozen before execution."
+  ],
+  "other_groups": "not_started"
+}

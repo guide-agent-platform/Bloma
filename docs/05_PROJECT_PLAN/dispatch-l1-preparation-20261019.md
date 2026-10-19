@@ -1,6 +1,6 @@
 # L1 quick 并行预实验准备
 
-用户于2026-10-19选择：先准备 L1，等当前 L2 首组收尾后再启动 L1，避免两个执行组争用同一 Coding Plan 通道。L1 的原生需求、PRD、草图和六组环境准备已完成。L2 后被确认进程消失，已按 interrupted 收尾；L1 G11 于北京时间20:48:38在外部看门狗下正式启动。准备与执行分开计量；最初封存时六组执行调用均为0，后续运行不能沿用这个0值作为当前状态。
+用户于2026-10-19选择：先准备 L1，等当前 L2 首组收尾后再启动 L1，避免两个执行组争用同一 Coding Plan 通道。L1 的原生需求、PRD、草图和六组环境准备已完成。L2 后被确认进程消失，已按 interrupted 收尾；L1 G11 于北京时间20:48:38在外部看门狗下正式启动，21:41:26正常交付，随后六项独立 GUI 验收全部通过（Q=1）。其余五组未启动。准备与执行分开计量；最初封存时六组执行调用均为0，后续运行不能沿用这个0值作为当前状态。
 
 L1 原始需求：
 
@@ -41,8 +41,16 @@ L1 运行副本：`C:\Users\17359\.codex\worktrees\l1-preparation-runtime\guide-
 
 四种 GLM 同账号三路组合在晚间复测中再次全部通过，24次物理请求、每组峰值3；属于传输资格而非产品质量。六组在首次执行前重新核对84份输入、94个运行文件及5个驱动/监督文件，模型、业务输入和主包不变；原 readiness 已归档，最新为 `readiness-release.json` 的 supervised-liveness-v2，SHA256=`5ec1e424201ad8b39000ccb405e1b987f5e18c4730deb953ed8370c8ed3161f8`。
 
-L1 G11 当前由隐藏的独立监督进程启动，初始 supervisor/launcher/driver/Electron PID 为91580/89984/77860/56656，均已实测存活并有持续心跳。这些PID只描述该次启动，不是永久身份。原生数据位于 `pilot-r1-runs/G11`，监督状态位于 `supervised-G11`。SDK/原生缺失终态时，监督者仅在确认本地所属进程全部结束后追加中断，未知用量继续保留；不会自动启动其他组。
+L1 G11 由隐藏的独立监督进程启动，初始 supervisor/launcher/driver/Electron PID 为91580/89984/77860/56656，运行期间已实测存活并有持续心跳，结束后均已确认退出。这些PID只描述该次启动，不是永久身份。原生数据位于 `pilot-r1-runs/G11`，监督状态位于 `supervised-G11`。SDK/原生缺失终态时，监督者仅在确认本地所属进程全部结束后追加中断，未知用量继续保留；不会自动启动其他组。
 
 北京时间21:00:11已记录真实组内并行：worker-1（`t1_core_logic`）与worker-2（`t2_ui_design`）两个独立执行会话的物理 HTTP 时间区间重叠，均调用GLM 5.3 Flash，峰值2。此时26次请求、24次已收尾，尚无机器终态或独立Q。[并行启动证据](../../outputs/experiment-L1-20261019/parallel-start-proof.json)保留两个会话的精确传输区间与存活观测，不把“已派出两人”等同于交付成功。
 
-版本化摘要见 [初始起跑摘要](../../outputs/experiment-L1-20261019/pre-execution-readiness.json)、[存活监督升级后的起跑摘要](../../outputs/experiment-L1-20261019/pre-execution-readiness-liveness-v2.json)、[宽窗口草图](../../outputs/experiment-L1-20261019/ux-confirmed-1100.png)、[窄窗口草图](../../outputs/experiment-L1-20261019/ux-confirmed-820.png)。传输容量、文档审阅与独立产品业务 Q 分开，尚无 L1 产品交付或 Q 结果。
+版本化摘要见 [初始起跑摘要](../../outputs/experiment-L1-20261019/pre-execution-readiness.json)、[存活监督升级后的起跑摘要](../../outputs/experiment-L1-20261019/pre-execution-readiness-liveness-v2.json)、[宽窗口草图](../../outputs/experiment-L1-20261019/ux-confirmed-1100.png)、[窄窗口草图](../../outputs/experiment-L1-20261019/ux-confirmed-820.png)。传输容量、文档审阅与独立产品业务 Q 分开。
+
+G11（Flash 调度 + Flash 执行）于21:41:26写入 `run_finished: ready / delivered`，墙钟52分48.179秒；Electron原生 exit/close 均为0，监督者确认进程全部收尾，没有强制清理。配置文件保留的 `running` 字段不能覆盖已有终态。本组原始执行103次逻辑请求、103次物理传输均有终态，无孤儿、损坏记录或缺失usage；调度32次、执行71次，实际模型均为`glm-5.3-flash`，两名实现者处理5项自定任务。仅这一组不足以比较模型能力或并行提速。
+
+独立宿主在交付后按封存的六项业务语义驱动真实 WebView2 窗口，操作仅选择已渲染的输入、按钮和筛选控件，不直接调用业务函数；使用全新数据目录，核对同名任务不同ID，提交空串和纯空格，实际关闭所属产品进程树后用同数据新进程重开。新增去空格、空白拒绝、完成切换隔离、筛选、删除隔离、重启持久化全部通过；截图也已查看。前后源码指纹一致，测试数据位于产品外，未修改被测业务代码。选择器适配在交付后完成，没有改变事前封存的业务期望或分母；它不是可对所有产物直接套用的通用评分器。宿主`evaluate`已登记6/6、Q=1、success=true，`report`确认`evaluation_evidence_valid=true`。原始独立证据位于证据根`independent-G11-r1`；版本化副本与结果见[首组结果](../../outputs/experiment-L1-20261019/G11-result.json)、[独立操作记录](../../outputs/experiment-L1-20261019/G11-independent-review.json)、[界面截图](../../outputs/experiment-L1-20261019/G11-persisted-final.png)。
+
+执行账本报告input总量5,168,392（其中cache-read4,614,272，扣除缓存读取为554,120）、output153,138、cache-creation0；合计5,321,530。它是供应商报告用量，不是费用，不包含共同准备86次、通道资格检查或宿主审阅消耗。已观察到D/E真实调用；本组V配置虽然为DeepSeek Flash，但没有V模型请求，不能据此声称验证了V真实调用链。独立Q来自外部GUI验收。
+
+另保留一个链路疑点：原生交付屏快照仍出现“项目根缺少 LAUNCH.json 启动声明”，而磁盘清单存在且独立产品可启动。尚不能断言这是陈旧显示还是平台启动入口故障；不改本次产物或补造已点按平台按钮的证据。后续组暂不自动启动，先审阅首组的V调用范围与这个交付面板提示。
