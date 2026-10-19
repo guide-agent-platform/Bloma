@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { cancelExperimentProject } from './dispatch-experiment-native-control.mjs'
+import { cancelExperimentProject, nativeHeartbeat, nativeProcessEvent, nativeProcessReceipt } from './dispatch-experiment-native-control.mjs'
 import { assertPreparationResume, preparationTokenCap, selectClarificationAnswer, selectPreparationChoice } from './dispatch-experiment-native-choices.mjs'
 const [command, ...args] = process.argv.slice(2)
 const option = (name, fallback) => { const i = args.indexOf(`--${name}`); return i < 0 ? fallback : args[i + 1] }
@@ -23,7 +23,7 @@ const glmPlan = option('glm-plan', 'regular')
 if (!['regular', 'coding'].includes(glmPlan)) throw new Error('EXPERIMENT_INVALID_GLM_PLAN')
 const clarificationAnswers = option('clarification-answers') ? JSON.parse(readFileSync(option('clarification-answers'), 'utf8')) : []
 if (!Array.isArray(clarificationAnswers)) throw new Error('EXPERIMENT_INVALID_CLARIFICATION_ANSWERS')
-if (!['prepare', 'run', 'seed'].includes(command) || !option('home') || (noMonetaryLimit === Boolean(policyOption))
+if (!['prepare', 'run', 'seed', 'qualify'].includes(command) || !option('home') || (noMonetaryLimit === Boolean(policyOption))
   || home.toLowerCase() === join(homedir(), '.proma').toLowerCase()) throw new Error('EXPERIMENT_DRIVER_ARGUMENTS')
 mkdirSync(reportDir, { recursive: true })
 const project = () => JSON.parse(readFileSync(join(home, 'projects.json'), 'utf8')).projects[0]
@@ -32,6 +32,14 @@ const effectiveOutputLimit = command === 'run' ? config(project().project_id).li
 const credentialsPath = option('credentials', join(process.env.LOCALAPPDATA, 'Bloma', 'dispatch-experiment-20261013', 'credentials.dpapi.json'))
 const electronEnv = { ...process.env, PROMA_HOME: home }
 delete electronEnv.ELECTRON_RUN_AS_NODE
+let qualificationSnapshot
+if (command === 'qualify') {
+  const current = project(), original = config(current.project_id)
+  if (original.state !== 'running' || original.started_at || !original.parent_session_id) throw new Error('EXPERIMENT_QUALIFY_REQUIRES_FRESH_RESTORE')
+  const eventPath = join(home, 'dispatch-experiments/events', `${original.run_id}.jsonl`)
+  const parentPath = join(home, 'agent-sessions', `${original.parent_session_id}.jsonl`)
+  qualificationSnapshot = { eventPath, parentPath, events: readFileSync(eventPath), parent: readFileSync(parentPath) }
+}
 function seed() {
   const script = "$ErrorActionPreference='Stop';$s=Get-Content -LiteralPath $env:BEX_CREDENTIAL_STORE -Raw | ConvertFrom-Json;$r=@{};foreach($n in @('deepseek','glm')){$v=ConvertTo-SecureString $s.$n;$r[$n]=[System.Net.NetworkCredential]::new('', $v).Password};$r | ConvertTo-Json -Compress"
   const keys = JSON.parse(execFileSync('pwsh.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8', windowsHide: true,
@@ -46,20 +54,55 @@ seed()
 if (command === 'seed') { console.log(JSON.stringify({ home, seeded: true })); process.exit(0) }
 const sleep = ms => new Promise(done => setTimeout(done, ms))
 const cli = (...params) => execFileSync(process.execPath, ['scripts/dispatch-experiment.mjs', ...params], { encoding: 'utf8', windowsHide: true }).trim()
-let application, page
+let application, page, heartbeatTimer
 const report = { command, home, resume_preparation: resumePreparation, at: new Date().toISOString(), confirmations: [], outcome: 'running' }
 report.glm_plan = glmPlan
 report.monetary_mode = noMonetaryLimit ? 'unlimited-explicit-user-authorization' : 'policy'
 report.host_output_ceiling = effectiveOutputLimit
 if (command === 'prepare') report.preparation_max_output_tokens = preparationMaxTokens
 const log = message => console.log(`[native-experiment] ${message}`)
+function telemetryContext() {
+  // A fresh prepare has no project/config yet. Do not infer liveness from their state.
+  let current, experiment
+  try { current = project() } catch {}
+  if (current?.project_id) { try { experiment = config(current.project_id) } catch {} }
+  return { project_id: current?.project_id, run_id: experiment?.run_id,
+    current_stage: current?.current_stage, desktop_phase: current?.desktop_phase, state: experiment?.state }
+}
+function writeHeartbeat() {
+  const child = application?.process()
+  if (!child) return
+  try {
+    writeFileSync(join(reportDir, 'heartbeat.json'), JSON.stringify(nativeHeartbeat({
+      ...telemetryContext(), at: new Date().toISOString(), driver_pid: process.pid,
+      electron_pid: child.pid, electron_exit_code: child.exitCode, electron_killed: child.killed,
+    }), null, 2))
+  } catch (error) { log(`heartbeat-write-failed ${error.code ?? 'unknown'}`) }
+}
 try {
   application = await _electron.launch({ args: ['.', `--user-data-dir=${join(home, 'electron-user-data')}`],
     env: { ...electronEnv, BLOMA_DESKTOP_DISPATCH: '1',
       BLOMA_DISPATCH_EXPERIMENT: '1', BLOMA_MONETARY_POLICY: noMonetaryLimit ? '' : policy,
       BLOMA_EXPERIMENT_UNLIMITED_MONETARY: noMonetaryLimit ? '1' : '0',
       BLOMA_EXPERIMENT_MAX_OUTPUT_TOKENS: String(effectiveOutputLimit) }, timeout: 60000 })
-  for (const stream of [application.process().stdout, application.process().stderr]) stream?.on('data', bytes => appendFileSync(join(reportDir, 'main.log'), bytes))
+  const child = application.process()
+  writeFileSync(join(reportDir, 'process-receipt.json'), JSON.stringify(nativeProcessReceipt({
+    at: new Date().toISOString(), driver_pid: process.pid, driver_ppid: process.ppid,
+    electron_pid: child.pid, home, run_id: telemetryContext().run_id,
+  }), null, 2))
+  for (const event of ['exit', 'close']) child.on(event, (exitCode, signal) => {
+    try {
+      appendFileSync(join(reportDir, 'process-events.jsonl'), JSON.stringify(nativeProcessEvent({
+        at: new Date().toISOString(), event, exit_code: exitCode, signal,
+        driver_pid: process.pid, electron_pid: child.pid,
+      })) + '\n')
+    } catch (error) { log(`process-event-write-failed ${error.code ?? 'unknown'}`) }
+    writeHeartbeat()
+  })
+  writeHeartbeat()
+  heartbeatTimer = setInterval(writeHeartbeat, 10000)
+  heartbeatTimer.unref()
+  for (const stream of [child.stdout, child.stderr]) stream?.on('data', bytes => appendFileSync(join(reportDir, 'main.log'), bytes))
   page = await application.firstWindow()
   await page.waitForLoadState('domcontentloaded')
   await application.evaluate(({ BrowserWindow }) => { for (const window of BrowserWindow.getAllWindows()) { window.setBounds({ x: -15000, y: -15000, width: 1280, height: 860 }); window.webContents.setBackgroundThrottling(false) } })
@@ -89,7 +132,7 @@ try {
     if (await projectsNav.isVisible()) await projectsNav.click()
     await page.locator('[data-ai-id="project-list-item"]').click()
     await page.locator('textarea').waitFor()
-    if (!resumePreparation) {
+    if (command === 'run') {
       const continuation = option('continuation-file')
       const message = continuation ? readFileSync(continuation, 'utf8').trim() : '请继续完成已经确认的需求。'
       if (!message) throw new Error('EXPERIMENT_EMPTY_CONTINUATION')
@@ -102,10 +145,17 @@ try {
     }
     report.run_id = original.run_id
   }
-  if (!resumePreparation || resumeAnswer) await page.getByRole('button', { name: '发送消息', exact: true }).click()
+  if (command === 'qualify') {
+    const waitMs = Number(option('qualify-wait-ms', '15000'))
+    if (!Number.isSafeInteger(waitMs) || waitMs < 12000 || waitMs > 60000) throw new Error('EXPERIMENT_INVALID_QUALIFICATION_WAIT')
+    await sleep(waitMs)
+    if (!readFileSync(qualificationSnapshot.eventPath).equals(qualificationSnapshot.events)
+      || !readFileSync(qualificationSnapshot.parentPath).equals(qualificationSnapshot.parent)) throw new Error('EXPERIMENT_QUALIFICATION_CHANGED_HISTORY')
+    report.outcome = 'qualified'; report.model_calls = 0; report.parent_unchanged = true
+  } else if (!resumePreparation || resumeAnswer) await page.getByRole('button', { name: '发送消息', exact: true }).click()
   const deadline = Date.now() + Number(option('timeout-min', command === 'prepare' ? '40' : '32')) * 60000
   let lastAction = 0, lastStatus = '', pendingReview, reviewSequence = 0, lastLiveState = 0
-  while (Date.now() < deadline) {
+  while (command !== 'qualify' && Date.now() < deadline) {
     await sleep(2000)
     const current = project(), experiment = config(current.project_id)
     if (existsSync(stopFile)) {
@@ -221,9 +271,11 @@ try {
   }
 }
 finally {
+  clearInterval(heartbeatTimer)
   if (application) await application.close().catch(() => {})
+  writeHeartbeat()
   report.finished_at = new Date().toISOString()
   writeFileSync(join(reportDir, 'report.json'), JSON.stringify(report, null, 2))
 }
-if (!['prepared', 'machine-finished'].includes(report.outcome)) process.exitCode = 1
+if (!['prepared', 'machine-finished', 'qualified'].includes(report.outcome)) process.exitCode = 1
 log(report.outcome)
