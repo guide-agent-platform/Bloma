@@ -115,6 +115,19 @@ export const PROFILES: readonly ReasoningProfile[] = [
     normalize: normalizeWith('high', (l) => (l === 'off' ? 'off' : l === 'max' ? 'max' : 'high')),
     encode: encodeEffortBased(GLM52_EFFORT),
   },
+  {
+    id: 'glm-5.3-flash',
+    levels: ['low', 'high', 'max'],
+    defaultLevel: 'high',
+    normalize: normalizeWith('high', level => {
+      if (level === 'off') throw new Error('MODEL_THINKING_OFF_UNSUPPORTED: glm-5.3-flash 不支持关闭思考，请选择 low、high 或 max。')
+      return level
+    }),
+    encode: level => {
+      if (level === 'off') throw new Error('MODEL_THINKING_OFF_UNSUPPORTED: glm-5.3-flash 不支持关闭思考，请选择 low、high 或 max。')
+      return { thinking: { type: 'enabled' }, output_config: { effort: GLM53_EFFORT[level] }, omit: false }
+    },
+  },
 ]
 
 /** 仅按模型 ID 匹配（Bloma 全走 anthropic-messages，无 transport 分叉） */
@@ -127,6 +140,7 @@ export function resolveProfile(modelId: string | undefined): ReasoningProfile | 
   if (/^(?:k3(?:-256k)?|kimi-k3)$/.test(id)) return PROFILES[2]
   if (id === 'glm-5.3') return PROFILES[3]
   if (id === 'glm-5.2') return PROFILES[4]
+  if (id === 'glm-5.3-flash') return PROFILES[5]
   return undefined
 }
 
@@ -153,8 +167,9 @@ export const THINKING_OMIT_PROVIDERS = new Set([
 
 /**
  * 主入口：给 anthropicMessagesQuery 消费。
- * 与现状兼容契约：level === 'off' 或模型未识别 → 行为与今天完全一致
+ * 与现状兼容契约：既有模型 level === 'off' 或模型未识别 → 行为与今天完全一致
  * （thinking:disabled + 既有 400 降级），保证零回归。
+ * GLM-5.3-Flash 仅支持启用思考，显式 off 在 HTTP 之前拒绝。
  */
 export function buildThinkingFragment(
   modelId: string | undefined,

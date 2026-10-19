@@ -28,6 +28,7 @@ test('Coding Plan uses native Anthropic route and encrypted credentials', async 
   assert.equal(channels[1].provider_type, 'zhipu-coding')
   assert.equal(channels[1].base_url, 'https://open.bigmodel.cn/api/anthropic')
   assert.equal(channels[1].models[0].name, 'glm-5.3')
+  assert.equal(channels[1].models.filter(model => model.id === 'glm-5.3-flash' && model.enabled && model.supports_tools).length, 1)
   assert.equal(channels[1].max_tokens, 131072)
   assert.equal(channels[0].models[0].name, 'deepseek-flash')
   assert.ok(!JSON.stringify(channels).includes('test-glm'))

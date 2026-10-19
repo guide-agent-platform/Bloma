@@ -23,12 +23,14 @@ app.whenReady().then(() => {
     if (!key) throw new Error('EXPERIMENT_CREDENTIAL_MISSING')
     return { id, name, provider_type, base_url, api_key: safeStorage.encryptString(key).toString('hex'),
       models: [{ id: model, name: model, enabled: true, supports_tools: true },
+        ...(id === 'experiment-glm' ? [{ id: 'glm-5.3-flash', name: 'GLM 5.3 Flash', enabled: true, supports_tools: true }] : []),
         ...(id === 'experiment-ds' ? [{ id: 'deepseek-v4-pro', name: 'deepseek-v4-pro', enabled: true, supports_tools: true }] : [])],
       enabled: true, max_tokens: id === 'experiment-ds' ? preparationMaxTokens : Math.min(preparationMaxTokens, 131072) }
   })
   mkdirSync(home, { recursive: true })
   writeFileSync(join(home, 'bloma-channels.json'), JSON.stringify({ version: 1, channels }), 'utf8')
-  // Preparation and all non-experiment auxiliary roles use the common M1.
+  // Common preparation and auxiliary routing remain fixed; measured D/E/V roles
+  // are bound explicitly by the restored experiment, including GLM Flash pairs.
   writeFileSync(join(home, 'category-routing.json'), JSON.stringify({ version: 1, routing: Object.fromEntries(
     ['guide', 'prd', 'sketch', 'mvp', 'judge', 'audit', 'summary'].map(category => [category, { channel_id: 'experiment-ds' }])) }), 'utf8')
   console.log('EXPERIMENT_CHANNELS_ENCRYPTED')

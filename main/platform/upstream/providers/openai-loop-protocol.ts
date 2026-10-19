@@ -31,10 +31,11 @@ const textOf = (value: unknown): string => typeof value === 'string' ? value : A
 
 /** Input is the fully hydrated Anthropic-shaped body used by the native agent loop. */
 export function openAiLoopBody(body: Record<string, unknown>): Record<string, unknown> {
-  if (String(body.model).toLowerCase() === 'glm-5.3' && (body.thinking as { type?: string } | undefined)?.type === 'disabled') {
+  const model = String(body.model).toLowerCase()
+  if ((model === 'glm-5.3' || model === 'glm-5.3-flash') && (body.thinking as { type?: string } | undefined)?.type === 'disabled') {
     // Regular API returned HTTP 400/1210: this model always thinks. Fail locally
     // rather than paying for a retry or silently changing the requested setting.
-    throw new Error('MODEL_THINKING_OFF_UNSUPPORTED: glm-5.3 不支持关闭思考，请选择 low、high 或 max。')
+    throw new Error(`MODEL_THINKING_OFF_UNSUPPORTED: ${model} 不支持关闭思考，请选择 low、high 或 max。`)
   }
   const messages: Record<string, unknown>[] = []
   if (body.system) messages.push({ role: 'system', content: body.system })

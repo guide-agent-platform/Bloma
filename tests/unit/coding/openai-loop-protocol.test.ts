@@ -3,15 +3,16 @@ import { OPENAI_LOOP_ADAPTER, openAiLoopBody } from '../../../main/platform/upst
 import { anthropicMessagesQueryViaProviders } from '../../../main/platform/upstream/providers/loop-query'
 
 describe('regular GLM API protocol', () => {
-  it('rejects unsupported GLM-5.3 thinking-off before any physical HTTP request', async () => {
+  it.each(['glm-5.3', 'glm-5.3-flash'])('rejects unsupported %s thinking-off before any physical HTTP request', async model => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
     try {
       await expect((async () => {
         for await (const _ of anthropicMessagesQueryViaProviders('probe', { sessionId: 'off-preflight', signal: new AbortController().signal,
-          env: { PATH: 'test', ANTHROPIC_AUTH_TOKEN: 'test', ANTHROPIC_BASE_URL: 'https://open.bigmodel.cn/api/paas/v4', ANTHROPIC_MODEL: 'glm-5.3', ANTHROPIC_PROVIDER_TYPE: 'zhipu' }, maxTokens: 512, thinkingLevel: 'off' })) void _
+          env: { PATH: 'test', ANTHROPIC_AUTH_TOKEN: 'test', ANTHROPIC_BASE_URL: 'https://open.bigmodel.cn/api/paas/v4', ANTHROPIC_MODEL: model, ANTHROPIC_PROVIDER_TYPE: 'zhipu' }, maxTokens: 512, thinkingLevel: 'off' })) void _
       })()).rejects.toThrow('MODEL_THINKING_OFF_UNSUPPORTED')
       expect(fetchMock).not.toHaveBeenCalled()
+      expect(() => openAiLoopBody({ model, thinking: { type: 'disabled' }, messages: [] })).toThrow(`MODEL_THINKING_OFF_UNSUPPORTED: ${model}`)
       expect(openAiLoopBody({ model: 'other-model', thinking: { type: 'disabled' }, messages: [] }).thinking).toEqual({ type: 'disabled' })
     } finally { vi.unstubAllGlobals() }
   })
@@ -32,7 +33,7 @@ describe('regular GLM API protocol', () => {
     expect(OPENAI_LOOP_ADAPTER.parseSSELine('{"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":10,"prompt_tokens_details":{"cached_tokens":40}}}'))
       .toEqual([{ type: 'usage', inputTokens: 60, outputTokens: 10, cacheReadInputTokens: 40 }])
   })
-  it('native query sends regular API authentication and assembles indexed parallel tool calls', async () => {
+  it.each(['glm-5.3', 'glm-5.3-flash'])('%s sends regular API authentication and assembles indexed parallel tool calls', async model => {
     const chunks = [
       { choices: [{ delta: { tool_calls: [{ index: 0, id: 'a', function: { name: 'read_file', arguments: '{"path":' } }, { index: 1, id: 'b', function: { name: 'read_file', arguments: '{"path":' } }] } }] },
       { choices: [{ delta: { tool_calls: [{ index: 1, function: { arguments: '"b"}' } }, { index: 0, function: { arguments: '"a"}' } }] } }] },
@@ -42,9 +43,10 @@ describe('regular GLM API protocol', () => {
     try {
       const messages = []
       for await (const message of anthropicMessagesQueryViaProviders('probe', { sessionId: 'test', signal: new AbortController().signal,
-        env: { PATH: 'test', ANTHROPIC_AUTH_TOKEN: 'test', ANTHROPIC_BASE_URL: 'https://open.bigmodel.cn/api/paas/v4', ANTHROPIC_MODEL: 'glm-5.3', ANTHROPIC_PROVIDER_TYPE: 'zhipu' }, maxTokens: 8192, thinkingLevel: 'low' })) messages.push(message)
+        env: { PATH: 'test', ANTHROPIC_AUTH_TOKEN: 'test', ANTHROPIC_BASE_URL: 'https://open.bigmodel.cn/api/paas/v4', ANTHROPIC_MODEL: model, ANTHROPIC_PROVIDER_TYPE: 'zhipu' }, maxTokens: 8192, thinkingLevel: 'high' })) messages.push(message)
       expect(fetchMock.mock.calls[0][0]).toBe('https://open.bigmodel.cn/api/paas/v4/chat/completions')
       expect(fetchMock.mock.calls[0][1].headers).toEqual({ authorization: 'Bearer test', 'content-type': 'application/json' })
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ model, thinking: { type: 'enabled' }, reasoning_effort: 'high' })
       expect(messages.filter(m => m.type === 'assistant').map(m => m.message?.content)).toEqual([
         [{ type: 'tool_use', id: 'a', name: 'read_file', input: { path: 'a' } }], [{ type: 'tool_use', id: 'b', name: 'read_file', input: { path: 'b' } }] ])
       expect(messages.at(-1)?.usage).toEqual({ input_tokens: 100, output_tokens: 10 })

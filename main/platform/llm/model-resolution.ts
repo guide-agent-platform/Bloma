@@ -182,7 +182,7 @@ export function capMaxTokensForProvider(maxTokens: number, providerType?: string
   if (providerType === 'deepseek' && /^deepseek-(?:flash|v4-(?:flash|pro))(?:-|$)/i.test(modelId ?? '')) return Math.min(maxTokens, 393216)
   // Regular GLM-5.3 also advertises 128K output. Preserve the configured intent
   // in the experiment and apply the model's limit only at transport.
-  if (providerType === 'zhipu' && modelId?.toLowerCase() === 'glm-5.3') return Math.min(maxTokens, 131072)
+  if (providerType === 'zhipu' && ['glm-5.3', 'glm-5.3-flash'].includes(modelId?.toLowerCase() ?? '')) return Math.min(maxTokens, 131072)
   const cap = PROVIDER_MAX_TOKENS_CAP[providerType]
   return cap !== undefined ? Math.min(maxTokens, cap) : maxTokens
 }

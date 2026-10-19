@@ -25,6 +25,28 @@ describe('reasoning-profile（推理档位移植）', () => {
     expect(resolveProfile('glm-5.3')?.id).toBe('glm-5.3')
   })
 
+  it('resolves only the exact GLM-5.3-Flash model and exposes its supported thinking levels', () => {
+    const profile = resolveProfile('GLM-5.3-FLASH')!
+    expect(profile.id).toBe('glm-5.3-flash')
+    expect(profile.levels).toEqual(['low', 'high', 'max'])
+    expect(profile.defaultLevel).toBe('high')
+    expect(resolveProfile('glm-5.3-flash-unknown')).toBeUndefined()
+  })
+
+  it.each(['low', 'high', 'max'] as const)('GLM-5.3-Flash %s enables thinking with the requested effort', level => {
+    expect(buildThinkingFragment('glm-5.3-flash', 'zhipu-coding', level)).toEqual({
+      thinking: { type: 'enabled' }, output_config: { effort: level }, omit: false,
+    })
+  })
+
+  it('defaults GLM-5.3-Flash to high and rejects explicit off instead of silently changing it', () => {
+    expect(buildThinkingFragment('glm-5.3-flash', 'zhipu-coding', undefined)).toEqual({
+      thinking: { type: 'enabled' }, output_config: { effort: 'high' }, omit: false,
+    })
+    expect(() => buildThinkingFragment('glm-5.3-flash', 'zhipu-coding', 'off')).toThrow('MODEL_THINKING_OFF_UNSUPPORTED: glm-5.3-flash')
+    expect(() => resolveProfile('glm-5.3-flash')!.encode('off')).toThrow('MODEL_THINKING_OFF_UNSUPPORTED')
+  })
+
   it('[S4-REASON-003] resolve 大小写不敏感', () => {
     expect(resolveProfile('GLM-5.3')?.id).toBe('glm-5.3')
   })

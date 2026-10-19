@@ -147,6 +147,56 @@ describe('experimental output ceiling at the SDK boundary', () => {
   })
 })
 
+describe('GLM-5.3-Flash thinking and output protocol', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  const flashOptions = (provider: 'zhipu-coding' | 'zhipu', thinkingLevel?: SDKQueryOptions['thinkingLevel']) => opts({
+    maxTokens: 640000, thinkingLevel,
+    env: { ...opts().env, ANTHROPIC_MODEL: 'glm-5.3-flash', ANTHROPIC_PROVIDER_TYPE: provider,
+      ANTHROPIC_BASE_URL: provider === 'zhipu' ? 'https://open.bigmodel.cn/api/paas/v4' : 'https://open.bigmodel.cn/api/anthropic' },
+  })
+
+  it.each(['zhipu-coding', 'zhipu'] as const)('encodes explicit high with the 128K output cap on %s', async provider => {
+    mockStreamOk()
+    for await (const _ of anthropicMessagesQueryViaProviders('implement', flashOptions(provider, 'high'))) void _
+    expect(parsedBody().max_tokens).toBe(131072)
+    expect(parsedBody().thinking).toEqual({ type: 'enabled' })
+    if (provider === 'zhipu-coding') {
+      expect(captured!.url).toBe('https://open.bigmodel.cn/api/anthropic/v1/messages')
+      expect(parsedBody().output_config).toEqual({ effort: 'high' })
+    } else {
+      expect(captured!.url).toBe('https://open.bigmodel.cn/api/paas/v4/chat/completions')
+      expect(parsedBody().reasoning_effort).toBe('high')
+    }
+  })
+
+  it.each(['0', '1'])('keeps default high effort with BLOMA_SHOW_THINKING=%s', async debug => {
+    vi.stubEnv('BLOMA_SHOW_THINKING', debug)
+    mockStreamOk()
+    for await (const _ of anthropicMessagesQueryViaProviders('implement', flashOptions('zhipu-coding'))) void _
+    expect(parsedBody().thinking).toEqual({ type: 'enabled' })
+    expect(parsedBody().output_config).toEqual({ effort: 'high' })
+  })
+
+  it.each(['zhipu-coding', 'zhipu'] as const)('rejects off before transport on %s', async provider => {
+    await expect((async () => {
+      for await (const _ of anthropicMessagesQueryViaProviders('implement', flashOptions(provider, 'off'))) void _
+    })()).rejects.toThrow('MODEL_THINKING_OFF_UNSUPPORTED: glm-5.3-flash')
+    expect(h.streamSSE).not.toHaveBeenCalled()
+  })
+
+  it('does not remove mandatory thinking or effort and silently retry a rejected Flash request', async () => {
+    h.streamSSE.mockRejectedValue(new HTTPError('output_config effort rejected', 400))
+    await expect((async () => {
+      for await (const _ of anthropicMessagesQueryViaProviders('implement', flashOptions('zhipu-coding', 'high'))) void _
+    })()).rejects.toThrow('SDK request failed with 400')
+    expect(h.streamSSE).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(h.streamSSE.mock.calls[0][0].request.body)).toMatchObject({
+      thinking: { type: 'enabled' }, output_config: { effort: 'high' },
+    })
+  })
+})
+
 describe('请求体拼装：历史窗口与 system 提取', () => {
   it('history 路径：system 提取到顶层；history+prompt 追加为末轮 user；maxTokens 缺省 640000；temperature/tools 透传', async () => {
     mockStreamOk()

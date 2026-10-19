@@ -17,7 +17,13 @@ const sha = path => createHash('sha256').update(readFileSync(path)).digest('hex'
 const cli = args => JSON.parse(execFileSync(process.execPath, ['scripts/dispatch-experiment.mjs', ...args], { windowsHide: true, encoding: 'utf8', maxBuffer: 12000000 }))
 const prior = read(join(source, 'manifest.json')), project = prior.project_id
 const stage = join(out, 'stage')
-const pair = { m1: { channel_id: 'experiment-ds', model_id: 'deepseek-flash' }, m2: { channel_id: 'experiment-glm', model_id: 'glm-5.3' }, verifier: { channel_id: 'experiment-ds', model_id: 'deepseek-flash' } }
+const pairIndex = args.indexOf('--model-pair-file')
+const pair = pairIndex < 0
+  ? { m1: { channel_id: 'experiment-ds', model_id: 'deepseek-flash' }, m2: { channel_id: 'experiment-glm', model_id: 'glm-5.3' }, verifier: { channel_id: 'experiment-ds', model_id: 'deepseek-flash' } }
+  : read(resolve(args[pairIndex + 1]))
+for (const role of ['m1', 'm2', 'verifier']) {
+  if (!pair[role] || !/^[A-Za-z0-9._-]+$/.test(pair[role].channel_id ?? '') || !/^[A-Za-z0-9._-]+$/.test(pair[role].model_id ?? '')) throw Error('INVALID_MODEL_PAIR')
+}
 const limits = { max_workers: 2, max_tasks: 16, dispatcher_turns: 60, executor_turns: 100, max_requests: 256, max_output_tokens: 640000, wall_ms: 3600000 }
 const settings = { temperature: 0.1, thinking_level: 'high', response_header_timeout_ms: 120000 }
 put('models.json', pair); put('limits.json', limits)

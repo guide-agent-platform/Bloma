@@ -117,7 +117,9 @@ async function* anthropicMessagesQueryViaProvidersInner(prompt: string, options:
   if (options.temperature !== undefined) body.temperature = options.temperature
   if (systemText) body.system = systemText
   if (options.tools?.length) body.tools = options.tools
-  if (showThinking) {
+  // Flash requires thinking: keep its effort protocol even when debug logging is on.
+  const thinkingRequired = model.toLowerCase() === 'glm-5.3-flash'
+  if (showThinking && !thinkingRequired) {
     const devFragment = buildThinkingFragment(model, providerType, 'off')
     if (devFragment.omit) {
       console.warn('[providers-query] omit 渠道忽略 BLOMA_SHOW_THINKING（thinking 字段会 400）')
@@ -127,7 +129,7 @@ async function* anthropicMessagesQueryViaProvidersInner(prompt: string, options:
       body.thinking = { type: 'enabled', budget_tokens: Math.max(256, budget) }
     }
   } else {
-    const fragment = buildThinkingFragment(model, providerType, options.thinkingLevel ?? 'off')
+    const fragment = buildThinkingFragment(model, providerType, options.thinkingLevel ?? (thinkingRequired ? 'high' : 'off'))
     if (!fragment.omit) {
       if (fragment.thinking) body.thinking = fragment.thinking
       if (fragment.output_config) body.output_config = fragment.output_config
@@ -212,7 +214,7 @@ async function* anthropicMessagesQueryViaProvidersInner(prompt: string, options:
       // （HTTP 层失败先于流），重试无双发风险。
       if (error instanceof HTTPError && error.status === 400) {
         const detail = extractErrorMessage(error.message)
-        const thinkingRejected = (body.thinking as { type?: string } | undefined) !== undefined
+        const thinkingRejected = !thinkingRequired && (body.thinking as { type?: string } | undefined) !== undefined
           && /thinking|reasoning|effort|output_config/i.test(detail)
         const imageRejected = JSON.stringify(body.messages ?? []).includes('"type":"image"')
           && /image|multimodal|vision|多模态/i.test(detail)

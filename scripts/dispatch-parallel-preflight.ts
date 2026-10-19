@@ -18,6 +18,8 @@ process.env.PROMA_HOME = join(out, 'home')
 const live = args.includes('--live')
 const recover = args.includes('--recover')
 const uncapped = args.includes('--no-monetary-limit')
+const glmFlashPair = args.includes('--glm-flash-pair')
+if (glmFlashPair && (!uncapped || recover)) throw new Error('PREFLIGHT_GLM_PAIR_REQUIRES_UNLIMITED_FRESH_RUN')
 const concurrencyIndex = args.indexOf('--concurrency')
 const concurrency = concurrencyIndex < 0 ? 2 : Number(args[concurrencyIndex + 1])
 if (![2, 3].includes(concurrency)) throw new Error('PREFLIGHT_CONCURRENCY_INVALID')
@@ -26,7 +28,7 @@ if (!recover && existsSync(join(out, 'preflight.json'))) throw new Error('PREFLI
 const report: Record<string, any> = recover ? JSON.parse(readFileSync(join(out, 'preflight.json'), 'utf8'))
   : { at: new Date().toISOString(), kind: 'transport_preflight', live,
     product_quality: null, metadata: {}, probes: [], policies: {}, physical_requests: 0,
-    monetary_mode: uncapped ? 'unlimited-explicit-user-authorization' : 'existing-policy', concurrency }
+    monetary_mode: uncapped ? 'unlimited-explicit-user-authorization' : 'existing-policy', concurrency, glm_flash_pair: glmFlashPair }
 const save = () => writeFileSync(join(out, 'preflight.json'), JSON.stringify(report, null, 2))
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
 const decrypt = "$ErrorActionPreference='Stop';$s=Get-Content -LiteralPath $env:BEX_CREDENTIAL_STORE -Raw|ConvertFrom-Json;$r=@{};foreach($n in @('deepseek','glm')){$v=ConvertTo-SecureString $s.$n;$r[$n]=[System.Net.NetworkCredential]::new('', $v).Password};$r|ConvertTo-Json -Compress"
@@ -93,12 +95,14 @@ function restoreCodingPolicy(path: string, previous: string) {
     report.policies.glm.budget_after = readMonetaryBudget(path)
 }
 
-async function probe(provider: 'deepseek' | 'zhipu-coding', key: string, policyPath: string) {
-  const model = provider === 'deepseek' ? 'deepseek-flash' : 'glm-5.3'
+async function probe(provider: 'deepseek' | 'zhipu-coding', key: string, policyPath: string, models?: string[], batch: string = provider) {
+  if (models && models.length !== concurrency) throw new Error('PREFLIGHT_BATCH_SIZE')
   const counts = { admitted: 0, active: 0, peak: 0 }
   const windows: Array<{ start: number; finish: number }> = []
   async function worker(index: number) {
-    const row: Record<string, any> = { provider, model, index, calls: [], tool_roundtrip: false }
+    const model = models?.[index - 1] ?? (provider === 'deepseek' ? 'deepseek-flash' : 'glm-5.3')
+    const sessionId = `preflight-${batch}-${index}`
+    const row: Record<string, any> = { provider, model, index, batch, session_id: sessionId, calls: [], tool_roundtrip: false }
     report.probes.push(row)
     const messages: ConversationTurn[] = [{ role: 'user', content: `Transport test ${index}. Call echo_probe with value "probe-${index}" exactly once. After its tool result, reply only OK.` }]
     const query = async () => {
@@ -106,7 +110,7 @@ async function probe(provider: 'deepseek' | 'zhipu-coding', key: string, policyP
       const blocks: MessageContentBlock[] = []; let text = '', usage, stopReason
       try {
         const options: SDKQueryOptions = {
-          sessionId: `preflight-${provider}-${index}`, signal: AbortSignal.timeout(120000),
+          sessionId, signal: AbortSignal.timeout(120000),
           env: { ...process.env, PATH: process.env.PATH ?? process.env.Path ?? '', ANTHROPIC_AUTH_TOKEN: key,
             ANTHROPIC_MODEL: model, ANTHROPIC_PROVIDER_TYPE: provider,
             ANTHROPIC_BASE_URL: provider === 'deepseek' ? 'https://api.deepseek.com/anthropic' : 'https://open.bigmodel.cn/api/anthropic' },
@@ -118,6 +122,10 @@ async function probe(provider: 'deepseek' | 'zhipu-coding', key: string, policyP
             if (url.protocol !== 'https:' || url.pathname !== (provider === 'deepseek' ? '/anthropic/v1/messages' : '/api/anthropic/v1/messages')
               || url.hostname !== (provider === 'deepseek' ? 'api.deepseek.com' : 'open.bigmodel.cn')) throw new Error('PREFLIGHT_ENDPOINT_CHANGED')
             if (Buffer.byteLength(request.body) > 12000) throw new Error('PREFLIGHT_BODY_LIMIT')
+            const body = JSON.parse(request.body)
+            if (body.model !== model) throw new Error('PREFLIGHT_MODEL_CHANGED')
+            if (model === 'glm-5.3-flash' && (body.thinking?.type !== 'enabled' || body.output_config?.effort !== 'high')) throw new Error('PREFLIGHT_FLASH_THINKING_MISMATCH')
+            row.effective_request = { model: body.model, thinking: body.thinking, output_config: body.output_config, max_tokens: body.max_tokens }
             if (++counts.admitted > concurrency * 2) throw new Error('PREFLIGHT_PHYSICAL_REQUEST_LIMIT')
             save()
           },
@@ -158,22 +166,34 @@ async function probe(provider: 'deepseek' | 'zhipu-coding', key: string, policyP
   await Promise.allSettled(Array.from({ length: concurrency }, (_, i) => worker(i + 1)))
   report[`${provider}_concurrency`] = { peak_query_lifetimes: counts.peak, physical_admissions: counts.admitted, windows,
     note: 'Provider-level overlap; real child-loop scheduling is verified separately.' }
+  ;(report.probe_batches ??= []).push({ batch, provider, models: models ?? [provider === 'deepseek' ? 'deepseek-flash' : 'glm-5.3'], physical_admissions: counts.admitted })
 }
 
 function physicalEvidence() {
   const events = readFileSync(join(process.env.PROMA_HOME!, 'usage-ledger/parallel-preflight.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line))
   const spans = events.filter(e => e.event === 'transport_started').map(start => {
     const end = events.find(e => e.event === 'transport_finished' && e.query_id === start.query_id && e.transport_index === start.transport_index)
-    return { model: start.model, query_id: start.query_id, transport_index: start.transport_index,
+    return { model: start.model, session_id: start.session_id, query_id: start.query_id, transport_index: start.transport_index,
       start: start.at, finish: end?.at, status: end?.status }
   })
   report.physical_transport_spans = spans
-  for (const model of ['deepseek-flash', 'glm-5.3']) {
+  const peakOf = (selected: typeof spans) => {
+    const points = selected.filter(span => span.finish).flatMap(span => [
+      { at: Date.parse(span.start), delta: 1 }, { at: Date.parse(span.finish!), delta: -1 }]).sort((a, b) => a.at - b.at || a.delta - b.delta)
+    let active = 0, peak = 0
+    for (const point of points) { active += point.delta; peak = Math.max(peak, active) }
+    return peak
+  }
+  for (const model of new Set<string>(report.probes.map((row: any) => row.model))) {
     const points = spans.filter(span => span.model === model && span.finish).flatMap(span => [
       { at: Date.parse(span.start), delta: 1 }, { at: Date.parse(span.finish!), delta: -1 }]).sort((a, b) => a.at - b.at || a.delta - b.delta)
     let active = 0, peak = 0
     for (const point of points) { active += point.delta; peak = Math.max(peak, active) }
     report[`${model}_physical_peak`] = peak
+  }
+  for (const batch of report.probe_batches ?? []) {
+    const sessions = new Set(report.probes.filter((row: any) => row.batch === batch.batch).map((row: any) => row.session_id))
+    batch.physical_peak = peakOf(spans.filter(span => sessions.has(span.session_id)))
   }
 }
 
@@ -194,8 +214,18 @@ try {
   save()
   if (live) {
     if (uncapped) {
-      await probe('deepseek', keys.deepseek, '')
-      await probe('zhipu-coding', keys.glm, '')
+      if (glmFlashPair) {
+        if (concurrency !== 3) throw new Error('PREFLIGHT_GLM_PAIR_REQUIRES_THREE_WAY')
+        for (const [batch, models] of [
+          ['G11', ['glm-5.3-flash', 'glm-5.3-flash', 'glm-5.3-flash']],
+          ['G12', ['glm-5.3-flash', 'glm-5.3', 'glm-5.3']],
+          ['G21', ['glm-5.3', 'glm-5.3-flash', 'glm-5.3-flash']],
+          ['G22', ['glm-5.3', 'glm-5.3', 'glm-5.3']],
+        ] as Array<[string, string[]]>) await probe('zhipu-coding', keys.glm, '', models, batch)
+      } else {
+        await probe('deepseek', keys.deepseek, '')
+        await probe('zhipu-coding', keys.glm, '')
+      }
     } else {
       if (!dsPolicy) throw new Error('PREFLIGHT_EXISTING_DS_BUDGET_REQUIRED')
       await probe('deepseek', keys.deepseek, dsPolicy)
@@ -204,8 +234,11 @@ try {
     }
     physicalEvidence()
     if (dsPolicy) report.policies.deepseek.budget_after = readMonetaryBudget(dsPolicy)
-    report.passed = report.probes.length === concurrency * 2 && report.probes.every((row: any) => row.tool_roundtrip)
-      && report['deepseek-flash_physical_peak'] === concurrency && report['glm-5.3_physical_peak'] === concurrency
+    report.passed = glmFlashPair
+      ? report.probes.length === 12 && report.probes.every((row: any) => row.tool_roundtrip)
+        && report.probe_batches.length === 4 && report.probe_batches.every((batch: any) => batch.physical_peak === 3)
+      : report.probes.length === concurrency * 2 && report.probes.every((row: any) => row.tool_roundtrip)
+        && report['deepseek-flash_physical_peak'] === concurrency && report['glm-5.3_physical_peak'] === concurrency
   }
   }
 } catch (error) {
