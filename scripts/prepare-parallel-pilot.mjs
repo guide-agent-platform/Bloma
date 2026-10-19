@@ -9,6 +9,9 @@ const source = option('source-snapshot'), evaluator = option('evaluator'), out =
 const prefixIndex = args.indexOf('--run-prefix')
 const prefix = prefixIndex < 0 ? 'parallel-L2-20261018-r1' : args[prefixIndex + 1]
 if (!/^[A-Za-z0-9_-]{1,70}$/.test(prefix ?? '')) throw Error('INVALID_RUN_PREFIX')
+const taskIndex = args.indexOf('--task-id')
+const taskId = taskIndex < 0 ? 'L2-v2-parallel' : args[taskIndex + 1]
+if (!/^[A-Za-z0-9_-]{1,80}$/.test(taskId ?? '')) throw Error('INVALID_TASK_ID')
 if (existsSync(out)) throw Error('PRESERVE_EXISTING_PILOT')
 mkdirSync(out, { recursive: true })
 const read = path => JSON.parse(readFileSync(path, 'utf8').replace(/^\uFEFF/, ''))
@@ -37,7 +40,7 @@ cpSync(evaluator, join(out, 'evaluator'), { recursive: true, errorOnExist: true,
 const frozen = cli(['freeze', '--home', stage, '--project', project, '--out', join(out, 'snapshot')])
 const matrix = cli(['matrix', '--home', join(out, 'cohort'), '--snapshot', join(out, 'snapshot'), '--models', join(out, 'models.json'),
   '--run-prefix', prefix, '--worker-limit', '2', '--limits', join(out, 'limits.json'),
-  '--evaluator', join(out, 'evaluator'), '--task', 'L2-v2-parallel', '--repeat', 'r1'])
+  '--evaluator', join(out, 'evaluator'), '--task', taskId, '--repeat', 'r1'])
 const manifest = read(join(out, 'snapshot', 'manifest.json'))
 const business = Object.entries(prior.files).filter(([path]) => path.includes('/documents/') || path.includes('/generated-projects/'))
 if (business.some(([path, hash]) => manifest.files[path] !== hash)) throw Error('BUSINESS_INPUT_CHANGED')
