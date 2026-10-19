@@ -43,4 +43,6 @@ L1 运行副本：`C:\Users\17359\.codex\worktrees\l1-preparation-runtime\guide-
 
 L1 G11 当前由隐藏的独立监督进程启动，初始 supervisor/launcher/driver/Electron PID 为91580/89984/77860/56656，均已实测存活并有持续心跳。这些PID只描述该次启动，不是永久身份。原生数据位于 `pilot-r1-runs/G11`，监督状态位于 `supervised-G11`。SDK/原生缺失终态时，监督者仅在确认本地所属进程全部结束后追加中断，未知用量继续保留；不会自动启动其他组。
 
+北京时间21:00:11已记录真实组内并行：worker-1（`t1_core_logic`）与worker-2（`t2_ui_design`）两个独立执行会话的物理 HTTP 时间区间重叠，均调用GLM 5.3 Flash，峰值2。此时26次请求、24次已收尾，尚无机器终态或独立Q。[并行启动证据](../../outputs/experiment-L1-20261019/parallel-start-proof.json)保留两个会话的精确传输区间与存活观测，不把“已派出两人”等同于交付成功。
+
 版本化摘要见 [初始起跑摘要](../../outputs/experiment-L1-20261019/pre-execution-readiness.json)、[存活监督升级后的起跑摘要](../../outputs/experiment-L1-20261019/pre-execution-readiness-liveness-v2.json)、[宽窗口草图](../../outputs/experiment-L1-20261019/ux-confirmed-1100.png)、[窄窗口草图](../../outputs/experiment-L1-20261019/ux-confirmed-820.png)。传输容量、文档审阅与独立产品业务 Q 分开，尚无 L1 产品交付或 Q 结果。

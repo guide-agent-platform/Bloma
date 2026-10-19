@@ -1,0 +1,65 @@
+{
+  "at": "2026-10-19T13:00:44.099Z",
+  "kind": "real-within-group-executor-overlap",
+  "task_id": "L1",
+  "group": "G11",
+  "run_id": "glm-pair-parallel-L1-quick-20261019-r1-G11",
+  "executor_model": "glm-5.3-flash",
+  "workers": [
+    {
+      "id": "worker-1",
+      "child_session_id": "a49ad489-48d6-4ab4-b987-f5a3948ff88a",
+      "task_ids": [
+        "t1_core_logic"
+      ],
+      "has_executed": true
+    },
+    {
+      "id": "worker-2",
+      "child_session_id": "587b6912-ad36-425e-b4f0-44ef0d13f67e",
+      "task_ids": [
+        "t2_ui_design"
+      ],
+      "has_executed": true
+    }
+  ],
+  "physical_peak": 2,
+  "overlap_at": "2026-10-19T13:00:11.341Z",
+  "overlap_spans": [
+    {
+      "session_id": "a49ad489-48d6-4ab4-b987-f5a3948ff88a",
+      "role": "experiment_executor",
+      "model": "glm-5.3-flash",
+      "query_id": "9d70f33d-6f46-488f-900d-3b887b0f7300",
+      "transport_index": 1,
+      "start": "2026-10-19T13:00:11.302Z",
+      "finish": "2026-10-19T13:00:17.430Z",
+      "status": "completed"
+    },
+    {
+      "session_id": "587b6912-ad36-425e-b4f0-44ef0d13f67e",
+      "role": "experiment_executor",
+      "model": "glm-5.3-flash",
+      "query_id": "b96b137a-4f08-44f2-a336-33ad15352ce8",
+      "transport_index": 1,
+      "start": "2026-10-19T13:00:11.341Z",
+      "finish": "2026-10-19T13:00:19.025Z",
+      "status": "completed"
+    }
+  ],
+  "liveness": {
+    "driver_pid": 77860,
+    "electron_pid": 56656,
+    "supervisor_pid": 91580,
+    "driver_alive": true,
+    "electron_alive": true,
+    "supervisor_alive": true,
+    "native_heartbeat_at": "2026-10-19T13:00:36.409Z",
+    "supervisor_heartbeat_at": "2026-10-19T13:00:42.850Z"
+  },
+  "model_requests_at_observation": 26,
+  "completed_physical_at_observation": 24,
+  "terminal": null,
+  "product_quality": null,
+  "qualification": "Live Coding Plan requests from two distinct assigned implementer sessions; delivery and independent six-item business acceptance remain unfinished."
+}
