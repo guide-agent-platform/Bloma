@@ -2,15 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { decideBlocks } from '../support/guide-decide-stream'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
 
-vi.mock('../../main/coding/programming-orchestrator', () => ({
-  runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
-  resolvePrdBackplane: vi.fn(async (_input: unknown, requirements: unknown) => ({
+vi.mock('../../main/guide/pipeline', async importOriginal => ({ ...await importOriginal<object>(), resolvePrdBackplane: vi.fn(async (_input: unknown, requirements: unknown) => ({
     name: '未命名项目',
     positioning: '个人记账工具',
     requirements,
-  })),
-  setProgrammingEventPublisher: vi.fn(),
-}))
+  })) }))
+vi.mock('../../main/platform/programming-events', async importOriginal => ({ ...await importOriginal<object>(), setProgrammingEventPublisher: vi.fn() }))
 vi.mock('../../main/delivery/track-analytics', () => ({ trackAnalytics: vi.fn() }))
 vi.mock('../../main/project/document-engine', () => ({ syncDocuments: vi.fn(() => ({ documents: [], stale_documents: [] })) }))
 vi.mock('../../main/project/project-service', () => ({

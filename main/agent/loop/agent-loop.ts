@@ -1,6 +1,6 @@
 import type { AgentEvent, AgentLoopStatus, LoopTerminationDetail, LoopValidationSnapshot, MessageContentBlock, PastedImageRef, PromaPermissionMode } from '../../../shared/types'
-import { getAgentSessionPath } from '../../../storage/config-paths'
-import { appendJsonLine } from '../../../storage/json-store'
+
+
 import { appendSessionMessage } from '../../platform/sessions/session-tree'
 import { buildAttachmentTools } from '../tools/attachment-tools'
 import { materialImageRefs, renderMaterialContext } from '../../platform/attachments/material-context'
@@ -745,7 +745,7 @@ export async function runAgentLoop(input: AgentLoopInput): Promise<AgentLoopResu
             if (steerConfirmEnabled() && entry.steerId) settleSteerEntry(input.sessionId, entry.steerId, 'rejected')
           } else {
             // 内容不丢、并入对话历史：下一条消息/下一个 run 恢复时模型可见
-            appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: wrapSteerContent(entry.content) }])
+            appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: wrapSteerContent(entry.content) }], 'user')
             if (steerConfirmEnabled() && entry.steerId) settleSteerEntry(input.sessionId, entry.steerId, 'deferred_next_run')
           }
         }
@@ -1256,7 +1256,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
       const steerEntries = drainSteerQueue(input.sessionId)
       for (const entry of steerEntries) {
         const wrapped = wrapSteerContent(entry.content)
-        appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: wrapped }])
+        appendLoopMessage(input.sessionId, 'user', [{ type: 'text', text: wrapped }], 'user')
         messages.push({ role: 'user', content: [{ type: 'text', text: wrapped }] })
         // I3（P7-7，仅 on 时）：注入完成是 merged_this_run 的唯一事实源——payload 追加
         //  steer_id/status，状态账本同点推进（off 时 entry.steerId 缺省，字节不变）。

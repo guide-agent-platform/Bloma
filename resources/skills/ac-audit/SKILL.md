@@ -18,7 +18,7 @@ description: Bloma 验收标准审计 SOP——多角色对抗审查（Attacker/
 | Reviewer | 中立 | 裁决 upheld/dismissed/escalate，输出按严重度排序的修复清单 |
 
 - 三角色必须独立上下文，不可复用会话
-- 多厂商模型承担：Attacker=deepseek / Defender=glm / Reviewer=qwen（`scripts/multi-vendor-run.mjs`）
+- 审查角色使用本次明确指定的渠道和模型，记录实际绑定；不复用历史账号短ID或旧三模型脚本。付费审阅只在调用方已获授权的范围内执行。
 
 ## 3. 收敛与执行
 - 父会话读 Reviewer 清单逐条评估采纳；文件变更只由父会话执行

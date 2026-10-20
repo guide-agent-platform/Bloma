@@ -2,65 +2,34 @@
  * 需求确认流（PR4a 拆出）：待确认快照、确认启动流、resolveRequirementConfirm 出口。
  * 纯机械搬移（零行为变化）；对外契约经 guide-agent-service re-export 保持不变。
  */
-import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
-import type { AgentEvent, AgentMessage, AgentSendMessageInput, MessageContentBlock, Project, ProjectMode, ResearchIdea } from '../../../shared/types'
-import { getAgentSessionPath } from '../../../storage/config-paths'
-import { appendJsonLine } from '../../../storage/json-store'
-import { appendSessionMessage } from '../../platform/sessions/session-tree'
-import { routeDialogue, type ClarificationOption } from '../dialogue-router'
-import { loadPromptOverride } from '../../agent/prompting/prompt-config'
-import { parseDecisionText, recordDecision } from '../../project/decision-log'
-import { syncDocuments } from '../../project/document-engine'
-import { researchMarketSimilar, normalizeResearchQuery, type MarketResearch } from '../guide-research'
-import {
-  PRD_REVIEW_OPTION_OVERRIDE,
-  PRD_REVIEW_OPTION_SUPPLEMENT,
-  publishPrdReviewCard,
-  resolvePrdReviewAnswers,
-  resumePrdReviewOverride,
-  runPrdReviewGate,
-  takePendingPrdReview,
-  type PrdReviewIssue,
-} from '../../review/prd-review'
-import {
-  PRD_CONFIRM_OPTION_ADJUST,
-  PRD_CONFIRM_OPTION_CONFIRM,
-  consumePrdConfirmAdjust,
-  consumePrdConfirmDismiss,
-  publishPrdConfirmCard,
-  resolvePrdConfirmCardAnswer,
-  resumePrdConfirmConfirmed,
-} from '../prd-confirm'
-import { resolveChannelEnv } from '../../platform/llm/runtime-fallback'
-import { resolveRoutedChannelId } from '../../platform/llm/category-routing'
-import { getChannelByIdRaw } from '../../platform/llm/channel-manager'
-import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../orchestration/orchestrator'
-import { trackAnalytics } from '../../delivery/track-analytics'
-import { runAgentLoop } from '../../agent/loop/agent-loop'
-import { buildGuideTools, type GuideDecision } from '../guide-tools'
-import {
-  detectOrphanEnrichmentClarification,
-  hasPendingEnrichmentClarification,
-  isEnrichmentClarificationAnswer,
-  recordEnrichmentClarificationAnswered,
-  recordEnrichmentClarificationExhausted,
-  recordEnrichmentClarificationTimeout,
-  readLastEnrichmentClarificationRequests,
-  shouldSuspendForEnrichmentClarification,
-  suspendForEnrichmentClarification,
-  takePendingEnrichmentClarification,
-  type EnrichmentClarificationRequest,
-} from '../clarification'
-import { resolvePrdBackplane, setProgrammingEventPublisher, nextRequirementId, refineModificationDescription } from '../../coding/programming-orchestrator'
-import { normalizeRequirementUpdate, applyNormalization, resolveRoutedRequirementId } from '../requirement-normalizer'
-import { buildReferenceSection } from '../web-reference-extractor'
-import { findProject, updateProject, readLastSketchRequirements, recordSketchGenerated } from '../../project/project-service'
-import { buildClarifyInjection } from '../../agent/prompting/template-injection'
-import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
-import { isAutoDelegationText, readPrimaryIntent } from '../../platform/sessions/session-service'
-import type { PrdBackplane, SketchRequirement } from '../../coding/sketch-engine'
-import { isRecord } from '../../../shared/validators'
+/**
+ * 需求确认流（PR4a 拆出）：待确认快照、确认启动流、resolveRequirementConfirm 出口。
+ * 纯机械搬移（零行为变化）；对外契约经 guide-agent-service re-export 保持不变。
+ */
+
+
+import type { AgentEvent, AgentSendMessageInput, ResearchIdea } from '../../../shared/types';
+
+
+
+
+
+import { recordDecision } from '../../project/decision-log';
+
+import { researchMarketSimilar, type MarketResearch } from '../guide-research';
+
+
+
+
+
+import type { GuideModelOptions } from '../../orchestration/orchestrator';
+
+
+import { updateProject } from '../../project/project-service';
+
+
+import type { SketchRequirement } from "../../model/prd-backplane";
+
 
 type GuideEventPublisher = (event: AgentEvent) => void
 

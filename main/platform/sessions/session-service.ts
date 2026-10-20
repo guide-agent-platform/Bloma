@@ -29,7 +29,7 @@ import type {
   SessionCleanOrphansResult,
 } from '../../../shared/types'
 import { getAgentSessionPath, getAgentSessionsIndexPath, getPromaHome } from '../../../storage/config-paths'
-import { readJsonFile, writeJsonFile } from '../../../storage/json-store'
+import { writeJsonFile } from '../../../storage/json-store';
 import { appendSessionMessage } from './session-tree'
 
 /**

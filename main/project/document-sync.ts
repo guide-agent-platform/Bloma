@@ -6,22 +6,15 @@
 import { randomUUID } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import type {
-  DocumentReadResult,
-  DocumentRef,
-  DocumentSyncInput,
-  DocumentSyncResult,
-  Project,
-  TemplateType,
-} from '../../shared/types'
+import type { DocumentReadResult, DocumentRef, DocumentSyncInput, DocumentSyncResult } from '../../shared/types';
 import { getDocumentsDir } from '../../storage/config-paths'
 import { findProject, readLastSketchRequirements } from './project-service'
-import { nextRequirementId } from '../coding/programming-orchestrator'
-import type { PrdBackplane, RequirementStatus, SketchRequirement } from '../coding/sketch-engine'
-import { buildPrdDocumentFallback, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, backplaneTemplateMeta } from '../coding/sketch-engine'
-import { parseEarsAssertion } from '../guide/ears-vocabulary'
-import { gwtRequiredCategories } from '../agent/prompting/template-injection'
-import { describeEffect, describeTrigger, parseBehaviorAssertion } from '../verification/behavior-assertions'
+
+import type { PrdBackplane, SketchRequirement } from "../model/prd-backplane";
+
+
+
+
 
 
 
@@ -48,7 +41,7 @@ interface ManifestEntry {
   status: DocumentRef['status']
 }
 
-import { buildPrdBackplane, readPrdBackplane, readManifest, writeManifest, renderPrdJson, renderPrdDraft, renderPrdFull, renderTestReportMount, renderGwtSkeleton, renderChangelog, renderModeUpgraded, renderArchitecturePuml, renderSprintPlan, readPersistedUserConfirmedAt } from './prd-store'
+import { buildPrdBackplane, readManifest, writeManifest, renderPrdJson, renderPrdDraft, renderPrdFull, renderTestReportMount, renderGwtSkeleton, renderChangelog, renderModeUpgraded, renderArchitecturePuml, renderSprintPlan, readPersistedUserConfirmedAt } from './prd-store';
 
 export function syncDocuments(input: DocumentSyncInput, backplaneOverride?: PrdBackplane): DocumentSyncResult {
   const project = findProject(input.project_id)

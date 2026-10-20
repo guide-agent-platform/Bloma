@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { runAgentLoop, type AgentLoopInput, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../../../main/agent/loop/agent-loop'
-import { renderTaskChecklist, type LoopPlan } from '../../../main/agent/loop/loop-planner'
 import type { SDKMessage } from '../../../shared/types'
 import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../../../main/orchestration/orchestrator'
 
@@ -74,42 +73,6 @@ function userTexts(messages: ConversationTurn[]): string[] {
     .filter((turn) => turn.role === 'user')
     .map((turn) => (typeof turn.content === 'string' ? turn.content : JSON.stringify(turn.content)))
 }
-
-describe('renderTaskChecklist — plan 合同 checklist 化', () => {
-  const plan: LoopPlan = {
-    filesToTouch: [
-      { path: 'index.html', reason: '入口与承接位' },
-      { path: 'src/styles.css', reason: '街机视觉基线' },
-      { path: 'src/game/state.js', reason: '状态机' },
-      { path: 'src/game/entities.js', reason: '实体系统' },
-      { path: 'src/app.js', reason: '装配入口' },
-      { path: 'server/routes/scores.js', reason: '最高分持久化' },
-    ],
-    reuse: [],
-    verification: ['F-001 点击开始游戏按钮→开始页面消失', 'GET /api/scores 返回 {highScore:number}'],
-    risks: [],
-  }
-
-  it('分组有序编号 + 工作纪律 + 验证口径按文件名映射', () => {
-    const text = renderTaskChecklist(plan)
-    expect(text).toContain('## 实施清单（按序推进，完成一项即勾选进入下一项）')
-    expect(text).toContain('1. [ ] 入口与样式：index.html、src/styles.css')
-    expect(text).toContain('src/game/ 模块：src/game/state.js、src/game/entities.js')
-    expect(text).toContain('装配入口：src/app.js')
-    expect(text).toContain('后端路由：server/routes/scores.js')
-    // 验证映射：scores 命中 GET /api/scores 行；index/stem 无命中不硬挂
-    expect(text).toContain('验证：GET /api/scores 返回 {highScore:number}')
-    expect(text).not.toContain('F-001 点击开始游戏按钮')
-    expect(text).toContain('禁止先全读再全写')
-    expect(text).toContain('微调用 edit_file')
-    // 编号连续
-    for (const n of [1, 2, 3, 4]) expect(text).toContain(`${n}. [ ] `)
-  })
-
-  it('空 filesToTouch 返回空串', () => {
-    expect(renderTaskChecklist({ filesToTouch: [], reuse: [], verification: [], risks: [] })).toBe('')
-  })
-})
 
 describe('W5+（狗粮 52f19ab4 增强）：清单完成后零验证的重复强提醒 + grace 退化补口', () => {
   const originalHome = process.env.PROMA_HOME

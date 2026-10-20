@@ -8,7 +8,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import type { AgentEvent, AgentSendMessageInput, ProjectMode } from '../../shared/types'
-import type { SketchRequirement } from '../coding/sketch-engine'
+import type { SketchRequirement } from "../model/prd-backplane";
 import type { SDKQuery } from '../orchestration/orchestrator'
 import { recordDecision } from '../project/decision-log'
 import { readPrdBackplane } from '../project/prd-store'

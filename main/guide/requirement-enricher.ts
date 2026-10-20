@@ -1,7 +1,7 @@
 import type { SDKQuery } from '../orchestration/orchestrator'
 import { loadPromptOverride } from '../agent/prompting/prompt-config'
-import type { SketchRequirement } from '../coding/sketch-engine'
-import { isPlaceholderAssertion } from '../coding/sketch-engine'
+import type { SketchRequirement } from "../model/prd-backplane";
+import { isPlaceholderAssertion } from "../model/prd-backplane";
 import { parseBehaviorAssertion } from '../verification/behavior-assertions'
 import { categoryTemperature } from '../platform/llm/model-resolution'
 import { readConversation } from './prd-engine-llm'

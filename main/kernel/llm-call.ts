@@ -17,7 +17,7 @@
  */
 
 import type { ConversationTurn, SDKQuery, SDKQueryOptions } from '../orchestration/orchestrator'
-import type { MessageContentBlock, SDKMessage } from '../../shared/types'
+import type { MessageContentBlock } from '../../shared/types';
 import type { ThinkingLevel } from '../../shared/reasoning-profile'
 
 /** 单轮尝试失败观测（2026-10-03 e99e6319 事故）：调用方可据此把真实原因写进决策日志。 */

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { syncDocuments, markPrdUserConfirmed } from '../../main/project/document-engine'
 import { createProject, recordSketchGenerated } from '../../main/project/project-service'
 import { getDocumentsDir } from '../../storage/config-paths'
-import type { PrdBackplane, SketchRequirement } from '../../main/coding/sketch-engine'
+import type { PrdBackplane, SketchRequirement } from "../../main/model/prd-backplane";
 
 /**
  * 活背板裁剪版（2026-10-03 删留执行）：updateRequirementStatus 及其回写/重生成清除/

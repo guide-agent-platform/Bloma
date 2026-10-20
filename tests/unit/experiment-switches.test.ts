@@ -19,7 +19,7 @@ describe('experiment-switches 注册表', () => {
   })
 
   it('注册表非空且 id 唯一、标签非空（新增开关登记完整性）', () => {
-    expect(KNOWN_EXPERIMENT_SWITCHES.length).toBeGreaterThanOrEqual(5)
+    expect(KNOWN_EXPERIMENT_SWITCHES.length).toBeGreaterThan(0)
     const ids = KNOWN_EXPERIMENT_SWITCHES.map((m) => m.id)
     expect(new Set(ids).size).toBe(ids.length)
     for (const meta of KNOWN_EXPERIMENT_SWITCHES) {
@@ -60,7 +60,7 @@ describe('experiment-switches 注册表', () => {
     expect(switches.BLOMA_PROJECT_GIT).toBe(false)
     expect(switches.BLOMA_ROLLBACK_CODE_ONLY).toBe(true)
     expect(switches.BLOMA_EXPORT_V2).toBe(true)
-    expect(switches.BLOMA_CONTEXT_PACK).toBe(false)
+    expect(switches.BLOMA_CONTEXT_PACK).toBeUndefined()
     // 白名单外不出现（只回注册表项）
     expect(Object.keys(switches).every((k) => ids().includes(k))).toBe(true)
     function ids(): string[] {

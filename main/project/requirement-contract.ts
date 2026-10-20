@@ -31,10 +31,13 @@ export function acceptanceAssociationIssues(backplane: PrdBackplane): string[] {
 
 /** Test registrations bind to behavior as well as identity; priority is scheduling only. */
 export function requirementEvidenceHash(backplane: PrdBackplane, item: SketchRequirement): string {
-  return digest([item.id, item.description, item.story ?? '', item.behavior_assertions ?? [],
+  const fields: unknown[] = [item.id, item.description, item.story ?? '', item.behavior_assertions ?? [],
     item.scope_notes ?? '', trustedAcceptance(backplane, item) ?? '', backplane.constraints ?? [], backplane.out_of_scope ?? [],
     backplane.ux ?? null, backplane.shape ?? null, backplane.gdd ?? null, backplane.ai_capabilities ?? [], backplane.key_tasks ?? [],
-    backplane.assumptions ?? [], backplane.requirements_model ?? null])
+    backplane.assumptions ?? [], backplane.requirements_model ?? null]
+  // Preserve historical hashes for old features; a new declaration invalidates old evidence.
+  if (item.capabilities !== undefined) fields.push({ capabilities: item.capabilities })
+  return digest(fields)
 }
 
 export function requirementVerificationContext(backplane: PrdBackplane): unknown {

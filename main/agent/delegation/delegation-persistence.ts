@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { appendJsonLine } from '../../../storage/json-store'
+
 import { appendSessionMessage } from '../../platform/sessions/session-tree'
 import { settleSessionRecord } from '../../platform/sessions/session-service'
 import { getAgentSessionPath, getAgentSessionsIndexPath } from '../../../storage/config-paths'

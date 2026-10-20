@@ -4,10 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../../main/coding/programming-orchestrator', () => ({
-  runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
-  setProgrammingEventPublisher: vi.fn(),
-}))
+vi.mock('../../main/platform/programming-events', async importOriginal => ({ ...await importOriginal<object>(), setProgrammingEventPublisher: vi.fn() }))
 vi.mock('../../main/delivery/track-analytics', () => ({
   trackAnalytics: vi.fn(),
 }))

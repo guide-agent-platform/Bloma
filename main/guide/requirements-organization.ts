@@ -48,6 +48,7 @@ export const ORGANIZED_PRD_SYSTEM_PROMPT = `你是 Bloma 的需求分析师。�
 原话、目标、功能是不同层次。候选功能尚未冻结，可拆分/合并；不把整段原话或“你帮我决定”变成 F-001。功能数量由独立业务边界决定，没有 3~5 项上限，也不按按钮机械拆分。
 输出顶层 name、positioning、form、requirements、requirements_model、out_of_scope、assumptions，并按实际产品输出 ux、shape、gdd 等已有补充契约。
 requirements:[{id:"F-001",description:"独立能力",story:"用户为什么需要它",priority:"P0|P1|P2",origin:"user|guide"}]。描述说清能力，不复制全文；不丢用户指定的实现/运行约束。首次编号从 F-001 顺序递增；重整已有结构化模型时沿用已有同义功能编号，新增取最大编号+1，不能将旧编号分配给另一件事。
+每项另输出 capabilities:[]，只登记该项真实需要的验证能力：llm=真实模型HTTP调用，speech=语音识别/转写，microphone=真实音频采集，prefix_rename=文件系统前缀改名，rename_undo=同一文件改名业务的撤销。普通整理/排序不等于AI，联系人改名不等于文件改名；排除项不登记能力，不能用关键词相似代替操作对象判断。没有这些能力时明确空数组。此字段是宿主内部验证元数据，不为用户另加技术需求。
 requirements_model:{
  version:1, goal:"谁在什么场景下解决什么问题", target_users:["目标用户"],
  entities:[{id:"O-001",name:"业务对象",description:"含义与生命周期",attributes:["重要属性"]}],

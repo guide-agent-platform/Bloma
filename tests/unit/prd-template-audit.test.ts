@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ruleGateReview } from '../../main/review/prd-review'
 import { syncDocuments } from '../../main/project/document-engine'
 import { createProject, recordSketchGenerated } from '../../main/project/project-service'
-import type { PrdBackplane, SketchRequirement } from '../../main/coding/sketch-engine'
+import type { PrdBackplane, SketchRequirement } from "../../main/model/prd-backplane";
 
 /** 注入点④内审变体 + ⑧judge 版本一致性（P6，最后做——消费前面所有产物）。 */
 

@@ -12,7 +12,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { extname, join, relative } from 'node:path'
-import { getDocumentsDir, getPromaHome } from '../../storage/config-paths'
+import { getDocumentsDir } from '../../storage/config-paths';
 
 /** 地图注入预算（字符）：对齐 compacting-window DIGEST_MAX_CHARS 纪律 */
 export const PROJECT_MAP_MAX_CHARS = 1200

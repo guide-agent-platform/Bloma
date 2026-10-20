@@ -10,7 +10,19 @@
  * pending 为进程内存态（与 guide 线确认卡同口径）：应用重启丢卡 = 回到 verify，
  * 用户发任意消息重跑 verify 收口会再次触发本门，无死锁。
  */
-import type { DesktopDispatchRunResult } from './dispatcher-loop'
+/**
+ * longterm MVP 确认门（2026-10-04 确认门新规，实施稿《Bloma-确认门与呈现层-20261004》）。
+ *
+ * 拍板矩阵：longterm＝PRD+UX+MVP 三道——verify 全绿后、delivered 前交用户过目
+ * （截图/文件清单/DELIVERY 摘要；右栏 DeliveryPanel 同步可见）。确认 → 交付收口
+ * （复用发卡时装配的通知数据，含 driverReport 等运行期证据）；调整（卡选项或挂起
+ * 期间任意普通非停止消息）→ 由 desktop-route 回炉 implement（【交付前迭代】任务书，
+ * 与 delivered 反馈回炉同机制）。quick 不设（快速直通道不变）。
+ *
+ * pending 为进程内存态（与 guide 线确认卡同口径）：应用重启丢卡 = 回到 verify，
+ * 用户发任意消息重跑 verify 收口会再次触发本门，无死锁。
+ */
+
 import type { DesktopRouteDeps } from './desktop-route'
 import { verificationFingerprint } from './verification-fingerprint'
 import { MVP_REVIEW_RELATIVE_PATH } from './host-verification-outputs'

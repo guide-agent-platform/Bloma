@@ -5,8 +5,8 @@ import {
   renderResponseVocabularyForPrompt,
   renderTriggerVocabularyForPrompt,
 } from './ears-vocabulary'
-import type { SketchRequirement } from '../coding/sketch-engine'
-import { requirementPriority } from '../coding/sketch-engine'
+import type { SketchRequirement } from "../model/prd-backplane";
+import { requirementPriority } from "../model/prd-backplane";
 import { categoryTemperature } from '../platform/llm/model-resolution'
 import { callLlmForJson } from '../kernel/llm-call'
 

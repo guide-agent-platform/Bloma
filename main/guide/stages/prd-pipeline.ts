@@ -2,66 +2,39 @@
  * PRD 收敛链（PR4a 拆出）：runPrdPipeline 统一收口（需求工程腿+六维审查+熔断转确认）。
  * 纯机械搬移（零行为变化）；对外契约经 guide-agent-service re-export 保持不变。
  */
-import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
-import type { AgentEvent, AgentMessage, AgentSendMessageInput, MessageContentBlock, Project, ProjectMode, ResearchIdea } from '../../../shared/types'
-import { getAgentSessionPath } from '../../../storage/config-paths'
-import { appendJsonLine } from '../../../storage/json-store'
+/**
+ * PRD 收敛链（PR4a 拆出）：runPrdPipeline 统一收口（需求工程腿+六维审查+熔断转确认）。
+ * 纯机械搬移（零行为变化）；对外契约经 guide-agent-service re-export 保持不变。
+ */
+
+
+import type { AgentEvent, ResearchIdea } from '../../../shared/types';
+
+
 import { appendSessionMessage } from '../../platform/sessions/session-tree'
-import { routeDialogue, type ClarificationOption } from '../dialogue-router'
-import { loadPromptOverride } from '../../agent/prompting/prompt-config'
-import { parseDecisionText, recordDecision } from '../../project/decision-log'
+
+
+import { recordDecision } from '../../project/decision-log';
 import { syncDocuments } from '../../project/document-engine'
-import { researchMarketSimilar, normalizeResearchQuery, type MarketResearch } from '../guide-research'
-import {
-  PRD_REVIEW_OPTION_OVERRIDE,
-  PRD_REVIEW_OPTION_SUPPLEMENT,
-  publishPrdReviewCard,
-  resolvePrdReviewAnswers,
-  resumePrdReviewOverride,
-  runPrdReviewGate,
-  takePendingPrdReview,
-  type PrdReviewIssue,
-} from '../../review/prd-review'
-import {
-  PRD_CONFIRM_OPTION_ADJUST,
-  PRD_CONFIRM_OPTION_CONFIRM,
-  consumePrdConfirmAdjust,
-  consumePrdConfirmDismiss,
-  publishPrdConfirmCard,
-  resolvePrdConfirmCardAnswer,
-  resumePrdConfirmConfirmed,
-} from '../prd-confirm'
+import { researchMarketSimilar } from '../guide-research';
+import { publishPrdReviewCard, runPrdReviewGate } from '../../review/prd-review';
+import { publishPrdConfirmCard } from '../prd-confirm';
 import { resolveChannelEnv } from '../../platform/llm/runtime-fallback'
 import { resolveRoutedChannelId } from '../../platform/llm/category-routing'
 import { getChannelByIdRaw } from '../../platform/llm/channel-manager'
-import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../orchestration/orchestrator'
+
 import { trackAnalytics } from '../../delivery/track-analytics'
-import { runAgentLoop } from '../../agent/loop/agent-loop'
-import { buildGuideTools, type GuideDecision } from '../guide-tools'
-import {
-  detectOrphanEnrichmentClarification,
-  hasPendingEnrichmentClarification,
-  isEnrichmentClarificationAnswer,
-  recordEnrichmentClarificationAnswered,
-  recordEnrichmentClarificationExhausted,
-  recordEnrichmentClarificationTimeout,
-  readLastEnrichmentClarificationRequests,
-  shouldSuspendForEnrichmentClarification,
-  suspendForEnrichmentClarification,
-  takePendingEnrichmentClarification,
-  type EnrichmentClarificationRequest,
-} from '../clarification'
+
+
+import { recordEnrichmentClarificationExhausted, recordEnrichmentClarificationTimeout, shouldSuspendForEnrichmentClarification, suspendForEnrichmentClarification, type EnrichmentClarificationRequest } from '../clarification';
 import { evaluateShapeGate } from '../prd-engine-llm'
-import { resolvePrdBackplane, setProgrammingEventPublisher, nextRequirementId, refineModificationDescription } from '../../coding/programming-orchestrator'
-import { normalizeRequirementUpdate, applyNormalization, resolveRoutedRequirementId } from '../requirement-normalizer'
-import { buildReferenceSection } from '../web-reference-extractor'
-import { findProject, updateProject, readLastSketchRequirements, recordSketchGenerated } from '../../project/project-service'
-import { buildClarifyInjection } from '../../agent/prompting/template-injection'
-import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
-import { isAutoDelegationText, readPrimaryIntent } from '../../platform/sessions/session-service'
-import type { PrdBackplane, SketchRequirement } from '../../coding/sketch-engine'
-import { isRecord } from '../../../shared/validators'
+import { resolvePrdBackplane } from "../pipeline";
+import { nextRequirementId } from "../../model/requirement-utils";
+import { updateProject } from '../../project/project-service';
+
+
+import type { PrdBackplane, SketchRequirement } from "../../model/prd-backplane";
+
 import { PrdStructureError, prdStructureIssues } from '../../model/requirements-model'
 
 type GuideEventPublisher = (event: AgentEvent) => void

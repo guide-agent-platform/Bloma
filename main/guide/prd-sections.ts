@@ -18,8 +18,27 @@
  * - 12.4 的「项目名称」= name（已有字段，不设章节）、「核心功能」= requirements。
  */
 
-import type { PrdBackplane, PrdSectionId } from '../coding/sketch-engine'
-import { requirementPriority } from '../coding/sketch-engine'
+/**
+ * PRD 章节 schema 与必填矩阵（2026-09-02 周计划 §5 P1；方案 §5.1）。
+ *
+ * 一份章节定义 = {id, 必填矩阵（模式×硬约束等级）, 数据源, 消费者清单}，带版本字段。
+ * 章节是**背板字段的视图映射**，不是新存储层——背板（sketch-engine.ts PrdBackplane）
+ * 是唯一真相源，本模块只定义「哪些章节、何时必填、数据从哪来、谁消费」，
+ * 防 Kiro 三件套式独立文档结构引入双真相源（纪律第 3 条）。
+ *
+ * 必填矩阵展开 PRD 12.4（方案 §二）：
+ * - 宽松（personal_tool）：定位/功能/页面/GWT/范围外五必填（quick 基底）；
+ * - 标准（web_fullstack/desktop_tool）：+ 目标用户（personas）+ 验收标准（assertions
+ *   完备性升级）+ API Spec（interface_spec）；
+ * - 严格：+ 用户故事/竞品分析（二期，不做，类型保留）。
+ *
+ * 调研对照（research/P1-章节schema与EARS词表-借鉴笔记.md）：
+ * - Spec Kit 的 NEEDS CLARIFICATION 上限 3 + 按 impact 排序 → 澄清问题框架（注入点②）；
+ * - OpenSpec「不许为满足校验编造需求」→ 完备性检查只标记 missing，不要求 LLM 编内容；
+ * - 12.4 的「项目名称」= name（已有字段，不设章节）、「核心功能」= requirements。
+ */
+import type { PrdBackplane, PrdSectionId } from "../model/prd-backplane";
+import { requirementPriority } from "../model/prd-backplane";
 import type { ConstraintLevel, ProjectMode } from '../../shared/types'
 
 /** 章节 schema 版本（结构变更时 +1；§6 注入点⑧ judge 轻量版本一致性校验消费）。2026-10-06 +ux（体验契约章节）→ v2。 */

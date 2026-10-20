@@ -2,69 +2,37 @@
  * 向导运行时件（PR4a 拆出）：默认系统提示词、Guide JSON 解析、消息文本抽取、渠道主机判定。
  * 纯机械搬移（零行为变化）；对外契约经 guide-agent-service re-export 保持不变。
  */
-import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
-import type { AgentEvent, AgentMessage, AgentSendMessageInput, MessageContentBlock, Project, ProjectMode, ResearchIdea } from '../../../shared/types'
-import { getAgentSessionPath } from '../../../storage/config-paths'
-import { appendJsonLine } from '../../../storage/json-store'
-import { appendSessionMessage } from '../../platform/sessions/session-tree'
-import { routeDialogue, type ClarificationOption } from '../dialogue-router'
-import { loadPromptOverride } from '../../agent/prompting/prompt-config'
-import { parseDecisionText, recordDecision } from '../../project/decision-log'
-import { syncDocuments } from '../../project/document-engine'
-import { researchMarketSimilar, normalizeResearchQuery, type MarketResearch } from '../guide-research'
-import {
-  PRD_REVIEW_OPTION_OVERRIDE,
-  PRD_REVIEW_OPTION_SUPPLEMENT,
-  publishPrdReviewCard,
-  resolvePrdReviewAnswers,
-  resumePrdReviewOverride,
-  runPrdReviewGate,
-  takePendingPrdReview,
-  type PrdReviewIssue,
-} from '../../review/prd-review'
-import {
-  PRD_CONFIRM_OPTION_ADJUST,
-  PRD_CONFIRM_OPTION_CONFIRM,
-  consumePrdConfirmAdjust,
-  consumePrdConfirmDismiss,
-  publishPrdConfirmCard,
-  resolvePrdConfirmCardAnswer,
-  resumePrdConfirmConfirmed,
-} from '../prd-confirm'
-import { resolveChannelEnv } from '../../platform/llm/runtime-fallback'
-import { resolveRoutedChannelId } from '../../platform/llm/category-routing'
-import { getChannelByIdRaw } from '../../platform/llm/channel-manager'
-import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../orchestration/orchestrator'
-import { trackAnalytics } from '../../delivery/track-analytics'
-import { runAgentLoop } from '../../agent/loop/agent-loop'
-import { buildGuideTools, type GuideDecision } from '../guide-tools'
-import {
-  detectOrphanEnrichmentClarification,
-  hasPendingEnrichmentClarification,
-  isEnrichmentClarificationAnswer,
-  recordEnrichmentClarificationAnswered,
-  recordEnrichmentClarificationExhausted,
-  recordEnrichmentClarificationTimeout,
-  readLastEnrichmentClarificationRequests,
-  shouldSuspendForEnrichmentClarification,
-  suspendForEnrichmentClarification,
-  takePendingEnrichmentClarification,
-  type EnrichmentClarificationRequest,
-} from '../clarification'
-import { resolvePrdBackplane, setProgrammingEventPublisher, nextRequirementId, refineModificationDescription } from '../../coding/programming-orchestrator'
-import { normalizeRequirementUpdate, applyNormalization, resolveRoutedRequirementId } from '../requirement-normalizer'
-import { buildReferenceSection } from '../web-reference-extractor'
-import { findProject, updateProject, readLastSketchRequirements, recordSketchGenerated } from '../../project/project-service'
-import { buildClarifyInjection } from '../../agent/prompting/template-injection'
-import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
-import { isAutoDelegationText, readPrimaryIntent } from '../../platform/sessions/session-service'
-import type { PrdBackplane, SketchRequirement } from '../../coding/sketch-engine'
+/**
+ * 向导运行时件（PR4a 拆出）：默认系统提示词、Guide JSON 解析、消息文本抽取、渠道主机判定。
+ * 纯机械搬移（零行为变化）；对外契约经 guide-agent-service re-export 保持不变。
+ */
+
+
+import type { AgentEvent, MessageContentBlock } from '../../../shared/types';
+
+
+
+import { type ClarificationOption } from '../dialogue-router';
+
+
+
+
+import { PRD_REVIEW_OPTION_OVERRIDE, PRD_REVIEW_OPTION_SUPPLEMENT } from '../../review/prd-review';
+import { PRD_CONFIRM_OPTION_ADJUST, PRD_CONFIRM_OPTION_CONFIRM } from '../prd-confirm';
+
+
+
+
+
+
+
+
+
 import { isRecord } from '../../../shared/validators'
 
 type GuideEventPublisher = (event: AgentEvent) => void
 
-import { normalizeClarificationOptions } from './clarify-flow'
+
 
 /** 引导对话给模型的结构化指令：模型只输出 JSON 二选一（对齐 A2-14a Step 3 模板）。 */
 export const DEFAULT_GUIDE_SYSTEM_PROMPT = `你是「向导 Agent」，一位经验丰富的产品向导，负责把用户的想法变成可以开工的软件需求。只输出一个 JSON 对象，不要任何多余文字，不要 markdown 代码块围栏。

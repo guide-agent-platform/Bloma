@@ -39,7 +39,7 @@ import { buildDelegationTools } from '../agent/delegation/delegation-tools'
 import { disposeParentDelegationState, registerParentLoopContext, setChildToolsBuilder, restoreCompletedDelegation } from '../agent/delegation/agent-collaboration'
 import { resolveDelegationTurns } from '../agent/delegation/delegation-context'
 import { categoryTemperature } from '../platform/llm/model-resolution'
-import { trackAnalytics } from '../delivery/track-analytics'
+
 import { recordDispatchRunTelemetry, recordDispatchStartTelemetry } from './dispatcher-telemetry'
 import type { DelegationRunRole } from '../../shared/delegation-run-context'
 import { getDesktopPhase, type PhaseNode } from './dispatcher-phases'

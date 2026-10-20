@@ -595,8 +595,8 @@ function parsePrdJson(text: string, sources?: RequirementSource[], onIssues?: (i
 
 /**
  * 解析 ai_capabilities（Phase 2 M1）：capability_id 归一为 CAP-0N（接受 CAP-1/cap_01/1
- * 等变体）；task 必填（缺则弃条）；数组字段过滤空串并限量；source 白名单外归
- * pending_assumption（保守：来源不明不当作已确认）；上限 4 条。
+ * 等变体）；task 必填（缺则弃条）；数组字段过滤空串，保留全部义务；source 白名单外归
+ * pending_assumption（保守：来源不明不当作已确认）。
  * export：供单测直测（契约清洗承重，同 parseInterfaceSpec 口径）。
  */
 export function parseAiCapabilities(raw: unknown): AiCapability[] {
@@ -611,7 +611,7 @@ export function parseAiCapabilities(raw: unknown): AiCapability[] {
     const capabilityId = `CAP-${String(idMatch ? Number(idMatch[1]) : out.length + 1).padStart(2, '0')}`
     const list = (value: unknown): string[] =>
       Array.isArray(value)
-        ? value.filter((v): v is string => typeof v === 'string' && v.trim().length > 0).map((v) => v.trim().slice(0, 160)).slice(0, 4)
+        ? value.filter((v): v is string => typeof v === 'string' && v.trim().length > 0).map((v) => v.trim())
         : []
     const sourceRaw = typeof entry.source === 'string' ? entry.source : ''
     const source: AiCapability['source'] =
@@ -620,14 +620,13 @@ export function parseAiCapabilities(raw: unknown): AiCapability[] {
         : 'pending_assumption'
     out.push({
       capability_id: capabilityId,
-      task: task.slice(0, 200),
-      keyProcessing: typeof entry.keyProcessing === 'string' ? entry.keyProcessing.trim().slice(0, 300) : '',
-      ioDependency: typeof entry.ioDependency === 'string' ? entry.ioDependency.trim().slice(0, 300) : '',
+      task,
+      keyProcessing: typeof entry.keyProcessing === 'string' ? entry.keyProcessing.trim() : '',
+      ioDependency: typeof entry.ioDependency === 'string' ? entry.ioDependency.trim() : '',
       forbiddenSubstitutions: list(entry.forbiddenSubstitutions),
       evidence: list(entry.evidence),
       source,
     })
-    if (out.length >= 4) break
   }
   return out
 }

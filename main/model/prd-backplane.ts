@@ -9,6 +9,7 @@
  * 新代码请直接 from './model/prd-backplane'。
  */
 import type { ConstraintLevel, ProjectMode, TemplateType } from '../../shared/types'
+import { requirementCapabilities, type RequirementCapability } from './requirement-capabilities'
 
 /** 章节标识（章节 schema 的 id 集；schema 定义在 prd-sections.ts，类型真相源在此随背板维护）。 */
 export type PrdSectionId =
@@ -263,23 +264,14 @@ export function backplaneAiCapabilities(backplane: PrdBackplane): AiCapability[]
 }
 
 /**
- * AI 能力信号词（deriveAiCapabilities 触发判据）。与 bench/harness/metrics.mjs 的
- * AI_INTENT_RE 同源，但 ascii 「ai」收紧为词边界匹配（防 email/main/train 等
- * 含 ai 子串的英文词误触发——bench 侧度量历史项目保持原样，不动）。
- * 改动本表时同步评估 bench 侧口径（陷阱 22 纪律）。
- */
-export const AI_CAPABILITY_SIGNAL_RE = /\bai\b|智能|语音|总结|整理|自动生成|自动汇总|大模型/i
-
-/**
- * 确定性派生最小 CAP（LLM 漏报兜底）：功能项命中 AI 信号
- * 而开关开启时，为每条命中项派生一条最小能力契约（确定性模板，不编内容——只把
+ * 确定性派生最小 CAP（LLM 漏报兜底）：功能项明确需要模型调用
+ * 而开关开启时，为每条模型功能派生一条最小能力契约（确定性模板，不编内容——只把
  * 「该能力的智能性不可被降级替代」开成硬条款）。纯展示/纯 CRUD 零派生。
- * 上限 3 条（派生是兜底不是主力，宁缺毋滥）。
+ * 不凭普通整理/排序词语添加模型义务，不裁掉尾部功能。
  */
 export function deriveAiCapabilities(requirements: SketchRequirement[]): AiCapability[] | undefined {
   const signaled = requirements
-    .filter((item) => AI_CAPABILITY_SIGNAL_RE.test(`${item.description} ${item.story ?? ''}`))
-    .slice(0, 3)
+    .filter((item) => requirementCapabilities(item).has('llm'))
   if (signaled.length === 0) return undefined
   return signaled.map((item, index) => ({
     capability_id: `CAP-${String(index + 1).padStart(2, '0')}`,
@@ -334,6 +326,8 @@ export const TEMPLATE_META_VERSION = 1
  * 取值（缺省回退），旧数据（只有 id+description）无需迁移即可参与新管线。
  */
 export interface SketchRequirement {
+  /** Host verification adapter selection, frozen with the confirmed feature. */
+  capabilities?: RequirementCapability[]
   source_refs?: import('../../shared/attachment-types').MaterialSourceRef[]
   id: string
   description: string

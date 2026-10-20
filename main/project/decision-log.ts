@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AgentMessage } from '../../shared/types'
 import { getAgentSessionPath, getDocumentsDir } from '../../storage/config-paths'
-import { appendJsonLine } from '../../storage/json-store'
+
 import { appendSessionMessage } from '../platform/sessions/session-tree'
 import { registerDecisionsDocument } from './document-engine'
 import { findProject } from './project-service'

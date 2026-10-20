@@ -19,11 +19,11 @@ import { loadPromptWithSource } from '../agent/prompting/prompt-config'
 import { UX_SKETCH_SYSTEM_PROMPT } from '../agent/prompting/ux-sketch-prompt'
 import { findProject } from '../project/project-service'
 import { mintProjectPreviewUrl } from '../delivery/preview-scheme'
-import type { SketchRequirement } from '../coding/sketch-engine'
+import type { SketchRequirement } from "../model/prd-backplane";
 import { injectSketchCorrector } from './sketch-corrector'
 import { createHash, randomUUID } from 'node:crypto'
 import type { PrdBackplane } from '../model/prd-backplane'
-import { buildFallbackUxDesign, parseUxDesign, renderUxDesignSummary, type UxDesign } from '../model/ux-design'
+import { buildFallbackUxDesign, parseUxDesign, type UxDesign } from '../model/ux-design';
 import { prdScopeFingerprint } from '../project/requirement-contract'
 import { writeTextFileAtomic } from '../../storage/json-store'
 import { appendJsonLine } from '../../storage/json-store'

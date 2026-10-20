@@ -2,65 +2,34 @@
  * 澄清流（PR4a 拆出）：轮次计数与自动收敛、点选回流与方向累积、选项归一、纾困卡、澄清卡发布、自由聊计数。
  * 纯机械搬移（零行为变化）；对外契约经 guide-agent-service re-export 保持不变。
  */
-import { randomUUID } from 'node:crypto'
+/**
+ * 澄清流（PR4a 拆出）：轮次计数与自动收敛、点选回流与方向累积、选项归一、纾困卡、澄清卡发布、自由聊计数。
+ * 纯机械搬移（零行为变化）；对外契约经 guide-agent-service re-export 保持不变。
+ */
+
 import { existsSync, readFileSync } from 'node:fs'
-import type { AgentEvent, AgentMessage, AgentSendMessageInput, MessageContentBlock, Project, ProjectMode, ResearchIdea } from '../../../shared/types'
+import type { AgentEvent, AgentMessage, AgentSendMessageInput, ResearchIdea } from '../../../shared/types';
 import { getAgentSessionPath } from '../../../storage/config-paths'
-import { appendJsonLine } from '../../../storage/json-store'
-import { appendSessionMessage } from '../../platform/sessions/session-tree'
-import { routeDialogue, type ClarificationOption } from '../dialogue-router'
-import { loadPromptOverride } from '../../agent/prompting/prompt-config'
+
+
+import { type ClarificationOption } from '../dialogue-router';
+
 import { parseDecisionText, recordDecision } from '../../project/decision-log'
-import { syncDocuments } from '../../project/document-engine'
-import { researchMarketSimilar, normalizeResearchQuery, type MarketResearch } from '../guide-research'
-import {
-  PRD_REVIEW_OPTION_OVERRIDE,
-  PRD_REVIEW_OPTION_SUPPLEMENT,
-  publishPrdReviewCard,
-  resolvePrdReviewAnswers,
-  resumePrdReviewOverride,
-  runPrdReviewGate,
-  takePendingPrdReview,
-  type PrdReviewIssue,
-} from '../../review/prd-review'
-import {
-  PRD_CONFIRM_OPTION_ADJUST,
-  PRD_CONFIRM_OPTION_CONFIRM,
-  consumePrdConfirmAdjust,
-  consumePrdConfirmDismiss,
-  publishPrdConfirmCard,
-  resolvePrdConfirmCardAnswer,
-  resumePrdConfirmConfirmed,
-} from '../prd-confirm'
-import { resolveChannelEnv } from '../../platform/llm/runtime-fallback'
-import { resolveRoutedChannelId } from '../../platform/llm/category-routing'
-import { getChannelByIdRaw } from '../../platform/llm/channel-manager'
-import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../orchestration/orchestrator'
+
+import { type MarketResearch } from '../guide-research';
+
+
+
+
+
+import type { SDKQuery } from '../../orchestration/orchestrator';
 import { trackAnalytics } from '../../delivery/track-analytics'
-import { runAgentLoop } from '../../agent/loop/agent-loop'
-import { buildGuideTools, type GuideDecision } from '../guide-tools'
-import {
-  detectOrphanEnrichmentClarification,
-  hasPendingEnrichmentClarification,
-  isEnrichmentClarificationAnswer,
-  recordEnrichmentClarificationAnswered,
-  recordEnrichmentClarificationExhausted,
-  recordEnrichmentClarificationTimeout,
-  readLastEnrichmentClarificationRequests,
-  shouldSuspendForEnrichmentClarification,
-  suspendForEnrichmentClarification,
-  takePendingEnrichmentClarification,
-  type EnrichmentClarificationRequest,
-} from '../clarification'
-import { resolvePrdBackplane, setProgrammingEventPublisher, nextRequirementId, refineModificationDescription } from '../../coding/programming-orchestrator'
-import { normalizeRequirementUpdate, applyNormalization, resolveRoutedRequirementId } from '../requirement-normalizer'
-import { buildReferenceSection } from '../web-reference-extractor'
-import { findProject, updateProject, readLastSketchRequirements, recordSketchGenerated } from '../../project/project-service'
-import { buildClarifyInjection } from '../../agent/prompting/template-injection'
-import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
-import { isAutoDelegationText, readPrimaryIntent } from '../../platform/sessions/session-service'
-import type { PrdBackplane, SketchRequirement } from '../../coding/sketch-engine'
-import { isRecord } from '../../../shared/validators'
+
+import { type GuideDecision } from '../guide-tools';
+
+import { isAutoDelegationText } from '../../platform/sessions/session-service';
+import type { SketchRequirement } from "../../model/prd-backplane";
+
 
 type GuideEventPublisher = (event: AgentEvent) => void
 

@@ -10,7 +10,7 @@
  * 产物：00_VERIFY/fault-kill-report.json（MVP 过目页注入段消费）。
  */
 import { spawn } from 'node:child_process'
-import { copyFileSync, existsSync, readFileSync } from 'node:fs'
+import { copyFileSync, existsSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path'
 import { mainRootDir } from '../platform/paths'
 import { readPrdBackplane } from '../project/document-engine'

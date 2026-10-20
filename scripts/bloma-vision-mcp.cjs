@@ -16,7 +16,7 @@ const path = require('node:path')
 const fs = require('node:fs')
 const os = require('node:os')
 
-const BLOMA_ROOT = process.env.BLOMA_ROOT || path.resolve(__dirname, '..', '..')
+const BLOMA_ROOT = process.env.BLOMA_ROOT || path.resolve(__dirname, '..')
 const NODE_BIN = process.env.NODE_BIN || 'node'
 const VISION_SCRIPT = path.join(BLOMA_ROOT, 'scripts', 'vision-diagnose.mjs')
 const MAX_BUFFER = 1024 * 1024 * 4

@@ -2,9 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { decideBlocks } from '../support/guide-decide-stream'
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
 
-vi.mock('../../main/coding/programming-orchestrator', () => ({
-  setProgrammingEventPublisher: vi.fn(),
-}))
+vi.mock('../../main/platform/programming-events', async importOriginal => ({ ...await importOriginal<object>(), setProgrammingEventPublisher: vi.fn() }))
 vi.mock('../../main/delivery/track-analytics', () => ({
   trackAnalytics: vi.fn(),
 }))

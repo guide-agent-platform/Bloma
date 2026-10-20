@@ -19,7 +19,7 @@ app.whenReady().then(() => {
       // 同名渠道支持：额外按 id 前 8 位索引（不被同名覆盖）
       const shortId = String(c.id || '').slice(0, 8)
       if (shortId) result['id:' + shortId] = result[c.name || c.id]
-      console.log('OK:', c.name || c.id, '(id:' + shortId + ')', 'len=' + plain.length, 'prefix=' + plain.slice(0, 10))
+      console.log('OK:', c.name || c.id, '(id:' + shortId + ')')
     } catch (e) {
       result[c.name || c.id] = { provider: c.provider, error: '解密失败: ' + e.message.slice(0, 80) }
       console.log('FAIL:', c.name || c.id, e.message.slice(0, 80))

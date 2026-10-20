@@ -7,15 +7,7 @@ import {
   renderDocumentSectionSpec,
   requiredSections,
 } from '../../main/guide/prd-sections'
-import {
-  backplaneGlossary,
-  backplanePages,
-  backplanePersonas,
-  backplaneTemplateMeta,
-  defaultConstraintLevel,
-  TEMPLATE_META_VERSION,
-  type PrdBackplane,
-} from '../../main/coding/sketch-engine'
+import { backplaneGlossary, backplanePages, backplanePersonas, backplaneTemplateMeta, defaultConstraintLevel, TEMPLATE_META_VERSION, type PrdBackplane } from "../../main/model/prd-backplane";
 
 function makeBackplane(overrides: Partial<PrdBackplane> = {}): PrdBackplane {
   return {

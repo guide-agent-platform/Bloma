@@ -22,24 +22,19 @@ vi.mock('../../main/review/review-delegation', () => ({
   runDelegatedReview: vi.fn().mockResolvedValue({ ok: false, failure: 'failed' }),
 }))
 
-vi.mock('../../main/coding/programming-orchestrator', () => ({
-  runSketchTask: vi.fn().mockResolvedValue({ preview_url: 'http://localhost', snapshot: {}, summary: 'ok' }),
-  // 默认实现：不带追问的背板（重跑轮走这里）
-  resolvePrdBackplane: vi.fn(async (_input: unknown, requirements: unknown) => ({
+vi.mock('../../main/guide/pipeline', async importOriginal => ({ ...await importOriginal<object>(), resolvePrdBackplane: vi.fn(async (_input: unknown, requirements: unknown) => ({
     name: '未命名项目',
     positioning: '个人记账工具',
     requirements,
-  })),
-  setProgrammingEventPublisher: vi.fn(),
-  nextRequirementId: vi.fn((existing: Array<{ id: string }>) => {
+  })) }))
+vi.mock('../../main/platform/programming-events', async importOriginal => ({ ...await importOriginal<object>(), setProgrammingEventPublisher: vi.fn() }))
+vi.mock('../../main/model/requirement-utils', async importOriginal => ({ ...await importOriginal<object>(), nextRequirementId: vi.fn((existing: Array<{ id: string }>) => {
     const max = existing.reduce((acc, item) => {
       const match = /^F-(\d+)$/.exec(item.id)
       return match ? Math.max(acc, Number(match[1])) : acc
     }, 0)
     return `F-${String(max + 1).padStart(3, '0')}`
-  }),
-  refineModificationDescription: vi.fn((text: string) => text.trim()),
-}))
+  }), refineModificationDescription: vi.fn((text: string) => text.trim()) }))
 vi.mock('../../main/delivery/track-analytics', () => ({ trackAnalytics: vi.fn() }))
 vi.mock('../../main/project/document-engine', () => ({
   syncDocuments: vi.fn(() => ({ documents: [], stale_documents: [] })),
@@ -71,7 +66,7 @@ vi.mock('../../main/platform/llm/runtime-fallback', () => ({
 }))
 
 import { handleGuideMessage, resolveRequirementConfirm } from '../../main/guide/guide-agent-service'
-import { resolvePrdBackplane } from '../../main/coding/programming-orchestrator'
+import { resolvePrdBackplane } from "../../main/guide/pipeline";
 import { syncDocuments } from '../../main/project/document-engine'
 import { hasPendingEnrichmentClarification, takePendingEnrichmentClarification, type EnrichmentClarificationRequest } from '../../main/guide/clarification'
 import { getAgentSessionPath } from '../../storage/config-paths'

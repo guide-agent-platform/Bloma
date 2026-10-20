@@ -21,8 +21,30 @@
  *   违规即 Defender 轮失败 → 内审视为未收敛 → 走用户知情决策卡。
  */
 
-import type { PrdBackplane, SketchRequirement } from '../coding/sketch-engine'
-import { nextRequirementId } from '../coding/programming-orchestrator'
+/**
+ * PRD 内审 Defender（修订者）子系统——AC-Lite 内审闭环的核心新增件，2026-09-01。
+ *
+ * 方法论来源：2026-08-30 组会决议 4（补齐内审角色）+ 设计稿《内审机制最小设计》§3.1。
+ * 现状（743c138）审查「只攻不守」：issues 甩给用户决策卡，生成者从不自改——
+ * 裁判≠内审（周老师原话）、用户替模型打工。Defender 把「自查自改」的环闭上：
+ * 攻击轮发现 blocking/major 后，先由修订者子 agent 按约束改出 PRD 草稿，
+ * 复核轮通过才上用户过目卡（用户看到的是「已内审 + 残留问题知情」）。
+ *
+ * 物理边界（铁律用工具面与代码双保险，不信提示词）：
+ * - 工具面：research 只读 + 唯一写权限 write_prd_draft——只写**内存草稿副本**，
+ *   不碰盘上 requirement_confirmed 检查点（修订稿必须重走用户过目门，
+ *   user_confirmed_at 不继承——对齐陷阱 19/42）。
+ * - 产物校验（validateDefenderDraft，代码级、不信任模型自报）：
+ *   ① 背板 schema（必填形状 + requirements 项形状）；
+ *   ② F-001 主题锚点 description 逐字不变；
+ *   ③ 原 id 集不可减（已确认清单不可删项）；
+ *   ④ 新增 id ⊆ {nextRequirementId(原)}（max+1 语义，至多补一个闭环项，不猜号）；
+ *   ⑤ 每条 issue 必须有处置（fixed/rejected + 说明）；
+ *   ⑥ user_confirmed_at 等确认状态字段强制剥除（不继承）。
+ *   违规即 Defender 轮失败 → 内审视为未收敛 → 走用户知情决策卡。
+ */
+import type { PrdBackplane, SketchRequirement } from "../model/prd-backplane";
+import { nextRequirementId } from "../model/requirement-utils";
 import type { PrdReviewIssue } from './prd-review'
 import { reconcileAcceptanceRevision } from '../project/requirement-contract'
 import { buildPrdDocumentFallback } from '../model/prd-backplane'

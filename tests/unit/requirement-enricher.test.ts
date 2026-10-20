@@ -10,7 +10,7 @@ import {
   extractUserTexts,
   type EnrichedSketchRequirement,
 } from '../../main/guide/requirement-enricher'
-import { DEFAULT_BEHAVIOR_ASSERTION, type SketchRequirement } from '../../main/coding/sketch-engine'
+import { DEFAULT_BEHAVIOR_ASSERTION, type SketchRequirement } from "../../main/model/prd-backplane";
 import { getAgentSessionPath } from '../../storage/config-paths'
 import { appendJsonLine } from '../../storage/json-store'
 import type { SDKMessage } from '../../shared/types'

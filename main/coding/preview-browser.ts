@@ -21,7 +21,30 @@
  * - 开关 BLOMA_BROWSER_TOOLS（缺省 off = 工具不注册，字节级现状）。
  * - 只挂主 loop（role='parent'）；委派子 agent 不开放（review 只读三件套列为后续）。
  */
-import { mkdirSync, writeFileSync } from 'node:fs'
+/**
+ * 预览浏览器工具族（Phase 10 W1，2026-09-16；同步自 Proma 上游 Browser* 工具库）。
+ *
+ * 解决什么：编程 Agent 此前只能通过 GWT 断言的文本结果间接了解产物，看不见也摸不着
+ * 真实渲染出来的界面（B 站假绿/canvas 断言/死按钮类病灶的生成侧盲区）。本模块给主 loop
+ * 一个持久 Playwright 会话：navigate/observe/click/fill/press/extract/screenshot/wait_for
+ * 八件套，Agent 可以像用户一样驱动自己的产物并拿回可读证据。
+ *
+ * 设计要点（与 Proma 上游的差异均是有意适配）：
+ * - **同源硬边界**（上游没有，Bloma 特有）：只允许访问 ctx.state.preview_url 的 origin——
+ *   外网必须走 server/routes 同源代理（与 CSP/媒体纪律同口径），浏览器会话不做第二个
+ *   网络出口（net-guard 的 SSRF 防线不经由本模块旁路）。
+ * - **selector-first**（上游 Observe/Click 走 a11y ref）：Bloma 全链（GWT 探针/修复轮
+ *   location）已统一 CSS selector 语汇，工具面沿用 selector + 可选 wait_for，与仓库
+ *   约定一致且可单测。
+ * - **持久会话**：page 句柄按 sessionId 缓存（run 级生命周期），loop finally 与 5 分钟
+ *   闲置看门狗双保险关闭；全部串行（共享 page 天然互斥，不声明 parallelSafe）。
+ * - **截图不回传图像块**：loop 工具结果通道是纯文本（无 image block），v1 截图落盘
+ *   documents/preview-shots/ 并返回路径+尺寸+控制台错误摘要；视觉理解增强（接 V1
+ *   视觉渠道转描述）列为后续可选。
+ * - 开关 BLOMA_BROWSER_TOOLS（缺省 off = 工具不注册，字节级现状）。
+ * - 只挂主 loop（role='parent'）；委派子 agent 不开放（review 只读三件套列为后续）。
+ */
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path'
 import { getDocumentsDir } from '../../storage/config-paths'
 import { findProject } from '../project/project-service'

@@ -1,15 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import {
-  ISOLATION_NOTE,
-  acquireChildRunContext,
-  formatWorktreeNote,
-  invokeChildLoopWithContext,
-  summarizeChildResult,
-  type ChildRunContext,
-  type ChildRunContextProvider,
-  buildChildSystemPrompt,
-  buildDelegationPrompt,
-} from './child-run-context'
+import { acquireChildRunContext, formatWorktreeNote, invokeChildLoopWithContext, summarizeChildResult, buildChildSystemPrompt, buildDelegationPrompt } from './child-run-context';
 
 /** P1-06：子运行上下文接口 re-export（coding 层 worktree 隔离经此注入）。 */
 export { setChildRunContextProvider } from './child-run-context'
@@ -24,20 +14,13 @@ import { awaitDelegationState } from './delegation-wait'
 import { installAbortSettlement } from './delegation-abort'
 export { ABORT_SETTLE_TIMEOUT_MS } from './delegation-abort'
 import { recordSessionActivity } from '../../platform/sessions/session-service'
-import type { AgentEvent, PromaPermissionMode } from '../../../shared/types'
-import type { SDKQuery } from '../../orchestration/orchestrator'
+import type { AgentEvent } from '../../../shared/types';
+
 import type { ConversationTurn } from '../../orchestration/orchestrator'
 import { resolveDelegationChannelOverride, type DelegationChannelOverride } from './delegation-channel'
 import { ensureDelegationWatchStarted, setDelegationScanSource } from './delegation-watch'
 import { installDelegationHeartbeat } from './delegation-heartbeat'
-import {
-  runAgentLoop,
-  type AgentLoopResult,
-  type AgentLoopTool,
-  type AgentLoopTurnInfo,
-  type AgentLoopCompactionInfo,
-  type ToolContext,
-} from '../loop/agent-loop'
+import { runAgentLoop, type AgentLoopResult, type AgentLoopTool, type ToolContext } from '../loop/agent-loop';
 
 /**
  * 委派协作协调器（委派协作嫁接方案 §4.1，2026-08-24）。

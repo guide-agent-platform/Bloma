@@ -1,110 +1,43 @@
 /**
  * 项目族：create/list/archive×2/delete/export×2/rename/abandon/reopen/confirm-sketch/submit-correction/dom×2/upgrade/finalize + APP_SWITCH_STATE（PR4d 自 ipc.ts 拆出；纯机械搬移，行为零变化）。
  */
-import { randomUUID } from 'node:crypto'
-import { readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+/**
+ * 项目族：create/list/archive×2/delete/export×2/rename/abandon/reopen/confirm-sketch/submit-correction/dom×2/upgrade/finalize + APP_SWITCH_STATE（PR4d 自 ipc.ts 拆出；纯机械搬移，行为零变化）。
+ */
+
+
+
 import { dialog } from 'electron'
 import type { BrowserWindow, IpcMain } from 'electron'
-import type {
-  AgentCancelInput,
-  AgentConfirmRequirementsInput,
-  AgentForkSessionInput,
-  AgentListSessionsInput,
-  AgentLoadMessagesInput,
-  AgentSendMessageInput,
-  AgentSteerQueryInput,
-  AgentSteerResolveInput,
-  AnalyticsTrackInput,
-  CategoryRoutingUpdateEnvelope,
-  CategoryRoutingRoleUpdateEnvelope,
-  ChannelCreateEnvelope,
-  ChannelDeleteEnvelope,
-  ChannelTestEnvelope,
-  ChannelTestDirectEnvelope,
-  ChannelUpdateEnvelope,
-  FetchModelsEnvelope,
-  DocumentListInput,
-  DocumentReadInput,
-  DocumentSyncInput,
-  PermissionResponseInput,
-  PastedImageSaveInput,
-  PermissionSetModeInput,
-  ProjectFileReadInput,
-  PromptReadInput,
-  PromptResetInput,
-  PromptSaveInput,
-  ProjectAbandonInput,
-  ProjectArchiveInput,
-  ProjectCreateInput,
-  ProjectDeleteInput,
-  ProjectExportInput,
-  ProjectUpgradeExportInput,
-  AppSwitchStateResult,
-  ProjectFinalizeInput,
-  ProjectListInput,
-  ProjectReopenInput,
-  ProjectRenameInput,
-  ProjectUnarchiveInput,
-  ProjectUpgradeInput,
-  RequestEnvelope,
-  SandboxRunInput,
-  SandboxStopInput,
-  SnapshotCreateInput,
-  SnapshotDocumentListInput,
-  SnapshotDocumentReadInput,
-  SnapshotListInput,
-  SnapshotRollbackInput,
-  SnapshotScreenshotInput,
-} from '../../shared/types'
+import type { ProjectAbandonInput, ProjectArchiveInput, ProjectDeleteInput, ProjectExportInput, ProjectUpgradeExportInput, AppSwitchStateResult, ProjectFinalizeInput, ProjectListInput, ProjectReopenInput, ProjectRenameInput, ProjectUnarchiveInput, ProjectUpgradeInput } from '../../shared/types';
 import { IPC_CHANNELS } from '../../shared/types'
-import { fail, ok } from '../../shared/api-result'
-import { cancelAgent, getSdkQuery, hasForegroundRun, isSessionActive, persistSteerDeferredNotice, publishSteerStatusEvent, registerBackgroundRun, runAgent, setAgentStreamPublisher, unregisterBackgroundRun } from '../orchestration/orchestrator'
-import { enqueueSteer, getSteerStatuses, pendingSteerCount, registerSteer, resolveSteer, setSteerStatusListener, steerConfirmEnabled } from '../agent/loop/steer-queue'
-import { savePastedImage } from '../platform/shell/pasted-images'
-import { clearPendingReviewAction, setForegroundRunChecker, setProgrammingEventPublisher } from '../coding/programming-orchestrator'
-import { handleAgentStreamEvent } from '../platform/shell/notifications'
-import { assertToolAllowed, getPermissionMode, resolvePermission, setPermissionMode, setPermissionRequestPublisher } from '../agent/permissions/permission-service'
-import {
-  abandonProject,
-  archiveProject,
-  confirmSketch,
-  createProject,
-  deleteProject,
-  finalizeProject,
-  findProject,
-  getProjectProgressSummary,
-  listProjects,
-  renameProject,
-  reopenProject,
-  unarchiveProject,
-  updateProject,
-  upgradeProject,
-} from '../project/project-service'
-import { cleanOrphanSessions, forkFrom, listSessions, loadMessages, setSessionActiveChecker } from '../platform/sessions/session-service'
+
+import { cancelAgent } from '../orchestration/orchestrator';
+
+
+import { clearPendingReviewAction } from "../iteration/pending";
+
+
+import { abandonProject, archiveProject, createProject, deleteProject, finalizeProject, findProject, getProjectProgressSummary, listProjects, renameProject, reopenProject, unarchiveProject, upgradeProject } from '../project/project-service';
+
 import { exportProjectHandoff } from '../delivery/project-export'
 import { upgradeExport } from '../coding/export-manifest'
 import { readExperimentSwitches } from '../platform/shell/experiment-switches'
 import { dirname } from 'node:path'
-import { resolveRequirementConfirm } from '../guide/guide-agent-service'
-import { createChannel, deleteChannel, fetchModels, listChannels, testChannel, testChannelDirect, updateChannel } from '../platform/llm/channel-manager'
-import {
-  buildCategoryRoutingRoleViews,
-  buildCategoryRoutingViews,
-  updateCategoryRouting,
-  updateCategoryRoutingRoles,
-} from '../platform/llm/category-routing'
-import { listPromptSlots, readPromptSlot, resetPromptSlot, savePromptSlot } from '../agent/prompting/prompt-service'
-import { listDocuments, readDocument, syncDocuments, isPrdUserConfirmed, renamePrdProject } from '../project/document-engine'
-import { isCircuitBreakSettled, convergeStageFromEvidence, evaluateDiskArtifact } from '../project/recovery-service'
-import { runSandbox, stopSandbox } from '../delivery/sandbox'
-import { createSnapshot, listSnapshotDocuments, listSnapshots, loadSnapshotScreenshot, readSnapshotDocument, rollbackSnapshot } from '../delivery/snapshots'
+
+
+
+
+import { syncDocuments, renamePrdProject } from '../project/document-engine';
+
+import { stopSandbox } from '../delivery/sandbox';
+import { createSnapshot } from '../delivery/snapshots';
 import { trackAnalytics } from '../delivery/track-analytics'
-import { hasRequestId, isRecord, requireValue } from '../../shared/validators'
-import { getAgentSessionPath } from '../../storage/config-paths'
-import { appendJsonLine } from '../../storage/json-store'
-import { appendSessionMessage } from '../platform/sessions/session-tree'
-import { safeInvoke, errorCodeFrom, extractRequestId, requireFields, resolvePermissionSession, validateAgentSend, validateCancel, validateConfirmRequirements, validatePermissionResponse, validateProjectCreate } from './shared'
+
+
+
+
+import { safeInvoke, extractRequestId, requireFields, validateProjectCreate } from './shared';
 
 export function registerProjectsIpc(ipcMain: IpcMain, mainWindow: BrowserWindow): void {
   void mainWindow

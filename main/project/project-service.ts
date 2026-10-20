@@ -4,26 +4,9 @@ import { rmSyncWithRetry } from '../platform/storage/fs-retry'
 import { cleanupPastedImages } from '../platform/shell/pasted-images'
 import { assertExportPathNotLink, resolveProjectExportTarget } from './export-target'
 import { isAbsolute, join, relative, resolve } from 'node:path'
-import type {
-  ConfirmSketchInput,
-  CorrectionContext,
-  Project,
-  ProjectAbandonInput,
-  ProjectArchiveInput,
-  ProjectCreateInput,
-  ProjectDeleteInput,
-  ProjectExportInput,
-  ProjectExportResult,
-  ProjectFinalizeInput,
-  ProjectReopenInput,
-  ProjectRenameInput,
-  ProjectUnarchiveInput,
-  ProjectUpgradeInput,
-  RevisionAccepted,
-  WorkflowStage,
-} from '../../shared/types'
+import type { ConfirmSketchInput, Project, ProjectAbandonInput, ProjectArchiveInput, ProjectCreateInput, ProjectDeleteInput, ProjectExportInput, ProjectExportResult, ProjectFinalizeInput, ProjectReopenInput, ProjectRenameInput, ProjectUnarchiveInput, ProjectUpgradeInput, WorkflowStage } from '../../shared/types';
 import { WORKFLOW_STAGES } from '../../shared/types'
-import type { SketchRequirement } from '../coding/sketch-engine'
+import type { SketchRequirement } from "../model/prd-backplane";
 import { getAgentSessionPath,
   getAgentSessionsIndexPath,
   getDocumentsDir,

@@ -8,6 +8,7 @@ import { verificationFingerprint } from './verification-fingerprint'
 import { hasCurrentMicrophoneEvidence, runHostSpeechProbe, type SpeechVerificationSpec } from './speech-verification'
 import { runHostPrefixRenameProbe, type FileVerificationResult } from './file-verification'
 import { runHostLlmProbe, type LlmVerificationSpec, type LlmVerificationResult } from './llm-verification'
+import { requirementCapabilities } from '../model/requirement-capabilities'
 
 export type CoreVerificationStatus = 'passed' | 'failed' | 'unverified' | 'environment_blocked'
 export interface CoreVerificationResult {
@@ -107,19 +108,20 @@ export async function runCoreVerification(options: {
       }
     }
     if (verificationFingerprint(root, context) !== fingerprint) result.missing.push('验证期间源码或声明变化，本次结果作废')
-    const hasSpeechRequirement = required.some(item => /(?:语音(?:输入|录入|识别|转写)|麦克风|录音|ASR)/i.test(item.description))
+    const capabilities = new Map(required.map(item => [item.id, requirementCapabilities(item)]))
+    const hasSpeechRequirement = required.some(item => capabilities.get(item.id)!.has('speech'))
     if (hasSpeechRequirement && !speech) result.missing.push('缺少 ASR 入口登记 speech，须登记产品实际使用的模型构造和转写方法')
     const speechResult = hasSpeechRequirement && speech ? await runHostSpeechProbe({ projectId: options.projectId, root, speech }) : undefined
     if (speechResult) result.speech = speechResult
     // Never combine unrelated feature words into a synthetic capability or undo obligation.
-    const prefixRename = required.filter(item => /前缀/.test(item.description) && /(?:重命名|改名)/.test(item.description))
-    const renameUndo = required.some(item => /撤销|还原/.test(item.description) && /(?:前缀|重命名|改名)/.test(item.description))
+    const prefixRename = required.filter(item => capabilities.get(item.id)!.has('prefix_rename'))
+    const renameUndo = required.some(item => capabilities.get(item.id)!.has('rename_undo'))
     const fileResult = prefixRename.length ? await runHostPrefixRenameProbe(root, undefined, { requireUndo: renameUndo }) : undefined
     if (fileResult) {
       result.file_operations = fileResult
       if (fileResult.status !== 'passed') result.missing.push(`宿主前缀改名反例未通过：${fileResult.error ?? fileResult.tests?.filter(t => !t.passed).map(t => t.name).join('、')}`)
     }
-    const llmItems = required.filter(item => /\bLLM\b|真实(?:模型|AI)|(?:模型|AI).{0,60}(?:调用|增强|Key|API|密钥)|(?:Key|密钥).{0,60}(?:模型|AI)/i.test(item.description))
+    const llmItems = required.filter(item => capabilities.get(item.id)!.has('llm'))
     const needsLlm = llmItems.length > 0 || !!backplane.shape && !['none', 'preview'].includes(backplane.shape.llm_role)
     const llm = raw.llm as LlmVerificationSpec | undefined
     if (needsLlm && !llm) result.missing.push('缺少真实模型功能入口登记 llm；mock 或固定 network_error 不能证明请求链路已实现')
@@ -140,9 +142,9 @@ export async function runCoreVerification(options: {
         if (!llmResult || llmResult.status !== 'passed') completion.verification = llmResult?.status ?? 'unverified'
       }
       // A product-owned test label cannot attest microphone capture or real-model execution.
-      if (/(?:语音(?:输入|录入|识别|转写)|麦克风|录音|ASR)/i.test(requirement.description)) {
+      if (capabilities.get(requirement.id)!.has('speech')) {
         if (speechResult?.status !== 'passed') result.missing.push(`${requirement.id}: 宿主真实音频探针未通过，文本模拟不可替代${speechResult?.error ? `（${speechResult.error}）` : ''}`)
-        if (speech && /(麦克风|录音|语音(?:输入|录入))/.test(requirement.description) && !hasCurrentMicrophoneEvidence(options.projectId, root, speech)) {
+        if (speech && capabilities.get(requirement.id)!.has('microphone') && !hasCurrentMicrophoneEvidence(options.projectId, root, speech)) {
           result.missing.push(`${requirement.id}: 真实采集链路待授权实测`)
         }
       }

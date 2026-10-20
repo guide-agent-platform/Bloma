@@ -27,22 +27,14 @@ import { syncDocuments } from '../../project/document-engine'
 import { prdStructureIssues } from '../../model/requirements-model'
 import { runPrdReviewGate } from './prd-review-gate'
 import { publishPrdConfirmCard } from '../../guide/prd-confirm'
-import type { PrdBackplane } from '../../coding/sketch-engine'
-import { defaultConstraintLevel } from '../../coding/sketch-engine'
-import { checkSectionCompleteness } from '../../guide/prd-sections'
-import { parseEarsAssertion, renderForbiddenTermsForPrompt } from '../../guide/ears-vocabulary'
+import type { PrdBackplane } from "../../model/prd-backplane";
+
+
+
 import type { SDKQuery } from '../../orchestration/orchestrator'
-import { runDelegatedReview } from '../review-delegation'
-import { buildConversationExcerpt, buildReadConversationHistoryTool } from '../../agent/loop/conversation-excerpt'
-import {
-  DEFENDER_SYSTEM_PROMPT,
-  buildDefenderTask,
-  buildWritePrdDraftTool,
-  validateDefenderDraft,
-  validateDispositionCoverage,
-  type DefenderDisposition,
-  type DefenderFailure,
-} from '../prd-defender'
+
+
+
 
 // =========================================================================
 // 类型

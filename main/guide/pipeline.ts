@@ -19,7 +19,7 @@ import { sessionMaterials, renderMaterialContext, providedPages } from '../platf
 import { buildPrdBackplane, readPrdBackplane } from '../project/document-engine'
 import { applyGeneratedProjectName, findProject } from '../project/project-service'
 import { resolveChannelEnv } from '../platform/llm/runtime-fallback'
-import { backplaneTemplateMeta, type PrdBackplane, type SketchRequirement } from '../coding/sketch-engine'
+import { backplaneTemplateMeta, type PrdBackplane, type SketchRequirement } from "../model/prd-backplane";
 import { generatePrdLlm, readConversation } from './prd-engine-llm'
 import { enrichRequirementsLlm, extractUserTexts, mergeEnrichment } from './requirement-enricher'
 import { recordDecision } from '../project/decision-log'

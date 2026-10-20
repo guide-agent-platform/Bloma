@@ -9,13 +9,13 @@
  */
 import type { AgentLoopTool } from '../agent/loop/agent-loop'
 import { hasProjectRootOverride } from '../../shared/project-root-override'
-import { preflightEnabled, toolEvidenceEnabled } from '../agent/loop/agent-loop'
+
 import type { BuildAgentToolsOptions } from '../agent/tools/agent-tools'
-import { validationStateLine, SANDBOX_LOG_TAIL_LIMIT } from '../agent/tools/agent-tools'
-import { findProject, readLastSketchRequirements } from '../project/project-service'
-import { readPrdBackplane } from '../project/document-engine'
-import { runSandbox, getSandboxLogs } from '../delivery/sandbox'
-import { isPlaceholderAssertion } from './sketch-engine'
+import { validationStateLine } from '../agent/tools/agent-tools';
+import { findProject } from '../project/project-service';
+
+
+
 import { runSecurityScan } from '../verification/security-scan'
 import { browserToolsEnabled, buildPreviewBrowserTools } from './preview-browser'
 import { readRealScaffoldVariant } from './preview-runtime'

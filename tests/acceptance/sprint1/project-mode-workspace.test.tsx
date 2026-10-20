@@ -8,7 +8,6 @@ configure({ testIdAttribute: 'data-ai-id' })
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../../../renderer/components/App'
 import { ModeSelectionPage } from '../../../renderer/components/ModeSelectionPage'
-import { ModeCard } from '../../../renderer/components/ModeCard'
 import { WorkspaceHeader } from '../../../renderer/components/WorkspaceHeader'
 import {
   currentProjectAtom,
@@ -645,19 +644,6 @@ describe('模式卡 a11y（mode-card-a11y，r63 方向 B）', () => {
     expect(document.activeElement).toBe(start)
     // 原生 button 标签即键盘激活契约（jsdom 不合成 Enter→click，标签断言锁定）
     expect(start.tagName).toBe('BUTTON')
-  })
-
-  it('[S1-UI-027] disabled → 容器 aria-disabled + 开始按钮原生 disabled，点击不触发', () => {
-    const onSelect = vi.fn()
-    render(<ModeCard mode="quick" title="快速做一个试试" description="x" disabled onSelect={onSelect} />)
-
-    const quick = screen.getByRole('group', { name: /快速做一个试试/ })
-    expect(quick.getAttribute('aria-disabled')).toBe('true')
-    const start = screen.getByRole('button', { name: '开始：快速做一个试试' }) as HTMLButtonElement
-    expect(start.disabled).toBe(true)
-    fireEvent.click(start)
-    fireEvent.click(quick)
-    expect(onSelect).not.toHaveBeenCalled()
   })
 })
 

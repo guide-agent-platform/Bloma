@@ -1,30 +1,17 @@
 // 快照/回滚（PR3a 自 platform-services 拆出）：创建/列表/截图/文档回看/容量治理/回滚/恢复。
 import { runSandbox, stopSandbox } from './sandbox'
 import { randomUUID } from 'node:crypto'
-import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
+
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { createServer } from 'node:net'
-import type {
-  AnalyticsTrackInput,
-  AnalyticsTrackResult,
-  RollbackResult,
-  SandboxRunInput,
-  SandboxRunResult,
-  SandboxStopInput,
-  SandboxStopResult,
-  Snapshot,
-  SnapshotCreateInput,
-  SnapshotDocumentEntry,
-  SnapshotDocumentListResult,
-  SnapshotRollbackInput,
-} from '../../shared/types'
-import { getAnalyticsPath, getDocumentsDir, getSnapshotsDir } from '../../storage/config-paths'
-import { appendJsonLine, readJsonFile, writeJsonFile } from '../../storage/json-store'
+
+import type { RollbackResult, Snapshot, SnapshotCreateInput, SnapshotDocumentEntry, SnapshotDocumentListResult, SnapshotRollbackInput } from '../../shared/types';
+import { getDocumentsDir, getSnapshotsDir } from '../../storage/config-paths';
+import { readJsonFile, writeJsonFile } from '../../storage/json-store';
 import { readDocumentsManifest } from '../project/document-engine'
 import { findProject, updateProject } from '../project/project-service'
-import { PRODUCT_CSP } from '../coding/product-csp'
+
 
 type SnapshotCaptureProvider = () => Promise<{ buffer: Buffer; extension: 'png' | 'jpg' | 'svg' } | undefined>
 /** 快照容量策略（A2-16，闭环 ATK3-G-001，architecture §14）：单项目活跃快照上限。 */

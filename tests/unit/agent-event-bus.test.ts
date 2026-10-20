@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AgentEvent } from '../../shared/types'
 import { emitAgentEvent, onAgentEvent, resetAgentEventBusForTests } from '../../main/platform/events/agent-event-bus'
 import { cancelAgent, setAgentStreamPublisher } from '../../main/orchestration/orchestrator'
-import { setProgrammingEventPublisher } from '../../main/coding/programming-orchestrator'
+import { setProgrammingEventPublisher } from "../../main/platform/programming-events";
 
 /**
  * P2-A 事件总线（2026-09-08 pi 差距方案 §5 A 期）：main 进程 AgentEvent 订阅面。

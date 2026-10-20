@@ -1,29 +1,18 @@
 // 沙箱/预览进程宿主（PR3a 自 platform-services 拆出）：进程生命周期、端口分配、健康检查、
 // 内嵌零约定文件服务器脚本、real-fullstack spawn 分流（幂等守卫三项比对）。
-import { randomUUID } from 'node:crypto'
+// 沙箱/预览进程宿主（PR3a 自 platform-services 拆出）：进程生命周期、端口分配、健康检查、
+// 内嵌零约定文件服务器脚本、real-fullstack spawn 分流（幂等守卫三项比对）。
+
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+
 import { tmpdir } from 'node:os'
-import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
+
 import { createServer } from 'node:net'
-import type {
-  AnalyticsTrackInput,
-  AnalyticsTrackResult,
-  RollbackResult,
-  SandboxRunInput,
-  SandboxRunResult,
-  SandboxStopInput,
-  SandboxStopResult,
-  Snapshot,
-  SnapshotCreateInput,
-  SnapshotDocumentEntry,
-  SnapshotDocumentListResult,
-  SnapshotRollbackInput,
-} from '../../shared/types'
-import { getAnalyticsPath, getDocumentsDir, getSnapshotsDir } from '../../storage/config-paths'
-import { appendJsonLine, readJsonFile, writeJsonFile } from '../../storage/json-store'
-import { readDocumentsManifest } from '../project/document-engine'
-import { findProject, updateProject } from '../project/project-service'
+import type { SandboxRunInput, SandboxRunResult, SandboxStopInput, SandboxStopResult } from '../../shared/types';
+
+
+
+import { findProject } from '../project/project-service';
 import { PRODUCT_CSP } from '../coding/product-csp'
 
 interface SandboxProcess {

@@ -20,33 +20,46 @@
  * 修订稿重走用户过目门：user_confirmed_at 不继承（陷阱 19/42 口径）。
  */
 
-import { randomUUID } from 'node:crypto'
+/**
+ * 审查提示词（PR4d 拆出）：Attacker 系统提示词、复查提示词、审查任务/复查任务/审计注入构建。
+ * 纯机械搬移；对外契约经 prd-review re-export 保持不变。
+ */
+/**
+ * PRD 内审门（prd-review）——AC-Lite 攻击→修订→复核闭环，2026-09-01。
+ *
+ * 方法论来源：用户指定 skill「ac-audit」（对抗-收敛文档审计）；2026-08-26 首落地
+ * 为单轮简化版（simplified_ac）；2026-08-30 组会决议 1/4 升级为内审闭环：
+ *
+ * - Attacker（攻击者）：六维攻击面 I-F-Z-U-L-G，task 携带用户对话原文摘录
+ *   （F 维对照源，2026-09-01 补齐）+ read_conversation_history 工具；
+ * - Defender（修订者，新增）：按铁律修订背板草稿（prd-defender，代码级校验）；
+ * - 复核轮（Attacker 变体）：只验旧 issue 是否消除 + 有无新伤，不全量重扫；
+ * - 裁决（代码，不信任模型自报）：deriveVerdict 口径不变，收敛判定只认复核轮输出。
+ *
+ * 轮次预算：quick 1 轮修复 / longterm 2 轮；超预算 → 用户知情决策卡（残留
+ * blocking/major + Defender 已改什么）。降级链：委派内审（默认）→ 直连 →
+ * 规则门；aborted（用户停止）永不降级、立即终止管线。
+ * 修订稿重走用户过目门：user_confirmed_at 不继承（陷阱 19/42 口径）。
+ */
+
 import type { AgentEvent, AgentSendMessageInput } from '../../../shared/types'
-import { recordDecision } from '../../project/decision-log'
-import { publishPrdConfirmCard } from '../../guide/prd-confirm'
-import type { PrdBackplane } from '../../coding/sketch-engine'
-import { defaultConstraintLevel } from '../../coding/sketch-engine'
+
+
+import type { PrdBackplane } from "../../model/prd-backplane";
+import { defaultConstraintLevel } from "../../model/prd-backplane";
 import { checkSectionCompleteness } from '../../guide/prd-sections'
-import { parseEarsAssertion, renderForbiddenTermsForPrompt } from '../../guide/ears-vocabulary'
+import { renderForbiddenTermsForPrompt } from '../../guide/ears-vocabulary';
 import type { SDKQuery } from '../../orchestration/orchestrator'
-import { runDelegatedReview } from '../review-delegation'
-import { buildConversationExcerpt, buildReadConversationHistoryTool } from '../../agent/loop/conversation-excerpt'
-import {
-  DEFENDER_SYSTEM_PROMPT,
-  buildDefenderTask,
-  buildWritePrdDraftTool,
-  validateDefenderDraft,
-  validateDispositionCoverage,
-  type DefenderDisposition,
-  type DefenderFailure,
-} from '../prd-defender'
+
+
+import { type DefenderDisposition } from '../prd-defender';
 
 // =========================================================================
 // 类型
 // =========================================================================
 
 import { PrdReviewIssue } from './prd-review-contracts'
-import { runPrdReviewGate } from './prd-review-gate'
+
 
 /** 六维攻击 system prompt（攻击轮）：六维攻击面 + PRD 权重 + 证据/严重度/禁编造铁律。 */
 export const PRD_REVIEW_SYSTEM_PROMPT = [

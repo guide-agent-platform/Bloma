@@ -11,7 +11,7 @@ import { HISTORY_WINDOW_TURNS } from '../../main/orchestration/orchestrator'
 import { setSafeStorageAdapter } from '../../main/platform/storage/safe-storage'
 import { createProject, findProject, updateProject } from '../../main/project/project-service'
 import { getAgentSessionPath } from '../../storage/config-paths'
-import type { PrdBackplane, SketchRequirement } from '../../main/coding/sketch-engine'
+import type { PrdBackplane, SketchRequirement } from "../../main/model/prd-backplane";
 import type { AgentMessage } from '../../shared/types'
 // 2026-10-03 删留执行：runAgent/setSDKQueryForTests/setAgentStreamPublisher/createChannel/
 // SDKMessage/vi 为头注所述「端到端回灌」用例（已不存在）的死 import，已清。

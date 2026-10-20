@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AgentEvent, Project, RollbackResult, Snapshot, WorkflowStage } from '../../shared/types'
-import { getAgentSessionPath } from '../../storage/config-paths'
-import { appendJsonLine } from '../../storage/json-store'
+
+
 import { appendSessionMessage } from '../platform/sessions/session-tree'
 import { recordDecision } from '../project/decision-log'
 import { hasInteractiveEntry } from '../verification/test-legacy'

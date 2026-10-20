@@ -3,7 +3,7 @@
  * web_research（fork 调研子代理+超时兜底）。纯机械搬移；角色裁剪由调用方装配。
  */
 import type { AgentLoopTool } from '../loop/agent-loop'
-import { withAbort, writeGuardEnabled } from '../loop/agent-loop'
+import { withAbort } from '../loop/agent-loop';
 import {
   assertPublicHttpUrl,
   htmlToText,
@@ -14,7 +14,7 @@ import {
 } from '../../platform/net/net-guard'
 import { startDelegation, stopDelegation, waitForDelegations, type StartDelegationResult } from '../delegation/agent-collaboration'
 import { numberOr, WEB_RESEARCH_MAX_CHARS } from './agent-tools'
-import { findProject } from '../../project/project-service'
+
 
 export const WEB_RESEARCH_TIMEOUT_MS = 90_000
 let webResearchTimeoutMs = WEB_RESEARCH_TIMEOUT_MS

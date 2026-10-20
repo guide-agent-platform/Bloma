@@ -13,14 +13,7 @@ import { spawn as nodeSpawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { trackAnalytics } from '../delivery/track-analytics'
 import { readLaunchDeclaration } from './launch-smoke'
-import {
-  killWebviewProcessTree,
-  matchDriveServerLine,
-  webviewClickJs,
-  webviewPost,
-  webviewSetTextJs,
-  WEBVIEW_LOG_TAIL_CHARS,
-} from './drive-app-webview'
+import { killWebviewProcessTree, webviewClickJs, webviewPost, webviewSetTextJs, WEBVIEW_LOG_TAIL_CHARS } from './drive-app-webview';
 
 export const TRACE_DIR_REL = '00_VERIFY/drive-trace'
 export const DRIVE_FINDINGS_REL = '00_VERIFY/drive-findings.json'

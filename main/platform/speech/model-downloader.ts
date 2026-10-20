@@ -11,7 +11,7 @@
 
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
-import { access, mkdir, rename, rm, stat } from 'node:fs/promises'
+import { mkdir, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'

@@ -3,64 +3,35 @@
  * 纯机械搬移（零行为变化）；对外契约经 orchestrator re-export 保持不变。
  */
 import { randomUUID } from 'node:crypto'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import type {
-  AgentCancelInput,
-  AgentCancelResult,
-  AgentEvent,
-  AgentLoopJudgeMetadata,
-  AgentMessage,
-  AgentSendMessageInput,
-  AgentSendMessageResult,
-  MessageContentBlock,
-  PastedImageRef,
-  SDKMessage,
-  WorkflowStage,
-} from '../../../shared/types'
-import { getAgentSessionPath } from '../../../storage/config-paths'
-import { appendJsonLine } from '../../../storage/json-store'
-import { appendSessionMessage } from '../../platform/sessions/session-tree'
-import { buildThinkingFragment, type ThinkingLevel } from '../../../shared/reasoning-profile'
-import { SessionMessageQueue, type QueueEntry } from '../../platform/sessions/message-queue'
-import { clearSteerQueue, rejectPendingSteer, steerConfirmEnabled, type SteerLedgerEntry } from '../../agent/loop/steer-queue'
-import { emitAgentEvent } from '../../platform/events/agent-event-bus'
-import { hydrateMessagesImageBlocks } from '../../platform/shell/pasted-images'
-import { trackAnalytics } from '../../delivery/track-analytics'
+
+
+import type { AgentSendMessageInput, SDKMessage } from '../../../shared/types';
+
+
+
+
+import { SessionMessageQueue } from '../../platform/sessions/message-queue';
+
+
+
+
 export { buildSdkEnv } from '../../platform/llm/channel-manager'
-import {
-  extractErrorStatusCode,
-  isInfrastructureFailure,
-  isUserCancelledQuery,
-  pickBackupChannelEnv,
-  readFallbackContext,
-  recordChannelSwitch,
-  resolveChannelEnv,
-} from '../../platform/llm/runtime-fallback'
-import { categoryForStage, categoryTemperature } from '../../platform/llm/model-resolution'
-import { handleGuideMessage } from '../../guide/guide-agent-service'
-import {
-  clearPendingReviewAction,
-  isIterationDecisionId,
-  nextRequirementId,
-  refineModificationDescription,
-  setPendingReviewAction,
-  setProgrammingEventPublisher,
-  takeFailedIteration,
-  takePendingReviewAction,
-} from '../../coding/programming-orchestrator'
-import { applyNormalization, normalizeRequirementUpdate, recordRequirementNormalization } from '../../guide/requirement-normalizer'
-import { readPrdBackplane } from '../../project/document-engine'
-import { backplaneInterfaceSpec } from '../../model/prd-backplane'
-import { isDegenerateText } from '../../coding/output-integrity'
-import { createWhitespaceArtifactCleaner } from '../../agent/loop/agent-loop'
-import { recordDecision } from '../../project/decision-log'
-import { captureConstraints, extractConstraints, readProjectConstraints, scanSessionConstraints } from '../../guide/constraint-extractor'
-import { isCircuitBreakSettled } from '../../project/recovery-service'
-import { addScopeExclusion, findProject, readLastSketchRequirements, recordSketchGenerated, updateProject } from '../../project/project-service'
-import { recordSessionActivity } from '../../platform/sessions/session-service'
-import { isThinkingLogEnabled, logThinking } from '../../agent/loop/thinking-log'
-import { extractErrorMessage } from '../../platform/llm/channel-test-error'
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 import { StreamPublisher } from './orchestration-contracts'
 import { streamPublisher } from './sdk-glue'

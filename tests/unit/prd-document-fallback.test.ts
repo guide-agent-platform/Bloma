@@ -6,8 +6,8 @@
  * 以及同源一致性（验收要点/断言逐字出现）。
  */
 import { describe, expect, it } from 'vitest'
-import { buildPrdDocumentFallback, requirementStory } from '../../main/coding/sketch-engine'
-import type { SketchRequirement } from '../../main/coding/sketch-engine'
+import { buildPrdDocumentFallback, requirementStory } from "../../main/model/prd-backplane";
+import type { SketchRequirement } from "../../main/model/prd-backplane";
 
 const items: SketchRequirement[] = [
   {

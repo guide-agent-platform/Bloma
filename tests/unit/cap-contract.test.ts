@@ -6,7 +6,6 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  AI_CAPABILITY_SIGNAL_RE,
   backplaneAiCapabilities,
   capContractEnabled,
   deriveAiCapabilities,
@@ -63,23 +62,6 @@ describe('capContractEnabled（BLOMA_CAP_CONTRACT）', () => {
   })
 })
 
-describe('AI 能力信号词（AI_CAPABILITY_SIGNAL_RE）', () => {
-  it('随心记式 AI 需求命中', () => {
-    expect(AI_CAPABILITY_SIGNAL_RE.test('做一个ai随心记，可以智能总结回顾')).toBe(true)
-    expect(AI_CAPABILITY_SIGNAL_RE.test('自动生成每日总结')).toBe(true)
-    expect(AI_CAPABILITY_SIGNAL_RE.test('语音转文字')).toBe(true)
-  })
-  it('纯 CRUD / 展示类不命中', () => {
-    expect(AI_CAPABILITY_SIGNAL_RE.test('做一个四则计算器')).toBe(false)
-    expect(AI_CAPABILITY_SIGNAL_RE.test('待办清单，可增删改查')).toBe(false)
-  })
-  it('英文含 ai 子串不误触（词边界收紧，bench 侧口径不动）', () => {
-    expect(AI_CAPABILITY_SIGNAL_RE.test('email 收发工具')).toBe(false)
-    expect(AI_CAPABILITY_SIGNAL_RE.test('训练 train 计划表')).toBe(false)
-    expect(AI_CAPABILITY_SIGNAL_RE.test('AI 对话助手')).toBe(true)
-  })
-})
-
 describe('deriveAiCapabilities（确定性派生兜底）', () => {
   it('AI 信号命中 → 派生最小 CAP（确定性字段）', () => {
     const caps = deriveAiCapabilities([req('F-001', 'AI 智能总结笔记'), req('F-002', '列表查看')])
@@ -93,9 +75,9 @@ describe('deriveAiCapabilities（确定性派生兜底）', () => {
   it('纯展示/CRUD → undefined（零派生）', () => {
     expect(deriveAiCapabilities([req('F-001', '做一个计算器'), req('F-002', '查看历史记录')])).toBeUndefined()
   })
-  it('上限 3 条', () => {
+  it('retains obligations for every model-backed feature', () => {
     const caps = deriveAiCapabilities([req('F-001', 'AI 总结'), req('F-002', 'AI 翻译'), req('F-003', 'AI 配图'), req('F-004', 'AI 润色')])
-    expect(caps).toHaveLength(3)
+    expect(caps).toHaveLength(4)
   })
 })
 
@@ -108,10 +90,10 @@ describe('parseAiCapabilities（LLM 产出清洗）', () => {
     expect(caps[0].capability_id).toBe('CAP-02')
     expect(caps[0].source).toBe('pending_assumption')
   })
-  it('缺 task 弃条；非对象/非数组 → 空数组；上限 4 条', () => {
+  it('缺 task 弃条；非对象/非数组 → 空数组；保留全部有效能力', () => {
     expect(parseAiCapabilities('x')).toEqual([])
     expect(parseAiCapabilities([{ keyProcessing: '无 task' }, { task: '有效' }])).toHaveLength(1)
-    expect(parseAiCapabilities(Array.from({ length: 6 }, (_, i) => ({ task: `能力${i}` })))).toHaveLength(4)
+    expect(parseAiCapabilities(Array.from({ length: 6 }, (_, i) => ({ task: `能力${i}` })))).toHaveLength(6)
   })
 })
 

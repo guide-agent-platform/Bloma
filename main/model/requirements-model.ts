@@ -1,4 +1,5 @@
 import type { PrdBackplane, SketchRequirement } from './prd-backplane'
+import { validRequirementCapabilities } from './requirement-capabilities'
 
 /** Sources belong to the host; the model may reference them but may not invent user statements. */
 export interface RequirementSource { id: string; text: string }
@@ -47,6 +48,7 @@ export function validateRequirementsModel(raw: unknown, features: SketchRequirem
   for (const feature of features) {
     if (!record(feature) || !/^F-\d{3,}$/.test(feature.id) || !text(feature.description)) { issues.push('功能项 id 或描述无效'); continue }
     if (featureIds.has(feature.id)) issues.push(`功能项重复：${feature.id}`)
+    if (feature.capabilities !== undefined && !validRequirementCapabilities(feature.capabilities)) issues.push(`${feature.id} 能力声明无效`)
     featureIds.add(feature.id)
     if (!['P0', 'P1', 'P2'].includes(feature.priority ?? '')) issues.push(`${feature.id} 未声明优先级`)
   }
@@ -129,7 +131,12 @@ export function parseOrganizedRequirements(raw: unknown, sources: RequirementSou
   for (const value of raw.requirements) {
     if (!record(value) || !text(value.id) || !text(value.description)) return undefined
     if (value.behavior_assertions !== undefined && !texts(value.behavior_assertions)) return undefined
+    if (value.capabilities !== undefined && !validRequirementCapabilities(value.capabilities)) {
+      onIssues?.([`${value.id}: capabilities 必须为已支持能力的数组`])
+      return undefined
+    }
     requirements.push({ id: value.id, description: value.description, priority: value.priority as SketchRequirement['priority'],
+      ...(value.capabilities !== undefined ? { capabilities: [...new Set(value.capabilities)] } : {}),
       ...(text(value.story) ? { story: value.story } : {}),
       ...(text(value.scope_notes) ? { scope_notes: value.scope_notes } : {}),
       ...(texts(value.behavior_assertions) ? { behavior_assertions: value.behavior_assertions } : {}),

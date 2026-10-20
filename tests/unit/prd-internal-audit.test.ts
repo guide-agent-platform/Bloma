@@ -15,7 +15,7 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import type { SDKMessage } from '../../shared/types'
 import type { SDKQuery } from '../../main/orchestration/orchestrator'
-import type { PrdBackplane } from '../../main/coding/sketch-engine'
+import type { PrdBackplane } from "../../main/model/prd-backplane";
 import {
   internalAuditBudget,
   internalAuditMajorGateEnabled,

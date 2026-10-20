@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { earsifyRequirements, mergeRewrite, semanticOverlap, type EarsifyStats } from '../../main/guide/requirement-earsifier'
-import type { SketchRequirement } from '../../main/coding/sketch-engine'
+import type { SketchRequirement } from "../../main/model/prd-backplane";
 
 function makeRequirements(): SketchRequirement[] {
   return [

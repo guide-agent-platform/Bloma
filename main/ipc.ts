@@ -8,7 +8,7 @@ import { IPC_CHANNELS } from '../shared/types'
 import { hasForegroundRun, isSessionActive, persistSteerDeferredNotice, publishSteerStatusEvent, setAgentStreamPublisher } from './orchestration/orchestrator'
 import { setSteerStatusListener } from './agent/loop/steer-queue'
 import { setDelegationHeartbeatPublisher } from './agent/delegation/delegation-heartbeat'
-import { setForegroundRunChecker, setProgrammingEventPublisher } from './coding/programming-orchestrator'
+import { setForegroundRunChecker, setProgrammingEventPublisher } from "./platform/programming-events";
 import { handleAgentStreamEvent } from './platform/shell/notifications'
 import { setPermissionRequestPublisher } from './agent/permissions/permission-service'
 import { setSessionActiveChecker } from './platform/sessions/session-service'

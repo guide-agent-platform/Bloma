@@ -10,7 +10,7 @@
 // - 安全：resolvePastedImagePath 严格校验 imageId 格式（两段式、白名单字符），防路径穿越。
 
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path'
 import type { ConversationTurn } from '../../orchestration/orchestrator'
 import type { MessageContentBlock } from '../../../shared/types'

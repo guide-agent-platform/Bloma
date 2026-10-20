@@ -13,7 +13,7 @@
  *   R1 rank(importer) ≤ rank(target)（只向下；类型导入豁免——不构成运行时耦合。
  *      该规则同时覆盖「agent 零领域」「platform 零上层」两个目标）
  *   R8 main 根级只允许 index.ts/ipc.ts/csp.ts
- *   R9 全仓零「过渡桩」（R4 归位遗留形态）
+ *   R9 禁止重新依赖已删除的旧生成转发入口；显式模块门面可保留，不按行数判定。
  *   R7 文件尺寸改为独立审查报告（npm run report:source-size），不以行数判架构失败。
  *   同层跨组（如 domain 内 coding→project）不设硬规则：domain 子域协作是设计的
  *   正常内部结构；深度耦合在 PR3/PR4 拆解时按 R1 白名单的消减节奏治理。
@@ -111,14 +111,10 @@ const WHITELIST = new Set<string>([
   // ── 主题二：agent/loop 收口/上下文构建引用领域件（PR3 拆 programming-orchestrator 时一并评估归属）
   'R1|main/agent/loop -> main/coding/output-integrity',
   'R1|main/agent/loop -> main/coding/preview-browser',
-  'R1|main/agent/loop -> main/kernel/llm-call',
-  'R1|main/agent/loop -> main/model/prd-backplane',
-  'R1|main/agent/loop -> main/project/decision-log',
   'R1|main/agent/loop -> main/project/document-engine',
   'R1|main/agent/loop -> main/project/learnings-log',
   'R1|main/agent/loop -> main/project/project-service',
   // ── 主题三：agent/prompting 表达层引用 PRD/需求领域件（表达适配层的固有耦合，PR4 评估上提或下沉）
-  'R1|main/agent/prompting -> main/coding/sketch-engine',
   'R1|main/agent/prompting -> main/guide/guide-agent-service',
   'R1|main/agent/prompting -> main/guide/prd-engine-llm',
   'R1|main/agent/prompting -> main/guide/requirement-enricher',
@@ -138,13 +134,18 @@ describe('layer-rules 层规则（PR2 立规批）', () => {
     expect(rootTs).toEqual(['csp.ts', 'index.ts', 'ipc.ts'])
   })
 
-  it('R9: 全仓零「过渡桩」', () => {
+  it('R9: production imports cannot reintroduce retired generation facades', () => {
     const files = walkTs(join(REPO, 'main')).concat(walkTs(join(REPO, 'shared')))
-    const stubs = files.filter((f) => {
-      const s = readFileSync(f, 'utf8')
-      return s.includes('过渡桩') || (/^export \* from /m.test(s) && s.split('\n').length <= 6)
-    })
-    expect(stubs, `残留桩: ${stubs.join(', ')}`).toEqual([])
+    const retired = new Set(['main/coding/programming-orchestrator', 'main/coding/sketch-engine'])
+    const violations: string[] = []
+    for (const file of files) {
+      for (const match of readFileSync(file, 'utf8').matchAll(IMPORT_RE)) {
+        if (!match[2].startsWith('.')) continue
+        const target = posix.normalize(posix.join(posix.dirname(toPosix(posix.relative(toPosix(REPO), toPosix(file)))), match[2])).replace(/\.tsx?$/, '')
+        if (retired.has(target)) violations.push(`${file}: ${match[2]}`)
+      }
+    }
+    expect(violations).toEqual([])
   })
 
   it('R1: 依赖只向下（类型导入豁免）——违规集合与白名单精确相等（只减不增）', () => {

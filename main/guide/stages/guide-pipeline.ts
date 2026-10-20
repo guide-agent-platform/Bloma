@@ -3,65 +3,35 @@
  * 纯机械搬移（零行为变化）；对外契约经 guide-agent-service re-export 保持不变。
  */
 import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
-import type { AgentEvent, AgentMessage, AgentSendMessageInput, MessageContentBlock, Project, ProjectMode, ResearchIdea } from '../../../shared/types'
-import { getAgentSessionPath } from '../../../storage/config-paths'
-import { appendJsonLine } from '../../../storage/json-store'
+
+import type { AgentEvent, AgentSendMessageInput, Project } from '../../../shared/types';
+
+
 import { appendSessionMessage } from '../../platform/sessions/session-tree'
-import { routeDialogue, type ClarificationOption } from '../dialogue-router'
+import { routeDialogue } from '../dialogue-router';
 import { loadPromptOverride } from '../../agent/prompting/prompt-config'
 import { userFacingOutputContract } from '../../agent/prompting/user-facing-output'
-import { parseDecisionText, recordDecision } from '../../project/decision-log'
-import { syncDocuments } from '../../project/document-engine'
-import { researchMarketSimilar, normalizeResearchQuery, type MarketResearch } from '../guide-research'
-import {
-  PRD_REVIEW_OPTION_OVERRIDE,
-  PRD_REVIEW_OPTION_SUPPLEMENT,
-  publishPrdReviewCard,
-  resolvePrdReviewAnswers,
-  resumePrdReviewOverride,
-  runPrdReviewGate,
-  takePendingPrdReview,
-  type PrdReviewIssue,
-} from '../../review/prd-review'
-import {
-  PRD_CONFIRM_OPTION_ADJUST,
-  PRD_CONFIRM_OPTION_CONFIRM,
-  consumePrdConfirmAdjust,
-  consumePrdConfirmDismiss,
-  publishPrdConfirmCard,
-  resolvePrdConfirmCardAnswer,
-  resumePrdConfirmConfirmed,
-} from '../prd-confirm'
-import { resolveChannelEnv } from '../../platform/llm/runtime-fallback'
-import { resolveRoutedChannelId } from '../../platform/llm/category-routing'
-import { getChannelByIdRaw } from '../../platform/llm/channel-manager'
-import type { ConversationTurn, GuideModelOptions, SDKQuery } from '../../orchestration/orchestrator'
+import { recordDecision } from '../../project/decision-log';
+
+
+import { resolvePrdReviewAnswers, resumePrdReviewOverride, takePendingPrdReview, type PrdReviewIssue } from '../../review/prd-review';
+import { consumePrdConfirmAdjust, consumePrdConfirmDismiss, resolvePrdConfirmCardAnswer, resumePrdConfirmConfirmed } from '../prd-confirm';
+
+
+
+import type { GuideModelOptions } from '../../orchestration/orchestrator';
 import { trackAnalytics } from '../../delivery/track-analytics'
 import { runAgentLoop } from '../../agent/loop/agent-loop'
 import { buildGuideTools, type GuideDecision } from '../guide-tools'
-import {
-  detectOrphanEnrichmentClarification,
-  hasPendingEnrichmentClarification,
-  isEnrichmentClarificationAnswer,
-  recordEnrichmentClarificationAnswered,
-  recordEnrichmentClarificationExhausted,
-  recordEnrichmentClarificationTimeout,
-  readLastEnrichmentClarificationRequests,
-  shouldSuspendForEnrichmentClarification,
-  suspendForEnrichmentClarification,
-  takePendingEnrichmentClarification,
-  type EnrichmentClarificationRequest,
-} from '../clarification'
-import { resolvePrdBackplane, setProgrammingEventPublisher, nextRequirementId, refineModificationDescription } from '../../coding/programming-orchestrator'
+import { detectOrphanEnrichmentClarification, hasPendingEnrichmentClarification, isEnrichmentClarificationAnswer, recordEnrichmentClarificationAnswered, recordEnrichmentClarificationTimeout, readLastEnrichmentClarificationRequests, takePendingEnrichmentClarification } from '../clarification';
+import { setProgrammingEventPublisher } from "../../platform/programming-events";
+import { nextRequirementId, refineModificationDescription } from "../../model/requirement-utils";
 import { normalizeRequirementUpdate, applyNormalization, resolveRoutedRequirementId } from '../requirement-normalizer'
-import { buildReferenceSection } from '../web-reference-extractor'
-import { findProject, updateProject, readLastSketchRequirements, recordSketchGenerated } from '../../project/project-service'
-import { buildClarifyInjection } from '../../agent/prompting/template-injection'
+import { findProject, updateProject } from '../../project/project-service';
 import { captureConstraints, extractConstraints, readProjectConstraints } from '../constraint-extractor'
-import { isAutoDelegationText, readPrimaryIntent } from '../../platform/sessions/session-service'
-import type { PrdBackplane, SketchRequirement } from '../../coding/sketch-engine'
-import { isRecord } from '../../../shared/validators'
+import { readPrimaryIntent } from '../../platform/sessions/session-service';
+import type { SketchRequirement } from "../../model/prd-backplane";
+
 
 type GuideEventPublisher = (event: AgentEvent) => void
 
@@ -735,23 +705,9 @@ export async function tryModelDrivenGuide(
 ): Promise<boolean> {
   // 首轮判定：会话里还没有任何助手回复 = 用户尚未经历过一轮澄清（卡片答案路径不经过此处）
   const isFirstTurn = !model.history.some((turn) => turn.role === 'assistant')
-  // 注入点②（周计划 §6）：模板章节框架切片——quick 只问必填章缺口（≤3 问纪律），
-  // longterm 全章节框架；开关关闭/模板缺失时为 null，行为=现状
-  let templateSection: string | null = null
-  try {
-    templateSection = buildClarifyInjection(project?.template_type ?? 'personal_tool', input.mode)
-  } catch {
-    templateSection = null
-  }
   const baseSystem = isFirstTurn
     ? (loadPromptOverride('guide-system') ?? DEFAULT_GUIDE_SYSTEM_PROMPT) + FIRST_TURN_RULE
     : loadPromptOverride('guide-system') ?? DEFAULT_GUIDE_SYSTEM_PROMPT
-  const systemTurn: ConversationTurn = {
-    role: 'system',
-    content: templateSection ? `${baseSystem}\n\n${templateSection}` : baseSystem,
-  }
-  const history: ConversationTurn[] = [systemTurn, ...model.history]
-
   // —— 模型调用层（Phase 10 向导 loop 化，2026-09-16；旧单次 JSON 路径已删 2026-10-01）——
   // runAgentLoop + 向导工具面（自由对话 + 只读事实 + guide_decide 决策工具）；
   // 决策经工具原生入参提交（根治 parseGuideJson 的 PARSE_FAILED/截断旧病），

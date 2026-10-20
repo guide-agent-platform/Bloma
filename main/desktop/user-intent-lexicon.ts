@@ -17,8 +17,8 @@ export type UserDesktopIntent = 'stop' | 'continue' | 'none'
 
 // Commands address this run. Product nouns, quoted labels and negated commands
 // are not instructions to the host; unknown prose remains ordinary feedback.
-const STOP_COMMAND = /^(?:请|麻烦|先|现在|马上|暂时)*(?:不通过|没通过|测试没通过|需要修复|重做|不行|改主意|暂缓|先停|取消|停止|停下|别推进|需要调整|不满意)(?:(?:当前|这个|本次)?(?:任务|流程|制作|生成|运行|执行)|一下|吧|了|先)*$/
-const STOP_ENGLISH = /^(?:please\s+)?(?:stop|halt|cancel|pause)(?:\s+(?:it|this|now|the|current|run|task|workflow|please))*$/i
+const STOP_COMMAND = /^(?:请|你|麻烦|帮我|先|现在|马上|暂时)*(?:不通过|没通过|测试没通过|需要修复|重做|不行|改主意|暂缓|先停|取消|停止|停下|别推进|需要调整|不满意)(?:(?:当前|这个|本次)?(?:任务|流程|制作|生成|运行|执行|开工|交付|推进|操作)|一下|吧|了|先)*$/
+const STOP_ENGLISH = /^(?:please\s+)?(?:stop|halt|cancel|pause)(?:\s+(?:it|this|now|the|current|run|task|workflow|process|generation|generating|please))*$/i
 const CONTINUE_COMMAND = /^(?:请)?(?:继续|可以|通过|好的|没问题|确认|推进|恢复|继续跑|放手去做)(?:继续|通过|开工|执行|运行|生成|制作|推进|了|吧)*$/
 const CONTINUE_ENGLISH = /^(?:please\s+)?(?:continue|go on|ok|resume|approve)(?:\s+(?:it|this|now|the|current|run|task|workflow|please))*$/i
 

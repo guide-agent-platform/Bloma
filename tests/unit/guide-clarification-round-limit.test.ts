@@ -8,9 +8,7 @@ import { decideBlocks } from '../support/guide-decide-stream'
 // 2026-09-16 FILE-LEVEL 钉：BLOMA_GUIDE_LOOP 缺省翻转 on，本文件全部用例锁旧单次 JSON 路径
 import type { AgentEvent, AgentSendMessageInput, SDKMessage } from '../../shared/types'
 
-vi.mock('../../main/coding/programming-orchestrator', () => ({
-  setProgrammingEventPublisher: vi.fn(),
-}))
+vi.mock('../../main/platform/programming-events', async importOriginal => ({ ...await importOriginal<object>(), setProgrammingEventPublisher: vi.fn() }))
 vi.mock('../../main/delivery/track-analytics', () => ({
   trackAnalytics: vi.fn(),
 }))

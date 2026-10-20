@@ -2,23 +2,20 @@
  * 需求追加/断言更新/PRD 渲染；对外契约经 document-engine re-export 保持不变。
  * 纯机械搬移；对外契约经 document-engine re-export 保持不变。
  */
-import { randomUUID } from 'node:crypto'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import type {
-  DocumentReadResult,
-  DocumentRef,
-  DocumentSyncInput,
-  DocumentSyncResult,
-  Project,
-  TemplateType,
-} from '../../shared/types'
+/**
+ * 需求追加/断言更新/PRD 渲染；对外契约经 document-engine re-export 保持不变。
+ * 纯机械搬移；对外契约经 document-engine re-export 保持不变。
+ */
+
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { DocumentRef, DocumentSyncInput, Project, TemplateType } from '../../shared/types';
 import { getDocumentsDir } from '../../storage/config-paths'
 import { writeTextFileAtomic } from '../../storage/json-store'
 import { findProject, readLastSketchRequirements } from './project-service'
-import { nextRequirementId } from '../coding/programming-orchestrator'
-import type { PrdBackplane, RequirementStatus, SketchRequirement } from '../coding/sketch-engine'
-import { buildPrdDocumentFallback, requirementAssertions, requirementPriority, requirementStatusLabel, requirementStory, backplaneTemplateMeta } from '../coding/sketch-engine'
+import { nextRequirementId } from "../model/requirement-utils";
+import type { PrdBackplane, RequirementStatus, SketchRequirement } from "../model/prd-backplane";
+import { buildPrdDocumentFallback, requirementAssertions, requirementStatusLabel, requirementStory, backplaneTemplateMeta } from "../model/prd-backplane";
 import { parseEarsAssertion } from '../guide/ears-vocabulary'
 import { gwtRequiredCategories } from '../agent/prompting/template-injection'
 import { describeEffect, describeTrigger, parseBehaviorAssertion } from '../verification/behavior-assertions'

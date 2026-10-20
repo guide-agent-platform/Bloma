@@ -10,16 +10,13 @@ vi.mock('../../main/review/review-delegation', () => {
   return { runDelegatedReview: vi.fn().mockResolvedValue({ ok: false, failure: 'failed' }) }
 })
 
-vi.mock('../../main/coding/programming-orchestrator', () => ({
-  resolvePrdBackplane: vi.fn(async (_input: unknown, requirements: unknown) => ({
+vi.mock('../../main/guide/pipeline', async importOriginal => ({ ...await importOriginal<object>(), resolvePrdBackplane: vi.fn(async (_input: unknown, requirements: unknown) => ({
     name: '未命名项目',
     positioning: '个人记账工具',
     requirements,
-  })),
-  setProgrammingEventPublisher: vi.fn(),
-  refineModificationDescription: vi.fn((text: string) => text),
-  nextRequirementId: vi.fn((existing: Array<{ id: string }>) => `F-${String(existing.length + 1).padStart(3, '0')}`),
-}))
+  })) }))
+vi.mock('../../main/platform/programming-events', async importOriginal => ({ ...await importOriginal<object>(), setProgrammingEventPublisher: vi.fn() }))
+vi.mock('../../main/model/requirement-utils', async importOriginal => ({ ...await importOriginal<object>(), refineModificationDescription: vi.fn((text: string) => text), nextRequirementId: vi.fn((existing: Array<{ id: string }>) => `F-${String(existing.length + 1).padStart(3, '0')}`) }))
 vi.mock('../../main/delivery/track-analytics', () => ({ trackAnalytics: vi.fn() }))
 vi.mock('../../main/project/document-engine', () => ({
   syncDocuments: vi.fn(() => ({ documents: [], stale_documents: [] })),
@@ -68,7 +65,7 @@ import {
 } from '../../main/guide/guide-agent-service'
 import { resolveChannelEnv } from '../../main/platform/llm/runtime-fallback'
 import { recordDecision } from '../../main/project/decision-log'
-import { resolvePrdBackplane } from '../../main/coding/programming-orchestrator'
+import { resolvePrdBackplane } from "../../main/guide/pipeline";
 import {
   PRD_REVIEW_OPTION_DELEGATE_ALL,
   buildReviewQuestions,

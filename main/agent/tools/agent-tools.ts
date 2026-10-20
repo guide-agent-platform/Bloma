@@ -1,12 +1,12 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { rmSyncWithRetry } from '../../platform/storage/fs-retry'
 import { tmpdir } from 'node:os'
 import { extname, isAbsolute, join, relative, resolve } from 'node:path'
-import { findProject, readLastSketchRequirements } from '../../project/project-service'
+import { findProject } from '../../project/project-service';
 import { decideWrite, estimateTokenCount } from '../loop/usage-guard'
-import { withAbort, toolEvidenceEnabled, writeGuardEnabled, preflightEnabled, compactToolEnabled, MAX_EXPLICIT_COMPACTIONS, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../loop/agent-loop'
+import { toolEvidenceEnabled, writeGuardEnabled, preflightEnabled, compactToolEnabled, MAX_EXPLICIT_COMPACTIONS, type AgentLoopTool, type ToolContext, type ToolOutcome } from '../loop/agent-loop';
 import { commitFileWrite, fileRevisionOf, fileRevisionsOf } from './write-lease'
 import { replaceUniqueText } from './text-edit'
 import { resolveProjectRoot } from '../../../shared/project-root-override'

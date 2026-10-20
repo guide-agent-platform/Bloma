@@ -203,7 +203,7 @@ describe('Sprint 3 analytics completeness audit (T8)', () => {
       project_created: '写入方活跃（project-service createProject）；断言文件随 web 线拆除退役，待补。',
       clarification_responded: '写入方活跃（guide 线 U5 J5）；待补断言。',
       decision_selected: '写入方活跃（guide 线 P7-9b）；待补断言。',
-      test_completed: '兼容读侧保留：test-legacy 从旧 analytics JSONL 还原报告在用；执行器已随 web 线退役，无新写入方。',
+      test_completed: '旧事件类型供历史 bench/报告读取；当前桌面验证使用独立核心验证与实验事件，无新 Web 执行写入方。',
     }
 
     // 引用实存校验：断言文件必须存在，且源码中真实出现该事件字面量（否则覆盖声称失实）

@@ -30,6 +30,15 @@ const run = (code = 0, stdout = 'PASS actual input') => runCoreVerification({ pr
   spawn: async () => ({ code, stdout, stderr: '' }) })
 
 describe('shared core delivery', () => {
+  it.each(['不需要语音识别', '不需要真实模型调用', '联系人按编号前缀筛选并支持给联系人改名'])('does not impose an unrelated capability probe for %s', async description => {
+    vi.mocked(readPrdBackplane).mockReturnValue({ requirements: [{ id: 'F-001', description }] } as never)
+    vi.mocked(runHostPrefixRenameProbe).mockClear()
+    vi.mocked(runHostLlmProbe).mockClear()
+    manifest()
+    expect((await run()).status).toBe('passed')
+    expect(runHostPrefixRenameProbe).not.toHaveBeenCalled()
+    expect(runHostLlmProbe).not.toHaveBeenCalled()
+  })
   it('reads complete scenario evidence beyond the display excerpt and preserves late failure', async () => {
     manifest()
     const noise = 'diagnostic '.repeat(2000) + '\n'
@@ -144,7 +153,7 @@ describe('shared core delivery', () => {
     await run()
     expect(runHostPrefixRenameProbe).toHaveBeenCalledWith(root, undefined, { requireUndo: false })
     vi.mocked(readPrdBackplane).mockReturnValue({ requirements: [
-      { id: 'F-001', description: '给文件添加前缀改名' }, { id: 'F-002', description: '撤销上一次改名' },
+      { id: 'F-001', description: '给文件添加前缀改名' }, { id: 'F-002', description: '撤销上一次改名', capabilities: ['rename_undo'] },
     ] } as never)
     manifest()
     await run()

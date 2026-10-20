@@ -18,7 +18,7 @@ import {
 } from './platform/shell/notifications'
 import { MAIN_FRAME_CSP, shouldInjectMainFrameCsp } from './csp'
 import { createCrashGuard } from './platform/shell/renderer-crash-guard'
-import { installPreviewProtocolHandler, registerPreviewSchemePrivileges } from './delivery/preview-scheme'
+import { installPreviewProtocolHandler } from './delivery/preview-scheme';
 // PR4 后续：平台件决策 sink 接线（runtime-fallback 不再反向依赖 domain 决策日志）
 import { setDecisionSink } from './platform/llm/runtime-fallback'
 import { setProjectTouchHandler } from './platform/sessions/session-service'

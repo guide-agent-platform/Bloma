@@ -21,7 +21,7 @@ import { extractErrorMessage } from '../../llm/channel-test-error'
 import { buildThinkingFragment } from '../../../../shared/reasoning-profile'
 import type { ConversationTurn, SDKQueryOptions } from '../../../orchestration/orchestrator'
 import type { MessageContentBlock, ProviderType, SDKMessage } from '../../../../shared/types'
-import { ANTHROPIC_SSE_ADAPTER, buildAnthropicHeaders, resolveMessagesUrl } from './anthropic-sse-adapter'
+import { ANTHROPIC_SSE_ADAPTER, buildAnthropicHeaders } from './anthropic-sse-adapter';
 import { normalizeAnthropicBaseUrl, resolveAnthropicMessagesUrl } from './url-utils'
 import { streamSSE, HTTPError } from './sse-reader'
 import { capMaxTokensForProvider } from '../../llm/model-resolution'

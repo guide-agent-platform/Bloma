@@ -29,7 +29,7 @@ import {
   type DelegationSummary,
 } from '../agent/delegation/agent-collaboration'
 import { buildAgentTools } from '../agent/tools/agent-tools'
-import { buildDomainTools, domainToolOptionsDefaults } from '../coding/tool-handlers'
+import { buildDomainTools } from '../coding/tool-handlers';
 import { createToolState, type AgentLoopTool, type ToolContext } from '../agent/loop/agent-loop'
 import type { SDKQuery } from '../orchestration/orchestrator'
 

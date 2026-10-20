@@ -1,8 +1,8 @@
 import type { SDKQuery } from '../orchestration/orchestrator'
 import type { ThinkingLevel } from '../../shared/reasoning-profile'
 import { loadPromptOverride } from '../agent/prompting/prompt-config'
-import type { SketchRequirement } from '../coding/sketch-engine'
-import { requirementAssertions } from '../coding/sketch-engine'
+import type { SketchRequirement } from "../model/prd-backplane";
+import { requirementAssertions } from "../model/prd-backplane";
 import { categoryTemperature } from '../platform/llm/model-resolution'
 import { recordDecision } from '../project/decision-log'
 import { callLlmForJson } from '../kernel/llm-call'
@@ -163,6 +163,7 @@ export function applyNormalization(
         item.id === 'F-001'
           ? {
               ...item,
+              capabilities: undefined,
               behavior_assertions: dedupe([...requirementAssertions(item), ...(decision.behavior_assertions ?? [])]),
               ...(decision.scope_notes ? { scope_notes: mergeScopeNotes(item.scope_notes, decision.scope_notes) } : {}),
             }
@@ -173,6 +174,7 @@ export function applyNormalization(
       item.id === decision.reviseId
         ? {
             ...item,
+            capabilities: undefined,
             description: decision.description,
             story: decision.story ?? decision.description,
             behavior_assertions: dedupe([...requirementAssertions(item), ...(decision.behavior_assertions ?? [])]),

@@ -4,11 +4,11 @@ import type { AgentEvent, AgentSendMessageInput, ResearchIdea } from '../../shar
 import { recordDecision } from '../project/decision-log'
 import { trackAnalytics } from '../delivery/track-analytics'
 import { appendPrdRequirements, markPrdUserConfirmed, updatePrdAssertions } from '../project/document-engine'
-import { nextRequirementId } from '../coding/programming-orchestrator'
+import { nextRequirementId } from "../model/requirement-utils";
 import { earsifyRequirements } from './requirement-earsifier'
 import { resolveChannelEnv } from '../platform/llm/runtime-fallback'
-import type { PrdBackplane, SketchRequirement } from '../coding/sketch-engine'
-import { backplaneAiCapabilities, backplaneKeyTasks, backplaneTemplateMeta, requirementAssertions, requirementPriority, requirementStory } from '../coding/sketch-engine'
+import type { PrdBackplane, SketchRequirement } from "../model/prd-backplane";
+import { backplaneAiCapabilities, backplaneKeyTasks, requirementAssertions, requirementPriority, requirementStory } from "../model/prd-backplane";
 import type { SDKQuery } from '../orchestration/orchestrator'
 import { shouldEnterDesktopLine } from '../desktop/desktop-route'
 import { buildWebLineRetiredCardPayload } from './web-line-retired'

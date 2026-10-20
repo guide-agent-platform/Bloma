@@ -23,20 +23,7 @@ import {
   normalizeBaseUrl,
 } from './channel-url-utils'
 import { normalizeHttpResponse, normalizeRequestError } from './channel-test-error'
-import {
-  ARK_CODING_PLAN_MODELS,
-  ARK_CODING_PLAN_TEST_MODEL,
-  DEEPSEEK_PRESET_MODELS,
-  KIMI_PRESET_MODELS,
-  PROVIDER_TEST_MODEL_PRESETS,
-  QWEN_TOKEN_PLAN_PRESET_MODELS,
-  XIAOMI_PRESET_MODELS,
-  cloneModels,
-  createPresetModelsResult,
-  extractZhipuCodingTeamApiToken,
-  parseZhipuTeamCredentials,
-  resolveFirstTestModelId,
-} from './channel-presets'
+import { ARK_CODING_PLAN_MODELS, ARK_CODING_PLAN_TEST_MODEL, PROVIDER_TEST_MODEL_PRESETS, QWEN_TOKEN_PLAN_PRESET_MODELS, XIAOMI_PRESET_MODELS, cloneModels, createPresetModelsResult, extractZhipuCodingTeamApiToken, parseZhipuTeamCredentials, resolveFirstTestModelId } from './channel-presets';
 
 /** SDK 子进程环境白名单：仅透传运行 SDK 所需的基础环境，避免宿主机 ANTHROPIC_/CLAUDE_ 历史配置污染 Agent 渠道。 */
 const SDK_ENV_ALLOWLIST = [
