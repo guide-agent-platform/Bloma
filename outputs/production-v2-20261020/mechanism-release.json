@@ -1,0 +1,41 @@
+{
+  "at": "2026-10-20T07:03:38.904Z",
+  "runtime_commit": "d245a8b42f6dff5e260f3fa439c77c1cc415c2a6",
+  "input_hash": "974a745fbafedcaea29cdf04e1cb9e7162a73e67623c93662cdcf2ef85d6e917",
+  "runtime_sha256": "0f767912cb97faa80e679f9d544cbadc901df670f38f5fa8bf6bbf8702b833e0",
+  "validation": {
+    "unit": {
+      "files": 280,
+      "tests": 2598,
+      "passed": true,
+      "log": "C:/Users/17359/OneDrive/Desktop/guide-agent-platform-sprint0/run-artifacts/production-v2-mechanism-unit-release.log",
+      "sha256": "7c9e940ff82921aff7eefd06e31d6bc245c5f0c3bbca900b76c7196444f198e1"
+    },
+    "integration": {
+      "files": 2,
+      "tests": 8,
+      "passed": true
+    },
+    "typecheck": true,
+    "build": true
+  },
+  "local_qualification_passed": true,
+  "provider_qualified": false,
+  "model_calls": 0,
+  "independent_adapter_sha256": "7036a4f5b2f7acf0e551c9f4ad7f2e7a357d6def5a5eb0feb27c39c98b83c45c",
+  "suite_sha256": "08dbe9b458009c4cc22c8f7f8e2136975bcb943c70509c186e0ebe80f8a49fff",
+  "cohort": "C:/Users/17359/bex-pv220/pilot-r3",
+  "runtime_root": "C:/Users/17359/.codex/worktrees/production-mechanism-runtime/guide-agent-platform-sprint0",
+  "run_id": "production-v2-L1-quick-20261020-r3-G11",
+  "readiness": "C:/Users/17359/bex-pv220/pilot-r3/readiness-release.json",
+  "runtime_files": 95,
+  "product_quality": null,
+  "preparation_failures_preserved": [
+    {
+      "kind": "host-harness-missing-continuation-file-after-six-environment-and-ui-checks",
+      "model_calls": 0,
+      "log": "run-artifacts/production-v2-mechanism-cohort-qualification.log",
+      "recovery_log": "run-artifacts/production-v2-mechanism-cohort-seal-recovery.log"
+    }
+  ]
+}

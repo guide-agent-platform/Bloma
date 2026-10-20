@@ -55,3 +55,11 @@ GLM 5.3 与 Flash 均实际返回 HTTP429/code1308 固定五小时限额；最�
 机制补丁最终完整回归：280 文件/2598 例全部通过（`production-v2-mechanism-unit-release.log`）；集成 2 文件/8 例通过，类型检查和完整构建通过。800 行尺寸硬门改为独立可配置审查报告，依赖方向等检查保持；报告不会用物理行数宣判架构失败，也不隐藏历史豁免文件。
 
 原始日志位于 `run-artifacts/production-v2-*.log`，不以日志文件名代替退出码和内容核对。已保留行数断言、预览页指纹的前序失败及修复验证；没有新的 G11 产品质量或耗时结果。源码完成验证后另封新的运行副本，不在旧 prototype 上混入补丁。
+
+## 审查后运行封存
+
+机制修复版本 `d245a8b42f6dff5e260f3fa439c77c1cc415c2a6` 已另封于 `production-mechanism-runtime` 工作树，主 bundle SHA256 为 `0f767912cb97faa80e679f9d544cbadc901df670f38f5fa8bf6bbf8702b833e0`。新 cohort `C:\Users\17359\bex-pv220\pilot-r3`，input_hash 为 `974a745fbafedcaea29cdf04e1cb9e7162a73e67623c93662cdcf2ef85d6e917`；除需要重新定位的项目/会话索引外，冻结业务文件逐字节匹配上一版，六组解释器、依赖与实际平台界面资格均通过。封存 95 个运行文件与原生驱动文件，新 G11 run id 为 `production-v2-L1-quick-20261020-r3-G11`。摘要见 `outputs/production-v2-20261020/mechanism-release.json`。
+
+本地封存脚本首次在六组环境/UI检查之后因漏准备 continuation.txt 退出；保留零模型调用的失败日志，补齐对应组的原始接续指令，未重复添加环境说明，复用真实已完成检查并重新核对全部输入后完成封存。没有补造 SDK、usage 或业务验收结果。
+
+r2 prototype 已在未执行前退役；旧快照、配置与实跑样本不改写。r3 的审查证书匹配源版本，运行 readiness 仍为 false、qualified_groups 为空，原因是供应商额度与真实通道资格尚待恢复。控制器实际返回 waiting-for-provider-quota、model_calls=0；未到供应商当次提示的恢复窗口不发预检，恢复后仍需真实工具往返通过。只启动 G11，其余五组等待审阅；外部 Q 仍未知。
