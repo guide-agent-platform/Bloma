@@ -4,6 +4,8 @@
 > 当前状态：需求、UX、架构、接口、测试、Sprint、科研计划已完成  
 > 日期：2026-07-10
 
+> 当前实现入口（2026-10-20）：平台生成Windows Python/WebView2桌面应用，需求、UX、制作和验证的现行接线见[制作流程v2](docs/05_PROJECT_PLAN/production-workflow-v2-20261020.md)。本页其余规划保留历史范围；代码清理、硬编码修复和本机旧项目清理结果见[清理实施记录](docs/05_PROJECT_PLAN/hardcoding-cleanup-execution-20261020.md)。
+
 ---
 
 ## 1. 项目目的
