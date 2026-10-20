@@ -85,6 +85,27 @@ describe('R1-providers streamSSE（上游装配容错）', () => {
       expect(throttled).toHaveBeenCalledTimes(2)
     } finally { setSseRetryWaitBudgetForTests() }
   })
+  it('stops on fixed Coding Plan quota exhaustion and preserves its provider reset time', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { code: '1308', message: '已达到 5 小时的使用上限。您的限额将在 2026-10-20 16:49:18 重置。' } }), { status: 429 }))
+    await expect(streamSSE({ request: { url: 'https://open.bigmodel.cn/api/anthropic/v1/messages', body: '{}', headers: {} }, adapter: ANTHROPIC_SSE_ADAPTER,
+      fetchFn, onEvent: () => {} })).rejects.toMatchObject({ status: 429, providerCode: '1308', nonRetryable: true, providerResetAt: '2026-10-20 16:49:18' })
+    expect(fetchFn).toHaveBeenCalledOnce()
+  })
+  it('does not retry a host request-guard rejection or admit a physical request', async () => {
+    const fetchFn = vi.fn(), guard = vi.fn(() => { throw Error('HOST_REQUEST_LIMIT') })
+    await expect(streamSSE({ request: { url: 'https://test.example/messages', body: '{}', headers: {} }, adapter: ANTHROPIC_SSE_ADAPTER,
+      fetchFn, requestGuard: guard, onEvent: () => {} })).rejects.toThrow('HOST_REQUEST_LIMIT')
+    expect(guard).toHaveBeenCalledOnce(); expect(fetchFn).not.toHaveBeenCalled()
+  })
+  it('keeps ordinary 1308 throttling retryable when no fixed quota window is reported', async () => {
+    setSseRetryWaitBudgetForTests(5)
+    try {
+      const fetchFn = vi.fn().mockResolvedValueOnce(new Response('{"error":{"code":"1308","message":"too many requests"}}', { status: 429 }))
+        .mockResolvedValueOnce(sseResponse('data: [DONE]\n\n'))
+      await streamSSE({ request: { url: 'https://open.bigmodel.cn/api/anthropic/v1/messages', body: '{}', headers: {} }, adapter: ANTHROPIC_SSE_ADAPTER, fetchFn, onEvent: () => {} })
+      expect(fetchFn).toHaveBeenCalledTimes(2)
+    } finally { setSseRetryWaitBudgetForTests() }
+  })
   it('reports HTTP 200 JSON responses as protocol errors without retrying or logging response content', async () => {
     const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { code: '1309', message: 'private-response-text' } }), {
       headers: { 'content-type': 'application/json' },

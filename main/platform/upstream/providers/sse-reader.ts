@@ -90,10 +90,16 @@ class HTTPError extends Error {
     readonly status: number,
     readonly providerCode?: string,
     readonly nonRetryable = false,
+    readonly providerResetAt?: string,
   ) {
     super(message)
     this.name = 'HTTPError'
   }
+}
+
+/** Host admission/validation failures must never turn into transport retries. */
+class RequestGuardError extends Error {
+  constructor(error: unknown) { super(error instanceof Error ? error.message : String(error)); this.name = 'RequestGuardError' }
 }
 
 /** Provider 在 200 流内返回的语义错误，通常不是瞬时网络问题，不应自动重试。 */
@@ -118,6 +124,7 @@ function getSSERetryDelayMs(attempt: number, elapsedRetryDelayMs: number): numbe
 function isRetriableError(error: unknown): boolean {
   if (error instanceof MonetaryBudgetError) return false
   if (error instanceof ProviderStreamError) return false
+  if (error instanceof RequestGuardError) return false
   if (error instanceof HTTPError) {
     if (error.nonRetryable) return false
     return error.status === 408 || error.status === 425 || error.status === 429 || error.status >= 500
@@ -201,7 +208,7 @@ function normalizeToolCallOutputIndex(value: unknown): string | undefined {
 
 /** 单次 SSE 流式尝试（不含重试逻辑；上游原样） */
 async function runStreamAttempt(options: StreamSSEOptions): Promise<StreamSSEResult> {
-  options.requestGuard?.(options.request)
+  try { options.requestGuard?.(options.request) } catch (error) { throw new RequestGuardError(error) }
   const reservation = await reserveModelRequestWhenAvailable(options.request.url, options.request.body, options.signal,
     options.monetaryPolicyPath ?? process.env.BLOMA_MONETARY_POLICY)
   let usage: SDKMessage['usage']
@@ -259,14 +266,17 @@ async function runReservedStreamAttempt(options: StreamSSEOptions): Promise<Stre
   // 2. 错误检查
   if (!response.ok) {
     const text = await response.text().catch(() => '')
-    let code: unknown
-    try { const raw = JSON.parse(text); code = raw.error?.code ?? raw.code } catch { /* non-JSON errors keep the ordinary HTTP retry policy */ }
+    let code: unknown, providerMessage = ''
+    try { const raw = JSON.parse(text); code = raw.error?.code ?? raw.code; providerMessage = typeof raw.error?.message === 'string' ? raw.error.message : '' } catch { /* non-JSON errors keep the ordinary HTTP retry policy */ }
     const safeCode = typeof code === 'number' || typeof code === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(code) ? String(code) : undefined
     receipt({ response_bytes: Buffer.byteLength(text), body_sha256: createHash('sha256').update(text).digest('hex'), json_error_code: safeCode })
     // BigModel documents 1113 as insufficient prepaid credit, despite HTTP 429.
     // Repeating it is not rate-limit recovery and creates additional unknown holds.
     const creditExhausted = new URL(request.url).hostname === 'open.bigmodel.cn' && response.status === 429 && safeCode === '1113'
-    throw new HTTPError(`provider API 错误 (${response.status}): ${text.slice(0, 300)}`, response.status, safeCode, creditExhausted)
+    const fixedQuotaExhausted = new URL(request.url).hostname === 'open.bigmodel.cn' && response.status === 429 && safeCode === '1308'
+      && /小时.*(?:上限|限额)|限额将在|(?:usage|quota).*(?:limit|reset)/i.test(providerMessage)
+    const resetAt = fixedQuotaExhausted ? providerMessage.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/)?.[0] : undefined
+    throw new HTTPError(`provider API 错误 (${response.status}): ${text.slice(0, 300)}`, response.status, safeCode, creditExhausted || fixedQuotaExhausted, resetAt)
   }
 
   if (!response.body) {

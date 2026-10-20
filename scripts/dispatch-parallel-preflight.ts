@@ -19,6 +19,10 @@ const live = args.includes('--live')
 const recover = args.includes('--recover')
 const uncapped = args.includes('--no-monetary-limit')
 const glmFlashPair = args.includes('--glm-flash-pair')
+const batchIndex = args.indexOf('--batches')
+const selectedBatches = batchIndex < 0 ? ['G11', 'G12', 'G21', 'G22'] : (args[batchIndex + 1] ?? '').split(',')
+if (batchIndex >= 0 && (!glmFlashPair || !selectedBatches.length || new Set(selectedBatches).size !== selectedBatches.length
+  || selectedBatches.some(batch => !['G11', 'G12', 'G21', 'G22'].includes(batch)))) throw new Error('PREFLIGHT_INVALID_BATCH_SELECTION')
 if (glmFlashPair && (!uncapped || recover)) throw new Error('PREFLIGHT_GLM_PAIR_REQUIRES_UNLIMITED_FRESH_RUN')
 const concurrencyIndex = args.indexOf('--concurrency')
 const concurrency = concurrencyIndex < 0 ? 2 : Number(args[concurrencyIndex + 1])
@@ -28,7 +32,8 @@ if (!recover && existsSync(join(out, 'preflight.json'))) throw new Error('PREFLI
 const report: Record<string, any> = recover ? JSON.parse(readFileSync(join(out, 'preflight.json'), 'utf8'))
   : { at: new Date().toISOString(), kind: 'transport_preflight', live,
     product_quality: null, metadata: {}, probes: [], policies: {}, physical_requests: 0,
-    monetary_mode: uncapped ? 'unlimited-explicit-user-authorization' : 'existing-policy', concurrency, glm_flash_pair: glmFlashPair }
+    monetary_mode: uncapped ? 'unlimited-explicit-user-authorization' : 'existing-policy', concurrency, glm_flash_pair: glmFlashPair,
+    ...(glmFlashPair ? { selected_batches: selectedBatches } : {}) }
 const save = () => writeFileSync(join(out, 'preflight.json'), JSON.stringify(report, null, 2))
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
 const decrypt = "$ErrorActionPreference='Stop';$s=Get-Content -LiteralPath $env:BEX_CREDENTIAL_STORE -Raw|ConvertFrom-Json;$r=@{};foreach($n in @('deepseek','glm')){$v=ConvertTo-SecureString $s.$n;$r[$n]=[System.Net.NetworkCredential]::new('', $v).Password};$r|ConvertTo-Json -Compress"
@@ -221,7 +226,7 @@ try {
           ['G12', ['glm-5.3-flash', 'glm-5.3', 'glm-5.3']],
           ['G21', ['glm-5.3', 'glm-5.3-flash', 'glm-5.3-flash']],
           ['G22', ['glm-5.3', 'glm-5.3', 'glm-5.3']],
-        ] as Array<[string, string[]]>) await probe('zhipu-coding', keys.glm, '', models, batch)
+        ] as Array<[string, string[]]>) if (selectedBatches.includes(batch)) await probe('zhipu-coding', keys.glm, '', models, batch)
       } else {
         await probe('deepseek', keys.deepseek, '')
         await probe('zhipu-coding', keys.glm, '')
@@ -235,8 +240,8 @@ try {
     physicalEvidence()
     if (dsPolicy) report.policies.deepseek.budget_after = readMonetaryBudget(dsPolicy)
     report.passed = glmFlashPair
-      ? report.probes.length === 12 && report.probes.every((row: any) => row.tool_roundtrip)
-        && report.probe_batches.length === 4 && report.probe_batches.every((batch: any) => batch.physical_peak === 3)
+      ? report.probes.length === selectedBatches.length * 3 && report.probes.every((row: any) => row.tool_roundtrip)
+        && report.probe_batches.length === selectedBatches.length && report.probe_batches.every((batch: any) => batch.physical_peak === 3)
       : report.probes.length === concurrency * 2 && report.probes.every((row: any) => row.tool_roundtrip)
         && report['deepseek-flash_physical_peak'] === concurrency && report['glm-5.3_physical_peak'] === concurrency
   }

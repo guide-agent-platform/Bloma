@@ -238,13 +238,13 @@ describe('research data collection', () => {
 })
 
 describe('pinned roles and experiment conditions', () => {
-  it('makes a permanent provider credit rejection terminal before another paid query', async () => {
+  it.each([['1113', 'PROVIDER_BALANCE_EXHAUSTED'], ['1308', 'PROVIDER_QUOTA_WINDOW_EXHAUSTED']] as const)('makes provider rejection %s terminal before another paid query', async (code, reason) => {
     const config = running('standalone'); writeExperiment(config)
     const binding = resolveExperimentModel(config.models!.executor), options = { sessionId: 'parent', signal: new AbortController().signal, env: binding.env }
-    const base = vi.fn(async function* () { throw Object.assign(new Error('provider credit rejection'), { status: 429, providerCode: '1113', nonRetryable: true }); yield text() })
+    const base = vi.fn(async function* () { throw Object.assign(new Error('provider credit rejection'), { status: 429, providerCode: code, nonRetryable: true }); yield text() })
     const guarded = guardExperimentQuery(base, config, 'implement')
     await expect(async () => { for await (const _ of guarded('', options)) {} }).rejects.toThrow('provider credit rejection')
-    expect(readExperimentEvents(config).events.find(x => x.event === 'run_finished')).toMatchObject({ outcome: 'failed', reason: 'PROVIDER_BALANCE_EXHAUSTED' })
+    expect(readExperimentEvents(config).events.find(x => x.event === 'run_finished')).toMatchObject({ outcome: 'failed', reason })
     await expect(async () => { for await (const _ of guarded('', options)) {} }).rejects.toThrow('EXPERIMENT_ALREADY_FINISHED')
     expect(base).toHaveBeenCalledOnce()
   })

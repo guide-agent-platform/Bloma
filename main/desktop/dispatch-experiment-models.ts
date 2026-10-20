@@ -82,9 +82,10 @@ export function guardExperimentQuery(query: SDKQuery, config: DispatchExperiment
         responseHeaderTimeoutMs: settings.response_header_timeout_ms ?? 30000,
         accounting: options.accounting ? { ...options.accounting, runId: config.run_id, role: `experiment_${role}` } : undefined })
     } catch (error) {
-      const rejection = error as { status?: number; providerCode?: string; nonRetryable?: boolean }
-      if (rejection?.status === 429 && rejection.providerCode === '1113' && rejection.nonRetryable === true) {
-        finishExperiment(config, 'failed', 'PROVIDER_BALANCE_EXHAUSTED')
+      const rejection = error as { status?: number; providerCode?: string; nonRetryable?: boolean; providerResetAt?: string }
+      if (rejection?.status === 429 && ['1113', '1308'].includes(rejection.providerCode ?? '') && rejection.nonRetryable === true) {
+        recordExperiment(config, 'provider_unavailable', { provider_code: rejection.providerCode, reset_at_provider_local: rejection.providerResetAt })
+        finishExperiment(config, 'failed', rejection.providerCode === '1113' ? 'PROVIDER_BALANCE_EXHAUSTED' : 'PROVIDER_QUOTA_WINDOW_EXHAUSTED')
       }
       throw error
     } finally { recordExperiment(config, 'model_request_finished', { role, session_id: options.sessionId, request_number: number }) }
