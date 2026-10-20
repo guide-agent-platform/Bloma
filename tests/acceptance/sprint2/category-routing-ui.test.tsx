@@ -80,7 +80,7 @@ describe('M5 三角色渠道配置区（ChannelSettingsPage）', () => {
     installApi({ views: makeViews() })
     render(<ChannelSettingsPage />)
 
-    await waitFor(() => expect(screen.getByText('角色配置')).toBeDefined())
+    await screen.findByLabelText('向导 Agent 渠道')
     for (const label of ['向导 Agent', '编程 Agent', '裁判 Agent']) {
       expect(screen.getByText(label)).toBeDefined()
     }
