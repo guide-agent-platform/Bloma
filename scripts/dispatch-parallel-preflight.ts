@@ -13,6 +13,9 @@ import type { MessageContentBlock } from '../shared/types'
 const args = process.argv.slice(2)
 const option = (name: string) => { const i = args.indexOf(`--${name}`); if (i < 0 || !args[i + 1]) throw new Error(`Missing --${name}`); return args[i + 1] }
 const out = resolve(option('out')), credentialPath = resolve(option('credentials'))
+const runIndex = args.indexOf('--run-id')
+const runId = runIndex < 0 ? `transport-preflight-${Date.now()}` : args[runIndex + 1]
+if (!/^[A-Za-z0-9_-]{1,100}$/.test(runId ?? '')) throw new Error('PREFLIGHT_INVALID_RUN_ID')
 mkdirSync(out, { recursive: true })
 process.env.PROMA_HOME = join(out, 'home')
 const live = args.includes('--live')
@@ -30,7 +33,7 @@ if (![2, 3].includes(concurrency)) throw new Error('PREFLIGHT_CONCURRENCY_INVALI
 if (recover && uncapped) throw new Error('PREFLIGHT_RECOVERY_MODE_CONFLICT')
 if (!recover && existsSync(join(out, 'preflight.json'))) throw new Error('PREFLIGHT_OUTPUT_EXISTS')
 const report: Record<string, any> = recover ? JSON.parse(readFileSync(join(out, 'preflight.json'), 'utf8'))
-  : { at: new Date().toISOString(), kind: 'transport_preflight', live,
+  : { at: new Date().toISOString(), kind: 'transport_preflight', run_id: runId, live,
     product_quality: null, metadata: {}, probes: [], policies: {}, physical_requests: 0,
     monetary_mode: uncapped ? 'unlimited-explicit-user-authorization' : 'existing-policy', concurrency, glm_flash_pair: glmFlashPair,
     ...(glmFlashPair ? { selected_batches: selectedBatches } : {}) }
@@ -121,7 +124,7 @@ async function probe(provider: 'deepseek' | 'zhipu-coding', key: string, policyP
             ANTHROPIC_BASE_URL: provider === 'deepseek' ? 'https://api.deepseek.com/anthropic' : 'https://open.bigmodel.cn/api/anthropic' },
           providerType: provider, messages, maxTokens: 8192, thinkingLevel: 'high', temperature: 0.1,
           monetaryPolicyPath: policyPath, responseHeaderTimeoutMs: 60000,
-          accounting: { projectId: 'parallel-preflight', runId: 'parallel-preflight-20261018', role: 'transport_probe' },
+          accounting: { projectId: 'parallel-preflight', runId: report.run_id ?? runId, role: 'transport_probe' },
           requestGuard: request => {
             const url = new URL(request.url)
             if (url.protocol !== 'https:' || url.pathname !== (provider === 'deepseek' ? '/anthropic/v1/messages' : '/api/anthropic/v1/messages')
@@ -165,6 +168,7 @@ async function probe(provider: 'deepseek' | 'zhipu-coding', key: string, policyP
       // Error bodies can contain request data; preserve safe classifications only.
       const e = error as any
       row.error = { type: e.name, status: e.status, provider_code: e.providerCode,
+        ...(typeof e.providerResetAt === 'string' && /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/.test(e.providerResetAt) ? { reset_at: e.providerResetAt } : {}),
         code: /^PREFLIGHT_|^MONETARY_/.test(e.message) ? e.message : 'PROVIDER_PROBE_FAILED' }
     }
   }
