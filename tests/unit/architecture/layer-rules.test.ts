@@ -14,6 +14,7 @@
  *      该规则同时覆盖「agent 零领域」「platform 零上层」两个目标）
  *   R8 main 根级只允许 index.ts/ipc.ts/csp.ts
  *   R9 全仓零「过渡桩」（R4 归位遗留形态）
+ *   R7 文件尺寸改为独立审查报告（npm run report:source-size），不以行数判架构失败。
  *   同层跨组（如 domain 内 coding→project）不设硬规则：domain 子域协作是设计的
  *   正常内部结构；深度耦合在 PR3/PR4 拆解时按 R1 白名单的消减节奏治理。
  *
@@ -144,30 +145,6 @@ describe('layer-rules 层规则（PR2 立规批）', () => {
       return s.includes('过渡桩') || (/^export \* from /m.test(s) && s.split('\n').length <= 6)
     })
     expect(stubs, `残留桩: ${stubs.join(', ')}`).toEqual([])
-  })
-
-  it('R7: 单文件 ≤800 行——超标须白名单登记（只减不增）', () => {
-    const OVERSIZE_WHITELIST = new Set([
-      // PR4 拆解目标：orchestrator（意图路由/状态机/落盘）、
-      // agent-tools（tool-handlers 注入反转时拆组）、ipc（按通道族模块化）、prd-review（六维审查逐维拆）、
-      // document-engine（文档同步与背板读写分离）。
-      // 长期豁免：generate（runMvpViaAgentLoop 主循环内聚）、agent-loop（loop 生命周期商内聚）、
-      // guide-pipeline（handleGuideMessage 主分流商内聚）。
-      'main/coding/stages/generate.ts',
-      'main/agent/loop/agent-loop.ts',
-      'main/guide/stages/guide-pipeline.ts',
-      // 契约层类型聚合：shared/types 是四层契约的唯一真相源，长期豁免（如需治理按域拆 types/ 子目录）
-      'shared/types.ts',
-    ])
-    const oversize: string[] = []
-    for (const file of walkTs(join(REPO, 'main')).concat(walkTs(join(REPO, 'shared')))) {
-      const count = readFileSync(file, 'utf8').split('\n').length
-      if (count > 800) {
-        const rel = toPosix(file).replace(toPosix(REPO), '').replace(/^\//, '')
-        if (!OVERSIZE_WHITELIST.has(rel)) oversize.push(`${rel} (${count} 行)`)
-      }
-    }
-    expect(oversize.sort(), `新增超标文件须先登记 OVERSIZE_WHITELIST：\n${oversize.join('\n')}`).toEqual([])
   })
 
   it('R1: 依赖只向下（类型导入豁免）——违规集合与白名单精确相等（只减不增）', () => {

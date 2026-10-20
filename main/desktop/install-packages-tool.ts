@@ -41,10 +41,10 @@ export function venvPythonRelativePath(): string {
 }
 
 /** 组件包名 → import 模块名（卡片库映射，未登记的回退包名自身；先剥版本约束段）。 */
-function importNameOf(packageSpec: string): string {
+function importNameOf(packageSpec: string, imports: Record<string, string>): string {
   const base = packageSpec.trim().match(/^[A-Za-z0-9][A-Za-z0-9._-]*/)?.[0] ?? packageSpec.trim()
   const card = WINDOWS_COMPONENT_CARDS.find((item) => item.package.toLowerCase() === base.toLowerCase())
-  return card?.importName ?? base.replace(/[-_]+/g, '_')
+  return imports[base.toLowerCase().replace(/[-_.]+/g, '-')] ?? card?.importName ?? base.replace(/[-_]+/g, '_')
 }
 
 export function buildInstallPackagesTool(projectId: string, deps: InstallPackagesDeps = {}): AgentLoopTool {
@@ -58,7 +58,7 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
       '在项目内 .venv 安装声明的第三方包（声明制，无任意命令）：入参给包列表（如 ["pystray","Pillow>=10"]）' +
       '或 requirements=true 读项目根 requirements.txt。首次自动建 venv；装完逐包 import 探测回读；' +
       '装好后 run_project_script 与 LAUNCH 命令自动/应改用 .venv\\Scripts\\python.exe。' +
-      '可用组件速查：pynput=全局热键注入｜pystray+Pillow=托盘｜sounddevice=录音播放｜pyperclip=剪贴板｜winotify=Toast 通知｜sherpa-onnx=本地离线语音识别（安装后提供 speech_locator.py 与 speech_runtime.py；复用 SpeechEngine/StreamingRecorder，勿在音频回调里同步识别）。实测版本 numpy==2.5.4、sherpa-onnx==1.13.8、sounddevice==0.5.6。' +
+      '包名与导入名不同时可给 imports 映射（如 {"beautifulsoup4":"bs4"}）；平台已知映射自动识别。语音专用接入指引按需读 read_production_context。' +
       `全程至多 ${maxCalls} 次安装调用。`,
     input_schema: {
       type: 'object',
@@ -69,6 +69,7 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
           description: '包声明列表（名称或 名称+版本约束，PEP 440 白名单格式）',
         },
         requirements: { type: 'boolean', description: 'true=安装项目根 requirements.txt 声明的全部包' },
+        imports: { type: 'object', additionalProperties: { type: 'string' }, description: '可选：本次声明的发行包名到 Python 导入模块名的映射，模块名可含点号' },
       },
     },
     execute: async (input, ctx) => {
@@ -90,10 +91,25 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
           .filter((line) => line && !line.startsWith('#'))
         if (specs.length === 0) return { output: 'requirements.txt 为空，无可安装声明。', isError: true }
       } else if (Array.isArray(input.packages)) {
-        specs = input.packages.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean)
+        if (input.packages.some(item => typeof item !== 'string' || !item.trim())) return { output: 'packages 必须是非空包声明的字符串数组；未忽略任何声明，也未安装。', isError: true }
+        specs = input.packages.map((item: string) => item.trim())
       }
       if (specs.length === 0) {
         return { output: '未声明任何包：给 packages 列表或 requirements=true。', isError: true }
+      }
+      if (input.requirements === true && input.packages !== undefined) return { output: 'packages 与 requirements=true 只能选择一项；未安装。', isError: true }
+      const imports: Record<string, string> = Object.create(null)
+      const requestedNames = new Set(specs.map(spec => spec.match(/^[A-Za-z0-9][A-Za-z0-9._-]*/)?.[0]?.toLowerCase().replace(/[-_.]+/g, '-')))
+      if (input.imports !== undefined) {
+        if (!input.imports || typeof input.imports !== 'object' || Array.isArray(input.imports)) return { output: 'imports 必须是包名到模块名的对象；未安装。', isError: true }
+        for (const [name, module] of Object.entries(input.imports)) {
+          const normalized = name.toLowerCase().replace(/[-_.]+/g, '-')
+          if (!requestedNames.has(normalized) || typeof module !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(module)) {
+            return { output: `imports 只接受本次声明包名与合法 Python 模块名：${name}；未安装。`, isError: true }
+          }
+          if (normalized in imports) return { output: `imports 包名重复：${name}；未安装。`, isError: true }
+          imports[normalized] = module
+        }
       }
       // Bare speech dependencies use the locally validated baseline. Explicit user versions win.
       const speechBaseline: Record<string, string> = { 'sherpa-onnx': '1.13.8', numpy: '2.5.4', sounddevice: '0.5.6' }
@@ -188,7 +204,7 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
       const probeResults: string[] = []
       const probeFailures: string[] = []
       for (const spec of specs) {
-        const moduleName = importNameOf(spec)
+        const moduleName = importNameOf(spec, imports)
         try {
           const { code, stderr } = await spawn({
             command: [venvPython, '-c', `import ${moduleName}`],
@@ -205,18 +221,6 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
         }
       }
 
-      if (specs.some(spec => spec.trim().toLowerCase().startsWith('pywebview'))) {
-        const target = join(root, 'file_plan_guard.py')
-        if (!existsSync(target)) {
-          const { cpSync } = await import('node:fs')
-          const { mainRootDir } = await import('../platform/paths')
-          const source = join(mainRootDir(), 'templates', 'tools', 'file_plan_guard.py')
-          if (existsSync(source)) {
-            cpSync(source, target)
-            steps.push('已生成 file_plan_guard.py：前缀改名执行前校验当前目录/前缀与预览绑定、纯文件名和路径边界；UI 输入或扫描变化立即停用旧预览。')
-          }
-        }
-      }
       // ④ 语音识别平台资产：装 sherpa-onnx 时自动落 speech_locator.py 进项目根
       //（模型定位器：~/.proma/speech-models/ 与平台语音输入共用，miss 自动从 hf-mirror 下载；
       //  2026-10-05 语音批 C 线——平台供资产惯例，子会话零寻路成本，产物自带源码可独立分发）

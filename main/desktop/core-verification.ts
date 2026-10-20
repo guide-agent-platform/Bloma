@@ -116,8 +116,10 @@ export async function runCoreVerification(options: {
     if (hasSpeechRequirement && !speech) result.missing.push('缺少 ASR 入口登记 speech，须登记产品实际使用的模型构造和转写方法')
     const speechResult = hasSpeechRequirement && speech ? await runHostSpeechProbe({ projectId: options.projectId, root, speech }) : undefined
     if (speechResult) result.speech = speechResult
-    const descriptions = required.map(item => item.description).join('\n')
-    const fileResult = /前缀/.test(descriptions) && /(?:重命名|改名)/.test(descriptions) ? await runHostPrefixRenameProbe(root, undefined, { requireUndo: /撤销|还原/.test(descriptions) }) : undefined
+    // Never combine unrelated feature words into a synthetic capability or undo obligation.
+    const prefixRename = required.filter(item => /前缀/.test(item.description) && /(?:重命名|改名)/.test(item.description))
+    const renameUndo = required.some(item => /撤销|还原/.test(item.description) && /(?:前缀|重命名|改名)/.test(item.description))
+    const fileResult = prefixRename.length ? await runHostPrefixRenameProbe(root, undefined, { requireUndo: renameUndo }) : undefined
     if (fileResult) {
       result.file_operations = fileResult
       if (fileResult.status !== 'passed') result.missing.push(`宿主前缀改名反例未通过：${fileResult.error ?? fileResult.tests?.filter(t => !t.passed).map(t => t.name).join('、')}`)

@@ -27,13 +27,14 @@ import type { ToolBudgetFact } from '../../shared/tool-feedback'
 import { DEFAULT_DESKTOP_EXECUTION_LIMITS } from './execution-limits'
 import { getPromaHome } from '../../storage/config-paths'
 import { pythonEncodingEnv } from './python-process-env'
-import { captureVerificationVersion, collectVerificationReceipts, recordVerificationReceipt, receiptEvidence, receiptPython } from './verification-receipts'
+import { captureVerificationVersion, collectVerificationReceipts, recordVerificationReceipt, receiptEvidence, receiptPython, hasVerificationReceipt } from './verification-receipts'
 
 const DEFAULT_TIMEOUT_MS = 90_000
 const MAX_TIMEOUT_MS = 180_000
 const MIN_TIMEOUT_MS = 5_000
 const DEFAULT_MAX_RUNS = DEFAULT_DESKTOP_EXECUTION_LIMITS.script_runs
-const MAX_ARGS = 8
+const MAX_ARGS = 64
+const MAX_ARG_CHARS = 16_000
 /** 最小生存 env（同 process-driver MINIMUM_SURVIVAL_ENV 家族）+ PATH/TEMP——解释器解析与临时目录刚需。 */
 const CHILD_EXEC_ENV_KEYS: readonly string[] = [
   'SystemRoot', 'SystemDrive', 'ComSpec', 'PATHEXT', 'windir', 'PATH', 'Path', 'TEMP', 'TMP',
@@ -127,7 +128,7 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
       properties: {
         script: { type: 'string', description: '项目根内相对路径（如 自测.py），必须 .py 且已存在' },
         code: { type: 'string', description: '单次 Python 短代码，最多 16000 字符；与 script 互斥，在项目目录执行，沿用相同解释器和环境隔离' },
-        args: { type: 'array', items: { type: 'string' }, description: '传给脚本的参数（至多 8 个）' },
+        args: { type: 'array', maxItems: MAX_ARGS, items: { type: 'string' }, description: `传给脚本的参数（至多 ${MAX_ARGS} 个、合计 ${MAX_ARG_CHARS} 字符；完整传递，不截断）` },
         timeout_ms: { type: 'number', description: `超时毫秒（${MIN_TIMEOUT_MS / 1000}s~${MAX_TIMEOUT_MS / 1000}s，缺省 90s）` },
       },
     },
@@ -166,11 +167,17 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
       } catch {
         return { output: `脚本不可读：${script}`, isError: true }
       }
-      const args = Array.isArray(input.args)
-        ? input.args.filter((item): item is string => typeof item === 'string').slice(0, MAX_ARGS)
-        : []
-      const requested = typeof input.timeout_ms === 'number' ? input.timeout_ms : defaultTimeoutMs
-      const timeoutMs = Math.min(Math.max(Math.round(requested) || defaultTimeoutMs, MIN_TIMEOUT_MS), MAX_TIMEOUT_MS)
+      if (input.args !== undefined && (!Array.isArray(input.args) || input.args.length > MAX_ARGS
+        || input.args.some(item => typeof item !== 'string' || item.includes('\0'))
+        || input.args.reduce((size, item) => size + item.length, 0) > MAX_ARG_CHARS)) {
+        return { output: `args 必须是完整字符串数组，至多 ${MAX_ARGS} 个、合计 ${MAX_ARG_CHARS} 字符，不能含空字符；未执行，也未截断参数。`, isError: true }
+      }
+      const args = (input.args ?? []) as string[]
+      const requested = input.timeout_ms ?? defaultTimeoutMs
+      if (typeof requested !== 'number' || !Number.isFinite(requested) || requested < MIN_TIMEOUT_MS || requested > MAX_TIMEOUT_MS) {
+        return { output: `timeout_ms 必须是 ${MIN_TIMEOUT_MS}~${MAX_TIMEOUT_MS} 之间的有限数字；未执行。`, isError: true }
+      }
+      const timeoutMs = Math.round(requested)
 
       let python: string
       if (existsSync(join(rootReal, '.venv', 'Scripts', 'python.exe'))) {
@@ -202,6 +209,12 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
       const env = { ...buildChildExecEnv(process.env), APP_DATA_DIR: appData }
       const command = [python, ...(script ? [target] : ['-c', inlineCode]), ...args]
       const before = captureVerificationVersion(rootReal, python, env, projectId)
+      // The key includes all argument values; the short display label omits values.
+      const entry = script ? [script, ...args.filter(arg => /^--[A-Za-z0-9_-]{1,40}$/.test(arg))].join(' ').slice(0, 160) : `inline-${ctx.toolCallId ?? 'probe'}`
+      const evidence = (scenarios: Array<{ outcome: string }>) => {
+        try { return receiptEvidence(entry, command, timeoutMs, before, captureVerificationVersion(rootReal, python, env, projectId), scenarios) }
+        catch { return { ...receiptEvidence(entry, command, timeoutMs, before, before, scenarios), freshness: 'unknown' as const } }
+      }
       try {
         const { code, stdout, stderr } = await spawn({
           command,
@@ -213,9 +226,9 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
         const durationMs = Date.now() - startedAt
         const parsed = parseDriverStdout(stdout)
         const facts = scriptExecutionFacts(code, parsed.scenarios, budgetFact(runs))
-        const entry = script ? [script, ...args.filter(arg => /^--[A-Za-z0-9_-]{1,40}$/.test(arg))].join(' ').slice(0, 160) : `inline-${ctx.toolCallId ?? 'probe'}`
-        if (parsed.scenarios.length) facts.feedback.evidence = receiptEvidence(entry, command, timeoutMs,
-          before, captureVerificationVersion(rootReal, python, env, projectId), parsed.scenarios)
+        // An exception or a no-assertion rerun must replace this command's old PASS too.
+        const proof = evidence(parsed.scenarios)
+        if (parsed.scenarios.length || code !== 0 || hasVerificationReceipt(projectId, ctx.sessionId, proof.key)) facts.feedback.evidence = proof
         const verificationStatus = facts.verificationStatus
         const verdict = `进程退出码 ${code}；${facts.verdict}`
         return {
@@ -237,10 +250,11 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
           return {
             output: `执行失败（${error.kind}）：${error.message}。timeout=环境类不要反复重试；not-found=解释器路径问题，用 probe_desktop_env 诊断。`,
             isError: true,
-            feedback: { schema_version: 1, execution: 'failed', verification: 'unverified', category: 'environment', recovery: 'prepare_environment', reason: error.kind },
+            feedback: { schema_version: 1, execution: error.kind === 'cancelled' ? 'cancelled' : 'failed', verification: 'unverified', category: 'environment', recovery: error.kind === 'cancelled' ? 'stop' : 'prepare_environment', reason: error.kind, evidence: evidence([]) },
           }
         }
-        return { output: `执行异常：${error instanceof Error ? error.message : String(error)}`, isError: true }
+        return { output: `执行异常：${error instanceof Error ? error.message : String(error)}`, isError: true,
+          feedback: { schema_version: 1, execution: 'failed', verification: 'unverified', category: 'verification_harness', recovery: 'inspect', reason: 'SCRIPT_EXECUTION_ERROR', evidence: evidence([]) } }
       }
     },
   }

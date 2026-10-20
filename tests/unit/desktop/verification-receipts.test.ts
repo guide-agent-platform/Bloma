@@ -1,7 +1,8 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { DriverExecutionError } from '../../../main/desktop/process-driver'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildChildScriptRunnerTool } from '../../../main/desktop/child-exec-tool'
 import { createToolState, runAgentLoop, type ToolContext } from '../../../main/agent/loop/agent-loop'
@@ -58,6 +59,15 @@ describe('host versioned verification receipts', () => {
     consumeProjectAttempt(id, 'install:another-worker', 4)
     expect(tool.collectFeedback!(ctx)[0].evidence?.freshness).toBe('stale')
   })
+  it('invalidates receipts for executable code written into the report directory', async () => {
+    const tool = await run('core_check.py', 'PASS core\n')
+    mkdirSync(join(root, '00_VERIFY'))
+    writeFileSync(join(root, '00_VERIFY', 'core-verification.json'), '{}')
+    writeFileSync(join(root, '00_VERIFY', 'mvp-review.html'), '<html>host review output</html>')
+    expect(tool.collectFeedback!(ctx)[0].evidence?.freshness).toBe('current')
+    writeFileSync(join(root, '00_VERIFY', 'actual_test.py'), 'assert False')
+    expect(tool.collectFeedback!(ctx)[0].evidence?.freshness).toBe('stale')
+  })
   it('a later FAIL of the same command replaces its earlier PASS; executions are never skipped', async () => {
     await run('core_check.py', 'PASS core\n')
     const last = await run('core_check.py', 'FAIL core\n')
@@ -65,6 +75,28 @@ describe('host versioned verification receipts', () => {
     expect(facts.filter(f => f.evidence)).toHaveLength(1)
     expect(facts[0]).toMatchObject({ verification: 'failed', evidence: { failed: 1, freshness: 'current' } })
     expect(facts.at(-1)?.budget?.used).toBe(2)
+  })
+  it.each(['no assertions', 'exception', 'timeout', 'cancelled'] as const)('replaces an earlier PASS when the same command later reports %s', async kind => {
+    await run('core_check.py', 'PASS core\n')
+    const tool = buildChildScriptRunnerTool(id, { resolvePython: async () => 'C:/Python313/python.exe', spawn: async () => {
+      if (kind === 'timeout' || kind === 'cancelled') throw new DriverExecutionError(kind, 'stopped')
+      return { code: kind === 'exception' ? 1 : 0, stdout: '', stderr: 'no business assertions' }
+    } })
+    const outcome = await tool.execute({ script: 'core_check.py' }, ctx)
+    tool.recordFeedback!(safeToolFeedback(outcome.feedback)!, ctx)
+    const facts = tool.collectFeedback!(ctx).filter(f => f.evidence)
+    expect(facts).toHaveLength(1)
+    expect(facts[0]).toMatchObject({ verification: 'unverified', evidence: { passed: 0 } })
+  })
+  it('keeps argument values in receipt identity even when their short display labels match', async () => {
+    const tool = runner('PASS parameterized\n')
+    for (const args of [['--case', 'left'], ['--case', 'right']]) {
+      const outcome = await tool.execute({ script: 'core_check.py', args }, ctx)
+      tool.recordFeedback!(safeToolFeedback(outcome.feedback)!, ctx)
+    }
+    const facts = tool.collectFeedback!(ctx).filter(f => f.evidence)
+    expect(facts).toHaveLength(2)
+    expect(facts[0].evidence!.key).not.toBe(facts[1].evidence!.key)
   })
   it('post-audit permission rejection cannot be stored as a valid successful receipt', async () => {
     const tool = runner('PASS core\n'), outcome = await tool.execute({ script: 'core_check.py' }, ctx)

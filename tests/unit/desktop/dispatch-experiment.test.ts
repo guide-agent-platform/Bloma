@@ -166,6 +166,23 @@ describe('host tool boundaries', () => {
     const tool = wrapExperimentDispatcherTools([{ name: 'delegate_agent', description: '', input_schema: {}, execute }], value)[0]
     expect((await tool.execute({ task_id: 'two' }, ctx())).output).toBe('EXPERIMENT_DEPENDENCY_WAIT'); expect(execute).not.toHaveBeenCalled()
   })
+  it('installation side effects obey assigned source paths and cannot overwrite frozen inputs', async () => {
+    const value = config('running')
+    value.tasks[0].writes.push('requirements.txt')
+    value.workers.all = { delegation_id: 'd', child_session_id: 'child', task_ids: ['one'] }
+    save(join(root, 'requirements.txt'), 'frozen\n')
+    value.protected_inputs = { [join(root, 'requirements.txt').slice(home.length + 1).replaceAll('\\', '/')]: 'a'.repeat(64) }
+    const tool = wrapExperimentWorkerTools([{ name: 'install_packages', description: '', input_schema: {}, execute: async () => {
+      writeFileSync(join(root, 'requirements.txt'), 'rewritten\n')
+      writeFileSync(join(root, 'unassigned_helper.py'), '# implicit source')
+      return { output: 'installed' }
+    } }], value, root)[0]
+    const outcome = await tool.execute({}, { ...ctx(), sessionId: 'child' })
+    expect(outcome.isError).toBe(true)
+    expect(readFileSync(join(root, 'requirements.txt'), 'utf8')).toBe('frozen\n')
+    expect(existsSync(join(root, 'unassigned_helper.py'))).toBe(false)
+    expect(outcome.feedback).toMatchObject({ verification: 'unverified', category: 'permission' })
+  })
   it('guards direct writes including directory scopes and traversal', async () => {
     const value = config('running'); value.workers.all = { delegation_id: 'd', child_session_id: 'child', task_ids: ['one'] }; writeExperiment(value)
     const execute = vi.fn(async () => ({ output: 'ok' }))

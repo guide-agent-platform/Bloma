@@ -1,0 +1,20 @@
+{
+  "mode": "informational",
+  "review_threshold": 800,
+  "scanned_files": 274,
+  "review_candidates": [
+    {
+      "path": "main/agent/loop/agent-loop.ts",
+      "lines": 2045
+    },
+    {
+      "path": "shared/types.ts",
+      "lines": 1941
+    },
+    {
+      "path": "main/guide/stages/guide-pipeline.ts",
+      "lines": 925
+    }
+  ],
+  "guidance": "Review responsibilities, dependency direction and testability. Line count alone never fails this report; no file exemptions hide large modules."
+}

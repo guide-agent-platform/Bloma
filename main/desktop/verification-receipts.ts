@@ -5,22 +5,24 @@ import { getPromaHome } from '../../storage/config-paths'
 import { writeTextFileAtomic } from '../../storage/json-store'
 import { readProjectAttempts } from '../platform/execution/project-attempts'
 import { safeToolFeedback, type ToolFeedback } from '../../shared/tool-feedback'
+import { isHostPresentationOutput } from './host-verification-outputs'
 
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
-const excluded = new Set(['.venv', 'venv', '__pycache__', '.git', 'node_modules', '.cache', '00_VERIFY'])
+const excluded = new Set(['.venv', 'venv', '__pycache__', '.git', 'node_modules', '.cache'])
 // Registration and delivery prose are checked separately by the host delivery gate.
 const declarations = new Set(['CORE_CHECK.json', 'LAUNCH.json', 'DELIVERY.md'])
 function treeFingerprint(root: string): string {
   const files: Array<[string, string]> = []; let size = 0
-  const visit = (directory: string) => {
+  const visit = (directory: string, executableOnly = false) => {
     for (const name of readdirSync(directory).sort()) {
       if (excluded.has(name)) continue
       const full = join(directory, name), rel = relative(root, full).replaceAll('\\', '/')
-      if (declarations.has(rel)) continue
+      if (declarations.has(rel) || isHostPresentationOutput(rel)) continue
       const stat = lstatSync(full)
       if (stat.isSymbolicLink()) throw new Error('VERIFICATION_SOURCE_LINK')
-      if (stat.isDirectory()) visit(full)
+      if (stat.isDirectory()) visit(full, executableOnly || name === '00_VERIFY')
       else if (stat.isFile()) {
+        if (executableOnly && !/\.(?:py|js|mjs|cjs|ts|tsx|html|css)$/i.test(name)) continue
         size += stat.size
         if (files.length >= 4096 || size > 128 * 1024 * 1024) throw new Error('VERIFICATION_SOURCE_LIMIT')
         files.push([rel, hash(readFileSync(full))])
@@ -76,6 +78,9 @@ function readReceipts(projectId: string, sessionId: string): ToolFeedback[] {
   const raw = JSON.parse(readFileSync(file, 'utf8'))
   if (raw.schema_version !== 1 || !Array.isArray(raw.facts) || raw.facts.length > 16) throw new Error('VERIFICATION_RECEIPTS_INVALID')
   return raw.facts.map(safeToolFeedback).filter((f: ToolFeedback | undefined): f is ToolFeedback => Boolean(f?.evidence))
+}
+export function hasVerificationReceipt(projectId: string, sessionId: string, key: string): boolean {
+  return readReceipts(projectId, sessionId).some(f => f.evidence!.key === key)
 }
 /** Called after permission/write-audit wrappers; never saves their rejected run as a pass. */
 export function receiptPython(projectId: string, sessionId: string): string | undefined {

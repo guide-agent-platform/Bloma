@@ -929,7 +929,7 @@ async function runAgentLoopImpl(input: AgentLoopInput): Promise<AgentLoopResult>
     })
     return {
       ...r,
-      ...(ctx.state.successful_file_changes ? { files_changed: ctx.state.successful_file_changes.slice(0, 20) } : {}),
+      ...(ctx.state.successful_file_changes ? { files_changed: [...ctx.state.successful_file_changes] } : {}),
       tool_feedback: retainedToolFeedback([...Object.values(ctx.state.latest_tool_feedback ?? {}).map(f => f.evidence
         ? { ...f, verification: 'unverified' as const, evidence: { ...f.evidence, freshness: 'unknown' as const } } : f), ...input.tools.flatMap(tool => {
         try { return tool.collectFeedback?.(ctx) ?? [] } catch { return [{ schema_version: 1 as const, execution: 'not_run' as const, verification: 'unverified' as const,

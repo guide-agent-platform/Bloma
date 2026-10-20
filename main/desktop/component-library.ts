@@ -118,7 +118,7 @@ export function componentQuickReference(): string {
     (card) => `- ${card.package}（import ${card.importName}）：${card.purpose}｜坑：${card.pitfall}｜降级：${card.fallback}｜[${card.evidence}]`,
   )
   return ['可用组件速查（pip 声明安装，详卡见 install_packages 工具）：', ...lines,
-    '- 内置 file_plan_guard.py（随 pywebview 物化，不另装 pip）：前缀改名前用 validate_prefix_plan(folder,prefix,plan) 校验当前输入与快照、文件名和目录边界；输入/扫描变化立即失效旧预览，异步旧响应不能重新启用执行。固定反例与隔离 GUI 回放有证据，不保证操作期间的原子隔离。',
+    '- 可复用骨架组件 file_plan_guard.py（是否已物化用 inspect_project_resources 核对，不另装 pip）：仅文件改名业务需要 validate_prefix_plan(folder,prefix,plan) 校验当前输入与快照、文件名和目录边界；输入/扫描变化立即失效旧预览。固定反例与隔离 GUI 回放有证据，不保证操作期间的原子隔离。',
     '- 内置 file_transactions.py：build_prefix_plan / execute_prefix_plan / undo_prefix_rename；源文件变化、目标冲突先拒绝，操作异常恢复原文件名并如实返回恢复路径，进度通知异常独立记录。ui/preview-state.js 的 createPreviewGuard 绑定输入/扫描版本，旧响应不能启用执行，take() 只消费一次。必须接入实际业务，不能只把组件放进目录。',
     '- 内置 llm_client.py：LlmClient.generate({prompt,config:{endpoint,model,api_key,provider,timeout}}) 执行真实 HTTP 请求，区分未配置、鉴权、模型、限流、超时、网络与响应错误；真实功能不能只实现 mock。宿主本机 HTTP 探针不消耗模型额度。',
   ].join('\n')

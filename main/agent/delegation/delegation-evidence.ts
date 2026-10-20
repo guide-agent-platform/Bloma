@@ -19,6 +19,7 @@ export function refreshHandoffEvidence(record: DelegationRecord, tools: AgentLoo
   const handoff = buildTaskHandoff({ status: record.loopStatus ?? 'completed', turns: 0, finalText: '', toolCalls: [],
     files_changed: prior.changed_files, tool_feedback: [...previous, ...facts] })
   handoff.stop_reason = prior.stop_reason
+  if (prior.omitted_changed_files) handoff.omitted_changed_files = prior.omitted_changed_files
   return handoff
 }
 

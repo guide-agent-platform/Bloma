@@ -608,6 +608,40 @@ describe('M3 提问冒泡 / 续跑（委派协作嫁接方案 §6）', () => {
     expect(summary.status).toBe('completed')
     expect(summary.result_summary).toContain('初稿完成')
   })
+  it('a stopped invocation and its old abort timer cannot settle or cancel the replacement continuation', async () => {
+    let releaseOld!: () => void, releaseNew!: () => void
+    const oldBarrier = new Promise<void>(r => { releaseOld = r })
+    const newBarrier = new Promise<void>(r => { releaseNew = r })
+    setChildToolsBuilder(() => [])
+    registerParent(async function* () { await oldBarrier; yield textMessage('old result'); yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' } })
+    const child = startDelegation(parentContext(), { task: 'first' })
+    const record = findDelegation(parentSessionId, child.delegation_id)!
+    await new Promise(r => setTimeout(r, 5))
+    stopDelegation(parentSessionId, child.delegation_id)
+    registerParent(async function* () { await newBarrier; yield textMessage('new result'); yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' } })
+    continueDelegation(parentContext(), child.delegation_id, 'replacement')
+    releaseOld()
+    await new Promise(r => setTimeout(r, 5100))
+    expect(record.status).toBe('running')
+    expect(findDelegation(parentSessionId, child.delegation_id)).toBe(record)
+    releaseNew()
+    await record.completion
+    expect(record.resultSummary).toContain('new result')
+    expect(record.resultSummary).not.toContain('old result')
+  }, 15000)
+  it('registry pruning does not remove completed tasks still owned by an active parent', async () => {
+    setChildToolsBuilder(() => [])
+    registerParent(oneShotQuery('done'))
+    const first = startDelegation(parentContext(), { task: 'keep for integration' })
+    await findDelegation(parentSessionId, first.delegation_id)!.completion
+    for (let i = 0; i < 51; i++) {
+      const child = startDelegation(parentContext(), { task: `other ${i}` })
+      await findDelegation(parentSessionId, child.delegation_id)!.completion
+    }
+    expect(findDelegation(parentSessionId, first.delegation_id)?.status).toBe('completed')
+    expect(continueDelegation(parentContext(), first.delegation_id, 'integration correction').child_session_id).toBe(first.child_session_id)
+    await findDelegation(parentSessionId, first.delegation_id)!.completion
+  })
 
   it('continue 工具接线：已终结委派经 continue_delegation 工具续跑', async () => {
     registerParent(oneShotQuery('初版完成'))

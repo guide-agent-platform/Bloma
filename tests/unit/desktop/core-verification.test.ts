@@ -117,6 +117,30 @@ describe('shared core delivery', () => {
     vi.mocked(runHostPrefixRenameProbe).mockResolvedValue({ probe_version: 1, status: 'passed' })
     expect((await run()).status).toBe('passed')
   })
+  it('does not combine words from unrelated requirements to impose a prefix-rename probe', async () => {
+    vi.mocked(runHostPrefixRenameProbe).mockClear()
+    vi.mocked(readPrdBackplane).mockReturnValue({ requirements: [
+      { id: 'F-001', description: '按编号前缀搜索联系人' }, { id: 'F-002', description: '给联系人改名' },
+    ] } as never)
+    manifest()
+    await run()
+    expect(runHostPrefixRenameProbe).not.toHaveBeenCalled()
+  })
+  it('does not impose filename undo because an unrelated feature supports undo', async () => {
+    vi.mocked(runHostPrefixRenameProbe).mockClear().mockResolvedValue({ probe_version: 1, status: 'passed' })
+    vi.mocked(readPrdBackplane).mockReturnValue({ requirements: [
+      { id: 'F-001', description: '给文件添加前缀改名' }, { id: 'F-002', description: '撤销笔记编辑' },
+    ] } as never)
+    manifest()
+    await run()
+    expect(runHostPrefixRenameProbe).toHaveBeenCalledWith(root, undefined, { requireUndo: false })
+    vi.mocked(readPrdBackplane).mockReturnValue({ requirements: [
+      { id: 'F-001', description: '给文件添加前缀改名' }, { id: 'F-002', description: '撤销上一次改名' },
+    ] } as never)
+    manifest()
+    await run()
+    expect(runHostPrefixRenameProbe).toHaveBeenLastCalledWith(root, undefined, { requireUndo: true })
+  })
   it('missing execution evidence is unverified, never green', async () => {
     expect((await run()).status).toBe('unverified')
     expect(JSON.parse(readFileSync(join(root, CORE_REPORT_REL), 'utf8')).status).toBe('unverified')

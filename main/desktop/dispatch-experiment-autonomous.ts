@@ -1,8 +1,8 @@
 import type { AgentLoopTool, ToolContext, ToolOutcome } from '../agent/loop/agent-loop'
-import { findDelegation } from '../agent/delegation/agent-collaboration'
+import { findDelegation, getDelegationSummary } from '../agent/delegation/agent-collaboration'
 import { experimentLimits, recordExperiment, validateExperimentTasks, writeExperiment, type DispatchExperiment, type ExperimentTask } from './dispatch-experiment'
 import { assertExperimentWorkerRecovery } from './dispatch-experiment-recovery'
-import { handoffRecovery } from '../agent/delegation/task-handoff'
+import { assertDelegationRecovery } from '../agent/delegation/delegation-evidence'
 import { readPrdBackplane } from '../project/prd-store'
 
 export function autonomousTaskBook(config: DispatchExperiment): string {
@@ -56,10 +56,14 @@ export function wrapAutonomousDispatcherTools(tools: AgentLoopTool[], config: Di
       return { output: JSON.stringify({ plan_locked: Boolean(config.plan_locked), worker_limit: experimentLimits(config).max_workers,
         tasks: config.tasks.map(({ id, depends_on, writes, feature_ids }) => ({ id, depends_on, writes, feature_ids })),
         workers: Object.entries(config.workers).map(([slot, worker]) => { const record = findDelegation(ctx.sessionId, worker.delegation_id)
+          if (record) getDelegationSummary(record) // Refresh receipts exactly as actual continuation does.
+          let continuationBlocked = record ? record.status === 'running' ? 'WORKER_STILL_RUNNING' : record.status === 'cancelled' ? 'CANCELLED_WORKER_REQUIRES_NEW_RUN' : null : 'WORKER_MISSING'
+          if (record && !continuationBlocked) try { assertDelegationRecovery(record) } catch (error) {
+            continuationBlocked = error instanceof Error ? error.message : String(error)
+          }
           return { slot, delegation_id: worker.delegation_id, task_ids: worker.task_ids, status: record?.status ?? 'missing',
             loop_status: record?.loopStatus ?? null, task_handoff: record?.taskHandoff ?? null,
-            can_continue: Boolean(record && record.status !== 'running' && record.status !== 'cancelled'
-              && (record.loopStatus !== 'budget_exhausted' || record.taskHandoff && handoffRecovery(record.taskHandoff) === 'resume')) } }),
+            can_continue: !continuationBlocked, continuation_blocked_reason: continuationBlocked } }),
       }) }
     } }
   return [...tools.map(tool => {
@@ -98,6 +102,7 @@ export function wrapAutonomousDispatcherTools(tools: AgentLoopTool[], config: Di
             const record = owner && findDelegation(ctx.sessionId, owner.delegation_id)
             assertExperimentWorkerRecovery(config, record)
             if (!owner?.has_executed || record?.status !== 'completed' || record.loopStatus !== 'completed') throw new Error('EXPERIMENT_DEPENDENCY_WAIT')
+            if (getDelegationSummary(record).task_handoff?.completion === 'incomplete') throw new Error('EXPERIMENT_DEPENDENCY_UNRESOLVED: 负责人已结束，但宿主交接仍含失败或阻塞；先修复该依赖。')
           }
           const scopes = selected.flatMap(task => task.writes).map(path => path.toLowerCase())
           for (const worker of Object.values(config.workers)) {

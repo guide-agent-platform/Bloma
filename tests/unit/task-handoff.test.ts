@@ -11,6 +11,23 @@ describe('host task handoff', () => {
   it('planned writes without a committed result are not changed files', () => {
     expect(buildTaskHandoff({ ...base, files_changed: undefined }).changed_files).toEqual([])
   })
+  it('keeps complete file identities and explicitly reports a bounded file list', () => {
+    const path = 'nested/'.repeat(30) + 'important.py'
+    const h = buildTaskHandoff({ ...base, files_changed: [path, ...Array.from({ length: 25 }, (_, i) => `${i}.py`)] })
+    expect(h.omitted_changed_files).toBe(6)
+    expect(readTaskHandoff(JSON.parse(JSON.stringify(h)))?.changed_files[0]).toBe(path)
+    expect(readTaskHandoff(JSON.parse(JSON.stringify(h)))?.omitted_changed_files).toBe(6)
+  })
+  it('retains a failed host operation when many later successful receipts fill the handoff', () => {
+    const failure = { schema_version: 1 as const, execution: 'failed' as const, verification: 'unverified' as const, category: 'permission' as const, reason: 'WRITE_ROLLED_BACK' }
+    const successful = Array.from({ length: 16 }, (_, i) => ({ schema_version: 1 as const, execution: 'completed' as const, verification: 'passed' as const,
+      evidence: { key: i.toString(16).padStart(64, '0'), entry: `${i}.py`, source_fingerprint: 'a'.repeat(64), environment_fingerprint: 'b'.repeat(64), freshness: 'current' as const, passed: 1, failed: 0, blocked: 0 } }))
+    const h = buildTaskHandoff({ ...base, tool_feedback: [failure, ...successful] })
+    expect(h.verification).toHaveLength(8)
+    expect(h.verification).toContainEqual(expect.objectContaining({ reason: 'WRITE_ROLLED_BACK' }))
+    expect(h.completion).toBe('incomplete')
+    expect(h.recovery).toBe('inspect')
+  })
   it('records budget stop and failed evidence as unfinished work', () => {
     const h = buildTaskHandoff({ ...base, status: 'turn_limit', tool_feedback: [{ schema_version: 1, execution: 'completed', verification: 'failed', category: 'product_assertion', scope: 'save' }] })
     expect(h.completion).toBe('incomplete')

@@ -176,14 +176,27 @@ describe('install_packages（声明制 venv 安装刀）', () => {
     const otherRoot = createProject({ request_id: 'req-install-other', mode: 'quick' }).root_path
     expect(existsSync(join(otherRoot, 'speech_locator.py'))).toBe(false)
   })
-  it('materializes the prefix-plan guard without overwriting an existing product helper', async () => {
+  it('installing a generic GUI package does not inject a filename-renaming business helper', async () => {
     const tool = buildInstallPackagesTool(projectId, { spawn: makeSpawn([{ match: cmd => cmd.includes('pip'), code: 0 }]) })
     const first = await tool.execute({ packages: ['pywebview'] }, ctxFor(projectId))
     const path = join(projectRoot, 'file_plan_guard.py')
     expect(first.isError).toBeFalsy()
-    expect(readFileSync(path, 'utf8')).toContain('def validate_prefix_plan(')
+    expect(existsSync(path)).toBe(false)
     writeFileSync(path, '# existing product helper')
     await tool.execute({ packages: ['pywebview'] }, ctxFor(projectId))
     expect(readFileSync(path, 'utf8')).toBe('# existing product helper')
+  })
+  it('accepts explicit distribution/import mappings outside the platform component catalog', async () => {
+    const spawn = makeSpawn([])
+    const tool = buildInstallPackagesTool(projectId, { spawn, maxCalls: 1 })
+    for (const input of [{ packages: ['requests', 3] }, { packages: ['requests'], requirements: true },
+      { packages: ['beautifulsoup4'], imports: { beautifulsoup4: 'bs4;exit()' } },
+      { packages: ['beautifulsoup4'], imports: { unknown: 'bs4' } }]) {
+      expect((await tool.execute(input, ctxFor(projectId))).isError).toBe(true)
+    }
+    expect(spawn).not.toHaveBeenCalled()
+    const outcome = await tool.execute({ packages: ['beautifulsoup4'], imports: { beautifulsoup4: 'bs4' } }, ctxFor(projectId))
+    expect(outcome.isError).toBe(false)
+    expect(spawn.mock.calls.some(([request]) => request.command.includes('import bs4'))).toBe(true)
   })
 })

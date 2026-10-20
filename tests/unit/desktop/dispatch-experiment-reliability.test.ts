@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createToolState, type ToolContext } from '../../../main/agent/loop/agent-loop'
 import { wrapAutonomousDispatcherTools } from '../../../main/desktop/dispatch-experiment-autonomous'
 import { experimentConditionHash, writeExperiment, type DispatchExperiment } from '../../../main/desktop/dispatch-experiment'
+import * as collaboration from '../../../main/agent/delegation/agent-collaboration'
+import { buildTaskHandoff } from '../../../main/agent/delegation/task-handoff'
 
 let home: string, originalHome: string | undefined
 beforeEach(() => {
@@ -14,6 +16,7 @@ beforeEach(() => {
   writeFileSync(join(home, 'dispatch-experiment-home.json'), '{"version":1}')
 })
 afterEach(() => {
+  vi.restoreAllMocks()
   if (originalHome === undefined) delete process.env.PROMA_HOME
   else process.env.PROMA_HOME = originalHome
   rmSync(home, { recursive: true, force: true })
@@ -30,9 +33,31 @@ function fixture(required = ['CORE_CHECK.json', 'DELIVERY.md', 'LAUNCH.json']) {
   const delegated = vi.fn(async () => ({ output: 'created' }))
   const tools = wrapAutonomousDispatcherTools([{ name: 'delegate_agent', description: 'test', input_schema: { type: 'object', properties: {} }, execute: delegated }], config, created, () => ({}), () => {})
   const ctx: ToolContext = { projectId: 'p', sessionId: 'parent', requestId: 'request', signal: new AbortController().signal, state: createToolState(0) }
-  return { config, created, ctx, plan: tools.find(t => t.name === 'experiment_plan')!, delegate: tools.find(t => t.name === 'delegate_agent')! }
+  return { config, created, ctx, plan: tools.find(t => t.name === 'experiment_plan')!, delegate: tools.find(t => t.name === 'delegate_agent')!, status: tools.find(t => t.name === 'experiment_status')! }
 }
 describe('pre-dispatch required artifact permission coverage', () => {
+  it('does not release dependencies merely because the worker loop ended while host facts still report failure', async () => {
+    const f = fixture([])
+    await f.plan.execute({ tasks: [{ id: 'left', instruction: '接口', depends_on: [], writes: ['left.py'] },
+      { id: 'right', instruction: '消费者', depends_on: ['left'], writes: ['right.py'] }] }, f.ctx)
+    f.config.workers.left = { delegation_id: 'left-worker', child_session_id: 'left-child', task_ids: ['left'], has_executed: true }
+    const taskHandoff = buildTaskHandoff({ status: 'completed', turns: 1, finalText: '', toolCalls: [],
+      tool_feedback: [{ schema_version: 1, execution: 'completed', verification: 'failed', category: 'product_assertion' }] })
+    vi.spyOn(collaboration, 'findDelegation').mockReturnValue({ status: 'completed', loopStatus: 'completed', taskHandoff } as collaboration.DelegationRecord)
+    expect((await f.delegate.execute({ task_ids: ['right'] }, f.ctx)).output).toContain('EXPERIMENT_DEPENDENCY_UNRESOLVED')
+    expect(f.created).not.toHaveBeenCalled()
+  })
+  it('status uses the actual continuation admission policy, including exhausted cumulative resources', async () => {
+    const f = fixture([])
+    f.config.workers.left = { delegation_id: 'left-worker', child_session_id: 'left-child', task_ids: [], has_executed: true }
+    const taskHandoff = buildTaskHandoff({ status: 'completed', turns: 1, finalText: '', toolCalls: [], tool_feedback: [{ schema_version: 1,
+      execution: 'completed', verification: 'not_applicable', scope: 'execution_resources',
+      budget: { resource: 'script_runs', scope: 'session', used: 12, limit: 12, remaining: 0, resets_on: 'new_run' } }] })
+    vi.spyOn(collaboration, 'findDelegation').mockReturnValue({ status: 'completed', loopStatus: 'completed', taskHandoff } as collaboration.DelegationRecord)
+    const status = JSON.parse((await f.status.execute({}, f.ctx)).output)
+    expect(status.workers[0].can_continue).toBe(false)
+    expect(status.workers[0].continuation_blocked_reason).toContain('DELEGATION_BUDGET_REQUIRES_NEW_RUN')
+  })
   it('rejects an incomplete plan before irreversible dispatch; allows the model to correct its own plan', async () => {
     const f = fixture()
     const task = { id: 'chosen-by-model', instruction: '业务与自测', depends_on: [], writes: ['app.py', 'test_logic.py'] }

@@ -13,6 +13,7 @@
     "start:auto": "node scripts/start.mjs",
     "typecheck": "tsc --noEmit",
     "analyze:loop": "node scripts/calibrate-loop-params.mjs",
+    "report:source-size": "node scripts/source-size-report.mjs",
     "test:unit": "vitest run tests/unit",
     "test:unit:light": "vitest run tests/unit --maxWorkers=2 --minWorkers=1",
     "test:unit:fast": "vitest run tests/unit --exclude \"**/worktree-isolation.test.ts\" --exclude \"**/project-git.test.ts\" --exclude \"**/platform-services.test.ts\" --exclude \"**/snapshot-documents.test.ts\"",

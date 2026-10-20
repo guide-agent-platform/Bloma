@@ -1,6 +1,6 @@
 import { relative, resolve } from 'node:path'
 import type { AgentLoopTool, ToolContext, ToolOutcome } from '../agent/loop/agent-loop'
-import { findDelegation, stopDelegation } from '../agent/delegation/agent-collaboration'
+import { findDelegation, getDelegationSummary, stopDelegation } from '../agent/delegation/agent-collaboration'
 import { recordExperiment, writeExperiment, type DispatchExperiment, type ExperimentTask } from './dispatch-experiment'
 import type { PhaseNode } from './dispatcher-phases'
 import { autonomousTaskBook, wrapAutonomousDispatcherTools } from './dispatch-experiment-autonomous'
@@ -89,6 +89,7 @@ export function wrapExperimentDispatcherTools(tools: AgentLoopTool[], config: Di
       const record = worker && findDelegation(ctx.sessionId, worker.delegation_id)
       assertExperimentWorkerRecovery(config, record)
       if (!worker?.has_executed || record?.status !== 'completed' || record.loopStatus !== 'completed') throw new Error('EXPERIMENT_DEPENDENCY_WAIT')
+      if (getDelegationSummary(record).task_handoff?.completion === 'incomplete') throw new Error('EXPERIMENT_DEPENDENCY_UNRESOLVED')
     }
   }
   return tools.map(tool => {
@@ -155,6 +156,7 @@ export function experimentTasksFinished(config: DispatchExperiment): boolean {
   return config.tasks.every(task => Object.values(config.workers).some(worker => {
     const record = findDelegation(config.parent_session_id!, worker.delegation_id)
     return worker.has_executed && worker.task_ids.includes(task.id) && record?.status === 'completed' && record.loopStatus === 'completed'
+      && record.taskHandoff?.completion !== 'incomplete'
   }))
 }
 export function wrapExperimentWorkerTools(tools: AgentLoopTool[], config: DispatchExperiment, root: string): AgentLoopTool[] {
@@ -176,7 +178,7 @@ export function wrapExperimentWorkerTools(tools: AgentLoopTool[], config: Dispat
           feedback: { schema_version: 1, execution: 'not_run', verification: 'unverified', source: 'host', scope: 'assigned_source_files', category: 'permission', reason: 'EXPERIMENT_WRITE_OUTSIDE_ASSIGNMENT', recovery: 'correct_input' } }
       }
     }
-    if (tool.name === 'run_project_script') {
+    if (tool.name === 'run_project_script' || tool.name === 'install_packages') {
       try { return await auditScriptSourceWrites(root, writes, protectedPaths, () => tool.execute(input, ctx)) }
       catch (e) { finishExperiment(config, 'failed', 'EXPERIMENT_SOURCE_AUDIT_FAILED'); throw e }
     }

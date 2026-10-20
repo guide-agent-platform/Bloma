@@ -13,6 +13,7 @@
 import type { DesktopDispatchRunResult } from './dispatcher-loop'
 import type { DesktopRouteDeps } from './desktop-route'
 import { verificationFingerprint } from './verification-fingerprint'
+import { MVP_REVIEW_RELATIVE_PATH } from './host-verification-outputs'
 import type { DeliveredNoticeInput } from './notice-cards'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -31,7 +32,6 @@ export const MVP_OPTION_ADJUST = 'mvp_adjust'
 /** 批11 ②（2026-10-08）：先在程序里点点看——打开修改预览实例点选标记问题再决定。 */
 export const MVP_OPTION_PICK = 'mvp_pick'
 
-const MVP_REVIEW_RELATIVE_PATH = '00_VERIFY/mvp-review.html'
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')

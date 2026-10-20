@@ -1,0 +1,55 @@
+{
+  "verdict": "pass",
+  "checked_features": [
+    "F-001",
+    "F-002",
+    "F-003",
+    "F-004",
+    "F-005",
+    "F-006"
+  ],
+  "evidence": [
+    "00_VERIFY/core-verification.json：宿主报告 status=passed，missing=[]，fingerprint=e7b54e8f…13d613f；requirements 中 F-001~F-006 全部 implementation=implemented、verification=passed，requirement_hash 与 read_production_context 及 CORE_CHECK.json 的六个哈希逐一一致（F-001 f5e55d05…、F-002 d9d82f64…、F-003 0fc628d5…、F-004 3670f0cf…、F-005 d4a3b93a…、F-006 abacb835…），未出现需求版本漂移。",
+    "00_VERIFY/core-verification.json：21 条 logic 证据 + 8 条 gui 证据逐条给出 fid/scenario/outcome=pass；gui_execution.command=python gui_check.py、routing=pass、8/8 场景 pass；00_VERIFY/screenshots/LAUNCH.png 存在。宿主证据覆盖 F-001 去空格/空白拒绝/同名独立/三视图下输入、F-002 勾选往返/同名独立/重开保持、F-003 三视图过滤/空态/完成后移出/切换保持、F-004 指定删除/同名保留/删空/重开不复现、F-005 重开顺序与状态/空库/删除后恢复、F-006 A-B-C 顺序与状态标签/同名分行/已完成视图只列已完成。",
+    "core/task_board.py：add_task 用 str(title).strip() 后空串抛 ValueError「标题不能为空」，seq=max(seq)+1 追加（BR-001/BR-005）；同名任务各自 uuid4 id 与独立 done（BR-004）；list_tasks 校验 all/open/done 并按 seq 升序过滤（BR-003）；toggle_task/delete_task 均按 id 只作用于目标记录，删除不改其余 seq、删后返回新 counts（BR-008/BR-004）。",
+    "record_store.py：update 在 deepcopy 上执行 transform → 校验 → 临时文件 + fsync + os.replace 原子落盘 → 再提交内存（BR-006 持久化语义正确，失败不破坏原文件）；读取失败抛 DataIntegrityError 而非静默清空；无网络/账号依赖，符合离线约束。",
+    "app.py：三层的桥接层 Api 暴露 list_tasks/add_task/toggle_task/delete_task，失败以 {\"ok\":false,\"error\":中文} 如实回传，不吞异常；Logic 门面可直接注入 data_dir（供重开验证）；--drive-port 只绑 127.0.0.1 且窗口屏幕外渲染，正常启动走 pywebview.api，无 CDN/外链（ui/ 全本地）。",
+    "ui/index.html：currentView 会话内存保存，视图按钮点击只改 currentView 并 refresh()，请求与渲染都使用 currentView（BR-009 保持选中视图，不自动跳回 all）；composer/输入框位于主区、不随视图切换隐藏，三视图下均可见可用，新增成功后 input.value=\"\" 再 refresh()（BR-010/AC-032/AC-033：已完成视图下新增仍停留已完成视图，由 gui 场景『gui view tabs filter and keep selection』断言 pressed.done=true 且列表不出现新任务）。",
+    "ui/index.html renderTasks：每行 task（data-id）、.check（aria-pressed、data-action=toggle）、.task-title、.task-state（已完成/未完成）、.del（data-action=delete）均在三种视图中同样渲染，删除入口三视图皆可用（BR-008）；空列表渲染 .empty 筛选空态、无占位任务行（AC-011/AC-024/AC-029）；所有文案走 textContent，无 innerHTML 注入面。",
+    "ui/app.css：.del 固定 28px 可见（非 hover 才显形），.check 圆形勾选点、.task.done 样式与 line-through、.task-state 两态配色，与 DELIVERY.md 描述的界面行为一致；无脚本自述冒充 GUI 通过的情况——gui_check.py 的断言全部从真实 DOM 回读（ROWS_JS/COUNTS_JS/STATE_JS/PRESSED_JS），/call 仅用于种子数据，重启链用同 APP_DATA_DIR 重启进程后回读 DOM。",
+    "core_check.py：21 个固定场景与 CORE_CHECK.json 场景名逐字对应，每场景独立 tempfile + APP_DATA_DIR 级隔离，不触碰项目根 data/；含非法视图 ValueError、删空列表 counts 全 0、重开后删除不复现，以及断网（socket.connect 拦截）+ 源码无网络 import 的离线断言。",
+    "gui_check.py 与 CORE_CHECK.json 场景清单一致（21 logic + 8 gui），gui 场景覆盖新增去空格/空白拒绝并保留输入、勾选与取消、三视图过滤与保持、同名删一条、重开恢复、A-B-C 顺序与状态标签；未发现 CORE_CHECK.json 声明与脚本实际场景不符之处。",
+    "DELIVERY.md：六项功能、限制（单机、明文 JSON、无备份、单实例写、无人工验收）、启动方式与数据位置（data/records.json、APP_DATA_DIR 可覆盖）与实现一致，明确标注尚无人工点击验收，未夸大为已通过人工验收。",
+    "待后续阶段（不构成本阶段 fail）：AC-028（未完成视图删除）与 AC-016（已完成视图删除）在 gui_check.py 中未各自设独立场景，但其业务行为已由 logic 场景『delete removes only target task』『delete removes…/delete same-name keeps twin intact』覆盖，且删除入口在三种视图下同一行结构渲染，源码层面无缺口；外部人工 GUI 验收与 Q 环节另计。"
+  ],
+  "findings": [],
+  "child_session_id": "1dde0e81-4078-4562-abb3-045f1754dda1",
+  "scope": "independent_source_and_host_evidence_review",
+  "loop_status": "completed",
+  "run_id": "production-v2-verifier-only-20261020-r3",
+  "fingerprint_before": "f3686426454e2dedc4459890408a7bb9c363b085a5c5871e7b826967351d3a0c",
+  "fingerprint_after": "f3686426454e2dedc4459890408a7bb9c363b085a5c5871e7b826967351d3a0c",
+  "source_unchanged": true,
+  "observed_feature_reads": [
+    "F-001",
+    "F-002",
+    "F-003",
+    "F-004",
+    "F-005",
+    "F-006"
+  ],
+  "observed_file_reads": [
+    "00_verify/core-verification.json",
+    "core_check.json",
+    "delivery.md",
+    "core/task_board.py",
+    "record_store.py",
+    "core_check.py",
+    "gui_check.py",
+    "app.py",
+    "ui/bridge.js",
+    "ui/index.html",
+    "ui/app.css"
+  ],
+  "required_evidence_read": true
+}

@@ -21,6 +21,8 @@ import { buildTaskHandoff, renderTaskHandoff, type TaskHandoff } from './task-ha
 import { refreshHandoffEvidence, assertDelegationRecovery } from './delegation-evidence'
 export { DelegationBudgetError } from './delegation-evidence'
 import { awaitDelegationState } from './delegation-wait'
+import { installAbortSettlement } from './delegation-abort'
+export { ABORT_SETTLE_TIMEOUT_MS } from './delegation-abort'
 import { recordSessionActivity } from '../../platform/sessions/session-service'
 import type { AgentEvent, PromaPermissionMode } from '../../../shared/types'
 import type { SDKQuery } from '../../orchestration/orchestrator'
@@ -170,14 +172,6 @@ export interface WaitForDelegationsArgs {
 const delegations = new Map<string, DelegationRecord>()
 const parentContexts = new Map<string, DelegationParentContext>()
 
-/**
- * abort 后子循环仍不 settle 的强制收尾超时（ms）：
- * 部分工具（如 hang 类 `execute: () => new Promise<never>(() => {})`）不响应 abort 信号，
- * abort 后子循环永久挂起、completion 永不 resolve，DelegationRecord 会永远留在 registry
- * （内存泄漏 + 占用并行额度）。超时后强制终结（resolve completion + 摘除），见 startDelegation。
- */
-export const ABORT_SETTLE_TIMEOUT_MS = 5000
-
 let childToolsBuilder: ChildToolsBuilder = () => {
   throw new Error('子 agent 工具集构建器未注入（programming-orchestrator 应在 runMvpViaAgentLoop 注册 setChildToolsBuilder）')
 }
@@ -260,36 +254,9 @@ export function startDelegation(parent: ToolContext, args: DelegateAgentArgs): S
   pruneFinishedDelegations()
   publishDelegationEvent(parent.sessionId, 'delegation_started', record)
 
-  // abort 兜底（P2⑤）：abort 后子循环可能不响应（hang 类工具 execute 永不 settle，
-  // runAgentLoop 的 tool.execute 不经 withAbort），超时后强制收尾——resolve completion
-  // 解除 wait 阻塞 + 置 cancelled + 摘除 registry，避免 DelegationRecord 永久泄漏。
-  // 正常路径（loop 在超时前 settle，或 stopDelegation 已手动收尾）下 status 已非 running，幂等跳过。
-  record.abort.signal.addEventListener(
-    'abort',
-    () => {
-      setTimeout(() => {
-        if (record.status !== 'running') return
-        record.status = 'cancelled'
-        record.error = '已由主 agent 停止（abort），子循环未响应，超时强制收尾'
-        try {
-          appendDelegationSettle(record.childSessionId, 'cancelled', { error: record.error })
-        } catch (error) {
-          console.warn('[delegation-persistence] abort 强制收尾落盘失败:', error)
-        }
-        record.resolveCompletion()
-        publishDelegationEvent(parent.sessionId, 'delegation_cancelled', record)
-        delegations.delete(record.delegationId)
-      }, ABORT_SETTLE_TIMEOUT_MS).unref?.()
-    },
-    { once: true },
-  )
-
   const prompt = buildDelegationPrompt({ role, task, expectedOutput: args.expectedOutput })
 
-  void runChildLoop({ parent, parentCtx, record, prompt, role }).then(
-    (result) => settleChildLoop(record, result),
-    (error) => settleChildLoopError(record, error),
-  )
+  launchChildLoop({ parent, parentCtx, record, prompt, role })
 
   return { delegation_id: delegationId, child_session_id: childSessionId, role, goal, status: record.status }
 }
@@ -354,6 +321,7 @@ async function runChildLoop(opts: {
   replayTurns?: ConversationTurn[]
 }): Promise<AgentLoopResult> {
   const { parent, parentCtx, record, prompt, role } = opts
+  const runAbort = record.abort
   const childRequestId = randomUUID()
   const maxTurns = resolveDelegationTurns(parentCtx, role)
   // P1-06 收尾：子运行上下文（worktree 隔离）；provider 未注册/开关 off → 零变化
@@ -381,7 +349,7 @@ async function runChildLoop(opts: {
     delegationDepth: parent.state.delegation_depth + 1,
     temperature: parentCtx.temperature,
     providerType: record.channelOverride?.providerType ?? parentCtx.providerType,
-    signal: record.abort.signal,
+    signal: runAbort.signal,
     // 子 agent 聊天类事件（message_delta 等）不进父会话聊天流（见白名单注释）
     publish: (type, payload) => {
       if (CHILD_LOOP_ALLOWED_EVENT_TYPES.has(type)) parentCtx.publish(type, payload)
@@ -394,8 +362,21 @@ async function runChildLoop(opts: {
       : undefined,
   })
   const { result, meta } = await invokeChildLoopWithContext(runContext, invoke)
-  if (meta) record.worktreeMeta = { ...(record.worktreeMeta ?? {}), ...meta }
+  if (meta && record.abort === runAbort) record.worktreeMeta = { ...(record.worktreeMeta ?? {}), ...meta }
   return result
+}
+
+/** A stopped invocation can finish late after continuation reused the record. */
+function launchChildLoop(opts: Parameters<typeof runChildLoop>[0]): void {
+  const ownedAbort = opts.record.abort
+  installAbortSettlement(opts.record, () => {
+    publishDelegationEvent(opts.record.parentSessionId, 'delegation_cancelled', opts.record)
+    delegations.delete(opts.record.delegationId)
+  })
+  void runChildLoop(opts).then(
+    result => { if (opts.record.abort === ownedAbort) settleChildLoop(opts.record, result) },
+    error => { if (opts.record.abort === ownedAbort) settleChildLoopError(opts.record, error) },
+  )
 }
 
 // =========================================================================
@@ -675,10 +656,7 @@ export function continueDelegation(parent: ToolContext, delegationId: string, ta
   } catch (error) {
     console.warn('[delegation-persistence] 续跑历史读回失败，退化为无历史续跑:', error)
   }
-  void runChildLoop({ parent, parentCtx, record, prompt, role: record.role, replayTurns }).then(
-    (result) => settleChildLoop(record, result),
-    (error) => settleChildLoopError(record, error),
-  )
+  launchChildLoop({ parent, parentCtx, record, prompt, role: record.role, replayTurns })
   publishDelegationEvent(parent.sessionId, 'delegation_started', record)
   return {
     delegation_id: record.delegationId,
@@ -743,7 +721,8 @@ function runningDelegationCount(parentSessionId: string): number {
 
 function pruneFinishedDelegations(): void {
   const finished = [...delegations.values()]
-    .filter((record) => record.status !== 'running')
+    // Active parents still own these records for dependencies and continuation.
+    .filter((record) => record.status !== 'running' && !parentContexts.has(record.parentSessionId))
     .sort((a, b) => a.startedAt - b.startedAt)
   const excess = finished.length - MAX_FINISHED_DELEGATIONS
   for (let index = 0; index < excess; index += 1) {

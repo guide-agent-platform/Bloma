@@ -16,6 +16,12 @@ export function persistentBudgetBlocked(feedback: readonly ToolFeedback[]): bool
   return feedback.some(f => f.category === 'budget' && toolRecovery(f) === 'stop')
 }
 
+/** A completed loop cannot erase a host-reported failed or blocked operation. */
+export function hasUnresolvedToolFailure(f: ToolFeedback): boolean {
+  return ['failed', 'cancelled'].includes(f.execution) || f.verification === 'failed'
+    || ['environment', 'verification_harness', 'budget'].includes(f.category ?? '')
+}
+
 /** Terminal budget facts cannot fall out of a bounded handoff after ordinary reads. */
 export function retainedToolFeedback(facts: readonly ToolFeedback[], limit = 8): ToolFeedback[] {
   const terminal = new Map<string, ToolFeedback>()
@@ -28,7 +34,9 @@ export function retainedToolFeedback(facts: readonly ToolFeedback[], limit = 8):
     else if (f.scope === 'execution_resources' && f.budget) resources.set(f.budget.resource, f)
     else other.push(f)
   }
-  const kept = [...evidence.values(), ...resources.values(), ...terminal.values()].slice(-limit)
+  const ordinary = [...other, ...evidence.values()]
+  const failures = ordinary.filter(hasUnresolvedToolFailure)
+  const kept = [...failures, ...resources.values(), ...terminal.values()].slice(-limit)
   const room = Math.max(0, limit - kept.length)
-  return [...(room ? other.slice(-room) : []), ...kept]
+  return [...(room ? ordinary.filter(f => !hasUnresolvedToolFailure(f)).slice(-room) : []), ...kept]
 }

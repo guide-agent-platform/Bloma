@@ -1,0 +1,92 @@
+{
+  "at": "2026-10-20T14:26:18.6238050+08:00",
+  "kind": "real-verifier-only-regression-on-existing-accepted-product",
+  "run_id": "production-v2-verifier-only-20261020-r3",
+  "new_business_generation": false,
+  "verdict": "pass",
+  "checked_features": [
+    "F-001",
+    "F-002",
+    "F-003",
+    "F-004",
+    "F-005",
+    "F-006"
+  ],
+  "required_evidence_read": true,
+  "source_unchanged": true,
+  "parent_history_unchanged": true,
+  "observed_models": {
+    "verifier": {
+      "channel_id": "experiment-ds",
+      "model": "deepseek-flash",
+      "endpoint_host": "api.deepseek.com",
+      "endpoint_fingerprint": "efdbb18afca7615955804478fde78bff5e7336dee41fa0844bc1d5f8ec527cbe",
+      "provider_type": "deepseek"
+    }
+  },
+  "model_requests_by_role": {
+    "verifier": {
+      "requests": 14,
+      "models": [
+        "deepseek-flash"
+      ]
+    }
+  },
+  "usage": {
+    "project_id": "42487b23-f6c0-47e5-b46b-f607b105ae7b",
+    "logical_queries": 14,
+    "physical_requests": 14,
+    "reported_input": 393996,
+    "reported_output": 5050,
+    "reported_total": 399046,
+    "cache_read": 300160,
+    "cache_creation": 0,
+    "missing_usage_queries": 0,
+    "unmeasured_failed_attempts": 0,
+    "active_queries": 0,
+    "malformed_lines": 0,
+    "by_role": {
+      "experiment_verifier": {
+        "queries": 14,
+        "input": 393996,
+        "output": 5050
+      }
+    },
+    "by_scope": {
+      "loop": {
+        "queries": 12,
+        "input": 299704,
+        "output": 2142
+      },
+      "grace": {
+        "queries": 2,
+        "input": 94292,
+        "output": 2908
+      }
+    },
+    "by_model": {
+      "[\"api.deepseek.com\",\"deepseek-flash\"]": {
+        "model": "deepseek-flash",
+        "endpoint_host": "api.deepseek.com",
+        "queries": 14,
+        "input": 393996,
+        "output": 5050,
+        "cache_read": 300160,
+        "cache_creation": 0,
+        "missing_usage_queries": 0
+      }
+    },
+    "partial_records": 0,
+    "recording_errors": 0,
+    "complete": true,
+    "scope": "streaming parent/child/auxiliary SDK queries and provider qualification; totals are known reported usage, not a bill; failed attempts without usage remain unknown"
+  },
+  "product_quality": null,
+  "evidence": "C:\\Users\\17359\\bex-pv220\\v-only-r3\\production-reviews\\production-v2-verifier-only-20261020-r3-ba657c7b-a3fb-4205-9688-ac1b85f64cc4.json",
+  "host_core_report": "C:\\Users\\17359\\bex-pv220\\v-only-r3\\agent-workspaces\\default-software-builder\\generated-projects\\42487b23-f6c0-47e5-b46b-f607b105ae7b\\00_VERIFY\\core-verification.json",
+  "diagnostic_attempts_preserved": [
+    "initial zero-call Electron readiness harness stall",
+    "zero-call diagnostic userData mismatch",
+    "fresh r3 isolated diagnostic with matching credential profile"
+  ]
+}

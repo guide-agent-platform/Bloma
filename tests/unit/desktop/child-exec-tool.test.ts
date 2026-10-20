@@ -51,6 +51,22 @@ describe('run_project_script（方案 B：implement 子会话受控执行）', (
 
   const okPython = async () => 'C:/Python313/python.exe'
 
+  it('passes complete argument vectors and rejects malformed requests before consuming any execution', async () => {
+    const spawn = fakeSpawn({ code: 0 })
+    const tool = buildChildScriptRunnerTool(projectId, { spawn, resolvePython: okPython, maxRuns: 1 })
+    const ctx = ctxFor(projectId)
+    for (const args of ['not-array', ['--ok', 4], ['bad\0argument'], Array(65).fill('x'), ['x'.repeat(16001)]]) {
+      expect((await tool.execute({ script: '自测.py', args }, ctx)).isError).toBe(true)
+    }
+    for (const timeout_ms of [Infinity, NaN, 0, 180001, '90000']) {
+      expect((await tool.execute({ script: '自测.py', timeout_ms }, ctx)).isError).toBe(true)
+    }
+    expect(spawn).not.toHaveBeenCalled()
+    const args = Array.from({ length: 12 }, (_, i) => `value ${i}`)
+    expect((await tool.execute({ script: '自测.py', args }, ctx)).isError).toBeFalsy()
+    expect(spawn.mock.calls[0][0].command.slice(2)).toEqual(args)
+  })
+
   it('短代码直接以参数执行，无临时文件；坏请求不消耗执行预算', async () => {
     const spawn = fakeSpawn({ code: 0, stdout: 'PASS clean\n' })
     const tool = buildChildScriptRunnerTool(projectId, { spawn, resolvePython: okPython, maxRuns: 1 })
