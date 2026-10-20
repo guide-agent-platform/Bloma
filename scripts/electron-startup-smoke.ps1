@@ -3,7 +3,6 @@ $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $electron = Join-Path $root 'node_modules\electron\dist\electron.exe'
 $rendererBuild = Join-Path $root 'dist\index.html'
-$port = 9444
 $tempRoot = [IO.Path]::GetFullPath($env:TEMP) + [IO.Path]::DirectorySeparatorChar
 $promaTemp = Join-Path $env:TEMP ('bloma-acceptance-electron-' + [guid]::NewGuid().ToString('N'))
 $resolvedPromaTemp = [IO.Path]::GetFullPath($promaTemp)
@@ -19,6 +18,8 @@ if (-not $resolvedPromaTemp.StartsWith($tempRoot)) {
 }
 
 New-Item -ItemType Directory -Path $resolvedPromaTemp | Out-Null
+$isolatedUserData = Join-Path $resolvedPromaTemp 'electron-user-data'
+$debugPortFile = Join-Path $isolatedUserData 'DevToolsActivePort'
 $oldPromaHome = $env:PROMA_HOME
 $env:PROMA_HOME = $resolvedPromaTemp
 $process = $null
@@ -26,7 +27,7 @@ $process = $null
 try {
   $process = Start-Process `
     -FilePath $electron `
-    -ArgumentList @('.', '--remote-debugging-address=127.0.0.1', "--remote-debugging-port=$port") `
+    -ArgumentList @('.', "--user-data-dir=`"$isolatedUserData`"", '--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0') `
     -WorkingDirectory $root `
     -PassThru `
     -WindowStyle Hidden
@@ -35,6 +36,11 @@ try {
   $renderer = $null
   while ((Get-Date) -lt $deadline -and -not $process.HasExited) {
     try {
+      if (-not (Test-Path -LiteralPath $debugPortFile)) {
+        Start-Sleep -Milliseconds 200
+        continue
+      }
+      $port = [int](Get-Content -LiteralPath $debugPortFile -TotalCount 1)
       $pages = Invoke-RestMethod -Uri "http://127.0.0.1:$port/json" -TimeoutSec 1
       $renderer = $pages |
         Where-Object { $_.url -match 'dist/index\.html' } |
@@ -60,9 +66,27 @@ try {
     RendererUrl = $renderer.url
   } | Format-List
 } finally {
-  if ($process -and -not $process.HasExited) {
-    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-    Wait-Process -Id $process.Id -Timeout 5 -ErrorAction SilentlyContinue
+  if ($process) {
+    # Chromium owns child processes and cache handles. Stop only this test's
+    # captured process tree, including children left after the parent exits.
+    $ownedProcessIds = [Collections.Generic.HashSet[int]]::new()
+    [void]$ownedProcessIds.Add($process.Id)
+    $processSnapshot = @(Get-CimInstance Win32_Process)
+    do {
+      $foundChild = $false
+      foreach ($processRow in $processSnapshot) {
+        if ($ownedProcessIds.Contains([int]$processRow.ParentProcessId) -and $ownedProcessIds.Add([int]$processRow.ProcessId)) {
+          $foundChild = $true
+        }
+      }
+    } while ($foundChild)
+    foreach ($ownedProcessId in $ownedProcessIds) {
+      if ($ownedProcessId -eq $process.Id -and $process.HasExited) { continue }
+      Stop-Process -Id $ownedProcessId -Force -ErrorAction SilentlyContinue
+    }
+    foreach ($ownedProcessId in $ownedProcessIds) {
+      Wait-Process -Id $ownedProcessId -Timeout 5 -ErrorAction SilentlyContinue
+    }
   }
   if ($null -eq $oldPromaHome) {
     Remove-Item Env:PROMA_HOME -ErrorAction SilentlyContinue
@@ -70,6 +94,14 @@ try {
     $env:PROMA_HOME = $oldPromaHome
   }
   if (Test-Path -LiteralPath $resolvedPromaTemp) {
-    Remove-Item -LiteralPath $resolvedPromaTemp -Recurse -Force
+    for ($cleanupAttempt = 0; $cleanupAttempt -lt 10; $cleanupAttempt++) {
+      try {
+        Remove-Item -LiteralPath $resolvedPromaTemp -Recurse -Force -ErrorAction Stop
+        break
+      } catch {
+        if ($cleanupAttempt -eq 9) { throw }
+        Start-Sleep -Milliseconds 250
+      }
+    }
   }
 }
