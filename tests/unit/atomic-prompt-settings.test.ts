@@ -25,10 +25,12 @@ describe('提示词保存失败保留旧内容', () => {
 
   it('原子替换失败时原配置未变，临时文件清理；再次保存成功后即时读取新版', () => {
     savePromptSlot('loop-system', '原有规则')
-    vi.mocked(fs.renameSync).mockImplementationOnce(() => { throw Object.assign(new Error('file busy'), { code: 'EPERM' }) })
+    const rename = vi.mocked(fs.renameSync).getMockImplementation()!
+    vi.mocked(fs.renameSync).mockImplementation(() => { throw Object.assign(new Error('file busy'), { code: 'EPERM' }) })
     expect(() => savePromptSlot('loop-system', '新的规则')).toThrow('file busy')
     expect(readPromptSlot('loop-system').content).toBe('原有规则')
     expect(fs.readdirSync(join(home, 'prompts'))).toEqual(['loop-system.md'])
+    vi.mocked(fs.renameSync).mockImplementation(rename)
     savePromptSlot('loop-system', '新的规则')
     expect(readPromptSlot('loop-system').content).toBe('新的规则')
   })
