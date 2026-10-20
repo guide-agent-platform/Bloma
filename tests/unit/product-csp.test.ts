@@ -40,6 +40,7 @@ describe('PRODUCT_CSP 单一真相源', () => {
     projectId = project.project_id
     writeFileSync(join(project.root_path, 'index.html'), '<!doctype html><html><body>test</body></html>')
     const sandbox = await runSandbox({ request_id: 'csp-run', project_id: projectId })
+    if (!sandbox.preview_url) throw new Error('Preview server did not provide a URL')
     const response = await fetch(sandbox.preview_url)
     expect(response.headers.get('content-security-policy')).toBe(PRODUCT_CSP)
     await response.arrayBuffer()

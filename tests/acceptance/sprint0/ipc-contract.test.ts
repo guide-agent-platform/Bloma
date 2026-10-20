@@ -11,6 +11,19 @@ const root = fileURLToPath(new URL('../../..', import.meta.url))
 // 本清单与 S0-IPC-006 扫描面（main/ipc.ts + main/ipc/ 全目录）——web 线拆除
 // （2026-10-01）曾因漏同步致 S0-IPC-005/006 长期存量红、契约保护空转（教训勿重犯）。
 const expectedChannels = {
+  ATTACHMENT_HISTORY: 'attachment:history',
+  ATTACHMENT_IMPORT: 'attachment:import',
+  ATTACHMENT_PREVIEW: 'attachment:preview',
+  ATTACHMENT_READ: 'attachment:read',
+  ATTACHMENT_REUSE: 'attachment:reuse',
+  CHAT_RECEIPT: 'chat:receipt',
+  CHAT_RECEIPTS: 'chat:receipts',
+  CHAT_RECOVER: 'chat:recover',
+  CHAT_SUBMIT: 'chat:submit',
+  CLIPBOARD_WRITE_TEXT: 'clipboard:write-text',
+  COMPOSER_LOAD: 'composer:load',
+  COMPOSER_SAVE: 'composer:save',
+  NOTIFICATION_SPEAK: 'notification:speak',
   AGENT_SEND_MESSAGE: 'agent:send-message',
   AGENT_STEER_MESSAGE: 'agent:steer-message',
   AGENT_STEER_RESOLVE: 'agent:steer-resolve',

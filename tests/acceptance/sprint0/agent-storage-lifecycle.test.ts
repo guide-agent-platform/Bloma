@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildSdkEnv,
   cancelAgent,
@@ -11,7 +11,7 @@ import {
   setSDKQueryForTests,
 } from '../../../main/orchestration/orchestrator'
 import { createProject, findProject, updateProject } from '../../../main/project/project-service'
-import { listSessions, loadMessages } from '../../../main/platform/sessions/session-service'
+import { listSessions, loadMessages, setProjectTouchHandler } from '../../../main/platform/sessions/session-service'
 import type { SDKMessage } from '../../../shared/types'
 import {
   listFilesRecursively,
@@ -38,10 +38,35 @@ vi.mock('../../../main/platform/llm/channel-manager', async (importOriginal) => 
   }
 })
 
+// 此组验收宿主的落盘、排队与取消；领域对话在独立套件验收。旧夹具使用已退役的
+// generating_mvp 路径，SDK 根本不会执行。用当前向导入口注入受控流，保留真实宿主
+// 路由、SDK 注入点、会话存储与 activeSessions，不调用线上模型。
+vi.mock('../../../main/guide/guide-agent-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../main/guide/guide-agent-service')>()
+  return {
+    ...actual,
+    handleGuideMessage: async (...args: Parameters<typeof actual.handleGuideMessage>) => {
+      const [input, , model, persistAssistant] = args
+      if (!model) throw new Error('Lifecycle fixture requires a model channel')
+      for await (const message of model.query(input.content, {
+        env: model.env, signal: model.signal, sessionId: input.session_id, maxTokens: model.maxTokens,
+      })) {
+        if (message.type === 'assistant') {
+          const text = message.message?.content.map(block => block.text ?? '').join('')
+          if (text) persistAssistant?.(text)
+        }
+      }
+    },
+  }
+})
+
 describe('Sprint 0 agent storage lifecycle acceptance', () => {
   let environment: TemporaryPromaHome | undefined
 
+  beforeEach(() => setProjectTouchHandler((projectId, patch) => { updateProject(projectId, patch) }))
+
   afterEach(() => {
+    setProjectTouchHandler(null)
     environment?.cleanup()
     environment = undefined
     setAgentStreamPublisher(() => undefined)
@@ -92,9 +117,6 @@ describe('Sprint 0 agent storage lifecycle acceptance', () => {
     environment = useTemporaryPromaHome('bloma-role-c-history-')
     setSDKQueryForTests(successfulQuery)
     const project = createProject({ request_id: 'role-c-history-project', mode: 'quick' })
-    // 本用例聚焦存储生命周期而非阶段路由：让项目存储阶段与渲染端上报一致（generating_mvp），
-    // 权威阶段判定才不会把这条消息误路由到引导路径。
-    updateProject(project.project_id, { current_stage: 'generating_mvp' })
 
     await runAgent({
       request_id: 'role-c-history-req',
@@ -102,7 +124,7 @@ describe('Sprint 0 agent storage lifecycle acceptance', () => {
       project_id: project.project_id,
       content: '阶段验收消息',
       mode: 'quick',
-      current_stage: 'generating_mvp',
+      current_stage: 'clarifying',
       channel_id: 'test-channel',
     })
 
@@ -158,13 +180,15 @@ describe('Sprint 0 agent storage lifecycle acceptance', () => {
     }
   })
 
-  it('[S0-AGENT-005] 同一 session 正在运行时应拒绝第二个 Agent 请求', async () => {
+  it('[S0-AGENT-005] 同一 session 正在运行时应排队第二个 Agent 请求', async () => {
     environment = useTemporaryPromaHome('bloma-role-c-concurrency-')
     let release!: () => void
     const hold = new Promise<void>((resolve) => {
       release = resolve
     })
+    let entered = false
     setSDKQueryForTests(async function* (): AsyncGenerator<SDKMessage> {
+      entered = true
       yield {
         type: 'assistant',
         message: { role: 'assistant', content: [{ type: 'text', text: '处理中' }] },
@@ -173,10 +197,11 @@ describe('Sprint 0 agent storage lifecycle acceptance', () => {
       yield { type: 'result', subtype: 'success' }
     })
 
-    const first = runAgent(agentInput('role-c-busy'))
-    await waitForCondition(() => isSessionActive('role-c-busy'))
+    const input = agentInput('role-c-busy')
+    const first = runAgent(input)
+    await waitForCondition(() => entered)
     // message-queue（2026-08-27）：busy 不再 throw 丢消息——排队并返回 queued:true
-    const second = await runAgent(agentInput('role-c-busy'))
+    const second = await runAgent({ ...input, request_id: 'role-c-busy-second' })
     expect(second.queued).toBe(true)
     expect(second.stream_started).toBe(false)
     expect(isSessionActive('role-c-busy')).toBe(true) // 第一条仍在跑
@@ -190,6 +215,7 @@ describe('Sprint 0 agent storage lifecycle acceptance', () => {
   it('[S0-AGENT-006] 取消请求应终止迭代器并释放 activeSessions', async () => {
     environment = useTemporaryPromaHome('bloma-role-c-cancel-')
     let finalized = false
+    let entered = false
     setSDKQueryForTests(async function* (_prompt, options): AsyncGenerator<SDKMessage> {
       try {
         yield {
@@ -202,6 +228,7 @@ describe('Sprint 0 agent storage lifecycle acceptance', () => {
             () => reject(new Error('AGENT_CANCELLED')),
             { once: true },
           )
+          entered = true
         })
       } finally {
         finalized = true
@@ -209,7 +236,7 @@ describe('Sprint 0 agent storage lifecycle acceptance', () => {
     })
 
     const running = runAgent(agentInput('role-c-cancel'))
-    await waitForCondition(() => isSessionActive('role-c-cancel'))
+    await waitForCondition(() => entered)
     const cancelled = await cancelAgent({
       request_id: 'role-c-cancel-request',
       session_id: 'role-c-cancel',
@@ -224,13 +251,14 @@ describe('Sprint 0 agent storage lifecycle acceptance', () => {
 })
 
 function agentInput(sessionId: string) {
+  const project = createProject({ request_id: `project-${sessionId}`, mode: 'quick' })
   return {
     request_id: `request-${sessionId}`,
     session_id: sessionId,
-    project_id: 'role-c-project',
+    project_id: project.project_id,
     content: '阶段验收消息',
     mode: 'quick' as const,
-    current_stage: 'generating_mvp' as const,
+    current_stage: 'clarifying' as const,
     channel_id: 'test-channel',
   }
 }
