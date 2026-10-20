@@ -510,7 +510,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         <div ref={messagesEndRef} style={compact ? { display: 'none' } : undefined} />
       </div>
 
-      <MessageComposer onSendMessage={onSendMessage} busy={busy} onStopGeneration={onStopGeneration} onOpenSettings={onOpenSettings}
+      <MessageComposer onSendMessage={onSendMessage} onMessageSent={() => setIdeaHint(false)} busy={busy} onStopGeneration={onStopGeneration} onOpenSettings={onOpenSettings}
         placeholder={compact ? '告诉我，还想改些什么…' : undefined}
         usage={!compact && sessionUsage ? `本会话已用 ≈${(sessionUsage.inputTokens + sessionUsage.outputTokens).toLocaleString()} tokens${sessionUsage.turnsWithUsage === 0 ? '（估算）' : ''}` : undefined} />
 

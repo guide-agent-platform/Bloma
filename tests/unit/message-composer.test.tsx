@@ -26,8 +26,8 @@ beforeEach(() => {
   } } as unknown as ElectronAPI
 })
 afterEach(() => { cleanup(); delete window.electronAPI })
-function mount(send = vi.fn()) {
-  return render(<Provider store={store}><MessageComposer onSendMessage={send} busy={false} /></Provider>)
+function mount(send = vi.fn(), onSent?: () => void) {
+  return render(<Provider store={store}><MessageComposer onSendMessage={send} onMessageSent={onSent} busy={false} /></Provider>)
 }
 function paste() {
   const event = new Event('paste', { bubbles: true, cancelable: true })
@@ -64,17 +64,20 @@ describe('persistent MessageComposer', () => {
   })
   it('retains failed sending snapshot and retries with the same stable identity', async () => {
     const send = vi.fn().mockRejectedValueOnce(new Error('response lost')).mockResolvedValue({ status: 'accepted' })
-    mount(send)
+    const onSent = vi.fn()
+    mount(send, onSent)
     await waitFor(() => expect(window.electronAPI!.composer.save).toHaveBeenCalled())
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'keep me' } })
     fireEvent.click(screen.getByLabelText('发送消息'))
     await screen.findByText('response lost')
+    expect(onSent).not.toHaveBeenCalled()
     const id = send.mock.calls[0][2].client_message_id
     expect(drafts.get('draft-s')?.pending_send?.client_message_id).toBe(id)
     fireEvent.click(screen.getByLabelText('发送消息'))
     await waitFor(() => expect(send).toHaveBeenCalledTimes(2))
     expect(send.mock.calls[1][2].client_message_id).toBe(id)
     await waitFor(() => expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe(''))
+    expect(onSent).toHaveBeenCalledTimes(1)
   })
   it('image-only messages can send and remount reconstructs image preview from persisted refs', async () => {
     const send = vi.fn().mockResolvedValue({ status: 'accepted' })

@@ -9,7 +9,7 @@ import type { PastedImageRef } from '../../shared/types'
 
 export interface ComposerSubmission { draft: ComposerDraft; client_message_id: string }
 export type ComposerSend = (text: string, images?: PastedImageRef[], submission?: ComposerSubmission) => void | Promise<SendReceipt>
-export function useComposer(onSend?: ComposerSend) {
+export function useComposer(onSend?: ComposerSend, onSent?: () => void) {
   const store = useStore()
   const scope = useAtomValue(composerScopeAtom)
   const key = draftKey(scope)
@@ -167,6 +167,7 @@ export function useComposer(onSend?: ComposerSend) {
         if (!saved.ok) throw new Error(`已接收；草稿清理未保存：${saved.error.message}`)
       }
       if (aliveKey.current === key) setLegacyImages([])
+      if (aliveKey.current === key) onSent?.()
     } catch (reason) { if (aliveKey.current === key) setError(reason instanceof Error ? reason.message : String(reason)) }
     finally { sendLock.current = false; setSending(false) }
   }

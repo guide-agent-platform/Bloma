@@ -151,7 +151,7 @@ describe('DelegationFeed（内联行胶囊）', () => {
         <DelegationFeed sessionId="session-ui" />
       </Provider>,
     )
-    expect(screen.getByTestId('delegation-row').textContent).toContain('已完成')
+    expect(screen.getByTestId('delegation-row').textContent).toContain('已结束')
     expect(screen.getByTestId('delegation-row').textContent).not.toContain('待回答')
   })
 })

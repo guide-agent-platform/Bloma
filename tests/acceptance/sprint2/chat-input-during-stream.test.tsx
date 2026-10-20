@@ -14,12 +14,12 @@ import {
 
 /**
  * 生成期间输入框保持可用（2026-08-16「发完一条就打不开输入框」案例）：
- * - 输入框不再整体禁用：流式运行中仍可打字（草稿），只禁发送；
+ * - 流式运行中仍可打字并发送，由宿主排队；
  * - 生成中显示停止按钮（U4），发送入口被替换；
  * - WaitingFeedback 挂到真实忙碌信号上（此前挂在恒 false 的 isWaiting，从未显示），
  *   且话术按权威阶段显示（generating_sketch → 「生成草图」）。
  */
-describe('生成期间输入框保持可用（草稿可输入、发送禁用、阶段化等待反馈）', () => {
+describe('生成期间输入与排队、阶段化等待反馈', () => {
   afterEach(() => {
     cleanup()
     vi.useRealTimers()
@@ -52,7 +52,7 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
     expect((input as HTMLTextAreaElement).value).toBe('先记着：要加深色模式')
 
     // 生成中显示停止按钮（U4）
-    expect(screen.getByLabelText('停止生成')).toBeTruthy()
+    expect(screen.getByLabelText('停止本轮制作')).toBeTruthy()
 
     // message-queue（2026-08-27）：生成期间 Enter 仍可提交——由后端排队兜底，不丢消息
     fireEvent.keyDown(input, { key: 'Enter' })
@@ -118,8 +118,7 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
     fireEvent.keyDown(input, { key: 'Enter' })
 
     // 排队气泡出现：消息原文可见 + 排队中角标；输入框照常清空
-    expect(screen.getByText('再加一个导出按钮')).toBeTruthy()
-    expect(screen.getByText('排队中')).toBeTruthy()
+    expect(screen.getByText('排队中：再加一个导出按钮')).toBeTruthy()
     expect((input as HTMLTextAreaElement).value).toBe('')
   })
 
@@ -141,7 +140,7 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
     const input = screen.getByRole('textbox')
     fireEvent.change(input, { target: { value: '生成完成后看看这个' } })
     fireEvent.keyDown(input, { key: 'Enter' })
-    expect(screen.getByText('生成完成后看看这个')).toBeTruthy()
+    expect(screen.getByText('排队中：生成完成后看看这个')).toBeTruthy()
 
     // 后端队列派发：run 结束 + 用户消息进流（agentMessagesFamily）→ 气泡出列
     act(() => {
@@ -183,7 +182,7 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
     const input = screen.getByRole('textbox')
     fireEvent.change(input, { target: { value: '抖动场景消息' } })
     fireEvent.keyDown(input, { key: 'Enter' })
-    expect(screen.getByText('抖动场景消息')).toBeTruthy()
+    expect(screen.getByText('排队中：抖动场景消息')).toBeTruthy()
 
     // run A 结束（busy→false）但消息尚未派发进流（异步间隙）——气泡必须保留
     act(() => {
@@ -194,8 +193,7 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
         <ChatPanel onSendMessage={onSend} />
       </Provider>,
     )
-    expect(screen.getByText('抖动场景消息')).toBeTruthy()
-    expect(screen.getByText('排队中')).toBeTruthy()
+    expect(screen.getByText('排队中：抖动场景消息')).toBeTruthy()
   })
 
   // 「提出新想法」动作链（2026-09-08）：超时态点击 → 收起进度卡 + 聚焦输入框 + 灰字排队提示；
@@ -234,7 +232,7 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(onSend).toHaveBeenCalledWith('再加一个排行榜')
     expect(container.querySelector('[data-ai-id=idea-hint]')).toBeNull()
-    expect(screen.getByText('排队中')).toBeTruthy()
+    expect(screen.getByText('排队中：再加一个排行榜')).toBeTruthy()
   })
 
   it('进度卡内「提出新想法」：点击后收起进度卡并显示排队提示', () => {
@@ -261,10 +259,7 @@ describe('生成期间输入框保持可用（草稿可输入、发送禁用、�
     fireEvent.click(screen.getByRole('button', { name: '查看进度' }))
     expect(container.querySelector('[data-ai-id=progress-card]')).toBeTruthy()
 
-    // 超时态等待卡与进度卡各有一个同名按钮，后者是进度卡内链接
-    const ideaButtons = screen.getAllByRole('button', { name: '提出新想法' })
-    expect(ideaButtons).toHaveLength(2)
-    fireEvent.click(ideaButtons[1])
+    fireEvent.click(screen.getByRole('button', { name: '补充或修改要求' }))
 
     expect(container.querySelector('[data-ai-id=progress-card]')).toBeNull()
     expect(container.querySelector('[data-ai-id=idea-hint]')).toBeTruthy()

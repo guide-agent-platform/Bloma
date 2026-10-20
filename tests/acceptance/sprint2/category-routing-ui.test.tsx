@@ -76,7 +76,7 @@ describe('M5 三角色渠道配置区（ChannelSettingsPage）', () => {
     delete window.electronAPI
   })
 
-  it('渲染向导、编程、裁判三行角色 + 渠道下拉（仅 Anthropic 协议渠道可选）', async () => {
+  it('渲染三角色与原生Agent支持的渠道（包含智谱协议）', async () => {
     installApi({ views: makeViews() })
     render(<ChannelSettingsPage />)
 
@@ -88,7 +88,7 @@ describe('M5 三角色渠道配置区（ChannelSettingsPage）', () => {
 
     const select = screen.getByLabelText('向导 Agent 渠道') as HTMLSelectElement
     const optionTexts = Array.from(select.options).map((option) => option.textContent ?? '')
-    expect(optionTexts.some((text) => text.includes('智谱 OpenAI 协议'))).toBe(false)
+    expect(optionTexts.some((text) => text.includes('智谱 OpenAI 协议'))).toBe(true)
     expect(optionTexts.some((text) => text.includes('Kimi 渠道'))).toBe(true)
     expect(select.value).toBe('ch-kimi')
   })
@@ -142,10 +142,14 @@ describe('M5 三角色渠道配置区（ChannelSettingsPage）', () => {
 
     const select = screen.getByLabelText('向导 Agent 渠道') as HTMLSelectElement
     expect(select.value).toBe('ch-kimi')
-    await act(async () => fireEvent.wheel(select, { deltaY: 120 }))
+    await act(async () => fireEvent.wheel(select, { deltaY: 100 }))
+    expect(select.value).toBe('ch-zhipu-openai')
+    await act(async () => fireEvent.wheel(select, { deltaY: 100 }))
     expect(select.value).toBe('')
     expect((screen.getByTestId('role-routing-save') as HTMLButtonElement).disabled).toBe(false)
-    await act(async () => fireEvent.wheel(select, { deltaY: -120 }))
+    await act(async () => fireEvent.wheel(select, { deltaY: -100 }))
+    expect(select.value).toBe('ch-zhipu-openai')
+    await act(async () => fireEvent.wheel(select, { deltaY: -100 }))
     expect(select.value).toBe('ch-kimi')
   })
 

@@ -196,7 +196,8 @@ describe('Sprint 3 analytics completeness audit (T8)', () => {
       user_undo: ['tests/acceptance/sprint3/analytics-completeness.test.ts'], // T8-003
       scope_confirmed: ['tests/unit/guide-prd-confirm.test.ts'], // 确认动作留存断言
       desktop_dispatch_run: ['tests/unit/desktop/dispatcher-loop.test.ts'], // 桌面线运行遥测
-      conversation_submitted: ['tests/e2e/sprint1/sketch-workflow.e2e.ts'], // E2E 事件流
+      desktop_dispatch_run_started: ['tests/unit/desktop/dispatcher-loop.test.ts'],
+      conversation_submitted: ['tests/acceptance/sprint2/guide-clarification-fixes.test.ts'], // 原生向导实际落盘
     }
 
     const todoBlocked: Record<string, string> = {
@@ -204,6 +205,11 @@ describe('Sprint 3 analytics completeness audit (T8)', () => {
       clarification_responded: '写入方活跃（guide 线 U5 J5）；待补断言。',
       decision_selected: '写入方活跃（guide 线 P7-9b）；待补断言。',
       test_completed: '旧事件类型供历史 bench/报告读取；当前桌面验证使用独立核心验证与实验事件，无新 Web 执行写入方。',
+      desktop_drive_session_started: '探索会话有运行写入方，尚无独立的分析JSONL事件断言。',
+      desktop_drive_step: '探索步骤有运行写入方，尚无独立的分析JSONL事件断言。',
+      desktop_drive_findings: '探索发现有运行写入方，尚无独立的分析JSONL事件断言。',
+      desktop_drive_session_closed: '探索会话收尾有运行写入方，尚无独立的分析JSONL事件断言。',
+      desktop_delivery_outcome: '交付结果派生已有单测，分析JSONL落盘事件尚缺直接断言。',
     }
 
     // 引用实存校验：断言文件必须存在，且源码中真实出现该事件字面量（否则覆盖声称失实）

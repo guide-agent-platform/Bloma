@@ -14,13 +14,14 @@ import '../styles/chat.css'
 
 export const MessageComposer: React.FC<{
   onSendMessage?: ComposerSend
+  onMessageSent?: () => void
   busy: boolean
   onStopGeneration?: () => void
   onOpenSettings?: () => void
   usage?: string
   placeholder?: string
-}> = ({ onSendMessage, busy, onStopGeneration, onOpenSettings, usage, placeholder }) => {
-  const composer = useComposer(onSendMessage)
+}> = ({ onSendMessage, onMessageSent, busy, onStopGeneration, onOpenSettings, usage, placeholder }) => {
+  const composer = useComposer(onSendMessage, onMessageSent)
   const activeSession = useAtomValue(activeAgentSessionIdAtom)
   const messages = useAtomValue(agentMessagesFamily(activeSession ?? ''))
   const [legacyQueue, setLegacyQueue] = React.useState<string[]>([])
