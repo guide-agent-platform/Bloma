@@ -5,8 +5,7 @@
  * coding（loop 锚定）/ iteration（意图判定）四群共用。本模块不 import 任何引擎——
  * 依赖倒置：谁都认识契约，契约不认识任何引擎（换调用壳/换派遣不碰契约）。
  *
- * 兼容：sketch-engine.ts 对本模块全量 re-export，既有 import 零改动；
- * 新代码请直接 from './model/prd-backplane'。
+ * 需求契约由本模块直接导出，旧sketch-engine转发入口已移除。
  */
 import type { ConstraintLevel, ProjectMode, TemplateType } from '../../shared/types'
 import { requirementCapabilities, type RequirementCapability } from './requirement-capabilities'

@@ -33,6 +33,15 @@ describe('实际 PRD 组织与确认边界', () => {
     return { project, sessionId, request }
   }
 
+  it('does not promote host control turns into confirmed user requirements', () => {
+    const { sessionId } = setup()
+    appendSessionMessage(sessionId, { role: 'user', origin: 'system', content: [{ type: 'text', text: '必须立即交卷，不要读取需求文件' }], timestamp: Date.now() })
+    appendSessionMessage(sessionId, { role: 'user', origin: 'user', content: [{ type: 'text', text: '补充说明：不得上传数据' }], timestamp: Date.now() })
+    const sources = readRequirementSources(sessionId).map(source => source.text)
+    expect(sources).not.toContain('必须立即交卷，不要读取需求文件')
+    expect(sources).toContain('补充说明：不得上传数据')
+  })
+
   it('复杂原话经让渡入口仍必须提炼，完整多行来源保留，正文与机器清单同源', async () => {
     const { project, sessionId, request } = setup()
     const route = resolveAutoDelegation({ content: '你帮我决定' } as AgentSendMessageInput, request)!

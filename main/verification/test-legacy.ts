@@ -28,7 +28,7 @@ export interface GwtTestResult {
   /**
    * 产物入口聚合指纹（2026-09-25 挂账②，对方 entryFingerprint 直译——多文件聚合口径）：
    * index.html + src/** 递归 + dist/app.js 逐文件 sha256 组合。报告落盘时计算；
-   * 消费侧（checkEntryFingerprintFresh）比对当前产物——验证后被改可检测。
+   * 仅保留历史报告的数据字段；当前桌面证据使用独立的源码与环境指纹。
    */
   entry_fingerprint?: EntryFingerprint
   /**

@@ -1,6 +1,6 @@
 /**
  * 需求项通用工具（web 线拆除刀2 自 coding/stages/iterate 迁出，2026-10-01）：
- * id 生成与修改描述清洗——品类无关纯函数，消费方经 coding/programming-orchestrator 桩接入。
+ * id生成与修改描述清洗的品类无关纯函数，消费者直接依赖本模块。
  */
 import type { SketchRequirement } from './prd-backplane'
 

@@ -14,9 +14,9 @@ export function readRequirementSources(sessionId: string): RequirementSource[] {
   const sources: RequirementSource[] = []
   const seen = new Set<string>()
   for (const line of readFileSync(path, 'utf8').split('\n')) {
-    let message: { role?: string; content?: unknown }
+    let message: { role?: string; origin?: string; content?: unknown }
     try { message = JSON.parse(line) } catch { continue }
-    if (message.role !== 'user') continue
+    if (message.role !== 'user' || message.origin === 'system' || message.origin === 'agent') continue
     const content = typeof message.content === 'string' ? message.content : Array.isArray(message.content)
       ? message.content.flatMap(block => block?.type === 'text' && typeof block.text === 'string' ? [block.text] : []).join('\n') : ''
     // Control choices are decisions, not capabilities. Meaningful clarification answers remain sources.

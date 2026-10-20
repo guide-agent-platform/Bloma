@@ -7,9 +7,7 @@
  * 二者均为渲染端内存级生命周期（随进程重启失效，与决策卡一致——卡片重启即消失，
  * 无须持久化）。
  *
- * runIterationTask 本体（迭代闭环编排）仍在 coding/programming-orchestrator
- *（与 runMvpTask 共享大量内部函数，拆分挂后续独立批次）；本模块先行落位
- * iteration 群的独立状态面，orchestrator 侧 re-export 保持旧导出面不变。
+ * 当前消费者直接依赖本状态模块；旧Web生成和迭代执行器已退役。
  */
 
 /**
