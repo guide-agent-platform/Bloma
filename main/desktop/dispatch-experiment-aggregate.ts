@@ -31,7 +31,7 @@ export function aggregateModelExperiments(matrixPaths: string[]) {
     if (pair.length !== 6 || groups.some(group => pair.filter(row => row.sample!.group === group).length !== 1)) throw new Error('EXPERIMENT_PAIR_GROUP_MISMATCH')
     const get = (group: string) => pair.find(row => row.sample!.group === group)!
     const first = get('G11'), second = get('G22')
-    const common = (row: Report) => [row.mode, row.input_hash, row.evaluator_hash, row.runtime_hash, row.limits, row.settings ?? DEFAULT_EXPERIMENT_SETTINGS, row.models?.verifier, row.required_writes, row.execution_limits]
+    const common = (row: Report) => [row.mode, row.input_hash, row.evaluator_hash, row.runtime_hash, row.limits, row.settings ?? DEFAULT_EXPERIMENT_SETTINGS, row.models?.verifier, row.required_writes, row.execution_limits, row.production_protocol]
     if (!first.evaluator_hash || pair.some(row => !equal(common(row), common(first)))) throw new Error('EXPERIMENT_PAIR_CONDITIONS_MISMATCH')
     const one = first.models!.executor, two = second.models!.executor
     for (const row of pair) {
@@ -40,7 +40,7 @@ export function aggregateModelExperiments(matrixPaths: string[]) {
       const e = ['G11', 'G21', 'S1'].includes(group) ? one : two
       if (!equal(row.models!.dispatcher, d) || !equal(row.models!.executor, e)) throw new Error('EXPERIMENT_PAIR_MODEL_MISMATCH')
     }
-    const experimentConditions = [first.runtime_hash, first.limits, first.settings ?? DEFAULT_EXPERIMENT_SETTINGS, one, two, first.models!.verifier, first.required_writes, first.execution_limits]
+    const experimentConditions = [first.runtime_hash, first.limits, first.settings ?? DEFAULT_EXPERIMENT_SETTINGS, one, two, first.models!.verifier, first.required_writes, first.execution_limits, first.production_protocol]
     if (conditions.has(first.mode) && !equal(conditions.get(first.mode), experimentConditions)) throw new Error('EXPERIMENT_STRATUM_CONDITIONS_MISMATCH')
     conditions.set(first.mode, experimentConditions)
     const taskKey = JSON.stringify([first.mode, first.sample!.task_id]), inputs = [first.input_hash, first.evaluator_hash]

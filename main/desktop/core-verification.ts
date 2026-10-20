@@ -178,11 +178,12 @@ export async function runCoreVerification(options: {
   return result
 }
 
-export const CORE_VERIFICATION_BRIEF = `
+export const CORE_DECLARATION_BRIEF = `
 所有逻辑与界面场景都登记在同一个 scenarios 数组，分别标记 input=logic/gui；不要使用 gui_scenarios 字段。用固定场景名，避免把 repr/JSON 格式化的测试输入拼入名称后与声明产生引号差异。
 核心业务验证：复用已写好的测试，在项目根登记 CORE_CHECK.json：
 {"schema_version":2,"requirements":[{"id":"F-001","requirement_hash":"需求清单中的完整验证版本","implementation":"implemented"}],"command":["python","core_check.py"],"scenarios":[{"name":"新增并重启仍保留","covers":["F-001"],"input":"gui"}]}。
 requirements 必须列出全部已确认功能项，P0/P1/P2 仅决定顺序。implementation 如实填 implemented/partial/missing/unverified；仅 mock、占位分支或尚未调用真实端点的功能不能填 implemented。核对每个场景与本项描述和断言后再登记版本，不可只复制旧覆盖编号。实现状态与测试结果独立，旧声明仅作诊断，不认证新交付。
-command 必须实际执行并输出所有登记场景；只有逻辑测试时 input 填 logic。已有独立 GUI 测试可另登记 gui_command:["python","test_ui.py"]，平台顺序执行两者，gui 场景仅从 GUI 入口回读，不必重写测试或额外造聚合脚本。场景名必须全局唯一，stdout 为 PASS/FAIL/BLOCKED 加完全一致的场景名。每个已确认需求至少一条实际业务断言，至少一条实际界面业务链。input 如实填 logic/gui/audio/microphone/mock；mock 不覆盖真实能力。数据目录从 APP_DATA_DIR 读取。
-模型功能须实现实际 HTTP 客户端与用户可配 endpoint/model/Key，保留无配置引导；不得以固定 network_error 伪装连接失败。复用内置 llm_client.py，登记 llm:{"module":"app","factory":"Logic","method":"enhance","covers":["对应模型功能 F-id"]}，入口接收 {prompt,config:{endpoint,model,api_key,provider,timeout}}，返回 {ok,kind,text/message}。必须登记产品实际使用的入口，不能另写只供探针的替身。宿主用本机 HTTP 服务验证请求、响应、401/404/429/非法响应及无 Key，不调用付费端点；外部生成质量另列待真实验证。
-语音复用 speech_runtime.py 的 SpeechEngine/StreamingRecorder，另加 speech:{"module":"speech_runtime","factory":"SpeechEngine","method":"transcribe","rate_argument":true}，须指向产品实际使用的 ASR 实例构造入口，宿主固定 WAV/二维 PCM 探针会执行它。录音只入队，准备/识别在后台，UI 线程显示累计文字；硬件采集需要单独授权证据，文本模拟不能替代。环境不具备时明确待验证，不改需求或期望绕过失败。`
+command 必须实际执行并输出所有登记场景；只有逻辑测试时 input 填 logic。已有独立 GUI 测试可另登记 gui_command:["python","test_ui.py"]，平台顺序执行两者，gui 场景仅从 GUI 入口回读，不必重写测试或额外造聚合脚本。场景名必须全局唯一，stdout 为 PASS/FAIL/BLOCKED 加完全一致的场景名。每个已确认需求至少一条实际业务断言，至少一条实际界面业务链。input 如实填 logic/gui/audio/microphone/mock；mock 不覆盖真实能力。数据目录从 APP_DATA_DIR 读取。`
+export const MODEL_VERIFICATION_BRIEF = `模型功能须实现实际 HTTP 客户端与用户可配 endpoint/model/Key，保留无配置引导；不得以固定 network_error 伪装连接失败。复用内置 llm_client.py，登记 llm:{"module":"app","factory":"Logic","method":"enhance","covers":["对应模型功能 F-id"]}，入口接收 {prompt,config:{endpoint,model,api_key,provider,timeout}}，返回 {ok,kind,text/message}。必须登记产品实际使用的入口，不能另写只供探针的替身。宿主用本机 HTTP 服务验证请求、响应、401/404/429/非法响应及无 Key，不调用付费端点；外部生成质量另列待真实验证。`
+export const SPEECH_VERIFICATION_BRIEF = `语音复用 speech_runtime.py 的 SpeechEngine/StreamingRecorder，另加 speech:{"module":"speech_runtime","factory":"SpeechEngine","method":"transcribe","rate_argument":true}，须指向产品实际使用的 ASR 实例构造入口，宿主固定 WAV/二维 PCM 探针会执行它。录音只入队，准备/识别在后台，UI 线程显示累计文字；硬件采集需要单独授权证据，文本模拟不能替代。环境不具备时明确待验证，不改需求或期望绕过失败。`
+export const CORE_VERIFICATION_BRIEF = [CORE_DECLARATION_BRIEF, MODEL_VERIFICATION_BRIEF, SPEECH_VERIFICATION_BRIEF].join('\n')

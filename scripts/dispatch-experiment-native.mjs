@@ -260,6 +260,22 @@ try {
   }
   if (report.outcome === 'running') report.outcome = 'timeout'
   report.project = project()
+  if (report.run_outcome === 'ready' && report.project.current_stage === 'completed') {
+    // Delivery metadata is asynchronous. Capture the settled panel, not a stale pre-delivery response.
+    const panel = page.locator('[data-ai-id="delivery-panel"]')
+    try {
+      await panel.waitFor({ state: 'visible', timeout: 10000 })
+      await panel.locator('[data-ai-id="delivery-refresh"]').click({ timeout: 5000 })
+      await page.waitForFunction(() => {
+        const panel = document.querySelector('[data-ai-id="delivery-panel"]')
+        return panel && !panel.textContent.includes('读取产物…')
+      }, undefined, { timeout: 10000 })
+      report.delivery_surface = await panel.evaluate(element => ({
+        settled: true, launch_available: !!element.querySelector('[data-ai-id="delivery-launch-button"]:not(:disabled)'),
+        launch_hint: element.querySelector('[data-ai-id="delivery-launch-hint"]')?.textContent?.trim() ?? null,
+      }))
+    } catch { report.delivery_surface = { settled: false, launch_available: null, launch_hint: null } }
+  }
   report.end_screen_text = (await page.locator('body').innerText()).slice(-16000)
   await page.screenshot({ path: join(reportDir, 'terminal.png') })
   if (report.outcome === 'timeout') {

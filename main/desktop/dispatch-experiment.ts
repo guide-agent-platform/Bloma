@@ -20,10 +20,11 @@ export const EXPERIMENT_REQUIRED_DELIVERABLES = ['CORE_CHECK.json', 'DELIVERY.md
 export interface ExperimentModelReceipt { channel_id: string; model: string; endpoint_host: string; endpoint_fingerprint?: string; provider_type?: string }
 export interface ExperimentLimits { max_workers: number; max_tasks: number; dispatcher_turns: number; executor_turns: number; max_requests: number; max_output_tokens: number; wall_ms: number }
 export const DEFAULT_EXPERIMENT_LIMITS: ExperimentLimits = { max_workers: 2, max_tasks: 16, dispatcher_turns: 40, executor_turns: 32, max_requests: 128, max_output_tokens: 640000, wall_ms: 1_800_000 }
-export interface ExperimentTask { id: string; instruction: string; depends_on: string[]; writes: string[] }
+export interface ExperimentTask { id: string; instruction: string; depends_on: string[]; writes: string[]; feature_ids?: string[] }
 export interface ExperimentWorker { delegation_id: string; child_session_id: string; task_ids: string[]; has_executed?: boolean }
 export interface ExperimentSample { task_id: string; repeat_id: string; pair_id: string; group: 'G11' | 'G12' | 'G21' | 'G22' | 'S1' | 'S2' }
 export interface DispatchExperiment {
+  production_protocol?: 'v2'
   version: 1; project_id: string; mode: 'quick' | 'longterm'; experiment_id: string; run_id: string
   state: 'prepare' | 'prepared' | 'running'; policy?: ExperimentPolicy; planning?: 'fixed' | 'autonomous'
   snapshot_id?: string; input_hash?: string; parent_session_id?: string
@@ -43,10 +44,13 @@ export function experimentConditionHash(config: DispatchExperiment): string {
   return createHash('sha256').update(JSON.stringify({ mode: config.mode, policy: config.policy,
     planning: config.planning ?? 'fixed', models: config.models, limits: config.limits, settings: config.models ? config.settings ?? DEFAULT_EXPERIMENT_SETTINGS : config.settings,
     protected_inputs: config.protected_inputs, required_writes: config.required_writes, execution_limits: config.execution_limits, input_hash: config.input_hash, runtime_hash: config.runtime_hash,
-    sample: config.sample, evaluator_hash: config.evaluator_hash })).digest('hex')
+    sample: config.sample, evaluator_hash: config.evaluator_hash,
+    ...(config.production_protocol ? { production_protocol: config.production_protocol } : {}) })).digest('hex')
 }
 export function validateExperimentTasks(tasks: ExperimentTask[], maximum: number): void {
   if (!Array.isArray(tasks) || tasks.length > maximum) throw new Error('EXPERIMENT_INVALID_TASKS')
+  for (const task of tasks) if (task?.feature_ids !== undefined && (!Array.isArray(task.feature_ids)
+    || new Set(task.feature_ids).size !== task.feature_ids.length || task.feature_ids.some(id => typeof id !== 'string' || !/^F-[A-Za-z0-9_-]+$/.test(id)))) throw new Error('EXPERIMENT_INVALID_FEATURE_IDS')
   const ids = new Set(tasks.map(task => task.id))
   if (ids.size !== tasks.length) throw new Error('EXPERIMENT_DUPLICATE_TASK')
   for (const task of tasks) {
@@ -83,6 +87,7 @@ export function assertExperimentHome(home = getPromaHome()): void {
 }
 export function validateExperiment(raw: unknown): DispatchExperiment {
   const value = raw as DispatchExperiment
+  if (value?.production_protocol !== undefined && value.production_protocol !== 'v2') throw new Error('EXPERIMENT_INVALID_PRODUCTION_PROTOCOL')
   if (!value || value.version !== 1 || !['quick', 'longterm'].includes(value.mode)
     || !['prepare', 'prepared', 'running'].includes(value.state)) throw new Error('EXPERIMENT_INVALID_CONFIG')
   for (const id of [value.project_id, value.experiment_id, value.run_id]) assertExperimentId(id)

@@ -34,6 +34,7 @@ export function experimentPhase(node: PhaseNode, config: DispatchExperiment): Ph
   const modern = config.policy === 'autonomous' || config.policy === 'standalone'
   const instruction = config.policy === 'standalone' ? '直接完成实现' : modern ? '按你自行产生的任务分解组织实现' : '按冻结实验任务图委派实现子会话完成实现'
   const adapt = (text: string) => text.replaceAll('一次性委派 implement 子会话完成实现', instruction)
+    .replaceAll('按职责委派 implement 子会话完成实现', instruction)
     .replace(/同一委派线(?:续接)?/g, '沿实验快照保留的骨架交接继续工作')
   return { ...node, taskTemplate: adapt(node.taskTemplate) + '\n' + experimentTaskBook(config),
     quickTaskTemplate: node.quickTaskTemplate ? adapt(node.quickTaskTemplate) + '\n' + experimentTaskBook(config) : undefined,

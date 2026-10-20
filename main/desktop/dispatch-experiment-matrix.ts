@@ -16,6 +16,7 @@ export function createModelMatrix(snapshot: string, destination: string,
   const result = conditions.map(condition => {
     const home = join(destination, condition.group)
     const config = restoreExperiment(snapshot, home, condition.group.startsWith('S') ? 'standalone' : 'autonomous', `${prefix}-${condition.group}`, {
+      production_protocol: 'v2',
       models: { dispatcher: condition.dispatcher, executor: condition.executor, verifier: pair.verifier },
       limits: { ...DEFAULT_EXPERIMENT_LIMITS, ...limits, max_workers: workerLimit },
       ...(collection ? { evaluator: collection.evaluator, sample: { task_id: collection.task_id, repeat_id: collection.repeat_id,
@@ -23,7 +24,7 @@ export function createModelMatrix(snapshot: string, destination: string,
     })
     return { group: condition.group, home, run_id: config.run_id, policy: config.policy, mode: config.mode,
       project_id: config.project_id, sample: config.sample, evaluator_hash: config.evaluator_hash,
-      models: config.models, input_hash: config.input_hash, condition_hash: config.condition_hash }
+      models: config.models, input_hash: config.input_hash, condition_hash: config.condition_hash, production_protocol: config.production_protocol }
   })
   writeFileSync(join(destination, 'matrix.json'), JSON.stringify(result, null, 2), { flag: 'wx' })
   return result

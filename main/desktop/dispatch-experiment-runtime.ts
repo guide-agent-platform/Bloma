@@ -3,7 +3,8 @@ import { loadChildSessionSnapshot, replayTurnsFrom } from '../agent/delegation/d
 import type { DesktopDispatchRunInput } from './dispatcher-loop'
 import { buildAdvanceProtocolSection, buildDesktopChildBaseSystem, renderTaskTemplate } from './dispatcher-prompt'
 import type { PhaseNode } from './dispatcher-phases'
-import { experimentLimits, recordExperiment, type DispatchExperiment } from './dispatch-experiment'
+import { experimentLimits, recordExperiment, readExperiment, type DispatchExperiment } from './dispatch-experiment'
+import { DEFAULT_DESKTOP_EXECUTION_LIMITS } from './execution-limits'
 import { bindExperimentWorkers, experimentRunSignal, guardExperimentQuery, lockExperimentModel } from './dispatch-experiment-models'
 import { getPromaHome } from '../../storage/config-paths'
 import { assertExperimentEvaluator } from './dispatch-experiment-evaluator'
@@ -30,7 +31,7 @@ export function bindExperimentInput(input: DesktopDispatchRunInput, config: Disp
 }
 export function standaloneSystem(node: PhaseNode, input: DesktopDispatchRunInput): string {
   const template = input.quickMode && node.quickTaskTemplate ? node.quickTaskTemplate : node.taskTemplate
-  return buildDesktopChildBaseSystem(node, input) + '\n' + renderTaskTemplate(template, { project_name: input.projectName, shape_brief: input.shapeBrief ?? '' }).text
+  return buildDesktopChildBaseSystem(node, { ...input, executionLimits: readExperiment(input.projectId)?.execution_limits ?? DEFAULT_DESKTOP_EXECUTION_LIMITS }) + '\n' + renderTaskTemplate(template, { project_name: input.projectName, shape_brief: input.shapeBrief ?? '' }).text
     + '\n' + buildAdvanceProtocolSection(node)
 }
 export function standaloneTools(tools: AgentLoopTool[]): AgentLoopTool[] {

@@ -7,6 +7,14 @@ const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 const make = () => { const root = mkdtempSync(join(tmpdir(), 'source-audit-')); roots.push(root); return root }
 describe('controlled script source write audit', () => {
+  it('rolls back out-of-scope writes even when the invoked tool throws', async () => {
+    const root = make(); writeFileSync(join(root, 'other.py'), 'original')
+    const result = await auditScriptSourceWrites(root, [], [], async () => {
+      writeFileSync(join(root, 'other.py'), 'unexpected'); throw new Error('tool crashed after writing')
+    })
+    expect(result.isError).toBe(true)
+    expect(readFileSync(join(root, 'other.py'), 'utf8')).toBe('original')
+  })
   it('restores refused edits, creations and deletions without removing authorized changes', async () => {
     const root = make(); writeFileSync(join(root, 'locked.py'), 'original'); writeFileSync(join(root, 'deleted.py'), 'keep')
     const outcome = await auditScriptSourceWrites(root, ['allowed.py'], [], async () => {

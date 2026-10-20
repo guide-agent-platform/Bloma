@@ -35,21 +35,23 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
   const [launchState, setLaunchState] = React.useState<string | null>(null)
   const [showCorrection, setShowCorrection] = React.useState(false)
   const currentProjectId = React.useRef(projectId)
+  const refreshSequence = React.useRef(0)
   currentProjectId.current = projectId
-  React.useEffect(() => { setData(undefined); setLaunchState(null) }, [projectId])
+  React.useEffect(() => { refreshSequence.current++; setData(undefined); setLaunchState(null) }, [projectId])
 
   const refresh = React.useCallback(async () => {
     if (!projectId) return
     const api = window.electronAPI?.projectDeliverables
     if (!api) return
+    const sequence = ++refreshSequence.current
     setLoading(true)
     try {
       const result = await api.get({ request_id: crypto.randomUUID(), project_id: projectId })
-      if (currentProjectId.current === projectId) setData(result.ok ? result.data : undefined)
+      if (currentProjectId.current === projectId && sequence === refreshSequence.current) setData(result.ok ? result.data : undefined)
     } catch {
-      if (currentProjectId.current === projectId) setData(undefined)
+      if (currentProjectId.current === projectId && sequence === refreshSequence.current) setData(undefined)
     } finally {
-      if (currentProjectId.current === projectId) setLoading(false)
+      if (currentProjectId.current === projectId && sequence === refreshSequence.current) setLoading(false)
     }
   }, [projectId])
 
@@ -57,7 +59,7 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
     void refresh()
     setLaunchState(null)
     // 依赖含 desktopPhase/artifactsVersion：阶段推进与产物变更信号触发重拉（A-08）
-  }, [refresh, desktopPhase, artifactsVersion])
+  }, [refresh, desktopPhase, artifactsVersion, project?.current_stage])
 
   const onLaunch = async (): Promise<void> => {
     if (!projectId) return
@@ -111,7 +113,7 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
         <button
           data-ai-id="delivery-launch-button"
           onClick={() => void onLaunch()}
-          disabled={!data?.can_launch}
+          disabled={loading || !data?.can_launch}
           style={{
             display: 'flex', alignItems: 'center', gap: 6,
             background: data?.can_launch ? 'var(--theatre-accent, var(--color-quick))' : 'var(--color-surface-muted)',
@@ -123,7 +125,7 @@ export const DeliveryPanel: React.FC<{ embedded?: boolean }> = ({ embedded = fal
         >
           <Play />启动程序
         </button>
-        {data && !data.can_launch && (
+        {!loading && data && !data.can_launch && (
           <span data-ai-id="delivery-launch-hint" style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)' }}>
             {project?.current_stage !== 'completed' ? '项目完成后可启动' : data.launch.declared && !data.launch.parse_ok
               ? `LAUNCH.json 不合法：${data.launch.parse_error ?? ''}`

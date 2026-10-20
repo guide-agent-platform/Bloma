@@ -2,15 +2,18 @@ import type { AgentLoopTool, ToolContext, ToolOutcome } from '../agent/loop/agen
 import { findDelegation } from '../agent/delegation/agent-collaboration'
 import { experimentLimits, recordExperiment, validateExperimentTasks, writeExperiment, type DispatchExperiment, type ExperimentTask } from './dispatch-experiment'
 import { assertExperimentWorkerRecovery } from './dispatch-experiment-recovery'
+import { handoffRecovery } from '../agent/delegation/task-handoff'
+import { readPrdBackplane } from '../project/prd-store'
 
 export function autonomousTaskBook(config: DispatchExperiment): string {
   const limits = experimentLimits(config)
   return '【调度实验运行协议】\n' +
-    `需求、初始产物和验收已冻结。自行制定任务分解，使用 experiment_plan 登记任务、依赖与写入范围；不规定任务数量或具体拆分答案。\n` +
+    `需求、初始产物和验收已冻结。自行制定任务分解，用experiment_plan登记目标、接口、依赖、写入范围及相关feature_ids（F编号）；平台按功能编号给执行者交接完整规则与验收。不规定任务数量或具体拆分答案。\n` +
     'writes只接受具体文件路径或以 / 结尾的目录前缀，不支持 *、**、? 通配符；不合法范围会在锁定计划前拒绝。\n' +
     (config.required_writes?.length ? `宿主必需交付文件（项目根相对路径）：${config.required_writes.join('、')}。计划写入范围必须覆盖这些文件；首次派遣前缺失会明确拒绝，可重新提交你自己的计划。测试脚本名称与业务分解仍由你决定。\n` : '') +
     `实现者最多 ${limits.max_workers} 名，任务登记最多 ${limits.max_tasks} 项。delegate_agent 用 task_ids 分配任务；continue_delegation 可分配尚未执行的已登记任务或发送修复反馈。\n` +
     '一次委派或续接分配的一批任务，须等该实现者整轮成功结束后才释放给其他实现者的依赖；运行中不会提前发布其中单个任务已完成的事件。请据此安排你自己的依赖与并行派发。\n' +
+    '任务正文只在experiment_plan登记一次，派工仅传task_ids，不在task或feedback中复制正文。任务写目标、接口、验收引用和写入边界即可，不预写完整实现。已有名额用完后以continue_delegation复用已结束实现者；先用experiment_status读取实际状态、loop结果、交接证据和依赖，不把等待、进程结束或摘要自述当作验收。续接feedback仅传新增事实、失败证据或接口变更。\n' +
     'CORE_CHECK.json 的 scenarios 最多 64 条，场景名须唯一；合并重复场景时仍须覆盖全部已确认需求。\n' +
     '角色、模型由宿主实验配置绑定，不自行修改。规划登记只定义执行协议，不表示任务或产物已验收；是否启动、分配、等待、集成和修复由你决定。历史证据不是当前版本已通过证明。'
 }
@@ -21,6 +24,7 @@ export function wrapAutonomousDispatcherTools(tools: AgentLoopTool[], config: Di
   const plan: AgentLoopTool = { name: 'experiment_plan', description: '登记你自行产生的任务分解。第一次派遣后计划锁定，修复沿已登记任务进行。',
     input_schema: { type: 'object', properties: { tasks: { type: 'array', items: { type: 'object', properties: {
       id: { type: 'string' }, instruction: { type: 'string' }, depends_on: { type: 'array', items: { type: 'string' } }, writes: { type: 'array', description: '具体文件相对路径或以 / 结尾的目录前缀；不支持 *、**、? 通配符', items: { type: 'string' } },
+      feature_ids: { type: 'array', items: { type: 'string' }, description: '本任务关联的已确认F编号；按职责提供完整规则与场景，不改变全局范围。' },
     }, required: ['id', 'instruction', 'depends_on', 'writes'] } } }, required: ['tasks'] },
     execute: async (input, ctx) => {
       try {
@@ -28,6 +32,11 @@ export function wrapAutonomousDispatcherTools(tools: AgentLoopTool[], config: Di
         if (config.plan_locked) throw new Error('EXPERIMENT_PLAN_ALREADY_DISPATCHED')
         const tasks = input.tasks as ExperimentTask[]
         validateExperimentTasks(tasks, experimentLimits(config).max_tasks)
+        const requestedFeatures = tasks.flatMap(task => task.feature_ids ?? [])
+        if (requestedFeatures.length) {
+          const known = new Set(readPrdBackplane(config.project_id).requirements.map(item => item.id))
+          if (requestedFeatures.some(id => !known.has(id))) throw new Error('EXPERIMENT_UNKNOWN_FEATURE')
+        }
         if (!tasks.length) throw new Error('EXPERIMENT_EMPTY_PLAN')
         // Validate new plans only: historical configs with unsupported scopes remain readable.
         const unsupported = tasks.flatMap(task => task.writes).filter(path => /[*?]/.test(path))
@@ -41,16 +50,35 @@ export function wrapAutonomousDispatcherTools(tools: AgentLoopTool[], config: Di
         return { output: `计划已登记，共 ${tasks.length} 项。登记不代表已执行或已验收。` }
       } catch (error) { return rejected(config, error, ctx) }
     } }
+  const status: AgentLoopTool = { name: 'experiment_status', parallelSafe: true, description: '只读查询登记任务、实现者实际生命周期/loop结果、交接证据与可续接状态。',
+    input_schema: { type: 'object', properties: {} }, execute: async (_input, ctx) => {
+      if (ctx.projectId !== config.project_id || ctx.sessionId !== config.parent_session_id) return { isError: true, output: 'EXPERIMENT_CONTEXT_MISMATCH' }
+      return { output: JSON.stringify({ plan_locked: Boolean(config.plan_locked), worker_limit: experimentLimits(config).max_workers,
+        tasks: config.tasks.map(({ id, depends_on, writes, feature_ids }) => ({ id, depends_on, writes, feature_ids })),
+        workers: Object.entries(config.workers).map(([slot, worker]) => { const record = findDelegation(ctx.sessionId, worker.delegation_id)
+          return { slot, delegation_id: worker.delegation_id, task_ids: worker.task_ids, status: record?.status ?? 'missing',
+            loop_status: record?.loopStatus ?? null, task_handoff: record?.taskHandoff ?? null,
+            can_continue: Boolean(record && record.status !== 'running' && record.status !== 'cancelled'
+              && (record.loopStatus !== 'budget_exhausted' || record.taskHandoff && handoffRecovery(record.taskHandoff) === 'resume')) } }),
+      }) }
+    } }
   return [...tools.map(tool => {
     if (!['delegate_agent', 'continue_delegation'].includes(tool.name)) return tool
     const initial = tool.name === 'delegate_agent'
     return { ...tool, parallelSafe: false,
-      description: initial ? '把已登记的任务分配给一名实现者；人数、角色和模型由宿主限定。' : '续接已有实现者，分配已登记任务或给出修复反馈。',
-      input_schema: { type: 'object', properties: { task_ids: { type: 'array', items: { type: 'string' } }, task: { type: 'string' },
+      description: initial ? '仅用task_ids把已登记正文交给实现者，宿主自动附正文；不重复填写任务说明。' : '续接已结束实现者；新增任务传task_ids，feedback只写增量事实/失败证据；同一任务不重复正文。',
+      input_schema: { type: 'object', properties: { task_ids: { type: 'array', items: { type: 'string' } },
+        ...(initial ? {} : { feedback: { type: 'string', description: '仅本轮新增事实、接口变化或失败证据；不要重复已登记任务正文。' } }),
         ...(initial ? {} : { delegation_id: { type: 'string' } }) }, required: initial ? ['task_ids'] : ['delegation_id'] },
       execute: async (input: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutcome> => {
         const key = ctx.toolCallId && `${tool.name}:${ctx.toolCallId}`
         if (key && cache.has(key)) return cache.get(key)!
+        const previousPlanLocked = config.plan_locked
+        const rollbackUnusedLock = () => {
+          if (!previousPlanLocked && config.plan_locked && !Object.values(config.workers).some(worker => worker.has_executed)) {
+            config.plan_locked = previousPlanLocked; writeExperiment(config)
+          }
+        }
         try {
           if (ctx.projectId !== config.project_id || ctx.sessionId !== config.parent_session_id) throw new Error('EXPERIMENT_CONTEXT_MISMATCH')
           if (input.channelId || input.modelId || (input.role && input.role !== 'implement')) throw new Error('EXPERIMENT_MODEL_OR_ROLE_OVERRIDE')
@@ -82,8 +110,11 @@ export function wrapAutonomousDispatcherTools(tools: AgentLoopTool[], config: Di
           }
           config.plan_locked = true
           let result: ToolOutcome
-          const instruction = selected.map(task => `[${task.id}] ${task.instruction}\n依赖：${task.depends_on.join(',')}\n写入范围：${task.writes.join(',')}`).join('\n\n')
-            + (typeof input.task === 'string' ? `\n调度反馈（保持已确认需求）：${input.task}` : '')
+          const fresh = existing?.has_executed ? selected.filter(task => !old.includes(task.id)) : selected
+          const feedback = typeof input.feedback === 'string' ? input.feedback : !initial && typeof input.task === 'string' ? input.task : ''
+          const instruction = (fresh.length ? fresh.map(task => `[${task.id}] ${task.instruction}\n功能引用：${task.feature_ids?.join(',') || '按任务核对权威需求'}\n依赖：${task.depends_on.join(',')}\n写入范围：${task.writes.join(',')}`).join('\n\n')
+            : `继续已登记任务：${ids.join(',')}。沿用历史任务正文、写入范围和已读事实，不扩大职责。`)
+            + (feedback.trim() ? `\n本轮增量反馈（保持已确认需求）：${feedback}` : '')
           if (existing) {
             const record = findDelegation(ctx.sessionId, existing.delegation_id)
             const status = record?.status
@@ -99,12 +130,13 @@ export function wrapAutonomousDispatcherTools(tools: AgentLoopTool[], config: Di
             const newSlot = `worker-${Object.keys(config.workers).length + 1}`
             result = await create(newSlot, ids, () => tool.execute({ task: instruction, role: 'implement', ...modelArgs() }, ctx))
           }
+          if (result.isError) rollbackUnusedLock()
           recordExperiment(config, 'dispatch', { request_id: ctx.requestId, task_ids: ids, workers: Object.values(config.workers), error: Boolean(result.isError) })
           if (key) cache.set(key, result)
           return result
-        } catch (error) { return rejected(config, error, ctx) }
+        } catch (error) { rollbackUnusedLock(); return rejected(config, error, ctx) }
       } }
-  }), plan]
+  }), plan, status]
 }
 function rejected(config: DispatchExperiment, error: unknown, ctx: ToolContext): ToolOutcome {
   const reason = error instanceof Error ? error.message : String(error)

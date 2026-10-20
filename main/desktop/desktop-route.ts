@@ -5,10 +5,8 @@
  * 推进，人工只保留 Intent 层（PRD 确认）与异常处理（停止词/blocked 放行/门禁耗尽
  * 人话卡）。旧确认卡回传按协议升级告知兼容处理，不再发新卡。
  *
- * 快速型直通道（2026-10-03 拍板：quick 的目的是快速做出可用应用）：quick 项目
- * 跳过 arch/scaffold（无骨架/契约前提，implement 用阶段表快速版任务书从零实现），
- * implement 门禁全绿后不走 verify 工程验收（契约/驱动断言/裁判门是长期模式的
- * 工程化设施），过一道宿主安全门（fail-closed 底线）直达 delivered 交付。
+ * quick 跳过 arch/scaffold及契约verify，先过核心/安全/启动门；v2实验另经独立V审阅。
+ * 各阶段的事实、依赖、权限与交付仍由宿主裁决。
  *
  * 承接批次 D 的 runDesktopDispatcherLoop 与批次 E 的拒收闭环：
  *   分流（agent-dispatch 调用）：BLOMA_DESKTOP_DISPATCH on 且项目 template_type=
@@ -74,6 +72,8 @@ import { readProjectAttempts, consumeProjectAttempt, resetProjectAttemptScope } 
 import type { CoreVerificationResult } from './core-verification'
 import { createChannelFailureTracker, observeChannelFailure, type ChannelFailureTracker } from './channel-failure-watch'
 import { readDesktopRequirementsDigest, readDesktopShapeBriefs } from './requirement-digest'
+import { readProductionDigest } from './production-context'
+import { runQuickProductionReview, ensureQuickProductionReview } from './quick-production-review'
 import { runSecurityScan } from '../verification/security-scan'
 
 // =========================================================================
@@ -463,7 +463,7 @@ async function runDesktopStage(
   // 首跑修复：需求摘要（PRD 背板 → 调度员/子会话上下文；deps 覆写位供测试与异地装配）
   const requirementsDigest = deps.requirementsDigest
     ? deps.requirementsDigest(input.projectId)
-    : readDesktopRequirementsDigest(input.projectId)
+    : ['desktop-implement', 'desktop-verify'].includes(phaseId) ? readProductionDigest(input.projectId) : readDesktopRequirementsDigest(input.projectId)
   let uxBinding: ReturnType<typeof readConfirmedUxBinding>
   try { uxBinding = readConfirmedUxBinding(input.projectId, readPrdBackplane(input.projectId)) }
   catch (error) {
@@ -666,10 +666,7 @@ async function settleDesktopStage(
       deps.complete(input.sessionId, input.projectId)
       return
     }
-    // ── 快速型直通道（2026-10-03 拍板：quick 的目的是快速做出可用应用）：implement
-    // 门禁全绿后不走 verify 工程验收（契约/驱动断言/裁判门是长期模式的工程化设施），
-    // 过一道宿主安全门（fail-closed 底线，与 verify 收口同款扫描器）直达 delivered。
-    // 安全不过 → 停在 implement 出人话卡（修复后重新收口会自动重扫）。 ──
+    // quick以核心、安全、启动门收口，v2实验另有独立V审阅；失败保留产物，不宣布交付。
     if (next === 'desktop-verify') {
       const project = findProject(input.projectId)
       if (project?.mode === 'quick') {
@@ -705,6 +702,13 @@ async function settleDesktopStage(
           deps.complete(input.sessionId, input.projectId, 'incomplete')
           return
         }
+        if (!await ensureQuickProductionReview({ projectId: input.projectId, sessionId: input.sessionId, requestId: input.requestId,
+          currentPhase: phaseId, task: input.content, query, env, maxTokens: 640000, signal: input.signal ?? new AbortController().signal,
+          publish: (type, payload) => deps.publish(input, type, payload), projectName, sandboxRoot: project.root_path, quickMode: true }, {
+          review: runQuickProductionReview,
+          repair: feedback => runDesktopStage({ ...input, content: feedback, initialMessagePersisted: false }, query, env, 'desktop-implement', deps, projectName, chainDepth, true),
+          publish: text => deps.publish(input, 'message_delta', { text }), stop: () => deps.complete(input.sessionId, input.projectId, 'incomplete'),
+        })) return
         updateProject(input.projectId, { desktop_phase: 'delivered', status: 'completed', current_stage: 'completed' })
         recordDeliveryOutcomeTelemetry(input.projectId, input.sessionId, 'quick-direct')
         recordExperimentBoundary(input.projectId, 'delivered', { via: 'quick-direct' })

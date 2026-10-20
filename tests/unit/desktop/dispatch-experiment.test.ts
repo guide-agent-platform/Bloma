@@ -186,7 +186,7 @@ describe('host tool boundaries', () => {
     const adapted = experimentPhase(DESKTOP_PHASES['desktop-implement'], value)
     expect(adapted.quickTaskTemplate).not.toContain('一次性委派 implement 子会话完成实现')
     expect(adapted.taskTemplate).toContain('最多两名实现者')
-    expect(DESKTOP_PHASES['desktop-implement'].quickTaskTemplate).toContain('一次性委派 implement 子会话完成实现')
+    expect(DESKTOP_PHASES['desktop-implement'].quickTaskTemplate).toContain('按职责委派 implement 子会话完成实现')
   })
 })
 

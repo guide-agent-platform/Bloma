@@ -172,7 +172,7 @@ export function readDesktopShapeBriefs(projectId: string): { shapeBrief?: string
  * quick/longterm 子会话同享）。
  * 批9（2026-10-07）：背板 shape 存在时再追加形状摘要段（同注入点）。
  */
-export function readDesktopRequirementsDigest(projectId: string): string | undefined {
+export function readDesktopRequirementsDigest(projectId: string, options: { includePrdDocument?: boolean } = {}): string | undefined {
   try {
     const backplane = readPrdBackplane(projectId)
     const associationIssues = acceptanceAssociationIssues(backplane)
@@ -181,7 +181,7 @@ export function readDesktopRequirementsDigest(projectId: string): string | undef
       constraints: backplane.constraints,
       out_of_scope: backplane.out_of_scope,
       assumptions: backplane.assumptions,
-      prd_document: associationIssues.length ? undefined : backplane.prd_document,
+      prd_document: associationIssues.length || options.includePrdDocument === false ? undefined : backplane.prd_document,
       // 运行契约不得用展示窗口裁剪：全部功能、长描述与验收条件都传给实现者。
       maxItems: backplane.requirements.length,
       maxDescriptionChars: Number.MAX_SAFE_INTEGER,

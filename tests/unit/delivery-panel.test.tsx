@@ -9,7 +9,7 @@
  *   （原先 mock window.bloma 掩盖了生产死链）。
  */
 import React from 'react'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { configure } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Provider, createStore } from 'jotai'
@@ -45,6 +45,19 @@ function renderPanel(stage: string): void {
 }
 
 describe('DeliveryPanel', () => {
+  it('keeps the newest launch declaration when an older refresh arrives late', async () => {
+    let resolveOld!: (value: unknown) => void
+    const old = new Promise(resolve => { resolveOld = resolve })
+    const current = { files: ['app.py', 'LAUNCH.json'], launch: { declared: true, parse_ok: true }, can_launch: true }
+    const get = vi.fn().mockReturnValueOnce(old).mockResolvedValue({ ok: true, data: current })
+    ;(window as unknown as { electronAPI: unknown }).electronAPI = { projectDeliverables: { get, launch: vi.fn() } }
+    renderPanel('completed')
+    fireEvent.click(screen.getByRole('button', { name: '刷新产物' }))
+    await waitFor(() => expect((screen.getByTestId('delivery-launch-button') as HTMLButtonElement).disabled).toBe(false))
+    await act(async () => resolveOld({ ok: true, data: { files: [], launch: { declared: false, parse_ok: false }, can_launch: false } }))
+    expect(screen.queryByTestId('delivery-launch-hint')).toBeNull()
+    expect((screen.getByTestId('delivery-launch-button') as HTMLButtonElement).disabled).toBe(false)
+  })
   beforeEach(() => {
     ;(window as unknown as { electronAPI: unknown }).electronAPI = undefined
   })

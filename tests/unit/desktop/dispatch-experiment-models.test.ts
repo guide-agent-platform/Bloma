@@ -15,6 +15,7 @@ import { withAbort } from '../../../main/agent/loop/agent-loop'
 import { reportModelExperiment } from '../../../main/desktop/dispatch-experiment-report'
 import { spawnSync } from 'node:child_process'
 import { restorePromaHome } from '../../support/proma-home-guard'
+import { runQuickProductionReview, ensureQuickProductionReview } from '../../../main/desktop/quick-production-review'
 import { evaluateExperiment, installExperimentEvaluator } from '../../../main/desktop/dispatch-experiment-evaluator'
 import { finishExperiment, readExperimentEvents } from '../../../main/desktop/dispatch-experiment-records'
 import { aggregateModelExperiments } from '../../../main/desktop/dispatch-experiment-aggregate'
@@ -375,6 +376,109 @@ describe('pinned roles and experiment conditions', () => {
 })
 
 describe('actual loop routing with fake SDK responses', () => {
+  it('bounds concrete V repair feedback without resetting the experiment or erasing failed reviews', async () => {
+    const config = running(); config.production_protocol = 'v2'; config.condition_hash = experimentConditionHash(config); writeExperiment(config)
+    let reviews = 0, repairs = 0, stops = 0
+    const input = { projectId: 'p', sessionId: 'parent', requestId: 'review', currentPhase: 'desktop-implement', task: '', query: (async function* () { throw Error('unexpected model call') }) as SDKQuery,
+      env: {}, maxTokens: 2048, signal: new AbortController().signal, publish: () => {}, projectName: 'test', sandboxRoot: root, quickMode: true }
+    const controls = {
+      review: async () => { reviews++; return { verdict: 'fail' as const, checked_features: ['F-001'], evidence: ['actual finding'], findings: [{ feature_id: 'F-001', problem: '接口返回值未被界面正确读取' }] } },
+      repair: async (feedback: string) => { repairs++; expect(feedback).toContain('原负责人续接'); await ensureQuickProductionReview(input, controls) },
+      publish: () => {}, stop: () => { stops++ },
+    }
+    expect(await ensureQuickProductionReview(input, controls)).toBe(false)
+    expect({ reviews, repairs, stops }).toEqual({ reviews: 3, repairs: 2, stops: 1 })
+    const events = readExperimentEvents(readExperiment('p')!).events
+    expect(events.filter(event => event.event === 'quick_verifier_repair')).toHaveLength(2)
+    expect(events.filter(event => event.event === 'run_finished')).toHaveLength(1)
+    expect(reportModelExperiment('p').product_quality).toBeNull()
+  })
+  it('builds the executor system from its feature assignment while retaining shared constraints', async () => {
+    save(join(home, 'agent-workspaces/default-software-builder/documents/p/prd.json'), JSON.stringify({ project_id: 'p', name: 'test',
+      requirements: [{ id: 'F-001', description: 'ASSIGNED_FULL_BEHAVIOR', behavior_assertions: ['MUST_KEEP_BOUNDARY'] }, { id: 'F-002', description: 'OTHER_ROLE_ONLY_BEHAVIOR' }],
+      acceptance: {}, constraints: ['SHARED_OFFLINE_CONSTRAINT'], assumptions: [], out_of_scope: [] }))
+    const assignment = { ...task('scoped'), feature_ids: ['F-001'] }; let calls = 0, checked = false
+    const query: SDKQuery = async function* (_prompt, options) {
+      if (options.sessionId === 'parent') {
+        if (++calls === 1) yield toolMessage('plan', 'experiment_plan', { tasks: [assignment] })
+        else if (calls === 2) yield toolMessage('delegate', 'delegate_agent', { task_ids: ['scoped'] })
+        else if (calls === 3) yield toolMessage('wait', 'wait_for_delegations', { timeout_ms: 2000 })
+        else yield text()
+      } else {
+        const system = String(options.messages?.[0]?.content ?? '')
+        expect(system).toContain('ASSIGNED_FULL_BEHAVIOR'); expect(system).toContain('MUST_KEEP_BOUNDARY')
+        expect(system).toContain('SHARED_OFFLINE_CONSTRAINT'); expect(system).not.toContain('OTHER_ROLE_ONLY_BEHAVIOR')
+        expect(system).not.toContain('FULL_UNSCOPED_SYSTEM'); checked = true; yield text()
+      }
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+    await run(query, { requirementsDigest: 'FULL_UNSCOPED_SYSTEM' })
+    expect(checked).toBe(true)
+  })
+  it('hands off registered text once, exposes live status, and resumes with only incremental feedback', async () => {
+    const item = { ...task('only'), instruction: 'UNIQUE_REGISTERED_TASK_239' }
+    let parentCalls = 0, childCalls = 0, observedStatus = false, observedIncrement = false
+    let delegationId = ''
+    const query: SDKQuery = async function* (_prompt, options) {
+      if (options.sessionId === 'parent') {
+        parentCalls++
+        if (parentCalls === 1) yield toolMessage('plan', 'experiment_plan', { tasks: [item] })
+        else if (parentCalls === 2) yield toolMessage('dispatch', 'delegate_agent', { task_ids: ['only'], task: item.instruction })
+        else if (parentCalls === 3 || parentCalls === 6) yield toolMessage(`wait-${parentCalls}`, 'wait_for_delegations', { timeout_ms: 2000 })
+        else if (parentCalls === 4) {
+          delegationId = Object.values(readExperiment('p')!.workers)[0].delegation_id
+          yield toolMessage('status', 'experiment_status', {})
+        } else if (parentCalls === 5) {
+          const transcript = JSON.stringify(options.messages)
+          observedStatus = transcript.includes('can_continue') && transcript.includes('loop_status')
+          yield toolMessage('resume', 'continue_delegation', { delegation_id: delegationId, feedback: '只核对新增接口事实' })
+        } else yield text()
+      } else {
+        childCalls++
+        if (childCalls === 1) {
+          expect(JSON.stringify(options.messages).split(item.instruction)).toHaveLength(2)
+          yield toolMessage('write-once', 'write_file', { path: 'only.py', content: '# implemented' })
+        } else if (childCalls === 3) {
+          const messages = options.messages as Array<{ role: string; content: unknown }>
+          const latest = JSON.stringify(messages.filter(row => row.role === 'user').at(-1))
+          expect(latest).toContain('只核对新增接口事实'); expect(latest).not.toContain(item.instruction)
+          observedIncrement = true; yield text()
+        } else yield text()
+      }
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+    await run(query)
+    expect(observedStatus).toBe(true); expect(observedIncrement).toBe(true)
+    expect(readFileSync(join(root, 'only.py'), 'utf8')).toContain('implemented')
+  })
+
+  it.each([true, false])('v2 invokes the pinned V and requires real reads before accepting its green claim (%s)', async readEvidence => {
+    const config = running(); config.production_protocol = 'v2'; config.condition_hash = experimentConditionHash(config); writeExperiment(config)
+    save(join(home, 'agent-workspaces/default-software-builder/documents/p/prd.json'), JSON.stringify({ project_id: 'p', name: 'test', requirements: [{ id: 'F-001', description: '离线保存' }], acceptance: {}, constraints: [], assumptions: [], out_of_scope: [] }))
+    save(join(root, '00_VERIFY/core-verification.json'), '{"status":"passed"}')
+    let calls = 0
+    const query: SDKQuery = async function* (_prompt, options) {
+      expect(options.env.ANTHROPIC_MODEL).toBe('mv')
+      expect(options.accounting?.role).toBe('experiment_verifier')
+      calls++
+      if (readEvidence && calls === 1) yield toolMessage('scope', 'read_production_context', { topic: 'features' })
+      else if (readEvidence && calls === 2) yield toolMessage('host-report', 'read_file', { path: '00_VERIFY/core-verification.json' })
+      else if (readEvidence && calls === 3) yield toolMessage('source', 'read_file', { path: 'placeholder.py' })
+      else yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: JSON.stringify({ verdict: 'pass', checked_features: ['F-001'], evidence: ['已读宿主报告与源码'], findings: [] }) }] } }
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+    const result = await runQuickProductionReview({ projectId: 'p', sessionId: 'parent', requestId: 'review', currentPhase: 'desktop-implement', task: '', query,
+      env: {}, maxTokens: 2048, signal: new AbortController().signal, publish: () => {}, projectName: 'test', sandboxRoot: root, quickMode: true })
+    expect(result.verdict).toBe(readEvidence ? 'pass' : 'unverified')
+    const report = reportModelExperiment('p')
+    expect(report.model_requests_by_role.verifier.requests).toBe(readEvidence ? 4 : 1)
+    expect(report.observed_models?.verifier?.model).toBe('mv')
+    expect(report.product_quality).toBeNull()
+    const sessionIndex = JSON.parse(readFileSync(join(home, 'bloma-agent-sessions.json'), 'utf8'))
+    const reviewSession = sessionIndex.sessions.find((item: any) => item.source_delegation_id?.startsWith('quick-review-'))
+    expect(reviewSession).toMatchObject({ parent_session_id: 'parent', status: 'completed' })
+    expect(readFileSync(join(home, 'agent-sessions/parent.jsonl'), 'utf8')).not.toContain('"verdict"')
+  })
   it('executes a 41-step child under E64 while keeping the dispatcher at D40', async () => {
     const initial = running()
     initial.limits = { ...DEFAULT_EXPERIMENT_LIMITS, dispatcher_turns: 40, executor_turns: 64 }

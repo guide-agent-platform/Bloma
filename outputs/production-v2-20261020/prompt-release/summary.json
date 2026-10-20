@@ -1,0 +1,37 @@
+{
+  "scope": "offline prompt and requirement-preservation inspection; not model performance or quality",
+  "project_id": "42487b23-f6c0-47e5-b46b-f607b105ae7b",
+  "features": [
+    "F-001",
+    "F-002",
+    "F-003",
+    "F-004",
+    "F-005",
+    "F-006"
+  ],
+  "structured_requirements_characters": 5552,
+  "dispatcher_system_characters": 11589,
+  "executor_system_characters": 8158,
+  "single_feature_example_characters": 9610,
+  "inline_single_feature_characters": 4563,
+  "all_features_present": true,
+  "baseline": {
+    "dispatcher": {
+      "characters": 24097,
+      "observed_system_sha256": [
+        "d227d14caa793298fa7516a3dde07b9efb9e5e6501e2d05e38362ef9107890b0"
+      ],
+      "reconstructed_system_sha256": "d227d14caa793298fa7516a3dde07b9efb9e5e6501e2d05e38362ef9107890b0",
+      "all_observed_systems_match": true
+    },
+    "executor": {
+      "characters": 18475,
+      "observed_system_sha256": [
+        "1439e288867837e6d61810a42c1009d0e544626fc7ab8ad56514d8fc17663e0f"
+      ],
+      "reconstructed_system_sha256": "1439e288867837e6d61810a42c1009d0e544626fc7ab8ad56514d8fc17663e0f",
+      "all_observed_systems_match": true
+    }
+  },
+  "model_calls": 0
+}

@@ -50,12 +50,15 @@ function snapshot(root: string): Map<string, File> {
 }
 export async function auditScriptSourceWrites(root: string, scopes: string[] | undefined, protectedPaths: string[],
   action: () => Promise<ToolOutcome>): Promise<ToolOutcome> {
-  const before = snapshot(root), result = await action(), after = snapshot(root)
+  const before = snapshot(root)
+  let result: ToolOutcome, failure: unknown, threw = false
+  try { result = await action() } catch (error) { threw = true; failure = error; result = { isError: true, output: '执行异常，源文件修改仍须接受越界审计。' } }
+  const after = snapshot(root)
   const protectedSet = new Set(protectedPaths.map(p => p.toLowerCase()))
   const permitted = (path: string) => !protectedSet.has(path.toLowerCase()) && (scopes === undefined || scopes.some(s =>
     path.toLowerCase() === s.toLowerCase() || s.endsWith('/') && path.toLowerCase().startsWith(s.toLowerCase())))
   const refused = [...new Set([...before.keys(), ...after.keys()])].filter(p => before.get(p)?.hash !== after.get(p)?.hash && !permitted(p))
-  if (!refused.length) return result
+  if (!refused.length) { if (threw) throw failure; return result }
   for (const p of refused) {
     const full = resolve(root, p), rel = relative(resolve(root), full)
     if (rel.startsWith('..') || resolve(full) === resolve(root)) throw new Error('EXPERIMENT_SOURCE_ROLLBACK_OUTSIDE_ROOT')

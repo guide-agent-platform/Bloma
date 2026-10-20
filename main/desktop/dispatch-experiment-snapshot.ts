@@ -74,7 +74,7 @@ export function freezeExperiment(home: string, projectId: string, destination: s
   return manifest
 }
 export function restoreExperiment(snapshot: string, home: string, policy: ExperimentPolicy, runId: string,
-  options: { models?: ExperimentModels; limits?: ExperimentLimits; settings?: ExperimentSettings; evaluator?: string; sample?: DispatchExperiment['sample'] } = {}): DispatchExperiment {
+  options: { models?: ExperimentModels; limits?: ExperimentLimits; settings?: ExperimentSettings; evaluator?: string; sample?: DispatchExperiment['sample']; production_protocol?: 'v2' } = {}): DispatchExperiment {
   assertExperimentId(runId)
   if (!(EXPERIMENT_POLICIES as readonly string[]).includes(policy) || existsSync(home) || inside(snapshot, home) || inside(home, snapshot)) throw new Error('EXPERIMENT_RESTORE_TARGET_NOT_FRESH')
   const manifest = JSON.parse(readFileSync(join(snapshot, 'manifest.json'), 'utf8')) as FrozenManifest

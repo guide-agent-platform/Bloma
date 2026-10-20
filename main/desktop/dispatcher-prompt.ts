@@ -11,8 +11,10 @@
 import type { PhaseNode } from './dispatcher-phases'
 import { PHASE_ADVANCE_KEYWORD } from './dispatcher-gate'
 import { userFacingOutputContract } from '../agent/prompting/user-facing-output'
-import { CORE_VERIFICATION_BRIEF } from './core-verification'
 import { componentQuickReference } from './component-library'
+import { productionGuide, PRODUCTION_VERIFICATION_BRIEF } from './production-guide'
+import type { DesktopExecutionLimits } from './execution-limits'
+import type { DelegationRunRole } from '../../shared/delegation-run-context'
 
 /** 任务书模板渲染结果：unresolved 收集未匹配占位符（诊断/测试断言用）。 */
 export interface RenderedTemplate {
@@ -38,6 +40,7 @@ export function renderTaskTemplate(template: string, vars: Record<string, string
 
 /** 构建器上下文：模板变量 + 阶段表整体信息（进度条/序列感知）。 */
 export interface DispatcherPromptContext {
+  executionLimits?: DesktopExecutionLimits
   /** 项目名（模板 {{project_name}} 与产物占位符共用）。 */
   projectName: string
   /** 项目沙箱产物根提示（相对根说明，如「沙箱根=项目目录」；进提示词环境段）。 */
@@ -84,7 +87,9 @@ export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherProm
     shape_verify_brief: ctx.shapeVerifyBrief ?? '',
   })
   const sections: string[] = []
-  if (node.id === 'desktop-implement' || node.id === 'desktop-verify') sections.push(CORE_VERIFICATION_BRIEF)
+  if (node.id === 'desktop-implement' || node.id === 'desktop-verify') {
+    sections.push(PRODUCTION_VERIFICATION_BRIEF, productionGuide('dispatcher', ctx.executionLimits))
+  }
 
   // 1. 角色与使命头
   sections.push(
@@ -99,8 +104,8 @@ export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherProm
   if (ctx.requirementsDigest) {
     sections.push(`【项目需求（唯一真相源，不得改写）】\n${ctx.requirementsDigest}`)
   }
-  if (ctx.uxSketchPath) sections.push(confirmedSketchInstruction(ctx.uxSketchPath))
-  if (ctx.uxDesignPath) sections.push(`【已确认交互设计】先 read_file ${ctx.uxDesignPath}，按页面、动作、状态与F/W/AC关联实现；非界面职责也须落实。原始功能必须完整，enhancements中明确列出的附加能力可实现并单独验证，不得用新增能力替代原需求。不得改写确认文件。`)
+  if (ctx.uxSketchPath) sections.push(confirmedSketchInstruction(ctx.uxSketchPath, true))
+  if (ctx.uxDesignPath) sections.push(`【已确认交互设计】${ctx.uxDesignPath}为权威交互记录。按F/W/AC分派相关行为；界面实现者先读，其他职责按接口需要查询。附加能力仅采用enhancements，不得改写确认文件或替代原需求。`)
 
   // 1c. 上一轮已验证结论（刀2 checkpoint：同阶段重跑防重验——任务书之前注入，结论优先于任务）
   if (ctx.verifiedConclusion) {
@@ -152,7 +157,7 @@ export function buildDispatcherSystemPrompt(node: PhaseNode, ctx: DispatcherProm
  */
 export function buildDesktopChildBaseSystem(
   node: PhaseNode,
-  ctx: { projectName: string; requirementsDigest?: string; quickMode?: boolean; uxSketchPath?: string; uxDesignPath?: string; shapeBrief?: string; shapeVerifyBrief?: string },
+  ctx: { projectName: string; requirementsDigest?: string; quickMode?: boolean; uxSketchPath?: string; uxDesignPath?: string; shapeBrief?: string; shapeVerifyBrief?: string; executionLimits?: DesktopExecutionLimits; role?: DelegationRunRole },
 ): string {
   const useQuickBook = Boolean(ctx.quickMode && node.quickTaskTemplate)
   const constraints = useQuickBook ? (node.quickConstraints ?? node.constraints) : node.constraints
@@ -161,12 +166,15 @@ export function buildDesktopChildBaseSystem(
     // 刀4（2026-10-02）：子会话产出经委派摘要回流调度员→聊天流，英文长报告会原样
     // 灌进用户视野——汇报语言纪律在基底 system 收口（防英文报告回流摘要）。
     '【汇报纪律】完成摘要与一切面向用户的文本一律使用中文，简明扼要（要点式，先结论后细节索引）；分析细节写入产物文件，不在摘要里展开。',
-    '【实现与验收纪律】Api 返回值与界面读取路径必须一致：若返回 {ok,data}，先检查 ok 并读取 data；不得把缺失 records/summary 默认为空而隐藏协议错误。防重复提交不等于禁止用户保存两条内容相同的记录，未在 PRD 确认的业务限制不得添加。本地记录若用 JSON，复用 record_store.py 的 JsonRecordStore：update 在副本上修改，落盘成功才提交内存；损坏或无法读取的文件必须报告并禁止覆盖，不能静默当空表。使用 required_keys/validator 校验业务字段；若 PRD 选用 SQLite，则采用事务实现同样的失败原子性，不改技术选型。自测走独立数据目录；逻辑通过不能写成按钮流程通过，GUI 验收至少覆盖一次实际输入→点击→界面与持久化差分（可写隔离 test_ui.py，用 run_project_script 启动 --drive-port 后真实操作 /eval、/call），未跑则在 DELIVERY 明确业务交互未验。',
+    ...(!ctx.role || ctx.role === 'implement' || ctx.role === 'custom' ? ['【实现与验收纪律】Api 返回值与界面读取路径必须一致：若返回 {ok,data}，先检查 ok 并读取 data；不得把缺失 records/summary 默认为空而隐藏协议错误。防重复提交不等于禁止用户保存两条内容相同的记录，未在 PRD 确认的业务限制不得添加。本地记录若用 JSON，复用 record_store.py 的 JsonRecordStore：update 在副本上修改，落盘成功才提交内存；损坏或无法读取的文件必须报告并禁止覆盖，不能静默当空表。使用 required_keys/validator 校验业务字段；若 PRD 选用 SQLite，则采用事务实现同样的失败原子性，不改技术选型。自测走独立数据目录；逻辑通过不能写成按钮流程通过，GUI 验收至少覆盖一次实际输入→点击→界面与持久化差分（可写隔离 test_ui.py，用 run_project_script 启动 --drive-port 后真实操作 /eval、/call），未跑则在 DELIVERY 明确业务交互未验。'] : ['【只读职责】核对职责相关需求、实现与证据，报告发现和未验项；不承担实现任务，不写业务源码。']),
     node.outputPath
       ? `本阶段产物目录：${node.outputPath}/（相对项目根目录）。`
       : '本阶段产物写入项目根目录（相对路径）。',
   ]
-  if (node.id === 'desktop-implement' || node.id === 'desktop-verify') parts.push(CORE_VERIFICATION_BRIEF)
+  if (node.id === 'desktop-implement' || node.id === 'desktop-verify') {
+    parts.push(PRODUCTION_VERIFICATION_BRIEF)
+    if (!ctx.role || ctx.role === 'implement' || ctx.role === 'custom') parts.push(productionGuide('executor', ctx.executionLimits))
+  }
   if (node.id === 'desktop-arch') parts.push(architectureComponentFacts())
   if (node.id === 'desktop-scaffold') parts.push('【工程契约前置登记】当需求含业务模型版本1时，在contract.json顶层增加prd_fingerprint，原样使用需求范围版本；scenarios.covers须登记全部已确认F编号（不限P0）。此时可保留驱动骨架待实现的断言，不能自报已通过测试。')
   if (constraints.length > 0) {
@@ -176,14 +184,14 @@ export function buildDesktopChildBaseSystem(
     parts.push(`【项目需求（原始功能必须全部保留，不得削减或改写）】\n${ctx.requirementsDigest}\n合理附加能力只采用已确认交互设计中明确列出的enhancements；不得用新增能力替代原F/W/AC覆盖，未实现或未验证的增强须如实说明。`)
   }
   if (ctx.uxSketchPath) parts.push(confirmedSketchInstruction(ctx.uxSketchPath))
-  if (ctx.uxDesignPath) parts.push(`【已确认交互设计】先 read_file ${ctx.uxDesignPath}，按页面、动作、状态与F/W/AC关联实现；非界面职责也须落实。enhancements是本方案明确列出的附加能力，原始功能为交付底线，新增能力需要实现和真实验证，不用静态标注冒充已完成。不得改写确认文件。`)
+  if (ctx.uxDesignPath) parts.push(`【已确认交互设计】${ctx.uxDesignPath}为权威交互记录。承担界面职责时先读；其他职责按相关F/W/AC和接口需要查询。enhancements不能替代原始功能；不得改写确认文件或用静态标注冒充已验证。`)
   if ((node.id === 'desktop-scaffold' || node.id === 'desktop-implement') && ctx.shapeBrief) parts.push(ctx.shapeBrief)
   if (node.id === 'desktop-verify' && ctx.shapeVerifyBrief) parts.push(ctx.shapeVerifyBrief)
   return parts.join('\n\n')
 }
 
-function confirmedSketchInstruction(path: string): string {
-  return `【已确认界面】先 read_file ${path}，按其布局、字体层级、色彩、间距与交互方向实现并把此要求传给实现子会话。不要仅看组件库重新设计。已确认设计优先于骨架默认视觉：可重排 ui/index.html、定制组件和 CSS，把设计值落实到项目 tokens.css；组件库提供行为示例，不替代设计。保留 App.call 桥、App.show 与 .w-banner 状态反馈、驱动/纠错脚本及稳定定位标记。草图示意数据与平台点选注入脚本不得复制为业务实现；静态草图不能充当已执行的交互证据。`
+function confirmedSketchInstruction(path: string, dispatcher = false): string {
+  return `【已确认界面】${dispatcher ? '交给界面实现者' : '承担界面职责时'}先 read_file ${path}，按布局、字体、色彩、间距及交互实现。不要仅看组件库重新设计；确认设计优先，设计值落实到tokens.css。保留App.call、App.show、.w-banner、驱动/纠错协议与定位标记。示意数据及点选脚本不是业务实现，静态草图不是交互执行证据。非界面职责按相关交互接口查询，无需通读视觉源码。`
 }
 
 function architectureComponentFacts(): string {

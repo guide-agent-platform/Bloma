@@ -42,7 +42,9 @@ import { findProject, updateProject } from '../../../main/project/project-servic
 import { isMvpConfirmPending, resetMvpConfirmForTests } from '../../../main/desktop/mvp-confirm'
 import { finishCorrectionSession, hasActiveCorrectionSession } from '../../../main/desktop/correction-session'
 import { verificationFingerprint } from '../../../main/desktop/verification-fingerprint'
-import { writeExperiment, readExperiment, EXPERIMENT_SWITCH } from '../../../main/desktop/dispatch-experiment'
+import { writeExperiment, readExperiment, EXPERIMENT_SWITCH, experimentConditionHash, type DispatchExperiment } from '../../../main/desktop/dispatch-experiment'
+import * as productionReview from '../../../main/desktop/quick-production-review'
+import * as dispatcherLoop from '../../../main/desktop/dispatcher-loop'
 import {
   DESKTOP_CONFIRM_OPTION_PREFIX,
   MAX_AUTO_ADVANCE_CHAIN,
@@ -109,6 +111,35 @@ function baseRecord() {
 let record: ReturnType<typeof baseRecord>
 
 describe('experimental native preparation pause', () => {
+  it.each(['pass', 'fail', 'unverified'] as const)('v2 quick reaches independent V after native gates and only delivers on pass (%s)', async verdict => {
+    const oldHome = process.env.PROMA_HOME, oldSwitch = process.env[EXPERIMENT_SWITCH]
+    const home = join(sandboxRoot, 'v2-home'); mkdirSync(home); writeFileSync(join(home, 'dispatch-experiment-home.json'), '{"version":1}')
+    process.env.PROMA_HOME = home; process.env[EXPERIMENT_SWITCH] = '1'
+    record.mode = 'quick'; record.desktop_phase = 'desktop-implement'
+    const input = routeInput()
+    const config: DispatchExperiment = { version: 1, project_id: 'p1', mode: 'quick', experiment_id: 'v2', run_id: 'v2-run', state: 'running',
+      production_protocol: 'v2', policy: 'standalone', planning: 'autonomous', tasks: [], workers: {}, snapshot_id: 's', input_hash: 'a'.repeat(64), parent_session_id: input.sessionId,
+      models: { dispatcher: { channel_id: 'd', model_id: 'd' }, executor: { channel_id: 'e', model_id: 'e' }, verifier: { channel_id: 'v', model_id: 'v' } } }
+    config.condition_hash = experimentConditionHash(config); writeExperiment(config)
+    const loop = vi.spyOn(dispatcherLoop, 'runDesktopDispatcherLoop').mockResolvedValue({ status: 'completed', advance: { decision: 'advance', target: 'desktop-verify', discardedObservations: [] } })
+    const order: string[] = []
+    const review = vi.spyOn(productionReview, 'runQuickProductionReview').mockImplementation(async () => {
+      order.push('V'); expect(record.desktop_phase).not.toBe('delivered')
+      return { verdict, checked_features: ['F-001'], evidence: ['test review boundary'], findings: [] }
+    })
+    try {
+      const { deps } = collectorDeps({ coreVerification: async () => { order.push('core'); return { status: 'passed', summary: '', checked_at: '', missing: [], evidence: [] } },
+        securityScan: () => { order.push('security'); return { passed: true, blocking: 0, scanned: 1, listing: '' } },
+        launchSmoke: async () => { order.push('launch'); return { passed: true, detail: 'test smoke' } } })
+      await handleDesktopDispatchMessage(input, deps)
+      expect(order).toEqual(['core', 'security', 'launch', 'V'])
+      expect(record.desktop_phase === 'delivered').toBe(verdict === 'pass')
+    } finally {
+      loop.mockRestore(); review.mockRestore()
+      if (oldHome === undefined) delete process.env.PROMA_HOME; else process.env.PROMA_HOME = oldHome
+      if (oldSwitch === undefined) delete process.env[EXPERIMENT_SWITCH]; else process.env[EXPERIMENT_SWITCH] = oldSwitch
+    }
+  })
   it.each(['quick', 'longterm'] as const)('%s reaches Implement pause before any implementation query', async mode => {
     const previousHome = process.env.PROMA_HOME, previousSwitch = process.env[EXPERIMENT_SWITCH]
     const home = join(sandboxRoot, 'isolated-home'); mkdirSync(home)

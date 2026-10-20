@@ -324,6 +324,7 @@ export const DISPATCHER_BASE_TOOLS: ReadonlySet<string> = new Set([
   'web_fetch',
   'web_research',
   'inspect_project_resources',
+  'read_production_context',
   'guide_decide',
   'compact_context',
 ])

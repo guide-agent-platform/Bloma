@@ -14,7 +14,6 @@
  */
 
 import { MINIMAL_CONTRACT_EXAMPLE } from './contract-schema'
-import { componentQuickReference } from './component-library'
 
 // =========================================================================
 // Schema
@@ -217,10 +216,10 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '3. 状态反馈唯一呈现位 App.show（UX 契约状态机）：执行中 App.show("running","正在保存…") → 终态：成功给数量 App.show("success","已保存 3 条记录")；部分成功分别计数 App.show("partial","导入完成：成功 24，跳过 2")；失败带下一步 App.show("failed","保存失败：文件被占用","已关闭占用程序？点重试；原数据未修改")；每个耗时操作必须 running→终态；\n' +
       '4. 耗时>1s 的操作不阻塞 UI：Python 侧线程完成后 evaluate_js 推送（照抄 app.py 内 push_update 注释样例的模式：`webview.windows[0].evaluate_js(f"window.on_update({json.dumps(payload, ensure_ascii=False)})")`，页面定义 window.on_update 接收）——禁止在 Api 桥方法里同步长计算；\n' +
       '5. 防重复提交与失败不丢输入：执行中禁用触发按钮；输入行失败恢复原值（index.html onSend 即标准形态：失败分支 input.value = text）；\n' +
-      '6. 真实红绿反馈：子会话可用 run_project_script 当场运行项目根内 .py 自测脚本（每次≤90s、至多 12 次，任务书里直接要求它写无头自测——import app 测 Logic 层——并附真实红绿结果）；收口前用 run_project_driver 跑一次契约驱动，失败清单交同一委派线修复后复跑；不要因「无法执行」阻塞、编造或向用户索要本机运行；驱动断言与实现静态自洽（断言先行、真实调用被测代码、禁止平凡通过）——验收语义在 PRD 确认时已冻结（背板 acceptance/F-id），实现与测试只能引用不得重定义「什么算对」；\n' +
+      '6. 真实红绿反馈：run_project_script执行逻辑与GUI业务验证，实际次数及超时以宿主资源和工具反馈为准；收口前run_project_driver跑契约驱动，失败清单交原实现者局部修复。断言与实现须静态自洽、真实调用业务代码，引用实际结果，不能编造执行或将环境错误当业务失败；验收语义按已确认PRD冻结，实现与测试都不能降低期望。\n' +
       '7. 产出 DELIVERY.md 到项目根（不是 00_SCAFFOLD/ 内——门禁按项目根检查）。面向不懂编程的用户，按四段写：①本版本已确认能做——每条注明验证方式（「已实际运行验证」/「已用测试脚本验证」），禁止把没验证的写成能做；②目前限制——做不到的、已知小问题、没来得及验证的，如实列出；③给你的建议——怎么开始用、先试什么、遇到问题怎么办；④你的数据——数据存在电脑哪个文件夹/哪个文件、怎么备份（复制哪个文件就行）、换新电脑会不会丢（怎么带走）。运行方式与依赖安装并入①或单独一节（写给会双击运行的人，不是写给程序员）；契约 driver.command 相对项目根解析；\n' +
       '8. 产出 LAUNCH.json 到项目根（机器可读启动声明，宿主启动冒烟与交付面板都用它）：{"schema_version":1,"command":["python","app.py"],"window_title":"<与 webview.create_window 第一参数完全一致的窗口标题>"}——装了 .venv 的项目 command 用 [".venv\\Scripts\\python.exe","app.py"]；GUI 程序 window_title 必填（平台联合判定冒烟门按标题找窗截图——webview 宿主窗口实测兼容）；主程序入口纪律：保留 python app.py 正常启动形态，--self-check 与 --drive-port 模式不得删除或改名（平台冒烟/探索桥依赖），测试参数只允许控制自身行为不得改变正常启动路径；\n' +
-      `9. 第三方组件：子会话用 install_packages 声明制安装（项目内 .venv，requirements.txt 声明→装→import 回读；装后 LAUNCH command 用 .venv\\Scripts\\python.exe）。可用组件速查：\n${componentQuickReference().split('\n').slice(1).join('\n')}\n10. 体验纪律（UX 契约线，2026-10-06）：PRD「体验要求」（背板 ux，无则按通用九态：空态/待输入/校验中/执行中/成功/部分成功/失败/已取消/待配置）是已冻结的交付契约——①空态给引导不是空白（App.renderList 的 emptyTitle/emptyHint）；②反馈全走 App.show 状态条与行内提示，禁 alert()/confirm()/prompt() 弹窗当正常流反馈（模态弹窗阻塞 DOM 线程，会卡死驱动与用户流）；③样式忠实于已确认设计，可定制组件并更新项目 tokens；保留 .w-banner 与 App.show 状态反馈。\n11. 形状纪律（批9 2026-10-07）：产品形状已随 PRD 冻结——若实现中发现形状不成立（必备状态集/主循环与实际需求矛盾），停下输出显式变更声明（当前形状/拟切换/原因/影响四要素）等待确认，禁止静默切换模板或骨架方向。\n{{shape_brief}}`,
+      '9. 第三方组件按需查询inspect_project_resources，缺失时用install_packages声明→安装→import回读；专项协议读取read_production_context(topic=verification)。复用项目.venv并让LAUNCH使用真实解释器。\n10. 体验纪律：按确认UX实现，空态给引导，反馈走App.show及行内提示，保留.w-banner；禁alert/confirm/prompt作为正常交互，长任务不阻塞UI。\n11. 产品形状已冻结，发现不成立时报告当前/拟切换形状、原因与影响，等待确认，不静默切换。\n{{shape_brief}}',
     outputPath: '',
     constraints: [
       '每实现一个功能必须先有对应驱动断言（禁止无断言的实现）',
@@ -259,8 +258,8 @@ export const DESKTOP_PHASES: Record<DesktopPhaseId, PhaseNode> = {
       '2. 三层纪律：小工具可扩展 Logic；复杂业务按职责拆 core/、storage/ 等模块，app.py 保留 Logic 导入/门面（from app import Logic 可用）及现有启动/验证模式；业务模块不 import UI。Api 桥转调真实业务层，ui/ 只渲染与收集输入，经 window.App.call 调桥；架构说明与实际模块/持久化方案一致；\n' +
       '3. UI 按已确认设计实现：先 read 00_UX/confirmed.html（如有）与 ui/PATTERNS.md；布局、组件外观和 CSS 可按设计定制，颜色/间距/字阶由项目 tokens.css 统一管理并以 var(--*) 复用，骨架仅作行为示例；**禁 npm/CDN/外链字体/构建步骤——界面资产离线可用；已确认的联网业务按 PRD/产品形状实现**；\n' +
       '4. 状态反馈唯一呈现位 App.show（running→成功给数量/部分成功分别计数/失败带下一步）；耗时>1s 操作 Python 侧线程+evaluate_js 推送（照抄 app.py push_update 注释样例），禁止 Api 桥里同步长计算；执行中禁用触发按钮防重复提交；输入失败恢复原值（index.html onSend 即标准形态：失败分支 input.value = text）；\n' +
-      '5. 一次性委派 implement 子会话完成实现（依赖与解释器路径如实装配，不编造运行结果）：子会话有 run_project_script（真实运行项目根内 .py，每次≤90s、至多 12 次）——任务书里要求它写无头自测脚本（import app 测 Logic 层）并当场跑到绿、附真实红绿结果，不要只写不跑；子会话还有 install_packages（声明制 .venv 安装：requirements 声明→安装→import 回读；装后 LAUNCH command 用 .venv\\Scripts\\python.exe；venv 统一用 .venv 这一个名字，不要自建 .venv-probe 之类异名 venv——快照/安全扫描/交付清单靠标记识别，异名会漏）；\n' +
-      `6. 可用组件速查（声明安装，坑与降级详卡见 install_packages 工具）：\n${componentQuickReference().split('\n').slice(1).join('\n')}\n` +
+      '5. 按职责委派 implement 子会话完成实现，写清目标、接口、写入边界与验收引用；依赖和解释器如实核实。run_project_script真实执行逻辑自测及GUI业务链，次数与超时以宿主资源、工具描述和实时反馈为准；失败按证据修复。install_packages按requirements声明→安装→import核实；已有.venv优先复用，不另建异名环境。\n' +
+      '6. 可用环境与组件先用inspect_project_resources查询，需要专项验证说明时读取read_production_context(topic=verification)，不为无关能力安装或调研组件。\n' +
       '7. 产出 DELIVERY.md 到项目根（不是子目录内——门禁按项目根检查）。面向不懂编程的用户，按四段写：①本版本已确认能做——每条注明验证方式（自测结果如实引用，没验证的明说）；②目前限制——做不完/做不到的如实列出；③给你的建议——怎么开始用、先试什么；④你的数据——数据存在哪、怎么备份、换电脑会不会丢（怎么带走）。不要求 contract.json 与驱动断言；\n' +
       '8. 产出 LAUNCH.json 到项目根（平台交付前会真实启动一次验证，这是快速模式的验收门）：{"schema_version":1,"command":["python","app.py"],"window_title":"<与 webview.create_window 第一参数完全一致的窗口标题>"}——command 相对项目根；GUI 程序 window_title 必填（平台联合判定与截窗都靠标题找窗）；--self-check 与 --drive-port 模式不得删除或改名（平台依赖）；\n' +
       '9. 体验纪律（UX 契约线，2026-10-06）：PRD「体验要求」（无则按通用九态）是交付契约——①核心操作成功/失败反馈可见（App.show），空态给引导不是空白；②禁 alert()/confirm()/prompt() 弹窗当正常流反馈（模态弹窗会卡死驱动与用户流）；③长任务不阻塞 UI（Python 线程+evaluate_js 推送）；④按已确认设计统一视觉，允许定制组件、布局与项目 tokens；保留 .w-banner 与 App.show 状态反馈。\n10. 形状纪律（批9 2026-10-07）：产品形状已随 PRD 冻结——若实现中发现形状不成立，停下输出显式变更声明（当前形状/拟切换/原因/影响四要素）等待确认，禁止静默切换。\n{{shape_brief}}',

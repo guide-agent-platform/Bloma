@@ -362,7 +362,7 @@ async function runChildLoop(opts: {
     ? '\n\n【隔离工作模式】你在独立分支的工作树上实现（改动不直接进项目主目录）；本会话不提供预览/测试/安全验证工具——验证由父会话在合并后统一执行，请专注于实现与逻辑自检。'
     : ''
   const invoke = (): Promise<AgentLoopResult> => runAgentLoop({
-    system: `${buildChildSystemPrompt(parentCtx.system, role)}${isolationNote}`,
+    system: `${buildChildSystemPrompt(parentCtx.childSystemBuilder?.(role, record.childSessionId) ?? parentCtx.system, role)}${isolationNote}`,
     task: parentCtx.delegationTurnLimits?.[role] ? prompt + '\n\n【执行预算】本轮上限 ' + maxTurns + ' 轮，每轮为一次模型请求。沿用历史中的已读事实，避免重复通读；保留最后约 1/4 轮数用于真实验证与交付收口。未完成时明确列出未落盘/未验证项，不得声称工作已完成。' : prompt,
     historyTurns: opts.replayTurns,
     materials: parentCtx.materials,

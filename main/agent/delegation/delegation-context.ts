@@ -18,6 +18,8 @@ export interface DelegationParentContext {
   permissionMode: PromaPermissionMode
   temperature: number
   system: string
+  /** Domain-owned context selection at start/continue; generic delegation owns no domain rules. */
+  childSystemBuilder?: (role: DelegationRunRole, childSessionId: string) => string
   editFormat: 'diff' | 'whole'
   childToolsBuilder?: ChildToolsBuilder
   providerType?: string
