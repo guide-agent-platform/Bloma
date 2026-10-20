@@ -1291,7 +1291,7 @@ export interface Project {
   desktop_confirm_fingerprint?: string
   /** 桌面线人工暂停态（刀1，2026-10-02）：停止词命中或门禁修复轮耗尽时置位；
    *  继续词/普通用户消息出现即清除（人工出场即放行）。note 存原始停止语或拒因。 */
-  desktop_blocked?: { reason: 'user-stop' | 'gate-exhausted'; note?: string; at: string }
+  desktop_blocked?: { reason: 'user-stop' | 'gate-exhausted' | 'startup-interrupted'; note?: string; at: string }
   /** 桌面线阶段推进 checkpoint（刀2，2026-10-02）：门禁全绿待推进时写入（含阶段快照
    *  存证）；同阶段重跑时由续跑注入消费（勿重验已验门禁）——重验率遥测的数据面。 */
   desktop_checkpoint?: DesktopCheckpoint

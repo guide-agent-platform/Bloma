@@ -42,6 +42,24 @@ describe('startup reconcile (T1)', () => {
     return { projectId: project.project_id, sessionId }
   }
 
+  it('preserves interrupted Python desktop source and phase even with an older healthy snapshot', async () => {
+    const { projectId, sessionId } = setup()
+    const root = findProject(projectId).root_path
+    writeFileSync(join(root, 'app.py'), '# older desktop version')
+    await createSnapshot({ request_id: 'desktop-snapshot', project_id: projectId, kind: 'mvp', summary: 'older version', include_documents: false, health_status: 'healthy' })
+    writeFileSync(join(root, 'app.py'), '# current desktop work')
+    mkdirSync(join(root, 'data'), { recursive: true })
+    writeFileSync(join(root, 'data', 'records.json'), '[{"amount":42}]')
+    updateProject(projectId, { current_stage: 'generating_mvp', desktop_phase: 'desktop-implement' })
+    const outcomes = await reconcileInterruptedProjects()
+    expect(outcomes[0]).toMatchObject({ action: 'desktop_preserved', to_stage: 'blocked_for_user_decision' })
+    expect(findProject(projectId)).toMatchObject({ desktop_phase: 'desktop-implement', desktop_blocked: { reason: 'startup-interrupted' } })
+    expect(readFileSync(join(root, 'app.py'), 'utf8')).toBe('# current desktop work')
+    expect(readFileSync(join(root, 'data', 'records.json'), 'utf8')).toBe('[{"amount":42}]')
+    expect(readSessionText(sessionId)).toContain('没有自动回滚')
+    expect(await reconcileInterruptedProjects()).toEqual([])
+  })
+
   /** 写一份「完整 MVP 产物」：合法 HTML 文档 + 交互控件 + app.js 脚本逻辑。 */
   function writeCompleteArtifact(rootPath: string): void {
     mkdirSync(join(rootPath, 'src'), { recursive: true })

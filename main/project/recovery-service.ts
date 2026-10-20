@@ -58,7 +58,7 @@ export interface ReconcileOutcome {
   from_stage: WorkflowStage
   to_stage: WorkflowStage
   /** 恢复手段：磁盘产物直接认定 / 回滚健康快照后认定 */
-  action: 'disk_verified' | 'snapshot_restored'
+  action: 'disk_verified' | 'snapshot_restored' | 'desktop_preserved'
 }
 
 /** 按磁盘证据判定项目产物完整度（只读 root_path，不改任何状态）。 */
@@ -147,6 +147,20 @@ export async function reconcileInterruptedProjects(): Promise<ReconcileOutcome[]
 }
 
 async function reconcileInterruptedProject(project: Project): Promise<ReconcileOutcome> {
+  // Desktop work is resumable source, not an incomplete legacy HTML preview.
+  // Never replace it with an older snapshot merely because index.html is absent.
+  if ((project.desktop_phase && project.desktop_phase !== 'requirements')
+    || existsSync(join(project.root_path, 'app.py')) || existsSync(join(project.root_path, 'LAUNCH.json'))) {
+    const stage: WorkflowStage = 'blocked_for_user_decision'
+    updateProject(project.project_id, {
+      current_stage: stage,
+      desktop_phase: project.desktop_phase ?? 'desktop-implement',
+      desktop_blocked: { reason: 'startup-interrupted', at: new Date().toISOString() },
+      blocked_action: undefined,
+    })
+    persistReconcileMessage(project, stage, 'desktop_preserved', undefined)
+    return { project_id: project.project_id, from_stage: project.current_stage, to_stage: stage, action: 'desktop_preserved' }
+  }
   let evidence = evaluateDiskArtifact(project.root_path)
   let action: ReconcileOutcome['action'] = 'disk_verified'
   let restoredFrom: Snapshot | undefined
@@ -198,7 +212,9 @@ function persistReconcileMessage(
   if (action === 'snapshot_restored' && restoredFrom) {
     parts.push(`磁盘上的产物不完整，已回滚到最近一个健康快照（${restoredFrom.snapshot_id.slice(0, 8)}，${restoredFrom.created_at.slice(0, 19).replace('T', ' ')} 创建）。`)
   }
-  if (toStage === 'ready') {
+  if (action === 'desktop_preserved') {
+    parts.push('桌面项目的当前源码和使用数据已保留，没有自动回滚。制作停在原阶段，尚未取得新的验证结论；发送继续或修改意见后再恢复。')
+  } else if (toStage === 'ready') {
     parts.push('现在磁盘上的产物是完整的，项目已恢复为可用状态。')
     if (QUALITY_GATE_STAGES.has(project.current_stage)) {
       parts.push('注意：当时的测试与裁判审查未执行完毕，此处的「可用」仅表示产物完整，不是质量结论。')
