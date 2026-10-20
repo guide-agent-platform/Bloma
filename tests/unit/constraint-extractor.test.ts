@@ -52,6 +52,11 @@ function longSession(turns: number): AgentMessage[] {
   return messages
 }
 describe('T4-L1 extractConstraints 确定性提取', () => {
+  it('retains every constraint and complete long clauses', () => {
+    const clauses = ['必须离线', '不要登录', '禁止联网', '必须导出', '必须备份', '不得上传数据', '只能导出CSV']
+    const long = '必须' + '完整保留原始输入并检查数据之间的关系'.repeat(6)
+    expect(extractConstraints([...clauses, long].join(';'))).toEqual([...clauses, long])
+  })
   it('提取排除类与要求类约束短语', () => {
     expect(extractConstraints('做一个记账 app，不含登录，必须离线可用')).toEqual(['不含登录', '必须离线可用'])
     expect(extractConstraints('界面要克制，禁止联网，数据只能存本地')).toEqual(['禁止联网', '数据只能存本地'])
@@ -89,6 +94,14 @@ describe('T4-L2 全量扫描：首轮约束历轮可回', () => {
       turn('user', '帮我做个工具', 2),
     ])
     expect(scanSessionConstraints('session-assistant-only')).toEqual([])
+  })
+  it('uses origin for host control and keeps authentic supplementary user clauses', () => {
+    writeSession('origin-constraints', [
+      { ...turn('user', '目标：必须离线', 1), origin: 'user' },
+      turn('user', '补充说明：不得上传数据', 2),
+      { ...turn('user', '必须调用另一个工具', 3), origin: 'system' },
+    ])
+    expect(scanSessionConstraints('origin-constraints')).toEqual(['目标：必须离线', '补充说明：不得上传数据'])
   })
   it('平台合成 user 轮（修复任务卡/退行反馈）不参与约束提取', () => {
     writeSession('session-synthetic', [

@@ -89,9 +89,9 @@ describe('parseKeyTasks（形状级清洗）', () => {
     ])
     expect(out.map((t) => t.must_deliver)).toEqual([true, false, true])
   })
-  it('上限 4 条（LLM 超产截断）', () => {
+  it('retains all task declarations before scope validation', () => {
     const raw = [1, 2, 3, 4, 5, 6].map((n) => ({ task_id: `KT-0${n}`, label: `任务${n}`, feature_ids: ['F-001'] }))
-    expect(parseKeyTasks(raw)).toHaveLength(4)
+    expect(parseKeyTasks(raw)).toHaveLength(6)
   })
   it('非数组输入 → []', () => {
     expect(parseKeyTasks(undefined)).toEqual([])
@@ -136,10 +136,13 @@ describe('finalizeKeyTasks（白名单 + P0 补齐 + 重编号）', () => {
     )
     expect(out.map((t) => t.task_id)).toEqual(['KT-01', 'KT-02'])
   })
-  it('总量截 6（LLM 4 + P0 补齐 2 封顶，宁全勿缺但防滥用）', () => {
+  it('deduplicates repeated tasks and covers every P0 beyond six items', () => {
     const llm = [1, 2, 3, 4].map((n) => ({ task_id: '', label: `任务${n}`, feature_ids: ['F-001'], must_deliver: true }))
-    const p0 = ['F-001', 'F-002', 'F-003', 'F-004', 'F-005'].map((id) => req(id, `功能${id}`, 'P0'))
-    expect(finalizeKeyTasks(llm, p0)).toHaveLength(6)
+    const p0 = Array.from({ length: 9 }, (_, i) => req(`F-${String(i + 1).padStart(3, '0')}`, `功能${i}`, 'P0'))
+    const tasks = finalizeKeyTasks(llm, p0)
+    expect(tasks).toHaveLength(9)
+    expect(new Set(tasks.filter(task => task.must_deliver).flatMap(task => task.feature_ids))).toEqual(new Set(p0.map(item => item.id)))
+    expect(parseKeyTasks([{ label: '全部功能', feature_ids: p0.map(item => item.id) }])[0].feature_ids).toHaveLength(9)
   })
 })
 

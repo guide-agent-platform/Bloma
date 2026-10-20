@@ -30,6 +30,15 @@ const run = (code = 0, stdout = 'PASS actual input') => runCoreVerification({ pr
   spawn: async () => ({ code, stdout, stderr: '' }) })
 
 describe('shared core delivery', () => {
+  it('reads complete scenario evidence beyond the display excerpt and preserves late failure', async () => {
+    manifest()
+    const noise = 'diagnostic '.repeat(2000) + '\n'
+    expect((await run(0, noise + 'PASS actual input')).status).toBe('passed')
+    const failed = await run(0, 'PASS actual input\n' + noise + 'FAIL actual input: late assertion failed')
+    expect(failed.status).toBe('failed')
+    expect(failed.evidence[0].outcome).toBe('fail')
+    expect((await run(0, noise + 'SCENARIO|actual input|pass|all checked')).status).toBe('passed')
+  })
   it('diagnoses unsupported GUI scenario fields before running scripts', async () => {
     writeManifest({ command: ['python', 'core_check.py'], scenarios: [{ name: 'actual input', covers: ['F-001'], input: 'logic' }], gui_scenarios: [] })
     const spawn = vi.fn()

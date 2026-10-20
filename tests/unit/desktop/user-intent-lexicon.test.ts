@@ -6,8 +6,6 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
-  USER_CONTINUE_KEYWORDS,
-  USER_STOP_KEYWORDS,
   classifyUserDesktopIntent,
 } from '../../../main/desktop/user-intent-lexicon'
 
@@ -62,11 +60,12 @@ describe('英文词边界与大小写', () => {
   })
 })
 
-describe('词表互斥性（数据自洽）', () => {
-  it('停止词与继续词无交集', () => {
-    const stop = new Set(USER_STOP_KEYWORDS)
-    for (const kw of USER_CONTINUE_KEYWORDS) {
-      expect(stop.has(kw), `词「${kw}」不应同时出现在两张词表`).toBe(false)
+describe('host commands versus product prose', () => {
+  it('does not pause for product controls, quoted commands or negated stop requests', () => {
+    for (const text of ['增加取消按钮', '任务执行时显示停止按钮', '请把停止按钮改红', '按钮文字叫“取消”', '不要停止', 'do not stop', 'add a cancel button']) {
+      expect(classifyUserDesktopIntent(text), text).toBe('none')
     }
+    expect(classifyUserDesktopIntent('不要停止，继续执行')).toBe('continue')
+    expect(classifyUserDesktopIntent('请停止当前任务')).toBe('stop')
   })
 })

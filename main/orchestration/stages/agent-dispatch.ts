@@ -177,6 +177,7 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
 
     appendAgentMessage(input.session_id, {
       role: 'user',
+      origin: input.metadata?.source === 'system_resume' ? 'system' : 'user',
       ...(input.client_message_id ? { client_message_id: input.client_message_id } : {}),
       ...(input.attachment_refs?.length ? { attachments: sessionMaterials(input.project_id, input.session_id).attachments.filter(info => input.attachment_refs!.some(ref => ref.attachment_id === info.attachment_id)) } : {}),
       // clipboard-paste P1（2026-08-29）：带图消息落 [text, ...image 短引用] 块数组（JSONL 无 base64）

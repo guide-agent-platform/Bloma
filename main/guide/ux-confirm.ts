@@ -16,7 +16,7 @@ import { appendSessionMessage } from '../platform/sessions/session-tree'
 import { enterDesktopLine, DESKTOP_LINE_TEMPLATE_TYPES } from '../desktop/desktop-route'
 import { findProject, updateProject } from '../project/project-service'
 import { freezeConfirmedUxSketch, stageUxSketch, type UxSketchGeneration } from './ux-sketch'
-import { USER_STOP_KEYWORDS } from '../desktop/user-intent-lexicon'
+import { classifyUserDesktopIntent } from '../desktop/user-intent-lexicon'
 import type { PrdBackplane } from '../model/prd-backplane'
 import { prdScopeFingerprint } from '../project/requirement-contract'
 import { prdStructureIssues } from '../model/requirements-model'
@@ -24,6 +24,7 @@ import { buildFallbackUxDesign, renderUxDesignSummary, uxDesignFingerprint, type
 import { writeTextFileAtomic } from '../../storage/json-store'
 import { join } from 'node:path'
 import { resolveChannelEnv } from '../platform/llm/runtime-fallback'
+import { resolveGenerationMaxTokens } from '../platform/llm/model-resolution'
 import { generateUxVisualDesign, type UxVisualEvidence } from './ux-visual-pipeline'
 
 /** UX 门回门意图词（2026-10-04 真机踩坑修复：「按草图开工」是 dismiss 提示语的原文，
@@ -41,7 +42,7 @@ export function isUxResumeIntent(text: string): boolean {
 
 function isNegativeUxIntent(text: string): boolean {
   const instruction = text.replace(/不需要调整|(?:不用|无需|不必)(?:再)?(?:改|调整|重做)/g, '')
-  return USER_STOP_KEYWORDS.some(word => instruction.includes(word)) || /(?:不要|不许|不想|不能|暂不|先不|别|勿|不)[^。！？!?]{0,16}(?:开工|确认|继续|开始|交付|推进|草图)|继续(?:改|调整)|再(?:改|调整|画)/.test(instruction)
+  return classifyUserDesktopIntent(instruction) === 'stop' || /(?:不要|不许|不想|不能|暂不|先不|别|勿|不)[^。！？!?]{0,16}(?:开工|确认|继续|开始|交付|推进|草图)|继续(?:改|调整)|再(?:改|调整|画)/.test(instruction)
 }
 
 type GuideEventPublisher = (event: AgentEvent) => void
@@ -150,7 +151,7 @@ export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: str
       session_id: pending.session_id,
       query: pending.query,
       env: pending.env,
-      maxTokens: 640000,
+      maxTokens: resolveGenerationMaxTokens(resolution.channel ?? {}),
       backplane: current,
       positioning: pending.positioning,
       requirements: pending.requirements,
@@ -486,10 +487,13 @@ export async function republishUxCardFromArchive(
 
 /** 进桌面线（与 prd-confirm 原桌面分支同款装配；UX 门成为唯一入口后此处收口）。 */
 async function enterDesktopLineFromPending(pending: PendingUxConfirm): Promise<void> {
+  const production = resolveChannelEnv({ channelId: pending.channel_id, category: 'mvp',
+    projectId: pending.project_id, sessionId: pending.session_id })
   await enterDesktopLine(
-    { projectId: pending.project_id, sessionId: pending.session_id, requestId: pending.request_id, content: '开始桌面交付流程', signal: pending.signal },
+    { projectId: pending.project_id, sessionId: pending.session_id, requestId: pending.request_id, content: '开始桌面交付流程', signal: pending.signal,
+      maxTokens: resolveGenerationMaxTokens(production.channel ?? {}) },
     pending.query,
-    pending.env,
+    production.env ?? pending.env,
     {
       publish: (_target, type, payload) => pending.publish(makeUxEvent(pending, type, payload)),
       persistAssistant: () => undefined,

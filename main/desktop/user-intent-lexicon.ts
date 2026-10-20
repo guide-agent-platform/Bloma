@@ -15,39 +15,17 @@
 /** 用户文本意图三态：stop=停止/反悔；continue=继续（仅 blocked 态消费）；none=普通消息。 */
 export type UserDesktopIntent = 'stop' | 'continue' | 'none'
 
-/** 停止/反悔词（命中 → 中断推进、置 desktop_blocked、出人话卡）。
- *  脑测修复 4（2026-10-03）：删高误伤日常词（等等/再想想/不急/先别）——长句
- *  「弹窗先别太多」等含子串会被误停；明确指令词保留（误停有自愈：blocked 卡
- *  引导「继续」放行，但每误停一次都是用户成本）。 */
-export const USER_STOP_KEYWORDS: readonly string[] = [
-  '不通过', '没通过', '需要修复', '重做', '不行', '改主意',
-  '暂缓', '先停', '取消', '先停一下',
-  '需要调整', '不满意', '停止', '停下', '别推进',
-  'stop', 'halt', 'cancel', 'pause',
-]
+// Commands address this run. Product nouns, quoted labels and negated commands
+// are not instructions to the host; unknown prose remains ordinary feedback.
+const STOP_COMMAND = /^(?:请|麻烦|先|现在|马上|暂时)*(?:不通过|没通过|测试没通过|需要修复|重做|不行|改主意|暂缓|先停|取消|停止|停下|别推进|需要调整|不满意)(?:(?:当前|这个|本次)?(?:任务|流程|制作|生成|运行|执行)|一下|吧|了|先)*$/
+const STOP_ENGLISH = /^(?:please\s+)?(?:stop|halt|cancel|pause)(?:\s+(?:it|this|now|the|current|run|task|workflow|please))*$/i
+const CONTINUE_COMMAND = /^(?:请)?(?:继续|可以|通过|好的|没问题|确认|推进|恢复|继续跑|放手去做)(?:继续|通过|开工|执行|运行|生成|制作|推进|了|吧)*$/
+const CONTINUE_ENGLISH = /^(?:please\s+)?(?:continue|go on|ok|resume|approve)(?:\s+(?:it|this|now|the|current|run|task|workflow|please))*$/i
 
-/** 继续词（仅在 blocked 态生效——修复后放行授权；正常态不特殊处理，防文本误推进）。 */
-export const USER_CONTINUE_KEYWORDS: readonly string[] = [
-  '继续', '可以', '通过', '好的', '没问题', '确认', '推进',
-  '恢复', '继续跑', '放手去做',
-  'continue', 'go on', 'ok', 'resume', 'approve',
-]
-
-/** 词匹配（中文 includes / 纯英文 \b 词边界，大小写不敏感；纯 ASCII 词才走词边界）。 */
-function keywordHit(text: string, keywords: readonly string[]): string | undefined {
-  for (const kw of keywords) {
-    if (/^[\x20-\x7E]+$/.test(kw)) {
-      if (new RegExp(`\\b${kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(text)) return kw
-    } else if (text.includes(kw)) {
-      return kw
-    }
-  }
-  return undefined
-}
-
-/** 用户文本意图分类（纯函数）：stop 优先于 continue（反义词包含子串的实证防御）。 */
+/** Only whole command clauses control the host; stop takes precedence. */
 export function classifyUserDesktopIntent(text: string): UserDesktopIntent {
-  if (keywordHit(text, USER_STOP_KEYWORDS) !== undefined) return 'stop'
-  if (keywordHit(text, USER_CONTINUE_KEYWORDS) !== undefined) return 'continue'
+  const clauses = text.trim().split(/[，。；！？,;!?\n]+/).map(part => part.trim()).filter(Boolean)
+  if (clauses.some(part => STOP_COMMAND.test(part) || STOP_ENGLISH.test(part))) return 'stop'
+  if (clauses.some(part => CONTINUE_COMMAND.test(part) || CONTINUE_ENGLISH.test(part))) return 'continue'
   return 'none'
 }

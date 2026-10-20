@@ -3,7 +3,7 @@ import { dirname, join, resolve, relative, isAbsolute } from 'node:path'
 import { readPrdBackplane } from '../project/document-engine'
 import { requirementEvidenceHash, requirementVerificationContext } from '../project/requirement-contract'
 import { parseProjectContract } from './contract-schema'
-import { execFileDriverSpawn, runContractDriver, type DriverSpawn } from './process-driver'
+import { execFileDriverSpawn, runContractDriver, type DriverSpawn, type DriverScenarioOutcome } from './process-driver'
 import { verificationFingerprint } from './verification-fingerprint'
 import { hasCurrentMicrophoneEvidence, runHostSpeechProbe, type SpeechVerificationSpec } from './speech-verification'
 import { runHostPrefixRenameProbe, type FileVerificationResult } from './file-verification'
@@ -27,13 +27,8 @@ interface CoreScenario { name: string; covers: string[]; input: 'logic' | 'gui' 
 export const CORE_MANIFEST_REL = 'CORE_CHECK.json'
 export const CORE_REPORT_REL = '00_VERIFY/core-verification.json'
 
-function scenarioOutcome(stdout: string, name: string): string {
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const pattern = new RegExp(`^(PASS|FAIL|BLOCKED|SKIP)\\s+${escaped}(?::|$)`)
-  const states = stdout.split(/\r?\n/).flatMap(line => {
-    const match = pattern.exec(line.trim())
-    return match ? [({ PASS: 'pass', FAIL: 'fail', BLOCKED: 'blocked', SKIP: 'skipped' } as Record<string, string>)[match[1]!]!] : []
-  })
+function scenarioOutcome(scenarios: DriverScenarioOutcome[], name: string): string {
+  const states = scenarios.filter(scenario => scenario.name === name).map(scenario => scenario.outcome)
   return states.includes('fail') ? 'fail' : states.includes('blocked') ? 'blocked' : states.length && states.every(s => s === 'pass') ? 'pass' : 'unverified'
 }
 
@@ -96,7 +91,7 @@ export async function runCoreVerification(options: {
     const execute = (registered: string[]) => runContractDriver({ contract: parseProjectContract(JSON.stringify({ schema_version: 1, entry: 'app.py',
       driver: { command: registered, timeout_ms: 120000, exit_code_semantics: { 0: 'pass', 1: 'fail', 2: 'blocked' }, assert_readback: 'core scenario readback' },
       components: [], env_whitelist: ['APP_DATA_DIR', 'BLOMA_SPEECH_MODEL_DIR', 'BLOMA_SPEECH_OFFLINE'], scenarios,
-    })), cwd: root, spawn: options.spawn ?? execFileDriverSpawn,
+    })), cwd: root, spawn: options.spawn ?? execFileDriverSpawn, exactScenarioNames: scenarios.map(scenario => scenario.name),
       parentEnv: { ...process.env, APP_DATA_DIR: join(root, '00_VERIFY/core-data'), BLOMA_SPEECH_OFFLINE: '1' } })
     const report = await execute(command)
     const guiReport = guiCommand ? await execute(guiCommand) : undefined
@@ -104,7 +99,7 @@ export async function runCoreVerification(options: {
     if (guiReport) result.gui_execution = { command: guiReport.command, routing: guiReport.routing, scenarios: guiReport.scenarios }
     for (const scenario of scenarios) {
       const source = scenario.input === 'gui' && guiReport ? guiReport : report
-      const outcome = scenarioOutcome(source.stdoutExcerpt, scenario.name)
+      const outcome = scenarioOutcome(source.scenarios, scenario.name)
       for (const fid of scenario.covers) result.evidence.push({ fid, scenario: scenario.name, input: scenario.input, outcome })
       if (outcome !== 'pass') {
         const observed = outcome === 'unverified' ? source.scenarios.map(row => row.name).slice(0, 64) : []

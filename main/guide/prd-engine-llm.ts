@@ -636,7 +636,7 @@ export function parseAiCapabilities(raw: unknown): AiCapability[] {
  * 解析 key_tasks（Phase 7 U1 H2）：形状级清洗——label 必填（缺则弃条）；
  * feature_ids 过滤非字符串并去重（白名单校验与 P0 补齐在 finalizeKeyTasks，
  * 因 parse 阶段无 requirements 上下文）；must_deliver 非 false 一律归 true
- * （保守：关键任务缺省必交，与「从严 v0」一致）；上限 4 条。
+ * （保守：关键任务缺省必交）。解析不静默裁剪任务或功能关联。
  * export：供单测直测（契约清洗承重，同 parseAiCapabilities 口径）。
  */
 export function parseKeyTasks(raw: unknown): KeyTask[] {
@@ -647,16 +647,15 @@ export function parseKeyTasks(raw: unknown): KeyTask[] {
     const label = typeof entry.label === 'string' ? entry.label.trim() : ''
     if (!label) continue
     const featureIds = Array.isArray(entry.feature_ids)
-      ? [...new Set(entry.feature_ids.filter((v): v is string => typeof v === 'string' && v.trim().length > 0))].slice(0, 6)
+      ? [...new Set(entry.feature_ids.filter((v): v is string => typeof v === 'string' && v.trim().length > 0))]
       : []
     if (featureIds.length === 0) continue
     out.push({
       task_id: typeof entry.task_id === 'string' ? entry.task_id : '',
-      label: label.slice(0, 80),
+      label,
       feature_ids: featureIds,
       must_deliver: entry.must_deliver !== false,
     })
-    if (out.length >= 4) break
   }
   return out
 }

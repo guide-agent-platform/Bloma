@@ -310,6 +310,15 @@ describe('判定矩阵（开关字节锁）', () => {
 })
 
 describe('handleDesktopDispatchMessage 消息路由', () => {
+  it('preserves the explicit output budget and treats cancel-button requirements as ordinary feedback', async () => {
+    const loop = vi.spyOn(dispatcherLoop, 'runDesktopDispatcherLoop').mockResolvedValue({ status: 'cancelled' })
+    try {
+      const { deps } = collectorDeps()
+      await handleDesktopDispatchMessage({ ...routeInput(), content: '增加取消按钮', maxTokens: 4096 }, deps)
+      expect(loop).toHaveBeenCalledWith(expect.objectContaining({ maxTokens: 4096, task: '增加取消按钮' }))
+      expect((record as Record<string, unknown>).desktop_blocked).toBeUndefined()
+    } finally { loop.mockRestore() }
+  })
   it('普通消息：调度员 run → 推进 → desktop_phase 落盘 + 自动续跑下一阶段 + stage_changed 事件（渲染端阶段条数据源）', async () => {
     const { deps, events } = collectorDeps()
     await handleDesktopDispatchMessage(routeInput(), deps)

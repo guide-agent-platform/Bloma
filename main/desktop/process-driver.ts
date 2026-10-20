@@ -185,7 +185,7 @@ export function buildDriverEnv(contract: ProjectContract, parentEnv: NodeJS.Proc
 // =========================================================================
 
 /** stdout 行级锚点解析（PASS/FAIL/BLOCKED/SKIP 场景行 + SUMMARY 行）。 */
-export function parseDriverStdout(stdout: string): { scenarios: DriverScenarioOutcome[]; summaryLine: string | null } {
+export function parseDriverStdout(stdout: string, exactNames?: readonly string[]): { scenarios: DriverScenarioOutcome[]; summaryLine: string | null } {
   const scenarios: DriverScenarioOutcome[] = []
   let summaryLine: string | null = null
   for (const rawLine of stdout.split(/\r?\n/)) {
@@ -201,8 +201,20 @@ export function parseDriverStdout(stdout: string): { scenarios: DriverScenarioOu
     // 竖线方言：SCENARIO|<id>|<pass|fail|blocked|skip>|<detail...>
     const piped = /^SCENARIO\|([^|]+)\|(pass|fail|blocked|skip)\b/i.exec(line)
     if (piped) {
-      scenarios.push({ name: piped[1].trim(), outcome: piped[2].toLowerCase() as DriverScenarioOutcome['outcome'] })
+      const outcome = piped[2].toLowerCase()
+      scenarios.push({ name: piped[1].trim(), outcome: outcome === 'skip' ? 'skipped' : outcome as DriverScenarioOutcome['outcome'] })
       continue
+    }
+    if (exactNames) {
+      const declared = /^(PASS|FAIL|BLOCKED|SKIP)\s+(.+)$/.exec(line)
+      if (declared) {
+        const rest = declared[2]
+        const name = [...exactNames].sort((a, b) => b.length - a.length).find(name => rest === name || rest.startsWith(`${name}:`))
+        const outcomes = { PASS: 'pass', FAIL: 'fail', BLOCKED: 'blocked', SKIP: 'skipped' } as const
+        // Unknown output remains visible for diagnosis and conservative FAIL routing.
+        scenarios.push({ name: name ?? rest, outcome: outcomes[declared[1] as keyof typeof outcomes] })
+        continue
+      }
     }
     // 场景行：PASS|FAIL|BLOCKED|SKIP <name>（主名=首段非空白非冒号；支持中文——P0-1a 实证，
     // 2026-10-02：旧 `(\S+)\b` 的 \b 在中文字符间不存在词边界，中文名场景静默解析失败，
@@ -233,6 +245,8 @@ export function parseDriverStdout(stdout: string): { scenarios: DriverScenarioOu
 
 /** 驱动执行输入。 */
 export interface RunDriverInput {
+  /** Parse full registered names before producing the bounded display excerpt. */
+  exactScenarioNames?: readonly string[]
   signal?: AbortSignal
   contract: ProjectContract
   /** 工作目录（沙箱内项目根——契约相对命令的解析根）。 */
@@ -357,7 +371,7 @@ export async function runContractDriver(input: RunDriverInput): Promise<DriverEx
         startedAt,
       }
     }
-    const { scenarios, summaryLine } = parseDriverStdout(stdout)
+    const { scenarios, summaryLine } = parseDriverStdout(stdout, input.exactScenarioNames)
     // self_check 面：退出码 + 可选 stdout 锚点（不走场景路由——契约 expect 语义）
     if (which === 'self_check') {
       const expect = contract.self_check?.expect_stdout_contains

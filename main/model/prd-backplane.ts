@@ -224,24 +224,24 @@ export function backplaneKeyTasks(backplane: PrdBackplane): KeyTask[] {
  * ①LLM 产出先过功能项白名单（feature_ids ∩ requirements；悬空任务=无有效关联项
  *   即弃条，不给下游留空承诺）；②未覆盖的 P0 项各自追加派生任务（label=故事
  *   截断、must_deliver=true）——「P0 必落任务」不变式；③task_id 统一重编号
- * KT-01..（追加后不跳号）；④总量截 6（LLM ≤4 + 补齐，宁全勿缺但防滥用）。
+ * KT-01..（追加后不跳号）。数量限制不能裁掉已确认的交付义务。
  */
 export function finalizeKeyTasks(parsed: KeyTask[], requirements: SketchRequirement[]): KeyTask[] {
   const validIds = new Set(requirements.map((item) => item.id))
   const merged: KeyTask[] = []
-  for (const task of parsed.slice(0, 4)) {
-    const ids = [...new Set(task.feature_ids.filter((id) => validIds.has(id)))].slice(0, 6)
+  for (const task of parsed) {
+    const ids = [...new Set(task.feature_ids.filter((id) => validIds.has(id)))]
     if (!task.label.trim() || ids.length === 0) continue
-    merged.push({ label: task.label.trim().slice(0, 80), feature_ids: ids, must_deliver: task.must_deliver, task_id: '' })
-    if (merged.length >= 6) break
+    if (merged.some(existing => existing.feature_ids.length === ids.length && ids.every(id => existing.feature_ids.includes(id)))) continue
+    merged.push({ label: task.label.trim(), feature_ids: ids,
+      must_deliver: task.must_deliver || requirements.some(item => ids.includes(item.id) && requirementPriority(item) === 'P0'), task_id: '' })
   }
   const covered = new Set(merged.flatMap((task) => task.feature_ids))
   for (const item of requirements) {
-    if (merged.length >= 6) break
     if (requirementPriority(item) !== 'P0' || covered.has(item.id)) continue
     merged.push({
       task_id: '',
-      label: requirementStory(item).replace(/\s+/g, ' ').trim().slice(0, 60) || item.description.slice(0, 60),
+      label: requirementStory(item).replace(/\s+/g, ' ').trim() || item.description,
       feature_ids: [item.id],
       must_deliver: true,
     })

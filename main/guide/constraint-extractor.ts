@@ -27,11 +27,6 @@ const CONSTRAINT_MARKER_RE =
 /** 子句切分：标点与换行。约束语句几乎总是一个独立短句。 */
 const CLAUSE_SPLIT_RE = /[，。；！？、,;!?\n]+/
 
-/** 单条约束语句上限：约束是短语不是段落，超长说明命中了叙述句，截断保真。 */
-const CONSTRAINT_MAX_LENGTH = 60
-/** 单次提取条数上限：一条消息里 5 条以上「约束」几乎必然是误报。 */
-const CONSTRAINT_MAX_PER_TEXT = 5;
-
 /**
  * 从一段自然语言提取约束语句（原话短语，不转写——转写是 LLM 的事，这里只认证据）。
  * 返回去重后的子句列表；无约束返回空数组。
@@ -53,11 +48,10 @@ export function extractConstraints(text: string): string[] {
   const found: string[] = []
   for (const clause of text.split(CLAUSE_SPLIT_RE)) {
     const trimmed = clause.replace(/\s+/g, ' ').trim()
-    if (!trimmed || trimmed.length > CONSTRAINT_MAX_LENGTH) continue
+    if (!trimmed) continue
     if (!CONSTRAINT_MARKER_RE.test(trimmed)) continue
     if (sanitizeConstraints([trimmed]).length === 0) continue
     if (!found.includes(trimmed)) found.push(trimmed)
-    if (found.length >= CONSTRAINT_MAX_PER_TEXT) break
   }
   return found
 }
@@ -80,7 +74,6 @@ export function extractConstraints(text: string): string[] {
 const SYNTHETIC_USER_TURN_PREFIXES = [
   '## 修复任务',
   '【传输事故反馈】',
-  '目标：',
   '<untrusted-memory',
   '【收口指令',
   '【进度对账',
@@ -88,10 +81,6 @@ const SYNTHETIC_USER_TURN_PREFIXES = [
   '【修改模式】',
   '【本轮任务】',
   '【工作方式】',
-  // R0.4 补丁（2026-09-19 狗粮 a602709f）：审查答题回写轮是 UI 选项回显不是用户
-  // 原话——其中的选项描述碎片（「做的人只能自己猜」「要不要拦」）被提取成约束入库
-  '我选好了，',
-  '补充说明：',
   // 批10 旧账②（2026-10-07 批9 狗粮实锤）：拒收续接指令（advance-rejection-loop 的
   // buildContinuationDirective）作为 systemInitiated user 轮落盘，拒因文案「不要去补
   // 报告文件」被提取入库——[system·*] 前缀是平台系统轮统一信号，整轮丢弃。
@@ -157,13 +146,17 @@ export function scanSessionConstraints(sessionId: string): string[] {
     } catch {
       continue
     }
-    if (message.role !== 'user') continue
+    if (message.role !== 'user' || message.origin === 'system' || message.origin === 'agent') continue
     const text = (message.content ?? [])
       .filter((block) => block.type === 'text')
       .map((block) => block.text ?? '')
       .join('')
-    if (SYNTHETIC_USER_TURN_PREFIXES.some((prefix) => text.trimStart().startsWith(prefix))) continue
-    if (text.includes(HOST_INJECTION_MARKER)) continue
+    // Modern provenance is authoritative; the narrow prefix fallback is only
+    // for older messages that predate origin/client identity.
+    if (!message.origin && !message.client_message_id) {
+      if (SYNTHETIC_USER_TURN_PREFIXES.some((prefix) => text.trimStart().startsWith(prefix))) continue
+      if (text.includes(HOST_INJECTION_MARKER)) continue
+    }
     const shellStripped = text.trimStart().replace(KNOWN_SHELL_PREFIX_RE, '')
     for (const constraint of extractConstraints(shellStripped)) {
       if (!constraints.includes(constraint)) constraints.push(constraint)

@@ -55,6 +55,7 @@ async function defaultLaunchSmokeGate(projectId: string): Promise<LaunchSmokeRes
   }
 }
 import { classifyUserDesktopIntent } from './user-intent-lexicon'
+import { GENERATION_MAX_TOKENS } from '../platform/llm/model-resolution'
 import {
   confirmMvpDelivered,
   consumeMvpPendingForRework,
@@ -213,7 +214,7 @@ function defaultQuickSecurityGate(projectId: string): QuickSecurityGateResult | 
  * 返回 true=已改道（调用方不再走 runSketchTask）；false=不该改道（调用方走原路径）。
  */
 export async function enterDesktopLine(
-  input: { projectId: string; sessionId: string; requestId: string; content: string; signal?: AbortSignal; images?: import('../../shared/types').PastedImageRef[]; initialMessagePersisted?: boolean },
+  input: DesktopStageInput,
   query: SDKQuery,
   env: Record<string, string>,
   deps: DesktopRouteDeps,
@@ -265,6 +266,14 @@ export interface DesktopRouteInput {
 /** 确认卡选项 id 前缀（刀1 前的旧协议；保留仅用于识别旧卡回传——不再发新卡）。 */
 export const DESKTOP_CONFIRM_OPTION_PREFIX = 'desktop_confirm:'
 
+interface DesktopStageInput {
+  projectId: string; sessionId: string; requestId: string; content: string
+  maxTokens?: number
+  signal?: AbortSignal
+  images?: import('../../shared/types').PastedImageRef[]
+  initialMessagePersisted?: boolean
+}
+
 /**
  * 桌面线消息路由（接管后全部消息进这里）：
  * - 旧确认卡回传（刀1 协议升级）：如实告知已无需人工确认，照常跑当前阶段；
@@ -288,7 +297,7 @@ export async function handleDesktopDispatchMessage(
     deps.publish(input, 'message_delta', {
       text: '确认协议已升级：中间阶段不再需要人工确认，门禁全绿自动推进。已按当前阶段继续处理你的消息。',
     })
-    await runDesktopStage({ projectId: input.projectId, sessionId: input.sessionId, requestId: input.requestId, content: input.content, signal: input.signal, images: input.images, initialMessagePersisted: input.initialMessagePersisted }, input.query, input.env, phaseId, deps, projectName, 0)
+    await runDesktopStage(input, input.query, input.env, phaseId, deps, projectName, 0)
     return
   }
   // ── MVP 确认门回传/反馈（2026-10-04 确认门新规）：longterm 交付前过目的最后一道门。
@@ -360,6 +369,7 @@ export async function handleDesktopDispatchMessage(
         sessionId: input.sessionId,
         requestId: input.requestId,
         content: `【交付前迭代】用户对验收通过产物的修改意见，按此修改实现（其余功能与已验证行为保持不变）：${feedbackContent}`,
+        maxTokens: input.maxTokens,
         signal: input.signal,
         images: input.images,
         initialMessagePersisted: input.initialMessagePersisted,
@@ -383,6 +393,7 @@ export async function handleDesktopDispatchMessage(
         sessionId: input.sessionId,
         requestId: input.requestId,
         content: `【交付后迭代】用户对已交付产物的反馈，按此修改实现（其余功能与已验证行为保持不变）：${input.content}`,
+        maxTokens: input.maxTokens,
         signal: input.signal,
         images: input.images,
         initialMessagePersisted: input.initialMessagePersisted,
@@ -428,7 +439,7 @@ export async function handleDesktopDispatchMessage(
     deps.persistSystem(input.sessionId, `[decision] desktop-unblock ${phaseId}（${intent === 'continue' ? '继续词放行' : '人工出场放行'}）`)
   }
 
-  await runDesktopStage({ projectId: input.projectId, sessionId: input.sessionId, requestId: input.requestId, content: input.content, signal: input.signal, images: input.images, initialMessagePersisted: input.initialMessagePersisted }, input.query, input.env, phaseId, deps, projectName, 0)
+  await runDesktopStage(input, input.query, input.env, phaseId, deps, projectName, 0)
 }
 
 // =========================================================================
@@ -443,7 +454,7 @@ export async function handleDesktopDispatchMessage(
 export const MAX_AUTO_ADVANCE_CHAIN = 4
 
 async function runDesktopStage(
-  input: { projectId: string; sessionId: string; requestId: string; content: string; signal?: AbortSignal; images?: import('../../shared/types').PastedImageRef[]; initialMessagePersisted?: boolean },
+  input: DesktopStageInput,
   query: SDKQuery,
   env: Record<string, string>,
   phaseId: string,
@@ -506,7 +517,7 @@ async function runDesktopStage(
     initialMessagePersisted: input.initialMessagePersisted,
     query,
     env,
-    maxTokens: 640000,
+    maxTokens: input.maxTokens ?? GENERATION_MAX_TOKENS,
     signal: input.signal ?? new AbortController().signal,
     publish: (type, payload) => {
       // 调度员 loop 的过程事件按原类型直通渲染端（首跑修复：此前误折叠为 message_delta，
@@ -567,7 +578,7 @@ async function runDesktopStage(
  * （人工是异常处理器不是流水线工位）。
  */
 async function settleDesktopStage(
-  input: { projectId: string; sessionId: string; requestId: string; content: string; signal?: AbortSignal; images?: import('../../shared/types').PastedImageRef[]; initialMessagePersisted?: boolean },
+  input: DesktopStageInput,
   query: SDKQuery,
   env: Record<string, string>,
   result: DesktopDispatchRunResult,
@@ -703,7 +714,7 @@ async function settleDesktopStage(
           return
         }
         if (!await ensureQuickProductionReview({ projectId: input.projectId, sessionId: input.sessionId, requestId: input.requestId,
-          currentPhase: phaseId, task: input.content, query, env, maxTokens: 640000, signal: input.signal ?? new AbortController().signal,
+          currentPhase: phaseId, task: input.content, query, env, maxTokens: input.maxTokens ?? GENERATION_MAX_TOKENS, signal: input.signal ?? new AbortController().signal,
           publish: (type, payload) => deps.publish(input, type, payload), projectName, sandboxRoot: project.root_path, quickMode: true }, {
           review: runQuickProductionReview,
           repair: feedback => runDesktopStage({ ...input, content: feedback, initialMessagePersisted: false }, query, env, 'desktop-implement', deps, projectName, chainDepth, true),
@@ -747,7 +758,7 @@ async function settleDesktopStage(
   if (action.continuation && !action.degrade) {
     deps.persistSystem(input.sessionId, `[decision] desktop-reject ${phaseId}（${decision.reason}）第 ${action.count} 次闭环，续接驱动`)
     await runDesktopStage(
-      { projectId: input.projectId, sessionId: input.sessionId, requestId: input.requestId, content: action.continuation },
+      { ...input, content: action.continuation, initialMessagePersisted: false },
       query, env, phaseId, deps, projectName, chainDepth,
     )
     return
