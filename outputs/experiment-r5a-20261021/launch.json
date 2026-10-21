@@ -1,0 +1,38 @@
+{
+  "at": "2026-10-21T09:54:27.243Z",
+  "status": "running",
+  "launch_at": "2026-10-21T09:53:08.274Z",
+  "started_at": "2026-10-21T09:53:13.365Z",
+  "group": "G11",
+  "run_id": "production-v2-L1-quick-20261021-r5a-G11",
+  "cohort": "C:\\Users\\17359\\bex-pv220\\pilot-r5a",
+  "runtime_commit": "8224ac088b9103cddeca231596ae9a99940290f9",
+  "runtime_sha256": "8c02defd59ede874f007b1cc3f5ac6b6d1a092b4210f28a77ad18f2bf686ae1f",
+  "input_hash": "4566f020f5d27f0cdac677a569b6518b15e64c757b5e0a9e54f70bfb19325489",
+  "readiness_sha256": "ca0e1f8f0ac5d6750736fe8daa0cd4d7b024ae80b9a3e0e95eb8f96e517df2a9",
+  "supervisor_pid": 16376,
+  "liveness": {
+    "driver_pid": 54788,
+    "electron_pid": 18812,
+    "supervisor_pid": 16376,
+    "driver_alive": true,
+    "electron_alive": true,
+    "supervisor_alive": true,
+    "native_heartbeat_at": "2026-10-21T09:54:21.259Z",
+    "supervisor_heartbeat_at": "2026-10-21T09:54:27.146Z"
+  },
+  "model_requests_at_observation": 5,
+  "physical_requests_at_observation": 5,
+  "models": {
+    "verifier": "deepseek-flash",
+    "dispatcher": "glm-5.3-flash",
+    "executor": "glm-5.3-flash"
+  },
+  "preflight_physical_requests": 14,
+  "supervisor_output_dir": "C:\\Users\\17359\\AppData\\Local\\Bloma\\production-v2-L1-20261020\\supervised-r5a-G11",
+  "native_report_dir": "C:\\Users\\17359\\AppData\\Local\\Bloma\\production-v2-L1-20261020\\pilot-r5a-runs\\G11",
+  "independent_adapter": "C:/Users/17359/bex-pv220/review-new-G11-r5a.py",
+  "other_groups_started": false,
+  "product_quality": null,
+  "note": "Only G11 resumed after the user asked to continue the experiment. Native model requests and live supervisor/driver/Electron attested; no result or delivery claim."
+}
