@@ -21,6 +21,8 @@ import { finishExperiment, readExperimentEvents } from '../../../main/desktop/di
 import { aggregateModelExperiments } from '../../../main/desktop/dispatch-experiment-aggregate'
 import { ensureCoreDelivery } from '../../../main/desktop/core-delivery'
 import { bindExperimentInput } from '../../../main/desktop/dispatch-experiment-runtime'
+import { findDelegation } from '../../../main/agent/delegation/agent-collaboration'
+import { readTaskHandoff } from '../../../main/agent/delegation/task-handoff'
 
 vi.mock('../../../main/platform/llm/channel-manager', async original => ({
   ...await original<typeof import('../../../main/platform/llm/channel-manager')>(),
@@ -450,6 +452,50 @@ describe('actual loop routing with fake SDK responses', () => {
     await run(query)
     expect(observedStatus).toBe(true); expect(observedIncrement).toBe(true)
     expect(readFileSync(join(root, 'only.py'), 'utf8')).toContain('implemented')
+  })
+
+  it('real parent and child loops continue into verification after an r4 failed diagnostic handoff', async () => {
+    const captured = JSON.parse(readFileSync(new URL('../../fixtures/dispatch-experiment/r4-handoffs.json', import.meta.url), 'utf8'))
+    const tasks = [task('producer'), { ...task('verification'), depends_on: ['producer'] }]
+    let parentCalls = 0, childCalls = 0, delegationId = '', sawPending = false
+    const query: SDKQuery = async function* (_prompt, options) {
+      if (options.sessionId === 'parent') {
+        parentCalls++
+        if (parentCalls === 1) yield toolMessage('r4-plan', 'experiment_plan', { tasks })
+        else if (parentCalls === 2) yield toolMessage('r4-producer', 'delegate_agent', { task_ids: ['producer'] })
+        else if (parentCalls === 3 || parentCalls === 6) yield toolMessage(`r4-wait-${parentCalls}`, 'wait_for_delegations', { timeout_ms: 2000 })
+        else if (parentCalls === 4) {
+          delegationId = Object.values(readExperiment('p')!.workers)[0].delegation_id
+          const record = findDelegation('parent', delegationId)!
+          record.taskHandoff = readTaskHandoff(captured.ui)
+          expect(record.taskHandoff?.completion).toBe('incomplete')
+          yield toolMessage('r4-status', 'experiment_status', {})
+        } else if (parentCalls === 5) {
+          const block = options.messages?.flatMap(message => Array.isArray(message.content) ? message.content : [])
+            .find(item => item.type === 'tool_result' && item.tool_use_id === 'r4-status')
+          if (block?.type !== 'tool_result') throw Error('Missing actual status result')
+          const status = JSON.parse(String(block.content))
+          expect(status.workers[0].dependency_ready).toBe(true)
+          expect(status.workers[0].verification_state).toBe('incomplete')
+          expect(status.workers[0].task_handoff.pending.length).toBeGreaterThan(0)
+          sawPending = true
+          yield toolMessage('r4-verify', 'continue_delegation', { delegation_id: delegationId, task_ids: ['verification'], feedback: '接手当前输出核验；历史诊断保留，不宣称已通过。' })
+        } else yield text()
+      } else {
+        childCalls++
+        if (childCalls === 1) yield toolMessage('r4-write-producer', 'write_file', { path: 'producer.py', content: '# stable candidate' })
+        else if (childCalls === 3) yield toolMessage('r4-write-verification', 'write_file', { path: 'verification.py', content: '# follow-up reached; business verification still required' })
+        else yield text()
+      }
+      yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
+    }
+    const result = await run(query)
+    expect(result.status).toBe('completed')
+    expect(sawPending).toBe(true)
+    expect(childCalls).toBe(4)
+    expect(readFileSync(join(root, 'verification.py'), 'utf8')).toContain('follow-up reached')
+    expect(readExperimentEvents(readExperiment('p')!).events.some(event => event.event === 'dispatch_rejected')).toBe(false)
+    expect(reportModelExperiment('p').product_quality).toBeNull()
   })
 
   it.each([true, false])('v2 invokes the pinned V and requires real reads before accepting its green claim (%s)', async readEvidence => {
