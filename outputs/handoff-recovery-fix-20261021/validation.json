@@ -1,0 +1,140 @@
+{
+  "verified_at": "2026-10-21T17:45:31.7663301+08:00",
+  "scope": "local-engineering-fix",
+  "main_source_commit": "8ced3492217456ee0d4fbe2d7c4265ed374569bc",
+  "isolated_source_commit": "8224ac088b9103cddeca231596ae9a99940290f9",
+  "main_and_isolated_main_tests_equal": true,
+  "prerequisite_commit": "29c2d3f7b676fa77b84b35e1235a817bf6ab6092",
+  "repair_commit": "bd3b52f99c086bcc3933bbbbd71f07caa6d302f8",
+  "paid_model_calls": 0,
+  "real_model_performance_claim": false,
+  "validation": {
+    "unit": {
+      "tests": 2503,
+      "files": 270,
+      "passed": true,
+      "note": "Run began before one extra test was added; the added test passed in the separate real-loop suite."
+    },
+    "real_loop_suite": {
+      "tests": 45,
+      "overlap_with_unit": 44,
+      "passed": true,
+      "sdk": "test-double",
+      "files": 1,
+      "new_test": 1
+    },
+    "integration_regression_acceptance": {
+      "tests": 149,
+      "files": 30,
+      "passed": true
+    },
+    "targeted": {
+      "overlaps_unit": true,
+      "tests": 97,
+      "files": 7,
+      "passed": true
+    },
+    "typecheck": {
+      "passed": true
+    },
+    "isolated_build": {
+      "passed": true
+    },
+    "main_build": {
+      "passed": true
+    },
+    "electron_smoke": {
+      "test_id": "S0-UI-007",
+      "passed": true
+    }
+  },
+  "main_runtime_sha256": "8c02defd59ede874f007b1cc3f5ac6b6d1a092b4210f28a77ad18f2bf686ae1f",
+  "frozen_r4": {
+    "commit": "54b378cc677a45349051e1aad677896fbc049a01",
+    "independent_business_checks": "6/6",
+    "runtime_matches_seal": true,
+    "runtime_sha256": "378136c2825df38b3c992fd24462755e89ad3a85b1bee3462b3d1bbdc4c0a64f",
+    "modified_by_repair": false,
+    "verifier_executed": false,
+    "native_outcome": "timeout",
+    "root": "C:\\Users\\17359\\.codex\\worktrees\\experiment-readiness-20261020\\guide-agent-platform-sprint0"
+  },
+  "next_real_run": "requires-new-runtime-seal-and-new-cohort",
+  "logs": [
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\handoff-recovery-fix-20261021\\isolated-validation\\build.log",
+      "sha256": "3f0cc5d5d12660cfc49829a966e9d25acebd777bda04261244fccc4dadee0fe0",
+      "bytes": 4000
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\handoff-recovery-fix-20261021\\isolated-validation\\capture-fixture.mjs",
+      "sha256": "e3b5ed64dc950b476fee7cb8506d5005914c2052e1329fb316bed7421c40fd7a",
+      "bytes": 563
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\handoff-recovery-fix-20261021\\isolated-validation\\dependencies.log",
+      "sha256": "5b5cc1fa5536406c29215279ff27aee5d27af7f55d6fd450388442d061c21cb0",
+      "bytes": 388
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\handoff-recovery-fix-20261021\\isolated-validation\\electron-smoke.log",
+      "sha256": "b90c8d85a483b5cb19af5a24d17ef87462959fec03e3a4299f5092615c453688",
+      "bytes": 509
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\handoff-recovery-fix-20261021\\isolated-validation\\integration-acceptance.log",
+      "sha256": "81ab6615f1ad52d5ece730e28277f3007dd77befd7f3568f864685cd2be374d8",
+      "bytes": 31467
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\handoff-recovery-fix-20261021\\isolated-validation\\readiness-and-gates-retry.log",
+      "sha256": "45c3a4c9a1f6b242801e07a685581a7663d335236c5011fc20024e2d82db02bf",
+      "bytes": 82751
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\handoff-recovery-fix-20261021\\isolated-validation\\readiness-and-gates.log",
+      "sha256": "9794415494b4cffb8ca6590cd339cc4ed0ca1ccaae71aa11fd1f1b36b26c747e",
+      "bytes": 90690
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\handoff-recovery-fix-20261021\\isolated-validation\\readiness-tests.log",
+      "sha256": "f49691ceef492de4439efbdaa87c18405076ba3610986b7f676d40dd1496e714",
+      "bytes": 8688
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\handoff-recovery-fix-20261021\\isolated-validation\\real-loop-replay.log",
+      "sha256": "05d5b84d52cda7e69f49ea4f41b1b62d7f1223102ec93211e0c84e3b81f39de8",
+      "bytes": 5004
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\handoff-recovery-fix-20261021\\isolated-validation\\targeted-final.log",
+      "sha256": "6bd28c3acf9b1a8c8cb5a286568af47a94cfd20d97bffbbb5b5041f2469f9c1d",
+      "bytes": 84479
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\handoff-recovery-fix-20261021\\isolated-validation\\typecheck-final.log",
+      "sha256": "23a15944e38ab3fa01c169ac7a4e968e28ffbf58e82fe957c540b33663525d74",
+      "bytes": 227
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\handoff-recovery-fix-20261021\\isolated-validation\\typecheck-release.log",
+      "sha256": "23a15944e38ab3fa01c169ac7a4e968e28ffbf58e82fe957c540b33663525d74",
+      "bytes": 227
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\handoff-recovery-fix-20261021\\isolated-validation\\typecheck.log",
+      "sha256": "2943dd6a260578f25aa5db23143e6821537940925f5eb6fe1199d4792c9cbbbf",
+      "bytes": 491
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\handoff-recovery-fix-20261021\\isolated-validation\\unit-all.log",
+      "sha256": "fe87ac88261692cb3b0f833de09bb14354a320c08d4a2dca50905e8d57dd9e55",
+      "bytes": 235197
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\handoff-recovery-fix-20261021\\main-build.log",
+      "sha256": "3b169e4ee991f115fdbd1e869c717362309150f8e197a5afe181eb9667ed6357",
+      "bytes": 4000
+    }
+  ]
+}
