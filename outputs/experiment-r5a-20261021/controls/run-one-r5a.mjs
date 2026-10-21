@@ -1,0 +1,38 @@
+// Explicit-start controller for this sealed cohort. Default behavior is read-only validation.
+import fs from 'node:fs';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import {execFileSync,spawn} from 'node:child_process';
+const cohort='C:/Users/17359/bex-pv220/pilot-r5a';
+const group=process.argv[2]??'G11';
+const start=process.argv.includes('--start');
+const read=p=>JSON.parse(fs.readFileSync(p,'utf8').replace(/^\uFEFF/,''));
+const sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+const registry=read(path.join(cohort,'registry.json')),release=read(path.join(cohort,'readiness-release.json'));
+const audit=read(path.join(cohort,'audit-ready.json'));
+assert(release.passed && release.qualified_groups.includes(group),'Group is not qualified');
+assert.equal(audit.runtime_commit,release.runtime.commit);assert.equal(audit.input_hash,registry.input_hash);
+assert.equal(audit.main_sha256,release.runtime.main_sha256);
+assert.equal(audit.launcher_sha256,sha(new URL(import.meta.url)),'Launcher changed after sealing');
+assert.equal(audit.validation_complete,true);
+for(const proof of audit.independent_evaluator_files)assert.equal(sha(proof.path),proof.sha256);
+assert.equal(sha('C:/Users/17359/bex-pv220/run-one.mjs'),audit.base_launcher_sha256);
+assert.equal(execFileSync('git',['rev-parse','HEAD'],{cwd:release.runtime.runtime_root,encoding:'utf8'}).trim(),release.runtime.commit);
+assert(Date.now()>=Date.parse(release.provider_gate.qualified_at) && Date.now()<Date.parse(release.provider_gate.expires_at),'Live provider qualification has expired');
+for(const proof of release.provider_gate.evidence)assert.equal(sha(proof.path),proof.sha256);
+execFileSync(process.execPath,['C:/Users/17359/bex-pv220/run-one.mjs',cohort,group,'--check-only'],{cwd:release.runtime.runtime_root,windowsHide:true,stdio:'pipe'});
+if(!start){console.log(JSON.stringify({state:'ready-not-started',group,run_id:registry.matrix.find(row=>row.group===group).run_id,model_calls:0}));process.exit(0);}
+const arm=registry.matrix.find(row=>row.group===group);
+const output='C:/Users/17359/AppData/Local/Bloma/production-v2-L1-20261020/supervised-r5a-'+group;
+const report='C:/Users/17359/AppData/Local/Bloma/production-v2-L1-20261020/pilot-r5a-runs/'+group;
+assert(!fs.existsSync(output) && !fs.existsSync(report),'Preserve earlier execution attempts');
+const job={mode:'run',home:arm.home,runtime_root:release.runtime.runtime_root,output_dir:output,report_dir:report,cohort,group,launcher_script:'C:/Users/17359/bex-pv220/run-one.mjs',readiness_sha256:sha(path.join(cohort,'readiness-release.json'))};
+const jobPath=path.join(cohort,'run-'+group+'-supervised.json');
+fs.writeFileSync(jobPath,JSON.stringify(job,null,2)+'\n',{flag:'wx'});
+fs.mkdirSync(output,{recursive:true});
+const stdout=fs.openSync(path.join(output,'console.stdout.log'),'wx'),stderr=fs.openSync(path.join(output,'console.stderr.log'),'wx');
+const child=spawn(process.execPath,[path.join(release.runtime.runtime_root,'scripts/dispatch-experiment-supervisor.mjs'),jobPath],{cwd:release.runtime.runtime_root,windowsHide:true,detached:true,env:{...process.env,BLOMA_DELEGATION_WORKTREE:'0'},stdio:['ignore',stdout,stderr]});
+fs.closeSync(stdout);fs.closeSync(stderr);child.unref();
+fs.writeFileSync(path.join(cohort,'started-'+group+'.json'),JSON.stringify({at:new Date().toISOString(),run_id:arm.run_id,pid:child.pid,job:jobPath},null,2)+'\n',{flag:'wx'});
+console.log(JSON.stringify({state:'started',group,run_id:arm.run_id,supervisor_pid:child.pid}));

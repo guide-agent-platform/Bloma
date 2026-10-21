@@ -1,0 +1,94 @@
+{
+  "at": "2026-10-21T09:51:40.812Z",
+  "runtime_commit": "8224ac088b9103cddeca231596ae9a99940290f9",
+  "input_hash": "4566f020f5d27f0cdac677a569b6518b15e64c757b5e0a9e54f70bfb19325489",
+  "main_sha256": "8c02defd59ede874f007b1cc3f5ac6b6d1a092b4210f28a77ad18f2bf686ae1f",
+  "validation_complete": true,
+  "validation": {
+    "source": {
+      "path": "C:/Users/17359/OneDrive/Desktop/guide-agent-platform-sprint0/outputs/handoff-recovery-fix-20261021/validation.json",
+      "sha256": "a6bf6ad86c38635fac550687812b2f526a122a955c68ba2537691ca655722ecc"
+    },
+    "results": {
+      "unit": {
+        "tests": 2503,
+        "files": 270,
+        "passed": true,
+        "note": "Run began before one extra test was added; the added test passed in the separate real-loop suite."
+      },
+      "real_loop_suite": {
+        "tests": 45,
+        "overlap_with_unit": 44,
+        "passed": true,
+        "sdk": "test-double",
+        "files": 1,
+        "new_test": 1
+      },
+      "integration_regression_acceptance": {
+        "tests": 149,
+        "files": 30,
+        "passed": true
+      },
+      "targeted": {
+        "overlaps_unit": true,
+        "tests": 97,
+        "files": 7,
+        "passed": true
+      },
+      "typecheck": {
+        "passed": true
+      },
+      "isolated_build": {
+        "passed": true
+      },
+      "main_build": {
+        "passed": true
+      },
+      "electron_smoke": {
+        "test_id": "S0-UI-007",
+        "passed": true
+      }
+    },
+    "native_controls": {
+      "path": "C:/Users/17359/AppData/Local/Bloma/production-v2-L1-20261020/native-controls-r5a.log",
+      "sha256": "cd4d842208d04a58471b670793c1a3119e5bcdca34f3c08c1d4599cb9cc0e8f6"
+    }
+  },
+  "independent_evaluator_files": [
+    {
+      "path": "C:/Users/17359/bex-l1q19/evaluator/suite.json",
+      "sha256": "08dbe9b458009c4cc22c8f7f8e2136975bcb943c70509c186e0ebe80f8a49fff"
+    },
+    {
+      "path": "C:/Users/17359/bex-pv220/review-new-G11-r5a.py",
+      "sha256": "eca1950d8c6c2499b349a83121ed5203b6874bc9e97192a3ca2553c5fc711297"
+    },
+    {
+      "path": "C:/Users/17359/.codex/worktrees/handoff-recovery-fix/guide-agent-platform-sprint0/scripts/robustness-ui-replay.py",
+      "sha256": "ebd3fe8d9a8d2553766e9a58ac927e1fcfdcad01f3746dfbba066ed277e142f1"
+    },
+    {
+      "path": "C:/Users/17359/.codex/worktrees/handoff-recovery-fix/guide-agent-platform-sprint0/scripts/capture-owned-window.py",
+      "sha256": "516b8a2c65f6fac70383870edb5e9547e21e65ed481dc9f3563f6e0d5a5f78f0"
+    }
+  ],
+  "base_launcher_sha256": "d2038a7f6ba0be3d03b18b7297cb08438c7f89a28f13c81343b4d92df6755616",
+  "launcher_sha256": "0b73f8b719710e9a27460291d8d58d4fa5ecb378f5fb098d29472f4b4eeceab2",
+  "local_qualification_passed": true,
+  "provider_qualified_groups": [
+    "G11"
+  ],
+  "measured_model_calls": 0,
+  "preflight_physical_requests": 14,
+  "product_quality": null,
+  "cohort": "C:/Users/17359/bex-pv220/pilot-r5a",
+  "runtime_root": "C:/Users/17359/.codex/worktrees/handoff-recovery-fix/guide-agent-platform-sprint0",
+  "branch": "codex/handoff-recovery-fix",
+  "readiness": "C:/Users/17359/bex-pv220/pilot-r5a/readiness-release.json",
+  "readiness_sha256": "ca0e1f8f0ac5d6750736fe8daa0cd4d7b024ae80b9a3e0e95eb8f96e517df2a9",
+  "start_check_command": "node C:/Users/17359/bex-pv220/run-one-r5a.mjs G11 --check-only",
+  "provider_qualification_expires_at": "2026-10-21T10:19:24.888Z",
+  "input_business_files_unchanged": true,
+  "adapter_scope": "Only cohort/runtime/run identity changed from the preserved r4 selector-v2 adapter; the six business predicates are unchanged.",
+  "preparation_only": true
+}
