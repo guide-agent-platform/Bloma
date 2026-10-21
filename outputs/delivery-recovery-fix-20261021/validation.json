@@ -1,0 +1,234 @@
+{
+  "at": "2026-10-21T19:26:49.9409400+08:00",
+  "base_commit": "199a02dc62575fe1fe7585c27a83dea710a8a917",
+  "paid_model_calls": 0,
+  "unit": {
+    "passed": true,
+    "tests": 2531,
+    "files": 273
+  },
+  "final_targeted": {
+    "new_case_after_unit_started": 1,
+    "files": 7,
+    "tests": 136,
+    "note": "Final entry boundary protection covered by targeted/typecheck/build/native checks after full suite began.",
+    "passed": true,
+    "overlap_with_unit": 135
+  },
+  "integration_regression_acceptance": {
+    "passed": true,
+    "tests": 149,
+    "files": 30
+  },
+  "typecheck_passed": true,
+  "build_passed": true,
+  "electron_smoke": {
+    "test_id": "S0-UI-007",
+    "passed": true,
+    "pid": 107772
+  },
+  "native_normal_startup": {
+    "runner": "TypeScript host + registered Python entry + real WebView2 native API and DOM; no dport",
+    "negative": "failed",
+    "source_unchanged": true,
+    "fixtures_only": true,
+    "positive": "passed"
+  },
+  "frozen_r5a": {
+    "runtime_sha256": "8c02defd59ede874f007b1cc3f5ac6b6d1a092b4210f28a77ad18f2bf686ae1f",
+    "runtime_commit": "8224ac088b9103cddeca231596ae9a99940290f9",
+    "Q": 1,
+    "product_evidence_valid": true,
+    "runtime_unchanged": true,
+    "run_outcome": "failed"
+  },
+  "main_project_list_empty": true,
+  "source_files": [
+    {
+      "path": "main/desktop/desktop-route.ts",
+      "sha256": "db0a1a0f58f5536bbcfd706c80382b83cd1c764036ab511c27276acbffae56bc"
+    },
+    {
+      "path": "main/desktop/dispatch-experiment.ts",
+      "sha256": "5c8d2dd187d1cf5b1c92b306aa494a00a65a745eccb293091ed4f4265cdc4c50"
+    },
+    {
+      "path": "main/desktop/dispatcher-phases.ts",
+      "sha256": "7377ffdebb116b3193719299e8bb28ef250740a5ed5714a8b9b534eb6cb864d7"
+    },
+    {
+      "path": "main/desktop/driver-runner-tool.ts",
+      "sha256": "4ace807aeaa8c6e12d53481d5008af19d9aae0e34ef38d5e16e6b194fa464d9b"
+    },
+    {
+      "path": "main/desktop/quick-production-review.ts",
+      "sha256": "f97acc77561c64648c59e672d558aaaa5098baa564b718d93aea9028f178a755"
+    },
+    {
+      "path": "main/desktop/normal-startup-verification.ts",
+      "sha256": "896b3f1407a2c3c7e647764c2402a347a60ab45ae452dc681eb0f33ff78de351"
+    },
+    {
+      "path": "main/templates/skeletons/desktop-python/ui/bridge.js",
+      "sha256": "6ecc367c5ef67a4660c211745b65323d6276fa1e20aee75e69022dfb5101dc2c"
+    },
+    {
+      "path": "main/templates/tools/normal_startup_probe.py",
+      "sha256": "38b38e79788c6a8d87926092fa4e0e52272c02f19fd6e36756a9183152f02f87"
+    },
+    {
+      "path": "shared/types.ts",
+      "sha256": "b6f43bb700444170b41cdbe5bd9d11ece3300afc8824fb04eb7bd5fa372503e2"
+    },
+    {
+      "path": "tests/unit/desktop/desktop-route.test.ts",
+      "sha256": "78a30d1efe0f334b103d072e184c8937870d780867244029844a3a0753525420"
+    },
+    {
+      "path": "tests/unit/desktop/dispatch-experiment-models.test.ts",
+      "sha256": "9fcd619ed249a3e45359fd16a9c4e3ceee2b8ed933d4a7d411b3444b6bd35dbc"
+    },
+    {
+      "path": "tests/unit/desktop/driver-runner-tool.test.ts",
+      "sha256": "605bd14d523d70a4b004aa307900c374e1f5e246f5470d6bba6e2f4efbc079f4"
+    },
+    {
+      "path": "tests/unit/desktop/quick-review-recovery.test.ts",
+      "sha256": "7b8f5daa93b45a0d5c453b71680bb93b7a29d46062a8fcda025075556a311bf3"
+    },
+    {
+      "path": "tests/unit/desktop/normal-startup-verification.test.ts",
+      "sha256": "e31c4bedd09a730ddc33ff46bdea5ecf7733b7ccb0d6bafd6f1097cbf3a787c7"
+    },
+    {
+      "path": "tests/unit/desktop/normal-bridge-readiness.test.ts",
+      "sha256": "15ec719083381af20fed8ae334526c6f114a96674ea553f5554f97a20713a465"
+    },
+    {
+      "path": "tests/fixtures/dispatch-experiment/r5a-ui.html",
+      "sha256": "3e2b1b2b68dce82e797a8bc91c987a55d31f38b901974621e9c004568e14f255"
+    }
+  ],
+  "logs": [
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\build-complete.log",
+      "sha256": "531230883930ffe434f91d2c7cbba89e8788dd960f3799ceff6e14389199e84f",
+      "bytes": 4000
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\build.log",
+      "sha256": "84c0067a62af0b5df1dbc1624bda8324d432176a0e64088e47dbb46c86ae82a4",
+      "bytes": 3999
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\electron-smoke-complete.log",
+      "sha256": "fcb39ae824a7b0a009459b2df2470fa37d15ed5dc7e3c5a4087b07164eba60e8",
+      "bytes": 488
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\electron-smoke.log",
+      "sha256": "94bfe22de3510d3205159f05dd47873484497eb1498383f92e335ae55a5aeaed",
+      "bytes": 487
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\frozen-r5a-check.log",
+      "sha256": "d30045e80526a8f690b1ab2838cc8a42d005ee906dccd276261f2846f6fd82f5",
+      "bytes": 16611
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\frozen-r5a-report.json",
+      "sha256": "23bc0674da1da5d5ed96ba3aa9dcbad118569b615975b39d5c7fcfb0b35102b9",
+      "bytes": 19612
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\integration-acceptance.log",
+      "sha256": "30019cd21da2a1447ed0960905a4c0f2813561d9a0c52417411c4cc9dcc59ba3",
+      "bytes": 29618
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\native-normal-failure.log",
+      "sha256": "9150909a4da63a1bf09d77030659e0aa648d69e903ee85b677da77322148c568",
+      "bytes": 1514
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\native-normal-fixed.log",
+      "sha256": "82e7431cae4d8b18e4d07790a12bf765941168bc9f0c03e42b75350f1056af8c",
+      "bytes": 1590
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\native-normal-pipeline-final.log",
+      "sha256": "745cca494a35a7aa50f07fba029e853e9306f915fb321df0ecbe7210d5afd14f",
+      "bytes": 137
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\native-normal-pipeline-initial.json",
+      "sha256": "c7f4a0310c61703e3af5ada05aa1a0e5263005393498a561079abec8321ee587",
+      "bytes": 2872
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\native-normal-pipeline.json",
+      "sha256": "c7f4a0310c61703e3af5ada05aa1a0e5263005393498a561079abec8321ee587",
+      "bytes": 2872
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\native-normal-pipeline.log",
+      "sha256": "745cca494a35a7aa50f07fba029e853e9306f915fb321df0ecbe7210d5afd14f",
+      "bytes": 137
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\normal-check.ts",
+      "sha256": "31af77663e02e67c99ce31fcfd4eb13eabe1c06f09dadb47a34a5d337b82ff80",
+      "bytes": 1043
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\targeted-complete.log",
+      "sha256": "b249a4e9d2961ea956ccc3bef604fe49dfcbe2a19ba63fad914bf33fe1305d38",
+      "bytes": 81776
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\targeted-final.log",
+      "sha256": "1949f204ecf286dc95a4ef65e221bdc67f3277eac02efd5189e3db8f393cac22",
+      "bytes": 80067
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\targeted-initial.log",
+      "sha256": "c921b6c97cdd7feba48e4e98e877236937abab1d67fb66941718bb3feadc5a07",
+      "bytes": 89795
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\targeted-retry.log",
+      "sha256": "c595bb43eb58e537e3378508b5494821c6ab4d3dcc17034da3ff89905cc9ee5d",
+      "bytes": 79478
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\typecheck-complete.log",
+      "sha256": "23a15944e38ab3fa01c169ac7a4e968e28ffbf58e82fe957c540b33663525d74",
+      "bytes": 227
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\typecheck-final.log",
+      "sha256": "23a15944e38ab3fa01c169ac7a4e968e28ffbf58e82fe957c540b33663525d74",
+      "bytes": 227
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\typecheck-initial.log",
+      "sha256": "5b7f0cb65065521a2b266b59fa20b39c192c270dba611471515d2698d62e4cc3",
+      "bytes": 433
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\typecheck-release.log",
+      "sha256": "23a15944e38ab3fa01c169ac7a4e968e28ffbf58e82fe957c540b33663525d74",
+      "bytes": 227
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\typecheck-second.log",
+      "sha256": "935a4169394ac30ad13a545a51ac3c677d7dd5b954edff668e23634b408a3154",
+      "bytes": 2185
+    },
+    {
+      "path": "C:\\Users\\17359\\OneDrive\\Desktop\\guide-agent-platform-sprint0\\run-artifacts\\delivery-recovery-fix-20261021\\unit-all.log",
+      "sha256": "1353c974a5fd25496962182ba4dcab10557581a16ecfb688c5675f4a0d9eef62",
+      "bytes": 220896
+    }
+  ]
+}

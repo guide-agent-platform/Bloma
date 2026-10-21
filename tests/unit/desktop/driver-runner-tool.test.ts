@@ -55,6 +55,18 @@ function toolFor(root: string | undefined, spawn: Parameters<typeof buildProject
 }
 
 describe('run_project_driver 工具', () => {
+  it.each(['passed', 'failed', 'unverified', 'environment_blocked'] as const)('quick uses the host CORE_CHECK path without a scaffold contract (%s)', async status => {
+    const root = await makeRoot(false)
+    const coreVerification = async (input: { projectId: string; sandboxRoot?: string }) => {
+      expect(input.projectId).toBe('proj-test'); expect(input.sandboxRoot).toBe(root)
+      return { status, summary: 'core result', missing: [], evidence: [], checked_at: '' }
+    }
+    const tool = buildProjectDriverRunnerTool('proj-test', { mode: 'quick', resolveRoot: () => root, coreVerification })
+    const out = await tool.execute({}, {} as never)
+    expect(out.isError).toBe(status !== 'passed')
+    expect(out.output).not.toContain('contract-invalid')
+    expect(out.detail).toMatchObject({ core_verification: { status } })
+  })
   it('合法契约 + 全绿驱动 → pass 渲染（场景读回 + 命令留档）', async () => {
     const root = await makeRoot(true)
     const tool = toolFor(root, async () => ({ code: 0, stdout: 'PASS 加法\nPASS 除零\nSUMMARY pass=2 fail=0', stderr: '' }))

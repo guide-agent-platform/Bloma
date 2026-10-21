@@ -23,6 +23,24 @@ window.App = (function () {
     return result;
   }
 
+  // Native injection may finish after DOMContentLoaded. Wait for the actual
+  // ready event instead of exhausting a single 120ms retry and poisoning UI boot.
+  var BRIDGE_READY_TIMEOUT_MS = 10000;
+  function nativeApi(op) {
+    function available() {
+      return window.pywebview && window.pywebview.api && typeof window.pywebview.api[op] === "function";
+    }
+    if (available()) return Promise.resolve(window.pywebview.api);
+    return new Promise(function (resolve, reject) {
+      var timer;
+      function cleanup() { window.removeEventListener("pywebviewready", ready); clearTimeout(timer); }
+      function ready() { if (available()) { cleanup(); resolve(window.pywebview.api); } }
+      window.addEventListener("pywebviewready", ready);
+      timer = setTimeout(function () { cleanup(); reject(new Error("桥未就绪：pywebview.api." + op)); }, BRIDGE_READY_TIMEOUT_MS);
+      ready();
+    });
+  }
+
   /** 调 Python api 方法：await App.call("op_name", arg1, ...) → Python 返回值。
    *  失败如实抛出（UI 层 catch 后走失败态横幅，不吞异常）。 */
   async function call(op) {
@@ -39,17 +57,9 @@ window.App = (function () {
       if (!body.ok) throw new Error(body.error || "call failed: " + op);
       return apiResult(body.result);
     }
-    if (window.pywebview && pywebview.api && pywebview.api[op]) {
-      var raw = await pywebview.api[op].apply(null, args);
-      try { return apiResult(JSON.parse(raw)); } catch (e) { return raw; }
-    }
-    // 桥未就绪（页面先于 pywebview 注入加载）——排队重试一次
-    await new Promise(function (r) { setTimeout(r, 120); });
-    if (window.pywebview && pywebview.api && pywebview.api[op]) {
-      var raw2 = await pywebview.api[op].apply(null, args);
-      try { return apiResult(JSON.parse(raw2)); } catch (e) { return raw2; }
-    }
-    throw new Error("桥未就绪：pywebview.api." + op);
+    var api = await nativeApi(op);
+    var raw = await api[op].apply(api, args);
+    try { return apiResult(JSON.parse(raw)); } catch (e) { return raw; }
   }
 
   /** 状态反馈条（UX 契约状态机的唯一呈现位）。

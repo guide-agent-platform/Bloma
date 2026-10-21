@@ -165,6 +165,7 @@ export function recordExperimentBoundary(projectId: string, event: string, paylo
     recordExperiment(config, event, payload)
     if (event === 'mvp_ready' || event === 'delivered') finishExperiment(config, 'ready', event)
     if (event === 'gate_exhausted') finishExperiment(config, 'failed', 'EXPERIMENT_GATE_EXHAUSTED')
+    if (event === 'quick_verifier_blocked') finishExperiment(config, 'failed', String(payload.reason ?? 'VERIFICATION_EVIDENCE_INSUFFICIENT'))
     if (event === 'core_verification_blocked') {
       const status = payload.verification_status === 'failed' ? 'FAILED' : payload.verification_status === 'environment_blocked' ? 'ENVIRONMENT_BLOCKED' : 'UNVERIFIED'
       finishExperiment(config, 'failed', `CORE_VERIFICATION_${status}`)

@@ -186,10 +186,11 @@ describe('experimental native preparation pause', () => {
         securityScan: () => { order.push('security'); return { passed: true, blocking: 0, scanned: 1, listing: '' } },
         launchSmoke: async () => { order.push('launch'); return { passed: true, detail: 'test smoke' } } })
       await handleDesktopDispatchMessage(input, deps)
-      expect(order).toEqual(['core', 'security', 'launch', 'V'])
+      expect(order).toEqual(['core', 'security', 'launch', ...Array(verdict === 'pass' ? 1 : 3).fill('V')])
       expect(record.desktop_phase === 'delivered').toBe(verdict === 'pass')
       expect(taskHandoff).toEqual(before)
       expect(taskHandoff.completion).toBe('incomplete')
+      if (verdict !== 'pass') expect((record as Record<string, unknown>).desktop_blocked).toMatchObject({ reason: 'verification-incomplete' })
     } finally {
       find.mockRestore(); loop.mockRestore(); review.mockRestore()
       if (oldHome === undefined) delete process.env.PROMA_HOME; else process.env.PROMA_HOME = oldHome

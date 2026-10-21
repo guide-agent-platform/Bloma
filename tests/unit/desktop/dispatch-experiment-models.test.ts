@@ -23,6 +23,7 @@ import { ensureCoreDelivery } from '../../../main/desktop/core-delivery'
 import { bindExperimentInput } from '../../../main/desktop/dispatch-experiment-runtime'
 import { findDelegation } from '../../../main/agent/delegation/agent-collaboration'
 import { readTaskHandoff } from '../../../main/agent/delegation/task-handoff'
+import * as normalStartup from '../../../main/desktop/normal-startup-verification'
 
 vi.mock('../../../main/platform/llm/channel-manager', async original => ({
   ...await original<typeof import('../../../main/platform/llm/channel-manager')>(),
@@ -498,10 +499,19 @@ describe('actual loop routing with fake SDK responses', () => {
     expect(reportModelExperiment('p').product_quality).toBeNull()
   })
 
-  it.each([true, false])('v2 invokes the pinned V and requires real reads before accepting its green claim (%s)', async readEvidence => {
+  it.each([
+    { readEvidence: true, startup: 'not_applicable', readStartup: false },
+    { readEvidence: false, startup: 'not_applicable', readStartup: false },
+    { readEvidence: true, startup: 'failed', readStartup: true },
+    { readEvidence: true, startup: 'unverified', readStartup: true },
+    { readEvidence: true, startup: 'passed', readStartup: false },
+    { readEvidence: true, startup: 'passed', readStartup: true },
+  ] as const)('v2 pinned V cannot bypass real reads or native-startup evidence ($readEvidence/$startup/$readStartup)', async ({ readEvidence, startup, readStartup }) => {
     const config = running(); config.production_protocol = 'v2'; config.condition_hash = experimentConditionHash(config); writeExperiment(config)
     save(join(home, 'agent-workspaces/default-software-builder/documents/p/prd.json'), JSON.stringify({ project_id: 'p', name: 'test', requirements: [{ id: 'F-001', description: '离线保存' }], acceptance: {}, constraints: [], assumptions: [], out_of_scope: [] }))
     save(join(root, '00_VERIFY/core-verification.json'), '{"status":"passed"}')
+    save(join(root, '00_VERIFY/normal-startup.json'), JSON.stringify({ status: startup }))
+    const normal = vi.spyOn(normalStartup, 'runNormalStartupVerification').mockResolvedValue({ probe_version: 1, status: startup, samples: [] })
     let calls = 0
     const query: SDKQuery = async function* (_prompt, options) {
       expect(options.env.ANTHROPIC_MODEL).toBe('mv')
@@ -510,14 +520,17 @@ describe('actual loop routing with fake SDK responses', () => {
       if (readEvidence && calls === 1) yield toolMessage('scope', 'read_production_context', { topic: 'features' })
       else if (readEvidence && calls === 2) yield toolMessage('host-report', 'read_file', { path: '00_VERIFY/core-verification.json' })
       else if (readEvidence && calls === 3) yield toolMessage('source', 'read_file', { path: 'placeholder.py' })
+      else if (readEvidence && readStartup && calls === 4) yield toolMessage('normal', 'read_file', { path: '00_VERIFY/normal-startup.json' })
       else yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: JSON.stringify({ verdict: 'pass', checked_features: ['F-001'], evidence: ['已读宿主报告与源码'], findings: [] }) }] } }
       yield { type: 'result', subtype: 'success', stop_reason: 'end_turn' }
     }
-    const result = await runQuickProductionReview({ projectId: 'p', sessionId: 'parent', requestId: 'review', currentPhase: 'desktop-implement', task: '', query,
-      env: {}, maxTokens: 2048, signal: new AbortController().signal, publish: () => {}, projectName: 'test', sandboxRoot: root, quickMode: true })
-    expect(result.verdict).toBe(readEvidence ? 'pass' : 'unverified')
+    let result
+    try { result = await runQuickProductionReview({ projectId: 'p', sessionId: 'parent', requestId: 'review', currentPhase: 'desktop-implement', task: '', query,
+      env: {}, maxTokens: 2048, signal: new AbortController().signal, publish: () => {}, projectName: 'test', sandboxRoot: root, quickMode: true }) }
+    finally { normal.mockRestore() }
+    expect(result.verdict).toBe(startup === 'failed' ? 'fail' : !readEvidence || startup === 'unverified' || startup === 'passed' && !readStartup ? 'unverified' : 'pass')
     const report = reportModelExperiment('p')
-    expect(report.model_requests_by_role.verifier.requests).toBe(readEvidence ? 4 : 1)
+    expect(report.model_requests_by_role.verifier.requests).toBe(readEvidence ? readStartup ? 5 : 4 : 1)
     expect(report.observed_models?.verifier?.model).toBe('mv')
     expect(report.product_quality).toBeNull()
     const sessionIndex = JSON.parse(readFileSync(join(home, 'bloma-agent-sessions.json'), 'utf8'))

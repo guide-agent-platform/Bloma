@@ -1,0 +1,56 @@
+{
+  "paid_model_calls": 0,
+  "scope": "Host TS runner, registered Python entry, real native WebView2 bridge and DOM, no dport; isolated fixtures copied from r5a; original untouched",
+  "results": [
+    {
+      "name": "normal-fixed",
+      "probe_version": 1,
+      "status": "passed",
+      "samples": [
+        {
+          "normal_mode": true,
+          "document_ready": true,
+          "bridge_ready": true,
+          "app_present": true,
+          "startup_error": "",
+          "visible_text": "便签板\n离线待办\n\n视图\n\n全部\n0\n未完成\n0\n已完成\n0\n本地保存 · 无需联网\n\n任务保存在本机，关闭程序后再次打开仍会保留。\n\n全部任务\n0 条 · 0 未完成 / 0 已完成\n＋\n新增\n还没有任务\n在上方输入一条待办，按回车或点「新增」即可保存到本机。"
+        },
+        {
+          "normal_mode": true,
+          "document_ready": true,
+          "bridge_ready": true,
+          "app_present": true,
+          "startup_error": "",
+          "visible_text": "便签板\n离线待办\n\n视图\n\n全部\n0\n未完成\n0\n已完成\n0\n本地保存 · 无需联网\n\n任务保存在本机，关闭程序后再次打开仍会保留。\n\n全部任务\n0 条 · 0 未完成 / 0 已完成\n＋\n新增\n还没有任务\n在上方输入一条待办，按回车或点「新增」即可保存到本机。"
+        }
+      ],
+      "fingerprint": "041a05e4601b447e21acf8729c8691ac94d7c59910674e1c458318b4136bb832",
+      "source_unchanged": true
+    },
+    {
+      "name": "normal-failure",
+      "probe_version": 1,
+      "status": "failed",
+      "samples": [
+        {
+          "normal_mode": true,
+          "document_ready": true,
+          "bridge_ready": true,
+          "app_present": true,
+          "startup_error": "加载失败：PROBE_INJECTED_FAILURE请重启应用后重试",
+          "visible_text": "便签板\n离线待办\n\n视图\n\n全部\n–\n未完成\n–\n已完成\n–\n本地保存 · 无需联网\n\n任务保存在本机，关闭程序后再次打开仍会保留。\n\n全部任务\n加载失败：PROBE_INJECTED_FAILURE\n请重启应用后重试\n＋\n新增"
+        },
+        {
+          "normal_mode": true,
+          "document_ready": true,
+          "bridge_ready": true,
+          "app_present": true,
+          "startup_error": "加载失败：PROBE_INJECTED_FAILURE请重启应用后重试",
+          "visible_text": "便签板\n离线待办\n\n视图\n\n全部\n–\n未完成\n–\n已完成\n–\n本地保存 · 无需联网\n\n任务保存在本机，关闭程序后再次打开仍会保留。\n\n全部任务\n加载失败：PROBE_INJECTED_FAILURE\n请重启应用后重试\n＋\n新增"
+        }
+      ],
+      "fingerprint": "03130ddebb49a9403fe446d17b2d991bc56870f771b3d16e49e016ec74b9f182",
+      "source_unchanged": true
+    }
+  ]
+}

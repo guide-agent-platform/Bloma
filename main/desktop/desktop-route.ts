@@ -718,7 +718,12 @@ async function settleDesktopStage(
           publish: (type, payload) => deps.publish(input, type, payload), projectName, sandboxRoot: project.root_path, quickMode: true }, {
           review: runQuickProductionReview,
           repair: feedback => runDesktopStage({ ...input, content: feedback, initialMessagePersisted: false }, query, env, 'desktop-implement', deps, projectName, chainDepth, true),
-          publish: text => deps.publish(input, 'message_delta', { text }), stop: () => deps.complete(input.sessionId, input.projectId, 'incomplete'),
+          supplement: feedback => runDesktopStage({ ...input, content: feedback, initialMessagePersisted: false }, query, env, 'desktop-implement', deps, projectName, chainDepth, true),
+          publish: text => deps.publish(input, 'message_delta', { text }), stop: reason => {
+            updateProject(input.projectId, { desktop_blocked: { reason: 'verification-incomplete', note: reason, at: new Date().toISOString() } })
+            deps.publish(input, 'stage_changed', { stage: phaseId, paused: true })
+            deps.complete(input.sessionId, input.projectId, 'incomplete')
+          },
         })) return
         updateProject(input.projectId, { desktop_phase: 'delivered', status: 'completed', current_stage: 'completed' })
         recordDeliveryOutcomeTelemetry(input.projectId, input.sessionId, 'quick-direct')

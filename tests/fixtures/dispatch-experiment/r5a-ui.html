@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<!-- 便签板 · 离线待办清单（按 00_UX/confirmed.html 已确认设计实现）
+     样式：kit.css → tokens.css → app.css（业务设计值在 tokens，业务样式在 app.css）
+     保留：App.call 桥、App.show + .w-banner、三个 js 引用、data-bloma-id 定位标记。
+     桥契约（app.py Api，冻结）：成功返回顶层扁平 {"ok":true,"view":…,"tasks":[{id,title,done}…],
+     "counts":{"all","active","completed"}}；失败 {"ok":false,"error":…}。
+     视图键：all / active / completed。UI 检查 ok 后读顶层 tasks/counts，缺失按协议错误上报。 -->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>便签板 · 离线待办清单</title>
+  <link rel="stylesheet" href="kit.css">
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- 左栏 212px：品牌 / 竖向三视图切换（带计数）/ 离线徽标 -->
+  <aside class="rail">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span>
+        <span class="brand-name">便签板</span><br>
+        <span class="brand-sub">离线待办</span>
+      </span>
+    </div>
+
+    <nav aria-label="视图筛选">
+      <p class="rail-label">视图</p>
+      <div class="views" id="views" data-bloma-id="view.group">
+        <button class="view-btn" type="button" data-view="all" aria-pressed="true" data-bloma-id="view.all">
+          <span>全部</span><span class="count" id="count-all" data-bloma-id="count.all">–</span>
+        </button>
+        <button class="view-btn" type="button" data-view="active" aria-pressed="false" data-bloma-id="view.active">
+          <span>未完成</span><span class="count" id="count-active" data-bloma-id="count.active">–</span>
+        </button>
+        <button class="view-btn" type="button" data-view="completed" aria-pressed="false" data-bloma-id="view.completed">
+          <span>已完成</span><span class="count" id="count-completed" data-bloma-id="count.completed">–</span>
+        </button>
+      </div>
+    </nav>
+
+    <div class="rail-foot">
+      <div class="offline-badge"><span class="dot" aria-hidden="true"></span>本地保存 · 无需联网</div>
+      <p class="rail-note">任务保存在本机，关闭程序后再次打开仍会保留。</p>
+    </div>
+  </aside>
+
+  <!-- 主区 -->
+  <main class="main" data-page-id="P-001">
+    <header class="main-head">
+      <h1 class="main-title" id="main-title" data-bloma-id="main.title">全部任务</h1>
+      <span class="main-meta" id="main-meta" data-bloma-id="main.meta"></span>
+    </header>
+
+    <!-- 状态反馈条：App.show(...) 的唯一呈现位（呈现逻辑在 bridge.js） -->
+    <div class="w-banner"></div>
+
+    <!-- 快速记录条：三种视图下均可见可用，回车或按钮提交 -->
+    <form class="composer" id="composer" data-bloma-id="composer.form" novalidate>
+      <input type="text" id="task-input" placeholder="记一条待办，回车或点「新增」保存"
+             aria-label="任务标题" autocomplete="off" data-bloma-id="composer.input">
+      <button class="add-btn" type="submit" id="btn-add" data-bloma-id="composer.add">
+        <span class="plus" aria-hidden="true">＋</span>新增
+      </button>
+    </form>
+
+    <!-- 按新增顺序的便签列表（行由 JS 从 list_tasks 渲染） -->
+    <section class="list-wrap" id="task-list" aria-label="任务列表" data-bloma-id="task.list"></section>
+  </main>
+
+</div>
+
+<!-- 删除图标模板（静态结构，按行克隆） -->
+<template id="tpl-del-icon">
+  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 3.5h9M5.5 3.5V2.2h3v1.3M3.6 3.5l.5 8.1h5.8l.5-8.1" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+</template>
+
+<script src="bridge.js"></script>
+<script src="preview-state.js"></script>
+<script src="correction.js"></script>
+<script>
+  "use strict";
+  // ── 便签板业务：UI 只渲染与收集输入，真相在 Python 逻辑层（list_tasks/add_task/toggle_task/delete_task）──
+  var VIEW_TITLES = { all: "全部任务", active: "未完成任务", completed: "已完成任务" };
+  var currentView = "all";
+  var booted = false;
+
+  function $(id) { return document.getElementById(id); }
+
+  // 桥成功返回顶层扁平 {ok:true, view, tasks, counts}；失败 {ok:false,error}。
+  // ok=false 或业务字段缺失都按协议错误抛出，不得当空表掩盖。
+  function readTaskPage(resp, opName) {
+    if (!resp || resp.ok !== true) throw new Error(resp && resp.error ? resp.error : opName + " 返回失败");
+    if (!Array.isArray(resp.tasks)) throw new Error(opName + " 返回缺少 tasks 列表");
+    var c = resp.counts;
+    if (!c || typeof c !== "object" ||
+        typeof c.all !== "number" || typeof c.active !== "number" || typeof c.completed !== "number") {
+      throw new Error(opName + " 返回缺少三视图计数");
+    }
+    return resp;
+  }
+
+  async function fetchView(view) {
+    return readTaskPage(await App.call("list_tasks", view), "list_tasks");
+  }
+
+  function renderCounts(counts) {
+    $("count-all").textContent = String(counts.all);
+    $("count-active").textContent = String(counts.active);
+    $("count-completed").textContent = String(counts.completed);
+    $("main-meta").textContent =
+      counts.all + " 条 · " + counts.active + " 未完成 / " + counts.completed + " 已完成";
+  }
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function renderEmpty(allEmpty) {
+    var box = el("div", "empty");
+    box.appendChild(el("div", "empty-title", allEmpty ? "还没有任务" : "这个视图里还没有任务"));
+    box.appendChild(el("div", "empty-sub",
+      allEmpty ? "在上方输入一条待办，按回车或点「新增」即可保存到本机。"
+               : "切换到其他视图查看，或在上方新增一条待办。"));
+    return box;
+  }
+
+  function renderTasks(tasks) {
+    var wrap = $("task-list");
+    while (wrap.firstChild) wrap.removeChild(wrap.firstChild);
+    if (!tasks.length) { wrap.appendChild(renderEmpty(currentView === "all")); return; }
+
+    var head = el("div", "list-head");
+    head.appendChild(el("span", null, "按新增顺序排列"));
+    head.appendChild(el("span", "order", "1 → " + tasks.length));
+    wrap.appendChild(head);
+
+    var tpl = $("tpl-del-icon");
+    tasks.forEach(function (t) {
+      if (t.id == null || typeof t.title !== "string" || typeof t.done !== "boolean") {
+        throw new Error("任务数据格式不正确（缺 id/title/done）");
+      }
+      var row = el("article", "task" + (t.done ? " done" : ""));
+      row.dataset.taskId = String(t.id);
+
+      var check = el("button", "check");
+      check.type = "button";
+      check.setAttribute("aria-pressed", t.done ? "true" : "false");
+      check.setAttribute("aria-label", (t.done ? "取消完成：" : "标记完成：") + t.title);
+      check.dataset.action = "toggle";
+      check.dataset.taskId = String(t.id);
+      check.setAttribute("data-bloma-id", "task.check");
+      row.appendChild(check);
+
+      var title = el("span", "task-title", t.title);
+      title.setAttribute("data-bloma-id", "task.title");
+      row.appendChild(title);
+
+      var state = el("span", "task-state", t.done ? "已完成" : "未完成");
+      state.setAttribute("data-bloma-id", "task.state");
+      row.appendChild(state);
+
+      var del = el("button", "del");
+      del.type = "button";
+      del.setAttribute("aria-label", "删除：" + t.title);
+      del.dataset.action = "delete";
+      del.dataset.taskId = String(t.id);
+      del.setAttribute("data-bloma-id", "task.delete");
+      del.appendChild(tpl.content.cloneNode(true));
+      row.appendChild(del);
+
+      wrap.appendChild(row);
+    });
+  }
+
+  // 当前视图刷新 + 全量页兜底（full 页同时携带三视图计数）
+  async function refreshView() {
+    var page = await fetchView(currentView);
+    renderTasks(page.tasks);
+    renderCounts(page.counts);
+  }
+
+  function setPressedView(view) {
+    currentView = view;
+    $("main-title").textContent = VIEW_TITLES[view] || "全部任务";
+    var btns = document.querySelectorAll("#views .view-btn");
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].setAttribute("aria-pressed", btns[i].dataset.view === view ? "true" : "false");
+    }
+  }
+
+  async function boot() {
+    if (booted) return;
+    booted = true;
+    try {
+      await refreshView(); // 默认全部视图
+      App.hide();
+    } catch (e) {
+      App.show("failed", "加载失败：" + e.message, "请重启应用后重试");
+    }
+  }
+
+  // ── 新增：onSend 标准形态（running→终态；失败恢复输入原值；成功清空并刷新）──
+  async function onSend() {
+    var input = $("task-input");
+    var btn = $("btn-add");
+    var composer = $("composer");
+    var raw = input.value;
+    var title = raw.trim();
+    if (!title) { // 空白标题：不保存、列表不变、输入恢复原值、横幅提示
+      composer.setAttribute("data-invalid", "true");
+      input.value = raw;
+      App.show("failed", "标题不能为空", "输入任务内容后再保存");
+      return;
+    }
+    composer.removeAttribute("data-invalid");
+    btn.disabled = true; // 提交中禁用触发按钮
+    try {
+      App.show("running", "正在保存…");
+      readTaskPage(await App.call("add_task", title), "add_task");
+      input.value = ""; // 成功才清空
+      await refreshView(); // 列表与三视图计数同步，当前视图保持选中
+      App.show("success", "已保存：" + title);
+    } catch (e) {
+      input.value = raw; // 失败不丢已输入内容
+      App.show("failed", "保存失败：" + e.message, "输入已保留，可重试");
+    } finally {
+      btn.disabled = false;
+      setTimeout(App.hide, 2200);
+    }
+  }
+
+  // ── 视图切换：高亮当前选中，list_tasks(view) 刷新，不自动跳回 ──
+  $("views").addEventListener("click", async function (e) {
+    var btn = e.target.closest(".view-btn");
+    if (!btn) return;
+    setPressedView(btn.dataset.view);
+    try {
+      await refreshView();
+      App.hide();
+    } catch (err) {
+      App.show("failed", "加载视图失败：" + err.message, "请重试或重启应用");
+    }
+  });
+
+  // ── 行内操作：勾选切换 / 删除（事件委托，按 taskId 定位唯一任务）──
+  $("task-list").addEventListener("click", async function (e) {
+    var btn = e.target.closest("[data-action]");
+    if (!btn) return;
+    var action = btn.dataset.action;
+    var row = e.target.closest(".task");
+    var title = row && row.querySelector(".task-title") ? row.querySelector(".task-title").textContent : "";
+    btn.disabled = true; // 提交中禁用触发按钮
+    try {
+      if (action === "toggle") {
+        readTaskPage(await App.call("toggle_task", btn.dataset.taskId), "toggle_task");
+        await refreshView(); // 计数与当前视图同步（如未完成视图下该行移出）
+      } else if (action === "delete") {
+        readTaskPage(await App.call("delete_task", btn.dataset.taskId), "delete_task");
+        await refreshView();
+        App.show("success", "已删除：" + title);
+        setTimeout(App.hide, 2200);
+      }
+    } catch (err) {
+      App.show("failed", (action === "toggle" ? "切换失败：" : "删除失败：") + err.message,
+        "列表已刷新为当前保存状态，可重试");
+      try { await refreshView(); } catch (e2) { /* 保留失败横幅 */ }
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // ── 快速记录条：回车或按钮提交 ──
+  $("composer").addEventListener("submit", function (e) { e.preventDefault(); onSend(); });
+  $("task-input").addEventListener("input", function () {
+    $("composer").removeAttribute("data-invalid"); // 输入即清除错误描边
+  });
+
+  // 首屏装载：默认全部视图。pywebview 注入就绪（正常启动）或驱动模式（dport，HTTP 桥）
+  window.addEventListener("pywebviewready", boot);
+  if (/[?&]dport=\d+/.test(window.location.search)) boot();
+  else document.addEventListener("DOMContentLoaded", function () { setTimeout(boot, 300); });
+</script>
+</body>
+</html>

@@ -26,12 +26,15 @@ import type { AgentLoopTool, ToolOutcome } from '../agent/loop/agent-loop'
 import { findProject } from '../project/project-service'
 import { parseProjectContract } from './contract-schema'
 import { execFileDriverSpawn, runContractDriver, type DriverExecutionReport, type DriverSpawn } from './process-driver'
+import { runCoreVerification, type CoreVerificationResult } from './core-verification'
 
 /** 契约路径（对齐 dispatcher-loop 的 CONTRACT_PATH，单一常量防漂移）。 */
 const CONTRACT_RELATIVE_PATH = '00_SCAFFOLD/contract.json'
 
 /** 驱动执行工具可注入依赖（测试桩零真实子进程、零真实项目解析）。 */
 export interface ProjectDriverRunnerDeps {
+  mode?: 'quick' | 'longterm'
+  coreVerification?: typeof runCoreVerification
   spawn?: DriverSpawn
   /** 项目根解析覆盖（缺省 sandboxRoot ?? findProject(projectId).root_path）。 */
   resolveRoot?: (projectId: string) => string | undefined
@@ -84,8 +87,8 @@ export function buildProjectDriverRunnerTool(projectId: string, deps: ProjectDri
   return {
     name: 'run_project_driver',
     description:
-      '真实执行本项目的驱动验收命令（平台收口 spawn：契约声明制 + 命令黑名单 + env 白名单 + 超时硬停，不接受任意命令）。' +
-      'desktop-implement 阶段获得真实红绿反馈的唯一通道：收口前运行一次，失败清单交同一委派线修复后复跑，' +
+      '真实执行本项目业务检查：quick读取CORE_CHECK.json运行核心及GUI检查，无需00_SCAFFOLD契约；longterm按契约执行驱动。使用同一宿主执行器、命令边界与超时。' +
+      '收口前运行一次，失败清单交同一委派线修复后复跑，' +
       '全部场景 PASS 才可申请推进确认。blocked 为环境类问题，不要反复重试。',
     input_schema: { type: 'object', properties: {} },
     execute: async (_input, ctx): Promise<ToolOutcome> => {
@@ -100,6 +103,10 @@ export function buildProjectDriverRunnerTool(projectId: string, deps: ProjectDri
           output: `项目根不可解析（projectId=${projectId}）：无法定位驱动工作目录。请确认项目存在后再试；这是 blocked 类问题，不要绕过。`,
           isError: true,
         }
+      }
+      if ((deps.mode ?? (deps.resolveRoot ? undefined : findProject(projectId)?.mode)) === 'quick') {
+        const result: CoreVerificationResult = await (deps.coreVerification ?? runCoreVerification)({ projectId, sandboxRoot: root, spawn: deps.spawn })
+        return { output: `${result.summary}\n${JSON.stringify(result)}`, isError: result.status !== 'passed', detail: { core_verification: result } }
       }
       let jsonText: string
       try {
