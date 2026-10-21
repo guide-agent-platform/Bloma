@@ -518,7 +518,7 @@ async function runAgentLoopSafe(
         if (feedback) return feedback
         const config = node.id === 'desktop-implement' ? readExperiment(input.projectId) : undefined
         return config?.state === 'running' && !experimentTasksFinished(config)
-          ? '【宿主实验完成条件】已登记的任务尚未全部完成。请读取真实委派状态、失败原因及剩余额度，补未执行或未完成任务；不要将已发起委派当作执行完毕，也不能换执行器隐去失败或清零预算。'
+            ? '【宿主实验执行条件】已登记任务尚未全部执行结束。请读取真实委派状态及剩余额度，补未执行或未结束任务；不能换执行器隐去失败或清零预算。执行依赖就绪不代表业务通过，历史诊断与当前验证缺口仍交后续集成、宿主检查及V核对。'
           : undefined
       } } : {}),
       signal: input.signal,

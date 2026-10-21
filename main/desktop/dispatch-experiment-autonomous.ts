@@ -1,7 +1,7 @@
 import type { AgentLoopTool, ToolContext, ToolOutcome } from '../agent/loop/agent-loop'
 import { findDelegation, getDelegationSummary } from '../agent/delegation/agent-collaboration'
 import { experimentLimits, recordExperiment, validateExperimentTasks, writeExperiment, type DispatchExperiment, type ExperimentTask } from './dispatch-experiment'
-import { assertExperimentWorkerRecovery } from './dispatch-experiment-recovery'
+import { assertExperimentWorkerRecovery, experimentWorkerExecutionFinished } from './dispatch-experiment-recovery'
 import { assertDelegationRecovery } from '../agent/delegation/delegation-evidence'
 import { readPrdBackplane } from '../project/prd-store'
 
@@ -12,7 +12,8 @@ export function autonomousTaskBook(config: DispatchExperiment): string {
     'writes只接受具体文件路径或以 / 结尾的目录前缀，不支持 *、**、? 通配符；不合法范围会在锁定计划前拒绝。\n' +
     (config.required_writes?.length ? `宿主必需交付文件（项目根相对路径）：${config.required_writes.join('、')}。计划写入范围必须覆盖这些文件；首次派遣前缺失会明确拒绝，可重新提交你自己的计划。测试脚本名称与业务分解仍由你决定。\n` : '') +
     `实现者最多 ${limits.max_workers} 名，任务登记最多 ${limits.max_tasks} 项。delegate_agent 用 task_ids 分配任务；continue_delegation 可分配尚未执行的已登记任务或发送修复反馈。\n` +
-    '一次委派或续接分配的一批任务，须等该实现者整轮成功结束后才释放给其他实现者的依赖；运行中不会提前发布其中单个任务已完成的事件。请据此安排你自己的依赖与并行派发。\n' +
+    '一次委派或续接分配的一批任务，须等该实现者生命周期completed且loop_status=completed才释放执行依赖；运行中不会提前释放单个任务。experiment_status的dependency_ready只表示可接手稳定输出，不代表业务通过。\n' +
+    '旧自测失败、测试脚本错误和stale/unknown凭据仍保留在task_handoff，交后续验证、集成或修复处理；不要为清空历史诊断重复同一工作。最终交付仍须通过当前版本宿主核心检查、安全、启动门和规定的V审阅。累计预算耗尽、取消或未结束的执行器仍不能放行。\n' +
     '任务正文只在experiment_plan登记一次，派工仅传task_ids，不在task或feedback中复制正文。任务写目标、接口、验收引用和写入边界即可，不预写完整实现。已有名额用完后以continue_delegation复用已结束实现者；先用experiment_status读取实际状态、loop结果、交接证据和依赖，不把等待、进程结束或摘要自述当作验收。续接feedback仅传新增事实、失败证据或接口变更。\n' +
     'CORE_CHECK.json 的 scenarios 最多 64 条，场景名须唯一；合并重复场景时仍须覆盖全部已确认需求。\n' +
     '角色、模型由宿主实验配置绑定，不自行修改。规划登记只定义执行协议，不表示任务或产物已验收；是否启动、分配、等待、集成和修复由你决定。历史证据不是当前版本已通过证明。'
@@ -63,6 +64,8 @@ export function wrapAutonomousDispatcherTools(tools: AgentLoopTool[], config: Di
           }
           return { slot, delegation_id: worker.delegation_id, task_ids: worker.task_ids, status: record?.status ?? 'missing',
             loop_status: record?.loopStatus ?? null, task_handoff: record?.taskHandoff ?? null,
+            dependency_ready: worker.has_executed && experimentWorkerExecutionFinished(record),
+            verification_state: record?.taskHandoff?.completion ?? 'unverified',
             can_continue: !continuationBlocked, continuation_blocked_reason: continuationBlocked } }),
       }) }
     } }
@@ -101,8 +104,8 @@ export function wrapAutonomousDispatcherTools(tools: AgentLoopTool[], config: Di
             const owner = Object.values(config.workers).find(worker => worker.task_ids.includes(dependency))
             const record = owner && findDelegation(ctx.sessionId, owner.delegation_id)
             assertExperimentWorkerRecovery(config, record)
-            if (!owner?.has_executed || record?.status !== 'completed' || record.loopStatus !== 'completed') throw new Error('EXPERIMENT_DEPENDENCY_WAIT')
-            if (getDelegationSummary(record).task_handoff?.completion === 'incomplete') throw new Error('EXPERIMENT_DEPENDENCY_UNRESOLVED: 负责人已结束，但宿主交接仍含失败或阻塞；先修复该依赖。')
+            if (!owner?.has_executed || !experimentWorkerExecutionFinished(record)) throw new Error('EXPERIMENT_DEPENDENCY_WAIT')
+            getDelegationSummary(record!) // Refresh and retain verification findings; they are inputs to the next task.
           }
           const scopes = selected.flatMap(task => task.writes).map(path => path.toLowerCase())
           for (const worker of Object.values(config.workers)) {

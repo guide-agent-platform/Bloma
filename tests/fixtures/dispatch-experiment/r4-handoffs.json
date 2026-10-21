@@ -1,0 +1,386 @@
+{
+  "source_run": "production-v2-L1-quick-20261020-r4-G11",
+  "backend": {
+    "schema_version": 1,
+    "completion": "unverified",
+    "loop_status": "completed",
+    "changed_files": [
+      "core/__init__.py",
+      "core/tasks.py",
+      "app.py",
+      "core_check.py",
+      "00_VERIFY/logic/drive_smoke.py",
+      "CORE_CHECK.json",
+      "LAUNCH.json"
+    ],
+    "verification": [
+      {
+        "schema_version": 1,
+        "execution": "completed",
+        "verification": "not_applicable",
+        "source": "host"
+      },
+      {
+        "schema_version": 1,
+        "execution": "completed",
+        "verification": "not_applicable",
+        "source": "host"
+      },
+      {
+        "schema_version": 1,
+        "execution": "completed",
+        "verification": "not_applicable",
+        "source": "host"
+      },
+      {
+        "schema_version": 1,
+        "execution": "completed",
+        "verification": "not_applicable",
+        "source": "host"
+      },
+      {
+        "schema_version": 1,
+        "execution": "completed",
+        "verification": "unverified",
+        "scope": "reported_scenarios",
+        "budget": {
+          "resource": "script_runs",
+          "scope": "session",
+          "used": 4,
+          "limit": 64,
+          "remaining": 60,
+          "resets_on": "new_run"
+        },
+        "source": "host",
+        "exit_code": 0,
+        "evidence": {
+          "key": "df2cfc3fa40eb312bd8c7f7e410338f8af6c160383d04ab2c81be75a684181e1",
+          "entry": "inline-call_51644b12b6cd4bdb85fcaad3",
+          "source_fingerprint": "b2bf2e8c93f6505c65acc8209d646a4ee6168235b4fee4b2dfc91c0a138c60f7",
+          "environment_fingerprint": "2c98788bd2c60291ef34b7b55d64924bc0fa031a5aea45583cd7de7b9291a090",
+          "freshness": "stale",
+          "passed": 2,
+          "failed": 0,
+          "blocked": 0,
+          "attempt_seq": 4
+        }
+      },
+      {
+        "schema_version": 1,
+        "execution": "completed",
+        "verification": "unverified",
+        "scope": "reported_scenarios",
+        "budget": {
+          "resource": "script_runs",
+          "scope": "session",
+          "used": 10,
+          "limit": 64,
+          "remaining": 54,
+          "resets_on": "new_run"
+        },
+        "source": "host",
+        "exit_code": 0,
+        "evidence": {
+          "key": "dbcf852eaa755f2ae37c1979a7c1a92c6afc999b9a86f295ba73018a46d74c95",
+          "entry": "00_VERIFY/logic/drive_smoke.py",
+          "source_fingerprint": "60f3152d26718ad8b8ce870b31b740585cea08ee3d6933041ca3fbee6d4b47fe",
+          "environment_fingerprint": "2c98788bd2c60291ef34b7b55d64924bc0fa031a5aea45583cd7de7b9291a090",
+          "freshness": "stale",
+          "passed": 2,
+          "failed": 0,
+          "blocked": 0,
+          "attempt_seq": 10
+        }
+      },
+      {
+        "schema_version": 1,
+        "execution": "completed",
+        "verification": "passed",
+        "scope": "reported_scenarios",
+        "budget": {
+          "resource": "script_runs",
+          "scope": "session",
+          "used": 11,
+          "limit": 64,
+          "remaining": 53,
+          "resets_on": "new_run"
+        },
+        "source": "host",
+        "exit_code": 0,
+        "evidence": {
+          "key": "6da94553525789f9cc86a60bb994855752f37be9d82c761ee74563c5d31ff403",
+          "entry": "core_check.py",
+          "source_fingerprint": "19d3c80df15e8d0b1841511f85267399a0ac05e48be4f5712efddaa71298c8b2",
+          "environment_fingerprint": "2c98788bd2c60291ef34b7b55d64924bc0fa031a5aea45583cd7de7b9291a090",
+          "freshness": "current",
+          "passed": 8,
+          "failed": 0,
+          "blocked": 0,
+          "attempt_seq": 11
+        }
+      },
+      {
+        "schema_version": 1,
+        "execution": "completed",
+        "verification": "not_applicable",
+        "scope": "execution_resources",
+        "budget": {
+          "resource": "script_runs",
+          "scope": "session",
+          "used": 11,
+          "limit": 64,
+          "remaining": 53,
+          "resets_on": "new_run"
+        },
+        "source": "host"
+      }
+    ],
+    "pending": [
+      "inline-call_51644b12b6cd4bdb85fcaad3: 验证版本 stale，核对变更后仅补缺失验证",
+      "00_VERIFY/logic/drive_smoke.py: 验证版本 stale，核对变更后仅补缺失验证"
+    ],
+    "recovery": "none",
+    "resources": [
+      {
+        "resource": "script_runs",
+        "scope": "session",
+        "used": 11,
+        "limit": 64,
+        "remaining": 53,
+        "resets_on": "new_run"
+      }
+    ]
+  },
+  "ui": {
+    "schema_version": 1,
+    "completion": "incomplete",
+    "loop_status": "completed",
+    "changed_files": [
+      "ui/tokens.css",
+      "ui/app.css",
+      "ui/index.html",
+      "ui/app.js"
+    ],
+    "verification": [
+      {
+        "schema_version": 1,
+        "execution": "completed",
+        "verification": "passed",
+        "scope": "reported_scenarios",
+        "budget": {
+          "resource": "script_runs",
+          "scope": "session",
+          "used": 9,
+          "limit": 64,
+          "remaining": 55,
+          "resets_on": "new_run"
+        },
+        "source": "host",
+        "exit_code": 0,
+        "evidence": {
+          "key": "daf396e394900dcb3fa6987d3fec8f6fe3edfc961d399fb3ac3269b64fcb85b3",
+          "entry": "inline-call_958242dd15cc4636ae23d644",
+          "source_fingerprint": "125d1ce4cb039448fbdd1e84950a2f1ede84aee525cfaaafac8d64afc8857889",
+          "environment_fingerprint": "264ef53c47b72a961f28f1336e1c3d356bb90e826d6590f69ac92095e43e0357",
+          "freshness": "current",
+          "passed": 1,
+          "failed": 0,
+          "blocked": 0,
+          "attempt_seq": 9
+        }
+      },
+      {
+        "schema_version": 1,
+        "execution": "completed",
+        "verification": "passed",
+        "scope": "reported_scenarios",
+        "budget": {
+          "resource": "script_runs",
+          "scope": "session",
+          "used": 10,
+          "limit": 64,
+          "remaining": 54,
+          "resets_on": "new_run"
+        },
+        "source": "host",
+        "exit_code": 0,
+        "evidence": {
+          "key": "b96ba1230c3d81c30b49700c28c9f04dc1494d120cfa5730ae5a03f59d4b2340",
+          "entry": "inline-call_2579c7ae1f694c55a14d0f65",
+          "source_fingerprint": "125d1ce4cb039448fbdd1e84950a2f1ede84aee525cfaaafac8d64afc8857889",
+          "environment_fingerprint": "264ef53c47b72a961f28f1336e1c3d356bb90e826d6590f69ac92095e43e0357",
+          "freshness": "current",
+          "passed": 5,
+          "failed": 0,
+          "blocked": 0,
+          "attempt_seq": 10
+        }
+      },
+      {
+        "schema_version": 1,
+        "execution": "completed",
+        "verification": "passed",
+        "scope": "reported_scenarios",
+        "budget": {
+          "resource": "script_runs",
+          "scope": "session",
+          "used": 11,
+          "limit": 64,
+          "remaining": 53,
+          "resets_on": "new_run"
+        },
+        "source": "host",
+        "exit_code": 0,
+        "evidence": {
+          "key": "8eb0e77e1388dee6c7df51ff4f3da7369429127bf4f402d0a51834aa71551cc8",
+          "entry": "inline-call_b35deb25d45a4c68a15a7b79",
+          "source_fingerprint": "125d1ce4cb039448fbdd1e84950a2f1ede84aee525cfaaafac8d64afc8857889",
+          "environment_fingerprint": "264ef53c47b72a961f28f1336e1c3d356bb90e826d6590f69ac92095e43e0357",
+          "freshness": "current",
+          "passed": 5,
+          "failed": 0,
+          "blocked": 0,
+          "attempt_seq": 11
+        }
+      },
+      {
+        "schema_version": 1,
+        "execution": "failed",
+        "verification": "failed",
+        "scope": "reported_scenarios",
+        "category": "product_assertion",
+        "recovery": "repair_product",
+        "budget": {
+          "resource": "script_runs",
+          "scope": "session",
+          "used": 2,
+          "limit": 64,
+          "remaining": 62,
+          "resets_on": "new_run"
+        },
+        "source": "host",
+        "exit_code": 1,
+        "evidence": {
+          "key": "d4d9355aff7311e69b31a821eb9f4e35cc5d5bcf593666dab088affecdddf60b",
+          "entry": "inline-call_57c0ff4909cf40fd95e20b41",
+          "source_fingerprint": "125d1ce4cb039448fbdd1e84950a2f1ede84aee525cfaaafac8d64afc8857889",
+          "environment_fingerprint": "264ef53c47b72a961f28f1336e1c3d356bb90e826d6590f69ac92095e43e0357",
+          "freshness": "current",
+          "passed": 24,
+          "failed": 1,
+          "blocked": 0,
+          "attempt_seq": 2
+        }
+      },
+      {
+        "schema_version": 1,
+        "execution": "failed",
+        "verification": "unverified",
+        "reason": "timeout",
+        "category": "environment",
+        "recovery": "prepare_environment",
+        "evidence": {
+          "key": "5fef12e0da2686e272890897671590cea183495e19bd66edb3a9d9e038f05a44",
+          "entry": "inline-call_49fe0a4759374b39ac8d5ed1",
+          "source_fingerprint": "125d1ce4cb039448fbdd1e84950a2f1ede84aee525cfaaafac8d64afc8857889",
+          "environment_fingerprint": "264ef53c47b72a961f28f1336e1c3d356bb90e826d6590f69ac92095e43e0357",
+          "freshness": "current",
+          "passed": 0,
+          "failed": 0,
+          "blocked": 0,
+          "attempt_seq": 3
+        }
+      },
+      {
+        "schema_version": 1,
+        "execution": "completed",
+        "verification": "failed",
+        "scope": "reported_scenarios",
+        "category": "product_assertion",
+        "recovery": "repair_product",
+        "budget": {
+          "resource": "script_runs",
+          "scope": "session",
+          "used": 7,
+          "limit": 64,
+          "remaining": 57,
+          "resets_on": "new_run"
+        },
+        "source": "host",
+        "exit_code": 0,
+        "evidence": {
+          "key": "f59e867bd54796ab60d78e7d3918808a88a51805cfb475d449e3ec60b7523138",
+          "entry": "inline-call_899670b26e0c44aa846f6a63",
+          "source_fingerprint": "125d1ce4cb039448fbdd1e84950a2f1ede84aee525cfaaafac8d64afc8857889",
+          "environment_fingerprint": "264ef53c47b72a961f28f1336e1c3d356bb90e826d6590f69ac92095e43e0357",
+          "freshness": "current",
+          "passed": 2,
+          "failed": 3,
+          "blocked": 0,
+          "attempt_seq": 7
+        }
+      },
+      {
+        "schema_version": 1,
+        "execution": "completed",
+        "verification": "failed",
+        "scope": "reported_scenarios",
+        "category": "product_assertion",
+        "recovery": "repair_product",
+        "budget": {
+          "resource": "script_runs",
+          "scope": "session",
+          "used": 8,
+          "limit": 64,
+          "remaining": 56,
+          "resets_on": "new_run"
+        },
+        "source": "host",
+        "exit_code": 0,
+        "evidence": {
+          "key": "7e9eaf13d5c225ee4ab6012a352be2fd0a6d0b000b241dc2a70a8ac4681ccca8",
+          "entry": "inline-call_afa64a7475db4337a62f4368",
+          "source_fingerprint": "125d1ce4cb039448fbdd1e84950a2f1ede84aee525cfaaafac8d64afc8857889",
+          "environment_fingerprint": "264ef53c47b72a961f28f1336e1c3d356bb90e826d6590f69ac92095e43e0357",
+          "freshness": "current",
+          "passed": 2,
+          "failed": 1,
+          "blocked": 0,
+          "attempt_seq": 8
+        }
+      },
+      {
+        "schema_version": 1,
+        "execution": "completed",
+        "verification": "not_applicable",
+        "scope": "execution_resources",
+        "budget": {
+          "resource": "script_runs",
+          "scope": "session",
+          "used": 11,
+          "limit": 64,
+          "remaining": 53,
+          "resets_on": "new_run"
+        },
+        "source": "host"
+      }
+    ],
+    "pending": [
+      "reported_scenarios: product_assertion; repair_product",
+      "工具: environment; timeout",
+      "reported_scenarios: product_assertion; repair_product",
+      "reported_scenarios: product_assertion; repair_product"
+    ],
+    "recovery": "inspect",
+    "resources": [
+      {
+        "resource": "script_runs",
+        "scope": "session",
+        "used": 11,
+        "limit": 64,
+        "remaining": 53,
+        "resets_on": "new_run"
+      }
+    ]
+  }
+}

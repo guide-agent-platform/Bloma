@@ -36,7 +36,7 @@ function fixture(required = ['CORE_CHECK.json', 'DELIVERY.md', 'LAUNCH.json']) {
   return { config, created, ctx, plan: tools.find(t => t.name === 'experiment_plan')!, delegate: tools.find(t => t.name === 'delegate_agent')!, status: tools.find(t => t.name === 'experiment_status')! }
 }
 describe('pre-dispatch required artifact permission coverage', () => {
-  it('does not release dependencies merely because the worker loop ended while host facts still report failure', async () => {
+  it('releases ended execution to the next verifier while preserving failed host facts', async () => {
     const f = fixture([])
     await f.plan.execute({ tasks: [{ id: 'left', instruction: '接口', depends_on: [], writes: ['left.py'] },
       { id: 'right', instruction: '消费者', depends_on: ['left'], writes: ['right.py'] }] }, f.ctx)
@@ -44,8 +44,12 @@ describe('pre-dispatch required artifact permission coverage', () => {
     const taskHandoff = buildTaskHandoff({ status: 'completed', turns: 1, finalText: '', toolCalls: [],
       tool_feedback: [{ schema_version: 1, execution: 'completed', verification: 'failed', category: 'product_assertion' }] })
     vi.spyOn(collaboration, 'findDelegation').mockReturnValue({ status: 'completed', loopStatus: 'completed', taskHandoff } as collaboration.DelegationRecord)
-    expect((await f.delegate.execute({ task_ids: ['right'] }, f.ctx)).output).toContain('EXPERIMENT_DEPENDENCY_UNRESOLVED')
-    expect(f.created).not.toHaveBeenCalled()
+    expect((await f.delegate.execute({ task_ids: ['right'] }, f.ctx)).isError).not.toBe(true)
+    expect(f.created).toHaveBeenCalledTimes(1)
+    expect(taskHandoff.completion).toBe('incomplete')
+    expect(taskHandoff.verification).toContainEqual(expect.objectContaining({ verification: 'failed' }))
+    const status = JSON.parse((await f.status.execute({}, f.ctx)).output)
+    expect(status.workers[0]).toMatchObject({ dependency_ready: true, verification_state: 'incomplete' })
   })
   it('status uses the actual continuation admission policy, including exhausted cumulative resources', async () => {
     const f = fixture([])
@@ -56,6 +60,7 @@ describe('pre-dispatch required artifact permission coverage', () => {
     vi.spyOn(collaboration, 'findDelegation').mockReturnValue({ status: 'completed', loopStatus: 'completed', taskHandoff } as collaboration.DelegationRecord)
     const status = JSON.parse((await f.status.execute({}, f.ctx)).output)
     expect(status.workers[0].can_continue).toBe(false)
+    expect(status.workers[0].dependency_ready).toBe(true)
     expect(status.workers[0].continuation_blocked_reason).toContain('DELEGATION_BUDGET_REQUIRES_NEW_RUN')
   })
   it('rejects an incomplete plan before irreversible dispatch; allows the model to correct its own plan', async () => {

@@ -5,7 +5,7 @@ import { recordExperiment, writeExperiment, type DispatchExperiment, type Experi
 import type { PhaseNode } from './dispatcher-phases'
 import { autonomousTaskBook, wrapAutonomousDispatcherTools } from './dispatch-experiment-autonomous'
 import { bindExperimentWorkers, lockExperimentModel } from './dispatch-experiment-models'
-import { assertExperimentWorkerRecovery } from './dispatch-experiment-recovery'
+import { assertExperimentWorkerRecovery, experimentWorkerExecutionFinished } from './dispatch-experiment-recovery'
 import { auditScriptSourceWrites, withProjectWriteLease } from './source-write-audit'
 import { getPromaHome } from '../../storage/config-paths'
 import { join } from 'node:path'
@@ -55,6 +55,7 @@ export function experimentTaskBook(config: DispatchExperiment): string {
       ? '只使用一名实现者；delegate_agent 的 task_id=all，一次交给它全部冻结任务，按依赖顺序实现。修复续接它。\n'
       : '最多两名实现者；delegate_agent 的 task_id 使用下列任务编号，每名固定负责一个任务。依赖未结束或写入范围重叠时不得同时启动。修复续接对应实现者。\n') +
     `角色固定 implement，${config.models ? '实现模型由宿主独立绑定' : '模型继承父上下文'}，不自行改渠道。历史证据属于冻结来源，不能当作当前版本已通过；历史绝对路径不能继续使用，当前产物均按相对项目根操作。\n` +
+    '执行依赖就绪只表示实现者正常结束、后续任务可以核验其输出；交接中的失败或过期凭据仍保留，不能宣称已通过。最终交付仍由当前版本的宿主门禁裁决，累计资源终止不能用续接规避。\n' +
     JSON.stringify(config.tasks, null, 2)
 }
 export function wrapExperimentDispatcherTools(tools: AgentLoopTool[], config: DispatchExperiment): AgentLoopTool[] {
@@ -88,8 +89,8 @@ export function wrapExperimentDispatcherTools(tools: AgentLoopTool[], config: Di
       const worker = Object.values(config.workers).find(item => item.task_ids.includes(dependency))
       const record = worker && findDelegation(ctx.sessionId, worker.delegation_id)
       assertExperimentWorkerRecovery(config, record)
-      if (!worker?.has_executed || record?.status !== 'completed' || record.loopStatus !== 'completed') throw new Error('EXPERIMENT_DEPENDENCY_WAIT')
-      if (getDelegationSummary(record).task_handoff?.completion === 'incomplete') throw new Error('EXPERIMENT_DEPENDENCY_UNRESOLVED')
+      if (!worker?.has_executed || !experimentWorkerExecutionFinished(record)) throw new Error('EXPERIMENT_DEPENDENCY_WAIT')
+      getDelegationSummary(record!) // Keep failed evidence visible without blocking the task that must verify it.
     }
   }
   return tools.map(tool => {
@@ -150,13 +151,14 @@ export function wrapExperimentDispatcherTools(tools: AgentLoopTool[], config: Di
     }
   })
 }
+/** Execution coverage only. Driver/core/security/launch/V gates run after this
+ * check; a task's old exploratory failure is not a substitute for those gates. */
 export function experimentTasksFinished(config: DispatchExperiment): boolean {
   if (config.policy === 'standalone') return true
   if (!config.tasks.length) return false
   return config.tasks.every(task => Object.values(config.workers).some(worker => {
     const record = findDelegation(config.parent_session_id!, worker.delegation_id)
-    return worker.has_executed && worker.task_ids.includes(task.id) && record?.status === 'completed' && record.loopStatus === 'completed'
-      && record.taskHandoff?.completion !== 'incomplete'
+    return worker.has_executed && worker.task_ids.includes(task.id) && experimentWorkerExecutionFinished(record)
   }))
 }
 export function wrapExperimentWorkerTools(tools: AgentLoopTool[], config: DispatchExperiment, root: string): AgentLoopTool[] {

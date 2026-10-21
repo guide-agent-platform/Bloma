@@ -45,6 +45,9 @@ import { verificationFingerprint } from '../../../main/desktop/verification-fing
 import { writeExperiment, readExperiment, EXPERIMENT_SWITCH, experimentConditionHash, type DispatchExperiment } from '../../../main/desktop/dispatch-experiment'
 import * as productionReview from '../../../main/desktop/quick-production-review'
 import * as dispatcherLoop from '../../../main/desktop/dispatcher-loop'
+import * as collaboration from '../../../main/agent/delegation/agent-collaboration'
+import { readTaskHandoff } from '../../../main/agent/delegation/task-handoff'
+import { experimentTasksFinished } from '../../../main/desktop/dispatch-experiment-policy'
 import {
   DESKTOP_CONFIRM_OPTION_PREFIX,
   MAX_AUTO_ADVANCE_CHAIN,
@@ -111,15 +114,65 @@ function baseRecord() {
 let record: ReturnType<typeof baseRecord>
 
 describe('experimental native preparation pause', () => {
-  it.each(['pass', 'fail', 'unverified'] as const)('v2 quick reaches independent V after native gates and only delivers on pass (%s)', async verdict => {
+  it.each(['core-failed', 'core-unverified', 'security', 'launch'] as const)('execution-ready r4 handoff cannot bypass the %s delivery gate', async gate => {
+    const oldHome = process.env.PROMA_HOME, oldSwitch = process.env[EXPERIMENT_SWITCH]
+    const home = join(sandboxRoot, 'r4-gate-home'); mkdirSync(home); writeFileSync(join(home, 'dispatch-experiment-home.json'), '{"version":1}')
+    process.env.PROMA_HOME = home; process.env[EXPERIMENT_SWITCH] = '1'
+    record.mode = 'quick'; record.desktop_phase = 'desktop-implement'
+    const input = routeInput()
+    const captured = JSON.parse(readFileSync(new URL('../../fixtures/dispatch-experiment/r4-handoffs.json', import.meta.url), 'utf8'))
+    const taskHandoff = readTaskHandoff(captured.ui)!
+    const before = structuredClone(taskHandoff)
+    const owner = { status: 'completed', loopStatus: 'completed', taskHandoff } as collaboration.DelegationRecord
+    const find = vi.spyOn(collaboration, 'findDelegation').mockReturnValue(owner)
+    const config: DispatchExperiment = { version: 1, project_id: 'p1', mode: 'quick', experiment_id: 'r4-gate', run_id: 'r4-gate', state: 'running',
+      production_protocol: 'v2', policy: 'autonomous', planning: 'autonomous',
+      tasks: [{ id: 'implementation', instruction: '已结束的实现工作', depends_on: [], writes: ['app.py'] }],
+      workers: { worker: { delegation_id: 'done', child_session_id: 'child', task_ids: ['implementation'], has_executed: true } },
+      snapshot_id: 's', input_hash: 'a'.repeat(64), parent_session_id: input.sessionId,
+      models: { dispatcher: { channel_id: 'd', model_id: 'd' }, executor: { channel_id: 'e', model_id: 'e' }, verifier: { channel_id: 'v', model_id: 'v' } } }
+    config.condition_hash = experimentConditionHash(config); writeExperiment(config)
+    const loop = vi.spyOn(dispatcherLoop, 'runDesktopDispatcherLoop').mockResolvedValue({ status: 'completed', advance: { decision: 'advance', target: 'desktop-verify', discardedObservations: [] } })
+    const review = vi.spyOn(productionReview, 'runQuickProductionReview')
+    try {
+      expect(experimentTasksFinished(config)).toBe(true)
+      const complete = vi.fn()
+      const { deps } = collectorDeps({ complete,
+        coreVerification: async () => ({ status: gate === 'core-failed' ? 'failed' : gate === 'core-unverified' ? 'unverified' : 'passed',
+          summary: 'host gate fixture', checked_at: '', missing: gate.startsWith('core') ? ['F-001'] : [], evidence: [] }),
+        securityScan: () => ({ passed: gate !== 'security', blocking: gate === 'security' ? 1 : 0, scanned: 1, listing: 'host security fixture' }),
+        launchSmoke: async () => ({ passed: gate !== 'launch', detail: 'host smoke fixture' }) })
+      await handleDesktopDispatchMessage(input, deps)
+      expect(record.desktop_phase).not.toBe('delivered')
+      expect(review).not.toHaveBeenCalled()
+      expect(complete).not.toHaveBeenCalledWith(input.sessionId, input.projectId, 'success')
+      expect(taskHandoff).toEqual(before)
+      expect(taskHandoff.completion).toBe('incomplete')
+    } finally {
+      find.mockRestore(); loop.mockRestore(); review.mockRestore()
+      if (oldHome === undefined) delete process.env.PROMA_HOME; else process.env.PROMA_HOME = oldHome
+      if (oldSwitch === undefined) delete process.env[EXPERIMENT_SWITCH]; else process.env[EXPERIMENT_SWITCH] = oldSwitch
+    }
+  })
+  it.each((['standalone', 'autonomous'] as const).flatMap(policy => (['pass', 'fail', 'unverified'] as const).map(verdict => ({ policy, verdict }))))
+    ('v2 quick $policy reaches independent V after native gates and only delivers on $verdict', async ({ policy, verdict }) => {
     const oldHome = process.env.PROMA_HOME, oldSwitch = process.env[EXPERIMENT_SWITCH]
     const home = join(sandboxRoot, 'v2-home'); mkdirSync(home); writeFileSync(join(home, 'dispatch-experiment-home.json'), '{"version":1}')
     process.env.PROMA_HOME = home; process.env[EXPERIMENT_SWITCH] = '1'
     record.mode = 'quick'; record.desktop_phase = 'desktop-implement'
     const input = routeInput()
     const config: DispatchExperiment = { version: 1, project_id: 'p1', mode: 'quick', experiment_id: 'v2', run_id: 'v2-run', state: 'running',
-      production_protocol: 'v2', policy: 'standalone', planning: 'autonomous', tasks: [], workers: {}, snapshot_id: 's', input_hash: 'a'.repeat(64), parent_session_id: input.sessionId,
+      production_protocol: 'v2', policy, planning: 'autonomous', tasks: [], workers: {}, snapshot_id: 's', input_hash: 'a'.repeat(64), parent_session_id: input.sessionId,
       models: { dispatcher: { channel_id: 'd', model_id: 'd' }, executor: { channel_id: 'e', model_id: 'e' }, verifier: { channel_id: 'v', model_id: 'v' } } }
+    const captured = JSON.parse(readFileSync(new URL('../../fixtures/dispatch-experiment/r4-handoffs.json', import.meta.url), 'utf8'))
+    const taskHandoff = readTaskHandoff(captured.ui)!
+    const before = structuredClone(taskHandoff)
+    const owner = { status: 'completed', loopStatus: 'completed', taskHandoff } as collaboration.DelegationRecord
+    const find = vi.spyOn(collaboration, 'findDelegation').mockReturnValue(owner)
+    if (policy === 'autonomous') {
+      config.tasks = [{ id: 'done', instruction: '已结束但仍需宿主核验的实现', depends_on: [], writes: ['app.py'] }]
+      config.workers = { worker: { delegation_id: 'done', child_session_id: 'child', task_ids: ['done'], has_executed: true } }
+    }
     config.condition_hash = experimentConditionHash(config); writeExperiment(config)
     const loop = vi.spyOn(dispatcherLoop, 'runDesktopDispatcherLoop').mockResolvedValue({ status: 'completed', advance: { decision: 'advance', target: 'desktop-verify', discardedObservations: [] } })
     const order: string[] = []
@@ -128,14 +181,17 @@ describe('experimental native preparation pause', () => {
       return { verdict, checked_features: ['F-001'], evidence: ['test review boundary'], findings: [] }
     })
     try {
+      expect(experimentTasksFinished(config)).toBe(true)
       const { deps } = collectorDeps({ coreVerification: async () => { order.push('core'); return { status: 'passed', summary: '', checked_at: '', missing: [], evidence: [] } },
         securityScan: () => { order.push('security'); return { passed: true, blocking: 0, scanned: 1, listing: '' } },
         launchSmoke: async () => { order.push('launch'); return { passed: true, detail: 'test smoke' } } })
       await handleDesktopDispatchMessage(input, deps)
       expect(order).toEqual(['core', 'security', 'launch', 'V'])
       expect(record.desktop_phase === 'delivered').toBe(verdict === 'pass')
+      expect(taskHandoff).toEqual(before)
+      expect(taskHandoff.completion).toBe('incomplete')
     } finally {
-      loop.mockRestore(); review.mockRestore()
+      find.mockRestore(); loop.mockRestore(); review.mockRestore()
       if (oldHome === undefined) delete process.env.PROMA_HOME; else process.env.PROMA_HOME = oldHome
       if (oldSwitch === undefined) delete process.env[EXPERIMENT_SWITCH]; else process.env[EXPERIMENT_SWITCH] = oldSwitch
     }
