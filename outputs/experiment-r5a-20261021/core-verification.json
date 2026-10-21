@@ -1,0 +1,197 @@
+{
+  "status": "passed",
+  "summary": "核心业务驱动已通过，验证范围见报告。",
+  "checked_at": "2026-10-21T10:43:57.576Z",
+  "missing": [],
+  "evidence": [
+    {
+      "fid": "F-001",
+      "scenario": "L1 去除首尾空格保存为买牛奶并出现于列表",
+      "input": "logic",
+      "outcome": "pass"
+    },
+    {
+      "fid": "F-001",
+      "scenario": "L2 仅空格制表符标题拒绝保存且列表不变",
+      "input": "logic",
+      "outcome": "pass"
+    },
+    {
+      "fid": "F-001",
+      "scenario": "L3 同名任务独立完成状态且删除其一不影响另一条",
+      "input": "logic",
+      "outcome": "pass"
+    },
+    {
+      "fid": "F-004",
+      "scenario": "L3 同名任务独立完成状态且删除其一不影响另一条",
+      "input": "logic",
+      "outcome": "pass"
+    },
+    {
+      "fid": "F-002",
+      "scenario": "L4 勾选完成再勾选恢复未完成",
+      "input": "logic",
+      "outcome": "pass"
+    },
+    {
+      "fid": "F-002",
+      "scenario": "L5 重开同目录后顺序标题完成态保留且已删任务不复现",
+      "input": "logic",
+      "outcome": "pass"
+    },
+    {
+      "fid": "F-005",
+      "scenario": "L5 重开同目录后顺序标题完成态保留且已删任务不复现",
+      "input": "logic",
+      "outcome": "pass"
+    },
+    {
+      "fid": "F-003",
+      "scenario": "L6 三视图筛选正确且按新增顺序",
+      "input": "logic",
+      "outcome": "pass"
+    },
+    {
+      "fid": "F-003",
+      "scenario": "L7 视图选择由调用保持且最终视图展示全部任务",
+      "input": "logic",
+      "outcome": "pass"
+    },
+    {
+      "fid": "F-006",
+      "scenario": "L8 同名两条不合并按新增顺序展示标题与完成状态",
+      "input": "logic",
+      "outcome": "pass"
+    },
+    {
+      "fid": "F-005",
+      "scenario": "L9 空数据重开为空列表",
+      "input": "logic",
+      "outcome": "pass"
+    },
+    {
+      "fid": "F-001",
+      "scenario": "G1 输入带空格标题提交后列表出现买牛奶且输入框清空视图同步",
+      "input": "gui",
+      "outcome": "pass"
+    },
+    {
+      "fid": "F-001",
+      "scenario": "G2 仅空格制表符提交列表不变输入恢复原值横幅错误提示",
+      "input": "gui",
+      "outcome": "pass"
+    },
+    {
+      "fid": "F-001",
+      "scenario": "G3 两条同名任务分别勾选互不影响且全部视图按新增顺序展示两条",
+      "input": "gui",
+      "outcome": "pass"
+    },
+    {
+      "fid": "F-002",
+      "scenario": "G3 两条同名任务分别勾选互不影响且全部视图按新增顺序展示两条",
+      "input": "gui",
+      "outcome": "pass"
+    },
+    {
+      "fid": "F-006",
+      "scenario": "G3 两条同名任务分别勾选互不影响且全部视图按新增顺序展示两条",
+      "input": "gui",
+      "outcome": "pass"
+    },
+    {
+      "fid": "F-002",
+      "scenario": "G4 勾选后已完成视图出现未完成视图移除且视图切换保持选中",
+      "input": "gui",
+      "outcome": "pass"
+    },
+    {
+      "fid": "F-003",
+      "scenario": "G4 勾选后已完成视图出现未完成视图移除且视图切换保持选中",
+      "input": "gui",
+      "outcome": "pass"
+    },
+    {
+      "fid": "F-004",
+      "scenario": "G5 已完成视图删除任务后全部视图消失且其他任务保留",
+      "input": "gui",
+      "outcome": "pass"
+    },
+    {
+      "fid": "F-005",
+      "scenario": "G6 关闭重开同数据目录内容保留且空数据重开为空列表",
+      "input": "gui",
+      "outcome": "pass"
+    }
+  ],
+  "fingerprint": "404a7e7088d48a7476e2d74d4acb5b81f00c10947ff371e3fe805de074e9dd13",
+  "requirements": [
+    {
+      "id": "F-001",
+      "requirement_hash": "f5e55d056ff0061f7e5217dc7fc8164fe2ded82ae4747cae7cb2d09f19a86e63",
+      "implementation": "implemented",
+      "verification": "passed"
+    },
+    {
+      "id": "F-002",
+      "requirement_hash": "d9d82f64623e889bf0315c650437b2194981cc1086f452cf9306072aa84b954e",
+      "implementation": "implemented",
+      "verification": "passed"
+    },
+    {
+      "id": "F-003",
+      "requirement_hash": "0fc628d55d97f8be3600753e5aa4594465d61eb38b0f4be93f5979df99e52f58",
+      "implementation": "implemented",
+      "verification": "passed"
+    },
+    {
+      "id": "F-004",
+      "requirement_hash": "367f0cf421e885c5d74269103d32d07d2940f5f21b1ab0175453dd88805521ef",
+      "implementation": "implemented",
+      "verification": "passed"
+    },
+    {
+      "id": "F-005",
+      "requirement_hash": "d4a3b93a0154db3caaa1a8f79f15d719718ed502e0fe57366fd854ad11383e1b",
+      "implementation": "implemented",
+      "verification": "passed"
+    },
+    {
+      "id": "F-006",
+      "requirement_hash": "abacb835720154d466476e25acc4b70fbc531740d6f4048373d2bbfcb55ec425",
+      "implementation": "implemented",
+      "verification": "passed"
+    }
+  ],
+  "gui_execution": {
+    "command": "python test_gui.py",
+    "routing": "pass",
+    "scenarios": [
+      {
+        "name": "G1 输入带空格标题提交后列表出现买牛奶且输入框清空视图同步",
+        "outcome": "pass"
+      },
+      {
+        "name": "G2 仅空格制表符提交列表不变输入恢复原值横幅错误提示",
+        "outcome": "pass"
+      },
+      {
+        "name": "G3 两条同名任务分别勾选互不影响且全部视图按新增顺序展示两条",
+        "outcome": "pass"
+      },
+      {
+        "name": "G4 勾选后已完成视图出现未完成视图移除且视图切换保持选中",
+        "outcome": "pass"
+      },
+      {
+        "name": "G5 已完成视图删除任务后全部视图消失且其他任务保留",
+        "outcome": "pass"
+      },
+      {
+        "name": "G6 关闭重开同数据目录内容保留且空数据重开为空列表",
+        "outcome": "pass"
+      }
+    ]
+  }
+}

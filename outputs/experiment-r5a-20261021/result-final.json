@@ -1,0 +1,413 @@
+{
+  "version": 2,
+  "run_id": "production-v2-L1-quick-20261021-r5a-G11",
+  "project_id": "42487b23-f6c0-47e5-b46b-f607b105ae7b",
+  "mode": "quick",
+  "policy": "autonomous",
+  "production_protocol": "v2",
+  "sample": {
+    "task_id": "L1",
+    "repeat_id": "r1",
+    "pair_id": "production-v2-L1-quick-20261021-r5a",
+    "group": "G11"
+  },
+  "evaluator_hash": "14c714554364a7b55136f3e82af63b33f6f201d928d70a9ddf8a78d685e16fd1",
+  "limits": {
+    "max_workers": 2,
+    "max_tasks": 16,
+    "dispatcher_turns": 60,
+    "executor_turns": 100,
+    "max_requests": 256,
+    "max_output_tokens": 640000,
+    "wall_ms": 3600000
+  },
+  "settings": {
+    "temperature": 0.1,
+    "thinking_level": "high",
+    "response_header_timeout_ms": 120000
+  },
+  "runtime_hash": "8c02defd59ede874f007b1cc3f5ac6b6d1a092b4210f28a77ad18f2bf686ae1f",
+  "required_writes": [
+    "CORE_CHECK.json",
+    "DELIVERY.md",
+    "LAUNCH.json"
+  ],
+  "execution_limits": {
+    "script_runs": 64,
+    "install_calls": 8
+  },
+  "effective_resources": [
+    {
+      "script_runs": 64,
+      "install_calls": 8,
+      "parent_turns": 60,
+      "effective_executor_turns": 100,
+      "requested_executor_turns": 100,
+      "script_scope": "session",
+      "script_resets_on": "new_run"
+    }
+  ],
+  "input_hash": "4566f020f5d27f0cdac677a569b6518b15e64c757b5e0a9e54f70bfb19325489",
+  "condition_hash": "fc071c7bf659c403a68e417a6181ac49a6a5dc9c4c08749a1cb121ed06e6740c",
+  "models": {
+    "dispatcher": {
+      "channel_id": "experiment-glm",
+      "model_id": "glm-5.3-flash"
+    },
+    "executor": {
+      "channel_id": "experiment-glm",
+      "model_id": "glm-5.3-flash"
+    },
+    "verifier": {
+      "channel_id": "experiment-ds",
+      "model_id": "deepseek-flash"
+    }
+  },
+  "observed_models": {
+    "dispatcher": {
+      "channel_id": "experiment-glm",
+      "model": "glm-5.3-flash",
+      "endpoint_host": "open.bigmodel.cn",
+      "endpoint_fingerprint": "1e90246348f66dd206b4bcbd68e0dff9657bfda32df9ae69b9b2ee7e164251ce",
+      "provider_type": "zhipu-coding"
+    },
+    "executor": {
+      "channel_id": "experiment-glm",
+      "model": "glm-5.3-flash",
+      "endpoint_host": "open.bigmodel.cn",
+      "endpoint_fingerprint": "1e90246348f66dd206b4bcbd68e0dff9657bfda32df9ae69b9b2ee7e164251ce",
+      "provider_type": "zhipu-coding"
+    },
+    "verifier": {
+      "channel_id": "experiment-ds",
+      "model": "deepseek-flash",
+      "endpoint_host": "api.deepseek.com",
+      "endpoint_fingerprint": "efdbb18afca7615955804478fde78bff5e7336dee41fa0844bc1d5f8ec527cbe",
+      "provider_type": "deepseek"
+    }
+  },
+  "declared_tasks": [
+    {
+      "depends_on": [],
+      "feature_ids": [
+        "F-001",
+        "F-002",
+        "F-003",
+        "F-004",
+        "F-005",
+        "F-006"
+      ],
+      "id": "T-01",
+      "instruction": "目标：实现离线待办核心业务层（core/todo.py）并改造 app.py 桥，保持三层纪律（业务模块不 import UI），保留既有启动/--self-check/--drive-port(/eval、/call)/纠错协议与 from app import Logic 门面。\n接口（冻结，UI 与测试并行开发依赖此契约）：\n- Logic(data_dir=None)；数据文件 <dir>/records.json 复用 record_store.JsonRecordStore（required_keys=(\"id\",\"title\",\"done\")），目录缺省读 APP_DATA_DIR，否则项目 data/。\n- add_task(title)->dict：strip 后为空 raise ValueError(\"标题不能为空\")；同名任务允许，独立 id 与 done；\n- toggle_task(task_id)->dict：不存在 raise ValueError(\"任务不存在\")；\n- delete_task(task_id)->None；\n- list_tasks(view=\"all\"|\"active\"|\"completed\")->list[dict]，保持新增顺序，非法 view raise ValueError。\n- 保留 list_items()/add_item() 薄兼容包装；app.py self_check 改用新接口但保持 SELF-CHECK OK/FAIL 锚点输出与退出码语义。\n- Api 桥方法（返回 JSON 字符串，成功 {\"ok\":true,...}，失败 {\"ok\":false,\"error\":\"...\"}，不向 UI 抛异常）：list_tasks(view=\"all\")→{\"ok\":true,\"view\":…,\"tasks\":[{id,title,done}…],\"counts\":{\"all\":n,\"active\":m,\"completed\":k}}；add_task(title, view=\"all\")→成功 {\"ok\":true,\"view\":…,\"tasks\":…,\"counts\":…,\"added\":{…}}，空白 {\"ok\":false,\"error\":\"标题不能为空\"}；toggle_task(task_id, view=\"all\")、delete_task(task_id, view=\"all\")→{\"ok\":true,\"view\":…,\"tasks\":…,\"counts\":…}，未知 id {\"ok\":false,\"error\":\"任务不存在\"}。\n范围排除：不做账号/联网/二次确认。完成后用 run_project_script 真实冒烟：独立临时 APP_DATA_DIR 下 import app、新增/勾选/删除/三视图读取各一次（红则修复）。",
+      "writes": [
+        "core/",
+        "app.py"
+      ]
+    },
+    {
+      "depends_on": [
+        "T-01"
+      ],
+      "feature_ids": [
+        "F-001",
+        "F-002",
+        "F-003",
+        "F-004",
+        "F-005",
+        "F-006"
+      ],
+      "id": "T-02",
+      "instruction": "目标：Logic 层真实红绿自测 core_check.py + 登记 CORE_CHECK.json。\n- core_check.py：全部场景用固定场景名，stdout 逐条输出 \"PASS <场景名>\"/\"FAIL <场景名>\"，任一失败退出码非 0；数据一律走独立临时 APP_DATA_DIR，不碰项目 data/。场景：L1 去除首尾空格保存为\"买牛奶\"并出现于列表(F-001)；L2 仅空格/制表符标题拒绝保存且列表不变(F-001)；L3 两条同名任务独立完成状态、删除其一不影响另一条(F-001/F-004)；L4 勾选完成再勾选恢复未完成(F-002)；L5 新 Logic 实例重开同目录后顺序/标题/完成态保留、已删任务不复现(F-002/F-005)；L6 active/completed/all 视图筛选正确且按新增顺序(F-003)；L7 视图选择由调用保持、最终视图展示全部任务(F-003)；L8 同名两条不合并、按新增顺序展示标题与完成状态(F-006)；L9 空数据重开为空列表(F-005)。\n- CORE_CHECK.json（schema_version=2）：requirements 列 F-001..F-006，requirement_hash 用需求清单中各功能验证版本完整哈希（F-001=f5e55d056ff0061f7e5217dc7fc8164fe2ded82ae4747cae7cb2d09f19a86e63；F-002=d9d82f64623e889bf0315c650437b2194981cc1086f452cf9306072aa84b954e；F-003=0fc628d55d97f8be3600753e5aa4594465d61eb38b0f4be93f5979df99e52f58；F-004=367f0cf421e885c5d74269103d32d07d2940f5f21b1ab0175453dd88805521ef；F-005=d4a3b93a0154db3caaa1a8f79f15d719718ed502e0fe57366fd854ad11383e1b；F-006=abacb835720154d466476e25acc4b70fbc531740d6f4048373d2bbfcb55ec425），implementation 按当时事实如实填；command=[\"python\",\"core_check.py\"]；scenarios 登记上述 logic 场景（input=\"logic\"，名称与脚本输出完全一致）。\n- 先真实运行 core_check.py 全绿再登记；失败按证据修 core/todo.py 或测试，不得改语义凑绿。",
+      "writes": [
+        "core_check.py",
+        "CORE_CHECK.json"
+      ]
+    },
+    {
+      "depends_on": [],
+      "feature_ids": [
+        "F-001",
+        "F-002",
+        "F-003",
+        "F-004",
+        "F-005",
+        "F-006"
+      ],
+      "id": "T-03",
+      "instruction": "目标：按已确认设计实现真实可用的待办界面。先读 00_UX/confirmed.json（权威交互记录）与 00_UX/confirmed.html，再读 ui/PATTERNS.md、ui/kit.css、ui/tokens.css、ui/bridge.js（只读，禁止修改 kit.css/bridge.js/correction.js/preview-state.js）。\n- 布局/视觉按确认设计落实：左 212px 侧栏（品牌、竖向三视图切换带各视图计数、离线徽标）、右主区顶部快速输入条（三种视图下均可见可用，回车或按钮提交）、下方按新增顺序的便签列表行（圆形勾选、标题、状态标签、删除图标按钮）；空态给引导不空白；760px 以下响应式折叠（左栏转顶部标签条）。\n- 颜色/间距/字阶统一放 tokens.css，用 var(--*) 复用；新增样式写 ui/app.css，index.html 按 kit.css→tokens.css→app.css 顺序引用。\n- 行为全部经 window.App.call 调桥（接口契约见 T-01，op：list_tasks/add_task/toggle_task/delete_task）；反馈唯一呈现位 App.show（.w-banner）；禁 alert()/confirm()/prompt()；提交中禁用触发按钮；失败恢复输入原值（onSend 标准形态）。具体：add 成功清空输入并刷新列表与计数、当前视图保持；add 失败（空白标题）横幅提示\"标题不能为空\"且输入恢复原值；toggle/delete 成功刷新列表与计数；视图切换高亮当前选中并 list_tasks(view)；启动加载 list_tasks(\"all\")（默认全部视图）。空态展示引导文案与新增入口提示。\n- 保留 .w-banner、三个 js 引用与 data-bloma-id 定位标记；为关键控件加稳定定位标记：输入框、提交按钮、三个视图切换按钮、每行勾选框/删除按钮/标题/状态标签、列表容器、三个计数。\n- 静态示意数据与点选脚本不得当业务结果；桥方法未就绪期（并行开发）冒烟仅验证首屏渲染无 JS 错误即可，全链路由集成任务验收。",
+      "writes": [
+        "ui/index.html",
+        "ui/tokens.css",
+        "ui/app.css"
+      ]
+    },
+    {
+      "depends_on": [
+        "T-02",
+        "T-03"
+      ],
+      "feature_ids": [
+        "F-001",
+        "F-002",
+        "F-003",
+        "F-004",
+        "F-005",
+        "F-006"
+      ],
+      "id": "T-04",
+      "instruction": "目标：集成 UI 与核心，真实 GUI 业务链验证，登记交付物。\n- test_gui.py：subprocess 启动 python app.py --drive-port <port>（独立临时 APP_DATA_DIR），等待 DRIVE_SERVER 就绪，用 HTTP /eval 驱动真实 UI（设输入值→触发提交/点击→回读列表行、横幅、计数、视图状态），场景固定名、stdout 逐条 PASS/FAIL <场景名>，失败退出码非 0：G1 输入\"  买牛奶  \"提交→列表出现\"买牛奶\"、输入框清空、当前视图同步(F-001)；G2 仅空格/制表符提交→列表不变、输入恢复原值、横幅错误提示(F-001)；G3 两条同名任务分别勾选互不影响、全部视图按新增顺序展示两条(F-001/F-002/F-006)；G4 勾选→已完成视图出现、未完成视图移除、视图切换保持选中(F-002/F-003)；G5 已完成视图删除该任务→全部视图消失、其他任务保留(F-004)；G6 关闭进程重开同数据目录→标题/完成态/顺序保留、默认全部视图，另验空数据重开为空列表(F-005)。\n- 真实运行 python app.py --self-check 与 core_check.py 复跑确认仍绿；失败按证据修复（app.py 仅限集成修复）。\n- 更新 CORE_CHECK.json：追加上述 gui 场景（input=\"gui\"）与 gui_command [\"python\",\"test_gui.py\"]；requirements implementation 按最终事实。\n- LAUNCH.json：{\"schema_version\":1,\"command\":[\"python\",\"app.py\"],\"window_title\":\"离线待办清单\"}（与 webview.create_window 第一参数一致）。\n- DELIVERY.md（项目根，四段、面向不懂编程用户）：①本版本已确认能做——每条注明验证方式并如实引用自测结果（没验证的明说）；②目前限制——如实列出（如删除无二次确认、账号/联网/优先级/截止日期等为范围排除）；③给你的建议——怎么启动、先试什么；④你的数据——存在哪（APP_DATA_DIR 缺省项目 data/records.json）、怎么备份（复制该文件）、换电脑怎么带走。\n- 关闭自己启动的全部进程。",
+      "writes": [
+        "test_gui.py",
+        "CORE_CHECK.json",
+        "LAUNCH.json",
+        "DELIVERY.md",
+        "app.py"
+      ]
+    }
+  ],
+  "model_requests_by_role": {
+    "dispatcher": {
+      "requests": 25,
+      "models": [
+        "glm-5.3-flash"
+      ]
+    },
+    "executor": {
+      "requests": 75,
+      "models": [
+        "glm-5.3-flash"
+      ]
+    },
+    "verifier": {
+      "requests": 14,
+      "models": [
+        "deepseek-flash"
+      ]
+    }
+  },
+  "peak_overlapping_executor_requests": 2,
+  "implemented_worker_sessions": 2,
+  "started_at": "2026-10-21T09:53:13.365Z",
+  "ended_at": "2026-10-21T10:45:02.572Z",
+  "run_outcome": "failed",
+  "termination_reason": "EXPERIMENT_GATE_EXHAUSTED",
+  "machine_ms": 3109207,
+  "time_to_ready_ms": null,
+  "human_wait_ms": null,
+  "mvp_review_span_ms": null,
+  "native_outcome": "not_finished",
+  "last_stage_status": "completed",
+  "product_quality": 1,
+  "product_success": true,
+  "evaluation": {
+    "suite_hash": "14c714554364a7b55136f3e82af63b33f6f201d928d70a9ddf8a78d685e16fd1",
+    "product_hash": "c8c290d57e9b7f7b6c383f0f7c8dc19a745daf2d4665526b6d0e26bf470881ee",
+    "checks": [
+      {
+        "id": "add-trim",
+        "kind": "manual",
+        "status": "passed",
+        "evidence": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\production-v2-L1-20261020\\pilot-r5a-independent\\G11\\attempt-2-selector\\review.json",
+        "evidence_sha256": "27a585cdfb69c5f5c60cd5d89a65edab81f4d8b47d1a9c2876ecca1f3fb14efd"
+      },
+      {
+        "id": "empty-rejection",
+        "kind": "manual",
+        "status": "passed",
+        "evidence": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\production-v2-L1-20261020\\pilot-r5a-independent\\G11\\attempt-1\\review.json",
+        "evidence_sha256": "13ae21b34ced1d12c0c01939ee41425b2379fb73e6d4437ae6ba7dc48ca293eb"
+      },
+      {
+        "id": "toggle-isolation",
+        "kind": "manual",
+        "status": "passed",
+        "evidence": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\production-v2-L1-20261020\\pilot-r5a-independent\\G11\\attempt-2-selector\\review.json",
+        "evidence_sha256": "27a585cdfb69c5f5c60cd5d89a65edab81f4d8b47d1a9c2876ecca1f3fb14efd"
+      },
+      {
+        "id": "filters",
+        "kind": "manual",
+        "status": "passed",
+        "evidence": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\production-v2-L1-20261020\\pilot-r5a-independent\\G11\\attempt-2-selector\\review.json",
+        "evidence_sha256": "27a585cdfb69c5f5c60cd5d89a65edab81f4d8b47d1a9c2876ecca1f3fb14efd"
+      },
+      {
+        "id": "delete-isolation",
+        "kind": "manual",
+        "status": "passed",
+        "evidence": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\production-v2-L1-20261020\\pilot-r5a-independent\\G11\\attempt-2-selector\\review.json",
+        "evidence_sha256": "27a585cdfb69c5f5c60cd5d89a65edab81f4d8b47d1a9c2876ecca1f3fb14efd"
+      },
+      {
+        "id": "restart-persistence",
+        "kind": "manual",
+        "status": "passed",
+        "evidence": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\production-v2-L1-20261020\\pilot-r5a-independent\\G11\\attempt-2-selector\\review.json",
+        "evidence_sha256": "27a585cdfb69c5f5c60cd5d89a65edab81f4d8b47d1a9c2876ecca1f3fb14efd"
+      }
+    ],
+    "complete": true,
+    "score": 1,
+    "success": true
+  },
+  "evaluation_evidence_valid": true,
+  "stage_attempts": [
+    {
+      "at": "2026-10-21T10:43:57.554Z",
+      "event": "experiment_stage_finished",
+      "experiment_id": "production-v2-L1-quick-20261020-r2",
+      "run_id": "production-v2-L1-quick-20261021-r5a-G11",
+      "project_id": "42487b23-f6c0-47e5-b46b-f607b105ae7b",
+      "mode": "quick",
+      "policy": "autonomous",
+      "snapshot_id": "77ff7ced-ace0-47d3-91cf-c7597fb23da8",
+      "phase": "desktop-implement",
+      "request_id": "0daae420-84fb-4f9c-a0c7-0f358704b1e5",
+      "status": "completed",
+      "loop_status": "completed",
+      "duration_ms": 3044189
+    }
+  ],
+  "declared_task_count": 4,
+  "project_usage": {
+    "project_id": "42487b23-f6c0-47e5-b46b-f607b105ae7b",
+    "logical_queries": 114,
+    "physical_requests": 114,
+    "reported_input": 4270814,
+    "reported_output": 129718,
+    "reported_total": 4400532,
+    "cache_read": 3887676,
+    "cache_creation": 0,
+    "missing_usage_queries": 0,
+    "unmeasured_failed_attempts": 0,
+    "active_queries": 0,
+    "malformed_lines": 0,
+    "by_role": {
+      "experiment_dispatcher": {
+        "queries": 25,
+        "input": 726562,
+        "output": 23717
+      },
+      "experiment_executor": {
+        "queries": 75,
+        "input": 3194427,
+        "output": 101029
+      },
+      "experiment_verifier": {
+        "queries": 14,
+        "input": 349825,
+        "output": 4972
+      }
+    },
+    "by_scope": {
+      "loop": {
+        "queries": 112,
+        "input": 4187153,
+        "output": 127779
+      },
+      "grace": {
+        "queries": 2,
+        "input": 83661,
+        "output": 1939
+      }
+    },
+    "by_model": {
+      "[\"open.bigmodel.cn\",\"glm-5.3-flash\"]": {
+        "model": "glm-5.3-flash",
+        "endpoint_host": "open.bigmodel.cn",
+        "queries": 100,
+        "input": 3920989,
+        "output": 124746,
+        "cache_read": 3620800,
+        "cache_creation": 0,
+        "missing_usage_queries": 0
+      },
+      "[\"api.deepseek.com\",\"deepseek-flash\"]": {
+        "model": "deepseek-flash",
+        "endpoint_host": "api.deepseek.com",
+        "queries": 14,
+        "input": 349825,
+        "output": 4972,
+        "cache_read": 266876,
+        "cache_creation": 0,
+        "missing_usage_queries": 0
+      }
+    },
+    "partial_records": 0,
+    "recording_errors": 0,
+    "complete": true,
+    "scope": "streaming parent/child/auxiliary SDK queries and provider qualification; totals are known reported usage, not a bill; failed attempts without usage remain unknown"
+  },
+  "run_usage": {
+    "project_id": "42487b23-f6c0-47e5-b46b-f607b105ae7b",
+    "logical_queries": 114,
+    "physical_requests": 114,
+    "reported_input": 4270814,
+    "reported_output": 129718,
+    "reported_total": 4400532,
+    "cache_read": 3887676,
+    "cache_creation": 0,
+    "missing_usage_queries": 0,
+    "unmeasured_failed_attempts": 0,
+    "active_queries": 0,
+    "malformed_lines": 0,
+    "by_role": {
+      "experiment_dispatcher": {
+        "queries": 25,
+        "input": 726562,
+        "output": 23717
+      },
+      "experiment_executor": {
+        "queries": 75,
+        "input": 3194427,
+        "output": 101029
+      },
+      "experiment_verifier": {
+        "queries": 14,
+        "input": 349825,
+        "output": 4972
+      }
+    },
+    "by_scope": {
+      "loop": {
+        "queries": 112,
+        "input": 4187153,
+        "output": 127779
+      },
+      "grace": {
+        "queries": 2,
+        "input": 83661,
+        "output": 1939
+      }
+    },
+    "by_model": {
+      "[\"open.bigmodel.cn\",\"glm-5.3-flash\"]": {
+        "model": "glm-5.3-flash",
+        "endpoint_host": "open.bigmodel.cn",
+        "queries": 100,
+        "input": 3920989,
+        "output": 124746,
+        "cache_read": 3620800,
+        "cache_creation": 0,
+        "missing_usage_queries": 0
+      },
+      "[\"api.deepseek.com\",\"deepseek-flash\"]": {
+        "model": "deepseek-flash",
+        "endpoint_host": "api.deepseek.com",
+        "queries": 14,
+        "input": 349825,
+        "output": 4972,
+        "cache_read": 266876,
+        "cache_creation": 0,
+        "missing_usage_queries": 0
+      }
+    },
+    "partial_records": 0,
+    "recording_errors": 0,
+    "complete": true,
+    "scope": "streaming parent/child/auxiliary SDK queries and provider qualification; totals are known reported usage, not a bill; failed attempts without usage remain unknown"
+  },
+  "malformed_events": 0,
+  "unfinished_executor_requests": 0,
+  "protocol_rejections": 3
+}

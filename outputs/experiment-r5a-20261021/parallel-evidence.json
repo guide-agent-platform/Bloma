@@ -1,0 +1,758 @@
+{
+  "scope": "complete physical HTTP intervals and distinct executor sessions; includes network waits",
+  "peak_distinct_executor_sessions": 2,
+  "first_peak_at": "2026-10-21T09:59:04.227Z",
+  "overlap_ms_at_least_two_distinct_executors": 578615,
+  "executor_spans": [
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "0c16b18d-6e9a-4eb0-a538-241e51e2b7fa",
+      "transport_index": 1,
+      "start": "2026-10-21T09:59:04.177Z",
+      "finish": "2026-10-21T09:59:10.898Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "a82b022f-892a-438c-8910-7a7560b89783",
+      "transport_index": 1,
+      "start": "2026-10-21T09:59:04.227Z",
+      "finish": "2026-10-21T09:59:11.305Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "ee3d1fe5-3659-41cb-8c57-787b63718ff4",
+      "transport_index": 1,
+      "start": "2026-10-21T09:59:11.358Z",
+      "finish": "2026-10-21T09:59:18.542Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "95da8bf5-3730-4c10-81f8-8474f529ccee",
+      "transport_index": 1,
+      "start": "2026-10-21T09:59:11.612Z",
+      "finish": "2026-10-21T09:59:17.973Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "f7e60e90-5ff8-4b2a-891d-b9269c995b8e",
+      "transport_index": 1,
+      "start": "2026-10-21T09:59:18.003Z",
+      "finish": "2026-10-21T09:59:22.917Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "931e20ae-ff10-46e3-8ca5-82f9aad2fcf8",
+      "transport_index": 1,
+      "start": "2026-10-21T09:59:18.575Z",
+      "finish": "2026-10-21T09:59:23.272Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "2175d7e0-9f53-4dd3-95a3-c85705470c1d",
+      "transport_index": 1,
+      "start": "2026-10-21T09:59:22.945Z",
+      "finish": "2026-10-21T10:00:32.847Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "612e5a6c-b4a8-40b1-9d4c-b789944bec3b",
+      "transport_index": 1,
+      "start": "2026-10-21T09:59:23.303Z",
+      "finish": "2026-10-21T09:59:26.245Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "404bd945-4edc-4038-a0f1-784f0eb18caf",
+      "transport_index": 1,
+      "start": "2026-10-21T09:59:26.276Z",
+      "finish": "2026-10-21T09:59:31.032Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "3408302a-d39a-4f1a-8ff4-36ac035291a9",
+      "transport_index": 1,
+      "start": "2026-10-21T09:59:31.064Z",
+      "finish": "2026-10-21T09:59:38.273Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "937c5e22-d4bd-4472-9d8a-cd9382a50d82",
+      "transport_index": 1,
+      "start": "2026-10-21T09:59:38.305Z",
+      "finish": "2026-10-21T09:59:42.953Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "ed8aec96-77ff-4507-bfdb-713c1f131b0a",
+      "transport_index": 1,
+      "start": "2026-10-21T09:59:42.981Z",
+      "finish": "2026-10-21T09:59:47.876Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "9f9f5651-532a-4bdd-ae8d-02aa348180a3",
+      "transport_index": 1,
+      "start": "2026-10-21T09:59:47.909Z",
+      "finish": "2026-10-21T09:59:55.535Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "821cf64a-4362-417f-969e-2014c29fdc1d",
+      "transport_index": 1,
+      "start": "2026-10-21T09:59:55.670Z",
+      "finish": "2026-10-21T10:04:05.794Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "858a3efa-6611-4b37-8f4a-03105789a6b9",
+      "transport_index": 1,
+      "start": "2026-10-21T10:00:32.880Z",
+      "finish": "2026-10-21T10:00:39.793Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "999a4c8d-3cc0-4e9b-986b-5eae04cea51d",
+      "transport_index": 1,
+      "start": "2026-10-21T10:00:39.927Z",
+      "finish": "2026-10-21T10:00:46.995Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "f0478c12-935c-4220-b60d-47a4bc5731fd",
+      "transport_index": 1,
+      "start": "2026-10-21T10:00:47.022Z",
+      "finish": "2026-10-21T10:01:45.946Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "99cb7430-cf1c-41a3-a6e5-fee18204f517",
+      "transport_index": 1,
+      "start": "2026-10-21T10:01:45.972Z",
+      "finish": "2026-10-21T10:02:16.117Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "45df79d9-0a9e-4a85-8360-49778bc201b9",
+      "transport_index": 1,
+      "start": "2026-10-21T10:02:16.147Z",
+      "finish": "2026-10-21T10:03:41.101Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "ae2f8087-f5ca-42e2-94eb-ac7d87bc78ac",
+      "transport_index": 1,
+      "start": "2026-10-21T10:03:41.135Z",
+      "finish": "2026-10-21T10:04:51.921Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "d1f13c90-5db0-4b56-bb77-ae4b94fdfff8",
+      "transport_index": 1,
+      "start": "2026-10-21T10:04:05.827Z",
+      "finish": "2026-10-21T10:05:10.950Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "7751704e-7d57-4063-814e-79ff7fe0cd38",
+      "transport_index": 1,
+      "start": "2026-10-21T10:04:51.955Z",
+      "finish": "2026-10-21T10:04:56.888Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "4386b71b-d8c0-4e27-a768-aaf3b695bd18",
+      "transport_index": 1,
+      "start": "2026-10-21T10:04:58.438Z",
+      "finish": "2026-10-21T10:06:14.275Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "1a4866ca-622d-4a77-afc8-5172f408ae13",
+      "transport_index": 1,
+      "start": "2026-10-21T10:05:10.987Z",
+      "finish": "2026-10-21T10:07:00.814Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "6b712428-55ad-4264-b43f-9460ec3feb2c",
+      "transport_index": 1,
+      "start": "2026-10-21T10:06:14.384Z",
+      "finish": "2026-10-21T10:06:29.082Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "77ffa09a-bdbb-423f-82a8-e93862d044e8",
+      "transport_index": 1,
+      "start": "2026-10-21T10:06:30.527Z",
+      "finish": "2026-10-21T10:07:02.098Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "e9a484c1-9d65-47ad-a05c-ac2dadf54520",
+      "transport_index": 1,
+      "start": "2026-10-21T10:07:00.848Z",
+      "finish": "2026-10-21T10:07:14.908Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "dbecb56b-3cd3-4be8-afd9-1bf072ccd447",
+      "transport_index": 1,
+      "start": "2026-10-21T10:07:03.550Z",
+      "finish": "2026-10-21T10:07:10.438Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "c1070782-a62b-4235-a8e6-ef78be667dbc",
+      "transport_index": 1,
+      "start": "2026-10-21T10:07:11.891Z",
+      "finish": "2026-10-21T10:08:20.950Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "a423c49a-a2b8-424b-b826-8ccc4b8e8465",
+      "transport_index": 1,
+      "start": "2026-10-21T10:07:15.524Z",
+      "finish": "2026-10-21T10:07:39.423Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "fa2fd3d9-80c7-4917-961a-0eb05ec39d3b",
+      "transport_index": 1,
+      "start": "2026-10-21T10:07:40.419Z",
+      "finish": "2026-10-21T10:07:55.525Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "5b181630-54ba-440a-bfe2-c91b88c77449",
+      "transport_index": 1,
+      "start": "2026-10-21T10:07:56.664Z",
+      "finish": "2026-10-21T10:08:00.984Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "59de9ece-9622-4744-b42a-bd185cbdf584",
+      "transport_index": 1,
+      "start": "2026-10-21T10:08:01.021Z",
+      "finish": "2026-10-21T10:08:05.430Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "3d9e7884-79f4-4fd5-af1e-0203b3a5c6b4",
+      "transport_index": 1,
+      "start": "2026-10-21T10:08:05.462Z",
+      "finish": "2026-10-21T10:08:10.133Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "94725fbf-47de-4186-9024-8681a66cca7a",
+      "transport_index": 1,
+      "start": "2026-10-21T10:08:10.167Z",
+      "finish": "2026-10-21T10:08:41.684Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "97681dd5-18f2-4162-bab4-4715ca33cc62",
+      "transport_index": 1,
+      "start": "2026-10-21T10:08:20.983Z",
+      "finish": "2026-10-21T10:08:25.566Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "cdf2a629-079f-4006-81a1-56f6ae659512",
+      "transport_index": 1,
+      "start": "2026-10-21T10:08:25.595Z",
+      "finish": "2026-10-21T10:08:53.387Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "c0c4ac42-2a11-4096-afd2-e3af782b1064",
+      "transport_index": 1,
+      "start": "2026-10-21T10:08:41.723Z",
+      "finish": "2026-10-21T10:08:46.370Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "f7edde12-da32-42d9-b713-64401c4c320d",
+      "transport_index": 1,
+      "start": "2026-10-21T10:08:46.402Z",
+      "finish": "2026-10-21T10:10:06.529Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "f472d8bc-771d-43c1-9f6b-3aed59696a59",
+      "transport_index": 1,
+      "start": "2026-10-21T10:10:06.565Z",
+      "finish": "2026-10-21T10:10:20.712Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "d29a78ce-aba9-4bdc-98e6-091abd77df00",
+      "transport_index": 1,
+      "start": "2026-10-21T10:10:21.746Z",
+      "finish": "2026-10-21T10:10:39.538Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "91e8c0a1-99a6-4bf6-bed6-bf96aa0122a2",
+      "transport_index": 1,
+      "start": "2026-10-21T10:10:42.073Z",
+      "finish": "2026-10-21T10:11:31.985Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "ad54165e-53a5-48ca-8101-ab96c721b8aa",
+      "transport_index": 1,
+      "start": "2026-10-21T10:11:33.973Z",
+      "finish": "2026-10-21T10:12:01.684Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "c8cfb3d0-0622-4902-807b-5c6a17659e91",
+      "transport_index": 1,
+      "start": "2026-10-21T10:12:04.502Z",
+      "finish": "2026-10-21T10:13:11.248Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "d6904e29-bff5-42c3-89e6-b918c3c52ccd",
+      "transport_index": 1,
+      "start": "2026-10-21T10:13:15.323Z",
+      "finish": "2026-10-21T10:13:36.171Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "a516c4e8-c452-4893-83dc-e9245ebfc5a7",
+      "transport_index": 1,
+      "start": "2026-10-21T10:15:46.702Z",
+      "finish": "2026-10-21T10:16:04.149Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "58734e33-19e2-406b-a1c7-c5b062a0ad0d",
+      "transport_index": 1,
+      "start": "2026-10-21T10:16:11.563Z",
+      "finish": "2026-10-21T10:17:30.630Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "4ec18b16-3585-481c-ae4e-24105160ae13",
+      "transport_index": 1,
+      "start": "2026-10-21T10:17:36.952Z",
+      "finish": "2026-10-21T10:19:12.931Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "0fe0c8eb-292c-4e5b-98cc-51c30914027f",
+      "transport_index": 1,
+      "start": "2026-10-21T10:21:40.564Z",
+      "finish": "2026-10-21T10:22:52.699Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "4547930f-73f9-484b-b18d-d87acc6969a8",
+      "transport_index": 1,
+      "start": "2026-10-21T10:25:20.197Z",
+      "finish": "2026-10-21T10:26:34.795Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "fc2d0034-9b7f-43a9-9b69-82ce265bddbf",
+      "transport_index": 1,
+      "start": "2026-10-21T10:26:57.748Z",
+      "finish": "2026-10-21T10:27:27.403Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+      "model": "glm-5.3-flash",
+      "query_id": "ae9f1949-c9a4-42d8-8067-656538a40dfd",
+      "transport_index": 1,
+      "start": "2026-10-21T10:27:41.931Z",
+      "finish": "2026-10-21T10:28:20.230Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "a37fd741-76f2-460d-b00b-4ade7086543a",
+      "transport_index": 1,
+      "start": "2026-10-21T10:28:38.887Z",
+      "finish": "2026-10-21T10:29:03.580Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "278bda27-1c17-4287-b401-2477c8bb50f2",
+      "transport_index": 1,
+      "start": "2026-10-21T10:29:03.615Z",
+      "finish": "2026-10-21T10:29:12.209Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "ead0d256-0a65-4fdf-b599-be87c07a3b09",
+      "transport_index": 1,
+      "start": "2026-10-21T10:29:12.241Z",
+      "finish": "2026-10-21T10:29:29.552Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "0bb4f4c1-0dd0-46af-8d10-b776b7a3f62d",
+      "transport_index": 1,
+      "start": "2026-10-21T10:29:29.585Z",
+      "finish": "2026-10-21T10:34:46.269Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "ffdf7e71-6196-4ea6-8fc5-c0b4d771ee65",
+      "transport_index": 1,
+      "start": "2026-10-21T10:34:46.306Z",
+      "finish": "2026-10-21T10:34:51.064Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "c9648f05-089c-4f3f-8979-7ac177ac3732",
+      "transport_index": 1,
+      "start": "2026-10-21T10:35:03.821Z",
+      "finish": "2026-10-21T10:35:14.218Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "1173b249-f1da-4c91-a682-31e755c45417",
+      "transport_index": 1,
+      "start": "2026-10-21T10:35:17.793Z",
+      "finish": "2026-10-21T10:35:43.171Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "353f3b04-0a28-42b6-b6c6-58fd0f5f3ad3",
+      "transport_index": 1,
+      "start": "2026-10-21T10:35:43.210Z",
+      "finish": "2026-10-21T10:35:47.160Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "fa18af90-fea9-42ba-8489-0cd09347d334",
+      "transport_index": 1,
+      "start": "2026-10-21T10:35:47.197Z",
+      "finish": "2026-10-21T10:35:53.921Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "72575aa7-3652-4cd3-9366-c48df9de9a88",
+      "transport_index": 1,
+      "start": "2026-10-21T10:35:53.962Z",
+      "finish": "2026-10-21T10:36:03.378Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "c13a24a9-77c5-4ac1-b1e3-a4ad8a1f7a1b",
+      "transport_index": 1,
+      "start": "2026-10-21T10:36:03.433Z",
+      "finish": "2026-10-21T10:36:08.145Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "f9b3bf68-37de-451b-b2ab-8651faead1f7",
+      "transport_index": 1,
+      "start": "2026-10-21T10:36:08.177Z",
+      "finish": "2026-10-21T10:36:58.178Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "22b288b9-d4cb-480f-96cb-5e22f2f1781a",
+      "transport_index": 1,
+      "start": "2026-10-21T10:36:58.224Z",
+      "finish": "2026-10-21T10:37:31.530Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "3540be27-c1ad-4f1e-aaa3-e663732cf090",
+      "transport_index": 1,
+      "start": "2026-10-21T10:37:31.581Z",
+      "finish": "2026-10-21T10:37:59.759Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "c08f1583-c1db-461a-bc93-bf1d274f70a7",
+      "transport_index": 1,
+      "start": "2026-10-21T10:39:02.660Z",
+      "finish": "2026-10-21T10:39:11.152Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "12b3dc70-b6cd-4e49-b2ad-44e91a2add4f",
+      "transport_index": 1,
+      "start": "2026-10-21T10:39:11.189Z",
+      "finish": "2026-10-21T10:39:16.377Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "a9335d5f-4267-4753-bbbc-95b52113ffa8",
+      "transport_index": 1,
+      "start": "2026-10-21T10:39:16.416Z",
+      "finish": "2026-10-21T10:39:21.742Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "4961e47b-d0dd-44da-b32c-ea0b2f64cca4",
+      "transport_index": 1,
+      "start": "2026-10-21T10:39:21.780Z",
+      "finish": "2026-10-21T10:39:26.236Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "81358a61-27b0-4f25-851c-78bbac779519",
+      "transport_index": 1,
+      "start": "2026-10-21T10:39:26.274Z",
+      "finish": "2026-10-21T10:39:37.998Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "d34b649d-53f9-4b97-a2e7-ecc769aa0f3c",
+      "transport_index": 1,
+      "start": "2026-10-21T10:40:44.639Z",
+      "finish": "2026-10-21T10:40:58.788Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "9b6a52f5-c23d-4cd2-b136-8b3d64c6b0af",
+      "transport_index": 1,
+      "start": "2026-10-21T10:40:58.818Z",
+      "finish": "2026-10-21T10:41:17.654Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "e13080b5-e115-4630-8519-5a89c78b1bdd",
+      "transport_index": 1,
+      "start": "2026-10-21T10:41:36.344Z",
+      "finish": "2026-10-21T10:41:42.935Z",
+      "status": "completed"
+    },
+    {
+      "role": "experiment_executor",
+      "session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+      "model": "glm-5.3-flash",
+      "query_id": "ddb9c935-c0a5-4976-b7ab-141fdd9dfec8",
+      "transport_index": 1,
+      "start": "2026-10-21T10:41:42.964Z",
+      "finish": "2026-10-21T10:42:34.442Z",
+      "status": "completed"
+    }
+  ]
+}

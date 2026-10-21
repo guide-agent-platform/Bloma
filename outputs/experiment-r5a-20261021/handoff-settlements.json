@@ -1,0 +1,950 @@
+[
+  {
+    "at": "2026-10-21T10:08:53.734Z",
+    "child_session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+    "delegation_id": "2667899e-1a8f-4276-b379-a3b7e2c7cf5a",
+    "lifecycle_status": "completed",
+    "loop_status": "completed",
+    "handoff": {
+      "schema_version": 1,
+      "completion": "incomplete",
+      "loop_status": "completed",
+      "changed_files": [
+        "core/todo.py",
+        "core/__init__.py",
+        "app.py",
+        "core_check.py",
+        "CORE_CHECK.json"
+      ],
+      "verification": [
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "not_applicable",
+          "source": "host"
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "unverified",
+          "scope": "reported_scenarios",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 4,
+            "limit": 64,
+            "remaining": 60,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 0
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "not_applicable",
+          "source": "host"
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "not_applicable",
+          "source": "host"
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "unverified",
+          "scope": "reported_scenarios",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 1,
+            "limit": 64,
+            "remaining": 63,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 0,
+          "evidence": {
+            "key": "f880613fca5fb60bf1b5d00d742ce2bc14dd30a08abc0d8acc8b9546e22bafc8",
+            "entry": "core_check.py",
+            "source_fingerprint": "197bf618963c2fd8ba6cf964f47e864280eba035cecc7b8dc585fab4c2edc67f",
+            "environment_fingerprint": "4c5298ea7f53c1f5c009baeba84fadc028d77c44699177a1464ed688be0a5c35",
+            "freshness": "stale",
+            "passed": 9,
+            "failed": 0,
+            "blocked": 0,
+            "attempt_seq": 1
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "passed",
+          "scope": "reported_scenarios",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 3,
+            "limit": 64,
+            "remaining": 61,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 0,
+          "evidence": {
+            "key": "85963935f77d1653c9ad4fc2c967ab9fd5b34cc2234b8d2503385f2df17bd877",
+            "entry": "inline-call_ae08fd65b32547ca85338326",
+            "source_fingerprint": "2f7f51c1211052524bb336fa87c791decaa49a1c4b4f51c06dd9421585fdc0c4",
+            "environment_fingerprint": "4c5298ea7f53c1f5c009baeba84fadc028d77c44699177a1464ed688be0a5c35",
+            "freshness": "current",
+            "passed": 1,
+            "failed": 0,
+            "blocked": 0,
+            "attempt_seq": 3
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "failed",
+          "verification": "unverified",
+          "scope": "reported_scenarios",
+          "reason": "PROCESS_EXIT_WITHOUT_FAILURE_ASSERTION",
+          "category": "verification_harness",
+          "recovery": "inspect",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 2,
+            "limit": 64,
+            "remaining": 62,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 1,
+          "evidence": {
+            "key": "c2034965e9793c8eea2dedc7091f69ba27d0e41b3d8c126142ae26507535129a",
+            "entry": "inline-call_510a90fca8e44edfa7cfa143",
+            "source_fingerprint": "1db84628d388c176e0e867776c9bf02887345c2d9a4398cfd9aa23c3135b85ee",
+            "environment_fingerprint": "4c5298ea7f53c1f5c009baeba84fadc028d77c44699177a1464ed688be0a5c35",
+            "freshness": "stale",
+            "passed": 0,
+            "failed": 0,
+            "blocked": 0,
+            "attempt_seq": 2
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "not_applicable",
+          "scope": "execution_resources",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 4,
+            "limit": 64,
+            "remaining": 60,
+            "resets_on": "new_run"
+          },
+          "source": "host"
+        }
+      ],
+      "pending": [
+        "core_check.py: 验证版本 stale，核对变更后仅补缺失验证",
+        "inline-call_510a90fca8e44edfa7cfa143: 验证版本 stale，核对变更后仅补缺失验证"
+      ],
+      "recovery": "inspect",
+      "resources": [
+        {
+          "resource": "script_runs",
+          "scope": "session",
+          "used": 4,
+          "limit": 64,
+          "remaining": 60,
+          "resets_on": "new_run"
+        }
+      ]
+    }
+  },
+  {
+    "at": "2026-10-21T10:38:00.237Z",
+    "child_session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+    "delegation_id": "2667899e-1a8f-4276-b379-a3b7e2c7cf5a",
+    "lifecycle_status": "completed",
+    "loop_status": "completed",
+    "handoff": {
+      "schema_version": 1,
+      "completion": "incomplete",
+      "loop_status": "completed",
+      "changed_files": [
+        "test_gui.py",
+        "LAUNCH.json",
+        "CORE_CHECK.json",
+        "DELIVERY.md"
+      ],
+      "verification": [
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "not_applicable",
+          "source": "host"
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "not_applicable",
+          "source": "host"
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "not_applicable",
+          "source": "host"
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "unverified",
+          "scope": "reported_scenarios",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 3,
+            "limit": 64,
+            "remaining": 61,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 0,
+          "evidence": {
+            "key": "85963935f77d1653c9ad4fc2c967ab9fd5b34cc2234b8d2503385f2df17bd877",
+            "entry": "inline-call_ae08fd65b32547ca85338326",
+            "source_fingerprint": "2f7f51c1211052524bb336fa87c791decaa49a1c4b4f51c06dd9421585fdc0c4",
+            "environment_fingerprint": "4c5298ea7f53c1f5c009baeba84fadc028d77c44699177a1464ed688be0a5c35",
+            "freshness": "stale",
+            "passed": 1,
+            "failed": 0,
+            "blocked": 0,
+            "attempt_seq": 3
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "passed",
+          "scope": "reported_scenarios",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 5,
+            "limit": 64,
+            "remaining": 59,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 0,
+          "evidence": {
+            "key": "b7308f9bf31fbb9a18583019bc5fe73d1909f665a048a7008873d7dc5ea46819",
+            "entry": "test_gui.py",
+            "source_fingerprint": "4979d6b7b59ab3666b48bb3d69ef25624f36dca706c484550903702d0bef9093",
+            "environment_fingerprint": "4c5298ea7f53c1f5c009baeba84fadc028d77c44699177a1464ed688be0a5c35",
+            "freshness": "current",
+            "passed": 6,
+            "failed": 0,
+            "blocked": 0,
+            "attempt_seq": 5
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "passed",
+          "scope": "reported_scenarios",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 6,
+            "limit": 64,
+            "remaining": 58,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 0,
+          "evidence": {
+            "key": "f880613fca5fb60bf1b5d00d742ce2bc14dd30a08abc0d8acc8b9546e22bafc8",
+            "entry": "core_check.py",
+            "source_fingerprint": "4979d6b7b59ab3666b48bb3d69ef25624f36dca706c484550903702d0bef9093",
+            "environment_fingerprint": "4c5298ea7f53c1f5c009baeba84fadc028d77c44699177a1464ed688be0a5c35",
+            "freshness": "current",
+            "passed": 9,
+            "failed": 0,
+            "blocked": 0,
+            "attempt_seq": 6
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "failed",
+          "verification": "unverified",
+          "scope": "reported_scenarios",
+          "reason": "PROCESS_EXIT_WITHOUT_FAILURE_ASSERTION",
+          "category": "verification_harness",
+          "recovery": "inspect",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 2,
+            "limit": 64,
+            "remaining": 62,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 1,
+          "evidence": {
+            "key": "c2034965e9793c8eea2dedc7091f69ba27d0e41b3d8c126142ae26507535129a",
+            "entry": "inline-call_510a90fca8e44edfa7cfa143",
+            "source_fingerprint": "1db84628d388c176e0e867776c9bf02887345c2d9a4398cfd9aa23c3135b85ee",
+            "environment_fingerprint": "4c5298ea7f53c1f5c009baeba84fadc028d77c44699177a1464ed688be0a5c35",
+            "freshness": "stale",
+            "passed": 0,
+            "failed": 0,
+            "blocked": 0,
+            "attempt_seq": 2
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "not_applicable",
+          "scope": "execution_resources",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 7,
+            "limit": 64,
+            "remaining": 57,
+            "resets_on": "new_run"
+          },
+          "source": "host"
+        }
+      ],
+      "pending": [
+        "inline-call_ae08fd65b32547ca85338326: 验证版本 stale，核对变更后仅补缺失验证",
+        "inline-call_510a90fca8e44edfa7cfa143: 验证版本 stale，核对变更后仅补缺失验证"
+      ],
+      "recovery": "inspect",
+      "resources": [
+        {
+          "resource": "script_runs",
+          "scope": "session",
+          "used": 7,
+          "limit": 64,
+          "remaining": 57,
+          "resets_on": "new_run"
+        }
+      ]
+    }
+  },
+  {
+    "at": "2026-10-21T10:39:38.360Z",
+    "child_session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+    "delegation_id": "2667899e-1a8f-4276-b379-a3b7e2c7cf5a",
+    "lifecycle_status": "completed",
+    "loop_status": "completed",
+    "handoff": {
+      "schema_version": 1,
+      "completion": "incomplete",
+      "loop_status": "completed",
+      "changed_files": [
+        "DELIVERY.md"
+      ],
+      "verification": [
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "not_applicable",
+          "source": "host"
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "not_applicable",
+          "source": "host"
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "not_applicable",
+          "source": "host"
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "unverified",
+          "scope": "reported_scenarios",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 3,
+            "limit": 64,
+            "remaining": 61,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 0,
+          "evidence": {
+            "key": "85963935f77d1653c9ad4fc2c967ab9fd5b34cc2234b8d2503385f2df17bd877",
+            "entry": "inline-call_ae08fd65b32547ca85338326",
+            "source_fingerprint": "2f7f51c1211052524bb336fa87c791decaa49a1c4b4f51c06dd9421585fdc0c4",
+            "environment_fingerprint": "4c5298ea7f53c1f5c009baeba84fadc028d77c44699177a1464ed688be0a5c35",
+            "freshness": "stale",
+            "passed": 1,
+            "failed": 0,
+            "blocked": 0,
+            "attempt_seq": 3
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "passed",
+          "scope": "reported_scenarios",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 5,
+            "limit": 64,
+            "remaining": 59,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 0,
+          "evidence": {
+            "key": "b7308f9bf31fbb9a18583019bc5fe73d1909f665a048a7008873d7dc5ea46819",
+            "entry": "test_gui.py",
+            "source_fingerprint": "4979d6b7b59ab3666b48bb3d69ef25624f36dca706c484550903702d0bef9093",
+            "environment_fingerprint": "4c5298ea7f53c1f5c009baeba84fadc028d77c44699177a1464ed688be0a5c35",
+            "freshness": "current",
+            "passed": 6,
+            "failed": 0,
+            "blocked": 0,
+            "attempt_seq": 5
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "passed",
+          "scope": "reported_scenarios",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 6,
+            "limit": 64,
+            "remaining": 58,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 0,
+          "evidence": {
+            "key": "f880613fca5fb60bf1b5d00d742ce2bc14dd30a08abc0d8acc8b9546e22bafc8",
+            "entry": "core_check.py",
+            "source_fingerprint": "4979d6b7b59ab3666b48bb3d69ef25624f36dca706c484550903702d0bef9093",
+            "environment_fingerprint": "4c5298ea7f53c1f5c009baeba84fadc028d77c44699177a1464ed688be0a5c35",
+            "freshness": "current",
+            "passed": 9,
+            "failed": 0,
+            "blocked": 0,
+            "attempt_seq": 6
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "failed",
+          "verification": "unverified",
+          "scope": "reported_scenarios",
+          "reason": "PROCESS_EXIT_WITHOUT_FAILURE_ASSERTION",
+          "category": "verification_harness",
+          "recovery": "inspect",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 2,
+            "limit": 64,
+            "remaining": 62,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 1,
+          "evidence": {
+            "key": "c2034965e9793c8eea2dedc7091f69ba27d0e41b3d8c126142ae26507535129a",
+            "entry": "inline-call_510a90fca8e44edfa7cfa143",
+            "source_fingerprint": "1db84628d388c176e0e867776c9bf02887345c2d9a4398cfd9aa23c3135b85ee",
+            "environment_fingerprint": "4c5298ea7f53c1f5c009baeba84fadc028d77c44699177a1464ed688be0a5c35",
+            "freshness": "stale",
+            "passed": 0,
+            "failed": 0,
+            "blocked": 0,
+            "attempt_seq": 2
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "not_applicable",
+          "scope": "execution_resources",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 7,
+            "limit": 64,
+            "remaining": 57,
+            "resets_on": "new_run"
+          },
+          "source": "host"
+        }
+      ],
+      "pending": [
+        "inline-call_ae08fd65b32547ca85338326: 验证版本 stale，核对变更后仅补缺失验证",
+        "inline-call_510a90fca8e44edfa7cfa143: 验证版本 stale，核对变更后仅补缺失验证"
+      ],
+      "recovery": "inspect",
+      "resources": [
+        {
+          "resource": "script_runs",
+          "scope": "session",
+          "used": 7,
+          "limit": 64,
+          "remaining": 57,
+          "resets_on": "new_run"
+        }
+      ]
+    }
+  },
+  {
+    "at": "2026-10-21T10:42:34.765Z",
+    "child_session_id": "eb5450bb-bb81-4df3-b6fc-293d61a19be5",
+    "delegation_id": "2667899e-1a8f-4276-b379-a3b7e2c7cf5a",
+    "lifecycle_status": "completed",
+    "loop_status": "completed",
+    "handoff": {
+      "schema_version": 1,
+      "completion": "incomplete",
+      "loop_status": "completed",
+      "changed_files": [],
+      "verification": [
+        {
+          "schema_version": 1,
+          "execution": "not_run",
+          "verification": "unverified",
+          "scope": "assigned_source_files",
+          "reason": "EXPERIMENT_WRITE_OUTSIDE_ASSIGNMENT",
+          "category": "permission",
+          "recovery": "correct_input",
+          "source": "host"
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "unverified",
+          "scope": "reported_scenarios",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 3,
+            "limit": 64,
+            "remaining": 61,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 0,
+          "evidence": {
+            "key": "85963935f77d1653c9ad4fc2c967ab9fd5b34cc2234b8d2503385f2df17bd877",
+            "entry": "inline-call_ae08fd65b32547ca85338326",
+            "source_fingerprint": "2f7f51c1211052524bb336fa87c791decaa49a1c4b4f51c06dd9421585fdc0c4",
+            "environment_fingerprint": "4c5298ea7f53c1f5c009baeba84fadc028d77c44699177a1464ed688be0a5c35",
+            "freshness": "stale",
+            "passed": 1,
+            "failed": 0,
+            "blocked": 0,
+            "attempt_seq": 3
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "passed",
+          "scope": "reported_scenarios",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 5,
+            "limit": 64,
+            "remaining": 59,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 0,
+          "evidence": {
+            "key": "b7308f9bf31fbb9a18583019bc5fe73d1909f665a048a7008873d7dc5ea46819",
+            "entry": "test_gui.py",
+            "source_fingerprint": "4979d6b7b59ab3666b48bb3d69ef25624f36dca706c484550903702d0bef9093",
+            "environment_fingerprint": "4c5298ea7f53c1f5c009baeba84fadc028d77c44699177a1464ed688be0a5c35",
+            "freshness": "current",
+            "passed": 6,
+            "failed": 0,
+            "blocked": 0,
+            "attempt_seq": 5
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "passed",
+          "scope": "reported_scenarios",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 6,
+            "limit": 64,
+            "remaining": 58,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 0,
+          "evidence": {
+            "key": "f880613fca5fb60bf1b5d00d742ce2bc14dd30a08abc0d8acc8b9546e22bafc8",
+            "entry": "core_check.py",
+            "source_fingerprint": "4979d6b7b59ab3666b48bb3d69ef25624f36dca706c484550903702d0bef9093",
+            "environment_fingerprint": "4c5298ea7f53c1f5c009baeba84fadc028d77c44699177a1464ed688be0a5c35",
+            "freshness": "current",
+            "passed": 9,
+            "failed": 0,
+            "blocked": 0,
+            "attempt_seq": 6
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "failed",
+          "verification": "unverified",
+          "scope": "reported_scenarios",
+          "reason": "PROCESS_EXIT_WITHOUT_FAILURE_ASSERTION",
+          "category": "verification_harness",
+          "recovery": "inspect",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 2,
+            "limit": 64,
+            "remaining": 62,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 1,
+          "evidence": {
+            "key": "c2034965e9793c8eea2dedc7091f69ba27d0e41b3d8c126142ae26507535129a",
+            "entry": "inline-call_510a90fca8e44edfa7cfa143",
+            "source_fingerprint": "1db84628d388c176e0e867776c9bf02887345c2d9a4398cfd9aa23c3135b85ee",
+            "environment_fingerprint": "4c5298ea7f53c1f5c009baeba84fadc028d77c44699177a1464ed688be0a5c35",
+            "freshness": "stale",
+            "passed": 0,
+            "failed": 0,
+            "blocked": 0,
+            "attempt_seq": 2
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "not_applicable",
+          "scope": "execution_resources",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 7,
+            "limit": 64,
+            "remaining": 57,
+            "resets_on": "new_run"
+          },
+          "source": "host"
+        }
+      ],
+      "pending": [
+        "assigned_source_files: permission; EXPERIMENT_WRITE_OUTSIDE_ASSIGNMENT",
+        "inline-call_ae08fd65b32547ca85338326: 验证版本 stale，核对变更后仅补缺失验证",
+        "inline-call_510a90fca8e44edfa7cfa143: 验证版本 stale，核对变更后仅补缺失验证"
+      ],
+      "recovery": "inspect",
+      "resources": [
+        {
+          "resource": "script_runs",
+          "scope": "session",
+          "used": 7,
+          "limit": 64,
+          "remaining": 57,
+          "resets_on": "new_run"
+        }
+      ]
+    }
+  },
+  {
+    "at": "2026-10-21T10:28:20.580Z",
+    "child_session_id": "2d4d64e1-2c14-4589-b323-94771e95ae3e",
+    "delegation_id": "b105fce5-9e16-4deb-bf61-bce25499e008",
+    "lifecycle_status": "completed",
+    "loop_status": "completed",
+    "handoff": {
+      "schema_version": 1,
+      "completion": "incomplete",
+      "loop_status": "completed",
+      "changed_files": [
+        "ui/tokens.css",
+        "ui/app.css",
+        "ui/index.html"
+      ],
+      "verification": [
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "passed",
+          "scope": "reported_scenarios",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 14,
+            "limit": 64,
+            "remaining": 50,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 0,
+          "evidence": {
+            "key": "beaf461d4022a26d1bd9678cd73d88d06e2effe41ffa8378e9cb2da1ff8e87af",
+            "entry": "inline-call_82bfdb3cce1b4d3dac58f0da",
+            "source_fingerprint": "c6f36ffc283e4cf56990cca346ad38595d221af8f6b11cffb1d5de3393bb0247",
+            "environment_fingerprint": "50b840123175c2e44ab68f666a42cb6f0032e28a002fc20e62585e5c7345414d",
+            "freshness": "current",
+            "passed": 5,
+            "failed": 0,
+            "blocked": 0,
+            "attempt_seq": 14
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "failed",
+          "verification": "unverified",
+          "scope": "source_write_audit",
+          "reason": "SCRIPT_SOURCE_WRITES_ROLLED_BACK",
+          "category": "permission",
+          "recovery": "correct_input",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 4,
+            "limit": 64,
+            "remaining": 60,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 1,
+          "evidence": {
+            "key": "e3ecff7ce59da6ddad3ee76a41562b2388a86c0615164dc727f9323823a5144f",
+            "entry": "inline-call_939fa77460894dd888397b45",
+            "source_fingerprint": "c6f36ffc283e4cf56990cca346ad38595d221af8f6b11cffb1d5de3393bb0247",
+            "environment_fingerprint": "50b840123175c2e44ab68f666a42cb6f0032e28a002fc20e62585e5c7345414d",
+            "freshness": "unknown",
+            "passed": 0,
+            "failed": 0,
+            "blocked": 0,
+            "attempt_seq": 4
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "failed",
+          "verification": "unverified",
+          "scope": "reported_scenarios",
+          "reason": "PROCESS_EXIT_WITHOUT_FAILURE_ASSERTION",
+          "category": "verification_harness",
+          "recovery": "inspect",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 5,
+            "limit": 64,
+            "remaining": 59,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 1,
+          "evidence": {
+            "key": "474008cc9c041ba7ec2f30a8551169ec2822b0ab629d0f344d865a1ef6805342",
+            "entry": "inline-call_ce0f016de4834e5994c2a7a6",
+            "source_fingerprint": "c6f36ffc283e4cf56990cca346ad38595d221af8f6b11cffb1d5de3393bb0247",
+            "environment_fingerprint": "50b840123175c2e44ab68f666a42cb6f0032e28a002fc20e62585e5c7345414d",
+            "freshness": "current",
+            "passed": 0,
+            "failed": 0,
+            "blocked": 0,
+            "attempt_seq": 5
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "failed",
+          "verification": "unverified",
+          "scope": "reported_scenarios",
+          "reason": "PROCESS_EXIT_WITHOUT_FAILURE_ASSERTION",
+          "category": "verification_harness",
+          "recovery": "inspect",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 7,
+            "limit": 64,
+            "remaining": 57,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 1,
+          "evidence": {
+            "key": "be40409306625754076eec664a130b59ae731c6569d32fff3e3cb95711ad2688",
+            "entry": "inline-call_562dffa83690462ab16c973b",
+            "source_fingerprint": "c6f36ffc283e4cf56990cca346ad38595d221af8f6b11cffb1d5de3393bb0247",
+            "environment_fingerprint": "50b840123175c2e44ab68f666a42cb6f0032e28a002fc20e62585e5c7345414d",
+            "freshness": "current",
+            "passed": 0,
+            "failed": 0,
+            "blocked": 0,
+            "attempt_seq": 7
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "failed",
+          "scope": "reported_scenarios",
+          "category": "product_assertion",
+          "recovery": "repair_product",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 8,
+            "limit": 64,
+            "remaining": 56,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 0,
+          "evidence": {
+            "key": "f7ec30ae9cb291f3e0b38ad37e0b8c43affab8534a98d02b30006950b31b727d",
+            "entry": "inline-call_ecc26a61b9e248ed98507a02",
+            "source_fingerprint": "c6f36ffc283e4cf56990cca346ad38595d221af8f6b11cffb1d5de3393bb0247",
+            "environment_fingerprint": "50b840123175c2e44ab68f666a42cb6f0032e28a002fc20e62585e5c7345414d",
+            "freshness": "current",
+            "passed": 0,
+            "failed": 7,
+            "blocked": 0,
+            "attempt_seq": 8
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "failed",
+          "scope": "reported_scenarios",
+          "category": "product_assertion",
+          "recovery": "repair_product",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 11,
+            "limit": 64,
+            "remaining": 53,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 0,
+          "evidence": {
+            "key": "093df0d17aeb6241d74b319e4d0b1b08583051863c812382686e0cb4fdee5b22",
+            "entry": "inline-call_511dcf8891774752af3e2d3c",
+            "source_fingerprint": "c6f36ffc283e4cf56990cca346ad38595d221af8f6b11cffb1d5de3393bb0247",
+            "environment_fingerprint": "50b840123175c2e44ab68f666a42cb6f0032e28a002fc20e62585e5c7345414d",
+            "freshness": "current",
+            "passed": 1,
+            "failed": 6,
+            "blocked": 0,
+            "attempt_seq": 11
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "failed",
+          "scope": "reported_scenarios",
+          "category": "product_assertion",
+          "recovery": "repair_product",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 12,
+            "limit": 64,
+            "remaining": 52,
+            "resets_on": "new_run"
+          },
+          "source": "host",
+          "exit_code": 0,
+          "evidence": {
+            "key": "fc0a540493e1d85ca77ef4157dd3deb4d27e76e06972aa348ba96ffd794817b3",
+            "entry": "inline-call_5aefad96fd3e4ac980db022c",
+            "source_fingerprint": "c6f36ffc283e4cf56990cca346ad38595d221af8f6b11cffb1d5de3393bb0247",
+            "environment_fingerprint": "50b840123175c2e44ab68f666a42cb6f0032e28a002fc20e62585e5c7345414d",
+            "freshness": "current",
+            "passed": 1,
+            "failed": 6,
+            "blocked": 0,
+            "attempt_seq": 12
+          }
+        },
+        {
+          "schema_version": 1,
+          "execution": "completed",
+          "verification": "not_applicable",
+          "scope": "execution_resources",
+          "budget": {
+            "resource": "script_runs",
+            "scope": "session",
+            "used": 14,
+            "limit": 64,
+            "remaining": 50,
+            "resets_on": "new_run"
+          },
+          "source": "host"
+        }
+      ],
+      "pending": [
+        "inline-call_939fa77460894dd888397b45: 验证版本 unknown，核对变更后仅补缺失验证",
+        "reported_scenarios: verification_harness; PROCESS_EXIT_WITHOUT_FAILURE_ASSERTION",
+        "reported_scenarios: verification_harness; PROCESS_EXIT_WITHOUT_FAILURE_ASSERTION",
+        "reported_scenarios: product_assertion; repair_product",
+        "reported_scenarios: product_assertion; repair_product",
+        "reported_scenarios: product_assertion; repair_product"
+      ],
+      "recovery": "inspect",
+      "resources": [
+        {
+          "resource": "script_runs",
+          "scope": "session",
+          "used": 14,
+          "limit": 64,
+          "remaining": 50,
+          "resets_on": "new_run"
+        }
+      ]
+    }
+  }
+]

@@ -1,0 +1,32 @@
+{
+  "at": "2026-10-21T10:45:06.814Z",
+  "mode": "run",
+  "local_processes_settled": true,
+  "exit_code": 1,
+  "exit_signal": null,
+  "spawn_error": null,
+  "forced_cleanup": false,
+  "stop_reason": "terminal-cleanup",
+  "native_outcome": "operator-stopped",
+  "terminal": {
+    "at": "2026-10-21T10:45:02.572Z",
+    "event": "run_finished",
+    "experiment_id": "production-v2-L1-quick-20261020-r2",
+    "run_id": "production-v2-L1-quick-20261021-r5a-G11",
+    "project_id": "42487b23-f6c0-47e5-b46b-f607b105ae7b",
+    "mode": "quick",
+    "policy": "autonomous",
+    "snapshot_id": "77ff7ced-ace0-47d3-91cf-c7597fb23da8",
+    "outcome": "failed",
+    "reason": "EXPERIMENT_GATE_EXHAUSTED"
+  },
+  "ledger": {
+    "queries": 114,
+    "terminal_receipts": 114,
+    "malformed_lines": 0,
+    "read_error": null,
+    "orphaned": []
+  },
+  "product_quality": null,
+  "qualified": false
+}

@@ -1,0 +1,63 @@
+{
+  "verdict": "unverified",
+  "checked_features": [
+    "F-001",
+    "F-002",
+    "F-003",
+    "F-004",
+    "F-005",
+    "F-006"
+  ],
+  "evidence": [
+    "00_VERIFY/core-verification.json：status=passed，9 个逻辑场景（L1–L9）及 6 个 GUI 场景（G1–G6）均为 outcome=pass，六个功能 verification=passed；6 项需求哈希与 CORE_CHECK.json 一致。",
+    "CORE_CHECK.json：F-001~F-006 均标为 implemented；scenarios 覆盖 L1–L9、G1–G6，其中 G1/G2 覆盖 F-001，G3 覆盖 F-001/F-002/F-006，G4 覆盖 F-002/F-003，G5 覆盖 F-004，G6 覆盖 F-005，没有遗漏任何功能。",
+    "core/todo.py:60-67 add_task：先执行 (title or '').strip()，若为空则抛出 ValueError('标题不能为空')，如果非空，则用独立的 uuid4 id、done=False，并通过 _store.update 追加到列表尾部（符合 F-001、BR-001、BR-004、BR-005）。",
+    "core/todo.py:70-83 toggle_task 与 86-95 delete_task：都按 id 精确定位并只修改目标行，找不到时抛错，且不写入文件，同名任务之间互不影响（符合 F-002、F-004、BR-004）。",
+    "core/todo.py:42-50 _filtered 与 98-100 list_tasks：all/active/completed 三种视图按 done 过滤，返回顺序沿用存储顺序（新增顺序），非法视图抛 ValueError（符合 F-003、F-006、BR-003/BR-005）。",
+    "record_store.py:24-32/51-73：启动时读取 records.json 并校验必需的 id/title/done 字段；更新时先在深拷贝副本上执行变换，再校验，然后经临时文件、fsync 和 os.replace 原子写入文件，成功后提交到内存；文件损坏时通过 DataIntegrityError 如实抛出错误，不静默地当作空列表处理（符合 F-005、BR-006）。",
+    "app.py:95-121 桥接方法 list_tasks/add_task/toggle_task/delete_task：返回顶层扁平 {ok,view,tasks,counts[,added]}，失败时统一转为 {ok:false,error}，不向 UI 抛异常（接口与 ui/index.html 注释中的冻结契约一致）。",
+    "ui/index.html:208-236 onSend：先 trim 再本地拦截空标题（显示横幅“标题不能为空”、恢复输入原值、列表不变），只有成功后才清空输入并调用 refreshView()；renderTasks 按 tasks 顺序生成包含 task-title/task-state/toggle/delete 的行；239-249 的视图点击只更新 currentView 并刷新，不自动跳回（符合 F-001、F-002、F-003、F-006 的界面断言）。",
+    "test_gui.py:281-404：G1–G6 通过真实 app.py --drive-port 子进程和 /eval 真实点击页面，并回读行标题、状态、视图、计数、横幅；G6 会 terminate 进程后对同一数据目录重新启动（含空目录）——属于真界面业务链，不是纯脚本自述。",
+    "DELIVERY.md:13-22 交付说明与上述实现/验收点一一对应，未发现夸大（并如实列出无二次确认、无编辑等限制）。"
+  ],
+  "findings": [
+    {
+      "feature_id": "F-006",
+      "problem": "正常启动路径的首屏装载存在时序风险且未被任何自动化覆盖：ui/index.html:197-206 boot() 一进入就置 booted=true，失败后（桥未就绪）只显示“加载失败”，随后 pywebviewready 再次触发 boot 会被 booted 直接 return，列表可能永久空白；而 test_gui.py 全部走 ?dport= 的 HTTP 桥分支（ui/bridge.js:31-41），从未验证 pywebview.api 正常启动分支，故 F-006/F-001 的“正常双击启动后列表可用”未被独立证据覆盖。"
+    },
+    {
+      "feature_id": "F-001",
+      "problem": "桥上 add_task 在 ui/index.html:225 未传 view，app.py:101-105 的 _snapshot 以缺省 'all' 生成 tasks 回包，与当前视图不一致（前端以 refreshView 重新拉取兜底，功能未观察到错误，但也说明回包视图契约与“当前选中视图”存在偏差，属未解决的一致性问题）。"
+    }
+  ],
+  "child_session_id": "d9dcd0fd-dd4e-4c7e-bdf7-8bd2448e61cc",
+  "scope": "independent_source_and_host_evidence_review",
+  "loop_status": "completed",
+  "run_id": "production-v2-L1-quick-20261021-r5a-G11",
+  "fingerprint_before": "371186beb9bbeb04bbe29a3d64eefbe68526d3fcc47a7292f1077f35e109c0e6",
+  "fingerprint_after": "371186beb9bbeb04bbe29a3d64eefbe68526d3fcc47a7292f1077f35e109c0e6",
+  "source_unchanged": true,
+  "observed_feature_reads": [
+    "F-001",
+    "F-002",
+    "F-003",
+    "F-004",
+    "F-005",
+    "F-006"
+  ],
+  "observed_file_reads": [
+    "00_verify/core-verification.json",
+    "core_check.json",
+    "delivery.md",
+    "core/todo.py",
+    "record_store.py",
+    "app.py",
+    "ui/index.html",
+    "ui/bridge.js",
+    "test_gui.py",
+    "core_check.py",
+    "ui/preview-state.js",
+    "launch.json"
+  ],
+  "required_evidence_read": true
+}

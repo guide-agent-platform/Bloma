@@ -1,0 +1,88 @@
+{
+  "at": "2026-10-21T10:50:48.472Z",
+  "original": {
+    "path": "C:/Users/17359/bex-pv220/review-new-G11-r5a.py",
+    "sha256": "eca1950d8c6c2499b349a83121ed5203b6874bc9e97192a3ca2553c5fc711297"
+  },
+  "revised": {
+    "path": "C:/Users/17359/bex-pv220/review-new-G11-r5a-selector-v2.py",
+    "sha256": "94b267720c3a86d1075a134ba66b3a8b36e221c9bf6e9ab7771a2425cacf9af0"
+  },
+  "changes": [
+    "Three row identity selectors: data-id to data-task-id",
+    "Filter selector: done to completed; open to active retained"
+  ],
+  "business_predicates_unchanged": true,
+  "original_preserved": true,
+  "attempt1": {
+    "path": "C:/Users/17359/AppData/Local/Bloma/production-v2-L1-20261020/pilot-r5a-independent/G11/attempt-1/review.json",
+    "sha256": "13ae21b34ced1d12c0c01939ee41425b2379fb73e6d4437ae6ba7dc48ca293eb",
+    "complete": false,
+    "quality": null,
+    "checks": [
+      {
+        "id": "add-trim",
+        "status": "pending",
+        "harness_error": "KeyError: 'id'"
+      },
+      {
+        "id": "empty-rejection",
+        "status": "passed"
+      },
+      {
+        "id": "toggle-isolation",
+        "status": "pending",
+        "harness_error": "KeyError: 'id'"
+      },
+      {
+        "id": "filters",
+        "status": "pending",
+        "harness_error": "KeyError: 'mixed'"
+      },
+      {
+        "id": "delete-isolation",
+        "status": "pending",
+        "harness_error": "KeyError: 'second'"
+      },
+      {
+        "id": "restart-persistence",
+        "status": "pending",
+        "harness_error": "KeyError: 'after_delete'"
+      }
+    ]
+  },
+  "attempt2": {
+    "path": "C:/Users/17359/AppData/Local/Bloma/production-v2-L1-20261020/pilot-r5a-independent/G11/attempt-2-selector/review.json",
+    "sha256": "27a585cdfb69c5f5c60cd5d89a65edab81f4d8b47d1a9c2876ecca1f3fb14efd",
+    "complete": true,
+    "quality": 1,
+    "checks": [
+      {
+        "id": "add-trim",
+        "status": "passed"
+      },
+      {
+        "id": "empty-rejection",
+        "status": "passed"
+      },
+      {
+        "id": "toggle-isolation",
+        "status": "passed"
+      },
+      {
+        "id": "filters",
+        "status": "passed"
+      },
+      {
+        "id": "delete-isolation",
+        "status": "passed"
+      },
+      {
+        "id": "restart-persistence",
+        "status": "passed"
+      }
+    ]
+  },
+  "source_unchanged": true,
+  "locked_result": "empty-rejection from attempt-1; only the five pending checks supplied from attempt-2"
+}
