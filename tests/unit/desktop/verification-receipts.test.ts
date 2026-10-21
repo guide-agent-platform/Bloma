@@ -10,9 +10,12 @@ import type { SDKMessage } from '../../../shared/types'
 import { createProject } from '../../../main/project/project-service'
 import { safeToolFeedback, type ToolFeedback } from '../../../shared/tool-feedback'
 import { retainedToolFeedback } from '../../../shared/tool-feedback-policy'
-import { consumeProjectAttempt } from '../../../main/platform/execution/project-attempts'
+import { consumeProjectAttempt, resetProjectAttemptScope } from '../../../main/platform/execution/project-attempts'
 import { restorePromaHome } from '../../support/proma-home-guard'
 import { buildTaskHandoff, readTaskHandoff } from '../../../main/agent/delegation/task-handoff'
+import { refreshHandoffEvidence } from '../../../main/agent/delegation/delegation-evidence'
+import type { DelegationRecord } from '../../../main/agent/delegation/agent-collaboration'
+import * as jsonStore from '../../../storage/json-store'
 
 describe('host versioned verification receipts', () => {
   const priorHome = process.env.PROMA_HOME
@@ -25,7 +28,7 @@ describe('host versioned verification receipts', () => {
     writeFileSync(join(root, 'test_ui.py'), 'print("PASS gui")')
     ctx = { projectId: id, sessionId: 'receipt-child', requestId: 'receipt-test', signal: new AbortController().signal, state: createToolState() }
   })
-  afterEach(() => restorePromaHome(priorHome))
+  afterEach(() => { vi.restoreAllMocks(); restorePromaHome(priorHome) })
   function runner(stdout: string) {
     return buildChildScriptRunnerTool(id, { resolvePython: async () => 'C:/Python313/python.exe',
       spawn: vi.fn(async () => ({ code: stdout.startsWith('FAIL') ? 1 : 0, stdout, stderr: '' })) })
@@ -75,6 +78,70 @@ describe('host versioned verification receipts', () => {
     expect(facts.filter(f => f.evidence)).toHaveLength(1)
     expect(facts[0]).toMatchObject({ verification: 'failed', evidence: { failed: 1, freshness: 'current' } })
     expect(facts.at(-1)?.budget?.used).toBe(2)
+  })
+  it('invalidates an old PASS before execution, surviving a crash before the final receipt hook', async () => {
+    await run('core_check.py', 'PASS core\n')
+    const tool = runner('FAIL core\n')
+    const outcome = await tool.execute({ script: 'core_check.py' }, ctx)
+    expect(outcome.feedback?.evidence?.attempt_seq).toBe(2)
+    // Simulate an interrupted host: the post-audit record hook never runs.
+    const restarted = runner('').collectFeedback!(ctx).filter(f => f.evidence)
+    expect(restarted).toHaveLength(1)
+    expect(restarted[0]).toMatchObject({ verification: 'unverified', reason: 'VERIFICATION_ATTEMPT_PENDING', evidence: { attempt_seq: 2, freshness: 'unknown', passed: 0 } })
+  })
+  it('does not start a rerun if the old receipt cannot be durably invalidated', async () => {
+    await run('core_check.py', 'PASS core\n')
+    const write = jsonStore.writeTextFileAtomic
+    vi.spyOn(jsonStore, 'writeTextFileAtomic').mockImplementation((file, text) => {
+      if (file.includes('verification-receipts')) throw new Error('injected receipt storage error')
+      write(file, text)
+    })
+    const spawn = vi.fn(async () => ({ code: 1, stdout: 'FAIL core', stderr: '' }))
+    const tool = buildChildScriptRunnerTool(id, { resolvePython: async () => 'C:/Python313/python.exe', spawn })
+    const outcome = await tool.execute({ script: 'core_check.py' }, ctx)
+    expect(spawn).not.toHaveBeenCalled()
+    expect(outcome.feedback).toMatchObject({ execution: 'not_run', verification: 'unverified', reason: 'EVIDENCE_INVALIDATION_FAILED' })
+  })
+  it('a final receipt write failure cannot resurrect PASS through loop completion, handoff refresh or restart; a newer real rerun can recover', async () => {
+    await run('core_check.py', 'PASS core\n')
+    let failReceipt = false
+    const write = jsonStore.writeTextFileAtomic
+    vi.spyOn(jsonStore, 'writeTextFileAtomic').mockImplementation((file, text) => {
+      if (failReceipt && file.includes('verification-receipts')) throw new Error('injected final receipt write failure')
+      write(file, text)
+    })
+    const tool = buildChildScriptRunnerTool(id, { resolvePython: async () => 'C:/Python313/python.exe', spawn: async () => {
+      failReceipt = true
+      return { code: 1, stdout: 'FAIL core\n', stderr: '' }
+    } })
+    let turns = 0
+    const result = await runAgentLoop({ projectId: id, sessionId: ctx.sessionId, requestId: 'receipt-write-failure', signal: ctx.signal,
+      task: 'rerun', system: '', env: {}, maxTokens: 256, maxTurns: 3, tools: [tool], permissionMode: 'allow-all', publish: () => {},
+      query: async function* () {
+        const content = ++turns === 1 ? [{ type: 'tool_use', id: 'failed-receipt', name: tool.name, input: { script: 'core_check.py' } }] : [{ type: 'text', text: 'done' }]
+        yield { type: 'assistant', message: { role: 'assistant', content } } as SDKMessage
+        yield { type: 'result', subtype: 'success', stop_reason: turns === 1 ? 'tool_use' : 'end_turn' } as SDKMessage
+      } })
+    const proof = result.tool_feedback!.find(f => f.evidence)!
+    expect(proof).toMatchObject({ verification: 'unverified', reason: 'EVIDENCE_RECORD_FAILED', evidence: { attempt_seq: 2, failed: 1 } })
+    const record = { projectId: id, childSessionId: ctx.sessionId, loopStatus: 'completed', abort: new AbortController(), taskHandoff: buildTaskHandoff(result) } as DelegationRecord
+    expect(refreshHandoffEvidence(record, [runner('')])).toMatchObject({ completion: 'incomplete' })
+    expect(refreshHandoffEvidence(record, [runner('')]).verification.find(f => f.evidence)?.reason).toBe('EVIDENCE_RECORD_FAILED')
+    expect(runner('').collectFeedback!(ctx).filter(f => f.evidence).every(f => f.verification !== 'passed')).toBe(true)
+    failReceipt = false
+    const repaired = await run('core_check.py', 'PASS core\n')
+    expect(refreshHandoffEvidence(record, [repaired]).verification.find(f => f.evidence)).toMatchObject({ verification: 'passed', evidence: { attempt_seq: 3 } })
+  })
+  it('execution sequence survives active budget resets and refuses a rewound counter', async () => {
+    await run('core_check.py', 'PASS core\n')
+    resetProjectAttemptScope(id, `script:${ctx.sessionId}`)
+    const second = await run('core_check.py', 'PASS core\n')
+    expect(second.collectFeedback!(ctx)[0].evidence?.attempt_seq).toBe(2)
+    writeFileSync(join(process.env.PROMA_HOME!, 'execution-attempts', id + '.json'), '{"schema_version":1,"active":{},"total":{}}')
+    const spawn = vi.fn(async () => ({ code: 0, stdout: 'PASS core', stderr: '' }))
+    const tool = buildChildScriptRunnerTool(id, { resolvePython: async () => 'C:/Python313/python.exe', spawn })
+    expect((await tool.execute({ script: 'core_check.py' }, ctx)).feedback?.reason).toBe('EVIDENCE_INVALIDATION_FAILED')
+    expect(spawn).not.toHaveBeenCalled()
   })
   it.each(['no assertions', 'exception', 'timeout', 'cancelled'] as const)('replaces an earlier PASS when the same command later reports %s', async kind => {
     await run('core_check.py', 'PASS core\n')

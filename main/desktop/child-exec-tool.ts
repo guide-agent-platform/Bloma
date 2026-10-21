@@ -27,7 +27,7 @@ import type { ToolBudgetFact } from '../../shared/tool-feedback'
 import { DEFAULT_DESKTOP_EXECUTION_LIMITS } from './execution-limits'
 import { getPromaHome } from '../../storage/config-paths'
 import { pythonEncodingEnv } from './python-process-env'
-import { captureVerificationVersion, collectVerificationReceipts, recordVerificationReceipt, receiptEvidence, receiptPython, hasVerificationReceipt } from './verification-receipts'
+import { beginVerificationAttempt, captureVerificationVersion, collectVerificationReceipts, recordVerificationReceipt, receiptEvidence, receiptPython, hasVerificationReceipt } from './verification-receipts'
 
 const DEFAULT_TIMEOUT_MS = 90_000
 const MAX_TIMEOUT_MS = 180_000
@@ -92,6 +92,7 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
   const maxRuns = deps.maxRuns ?? DEFAULT_MAX_RUNS
   const defaultTimeoutMs = deps.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS
   let runs = 0
+  let attemptSeq = 0
   let lastPython: string | undefined
   const budgetFact = (used: number): ToolBudgetFact => ({ resource: 'script_runs', scope: 'session', used, limit: maxRuns,
     remaining: Math.max(0, maxRuns - used), resets_on: 'new_run' })
@@ -203,6 +204,7 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
         if (!attempt.allowed) return { output: `本任务累计执行预算用尽（${attempt.used}/${maxRuns} 次），续接不会清零。保存未完成项后停止。`, isError: true, budgetExhausted: true,
           feedback: { schema_version: 1, execution: 'not_run', verification: 'unverified', source: 'host', scope: 'reported_scenarios', category: 'budget', recovery: 'stop', budget: budgetFact(attempt.used) } }
         runs = attempt.used
+        attemptSeq = attempt.total
       } catch { return { output: '执行计数不可保存，未启动脚本。请恢复执行记录后重试。', isError: true, feedback: { schema_version: 1, execution: 'not_run', verification: 'unverified', category: 'environment', recovery: 'prepare_environment' } } }
       const label = script || '单次短代码'
       lastPython = python
@@ -212,9 +214,12 @@ export function buildChildScriptRunnerTool(projectId: string, deps: ChildScriptR
       // The key includes all argument values; the short display label omits values.
       const entry = script ? [script, ...args.filter(arg => /^--[A-Za-z0-9_-]{1,40}$/.test(arg))].join(' ').slice(0, 160) : `inline-${ctx.toolCallId ?? 'probe'}`
       const evidence = (scenarios: Array<{ outcome: string }>) => {
-        try { return receiptEvidence(entry, command, timeoutMs, before, captureVerificationVersion(rootReal, python, env, projectId), scenarios) }
-        catch { return { ...receiptEvidence(entry, command, timeoutMs, before, before, scenarios), freshness: 'unknown' as const } }
+        try { return { ...receiptEvidence(entry, command, timeoutMs, before, captureVerificationVersion(rootReal, python, env, projectId), scenarios), attempt_seq: attemptSeq } }
+        catch { return { ...receiptEvidence(entry, command, timeoutMs, before, before, scenarios), freshness: 'unknown' as const, attempt_seq: attemptSeq } }
       }
+      try { beginVerificationAttempt(projectId, ctx.sessionId, { ...receiptEvidence(entry, command, timeoutMs, before, before, []), attempt_seq: attemptSeq }, python) }
+      catch { return { output: '旧验证凭据无法失效，未启动脚本；恢复凭据存储后再试。', isError: true,
+        feedback: { schema_version: 1, execution: 'not_run', verification: 'unverified', category: 'verification_harness', recovery: 'inspect', reason: 'EVIDENCE_INVALIDATION_FAILED' } } }
       try {
         const { code, stdout, stderr } = await spawn({
           command,

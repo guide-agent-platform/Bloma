@@ -13,8 +13,7 @@ export function refreshHandoffEvidence(record: DelegationRecord, tools: AgentLoo
     try { return tool.collectFeedback!(ctx) } catch { return [{ schema_version: 1 as const, execution: 'not_run' as const,
       verification: 'unverified' as const, category: 'verification_harness' as const, recovery: 'inspect' as const, reason: 'EVIDENCE_COLLECTION_FAILED' }] }
   })
-  const found = new Set(facts.flatMap(f => f.evidence ? [f.evidence.key] : []))
-  const previous = prior.verification.filter(f => f.scope !== 'execution_resources' && (!f.evidence || !found.has(f.evidence.key)))
+  const previous = prior.verification.filter(f => f.scope !== 'execution_resources')
     .map(f => f.evidence ? { ...f, verification: 'unverified' as const, evidence: { ...f.evidence, freshness: 'unknown' as const } } : f)
   const handoff = buildTaskHandoff({ status: record.loopStatus ?? 'completed', turns: 0, finalText: '', toolCalls: [],
     files_changed: prior.changed_files, tool_feedback: [...previous, ...facts] })

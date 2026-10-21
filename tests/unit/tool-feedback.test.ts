@@ -3,8 +3,21 @@ import { safeToolFeedback, formatToolFeedback, readToolFeedback, toolFeedbackLab
 import { feedbackForTool } from '../../main/agent/loop/tool-feedback'
 import { deriveToolCallRecords } from '../../renderer/components/ToolCallBlock'
 import type { AgentEvent } from '../../shared/types'
+import { retainedToolFeedback } from '../../shared/tool-feedback-policy'
 
 describe('tool feedback contract', () => {
+  it('execution order and a failed receipt commit take precedence over collector ordering, including legacy receipts', () => {
+    const evidence = { key: 'a'.repeat(64), entry: 'core.py', source_fingerprint: 'b'.repeat(64), environment_fingerprint: 'c'.repeat(64), freshness: 'current' as const, passed: 1, failed: 0, blocked: 0 }
+    const disk = { schema_version: 1 as const, execution: 'completed' as const, verification: 'passed' as const, evidence }
+    const failed = { ...disk, verification: 'unverified' as const, reason: 'EVIDENCE_RECORD_FAILED', evidence: { ...evidence, attempt_seq: 2, freshness: 'unknown' as const, passed: 0, failed: 1 } }
+    expect(retainedToolFeedback([failed, disk])[0]).toBe(failed)
+    expect(retainedToolFeedback([failed, { ...disk, evidence: { ...evidence, attempt_seq: 2 } }])[0]).toBe(failed)
+    const fresh = { ...disk, evidence: { ...evidence, attempt_seq: 3 } }
+    expect(retainedToolFeedback([failed, fresh])[0]).toBe(fresh)
+    expect(retainedToolFeedback([fresh, failed])[0]).toBe(fresh)
+    expect(safeToolFeedback(failed)?.evidence?.attempt_seq).toBe(2)
+    expect(safeToolFeedback({ ...fresh, evidence: { ...fresh.evidence, attempt_seq: -1 } })?.verification).toBe('unverified')
+  })
   it('does not turn process exit 0 into business evidence', () => {
     expect(feedbackForTool('run_project_script', { output: 'ZIP_FAIL', detail: { code: 0, verification_status: 'not_reported' } })).toMatchObject({ execution: 'completed', verification: 'unverified', exit_code: 0 })
     expect(feedbackForTool('install_packages', { output: 'import failed', isError: true, detail: { imports_verified: false } })).toMatchObject({ category: 'environment', verification: 'unverified', recovery: 'prepare_environment' })

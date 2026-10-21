@@ -1,0 +1,26 @@
+{
+  "at": "2026-10-20T07:08:10.334Z",
+  "source_commit": "d245a8b42f6dff5e260f3fa439c77c1cc415c2a6",
+  "kind": "synthetic-host-fact-regression-no-model",
+  "model_calls": 0,
+  "condition": "new FAIL cannot be persisted; collector returns the old disk PASS for the same command and input version",
+  "expected": "unverified with EVIDENCE_RECORD_FAILED; never a current PASS",
+  "observed": [
+    {
+      "schema_version": 1,
+      "execution": "completed",
+      "verification": "passed",
+      "evidence": {
+        "key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "entry": "core_check.py",
+        "source_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "environment_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "freshness": "current",
+        "passed": 1,
+        "failed": 0,
+        "blocked": 0
+      }
+    }
+  ],
+  "resurrected_old_pass": true
+}

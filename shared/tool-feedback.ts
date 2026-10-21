@@ -32,6 +32,8 @@ export interface ToolFeedback {
     passed: number
     failed: number
     blocked: number
+    /** Monotonic host execution count within this project/session, across budget resets. */
+    attempt_seq?: number
   }
 }
 
@@ -64,9 +66,11 @@ export function safeToolFeedback(raw: unknown): ToolFeedback | undefined {
   const e = r.evidence as ToolFeedback['evidence']
   if (e && typeof e === 'object' && [e.key, e.source_fingerprint, e.environment_fingerprint].every(s => typeof s === 'string' && /^[a-f0-9]{64}$/.test(s))
     && typeof e.entry === 'string' && e.entry.length <= 160 && !e.entry.includes('..') && !/^([a-z]:|[\\/]|https?:)/i.test(e.entry)
-    && ['current', 'stale', 'unknown'].includes(e.freshness) && [e.passed, e.failed, e.blocked].every(n => Number.isSafeInteger(n) && n >= 0 && n <= 4096)) {
+    && ['current', 'stale', 'unknown'].includes(e.freshness) && [e.passed, e.failed, e.blocked].every(n => Number.isSafeInteger(n) && n >= 0 && n <= 4096)
+    && (e.attempt_seq === undefined || Number.isSafeInteger(e.attempt_seq) && e.attempt_seq > 0)) {
     result.evidence = { key: e.key, entry: e.entry, source_fingerprint: e.source_fingerprint, environment_fingerprint: e.environment_fingerprint,
       freshness: e.freshness, passed: e.passed, failed: e.failed, blocked: e.blocked }
+    if (e.attempt_seq !== undefined) result.evidence.attempt_seq = e.attempt_seq
     if (e.freshness !== 'current') result.verification = 'unverified'
   } else if (r.evidence !== undefined) {
     result.verification = 'unverified'; result.category = 'verification_harness'; result.recovery = 'inspect'; result.reason = 'VERIFICATION_EVIDENCE_INVALID'

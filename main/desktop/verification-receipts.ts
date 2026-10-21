@@ -6,6 +6,7 @@ import { writeTextFileAtomic } from '../../storage/json-store'
 import { readProjectAttempts } from '../platform/execution/project-attempts'
 import { safeToolFeedback, type ToolFeedback } from '../../shared/tool-feedback'
 import { isHostPresentationOutput } from './host-verification-outputs'
+import { preferredEvidenceFact } from '../../shared/tool-feedback-policy'
 
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
 const excluded = new Set(['.venv', 'venv', '__pycache__', '.git', 'node_modules', '.cache'])
@@ -92,9 +93,25 @@ export function receiptPython(projectId: string, sessionId: string): string | un
 export function recordVerificationReceipt(projectId: string, sessionId: string, feedback: ToolFeedback, python: string): void {
   const fact = safeToolFeedback(feedback)
   if (!fact?.evidence) return
-  const facts = readReceipts(projectId, sessionId).filter(f => f.evidence!.key !== fact.evidence!.key)
+  const stored = readReceipts(projectId, sessionId)
+  const previous = stored.find(f => f.evidence!.key === fact.evidence!.key)
+  if (previous && preferredEvidenceFact(previous, fact) === previous) return
+  const facts = stored.filter(f => f.evidence!.key !== fact.evidence!.key)
   facts.push(fact)
   writeTextFileAtomic(receiptPath(projectId, sessionId), JSON.stringify({ schema_version: 1, python, facts: facts.slice(-16) }))
+}
+/** Before re-executing an existing proof, durably invalidate it. A crash or failed
+ * final write can leave only an unknown attempt marker, never the old PASS. */
+export function beginVerificationAttempt(projectId: string, sessionId: string, proof: NonNullable<ToolFeedback['evidence']>, python: string): void {
+  const previous = readReceipts(projectId, sessionId).find(f => f.evidence!.key === proof.key)
+  if (!previous) return
+  if (!proof.attempt_seq || proof.attempt_seq <= (previous.evidence!.attempt_seq ?? 0)) throw new Error('VERIFICATION_ATTEMPT_NOT_NEWER')
+  recordVerificationReceipt(projectId, sessionId, { schema_version: 1, execution: 'running', verification: 'unverified', source: 'host',
+    scope: 'reported_scenarios', category: 'verification_harness', recovery: 'inspect', reason: 'VERIFICATION_ATTEMPT_PENDING',
+    evidence: { ...proof, freshness: 'unknown', passed: 0, failed: 0, blocked: 0 } }, python)
+  const marker = readReceipts(projectId, sessionId).find(f => f.evidence!.key === proof.key)
+  if (marker?.reason !== 'VERIFICATION_ATTEMPT_PENDING' || marker.evidence?.attempt_seq !== proof.attempt_seq
+    || marker.verification !== 'unverified') throw new Error('VERIFICATION_INVALIDATION_NOT_SAVED')
 }
 export function collectVerificationReceipts(projectId: string, sessionId: string, version?: VerificationVersion): ToolFeedback[] {
   return readReceipts(projectId, sessionId).map(f => {

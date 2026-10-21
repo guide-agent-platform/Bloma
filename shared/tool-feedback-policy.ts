@@ -22,6 +22,14 @@ export function hasUnresolvedToolFailure(f: ToolFeedback): boolean {
     || ['environment', 'verification_harness', 'budget'].includes(f.category ?? '')
 }
 
+/** Collector order is not execution order. Disk readback cannot erase a newer write failure. */
+export function preferredEvidenceFact(previous: ToolFeedback, candidate: ToolFeedback): ToolFeedback {
+  const previousSeq = previous.evidence?.attempt_seq ?? 0, candidateSeq = candidate.evidence?.attempt_seq ?? 0
+  if (previousSeq !== candidateSeq) return candidateSeq > previousSeq ? candidate : previous
+  if (previous.reason === 'EVIDENCE_RECORD_FAILED' && candidate.reason !== 'EVIDENCE_RECORD_FAILED') return previous
+  return candidate
+}
+
 /** Terminal budget facts cannot fall out of a bounded handoff after ordinary reads. */
 export function retainedToolFeedback(facts: readonly ToolFeedback[], limit = 8): ToolFeedback[] {
   const terminal = new Map<string, ToolFeedback>()
@@ -30,7 +38,11 @@ export function retainedToolFeedback(facts: readonly ToolFeedback[], limit = 8):
   const other: ToolFeedback[] = []
   for (const f of facts) {
     if (f.category === 'budget' && toolRecovery(f) === 'stop') terminal.set(`${f.scope}:${JSON.stringify(f.budget)}`, f)
-    else if (f.evidence) { evidence.delete(f.evidence.key); evidence.set(f.evidence.key, f) }
+    else if (f.evidence) {
+      const previous = evidence.get(f.evidence.key)
+      const kept = previous ? preferredEvidenceFact(previous, f) : f
+      evidence.delete(f.evidence.key); evidence.set(f.evidence.key, kept)
+    }
     else if (f.scope === 'execution_resources' && f.budget) resources.set(f.budget.resource, f)
     else other.push(f)
   }
