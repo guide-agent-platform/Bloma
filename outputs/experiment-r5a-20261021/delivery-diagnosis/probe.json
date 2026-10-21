@@ -1,0 +1,61 @@
+{
+  "at": "2026-10-21T10:57:04.447Z",
+  "scope": "Offline DOM execution of actual generated inline UI and actual bridge.js; injected Python API and controlled timer order; not a real WebView startup-frequency test",
+  "paid_model_calls": 0,
+  "control": {
+    "initial": {
+      "rows": [
+        "已保存任务"
+      ],
+      "banner": "",
+      "view": "all"
+    },
+    "after_add_in_completed_view": {
+      "rows": [
+        "已保存任务"
+      ],
+      "banner": "已保存：新增未完成任务",
+      "view": "completed"
+    },
+    "calls": [
+      {
+        "op": "list_tasks",
+        "view": "all"
+      },
+      {
+        "op": "list_tasks",
+        "view": "completed"
+      },
+      {
+        "op": "add_task",
+        "title": "新增未完成任务",
+        "view": "all"
+      },
+      {
+        "op": "list_tasks",
+        "view": "completed"
+      }
+    ],
+    "view_preserved_by_refresh": true
+  },
+  "delayed_bridge": {
+    "initial": {
+      "rows": [],
+      "banner": "加载失败：桥未就绪：pywebview.api.list_tasks请重启应用后重试",
+      "view": "all"
+    },
+    "after_bridge_ready": {
+      "rows": [],
+      "banner": "加载失败：桥未就绪：pywebview.api.list_tasks请重启应用后重试",
+      "view": "all"
+    },
+    "calls": [],
+    "recovered_automatically": false
+  },
+  "source_unchanged": true,
+  "source_hashes": {
+    "ui/index.html": "3e2b1b2b68dce82e797a8bc91c987a55d31f38b901974621e9c004568e14f255",
+    "ui/bridge.js": "13abafca78eb67f9ff1005bb1dc056a3f8a4e4d3ad271fa3643b7e65f50a9a60",
+    "app.py": "c26d2c79a693d8cb6e901df458f6a4af7c93a75ee7db27733bab3f45148c40af"
+  }
+}
