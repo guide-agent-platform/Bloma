@@ -1,0 +1,192 @@
+{
+  "at": "2026-10-21T05:33:56.340Z",
+  "run_id": "production-v2-L1-quick-20261020-r4-G11",
+  "runtime_commit": "54b378cc677a45349051e1aad677896fbc049a01",
+  "input_hash": "c033711515ee6c6626c72044029045c06a65328ce75f1331115a697289ab3944",
+  "supervisor": {
+    "at": "2026-10-21T05:29:53.797Z",
+    "mode": "run",
+    "local_processes_settled": true,
+    "exit_code": 0,
+    "exit_signal": null,
+    "spawn_error": null,
+    "forced_cleanup": false,
+    "stop_reason": "terminal-cleanup",
+    "native_outcome": "machine-finished",
+    "terminal": {
+      "at": "2026-10-21T05:29:50.288Z",
+      "event": "run_finished",
+      "experiment_id": "production-v2-L1-quick-20261020-r2",
+      "run_id": "production-v2-L1-quick-20261020-r4-G11",
+      "project_id": "42487b23-f6c0-47e5-b46b-f607b105ae7b",
+      "mode": "quick",
+      "policy": "autonomous",
+      "snapshot_id": "af6b24d5-c977-4bf6-aaa9-7ca3cf6242cb",
+      "outcome": "timeout",
+      "reason": "cancelled"
+    },
+    "ledger": {
+      "queries": 126,
+      "terminal_receipts": 126,
+      "malformed_lines": 0,
+      "read_error": null,
+      "orphaned": []
+    },
+    "product_quality": null,
+    "qualified": false
+  },
+  "independent_review": "C:/Users/17359/AppData/Local/Bloma/production-v2-L1-20261020/pilot-r4-independent/G11/attempt-2-selector/review.json",
+  "independent_complete": true,
+  "independent_quality": 1,
+  "checks": [
+    {
+      "id": "add-trim",
+      "status": "passed"
+    },
+    {
+      "id": "empty-rejection",
+      "status": "passed"
+    },
+    {
+      "id": "toggle-isolation",
+      "status": "passed"
+    },
+    {
+      "id": "filters",
+      "status": "passed"
+    },
+    {
+      "id": "delete-isolation",
+      "status": "passed"
+    },
+    {
+      "id": "restart-persistence",
+      "status": "passed"
+    }
+  ],
+  "source_unchanged": true,
+  "evaluation": {
+    "suite_hash": "14c714554364a7b55136f3e82af63b33f6f201d928d70a9ddf8a78d685e16fd1",
+    "product_hash": "ad28e97bd6a505f2b2d68de6dde39947f6b7e50740a0b4fd68db827659f5aa0b",
+    "checks": [
+      {
+        "id": "add-trim",
+        "kind": "manual",
+        "status": "passed",
+        "evidence": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\production-v2-L1-20261020\\pilot-r4-independent\\G11\\attempt-1\\review.json",
+        "evidence_sha256": "179df194e699d8d7a934486d9275b1d03e7f7bb013f3d162c8648eae026e3c78"
+      },
+      {
+        "id": "empty-rejection",
+        "kind": "manual",
+        "status": "passed",
+        "evidence": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\production-v2-L1-20261020\\pilot-r4-independent\\G11\\attempt-1\\review.json",
+        "evidence_sha256": "179df194e699d8d7a934486d9275b1d03e7f7bb013f3d162c8648eae026e3c78"
+      },
+      {
+        "id": "toggle-isolation",
+        "kind": "manual",
+        "status": "passed",
+        "evidence": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\production-v2-L1-20261020\\pilot-r4-independent\\G11\\attempt-1\\review.json",
+        "evidence_sha256": "179df194e699d8d7a934486d9275b1d03e7f7bb013f3d162c8648eae026e3c78"
+      },
+      {
+        "id": "filters",
+        "kind": "manual",
+        "status": "passed",
+        "evidence": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\production-v2-L1-20261020\\pilot-r4-independent\\G11\\attempt-2-selector\\review.json",
+        "evidence_sha256": "84c77156834e2bff039d98b07d536cd42fe81995dd8dc13fca5d6845c75937cb"
+      },
+      {
+        "id": "delete-isolation",
+        "kind": "manual",
+        "status": "passed",
+        "evidence": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\production-v2-L1-20261020\\pilot-r4-independent\\G11\\attempt-1\\review.json",
+        "evidence_sha256": "179df194e699d8d7a934486d9275b1d03e7f7bb013f3d162c8648eae026e3c78"
+      },
+      {
+        "id": "restart-persistence",
+        "kind": "manual",
+        "status": "passed",
+        "evidence": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\production-v2-L1-20261020\\pilot-r4-independent\\G11\\attempt-1\\review.json",
+        "evidence_sha256": "179df194e699d8d7a934486d9275b1d03e7f7bb013f3d162c8648eae026e3c78"
+      }
+    ],
+    "complete": true,
+    "score": 1,
+    "success": true
+  },
+  "model_report": "C:/Users/17359/AppData/Local/Bloma/production-v2-L1-20261020/pilot-r4-independent/G11/final-model-report-complete.json",
+  "model_report_sha256": "fbc3b94624513909f713cf1ec74e4fe9971609e76c302eced055056149fa72cf",
+  "observation": {
+    "state": "timeout",
+    "started_at": "2026-10-21T04:29:49.632Z",
+    "model_requests": 126,
+    "physical_requests": 126,
+    "completed_physical": 126,
+    "executor_physical_peak": 2,
+    "executor_physical_peak_at": "2026-10-21T04:34:48.247Z",
+    "finished_queries": 126,
+    "queries_with_complete_usage": 125,
+    "known_usage_totals": {
+      "input_tokens": 584258,
+      "output_tokens": 185402,
+      "cache_read_input_tokens": 5423424,
+      "cache_creation_input_tokens": 0
+    },
+    "terminal": {
+      "at": "2026-10-21T05:29:50.288Z",
+      "event": "run_finished",
+      "experiment_id": "production-v2-L1-quick-20261020-r2",
+      "run_id": "production-v2-L1-quick-20261020-r4-G11",
+      "project_id": "42487b23-f6c0-47e5-b46b-f607b105ae7b",
+      "mode": "quick",
+      "policy": "autonomous",
+      "snapshot_id": "af6b24d5-c977-4bf6-aaa9-7ca3cf6242cb",
+      "outcome": "timeout",
+      "reason": "cancelled"
+    }
+  },
+  "other_groups_started": [],
+  "status": "business-verified-workflow-timeout",
+  "initial_incomplete_review": {
+    "result": "outputs/experiment-r4-G11-20261021/result.json",
+    "review": "C:/Users/17359/AppData/Local/Bloma/production-v2-L1-20261020/pilot-r4-independent/G11/attempt-1/review.json",
+    "quality": null,
+    "reason": "Independent adapter used old open data-view; product uses active. No product source was changed."
+  },
+  "selector_revision": {
+    "at": "2026-10-21T05:32:26.126721+00:00",
+    "original_adapter": "C:\\Users\\17359\\bex-pv220\\review-new-G11-r4.py",
+    "original_sha256": "aa2bce55990cafc052c966c358911b6027079a4718727f4fb57d54ec8a2cb398",
+    "revised_adapter": "C:\\Users\\17359\\bex-pv220\\review-new-G11-r4-selector-v2.py",
+    "revised_sha256": "7b4daf8572c867c5900bda62106c44612ca8ec71f42758bb0ff0951c7d83a813",
+    "change": "Only map the scorer open view to the product active data-view control; all business actions, expectations and six checks unchanged.",
+    "product_modified": false,
+    "first_review_preserved": true
+  },
+  "formal_request_roles": {
+    "dispatcher": 23,
+    "executor": 103
+  },
+  "dispatch_rejections": [
+    {
+      "at": "2026-10-21T05:25:21.377Z",
+      "reason": "EXPERIMENT_DEPENDENCY_UNRESOLVED: 负责人已结束，但宿主交接仍含失败或阻塞；先修复该依赖。"
+    },
+    {
+      "at": "2026-10-21T05:26:21.649Z",
+      "reason": "EXPERIMENT_DEPENDENCY_UNRESOLVED: 负责人已结束，但宿主交接仍含失败或阻塞；先修复该依赖。"
+    },
+    {
+      "at": "2026-10-21T05:26:53.191Z",
+      "reason": "EXPERIMENT_DEPENDENCY_UNRESOLVED: 负责人已结束，但宿主交接仍含失败或阻塞；先修复该依赖。"
+    },
+    {
+      "at": "2026-10-21T05:28:38.274Z",
+      "reason": "EXPERIMENT_DEPENDENCY_UNRESOLVED: 负责人已结束，但宿主交接仍含失败或阻塞；先修复该依赖。"
+    }
+  ],
+  "verifier_executed": false,
+  "note": "Native run timed out after its sealed 60-minute budget. Six frozen business checks pass in independent real GUI replay after a selector-only adapter correction. This does not convert timeout to delivered; no paired model comparison is available."
+}

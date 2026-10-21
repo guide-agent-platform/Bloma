@@ -1,0 +1,5 @@
+{
+  "peak_distinct_executor_sessions": 2,
+  "overlap_ms": 835398,
+  "method": "Integrate completed physical HTTP spans with at least two distinct executor session ids active; touching interval endpoints do not overlap."
+}

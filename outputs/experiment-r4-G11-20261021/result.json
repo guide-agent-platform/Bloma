@@ -1,0 +1,150 @@
+{
+  "at": "2026-10-21T05:30:46.030Z",
+  "run_id": "production-v2-L1-quick-20261020-r4-G11",
+  "runtime_commit": "54b378cc677a45349051e1aad677896fbc049a01",
+  "input_hash": "c033711515ee6c6626c72044029045c06a65328ce75f1331115a697289ab3944",
+  "supervisor": {
+    "at": "2026-10-21T05:29:53.797Z",
+    "mode": "run",
+    "local_processes_settled": true,
+    "exit_code": 0,
+    "exit_signal": null,
+    "spawn_error": null,
+    "forced_cleanup": false,
+    "stop_reason": "terminal-cleanup",
+    "native_outcome": "machine-finished",
+    "terminal": {
+      "at": "2026-10-21T05:29:50.288Z",
+      "event": "run_finished",
+      "experiment_id": "production-v2-L1-quick-20261020-r2",
+      "run_id": "production-v2-L1-quick-20261020-r4-G11",
+      "project_id": "42487b23-f6c0-47e5-b46b-f607b105ae7b",
+      "mode": "quick",
+      "policy": "autonomous",
+      "snapshot_id": "af6b24d5-c977-4bf6-aaa9-7ca3cf6242cb",
+      "outcome": "timeout",
+      "reason": "cancelled"
+    },
+    "ledger": {
+      "queries": 126,
+      "terminal_receipts": 126,
+      "malformed_lines": 0,
+      "read_error": null,
+      "orphaned": []
+    },
+    "product_quality": null,
+    "qualified": false
+  },
+  "independent_review": "C:/Users/17359/AppData/Local/Bloma/production-v2-L1-20261020/pilot-r4-independent/G11/attempt-1/review.json",
+  "independent_complete": false,
+  "independent_quality": null,
+  "checks": [
+    {
+      "id": "add-trim",
+      "status": "passed"
+    },
+    {
+      "id": "empty-rejection",
+      "status": "passed"
+    },
+    {
+      "id": "toggle-isolation",
+      "status": "passed"
+    },
+    {
+      "id": "filters",
+      "status": "pending",
+      "harness_error": "RuntimeError: GUI readback failed: {'name': 'TypeError', 'stack': \"TypeError: Cannot read properties of null (reading 'click')\\n    at Object.filter (eval at <anonymous> (:4:29), <anonymous>:9:76)\\n    at eval (eval at <anonymous> (:4:29), <anonymous>:1:17)\\n    at <anonymous>:4:29\", 'message': \"Cannot read properties of null (readin"
+    },
+    {
+      "id": "delete-isolation",
+      "status": "passed"
+    },
+    {
+      "id": "restart-persistence",
+      "status": "passed"
+    }
+  ],
+  "source_unchanged": true,
+  "evaluation": {
+    "suite_hash": "14c714554364a7b55136f3e82af63b33f6f201d928d70a9ddf8a78d685e16fd1",
+    "product_hash": "ad28e97bd6a505f2b2d68de6dde39947f6b7e50740a0b4fd68db827659f5aa0b",
+    "checks": [
+      {
+        "id": "add-trim",
+        "kind": "manual",
+        "status": "passed",
+        "evidence": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\production-v2-L1-20261020\\pilot-r4-independent\\G11\\attempt-1\\review.json",
+        "evidence_sha256": "179df194e699d8d7a934486d9275b1d03e7f7bb013f3d162c8648eae026e3c78"
+      },
+      {
+        "id": "empty-rejection",
+        "kind": "manual",
+        "status": "passed",
+        "evidence": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\production-v2-L1-20261020\\pilot-r4-independent\\G11\\attempt-1\\review.json",
+        "evidence_sha256": "179df194e699d8d7a934486d9275b1d03e7f7bb013f3d162c8648eae026e3c78"
+      },
+      {
+        "id": "toggle-isolation",
+        "kind": "manual",
+        "status": "passed",
+        "evidence": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\production-v2-L1-20261020\\pilot-r4-independent\\G11\\attempt-1\\review.json",
+        "evidence_sha256": "179df194e699d8d7a934486d9275b1d03e7f7bb013f3d162c8648eae026e3c78"
+      },
+      {
+        "id": "filters",
+        "kind": "manual",
+        "status": "pending"
+      },
+      {
+        "id": "delete-isolation",
+        "kind": "manual",
+        "status": "passed",
+        "evidence": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\production-v2-L1-20261020\\pilot-r4-independent\\G11\\attempt-1\\review.json",
+        "evidence_sha256": "179df194e699d8d7a934486d9275b1d03e7f7bb013f3d162c8648eae026e3c78"
+      },
+      {
+        "id": "restart-persistence",
+        "kind": "manual",
+        "status": "passed",
+        "evidence": "C:\\Users\\17359\\AppData\\Local\\Packages\\OpenAI.Codex_2p2nqsd0c76g0\\LocalCache\\Local\\Bloma\\production-v2-L1-20261020\\pilot-r4-independent\\G11\\attempt-1\\review.json",
+        "evidence_sha256": "179df194e699d8d7a934486d9275b1d03e7f7bb013f3d162c8648eae026e3c78"
+      }
+    ],
+    "complete": false,
+    "score": null,
+    "success": null
+  },
+  "model_report": "C:/Users/17359/AppData/Local/Bloma/production-v2-L1-20261020/pilot-r4-independent/G11/final-model-report.json",
+  "model_report_sha256": "56c18c381c4609d8d603dc51e8561176c7cd92fdba17b3d3b6da14f79d1ca235",
+  "observation": {
+    "state": "timeout",
+    "started_at": "2026-10-21T04:29:49.632Z",
+    "model_requests": 126,
+    "physical_requests": 126,
+    "completed_physical": 126,
+    "executor_physical_peak": 2,
+    "executor_physical_peak_at": "2026-10-21T04:34:48.247Z",
+    "finished_queries": 126,
+    "queries_with_complete_usage": 125,
+    "known_usage_totals": {
+      "input_tokens": 584258,
+      "output_tokens": 185402,
+      "cache_read_input_tokens": 5423424,
+      "cache_creation_input_tokens": 0
+    },
+    "terminal": {
+      "at": "2026-10-21T05:29:50.288Z",
+      "event": "run_finished",
+      "experiment_id": "production-v2-L1-quick-20261020-r2",
+      "run_id": "production-v2-L1-quick-20261020-r4-G11",
+      "project_id": "42487b23-f6c0-47e5-b46b-f607b105ae7b",
+      "mode": "quick",
+      "policy": "autonomous",
+      "snapshot_id": "af6b24d5-c977-4bf6-aaa9-7ca3cf6242cb",
+      "outcome": "timeout",
+      "reason": "cancelled"
+    }
+  },
+  "other_groups_started": []
+}

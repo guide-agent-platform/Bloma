@@ -1,0 +1,10 @@
+{
+  "at": "2026-10-21T05:32:26.126721+00:00",
+  "original_adapter": "C:\\Users\\17359\\bex-pv220\\review-new-G11-r4.py",
+  "original_sha256": "aa2bce55990cafc052c966c358911b6027079a4718727f4fb57d54ec8a2cb398",
+  "revised_adapter": "C:\\Users\\17359\\bex-pv220\\review-new-G11-r4-selector-v2.py",
+  "revised_sha256": "7b4daf8572c867c5900bda62106c44612ca8ec71f42758bb0ff0951c7d83a813",
+  "change": "Only map the scorer open view to the product active data-view control; all business actions, expectations and six checks unchanged.",
+  "product_modified": false,
+  "first_review_preserved": true
+}

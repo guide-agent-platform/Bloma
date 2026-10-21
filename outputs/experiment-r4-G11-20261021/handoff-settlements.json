@@ -1,0 +1,185 @@
+[
+  {
+    "slot": "worker-1",
+    "child_session_id": "f33d550f-eba5-4176-be39-18cf77dc24d2",
+    "settlements": [
+      {
+        "at": "2026-10-21T04:50:44.765Z",
+        "status": "completed",
+        "loop_status": "completed",
+        "completion": "unverified",
+        "pending": [
+          "inline-call_51644b12b6cd4bdb85fcaad3: 验证版本 stale，核对变更后仅补缺失验证",
+          "00_VERIFY/logic/drive_smoke.py: 验证版本 stale，核对变更后仅补缺失验证"
+        ],
+        "recovery": "none",
+        "verification": [
+          {
+            "verification": "unverified",
+            "execution": "completed",
+            "scope": "reported_scenarios",
+            "evidence": {
+              "entry": "inline-call_51644b12b6cd4bdb85fcaad3",
+              "freshness": "stale",
+              "passed": 2,
+              "failed": 0,
+              "attempt_seq": 4
+            }
+          },
+          {
+            "verification": "unverified",
+            "execution": "completed",
+            "scope": "reported_scenarios",
+            "evidence": {
+              "entry": "00_VERIFY/logic/drive_smoke.py",
+              "freshness": "stale",
+              "passed": 2,
+              "failed": 0,
+              "attempt_seq": 10
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "slot": "worker-2",
+    "child_session_id": "dda4ced7-ab07-4f14-a1f1-0c7a64e2f8a4",
+    "settlements": [
+      {
+        "at": "2026-10-21T05:24:48.022Z",
+        "status": "completed",
+        "loop_status": "completed",
+        "completion": "incomplete",
+        "pending": [
+          "reported_scenarios: product_assertion; repair_product",
+          "工具: environment; timeout",
+          "reported_scenarios: product_assertion; repair_product",
+          "reported_scenarios: product_assertion; repair_product"
+        ],
+        "recovery": "inspect",
+        "verification": [
+          {
+            "verification": "failed",
+            "execution": "failed",
+            "category": "product_assertion",
+            "scope": "reported_scenarios",
+            "evidence": {
+              "entry": "inline-call_57c0ff4909cf40fd95e20b41",
+              "freshness": "current",
+              "passed": 24,
+              "failed": 1,
+              "attempt_seq": 2
+            }
+          },
+          {
+            "verification": "unverified",
+            "execution": "failed",
+            "category": "environment",
+            "reason": "timeout",
+            "evidence": {
+              "entry": "inline-call_49fe0a4759374b39ac8d5ed1",
+              "freshness": "current",
+              "passed": 0,
+              "failed": 0,
+              "attempt_seq": 3
+            }
+          },
+          {
+            "verification": "failed",
+            "execution": "completed",
+            "category": "product_assertion",
+            "scope": "reported_scenarios",
+            "evidence": {
+              "entry": "inline-call_899670b26e0c44aa846f6a63",
+              "freshness": "current",
+              "passed": 2,
+              "failed": 3,
+              "attempt_seq": 7
+            }
+          },
+          {
+            "verification": "failed",
+            "execution": "completed",
+            "category": "product_assertion",
+            "scope": "reported_scenarios",
+            "evidence": {
+              "entry": "inline-call_afa64a7475db4337a62f4368",
+              "freshness": "current",
+              "passed": 2,
+              "failed": 1,
+              "attempt_seq": 8
+            }
+          }
+        ]
+      },
+      {
+        "at": "2026-10-21T05:28:29.152Z",
+        "status": "completed",
+        "loop_status": "completed",
+        "completion": "incomplete",
+        "pending": [
+          "reported_scenarios: product_assertion; repair_product",
+          "工具: environment; timeout",
+          "reported_scenarios: product_assertion; repair_product",
+          "reported_scenarios: product_assertion; repair_product"
+        ],
+        "recovery": "inspect",
+        "verification": [
+          {
+            "verification": "failed",
+            "execution": "failed",
+            "category": "product_assertion",
+            "scope": "reported_scenarios",
+            "evidence": {
+              "entry": "inline-call_57c0ff4909cf40fd95e20b41",
+              "freshness": "current",
+              "passed": 24,
+              "failed": 1,
+              "attempt_seq": 2
+            }
+          },
+          {
+            "verification": "unverified",
+            "execution": "failed",
+            "category": "environment",
+            "reason": "timeout",
+            "evidence": {
+              "entry": "inline-call_49fe0a4759374b39ac8d5ed1",
+              "freshness": "current",
+              "passed": 0,
+              "failed": 0,
+              "attempt_seq": 3
+            }
+          },
+          {
+            "verification": "failed",
+            "execution": "completed",
+            "category": "product_assertion",
+            "scope": "reported_scenarios",
+            "evidence": {
+              "entry": "inline-call_899670b26e0c44aa846f6a63",
+              "freshness": "current",
+              "passed": 2,
+              "failed": 3,
+              "attempt_seq": 7
+            }
+          },
+          {
+            "verification": "failed",
+            "execution": "completed",
+            "category": "product_assertion",
+            "scope": "reported_scenarios",
+            "evidence": {
+              "entry": "inline-call_afa64a7475db4337a62f4368",
+              "freshness": "current",
+              "passed": 2,
+              "failed": 1,
+              "attempt_seq": 8
+            }
+          }
+        ]
+      }
+    ]
+  }
+]
