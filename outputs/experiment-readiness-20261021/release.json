@@ -1,0 +1,82 @@
+{
+  "at": "2026-10-21T04:27:54.611Z",
+  "runtime_commit": "54b378cc677a45349051e1aad677896fbc049a01",
+  "input_hash": "c033711515ee6c6626c72044029045c06a65328ce75f1331115a697289ab3944",
+  "main_sha256": "378136c2825df38b3c992fd24462755e89ad3a85b1bee3462b3d1bbdc4c0a64f",
+  "validation_complete": true,
+  "validation": {
+    "unit": {
+      "files": 269,
+      "tests": 2486,
+      "passed": true,
+      "path": "C:\\Users\\17359\\.codex\\worktrees\\experiment-readiness-20261020\\guide-agent-platform-sprint0\\run-artifacts\\experiment-readiness-20261020\\unit-release-20261021.log",
+      "sha256": "623af74fa27f61db56bf7e920d962a8f3bd2ca9c71af06867f9a6c971554c85e"
+    },
+    "acceptance_and_regression": {
+      "files": 30,
+      "tests": 149,
+      "passed": true,
+      "path": "C:\\Users\\17359\\.codex\\worktrees\\experiment-readiness-20261020\\guide-agent-platform-sprint0\\run-artifacts\\experiment-readiness-20261020\\acceptance-final-20261021.log",
+      "sha256": "4c96898dcd5a45c415aedb599041175a9240fb5feaada43e001337550ab7154c"
+    },
+    "native_controls": {
+      "passed": 12,
+      "path": "C:\\Users\\17359\\.codex\\worktrees\\experiment-readiness-20261020\\guide-agent-platform-sprint0\\run-artifacts\\experiment-readiness-20261020\\native-controls-20261021.log",
+      "sha256": "5ed0a192a1f4f213b3b95e87a0cde5303c2442627ac9811a8bc16ccde9692c6a"
+    },
+    "typecheck": {
+      "passed": true,
+      "path": "C:\\Users\\17359\\.codex\\worktrees\\experiment-readiness-20261020\\guide-agent-platform-sprint0\\run-artifacts\\experiment-readiness-20261020\\typecheck-final.log",
+      "sha256": "23a15944e38ab3fa01c169ac7a4e968e28ffbf58e82fe957c540b33663525d74"
+    },
+    "build": {
+      "passed": true,
+      "path": "C:\\Users\\17359\\.codex\\worktrees\\experiment-readiness-20261020\\guide-agent-platform-sprint0\\run-artifacts\\experiment-readiness-20261020\\build-release.log",
+      "sha256": "35abb6894258c849e104574c1117598819a89d513a1cad19378182163507c216"
+    }
+  },
+  "independent_evaluator_files": [
+    {
+      "path": "C:/Users/17359/bex-l1q19/evaluator/suite.json",
+      "sha256": "08dbe9b458009c4cc22c8f7f8e2136975bcb943c70509c186e0ebe80f8a49fff"
+    },
+    {
+      "path": "C:/Users/17359/bex-pv220/review-new-G11-r4.py",
+      "sha256": "aa2bce55990cafc052c966c358911b6027079a4718727f4fb57d54ec8a2cb398"
+    },
+    {
+      "path": "C:\\Users\\17359\\.codex\\worktrees\\experiment-readiness-20261020\\guide-agent-platform-sprint0\\scripts\\robustness-ui-replay.py",
+      "sha256": "ebd3fe8d9a8d2553766e9a58ac927e1fcfdcad01f3746dfbba066ed277e142f1"
+    },
+    {
+      "path": "C:\\Users\\17359\\.codex\\worktrees\\experiment-readiness-20261020\\guide-agent-platform-sprint0\\scripts\\capture-owned-window.py",
+      "sha256": "516b8a2c65f6fac70383870edb5e9547e21e65ed481dc9f3563f6e0d5a5f78f0"
+    }
+  ],
+  "base_launcher_sha256": "d2038a7f6ba0be3d03b18b7297cb08438c7f89a28f13c81343b4d92df6755616",
+  "electron_smoke": {
+    "passed": true,
+    "path": "C:\\Users\\17359\\.codex\\worktrees\\experiment-readiness-20261020\\guide-agent-platform-sprint0\\run-artifacts\\experiment-readiness-20261020\\electron-smoke-20261021.log",
+    "sha256": "bf66fbf237ae5331028ada2dd458f42ef0e6c0f5e8b228d29e52d85aab1c6627"
+  },
+  "local_qualification_passed": true,
+  "provider_qualified_groups": [
+    "G11"
+  ],
+  "launcher_sha256": "9521bfa8800015f4e8a16d2764ef06f614885dc5c6c351526be4c8b3ccf6bcaa",
+  "measured_model_calls": 0,
+  "preflight_physical_requests": 14,
+  "product_quality": null,
+  "cohort": "C:/Users/17359/bex-pv220/pilot-r4",
+  "runtime_root": "C:/Users/17359/.codex/worktrees/experiment-readiness-20261020/guide-agent-platform-sprint0",
+  "branch": "codex/experiment-readiness-20261020",
+  "readiness": "C:\\Users\\17359\\bex-pv220\\pilot-r4\\readiness-release.json",
+  "readiness_sha256": "aa04b423d5e5014a6fe6f126dc6f0765cb50501974694866615e50ca9c341ce8",
+  "launcher": "C:/Users/17359/bex-pv220/run-one-r4.mjs",
+  "start_check_command": "node C:/Users/17359/bex-pv220/run-one-r4.mjs G11 --check-only",
+  "provider_qualification_expires_at": "2026-10-21T04:46:55.232Z",
+  "source_snapshot": "C:\\Users\\17359\\bex-pv220\\pilot-r3\\snapshot",
+  "independent_suite_sha256": "08dbe9b458009c4cc22c8f7f8e2136975bcb943c70509c186e0ebe80f8a49fff",
+  "input_business_files_unchanged": true,
+  "preparation_only": true
+}
