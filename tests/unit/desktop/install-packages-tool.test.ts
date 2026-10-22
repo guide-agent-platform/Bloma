@@ -73,6 +73,17 @@ describe('install_packages（声明制 venv 安装刀）', () => {
     expect(commands.filter((cmd) => cmd.includes('import'))).toHaveLength(2)
   })
 
+  it.skipIf(process.platform !== 'win32')('rejects installed pywebview when its lazy Windows CLR dependency fails', async () => {
+    const spawn = makeSpawn([{ match: command => command.some(part => part.includes('import clr')), code: 1, stderr: 'ImportError: DLL load failed: 文件名或扩展名太长' }])
+    const result = await buildInstallPackagesTool(projectId, { spawn }).execute({ packages: ['pywebview'] }, ctxFor(projectId))
+    expect(result.isError).toBe(true)
+    expect(result.detail).toMatchObject({ imports_verified: false })
+    expect(result.output).toContain('Windows CLR')
+    expect(result.output).toContain('文件名或扩展名太长')
+    expect(result.output).toContain('不能宣称环境就绪')
+    expect(spawn.mock.calls.some(([request]) => request.command.some(part => part.includes('System.Windows.Forms')))).toBe(true)
+  })
+
   it('venv 幂等：已存在时不再创建', async () => {
     mkdirSync(join(projectRoot, '.venv', 'Scripts'), { recursive: true })
     writeFileSync(join(projectRoot, venvPythonRelativePath()), '#stub', 'utf8')

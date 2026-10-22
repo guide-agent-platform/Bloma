@@ -205,18 +205,23 @@ export function buildInstallPackagesTool(projectId: string, deps: InstallPackage
       const probeFailures: string[] = []
       for (const spec of specs) {
         const moduleName = importNameOf(spec, imports)
+        // webview imports lazily; its top-level import alone does not load the
+        // Windows native bridge. Long DLL paths / missing CLR must fail here.
+        const nativeWebview = process.platform === 'win32' && /^pywebview(?:\s|[<>=!~]|$)/i.test(spec)
+        const probe = `import ${moduleName}` + (nativeWebview ? '\nimport clr\nclr.AddReference("System.Windows.Forms")' : '')
+        const label = `${spec} → import ${moduleName}${nativeWebview ? ' + Windows CLR' : ''}`
         try {
           const { code, stderr } = await spawn({
-            command: [venvPython, '-c', `import ${moduleName}`],
+            command: [venvPython, '-c', probe],
             timeoutMs: 30_000,
             env,
             cwd: root,
             signal: ctx.signal,
           })
-          probeResults.push(code === 0 ? `${spec} → import ${moduleName} ✓` : `${spec} → import ${moduleName} ✗（装上但导入失败，看依赖项）`)
+          probeResults.push(code === 0 ? `${label} ✓` : `${label} ✗（装上但导入失败，看依赖项）`)
           if (code !== 0) probeFailures.push(`${spec}: ${stderr.slice(-1000) || `import 退出码 ${code}`}`)
         } catch (error) {
-          probeResults.push(`${spec} → import ${moduleName} ✗（探测超时/异常）`)
+          probeResults.push(`${label} ✗（探测超时/异常）`)
           probeFailures.push(`${spec}: ${error instanceof Error ? error.message.slice(0, 1000) : '探测异常'}`)
         }
       }
