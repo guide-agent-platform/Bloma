@@ -5,11 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../../../main/project/document-engine', () => ({ readPrdBackplane: vi.fn() }))
 vi.mock('../../../main/desktop/file-verification', () => ({ runHostPrefixRenameProbe: vi.fn() }))
 vi.mock('../../../main/desktop/llm-verification', () => ({ runHostLlmProbe: vi.fn() }))
+vi.mock('../../../main/desktop/speech-verification', () => ({ runHostSpeechProbe: vi.fn(), hasCurrentMicrophoneEvidence: vi.fn(() => false) }))
 import { readPrdBackplane } from '../../../main/project/document-engine'
 import { runCoreVerification, CORE_REPORT_REL } from '../../../main/desktop/core-verification'
 import { runHostPrefixRenameProbe } from '../../../main/desktop/file-verification'
 import { requirementEvidenceHash } from '../../../main/project/requirement-contract'
 import { runHostLlmProbe } from '../../../main/desktop/llm-verification'
+import { runHostSpeechProbe } from '../../../main/desktop/speech-verification'
 
 let root: string
 beforeEach(() => {
@@ -30,6 +32,34 @@ const run = (code = 0, stdout = 'PASS actual input') => runCoreVerification({ pr
   spawn: async () => ({ code, stdout, stderr: '' }) })
 
 describe('shared core delivery', () => {
+  it.each(['failed', 'environment_blocked'] as const)('does not label speech features passed after a host %s result', async status => {
+    vi.mocked(readPrdBackplane).mockReturnValue({ requirements: [{ id: 'F-001', description: '语音识别' }] } as never)
+    writeManifest({ command: ['python', 'core_check.py'], scenarios: [{ name: 'actual input', covers: ['F-001'], input: 'gui' }],
+      speech: { module: 'speech_runtime', factory: 'SpeechEngine', method: 'transcribe' } })
+    vi.mocked(runHostSpeechProbe).mockResolvedValue({ probe_version: 1, status })
+    const result = await run()
+    expect(result.status).toBe(status)
+    expect(result.requirements?.[0]?.verification).toBe(status)
+  })
+
+  it('keeps microphone verification unknown without the separate capture evidence', async () => {
+    vi.mocked(readPrdBackplane).mockReturnValue({ requirements: [{ id: 'F-001', description: '麦克风实时语音识别' }] } as never)
+    writeManifest({ command: ['python', 'core_check.py'], scenarios: [{ name: 'actual input', covers: ['F-001'], input: 'gui' }],
+      speech: { module: 'speech_runtime', factory: 'SpeechEngine', method: 'transcribe' } })
+    vi.mocked(runHostSpeechProbe).mockResolvedValue({ probe_version: 1, status: 'passed' })
+    const result = await run()
+    expect(result.status).toBe('unverified')
+    expect(result.requirements?.[0]?.verification).toBe('unverified')
+  })
+
+  it('retains a reproduced feature failure when its capability probe is also blocked', async () => {
+    vi.mocked(readPrdBackplane).mockReturnValue({ requirements: [{ id: 'F-001', description: '语音识别' }] } as never)
+    writeManifest({ command: ['python', 'core_check.py'], scenarios: [{ name: 'actual input', covers: ['F-001'], input: 'gui' }],
+      speech: { module: 'speech_runtime', factory: 'SpeechEngine', method: 'transcribe' } })
+    vi.mocked(runHostSpeechProbe).mockResolvedValue({ probe_version: 1, status: 'environment_blocked' })
+    expect((await run(1, 'FAIL actual input')).requirements?.[0]?.verification).toBe('failed')
+  })
+
   it('never starts or saves evidence for a cancelled check', async () => {
     manifest()
     const controller = new AbortController(); controller.abort()

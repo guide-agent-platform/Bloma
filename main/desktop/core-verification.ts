@@ -33,6 +33,11 @@ function scenarioOutcome(scenarios: DriverScenarioOutcome[], name: string): stri
   return states.includes('fail') ? 'fail' : states.includes('blocked') ? 'blocked' : states.length && states.every(s => s === 'pass') ? 'pass' : 'unverified'
 }
 
+function combineVerification(current: CoreVerificationStatus, probe: CoreVerificationStatus): CoreVerificationStatus {
+  const rank = { passed: 0, unverified: 1, environment_blocked: 2, failed: 3 }
+  return rank[probe] > rank[current] ? probe : current
+}
+
 /** Minimal shared execution contract; input labels alone are not real audio evidence. */
 export async function runCoreVerification(options: {
   projectId: string; sandboxRoot?: string; spawn?: DriverSpawn; signal?: AbortSignal
@@ -145,12 +150,19 @@ export async function runCoreVerification(options: {
       completion.verification = evidence.some(e => e.outcome === 'fail') ? 'failed' : evidence.some(e => e.outcome === 'blocked') ? 'environment_blocked' :
         rows.length && evidence.every(e => e.outcome === 'pass') ? 'passed' : 'unverified'
       if (llmItems.some(item => item.id === requirement.id) || llm?.covers.includes(requirement.id)) {
-        if (!llmResult || llmResult.status !== 'passed') completion.verification = llmResult?.status ?? 'unverified'
+        if (!llmResult || llmResult.status !== 'passed') completion.verification = combineVerification(completion.verification, llmResult?.status ?? 'unverified')
+      }
+      if (prefixRename.some(item => item.id === requirement.id) && fileResult?.status !== 'passed') {
+        completion.verification = combineVerification(completion.verification, fileResult?.status ?? 'unverified')
       }
       // A product-owned test label cannot attest microphone capture or real-model execution.
       if (capabilities.get(requirement.id)!.has('speech')) {
-        if (speechResult?.status !== 'passed') result.missing.push(`${requirement.id}: 宿主真实音频探针未通过，文本模拟不可替代${speechResult?.error ? `（${speechResult.error}）` : ''}`)
+        if (speechResult?.status !== 'passed') {
+          completion.verification = combineVerification(completion.verification, speechResult?.status ?? 'unverified')
+          result.missing.push(`${requirement.id}: 宿主真实音频探针未通过，文本模拟不可替代${speechResult?.error ? `（${speechResult.error}）` : ''}`)
+        }
         if (speech && capabilities.get(requirement.id)!.has('microphone') && !hasCurrentMicrophoneEvidence(options.projectId, root, speech)) {
+          if (completion.verification === 'passed') completion.verification = 'unverified'
           result.missing.push(`${requirement.id}: 真实采集链路待授权实测`)
         }
       }
