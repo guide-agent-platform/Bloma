@@ -40,6 +40,19 @@ export function createChannelFailureTracker(): ChannelFailureTracker {
   return { lastKind: undefined, consecutive: 0, lastAt: 0, notified: false }
 }
 
+/** Host admission failures never establish a provider outage or a bad API key. */
+export function localExecutionStopNotice(error: string): string | undefined {
+  if (/\b(?:REQUEST_BUDGET_EXHAUSTED|MONETARY_BUDGET_EXHAUSTED|MONETARY_OPERATION_EXHAUSTED)\b/.test(error)) {
+    return '本轮模型调用次数或金额预算已用完，当前阶段和产物已保留。请核对本地执行预算后再继续。'
+  }
+  if (/\b(?:MONETARY_[A-Z_]+|REQUEST_OUTPUT_LIMIT)\b/.test(error)) {
+    return '本地模型调用策略未通过校验，本次调用未放行。请核对执行策略；当前进度已保留。'
+  }
+  if (/\bEXPERIMENT_[A-Z_]*(?:BUDGET|DEADLINE|ATTEMPT)[A-Z_]*\b/.test(error)) {
+    return '本轮实验执行额度或时限已到，当前进度已保留。请核对实验执行策略后再继续。'
+  }
+}
+
 /** 连续失败出卡阈值（2 次：一次可能是偶发，两次即系统性）。 */
 export const CHANNEL_FAILURE_NOTIFY_THRESHOLD = 2
 
@@ -66,6 +79,10 @@ export function observeChannelFailure(
   tracker: ChannelFailureTracker,
   input: { error?: string; channel?: string; at?: number },
 ): ChannelFailureObservation {
+  if (localExecutionStopNotice(input.error ?? '')) {
+    Object.assign(tracker, createChannelFailureTracker())
+    return { notify: false }
+  }
   const kind = classifyChannelFailure(input.error ?? '')
   const now = input.at ?? Date.now()
   if (tracker.lastKind !== kind || now - tracker.lastAt > FAILURE_WINDOW_MS) {

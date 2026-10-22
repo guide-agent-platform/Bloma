@@ -76,7 +76,7 @@ import { verificationFingerprint } from './verification-fingerprint'
 import { ensureCoreDelivery, resetCoreDeliveryState, clearCoreDeliveryRetries } from './core-delivery'
 import { readProjectAttempts, consumeProjectAttempt, resetProjectAttemptScope } from '../platform/execution/project-attempts'
 import type { CoreVerificationResult } from './core-verification'
-import { createChannelFailureTracker, observeChannelFailure, type ChannelFailureTracker } from './channel-failure-watch'
+import { createChannelFailureTracker, observeChannelFailure, localExecutionStopNotice, type ChannelFailureTracker } from './channel-failure-watch'
 import { readDesktopRequirementsDigest, readDesktopShapeBriefs } from './requirement-digest'
 import { readProductionDigest } from './production-context'
 import { runQuickProductionReview, ensureQuickProductionReview } from './quick-production-review'
@@ -637,7 +637,10 @@ async function settleDesktopStage(
     const errorMessage = result.error_message
     if (typeof errorMessage === 'string' && errorMessage.length > 0) {
       const observation = observeChannelFailure(channelTrackerOf(input.projectId), { error: errorMessage })
-      if (observation.notify && observation.card) {
+      const localStop = localExecutionStopNotice(errorMessage)
+      if (localStop) {
+        line += `\n${localStop}\n错误摘要：${errorMessage.slice(0, 160)}`
+      } else if (observation.notify && observation.card) {
         line = observation.card
       } else {
         line += `\n错误摘要：${errorMessage.slice(0, 160)}`

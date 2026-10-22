@@ -11,6 +11,7 @@ import {
   classifyChannelFailure,
   createChannelFailureTracker,
   observeChannelFailure,
+  localExecutionStopNotice,
 } from '../../../main/desktop/channel-failure-watch'
 
 describe('classifyChannelFailure 签名归类', () => {
@@ -39,6 +40,18 @@ describe('classifyChannelFailure 签名归类', () => {
 })
 
 describe('observeChannelFailure 阈值推进', () => {
+  it.each(['REQUEST_BUDGET_EXHAUSTED', 'MONETARY_OPERATION_EXHAUSTED', 'MONETARY_POLICY_UNAVAILABLE', 'EXPERIMENT_REQUEST_BUDGET_EXHAUSTED'])(
+    'does not attribute local %s admission failures to the channel', error => {
+      const tracker = createChannelFailureTracker()
+      observeChannelFailure(tracker, { error: 'ECONNRESET', at: 1000 })
+      for (let i = 0; i < 3; i++) expect(observeChannelFailure(tracker, { error, at: 2000 + i }).notify).toBe(false)
+      expect(tracker.consecutive).toBe(0)
+      expect(localExecutionStopNotice(error)).toContain('保留')
+      expect(localExecutionStopNotice(error)).not.toContain('API Key')
+      expect(observeChannelFailure(tracker, { error: 'ECONNRESET', at: 3000 }).notify).toBe(false)
+      expect(observeChannelFailure(tracker, { error: 'ECONNRESET', at: 4000 }).notify).toBe(true)
+    })
+
   it('第 1 次静默；同签名第 2 次出卡；之后不再重复出卡（防刷屏）', () => {
     const tracker = createChannelFailureTracker()
     const first = observeChannelFailure(tracker, { error: 'HTTP 429 rate limited', channel: 'kimi', at: 1000 })

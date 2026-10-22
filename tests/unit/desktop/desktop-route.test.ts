@@ -727,6 +727,19 @@ describe('handleDesktopDispatchMessage 消息路由', () => {
     expect(edu).toContain('驱动断言未通过')
   })
 
+  it('repeated host budget stops preserve the stage and explain the local budget instead of suggesting an API key change', async () => {
+    const query: SDKQuery = async function* () { throw new Error('REQUEST_BUDGET_EXHAUSTED') }
+    const { deps, events } = collectorDeps()
+    for (let i = 0; i < 2; i++) await handleDesktopDispatchMessage({
+      projectId: 'p1', sessionId: 's1', requestId: `budget-${i}`, content: '继续', query, env: {}, maxTokens: 1024,
+    }, deps)
+    const text = events.map(event => event.payload.text ?? '').join('\n')
+    expect(text).toContain('预算已用完')
+    expect(text).not.toContain('【渠道疑似故障】')
+    expect(text).not.toContain('更新 API Key')
+    expect(record.desktop_phase).toBe('desktop-scaffold')
+  })
+
   it('loop 未收口（cancelled/error）：阶段不动 + 可重试话术（loop 取消收尾已在批次 D dispatcher-loop 测试覆盖，此处验路由分支经非 completed 结果触发）', async () => {
     // 构造非 completed：query 直接 throw（断流 fail-soft → error 状态）——路由走「未收口」分支
     const query: SDKQuery = async function* () {
