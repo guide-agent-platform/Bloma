@@ -26,6 +26,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { recordDecision } from '../../../main/project/decision-log'
+import { pendingConfirmationPath, readMvpConfirmation } from '../../../main/desktop/pending-confirmation-store'
 import {
   resetMvpConfirmForTests,
   MVP_OPTION_ADJUST,
@@ -273,6 +274,38 @@ describe('回传拦截', () => {
 })
 
 describe('confirmMvpDelivered（确认交付）', () => {
+  it('recovers a persisted pending record in a fresh module without executing work', async () => {
+    const { deps } = makeDeps()
+    holdForMvpConfirm({ input, deps, fromPhase: 'desktop-verify', notice: { projectName: 'saved', fromPhaseTitle: '验收' } })
+    expect(readMvpConfirmation('p1')).toMatchObject({ state: 'pending', session_id: 's1', notice: { projectName: 'saved' } })
+    expect(pendingConfirmationPath('p1')).not.toContain(projectRoot)
+    vi.resetModules()
+    const fresh = await import('../../../main/desktop/mvp-confirm')
+    expect(fresh.isMvpConfirmPending('p1')).toBe(true)
+    expect(fresh.isMvpEvidenceCurrent('p1')).toBe(true)
+    expect(mockUpdate).not.toHaveBeenCalled()
+  })
+
+  it('keeps a consuming record recoverable when project persistence fails', () => {
+    const { deps } = makeDeps()
+    holdForMvpConfirm({ input, deps, fromPhase: 'desktop-verify', notice: { projectName: 'saved', fromPhaseTitle: '验收' } })
+    mockUpdate.mockImplementationOnce(() => { throw Error('disk unavailable') })
+    expect(() => confirmMvpDelivered({ input, deps })).toThrow('disk unavailable')
+    expect(readMvpConfirmation('p1')?.state).toBe('consuming')
+    expect(isMvpConfirmPending('p1')).toBe(true)
+  })
+
+  it('refuses stale source, wrong session, and unreadable durable records', () => {
+    const { deps } = makeDeps()
+    holdForMvpConfirm({ input, deps, fromPhase: 'desktop-verify', notice: { projectName: 'saved', fromPhaseTitle: '验收' } })
+    expect(() => confirmMvpDelivered({ input: { ...input, sessionId: 'other' }, deps })).toThrow('STALE')
+    writeFileSync(join(projectRoot, 'app.py'), '# changed')
+    expect(() => confirmMvpDelivered({ input, deps })).toThrow('STALE')
+    writeFileSync(pendingConfirmationPath('p1'), '{broken')
+    expect(() => isMvpConfirmPending('p1')).toThrow()
+    expect(mockUpdate).not.toHaveBeenCalled()
+  })
+
   it('delivered 收口 + viaMvpConfirm 通知卡话术 + pending 清理', () => {
     const { events, deps } = makeDeps()
     holdForMvpConfirm({ input, deps, fromPhase: 'desktop-verify', notice: { projectName: '计算器', fromPhaseTitle: '验收' } })

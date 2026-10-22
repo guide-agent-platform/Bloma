@@ -1,3 +1,5 @@
+import { readMvpConfirmation, writeMvpConfirmation, pendingConfirmationPath, type StoredMvpConfirmation } from './pending-confirmation-store'
+import { rmSync } from 'node:fs'
 /**
  * longterm MVP 确认门（2026-10-04 确认门新规，实施稿《Bloma-确认门与呈现层-20261004》）。
  *
@@ -7,22 +9,9 @@
  * 期间任意普通非停止消息）→ 由 desktop-route 回炉 implement（【交付前迭代】任务书，
  * 与 delivered 反馈回炉同机制）。quick 不设（快速直通道不变）。
  *
- * pending 为进程内存态（与 guide 线确认卡同口径）：应用重启丢卡 = 回到 verify，
- * 用户发任意消息重跑 verify 收口会再次触发本门，无死锁。
+ * pending 原子持久化在宿主home；重启后绑定会话、需求和源码恢复。
+ * 消费中的记录可恢复，旧版本重新验证；恢复本身不启动模型任务。
  */
-/**
- * longterm MVP 确认门（2026-10-04 确认门新规，实施稿《Bloma-确认门与呈现层-20261004》）。
- *
- * 拍板矩阵：longterm＝PRD+UX+MVP 三道——verify 全绿后、delivered 前交用户过目
- * （截图/文件清单/DELIVERY 摘要；右栏 DeliveryPanel 同步可见）。确认 → 交付收口
- * （复用发卡时装配的通知数据，含 driverReport 等运行期证据）；调整（卡选项或挂起
- * 期间任意普通非停止消息）→ 由 desktop-route 回炉 implement（【交付前迭代】任务书，
- * 与 delivered 反馈回炉同机制）。quick 不设（快速直通道不变）。
- *
- * pending 为进程内存态（与 guide 线确认卡同口径）：应用重启丢卡 = 回到 verify，
- * 用户发任意消息重跑 verify 收口会再次触发本门，无死锁。
- */
-
 import type { DesktopRouteDeps } from './desktop-route'
 import { verificationFingerprint } from './verification-fingerprint'
 import { prdScopeFingerprint } from '../project/requirement-contract'
@@ -222,22 +211,22 @@ ${shots || '<p style="color:#999">（无截图——无窗口程序或截图未�
 </html>`
 }
 
-interface PendingMvpConfirm {
-  fingerprint?: string
-  session_id: string
-  from_phase: string
-  /** 发卡时装配好的交付通知数据（driverReport 等运行期证据此刻才有，确认时复用） */
-  notice: DeliveredNoticeInput
+const confirmationFiles = new Set<string>()
+function pendingMvp(projectId: string): StoredMvpConfirmation | undefined {
+  const pending = readMvpConfirmation(projectId)
+  if (!pending) return
+  const project = findProject(projectId)
+  if (project?.desktop_phase && project.desktop_phase !== pending.from_phase) return
+  return pending
 }
-
-const pendingMvpConfirms = new Map<string, PendingMvpConfirm>()
-
-export function isMvpConfirmPending(projectId: string): boolean {
-  return pendingMvpConfirms.has(projectId)
+function savePending(record: StoredMvpConfirmation): void {
+  writeMvpConfirmation(record)
+  confirmationFiles.add(pendingConfirmationPath(record.project_id))
 }
+export function isMvpConfirmPending(projectId: string): boolean { return Boolean(pendingMvp(projectId)) }
 export function isMvpEvidenceCurrent(projectId: string): boolean {
   try {
-    const pending = pendingMvpConfirms.get(projectId)
+    const pending = pendingMvp(projectId)
     const current = mvpFingerprint(projectId)
     return Boolean(current && pending?.fingerprint === current)
   } catch { return false }
@@ -257,7 +246,7 @@ export function holdForMvpConfirm(options: {
   notice: DeliveredNoticeInput
 }): void {
   const { input, deps } = options
-  pendingMvpConfirms.set(input.projectId, {
+  savePending({ version: 1, project_id: input.projectId, state: 'pending',
     session_id: input.sessionId,
     from_phase: options.fromPhase,
     notice: options.notice,
@@ -370,12 +359,14 @@ export function holdForMvpConfirm(options: {
 
 /** 测试隔离：清 pending（生产无用）。 */
 export function resetMvpConfirmForTests(): void {
-  pendingMvpConfirms.clear()
+  for (const path of confirmationFiles) rmSync(path, { force: true })
+  confirmationFiles.clear()
 }
 
 /** MVP 卡回传识别（desktop-route 消息入口调用；返回 undefined 则不拦截）。 */
-export function resolveMvpConfirmAnswer(input: { projectId: string; cardOptionId?: string }): 'confirm' | 'adjust' | 'pick' | undefined {
-  if (!isMvpConfirmPending(input.projectId)) return undefined
+export function resolveMvpConfirmAnswer(input: { projectId: string; sessionId?: string; cardOptionId?: string }): 'confirm' | 'adjust' | 'pick' | undefined {
+  const pending = pendingMvp(input.projectId)
+  if (!pending || input.sessionId && pending.session_id !== input.sessionId) return undefined
   if (input.cardOptionId === MVP_OPTION_CONFIRM) return 'confirm'
   if (input.cardOptionId === MVP_OPTION_ADJUST) return 'adjust'
   if (input.cardOptionId === MVP_OPTION_PICK) return 'pick'
@@ -393,8 +384,9 @@ export function confirmMvpDelivered(options: {
   deps: DesktopRouteDeps
 }): void {
   const { input, deps } = options
-  const pending = pendingMvpConfirms.get(input.projectId)
-  pendingMvpConfirms.delete(input.projectId)
+  const pending = pendingMvp(input.projectId)
+  if (!pending || pending.session_id !== input.sessionId || !isMvpEvidenceCurrent(input.projectId)) throw new Error('MVP_CONFIRMATION_STALE')
+  savePending({ ...pending, state: 'consuming' })
   recordDecision({
     project_id: input.projectId,
     session_id: input.sessionId,
@@ -404,7 +396,8 @@ export function confirmMvpDelivered(options: {
       why: '用户在 MVP 确认卡选择「确认，交付」',
     },
   })
-  updateProject(input.projectId, { desktop_phase: 'delivered', status: 'completed', current_stage: 'completed' })
+  updateProject(input.projectId, { desktop_phase: 'delivered', status: 'completed', current_stage: 'completed', desktop_blocked: undefined })
+  savePending({ ...pending, state: 'consumed' })
   recordDeliveryOutcomeTelemetry(input.projectId, input.sessionId, 'mvp-confirm')
   deps.publish(input, 'mvp_review_closed', {})
   deps.publish(input, 'stage_changed', { stage: 'delivered' })
@@ -417,9 +410,9 @@ export function confirmMvpDelivered(options: {
 
 /** 调整回炉前消费 pending（决策留痕）；阶段切换与任务书由 desktop-route 回炉分支执行。 */
 export function consumeMvpPendingForRework(input: { sessionId: string; projectId: string }): { from_phase: string } | undefined {
-  const pending = pendingMvpConfirms.get(input.projectId)
+  const pending = pendingMvp(input.projectId)
   if (!pending) return undefined
-  pendingMvpConfirms.delete(input.projectId)
+  savePending({ ...pending, state: 'consumed' })
   recordDecision({
     project_id: input.projectId,
     session_id: input.sessionId,
