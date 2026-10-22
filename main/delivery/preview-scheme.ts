@@ -16,7 +16,7 @@
  */
 import { net, protocol, session } from 'electron'
 import { existsSync, realpathSync, statSync } from 'node:fs'
-import { extname, join, resolve, sep } from 'node:path'
+import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { findProject } from '../project/project-service'
 import { injectSketchViewport } from '../../shared/sketch-viewport'
@@ -34,8 +34,8 @@ export function registerPreviewSchemePrivileges(): void {
 }
 
 function isInsideDirectory(target: string, root: string): boolean {
-  const rel = target.substring(root.length)
-  return rel === '' || rel.startsWith(sep)
+  const rel = relative(root, target)
+  return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)
 }
 
 const installedSessions = new WeakSet<object>()
@@ -55,7 +55,9 @@ async function handlePreviewFileRequest(request: Request): Promise<Response> {
     return new Response('Bad Request', { status: 400 })
   }
   const projectId = url.hostname
-  const project = findProject(projectId)
+  let project: ReturnType<typeof findProject>
+  try { project = findProject(projectId) }
+  catch { return new Response('Not Found', { status: 404 }) }
   if (!project?.root_path) return new Response('Not Found', { status: 404 })
   let root: string
   try {
@@ -63,7 +65,9 @@ async function handlePreviewFileRequest(request: Request): Promise<Response> {
   } catch {
     return new Response('Not Found', { status: 404 })
   }
-  const relativePath = decodeURIComponent(url.pathname.replace(/^\/+/, ''))
+  let relativePath: string
+  try { relativePath = decodeURIComponent(url.pathname.replace(/^\/+/, '')) }
+  catch { return new Response('Bad Request', { status: 400 }) }
   let target = root
   if (relativePath) {
     try {
@@ -74,17 +78,18 @@ async function handlePreviewFileRequest(request: Request): Promise<Response> {
     if (!isInsideDirectory(target, root)) {
       return new Response('Forbidden', { status: 403 })
     }
-    try {
-      if (statSync(target).isDirectory()) {
-        const indexCandidates = ['index.html', 'index.htm']
-          .map((name) => join(target, name))
-          .find((candidate) => existsSync(candidate) && statSync(candidate).isFile())
-        if (!indexCandidates) return new Response('Not Found', { status: 404 })
-        target = indexCandidates
-      }
-    } catch {
-      return new Response('Not Found', { status: 404 })
+  }
+  try {
+    if (statSync(target).isDirectory()) {
+      const indexCandidates = ['index.html', 'index.htm']
+        .map((name) => join(target, name))
+        .find((candidate) => existsSync(candidate) && statSync(candidate).isFile())
+      if (!indexCandidates) return new Response('Not Found', { status: 404 })
+      target = realpathSync(indexCandidates)
+      if (!isInsideDirectory(target, root)) return new Response('Forbidden', { status: 403 })
     }
+  } catch {
+    return new Response('Not Found', { status: 404 })
   }
   // HTML 入口补 charset（陷阱 40：无 charset 头时 Latin-1 解码乱码；meta 标签兜底但显式更稳）
   const response = await net.fetch(pathToFileURL(target).toString())
@@ -122,8 +127,8 @@ export function mintProjectPreviewUrl(projectId: string, relativeHtmlPath: strin
   if (!['.html', '.htm'].includes(extension)) {
     throw new Error(`PREVIEW_NOT_HTML: 入口只支持 HTML，当前为 ${extname(target) || '无扩展名'}`)
   }
-  const relative = target.substring(root.length + 1).split(sep).map(encodeURIComponent).join('/')
-  return `${PREVIEW_SCHEME}://${projectId}/${relative}`
+  const encoded = relative(root, target).split(sep).map(encodeURIComponent).join('/')
+  return `${PREVIEW_SCHEME}://${projectId}/${encoded}`
 }
 
 function relativePathJoin(dir: string, name: string): string {

@@ -6,7 +6,7 @@
  */
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('electron', () => ({
@@ -109,6 +109,27 @@ describe('mintProjectPreviewUrl（入口铸造边界）', () => {
 })
 
 describe('handlePreviewFileRequest（子资源路径）', () => {
+  it('rejects an existing sibling with the same path length at mint and request time', async () => {
+    // Different prefix, but a separator at exactly root.length: the old substring
+    // check accepted this real, existing target as inside the project.
+    const outside = join(dirname(projectRoot), 'x'.repeat(projectRoot.split(/[\\/]/).at(-1)!.length))
+    mkdirSync(outside)
+    try {
+      writeFileSync(join(outside, 'secret.html'), '<html>private</html>')
+      expect(() => mintProjectPreviewUrl('p1', join(outside, 'secret.html'))).toThrow('PREVIEW_PATH_ESCAPE')
+      symlinkSync(outside, join(projectRoot, 'escape'), 'junction')
+      const handler = captureHandler()
+      expect((await handler(new Request('bloma-file://p1/escape/secret.html'))).status).toBe(403)
+    } finally { rmSync(outside, { recursive: true, force: true }) }
+  })
+
+  it('returns ordinary errors for deleted projects and malformed encoded paths', async () => {
+    const handler = captureHandler()
+    expect((await handler(new Request('bloma-file://p1/%ZZ'))).status).toBe(400)
+    mockFindProject.mockImplementation(() => { throw Error('PROJECT_NOT_FOUND') })
+    expect((await handler(new Request('bloma-file://missing/index.html'))).status).toBe(404)
+  })
+
   it('adds the size bridge only to opted-in HTML responses without rewriting the file', async () => {
     const handler = captureHandler()
     const plain = await handler(new Request('bloma-file://p1/00_UX/ux-sketch.html'))

@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync,
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { writeTextFileAtomic } from '../../storage/json-store'
+import { writeJsonFile, writeTextFileAtomic } from '../../storage/json-store'
 import { renameWithRetry, WIN32_RETRYABLE, POSIX_RETRYABLE, type FsRetryDeps } from '../../storage/fs-retry'
 
 vi.mock('../../storage/fs-retry', async original => {
@@ -39,6 +39,14 @@ function injectRename(rename: FsRetryDeps['renameSync'], retryableCodes = WIN32_
 }
 
 describe('atomic text persistence under transient file contention', () => {
+  it('also preserves project/session/channel JSON when replacement is refused', () => {
+    const error = permissionError('EPERM')
+    injectRename(() => { throw error })
+    expect(() => writeJsonFile(target, { revision: 29 })).toThrow(error)
+    expect(readFileSync(target, 'utf8')).toBe(oldContent)
+    expect(readdirSync(root)).toEqual(['state.json'])
+  })
+
   it('retries Windows EPERM and replaces the whole old file only when rename succeeds', () => {
     let attempts = 0
     const sleeps = injectRename((source, destination) => {
