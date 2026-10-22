@@ -229,8 +229,8 @@ npm run test:regression:sprint0
 npm run test:regression:sprint1
 npm run test:acceptance:sprint0
 npm run test:acceptance:sprint1
-npm run test:e2e:sprint1
-npm run test:e2e
+npm run test:acceptance:sprint2
+npm run test:acceptance:sprint3
 npm run test:electron-smoke
 npm run test:all
 npm run docs:check
