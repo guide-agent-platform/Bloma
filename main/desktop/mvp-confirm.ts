@@ -252,6 +252,7 @@ export function holdForMvpConfirm(options: {
     notice: options.notice,
     fingerprint: mvpFingerprint(input.projectId),
   })
+  updateProject(input.projectId, { current_stage: 'blocked_for_user_decision' })
   const screenshotCount = options.notice.screenshotPaths?.length ?? 0
   recordDecision({
     project_id: input.projectId,

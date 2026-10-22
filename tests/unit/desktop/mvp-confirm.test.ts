@@ -277,6 +277,7 @@ describe('confirmMvpDelivered（确认交付）', () => {
   it('recovers a persisted pending record in a fresh module without executing work', async () => {
     const { deps } = makeDeps()
     holdForMvpConfirm({ input, deps, fromPhase: 'desktop-verify', notice: { projectName: 'saved', fromPhaseTitle: '验收' } })
+    mockUpdate.mockClear()
     expect(readMvpConfirmation('p1')).toMatchObject({ state: 'pending', session_id: 's1', notice: { projectName: 'saved' } })
     expect(pendingConfirmationPath('p1')).not.toContain(projectRoot)
     vi.resetModules()
@@ -289,6 +290,7 @@ describe('confirmMvpDelivered（确认交付）', () => {
   it('keeps a consuming record recoverable when project persistence fails', () => {
     const { deps } = makeDeps()
     holdForMvpConfirm({ input, deps, fromPhase: 'desktop-verify', notice: { projectName: 'saved', fromPhaseTitle: '验收' } })
+    mockUpdate.mockClear()
     mockUpdate.mockImplementationOnce(() => { throw Error('disk unavailable') })
     expect(() => confirmMvpDelivered({ input, deps })).toThrow('disk unavailable')
     expect(readMvpConfirmation('p1')?.state).toBe('consuming')
@@ -298,6 +300,7 @@ describe('confirmMvpDelivered（确认交付）', () => {
   it('refuses stale source, wrong session, and unreadable durable records', () => {
     const { deps } = makeDeps()
     holdForMvpConfirm({ input, deps, fromPhase: 'desktop-verify', notice: { projectName: 'saved', fromPhaseTitle: '验收' } })
+    mockUpdate.mockClear()
     expect(() => confirmMvpDelivered({ input: { ...input, sessionId: 'other' }, deps })).toThrow('STALE')
     writeFileSync(join(projectRoot, 'app.py'), '# changed')
     expect(() => confirmMvpDelivered({ input, deps })).toThrow('STALE')

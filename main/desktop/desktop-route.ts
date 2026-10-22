@@ -588,6 +588,9 @@ async function runDesktopStage(
       writeFileSync(path, content, 'utf8')
     },
   }
+  // The coarse lifecycle must reflect real work as well as desktop_phase, so
+  // startup reconciliation can recognize a crashed ordinary (non-experiment) run.
+  updateProject(input.projectId, { current_stage: phaseId === 'desktop-verify' ? 'testing' : 'generating_mvp' })
   const result = await runDesktopDispatcherLoop(loopInput)
   // Dispatcher binding owns the same cumulative experiment deadline as host
   // verification. Do not lose it when control returns from the model loop.

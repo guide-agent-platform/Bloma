@@ -1,17 +1,22 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve, relative, isAbsolute } from 'node:path'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { join, resolve, relative, isAbsolute } from 'node:path'
+import { tmpdir } from 'node:os'
+import { writeTextFileAtomic } from '../../storage/json-store'
 import { readPrdBackplane } from '../project/document-engine'
-import { requirementEvidenceHash, requirementVerificationContext } from '../project/requirement-contract'
+import { prdScopeFingerprint, requirementEvidenceHash, requirementVerificationContext } from '../project/requirement-contract'
 import { parseProjectContract } from './contract-schema'
 import { execFileDriverSpawn, runContractDriver, type DriverSpawn, type DriverScenarioOutcome } from './process-driver'
 import { verificationFingerprint } from './verification-fingerprint'
-import type { SpeechVerificationSpec } from './speech-verification'
 import type { FileVerificationResult } from './file-verification'
 import type { LlmVerificationResult } from './llm-verification'
 import { combineVerification, runCapabilityVerifiers, type CapabilityVerifier } from './capability-verifiers'
+import { runGuiAcceptance, type GuiAcceptanceResult } from './gui-acceptance'
+import { coreVerificationCacheKey, withCoreVerificationCache } from './core-verification-cache'
 
 export type CoreVerificationStatus = 'passed' | 'failed' | 'unverified' | 'environment_blocked'
 export interface CoreVerificationResult {
+  reused?: boolean
+  host_gui?: GuiAcceptanceResult
   llm?: LlmVerificationResult
   requirements?: Array<{ id: string; requirement_hash: string; implementation: 'implemented' | 'partial' | 'missing' | 'unverified'; verification: CoreVerificationStatus }>
   speech?: import('./speech-verification').SpeechVerificationResult
@@ -34,11 +39,24 @@ function scenarioOutcome(scenarios: DriverScenarioOutcome[], name: string): stri
 }
 
 /** Minimal shared execution contract; input labels alone are not real audio evidence. */
-export async function runCoreVerification(options: {
-  projectId: string; sandboxRoot?: string; spawn?: DriverSpawn; signal?: AbortSignal; capabilityVerifiers?: readonly CapabilityVerifier[]
-}): Promise<CoreVerificationResult> {
+export interface CoreVerificationOptions {
+  projectId: string; sandboxRoot?: string; spawn?: DriverSpawn; signal?: AbortSignal; capabilityVerifiers?: readonly CapabilityVerifier[]; reuse?: boolean; force?: boolean
+}
+export async function runCoreVerification(options: CoreVerificationOptions): Promise<CoreVerificationResult> {
+  if (!options.reuse || options.spawn || options.capabilityVerifiers || !options.sandboxRoot) return runFreshCoreVerification(options)
+  try {
+    return await withCoreVerificationCache({ projectId: options.projectId, signal: options.signal, force: options.force,
+      key: () => coreVerificationCacheKey(options.projectId, options.sandboxRoot!) }, () => runFreshCoreVerification(options))
+  } catch (error) {
+    if (options.signal?.aborted) throw error
+    return { status: 'environment_blocked', summary: '验证凭据未能可靠保存，产物已保留，不能确认交付。', checked_at: new Date().toISOString(),
+      evidence: [], missing: [error instanceof Error ? error.message : String(error)] }
+  }
+}
+async function runFreshCoreVerification(options: CoreVerificationOptions): Promise<CoreVerificationResult> {
   const result: CoreVerificationResult = { status: 'unverified', summary: '已生成，核心功能待验证。', checked_at: new Date().toISOString(), missing: [], evidence: [] }
   const root = options.sandboxRoot
+  let dataRoot: string | undefined
   try {
     options.signal?.throwIfAborted()
     if (!root) throw new Error('项目路径不可用')
@@ -89,11 +107,12 @@ export async function runCoreVerification(options: {
     const guiCommand = raw.gui_command === undefined ? undefined : registeredCommand(raw.gui_command)
     const knownIds = new Set(backplane.requirements.map(r => r.id))
     if (scenarios.some(s => s.covers.some(fid => !knownIds.has(fid)))) throw new Error('核心验证引用了不存在的需求')
+    dataRoot = mkdtempSync(join(tmpdir(), 'bloma-core-verification-'))
     const execute = (registered: string[]) => runContractDriver({ contract: parseProjectContract(JSON.stringify({ schema_version: 1, entry: 'app.py',
       driver: { command: registered, timeout_ms: 120000, exit_code_semantics: { 0: 'pass', 1: 'fail', 2: 'blocked' }, assert_readback: 'core scenario readback' },
       components: [], env_whitelist: ['APP_DATA_DIR', 'BLOMA_SPEECH_MODEL_DIR', 'BLOMA_SPEECH_OFFLINE'], scenarios,
     })), cwd: root, spawn: options.spawn ?? execFileDriverSpawn, exactScenarioNames: scenarios.map(scenario => scenario.name),
-      signal: options.signal, parentEnv: { ...process.env, APP_DATA_DIR: join(root, '00_VERIFY/core-data'), BLOMA_SPEECH_OFFLINE: '1' } })
+      signal: options.signal, parentEnv: { ...process.env, APP_DATA_DIR: join(dataRoot!, 'data'), BLOMA_SPEECH_OFFLINE: '1' } })
     const report = await execute(command)
     options.signal?.throwIfAborted()
     const guiReport = guiCommand ? await execute(guiCommand) : undefined
@@ -112,6 +131,14 @@ export async function runCoreVerification(options: {
     if (verificationFingerprint(root, context) !== fingerprint) result.missing.push('验证期间源码或声明变化，本次结果作废')
     const capabilities = await runCapabilityVerifiers({ projectId: options.projectId, root, backplane, manifest: raw, signal: options.signal }, options.capabilityVerifiers)
     for (const outcome of capabilities) { result.missing.push(...outcome.missing); Object.assign(result, outcome.report) }
+    const hostGui = await runGuiAcceptance({ projectId: options.projectId, root, scopeHash: prdScopeFingerprint(backplane), signal: options.signal })
+    if (hostGui) {
+      result.host_gui = hostGui
+      if (hostGui.covers.some(id => !ids.has(id))) throw new Error('GUI_COVERAGE_UNKNOWN_REQUIREMENT')
+      if (hostGui.status !== 'passed') result.missing.push(`宿主GUI业务验收未通过：${hostGui.error ?? hostGui.status}`)
+      for (const fid of hostGui.covers) result.evidence.push({ fid, scenario: 'host-native-gui', input: 'gui',
+        outcome: hostGui.status === 'passed' ? 'pass' : hostGui.status === 'failed' ? 'fail' : 'unverified' })
+    }
     for (const requirement of required) {
       const rows = result.evidence.filter(e => e.fid === requirement.id && e.outcome === 'pass' && e.input !== 'mock')
       if (!rows.length) result.missing.push(requirement.id)
@@ -133,9 +160,9 @@ export async function runCoreVerification(options: {
       result.missing.push('验证期间源码或需求契约变化，本次结果作废')
       for (const item of result.requirements) item.verification = 'unverified'
     }
-    if (reports.some(r => r.routing === 'fail') || capabilities.some(outcome => outcome.status === 'failed')) { result.status = 'failed'; result.summary = '核心功能测试失败，需要修复。' }
+    if (reports.some(r => r.routing === 'fail') || capabilities.some(outcome => outcome.status === 'failed') || hostGui?.status === 'failed') { result.status = 'failed'; result.summary = '核心功能测试失败，需要修复。' }
     else if (reports.some(r => r.routing === 'blocked') || capabilities.some(outcome => outcome.status === 'environment_blocked')) { result.status = 'environment_blocked'; result.summary = '验证环境未就绪，程序已保留。' }
-    else if (result.missing.length || !fingerprint) {
+    else if (result.missing.length || !fingerprint || result.requirements.some(item => item.verification !== 'passed') || capabilities.some(outcome => outcome.status === 'unverified')) {
       result.summary = result.requirements.some(item => item.implementation === 'partial' || item.implementation === 'missing')
         ? '程序已保留，仍有未完成的已确认功能，尚不能完整交付。'
         : result.requirements.some(item => item.implementation === 'unverified')
@@ -145,9 +172,11 @@ export async function runCoreVerification(options: {
   } catch (error) {
     if (options.signal?.aborted) throw error
     result.missing.push(error instanceof Error ? error.message : String(error))
+  } finally {
+    if (dataRoot) { try { rmSync(dataRoot, { recursive: true, force: true }) } catch { /* owned test fixture only */ } }
   }
   if (root) {
-    try { const path = join(root, CORE_REPORT_REL); mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, JSON.stringify(result, null, 2)) }
+    try { writeTextFileAtomic(join(root, CORE_REPORT_REL), JSON.stringify(result, null, 2)) }
     catch { result.status = 'environment_blocked'; result.summary = '验证记录未能保存，不能确认交付。' }
   }
   return result

@@ -64,12 +64,18 @@ export const BUILTIN_CAPABILITY_VERIFIERS: readonly CapabilityVerifier[] = [spee
 /** Host injection only. No global registration or product-owned executable plugins. */
 export async function runCapabilityVerifiers(ctx: CapabilityContext, registry = BUILTIN_CAPABILITY_VERIFIERS): Promise<CapabilityOutcome[]> {
   if (new Set(registry.map(verifier => verifier.id)).size !== registry.length) throw new Error('DUPLICATE_CAPABILITY_VERIFIER')
+  ctx.signal?.throwIfAborted()
   const outcomes: CapabilityOutcome[] = []
   for (const verifier of registry) {
     ctx.signal?.throwIfAborted()
     const outcome = await verifier.run(ctx)
     ctx.signal?.throwIfAborted()
-    if (outcome) outcomes.push(outcome)
+    if (outcome) {
+      const valid = (status: string) => ['passed', 'failed', 'unverified', 'environment_blocked'].includes(status)
+      if (!valid(outcome.status) || !Array.isArray(outcome.missing) || outcome.missing.some(reason => typeof reason !== 'string')
+        || !outcome.features || Object.entries(outcome.features).some(([id, status]) => !valid(status) || !ctx.backplane.requirements.some(item => item.id === id))) throw new Error('CAPABILITY_OUTCOME_INVALID')
+      outcomes.push(outcome)
+    }
   }
   return outcomes
 }

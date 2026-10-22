@@ -32,6 +32,15 @@ const run = (code = 0, stdout = 'PASS actual input') => runCoreVerification({ pr
   spawn: async () => ({ code, stdout, stderr: '' }) })
 
 describe('shared core delivery', () => {
+  it('cannot turn an extension verifier with unknown evidence into a delivery pass', async () => {
+    manifest()
+    const result = await runCoreVerification({ projectId: 'p', sandboxRoot: root,
+      spawn: async () => ({ code: 0, stdout: 'PASS actual input', stderr: '' }),
+      capabilityVerifiers: [{ id: 'unknown', run: async () => ({ status: 'unverified', missing: [], features: { 'F-001': 'unverified' } }) }] })
+    expect(result.status).toBe('unverified')
+    expect(result.requirements?.[0]?.verification).toBe('unverified')
+  })
+
   it.each(['failed', 'environment_blocked'] as const)('does not label speech features passed after a host %s result', async status => {
     vi.mocked(readPrdBackplane).mockReturnValue({ requirements: [{ id: 'F-001', description: '语音识别' }] } as never)
     writeManifest({ command: ['python', 'core_check.py'], scenarios: [{ name: 'actual input', covers: ['F-001'], input: 'gui' }],

@@ -13,11 +13,11 @@ describe('host verification composition', () => {
   })
   it('keeps injected capability evidence and cancellation under the host owner', async () => {
     const controller = new AbortController()
-    const context = { projectId: 'p', root: '', backplane: { requirements: [] }, manifest: {}, signal: controller.signal } as never
+    const context = { projectId: 'p', root: '', backplane: { requirements: [{ id: 'F-001' }] }, manifest: {}, signal: controller.signal } as never
     const result = await runCapabilityVerifiers(context, [{ id: 'custom', run: async () => ({ status: 'unverified', missing: ['hardware unavailable'], features: { 'F-001': 'unverified' } }) }])
     expect(result[0].features['F-001']).toBe('unverified')
     controller.abort()
-    await expect(runCapabilityVerifiers(context, [])).resolves.toEqual([])
+    await expect(runCapabilityVerifiers(context, [])).rejects.toThrow()
     await expect(runCapabilityVerifiers(context, [{ id: 'custom', run: async () => { throw Error('must not run') } }])).rejects.toThrow()
   })
   it('refuses duplicate capability identities', async () => {

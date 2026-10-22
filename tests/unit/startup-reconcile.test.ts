@@ -10,6 +10,7 @@ import {
 } from '../../main/project/recovery-service'
 import { createProject, findProject, updateProject } from '../../main/project/project-service'
 import { recordSessionActivity, setProjectTouchHandler } from '../../main/platform/sessions/session-service'
+import { consumeProjectAttempt, readProjectAttempts } from '../../main/platform/execution/project-attempts'
 
 // PR4 后续：平台件已去域依赖，测试接真源（与 main/index 接线同款；项目缺席静默）
 setProjectTouchHandler((projectId, patch) => {
@@ -51,10 +52,13 @@ describe('startup reconcile (T1)', () => {
     mkdirSync(join(root, 'data'), { recursive: true })
     writeFileSync(join(root, 'data', 'records.json'), '[{"amount":42}]')
     updateProject(projectId, { current_stage: 'generating_mvp', desktop_phase: 'desktop-implement' })
+    consumeProjectAttempt(projectId, 'script:worker-1', 8)
+    const attempts = readProjectAttempts(projectId)
     const outcomes = await reconcileInterruptedProjects()
     expect(outcomes[0]).toMatchObject({ action: 'desktop_preserved', to_stage: 'blocked_for_user_decision' })
     expect(findProject(projectId)).toMatchObject({ desktop_phase: 'desktop-implement', desktop_blocked: { reason: 'startup-interrupted' } })
     expect(readFileSync(join(root, 'app.py'), 'utf8')).toBe('# current desktop work')
+    expect(readProjectAttempts(projectId)).toEqual(attempts)
     expect(readFileSync(join(root, 'data', 'records.json'), 'utf8')).toBe('[{"amount":42}]')
     expect(readSessionText(sessionId)).toContain('没有自动回滚')
     expect(await reconcileInterruptedProjects()).toEqual([])

@@ -1,0 +1,7 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Native GUI fixture</title></head><body>
+<input id="name"><button id="save">Save</button><span id="count">loading</span><span id="error"></span><div id="items"></div>
+<script src="bridge.js"></script><script>
+async function refresh(){const rows=await App.call('list_items');document.querySelector('#count').textContent=String(rows.length);document.querySelector('#items').textContent=rows.join(',');}
+document.querySelector('#save').onclick=async()=>{const result=await App.call('add_item',document.querySelector('#name').value);document.querySelector('#error').textContent=result.error||'';await refresh();};
+window.addEventListener('DOMContentLoaded',refresh);
+</script></body></html>

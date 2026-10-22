@@ -13,7 +13,7 @@ export async function ensureCoreDelivery(input: { projectId: string; sessionId: 
   input.signal?.throwIfAborted()
   const result: CoreVerificationResult = await (deps.coreVerification
     ? deps.coreVerification(input.projectId, input.signal)
-    : runCoreVerification({ projectId: input.projectId, sandboxRoot: findProject(input.projectId)?.root_path, signal: input.signal }))
+    : runCoreVerification({ projectId: input.projectId, sandboxRoot: findProject(input.projectId)?.root_path, signal: input.signal, reuse: true }))
   input.signal?.throwIfAborted()
   seenProjects.add(input.projectId)
   if (result.status === 'passed') { clearCoreDeliveryRetries(input.projectId); return true }
