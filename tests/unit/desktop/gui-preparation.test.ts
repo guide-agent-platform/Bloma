@@ -39,6 +39,28 @@ function setup() {
 import { mkdirSync } from 'node:fs'
 const requireDir = (path: string) => mkdirSync(path, { recursive: true })
 describe('independent GUI rules in ordinary production', () => {
+  it('reprepares automatically bound rules after a UX-only change without resetting scope attempts', async () => {
+    const { project, suite } = setup()
+    const query: SDKQuery = vi.fn(async function* () {
+      yield { type: 'assistant' as const, message: { role: 'assistant' as const, content: [{ type: 'text' as const, text: JSON.stringify(suite) }] } }
+    })
+    const input = { projectId: project.project_id, sessionId: 's', query, env: {} }
+    expect(await prepareGuiAcceptance(input)).toBe(true)
+    const old = JSON.parse(readFileSync(guiSuitePath(project.project_id), 'utf8'))
+    const path = join(project.root_path, '00_UX/confirmed.json'), confirmed = JSON.parse(readFileSync(path, 'utf8'))
+    confirmed.design.pages[0].purpose += '，调整布局'
+    writeFileSync(path, JSON.stringify(confirmed))
+    const binding = findProject(project.project_id).ux_confirmation!
+    updateProject(project.project_id, { ux_confirmation: { ...binding, design_hash: uxDesignFingerprint(confirmed.design) } })
+    expect(() => guiControlBindings(project.project_id)).toThrow('GUI_BINDINGS_DESIGN_STALE')
+    expect(await prepareGuiAcceptance(input)).toBe(true)
+    const current = JSON.parse(readFileSync(guiSuitePath(project.project_id), 'utf8'))
+    expect(current.design_hash).not.toBe(old.design_hash)
+    expect(current.design_hash).toBe(uxDesignFingerprint(confirmed.design))
+    expect(query).toHaveBeenCalledTimes(2)
+    expect(Object.values(readProjectAttempts(project.project_id).total)).toEqual([2])
+  })
+
   it('uses concrete validation feedback to repair a mapping without changing the frozen intent', async () => {
     const { project, suite } = setup()
     let calls = 0

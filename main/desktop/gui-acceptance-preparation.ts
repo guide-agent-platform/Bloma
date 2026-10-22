@@ -26,15 +26,15 @@ export async function prepareGuiAcceptance(input: { projectId: string; sessionId
   try {
     input.signal?.throwIfAborted()
     if (!backplane.user_confirmed_at || project.ux_confirmation?.prd_fingerprint !== scope) return block('GUI_CONFIRMED_INTENT_MISSING')
-    if (existsSync(path)) {
-      const saved = parseGuiSuite(JSON.parse(readFileSync(path, 'utf8')))
-      if (saved.scope_hash === scope) {
-        updateProject(input.projectId, { gui_acceptance: { status: 'sealed', scope_hash: scope } }); return true
-      }
-    }
     const confirmed = JSON.parse(readFileSync(join(project.root_path, '00_UX/confirmed.json'), 'utf8')) as { design: UxDesign }
     const design = confirmed.design
     if (design.prd_fingerprint !== scope || uxDesignFingerprint(design) !== project.ux_confirmation.design_hash) return block('GUI_DESIGN_VERSION_CHANGED')
+    if (existsSync(path)) {
+      const saved = parseGuiSuite(JSON.parse(readFileSync(path, 'utf8')))
+      if (saved.scope_hash === scope && (!saved.design_hash || saved.design_hash === project.ux_confirmation.design_hash)) {
+        updateProject(input.projectId, { gui_acceptance: { status: 'sealed', scope_hash: scope } }); return true
+      }
+    }
     const uiFeatures = [...new Set(design.interactions.map(item => item.feature_id))]
     if (!uiFeatures.length) return block('GUI_INTERACTIVE_SCOPE_MISSING')
     const allowance = consumeProjectAttempt(input.projectId, `gui-plan:${scope}`, 2)
@@ -59,7 +59,7 @@ export async function prepareGuiAcceptance(input: { projectId: string; sessionId
         lastProposal = text; issues = []
         try {
         const raw = JSON.parse(text.trim().replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, ''))
-        const value = parseGuiSuite({ ...raw, version: 1, scope_hash: scope })
+        const value = parseGuiSuite({ ...raw, version: 1, scope_hash: scope, design_hash: project.ux_confirmation!.design_hash })
         const known = new Set(backplane.requirements.map(item => item.id))
         if (uiFeatures.some(id => !value.covers.includes(id)) || value.covers.some(id => !known.has(id)) || !value.control_bindings?.length) return reject('GUI_COVERAGE_OR_BINDINGS_MISSING: UI功能=' + uiFeatures.join(','))
         if (!value.steps.some(step => step.kind === 'fill' || step.kind === 'click')) return reject('GUI_BUSINESS_ACTION_MISSING')
@@ -99,6 +99,7 @@ export function guiControlBindings(projectId: string): GuiAcceptanceSuite['contr
   if (!existsSync(path)) return
   const suite = parseGuiSuite(JSON.parse(readFileSync(path, 'utf8')))
   if (suite.scope_hash !== prdScopeFingerprint(readPrdBackplane(projectId))) throw new Error('GUI_BINDINGS_SCOPE_STALE')
+  if (suite.design_hash && suite.design_hash !== findProject(projectId).ux_confirmation?.design_hash) throw new Error('GUI_BINDINGS_DESIGN_STALE')
   return suite.control_bindings?.filter(binding => suite.steps.some(step => 'selector' in step && step.selector === binding.selector
     && !(step.kind === 'expect' && step.property === 'count' && step.equals === '0')))
 }

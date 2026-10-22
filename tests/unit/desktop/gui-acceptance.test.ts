@@ -16,6 +16,14 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 const observation = (steps: unknown[], status = 'passed') => ({ code: 0, stdout: 'BLOMA_GUI_ACCEPTANCE:' + JSON.stringify({ version: 1, status, steps }), stderr: '' })
 describe('independent host native GUI acceptance', () => {
+  it.each([undefined, 'c'.repeat(64)])('rejects generated rules when current UX fingerprint is %s', async designHash => {
+    installGuiAcceptanceSuite('p', { ...suite(), design_hash: 'b'.repeat(64) })
+    const spawn = vi.fn()
+    const result = await runGuiAcceptance({ projectId: 'p', root, scopeHash: scope, designHash, spawn })
+    expect(result).toMatchObject({ status: 'unverified', error: 'GUI_DESIGN_STALE' })
+    expect(spawn).not.toHaveBeenCalled()
+  })
+
   it('shares isolated data across actual restart segments and removes it afterwards', async () => {
     const input = suite(); input.steps.push({ id: 'restart', kind: 'restart' }, { id: 'saved', kind: 'expect', selector: '#count', equals: '1' })
     installGuiAcceptanceSuite('p', input)

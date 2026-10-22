@@ -13,6 +13,8 @@ type Action = { id: string; kind: 'fill'; selector: string; value: string } | { 
   | { id: string; kind: 'expect'; selector: string; property?: 'text' | 'value' | 'count'; equals?: string; contains?: string; nonempty?: true; timeout_ms?: number }
   | { id: string; kind: 'restart' | 'lock_data' | 'unlock_data' | 'storage_full' | 'storage_restore' | 'corrupt_data' | 'remove_data' }
 export interface GuiAcceptanceSuite { version: 1; scope_hash: string; covers: string[]; steps: Action[]
+  /** Host-stamped provenance for automatically prepared controls and expectations. */
+  design_hash?: string
   control_bindings?: Array<{ selector: string; description: string }>
   acceptance_refs?: Record<string, string[]>
   fixtures?: Array<{ path: string; text: string }>
@@ -32,6 +34,7 @@ export function parseGuiSuite(value: unknown): GuiAcceptanceSuite {
     || suite.covers.some(id => typeof id !== 'string' || !/^F-\d+$/.test(id)) || new Set(suite.covers).size !== suite.covers.length
     || !Array.isArray(suite.steps) || !suite.steps.length) throw new Error('GUI_SUITE_INVALID')
   if (suite.steps.length > 96) throw new Error(`GUI_STEP_LIMIT_EXCEEDED: ${suite.steps.length}>96`)
+  if (suite.design_hash !== undefined && !/^[a-f0-9]{64}$/.test(suite.design_hash)) throw new Error('GUI_DESIGN_HASH_INVALID')
   const ids = new Set<string>()
   let storageFault: 'lock' | 'full' | undefined
   if (suite.fixtures !== undefined && (!Array.isArray(suite.fixtures) || suite.fixtures.length > 16
@@ -72,7 +75,7 @@ function splitSteps(suite: GuiAcceptanceSuite): Action[][] {
 export function installGuiAcceptanceSuite(projectId: string, value: unknown): void {
   writeTextFileAtomic(guiSuitePath(projectId), JSON.stringify(parseGuiSuite(value)))
 }
-export async function runGuiAcceptance(options: { projectId: string; root: string; scopeHash: string; signal?: AbortSignal; spawn?: DriverSpawn; python?: string; probePath?: string }): Promise<GuiAcceptanceResult | undefined> {
+export async function runGuiAcceptance(options: { projectId: string; root: string; scopeHash: string; designHash?: string; signal?: AbortSignal; spawn?: DriverSpawn; python?: string; probePath?: string }): Promise<GuiAcceptanceResult | undefined> {
   const callerSignal = options.signal
   options = { ...options, signal: AbortSignal.any([...(callerSignal ? [callerSignal] : []), AbortSignal.timeout(300000)]) }
   options.signal?.throwIfAborted()
@@ -85,6 +88,7 @@ export async function runGuiAcceptance(options: { projectId: string; root: strin
     const bytes = readFileSync(path), suite = parseGuiSuite(JSON.parse(bytes.toString('utf8')))
     result.suite_hash = createHash('sha256').update(bytes).digest('hex'); result.covers = suite.covers
     if (suite.scope_hash !== options.scopeHash) throw new Error('GUI_SCOPE_STALE')
+    if (suite.design_hash && suite.design_hash !== options.designHash) throw new Error('GUI_DESIGN_STALE')
     const before = verificationFingerprint(options.root)
     if (!before) throw new Error('GUI_SOURCE_UNREADABLE')
     result.scope_hash = options.scopeHash; result.source_fingerprint = before

@@ -32,7 +32,10 @@ export function coreVerificationCacheKey(projectId: string, root: string): strin
     const implementation = existsSync(join(host, 'desktop', modules[0])) ? modules.map(name => digest(readFileSync(join(host, 'desktop', name)))) : [digest(readFileSync(join(host, 'index.js')))]
     const suite = guiSuitePath(projectId)
     let requiredProtocol: unknown = null
-    try { requiredProtocol = findProject(projectId).gui_acceptance ?? null } catch { /* no project in isolated key tests */ }
+    try {
+      const project = findProject(projectId)
+      requiredProtocol = { gui_acceptance: project.gui_acceptance ?? null, ux_confirmation: project.ux_confirmation ?? null }
+    } catch { /* no project in isolated key tests */ }
     return digest({ protocol: 1, fixture: 'fresh-empty-data-v1', source, version, assets, implementation, requiredProtocol,
       gui: existsSync(suite) ? digest(readFileSync(suite)) : null })
   } catch { return undefined }

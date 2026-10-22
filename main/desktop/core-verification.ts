@@ -132,7 +132,9 @@ async function runFreshCoreVerification(options: CoreVerificationOptions): Promi
     if (verificationFingerprint(root, context) !== fingerprint) result.missing.push('验证期间源码或声明变化，本次结果作废')
     const capabilities = await runCapabilityVerifiers({ projectId: options.projectId, root, backplane, manifest: raw, signal: options.signal }, options.capabilityVerifiers)
     for (const outcome of capabilities) { result.missing.push(...outcome.missing); Object.assign(result, outcome.report) }
-    const hostGui = await runGuiAcceptance({ projectId: options.projectId, root, scopeHash: prdScopeFingerprint(backplane), signal: options.signal })
+    let designHash: string | undefined
+    try { designHash = findProject(options.projectId).ux_confirmation?.design_hash } catch { /* legacy isolated verification */ }
+    const hostGui = await runGuiAcceptance({ projectId: options.projectId, root, scopeHash: prdScopeFingerprint(backplane), designHash, signal: options.signal })
     if (!hostGui) {
       try { if (findProject(options.projectId).gui_acceptance) result.missing.push('宿主独立GUI验收规则缺失，不能用产品自测替代') }
       catch { /* a missing project is already diagnosed by the PRD reader */ }

@@ -18,7 +18,7 @@ if (operation === 'scope') {
   installGuiAcceptanceSuite(projectId, suite)
   process.stdout.write(JSON.stringify({ installed: true, project_id: projectId, scope_hash: scope }) + '\n')
 } else {
-  const result = await runGuiAcceptance({ projectId, root: project.root_path, scopeHash: scope, signal: AbortSignal.timeout(600000), probePath: resolve('main/templates/tools/gui_acceptance_probe.py') })
+  const result = await runGuiAcceptance({ projectId, root: project.root_path, scopeHash: scope, designHash: project.ux_confirmation?.design_hash, signal: AbortSignal.timeout(600000), probePath: resolve('main/templates/tools/gui_acceptance_probe.py') })
   process.stdout.write(JSON.stringify(result ?? { status: 'unverified', error: 'GUI_SUITE_NOT_INSTALLED' }, null, 2) + '\n')
   if (result?.status !== 'passed') process.exitCode = 1
 }
