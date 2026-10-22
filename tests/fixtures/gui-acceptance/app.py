@@ -9,14 +9,26 @@ data = Path(os.environ['APP_DATA_DIR']) / 'records.json'
 
 class Api:
     def list_items(self):
-        return json.dumps(json.loads(data.read_text()) if data.exists() else [])
+        try:
+            if not data.exists() and data.with_suffix('.initialized').exists():
+                return json.dumps({'error': 'Load failed: missing data'})
+            return json.dumps(json.loads(data.read_text()) if data.exists() else [])
+        except (OSError, ValueError):
+            return json.dumps({'error': 'Load failed: corrupt data'})
 
     def add_item(self, value):
         if not value.strip():
             return json.dumps({'error': 'Name required'})
-        items = json.loads(self.list_items()) + [value]
+        rows = json.loads(self.list_items())
+        if isinstance(rows, dict):
+            return json.dumps(rows)
+        items = rows + [value]
         data.parent.mkdir(parents=True, exist_ok=True)
-        data.write_text(json.dumps(items))
+        try:
+            data.write_text(json.dumps(items))
+            data.with_suffix('.initialized').write_text('1')
+        except OSError:
+            return json.dumps({'error': 'Save failed'})
         return json.dumps({'ok': True})
 
 

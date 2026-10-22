@@ -1,11 +1,13 @@
 """Host-owned native GUI actions. No product-authored Python/JS assertions."""
 import json
+import hashlib
 import os
 import runpy
 import sys
 import threading
 import time
 from pathlib import Path
+from gui_storage_faults import storage_full, restore_storage, mutate_data
 
 entry = Path(sys.argv[1]).resolve()
 steps = json.loads(Path(sys.argv[2]).read_text(encoding='utf-8'))
@@ -13,6 +15,42 @@ output = []
 emitted = False
 observer_lock = threading.Lock()
 observer_started = False
+locked_files = []
+
+
+def unlock_data(check=False):
+    unchanged = True
+    count = len(locked_files)
+    if locked_files:
+        import ctypes
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+        while locked_files:
+            handle, path, before = locked_files.pop()
+            kernel.CloseHandle(handle)
+            if check:
+                unchanged = unchanged and path.exists() and hashlib.sha256(path.read_bytes()).hexdigest() == before
+    if check and not unchanged:
+        raise AssertionError('GUI_FAILED_OPERATION_MUTATED_DATA')
+    return {'unchanged': unchanged, 'files': count}
+
+
+def lock_data():
+    import ctypes
+    root = Path(os.environ['APP_DATA_DIR']).resolve()
+    files = [path for path in root.rglob('*') if path.is_file()]
+    if not files or len(files) > 64 or any(not path.resolve().is_relative_to(root) for path in files):
+        raise RuntimeError('GUI_DATA_FILES_UNAVAILABLE_OR_OUTSIDE_FIXTURE')
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.CreateFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
+    kernel.CreateFileW.restype = ctypes.c_void_p
+    for path in files:
+        before = hashlib.sha256(path.read_bytes()).hexdigest()
+        handle = kernel.CreateFileW(str(path), 0x80000000, 1, None, 3, 0x80, None)
+        if handle == ctypes.c_void_p(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        locked_files.append((handle, path, before))
+    return len(locked_files)
 
 
 def emit(status, error=None):
@@ -34,6 +72,16 @@ def observe(window):
         else:
             raise TimeoutError('NATIVE_BRIDGE_NOT_READY')
         for step in steps:
+            if step['kind'] in ('storage_full', 'storage_restore', 'corrupt_data', 'remove_data'):
+                root = os.environ['APP_DATA_DIR']
+                actual = (storage_full(root) if step['kind'] == 'storage_full' else restore_storage(check=True) if step['kind'] == 'storage_restore'
+                          else mutate_data(root, remove=step['kind'] == 'remove_data'))
+                output.append({'id': step['id'], 'passed': True, 'actual': actual})
+                continue
+            if step['kind'] in ('lock_data', 'unlock_data'):
+                actual = lock_data() if step['kind'] == 'lock_data' else unlock_data(check=True)
+                output.append({'id': step['id'], 'passed': True, 'actual': actual})
+                continue
             selector = json.dumps(step['selector'])
             get = 'document.querySelector(' + selector + ')'
             if step['kind'] == 'fill':
@@ -43,7 +91,7 @@ def observe(window):
                 expression = '(()=>{const e=' + get + ';if(!e||e.disabled)return false;e.click();return true})()'
             else:
                 expression = ('String(document.querySelectorAll(' + selector + ').length)' if step.get('property') == 'count' else
-                              '(()=>{const e=' + get + ';return e?' + ('e.value' if step.get('property') == 'value' else 'e.textContent') + ':null})()')
+                              '(()=>{const e=' + get + ';return e?' + ('e.value' if step.get('property') == 'value' else 'Array.from(document.querySelectorAll(' + selector + ')).map(x=>x.textContent).join("\\n")') + ':null})()')
             deadline = time.monotonic() + step.get('timeout_ms', 5000) / 1000
             while True:
                 actual = window.evaluate_js(expression)
@@ -63,9 +111,13 @@ def observe(window):
                 emit('failed', 'GUI_ASSERTION_FAILED:' + step['id'])
                 return
         emit('passed')
+    except AssertionError as error:
+        emit('failed', str(error)[:500])
     except Exception as error:
         emit('unverified', str(error)[:500])
     finally:
+        restore_storage()
+        unlock_data()
         window.destroy()
 
 

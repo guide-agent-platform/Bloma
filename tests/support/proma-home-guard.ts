@@ -28,7 +28,7 @@ for (const key of Object.keys(process.env)) {
   if (key.startsWith('BLOMA_')) delete process.env[key]
 }
 // Existing tests exercise the legacy confirmation protocol. The independent GUI
-// preparation tests explicitly opt in and verify the new-project default path.
+// preparation tests explicitly opt in and verify the new-project rollout path.
 process.env.BLOMA_AUTO_GUI_ACCEPTANCE = '0'
 
 /**

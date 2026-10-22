@@ -39,6 +39,19 @@ function setup() {
 import { mkdirSync } from 'node:fs'
 const requireDir = (path: string) => mkdirSync(path, { recursive: true })
 describe('independent GUI rules in ordinary production', () => {
+  it('uses concrete validation feedback to repair a mapping without changing the frozen intent', async () => {
+    const { project, suite } = setup()
+    let calls = 0
+    const query: SDKQuery = async function* (prompt) {
+      calls++
+      if (calls === 2) expect(prompt).toContain('GUI_AC_MAPPING_INCOMPLETE')
+      yield { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: JSON.stringify({ ...suite, ...(calls === 1 ? { acceptance_refs: {} } : {}) }) }] } }
+    }
+    expect(await prepareGuiAcceptance({ projectId: project.project_id, sessionId: 's', query, env: {} })).toBe(true)
+    expect(calls).toBe(2)
+    const audit = JSON.parse(readFileSync(join(home, 'gui-acceptance/planning', `${project.project_id}-1.json`), 'utf8'))
+    expect(audit.failures[0].validation_issues[0]).toContain('GUI_AC_MAPPING_INCOMPLETE')
+  })
   it('creates host-owned frozen expectations before implementation and hands over only control identities', async () => {
     const { project, suite, scope } = setup()
     const query: SDKQuery = vi.fn(async function* (prompt, options) {
@@ -84,7 +97,7 @@ describe('independent GUI rules in ordinary production', () => {
     expect(existsSync(guiSuitePath(project.project_id))).toBe(false)
   })
   it('does not silently upgrade a legacy project or invoke an extra model', async () => {
-    process.env.BLOMA_AUTO_GUI_ACCEPTANCE = '0'
+    delete process.env.BLOMA_AUTO_GUI_ACCEPTANCE
     const project = createProject({ request_id: 'legacy', mode: 'quick' }), query = vi.fn() as SDKQuery
     expect(await prepareGuiAcceptance({ projectId: project.project_id, sessionId: 's', query, env: {} })).toBe(true)
     expect(query).not.toHaveBeenCalled()

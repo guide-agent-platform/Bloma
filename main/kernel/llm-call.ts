@@ -43,7 +43,7 @@ export interface LlmJsonCallOptions<T> {
   /** 尝试次数（含首轮）；缺省 2 = 首轮 + 带反馈重试一次 */
   attempts?: number
   /** 重试轮的 user 内容（带反馈重试提示）；缺省沿用首轮 prompt */
-  retryFeedback?: string
+  retryFeedback?: string | (() => string)
   /** 推理档位（reasoning-profile 2026-08-27）：判定/校验类任务启用；缺省不传 = 现状 off */
   thinkingLevel?: ThinkingLevel
   /** 渠道 providerType（omit 黑名单判断用；不传 = 不做 omit，off 档下与现状一致） */
@@ -85,7 +85,7 @@ export async function callLlmForJson<T>(options: LlmJsonCallOptions<T>): Promise
               { role: 'user', content: options.prompt },
               { role: 'assistant', content: accumulated },
             ]
-      const prompt = attempt === 0 || truncated ? options.prompt : (options.retryFeedback ?? options.prompt)
+      const prompt = attempt === 0 || truncated ? options.prompt : (typeof options.retryFeedback === 'function' ? options.retryFeedback() : options.retryFeedback ?? options.prompt)
       let round: string
       try {
         round = await runSingleTurn(options, maxTokens, history, prompt, signal)

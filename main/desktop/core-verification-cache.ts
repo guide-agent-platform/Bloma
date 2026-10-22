@@ -26,7 +26,7 @@ export function coreVerificationCacheKey(projectId: string, root: string): strin
     if (!source) return
     const env = buildDriverEnv({ env_whitelist: ['BLOMA_SPEECH_MODEL_DIR', 'BLOMA_SPEECH_OFFLINE'] } as never, process.env)
     const version = captureVerificationVersion(root, python, env, projectId)
-    const host = mainRootDir(), assets = ['gui_acceptance_probe.py', 'prefix_rename_probe.py', 'llm_entry_probe.py']
+    const host = mainRootDir(), assets = ['gui_acceptance_probe.py', 'gui_storage_faults.py', 'prefix_rename_probe.py', 'llm_entry_probe.py']
       .map(name => digest(readFileSync(join(host, 'templates/tools', name))))
     const modules = ['core-verification.ts', 'capability-verifiers.ts', 'gui-acceptance.ts', 'process-driver.ts', 'core-verification-cache.ts']
     const implementation = existsSync(join(host, 'desktop', modules[0])) ? modules.map(name => digest(readFileSync(join(host, 'desktop', name)))) : [digest(readFileSync(join(host, 'index.js')))]

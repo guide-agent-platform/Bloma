@@ -47,6 +47,11 @@ describe('independent host native GUI acceptance', () => {
     expect(() => parseGuiSuite({ ...suite(), steps: [{ id: 'click', kind: 'click', selector: '#button' }] })).toThrow('ASSERTION')
     expect(() => parseGuiSuite({ ...suite(), steps: [...suite().steps, { id: 'restart', kind: 'restart' }] })).toThrow('ASSERTION')
     expect(guiSuitePath('p')).not.toContain(root)
+    expect(() => parseGuiSuite({ ...suite(), steps: [{ id: 'unlock', kind: 'unlock_data' }, ...suite().steps] })).toThrow('UNBALANCED')
+    expect(() => parseGuiSuite({ ...suite(), steps: [{ id: 'lock', kind: 'lock_data' }, ...suite().steps] })).toThrow('UNBALANCED')
+    expect(() => parseGuiSuite({ ...suite(), fixtures: [{ path: 'input/../escape', text: 'bad' }] })).toThrow('FIXTURES')
+    expect(() => parseGuiSuite({ ...suite(), fixtures: [{ path: 'input/NUL', text: 'bad' }] })).toThrow('FIXTURES')
+    expect(() => parseGuiSuite({ ...suite(), steps: [{ id: 'full', kind: 'storage_full' }, ...suite().steps] })).toThrow('UNBALANCED')
   })
   const nativePython = resolve('run-artifacts/workflow-gui-runtime/Scripts/python.exe')
   it.skipIf(process.platform !== 'win32' || !existsSync(nativePython))('really clicks through native pywebview, checks persistence after restart, and rejects empty input', async () => {
@@ -54,16 +59,32 @@ describe('independent host native GUI acceptance', () => {
     input.steps.push({ id: 'type', kind: 'fill', selector: '#name', value: 'saved by host' }, { id: 'save', kind: 'click', selector: '#save' },
       { id: 'added', kind: 'expect', selector: '#count', equals: '1' }, { id: 'restart', kind: 'restart' },
       { id: 'persisted', kind: 'expect', selector: '#items', equals: 'saved by host' },
+      { id: 'locked-name', kind: 'fill', selector: '#name', value: 'must remain unsaved' },
+      { id: 'deny-write', kind: 'lock_data' }, { id: 'blocked-save', kind: 'click', selector: '#save' },
+      { id: 'save-error', kind: 'expect', selector: '#error', contains: 'Save failed' },
+      { id: 'input-retained', kind: 'expect', selector: '#name', property: 'value', equals: 'must remain unsaved' },
+      { id: 'restore-access', kind: 'unlock_data' },
+      { id: 'full-name', kind: 'fill', selector: '#name', value: 'disk full input' },
+      { id: 'inject-full', kind: 'storage_full' }, { id: 'full-save', kind: 'click', selector: '#save' },
+      { id: 'full-error', kind: 'expect', selector: '#error', nonempty: true },
+      { id: 'full-input', kind: 'expect', selector: '#name', property: 'value', equals: 'disk full input' },
+      { id: 'clear-full', kind: 'storage_restore' },
+      { id: 'clear-name', kind: 'fill', selector: '#name', value: '' },
       { id: 'empty-save', kind: 'click', selector: '#save' }, { id: 'error', kind: 'expect', selector: '#error', equals: 'Name required' },
-      { id: 'unchanged', kind: 'expect', selector: '#count', equals: '1' })
+      { id: 'unchanged', kind: 'expect', selector: '#count', equals: '1' },
+      { id: 'corrupt', kind: 'corrupt_data' }, { id: 'reopen-corrupt', kind: 'restart' },
+      { id: 'corrupt-error', kind: 'expect', selector: '#error', contains: 'corrupt' },
+      { id: 'remove', kind: 'remove_data' }, { id: 'reopen-missing', kind: 'restart' },
+      { id: 'missing-error', kind: 'expect', selector: '#error', contains: 'missing' },
+      { id: 'missing-empty', kind: 'expect', selector: '#count', equals: '0' })
     installGuiAcceptanceSuite('p', input)
     const result = await runGuiAcceptance({ projectId: 'p', root, scopeHash: scope, python: nativePython, signal: AbortSignal.timeout(90000) })
     expect(result?.status, JSON.stringify(result)).toBe('passed')
-    expect(result?.steps).toHaveLength(8)
+    expect(result?.steps).toHaveLength(26)
     installGuiAcceptanceSuite('p', { ...suite(), steps: [{ id: 'wrong-expectation', kind: 'expect', selector: '#count', equals: '999', timeout_ms: 100 }] })
     const negative = await runGuiAcceptance({ projectId: 'p', root, scopeHash: scope, python: nativePython, signal: AbortSignal.timeout(45000) })
     expect(negative?.status).toBe('failed')
     expect(negative?.steps[0].actual).toBe('0')
-    writeFileSync(resolve('run-artifacts/workflow-20261022-native-gui.json'), JSON.stringify({ fixture: 'tests/fixtures/gui-acceptance', success: result, intentional_counterexample: negative }, null, 2))
+    writeFileSync(resolve('run-artifacts/recovery2-native-gui.json'), JSON.stringify({ fixture: 'tests/fixtures/gui-acceptance', success: result, intentional_counterexample: negative }, null, 2))
   }, 100000)
 })
