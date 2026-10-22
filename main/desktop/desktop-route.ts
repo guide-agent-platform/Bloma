@@ -1,4 +1,5 @@
 import { desktopDeliveryPolicy } from './delivery-policy'
+import { commitDesktopDelivery } from './delivery-state'
 /**
  * 桌面线路由器（接线批，2026-09-24）——runAgent 意图分流 + PRD 确认改道 + 凭据链。
  *
@@ -702,7 +703,7 @@ async function settleDesktopStage(
         }
       }
       if (!checkDeliveryVersion(input, deliveryVersion, deps)) return
-      updateProject(input.projectId, { desktop_phase: finalPhase, status: 'completed', current_stage: 'completed' })
+      commitDesktopDelivery(input.projectId, input.signal)
       recordDeliveryOutcomeTelemetry(input.projectId, input.sessionId, 'terminal')
       recordExperimentBoundary(input.projectId, 'delivered', { via: 'terminal' })
       deps.publish(input, 'stage_changed', { stage: finalPhase })
@@ -762,7 +763,7 @@ async function settleDesktopStage(
           },
         })) return
         if (!checkDeliveryVersion(input, deliveryVersion, deps)) return
-        updateProject(input.projectId, { desktop_phase: 'delivered', status: 'completed', current_stage: 'completed' })
+        commitDesktopDelivery(input.projectId, input.signal)
         recordDeliveryOutcomeTelemetry(input.projectId, input.sessionId, 'quick-direct')
         recordExperimentBoundary(input.projectId, 'delivered', { via: 'quick-direct' })
         deps.publish(input, 'stage_changed', { stage: 'delivered' })

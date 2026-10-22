@@ -1,4 +1,5 @@
 import { readMvpConfirmation, writeMvpConfirmation, pendingConfirmationPath, type StoredMvpConfirmation } from './pending-confirmation-store'
+import { commitDesktopDelivery } from './delivery-state'
 import { rmSync } from 'node:fs'
 /**
  * longterm MVP 确认门（2026-10-04 确认门新规，实施稿《Bloma-确认门与呈现层-20261004》）。
@@ -397,7 +398,7 @@ export function confirmMvpDelivered(options: {
       why: '用户在 MVP 确认卡选择「确认，交付」',
     },
   })
-  updateProject(input.projectId, { desktop_phase: 'delivered', status: 'completed', current_stage: 'completed', desktop_blocked: undefined })
+  commitDesktopDelivery(input.projectId)
   savePending({ ...pending, state: 'consumed' })
   recordDeliveryOutcomeTelemetry(input.projectId, input.sessionId, 'mvp-confirm')
   deps.publish(input, 'mvp_review_closed', {})
