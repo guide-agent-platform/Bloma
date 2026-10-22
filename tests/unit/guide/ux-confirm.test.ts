@@ -148,6 +148,17 @@ describe('runUxConfirmGate（发门）', () => {
 })
 
 describe('确认/让渡/调整回传', () => {
+  it('propagates the first production interruption after a successful UX confirmation', async () => {
+    const { events, publish } = makePublish()
+    await runUxConfirmGate({ ...basePending({ publish }) })
+    mockEnter.mockImplementationOnce(async (input, _query, _env, deps) => {
+      deps.complete(input.sessionId, input.projectId, 'incomplete')
+      return true
+    })
+    await resumeUxConfirmConfirmed(cardInput(UX_CONFIRM_OPTION_CONFIRM) as never)
+    expect(events.filter(event => event.type === 'message_completed').at(-1)?.payload.subtype).toBe('incomplete')
+  })
+
   it('a failed confirmed-sketch write preserves pending and allows retry', async () => {
     const { events, publish } = makePublish()
     await runUxConfirmGate({ ...basePending({ publish }) })
@@ -155,6 +166,7 @@ describe('确认/让渡/调整回传', () => {
     await resumeUxConfirmConfirmed(cardInput(UX_CONFIRM_OPTION_CONFIRM) as never)
     expect(mockEnter).not.toHaveBeenCalled()
     expect(events.some(event => String(event.payload.text).includes('保存已确认草图失败'))).toBe(true)
+    expect(events.filter(event => event.type === 'message_completed').at(-1)?.payload.subtype).toBe('incomplete')
     expect(resolveUxConfirmCardAnswer(cardInput(UX_CONFIRM_OPTION_CONFIRM) as never)).toBe('confirm')
     await resumeUxConfirmConfirmed(cardInput(UX_CONFIRM_OPTION_CONFIRM) as never)
     expect(mockEnter).toHaveBeenCalledTimes(1)

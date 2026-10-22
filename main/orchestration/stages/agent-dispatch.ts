@@ -273,10 +273,17 @@ export async function runAgent(input: AgentSendMessageInput): Promise<AgentSendM
       return { accepted: true, session_id: input.session_id, stream_started: true }
     }
 
-        if (shouldUseGuideAgent(authoritativeStage)) {
-      await handleGuideMessage(input, publishForRun, guideOptions, persistAssistant, persistSystem)
+    if (shouldUseGuideAgent(authoritativeStage)) {
+      // UX confirmation can enter production within the guide call. Preserve a
+      // later incomplete result even if the earlier confirmation itself succeeded.
+      let guideIncomplete = false
+      await handleGuideMessage(input, event => {
+        if (event.type === 'error' || event.type === 'message_completed' && ['incomplete', 'error'].includes(String(event.payload.subtype))) guideIncomplete = true
+        publishForRun(event)
+      }, guideOptions, persistAssistant, persistSystem)
+      if (guideIncomplete) receiptOutcome = 'failed'
       persistTerminalMessage(input.session_id, 'completed')
-      publishForRun(makeEvent(input, 'completed', { subtype: 'success' }))
+      publishForRun(makeEvent(input, 'completed', { subtype: guideIncomplete ? 'incomplete' : 'success' }))
       return { accepted: true, session_id: input.session_id, stream_started: true }
     }
 

@@ -364,6 +364,7 @@ export async function resumeUxConfirmConfirmed(input: AgentSendMessageInput): Pr
   } catch (error) {
     pendingUxConfirms.set(pending.project_id, pending)
     pending.publish(makeUxEvent(pending, 'message_delta', { text: `保存已确认草图失败，尚未开工，请重试确认：${error instanceof Error ? error.message : String(error)}` }))
+    pending.publish(makeUxEvent(pending, 'message_completed', { subtype: 'incomplete' }))
     return true
   }
   if (pending.signal?.aborted) return true
@@ -552,7 +553,7 @@ async function enterDesktopLineFromPending(pending: PendingUxConfirm): Promise<v
       publish: (_target, type, payload) => pending.publish(makeUxEvent(pending, type, payload)),
       persistAssistant: () => undefined,
       persistSystem: (sessionId, text) => appendSessionMessage(sessionId, { role: 'system', content: [{ type: 'text', text }], timestamp: Date.now() }),
-      complete: () => undefined,
+      complete: (_sessionId, _projectId, outcome) => pending.publish(makeUxEvent(pending, 'message_completed', { subtype: outcome ?? 'success' })),
     },
   )
 }
