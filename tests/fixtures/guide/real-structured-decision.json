@@ -1,0 +1,26 @@
+{
+  "action": "generate_sketch",
+  "reply": "需求已确认，直接出草图：两个输入框加一个计算按钮，支持负数和小数；任一框空白或不是数字时说明具体原因，且不显示新的结果；不做历史、文件、账户。",
+  "requirements": [
+    {
+      "id": "input-two-numbers",
+      "description": "提供两个数字输入框，可输入整数、负数和小数",
+      "origin": "user"
+    },
+    {
+      "id": "calculate-sum",
+      "description": "点击计算按钮后显示两数之和",
+      "origin": "user"
+    },
+    {
+      "id": "validate-input",
+      "description": "任一输入框空白或非数字时，说明具体原因且不显示新的计算结果",
+      "origin": "user"
+    },
+    {
+      "id": "no-persistence",
+      "description": "不保存历史记录、不生成文件、不涉及账户或其它功能",
+      "origin": "user"
+    }
+  ]
+}

@@ -36,7 +36,7 @@ export interface GuideToolsOptions {
 }
 
 /** guide_decide 参数校验（宽松收形：细节归一由下游 normalizeClarificationOptions/ensurePrimaryIntent 完成）。 */
-function validateDecision(raw: Record<string, unknown>): { ok: true; decision: GuideDecision } | { ok: false; error: string } {
+export function validateGuideDecision(raw: Record<string, unknown>): { ok: true; decision: GuideDecision } | { ok: false; error: string } {
   const action = raw.action
   if (action !== 'ask_clarification' && action !== 'confirm_requirements' && action !== 'generate_sketch') {
     return { ok: false, error: 'action 只能是 ask_clarification / confirm_requirements / generate_sketch。' }
@@ -119,7 +119,7 @@ export function buildGuideTools(projectId: string, options: GuideToolsOptions): 
       if (decided) {
         return { output: '本轮已提交过决策，不要重复调用；等待用户回应即可。', isError: true }
       }
-      const validated = validateDecision(toolInput)
+      const validated = validateGuideDecision(toolInput)
       if (!validated.ok) return { output: `决策参数不合法：${validated.error}请修正后重新提交。`, isError: true }
       decided = true
       options.onDecide(validated.decision)

@@ -25,7 +25,7 @@ import { consumePrdConfirmAdjust, consumePrdConfirmDismiss, resolvePrdConfirmCar
 import type { GuideModelOptions } from '../../orchestration/orchestrator';
 import { trackAnalytics } from '../../delivery/track-analytics'
 import { runAgentLoop } from '../../agent/loop/agent-loop'
-import { buildGuideTools, type GuideDecision } from '../guide-tools'
+import { buildGuideTools, validateGuideDecision, type GuideDecision } from '../guide-tools'
 import { detectOrphanEnrichmentClarification, hasPendingEnrichmentClarification, isEnrichmentClarificationAnswer, recordEnrichmentClarificationAnswered, recordEnrichmentClarificationTimeout, readLastEnrichmentClarificationRequests, takePendingEnrichmentClarification } from '../clarification';
 import { setProgrammingEventPublisher } from "../../platform/programming-events";
 import { nextRequirementId, refineModificationDescription } from "../../model/requirement-utils";
@@ -658,6 +658,12 @@ export async function runGuideLoopTurn(
   baseSystem: string,
 ): Promise<GuideLoopOutcome> {
   const holder: { decision: GuideDecision | null } = { decision: null }
+  let visibleText = ''
+  let textPublished = false
+  const structuredPrefix = (text: string) => {
+    const value = text.trimStart()
+    return !value || value.startsWith('{') || value.startsWith('```') || '```json'.startsWith(value)
+  }
   const tools = buildGuideTools(input.project_id, { onDecide: (decision) => { holder.decision = decision } })
   const reminder = freeChatStreakOf(input.session_id) >= 3
     ? '\n\n【宿主提醒】已连续多轮自由对话未收敛：请在本轮用 guide_decide 提交决策（问一个关键问题，或需求已闭环时整理清单确认）。'
@@ -684,7 +690,15 @@ export async function runGuideLoopTurn(
       delegationDepth: 1,
       ...(model.temperature !== undefined ? { temperature: model.temperature } : {}),
       publish: (type, payload) => {
-        if (type === 'message_delta') publish(makeGuideEvent(input, 'message_delta', payload))
+        if (type === 'message_delta') {
+          const text = typeof payload.text === 'string' ? payload.text : ''
+          visibleText += text
+          if (textPublished) publish(makeGuideEvent(input, 'message_delta', payload))
+          else if (!structuredPrefix(visibleText)) {
+            textPublished = true
+            publish(makeGuideEvent(input, 'message_delta', { text: visibleText }))
+          }
+        }
         // 思考增量透传（2026-10-04）：向导也要「思考中·Xs」呈现，不能在这里被吞掉
         else if (type === 'thinking_delta') publish(makeGuideEvent(input, 'thinking_delta', payload))
       },
@@ -710,18 +724,32 @@ export async function runGuideLoopTurn(
     return { kind: 'failed' }
   }
   if (!result) return { kind: 'failed' }
+  let decisionTransport = 'tool'
+  if (!holder.decision && result.status === 'completed' && !model.signal.aborted && structuredPrefix(result.finalText)
+    && Buffer.byteLength(result.finalText) <= 65536) {
+    try {
+      const raw = JSON.parse(result.finalText.trim().replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, ''))
+      if (raw && typeof raw === 'object' && !Array.isArray(raw) && typeof raw.reply === 'string' && raw.reply.trim()) {
+        const validated = validateGuideDecision(raw)
+        if (validated.ok && (validated.decision.action === 'ask_clarification' ? validated.decision.questions?.length : validated.decision.requirements?.length)) {
+          holder.decision = validated.decision; decisionTransport = 'structured_text'
+        }
+      }
+    } catch { /* incomplete JSON cannot grant a workflow transition */ }
+  }
   if (holder.decision) {
     try {
       recordDecision({
         project_id: input.project_id,
         session_id: input.session_id,
-        entry: { type: 'guide_loop', title: `向导决策：${holder.decision.action}`, why: holder.decision.reply.slice(0, 120), detail: { via: 'loop', outcome: 'decision', action: holder.decision.action } },
+        entry: { type: 'guide_loop', title: `向导决策：${holder.decision.action}`, why: holder.decision.reply.slice(0, 120), detail: { via: 'loop', outcome: 'decision', action: holder.decision.action, transport: decisionTransport } },
       })
     } catch {
       /* 决策日志失败不影响流程 */
     }
     return { kind: 'decision', decision: normalizeGuideDecisionToParsed(holder.decision) }
   }
+  if (structuredPrefix(result.finalText)) return { kind: 'failed' }
   if ((result.status === 'completed' || result.status === 'turn_limit') && result.finalText.trim()) {
     return { kind: 'free_chat', text: result.finalText }
   }
