@@ -6,6 +6,8 @@
 
 > 当前实现入口（2026-10-20）：平台生成Windows Python/WebView2桌面应用，需求、UX、制作和验证的现行接线见[制作流程v2](docs/05_PROJECT_PLAN/production-workflow-v2-20261020.md)。本页其余规划保留历史范围；代码清理、硬编码修复和本机旧项目清理结果见[清理实施记录](docs/05_PROJECT_PLAN/hardcoding-cleanup-execution-20261020.md)。
 
+> 2026-10-22后续完善：[全流程实施记录](docs/05_PROJECT_PLAN/workflow-improvement-20261022.md)包含持久MVP确认、宿主原生GUI验收CLI、验证凭据复用及交付规则收敛的实现与验证边界。
+
 ---
 
 ## 1. 项目目的
