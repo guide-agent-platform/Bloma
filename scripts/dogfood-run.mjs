@@ -24,6 +24,7 @@ import { join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { readPrdProbe } from './prd-probe-inspection.mjs'
+import { selectReviewDelegation } from './lib/dogfood-card-policy.mjs'
 
 const args = process.argv.slice(2)
 const flag = (name) => args.includes(`--${name}`)
@@ -714,7 +715,7 @@ try {
     let action = null
     const overlays = state.overlays ?? {}
     const clarifyAuto = enabled.find((o) => o.kind === 'clarify' && (o.id === 'auto' || /你帮我|全部交给/.test(o.label)))
-    const reviewAuto = enabled.find((o) => o.kind === 'review' && (o.id === 'prd_review_delegate_all' || /全部交给|你帮我/.test(o.label)))
+    const reviewAuto = selectReviewDelegation(enabled)
     if (STOP_AFTER_PRD && overlays.prdConfirm) {
       const { project: record, backplane: prd } = readPrdProbe(HOME, project?.id)
       report.project = { id: record.project_id, dir: record.root_path }
@@ -728,7 +729,7 @@ try {
       log(`PRD-only probe stopped before confirmation: ${report.outcome}, ${prd.requirements.length} capabilities`)
       break
     }
-    if (STOP_AFTER_PRD && overlays.review && !reviewAuto) {
+    if (overlays.review && !reviewAuto) {
       report.outcome = 'prd-review-unresolved'
       log('Bounded PRD repair did not converge; preserving unresolved review without automatic waiver')
       break
@@ -736,7 +737,7 @@ try {
     if (state.upgradeDialog) {
       action = { id: '__upgrade_cancel', raw: 'upgrade-cancel', why: '关升级弹窗' }
     } else if (overlays.review) {
-      action = { id: '__review_auto', raw: reviewAuto ? reviewAuto.raw : 'review-choice-global-prd_review_delegate_all', why: `内审定夺委托（${reviewAuto?.label ?? '全部交给向导决定'}）` }
+      action = { id: '__review_auto', raw: reviewAuto.raw, why: `内审定夺委托（${reviewAuto.label}）` }
     } else if (overlays.prdConfirm) {
       action = { id: '__prd_submit', raw: 'prd-confirm-submit', why: 'PRD 确认（自动）' }
     } else if (overlays.requirementConfirm) {
