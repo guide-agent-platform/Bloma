@@ -1,3 +1,6 @@
+import { restorePrdConfirmation, replayPrdConfirmation, hasPrdAdjustAwait, hasPendingPrdConfirm } from '../prd-confirm'
+import { restoreUxConfirmation, replayUxConfirmation, isUxAdjustAwait, hasPendingUxConfirm } from '../ux-confirm'
+import { readGuideConfirmation } from '../confirmation-journal'
 /**
  * 向导主管线（PR4a 拆出）：handleGuideMessage 意图分流、guide loop 轮次（模型驱动澄清）、决策归一、事件发布。
  * 纯机械搬移（零行为变化）；对外契约经 guide-agent-service re-export 保持不变。
@@ -366,14 +369,44 @@ export async function handleGuideMessage(
 
   // 啪住，困惑打「？」后整个需求流程重新澄清全链重跑（用户反馈「没法在原有基础上
   // 修改，是完全性重构」）；dismiss → 暂不确认，回对话继续不开工。
-  const prdConfirmDecision = resolvePrdConfirmCardAnswer(input)
+  try {
+    if (model?.query) {
+      const context = { query: model.query, env: model.env ?? {}, signal: model.signal }
+      const restoredPrd = restorePrdConfirmation(input, publish, context)
+      const restoredUx = restoreUxConfirmation(input, publish, context)
+      const continuing = input.metadata?.source !== 'card_option' && (classifyUserDesktopIntent(input.content) === 'continue' || isUxResumeIntent(input.content))
+      if (continuing && (restoredPrd || restoredUx && !isUxAdjustAwait(input.project_id))) {
+        if (restoredUx) replayUxConfirmation(input.project_id)
+        else replayPrdConfirmation(input.project_id)
+        publish(makeGuideEvent(input, 'message_completed', { subtype: 'success' }))
+        return
+      }
+    } else if (readGuideConfirmation('prd', input.project_id) || readGuideConfirmation('ux', input.project_id)) {
+      publish(makeGuideEvent(input, 'message_delta', { text: '已保留上次候选方案，请配置可用模型渠道后继续确认或调整。' }))
+      publish(makeGuideEvent(input, 'message_completed', { subtype: 'incomplete' }))
+      return
+    }
+  } catch (error) {
+    publish(makeGuideEvent(input, 'message_delta', { text: `上次确认状态不能直接继续，候选与意见已保留；请核对当前会话和需求版本后重试：${error instanceof Error ? error.message : String(error)}` }))
+    publish(makeGuideEvent(input, 'message_completed', { subtype: 'incomplete' }))
+    return
+  }
+  const selectedConfirmation = input.metadata?.source === 'card_option' ? input.metadata.selected_option_id : undefined
+  if (selectedConfirmation && (selectedConfirmation.startsWith('prd_confirm_') && !hasPendingPrdConfirm(input.project_id)
+    || selectedConfirmation.startsWith('ux_') && !hasPendingUxConfirm(input.project_id))) {
+    publish(makeGuideEvent(input, 'message_delta', { text: '这张确认卡已结束或版本已失效，本次没有开工。请按当前需求继续整理方案。' }))
+    publish(makeGuideEvent(input, 'message_completed', { subtype: 'incomplete' }))
+    return
+  }
+  const prdConfirmDecision = resolvePrdConfirmCardAnswer(input) ?? (hasPrdAdjustAwait(input.project_id)
+    && input.metadata?.source !== 'card_option' && input.content.trim() && classifyUserDesktopIntent(input.content) !== 'stop' ? 'adjust' : undefined)
   if (prdConfirmDecision === 'confirm') {
     await resumePrdConfirmConfirmed(input)
     return
   }
   if (prdConfirmDecision === 'adjust') {
     const pendingAdjust = consumePrdConfirmAdjust(input)
-    const adjustment = input.content.trim()
+    const adjustment = pendingAdjust?.unappliedFeedback ?? input.content.trim()
     if (pendingAdjust && adjustment) {
       const ack = `好的，按你的想法「${adjustment.slice(0, 40)}」修订 PRD，整理好后再请你确认。`
       persistAssistant?.(ack)

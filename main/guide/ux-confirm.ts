@@ -1,3 +1,4 @@
+import { ConfirmationMap, loadGuideConfirmationForResume, archiveGuideConfirmation, clearGuideConfirmationFilesForTests } from './confirmation-journal'
 /**
  * UX 草图确认门（2026-10-04 确认门新规，实施稿《Bloma-确认门与呈现层-20261004》）。
  *
@@ -56,6 +57,7 @@ export const UX_CONFIRM_OPTION_DELEGATE = 'ux_delegate'
 
 /** UX 门挂起上下文：与 PRD 卡 pending 同构（续跑桌面线所需全量）。 */
 export interface PendingUxConfirm {
+  confirmationId?: string
   backplane?: PrdBackplane
   prdFingerprint?: string
   design?: UxDesign
@@ -81,9 +83,13 @@ export interface PendingUxConfirm {
   sketchSummary?: string
 }
 
-const pendingUxConfirms = new Map<string, PendingUxConfirm>()
+const serializeUx = (value: PendingUxConfirm): Record<string, unknown> => {
+  const { query, env, publish, signal, confirmationId, ...data } = value
+  return data
+}
+const pendingUxConfirms = new ConfirmationMap<PendingUxConfirm>('ux', 'pending', value => value.prdFingerprint, serializeUx)
 /** 点了「有要调整的」等反馈文本的中间态（同 pending 上下文 + 轮次）。 */
-const pendingUxAdjusts = new Map<string, PendingUxConfirm>()
+const pendingUxAdjusts = new ConfirmationMap<PendingUxConfirm>('ux', 'adjust', value => value.prdFingerprint, serializeUx)
 
 export function hasPendingUxConfirm(projectId: string): boolean {
   return pendingUxConfirms.has(projectId)
@@ -93,6 +99,38 @@ function takePendingUxConfirm(projectId: string): PendingUxConfirm | undefined {
   const pending = pendingUxConfirms.get(projectId)
   pendingUxConfirms.delete(projectId)
   return pending
+}
+
+export function restoreUxConfirmation(input: AgentSendMessageInput, publish: GuideEventPublisher, context: { query: SDKQuery; env: Record<string, string>; signal?: AbortSignal }): boolean {
+  let pending = pendingUxConfirms.get(input.project_id) ?? pendingUxAdjusts.get(input.project_id)
+  let adjusting = pendingUxAdjusts.has(input.project_id)
+  let saved: ReturnType<typeof loadGuideConfirmationForResume>
+  try { saved = loadGuideConfirmationForResume('ux', input.project_id) }
+  catch (error) { pendingUxConfirms.forget(input.project_id); pendingUxAdjusts.forget(input.project_id); throw error }
+  if (!pending) {
+    if (!saved) return false
+    if (saved.session_id !== input.session_id) throw new Error('UX_CONFIRMATION_SESSION_CHANGED')
+    const project = findProject(input.project_id)
+    if (project.desktop_phase) return false
+    const current = readPrdBackplane(input.project_id)
+    if (!current.user_confirmed_at || saved.scope_hash !== prdScopeFingerprint(current)) {
+      archiveGuideConfirmation('ux', input.project_id)
+      throw new Error('UX_CONFIRMATION_SCOPE_CHANGED_ARCHIVED')
+    }
+    const data = saved.data as unknown as PendingUxConfirm
+    if (!data.design || data.project_id !== input.project_id || data.session_id !== input.session_id || !Number.isSafeInteger(data.round) || data.round < 1
+      || data.prdFingerprint !== saved.scope_hash || data.sketchHtml !== undefined && typeof data.sketchHtml !== 'string'
+      || data.sketchHash !== undefined && !/^[a-f0-9]{64}$/.test(data.sketchHash)) throw new Error('UX_CONFIRMATION_INVALID')
+    pending = { ...data, confirmationId: saved.id, ...context, publish }
+    adjusting = saved.state === 'adjust' || saved.state === 'working' && Boolean(data.unappliedFeedback)
+  }
+  if (pending.session_id !== input.session_id) throw new Error('UX_CONFIRMATION_SESSION_CHANGED')
+  ;(adjusting ? pendingUxAdjusts : pendingUxConfirms).bind(input.project_id, { ...pending, ...context, publish, request_id: input.request_id })
+  return true
+}
+export function replayUxConfirmation(projectId: string): void {
+  const pending = pendingUxConfirms.get(projectId)
+  if (pending) publishUxCard(pending)
 }
 
 function makeUxEvent(pending: Pick<PendingUxConfirm, 'session_id' | 'project_id'>, type: AgentEvent['type'], payload: Record<string, unknown>): AgentEvent {
@@ -113,7 +151,7 @@ function makeUxEvent(pending: Pick<PendingUxConfirm, 'session_id' | 'project_id'
  */
 export async function runUxConfirmGate(pending: PendingUxConfirm, feedback?: string): Promise<void> {
   if (pending.signal?.aborted) return
-  if (feedback && pending.unappliedFeedback) feedback = /^(?:重试|再试一次|再试)$/.test(feedback.trim())
+  if (feedback && pending.unappliedFeedback && feedback !== pending.unappliedFeedback) feedback = /^(?:重试|再试一次|再试)$/.test(feedback.trim())
     ? pending.unappliedFeedback : `${pending.unappliedFeedback}\n补充意见：${feedback}`
   const current = readPrdBackplane(pending.project_id)
   if (!current.user_confirmed_at || prdStructureIssues(current).length) {
@@ -259,7 +297,10 @@ function publishUxCard(pending: PendingUxConfirm): void {
 export function resetUxConfirmForTests(): void {
   pendingUxConfirms.clear()
   pendingUxAdjusts.clear()
+  clearGuideConfirmationFilesForTests('ux')
 }
+export function clearUxConfirmationMemoryForTests(): void { pendingUxConfirms.clear(); pendingUxAdjusts.clear() }
+export function isUxAdjustAwait(projectId: string): boolean { return pendingUxAdjusts.has(projectId) }
 
 /** 测试隔离种子（生产无用；批11 ①测试）：直接置挂起态/等反馈态。 */
 export function seedUxConfirmForTests(pending: { project_id: string; session_id: string; round: number }): void {
@@ -325,6 +366,7 @@ export async function resumeUxConfirmConfirmed(input: AgentSendMessageInput): Pr
     return true
   }
   if (pending.signal?.aborted) return true
+  pendingUxConfirms.save(pending, 'consumed')
   pending.publish(makeUxEvent(pending, 'ux_sketch_closed', {}))
   recordDecision({ project_id: input.project_id, session_id: pending.session_id, entry: { type: 'ux_confirm', title: '用户确认当前界面设计', why: '需求版本与设计版本核对通过，确认记录已保存', detail: { round: pending.round, prd_fingerprint: pending.prdFingerprint, html_hash: pending.sketchHash ?? null } } })
   pending.publish(makeUxEvent(pending, 'message_delta', { text: '好，按这个界面方向开工，进入桌面交付流程。' }))
@@ -359,6 +401,7 @@ export function startUxAdjustAwait(input: AgentSendMessageInput): void {
 export function consumeUxConfirmDismiss(input: AgentSendMessageInput): void {
   const pending = takePendingUxConfirm(input.project_id)
   if (!pending) return
+  pendingUxConfirms.save(pending, 'dismissed')
   recordDecision({
     project_id: input.project_id,
     session_id: pending.session_id,
@@ -383,8 +426,11 @@ export function takeUxAdjustFeedback(input: AgentSendMessageInput): { pending: P
   const text = input.content.trim()
   if (!text) return undefined
   if (isExplicitUxPause(text)) return undefined
+  const feedback = pending.unappliedFeedback && pending.unappliedFeedback !== text
+    ? /^(?:重试|再试一次|再试)$/.test(text) ? pending.unappliedFeedback : `${pending.unappliedFeedback}\n补充意见：${text}` : text
+  pending.unappliedFeedback = feedback
   pendingUxAdjusts.delete(input.project_id)
-  return { pending, feedback: text }
+  return { pending, feedback }
 }
 
 function isExplicitUxPause(text: string): boolean {
@@ -412,6 +458,7 @@ export function takeUxSketchCorrection(input: AgentSendMessageInput): { pending:
   if (!pending) return undefined
   const text = input.content.trim()
   if (!text) return undefined
+  pending.unappliedFeedback = text
   if (inAdjustWait) pendingUxAdjusts.delete(input.project_id)
   else pendingUxConfirms.delete(input.project_id)
   return { pending, feedback: text }

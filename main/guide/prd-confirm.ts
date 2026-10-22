@@ -1,3 +1,6 @@
+import { ConfirmationMap, loadGuideConfirmationForResume, archiveGuideConfirmation, clearGuideConfirmationFilesForTests } from './confirmation-journal'
+import { prdScopeFingerprint } from '../project/requirement-contract'
+import { readPrdBackplane } from '../project/prd-store'
 import { randomUUID } from 'node:crypto'
 import { prdStructureIssues } from '../model/requirements-model'
 import type { AgentEvent, AgentSendMessageInput, ResearchIdea } from '../../shared/types'
@@ -39,6 +42,10 @@ export const PRD_CONFIRM_OPTION_DISMISS = 'prd_confirm_dismiss'
  *  requirements 用完整 SketchRequirement（含 behavior_assertions）——GWT 行为探针从
  *  sketch_generated 事件快照派生场景，瘦身清单会使探针整体退化为存在性检查（B-1）。 */
 interface PendingPrdConfirm {
+  confirmationId?: string
+  adjustAwait?: boolean
+  unappliedFeedback?: string
+  reviewNote?: string
   backplane: PrdBackplane
   onScopeChange?: (labels: string[]) => Promise<void>
   request_id: string
@@ -59,7 +66,44 @@ interface PendingPrdConfirm {
   signal?: AbortSignal
 }
 
-const pendingPrdConfirms = new Map<string, PendingPrdConfirm>()
+const pendingPrdConfirms = new ConfirmationMap<PendingPrdConfirm>('prd', 'pending', value => prdScopeFingerprint(value.backplane), value => {
+  const { query, env, publish, signal, onScopeChange, confirmationId, ...data } = value
+  return data
+})
+
+export function restorePrdConfirmation(input: AgentSendMessageInput, publish: PendingPrdConfirm['publish'], context: { query: SDKQuery; env: Record<string, string>; signal?: AbortSignal }): boolean {
+  let pending = pendingPrdConfirms.get(input.project_id)
+  let saved: ReturnType<typeof loadGuideConfirmationForResume>
+  try { saved = loadGuideConfirmationForResume('prd', input.project_id) }
+  catch (error) { pendingPrdConfirms.forget(input.project_id); throw error }
+  if (!pending) {
+    if (!saved) return false
+    if (saved.session_id !== input.session_id) throw new Error('PRD_CONFIRMATION_SESSION_CHANGED')
+    const current = readPrdBackplane(input.project_id)
+    if (saved.scope_hash !== prdScopeFingerprint(current)) {
+      archiveGuideConfirmation('prd', input.project_id)
+      throw new Error('PRD_CONFIRMATION_SCOPE_CHANGED_ARCHIVED')
+    }
+    const data = saved.data as unknown as PendingPrdConfirm
+    if (!data.backplane || data.project_id !== input.project_id || data.session_id !== input.session_id
+      || !Array.isArray(data.requirements) || !Array.isArray(data.ideas) || prdScopeFingerprint(data.backplane) !== saved.scope_hash) throw new Error('PRD_CONFIRMATION_INVALID')
+    pending = { ...data, backplane: current, requirements: current.requirements, confirmationId: saved.id,
+      adjustAwait: data.adjustAwait || saved.state === 'dismissed' || saved.state === 'working' && Boolean(data.unappliedFeedback), ...context, publish }
+  }
+  if (pending.session_id !== input.session_id) throw new Error('PRD_CONFIRMATION_SESSION_CHANGED')
+  pendingPrdConfirms.bind(input.project_id, { ...pending, ...context, publish, request_id: input.request_id })
+  return true
+}
+export function hasPrdAdjustAwait(projectId: string): boolean { return Boolean(pendingPrdConfirms.get(projectId)?.adjustAwait) }
+export function replayPrdConfirmation(projectId: string): void {
+  const pending = pendingPrdConfirms.get(projectId)
+  if (!pending) return
+  publishPrdConfirmCard({ input: pending, backplane: pending.backplane, requirements: pending.requirements, ideas: pending.ideas,
+    query: pending.query, env: pending.env, signal: pending.signal, publish: pending.publish, reviewNote: pending.reviewNote })
+}
+export function clearPrdConfirmationMemoryForTests(): void { pendingPrdConfirms.clear() }
+export function resetPrdConfirmationForTests(): void { pendingPrdConfirms.clear(); clearGuideConfirmationFilesForTests('prd') }
+
 
 export function takePendingPrdConfirm(projectId: string): PendingPrdConfirm | undefined {
   const pending = pendingPrdConfirms.get(projectId)
@@ -100,6 +144,7 @@ export function publishPrdConfirmCard(opts: {
   const ideas = opts.ideas ?? []
   pendingPrdConfirms.set(input.project_id, {
     backplane,
+    reviewNote,
     onScopeChange: opts.onScopeChange,
     request_id: input.request_id,
     session_id: input.session_id,
@@ -236,6 +281,7 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
     pending.publish(makeConfirmEvent(pending, 'message_completed', { subtype: 'error' }))
     return true
   }
+  pendingPrdConfirms.save(pending, 'consumed')
   // B-1：草图任务清单与 prd.json 同源——盘上权威清单含 enrichment 断言与采纳项，
   // GWT 探针读 sketch_generated 事件快照派生场景，瘦身清单会使主路径行为探针
   // 整体退化为「页面有元素即过」的存在性检查（与 judge 对账断言永久失配）。
@@ -407,7 +453,14 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
 
 /** 用户选择调整：取走 pending（带文本时直接进修订闭环），返回待决信息供调用方。 */
 export function consumePrdConfirmAdjust(input: AgentSendMessageInput): PendingPrdConfirm | undefined {
-  const pending = takePendingPrdConfirm(input.project_id)
+  const candidate = pendingPrdConfirms.get(input.project_id)
+  if (candidate) {
+    const text = input.content.trim()
+    candidate.adjustAwait = true
+    if (text) candidate.unappliedFeedback = candidate.unappliedFeedback && /^(?:重试|再试一次|再试)$/.test(text) ? candidate.unappliedFeedback : text
+    else pendingPrdConfirms.set(input.project_id, candidate)
+  }
+  const pending = input.content.trim() ? takePendingPrdConfirm(input.project_id) : candidate
   if (!pending) return undefined
   recordDecision({
     project_id: input.project_id,
@@ -427,6 +480,7 @@ export function consumePrdConfirmAdjust(input: AgentSendMessageInput): PendingPr
 export function consumePrdConfirmDismiss(input: AgentSendMessageInput): PendingPrdConfirm | undefined {
   const pending = takePendingPrdConfirm(input.project_id)
   if (!pending) return undefined
+  pendingPrdConfirms.save(pending, 'dismissed')
   recordDecision({
     project_id: input.project_id,
     session_id: pending.session_id,
