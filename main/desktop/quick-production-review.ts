@@ -10,6 +10,7 @@ import { bindExperimentInput } from './dispatch-experiment-runtime'
 import { buildProductionContextTool } from './production-context'
 import type { DesktopDispatchRunInput } from './dispatcher-loop'
 import { verificationFingerprint } from './verification-fingerprint'
+import { requirementVerificationContext } from '../project/requirement-contract'
 import { randomUUID } from 'node:crypto'
 import { consumeProjectAttempt, resetProjectAttemptScope } from '../platform/execution/project-attempts'
 import { recordExperimentBoundary } from './dispatch-experiment'
@@ -41,12 +42,13 @@ export function parseQuickProductionReview(text: string, required: string[]): Qu
 export async function runQuickProductionReview(input: DesktopDispatchRunInput): Promise<QuickProductionReview> {
   const config = readExperiment(input.projectId)
   if (!config?.models || config.production_protocol !== 'v2') throw new Error('QUICK_REVIEW_REQUIRES_V2_EXPERIMENT')
-  const required = readPrdBackplane(input.projectId).requirements.map(item => item.id)
+  const backplane = readPrdBackplane(input.projectId)
+  const required = backplane.requirements.map(item => item.id)
   if (!required.length) throw new Error('QUICK_REVIEW_EMPTY_SCOPE')
   const binding = bindExperimentInput({ ...input, maxTurns: 12 }, config, 'verify')
   const startup = input.sandboxRoot ? await runNormalStartupVerification(input.sandboxRoot, binding.signal)
     : { status: 'unverified' as const, error: 'NORMAL_STARTUP_PROJECT_ROOT_MISSING' }
-  const fingerprintBefore = verificationFingerprint(input.sandboxRoot)
+  const fingerprintBefore = verificationFingerprint(input.sandboxRoot, requirementVerificationContext(backplane))
   const reviewId = randomUUID()
   const reviewSessionId = randomUUID()
   const readFeatures = new Set<string>(), readPaths = new Set<string>()
@@ -76,12 +78,13 @@ export async function runQuickProductionReview(input: DesktopDispatchRunInput): 
     appendDelegationSettle(reviewSessionId, input.signal.aborted ? 'cancelled' : 'failed', { error: 'VERIFIER_EXECUTION_ERROR' })
     throw error
   }
+  binding.signal.throwIfAborted()
   appendDelegationSettle(reviewSessionId, result.status === 'cancelled' ? 'cancelled' : 'completed', { loopStatus: result.status, resultSummary: '独立检查调用已结束，业务判定见审阅报告。' })
   let review = result.status === 'completed' && parseQuickProductionReview(result.finalText, required)
     || { verdict: 'unverified' as const, checked_features: [], evidence: [], findings: [] }
   const evidenceRead = readPaths.has('00_verify/core-verification.json') && [...readPaths].some(path => /\.(py|js|html)$/.test(path))
     && required.every(id => readFeatures.has(id))
-  const fingerprintAfter = verificationFingerprint(input.sandboxRoot)
+  const fingerprintAfter = verificationFingerprint(input.sandboxRoot, requirementVerificationContext(readPrdBackplane(input.projectId)))
   const unchanged = Boolean(fingerprintBefore && fingerprintAfter === fingerprintBefore)
   if (review.verdict === 'pass' && (!evidenceRead || !unchanged)) review = { ...review, verdict: 'unverified' }
   if (startup.status === 'failed') review = { ...review, verdict: 'fail', findings: [...review.findings,
@@ -120,6 +123,7 @@ export async function ensureQuickProductionReview(input: DesktopDispatchRunInput
     review = { verdict: 'unverified', checked_features: [], evidence: [], findings: [] }
     recordExperiment(config, 'quick_verifier_finished', { verdict: 'unverified', reason: 'VERIFIER_EXECUTION_ERROR' })
   }
+  input.signal.throwIfAborted()
   if (review.verdict === 'pass') { resetProjectAttemptScope(input.projectId, 'quick-review'); return true }
   const findings = review.findings.filter(item => item.kind !== 'advisory')
   const productFailure = findings.some(item => item.kind === 'product') || review.verdict === 'fail' && findings.some(item => !item.kind)

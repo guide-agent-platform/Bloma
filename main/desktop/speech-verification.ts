@@ -54,9 +54,10 @@ export function recordManualSpeechComponentAcceptance(evidencePath: string, reas
 }
 
 /** Only an explicitly authorized caller passes microphone=true. Normal delivery never records. */
-export async function runHostSpeechProbe(options: { projectId: string; root: string; speech: SpeechVerificationSpec; microphone?: boolean; spawn?: DriverSpawn }): Promise<SpeechVerificationResult> {
+export async function runHostSpeechProbe(options: { projectId: string; root: string; speech: SpeechVerificationSpec; microphone?: boolean; spawn?: DriverSpawn; signal?: AbortSignal }): Promise<SpeechVerificationResult> {
   const { root, speech } = options
   try {
+    options.signal?.throwIfAborted()
     if (!speech || !/^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$/.test(speech.module) ||
         !/^[A-Za-z_]\w*$/.test(speech.factory) || !/^[A-Za-z_]\w*$/.test(speech.method) ||
         !existsSync(join(root, ...speech.module.split('.'))) && !existsSync(join(root, `${speech.module.replace(/\./g, '/')}.py`))) {
@@ -72,7 +73,8 @@ export async function runHostSpeechProbe(options: { projectId: string; root: str
     const env = buildDriverEnv({ env_whitelist: ['BLOMA_SPEECH_MODEL_DIR'] } as never, process.env)
     env.BLOMA_SPEECH_MODEL_DIR = process.env.BLOMA_SPEECH_MODEL_DIR || speechModelRoot()
     env.BLOMA_SPEECH_OFFLINE = '1'
-    const execution = await (options.spawn ?? execFileDriverSpawn)({ command, cwd: root, env, timeoutMs: 90000 })
+    const execution = await (options.spawn ?? execFileDriverSpawn)({ command, cwd: root, env, timeoutMs: 90000, signal: options.signal })
+    options.signal?.throwIfAborted()
     const last = execution.stdout.trim().split(/\r?\n/).at(-1) ?? ''
     const result = JSON.parse(last) as SpeechVerificationResult
     if (result.probe_version !== 1 || !['passed', 'failed', 'environment_blocked'].includes(result.status)) throw new Error('宿主音频探针未返回有效报告')
@@ -87,6 +89,7 @@ export async function runHostSpeechProbe(options: { projectId: string; root: str
     }
     return result
   } catch (error) {
+    if (options.signal?.aborted) throw error
     return { status: 'environment_blocked', probe_version: 1, error: error instanceof Error ? error.message : String(error) }
   }
 }

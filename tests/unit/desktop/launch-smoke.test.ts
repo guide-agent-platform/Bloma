@@ -1,7 +1,7 @@
 /**
  * launch-smoke 单测（2026-10-04 呈现层收口）：声明解析 + 冒烟编排（spawn/capture 注入）。
  */
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
@@ -41,6 +41,36 @@ describe('parseLaunchDeclaration', () => {
 })
 
 describe('runLaunchSmoke（注入编排）', () => {
+  it('does not launch after cancellation', async () => {
+    const controller = new AbortController(); controller.abort()
+    await expect(runLaunchSmoke(makeRoot(), { signal: controller.signal, spawnImpl: () => { throw Error('must not spawn') } })).rejects.toThrow()
+  })
+
+  it('isolates startup data and cleans up even when capture throws', async () => {
+    const root = makeRoot('{"schema_version":1,"command":["python","app.py"]}')
+    const child = new FakeChild()
+    let data = ''
+    await runLaunchSmoke(root, { graceMs: 1, spawnImpl: (_command, _cwd, env) => {
+      data = env!.APP_DATA_DIR!
+      expect(data).not.toContain(root)
+      mkdirSync(data, { recursive: true }); writeFileSync(join(data, 'test.json'), '{}')
+      return child as unknown as ChildProcess
+    }, captureWindow: async () => { throw Error('capture failed') } })
+    expect(child.killed).toBe(true)
+    expect(existsSync(data)).toBe(false)
+  })
+
+  it('cancels during capture without saving late evidence or leaving the child alive', async () => {
+    const root = makeRoot('{"schema_version":1,"command":["python","app.py"]}')
+    const child = new FakeChild(), controller = new AbortController()
+    await expect(runLaunchSmoke(root, { signal: controller.signal, graceMs: 1,
+      spawnImpl: () => child as unknown as ChildProcess, captureWindow: async () => {
+        controller.abort(); return Buffer.from('late screenshot')
+      } })).rejects.toThrow()
+    expect(child.killed).toBe(true)
+    expect(existsSync(join(root, '00_VERIFY/screenshots/LAUNCH.png'))).toBe(false)
+  })
+
   it('uses the project virtual environment for a bare Python declaration, preserving the declared arguments', async () => {
     const root = makeRoot('{"schema_version":1,"command":["python","app.py"]}')
     const python = process.platform === 'win32' ? join(root, '.venv', 'Scripts', 'python.exe') : join(root, '.venv', 'bin', 'python')
@@ -238,6 +268,31 @@ describe('runLaunchSmoke 联合判定档（批1 2026-10-06：LAUNCH 带 window_t
     expect(result.detail).toContain('仅验证进程存活')
     expect(result.criteria?.degraded).toBe(true)
     expect(child.killed).toBe(true)
+  })
+
+  it('accepts the observer confirming graceful closure after the product exits normally', async () => {
+    const child = new FakeChild()
+    const result = await runLaunchSmoke(jointRoot(), { graceMs: 1,
+      spawnImpl: () => child as unknown as ChildProcess,
+      probeImpl: async () => {
+        child.exitCode = 0; child.emit('exit', 0)
+        await new Promise(resolve => setTimeout(resolve, 5))
+        return { json: goodCriteria() }
+      } })
+    expect(result.passed).toBe(true)
+    expect(result.criteria?.closed_gracefully).toBe(true)
+  })
+
+  it('does not treat unexplained exit 0 as a successful smoke check', async () => {
+    const child = new FakeChild()
+    const result = await runLaunchSmoke(jointRoot(), { graceMs: 1,
+      spawnImpl: () => child as unknown as ChildProcess,
+      probeImpl: async () => {
+        child.exitCode = 0; child.emit('exit', 0)
+        await new Promise(resolve => setTimeout(resolve, 5))
+        return { json: null, error: 'missing close observation' }
+      } })
+    expect(result.passed).toBe(false)
   })
 
   it('探针观察期内进程退出（宽限期后崩溃）→ 不通过，输出尾部即修复靶子', async () => {

@@ -35,11 +35,12 @@ function scenarioOutcome(scenarios: DriverScenarioOutcome[], name: string): stri
 
 /** Minimal shared execution contract; input labels alone are not real audio evidence. */
 export async function runCoreVerification(options: {
-  projectId: string; sandboxRoot?: string; spawn?: DriverSpawn
+  projectId: string; sandboxRoot?: string; spawn?: DriverSpawn; signal?: AbortSignal
 }): Promise<CoreVerificationResult> {
   const result: CoreVerificationResult = { status: 'unverified', summary: '已生成，核心功能待验证。', checked_at: new Date().toISOString(), missing: [], evidence: [] }
   const root = options.sandboxRoot
   try {
+    options.signal?.throwIfAborted()
     if (!root) throw new Error('项目路径不可用')
     const backplane = readPrdBackplane(options.projectId)
     // Confirmed scope is independent of priority. This runs only for a fresh verification;
@@ -93,9 +94,11 @@ export async function runCoreVerification(options: {
       driver: { command: registered, timeout_ms: 120000, exit_code_semantics: { 0: 'pass', 1: 'fail', 2: 'blocked' }, assert_readback: 'core scenario readback' },
       components: [], env_whitelist: ['APP_DATA_DIR', 'BLOMA_SPEECH_MODEL_DIR', 'BLOMA_SPEECH_OFFLINE'], scenarios,
     })), cwd: root, spawn: options.spawn ?? execFileDriverSpawn, exactScenarioNames: scenarios.map(scenario => scenario.name),
-      parentEnv: { ...process.env, APP_DATA_DIR: join(root, '00_VERIFY/core-data'), BLOMA_SPEECH_OFFLINE: '1' } })
+      signal: options.signal, parentEnv: { ...process.env, APP_DATA_DIR: join(root, '00_VERIFY/core-data'), BLOMA_SPEECH_OFFLINE: '1' } })
     const report = await execute(command)
+    options.signal?.throwIfAborted()
     const guiReport = guiCommand ? await execute(guiCommand) : undefined
+    options.signal?.throwIfAborted()
     const reports = guiReport ? [report, guiReport] : [report]
     if (guiReport) result.gui_execution = { command: guiReport.command, routing: guiReport.routing, scenarios: guiReport.scenarios }
     for (const scenario of scenarios) {
@@ -111,12 +114,14 @@ export async function runCoreVerification(options: {
     const capabilities = new Map(required.map(item => [item.id, requirementCapabilities(item)]))
     const hasSpeechRequirement = required.some(item => capabilities.get(item.id)!.has('speech'))
     if (hasSpeechRequirement && !speech) result.missing.push('缺少 ASR 入口登记 speech，须登记产品实际使用的模型构造和转写方法')
-    const speechResult = hasSpeechRequirement && speech ? await runHostSpeechProbe({ projectId: options.projectId, root, speech }) : undefined
+    const speechResult = hasSpeechRequirement && speech ? await runHostSpeechProbe({ projectId: options.projectId, root, speech, signal: options.signal }) : undefined
+    options.signal?.throwIfAborted()
     if (speechResult) result.speech = speechResult
     // Never combine unrelated feature words into a synthetic capability or undo obligation.
     const prefixRename = required.filter(item => capabilities.get(item.id)!.has('prefix_rename'))
     const renameUndo = required.some(item => capabilities.get(item.id)!.has('rename_undo'))
-    const fileResult = prefixRename.length ? await runHostPrefixRenameProbe(root, undefined, { requireUndo: renameUndo }) : undefined
+    const fileResult = prefixRename.length ? await runHostPrefixRenameProbe(root, undefined, { requireUndo: renameUndo, signal: options.signal }) : undefined
+    options.signal?.throwIfAborted()
     if (fileResult) {
       result.file_operations = fileResult
       if (fileResult.status !== 'passed') result.missing.push(`宿主前缀改名反例未通过：${fileResult.error ?? fileResult.tests?.filter(t => !t.passed).map(t => t.name).join('、')}`)
@@ -126,7 +131,8 @@ export async function runCoreVerification(options: {
     const llm = raw.llm as LlmVerificationSpec | undefined
     if (needsLlm && !llm) result.missing.push('缺少真实模型功能入口登记 llm；mock 或固定 network_error 不能证明请求链路已实现')
     if (llm && (!Array.isArray(llm.covers) || !llm.covers.length || llm.covers.some(id => !ids.has(id)) || llmItems.some(item => !llm.covers.includes(item.id)))) throw new Error('模型入口覆盖声明缺失、悬空或漏掉模型需求')
-    const llmResult = llm ? await runHostLlmProbe(root, llm) : undefined
+    const llmResult = llm ? await runHostLlmProbe(root, llm, undefined, options.signal) : undefined
+    options.signal?.throwIfAborted()
     if (llmResult) {
       result.llm = llmResult
       if (llmResult.status !== 'passed') result.missing.push(`模型功能本机 HTTP 探针未通过：${llmResult.error ?? llmResult.tests?.filter(test => !test.passed).map(test => test.name).join('、')}`)
@@ -168,6 +174,7 @@ export async function runCoreVerification(options: {
     }
     else { result.status = 'passed'; result.summary = '核心业务驱动已通过，验证范围见报告。' }
   } catch (error) {
+    if (options.signal?.aborted) throw error
     result.missing.push(error instanceof Error ? error.message : String(error))
   }
   if (root) {

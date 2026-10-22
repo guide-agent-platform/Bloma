@@ -12,13 +12,15 @@ export interface FileVerificationResult {
 }
 
 /** Product-authored PASS output cannot override these fixed filesystem counterexamples. */
-export async function runHostPrefixRenameProbe(root: string, spawn: DriverSpawn = execFileDriverSpawn, options: { requireUndo?: boolean } = {}): Promise<FileVerificationResult> {
+export async function runHostPrefixRenameProbe(root: string, spawn: DriverSpawn = execFileDriverSpawn, options: { requireUndo?: boolean; signal?: AbortSignal } = {}): Promise<FileVerificationResult> {
   try {
+    options.signal?.throwIfAborted()
     const fingerprint = verificationFingerprint(root)
     if (!fingerprint) throw new Error('文件能力验证输入不可完整读取')
     const executable = resolveDriverVenvCommand(['python'], root)[0]!
     const report = await spawn({ command: [executable, '-X', 'utf8', '-B', join(mainRootDir(), 'templates/tools/prefix_rename_probe.py'), root, ...(options.requireUndo ? ['--require-undo'] : [])],
-      cwd: root, timeoutMs: 30000, env: buildDriverEnv({ env_whitelist: [] } as never, process.env) })
+      cwd: root, timeoutMs: 30000, signal: options.signal, env: buildDriverEnv({ env_whitelist: [] } as never, process.env) })
+    options.signal?.throwIfAborted()
     const parsed = JSON.parse(report.stdout.trim()) as FileVerificationResult
     if (parsed.probe_version !== 1 || !['passed', 'failed', 'environment_blocked'].includes(parsed.status)) throw new Error('文件探针未返回有效结果')
     if (parsed.status === 'passed') {
@@ -30,6 +32,7 @@ export async function runHostPrefixRenameProbe(root: string, spawn: DriverSpawn 
     if (verificationFingerprint(root) !== fingerprint) throw new Error('文件探针期间验证输入发生变化')
     return parsed
   } catch (error) {
+    if (options.signal?.aborted) throw error
     return { probe_version: 1, status: 'environment_blocked', error: error instanceof Error ? error.message.slice(0, 300) : String(error) }
   }
 }

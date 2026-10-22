@@ -44,12 +44,13 @@ import { recordDeliveryOutcomeTelemetry } from './dispatcher-telemetry'
  *  有 window_title 时走联合判定档（探针：窗口可见/消息循环响应/稳定期/优雅关闭/错误框），
  *  截图落 00_VERIFY/screenshots（delivered 卡自动嵌图）。项目根缺失/异常返回 null 跳过
  *  留痕（冒烟门不做可用性单点）。 */
-async function defaultLaunchSmokeGate(projectId: string): Promise<LaunchSmokeResult | null> {
+async function defaultLaunchSmokeGate(projectId: string, signal?: AbortSignal): Promise<LaunchSmokeResult | null> {
   try {
     const project = findProject(projectId)
     if (!project?.root_path) return null
-    return await runLaunchSmoke(project.root_path)
+    return await runLaunchSmoke(project.root_path, { signal })
   } catch (error) {
+    if (signal?.aborted) throw error
     console.error('[desktop-quick] 启动冒烟执行失败（跳过本次门禁，留痕）：', error)
     return null
   }
@@ -112,7 +113,7 @@ export function shouldEnterDesktopLine(project: DesktopLineProjectLike | undefin
 
 /** 路由层外部效应面（测试全桩化；生产由 agent-dispatch 注入）。 */
 export interface DesktopRouteDeps {
-  coreVerification?: (projectId: string) => Promise<CoreVerificationResult>
+  coreVerification?: (projectId: string, signal?: AbortSignal) => Promise<CoreVerificationResult>
   /** 事件发布（生产=streamPublisher∘makeEvent；type+payload 直传）。 */
   publish: (input: { sessionId: string; projectId: string }, type: AgentEvent['type'], payload: Record<string, unknown>) => void
   /** 助手消息落盘（生产=appendAgentMessage）。 */
@@ -132,7 +133,7 @@ export interface DesktopRouteDeps {
   securityScan?: (projectId: string) => QuickSecurityGateResult | null
   /** 启动冒烟门注入（2026-10-04 呈现层收口）：quick 直落 delivered 前真实启动一次；
    *  缺省生产实现见 defaultLaunchSmokeGate（无项目上下文返回 null 跳过留痕）。 */
-  launchSmoke?: (projectId: string) => Promise<LaunchSmokeResult | null>
+  launchSmoke?: (projectId: string, signal?: AbortSignal) => Promise<LaunchSmokeResult | null>
 }
 
 // =========================================================================
@@ -285,6 +286,7 @@ export async function handleDesktopDispatchMessage(
   input: DesktopRouteInput,
   deps: DesktopRouteDeps,
 ): Promise<void> {
+  input.signal?.throwIfAborted()
   if (!input.cardOptionId) clearCoreDeliveryRetries(input.projectId)
   const project = findProject(input.projectId)
   const projectName = project?.name ?? input.projectId
@@ -463,6 +465,7 @@ async function runDesktopStage(
   chainDepth: number,
   coreRepair = false,
 ): Promise<void> {
+  input.signal?.throwIfAborted()
   const node = getDesktopPhase(phaseId)
   if (!node) {
     deps.publish(input, 'message_delta', { text: `桌面阶段「${phaseId}」不在阶段表内（数据异常）。请人工检查项目状态。` })
@@ -587,6 +590,7 @@ async function settleDesktopStage(
   projectName: string,
   chainDepth: number,
 ): Promise<void> {
+  input.signal?.throwIfAborted()
   // ── loop 未完成（取消/断流）：话术收尾，阶段不动 ──
   if (result.status !== 'completed' || !result.advance) {
     const why = result.status === 'cancelled' ? '已停止' : '运行异常中断'
@@ -645,7 +649,8 @@ async function settleDesktopStage(
           // （S15 自写自检≠用户路径，弹幕单冻结 bug 的另一面）。MVP 门挂起前跑同款启动
           // 冒烟（联合判定档），失败停在 verify 出人话卡（判据/stderr 即修复靶子），
           // 与 quick 冒烟语义对齐：两单型交付前都真实启动一次。
-          const smoke = await (deps.launchSmoke ? deps.launchSmoke(input.projectId) : defaultLaunchSmokeGate(input.projectId))
+          const smoke = await (deps.launchSmoke ? deps.launchSmoke(input.projectId, input.signal) : defaultLaunchSmokeGate(input.projectId, input.signal))
+          input.signal?.throwIfAborted()
           if (!smoke || !smoke.passed) {
             deps.publish(input, 'message_delta', {
               text: buildBlockedNoticeCard({
@@ -700,7 +705,8 @@ async function settleDesktopStage(
         // 启动冒烟门（2026-10-04 呈现层收口）：安全门过了还要真实启动一次——
         // 「程序能跑起来」是 quick 的验收标准；起不来留在 implement 出人话卡（stderr 尾部
         // 即修复靶子），过了才 delivered（截图已落 00_VERIFY/screenshots，通知卡自动嵌图）
-        const smoke = await (deps.launchSmoke ? deps.launchSmoke(input.projectId) : defaultLaunchSmokeGate(input.projectId))
+        const smoke = await (deps.launchSmoke ? deps.launchSmoke(input.projectId, input.signal) : defaultLaunchSmokeGate(input.projectId, input.signal))
+        input.signal?.throwIfAborted()
         if (!smoke || !smoke.passed) {
           deps.publish(input, 'message_delta', {
             text: buildBlockedNoticeCard({
@@ -725,6 +731,7 @@ async function settleDesktopStage(
             deps.complete(input.sessionId, input.projectId, 'incomplete')
           },
         })) return
+        input.signal?.throwIfAborted()
         updateProject(input.projectId, { desktop_phase: 'delivered', status: 'completed', current_stage: 'completed' })
         recordDeliveryOutcomeTelemetry(input.projectId, input.sessionId, 'quick-direct')
         recordExperimentBoundary(input.projectId, 'delivered', { via: 'quick-direct' })

@@ -105,7 +105,7 @@ export function buildProjectDriverRunnerTool(projectId: string, deps: ProjectDri
         }
       }
       if ((deps.mode ?? (deps.resolveRoot ? undefined : findProject(projectId)?.mode)) === 'quick') {
-        const result: CoreVerificationResult = await (deps.coreVerification ?? runCoreVerification)({ projectId, sandboxRoot: root, spawn: deps.spawn })
+        const result: CoreVerificationResult = await (deps.coreVerification ?? runCoreVerification)({ projectId, sandboxRoot: root, spawn: deps.spawn, signal: ctx.signal })
         return { output: `${result.summary}\n${JSON.stringify(result)}`, isError: result.status !== 'passed', detail: { core_verification: result } }
       }
       let jsonText: string

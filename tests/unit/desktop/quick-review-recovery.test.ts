@@ -17,6 +17,15 @@ const input = () => ({ projectId: 'p', signal: new AbortController().signal }) a
 const pass: QuickProductionReview = { verdict: 'pass', checked_features: ['F-001'], evidence: ['fresh review'], findings: [] }
 
 describe('V recovery without changing evidence into PASS', () => {
+  it('refuses a review pass returned after the run was stopped', async () => {
+    const controller = new AbortController(), run = { ...input(), signal: controller.signal }
+    const controls = { review: vi.fn(async () => { controller.abort(); return pass }), repair: vi.fn(), stop: vi.fn(), publish: vi.fn() }
+    await expect(ensureQuickProductionReview(run, controls)).rejects.toThrow()
+    expect(controls.repair).not.toHaveBeenCalled()
+    expect(controls.stop).not.toHaveBeenCalled()
+    expect(readProjectAttempts('p').total).toEqual({})
+  })
+
   it('replays the captured r5 unverified review through evidence collection and a fresh V pass', async () => {
     const captured = JSON.parse(readFileSync(new URL('../../../outputs/experiment-r5a-20261021/verifier-review.json', import.meta.url), 'utf8')) as QuickProductionReview
     const original = structuredClone(captured)

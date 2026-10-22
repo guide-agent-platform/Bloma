@@ -25,6 +25,7 @@
 
 import type { DesktopRouteDeps } from './desktop-route'
 import { verificationFingerprint } from './verification-fingerprint'
+import { requirementVerificationContext } from '../project/requirement-contract'
 import { MVP_REVIEW_RELATIVE_PATH } from './host-verification-outputs'
 import type { DeliveredNoticeInput } from './notice-cards'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -237,9 +238,15 @@ export function isMvpConfirmPending(projectId: string): boolean {
 export function isMvpEvidenceCurrent(projectId: string): boolean {
   try {
     const pending = pendingMvpConfirms.get(projectId)
-    const current = verificationFingerprint(findProject(projectId)?.root_path)
+    const current = mvpFingerprint(projectId)
     return Boolean(current && pending?.fingerprint === current)
   } catch { return false }
+}
+
+function mvpFingerprint(projectId: string): string | undefined {
+  try {
+    return verificationFingerprint(findProject(projectId)?.root_path, requirementVerificationContext(readPrdBackplane(projectId)))
+  } catch { return undefined }
 }
 
 /** verify→delivered 收口点调用：挂起 MVP 确认卡（不发交付通知、不置 delivered）。 */
@@ -254,7 +261,7 @@ export function holdForMvpConfirm(options: {
     session_id: input.sessionId,
     from_phase: options.fromPhase,
     notice: options.notice,
-    fingerprint: verificationFingerprint(findProject(input.projectId)?.root_path),
+    fingerprint: mvpFingerprint(input.projectId),
   })
   const screenshotCount = options.notice.screenshotPaths?.length ?? 0
   recordDecision({

@@ -5,6 +5,16 @@ import { describe, expect, it } from 'vitest'
 import { verificationFingerprint } from '../../../main/desktop/verification-fingerprint'
 
 describe('verification freshness', () => {
+  it('invalidates evidence when hidden executable source changes', () => {
+    const root = mkdtempSync(join(tmpdir(), 'hidden-verification-'))
+    try {
+      writeFileSync(join(root, '.implementation.py'), '# before')
+      const before = verificationFingerprint(root)
+      writeFileSync(join(root, '.implementation.py'), '# after')
+      expect(verificationFingerprint(root)).not.toBe(before)
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+
   it('does not treat source and test code as disposable data just because of their directory names', () => {
     const root = mkdtempSync(join(tmpdir(), 'fingerprint-code-'))
     try {

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -30,6 +30,30 @@ const run = (code = 0, stdout = 'PASS actual input') => runCoreVerification({ pr
   spawn: async () => ({ code, stdout, stderr: '' }) })
 
 describe('shared core delivery', () => {
+  it('never starts or saves evidence for a cancelled check', async () => {
+    manifest()
+    const controller = new AbortController(); controller.abort()
+    const spawn = vi.fn()
+    await expect(runCoreVerification({ projectId: 'p', sandboxRoot: root, signal: controller.signal, spawn })).rejects.toThrow()
+    expect(spawn).not.toHaveBeenCalled()
+    expect(existsSync(join(root, CORE_REPORT_REL))).toBe(false)
+  })
+
+  it('propagates cancellation to the driver and stops before launching the GUI check', async () => {
+    writeFileSync(join(root, 'test_ui.py'), '# GUI')
+    writeManifest({ command: ['python', 'core_check.py'], gui_command: ['python', 'test_ui.py'],
+      scenarios: [{ name: 'actual input', covers: ['F-001'], input: 'gui' }] })
+    const controller = new AbortController()
+    const spawn = vi.fn(async ({ signal }) => {
+      expect(signal).toBe(controller.signal)
+      controller.abort()
+      return { code: 0, stdout: 'PASS actual input', stderr: '' }
+    })
+    await expect(runCoreVerification({ projectId: 'p', sandboxRoot: root, signal: controller.signal, spawn })).rejects.toThrow()
+    expect(spawn).toHaveBeenCalledOnce()
+    expect(existsSync(join(root, CORE_REPORT_REL))).toBe(false)
+  })
+
   it.each(['不需要语音识别', '不需要真实模型调用', '联系人按编号前缀筛选并支持给联系人改名'])('does not impose an unrelated capability probe for %s', async description => {
     vi.mocked(readPrdBackplane).mockReturnValue({ requirements: [{ id: 'F-001', description }] } as never)
     vi.mocked(runHostPrefixRenameProbe).mockClear()

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { basename, isAbsolute, join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { mainRootDir } from '../platform/paths'
@@ -20,8 +20,10 @@ export interface NormalStartupResult {
 /** Platform-owned observation of the normal skeleton-v2 launch path. It proves
  * bridge/first-screen readiness, not the six business acceptance scenarios. */
 export async function runNormalStartupVerification(root: string, signal?: AbortSignal, spawn: DriverSpawn = execFileDriverSpawn): Promise<NormalStartupResult> {
+  signal?.throwIfAborted()
   const result: NormalStartupResult = { probe_version: 1, status: 'unverified', samples: [] }
   if (!existsSync(join(root, 'ui/bridge.js'))) return { ...result, status: 'not_applicable' }
+  let dataRoot: string | undefined
   try {
     const launch = readLaunchDeclaration(root)
     if (!launch?.ok) throw new Error('NORMAL_STARTUP_LAUNCH_DECLARATION_MISSING')
@@ -32,10 +34,11 @@ export async function runNormalStartupVerification(root: string, signal?: AbortS
     if (isAbsolute(rel) || rel.startsWith('..') || resolve(actualRoot, rel) !== entry) throw new Error('NORMAL_STARTUP_ENTRY_OUTSIDE_PROJECT')
     const fingerprint = verificationFingerprint(root)
     if (!fingerprint) throw new Error('NORMAL_STARTUP_INPUT_UNREADABLE')
-    const dataRoot = mkdtempSync(join(tmpdir(), 'bloma-normal-startup-'))
+    dataRoot = mkdtempSync(join(tmpdir(), 'bloma-normal-startup-'))
     const response = await spawn({ command: [resolveDriverVenvCommand([executable], root)[0], '-X', 'utf8', '-B', join(mainRootDir(), 'templates/tools/normal_startup_probe.py'), entry, JSON.stringify(args)],
       cwd: root, timeoutMs: 30000, signal,
       env: { ...buildDriverEnv({ env_whitelist: [] } as never, process.env), APP_DATA_DIR: join(dataRoot, 'data'), PYTHONDONTWRITEBYTECODE: '1' } })
+    signal?.throwIfAborted()
     const line = response.stdout.split(/\r?\n/).filter(row => row.startsWith('BLOMA_NORMAL_STARTUP:')).at(-1)
     const parsed = JSON.parse(line?.slice('BLOMA_NORMAL_STARTUP:'.length) ?? 'null') as NormalStartupResult
     if (parsed?.probe_version !== 1 || !['passed', 'failed', 'unverified'].includes(parsed.status) || !Array.isArray(parsed.samples)) throw new Error('NORMAL_STARTUP_INVALID_OBSERVATION')
@@ -46,6 +49,8 @@ export async function runNormalStartupVerification(root: string, signal?: AbortS
   } catch (error) {
     if (signal?.aborted) throw error
     result.status = 'unverified'; result.error = error instanceof Error ? error.message : String(error)
+  } finally {
+    if (dataRoot) { try { rmSync(dataRoot, { recursive: true, force: true }) } catch { /* owned temporary data only */ } }
   }
   try { mkdirSync(join(root, '00_VERIFY'), { recursive: true }); writeTextFileAtomic(join(root, NORMAL_STARTUP_REPORT), JSON.stringify(result, null, 2)) }
   catch { result.status = 'unverified'; result.error = 'NORMAL_STARTUP_REPORT_NOT_SAVED' }

@@ -9,6 +9,22 @@ function deps(outcome: () => Promise<CoreVerificationResult>) {
   return { coreVerification: outcome, publish: vi.fn(), persistSystem: vi.fn(), complete: vi.fn(), persistAssistant: vi.fn() } as DesktopRouteDeps
 }
 describe('bounded autonomous core repair', () => {
+  it('does not deliver or recover from a result returned after cancellation', async () => {
+    const controller = new AbortController()
+    const target = deps(async () => { controller.abort(); return result('passed') })
+    const repair = vi.fn()
+    await expect(ensureCoreDelivery({ ...input, signal: controller.signal }, target, repair)).rejects.toThrow()
+    expect(repair).not.toHaveBeenCalled()
+    expect(target.complete).not.toHaveBeenCalled()
+  })
+
+  it('requests evidence before source edits for an unknown result', async () => {
+    const target = deps(async () => result('unverified', ['场景名不匹配']))
+    const repair = vi.fn()
+    await ensureCoreDelivery(input, target, repair)
+    expect(repair).toHaveBeenCalledWith(expect.stringContaining('不要把未知当失败盲改源码'))
+  })
+
   it('repairs a concrete failed path and rechecks without asking the user', async () => {
     let attempts = 0
     const target = deps(async () => result(++attempts < 3 ? 'failed' : 'passed'))

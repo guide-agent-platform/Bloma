@@ -20,12 +20,13 @@
  *
  * 依赖注入：spawn/capture/probe/超时均注入（单测零 electron/零真 GUI，陷阱 35）。
  */
-import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { execFile, spawn as nodeSpawn, type ChildProcess } from 'node:child_process'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { violatesCommandBlacklist } from './contract-schema'
-import { resolveDriverVenvCommand } from './process-driver'
+import { buildDriverEnv, resolveDriverVenvCommand } from './process-driver'
 
 /** 入口声明文件（项目根相对）。 */
 export const LAUNCH_RELATIVE_PATH = 'LAUNCH.json'
@@ -114,6 +115,7 @@ export interface LaunchProbeCriteria {
 
 /** 探针运行入参（超时预算由宿主统一编排）。 */
 export interface ProbeRunInput {
+  signal?: AbortSignal
   pid: number
   title: string
   outPng: string
@@ -138,8 +140,9 @@ export interface LaunchSmokeResult {
 }
 
 export interface LaunchSmokeDeps {
+  signal?: AbortSignal
   /** 注入 spawn（缺省 nodeSpawn 包装）；测试用 */
-  spawnImpl?: (command: string[], cwd: string) => ChildProcess
+  spawnImpl?: (command: string[], cwd: string, env?: Record<string, string>) => ChildProcess
   /** 注入窗口截图（纯存活档/降级档用）；返回 png Buffer 或 null（无匹配窗口） */
   captureWindow?: (titleHint: string | undefined) => Promise<Buffer | null>
   /** 注入联合判定探针（联合档用）；测试用 */
@@ -162,9 +165,9 @@ interface SpawnedChild {
   stderr: string
 }
 
-function defaultSpawn(command: string[], cwd: string): ChildProcess {
+function defaultSpawn(command: string[], cwd: string, env?: Record<string, string>): ChildProcess {
   // windowsHide 隐藏控制台宿主；GUI 窗口（tkinter 等）不受影响照常弹出
-  return nodeSpawn(command[0]!, command.slice(1), { cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+  return nodeSpawn(command[0]!, command.slice(1), { cwd, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
 }
 
 async function defaultCaptureWindow(titleHint: string | undefined): Promise<Buffer | null> {
@@ -503,7 +506,7 @@ async function defaultRunProbe(input: ProbeRunInput): Promise<ProbeRun> {
       String(input.readyMs),
       String(input.stableMs),
       String(input.closeMs),
-    ], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })
+    ], { windowsHide: true, signal: input.signal, stdio: ['ignore', 'pipe', 'ignore'] })
     const timer = setTimeout(() => {
       child.kill()
       resolve({ json: null, error: `探针超时（${input.watchdogMs}ms 看门狗）` })
@@ -538,6 +541,20 @@ function spawnCollecting(spawnImpl: (command: string[], cwd: string) => ChildPro
 
 const tail = (text: string, max = 600): string => (text.length > max ? `…${text.slice(-max)}` : text)
 
+/** Stop waiting as soon as the owning run ends. Late capture/probe results must
+ * never save a screenshot or turn cancellation into a delivery pass. */
+async function launchStep<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return work
+  signal.throwIfAborted()
+  let abort!: () => void
+  try {
+    return await Promise.race([work, new Promise<never>((_, reject) => {
+      abort = () => reject(signal.reason ?? new Error('LAUNCH_CANCELLED'))
+      signal.addEventListener('abort', abort, { once: true })
+    })])
+  } finally { signal.removeEventListener('abort', abort) }
+}
+
 /** 联合判定失败 → 人话 + 修复靶子。 */
 function probeFailResult(criteria: LaunchProbeCriteria): LaunchSmokeResult {
   const human: Record<string, string> = {
@@ -561,6 +578,45 @@ function probeFailResult(criteria: LaunchProbeCriteria): LaunchSmokeResult {
  * - 纯存活档（无 window_title）：存活 → 截图（可跳过）→ kill → 通过。
  */
 export async function runLaunchSmoke(rootPath: string, deps: LaunchSmokeDeps = {}): Promise<LaunchSmokeResult> {
+  deps.signal?.throwIfAborted()
+  const dataRoot = mkdtempSync(join(tmpdir(), 'bloma-launch-data-'))
+  const probeController = new AbortController()
+  const signal = deps.signal ? AbortSignal.any([deps.signal, probeController.signal]) : probeController.signal
+  const env = { ...buildDriverEnv({ env_whitelist: ['BLOMA_SPEECH_MODEL_DIR', 'BLOMA_SPEECH_OFFLINE'] } as never, process.env),
+    APP_DATA_DIR: join(dataRoot, 'data'), PYTHONDONTWRITEBYTECODE: '1' }
+  let child: ChildProcess | undefined, stopping: Promise<void> | undefined
+  const stop = (): Promise<void> => {
+    if (stopping) return stopping
+    if (!child || child.exitCode !== null || child.signalCode) return Promise.resolve()
+    const owned = child
+    // Injected spawns own their process implementation; production only targets
+    // the actual PID returned by our nodeSpawn call, never an enumerated process.
+    stopping = process.platform === 'win32' && !deps.spawnImpl && owned.pid
+      ? new Promise<void>(resolve => execFile('taskkill', ['/PID', String(owned.pid), '/T', '/F'],
+        { windowsHide: true, timeout: 5000 }, () => { try { owned.kill() } catch { /* exited */ } resolve() }))
+      : Promise.resolve().then(() => { try { owned.kill() } catch { /* exited */ } })
+    return stopping
+  }
+  const abort = () => { void stop() }
+  deps.signal?.addEventListener('abort', abort, { once: true })
+  try {
+    const result = await runOwnedLaunchSmoke(rootPath, { ...deps, signal,
+      spawnImpl: (command, cwd) => {
+        signal.throwIfAborted()
+        child = (deps.spawnImpl ?? defaultSpawn)(command, cwd, env)
+        return child
+      } })
+    deps.signal?.throwIfAborted()
+    return result
+  } finally {
+    deps.signal?.removeEventListener('abort', abort)
+    probeController.abort()
+    await stop()
+    try { rmSync(dataRoot, { recursive: true, force: true }) } catch { /* owned temporary data only */ }
+  }
+}
+
+async function runOwnedLaunchSmoke(rootPath: string, deps: LaunchSmokeDeps): Promise<LaunchSmokeResult> {
   const declaration = readLaunchDeclaration(rootPath)
   if (declaration === null) {
     return { passed: false, detail: `启动冒烟无法执行：项目根缺少 ${LAUNCH_RELATIVE_PATH}（入口声明，任务书要求产出）` }
@@ -581,22 +637,24 @@ export async function runLaunchSmoke(rootPath: string, deps: LaunchSmokeDeps = {
   try {
     spawned = spawnCollecting(spawnImpl, resolveDriverVenvCommand(declaration.launch.command, rootPath), rootPath)
   } catch (error) {
+    if (deps.signal?.aborted) throw error
     return { passed: false, detail: `启动冒烟 spawn 失败：${error instanceof Error ? error.message : String(error)}` }
   }
 
   // spawn 异步错误（ENOENT 等）与退出码统一收敛：任一时刻退出/出错即失败（桌面 GUI 程序应持续存活）
-  const outcome = await new Promise<{ kind: 'alive' } | { kind: 'exit'; code: number } | { kind: 'error'; message: string }>((resolve) => {
+  const outcome = await launchStep(new Promise<{ kind: 'alive' } | { kind: 'exit'; code: number } | { kind: 'error'; message: string }>((resolve) => {
     let settled = false
     const settle = (value: { kind: 'alive' } | { kind: 'exit'; code: number } | { kind: 'error'; message: string }): void => {
       if (!settled) {
         settled = true
+        clearTimeout(timer)
         resolve(value)
       }
     }
     spawned.child.once('exit', (code) => settle({ kind: 'exit', code: code ?? -1 }))
     spawned.child.once('error', (error) => settle({ kind: 'error', message: error instanceof Error ? error.message : String(error) }))
-    setTimeout(() => settle({ kind: 'alive' }), graceMs)
-  })
+    const timer = setTimeout(() => settle({ kind: 'alive' }), graceMs)
+  }), deps.signal)
   if (outcome.kind === 'error') {
     return { passed: false, detail: `启动冒烟 spawn 失败：${outcome.message}` }
   }
@@ -625,10 +683,24 @@ export async function runLaunchSmoke(rootPath: string, deps: LaunchSmokeDeps = {
     const exitDuringProbe = new Promise<number>((resolve) => {
       spawned.child.once('exit', (code) => resolve(code ?? -1))
     })
-    const winner = await Promise.race([
-      runProbe({ pid: spawned.child.pid ?? -1, title: declaration.launch.window_title, outPng, readyMs, stableMs, closeMs, watchdogMs }).then((r): { kind: 'probe'; r: ProbeRun } => ({ kind: 'probe', r })),
-      exitDuringProbe.then((code): { kind: 'exit'; code: number } => ({ kind: 'exit', code })),
-    ])
+    let watchdog: ReturnType<typeof setTimeout> | undefined
+    let winner: { kind: 'probe'; r: ProbeRun } | { kind: 'exit'; code: number }
+    try {
+      const probing = Promise.race([
+        runProbe({ pid: spawned.child.pid ?? -1, title: declaration.launch.window_title, outPng, readyMs, stableMs, closeMs, watchdogMs, signal: deps.signal }),
+        new Promise<ProbeRun>(resolve => { watchdog = setTimeout(() => resolve({ json: null, error: '启动探针宿主等待超时' }), watchdogMs) }),
+      ])
+      winner = await launchStep(Promise.race([
+        probing.then((r): { kind: 'probe'; r: ProbeRun } => ({ kind: 'probe', r })),
+        exitDuringProbe.then((code): { kind: 'exit'; code: number } => ({ kind: 'exit', code })),
+      ]), deps.signal)
+      // WM_CLOSE intentionally exits the product before the observer prints its
+      // final report. Only a successful closing observation may explain exit 0.
+      if (winner.kind === 'exit' && winner.code === 0) {
+        const observation = await launchStep(probing, deps.signal)
+        if (observation.json?.closed_gracefully) winner = { kind: 'probe', r: observation }
+      }
+    } finally { clearTimeout(watchdog) }
 
     if (winner.kind === 'exit') {
       const output = [spawned.stderr, spawned.stdout].filter(Boolean).join('\n').trim()
@@ -658,7 +730,7 @@ export async function runLaunchSmoke(rootPath: string, deps: LaunchSmokeDeps = {
       // 探针不可用 → 降级纯存活档：如实标注「未执行联合判定」（不误杀，不伪装成已检查）
       let degradedShot: string | undefined
       try {
-        const png = await captureWindow(declaration.launch.window_title)
+        const png = await launchStep(captureWindow(declaration.launch.window_title), deps.signal)
         if (png && png.length > 0) {
           const abs = join(rootPath, SMOKE_SCREENSHOT_RELATIVE_PATH)
           mkdirSync(join(abs, '..'), { recursive: true })
@@ -666,9 +738,9 @@ export async function runLaunchSmoke(rootPath: string, deps: LaunchSmokeDeps = {
           degradedShot = SMOKE_SCREENSHOT_RELATIVE_PATH
         }
       } catch {
+        deps.signal?.throwIfAborted()
         // 截图失败无害
       }
-      try { spawned.child.kill() } catch { /* 进程已退出等无害 */ }
       return {
         passed: true,
         detail: `启动冒烟通过（降级判定：联合探针不可用——${winner.r.error ?? '未知原因'}，仅验证进程存活${degradedShot ? `，截图已存 ${degradedShot}` : ''}；窗口可用性未验证）`,
@@ -683,7 +755,6 @@ export async function runLaunchSmoke(rootPath: string, deps: LaunchSmokeDeps = {
 
     const criteria = winner.r.json
     if (criteria.fail_code !== undefined || !criteria.window_found || !criteria.responsive || !criteria.stable || !criteria.closed_gracefully || criteria.crash_dialog.length > 0) {
-      try { spawned.child.kill() } catch { /* 清理兜底 */ }
       if (criteria.fail_code === undefined) {
         // 探针未给 fail_code 但判据不全绿（防御：按缺失面定位）
         const missing: string[] = []
@@ -710,7 +781,7 @@ export async function runLaunchSmoke(rootPath: string, deps: LaunchSmokeDeps = {
   // ══ 纯存活档（无 window_title，旧行为）：存活 → 截图（可跳过）→ kill → 通过 ══
   let screenshotRel: string | undefined
   try {
-    const png = await captureWindow(declaration.launch.window_title)
+    const png = await launchStep(captureWindow(declaration.launch.window_title), deps.signal)
     if (png && png.length > 0) {
       const abs = join(rootPath, SMOKE_SCREENSHOT_RELATIVE_PATH)
       mkdirSync(join(abs, '..'), { recursive: true })
@@ -718,12 +789,8 @@ export async function runLaunchSmoke(rootPath: string, deps: LaunchSmokeDeps = {
       screenshotRel = SMOKE_SCREENSHOT_RELATIVE_PATH
     }
   } catch {
+    deps.signal?.throwIfAborted()
     // 截图失败不阻塞冒烟结论（截图是呈现层证据不是可用性门——同任务书截图约定）
-  }
-  try {
-    spawned.child.kill()
-  } catch {
-    // kill 失败（进程已自行退出等）不影响结论
   }
   return {
     passed: true,

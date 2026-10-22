@@ -18,6 +18,8 @@ vi.mock('../../../main/delivery/preview-scheme', () => ({
 vi.mock('../../../main/project/decision-log', () => ({
   recordDecision: vi.fn(),
 }))
+vi.mock('../../../main/project/document-engine', () => ({ readPrdBackplane: vi.fn() }))
+import { readPrdBackplane } from '../../../main/project/document-engine'
 
 import { findProject, updateProject } from '../../../main/project/project-service'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -61,6 +63,7 @@ let projectRoot: string
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.mocked(readPrdBackplane).mockReturnValue({ requirements: [{ id: 'F-001', description: '当前需求' }] } as never)
   resetMvpConfirmForTests()
   projectRoot = mkdtempSync(join(tmpdir(), 'bloma-mvp-confirm-'))
   vi.mocked(findProject).mockImplementation(() => ({ project_id: 'p1', root_path: projectRoot }) as never)
@@ -71,6 +74,14 @@ afterEach(() => {
 })
 
 describe('holdForMvpConfirm（挂起）', () => {
+  it('requires renewed confirmation when requirements change outside the product directory', () => {
+    const { deps } = makeDeps()
+    holdForMvpConfirm({ input, deps, fromPhase: 'desktop-verify', notice: { projectName: 'p', fromPhaseTitle: '验证' } })
+    expect(isMvpEvidenceCurrent('p1')).toBe(true)
+    vi.mocked(readPrdBackplane).mockReturnValue({ requirements: [{ id: 'F-001', description: '已修订的需求' }] } as never)
+    expect(isMvpEvidenceCurrent('p1')).toBe(false)
+  })
+
   it('pending review evidence becomes stale when executable code changes', () => {
     const { deps } = makeDeps()
     writeFileSync(join(projectRoot, 'app.py'), '# current')

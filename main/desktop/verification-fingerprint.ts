@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { isHostPresentationOutput } from './host-verification-outputs'
 
 // Mutable business data/reports are not executable verification inputs.
-const EXCLUDED = new Set(['.git', '.venv', 'node_modules', '__pycache__', '00_HISTORY'])
+const EXCLUDED = new Set(['.git', '.venv', '.cache', 'node_modules', '__pycache__', '00_HISTORY'])
 const MUTABLE_DIRECTORIES = new Set(['data', '00_VERIFY', '00_UX'])
 const EXECUTABLE_FILE = /\.(?:py|js|mjs|cjs|ts|tsx|html|css)$/i
 const INPUT_FILE = /\.(?:py|js|mjs|cjs|ts|tsx|html|css|json|txt|toml|yaml|yml|onnx)$/i
@@ -18,7 +18,7 @@ export function verificationFingerprint(root: string | undefined, context: unkno
     let bytes = 0
     const visit = (dir: string, relative = '', executableOnly = false) => {
       for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-        if (EXCLUDED.has(entry.name) || entry.name.startsWith('.')) continue
+        if (EXCLUDED.has(entry.name)) continue
         if (entry.isSymbolicLink()) throw new Error('linked verification input')
         const path = join(dir, entry.name)
         const rel = `${relative}${entry.name}`
