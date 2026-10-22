@@ -21,7 +21,7 @@ import { gwtRequiredCategories } from '../agent/prompting/template-injection'
 import { describeEffect, describeTrigger, parseBehaviorAssertion } from '../verification/behavior-assertions'
 import { readRequirements, assertInsideDocumentsDir } from './document-sync'
 import { normalizePrdDocumentNewlines, reconcilePrdDocumentPriorities } from '../model/prd-backplane'
-import { bindAcceptance, reconcileAcceptanceRevision, trustedAcceptance } from './requirement-contract'
+import { bindAcceptance, prdScopeFingerprint, reconcileAcceptanceRevision, trustedAcceptance } from './requirement-contract'
 import { prdStructureIssues, projectRequirementsModel, validateRequirementsModel } from '../model/requirements-model'
 
 /**
@@ -156,7 +156,7 @@ export interface RequirementStatusUpdate {
  * PRD 用户确认落盘（2026-08-26，改造 3）：确认卡「确认无误」时写入 user_confirmed_at。
  * 只加/更新时间戳字段，其余内容原样保留；prd.json 缺失/损坏 → null 不抛错（增强腿）。
  */
-export function markPrdUserConfirmed(projectId: string): PrdBackplane | null {
+export function markPrdUserConfirmed(projectId: string, expectedScope?: string): PrdBackplane | null {
   try {
     const project = findProject(projectId)
     const dir = getDocumentsDir(project.workspace_slug, project.project_id)
@@ -165,8 +165,9 @@ export function markPrdUserConfirmed(projectId: string): PrdBackplane | null {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as PrdBackplane
     if (!parsed || !Array.isArray(parsed.requirements)) return null
     if (prdStructureIssues(parsed).length) return null
+    if (expectedScope && prdScopeFingerprint(reconcilePrdBackplane(parsed)) !== expectedScope) return null
     const confirmed: PrdBackplane = { ...parsed, user_confirmed_at: new Date().toISOString() }
-    writeFileSync(path, renderPrdJson(confirmed), 'utf8')
+    writeTextFileAtomic(path, renderPrdJson(confirmed))
     return confirmed
   } catch {
     return null

@@ -289,7 +289,7 @@ describe('PRD 用户确认门（改造 3）', () => {
       makeModel(scriptedQuery()),
     )
 
-    expect(markPrdUserConfirmed).toHaveBeenCalledWith('proj-1')
+    expect(markPrdUserConfirmed).toHaveBeenCalledWith('proj-1', expect.stringMatching(/^[a-f0-9]{64}$/))
     // web 线拆除刀1（2026-10-01）：不再进草图，改发形态引导卡
     const card = events.find(
       (event) => event.type === 'user_decision_required' && (event.payload as { kind?: string }).kind === 'web_line_retired',

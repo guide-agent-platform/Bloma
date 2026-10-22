@@ -1,6 +1,7 @@
 import { ConfirmationMap, loadGuideConfirmationForResume, archiveGuideConfirmation, clearGuideConfirmationFilesForTests } from './confirmation-journal'
 import { prdScopeFingerprint } from '../project/requirement-contract'
 import { readPrdBackplane } from '../project/prd-store'
+import { appendSessionMessage } from '../platform/sessions/session-tree'
 import { randomUUID } from 'node:crypto'
 import { prdStructureIssues } from '../model/requirements-model'
 import type { AgentEvent, AgentSendMessageInput, ResearchIdea } from '../../shared/types'
@@ -46,6 +47,7 @@ interface PendingPrdConfirm {
   adjustAwait?: boolean
   unappliedFeedback?: string
   reviewNote?: string
+  ideasMode?: 'agent' | 'scrape'
   backplane: PrdBackplane
   onScopeChange?: (labels: string[]) => Promise<void>
   request_id: string
@@ -91,7 +93,15 @@ export function restorePrdConfirmation(input: AgentSendMessageInput, publish: Pe
       adjustAwait: data.adjustAwait || saved.state === 'dismissed' || saved.state === 'working' && Boolean(data.unappliedFeedback), ...context, publish }
   }
   if (pending.session_id !== input.session_id) throw new Error('PRD_CONFIRMATION_SESSION_CHANGED')
-  pendingPrdConfirms.bind(input.project_id, { ...pending, ...context, publish, request_id: input.request_id })
+  const rebound = { ...pending, ...context, publish, request_id: input.request_id, channel_id: input.channel_id ?? pending.channel_id }
+  rebound.onScopeChange = async labels => {
+    appendSessionMessage(input.session_id, { role: 'user', content: [{ type: 'text', text: `我在 PRD 确认卡采纳这些新需求：${labels.join('；')}` }], timestamp: Date.now(), metadata: { source: 'prd_adopted_ideas' } })
+    const { runPrdPipeline } = await import('./stages/prd-pipeline')
+    await runPrdPipeline({ request_id: input.request_id, project_id: input.project_id, session_id: input.session_id,
+      mode: rebound.mode, channel_id: input.channel_id ?? rebound.channel_id, requirements: rebound.backplane.requirements,
+      query: context.query, env: context.env, signal: context.signal, publish })
+  }
+  pendingPrdConfirms.bind(input.project_id, rebound)
   return true
 }
 export function hasPrdAdjustAwait(projectId: string): boolean { return Boolean(pendingPrdConfirms.get(projectId)?.adjustAwait) }
@@ -99,7 +109,8 @@ export function replayPrdConfirmation(projectId: string): void {
   const pending = pendingPrdConfirms.get(projectId)
   if (!pending) return
   publishPrdConfirmCard({ input: pending, backplane: pending.backplane, requirements: pending.requirements, ideas: pending.ideas,
-    query: pending.query, env: pending.env, signal: pending.signal, publish: pending.publish, reviewNote: pending.reviewNote })
+    query: pending.query, env: pending.env, signal: pending.signal, publish: pending.publish, reviewNote: pending.reviewNote,
+    ideasMode: pending.ideasMode ?? 'agent', onScopeChange: pending.onScopeChange })
 }
 export function clearPrdConfirmationMemoryForTests(): void { pendingPrdConfirms.clear() }
 export function resetPrdConfirmationForTests(): void { pendingPrdConfirms.clear(); clearGuideConfirmationFilesForTests('prd') }
@@ -145,6 +156,7 @@ export function publishPrdConfirmCard(opts: {
   pendingPrdConfirms.set(input.project_id, {
     backplane,
     reviewNote,
+    ideasMode: opts.ideasMode ?? 'scrape',
     onScopeChange: opts.onScopeChange,
     request_id: input.request_id,
     session_id: input.session_id,
@@ -247,6 +259,9 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
   const adopted = (input.metadata?.adopted_ideas ?? [])
     .filter((label) => pending.ideas.some((idea) => idea.label === label))
   if (adopted.length && pending.backplane.requirements_model) {
+    pending.adjustAwait = true
+    pending.unappliedFeedback = `我在 PRD 确认卡采纳这些新需求：${[...new Set(adopted)].join('；')}`
+    pendingPrdConfirms.save(pending, 'working')
     if (pending.onScopeChange) await pending.onScopeChange([...new Set(adopted)])
     else {
       pendingPrdConfirms.set(input.project_id, pending)
@@ -262,6 +277,7 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
     }))
     const updatedBackplane = appendPrdRequirements(input.project_id, additions)
     if (updatedBackplane) {
+      pending.backplane = updatedBackplane
       // 完整清单（含 behavior_assertions）：探针/judge/渲染同源，不再瘦身（B-1）
       sketchRequirements = updatedBackplane.requirements
     } else {
@@ -274,7 +290,7 @@ export async function resumePrdConfirmConfirmed(input: AgentSendMessageInput): P
       console.error('[prd-confirm] 采纳想法写入 prd.json 失败（缺失/损坏），仅并入草图任务清单')
     }
   }
-  const confirmed = markPrdUserConfirmed(input.project_id)
+  const confirmed = markPrdUserConfirmed(input.project_id, prdScopeFingerprint(pending.backplane))
   if (!confirmed) {
     pendingPrdConfirms.set(input.project_id, pending)
     pending.publish(makeConfirmEvent(pending, 'message_delta', { text: '需求确认未保存成功，或文档结构发生冲突。本次没有开工，请先调整需求或重试确认。' }))

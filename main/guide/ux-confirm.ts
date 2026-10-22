@@ -126,7 +126,7 @@ export function restoreUxConfirmation(input: AgentSendMessageInput, publish: Gui
     adjusting = saved.state === 'adjust' || saved.state === 'working' && Boolean(data.unappliedFeedback)
   }
   if (pending.session_id !== input.session_id) throw new Error('UX_CONFIRMATION_SESSION_CHANGED')
-  ;(adjusting ? pendingUxAdjusts : pendingUxConfirms).bind(input.project_id, { ...pending, ...context, publish, request_id: input.request_id })
+  ;(adjusting ? pendingUxAdjusts : pendingUxConfirms).bind(input.project_id, { ...pending, ...context, publish, request_id: input.request_id, channel_id: input.channel_id ?? pending.channel_id })
   return true
 }
 export function replayUxConfirmation(projectId: string): void {

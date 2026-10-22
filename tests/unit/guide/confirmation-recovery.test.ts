@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../../../main/desktop/desktop-route', () => ({ enterDesktopLine: vi.fn(async () => true), DESKTOP_LINE_TEMPLATE_TYPES: new Set(['desktop_tool', 'game']) }))
 vi.mock('../../../main/delivery/preview-scheme', () => ({ mintProjectPreviewUrl: vi.fn((id, path) => `bloma-file://${id}/${path}`) }))
 vi.mock('../../../main/guide/ux-visual-pipeline', () => ({ generateUxVisualDesign: vi.fn() }))
+vi.mock('../../../main/guide/stages/prd-pipeline', () => ({ runPrdPipeline: vi.fn(async () => ({ started: true, prd_written: true })) }))
 vi.mock('../../../storage/json-store', async original => {
   const actual = await original<typeof import('../../../storage/json-store')>()
   return { ...actual, writeTextFileAtomic: vi.fn(actual.writeTextFileAtomic) }
@@ -19,8 +20,10 @@ import { syncDocuments, markPrdUserConfirmed, readPrdBackplane } from '../../../
 import { buildFallbackUxDesign } from '../../../main/model/ux-design'
 import { generateUxVisualDesign } from '../../../main/guide/ux-visual-pipeline'
 import { enterDesktopLine } from '../../../main/desktop/desktop-route'
+import { runPrdPipeline } from '../../../main/guide/stages/prd-pipeline'
 import { publishPrdConfirmCard, clearPrdConfirmationMemoryForTests, restorePrdConfirmation, replayPrdConfirmation,
   consumePrdConfirmAdjust, hasPrdAdjustAwait, resetPrdConfirmationForTests } from '../../../main/guide/prd-confirm'
+import { resumePrdConfirmConfirmed } from '../../../main/guide/prd-confirm'
 import { runUxConfirmGate, clearUxConfirmationMemoryForTests, restoreUxConfirmation, replayUxConfirmation,
   resumeUxConfirmConfirmed, startUxAdjustAwait, takeUxAdjustFeedback, hasPendingUxConfirm, resetUxConfirmForTests } from '../../../main/guide/ux-confirm'
 import { guideConfirmationPath, readGuideConfirmation } from '../../../main/guide/confirmation-journal'
@@ -53,6 +56,28 @@ function setup() {
   return { project, current, design, html, events, query, input, pending }
 }
 describe('PRD/UX durable candidate recovery', () => {
+  it('rebuilds the adopted-idea callback with the current runtime and retains unprocessed scope feedback', async () => {
+    const { project, current, input, pending, query } = setup()
+    publishPrdConfirmCard({ input: pending, backplane: current, requirements: current.requirements, ideas: [{ label: '导出备份' } as never], query, publish: pending.publish })
+    clearPrdConfirmationMemoryForTests()
+    const signal = new AbortController().signal, env = { ANTHROPIC_API_KEY: 'CURRENT_ONLY' }
+    restorePrdConfirmation(input, pending.publish, { query, env, signal })
+    await resumePrdConfirmConfirmed({ ...input, metadata: { source: 'card_option', selected_option_id: 'prd_confirm_confirm', adopted_ideas: ['导出备份'] } })
+    expect(runPrdPipeline).toHaveBeenCalledWith(expect.objectContaining({ query, env, signal, project_id: project.project_id }))
+    expect(readGuideConfirmation('prd', project.project_id)?.data.unappliedFeedback).toContain('导出备份')
+    expect(generateUxVisualDesign).not.toHaveBeenCalled()
+  })
+  it('cannot confirm a different PRD through an old in-memory candidate', async () => {
+    const { project, current, input, pending, query } = setup()
+    publishPrdConfirmCard({ input: pending, backplane: current, requirements: current.requirements, query, publish: pending.publish })
+    const path = join(getDocumentsDir(project.workspace_slug, project.project_id), 'prd.json')
+    const revised = JSON.parse(readFileSync(path, 'utf8')); revised.constraints = ['新范围']; delete revised.user_confirmed_at
+    writeFileSync(path, JSON.stringify(revised))
+    await resumePrdConfirmConfirmed(input)
+    expect(JSON.parse(readFileSync(path, 'utf8')).user_confirmed_at).toBeUndefined()
+    expect(generateUxVisualDesign).not.toHaveBeenCalled()
+    expect(enterDesktopLine).not.toHaveBeenCalled()
+  })
   it('restores the same PRD without serializing credentials or invoking a model', () => {
     const { project, current, input, pending, events, query } = setup()
     publishPrdConfirmCard({ input: pending, backplane: current, requirements: current.requirements, query, env: pending.env, publish: pending.publish })
