@@ -224,6 +224,23 @@ describe('experimental native preparation pause', () => {
 })
 
 describe('required delivery evidence', () => {
+  it.each(['quick', 'longterm'] as const)('does not deliver %s evidence invalidated by startup side effects', async mode => {
+    record.mode = mode
+    record.desktop_phase = mode === 'quick' ? 'desktop-implement' : 'desktop-verify'
+    const loop = vi.spyOn(dispatcherLoop, 'runDesktopDispatcherLoop').mockResolvedValue({ status: 'completed', advance: {
+      decision: 'advance', target: mode === 'quick' ? 'desktop-verify' : 'delivered', discardedObservations: [] } })
+    const { deps, events } = collectorDeps({ launchSmoke: async () => {
+      writeFileSync(join(sandboxRoot, 'app.py'), '# changed during smoke')
+      return { passed: true, detail: 'alive' }
+    } })
+    try {
+      await handleDesktopDispatchMessage(routeInput(), deps)
+      expect(record.desktop_phase).not.toBe('delivered')
+      expect(isMvpConfirmPending('p1')).toBe(false)
+      expect(events.some(event => JSON.stringify(event).includes('本次证据不能用于交付'))).toBe(true)
+    } finally { loop.mockRestore() }
+  })
+
   it.each(['security', 'smoke', 'core'])('quick %s missing cannot become delivered', async (which) => {
     record.mode = 'quick'
     record.desktop_phase = 'desktop-implement'

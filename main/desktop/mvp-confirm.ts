@@ -25,7 +25,7 @@
 
 import type { DesktopRouteDeps } from './desktop-route'
 import { verificationFingerprint } from './verification-fingerprint'
-import { requirementVerificationContext } from '../project/requirement-contract'
+import { prdScopeFingerprint } from '../project/requirement-contract'
 import { MVP_REVIEW_RELATIVE_PATH } from './host-verification-outputs'
 import type { DeliveredNoticeInput } from './notice-cards'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -245,7 +245,7 @@ export function isMvpEvidenceCurrent(projectId: string): boolean {
 
 function mvpFingerprint(projectId: string): string | undefined {
   try {
-    return verificationFingerprint(findProject(projectId)?.root_path, requirementVerificationContext(readPrdBackplane(projectId)))
+    return verificationFingerprint(findProject(projectId)?.root_path, prdScopeFingerprint(readPrdBackplane(projectId)))
   } catch { return undefined }
 }
 

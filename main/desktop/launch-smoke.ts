@@ -642,19 +642,20 @@ async function runOwnedLaunchSmoke(rootPath: string, deps: LaunchSmokeDeps): Pro
   }
 
   // spawn 异步错误（ENOENT 等）与退出码统一收敛：任一时刻退出/出错即失败（桌面 GUI 程序应持续存活）
+  let graceTimer: ReturnType<typeof setTimeout> | undefined
   const outcome = await launchStep(new Promise<{ kind: 'alive' } | { kind: 'exit'; code: number } | { kind: 'error'; message: string }>((resolve) => {
     let settled = false
     const settle = (value: { kind: 'alive' } | { kind: 'exit'; code: number } | { kind: 'error'; message: string }): void => {
       if (!settled) {
         settled = true
-        clearTimeout(timer)
+        clearTimeout(graceTimer)
         resolve(value)
       }
     }
     spawned.child.once('exit', (code) => settle({ kind: 'exit', code: code ?? -1 }))
     spawned.child.once('error', (error) => settle({ kind: 'error', message: error instanceof Error ? error.message : String(error) }))
-    const timer = setTimeout(() => settle({ kind: 'alive' }), graceMs)
-  }), deps.signal)
+    graceTimer = setTimeout(() => settle({ kind: 'alive' }), graceMs)
+  }), deps.signal).finally(() => clearTimeout(graceTimer))
   if (outcome.kind === 'error') {
     return { passed: false, detail: `启动冒烟 spawn 失败：${outcome.message}` }
   }

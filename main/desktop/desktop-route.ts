@@ -30,6 +30,8 @@ import { findProject, updateProject } from '../project/project-service'
 import { readConfirmedUxBinding } from '../project/ux-binding'
 import { holdExperimentBeforeImplement, readExperiment, recordExperiment, recordExperimentBoundary } from './dispatch-experiment'
 import { readPrdBackplane } from '../project/prd-store'
+import { prdScopeFingerprint } from '../project/requirement-contract'
+import { experimentRunSignal } from './dispatch-experiment-models'
 import { getDesktopPhase, getNextDesktopPhase } from './dispatcher-phases'
 import { isDesktopDispatchEnabled } from './dispatcher-switch'
 import { runDesktopDispatcherLoop, type DesktopDispatchRunInput, type DesktopDispatchRunResult } from './dispatcher-loop'
@@ -275,6 +277,20 @@ interface DesktopStageInput {
   initialMessagePersisted?: boolean
 }
 
+function deliveryFingerprint(projectId: string): string | undefined {
+  try { return verificationFingerprint(findProject(projectId).root_path, prdScopeFingerprint(readPrdBackplane(projectId))) }
+  catch { return undefined }
+}
+
+function checkDeliveryVersion(input: DesktopStageInput, before: string | undefined, deps: DesktopRouteDeps): boolean {
+  input.signal?.throwIfAborted()
+  if (before && deliveryFingerprint(input.projectId) === before) return true
+  deps.publish(input, 'message_delta', { text: '检查期间源码或需求版本发生变化，本次证据不能用于交付；程序已保留，需要按当前版本重新验证。' })
+  recordExperimentBoundary(input.projectId, 'delivery_version_changed')
+  deps.complete(input.sessionId, input.projectId, 'incomplete')
+  return false
+}
+
 /**
  * 桌面线消息路由（接管后全部消息进这里）：
  * - 旧确认卡回传（刀1 协议升级）：如实告知已无需人工确认，照常跑当前阶段；
@@ -308,6 +324,7 @@ export async function handleDesktopDispatchMessage(
   // delivered 反馈同机制，改完重走 verify 再过本门）。──
   const mvpAnswer = resolveMvpConfirmAnswer(input)
   if (mvpAnswer === 'confirm') {
+    const before = deliveryFingerprint(input.projectId)
     if (!isMvpEvidenceCurrent(input.projectId)) {
       deps.publish(input, 'message_delta', { text: '当前版本需要重新验证，我会先检查再交付。' })
       consumeMvpPendingForRework(input)
@@ -316,6 +333,7 @@ export async function handleDesktopDispatchMessage(
       return
     }
     if (!await ensureCoreDelivery(input, deps, feedback => runDesktopStage({ ...input, content: feedback, initialMessagePersisted: false }, input.query, input.env, 'desktop-implement', deps, projectName, 0, true))) return
+    if (!checkDeliveryVersion(input, before, deps)) return
     // 收口矩阵补齐（批11 审查修复，2026-10-08）：确认交付时若仍有活跃纠错会话——kill 实例；
     // 有未发送选区则如实告知已丢弃（不静默吞掉用户的点选，也不拦住交付决策）。
     if (hasActiveCorrectionSession(input.projectId)) {
@@ -570,6 +588,10 @@ async function runDesktopStage(
     },
   }
   const result = await runDesktopDispatcherLoop(loopInput)
+  // Dispatcher binding owns the same cumulative experiment deadline as host
+  // verification. Do not lose it when control returns from the model loop.
+  const experiment = readExperiment(input.projectId)
+  if (experiment?.state === 'running') input = { ...input, signal: experimentRunSignal(experiment, loopInput.signal) }
   recordExperimentBoundary(input.projectId, 'stage_finished', { phase: phaseId, request_id: input.requestId, status: result.status, advance: result.advance?.decision })
   await settleDesktopStage(input, query, env, result, phaseId, deps, projectName, chainDepth)
 }
@@ -634,6 +656,7 @@ async function settleDesktopStage(
       // 终态（delivered）：终态字段收口 + 交付通知卡（刀1：通知≠确认——不阻塞不等待，
       // 用户回复修改意见走迭代）；不续跑（delivered 是哨兵节点，无任务可跑）
       const finalPhase = next ?? 'delivered'
+      const deliveryVersion = deliveryFingerprint(input.projectId)
       // ── MVP 确认门（2026-10-04 确认门新规，修订 10-02 刀1）：longterm 交付前交用户
       // 过目成品（quick 不设，快速直通道不变）；挂起不发通知不置 delivered，确认后收口。──
       if (finalPhase === 'delivered') {
@@ -663,6 +686,7 @@ async function settleDesktopStage(
             deps.complete(input.sessionId, input.projectId, 'incomplete')
             return
           }
+          if (!checkDeliveryVersion(input, deliveryVersion, deps)) return
           holdForMvpConfirm({
             input,
             deps,
@@ -673,6 +697,7 @@ async function settleDesktopStage(
           return
         }
       }
+      if (!checkDeliveryVersion(input, deliveryVersion, deps)) return
       updateProject(input.projectId, { desktop_phase: finalPhase, status: 'completed', current_stage: 'completed' })
       recordDeliveryOutcomeTelemetry(input.projectId, input.sessionId, 'terminal')
       recordExperimentBoundary(input.projectId, 'delivered', { via: 'terminal' })
@@ -686,6 +711,7 @@ async function settleDesktopStage(
     if (next === 'desktop-verify') {
       const project = findProject(input.projectId)
       if (project?.mode === 'quick') {
+        const deliveryVersion = deliveryFingerprint(input.projectId)
         if (!await ensureCoreDelivery(input, deps, feedback => runDesktopStage({ ...input, content: feedback, initialMessagePersisted: false }, query, env, 'desktop-implement', deps, projectName, chainDepth, true))) return
         const securityGate = deps.securityScan
           ? deps.securityScan(input.projectId)
@@ -731,7 +757,7 @@ async function settleDesktopStage(
             deps.complete(input.sessionId, input.projectId, 'incomplete')
           },
         })) return
-        input.signal?.throwIfAborted()
+        if (!checkDeliveryVersion(input, deliveryVersion, deps)) return
         updateProject(input.projectId, { desktop_phase: 'delivered', status: 'completed', current_stage: 'completed' })
         recordDeliveryOutcomeTelemetry(input.projectId, input.sessionId, 'quick-direct')
         recordExperimentBoundary(input.projectId, 'delivered', { via: 'quick-direct' })

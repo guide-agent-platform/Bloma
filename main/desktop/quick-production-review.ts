@@ -10,7 +10,7 @@ import { bindExperimentInput } from './dispatch-experiment-runtime'
 import { buildProductionContextTool } from './production-context'
 import type { DesktopDispatchRunInput } from './dispatcher-loop'
 import { verificationFingerprint } from './verification-fingerprint'
-import { requirementVerificationContext } from '../project/requirement-contract'
+import { prdScopeFingerprint } from '../project/requirement-contract'
 import { randomUUID } from 'node:crypto'
 import { consumeProjectAttempt, resetProjectAttemptScope } from '../platform/execution/project-attempts'
 import { recordExperimentBoundary } from './dispatch-experiment'
@@ -48,7 +48,7 @@ export async function runQuickProductionReview(input: DesktopDispatchRunInput): 
   const binding = bindExperimentInput({ ...input, maxTurns: 12 }, config, 'verify')
   const startup = input.sandboxRoot ? await runNormalStartupVerification(input.sandboxRoot, binding.signal)
     : { status: 'unverified' as const, error: 'NORMAL_STARTUP_PROJECT_ROOT_MISSING' }
-  const fingerprintBefore = verificationFingerprint(input.sandboxRoot, requirementVerificationContext(backplane))
+  const fingerprintBefore = verificationFingerprint(input.sandboxRoot, prdScopeFingerprint(backplane))
   const reviewId = randomUUID()
   const reviewSessionId = randomUUID()
   const readFeatures = new Set<string>(), readPaths = new Set<string>()
@@ -84,7 +84,7 @@ export async function runQuickProductionReview(input: DesktopDispatchRunInput): 
     || { verdict: 'unverified' as const, checked_features: [], evidence: [], findings: [] }
   const evidenceRead = readPaths.has('00_verify/core-verification.json') && [...readPaths].some(path => /\.(py|js|html)$/.test(path))
     && required.every(id => readFeatures.has(id))
-  const fingerprintAfter = verificationFingerprint(input.sandboxRoot, requirementVerificationContext(readPrdBackplane(input.projectId)))
+  const fingerprintAfter = verificationFingerprint(input.sandboxRoot, prdScopeFingerprint(readPrdBackplane(input.projectId)))
   const unchanged = Boolean(fingerprintBefore && fingerprintAfter === fingerprintBefore)
   if (review.verdict === 'pass' && (!evidenceRead || !unchanged)) review = { ...review, verdict: 'unverified' }
   if (startup.status === 'failed') review = { ...review, verdict: 'fail', findings: [...review.findings,
