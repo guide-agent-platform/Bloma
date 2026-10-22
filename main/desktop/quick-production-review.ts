@@ -1,3 +1,4 @@
+import { desktopDeliveryPolicy } from './delivery-policy'
 import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
 import { writeTextFileAtomic } from '../../storage/json-store'
@@ -112,7 +113,8 @@ export async function ensureQuickProductionReview(input: DesktopDispatchRunInput
   stop: (reason?: string) => void
 }): Promise<boolean> {
   const config = readExperiment(input.projectId)
-  if (config?.production_protocol !== 'v2' || !config.models) return true
+  if (!desktopDeliveryPolicy('quick', config).independentReview) return true
+  if (!config) return true
   input.signal.throwIfAborted()
   let review: QuickProductionReview
   let unavailable = false

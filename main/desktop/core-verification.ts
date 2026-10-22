@@ -5,10 +5,10 @@ import { requirementEvidenceHash, requirementVerificationContext } from '../proj
 import { parseProjectContract } from './contract-schema'
 import { execFileDriverSpawn, runContractDriver, type DriverSpawn, type DriverScenarioOutcome } from './process-driver'
 import { verificationFingerprint } from './verification-fingerprint'
-import { hasCurrentMicrophoneEvidence, runHostSpeechProbe, type SpeechVerificationSpec } from './speech-verification'
-import { runHostPrefixRenameProbe, type FileVerificationResult } from './file-verification'
-import { runHostLlmProbe, type LlmVerificationSpec, type LlmVerificationResult } from './llm-verification'
-import { requirementCapabilities } from '../model/requirement-capabilities'
+import type { SpeechVerificationSpec } from './speech-verification'
+import type { FileVerificationResult } from './file-verification'
+import type { LlmVerificationResult } from './llm-verification'
+import { combineVerification, runCapabilityVerifiers, type CapabilityVerifier } from './capability-verifiers'
 
 export type CoreVerificationStatus = 'passed' | 'failed' | 'unverified' | 'environment_blocked'
 export interface CoreVerificationResult {
@@ -33,14 +33,9 @@ function scenarioOutcome(scenarios: DriverScenarioOutcome[], name: string): stri
   return states.includes('fail') ? 'fail' : states.includes('blocked') ? 'blocked' : states.length && states.every(s => s === 'pass') ? 'pass' : 'unverified'
 }
 
-function combineVerification(current: CoreVerificationStatus, probe: CoreVerificationStatus): CoreVerificationStatus {
-  const rank = { passed: 0, unverified: 1, environment_blocked: 2, failed: 3 }
-  return rank[probe] > rank[current] ? probe : current
-}
-
 /** Minimal shared execution contract; input labels alone are not real audio evidence. */
 export async function runCoreVerification(options: {
-  projectId: string; sandboxRoot?: string; spawn?: DriverSpawn; signal?: AbortSignal
+  projectId: string; sandboxRoot?: string; spawn?: DriverSpawn; signal?: AbortSignal; capabilityVerifiers?: readonly CapabilityVerifier[]
 }): Promise<CoreVerificationResult> {
   const result: CoreVerificationResult = { status: 'unverified', summary: '已生成，核心功能待验证。', checked_at: new Date().toISOString(), missing: [], evidence: [] }
   const root = options.sandboxRoot
@@ -77,7 +72,6 @@ export async function runCoreVerification(options: {
       return { id: item.id, requirement_hash: hash, implementation: (declaration?.implementation ?? 'unverified') as 'implemented' | 'partial' | 'missing' | 'unverified', verification: 'unverified' }
     })
     const scenarios = raw.scenarios as CoreScenario[]
-    const speech = raw.speech as SpeechVerificationSpec | undefined
     if (Array.isArray(scenarios) && scenarios.length > 64) throw new Error(`核心验证场景数量 ${scenarios.length} 超过上限 64；请合并重复场景并保留全部需求覆盖，再重新运行验证`)
     if (!Array.isArray(scenarios) || !scenarios.length || scenarios.length > 64 || scenarios.some(s =>
       !s || typeof s.name !== 'string' || !s.name || /[\r\n]/.test(s.name) || !Array.isArray(s.covers) || s.covers.some(fid => typeof fid !== 'string') ||
@@ -116,32 +110,8 @@ export async function runCoreVerification(options: {
       }
     }
     if (verificationFingerprint(root, context) !== fingerprint) result.missing.push('验证期间源码或声明变化，本次结果作废')
-    const capabilities = new Map(required.map(item => [item.id, requirementCapabilities(item)]))
-    const hasSpeechRequirement = required.some(item => capabilities.get(item.id)!.has('speech'))
-    if (hasSpeechRequirement && !speech) result.missing.push('缺少 ASR 入口登记 speech，须登记产品实际使用的模型构造和转写方法')
-    const speechResult = hasSpeechRequirement && speech ? await runHostSpeechProbe({ projectId: options.projectId, root, speech, signal: options.signal }) : undefined
-    options.signal?.throwIfAborted()
-    if (speechResult) result.speech = speechResult
-    // Never combine unrelated feature words into a synthetic capability or undo obligation.
-    const prefixRename = required.filter(item => capabilities.get(item.id)!.has('prefix_rename'))
-    const renameUndo = required.some(item => capabilities.get(item.id)!.has('rename_undo'))
-    const fileResult = prefixRename.length ? await runHostPrefixRenameProbe(root, undefined, { requireUndo: renameUndo, signal: options.signal }) : undefined
-    options.signal?.throwIfAborted()
-    if (fileResult) {
-      result.file_operations = fileResult
-      if (fileResult.status !== 'passed') result.missing.push(`宿主前缀改名反例未通过：${fileResult.error ?? fileResult.tests?.filter(t => !t.passed).map(t => t.name).join('、')}`)
-    }
-    const llmItems = required.filter(item => capabilities.get(item.id)!.has('llm'))
-    const needsLlm = llmItems.length > 0 || !!backplane.shape && !['none', 'preview'].includes(backplane.shape.llm_role)
-    const llm = raw.llm as LlmVerificationSpec | undefined
-    if (needsLlm && !llm) result.missing.push('缺少真实模型功能入口登记 llm；mock 或固定 network_error 不能证明请求链路已实现')
-    if (llm && (!Array.isArray(llm.covers) || !llm.covers.length || llm.covers.some(id => !ids.has(id)) || llmItems.some(item => !llm.covers.includes(item.id)))) throw new Error('模型入口覆盖声明缺失、悬空或漏掉模型需求')
-    const llmResult = llm ? await runHostLlmProbe(root, llm, undefined, options.signal) : undefined
-    options.signal?.throwIfAborted()
-    if (llmResult) {
-      result.llm = llmResult
-      if (llmResult.status !== 'passed') result.missing.push(`模型功能本机 HTTP 探针未通过：${llmResult.error ?? llmResult.tests?.filter(test => !test.passed).map(test => test.name).join('、')}`)
-    }
+    const capabilities = await runCapabilityVerifiers({ projectId: options.projectId, root, backplane, manifest: raw, signal: options.signal }, options.capabilityVerifiers)
+    for (const outcome of capabilities) { result.missing.push(...outcome.missing); Object.assign(result, outcome.report) }
     for (const requirement of required) {
       const rows = result.evidence.filter(e => e.fid === requirement.id && e.outcome === 'pass' && e.input !== 'mock')
       if (!rows.length) result.missing.push(requirement.id)
@@ -149,22 +119,9 @@ export async function runCoreVerification(options: {
       const evidence = result.evidence.filter(e => e.fid === requirement.id)
       completion.verification = evidence.some(e => e.outcome === 'fail') ? 'failed' : evidence.some(e => e.outcome === 'blocked') ? 'environment_blocked' :
         rows.length && evidence.every(e => e.outcome === 'pass') ? 'passed' : 'unverified'
-      if (llmItems.some(item => item.id === requirement.id) || llm?.covers.includes(requirement.id)) {
-        if (!llmResult || llmResult.status !== 'passed') completion.verification = combineVerification(completion.verification, llmResult?.status ?? 'unverified')
-      }
-      if (prefixRename.some(item => item.id === requirement.id) && fileResult?.status !== 'passed') {
-        completion.verification = combineVerification(completion.verification, fileResult?.status ?? 'unverified')
-      }
-      // A product-owned test label cannot attest microphone capture or real-model execution.
-      if (capabilities.get(requirement.id)!.has('speech')) {
-        if (speechResult?.status !== 'passed') {
-          completion.verification = combineVerification(completion.verification, speechResult?.status ?? 'unverified')
-          result.missing.push(`${requirement.id}: 宿主真实音频探针未通过，文本模拟不可替代${speechResult?.error ? `（${speechResult.error}）` : ''}`)
-        }
-        if (speech && capabilities.get(requirement.id)!.has('microphone') && !hasCurrentMicrophoneEvidence(options.projectId, root, speech)) {
-          if (completion.verification === 'passed') completion.verification = 'unverified'
-          result.missing.push(`${requirement.id}: 真实采集链路待授权实测`)
-        }
+      for (const outcome of capabilities) {
+        const status = outcome.features[requirement.id]
+        if (status) completion.verification = combineVerification(completion.verification, status)
       }
     }
     const guiEntryPassed = guiReport?.routing === 'pass' && guiReport.scenarios.some(s => s.outcome === 'pass')
@@ -176,8 +133,8 @@ export async function runCoreVerification(options: {
       result.missing.push('验证期间源码或需求契约变化，本次结果作废')
       for (const item of result.requirements) item.verification = 'unverified'
     }
-    if (reports.some(r => r.routing === 'fail') || speechResult?.status === 'failed' || fileResult?.status === 'failed' || llmResult?.status === 'failed') { result.status = 'failed'; result.summary = '核心功能测试失败，需要修复。' }
-    else if (reports.some(r => r.routing === 'blocked') || speechResult?.status === 'environment_blocked' || fileResult?.status === 'environment_blocked' || llmResult?.status === 'environment_blocked') { result.status = 'environment_blocked'; result.summary = '验证环境未就绪，程序已保留。' }
+    if (reports.some(r => r.routing === 'fail') || capabilities.some(outcome => outcome.status === 'failed')) { result.status = 'failed'; result.summary = '核心功能测试失败，需要修复。' }
+    else if (reports.some(r => r.routing === 'blocked') || capabilities.some(outcome => outcome.status === 'environment_blocked')) { result.status = 'environment_blocked'; result.summary = '验证环境未就绪，程序已保留。' }
     else if (result.missing.length || !fingerprint) {
       result.summary = result.requirements.some(item => item.implementation === 'partial' || item.implementation === 'missing')
         ? '程序已保留，仍有未完成的已确认功能，尚不能完整交付。'

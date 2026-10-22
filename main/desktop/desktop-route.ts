@@ -1,3 +1,4 @@
+import { desktopDeliveryPolicy } from './delivery-policy'
 /**
  * 桌面线路由器（接线批，2026-09-24）——runAgent 意图分流 + PRD 确认改道 + 凭据链。
  *
@@ -233,7 +234,7 @@ export async function enterDesktopLine(
   const projectName = project?.name ?? input.projectId
   // 快速型直通道（2026-10-03）：quick 跳过 arch/scaffold，直接从 implement 快速版
   // 任务书起跑（从零做出可用应用）；长期型从 desktop-arch 完整工程链开始。
-  const isQuick = project?.mode === 'quick'
+  const isQuick = desktopDeliveryPolicy(project?.mode).quick
   const startPhase = isQuick ? 'desktop-implement' : 'desktop-arch'
   updateProject(input.projectId, { desktop_phase: startPhase })
   deps.publish(input, 'stage_changed', { stage: startPhase })
@@ -665,7 +666,7 @@ async function settleDesktopStage(
           await runDesktopStage({ ...input, content: feedback, initialMessagePersisted: false }, query, env, 'desktop-implement', deps, projectName, chainDepth, true)
         })) return
         const gateProject = findProject(input.projectId)
-        if (gateProject?.mode === 'longterm' && !isMvpConfirmPending(input.projectId)) {
+        if (desktopDeliveryPolicy(gateProject?.mode).mvpConfirmation && !isMvpConfirmPending(input.projectId)) {
           // 交付门堵口（2026-10-06 批1，根因⑥「声明-消费不对称」）：implement 门禁要求
           // 产出 LAUNCH.json，但 longterm 交付链（verify→MVP 门→delivered）此前从不消费它
           // ——正常入口 python app.py 的平台级真实启动验证缺位，只依赖 driver 场景自觉
@@ -710,7 +711,7 @@ async function settleDesktopStage(
     // quick以核心、安全、启动门收口，v2实验另有独立V审阅；失败保留产物，不宣布交付。
     if (next === 'desktop-verify') {
       const project = findProject(input.projectId)
-      if (project?.mode === 'quick') {
+      if (desktopDeliveryPolicy(project?.mode).quick) {
         const deliveryVersion = deliveryFingerprint(input.projectId)
         if (!await ensureCoreDelivery(input, deps, feedback => runDesktopStage({ ...input, content: feedback, initialMessagePersisted: false }, query, env, 'desktop-implement', deps, projectName, chainDepth, true))) return
         const securityGate = deps.securityScan
