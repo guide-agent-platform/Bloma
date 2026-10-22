@@ -30,3 +30,12 @@ test('ordinary confirmations retain their distinct transport', () => {
     assert.deepEqual(selectPipelineConfirmation({ kind }), { kind: 'option', id })
   }
 })
+
+test('desktop conversion requires explicit pilot policy and an offered option', () => {
+  const payload = { kind: 'web_line_retired', questions: [{ id: 'web_to_desktop' }] }
+  assert.equal(selectPipelineConfirmation(payload).kind, 'stop')
+  assert.deepEqual(selectPipelineConfirmation(payload, { allowDesktopConversion: true }), { kind: 'option', id: 'web_to_desktop' })
+  for (const questions of [[], [{ id: 'web_to_revise' }], [{ id: 'web_to_desktop', disabled: true }]]) {
+    assert.equal(selectPipelineConfirmation({ ...payload, questions }, { allowDesktopConversion: true }).kind, 'stop')
+  }
+})
