@@ -1,3 +1,4 @@
+import { prepareGuiAcceptance } from '../desktop/gui-acceptance-preparation'
 import { ConfirmationMap, loadGuideConfirmationForResume, archiveGuideConfirmation, clearGuideConfirmationFilesForTests } from './confirmation-journal'
 /**
  * UX 草图确认门（2026-10-04 确认门新规，实施稿《Bloma-确认门与呈现层-20261004》）。
@@ -366,6 +367,12 @@ export async function resumeUxConfirmConfirmed(input: AgentSendMessageInput): Pr
     return true
   }
   if (pending.signal?.aborted) return true
+  if (!await prepareGuiAcceptance({ projectId: pending.project_id, sessionId: pending.session_id, query: pending.query, env: pending.env, signal: pending.signal })) {
+    pendingUxConfirms.set(input.project_id, pending)
+    pending.publish(makeUxEvent(pending, 'message_delta', { text: '当前界面方向已保存，独立业务验收规则尚未准备完整，本次未启动实现。可重试确认，或由宿主补齐验收规则。' }))
+    pending.publish(makeUxEvent(pending, 'message_completed', { subtype: 'incomplete' }))
+    return true
+  }
   pendingUxConfirms.save(pending, 'consumed')
   pending.publish(makeUxEvent(pending, 'ux_sketch_closed', {}))
   recordDecision({ project_id: input.project_id, session_id: pending.session_id, entry: { type: 'ux_confirm', title: '用户确认当前界面设计', why: '需求版本与设计版本核对通过，确认记录已保存', detail: { round: pending.round, prd_fingerprint: pending.prdFingerprint, html_hash: pending.sketchHash ?? null } } })

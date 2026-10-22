@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { getPromaHome } from '../../storage/config-paths'
@@ -10,9 +10,13 @@ import { buildDriverEnv, execFileDriverSpawn, resolveDriverVenvCommand, type Dri
 import { verificationFingerprint } from './verification-fingerprint'
 
 type Action = { id: string; kind: 'fill'; selector: string; value: string } | { id: string; kind: 'click'; selector: string }
-  | { id: string; kind: 'expect'; selector: string; property?: 'text' | 'value'; equals: string; timeout_ms?: number }
+  | { id: string; kind: 'expect'; selector: string; property?: 'text' | 'value' | 'count'; equals?: string; contains?: string; nonempty?: true; timeout_ms?: number }
   | { id: string; kind: 'restart' }
-export interface GuiAcceptanceSuite { version: 1; scope_hash: string; covers: string[]; steps: Action[] }
+export interface GuiAcceptanceSuite { version: 1; scope_hash: string; covers: string[]; steps: Action[]
+  control_bindings?: Array<{ selector: string; description: string }>
+  acceptance_refs?: Record<string, string[]>
+  fixtures?: Array<{ path: string; text: string }>
+}
 export interface GuiAcceptanceResult {
   version: 1; scope: 'host_native_gui_business'; status: 'passed' | 'failed' | 'unverified'
   suite_hash: string; covers: string[]; steps: Array<{ id: string; passed: boolean; actual?: unknown }>; error?: string
@@ -28,13 +32,23 @@ export function parseGuiSuite(value: unknown): GuiAcceptanceSuite {
     || suite.covers.some(id => typeof id !== 'string' || !/^F-\d+$/.test(id)) || new Set(suite.covers).size !== suite.covers.length
     || !Array.isArray(suite.steps) || !suite.steps.length || suite.steps.length > 60) throw new Error('GUI_SUITE_INVALID')
   const ids = new Set<string>()
+  if (suite.fixtures !== undefined && (!Array.isArray(suite.fixtures) || suite.fixtures.length > 16
+    || suite.fixtures.some(file => !file || typeof file.path !== 'string' || !/^input\/[A-Za-z0-9_./-]+$/.test(file.path)
+      || file.path.split('/').some(part => !part || ['.', '..'].includes(part) || /^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i.test(part))
+      || typeof file.text !== 'string' || Buffer.byteLength(file.text) > 4096)
+    || new Set(suite.fixtures.map(file => file.path.toLowerCase())).size !== suite.fixtures.length)) throw new Error('GUI_FIXTURES_INVALID')
+  if (suite.control_bindings !== undefined && (!Array.isArray(suite.control_bindings) || suite.control_bindings.length > 60
+    || suite.control_bindings.some(item => !item || typeof item.selector !== 'string' || !item.selector || item.selector.length > 512 || typeof item.description !== 'string' || !item.description || item.description.length > 1000))) throw new Error('GUI_BINDINGS_INVALID')
   for (const step of suite.steps) {
     if (!step || typeof step.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(step.id) || ids.has(step.id)
       || !['fill', 'click', 'expect', 'restart'].includes(step.kind)) throw new Error('GUI_STEP_INVALID')
     ids.add(step.id)
     if (step.kind !== 'restart' && (typeof step.selector !== 'string' || !step.selector || step.selector.length > 512)) throw new Error('GUI_SELECTOR_INVALID')
     if (step.kind === 'fill' && (typeof step.value !== 'string' || step.value.length > 4096)) throw new Error('GUI_VALUE_INVALID')
-    if (step.kind === 'expect' && (typeof step.equals !== 'string' || step.equals.length > 4096 || step.property !== undefined && !['text', 'value'].includes(step.property)
+    if (step.kind === 'expect' && ([step.equals !== undefined, step.contains !== undefined, step.nonempty !== undefined].filter(Boolean).length !== 1
+      || step.equals !== undefined && (typeof step.equals !== 'string' || step.equals.length > 4096)
+      || step.contains !== undefined && (typeof step.contains !== 'string' || !step.contains || step.contains.length > 4096)
+      || step.nonempty !== undefined && step.nonempty !== true || step.property !== undefined && !['text', 'value', 'count'].includes(step.property)
       || step.timeout_ms !== undefined && (!Number.isSafeInteger(step.timeout_ms) || step.timeout_ms < 1 || step.timeout_ms > 10000))) throw new Error('GUI_EXPECT_INVALID')
   }
   const groups = splitSteps(suite)
@@ -69,6 +83,10 @@ export async function runGuiAcceptance(options: { projectId: string; root: strin
     const root = realpathSync(options.root), entry = realpathSync(resolve(root, launch.launch.command[1])), rel = relative(root, entry)
     if (isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`) || !entry.endsWith('.py')) throw new Error('GUI_ENTRY_OUTSIDE_PROJECT')
     temporary = mkdtempSync(join(tmpdir(), 'bloma-host-gui-'))
+    for (const fixture of suite.fixtures ?? []) {
+      const target = join(temporary, 'data', fixture.path)
+      mkdirSync(join(target, '..'), { recursive: true }); writeFileSync(target, fixture.text)
+    }
     const python = options.python ?? resolveDriverVenvCommand([launch.launch.command[0]], root)[0]
     for (const [index, group] of splitSteps(suite).entries()) {
       options.signal?.throwIfAborted()

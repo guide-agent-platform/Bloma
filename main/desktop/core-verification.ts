@@ -1,3 +1,4 @@
+import { findProject } from '../project/project-service'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join, resolve, relative, isAbsolute } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -132,6 +133,10 @@ async function runFreshCoreVerification(options: CoreVerificationOptions): Promi
     const capabilities = await runCapabilityVerifiers({ projectId: options.projectId, root, backplane, manifest: raw, signal: options.signal }, options.capabilityVerifiers)
     for (const outcome of capabilities) { result.missing.push(...outcome.missing); Object.assign(result, outcome.report) }
     const hostGui = await runGuiAcceptance({ projectId: options.projectId, root, scopeHash: prdScopeFingerprint(backplane), signal: options.signal })
+    if (!hostGui) {
+      try { if (findProject(options.projectId).gui_acceptance) result.missing.push('宿主独立GUI验收规则缺失，不能用产品自测替代') }
+      catch { /* a missing project is already diagnosed by the PRD reader */ }
+    }
     if (hostGui) {
       result.host_gui = hostGui
       if (hostGui.covers.some(id => !ids.has(id))) throw new Error('GUI_COVERAGE_UNKNOWN_REQUIREMENT')

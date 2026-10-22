@@ -77,6 +77,7 @@ export function createProject(input: ProjectCreateInput): Project {
     workspace_slug: WORKSPACE_SLUG,
     name: deriveProjectDisplayName(input.initial_message) ?? input.initial_message?.slice(0, 32) ?? '未命名项目',
     name_source: 'message',
+    ...(process.env.BLOMA_AUTO_GUI_ACCEPTANCE === '0' ? {} : { gui_acceptance: { status: 'pending' as const, scope_hash: '' } }),
     mode: input.mode,
     // 注入点①（周计划 §6 / PRD 12.2）：关键词自动推断，对用户透明；无命中兜底个人小工具（宽松级误判代价最小）
     template_type: 'desktop_tool',

@@ -1,5 +1,6 @@
 """Host-owned native GUI actions. No product-authored Python/JS assertions."""
 import json
+import os
 import runpy
 import sys
 import threading
@@ -36,15 +37,24 @@ def observe(window):
             selector = json.dumps(step['selector'])
             get = 'document.querySelector(' + selector + ')'
             if step['kind'] == 'fill':
-                expression = '(()=>{const e=' + get + ';if(!e)return false;e.value=' + json.dumps(step['value']) + ';e.dispatchEvent(new Event("input",{bubbles:true}));e.dispatchEvent(new Event("change",{bubbles:true}));return true})()'
+                value = step['value'].replace('{{DATA_DIR}}', os.environ['APP_DATA_DIR'])
+                expression = '(()=>{const e=' + get + ';if(!e)return false;e.value=' + json.dumps(value) + ';e.dispatchEvent(new Event("input",{bubbles:true}));e.dispatchEvent(new Event("change",{bubbles:true}));return true})()'
             elif step['kind'] == 'click':
                 expression = '(()=>{const e=' + get + ';if(!e||e.disabled)return false;e.click();return true})()'
             else:
-                expression = '(()=>{const e=' + get + ';return e?' + ('e.value' if step.get('property') == 'value' else 'e.textContent') + ':null})()'
+                expression = ('String(document.querySelectorAll(' + selector + ').length)' if step.get('property') == 'count' else
+                              '(()=>{const e=' + get + ';return e?' + ('e.value' if step.get('property') == 'value' else 'e.textContent') + ':null})()')
             deadline = time.monotonic() + step.get('timeout_ms', 5000) / 1000
             while True:
                 actual = window.evaluate_js(expression)
-                passed = (actual == step['equals'] if step['kind'] == 'expect' else actual is True)
+                if step['kind'] != 'expect':
+                    passed = actual is True
+                elif 'equals' in step:
+                    passed = actual == step['equals'].replace('{{DATA_DIR}}', os.environ['APP_DATA_DIR'])
+                elif 'contains' in step:
+                    passed = isinstance(actual, str) and step['contains'].replace('{{DATA_DIR}}', os.environ['APP_DATA_DIR']) in actual
+                else:
+                    passed = isinstance(actual, str) and bool(actual.strip())
                 if passed or step['kind'] != 'expect' or time.monotonic() >= deadline:
                     break
                 time.sleep(.1)

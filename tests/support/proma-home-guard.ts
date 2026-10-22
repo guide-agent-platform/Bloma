@@ -27,6 +27,9 @@ process.env.PROMA_HOME = TEST_PROMA_HOME
 for (const key of Object.keys(process.env)) {
   if (key.startsWith('BLOMA_')) delete process.env[key]
 }
+// Existing tests exercise the legacy confirmation protocol. The independent GUI
+// preparation tests explicitly opt in and verify the new-project default path.
+process.env.BLOMA_AUTO_GUI_ACCEPTANCE = '0'
 
 /**
  * 全局兜底：防止 `PROMA_HOME` 被污染成字符串 "undefined"。

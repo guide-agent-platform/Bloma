@@ -1,3 +1,4 @@
+import { guiControlBindings } from './gui-acceptance-preparation'
 import type { AgentLoopTool } from '../agent/loop/agent-loop'
 import type { PrdBackplane } from '../model/prd-backplane'
 import { readPrdBackplane } from '../project/prd-store'
@@ -42,12 +43,13 @@ export function buildProductionContextTool(projectId: string): AgentLoopTool {
   return { name: 'read_production_context', parallelSafe: true,
     description: '只读制作交接：overview看范围，features按feature_ids读完整功能/规则/流程/验收（省略编号返回全部），prd读正文，verification读通用验证登记；模型或语音业务分别用verification-llm/verification-speech。按职责读取，避免重复通读。',
     input_schema: { type: 'object', properties: {
-      topic: { type: 'string', enum: ['overview', 'features', 'prd', 'verification', 'verification-llm', 'verification-speech'] },
+      topic: { type: 'string', enum: ['overview', 'features', 'prd', 'verification', 'verification-llm', 'verification-speech', 'verification-gui'] },
       feature_ids: { type: 'array', items: { type: 'string' }, description: 'features主题的功能编号，如F-001；未知编号拒绝，不默默过滤。' },
     }, required: ['topic'] },
     execute: async (input, ctx) => {
       try {
         if (ctx.projectId !== projectId) throw new Error('PRODUCTION_CONTEXT_MISMATCH')
+        if (input.topic === 'verification-gui') return { output: JSON.stringify({ control_bindings: guiControlBindings(projectId), note: '实现需保留这些已确认控件身份，固定业务期望由宿主管理。' }) }
         if (input.feature_ids !== undefined && (!Array.isArray(input.feature_ids) || input.feature_ids.some(id => typeof id !== 'string'))) throw new Error('PRODUCTION_INVALID_FEATURES')
         return { output: JSON.stringify(productionContext(readPrdBackplane(projectId), String(input.topic), input.feature_ids as string[] | undefined)) }
       } catch (error) { return { isError: true, output: error instanceof Error ? error.message : String(error) } }

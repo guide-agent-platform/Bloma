@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { getPromaHome } from '../../storage/config-paths'
 import { writeTextFileAtomic } from '../../storage/json-store'
 import { readPrdBackplane } from '../project/prd-store'
+import { findProject } from '../project/project-service'
 import { prdScopeFingerprint } from '../project/requirement-contract'
 import { requirementCapabilities } from '../model/requirement-capabilities'
 import { mainRootDir } from '../platform/paths'
@@ -30,7 +31,9 @@ export function coreVerificationCacheKey(projectId: string, root: string): strin
     const modules = ['core-verification.ts', 'capability-verifiers.ts', 'gui-acceptance.ts', 'process-driver.ts', 'core-verification-cache.ts']
     const implementation = existsSync(join(host, 'desktop', modules[0])) ? modules.map(name => digest(readFileSync(join(host, 'desktop', name)))) : [digest(readFileSync(join(host, 'index.js')))]
     const suite = guiSuitePath(projectId)
-    return digest({ protocol: 1, fixture: 'fresh-empty-data-v1', source, version, assets, implementation,
+    let requiredProtocol: unknown = null
+    try { requiredProtocol = findProject(projectId).gui_acceptance ?? null } catch { /* no project in isolated key tests */ }
+    return digest({ protocol: 1, fixture: 'fresh-empty-data-v1', source, version, assets, implementation, requiredProtocol,
       gui: existsSync(suite) ? digest(readFileSync(suite)) : null })
   } catch { return undefined }
 }

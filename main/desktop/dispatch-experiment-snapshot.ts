@@ -59,7 +59,7 @@ export function freezeExperiment(home: string, projectId: string, destination: s
   validateExperiment(config)
   if (config.planning === 'autonomous' ? tasks.length !== 0 : tasks.length !== 2) throw new Error('EXPERIMENT_FROZEN_PLANNING_MISMATCH')
   const workspace = join('agent-workspaces', String(project.workspace_slug))
-  const roots = [join(workspace, 'generated-projects', projectId), join(workspace, 'documents', projectId), 'agent-sessions', 'prompts', 'templates', 'bloma-composer', 'pasted-images']
+  const roots = [join(workspace, 'generated-projects', projectId), join(workspace, 'documents', projectId), 'agent-sessions', 'prompts', 'templates', 'bloma-composer', 'pasted-images', `gui-acceptance/${projectId}.json`]
   const files: Record<string, string> = {}, skipped: string[] = []
   mkdirSync(destination, { recursive: false })
   for (const root of roots) if (existsSync(join(home, root))) copyTree(join(home, root), join(destination, 'home', root), files, root.replaceAll('\\', '/'), skipped)
@@ -101,7 +101,7 @@ export function restoreExperiment(snapshot: string, home: string, policy: Experi
     path.endsWith(`/documents/${manifest.project_id}/prd.json`) || path.endsWith(`/documents/${manifest.project_id}/prd.md`)
     || path.includes(`/documents/${manifest.project_id}/features/`) || /\/00_UX\/confirmed\.(html|json)$/.test(path)
     || /\/00_ENV\/(common-environment\.json|requirements\.lock)$/.test(path)
-    || /\/00_ARCH\/architecture\.(md|json)$/.test(path) || path.endsWith('/00_SCAFFOLD/contract.json') || path.startsWith('prompts/')))
+    || /\/00_ARCH\/architecture\.(md|json)$/.test(path) || path.endsWith('/00_SCAFFOLD/contract.json') || path.startsWith('prompts/') || path.startsWith('gui-acceptance/')))
   delete config.started_at; delete config.request_count; delete config.observed_models; delete config.plan_locked
   config.condition_hash = experimentConditionHash(config)
   validateExperiment(config)
