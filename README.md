@@ -8,6 +8,8 @@
 
 > 2026-10-22后续完善：[全流程实施记录](docs/05_PROJECT_PLAN/workflow-improvement-20261022.md)包含持久MVP确认、宿主原生GUI验收CLI、验证凭据复用及交付规则收敛的实现与验证边界。
 
+> 2026-10-23接续：[确认恢复与独立验收实测](docs/05_PROJECT_PLAN/confirmation-acceptance-20261022.md)记录PRD/UX持久恢复、独立GUI规则准备、存储故障验证和真实模型试跑。自动准备目前须显式开启，真实任务结果与测试fixture结果分别记录。
+
 ---
 
 ## 1. 项目目的
